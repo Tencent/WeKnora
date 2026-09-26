@@ -20,6 +20,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/infrastructure/chunker"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/plugin/activate"
+	plugindriver "github.com/Tencent/WeKnora/internal/plugin/driver"
 	pluginevents "github.com/Tencent/WeKnora/internal/plugin/events"
 	"github.com/Tencent/WeKnora/internal/plugin/host"
 	"github.com/Tencent/WeKnora/internal/plugin/hostapi"
@@ -270,8 +271,11 @@ func newPluginInstaller(
 
 // newPluginAdminHandler serves plugin installation, with the marketplace
 // WEKNORA_PLUGIN_INDEX_URL names.
-func newPluginAdminHandler(service *install.Service, tenants interfaces.TenantService) *handler.PluginAdminHandler {
-	return handler.NewPluginAdminHandler(service).WithMarket(market.FromEnv(handler.Version)).WithTenants(tenants)
+func newPluginAdminHandler(
+	service *install.Service, tenants interfaces.TenantService, drivers *plugindriver.Set,
+) *handler.PluginAdminHandler {
+	return handler.NewPluginAdminHandler(service).WithMarket(market.FromEnv(handler.Version)).WithTenants(tenants).
+		WithDrivers(drivers)
 }
 
 // startPluginReconciler loads installed plugins before the server takes

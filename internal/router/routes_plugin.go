@@ -60,6 +60,7 @@ func RegisterPluginAdminRoutes(r *gin.RouterGroup, h *handler.PluginAdminHandler
 		plugins.GET("/market", h.ListMarketPlugins)
 		plugins.GET("/tenants", h.ListPluginAudienceTenants)
 		plugins.GET("/:id", h.GetInstalledPlugin)
+		plugins.GET("/:id/instances", h.GetPluginInstances)
 		plugins.DELETE("/:id", h.UninstallPlugin)
 		plugins.PUT("/:id/enabled", h.SetInstalledPluginEnabled)
 		plugins.PUT("/:id/active-version", h.ActivatePluginVersion)

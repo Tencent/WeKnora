@@ -195,9 +195,10 @@ import SchemaForm from '@/components/schema-form/SchemaForm.vue'
 import { pluginFormSource } from '@/components/schema-form/pluginSource'
 import { provideSchemaFormSource } from '@/components/schema-form/source'
 import { validateConfig, type ConfigSchema, type ConfigValue, type FieldError } from '@/components/schema-form/schema'
-import { getPlugin, type PluginInstance } from '@/api/plugin'
+import type { PluginInstance } from '@/api/plugin'
 import {
   activatePluginVersion,
+  getPluginInstances,
   getPluginSystemConfig,
   listAudienceTenants,
   rotatePluginSecret,
@@ -307,15 +308,17 @@ async function saveAudience() {
 
 const formatDate = (s: string) => (s ? new Date(s).toLocaleString(locale.value) : '')
 
+// From the admin API: the workspace catalog would hide plugins the admin's
+// current workspace does not see (another workspace's own, a limited audience).
 async function loadNodes(id: string) {
   instanceError.value = ''
   try {
-    const res = await getPlugin(id)
+    const res = await getPluginInstances(id)
     instances.value = res.data.instances ?? []
     instanceError.value = res.data.instanceError ?? ''
-  } catch {
-    // A plugin disabled platform-wide is not in the catalog; it runs nowhere.
+  } catch (e: any) {
     instances.value = []
+    instanceError.value = e?.message || ''
   }
 }
 

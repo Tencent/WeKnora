@@ -22,6 +22,7 @@ func TestPluginInstallationRequiresSystemAdmin(t *testing.T) {
 		{http.MethodPost, "/api/v1/system/admin/plugins"},
 		{http.MethodPost, "/api/v1/system/admin/plugins/inspect"},
 		{http.MethodGet, "/api/v1/system/admin/plugins/acme.kit"},
+		{http.MethodGet, "/api/v1/system/admin/plugins/acme.kit/instances"},
 		{http.MethodDelete, "/api/v1/system/admin/plugins/acme.kit"},
 		{http.MethodPut, "/api/v1/system/admin/plugins/acme.kit/enabled"},
 		{http.MethodPut, "/api/v1/system/admin/plugins/acme.kit/active-version"},

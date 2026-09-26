@@ -12,7 +12,9 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/plugin/driver"
 	"github.com/Tencent/WeKnora/internal/plugin/install"
+	"github.com/Tencent/WeKnora/internal/plugin/manifest"
 	"github.com/Tencent/WeKnora/internal/plugin/market"
 	"github.com/Tencent/WeKnora/internal/plugin/pkg"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -24,6 +26,7 @@ type PluginAdminHandler struct {
 	service *install.Service
 	market  *market.Client
 	tenants PluginAudienceTenants
+	drivers *driver.Set
 }
 
 // PluginAudienceTenants finds the workspaces a plugin's audience can name.
@@ -37,6 +40,12 @@ type PluginAudienceTenants interface {
 // WithTenants lets the handler look workspaces up for plugin audiences.
 func (h *PluginAdminHandler) WithTenants(t PluginAudienceTenants) *PluginAdminHandler {
 	h.tenants = t
+	return h
+}
+
+// WithDrivers lets the handler report where each plugin runs.
+func (h *PluginAdminHandler) WithDrivers(d *driver.Set) *PluginAdminHandler {
+	h.drivers = d
 	return h
 }
 
@@ -267,6 +276,46 @@ func (h *PluginAdminHandler) GetInstalledPlugin(c *gin.Context) {
 		return
 	}
 	h.ok(c, view)
+}
+
+// PluginInstancesDTO is where a plugin runs: its instances on each node.
+type PluginInstancesDTO struct {
+	Instances []driver.InstanceStatus `json:"instances"`
+	// InstanceError explains an empty Instances (no driver, lookup failed).
+	InstanceError string `json:"instanceError,omitempty"`
+}
+
+// GetPluginInstances godoc
+// @Summary      获取插件的运行实例
+// @Description  返回已安装插件在各节点上的实例状态，不受当前空间可见范围限制
+// @Tags         System
+// @Produce      json
+// @Param        id   path      string  true  "插件 ID"
+// @Success      200  {object}  map[string]interface{}
+// @Security     Bearer
+// @Router       /system/admin/plugins/{id}/instances [get]
+func (h *PluginAdminHandler) GetPluginInstances(c *gin.Context) {
+	view, err := h.service.Get(c.Request.Context(), c.Param("id"))
+	if err != nil {
+		h.fail(c, err)
+		return
+	}
+	out := PluginInstancesDTO{Instances: []driver.InstanceStatus{}}
+	if h.drivers == nil {
+		h.ok(c, out)
+		return
+	}
+	d, err := h.drivers.For(manifest.RuntimeType(view.Runtime))
+	if err == nil {
+		out.Instances, err = d.Status(c.Request.Context(), view.ID)
+	}
+	if err != nil {
+		out.InstanceError = err.Error()
+		out.Instances = []driver.InstanceStatus{}
+	} else if out.Instances == nil {
+		out.Instances = []driver.InstanceStatus{}
+	}
+	h.ok(c, out)
 }
 
 // SetInstalledPluginEnabled godoc

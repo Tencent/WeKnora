@@ -11,7 +11,9 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/Tencent/WeKnora/internal/middleware"
+	"github.com/Tencent/WeKnora/internal/plugin/driver"
 	"github.com/Tencent/WeKnora/internal/plugin/install"
+	"github.com/Tencent/WeKnora/internal/plugin/manifest"
 	"github.com/Tencent/WeKnora/internal/plugin/market"
 	"github.com/Tencent/WeKnora/internal/plugin/plugintest"
 	"github.com/Tencent/WeKnora/internal/plugin/reconcile"
@@ -131,5 +133,46 @@ func TestPluginAudienceTenants(t *testing.T) {
 	}
 	if got := get(""); strings.Contains(got, "secret") {
 		t.Fatalf("leaks tenant fields: %s", got)
+	}
+}
+
+// A system admin sees where a plugin runs whatever workspace they are in:
+// the state comes from the installed plugin, not the workspace's catalog.
+func TestPluginAdminInstances(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repo, store := plugintest.NewMemRepo(), &plugintest.MemStore{}
+	r := reconcile.New(reconcile.Options{Repo: repo, Store: store, Registry: registry.New(), CacheDir: t.TempDir()})
+	svc := install.NewService(repo, store, r, "0.5.0")
+	plugintest.Install(t, repo, store, plugintest.KitPackage(t, "1.0.0"), types.PluginStateEnabled)
+	if err := r.Reconcile(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+
+	engine := func(h *PluginAdminHandler) *gin.Engine {
+		e := gin.New()
+		e.Use(middleware.ErrorHandler())
+		e.GET("/plugins/:id/instances", h.GetPluginInstances)
+		return e
+	}
+	var res struct {
+		Data PluginInstancesDTO `json:"data"`
+	}
+	e := engine(NewPluginAdminHandler(svc).WithDrivers(driver.NewSet(r.Driver(manifest.RuntimeDeclarative))))
+	w := call(e, http.MethodGet, "/plugins/acme.kit/instances", "", nil)
+	if err := json.Unmarshal(w.Body.Bytes(), &res); err != nil || w.Code != http.StatusOK ||
+		len(res.Data.Instances) != 1 || res.Data.Instances[0].Version != "1.0.0" ||
+		res.Data.Instances[0].State != driver.StateReady {
+		t.Fatalf("instances = %d %s", w.Code, w.Body.String())
+	}
+	if w := call(e, http.MethodGet, "/plugins/acme.missing/instances", "", nil); w.Code != http.StatusNotFound {
+		t.Fatalf("missing plugin = %d %s", w.Code, w.Body.String())
+	}
+
+	// A runtime without a driver says why it lists nothing.
+	w = call(engine(NewPluginAdminHandler(svc).WithDrivers(driver.NewSet())), http.MethodGet,
+		"/plugins/acme.kit/instances", "", nil)
+	if err := json.Unmarshal(w.Body.Bytes(), &res); err != nil || w.Code != http.StatusOK ||
+		len(res.Data.Instances) != 0 || res.Data.InstanceError == "" {
+		t.Fatalf("no driver = %d %s", w.Code, w.Body.String())
 	}
 }
