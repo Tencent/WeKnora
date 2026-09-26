@@ -402,15 +402,17 @@ func (r *taskPendingOpsRepository) DeleteByScope(ctx context.Context, scope, sco
 // transaction: a failed release rolls the delete back so a retry finds the
 // rows again. A document with any freshly claimed row in the lane (whatever
 // its op) is skipped whole, matching ClaimBatch's per-key claim, since the
-// live batch will release it. Returns the released dedup keys.
+// live batch will release it. Returns the released dedup keys and the
+// documents whose release completed them (this release took the last slot;
+// a concurrent subtask finishing the same document does not).
 func (r *taskPendingOpsRepository) DrainUnclaimedAndRelease(
 	ctx context.Context, taskType, scope, scopeID, op string, staleBefore time.Time,
-) ([]string, error) {
+) (released, completed []string, err error) {
 	if taskType == "" || scope == "" || scopeID == "" || op == "" {
-		return nil, errors.New("task pending ops: task_type, scope, scope_id and op are required")
+		return nil, nil, errors.New("task pending ops: task_type, scope, scope_id and op are required")
 	}
-	var keys []string
-	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	var keys, promotedKeys []string
+	err = r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var removed []string
 		if err := tx.Raw(
 			`DELETE FROM task_pending_ops
@@ -432,17 +434,21 @@ func (r *taskPendingOpsRepository) DrainUnclaimedAndRelease(
 				continue
 			}
 			seen[key] = struct{}{}
-			if _, err := finalizeSubtask(tx, key); err != nil {
+			promoted, err := finalizeSubtask(tx, key)
+			if err != nil {
 				return fmt.Errorf("release finalizing slot for %s: %w", key, err)
 			}
 			keys = append(keys, key)
+			if promoted {
+				promotedKeys = append(promotedKeys, key)
+			}
 		}
 		return nil
 	})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return keys, nil
+	return keys, promotedKeys, nil
 }
 
 // IncrFailCount atomically bumps fail_count for one row and returns the

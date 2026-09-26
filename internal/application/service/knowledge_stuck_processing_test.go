@@ -41,9 +41,9 @@ type wikiUnavailablePendingRepo struct {
 
 func (r *wikiUnavailablePendingRepo) DrainUnclaimedAndRelease(
 	_ context.Context, taskType, scope, scopeID, op string, _ time.Time,
-) ([]string, error) {
+) ([]string, []string, error) {
 	r.drained = append(r.drained, taskType+"|"+scope+"|"+scopeID+"|"+op)
-	return r.drainKeys, r.drainErr
+	return r.drainKeys, r.drainKeys, r.drainErr
 }
 
 type wikiUnavailableModelService struct {
