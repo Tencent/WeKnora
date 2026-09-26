@@ -23,6 +23,7 @@ registry.Register("metaso", infra_web_search.NewMetasoProvider)
 registry.Register("bocha", infra_web_search.NewBochaProvider)
 registry.Register("brave", infra_web_search.NewBraveProvider)
 registry.Register("serply", infra_web_search.NewSerplyProvider)
+registry.Register("youcom", infra_web_search.NewYoucomProvider)
 ```
 
 | 引擎 | 源码文件 | 是否需要 API Key | 端点 | 备注 |
@@ -41,8 +42,9 @@ registry.Register("serply", infra_web_search.NewSerplyProvider)
 | 博查 Bocha | `bocha.go` | 是 | `https://api.bochaai.com/v1/web-search` | extra_config.freshness、summary |
 | Brave Search | `brave.go` | 是 | `https://api.search.brave.com/res/v1/web/search` | 支持按次传 country/freshness |
 | Serply | `serply.go` | 是 | `https://api.serply.io/v1/search` | Google 结果；支持按次传 country/freshness（仅 pd/pw/pm/py） |
+| You.com | `youcom.go` | 是 | `https://api.you.com/api/v1/search`（硬编码） | AI 搜索 API，需在 you.com/platform/api-keys 获取 key |
 
-当前共注册 14 个引擎。
+当前共注册 15 个引擎。
 
 | 提供商附加配置 | 值 |
 | --- | --- |

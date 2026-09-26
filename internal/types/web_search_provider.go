@@ -30,6 +30,7 @@ const (
 	WebSearchProviderTypeMetaso     WebSearchProviderType = "metaso"
 	WebSearchProviderTypeBocha      WebSearchProviderType = "bocha"
 	WebSearchProviderTypeSerply     WebSearchProviderType = "serply"
+	WebSearchProviderTypeYoucom     WebSearchProviderType = "youcom"
 )
 
 // WebSearchProviderEntity represents a configured web search provider instance for a workspace.
@@ -373,6 +374,14 @@ func GetWebSearchProviderTypes() []WebSearchProviderTypeInfo {
 					},
 				},
 			},
+		},
+		{
+			ID:             "youcom",
+			Name:           "You.com",
+			RequiresAPIKey: true,
+			SupportsProxy:  true,
+			Description:    "You.com Search API for AI agents (requires API key from you.com/platform/api-keys)",
+			DocsURL:        "https://you.com/platform/api-keys",
 		},
 	}
 }
