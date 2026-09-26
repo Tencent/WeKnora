@@ -55,14 +55,18 @@
     <!-- eslint-disable-next-line vue/no-v-html -- sanitized by renderDocumentPreviewMarkdown -->
     <div v-else-if="spec.view === 'markdown'" class="plugin-tool-view__markdown" v-html="markdownHtml" />
 
-    <PluginFrame v-else-if="spec.view === 'page' && page" :page="page" :context="pageContext" />
+    <template v-else-if="spec.view === 'page' && page">
+      <PluginFrame v-if="framePage" :page="framePage" :context="pageContext" />
+      <p v-else-if="framePage === null" class="plugin-tool-view__empty">{{ t('pluginToolView.pageUnavailable') }}</p>
+      <t-loading v-else size="small" />
+    </template>
 
     <pre v-else class="plugin-tool-view__json">{{ json }}</pre>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 import PluginFrame from '@/extensions/pluginFrame/PluginFrame.vue'
@@ -76,6 +80,7 @@ import {
   type PluginToolViewData,
   type ToolViewSpec,
 } from '@/extensions/pluginToolView'
+import { usePluginPagesStore } from '@/stores/pluginPages'
 import { renderDocumentPreviewMarkdown } from '@/utils/documentPreviewMarkdown'
 
 // A plugin tool's structured result, shown with the view its plugin
@@ -119,6 +124,21 @@ const page = computed<FramePage | null>(() => {
     entry: spec.value.entry,
     name: { default: d.mcp_tool || d.plugin_id },
   }
+})
+// Only the loaded version of a plugin serves its page files: a result
+// recorded before an upgrade shows under the current version, and one whose
+// plugin is gone says so instead of waiting on a page that cannot load.
+const pluginPages = usePluginPagesStore()
+const pagesSettled = ref(false)
+if (spec.value.view === 'page') {
+  void pluginPages.ensure().catch(() => {}).finally(() => {
+    pagesSettled.value = true
+  })
+}
+/** undefined while the plugin listing loads; null when the plugin is gone. */
+const framePage = computed<FramePage | null | undefined>(() => {
+  if (!page.value || (!pluginPages.loaded && !pagesSettled.value)) return undefined
+  return pluginPages.currentPage(page.value)
 })
 const pageContext = computed(() => ({
   tool: props.data.mcp_tool,

@@ -2942,7 +2942,8 @@ export default {
     hint: 'The plugin providing this is switched off in this workspace: no new ones can be added, existing ones keep working. Admins can switch it back on in Settings → Plugins.'
   },
   pluginToolView: {
-    empty: 'No results'
+    empty: 'No results',
+    pageUnavailable: 'The plugin is no longer available, so this result page cannot be shown'
   },
   pluginPages: {
     notResponding: 'The plugin page is not responding; it may have failed to load.',

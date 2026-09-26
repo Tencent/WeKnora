@@ -2,7 +2,17 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import type { ContributionListing, ListedContribution } from '../../api/plugin'
-import { findPage, pageFileUrl, pageIconUrl, pageProvider, pagesOf } from './pluginPages'
+import {
+  currentFramePage,
+  findPage,
+  listedVersion,
+  pageFileUrl,
+  pageIconUrl,
+  pageProvider,
+  pagesOf,
+  samePage,
+  type FramePage,
+} from './pluginPages'
 
 const c = (over: Partial<ListedContribution>): ListedContribution => ({
   id: 'links', name: { default: 'Links' }, pluginId: 'acme.links', qualifiedId: 'acme.links/links',
@@ -53,4 +63,29 @@ test('page icons and providers', () => {
   assert.equal(pageIconUrl('', { ...listing, pluginIcons: { 'acme.links': 'javascript:alert(1)' } }, plain), undefined)
   assert.equal(pageProvider(named, plain, 'zh-CN'), '链接')
   assert.equal(pageProvider(listing, plain, 'zh-CN'), 'acme.links')
+})
+
+test('a settings section is registered again when its plugin moves on', () => {
+  const [page] = pagesOf(listing, 'settingsSections')
+  assert.equal(samePage(page, { ...page }), true)
+  // The old page's files are no longer served after an upgrade.
+  assert.equal(samePage(page, { ...page, version: '1.1.0' }), false)
+})
+
+test('a recorded tool page is served under the current version', () => {
+  const tools: ContributionListing = {
+    points: [],
+    contributions: { mcpServers: [c({ id: 'srv', qualifiedId: 'acme.links/srv', version: '1.2.0', entry: undefined })] },
+  }
+  const recorded: FramePage = { pluginId: 'acme.links', version: '1.0.0', mount: 'mcpServers/srv', entry: 'ui/tool.html', name: { default: 't' } }
+  assert.equal(listedVersion(tools, 'acme.links'), '1.2.0')
+  assert.equal(listedVersion(tools, 'acme.gone'), null)
+  assert.equal(listedVersion(null, 'acme.links'), undefined)
+
+  assert.deepEqual(currentFramePage(recorded, tools), { ...recorded, version: '1.2.0' })
+  // Unknown listing: keep what was recorded; a gone plugin has no page.
+  assert.equal(currentFramePage(recorded, null), recorded)
+  assert.equal(currentFramePage({ ...recorded, pluginId: 'acme.gone' }, tools), null)
+  const same = { ...recorded, version: '1.2.0' }
+  assert.equal(currentFramePage(same, tools), same)
 })
