@@ -1129,6 +1129,10 @@ export default {
       baseUrl: 'Base URL（可选）',
       baseUrlHint: '留空将使用默认公有云地址；如果是私有部署/企业内网部署，或需要通过反向代理访问，请填写自定义地址（例如 https://api-proxy.example.com）',
       feedUrls: '订阅源地址',
+      catalogUrls: '目录地址',
+      catalogUrlsHint: '每行一个 OPDS 目录地址，支持导航目录与获取目录。',
+      opdsUsername: '用户名（可选）',
+      opdsPassword: '密码（可选）',
       feedUrlsHint: '每行一个 RSS / Atom 订阅源地址，支持同时填写多个',
       authHeaders: '自定义请求头（可选）',
       authHeadersHint: '用于访问私有订阅源，每行一个，格式为「名称: 值」，例如 Authorization: Bearer xxxx'
@@ -1147,6 +1151,7 @@ export default {
       dingtalk: '同步钉钉知识库中的在线文档',
       ima: '同步腾讯 IMA 知识库中的文档、笔记与文件（暂不支持 AI 会话与视频解析）',
       rss: '同步 RSS / Atom 订阅源中的文章',
+      opds: '同步 OPDS 目录中的电子书（Calibre-Web、Kavita、Komga 等）',
       gitlab: '同步 GitLab 项目中的文件'
     },
     connector: {
@@ -1160,6 +1165,7 @@ export default {
       dingtalk: '钉钉文档',
       ima: '腾讯 IMA',
       rss: 'RSS / Atom 订阅',
+      opds: 'OPDS 目录',
       gitlab: 'GitLab'
     },
     logDetail: {
@@ -7153,6 +7159,7 @@ export default {
     channelYuque: '语雀',
     channelGitLab: 'GitLab',
     channelIma: '腾讯 IMA',
+    channelOpds: 'OPDS 目录',
     channelUpload: '上传',
     channelManual: '手动',
     channelUrl: '网页',

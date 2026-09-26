@@ -310,6 +310,14 @@ var ConnectorMetadataRegistry = map[string]ConnectorMetadata{
 		AuthType:     "token",
 		Capabilities: []string{"incremental", "hierarchical"},
 	},
+	types.ConnectorTypeOPDS: {
+		Type:         types.ConnectorTypeOPDS,
+		Name:         "OPDS Catalog",
+		Description:  "Sync e-books from an OPDS catalog (Calibre-Web, Kavita, Komga, …)",
+		Priority:     13,
+		AuthType:     "custom",
+		Capabilities: []string{"incremental"},
+	},
 }
 
 // ListAvailableConnectors returns all available connector metadata

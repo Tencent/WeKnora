@@ -18,6 +18,8 @@ export const datasourceIconMap: Record<string, string> = {
   yuque: yuqueIcon,
   dingtalk: dingtalkIcon,
   rss: rssIcon,
+  // OPDS is an Atom-based catalog, so the feed icon reads correctly here.
+  opds: rssIcon,
   confluence: confluenceIcon,
   gitlab: gitlabIcon,
   ima: imaIcon,

@@ -1128,6 +1128,10 @@ export default {
       baseUrlHint: 'Оставьте пустым, чтобы использовать адрес общедоступного облака по умолчанию. Для частных/корпоративных развертываний или при доступе через обратный прокси введите ваш собственный адрес (например, https://api-proxy.example.com)',
       feedUrls: 'Адреса лент',
       feedUrlsHint: 'По одному адресу ленты RSS / Atom в строке; можно указать несколько.',
+      catalogUrls: 'Адреса каталогов',
+      catalogUrlsHint: 'По одному адресу каталога OPDS в строке. Поддерживаются ленты навигации и ленты с файлами для скачивания.',
+      opdsUsername: 'Имя пользователя (необязательно)',
+      opdsPassword: 'Пароль (необязательно)',
       authHeaders: 'Пользовательские заголовки (необязательно)',
       authHeadersHint: 'Для приватных лент. По одному в строке в формате «Имя: Значение», например Authorization: Bearer xxxx'
     },
@@ -1145,6 +1149,7 @@ export default {
       dingtalk: 'Синхронизация онлайн-документов из баз знаний DingTalk',
       ima: 'Синхронизация документов, заметок и файлов из баз знаний Tencent IMA (ИИ-сессии и разбор видео не поддерживаются)',
       rss: 'Синхронизация статей из лент RSS / Atom',
+      opds: 'Синхронизация электронных книг из каталога OPDS (Calibre-Web, Kavita, Komga и др.)',
       gitlab: 'Синхронизация файлов из проектов GitLab'
     },
     connector: {
@@ -1158,6 +1163,7 @@ export default {
       dingtalk: 'Документы DingTalk',
       ima: 'Tencent IMA',
       rss: 'RSS / Atom лента',
+      opds: 'Каталог OPDS',
       gitlab: 'GitLab'
     },
     logDetail: {
@@ -7151,6 +7157,7 @@ export default {
     channelYuque: 'Yuque',
     channelGitLab: 'GitLab',
     channelIma: 'Tencent IMA',
+    channelOpds: 'Каталог OPDS',
     channelUpload: 'Загрузка',
     channelManual: 'Вручную',
     channelUrl: 'Веб',

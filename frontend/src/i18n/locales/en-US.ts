@@ -811,6 +811,7 @@ export default {
     channelYuque: 'Yuque',
     channelGitLab: 'GitLab',
     channelIma: 'Tencent IMA',
+    channelOpds: 'OPDS Catalog',
     channelUpload: 'Upload',
     channelManual: 'Manual',
     channelUrl: 'Web',
@@ -6926,6 +6927,7 @@ export default {
       dingtalk: 'DingTalk Docs',
       rss: 'RSS / Atom Feed',
       ima: 'Tencent IMA',
+      opds: 'OPDS Catalog',
       gitlab: 'GitLab'
     },
     connectorDesc: {
@@ -6939,6 +6941,7 @@ export default {
       dingtalk: 'Sync online documents from DingTalk knowledge bases',
       rss: 'Sync articles from RSS / Atom feeds',
       ima: 'Sync documents, notes and files from Tencent IMA knowledge bases (AI sessions and video parses are not supported)',
+      opds: 'Sync e-books from an OPDS catalog (Calibre-Web, Kavita, Komga, …)',
       gitlab: 'Sync files from GitLab projects'
     },
     drive: {
@@ -6976,6 +6979,10 @@ export default {
       baseUrlHint: 'Leave empty to use the default public cloud address. For private/enterprise deployments or when accessing via reverse proxy, enter your custom address (e.g. https://api-proxy.example.com).',
       feedUrls: 'Feed URLs',
       feedUrlsHint: 'One RSS / Atom feed URL per line; multiple feeds are supported.',
+      catalogUrls: 'Catalog URLs',
+      catalogUrlsHint: 'One OPDS catalog URL per line. Both navigation and acquisition feeds are supported.',
+      opdsUsername: 'Username (optional)',
+      opdsPassword: 'Password (optional)',
       authHeaders: 'Custom headers (optional)',
       authHeadersHint: 'For private feeds. One per line in "Name: Value" form, e.g. Authorization: Bearer xxxx'
     },
