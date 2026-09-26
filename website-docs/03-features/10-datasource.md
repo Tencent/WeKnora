@@ -35,8 +35,25 @@
 | 腾讯 IMA | `ima` | 知识库中的文件与笔记 |
 | GitLab | `gitlab` | 仓库指定分支/标签下的目录 |
 | RSS / Atom | `rss` | 订阅源文章 |
+| Paperless-ngx | `paperless` | 按 Correspondent、Document Type 和 Custom Fields 筛选的文档 |
 
 各连接器支持的格式、认证与删除检测见参考部分。
+
+### Paperless-ngx
+
+Paperless-ngx 连接器读取 API Token 对应用户可见的文档，并同步到当前知识库。用户、组和文档可见性仍由 Paperless 管理；WeKnora 不会更改 Paperless 中的权限。
+
+1. 在 Paperless 用户个人资料中创建 API Token。
+2. 编辑目标知识库，在「数据源」中选择 **Paperless-ngx**。
+3. 填写 Paperless 实例根 URL 和 API Token，点击「测试连接」。URL 不要附加 `/api`。
+4. 可选择一个或多个 Correspondents、Document Types，并添加 Custom Field 字段/值条件。全部留空时会同步该 Token 可见的所有文档。
+5. 设置同步策略和周期并保存。
+
+Correspondents 内的多个选项按 **OR** 匹配；Document Types 也按 **OR** 匹配。Correspondent、Document Type 和 Custom Field 条件组之间按 **AND** 组合。Custom Field 必须先在 Paperless 中创建并填写到文档中；连接器使用精确匹配，因此字段值的空格、拼写和大小写应统一。新的数据源筛选通过这些元数据完成，不使用 Tags。
+
+连接器优先使用 Paperless 已生成的 OCR 文本并将其作为 `.txt` 入库，之后由 WeKnora 执行分块和向量索引。若 OCR 内容为空，则下载原始文件（例如 PDF）交给 WeKnora 的解析器。容器化部署时，Paperless URL 必须能从 app 容器访问；同一 Compose 网络可用服务名和容器端口，例如 `http://paperless:8000`。从容器访问时，`localhost` 指向 app 容器自身。
+
+源端删除检测目前不支持；从 Paperless 删除文档不会自动删除知识库中的对应条目。
 
 ## 检查变更与失败
 

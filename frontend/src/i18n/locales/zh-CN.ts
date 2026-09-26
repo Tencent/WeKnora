@@ -1147,7 +1147,8 @@ export default {
       dingtalk: '同步钉钉知识库中的在线文档',
       ima: '同步腾讯 IMA 知识库中的文档、笔记与文件（暂不支持 AI 会话与视频解析）',
       rss: '同步 RSS / Atom 订阅源中的文章',
-      gitlab: '同步 GitLab 项目中的文件'
+      gitlab: '同步 GitLab 项目中的文件',
+      paperless: '同步 Paperless-ngx 中的 OCR 文档'
     },
     connector: {
       feishu: '飞书',
@@ -1160,7 +1161,26 @@ export default {
       dingtalk: '钉钉文档',
       ima: '腾讯 IMA',
       rss: 'RSS / Atom 订阅',
-      gitlab: 'GitLab'
+      gitlab: 'GitLab',
+      paperless: 'Paperless-ngx'
+    },
+    paperless: {
+      baseUrl: 'Paperless URL',
+      apiToken: 'API token',
+      filtersTitle: '文档筛选条件',
+      filtersHint: '留空则同步此令牌可见的所有文档。同一列表中的多个选项按 OR 匹配，不同筛选组按 AND 组合。',
+      correspondents: '往来单位',
+      correspondentsPlaceholder: '选择往来单位',
+      documentTypes: '文档类型',
+      documentTypesPlaceholder: '选择文档类型',
+      customFields: '自定义字段',
+      customFieldsHint: '为 Paperless 自定义字段添加精确匹配条件。',
+      addCustomFieldFilter: '添加筛选条件',
+      customFieldPlaceholder: '选择自定义字段',
+      customFieldValuePlaceholder: '匹配值',
+      noCustomFields: '此 Paperless 实例尚未配置自定义字段。',
+      metadataSelectionHint: '可选择一个或多个往来单位和文档类型。留空表示包含全部。',
+      filterValue: '值'
     },
     logDetail: {
       startTime: '开始时间',

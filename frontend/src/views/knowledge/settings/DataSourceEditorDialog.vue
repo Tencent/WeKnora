@@ -253,6 +253,76 @@ const driveFolderTokenError = ref('')
 const driveRootLoaded = ref(false)
 const isDriveConnector = (type: string) => type === 'feishu_drive' || type === 'lark_drive'
 const isGitLabConnector = (type: string) => type === 'gitlab'
+const isPaperlessConnector = (type: string) => type === 'paperless'
+
+interface PaperlessCustomFieldFilter {
+  field_id: string
+  value: string
+}
+
+const paperlessCustomFieldFilters = ref<PaperlessCustomFieldFilter[]>([])
+const paperlessCorrespondentOptions = computed(() => resources.value
+  .filter(resource => resource.type === 'paperless_correspondent')
+  .map(resource => ({ label: resource.name, value: resource.external_id.replace('correspondent:', '') })))
+const paperlessDocumentTypeOptions = computed(() => resources.value
+  .filter(resource => resource.type === 'paperless_document_type')
+  .map(resource => ({ label: resource.name, value: resource.external_id.replace('document_type:', '') })))
+const paperlessCustomFieldOptions = computed(() => resources.value
+  .filter(resource => resource.type === 'paperless_custom_field')
+  .map(resource => ({
+    label: resource.description ? `${resource.name} (${resource.description})` : resource.name,
+    value: resource.external_id.replace('custom_field:', ''),
+  })))
+const paperlessCorrespondentIds = computed<string[]>({
+  get: () => selectedResourceIds.value
+    .filter(id => id.startsWith('correspondent:'))
+    .map(id => id.replace('correspondent:', '')),
+  set: (values) => {
+    selectedResourceIds.value = [
+      ...selectedResourceIds.value.filter(id => !id.startsWith('correspondent:')),
+      ...values.map(id => `correspondent:${id}`),
+    ]
+  },
+})
+const paperlessDocumentTypeIds = computed<string[]>({
+  get: () => selectedResourceIds.value
+    .filter(id => id.startsWith('document_type:'))
+    .map(id => id.replace('document_type:', '')),
+  set: (values) => {
+    selectedResourceIds.value = [
+      ...selectedResourceIds.value.filter(id => !id.startsWith('document_type:')),
+      ...values.map(id => `document_type:${id}`),
+    ]
+  },
+})
+
+function addPaperlessCustomFieldFilter() {
+  paperlessCustomFieldFilters.value.push({ field_id: '', value: '' })
+}
+
+function removePaperlessCustomFieldFilter(index: number) {
+  paperlessCustomFieldFilters.value.splice(index, 1)
+}
+
+function hydratePaperlessCustomFieldFilters(settings: Record<string, any> = {}) {
+  const saved = settings.custom_field_filters
+  paperlessCustomFieldFilters.value = Array.isArray(saved)
+    ? saved.map((filter: any) => ({
+        field_id: String(filter.field_id || ''),
+        value: filter.value == null ? '' : String(filter.value),
+      }))
+    : []
+}
+
+function syncPaperlessFiltersToConfig() {
+  if (!isPaperlessConnector(form.value.type)) return
+  form.value.config.settings.custom_field_filters = paperlessCustomFieldFilters.value
+    .filter(filter => filter.field_id && filter.value.trim())
+    .map(filter => ({ field_id: Number(filter.field_id), operator: 'exact', value: filter.value.trim() }))
+  form.value.config.resource_ids = selectedResourceIds.value.filter(id =>
+    id === 'all' || id.startsWith('correspondent:') || id.startsWith('document_type:'),
+  )
+}
 
 interface GitLabProjectInput { project_id: string; ref: string; pathsText: string }
 const gitlabProjects = ref<GitLabProjectInput[]>([])
@@ -728,6 +798,13 @@ const connectorDefs = computed<ConnectorDef[]>(() => [
       { key: 'access_token', labelKey: 'datasource.gitlab.accessToken', placeholder: '', secret: true },
     ],
   },
+  {
+    type: 'paperless', available: true, docUrl: 'https://docs.paperless-ngx.com/api/', permissionDocUrl: '', permissionPageUrl: '', requiredPermissions: [],
+    fields: [
+      { key: 'base_url', labelKey: 'datasource.paperless.baseUrl', placeholder: 'https://paperless.example.com' },
+      { key: 'api_token', labelKey: 'datasource.paperless.apiToken', placeholder: '', secret: true },
+    ],
+  },
 ])
 
 
@@ -774,6 +851,7 @@ watch(visible, async (v) => {
   driveRootLoaded.value = false
   rssAuthHeaders.value = []
   gitlabProjects.value = []
+  paperlessCustomFieldFilters.value = []
 
   if (isEdit.value && props.dataSource) {
     // Reset edit/replace toggle every open so an aborted replace doesn't
@@ -800,6 +878,9 @@ watch(visible, async (v) => {
       sync_deletions: props.dataSource.sync_deletions,
     }
     selectedResourceIds.value = form.value.config?.resource_ids || []
+    if (isPaperlessConnector(form.value.type)) {
+      hydratePaperlessCustomFieldFilters(form.value.config.settings)
+    }
     if (isGitLabConnector(form.value.type)) {
       const savedProjects = Array.isArray(form.value.config.settings.projects) ? form.value.config.settings.projects : []
       gitlabProjects.value = savedProjects.map((project: any) => ({
@@ -832,6 +913,7 @@ watch(visible, async (v) => {
       conflict_strategy: 'overwrite',
       sync_deletions: true,
     }
+    paperlessCustomFieldFilters.value = []
   }
 })
 
@@ -1161,6 +1243,7 @@ function prevStep() {
 function buildConfigPayload(): Record<string, unknown> {
   syncGitLabProjectsToSettings()
   syncConfluencePublicFieldsToSettings()
+  syncPaperlessFiltersToConfig()
   return {
     credentials: isEdit.value ? {} : { ...form.value.config.credentials },
     resource_ids: form.value.config.resource_ids,
@@ -1194,7 +1277,8 @@ async function commitCredentialsIfNeeded(dsId: string): Promise<boolean> {
 
 // --- Final submit ---
 async function handleSubmit() {
-  form.value.config.resource_ids = selectedResourceIds.value
+  if (isPaperlessConnector(form.value.type)) syncPaperlessFiltersToConfig()
+  else form.value.config.resource_ids = selectedResourceIds.value
   submitting.value = true
   try {
     let dataSourceId = tempDsId.value
@@ -1705,6 +1789,66 @@ const drawerConfirmText = computed(() => {
             <t-textarea v-model="project.pathsText" :placeholder="t('datasource.gitlab.pathsPlaceholder')" :autosize="{ minRows: 2, maxRows: 5 }" />
           </div>
           <t-button variant="outline" @click="addGitLabProject"><template #icon><t-icon name="add" /></template>{{ t('datasource.gitlab.addProject') }}</t-button>
+        </div>
+      </template>
+      <template v-else-if="isPaperlessConnector(form.type)">
+        <h4 class="setting-drawer__section-title">{{ t('datasource.paperless.filtersTitle') }}</h4>
+        <p class="ds-resource-hint">{{ t('datasource.paperless.filtersHint') }}</p>
+        <p class="form-desc">{{ t('datasource.paperless.metadataSelectionHint') }}</p>
+
+        <div class="paperless-filter-field">
+          <label class="form-label">{{ t('datasource.paperless.correspondents') }}</label>
+          <t-select
+            v-model="paperlessCorrespondentIds"
+            multiple
+            filterable
+            clearable
+            :loading="loadingResources"
+            :options="paperlessCorrespondentOptions"
+            :placeholder="t('datasource.paperless.correspondentsPlaceholder')"
+          />
+        </div>
+
+        <div class="paperless-filter-field">
+          <label class="form-label">{{ t('datasource.paperless.documentTypes') }}</label>
+          <t-select
+            v-model="paperlessDocumentTypeIds"
+            multiple
+            filterable
+            clearable
+            :loading="loadingResources"
+            :options="paperlessDocumentTypeOptions"
+            :placeholder="t('datasource.paperless.documentTypesPlaceholder')"
+          />
+        </div>
+
+        <div class="paperless-filter-fields">
+          <div class="paperless-filter-fields__header">
+            <div>
+              <label class="form-label">{{ t('datasource.paperless.customFields') }}</label>
+              <p class="form-desc">{{ t('datasource.paperless.customFieldsHint') }}</p>
+            </div>
+            <t-button size="small" variant="outline" :disabled="paperlessCustomFieldOptions.length === 0" @click="addPaperlessCustomFieldFilter">
+              <template #icon><t-icon name="add" /></template>
+              {{ t('datasource.paperless.addCustomFieldFilter') }}
+            </t-button>
+          </div>
+          <div v-for="(filter, index) in paperlessCustomFieldFilters" :key="index" class="paperless-filter-fields__row">
+            <t-select
+              v-model="filter.field_id"
+              filterable
+              :loading="loadingResources"
+              :options="paperlessCustomFieldOptions"
+              :placeholder="t('datasource.paperless.customFieldPlaceholder')"
+            />
+            <t-input v-model="filter.value" :placeholder="t('datasource.paperless.customFieldValuePlaceholder')" />
+            <t-button variant="text" theme="danger" shape="square" :aria-label="t('common.delete')" @click="removePaperlessCustomFieldFilter(index)">
+              <t-icon name="delete" />
+            </t-button>
+          </div>
+          <p v-if="paperlessCustomFieldOptions.length === 0 && !loadingResources" class="form-desc">
+            {{ t('datasource.paperless.noCustomFields') }}
+          </p>
         </div>
       </template>
       <template v-else>
@@ -2423,6 +2567,27 @@ const drawerConfirmText = computed(() => {
   font-size: var(--app-text-sm);
   line-height: 1.5;
   color: var(--td-text-color-placeholder);
+}
+
+.paperless-filter-field,
+.paperless-filter-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.paperless-filter-fields__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.paperless-filter-fields__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 32px;
+  align-items: center;
+  gap: 8px;
 }
 
 /* Drive (云盘) root folder_token input - shown before the lazy-load tree. */

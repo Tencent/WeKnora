@@ -168,6 +168,25 @@ test('new GitLab data sources continue to test credentials without persistence',
   } finally { f.close() }
 })
 
+test('Paperless filters save correspondent, document type and custom-field values', async () => {
+  const f = await fixture({ create: true })
+  try {
+    f.vm.selectType(f.vm.connectorDefs.find((def: any) => def.type === 'paperless'))
+    f.vm.selectedResourceIds = ['correspondent:7', 'document_type:8']
+    f.vm.paperlessCustomFieldFilters = [
+      { field_id: '10', value: 'Souza Cruz' },
+      { field_id: '11', value: '  ' },
+    ]
+
+    f.vm.syncPaperlessFiltersToConfig()
+
+    assert.deepEqual(f.vm.form.config.resource_ids, ['correspondent:7', 'document_type:8'])
+    assert.deepEqual(JSON.parse(JSON.stringify(f.vm.form.config.settings.custom_field_filters)), [
+      { field_id: 10, operator: 'exact', value: 'Souza Cruz' },
+    ])
+  } finally { f.close() }
+})
+
 test('a new Yuque data source adopts the TOC folder layout, but not the filter', async () => {
   const f = await fixture({ create: true })
   try {
