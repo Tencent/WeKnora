@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/application/access"
+	"github.com/Tencent/WeKnora/internal/application/repository"
 	chatpipeline "github.com/Tencent/WeKnora/internal/application/service/chat_pipeline"
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	"github.com/Tencent/WeKnora/internal/config"
@@ -473,8 +475,19 @@ func (s *DataTableSummaryService) Handle(ctx context.Context, t *asynq.Task) err
 
 	logger.Infof(ctx, "Processing table extraction for knowledge: %s", payload.KnowledgeID)
 
+	knowledge, err := s.knowledgeService.GetRepository().GetKnowledgeByID(ctx, payload.TenantID, payload.KnowledgeID)
+	if errors.Is(err, repository.ErrKnowledgeNotFound) {
+		logger.Infof(ctx, "Skipping orphaned table summary task: knowledge %s not found in tenant %d",
+			payload.KnowledgeID, payload.TenantID)
+		return nil
+	}
+	if err != nil {
+		logger.Errorf(ctx, "failed to get knowledge: %v", err)
+		return err
+	}
+
 	// 2. 准备所有必需的资源（知识、模型、引擎等）
-	resources, err := s.prepareResources(ctx, payload)
+	resources, err := s.prepareResources(ctx, payload, knowledge)
 	if err != nil {
 		return err
 	}
@@ -513,14 +526,12 @@ type extractionResources struct {
 
 // prepareResources 准备提取所需的所有资源
 // 思路：集中加载所有依赖，统一错误处理，避免分散的资源获取逻辑
-func (s *DataTableSummaryService) prepareResources(ctx context.Context, payload DataTableSummaryPayload) (*extractionResources, error) {
-	// 获取并验证知识文件
-	knowledge, err := s.knowledgeService.GetRepository().GetKnowledgeByID(ctx, payload.TenantID, payload.KnowledgeID)
-	if err != nil {
-		logger.Errorf(ctx, "failed to get knowledge: %v", err)
-		return nil, err
-	}
-
+func (s *DataTableSummaryService) prepareResources(
+	ctx context.Context,
+	payload DataTableSummaryPayload,
+	knowledge *types.Knowledge,
+) (*extractionResources, error) {
+	// 验证知识文件
 	if knowledge == nil || knowledge.ID != payload.KnowledgeID || knowledge.TenantID != payload.TenantID {
 		return nil, fmt.Errorf("invalid table summary knowledge scope")
 	}
