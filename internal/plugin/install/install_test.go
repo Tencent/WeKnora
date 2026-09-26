@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Tencent/WeKnora/internal/plugin/manifest"
 	"github.com/Tencent/WeKnora/internal/plugin/plugintest"
 	"github.com/Tencent/WeKnora/internal/plugin/reconcile"
 	"github.com/Tencent/WeKnora/internal/plugin/registry"
@@ -399,5 +400,34 @@ func TestWorkspaceOwnedPlugins(t *testing.T) {
 	taken := Request{Data: ownedPackage(t, "acme.kit", "2.0.0"), RemoteURL: "https://plugins.example.com/kit"}
 	if _, err := s.InstallOwned(ctx, 7, taken); !isInvalid(err) {
 		t.Fatalf("a workspace took a platform plugin's ID: %v", err)
+	}
+}
+
+func TestKubernetesPackagesNeedACluster(t *testing.T) {
+	ctx := context.Background()
+	s, repo, _, _ := newService(t)
+	data := plugintest.Zip(t, map[string]string{"plugin.yaml": "schemaVersion: 1\nid: acme.kube\nversion: 1.0.0\n" +
+		"apiVersion: weknora.plugin/v1\nname: K\npublisher: { id: acme }\n" +
+		"runtime: { type: kubernetes, image: ghcr.io/acme/kube:1.0.0 }\n" +
+		"contributes:\n  webSearch:\n    - { id: s, name: S }\n"})
+	_, err := s.Inspect(ctx, data)
+	if !isInvalid(err) || !strings.Contains(err.Error(), "WEKNORA_PLUGIN_K8S_NAMESPACE") {
+		t.Fatalf("without a cluster: %v", err)
+	}
+	s.WithRuntimes(manifest.RuntimeKubernetes)
+	v, err := s.Install(ctx, Request{Data: data})
+	if err != nil {
+		t.Fatal(err)
+	}
+	row, _ := repo.GetPlugin(ctx, "acme.kube")
+	if row.RemoteSecret == "" || v.IssuedSecret != "" {
+		t.Fatalf("secret stored %v, shown %q", row.RemoteSecret != "", v.IssuedSecret)
+	}
+	before := row.RemoteSecret
+	if v, err := s.RotateSecret(ctx, "acme.kube"); err != nil || v.IssuedSecret != "" {
+		t.Fatalf("rotate = %v (shown %q)", err, v.IssuedSecret)
+	}
+	if row, _ := repo.GetPlugin(ctx, "acme.kube"); row.RemoteSecret == before {
+		t.Fatal("rotation kept the secret")
 	}
 }

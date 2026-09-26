@@ -186,6 +186,21 @@ pluginHost:
   affinity: {}
 
 # -----------------------------------------------------------------------------
+# Kubernetes plugins (runtime.type: kubernetes)
+# -----------------------------------------------------------------------------
+pluginKube:
+  # -- Let the app deploy kubernetes plugins as Deployments + Services.
+  # Grants the app's service account a Role over deployments, services and
+  # secrets in the plugin namespace.
+  enabled: false
+
+  # -- Namespace plugins run in (default: the release namespace)
+  namespace: ""
+
+  # -- Image pull secret for plugin images, in the plugin namespace
+  imagePullSecret: ""
+
+# -----------------------------------------------------------------------------
 # Frontend (Web UI)
 # -----------------------------------------------------------------------------
 frontend:

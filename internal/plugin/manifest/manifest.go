@@ -101,6 +101,10 @@ type Runtime struct {
 	// connections such as an IM WebSocket).
 	Singleton bool       `json:"singleton,omitempty" yaml:"singleton"`
 	Resources *Resources `json:"resources,omitempty" yaml:"resources"`
+	// Image is the container image of a kubernetes plugin; Port is where
+	// it serves the protocol (default 8080).
+	Image string `json:"image,omitempty" yaml:"image"`
+	Port  int    `json:"port,omitempty"  yaml:"port"`
 }
 
 // Resources caps a host plugin process.
@@ -299,8 +303,17 @@ func (m *Manifest) validateRuntime(add func(string, ...any)) {
 			add("runtime.type %q is reserved for builtin plugins", RuntimeBuiltin)
 		}
 	case RuntimeDeclarative:
-	case RuntimeRemote, RuntimeKubernetes:
+	case RuntimeRemote:
 		m.validateAPIVersion(add)
+	case RuntimeKubernetes:
+		m.validateAPIVersion(add)
+		if strings.TrimSpace(m.Runtime.Image) == "" || strings.ContainsAny(m.Runtime.Image, " \t\n") {
+			add("runtime.image is required for kubernetes plugins")
+		}
+		if m.Runtime.Port < 0 || m.Runtime.Port > 65535 {
+			add("runtime.port %d is not a port", m.Runtime.Port)
+		}
+		m.validateResources(add)
 	case RuntimeHost:
 		m.validateAPIVersion(add)
 		switch m.Runtime.Kind {
@@ -311,20 +324,26 @@ func (m *Manifest) validateRuntime(add func(string, ...any)) {
 		if m.Runtime.Entry == "" {
 			add("runtime.entry is required for host plugins")
 		}
-		if r := m.Runtime.Resources; r != nil {
-			if r.CPU != "" {
-				if _, err := ParseCPU(r.CPU); err != nil {
-					add("runtime.resources.%v", err)
-				}
-			}
-			if r.Memory != "" {
-				if _, err := ParseMemory(r.Memory); err != nil {
-					add("runtime.resources.%v", err)
-				}
-			}
-		}
+		m.validateResources(add)
 	default:
 		add("runtime.type %q is not one of builtin, declarative, host, remote, kubernetes", m.Runtime.Type)
+	}
+}
+
+func (m *Manifest) validateResources(add func(string, ...any)) {
+	r := m.Runtime.Resources
+	if r == nil {
+		return
+	}
+	if r.CPU != "" {
+		if _, err := ParseCPU(r.CPU); err != nil {
+			add("runtime.resources.%v", err)
+		}
+	}
+	if r.Memory != "" {
+		if _, err := ParseMemory(r.Memory); err != nil {
+			add("runtime.resources.%v", err)
+		}
 	}
 }
 

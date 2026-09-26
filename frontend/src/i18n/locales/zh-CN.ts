@@ -5266,7 +5266,8 @@ export default {
     runtime: {
       declarative: '声明式',
       host: '本机进程',
-      remote: '远程服务'
+      remote: '远程服务',
+      kubernetes: 'Kubernetes 部署'
     },
     title: '插件管理',
     description: '安装与管理本平台的插件。安装后所有空间都能看到，但每个空间需自行启用；停用会在所有节点卸载该插件。',

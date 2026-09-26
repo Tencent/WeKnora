@@ -1,0 +1,40 @@
+{{/*
+Copyright 2025 Tencent
+SPDX-License-Identifier: MIT
+
+Lets the app deploy kubernetes plugins (runtime.type: kubernetes) in the
+plugin namespace: their Deployment, Service and signing-secret Secret.
+*/}}
+{{- if .Values.pluginKube.enabled }}
+{{- $ns := .Values.pluginKube.namespace | default .Release.Namespace }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "weknora.fullname" . }}-plugins
+  namespace: {{ $ns }}
+  labels:
+    {{- include "weknora.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["services", "secrets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "weknora.fullname" . }}-plugins
+  namespace: {{ $ns }}
+  labels:
+    {{- include "weknora.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "weknora.fullname" . }}-plugins
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "weknora.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}

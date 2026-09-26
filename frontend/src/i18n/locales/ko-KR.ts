@@ -5264,7 +5264,8 @@ export default {
     runtime: {
       declarative: '선언형',
       host: '로컬 프로세스',
-      remote: '원격 서비스'
+      remote: '원격 서비스',
+      kubernetes: 'Kubernetes'
     },
     title: '플러그인 관리',
     description: '플랫폼 전체의 플러그인을 설치하고 관리합니다. 설치된 플러그인은 모든 워크스페이스에 보이며 각 워크스페이스가 직접 활성화합니다. 여기서 비활성화하면 모든 노드에서 언로드됩니다.',

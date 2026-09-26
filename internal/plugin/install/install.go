@@ -97,6 +97,20 @@ type Service struct {
 	trust       *trust.Store
 	// tenantPlugins is the platform's switch for workspaces' own plugins.
 	tenantPlugins func(context.Context) bool
+	// runtimes adds runtimes this platform is set up for (kubernetes).
+	runtimes map[manifest.RuntimeType]bool
+}
+
+// WithRuntimes accepts packages of runtimes beyond the default ones, such
+// as kubernetes when the platform has a cluster for plugins.
+func (s *Service) WithRuntimes(rts ...manifest.RuntimeType) *Service {
+	if s.runtimes == nil {
+		s.runtimes = map[manifest.RuntimeType]bool{}
+	}
+	for _, rt := range rts {
+		s.runtimes[rt] = true
+	}
+	return s
 }
 
 // PackageCheck is a domain's install-time verdict on a package, such as
@@ -212,7 +226,10 @@ func (s *Service) open(data []byte) (*pkg.Package, trust.Verdict, error) {
 
 // check applies the platform's runtime, engine and domain checks.
 func (s *Service) check(p *pkg.Package) error {
-	if !supportedRuntimes[p.Manifest.Runtime.Type] {
+	if !supportedRuntimes[p.Manifest.Runtime.Type] && !s.runtimes[p.Manifest.Runtime.Type] {
+		if p.Manifest.Runtime.Type == manifest.RuntimeKubernetes {
+			return invalid("kubernetes plugins need a cluster: set WEKNORA_PLUGIN_K8S_NAMESPACE")
+		}
 		return invalid("runtime %q is not supported yet; declarative, host and remote plugins can be installed",
 			p.Manifest.Runtime.Type)
 	}
@@ -307,6 +324,12 @@ func (s *Service) install(
 		}
 	}
 	var issued string
+	if m.Runtime.Type == manifest.RuntimeKubernetes && row.RemoteSecret == "" {
+		// WeKnora deploys the service and hands it the secret itself.
+		if _, err := s.issueSecret(row); err != nil {
+			return nil, err
+		}
+	}
 	if m.Runtime.Type == manifest.RuntimeRemote {
 		if req.RemoteURL != "" {
 			if err := checkRemoteURL(req.RemoteURL); err != nil {
@@ -390,10 +413,20 @@ func (s *Service) SetRemoteURL(ctx context.Context, id, rawURL string) (*View, e
 
 // RotateSecret replaces a remote plugin's signing secret. Calls fail until
 // the service is given the new one, which only this response shows.
+//
+// A kubernetes plugin's secret is WeKnora's to hand out: rotating it rolls
+// the plugin's pods with the new one, and it is not shown.
 func (s *Service) RotateSecret(ctx context.Context, id string) (*View, error) {
-	row, err := s.remoteRow(ctx, id)
+	row, err := s.repo.GetPlugin(ctx, id)
 	if err != nil {
 		return nil, err
+	}
+	if row == nil {
+		return nil, ErrNotInstalled
+	}
+	deployed := row.Runtime == string(manifest.RuntimeKubernetes)
+	if row.Runtime != string(manifest.RuntimeRemote) && !deployed {
+		return nil, invalid("%s is not a remote plugin", id)
 	}
 	secret, err := s.issueSecret(row)
 	if err != nil {
@@ -403,7 +436,7 @@ func (s *Service) RotateSecret(ctx context.Context, id string) (*View, error) {
 		return nil, err
 	}
 	v, err := s.apply(ctx, id)
-	if v != nil {
+	if v != nil && !deployed {
 		v.IssuedSecret = secret
 	}
 	return v, err

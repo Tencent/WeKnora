@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"sync"
 	"time"
 
@@ -30,7 +31,10 @@ const (
 // before the activators that route calls to the plugins.
 type Manager struct {
 	newClient func(url string, secret []byte) *client.Client
-	interval  time.Duration
+	// newTrustedClient reaches services WeKnora deployed itself (the
+	// kubernetes driver), which live on private cluster addresses.
+	newTrustedClient func(url string, secret []byte) *client.Client
+	interval         time.Duration
 
 	mu        sync.Mutex
 	reporter  host.StateReporter
@@ -57,9 +61,15 @@ func NewManager() *Manager {
 	cfg.Timeout = 0 // calls are bounded by their context; syncs stream
 	cfg.SameOriginRedirectsOnly = true
 	httpClient := utils.NewSSRFSafeHTTPClient(cfg)
+	trusted := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	}}
 	return &Manager{
 		newClient: func(url string, secret []byte) *client.Client {
 			return client.New(url, httpClient, client.Signed(secret))
+		},
+		newTrustedClient: func(url string, secret []byte) *client.Client {
+			return client.New(url, trusted, client.Signed(secret))
 		},
 		interval:  healthInterval,
 		endpoints: map[string]*endpoint{},
@@ -101,18 +111,28 @@ func (m *Manager) Activate(ctx context.Context, l *reconcile.Loaded) error {
 	if secret == "" {
 		return errors.New("the remote plugin has no signing secret")
 	}
-	c := m.newClient(url, []byte(secret))
+	return m.serve(ctx, l.Manifest, url, m.newClient(url, []byte(secret)))
+}
+
+// ServeDeployed registers a plugin service WeKnora deployed itself (the
+// kubernetes driver) at url: checked and health-watched like a remote
+// plugin, but reached on the cluster's private addresses.
+func (m *Manager) ServeDeployed(ctx context.Context, mf *manifest.Manifest, url, secret string) error {
+	return m.serve(ctx, mf, url, m.newTrustedClient(url, []byte(secret)))
+}
+
+func (m *Manager) serve(ctx context.Context, mf *manifest.Manifest, url string, c *client.Client) error {
 	cctx, cancel := context.WithTimeout(ctx, checkTimeout)
-	err = verify(cctx, c, l.Manifest)
+	err := verify(cctx, c, mf)
 	cancel()
 	if err != nil {
 		c.Close()
 		return err
 	}
 
-	id := l.Manifest.ID
+	id := mf.ID
 	wctx, stop := context.WithCancel(context.Background())
-	e := &endpoint{m: l.Manifest, c: c, cancel: stop, done: make(chan struct{})}
+	e := &endpoint{m: mf, c: c, cancel: stop, done: make(chan struct{})}
 	m.mu.Lock()
 	old := m.endpoints[id]
 	m.endpoints[id] = e
@@ -121,7 +141,7 @@ func (m *Manager) Activate(ctx context.Context, l *reconcile.Loaded) error {
 		old.close()
 	}
 	go m.watch(wctx, id, e)
-	logger.Infof(ctx, "[plugin] remote %s %s at %s", id, l.Manifest.Version, url)
+	logger.Infof(ctx, "[plugin] remote %s %s at %s", id, mf.Version, url)
 	return nil
 }
 

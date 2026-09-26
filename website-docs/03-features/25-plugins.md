@@ -180,6 +180,24 @@ Helm 设置 `pluginHost.enabled=true` 即可。使用本地存储（`STORAGE_TYP
 
 独立宿主需要 Redis，且所有节点的 `SYSTEM_AES_KEY`（或 `JWT_SECRET`）必须一致。app 不运行某个 kind、又没有配置独立宿主时，该 kind 的插件在插件详情中显示为加载失败，并说明原因。
 
+### Kubernetes 部署
+
+`runtime.type: kubernetes` 的插件包里写的是容器镜像，由 WeKnora 自己部署到集群里：
+
+```yaml
+runtime:
+  type: kubernetes
+  image: ghcr.io/acme/search:1.2.0   # 用 SDK 的 Serve 启动，读 WEKNORA_PLUGIN_ADDR / WEKNORA_PLUGIN_SECRET
+  port: 8080                         # 默认 8080
+  resources: { cpu: 500m, memory: 256Mi }
+```
+
+- 设置 `WEKNORA_PLUGIN_K8S_NAMESPACE` 后启用（helm：`pluginKube.enabled`，会给 app 的 ServiceAccount 授予该命名空间内 Deployment、Service、Secret 的权限）；未设置时这类插件包不能安装。
+- 安装后 WeKnora 在该命名空间创建签名密钥 Secret、Deployment 和 Service，等滚动完成、校验服务的清单后开始调用；之后按远程插件的方式做健康检查。升级即滚动更新；轮换密钥会滚动重建 Pod；卸载会删除这三项资源。
+- 容器以非 root 运行、不挂载 ServiceAccount 令牌。插件要回调 Host API 时，需设置 `WEKNORA_PLUGIN_HOST_API_URL`（helm 自动设置）。
+- WeKnora 不在集群内时，可用 `WEKNORA_PLUGIN_K8S_API`、`WEKNORA_PLUGIN_K8S_TOKEN`、`WEKNORA_PLUGIN_K8S_CA` 指定 API 地址与凭证，并用 `WEKNORA_PLUGIN_K8S_SERVICE_TYPE=NodePort` + `WEKNORA_PLUGIN_K8S_NODE_HOST` 经节点端口访问插件。
+- 目前每个插件一个副本、所有空间共用；`permissions.egress` 不会转成 NetworkPolicy，出网限制需在集群侧配置。
+
 ## 插件页面
 
 插件可以在界面上加三种页面：

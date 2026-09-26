@@ -176,6 +176,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(activate.NewModelVendors))
 	must(container.Provide(newPluginHostManager))
 	must(container.Provide(pluginremote.NewManager))
+	must(container.Provide(newPluginKubeDriver))
 	must(container.Provide(newPluginHostPool))
 	must(container.Provide(newPluginDelegation))
 	must(container.Provide(newPluginInvoker))

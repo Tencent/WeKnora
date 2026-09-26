@@ -2738,7 +2738,8 @@ export default {
     runtime: {
       declarative: 'Declarative',
       host: 'Local process',
-      remote: 'Remote service'
+      remote: 'Remote service',
+      kubernetes: 'Kubernetes'
     },
     title: 'Plugin management',
     description: 'Install and manage plugins for the whole platform. Every workspace sees an installed plugin, and each one enables it for itself; disabling a plugin here unloads it on every node.',

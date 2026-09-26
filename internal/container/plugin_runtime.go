@@ -25,6 +25,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/plugin/hostapi"
 	"github.com/Tencent/WeKnora/internal/plugin/hostpool"
 	"github.com/Tencent/WeKnora/internal/plugin/install"
+	"github.com/Tencent/WeKnora/internal/plugin/kube"
 	"github.com/Tencent/WeKnora/internal/plugin/manifest"
 	"github.com/Tencent/WeKnora/internal/plugin/market"
 	pluginoauth "github.com/Tencent/WeKnora/internal/plugin/oauth"
@@ -54,8 +55,10 @@ func newPluginPackageStore(cfg *config.Config) (reconcile.PackageStore, error) {
 type pluginActivators struct {
 	dig.In
 
-	Host       *host.Manager
-	Remote     *remote.Manager
+	Host   *host.Manager
+	Remote *remote.Manager
+	// Kube is nil unless WEKNORA_PLUGIN_K8S_NAMESPACE is set.
+	Kube       *kube.Driver
 	Delegation *pluginDelegation
 	WebSearch  *activate.WebSearch
 	Connectors *activate.Connectors
@@ -70,9 +73,24 @@ type pluginActivators struct {
 // list orders the activators: the runtimes first, so a code plugin is
 // reachable before anything routes calls to it.
 func (a pluginActivators) list() []reconcile.Activator {
-	return []reconcile.Activator{
-		a.Host, a.Remote, a.Delegation, a.WebSearch, a.Connectors, a.Parsers, a.UIPages, a.Vendors, a.MCP, a.Skills,
+	runtimes := []reconcile.Activator{a.Host, a.Remote}
+	if a.Kube != nil {
+		runtimes = append(runtimes, a.Kube)
 	}
+	return append(runtimes,
+		a.Delegation, a.WebSearch, a.Connectors, a.Parsers, a.UIPages, a.Vendors, a.MCP, a.Skills)
+}
+
+// newPluginKubeDriver runs kubernetes plugins when the platform names a
+// namespace for them (WEKNORA_PLUGIN_K8S_NAMESPACE); nil otherwise.
+func newPluginKubeDriver(r *remote.Manager) (*kube.Driver, error) {
+	cfg, err := kube.ConfigFromEnv()
+	if err != nil || cfg == nil {
+		return nil, err
+	}
+	logger.Infof(context.Background(), "[plugin] kubernetes plugins run in namespace %s (%s services)",
+		cfg.Namespace, cfg.ServiceType)
+	return kube.New(cfg, r)
 }
 
 // newPluginHostAPI serves the Host API and gives calls a way back to it: the
@@ -237,9 +255,13 @@ func newPluginInstaller(
 	r *reconcile.Reconciler,
 	trusted *plugintrust.Store,
 	settings interfaces.SystemSettingService,
+	kubeDriver *kube.Driver,
 ) *install.Service {
-	return install.NewService(repo, store, r, handler.Version).
-		WithChecks(activate.CheckModelVendors).WithTrust(trusted).
+	s := install.NewService(repo, store, r, handler.Version)
+	if kubeDriver != nil {
+		s.WithRuntimes(manifest.RuntimeKubernetes)
+	}
+	return s.WithChecks(activate.CheckModelVendors).WithTrust(trusted).
 		WithTenantPlugins(func(ctx context.Context) bool {
 			return settings.GetBool(ctx, "tenant.plugin_remote_enabled", "WEKNORA_PLUGIN_TENANT_REMOTE", false)
 		})

@@ -29,6 +29,10 @@ spec:
     spec:
       {{- include "weknora.imagePullSecrets" . | nindent 6 }}
       serviceAccountName: {{ include "weknora.serviceAccountName" . }}
+      {{- if .Values.pluginKube.enabled }}
+      # The kubernetes plugin driver calls the API as this service account.
+      automountServiceAccountToken: true
+      {{- end }}
       {{- with .Values.app.podSecurityContext | default .Values.global.podSecurityContext }}
       securityContext:
         {{- toYaml . | nindent 8 }}
@@ -134,6 +138,19 @@ spec:
               value: {{ .Values.pluginHost.appKinds | quote }}
             - name: WEKNORA_PLUGIN_HOST_API_URL
               value: "http://app:{{ .Values.app.service.port }}"
+            {{- end }}
+            {{- if .Values.pluginKube.enabled }}
+            # Kubernetes plugins run as Deployments in this namespace.
+            - name: WEKNORA_PLUGIN_K8S_NAMESPACE
+              value: {{ .Values.pluginKube.namespace | default .Release.Namespace | quote }}
+            {{- with .Values.pluginKube.imagePullSecret }}
+            - name: WEKNORA_PLUGIN_K8S_IMAGE_PULL_SECRET
+              value: {{ . | quote }}
+            {{- end }}
+            {{- if not .Values.pluginHost.enabled }}
+            - name: WEKNORA_PLUGIN_HOST_API_URL
+              value: "http://app.{{ .Release.Namespace }}.svc:{{ .Values.app.service.port }}"
+            {{- end }}
             {{- end }}
             {{- if .Values.neo4j.enabled }}
             # Neo4j configuration (for GraphRAG)

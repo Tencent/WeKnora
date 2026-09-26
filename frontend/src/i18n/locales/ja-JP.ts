@@ -2738,7 +2738,8 @@ export default {
     runtime: {
       declarative: '宣言型',
       host: 'ローカルプロセス',
-      remote: 'リモートサービス'
+      remote: 'リモートサービス',
+      kubernetes: 'Kubernetes'
     },
     title: 'プラグイン管理',
     description: 'プラットフォーム全体のプラグインをインストール・管理します。インストールしたプラグインはすべてのワークスペースに表示され、各ワークスペースで個別に有効化します。ここで無効にすると全ノードでアンロードされます。',
