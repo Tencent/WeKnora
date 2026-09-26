@@ -426,28 +426,52 @@ func CheckServedManifest(want *manifest.Manifest, got *pluginapi.Manifest) error
 	return nil
 }
 
+// maxLogLine is the longest line of plugin output logged; the rest of a
+// longer line is dropped.
+const maxLogLine = 64 << 10
+
 // forwardLogs copies a child's output into WeKnora's logs. On stdout it
-// also watches for the handshake line.
+// also watches for the handshake line. It reads until the pipe closes: a
+// child writing to a pipe no one drains would block.
 func forwardLogs(r io.Reader, id string, handshake chan<- pluginapi.Handshake, hsErr chan<- error) {
-	sc := bufio.NewScanner(r)
-	sc.Buffer(make([]byte, 0, 64<<10), 1<<20)
+	br := bufio.NewReaderSize(r, maxLogLine)
 	seen := false
-	for sc.Scan() {
-		line := sc.Text()
-		if handshake != nil && !seen {
-			hs, ok, err := pluginapi.ParseHandshake(line)
-			if ok {
-				seen = true
-				if err != nil {
-					hsErr <- err
-				} else {
-					handshake <- hs
+	for {
+		line, truncated, err := readLogLine(br)
+		if line != "" || err == nil {
+			if handshake != nil && !seen && !truncated {
+				hs, ok, herr := pluginapi.ParseHandshake(line)
+				if ok {
+					seen = true
+					if herr != nil {
+						hsErr <- herr
+					} else {
+						handshake <- hs
+					}
+					continue
 				}
-				continue
 			}
+			if truncated {
+				line += " [truncated]"
+			}
+			logger.Infof(context.Background(), "[plugin %s] %s", id, line)
 		}
-		logger.Infof(context.Background(), "[plugin %s] %s", id, line)
+		if err != nil {
+			return
+		}
 	}
+}
+
+// readLogLine reads one line without its line ending. A line longer than
+// the reader's buffer is cut there and the rest of it is read and dropped.
+func readLogLine(br *bufio.Reader) (line string, truncated bool, err error) {
+	b, err := br.ReadSlice('\n')
+	line = string(b)
+	for errors.Is(err, bufio.ErrBufferFull) {
+		truncated = true
+		_, err = br.ReadSlice('\n')
+	}
+	return strings.TrimRight(line, "\r\n"), truncated, err
 }
 
 func (p *process) setState(s State, err error) {
