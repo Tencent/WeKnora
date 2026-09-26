@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	infra_web_search "github.com/Tencent/WeKnora/internal/infrastructure/web_search"
+	"github.com/Tencent/WeKnora/internal/plugin/manifest"
 	"github.com/Tencent/WeKnora/internal/plugin/pkg"
 	"github.com/Tencent/WeKnora/internal/plugin/plugintest"
 	"github.com/Tencent/WeKnora/internal/plugin/reconcile"
@@ -36,7 +37,13 @@ contributes:
 // fakeClients serves one plugin from an in-process SDK handler.
 type fakeClients struct{ c *client.Client }
 
-func (f fakeClients) Client(string) (*client.Client, error) { return f.c, nil }
+func (f fakeClients) Client(context.Context, *manifest.Manifest) (*client.Client, error) {
+	return f.c, nil
+}
+
+// OnThisNode is true unless the manifest's runtime is remote, like the
+// embedded host.
+func (f fakeClients) OnThisNode(id string) bool { return id != "acme.remote" }
 
 func searchLoaded(t *testing.T, schema string) *reconcile.Loaded {
 	t.Helper()

@@ -5,6 +5,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"sync"
@@ -195,8 +196,10 @@ func Install(t testing.TB, repo *MemRepo, store *MemStore, data []byte, state st
 		t.Fatal(err)
 	}
 	uri, _ := store.Put(ctx, p.Digest, data)
+	manifestJSON, _ := json.Marshal(p.Manifest)
 	_ = repo.SaveVersion(ctx, &types.PluginVersion{
 		PluginID: p.Manifest.ID, Version: p.Manifest.Version, Digest: p.Digest, PackageURI: uri,
+		Manifest: types.JSON(manifestJSON),
 	})
 	_ = repo.SavePlugin(ctx, &types.InstalledPlugin{
 		ID: p.Manifest.ID, ActiveVersion: p.Manifest.Version, DesiredState: state, Runtime: "declarative",

@@ -15,10 +15,13 @@ import (
 	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/handler"
+	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/plugin/activate"
 	"github.com/Tencent/WeKnora/internal/plugin/host"
 	"github.com/Tencent/WeKnora/internal/plugin/hostapi"
+	"github.com/Tencent/WeKnora/internal/plugin/hostpool"
 	"github.com/Tencent/WeKnora/internal/plugin/install"
+	"github.com/Tencent/WeKnora/internal/plugin/manifest"
 	"github.com/Tencent/WeKnora/internal/plugin/reconcile"
 	pluginregistry "github.com/Tencent/WeKnora/internal/plugin/registry"
 	"github.com/Tencent/WeKnora/internal/plugin/remote"
@@ -44,6 +47,7 @@ type pluginActivators struct {
 
 	Host       *host.Manager
 	Remote     *remote.Manager
+	Delegation *pluginDelegation
 	WebSearch  *activate.WebSearch
 	Connectors *activate.Connectors
 	Parsers    *activate.Parsers
@@ -57,27 +61,26 @@ type pluginActivators struct {
 // reachable before anything routes calls to it.
 func (a pluginActivators) list() []reconcile.Activator {
 	return []reconcile.Activator{
-		a.Host, a.Remote, a.WebSearch, a.Connectors, a.Parsers, a.Vendors, a.MCP, a.Skills,
+		a.Host, a.Remote, a.Delegation, a.WebSearch, a.Connectors, a.Parsers, a.Vendors, a.MCP, a.Skills,
 	}
 }
 
 // newPluginHostAPI serves the Host API and gives calls a way back to it: the
-// embedded host's plugins reach this node on loopback, remote plugins only
-// through WEKNORA_PLUGIN_HOST_API_URL.
+// embedded host's plugins reach this node on loopback, plugins elsewhere
+// (remote, on a plugin host) only through WEKNORA_PLUGIN_HOST_API_URL.
 func newPluginHostAPI(
 	cfg *config.Config, iv *activate.Invoker, repo interfaces.PluginKVRepository, cleaner interfaces.ResourceCleaner,
 ) *hostapi.Handler {
 	issuer := hostapi.NewIssuerFromEnv()
-	url := strings.TrimSpace(os.Getenv("WEKNORA_PLUGIN_HOST_API_URL"))
-	iv.SetPublicHostAPI(url)
-	if url == "" {
-		port := 8080
-		if cfg != nil && cfg.Server != nil && cfg.Server.Port > 0 {
-			port = cfg.Server.Port
-		}
-		url = fmt.Sprintf("http://127.0.0.1:%d", port)
+	// Plugins on this node always use loopback; the public address is for
+	// plugins elsewhere (remote, on a plugin host), which reach this node
+	// the way the deployment routes to it.
+	port := 8080
+	if cfg != nil && cfg.Server != nil && cfg.Server.Port > 0 {
+		port = cfg.Server.Port
 	}
-	iv.SetHostAPI(issuer, url)
+	iv.SetHostAPI(issuer, fmt.Sprintf("http://127.0.0.1:%d", port))
+	iv.SetPublicHostAPI(strings.TrimSpace(os.Getenv("WEKNORA_PLUGIN_HOST_API_URL")))
 	kv := hostapi.NewKV(repo)
 	ctx, cancel := context.WithCancel(context.Background())
 	kv.StartSweeper(ctx, 10*time.Minute)
@@ -97,24 +100,87 @@ func bindPluginActivators(
 	skills.SetPluginSkills(a.Skills)
 }
 
-// newPluginInvoker reaches code plugins through this node's plugin host or,
-// for remote ones, at their registered URLs.
-func newPluginInvoker(h *host.Manager, r *remote.Manager) *activate.Invoker {
-	return activate.NewInvoker(pluginClients{host: h, remote: r})
+// newPluginHostManager is this node's embedded plugin host. It runs the
+// kinds WEKNORA_PLUGIN_EMBEDDED_KINDS names (default: every kind this
+// machine can run; "none" leaves all host plugins to standalone hosts).
+func newPluginHostManager() *host.Manager {
+	m := host.NewManager()
+	m.SetKinds(host.KindsFromEnv("WEKNORA_PLUGIN_EMBEDDED_KINDS"))
+	return m
 }
 
-// pluginClients finds a code plugin in whichever runtime loaded it.
+// newPluginHostPool finds standalone plugin hosts (weknora plugin-host) in
+// Redis. It is nil without Redis or a cluster key: host plugins then run on
+// this node or nowhere.
+func newPluginHostPool(rdb *redis.Client) *hostpool.Pool {
+	if rdb == nil {
+		return nil
+	}
+	key, err := hostpool.ClusterKey()
+	if err != nil {
+		logger.Warnf(context.Background(), "[plugin] standalone plugin hosts are off: %v", err)
+		return nil
+	}
+	return hostpool.NewPool(rdb, key)
+}
+
+// newPluginInvoker reaches code plugins through this node's plugin host, a
+// standalone plugin host, or a remote plugin's registered URL.
+func newPluginInvoker(h *host.Manager, r *remote.Manager, pool *hostpool.Pool) *activate.Invoker {
+	return activate.NewInvoker(pluginClients{host: h, remote: r, pool: pool})
+}
+
+// pluginClients finds a code plugin in whichever runtime serves it.
 type pluginClients struct {
 	host   *host.Manager
 	remote *remote.Manager
+	pool   *hostpool.Pool
 }
 
-func (c pluginClients) Client(pluginID string) (*client.Client, error) {
-	if c.remote.Owns(pluginID) {
-		return c.remote.Client(pluginID)
+func (c pluginClients) Client(ctx context.Context, m *manifest.Manifest) (*client.Client, error) {
+	switch {
+	case c.remote.Owns(m.ID):
+		return c.remote.Client(m.ID)
+	case c.host.Local(m.ID) || c.pool == nil || m.Runtime.Type != manifest.RuntimeHost:
+		return c.host.Client(m.ID)
+	default:
+		return c.pool.Client(ctx, m.ID, m.Version)
 	}
-	return c.host.Client(pluginID)
 }
+
+func (c pluginClients) OnThisNode(pluginID string) bool { return c.host.Local(pluginID) }
+
+// pluginDelegation fails a host plugin this node leaves to standalone
+// plugin hosts when there are none to leave it to. With hosts configured it
+// only logs: they may start later, and calls say which plugin is missing.
+type pluginDelegation struct {
+	host *host.Manager
+	pool *hostpool.Pool
+}
+
+func newPluginDelegation(h *host.Manager, pool *hostpool.Pool) *pluginDelegation {
+	return &pluginDelegation{host: h, pool: pool}
+}
+
+func (d *pluginDelegation) Name() string { return "plugin-hosts" }
+
+func (d *pluginDelegation) Activate(ctx context.Context, l *reconcile.Loaded) error {
+	m := l.Manifest
+	if m.Runtime.Type != manifest.RuntimeHost || d.host.Runs(m.Runtime.Kind) {
+		return nil
+	}
+	if d.pool == nil {
+		return fmt.Errorf("this node does not run %s plugins (WEKNORA_PLUGIN_EMBEDDED_KINDS) and no plugin host "+
+			"is configured; run weknora plugin-host with Redis and the same SYSTEM_AES_KEY", m.Runtime.Kind)
+	}
+	if !d.pool.Runs(ctx, m.ID, m.Version) {
+		logger.Infof(ctx, "[plugin] %s@%s waits for a plugin host that runs %s plugins",
+			m.ID, m.Version, m.Runtime.Kind)
+	}
+	return nil
+}
+
+func (d *pluginDelegation) Deactivate(context.Context, string) error { return nil }
 
 func newMCPServiceRepository(db *gorm.DB, plugins *activate.MCPServers) interfaces.MCPServiceRepository {
 	return plugins.Repository(repository.NewMCPServiceRepository(db))
@@ -146,6 +212,9 @@ func startPluginReconciler(
 	r *reconcile.Reconciler, hostManager *host.Manager, remoteManager *remote.Manager,
 	cleaner interfaces.ResourceCleaner,
 ) {
+	if kinds := hostManager.Kinds(); len(kinds) > 0 {
+		logger.Infof(context.Background(), "[plugin] this node runs %s host plugins", strings.Join(kinds, ", "))
+	}
 	hostManager.SetReporter(r)
 	remoteManager.SetReporter(r)
 	ctx, cancel := context.WithCancel(context.Background())

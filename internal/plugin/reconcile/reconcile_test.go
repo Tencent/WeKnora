@@ -226,3 +226,35 @@ func TestReconcileReloadsOnRuntimeTargetChange(t *testing.T) {
 		t.Fatalf("Loaded carries secret %q", got)
 	}
 }
+
+// A standalone plugin host loads host plugins only.
+func TestRuntimesLimitWhatANodeLoads(t *testing.T) {
+	ctx := context.Background()
+	repo, store, reg, act := plugintest.NewMemRepo(), &plugintest.MemStore{}, registry.New(), &recorder{}
+	r := New(Options{
+		Repo: repo, Store: store, Registry: reg, CacheDir: t.TempDir(), Activators: []Activator{act},
+		Runtimes: []manifest.RuntimeType{manifest.RuntimeHost}, Role: "plugin-host",
+	})
+	plugintest.Install(t, repo, store, plugintest.KitPackage(t, "1.0.0"), types.PluginStateEnabled)
+	if err := r.Reconcile(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if len(act.calls) != 0 || len(r.Loaded()) != 0 {
+		t.Fatalf("a declarative plugin was loaded: %v", act.calls)
+	}
+	if !strings.HasPrefix(r.NodeName(), "plugin-host:") {
+		t.Fatalf("node name = %s", r.NodeName())
+	}
+
+	// Accept filters on the manifest: nothing is loaded, nothing reported.
+	r = New(Options{
+		Repo: repo, Store: store, Registry: registry.New(), CacheDir: t.TempDir(), Activators: []Activator{act},
+		Accept: func(m *manifest.Manifest) bool { return m.Version != "1.0.0" },
+	})
+	if err := r.Reconcile(ctx); err != nil || len(r.Loaded()) != 0 {
+		t.Fatalf("an unaccepted plugin was loaded: %v", err)
+	}
+	if _, ok := r.Status("acme.kit"); ok {
+		t.Fatal("an unaccepted plugin has no status here")
+	}
+}

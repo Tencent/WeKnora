@@ -37,6 +37,9 @@ func (r *Reconciler) NodeName() string {
 	if host == "" {
 		host = "node"
 	}
+	if r.role != "" {
+		host = r.role + ":" + host
+	}
 	return host + "/" + r.instanceID[:8]
 }
 

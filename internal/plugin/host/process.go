@@ -51,6 +51,8 @@ const (
 type spec struct {
 	m   *manifest.Manifest
 	dir string // extracted package
+	// direct are hosts reached without the egress proxy.
+	direct []string
 }
 
 // Kinds of host plugin this host runs.
@@ -200,11 +202,11 @@ func (p *process) childEnv(network, socket, token string) []string {
 		"HTTPS_PROXY=" + p.proxy.URL(),
 		"http_proxy=" + p.proxy.URL(),
 		"https_proxy=" + p.proxy.URL(),
-		// The Host API is on this node's loopback; the proxy is for the
-		// outside world.
-		"NO_PROXY=127.0.0.1,localhost,::1",
-		"no_proxy=127.0.0.1,localhost,::1",
 	}
+	// The Host API is on this node's loopback, or on a host named direct;
+	// the proxy is for the outside world.
+	noProxy := strings.Join(append([]string{"127.0.0.1", "localhost", "::1"}, p.spec.direct...), ",")
+	env = append(env, "NO_PROXY="+noProxy, "no_proxy="+noProxy)
 	for _, k := range []string{"PATH", "LANG", "LC_ALL", "TZ", "SYSTEMROOT", "WINDIR"} {
 		if v, ok := os.LookupEnv(k); ok {
 			env = append(env, k+"="+v)

@@ -103,7 +103,7 @@ func (e *pluginEngine) FileTypes(bool) []string         { return e.fileTypes }
 func (e *pluginEngine) PluginID() string                { return e.m.ID }
 func (e *pluginEngine) DisplayNames() map[string]string { return e.names }
 func (e *pluginEngine) CheckAvailable(bool, map[string]string) (bool, string) {
-	if _, err := e.iv.clients.Client(e.m.ID); err != nil {
+	if _, err := e.iv.clients.Client(context.Background(), e.m); err != nil {
 		return false, err.Error()
 	}
 	return true, ""

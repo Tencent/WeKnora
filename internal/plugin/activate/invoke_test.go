@@ -36,7 +36,7 @@ func TestEnvelopeCarriesHostAccessOnlyForGrantedPlugins(t *testing.T) {
 	}
 
 	remote := *granted
-	remote.Runtime.Type = manifest.RuntimeRemote
+	remote.ID = "acme.remote"
 	if env, _ := iv.Envelope(ctx, &remote, nil); env.Context.Host != nil {
 		t.Fatal("a remote plugin must not be sent to this node's loopback address")
 	}

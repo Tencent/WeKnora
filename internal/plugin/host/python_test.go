@@ -128,3 +128,30 @@ func TestEntryName(t *testing.T) {
 		t.Fatal("this host runs binaries and python")
 	}
 }
+
+func TestKindsDecideWhereAPluginRuns(t *testing.T) {
+	ctx := context.Background()
+	l := install(t, "1.0.0", "")
+
+	embedded := NewManager()
+	embedded.SetKinds([]string{KindPython})
+	defer embedded.Close()
+	if err := embedded.Activate(ctx, l); err != nil || embedded.Local("acme.echo") {
+		t.Fatalf("an app node hands other kinds on: %v", err)
+	}
+
+	standalone := NewStandaloneManager([]string{KindPython})
+	defer standalone.Close()
+	if err := standalone.Activate(ctx, l); err == nil || !strings.Contains(err.Error(), "does not run binary") {
+		t.Fatalf("a standalone host refuses other kinds, got %v", err)
+	}
+
+	t.Setenv("WEKNORA_PLUGIN_EMBEDDED_KINDS", "none")
+	if got := KindsFromEnv("WEKNORA_PLUGIN_EMBEDDED_KINDS"); len(got) != 0 {
+		t.Fatalf("none = %v", got)
+	}
+	t.Setenv("WEKNORA_PLUGIN_EMBEDDED_KINDS", "binary, node")
+	if got := KindsFromEnv("WEKNORA_PLUGIN_EMBEDDED_KINDS"); len(got) != 1 || got[0] != KindBinary {
+		t.Fatalf("binary, node = %v", got)
+	}
+}

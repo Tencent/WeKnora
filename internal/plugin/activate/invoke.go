@@ -14,9 +14,13 @@ import (
 	"github.com/Tencent/WeKnora/pluginsdk/pluginapi"
 )
 
-// ClientSource reaches running code plugins (the node's plugin host).
+// ClientSource reaches running code plugins wherever they run: this node's
+// plugin host, a standalone plugin host, a remote service.
 type ClientSource interface {
-	Client(pluginID string) (*client.Client, error)
+	Client(ctx context.Context, m *manifest.Manifest) (*client.Client, error)
+	// OnThisNode reports whether a plugin runs on this node, where the
+	// loopback Host API address reaches WeKnora.
+	OnThisNode(pluginID string) bool
 }
 
 // Invoker is how the remote adapters call a code plugin: it finds the
@@ -29,7 +33,7 @@ type Invoker struct {
 	tenancy *tenancy.Service
 	plugins interfaces.PluginRepository
 	// tokens and hostURL give plugins granted Host API scopes a way back;
-	// remote plugins, off this node, use publicHostURL.
+	// plugins off this node (remote, on a plugin host) use publicHostURL.
 	tokens        TokenIssuer
 	hostURL       string
 	publicHostURL string
@@ -104,7 +108,7 @@ func (iv *Invoker) Envelope(
 	}
 	iv.mu.RLock()
 	t, plugins, tokens, hostURL := iv.tenancy, iv.plugins, iv.tokens, iv.hostURL
-	if m.Runtime.Type == manifest.RuntimeRemote {
+	if !iv.clients.OnThisNode(m.ID) {
 		hostURL = iv.publicHostURL
 	}
 	iv.mu.RUnlock()
@@ -160,7 +164,7 @@ func present(pluginID string, err error) error {
 func (iv *Invoker) Call(
 	ctx context.Context, m *manifest.Manifest, path string, instance map[string]any, input, out any,
 ) error {
-	c, err := iv.clients.Client(m.ID)
+	c, err := iv.clients.Client(ctx, m)
 	if err != nil {
 		return present(m.ID, err)
 	}
@@ -176,7 +180,7 @@ func (iv *Invoker) Stream(
 	ctx context.Context, m *manifest.Manifest, path string, instance map[string]any, input any,
 	fn func(pluginapi.Event) error,
 ) ([]byte, error) {
-	c, err := iv.clients.Client(m.ID)
+	c, err := iv.clients.Client(ctx, m)
 	if err != nil {
 		return nil, present(m.ID, err)
 	}

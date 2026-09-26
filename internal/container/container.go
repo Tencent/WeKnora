@@ -74,7 +74,6 @@ import (
 	"github.com/Tencent/WeKnora/internal/plugin/activate"
 	pluginbuiltin "github.com/Tencent/WeKnora/internal/plugin/builtin"
 	plugindriver "github.com/Tencent/WeKnora/internal/plugin/driver"
-	pluginhost "github.com/Tencent/WeKnora/internal/plugin/host"
 	pluginmanifest "github.com/Tencent/WeKnora/internal/plugin/manifest"
 	"github.com/Tencent/WeKnora/internal/plugin/reconcile"
 	pluginregistry "github.com/Tencent/WeKnora/internal/plugin/registry"
@@ -168,8 +167,10 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(activate.NewMCPServers))
 	must(container.Provide(activate.NewSkills))
 	must(container.Provide(activate.NewModelVendors))
-	must(container.Provide(pluginhost.NewManager))
+	must(container.Provide(newPluginHostManager))
 	must(container.Provide(pluginremote.NewManager))
+	must(container.Provide(newPluginHostPool))
+	must(container.Provide(newPluginDelegation))
 	must(container.Provide(newPluginInvoker))
 	must(container.Provide(repository.NewPluginKVRepository))
 	must(container.Provide(newPluginHostAPI))
