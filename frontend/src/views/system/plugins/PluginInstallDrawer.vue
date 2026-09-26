@@ -2,17 +2,30 @@
   <SettingDrawer
     :visible="visible"
     :title="tenant ? t('pluginCenter.own.title') : t('pluginAdmin.install.title')"
-    :description="tenant ? t('pluginCenter.own.description') : t('pluginAdmin.install.description')"
     icon="download"
     width="640px"
-    :confirm-text="confirmText"
-    :confirm-loading="busy"
-    :confirm-disabled="!canConfirm"
     @update:visible="(v: boolean) => emit('update:visible', v)"
-    @confirm="onConfirm"
   >
-    <section class="setting-drawer__section">
-      <h4 class="setting-drawer__section-title">{{ t('pluginAdmin.install.sourceSection') }}</h4>
+    <template #header-extra>
+      <ol class="install-steps">
+        <li
+          v-for="(s, i) in STEPS"
+          :key="s"
+          class="install-steps__step"
+          :class="{ 'is-current': step === s, 'is-done': STEPS.indexOf(step) > i }"
+        >
+          <span class="install-steps__n">
+            <t-icon v-if="STEPS.indexOf(step) > i" name="check" />
+            <template v-else>{{ i + 1 }}</template>
+          </span>
+          {{ t(`pluginAdmin.install.steps.${s}`) }}
+        </li>
+      </ol>
+    </template>
+
+    <!-- 1. Choose a package -->
+    <section v-if="step === 'source'" class="setting-drawer__section">
+      <p class="form-desc form-desc--lead">{{ tenant ? t('pluginCenter.own.description') : t('pluginAdmin.install.description') }}</p>
       <div class="option-chips">
         <button
           v-for="m in modes"
@@ -27,25 +40,36 @@
         </button>
       </div>
 
-      <div v-if="mode === 'upload'" class="form-item">
-        <label class="form-label required">{{ t('pluginAdmin.install.fileLabel') }}</label>
-        <div class="package-picker">
-          <t-button variant="outline" :disabled="busy" @click="fileInput?.click()">
-            <template #icon><t-icon name="upload" /></template>
-            {{ t('pluginAdmin.install.chooseFile') }}
-          </t-button>
-          <span class="package-picker__name">{{ file?.name ?? t('pluginAdmin.install.noFile') }}</span>
-          <input ref="fileInput" type="file" accept=".wkp,.zip" hidden @change="onFile" />
-        </div>
-        <p class="form-desc">{{ t('pluginAdmin.install.fileHint') }}</p>
-      </div>
+      <button
+        v-if="mode === 'upload'"
+        type="button"
+        class="drop-zone"
+        :class="{ 'is-over': dragOver, 'is-busy': busy }"
+        :disabled="busy"
+        @click="fileInput?.click()"
+        @dragover.prevent="dragOver = true"
+        @dragleave.prevent="dragOver = false"
+        @drop.prevent="onDrop"
+      >
+        <span class="drop-zone__icon">
+          <t-loading v-if="busy" size="small" />
+          <t-icon v-else name="upload" />
+        </span>
+        <span class="drop-zone__title">
+          {{ busy ? t('pluginAdmin.install.inspecting') : file?.name ?? t('pluginAdmin.install.dropTitle') }}
+        </span>
+        <span class="drop-zone__hint">{{ t('pluginAdmin.install.dropHint') }}</span>
+        <input ref="fileInput" type="file" accept=".wkp,.zip" hidden @change="onFile" />
+      </button>
 
       <div v-else-if="mode === 'market'" class="form-item">
         <p v-if="marketLoading" class="form-desc">{{ t('pluginAdmin.market.loading') }}</p>
         <t-alert v-else-if="marketError" theme="error" :message="marketError" />
-        <p v-else-if="market && !market.configured" class="form-desc">{{ t('pluginAdmin.market.notConfigured') }}</p>
+        <p v-else-if="market && !market.configured" class="notice">{{ t('pluginAdmin.market.notConfigured') }}</p>
         <template v-else-if="market">
-          <t-input v-model="marketQuery" clearable :placeholder="t('pluginAdmin.market.search')" />
+          <t-input v-model="marketQuery" clearable :placeholder="t('pluginAdmin.market.search')">
+            <template #prefix-icon><t-icon name="search" /></template>
+          </t-input>
           <p v-if="marketList.length === 0" class="form-desc">{{ t('pluginAdmin.market.empty') }}</p>
           <ul v-else class="market-list">
             <li
@@ -54,20 +78,19 @@
               class="market-list__item"
               :class="{ 'is-picked': picked?.id === p.id }"
             >
-              <div class="market-list__badge" :class="{ 'market-list__badge--logo': !!p.icon }">
-                <img v-if="p.icon" :src="p.icon" alt="" class="market-list__badge-img" />
-                <template v-else>{{ localizedText(p.name, locale).trim().charAt(0).toUpperCase() }}</template>
-              </div>
+              <span class="market-list__badge" :class="{ 'market-list__badge--logo': !!p.icon }">
+                <img v-if="p.icon" :src="p.icon" alt="" />
+                <t-icon v-else name="extension" />
+              </span>
               <div class="market-list__text">
                 <div class="market-list__name">
                   {{ localizedText(p.name, locale) }}
-                  <t-tag v-if="p.installedVersion" size="small" variant="light">
+                  <span v-if="p.installedVersion" class="market-list__installed">
                     {{ t('pluginAdmin.market.installed', { version: p.installedVersion }) }}
-                  </t-tag>
+                  </span>
                 </div>
                 <div class="market-list__meta">
-                  {{ p.id }}<template v-if="p.latest"> · v{{ p.latest.version }}</template>
-                  · {{ p.publisher?.name || p.publisher?.id }}
+                  {{ p.publisher?.name || p.publisher?.id }}<template v-if="p.latest"> · v{{ p.latest.version }}</template>
                 </div>
                 <p v-if="localizedText(p.description, locale)" class="market-list__desc">
                   {{ localizedText(p.description, locale) }}
@@ -95,74 +118,86 @@
           v-model="url"
           :disabled="busy"
           placeholder="https://example.com/acme-search-1.0.0.wkp"
-          @change="preview = null"
+          @enter="inspect"
         />
         <p class="form-desc">{{ t('pluginAdmin.install.urlHint') }}</p>
       </div>
     </section>
 
-    <section v-if="preview" class="setting-drawer__section">
-      <h4 class="setting-drawer__section-title">{{ t('pluginAdmin.install.reviewSection') }}</h4>
-      <div class="review-head">
-        <div class="review-head__badge" :class="{ 'review-head__badge--logo': !!icon }">
-          <img v-if="icon" :src="icon" alt="" class="review-head__badge-img" />
-          <template v-else>{{ initial }}</template>
+    <!-- 2. Review -->
+    <template v-else-if="step === 'review' && preview">
+      <section class="setting-drawer__section">
+        <div class="review-hero">
+          <PluginBadge :manifest="preview.manifest" size="lg" />
+          <div class="review-hero__text">
+            <div class="review-hero__name">{{ localizedText(preview.manifest.name, locale) }}</div>
+            <div class="review-hero__meta">
+              {{ preview.manifest.publisher.name || preview.manifest.publisher.id }} · {{ preview.manifest.id }} · {{ formatBytes(preview.size) }}
+            </div>
+          </div>
+          <div class="review-hero__change" :class="`is-${preview.change}`">
+            <strong>{{ t(`pluginAdmin.install.changeShort.${preview.change}`) }}</strong>
+            <span>
+              <template v-if="preview.installedVersion && preview.change !== 'reinstall'">v{{ preview.installedVersion }} → </template>v{{ preview.manifest.version }}
+            </span>
+          </div>
         </div>
-        <div class="review-head__text">
-          <div class="review-head__name">
-            {{ localizedText(preview.manifest.name, locale) }}
-            <t-tag size="small" variant="light" :theme="changeTheme">
-              {{ t(`pluginAdmin.change.${preview.change}`, { from: preview.installedVersion ?? '' }) }}
-            </t-tag>
-            <t-tag size="small" variant="light" :theme="trustTheme(preview.trust.level)">
-              {{ t(`pluginAdmin.trust.${preview.trust.level}`) }}
-            </t-tag>
-          </div>
-          <div class="review-head__meta">
-            {{ preview.manifest.id }} · v{{ preview.manifest.version }} · {{ formatBytes(preview.size) }}
-          </div>
-          <div class="review-head__meta">
-            {{ t('pluginAdmin.publisher') }}: {{ preview.manifest.publisher.name || preview.manifest.publisher.id }}
-          </div>
-          <div class="review-head__meta">
-            {{ t(`pluginAdmin.trust.${signature.key}`, { key: signature.keyId }) }}
-          </div>
-          <p v-if="description" class="review-head__desc">{{ description }}</p>
-        </div>
-      </div>
+        <p v-if="description" class="review-about">{{ description }}</p>
+        <dl class="review-facts">
+          <dt>{{ t('pluginAdmin.install.trustRow') }}</dt>
+          <dd>
+            <span class="trust" :class="`trust--${preview.trust.level}`">{{ t(`pluginAdmin.trust.${preview.trust.level}`) }}</span>
+            <span class="review-facts__muted">{{ t(`pluginAdmin.trust.${signature.key}`, { key: signature.keyId }) }}</span>
+          </dd>
+          <dt>{{ t('pluginAdmin.detail.runtime') }}</dt>
+          <dd>{{ runtimeLabel(preview.manifest.runtime?.type ?? '') }}</dd>
+          <template v-if="preview.manifest.engines?.weknora">
+            <dt>{{ t('pluginAdmin.detail.engines') }}</dt>
+            <dd><code>{{ preview.manifest.engines.weknora }}</code></dd>
+          </template>
+          <dt>{{ t('pluginAdmin.install.digest') }}</dt>
+          <dd class="review-facts__digest">
+            <code :title="preview.digest">{{ shortDigest(preview.digest) }}…</code>
+            <t-button size="small" variant="text" theme="primary" @click="copyWithToast(preview.digest, 'pluginAdmin.secret.copied')">
+              {{ t('pluginAdmin.secret.copy') }}
+            </t-button>
+          </dd>
+        </dl>
+      </section>
 
-      <div class="review-block">
-        <div class="review-block__title">{{ t('pluginAdmin.contributions') }}</div>
-        <ul class="review-list">
-          <li v-for="c in contributions" :key="c.id">
-            <span class="review-list__point">{{ t(`pluginCenter.points.${c.point}`) }}</span>
-            <span class="review-list__name">{{ c.name }}</span>
-            <code v-if="c.detail" class="review-list__detail">{{ c.detail }}</code>
-          </li>
-        </ul>
-      </div>
+      <section class="setting-drawer__section">
+        <h4 class="setting-drawer__section-title">{{ t('pluginAdmin.contributions') }}</h4>
+        <PluginCapabilityList :manifest="preview.manifest" show="detail" />
+      </section>
 
-      <div class="review-block">
-        <div class="review-block__title">{{ t('pluginAdmin.permissions') }}</div>
+      <section class="setting-drawer__section">
+        <h4 class="setting-drawer__section-title">{{ t('pluginAdmin.permissions') }}</h4>
         <p v-if="permissions.length === 0 && hosts.length === 0" class="form-desc">
           {{ t('pluginAdmin.install.noPermissions') }}
         </p>
-        <ul v-else class="review-list">
+        <ul v-else class="perm-list">
           <li v-for="h in hosts" :key="`host:${h}`">
-            <span class="review-list__point">{{ t('pluginAdmin.permission.remote') }}</span>
-            <code class="review-list__detail">{{ h }}</code>
+            <span class="perm-list__kind">{{ t('pluginAdmin.permission.remote') }}</span>
+            <code>{{ h }}</code>
           </li>
-          <li v-for="p in permissions" :key="`${p.kind}:${p.value}`">
-            <span class="review-list__point">{{ t(`pluginAdmin.permission.${p.kind}`) }}</span>
-            <strong v-if="p.kind === 'egress' && p.value === EGRESS_ANY_HOST" class="review-list__warn">
-              {{ t('pluginAdmin.permission.anyHost') }}
-            </strong>
-            <code v-else class="review-list__detail">{{ p.value }}</code>
+          <li
+            v-for="p in permissions"
+            :key="`${p.kind}:${p.value}`"
+            :class="{ 'is-risky': p.kind === 'egress' && p.value === EGRESS_ANY_HOST }"
+          >
+            <template v-if="p.kind === 'egress' && p.value === EGRESS_ANY_HOST">
+              <span class="perm-list__kind"><t-icon name="error-circle" /> {{ t('pluginAdmin.permission.anyHost') }}</span>
+              <span>{{ t('pluginAdmin.install.anyHostHint') }}</span>
+            </template>
+            <template v-else>
+              <span class="perm-list__kind">{{ t(`pluginAdmin.permission.${p.kind}`) }}</span>
+              <code>{{ p.value }}</code>
+            </template>
           </li>
         </ul>
-      </div>
+      </section>
 
-      <div v-if="isRemote" class="form-item">
+      <section v-if="isRemote" class="setting-drawer__section">
         <label class="form-label" :class="{ required: preview.change === 'install' }">
           {{ t('pluginAdmin.install.remoteUrlLabel') }}
         </label>
@@ -171,31 +206,48 @@
           {{ t('pluginAdmin.install.remoteUrlHint') }}
           <template v-if="preview.change !== 'install'">{{ t('pluginAdmin.install.remoteUrlKeep') }}</template>
         </p>
-      </div>
+      </section>
 
-      <t-alert
-        v-if="needsConfig"
-        theme="info"
-        class="review-alert"
-        :message="t('pluginAdmin.install.configNotice')"
-      />
-      <t-alert
-        theme="warning"
-        class="review-alert"
-        :message="tenant ? t('pluginCenter.own.notice') : t('pluginAdmin.install.tenantNotice')"
-      />
-      <p class="form-desc">{{ t('pluginAdmin.install.digest') }}: <code>{{ preview.digest }}</code></p>
+      <p class="notice">{{ notice }}</p>
+    </template>
+
+    <!-- 3. Done -->
+    <section v-else-if="step === 'done' && done" class="install-done">
+      <span class="install-done__icon"><t-icon name="check" /></span>
+      <div class="install-done__title">{{ t('pluginAdmin.install.done', { name: done.name }) }}</div>
+      <p class="install-done__hint">{{ doneHint }}</p>
     </section>
+
+    <template #footer-left>
+      <t-button v-if="step === 'review'" variant="outline" :disabled="busy" @click="back">
+        {{ t('pluginAdmin.install.back') }}
+      </t-button>
+    </template>
+    <template #footer-right>
+      <template v-if="step === 'done'">
+        <t-button theme="primary" @click="emit('update:visible', false)">{{ t('pluginAdmin.install.finish') }}</t-button>
+      </template>
+      <template v-else>
+        <t-button variant="outline" :disabled="busy" @click="emit('update:visible', false)">{{ t('common.cancel') }}</t-button>
+        <t-button v-if="step === 'source'" theme="primary" :loading="busy" :disabled="!source || busy" @click="inspect">
+          {{ t('pluginAdmin.install.next') }}
+        </t-button>
+        <t-button v-else theme="primary" :loading="busy" :disabled="!canConfirm" @click="onConfirm">
+          {{ confirmText }}
+        </t-button>
+      </template>
+    </template>
   </SettingDrawer>
 </template>
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { pluginIconUrl } from '@/extensions/pluginIcon'
 import { MessagePlugin } from 'tdesign-vue-next'
 
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
+import PluginBadge from '@/components/plugins/PluginBadge.vue'
+import PluginCapabilityList from '@/components/plugins/PluginCapabilityList.vue'
 import { tenantPackages } from '@/api/tenantPlugins'
 import {
   listMarketPlugins,
@@ -206,11 +258,11 @@ import {
   type PackageSource,
   type PluginPreview,
 } from '@/api/system/plugins'
+import { copyWithToast } from '@/utils/clipboard'
 import { localizedText } from '@/utils/localizedText'
 
 import {
   EGRESS_ANY_HOST,
-  contributionLines,
   filterMarket,
   marketAction,
   formatBytes,
@@ -219,8 +271,8 @@ import {
   permissionLines,
   remoteHosts,
   remoteUrlReady,
+  shortDigest,
   trustNote,
-  trustTheme,
 } from '../pluginManagementState'
 import { hasTenantConfig } from '../../settings/pluginCenterState'
 
@@ -235,7 +287,11 @@ const emit = defineEmits<{
   installed: [plugin: InstalledPlugin]
 }>()
 
-const { t, locale } = useI18n()
+const { t, te, locale } = useI18n()
+const runtimeLabel = (rt: string) => (te(`pluginAdmin.runtime.${rt}`) ? t(`pluginAdmin.runtime.${rt}`) : rt)
+
+const STEPS = ['source', 'review', 'done'] as const
+type Step = (typeof STEPS)[number]
 
 type Mode = 'upload' | 'url' | 'market'
 const mode = ref<Mode>('upload')
@@ -246,7 +302,9 @@ const file = ref<File | null>(null)
 const url = ref('')
 const remoteUrl = ref('')
 const fileInput = ref<HTMLInputElement | null>(null)
+const dragOver = ref(false)
 const preview = ref<PluginPreview | null>(null)
+const done = ref<{ name: string; needsConfig: boolean } | null>(null)
 const busy = ref(false)
 const market = ref<MarketListing | null>(null)
 const marketLoading = ref(false)
@@ -254,6 +312,8 @@ const marketError = ref('')
 const marketQuery = ref('')
 const picked = ref<MarketPlugin | null>(null)
 const marketList = computed(() => filterMarket(market.value?.plugins ?? [], marketQuery.value, locale.value))
+
+const step = computed<Step>(() => (done.value ? 'done' : preview.value ? 'review' : 'source'))
 
 watch(
   () => props.visible,
@@ -264,6 +324,7 @@ watch(
     url.value = ''
     remoteUrl.value = ''
     preview.value = null
+    done.value = null
     picked.value = null
     marketQuery.value = ''
     market.value = null
@@ -275,6 +336,11 @@ function setMode(m: Mode) {
   preview.value = null
   picked.value = null
   if (m === 'market' && !market.value && !marketLoading.value) void loadMarket()
+}
+
+function back() {
+  preview.value = null
+  picked.value = null
 }
 
 async function loadMarket() {
@@ -296,12 +362,22 @@ function pick(p: MarketPlugin) {
   void inspect()
 }
 
+function choose(f: File | null) {
+  file.value = f
+  preview.value = null
+  if (f) void inspect()
+}
+
 function onFile(e: Event) {
   const input = e.target as HTMLInputElement
-  file.value = input.files?.[0] ?? null
-  preview.value = null
+  choose(input.files?.[0] ?? null)
   input.value = ''
-  if (file.value) void inspect()
+}
+
+function onDrop(e: DragEvent) {
+  dragOver.value = false
+  if (busy.value) return
+  choose(e.dataTransfer?.files?.[0] ?? null)
 }
 
 const source = computed<PackageSource | null>(() => {
@@ -315,34 +391,37 @@ const source = computed<PackageSource | null>(() => {
 
 const isRemote = computed(() => preview.value?.manifest.runtime?.type === 'remote')
 const canConfirm = computed(
-  () => !!source.value && !busy.value && (!preview.value || remoteUrlReady(preview.value, remoteUrl.value)),
+  () => !!source.value && !busy.value && !!preview.value && remoteUrlReady(preview.value, remoteUrl.value),
 )
-const confirmText = computed(() =>
-  preview.value ? t(`pluginAdmin.install.confirm.${preview.value.change}`) : t('pluginAdmin.install.inspect'),
-)
+const confirmText = computed(() => {
+  const p = preview.value
+  if (!p) return ''
+  if (p.change === 'upgrade' || p.change === 'downgrade') {
+    return t(`pluginAdmin.install.confirmTo.${p.change}`, { version: p.manifest.version })
+  }
+  return t(`pluginAdmin.install.confirm.${p.change}`)
+})
 
-const contributions = computed(() => (preview.value ? contributionLines(preview.value.manifest, locale.value) : []))
 const permissions = computed(() => permissionLines(preview.value?.manifest.permissions))
 const hosts = computed(() => (preview.value ? remoteHosts(preview.value.manifest) : []))
 const description = computed(() => (preview.value ? localizedText(preview.value.manifest.description, locale.value) : ''))
-const icon = computed(() => pluginIconUrl(preview.value?.manifest))
 const signature = computed(() => trustNote(preview.value?.trust ?? { level: 'community' }))
-const initial = computed(() =>
-  (preview.value ? localizedText(preview.value.manifest.name, locale.value) : '?').trim().charAt(0).toUpperCase(),
-)
 const needsConfig = computed(
   () => !!preview.value && (hasSystemConfig(preview.value.manifest) || hasTenantConfig(preview.value.manifest)),
 )
-const changeTheme = computed(() => {
-  switch (preview.value?.change) {
-    case 'upgrade':
-      return 'success'
-    case 'downgrade':
-      return 'warning'
-    default:
-      return 'primary'
-  }
-})
+// One sentence per fact, joined without the gap a template line break leaves.
+const joined = (...parts: Array<string | false>) => parts.filter(Boolean).join(locale.value.startsWith('zh') || locale.value.startsWith('ja') ? '' : ' ')
+const notice = computed(() =>
+  joined(
+    tenant.value ? t('pluginCenter.own.notice') : t('pluginAdmin.install.tenantNotice'),
+    needsConfig.value && t('pluginAdmin.install.configNotice'),
+  ),
+)
+const doneHint = computed(() =>
+  tenant.value
+    ? t('pluginCenter.own.notice')
+    : joined(t('pluginAdmin.install.doneHint'), !!done.value?.needsConfig && t('pluginAdmin.install.doneConfig')),
+)
 
 async function inspect() {
   if (!source.value) return
@@ -359,11 +438,7 @@ async function inspect() {
 }
 
 async function onConfirm() {
-  if (!preview.value) {
-    await inspect()
-    return
-  }
-  if (!source.value) return
+  if (!preview.value || !source.value) return
   busy.value = true
   try {
     const res = await api.value.install(
@@ -371,9 +446,11 @@ async function onConfirm() {
       preview.value.digest,
       isRemote.value ? remoteUrl.value.trim() : undefined,
     )
-    MessagePlugin.success(t('pluginAdmin.install.done', { name: localizedText(preview.value.manifest.name, locale.value) }))
+    done.value = {
+      name: localizedText(preview.value.manifest.name, locale.value),
+      needsConfig: hasSystemConfig(preview.value.manifest),
+    }
     emit('installed', res.data)
-    emit('update:visible', false)
   } catch (e: any) {
     MessagePlugin.error(e?.message || t('pluginAdmin.install.failed'))
   } finally {
@@ -383,37 +460,68 @@ async function onConfirm() {
 </script>
 
 <style lang="less" scoped>
-@import (reference) '@/components/css/provider-card.less';
+@import (reference) '@/components/css/option-chips.less';
+
+.install-steps {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--app-text-md);
+  color: var(--td-text-color-placeholder);
+
+  &__step {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    white-space: nowrap;
+
+    & + &::before {
+      content: '';
+      width: 32px;
+      height: 1px;
+      margin-right: 4px;
+      background: var(--td-component-stroke);
+    }
+
+    &.is-current {
+      color: var(--td-text-color-primary);
+      font-weight: 500;
+    }
+
+    &.is-done {
+      color: var(--td-brand-color);
+    }
+  }
+
+  &__n {
+    width: 20px;
+    height: 20px;
+    display: inline-grid;
+    place-items: center;
+    border: 1px solid currentColor;
+    border-radius: 50%;
+    font-size: var(--app-text-xs);
+    font-weight: 400;
+    line-height: 1;
+
+    .is-current & {
+      border-color: var(--td-brand-color);
+      background: var(--td-brand-color);
+      color: var(--td-text-color-anti);
+    }
+  }
+}
 
 .option-chips {
-  display: inline-flex;
+  .option-chips();
   align-self: flex-start;
-  gap: 4px;
-  padding: 3px;
-  border-radius: var(--app-radius-md);
-  background: var(--td-bg-color-secondarycontainer);
 }
 
 .option-chip {
-  border: none;
-  background: transparent;
-  color: var(--td-text-color-secondary);
-  font: inherit;
-  font-size: var(--app-text-sm);
-  padding: 5px 12px;
-  border-radius: var(--app-radius-sm);
-  cursor: pointer;
-
-  &--active {
-    background: var(--td-bg-color-container);
-    color: var(--td-brand-color);
-    font-weight: 500;
-    box-shadow: var(--td-shadow-1);
-  }
-
-  &:disabled {
-    cursor: not-allowed;
-  }
+  .option-chip();
 }
 
 .form-label {
@@ -436,181 +544,339 @@ async function onConfirm() {
   line-height: 1.5;
   color: var(--td-text-color-placeholder);
   word-break: break-all;
+
+  &--lead {
+    margin: 0;
+    font-size: var(--app-text-md);
+    color: var(--td-text-color-secondary);
+    word-break: normal;
+  }
 }
 
-.package-picker {
+.drop-zone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  padding: 36px 16px;
+  border: 1px dashed var(--td-component-border);
+  border-radius: var(--app-radius-lg);
+  background: none;
+  font: inherit;
+  cursor: pointer;
+  transition: border-color var(--app-motion-fast) ease, background var(--app-motion-fast) ease;
+
+  &:hover:not(:disabled),
+  &.is-over {
+    border-color: var(--td-brand-color);
+    background: var(--td-brand-color-light);
+  }
+
+  &:disabled {
+    cursor: progress;
+  }
+
+  &__icon {
+    width: 36px;
+    height: 36px;
+    display: grid;
+    place-items: center;
+    margin-bottom: 6px;
+    border-radius: 50%;
+    background: var(--td-brand-color-1);
+    color: var(--td-brand-color);
+    font-size: var(--app-text-2xl);
+  }
+
+  &__title {
+    font-size: var(--app-text-base);
+    font-weight: 500;
+    color: var(--td-text-color-primary);
+  }
+
+  &__hint {
+    font-size: var(--app-text-md);
+    color: var(--td-text-color-secondary);
+  }
+}
+
+.review-hero {
   display: flex;
   align-items: center;
-  gap: 10px;
-  min-width: 0;
-
-  &__name {
-    font-size: var(--app-text-sm);
-    color: var(--td-text-color-secondary);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-}
-
-.review-head {
-  display: flex;
   gap: 12px;
-
-  &__badge {
-    .provider-card-badge();
-    .provider-card-badge-color(#0052d9);
-  }
-
-  &__badge-img {
-    .provider-card-badge-img();
-  }
+  padding: 16px;
+  border: 1px solid var(--td-component-stroke);
+  border-radius: var(--app-radius-lg);
 
   &__text {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
+    flex: 1;
     min-width: 0;
   }
 
   &__name {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-size: var(--app-text-lg);
+    font-size: var(--app-text-xl);
     font-weight: 600;
     color: var(--td-text-color-primary);
   }
 
   &__meta {
-    font-size: var(--app-text-xs);
+    margin-top: 2px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: var(--app-text-md);
+    color: var(--td-text-color-secondary);
+  }
+
+  &__change {
+    flex: none;
+    text-align: right;
+    font-size: var(--app-text-md);
+    color: var(--td-text-color-secondary);
+
+    strong {
+      display: block;
+      font-weight: 500;
+      color: var(--td-brand-color);
+    }
+
+    &.is-downgrade strong {
+      color: var(--td-warning-color);
+    }
+  }
+}
+
+.review-about {
+  margin: 0;
+  font-size: var(--app-text-md);
+  line-height: 1.6;
+  color: var(--td-text-color-secondary);
+}
+
+.review-facts {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 10px 20px;
+  margin: 0;
+  font-size: var(--app-text-md);
+
+  dt {
+    color: var(--td-text-color-secondary);
+  }
+
+  dd {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 0;
+    min-width: 0;
+    color: var(--td-text-color-primary);
+  }
+
+  code {
     font-family: var(--app-font-family-mono);
+    font-size: var(--app-text-sm);
+  }
+
+  &__muted {
     color: var(--td-text-color-placeholder);
   }
 
-  &__desc {
-    margin: 4px 0 0;
-    font-size: var(--app-text-sm);
-    color: var(--td-text-color-secondary);
+  &__digest {
+    code {
+      color: var(--td-text-color-secondary);
+    }
+
+    .t-button {
+      margin: -4px 0;
+    }
   }
 }
 
-.review-block {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
+.trust {
+  &--official {
+    color: var(--td-success-color);
+  }
 
-  &__title {
-    font-size: var(--app-text-sm);
-    font-weight: 500;
-    color: var(--td-text-color-primary);
+  &--verified {
+    color: var(--td-brand-color);
   }
 }
 
-.review-list {
+.perm-list {
   margin: 0;
   padding: 0;
   list-style: none;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
+  border: 1px solid var(--td-component-stroke);
+  border-radius: var(--app-radius-md);
 
   li {
     display: flex;
-    align-items: baseline;
-    flex-wrap: wrap;
-    gap: 8px;
-    font-size: var(--app-text-sm);
-  }
-
-  &__point {
-    flex: none;
-    font-size: var(--app-text-xs);
-    color: var(--td-text-color-secondary);
-    background: var(--td-bg-color-secondarycontainer);
-    border-radius: var(--app-radius-xs);
-    padding: 1px 6px;
-  }
-
-  &__name {
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 12px;
+    font-size: var(--app-text-md);
     color: var(--td-text-color-primary);
+
+    & + li {
+      border-top: 1px solid var(--td-component-stroke);
+    }
+
+    code {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-family: var(--app-font-family-mono);
+      font-size: var(--app-text-sm);
+      color: var(--td-text-color-secondary);
+    }
+
+    &.is-risky {
+      background: var(--td-warning-color-1);
+      color: var(--td-text-color-secondary);
+
+      .perm-list__kind {
+        color: var(--td-warning-color-7);
+        font-weight: 500;
+      }
+    }
   }
 
-  &__detail {
-    font-size: var(--app-text-xs);
-    color: var(--td-text-color-placeholder);
-    word-break: break-all;
-  }
-
-  &__warn {
-    font-size: var(--app-text-sm);
-    font-weight: 500;
-    color: var(--td-warning-color);
+  &__kind {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    flex: none;
   }
 }
 
-.review-alert {
-  margin-top: 4px;
+// One neutral note at the end of the review, not a stack of alerts.
+.notice {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: var(--app-radius-md);
+  background: var(--td-bg-color-secondarycontainer);
+  font-size: var(--app-text-md);
+  line-height: 1.6;
+  color: var(--td-text-color-secondary);
+}
+
+.install-done {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 48px 24px;
+  text-align: center;
+
+  &__icon {
+    width: 48px;
+    height: 48px;
+    display: grid;
+    place-items: center;
+    margin-bottom: 8px;
+    border-radius: 50%;
+    background: var(--td-success-color-1);
+    color: var(--td-success-color);
+    font-size: var(--app-text-3xl);
+  }
+
+  &__title {
+    font-size: var(--app-text-xl);
+    font-weight: 600;
+    color: var(--td-text-color-primary);
+  }
+
+  &__hint {
+    max-width: 420px;
+    margin: 0;
+    font-size: var(--app-text-md);
+    line-height: 1.6;
+    color: var(--td-text-color-secondary);
+  }
 }
 
 .market-list {
   margin: 8px 0 0;
   padding: 0;
   list-style: none;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
   max-height: 420px;
   overflow-y: auto;
+  border: 1px solid var(--td-component-stroke);
+  border-radius: var(--app-radius-md);
 
   &__item {
     display: flex;
     align-items: flex-start;
     gap: 10px;
-    padding: 10px;
-    border: 1px solid var(--td-component-stroke);
-    border-radius: var(--app-radius-md);
+    padding: 12px;
+
+    & + & {
+      border-top: 1px solid var(--td-component-stroke);
+    }
 
     &.is-picked {
-      border-color: var(--td-brand-color);
+      background: var(--td-brand-color-light);
     }
   }
 
   &__badge {
-    .provider-card-badge();
-    .provider-card-badge-color(#0052d9);
-  }
+    flex: none;
+    width: 32px;
+    height: 32px;
+    display: grid;
+    place-items: center;
+    border-radius: var(--app-radius-md);
+    background: var(--td-bg-color-secondarycontainer);
+    color: var(--td-text-color-secondary);
+    font-size: var(--app-text-xl);
 
-  &__badge-img {
-    .provider-card-badge-img();
+    &--logo {
+      background: var(--td-bg-color-container);
+      border: 1px solid var(--td-component-stroke);
+    }
+
+    img {
+      width: 20px;
+      height: 20px;
+      object-fit: contain;
+    }
   }
 
   &__text {
     flex: 1;
     min-width: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
   }
 
   &__name {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 8px;
+    font-size: var(--app-text-md);
     font-weight: 500;
     color: var(--td-text-color-primary);
   }
 
+  &__installed {
+    font-size: var(--app-text-sm);
+    font-weight: 400;
+    color: var(--td-text-color-placeholder);
+  }
+
   &__meta {
-    font-size: var(--app-text-xs);
-    font-family: var(--app-font-family-mono);
+    margin-top: 2px;
+    font-size: var(--app-text-sm);
     color: var(--td-text-color-placeholder);
   }
 
   &__desc,
   &__warn {
-    margin: 2px 0 0;
+    margin: 4px 0 0;
     font-size: var(--app-text-sm);
+    line-height: 1.5;
     color: var(--td-text-color-secondary);
   }
 

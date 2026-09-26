@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 
 from weknora_plugin import ErrorCode, Plugin, PluginError, UIResponse, WebhookResponse
 
-plugin = Plugin("weknora-examples.activity", "1.0.0")
+plugin = Plugin("weknora-examples.activity", "1.1.1")
 
 FEED_KEY = "feed"
 MAX_ENTRIES = 100

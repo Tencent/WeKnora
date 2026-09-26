@@ -1,23 +1,6 @@
-:root {
-  --fg: var(--wk-text-color-primary, #1f2329);
-  --muted: var(--wk-text-color-secondary, #646a73);
-  --line: var(--wk-component-border, #dee0e3);
-  --card: var(--wk-bg-color-container, #fff);
-  --brand: var(--wk-brand-color, #0052d9);
-  --danger: var(--wk-error-color, #d54941);
-  --ok: var(--wk-success-color, #2ba471);
-  --radius: var(--wk-radius-default, 6px);
-}
-:root[data-theme='dark'] { color-scheme: dark; }
-body { margin: 0; font: 14px/1.5 var(--wk-font-family, system-ui, sans-serif); color: var(--fg); background: transparent; }
-main { padding: 4px 2px 12px; }
-.bar { display: flex; justify-content: flex-end; margin-bottom: 8px; }
-button { padding: 4px 12px; font: inherit; border-radius: var(--radius); cursor: pointer; border: 1px solid var(--line); background: var(--card); color: var(--fg); }
-.empty { color: var(--muted); padding: 24px 0; text-align: center; }
-ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
-li { display: flex; gap: 10px; align-items: baseline; padding: 8px 12px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--card); }
-.kind { flex: none; font-size: 12px; padding: 0 6px; border-radius: 4px; background: color-mix(in srgb, var(--brand) 12%, transparent); color: var(--brand); }
-.kind.failed, .kind.deleted { color: var(--danger); background: color-mix(in srgb, var(--danger) 12%, transparent); }
-.kind.ingested { color: var(--ok); background: color-mix(in srgb, var(--ok) 12%, transparent); }
-.text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
-time { flex: none; color: var(--muted); font-size: 12px; }
+/* Built on the WeKnora plugin UI kit (weknora-plugin-ui.css); only what is
+   particular to this page is here. */
+main { padding: 2px 0 12px; }
+.wk-row__main { white-space: normal; overflow-wrap: anywhere; }
+/* Equal-width kind labels keep the entries' text in one column. */
+.wk-row > .wk-tag { min-width: 60px; justify-content: center; }

@@ -70,10 +70,13 @@ type PluginContributionDTO struct {
 type PluginContributionsDTO struct {
 	Points        []manifest.PointInfo                       `json:"points"`
 	Contributions map[manifest.Point][]PluginContributionDTO `json:"contributions"`
-	// PluginIcons are the icons (data URIs) of plugins the tenant switched
-	// off: their types leave the type lists, and instance lists still need
-	// an icon for them.
+	// PluginIcons are the icons (data URIs) of plugins with pages, shown on
+	// the pages' tabs, and of plugins the tenant switched off: their types
+	// leave the type lists, and instance lists still need an icon for them.
 	PluginIcons map[string]string `json:"pluginIcons,omitempty"`
+	// PluginNames are the names of the listed plugins, for pages that say
+	// which plugin provides them.
+	PluginNames map[string]manifest.LocalizedText `json:"pluginNames,omitempty"`
 }
 
 // ListPlugins godoc
@@ -201,6 +204,7 @@ func (h *PluginHandler) ListContributions(c *gin.Context) {
 	out := PluginContributionsDTO{
 		Points:        points,
 		Contributions: make(map[manifest.Point][]PluginContributionDTO, len(points)),
+		PluginNames:   map[string]manifest.LocalizedText{},
 	}
 	// Plugins the tenant may not see are absent from its list, and so from
 	// these maps.
@@ -229,7 +233,8 @@ func (h *PluginHandler) ListContributions(c *gin.Context) {
 			}
 			if m, ok := h.registry.Plugin(e.PluginID); ok {
 				dto.Version = m.Version
-				if !dto.Enabled && m.IconData != "" {
+				out.PluginNames[m.ID] = m.Name
+				if m.IconData != "" && (!dto.Enabled || manifest.IsUIPoint(info.Point)) {
 					if out.PluginIcons == nil {
 						out.PluginIcons = map[string]string{}
 					}

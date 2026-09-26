@@ -204,6 +204,8 @@ export const THEME_TOKENS = [
   'bg-color-page',
   'bg-color-container',
   'bg-color-secondarycontainer',
+  'bg-color-container-hover',
+  'component-stroke',
   'component-border',
   'border-level-1-color',
   'error-color',

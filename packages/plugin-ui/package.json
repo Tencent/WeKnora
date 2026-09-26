@@ -6,8 +6,8 @@
   "type": "module",
   "main": "index.js",
   "types": "index.d.ts",
-  "exports": { ".": { "types": "./index.d.ts", "default": "./index.js" } },
-  "files": ["index.js", "index.d.ts", "README.md"],
+  "exports": { ".": { "types": "./index.d.ts", "default": "./index.js" }, "./kit.css": "./kit.css" },
+  "files": ["index.js", "index.d.ts", "kit.css", "README.md"],
   "keywords": ["weknora", "plugin"],
   "repository": { "type": "git", "url": "https://github.com/Tencent/WeKnora.git", "directory": "packages/plugin-ui" }
 }

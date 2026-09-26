@@ -1,0 +1,184 @@
+/*
+ * WeKnora plugin UI kit: the app's look for plugin pages.
+ *
+ * Colours, radius and font come from the app theme, which the bridge sets as
+ * --wk-* variables (connect() applies them); the fallbacks keep a page usable
+ * when opened on its own. Link it before the page's own stylesheet:
+ *
+ *   <link rel="stylesheet" href="weknora-plugin-ui.css" />
+ *
+ * Primitives: .wk-list / .wk-row, .wk-btn, .wk-input, .wk-tag, .wk-seg,
+ * .wk-toolbar, .wk-empty, .wk-muted. The page body is transparent: the app
+ * draws the surface and the title around it.
+ */
+:root {
+  color-scheme: light;
+  --wk-fg: var(--wk-text-color-primary, #1f2329);
+  --wk-fg-2: var(--wk-text-color-secondary, #646a73);
+  --wk-fg-3: var(--wk-text-color-placeholder, #8f959e);
+  --wk-surface: var(--wk-bg-color-container, #fff);
+  --wk-surface-2: var(--wk-bg-color-secondarycontainer, #f3f4f6);
+  --wk-hover: var(--wk-bg-color-container-hover, #f5f6f7);
+  --wk-stroke: var(--wk-component-stroke, #e7e8eb);
+  --wk-border: var(--wk-component-border, #dee0e3);
+  --wk-brand: var(--wk-brand-color, #07c05f);
+  --wk-brand-soft: var(--wk-brand-color-light, #e8f8ef);
+  --wk-danger: var(--wk-error-color, #d54941);
+  --wk-warning: var(--wk-warning-color, #e37318);
+  --wk-success: var(--wk-success-color, #2ba471);
+  --wk-radius: var(--wk-radius-default, 6px);
+  --wk-radius-lg: 8px;
+}
+:root[data-theme='dark'] { color-scheme: dark; }
+
+*, *::before, *::after { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font: 14px/1.5 var(--wk-font-family, system-ui, -apple-system, 'PingFang SC', sans-serif);
+  color: var(--wk-fg);
+  background: transparent;
+  -webkit-font-smoothing: antialiased;
+}
+
+a { color: var(--wk-brand); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+.wk-muted { color: var(--wk-fg-3); font-size: 12px; }
+
+/* A bordered list of rows: the shape of most plugin pages. */
+.wk-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border: 1px solid var(--wk-stroke);
+  border-radius: var(--wk-radius-lg);
+  background: var(--wk-surface);
+  overflow: hidden;
+}
+.wk-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 52px;
+  padding: 10px 16px;
+}
+.wk-row + .wk-row { border-top: 1px solid var(--wk-stroke); }
+.wk-row:hover { background: var(--wk-hover); }
+.wk-row__main { flex: 1; min-width: 0; }
+.wk-row__title { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wk-row__sub { margin-top: 1px; color: var(--wk-fg-3); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wk-row__meta { flex: none; color: var(--wk-fg-3); font-size: 12px; }
+.wk-row__actions { flex: none; display: flex; gap: 4px; }
+
+/* A square letter or icon at the start of a row. */
+.wk-avatar {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--wk-radius);
+  background: var(--wk-surface-2);
+  color: var(--wk-fg-2);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.wk-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  height: 32px;
+  padding: 0 14px;
+  font: inherit;
+  color: var(--wk-fg);
+  background: var(--wk-surface);
+  border: 1px solid var(--wk-border);
+  border-radius: var(--wk-radius);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: border-color .15s, color .15s, background .15s;
+}
+.wk-btn:hover:not(:disabled) { border-color: var(--wk-brand); color: var(--wk-brand); }
+.wk-btn:disabled { opacity: .5; cursor: not-allowed; }
+.wk-btn--primary { color: #fff; background: var(--wk-brand); border-color: var(--wk-brand); }
+.wk-btn--primary:hover:not(:disabled) { color: #fff; filter: brightness(1.05); }
+.wk-btn--text { border-color: transparent; background: transparent; color: var(--wk-fg-2); padding: 0 8px; }
+.wk-btn--text:hover:not(:disabled) { border-color: transparent; background: var(--wk-surface-2); color: var(--wk-fg); }
+.wk-btn--danger { color: var(--wk-danger); }
+.wk-btn--danger:hover:not(:disabled) { color: var(--wk-danger); }
+.wk-btn--sm { height: 26px; padding: 0 8px; font-size: 13px; }
+
+.wk-input {
+  height: 32px;
+  min-width: 0;
+  padding: 0 10px;
+  font: inherit;
+  color: var(--wk-fg);
+  background: var(--wk-surface);
+  border: 1px solid var(--wk-border);
+  border-radius: var(--wk-radius);
+  outline: none;
+  transition: border-color .15s, box-shadow .15s;
+}
+.wk-input::placeholder { color: var(--wk-fg-3); }
+.wk-input:focus { border-color: var(--wk-brand); box-shadow: 0 0 0 2px var(--wk-brand-soft); }
+
+/* A small status label. */
+.wk-tag {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  color: var(--wk-fg-2);
+  background: var(--wk-surface-2);
+}
+.wk-tag--brand { color: var(--wk-brand); background: color-mix(in srgb, var(--wk-brand) 12%, transparent); }
+.wk-tag--success { color: var(--wk-success); background: color-mix(in srgb, var(--wk-success) 12%, transparent); }
+.wk-tag--warning { color: var(--wk-warning); background: color-mix(in srgb, var(--wk-warning) 12%, transparent); }
+.wk-tag--danger { color: var(--wk-danger); background: color-mix(in srgb, var(--wk-danger) 12%, transparent); }
+
+/* A segmented filter, like the app's. Mark the active button aria-pressed. */
+.wk-seg {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: var(--wk-radius);
+  background: var(--wk-surface-2);
+}
+.wk-seg button {
+  padding: 3px 12px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--wk-fg-2);
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.wk-seg button:hover { color: var(--wk-fg); }
+.wk-seg button[aria-pressed='true'] {
+  color: var(--wk-fg);
+  font-weight: 500;
+  background: var(--wk-surface);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--wk-fg) 10%, transparent);
+}
+
+/* A row of controls above or below a list. */
+.wk-toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 0 0 12px; }
+.wk-toolbar--end { justify-content: space-between; }
+.wk-toolbar--below { margin: 12px 0 0; }
+.wk-toolbar .wk-input { flex: 1; min-width: 140px; }
+
+.wk-empty {
+  padding: 32px 16px;
+  text-align: center;
+  color: var(--wk-fg-3);
+  border: 1px dashed var(--wk-stroke);
+  border-radius: var(--wk-radius-lg);
+}

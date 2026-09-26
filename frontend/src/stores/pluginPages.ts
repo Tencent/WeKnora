@@ -9,7 +9,8 @@ import {
   switchedOffIcon,
 } from '@/extensions/pluginContributions'
 import { useAuthStore } from '@/stores/auth'
-import { pagesOf, type PagePoint, type PluginPage } from '@/extensions/pluginFrame/pluginPages'
+import { pageIconUrl, pageProvider, pagesOf, type PagePoint, type PluginPage } from '@/extensions/pluginFrame/pluginPages'
+import { getApiBaseUrl } from '@/utils/api-base'
 
 import { createCachedResource } from './resourceCache'
 
@@ -66,6 +67,10 @@ export const usePluginPagesStore = defineStore('pluginPages', () => {
       switchedOffIcon(listing.value, point, typeId),
     /** Plugin chunkers as chunking strategy choices. */
     chunkers: (locale: string, current?: string) => chunkerStrategies(listing.value, locale, current),
+    /** A page's icon URL: its own, else its plugin's; undefined for the generic glyph. */
+    pageIcon: (page: PluginPage) => pageIconUrl(getApiBaseUrl(), listing.value, page),
+    /** The name of the plugin providing a page. */
+    pageProvider: (page: PluginPage, locale: string) => pageProvider(listing.value, page, locale),
     pages: visible('pages'),
     settingsSections: visible('settingsSections'),
     kbTabs: visible('kbTabs'),

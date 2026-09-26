@@ -59,10 +59,86 @@ export function contributionSummary(m: PluginManifest): Array<{ point: Extension
     .filter((s) => s.count > 0)
 }
 
+/**
+ * The categories the plugin center filters by: what a plugin is for, in the
+ * words of the people enabling it, rather than one chip per extension point.
+ */
+export const PLUGIN_CATEGORIES = {
+  data: ['connectors', 'parsers', 'chunkers'],
+  model: ['modelVendors'],
+  tool: ['tools', 'mcpServers', 'skills', 'webSearch'],
+  channel: ['imChannels', 'webhooks'],
+  ui: ['pages', 'settingsSections', 'kbTabs', 'pipelineHooks'],
+} as const satisfies Record<string, readonly ExtensionPoint[]>
+
+export type PluginCategory = keyof typeof PLUGIN_CATEGORIES
+
+export const CATEGORY_ORDER = Object.keys(PLUGIN_CATEGORIES) as PluginCategory[]
+
+/** Whether a plugin contributes anything in a category. */
+export function inCategory(m: PluginManifest, c: PluginCategory): boolean {
+  return (PLUGIN_CATEGORIES[c] as readonly ExtensionPoint[]).some((p) => (m.contributes[p]?.length ?? 0) > 0)
+}
+
+/** The distinct kinds of thing a plugin provides, in point order (for a card's footer). */
+export function providedPoints(m: PluginManifest): ExtensionPoint[] {
+  const out: ExtensionPoint[] = []
+  for (const s of contributionSummary(m)) {
+    // Agent tools come as MCP servers or builtin tools; one label covers both.
+    const p = s.point === 'mcpServers' ? 'tools' : s.point
+    if (!out.includes(p)) out.push(p)
+  }
+  return out
+}
+
+/** The TDesign icon of each extension point, for capability lists. */
+export const POINT_ICON: Record<ExtensionPoint, string> = {
+  modelVendors: 'layers',
+  connectors: 'data-base',
+  imChannels: 'chat-message',
+  webSearch: 'internet',
+  tools: 'tools',
+  parsers: 'file-1',
+  chunkers: 'cut',
+  pipelineHooks: 'ai-search',
+  skills: 'star',
+  mcpServers: 'tools',
+  pages: 'app',
+  settingsSections: 'setting-1',
+  kbTabs: 'component-layout',
+  webhooks: 'link',
+}
+
+/** A builtin's one category, for grouping: the first it belongs to. */
+export function primaryCategory(m: PluginManifest): PluginCategory | undefined {
+  return CATEGORY_ORDER.find((c) => inCategory(m, c))
+}
+
+/** One thing a plugin adds, with where to find it, for the detail drawer. */
+export interface CapabilityLine {
+  point: ExtensionPoint
+  id: string
+  name: string
+  /** The MCP server URL, or the package path of a skill / vendor file. */
+  detail: string
+}
+
+export function capabilityLines(m: PluginManifest, locale: string): CapabilityLine[] {
+  const out: CapabilityLine[] = []
+  for (const point of EXTENSION_POINTS) {
+    for (const c of m.contributes[point] ?? []) {
+      out.push({ point, id: `${point}/${c.id}`, name: localizedText(c.name, locale) || c.id, detail: c.mcp?.url ?? c.path ?? '' })
+    }
+  }
+  return out
+}
+
 export interface PluginFilter {
   query: string
   /** Only plugins contributing to this point; empty for all. */
-  point: ExtensionPoint | ''
+  point?: ExtensionPoint | ''
+  /** Only plugins in this category; empty for all. */
+  category?: PluginCategory | ''
   locale: string
 }
 
@@ -76,6 +152,7 @@ export function filterPlugins(list: readonly TenantPlugin[], f: PluginFilter): T
   const matches = (p: TenantPlugin) => {
     const m = p.manifest
     if (f.point && !(m.contributes[f.point]?.length)) return false
+    if (f.category && !inCategory(m, f.category)) return false
     if (!q) return true
     const texts = [m.id, localizedText(m.name, f.locale), m.name.default]
     for (const point of EXTENSION_POINTS) {

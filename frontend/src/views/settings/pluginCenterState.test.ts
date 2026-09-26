@@ -1,8 +1,16 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import type { TenantPlugin } from '../../api/plugin'
-import { contributionSummary, filterPlugins, hasTenantConfig, pluginSkillChoices } from './pluginCenterState'
+import type { PluginManifest, TenantPlugin } from '../../api/plugin'
+import {
+  capabilityLines,
+  contributionSummary,
+  filterPlugins,
+  hasTenantConfig,
+  inCategory,
+  pluginSkillChoices,
+  providedPoints,
+} from './pluginCenterState'
 
 const plugin = (id: string, name: string, contributes: TenantPlugin['manifest']['contributes'], zh?: string): TenantPlugin => ({
   enabled: true,
@@ -73,4 +81,24 @@ test('canConfigure covers webhooks, and webhookUrl prefers the server URL', asyn
   assert.equal(canConfigure(hooks), true)
   assert.equal(webhookUrl({ path: '/api/v1/plugin-callbacks/a/b/c' }, 'https://x.example'), 'https://x.example/api/v1/plugin-callbacks/a/b/c')
   assert.equal(webhookUrl({ path: '/p', url: 'https://public.example/p' }, 'https://x.example'), 'https://public.example/p')
+})
+
+test('categories, provided points and capability lines', () => {
+  const jira = {
+    id: 'acme.jira', name: { default: 'Jira' }, contributes: {
+      connectors: [{ id: 'jira', name: { default: 'Jira issues' } }],
+      mcpServers: [{ id: 'tools', name: { default: 'Jira tools' } }],
+      skills: [{ id: 'triage', name: { default: 'Triage' } }],
+      webhooks: [{ id: 'issues', name: { default: 'Issues' } }],
+    },
+  } as unknown as PluginManifest
+  assert.ok(inCategory(jira, 'data') && inCategory(jira, 'tool') && inCategory(jira, 'channel'))
+  assert.ok(!inCategory(jira, 'model') && !inCategory(jira, 'ui'))
+  assert.deepEqual(providedPoints(jira), ['connectors', 'skills', 'tools', 'webhooks'])
+  assert.deepEqual(capabilityLines(jira, 'en-US').map((c) => [c.point, c.name]), [
+    ['connectors', 'Jira issues'], ['skills', 'Triage'], ['mcpServers', 'Jira tools'], ['webhooks', 'Issues'],
+  ])
+  const list = [{ manifest: jira, enabled: true }] as unknown as TenantPlugin[]
+  assert.equal(filterPlugins(list, { query: '', category: 'model', locale: 'en-US' }).length, 0)
+  assert.equal(filterPlugins(list, { query: '', category: 'data', locale: 'en-US' }).length, 1)
 })

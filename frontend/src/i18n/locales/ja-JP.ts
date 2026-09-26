@@ -2734,6 +2734,28 @@ export default {
     }
   },
   pluginAdmin: {
+    searchPlaceholder: '名前または ID で検索',
+    noMatch: '一致するプラグインはありません',
+    filters: {
+      all: 'すべて',
+      problem: '異常',
+      disabled: '無効',
+      owned: 'スペース独自'
+    },
+    columns: {
+      plugin: 'プラグイン',
+      version: 'バージョン',
+      runtime: '実行方式',
+      trust: '信頼',
+      audience: '公開範囲',
+      state: '状態'
+    },
+    menu: {
+      detail: '詳細を表示',
+      enable: '全体で有効化',
+      disable: '全体で無効化',
+      more: 'その他の操作'
+    },
     ownedBy: 'スペース {tenant} 独自',
     runtime: {
       declarative: '宣言型',
@@ -2742,14 +2764,14 @@ export default {
       kubernetes: 'Kubernetes'
     },
     title: 'プラグイン管理',
-    description: 'プラットフォーム全体のプラグインをインストール・管理します。インストールしたプラグインはすべてのワークスペースに表示され、各ワークスペースで個別に有効化します。ここで無効にすると全ノードでアンロードされます。',
+    description: 'プラットフォームのプラグインをインストール・管理します。各スペースでの有効化は別途必要です。',
     installButton: 'プラグインをインストール',
     empty: 'インストール済みのプラグインはありません',
     loadFailed: 'インストール済みプラグインの読み込みに失敗しました',
     saveFailed: '保存に失敗しました',
     enabledToast: 'プラットフォーム全体で有効にしました',
     disabledToast: 'プラットフォーム全体で無効にしました',
-    platformSwitch: 'プラットフォーム全体で有効／無効',
+    platformSwitch: '全体で有効',
     publisher: '発行者',
     contributions: '提供する機能',
     permissions: '権限と外部アクセス',
@@ -2818,6 +2840,7 @@ export default {
       title: '公開範囲',
       hint: '限定すると、選択したスペースだけがプラグインを表示・有効化できます。他のスペースからは見えなくなり、スイッチと設定は保持され、再び含めると復元されます。',
       all: 'すべてのスペース',
+      count: '{count} 個のスペース',
       some: '指定したスペース',
       placeholder: 'スペースを検索して選択',
       none: 'スペースが選択されていません。どのスペースも使用できません。',
@@ -2825,29 +2848,47 @@ export default {
       saveFailed: '公開範囲を更新できませんでした'
     },
     install: {
+      steps: {
+        source: 'パッケージを選択',
+        review: '確認',
+        done: '完了'
+      },
+      dropTitle: '.wkp パッケージをここにドロップ、またはクリックして選択',
+      dropHint: '最大 64 MB。選択後にまず検査され、すぐにはインストールされません。',
+      inspecting: 'パッケージを検査中…',
+      next: '次へ',
+      back: '戻る',
+      finish: '完了',
+      doneHint: '各スペースの管理者がプラグインセンターで有効化できます。',
+      doneConfig: 'プラットフォーム設定が必要です。プラグインの詳細で入力してください。',
+      trustRow: '信頼度',
+      anyHostHint: 'このプラグインを信頼できるか確認してください',
+      changeShort: {
+        install: '新規インストール',
+        upgrade: 'アップグレード',
+        downgrade: 'ダウングレード',
+        reinstall: '再インストール'
+      },
+      confirmTo: {
+        upgrade: 'v{version} にアップグレード',
+        downgrade: 'v{version} にダウングレード'
+      },
       title: 'プラグインをインストール',
       description: '.wkp パッケージをアップロードするかダウンロード URL を指定し、確認してからインストールします。',
-      sourceSection: 'パッケージ',
       mode: {
         upload: 'ファイルをアップロード',
         url: 'URL から',
         market: 'マーケットから'
       },
-      fileLabel: 'パッケージファイル',
-      chooseFile: 'ファイルを選択',
-      noFile: 'ファイル未選択',
-      fileHint: '.wkp ファイル（plugin.yaml を含む zip）、最大 64 MB。',
       urlLabel: 'ダウンロード URL',
       urlHint: 'サーバーがこの URL からダウンロードします。プライベートネットワークのアドレスは拒否されます。',
       remoteUrlLabel: 'サービス URL',
       remoteUrlHint: 'プラグインサービスの HTTP(S) アドレス。プライベートネットワークのホストは SSRF_WHITELIST に追加する必要があります。',
       remoteUrlKeep: 'アップグレード時は空欄のままで現在の URL を引き続き使用します',
-      reviewSection: 'インストール前の確認',
       noPermissions: 'このプラグインは追加の権限を要求しません。',
       configNotice: 'このプラグインには設定が必要です。プラットフォーム設定はインストール後の詳細で、ワークスペース設定は各ワークスペース管理者がプラグインセンターで入力します。',
       tenantNotice: 'インストール後、プラグインはすべてのワークスペースに表示されますが、ワークスペース管理者が有効にするまで無効です。',
       digest: 'パッケージダイジェスト',
-      inspect: 'パッケージを確認',
       confirm: {
         install: 'インストール',
         upgrade: 'アップグレード',
@@ -2906,10 +2947,45 @@ export default {
   pluginPages: {
     notResponding: 'プラグインページが応答しません。読み込みに失敗した可能性があります。',
     requestFailed: 'プラグインへのリクエストに失敗しました',
-    fromPlugin: 'プラグイン {id} が提供'
+    fromPlugin: 'プラグイン「{name}」が提供'
   },
   pluginCenter: {
+    tabs: {
+      installed: 'インストール済み',
+      builtin: '組み込み'
+    },
+    categories: {
+      data: 'データ接続',
+      model: 'モデル',
+      tool: 'ツールと検索',
+      channel: 'メッセージチャネル',
+      ui: 'ページとフロー'
+    },
+    where: {
+      modelVendors: '「モデル管理」でモデルを追加',
+      connectors: 'ナレッジベースの「データソース」で追加',
+      imChannels: 'エージェントの「IM チャネル」で追加',
+      webSearch: '「ウェブ検索」で追加',
+      tools: 'エージェントのツールで選択',
+      parsers: '「解析エンジン」で選択',
+      chunkers: 'ナレッジベースの「チャンク設定」で選択',
+      pipelineHooks: 'ナレッジベース Q&A で自動的に適用',
+      skills: 'エージェントのスキルで有効化',
+      mcpServers: 'エージェントのツールで選択',
+      pages: '「ツールボックス」で開く',
+      settingsSections: '設定の「拡張」グループ',
+      kbTabs: 'ナレッジベース詳細のタブ',
+      webhooks: 'アドレスは下記'
+    },
+    detail: {
+      enabledHere: 'このスペースで有効',
+      config: 'スペース設定'
+    },
+    noneInstalled: 'まだプラグインがありません。システム管理者が「プラグイン管理」でインストールできます。',
+    off: '無効',
     own: {
+      section: 'サービスと鍵',
+      updateHint: '新しいバージョンのパッケージをアップロードし、確認後に置き換えます。',
       register: '独自プラグインを登録',
       title: 'このスペース独自のプラグインを登録',
       description: 'リモートプラグインの .wkp パッケージをアップロードするか URL を入力し、サービスのアドレスを入力します。プラグインのコードは自社のサーバーで動作します。',
@@ -2937,7 +3013,7 @@ export default {
     configSaveFailed: 'プラグイン設定の保存に失敗しました',
     navGroup: '拡張',
     title: 'プラグイン',
-    description: 'このデプロイが提供するすべてのプラグイン（組み込みと、システム管理者がインストールしたもの）。このワークスペースで有効化・無効化できます。無効にしたプラグインの連携は種類一覧から外れ新規作成できなくなりますが、既存のものは引き続き動作します。インストールされたプラグインは、ワークスペース管理者が有効にするまで無効です。',
+    description: 'このスペースでプラグインを有効にします。無効にすると新しい連携は作れなくなり、既存のものはそのまま動作します。',
     searchPlaceholder: 'プラグイン名・ID・連携を検索',
     allPoints: 'すべて',
     empty: '一致するプラグインはありません',

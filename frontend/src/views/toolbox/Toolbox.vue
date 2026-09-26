@@ -38,7 +38,7 @@
         </button>
         <button v-for="page in pluginPages.pages" :key="page.key" type="button" role="tab" class="toolbox-tab"
           :aria-selected="selectedPage?.key === page.key" @click="selectPage(page.key)">
-          <t-icon name="app" size="18px" />
+          <PluginPageIcon :url="pluginPages.pageIcon(page)" />
           <span>{{ localizedText(page.name, locale) }}</span>
         </button>
       </div>
@@ -80,6 +80,7 @@ import ResourceIcon from '@/components/icons/ResourceIcon.vue'
 import BrowserIcon from '@/components/icons/BrowserIcon.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import PluginFrame from '@/extensions/pluginFrame/PluginFrame.vue'
+import PluginPageIcon from '@/extensions/pluginFrame/PluginPageIcon.vue'
 import { findPage, type PluginPage } from '@/extensions/pluginFrame/pluginPages'
 import { usePluginPagesStore } from '@/stores/pluginPages'
 import { localizedText } from '@/utils/localizedText'
@@ -112,7 +113,7 @@ const selectedItem = computed(() => visibleItems.value.find((item) => item.key =
 // Plugin pages are tabs too, keyed "plugin:<plugin>/<page>".
 const selectedPage = computed(() => findPage(pluginPages.pages, requestedSection.value))
 const pageDescription = (page: PluginPage) =>
-  page.description ? localizedText(page.description, locale.value) : t('pluginPages.fromPlugin', { id: page.pluginId })
+  page.description ? localizedText(page.description, locale.value) : t('pluginPages.fromPlugin', { name: pluginPages.pageProvider(page, locale.value) })
 const selectPage = (key: string) => {
   if (key === requestedSection.value) return
   void router.replace({ path: `/platform/toolbox/${encodeURIComponent(key)}` })

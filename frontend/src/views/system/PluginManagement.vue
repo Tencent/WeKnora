@@ -1,7 +1,7 @@
 <template>
   <div class="plugin-admin">
     <header class="section-header">
-      <div class="section-header__row">
+      <div class="section-header__top">
         <div>
           <h2>{{ t('pluginAdmin.title') }}</h2>
           <p class="section-description">{{ t('pluginAdmin.description') }}</p>
@@ -21,59 +21,100 @@
         {{ t('pluginAdmin.installButton') }}
       </t-button>
     </div>
-    <div v-else class="plugin-list">
-      <div
-        v-for="p in plugins"
-        :key="p.id"
-        class="plugin-card"
-        :class="{ 'plugin-card--off': p.desired_state === 'disabled' }"
-        role="button"
-        tabindex="0"
-        @click="openDetail(p)"
-        @keydown.enter="openDetail(p)"
-      >
-        <div class="plugin-card__badge" :class="{ 'plugin-card__badge--logo': !!pluginIconUrl(p.manifest) }">
-          <img v-if="pluginIconUrl(p.manifest)" :src="pluginIconUrl(p.manifest)" alt="" class="plugin-card__badge-img" />
-          <template v-else>{{ initial(p) }}</template>
-        </div>
-        <div class="plugin-card__body">
-          <div class="plugin-card__title">
-            <span class="plugin-card__name">{{ nameOf(p) }}</span>
-            <t-tag v-if="p.owner_tenant_id" size="small" variant="light">
-              {{ t('pluginAdmin.ownedBy', { tenant: p.owner_tenant_id }) }}
-            </t-tag>
-            <t-tooltip :content="p.node?.error" :disabled="!p.node?.error">
-              <t-tag size="small" variant="light" :theme="stateTheme(p)">
-                {{ t(`pluginAdmin.state.${installedState(p)}`) }}
-              </t-tag>
-            </t-tooltip>
-          </div>
-          <div class="plugin-card__meta">{{ p.id }} · v{{ p.active_version }} · {{ runtimeLabel(p.runtime) }}</div>
-          <div v-if="descriptionOf(p)" class="plugin-card__desc">{{ descriptionOf(p) }}</div>
-          <div v-if="p.manifest" class="plugin-card__contribs">
-            <span v-for="s in contributionSummary(p.manifest)" :key="s.point" class="plugin-card__contrib">
-              {{ t(`pluginCenter.points.${s.point}`) }} × {{ s.count }}
-            </span>
-          </div>
-        </div>
-        <div class="plugin-card__actions" @click.stop @keydown.enter.stop>
-          <t-tooltip :content="t('pluginAdmin.platformSwitch')">
-            <t-switch
-              :model-value="p.desired_state === 'enabled'"
-              :loading="pending.has(p.id)"
-              :disabled="pending.has(p.id)"
-              @update:model-value="(v: boolean) => toggle(p, v)"
-            />
-          </t-tooltip>
+    <template v-else>
+      <div class="plugin-admin__toolbar">
+        <t-input v-model="query" class="plugin-admin__search" clearable :placeholder="t('pluginAdmin.searchPlaceholder')">
+          <template #prefix-icon><t-icon name="search" /></template>
+        </t-input>
+        <div class="option-chips">
+          <button
+            v-for="f in ADMIN_FILTERS"
+            :key="f"
+            type="button"
+            class="option-chip"
+            :class="{ 'option-chip--active': filter === f }"
+            :aria-pressed="filter === f"
+            @click="filter = f"
+          >
+            {{ t(`pluginAdmin.filters.${f}`) }}<span class="option-chip__count">{{ counts[f] }}</span>
+          </button>
         </div>
       </div>
-    </div>
+
+      <div class="plugin-table">
+        <table>
+          <thead>
+            <tr>
+              <th>{{ t('pluginAdmin.columns.plugin') }}</th>
+              <th>{{ t('pluginAdmin.columns.version') }}</th>
+              <th>{{ t('pluginAdmin.columns.runtime') }}</th>
+              <th>{{ t('pluginAdmin.columns.trust') }}</th>
+              <th>{{ t('pluginAdmin.columns.audience') }}</th>
+              <th>{{ t('pluginAdmin.columns.state') }}</th>
+              <th class="plugin-table__menu-col" />
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-if="visible.length === 0">
+              <td colspan="7" class="plugin-table__empty">{{ t('pluginAdmin.noMatch') }}</td>
+            </tr>
+            <tr
+              v-for="p in visible"
+              :key="p.id"
+              class="plugin-row"
+              :class="{ 'plugin-row--off': p.desired_state === 'disabled' }"
+              tabindex="0"
+              @click="openDetail(p)"
+              @keydown.enter="openDetail(p)"
+            >
+              <td>
+                <div class="plugin-row__plugin">
+                  <PluginBadge :manifest="p.manifest" size="md" />
+                  <div class="plugin-row__names">
+                    <div class="plugin-row__name">{{ nameOf(p) }}</div>
+                    <div class="plugin-row__id">{{ p.id }}</div>
+                  </div>
+                </div>
+              </td>
+              <td class="plugin-row__num">v{{ p.active_version }}</td>
+              <td>{{ runtimeLabel(p.runtime) }}</td>
+              <td>
+                <span class="trust" :class="`trust--${activeTrust(p)}`">{{ t(`pluginAdmin.trust.${activeTrust(p)}`) }}</span>
+              </td>
+              <td>{{ audienceLabel(p) }}</td>
+              <td>
+                <t-tooltip :content="p.node?.error" :disabled="!p.node?.error">
+                  <span class="state" :class="`state--${installedState(p)}`">{{ t(`pluginAdmin.state.${installedState(p)}`) }}</span>
+                </t-tooltip>
+              </td>
+              <td class="plugin-table__menu-col" @click.stop @keydown.enter.stop>
+                <t-dropdown trigger="click" placement="bottom-right" attach="body" :min-column-width="120">
+                  <t-button variant="text" shape="square" size="small" :loading="pending.has(p.id)" :aria-label="t('pluginAdmin.menu.more')">
+                    <template #icon><t-icon name="ellipsis" /></template>
+                  </t-button>
+                  <template #dropdown>
+                    <t-dropdown-menu>
+                      <t-dropdown-item @click="openDetail(p)">{{ t('pluginAdmin.menu.detail') }}</t-dropdown-item>
+                      <t-dropdown-item @click="toggle(p, p.desired_state !== 'enabled')">
+                        {{ p.desired_state === 'enabled' ? t('pluginAdmin.menu.disable') : t('pluginAdmin.menu.enable') }}
+                      </t-dropdown-item>
+                    </t-dropdown-menu>
+                  </template>
+                </t-dropdown>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </template>
 
     <PluginInstallDrawer v-model:visible="installOpen" @installed="upsert" />
     <PluginSecretDialog v-model:secret="issuedSecret" />
     <PluginDetailDrawer
       v-model:visible="detailOpen"
       :plugin="selected"
+      :pending="!!selected && pending.has(selected.id)"
+      @toggle="(v: boolean) => selected && toggle(selected, v)"
       @changed="upsert"
       @removed="remove"
     />
@@ -83,17 +124,24 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { pluginIconUrl } from '@/extensions/pluginIcon'
 import { MessagePlugin } from 'tdesign-vue-next'
 
 import { listInstalledPlugins, setInstalledPluginEnabled, type InstalledPlugin } from '@/api/system/plugins'
+import PluginBadge from '@/components/plugins/PluginBadge.vue'
 import PluginSecretDialog from '@/components/plugins/PluginSecretDialog.vue'
 import { localizedText } from '@/utils/localizedText'
 
-import { contributionSummary } from '../settings/pluginCenterState'
 import PluginDetailDrawer from './plugins/PluginDetailDrawer.vue'
 import PluginInstallDrawer from './plugins/PluginInstallDrawer.vue'
-import { installedState } from './pluginManagementState'
+import {
+  ADMIN_FILTERS,
+  activeTrust,
+  audienceSummary,
+  filterInstalled,
+  installedState,
+  matchesAdminFilter,
+  type AdminFilter,
+} from './pluginManagementState'
 
 // Platform plugin management: what is installed, on which version, whether it
 // loads. Installing makes a plugin available to every workspace; each
@@ -111,21 +159,20 @@ const issuedSecret = ref('')
 const selectedId = ref('')
 const selected = computed(() => plugins.value.find((p) => p.id === selectedId.value) ?? null)
 
-const nameOf = (p: InstalledPlugin) => (p.manifest ? localizedText(p.manifest.name, locale.value) : p.id)
-const descriptionOf = (p: InstalledPlugin) => (p.manifest ? localizedText(p.manifest.description, locale.value) : '')
-const initial = (p: InstalledPlugin) => (nameOf(p).trim().charAt(0) || '?').toUpperCase()
+const query = ref('')
+const filter = ref<AdminFilter>('all')
+const visible = computed(() => filterInstalled(plugins.value, { query: query.value, filter: filter.value, locale: locale.value }))
+const counts = computed(
+  () => Object.fromEntries(ADMIN_FILTERS.map((f) => [f, plugins.value.filter((p) => matchesAdminFilter(p, f)).length])) as Record<AdminFilter, number>,
+)
 
-function stateTheme(p: InstalledPlugin) {
-  switch (installedState(p)) {
-    case 'running':
-      return 'success'
-    case 'failed':
-      return 'danger'
-    case 'degraded':
-      return 'warning'
-    default:
-      return 'default'
-  }
+const nameOf = (p: InstalledPlugin) => (p.manifest ? localizedText(p.manifest.name, locale.value) : p.id)
+
+function audienceLabel(p: InstalledPlugin) {
+  const a = audienceSummary(p)
+  if (a.kind === 'owned') return t('pluginAdmin.ownedBy', { tenant: a.tenant })
+  if (a.kind === 'all') return t('pluginAdmin.audience.all')
+  return t('pluginAdmin.audience.count', { count: a.count })
 }
 
 async function load() {
@@ -145,7 +192,7 @@ function upsert(received: InstalledPlugin) {
   if (secret) issuedSecret.value = secret
   const i = plugins.value.findIndex((x) => x.id === p.id)
   if (i >= 0) plugins.value.splice(i, 1, p)
-  else plugins.value = [...plugins.value, p].sort((a, b) => a.id.localeCompare(b.id))
+  else plugins.value = [...plugins.value, p]
 }
 
 function remove(id: string) {
@@ -176,8 +223,8 @@ onMounted(load)
 </script>
 
 <style lang="less" scoped>
-@import (reference) '@/components/css/provider-card.less';
 @import (reference) '@/components/css/settings-section.less';
+@import (reference) '@/components/css/option-chips.less';
 
 .plugin-admin {
   width: 100%;
@@ -185,12 +232,11 @@ onMounted(load)
 
 .section-header {
   .settings-section-header();
+  margin-bottom: 20px;
 
-  &__row {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 16px;
+  // Clear of the settings dialog's close button.
+  &__top {
+    padding-right: 40px;
   }
 }
 
@@ -206,78 +252,171 @@ onMounted(load)
   }
 }
 
-.plugin-list {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+.plugin-admin__toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
   gap: 12px;
+  margin-bottom: 16px;
 }
 
-.plugin-card {
-  .provider-card();
-  align-items: flex-start;
-  cursor: pointer;
+.plugin-admin__search {
+  width: 220px;
+}
 
-  &--off {
-    .plugin-card__badge,
-    .plugin-card__body {
-      opacity: 0.55;
-    }
+.option-chips {
+  .option-chips();
+}
+
+.option-chip {
+  .option-chip();
+
+  &__count {
+    .option-chip-count();
   }
 }
 
-.plugin-card__badge {
-  .provider-card-badge();
-  .provider-card-badge-color(#0052d9);
+.plugin-table {
+  overflow-x: auto;
+  border: 1px solid var(--td-component-stroke);
+  border-radius: var(--app-radius-lg);
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: var(--app-text-md);
+  }
+
+  th {
+    padding: 10px 12px;
+    text-align: left;
+    font-weight: 400;
+    color: var(--td-text-color-secondary);
+    background: var(--td-bg-color-secondarycontainer);
+    white-space: nowrap;
+  }
+
+  td {
+    padding: 10px 12px;
+    border-top: 1px solid var(--td-component-stroke);
+    color: var(--td-text-color-primary);
+    white-space: nowrap;
+  }
+
+  th:first-child,
+  td:first-child {
+    padding-left: 16px;
+  }
+
+  &__menu-col {
+    width: 48px;
+    text-align: right;
+  }
+
+  &__empty {
+    text-align: center;
+    color: var(--td-text-color-placeholder);
+  }
 }
 
-.plugin-card__badge-img {
-  .provider-card-badge-img();
+.plugin-row {
+  cursor: pointer;
+  transition: background var(--app-motion-fast) ease;
+
+  &:hover {
+    background: var(--td-bg-color-container-hover);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--td-brand-color);
+    outline-offset: -2px;
+  }
+
+  &--off .plugin-badge,
+  &--off .plugin-row__names {
+    opacity: 0.5;
+  }
 }
 
-.plugin-card__body {
-  .provider-card-body();
-  gap: 4px;
-}
-
-.plugin-card__title {
+.plugin-row__plugin {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 10px;
   min-width: 0;
 }
 
-.plugin-card__name {
-  .provider-card-title();
+.plugin-row__names {
+  min-width: 0;
 }
 
-.plugin-card__meta {
-  font-family: var(--app-font-family-mono);
-  font-size: var(--app-text-xs);
+.plugin-row__name {
+  font-weight: 500;
+}
+
+.plugin-row__id {
+  margin-top: 1px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-placeholder);
 }
 
-.plugin-card__desc {
-  font-size: var(--app-text-sm);
-  color: var(--td-text-color-secondary);
-  line-height: 1.5;
+.plugin-row__num {
+  font-variant-numeric: tabular-nums;
 }
 
-.plugin-card__contribs {
-  display: flex;
-  flex-wrap: wrap;
+// Community is the default and stays quiet; official and verified stand out.
+.trust {
+  color: var(--td-text-color-placeholder);
+
+  &--official,
+  &--verified {
+    padding: 1px 6px;
+    border-radius: var(--app-radius-xs);
+    font-size: var(--app-text-sm);
+  }
+
+  &--official {
+    color: var(--td-success-color);
+    background: var(--td-success-color-1);
+  }
+
+  &--verified {
+    color: var(--td-brand-color);
+    background: var(--td-brand-color-1);
+  }
+}
+
+.state {
+  display: inline-flex;
+  align-items: center;
   gap: 6px;
-  margin-top: 4px;
-}
 
-.plugin-card__contrib {
-  font-size: var(--app-text-xs);
-  color: var(--td-text-color-secondary);
-  background: var(--td-bg-color-secondarycontainer);
-  border-radius: var(--app-radius-xs);
-  padding: 1px 6px;
-}
+  &::before {
+    content: '';
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+  }
 
-.plugin-card__actions {
-  flex: none;
+  &--running {
+    color: var(--td-text-color-primary);
+
+    &::before {
+      background: var(--td-success-color);
+    }
+  }
+
+  &--degraded {
+    color: var(--td-warning-color);
+  }
+
+  &--failed {
+    color: var(--td-error-color);
+  }
+
+  &--disabled,
+  &--pending {
+    color: var(--td-text-color-placeholder);
+  }
 }
 </style>

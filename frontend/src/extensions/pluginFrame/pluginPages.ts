@@ -1,5 +1,7 @@
 import type { ContributionListing, ListedContribution, PluginContribution } from '@/api/plugin'
-import type { LocalizedText } from '@/utils/localizedText'
+import { localizedText, type LocalizedText } from '../../utils/localizedText'
+
+import { safeIconData } from '../pluginContributions'
 
 /** The points whose contributions are sandboxed plugin pages. */
 export const PAGE_POINTS = ['pages', 'settingsSections', 'kbTabs'] as const
@@ -74,4 +76,24 @@ export function pageFileUrl(apiBase: string, page: Pick<PluginPage, 'pluginId' |
 /** The page a key names, among pages. */
 export function findPage(pages: readonly PluginPage[], key: string): PluginPage | undefined {
   return pages.find((p) => p.key === key)
+}
+
+/** A page's icon: its own file under ui/, else its plugin's icon. */
+export function pageIconUrl(
+  apiBase: string,
+  listing: ContributionListing | null | undefined,
+  page: Pick<PluginPage, 'pluginId' | 'version' | 'entry' | 'icon'>,
+): string | undefined {
+  if (page.icon) return pageFileUrl(apiBase, page, page.icon)
+  return safeIconData(listing?.pluginIcons?.[page.pluginId])
+}
+
+/** The name of the plugin providing a page, or its ID. */
+export function pageProvider(
+  listing: ContributionListing | null | undefined,
+  page: Pick<PluginPage, 'pluginId'>,
+  locale: string,
+): string {
+  const name = listing?.pluginNames?.[page.pluginId]
+  return (name && localizedText(name, locale)) || page.pluginId
 }

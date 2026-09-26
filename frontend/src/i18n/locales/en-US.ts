@@ -2734,6 +2734,28 @@ export default {
     }
   },
   pluginAdmin: {
+    searchPlaceholder: 'Search by name or ID',
+    noMatch: 'No matching plugins',
+    filters: {
+      all: 'All',
+      problem: 'Problems',
+      disabled: 'Disabled',
+      owned: 'Workspace-owned'
+    },
+    columns: {
+      plugin: 'Plugin',
+      version: 'Version',
+      runtime: 'Runtime',
+      trust: 'Trust',
+      audience: 'Visible to',
+      state: 'Status'
+    },
+    menu: {
+      detail: 'View details',
+      enable: 'Enable platform-wide',
+      disable: 'Disable platform-wide',
+      more: 'More actions'
+    },
     ownedBy: 'Workspace {tenant}',
     runtime: {
       declarative: 'Declarative',
@@ -2742,14 +2764,14 @@ export default {
       kubernetes: 'Kubernetes'
     },
     title: 'Plugin management',
-    description: 'Install and manage plugins for the whole platform. Every workspace sees an installed plugin, and each one enables it for itself; disabling a plugin here unloads it on every node.',
+    description: 'Install and manage plugins on this platform. Each workspace still turns them on itself.',
     installButton: 'Install plugin',
     empty: 'No plugins installed yet',
     loadFailed: 'Failed to load installed plugins',
     saveFailed: 'Failed to save',
     enabledToast: 'Enabled platform-wide',
     disabledToast: 'Disabled platform-wide',
-    platformSwitch: 'Enable or disable platform-wide',
+    platformSwitch: 'Enabled platform-wide',
     publisher: 'Publisher',
     contributions: 'What it adds',
     permissions: 'Permissions and remote access',
@@ -2818,6 +2840,7 @@ export default {
       title: 'Visible to',
       hint: 'When limited, only the chosen workspaces see and can enable the plugin. Others lose sight of it; their switch and settings are kept for when they are let back in.',
       all: 'All workspaces',
+      count: '{count} workspaces',
       some: 'Selected workspaces',
       placeholder: 'Search and pick workspaces',
       none: 'No workspace selected: none can use the plugin.',
@@ -2825,29 +2848,47 @@ export default {
       saveFailed: 'Could not update visibility'
     },
     install: {
+      steps: {
+        source: 'Choose package',
+        review: 'Review',
+        done: 'Done'
+      },
+      dropTitle: 'Drop a .wkp package here, or click to choose',
+      dropHint: 'Up to 64 MB. It is checked first, not installed right away.',
+      inspecting: 'Checking the package…',
+      next: 'Next',
+      back: 'Back',
+      finish: 'Done',
+      doneHint: 'Workspace admins can now turn it on in their plugin center.',
+      doneConfig: 'It needs platform configuration; fill it in from the plugin details.',
+      trustRow: 'Trust',
+      anyHostHint: 'Make sure you trust this plugin',
+      changeShort: {
+        install: 'New install',
+        upgrade: 'Upgrade',
+        downgrade: 'Downgrade',
+        reinstall: 'Reinstall'
+      },
+      confirmTo: {
+        upgrade: 'Upgrade to v{version}',
+        downgrade: 'Downgrade to v{version}'
+      },
       title: 'Install plugin',
       description: 'Upload a .wkp package or give its download URL, review it, then install.',
-      sourceSection: 'Package',
       mode: {
         upload: 'Upload file',
         url: 'From URL',
         market: 'From marketplace'
       },
-      fileLabel: 'Package file',
-      chooseFile: 'Choose file',
-      noFile: 'No file chosen',
-      fileHint: 'A .wkp file (a zip with plugin.yaml), up to 64 MB.',
       urlLabel: 'Download URL',
       urlHint: 'The server downloads this URL; private network addresses are refused.',
       remoteUrlLabel: 'Service URL',
       remoteUrlHint: 'The plugin service\'s HTTP(S) address. Private network hosts must be listed in SSRF_WHITELIST.',
       remoteUrlKeep: 'On an upgrade, leave empty to keep the current URL',
-      reviewSection: 'Review before installing',
       noPermissions: 'This plugin asks for no extra permissions.',
       configNotice: 'This plugin needs configuration: platform settings are in its details after installing, and workspace admins fill in workspace settings in Plugins.',
       tenantNotice: 'Once installed the plugin is visible to every workspace but disabled until a workspace admin enables it.',
       digest: 'Package digest',
-      inspect: 'Inspect package',
       confirm: {
         install: 'Install',
         upgrade: 'Upgrade',
@@ -2906,10 +2947,45 @@ export default {
   pluginPages: {
     notResponding: 'The plugin page is not responding; it may have failed to load.',
     requestFailed: 'The plugin request failed',
-    fromPlugin: 'Provided by the plugin {id}'
+    fromPlugin: 'Provided by the {name} plugin'
   },
   pluginCenter: {
+    tabs: {
+      installed: 'Installed',
+      builtin: 'Built-in'
+    },
+    categories: {
+      data: 'Data',
+      model: 'Models',
+      tool: 'Tools & search',
+      channel: 'Channels',
+      ui: 'Pages & flow'
+    },
+    where: {
+      modelVendors: 'Add models under Model management',
+      connectors: 'Add under a knowledge base\'s Data sources',
+      imChannels: 'Add under an agent\'s IM channels',
+      webSearch: 'Add under Web search',
+      tools: 'Tick it in an agent\'s tools',
+      parsers: 'Pick it under Parser engines',
+      chunkers: 'Pick it in a knowledge base\'s chunking settings',
+      pipelineHooks: 'Applies to knowledge Q&A automatically',
+      skills: 'Enable it in an agent\'s skills',
+      mcpServers: 'Tick it in an agent\'s tools',
+      pages: 'Open it from the Toolbox',
+      settingsSections: 'In the Extensions group of Settings',
+      kbTabs: 'A tab on each knowledge base',
+      webhooks: 'Addresses below'
+    },
+    detail: {
+      enabledHere: 'On in this workspace',
+      config: 'Workspace settings'
+    },
+    noneInstalled: 'No plugins installed yet. A system admin can install them under Plugin management.',
+    off: 'Off',
     own: {
+      section: 'Service and secret',
+      updateHint: 'Upload a newer package, review it and replace the current version.',
       register: 'Register own plugin',
       title: 'Register a plugin of this workspace',
       description: 'Upload a remote plugin package (.wkp) or give its URL, and the address of its service. The plugin code runs on your own servers.',
@@ -2937,7 +3013,7 @@ export default {
     configSaveFailed: 'Failed to save the plugin configuration',
     navGroup: 'Extensions',
     title: 'Plugins',
-    description: 'Every plugin this deployment provides: builtins and the ones a system administrator installed. Enable or disable them for this workspace: a disabled plugin\'s integrations leave the type lists and cannot be created, while existing ones keep working. Installed plugins start disabled until a workspace admin enables them.',
+    description: 'Turn plugins on for this workspace. Switching one off stops new integrations from it; existing ones keep working.',
     searchPlaceholder: 'Search plugins, IDs or integrations',
     allPoints: 'All',
     empty: 'No matching plugins',

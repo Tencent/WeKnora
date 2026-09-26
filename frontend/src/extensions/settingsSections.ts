@@ -11,6 +11,8 @@ export { CORE_PLUGIN_ID } from './registry'
 export type SettingsNavIcon =
   | { kind: 'tdesign'; name: string }
   | { kind: 'emoji'; value: string }
+  /** An image, e.g. a plugin's own icon. */
+  | { kind: 'image'; url: string }
   /** Hand-drawn icons kept in SettingsNavIcon.vue. */
   | { kind: 'builtin'; name: 'globe' | 'weknora' | 'sandbox' }
 

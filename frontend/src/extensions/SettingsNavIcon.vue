@@ -22,6 +22,7 @@
     <path d="M2.5 6.5h13" stroke="currentColor" stroke-width="1.2" />
     <path d="M5.5 10h4M5.5 12.5h2.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" />
   </svg>
+  <img v-else-if="icon.kind === 'image'" :src="icon.url" alt="" class="nav-icon nav-icon-image" />
   <span v-else-if="icon.kind === 'emoji'" class="nav-icon nav-icon-emoji">{{ icon.value }}</span>
   <t-icon v-else :name="icon.kind === 'tdesign' ? icon.name : 'setting'" class="nav-icon" />
 </template>
@@ -33,3 +34,11 @@ import type { SettingsNavIcon } from './settingsSections'
 // .nav-icon rules of the settings modal.
 defineProps<{ icon: SettingsNavIcon }>()
 </script>
+
+<style scoped>
+.nav-icon-image {
+  width: 16px;
+  height: 16px;
+  object-fit: contain;
+}
+</style>

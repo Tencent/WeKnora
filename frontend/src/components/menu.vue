@@ -213,6 +213,7 @@
 </template>
 
 <script setup lang="ts">
+import { IM_PLATFORM_LOGOS } from '@/components/imPlatformLogos';
 import { storeToRefs } from 'pinia';
 import { onMounted, onUnmounted, watch, computed, ref, h, nextTick } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
@@ -283,27 +284,8 @@ const chatResources = useChatResourcesStore();
 const editorResources = useEditorResourcesStore();
 // Platform logos reused from IMChannelsOverviewPanel — keeps the session list
 // visually consistent with the channels admin view.
-import wecomLogo from '@/assets/img/im/wecom.svg';
-import feishuLogo from '@/assets/img/im/feishu.svg';
-import larkLogo from '@/assets/img/im/lark.svg';
-import slackLogo from '@/assets/img/im/slack.svg';
-import telegramLogo from '@/assets/img/im/telegram.svg';
-import dingtalkLogo from '@/assets/img/im/dingtalk.svg';
-import mattermostLogo from '@/assets/img/im/mattermost.svg';
-import wechatLogo from '@/assets/img/im/wechat.svg';
-import qqbotLogo from '@/assets/img/im/qqbot.png';
 
-const PLATFORM_LOGO: Record<string, string> = {
-    wecom: wecomLogo,
-    feishu: feishuLogo,
-    lark: larkLogo,
-    slack: slackLogo,
-    telegram: telegramLogo,
-    dingtalk: dingtalkLogo,
-    mattermost: mattermostLogo,
-    wechat: wechatLogo,
-    qqbot: qqbotLogo,
-};
+const PLATFORM_LOGO = IM_PLATFORM_LOGOS;
 
 const platformLogo = (p: string): string => (p ? PLATFORM_LOGO[p] || '' : '');
 

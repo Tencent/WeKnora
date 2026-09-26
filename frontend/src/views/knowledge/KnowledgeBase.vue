@@ -82,6 +82,7 @@ import {
 } from './documentSorting';
 import { useI18n } from 'vue-i18n';
 import PluginFrame from '@/extensions/pluginFrame/PluginFrame.vue';
+import PluginPageIcon from '@/extensions/pluginFrame/PluginPageIcon.vue';
 import { findPage } from '@/extensions/pluginFrame/pluginPages';
 import { usePluginPagesStore } from '@/stores/pluginPages';
 import { localizedText } from '@/utils/localizedText';
@@ -128,7 +129,7 @@ const wikiIndexingTip = computed(() => {
 // so the header marks documents active then too.
 const kbViewTabs = computed(() => {
   const w = 'knowledgeEditor.wikiBrowser'
-  const tabs: Array<{ key: KbTab; icon: string; label: string; tip: string; indexing?: boolean }> = [
+  const tabs: Array<{ key: KbTab; icon: string; label: string; tip: string; indexing?: boolean; plugin?: boolean; image?: string }> = [
     { key: 'documents', icon: 'file', label: t(`${w}.tabDocuments`), tip: t(`${w}.tabDocumentsTip`) },
   ]
   if (isWiki.value) {
@@ -142,7 +143,7 @@ const kbViewTabs = computed(() => {
   for (const page of pluginPages.kbTabs) {
     const label = localizedText(page.name, locale.value)
     const tip = page.description ? localizedText(page.description, locale.value) : label
-    tabs.push({ key: page.key as KbTab, icon: 'app', label, tip })
+    tabs.push({ key: page.key as KbTab, icon: 'app', plugin: true, image: pluginPages.pageIcon(page), label, tip })
   }
   return tabs
 })
@@ -2317,6 +2318,7 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
                     :class="{ active: shownKbTab === tab.key, indexing: tab.indexing }"
                     :aria-selected="shownKbTab === tab.key" @click="activeKbTab = tab.key">
                     <t-loading v-if="tab.indexing" size="small" class="kb-view-tab__indicator" />
+                    <PluginPageIcon v-else-if="tab.plugin" :url="tab.image" size="16px" />
                     <t-icon v-else :name="tab.icon" size="16px" />
                     <span>{{ tab.label }}</span>
                   </button>

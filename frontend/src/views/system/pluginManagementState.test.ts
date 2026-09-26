@@ -21,6 +21,9 @@ import {
   audienceOf,
   sameAudience,
   sortVersions,
+  activeTrust,
+  audienceSummary,
+  filterInstalled,
 } from './pluginManagementState'
 
 const manifest: PluginManifest = {
@@ -133,4 +136,30 @@ test('plugin audiences', () => {
   assert.ok(!sameAudience(null, []))
   assert.ok(sameAudience([7, 9, 9], [9, 7]))
   assert.ok(!sameAudience([7], [7, 9]))
+})
+
+test('installed table filters, trust and visibility', () => {
+  const p = (id: string, extra: Partial<InstalledPlugin> = {}) =>
+    ({ id, desired_state: 'enabled', active_version: '1.0.0', versions: [], node: { version: '1', state: 'ready', updatedAt: '' }, ...extra }) as InstalledPlugin
+  const list = [
+    p('b.ok'),
+    p('a.broken', { node: { version: '1', state: 'failed', updatedAt: '' } }),
+    p('c.off', { desired_state: 'disabled' }),
+    p('d.own', { owner_tenant_id: 7, manifest }),
+  ]
+  const ids = (filter: 'all' | 'problem' | 'disabled' | 'owned', query = '') =>
+    filterInstalled(list, { filter, query, locale: 'en-US' }).map((x) => x.id)
+  assert.deepEqual(ids('all'), ['a.broken', 'b.ok', 'c.off', 'd.own'])
+  assert.deepEqual(ids('problem'), ['a.broken'])
+  assert.deepEqual(ids('disabled'), ['c.off'])
+  assert.deepEqual(ids('owned'), ['d.own'])
+  assert.deepEqual(ids('all', 'acme search'), ['d.own'])
+
+  const v = (version: string, trust?: 'verified') => ({ version, trust }) as PluginVersion
+  assert.equal(activeTrust(p('x', { versions: [v('1.0.0', 'verified'), v('0.9.0')] })), 'verified')
+  assert.equal(activeTrust(p('x')), 'community')
+
+  assert.deepEqual(audienceSummary(p('x')), { kind: 'all' })
+  assert.deepEqual(audienceSummary(p('x', { audience: [3, 4] })), { kind: 'some', count: 2 })
+  assert.deepEqual(audienceSummary(p('x', { owner_tenant_id: 7, audience: [7] })), { kind: 'owned', tenant: 7 })
 })

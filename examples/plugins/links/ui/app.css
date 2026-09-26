@@ -1,41 +1,5 @@
-/* Colours and fonts come from the app theme (--wk-* variables, set by the
-   bridge), with fallbacks for opening the page on its own. */
-:root {
-  color-scheme: light;
-  --fg: var(--wk-text-color-primary, #1f2329);
-  --muted: var(--wk-text-color-secondary, #646a73);
-  --line: var(--wk-component-border, #dee0e3);
-  --card: var(--wk-bg-color-container, #fff);
-  --brand: var(--wk-brand-color, #0052d9);
-  --danger: var(--wk-error-color, #d54941);
-  --radius: var(--wk-radius-default, 6px);
-}
-:root[data-theme='dark'] { color-scheme: dark; }
-* { box-sizing: border-box; }
-body {
-  margin: 0;
-  font: 14px/1.5 var(--wk-font-family, system-ui, sans-serif);
-  color: var(--fg);
-  background: transparent;
-}
-main { padding: 4px 2px 12px; }
-.empty { color: var(--muted); padding: 24px 0; text-align: center; }
-ul.links { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
-.links li {
-  display: flex; align-items: center; gap: 10px;
-  padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--card);
-}
-.links a { color: var(--brand); text-decoration: none; font-weight: 500; }
-.links a:hover { text-decoration: underline; }
-.links .url { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
-form { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
-input {
-  flex: 1; min-width: 140px; padding: 6px 10px; font: inherit; color: var(--fg);
-  background: var(--card); border: 1px solid var(--line); border-radius: var(--radius);
-}
-button {
-  padding: 6px 14px; font: inherit; border-radius: var(--radius); cursor: pointer;
-  border: 1px solid var(--brand); background: var(--brand); color: #fff;
-}
-button.remove { border-color: transparent; background: transparent; color: var(--danger); padding: 4px 8px; }
-button:disabled { opacity: 0.6; cursor: default; }
+/* Built on the WeKnora plugin UI kit (weknora-plugin-ui.css); only what is
+   particular to this page is here. */
+main { padding: 2px 0 12px; }
+.wk-row__title a { color: inherit; }
+.wk-row__title a:hover { color: var(--wk-brand); text-decoration: none; }

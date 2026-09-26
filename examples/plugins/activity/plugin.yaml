@@ -1,6 +1,6 @@
 schemaVersion: 1
 id: weknora-examples.activity
-version: 1.0.0
+version: 1.1.1
 apiVersion: weknora.plugin/v1
 name: { en-US: Activity feed, zh-CN: 动态 }
 description:
@@ -9,6 +9,7 @@ description:
 publisher: { id: weknora-examples, name: WeKnora examples }
 homepage: https://github.com/Tencent/WeKnora/tree/main/examples/plugins/activity
 license: MIT
+icon: icon.svg
 runtime: { type: host, kind: python, entry: main.py }
 config:
   tenant: schemas/tenant.yaml

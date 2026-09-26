@@ -129,8 +129,17 @@ func TestPluginHandlerTogglesPluginsPerTenant(t *testing.T) {
 	}
 	notion := builtinPlugin("weknora.notion", false, manifest.PointConnectors, "notion")
 	notion.IconData = "data:image/svg+xml;base64,PHN2Zy8+"
+	// Enabled: a plugin with a page sends its icon for the tab, one without
+	// pages does not.
+	links := builtinPlugin("weknora.links", false, manifest.PointPages, "links")
+	links.Contributes[manifest.PointPages][0].Entry = "ui/index.html"
+	links.IconData = "data:image/svg+xml;base64,PGxpbmtzLz4="
+	yuque := builtinPlugin("weknora.yuque", false, manifest.PointConnectors, "yuque")
+	yuque.IconData = "data:image/svg+xml;base64,PHl1cXVlLz4="
 	for _, m := range []*manifest.Manifest{
 		notion,
+		links,
+		yuque,
 		builtinPlugin("weknora.agent-tools", true, manifest.PointTools, "thinking"),
 	} {
 		if err := reg.Register(m); err != nil {
@@ -177,7 +186,26 @@ func TestPluginHandlerTogglesPluginsPerTenant(t *testing.T) {
 	if contribs.Data.PluginIcons["weknora.notion"] != notion.IconData {
 		t.Fatalf("a switched-off plugin's icon rides along: %v", contribs.Data.PluginIcons)
 	}
-	if got := contribs.Data.Contributions["connectors"]; len(got) != 1 || got[0]["enabled"] != false {
-		t.Fatalf("disabled plugin's contribution should read disabled: %v", got)
+	if got := contribs.Data.Contributions["connectors"]; len(got) != 2 {
+		t.Fatalf("connectors = %v", got)
+	}
+
+	var all struct {
+		Data struct {
+			PluginIcons map[string]string            `json:"pluginIcons"`
+			PluginNames map[string]map[string]string `json:"pluginNames"`
+		} `json:"data"`
+	}
+	if code := getJSON(t, r, "/plugins/contributions", &all); code != http.StatusOK {
+		t.Fatalf("contributions status = %d", code)
+	}
+	if all.Data.PluginIcons["weknora.links"] != links.IconData {
+		t.Fatalf("a plugin with pages sends its icon for the tab: %v", all.Data.PluginIcons)
+	}
+	if _, ok := all.Data.PluginIcons["weknora.yuque"]; ok {
+		t.Fatalf("an enabled plugin without pages needs no icon: %v", all.Data.PluginIcons)
+	}
+	if all.Data.PluginNames["weknora.links"]["default"] != "weknora.links" {
+		t.Fatalf("plugin names = %v", all.Data.PluginNames)
 	}
 }

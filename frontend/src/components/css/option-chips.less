@@ -1,0 +1,46 @@
+// A segmented filter: a row of text buttons on a sunken track, the active one
+// raised. Shared by the plugin center, plugin management and install drawer.
+.option-chips() {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 3px;
+  border-radius: var(--app-radius-md);
+  background: var(--td-bg-color-secondarycontainer);
+}
+
+.option-chip() {
+  border: none;
+  background: transparent;
+  color: var(--td-text-color-secondary);
+  font: inherit;
+  font-size: var(--app-text-md);
+  line-height: 1.3;
+  padding: 4px 12px;
+  border-radius: var(--app-radius-sm);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background var(--app-motion-fast) ease, color var(--app-motion-fast) ease;
+
+  &:hover:not(:disabled) {
+    color: var(--td-text-color-primary);
+  }
+
+  &:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+
+  &--active {
+    background: var(--td-bg-color-container);
+    color: var(--td-text-color-primary);
+    font-weight: 500;
+    box-shadow: 0 1px 2px color-mix(in srgb, var(--td-text-color-primary) 10%, transparent);
+  }
+}
+
+.option-chip-count() {
+  margin-left: 4px;
+  font-weight: 400;
+  color: var(--td-text-color-placeholder);
+}

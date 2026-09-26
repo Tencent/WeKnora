@@ -52,6 +52,8 @@ export interface ContributionListing {
   contributions: Partial<Record<ExtensionPoint, ListedContribution[]>>
   /** Icons (data URIs) of the plugins the workspace switched off. */
   pluginIcons?: Record<string, string>
+  /** Names of the listed plugins. */
+  pluginNames?: Record<string, LocalizedText>
 }
 
 export interface PluginPermissions {

@@ -47,7 +47,7 @@ async function load() {
     const { body } = await wk.get(path())
     render(Array.isArray(body) ? body : [])
   } catch (e) {
-    app.replaceChildren(el('p', { className: 'empty', textContent: e.message }))
+    app.replaceChildren(el('p', { className: 'wk-empty', textContent: e.message }))
   } finally {
     app.removeAttribute('aria-busy')
   }
@@ -65,24 +65,28 @@ async function save(links) {
 
 function render(links) {
   const editable = mode === 'manage' || (mode === 'kb' && wk.context.role !== 'viewer')
-  const list = el('ul', { className: 'links' })
+  const list = el('ul', { className: 'wk-list' })
   links.forEach((link, i) => {
-    const a = el('a', { href: link.url, target: '_blank', rel: 'noopener noreferrer', textContent: link.title })
-    const item = el('li', {}, a, el('span', { className: 'url', textContent: link.url }))
+    const title = el('div', { className: 'wk-row__title' },
+      el('a', { href: link.url, target: '_blank', rel: 'noopener noreferrer', textContent: link.title || link.url }))
+    const item = el('li', { className: 'wk-row' },
+      el('span', { className: 'wk-avatar', textContent: initial(link) }),
+      el('div', { className: 'wk-row__main' }, title, el('div', { className: 'wk-row__sub', textContent: link.url })))
     if (editable) {
-      const remove = el('button', { className: 'remove', type: 'button', textContent: text.remove })
+      const remove = el('button', { className: 'wk-btn wk-btn--text wk-btn--danger wk-btn--sm', type: 'button', textContent: text.remove })
       remove.addEventListener('click', async () => {
         if (await wk.confirm(text.confirm)) await save(links.filter((_, j) => j !== i))
       })
-      item.append(remove)
+      item.append(el('div', { className: 'wk-row__actions' }, remove))
     }
     list.append(item)
   })
-  const nodes = links.length ? [list] : [el('p', { className: 'empty', textContent: mode === 'manage' ? text.emptyManage : text.empty })]
+  const nodes = links.length ? [list] : [el('p', { className: 'wk-empty', textContent: mode === 'manage' ? text.emptyManage : text.empty })]
   if (editable) {
-    const title = el('input', { placeholder: text.title, maxLength: 120 })
-    const url = el('input', { placeholder: text.url, type: 'url', required: true })
-    const form = el('form', {}, title, url, el('button', { type: 'submit', textContent: text.add }))
+    const title = el('input', { className: 'wk-input', placeholder: text.title, maxLength: 120 })
+    const url = el('input', { className: 'wk-input', placeholder: text.url, type: 'url', required: true })
+    const form = el('form', { className: 'wk-toolbar wk-toolbar--below' }, title, url,
+      el('button', { className: 'wk-btn wk-btn--primary', type: 'submit', textContent: text.add }))
     form.addEventListener('submit', async (event) => {
       event.preventDefault()
       await save([...links, { title: title.value, url: url.value }])
@@ -90,6 +94,19 @@ function render(links) {
     nodes.push(form)
   }
   app.replaceChildren(...nodes)
+}
+
+// The first letter of a link's title, or of its host.
+function initial(link) {
+  let s = link.title
+  if (!s) {
+    try {
+      s = new URL(link.url).hostname.replace(/^www\./, '')
+    } catch {
+      s = link.url
+    }
+  }
+  return (s || '?').trim().charAt(0).toUpperCase()
 }
 
 await load()

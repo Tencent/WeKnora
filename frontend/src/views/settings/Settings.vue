@@ -99,7 +99,7 @@ const pluginPagesLoaded = ref(false)
 void pluginPages.ensure().catch(() => {}).finally(() => {
   pluginPagesLoaded.value = true
 })
-watch(() => pluginPages.settingsSections, syncPluginSettingsSections, { immediate: true })
+watch(() => pluginPages.settingsSections, (pages) => syncPluginSettingsSections(pages, pluginPages.pageIcon), { immediate: true })
 
 const currentSection = ref<string>('general')
 const currentSubSection = ref<string>('')

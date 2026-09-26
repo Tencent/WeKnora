@@ -5262,6 +5262,28 @@ export default {
     noCompatibleKbForAgent: '当前智能体的工具与作用域内知识库的能力不匹配，暂无可引用的知识库。'
   },
   pluginAdmin: {
+    searchPlaceholder: '搜索插件名称或 ID',
+    noMatch: '没有匹配的插件',
+    filters: {
+      all: '全部',
+      problem: '异常',
+      disabled: '已停用',
+      owned: '空间自有'
+    },
+    columns: {
+      plugin: '插件',
+      version: '版本',
+      runtime: '运行方式',
+      trust: '信任',
+      audience: '可见范围',
+      state: '状态'
+    },
+    menu: {
+      detail: '查看详情',
+      enable: '在全平台启用',
+      disable: '在全平台停用',
+      more: '更多操作'
+    },
     ownedBy: '空间 {tenant} 自有',
     runtime: {
       declarative: '声明式',
@@ -5270,14 +5292,14 @@ export default {
       kubernetes: 'Kubernetes 部署'
     },
     title: '插件管理',
-    description: '安装与管理本平台的插件。安装后所有空间都能看到，但每个空间需自行启用；停用会在所有节点卸载该插件。',
+    description: '安装并管理平台上的插件。安装后各空间还需自行启用。',
     installButton: '安装插件',
     empty: '还没有安装任何插件',
     loadFailed: '加载已安装插件失败',
     saveFailed: '保存失败',
     enabledToast: '已在全平台启用',
     disabledToast: '已在全平台停用',
-    platformSwitch: '全平台启用 / 停用',
+    platformSwitch: '全平台启用',
     publisher: '发布者',
     contributions: '提供的能力',
     permissions: '权限与外部访问',
@@ -5346,6 +5368,7 @@ export default {
       title: '可见范围',
       hint: '限定后，只有所选空间能看到并启用该插件；其他空间看不到它，已有的开关和配置保留，重新纳入后恢复。',
       all: '所有空间',
+      count: '{count} 个空间',
       some: '指定空间',
       placeholder: '搜索并选择空间',
       none: '未选择任何空间：没有空间能使用该插件。',
@@ -5353,29 +5376,47 @@ export default {
       saveFailed: '更新可见范围失败'
     },
     install: {
+      steps: {
+        source: '选择插件包',
+        review: '审阅',
+        done: '完成'
+      },
+      dropTitle: '把 .wkp 插件包拖到这里，或点击选择',
+      dropHint: '最大 64 MB。选中后自动检查，不会立即安装。',
+      inspecting: '正在检查插件包…',
+      next: '下一步',
+      back: '上一步',
+      finish: '完成',
+      doneHint: '各空间管理员可在插件中心启用它。',
+      doneConfig: '该插件需要平台配置，可在插件详情中填写。',
+      trustRow: '来源可信度',
+      anyHostHint: '请确认你信任该插件',
+      changeShort: {
+        install: '新安装',
+        upgrade: '升级',
+        downgrade: '降级',
+        reinstall: '重新安装'
+      },
+      confirmTo: {
+        upgrade: '升级到 v{version}',
+        downgrade: '降级到 v{version}'
+      },
       title: '安装插件',
       description: '上传 .wkp 插件包或填写下载地址，审阅后安装。',
-      sourceSection: '插件包',
       mode: {
         upload: '上传文件',
         url: '从 URL 下载',
         market: '从插件市场'
       },
-      fileLabel: '插件包文件',
-      chooseFile: '选择文件',
-      noFile: '未选择文件',
-      fileHint: '.wkp 文件（包含 plugin.yaml 的 zip），最大 64 MB。',
       urlLabel: '下载地址',
       urlHint: '服务端会下载该地址；不允许内网地址。',
       remoteUrlLabel: '服务地址',
       remoteUrlHint: '插件服务的 HTTP(S) 地址。内网地址需要加入 SSRF_WHITELIST。',
       remoteUrlKeep: '升级时可留空，沿用当前地址',
-      reviewSection: '安装前审阅',
       noPermissions: '该插件不申请任何额外权限。',
       configNotice: '该插件需要配置：平台配置在安装后的详情中填写，空间配置由各空间管理员在插件中心填写。',
       tenantNotice: '安装后插件对所有空间可见，但默认停用，由各空间管理员自行启用。',
       digest: '包摘要',
-      inspect: '检查插件包',
       confirm: {
         install: '安装',
         upgrade: '升级',
@@ -5434,10 +5475,45 @@ export default {
   pluginPages: {
     notResponding: '插件页面没有响应，可能加载失败。',
     requestFailed: '插件请求失败',
-    fromPlugin: '由插件 {id} 提供'
+    fromPlugin: '由插件「{name}」提供'
   },
   pluginCenter: {
+    tabs: {
+      installed: '已安装',
+      builtin: '内置'
+    },
+    categories: {
+      data: '数据接入',
+      model: '模型',
+      tool: '工具与搜索',
+      channel: '消息渠道',
+      ui: '页面与流程'
+    },
+    where: {
+      modelVendors: '在「模型管理」中添加模型',
+      connectors: '在知识库「数据源」中添加',
+      imChannels: '在智能体的「IM 渠道」中添加',
+      webSearch: '在「网络搜索」中添加',
+      tools: '在智能体的工具中勾选',
+      parsers: '在「解析引擎」中选择',
+      chunkers: '在知识库「分块设置」中选择',
+      pipelineHooks: '知识库问答时自动生效',
+      skills: '在智能体的技能中启用',
+      mcpServers: '在智能体的工具中勾选',
+      pages: '在「工具箱」中打开',
+      settingsSections: '在设置的「扩展」分组中',
+      kbTabs: '在知识库详情的页签中',
+      webhooks: '地址见下方'
+    },
+    detail: {
+      enabledHere: '本空间启用',
+      config: '空间配置'
+    },
+    noneInstalled: '还没有安装插件，系统管理员可在「插件管理」中安装。',
+    off: '已停用',
     own: {
+      section: '服务与密钥',
+      updateHint: '上传新版本的插件包，审阅后替换当前版本。',
       register: '登记自有插件',
       title: '登记本空间自有插件',
       description: '上传远程插件的 .wkp 包或填写下载地址，并填写插件服务的地址。插件代码运行在你们自己的服务器上。',
@@ -5465,7 +5541,7 @@ export default {
     configSaveFailed: '保存插件配置失败',
     navGroup: '扩展',
     title: '插件',
-    description: '本部署提供的所有插件，含内置插件与平台管理员安装的插件。在这里为当前空间启用或停用：停用后其集成不再出现在类型列表中、不能新建，已有的照常工作。安装的插件默认停用，需空间管理员启用。',
+    description: '为本空间启用插件。停用后它提供的集成不能再新建，已有的照常工作。',
     searchPlaceholder: '搜索插件名称、ID 或集成',
     allPoints: '全部',
     empty: '没有匹配的插件',

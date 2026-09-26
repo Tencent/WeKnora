@@ -5260,6 +5260,28 @@ export default {
     noCompatibleKbForAgent: '현재 에이전트의 도구와 범위 내 지식베이스의 기능이 일치하지 않아 참조할 수 있는 지식베이스가 없습니다.'
   },
   pluginAdmin: {
+    searchPlaceholder: '이름 또는 ID로 검색',
+    noMatch: '일치하는 플러그인이 없습니다',
+    filters: {
+      all: '전체',
+      problem: '이상',
+      disabled: '비활성',
+      owned: '공간 소유'
+    },
+    columns: {
+      plugin: '플러그인',
+      version: '버전',
+      runtime: '실행 방식',
+      trust: '신뢰',
+      audience: '공개 범위',
+      state: '상태'
+    },
+    menu: {
+      detail: '상세 보기',
+      enable: '전체 활성화',
+      disable: '전체 비활성화',
+      more: '추가 작업'
+    },
     ownedBy: '공간 {tenant} 자체',
     runtime: {
       declarative: '선언형',
@@ -5268,14 +5290,14 @@ export default {
       kubernetes: 'Kubernetes'
     },
     title: '플러그인 관리',
-    description: '플랫폼 전체의 플러그인을 설치하고 관리합니다. 설치된 플러그인은 모든 워크스페이스에 보이며 각 워크스페이스가 직접 활성화합니다. 여기서 비활성화하면 모든 노드에서 언로드됩니다.',
+    description: '플랫폼의 플러그인을 설치하고 관리합니다. 각 공간에서 별도로 활성화해야 합니다.',
     installButton: '플러그인 설치',
     empty: '설치된 플러그인이 없습니다',
     loadFailed: '설치된 플러그인을 불러오지 못했습니다',
     saveFailed: '저장하지 못했습니다',
     enabledToast: '플랫폼 전체에서 활성화했습니다',
     disabledToast: '플랫폼 전체에서 비활성화했습니다',
-    platformSwitch: '플랫폼 전체 활성화 / 비활성화',
+    platformSwitch: '전체 활성화',
     publisher: '게시자',
     contributions: '제공 기능',
     permissions: '권한 및 외부 접근',
@@ -5344,6 +5366,7 @@ export default {
       title: '공개 범위',
       hint: '제한하면 선택한 공간만 플러그인을 보고 활성화할 수 있습니다. 다른 공간에서는 보이지 않으며, 스위치와 설정은 유지되어 다시 포함하면 복원됩니다.',
       all: '모든 공간',
+      count: '공간 {count}개',
       some: '지정한 공간',
       placeholder: '공간 검색 및 선택',
       none: '선택한 공간이 없습니다. 어떤 공간도 사용할 수 없습니다.',
@@ -5351,29 +5374,47 @@ export default {
       saveFailed: '공개 범위를 업데이트하지 못했습니다'
     },
     install: {
+      steps: {
+        source: '패키지 선택',
+        review: '검토',
+        done: '완료'
+      },
+      dropTitle: '.wkp 패키지를 여기로 끌어오거나 클릭해 선택',
+      dropHint: '최대 64 MB. 선택하면 먼저 검사하며 바로 설치하지 않습니다.',
+      inspecting: '패키지 검사 중…',
+      next: '다음',
+      back: '이전',
+      finish: '완료',
+      doneHint: '각 공간 관리자가 플러그인 센터에서 활성화할 수 있습니다.',
+      doneConfig: '플랫폼 설정이 필요합니다. 플러그인 상세에서 입력하세요.',
+      trustRow: '신뢰도',
+      anyHostHint: '이 플러그인을 신뢰하는지 확인하세요',
+      changeShort: {
+        install: '새로 설치',
+        upgrade: '업그레이드',
+        downgrade: '다운그레이드',
+        reinstall: '재설치'
+      },
+      confirmTo: {
+        upgrade: 'v{version}(으)로 업그레이드',
+        downgrade: 'v{version}(으)로 다운그레이드'
+      },
       title: '플러그인 설치',
       description: '.wkp 패키지를 업로드하거나 다운로드 URL을 입력하고, 검토한 뒤 설치합니다.',
-      sourceSection: '패키지',
       mode: {
         upload: '파일 업로드',
         url: 'URL에서',
         market: '마켓에서'
       },
-      fileLabel: '패키지 파일',
-      chooseFile: '파일 선택',
-      noFile: '선택된 파일 없음',
-      fileHint: '.wkp 파일(plugin.yaml이 포함된 zip), 최대 64 MB.',
       urlLabel: '다운로드 URL',
       urlHint: '서버가 이 URL에서 다운로드합니다. 사설 네트워크 주소는 거부됩니다.',
       remoteUrlLabel: '서비스 URL',
       remoteUrlHint: '플러그인 서비스의 HTTP(S) 주소입니다. 사설 네트워크 호스트는 SSRF_WHITELIST에 추가해야 합니다.',
       remoteUrlKeep: '업그레이드 시 비워 두면 현재 URL을 계속 사용합니다',
-      reviewSection: '설치 전 검토',
       noPermissions: '이 플러그인은 추가 권한을 요청하지 않습니다.',
       configNotice: '이 플러그인은 설정이 필요합니다. 플랫폼 설정은 설치 후 상세 화면에서, 워크스페이스 설정은 각 워크스페이스 관리자가 플러그인 센터에서 입력합니다.',
       tenantNotice: '설치 후 플러그인은 모든 워크스페이스에 보이지만 워크스페이스 관리자가 활성화하기 전까지 비활성 상태입니다.',
       digest: '패키지 다이제스트',
-      inspect: '패키지 검사',
       confirm: {
         install: '설치',
         upgrade: '업그레이드',
@@ -5432,10 +5473,45 @@ export default {
   pluginPages: {
     notResponding: '플러그인 페이지가 응답하지 않습니다. 로드에 실패했을 수 있습니다.',
     requestFailed: '플러그인 요청에 실패했습니다',
-    fromPlugin: '플러그인 {id} 제공'
+    fromPlugin: '플러그인 「{name}」 제공'
   },
   pluginCenter: {
+    tabs: {
+      installed: '설치됨',
+      builtin: '기본 제공'
+    },
+    categories: {
+      data: '데이터 연결',
+      model: '모델',
+      tool: '도구와 검색',
+      channel: '메시지 채널',
+      ui: '페이지와 흐름'
+    },
+    where: {
+      modelVendors: '「모델 관리」에서 모델 추가',
+      connectors: '지식 베이스 「데이터 소스」에서 추가',
+      imChannels: '에이전트의 「IM 채널」에서 추가',
+      webSearch: '「웹 검색」에서 추가',
+      tools: '에이전트 도구에서 선택',
+      parsers: '「파서 엔진」에서 선택',
+      chunkers: '지식 베이스 「청크 설정」에서 선택',
+      pipelineHooks: '지식 베이스 Q&A에 자동 적용',
+      skills: '에이전트 스킬에서 사용',
+      mcpServers: '에이전트 도구에서 선택',
+      pages: '「도구 상자」에서 열기',
+      settingsSections: '설정의 「확장」 그룹',
+      kbTabs: '지식 베이스 상세의 탭',
+      webhooks: '주소는 아래 참고'
+    },
+    detail: {
+      enabledHere: '이 공간에서 사용',
+      config: '공간 설정'
+    },
+    noneInstalled: '아직 설치된 플러그인이 없습니다. 시스템 관리자가 「플러그인 관리」에서 설치할 수 있습니다.',
+    off: '꺼짐',
     own: {
+      section: '서비스와 키',
+      updateHint: '새 버전 패키지를 업로드하고 검토한 뒤 현재 버전을 교체합니다.',
       register: '자체 플러그인 등록',
       title: '이 공간의 자체 플러그인 등록',
       description: '원격 플러그인 .wkp 패키지를 업로드하거나 URL을 입력하고, 서비스 주소를 입력하세요. 플러그인 코드는 자체 서버에서 실행됩니다.',
@@ -5463,7 +5539,7 @@ export default {
     configSaveFailed: '플러그인 설정을 저장하지 못했습니다',
     navGroup: '확장',
     title: '플러그인',
-    description: '이 배포에서 제공하는 모든 플러그인(내장 플러그인과 시스템 관리자가 설치한 플러그인). 이 워크스페이스에서 활성화하거나 비활성화할 수 있습니다. 비활성화된 플러그인의 연동은 유형 목록에서 빠지고 새로 만들 수 없지만 기존 항목은 계속 동작합니다. 설치된 플러그인은 워크스페이스 관리자가 활성화하기 전까지 비활성 상태입니다.',
+    description: '이 공간에서 플러그인을 켭니다. 끄면 새 연동을 만들 수 없고 기존 연동은 그대로 동작합니다.',
     searchPlaceholder: '플러그인 이름, ID 또는 연동 검색',
     allPoints: '전체',
     empty: '일치하는 플러그인이 없습니다',

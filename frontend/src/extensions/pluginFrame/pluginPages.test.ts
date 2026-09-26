@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import type { ContributionListing, ListedContribution } from '../../api/plugin'
-import { findPage, pageFileUrl, pagesOf } from './pluginPages'
+import { findPage, pageFileUrl, pageIconUrl, pageProvider, pagesOf } from './pluginPages'
 
 const c = (over: Partial<ListedContribution>): ListedContribution => ({
   id: 'links', name: { default: 'Links' }, pluginId: 'acme.links', qualifiedId: 'acme.links/links',
@@ -41,4 +41,16 @@ test('pageFileUrl escapes each segment', () => {
   const page = pagesOf(listing, 'pages')[0]
   assert.equal(pageFileUrl('/app', page), '/app/api/v1/plugin-ui/assets/acme.links/1.0.0/ui/index.html')
   assert.equal(pageFileUrl('', page, 'ui/a b.js'), '/api/v1/plugin-ui/assets/acme.links/1.0.0/ui/a%20b.js')
+})
+
+test('page icons and providers', () => {
+  const [withIcon, plain] = pagesOf(listing, 'pages')
+  const icon = 'data:image/svg+xml;base64,PHN2Zy8+'
+  const named = { ...listing, pluginIcons: { 'acme.links': icon }, pluginNames: { 'acme.links': { default: 'Links', 'zh-CN': '链接' } } }
+  assert.equal(pageIconUrl('', named, withIcon), '/api/v1/plugin-ui/assets/acme.links/1.0.0/ui/icon.svg')
+  assert.equal(pageIconUrl('', named, plain), icon)
+  assert.equal(pageIconUrl('', listing, plain), undefined)
+  assert.equal(pageIconUrl('', { ...listing, pluginIcons: { 'acme.links': 'javascript:alert(1)' } }, plain), undefined)
+  assert.equal(pageProvider(named, plain, 'zh-CN'), '链接')
+  assert.equal(pageProvider(listing, plain, 'zh-CN'), 'acme.links')
 })

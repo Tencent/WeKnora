@@ -44,6 +44,34 @@ Ship `index.js` inside the plugin package, for example as
   `--wk-text-color-primary`, `--wk-bg-color-container` and
   `--wk-component-border`.
 
+## Looking like the app
+
+`kit.css` gives a page the app's look without a framework. Ship it next to
+the bridge, for example as `ui/weknora-plugin-ui.css`, and link it before
+your own stylesheet:
+
+```html
+<link rel="stylesheet" href="weknora-plugin-ui.css" />
+```
+
+It reads the `--wk-*` tokens `connect()` sets, so pages follow the app's
+colours and dark mode. The primitives:
+
+| Class | For |
+| --- | --- |
+| `wk-list`, `wk-row` (`__main`, `__title`, `__sub`, `__meta`, `__actions`) | A bordered list of rows, the shape of most pages |
+| `wk-avatar` | A letter or icon at the start of a row |
+| `wk-btn` (`--primary`, `--text`, `--danger`, `--sm`) | Buttons |
+| `wk-input` | Text inputs |
+| `wk-tag` (`--brand`, `--success`, `--warning`, `--danger`) | Status labels |
+| `wk-seg` | A segmented filter; mark the active button `aria-pressed="true"` |
+| `wk-toolbar` (`--end`, `--below`) | A row of controls above or below a list |
+| `wk-empty`, `wk-muted` | Empty states and secondary text |
+
+The app draws the page's title and surface. In a settings section it shows
+the section name, its description and which plugin provides it, so the page
+starts with its content, not a heading.
+
 ## Where pages appear
 
 Declare pages in `plugin.yaml` with an `entry` under `ui/`:

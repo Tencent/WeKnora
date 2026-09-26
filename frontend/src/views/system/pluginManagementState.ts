@@ -187,3 +187,48 @@ export function hasSystemConfig(m: PluginManifest | undefined): boolean {
   const props = m?.config?.systemSchema?.properties
   return !!props && Object.keys(props).length > 0
 }
+
+/** The filters above the installed-plugin table. */
+export const ADMIN_FILTERS = ['all', 'problem', 'disabled', 'owned'] as const
+export type AdminFilter = (typeof ADMIN_FILTERS)[number]
+
+export function matchesAdminFilter(p: InstalledPlugin, f: AdminFilter): boolean {
+  switch (f) {
+    case 'problem': {
+      const s = installedState(p)
+      return s === 'failed' || s === 'degraded'
+    }
+    case 'disabled':
+      return p.desired_state === 'disabled'
+    case 'owned':
+      return !!p.owner_tenant_id
+    default:
+      return true
+  }
+}
+
+/** Installed plugins matching a filter and a search over ID and name, sorted by ID. */
+export function filterInstalled(
+  list: readonly InstalledPlugin[],
+  f: { query: string; filter: AdminFilter; locale: string },
+): InstalledPlugin[] {
+  const q = f.query.trim().toLowerCase()
+  return list
+    .filter((p) => matchesAdminFilter(p, f.filter))
+    .filter((p) => !q || [p.id, p.manifest ? localizedText(p.manifest.name, f.locale) : ''].some((s) => s.toLowerCase().includes(q)))
+    .sort((a, b) => a.id.localeCompare(b.id))
+}
+
+/** The trust level of the version a plugin runs. */
+export function activeTrust(p: InstalledPlugin): TrustLevel {
+  return p.versions?.find((v) => v.version === p.active_version)?.trust ?? 'community'
+}
+
+/** Who can see a plugin, for the table's visibility column. */
+export function audienceSummary(
+  p: InstalledPlugin,
+): { kind: 'owned'; tenant: number } | { kind: 'all' } | { kind: 'some'; count: number } {
+  if (p.owner_tenant_id) return { kind: 'owned', tenant: p.owner_tenant_id }
+  const a = audienceOf(p)
+  return a === null ? { kind: 'all' } : { kind: 'some', count: a.length }
+}

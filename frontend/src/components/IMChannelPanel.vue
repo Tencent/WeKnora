@@ -306,6 +306,7 @@
 </template>
 
 <script setup lang="ts">
+import { IM_PLATFORM_LOGOS } from '@/components/imPlatformLogos';
 import { ref, onMounted, watch, onUnmounted, computed } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { MessagePlugin } from 'tdesign-vue-next';
@@ -324,33 +325,12 @@ import SchemaForm from '@/components/schema-form/SchemaForm.vue';
 import { applyDefaults, schemaAt, validateConfig, type FieldError } from '@/components/schema-form/schema';
 import { useSchemaText } from '@/components/schema-form/useSchemaText';
 import IntegrationsAgentFilter from '@/components/IntegrationsAgentFilter.vue';
-import wecomLogo from '@/assets/img/im/wecom.svg';
-import feishuLogo from '@/assets/img/im/feishu.svg';
-import larkLogo from '@/assets/img/im/lark.svg';
-import slackLogo from '@/assets/img/im/slack.svg';
-import telegramLogo from '@/assets/img/im/telegram.svg';
-import dingtalkLogo from '@/assets/img/im/dingtalk.svg';
-import mattermostLogo from '@/assets/img/im/mattermost.svg';
-import wechatLogo from '@/assets/img/im/wechat.svg';
-import qqbotLogo from '@/assets/img/im/qqbot.png';
-import yunzhijiaLogo from '@/assets/img/im/yunzhijia.svg';
 import PluginOffTag from '@/components/plugins/PluginOffTag.vue';
 
 type IMPlatform = IMChannel['platform'];
 type IMLocale = NonNullable<IMChannel['locale']>;
 
-const PLATFORM_LOGO: Record<string, string> = {
-  wecom: wecomLogo,
-  feishu: feishuLogo,
-  lark: larkLogo,
-  slack: slackLogo,
-  telegram: telegramLogo,
-  dingtalk: dingtalkLogo,
-  mattermost: mattermostLogo,
-  wechat: wechatLogo,
-  qqbot: qqbotLogo,
-  yunzhijia: yunzhijiaLogo,
-};
+const PLATFORM_LOGO = IM_PLATFORM_LOGOS;
 
 const platformLogo = (platform: string): string => (platform ? PLATFORM_LOGO[platform] || '' : '');
 

@@ -3,7 +3,6 @@
     :visible="visible"
     :title="title"
     :description="plugin ? `${plugin.id} · v${plugin.active_version}` : ''"
-    icon="app"
     width="640px"
     :confirm-text="t('common.save')"
     :confirm-loading="saving"
@@ -12,6 +11,21 @@
     @update:visible="(v: boolean) => emit('update:visible', v)"
     @confirm="saveConfig"
   >
+    <template #headerIcon>
+      <PluginBadge v-if="plugin" :manifest="plugin.manifest" size="md" />
+    </template>
+    <template #header-actions>
+      <div v-if="plugin" class="platform-switch">
+        <span>{{ t('pluginAdmin.platformSwitch') }}</span>
+        <t-switch
+          size="small"
+          :model-value="plugin.desired_state === 'enabled'"
+          :loading="pending"
+          :disabled="pending"
+          @update:model-value="(v: boolean) => emit('toggle', v)"
+        />
+      </div>
+    </template>
     <template v-if="plugin">
       <section class="setting-drawer__section">
         <h4 class="setting-drawer__section-title">{{ t('pluginAdmin.detail.overview') }}</h4>
@@ -38,13 +52,7 @@
             <dd><code class="facts__code">{{ manifest.engines.weknora }}</code></dd>
           </template>
         </dl>
-        <ul v-if="contributions.length" class="line-list">
-          <li v-for="c in contributions" :key="c.id">
-            <span class="line-list__tag">{{ t(`pluginCenter.points.${c.point}`) }}</span>
-            <span>{{ c.name }}</span>
-            <code v-if="c.detail" class="line-list__muted">{{ c.detail }}</code>
-          </li>
-        </ul>
+        <PluginCapabilityList v-if="manifest" :manifest="manifest" show="detail" class="caps" />
       </section>
 
       <section class="setting-drawer__section">
@@ -181,6 +189,8 @@ import { useI18n } from 'vue-i18n'
 import { MessagePlugin } from 'tdesign-vue-next'
 
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
+import PluginBadge from '@/components/plugins/PluginBadge.vue'
+import PluginCapabilityList from '@/components/plugins/PluginCapabilityList.vue'
 import SchemaForm from '@/components/schema-form/SchemaForm.vue'
 import { pluginFormSource } from '@/components/schema-form/pluginSource'
 import { provideSchemaFormSource } from '@/components/schema-form/source'
@@ -202,7 +212,6 @@ import { localizedText } from '@/utils/localizedText'
 import {
   audienceOf,
   compareVersions,
-  contributionLines,
   formatBytes,
   hasSystemConfig,
   isPackageUrl,
@@ -212,9 +221,10 @@ import {
   trustTheme,
 } from '../pluginManagementState'
 
-const props = defineProps<{ visible: boolean; plugin: InstalledPlugin | null }>()
+const props = defineProps<{ visible: boolean; plugin: InstalledPlugin | null; pending?: boolean }>()
 const emit = defineEmits<{
   'update:visible': [value: boolean]
+  toggle: [enabled: boolean]
   changed: [plugin: InstalledPlugin]
   removed: [id: string]
 }>()
@@ -223,7 +233,6 @@ const { t, te, locale } = useI18n()
 
 const manifest = computed(() => props.plugin?.manifest)
 const title = computed(() => (manifest.value ? localizedText(manifest.value.name, locale.value) : props.plugin?.id ?? ''))
-const contributions = computed(() => (manifest.value ? contributionLines(manifest.value, locale.value) : []))
 const versions = computed(() => sortVersions(props.plugin?.versions ?? []))
 
 const instances = ref<PluginInstance[]>([])
@@ -423,6 +432,18 @@ async function uninstall() {
 </script>
 
 <style lang="less" scoped>
+.caps {
+  margin-top: 12px;
+}
+
+.platform-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--app-text-md);
+  color: var(--td-text-color-secondary);
+}
+
 .facts {
   display: grid;
   grid-template-columns: max-content 1fr;
