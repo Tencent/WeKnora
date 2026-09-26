@@ -29,37 +29,25 @@ const (
 	obFieldKeyCaptureCaption = "capture_caption"
 )
 
-// Fields declares this pipeline's private controls. Both default true, which
-// leaves the behaviour an untouched knowledge base gets today: observe, caption,
-// then follow the attribute policy.
-func (obCapOcrPipeline) Fields() []types.ImageFieldDef {
-	return []types.ImageFieldDef{
-		{
-			Key:   obFieldKeyAllowOCR,
-			Type:  types.ImageFieldTypeBool,
-			Label: "Allow OCR",
-			Description: "Ceiling on the attribute policy: with this off, no image is " +
-				"OCR'd whatever its attributes say.",
-			Default: true,
-		},
-		{
-			Key:   obFieldKeyCaptureCaption,
-			Type:  types.ImageFieldTypeBool,
-			Label: "Capture caption",
-			Description: "Keep the description the observation produced. Turning it off " +
-				"observes the attributes but stores no caption.",
-			Default: true,
-		},
-	}
-}
+// Fields declares this pipeline's panel controls. There are none on purpose:
+// the model decides from the observed attributes whether OCR is worth a second
+// pass, and the caption the observation produced is always kept. The two
+// tunables below stay readable as parameters, so an API caller can still set a
+// hard ceiling, but they are not offered as switches — an untouched knowledge
+// base therefore behaves exactly as it does today, with both defaults true.
+// The empty slice (not nil) keeps the endpoint's JSON an array rather than
+// null, so the panel contract stays uniform across pipelines.
+func (obCapOcrPipeline) Fields() []types.ImageFieldDef { return []types.ImageFieldDef{} }
 
 func (obCapOcrPipeline) Run(ctx context.Context, r *runContext) error {
 	// One request fills both the attribute slots and the caption slot, so there
-	// Recorded before the branches below, not after: the skipped-OCR path is
+	// is no separate caption action to schedule here. The effective values are
+	// recorded before the branches below, not after: the skipped-OCR path is
 	// exactly the one where knowing which switches were in force matters most.
-	r.out["params"] = r.ParamSnapshot(obFieldKeyAllowOCR, obFieldKeyCaptureCaption)
-
-	// is no separate caption action to schedule here.
+	r.out["params"] = types.JSONMap{
+		obFieldKeyAllowOCR:       r.BoolParamOr(obFieldKeyAllowOCR, true),
+		obFieldKeyCaptureCaption: r.BoolParamOr(obFieldKeyCaptureCaption, true),
+	}
 	if err := r.execute(ctx, types.ImageActionObservationCaption); err != nil {
 		return err
 	}
@@ -68,7 +56,7 @@ func (obCapOcrPipeline) Run(ctx context.Context, r *runContext) error {
 	// only says whether OCR is allowed at all. Both lines are recorded even
 	// when OCR is skipped, because the trace has to show the decision that was
 	// made rather than an OCR chunk that is simply missing.
-	want := r.BoolParam(obFieldKeyAllowOCR) &&
+	want := r.BoolParamOr(obFieldKeyAllowOCR, true) &&
 		DecideOCR(r.imageInfo.Attrs, r.payload.ImageActions)
 	r.out["attr_policy"] = types.JSONMap{"ocr": want}
 	r.out["image_attrs"] = r.imageInfo.Attrs.Attrs

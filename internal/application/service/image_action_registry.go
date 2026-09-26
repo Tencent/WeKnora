@@ -158,17 +158,26 @@ func (r *runContext) Param(key string) any {
 	return nil
 }
 
-// BoolParam reads a boolean tunable. JSON hands a map[string]any an unmarshalled
-// "true" as a real bool, but a config written by hand may use a string, so both
-// are read; anything else falls back to the declared default.
+// BoolParam reads a boolean tunable. JSON hands a map[string]any an
+// unmarshalled "true" as a real bool, but a config written by hand may use a
+// string, so both are read; anything else falls back to false.
 func (r *runContext) BoolParam(key string) bool {
+	return r.BoolParamOr(key, false)
+}
+
+// BoolParamOr reads a boolean tunable the way BoolParam does, but falls back
+// to def when neither the stored params nor a declared field default answers.
+// A pipeline that reads a key it does not declare in Fields() — a control it
+// deliberately keeps off the panel — pins its working default here, at the
+// one place the key is read.
+func (r *runContext) BoolParamOr(key string, def bool) bool {
 	switch v := r.Param(key).(type) {
 	case bool:
 		return v
 	case string:
 		return v == "true" || v == "1" || v == "on"
 	}
-	return false
+	return def
 }
 
 // ParamSnapshot renders the given keys as a plain map for the trace row.
@@ -240,10 +249,11 @@ func runObservationCaptionAction(ctx context.Context, r *runContext) error {
 	obs, ok := types.ParseImageAttrsResponse(raw)
 	// Whether the description reaches the caption slot is this pipeline's
 	// business, so the observation reads its own key rather than a payload
-	// field. With the default it stays a by-product; turning it off observes
-	// the attributes and records nothing to caption.
+	// field. The key is not declared in Fields(), so the working default is
+	// pinned here: with it, the caption stays a by-product; an API caller
+	// passing false observes the attributes and records nothing to caption.
 	applyImageObservation(r.imageInfo, obs.Attrs, obs.Description, r.out,
-		r.BoolParam(obFieldKeyCaptureCaption))
+		r.BoolParamOr(obFieldKeyCaptureCaption, true))
 	if !obs.Observed {
 		// The model ignored the attribute protocol — a user custom instruction
 		// may have derailed the format, or it answered in prose. Nothing is

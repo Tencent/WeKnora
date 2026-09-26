@@ -227,6 +227,27 @@ func TestParamFallsBackToDeclaredDefault(t *testing.T) {
 	}
 }
 
+// TestObservationPipelineDeclaresNoControls pins the panel contract of
+// ob_cap_ocr: the model decides from the observed attributes, so the pipeline
+// declares no fields and the panel renders nothing for it. Its two tunables
+// remain readable as parameters for an API caller, defaulting to true — the
+// behaviour an untouched knowledge base has always had.
+func TestObservationPipelineDeclaresNoControls(t *testing.T) {
+	pipeline := imagePipelineRegistry[types.ImagePipelineObCapOCR]
+	if fields := pipeline.Fields(); len(fields) != 0 {
+		t.Errorf("ob_cap_ocr declares %d fields, want none — the panel must not offer manual switches",
+			len(fields))
+	}
+	r := &runContext{out: types.JSONMap{}, imageInfo: &types.ImageInfo{}, declared: pipeline.Fields()}
+	if !r.BoolParamOr(obFieldKeyAllowOCR, true) {
+		t.Error("allow_ocr with no params must default to true")
+	}
+	r.params = map[string]any{obFieldKeyAllowOCR: false}
+	if r.BoolParamOr(obFieldKeyAllowOCR, true) {
+		t.Error("an explicit allow_ocr=false must override the pinned default")
+	}
+}
+
 // TestUnknownPipelineFieldIsIgnored keeps a stale stored parameter harmless. A
 // knowledge base may carry a key the running pipeline no longer declares; it
 // must not leak into the trace snapshot nor change the run.
