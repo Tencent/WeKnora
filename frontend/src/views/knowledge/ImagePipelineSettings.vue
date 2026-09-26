@@ -223,7 +223,7 @@ watch(() => props.pipelineId, () => {
     .desc {
       margin: 4px 0 0;
       opacity: 0.75;
-      font-size: 12px;
+      font-size: var(--app-text-sm);
       line-height: 1.5;
     }
   }
@@ -236,7 +236,7 @@ watch(() => props.pipelineId, () => {
   .image-pipeline-desc {
     margin: -4px 0 0;
     opacity: 0.75;
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     line-height: 1.5;
 
     &--error {
@@ -248,7 +248,7 @@ watch(() => props.pipelineId, () => {
 
   .image-pipeline-hint {
     opacity: 0.75;
-    font-size: 13px;
+    font-size: var(--app-text-md);
 
     &--error {
       color: var(--error-color, #d54941);
