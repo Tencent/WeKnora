@@ -49,6 +49,14 @@ type Activator interface {
 	Deactivate(ctx context.Context, pluginID string) error
 }
 
+// InPlaceActivator swaps an upgraded plugin itself inside Activate (the host
+// starts the new process before stopping the old one), so it is not
+// deactivated first.
+type InPlaceActivator interface {
+	Activator
+	ActivatesInPlace()
+}
+
 // Status is how a plugin fares on this node.
 type Status struct {
 	Version   string    `json:"version"`
@@ -61,6 +69,9 @@ type Status struct {
 const (
 	StateReady  = "ready"
 	StateFailed = "failed"
+	// StateDegraded: loaded, but its process crashed or fails health checks
+	// and is being restarted.
+	StateDegraded = "degraded"
 )
 
 // DefaultInterval is how often a node reconciles without being told to.
@@ -208,7 +219,8 @@ func (r *Reconciler) ensure(ctx context.Context, row types.InstalledPlugin) erro
 	l := &Loaded{Manifest: p.Manifest, Package: p, Dir: dir}
 	var errs []error
 	for _, a := range r.activators {
-		if _, had := r.loaded[row.ID]; had {
+		_, inPlace := a.(InPlaceActivator)
+		if _, had := r.loaded[row.ID]; had && !inPlace {
 			if err := a.Deactivate(ctx, row.ID); err != nil {
 				errs = append(errs, fmt.Errorf("%s: deactivate previous version: %w", a.Name(), err))
 			}
@@ -228,7 +240,9 @@ func (r *Reconciler) ensure(ctx context.Context, row types.InstalledPlugin) erro
 }
 
 func (r *Reconciler) unload(ctx context.Context, id string) {
-	for _, a := range r.activators {
+	// Reverse order: routes go before the processes they route to.
+	for i := len(r.activators) - 1; i >= 0; i-- {
+		a := r.activators[i]
 		if err := a.Deactivate(ctx, id); err != nil {
 			logger.Warnf(ctx, "[plugin] %s: deactivate %s: %v", a.Name(), id, err)
 		}
@@ -284,6 +298,28 @@ func (r *Reconciler) setStatus(id string, s Status) {
 	r.statusMu.Lock()
 	r.status[id] = s
 	r.statusMu.Unlock()
+}
+
+// ReportRuntime records a loaded plugin's runtime health (a host process that
+// crashed and is restarting, or recovered) and publishes it at once.
+func (r *Reconciler) ReportRuntime(pluginID string, healthy bool, err error) {
+	r.statusMu.Lock()
+	s, ok := r.status[pluginID]
+	if !ok || s.State == StateFailed {
+		r.statusMu.Unlock()
+		return
+	}
+	s.State, s.Error = StateReady, ""
+	if !healthy {
+		s.State = StateDegraded
+		if err != nil {
+			s.Error = err.Error()
+		}
+	}
+	s.UpdatedAt = time.Now()
+	r.status[pluginID] = s
+	r.statusMu.Unlock()
+	r.publishStatuses(context.Background())
 }
 
 // Status reports how one plugin fares on this node.

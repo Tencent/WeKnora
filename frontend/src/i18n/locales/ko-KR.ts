@@ -5252,6 +5252,10 @@ export default {
     noCompatibleKbForAgent: '현재 에이전트의 도구와 범위 내 지식베이스의 기능이 일치하지 않아 참조할 수 있는 지식베이스가 없습니다.'
   },
   pluginAdmin: {
+    runtime: {
+      declarative: '선언형',
+      host: '로컬 프로세스'
+    },
     title: '플러그인 관리',
     description: '플랫폼 전체의 플러그인을 설치하고 관리합니다. 설치된 플러그인은 모든 워크스페이스에 보이며 각 워크스페이스가 직접 활성화합니다. 여기서 비활성화하면 모든 노드에서 언로드됩니다.',
     installButton: '플러그인 설치',
@@ -5265,6 +5269,7 @@ export default {
     contributions: '제공 기능',
     permissions: '권한 및 외부 접근',
     state: {
+      degraded: '재시작 중',
       running: '실행 중',
       failed: '로드 실패',
       disabled: '비활성',
@@ -5287,6 +5292,7 @@ export default {
       reinstall: '재설치'
     },
     permission: {
+      anyHost: '모든 공개 호스트',
       remote: '원격 서비스',
       egress: '네트워크 송신',
       hostApi: 'WeKnora API',
@@ -7315,6 +7321,8 @@ export default {
     channelGitLab: 'GitLab',
     channelIma: 'Tencent IMA',
     channelUpload: '업로드',
+    channelRss: 'RSS',
+    channelExternal: '외부 데이터 소스',
     channelManual: '수동',
     channelUrl: '웹',
     channelUnknown: '알 수 없음',

@@ -12,7 +12,10 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"path"
+	goruntime "runtime"
 	"sort"
+	"strings"
 	"time"
 
 	"golang.org/x/mod/semver"
@@ -41,8 +44,29 @@ func invalid(format string, args ...any) error {
 }
 
 // supportedRuntimes are the runtimes an installed package may use today.
-// Code plugins arrive with the plugin host.
-var supportedRuntimes = map[manifest.RuntimeType]bool{manifest.RuntimeDeclarative: true}
+var supportedRuntimes = map[manifest.RuntimeType]bool{
+	manifest.RuntimeDeclarative: true,
+	manifest.RuntimeHost:        true,
+}
+
+// checkHostRuntime makes sure this server can run a host plugin: a binary
+// built for its OS and architecture. Other kinds need a host image that
+// carries their interpreter.
+func checkHostRuntime(p *pkg.Package) error {
+	rt := p.Manifest.Runtime
+	if rt.Kind != "binary" {
+		return invalid("runtime.kind %q is not supported yet; host plugins must be binaries", rt.Kind)
+	}
+	entry := strings.NewReplacer("{os}", goruntime.GOOS, "{arch}", goruntime.GOARCH).Replace(rt.Entry)
+	if goruntime.GOOS == "windows" && path.Ext(entry) == "" {
+		entry += ".exe"
+	}
+	if _, ok := p.ReadFile(entry); !ok {
+		return invalid("the package has no build for this server (%s/%s): %s is missing",
+			goruntime.GOOS, goruntime.GOARCH, entry)
+	}
+	return nil
+}
 
 // Syncer is the node's reconciler as the installer uses it.
 type Syncer interface {
@@ -152,8 +176,13 @@ func (s *Service) open(data []byte) (*pkg.Package, error) {
 		return nil, &InvalidError{Err: err}
 	}
 	if !supportedRuntimes[p.Manifest.Runtime.Type] {
-		return nil, invalid("runtime %q is not supported yet; only declarative plugins can be installed",
+		return nil, invalid("runtime %q is not supported yet; declarative and host plugins can be installed",
 			p.Manifest.Runtime.Type)
+	}
+	if p.Manifest.Runtime.Type == manifest.RuntimeHost {
+		if err := checkHostRuntime(p); err != nil {
+			return nil, err
+		}
 	}
 	if err := p.Manifest.CheckEngines(s.hostVersion); err != nil {
 		return nil, &InvalidError{Err: err}

@@ -1,0 +1,120 @@
+# WeKnora plugin SDK (Go)
+
+Build code plugins for WeKnora: web search providers and data source
+connectors that run as their own process. The module has no dependencies.
+
+| Package | What it is |
+| --- | --- |
+| `pluginapi` | The extension protocol v1: envelope, errors, stream events, messages. `openapi.yaml` describes it for other languages. |
+| `pluginsdk` | Write a plugin: register contributions, then `Serve`. |
+| `client` | Call a plugin, as WeKnora does. |
+| `conformance`, `cmd/weknora-plugin-conformance` | Check that a plugin speaks the protocol. |
+
+## A connector in 30 lines
+
+```go
+package main
+
+import (
+	"context"
+	"log"
+
+	"github.com/Tencent/WeKnora/pluginsdk"
+	"github.com/Tencent/WeKnora/pluginsdk/pluginapi"
+)
+
+type notes struct{}
+
+func (notes) Validate(ctx context.Context, call *pluginsdk.Call, cfg pluginsdk.ConnectorConfig) error {
+	if cfg.Credentials["token"] == nil {
+		return pluginapi.InvalidConfig("token is required", map[string]string{"credentials.token": "required"})
+	}
+	return nil
+}
+
+func (notes) ListResources(ctx context.Context, call *pluginsdk.Call, cfg pluginsdk.ConnectorConfig, parent string) ([]pluginapi.Resource, error) {
+	return []pluginapi.Resource{{ExternalID: "inbox", Name: "Inbox"}}, nil
+}
+
+func (notes) Fetch(ctx context.Context, call *pluginsdk.Call, cfg pluginsdk.ConnectorConfig, in pluginapi.FetchInput, s *pluginsdk.Stream) (*pluginapi.Cursor, error) {
+	if err := s.Item(pluginapi.FetchedItem{ExternalID: "n1", Title: "First note", Content: []byte("# Hello")}); err != nil {
+		return nil, err
+	}
+	return &pluginapi.Cursor{State: map[string]any{"after": "n1"}}, nil
+}
+
+func main() {
+	p := pluginsdk.New(pluginsdk.Info{ID: "acme.notes", Version: "1.0.0"})
+	p.Connector("notes", notes{})
+	log.Fatal(p.Serve())
+}
+```
+
+What the SDK does for you:
+
+- **Handshake.** Started by WeKnora's plugin host, the plugin listens on the
+  socket it is given and accepts only the host's token.
+- **Remote mode.** Run on its own, it listens on `WEKNORA_PLUGIN_ADDR` and
+  verifies signed requests with `WEKNORA_PLUGIN_SECRET`.
+- **Per call.** Each call's deadline reaches your context. Returned
+  `pluginapi` errors keep their code; anything else, and any panic, becomes
+  `internal`.
+
+Every call carries the tenant and the configuration, secrets already
+decrypted, in three separate scopes:
+
+- `call.Config.System`: set by the system administrator.
+- `call.Config.Tenant`: set per workspace.
+- the instance: `cfg`, or `call.DecodeInstance`.
+
+Keep plugins stateless and never cache a tenant's credentials across calls.
+
+## Packaging
+
+A package is a zip (`.wkp`) with `plugin.yaml` at its root:
+
+```yaml
+schemaVersion: 1
+id: acme.notes
+version: 1.0.0
+apiVersion: weknora.plugin/v1
+name: { en-US: ACME Notes }
+publisher: { id: acme }
+runtime: { type: host, kind: binary, entry: "bin/{os}-{arch}/notes" }
+permissions:
+  egress: [api.acme.example]      # hosts the plugin may reach; "*" = any public host
+contributes:
+  connectors:
+    - id: notes
+      name: { en-US: ACME Notes }
+      instanceSchema: schemas/notes.yaml   # fields with x-group: settings are settings, the rest credentials
+```
+
+A few rules the manifest and host enforce:
+
+- **Binaries.** Build one per platform into `bin/<os>-<arch>/`; WeKnora
+  runs the build for its own OS and architecture.
+- **Environment.** The process gets no environment from WeKnora beyond the
+  `WEKNORA_PLUGIN_*` variables.
+- **Outbound traffic.** It goes through the host's egress proxy, which
+  forwards only to the hosts in `permissions.egress` and never to private
+  addresses.
+- **IDs.** Contribution IDs are qualified with the plugin ID
+  (`acme.notes/notes`); for connectors and web search that must stay within
+  50 characters.
+
+See `examples/plugins/rss` for a complete plugin and its `package.sh`.
+
+## Testing
+
+```bash
+go run github.com/Tencent/WeKnora/pluginsdk/cmd/weknora-plugin-conformance -url http://localhost:8080 -secret $SECRET
+```
+
+In Go tests, run `conformance.Run` against `httptest.NewServer(p.Handler())`.
+
+## Installing
+
+In WeKnora: **System administration → Plugin management → Install plugin**.
+Upload the `.wkp` or give its URL, review what it adds and reaches, and
+install. Each workspace then enables it under **Settings → Plugins**.

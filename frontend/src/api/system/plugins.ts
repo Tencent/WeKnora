@@ -31,7 +31,9 @@ export interface PluginVersion {
 /** This node's report on an installed plugin. */
 export interface PluginNodeStatus {
   version: string
-  state: 'ready' | 'failed'
+  // degraded: loaded, but its process crashed or fails health checks and is
+  // being restarted.
+  state: 'ready' | 'failed' | 'degraded'
   error?: string
   updatedAt: string
 }

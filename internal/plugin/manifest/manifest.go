@@ -57,15 +57,15 @@ type Manifest struct {
 
 	// Builtin marks a plugin compiled into WeKnora. It cannot be set from a
 	// manifest file.
-	Builtin bool `json:"builtin,omitempty" yaml:"-"`
+	Builtin bool `json:"builtin,omitempty"  yaml:"-"`
 	// Required marks a builtin a tenant may not disable (the core agent
 	// tools, the default parser).
 	Required bool `json:"required,omitempty" yaml:"-"`
 
-	Runtime     Runtime       `json:"runtime"               yaml:"runtime"`
-	Permissions Permissions   `json:"permissions,omitzero"  yaml:"permissions"`
-	Config      ConfigSchemas `json:"config,omitzero"       yaml:"config"`
-	Contributes Contributions `json:"contributes"           yaml:"contributes"`
+	Runtime     Runtime       `json:"runtime"              yaml:"runtime"`
+	Permissions Permissions   `json:"permissions,omitzero" yaml:"permissions"`
+	Config      ConfigSchemas `json:"config,omitzero"      yaml:"config"`
+	Contributes Contributions `json:"contributes"          yaml:"contributes"`
 }
 
 // Engines constrains which WeKnora versions a plugin runs on.
@@ -84,12 +84,12 @@ type Publisher struct {
 
 // Runtime says how a plugin's code runs.
 type Runtime struct {
-	Type RuntimeType `json:"type" yaml:"type"`
+	Type RuntimeType `json:"type"                yaml:"type"`
 	// Kind is the process runtime for host plugins: binary, python or node.
-	Kind string `json:"kind,omitempty" yaml:"kind"`
+	Kind string `json:"kind,omitempty"      yaml:"kind"`
 	// Entry is the command inside the package, with {os} and {arch}
 	// placeholders for binaries.
-	Entry string `json:"entry,omitempty" yaml:"entry"`
+	Entry string `json:"entry,omitempty"     yaml:"entry"`
 	// Singleton allows only one live instance across the cluster (long-lived
 	// connections such as an IM WebSocket).
 	Singleton bool       `json:"singleton,omitempty" yaml:"singleton"`
@@ -106,17 +106,17 @@ type Resources struct {
 // install time.
 type Permissions struct {
 	// Egress lists host patterns the plugin may reach ("*.atlassian.net").
-	Egress []string `json:"egress,omitempty" yaml:"egress"`
+	Egress []string `json:"egress,omitempty"  yaml:"egress"`
 	// HostAPI lists WeKnora API scopes the plugin may call back with.
 	HostAPI []string `json:"hostApi,omitempty" yaml:"hostApi"`
 	// Events lists asynchronous events the plugin subscribes to.
-	Events []string `json:"events,omitempty" yaml:"events"`
+	Events []string `json:"events,omitempty"  yaml:"events"`
 }
 
 // ConfigSchemas points at the JSON Schemas of plugin-level configuration.
 type ConfigSchemas struct {
-	System string `json:"system,omitempty" yaml:"system"`
-	Tenant string `json:"tenant,omitempty" yaml:"tenant"`
+	System string `json:"system,omitempty"       yaml:"system"`
+	Tenant string `json:"tenant,omitempty"       yaml:"tenant"`
 	// SystemSchema and TenantSchema are the schema files' contents as JSON,
 	// filled in when a package is opened.
 	SystemSchema json.RawMessage `json:"systemSchema,omitempty" yaml:"-"`
@@ -130,40 +130,40 @@ type Contributions map[Point][]Contribution
 // such as one connector.
 type Contribution struct {
 	// ID is local to the plugin; QualifiedID adds the plugin ID.
-	ID          string        `json:"id"                   yaml:"id"`
-	Name        LocalizedText `json:"name"                 yaml:"name"`
-	Description LocalizedText `json:"description,omitzero" yaml:"description"`
-	Icon        string        `json:"icon,omitempty"       yaml:"icon"`
+	ID          string        `json:"id"                       yaml:"id"`
+	Name        LocalizedText `json:"name"                     yaml:"name"`
+	Description LocalizedText `json:"description,omitzero"     yaml:"description"`
+	Icon        string        `json:"icon,omitempty"           yaml:"icon"`
 	// Aliases are the short names builtins were stored under before plugins
 	// existed ("feishu"). Rows keep them, so lookups must keep resolving
 	// them. Only builtins may declare aliases.
-	Aliases      []string `json:"aliases,omitempty"      yaml:"-"`
-	Capabilities []string `json:"capabilities,omitempty" yaml:"capabilities"`
+	Aliases      []string `json:"aliases,omitempty"        yaml:"-"`
+	Capabilities []string `json:"capabilities,omitempty"   yaml:"capabilities"`
 	// Order sorts contributions of one point in the UI (lower first); ties
 	// keep registration order.
-	Order int `json:"order,omitempty" yaml:"order"`
+	Order int `json:"order,omitempty"          yaml:"order"`
 	// InstanceSchema points at the JSON Schema of one instance's
 	// configuration (one data source, one IM channel).
 	InstanceSchema string `json:"instanceSchema,omitempty" yaml:"instanceSchema"`
 	// Path is a file or directory inside the package: the skill directory
 	// (skills) or the vendor definition JSON (modelVendors).
-	Path string `json:"path,omitempty" yaml:"path"`
+	Path string `json:"path,omitempty"           yaml:"path"`
 	// MCP describes a remote MCP server (mcpServers).
-	MCP *MCPServer `json:"mcp,omitempty" yaml:"mcp"`
+	MCP *MCPServer `json:"mcp,omitempty"            yaml:"mcp"`
 	// Extra carries point-specific metadata the generic fields do not cover.
-	Extra map[string]any `json:"extra,omitempty" yaml:"extra"`
+	Extra map[string]any `json:"extra,omitempty"          yaml:"extra"`
 }
 
 // MCPServer is a remote MCP server a plugin contributes.
 type MCPServer struct {
-	URL string `json:"url" yaml:"url"`
+	URL string `json:"url"                 yaml:"url"`
 	// Transport is "sse" or "http-streamable" (the default).
 	Transport string `json:"transport,omitempty" yaml:"transport"`
 	// Headers are sent on every request. A value may reference the
 	// workspace's plugin configuration as ${config.<key>} (how a plugin asks
 	// each workspace for its own API key) or the platform's as
 	// ${system.<key>}. The URL is fixed: configuration cannot redirect it.
-	Headers map[string]string `json:"headers,omitempty" yaml:"headers"`
+	Headers map[string]string `json:"headers,omitempty"   yaml:"headers"`
 }
 
 // MCP transports a plugin may declare.
@@ -238,6 +238,7 @@ func (m *Manifest) Validate() error {
 		}
 	}
 	m.validateRuntime(add)
+	m.validatePermissions(add)
 	m.validateContributions(add)
 	return errors.Join(errs...)
 }
@@ -248,8 +249,11 @@ func (m *Manifest) validateRuntime(add func(string, ...any)) {
 		if !m.Builtin {
 			add("runtime.type %q is reserved for builtin plugins", RuntimeBuiltin)
 		}
-	case RuntimeDeclarative, RuntimeRemote, RuntimeKubernetes:
+	case RuntimeDeclarative:
+	case RuntimeRemote, RuntimeKubernetes:
+		m.validateAPIVersion(add)
 	case RuntimeHost:
+		m.validateAPIVersion(add)
 		switch m.Runtime.Kind {
 		case "binary", "python", "node":
 		default:
@@ -262,6 +266,42 @@ func (m *Manifest) validateRuntime(add func(string, ...any)) {
 		add("runtime.type %q is not one of builtin, declarative, host, remote, kubernetes", m.Runtime.Type)
 	}
 }
+
+// ExtensionAPIVersion is the extension protocol this build speaks
+// (pluginsdk/pluginapi.APIVersion).
+const ExtensionAPIVersion = "weknora.plugin/v1"
+
+func (m *Manifest) validateAPIVersion(add func(string, ...any)) {
+	if m.Builtin {
+		return
+	}
+	if m.APIVersion != ExtensionAPIVersion {
+		add("apiVersion must be %q for code plugins, got %q", ExtensionAPIVersion, m.APIVersion)
+	}
+}
+
+// egressPattern is a host name, optionally with a leading "*." wildcard.
+var egressPattern = regexp.MustCompile(`^(\*\.)?([a-z0-9]([a-z0-9-]*[a-z0-9])?)(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$`)
+
+// EgressAnyHost in permissions.egress grants any public host (a feed reader
+// follows links anywhere). Private addresses stay unreachable either way.
+const EgressAnyHost = "*"
+
+func (m *Manifest) validatePermissions(add func(string, ...any)) {
+	for _, e := range m.Permissions.Egress {
+		if e != EgressAnyHost && !egressPattern.MatchString(strings.ToLower(e)) {
+			add(
+				"permissions.egress %q must be a host name (api.example.com), a wildcard (*.example.com) or *",
+				e,
+			)
+		}
+	}
+}
+
+// storedTypeIDLimit is how long a qualified contribution ID may be where
+// instances store it in a varchar(50) column (data_sources.type,
+// web_search_providers.provider, knowledges.channel).
+var storedTypeIDLimit = map[Point]int{PointConnectors: 50, PointWebSearch: 50}
 
 func (m *Manifest) validateContributions(add func(string, ...any)) {
 	if len(m.Contributes) == 0 {
@@ -296,6 +336,10 @@ func (m *Manifest) validateContributions(add func(string, ...any)) {
 			seen[c.ID] = true
 			if c.Name.IsZero() {
 				add("%s.name is required", where)
+			}
+			if limit, ok := storedTypeIDLimit[point]; ok && !m.Builtin && len(QualifiedID(m.ID, c.ID)) > limit {
+				add("%s: %q is longer than the %d characters instances store their type in",
+					where, QualifiedID(m.ID, c.ID), limit)
 			}
 			if len(c.Aliases) > 0 && !m.Builtin {
 				add("%s.aliases may only be declared by builtin plugins", where)

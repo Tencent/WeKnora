@@ -29,6 +29,7 @@ import {
 import { useSchemaText } from '@/components/schema-form/useSchemaText'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import DataSourceTypeIcon from './DataSourceTypeIcon.vue'
+import { connectorDescription, connectorName } from './connectorLabels'
 import { getDatasourceIconUrl } from './datasourceIcons'
 
 const props = defineProps<{
@@ -38,7 +39,7 @@ const props = defineProps<{
 
 const visible = defineModel<boolean>('visible', { default: false })
 const emit = defineEmits<{ saved: [] }>()
-const { t } = useI18n()
+const { t, te, locale } = useI18n()
 
 const isEdit = computed(() => !!props.dataSource)
 const step = ref(0)
@@ -536,6 +537,11 @@ const currentDef = computed(() => connectorTypes.value.find(d => d.type === form
 
 const EMPTY_SCHEMA: ConfigSchema = { type: 'object', properties: {} }
 const credentialSchema = computed<ConfigSchema>(() => currentDef.value?.config_schema ?? EMPTY_SCHEMA)
+// Settings form of connectors without a built-in settings UI (plugins).
+const settingsSchema = computed<ConfigSchema | null>(() => currentDef.value?.settings_schema ?? null)
+const settingsErrors = ref<FieldError[]>([])
+const labelI18n = computed(() => ({ t: (k: string) => t(k), te: (k: string) => te(k), locale: locale.value }))
+const labelOf = (def: ConnectorMeta) => connectorName(def, labelI18n.value)
 
 // Field errors of the last credential check, shown under each field.
 const credentialErrors = ref<FieldError[]>([])
@@ -547,9 +553,12 @@ watch(() => form.value.config.credentials, () => { credentialErrors.value = [] }
 // fields and warns with the first one, as the editor always has.
 function checkCredentials(): boolean {
   credentialErrors.value = validateConfig(credentialSchema.value, form.value.config.credentials)
-  const first = credentialErrors.value[0]
+  settingsErrors.value = settingsSchema.value ? validateConfig(settingsSchema.value, form.value.config.settings) : []
+  const inCredentials = credentialErrors.value.length > 0
+  const first = credentialErrors.value[0] ?? settingsErrors.value[0]
   if (!first) return true
-  const field = schemaAt(credentialSchema.value, first.path)
+  const schema = inCredentials ? credentialSchema.value : (settingsSchema.value as ConfigSchema)
+  const field = schemaAt(schema, first.path)
   const label = field ? schemaText(field, 'title') : first.path
   MessagePlugin.warning(
     first.code === 'required'
@@ -673,9 +682,13 @@ watch(
 
 function selectType(def: ConnectorMeta) {
   form.value.type = def.type
-  form.value.name = t(`datasource.connector.${def.type}`)
+  form.value.name = labelOf(def)
   // Schema defaults, e.g. Confluence starts on the Server edition.
   form.value.config.credentials = applyDefaults(def.config_schema ?? EMPTY_SCHEMA, {})
+  if (def.settings_schema) {
+    form.value.config.settings = applyDefaults(def.settings_schema, form.value.config.settings ?? {})
+  }
+  settingsErrors.value = []
   credentialErrors.value = []
   if (def.type === 'confluence') {
     form.value.config.settings = { ...form.value.config.settings, edition: 'server' }
@@ -717,7 +730,7 @@ async function testConnection() {
         // validate-credentials is credentials-only; feed URLs live in settings.
         creds.feed_urls = form.value.config.settings.feed_urls
       }
-      await validateCredentials(form.value.type, creds)
+      await validateCredentials(form.value.type, creds, form.value.config.settings)
     }
     testResult.value = 'success'
     MessagePlugin.success(t('datasource.testSuccess'))
@@ -1137,9 +1150,9 @@ const drawerConfirmText = computed(() => {
     @confirm="handleDrawerConfirm"
     @cancel="handleClose"
   >
-    <template v-if="form.type && getDatasourceIconUrl(form.type)" #headerIcon>
+    <template v-if="form.type && (getDatasourceIconUrl(form.type) || currentDef?.icon)" #headerIcon>
       <img
-        :src="getDatasourceIconUrl(form.type)"
+        :src="getDatasourceIconUrl(form.type) || currentDef?.icon"
         :alt="form.type"
         class="datasource-header-icon__img"
       >
@@ -1210,10 +1223,10 @@ const drawerConfirmText = computed(() => {
           @click="selectType(def)"
         >
           <div class="ds-type-header">
-            <DataSourceTypeIcon :type="def.type" :size="20" />
-            <span class="ds-type-name">{{ t(`datasource.connector.${def.type}`) }}</span>
+            <DataSourceTypeIcon :type="def.type" :icon-url="def.icon" :label="labelOf(def)" :size="20" />
+            <span class="ds-type-name">{{ labelOf(def) }}</span>
           </div>
-          <div class="ds-type-desc">{{ t(`datasource.connectorDesc.${def.type}`) }}</div>
+          <div class="ds-type-desc">{{ connectorDescription(def, labelI18n) }}</div>
         </button>
       </div>
     </section>
@@ -1387,6 +1400,12 @@ const drawerConfirmText = computed(() => {
             v-model="form.config.credentials"
             :schema="credentialSchema"
             :errors="credentialErrors"
+          />
+          <SchemaForm
+            v-if="settingsSchema"
+            v-model="form.config.settings"
+            :schema="settingsSchema"
+            :errors="settingsErrors"
           />
           <div v-if="isEdit && replaceCredentialsMode" class="credential-edit-actions">
             <t-button size="small" variant="text" @click="cancelReplaceCredentials">

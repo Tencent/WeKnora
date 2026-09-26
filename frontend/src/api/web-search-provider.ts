@@ -6,7 +6,8 @@ export interface WebSearchProviderEntity {
   id?: string
   tenant_id?: number
   name: string
-  provider: 'brave' | 'bing' | 'google' | 'duckduckgo' | 'tavily' | 'ollama' | 'baidu' | 'searxng' | 'keenable' | 'zhipu' | 'metaso' | 'exa' | 'bocha' | 'serply'
+  // A builtin provider ID, or a plugin provider's qualified ID (acme.search/brave).
+  provider: 'brave' | 'bing' | 'google' | 'duckduckgo' | 'tavily' | 'ollama' | 'baidu' | 'searxng' | 'keenable' | 'zhipu' | 'metaso' | 'exa' | 'bocha' | 'serply' | (string & {})
   description?: string
   parameters: {
     // api_key is never returned by the server in this shape; it lives behind
@@ -40,6 +41,10 @@ export interface WebSearchProviderTypeInfo {
   config_fields?: WebSearchProviderConfigField[]
   // The parameters form as a config schema; the settings drawer renders it.
   config_schema?: ConfigSchema
+  // Plugin provider types: localized names, an icon (data: URI), the plugin.
+  names?: Record<string, string>
+  icon?: string
+  plugin_id?: string
 }
 
 export interface WebSearchProviderConfigField {

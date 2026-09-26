@@ -42,7 +42,7 @@
               </t-tag>
             </t-tooltip>
           </div>
-          <div class="plugin-card__meta">{{ p.id }} · v{{ p.active_version }} · {{ p.runtime }}</div>
+          <div class="plugin-card__meta">{{ p.id }} · v{{ p.active_version }} · {{ runtimeLabel(p.runtime) }}</div>
           <div v-if="descriptionOf(p)" class="plugin-card__desc">{{ descriptionOf(p) }}</div>
           <div v-if="p.manifest" class="plugin-card__contribs">
             <span v-for="s in contributionSummary(p.manifest)" :key="s.point" class="plugin-card__contrib">
@@ -89,7 +89,8 @@ import { installedState } from './pluginManagementState'
 // Platform plugin management: what is installed, on which version, whether it
 // loads. Installing makes a plugin available to every workspace; each
 // workspace still turns it on in its own plugin center.
-const { t, locale } = useI18n()
+const { t, te, locale } = useI18n()
+const runtimeLabel = (rt: string) => (te(`pluginAdmin.runtime.${rt}`) ? t(`pluginAdmin.runtime.${rt}`) : rt)
 
 const plugins = ref<InstalledPlugin[]>([])
 const loading = ref(false)
@@ -109,6 +110,8 @@ function stateTheme(p: InstalledPlugin) {
       return 'success'
     case 'failed':
       return 'danger'
+    case 'degraded':
+      return 'warning'
     default:
       return 'default'
   }

@@ -14,11 +14,46 @@ import (
 // webSearchProviderService implements interfaces.WebSearchProviderService
 type webSearchProviderService struct {
 	repo interfaces.WebSearchProviderRepository
+	// registry knows the provider types installed plugins contribute.
+	registry *infra_web_search.Registry
 }
 
 // NewWebSearchProviderService creates a new web search provider service
-func NewWebSearchProviderService(repo interfaces.WebSearchProviderRepository) interfaces.WebSearchProviderService {
-	return &webSearchProviderService{repo: repo}
+func NewWebSearchProviderService(
+	repo interfaces.WebSearchProviderRepository, registry *infra_web_search.Registry,
+) interfaces.WebSearchProviderService {
+	return &webSearchProviderService{repo: repo, registry: registry}
+}
+
+// validType accepts builtin types and the types of loaded plugins.
+func (s *webSearchProviderService) validType(t types.WebSearchProviderType) bool {
+	if isValidProviderType(t) {
+		return true
+	}
+	if s.registry == nil {
+		return false
+	}
+	_, ok := s.registry.PluginType(string(t))
+	return ok
+}
+
+// validateParams checks builtin parameters by type and plugin parameters
+// against the plugin's instance schema.
+func (s *webSearchProviderService) validateParams(
+	t types.WebSearchProviderType, params types.WebSearchProviderParameters,
+) error {
+	if s.registry != nil {
+		if pt, ok := s.registry.PluginType(string(t)); ok {
+			if err := validateOptionalProxyURL(params.ProxyURL); err != nil {
+				return err
+			}
+			if pt.Validate != nil {
+				return pt.Validate(params)
+			}
+			return nil
+		}
+	}
+	return validateProviderParameters(t, params)
 }
 
 // CreateProvider creates a new web search provider configuration.
@@ -27,11 +62,11 @@ func (s *webSearchProviderService) CreateProvider(ctx context.Context, provider 
 		return fmt.Errorf("tenant ID is required")
 	}
 
-	if !isValidProviderType(provider.Provider) {
+	if !s.validType(provider.Provider) {
 		return fmt.Errorf("invalid provider type: %s", provider.Provider)
 	}
 
-	if err := validateProviderParameters(provider.Provider, provider.Parameters); err != nil {
+	if err := s.validateParams(provider.Provider, provider.Parameters); err != nil {
 		return err
 	}
 
@@ -52,7 +87,7 @@ func (s *webSearchProviderService) UpdateProvider(ctx context.Context, provider 
 	}
 
 	// Validate provider type if set
-	if provider.Provider != "" && !isValidProviderType(provider.Provider) {
+	if provider.Provider != "" && !s.validType(provider.Provider) {
 		return fmt.Errorf("invalid provider type: %s", provider.Provider)
 	}
 
@@ -63,7 +98,7 @@ func (s *webSearchProviderService) UpdateProvider(ctx context.Context, provider 
 	}
 
 	if provider.Provider != "" {
-		if err := validateProviderParameters(provider.Provider, provider.Parameters); err != nil {
+		if err := s.validateParams(provider.Provider, provider.Parameters); err != nil {
 			return err
 		}
 	}

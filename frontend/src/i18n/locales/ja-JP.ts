@@ -812,6 +812,8 @@ export default {
     channelGitLab: 'GitLab',
     channelIma: 'Tencent IMA',
     channelUpload: 'アップロード',
+    channelRss: 'RSS',
+    channelExternal: '外部データソース',
     channelManual: '手動作成',
     channelUrl: 'Web',
     channelUnknown: '不明',
@@ -2732,6 +2734,10 @@ export default {
     }
   },
   pluginAdmin: {
+    runtime: {
+      declarative: '宣言型',
+      host: 'ローカルプロセス'
+    },
     title: 'プラグイン管理',
     description: 'プラットフォーム全体のプラグインをインストール・管理します。インストールしたプラグインはすべてのワークスペースに表示され、各ワークスペースで個別に有効化します。ここで無効にすると全ノードでアンロードされます。',
     installButton: 'プラグインをインストール',
@@ -2745,6 +2751,7 @@ export default {
     contributions: '提供する機能',
     permissions: '権限と外部アクセス',
     state: {
+      degraded: '再起動中',
       running: '稼働中',
       failed: '読み込み失敗',
       disabled: '無効',
@@ -2767,6 +2774,7 @@ export default {
       reinstall: '再インストール'
     },
     permission: {
+      anyHost: '任意の公開ホスト',
       remote: 'リモートサービス',
       egress: 'ネットワーク送信',
       hostApi: 'WeKnora API',

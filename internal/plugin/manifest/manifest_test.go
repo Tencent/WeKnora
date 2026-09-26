@@ -76,7 +76,8 @@ func TestValidateReportsEveryProblem(t *testing.T) {
 		Version:       "1.0",
 		Runtime:       Runtime{Type: RuntimeHost},
 		Contributes: Contributions{
-			"widgets": {{ID: "x", Name: Text("X", nil)}},
+			"widgets":       {{ID: "x", Name: Text("X", nil)}},
+			PointIMChannels: {{ID: "im", Name: Text("IM", nil)}},
 			PointConnectors: {
 				{ID: "dup", Name: Text("A", nil), Aliases: []string{"old"}},
 				{ID: "dup"},
@@ -94,8 +95,9 @@ func TestValidateReportsEveryProblem(t *testing.T) {
 		"name is required",
 		"runtime.kind",
 		"runtime.entry",
+		"apiVersion must be",
 		"contributes.widgets is not a known extension point",
-		"is not open to third-party plugins yet",
+		"contributes.imChannels is not open to third-party plugins yet",
 		`"dup" is declared twice`,
 		"contributes.connectors[1].name is required",
 		"aliases may only be declared by builtin plugins",
@@ -182,5 +184,37 @@ func TestContributionOmitsEmptyDescription(t *testing.T) {
 	}
 	if strings.Contains(string(data), "description") {
 		t.Fatalf("empty description should be omitted: %s", data)
+	}
+}
+
+func TestEgressPatterns(t *testing.T) {
+	base := func(egress ...string) *Manifest {
+		return &Manifest{
+			SchemaVersion: SchemaVersion, ID: "acme.x", Version: "1.0.0", APIVersion: ExtensionAPIVersion,
+			Name: Text("X", nil), Publisher: Publisher{ID: "acme"},
+			Runtime:     Runtime{Type: RuntimeHost, Kind: "binary", Entry: "bin/x"},
+			Permissions: Permissions{Egress: egress},
+			Contributes: Contributions{PointWebSearch: {{ID: "x", Name: Text("X", nil)}}},
+		}
+	}
+	if err := base("api.example.com", "*.atlassian.net", "*").Validate(); err != nil {
+		t.Fatalf("valid egress rejected: %v", err)
+	}
+	for _, bad := range []string{"**", "http://x.com", "x.com:443", "*.*.com", "10.0.0.0/8"} {
+		if err := base(bad).Validate(); err == nil || !strings.Contains(err.Error(), "permissions.egress") {
+			t.Errorf("egress %q: got %v", bad, err)
+		}
+	}
+}
+
+func TestStoredTypeIDLength(t *testing.T) {
+	m := &Manifest{
+		SchemaVersion: SchemaVersion, ID: "acme.a-rather-long-plugin-name", Version: "1.0.0",
+		APIVersion: ExtensionAPIVersion, Name: Text("X", nil), Publisher: Publisher{ID: "acme"},
+		Runtime:     Runtime{Type: RuntimeHost, Kind: "binary", Entry: "bin/x"},
+		Contributes: Contributions{PointConnectors: {{ID: "and-an-even-longer-connector-id", Name: Text("X", nil)}}},
+	}
+	if err := m.Validate(); err == nil || !strings.Contains(err.Error(), "longer than the 50 characters") {
+		t.Fatalf("want a length error, got %v", err)
 	}
 }

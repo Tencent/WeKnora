@@ -106,23 +106,29 @@ func (r *Reconciler) NodeStatuses(ctx context.Context, pluginID string) ([]NodeS
 	return out, nil
 }
 
-// Driver returns the driver for declarative plugins. They have no code to
-// run, so an instance is a node that loaded the plugin.
-func (r *Reconciler) Driver() driver.Driver { return declarativeDriver{r} }
+// Driver returns the status driver for plugins the reconciler loads on every
+// node (declarative and host): an instance is a node that loaded the plugin,
+// with the runtime health the node reported.
+func (r *Reconciler) Driver(rt manifest.RuntimeType) driver.Driver { return nodeDriver{r: r, rt: rt} }
 
-type declarativeDriver struct{ r *Reconciler }
-
-func (declarativeDriver) Type() manifest.RuntimeType { return manifest.RuntimeDeclarative }
-
-// Ensure and Remove are the reconciler's job for declarative plugins.
-func (declarativeDriver) Ensure(context.Context, *manifest.Manifest) error { return nil }
-func (declarativeDriver) Remove(context.Context, string, string) error     { return nil }
-
-func (declarativeDriver) Resolve(_ context.Context, pluginID string, _ uint64) (driver.Endpoint, error) {
-	return driver.Endpoint{}, fmt.Errorf("declarative plugin %s has no endpoint", pluginID)
+type nodeDriver struct {
+	r  *Reconciler
+	rt manifest.RuntimeType
 }
 
-func (d declarativeDriver) Status(ctx context.Context, pluginID string) ([]driver.InstanceStatus, error) {
+func (d nodeDriver) Type() manifest.RuntimeType { return d.rt }
+
+// Ensure and Remove are the reconciler's job.
+func (nodeDriver) Ensure(context.Context, *manifest.Manifest) error { return nil }
+func (nodeDriver) Remove(context.Context, string, string) error     { return nil }
+
+// Resolve is not how these plugins are reached: declarative ones have no
+// endpoint and host ones are reached through the node's host manager.
+func (d nodeDriver) Resolve(_ context.Context, pluginID string, _ uint64) (driver.Endpoint, error) {
+	return driver.Endpoint{}, fmt.Errorf("%s plugin %s has no shared endpoint", d.rt, pluginID)
+}
+
+func (d nodeDriver) Status(ctx context.Context, pluginID string) ([]driver.InstanceStatus, error) {
 	nodes, err := d.r.NodeStatuses(ctx, pluginID)
 	if err != nil {
 		return nil, err
@@ -130,7 +136,11 @@ func (d declarativeDriver) Status(ctx context.Context, pluginID string) ([]drive
 	out := make([]driver.InstanceStatus, 0, len(nodes))
 	for _, n := range nodes {
 		state := driver.StateReady
-		if n.State != StateReady {
+		switch n.State {
+		case StateReady:
+		case StateDegraded:
+			state = driver.StateDegraded
+		default:
 			state = driver.StateStopped
 		}
 		out = append(out, driver.InstanceStatus{

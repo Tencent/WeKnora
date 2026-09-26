@@ -116,6 +116,11 @@ const EXTRA_PREFIXES = [
   // knowledgeEditor.wikiBrowser.gallery.attr.builtin_caption …, and
   // everything else falls back to the contract wording.
   'knowledgeEditor.wikiBrowser.gallery.attr.',
+  // Connector names and descriptions are keyed by the connector type the
+  // backend registry lists (views/knowledge/settings/connectorLabels.ts);
+  // plugin connectors fall back to their own names.
+  'datasource.connector.',
+  'datasource.connectorDesc.',
 ] as const
 
 /** Keys that must survive pruning even when static analysis misses them. */

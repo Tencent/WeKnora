@@ -12,6 +12,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/handler"
 	"github.com/Tencent/WeKnora/internal/plugin/activate"
+	"github.com/Tencent/WeKnora/internal/plugin/host"
 	"github.com/Tencent/WeKnora/internal/plugin/install"
 	"github.com/Tencent/WeKnora/internal/plugin/reconcile"
 	pluginregistry "github.com/Tencent/WeKnora/internal/plugin/registry"
@@ -34,13 +35,19 @@ func newPluginPackageStore(cfg *config.Config) (reconcile.PackageStore, error) {
 type pluginActivators struct {
 	dig.In
 
-	MCP     *activate.MCPServers
-	Skills  *activate.Skills
-	Vendors *activate.ModelVendors
+	Host       *host.Manager
+	WebSearch  *activate.WebSearch
+	Connectors *activate.Connectors
+	MCP        *activate.MCPServers
+	Skills     *activate.Skills
+	Vendors    *activate.ModelVendors
+	Invoker    *activate.Invoker
 }
 
+// list orders the activators: the host first, so a code plugin's process is
+// running before anything routes calls to it.
 func (a pluginActivators) list() []reconcile.Activator {
-	return []reconcile.Activator{a.Vendors, a.MCP, a.Skills}
+	return []reconcile.Activator{a.Host, a.WebSearch, a.Connectors, a.Vendors, a.MCP, a.Skills}
 }
 
 // bindPluginActivators hands the activators what they need once the plugin
@@ -50,9 +57,13 @@ func bindPluginActivators(
 	skills *service.TenantSkillService,
 ) {
 	a.MCP.Bind(t, repo)
+	a.Invoker.Bind(t, repo)
 	a.Skills.Bind(t)
 	skills.SetPluginSkills(a.Skills)
 }
+
+// newPluginInvoker reaches code plugins through this node's plugin host.
+func newPluginInvoker(h *host.Manager) *activate.Invoker { return activate.NewInvoker(h) }
 
 func newMCPServiceRepository(db *gorm.DB, plugins *activate.MCPServers) interfaces.MCPServiceRepository {
 	return plugins.Repository(repository.NewMCPServiceRepository(db))
@@ -80,8 +91,13 @@ func newPluginInstaller(
 
 // startPluginReconciler loads installed plugins before the server takes
 // traffic, then keeps this node in step with the others.
-func startPluginReconciler(r *reconcile.Reconciler, cleaner interfaces.ResourceCleaner) {
+func startPluginReconciler(r *reconcile.Reconciler, hostManager *host.Manager, cleaner interfaces.ResourceCleaner) {
+	hostManager.SetReporter(r)
 	ctx, cancel := context.WithCancel(context.Background())
 	r.Start(ctx)
-	cleaner.RegisterWithName("PluginReconciler", func() error { cancel(); return nil })
+	cleaner.RegisterWithName("PluginReconciler", func() error {
+		cancel()
+		hostManager.Close()
+		return nil
+	})
 }

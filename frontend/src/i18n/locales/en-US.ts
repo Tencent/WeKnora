@@ -812,6 +812,8 @@ export default {
     channelGitLab: 'GitLab',
     channelIma: 'Tencent IMA',
     channelUpload: 'Upload',
+    channelRss: 'RSS',
+    channelExternal: 'External source',
     channelManual: 'Manual',
     channelUrl: 'Web',
     channelUnknown: 'Unknown',
@@ -2732,6 +2734,10 @@ export default {
     }
   },
   pluginAdmin: {
+    runtime: {
+      declarative: 'Declarative',
+      host: 'Local process'
+    },
     title: 'Plugin management',
     description: 'Install and manage plugins for the whole platform. Every workspace sees an installed plugin, and each one enables it for itself; disabling a plugin here unloads it on every node.',
     installButton: 'Install plugin',
@@ -2745,6 +2751,7 @@ export default {
     contributions: 'What it adds',
     permissions: 'Permissions and remote access',
     state: {
+      degraded: 'Restarting',
       running: 'Running',
       failed: 'Failed to load',
       disabled: 'Disabled',
@@ -2767,6 +2774,7 @@ export default {
       reinstall: 'Reinstall'
     },
     permission: {
+      anyHost: 'Any public host',
       remote: 'Remote service',
       egress: 'Network egress',
       hostApi: 'WeKnora API',

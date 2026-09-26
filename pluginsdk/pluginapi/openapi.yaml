@@ -1,0 +1,324 @@
+openapi: 3.1.0
+info:
+  title: WeKnora extension protocol
+  version: "1"
+  description: |
+    What WeKnora calls on a code plugin. Every POST takes an Envelope and
+    answers {"output": ...}, or streams NDJSON Events. Failures answer a
+    non-2xx status with an ErrorBody. Within a major version the protocol
+    only grows; both sides ignore fields they do not know.
+
+    Host plugins (started by the WeKnora plugin host) are called over the
+    socket from their handshake with `Authorization: Bearer <token>`. Remote
+    plugins are called over HTTPS and verify `X-WeKnora-Signature`:
+    hex HMAC-SHA256 of "<X-WeKnora-Timestamp>.<body>" with the shared secret,
+    rejecting timestamps more than 5 minutes off.
+servers:
+  - url: http://plugin
+security:
+  - hostToken: []
+  - signature: []
+paths:
+  /v1/manifest:
+    get:
+      summary: What this process is and serves
+      responses:
+        "200":
+          description: The manifest
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Manifest" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/health:
+    get:
+      summary: Liveness
+      responses:
+        "200":
+          description: Healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties: { status: { const: ok } }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/config/validate:
+    post:
+      summary: Check the plugin's system and tenant configuration
+      requestBody: { $ref: "#/components/requestBodies/Envelope" }
+      responses:
+        "200": { $ref: "#/components/responses/EmptyOutput" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/websearch/{id}/search:
+    post:
+      summary: Web search (WebSearchProvider.Search)
+      parameters: [{ $ref: "#/components/parameters/ContributionID" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/Envelope"
+                - properties: { input: { $ref: "#/components/schemas/SearchInput" } }
+      responses:
+        "200":
+          description: Results
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [output]
+                properties: { output: { $ref: "#/components/schemas/SearchOutput" } }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/connectors/{id}/validate:
+    post:
+      summary: Check a data source configuration (Connector.Validate)
+      parameters: [{ $ref: "#/components/parameters/ContributionID" }]
+      requestBody: { $ref: "#/components/requestBodies/Envelope" }
+      responses:
+        "200": { $ref: "#/components/responses/EmptyOutput" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/connectors/{id}/list-resources:
+    post:
+      summary: List syncable resources under a parent (Connector.ListResources)
+      parameters: [{ $ref: "#/components/parameters/ContributionID" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/Envelope"
+                - properties:
+                    input:
+                      type: object
+                      properties: { parentId: { type: string } }
+      responses:
+        "200":
+          description: Resources
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [output]
+                properties:
+                  output:
+                    type: object
+                    required: [resources]
+                    properties:
+                      resources: { type: array, items: { $ref: "#/components/schemas/Resource" } }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/connectors/{id}/resolve-ancestors:
+    post:
+      summary: Ancestors a lazy picker must expand to show a selection
+      parameters: [{ $ref: "#/components/parameters/ContributionID" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/Envelope"
+                - properties:
+                    input:
+                      type: object
+                      properties: { resourceIds: { type: array, items: { type: string } } }
+      responses:
+        "200":
+          description: Ancestor IDs
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [output]
+                properties:
+                  output:
+                    type: object
+                    required: [ancestors]
+                    properties: { ancestors: { type: array, items: { type: string } } }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/connectors/{id}/fetch:
+    post:
+      summary: Stream a full or incremental sync
+      description: |
+        Answers NDJSON: "item" events carry a FetchedItem, "checkpoint"
+        events a Cursor (a complete, resumable snapshot), and the stream
+        ends with "end" (data = final Cursor) or "error". A stream that
+        stops without either is treated as interrupted.
+      parameters: [{ $ref: "#/components/parameters/ContributionID" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/Envelope"
+                - properties: { input: { $ref: "#/components/schemas/FetchInput" } }
+      responses:
+        "200":
+          description: Event stream
+          content:
+            application/x-ndjson:
+              schema: { $ref: "#/components/schemas/Event" }
+        default: { $ref: "#/components/responses/Error" }
+components:
+  securitySchemes:
+    hostToken: { type: http, scheme: bearer }
+    signature: { type: apiKey, in: header, name: X-WeKnora-Signature }
+  parameters:
+    ContributionID:
+      name: id
+      in: path
+      required: true
+      description: The contribution's local ID from plugin.yaml
+      schema: { type: string }
+  requestBodies:
+    Envelope:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Envelope" }
+  responses:
+    EmptyOutput:
+      description: Accepted
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [output]
+            properties: { output: { type: object } }
+    Error:
+      description: A failed call
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorBody" }
+  schemas:
+    Envelope:
+      type: object
+      required: [context, config]
+      properties:
+        context:
+          type: object
+          required: [tenantId]
+          properties:
+            tenantId: { type: integer }
+            userId: { type: string }
+            locale: { type: string }
+            requestId: { type: string }
+            deadline: { type: string, format: date-time }
+            host:
+              type: object
+              description: Host API access; absent without granted scopes
+              properties:
+                url: { type: string }
+                token: { type: string }
+        config:
+          type: object
+          description: Configuration scopes, secrets decrypted, never merged
+          properties:
+            system: { type: object }
+            tenant: { type: object }
+            instance: { type: object }
+        input: {}
+    Manifest:
+      type: object
+      required: [id, version, apiVersion, contributes]
+      properties:
+        id: { type: string }
+        version: { type: string }
+        apiVersion: { const: weknora.plugin/v1 }
+        contributes:
+          type: object
+          additionalProperties: { type: array, items: { type: string } }
+    SearchInput:
+      type: object
+      required: [query]
+      properties:
+        query: { type: string }
+        maxResults: { type: integer }
+        includeDate: { type: boolean }
+        region: { type: string }
+        freshness: { type: string }
+    SearchOutput:
+      type: object
+      required: [results]
+      properties:
+        results:
+          type: array
+          items:
+            type: object
+            required: [title, url]
+            properties:
+              title: { type: string }
+              url: { type: string }
+              snippet: { type: string }
+              content: { type: string }
+              age: { type: string }
+              publishedAt: { type: string, format: date-time }
+    Resource:
+      type: object
+      required: [externalId, name]
+      properties:
+        externalId: { type: string }
+        name: { type: string }
+        type: { type: string }
+        description: { type: string }
+        url: { type: string }
+        modifiedAt: { type: string, format: date-time }
+        parentId: { type: string }
+        hasChildren: { type: boolean }
+        metadata: { type: object }
+    FetchInput:
+      type: object
+      required: [mode]
+      properties:
+        mode: { enum: [full, incremental] }
+        cursor: { $ref: "#/components/schemas/Cursor" }
+        resourceIds: { type: array, items: { type: string } }
+    Cursor:
+      type: object
+      properties:
+        lastSyncTime: { type: string, format: date-time }
+        state: { type: object }
+    FetchedItem:
+      type: object
+      required: [externalId, title]
+      properties:
+        externalId: { type: string }
+        title: { type: string }
+        content: { type: string, contentEncoding: base64 }
+        contentType: { type: string }
+        fileName: { type: string }
+        url: { type: string }
+        updatedAt: { type: string, format: date-time }
+        createdAt: { type: string, format: date-time }
+        metadata: { type: object, additionalProperties: { type: string } }
+        isDeleted: { type: boolean }
+        sourceResourceId: { type: string }
+    Event:
+      type: object
+      required: [type]
+      properties:
+        type: { enum: [item, checkpoint, progress, log, error, end] }
+        data: {}
+        error: { $ref: "#/components/schemas/Error" }
+        message: { type: string }
+        level: { enum: [debug, info, warn, error] }
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code: { enum: [invalid_config, unauthorized, not_found, rate_limited, unavailable, bad_request, internal] }
+        message: { type: string }
+        retryable: { type: boolean }
+        details:
+          type: object
+          properties:
+            fields: { type: object, additionalProperties: { type: string } }
+            retryAfter: { type: integer }
+    ErrorBody:
+      type: object
+      required: [error]
+      properties:
+        error: { $ref: "#/components/schemas/Error" }

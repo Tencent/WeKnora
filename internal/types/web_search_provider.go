@@ -134,6 +134,13 @@ type WebSearchProviderTypeInfo struct {
 	ID string `json:"id"`
 	// Human-readable name
 	Name string `json:"name"`
+	// Names localizes Name for plugin provider types, keyed by locale.
+	Names map[string]string `json:"names,omitempty"`
+	// Icon is an image (data: URI) for plugin provider types; builtin types
+	// use the frontend's bundled logos.
+	Icon string `json:"icon,omitempty"`
+	// PluginID names the installed plugin providing the type.
+	PluginID string `json:"plugin_id,omitempty"`
 	// Whether the provider requires an API key
 	RequiresAPIKey bool `json:"requires_api_key"`
 	// Whether the provider accepts an optional API key (keyless by default, but a

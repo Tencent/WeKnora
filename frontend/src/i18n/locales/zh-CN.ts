@@ -5254,6 +5254,10 @@ export default {
     noCompatibleKbForAgent: '当前智能体的工具与作用域内知识库的能力不匹配，暂无可引用的知识库。'
   },
   pluginAdmin: {
+    runtime: {
+      declarative: '声明式',
+      host: '本机进程'
+    },
     title: '插件管理',
     description: '安装与管理本平台的插件。安装后所有空间都能看到，但每个空间需自行启用；停用会在所有节点卸载该插件。',
     installButton: '安装插件',
@@ -5267,6 +5271,7 @@ export default {
     contributions: '提供的能力',
     permissions: '权限与外部访问',
     state: {
+      degraded: '重启中',
       running: '运行中',
       failed: '加载失败',
       disabled: '已停用',
@@ -5289,6 +5294,7 @@ export default {
       reinstall: '重新安装'
     },
     permission: {
+      anyHost: '任意公网地址',
       remote: '访问远程服务',
       egress: '网络出口',
       hostApi: '调用 WeKnora API',
@@ -7317,6 +7323,8 @@ export default {
     channelGitLab: 'GitLab',
     channelIma: '腾讯 IMA',
     channelUpload: '上传',
+    channelRss: 'RSS 订阅',
+    channelExternal: '外部数据源',
     channelManual: '手动',
     channelUrl: '网页',
     channelUnknown: '未知',

@@ -96,7 +96,10 @@
           </li>
           <li v-for="p in permissions" :key="`${p.kind}:${p.value}`">
             <span class="review-list__point">{{ t(`pluginAdmin.permission.${p.kind}`) }}</span>
-            <code class="review-list__detail">{{ p.value }}</code>
+            <strong v-if="p.kind === 'egress' && p.value === EGRESS_ANY_HOST" class="review-list__warn">
+              {{ t('pluginAdmin.permission.anyHost') }}
+            </strong>
+            <code v-else class="review-list__detail">{{ p.value }}</code>
           </li>
         </ul>
       </div>
@@ -128,7 +131,15 @@ import {
 } from '@/api/system/plugins'
 import { localizedText } from '@/utils/localizedText'
 
-import { hasSystemConfig, contributionLines, formatBytes, isPackageUrl, permissionLines, remoteHosts } from '../pluginManagementState'
+import {
+  EGRESS_ANY_HOST,
+  contributionLines,
+  formatBytes,
+  hasSystemConfig,
+  isPackageUrl,
+  permissionLines,
+  remoteHosts,
+} from '../pluginManagementState'
 import { hasTenantConfig } from '../../settings/pluginCenterState'
 
 // Installing is two steps on purpose: inspect shows what the package would
@@ -392,6 +403,12 @@ async function onConfirm() {
     font-size: var(--app-text-xs);
     color: var(--td-text-color-placeholder);
     word-break: break-all;
+  }
+
+  &__warn {
+    font-size: var(--app-text-sm);
+    font-weight: 500;
+    color: var(--td-warning-color);
   }
 }
 
