@@ -151,8 +151,12 @@ type Contribution struct {
 	// Path is a file or directory inside the package: the skill directory
 	// (skills) or the vendor definition JSON (modelVendors).
 	Path string `json:"path,omitempty"           yaml:"path"`
-	// MCP describes a remote MCP server (mcpServers).
+	// MCP describes a remote MCP server (mcpServers). A plugin with code
+	// may leave it out and serve the tools itself (pluginapi.MCPPath).
 	MCP *MCPServer `json:"mcp,omitempty"            yaml:"mcp"`
+	// ToolViews map tool names of an MCP server to the view that shows
+	// their structured results in the chat.
+	ToolViews map[string]ToolView `json:"toolViews,omitempty"      yaml:"toolViews"`
 	// FileTypes are the lower-case extensions a parser handles ("pdf").
 	FileTypes []string `json:"fileTypes,omitempty"      yaml:"fileTypes"`
 	// InstanceSchemaJSON is the instanceSchema file's content as JSON,
@@ -403,7 +407,13 @@ func (m *Manifest) validateContributions(add func(string, ...any)) {
 			if len(c.Aliases) > 0 && !m.Builtin {
 				add("%s.aliases may only be declared by builtin plugins", where)
 			}
-			validateDeclarative(point, c, m.Builtin, where, add)
+			validateDeclarative(point, c, m.Builtin, m.Runtime.Type != RuntimeDeclarative, where, add)
+			if len(c.ToolViews) > 0 {
+				if point != PointMCPServers {
+					add("%s.toolViews belong to mcpServers", where)
+				}
+				validateToolViews(c.ToolViews, where, add)
+			}
 			if IsUIPoint(point) {
 				validateUI(c, where, add)
 			}
@@ -437,7 +447,7 @@ func validateFileTypes(types []string, where string, add func(string, ...any)) {
 	}
 }
 
-func validateDeclarative(point Point, c Contribution, builtin bool, where string, add func(string, ...any)) {
+func validateDeclarative(point Point, c Contribution, builtin, code bool, where string, add func(string, ...any)) {
 	if builtin {
 		return
 	}
@@ -449,8 +459,12 @@ func validateDeclarative(point Point, c Contribution, builtin bool, where string
 			add("%s.path %q must be a relative path inside the package", where, c.Path)
 		}
 	case PointMCPServers:
-		if c.MCP == nil || c.MCP.URL == "" {
-			add("%s.mcp.url is required", where)
+		if c.ServedByPlugin() {
+			if !code {
+				add("%s.mcp.url is required: only a plugin with code can serve tools itself", where)
+			} else if c.MCP != nil && (c.MCP.Transport != "" || len(c.MCP.Headers) > 0) {
+				add("%s.mcp: transport and headers only apply to a remote url", where)
+			}
 			return
 		}
 		if !strings.HasPrefix(c.MCP.URL, "https://") && !strings.HasPrefix(c.MCP.URL, "http://") {

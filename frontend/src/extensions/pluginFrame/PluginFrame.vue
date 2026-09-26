@@ -29,7 +29,7 @@ import { getApiBaseUrl } from '@/utils/api-base'
 import { localizedText } from '@/utils/localizedText'
 
 import { BridgeCallError, createBridgeHost, readTheme, type BridgeInit } from './bridgeHost'
-import { pageFileUrl, type PluginPage } from './pluginPages'
+import { pageFileUrl, type FramePage } from './pluginPages'
 
 // One plugin page in a sandboxed iframe: an opaque origin (no
 // allow-same-origin), so it cannot read WeKnora's storage or call its API.
@@ -38,7 +38,7 @@ import { pageFileUrl, type PluginPage } from './pluginPages'
 // new window has its own origin and no way back into the app.
 const props = withDefaults(
   defineProps<{
-    page: PluginPage
+    page: FramePage
     /** What the mount tells the page, e.g. { knowledgeBaseId }. */
     context?: Record<string, unknown>
     /** Fill the container instead of growing with the page's content. */

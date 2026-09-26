@@ -67,6 +67,7 @@ type Plugin struct {
 	events     EventHandler
 	webhooks   map[string]WebhookHandler
 	options    map[string]OptionsHandler
+	mcp        map[string]*mcpServer
 	validate   ConfigValidator
 	logger     *slog.Logger
 	// ShutdownTimeout bounds how long Serve waits for calls in flight after
@@ -83,6 +84,7 @@ func New(info Info) *Plugin {
 		parsers:         map[string]Parser{},
 		webhooks:        map[string]WebhookHandler{},
 		options:         map[string]OptionsHandler{},
+		mcp:             map[string]*mcpServer{},
 		logger:          slog.New(slog.NewTextHandler(os.Stderr, nil)),
 		ShutdownTimeout: 60 * time.Second,
 	}
@@ -111,6 +113,7 @@ func (p *Plugin) Manifest() pluginapi.Manifest {
 	add("parsers", keys(p.parsers))
 	add("webhooks", keys(p.webhooks))
 	add("options", keys(p.options))
+	add("mcpServers", keys(p.mcp))
 	if p.events != nil {
 		m.Contributes["events"] = []string{"handler"}
 	}
@@ -155,6 +158,7 @@ func (p *Plugin) Handler() http.Handler {
 	p.routeUI(mux)
 	p.routeEvents(mux)
 	p.routeOptions(mux)
+	p.routeMCP(mux)
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, pluginapi.Errorf(pluginapi.CodeNotFound, "no endpoint %s %s", r.Method, r.URL.Path))
 	})

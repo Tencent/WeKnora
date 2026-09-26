@@ -19,6 +19,9 @@ const (
 	MCPTransportSSE            MCPTransportType = "sse"             // Server-Sent Events
 	MCPTransportHTTPStreamable MCPTransportType = "http-streamable" // HTTP Streamable
 	MCPTransportStdio          MCPTransportType = "stdio"           // Stdio (Standard Input/Output)
+	// MCPTransportPlugin is an MCP server a plugin serves itself, reached
+	// through plugin calls instead of a URL.
+	MCPTransportPlugin MCPTransportType = "plugin"
 )
 
 // MCPService represents an MCP (Model Context Protocol) service configuration
@@ -44,10 +47,18 @@ type MCPService struct {
 	PluginID string `json:"plugin_id,omitempty" gorm:"-"`
 	// PluginError says why a plugin service is disabled, typically that the
 	// workspace has not configured the plugin yet.
-	PluginError string         `json:"plugin_error,omitempty" gorm:"-"`
-	CreatedAt   time.Time      `json:"created_at"`
-	UpdatedAt   time.Time      `json:"updated_at"`
-	DeletedAt   gorm.DeletedAt `json:"deleted_at"             gorm:"index"`
+	PluginError string `json:"plugin_error,omitempty" gorm:"-"`
+	// PluginVersion is the version of the plugin providing the service.
+	PluginVersion string `json:"-" gorm:"-"`
+	// PluginServer is the plugin's local ID of the server (its mcpServers
+	// contribution); the plugin transport calls it by this ID.
+	PluginServer string `json:"-" gorm:"-"`
+	// ToolViews are the plugin's result views by tool name (manifest
+	// ToolView as JSON), for the chat to render structured results.
+	ToolViews map[string]json.RawMessage `json:"-" gorm:"-"`
+	CreatedAt time.Time                  `json:"created_at"`
+	UpdatedAt time.Time                  `json:"updated_at"`
+	DeletedAt gorm.DeletedAt             `json:"deleted_at"             gorm:"index"`
 }
 
 // EffectiveUsageInstructions preserves documentation on legacy services until

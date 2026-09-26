@@ -1,0 +1,73 @@
+# The connection agent tools use in this workspace. Data sources have their
+# own, so each knowledge base can sync with a different account.
+type: object
+# Fields hidden by x-visible-if are not required.
+required: [auth, account, site, base_url, email, api_token]
+properties:
+  auth:
+    type: string
+    title: Sign in with
+    default: oauth
+    x-order: 1
+    oneOf:
+      - const: oauth
+        title: Atlassian account (OAuth)
+        x-i18n: { title: { zh-CN: Atlassian 账号（OAuth） } }
+      - const: token
+        title: API token
+        x-i18n: { title: { zh-CN: API 令牌 } }
+    x-i18n:
+      title: { zh-CN: 登录方式 }
+  account:
+    type: string
+    title: Atlassian account
+    description: Needs the platform's OAuth app (plugin management → Jira)
+    x-order: 2
+    x-visible-if: { auth: oauth }
+    x-oauth:
+      authorizeUrl: https://auth.atlassian.com/authorize
+      tokenUrl: https://auth.atlassian.com/oauth/token
+      scopes: [read:jira-work, read:jira-user, offline_access]
+      clientId: ${system.client_id}
+      clientSecret: ${system.client_secret}
+      params: { audience: api.atlassian.com, prompt: consent }
+    x-i18n:
+      title: { zh-CN: Atlassian 账号 }
+      description: { zh-CN: 需要平台先配置 OAuth 应用（插件管理 → Jira） }
+  site:
+    type: string
+    title: Site
+    description: The Jira site the account can reach
+    x-order: 3
+    x-visible-if: { auth: oauth }
+    x-options: { name: sites, dependsOn: [account] }
+    x-i18n:
+      title: { zh-CN: 站点 }
+      description: { zh-CN: 该账号可访问的 Jira 站点 }
+  base_url:
+    type: string
+    title: Site URL
+    x-order: 4
+    x-visible-if: { auth: token }
+    x-placeholder: https://your-team.atlassian.net
+    pattern: "^https://[A-Za-z0-9-]+\\.atlassian\\.net/?$"
+    x-i18n:
+      title: { zh-CN: 站点地址 }
+  email:
+    type: string
+    title: Email
+    x-order: 5
+    x-visible-if: { auth: token }
+    format: email
+    x-i18n:
+      title: { zh-CN: 邮箱 }
+  api_token:
+    type: string
+    title: API token
+    description: Create one at id.atlassian.com → Security → API tokens
+    x-order: 6
+    x-secret: true
+    x-visible-if: { auth: token }
+    x-i18n:
+      title: { zh-CN: API 令牌 }
+      description: { zh-CN: 在 id.atlassian.com → 安全 → API 令牌 中创建 }

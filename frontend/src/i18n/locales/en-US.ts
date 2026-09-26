@@ -2859,6 +2859,9 @@ export default {
       rotateFailed: 'Failed to rotate the secret'
     }
   },
+  pluginToolView: {
+    empty: 'No results'
+  },
   pluginPages: {
     notResponding: 'The plugin page is not responding; it may have failed to load.',
     requestFailed: 'The plugin request failed',
@@ -5555,6 +5558,7 @@ export default {
     }
   },
   mcpSettings: {
+    transportPlugin: 'Built into plugin',
     fromPlugin: 'Plugin',
     pluginNotConfigured: 'The plugin is not configured yet; fill in its settings in Plugins to use it',
     addUsageInstructions: "Add usage instructions",

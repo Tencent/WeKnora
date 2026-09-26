@@ -334,3 +334,43 @@ class Option:
     value: Any
     label: str
     description: str = ""
+
+
+@dataclass
+class ToolContent:
+    """One content block of a tool result: text, or an image (base64
+    data)."""
+
+    type: str = "text"
+    text: str = ""
+    data: str = ""
+    mime_type: str = ""
+
+
+@dataclass
+class ToolResult:
+    """What a tool returns. The model reads content; structured_content is
+    data for the tool's result view (toolViews in plugin.yaml). is_error
+    marks a failure the model should see."""
+
+    content: List[ToolContent] = field(default_factory=list)
+    structured_content: Any = None
+    is_error: bool = False
+
+    @staticmethod
+    def text(text: str) -> "ToolResult":
+        return ToolResult(content=[ToolContent(text=text)])
+
+    @staticmethod
+    def structured(data: Any, text: str = "") -> "ToolResult":
+        """Data for the result view, and text for the model (the data as
+        JSON when text is empty)."""
+        if not text:
+            import json
+
+            text = json.dumps(to_wire(data), ensure_ascii=False, separators=(",", ":"))
+        return ToolResult(content=[ToolContent(text=text)], structured_content=data)
+
+    @staticmethod
+    def error(message: str) -> "ToolResult":
+        return ToolResult(content=[ToolContent(text=message)], is_error=True)

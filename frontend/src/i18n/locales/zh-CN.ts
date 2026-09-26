@@ -2665,6 +2665,7 @@ export default {
     }
   },
   mcpSettings: {
+    transportPlugin: '插件内置',
     fromPlugin: '插件',
     pluginNotConfigured: '插件尚未配置，请在插件中心填写配置后使用',
     addUsageInstructions: "添加使用说明",
@@ -5378,6 +5379,9 @@ export default {
       rotateConfirm: '确定轮换？旧密钥立即失效。',
       rotateFailed: '轮换密钥失败'
     }
+  },
+  pluginToolView: {
+    empty: '没有结果'
   },
   pluginPages: {
     notResponding: '插件页面没有响应，可能加载失败。',

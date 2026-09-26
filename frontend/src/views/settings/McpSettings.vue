@@ -241,6 +241,9 @@ const getTransportTypeLabel = (transportType: string) => {
       return 'HTTP Streamable'
     case 'stdio':
       return 'Stdio'
+    case 'plugin':
+      // Served by the plugin itself: there is no URL to show.
+      return t('mcpSettings.transportPlugin')
     default:
       return transportType
   }

@@ -151,6 +151,64 @@ WeKnora answers 404 unless all of these hold:
 
 Bodies are limited to 1 MB, with 20 calls a second per URL.
 
+## Agent tools
+
+Agent tools are MCP tools. A plugin with code can serve them itself: declare
+an `mcpServers` contribution without `mcp.url`, then add the tools.
+
+```yaml
+contributes:
+  mcpServers:
+    - id: tools
+      name: { en-US: ACME Issues }
+      toolViews:                 # optional: how the chat shows structured results
+        search_issues:
+          view: table
+          items: issues
+          columns: [{ field: key, link: url }, summary, status]
+```
+
+```go
+p.Tool("tools", pluginapi.Tool{
+	Name:        "search_issues",
+	Description: "Search issues",
+	InputSchema: json.RawMessage(`{"type":"object","properties":{"text":{"type":"string"}}}`),
+}, func(ctx context.Context, call *pluginsdk.Call, args json.RawMessage) (*pluginapi.ToolResult, error) {
+	// call.Config.Tenant is the workspace's plugin configuration.
+	return pluginapi.StructuredResult(map[string]any{"issues": rows}, "3 issues ..."), nil
+})
+```
+
+How it works:
+- **Discovery.** Every workspace that switches the plugin on gets the server
+  as a read-only MCP service. Agents use it like any MCP service, with the
+  same per-tool approval settings.
+- **Transport.** Messages reach the plugin at `/v1/mcp/{id}` inside the usual
+  envelope. Each call therefore carries the workspace's context and
+  configuration (OAuth fields already swapped for tokens), and the server
+  keeps no session.
+- **Results.** The model reads the text content. Return failures the model
+  should see as `pluginapi.ToolError` (or any error); they become results with
+  `isError`.
+- **`toolViews`** map a tool's `structuredContent` to a view, so the chat can
+  show it without plugin code:
+
+| View | Shows | Fields |
+| --- | --- | --- |
+| `table` | A list as rows | `items`, `columns` (field, title, link) |
+| `cards` | A list as cards | `items`, `title`, `subtitle`, `body`, `link` |
+| `kv` | One object's fields | `items`, `title`, `link`, `fields` |
+| `markdown` | Rendered Markdown | `field` (the text content when empty) |
+| `json` | The data, formatted | - |
+| `page` | A page of the plugin (`entry` under `ui/`) | Gets `{tool, arguments, result}` as its context |
+
+  Paths are dotted field paths into the structured content. A page's
+  requests use the mount `mcpServers/<id>`.
+
+A plugin can also point `mcp.url` at an MCP server it runs elsewhere; then
+headers carry the configuration (`${config.<key>}`), and `toolViews` apply
+too.
+
 ## Dynamic choices and OAuth
 
 Two schema keywords let a form ask the plugin while someone fills it in.
@@ -280,7 +338,8 @@ Complete plugins with their `package.sh`:
 - `examples/plugins/links`: pages (toolbox, settings, knowledge base tab), in Python.
 - `examples/plugins/activity`: events, a webhook and a page, in Python.
 - `examples/plugins/jira`: a Jira Cloud connector with an OAuth field, dynamic
-  options, incremental sync with deletions, and a skill.
+  options, incremental sync with deletions; agent tools with result views; and
+  a skill.
 
 ## Testing
 

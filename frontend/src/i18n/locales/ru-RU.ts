@@ -2663,6 +2663,7 @@ export default {
     }
   },
   mcpSettings: {
+    transportPlugin: 'Встроено в плагин',
     fromPlugin: 'Плагин',
     pluginNotConfigured: 'Плагин ещё не настроен; заполните его настройки в разделе «Плагины»',
     addUsageInstructions: "Добавить инструкции",
@@ -5376,6 +5377,9 @@ export default {
       rotateConfirm: 'Сменить секрет? Старый сразу перестанет действовать.',
       rotateFailed: 'Не удалось сменить секрет'
     }
+  },
+  pluginToolView: {
+    empty: 'Нет результатов'
   },
   pluginPages: {
     notResponding: 'Страница плагина не отвечает; возможно, она не загрузилась.',

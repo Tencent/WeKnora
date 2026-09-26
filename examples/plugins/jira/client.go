@@ -173,6 +173,8 @@ func statusError(resp *http.Response, body []byte) error {
 		return e
 	case resp.StatusCode >= 500:
 		return pluginapi.Errorf(pluginapi.CodeUnavailable, "jira %d: %s", resp.StatusCode, msg)
+	case resp.StatusCode == http.StatusNotFound:
+		return pluginapi.Errorf(pluginapi.CodeNotFound, "jira 404: %s", msg)
 	case resp.StatusCode == http.StatusBadRequest:
 		// Mostly a JQL filter Jira does not accept.
 		return pluginapi.InvalidConfig("jira rejected the query: "+msg,
@@ -323,6 +325,21 @@ func (t *jiraTime) UnmarshalJSON(b []byte) error {
 var searchFields = []string{
 	"summary", "description", "status", "issuetype", "priority", "resolution", "assignee", "reporter",
 	"labels", "created", "updated", "project", "parent", "comment",
+}
+
+// searchPage runs JQL for at most limit issues, without comments, and says
+// whether more matched.
+func (c *client) searchPage(ctx context.Context, jql string, limit int) ([]issue, bool, error) {
+	body := map[string]any{"jql": jql, "maxResults": limit, "fields": searchFields[:len(searchFields)-1]}
+	var page struct {
+		Issues        []issue `json:"issues"`
+		NextPageToken string  `json:"nextPageToken"`
+		IsLast        bool    `json:"isLast"`
+	}
+	if err := c.do(ctx, http.MethodPost, "/rest/api/3/search/jql", body, &page); err != nil {
+		return nil, false, err
+	}
+	return page.Issues, !page.IsLast && page.NextPageToken != "", nil
 }
 
 // search runs JQL a page at a time (the enhanced search API, which pages

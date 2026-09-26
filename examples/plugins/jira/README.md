@@ -7,6 +7,8 @@ related work and owners among the synced issues.
 It is the fullest example plugin. It shows:
 
 - a connector with incremental sync, checkpoints and deletions;
+- agent tools the plugin serves itself (`search_issues`, `get_issue`), with
+  result views: a table of issues, and the issue as Markdown;
 - an OAuth field (`x-oauth`): WeKnora runs Atlassian's consent flow and hands
   the plugin a fresh access token at every call;
 - dynamic choices (`x-options`): the sites the account can reach and the
@@ -28,8 +30,11 @@ It is the fullest example plugin. It shows:
       `<WeKnora address>/api/v1/plugin-oauth/callback`.
    4. In the plugin's details in WeKnora, enter the app's client ID and
       secret.
-3. Workspace admins switch the plugin on under **Settings → Plugins**, then
-   add a **Jira** data source to a knowledge base.
+3. Workspace admins switch the plugin on under **Settings → Plugins**.
+   - To sync, add a **Jira** data source to a knowledge base.
+   - For the agent tools, fill in the plugin's configuration there (an
+     Atlassian account or an API token). The tools then appear as the
+     **Jira** MCP service, ready to add to agents.
 
 ## What is synced
 

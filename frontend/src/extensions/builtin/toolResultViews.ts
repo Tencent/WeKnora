@@ -11,6 +11,7 @@ import KnowledgeBaseList from '@/views/chat/components/tool-results/KnowledgeBas
 import KnowledgeChunksList from '@/views/chat/components/tool-results/KnowledgeChunksList.vue'
 import McpToolResult from '@/views/chat/components/tool-results/McpToolResult.vue'
 import PlanDisplay from '@/views/chat/components/tool-results/PlanDisplay.vue'
+import PluginToolView from '@/views/chat/components/tool-results/PluginToolView.vue'
 import ReadSkillResult from '@/views/chat/components/tool-results/ReadSkillResult.vue'
 import RelatedChunks from '@/views/chat/components/tool-results/RelatedChunks.vue'
 import SandboxFilesResult from '@/views/chat/components/tool-results/SandboxFilesResult.vue'
@@ -58,6 +59,11 @@ const VIEWS: Record<string, View> = {
   mcp_discovery: {
     component: McpToolResult,
     props: (c) => ({ discovery: true, data: c.data, output: c.output, arguments: c.arguments, success: c.success }),
+  },
+  // Results of plugin tools, shown with the view the plugin declared.
+  plugin_tool_view: {
+    component: PluginToolView,
+    props: (c) => ({ data: c.data, output: c.output, arguments: c.arguments, success: c.success }),
   },
   mcp_call: {
     component: McpToolResult,

@@ -231,7 +231,15 @@ func NewMCPClient(config *ClientConfig) (MCPClient, error) {
 		// Stdio transport is disabled for security reasons (potential command injection vulnerabilities)
 		return nil, fmt.Errorf("stdio transport is disabled for security reasons; please use SSE or HTTP Streamable transport instead")
 	default:
-		return nil, ErrUnsupportedTransport
+		factory, ok := registeredTransport(config.Service.TransportType)
+		if !ok {
+			return nil, ErrUnsupportedTransport
+		}
+		t, err := factory(config.Service)
+		if err != nil {
+			return nil, err
+		}
+		mcpClient = client.NewClient(t)
 	}
 
 	instance := &mcpGoClient{
@@ -291,7 +299,7 @@ func buildOAuthConfig(config *ClientConfig, httpClient *http.Client) (transport.
 // onConnectionLost callback when the connection is lost
 func (c *mcpGoClient) onConnectionLost(err error) {
 	_ = c.Disconnect()
-	logger.Warnf(context.Background(), "MCP server connection has been lost, URL:%s, error:%v", *c.service.URL, err)
+	logger.Warnf(context.Background(), "MCP server connection has been lost, %s, error:%v", target(c.service), err)
 }
 
 // checkErrorAndDisconnectIfNeeded checks for transport errors that indicate the
@@ -355,7 +363,7 @@ func (c *mcpGoClient) Connect(ctx context.Context) error {
 		logger.GetLogger(ctx).Infof("MCP stdio client connected: %s %v",
 			c.service.StdioConfig.Command, c.service.StdioConfig.Args)
 	} else {
-		logger.GetLogger(ctx).Infof("MCP client connected to %s", *c.service.URL)
+		logger.GetLogger(ctx).Infof("MCP client connected to %s", target(c.service))
 	}
 	return nil
 }
@@ -617,8 +625,9 @@ func (c *mcpGoClient) CallTool(ctx context.Context, name string, args map[string
 	}
 
 	return &CallToolResult{
-		IsError: result.IsError,
-		Content: content,
+		IsError:           result.IsError,
+		Content:           content,
+		StructuredContent: result.StructuredContent,
 	}, nil
 }
 

@@ -170,6 +170,41 @@ func Run(ctx context.Context, t Target) Report {
 			return protocolAnswer(err)
 		})
 	}
+	for _, id := range m.Contributes["mcpServers"] {
+		check("mcp/"+id+" lists its tools", func(ctx context.Context) error {
+			var init, list pluginapi.MCPResponse
+			params := `{"protocolVersion":"` + pluginapi.MCPProtocolVersion + `","capabilities":{},` +
+				`"clientInfo":{"name":"conformance","version":"1"}}`
+			req := pluginapi.MCPRequest{
+				JSONRPC: "2.0", ID: json.RawMessage(`1`), Method: "initialize", Params: json.RawMessage(params),
+			}
+			if err := t.Client.Call(ctx, pluginapi.MCPPath(id), envelope(), req, &init); err != nil {
+				return err
+			}
+			if init.Error != nil || len(init.Result) == 0 {
+				return fmt.Errorf("initialize failed: %+v", init.Error)
+			}
+			req = pluginapi.MCPRequest{JSONRPC: "2.0", ID: json.RawMessage(`2`), Method: "tools/list"}
+			if err := t.Client.Call(ctx, pluginapi.MCPPath(id), envelope(), req, &list); err != nil {
+				return err
+			}
+			var tools struct {
+				Tools []pluginapi.Tool `json:"tools"`
+			}
+			if list.Error != nil || json.Unmarshal(list.Result, &tools) != nil || len(tools.Tools) == 0 {
+				return fmt.Errorf("tools/list answered no tools")
+			}
+			for _, tool := range tools.Tools {
+				var schema struct {
+					Type string `json:"type"`
+				}
+				if tool.Name == "" || json.Unmarshal(tool.InputSchema, &schema) != nil || schema.Type != "object" {
+					return fmt.Errorf("tool %q needs a name and an object inputSchema", tool.Name)
+				}
+			}
+			return nil
+		})
+	}
 	for _, id := range m.Contributes["webhooks"] {
 		check("webhooks/"+id+" answers", func(ctx context.Context) error {
 			var out pluginapi.WebhookResponse

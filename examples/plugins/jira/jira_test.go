@@ -66,6 +66,18 @@ func newFakeJira(t *testing.T) *fakeJira {
 		writeJSON(w, []issueType{{Name: "Task"}, {Name: "Bug"}, {Name: "Bug"}, {Name: "Sub-task", Subtask: true}})
 	})
 	api.HandleFunc("POST /rest/api/3/search/jql", f.search)
+	api.HandleFunc("GET /rest/api/3/issue/{key}", func(w http.ResponseWriter, r *http.Request) {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		for _, is := range f.issues {
+			if is["key"] == r.PathValue("key") {
+				writeJSON(w, is)
+				return
+			}
+		}
+		http.Error(w, `{"errorMessages":["Issue does not exist or you do not have permission to see it."]}`,
+			http.StatusNotFound)
+	})
 	mux.Handle("/ex/jira/"+cloudID+"/", http.StripPrefix("/ex/jira/"+cloudID, bearer(api)))
 	mux.Handle("/rest/", basic(api))
 	f.Server = httptest.NewServer(mux)
@@ -122,7 +134,10 @@ func (f *fakeJira) search(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.jql = append(f.jql, in.JQL)
-	key := projectClause.FindStringSubmatch(in.JQL)[1]
+	key := ""
+	if m := projectClause.FindStringSubmatch(in.JQL); m != nil {
+		key = m[1]
+	}
 	var since time.Time
 	if m := updatedClause.FindStringSubmatch(in.JQL); m != nil {
 		since, _ = time.ParseInLocation("2006/01/02 15:04", m[1], shanghai)
@@ -131,7 +146,7 @@ func (f *fakeJira) search(w http.ResponseWriter, r *http.Request) {
 	for _, is := range f.issues {
 		fields := is["fields"].(map[string]any)
 		updated, _ := time.Parse("2006-01-02T15:04:05.000-0700", fields["updated"].(string))
-		if strings.HasPrefix(is["key"].(string), key+"-") && !updated.Before(since) {
+		if strings.HasPrefix(is["key"].(string), key) && !updated.Before(since) {
 			list = append(list, is)
 		}
 	}
@@ -500,5 +515,75 @@ func TestPluginPassesConformance(t *testing.T) {
 		if !r.Passed {
 			t.Errorf("%s: %s", r.Name, r.Detail)
 		}
+	}
+}
+
+func TestAgentTools(t *testing.T) {
+	f := newFakeJira(t)
+	f.put("101", "ENG-1", "Login fails", "2026-09-20T10:00:00.000+0800")
+	f.put("102", "ENG-2", "Login is slow", "2026-09-21T10:00:00.000+0800")
+	f.put("103", "ENG-3", "Other", "2026-09-22T10:00:00.000+0800")
+	r := newRun(t)
+	tenant := map[string]any{"auth": "token", "base_url": f.URL, "email": email, "api_token": apiToken}
+	call := func(tool string, args string, tenant map[string]any, locale string) pluginapi.ToolResult {
+		t.Helper()
+		req := pluginapi.MCPRequest{
+			JSONRPC: "2.0", ID: json.RawMessage(`1`), Method: "tools/call",
+			Params: json.RawMessage(`{"name":"` + tool + `","arguments":` + args + `}`),
+		}
+		var out pluginapi.MCPResponse
+		env := pluginapi.Envelope{Context: pluginapi.Context{Locale: locale}, Config: pluginapi.Config{Tenant: tenant}}
+		if err := r.client.Call(context.Background(), pluginapi.MCPPath(toolsServer), env, req, &out); err != nil {
+			t.Fatal(err)
+		}
+		var res pluginapi.ToolResult
+		if out.Error != nil || json.Unmarshal(out.Result, &res) != nil {
+			t.Fatalf("%s: %+v", tool, out)
+		}
+		return res
+	}
+
+	res := call("search_issues", `{"text":"login","project":"ENG","limit":1}`, tenant, "")
+	if f.lastJQL() != `project = "ENG" AND text ~ "login" ORDER BY updated DESC` || res.IsError {
+		t.Fatalf("jql = %s, %+v", f.lastJQL(), res)
+	}
+	rows, _ := json.Marshal(res.StructuredContent)
+	if !strings.Contains(string(rows), `"key":"ENG-1"`) || !strings.Contains(string(rows), `"more":true`) ||
+		!strings.Contains(res.Content[0].Text, "- ENG-1 [In Progress] Login fails (unassigned") {
+		t.Fatalf("search = %s\n%s", rows, res.Content[0].Text)
+	}
+	call("search_issues", `{"jql":"assignee = currentUser()"}`, tenant, "")
+	if f.lastJQL() != "assignee = currentUser() ORDER BY updated DESC" {
+		t.Fatalf("jql = %s", f.lastJQL())
+	}
+	if res := call("search_issues", `{}`, tenant, ""); !res.IsError {
+		t.Fatal("a search needs jql or text")
+	}
+
+	res = call("get_issue", `{"key":"eng-2"}`, tenant, "")
+	md, _ := json.Marshal(res.StructuredContent)
+	if res.IsError || !strings.HasPrefix(res.Content[0].Text, "# ENG-2: Login is slow") ||
+		!strings.Contains(string(md), `"url":"`+f.URL+`/browse/ENG-2"`) {
+		t.Fatalf("get_issue = %+v", res)
+	}
+	if res := call("get_issue", `{"key":"ENG-9"}`, tenant, ""); !res.IsError ||
+		!strings.Contains(res.Content[0].Text, "does not exist") {
+		t.Fatalf("missing issue = %+v", res)
+	}
+	if res := call("get_issue", `{"key":"DROP TABLE"}`, tenant, ""); !res.IsError {
+		t.Fatal("a malformed key reaches Jira")
+	}
+	res = call("search_issues", `{"text":"x"}`, map[string]any{"auth": "oauth"}, "zh-CN")
+	if !res.IsError || !strings.Contains(res.Content[0].Text, "本空间尚未连接 Jira") {
+		t.Fatalf("unconfigured = %+v", res)
+	}
+
+	// The workspace form offers sites and issue types too.
+	var sites pluginapi.OptionsOutput
+	err := r.client.Call(context.Background(), pluginapi.OptionsPath("sites"),
+		pluginapi.Envelope{Config: pluginapi.Config{Tenant: map[string]any{"auth": "oauth", "account": oauthToken}}},
+		pluginapi.OptionsInput{Field: "site", Scope: pluginapi.OptionsScopeTenant}, &sites)
+	if err != nil || len(sites.Options) != 1 || sites.Options[0].Value != cloudID {
+		t.Fatalf("tenant sites = %+v, %v", sites, err)
 	}
 }

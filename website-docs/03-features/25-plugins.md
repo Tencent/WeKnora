@@ -129,6 +129,14 @@ Helm 设置 `pluginHost.enabled=true` 即可。使用本地存储（`STORAGE_TYP
 - 插件自行用空间配置里的密钥校验调用方。
 - 设置 `APP_EXTERNAL_URL` 后，插件还能拿到完整地址，自动向第三方注册。
 
+## 插件工具
+
+插件可以给 Agent 提供工具。工具统一按 MCP 服务接入：
+
+- 启用了插件的空间，会在 MCP 服务列表中看到插件提供的服务（只读），其中的工具与其他 MCP 工具一样，可在 Agent 中选用，并沿用相同的工具审批设置。
+- 代码插件可以自己提供工具，无需单独部署 MCP 服务。WeKnora 调用工具时带上当前空间的插件配置，所以工具使用的是空间管理员在「设置 → 插件」中填写的账号。
+- 插件可以为工具结果声明展示方式（表格、卡片、键值、Markdown、插件页面），对话中按此展示结构化结果；模型读取的仍是文本结果。
+
 ## 动态选项与账号连接
 
 插件的配置表单可以在填写时向插件取数据：
@@ -157,6 +165,6 @@ Helm 设置 `pluginHost.enabled=true` 即可。使用本地存储（`STORAGE_TYP
   - `notebooks`：Jupyter 笔记本解析器，Python；
   - `links`：带三种页面的团队链接插件，Python；
   - `activity`：订阅事件、接收 Webhook 的空间动态插件，Python；
-  - `jira`：Jira Cloud 问题同步，支持 OAuth 授权或 API 令牌，带动态选项、增量同步与问题分诊技能，Go。
+  - `jira`：Jira Cloud 问题同步与 Agent 工具（搜索、读取问题），支持 OAuth 授权或 API 令牌，带动态选项、增量同步与问题分诊技能，Go。
 
 同一个插件既可以打包成 `host` 插件由 WeKnora 运行，也可以作为 `remote` 服务独立部署，代码不用改。

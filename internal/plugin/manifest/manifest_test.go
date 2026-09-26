@@ -2,6 +2,7 @@ package manifest
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -262,6 +263,57 @@ func TestResourceAmounts(t *testing.T) {
 		}
 		if _, err := ParseMemory(bad); err == nil {
 			t.Errorf("ParseMemory(%q) accepted", bad)
+		}
+	}
+}
+
+func TestToolServersAndViews(t *testing.T) {
+	base := `schemaVersion: 1
+id: acme.tools
+version: 1.0.0
+apiVersion: weknora.plugin/v1
+name: { en-US: Tools }
+publisher: { id: acme }
+runtime: %s
+contributes:
+  mcpServers:
+    - id: issues
+      name: Issues
+%s`
+	parse := func(runtime, rest string) error {
+		_, err := Parse([]byte(fmt.Sprintf(base, runtime, rest)))
+		return err
+	}
+	code := "{ type: host, kind: binary, entry: bin/x }"
+	views := `      toolViews:
+        search: { view: table, items: issues, columns: [key, { field: summary, title: { en-US: Summary }, link: url }] }
+        get: { view: page, entry: ui/issue.html }
+        stats: { view: kv }
+`
+	if err := parse(code, views); err != nil {
+		t.Fatalf("a code plugin serving its own tools: %v", err)
+	}
+	m, _ := Parse([]byte(fmt.Sprintf(base, code, views)))
+	c := m.Contributes[PointMCPServers][0]
+	if !c.ServedByPlugin() || c.ToolViews["search"].Columns[0].Field != "key" ||
+		c.ToolViews["search"].Columns[1].Link != "url" {
+		t.Fatalf("contribution = %+v", c)
+	}
+	for name, tc := range map[string]struct{ runtime, rest, want string }{
+		"declarative needs a url": {"{ type: declarative }", "", "mcp.url is required"},
+		"headers need a url":      {code, "      mcp: { headers: { X: y } }\n", "only apply to a remote url"},
+		"table without columns":   {code, "      toolViews: { search: { view: table } }\n", "a table needs columns"},
+		"cards without title":     {code, "      toolViews: { search: { view: cards } }\n", "cards need a title"},
+		"page outside ui": {
+			code, "      toolViews: { get: { view: page, entry: x.html } }\n", "must be a file under ui/",
+		},
+		"unknown view": {code, "      toolViews: { get: { view: chart } }\n", "view must be"},
+		"bad path": {
+			code, "      toolViews: { get: { view: kv, title: \"a[0]\" } }\n", "dotted field path",
+		},
+	} {
+		if err := parse(tc.runtime, tc.rest); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: %v", name, err)
 		}
 	}
 }

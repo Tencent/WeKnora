@@ -32,7 +32,8 @@ export type DisplayType =
     | 'edit_sandbox_file'
     | 'read_skill'
     | 'mcp_discovery'
-    | 'mcp_call';
+    | 'mcp_call'
+    | 'plugin_tool_view';
 
 // Search result item
 export interface SearchResultItem {

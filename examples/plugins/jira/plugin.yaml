@@ -4,8 +4,8 @@ version: 1.0.0
 apiVersion: weknora.plugin/v1
 name: { en-US: Jira, zh-CN: Jira }
 description:
-  en-US: Sync Jira Cloud issues, with their comments, into a knowledge base, and a skill for triaging them. Connects with Atlassian OAuth or an API token; shows dynamic form options and OAuth fields.
-  zh-CN: 把 Jira Cloud 的问题（含评论）同步到知识库，并提供问题分诊技能。支持 Atlassian OAuth 授权或 API 令牌；演示表单动态选项与 OAuth 字段。
+  en-US: Sync Jira Cloud issues, with their comments, into a knowledge base; agent tools to search and read issues; and a skill for triaging them. Connects with Atlassian OAuth or an API token; shows dynamic form options and OAuth fields.
+  zh-CN: 把 Jira Cloud 的问题（含评论）同步到知识库，提供搜索和读取问题的 Agent 工具，以及问题分诊技能。支持 Atlassian OAuth 授权或 API 令牌；演示表单动态选项与 OAuth 字段。
 publisher: { id: weknora-examples, name: WeKnora examples }
 homepage: https://github.com/Tencent/WeKnora/tree/main/examples/plugins/jira
 license: MIT
@@ -23,6 +23,8 @@ config:
   # The platform's Atlassian OAuth 2.0 (3LO) app. Without it, workspaces can
   # still connect with an API token.
   system: schemas/system.yaml
+  # The connection the agent tools use in this workspace.
+  tenant: schemas/tenant.yaml
 contributes:
   connectors:
     - id: jira
@@ -33,6 +35,24 @@ contributes:
       icon: icon.svg
       capabilities: [incremental, streaming]
       instanceSchema: schemas/connector.yaml
+  mcpServers:
+    # No url: the plugin serves these tools itself.
+    - id: tools
+      name: { en-US: Jira, zh-CN: Jira }
+      description:
+        en-US: Search Jira issues with JQL or text, and read one issue with its comments
+        zh-CN: 用 JQL 或关键词搜索 Jira 问题，读取单个问题及其评论
+      toolViews:
+        search_issues:
+          view: table
+          items: issues
+          columns:
+            - { field: key, title: { en-US: Key, zh-CN: 编号 }, link: url }
+            - { field: summary, title: { en-US: Summary, zh-CN: 摘要 } }
+            - { field: status, title: { en-US: Status, zh-CN: 状态 } }
+            - { field: assignee, title: { en-US: Assignee, zh-CN: 负责人 } }
+            - { field: updated, title: { en-US: Updated, zh-CN: 更新时间 } }
+        get_issue: { view: markdown, field: markdown }
   skills:
     - id: jira-triage
       name: { en-US: Jira triage, zh-CN: Jira 问题分诊 }

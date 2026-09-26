@@ -17,7 +17,8 @@ import (
 var ErrNoPage = errors.New("no such plugin page")
 
 // UIPages keeps the pages of loaded plugins (pages, settingsSections,
-// kbTabs): where their files are, and which mounts exist.
+// kbTabs, and tool result pages of mcpServers): where their files are, and
+// which mounts exist.
 type UIPages struct {
 	mu     sync.RWMutex
 	loaded map[string]uiPlugin
@@ -37,8 +38,11 @@ func (a *UIPages) Name() string { return "ui" }
 // Activate implements reconcile.Activator.
 func (a *UIPages) Activate(_ context.Context, l *reconcile.Loaded) error {
 	has := false
-	for point := range l.Manifest.Contributes {
+	for point, list := range l.Manifest.Contributes {
 		has = has || manifest.IsUIPoint(point)
+		for _, c := range list {
+			has = has || (point == manifest.PointMCPServers && c.HasToolPages())
+		}
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -98,11 +102,13 @@ func (a *UIPages) Mount(pluginID, mount string) (Mount, error) {
 	p, ok := a.loaded[pluginID]
 	a.mu.RUnlock()
 	point, id, found := strings.Cut(mount, "/")
-	if !ok || !found || !manifest.IsUIPoint(manifest.Point(point)) {
+	toolPages := manifest.Point(point) == manifest.PointMCPServers
+	if !ok || !found || (!manifest.IsUIPoint(manifest.Point(point)) && !toolPages) {
 		return Mount{}, ErrNoPage
 	}
 	for _, c := range p.m.Contributes[manifest.Point(point)] {
-		if c.ID == id {
+		// A tool result page answers to its server: "mcpServers/<id>".
+		if c.ID == id && (!toolPages || c.HasToolPages()) {
 			return Mount{Manifest: p.m, Point: manifest.Point(point), Contribution: c}, nil
 		}
 	}

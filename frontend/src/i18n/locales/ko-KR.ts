@@ -2663,6 +2663,7 @@ export default {
     }
   },
   mcpSettings: {
+    transportPlugin: '플러그인 내장',
     fromPlugin: '플러그인',
     pluginNotConfigured: '플러그인이 아직 설정되지 않았습니다. 플러그인 센터에서 설정한 뒤 사용하세요',
     addUsageInstructions: "사용 안내 추가",
@@ -5376,6 +5377,9 @@ export default {
       rotateConfirm: '비밀 키를 교체할까요? 이전 키는 즉시 무효화됩니다.',
       rotateFailed: '비밀 키를 교체하지 못했습니다'
     }
+  },
+  pluginToolView: {
+    empty: '결과가 없습니다'
   },
   pluginPages: {
     notResponding: '플러그인 페이지가 응답하지 않습니다. 로드에 실패했을 수 있습니다.',

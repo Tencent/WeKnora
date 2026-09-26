@@ -25,7 +25,8 @@ func TestOpenAPIMatchesRoutes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, f := range []string{"websearch.go", "connector.go", "parser.go", "ui.go", "events.go", "options.go"} {
+	files := []string{"websearch.go", "connector.go", "parser.go", "ui.go", "events.go", "options.go", "mcp.go"}
+	for _, f := range files {
 		b, err := os.ReadFile(f)
 		if err != nil {
 			t.Fatal(err)
