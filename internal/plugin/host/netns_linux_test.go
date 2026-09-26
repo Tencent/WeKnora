@@ -28,14 +28,14 @@ func TestSandboxedPluginOnlyReachesTheProxyAndHostAPI(t *testing.T) {
 	fastTimings(t)
 	t.Setenv(envNetns, "1")
 	hostAPI := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		fmt.Fprint(w, "host api")
+		_, _ = fmt.Fprint(w, "host api")
 	}))
 	defer hostAPI.Close()
 	other, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer other.Close()
+	defer func() { _ = other.Close() }()
 
 	m := NewManager()
 	m.SetHostAPIAddr(strings.TrimPrefix(hostAPI.URL, "http://"))
