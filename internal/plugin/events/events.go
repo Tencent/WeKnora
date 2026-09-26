@@ -82,8 +82,7 @@ func Publish(ctx context.Context, tenantID uint64, typ string, data any) {
 // subscribed reports whether a loaded plugin wants an event and can take
 // it (it has code).
 func subscribed(m *manifest.Manifest, typ string) bool {
-	rt := m.Runtime.Type
-	return (rt == manifest.RuntimeHost || rt == manifest.RuntimeRemote) && slices.Contains(m.Permissions.Events, typ)
+	return m.Runtime.Type.HasCode() && slices.Contains(m.Permissions.Events, typ)
 }
 
 // Publish enqueues a delivery for every subscribed plugin the workspace has

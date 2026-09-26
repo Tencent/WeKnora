@@ -75,6 +75,7 @@ import (
 	pluginbuiltin "github.com/Tencent/WeKnora/internal/plugin/builtin"
 	plugindriver "github.com/Tencent/WeKnora/internal/plugin/driver"
 	pluginevents "github.com/Tencent/WeKnora/internal/plugin/events"
+	pluginkube "github.com/Tencent/WeKnora/internal/plugin/kube"
 	pluginmanifest "github.com/Tencent/WeKnora/internal/plugin/manifest"
 	pluginoauth "github.com/Tencent/WeKnora/internal/plugin/oauth"
 	"github.com/Tencent/WeKnora/internal/plugin/reconcile"
@@ -1870,12 +1871,20 @@ func newPluginRegistry(
 }
 
 // newPluginDrivers returns the drivers that run plugins: builtins,
-// declarative packages, the embedded host and remote services; a kubernetes
-// driver joins this set.
-func newPluginDrivers(reg *pluginregistry.Registry, r *reconcile.Reconciler) *plugindriver.Set {
-	return plugindriver.NewSet(plugindriver.NewBuiltin(reg.Plugin),
+// declarative packages, the embedded host and remote services, and
+// kubernetes deployments when this platform runs them.
+func newPluginDrivers(
+	reg *pluginregistry.Registry, r *reconcile.Reconciler, kubeDriver *pluginkube.Driver,
+) *plugindriver.Set {
+	drivers := []plugindriver.Driver{
+		plugindriver.NewBuiltin(reg.Plugin),
 		r.Driver(pluginmanifest.RuntimeDeclarative), r.Driver(pluginmanifest.RuntimeHost),
-		r.Driver(pluginmanifest.RuntimeRemote))
+		r.Driver(pluginmanifest.RuntimeRemote),
+	}
+	if kubeDriver != nil {
+		drivers = append(drivers, r.Driver(pluginmanifest.RuntimeKubernetes))
+	}
+	return plugindriver.NewSet(drivers...)
 }
 
 // installPluginGate gives the integration handlers the tenant plugin switches,

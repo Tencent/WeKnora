@@ -72,7 +72,7 @@ func (h *PluginWebhookHandler) allow(token string) bool {
 // webhookOf finds webhook id among a loaded plugin's contributions.
 func (h *PluginWebhookHandler) webhookOf(pluginID, id string) (*manifest.Manifest, *manifest.Contribution) {
 	m, ok := h.registry.Plugin(pluginID)
-	if !ok || (m.Runtime.Type != manifest.RuntimeHost && m.Runtime.Type != manifest.RuntimeRemote) {
+	if !ok || !m.Runtime.Type.HasCode() {
 		return nil, nil
 	}
 	for i, c := range m.Contributes[manifest.PointWebhooks] {

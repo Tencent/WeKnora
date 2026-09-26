@@ -146,6 +146,12 @@ func TestPluginPageRequests(t *testing.T) {
 		t.Fatalf("admin page for an admin = %d %s", w.Code, w.Body)
 	}
 
+	// A kubernetes deployment is served like a remote plugin.
+	deployed := uiEngine(t, manifest.RuntimeKubernetes, types.TenantRoleViewer)
+	if w := uiRequest(deployed, `{"mount":"pages/links","path":"/"}`); w.Code != 200 {
+		t.Fatalf("a kubernetes plugin's page request = %d %s", w.Code, w.Body)
+	}
+
 	static := uiEngine(t, manifest.RuntimeDeclarative, types.TenantRoleViewer)
 	if w := uiRequest(static, `{"mount":"pages/links","path":"/"}`); w.Code != http.StatusNotFound {
 		t.Fatalf("a plugin without code = %d", w.Code)

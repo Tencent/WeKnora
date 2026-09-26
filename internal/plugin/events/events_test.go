@@ -254,3 +254,19 @@ func TestDeferredKnowledgeWaitsForPlugins(t *testing.T) {
 		t.Fatalf("flushed %d events, want 1", len(tasks))
 	}
 }
+
+// Every runtime with code takes events, kubernetes deployments included.
+func TestSubscribedNeedsCode(t *testing.T) {
+	for rt, want := range map[manifest.RuntimeType]bool{
+		manifest.RuntimeHost: true, manifest.RuntimeRemote: true, manifest.RuntimeKubernetes: true,
+		manifest.RuntimeDeclarative: false, manifest.RuntimeBuiltin: false,
+	} {
+		m := &manifest.Manifest{
+			Runtime:     manifest.Runtime{Type: rt},
+			Permissions: manifest.Permissions{Events: []string{pluginapi.EventChatAnswered}},
+		}
+		if got := subscribed(m, pluginapi.EventChatAnswered); got != want {
+			t.Errorf("%s: subscribed = %v, want %v", rt, got, want)
+		}
+	}
+}
