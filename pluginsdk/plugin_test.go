@@ -211,6 +211,13 @@ func TestAuthModes(t *testing.T) {
 	if err != nil || len(out.Results) != 1 {
 		t.Fatalf("signed call = %+v, %v", out, err)
 	}
+	// A parse call carries a whole document: bodies well over 32 MiB pass.
+	big := strings.Repeat("x", 40<<20)
+	err = client.New(signed.URL, nil, client.Signed("s3cret")).
+		Call(ctx, pluginapi.SearchPath("echo"), pluginapi.Envelope{}, pluginapi.SearchInput{Query: big}, &out)
+	if err != nil {
+		t.Fatalf("signed call with a 40 MiB body: %v", err)
+	}
 }
 
 func isCode(err error, code pluginapi.ErrorCode) bool {
