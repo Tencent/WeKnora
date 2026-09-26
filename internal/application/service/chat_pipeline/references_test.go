@@ -137,3 +137,65 @@ func TestPrepareMessagesWithModelContextSuppressesCitationsWhenDisabled(t *testi
 	require.NotContains(t, messages[1].Content, "chunk-1")
 	require.Equal(t, "answer ", refs.DecodeOutputText(`answer <ref id="c1"/>`))
 }
+
+// A truncated ranked list must reach the model context view: this is the text
+// the model actually reads, and RenderedContexts is replaced wholesale.
+func TestPrepareMessagesWithModelContextReportsTruncatedRetrieval(t *testing.T) {
+	manage := &types.ChatManage{
+		PipelineRequest: types.PipelineRequest{
+			Query:         "who holds the CCSK certificate",
+			SummaryConfig: types.SummaryConfig{Prompt: "system"},
+		},
+		PipelineState: types.PipelineState{
+			UserContent: "question",
+			MergeResult: []*types.SearchResult{{
+				ID: "chunk-1", KnowledgeID: "doc-1", KnowledgeBaseID: "kb-1",
+				KnowledgeTitle: "Doc", Content: "evidence",
+			}},
+			Truncation: &types.RetrievalTruncation{Shown: 5, Candidates: 146},
+		},
+	}
+
+	messages, _ := prepareMessagesWithModelContext(context.Background(), manage)
+	require.Contains(t, messages[1].Content, `<subset shown="5" candidates="146">`)
+
+	manage.Truncation = nil
+	messages, _ = prepareMessagesWithModelContext(context.Background(), manage)
+	require.NotContains(t, messages[1].Content, "<subset")
+}
+
+// End to end: FILTER_TOP_K drops candidates, INTO_CHAT_MESSAGE renders the
+// passages, and the caveat must land in the messages the model reads — not in
+// RenderedContexts, which this stage replaces wholesale.
+func TestTruncatedRetrievalReachesModelMessages(t *testing.T) {
+	manage := &types.ChatManage{
+		PipelineRequest: types.PipelineRequest{
+			Query:         "who holds the CCSK certificate",
+			RerankTopK:    2,
+			SummaryConfig: types.SummaryConfig{Prompt: "system", ContextTemplate: "{{query}}\n{{contexts}}"},
+		},
+		PipelineState: types.PipelineState{
+			MergeResult: []*types.SearchResult{
+				{ID: "c1", KnowledgeID: "doc-1", KnowledgeBaseID: "kb-1", Content: "first", Score: 0.9},
+				{ID: "c2", KnowledgeID: "doc-1", KnowledgeBaseID: "kb-1", Content: "second", Score: 0.8},
+				{ID: "c3", KnowledgeID: "doc-1", KnowledgeBaseID: "kb-1", Content: "third", Score: 0.7},
+			},
+		},
+	}
+	next := func() *PluginError { return nil }
+	filter := &PluginFilterTopK{}
+	if err := filter.OnEvent(context.Background(), types.FILTER_TOP_K, manage, next); err != nil {
+		t.Fatalf("filter_top_k: %v", err)
+	}
+	intoChat := &PluginIntoChatMessage{}
+	if err := intoChat.OnEvent(context.Background(), types.INTO_CHAT_MESSAGE, manage, next); err != nil {
+		t.Fatalf("into_chat_message: %v", err)
+	}
+	require.Len(t, manage.MergeResult, 2)
+	require.NotContains(t, manage.RenderedContexts, "<subset")
+
+	messages, _ := prepareMessagesWithModelContext(context.Background(), manage)
+	require.Contains(t, messages[1].Content, `<subset shown="2" candidates="3">`)
+	require.Contains(t, messages[1].Content, "second")
+	require.NotContains(t, messages[1].Content, "third")
+}
