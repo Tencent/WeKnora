@@ -71,11 +71,19 @@ type egressProxy struct {
 	ln       net.Listener
 	srv      *http.Server
 	dial     func(ctx context.Context, network, addr string) (net.Conn, error)
-	logf     func(format string, args ...any)
-	wg       sync.WaitGroup
+	// direct are hosts WeKnora itself names (the Host API on another node):
+	// always allowed, and dialed without the public-address check, since
+	// they are usually on the internal network. A sandboxed plugin reaches
+	// them only through the proxy.
+	direct     map[string]bool
+	dialDirect func(ctx context.Context, network, addr string) (net.Conn, error)
+	logf       func(format string, args ...any)
+	wg         sync.WaitGroup
 }
 
-func startEgressProxy(pluginID string, patterns []string, logf func(string, ...any)) (*egressProxy, error) {
+func startEgressProxy(
+	pluginID string, patterns, direct []string, logf func(string, ...any),
+) (*egressProxy, error) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return nil, fmt.Errorf("start egress proxy: %w", err)
@@ -83,6 +91,11 @@ func startEgressProxy(pluginID string, patterns []string, logf func(string, ...a
 	p := &egressProxy{
 		pluginID: pluginID, policy: newEgressPolicy(patterns), ln: ln,
 		dial: utils.SSRFSafeDialContext, logf: logf,
+		direct:     map[string]bool{},
+		dialDirect: (&net.Dialer{Timeout: 30 * time.Second}).DialContext,
+	}
+	for _, h := range direct {
+		p.direct[strings.ToLower(h)] = true
 	}
 	p.srv = &http.Server{Handler: p, ReadHeaderTimeout: 30 * time.Second}
 	p.wg.Add(1)
@@ -103,6 +116,14 @@ func (p *egressProxy) Close() {
 	p.wg.Wait()
 }
 
+// allows reports whether the plugin may reach host, and how to dial it.
+func (p *egressProxy) allows(host string) (func(ctx context.Context, network, addr string) (net.Conn, error), bool) {
+	if p.direct[strings.ToLower(strings.TrimSuffix(host, "."))] {
+		return p.dialDirect, true
+	}
+	return p.dial, p.policy.allows(host)
+}
+
 func (p *egressProxy) deny(w http.ResponseWriter, host string) {
 	p.logf("[plugin] %s: egress to %s refused (not in permissions.egress)", p.pluginID, host)
 	http.Error(w, fmt.Sprintf("egress to %s is not permitted for plugin %s", host, p.pluginID), http.StatusForbidden)
@@ -118,7 +139,8 @@ func (p *egressProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	host := r.URL.Hostname()
-	if !p.policy.allows(host) {
+	dial, ok := p.allows(host)
+	if !ok {
 		p.deny(w, host)
 		return
 	}
@@ -126,7 +148,7 @@ func (p *egressProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	out.RequestURI = ""
 	out.Header.Del("Proxy-Connection")
 	out.Header.Del("Proxy-Authorization")
-	tr := &http.Transport{DialContext: p.dial, ResponseHeaderTimeout: 2 * time.Minute}
+	tr := &http.Transport{DialContext: dial, ResponseHeaderTimeout: 2 * time.Minute}
 	defer tr.CloseIdleConnections()
 	resp, err := tr.RoundTrip(out)
 	if err != nil {
@@ -151,12 +173,13 @@ func (p *egressProxy) tunnel(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad CONNECT target", http.StatusBadRequest)
 		return
 	}
-	if !p.policy.allows(host) {
+	dial, ok := p.allows(host)
+	if !ok {
 		p.deny(w, host)
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
-	upstream, err := p.dial(ctx, "tcp", r.Host)
+	upstream, err := dial(ctx, "tcp", r.Host)
 	cancel()
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadGateway)

@@ -2,6 +2,7 @@ package host
 
 import (
 	"context"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -228,7 +229,7 @@ func TestEgressProxyEnforcesThePolicy(t *testing.T) {
 		_, _ = w.Write([]byte("hello from " + r.Host))
 	}))
 	defer upstream.Close()
-	p, err := startEgressProxy("acme.echo", []string{"api.allowed.test", "*.wild.test"}, t.Logf)
+	p, err := startEgressProxy("acme.echo", []string{"api.allowed.test", "*.wild.test"}, nil, t.Logf)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -259,7 +260,7 @@ func TestEgressProxyTunnelsHTTPS(t *testing.T) {
 		_, _ = w.Write([]byte("secure"))
 	}))
 	defer upstream.Close()
-	p, err := startEgressProxy("acme.echo", []string{"*.wild.test"}, t.Logf)
+	p, err := startEgressProxy("acme.echo", []string{"*.wild.test"}, nil, t.Logf)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -293,5 +294,39 @@ func TestProtocolVersionsAgree(t *testing.T) {
 	if manifest.ExtensionAPIVersion != pluginapi.APIVersion {
 		t.Fatalf("manifest accepts %q, the protocol package speaks %q",
 			manifest.ExtensionAPIVersion, pluginapi.APIVersion)
+	}
+}
+
+// Hosts WeKnora names itself (the Host API on another node) pass the proxy
+// even on a private address; other private addresses stay refused.
+func TestEgressProxyPassesDirectHosts(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("host api"))
+	}))
+	defer upstream.Close()
+	u, _ := url.Parse(upstream.URL)
+	p, err := startEgressProxy("acme.echo", []string{"*"}, []string{"127.0.0.1"}, t.Logf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer p.Close()
+	proxyURL, _ := url.Parse(p.URL())
+	c := &http.Client{Transport: &http.Transport{Proxy: func(*http.Request) (*url.URL, error) { return proxyURL, nil }}}
+	resp, err := c.Get(upstream.URL + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	if resp.StatusCode != 200 || string(body) != "host api" {
+		t.Fatalf("direct host = %d %s", resp.StatusCode, body)
+	}
+	resp, err = c.Get("http://localhost:" + u.Port() + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode == 200 {
+		t.Fatal("a private address that is not a direct host went through")
 	}
 }

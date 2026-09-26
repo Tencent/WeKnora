@@ -148,7 +148,7 @@ func startProcess(sp spec, onState func(State, error)) (*process, error) {
 	if err != nil {
 		return nil, err
 	}
-	proxy, err := startEgressProxy(sp.m.ID, sp.m.Permissions.Egress, func(f string, a ...any) {
+	proxy, err := startEgressProxy(sp.m.ID, sp.m.Permissions.Egress, sp.direct, func(f string, a ...any) {
 		logger.Warnf(context.Background(), f, a...)
 	})
 	if err != nil {
@@ -208,9 +208,14 @@ func (p *process) childEnv(network, socket, token string) []string {
 		"https_proxy=" + p.proxy.URL(),
 	}
 	// The Host API is on this node's loopback, or on a host named direct;
-	// the proxy is for the outside world.
-	noProxy := strings.Join(append([]string{"127.0.0.1", "localhost", "::1"}, p.spec.direct...), ",")
-	env = append(env, "NO_PROXY="+noProxy, "no_proxy="+noProxy)
+	// the proxy is for the outside world. A sandboxed plugin has no route
+	// to a direct host: it goes through the proxy, which lets it pass.
+	noProxy := []string{"127.0.0.1", "localhost", "::1"}
+	if !netnsEnabled() {
+		noProxy = append(noProxy, p.spec.direct...)
+	}
+	noProxyList := strings.Join(noProxy, ",")
+	env = append(env, "NO_PROXY="+noProxyList, "no_proxy="+noProxyList)
 	for _, k := range []string{"PATH", "LANG", "LC_ALL", "TZ", "SYSTEMROOT", "WINDIR"} {
 		if v, ok := os.LookupEnv(k); ok {
 			env = append(env, k+"="+v)

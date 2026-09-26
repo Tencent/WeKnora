@@ -56,7 +56,7 @@
 - 在 Linux 上设置 `WEKNORA_PLUGIN_NETNS=1`，每个插件进程运行在独立的网络命名空间中，只能经出口代理和 Host API 访问外部，无法绕过代理直连。
   - 需要系统允许非特权用户命名空间：Ubuntu 24.04 需将 `kernel.apparmor_restrict_unprivileged_userns` 设为 0，Docker 默认的 seccomp 配置会拦截。
   - 条件不满足时插件启动失败并在详情中说明原因，不会在不受限的情况下运行。
-  - 目前只适用于内嵌宿主。
+  - 独立 plugin-host 同样适用：插件经出口代理访问 app 节点的 Host API。
 
 ### 独立插件宿主
 
