@@ -17,12 +17,15 @@ import (
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/go-sql-driver/mysql"   // MySQL driver for database/sql, used by Doris connection test
 	_ "github.com/jackc/pgx/v5/stdlib" // pgx driver for database/sql
+	"github.com/milvus-io/milvus/client/v2/milvusclient"
 	"github.com/qdrant/go-client/qdrant"
 	"github.com/tencent/vectordatabase-sdk-go/tcvectordb"
 	"github.com/weaviate/weaviate-go-client/v5/weaviate"
 	"github.com/weaviate/weaviate-go-client/v5/weaviate/auth"
 	wgrpc "github.com/weaviate/weaviate-go-client/v5/weaviate/grpc"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 const connectionTestTimeout = 10 * time.Second
@@ -175,11 +178,8 @@ func testQdrantConnection(ctx context.Context, config types.ConnectionConfig) (s
 }
 
 func testMilvusConnection(ctx context.Context, config types.ConnectionConfig) (string, error) {
-	// Use TCP dial instead of the Milvus SDK to avoid protobuf namespace conflict
-	// between milvus-proto and qdrant-client (both register "common.proto").
-	// A TCP dial is sufficient for connectivity verification; the Milvus SDK client
-	// creation in container.go (PR 3) will validate full gRPC connectivity.
-	// Version detection is not possible with TCP dial alone.
+	// The same SDK handshake used by the runtime is needed here: a TCP dial can
+	// succeed even when Milvus rejects the configured credentials or database.
 	testCtx, cancel := context.WithTimeout(ctx, connectionTestTimeout)
 	defer cancel()
 
@@ -188,12 +188,30 @@ func testMilvusConnection(ctx context.Context, config types.ConnectionConfig) (s
 		addr = "localhost:19530"
 	}
 
-	conn, err := secutils.SSRFSafeDialContext(testCtx, "tcp", addr)
+	client, err := milvusclient.New(testCtx, &milvusclient.ClientConfig{
+		Address:  addr,
+		Username: config.Username,
+		Password: config.Password,
+		DBName:   config.Database,
+		DialOptions: []grpc.DialOption{
+			grpc.WithTimeout(5 * time.Second),
+			grpc.WithContextDialer(secutils.SSRFSafeGRPCDialer),
+		},
+	})
 	if err != nil {
-		logger.Warnf(ctx, "Milvus connection test failed: %v", err)
-		return "", errors.NewBadRequestError("failed to connect to milvus: connection refused or server unreachable")
+		logger.Warnf(ctx, "Milvus connection test failed (gRPC status: %s)", status.Code(err))
+		switch status.Code(err) {
+		case codes.Unauthenticated:
+			return "", errors.NewBadRequestError("failed to connect to milvus: authentication failed; check username and password")
+		case codes.PermissionDenied:
+			return "", errors.NewBadRequestError("failed to connect to milvus: permission denied; check user access")
+		case codes.NotFound:
+			return "", errors.NewBadRequestError("failed to connect to milvus: database not found; check database name")
+		default:
+			return "", errors.NewBadRequestError("failed to connect to milvus: server unreachable or connection configuration invalid")
+		}
 	}
-	defer conn.Close()
+	defer client.Close(context.Background())
 
 	return "", nil
 }
