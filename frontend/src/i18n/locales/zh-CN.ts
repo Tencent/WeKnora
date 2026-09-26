@@ -5470,7 +5470,8 @@ export default {
     hint: '所属插件已在本空间停用：不能再新建此类项，已有的照常工作。管理员可在「设置 → 插件」中重新启用。'
   },
   pluginToolView: {
-    empty: '没有结果'
+    empty: '没有结果',
+    pageUnavailable: '插件已不可用，无法显示此结果页面'
   },
   pluginPages: {
     notResponding: '插件页面没有响应，可能加载失败。',
@@ -5571,6 +5572,7 @@ export default {
     }
   },
   schemaForm: {
+    secretStored: '已保存，留空则保持不变',
     errors: {
       required: '此项为必填',
       type: '格式不正确',

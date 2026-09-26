@@ -2,7 +2,7 @@
 import { del, get, post, postUpload, put } from '@/utils/request'
 
 import type { ConfigValue } from '@/components/schema-form/schema'
-import type { PluginConfig, PluginManifest } from '@/api/plugin'
+import type { PluginConfig, PluginInstance, PluginManifest } from '@/api/plugin'
 
 const BASE = '/api/v1/system/admin/plugins'
 const PACKAGE_TIMEOUT = 5 * 60 * 1000
@@ -138,6 +138,11 @@ export function listInstalledPlugins() {
 
 export function getInstalledPlugin(id: string) {
   return get<{ data: InstalledPlugin }>(`${BASE}/${encodeURIComponent(id)}`)
+}
+
+/** Where a plugin runs, on every node, whichever workspaces see it. */
+export function getPluginInstances(id: string) {
+  return get<{ data: { instances: PluginInstance[]; instanceError?: string } }>(`${BASE}/${encodeURIComponent(id)}/instances`)
 }
 
 /** Reviewing and installing packages, against one install endpoint. */

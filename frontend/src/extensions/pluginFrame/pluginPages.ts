@@ -66,11 +66,41 @@ export function pagesOf(listing: ContributionListing | null | undefined, point: 
   return out.sort((a, b) => a.order - b.order || a.qualifiedId.localeCompare(b.qualifiedId))
 }
 
+/**
+ * The version of a plugin whose page files are served: undefined while the
+ * listing is not loaded, null when the workspace no longer lists the plugin.
+ */
+export function listedVersion(listing: ContributionListing | null | undefined, pluginId: string): string | null | undefined {
+  if (!listing) return undefined
+  for (const list of Object.values(listing.contributions ?? {})) {
+    const version = list?.find((c) => c.pluginId === pluginId && c.version)?.version
+    if (version) return version
+  }
+  return null
+}
+
+/**
+ * A recorded page (a tool result in chat history) as it can be served now:
+ * only the loaded version's files are, so a page recorded under an older
+ * version moves to the current one. Null when the plugin is gone; the
+ * recorded page as is while the listing is unknown.
+ */
+export function currentFramePage(page: FramePage, listing: ContributionListing | null | undefined): FramePage | null {
+  const version = listedVersion(listing, page.pluginId)
+  if (version === null) return null
+  return version && version !== page.version ? { ...page, version } : page
+}
+
 /** The URL of a file of a plugin's pages (the entry by default). */
 export function pageFileUrl(apiBase: string, page: Pick<PluginPage, 'pluginId' | 'version' | 'entry'>, file = page.entry) {
   const seg = (s: string) => encodeURIComponent(s)
   const path = file.split('/').map(seg).join('/')
   return `${apiBase}/api/v1/plugin-ui/assets/${seg(page.pluginId)}/${seg(page.version)}/${path}`
+}
+
+/** Whether two listings of a page describe it alike (version, entry, name…). */
+export function samePage(a: PluginPage, b: PluginPage): boolean {
+  return JSON.stringify(a) === JSON.stringify(b)
 }
 
 /** The page a key names, among pages. */

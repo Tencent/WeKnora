@@ -1,5 +1,6 @@
 <template>
   <div class="headers-widget">
+    <p v-if="stored" class="headers-widget__stored">{{ t('schemaForm.secretStored') }}</p>
     <div v-for="(row, idx) in rows" :key="idx" class="headers-widget__row">
       <t-input
         v-model="row.key"
@@ -39,9 +40,10 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
+import { isStoredSecret, secretInputText, secretInputValue } from '../schema'
 import { parseHeaders, serializeHeaders, type HeaderRow } from './headers'
 import type { WidgetProps } from './types'
 
@@ -52,17 +54,23 @@ const props = defineProps<WidgetProps>()
 const emit = defineEmits<{ 'update:modelValue': [value: unknown] }>()
 const { t } = useI18n()
 
-const rows = ref<HeaderRow[]>(parseHeaders(props.modelValue))
+// Stored secret headers ("***") start with no rows: new rows replace them,
+// and removing every row again keeps them.
+const stored = computed(() => isStoredSecret(props.schema, props.modelValue))
+const hadStored = ref(stored.value)
+const rows = ref<HeaderRow[]>(parseHeaders(secretInputText(props.schema, props.modelValue)))
 
 watch(
   () => props.modelValue,
   v => {
-    if ((v ?? '') !== serializeHeaders(rows.value)) rows.value = parseHeaders(v)
+    if (stored.value) hadStored.value = true
+    const text = secretInputText(props.schema, v)
+    if (text !== serializeHeaders(rows.value)) rows.value = parseHeaders(text)
   },
 )
 
 function emitValue() {
-  const text = serializeHeaders(rows.value)
+  const text = secretInputValue(serializeHeaders(rows.value), hadStored.value)
   emit('update:modelValue', text || undefined)
 }
 
@@ -82,6 +90,12 @@ function remove(idx: number) {
   flex-direction: column;
   align-items: flex-start;
   gap: 8px;
+}
+
+.headers-widget__stored {
+  margin: 0;
+  font-size: var(--app-text-sm);
+  color: var(--td-text-color-placeholder);
 }
 
 .headers-widget__row {

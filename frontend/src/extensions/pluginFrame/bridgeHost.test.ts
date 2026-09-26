@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
+import { reactive } from 'vue'
+
 // The page's side of the bridge, as plugins ship it.
-import { BridgeError, connect } from '../../../../packages/plugin-ui/index.js'
-import { createBridgeHost, createRateLimiter, isAppPath, type BridgeHandlers } from './bridgeHost'
+import { BridgeError, connect, contentHeight } from '../../../../packages/plugin-ui/index.js'
+import { createBridgeHost, createRateLimiter, isAppPath, plainCopy, type BridgeHandlers, type BridgeInit } from './bridgeHost'
 
 type Listener = (event: { data: unknown; source: unknown }) => void
 
@@ -23,7 +25,7 @@ class FakeWindow {
   }
 }
 
-function setup(overrides: Partial<BridgeHandlers> = {}, burst = 30) {
+function setup(overrides: Partial<BridgeHandlers> = {}, burst = 30, context: Record<string, unknown> = { knowledgeBaseId: 'kb1' }) {
   const app = new FakeWindow()
   const frame = new FakeWindow()
   frame.parent = app
@@ -46,8 +48,8 @@ function setup(overrides: Partial<BridgeHandlers> = {}, burst = 30) {
     frame: () => frame as unknown as Window,
     init: () => ({
       pluginId: 'acme.links', version: '1.0.0', mount: 'pages/links', locale: 'zh-CN', role: 'viewer',
-      theme: { mode: 'dark', tokens: { 'brand-color': '#0052d9' } }, context: { knowledgeBaseId: 'kb1' },
-    }),
+      theme: { mode: 'dark', tokens: { 'brand-color': '#0052d9' } }, context,
+    }) as BridgeInit,
     handlers,
     burst,
     perSecond: 0.001,
@@ -127,4 +129,41 @@ test('an editor page sets its form and hears its changes', async () => {
   const other = setup()
   const page = await connect({ window: other.frame as unknown as Window, autoResize: false, applyTheme: false })
   await assert.rejects(page.form.set({ a: 1 }), /not in a form/)
+})
+
+test('reactive data reaches the page as a plain copy', async () => {
+  // A tool call still streaming: its arguments and result are Vue proxies,
+  // which postMessage cannot clone.
+  const event = reactive({ arguments: { q: 'x' }, structured: { items: [1, 2] } })
+  assert.throws(() => structuredClone({ context: { result: event.structured } }), { name: 'DataCloneError' })
+  const { frame, host } = setup({}, 30, { tool: 'search', arguments: event.arguments, result: event.structured })
+  const wk = await connect({ window: frame as unknown as Window, autoResize: false, applyTheme: false })
+  assert.deepEqual(wk.context.context, { tool: 'search', arguments: { q: 'x' }, result: { items: [1, 2] } })
+
+  const heard = new Promise((resolve) => wk.on('values', resolve))
+  host.send('values', reactive({ a: [1] }))
+  assert.deepEqual(await heard, { a: [1] })
+
+  assert.deepEqual(plainCopy(reactive({ a: { b: [1] } })), { a: { b: [1] } })
+  assert.equal(plainCopy(undefined), undefined)
+})
+
+test('autoResize measures the content, not the frame', () => {
+  // The frame is 600px tall; the content ends far above it.
+  const el = (bottom: number, style: Record<string, string> = {}) => ({ bottom, style })
+  const child = el(120, { marginBottom: '16px' })
+  const body = { ...el(110, { marginBottom: '8px' }), children: [child, el(600, { position: 'fixed' }), el(0, { display: 'none' })] }
+  const root = el(600, { paddingBottom: '4px', borderBottomWidth: '1px' })
+  const all = [body, root, ...body.children]
+  const win = {
+    scrollY: 10,
+    document: { body: { ...body, getBoundingClientRect: () => ({ bottom: body.bottom }) }, documentElement: { scrollHeight: 600 } },
+    getComputedStyle: (e: { style?: Record<string, string> }) =>
+      all.find((x) => x.style === e.style)?.style ?? root.style,
+  }
+  for (const c of body.children) Object.assign(c, { getBoundingClientRect: () => ({ bottom: c.bottom }) })
+  win.document.body.children = body.children
+  // A child's margin collapsing through the body's: 120 + 16, scrolled by 10,
+  // plus the root's padding and border; the fixed child does not count.
+  assert.equal(contentHeight(win as unknown as Window), 10 + 136 + 4 + 1)
 })

@@ -28,7 +28,7 @@ import { useAuthStore } from '@/stores/auth'
 import { getApiBaseUrl } from '@/utils/api-base'
 import { localizedText } from '@/utils/localizedText'
 
-import { BridgeCallError, createBridgeHost, readTheme, type BridgeInit } from './bridgeHost'
+import { BridgeCallError, createBridgeHost, plainCopy, readTheme, type BridgeInit } from './bridgeHost'
 import { pageFileUrl, type FramePage } from './pluginPages'
 
 // One plugin page in a sandboxed iframe: an opaque origin (no
@@ -72,10 +72,9 @@ const initData = (): BridgeInit => ({
   locale: locale.value,
   role: auth.canAccessAllTenants ? 'admin' : auth.currentTenantRole || 'viewer',
   theme: readTheme(),
-  // A plain copy: reactive form state cannot cross postMessage.
-  context: props.formValues
-    ? { ...props.context, values: JSON.parse(JSON.stringify(props.formValues)) }
-    : { ...props.context },
+  // A plain copy: reactive state (form values, a streaming tool call's
+  // arguments and result) cannot cross postMessage.
+  context: plainCopy(props.formValues ? { ...props.context, values: props.formValues } : props.context),
 })
 
 const host = createBridgeHost({

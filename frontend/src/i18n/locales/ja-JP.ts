@@ -2942,7 +2942,8 @@ export default {
     hint: '提供元のプラグインはこのワークスペースで無効です。新規作成はできませんが、既存のものは引き続き動作します。管理者は「設定 → プラグイン」で再度有効にできます。'
   },
   pluginToolView: {
-    empty: '結果がありません'
+    empty: '結果がありません',
+    pageUnavailable: 'プラグインが利用できなくなったため、この結果ページを表示できません'
   },
   pluginPages: {
     notResponding: 'プラグインページが応答しません。読み込みに失敗した可能性があります。',
@@ -3043,6 +3044,7 @@ export default {
     }
   },
   schemaForm: {
+    secretStored: '保存済みです。空のままにすると変更されません',
     errors: {
       required: 'この項目は必須です',
       type: '値が正しくありません',

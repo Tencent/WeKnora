@@ -129,6 +129,7 @@ import { MessagePlugin } from 'tdesign-vue-next'
 import { listInstalledPlugins, setInstalledPluginEnabled, type InstalledPlugin } from '@/api/system/plugins'
 import PluginBadge from '@/components/plugins/PluginBadge.vue'
 import PluginSecretDialog from '@/components/plugins/PluginSecretDialog.vue'
+import { usePluginPagesStore } from '@/stores/pluginPages'
 import { localizedText } from '@/utils/localizedText'
 
 import PluginDetailDrawer from './plugins/PluginDetailDrawer.vue'
@@ -187,16 +188,24 @@ async function load() {
   }
 }
 
+// Installing, switching, upgrading or removing a plugin changes the pages,
+// settings sections and tabs of the workspace the admin is in; reload them
+// rather than keep the old ones (and an old version's files) until a reload.
+const pluginPages = usePluginPagesStore()
+const refreshPages = () => void pluginPages.ensure(true).catch(() => {})
+
 function upsert(received: InstalledPlugin) {
   const { issuedSecret: secret, ...p } = received
   if (secret) issuedSecret.value = secret
   const i = plugins.value.findIndex((x) => x.id === p.id)
   if (i >= 0) plugins.value.splice(i, 1, p)
   else plugins.value = [...plugins.value, p]
+  refreshPages()
 }
 
 function remove(id: string) {
   plugins.value = plugins.value.filter((p) => p.id !== id)
+  refreshPages()
 }
 
 function openDetail(p: InstalledPlugin) {

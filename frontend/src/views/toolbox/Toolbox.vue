@@ -132,7 +132,7 @@ const select = (section: ToolboxSection | undefined) => {
 
 // The bare /toolbox URL, and tools lost to a role or workspace switch, land on
 // the first tool the user can still open.
-watch([selectedItem, selectedPage, visibleItems], () => {
+watch([selectedItem, selectedPage, visibleItems, pluginPagesLoaded], () => {
   const fallback = visibleItems.value[0]
   // A plugin page URL waits for the pages to load before falling back.
   const pendingPage = requestedSection.value.startsWith('plugin:') && !pluginPagesLoaded.value

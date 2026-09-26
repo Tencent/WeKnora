@@ -44,7 +44,8 @@ export function applyTheme(theme, doc = globalThis.document) {
 /**
  * Connects to the app. Resolves once the app sent the page its context
  * (`init`). Options:
- *   autoResize  keep the frame as tall as the page (default true)
+ *   autoResize  keep the frame as tall as the page's content, growing and
+ *               shrinking with it (default true)
  *   applyTheme  apply the app theme as CSS variables (default true)
  *   timeout     ms to wait for each answer (default 60000)
  *   window      the page's window (tests)
@@ -168,17 +169,43 @@ export function connect(options = {}) {
   }
 }
 
+/**
+ * How tall the page's content is, in pixels: the lowest bottom margin edge of
+ * <body> and its children (a child's margin can collapse through the body's),
+ * plus the root's bottom padding and border. Not the root's scrollHeight,
+ * which never drops below the frame's own height: a frame sized by it could
+ * grow but never shrink. Fixed-position children follow the viewport, not
+ * the content, and do not count.
+ */
+export function contentHeight(win = globalThis.window) {
+  const doc = win.document
+  const body = doc.body
+  if (!body) return Math.ceil(doc.documentElement.scrollHeight)
+  const px = (value) => parseFloat(value) || 0
+  const scrollY = win.scrollY || 0
+  const bottomOf = (el, style) => el.getBoundingClientRect().bottom + scrollY + px(style.marginBottom)
+  let bottom = bottomOf(body, win.getComputedStyle(body))
+  for (const child of body.children) {
+    const style = win.getComputedStyle(child)
+    if (style.position !== 'fixed' && style.display !== 'none') bottom = Math.max(bottom, bottomOf(child, style))
+  }
+  const root = win.getComputedStyle(doc.documentElement)
+  return Math.ceil(bottom + px(root.paddingBottom) + px(root.borderBottomWidth))
+}
+
 function watchHeight(win, bridge) {
   const doc = win.document
   if (!doc || typeof win.ResizeObserver !== 'function') return
   let last = 0
   const report = () => {
-    const height = Math.ceil(doc.documentElement.scrollHeight)
+    const height = contentHeight(win)
     if (height !== last) {
       last = height
       bridge.resize(height).catch(() => {})
     }
   }
-  new win.ResizeObserver(report).observe(doc.documentElement)
+  const observer = new win.ResizeObserver(report)
+  observer.observe(doc.documentElement)
+  if (doc.body) observer.observe(doc.body)
   report()
 }

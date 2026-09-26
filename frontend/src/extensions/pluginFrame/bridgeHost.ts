@@ -107,12 +107,30 @@ export interface BridgeHost {
   send(name: string, data: unknown): void
 }
 
+/**
+ * A JSON copy of a value: what the app hands a page is JSON data, and Vue's
+ * reactive proxies (a streaming tool call's arguments, form state) cannot be
+ * structured-cloned by postMessage.
+ */
+export function plainCopy<T>(value: T): T {
+  return value === undefined ? value : JSON.parse(JSON.stringify(value))
+}
+
 export function createBridgeHost(opts: BridgeHostOptions): BridgeHost {
   const allow = createRateLimiter(opts.burst ?? 30, opts.perSecond ?? 10, opts.now)
   const post = (msg: Record<string, unknown>) => {
+    const target = opts.frame()
+    if (!target) return
+    const data = { weknora: BRIDGE_PROTOCOL, ...msg }
     // The page's origin is opaque ("null"), so it cannot be named as the
     // target; only that window receives the message.
-    opts.frame()?.postMessage({ weknora: BRIDGE_PROTOCOL, ...msg }, '*')
+    try {
+      target.postMessage(data, '*')
+    } catch (e) {
+      // Reactive data somewhere in the message: send its plain copy.
+      if ((e as Error)?.name !== 'DataCloneError') throw e
+      target.postMessage(plainCopy(data), '*')
+    }
   }
   const send = (name: string, data: unknown) => post({ kind: 'event', name, data })
   const reply = (id: number, result: unknown) => post({ kind: 'response', id, ok: true, result })
