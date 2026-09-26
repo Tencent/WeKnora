@@ -190,8 +190,8 @@ pluginHost:
 # -----------------------------------------------------------------------------
 pluginKube:
   # -- Let the app deploy kubernetes plugins as Deployments + Services.
-  # Grants the app's service account a Role over deployments, services and
-  # secrets in the plugin namespace.
+  # Grants the app's service account a Role over deployments, services,
+  # secrets and network policies in the plugin namespace.
   enabled: false
 
   # -- Namespace plugins run in (default: the release namespace)
@@ -199,6 +199,27 @@ pluginKube:
 
   # -- Image pull secret for plugin images, in the plugin namespace
   imagePullSecret: ""
+
+  networkPolicy:
+    # -- Hold each plugin to its permissions.egress grant. Every plugin gets a
+    # NetworkPolicy that lets its pods reach only the cluster DNS and the app
+    # pods, and an HTTP(S) proxy (served by the app pods on egressProxyPort)
+    # that forwards only to the hosts its manifest was granted. Needs a
+    # network plugin that enforces NetworkPolicy (Calico, Cilium, k3s' built-in
+    # controller; flannel alone does not). false: plugins reach the network
+    # directly.
+    enabled: true
+
+    # -- Port the app pods serve the plugins' egress proxy on, added to the app
+    # Service. It asks each plugin for its own credentials; with an app.service
+    # type other than ClusterIP it is reachable from outside too.
+    egressProxyPort: 8090
+
+    # -- Labels ("key=value,...") of the namespace and pods of the cluster DNS
+    # plugins may query on port 53. dnsPodLabels "-" allows every pod in that
+    # namespace.
+    dnsNamespaceLabels: "kubernetes.io/metadata.name=kube-system"
+    dnsPodLabels: "k8s-app=kube-dns"
 
 # -----------------------------------------------------------------------------
 # Frontend (Web UI)

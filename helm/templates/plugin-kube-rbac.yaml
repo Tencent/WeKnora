@@ -3,7 +3,9 @@ Copyright 2025 Tencent
 SPDX-License-Identifier: MIT
 
 Lets the app deploy kubernetes plugins (runtime.type: kubernetes) in the
-plugin namespace: their Deployment, Service and signing-secret Secret.
+plugin namespace: their Deployment, Service, signing-secret Secret and
+NetworkPolicy. Network policies are granted even with
+pluginKube.networkPolicy off, so the app can remove ones left from before.
 */}}
 {{- if .Values.pluginKube.enabled }}
 {{- $ns := .Values.pluginKube.namespace | default .Release.Namespace }}
@@ -21,6 +23,9 @@ rules:
   - apiGroups: [""]
     resources: ["services", "secrets"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["networkpolicies"]
+    verbs: ["get", "create", "update", "patch", "delete"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding

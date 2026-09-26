@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/plugin/driver"
+	"github.com/Tencent/WeKnora/internal/plugin/egress"
 	"github.com/Tencent/WeKnora/internal/plugin/manifest"
 	"github.com/Tencent/WeKnora/internal/plugin/reconcile"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -330,3 +332,259 @@ func TestResourceName(t *testing.T) {
 }
 
 var dnsLabel = regexp.MustCompile(`^[a-z]([-a-z0-9]*[a-z0-9])?$`)
+
+func confinedConfig() *Config {
+	return &Config{
+		Namespace: "plugins", ServiceType: "ClusterIP",
+		HostAPIURL: "http://app.weknora.svc:80", EgressPort: 8090, EgressKey: []byte("key"),
+		NetworkPolicy: &NetworkPolicy{
+			AppNamespace: "weknora", AppLabels: map[string]string{"app.kubernetes.io/component": "app"},
+			AppPort:            8080,
+			DNSNamespaceLabels: map[string]string{"kubernetes.io/metadata.name": "kube-system"},
+			DNSPodLabels:       map[string]string{"k8s-app": "kube-dns"},
+		},
+	}
+}
+
+func objectKinds(objs []Object) string {
+	var kinds []string
+	for _, o := range objs {
+		kinds = append(kinds, o.Body["kind"].(string))
+	}
+	return strings.Join(kinds, ",")
+}
+
+// With the network policy on, a plugin's pods reach only DNS and the app
+// pods, and are handed the egress proxy with their own credentials, which
+// stay in the Secret.
+func TestResourcesConfineEgress(t *testing.T) {
+	cfg := confinedConfig()
+	m := loaded(t, "acme.search").Manifest
+	name := ResourceName(m.ID)
+	objs := Resources(cfg, m, name, "sekrit")
+	// The policy is in place before any pod starts.
+	if got := objectKinds(objs); got != "Secret,NetworkPolicy,Deployment,Service" {
+		t.Fatalf("objects = %s", got)
+	}
+	np := objs[1]
+	if np.Path != "/apis/networking.k8s.io/v1/namespaces/plugins/networkpolicies/"+name {
+		t.Fatalf("policy path = %s", np.Path)
+	}
+	b, _ := json.Marshal(np.Body["spec"])
+	app := `{"namespaceSelector":{"matchLabels":{"kubernetes.io/metadata.name":"weknora"}},` +
+		`"podSelector":{"matchLabels":{"app.kubernetes.io/component":"app"}}}`
+	want := `{"egress":[` +
+		`{"ports":[{"port":53,"protocol":"UDP"},{"port":53,"protocol":"TCP"}],"to":[` +
+		`{"namespaceSelector":{"matchLabels":{"kubernetes.io/metadata.name":"kube-system"}},` +
+		`"podSelector":{"matchLabels":{"k8s-app":"kube-dns"}}}]},` +
+		`{"ports":[{"port":8080,"protocol":"TCP"},{"port":8090,"protocol":"TCP"}],"to":[` + app + `]}],` +
+		`"ingress":[{"from":[` + app + `],"ports":[{"port":9000,"protocol":"TCP"}]}],` +
+		`"podSelector":{"matchLabels":{"app.kubernetes.io/name":"` + name + `"}},` +
+		`"policyTypes":["Ingress","Egress"]}`
+	if string(b) != want {
+		t.Fatalf("policy spec =\n%s\nwant\n%s", b, want)
+	}
+	if np.Body["metadata"].(map[string]any)["annotations"].(map[string]any)["weknora.plugin/id"] != m.ID {
+		t.Fatalf("policy metadata = %v", np.Body["metadata"])
+	}
+
+	proxy := "http://acme.search:" + egress.Password(cfg.EgressKey, m.ID) + "@app.weknora.svc:8090"
+	if got := objs[0].Body["stringData"].(map[string]any)["egress-proxy"]; got != proxy {
+		t.Fatalf("secret egress-proxy = %v, want %s", got, proxy)
+	}
+	dep, _ := json.Marshal(objs[2].Body)
+	if strings.Contains(string(dep), egress.Password(cfg.EgressKey, m.ID)) {
+		t.Fatal("the proxy password is inline in the Deployment")
+	}
+	for _, v := range []string{"HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy"} {
+		ref := `{"name":"` + v + `","valueFrom":{"secretKeyRef":{"key":"egress-proxy","name":"` + name + `"}}}`
+		if !strings.Contains(string(dep), ref) {
+			t.Fatalf("deployment lacks %s: %s", ref, dep)
+		}
+	}
+	for _, want := range []string{
+		`{"name":"NO_PROXY","value":"app.weknora.svc,localhost,127.0.0.1"}`, `"weknora.plugin/egress":"`,
+	} {
+		if !strings.Contains(string(dep), want) {
+			t.Fatalf("deployment lacks %s: %s", want, dep)
+		}
+	}
+}
+
+// Without egress settings a plugin runs as before: no policy, no proxy.
+func TestResourcesWithoutEgressControl(t *testing.T) {
+	cfg := &Config{Namespace: "plugins", ServiceType: "ClusterIP", HostAPIURL: "http://app.weknora.svc"}
+	objs := Resources(cfg, loaded(t, "acme.search").Manifest, "n", "s")
+	if got := objectKinds(objs); got != "Secret,Deployment,Service" {
+		t.Fatalf("objects = %s", got)
+	}
+	b, _ := json.Marshal(objs)
+	if strings.Contains(string(b), "PROXY") || strings.Contains(string(b), "egress") {
+		t.Fatalf("proxy settings without an egress proxy: %s", b)
+	}
+	if cfg.Egress() != driver.EgressUnmanaged {
+		t.Fatalf("egress = %s", cfg.Egress())
+	}
+	cfg.EgressPort, cfg.EgressKey = 8090, []byte("k")
+	objs = Resources(cfg, loaded(t, "acme.search").Manifest, "n", "s")
+	if got := objectKinds(objs); got != "Secret,Deployment,Service" || cfg.Egress() != driver.EgressProxy {
+		t.Fatalf("proxy only: objects = %s, egress = %s", got, cfg.Egress())
+	}
+}
+
+func TestDeactivateDeletesTheNetworkPolicy(t *testing.T) {
+	api := &fakeAPI{applied: map[string]map[string]any{}}
+	srv := httptest.NewServer(api)
+	defer srv.Close()
+	cfg := confinedConfig()
+	cfg.APIURL, cfg.Token = srv.URL, "tok"
+	d, err := New(cfg, &fakeEndpoints{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := d.Activate(context.Background(), loaded(t, "acme.search")); err != nil {
+		t.Fatal(err)
+	}
+	policy := networkPolicyPath("plugins", ResourceName("acme.search"))
+	if !api.has(policy) {
+		t.Fatalf("no network policy applied: %v", api.applied)
+	}
+	if err := d.Deactivate(context.Background(), "acme.search"); err != nil {
+		t.Fatal(err)
+	}
+	if len(api.deleted) != 4 || api.deleted[3] != policy || len(api.applied) != 0 {
+		t.Fatalf("deleted %v (the policy last), left %v", api.deleted, api.applied)
+	}
+}
+
+// Turning the policy off removes the one an earlier activation left, which
+// would cut the pods off now that they get no proxy; a platform that grants
+// no access to network policies is fine.
+func TestDisabledPolicyIsRemoved(t *testing.T) {
+	api := &fakeAPI{applied: map[string]map[string]any{}}
+	d, _ := newDriver(t, api)
+	l := loaded(t, "acme.search")
+	stale := networkPolicyPath("plugins", ResourceName("acme.search"))
+	api.applied[stale] = map[string]any{"metadata": map[string]any{
+		"annotations": map[string]any{"weknora.plugin/id": "acme.search"},
+	}}
+	if err := d.Activate(context.Background(), l); err != nil {
+		t.Fatal(err)
+	}
+	if api.has(stale) {
+		t.Fatal("the stale network policy survived")
+	}
+
+	forbidden := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/networkpolicies/") {
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
+		api.ServeHTTP(w, r)
+	})
+	d, _ = newDriver(t, forbidden)
+	if err := d.Activate(context.Background(), l); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.Deactivate(context.Background(), "acme.search"); err != nil {
+		t.Fatalf("deactivate without access to network policies: %v", err)
+	}
+}
+
+type fakeStatus struct{ driver.Driver }
+
+func (fakeStatus) Status(context.Context, string) ([]driver.InstanceStatus, error) {
+	return []driver.InstanceStatus{{Node: "a"}, {Node: "b", Egress: driver.EgressUnmanaged}}, nil
+}
+
+func TestStatusesReportTheEgressMode(t *testing.T) {
+	d, err := New(confinedConfig(), &fakeEndpoints{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, _ := d.Statuses(fakeStatus{}).Status(context.Background(), "acme.search")
+	for _, s := range out {
+		if s.Egress != driver.EgressNetworkPolicy {
+			t.Fatalf("%s: egress = %q", s.Node, s.Egress)
+		}
+	}
+}
+
+func TestEgressConfigFromEnv(t *testing.T) {
+	base := map[string]string{
+		"WEKNORA_PLUGIN_K8S_NAMESPACE": "plugins", "WEKNORA_PLUGIN_K8S_API": "https://k8s",
+		"WEKNORA_PLUGIN_K8S_TOKEN":    "t",
+		"WEKNORA_PLUGIN_HOST_API_URL": "http://app.weknora.svc:80",
+	}
+	for name, tc := range map[string]struct {
+		env     map[string]string
+		wantErr string
+		check   func(*Config) bool
+	}{
+		"off": {check: func(c *Config) bool { return c.EgressPort == 0 && c.NetworkPolicy == nil }},
+		"proxy only": {
+			env:   map[string]string{"WEKNORA_PLUGIN_K8S_EGRESS_PORT": "8090"},
+			check: func(c *Config) bool { return c.EgressPort == 8090 && c.NetworkPolicy == nil },
+		},
+		"bad port": {env: map[string]string{"WEKNORA_PLUGIN_K8S_EGRESS_PORT": "x"}, wantErr: "must be a port"},
+		"no host api": {
+			env:     map[string]string{"WEKNORA_PLUGIN_K8S_EGRESS_PORT": "8090", "WEKNORA_PLUGIN_HOST_API_URL": ""},
+			wantErr: "HOST_API_URL",
+		},
+		"policy without proxy": {
+			env: map[string]string{"WEKNORA_PLUGIN_K8S_NETWORK_POLICY": "1"}, wantErr: "EGRESS_PORT",
+		},
+		"policy without app labels": {
+			env: map[string]string{
+				"WEKNORA_PLUGIN_K8S_NETWORK_POLICY": "1", "WEKNORA_PLUGIN_K8S_EGRESS_PORT": "8090",
+			},
+			wantErr: "APP_LABELS",
+		},
+		"policy with node ports": {
+			env: map[string]string{
+				"WEKNORA_PLUGIN_K8S_NETWORK_POLICY": "1", "WEKNORA_PLUGIN_K8S_EGRESS_PORT": "8090",
+				"WEKNORA_PLUGIN_K8S_SERVICE_TYPE": "NodePort", "WEKNORA_PLUGIN_K8S_NODE_HOST": "10.0.0.1",
+			},
+			wantErr: "ClusterIP",
+		},
+		"policy": {
+			env: map[string]string{
+				"WEKNORA_PLUGIN_K8S_NETWORK_POLICY": "true", "WEKNORA_PLUGIN_K8S_EGRESS_PORT": "8090",
+				"WEKNORA_PLUGIN_K8S_APP_LABELS":    "app.kubernetes.io/instance=wk, app.kubernetes.io/component=app",
+				"WEKNORA_PLUGIN_K8S_APP_NAMESPACE": "weknora", "WEKNORA_PLUGIN_K8S_DNS_POD_LABELS": "-",
+			},
+			check: func(c *Config) bool {
+				np := c.NetworkPolicy
+				return np != nil && np.AppNamespace == "weknora" && len(np.AppLabels) == 2 &&
+					np.AppLabels["app.kubernetes.io/component"] == "app" && len(np.DNSPodLabels) == 0 &&
+					np.DNSNamespaceLabels["kubernetes.io/metadata.name"] == "kube-system"
+			},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			for k, v := range base {
+				t.Setenv(k, v)
+			}
+			for _, k := range []string{
+				"WEKNORA_PLUGIN_K8S_EGRESS_PORT", "WEKNORA_PLUGIN_K8S_NETWORK_POLICY", "WEKNORA_PLUGIN_K8S_APP_LABELS",
+				"WEKNORA_PLUGIN_K8S_APP_NAMESPACE", "WEKNORA_PLUGIN_K8S_DNS_POD_LABELS",
+				"WEKNORA_PLUGIN_K8S_DNS_NAMESPACE_LABELS", "WEKNORA_PLUGIN_K8S_SERVICE_TYPE",
+			} {
+				t.Setenv(k, "")
+			}
+			for k, v := range tc.env {
+				t.Setenv(k, v)
+			}
+			cfg, err := ConfigFromEnv()
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("err = %v, want %s", err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil || !tc.check(cfg) {
+				t.Fatalf("cfg = %+v, err = %v", cfg, err)
+			}
+		})
+	}
+}

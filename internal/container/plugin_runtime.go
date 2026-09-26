@@ -3,6 +3,9 @@ package container
 import (
 	"context"
 	"fmt"
+	"net"
+	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -21,6 +24,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/plugin/activate"
 	plugindriver "github.com/Tencent/WeKnora/internal/plugin/driver"
+	"github.com/Tencent/WeKnora/internal/plugin/egress"
 	pluginevents "github.com/Tencent/WeKnora/internal/plugin/events"
 	"github.com/Tencent/WeKnora/internal/plugin/host"
 	"github.com/Tencent/WeKnora/internal/plugin/hostapi"
@@ -84,14 +88,84 @@ func (a pluginActivators) list() []reconcile.Activator {
 
 // newPluginKubeDriver runs kubernetes plugins when the platform names a
 // namespace for them (WEKNORA_PLUGIN_K8S_NAMESPACE); nil otherwise.
-func newPluginKubeDriver(r *remote.Manager) (*kube.Driver, error) {
+func newPluginKubeDriver(r *remote.Manager, appCfg *config.Config) (*kube.Driver, error) {
 	cfg, err := kube.ConfigFromEnv()
 	if err != nil || cfg == nil {
 		return nil, err
 	}
-	logger.Infof(context.Background(), "[plugin] kubernetes plugins run in namespace %s (%s services)",
-		cfg.Namespace, cfg.ServiceType)
+	if cfg.EgressPort > 0 {
+		if cfg.EgressKey, err = pluginEgressKey(); err != nil {
+			return nil, err
+		}
+	}
+	if cfg.NetworkPolicy != nil {
+		cfg.NetworkPolicy.AppPort = serverPort(appCfg)
+	}
+	logger.Infof(context.Background(), "[plugin] kubernetes plugins run in namespace %s (%s services, egress %s)",
+		cfg.Namespace, cfg.ServiceType, cfg.Egress())
 	return kube.New(cfg, r)
+}
+
+// pluginEgressKey derives the cluster egress proxy's credentials key from
+// the secret every app node shares.
+func pluginEgressKey() ([]byte, error) {
+	key, err := hostpool.ClusterKey()
+	if err != nil {
+		return nil, fmt.Errorf("the kubernetes plugin egress proxy: %w", err)
+	}
+	return egress.ProxyKey(key), nil
+}
+
+// startPluginEgressProxy serves the egress proxy kubernetes plugins' pods go
+// through (WEKNORA_PLUGIN_K8S_EGRESS_PORT) on every app node: it checks a
+// plugin's credentials and applies its installed manifest's egress grant.
+func startPluginEgressProxy(
+	kubeDriver *kube.Driver, reg *pluginregistry.Registry, cleaner interfaces.ResourceCleaner,
+) error {
+	port := kube.EgressPortFromEnv()
+	if kubeDriver == nil || port == 0 {
+		return nil
+	}
+	key, err := pluginEgressKey()
+	if err != nil {
+		return err
+	}
+	var direct []string
+	if addr := hostPortOf(os.Getenv("WEKNORA_PLUGIN_HOST_API_URL")); addr != "" {
+		// Plugins that ignore NO_PROXY still reach the Host API.
+		direct = append(direct, addr)
+	}
+	ln, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
+	if err != nil {
+		return fmt.Errorf("the kubernetes plugin egress proxy: listen on %d: %w", port, err)
+	}
+	srv := &http.Server{
+		Handler: egress.NewClusterProxy(key, reg.Plugin, direct), ReadHeaderTimeout: 30 * time.Second,
+	}
+	go func() { _ = srv.Serve(ln) }()
+	logger.Infof(context.Background(), "[plugin] kubernetes plugins' egress proxy serves on :%d", port)
+	cleaner.RegisterWithName("PluginEgressProxy", func() error {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		return srv.Shutdown(ctx)
+	})
+	return nil
+}
+
+// hostPortOf is the host:port a URL names, with the scheme's default port.
+func hostPortOf(raw string) string {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || u.Hostname() == "" {
+		return ""
+	}
+	port := u.Port()
+	if port == "" {
+		port = "80"
+		if u.Scheme == "https" {
+			port = "443"
+		}
+	}
+	return net.JoinHostPort(u.Hostname(), port)
 }
 
 // newPluginHostAPI serves the Host API and gives calls a way back to it: the
