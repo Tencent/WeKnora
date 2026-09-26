@@ -168,6 +168,14 @@ func (h *IMHandler) CreateIMChannel(c *gin.Context) {
 	if req.Enabled != nil {
 		channel.Enabled = *req.Enabled
 	}
+	if im.IsPluginPlatform(channel.Platform) {
+		mode, ok := pluginIMMode(channel.Mode)
+		if !ok {
+			c.JSON(http.StatusBadRequest, gin.H{"error": pluginIMModeError})
+			return
+		}
+		channel.Mode = mode
+	}
 	// WeChat uses long-polling mode and full output only
 	if req.Platform == "wechat" {
 		channel.Mode = "longpoll"
@@ -299,6 +307,14 @@ func (h *IMHandler) UpdateIMChannel(c *gin.Context) {
 	}
 	if req.Mode != nil {
 		channel.Mode = *req.Mode
+		if im.IsPluginPlatform(channel.Platform) {
+			mode, ok := pluginIMMode(channel.Mode)
+			if !ok {
+				c.JSON(http.StatusBadRequest, gin.H{"error": pluginIMModeError})
+				return
+			}
+			channel.Mode = mode
+		}
 	}
 	if req.OutputMode != nil {
 		channel.OutputMode = *req.OutputMode
@@ -552,4 +568,17 @@ func (h *IMHandler) IMCallback(c *gin.Context) {
 			logger.Errorf(asyncCtx, "[IM] Handle message error for channel %s: %v", channelID, err)
 		}
 	}()
+}
+
+const pluginIMModeError = "plugin IM platforms only support webhook mode"
+
+// pluginIMMode returns the connection mode of a channel on a plugin's IM
+// platform: plugin platforms only take webhooks, which is also the default.
+// ok is false for any other mode.
+func pluginIMMode(mode string) (string, bool) {
+	switch mode {
+	case "", im.ModeWebhook:
+		return im.ModeWebhook, true
+	}
+	return mode, false
 }
