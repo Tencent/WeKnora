@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"io"
 	"iter"
@@ -30,20 +31,24 @@ import (
 type fakeDockerEngine struct {
 	pingErr error
 
-	created     []client.ContainerCreateOptions
-	createErr   error
-	createdID   string
-	started     []string
-	startErr    error
-	unpaused    []string
-	removed     []string
-	removeErr   error
-	inspect     map[string]container.InspectResponse
-	inspectErr  error
-	inspectHook func(id string) (container.InspectResponse, error)
-	list        []container.Summary
-	listFilters []client.Filters
-	listErr     error
+	created       []client.ContainerCreateOptions
+	createErr     error
+	createdID     string
+	started       []string
+	startErr      error
+	unpaused      []string
+	removed       []string
+	removeOptions []client.ContainerRemoveOptions
+	removeErr     error
+	inspect       map[string]container.InspectResponse
+	inspectErr    error
+	inspectHook   func(id string) (container.InspectResponse, error)
+	list          []container.Summary
+	listFilters   []client.Filters
+	listErr       error
+	stats         container.StatsResponse
+	statsErr      error
+	statsCalls    int
 
 	// startLeavesState skips the default "start → running" inspect update so
 	// a test can drive waitUntilRunning itself.
@@ -179,10 +184,25 @@ func (f *fakeDockerEngine) ContainerList(
 }
 
 func (f *fakeDockerEngine) ContainerRemove(
-	_ context.Context, id string, _ client.ContainerRemoveOptions,
+	_ context.Context, id string, options client.ContainerRemoveOptions,
 ) (client.ContainerRemoveResult, error) {
 	f.removed = append(f.removed, id)
+	f.removeOptions = append(f.removeOptions, options)
 	return client.ContainerRemoveResult{}, f.removeErr
+}
+
+func (f *fakeDockerEngine) ContainerStats(
+	_ context.Context, _ string, _ client.ContainerStatsOptions,
+) (client.ContainerStatsResult, error) {
+	f.statsCalls++
+	if f.statsErr != nil {
+		return client.ContainerStatsResult{}, f.statsErr
+	}
+	encoded, err := json.Marshal(f.stats)
+	if err != nil {
+		return client.ContainerStatsResult{}, err
+	}
+	return client.ContainerStatsResult{Body: io.NopCloser(bytes.NewReader(encoded))}, nil
 }
 
 func (f *fakeDockerEngine) ExecCreate(
@@ -473,6 +493,8 @@ func TestDockerClientCreateAppliesIsolationAndMetadata(t *testing.T) {
 	require.Equal(t, "sess-1", created.Config.Labels[remoteMetadataSessionID])
 	require.Equal(t, "900", created.Config.Labels[dockerIdleTTLLabel],
 		"the sweep must reclaim with the TTL the sandbox was created with")
+	require.Equal(t, "0", created.Config.Labels[dockerCPUTimeLimitLabel])
+	require.Equal(t, "0", created.Config.Labels[dockerHardLifetimeLabel])
 
 	host := created.HostConfig
 	require.Equal(t, []string{"ALL"}, host.CapDrop)
