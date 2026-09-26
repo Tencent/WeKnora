@@ -866,6 +866,7 @@ func NewService(
 	registry.Register(newHelpCommand(registry))
 	registry.Register(newInfoCommand(kbService))
 	registry.Register(newSearchCommand(sessionService, kbService))
+	registry.Register(newSaveCommand(knowledgeService))
 	registry.Register(newStopCommand())
 	registry.Register(newClearCommand())
 
@@ -2107,6 +2108,8 @@ func (s *Service) handleCommand(
 		AgentName:         agentName,
 		CustomAgent:       customAgent,
 		ChannelOutputMode: channel.OutputMode,
+		KnowledgeBaseID:   channel.KnowledgeBaseID,
+		Platform:          channel.Platform,
 	}
 
 	result, err := cmd.Execute(ctx, cmdCtx, args)

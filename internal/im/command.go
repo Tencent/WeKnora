@@ -47,6 +47,11 @@ type CommandContext struct {
 	// ChannelOutputMode is the channel-level output mode configured by the admin
 	// ("stream" or "full").
 	ChannelOutputMode string
+	// KnowledgeBaseID is the knowledge base configured on the current IM channel
+	// for saving files/URLs (empty when unset).
+	KnowledgeBaseID string
+	// Platform is the IM platform of the current channel (e.g. "wechat").
+	Platform string
 }
 
 // Command is the interface every IM slash-command must implement.
