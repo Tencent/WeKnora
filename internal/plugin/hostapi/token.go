@@ -23,8 +23,15 @@ import (
 // Audience of Host API tokens; they are refused anywhere else.
 const Audience = "weknora-host-api"
 
-// TokenTTL is how long a token lives: one call and its follow-ups.
-const TokenTTL = 5 * time.Minute
+// Token lifetimes. A token lives as long as the call it was issued for:
+// until the call's deadline plus TokenSlack, at least TokenTTL (also the
+// lifetime of a call without a deadline), at most MaxTokenTTL. A data
+// source sync streams for up to two hours on one call.
+const (
+	TokenTTL    = 5 * time.Minute
+	TokenSlack  = time.Minute
+	MaxTokenTTL = 6 * time.Hour
+)
 
 // Claims are what a Host API token asserts.
 type Claims struct {
@@ -68,10 +75,22 @@ func NewIssuerFromEnv() *Issuer {
 	return NewIssuer(mac.Sum(nil))
 }
 
-// Issue signs a token for one call.
+// Issue signs a token for one call without a deadline.
 func (i *Issuer) Issue(pluginID, version string, tenantID uint64, scopes []string) (string, time.Time, error) {
+	return i.IssueUntil(pluginID, version, tenantID, scopes, time.Time{})
+}
+
+// IssueUntil signs a token for one call that ends at deadline (zero: no
+// deadline), so the plugin can call back for as long as the call runs.
+func (i *Issuer) IssueUntil(
+	pluginID, version string, tenantID uint64, scopes []string, deadline time.Time,
+) (string, time.Time, error) {
 	now := i.now()
-	exp := now.Add(TokenTTL)
+	ttl := TokenTTL
+	if !deadline.IsZero() {
+		ttl = min(max(deadline.Sub(now)+TokenSlack, TokenTTL), MaxTokenTTL)
+	}
+	exp := now.Add(ttl)
 	claims := Claims{
 		PluginID: pluginID, Version: version, TenantID: tenantID, Scopes: scopes,
 		RegisteredClaims: jwt.RegisteredClaims{

@@ -186,3 +186,27 @@ func TestDataSourcesThroughTheSDK(t *testing.T) {
 	pe, ok := pluginapi.AsError(err)
 	require.True(t, ok && pe.Code == pluginapi.CodeUnauthorized, "the scope is required: %v", err)
 }
+
+func TestTokenLifetimeFollowsTheCallDeadline(t *testing.T) {
+	iss := NewIssuer([]byte("k"))
+	now := time.Now()
+	iss.now = func() time.Time { return now }
+	for _, tc := range []struct {
+		name     string
+		deadline time.Time
+		want     time.Duration
+	}{
+		{"no deadline", time.Time{}, TokenTTL},
+		{"short call", now.Add(10 * time.Second), TokenTTL},
+		{"two-hour sync", now.Add(2 * time.Hour), 2*time.Hour + TokenSlack},
+		{"capped", now.Add(48 * time.Hour), MaxTokenTTL},
+	} {
+		tok, exp, err := iss.IssueUntil("acme.x", "1.0.0", 7, []string{"kv"}, tc.deadline)
+		require.NoError(t, err, tc.name)
+		require.WithinDuration(t, now.Add(tc.want), exp, time.Second, tc.name)
+		later := NewIssuer([]byte("k"))
+		later.now = func() time.Time { return now.Add(tc.want - time.Second) }
+		_, err = later.Verify(tok)
+		require.NoError(t, err, "%s: the token must verify until it expires", tc.name)
+	}
+}
