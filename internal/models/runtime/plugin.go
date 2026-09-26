@@ -46,13 +46,13 @@ func (rt *Runtime) RegisterPlugin(id string, definition []byte, baseDir string) 
 
 	rt.mu.Lock()
 	defer rt.mu.Unlock()
-	if _, taken := rt.providers[id]; taken && !rt.plugins[id] {
+	if _, taken := rt.providers[id]; taken && rt.plugins[id] == nil {
 		return fmt.Errorf("vendor %s already exists", id)
 	}
 	if rt.plugins == nil {
-		rt.plugins = map[string]bool{}
+		rt.plugins = map[string]*Provider{}
 	}
-	rt.plugins[id] = true
+	rt.plugins[id] = vendor.clone()
 	rt.providers[id] = vendor
 	rt.builtins[id] = vendor.clone()
 	return nil
@@ -63,7 +63,7 @@ func (rt *Runtime) Unregister(id string) {
 	id = strings.ToLower(strings.TrimSpace(id))
 	rt.mu.Lock()
 	defer rt.mu.Unlock()
-	if !rt.plugins[id] {
+	if rt.plugins[id] == nil {
 		return
 	}
 	delete(rt.plugins, id)

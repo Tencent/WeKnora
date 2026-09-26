@@ -205,3 +205,24 @@ func TestCatalogViewsResolveThinkingLevels(t *testing.T) {
 	require.Contains(t, next, api.ReasoningLow)
 	require.Len(t, next, len(base)-1)
 }
+
+func TestModelCatalogPublishAndSyncKeepPluginVendors(t *testing.T) {
+	s, repo := catalogFixture(t)
+	ctx := context.Background()
+	def := []byte(`{"name":"ACME","base_url":"https://a.example/v1","models":[{"id":"m"}]}`)
+	require.NoError(t, s.target.RegisterPlugin("acme.ai/acme", def, t.TempDir()))
+	initial, err := s.State(ctx)
+	require.NoError(t, err)
+	_, ok := s.target.Get("acme.ai/acme")
+	require.True(t, ok, "the initial sync dropped the plugin vendor")
+	_, err = s.Publish(ctx, CatalogUpdate{Version: initial.Version, Baseline: initial.Baseline, Overlay: emptyOverlay})
+	require.NoError(t, err)
+	_, ok = s.target.Get("acme.ai/acme")
+	require.True(t, ok, "publishing dropped the plugin vendor")
+
+	replica := &ModelCatalogService{repo: repo, base: s.base, target: modelruntime.New(), baseline: "test-base"}
+	require.NoError(t, replica.target.RegisterPlugin("acme.ai/acme", def, t.TempDir()))
+	require.NoError(t, replica.Sync(ctx))
+	_, ok = replica.target.Get("acme.ai/acme")
+	require.True(t, ok, "syncing dropped the plugin vendor")
+}
