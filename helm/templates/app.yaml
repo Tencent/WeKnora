@@ -132,12 +132,9 @@ spec:
               value: {{ .Values.app.env.WEKNORA_SANDBOX_DOCKER_ENABLED | default "false" | quote }}
             {{- if .Values.pluginHost.enabled }}
             # Host plugins of these kinds still run in the app pods; the rest
-            # go to the plugin host pods. Plugins there reach the Host API
-            # through the app Service.
+            # go to the plugin host pods.
             - name: WEKNORA_PLUGIN_EMBEDDED_KINDS
               value: {{ .Values.pluginHost.appKinds | quote }}
-            - name: WEKNORA_PLUGIN_HOST_API_URL
-              value: "http://app:{{ .Values.app.service.port }}"
             {{- end }}
             {{- if .Values.pluginKube.enabled }}
             # Kubernetes plugins run as Deployments in this namespace.
@@ -147,10 +144,13 @@ spec:
             - name: WEKNORA_PLUGIN_K8S_IMAGE_PULL_SECRET
               value: {{ . | quote }}
             {{- end }}
-            {{- if not .Values.pluginHost.enabled }}
-            - name: WEKNORA_PLUGIN_HOST_API_URL
-              value: "http://app.{{ .Release.Namespace }}.svc:{{ .Values.app.service.port }}"
             {{- end }}
+            {{- if or .Values.pluginHost.enabled .Values.pluginKube.enabled }}
+            # Plugins off the app pods (on plugin host pods, or kubernetes
+            # plugins, maybe in another namespace) reach the Host API through
+            # the app Service.
+            - name: WEKNORA_PLUGIN_HOST_API_URL
+              value: {{ include "weknora.pluginHostAPIURL" . | quote }}
             {{- end }}
             {{- if .Values.neo4j.enabled }}
             # Neo4j configuration (for GraphRAG)

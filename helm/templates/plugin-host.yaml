@@ -57,9 +57,10 @@ spec:
               value: "http://$(POD_IP):8081"
             - name: WEKNORA_PLUGIN_HOST_KINDS
               value: {{ .Values.pluginHost.kinds | quote }}
-            # Plugins granted Host API scopes call the app through its Service.
+            # Plugins granted Host API scopes call the app through its Service,
+            # at the address the app gives them.
             - name: WEKNORA_PLUGIN_HOST_API_URL
-              value: "http://app:{{ .Values.app.service.port }}"
+              value: {{ include "weknora.pluginHostAPIURL" . | quote }}
             - name: TZ
               value: {{ .Values.app.env.TZ | quote }}
             # The same database, Redis, storage and secrets as the app.
