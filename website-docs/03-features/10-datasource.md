@@ -378,21 +378,25 @@ type StreamingConnector interface {
 
 #### ConnectorRegistry：注册与查找
 
-`ConnectorRegistry` 是简单的 `map[string]Connector` 注册表。实际注册发生在 `internal/container/container.go` 的 `initConnectorRegistry()`：
+`ConnectorRegistry` 是简单的 `map[string]Connector` 注册表。内置连接器以内置插件的形式登记在 `internal/plugin/builtin/implementations.go` 的 `NewConnectorRegistry()`，容器（`internal/container/container.go` 的 `initConnectorRegistry()`）只转调它；任何一个注册失败都会让启动失败：
 
 ```go
-registry.Register(wiki.NewConnector(core.RegionFeishu))             // feishu
-registry.Register(wiki.NewConnector(core.RegionLark))               // lark（国际版，同一实现不同 Region）
-registry.Register(drive.NewDriveConnector(core.RegionFeishuDrive))  // feishu_drive
-registry.Register(drive.NewDriveConnector(core.RegionLarkDrive))    // lark_drive
-registry.Register(notionConnector.NewConnector())                   // notion
-registry.Register(confluenceConnector.NewConnector())               // confluence
-registry.Register(yuqueConnector.NewConnector())                    // yuque
-registry.Register(dingtalkConnector.NewConnector())                 // dingtalk
-registry.Register(imaConnector.NewConnector())                      // ima
-registry.Register(rssConnector.NewConnector())                      // rss
-registry.Register(gitlabConnector.NewConnector())                   // gitlab
+connectors := []datasource.Connector{
+    wiki.NewConnector(core.RegionFeishu),              // feishu
+    wiki.NewConnector(core.RegionLark),                // lark（国际版，同一实现不同 Region）
+    drive.NewDriveConnector(core.RegionFeishuDrive),   // feishu_drive
+    drive.NewDriveConnector(core.RegionLarkDrive),     // lark_drive
+    notionConnector.NewConnector(),                    // notion
+    confluenceConnector.NewConnector(),                // confluence
+    yuqueConnector.NewConnector(),                     // yuque
+    dingtalkConnector.NewConnector(),                  // dingtalk
+    imaConnector.NewConnector(),                       // ima
+    rssConnector.NewConnector(),                       // rss
+    gitlabConnector.NewConnector(),                    // gitlab
+}
 ```
+
+插件包也能提供连接器（`connectors` 贡献点），由插件运行时在启用后注册进同一个注册表，见[插件](./25-plugins.md)。
 
 > 注意：`connector.go` 中的 `ConnectorMetadataRegistry` 仍包含尚未实现的连接器（GitHub、Google Drive、OneDrive、Web Crawler、Slack、IMAP 等），`/datasource/types` 不会返回它们。当前实际注册可用的类型为：`feishu`、`lark`、`feishu_drive`、`lark_drive`、`notion`、`confluence`、`yuque`、`dingtalk`、`ima`、`rss`、`gitlab`。未注册类型在创建数据源时会被 `connectorRegistry.Get()` 以 `ErrConnectorNotFound` 拒绝。
 

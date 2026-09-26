@@ -6,24 +6,30 @@
 
 ## 支持的搜索引擎
 
-引擎在 `internal/container/container.go` 的 `registerWebSearchProviders` 中注册：
+内置引擎以内置插件的形式登记在 `internal/plugin/builtin/implementations.go` 的 `RegisterWebSearchProviders`（容器 `internal/container/container.go` 的 `registerWebSearchProviders` 只转调它）：
 
 ```go
-registry.Register("duckduckgo", infra_web_search.NewDuckDuckGoProvider)
-registry.Register("google", infra_web_search.NewGoogleProvider)
-registry.Register("bing", infra_web_search.NewBingProvider)
-registry.Register("tavily", infra_web_search.NewTavilyProvider)
-registry.Register("ollama", infra_web_search.NewOllamaProvider)
-registry.Register("baidu", infra_web_search.NewBaiduProvider)
-registry.Register("searxng", infra_web_search.NewSearxngProvider)
-registry.Register("keenable", infra_web_search.NewKeenableProvider)
-registry.Register("zhipu", infra_web_search.NewZhipuProvider)
-registry.Register("exa", infra_web_search.NewExaProvider)
-registry.Register("metaso", infra_web_search.NewMetasoProvider)
-registry.Register("bocha", infra_web_search.NewBochaProvider)
-registry.Register("brave", infra_web_search.NewBraveProvider)
-registry.Register("serply", infra_web_search.NewSerplyProvider)
+for id, factory := range map[string]web_search.ProviderFactory{
+    "duckduckgo": web_search.NewDuckDuckGoProvider,
+    "google":     web_search.NewGoogleProvider,
+    "bing":       web_search.NewBingProvider,
+    "tavily":     web_search.NewTavilyProvider,
+    "ollama":     web_search.NewOllamaProvider,
+    "baidu":      web_search.NewBaiduProvider,
+    "searxng":    web_search.NewSearxngProvider,
+    "keenable":   web_search.NewKeenableProvider,
+    "zhipu":      web_search.NewZhipuProvider,
+    "exa":        web_search.NewExaProvider,
+    "metaso":     web_search.NewMetasoProvider,
+    "bocha":      web_search.NewBochaProvider,
+    "brave":      web_search.NewBraveProvider,
+    "serply":     web_search.NewSerplyProvider,
+} {
+    registry.Register(id, factory)
+}
 ```
+
+插件包也可以提供搜索引擎（`webSearch` 贡献点），见[插件](./25-plugins.md)。
 
 | 引擎 | 源码文件 | 是否需要 API Key | 端点 | 备注 |
 |------|---------|-----------------|------|------|
@@ -188,6 +194,6 @@ func (r *Registry) CreateProvider(providerType string, params types.WebSearchPro
 
 1. 在 `internal/infrastructure/web_search/` 新建 `<engine>.go`，实现 `interfaces.WebSearchProvider`（`Name()` + `Search()`），并提供工厂函数 `func New<Engine>Provider(params types.WebSearchProviderParameters) (interfaces.WebSearchProvider, error)`；官方端点应硬编码为常量，HTTP 客户端用 `NewSearchHTTPClient(timeout, params.ProxyURL)` 构造。
 2. 在 `internal/types/web_search_provider.go` 增加 `WebSearchProviderType` 常量。
-3. 在 `internal/container/container.go` 的注册处追加 `registry.Register("<engine>", infra_web_search.New<Engine>Provider)`。
+3. 在 `internal/plugin/builtin/implementations.go` 的 `RegisterWebSearchProviders` 里追加 `"<engine>": web_search.New<Engine>Provider`。
 4. 如需密钥/额外参数校验，在 web search provider service 的参数校验分支中补充（参考 `ValidateSearxngBaseURL` 的共享校验模式），并为前端 `GET /web-search/providers` 目录补充展示信息。
 5. 参考 `searxng_test.go` / `zhipu_test.go` 用 `httptest` 模拟上游编写单测。

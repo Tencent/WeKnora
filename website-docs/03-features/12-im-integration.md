@@ -251,20 +251,22 @@ type Adapter interface {
 4. 普通消息调用 WeKnora QA 流水线（`KnowledgeQA` / `AgentQA`）；
 5. 收集流式回答并通过 Adapter 回发。
 
-平台适配器通过 `AdapterFactory` 注册（`internal/container/container.go` 的 `registerIMAdapterFactories`）：
+平台适配器通过 `AdapterFactory` 注册。内置平台以内置插件的形式登记在 `internal/plugin/builtin/implementations.go` 的 `RegisterIMAdapters()`，容器（`internal/container/container.go` 的 `registerIMService`）先调用它，再加载并启动已有渠道：
 
 ```go
-imService.RegisterAdapterFactory("wecom", wecom.NewFactory())
-imService.RegisterAdapterFactory("feishu", feishu.NewFactory(feishu.RegionFeishu))
-imService.RegisterAdapterFactory("lark", feishu.NewFactory(feishu.RegionLark)) // Lark 与飞书同一适配器，仅 API 域名不同
-imService.RegisterAdapterFactory("slack", slack.NewFactory())
-imService.RegisterAdapterFactory("telegram", telegram.NewFactory())
-imService.RegisterAdapterFactory("dingtalk", dingtalk.NewFactory())
-imService.RegisterAdapterFactory("mattermost", mattermost.NewFactory())
-imService.RegisterAdapterFactory("wechat", wechat.NewFactory())
-imService.RegisterAdapterFactory("qqbot", qqbot.NewFactory())
-imService.RegisterAdapterFactory("yunzhijia", yunzhijia.NewFactory())
+s.RegisterAdapterFactory("wecom", imWecom.NewFactory())
+s.RegisterAdapterFactory("feishu", imFeishu.NewFactory(imFeishu.RegionFeishu))
+s.RegisterAdapterFactory("lark", imFeishu.NewFactory(imFeishu.RegionLark)) // Lark 与飞书同一适配器，仅 API 域名不同
+s.RegisterAdapterFactory("slack", imSlack.NewFactory())
+s.RegisterAdapterFactory("telegram", imTelegram.NewFactory())
+s.RegisterAdapterFactory("dingtalk", imDingtalk.NewFactory())
+s.RegisterAdapterFactory("mattermost", imMattermost.NewFactory())
+s.RegisterAdapterFactory("wechat", imWechat.NewFactory())
+s.RegisterAdapterFactory("qqbot", imQQBot.NewFactory())
+s.RegisterAdapterFactory("yunzhijia", imYunzhijia.NewFactory())
 ```
+
+插件包提供的 IM 平台（`imChannels` 贡献点）不走这张表：它们只支持 webhook 接入，通过 API 创建渠道时不传 `mode` 即为 `webhook`，传其他模式会被拒绝（400）。见[插件](./25-plugins.md)。
 
 ## 实现参考
 
