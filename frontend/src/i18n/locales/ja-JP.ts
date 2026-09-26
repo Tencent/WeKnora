@@ -2736,7 +2736,8 @@ export default {
   pluginAdmin: {
     runtime: {
       declarative: '宣言型',
-      host: 'ローカルプロセス'
+      host: 'ローカルプロセス',
+      remote: 'リモートサービス'
     },
     title: 'プラグイン管理',
     description: 'プラットフォーム全体のプラグインをインストール・管理します。インストールしたプラグインはすべてのワークスペースに表示され、各ワークスペースで個別に有効化します。ここで無効にすると全ノードでアンロードされます。',
@@ -2780,6 +2781,13 @@ export default {
       hostApi: 'WeKnora API',
       events: 'イベント'
     },
+    secret: {
+      title: 'プラグイン署名シークレット',
+      description: 'このシークレットをプラグインサービスの環境変数 WEKNORA_PLUGIN_SECRET に設定してください。サービスはこれでリクエストが WeKnora からのものか確認します。表示されるのは今回だけで、閉じると再表示できません。',
+      copy: 'コピー',
+      copied: 'コピーしました',
+      done: '保存しました'
+    },
     install: {
       title: 'プラグインをインストール',
       description: '.wkp パッケージをアップロードするかダウンロード URL を指定し、確認してからインストールします。',
@@ -2794,6 +2802,9 @@ export default {
       fileHint: '.wkp ファイル（plugin.yaml を含む zip）、最大 64 MB。',
       urlLabel: 'ダウンロード URL',
       urlHint: 'サーバーがこの URL からダウンロードします。プライベートネットワークのアドレスは拒否されます。',
+      remoteUrlLabel: 'サービス URL',
+      remoteUrlHint: 'プラグインサービスの HTTP(S) アドレス。プライベートネットワークのホストは SSRF_WHITELIST に追加する必要があります。',
+      remoteUrlKeep: 'アップグレード時は空欄のままで現在の URL を引き続き使用します',
       reviewSection: 'インストール前の確認',
       noPermissions: 'このプラグインは追加の権限を要求しません。',
       configNotice: 'このプラグインには設定が必要です。プラットフォーム設定はインストール後の詳細で、ワークスペース設定は各ワークスペース管理者がプラグインセンターで入力します。',
@@ -2836,7 +2847,16 @@ export default {
       uninstall: 'プラグインをアンインストール',
       uninstallConfirm: 'アンインストールしますか？すべてのノードで直ちにアンロードされます。',
       uninstalled: 'プラグインをアンインストールしました',
-      uninstallFailed: 'アンインストールに失敗しました'
+      uninstallFailed: 'アンインストールに失敗しました',
+      remote: 'リモートサービス',
+      remoteUrl: 'サービス URL',
+      editUrl: '変更',
+      urlSaved: 'サービス URL を更新しました',
+      urlSaveFailed: 'サービス URL の更新に失敗しました',
+      rotateSecret: 'シークレットをローテーション',
+      rotateHint: '新しい署名シークレットを発行します。サービスに新しいシークレットを設定するまで呼び出しは失敗します。',
+      rotateConfirm: 'ローテーションしますか？古いシークレットは直ちに無効になります。',
+      rotateFailed: 'シークレットのローテーションに失敗しました'
     }
   },
   pluginCenter: {

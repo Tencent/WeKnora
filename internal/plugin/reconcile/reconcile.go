@@ -8,6 +8,8 @@ package reconcile
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -37,6 +39,9 @@ type Loaded struct {
 	// Dir is the package extracted on local disk, for consumers that read
 	// files by path (skills).
 	Dir string
+	// Installed is the plugin's row: where a remote plugin runs and its
+	// sealed secret.
+	Installed types.InstalledPlugin
 }
 
 // Activator wires one domain to plugin contributions: it registers what a
@@ -101,12 +106,38 @@ type Reconciler struct {
 	instanceID string
 	interval   time.Duration
 
-	mu       sync.Mutex // serializes passes
-	loaded   map[string]*Loaded
-	digests  map[string]string // plugin ID → loaded digest
+	mu      sync.Mutex // serializes passes
+	loaded  map[string]*Loaded
+	digests map[string]string // plugin ID → loaded digest and runtime target
+	// retries holds plugins whose activation failed: a process that would
+	// not start, a remote service that was down. They are tried again with
+	// backoff until they load or change.
+	retries  map[string]retry
+	now      func() time.Time
 	statusMu sync.RWMutex
 	status   map[string]Status
 	runOnce  sync.Once
+}
+
+// retry is when a failed activation is tried again.
+type retry struct {
+	key      string // the load key that failed
+	attempts int
+	next     time.Time
+}
+
+// Backoff between attempts to activate a plugin that failed.
+const (
+	retryFloor   = 30 * time.Second
+	retryCeiling = 10 * time.Minute
+)
+
+func retryDelay(attempts int) time.Duration {
+	d := retryFloor
+	for i := 1; i < attempts && d < retryCeiling; i++ {
+		d *= 2
+	}
+	return min(d, retryCeiling)
 }
 
 // Options configures a Reconciler.
@@ -131,7 +162,8 @@ func New(o Options) *Reconciler {
 	return &Reconciler{
 		repo: o.Repo, store: o.Store, registry: o.Registry, cacheDir: o.CacheDir, rdb: o.Redis,
 		activators: o.Activators, instanceID: uuid.NewString(), interval: o.Interval,
-		loaded: map[string]*Loaded{}, digests: map[string]string{}, status: map[string]Status{},
+		loaded: map[string]*Loaded{}, digests: map[string]string{}, retries: map[string]retry{},
+		status: map[string]Status{}, now: time.Now,
 	}
 }
 
@@ -165,7 +197,7 @@ func (r *Reconciler) Reconcile(ctx context.Context) error {
 			r.setStatus(row.ID, Status{Version: row.ActiveVersion, State: StateFailed, Error: err.Error()})
 		}
 	}
-	for id := range r.digests {
+	for id := range r.loaded {
 		if !desired[id] {
 			r.unload(ctx, id)
 		}
@@ -183,6 +215,16 @@ func (r *Reconciler) Reconcile(ctx context.Context) error {
 	return errors.Join(errs...)
 }
 
+// runtimeTarget identifies where a plugin runs beyond its package: a new
+// remote URL or secret reloads the plugin like a new version would.
+func runtimeTarget(row types.InstalledPlugin) string {
+	if row.RemoteURL == "" && row.RemoteSecret == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(row.RemoteURL + "\x00" + row.RemoteSecret))
+	return hex.EncodeToString(sum[:8])
+}
+
 // ensure loads the active version of one plugin unless it already is.
 func (r *Reconciler) ensure(ctx context.Context, row types.InstalledPlugin) error {
 	v, err := r.repo.GetVersion(ctx, row.ID, row.ActiveVersion)
@@ -192,8 +234,12 @@ func (r *Reconciler) ensure(ctx context.Context, row types.InstalledPlugin) erro
 	if v == nil {
 		return fmt.Errorf("version %s is not stored", row.ActiveVersion)
 	}
-	if r.digests[row.ID] == v.Digest {
+	loadKey := v.Digest + "|" + runtimeTarget(row)
+	if r.digests[row.ID] == loadKey {
 		return nil
+	}
+	if rt, ok := r.retries[row.ID]; ok && rt.key == loadKey && r.now().Before(rt.next) {
+		return nil // still failed; its status says why
 	}
 	data, err := r.store.Get(ctx, v.PackageURI)
 	if err != nil {
@@ -216,7 +262,7 @@ func (r *Reconciler) ensure(ctx context.Context, row types.InstalledPlugin) erro
 	if err := r.registry.Replace(p.Manifest); err != nil {
 		return err
 	}
-	l := &Loaded{Manifest: p.Manifest, Package: p, Dir: dir}
+	l := &Loaded{Manifest: p.Manifest, Package: p, Dir: dir, Installed: row}
 	var errs []error
 	for _, a := range r.activators {
 		_, inPlace := a.(InPlaceActivator)
@@ -230,10 +276,19 @@ func (r *Reconciler) ensure(ctx context.Context, row types.InstalledPlugin) erro
 		}
 	}
 	r.loaded[row.ID] = l
-	r.digests[row.ID] = v.Digest
 	if err := errors.Join(errs...); err != nil {
+		rt := r.retries[row.ID]
+		if rt.key != loadKey {
+			rt = retry{key: loadKey}
+		}
+		rt.attempts++
+		rt.next = r.now().Add(retryDelay(rt.attempts))
+		r.retries[row.ID] = rt
+		delete(r.digests, row.ID)
 		return err
 	}
+	r.digests[row.ID] = loadKey
+	delete(r.retries, row.ID)
 	logger.Infof(ctx, "[plugin] loaded %s %s", row.ID, row.ActiveVersion)
 	r.setStatus(row.ID, Status{Version: row.ActiveVersion, State: StateReady})
 	return nil
@@ -252,6 +307,7 @@ func (r *Reconciler) unload(ctx context.Context, id string) {
 	}
 	delete(r.loaded, id)
 	delete(r.digests, id)
+	delete(r.retries, id)
 	r.statusMu.Lock()
 	delete(r.status, id)
 	r.statusMu.Unlock()

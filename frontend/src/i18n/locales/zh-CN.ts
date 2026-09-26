@@ -5256,7 +5256,8 @@ export default {
   pluginAdmin: {
     runtime: {
       declarative: '声明式',
-      host: '本机进程'
+      host: '本机进程',
+      remote: '远程服务'
     },
     title: '插件管理',
     description: '安装与管理本平台的插件。安装后所有空间都能看到，但每个空间需自行启用；停用会在所有节点卸载该插件。',
@@ -5300,6 +5301,13 @@ export default {
       hostApi: '调用 WeKnora API',
       events: '订阅事件'
     },
+    secret: {
+      title: '插件签名密钥',
+      description: '把此密钥配置为插件服务的环境变量 WEKNORA_PLUGIN_SECRET，服务据此确认请求来自 WeKnora。密钥只显示这一次，关闭后无法再查看。',
+      copy: '复制',
+      copied: '已复制',
+      done: '我已保存'
+    },
     install: {
       title: '安装插件',
       description: '上传 .wkp 插件包或填写下载地址，审阅后安装。',
@@ -5314,6 +5322,9 @@ export default {
       fileHint: '.wkp 文件（包含 plugin.yaml 的 zip），最大 64 MB。',
       urlLabel: '下载地址',
       urlHint: '服务端会下载该地址；不允许内网地址。',
+      remoteUrlLabel: '服务地址',
+      remoteUrlHint: '插件服务的 HTTP(S) 地址。内网地址需要加入 SSRF_WHITELIST。',
+      remoteUrlKeep: '升级时可留空，沿用当前地址',
       reviewSection: '安装前审阅',
       noPermissions: '该插件不申请任何额外权限。',
       configNotice: '该插件需要配置：平台配置在安装后的详情中填写，空间配置由各空间管理员在插件中心填写。',
@@ -5356,7 +5367,16 @@ export default {
       uninstall: '卸载插件',
       uninstallConfirm: '确定卸载？所有节点会立即卸载该插件。',
       uninstalled: '插件已卸载',
-      uninstallFailed: '卸载失败'
+      uninstallFailed: '卸载失败',
+      remote: '远程服务',
+      remoteUrl: '服务地址',
+      editUrl: '修改',
+      urlSaved: '服务地址已更新',
+      urlSaveFailed: '更新服务地址失败',
+      rotateSecret: '轮换密钥',
+      rotateHint: '生成新的签名密钥。服务换上新密钥之前，对它的调用会失败。',
+      rotateConfirm: '确定轮换？旧密钥立即失效。',
+      rotateFailed: '轮换密钥失败'
     }
   },
   pluginCenter: {

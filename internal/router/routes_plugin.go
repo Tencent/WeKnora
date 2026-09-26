@@ -39,6 +39,8 @@ func RegisterPluginAdminRoutes(r *gin.RouterGroup, h *handler.PluginAdminHandler
 		plugins.DELETE("/:id", h.UninstallPlugin)
 		plugins.PUT("/:id/enabled", h.SetInstalledPluginEnabled)
 		plugins.PUT("/:id/active-version", h.ActivatePluginVersion)
+		plugins.PUT("/:id/remote-url", h.SetPluginRemoteURL)
+		plugins.POST("/:id/secret/rotate", h.RotatePluginSecret)
 		plugins.GET("/:id/config", h.GetPluginSystemConfig)
 		plugins.PUT("/:id/config", h.UpdatePluginSystemConfig)
 	}

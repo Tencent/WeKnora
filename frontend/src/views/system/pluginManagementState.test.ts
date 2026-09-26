@@ -12,6 +12,7 @@ import {
   isPackageUrl,
   permissionLines,
   remoteHosts,
+  remoteUrlReady,
   shortDigest,
   sortVersions,
 } from './pluginManagementState'
@@ -76,4 +77,15 @@ test('isPackageUrl and hasSystemConfig', () => {
   assert.equal(isPackageUrl('not a url'), false)
   assert.equal(hasSystemConfig(manifest), true)
   assert.equal(hasSystemConfig(undefined), false)
+})
+
+test('remoteUrlReady asks a new remote plugin for its service URL', () => {
+  const remote = (change: string) => ({ manifest: { runtime: { type: 'remote' } }, change })
+  assert.equal(remoteUrlReady(remote('install'), ''), false)
+  assert.equal(remoteUrlReady(remote('install'), 'plugins.example.com'), false)
+  assert.equal(remoteUrlReady(remote('install'), 'https://plugins.example.com'), true)
+  assert.equal(remoteUrlReady(remote('upgrade'), ''), true)
+  assert.equal(remoteUrlReady(remote('upgrade'), 'nope'), false)
+  assert.equal(remoteUrlReady({ manifest: { runtime: { type: 'host' } }, change: 'install' }, ''), true)
+  assert.equal(remoteUrlReady(null, ''), true)
 })

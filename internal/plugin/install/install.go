@@ -6,13 +6,15 @@ package install
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
-	"path"
+	"os/exec"
 	goruntime "runtime"
 	"sort"
 	"strings"
@@ -21,6 +23,7 @@ import (
 	"golang.org/x/mod/semver"
 
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/plugin/host"
 	"github.com/Tencent/WeKnora/internal/plugin/manifest"
 	"github.com/Tencent/WeKnora/internal/plugin/pkg"
 	"github.com/Tencent/WeKnora/internal/plugin/reconcile"
@@ -47,23 +50,29 @@ func invalid(format string, args ...any) error {
 var supportedRuntimes = map[manifest.RuntimeType]bool{
 	manifest.RuntimeDeclarative: true,
 	manifest.RuntimeHost:        true,
+	manifest.RuntimeRemote:      true,
 }
 
 // checkHostRuntime makes sure this server can run a host plugin: a binary
-// built for its OS and architecture. Other kinds need a host image that
-// carries their interpreter.
+// built for its OS and architecture, or a Python entry and an interpreter.
 func checkHostRuntime(p *pkg.Package) error {
 	rt := p.Manifest.Runtime
-	if rt.Kind != "binary" {
-		return invalid("runtime.kind %q is not supported yet; host plugins must be binaries", rt.Kind)
+	if !host.Supported(rt.Kind) {
+		return invalid("runtime.kind %q is not supported yet; host plugins must be binaries or python", rt.Kind)
 	}
-	entry := strings.NewReplacer("{os}", goruntime.GOOS, "{arch}", goruntime.GOARCH).Replace(rt.Entry)
-	if goruntime.GOOS == "windows" && path.Ext(entry) == "" {
-		entry += ".exe"
-	}
+	entry := host.EntryName(rt)
 	if _, ok := p.ReadFile(entry); !ok {
-		return invalid("the package has no build for this server (%s/%s): %s is missing",
-			goruntime.GOOS, goruntime.GOARCH, entry)
+		if rt.Kind == host.KindBinary {
+			return invalid("the package has no build for this server (%s/%s): %s is missing",
+				goruntime.GOOS, goruntime.GOARCH, entry)
+		}
+		return invalid("the package has no %s (runtime.entry)", entry)
+	}
+	if rt.Kind == host.KindPython {
+		if _, err := exec.LookPath(host.PythonCommand()); err != nil {
+			return invalid("python plugins need %s on this server; install it or set WEKNORA_PLUGIN_PYTHON",
+				host.PythonCommand())
+		}
 	}
 	return nil
 }
@@ -142,6 +151,9 @@ type View struct {
 	Versions []types.PluginVersion `json:"versions"`
 	// Node is the plugin's state on the node that served the request.
 	Node *reconcile.Status `json:"node,omitempty"`
+	// IssuedSecret is a remote plugin's signing secret, returned only by
+	// the call that created it: the service needs it to check requests.
+	IssuedSecret string `json:"issuedSecret,omitempty"`
 }
 
 // Inspect opens a package and says what installing it would do.
@@ -176,7 +188,7 @@ func (s *Service) open(data []byte) (*pkg.Package, error) {
 		return nil, &InvalidError{Err: err}
 	}
 	if !supportedRuntimes[p.Manifest.Runtime.Type] {
-		return nil, invalid("runtime %q is not supported yet; declarative and host plugins can be installed",
+		return nil, invalid("runtime %q is not supported yet; declarative, host and remote plugins can be installed",
 			p.Manifest.Runtime.Type)
 	}
 	if p.Manifest.Runtime.Type == manifest.RuntimeHost {
@@ -203,6 +215,9 @@ type Request struct {
 	// to the package the administrator reviewed.
 	ExpectedDigest string
 	UserID         string
+	// RemoteURL is where a remote plugin's service runs. An upgrade may
+	// leave it empty to keep the registered one.
+	RemoteURL string
 }
 
 // Install stores the package as a version of its plugin and makes it the
@@ -248,6 +263,23 @@ func (s *Service) Install(ctx context.Context, req Request) (*View, error) {
 	if row == nil {
 		row = &types.InstalledPlugin{ID: m.ID, DesiredState: types.PluginStateEnabled, CreatedBy: req.UserID}
 	}
+	var issued string
+	if m.Runtime.Type == manifest.RuntimeRemote {
+		if req.RemoteURL != "" {
+			if err := checkRemoteURL(req.RemoteURL); err != nil {
+				return nil, err
+			}
+			row.RemoteURL = strings.TrimSuffix(req.RemoteURL, "/")
+		}
+		if row.RemoteURL == "" {
+			return nil, invalid("a remote plugin needs the URL of its service")
+		}
+		if row.RemoteSecret == "" {
+			if issued, err = s.issueSecret(row); err != nil {
+				return nil, err
+			}
+		}
+	}
 	source, _ := json.Marshal(req.Source)
 	perms, _ := json.Marshal(m.Permissions)
 	row.Source = types.JSON(source)
@@ -258,7 +290,94 @@ func (s *Service) Install(ctx context.Context, req Request) (*View, error) {
 		return nil, err
 	}
 	logger.Infof(ctx, "[plugin] %s installed %s %s (%s)", req.UserID, m.ID, m.Version, p.Digest)
-	return s.apply(ctx, m.ID)
+	v, err := s.apply(ctx, m.ID)
+	if v != nil {
+		v.IssuedSecret = issued
+	}
+	return v, err
+}
+
+// checkRemoteURL accepts an http(s) service URL that passes the SSRF rules;
+// a service on a private network needs its host in SSRF_WHITELIST.
+func checkRemoteURL(raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" {
+		return invalid("service URL must be an http(s) URL")
+	}
+	if u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+		return invalid("service URL must not carry credentials, a query or a fragment")
+	}
+	if err := utils.ValidateURLForSSRF(raw); err != nil {
+		return invalid("service URL is not allowed (private hosts must be in SSRF_WHITELIST): %v", err)
+	}
+	return nil
+}
+
+// issueSecret gives a remote plugin a new signing secret, stored sealed,
+// and returns it in the clear for the administrator to hand to the service.
+func (s *Service) issueSecret(row *types.InstalledPlugin) (string, error) {
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	secret := hex.EncodeToString(b)
+	sealed, err := utils.EncryptAESGCM(secret, utils.GetAESKey())
+	if err != nil {
+		return "", err
+	}
+	row.RemoteSecret = sealed
+	return secret, nil
+}
+
+// SetRemoteURL moves a remote plugin to another service URL.
+func (s *Service) SetRemoteURL(ctx context.Context, id, rawURL string) (*View, error) {
+	row, err := s.remoteRow(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if err := checkRemoteURL(rawURL); err != nil {
+		return nil, err
+	}
+	row.RemoteURL = strings.TrimSuffix(rawURL, "/")
+	if err := s.repo.SavePlugin(ctx, row); err != nil {
+		return nil, err
+	}
+	return s.apply(ctx, id)
+}
+
+// RotateSecret replaces a remote plugin's signing secret. Calls fail until
+// the service is given the new one, which only this response shows.
+func (s *Service) RotateSecret(ctx context.Context, id string) (*View, error) {
+	row, err := s.remoteRow(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	secret, err := s.issueSecret(row)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.repo.SavePlugin(ctx, row); err != nil {
+		return nil, err
+	}
+	v, err := s.apply(ctx, id)
+	if v != nil {
+		v.IssuedSecret = secret
+	}
+	return v, err
+}
+
+func (s *Service) remoteRow(ctx context.Context, id string) (*types.InstalledPlugin, error) {
+	row, err := s.repo.GetPlugin(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if row == nil {
+		return nil, ErrNotInstalled
+	}
+	if row.Runtime != string(manifest.RuntimeRemote) {
+		return nil, invalid("%s is not a remote plugin", id)
+	}
+	return row, nil
 }
 
 // FetchURL downloads a package over HTTP(S), refusing private addresses.

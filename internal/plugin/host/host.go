@@ -59,8 +59,9 @@ func (m *Manager) Activate(ctx context.Context, l *reconcile.Loaded) error {
 	if l.Manifest.Runtime.Type != manifest.RuntimeHost {
 		return nil
 	}
-	if l.Manifest.Runtime.Kind != "binary" {
-		return fmt.Errorf("runtime.kind %q is not supported by this host yet; only binary", l.Manifest.Runtime.Kind)
+	if !Supported(l.Manifest.Runtime.Kind) {
+		return fmt.Errorf("runtime.kind %q is not supported by this host; binary and python are",
+			l.Manifest.Runtime.Kind)
 	}
 	id := l.Manifest.ID
 	p, err := startProcess(spec{m: l.Manifest, dir: l.Dir}, func(s State, err error) {

@@ -104,6 +104,17 @@
         </ul>
       </div>
 
+      <div v-if="isRemote" class="form-item">
+        <label class="form-label" :class="{ required: preview.change === 'install' }">
+          {{ t('pluginAdmin.install.remoteUrlLabel') }}
+        </label>
+        <t-input v-model="remoteUrl" :disabled="busy" placeholder="https://plugins.example.com/acme-search" />
+        <p class="form-desc">
+          {{ t('pluginAdmin.install.remoteUrlHint') }}
+          <template v-if="preview.change !== 'install'">{{ t('pluginAdmin.install.remoteUrlKeep') }}</template>
+        </p>
+      </div>
+
       <t-alert
         v-if="needsConfig"
         theme="info"
@@ -139,6 +150,7 @@ import {
   isPackageUrl,
   permissionLines,
   remoteHosts,
+  remoteUrlReady,
 } from '../pluginManagementState'
 import { hasTenantConfig } from '../../settings/pluginCenterState'
 
@@ -156,6 +168,7 @@ const { t, locale } = useI18n()
 const mode = ref<'upload' | 'url'>('upload')
 const file = ref<File | null>(null)
 const url = ref('')
+const remoteUrl = ref('')
 const fileInput = ref<HTMLInputElement | null>(null)
 const preview = ref<PluginPreview | null>(null)
 const busy = ref(false)
@@ -167,6 +180,7 @@ watch(
     mode.value = 'upload'
     file.value = null
     url.value = ''
+    remoteUrl.value = ''
     preview.value = null
   },
 )
@@ -189,7 +203,10 @@ const source = computed<PackageSource | null>(() => {
   return isPackageUrl(url.value) ? { url: url.value.trim() } : null
 })
 
-const canConfirm = computed(() => !!source.value && !busy.value)
+const isRemote = computed(() => preview.value?.manifest.runtime?.type === 'remote')
+const canConfirm = computed(
+  () => !!source.value && !busy.value && (!preview.value || remoteUrlReady(preview.value, remoteUrl.value)),
+)
 const confirmText = computed(() =>
   preview.value ? t(`pluginAdmin.install.confirm.${preview.value.change}`) : t('pluginAdmin.install.inspect'),
 )
@@ -237,7 +254,11 @@ async function onConfirm() {
   if (!source.value) return
   busy.value = true
   try {
-    const res = await installPluginPackage(source.value, preview.value.digest)
+    const res = await installPluginPackage(
+      source.value,
+      preview.value.digest,
+      isRemote.value ? remoteUrl.value.trim() : undefined,
+    )
     MessagePlugin.success(t('pluginAdmin.install.done', { name: localizedText(preview.value.manifest.name, locale.value) }))
     emit('installed', res.data)
     emit('update:visible', false)

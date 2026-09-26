@@ -40,13 +40,17 @@ func (r *pluginRepository) GetPlugin(ctx context.Context, id string) (*types.Ins
 }
 
 // SavePlugin inserts or updates the row keyed by id.
+// pluginUpdateColumns are what saving an installed plugin overwrites: every
+// column but its identity and creation.
+var pluginUpdateColumns = []string{
+	"owner_tenant_id", "source", "active_version", "desired_state", "runtime",
+	"granted_perms", "system_config", "remote_url", "remote_secret", "updated_at",
+}
+
 func (r *pluginRepository) SavePlugin(ctx context.Context, p *types.InstalledPlugin) error {
 	return r.db.WithContext(ctx).Clauses(clause.OnConflict{
-		Columns: []clause.Column{{Name: "id"}},
-		DoUpdates: clause.AssignmentColumns([]string{
-			"owner_tenant_id", "source", "active_version", "desired_state", "runtime",
-			"granted_perms", "system_config", "updated_at",
-		}),
+		Columns:   []clause.Column{{Name: "id"}},
+		DoUpdates: clause.AssignmentColumns(pluginUpdateColumns),
 	}).Create(p).Error
 }
 

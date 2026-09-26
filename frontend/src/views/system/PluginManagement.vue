@@ -64,6 +64,18 @@
     </div>
 
     <PluginInstallDrawer v-model:visible="installOpen" @installed="upsert" />
+    <t-dialog
+      v-model:visible="secretOpen"
+      :header="t('pluginAdmin.secret.title')"
+      :confirm-btn="{ content: t('pluginAdmin.secret.copy'), theme: 'primary' }"
+      :cancel-btn="{ content: t('pluginAdmin.secret.done') }"
+      :close-on-overlay-click="false"
+      @confirm="copyWithToast(issuedSecret, 'pluginAdmin.secret.copied')"
+      @closed="issuedSecret = ''"
+    >
+      <p>{{ t('pluginAdmin.secret.description') }}</p>
+      <t-textarea :value="issuedSecret" readonly autosize />
+    </t-dialog>
     <PluginDetailDrawer
       v-model:visible="detailOpen"
       :plugin="selected"
@@ -79,6 +91,7 @@ import { useI18n } from 'vue-i18n'
 import { MessagePlugin } from 'tdesign-vue-next'
 
 import { listInstalledPlugins, setInstalledPluginEnabled, type InstalledPlugin } from '@/api/system/plugins'
+import { copyWithToast } from '@/utils/clipboard'
 import { localizedText } from '@/utils/localizedText'
 
 import { contributionSummary } from '../settings/pluginCenterState'
@@ -97,6 +110,9 @@ const loading = ref(false)
 const pending = ref(new Set<string>())
 const installOpen = ref(false)
 const detailOpen = ref(false)
+// A remote plugin's signing secret, shown once after it is issued.
+const secretOpen = ref(false)
+const issuedSecret = ref('')
 const selectedId = ref('')
 const selected = computed(() => plugins.value.find((p) => p.id === selectedId.value) ?? null)
 
@@ -129,7 +145,12 @@ async function load() {
   }
 }
 
-function upsert(p: InstalledPlugin) {
+function upsert(received: InstalledPlugin) {
+  const { issuedSecret: secret, ...p } = received
+  if (secret) {
+    issuedSecret.value = secret
+    secretOpen.value = true
+  }
   const i = plugins.value.findIndex((x) => x.id === p.id)
   if (i >= 0) plugins.value.splice(i, 1, p)
   else plugins.value = [...plugins.value, p].sort((a, b) => a.id.localeCompare(b.id))

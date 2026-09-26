@@ -10,6 +10,9 @@ connectors and document parsers that run as their own process. The module has no
 | `client` | Call a plugin, as WeKnora does. |
 | `conformance`, `cmd/weknora-plugin-conformance` | Check that a plugin speaks the protocol. |
 
+Writing Python? [`python/`](python/README.md) is the same SDK for Python
+3.9+, with only the standard library.
+
 ## A connector in 30 lines
 
 ```go
@@ -119,6 +122,11 @@ A few rules the manifest and host enforce:
 
 - **Binaries.** Build one per platform into `bin/<os>-<arch>/`; WeKnora
   runs the build for its own OS and architecture.
+- **Python.** A plugin can instead be Python source:
+  - Declare `runtime: { type: host, kind: python, entry: main.py }`.
+  - WeKnora runs the entry with its own `python3` (or
+    `WEKNORA_PLUGIN_PYTHON`).
+  - `vendor/` and the package root are on `PYTHONPATH`.
 - **Environment.** The process gets no environment from WeKnora beyond the
   `WEKNORA_PLUGIN_*` variables.
 - **Outbound traffic.** It goes through the host's egress proxy, which
@@ -128,8 +136,11 @@ A few rules the manifest and host enforce:
   (`acme.notes/notes`); for connectors and web search that must stay within
   50 characters.
 
-See `examples/plugins/rss` (a connector) and `examples/plugins/subtitles` (a
-parser using the Host API) for complete plugins with their `package.sh`.
+Complete plugins with their `package.sh`:
+
+- `examples/plugins/rss`: a connector.
+- `examples/plugins/subtitles`: a parser using the Host API.
+- `examples/plugins/notebooks`: a parser written in Python.
 
 ## Testing
 
@@ -144,3 +155,32 @@ In Go tests, run `conformance.Run` against `httptest.NewServer(p.Handler())`.
 In WeKnora: **System administration → Plugin management → Install plugin**.
 Upload the `.wkp` or give its URL, review what it adds and reaches, and
 install. Each workspace then enables it under **Settings → Plugins**.
+
+## Running as a remote service
+
+A plugin can also run as a service you deploy yourself, for instance in its
+own container or on another team's cluster. Its package then carries only
+`plugin.yaml` (plus schemas):
+
+```yaml
+runtime: { type: remote }
+```
+
+1. **Install.** Give the service URL when installing. WeKnora checks the
+   service's `/v1/manifest` against the package: same ID, version and
+   contributions.
+2. **Keep the secret.** Installing shows a signing secret once. Start the
+   service with it as `WEKNORA_PLUGIN_SECRET` (and `WEKNORA_PLUGIN_ADDR`,
+   default `:8080`). The SDK rejects requests without a valid signature.
+3. **Private hosts.** A service on a private network must be listed in
+   WeKnora's `SSRF_WHITELIST`.
+4. **Host API.** Remote plugins get a Host API token only when
+   `WEKNORA_PLUGIN_HOST_API_URL` tells WeKnora its address as the service
+   sees it.
+
+The plugin detail page changes the URL and rotates the secret. After a
+rotation, calls fail until the service has the new secret.
+
+Upgrade the service and the package together. While the service reports a
+version other than the active package, calls are refused and the plugin
+shows as degraded.
