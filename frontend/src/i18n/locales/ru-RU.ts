@@ -5482,6 +5482,7 @@ export default {
       tools: 'Инструменты агента',
       parsers: 'Разбор документов',
       chunkers: 'Разбиение на фрагменты',
+      pipelineHooks: 'Хуки конвейера ответов',
       skills: 'Навыки',
       mcpServers: 'MCP-серверы',
       pages: 'Страницы',

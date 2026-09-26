@@ -81,6 +81,7 @@ func (p *PluginChatCompletion) OnEvent(
 		"completion_tokens": chatResponse.Usage.CompletionTokens,
 		"prompt_tokens":     chatResponse.Usage.PromptTokens,
 	})
+	chatResponse.Content += AnswerAppendix(ctx, chatManage, chatResponse.Content)
 	chatManage.ChatResponse = chatResponse
 	return next()
 }

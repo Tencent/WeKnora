@@ -68,6 +68,16 @@ def paragraphs(call, inp):
     return spans
 
 
+@plugin.hook("guard", "filterResults")
+def drop_secrets(call, inp):
+    return {"keep": [r["id"] for r in inp["results"] if "secret" not in r["content"]]}
+
+
+@plugin.hook("guard", "answer")
+def footer(call, inp):
+    return {"append": "_checked_"}
+
+
 @plugin.connector("notes")
 class Notes:
     def validate(self, call, cfg):

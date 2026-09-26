@@ -2956,6 +2956,7 @@ export default {
       tools: 'エージェントツール',
       parsers: 'ドキュメント解析',
       chunkers: 'チャンカー',
+      pipelineHooks: 'Q&A パイプラインフック',
       skills: 'スキル',
       mcpServers: 'MCP サーバー',
       pages: 'ページ',

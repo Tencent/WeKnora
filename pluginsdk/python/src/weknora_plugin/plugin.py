@@ -168,6 +168,12 @@ class Stream:
 WebSearchFunc = Callable[[Call, SearchInput], List[SearchResult]]
 ParserFunc = Callable[[Call, ParseInput], ParseOutput]
 ChunkerFunc = Callable[[Call, ChunkInput], List[ChunkSpan]]
+#: A pipeline hook stage handler: fn(call, input dict) returns the output
+#: dict ({"query": ...}, {"keep": [...]} or {"append": ...}) or None.
+HookHandler = Callable[[Call, dict], Optional[dict]]
+
+#: Pipeline hook stages.
+HOOK_STAGES = ("rewriteQuery", "filterResults", "answer")
 ConfigValidator = Callable[[Call], None]
 UIHandler = Callable[[Call, UIRequest], Any]
 EventHandler = Callable[[Call, EventDelivery], None]
@@ -178,7 +184,7 @@ ToolHandler = Callable[[Call, dict], Any]
 #: The MCP revision plugins speak.
 MCP_PROTOCOL_VERSION = "2025-06-18"
 
-_ROUTE = re.compile(r"^/v1/(websearch|connectors|parsers|chunkers)/([^/]+)/([a-z-]+)$")
+_ROUTE = re.compile(r"^/v1/(websearch|connectors|parsers|chunkers|hooks)/([^/]+)/([A-Za-z-]+)$")
 
 
 class Plugin:
@@ -193,6 +199,7 @@ class Plugin:
         self._connectors: Dict[str, Any] = {}
         self._parsers: Dict[str, ParserFunc] = {}
         self._chunkers: Dict[str, ChunkerFunc] = {}
+        self._hooks: Dict[str, Dict[str, HookHandler]] = {}
         self._validate: Optional[ConfigValidator] = None
         self._ui: Optional[UIHandler] = None
         self._events: Optional[EventHandler] = None
@@ -228,6 +235,19 @@ class Plugin:
         """Registers chunker id: fn(call, ChunkInput) returns where to cut,
         a list of ChunkSpan (or (start, end) pairs) indexing input.text."""
         return self._register(self._chunkers, id, fn)
+
+    def hook(self, id: str, stage: str) -> Callable[[HookHandler], HookHandler]:
+        """Decorates the handler of pipeline hook id at a stage
+        (rewriteQuery, filterResults or answer). plugin.yaml lists the same
+        stages under contributes.pipelineHooks."""
+        if stage not in HOOK_STAGES:
+            raise ValueError(f"stage must be one of {', '.join(HOOK_STAGES)}")
+
+        def register(fn: HookHandler) -> HookHandler:
+            self._hooks.setdefault(id, {})[stage] = fn
+            return fn
+
+        return register
 
     def connector(self, id: str, connector: Any = None) -> Any:
         """Registers connector id: an object with validate(call, cfg),
@@ -329,6 +349,7 @@ class Plugin:
             ("connectors", self._connectors),
             ("parsers", self._parsers),
             ("chunkers", self._chunkers),
+            ("pipelineHooks", self._hooks),
             ("webhooks", self._webhooks),
             ("options", self._options),
             ("mcpServers", self._mcp),
@@ -410,6 +431,13 @@ class Plugin:
                 h._send_error(PluginError(ErrorCode.NOT_FOUND, f"no parser {cid!r}"))
             else:
                 self._unary(h, body, lambda call, raw: _parse_output(fn(call, from_wire(ParseInput, raw))))
+            return True
+        if point == "hooks":
+            fn = self._hooks.get(cid, {}).get(action)
+            if fn is None:
+                h._send_error(PluginError(ErrorCode.NOT_FOUND, f"pipeline hook {cid!r} has no stage {action!r}"))
+            else:
+                self._unary(h, body, lambda call, raw: fn(call, raw or {}) or {})
             return True
         if point == "chunkers" and action == "split":
             fn = self._chunkers.get(cid)

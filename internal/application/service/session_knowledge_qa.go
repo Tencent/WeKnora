@@ -1282,6 +1282,9 @@ func (s *sessionService) consumeFallbackStream(
 			if truncated && strings.TrimSpace(finalContent+response.Content) == "" {
 				response.Content = chatpipeline.EmptyTruncatedAnswerFallback
 			}
+			if response.Done {
+				response.Content += chatpipeline.AnswerAppendix(ctx, chatManage, finalContent+response.Content)
+			}
 			finalContent += response.Content
 			if err := eventBus.Emit(ctx, types.Event{
 				ID:        fallbackID,
@@ -1344,6 +1347,7 @@ func (s *sessionService) emitFallbackAnswer(ctx context.Context, chatManage *typ
 	if !chatManage.CitationsEnabled() {
 		content = modelcontext.NewRegistry(false).DecodeOutputText(content)
 	}
+	content += chatpipeline.AnswerAppendix(ctx, chatManage, content)
 
 	fallbackID := generateEventID("fallback")
 	if err := chatManage.EventBus.Emit(ctx, types.Event{

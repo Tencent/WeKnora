@@ -217,6 +217,49 @@ paths:
                 required: [output]
                 properties: { output: { $ref: "#/components/schemas/ChunkOutput" } }
         default: { $ref: "#/components/responses/Error" }
+  /v1/hooks/{id}/{stage}:
+    post:
+      summary: Take part in a stage of the knowledge Q&A pipeline
+      description: |
+        For contributes.pipelineHooks, at each stage the hook lists.
+        rewriteQuery may replace the rewritten question; filterResults may
+        drop and reorder retrieved passages (answer the IDs to keep);
+        answer may append Markdown after the finished answer. WeKnora waits
+        a few seconds at most and carries on without the hook on any error.
+      parameters:
+        - { $ref: "#/components/parameters/ContributionID" }
+        - { name: stage, in: path, required: true, schema: { enum: [rewriteQuery, filterResults, answer] } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/Envelope"
+                - properties:
+                    input:
+                      oneOf:
+                        - $ref: "#/components/schemas/RewriteQueryInput"
+                        - $ref: "#/components/schemas/FilterResultsInput"
+                        - $ref: "#/components/schemas/AnswerInput"
+      responses:
+        "200":
+          description: The hook's say
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [output]
+                properties:
+                  output:
+                    oneOf:
+                      - type: object
+                        properties: { query: { type: string, description: Empty keeps the question } }
+                      - type: object
+                        properties: { keep: { type: array, items: { type: string }, description: IDs to keep, in order } }
+                      - type: object
+                        properties: { append: { type: string, description: Markdown added after the answer } }
+        default: { $ref: "#/components/responses/Error" }
   /v1/ui/request:
     post:
       summary: Answer a request from one of the plugin's pages
@@ -539,6 +582,36 @@ components:
               start: { type: integer, description: First character (code point) of the chunk }
               end: { type: integer, description: One past the last character }
               contextHeader: { type: string, description: Prepended for embedding, such as its headings }
+    RewriteQueryInput:
+      type: object
+      required: [query, rewrittenQuery]
+      properties:
+        query: { type: string }
+        rewrittenQuery: { type: string }
+        sessionId: { type: string }
+    FilterResultsInput:
+      type: object
+      required: [query, results]
+      properties:
+        query: { type: string }
+        results:
+          type: array
+          items:
+            type: object
+            required: [id, content, score]
+            properties:
+              id: { type: string }
+              knowledgeId: { type: string }
+              knowledgeTitle: { type: string }
+              content: { type: string }
+              score: { type: number }
+    AnswerInput:
+      type: object
+      required: [query, answer]
+      properties:
+        query: { type: string }
+        answer: { type: string }
+        sessionId: { type: string }
     OptionsInput:
       type: object
       required: [field, scope]

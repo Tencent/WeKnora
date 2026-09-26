@@ -5482,6 +5482,7 @@ export default {
       tools: '에이전트 도구',
       parsers: '문서 파싱',
       chunkers: '청커',
+      pipelineHooks: 'Q&A 파이프라인 훅',
       skills: '스킬',
       mcpServers: 'MCP 서버',
       pages: '페이지',

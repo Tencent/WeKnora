@@ -163,6 +163,8 @@ type Contribution struct {
 	ToolViews map[string]ToolView `json:"toolViews,omitempty"      yaml:"toolViews"`
 	// FileTypes are the lower-case extensions a parser handles ("pdf").
 	FileTypes []string `json:"fileTypes,omitempty"      yaml:"fileTypes"`
+	// Stages are the chat pipeline stages a pipeline hook joins.
+	Stages []string `json:"stages,omitempty"         yaml:"stages"`
 	// InstanceSchemaJSON is the instanceSchema file's content as JSON,
 	// filled when the package is opened so every node can read it.
 	InstanceSchemaJSON json.RawMessage `json:"instanceSchemaJson,omitempty" yaml:"-"`
@@ -443,6 +445,11 @@ func (m *Manifest) validateContributions(add func(string, ...any)) {
 			if point == PointParsers && !m.Builtin {
 				validateFileTypes(c.FileTypes, where, add)
 			}
+			if point == PointPipelineHooks {
+				validateStages(c.Stages, where, add)
+			} else if len(c.Stages) > 0 {
+				add("%s.stages belong to pipelineHooks", where)
+			}
 			for _, alias := range c.Aliases {
 				// Aliases share the ID alphabet, which has no '/', so an
 				// alias can never shadow a qualified ID.
@@ -458,6 +465,31 @@ func (m *Manifest) validateContributions(add func(string, ...any)) {
 // Builtins describe their implementation in code instead.
 // fileTypePattern is a lower-case file extension without the dot.
 var fileTypePattern = regexp.MustCompile(`^[a-z0-9]{1,16}$`)
+
+// Pipeline hook stages: where a hook joins the knowledge Q&A pipeline.
+const (
+	// StageRewriteQuery sees the rewritten question and may replace it.
+	StageRewriteQuery = "rewriteQuery"
+	// StageFilterResults sees the retrieved passages and may drop or
+	// reorder them.
+	StageFilterResults = "filterResults"
+	// StageAnswer sees the finished answer and may append to it.
+	StageAnswer = "answer"
+)
+
+// PipelineStages lists the stages in pipeline order.
+var PipelineStages = []string{StageRewriteQuery, StageFilterResults, StageAnswer}
+
+func validateStages(stages []string, where string, add func(string, ...any)) {
+	if len(stages) == 0 {
+		add("%s.stages is required: one or more of %s", where, strings.Join(PipelineStages, ", "))
+	}
+	for _, s := range stages {
+		if !slices.Contains(PipelineStages, s) {
+			add("%s.stages %q is not one of %s", where, s, strings.Join(PipelineStages, ", "))
+		}
+	}
+}
 
 func validateFileTypes(types []string, where string, add func(string, ...any)) {
 	if len(types) == 0 {

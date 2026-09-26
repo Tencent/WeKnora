@@ -345,3 +345,27 @@ contributes:
 		}
 	}
 }
+
+func TestPipelineHookStages(t *testing.T) {
+	hook := func(stages ...string) *Manifest {
+		return &Manifest{
+			SchemaVersion: SchemaVersion, ID: "acme.guard", Version: "1.0.0", APIVersion: ExtensionAPIVersion,
+			Name: Text("G", nil), Publisher: Publisher{ID: "acme"},
+			Runtime:     Runtime{Type: RuntimeRemote},
+			Contributes: Contributions{PointPipelineHooks: {{ID: "g", Name: Text("G", nil), Stages: stages}}},
+		}
+	}
+	if err := hook(StageRewriteQuery, StageAnswer).Validate(); err != nil {
+		t.Fatal(err)
+	}
+	for _, bad := range [][]string{nil, {"rerank"}} {
+		if err := hook(bad...).Validate(); err == nil {
+			t.Fatalf("stages %v accepted", bad)
+		}
+	}
+	m := hook(StageAnswer)
+	m.Contributes[PointWebSearch] = []Contribution{{ID: "w", Name: Text("W", nil), Stages: []string{StageAnswer}}}
+	if err := m.Validate(); err == nil {
+		t.Fatal("stages on a web search provider accepted")
+	}
+}

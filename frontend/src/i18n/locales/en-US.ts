@@ -2956,6 +2956,7 @@ export default {
       tools: 'Agent tools',
       parsers: 'Document parsing',
       chunkers: 'Chunkers',
+      pipelineHooks: 'Q&A pipeline hooks',
       skills: 'Skills',
       mcpServers: 'MCP servers',
       pages: 'Pages',

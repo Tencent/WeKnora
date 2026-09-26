@@ -81,6 +81,7 @@ class PluginTest(unittest.TestCase):
                     "connectors": ["notes"],
                     "parsers": ["upper"],
                     "chunkers": ["paragraphs"],
+                    "pipelineHooks": ["guard"],
                     "webhooks": ["inbox"],
                     "options": ["projects"],
                     "mcpServers": ["issues"],
@@ -136,6 +137,15 @@ class PluginTest(unittest.TestCase):
         )
         status, body = self.c.call("/v1/chunkers/paragraphs/split", {"text": "out of range"})
         self.assertEqual(body["error"]["code"], "internal")
+
+    def test_hooks(self):
+        results = [{"id": "a", "content": "ok", "score": 1}, {"id": "b", "content": "secret", "score": 0.5}]
+        status, body = self.c.call("/v1/hooks/guard/filterResults", {"query": "q", "results": results})
+        self.assertEqual((status, body["output"]), (200, {"keep": ["a"]}))
+        status, body = self.c.call("/v1/hooks/guard/answer", {"query": "q", "answer": "a"})
+        self.assertEqual(body["output"], {"append": "_checked_"})
+        status, body = self.c.call("/v1/hooks/guard/rewriteQuery", {"query": "q", "rewrittenQuery": "q"})
+        self.assertEqual((status, body["error"]["code"]), (404, "not_found"))
 
     def test_events(self):
         from fixture import seen_events

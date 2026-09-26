@@ -13,6 +13,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/application/service"
+	chatpipeline "github.com/Tencent/WeKnora/internal/application/service/chat_pipeline"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/handler"
 	"github.com/Tencent/WeKnora/internal/infrastructure/chunker"
@@ -107,6 +108,7 @@ func bindPluginActivators(
 	a.Skills.Bind(t)
 	skills.SetPluginSkills(a.Skills)
 	chunker.SetPluginSplitter(activate.PluginChunker(a.Invoker, reg, t))
+	chatpipeline.SetExternalHooks(activate.NewPipelineHooks(a.Invoker, reg, t))
 }
 
 // newPluginHostManager is this node's embedded plugin host. It runs the

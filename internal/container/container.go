@@ -523,6 +523,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Invoke(chatpipeline.NewPluginSearchParallel))
 	must(container.Invoke(chatpipeline.NewPluginWikiBoost))
 	must(container.Invoke(chatpipeline.NewPluginMemoryAffinity))
+	must(container.Invoke(chatpipeline.NewPluginExternalHooks))
 	logger.Debugf(ctx, "[Container] Chat pipeline plugins registered")
 
 	// TenantSkillService is provided next to SessionService (handlers need

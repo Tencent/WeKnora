@@ -5484,6 +5484,7 @@ export default {
       tools: 'Agent 工具',
       parsers: '文档解析',
       chunkers: '分块器',
+      pipelineHooks: '问答流程钩子',
       skills: '技能',
       mcpServers: 'MCP 服务',
       pages: '页面',

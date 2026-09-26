@@ -16,6 +16,9 @@ const (
 	// PointChunkers contributes chunking strategies a knowledge base can
 	// pick: the plugin says where to cut, WeKnora takes the text.
 	PointChunkers Point = "chunkers"
+	// PointPipelineHooks joins stages of the knowledge Q&A pipeline:
+	// rewrite the question, filter what was retrieved, append to answers.
+	PointPipelineHooks Point = "pipelineHooks"
 	// PointSkills contributes SKILL.md skill directories from the package.
 	PointSkills Point = "skills"
 	// PointMCPServers contributes MCP servers whose tools agents can use.
@@ -64,6 +67,7 @@ var points = []PointInfo{
 	{Point: PointTools},
 	{Point: PointParsers, ThirdParty: true},
 	{Point: PointChunkers, ThirdParty: true},
+	{Point: PointPipelineHooks, ThirdParty: true},
 	{Point: PointSkills, ThirdParty: true, Declarative: true},
 	{Point: PointMCPServers, ThirdParty: true, Declarative: true},
 	// Pages are static files; a plugin with code can also answer their

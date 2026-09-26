@@ -13,6 +13,7 @@ export type ExtensionPoint =
   | 'tools'
   | 'parsers'
   | 'chunkers'
+  | 'pipelineHooks'
   | 'skills'
   | 'mcpServers'
   | 'pages'

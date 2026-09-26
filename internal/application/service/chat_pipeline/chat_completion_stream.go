@@ -131,6 +131,8 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 		thinkingOpen := false
 		answerCompleted := false
 		answerProduced := false
+		// The answer so far, for pipeline hooks that see the finished one.
+		var answerText strings.Builder
 
 		closeThinking := func() {
 			if !thinkingOpen {
@@ -262,6 +264,10 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 					if truncated && !answerProduced {
 						response.Content = EmptyTruncatedAnswerFallback
 						answerProduced = true
+					}
+					answerText.WriteString(response.Content)
+					if response.Done && answerProduced {
+						response.Content += AnswerAppendix(ctx, chatManage, answerText.String())
 					}
 					closeThinking()
 					eventBus.Emit(ctx, types.Event{

@@ -106,6 +106,38 @@ contributes:
 In Python, `@plugin.chunker("clauses")` returns `ChunkSpan`s or
 `(start, end)` pairs; string indices are already characters.
 
+## Pipeline hooks
+
+A pipeline hook takes part in knowledge Q&A: `rewriteQuery` may replace the
+question retrieval uses, `filterResults` may drop and reorder retrieved
+passages (return the IDs to keep), `answer` may append Markdown after the
+finished answer. WeKnora waits a few seconds at most and carries on without
+a hook that fails.
+
+```go
+p.PipelineHook("guard", pluginsdk.PipelineHook{
+	FilterResults: func(ctx context.Context, call *pluginsdk.Call,
+		in pluginapi.FilterResultsInput) (pluginapi.FilterResultsOutput, error) {
+		var keep []string
+		for _, r := range in.Results {
+			if !isConfidential(r.Content) {
+				keep = append(keep, r.ID)
+			}
+		}
+		return pluginapi.FilterResultsOutput{Keep: keep}, nil
+	},
+})
+```
+
+```yaml
+contributes:
+  pipelineHooks:
+    - { id: guard, name: { en-US: Guard }, stages: [filterResults] }
+```
+
+In Python: `@plugin.hook("guard", "filterResults")` on `fn(call, input)`
+returning `{"keep": [...]}`.
+
 ## Pages
 
 A plugin can add pages to the app:
