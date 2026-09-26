@@ -65,6 +65,8 @@ jobs:
     defaults:
       run:
         working-directory: pluginsdk/python
+        # A job's run defaults replace the workflow's, shell included.
+        shell: bash
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v6
