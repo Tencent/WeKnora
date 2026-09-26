@@ -5314,6 +5314,22 @@ export default {
       degraded: '이상',
       stopped: '로드되지 않음'
     },
+    egress: {
+      mode: {
+        sandboxed: '샌드박스',
+        networkPolicy: 'NetworkPolicy',
+        proxy: '프록시만',
+        unmanaged: '관리 불가'
+      },
+      hint: {
+        sandboxed: '플러그인 프로세스가 전용 네트워크 네임스페이스에서 실행되어 외부로는 이그레스 프록시를 통해서만 나갈 수 있습니다. 이그레스 권한이 강제됩니다.',
+        networkPolicy: 'Kubernetes NetworkPolicy로 플러그인 Pod는 DNS와 WeKnora에만 접근할 수 있으며 이그레스 프록시를 통해 외부로 나갑니다. 클러스터 네트워크 플러그인이 NetworkPolicy를 지원할 때 강제됩니다.',
+        proxy: '플러그인 프로세스에 HTTP(S)_PROXY로 이그레스 프록시가 주어지지만, 이 변수를 무시하는 코드는 직접 연결할 수 있습니다. Linux에서 비특권 사용자 네임스페이스를 허용하면 샌드박스로 실행됩니다.',
+        unmanaged: '플러그인이 WeKnora가 관리할 수 없는 환경(원격 서비스)에서 실행되므로 이그레스 권한이 강제되지 않습니다.'
+      },
+      unenforced: '이그레스 미강제',
+      unenforcedHint: '이 플러그인은 이그레스 권한을 선언했지만 적어도 하나의 인스턴스에서 제한이 강제되지 않아, 코드가 이그레스 프록시를 우회해 직접 연결할 수 있습니다.'
+    },
     source: {
       upload: '업로드',
       url: 'URL'

@@ -83,9 +83,14 @@
               </td>
               <td>{{ audienceLabel(p) }}</td>
               <td>
-                <t-tooltip :content="p.node?.error" :disabled="!p.node?.error">
-                  <span class="state" :class="`state--${installedState(p)}`">{{ t(`pluginAdmin.state.${installedState(p)}`) }}</span>
-                </t-tooltip>
+                <div class="plugin-row__state">
+                  <t-tooltip :content="p.node?.error" :disabled="!p.node?.error">
+                    <span class="state" :class="`state--${installedState(p)}`">{{ t(`pluginAdmin.state.${installedState(p)}`) }}</span>
+                  </t-tooltip>
+                  <t-tooltip v-if="egressUnenforced(p.manifest, p.egress)" :content="t('pluginAdmin.egress.unenforcedHint')">
+                    <span class="egress-flag">{{ t('pluginAdmin.egress.unenforced') }}</span>
+                  </t-tooltip>
+                </div>
               </td>
               <td class="plugin-table__menu-col" @click.stop @keydown.enter.stop>
                 <t-dropdown trigger="click" placement="bottom-right" attach="body" :min-column-width="120">
@@ -138,6 +143,7 @@ import {
   ADMIN_FILTERS,
   activeTrust,
   audienceSummary,
+  egressUnenforced,
   filterInstalled,
   installedState,
   matchesAdminFilter,
@@ -370,6 +376,21 @@ onMounted(load)
 
 .plugin-row__num {
   font-variant-numeric: tabular-nums;
+}
+
+.plugin-row__state {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+// A plugin granted egress that some instance is not held to.
+.egress-flag {
+  padding: 1px 6px;
+  border-radius: var(--app-radius-xs);
+  font-size: var(--app-text-sm);
+  color: var(--td-warning-color);
+  background: var(--td-warning-color-1);
 }
 
 // Community is the default and stays quiet; official and verified stand out.

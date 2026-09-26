@@ -1,6 +1,6 @@
 // Pure helpers behind PluginManagement.vue, kept free of Vue so they run
 // under node:test.
-import type { ExtensionPoint, PluginManifest, PluginPermissions } from '../../api/plugin'
+import type { EgressMode, ExtensionPoint, PluginManifest, PluginPermissions } from '../../api/plugin'
 import type { InstalledPlugin, MarketPlugin, PluginVersion, TrustLevel, TrustVerdict } from '../../api/system/plugins'
 import { localizedText } from '../../utils/localizedText'
 import { EXTENSION_POINTS } from '../settings/pluginCenterState'
@@ -157,6 +157,35 @@ export function installedState(p: InstalledPlugin): InstalledState {
     default:
       return 'failed'
   }
+}
+
+/** Whether an egress mode holds plugin code to its grant. */
+export function egressEnforced(mode: EgressMode | undefined): boolean {
+  return mode === 'sandboxed' || mode === 'networkPolicy'
+}
+
+/** The tag theme of an egress mode: enforced reads as fine, the rest warn. */
+export function egressTheme(mode: EgressMode): 'success' | 'warning' {
+  return egressEnforced(mode) ? 'success' : 'warning'
+}
+
+const EGRESS_RANK: Record<EgressMode, number> = { sandboxed: 1, networkPolicy: 2, proxy: 3, unmanaged: 4 }
+
+/** The least controlled egress mode among instances; undefined when none reports one. */
+export function weakestEgress(instances: readonly { egress?: EgressMode }[]): EgressMode | undefined {
+  let out: EgressMode | undefined
+  for (const { egress } of instances) {
+    if (egress && EGRESS_RANK[egress] && (!out || EGRESS_RANK[egress] > EGRESS_RANK[out])) out = egress
+  }
+  return out
+}
+
+/**
+ * Whether a plugin asks for outbound access and runs somewhere that does not
+ * hold it to the grant; mode is the least controlled of its instances.
+ */
+export function egressUnenforced(m: PluginManifest | undefined, mode: EgressMode | undefined): boolean {
+  return !!m?.permissions?.egress?.length && !!mode && !egressEnforced(mode)
 }
 
 /** The egress grant meaning any public host. */

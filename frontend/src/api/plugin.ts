@@ -96,6 +96,14 @@ export interface TenantPlugin {
   updatedAt?: string
 }
 
+/**
+ * How an instance's outbound traffic is held to the plugin's egress grant:
+ * sandboxed (own network namespace) and networkPolicy (Kubernetes) enforce
+ * it; proxy only hands the process the egress proxy, which code can ignore;
+ * unmanaged runs where WeKnora has no say (a remote service).
+ */
+export type EgressMode = 'sandboxed' | 'networkPolicy' | 'proxy' | 'unmanaged'
+
 /** One running instance of a plugin, for the detail view. */
 export interface PluginInstance {
   node: string
@@ -103,6 +111,8 @@ export interface PluginInstance {
   state: 'starting' | 'ready' | 'degraded' | 'stopped'
   error?: string
   updatedAt: string
+  /** Absent for plugins without code and nodes that leave the plugin to plugin hosts. */
+  egress?: EgressMode
 }
 
 /** A plugin configuration: its schema and values, secrets redacted. */

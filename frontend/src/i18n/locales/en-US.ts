@@ -2788,6 +2788,22 @@ export default {
       degraded: 'Degraded',
       stopped: 'Not loaded'
     },
+    egress: {
+      mode: {
+        sandboxed: 'Sandboxed',
+        networkPolicy: 'NetworkPolicy',
+        proxy: 'Proxy only',
+        unmanaged: 'Unmanaged'
+      },
+      hint: {
+        sandboxed: 'The plugin process runs in its own network namespace; the egress proxy is its only way out, so its egress grant is enforced.',
+        networkPolicy: 'A Kubernetes NetworkPolicy lets the plugin pod reach only DNS and WeKnora, whose egress proxy applies the grant. Enforced when the cluster network plugin supports NetworkPolicy.',
+        proxy: 'The plugin process is given the egress proxy through HTTP(S)_PROXY, but code that ignores those variables can connect directly. Allow unprivileged user namespaces on Linux to sandbox it.',
+        unmanaged: 'The plugin runs where WeKnora has no control (a remote service); its egress grant is not enforced.'
+      },
+      unenforced: 'Egress not enforced',
+      unenforcedHint: 'This plugin asks for outbound access, but at least one of its instances is not held to the grant: its code can bypass the egress proxy and connect directly.'
+    },
     source: {
       upload: 'Upload',
       url: 'URL'

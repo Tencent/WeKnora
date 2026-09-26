@@ -2,7 +2,7 @@
 import { del, get, post, postUpload, put } from '@/utils/request'
 
 import type { ConfigValue } from '@/components/schema-form/schema'
-import type { PluginConfig, PluginInstance, PluginManifest } from '@/api/plugin'
+import type { EgressMode, PluginConfig, PluginInstance, PluginManifest } from '@/api/plugin'
 
 const BASE = '/api/v1/system/admin/plugins'
 const PACKAGE_TIMEOUT = 5 * 60 * 1000
@@ -54,6 +54,7 @@ export interface PluginNodeStatus {
   state: 'ready' | 'failed' | 'degraded'
   error?: string
   updatedAt: string
+  egress?: EgressMode
 }
 
 export interface InstalledPlugin {
@@ -69,6 +70,8 @@ export interface InstalledPlugin {
   manifest?: PluginManifest
   versions: PluginVersion[]
   node?: PluginNodeStatus
+  /** The least controlled egress mode among the plugin's instances. */
+  egress?: EgressMode
   /** Set for a workspace's own plugin: the workspace that registered it. */
   owner_tenant_id?: number
   /** The workspaces the plugin is limited to; absent when every workspace sees it. */
