@@ -2,6 +2,7 @@ package events
 
 import (
 	"context"
+	"sync"
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -29,6 +30,33 @@ func terminal(status string) bool {
 // that reached that status outside the watched repository methods (bulk
 // updates, recovery sweeps).
 func PublishKnowledge(ctx context.Context, k *types.Knowledge) { publishKnowledge(ctx, k) }
+
+// deferred holds rows whose status changed before plugins were loaded
+// (the startup reset of interrupted documents).
+var deferred struct {
+	mu   sync.Mutex
+	rows []*types.Knowledge
+}
+
+// DeferKnowledge keeps rows to publish once plugins are loaded: at startup
+// the dispatcher does not know yet which plugins subscribe.
+func DeferKnowledge(rows ...*types.Knowledge) {
+	deferred.mu.Lock()
+	defer deferred.mu.Unlock()
+	deferred.rows = append(deferred.rows, rows...)
+}
+
+// FlushDeferred publishes the rows DeferKnowledge kept; call it once plugins
+// are loaded.
+func FlushDeferred(ctx context.Context) {
+	deferred.mu.Lock()
+	rows := deferred.rows
+	deferred.rows = nil
+	deferred.mu.Unlock()
+	for _, k := range rows {
+		publishKnowledge(ctx, k)
+	}
+}
 
 // PublishDeleted raises knowledge.deleted for rows that were deleted.
 func PublishDeleted(ctx context.Context, tenantID uint64, rows []*types.Knowledge) {

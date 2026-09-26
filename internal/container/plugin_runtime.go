@@ -233,6 +233,9 @@ func startPluginReconciler(
 	remoteManager.SetReporter(r)
 	ctx, cancel := context.WithCancel(context.Background())
 	r.Start(ctx)
+	// The first reconcile loaded the plugins: events held since startup
+	// (documents the startup reset failed) now find their subscribers.
+	pluginevents.FlushDeferred(ctx)
 	cleaner.RegisterWithName("PluginReconciler", func() error {
 		cancel()
 		hostManager.Close()

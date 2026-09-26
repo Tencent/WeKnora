@@ -125,7 +125,7 @@ Helm 设置 `pluginHost.enabled=true` 即可。使用本地存储（`STORAGE_TYP
 | `chat.answered` | 一次回答完成，含问题与回答内容 |
 
 - 只有启用了该插件的空间才会向它投递事件。
-- 删除整个知识库时，其中的每个文档都会产生 `knowledge.deleted`。Lite 单机重启时被中断而置为失败的文档不产生事件。
+- 删除整个知识库时，其中的每个文档都会产生 `knowledge.deleted`；重启时被中断而置为失败的文档，在插件加载后产生 `knowledge.failed`。
 - 事件经后台任务队列（有 Redis 时为 asynq）异步投递，至少一次。
 - 插件返回可重试错误时，同一事件会以相同 ID 重新投递，最多 10 次。
 

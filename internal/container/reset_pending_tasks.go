@@ -7,6 +7,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/logger"
+	pluginevents "github.com/Tencent/WeKnora/internal/plugin/events"
 	"github.com/Tencent/WeKnora/internal/types"
 	"gorm.io/gorm"
 )
@@ -84,11 +85,15 @@ func resetPendingTasks(db *gorm.DB) {
 		// Re-read the successfully reset ids so a row whose status changed in
 		// the small SELECT/UPDATE gap is not accidentally cancelled.
 		var resetKnowledge []types.Knowledge
-		if err := db.Select("id").
-			Where("id IN ? AND parse_status = ? AND error_message = ?",
-				stuckIDs, types.ParseStatusFailed, restartInterruptedMessage).
+		if err := db.Where("id IN ? AND parse_status = ? AND error_message = ?",
+			stuckIDs, types.ParseStatusFailed, restartInterruptedMessage).
 			Find(&resetKnowledge).Error; err != nil {
 			logger.Warnf(ctx, "resetPendingTasks: list reset knowledge failed: %v", err)
+		}
+		// Plugins subscribed to knowledge.failed hear of these once they are
+		// loaded; this runs before the plugin runtime starts.
+		for i := range resetKnowledge {
+			pluginevents.DeferKnowledge(&resetKnowledge[i])
 		}
 		for _, k := range resetKnowledge {
 			attempt, err := spanRepo.LatestAttempt(ctx, k.ID)

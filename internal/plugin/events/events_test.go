@@ -235,3 +235,22 @@ func TestPublishHelpers(t *testing.T) {
 		t.Fatalf("published %v, want %s", seen, want)
 	}
 }
+
+// Rows failed before plugins load (the startup reset) are published once
+// they are.
+func TestDeferredKnowledgeWaitsForPlugins(t *testing.T) {
+	ctx := context.Background()
+	early := &types.Knowledge{ID: "early", TenantID: 7, ParseStatus: types.ParseStatusFailed, ErrorMessage: "restart"}
+	DeferKnowledge(early)
+	d, q, _, _ := setup(t)
+	SetDefault(d)
+	t.Cleanup(func() { SetDefault(nil) })
+	if len(q.take()) != 0 {
+		t.Fatal("published before the flush")
+	}
+	FlushDeferred(ctx)
+	FlushDeferred(ctx)
+	if tasks := q.take(); len(tasks) != 1 {
+		t.Fatalf("flushed %d events, want 1", len(tasks))
+	}
+}
