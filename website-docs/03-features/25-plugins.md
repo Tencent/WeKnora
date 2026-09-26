@@ -156,6 +156,7 @@ Helm 设置 `pluginHost.enabled=true` 即可。使用本地存储（`STORAGE_TYP
   - `subtitles`：文档解析器，Go，使用 Host API；
   - `notebooks`：Jupyter 笔记本解析器，Python；
   - `links`：带三种页面的团队链接插件，Python；
-  - `activity`：订阅事件、接收 Webhook 的空间动态插件，Python。
+  - `activity`：订阅事件、接收 Webhook 的空间动态插件，Python；
+  - `jira`：Jira Cloud 问题同步，支持 OAuth 授权或 API 令牌，带动态选项、增量同步与问题分诊技能，Go。
 
 同一个插件既可以打包成 `host` 插件由 WeKnora 运行，也可以作为 `remote` 服务独立部署，代码不用改。

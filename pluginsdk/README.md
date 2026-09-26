@@ -279,6 +279,8 @@ Complete plugins with their `package.sh`:
 - `examples/plugins/notebooks`: a parser written in Python.
 - `examples/plugins/links`: pages (toolbox, settings, knowledge base tab), in Python.
 - `examples/plugins/activity`: events, a webhook and a page, in Python.
+- `examples/plugins/jira`: a Jira Cloud connector with an OAuth field, dynamic
+  options, incremental sync with deletions, and a skill.
 
 ## Testing
 
