@@ -26,6 +26,10 @@ type Context struct {
 	// Host lets the plugin call back into WeKnora (Host API); absent when
 	// the plugin was granted no scopes.
 	Host *HostAccess `json:"host,omitempty"`
+	// Webhooks are this workspace's URLs of the plugin's webhooks, by
+	// webhook ID, for registering them with a third party. Present only
+	// when WeKnora knows its public address.
+	Webhooks map[string]string `json:"webhooks,omitempty"`
 }
 
 // HostAccess is where and how a plugin calls the WeKnora Host API.

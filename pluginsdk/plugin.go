@@ -64,6 +64,8 @@ type Plugin struct {
 	connectors map[string]Connector
 	parsers    map[string]Parser
 	ui         UIHandler
+	events     EventHandler
+	webhooks   map[string]WebhookHandler
 	validate   ConfigValidator
 	logger     *slog.Logger
 	// ShutdownTimeout bounds how long Serve waits for calls in flight after
@@ -78,6 +80,7 @@ func New(info Info) *Plugin {
 		webSearch:       map[string]WebSearcher{},
 		connectors:      map[string]Connector{},
 		parsers:         map[string]Parser{},
+		webhooks:        map[string]WebhookHandler{},
 		logger:          slog.New(slog.NewTextHandler(os.Stderr, nil)),
 		ShutdownTimeout: 60 * time.Second,
 	}
@@ -104,6 +107,10 @@ func (p *Plugin) Manifest() pluginapi.Manifest {
 	add("webSearch", keys(p.webSearch))
 	add("connectors", keys(p.connectors))
 	add("parsers", keys(p.parsers))
+	add("webhooks", keys(p.webhooks))
+	if p.events != nil {
+		m.Contributes["events"] = []string{"handler"}
+	}
 	if p.ui != nil {
 		m.Contributes["ui"] = []string{"request"}
 	}
@@ -143,6 +150,7 @@ func (p *Plugin) Handler() http.Handler {
 	p.routeConnectors(mux)
 	p.routeParsers(mux)
 	p.routeUI(mux)
+	p.routeEvents(mux)
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, pluginapi.Errorf(pluginapi.CodeNotFound, "no endpoint %s %s", r.Method, r.URL.Path))
 	})

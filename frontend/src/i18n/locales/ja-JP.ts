@@ -2867,6 +2867,10 @@ export default {
   pluginCenter: {
     installed: 'インストール済み',
     configure: '設定',
+    webhooks: 'Webhook URL',
+    webhooksHint: 'サードパーティのサービスにこれらの URL を設定すると、イベントがこのプラグインに送られます。このワークスペースの秘密を含むため、公開しないでください。',
+    copy: 'コピー',
+    webhookCopied: 'Webhook URL をコピーしました',
     configTitle: '{name} の設定',
     configDescription: 'このワークスペースでプラグインを使うための設定（API キーなど）。シークレットは暗号化して保存され、再表示されません。',
     configLoadFailed: 'プラグイン設定の読み込みに失敗しました',
@@ -2897,7 +2901,8 @@ export default {
       mcpServers: 'MCP サーバー',
       pages: 'ページ',
       settingsSections: '設定セクション',
-      kbTabs: 'ナレッジベースのタブ'
+      kbTabs: 'ナレッジベースのタブ',
+      webhooks: 'Webhook'
     }
   },
   schemaForm: {

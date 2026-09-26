@@ -31,8 +31,11 @@ from .types import (
     ParseOutput,
     SearchInput,
     SearchResult,
+    EventDelivery,
     UIRequest,
     UIResponse,
+    WebhookRequest,
+    WebhookResponse,
     from_wire,
     parse_time,
     to_wire,
@@ -53,6 +56,9 @@ class Call:
         #: When WeKnora stops waiting; give up by then.
         self.deadline: Optional[datetime] = parse_time(ctx.get("deadline"))
         self._host = ctx.get("host") or {}
+        #: This workspace's webhook URLs by webhook ID, when WeKnora knows
+        #: its public address.
+        self.webhooks: Dict[str, str] = ctx.get("webhooks") or {}
         #: Platform-wide configuration (config.system).
         self.system: Dict[str, Any] = cfg.get("system") or {}
         #: Workspace configuration (config.tenant).
@@ -159,6 +165,8 @@ WebSearchFunc = Callable[[Call, SearchInput], List[SearchResult]]
 ParserFunc = Callable[[Call, ParseInput], ParseOutput]
 ConfigValidator = Callable[[Call], None]
 UIHandler = Callable[[Call, UIRequest], Any]
+EventHandler = Callable[[Call, EventDelivery], None]
+WebhookHandler = Callable[[Call, WebhookRequest], Any]
 
 _ROUTE = re.compile(r"^/v1/(websearch|connectors|parsers)/([^/]+)/([a-z-]+)$")
 
@@ -176,6 +184,8 @@ class Plugin:
         self._parsers: Dict[str, ParserFunc] = {}
         self._validate: Optional[ConfigValidator] = None
         self._ui: Optional[UIHandler] = None
+        self._events: Optional[EventHandler] = None
+        self._webhooks: Dict[str, WebhookHandler] = {}
         #: Seconds serve() waits for calls in flight after SIGTERM.
         self.shutdown_timeout = 60.0
         if logger is None:
@@ -216,6 +226,21 @@ class Plugin:
 
         return register
 
+    def on_event(self, fn: EventHandler) -> EventHandler:
+        """Registers the handler of the events subscribed to in
+        permissions.events: fn(call, EventDelivery). Deliveries repeat, so
+        be idempotent on the event's id. Raise a retryable PluginError
+        (unavailable, rate_limited) to be called again later; any other
+        error drops the event. Ignore types you do not know."""
+        self._events = fn
+        return fn
+
+    def webhook(self, id: str, fn: Optional[WebhookHandler] = None) -> Any:
+        """Registers webhook id (contributes.webhooks): fn(call,
+        WebhookRequest) returns a WebhookResponse, or any JSON value for a
+        200. call is the workspace the URL belongs to."""
+        return self._register(self._webhooks, id, fn)
+
     def ui(self, fn: UIHandler) -> UIHandler:
         """Registers the handler behind the plugin's pages: fn(call,
         UIRequest) returns a UIResponse, or any JSON value for a 200."""
@@ -247,11 +272,14 @@ class Plugin:
             ("webSearch", self._web_search),
             ("connectors", self._connectors),
             ("parsers", self._parsers),
+            ("webhooks", self._webhooks),
         ):
             if table:
                 contributes[point] = sorted(table)
         if self._ui is not None:
             contributes["ui"] = ["request"]
+        if self._events is not None:
+            contributes["events"] = ["handler"]
         return {"id": self.id, "version": self.version, "apiVersion": p.API_VERSION, "contributes": contributes}
 
     # Dispatch.
@@ -271,6 +299,20 @@ class Plugin:
                 h._send_error(PluginError(ErrorCode.NOT_FOUND, "this plugin's pages make no requests"))
             else:
                 self._unary(h, body, lambda call, raw: _ui_output(self._ui(call, from_wire(UIRequest, raw))))
+            return
+        if method == "POST" and path == "/v1/events":
+            if self._events is None:
+                h._send_error(PluginError(ErrorCode.NOT_FOUND, "this plugin handles no events"))
+            else:
+                events = self._events
+                self._unary(h, body, lambda call, raw: events(call, from_wire(EventDelivery, raw)), empty=True)
+            return
+        if method == "POST" and path.startswith("/v1/webhooks/"):
+            hook = self._webhooks.get(path[len("/v1/webhooks/"):])
+            if hook is None:
+                h._send_error(PluginError(ErrorCode.NOT_FOUND, f"no webhook {path.rsplit('/', 1)[-1]!r}"))
+            else:
+                self._unary(h, body, lambda call, raw: _webhook_output(hook(call, from_wire(WebhookRequest, raw))))
             return
         m = _ROUTE.match(path)
         if method == "POST" and m:
@@ -430,6 +472,19 @@ def _connector_call(c: Any, action: str, call: Call, raw: Any) -> Any:
     if resolve is None:
         return {"ancestors": []}
     return {"ancestors": list(resolve(call, cfg, list(raw.get("resourceIds") or [])) or [])}
+
+
+def _webhook_output(out: Any) -> Any:
+    if not isinstance(out, WebhookResponse):
+        import json as _json
+
+        out = WebhookResponse(content_type="application/json", body=_json.dumps(out).encode())
+    wire: dict = {"status": out.status or 200}
+    if out.content_type:
+        wire["contentType"] = out.content_type
+    if out.body:
+        wire["body"] = to_wire(out.body)
+    return wire
 
 
 def _ui_output(out: Any) -> Any:

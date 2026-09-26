@@ -15,6 +15,8 @@ import (
 
 	"golang.org/x/mod/semver"
 	"gopkg.in/yaml.v3"
+
+	"github.com/Tencent/WeKnora/pluginsdk/pluginapi"
 )
 
 // SchemaVersion is the manifest format version this build understands.
@@ -329,6 +331,14 @@ func (m *Manifest) validatePermissions(add func(string, ...any)) {
 			)
 		}
 	}
+	for _, e := range m.Permissions.Events {
+		if !slices.Contains(pluginapi.EventTypes, e) {
+			add("permissions.events %q is not an event type (known: %s)", e, strings.Join(pluginapi.EventTypes, ", "))
+		}
+	}
+	if len(m.Permissions.Events) > 0 && m.Runtime.Type == RuntimeDeclarative {
+		add("permissions.events needs code; declarative plugins cannot receive events")
+	}
 }
 
 // storedTypeIDLimit is how long a qualified contribution ID may be where
@@ -337,7 +347,8 @@ func (m *Manifest) validatePermissions(add func(string, ...any)) {
 var storedTypeIDLimit = map[Point]int{PointConnectors: 50, PointWebSearch: 50}
 
 func (m *Manifest) validateContributions(add func(string, ...any)) {
-	if len(m.Contributes) == 0 {
+	// A plugin that only listens to events contributes nothing else.
+	if len(m.Contributes) == 0 && len(m.Permissions.Events) == 0 {
 		add("contributes must declare at least one contribution")
 	}
 	for point := range m.Contributes {

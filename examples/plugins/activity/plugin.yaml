@@ -1,0 +1,30 @@
+schemaVersion: 1
+id: weknora-examples.activity
+version: 1.0.0
+apiVersion: weknora.plugin/v1
+name: { en-US: Activity feed, zh-CN: 动态 }
+description:
+  en-US: A feed of what happens in the workspace (documents ingested, failed, deleted, questions answered), plus notes other systems post through a webhook. Shows events and webhooks, written in Python.
+  zh-CN: 空间动态：文档入库、失败、删除、问答完成，以及外部系统经 Webhook 推送的消息。演示事件与 Webhook，用 Python 编写。
+publisher: { id: weknora-examples, name: WeKnora examples }
+homepage: https://github.com/Tencent/WeKnora/tree/main/examples/plugins/activity
+license: MIT
+runtime: { type: host, kind: python, entry: main.py }
+config:
+  tenant: schemas/tenant.yaml
+permissions:
+  hostApi: [kv]
+  # Answers include the question and the answer text.
+  events: [knowledge.ingested, knowledge.failed, knowledge.deleted, chat.answered]
+contributes:
+  pages:
+    - id: feed
+      name: { en-US: Activity, zh-CN: 动态 }
+      description: { en-US: What happened in this workspace lately, zh-CN: 本空间最近的动态 }
+      entry: ui/index.html
+  webhooks:
+    - id: notes
+      name: { en-US: Post a note, zh-CN: 推送消息 }
+      description:
+        en-US: "POST {\"text\": \"...\"} with the header X-Activity-Secret set to the secret in this plugin's settings."
+        zh-CN: "POST {\"text\": \"...\"}，并带上请求头 X-Activity-Secret，值为本插件设置中的密钥。"

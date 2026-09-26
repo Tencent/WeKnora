@@ -292,3 +292,55 @@ func TestUIRequests(t *testing.T) {
 		t.Fatalf("status = %d, %v", out.Status, err)
 	}
 }
+
+func TestEventsAndWebhooks(t *testing.T) {
+	ctx := context.Background()
+	p := New(Info{ID: "acme.hooks", Version: "1.0.0"})
+	var seen []string
+	p.OnEvent(func(_ context.Context, call *Call, ev pluginapi.EventDelivery) error {
+		if ev.Type == pluginapi.EventKnowledgeFailed {
+			return pluginapi.Errorf(pluginapi.CodeUnavailable, "try later")
+		}
+		seen = append(seen, fmt.Sprintf("%s#%d@%d", ev.Type, ev.Attempt, call.TenantID))
+		return nil
+	})
+	p.Webhook("jira", func(
+		_ context.Context, _ *Call, req pluginapi.WebhookRequest,
+	) (*pluginapi.WebhookResponse, error) {
+		if req.Headers["X-Signature"] != "ok" {
+			return &pluginapi.WebhookResponse{Status: 401}, nil
+		}
+		body := append([]byte(req.Path+" "), req.Body...)
+		return &pluginapi.WebhookResponse{ContentType: "text/plain", Body: body}, nil
+	})
+	m := p.Manifest()
+	if len(m.Contributes["events"]) != 1 || m.Contributes["webhooks"][0] != "jira" {
+		t.Fatalf("manifest = %+v", m)
+	}
+	srv := httptest.NewServer(p.Handler())
+	defer srv.Close()
+	c := client.New(srv.URL, nil, nil)
+	env := pluginapi.Envelope{Context: pluginapi.Context{TenantID: 9}}
+
+	ev := pluginapi.EventDelivery{ID: "e1", Type: pluginapi.EventKnowledgeIngested, Attempt: 2}
+	if err := c.Call(ctx, pluginapi.EventsPath, env, ev, nil); err != nil || seen[0] != "knowledge.ingested#2@9" {
+		t.Fatalf("event = %v, %v", seen, err)
+	}
+	ev.Type = pluginapi.EventKnowledgeFailed
+	err := c.Call(ctx, pluginapi.EventsPath, env, ev, nil)
+	if pe, ok := pluginapi.AsError(err); !ok || !pe.Retryable {
+		t.Fatalf("retryable failure = %v", err)
+	}
+
+	var out pluginapi.WebhookResponse
+	req := pluginapi.WebhookRequest{
+		Method: "POST", Path: "/issue", Headers: map[string]string{"X-Signature": "ok"}, Body: []byte("hi"),
+	}
+	if err := c.Call(ctx, pluginapi.WebhookPath("jira"), env, req, &out); err != nil || out.Status != 200 ||
+		string(out.Body) != "/issue hi" || out.ContentType != "text/plain" {
+		t.Fatalf("webhook = %+v, %v", out, err)
+	}
+	if err := c.Call(ctx, pluginapi.WebhookPath("nope"), env, req, &out); !isCode(err, pluginapi.CodeNotFound) {
+		t.Fatalf("unknown webhook = %v", err)
+	}
+}

@@ -23,8 +23,13 @@ from .protocol import API_VERSION, PROTOCOL_VERSION, ErrorCode, PluginError, inv
 from .types import (
     FETCH_FULL,
     FETCH_INCREMENTAL,
+    EVENT_CHAT_ANSWERED,
+    EVENT_KNOWLEDGE_DELETED,
+    EVENT_KNOWLEDGE_FAILED,
+    EVENT_KNOWLEDGE_INGESTED,
     ConnectorConfig,
     Cursor,
+    EventDelivery,
     FetchedItem,
     FetchInput,
     KVEntry,
@@ -37,6 +42,8 @@ from .types import (
     SearchResult,
     UIRequest,
     UIResponse,
+    WebhookRequest,
+    WebhookResponse,
 )
 
 __version__ = "0.1.0"
@@ -49,6 +56,11 @@ __all__ = [
     "Call",
     "ConnectorConfig",
     "Cursor",
+    "EVENT_CHAT_ANSWERED",
+    "EVENT_KNOWLEDGE_DELETED",
+    "EVENT_KNOWLEDGE_FAILED",
+    "EVENT_KNOWLEDGE_INGESTED",
+    "EventDelivery",
     "ErrorCode",
     "FetchInput",
     "FetchedItem",
@@ -67,5 +79,7 @@ __all__ = [
     "StreamClosed",
     "UIRequest",
     "UIResponse",
+    "WebhookRequest",
+    "WebhookResponse",
     "invalid_config",
 ]

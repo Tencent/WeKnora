@@ -149,6 +149,23 @@ func Run(ctx context.Context, t Target) Report {
 			return protocolAnswer(err)
 		})
 	}
+	if len(m.Contributes["events"]) > 0 {
+		check("events accepts a delivery", func(ctx context.Context) error {
+			// A type the plugin does not know: it must answer, not crash.
+			ev := pluginapi.EventDelivery{
+				ID: "conformance", Type: "weknora.conformance", OccurredAt: time.Now(), Attempt: 1,
+				Data: json.RawMessage(`{}`),
+			}
+			return protocolAnswer(t.Client.Call(ctx, pluginapi.EventsPath, envelope(), ev, nil))
+		})
+	}
+	for _, id := range m.Contributes["webhooks"] {
+		check("webhooks/"+id+" answers", func(ctx context.Context) error {
+			var out pluginapi.WebhookResponse
+			in := pluginapi.WebhookRequest{Method: http.MethodPost, Path: "/", Body: []byte(`{}`)}
+			return protocolAnswer(t.Client.Call(ctx, pluginapi.WebhookPath(id), envelope(), in, &out))
+		})
+	}
 	if len(m.Contributes["ui"]) > 0 {
 		check("ui/request answers", func(ctx context.Context) error {
 			var out pluginapi.UIResponse

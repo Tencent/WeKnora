@@ -12,7 +12,10 @@ import (
 // plugin switches. Any member may read the catalog; only admins change the
 // switches. Like the other integration catalogs it stays closed to scoped
 // API keys.
-func RegisterPluginRoutes(r *gin.RouterGroup, h *handler.PluginHandler, ui *handler.PluginUIHandler, g *rbacGuards) {
+func RegisterPluginRoutes(
+	r *gin.RouterGroup, h *handler.PluginHandler, ui *handler.PluginUIHandler, hooks *handler.PluginWebhookHandler,
+	g *rbacGuards,
+) {
 	plugins := g.apiKeyGroup(r.Group("/plugins"), apiKeyFullAccess())
 	{
 		plugins.GET("", g.Viewer(), h.ListPlugins)
@@ -29,6 +32,10 @@ func RegisterPluginRoutes(r *gin.RouterGroup, h *handler.PluginHandler, ui *hand
 			// checked per request, since it depends on the page.
 			ui.SetRoleGuard(func(need types.TenantRole) gin.HandlerFunc { return middleware.RequireRole(need, g.cfg) })
 			plugins.POST("/:id/ui-request", g.Viewer(), ui.Request)
+		}
+		// Webhook URLs carry their secret — Admin+.
+		if hooks != nil {
+			plugins.GET("/:id/webhooks", g.Admin(), hooks.List)
 		}
 	}
 }

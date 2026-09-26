@@ -60,7 +60,7 @@
             />
           </t-tooltip>
           <t-button
-            v-if="canManage && hasTenantConfig(p.manifest)"
+            v-if="canManage && canConfigure(p.manifest)"
             size="small"
             variant="text"
             theme="primary"
@@ -79,37 +79,66 @@
       icon="setting"
       :confirm-loading="configSaving"
       :confirm-disabled="!configSchema || configSaving"
+      :hide-footer="!configSchema"
       @confirm="saveConfig"
     >
       <div v-if="configLoading" class="plugin-center__state"><t-loading size="small" /></div>
-      <section v-else-if="configSchema" class="setting-drawer__section">
-        <SchemaForm v-model="configValues" :schema="configSchema" :errors="configErrors" />
-      </section>
+      <template v-else>
+        <section v-if="configSchema" class="setting-drawer__section">
+          <SchemaForm v-model="configValues" :schema="configSchema" :errors="configErrors" />
+        </section>
+        <section v-if="configWebhooks.length" class="setting-drawer__section">
+          <h4 class="setting-drawer__section-title">{{ t('pluginCenter.webhooks') }}</h4>
+          <p class="plugin-center__hint">{{ t('pluginCenter.webhooksHint') }}</p>
+          <div v-for="hook in configWebhooks" :key="hook.id" class="plugin-center__webhook">
+            <div class="plugin-center__webhook-name">{{ localizedText(hook.name, locale) }}</div>
+            <p v-if="hook.description" class="plugin-center__hint">{{ localizedText(hook.description, locale) }}</p>
+            <div class="plugin-center__webhook-url">
+              <code>{{ webhookUrl(hook, origin) }}</code>
+              <t-button size="small" variant="text" theme="primary"
+                @click="copyWithToast(webhookUrl(hook, origin), 'pluginCenter.webhookCopied')">
+                {{ t('pluginCenter.copy') }}
+              </t-button>
+            </div>
+          </div>
+        </section>
+      </template>
     </SettingDrawer>
   </div>
 </template>
 
 <script setup lang="ts">
-import { usePluginPagesStore } from '@/stores/pluginPages'
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { MessagePlugin } from 'tdesign-vue-next'
 
 import {
   getPluginConfig,
+  listPluginWebhooks,
   listPlugins,
   setPluginEnabled,
   updatePluginConfig,
   type ExtensionPoint,
+  type PluginWebhook,
   type TenantPlugin,
 } from '@/api/plugin'
 import SchemaForm from '@/components/schema-form/SchemaForm.vue'
 import { validateConfig, type ConfigSchema, type ConfigValue, type FieldError } from '@/components/schema-form/schema'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import { useAuthStore } from '@/stores/auth'
+import { usePluginPagesStore } from '@/stores/pluginPages'
 import { localizedText } from '@/utils/localizedText'
+import { copyWithToast } from '@/utils/clipboard'
 
-import { EXTENSION_POINTS, contributionSummary, filterPlugins, hasTenantConfig } from './pluginCenterState'
+import {
+  EXTENSION_POINTS,
+  canConfigure,
+  contributionSummary,
+  filterPlugins,
+  hasTenantConfig,
+  hasWebhooks,
+  webhookUrl,
+} from './pluginCenterState'
 
 // Lists the plugins this deployment knows — builtins included — and lets an
 // admin turn them off for the workspace. A disabled plugin's integrations drop
@@ -180,18 +209,27 @@ const configValues = ref<ConfigValue>({})
 const configErrors = ref<FieldError[]>([])
 const configLoading = ref(false)
 const configSaving = ref(false)
+const configWebhooks = ref<PluginWebhook[]>([])
+const origin = window.location.origin
 
 async function openConfig(p: TenantPlugin) {
   configPlugin.value = p
   configSchema.value = null
   configValues.value = {}
   configErrors.value = []
+  configWebhooks.value = []
   configOpen.value = true
   configLoading.value = true
   try {
-    const res = await getPluginConfig(p.manifest.id)
-    configSchema.value = res.data.schema
-    configValues.value = res.data.values ?? {}
+    const [config, hooks] = await Promise.all([
+      hasTenantConfig(p.manifest) ? getPluginConfig(p.manifest.id) : null,
+      hasWebhooks(p.manifest) ? listPluginWebhooks(p.manifest.id) : null,
+    ])
+    if (config) {
+      configSchema.value = config.data.schema
+      configValues.value = config.data.values ?? {}
+    }
+    configWebhooks.value = hooks?.data ?? []
   } catch (e: any) {
     MessagePlugin.error(e?.message || t('pluginCenter.configLoadFailed'))
   } finally {
@@ -278,6 +316,47 @@ onMounted(load)
     color: var(--td-brand-color);
     font-weight: 500;
     box-shadow: var(--td-shadow-1);
+  }
+}
+
+.plugin-center__hint {
+  margin: 0 0 8px;
+  font-size: var(--app-text-sm);
+  line-height: 1.5;
+  color: var(--td-text-color-placeholder);
+}
+
+.plugin-center__webhook {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+
+  & + & {
+    margin-top: 12px;
+  }
+}
+
+.plugin-center__webhook-name {
+  font-size: var(--app-text-sm);
+  font-weight: 500;
+  color: var(--td-text-color-primary);
+}
+
+.plugin-center__webhook-url {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+
+  code {
+    flex: 1;
+    min-width: 0;
+    padding: 6px 8px;
+    font-size: var(--app-text-xs);
+    word-break: break-all;
+    color: var(--td-text-color-secondary);
+    background: var(--td-bg-color-secondarycontainer);
+    border-radius: var(--app-radius-sm);
   }
 }
 
