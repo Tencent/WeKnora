@@ -315,6 +315,21 @@ const FinishReasonIncomplete = "incomplete"
 // message was finished, most often because a proxy cut the connection.
 const StreamEndedEarlyError = "the model's response ended before it finished (connection interrupted)"
 
+// StreamChunkCorruptError is what a consumer reports for an answer that carried
+// a chunk nobody could decode: a truncated frame, an HTML error page from a
+// proxy, malformed JSON. It is the other way a stream breaks, and it must not
+// be confused with StreamEndedEarlyError: the connection may be perfectly
+// healthy and the same request can come back whole, which is why the retry
+// classifier treats it as transient.
+//
+// The text is both the error reported and the classifier's handle on it. The
+// streaming path flattens errors into text before anything can inspect their
+// type (api.StreamAssembler.Fail puts err.Error() into StreamResponse.Content
+// and the agent rebuilds an error from that string), so a sentence survives
+// where a type does not. api.ErrCorruptStreamChunk wraps this same constant, so
+// the typed and the flattened form can never drift apart.
+const StreamChunkCorruptError = "the model's response was corrupted in transit"
+
 type StreamResponse struct {
 	ID                  string                 `json:"id"`
 	ResponseType        ResponseType           `json:"response_type"`
