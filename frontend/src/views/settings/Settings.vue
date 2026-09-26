@@ -64,6 +64,8 @@ import { useModalShell } from '@/composables/useModalShell'
 import SettingsModalShell from '@/components/SettingsModalShell.vue'
 import SettingsNavIcon from '@/extensions/SettingsNavIcon.vue'
 import { registerBuiltinSettings } from '@/extensions/builtin/settings'
+import { syncPluginSettingsSections } from '@/extensions/pluginFrame/settingsSync'
+import { usePluginPagesStore } from '@/stores/pluginPages'
 import {
   groupSections,
   sectionPermitted,
@@ -91,6 +93,13 @@ const { t } = useI18n()
 
 // Sections are registered, not listed here: builtins first, plugins later.
 registerBuiltinSettings()
+// Plugins' own settings sections join the plugins group once loaded.
+const pluginPages = usePluginPagesStore()
+const pluginPagesLoaded = ref(false)
+void pluginPages.ensure().catch(() => {}).finally(() => {
+  pluginPagesLoaded.value = true
+})
+watch(() => pluginPages.settingsSections, syncPluginSettingsSections, { immediate: true })
 
 const currentSection = ref<string>('general')
 const currentSubSection = ref<string>('')
@@ -247,7 +256,7 @@ watch(() => uiStore.settingsInitialSection, (section) => {
 }, { immediate: true })
 
 watch(
-  () => [visible.value, route.path, route.query.section, deploymentCapabilities.loaded] as const,
+  () => [visible.value, route.path, route.query.section, deploymentCapabilities.loaded, pluginPagesLoaded.value] as const,
   ([isVisible, path, section, capabilitiesLoaded]) => {
     if (!isVisible || path !== '/platform/settings') return
     if (typeof section !== 'string') {
@@ -258,7 +267,9 @@ watch(
       section,
       typeof route.query.tab === 'string' ? route.query.tab : undefined,
     )
-    if (capabilitiesLoaded && !isSectionSupported(normalizedSection)) {
+    // A plugin section registers once the plugin pages load.
+    const pendingPlugin = normalizedSection.startsWith('plugin:') && !pluginPagesLoaded.value
+    if (capabilitiesLoaded && !pendingPlugin && !isSectionSupported(normalizedSection)) {
       MessagePlugin.warning(t('settings.capabilityUnavailable'))
       const fallback = navItems.value[0]?.key || 'general'
       currentSection.value = fallback
@@ -275,7 +286,9 @@ watch(
 
 // 切换空间后角色可能变化，原本可见的 admin-only 面板可能消失。
 // 如果 currentSection 落到了不再显示的 key 上，就回退到第一个可见项。
-watch(navItems, (items) => {
+watch([navItems, pluginPagesLoaded], ([items]) => {
+  // A plugin section in the URL waits for the plugin sections to register.
+  if (currentSection.value.startsWith('plugin:') && !pluginPagesLoaded.value) return
   if (!items.some((item) => item.key === currentSection.value)) {
     const fallback = items[0]?.key || 'general'
     currentSection.value = fallback

@@ -153,8 +153,26 @@ type Contribution struct {
 	MCP *MCPServer `json:"mcp,omitempty"            yaml:"mcp"`
 	// FileTypes are the lower-case extensions a parser handles ("pdf").
 	FileTypes []string `json:"fileTypes,omitempty"      yaml:"fileTypes"`
+	// Entry is the HTML page of a UI contribution (pages, settingsSections,
+	// kbTabs), a path under UIRoot.
+	Entry string `json:"entry,omitempty"          yaml:"entry"`
+	// MinRole is the workspace role a UI contribution needs: viewer (the
+	// default for pages and tabs), contributor, admin (the default for
+	// settings sections) or owner.
+	MinRole string `json:"minRole,omitempty"        yaml:"minRole"`
 	// Extra carries point-specific metadata the generic fields do not cover.
 	Extra map[string]any `json:"extra,omitempty"          yaml:"extra"`
+}
+
+// UIMinRole is the role a UI contribution needs, with the point's default.
+func UIMinRole(point Point, c Contribution) string {
+	if c.MinRole != "" {
+		return c.MinRole
+	}
+	if point == PointSettingsSections {
+		return "admin"
+	}
+	return "viewer"
 }
 
 // MCPServer is a remote MCP server a plugin contributes.
@@ -360,6 +378,9 @@ func (m *Manifest) validateContributions(add func(string, ...any)) {
 				add("%s.aliases may only be declared by builtin plugins", where)
 			}
 			validateDeclarative(point, c, m.Builtin, where, add)
+			if IsUIPoint(point) {
+				validateUI(c, where, add)
+			}
 			if point == PointParsers && !m.Builtin {
 				validateFileTypes(c.FileTypes, where, add)
 			}
@@ -420,6 +441,22 @@ func validateDeclarative(point Point, c Contribution, builtin bool, where string
 		for name, value := range c.MCP.Headers {
 			validateTemplate(value, fmt.Sprintf("%s.mcp.headers.%s", where, name), add)
 		}
+	}
+}
+
+func validateUI(c Contribution, where string, add func(string, ...any)) {
+	switch {
+	case c.Entry == "":
+		add("%s.entry is required: the page's HTML file under %s", where, UIRoot)
+	case !isPackagePath(c.Entry) || !strings.HasPrefix(c.Entry, UIRoot):
+		add("%s.entry %q must be a file under %s", where, c.Entry, UIRoot)
+	case !strings.HasSuffix(c.Entry, ".html"):
+		add("%s.entry %q must be an .html file", where, c.Entry)
+	}
+	switch c.MinRole {
+	case "", "viewer", "contributor", "admin", "owner":
+	default:
+		add("%s.minRole must be viewer, contributor, admin or owner", where)
 	}
 }
 

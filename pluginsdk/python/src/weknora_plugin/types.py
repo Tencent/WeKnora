@@ -19,7 +19,7 @@ def _camel(name: str) -> str:
     return head + "".join(p[:1].upper() + p[1:] for p in rest)
 
 
-_FRACTION = re.compile(r"(\.\d{6})\d+")
+_FRACTION = re.compile(r"\.(\d+)")
 
 
 def parse_time(value: Any) -> Optional[datetime]:
@@ -28,7 +28,9 @@ def parse_time(value: Any) -> Optional[datetime]:
         return None
     if isinstance(value, datetime):
         return value
-    s = _FRACTION.sub(r"\1", str(value).replace("Z", "+00:00"))
+    # Go writes 0 to 9 fraction digits; Python before 3.11 reads exactly 3
+    # or 6.
+    s = _FRACTION.sub(lambda m: "." + m.group(1)[:6].ljust(6, "0"), str(value).replace("Z", "+00:00"), count=1)
     return datetime.fromisoformat(s)
 
 
@@ -240,3 +242,24 @@ class KVEntry:
 class KVList:
     entries: List[KVEntry] = field(default_factory=list)
     next: str = ""
+
+
+@dataclass
+class UIRequest:
+    """A request one of the plugin's pages made through the WeKnora bridge.
+    mount is "<point>/<id>" ("pages/links"); method and path are the page's
+    own routing; role is the caller's workspace role."""
+
+    mount: str = ""
+    method: str = ""
+    path: str = ""
+    body: Any = None
+    role: str = ""
+
+
+@dataclass
+class UIResponse:
+    """What the page receives: an HTTP-style status and a JSON body."""
+
+    body: Any = None
+    status: int = 200

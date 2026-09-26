@@ -1,4 +1,4 @@
-import { get, put } from '@/utils/request'
+import { get, post, put } from '@/utils/request'
 
 import type { ConfigSchema, ConfigValue } from '@/components/schema-form/schema'
 import type { LocalizedText } from '@/utils/localizedText'
@@ -14,6 +14,9 @@ export type ExtensionPoint =
   | 'parsers'
   | 'skills'
   | 'mcpServers'
+  | 'pages'
+  | 'settingsSections'
+  | 'kbTabs'
 
 export interface PluginContribution {
   id: string
@@ -27,6 +30,23 @@ export interface PluginContribution {
   path?: string
   /** Remote MCP server an installed plugin contributes. */
   mcp?: { url: string; transport?: string; headers?: Record<string, string> }
+  /** The HTML page of a UI contribution (pages, settingsSections, kbTabs), under ui/. */
+  entry?: string
+  /** Workspace role a UI contribution needs. */
+  minRole?: 'viewer' | 'contributor' | 'admin' | 'owner'
+}
+
+/** A contribution as GET /plugins/contributions lists it. */
+export interface ListedContribution extends PluginContribution {
+  pluginId: string
+  qualifiedId: string
+  version?: string
+  enabled: boolean
+}
+
+export interface ContributionListing {
+  points: Array<{ point: ExtensionPoint; thirdParty: boolean; declarative: boolean }>
+  contributions: Partial<Record<ExtensionPoint, ListedContribution[]>>
 }
 
 export interface PluginPermissions {
@@ -96,6 +116,25 @@ export function getPlugin(id: string) {
 /** Turns a plugin on or off for the current workspace (Admin+). */
 export function setPluginEnabled(id: string, enabled: boolean) {
   return put<{ data: TenantPlugin }>(`/api/v1/plugins/${encodeURIComponent(id)}/enabled`, { enabled })
+}
+
+/** Every contribution the deployment has, with the workspace's switches. */
+export function listContributions(point?: ExtensionPoint) {
+  return get<{ data: ContributionListing }>('/api/v1/plugins/contributions', point ? { params: { point } } : undefined)
+}
+
+/** What a plugin page's request returned. */
+export interface PluginPageResponse {
+  status: number
+  body?: unknown
+}
+
+/** Relays a request from a plugin page to the plugin's backend. */
+export function pluginPageRequest(
+  pluginId: string,
+  req: { mount: string; method: string; path: string; body?: unknown },
+) {
+  return post<{ data: PluginPageResponse }>(`/api/v1/plugins/${encodeURIComponent(pluginId)}/ui-request`, req)
 }
 
 /** The workspace's configuration of a plugin (Admin+). */

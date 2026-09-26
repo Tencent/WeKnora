@@ -31,6 +31,8 @@ from .types import (
     ParseOutput,
     SearchInput,
     SearchResult,
+    UIRequest,
+    UIResponse,
     from_wire,
     parse_time,
     to_wire,
@@ -156,6 +158,7 @@ class Stream:
 WebSearchFunc = Callable[[Call, SearchInput], List[SearchResult]]
 ParserFunc = Callable[[Call, ParseInput], ParseOutput]
 ConfigValidator = Callable[[Call], None]
+UIHandler = Callable[[Call, UIRequest], Any]
 
 _ROUTE = re.compile(r"^/v1/(websearch|connectors|parsers)/([^/]+)/([a-z-]+)$")
 
@@ -172,6 +175,7 @@ class Plugin:
         self._connectors: Dict[str, Any] = {}
         self._parsers: Dict[str, ParserFunc] = {}
         self._validate: Optional[ConfigValidator] = None
+        self._ui: Optional[UIHandler] = None
         #: Seconds serve() waits for calls in flight after SIGTERM.
         self.shutdown_timeout = 60.0
         if logger is None:
@@ -212,6 +216,12 @@ class Plugin:
 
         return register
 
+    def ui(self, fn: UIHandler) -> UIHandler:
+        """Registers the handler behind the plugin's pages: fn(call,
+        UIRequest) returns a UIResponse, or any JSON value for a 200."""
+        self._ui = fn
+        return fn
+
     def config_validator(self, fn: ConfigValidator) -> ConfigValidator:
         """Registers the check behind POST /v1/config/validate: raise
         invalid_config(...) to point at fields."""
@@ -240,6 +250,8 @@ class Plugin:
         ):
             if table:
                 contributes[point] = sorted(table)
+        if self._ui is not None:
+            contributes["ui"] = ["request"]
         return {"id": self.id, "version": self.version, "apiVersion": p.API_VERSION, "contributes": contributes}
 
     # Dispatch.
@@ -253,6 +265,12 @@ class Plugin:
             return
         if method == "POST" and path == "/v1/config/validate":
             self._unary(h, body, lambda call, _: self._validate(call) if self._validate else None, empty=True)
+            return
+        if method == "POST" and path == "/v1/ui/request":
+            if self._ui is None:
+                h._send_error(PluginError(ErrorCode.NOT_FOUND, "this plugin's pages make no requests"))
+            else:
+                self._unary(h, body, lambda call, raw: _ui_output(self._ui(call, from_wire(UIRequest, raw))))
             return
         m = _ROUTE.match(path)
         if method == "POST" and m:
@@ -412,6 +430,15 @@ def _connector_call(c: Any, action: str, call: Call, raw: Any) -> Any:
     if resolve is None:
         return {"ancestors": []}
     return {"ancestors": list(resolve(call, cfg, list(raw.get("resourceIds") or [])) or [])}
+
+
+def _ui_output(out: Any) -> Any:
+    if not isinstance(out, UIResponse):
+        out = UIResponse(body=out)
+    wire: dict = {"status": out.status or 200}
+    if out.body is not None:
+        wire["body"] = to_wire(out.body)
+    return wire
 
 
 def _parse_output(out: Any) -> Any:

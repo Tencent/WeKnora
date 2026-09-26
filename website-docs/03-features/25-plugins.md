@@ -88,6 +88,22 @@ Helm 设置 `pluginHost.enabled=true` 即可。使用本地存储（`STORAGE_TYP
 
 独立宿主需要 Redis，且所有节点的 `SYSTEM_AES_KEY`（或 `JWT_SECRET`）必须一致。app 不运行某个 kind、又没有配置独立宿主时，该 kind 的插件在插件详情中显示为加载失败，并说明原因。
 
+## 插件页面
+
+插件可以在界面上加三种页面：
+
+| 贡献点 | 出现在 | 默认最低角色 |
+| --- | --- | --- |
+| `pages` | 工具箱的一个标签页 | viewer |
+| `settingsSections` | 设置窗口「插件」分组下的一节 | admin |
+| `kbTabs` | 每个知识库的一个页签 | viewer |
+
+页面是插件包 `ui/` 目录下的 HTML，WeKnora 通过 `/api/v1/plugin-ui/assets/...` 提供。
+
+- **隔离**：页面在沙箱 iframe 中运行，没有同源权限，读不到 WeKnora 的登录状态和本地存储。严格的 CSP 禁止它访问网络。
+- **通信**：页面只能经 [`@weknora/plugin-ui`](https://github.com/Tencent/WeKnora/tree/main/packages/plugin-ui) 桥与 WeKnora 通信，由 WeKnora 代发请求给插件后端，或者弹提示、确认框、跳转页面。
+- **鉴权**：每次请求，WeKnora 都校验空间已启用该插件、用户满足页面的最低角色，并把用户角色一并交给插件后端。
+
 ## 开发插件
 
 - **Go**：[pluginsdk](https://github.com/Tencent/WeKnora/tree/main/pluginsdk)，含协议定义、SDK、客户端和一致性测试工具 `weknora-plugin-conformance`。
@@ -95,6 +111,7 @@ Helm 设置 `pluginHost.enabled=true` 即可。使用本地存储（`STORAGE_TYP
 - **示例**：[examples/plugins](https://github.com/Tencent/WeKnora/tree/main/examples/plugins)：
   - `rss`：数据源连接器，Go；
   - `subtitles`：文档解析器，Go，使用 Host API；
-  - `notebooks`：Jupyter 笔记本解析器，Python。
+  - `notebooks`：Jupyter 笔记本解析器，Python；
+  - `links`：带三种页面的团队链接插件，Python。
 
 同一个插件既可以打包成 `host` 插件由 WeKnora 运行，也可以作为 `remote` 服务独立部署，代码不用改。

@@ -82,6 +82,28 @@ references: return them in `Images` with an `OriginalRef` matching the
 `rate_limited`) to have the document retried later; any other error fails
 it for good.
 
+## Pages
+
+A plugin can add pages to the app:
+- `pages`: toolbox tabs.
+- `settingsSections`: sections of the settings dialog.
+- `kbTabs`: tabs on each knowledge base.
+
+Each is an HTML `entry` under `ui/` in the package. It runs in a sandboxed
+iframe and talks to the app through
+[`@weknora/plugin-ui`](../packages/plugin-ui). A page's requests reach the
+plugin's `UI` handler:
+
+```go
+p.UI(func(ctx context.Context, call *pluginsdk.Call, req pluginapi.UIRequest) (*pluginapi.UIResponse, error) {
+	// req.Mount ("pages/links"), req.Method, req.Path, req.Body, req.Role
+	return pluginsdk.UIJSON(200, links)
+})
+```
+
+WeKnora refuses a caller below the page's `minRole` before the call.
+The handler can check `req.Role` for anything finer.
+
 ## Calling back into WeKnora (Host API)
 
 A plugin that declares `permissions.hostApi` gets a short-lived token with
@@ -141,6 +163,7 @@ Complete plugins with their `package.sh`:
 - `examples/plugins/rss`: a connector.
 - `examples/plugins/subtitles`: a parser using the Host API.
 - `examples/plugins/notebooks`: a parser written in Python.
+- `examples/plugins/links`: pages (toolbox, settings, knowledge base tab), in Python.
 
 ## Testing
 

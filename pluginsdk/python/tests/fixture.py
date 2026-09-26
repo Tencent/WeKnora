@@ -19,6 +19,7 @@ from weknora_plugin import (  # noqa: E402
     PluginError,
     Resource,
     SearchResult,
+    UIResponse,
     invalid_config,
 )
 
@@ -72,6 +73,13 @@ class Notes:
         stream.checkpoint(Cursor(state={"after": start + 3}))
         stream.progress("done")
         return Cursor(state={"after": start + 3})
+
+
+@plugin.ui
+def ui(call, req):
+    if req.path == "/missing":
+        return UIResponse(status=404, body={"error": "no such thing"})
+    return {"mount": req.mount, "method": req.method, "path": req.path, "role": req.role, "body": req.body}
 
 
 if __name__ == "__main__":

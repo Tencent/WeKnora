@@ -94,6 +94,7 @@ type RouterParams struct {
 	PluginHandler                *handler.PluginHandler
 	PluginAdminHandler           *handler.PluginAdminHandler
 	PluginHostAPI                *hostapi.Handler
+	PluginUIHandler              *handler.PluginUIHandler
 	WeKnoraCloudHandler          *handler.WeKnoraCloudHandler
 	WikiPageHandler              *handler.WikiPageHandler
 	MemoryHandler                *handler.MemoryHandler
@@ -212,6 +213,11 @@ func NewRouter(params RouterParams) *gin.Engine {
 	// the handler verifies; user and API key auth do not apply.
 	if params.PluginHostAPI != nil {
 		params.PluginHostAPI.Register(r)
+	}
+	// Plugin page files load into sandboxed iframes that carry no
+	// credentials; see PluginUIHandler.ServeAsset.
+	if params.PluginUIHandler != nil {
+		r.GET(handler.PluginUIAssetsPrefix+"/:id/:version/*path", params.PluginUIHandler.ServeAsset)
 	}
 
 	// 认证中间件
@@ -333,7 +339,7 @@ func NewRouter(params RouterParams) *gin.Engine {
 		RegisterEmbedChannelRoutes(v1, params.EmbedChannelHandler, rbacGuards)
 		RegisterMCPEndpointRoutes(v1, params.MCPEndpointHandler, rbacGuards)
 		RegisterDataSourceRoutes(v1, params.DataSourceHandler, params.DataSourceCredentialsHandler, rbacGuards)
-		RegisterPluginRoutes(v1, params.PluginHandler, rbacGuards)
+		RegisterPluginRoutes(v1, params.PluginHandler, params.PluginUIHandler, rbacGuards)
 		RegisterPluginAdminRoutes(v1, params.PluginAdminHandler, rbacGuards)
 		RegisterWeKnoraCloudRoutes(v1, params.WeKnoraCloudHandler, rbacGuards)
 		RegisterWikiPageRoutes(v1, params.WikiPageHandler, rbacGuards)

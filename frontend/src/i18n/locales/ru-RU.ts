@@ -5377,6 +5377,11 @@ export default {
       rotateFailed: 'Не удалось сменить секрет'
     }
   },
+  pluginPages: {
+    notResponding: 'Страница плагина не отвечает; возможно, она не загрузилась.',
+    requestFailed: 'Запрос к плагину не выполнен',
+    fromPlugin: 'Предоставлено плагином {id}'
+  },
   pluginCenter: {
     installed: 'Установлен',
     configure: 'Настроить',
@@ -5407,7 +5412,10 @@ export default {
       tools: 'Инструменты агента',
       parsers: 'Разбор документов',
       skills: 'Навыки',
-      mcpServers: 'MCP-серверы'
+      mcpServers: 'MCP-серверы',
+      pages: 'Страницы',
+      settingsSections: 'Разделы настроек',
+      kbTabs: 'Вкладки базы знаний'
     }
   },
   schemaForm: {

@@ -177,6 +177,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(activate.NewWebSearch))
 	must(container.Provide(activate.NewConnectors))
 	must(container.Provide(activate.NewParsers))
+	must(container.Provide(activate.NewUIPages))
 	must(container.Provide(newMCPServiceRepository))
 	must(container.Provide(repository.NewMCPToolApprovalRepository))
 	must(container.Provide(repository.NewMCPOAuthRepository))
@@ -611,6 +612,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(newPluginDrivers))
 	must(container.Provide(handler.NewPluginHandler))
 	must(container.Provide(handler.NewPluginAdminHandler))
+	must(container.Provide(handler.NewPluginUIHandler))
 	logger.Debugf(ctx, "[Container] HTTP handlers registered")
 
 	// Wire the chat package's local image resolver so multimodal chat can read

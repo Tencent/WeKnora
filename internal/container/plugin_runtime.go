@@ -51,6 +51,7 @@ type pluginActivators struct {
 	WebSearch  *activate.WebSearch
 	Connectors *activate.Connectors
 	Parsers    *activate.Parsers
+	UIPages    *activate.UIPages
 	MCP        *activate.MCPServers
 	Skills     *activate.Skills
 	Vendors    *activate.ModelVendors
@@ -61,7 +62,7 @@ type pluginActivators struct {
 // reachable before anything routes calls to it.
 func (a pluginActivators) list() []reconcile.Activator {
 	return []reconcile.Activator{
-		a.Host, a.Remote, a.Delegation, a.WebSearch, a.Connectors, a.Parsers, a.Vendors, a.MCP, a.Skills,
+		a.Host, a.Remote, a.Delegation, a.WebSearch, a.Connectors, a.Parsers, a.UIPages, a.Vendors, a.MCP, a.Skills,
 	}
 }
 
