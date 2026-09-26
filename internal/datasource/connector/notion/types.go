@@ -247,9 +247,12 @@ func (f *notionFile) GetFileUploadID() string {
 // --- Cursor ---
 
 // notionCursor tracks state for incremental sync.
-// Only PageEditTimes is used for diffing; LastSyncTime lives on types.SyncCursor.
+// LastSyncTime lives on types.SyncCursor.
 type notionCursor struct {
 	PageEditTimes map[string]time.Time `json:"page_edit_times"` // page_id → last_edited_time
+	// DatabaseRecords distinguishes removed rows from records in other databases.
+	// Missing entries in legacy cursors are established on the next incremental sync.
+	DatabaseRecords map[string][]string `json:"database_records,omitempty"`
 }
 
 // --- Attachment ---
