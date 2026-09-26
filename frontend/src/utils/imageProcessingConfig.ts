@@ -68,3 +68,20 @@ export function buildImageProcessingConfig(
   }
   return JSON.stringify(built) === JSON.stringify(snap) ? null : built
 }
+
+/**
+ * Resolves the pipeline id a knowledge base's stored config points at, by the
+ * same rule the backend's ResolveImagePipelineID follows: an explicitly stored
+ * id wins (a pre-rename "caption_ocr" normalizes to "default"), otherwise the
+ * legacy observation switch picks ob_cap_ocr when on and default otherwise.
+ * Bases saved before the selector existed have no config at all and land on
+ * default, so the picker always shows a real option.
+ */
+export function resolveImagePipelineFromKb(
+  kb: Record<string, any> | null | undefined,
+): string {
+  const cfg = kb?.image_processing_config
+  const stored = (cfg?.image_pipeline as string | undefined) || ''
+  if (stored) return stored === 'caption_ocr' ? 'default' : stored
+  return cfg?.image_attrs_enabled ? 'ob_cap_ocr' : 'default'
+}

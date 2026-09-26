@@ -22,6 +22,8 @@ const props = defineProps<{
 const emit = defineEmits<{
   'update:pipelineId': [value: string]
   'update:params': [value: Record<string, unknown>]
+  /** Turned on while the current pick is configured to do nothing at all. */
+  'update:invalid': [value: boolean]
 }>()
 
 const { t, te } = useI18n()
@@ -37,6 +39,20 @@ const current = computed<ImagePipelineSpec | undefined>(() =>
 
 /** Its fields, in the order the backend declared them. */
 const fields = computed<ImagePipelineField[]>(() => current.value?.fields ?? [])
+
+/**
+ * A pipeline configured to do nothing. Stated generically rather than against
+ * one pipeline: if every declared field is a switch and all of them are off,
+ * no action would run for any image. The parent blocks the save; this drives
+ * the inline message.
+ */
+const invalid = computed<boolean>(() => {
+  const bools = fields.value.filter((field) => field.type === 'bool')
+  if (bools.length === 0 || bools.length !== fields.value.length) return false
+  return bools.every((field) => !paramValue(field))
+})
+
+watch(invalid, (value) => emit('update:invalid', value), { immediate: true })
 
 /**
  * A field's declared default. The backend sends JSON, so an unset key arrives
@@ -69,6 +85,12 @@ function fieldDescription(field: ImagePipelineField): string {
 function pipelineName(pipeline: ImagePipelineSpec): string {
   const key = `imagePipeline.${pipeline.id}.name`
   return te(key) ? t(key) : pipeline.name
+}
+
+/** How the selected pipeline works, shown under the pick. */
+function pipelineDescription(pipeline: ImagePipelineSpec): string {
+  const key = `imagePipeline.${pipeline.id}.description`
+  return te(key) ? t(key) : pipeline.description ?? ''
 }
 
 function onPipelineChange(value: string) {
@@ -117,9 +139,6 @@ watch(() => props.pipelineId, () => {
       <div class="image-pipeline-row">
         <div class="image-pipeline-info">
           <label>{{ $t('knowledgeEditor.advanced.multimodal.imagePipelineLabel') }}</label>
-          <p class="desc">
-            {{ $t('knowledgeEditor.advanced.multimodal.imagePipelineDescription') }}
-          </p>
         </div>
         <div class="image-pipeline-control">
           <t-select
@@ -136,6 +155,7 @@ watch(() => props.pipelineId, () => {
           </t-select>
         </div>
       </div>
+      <p v-if="current" class="image-pipeline-desc">{{ pipelineDescription(current) }}</p>
 
       <!-- One row per field the running pipeline declares. A pipeline with no
            fields shows nothing here, which is the honest rendering of "nothing
@@ -167,6 +187,10 @@ watch(() => props.pipelineId, () => {
           />
         </div>
       </div>
+
+      <p v-if="invalid" class="image-pipeline-desc image-pipeline-desc--error">
+        {{ $t('imagePipeline.noActionSelected') }}
+      </p>
     </template>
   </div>
 </template>
@@ -176,6 +200,10 @@ watch(() => props.pipelineId, () => {
   display: flex;
   flex-direction: column;
   gap: 12px;
+
+  // The section description above ends here; a wider gap marks where the
+  // controls begin, matching the rhythm of the other setting rows.
+  margin-top: 4px;
 
   .image-pipeline-row {
     display: flex;
@@ -203,6 +231,19 @@ watch(() => props.pipelineId, () => {
   .image-pipeline-control {
     flex: 0 0 200px;
     text-align: right;
+  }
+
+  .image-pipeline-desc {
+    margin: -4px 0 0;
+    opacity: 0.75;
+    font-size: 12px;
+    line-height: 1.5;
+
+    &--error {
+      margin: 0;
+      opacity: 1;
+      color: var(--error-color, #d54941);
+    }
   }
 
   .image-pipeline-hint {

@@ -244,6 +244,8 @@ export interface ImagePipelineField {
 export interface ImagePipelineSpec {
   id: string;
   name: string;
+  /** How the pipeline works, shown under the pick; i18n overlays on top. */
+  description: string;
   fields: ImagePipelineField[];
 }
 

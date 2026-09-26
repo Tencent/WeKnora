@@ -3955,13 +3955,11 @@ export default {
         imageAttrsDescription: 'オンにすると各画像を先に「属性観察＋説明」し、その属性で画像内テキストへの OCR 実行可否を決定します。オフは基本モード：全画像を1枚ずつ説明し全て OCR します',
         imageAttrsSchemaLabel: '観察可能な画像属性',
         imageAttrsSchemaDescription: 'モデルは以下の属性（バックエンドのレジストリで定義）を観察して OCR ポリシーを決めます',
-        imagePipelineSectionLabel: '画像パイプライン',
+        imagePipelineSectionLabel: '画像解析方式',
         imagePipelineSectionDescription:
-          'マルチモーダルが有効な間、各画像はここで選択したパイプラインで処理されます。パイプライン一覧と調整項目はバックエンドのレジストリから配信されるため、ここでは選択のみを行います。',
-        imagePipelineLabel: 'パイプライン',
-        imagePipelineDescription:
-          'パイプラインごとに画像の扱いが異なります。切り替えると、以前のパイプラインで設定したパラメータは消去されます。',
-        imagePipelinePlaceholder: 'パイプラインを選択',
+          'マルチモーダル解析が有効な場合、画像の解析方式を選択できます。',
+        imagePipelineLabel: '解析方式',
+        imagePipelinePlaceholder: '解析方式を選択',
         imagePipelineLoading: 'パイプラインを読み込み中…',
         imagePipelineLoadError: 'パイプラインの読み込みに失敗しました',
         imageAttrsOcrConditions: '観察した属性条件に基づいて OCR を実行',
@@ -7793,19 +7791,23 @@ export default {
   // ない部分はバックエンド固有の文言にフォールバックするため、新しい
   // パイプラインがキー名のまま表示されることはありません。
   imagePipeline: {
-    caption_ocr: {
-      name: '伝統',
+    noActionSelected: '解析アクションを1つ以上オンにしてください。オフのままでは何も処理されません。',
+    default: {
+      name: 'マニュアル',
+      description: 'タスクに合わせて解析アクションのスイッチを手動でオン/オフします。',
       enable_caption: {
         label: '画像説明',
         description: '各画像について一言の説明を生成し、キャプションとして保存します。'
       },
       enable_ocr: {
         label: '文字認識',
-        description: '画像に文字が含まれるかどうかに関係なく、画像内のテキストを抽出します。'
+        description: '画像内に出現するテキストを抽出します。'
       }
     },
     ob_cap_ocr: {
-      name: '属性観察'
+      name: 'スマート',
+      description:
+        'まず画像の特徴を観察して説明を生成し、その特徴に基づいて OCR を実行するかどうかを判断します。モデル呼び出しを節約し、解析速度を向上させます。'
     }
   }
 }

@@ -3955,13 +3955,11 @@ export default {
         imageAttrsDescription: 'When on, each image is first observed for attributes and described, then the attributes decide whether an OCR round runs for the text in the image. When off, the basic mode applies: every image is described and OCR runs for all of them',
         imageAttrsSchemaLabel: 'Observable image attributes',
         imageAttrsSchemaDescription: 'The model observes the attributes below (defined by the backend registry) to drive the OCR policy',
-        imagePipelineSectionLabel: 'Image pipeline',
+        imagePipelineSectionLabel: 'Image parsing scheme',
         imagePipelineSectionDescription:
-          'While multimodal is on, every image is processed by the pipeline picked here. The list of pipelines and of their tunables comes from the backend registry, so the panel only selects.',
-        imagePipelineLabel: 'Pipeline',
-        imagePipelineDescription:
-          'Pipelines differ in how they treat an image. Switching pipeline clears the parameters you set for the one you leave.',
-        imagePipelinePlaceholder: 'Select a pipeline',
+          'With multimodal parsing on, pick how images are parsed.',
+        imagePipelineLabel: 'Scheme',
+        imagePipelinePlaceholder: 'Select a scheme',
         imagePipelineLoading: 'Loading pipelines…',
         imagePipelineLoadError: 'Could not load pipelines',
         imageAttrsOcrConditions: 'Trigger OCR based on the observed attribute conditions',
@@ -7799,19 +7797,23 @@ export default {
   // not covered here falls back to the backend's own wording, so a new
   // pipeline never shows up as a bare key.
   imagePipeline: {
-    caption_ocr: {
-      name: 'Traditional',
+    noActionSelected: 'Turn on at least one parsing action, otherwise nothing will be processed.',
+    default: {
+      name: 'Manual',
+      description: 'Turn the parsing actions on or off to fit the task.',
       enable_caption: {
         label: 'Image caption',
         description: 'Ask the model for a one-line description of every image and store it as the caption.'
       },
       enable_ocr: {
         label: 'OCR',
-        description: 'Extract the text every image carries, whether or not the image contains any.'
+        description: 'Extract the text that appears in the image.'
       }
     },
     ob_cap_ocr: {
-      name: 'Observation'
+      name: 'Smart',
+      description:
+        'Observe the image attributes and describe the image first, then decide from the attributes whether to run OCR, saving model calls and speeding up parsing.'
     }
   }
 }

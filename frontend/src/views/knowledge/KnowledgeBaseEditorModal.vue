@@ -372,13 +372,14 @@
                 </p>
               </div>
               <!-- 面板取代了旧的观察开关：顶部多模态开关决定是否处理图片，
-                   这里决定怎么处理。选择器没有空选项，默认 caption_ocr；
-                   选中的流水线同时写回 imageAttrsEnabled（只有观察属性流水线
-                   点亮它），旧开关与属性面板跟随同一取值。 -->
+                   这里决定怎么处理。选择器没有空选项，默认 default（内部名，
+                   UI 显示为「传统」）；选中的方案同时写回 imageAttrsEnabled
+                   （只有智能模式点亮它），旧开关与属性面板跟随同一取值。 -->
               <ImagePipelineSettings
                 v-model:params="formData.imagePipelineParams"
                 :pipeline-id="formData.imagePipeline"
                 @update:pipeline-id="onPipelineChange"
+                @update:invalid="onPipelineInvalidChange"
               />
             </div>
 
@@ -581,7 +582,10 @@ import {
   type ImageAttrSchema,
   type KnowledgeBaseProfile,
 } from '@/api/knowledge-base'
-import { buildImageProcessingConfig } from '@/utils/imageProcessingConfig'
+import {
+  buildImageProcessingConfig,
+  resolveImagePipelineFromKb as resolveKbImagePipeline,
+} from '@/utils/imageProcessingConfig'
 import { imageAttrDisplay, imageAttrConditionDisplay } from '@/utils/imageAttrDisplay'
 
 // The image-attribute registry, fetched from the backend (single source of
@@ -915,16 +919,16 @@ const initFormData = (type: 'document' | 'faq' = 'document') => {
       descriptionLanguage: '',
       customInstructions: ''
     },
-    // 图片属性观察管线：管线选择与各管线的私有参数由 ImagePipelineSettings
+    // 图片解析方案：方案选择与各方案的私有参数由 ImagePipelineSettings
     // 编辑；其余配置（model_id 等）按加载时的快照原样回传，避免把 API 侧写入
     // 的设置洗掉。新建模式也必须用完整默认动作初始化——imageActions.ocr
     // .on_unobserved 直接被开关绑定，缺省会让打开开关的瞬间渲染崩溃。
     imageAttrsEnabled: false,
     imageActions: mergeImageActions(),
-    // 流水线没有「留空」选项：多模态开关决定是否处理图片，开了就一定要有
-    // 流水线可跑，所以默认落在 caption_ocr。选中的流水线决定旧观察开关的
-    // 取值（见 onPipelineChange）。
-    imagePipeline: 'caption_ocr',
+    // 方案没有「留空」选项：多模态开关决定是否处理图片，开了就一定要有
+    // 方案可跑，所以默认落在 default（内部名，UI 显示为「传统」）。选中的
+    // 方案决定旧观察开关的取值（见 onPipelineChange）。
+    imagePipeline: 'default',
     imagePipelineParams: {} as Record<string, unknown>,
     imageProcessingConfigSnapshot: null as Record<string, unknown> | null,
     asrConfig: {
@@ -1077,20 +1081,12 @@ const loadKBData = async (
         customInstructions: kb.vlm_config?.custom_instructions || ''
       },
       // 旧库迁移：本选择器出现之前保存的知识库没有 image_pipeline，按后端
-      // ResolveImagePipelineID 的同一规则落到具体流水线——观察开关开着就是
+      // ResolveImagePipelineID 的同一规则落到具体方案——观察开关开着就是
       // ob_cap_ocr，其余（包括根本没有 image_processing_config 的老库）落到
-      // 默认的 caption_ocr。下拉里没有空选项，所以这里必须解析出一个值。
-      imagePipeline:
-        ((kb as Record<string, any>).image_processing_config?.image_pipeline as string) ||
-        (!!(kb as Record<string, any>).image_processing_config?.image_attrs_enabled
-          ? 'ob_cap_ocr'
-          : 'caption_ocr'),
-      // 旧观察开关与选中的流水线保持同一个意思：只有观察属性流水线把它点亮。
-      imageAttrsEnabled:
-        (((kb as Record<string, any>).image_processing_config?.image_pipeline as string) ||
-          (!!(kb as Record<string, any>).image_processing_config?.image_attrs_enabled
-            ? 'ob_cap_ocr'
-            : 'caption_ocr')) === 'ob_cap_ocr',
+      // default。存过的 id 还可能是更名前的 caption_ocr，同样归一到 default。
+      imagePipeline: resolveKbImagePipeline(kb),
+      // 旧观察开关与选中的方案保持同一个意思：只有智能模式把它点亮。
+      imageAttrsEnabled: resolveKbImagePipeline(kb) === 'ob_cap_ocr',
       imageActions: mergeImageActions(
         (kb as Record<string, any>).image_processing_config?.image_actions,
       ),
@@ -1281,6 +1277,11 @@ const handleMultimodalToggle = () => {
 }
 
 /**
+ * 知识库存量配置到方案 id 的解析规则已抽到 utils/imageProcessingConfig
+ * （与后端 ResolveImagePipelineID 一致），供本弹窗与上传/重解析弹窗共用。
+ */
+
+/**
  * 流水线参数的清理由 ImagePipelineSettings 自己完成（切换即清空上一条的
  * 私有参数）；这里只负责让旧的观察开关跟上选择——只有观察属性流水线把它
  * 点亮，这样无论从哪个控件看，知识库读到的是同一个意思，下方的属性面板
@@ -1290,6 +1291,12 @@ const onPipelineChange = (value: string) => {
   if (!formData.value) return
   formData.value.imagePipeline = value
   formData.value.imageAttrsEnabled = value === 'ob_cap_ocr'
+}
+
+// 面板报上来的「选中的方案一个动作都没开」。只在多模态开启时阻止保存。
+const imagePipelineInvalid = ref(false)
+const onPipelineInvalidChange = (value: boolean) => {
+  imagePipelineInvalid.value = value
 }
 
 const handleMultimodalVLLMChange = (modelId: string) => {
@@ -1434,6 +1441,14 @@ const validateForm = (): boolean => {
   // 验证多模态配置（如果启用）
   if (formData.value.multimodalConfig.enabled && !formData.value.multimodalConfig.vllmModelId) {
     MessagePlugin.warning(t('knowledgeEditor.messages.multimodalInvalid'))
+    currentSection.value = 'multimodal'
+    return false
+  }
+
+  // 选中的解析方案一个动作都没开（如传统方案两个开关都关）：跑起来什么都
+  // 不会做，属于配置错误而不是合法选择。
+  if (formData.value.multimodalConfig.enabled && imagePipelineInvalid.value) {
+    MessagePlugin.warning(t('imagePipeline.noActionSelected'))
     currentSection.value = 'multimodal'
     return false
   }

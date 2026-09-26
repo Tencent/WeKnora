@@ -421,15 +421,24 @@
                             />
                           </div>
                         </div>
-                        <div v-if="uiState.multimodalConfig.enabled" class="setting-row">
+                        <div v-if="uiState.multimodalConfig.enabled" class="setting-row setting-row-vertical">
                           <div class="setting-info">
-                            <label>{{ t('knowledgeEditor.advanced.multimodal.imageAttrsLabel') }}</label>
-                            <p class="desc">{{ t('knowledgeEditor.advanced.multimodal.imageAttrsDescription') }}</p>
+                            <label>{{ t('knowledgeEditor.advanced.multimodal.imagePipelineSectionLabel') }}</label>
+                            <p class="desc">
+                              {{ t('knowledgeEditor.advanced.multimodal.imagePipelineSectionDescription') }}
+                            </p>
                           </div>
-                          <t-switch v-model="uiState.imageAttrsEnabled" size="medium" />
+                          <!-- 与知识库编辑器同款：方案与私有参数由注册表驱动，前端
+                               不写死任何方案名。选中智能模式时下方展开属性面板。 -->
+                          <ImagePipelineSettings
+                            v-model:params="uiState.imagePipelineParams"
+                            :pipeline-id="uiState.imagePipeline"
+                            @update:pipeline-id="uiState.imagePipeline = $event"
+                            @update:invalid="imagePipelineInvalid = $event"
+                          />
                         </div>
                         <div
-                          v-if="uiState.multimodalConfig.enabled && uiState.imageAttrsEnabled"
+                          v-if="uiState.multimodalConfig.enabled && uiState.imagePipeline === 'ob_cap_ocr'"
                           class="setting-row setting-row-vertical"
                         >
                           <div class="setting-info">
@@ -475,7 +484,7 @@
                              .setting-info / .setting-control 都撑成 100% 宽，水平
                              排布必然溢出，开关被顶到容器右缘之外。挪出来后与其它
                              开关行共用同一套排版，右缘与「图片属性观察」对齐 -->
-                        <template v-if="uiState.multimodalConfig.enabled && uiState.imageAttrsEnabled">
+                        <template v-if="uiState.multimodalConfig.enabled && uiState.imagePipeline === 'ob_cap_ocr'">
                           <div class="setting-row">
                             <div class="setting-info">
                               <label>{{ t('knowledgeEditor.advanced.multimodal.imageAttrsOcrOnUnobserved') }}</label>
@@ -652,6 +661,8 @@ import { getUploadFileKey } from '../utils/uploadSources'
 import { listKnowledgeTags, mergeImageActions, fetchImageAttrSchema, FALLBACK_IMAGE_ATTR_SCHEMA, type ImageActionsConfig, type ImageAttrSchema } from '@/api/knowledge-base'
 import { imageAttrDisplay, imageAttrConditionDisplay } from '@/utils/imageAttrDisplay'
 import KbUploadSourceDropdown from './KbUploadSourceDropdown.vue'
+import ImagePipelineSettings from '../ImagePipelineSettings.vue'
+import { resolveImagePipelineFromKb } from '@/utils/imageProcessingConfig'
 import FolderPickerMenu, { type FolderOption } from './FolderPickerMenu.vue'
 import { folderOptionFromPath, sortFolderOptions } from '../folderTree'
 import type { KnowledgeProcessOverrides } from '@/types/knowledgeProcess'
@@ -704,7 +715,11 @@ interface UploadUIState {
   summaryEnabled: boolean
   chunkingConfig: ChunkingUIConfig
   multimodalConfig: { enabled: boolean; vllmModelId: string; descriptionLanguage?: string; customInstructions?: string }
-  imageAttrsEnabled: boolean
+  // The image pipeline pick and its private tunables. The pick decides the
+  // legacy image_attrs_enabled switch (only ob_cap_ocr turns it on), which is
+  // derived at write time rather than stored.
+  imagePipeline: string
+  imagePipelineParams: Record<string, unknown>
   imageActions: ImageActionsConfig
   asrConfig: { enabled: boolean; modelId: string; language: string }
   questionGenerationConfig: { enabled: boolean; questionCount: number; customInstructions?: string }
@@ -1196,7 +1211,8 @@ function createDefaultUIState(): UploadUIState {
       tableMetadataInstructions: '',
     },
     multimodalConfig: { enabled: false, vllmModelId: '', descriptionLanguage: '', customInstructions: '' },
-    imageAttrsEnabled: false,
+    imagePipeline: 'default',
+    imagePipelineParams: {},
     imageActions: mergeImageActions(),
     asrConfig: { enabled: false, modelId: '', language: '' },
     questionGenerationConfig: { enabled: true, questionCount: 3, customInstructions: '' },
@@ -1240,8 +1256,11 @@ function initFromKbInfo(kb: any) {
       descriptionLanguage: kb.vlm_config?.description_language || '',
       customInstructions: kb.vlm_config?.custom_instructions || '',
     },
-    // 默认跟随知识库的图片属性观察设置；用户可对本次任务单独覆盖。
-    imageAttrsEnabled: !!kb.image_processing_config?.image_attrs_enabled,
+    // 默认跟随知识库的图片解析方案；用户可对本次任务单独覆盖。旧库（没有
+    // image_pipeline 的）按与后端一致的规则解析出一个具体方案。
+    imagePipeline: resolveImagePipelineFromKb(kb),
+    imagePipelineParams:
+      (kb.image_processing_config?.image_pipeline_params as Record<string, unknown>) ?? {},
     imageActions: mergeImageActions(kb.image_processing_config?.image_actions),
     asrConfig: {
       enabled: !!kb.asr_config?.enabled,
@@ -1291,7 +1310,11 @@ function buildProcessOverrides(): KnowledgeProcessOverrides {
       table_metadata_instructions: chunking.tableMetadataInstructions,
     },
     enable_multimodel: state.multimodalConfig.enabled,
-    image_attrs_enabled: state.imageAttrsEnabled,
+    // 旧观察开关跟随选中的方案（只有智能模式点亮它），与后端
+    // EffectiveProcessConfig 的派生规则一致；方案的显式选择随行下发。
+    image_attrs_enabled: state.imagePipeline === 'ob_cap_ocr',
+    image_pipeline: state.imagePipeline,
+    image_pipeline_params: state.imagePipelineParams,
     image_actions: {
       ocr: {
         // The KB's own conditions (mergeImageActions keeps a custom list), so
@@ -1356,7 +1379,15 @@ function applyOverridesToState(o?: KnowledgeProcessOverrides | null) {
   }
   if (o.parser_engine_rules) s.chunkingConfig.parserEngineRules = o.parser_engine_rules
   if (o.enable_multimodel != null) s.multimodalConfig.enabled = o.enable_multimodel
-  if (o.image_attrs_enabled != null) s.imageAttrsEnabled = o.image_attrs_enabled
+  if (o.image_pipeline != null) {
+    // 存量覆盖里可能是更名前的 caption_ocr，归一到 default。
+    s.imagePipeline = o.image_pipeline === 'caption_ocr' ? 'default' : o.image_pipeline
+  }
+  if (o.image_pipeline_params != null) s.imagePipelineParams = o.image_pipeline_params
+  else if (o.image_attrs_enabled != null && o.image_pipeline == null) {
+    // 旧版覆盖只带观察开关：按同一规则还原出方案选择。
+    s.imagePipeline = o.image_attrs_enabled ? 'ob_cap_ocr' : 'default'
+  }
   if (o.image_actions) s.imageActions = mergeImageActions(o.image_actions)
   if (o.vlm_config) {
     if (o.vlm_config.enabled != null) s.multimodalConfig.enabled = o.vlm_config.enabled
@@ -1558,12 +1589,19 @@ const handleCancel = () => {
   emit('update:visible', false)
 }
 
+// 面板报上来的「选中的方案一个动作都没开」；多模态开启时阻止确认。
+const imagePipelineInvalid = ref(false)
+
 const handleConfirm = () => {
   if (props.mode === 'file' && batchItemCount.value === 0) {
     MessagePlugin.warning(t('uploadConfirm.noItems'))
     return
   }
   if (!validateBeforeConfirm()) return
+  if (uiState.value.multimodalConfig.enabled && imagePipelineInvalid.value) {
+    MessagePlugin.warning(t('imagePipeline.noActionSelected'))
+    return
+  }
 
   const processConfig = buildProcessOverrides()
   if (props.mode === 'manual' && props.manualPreview) {
