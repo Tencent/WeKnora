@@ -3955,6 +3955,15 @@ export default {
         imageAttrsDescription: 'オンにすると各画像を先に「属性観察＋説明」し、その属性で画像内テキストへの OCR 実行可否を決定します。オフは基本モード：全画像を1枚ずつ説明し全て OCR します',
         imageAttrsSchemaLabel: '観察可能な画像属性',
         imageAttrsSchemaDescription: 'モデルは以下の属性（バックエンドのレジストリで定義）を観察して OCR ポリシーを決めます',
+        imagePipelineSectionLabel: '画像パイプライン',
+        imagePipelineSectionDescription:
+          '選択したパイプラインで各画像を処理します。パイプライン一覧と調整項目はバックエンドのレジストリから配信されるため、ここでは選択のみを行います。空欄の場合は上の観察スイッチに従います。',
+        imagePipelineLabel: 'パイプライン',
+        imagePipelineDescription:
+          'パイプラインごとに画像の扱いが異なります。切り替えると、以前のパイプラインで設定したパラメータは消去されます。',
+        imagePipelinePlaceholder: 'パイプラインを選択',
+        imagePipelineLoading: 'パイプラインを読み込み中…',
+        imagePipelineLoadError: 'パイプラインの読み込みに失敗しました',
         imageAttrsOcrConditions: '観察した属性条件に基づいて OCR を実行',
         imageAttrsOcrConditionsDesc: '観察した属性が以下の条件を満たす場合、その画像に OCR を実行します',
         imageAttrsOcrOnUnobserved: '画像属性の観察に失敗した場合も OCR を実行',

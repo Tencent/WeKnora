@@ -364,12 +364,23 @@
               </div>
             </div>
 
-            <div v-if="formData.multimodalConfig.enabled" class="setting-row">
+            <div v-if="formData.multimodalConfig.enabled" class="setting-row setting-row-vertical">
               <div class="setting-info">
-                <label>{{ $t('knowledgeEditor.advanced.multimodal.imageAttrsLabel') }}</label>
-                <p class="desc">{{ $t('knowledgeEditor.advanced.multimodal.imageAttrsDescription') }}</p>
+                <label>{{ $t('knowledgeEditor.advanced.multimodal.imagePipelineSectionLabel') }}</label>
+                <p class="desc">
+                  {{ $t('knowledgeEditor.advanced.multimodal.imagePipelineSectionDescription') }}
+                </p>
               </div>
-              <t-switch v-model="formData.imageAttrsEnabled" size="medium" />
+              <!-- The panel and the switch it replaces answer the same question
+                   from opposite ends: the switch said whether to observe, the
+                   list says which pipeline runs. Whatever is picked here is also
+                   written to imageAttrsEnabled, so a base edited through the UI
+                   keeps the older switch in step. -->
+              <ImagePipelineSettings
+                v-model:params="formData.imagePipelineParams"
+                :pipeline-id="formData.imagePipeline"
+                @update:pipeline-id="onPipelineChange"
+              />
             </div>
 
             <div v-if="formData.multimodalConfig.enabled && formData.imageAttrsEnabled"
@@ -605,6 +616,7 @@ import GraphSettings from './settings/GraphSettings.vue'
 import KBShareSettings from './settings/KBShareSettings.vue'
 import DataSourceSettings from './settings/DataSourceSettings.vue'
 import KnowledgeBaseActivitySettings from './settings/KnowledgeBaseActivitySettings.vue'
+import ImagePipelineSettings from './ImagePipelineSettings.vue'
 import { useI18n } from 'vue-i18n'
 
 const uiStore = useUIStore()
@@ -904,12 +916,16 @@ const initFormData = (type: 'document' | 'faq' = 'document') => {
       descriptionLanguage: '',
       customInstructions: ''
     },
-    // 图片属性观察管线：开关 + on_unobserved 兜底切换由 UI 编辑；其余配置
-    // （model_id 等）按加载时的快照原样回传，避免把 API 侧写入的设置洗掉。
-    // 新建模式也必须用完整默认动作初始化——imageActions.ocr.on_unobserved
-    // 直接被开关绑定，缺省会让打开开关的瞬间渲染崩溃。
+    // 图片属性观察管线：管线选择与各管线的私有参数由 ImagePipelineSettings
+    // 编辑；其余配置（model_id 等）按加载时的快照原样回传，避免把 API 侧写入
+    // 的设置洗掉。新建模式也必须用完整默认动作初始化——imageActions.ocr
+    // .on_unobserved 直接被开关绑定，缺省会让打开开关的瞬间渲染崩溃。
     imageAttrsEnabled: false,
     imageActions: mergeImageActions(),
+    // imagePipeline 为空表示「沿用旧的 imageAttrsEnabled 开关」，由后端
+    // ResolveImagePipelineID 推导；只有用户在下拉里显式选过才写值。
+    imagePipeline: '',
+    imagePipelineParams: {} as Record<string, unknown>,
     imageProcessingConfigSnapshot: null as Record<string, unknown> | null,
     asrConfig: {
       enabled: false,
@@ -1065,6 +1081,20 @@ const loadKBData = async (
       imageActions: mergeImageActions(
         (kb as Record<string, any>).image_processing_config?.image_actions,
       ),
+      // A base saved before the selector existed has no image_pipeline. The
+      // backend would then resolve from the old switch, so the panel shows what
+      // the base actually does today — ob_cap_ocr when observation is on — and
+      // saving writes that back explicitly.
+      imagePipeline:
+        ((kb as Record<string, any>).image_processing_config?.image_pipeline as string) ??
+        (!!(kb as Record<string, any>).image_processing_config?.image_attrs_enabled
+          ? 'ob_cap_ocr'
+          : ''),
+      imagePipelineParams:
+        ((kb as Record<string, any>).image_processing_config?.image_pipeline_params as Record<
+          string,
+          unknown
+        >) ?? {},
       imageProcessingConfigSnapshot:
         (kb as Record<string, any>).image_processing_config || null,
       asrConfig: {
@@ -1243,6 +1273,21 @@ const handleParserEngineRulesUpdate = (rules: any[]) => {
 const handleMultimodalToggle = () => {
   if (formData.value && !formData.value.multimodalConfig.enabled) {
     formData.value.multimodalConfig.vllmModelId = ''
+  }
+}
+
+/**
+ * The pipeline pick also decides the older observation switch: a non-empty pick
+ * is an explicit choice of the new way, and every pipeline in the registry so
+ * far observes images, so the switch stays on and the base keeps reading the
+ * same through either mechanism. Clearing the pick hands control back to that
+ * switch, which is then left untouched.
+ */
+const onPipelineChange = (value: string) => {
+  if (!formData.value) return
+  formData.value.imagePipeline = value
+  if (value) {
+    formData.value.imageAttrsEnabled = true
   }
 }
 
@@ -1458,6 +1503,8 @@ const buildSubmitData = () => {
       imageAttrsEnabled: formData.value.imageAttrsEnabled,
       onUnobserved: formData.value.imageActions.ocr.on_unobserved,
       defaultOn: displaySchema.value.default_actions.ocr.on,
+      pipelineId: formData.value.imagePipeline,
+      pipelineParams: formData.value.imagePipelineParams,
     })
     if (built) {
       data.image_processing_config = built

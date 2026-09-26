@@ -3955,6 +3955,15 @@ export default {
         imageAttrsDescription: 'When on, each image is first observed for attributes and described, then the attributes decide whether an OCR round runs for the text in the image. When off, the basic mode applies: every image is described and OCR runs for all of them',
         imageAttrsSchemaLabel: 'Observable image attributes',
         imageAttrsSchemaDescription: 'The model observes the attributes below (defined by the backend registry) to drive the OCR policy',
+        imagePipelineSectionLabel: 'Image pipeline',
+        imagePipelineSectionDescription:
+          'Images are processed by the pipeline picked here. The list of pipelines and of their tunables comes from the backend registry, so the panel only selects. Leaving it empty keeps the observation switch above in charge.',
+        imagePipelineLabel: 'Pipeline',
+        imagePipelineDescription:
+          'Pipelines differ in how they treat an image. Switching pipeline clears the parameters you set for the one you leave.',
+        imagePipelinePlaceholder: 'Select a pipeline',
+        imagePipelineLoading: 'Loading pipelines…',
+        imagePipelineLoadError: 'Could not load pipelines',
         imageAttrsOcrConditions: 'Trigger OCR based on the observed attribute conditions',
         imageAttrsOcrConditionsDesc: 'When the observed attributes match the conditions below, OCR runs on the image',
         imageAttrsOcrOnUnobserved: 'Run OCR when image-attribute observation fails',

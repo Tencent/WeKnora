@@ -4090,6 +4090,15 @@ export default {
         imageAttrsDescription: '켜면 각 이미지를 먼저 속성 관찰+설명한 뒤, 속성에 따라 이미지 내 텍스트에 OCR을 실행할지 결정합니다. 끄면 기본 모드: 모든 이미지를 하나씩 설명하고 모두 OCR합니다',
         imageAttrsSchemaLabel: '관찰 가능한 이미지 속성',
         imageAttrsSchemaDescription: '모델은 아래 속성(백엔드 레지스트리 정의)을 관찰해 OCR 정책을 결정합니다',
+        imagePipelineSectionLabel: '이미지 파이프라인',
+        imagePipelineSectionDescription:
+          '선택한 파이프라인으로 각 이미지를 처리합니다. 파이프라인 목록과 조정 항목은 백엔드 레지스트리에서 내려오므로 여기서는 선택만 합니다. 비워 두면 위의 관찰 스위치를 따릅니다.',
+        imagePipelineLabel: '파이프라인',
+        imagePipelineDescription:
+          '파이프라인마다 이미지 처리 방식이 다릅니다. 전환하면 이전 파이프라인에서 설정한 매개변수가 지워집니다.',
+        imagePipelinePlaceholder: '파이프라인 선택',
+        imagePipelineLoading: '파이프라인을 불러오는 중…',
+        imagePipelineLoadError: '파이프라인을 불러오지 못했습니다',
         imageAttrsOcrConditions: '관찰된 속성 조건에 따라 OCR 실행',
         imageAttrsOcrConditionsDesc: '관찰된 속성이 아래 조건을 충족하면 해당 이미지에 OCR을 실행합니다',
         imageAttrsOcrOnUnobserved: '이미지 속성 관찰에 실패해도 OCR 실행',

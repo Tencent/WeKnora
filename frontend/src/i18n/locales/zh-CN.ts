@@ -4092,6 +4092,15 @@ export default {
         imageAttrsDescription: '开启后，解析时对每张图片先「观察属性＋描述」，再按属性决定是否对图内文字再跑一轮 OCR；关闭则沿用基础模式：所有图片逐张描述并全部 OCR',
         imageAttrsSchemaLabel: '可观察的图片属性',
         imageAttrsSchemaDescription: '模型会观察以下属性（由后端注册表定义）以驱动 OCR 策略',
+        imagePipelineSectionLabel: '图片流水线',
+        imagePipelineSectionDescription:
+          '每张图片按此处选中的流水线处理；可选流水线与可调参数都由后端注册表下发，前端只负责选择。留空表示沿用上面的观察开关。',
+        imagePipelineLabel: '选择流水线',
+        imagePipelineDescription:
+          '不同流水线对图片的处理方式不同。切换流水线会清空刚才为该流水线设置的参数。',
+        imagePipelinePlaceholder: '请选择流水线',
+        imagePipelineLoading: '正在读取流水线…',
+        imagePipelineLoadError: '读取流水线失败',
         imageAttrsOcrConditions: '根据观察到的属性条件触发 OCR',
         imageAttrsOcrConditionsDesc: '当观察到的属性满足以下条件时，对图片进行 OCR',
         imageAttrsOcrOnUnobserved: '图片属性观察失败时仍执行 OCR',
