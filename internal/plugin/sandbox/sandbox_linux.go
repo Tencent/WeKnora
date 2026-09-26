@@ -43,10 +43,20 @@ func Main(args []string) int {
 	cmd := exec.Command(command[0], command[1:]...)
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 	cmd.SysProcAttr = &syscall.SysProcAttr{Pdeathsig: syscall.SIGKILL}
-	// The plugin host signals the whole process group; the plugin handles
-	// SIGTERM itself and the helper waits for it.
-	signal.Ignore(syscall.SIGTERM, syscall.SIGINT)
-	if err := cmd.Run(); err != nil {
+	// The plugin host signals the helper to stop the plugin: pass it on, so
+	// the plugin drains its calls, and wait for it to exit.
+	sigs := make(chan os.Signal, 2)
+	signal.Notify(sigs, syscall.SIGTERM, syscall.SIGINT)
+	err = cmd.Start()
+	if err == nil {
+		go func() {
+			for s := range sigs {
+				_ = cmd.Process.Signal(s)
+			}
+		}()
+		err = cmd.Wait()
+	}
+	if err != nil {
 		var exit *exec.ExitError
 		if errors.As(err, &exit) {
 			return exit.ExitCode()

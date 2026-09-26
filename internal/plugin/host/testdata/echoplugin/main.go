@@ -40,6 +40,15 @@ func main() {
 		case "pid":
 			return &pluginapi.SearchOutput{Results: []pluginapi.SearchResult{{Title: strconv.Itoa(os.Getpid()), URL: "pid"}}}, nil
 		}
+		// sleep:<duration> answers after a while, to keep a call in flight.
+		if d, ok := strings.CutPrefix(in.Query, "sleep:"); ok {
+			wait, err := time.ParseDuration(d)
+			if err != nil {
+				return nil, err
+			}
+			time.Sleep(wait)
+			return result("slept"), nil
+		}
 		// dial:<addr> connects without the proxy; fetch:<url> GETs through
 		// the environment's proxy settings.
 		if addr, ok := strings.CutPrefix(in.Query, "dial:"); ok {

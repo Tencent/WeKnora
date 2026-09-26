@@ -66,10 +66,14 @@ func (m *Manager) relay(w http.ResponseWriter, r *http.Request, key []byte) {
 	id, version, path := parts[0], parts[1], "/"+parts[2]
 	m.mu.Lock()
 	p := m.procs[id]
+	if p == nil || p.spec.m.Version != version {
+		// A caller not yet switched to an upgrade reaches the version it
+		// knows while it is handed over.
+		p = m.handingOver[id]
+	}
 	m.mu.Unlock()
 	if p == nil || p.spec.m.Version != version {
-		// The caller's view of this host is a heartbeat old; it retries
-		// elsewhere.
+		// The caller's view of this host is a heartbeat old.
 		gatewayError(w, pluginapi.Errorf(pluginapi.CodeUnavailable, "this host does not run %s@%s", id, version))
 		return
 	}

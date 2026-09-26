@@ -384,8 +384,8 @@ services:
       # ========== 插件 ==========
       # app 自己运行哪些 kind 的宿主插件（binary,python；none 表示全部交给 plugin-host），默认本机能跑的都跑
       - WEKNORA_PLUGIN_EMBEDDED_KINDS=${WEKNORA_PLUGIN_EMBEDDED_KINDS:-}
-      # 不在本机运行的插件（remote、plugin-host 上的）回调 Host API 的地址；启用 plugin-host 时设为 http://app:8080
-      - WEKNORA_PLUGIN_HOST_API_URL=${WEKNORA_PLUGIN_HOST_API_URL:-}
+      # 不在本机运行的插件（remote、plugin-host 上的）回调 Host API 的地址；须与 plugin-host 的取值一致
+      - WEKNORA_PLUGIN_HOST_API_URL=${WEKNORA_PLUGIN_HOST_API_URL:-http://app:8080}
     depends_on:
       redis:
         condition: service_started
@@ -404,7 +404,7 @@ services:
   # 通过 Redis 向 app 通告自己，app 用 SYSTEM_AES_KEY 派生的密钥签名调用它。
   # 启用：docker compose --profile plugin-host up -d，并在 .env 里设
   #   WEKNORA_PLUGIN_EMBEDDED_KINDS=none（或 binary）
-  #   WEKNORA_PLUGIN_HOST_API_URL=http://app:8080
+  # 插件经 WEKNORA_PLUGIN_HOST_API_URL（默认 http://app:8080，app 与此处共用）回调 Host API。
   plugin-host:
     image: wechatopenai/weknora-app:${WEKNORA_VERSION:-latest}
     container_name: WeKnora-plugin-host

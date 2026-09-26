@@ -132,15 +132,22 @@ func RunPluginHost(ctx context.Context) error {
 		return fmt.Errorf("gateway: %w", err)
 	}
 	// Withdraw first so app nodes stop picking this host, then let calls in
-	// flight finish before the plugins stop.
+	// flight finish: the gateway relays them while the plugins, told to
+	// stop, drain them (within the stop grace period, which the pod's
+	// termination grace period outlasts).
 	stop()
 	<-announced
+	closed := make(chan struct{})
+	go func() {
+		mgr.Close()
+		close(closed)
+	}()
 	shutdown, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	if err := srv.Shutdown(shutdown); err != nil {
 		logger.Warnf(ctx, "[plugin-host] shutdown: %v", err)
 	}
-	mgr.Close()
+	<-closed
 	return nil
 }
 

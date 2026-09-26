@@ -197,3 +197,12 @@ securityContext:
 {{- toYaml . | nindent 2 }}
 {{- end }}
 {{- end }}
+
+{{/*
+Host API address for plugins that do not run in the app pods: the app
+Service by a name that resolves from any namespace. The app hands it to the
+plugins; plugin hosts let it bypass their egress proxy, so both use this.
+*/}}
+{{- define "weknora.pluginHostAPIURL" -}}
+http://app.{{ .Release.Namespace }}.svc:{{ .Values.app.service.port }}
+{{- end }}

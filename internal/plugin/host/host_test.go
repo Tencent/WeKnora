@@ -2,6 +2,7 @@ package host
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -179,9 +180,10 @@ func TestHostRunsRestartsAndStopsAPlugin(t *testing.T) {
 	}
 	if runtime.GOOS != "windows" {
 		n, _ := strconv.Atoi(pid2)
-		if proc, err := os.FindProcess(n); err == nil && proc.Signal(syscall.Signal(0)) == nil {
-			t.Fatalf("process %d still runs after Deactivate", n)
-		}
+		waitFor(t, "the process to exit after Deactivate", func() bool {
+			proc, err := os.FindProcess(n)
+			return err != nil || proc.Signal(syscall.Signal(0)) != nil
+		})
 	}
 }
 
@@ -221,6 +223,82 @@ func TestUpgradeSwapsProcessesInPlace(t *testing.T) {
 	pid2, err := search(t, m, "pid")
 	if err != nil || pid2 == pid1 {
 		t.Fatalf("after upgrade pid = %s (was %s), %v", pid2, pid1, err)
+	}
+}
+
+// An upgrade does not wait for the old process to finish its calls: it
+// drains them in the background, up to the stop grace period.
+func TestUpgradeLetsTheOldProcessFinishItsCalls(t *testing.T) {
+	fastTimings(t)
+	stopGrace = 20 * time.Second
+	ctx := context.Background()
+	m := NewManager()
+	defer m.Close()
+	if err := m.Activate(ctx, install(t, "1.0.0", "")); err != nil {
+		t.Fatal(err)
+	}
+	inFlight := make(chan error, 1)
+	go func() {
+		got, err := search(t, m, "sleep:3s")
+		if err == nil && got != "slept" {
+			err = fmt.Errorf("answer %q", got)
+		}
+		inFlight <- err
+	}()
+	time.Sleep(300 * time.Millisecond)
+	start := time.Now()
+	if err := m.Activate(ctx, install(t, "1.1.0", "")); err != nil {
+		t.Fatal(err)
+	}
+	if took := time.Since(start); took > 2*time.Second {
+		t.Fatalf("the upgrade waited %s for the old process", took)
+	}
+	if err := <-inFlight; err != nil {
+		t.Fatalf("the call in flight on the old version failed: %v", err)
+	}
+}
+
+// A standalone host keeps the previous version of an upgraded plugin
+// running for the handover window, then stops it.
+func TestStandaloneHostHandsOverAnUpgrade(t *testing.T) {
+	fastTimings(t)
+	defer func(d time.Duration) { handoverWindow = d }(handoverWindow)
+	handoverWindow = 500 * time.Millisecond
+	ctx := context.Background()
+	m := NewStandaloneManager([]string{KindBinary})
+	defer m.Close()
+	changes := make(chan struct{}, 100)
+	m.OnChange(func() { changes <- struct{}{} })
+	if err := m.Activate(ctx, install(t, "1.0.0", "")); err != nil {
+		t.Fatal(err)
+	}
+	pid1, _ := search(t, m, "pid")
+	for len(changes) > 0 {
+		<-changes
+	}
+	if err := m.Activate(ctx, install(t, "1.1.0", "")); err != nil {
+		t.Fatal(err)
+	}
+	if len(changes) == 0 {
+		t.Fatal("an upgrade must be announced")
+	}
+	versions := func() string {
+		var vs []string
+		for _, r := range m.Running() {
+			vs = append(vs, r.Version)
+		}
+		return strings.Join(vs, ",")
+	}
+	if got := versions(); got != "1.0.0,1.1.0" {
+		t.Fatalf("running during the handover = %s", got)
+	}
+	waitFor(t, "the handover to end", func() bool { return versions() == "1.1.0" })
+	if runtime.GOOS != "windows" {
+		n, _ := strconv.Atoi(pid1)
+		waitFor(t, "the previous version to exit", func() bool {
+			proc, err := os.FindProcess(n)
+			return err != nil || proc.Signal(syscall.Signal(0)) != nil
+		})
 	}
 }
 

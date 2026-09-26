@@ -18,6 +18,7 @@
 package pluginsdk
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -29,7 +30,6 @@ import (
 	"os"
 	"os/signal"
 	"sort"
-	"strings"
 	"syscall"
 	"time"
 
@@ -363,7 +363,9 @@ func bearerAuth(token string) middleware {
 }
 
 // maxBody bounds a signed request body read into memory for verification.
-const maxBody = 32 << 20
+// A parse call carries the whole document, base64-encoded; this is the
+// limit of WeKnora's plugin host gateway too.
+const maxBody = 512 << 20
 
 func signatureAuth(secret []byte) middleware {
 	return func(next http.Handler) http.Handler {
@@ -379,7 +381,7 @@ func signatureAuth(secret []byte) middleware {
 				writeError(w, pluginapi.Errorf(pluginapi.CodeUnauthorized, "%v", err))
 				return
 			}
-			r.Body = io.NopCloser(strings.NewReader(string(body)))
+			r.Body = io.NopCloser(bytes.NewReader(body))
 			next.ServeHTTP(w, r)
 		})
 	}

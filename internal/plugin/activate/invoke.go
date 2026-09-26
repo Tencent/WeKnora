@@ -112,9 +112,12 @@ func (iv *Invoker) SetWebhooks(tokens *webhook.Tokens, publicBase string) {
 	iv.mu.Unlock()
 }
 
-// TokenIssuer signs the Host API token of one call.
+// TokenIssuer signs the Host API token of one call, valid until the call's
+// deadline (zero: none).
 type TokenIssuer interface {
-	Issue(pluginID, version string, tenantID uint64, scopes []string) (string, time.Time, error)
+	IssueUntil(
+		pluginID, version string, tenantID uint64, scopes []string, deadline time.Time,
+	) (string, time.Time, error)
 }
 
 // SetHostAPI lets calls carry Host API access: where plugins reach WeKnora
@@ -195,7 +198,11 @@ func (iv *Invoker) Envelope(
 		}
 	}
 	if tokens != nil && hostURL != "" && env.Context.TenantID != 0 && len(m.Permissions.HostAPI) > 0 {
-		token, _, err := tokens.Issue(m.ID, m.Version, env.Context.TenantID, m.Permissions.HostAPI)
+		var deadline time.Time
+		if env.Context.Deadline != nil {
+			deadline = *env.Context.Deadline
+		}
+		token, _, err := tokens.IssueUntil(m.ID, m.Version, env.Context.TenantID, m.Permissions.HostAPI, deadline)
 		if err != nil {
 			return env, err
 		}
