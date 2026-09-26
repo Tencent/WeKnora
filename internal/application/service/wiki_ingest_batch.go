@@ -1255,7 +1255,14 @@ func (s *wikiIngestService) mapOneDocument(
 	// was in flight, we must NOT proceed to LLM extraction — doing so would
 	// create wiki pages whose source_refs point at a ghost knowledge ID,
 	// permanently unreachable via wiki_read_source_doc.
-	if s.isKnowledgeGone(ctx, payload.KnowledgeBaseID, knowledgeID) {
+	gone, err := s.isKnowledgeGone(ctx, payload.KnowledgeBaseID, knowledgeID)
+	if err != nil {
+		failCtx, cancel := wikiIngestCleanupContext(ctx)
+		defer cancel()
+		s.tracker().FailSpan(failCtx, wikiSpan, "KNOWLEDGE_LOOKUP_FAILED", err.Error(), err)
+		return nil, nil, err
+	}
+	if gone {
 		logger.Infof(ctx, "wiki ingest: knowledge %s has been deleted, skip map", knowledgeID)
 		s.tracker().SkipSpan(ctx, wikiSpan, "knowledge_deleted")
 		return nil, nil, nil
@@ -1791,7 +1798,10 @@ func (s *wikiIngestService) reduceSlugUpdates(
 	// knowledge no longer exists so we don't resurrect a ghost source_ref.
 	// Retract updates are kept — they actively remove refs, which is what we
 	// want when the doc is gone.
-	updates = s.filterLiveUpdates(ctx, kbID, updates)
+	updates, err = s.filterLiveUpdates(ctx, kbID, updates)
+	if err != nil {
+		return false, "", false, err
+	}
 	if len(updates) == 0 {
 		return false, "", false, nil
 	}
