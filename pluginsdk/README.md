@@ -392,8 +392,9 @@ Scopes:
     deleted. The Jira example has its webhook note deleted issues in `kv`
     for the sync to confirm and report.
 
-The token is valid for a few minutes: use `call.Host()` within the call and
-don't keep it.
+The token is valid for the whole call: until the call's deadline plus a
+minute, at least five minutes, at most six hours, so a long sync can use it
+to the end. Use `call.Host()` within the call and don't keep it.
 
 ## Packaging
 
@@ -429,7 +430,12 @@ A few rules the manifest and host enforce:
   `WEKNORA_PLUGIN_*` variables.
 - **Outbound traffic.** It goes through the host's egress proxy, which
   forwards only to the hosts in `permissions.egress` and never to private
-  addresses.
+  addresses. The process gets the proxy as `HTTP_PROXY`/`HTTPS_PROXY`, so
+  use an HTTP client that honors them. On Linux the host also runs the
+  process in its own network namespace when the system allows it (the
+  default, `WEKNORA_PLUGIN_NETNS`), where the proxy is the only way out;
+  elsewhere a direct connection is not blocked, only against the rules.
+  The platform admin sees which applies to each instance.
 - **Resources.** `runtime.resources: { cpu: "500m", memory: 512Mi }`
   caps the process (Linux). Memory is always capped. CPU is capped only
   when the platform delegates a cgroup to WeKnora
