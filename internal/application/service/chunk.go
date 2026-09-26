@@ -646,7 +646,7 @@ func (s *chunkService) syncEditedChunkImages(ctx context.Context, chunk *types.C
 	}
 	contentURLs := searchutil.ImageURLsInContent(chunk.Content)
 	for _, child := range children {
-		if child.ChunkType != types.ChunkTypeImageOCR && child.ChunkType != types.ChunkTypeImageCaption {
+		if !types.IsImageChildChunkType(child.ChunkType) {
 			continue
 		}
 		desiredEnabled := chunk.IsEnabled && imageChildMatchesContent(child, contentURLs)
@@ -770,6 +770,11 @@ func (s *chunkService) syncChunkIndex(ctx context.Context, chunk *types.Chunk) e
 	engine, err := retriever.CreateRetrieveEngineForKB(ctx, s.retrieveEngine, s.ownership, chunk.TenantID, kb.VectorStoreID)
 	if err != nil {
 		return err
+	}
+	if chunk.ChunkType == types.ChunkTypeImageVector {
+		// Its index row holds the image's own vector; re-embedding Content
+		// would replace it with the caption's. Only the enabled flag follows.
+		return engine.BatchUpdateChunkEnabledStatus(ctx, map[string]bool{chunk.ID: chunk.IsEnabled})
 	}
 	if err := engine.DeleteByChunkIDList(ctx, []string{chunk.ID}, embedder.GetDimensions(), kb.Type); err != nil {
 		return err

@@ -501,6 +501,15 @@
           </div>
         </div>
 
+        <!-- Embedding: image input. Catalogued models answer it themselves; a row declares it in spec.input. -->
+        <div v-if="activeModelType === 'embedding'" class="form-item">
+          <label class="form-label">{{ $t('model.editor.embeddingImageInputLabel') }}</label>
+          <div class="vision-toggle">
+            <t-switch v-model="embeddingAcceptsImages" />
+            <span class="form-desc form-desc--inline">{{ $t('model.editor.embeddingImageInputDesc') }}</span>
+          </div>
+        </div>
+
         <!-- Chat / VLM: context window. Agent compaction sizes itself from this. -->
         <div v-if="activeModelType === 'chat' || activeModelType === 'vllm'" class="form-item">
           <label class="form-label">{{ $t('model.editor.contextWindowLabel') }}</label>
@@ -955,6 +964,38 @@ const vendorDocLink = computed(() => {
  */
 const catalogFilled = ref<Partial<ModelFormData>>({})
 
+/** Whether the catalog says the selected embedding model takes images. */
+const catalogEmbeddingAcceptsImages = computed(() =>
+  !!findCatalogEntry((formData.value.modelName || '').trim())?.input?.includes('image'))
+
+/**
+ * Image input of an embedding model: spec.input when the row declares it,
+ * the catalog otherwise. The row only stores a declaration that differs from
+ * the catalog, so a later catalog correction still reaches it.
+ */
+const embeddingAcceptsImages = computed<boolean>({
+  get: () => {
+    const input = formData.value.spec?.input
+    return Array.isArray(input) && input.length > 0
+      ? input.includes('image')
+      : catalogEmbeddingAcceptsImages.value
+  },
+  set: (value) => {
+    const spec: ModelSpecOverride = { ...(formData.value.spec || {}) }
+    if (value === catalogEmbeddingAcceptsImages.value) delete spec.input
+    else spec.input = value ? ['text', 'image'] : ['text']
+    formData.value.spec = Object.keys(spec).length > 0 ? spec : null
+  },
+})
+
+/** A declared input belongs to the model it was declared for. */
+const dropEmbeddingInputOverride = () => {
+  if (!formData.value.spec?.input) return
+  const spec: ModelSpecOverride = { ...formData.value.spec }
+  delete spec.input
+  formData.value.spec = Object.keys(spec).length > 0 ? spec : null
+}
+
 /** Fill blank capability fields from a catalog entry the user just picked. */
 const applyCatalogEntry = (entry: ModelCatalogEntry) => {
   if (activeModelType.value === 'chat' || activeModelType.value === 'vllm') {
@@ -971,6 +1012,7 @@ const applyCatalogEntry = (entry: ModelCatalogEntry) => {
     formData.value.supportsVision = true
     catalogFilled.value.supportsVision = true
   }
+  if (activeModelType.value === 'embedding') dropEmbeddingInputOverride()
   if (activeModelType.value === 'embedding' && !formData.value.dimension && entry.dimension) {
     formData.value.dimension = entry.dimension
     catalogFilled.value.dimension = entry.dimension
@@ -1623,6 +1665,7 @@ const resetModelSelectionForVendor = () => {
   if (filled.supportsVision && formData.value.supportsVision) {
     formData.value.supportsVision = false
   }
+  if (activeModelType.value === 'embedding') dropEmbeddingInputOverride()
   catalogFilled.value = {}
   modelChecked.value = false
   modelAvailable.value = false

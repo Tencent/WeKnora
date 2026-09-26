@@ -390,6 +390,15 @@ func ClearImageInfoTextMatchingBody(imageInfoJSON, recognized, chunkType string)
 				infos[i].Caption = ""
 				changed = true
 			}
+		case string(types.ChunkTypeImageVector):
+			// Its body is the caption, or the OCR text when there was none.
+			if infos[i].Caption == recognized {
+				infos[i].Caption = ""
+				changed = true
+			} else if infos[i].OCRText == recognized {
+				infos[i].OCRText = ""
+				changed = true
+			}
 		}
 	}
 	if !changed {

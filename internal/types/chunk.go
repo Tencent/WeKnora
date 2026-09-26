@@ -21,6 +21,11 @@ const (
 	ChunkTypeImageOCR ChunkType = "image_ocr"
 	// ChunkTypeImageCaption 表示图片描述的 Chunk
 	ChunkTypeImageCaption ChunkType = "image_caption"
+	// ChunkTypeImageVector 表示由多模态向量模型直接对图片编码的 Chunk。
+	// 它的索引行存的是图片本身的向量（SourceType 为 ImageSourceType），
+	// 不是 Content 的文本向量；Content 复用图片描述（没有描述时用 OCR 文本），
+	// 供重排和回答上下文使用。任何按文本重建索引的路径都不能处理它。
+	ChunkTypeImageVector ChunkType = "image_vector"
 	// ChunkTypeSummary 表示摘要类型的 Chunk
 	ChunkTypeSummary = "summary"
 	// ChunkTypeEntity 表示实体类型的 Chunk
@@ -38,6 +43,12 @@ const (
 	// ChunkTypeWikiPage 表示 Wiki 页面同步的 Chunk，用于将 wiki 页面接入现有检索管线
 	ChunkTypeWikiPage ChunkType = "wiki_page"
 )
+
+// IsImageChildChunkType reports whether a chunk is one the multimodal
+// pipeline hangs under the text chunk that shows an image.
+func IsImageChildChunkType(t ChunkType) bool {
+	return t == ChunkTypeImageOCR || t == ChunkTypeImageCaption || t == ChunkTypeImageVector
+}
 
 // ChunkStatus 定义了不同状态的 Chunk
 type ChunkStatus int

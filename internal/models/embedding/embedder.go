@@ -2,10 +2,12 @@ package embedding
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/models/api"
 	"github.com/Tencent/WeKnora/internal/models/utils/ollama"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -29,6 +31,61 @@ type Embedder interface {
 	GetModelID() string
 
 	EmbedderPooler
+}
+
+// Image is one image to embed: its bytes and MIME type.
+type Image = api.EmbedImage
+
+// ErrImagesUnsupported is returned when an embedder is asked for an image
+// vector its model or endpoint cannot produce.
+var ErrImagesUnsupported = errors.New("embedding model does not accept images")
+
+// ImageEmbedder is the image side of an Embedder whose model maps images into
+// the same space as its text vectors, so that a text query can find an image.
+// It is a separate interface because most embedders have no image side; use
+// AsImageEmbedder rather than a type assertion, since every decorator
+// implements it whether or not the model underneath does.
+type ImageEmbedder interface {
+	// AcceptsImages reports whether both the model and its endpoint take
+	// images.
+	AcceptsImages() bool
+	// ImageLimits are the vendor's documented per-image limits. The caller
+	// shrinks or converts an image to fit; an image outside them is refused.
+	ImageLimits() ImageLimits
+	// BatchEmbedImages converts images to vectors comparable with Embed's.
+	BatchEmbedImages(ctx context.Context, images []Image) ([][]float32, error)
+}
+
+// ImageLimits describes what one image may be. Zero values mean the vendor
+// documents no limit.
+type ImageLimits struct {
+	MaxBytes  int
+	MIMETypes []string
+}
+
+// AsImageEmbedder returns e's image side when its model accepts images.
+func AsImageEmbedder(e Embedder) (ImageEmbedder, bool) {
+	ie, ok := e.(ImageEmbedder)
+	if !ok || !ie.AcceptsImages() {
+		return nil, false
+	}
+	return ie, true
+}
+
+// imageSide is AsImageEmbedder for decorators, which must fail a call their
+// inner embedder cannot serve.
+func imageSide(e Embedder) (ImageEmbedder, error) {
+	if ie, ok := AsImageEmbedder(e); ok {
+		return ie, nil
+	}
+	return nil, fmt.Errorf("%s: %w", e.GetModelName(), ErrImagesUnsupported)
+}
+
+func imageLimitsOf(e Embedder) ImageLimits {
+	if ie, ok := AsImageEmbedder(e); ok {
+		return ie.ImageLimits()
+	}
+	return ImageLimits{}
 }
 
 type EmbedderPooler interface {

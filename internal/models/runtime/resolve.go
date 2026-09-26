@@ -298,6 +298,12 @@ func (r *Resolved) Capabilities() Capabilities {
 		ContextWindow:   r.Spec.ContextWindow,
 		MaxOutputTokens: r.Spec.MaxOutputTokens,
 	}
+	// Embedding, rerank and ASR references resolve no chat protocol, and an
+	// empty level map reads as "every level supported"; they do not think.
+	if r.API == "" {
+		caps.ThinkingLevels = []api.ReasoningEffort{}
+		return caps
+	}
 	switch r.API {
 	case api.APIOpenAICompletions:
 		caps.ThinkingFormat = string(r.OpenAICompletions.ThinkingFormat)

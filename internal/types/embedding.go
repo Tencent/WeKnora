@@ -7,6 +7,12 @@ const (
 	ChunkSourceType   SourceType = iota // Source is a text chunk
 	PassageSourceType                   // Source is a passage
 	SummarySourceType                   // Source is a summary
+	// ImageSourceType is an image embedded by a multimodal embedding model.
+	// Its vector lives in the text space but scores lower against a text
+	// query than text does, and its Content is not what was embedded, so
+	// retrieval gives it its own threshold and never counts it as a
+	// keyword hit.
+	ImageSourceType
 )
 
 // MatchType represents the type of matching algorithm
