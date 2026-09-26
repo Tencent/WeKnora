@@ -157,6 +157,7 @@ func TestDriverDeploysAndRemoves(t *testing.T) {
 		`"image":"ghcr.io/acme/search:1.2.0"`, `"value":":9000"`,
 		`"secretKeyRef":{"key":"secret","name":"` + name + `"}`,
 		`"memory":"256Mi"`, `"automountServiceAccountToken":false`, `"weknora.plugin/version":"1.2.0"`,
+		`"terminationGracePeriodSeconds":75`,
 	} {
 		if !strings.Contains(string(b), want) {
 			t.Fatalf("deployment lacks %s: %s", want, b)

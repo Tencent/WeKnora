@@ -239,19 +239,20 @@ func TestUpgradeLetsTheOldProcessFinishItsCalls(t *testing.T) {
 	}
 	inFlight := make(chan error, 1)
 	go func() {
-		got, err := search(t, m, "sleep:3s")
+		got, err := search(t, m, "sleep:4s")
 		if err == nil && got != "slept" {
 			err = fmt.Errorf("answer %q", got)
 		}
 		inFlight <- err
 	}()
 	time.Sleep(300 * time.Millisecond)
-	start := time.Now()
 	if err := m.Activate(ctx, install(t, "1.1.0", "")); err != nil {
 		t.Fatal(err)
 	}
-	if took := time.Since(start); took > 2*time.Second {
-		t.Fatalf("the upgrade waited %s for the old process", took)
+	select {
+	case err := <-inFlight:
+		t.Fatalf("the upgrade waited for the old process's call to finish (%v)", err)
+	default:
 	}
 	if err := <-inFlight; err != nil {
 		t.Fatalf("the call in flight on the old version failed: %v", err)

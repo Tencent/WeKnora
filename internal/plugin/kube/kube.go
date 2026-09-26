@@ -441,6 +441,9 @@ func Resources(cfg *Config, m *manifest.Manifest, name, secret string) []Object 
 	podSpec := map[string]any{
 		"containers":                   []any{container},
 		"automountServiceAccountToken": false,
+		// The SDKs drain calls for up to 60s on SIGTERM; the default 30s
+		// would cut a rollout's in-flight parse or sync short.
+		"terminationGracePeriodSeconds": 75,
 	}
 	if cfg.ImagePullSecret != "" {
 		podSpec["imagePullSecrets"] = []any{map[string]any{"name": cfg.ImagePullSecret}}
