@@ -293,3 +293,10 @@ func TestPublishAnswer(t *testing.T) {
 		t.Fatalf("published %+v %+v", p, data)
 	}
 }
+
+// Deliveries go to the queue the runtime-queues page shows them in.
+func TestDeliveriesUseTheDeclaredQueue(t *testing.T) {
+	if q, ok := types.QueueForTaskType(TaskType); !ok || q != types.QueueMaintenance {
+		t.Fatalf("plugin events are enqueued on %q but declared on %q", types.QueueMaintenance, q)
+	}
+}
