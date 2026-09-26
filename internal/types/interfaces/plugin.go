@@ -34,7 +34,11 @@ type PluginRepository interface {
 	ListPlugins(ctx context.Context) ([]types.InstalledPlugin, error)
 	// GetPlugin returns (nil, nil) when the plugin is not installed.
 	GetPlugin(ctx context.Context, id string) (*types.InstalledPlugin, error)
+	// SavePlugin inserts or overwrites the whole row.
 	SavePlugin(ctx context.Context, p *types.InstalledPlugin) error
+	// UpdatePlugin writes only the named columns of an existing row, so
+	// concurrent changes to other columns are kept.
+	UpdatePlugin(ctx context.Context, p *types.InstalledPlugin, columns ...string) error
 	// DeletePlugin removes the plugin and every stored version.
 	DeletePlugin(ctx context.Context, id string) error
 	ListVersions(ctx context.Context, pluginID string) ([]types.PluginVersion, error)

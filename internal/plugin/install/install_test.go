@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/plugin/manifest"
+	"github.com/Tencent/WeKnora/internal/plugin/pkg"
 	"github.com/Tencent/WeKnora/internal/plugin/plugintest"
 	"github.com/Tencent/WeKnora/internal/plugin/reconcile"
 	"github.com/Tencent/WeKnora/internal/plugin/registry"
@@ -429,5 +430,100 @@ func TestKubernetesPackagesNeedACluster(t *testing.T) {
 	}
 	if row, _ := repo.GetPlugin(ctx, "acme.kube"); row.RemoteSecret == before {
 		t.Fatal("rotation kept the secret")
+	}
+}
+
+// A plugin that moves from kubernetes to remote gets a secret the
+// administrator is shown: nobody ever saw the one its pods had.
+func TestKubernetesToRemoteIssuesASecret(t *testing.T) {
+	ctx := context.Background()
+	utils.SetSSRFWhitelistFromRaw("plugins.example.com")
+	t.Cleanup(func() { utils.SetSSRFWhitelistFromRaw("") })
+	t.Setenv("SYSTEM_AES_KEY", strings.Repeat("k", 32))
+	s, repo, _, _ := newService(t)
+	s.WithRuntimes(manifest.RuntimeKubernetes)
+	kubePkg := func(version string) []byte {
+		return plugintest.Zip(t, map[string]string{"plugin.yaml": "schemaVersion: 1\nid: acme.remote\n" +
+			"version: " + version + "\napiVersion: weknora.plugin/v1\nname: K\npublisher: { id: acme }\n" +
+			"runtime: { type: kubernetes, image: ghcr.io/acme/remote:1 }\n" +
+			"contributes:\n  webSearch:\n    - { id: search, name: S }\n"})
+	}
+	if _, err := s.Install(ctx, Request{Data: kubePkg("1.0.0")}); err != nil {
+		t.Fatal(err)
+	}
+	kubeSecret := func() string { row, _ := repo.GetPlugin(ctx, "acme.remote"); return row.RemoteSecret }
+	deployed := kubeSecret()
+
+	v, err := s.Install(ctx, Request{Data: remotePackage(t, "2.0.0"), RemoteURL: "https://plugins.example.com/r"})
+	if err != nil || len(v.IssuedSecret) != 64 || kubeSecret() == deployed {
+		t.Fatalf("switch to remote = %+v, %v", v, err)
+	}
+
+	// Back to kubernetes keeps it; a rollback to remote shows a new one.
+	if v, err = s.Activate(ctx, "acme.remote", "1.0.0"); err != nil || v.IssuedSecret != "" {
+		t.Fatalf("back to kubernetes = %+v, %v", v, err)
+	}
+	if v, err = s.Activate(ctx, "acme.remote", "2.0.0"); err != nil || len(v.IssuedSecret) != 64 {
+		t.Fatalf("rollback to remote = %+v, %v", v, err)
+	}
+}
+
+// Activating a stored version runs the checks installing it did: the
+// platform may no longer accept it.
+func TestActivateChecksTheStoredPackage(t *testing.T) {
+	ctx := context.Background()
+	s, _, _, _ := newService(t)
+	refuse := ""
+	s.WithChecks(func(p *pkg.Package) error {
+		if p.Manifest.Version == refuse {
+			return errors.New("vendor definitions no longer load")
+		}
+		return nil
+	})
+	for _, v := range []string{"1.0.0", "1.1.0"} {
+		if _, err := s.Install(ctx, Request{Data: plugintest.KitPackage(t, v)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	refuse = "1.0.0"
+	if _, err := s.Activate(ctx, "acme.kit", "1.0.0"); !isInvalid(err) || !strings.Contains(err.Error(), "no longer") {
+		t.Fatalf("activate a version the checks refuse = %v", err)
+	}
+	if v, _ := s.Get(ctx, "acme.kit"); v.ActiveVersion != "1.1.0" {
+		t.Fatalf("active = %s", v.ActiveVersion)
+	}
+	refuse = ""
+	if _, err := s.Activate(ctx, "acme.kit", "1.0.0"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A kind this node leaves to standalone plugin hosts is not checked against
+// this machine: the plugin host checks it against its own.
+func TestHostKindsLeftToPluginHosts(t *testing.T) {
+	ctx := context.Background()
+	s, _, _, _ := newService(t)
+	elsewhere := hostPackage(t, "binary", "bin/plan9-mips/search")
+	py := plugintest.Zip(t, map[string]string{
+		"plugin.yaml": "schemaVersion: 1\nid: acme.py\nversion: 1.0.0\napiVersion: weknora.plugin/v1\n" +
+			"name: { en-US: ACME Py }\npublisher: { id: acme }\n" +
+			"runtime: { type: host, kind: python, entry: main.py }\n" +
+			"contributes:\n  webSearch:\n    - { id: search, name: ACME Search }\n",
+		"main.py": "print()",
+	})
+	t.Setenv("WEKNORA_PLUGIN_PYTHON", "no-such-python-here")
+	t.Setenv("WEKNORA_PLUGIN_EMBEDDED_KINDS", "none")
+	if _, err := s.Inspect(ctx, elsewhere); err != nil {
+		t.Fatalf("a binary for another machine, run elsewhere: %v", err)
+	}
+	if _, err := s.Inspect(ctx, py); err != nil {
+		t.Fatalf("python run elsewhere: %v", err)
+	}
+	t.Setenv("WEKNORA_PLUGIN_EMBEDDED_KINDS", "binary,python")
+	if _, err := s.Inspect(ctx, elsewhere); !isInvalid(err) {
+		t.Fatalf("a binary for another machine, run here: %v", err)
+	}
+	if _, err := s.Inspect(ctx, py); !isInvalid(err) {
+		t.Fatalf("python run here without an interpreter: %v", err)
 	}
 }

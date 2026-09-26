@@ -14,6 +14,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"os/exec"
 	goruntime "runtime"
 	"slices"
@@ -55,12 +56,35 @@ var supportedRuntimes = map[manifest.RuntimeType]bool{
 	manifest.RuntimeRemote:      true,
 }
 
-// checkHostRuntime makes sure this server can run a host plugin: a binary
-// built for its OS and architecture, or a Python entry and an interpreter.
-func checkHostRuntime(p *pkg.Package) error {
+// embeddedKindsEnv names the host plugin kinds this node runs itself.
+const embeddedKindsEnv = "WEKNORA_PLUGIN_EMBEDDED_KINDS"
+
+// runsEmbedded reports whether this node runs host plugins of a kind itself.
+// Unset, it runs every kind it can, so the plugin must be able to run here;
+// a kind the setting leaves out runs on standalone plugin hosts, which
+// check the package against their own machine.
+func runsEmbedded(kind string) bool {
+	if raw, ok := os.LookupEnv(embeddedKindsEnv); !ok || strings.TrimSpace(raw) == "" {
+		return true
+	}
+	return slices.Contains(host.KindsFromEnv(embeddedKindsEnv), kind)
+}
+
+// checkHostRuntime makes sure a host plugin can run where it will: a binary
+// built for this server's OS and architecture, or a Python entry and an
+// interpreter, when this server runs its kind itself.
+func checkHostRuntime(p *pkg.Package, embedded func(kind string) bool) error {
 	rt := p.Manifest.Runtime
 	if !host.Supported(rt.Kind) {
 		return invalid("runtime.kind %q is not supported yet; host plugins must be binaries or python", rt.Kind)
+	}
+	if !embedded(rt.Kind) {
+		if rt.Kind == host.KindPython {
+			if _, ok := p.ReadFile(rt.Entry); !ok {
+				return invalid("the package has no %s (runtime.entry)", rt.Entry)
+			}
+		}
+		return nil
 	}
 	entry := host.EntryName(rt)
 	if _, ok := p.ReadFile(entry); !ok {
@@ -99,6 +123,8 @@ type Service struct {
 	tenantPlugins func(context.Context) bool
 	// runtimes adds runtimes this platform is set up for (kubernetes).
 	runtimes map[manifest.RuntimeType]bool
+	// embedded reports whether this node runs a host plugin kind itself.
+	embedded func(kind string) bool
 }
 
 // WithRuntimes accepts packages of runtimes beyond the default ones, such
@@ -140,7 +166,7 @@ func NewService(
 	anyTrust, _ := trust.NewStore(nil, trust.Community)
 	return &Service{
 		repo: repo, store: store, sync: sync, hostVersion: hostVersion,
-		client: utils.NewSSRFSafeHTTPClient(cfg), trust: anyTrust,
+		client: utils.NewSSRFSafeHTTPClient(cfg), trust: anyTrust, embedded: runsEmbedded,
 	}
 }
 
@@ -234,7 +260,7 @@ func (s *Service) check(p *pkg.Package) error {
 			p.Manifest.Runtime.Type)
 	}
 	if p.Manifest.Runtime.Type == manifest.RuntimeHost {
-		if err := checkHostRuntime(p); err != nil {
+		if err := checkHostRuntime(p, s.embedded); err != nil {
 			return err
 		}
 	}
@@ -310,11 +336,16 @@ func (s *Service) install(
 			PackageURI: uri, Size: p.Size, Trust: string(verdict.Level), SignerKeyID: verdict.KeyID,
 			CreatedBy: req.UserID, CreatedAt: time.Now(),
 		}); err != nil {
+			// Nothing refers to the package it stored.
+			if delErr := s.store.Delete(ctx, uri); delErr != nil {
+				logger.Warnf(ctx, "[plugin] delete package %s: %v", uri, delErr)
+			}
 			return nil, err
 		}
 	}
 
-	if row == nil {
+	isNew := row == nil
+	if isNew {
 		row = &types.InstalledPlugin{ID: m.ID, DesiredState: types.PluginStateEnabled, CreatedBy: req.UserID}
 		if owner != nil {
 			// A workspace's own plugin is only ever its own.
@@ -323,12 +354,13 @@ func (s *Service) install(
 			row.OwnerTenantID, row.Audience = &tenant, types.JSON(audience)
 		}
 	}
-	var issued string
-	if m.Runtime.Type == manifest.RuntimeKubernetes && row.RemoteSecret == "" {
-		// WeKnora deploys the service and hands it the secret itself.
-		if _, err := s.issueSecret(row); err != nil {
-			return nil, err
-		}
+	columns := []string{"source", "active_version", "runtime", "granted_perms"}
+	issued, secretChanged, err := s.ensureSecret(row, m.Runtime.Type)
+	if err != nil {
+		return nil, err
+	}
+	if secretChanged {
+		columns = append(columns, "remote_secret")
 	}
 	if m.Runtime.Type == manifest.RuntimeRemote {
 		if req.RemoteURL != "" {
@@ -336,14 +368,10 @@ func (s *Service) install(
 				return nil, err
 			}
 			row.RemoteURL = strings.TrimSuffix(req.RemoteURL, "/")
+			columns = append(columns, "remote_url")
 		}
 		if row.RemoteURL == "" {
 			return nil, invalid("a remote plugin needs the URL of its service")
-		}
-		if row.RemoteSecret == "" {
-			if issued, err = s.issueSecret(row); err != nil {
-				return nil, err
-			}
 		}
 	}
 	source, _ := json.Marshal(req.Source)
@@ -352,7 +380,14 @@ func (s *Service) install(
 	row.ActiveVersion = m.Version
 	row.Runtime = string(m.Runtime.Type)
 	row.GrantedPerms = types.JSON(perms)
-	if err := s.repo.SavePlugin(ctx, row); err != nil {
+	if isNew {
+		err = s.repo.SavePlugin(ctx, row)
+	} else {
+		// Only what installing changes: a switch or setting changed since
+		// the row was read stays.
+		err = s.repo.UpdatePlugin(ctx, row, columns...)
+	}
+	if err != nil {
 		return nil, err
 	}
 	logger.Infof(ctx, "[plugin] %s installed %s %s (%s, %s)", req.UserID, m.ID, m.Version, p.Digest, verdict.Level)
@@ -377,6 +412,31 @@ func checkRemoteURL(raw string) error {
 		return invalid("service URL is not allowed (private hosts must be in SSRF_WHITELIST): %v", err)
 	}
 	return nil
+}
+
+// ensureSecret gives a plugin that is to run in rt the signing secret it
+// needs: a remote plugin one the administrator is shown (issued), a
+// kubernetes plugin one WeKnora hands its pods itself. A plugin that moves
+// from kubernetes to remote gets a new one: nobody was ever shown the old.
+// changed says whether row.RemoteSecret is new.
+func (s *Service) ensureSecret(row *types.InstalledPlugin, rt manifest.RuntimeType) (issued string, changed bool,
+	err error,
+) {
+	switch rt {
+	case manifest.RuntimeKubernetes:
+		if row.RemoteSecret != "" {
+			return "", false, nil
+		}
+		_, err = s.issueSecret(row)
+		return "", err == nil, err
+	case manifest.RuntimeRemote:
+		if row.RemoteSecret != "" && row.Runtime != string(manifest.RuntimeKubernetes) {
+			return "", false, nil
+		}
+		issued, err = s.issueSecret(row)
+		return issued, err == nil, err
+	}
+	return "", false, nil
 }
 
 // issueSecret gives a remote plugin a new signing secret, stored sealed,
@@ -405,7 +465,7 @@ func (s *Service) SetRemoteURL(ctx context.Context, id, rawURL string) (*View, e
 		return nil, err
 	}
 	row.RemoteURL = strings.TrimSuffix(rawURL, "/")
-	if err := s.repo.SavePlugin(ctx, row); err != nil {
+	if err := s.repo.UpdatePlugin(ctx, row, "remote_url"); err != nil {
 		return nil, err
 	}
 	return s.apply(ctx, id)
@@ -432,7 +492,7 @@ func (s *Service) RotateSecret(ctx context.Context, id string) (*View, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := s.repo.SavePlugin(ctx, row); err != nil {
+	if err := s.repo.UpdatePlugin(ctx, row, "remote_secret"); err != nil {
 		return nil, err
 	}
 	v, err := s.apply(ctx, id)
@@ -551,7 +611,7 @@ func (s *Service) SetEnabled(ctx context.Context, id string, enabled bool) (*Vie
 	if enabled {
 		row.DesiredState = types.PluginStateEnabled
 	}
-	if err := s.repo.SavePlugin(ctx, row); err != nil {
+	if err := s.repo.UpdatePlugin(ctx, row, "desired_state"); err != nil {
 		return nil, err
 	}
 	return s.apply(ctx, id)
@@ -578,7 +638,7 @@ func (s *Service) SetAudience(ctx context.Context, id string, tenants []uint64) 
 		b, _ := json.Marshal(tenants)
 		row.Audience = types.JSON(b)
 	}
-	if err := s.repo.SavePlugin(ctx, row); err != nil {
+	if err := s.repo.UpdatePlugin(ctx, row, "audience"); err != nil {
 		return nil, err
 	}
 	return s.apply(ctx, id)
@@ -604,33 +664,42 @@ func (s *Service) Activate(ctx context.Context, id, version string) (*View, erro
 	if err := s.trust.Admit(trust.Level(v.Trust)); err != nil {
 		return nil, &InvalidError{Err: err}
 	}
-	var m manifest.Manifest
-	if err := json.Unmarshal(v.Manifest, &m); err == nil {
-		if err := m.CheckEngines(s.hostVersion); err != nil {
-			return nil, &InvalidError{Err: err}
-		}
-		perms, _ := json.Marshal(m.Permissions)
-		row.GrantedPerms = types.JSON(perms)
-		// Versions may run differently (host, then remote): the row says
-		// where the active one runs.
-		row.Runtime = string(m.Runtime.Type)
-		if m.Runtime.Type == manifest.RuntimeRemote && row.RemoteURL == "" {
-			return nil, invalid("version %s of %s is a remote plugin; install it with the URL of its service",
-				version, id)
-		}
+	// The version must still pass what installing it did: this platform
+	// may have changed since (runtimes, interpreters, model vendors).
+	data, err := s.store.Get(ctx, v.PackageURI)
+	if err != nil {
+		return nil, fmt.Errorf("read the stored package of %s %s: %w", id, version, err)
 	}
-	var issued string
-	if (row.Runtime == string(manifest.RuntimeRemote) || row.Runtime == string(manifest.RuntimeKubernetes)) &&
-		row.RemoteSecret == "" {
-		if issued, err = s.issueSecret(row); err != nil {
-			return nil, err
-		}
-		if row.Runtime == string(manifest.RuntimeKubernetes) {
-			issued = "" // WeKnora hands it to the pods itself
-		}
+	p, err := pkg.Open(data)
+	if err != nil {
+		return nil, &InvalidError{Err: err}
 	}
+	if p.Digest != v.Digest || p.Manifest.ID != id || p.Manifest.Version != version {
+		return nil, invalid("the stored package of %s %s does not match its record", id, version)
+	}
+	if err := s.check(p); err != nil {
+		return nil, err
+	}
+	m := p.Manifest
+	perms, _ := json.Marshal(m.Permissions)
+	row.GrantedPerms = types.JSON(perms)
+	if m.Runtime.Type == manifest.RuntimeRemote && row.RemoteURL == "" {
+		return nil, invalid("version %s of %s is a remote plugin; install it with the URL of its service",
+			version, id)
+	}
+	columns := []string{"granted_perms", "runtime", "active_version"}
+	issued, secretChanged, err := s.ensureSecret(row, m.Runtime.Type)
+	if err != nil {
+		return nil, err
+	}
+	if secretChanged {
+		columns = append(columns, "remote_secret")
+	}
+	// Versions may run differently (host, then remote): the row says where
+	// the active one runs.
+	row.Runtime = string(m.Runtime.Type)
 	row.ActiveVersion = version
-	if err := s.repo.SavePlugin(ctx, row); err != nil {
+	if err := s.repo.UpdatePlugin(ctx, row, columns...); err != nil {
 		return nil, err
 	}
 	view, err := s.apply(ctx, id)

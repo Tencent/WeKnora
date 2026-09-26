@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -39,7 +40,6 @@ func (r *pluginRepository) GetPlugin(ctx context.Context, id string) (*types.Ins
 	return &p, nil
 }
 
-// SavePlugin inserts or updates the row keyed by id.
 // pluginUpdateColumns are what saving an installed plugin overwrites: every
 // column but its identity and creation.
 var pluginUpdateColumns = []string{
@@ -47,11 +47,22 @@ var pluginUpdateColumns = []string{
 	"granted_perms", "system_config", "audience", "remote_url", "remote_secret", "updated_at",
 }
 
+// SavePlugin inserts or updates the row keyed by id. The row changes now,
+// whatever UpdatedAt it was read with: consumers reload on a new one.
 func (r *pluginRepository) SavePlugin(ctx context.Context, p *types.InstalledPlugin) error {
+	p.UpdatedAt = time.Now()
 	return r.db.WithContext(ctx).Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "id"}},
 		DoUpdates: clause.AssignmentColumns(pluginUpdateColumns),
 	}).Create(p).Error
+}
+
+// UpdatePlugin writes only the given columns of an existing row (and
+// updated_at), so changes made meanwhile to other columns survive.
+func (r *pluginRepository) UpdatePlugin(ctx context.Context, p *types.InstalledPlugin, columns ...string) error {
+	p.UpdatedAt = time.Now()
+	return r.db.WithContext(ctx).Model(&types.InstalledPlugin{}).Where("id = ?", p.ID).
+		Select(append(columns, "updated_at")).Updates(p).Error
 }
 
 func (r *pluginRepository) DeletePlugin(ctx context.Context, id string) error {
