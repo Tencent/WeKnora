@@ -5570,6 +5570,7 @@ export default {
     }
   },
   schemaForm: {
+    secretStored: 'Сохранено. Оставьте пустым, чтобы не менять',
     errors: {
       required: 'Обязательное поле',
       type: 'Недопустимое значение',

@@ -3044,6 +3044,7 @@ export default {
     }
   },
   schemaForm: {
+    secretStored: 'Saved. Leave empty to keep it',
     errors: {
       required: 'This field is required',
       type: 'Invalid value',

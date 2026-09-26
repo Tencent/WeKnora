@@ -81,6 +81,29 @@ export const HIDDEN_WIDGET = 'hidden'
 /** Same value the backend sends for a set secret. */
 export const REDACTED_SECRET = '***'
 
+/** Whether a field holds a stored secret, which the backend sends as "***". */
+export function isStoredSecret(schema: ConfigSchema, value: unknown): boolean {
+  return !!schema['x-secret'] && value === REDACTED_SECRET
+}
+
+/**
+ * What a text input shows for a field: a stored secret shows as empty (with
+ * a hint), so what the user types replaces it instead of being appended to
+ * the mask, which the backend would save as the new secret.
+ */
+export function secretInputText(schema: ConfigSchema, value: unknown): string {
+  if (isStoredSecret(schema, value)) return ''
+  return value === undefined || value === null ? '' : String(value)
+}
+
+/**
+ * What an input's text sets the field to: emptying a field that held a
+ * stored secret sends the mask back, which keeps the stored secret.
+ */
+export function secretInputValue(text: string, hadStoredSecret: boolean): string {
+  return text === '' && hadStoredSecret ? REDACTED_SECRET : text
+}
+
 /** Props of the `secret` slot of <SchemaForm> in secretMode "slot". */
 export interface SecretSlotProps {
   path: string

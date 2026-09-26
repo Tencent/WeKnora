@@ -5570,6 +5570,7 @@ export default {
     }
   },
   schemaForm: {
+    secretStored: '저장됨. 비워 두면 그대로 유지됩니다',
     errors: {
       required: '필수 항목입니다',
       type: '값이 올바르지 않습니다',

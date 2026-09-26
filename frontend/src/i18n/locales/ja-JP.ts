@@ -3044,6 +3044,7 @@ export default {
     }
   },
   schemaForm: {
+    secretStored: '保存済みです。空のままにすると変更されません',
     errors: {
       required: 'この項目は必須です',
       type: '値が正しくありません',

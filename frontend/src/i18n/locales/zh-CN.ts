@@ -5572,6 +5572,7 @@ export default {
     }
   },
   schemaForm: {
+    secretStored: '已保存，留空则保持不变',
     errors: {
       required: '此项为必填',
       type: '格式不正确',

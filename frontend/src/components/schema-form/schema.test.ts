@@ -5,10 +5,13 @@ import {
   REDACTED_SECRET,
   choicesOf,
   inGroup,
+  isStoredSecret,
   isVisible,
   orderedFields,
   resolveText,
   schemaAt,
+  secretInputText,
+  secretInputValue,
   secretPaths,
   validateConfig,
   applyDefaults,
@@ -162,4 +165,21 @@ test('"$" keys in x-visible-if read the context', () => {
   assert.equal(isVisible(s.properties!.signing_secret, { mode: 'webhook' }, { mode: 'websocket' }), false)
   assert.deepEqual(validateConfig(s, {}, { context: { mode: 'websocket' } }), [])
   assert.deepEqual(validateConfig(s, {}, { context: { mode: 'webhook' } }), [{ path: 'signing_secret', code: 'required' }])
+})
+
+test('a stored secret is replaced, not appended to', () => {
+  const secret: ConfigSchema = { type: 'string', 'x-secret': true }
+  const plain: ConfigSchema = { type: 'string' }
+  assert.equal(isStoredSecret(secret, REDACTED_SECRET), true)
+  assert.equal(isStoredSecret(plain, REDACTED_SECRET), false)
+  // The mask shows as an empty field, so typing yields only the new key
+  // (not "***newkey", which the backend would save).
+  assert.equal(secretInputText(secret, REDACTED_SECRET), '')
+  assert.equal(secretInputText(secret, 'typed'), 'typed')
+  assert.equal(secretInputText(plain, REDACTED_SECRET), REDACTED_SECRET)
+  assert.equal(secretInputText(plain, undefined), '')
+  assert.equal(secretInputValue('newkey', true), 'newkey')
+  // Emptying the field again keeps the stored secret.
+  assert.equal(secretInputValue('', true), REDACTED_SECRET)
+  assert.equal(secretInputValue('', false), '')
 })
