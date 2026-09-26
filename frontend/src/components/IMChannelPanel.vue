@@ -119,7 +119,7 @@
               </template>
               <t-option v-for="item in platformOptions" :key="item.value" :value="item.value" :label="item.label">
                 <div class="im-platform-select-option">
-                  <img v-if="item.logo" :src="item.logo" :alt="item.label" class="im-platform-select-option__icon" />
+                  <img :src="item.logo" :alt="item.label" class="im-platform-select-option__icon" />
                   <span>{{ item.label }}</span>
                 </div>
               </t-option>
@@ -146,19 +146,28 @@
 
       <!-- Step 2: Connection -->
       <div v-else-if="wizardStep === 1" class="im-step-body">
-        <section v-if="connectionModes.length > 0" class="setting-drawer__section im-drawer__section">
+        <section v-if="formData.platform !== 'wechat'" class="setting-drawer__section im-drawer__section">
           <h4 class="setting-drawer__section-title">{{ $t('agentEditor.im.sectionAccess') }}</h4>
 
           <div class="form-item">
             <label class="form-label required">{{ $t('agentEditor.im.mode') }}</label>
             <div class="option-chips">
-              <button v-for="mode in connectionModes" :key="mode" type="button" class="option-chip"
-                :class="{ 'option-chip--active': formData.mode === mode }"
-                @click="formData.mode = mode">
-                {{ modeLabel(mode) }}
+              <button type="button" class="option-chip"
+                :class="{ 'option-chip--active': formData.mode === 'websocket' }"
+                :disabled="formData.platform === 'mattermost'"
+                @click="formData.mode = 'websocket'">
+                {{ formData.platform === 'dingtalk' ? 'Stream' : 'WebSocket' }}
+              </button>
+              <button v-if="formData.platform !== 'dingtalk' && formData.platform !== 'qqbot'" type="button" class="option-chip" :class="{ 'option-chip--active': formData.mode === 'webhook' }"
+                @click="formData.mode = 'webhook'">
+                Webhook
               </button>
             </div>
-            <p class="form-desc">{{ modeHint }}</p>
+            <p class="form-desc">
+              {{ formData.platform === 'mattermost' ? $t('agentEditor.im.mattermostModeHint') :
+                formData.platform === 'yunzhijia' ? $t('agentEditor.im.yunzhijiaModeHint') :
+                  $t('agentEditor.im.modeHint') }}
+            </p>
           </div>
 
           <div class="form-item">
@@ -240,19 +249,292 @@
         <section class="setting-drawer__section im-drawer__section">
           <h4 class="setting-drawer__section-title">{{ $t('agentEditor.im.sectionCredentials') }}</h4>
           <div class="drawer-form">
-            <div v-if="currentPlatform?.links?.length" class="platform-link-hint">
-              <a v-for="link in currentPlatform.links" :key="link.url" :href="link.url" target="_blank"
-                rel="noopener noreferrer" class="doc-link">
-                {{ link.title_key && te(link.title_key) ? t(link.title_key) : link.title }}
-                <t-icon name="link" class="link-icon" />
-              </a>
-              <span class="hint-text">{{ $t('agentEditor.im.consoleTip') }}</span>
-            </div>
+            <!-- WeCom credentials -->
+            <template v-if="formData.platform === 'wecom'">
+              <div class="platform-link-hint">
+                <a href="https://work.weixin.qq.com/" target="_blank" rel="noopener noreferrer" class="doc-link">
+                  {{ $t('agentEditor.im.wecomConsole') }}
+                  <t-icon name="link" class="link-icon" />
+                </a>
+                <span class="hint-text">{{ $t('agentEditor.im.consoleTip') }}</span>
+              </div>
+              <template v-if="formData.mode === 'websocket'">
+                <div class="form-item">
+                  <label class="form-label">Bot ID</label>
+                  <t-input v-model="formData.credentials.bot_id" placeholder="Bot ID" />
+                </div>
+                <div class="form-item">
+                  <label class="form-label">Bot Secret</label>
+                  <t-input v-model="formData.credentials.bot_secret" type="password" placeholder="Bot Secret" />
+                </div>
+                <div class="form-item">
+                  <label class="form-label">WebSocket Endpoint</label>
+                  <t-input v-model="formData.credentials.ws_endpoint" placeholder="wss://openws.work.weixin.qq.com" />
+                  <p class="form-desc">{{ $t('agentEditor.im.wecomWSEndpointHint') }}</p>
+                </div>
+              </template>
+              <template v-else>
+                <div class="form-item">
+                  <label class="form-label">Corp ID</label>
+                  <t-input v-model="formData.credentials.corp_id" placeholder="Corp ID" />
+                </div>
+                <div class="form-item">
+                  <label class="form-label">Agent Secret</label>
+                  <t-input v-model="formData.credentials.agent_secret" type="password" placeholder="Agent Secret" />
+                </div>
+                <div class="form-item">
+                  <label class="form-label">Token</label>
+                  <t-input v-model="formData.credentials.token" placeholder="Token" />
+                </div>
+                <div class="form-item">
+                  <label class="form-label">EncodingAESKey</label>
+                  <t-input v-model="formData.credentials.encoding_aes_key" placeholder="EncodingAESKey" />
+                </div>
+                <div class="form-item">
+                  <label class="form-label">Corp Agent ID</label>
+                  <t-input-number v-model="formData.credentials.corp_agent_id" placeholder="Corp Agent ID"
+                    style="width: 100%;" />
+                </div>
+                <div class="form-item">
+                  <label class="form-label">API Base URL</label>
+                  <t-input v-model="formData.credentials.api_base_url" placeholder="https://qyapi.weixin.qq.com" />
+                  <p class="form-desc">{{ $t('agentEditor.im.wecomAPIBaseURLHint') }}</p>
+                </div>
+              </template>
+            </template>
 
-            <!-- Credentials from the platform's config schema; mode-specific fields follow formData.mode. -->
-            <SchemaForm v-if="currentPlatform?.config_schema" v-model="formData.credentials"
-              :schema="currentPlatform.config_schema" :context="{ mode: formData.mode }"
-              :errors="credentialErrors" />
+            <!-- Feishu / Lark credentials — same fields, different open platform -->
+            <template v-if="formData.platform === 'feishu' || formData.platform === 'lark'">
+              <div class="platform-link-hint">
+                <a :href="openPlatformConsole.url" target="_blank" rel="noopener noreferrer" class="doc-link">
+                  {{ $t(openPlatformConsole.labelKey) }}
+                  <t-icon name="link" class="link-icon" />
+                </a>
+                <span class="hint-text">{{ $t('agentEditor.im.consoleTip') }}</span>
+              </div>
+              <div class="form-item">
+                <label class="form-label">App ID</label>
+                <t-input v-model="formData.credentials.app_id" placeholder="App ID" />
+              </div>
+              <div class="form-item">
+                <label class="form-label">App Secret</label>
+                <t-input v-model="formData.credentials.app_secret" type="password" placeholder="App Secret" />
+              </div>
+              <div class="form-item">
+                <label class="form-label">Base URL</label>
+                <t-input v-model="formData.credentials.api_base_url" placeholder="https://open.feishu.cn" />
+                <p class="form-desc">{{ $t('agentEditor.im.feishuAPIBaseURLHint') }}</p>
+              </div>
+              <template v-if="formData.mode === 'webhook'">
+                <div class="form-item">
+                  <label class="form-label">Verification Token</label>
+                  <t-input v-model="formData.credentials.verification_token" placeholder="Verification Token" />
+                </div>
+                <div class="form-item">
+                  <label class="form-label">Encrypt Key</label>
+                  <t-input v-model="formData.credentials.encrypt_key" type="password" placeholder="Encrypt Key" />
+                </div>
+              </template>
+            </template>
+
+            <!-- Slack credentials -->
+            <template v-if="formData.platform === 'slack'">
+              <div class="platform-link-hint">
+                <a href="https://api.slack.com/apps" target="_blank" rel="noopener noreferrer" class="doc-link">
+                  {{ $t('agentEditor.im.slackConsole') }}
+                  <t-icon name="link" class="link-icon" />
+                </a>
+                <span class="hint-text">{{ $t('agentEditor.im.consoleTip') }}</span>
+              </div>
+              <template v-if="formData.mode === 'websocket'">
+                <div class="form-item">
+                  <label class="form-label">App Token</label>
+                  <t-input v-model="formData.credentials.app_token" type="password" placeholder="xapp-..." />
+                </div>
+                <div class="form-item">
+                  <label class="form-label">Bot Token</label>
+                  <t-input v-model="formData.credentials.bot_token" type="password" placeholder="xoxb-..." />
+                </div>
+              </template>
+              <template v-else>
+                <div class="form-item">
+                  <label class="form-label">Bot Token</label>
+                  <t-input v-model="formData.credentials.bot_token" type="password" placeholder="xoxb-..." />
+                </div>
+                <div class="form-item">
+                  <label class="form-label">Signing Secret</label>
+                  <t-input v-model="formData.credentials.signing_secret" type="password" placeholder="Signing Secret" />
+                </div>
+              </template>
+            </template>
+
+            <!-- Telegram credentials -->
+            <template v-if="formData.platform === 'telegram'">
+              <div class="platform-link-hint">
+                <a href="https://t.me/BotFather" target="_blank" rel="noopener noreferrer" class="doc-link">
+                  {{ $t('agentEditor.im.telegramConsole') }}
+                  <t-icon name="link" class="link-icon" />
+                </a>
+                <span class="hint-text">{{ $t('agentEditor.im.consoleTip') }}</span>
+              </div>
+              <div class="form-item">
+                <label class="form-label">Bot Token</label>
+                <t-input v-model="formData.credentials.bot_token" type="password" placeholder="123456789:AABBccdd..." />
+              </div>
+              <template v-if="formData.mode === 'webhook'">
+                <div class="form-item">
+                  <label class="form-label">Secret Token</label>
+                  <t-input v-model="formData.credentials.secret_token" type="password"
+                    placeholder="Secret Token (optional)" />
+                </div>
+              </template>
+            </template>
+
+            <!-- DingTalk credentials -->
+            <template v-if="formData.platform === 'dingtalk'">
+              <div class="platform-link-hint">
+                <a href="https://open.dingtalk.com/" target="_blank" rel="noopener noreferrer" class="doc-link">
+                  {{ $t('agentEditor.im.dingtalkConsole') }}
+                  <t-icon name="link" class="link-icon" />
+                </a>
+                <span class="hint-text">{{ $t('agentEditor.im.consoleTip') }}</span>
+              </div>
+              <div class="form-item">
+                <label class="form-label">Client ID (AppKey)</label>
+                <t-input v-model="formData.credentials.client_id" placeholder="Client ID / AppKey" />
+              </div>
+              <div class="form-item">
+                <label class="form-label">Client Secret (AppSecret)</label>
+                <t-input v-model="formData.credentials.client_secret" type="password"
+                  placeholder="Client Secret / AppSecret" />
+              </div>
+              <div class="form-item">
+                <label class="form-label">{{ $t('agentEditor.im.dingtalkCardTemplateId') }}</label>
+                <t-input v-model="formData.credentials.card_template_id"
+                  placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx.schema" />
+                <p class="form-desc">{{ $t('agentEditor.im.dingtalkCardTemplateIdHint') }}</p>
+              </div>
+            </template>
+
+            <!-- QQBot credentials -->
+            <template v-if="formData.platform === 'qqbot'">
+              <div class="platform-link-hint">
+                <a href="https://q.qq.com/" target="_blank" rel="noopener noreferrer" class="doc-link">
+                  {{ $t('agentEditor.im.qqbotConsole') }}
+                  <t-icon name="link" class="link-icon" />
+                </a>
+                <span class="hint-text">{{ $t('agentEditor.im.consoleTip') }}</span>
+              </div>
+              <div class="form-item">
+                <label class="form-label">App ID</label>
+                <t-input v-model="formData.credentials.app_id" placeholder="QQBot App ID" />
+              </div>
+              <div class="form-item">
+                <label class="form-label">App Secret</label>
+                <t-input v-model="formData.credentials.client_secret" type="password" placeholder="QQBot App Secret" />
+              </div>
+              <div class="form-item">
+                <label class="form-label">API Base URL</label>
+                <t-input v-model="formData.credentials.api_base_url" placeholder="https://api.sgroup.qq.com" />
+                <p class="form-desc">{{ $t('agentEditor.im.qqbotAPIBaseURLHint') }}</p>
+              </div>
+              <div class="form-item">
+                <label class="form-label">Gateway URL</label>
+                <t-input v-model="formData.credentials.gateway_url" placeholder="wss://api.sgroup.qq.com/websocket/" />
+                <p class="form-desc">{{ $t('agentEditor.im.qqbotGatewayURLHint') }}</p>
+              </div>
+            </template>
+
+            <!-- Mattermost credentials -->
+            <template v-if="formData.platform === 'mattermost'">
+              <div class="platform-link-hint">
+                <a href="https://developers.mattermost.com/integrate/webhooks/outgoing/" target="_blank"
+                  rel="noopener noreferrer" class="doc-link">
+                  {{ $t('agentEditor.im.mattermostConsole') }}
+                  <t-icon name="link" class="link-icon" />
+                </a>
+                <span class="hint-text">{{ $t('agentEditor.im.consoleTip') }}</span>
+              </div>
+              <div class="form-item">
+                <label class="form-label">Site URL</label>
+                <t-input v-model="formData.credentials.site_url" placeholder="https://mattermost.example.com" />
+              </div>
+              <div class="form-item">
+                <label class="form-label">Bot Token</label>
+                <t-input v-model="formData.credentials.bot_token" type="password" placeholder="Bot Token" />
+              </div>
+              <div class="form-item">
+                <label class="form-label">Outgoing Webhook Token</label>
+                <t-input v-model="formData.credentials.outgoing_token" type="password"
+                  placeholder="Token from Outgoing Webhook" />
+              </div>
+              <div class="form-item">
+                <label class="form-label">Bot User ID</label>
+                <t-input v-model="formData.credentials.bot_user_id" placeholder="Optional — filter bot self-messages" />
+              </div>
+              <div class="settings-group">
+                <div class="setting-row setting-row--last">
+                  <div class="setting-info">
+                    <label>{{ $t('agentEditor.im.mattermostPostToMain') }}</label>
+                    <p class="desc">{{ $t('agentEditor.im.mattermostPostToMainHint') }}</p>
+                  </div>
+                  <div class="setting-control">
+                    <t-switch :value="!!formData.credentials.post_to_main" size="small"
+                      @change="(v: boolean) => { formData.credentials.post_to_main = v }" />
+                  </div>
+                </div>
+              </div>
+            </template>
+
+            <!-- Yunzhijia credentials -->
+            <template v-if="formData.platform === 'yunzhijia'">
+              <div class="form-item">
+                <label class="form-label required">{{ $t('agentEditor.im.yunzhijiaSendMsgUrl') }}</label>
+                <t-input v-model="formData.credentials.send_msg_url"
+                  placeholder="https://www.yunzhijia.com/gateway/robot/webhook/send?yzjtype=0&yzjtoken=..." />
+                <p class="form-desc">
+                  {{ $t('agentEditor.im.yunzhijiaSendMsgUrlHint') }}
+                  <a href="https://www.yunzhijia.com/opendocs/docs.html#/guide/im/robot" target="_blank"
+                    rel="noopener noreferrer" class="doc-link">
+                    {{ $t('agentEditor.im.yunzhijiaRobotDoc') }}
+                  </a>
+                </p>
+              </div>
+              <div class="form-item">
+                <label class="form-label">{{ $t('agentEditor.im.yunzhijiaSecret') }}</label>
+                <t-input v-model="formData.credentials.secret" type="password"
+                  :placeholder="$t('agentEditor.im.yunzhijiaSecretPlaceholder')" />
+                <p class="form-desc">{{ $t('agentEditor.im.yunzhijiaSecretHint') }}</p>
+              </div>
+              <div class="form-item">
+                <label class="form-label">{{ $t('agentEditor.im.yunzhijiaAppId') }}</label>
+                <t-input v-model="formData.credentials.app_id"
+                  :placeholder="$t('agentEditor.im.yunzhijiaAppIdPlaceholder')" />
+                <p class="form-desc">
+                  {{ $t('agentEditor.im.yunzhijiaAppCredentialHint') }}
+                  <a href="https://www.yunzhijia.com/developers/" target="_blank" rel="noopener noreferrer"
+                    class="doc-link">
+                    {{ $t('agentEditor.im.yunzhijiaImageDoc') }}
+                  </a>
+                </p>
+              </div>
+              <div class="form-item">
+                <label class="form-label">{{ $t('agentEditor.im.yunzhijiaAppSecret') }}</label>
+                <t-input v-model="formData.credentials.app_secret" type="password"
+                  :placeholder="$t('agentEditor.im.yunzhijiaAppSecretPlaceholder')" />
+              </div>
+              <div class="form-item">
+                <label class="form-label">{{ $t('agentEditor.im.yunzhijiaTimeout') }}</label>
+                <t-input-number v-model="formData.credentials.timeout_seconds" placeholder="10" :min="1" :max="60"
+                  style="width: 100%;" />
+                <p class="form-desc">{{ $t('agentEditor.im.yunzhijiaTimeoutHint') }}</p>
+              </div>
+              <div class="form-item">
+                <label class="form-label required">{{ $t('agentEditor.im.yunzhijiaAllowedHostSuffix') }}</label>
+                <t-input v-model="formData.credentials.allowed_webhook_host_suffix" placeholder="yunzhijia.com" />
+                <p class="form-desc">{{ $t('agentEditor.im.yunzhijiaAllowedHostSuffixHint') }}</p>
+              </div>
+            </template>
 
             <!-- WeChat credentials (QR code binding) -->
             <template v-if="formData.platform === 'wechat'">
@@ -312,16 +594,13 @@ import { copyWithToast } from '@/utils/clipboard';
 import { normalizeOptionalString } from '@/utils/optionalString';
 import {
   listIMChannels, createIMChannel, updateIMChannel, deleteIMChannel, toggleIMChannel,
-  getWeChatQRCode, pollWeChatQRCodeStatus, listAllIMChannels, listIMPlatforms, getIMChannel,
-  type IMChannelOverview, type CustomAgent, type IMPlatformInfo,
+  getWeChatQRCode, pollWeChatQRCodeStatus, listAllIMChannels,
+  type IMChannelOverview, type CustomAgent,
 } from '@/api/agent';
 import { useChatResourcesStore } from '@/stores/chatResources';
 import type { IMChannel } from '@/api/agent';
 import { useAuthStore } from '@/stores/auth';
 import SettingDrawer from '@/components/settings/SettingDrawer.vue';
-import SchemaForm from '@/components/schema-form/SchemaForm.vue';
-import { applyDefaults, schemaAt, validateConfig, type FieldError } from '@/components/schema-form/schema';
-import { useSchemaText } from '@/components/schema-form/useSchemaText';
 import IntegrationsAgentFilter from '@/components/IntegrationsAgentFilter.vue';
 import wecomLogo from '@/assets/img/im/wecom.svg';
 import feishuLogo from '@/assets/img/im/feishu.svg';
@@ -352,43 +631,8 @@ const PLATFORM_LOGO: Record<string, string> = {
 
 const platformLogo = (platform: string): string => (platform ? PLATFORM_LOGO[platform] || '' : '');
 
-const { t, te, locale } = useI18n();
+const { t } = useI18n();
 const authStore = useAuthStore();
-const schemaText = useSchemaText();
-
-// Platforms with a registered adapter, from the backend: modes, links and
-// the credential form of each.
-const platforms = ref<IMPlatformInfo[]>([]);
-
-async function loadPlatforms() {
-  try {
-    const res = await listIMPlatforms();
-    platforms.value = res.data || [];
-  } catch (e: any) {
-    MessagePlugin.error(e?.message || t('common.operationFailed'));
-  }
-}
-
-const currentPlatform = computed(() => platforms.value.find((p) => p.id === formData.value.platform));
-
-// Modes offered as chips; long polling (WeChat) runs without a choice.
-const connectionModes = computed(() =>
-  (currentPlatform.value?.modes || []).filter((m) => m !== 'longpoll'),
-);
-
-function modeLabel(mode: string): string {
-  const custom = currentPlatform.value?.mode_labels?.[mode];
-  if (custom) return custom;
-  return mode === 'webhook' ? 'Webhook' : 'WebSocket';
-}
-
-const modeHint = computed(() => {
-  const key = currentPlatform.value?.mode_hint_key;
-  return key && te(key) ? t(key) : t('agentEditor.im.modeHint');
-});
-
-// Field errors of the last save attempt, shown under each credential.
-const credentialErrors = ref<FieldError[]>([]);
 
 const filterAgentId = defineModel<string>('filterAgentId', { default: '' });
 
@@ -424,9 +668,18 @@ const drawerConfirmText = computed(() =>
   wizardStep.value < stepTitles.value.length - 1 ? t('common.next') : t('common.save'),
 );
 
-const platformOptions = computed(() =>
-  platforms.value.map((p) => ({ value: p.id as IMPlatform, label: platformLabel(p.id), logo: platformLogo(p.id) })),
-);
+const platformOptions = computed(() => ([
+  { value: 'wecom' as IMPlatform, label: t('agentEditor.im.wecom'), logo: wecomLogo },
+  { value: 'feishu' as IMPlatform, label: t('agentEditor.im.feishu'), logo: feishuLogo },
+  { value: 'lark' as IMPlatform, label: t('agentEditor.im.lark'), logo: larkLogo },
+  { value: 'slack' as IMPlatform, label: t('agentEditor.im.slack'), logo: slackLogo },
+  { value: 'telegram' as IMPlatform, label: t('agentEditor.im.telegram'), logo: telegramLogo },
+  { value: 'dingtalk' as IMPlatform, label: t('agentEditor.im.dingtalk'), logo: dingtalkLogo },
+  { value: 'mattermost' as IMPlatform, label: t('agentEditor.im.mattermost'), logo: mattermostLogo },
+  { value: 'wechat' as IMPlatform, label: t('agentEditor.im.wechat'), logo: wechatLogo },
+  { value: 'qqbot' as IMPlatform, label: t('agentEditor.im.qqbot'), logo: qqbotLogo },
+  { value: 'yunzhijia' as IMPlatform, label: t('agentEditor.im.yunzhijia'), logo: yunzhijiaLogo },
+]));
 
 const localeOptions = computed(() => ([
   { value: '' as IMLocale, label: t('agentEditor.im.replyLanguageDefault') },
@@ -436,6 +689,14 @@ const localeOptions = computed(() => ([
   { value: 'ko-KR' as IMLocale, label: '한국어' },
   { value: 'ru-RU' as IMLocale, label: 'Русский' },
 ]));
+
+// Feishu and Lark are the same product on separate clouds, so each has its own
+// open platform console. Bots must be created on the one matching the channel.
+const openPlatformConsole = computed(() =>
+  formData.value.platform === 'lark'
+    ? { url: 'https://open.larksuite.com/', labelKey: 'agentEditor.im.larkConsole' }
+    : { url: 'https://open.feishu.cn/', labelKey: 'agentEditor.im.feishuConsole' },
+);
 
 const drawerTitle = computed(() => {
   if (editingChannel.value) {
@@ -526,9 +787,7 @@ function agentForChannel(channel: IMChannel | IMChannelOverview): CustomAgent | 
 
 function platformLabel(platform: string): string {
   const key = `agentEditor.im.${platform}`;
-  if (te(key)) return t(key);
-  const info = platforms.value.find((p) => p.id === platform);
-  return info?.names?.[locale.value] || info?.name || platform;
+  return t(key);
 }
 
 function defaultChannelName(platform: string = formData.value.platform): string {
@@ -540,15 +799,19 @@ function resolvedChannelName(): string {
 }
 
 function platformSupportsThread(platform: string): boolean {
-  return !!platforms.value.find((p) => p.id === platform)?.supports_thread;
+  return ['slack', 'mattermost', 'feishu', 'lark', 'telegram', 'yunzhijia'].includes(platform);
 }
 
 watch(
   () => formData.value.platform,
   (p) => {
-    const modes = currentPlatform.value?.modes || [];
-    if (modes.length > 0 && !modes.includes(formData.value.mode)) formData.value.mode = modes[0];
-    applyCredentialDefaults();
+    if (p === 'dingtalk' || p === 'qqbot') formData.value.mode = 'websocket';
+    if (p === 'mattermost') {
+      formData.value.mode = 'webhook';
+      if (typeof formData.value.credentials.post_to_main !== 'boolean') {
+        formData.value.credentials.post_to_main = false;
+      }
+    }
     if (!platformSupportsThread(p)) {
       formData.value.session_mode = 'user';
     }
@@ -565,50 +828,41 @@ const wechatBound = computed(() => {
 function onPlatformChange(val: string | number | boolean) {
   if (editingChannel.value) return;
   formData.value.credentials = defaultCredentials();
-  credentialErrors.value = [];
   stopWeChatPolling();
   wechatQRContent.value = '';
   wechatQRImgUrl.value = '';
   wechatQRCode.value = '';
   wechatQRStatus.value = '';
-  // Each platform starts on its default mode; long polling (WeChat) only
-  // supports full output.
-  const info = platforms.value.find((p) => p.id === val);
-  formData.value.mode = info?.modes?.[0] || 'websocket';
-  formData.value.output_mode = formData.value.mode === 'longpoll' ? 'full' : 'stream';
-  applyCredentialDefaults();
+  // WeChat uses fixed mode/output
+  if (val === 'wechat') {
+    formData.value.mode = 'longpoll';
+    formData.value.output_mode = 'full';
+  } else if (val === 'mattermost' || val === 'yunzhijia') {
+    formData.value.mode = 'webhook';
+    formData.value.output_mode = 'stream';
+    if (val === 'yunzhijia') {
+      formData.value.credentials = {
+        timeout_seconds: 10,
+        allowed_webhook_host_suffix: 'yunzhijia.com',
+      };
+    }
+  } else {
+    formData.value.mode = 'websocket';
+    formData.value.output_mode = 'stream';
+  }
   if (!channelNameTouched.value) {
     formData.value.name = defaultChannelName(String(val));
   }
 }
 
-// Fills the platform's schema defaults (Yunzhijia's host suffix and timeout,
-// Mattermost's post_to_main) into missing credentials.
-function applyCredentialDefaults() {
-  const schema = currentPlatform.value?.config_schema;
-  if (!schema) return;
-  const filled = applyDefaults(schema, formData.value.credentials);
-  // Assign only on change: a no-op write would still trigger the watcher that
-  // clears the errors checkCredentials just set.
-  if (JSON.stringify(filled) !== JSON.stringify(formData.value.credentials)) {
-    formData.value.credentials = filled;
+function normalizeYunzhijiaCredentials() {
+  if (formData.value.platform !== 'yunzhijia') return;
+  if (!formData.value.credentials.allowed_webhook_host_suffix) {
+    formData.value.credentials.allowed_webhook_host_suffix = 'yunzhijia.com';
   }
-}
-
-// Checks the credentials against the platform schema for the chosen mode,
-// marking failing fields and warning with the first.
-function checkCredentials(): boolean {
-  const schema = currentPlatform.value?.config_schema;
-  if (!schema) return true;
-  credentialErrors.value = validateConfig(schema, formData.value.credentials, {
-    context: { mode: formData.value.mode },
-  });
-  const first = credentialErrors.value[0];
-  if (!first) return true;
-  const field = schemaAt(schema, first.path);
-  const label = field ? schemaText(field, 'title') : first.path;
-  MessagePlugin.warning(`${label}: ${t(`schemaForm.errors.${first.code}`)}`);
-  return false;
+  if (!formData.value.credentials.timeout_seconds) {
+    formData.value.credentials.timeout_seconds = 10;
+  }
 }
 
 async function startWeChatBinding() {
@@ -724,15 +978,16 @@ function openDrawer(channel: IMChannel | IMChannelOverview) {
 
 async function editChannel(channel: IMChannel | IMChannelOverview) {
   wizardStep.value = 0;
-  // List responses carry no credentials; load the channel with its
-  // credentials (secrets redacted) so the form shows what is configured and a
-  // save does not send an empty credential map.
   let fullChannel: IMChannel | null = null;
-  try {
-    const res = await getIMChannel(channel.id);
-    fullChannel = res.data || null;
-  } catch {
-    fullChannel = null;
+  if (!('credentials' in channel)) {
+    try {
+      const res = await listIMChannels(channel.agent_id);
+      fullChannel = (res.data || []).find((item) => item.id === channel.id) || null;
+    } catch {
+      fullChannel = null;
+    }
+  } else {
+    fullChannel = channel as IMChannel;
   }
   if (!fullChannel) {
     MessagePlugin.error(t('common.operationFailed'));
@@ -752,8 +1007,7 @@ async function editChannel(channel: IMChannel | IMChannelOverview) {
     knowledge_base_id: fullChannel.knowledge_base_id || '',
     credentials: { ...fullChannel.credentials },
   };
-  applyCredentialDefaults();
-  credentialErrors.value = [];
+  normalizeYunzhijiaCredentials();
   showCreateDialog.value = true;
 }
 
@@ -788,8 +1042,15 @@ async function handleSave() {
       MessagePlugin.warning(t('agentEditor.im.wechatScanBind'));
       return;
     }
-    applyCredentialDefaults();
-    if (!checkCredentials()) return;
+    if (formData.value.platform === 'yunzhijia') {
+      // normalize fills in the default allowed host suffix, so only the send URL
+      // needs explicit validation here.
+      normalizeYunzhijiaCredentials();
+      if (!String(formData.value.credentials.send_msg_url || '').trim()) {
+        MessagePlugin.warning(t('agentEditor.im.yunzhijiaSendMsgUrlRequired'));
+        return;
+      }
+    }
 
     if (editingChannel.value) {
       await updateIMChannel(editingChannel.value.id, {
@@ -854,10 +1115,7 @@ async function handleDelete(id: string) {
 
 onMounted(() => {
   loadChannels();
-  loadPlatforms();
 });
-
-watch(() => formData.value.credentials, () => { credentialErrors.value = []; }, { deep: true });
 
 watch(filterAgentId, (id) => {
   if (!showCreateDialog.value && !editingChannel.value && id) {

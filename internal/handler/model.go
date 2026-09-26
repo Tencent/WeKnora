@@ -16,7 +16,6 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/api"
 	"github.com/Tencent/WeKnora/internal/models/chat"
-	"github.com/Tencent/WeKnora/internal/plugin/manifest"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
@@ -26,7 +25,6 @@ import (
 // ModelHandler handles HTTP requests for model-related operations
 // It implements the necessary methods to create, retrieve, update, and delete models
 type ModelHandler struct {
-	pluginGated
 	service interfaces.ModelService
 }
 
@@ -98,10 +96,6 @@ func (h *ModelHandler) CreateModel(c *gin.Context) {
 	}
 	if err := validateCatalogParameters(req.Name, req.Type, &req.Parameters); err != nil {
 		_ = c.Error(errors.NewBadRequestError(err.Error()))
-		return
-	}
-	if p := req.Parameters.Provider; p != "" && !h.pluginFilter(c)(manifest.PointModelVendors, p) {
-		_ = c.Error(errors.NewBadRequestError(disabledIntegrationError))
 		return
 	}
 

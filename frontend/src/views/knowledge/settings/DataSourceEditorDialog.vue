@@ -13,25 +13,11 @@ import {
   deleteDataSource,
   putDataSourceCredentials,
   deleteDataSourceCredentials,
-  getConnectorTypes,
-  type ConnectorMeta,
   type DataSource,
   type Resource,
 } from '@/api/datasource'
-import SchemaForm from '@/components/schema-form/SchemaForm.vue'
-import {
-  applyDefaults,
-  schemaAt,
-  validateConfig,
-  type ConfigSchema,
-  type FieldError,
-} from '@/components/schema-form/schema'
-import { pluginFormSource } from '@/components/schema-form/pluginSource'
-import { provideSchemaFormSource, valueAt } from '@/components/schema-form/source'
-import { useSchemaText } from '@/components/schema-form/useSchemaText'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import DataSourceTypeIcon from './DataSourceTypeIcon.vue'
-import { connectorDescription, connectorName } from './connectorLabels'
 import { getDatasourceIconUrl } from './datasourceIcons'
 
 const props = defineProps<{
@@ -41,7 +27,7 @@ const props = defineProps<{
 
 const visible = defineModel<boolean>('visible', { default: false })
 const emit = defineEmits<{ saved: [] }>()
-const { t, te, locale } = useI18n()
+const { t } = useI18n()
 
 const isEdit = computed(() => !!props.dataSource)
 const step = ref(0)
@@ -117,8 +103,33 @@ function cancelReplaceCredentials() {
   replaceCredentialsMode.value = false
   pendingRemoveCredentials.value = false
   form.value.config.credentials = {}
+  rssAuthHeaders.value = []
   testResult.value = credentialsConfigured.value ? 'success' : ''
   testErrorMsg.value = ''
+}
+
+interface CustomHeaderItem {
+  key: string
+  value: string
+}
+
+const rssAuthHeaders = ref<CustomHeaderItem[]>([])
+
+function serializeAuthHeaders(items: CustomHeaderItem[]): string {
+  return items
+    .filter(h => h.key.trim())
+    .map(h => `${h.key.trim()}: ${h.value}`)
+    .join('\n')
+}
+
+function syncRssAuthHeadersToCredentials() {
+  if (form.value.type !== 'rss') return
+  const serialized = serializeAuthHeaders(rssAuthHeaders.value)
+  if (serialized) {
+    form.value.config.credentials.auth_headers = serialized
+  } else {
+    delete form.value.config.credentials.auth_headers
+  }
 }
 
 // Feed URLs may still live in credentials on older rows (not returned by the
@@ -134,6 +145,14 @@ function hydrateRssFeedUrlsFromConfig(config: { settings?: Record<string, any>; 
     return { ...settings }
   }
   return { ...settings, feed_urls: ids.join('\n') }
+}
+
+function addRssAuthHeader() {
+  rssAuthHeaders.value.push({ key: '', value: '' })
+}
+
+function removeRssAuthHeader(idx: number) {
+  rssAuthHeaders.value.splice(idx, 1)
 }
 
 function needsConnectionTest(): boolean {
@@ -521,79 +540,212 @@ const schedulePresets = computed(() => [
   { label: t('datasource.schedule24h'), value: '0 0 2 * * *' },
 ])
 
-// --- Connectors ---
-// The connectors this deployment can create, with their setup guides and
-// credential forms (config_schema), come from /datasource/types.
-const connectorTypes = ref<ConnectorMeta[]>([])
-
-async function loadConnectorTypes() {
-  if (connectorTypes.value.length > 0) return
-  try {
-    connectorTypes.value = [...(await getConnectorTypes())]
-  } catch (e: any) {
-    MessagePlugin.error(e?.message || t('datasource.typesLoadFailed'))
-  }
+// --- Connector definitions ---
+interface ConnectorDef {
+  type: string
+  available: boolean
+  docUrl: string
+  permissionDocUrl: string
+  permissionPageUrl: string
+  requiredPermissions: string[]
+  fields: {
+    key: string
+    labelKey: string
+    placeholder: string
+    secret?: boolean
+    optional?: boolean
+    hintKey?: string
+    multiline?: boolean
+    fieldType?: 'custom_headers'
+  }[]
 }
 
-const currentDef = computed(() => connectorTypes.value.find(d => d.type === form.value.type))
-
-const EMPTY_SCHEMA: ConfigSchema = { type: 'object', properties: {} }
-const credentialSchema = computed<ConfigSchema>(() => currentDef.value?.config_schema ?? EMPTY_SCHEMA)
-// Settings form of connectors without a built-in settings UI (plugins).
-const settingsSchema = computed<ConfigSchema | null>(() => currentDef.value?.settings_schema ?? null)
-const settingsErrors = ref<FieldError[]>([])
-
-// Plugin connector fields with x-options / x-oauth ask the plugin, with the
-// instance the form holds (the stored credentials fill in what edit mode hides).
-provideSchemaFormSource(pluginFormSource({
-  target: () => {
-    const def = currentDef.value
-    if (!def?.plugin_id || !def.type.startsWith(`${def.plugin_id}/`)) return undefined
-    return {
-      pluginId: def.plugin_id,
-      scope: 'instance',
-      contribution: `connectors/${def.type.slice(def.plugin_id.length + 1)}`,
-      instanceId: props.dataSource?.id,
-    }
+const connectorDefs = computed<ConnectorDef[]>(() => [
+  {
+    type: 'feishu',
+    available: true,
+    docUrl: 'https://open.feishu.cn/app',
+    permissionDocUrl: 'https://open.feishu.cn/document/server-docs/docs/wiki-v2/wiki-overview',
+    permissionPageUrl: 'https://open.feishu.cn/app',
+    requiredPermissions: [
+      'wiki:wiki:readonly',
+      'drive:drive:readonly',
+      'drive:export:readonly',
+      'docx:document:readonly',
+    ],
+    fields: [
+      { key: 'app_id', labelKey: 'datasource.field.appId', placeholder: 'cli_xxxx' },
+      { key: 'app_secret', labelKey: 'datasource.field.appSecret', placeholder: '', secret: true },
+      { key: 'base_url', labelKey: 'datasource.field.baseUrl', placeholder: 'https://open.feishu.cn', optional: true, hintKey: 'datasource.field.baseUrlHint' },
+    ],
   },
-  values: () => ({
-    credentials: form.value.config.credentials,
-    settings: form.value.config.settings,
-    resourceIds: form.value.config.resource_ids,
-  }),
-  dependency: path => valueAt(form.value.config.credentials, path) ?? valueAt(form.value.config.settings, path),
-}))
-const labelI18n = computed(() => ({ t: (k: string) => t(k), te: (k: string) => te(k), locale: locale.value }))
-const labelOf = (def: ConnectorMeta) => connectorName(def, labelI18n.value)
+  {
+    // Lark is Feishu's international cloud. Same wiki/docx/drive APIs and the
+    // same scope identifiers, but a separate console, tenant and app — an app
+    // created on open.feishu.cn cannot read a Lark wiki.
+    type: 'lark',
+    available: true,
+    docUrl: 'https://open.larksuite.com/app',
+    permissionDocUrl: 'https://open.larksuite.com/document/server-docs/docs/wiki-v2/wiki-overview',
+    permissionPageUrl: 'https://open.larksuite.com/app',
+    requiredPermissions: [
+      'wiki:wiki:readonly',
+      'drive:drive:readonly',
+      'drive:export:readonly',
+      'docx:document:readonly',
+    ],
+    fields: [
+      { key: 'app_id', labelKey: 'datasource.field.appId', placeholder: 'cli_xxxx' },
+      { key: 'app_secret', labelKey: 'datasource.field.appSecret', placeholder: '', secret: true },
+      { key: 'base_url', labelKey: 'datasource.field.baseUrl', placeholder: 'https://open.feishu.cn', optional: true, hintKey: 'datasource.field.baseUrlHint' },
+    ],
+  },
+  {
+    // Feishu Drive (云盘) mode: sync documents/files under a user-supplied Drive
+    // folder_token. Same auth as the wiki connector but no wiki:wiki:readonly
+    // scope - Drive only needs drive + export + docx.
+    type: 'feishu_drive',
+    available: true,
+    docUrl: 'https://open.feishu.cn/app',
+    permissionDocUrl: 'https://open.feishu.cn/document/server-docs/docs/drive-v1/file/list',
+    permissionPageUrl: 'https://open.feishu.cn/app',
+    requiredPermissions: [
+      'drive:drive:readonly',
+      'drive:export:readonly',
+      'docx:document:readonly',
+    ],
+    fields: [
+      { key: 'app_id', labelKey: 'datasource.field.appId', placeholder: 'cli_xxxx' },
+      { key: 'app_secret', labelKey: 'datasource.field.appSecret', placeholder: '', secret: true },
+      { key: 'base_url', labelKey: 'datasource.field.baseUrl', placeholder: 'https://open.feishu.cn', optional: true, hintKey: 'datasource.field.baseUrlHint' },
+    ],
+  },
+  {
+    // Lark Drive: international counterpart of feishu_drive.
+    type: 'lark_drive',
+    available: true,
+    docUrl: 'https://open.larksuite.com/app',
+    permissionDocUrl: 'https://open.larksuite.com/document/server-docs/docs/drive-v1/file/list',
+    permissionPageUrl: 'https://open.larksuite.com/app',
+    requiredPermissions: [
+      'drive:drive:readonly',
+      'drive:export:readonly',
+      'docx:document:readonly',
+    ],
+    fields: [
+      { key: 'app_id', labelKey: 'datasource.field.appId', placeholder: 'cli_xxxx' },
+      { key: 'app_secret', labelKey: 'datasource.field.appSecret', placeholder: '', secret: true },
+      { key: 'base_url', labelKey: 'datasource.field.baseUrl', placeholder: 'https://open.larksuite.com', optional: true, hintKey: 'datasource.field.baseUrlHint' },
+    ],
+  },
+  {
+    type: 'notion',
+    available: true,
+    docUrl: 'https://www.notion.so/my-integrations',
+    permissionDocUrl: '',
+    permissionPageUrl: '',
+    requiredPermissions: [],
+    fields: [
+      { key: 'api_key', labelKey: 'datasource.field.integrationToken', placeholder: 'ntn_xxxx', secret: true },
+    ],
+  },
+  {
+    type: 'confluence',
+    available: true,
+    docUrl: 'https://developer.atlassian.com/cloud/confluence/rest/',
+    permissionDocUrl: 'https://developer.atlassian.com/cloud/confluence/rest/',
+    permissionPageUrl: 'https://id.atlassian.com/manage-profile/security/api-tokens',
+    requiredPermissions: [],
+    fields: [
+      { key: 'base_url', labelKey: 'datasource.field.confluenceBaseUrl', placeholder: 'https://confluence.example.com or https://team.atlassian.net/wiki' },
+      { key: 'username', labelKey: 'datasource.field.confluenceUsername', placeholder: 'name or email' },
+      { key: 'password', labelKey: 'datasource.field.confluencePassword', placeholder: 'Server/DC password', secret: true },
+      { key: 'api_token', labelKey: 'datasource.field.confluenceApiToken', placeholder: 'Cloud API token', secret: true },
+    ],
+  },
+  {
+    type: 'yuque',
+    available: true,
+    docUrl: 'https://www.yuque.com/yuque/developer/api',
+    permissionDocUrl: 'https://www.yuque.com/yuque/developer/api',
+    permissionPageUrl: 'https://www.yuque.com/settings/tokens',
+    requiredPermissions: [
+      'repo:read',
+      'doc:read',
+    ],
+    fields: [
+      { key: 'api_token', labelKey: 'datasource.field.apiToken', placeholder: '', secret: true },
+      { key: 'base_url', labelKey: 'datasource.field.baseUrl', placeholder: 'https://www.yuque.com', optional: true, hintKey: 'datasource.field.baseUrlHint' },
+    ],
+  },
+  {
+    type: 'dingtalk',
+    available: true,
+    docUrl: 'https://open.dingtalk.com/document/development/knowledge-base-overview',
+    permissionDocUrl: 'https://open.dingtalk.com/document/development/get-knowledge-base-list',
+    permissionPageUrl: 'https://open-dev.dingtalk.com/',
+    requiredPermissions: [
+      'Wiki.Workspace.Read',
+      'Wiki.Node.Read',
+      'Storage.File.Read',
+    ],
+    fields: [
+      { key: 'client_id', labelKey: 'datasource.field.clientId', placeholder: 'dingxxxxxxxx' },
+      { key: 'client_secret', labelKey: 'datasource.field.clientSecret', placeholder: '', secret: true },
+      { key: 'operator_id', labelKey: 'datasource.field.operatorId', placeholder: '', hintKey: 'datasource.field.operatorIdHint' },
+    ],
+  },
+  {
+    // Tencent IMA (ima.qq.com). Uses the OpenAPI at /openapi/wiki/v1 with two
+    // static headers (ima-openapi-clientid + ima-openapi-apikey); no OAuth.
+    type: 'ima',
+    available: true,
+    docUrl: 'https://ima.qq.com/agent-interface',
+    permissionDocUrl: 'https://ima.qq.com/agent-interface',
+    permissionPageUrl: 'https://ima.qq.com/agent-interface',
+    requiredPermissions: [],
+    fields: [
+      { key: 'client_id', labelKey: 'datasource.field.imaClientId', placeholder: '', secret: true },
+      { key: 'api_key', labelKey: 'datasource.field.imaApiKey', placeholder: '', secret: true },
+      { key: 'base_url', labelKey: 'datasource.field.baseUrl', placeholder: 'https://ima.qq.com', optional: true, hintKey: 'datasource.field.baseUrlHint' },
+    ],
+  },
+  {
+    type: 'rss',
+    available: true,
+    docUrl: '',
+    permissionDocUrl: '',
+    permissionPageUrl: '',
+    requiredPermissions: [],
+    fields: [
+      { key: 'auth_headers', labelKey: 'datasource.field.authHeaders', placeholder: '', optional: true, hintKey: 'datasource.field.authHeadersHint', fieldType: 'custom_headers' },
+    ],
+  },
+  {
+    type: 'gitlab', available: true, docUrl: '', permissionDocUrl: '', permissionPageUrl: '', requiredPermissions: [],
+    fields: [
+      { key: 'base_url', labelKey: 'datasource.gitlab.baseUrl', placeholder: 'https://gitlab.example.com' },
+      { key: 'access_token', labelKey: 'datasource.gitlab.accessToken', placeholder: '', secret: true },
+    ],
+  },
+])
 
-// Field errors of the last credential check, shown under each field.
-const credentialErrors = ref<FieldError[]>([])
-const schemaText = useSchemaText()
 
-watch(() => form.value.config.credentials, () => { credentialErrors.value = [] }, { deep: true })
+const currentDef = computed(() => connectorDefs.value.find(d => d.type === form.value.type))
 
-// Checks the credential form against its schema. On failure it marks the
-// fields and warns with the first one, as the editor always has.
-function checkCredentials(): boolean {
-  credentialErrors.value = validateConfig(credentialSchema.value, form.value.config.credentials)
-  settingsErrors.value = settingsSchema.value ? validateConfig(settingsSchema.value, form.value.config.settings) : []
-  const inCredentials = credentialErrors.value.length > 0
-  const first = credentialErrors.value[0] ?? settingsErrors.value[0]
-  if (!first) return true
-  const schema = inCredentials ? credentialSchema.value : (settingsSchema.value as ConfigSchema)
-  const field = schemaAt(schema, first.path)
-  const label = field ? schemaText(field, 'title') : first.path
-  MessagePlugin.warning(
-    first.code === 'required'
-      ? `${label} ${t('datasource.isRequired')}`
-      : `${label}: ${t(`schemaForm.errors.${first.code}`)}`,
-  )
-  return false
-}
+const displayedCredentialFields = computed(() => {
+  const fields = currentDef.value?.fields || []
+  if (form.value.type !== "confluence") return fields
+
+  return fields.filter((field) => {
+    if (field.key === "password") return form.value.config.credentials.edition !== "cloud"
+    if (field.key === "api_token") return form.value.config.credentials.edition === "cloud"
+    return true
+  })
+})
 
 // --- Drawer lifecycle ---
 watch(visible, async (v) => {
-  if (v) void loadConnectorTypes()
   if (!v) {
     if (!isEdit.value && tempDsId.value) {
       try {
@@ -620,6 +772,7 @@ watch(visible, async (v) => {
   driveFolderToken.value = ''
   driveFolderTokenError.value = ''
   driveRootLoaded.value = false
+  rssAuthHeaders.value = []
   gitlabProjects.value = []
 
   if (isEdit.value && props.dataSource) {
@@ -694,6 +847,18 @@ watch(
 )
 
 watch(
+  rssAuthHeaders,
+  () => {
+    syncRssAuthHeadersToCredentials()
+    if (needsConnectionTest()) {
+      testResult.value = ''
+      testErrorMsg.value = ''
+    }
+  },
+  { deep: true },
+)
+
+watch(
   () => form.value.config.settings.feed_urls,
   () => {
     if (needsConnectionTest()) {
@@ -703,16 +868,11 @@ watch(
   },
 )
 
-function selectType(def: ConnectorMeta) {
+function selectType(def: ConnectorDef) {
+  if (!def.available) return
   form.value.type = def.type
-  form.value.name = labelOf(def)
-  // Schema defaults, e.g. Confluence starts on the Server edition.
-  form.value.config.credentials = applyDefaults(def.config_schema ?? EMPTY_SCHEMA, {})
-  if (def.settings_schema) {
-    form.value.config.settings = applyDefaults(def.settings_schema, form.value.config.settings ?? {})
-  }
-  settingsErrors.value = []
-  credentialErrors.value = []
+  form.value.name = t(`datasource.connector.${def.type}`)
+  form.value.config.credentials = def.type === "confluence" ? { edition: "server" } : {}
   if (def.type === 'confluence') {
     form.value.config.settings = { ...form.value.config.settings, edition: 'server' }
   }
@@ -723,15 +883,24 @@ function selectType(def: ConnectorMeta) {
     form.value.config.settings = { ...form.value.config.settings, folder_mode: 'toc' }
   }
   if (isGitLabConnector(def.type)) addGitLabProject()
+  rssAuthHeaders.value = []
   step.value = 1
 }
 
 // --- Test connection ---
 async function testConnection() {
+  syncRssAuthHeadersToCredentials()
   syncConfluencePublicFieldsToSettings()
   if (!validateRssFeedUrls()) return
   if (!isEdit.value || !credentialsConfigured.value || replaceCredentialsMode.value) {
-    if (!checkCredentials()) return
+    const fields = displayedCredentialFields.value
+    for (const f of fields) {
+      if (f.optional || f.fieldType === 'custom_headers') continue
+      if (!form.value.config.credentials[f.key]) {
+        MessagePlugin.warning(`${t(f.labelKey)} ${t('datasource.isRequired')}`)
+        return
+      }
+    }
   }
 
   testing.value = true
@@ -753,7 +922,7 @@ async function testConnection() {
         // validate-credentials is credentials-only; feed URLs live in settings.
         creds.feed_urls = form.value.config.settings.feed_urls
       }
-      await validateCredentials(form.value.type, creds, form.value.config.settings)
+      await validateCredentials(form.value.type, creds)
     }
     testResult.value = 'success'
     MessagePlugin.success(t('datasource.testSuccess'))
@@ -918,11 +1087,21 @@ function validateRssFeedUrls(): boolean {
 }
 
 function validateStep1Fields(): boolean {
+  syncRssAuthHeadersToCredentials()
   if (!validateRssFeedUrls()) return false
   if (isEdit.value && credentialsConfigured.value && !replaceCredentialsMode.value) {
     return true
   }
-  return checkCredentials()
+
+  const fields = displayedCredentialFields.value
+  for (const f of fields) {
+    if (f.optional || f.fieldType === 'custom_headers') continue
+    if (!form.value.config.credentials[f.key]) {
+      MessagePlugin.warning(`${t(f.labelKey)} ${t('datasource.isRequired')}`)
+      return false
+    }
+  }
+  return true
 }
 
 async function nextStep() {
@@ -994,6 +1173,7 @@ function buildConfigPayload(): Record<string, unknown> {
 // the whole submit on failure so we don't leave the row partially saved.
 async function commitCredentialsIfNeeded(dsId: string): Promise<boolean> {
   if (!isEdit.value || !replaceCredentialsMode.value) return true
+  syncRssAuthHeadersToCredentials()
   syncConfluencePublicFieldsToSettings()
   const filled = Object.entries(form.value.config.credentials).filter(
     ([, v]) => typeof v === 'string' ? v !== '' : v != null,
@@ -1004,6 +1184,7 @@ async function commitCredentialsIfNeeded(dsId: string): Promise<boolean> {
     credentialsConfigured.value = true
     replaceCredentialsMode.value = false
     form.value.config.credentials = {}
+    rssAuthHeaders.value = []
     return true
   } catch (e: any) {
     MessagePlugin.error(e?.message || e?.error || t('credential.saveFailed'))
@@ -1173,9 +1354,9 @@ const drawerConfirmText = computed(() => {
     @confirm="handleDrawerConfirm"
     @cancel="handleClose"
   >
-    <template v-if="form.type && (getDatasourceIconUrl(form.type) || currentDef?.icon)" #headerIcon>
+    <template v-if="form.type && getDatasourceIconUrl(form.type)" #headerIcon>
       <img
-        :src="getDatasourceIconUrl(form.type) || currentDef?.icon"
+        :src="getDatasourceIconUrl(form.type)"
         :alt="form.type"
         class="datasource-header-icon__img"
       >
@@ -1239,17 +1420,19 @@ const drawerConfirmText = computed(() => {
       <h4 class="setting-drawer__section-title">{{ t('datasource.step.selectType') }}</h4>
       <div class="ds-type-grid">
         <button
-          v-for="def in connectorTypes"
+          v-for="def in connectorDefs"
           :key="def.type"
           type="button"
-          class="ds-type-card"
+          :class="['ds-type-card', { disabled: !def.available }]"
+          :disabled="!def.available"
           @click="selectType(def)"
         >
           <div class="ds-type-header">
-            <DataSourceTypeIcon :type="def.type" :icon-url="def.icon" :label="labelOf(def)" :size="20" />
-            <span class="ds-type-name">{{ labelOf(def) }}</span>
+            <DataSourceTypeIcon :type="def.type" :size="20" />
+            <span class="ds-type-name">{{ t(`datasource.connector.${def.type}`) }}</span>
+            <span v-if="!def.available" class="ds-type-soon">{{ t('datasource.comingSoon') }}</span>
           </div>
-          <div class="ds-type-desc">{{ connectorDescription(def, labelI18n) }}</div>
+          <div class="ds-type-desc">{{ t(`datasource.connectorDesc.${def.type}`) }}</div>
         </button>
       </div>
     </section>
@@ -1257,7 +1440,7 @@ const drawerConfirmText = computed(() => {
     <!-- Step 1: Credentials -->
     <template v-if="step === 1">
       <div
-        v-if="currentDef?.required_permissions?.length"
+        v-if="currentDef && currentDef.requiredPermissions.length > 0"
         class="ds-setup-guide ds-setup-guide--standalone"
       >
         <button
@@ -1290,7 +1473,7 @@ const drawerConfirmText = computed(() => {
               <span class="ds-setup-step__desc">
                 <template v-if="!t(`datasource.prereqStep2Desc_${form.type}`)">
                   <code
-                    v-for="perm in currentDef.required_permissions"
+                    v-for="perm in currentDef.requiredPermissions"
                     :key="perm"
                     class="ds-perm-tag"
                   >{{ perm }}</code>
@@ -1306,8 +1489,8 @@ const drawerConfirmText = computed(() => {
             </li>
           </ol>
           <a
-            v-if="currentDef.permission_page_url"
-            :href="currentDef.permission_page_url"
+            v-if="currentDef.permissionPageUrl"
+            :href="currentDef.permissionPageUrl"
             target="_blank"
             rel="noopener"
             class="doc-link ds-setup-guide__link"
@@ -1321,11 +1504,11 @@ const drawerConfirmText = computed(() => {
       <section class="setting-drawer__section">
         <h4 class="setting-drawer__section-title">{{ t('datasource.sectionBasic') }}</h4>
 
-        <div v-if="currentDef?.doc_url" class="inline-alert">
+        <div v-if="currentDef?.docUrl" class="inline-alert">
           <t-icon name="info-circle-filled" class="inline-alert__icon" />
           <span class="inline-alert__text">{{ t('datasource.docHint') }}</span>
           <a
-            :href="currentDef.doc_url"
+            :href="currentDef.docUrl"
             target="_blank"
             rel="noopener"
             class="inline-alert__action doc-link"
@@ -1419,17 +1602,81 @@ const drawerConfirmText = computed(() => {
         </div>
 
         <template v-else-if="credentialsInputVisible">
-          <SchemaForm
-            v-model="form.config.credentials"
-            :schema="credentialSchema"
-            :errors="credentialErrors"
-          />
-          <SchemaForm
-            v-if="settingsSchema"
-            v-model="form.config.settings"
-            :schema="settingsSchema"
-            :errors="settingsErrors"
-          />
+          <div v-if="form.type === 'confluence'" class="form-item">
+            <label class="form-label">{{ t('datasource.field.confluenceEdition') }}</label>
+            <t-select v-model="form.config.credentials.edition">
+              <t-option value="server" :label="t('datasource.field.confluenceEditionServer')" />
+              <t-option value="cloud" :label="t('datasource.field.confluenceEditionCloud')" />
+            </t-select>
+          </div>
+          <div
+            v-for="field in displayedCredentialFields"
+            :key="field.key"
+            class="form-item"
+          >
+            <template v-if="field.fieldType === 'custom_headers'">
+              <div class="custom-headers-header">
+                <label class="form-label" style="margin-bottom: 0;">{{ t(field.labelKey) }}</label>
+                <t-button variant="text" size="small" theme="primary" @click="addRssAuthHeader">
+                  <template #icon><t-icon name="add" /></template>
+                  {{ t('model.editor.customHeadersAdd') }}
+                </t-button>
+              </div>
+              <p v-if="field.hintKey" class="form-desc custom-headers-desc">{{ t(field.hintKey) }}</p>
+              <div v-if="rssAuthHeaders.length > 0" class="custom-headers-list">
+                <div v-for="(item, idx) in rssAuthHeaders" :key="idx" class="custom-header-row">
+                  <t-input
+                    v-model="item.key"
+                    :placeholder="t('model.editor.customHeadersKeyPlaceholder')"
+                    class="custom-header-key"
+                    autocomplete="off"
+                    spellcheck="false"
+                  />
+                  <t-input
+                    v-model="item.value"
+                    :placeholder="t('model.editor.customHeadersValuePlaceholder')"
+                    class="custom-header-value"
+                    autocomplete="off"
+                    spellcheck="false"
+                  />
+                  <t-button
+                    variant="text"
+                    shape="square"
+                    size="small"
+                    class="custom-header-remove"
+                    :aria-label="t('common.delete')"
+                    @click="removeRssAuthHeader(idx)"
+                  >
+                    <t-icon name="close" />
+                  </t-button>
+                </div>
+              </div>
+            </template>
+            <template v-else>
+              <label class="form-label" :class="{ required: !field.optional }">
+                {{ t(field.labelKey) }}
+              </label>
+              <t-textarea
+                v-if="field.multiline"
+                v-model="form.config.credentials[field.key]"
+                :placeholder="field.placeholder || t('credential.inputPlaceholder')"
+                :autosize="{ minRows: 2, maxRows: 6 }"
+                autocomplete="off"
+                spellcheck="false"
+              />
+              <t-input
+                v-else
+                v-model="form.config.credentials[field.key]"
+                :placeholder="field.placeholder || t('credential.inputPlaceholder')"
+                :type="field.secret ? 'password' : 'text'"
+                autocomplete="off"
+                spellcheck="false"
+              >
+                <template v-if="field.secret" #prefix-icon><t-icon name="lock-on" /></template>
+              </t-input>
+              <p v-if="field.hintKey" class="form-desc">{{ t(field.hintKey) }}</p>
+            </template>
+          </div>
           <div v-if="isEdit && replaceCredentialsMode" class="credential-edit-actions">
             <t-button size="small" variant="text" @click="cancelReplaceCredentials">
               {{ t('common.cancel') }}
@@ -1622,8 +1869,8 @@ const drawerConfirmText = computed(() => {
             {{ t('datasource.retryLoadResources') }}
           </button>
           <a
-            v-if="currentDef?.permission_doc_url"
-            :href="currentDef.permission_doc_url"
+            v-if="currentDef?.permissionDocUrl"
+            :href="currentDef.permissionDocUrl"
             target="_blank"
             rel="noopener"
             class="doc-link"
@@ -1836,6 +2083,11 @@ const drawerConfirmText = computed(() => {
   color: inherit;
 }
 
+.ds-type-card.disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .ds-type-header {
   display: flex;
   align-items: center;
@@ -1846,6 +2098,14 @@ const drawerConfirmText = computed(() => {
 .ds-type-name {
   font-size: var(--app-text-md);
   font-weight: 600;
+}
+
+.ds-type-soon {
+  font-size: var(--app-text-2xs);
+  color: var(--td-text-color-placeholder);
+  background: var(--td-bg-color-component);
+  padding: 1px 6px;
+  border-radius: 3px;
 }
 
 .ds-type-desc {
@@ -2485,6 +2745,55 @@ const drawerConfirmText = computed(() => {
   align-items: center;
   justify-content: center;
   gap: 16px;
+}
+
+.custom-headers-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.custom-headers-desc {
+  margin: 0 0 10px 0;
+  font-size: var(--app-text-sm);
+  line-height: 1.5;
+  color: var(--td-text-color-placeholder);
+}
+
+.custom-headers-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.custom-header-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+
+  .custom-header-key {
+    flex: 0 0 38%;
+  }
+
+  .custom-header-value {
+    flex: 1;
+  }
+
+  .custom-header-remove {
+    flex-shrink: 0;
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    color: var(--td-text-color-placeholder);
+    border-radius: var(--app-radius-sm);
+    transition: all 0.18s ease;
+
+    &:hover {
+      background: var(--td-error-color-light);
+      color: var(--td-error-color);
+    }
+  }
 }
 
 .ds-empty-retry {

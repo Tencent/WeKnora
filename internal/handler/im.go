@@ -9,7 +9,6 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/im"
 	"github.com/Tencent/WeKnora/internal/logger"
-	"github.com/Tencent/WeKnora/internal/plugin/manifest"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -35,7 +34,6 @@ var invalidIMPlatformError = func() string {
 
 // IMHandler handles IM platform callback requests and channel CRUD.
 type IMHandler struct {
-	pluginGated
 	imService *im.Service
 }
 
@@ -44,57 +42,6 @@ func NewIMHandler(imService *im.Service) *IMHandler {
 	return &IMHandler{
 		imService: imService,
 	}
-}
-
-// GetIMChannel godoc
-// @Summary      获取 IM 渠道
-// @Description  返回单个渠道供编辑：凭证中的密钥字段以 *** 代替
-// @Tags         IM
-// @Produce      json
-// @Param        id   path      string  true  "渠道 ID"
-// @Success      200  {object}  map[string]interface{}
-// @Security     Bearer
-// @Security     ApiKeyAuth
-// @Router       /im-channels/{id} [get]
-func (h *IMHandler) GetIMChannel(c *gin.Context) {
-	tenantID, ok := c.Request.Context().Value(types.TenantIDContextKey).(uint64)
-	if !ok {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized"})
-		return
-	}
-	channel, err := h.imService.GetChannelByIDAndTenant(c.Param("id"), tenantID)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "channel not found"})
-		return
-	}
-	creds, err := im.RedactCredentials(channel.Platform, channel.Credentials)
-	if err != nil {
-		creds = map[string]any{}
-	}
-	c.JSON(http.StatusOK, gin.H{"data": struct {
-		*im.IMChannel
-		Credentials map[string]any `json:"credentials"`
-	}{channel, creds}})
-}
-
-// ListIMPlatforms godoc
-// @Summary      列出 IM 平台
-// @Description  返回已注册的 IM 平台：支持的接入模式、控制台链接和凭证表单 Schema
-// @Tags         IM
-// @Produce      json
-// @Success      200  {object}  map[string]interface{}
-// @Security     Bearer
-// @Security     ApiKeyAuth
-// @Router       /im-channels/platforms [get]
-func (h *IMHandler) ListIMPlatforms(c *gin.Context) {
-	enabled := h.pluginFilter(c)
-	platforms := make([]im.PlatformInfo, 0)
-	for _, p := range h.imService.PlatformInfos() {
-		if enabled(manifest.PointIMChannels, p.ID) {
-			platforms = append(platforms, p)
-		}
-	}
-	c.JSON(http.StatusOK, gin.H{"success": true, "data": platforms})
 }
 
 // ── Channel CRUD handlers ──
@@ -129,10 +76,6 @@ func (h *IMHandler) CreateIMChannel(c *gin.Context) {
 		return
 	}
 
-	if !h.pluginFilter(c)(manifest.PointIMChannels, req.Platform) {
-		c.JSON(http.StatusBadRequest, gin.H{"error": disabledIntegrationError})
-		return
-	}
 	if !validIMPlatforms[req.Platform] {
 		c.JSON(http.StatusBadRequest, gin.H{"error": invalidIMPlatformError})
 		return
@@ -322,15 +265,7 @@ func (h *IMHandler) UpdateIMChannel(c *gin.Context) {
 		}
 	}
 	if req.Credentials != nil {
-		// The editor loads credentials redacted (GetIMChannel), so merge
-		// rather than replace: omitted keys and unchanged secrets keep their
-		// stored values.
-		merged, err := im.MergeCredentials(channel.Platform, channel.Credentials, req.Credentials)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid credentials"})
-			return
-		}
-		channel.Credentials = merged
+		channel.Credentials = req.Credentials
 	}
 	if req.Enabled != nil {
 		channel.Enabled = *req.Enabled

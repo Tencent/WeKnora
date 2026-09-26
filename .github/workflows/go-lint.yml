@@ -58,10 +58,10 @@ jobs:
           modules=()
           if git diff --name-only --diff-filter=ACMR "$diff_range" -- \
                .golangci.yml .github/workflows/go-lint.yml | grep -q .; then
-            modules=("." "cli" "client" "pluginsdk")
+            modules=("." "cli" "client")
           else
             if git diff --name-only --diff-filter=ACMR "$diff_range" -- \
-                 '*.go' ':!cli/**' ':!client/**' ':!pluginsdk/**' go.mod go.sum | grep -q .; then
+                 '*.go' ':!cli/**' ':!client/**' go.mod go.sum | grep -q .; then
               modules+=(".")
             fi
             if git diff --name-only --diff-filter=ACMR "$diff_range" -- 'cli/**' | grep -q .; then
@@ -69,9 +69,6 @@ jobs:
             fi
             if git diff --name-only --diff-filter=ACMR "$diff_range" -- 'client/**' | grep -q .; then
               modules+=("client")
-            fi
-            if git diff --name-only --diff-filter=ACMR "$diff_range" -- 'pluginsdk/**' | grep -q .; then
-              modules+=("pluginsdk")
             fi
           fi
           json="["

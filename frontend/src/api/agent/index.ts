@@ -1,4 +1,3 @@
-import type { ConfigSchema } from '@/components/schema-form/schema'
 import { get, post, put, del } from "../../utils/request";
 
 // 智能体配置
@@ -346,35 +345,6 @@ export interface IMChannelOverview {
   bot_identity: string;
   created_at: string;
   updated_at: string;
-}
-
-// IMPlatformInfo describes one IM platform (internal/im.PlatformInfo): its
-// connection modes, console links and the credential form.
-export interface IMPlatformInfo {
-  id: string
-  name: string
-  names?: Record<string, string>
-  order: number
-  /** Supported connection modes, default first. */
-  modes: Array<IMChannel['mode']>
-  mode_labels?: Record<string, string>
-  mode_hint_key?: string
-  supports_thread: boolean
-  links?: Array<{ url: string; title: string; title_key?: string }>
-  config_schema?: ConfigSchema
-}
-
-/**
- * One channel for the editor, credentials included: plain fields as stored,
- * set secrets as "***". Send them back unchanged to keep the stored secret.
- */
-export function getIMChannel(id: string) {
-  return get<{ data: IMChannel }>(`/api/v1/im-channels/${id}`);
-}
-
-/** The IM platforms this deployment has adapters for, in display order. */
-export function listIMPlatforms() {
-  return get<{ data: IMPlatformInfo[] }>('/api/v1/im-channels/platforms');
 }
 
 export function listAllIMChannels() {

@@ -13,8 +13,6 @@ import (
 	"github.com/Tencent/WeKnora/internal/models/api"
 	"github.com/Tencent/WeKnora/internal/models/providers"
 	modelruntime "github.com/Tencent/WeKnora/internal/models/runtime"
-	"github.com/Tencent/WeKnora/internal/plugin/configschema"
-	"github.com/Tencent/WeKnora/internal/plugin/manifest"
 	"github.com/Tencent/WeKnora/internal/types"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/gin-gonic/gin"
@@ -39,9 +37,6 @@ type ModelProviderDTO struct {
 	DefaultURLs  map[string]string      `json:"defaultUrls"`
 	ModelTypes   []string               `json:"modelTypes"`
 	ExtraFields  []providers.ExtraField `json:"extraFields,omitempty"`
-	// ConfigSchema describes ExtraFields as a config schema (the values of
-	// extra_config). It carries the same fields; the editor moves to it.
-	ConfigSchema *configschema.Schema `json:"configSchema,omitempty"`
 	// CredentialLabels rename the primary credential input for the model
 	// types that do not take a plain API key (signed rerank APIs).
 	CredentialLabels []providers.CredentialLabel `json:"credentialLabels,omitempty"`
@@ -128,9 +123,6 @@ func providerDTO(v *modelruntime.Provider, modelType types.ModelType, includeMod
 		// locale and the model type, so a new vendor needs no UI change.
 		CredentialLabels: v.CredentialLabels,
 		Order:            v.Order,
-	}
-	if len(v.ExtraFields) > 0 {
-		dto.ConfigSchema = providers.ExtraFieldsSchema(v.ExtraFields)
 	}
 	// Vendor-level thinking summary: resolve an unknown model so only the
 	// vendor defaults contribute.
@@ -227,11 +219,7 @@ func (h *ModelHandler) ListModelProviders(c *gin.Context) {
 	// themselves (dto.NewModelResponse).
 	includeURLs := dto.CanViewIntegrationSecrets(ctx)
 	result := make([]ModelProviderDTO, 0, len(vendors))
-	enabled := h.pluginFilter(c)
 	for _, v := range vendors {
-		if !enabled(manifest.PointModelVendors, v.ID) {
-			continue
-		}
 		p := providerDTO(v, backendType, true)
 		if !includeURLs {
 			p.DefaultURLs = nil

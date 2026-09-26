@@ -95,7 +95,6 @@ test('settings no longer render moved panels, and old bookmarks reach toolbox', 
   assert.match(router, /to\.path === '\/platform\/settings' && isToolboxSection\(to\.query\.section\)/)
   assert.match(router, /toolboxLocation\(to\.query\.section/)
   const page = readFileSync(new URL('../views/toolbox/Toolbox.vue', import.meta.url), 'utf8')
-  // Unknown sections (and plugin pages that are gone) fall back to the first tool.
-  assert.match(page, /if \(!selectedItem\.value && !selectedPage\.value && !pendingPage && fallback\) \{\s*void router\.replace\(toolboxLocation\(fallback\.key\)\)/)
+  assert.match(page, /if \(!selectedItem\.value && fallback\) void router\.replace\(toolboxLocation\(fallback\.key\)\)/)
   assert.match(page, /:key="sandboxId"\s+:initial-sandbox-id="sandboxId"/)
 })

@@ -6,7 +6,6 @@ import (
 	"log"
 	"time"
 
-	"github.com/Tencent/WeKnora/internal/plugin/configschema"
 	"github.com/Tencent/WeKnora/internal/utils"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -134,13 +133,6 @@ type WebSearchProviderTypeInfo struct {
 	ID string `json:"id"`
 	// Human-readable name
 	Name string `json:"name"`
-	// Names localizes Name for plugin provider types, keyed by locale.
-	Names map[string]string `json:"names,omitempty"`
-	// Icon is an image (data: URI) for plugin provider types; builtin types
-	// use the frontend's bundled logos.
-	Icon string `json:"icon,omitempty"`
-	// PluginID names the installed plugin providing the type.
-	PluginID string `json:"plugin_id,omitempty"`
 	// Whether the provider requires an API key
 	RequiresAPIKey bool `json:"requires_api_key"`
 	// Whether the provider accepts an optional API key (keyless by default, but a
@@ -158,10 +150,6 @@ type WebSearchProviderTypeInfo struct {
 	DocsURL string `json:"docs_url,omitempty"`
 	// Provider-specific non-secret configuration rendered dynamically by the frontend.
 	ConfigFields []WebSearchProviderConfigField `json:"config_fields,omitempty"`
-	// ConfigSchema describes the provider parameters (the fields above plus
-	// the connection flags) as a config schema. Filled by
-	// GetWebSearchProviderTypes.
-	ConfigSchema *configschema.Schema `json:"config_schema,omitempty"`
 }
 
 // WebSearchProviderConfigField describes a non-secret provider-specific form field.
@@ -187,14 +175,6 @@ type WebSearchProviderConfigFieldOption struct {
 
 // GetWebSearchProviderTypes returns metadata for all supported provider types.
 func GetWebSearchProviderTypes() []WebSearchProviderTypeInfo {
-	infos := webSearchProviderTypes()
-	for i := range infos {
-		infos[i].ConfigSchema = infos[i].BuildConfigSchema()
-	}
-	return infos
-}
-
-func webSearchProviderTypes() []WebSearchProviderTypeInfo {
 	return []WebSearchProviderTypeInfo{
 		{
 			ID: "brave", Name: "Brave Search", RequiresAPIKey: true, SupportsProxy: true,

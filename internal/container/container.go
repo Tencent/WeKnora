@@ -6,6 +6,7 @@ package container
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -58,10 +59,29 @@ import (
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/database"
 	"github.com/Tencent/WeKnora/internal/datasource"
+	confluenceConnector "github.com/Tencent/WeKnora/internal/datasource/connector/confluence"
+	dingtalkConnector "github.com/Tencent/WeKnora/internal/datasource/connector/dingtalk"
+	"github.com/Tencent/WeKnora/internal/datasource/connector/feishu/core"
+	"github.com/Tencent/WeKnora/internal/datasource/connector/feishu/drive"
+	"github.com/Tencent/WeKnora/internal/datasource/connector/feishu/wiki"
+	gitlabConnector "github.com/Tencent/WeKnora/internal/datasource/connector/gitlab"
+	imaConnector "github.com/Tencent/WeKnora/internal/datasource/connector/ima"
+	notionConnector "github.com/Tencent/WeKnora/internal/datasource/connector/notion"
+	rssConnector "github.com/Tencent/WeKnora/internal/datasource/connector/rss"
+	yuqueConnector "github.com/Tencent/WeKnora/internal/datasource/connector/yuque"
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/handler"
 	"github.com/Tencent/WeKnora/internal/handler/session"
 	imPkg "github.com/Tencent/WeKnora/internal/im"
+	"github.com/Tencent/WeKnora/internal/im/dingtalk"
+	"github.com/Tencent/WeKnora/internal/im/feishu"
+	"github.com/Tencent/WeKnora/internal/im/mattermost"
+	"github.com/Tencent/WeKnora/internal/im/qqbot"
+	"github.com/Tencent/WeKnora/internal/im/slack"
+	"github.com/Tencent/WeKnora/internal/im/telegram"
+	"github.com/Tencent/WeKnora/internal/im/wechat"
+	"github.com/Tencent/WeKnora/internal/im/wecom"
+	"github.com/Tencent/WeKnora/internal/im/yunzhijia"
 	"github.com/Tencent/WeKnora/internal/infrastructure/docparser"
 	infra_web_search "github.com/Tencent/WeKnora/internal/infrastructure/web_search"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -71,17 +91,6 @@ import (
 	"github.com/Tencent/WeKnora/internal/models/embedding"
 	"github.com/Tencent/WeKnora/internal/models/limiter" // register built-in vendors
 	"github.com/Tencent/WeKnora/internal/models/utils/ollama"
-	"github.com/Tencent/WeKnora/internal/plugin/activate"
-	pluginbuiltin "github.com/Tencent/WeKnora/internal/plugin/builtin"
-	plugindriver "github.com/Tencent/WeKnora/internal/plugin/driver"
-	pluginevents "github.com/Tencent/WeKnora/internal/plugin/events"
-	pluginmanifest "github.com/Tencent/WeKnora/internal/plugin/manifest"
-	pluginoauth "github.com/Tencent/WeKnora/internal/plugin/oauth"
-	"github.com/Tencent/WeKnora/internal/plugin/reconcile"
-	pluginregistry "github.com/Tencent/WeKnora/internal/plugin/registry"
-	pluginremote "github.com/Tencent/WeKnora/internal/plugin/remote"
-	plugintenancy "github.com/Tencent/WeKnora/internal/plugin/tenancy"
-	pluginwebhook "github.com/Tencent/WeKnora/internal/plugin/webhook"
 	"github.com/Tencent/WeKnora/internal/router"
 	"github.com/Tencent/WeKnora/internal/sandbox"
 	"github.com/Tencent/WeKnora/internal/storageallowlist"
@@ -153,10 +162,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(repository.NewTenantInvitationRepository))
 	must(container.Provide(repository.NewAuditLogRepository))
 	must(container.Provide(repository.NewKnowledgeBaseRepository))
-	// Documents reaching completed or failed raise plugin events.
-	must(container.Provide(func(db *gorm.DB) interfaces.KnowledgeRepository {
-		return pluginevents.WatchKnowledge(repository.NewKnowledgeRepository(db))
-	}))
+	must(container.Provide(repository.NewKnowledgeRepository))
 	must(container.Provide(repository.NewKnowledgeSpanRepository))
 	must(container.Provide(repository.NewChunkRepository))
 	must(container.Provide(repository.NewKnowledgeTagRepository))
@@ -169,29 +175,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(repository.NewSystemSettingRepository))
 	must(container.Provide(repository.NewModelCatalogRepository))
 	must(container.Provide(neo4jRepo.NewNeo4jRepository))
-	// Installed plugins' MCP servers are listed alongside stored services.
-	must(container.Provide(activate.NewMCPServers))
-	must(container.Provide(activate.NewSkills))
-	must(container.Provide(activate.NewModelVendors))
-	must(container.Provide(newPluginHostManager))
-	must(container.Provide(pluginremote.NewManager))
-	must(container.Provide(newPluginHostPool))
-	must(container.Provide(newPluginDelegation))
-	must(container.Provide(newPluginInvoker))
-	must(container.Provide(repository.NewPluginKVRepository))
-	must(container.Provide(newPluginHostAPI))
-	must(container.Provide(activate.NewWebSearch))
-	must(container.Provide(activate.NewConnectors))
-	must(container.Provide(activate.NewParsers))
-	must(container.Provide(activate.NewUIPages))
-	must(container.Provide(func(
-		reg *pluginregistry.Registry, t *plugintenancy.Service, enq interfaces.TaskEnqueuer, iv *activate.Invoker,
-	) *pluginevents.Dispatcher {
-		return pluginevents.NewDispatcher(reg, t, enq, iv)
-	}))
-	must(container.Provide(func(d *pluginevents.Dispatcher) interfaces.TaskHandler { return d },
-		dig.Name("pluginEvents")))
-	must(container.Provide(newMCPServiceRepository))
+	must(container.Provide(repository.NewMCPServiceRepository))
 	must(container.Provide(repository.NewMCPToolApprovalRepository))
 	must(container.Provide(repository.NewMCPOAuthRepository))
 	must(container.Provide(repository.NewTenantSandboxConfigRepository))
@@ -610,27 +594,6 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(handler.NewEmbedChannelHandler))
 	must(container.Provide(handler.NewMCPEndpointHandler))
 	must(container.Provide(handler.NewWeKnoraCloudHandler))
-	// Plugin catalog: builtins are described from what is registered above.
-	must(container.Provide(newPluginRegistry))
-	must(container.Provide(repository.NewPluginTenantSettingRepository))
-	must(container.Provide(plugintenancy.NewService))
-	must(container.Provide(func(s *plugintenancy.Service) interfaces.PluginGate { return s }))
-	must(container.Invoke(installPluginGate))
-	must(container.Provide(repository.NewPluginRepository))
-	must(container.Invoke(bindPluginActivators))
-	must(container.Provide(newPluginPackageStore))
-	must(container.Provide(newPluginReconciler))
-	must(container.Invoke(startPluginReconciler))
-	must(container.Provide(newPluginInstaller))
-	must(container.Provide(newPluginDrivers))
-	must(container.Provide(handler.NewPluginHandler))
-	must(container.Provide(handler.NewPluginAdminHandler))
-	must(container.Provide(handler.NewPluginUIHandler))
-	must(container.Provide(pluginwebhook.NewTokensFromEnv))
-	must(container.Provide(handler.NewPluginWebhookHandler))
-	must(container.Provide(repository.NewPluginOAuthRepository))
-	must(container.Provide(pluginoauth.NewService))
-	must(container.Provide(handler.NewPluginFormsHandler))
 	logger.Debugf(ctx, "[Container] HTTP handlers registered")
 
 	// Wire the chat package's local image resolver so multimodal chat can read
@@ -1844,56 +1807,37 @@ func NewDuckDB() (*sql.DB, error) {
 // Each provider type is registered with its factory function that accepts parameters.
 // Provider instances are created on-demand when tenants configure them.
 func registerWebSearchProviders(registry *infra_web_search.Registry) {
-	pluginbuiltin.RegisterWebSearchProviders(registry)
-}
-
-// newPluginRegistry builds the plugin registry from the builtins this process
-// has registered. It depends on the IM service so adapter factories are in
-// place before the platforms are read.
-func newPluginRegistry(
-	connectors *datasource.ConnectorRegistry,
-	webSearch *infra_web_search.Registry,
-	imService *imPkg.Service,
-) (*pluginregistry.Registry, error) {
-	return pluginbuiltin.NewRegistry(pluginbuiltin.Live{
-		Version:     handler.Version,
-		Connectors:  connectors,
-		WebSearch:   webSearch,
-		IMPlatforms: imService.Platforms(),
-	})
-}
-
-// newPluginDrivers returns the drivers that run plugins: builtins,
-// declarative packages, the embedded host and remote services; a kubernetes
-// driver joins this set.
-func newPluginDrivers(reg *pluginregistry.Registry, r *reconcile.Reconciler) *plugindriver.Set {
-	return plugindriver.NewSet(plugindriver.NewBuiltin(reg.Plugin),
-		r.Driver(pluginmanifest.RuntimeDeclarative), r.Driver(pluginmanifest.RuntimeHost),
-		r.Driver(pluginmanifest.RuntimeRemote))
-}
-
-// installPluginGate gives the integration handlers the tenant plugin switches,
-// so a disabled plugin's integrations drop out of type listings and cannot
-// back new instances.
-func installPluginGate(
-	gate interfaces.PluginGate,
-	models *handler.ModelHandler,
-	webSearch *handler.WebSearchProviderHandler,
-	dataSources *handler.DataSourceHandler,
-	imHandler *handler.IMHandler,
-	system *handler.SystemHandler,
-) {
-	gated := []interface{ SetPluginGate(interfaces.PluginGate) }{models, webSearch, dataSources, imHandler, system}
-	for _, h := range gated {
-		h.SetPluginGate(gate)
-	}
+	registry.Register("duckduckgo", infra_web_search.NewDuckDuckGoProvider)
+	registry.Register("google", infra_web_search.NewGoogleProvider)
+	registry.Register("bing", infra_web_search.NewBingProvider)
+	registry.Register("tavily", infra_web_search.NewTavilyProvider)
+	registry.Register("ollama", infra_web_search.NewOllamaProvider)
+	registry.Register("baidu", infra_web_search.NewBaiduProvider)
+	registry.Register("searxng", infra_web_search.NewSearxngProvider)
+	registry.Register("keenable", infra_web_search.NewKeenableProvider)
+	registry.Register("zhipu", infra_web_search.NewZhipuProvider)
+	registry.Register("exa", infra_web_search.NewExaProvider)
+	registry.Register("metaso", infra_web_search.NewMetasoProvider)
+	registry.Register("bocha", infra_web_search.NewBochaProvider)
+	registry.Register("brave", infra_web_search.NewBraveProvider)
+	registry.Register("serply", infra_web_search.NewSerplyProvider)
 }
 
 // registerIMService registers adapter factories, loads enabled channels, and
 // wires the process-lifetime shutdown hook. Each platform's factory lives in
 // its own subpackage to keep this file focused on wiring.
 func registerIMService(imService *imPkg.Service, cleaner interfaces.ResourceCleaner) {
-	pluginbuiltin.RegisterIMAdapters(imService)
+	imService.RegisterAdapterFactory("wecom", wecom.NewFactory())
+	imService.RegisterAdapterFactory("feishu", feishu.NewFactory(feishu.RegionFeishu))
+	// Lark is Feishu's international cloud: same adapter, different host/tenant.
+	imService.RegisterAdapterFactory("lark", feishu.NewFactory(feishu.RegionLark))
+	imService.RegisterAdapterFactory("slack", slack.NewFactory())
+	imService.RegisterAdapterFactory("telegram", telegram.NewFactory())
+	imService.RegisterAdapterFactory("dingtalk", dingtalk.NewFactory())
+	imService.RegisterAdapterFactory("mattermost", mattermost.NewFactory())
+	imService.RegisterAdapterFactory("wechat", wechat.NewFactory())
+	imService.RegisterAdapterFactory("qqbot", qqbot.NewFactory())
+	imService.RegisterAdapterFactory("yunzhijia", yunzhijia.NewFactory())
 
 	// Load and start all enabled channels from database
 	if err := imService.LoadAndStartChannels(); err != nil {
@@ -1910,7 +1854,54 @@ func registerIMService(imService *imPkg.Service, cleaner interfaces.ResourceClea
 // Aggregates registration errors via errors.Join so a misconfigured or duplicated connector fails
 // container initialization loudly instead of silently disabling the feature at runtime.
 func initConnectorRegistry() (*datasource.ConnectorRegistry, error) {
-	return pluginbuiltin.NewConnectorRegistry()
+	registry := datasource.NewConnectorRegistry()
+
+	var errs error
+	if err := registry.Register(wiki.NewConnector(core.RegionFeishu)); err != nil {
+		errs = errors.Join(errs, fmt.Errorf("register feishu connector: %w", err))
+	}
+	// Lark is Feishu's international cloud: same connector, different host/tenant.
+	if err := registry.Register(wiki.NewConnector(core.RegionLark)); err != nil {
+		errs = errors.Join(errs, fmt.Errorf("register lark connector: %w", err))
+	}
+	// Feishu/Lark Drive (云盘) mode: different connector type so the registry
+	// dispatches to the Drive connector. Shares core.Client/Region/export logic
+	// with the wiki connector. See 飞书云盘数据源设计.md / ADR-0001.
+	if err := registry.Register(drive.NewDriveConnector(core.RegionFeishuDrive)); err != nil {
+		errs = errors.Join(errs, fmt.Errorf("register feishu_drive connector: %w", err))
+	}
+	if err := registry.Register(drive.NewDriveConnector(core.RegionLarkDrive)); err != nil {
+		errs = errors.Join(errs, fmt.Errorf("register lark_drive connector: %w", err))
+	}
+	if err := registry.Register(notionConnector.NewConnector()); err != nil {
+		errs = errors.Join(errs, fmt.Errorf("register notion connector: %w", err))
+	}
+	if err := registry.Register(confluenceConnector.NewConnector()); err != nil {
+		errs = errors.Join(errs, fmt.Errorf("register confluence connector: %w", err))
+	}
+	if err := registry.Register(yuqueConnector.NewConnector()); err != nil {
+		errs = errors.Join(errs, fmt.Errorf("register yuque connector: %w", err))
+	}
+	if err := registry.Register(dingtalkConnector.NewConnector()); err != nil {
+		errs = errors.Join(errs, fmt.Errorf("register dingtalk connector: %w", err))
+	}
+	if err := registry.Register(imaConnector.NewConnector()); err != nil {
+		errs = errors.Join(errs, fmt.Errorf("register ima connector: %w", err))
+	}
+	if err := registry.Register(rssConnector.NewConnector()); err != nil {
+		errs = errors.Join(errs, fmt.Errorf("register rss connector: %w", err))
+	}
+	if err := registry.Register(gitlabConnector.NewConnector()); err != nil {
+		errs = errors.Join(errs, fmt.Errorf("register gitlab connector: %w", err))
+	}
+
+	// Future connectors will be registered here:
+	// if err := registry.Register(githubConnector.NewConnector()); err != nil { ... }
+
+	if errs != nil {
+		return nil, errs
+	}
+	return registry, nil
 }
 
 // startDataSourceScheduler starts the data source cron scheduler and registers cleanup.

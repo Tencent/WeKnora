@@ -109,9 +109,6 @@ const getSourceInfo = (item: KnowledgeItem): { icon: string; label: string } => 
   if (ch === 'dingtalk') return { icon: 'cloud-download', label: t('knowledgeBase.channelDingtalk') };
   if (ch === 'slack') return { icon: 'cloud-download', label: t('knowledgeBase.channelSlack') };
   if (ch === 'im') return { icon: 'cloud-download', label: t('knowledgeBase.channelIm') };
-  if (ch === 'rss') return { icon: 'cloud-download', label: t('knowledgeBase.channelRss') };
-  // Plugin connectors ingest under their qualified type ID (acme.feeds/feed).
-  if (ch && ch.includes('/')) return { icon: 'cloud-download', label: t('knowledgeBase.channelExternal') };
   if (item.type === 'url') return { icon: 'link', label: t('knowledgeBase.channelUrl') };
   if (item.type === 'manual') return { icon: 'edit', label: t('knowledgeBase.channelManual') };
   return { icon: 'upload', label: t('knowledgeBase.channelUpload') };

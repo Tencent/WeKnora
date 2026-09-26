@@ -107,10 +107,6 @@ export interface ParserEngineInfo {
   FileTypes: string[]
   Available?: boolean
   UnavailableReason?: string
-  /** Set on engines an installed plugin provides (Name is then acme.ocr/ocr). */
-  PluginID?: string
-  /** Localized names of plugin engines, keyed by locale; "default" as fallback. */
-  DisplayNames?: Record<string, string>
 }
 
 /** 解析引擎配置（引擎连接参数存空间；聊天附件解析策略在智能体中配置） */

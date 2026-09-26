@@ -202,42 +202,96 @@
           </div>
         </section>
 
-        <!-- Section 2 — 连接配置：按类型的 config_schema 渲染 credentials 分组 -->
-        <section v-if="hasGroup('credentials')" class="setting-drawer__section">
+        <!-- Section 2 — 连接配置（base url / api key / engine id），仅当任意字段需要时渲染 -->
+        <section
+          v-if="selectedProviderType?.requires_api_key || selectedProviderType?.supports_optional_api_key || selectedProviderType?.requires_engine_id || selectedProviderType?.requires_base_url || selectedProviderType?.config_fields?.length"
+          class="setting-drawer__section"
+        >
           <h4 class="setting-drawer__section-title">{{ t('webSearchSettings.credentialsSection', '连接配置') }}</h4>
+
+          <div v-if="selectedProviderType?.requires_base_url" class="form-item">
+            <label class="form-label required">{{ t('webSearchSettings.baseUrlLabel') }}</label>
+            <t-input
+              v-model="providerForm.parameters.base_url"
+              :placeholder="t('webSearchSettings.baseUrlPlaceholder')"
+            />
+          </div>
 
           <!--
             Edit 模式下凭证由 CredentialResource 管理（独立的 /credentials
-            子资源调用），不与本表单 submit 耦合；Create 模式下 SchemaForm
-            直接渲染密码输入框。
+            子资源调用），不与本表单 submit 耦合；Create 模式下用 plain
+            password input + lock prefix-icon，与 ModelEditorDialog 一致。
           -->
-          <SchemaForm
-            v-model="providerForm.parameters"
-            :schema="parametersSchema"
-            group="credentials"
-            :secret-mode="editingProvider?.id ? 'slot' : 'input'"
-            :errors="formErrors"
+          <div v-if="selectedProviderType?.requires_api_key || selectedProviderType?.supports_optional_api_key" class="form-item">
+            <label class="form-label" :class="{ required: selectedProviderType?.requires_api_key }">
+              {{ selectedProviderType?.supports_optional_api_key && !selectedProviderType?.requires_api_key
+                ? t('webSearchSettings.apiKeyOptionalLabel', 'API Key（可选）')
+                : t('webSearchSettings.apiKeyLabel') }}
+            </label>
+            <CredentialResource
+              v-if="editingProvider?.id"
+              :api="credentialApi"
+              :fields="credentialFields"
+              :meta="credentialMeta"
+            />
+            <t-input
+              v-else
+              v-model="providerForm.parameters.api_key"
+              type="password"
+              :placeholder="apiKeyPlaceholder"
+            >
+              <template #prefix-icon><t-icon name="lock-on" /></template>
+            </t-input>
+          </div>
+
+          <div v-if="selectedProviderType?.requires_engine_id" class="form-item">
+            <label class="form-label required">{{ t('webSearchSettings.engineIdLabel') }}</label>
+            <t-input
+              v-model="providerForm.parameters.engine_id"
+              :placeholder="t('webSearchSettings.engineIdLabel')"
+            />
+          </div>
+
+          <div
+            v-for="field in selectedProviderType?.config_fields || []"
+            :key="field.key"
+            class="form-item"
           >
-            <template #secret>
-              <CredentialResource
-                :api="credentialApi"
-                :fields="credentialFields"
-                :meta="credentialMeta"
+            <label class="form-label" :class="{ required: field.required }">
+              {{ configFieldText(field.label_key, field.label) }}
+            </label>
+            <t-select
+              v-if="field.type === 'select'"
+              v-model="providerForm.parameters.extra_config[field.key]"
+            >
+              <t-option
+                v-for="option in field.options || []"
+                :key="option.value"
+                :value="option.value"
+                :label="configFieldText(option.label_key, option.label)"
               />
-            </template>
-          </SchemaForm>
+            </t-select>
+            <p v-if="field.description" class="form-desc">
+              {{ configFieldText(field.description_key, field.description) }}
+            </p>
+          </div>
         </section>
 
         <!-- Section 3 — 选项（代理 / 默认） -->
-        <section v-if="selectedProviderType" class="setting-drawer__section">
+        <section
+          v-if="selectedProviderType?.supports_proxy || selectedProviderType"
+          class="setting-drawer__section"
+        >
           <h4 class="setting-drawer__section-title">{{ t('webSearchSettings.optionsSection', '选项') }}</h4>
 
-          <SchemaForm
-            v-model="providerForm.parameters"
-            :schema="parametersSchema"
-            group="options"
-            :errors="formErrors"
-          />
+          <div v-if="selectedProviderType?.supports_proxy" class="form-item">
+            <label class="form-label">{{ t('webSearchSettings.proxyUrlLabel') }}</label>
+            <t-input
+              v-model="providerForm.parameters.proxy_url"
+              :placeholder="t('webSearchSettings.proxyUrlPlaceholder')"
+            />
+            <p class="form-desc">{{ t('webSearchSettings.proxyUrlHelp') }}</p>
+          </div>
 
           <div class="form-item">
             <label class="form-label">{{ t('webSearchSettings.setAsDefault') }}</label>
@@ -270,19 +324,6 @@ import {
   type WebSearchCredentialField,
 } from '@/api/web-search-provider'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
-import SchemaForm from '@/components/schema-form/SchemaForm.vue'
-import { pluginFormSource } from '@/components/schema-form/pluginSource'
-import { provideSchemaFormSource } from '@/components/schema-form/source'
-import {
-  inGroup,
-  isPlainObject,
-  orderedFields,
-  applyDefaults,
-  validateConfig,
-  type ConfigSchema,
-  type ConfigValue,
-  type FieldError,
-} from '@/components/schema-form/schema'
 import CredentialResource, {
   type CredentialFieldDef,
   type CredentialResourceApi,
@@ -290,10 +331,9 @@ import CredentialResource, {
 import { useConfirmDelete } from '@/components/settings/useConfirmDelete'
 import { useAuthStore } from '@/stores/auth'
 import { useChatResourcesStore } from '@/stores/chatResources'
-import { pickLocale } from '@/utils/localizedText'
 import { providerLogo } from './providerLogos'
 
-const { t, locale } = useI18n()
+const { t } = useI18n()
 const authStore = useAuthStore()
 const chatResources = useChatResourcesStore()
 const confirmDelete = useConfirmDelete()
@@ -313,24 +353,25 @@ const formRef = ref<any>()
 // is initialized so the watch's source function doesn't trip on TDZ).
 const lastTestOk = ref<boolean | null>(null)
 
-// parameters follows the selected type's config_schema: api_key, engine_id,
-// base_url, proxy_url and extra_config, whichever the type declares.
 const providerForm = ref<{
   name: string
   provider: string
   description: string
-  parameters: ConfigValue
+  parameters: {
+    api_key?: string
+    engine_id?: string
+    base_url?: string
+    proxy_url?: string
+    extra_config: Record<string, string>
+  }
   is_default: boolean
 }>({
   name: '',
   provider: 'duckduckgo',
   description: '',
-  parameters: {},
+  parameters: { extra_config: {} },
   is_default: false,
 })
-
-// Field errors from the last save attempt, shown under each field.
-const formErrors = ref<FieldError[]>([])
 
 // Invalidate the cached test result whenever the user edits a connection
 // field. Set up after providerForm is declared so the watch's source
@@ -340,51 +381,22 @@ const formErrors = ref<FieldError[]>([])
 watch(
   () => [
     providerForm.value.provider,
-    JSON.stringify({ ...providerForm.value.parameters, proxy_url: undefined }),
+    providerForm.value.parameters?.api_key,
+    providerForm.value.parameters?.engine_id,
+    providerForm.value.parameters?.base_url,
+    JSON.stringify(providerForm.value.parameters?.extra_config || {}),
   ],
   () => { lastTestOk.value = null },
 )
-
-// Any edit clears the errors of the last save attempt.
-watch(() => JSON.stringify(providerForm.value.parameters), () => { formErrors.value = [] })
 
 // ===== Computed =====
 const selectedProviderType = computed(() => {
   return providerTypes.value.find(pt => pt.id === providerForm.value.provider)
 })
 
-const EMPTY_SCHEMA: ConfigSchema = { type: 'object', properties: {} }
-
-const parametersSchema = computed<ConfigSchema>(() => selectedProviderType.value?.config_schema ?? EMPTY_SCHEMA)
-
-// Plugin providers' x-options / x-oauth fields ask the plugin. Its schema is
-// flat: api_key plus fields the form keeps under extra_config.
-const EXTRA = 'extra_config.'
-function pluginInstanceValues(): ConfigValue {
-  const { extra_config: extra, ...rest } = providerForm.value.parameters
-  return { ...rest, ...(extra && typeof extra === 'object' ? (extra as ConfigValue) : {}) }
-}
-provideSchemaFormSource(pluginFormSource({
-  target: () => {
-    const type = selectedProviderType.value
-    if (!type?.plugin_id || !type.id.startsWith(`${type.plugin_id}/`)) return undefined
-    return {
-      pluginId: type.plugin_id,
-      scope: 'instance',
-      contribution: `webSearch/${type.id.slice(type.plugin_id.length + 1)}`,
-      instanceId: editingProvider.value?.id,
-    }
-  },
-  values: pluginInstanceValues,
-  field: path => (path.startsWith(EXTRA) ? path.slice(EXTRA.length) : path),
-}))
-
-const hasGroup = (group: string) => orderedFields(parametersSchema.value).some(f => inGroup(f.schema, group))
-
-// Validation for the parameters. In edit mode secrets are committed through
-// <CredentialResource>, and the stored key stands in for an empty input.
-const parameterErrors = () =>
-  validateConfig(parametersSchema.value, providerForm.value.parameters, { skipSecrets: !!editingProvider.value })
+// Create-mode placeholder (edit mode replaces the input with
+// <CredentialResource>, which has its own placeholder).
+const apiKeyPlaceholder = computed(() => t('webSearchSettings.apiKeyPlaceholder'))
 
 const credentialFields = computed<CredentialFieldDef<WebSearchCredentialField>[]>(() => [
   { key: 'api_key', label: t('webSearchSettings.apiKeyLabel') as string },
@@ -423,7 +435,7 @@ const drawerClass = computed(() => {
 // list card showed for the same provider id.
 const drawerLogo = computed(() => {
   const id = providerForm.value.provider
-  return id ? resolveLogo(id) ?? null : null
+  return id ? providerLogo('websearch', id) : null
 })
 
 const drawerLogoStyle = computed((): Record<string, string> => {
@@ -437,9 +449,14 @@ const drawerLogoStyle = computed((): Record<string, string> => {
 // can fire with no fresh api_key because the backend will fall back to
 // the stored credential. Free providers don't show the button at all.
 const canTestConnection = computed(() => {
-  if (!selectedProviderType.value) return false
+  const pt = selectedProviderType.value
+  if (!pt) return false
   if (editingProvider.value) return true
-  return parameterErrors().length === 0
+  if (pt.requires_api_key && !providerForm.value.parameters.api_key) return false
+  if (pt.requires_engine_id && !providerForm.value.parameters.engine_id) return false
+  if (pt.requires_base_url && !providerForm.value.parameters.base_url) return false
+  if (pt.config_fields?.some(field => field.required && !providerForm.value.parameters.extra_config?.[field.key])) return false
+  return true
 })
 
 // 卡片首字母徽章。复用 providerType 信息表，让多字节缩写也走同一处。
@@ -449,13 +466,7 @@ const providerInitial = (providerId: string) => {
 }
 
 // 见 VectorStoreSettings 的同名注释：返回 --logo-url 给 ::before 用 mask 渲染。
-// Plugin provider types carry their own icon.
-const resolveLogo = (providerId: string) => {
-  const bundled = providerLogo('websearch', providerId)
-  if (bundled) return bundled
-  const icon = providerTypes.value.find((p) => p.id === providerId)?.icon
-  return icon ? { mode: 'color' as const, url: icon } : undefined
-}
+const resolveLogo = (providerId: string) => providerLogo('websearch', providerId)
 
 const badgeClass = (providerId: string) => {
   const m = resolveLogo(providerId)?.mode
@@ -475,17 +486,25 @@ const providerTypeLabel = (providerId: string) => {
   return providerTypes.value.find(p => p.id === providerId)?.name || providerId
 }
 
-// Fills a type's schema defaults (e.g. Zhipu's search engine) into parameters.
-const parametersWithDefaults = (providerId: string, parameters: ConfigValue = {}) => {
-  const schema = providerTypes.value.find(p => p.id === providerId)?.config_schema
-  return schema ? applyDefaults(schema, parameters) : { ...parameters }
+const configFieldText = (key: string | undefined, fallback: string) => {
+  return key ? t(key, fallback) : fallback
+}
+
+const providerConfigDefaults = (providerId: string) => {
+  const fields = providerTypes.value.find(p => p.id === providerId)?.config_fields || []
+  return Object.fromEntries(
+    fields
+      .filter(field => field.default !== undefined)
+      .map(field => [field.key, field.default as string]),
+  )
 }
 
 // ===== Methods =====
 const onProviderTypeChange = () => {
-  providerForm.value.parameters = parametersWithDefaults(providerForm.value.provider)
+  providerForm.value.parameters = {
+    extra_config: providerConfigDefaults(providerForm.value.provider),
+  }
   lastTestOk.value = null
-  formErrors.value = []
 }
 
 // 走 chatResources 的共享快照并强刷：增删改之后对话输入栏读到的就是最新列表，
@@ -501,11 +520,7 @@ const loadProviderEntities = async () => {
 
 const loadProviderTypes = async () => {
   try {
-    // Plugin provider types name themselves per locale.
-    providerTypes.value = (await listWebSearchProviderTypes()).map((pt) => ({
-      ...pt,
-      name: pickLocale(pt.names, locale.value) || pt.name,
-    }))
+    providerTypes.value = await listWebSearchProviderTypes()
   } catch (error) {
     console.error('Failed to load provider types:', error)
   }
@@ -517,11 +532,12 @@ const openAddDialog = () => {
     name: '',
     provider: providerTypes.value[0]?.id || 'duckduckgo',
     description: '',
-    parameters: parametersWithDefaults(providerTypes.value[0]?.id || 'duckduckgo'),
+    parameters: {
+      extra_config: providerConfigDefaults(providerTypes.value[0]?.id || 'duckduckgo'),
+    },
     is_default: providerEntities.value.length === 0
   }
   lastTestOk.value = null
-  formErrors.value = []
   showAddProviderDialog.value = true
 }
 
@@ -531,13 +547,21 @@ const editProvider = (entity: WebSearchProviderEntity) => {
     name: entity.name,
     provider: entity.provider,
     description: entity.description || '',
-    // Never pre-fill the api_key — even the redacted placeholder from the
-    // server is ignored so that "non-empty means user typed it" holds.
-    parameters: parametersWithDefaults(entity.provider, { ...(entity.parameters || {}), api_key: undefined }),
+    parameters: {
+      // Never pre-fill the api_key — even the redacted placeholder from the
+      // server is ignored so that "non-empty means user typed it" holds.
+      api_key: '',
+      engine_id: entity.parameters?.engine_id || '',
+      base_url: entity.parameters?.base_url || '',
+      proxy_url: entity.parameters?.proxy_url || '',
+      extra_config: {
+        ...providerConfigDefaults(entity.provider),
+        ...(entity.parameters?.extra_config || {}),
+      },
+    },
     is_default: entity.is_default || false,
   }
   lastTestOk.value = null
-  formErrors.value = []
   showAddProviderDialog.value = true
 }
 
@@ -548,15 +572,27 @@ const saveProvider = async () => {
     MessagePlugin.warning(typeof firstError === 'string' ? firstError : 'Please check the form fields')
     return
   }
-  formErrors.value = parameterErrors()
-  if (formErrors.value.length > 0) return
 
   saving.value = true
   try {
     // Build the parameters payload. api_key only flows in on initial
     // create — edit mode commits credentials through <CredentialResource>
     // (a dedicated PUT /credentials call) before this save runs.
-    const paramsOut = buildParametersPayload(providerForm.value.parameters, !editingProvider.value)
+    const paramsOut: WebSearchProviderEntity['parameters'] = {
+      engine_id: providerForm.value.parameters.engine_id,
+      base_url: providerForm.value.parameters.base_url,
+      proxy_url: providerForm.value.parameters.proxy_url,
+    }
+    const extraConfig = Object.fromEntries(
+      Object.entries(providerForm.value.parameters.extra_config || {})
+        .filter(([, value]) => value !== ''),
+    )
+    if (Object.keys(extraConfig).length > 0) {
+      paramsOut.extra_config = extraConfig
+    }
+    if (!editingProvider.value && providerForm.value.parameters.api_key) {
+      paramsOut.api_key = providerForm.value.parameters.api_key
+    }
 
     const data: Partial<WebSearchProviderEntity> = {
       name: providerForm.value.name.trim() || selectedProviderType.value?.name || providerForm.value.provider,
@@ -580,22 +616,6 @@ const saveProvider = async () => {
   } finally {
     saving.value = false
   }
-}
-
-// Drops empty values (an empty extra_config entry means "unset") and, in edit
-// mode, the api_key, which is committed through <CredentialResource>.
-const buildParametersPayload = (parameters: ConfigValue, includeSecrets: boolean) => {
-  const out: Record<string, unknown> = {}
-  for (const [key, value] of Object.entries(parameters)) {
-    if (key === 'api_key' && !includeSecrets) continue
-    if (isPlainObject(value)) {
-      const nested = Object.fromEntries(Object.entries(value).filter(([, v]) => v !== '' && v !== undefined))
-      if (Object.keys(nested).length > 0) out[key] = nested
-      continue
-    }
-    if (value !== undefined && value !== '') out[key] = value
-  }
-  return out as WebSearchProviderEntity['parameters']
 }
 
 const deleteProvider = (entity: WebSearchProviderEntity) => {

@@ -812,8 +812,6 @@ export default {
     channelGitLab: 'GitLab',
     channelIma: 'Tencent IMA',
     channelUpload: 'アップロード',
-    channelRss: 'RSS',
-    channelExternal: '外部データソース',
     channelManual: '手動作成',
     channelUrl: 'Web',
     channelUnknown: '不明',
@@ -1881,8 +1879,6 @@ export default {
       },
     },
     skills: {
-      pluginSection: '有効なプラグインから',
-      pluginSectionHint: 'プラグインが提供するスキルを選んでライブラリに追加し、他のスキルと同様にサンドボックスへインストールできます。',
       title: 'スキル管理',
       description: 'スキルはワークスペースのカタログに登録されます。まず登録し、その後1つ以上のサンドボックスにインストールしてください。エージェントは、自身のサンドボックスで準備完了しているスキルのみ有効化できます。',
       helpTooltip: 'カタログのスキルは、どこかにインストールされている必要はありません。スクリプトは、エージェントが使用するサンドボックスイメージにスキルがインストールされて初めて実行されます。Docker、Cube、E2Bのイメージには互換性がないため、サンドボックスごとにインストールしてください。',
@@ -2253,18 +2249,6 @@ export default {
     baseUrlLabel: 'インスタンスURL',
     baseUrlPlaceholder: 'https://searxng.example.com',
     apiKeyPlaceholder: 'APIキーを入力',
-    configFields: {
-      searchEngine: '検索エンジン',
-      searchEngineDesc: 'Zhipu の検索エンジンとリクエストごとの料金プランを選択します。',
-      searchStd: 'スタンダード · ¥0.01/回',
-      searchPro: 'プロ · ¥0.03/回',
-      searchSogou: 'Sogou · ¥0.05/回',
-      searchQuark: 'Quark · ¥0.05/回',
-      contentSize: '要約の長さ',
-      contentSizeDesc: '中は簡潔な要約、詳細はより多くの文脈を返します。',
-      contentMedium: '中',
-      contentHigh: '詳細'
-    },
     toasts: {
       providerCreated: '検索プロバイダを作成しました',
       providerUpdated: '検索プロバイダを更新しました',
@@ -2731,209 +2715,6 @@ export default {
       parseTenantFailed: 'ワークスペース情報の解析に失敗しました',
       parseKnowledgeBasesFailed: 'ナレッジベース一覧の解析に失敗しました',
       parseCurrentKnowledgeBaseFailed: '現在のナレッジベースの解析に失敗しました'
-    }
-  },
-  pluginAdmin: {
-    runtime: {
-      declarative: '宣言型',
-      host: 'ローカルプロセス',
-      remote: 'リモートサービス'
-    },
-    title: 'プラグイン管理',
-    description: 'プラットフォーム全体のプラグインをインストール・管理します。インストールしたプラグインはすべてのワークスペースに表示され、各ワークスペースで個別に有効化します。ここで無効にすると全ノードでアンロードされます。',
-    installButton: 'プラグインをインストール',
-    empty: 'インストール済みのプラグインはありません',
-    loadFailed: 'インストール済みプラグインの読み込みに失敗しました',
-    saveFailed: '保存に失敗しました',
-    enabledToast: 'プラットフォーム全体で有効にしました',
-    disabledToast: 'プラットフォーム全体で無効にしました',
-    platformSwitch: 'プラットフォーム全体で有効／無効',
-    publisher: '発行者',
-    contributions: '提供する機能',
-    permissions: '権限と外部アクセス',
-    state: {
-      degraded: '再起動中',
-      running: '稼働中',
-      failed: '読み込み失敗',
-      disabled: '無効',
-      pending: '読み込み中'
-    },
-    nodeState: {
-      ready: '準備完了',
-      starting: '起動中',
-      degraded: '異常',
-      stopped: '未読み込み'
-    },
-    source: {
-      upload: 'アップロード',
-      url: 'URL'
-    },
-    change: {
-      install: '新規インストール',
-      upgrade: 'v{from} からアップグレード',
-      downgrade: 'v{from} からダウングレード',
-      reinstall: '再インストール'
-    },
-    permission: {
-      anyHost: '任意の公開ホスト',
-      remote: 'リモートサービス',
-      egress: 'ネットワーク送信',
-      hostApi: 'WeKnora API',
-      events: 'イベント'
-    },
-    secret: {
-      title: 'プラグイン署名シークレット',
-      description: 'このシークレットをプラグインサービスの環境変数 WEKNORA_PLUGIN_SECRET に設定してください。サービスはこれでリクエストが WeKnora からのものか確認します。表示されるのは今回だけで、閉じると再表示できません。',
-      copy: 'コピー',
-      copied: 'コピーしました',
-      done: '保存しました'
-    },
-    install: {
-      title: 'プラグインをインストール',
-      description: '.wkp パッケージをアップロードするかダウンロード URL を指定し、確認してからインストールします。',
-      sourceSection: 'パッケージ',
-      mode: {
-        upload: 'ファイルをアップロード',
-        url: 'URL から'
-      },
-      fileLabel: 'パッケージファイル',
-      chooseFile: 'ファイルを選択',
-      noFile: 'ファイル未選択',
-      fileHint: '.wkp ファイル（plugin.yaml を含む zip）、最大 64 MB。',
-      urlLabel: 'ダウンロード URL',
-      urlHint: 'サーバーがこの URL からダウンロードします。プライベートネットワークのアドレスは拒否されます。',
-      remoteUrlLabel: 'サービス URL',
-      remoteUrlHint: 'プラグインサービスの HTTP(S) アドレス。プライベートネットワークのホストは SSRF_WHITELIST に追加する必要があります。',
-      remoteUrlKeep: 'アップグレード時は空欄のままで現在の URL を引き続き使用します',
-      reviewSection: 'インストール前の確認',
-      noPermissions: 'このプラグインは追加の権限を要求しません。',
-      configNotice: 'このプラグインには設定が必要です。プラットフォーム設定はインストール後の詳細で、ワークスペース設定は各ワークスペース管理者がプラグインセンターで入力します。',
-      tenantNotice: 'インストール後、プラグインはすべてのワークスペースに表示されますが、ワークスペース管理者が有効にするまで無効です。',
-      digest: 'パッケージダイジェスト',
-      inspect: 'パッケージを確認',
-      confirm: {
-        install: 'インストール',
-        upgrade: 'アップグレード',
-        downgrade: '旧バージョンをインストール',
-        reinstall: '再インストール'
-      },
-      inspectFailed: 'パッケージを読み込めませんでした',
-      failed: 'インストールに失敗しました',
-      done: '{name} をインストールしました'
-    },
-    detail: {
-      overview: '概要',
-      runtime: 'ランタイム',
-      source: '取得元',
-      homepage: 'ホームページ',
-      license: 'ライセンス',
-      engines: '対応バージョン',
-      nodes: 'ノード',
-      noNodes: 'このプラグインを読み込んでいるノードはありません',
-      versions: 'バージョン',
-      active: '使用中',
-      activate: 'このバージョンに切り替え',
-      rollback: 'このバージョンにロールバック',
-      activateConfirm: 'v{version} を使用中のバージョンにしますか？すべてのノードで再読み込みされます。',
-      activated: 'v{version} に切り替えました',
-      activateFailed: 'バージョンの切り替えに失敗しました',
-      systemConfig: 'プラットフォーム設定',
-      systemConfigHint: 'すべてのワークスペースに適用されます（サービスリージョンや共通の認証情報など）。',
-      configLoadFailed: 'プラットフォーム設定の読み込みに失敗しました',
-      configSaved: 'プラットフォーム設定を保存しました',
-      configSaveFailed: 'プラットフォーム設定の保存に失敗しました',
-      danger: 'アンインストール',
-      uninstallHint: 'プラグインと保存済みの全バージョンを削除します。各ワークスペースのスイッチと設定は保持され、再インストールすると復元されます。',
-      uninstall: 'プラグインをアンインストール',
-      uninstallConfirm: 'アンインストールしますか？すべてのノードで直ちにアンロードされます。',
-      uninstalled: 'プラグインをアンインストールしました',
-      uninstallFailed: 'アンインストールに失敗しました',
-      remote: 'リモートサービス',
-      remoteUrl: 'サービス URL',
-      editUrl: '変更',
-      urlSaved: 'サービス URL を更新しました',
-      urlSaveFailed: 'サービス URL の更新に失敗しました',
-      rotateSecret: 'シークレットをローテーション',
-      rotateHint: '新しい署名シークレットを発行します。サービスに新しいシークレットを設定するまで呼び出しは失敗します。',
-      rotateConfirm: 'ローテーションしますか？古いシークレットは直ちに無効になります。',
-      rotateFailed: 'シークレットのローテーションに失敗しました'
-    }
-  },
-  pluginToolView: {
-    empty: '結果がありません'
-  },
-  pluginPages: {
-    notResponding: 'プラグインページが応答しません。読み込みに失敗した可能性があります。',
-    requestFailed: 'プラグインへのリクエストに失敗しました',
-    fromPlugin: 'プラグイン {id} が提供'
-  },
-  pluginCenter: {
-    installed: 'インストール済み',
-    configure: '設定',
-    webhooks: 'Webhook URL',
-    webhooksHint: 'サードパーティのサービスにこれらの URL を設定すると、イベントがこのプラグインに送られます。このワークスペースの秘密を含むため、公開しないでください。',
-    copy: 'コピー',
-    webhookCopied: 'Webhook URL をコピーしました',
-    configTitle: '{name} の設定',
-    configDescription: 'このワークスペースでプラグインを使うための設定（API キーなど）。シークレットは暗号化して保存され、再表示されません。',
-    configLoadFailed: 'プラグイン設定の読み込みに失敗しました',
-    configSaved: 'プラグイン設定を保存しました',
-    configSaveFailed: 'プラグイン設定の保存に失敗しました',
-    navGroup: '拡張',
-    title: 'プラグイン',
-    description: 'このデプロイが提供するすべてのプラグイン（組み込みと、システム管理者がインストールしたもの）。このワークスペースで有効化・無効化できます。無効にしたプラグインの連携は種類一覧から外れ新規作成できなくなりますが、既存のものは引き続き動作します。インストールされたプラグインは、ワークスペース管理者が有効にするまで無効です。',
-    searchPlaceholder: 'プラグイン名・ID・連携を検索',
-    allPoints: 'すべて',
-    empty: '一致するプラグインはありません',
-    builtin: '組み込み',
-    required: '必須',
-    requiredHint: 'WeKnora に必須のため無効にできません',
-    adminOnly: 'プラグインの有効化・無効化はワークスペース管理者のみ可能です',
-    loadFailed: 'プラグインを読み込めませんでした',
-    saveFailed: 'プラグイン設定を保存できませんでした',
-    enabledToast: 'プラグインを有効にしました',
-    disabledToast: 'プラグインを無効にしました',
-    points: {
-      modelVendors: 'モデルベンダー',
-      connectors: 'データソース',
-      imChannels: 'IM チャネル',
-      webSearch: 'Web 検索',
-      tools: 'エージェントツール',
-      parsers: 'ドキュメント解析',
-      skills: 'スキル',
-      mcpServers: 'MCP サーバー',
-      pages: 'ページ',
-      settingsSections: '設定セクション',
-      kbTabs: 'ナレッジベースのタブ',
-      webhooks: 'Webhook'
-    }
-  },
-  schemaForm: {
-    errors: {
-      required: 'この項目は必須です',
-      type: '値が正しくありません',
-      enum: '選択可能な値ではありません',
-      min_length: '短すぎます',
-      max_length: '長すぎます',
-      pattern: '形式が正しくありません',
-      minimum: '値が小さすぎます',
-      maximum: '値が大きすぎます',
-      format: 'https://example.com のような完全なアドレスを入力してください'
-    },
-    options: {
-      loading: '読み込み中…',
-      empty: '選択肢がありません',
-      retry: '再試行',
-      failed: '選択肢を読み込めませんでした'
-    },
-    oauth: {
-      connected: '接続済み',
-      notConnected: '未接続',
-      connect: 'アカウントを接続',
-      reconnect: '再接続',
-      disconnect: '切断',
-      popupBlocked: 'ブラウザが認可ウィンドウをブロックしました。ポップアップを許可して再試行してください。',
-      failed: '認可に失敗しました'
     }
   },
   common: {
@@ -5558,9 +5339,6 @@ export default {
     }
   },
   mcpSettings: {
-    transportPlugin: 'プラグイン内蔵',
-    fromPlugin: 'プラグイン',
-    pluginNotConfigured: 'プラグインが未設定です。プラグインセンターで設定してから使用してください',
     addUsageInstructions: "使用方法を追加",
     noUsageInstructions: "使用方法は未入力です",
     title: 'MCPサービス',
@@ -7080,7 +6858,6 @@ export default {
     resourceHint: '同期するスペースまたはフォルダを選択してください',
     untitled: '無題',
     resourceLoadFailed: 'リソースの読み込みに失敗しました',
-    typesLoadFailed: 'データソースの種類を読み込めませんでした',
     noResources: 'Wikiスペースが見つかりません',
     noResourcesDesc: 'コンテンツを取得するには、グループチャット経由でアプリにWikiのアクセス権限を付与する必要があります',
     noResourcesDesc_notion: 'コンテンツを取得するには、アプリにNotionページのアクセス権限が必要です',

@@ -14,7 +14,6 @@ import {
   REGISTERED_AUDIT_ACTION_ENTRIES,
 } from './auditActionRegistry.ts'
 import { AUDIT_ACTION_LOCALE_DEFAULTS, getAuditActionLocaleDefault } from './auditActionLocaleDefaults.ts'
-import { BACKEND_SCHEMA_I18N_KEYS } from './backendSchemaKeys.ts'
 import { writeLocaleModule } from './localeSerialize.ts'
 
 import enUS from './locales/en-US.ts'
@@ -116,11 +115,6 @@ const EXTRA_PREFIXES = [
   // knowledgeEditor.wikiBrowser.gallery.attr.builtin_caption …, and
   // everything else falls back to the contract wording.
   'knowledgeEditor.wikiBrowser.gallery.attr.',
-  // Connector names and descriptions are keyed by the connector type the
-  // backend registry lists (views/knowledge/settings/connectorLabels.ts);
-  // plugin connectors fall back to their own names.
-  'datasource.connector.',
-  'datasource.connectorDesc.',
 ] as const
 
 /** Keys that must survive pruning even when static analysis misses them. */
@@ -291,8 +285,7 @@ function addTemplatePattern(usage: I18nUsage, template: string): void {
 
 export function collectI18nUsageFromSources(rootDir = SOURCE_ROOT): I18nUsage {
   const usage: I18nUsage = {
-    // Backend config schemas name these keys; count them as used.
-    staticKeys: new Set<string>(BACKEND_SCHEMA_I18N_KEYS),
+    staticKeys: new Set<string>(),
     prefixes: new Set<string>(EXTRA_PREFIXES),
     segmentPatterns: [],
   }

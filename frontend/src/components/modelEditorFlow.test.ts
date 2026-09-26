@@ -872,25 +872,34 @@ test('every vendor-declared string in the form goes through a locale resolver', 
   const template = descriptor.template?.content ?? ''
   assert.ok(template.length > 0, 'the editor template should have been parsed')
 
-  // Plain extra fields render through <SchemaForm>, which resolves x-i18n
-  // titles, placeholders and option labels (schema-form/schema.test.ts).
-  assert.match(
-    template, /<SchemaForm v-model="extraConfigModel" :schema="plainExtraSchema"/,
-    'plain extra fields should render from the vendor config schema',
-  )
-
-  // The secret field still has its own input (it fills the app_secret slot),
-  // so its placeholder must go through the resolver rather than be read raw.
-  for (const pattern of [/secretExtraField\.placeholder/, /field\.placeholder/]) {
+  // `field` is the extra-field loop variable, so any read of its placeholder
+  // is a vendor string rendered without resolving the locale. One input
+  // branch per field type plus the secret field means it is easy to bind four
+  // and miss the fifth, which is exactly what happened.
+  for (const pattern of [
+    /:placeholder="field\.placeholder/,
+    /\{\{\s*field\.placeholder\s*\}\}/,
+    /v-if="field\.placeholder"/,
+  ]) {
     assert.equal(
       pattern.test(template), false,
-      `template reads a vendor placeholder directly (${pattern}); use extraFieldDisplayPlaceholder`,
+      `template reads field.placeholder directly (${pattern}); use extraFieldDisplayPlaceholder`,
     )
   }
-  assert.ok(
-    template.includes('extraFieldDisplayPlaceholder(secretExtraField)'),
-    'the secret field placeholder must use the resolver',
+
+  // Options: scope to the extra-field select, because `opt` is also the loop
+  // variable of the model-type list and the catalog model list, whose labels
+  // come from i18n and from the catalog's own names.
+  const optionLoop = /v-for="opt in \(field\.options \|\| \[\]\)"[^>]*/.exec(template)
+  assert.ok(optionLoop, 'the extra-field select should loop over field.options')
+  assert.match(
+    optionLoop[0], /:label="extraFieldDisplayOptionLabel\(opt\)"/,
+    'extra-field option labels must resolve the locale',
   )
+
+  // And the placeholder resolver is referenced, so the checks above cannot be
+  // satisfied by dropping the placeholders altogether.
+  assert.ok(template.includes('extraFieldDisplayPlaceholder('), 'placeholders must use the resolver')
 })
 
 test('the chat protocol override is offered only on chat and vision rows', () => {

@@ -49,5 +49,4 @@ export const SYSTEM_ADMIN_SETTINGS_SECTIONS = new Set([
   'runtime-queues',
   'platform-api-keys',
   'system-audit-log',
-  'plugin-admin',
 ])

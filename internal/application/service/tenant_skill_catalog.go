@@ -210,12 +210,11 @@ func (s *TenantSkillService) RegisterCatalogFromArchive(
 	return s.upsertCatalogFromBundle(ctx, tenantID, bundle, archive, true)
 }
 
-// RegisterCatalogFromSource fetches a public skill, or takes a skill of an
-// enabled plugin, and records it in the catalog.
+// RegisterCatalogFromSource fetches a public skill and records it in the catalog.
 func (s *TenantSkillService) RegisterCatalogFromSource(
 	ctx context.Context, tenantID uint64, source string,
 ) (*types.TenantSkillCatalogEntity, error) {
-	bundle, archive, err := s.resolveSkillSource(ctx, tenantID, source)
+	bundle, archive, err := fetchNormalizedSkillBundle(ctx, source, s.sourceHTTP)
 	if err != nil {
 		return nil, err
 	}

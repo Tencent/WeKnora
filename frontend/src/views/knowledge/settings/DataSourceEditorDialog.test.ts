@@ -9,9 +9,6 @@ import ts from 'typescript'
 import { createRenderer, h, nextTick, reactive, ref } from 'vue'
 
 const require = createRequire(import.meta.url)
-// The dialog validates credentials with the real schema helpers.
-const schemaModule = require('../../../components/schema-form/schema.ts')
-const sourceModule = require('../../../components/schema-form/source.ts')
 const filename = fileURLToPath(new URL('./DataSourceEditorDialog.vue', import.meta.url))
 const { descriptor } = parse(readFileSync(filename, 'utf8'), { filename })
 const script = compileScript(descriptor, { id: 'datasource-editor-test' }).content
@@ -35,23 +32,6 @@ async function fixture({
   const calls: Array<{ method: string; args: any[] }> = []
   let storedToken = configured ? 'expired-token' : ''
   const api = {
-    // Same credential form the backend serves for GitLab.
-    async getConnectorTypes() {
-      return [{
-        type: 'gitlab',
-        config_schema: {
-          type: 'object',
-          required: ['base_url', 'access_token'],
-          properties: {
-            base_url: { type: 'string', title: 'GitLab URL', 'x-order': 1 },
-            access_token: { type: 'string', title: 'Personal access token', 'x-secret': true, 'x-order': 2 },
-          },
-        },
-      }, { type: 'yuque', config_schema: { type: 'object', properties: {} } }, {
-        type: 'acme.jira/jira', plugin_id: 'acme.jira',
-        config_schema: { type: 'object', properties: { site: { type: 'string' } } },
-      }]
-    },
     async validateCredentials(type: string, credentials: Record<string, string>) {
       calls.push({ method: 'validateCredentials', args: [type, { ...credentials }] })
       if (credentials.access_token !== 'rotated-token') throw new Error('gitlab API /user: status 401')
@@ -80,32 +60,13 @@ async function fixture({
     },
   })
   const exports: any = {}
-  let formBinding: any
   runInNewContext(compiled, {
     exports,
     require(name: string) {
       if (name === 'vue') return require('vue')
-      if (name === 'vue-i18n') {
-        return { useI18n: () => ({ t: (key: string) => key, te: () => true, locale: { value: 'en-US' } }) }
-      }
-      if (name === './connectorLabels') {
-        return {
-          connectorName: (d: { type: string }) => `datasource.connector.${d.type}`,
-          connectorDescription: (d: { type: string }) => `datasource.connectorDesc.${d.type}`,
-        }
-      }
+      if (name === 'vue-i18n') return { useI18n: () => ({ t: (key: string) => key }) }
       if (name === 'tdesign-vue-next') return { MessagePlugin: { warning() {}, success() {}, error() {} } }
       if (name === '@/api/datasource') return api
-      if (name === '@/components/schema-form/schema') return schemaModule
-      if (name === '@/components/schema-form/source') {
-        return { valueAt: sourceModule.valueAt, provideSchemaFormSource() {} }
-      }
-      if (name === '@/components/schema-form/pluginSource') {
-        return { pluginFormSource: (b: unknown) => { formBinding = b; return {} } }
-      }
-      if (name === '@/components/schema-form/useSchemaText') {
-        return { useSchemaText: () => (schema: { title?: string }) => schema.title ?? '' }
-      }
       return { default: {} }
     },
     URL, console,
@@ -128,9 +89,7 @@ async function fixture({
     vm.form.config.credentials = { base_url: 'https://gitlab.example.com', access_token: token }
     await nextTick()
   }
-  return {
-    vm, calls, replace, formBinding, storedToken: () => storedToken, close: () => app.unmount(),
-  }
+  return { vm, calls, replace, storedToken: () => storedToken, close: () => app.unmount() }
 }
 
 test('rotated GitLab credentials are tested without updating the saved data source', async () => {
@@ -201,8 +160,7 @@ test('an existing data source with no saved credentials tests the entered token'
 test('new GitLab data sources continue to test credentials without persistence', async () => {
   const f = await fixture({ create: true })
   try {
-    await f.vm.loadConnectorTypes()
-    f.vm.selectType(f.vm.connectorTypes.find((def: any) => def.type === 'gitlab'))
+    f.vm.selectType(f.vm.connectorDefs.find((def: any) => def.type === 'gitlab'))
     await f.replace()
     await f.vm.testConnection()
     assert.equal(f.vm.testResult, 'success')
@@ -210,25 +168,11 @@ test('new GitLab data sources continue to test credentials without persistence',
   } finally { f.close() }
 })
 
-test('a missing required credential blocks the connection test and marks the field', async () => {
-  const f = await fixture({ create: true })
-  try {
-    await f.vm.loadConnectorTypes()
-    f.vm.selectType(f.vm.connectorTypes.find((def: any) => def.type === 'gitlab'))
-    f.vm.form.config.credentials = { base_url: 'https://gitlab.example.com' }
-    await nextTick() // the user typed before clicking; edits clear old errors
-    await f.vm.testConnection()
-    assert.deepEqual(f.calls, [], 'nothing reaches the backend')
-    assert.deepEqual(JSON.stringify(f.vm.credentialErrors), JSON.stringify([{ path: 'access_token', code: 'required' }]))
-  } finally { f.close() }
-})
-
 test('a new Yuque data source adopts the TOC folder layout, but not the filter', async () => {
   const f = await fixture({ create: true })
   try {
     assert.equal(f.vm.form.config.settings.folder_mode, undefined)
-    await f.vm.loadConnectorTypes()
-    f.vm.selectType(f.vm.connectorTypes.find((def: any) => def.type === 'yuque'))
+    f.vm.selectType(f.vm.connectorDefs.find((def: any) => def.type === 'yuque'))
     assert.equal(f.vm.form.config.settings.folder_mode, 'toc')
     // The layout is a presentation choice; toc_only decides what may enter the
     // knowledge base, so a new source is deliberately left without it.
@@ -281,23 +225,5 @@ test('Cloud hierarchy limitation stays visible after an empty space expansion', 
     f.vm.resources = [{ ...f.vm.resources[0], has_children: false }]
     await nextTick()
     assert.equal(f.vm.visibleTree.some((row: any) => row.noticeAfter), true)
-  } finally { f.close() }
-})
-
-test('plugin connector forms ask the plugin behind the connector type', async () => {
-  const f = await fixture({ type: 'acme.jira/jira', settings: { project: 'p1' } })
-  try {
-    await new Promise((resolve) => setTimeout(resolve, 0))
-    assert.deepEqual(JSON.parse(JSON.stringify(f.formBinding.target())), {
-      pluginId: 'acme.jira', scope: 'instance', contribution: 'connectors/jira', instanceId: 'source-one',
-    })
-    f.vm.form.config.credentials = { site: 'acme' }
-    assert.equal(f.formBinding.dependency('site'), 'acme')
-    assert.equal(f.formBinding.dependency('project'), 'p1')
-    assert.deepEqual(JSON.parse(JSON.stringify(f.formBinding.values())), {
-      credentials: { site: 'acme' }, settings: { project: 'p1' }, resourceIds: [],
-    })
-    f.vm.form.type = 'gitlab'
-    assert.equal(f.formBinding.target(), undefined)
   } finally { f.close() }
 })

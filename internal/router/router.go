@@ -20,9 +20,6 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/mcpserver"
 	"github.com/Tencent/WeKnora/internal/middleware"
-	"github.com/Tencent/WeKnora/internal/plugin/hostapi"
-	pluginoauth "github.com/Tencent/WeKnora/internal/plugin/oauth"
-	"github.com/Tencent/WeKnora/internal/plugin/webhook"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 
@@ -93,12 +90,6 @@ type RouterParams struct {
 	RedisClient                  *redis.Client
 	DataSourceHandler            *handler.DataSourceHandler
 	DataSourceCredentialsHandler *handler.DataSourceCredentialsHandler
-	PluginHandler                *handler.PluginHandler
-	PluginAdminHandler           *handler.PluginAdminHandler
-	PluginHostAPI                *hostapi.Handler
-	PluginUIHandler              *handler.PluginUIHandler
-	PluginWebhookHandler         *handler.PluginWebhookHandler
-	PluginFormsHandler           *handler.PluginFormsHandler
 	WeKnoraCloudHandler          *handler.WeKnoraCloudHandler
 	WikiPageHandler              *handler.WikiPageHandler
 	MemoryHandler                *handler.MemoryHandler
@@ -212,29 +203,6 @@ func NewRouter(params RouterParams) *gin.Engine {
 	r.GET("/api/v1/local-browser/extension", params.SessionHandler.BrowserSkillExtension)
 	r.POST("/api/v1/local-browser/extension/authorize", params.SessionHandler.BrowserSkillAuthorize)
 	r.POST("/api/v1/local-browser/internal", params.SessionHandler.BrowserSkillInternal)
-
-	// Host API: plugins call back with their own short-lived tokens, which
-	// the handler verifies; user and API key auth do not apply.
-	if params.PluginHostAPI != nil {
-		params.PluginHostAPI.Register(r)
-	}
-	// Plugin page files load into sandboxed iframes that carry no
-	// credentials; see PluginUIHandler.ServeAsset.
-	if params.PluginUIHandler != nil {
-		r.GET(handler.PluginUIAssetsPrefix+"/:id/:version/*path", params.PluginUIHandler.ServeAsset)
-	}
-	// Plugin webhooks: third parties call a secret per-workspace URL; the
-	// handler checks it, so no login applies.
-	// OAuth for plugin form fields: authorization servers return here
-	// without a WeKnora login; the state names the pending authorization.
-	if params.PluginFormsHandler != nil {
-		r.GET(pluginoauth.CallbackPath, params.PluginFormsHandler.OAuthCallback)
-	}
-	if params.PluginWebhookHandler != nil {
-		hooks := r.Group(webhook.PathPrefix)
-		hooks.Any("/:id/:hook/:token", params.PluginWebhookHandler.Receive)
-		hooks.Any("/:id/:hook/:token/*path", params.PluginWebhookHandler.Receive)
-	}
 
 	// 认证中间件
 	r.Use(middleware.Auth(params.TenantService, params.UserService, params.TenantMemberService, params.TenantAPIKeyService, params.Config))
@@ -355,9 +323,6 @@ func NewRouter(params RouterParams) *gin.Engine {
 		RegisterEmbedChannelRoutes(v1, params.EmbedChannelHandler, rbacGuards)
 		RegisterMCPEndpointRoutes(v1, params.MCPEndpointHandler, rbacGuards)
 		RegisterDataSourceRoutes(v1, params.DataSourceHandler, params.DataSourceCredentialsHandler, rbacGuards)
-		RegisterPluginRoutes(v1, params.PluginHandler, params.PluginUIHandler, params.PluginWebhookHandler,
-			params.PluginFormsHandler, rbacGuards)
-		RegisterPluginAdminRoutes(v1, params.PluginAdminHandler, rbacGuards)
 		RegisterWeKnoraCloudRoutes(v1, params.WeKnoraCloudHandler, rbacGuards)
 		RegisterWikiPageRoutes(v1, params.WikiPageHandler, rbacGuards)
 		RegisterMemoryRoutes(v1, params.MemoryHandler, rbacGuards)

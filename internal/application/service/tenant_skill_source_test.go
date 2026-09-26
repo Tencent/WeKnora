@@ -1,9 +1,7 @@
 package service
 
 import (
-	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -589,40 +587,4 @@ func TestFetchSkillArchiveRejectsOversizeBody(t *testing.T) {
 	_, err := fetchSkillArchive(t.Context(), server.URL+"/demo.zip", server.Client())
 	require.ErrorIs(t, err, ErrSkillSourceInvalid)
 	require.ErrorContains(t, err, "1 MB")
-}
-
-type fakePluginSkills struct {
-	archive []byte
-	err     error
-	asked   string
-}
-
-func (f *fakePluginSkills) Archive(_ context.Context, _ uint64, source string) ([]byte, error) {
-	f.asked = source
-	return f.archive, f.err
-}
-
-func TestResolveSkillSourceTakesPluginSkills(t *testing.T) {
-	ctx := context.Background()
-	s := &TenantSkillService{}
-	if _, _, err := s.resolveSkillSource(ctx, 1, "plugin:acme.kit/triage"); !errors.Is(err, ErrSkillSourceInvalid) {
-		t.Fatalf("without the plugin runtime a plugin source is invalid, got %v", err)
-	}
-
-	plugins := &fakePluginSkills{archive: zipBundle(t, map[string]string{
-		"SKILL.md": "---\nname: triage\ndescription: Triage issues.\n---\nSteps.",
-	})}
-	s.SetPluginSkills(plugins)
-	bundle, archive, err := s.resolveSkillSource(ctx, 1, "plugin:acme.kit/triage")
-	if err != nil || bundle.Name != "triage" || len(archive) == 0 {
-		t.Fatalf("resolve = %+v, %v", bundle, err)
-	}
-	if plugins.asked != "plugin:acme.kit/triage" {
-		t.Fatalf("archiver asked for %q", plugins.asked)
-	}
-
-	plugins.err = errors.New("no enabled plugin provides this skill")
-	if _, _, err := s.resolveSkillSource(ctx, 1, "plugin:acme.kit/triage"); !errors.Is(err, ErrSkillSourceInvalid) {
-		t.Fatalf("an unavailable plugin skill must be a bad source, got %v", err)
-	}
 }

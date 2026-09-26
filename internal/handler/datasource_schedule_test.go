@@ -44,7 +44,7 @@ func TestDataSourceScheduleAPIRejectsInvalidCron(t *testing.T) {
 				require.NoError(t, scheduler.AddOrUpdate(ds))
 			}
 			entries := scheduler.EntryCount()
-			h := NewDataSourceHandler(svc, kbSvc, nil)
+			h := NewDataSourceHandler(svc, kbSvc)
 			router := newDataSourceTestRouter(h)
 			router.POST("/datasource", h.CreateDataSource)
 			router.PUT("/datasource/:id", h.UpdateDataSource)

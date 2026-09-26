@@ -10,7 +10,6 @@ import (
 	"mime/multipart"
 	"net/http"
 	"os"
-	"slices"
 	"strings"
 	"time"
 
@@ -57,11 +56,8 @@ func isSupportedImportExtension(ext string) bool {
 	if ext == "" || ext == unknownFileType {
 		return false
 	}
-	if _, ok := supportedImportFileExtensions[ext]; ok {
-		return true
-	}
-	// Installed plugins' parser engines bring their own file types.
-	return slices.Contains(docparser.PluginFileTypes(), ext)
+	_, ok := supportedImportFileExtensions[ext]
+	return ok
 }
 
 // isValidFileType checks if a filename's extension is supported for import.

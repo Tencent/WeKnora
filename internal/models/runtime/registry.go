@@ -48,8 +48,6 @@ type Runtime struct {
 	mu        sync.RWMutex
 	providers map[string]*Provider
 	builtins  map[string]*Provider
-	// plugins marks the vendors installed plugins added (RegisterPlugin).
-	plugins map[string]bool
 }
 
 // New explicitly composes fresh built-in definitions and independent catalogs.

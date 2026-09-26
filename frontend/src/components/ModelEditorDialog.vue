@@ -346,14 +346,38 @@
           <div v-if="secretExtraField && !isEdit && formData.provider !== 'weknoracloud'" class="form-item">
             <label class="form-label" :class="{ required: secretExtraField.required }">{{ extraFieldDisplayLabel(secretExtraField) }}</label>
             <t-input v-model="formData.appSecret" type="password"
-              :placeholder="extraFieldDisplayPlaceholder(secretExtraField)" autocomplete="new-password" spellcheck="false">
+              :placeholder="secretExtraField.placeholder || ''" autocomplete="new-password" spellcheck="false">
               <template #prefix-icon><t-icon name="lock-on" /></template>
             </t-input>
-            <p v-if="extraFieldDisplayPlaceholder(secretExtraField)" class="form-desc">{{ extraFieldDisplayPlaceholder(secretExtraField) }}</p>
+            <p v-if="secretExtraField.placeholder" class="form-desc">{{ secretExtraField.placeholder }}</p>
           </div>
 
-          <!-- 厂商声明的其余额外字段：按厂商 configSchema 渲染，值存入 extra_config[key] -->
-          <SchemaForm v-model="extraConfigModel" :schema="plainExtraSchema" />
+          <!-- 厂商声明的其余额外字段：按 type 动态渲染，值存入 extra_config[key] -->
+          <div v-for="field in plainExtraFields" :key="field.key" class="form-item">
+            <label class="form-label" :class="{ required: field.required }">{{ extraFieldDisplayLabel(field) }}</label>
+            <div v-if="field.type === 'boolean'" class="vision-toggle">
+              <t-switch :model-value="extraConfigBool(field.key)"
+                @update:model-value="(v: boolean) => setExtraConfig(field.key, v ? 'true' : 'false')" />
+              <span v-if="extraFieldDisplayPlaceholder(field)" class="form-desc form-desc--inline">{{ extraFieldDisplayPlaceholder(field) }}</span>
+            </div>
+            <t-select v-else-if="field.type === 'select'" :model-value="formData.extraConfig[field.key] || ''"
+              :placeholder="extraFieldDisplayPlaceholder(field)" clearable
+              @update:model-value="(v: string) => setExtraConfig(field.key, v)">
+              <t-option v-for="opt in (field.options || [])" :key="opt.value" :value="opt.value"
+                :label="extraFieldDisplayOptionLabel(opt)" />
+            </t-select>
+            <t-input v-else-if="field.type === 'number'" :model-value="formData.extraConfig[field.key] || ''"
+              type="number" :placeholder="extraFieldDisplayPlaceholder(field)"
+              @update:model-value="(v: string | number) => setExtraConfig(field.key, String(v ?? ''))" />
+            <t-input v-else-if="field.type === 'password'" :model-value="formData.extraConfig[field.key] || ''"
+              type="password" :placeholder="extraFieldDisplayPlaceholder(field)" autocomplete="new-password" spellcheck="false"
+              @update:model-value="(v: string) => setExtraConfig(field.key, v)">
+              <template #prefix-icon><t-icon name="lock-on" /></template>
+            </t-input>
+            <t-input v-else :model-value="formData.extraConfig[field.key] || ''"
+              :placeholder="extraFieldDisplayPlaceholder(field)"
+              @update:model-value="(v: string) => setExtraConfig(field.key, v)" />
+          </div>
 
           <!-- 自定义 HTTP Header（类似 OpenAI Python SDK 的 extra_headers） -->
           <div v-if="formData.provider !== 'weknoracloud'" class="form-item">
@@ -588,7 +612,7 @@ import {
   checkOllamaModels, checkRemoteModel, testEmbeddingModel, checkRerankModel, checkASRModel, listOllamaModels,
   downloadOllamaModel, getDownloadProgress, checkOllamaStatus, resolveModelCatalog,
   type OllamaModelInfo, type ModelProviderOption, type ModelProviderExtraField,
-  type ModelCatalogEntry,
+  type ModelProviderExtraFieldOption, type ModelCatalogEntry,
   type ResolvedModelCatalog,
 } from '@/api/initialization'
 import {
@@ -604,9 +628,9 @@ import { useModelProvidersStore } from '@/stores/modelProviders'
 import {
   credentialLabelForModelType,
   extraFieldLabel,
+  extraFieldOptionLabel,
   extraFieldPlaceholder,
   extraFieldsForModelType,
-  plainExtraConfigSchema,
   pickLocalized,
   providerDescription,
   providerIcon,
@@ -616,7 +640,6 @@ import { levelLabelKey, supportedLevels } from '@/utils/reasoningEffort'
 import { DEFAULT_MODEL_CONTEXT_WINDOW, formatTokenCount } from '@/utils/contextWindow'
 import { copyWithToast } from '@/utils/clipboard'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
-import SchemaForm from '@/components/schema-form/SchemaForm.vue'
 import CredentialResource, {
   type CredentialFieldDef,
   type CredentialResourceApi,
@@ -774,6 +797,8 @@ const matchTriggerWidth = (triggerElement: HTMLElement) => ({
 const extraFieldDisplayLabel = (field: ModelProviderExtraField) => extraFieldLabel(field, currentLocale.value)
 const extraFieldDisplayPlaceholder = (field: ModelProviderExtraField) =>
   extraFieldPlaceholder(field, currentLocale.value)
+const extraFieldDisplayOptionLabel = (option: ModelProviderExtraFieldOption) =>
+  extraFieldOptionLabel(option, currentLocale.value)
 
 /**
  * Vendors whose API is not a bearer-token API name their first credential
@@ -816,22 +841,6 @@ const secretExtraField = computed<ModelProviderExtraField | undefined>(() =>
 const plainExtraFields = computed<ModelProviderExtraField[]>(() =>
   visibleExtraFields.value.filter(field => !isSecretExtraField(field)),
 )
-// The same plain fields as a config schema, rendered by <SchemaForm>.
-const plainExtraSchema = computed(() =>
-  plainExtraConfigSchema(selectedProvider.value?.configSchema, activeModelType.value, RESERVED_EXTRA_CONFIG_KEYS),
-)
-// extra_config is a map of strings; empty values are dropped as the user
-// clears them, so a cleared field falls back to the vendor default.
-const extraConfigModel = computed<Record<string, unknown>>({
-  get: () => formData.value.extraConfig || {},
-  set: (value) => {
-    const next: Record<string, string> = {}
-    for (const [key, v] of Object.entries(value)) {
-      if (v !== undefined && v !== null && v !== '') next[key] = String(v)
-    }
-    formData.value.extraConfig = next
-  },
-})
 
 /** extra_config keys that belong to the connection, not to the vendor. */
 const VENDOR_NEUTRAL_EXTRA_CONFIG_KEYS = ['api', 'remote_model_name'] as const
@@ -852,6 +861,11 @@ const setExtraConfig = (key: string, value: string | null | undefined) => {
   if (normalized === '') delete next[key]
   else next[key] = normalized
   formData.value.extraConfig = next
+}
+
+const extraConfigBool = (key: string) => {
+  const raw = (formData.value.extraConfig?.[key] || '').trim().toLowerCase()
+  return raw === 'true' || raw === '1' || raw === 'yes'
 }
 
 /** Pre-fill vendor defaults for fields the user has not touched. */

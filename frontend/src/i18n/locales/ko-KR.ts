@@ -995,7 +995,6 @@ export default {
     resourceHint: '동기화할 공간/폴더를 선택하세요',
     untitled: '제목 없음',
     resourceLoadFailed: '리소스 목록 로드 실패',
-    typesLoadFailed: '데이터 소스 유형을 불러오지 못했습니다',
     noResources: '동기화 가능한 위키 공간을 찾을 수 없습니다',
     noResourcesDesc: '앱이 콘텐츠를 가져오려면 그룹 채팅을 통해 위키 접근 권한을 얻어야 합니다',
     noResourcesDesc_notion: '앱이 콘텐츠를 가져오려면 Notion 페이지 접근 권한이 필요합니다',
@@ -2663,9 +2662,6 @@ export default {
     }
   },
   mcpSettings: {
-    transportPlugin: '플러그인 내장',
-    fromPlugin: '플러그인',
-    pluginNotConfigured: '플러그인이 아직 설정되지 않았습니다. 플러그인 센터에서 설정한 뒤 사용하세요',
     addUsageInstructions: "사용 안내 추가",
     noUsageInstructions: "아직 사용 안내가 없습니다",
     title: 'MCP 서비스 관리',
@@ -5252,209 +5248,6 @@ export default {
     belongsToOrg: '스페이스: ',
     noCompatibleKbForAgent: '현재 에이전트의 도구와 범위 내 지식베이스의 기능이 일치하지 않아 참조할 수 있는 지식베이스가 없습니다.'
   },
-  pluginAdmin: {
-    runtime: {
-      declarative: '선언형',
-      host: '로컬 프로세스',
-      remote: '원격 서비스'
-    },
-    title: '플러그인 관리',
-    description: '플랫폼 전체의 플러그인을 설치하고 관리합니다. 설치된 플러그인은 모든 워크스페이스에 보이며 각 워크스페이스가 직접 활성화합니다. 여기서 비활성화하면 모든 노드에서 언로드됩니다.',
-    installButton: '플러그인 설치',
-    empty: '설치된 플러그인이 없습니다',
-    loadFailed: '설치된 플러그인을 불러오지 못했습니다',
-    saveFailed: '저장하지 못했습니다',
-    enabledToast: '플랫폼 전체에서 활성화했습니다',
-    disabledToast: '플랫폼 전체에서 비활성화했습니다',
-    platformSwitch: '플랫폼 전체 활성화 / 비활성화',
-    publisher: '게시자',
-    contributions: '제공 기능',
-    permissions: '권한 및 외부 접근',
-    state: {
-      degraded: '재시작 중',
-      running: '실행 중',
-      failed: '로드 실패',
-      disabled: '비활성',
-      pending: '로드 중'
-    },
-    nodeState: {
-      ready: '준비됨',
-      starting: '시작 중',
-      degraded: '이상',
-      stopped: '로드되지 않음'
-    },
-    source: {
-      upload: '업로드',
-      url: 'URL'
-    },
-    change: {
-      install: '새로 설치',
-      upgrade: 'v{from}에서 업그레이드',
-      downgrade: 'v{from}에서 다운그레이드',
-      reinstall: '재설치'
-    },
-    permission: {
-      anyHost: '모든 공개 호스트',
-      remote: '원격 서비스',
-      egress: '네트워크 송신',
-      hostApi: 'WeKnora API',
-      events: '이벤트'
-    },
-    secret: {
-      title: '플러그인 서명 비밀 키',
-      description: '이 비밀 키를 플러그인 서비스의 환경 변수 WEKNORA_PLUGIN_SECRET으로 설정하세요. 서비스는 이를 사용해 요청이 WeKnora에서 온 것인지 확인합니다. 이번에만 표시되며 닫은 후에는 다시 볼 수 없습니다.',
-      copy: '복사',
-      copied: '복사했습니다',
-      done: '저장했습니다'
-    },
-    install: {
-      title: '플러그인 설치',
-      description: '.wkp 패키지를 업로드하거나 다운로드 URL을 입력하고, 검토한 뒤 설치합니다.',
-      sourceSection: '패키지',
-      mode: {
-        upload: '파일 업로드',
-        url: 'URL에서'
-      },
-      fileLabel: '패키지 파일',
-      chooseFile: '파일 선택',
-      noFile: '선택된 파일 없음',
-      fileHint: '.wkp 파일(plugin.yaml이 포함된 zip), 최대 64 MB.',
-      urlLabel: '다운로드 URL',
-      urlHint: '서버가 이 URL에서 다운로드합니다. 사설 네트워크 주소는 거부됩니다.',
-      remoteUrlLabel: '서비스 URL',
-      remoteUrlHint: '플러그인 서비스의 HTTP(S) 주소입니다. 사설 네트워크 호스트는 SSRF_WHITELIST에 추가해야 합니다.',
-      remoteUrlKeep: '업그레이드 시 비워 두면 현재 URL을 계속 사용합니다',
-      reviewSection: '설치 전 검토',
-      noPermissions: '이 플러그인은 추가 권한을 요청하지 않습니다.',
-      configNotice: '이 플러그인은 설정이 필요합니다. 플랫폼 설정은 설치 후 상세 화면에서, 워크스페이스 설정은 각 워크스페이스 관리자가 플러그인 센터에서 입력합니다.',
-      tenantNotice: '설치 후 플러그인은 모든 워크스페이스에 보이지만 워크스페이스 관리자가 활성화하기 전까지 비활성 상태입니다.',
-      digest: '패키지 다이제스트',
-      inspect: '패키지 검사',
-      confirm: {
-        install: '설치',
-        upgrade: '업그레이드',
-        downgrade: '이전 버전 설치',
-        reinstall: '재설치'
-      },
-      inspectFailed: '패키지를 읽을 수 없습니다',
-      failed: '설치에 실패했습니다',
-      done: '{name}을(를) 설치했습니다'
-    },
-    detail: {
-      overview: '개요',
-      runtime: '런타임',
-      source: '출처',
-      homepage: '홈페이지',
-      license: '라이선스',
-      engines: '호환 버전',
-      nodes: '노드',
-      noNodes: '이 플러그인을 로드한 노드가 없습니다',
-      versions: '버전',
-      active: '사용 중',
-      activate: '이 버전으로 전환',
-      rollback: '이 버전으로 롤백',
-      activateConfirm: 'v{version}을(를) 사용 중인 버전으로 할까요? 모든 노드가 플러그인을 다시 로드합니다.',
-      activated: 'v{version}(으)로 전환했습니다',
-      activateFailed: '버전을 전환하지 못했습니다',
-      systemConfig: '플랫폼 설정',
-      systemConfigHint: '모든 워크스페이스에 적용됩니다(예: 서비스 리전, 플랫폼 공용 자격 증명).',
-      configLoadFailed: '플랫폼 설정을 불러오지 못했습니다',
-      configSaved: '플랫폼 설정을 저장했습니다',
-      configSaveFailed: '플랫폼 설정을 저장하지 못했습니다',
-      danger: '제거',
-      uninstallHint: '플러그인과 저장된 모든 버전을 삭제합니다. 워크스페이스의 스위치와 설정은 유지되며 재설치하면 복원됩니다.',
-      uninstall: '플러그인 제거',
-      uninstallConfirm: '제거할까요? 모든 노드에서 즉시 언로드됩니다.',
-      uninstalled: '플러그인을 제거했습니다',
-      uninstallFailed: '제거하지 못했습니다',
-      remote: '원격 서비스',
-      remoteUrl: '서비스 URL',
-      editUrl: '변경',
-      urlSaved: '서비스 URL을 업데이트했습니다',
-      urlSaveFailed: '서비스 URL을 업데이트하지 못했습니다',
-      rotateSecret: '비밀 키 교체',
-      rotateHint: '새 서명 비밀 키를 발급합니다. 서비스에 새 키를 설정하기 전까지 호출이 실패합니다.',
-      rotateConfirm: '비밀 키를 교체할까요? 이전 키는 즉시 무효화됩니다.',
-      rotateFailed: '비밀 키를 교체하지 못했습니다'
-    }
-  },
-  pluginToolView: {
-    empty: '결과가 없습니다'
-  },
-  pluginPages: {
-    notResponding: '플러그인 페이지가 응답하지 않습니다. 로드에 실패했을 수 있습니다.',
-    requestFailed: '플러그인 요청에 실패했습니다',
-    fromPlugin: '플러그인 {id} 제공'
-  },
-  pluginCenter: {
-    installed: '설치됨',
-    configure: '설정',
-    webhooks: 'Webhook URL',
-    webhooksHint: '타사 서비스에 이 URL을 설정하면 이벤트가 이 플러그인으로 전송됩니다. 이 워크스페이스의 비밀이 포함되어 있으니 공개하지 마세요.',
-    copy: '복사',
-    webhookCopied: 'Webhook URL을 복사했습니다',
-    configTitle: '{name} 설정',
-    configDescription: '이 워크스페이스에서 플러그인을 사용하기 위한 설정(예: API 키). 비밀 값은 암호화되어 저장되며 다시 표시되지 않습니다.',
-    configLoadFailed: '플러그인 설정을 불러오지 못했습니다',
-    configSaved: '플러그인 설정을 저장했습니다',
-    configSaveFailed: '플러그인 설정을 저장하지 못했습니다',
-    navGroup: '확장',
-    title: '플러그인',
-    description: '이 배포에서 제공하는 모든 플러그인(내장 플러그인과 시스템 관리자가 설치한 플러그인). 이 워크스페이스에서 활성화하거나 비활성화할 수 있습니다. 비활성화된 플러그인의 연동은 유형 목록에서 빠지고 새로 만들 수 없지만 기존 항목은 계속 동작합니다. 설치된 플러그인은 워크스페이스 관리자가 활성화하기 전까지 비활성 상태입니다.',
-    searchPlaceholder: '플러그인 이름, ID 또는 연동 검색',
-    allPoints: '전체',
-    empty: '일치하는 플러그인이 없습니다',
-    builtin: '내장',
-    required: '필수',
-    requiredHint: 'WeKnora에 필요한 플러그인이라 끌 수 없습니다',
-    adminOnly: '워크스페이스 관리자만 플러그인을 켜거나 끌 수 있습니다',
-    loadFailed: '플러그인을 불러오지 못했습니다',
-    saveFailed: '플러그인 설정을 저장하지 못했습니다',
-    enabledToast: '플러그인을 켰습니다',
-    disabledToast: '플러그인을 껐습니다',
-    points: {
-      modelVendors: '모델 공급사',
-      connectors: '데이터 소스',
-      imChannels: 'IM 채널',
-      webSearch: '웹 검색',
-      tools: '에이전트 도구',
-      parsers: '문서 파싱',
-      skills: '스킬',
-      mcpServers: 'MCP 서버',
-      pages: '페이지',
-      settingsSections: '설정 섹션',
-      kbTabs: '지식 베이스 탭',
-      webhooks: 'Webhook'
-    }
-  },
-  schemaForm: {
-    errors: {
-      required: '필수 항목입니다',
-      type: '값이 올바르지 않습니다',
-      enum: '허용된 값이 아닙니다',
-      min_length: '너무 짧습니다',
-      max_length: '너무 깁니다',
-      pattern: '형식이 올바르지 않습니다',
-      minimum: '값이 너무 작습니다',
-      maximum: '값이 너무 큽니다',
-      format: 'https://example.com 과 같은 전체 주소를 입력하세요'
-    },
-    options: {
-      loading: '불러오는 중…',
-      empty: '선택할 수 있는 항목이 없습니다',
-      retry: '다시 시도',
-      failed: '선택 항목을 불러오지 못했습니다'
-    },
-    oauth: {
-      connected: '연결됨',
-      notConnected: '연결되지 않음',
-      connect: '계정 연결',
-      reconnect: '다시 연결',
-      disconnect: '연결 해제',
-      popupBlocked: '브라우저가 인증 창을 차단했습니다. 팝업을 허용한 뒤 다시 시도하세요.',
-      failed: '인증에 실패했습니다'
-    }
-  },
   common: {
     add: '추가',
     me: '나',
@@ -6011,18 +5804,6 @@ export default {
     baseUrlLabel: '인스턴스 URL',
     baseUrlPlaceholder: 'https://searxng.example.com',
     apiKeyPlaceholder: 'API 키를 입력하세요',
-    configFields: {
-      searchEngine: '검색 엔진',
-      searchEngineDesc: 'Zhipu 검색 엔진과 요청당 요금 등급을 선택합니다.',
-      searchStd: '기본 · ¥0.01/회',
-      searchPro: '프로 · ¥0.03/회',
-      searchSogou: 'Sogou · ¥0.05/회',
-      searchQuark: 'Quark · ¥0.05/회',
-      contentSize: '요약 길이',
-      contentSizeDesc: '보통은 간결한 요약을, 자세히는 더 많은 맥락을 반환합니다.',
-      contentMedium: '보통',
-      contentHigh: '자세히'
-    },
     toasts: {
       providerCreated: '검색 엔진 프로바이더가 생성되었습니다',
       providerUpdated: '검색 엔진 프로바이더가 업데이트되었습니다',
@@ -6449,8 +6230,6 @@ export default {
       },
     },
     skills: {
-      pluginSection: '활성화된 플러그인에서',
-      pluginSectionHint: '플러그인이 제공하는 스킬을 선택해 라이브러리에 추가한 뒤, 다른 스킬처럼 샌드박스에 설치할 수 있습니다.',
       title: '스킬 관리',
       description: '스킬은 워크스페이스 카탈로그에 속합니다. 먼저 등록한 뒤 하나 이상의 샌드박스에 설치할 수 있습니다. 에이전트는 현재 샌드박스에서 준비된 스킬만 사용할 수 있습니다.',
       helpTooltip: '카탈로그 스킬은 아무 샌드박스에도 설치하지 않아도 됩니다. 스크립트를 실행하려면 에이전트가 쓰는 샌드박스 이미지에 설치해야 합니다. Docker, Cube, E2B 이미지는 호환되지 않으므로 샌드박스마다 따로 설치합니다.',
@@ -7373,8 +7152,6 @@ export default {
     channelGitLab: 'GitLab',
     channelIma: 'Tencent IMA',
     channelUpload: '업로드',
-    channelRss: 'RSS',
-    channelExternal: '외부 데이터 소스',
     channelManual: '수동',
     channelUrl: '웹',
     channelUnknown: '알 수 없음',

@@ -7,7 +7,7 @@ export interface MCPService {
   description: string
   usage_instructions?: string
   enabled: boolean
-  transport_type: 'sse' | 'http-streamable' | 'stdio' | 'plugin'
+  transport_type: 'sse' | 'http-streamable' | 'stdio'
   url?: string // Optional: required for SSE/HTTP Streamable
   headers?: Record<string, string>
   auth_config?: {
@@ -41,10 +41,6 @@ export interface MCPService {
   }
   env_vars?: Record<string, string> // Environment variables for stdio transport
   is_builtin?: boolean // Whether this is a builtin MCP service
-  /** Installed plugin providing the service (read-only, never stored). */
-  plugin_id?: string
-  /** Why a plugin service is off, typically missing workspace configuration. */
-  plugin_error?: string
   // Per-field "configured?" map embedded on the main response (server-side
   // dto.MCPServiceResponse.Credentials). Drives the CredentialResource card
   // without a follow-up GET. Absent for builtin services.
