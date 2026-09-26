@@ -526,6 +526,12 @@ class _TCPServer(_Server):
             self.address_family = socket.AF_INET6
         super().__init__(address, *args)
 
+    def server_bind(self) -> None:
+        # HTTPServer.server_bind looks the host up with getfqdn, a reverse
+        # DNS query that can stall startup for seconds; nothing needs it.
+        socketserver.TCPServer.server_bind(self)
+        self.server_name, self.server_port = str(self.server_address[0]), int(self.server_address[1])
+
 
 class _UnixServer(_Server):
     address_family = getattr(socket, "AF_UNIX", socket.AF_INET)

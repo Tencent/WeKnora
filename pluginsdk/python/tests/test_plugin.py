@@ -144,6 +144,17 @@ class PluginTest(unittest.TestCase):
         self.assertEqual(events[1]["error"], {"code": "rate_limited", "message": "slow down", "retryable": True, "details": {"retryAfter": 7}})
 
 
+class BindTest(unittest.TestCase):
+    def test_no_reverse_dns_on_bind(self):
+        # getfqdn can stall startup for seconds where reverse DNS is slow.
+        from unittest import mock
+
+        with mock.patch("socket.getfqdn", side_effect=AssertionError("getfqdn called")):
+            server = plugin.test_server()
+        server.shutdown()
+        server.server_close()
+
+
 class WireTest(unittest.TestCase):
     def test_times(self):
         t = parse_time("2026-09-25T16:22:58.135616789Z")

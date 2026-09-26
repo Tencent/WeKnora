@@ -151,10 +151,16 @@ func TestPythonPluginConformsInRemoteMode(t *testing.T) {
 	stopPython(t, cmd)
 	base := "http://" + addr
 	c := client.New(base, nil, client.Signed("s3cret"))
-	deadline := time.Now().Add(10 * time.Second)
-	for c.Health(context.Background()) != nil {
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		err := c.Health(ctx)
+		cancel()
+		if err == nil {
+			break
+		}
 		if time.Now().After(deadline) {
-			t.Fatal("the Python plugin did not come up")
+			t.Fatalf("the Python plugin did not come up: %v", err)
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
