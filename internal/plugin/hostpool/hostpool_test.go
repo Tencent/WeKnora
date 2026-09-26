@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
@@ -89,8 +90,19 @@ func TestPoolReachesAPluginThroughAHost(t *testing.T) {
 	if !pool.Runs(ctx, "acme.echo", "1.0.0") || pool.Runs(ctx, "acme.echo", "2.0.0") {
 		t.Fatal("Runs should match the running version only")
 	}
+	// A version no host runs is unavailable, after a while for a host to
+	// finish upgrading to it.
+	defer func(d time.Duration) { upgradeWait = d }(upgradeWait)
+	upgradeWait = 300 * time.Millisecond
+	start := time.Now()
 	if _, err := pool.Client(ctx, "acme.echo", "2.0.0"); !isCode(err, pluginapi.CodeUnavailable) {
 		t.Fatalf("other version = %v", err)
+	}
+	if took := time.Since(start); took < upgradeWait {
+		t.Fatalf("gave up on an upgrade after %s", took)
+	}
+	if _, err := pool.Client(ctx, "acme.other", "1.0.0"); !isCode(err, pluginapi.CodeUnavailable) {
+		t.Fatalf("a plugin no host runs = %v", err)
 	}
 
 	// The gateway refuses calls without the cluster key, and relays a
@@ -157,6 +169,62 @@ func TestHostsAgeOutAndWithdraw(t *testing.T) {
 	}
 	if ok, _ := mr.SIsMember(indexKey(), "h2"); ok {
 		t.Fatal("an expired host must leave the index")
+	}
+}
+
+// During an upgrade on a standalone host, app nodes reach the new version
+// as soon as the host started it, and those not yet switched still reach
+// the old one.
+func TestUpgradeOnAHostHandsOver(t *testing.T) {
+	ctx := context.Background()
+	mr := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Setenv("SYSTEM_AES_KEY", "0123456789abcdef0123456789abcdef")
+	key, err := ClusterKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	mgr := host.NewStandaloneManager([]string{host.KindBinary})
+	defer mgr.Close()
+	v1 := echoPackage(t)
+	if err := mgr.Activate(ctx, v1); err != nil {
+		t.Fatal(err)
+	}
+	gw := httptest.NewServer(mgr.Gateway(key))
+	defer gw.Close()
+	runCtx, stop := context.WithCancel(ctx)
+	defer stop()
+	go NewAnnouncer(rdb, mgr, "h1", gw.URL).Run(runCtx)
+
+	pool := NewPool(rdb, key)
+	waitFor(t, func() bool { return pool.Runs(ctx, "acme.echo", "1.0.0") })
+	old, err := pool.Client(ctx, "acme.echo", "1.0.0")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	v2 := *v1
+	m2 := *v1.Manifest
+	m2.Version = "2.0.0"
+	v2.Manifest = &m2
+	_ = os.WriteFile(filepath.Join(v2.Dir, "version"), []byte("2.0.0"), 0o644)
+	if err := mgr.Activate(ctx, &v2); err != nil {
+		t.Fatal(err)
+	}
+	// Well within a heartbeat.
+	start := time.Now()
+	c, err := pool.Client(ctx, "acme.echo", "2.0.0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if took := time.Since(start); took > 2*time.Second {
+		t.Fatalf("the new version showed up after %s", took)
+	}
+	if got, err := search(ctx, c, "hello"); err != nil || got != "hello" {
+		t.Fatalf("search on the new version = %q, %v", got, err)
+	}
+	if got, err := search(ctx, old, "hello"); err != nil || got != "hello" {
+		t.Fatalf("search on the version handed over = %q, %v", got, err)
 	}
 }
 

@@ -18,6 +18,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/plugin/manifest"
@@ -51,7 +52,18 @@ type Manager struct {
 	// direct are hosts plugins reach without the egress proxy: the Host API
 	// when it is not on this machine.
 	direct []string
+	// handingOver are the previous versions of upgraded plugins, still
+	// served through the gateway until app nodes caught up (standalone
+	// hosts only).
+	handingOver map[string]*process
+	onChange    func()
 }
+
+// handoverWindow is how long a standalone host keeps serving the previous
+// version of an upgraded plugin: app nodes switch versions when they
+// reconcile, which they do at least every reconcile.DefaultInterval, and
+// see the host's new version a heartbeat later.
+var handoverWindow = reconcile.DefaultInterval + 15*time.Second
 
 // NewManager creates an empty host that runs every kind this machine can.
 func NewManager() *Manager {
@@ -63,7 +75,7 @@ func NewManager() *Manager {
 // NewStandaloneManager creates the host of a standalone plugin host
 // (weknora plugin-host): it runs the given kinds and refuses the others.
 func NewStandaloneManager(kinds []string) *Manager {
-	m := &Manager{procs: map[string]*process{}, standalone: true}
+	m := &Manager{procs: map[string]*process{}, standalone: true, handingOver: map[string]*process{}}
 	m.SetKinds(kinds)
 	return m
 }
@@ -145,6 +157,23 @@ func (m *Manager) SetHostAPIAddr(addr string) {
 	m.mu.Unlock()
 }
 
+// OnChange calls fn whenever what Running reports may have changed: a
+// plugin started, stopped or changed state. fn must not block.
+func (m *Manager) OnChange(fn func()) {
+	m.mu.Lock()
+	m.onChange = fn
+	m.mu.Unlock()
+}
+
+func (m *Manager) changed() {
+	m.mu.Lock()
+	fn := m.onChange
+	m.mu.Unlock()
+	if fn != nil {
+		fn()
+	}
+}
+
 // SetReporter wires health changes to the reconciler.
 func (m *Manager) SetReporter(r StateReporter) {
 	m.mu.Lock()
@@ -189,12 +218,37 @@ func (m *Manager) Activate(ctx context.Context, l *reconcile.Loaded) error {
 	m.mu.Lock()
 	old := m.procs[id]
 	m.procs[id] = p
+	var handed *process
+	if old != nil && m.handingOver != nil {
+		// App nodes still on the old version keep reaching it until they
+		// switched; a version handed over before is done.
+		handed, old = old, m.handingOver[id]
+		m.handingOver[id] = handed
+	}
 	m.mu.Unlock()
 	if old != nil {
 		m.retire(old)
 	}
+	if handed != nil {
+		time.AfterFunc(handoverWindow, func() { m.endHandover(id, handed) })
+	}
+	m.changed()
 	logger.Infof(ctx, "[plugin] host started %s %s", id, l.Manifest.Version)
 	return nil
+}
+
+// endHandover stops serving a plugin's previous version, unless it was
+// stopped already.
+func (m *Manager) endHandover(id string, p *process) {
+	m.mu.Lock()
+	if m.handingOver[id] != p {
+		m.mu.Unlock()
+		return
+	}
+	delete(m.handingOver, id)
+	m.mu.Unlock()
+	m.retire(p)
+	m.changed()
 }
 
 // Deactivate implements reconcile.Activator: it stops the process, which
@@ -203,11 +257,17 @@ func (m *Manager) Deactivate(ctx context.Context, pluginID string) error {
 	m.mu.Lock()
 	p := m.procs[pluginID]
 	delete(m.procs, pluginID)
+	previous := m.handingOver[pluginID]
+	delete(m.handingOver, pluginID)
 	m.mu.Unlock()
+	if previous != nil {
+		m.retire(previous)
+	}
 	if p != nil {
 		m.retire(p)
 		logger.Infof(ctx, "[plugin] host stopping %s", pluginID)
 	}
+	m.changed()
 	return nil
 }
 
@@ -223,6 +283,7 @@ func (m *Manager) retire(p *process) {
 }
 
 func (m *Manager) report(pluginID string, s State, err error) {
+	m.changed()
 	m.mu.Lock()
 	r := m.reporter
 	m.mu.Unlock()
@@ -267,11 +328,15 @@ type Running struct {
 	State   State  `json:"state"`
 }
 
-// Running lists the plugins this host runs and their state.
+// Running lists the plugins this host runs and their state, previous
+// versions still handed over included.
 func (m *Manager) Running() []Running {
 	m.mu.Lock()
-	procs := make([]*process, 0, len(m.procs))
+	procs := make([]*process, 0, len(m.procs)+len(m.handingOver))
 	for _, p := range m.procs {
+		procs = append(procs, p)
+	}
+	for _, p := range m.handingOver {
 		procs = append(procs, p)
 	}
 	m.mu.Unlock()
@@ -284,7 +349,12 @@ func (m *Manager) Running() []Running {
 			ID: p.spec.m.ID, Version: p.spec.m.Version, Kind: p.spec.m.Runtime.Kind, State: st,
 		})
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].ID != out[j].ID {
+			return out[i].ID < out[j].ID
+		}
+		return out[i].Version < out[j].Version
+	})
 	return out
 }
 
@@ -294,7 +364,14 @@ func (m *Manager) InFlight() int64 { return m.inFlight.Load() }
 // Close stops every plugin, for shutdown.
 func (m *Manager) Close() {
 	m.mu.Lock()
-	procs := m.procs
+	procs := make([]*process, 0, len(m.procs)+len(m.handingOver))
+	for _, p := range m.procs {
+		procs = append(procs, p)
+	}
+	for id, p := range m.handingOver {
+		procs = append(procs, p)
+		delete(m.handingOver, id)
+	}
 	m.procs = map[string]*process{}
 	m.mu.Unlock()
 	var wg sync.WaitGroup

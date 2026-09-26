@@ -258,6 +258,50 @@ func TestUpgradeLetsTheOldProcessFinishItsCalls(t *testing.T) {
 	}
 }
 
+// A standalone host keeps the previous version of an upgraded plugin
+// running for the handover window, then stops it.
+func TestStandaloneHostHandsOverAnUpgrade(t *testing.T) {
+	fastTimings(t)
+	defer func(d time.Duration) { handoverWindow = d }(handoverWindow)
+	handoverWindow = 500 * time.Millisecond
+	ctx := context.Background()
+	m := NewStandaloneManager([]string{KindBinary})
+	defer m.Close()
+	changes := make(chan struct{}, 100)
+	m.OnChange(func() { changes <- struct{}{} })
+	if err := m.Activate(ctx, install(t, "1.0.0", "")); err != nil {
+		t.Fatal(err)
+	}
+	pid1, _ := search(t, m, "pid")
+	for len(changes) > 0 {
+		<-changes
+	}
+	if err := m.Activate(ctx, install(t, "1.1.0", "")); err != nil {
+		t.Fatal(err)
+	}
+	if len(changes) == 0 {
+		t.Fatal("an upgrade must be announced")
+	}
+	versions := func() string {
+		var vs []string
+		for _, r := range m.Running() {
+			vs = append(vs, r.Version)
+		}
+		return strings.Join(vs, ",")
+	}
+	if got := versions(); got != "1.0.0,1.1.0" {
+		t.Fatalf("running during the handover = %s", got)
+	}
+	waitFor(t, "the handover to end", func() bool { return versions() == "1.1.0" })
+	if runtime.GOOS != "windows" {
+		n, _ := strconv.Atoi(pid1)
+		waitFor(t, "the previous version to exit", func() bool {
+			proc, err := os.FindProcess(n)
+			return err != nil || proc.Signal(syscall.Signal(0)) != nil
+		})
+	}
+}
+
 func TestEgressProxyEnforcesThePolicy(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte("hello from " + r.Host))

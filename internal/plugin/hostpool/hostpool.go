@@ -29,14 +29,23 @@ import (
 	"github.com/Tencent/WeKnora/pluginsdk/pluginapi"
 )
 
-// Heartbeat timing: a host refreshes its record every HeartbeatInterval and
-// drops out HeartbeatTTL after its last one, when Redis expires the record.
+// Heartbeat timing: a host refreshes its record every HeartbeatInterval,
+// and whenever the plugins it runs change, and drops out HeartbeatTTL after
+// its last one, when Redis expires the record.
 const (
 	HeartbeatInterval = 5 * time.Second
 	HeartbeatTTL      = 15 * time.Second
 	// refreshAfter is how long an app node trusts its view of the hosts.
 	refreshAfter = 2 * time.Second
+	// missRefresh is how old a view may be when a call finds no host for
+	// its plugin version: the host may have just announced it.
+	missRefresh = 250 * time.Millisecond
 )
+
+// upgradeWait is how long a call waits for a plugin version no host runs
+// yet while a host runs another version of it: the host is starting the
+// upgrade.
+var upgradeWait = 10 * time.Second
 
 const keyBase = "weknora:plugin-host:"
 
@@ -101,18 +110,31 @@ func (i Info) runs(pluginID, version string) bool {
 	return false
 }
 
+// has reports whether the host runs any version of a plugin, in any state.
+func (i Info) has(pluginID string) bool {
+	for _, p := range i.Plugins {
+		if p.ID == pluginID {
+			return true
+		}
+	}
+	return false
+}
+
 // Announcer keeps a plugin host's record in Redis.
 type Announcer struct {
-	rdb *redis.Client
-	mgr *host.Manager
-	id  string
-	url string
+	rdb  *redis.Client
+	mgr  *host.Manager
+	id   string
+	url  string
+	kick chan struct{}
 }
 
 // NewAnnouncer announces the host at url (its gateway, as app nodes reach
 // it) under id.
 func NewAnnouncer(rdb *redis.Client, mgr *host.Manager, id, url string) *Announcer {
-	return &Announcer{rdb: rdb, mgr: mgr, id: id, url: strings.TrimSuffix(url, "/")}
+	return &Announcer{
+		rdb: rdb, mgr: mgr, id: id, url: strings.TrimSuffix(url, "/"), kick: make(chan struct{}, 1),
+	}
 }
 
 func (a *Announcer) info() Info {
@@ -136,9 +158,17 @@ func (a *Announcer) Announce(ctx context.Context) error {
 	return err
 }
 
-// Run announces every HeartbeatInterval until ctx ends, then withdraws the
-// record so app nodes stop calling at once.
+// Run announces every HeartbeatInterval, and as soon as the plugins the
+// host runs change, until ctx ends; then it withdraws the record so app
+// nodes stop calling at once.
 func (a *Announcer) Run(ctx context.Context) {
+	a.mgr.OnChange(func() {
+		select {
+		case a.kick <- struct{}{}:
+		default:
+		}
+	})
+	defer a.mgr.OnChange(nil)
 	t := time.NewTicker(HeartbeatInterval)
 	defer t.Stop()
 	for {
@@ -156,6 +186,7 @@ func (a *Announcer) Run(ctx context.Context) {
 			cancel()
 			return
 		case <-t.C:
+		case <-a.kick:
 		}
 	}
 }
@@ -282,16 +313,48 @@ func leastBusy(hosts []Info, pluginID, version string) (Info, bool) {
 	return best[rand.IntN(len(best))], true //nolint:gosec // load spreading, not security
 }
 
+// pick finds a host for a plugin version. A view without one is read
+// again: the host may have announced the version since. While a host runs
+// another version of the plugin, an upgrade is under way there and pick
+// waits a while for it.
+func (p *Pool) pick(ctx context.Context, pluginID, version string) (Info, error) {
+	hosts, err := p.view(ctx, refreshAfter)
+	if err != nil {
+		return Info{}, pluginapi.Errorf(pluginapi.CodeUnavailable, "read plugin hosts: %v", err)
+	}
+	if h, ok := leastBusy(hosts, pluginID, version); ok {
+		return h, nil
+	}
+	deadline := time.Now().Add(upgradeWait)
+	for {
+		if hosts, err = p.view(ctx, missRefresh); err == nil {
+			if h, ok := leastBusy(hosts, pluginID, version); ok {
+				return h, nil
+			}
+		}
+		upgrading := false
+		for _, h := range hosts {
+			upgrading = upgrading || h.has(pluginID)
+		}
+		if !upgrading || time.Now().After(deadline) {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return Info{}, pluginapi.Errorf(pluginapi.CodeUnavailable,
+				"no plugin host runs %s@%s yet: %v", pluginID, version, ctx.Err())
+		case <-time.After(missRefresh):
+		}
+	}
+	return Info{}, pluginapi.Errorf(pluginapi.CodeUnavailable,
+		"no plugin host runs %s@%s; is weknora plugin-host up?", pluginID, version)
+}
+
 // Client reaches a plugin version on the least busy host that runs it.
 func (p *Pool) Client(ctx context.Context, pluginID, version string) (*client.Client, error) {
-	hosts, err := p.Hosts(ctx)
+	h, err := p.pick(ctx, pluginID, version)
 	if err != nil {
-		return nil, pluginapi.Errorf(pluginapi.CodeUnavailable, "read plugin hosts: %v", err)
-	}
-	h, ok := leastBusy(hosts, pluginID, version)
-	if !ok {
-		return nil, pluginapi.Errorf(pluginapi.CodeUnavailable,
-			"no plugin host runs %s@%s; is weknora plugin-host up?", pluginID, version)
+		return nil, err
 	}
 	base := fmt.Sprintf("%s%s%s/%s", h.URL, host.GatewayPrefix, pluginID, version)
 	p.mu.Lock()
