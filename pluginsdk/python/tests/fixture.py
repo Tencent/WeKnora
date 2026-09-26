@@ -20,8 +20,11 @@ from weknora_plugin import (  # noqa: E402
     Resource,
     SearchResult,
     UIResponse,
+    WebhookResponse,
     invalid_config,
 )
+
+seen_events = []
 
 plugin = Plugin("acme.fixture", "1.0.0")
 
@@ -73,6 +76,20 @@ class Notes:
         stream.checkpoint(Cursor(state={"after": start + 3}))
         stream.progress("done")
         return Cursor(state={"after": start + 3})
+
+
+@plugin.on_event
+def on_event(call, ev):
+    if ev.type == "knowledge.failed":
+        raise PluginError(ErrorCode.UNAVAILABLE, "try later")
+    seen_events.append((ev.id, ev.type, ev.attempt, call.tenant_id, (ev.data or {}).get("knowledgeId")))
+
+
+@plugin.webhook("inbox")
+def inbox(call, req):
+    if req.headers.get("X-Signature") != "ok":
+        return WebhookResponse(status=401, body="bad signature")
+    return {"path": req.path, "got": req.json(), "tenant": call.tenant_id}
 
 
 @plugin.ui

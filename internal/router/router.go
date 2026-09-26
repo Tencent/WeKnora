@@ -21,6 +21,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/mcpserver"
 	"github.com/Tencent/WeKnora/internal/middleware"
 	"github.com/Tencent/WeKnora/internal/plugin/hostapi"
+	"github.com/Tencent/WeKnora/internal/plugin/webhook"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 
@@ -95,6 +96,7 @@ type RouterParams struct {
 	PluginAdminHandler           *handler.PluginAdminHandler
 	PluginHostAPI                *hostapi.Handler
 	PluginUIHandler              *handler.PluginUIHandler
+	PluginWebhookHandler         *handler.PluginWebhookHandler
 	WeKnoraCloudHandler          *handler.WeKnoraCloudHandler
 	WikiPageHandler              *handler.WikiPageHandler
 	MemoryHandler                *handler.MemoryHandler
@@ -219,6 +221,13 @@ func NewRouter(params RouterParams) *gin.Engine {
 	if params.PluginUIHandler != nil {
 		r.GET(handler.PluginUIAssetsPrefix+"/:id/:version/*path", params.PluginUIHandler.ServeAsset)
 	}
+	// Plugin webhooks: third parties call a secret per-workspace URL; the
+	// handler checks it, so no login applies.
+	if params.PluginWebhookHandler != nil {
+		hooks := r.Group(webhook.PathPrefix)
+		hooks.Any("/:id/:hook/:token", params.PluginWebhookHandler.Receive)
+		hooks.Any("/:id/:hook/:token/*path", params.PluginWebhookHandler.Receive)
+	}
 
 	// 认证中间件
 	r.Use(middleware.Auth(params.TenantService, params.UserService, params.TenantMemberService, params.TenantAPIKeyService, params.Config))
@@ -339,7 +348,7 @@ func NewRouter(params RouterParams) *gin.Engine {
 		RegisterEmbedChannelRoutes(v1, params.EmbedChannelHandler, rbacGuards)
 		RegisterMCPEndpointRoutes(v1, params.MCPEndpointHandler, rbacGuards)
 		RegisterDataSourceRoutes(v1, params.DataSourceHandler, params.DataSourceCredentialsHandler, rbacGuards)
-		RegisterPluginRoutes(v1, params.PluginHandler, params.PluginUIHandler, rbacGuards)
+		RegisterPluginRoutes(v1, params.PluginHandler, params.PluginUIHandler, params.PluginWebhookHandler, rbacGuards)
 		RegisterPluginAdminRoutes(v1, params.PluginAdminHandler, rbacGuards)
 		RegisterWeKnoraCloudRoutes(v1, params.WeKnoraCloudHandler, rbacGuards)
 		RegisterWikiPageRoutes(v1, params.WikiPageHandler, rbacGuards)

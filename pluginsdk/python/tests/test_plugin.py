@@ -80,7 +80,9 @@ class PluginTest(unittest.TestCase):
                     "webSearch": ["echo"],
                     "connectors": ["notes"],
                     "parsers": ["upper"],
+                    "webhooks": ["inbox"],
                     "ui": ["request"],
+                    "events": ["handler"],
                 },
             },
         )
@@ -121,6 +123,26 @@ class PluginTest(unittest.TestCase):
         self.assertTrue(out["markdown"].startswith("HELLO"))
         self.assertEqual(out["images"], [{"originalRef": "img/dot.png", "data": base64.b64encode(b"\x89PNG").decode(), "mimeType": "image/png"}])
         self.assertEqual(out["metadata"], {"fileType": "txt"})
+
+    def test_events(self):
+        from fixture import seen_events
+
+        ev = {"id": "e1", "type": "knowledge.ingested", "occurredAt": "2026-09-26T10:51:18.5Z", "attempt": 2, "data": {"knowledgeId": "k1"}}
+        self.assertEqual(self.c.call("/v1/events", ev), (200, {"output": {}}))
+        self.assertIn(("e1", "knowledge.ingested", 2, 7, "k1"), seen_events)
+        status, body = self.c.call("/v1/events", dict(ev, type="knowledge.failed"))
+        self.assertEqual((status, body["error"]["retryable"]), (503, True))
+
+    def test_webhooks(self):
+        body = base64.b64encode(b'{"a": 1}').decode()
+        req = {"method": "POST", "path": "/issue", "headers": {"X-Signature": "ok"}, "body": body}
+        status, out = self.c.call("/v1/webhooks/inbox", req)
+        self.assertEqual(status, 200)
+        self.assertEqual(out["output"]["contentType"], "application/json")
+        self.assertEqual(json.loads(base64.b64decode(out["output"]["body"])), {"path": "/issue", "got": {"a": 1}, "tenant": 7})
+        status, out = self.c.call("/v1/webhooks/inbox", dict(req, headers={}))
+        self.assertEqual((out["output"]["status"], base64.b64decode(out["output"]["body"])), (401, b"bad signature"))
+        self.assertEqual(self.c.call("/v1/webhooks/nope", req)[0], 404)
 
     def test_ui_requests(self):
         req = {"mount": "pages/links", "method": "PUT", "path": "/links", "body": {"a": 1}, "role": "admin"}

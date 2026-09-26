@@ -23,6 +23,9 @@ const (
 	PointSettingsSections Point = "settingsSections"
 	// PointKBTabs contributes tabs of the knowledge base page.
 	PointKBTabs Point = "kbTabs"
+	// PointWebhooks contributes inbound URLs third parties call, one per
+	// workspace; WeKnora relays the calls to the plugin.
+	PointWebhooks Point = "webhooks"
 )
 
 // UIRoot is the package directory plugin pages live in. Only files under it
@@ -64,6 +67,7 @@ var points = []PointInfo{
 	{Point: PointPages, ThirdParty: true, Declarative: true},
 	{Point: PointSettingsSections, ThirdParty: true, Declarative: true},
 	{Point: PointKBTabs, ThirdParty: true, Declarative: true},
+	{Point: PointWebhooks, ThirdParty: true},
 }
 
 // Points returns every known extension point in display order.

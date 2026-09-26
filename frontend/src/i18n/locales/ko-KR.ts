@@ -5385,6 +5385,10 @@ export default {
   pluginCenter: {
     installed: '설치됨',
     configure: '설정',
+    webhooks: 'Webhook URL',
+    webhooksHint: '타사 서비스에 이 URL을 설정하면 이벤트가 이 플러그인으로 전송됩니다. 이 워크스페이스의 비밀이 포함되어 있으니 공개하지 마세요.',
+    copy: '복사',
+    webhookCopied: 'Webhook URL을 복사했습니다',
     configTitle: '{name} 설정',
     configDescription: '이 워크스페이스에서 플러그인을 사용하기 위한 설정(예: API 키). 비밀 값은 암호화되어 저장되며 다시 표시되지 않습니다.',
     configLoadFailed: '플러그인 설정을 불러오지 못했습니다',
@@ -5415,7 +5419,8 @@ export default {
       mcpServers: 'MCP 서버',
       pages: '페이지',
       settingsSections: '설정 섹션',
-      kbTabs: '지식 베이스 탭'
+      kbTabs: '지식 베이스 탭',
+      webhooks: 'Webhook'
     }
   },
   schemaForm: {

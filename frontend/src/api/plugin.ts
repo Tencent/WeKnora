@@ -17,6 +17,7 @@ export type ExtensionPoint =
   | 'pages'
   | 'settingsSections'
   | 'kbTabs'
+  | 'webhooks'
 
 export interface PluginContribution {
   id: string
@@ -135,6 +136,20 @@ export function pluginPageRequest(
   req: { mount: string; method: string; path: string; body?: unknown },
 ) {
   return post<{ data: PluginPageResponse }>(`/api/v1/plugins/${encodeURIComponent(pluginId)}/ui-request`, req)
+}
+
+/** A webhook of a plugin with this workspace's URL (Admin+: the URL is a secret). */
+export interface PluginWebhook {
+  id: string
+  name: LocalizedText
+  description?: LocalizedText
+  /** Path on this deployment; `url` is the full URL when the server knows its public address. */
+  path: string
+  url?: string
+}
+
+export function listPluginWebhooks(id: string) {
+  return get<{ data: PluginWebhook[] }>(`/api/v1/plugins/${encodeURIComponent(id)}/webhooks`)
 }
 
 /** The workspace's configuration of a plugin (Admin+). */

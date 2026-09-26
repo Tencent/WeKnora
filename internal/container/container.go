@@ -74,11 +74,13 @@ import (
 	"github.com/Tencent/WeKnora/internal/plugin/activate"
 	pluginbuiltin "github.com/Tencent/WeKnora/internal/plugin/builtin"
 	plugindriver "github.com/Tencent/WeKnora/internal/plugin/driver"
+	pluginevents "github.com/Tencent/WeKnora/internal/plugin/events"
 	pluginmanifest "github.com/Tencent/WeKnora/internal/plugin/manifest"
 	"github.com/Tencent/WeKnora/internal/plugin/reconcile"
 	pluginregistry "github.com/Tencent/WeKnora/internal/plugin/registry"
 	pluginremote "github.com/Tencent/WeKnora/internal/plugin/remote"
 	plugintenancy "github.com/Tencent/WeKnora/internal/plugin/tenancy"
+	pluginwebhook "github.com/Tencent/WeKnora/internal/plugin/webhook"
 	"github.com/Tencent/WeKnora/internal/router"
 	"github.com/Tencent/WeKnora/internal/sandbox"
 	"github.com/Tencent/WeKnora/internal/storageallowlist"
@@ -150,7 +152,10 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(repository.NewTenantInvitationRepository))
 	must(container.Provide(repository.NewAuditLogRepository))
 	must(container.Provide(repository.NewKnowledgeBaseRepository))
-	must(container.Provide(repository.NewKnowledgeRepository))
+	// Documents reaching completed or failed raise plugin events.
+	must(container.Provide(func(db *gorm.DB) interfaces.KnowledgeRepository {
+		return pluginevents.WatchKnowledge(repository.NewKnowledgeRepository(db))
+	}))
 	must(container.Provide(repository.NewKnowledgeSpanRepository))
 	must(container.Provide(repository.NewChunkRepository))
 	must(container.Provide(repository.NewKnowledgeTagRepository))
@@ -178,6 +183,13 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(activate.NewConnectors))
 	must(container.Provide(activate.NewParsers))
 	must(container.Provide(activate.NewUIPages))
+	must(container.Provide(func(
+		reg *pluginregistry.Registry, t *plugintenancy.Service, enq interfaces.TaskEnqueuer, iv *activate.Invoker,
+	) *pluginevents.Dispatcher {
+		return pluginevents.NewDispatcher(reg, t, enq, iv)
+	}))
+	must(container.Provide(func(d *pluginevents.Dispatcher) interfaces.TaskHandler { return d },
+		dig.Name("pluginEvents")))
 	must(container.Provide(newMCPServiceRepository))
 	must(container.Provide(repository.NewMCPToolApprovalRepository))
 	must(container.Provide(repository.NewMCPOAuthRepository))
@@ -613,6 +625,8 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(handler.NewPluginHandler))
 	must(container.Provide(handler.NewPluginAdminHandler))
 	must(container.Provide(handler.NewPluginUIHandler))
+	must(container.Provide(pluginwebhook.NewTokensFromEnv))
+	must(container.Provide(handler.NewPluginWebhookHandler))
 	logger.Debugf(ctx, "[Container] HTTP handlers registered")
 
 	// Wire the chat package's local image resolver so multimodal chat can read

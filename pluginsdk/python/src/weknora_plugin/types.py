@@ -263,3 +263,52 @@ class UIResponse:
 
     body: Any = None
     status: int = 200
+
+
+# Event types a plugin can subscribe to in permissions.events.
+EVENT_KNOWLEDGE_INGESTED = "knowledge.ingested"
+EVENT_KNOWLEDGE_FAILED = "knowledge.failed"
+EVENT_KNOWLEDGE_DELETED = "knowledge.deleted"
+EVENT_CHAT_ANSWERED = "chat.answered"
+
+
+@dataclass
+class EventDelivery:
+    """One event. Deliveries repeat (at least once): be idempotent on id.
+    data is the event's payload as a dict (see the protocol for each type)."""
+
+    id: str = ""
+    type: str = ""
+    occurred_at: Optional[datetime] = None
+    attempt: int = 1
+    data: Any = None
+
+
+@dataclass
+class WebhookRequest:
+    """An inbound call to one of the plugin's webhooks. body is the raw
+    bytes; headers carry one value each."""
+
+    method: str = ""
+    path: str = "/"
+    query: str = ""
+    headers: Dict[str, str] = field(default_factory=dict)
+    body: bytes = b""
+
+    def json(self) -> Any:
+        import json as _json
+
+        return _json.loads(self.body or b"null")
+
+
+@dataclass
+class WebhookResponse:
+    """What the caller receives. A str body is sent as UTF-8."""
+
+    status: int = 200
+    content_type: str = ""
+    body: Optional[Union[bytes, str]] = None
+
+    def __post_init__(self) -> None:
+        if isinstance(self.body, str):
+            self.body = self.body.encode()

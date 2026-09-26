@@ -104,6 +104,53 @@ p.UI(func(ctx context.Context, call *pluginsdk.Call, req pluginapi.UIRequest) (*
 WeKnora refuses a caller below the page's `minRole` before the call.
 The handler can check `req.Role` for anything finer.
 
+## Events
+
+List the events a plugin wants in `permissions.events`. The administrator
+sees them at install.
+
+| Event | When | Data |
+| --- | --- | --- |
+| `knowledge.ingested` | A document finished processing | `KnowledgeEventData` |
+| `knowledge.failed` | A document failed for good | `KnowledgeEventData` with `error` |
+| `knowledge.deleted` | A document was deleted | `KnowledgeEventData` |
+| `chat.answered` | An answer completed | `ChatEventData`, including the question and answer |
+
+```go
+p.OnEvent(func(ctx context.Context, call *pluginsdk.Call, ev pluginapi.EventDelivery) error {
+	// ev.ID stays the same across retries: deduplicate on it.
+	return nil
+})
+```
+
+Delivery is at least once, in the background:
+- A workspace receives events only while it has the plugin switched on.
+- A retryable error (`unavailable`, `rate_limited`) or a timeout brings
+  the event back later with the same `ID` and a higher `Attempt`.
+- Any other error drops the event.
+- Ignore types you do not know: the list only grows.
+
+## Webhooks
+
+`contributes.webhooks` gives each workspace a secret URL per webhook,
+under `/api/v1/plugin-callbacks/`. Workspace admins copy it from the plugin
+center, and it is in `call.Context.Webhooks` when WeKnora knows its
+public address.
+
+```go
+p.Webhook("events", func(ctx context.Context, call *pluginsdk.Call, req pluginapi.WebhookRequest) (*pluginapi.WebhookResponse, error) {
+	// call is the workspace the URL belongs to; verify the sender with its configuration.
+	return &pluginapi.WebhookResponse{Status: 204}, nil
+})
+```
+
+WeKnora answers 404 unless all of these hold:
+- the URL is genuine;
+- the webhook exists;
+- the workspace has the plugin on.
+
+Bodies are limited to 1 MB, with 20 calls a second per URL.
+
 ## Calling back into WeKnora (Host API)
 
 A plugin that declares `permissions.hostApi` gets a short-lived token with
@@ -164,6 +211,7 @@ Complete plugins with their `package.sh`:
 - `examples/plugins/subtitles`: a parser using the Host API.
 - `examples/plugins/notebooks`: a parser written in Python.
 - `examples/plugins/links`: pages (toolbox, settings, knowledge base tab), in Python.
+- `examples/plugins/activity`: events, a webhook and a page, in Python.
 
 ## Testing
 

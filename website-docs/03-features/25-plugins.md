@@ -104,6 +104,28 @@ Helm 设置 `pluginHost.enabled=true` 即可。使用本地存储（`STORAGE_TYP
 - **通信**：页面只能经 [`@weknora/plugin-ui`](https://github.com/Tencent/WeKnora/tree/main/packages/plugin-ui) 桥与 WeKnora 通信，由 WeKnora 代发请求给插件后端，或者弹提示、确认框、跳转页面。
 - **鉴权**：每次请求，WeKnora 都校验空间已启用该插件、用户满足页面的最低角色，并把用户角色一并交给插件后端。
 
+## 事件与 Webhook
+
+**事件**：插件在 `permissions.events` 中声明要订阅的事件，安装时由系统管理员审阅。
+
+| 事件 | 时机 |
+| --- | --- |
+| `knowledge.ingested` | 文档处理完成、可被检索 |
+| `knowledge.failed` | 文档处理最终失败 |
+| `knowledge.deleted` | 文档被删除 |
+| `chat.answered` | 一次回答完成，含问题与回答内容 |
+
+- 只有启用了该插件的空间才会向它投递事件。
+- 事件经后台任务队列（有 Redis 时为 asynq）异步投递，至少一次。
+- 插件返回可重试错误时，同一事件会以相同 ID 重新投递，最多 10 次。
+
+**Webhook**：插件在 `contributes.webhooks` 中声明入站地址。
+
+- 每个空间得到各自的秘密地址 `/api/v1/plugin-callbacks/...`，空间管理员可在「设置 → 插件」的「配置」中复制。
+- 第三方系统调用该地址时，WeKnora 先校验地址、确认空间已启用插件，再把请求转给插件。
+- 插件自行用空间配置里的密钥校验调用方。
+- 设置 `APP_EXTERNAL_URL` 后，插件还能拿到完整地址，自动向第三方注册。
+
 ## 开发插件
 
 - **Go**：[pluginsdk](https://github.com/Tencent/WeKnora/tree/main/pluginsdk)，含协议定义、SDK、客户端和一致性测试工具 `weknora-plugin-conformance`。
@@ -112,6 +134,7 @@ Helm 设置 `pluginHost.enabled=true` 即可。使用本地存储（`STORAGE_TYP
   - `rss`：数据源连接器，Go；
   - `subtitles`：文档解析器，Go，使用 Host API；
   - `notebooks`：Jupyter 笔记本解析器，Python；
-  - `links`：带三种页面的团队链接插件，Python。
+  - `links`：带三种页面的团队链接插件，Python；
+  - `activity`：订阅事件、接收 Webhook 的空间动态插件，Python。
 
 同一个插件既可以打包成 `host` 插件由 WeKnora 运行，也可以作为 `remote` 服务独立部署，代码不用改。

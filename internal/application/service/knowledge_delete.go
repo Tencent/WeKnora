@@ -10,8 +10,10 @@ import (
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
+	pluginevents "github.com/Tencent/WeKnora/internal/plugin/events"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	"github.com/Tencent/WeKnora/pluginsdk/pluginapi"
 	"github.com/hibiken/asynq"
 	"golang.org/x/sync/errgroup"
 )
@@ -604,6 +606,10 @@ func (s *knowledgeService) executeKnowledgeDelete(plan *knowledgeDeletePlan, sin
 		for _, knowledge := range knowledges {
 			knowledgeIDs = append(knowledgeIDs, knowledge.ID)
 			titles = append(titles, knowledge.Title)
+			pluginevents.Publish(ctx, tenantInfo.ID, pluginapi.EventKnowledgeDeleted, pluginapi.KnowledgeEventData{
+				KnowledgeBaseID: kbID, KnowledgeID: knowledge.ID, Title: knowledge.Title,
+				FileName: knowledge.FileName, FileType: knowledge.FileType, Source: knowledge.Source,
+			})
 		}
 		details := map[string]any{"count": len(knowledgeIDs)}
 		if len(knowledgeIDs) <= 20 {

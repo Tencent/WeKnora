@@ -63,3 +63,14 @@ test('pluginSkillChoices lists skills of enabled plugins with their install sour
   assert.equal(zh?.name, '分诊')
   assert.equal(zh?.description, 'Sort issues')
 })
+
+test('canConfigure covers webhooks, and webhookUrl prefers the server URL', async () => {
+  const { canConfigure, hasWebhooks, webhookUrl } = await import('./pluginCenterState')
+  const bare = plugin('acme.bare', 'Bare', {}).manifest
+  assert.equal(canConfigure(bare), false)
+  const hooks = plugin('acme.hooks', 'Hooks', { webhooks: [{ id: 'inbox', name: { default: 'Inbox' } }] }).manifest
+  assert.equal(hasWebhooks(hooks), true)
+  assert.equal(canConfigure(hooks), true)
+  assert.equal(webhookUrl({ path: '/api/v1/plugin-callbacks/a/b/c' }, 'https://x.example'), 'https://x.example/api/v1/plugin-callbacks/a/b/c')
+  assert.equal(webhookUrl({ path: '/p', url: 'https://public.example/p' }, 'https://x.example'), 'https://public.example/p')
+})

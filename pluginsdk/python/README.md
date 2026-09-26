@@ -77,6 +77,18 @@ def ui(call, req: UIRequest):
 The pages themselves are HTML under `ui/` that use
 [`@weknora/plugin-ui`](../../packages/plugin-ui).
 
+**Events and webhooks.**
+
+```python
+@plugin.on_event
+def on_event(call, ev: EventDelivery):   # permissions.events; dedupe on ev.id
+    ...
+
+@plugin.webhook("notes")                 # contributes.webhooks
+def notes(call, req: WebhookRequest):    # req.headers, req.body, req.json()
+    return WebhookResponse(status=204)
+```
+
 ## Errors
 
 Raise `PluginError(ErrorCode.X, "message")` to choose what WeKnora sees:

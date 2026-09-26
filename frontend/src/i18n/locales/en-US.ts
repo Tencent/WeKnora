@@ -2867,6 +2867,10 @@ export default {
   pluginCenter: {
     installed: 'Installed',
     configure: 'Configure',
+    webhooks: 'Webhook URLs',
+    webhooksHint: 'Set these URLs up in the third-party service so it sends its events to this plugin. They carry this workspace\'s secret; keep them private.',
+    copy: 'Copy',
+    webhookCopied: 'Webhook URL copied',
     configTitle: 'Configure {name}',
     configDescription: 'This workspace\'s settings for the plugin, such as its API key. Secrets are stored encrypted and never shown again.',
     configLoadFailed: 'Failed to load the plugin configuration',
@@ -2897,7 +2901,8 @@ export default {
       mcpServers: 'MCP servers',
       pages: 'Pages',
       settingsSections: 'Settings sections',
-      kbTabs: 'Knowledge base tabs'
+      kbTabs: 'Knowledge base tabs',
+      webhooks: 'Webhooks'
     }
   },
   schemaForm: {

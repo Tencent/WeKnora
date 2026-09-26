@@ -341,6 +341,9 @@ func CheckServedManifest(want *manifest.Manifest, got *pluginapi.Manifest) error
 	if got.APIVersion != pluginapi.APIVersion {
 		return fmt.Errorf("plugin speaks %q, this WeKnora speaks %q", got.APIVersion, pluginapi.APIVersion)
 	}
+	if len(want.Permissions.Events) > 0 && len(got.Contributes["events"]) == 0 {
+		return errors.New("plugin.yaml subscribes to events but the plugin handles none")
+	}
 	for point, contribs := range want.Contributes {
 		if info, ok := manifest.LookupPoint(point); !ok || info.Declarative {
 			continue

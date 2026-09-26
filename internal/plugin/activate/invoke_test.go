@@ -6,6 +6,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/plugin/hostapi"
 	"github.com/Tencent/WeKnora/internal/plugin/manifest"
+	"github.com/Tencent/WeKnora/internal/plugin/webhook"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -44,5 +45,23 @@ func TestEnvelopeCarriesHostAccessOnlyForGrantedPlugins(t *testing.T) {
 	if env, _ := iv.Envelope(ctx, &remote, nil); env.Context.Host == nil ||
 		env.Context.Host.URL != "https://weknora.example.com" {
 		t.Fatalf("remote envelope = %+v", env.Context)
+	}
+}
+
+func TestEnvelopeCarriesWebhookURLs(t *testing.T) {
+	iv := NewInvoker(fakeClients{})
+	m := &manifest.Manifest{ID: "acme.hooks", Contributes: manifest.Contributions{
+		manifest.PointWebhooks: {{ID: "inbox"}},
+	}}
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(7))
+	if env, _ := iv.Envelope(ctx, m, nil); env.Context.Webhooks != nil {
+		t.Fatal("no URLs without a public address")
+	}
+	tokens := webhook.NewTokens([]byte("k"))
+	iv.SetWebhooks(tokens, "https://weknora.example.com")
+	env, err := iv.Envelope(ctx, m, nil)
+	want := "https://weknora.example.com" + tokens.Path("acme.hooks", "inbox", 7)
+	if err != nil || env.Context.Webhooks["inbox"] != want {
+		t.Fatalf("webhooks = %v, %v", env.Context.Webhooks, err)
 	}
 }

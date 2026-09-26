@@ -64,6 +64,27 @@ func (s *Service) List(ctx context.Context, tenantID uint64) ([]TenantPlugin, er
 	return out, nil
 }
 
+// PluginEnabled reports whether a tenant has a plugin switched on. Unlike
+// EnabledFilter it fails closed: it decides whether workspace data goes to
+// the plugin.
+func (s *Service) PluginEnabled(ctx context.Context, tenantID uint64, pluginID string) (bool, error) {
+	m, ok := s.registry.Plugin(pluginID)
+	if !ok {
+		return false, nil
+	}
+	if m.Required {
+		return true, nil
+	}
+	row, err := s.repo.Get(ctx, tenantID, pluginID)
+	if err != nil {
+		return false, err
+	}
+	if row == nil {
+		return enabledByDefault(m), nil
+	}
+	return row.Enabled, nil
+}
+
 // SetEnabled turns a plugin on or off for a tenant.
 func (s *Service) SetEnabled(
 	ctx context.Context, tenantID uint64, pluginID string, enabled bool, updatedBy string,

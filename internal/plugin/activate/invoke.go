@@ -8,6 +8,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/plugin/install"
 	"github.com/Tencent/WeKnora/internal/plugin/manifest"
 	"github.com/Tencent/WeKnora/internal/plugin/tenancy"
+	"github.com/Tencent/WeKnora/internal/plugin/webhook"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/Tencent/WeKnora/pluginsdk/client"
@@ -37,6 +38,17 @@ type Invoker struct {
 	tokens        TokenIssuer
 	hostURL       string
 	publicHostURL string
+	// webhooks and publicBase give plugins their workspace's webhook URLs.
+	webhooks   *webhook.Tokens
+	publicBase string
+}
+
+// SetWebhooks lets calls carry the workspace's webhook URLs, when WeKnora's
+// public address (publicBase) is known.
+func (iv *Invoker) SetWebhooks(tokens *webhook.Tokens, publicBase string) {
+	iv.mu.Lock()
+	iv.webhooks, iv.publicBase = tokens, publicBase
+	iv.mu.Unlock()
 }
 
 // TokenIssuer signs the Host API token of one call.
@@ -111,7 +123,16 @@ func (iv *Invoker) Envelope(
 	if !iv.clients.OnThisNode(m.ID) {
 		hostURL = iv.publicHostURL
 	}
+	hooks, publicBase := iv.webhooks, iv.publicBase
 	iv.mu.RUnlock()
+	if hooks != nil && publicBase != "" && env.Context.TenantID != 0 {
+		for _, c := range m.Contributes[manifest.PointWebhooks] {
+			if env.Context.Webhooks == nil {
+				env.Context.Webhooks = map[string]string{}
+			}
+			env.Context.Webhooks[c.ID] = publicBase + hooks.Path(m.ID, c.ID, env.Context.TenantID)
+		}
+	}
 	if tokens != nil && hostURL != "" && env.Context.TenantID != 0 && len(m.Permissions.HostAPI) > 0 {
 		token, _, err := tokens.Issue(m.ID, m.Version, env.Context.TenantID, m.Permissions.HostAPI)
 		if err != nil {

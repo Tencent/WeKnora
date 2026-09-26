@@ -5387,6 +5387,10 @@ export default {
   pluginCenter: {
     installed: '已安装',
     configure: '配置',
+    webhooks: 'Webhook 地址',
+    webhooksHint: '在第三方系统里配置这些地址，它们会把事件推送给本插件。地址包含本空间的密钥，请勿公开。',
+    copy: '复制',
+    webhookCopied: '已复制 Webhook 地址',
     configTitle: '配置 {name}',
     configDescription: '本空间使用该插件时的配置，例如 API 密钥。密钥加密保存，不会再次显示。',
     configLoadFailed: '加载插件配置失败',
@@ -5417,7 +5421,8 @@ export default {
       mcpServers: 'MCP 服务',
       pages: '页面',
       settingsSections: '设置页',
-      kbTabs: '知识库页签'
+      kbTabs: '知识库页签',
+      webhooks: 'Webhook'
     }
   },
   schemaForm: {

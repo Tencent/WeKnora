@@ -6,11 +6,27 @@ import { localizedText } from '../../utils/localizedText'
 /** Extension points in the order the plugin center shows them. */
 export const EXTENSION_POINTS: ExtensionPoint[] = [
   'modelVendors', 'connectors', 'imChannels', 'webSearch', 'tools', 'parsers', 'skills', 'mcpServers',
+  'pages', 'settingsSections', 'kbTabs', 'webhooks',
 ]
 
 /** Whether the workspace can configure the plugin (it declares config.tenant). */
 export function hasTenantConfig(m: PluginManifest): boolean {
   return !!m.config?.tenantSchema?.properties && Object.keys(m.config.tenantSchema.properties).length > 0
+}
+
+/** Whether the plugin has webhooks, whose URLs admins set up elsewhere. */
+export function hasWebhooks(m: PluginManifest): boolean {
+  return (m.contributes?.webhooks?.length ?? 0) > 0
+}
+
+/** Whether the plugin's configuration drawer has anything to show. */
+export function canConfigure(m: PluginManifest): boolean {
+  return hasTenantConfig(m) || hasWebhooks(m)
+}
+
+/** A webhook's full URL: the server's, or this page's origin with the path. */
+export function webhookUrl(hook: { path: string; url?: string }, origin: string): string {
+  return hook.url || `${origin}${hook.path}`
 }
 
 /**

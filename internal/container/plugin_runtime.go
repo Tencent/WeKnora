@@ -17,6 +17,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/handler"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/plugin/activate"
+	pluginevents "github.com/Tencent/WeKnora/internal/plugin/events"
 	"github.com/Tencent/WeKnora/internal/plugin/host"
 	"github.com/Tencent/WeKnora/internal/plugin/hostapi"
 	"github.com/Tencent/WeKnora/internal/plugin/hostpool"
@@ -26,6 +27,7 @@ import (
 	pluginregistry "github.com/Tencent/WeKnora/internal/plugin/registry"
 	"github.com/Tencent/WeKnora/internal/plugin/remote"
 	plugintenancy "github.com/Tencent/WeKnora/internal/plugin/tenancy"
+	"github.com/Tencent/WeKnora/internal/plugin/webhook"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/Tencent/WeKnora/pluginsdk/client"
 )
@@ -71,7 +73,9 @@ func (a pluginActivators) list() []reconcile.Activator {
 // (remote, on a plugin host) only through WEKNORA_PLUGIN_HOST_API_URL.
 func newPluginHostAPI(
 	cfg *config.Config, iv *activate.Invoker, repo interfaces.PluginKVRepository, cleaner interfaces.ResourceCleaner,
+	hooks *webhook.Tokens,
 ) *hostapi.Handler {
+	iv.SetWebhooks(hooks, webhook.PublicBase())
 	issuer := hostapi.NewIssuerFromEnv()
 	// Plugins on this node always use loopback; the public address is for
 	// plugins elsewhere (remote, on a plugin host), which reach this node
@@ -211,8 +215,9 @@ func newPluginInstaller(
 // traffic, then keeps this node in step with the others.
 func startPluginReconciler(
 	r *reconcile.Reconciler, hostManager *host.Manager, remoteManager *remote.Manager,
-	cleaner interfaces.ResourceCleaner,
+	events *pluginevents.Dispatcher, cleaner interfaces.ResourceCleaner,
 ) {
+	pluginevents.SetDefault(events)
 	if kinds := hostManager.Kinds(); len(kinds) > 0 {
 		logger.Infof(context.Background(), "[plugin] this node runs %s host plugins", strings.Join(kinds, ", "))
 	}

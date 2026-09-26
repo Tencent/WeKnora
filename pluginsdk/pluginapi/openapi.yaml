@@ -218,6 +218,56 @@ paths:
                 required: [output]
                 properties: { output: { $ref: "#/components/schemas/UIResponse" } }
         default: { $ref: "#/components/responses/Error" }
+  /v1/events:
+    post:
+      summary: Receive an event the plugin subscribed to (permissions.events)
+      description: |
+        At least once: a retryable error or a timeout brings the same event
+        back later with the same id and a higher attempt, so handle it
+        idempotently. A non-retryable error drops it. Ignore unknown types.
+        The manifest lists "events": ["handler"] under contributes when the
+        plugin handles events.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/Envelope"
+                - properties: { input: { $ref: "#/components/schemas/EventDelivery" } }
+      responses:
+        "200":
+          description: Handled
+          content:
+            application/json:
+              schema: { type: object, required: [output], properties: { output: { type: object } } }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/webhooks/{id}:
+    post:
+      summary: Answer an inbound call to webhook id (contributes.webhooks)
+      description: |
+        Third parties call a secret per-workspace URL of WeKnora; WeKnora
+        relays the call here with that workspace's envelope. Verify the
+        sender (e.g. a signature header) with the workspace configuration.
+      parameters: [{ $ref: "#/components/parameters/ContributionID" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/Envelope"
+                - properties: { input: { $ref: "#/components/schemas/WebhookRequest" } }
+      responses:
+        "200":
+          description: The answer to the caller
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [output]
+                properties: { output: { $ref: "#/components/schemas/WebhookResponse" } }
+        default: { $ref: "#/components/responses/Error" }
 components:
   securitySchemes:
     hostToken: { type: http, scheme: bearer }
@@ -269,6 +319,10 @@ components:
               properties:
                 url: { type: string }
                 token: { type: string }
+            webhooks:
+              type: object
+              description: This workspace's webhook URLs by webhook ID, when WeKnora knows its public address
+              additionalProperties: { type: string }
         config:
           type: object
           description: Configuration scopes, secrets decrypted, never merged
@@ -375,6 +429,54 @@ components:
               mimeType: { type: string }
               data: { type: string, contentEncoding: base64 }
         metadata: { type: object, additionalProperties: { type: string } }
+    EventDelivery:
+      type: object
+      required: [id, type, occurredAt, attempt]
+      properties:
+        id: { type: string, description: Idempotency key; kept across retries }
+        type: { enum: [knowledge.ingested, knowledge.failed, knowledge.deleted, chat.answered] }
+        occurredAt: { type: string, format: date-time }
+        attempt: { type: integer, minimum: 1 }
+        data:
+          oneOf:
+            - $ref: "#/components/schemas/KnowledgeEventData"
+            - $ref: "#/components/schemas/ChatEventData"
+    KnowledgeEventData:
+      type: object
+      required: [knowledgeBaseId, knowledgeId]
+      properties:
+        knowledgeBaseId: { type: string }
+        knowledgeId: { type: string }
+        title: { type: string }
+        fileName: { type: string }
+        fileType: { type: string }
+        source: { type: string }
+        error: { type: string }
+    ChatEventData:
+      type: object
+      required: [sessionId, messageId, answer]
+      properties:
+        sessionId: { type: string }
+        messageId: { type: string }
+        agentId: { type: string }
+        userId: { type: string }
+        question: { type: string }
+        answer: { type: string }
+    WebhookRequest:
+      type: object
+      required: [method, path]
+      properties:
+        method: { type: string }
+        path: { type: string }
+        query: { type: string }
+        headers: { type: object, additionalProperties: { type: string } }
+        body: { type: string, contentEncoding: base64 }
+    WebhookResponse:
+      type: object
+      properties:
+        status: { type: integer }
+        contentType: { type: string }
+        body: { type: string, contentEncoding: base64 }
     UIRequest:
       type: object
       required: [mount, method, path]
