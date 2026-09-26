@@ -19,7 +19,7 @@ type IMChannel struct {
 	ID              string         `json:"id"          gorm:"type:varchar(36);primaryKey;default:uuid_generate_v4()"`
 	TenantID        uint64         `json:"tenant_id"   gorm:"not null;index:idx_im_channels_tenant"`
 	AgentID         string         `json:"agent_id"    gorm:"type:varchar(36);not null;index:idx_im_channels_agent"`
-	Platform        string         `json:"platform"    gorm:"type:varchar(20);not null"`
+	Platform        string         `json:"platform"    gorm:"type:varchar(160);not null"`
 	Name            string         `json:"name"        gorm:"type:varchar(255);not null;default:''"`
 	Enabled         bool           `json:"enabled"     gorm:"not null;default:true"`
 	Mode            string         `json:"mode"        gorm:"type:varchar(20);not null;default:'websocket'"`
@@ -242,7 +242,7 @@ func (ch *IMChannel) computeBotIdentity() string {
 // This allows the IM integration to maintain conversation continuity.
 type ChannelSession struct {
 	ID          string         `json:"id"            gorm:"type:varchar(36);primaryKey;default:uuid_generate_v4()"`
-	Platform    string         `json:"platform"      gorm:"type:varchar(20);not null"`
+	Platform    string         `json:"platform"      gorm:"type:varchar(160);not null"`
 	UserID      string         `json:"user_id"       gorm:"type:varchar(128);not null"`
 	ChatID      string         `json:"chat_id"       gorm:"type:varchar(128);not null;default:''"`
 	ThreadID    string         `json:"thread_id"     gorm:"type:varchar(128);not null;default:''"`

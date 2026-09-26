@@ -231,6 +231,22 @@ class ParseOutput:
 
 
 @dataclass
+class IMMessage:
+    """A user's message in a chat. chat_id is the conversation (the user
+    for direct chats); chat_type is "direct" or "group"; extra carries what
+    the plugin needs to reply."""
+
+    user_id: str = ""
+    chat_id: str = ""
+    content: str = ""
+    user_name: str = ""
+    chat_type: str = "direct"
+    message_id: str = ""
+    thread_id: str = ""
+    extra: Dict[str, str] = field(default_factory=dict)
+
+
+@dataclass
 class ChunkInput:
     """A document (Markdown) to cut into chunks, with the knowledge base's
     chunking settings as hints. Sizes count characters."""

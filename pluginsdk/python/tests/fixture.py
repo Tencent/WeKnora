@@ -11,6 +11,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 
 from weknora_plugin import (  # noqa: E402
     ChunkSpan,
+    IMMessage,
     Cursor,
     ErrorCode,
     FetchedItem,
@@ -76,6 +77,21 @@ def drop_secrets(call, inp):
 @plugin.hook("guard", "answer")
 def footer(call, inp):
     return {"append": "_checked_"}
+
+
+@plugin.im_channel("chat")
+class Chat:
+    def __init__(self):
+        self.sent = []
+
+    def callback(self, call, req):
+        body = req.json()
+        if "challenge" in body:
+            return WebhookResponse(content_type="text/plain", body=body["challenge"])
+        return IMMessage(user_id=body["from"], chat_id="c1", content=body["text"], chat_type="group")
+
+    def send(self, call, message, content):
+        self.sent.append((message.user_id, content, call.instance.get("token")))
 
 
 @plugin.connector("notes")

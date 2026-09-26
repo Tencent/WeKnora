@@ -65,6 +65,7 @@ type Plugin struct {
 	parsers    map[string]Parser
 	chunkers   map[string]Chunker
 	hooks      map[string]PipelineHook
+	imChannels map[string]IMChannel
 	ui         UIHandler
 	events     EventHandler
 	webhooks   map[string]WebhookHandler
@@ -86,6 +87,7 @@ func New(info Info) *Plugin {
 		parsers:         map[string]Parser{},
 		chunkers:        map[string]Chunker{},
 		hooks:           map[string]PipelineHook{},
+		imChannels:      map[string]IMChannel{},
 		webhooks:        map[string]WebhookHandler{},
 		options:         map[string]OptionsHandler{},
 		mcp:             map[string]*mcpServer{},
@@ -117,6 +119,7 @@ func (p *Plugin) Manifest() pluginapi.Manifest {
 	add("parsers", keys(p.parsers))
 	add("chunkers", keys(p.chunkers))
 	add("pipelineHooks", keys(p.hooks))
+	add("imChannels", keys(p.imChannels))
 	add("webhooks", keys(p.webhooks))
 	add("options", keys(p.options))
 	add("mcpServers", keys(p.mcp))
@@ -163,6 +166,7 @@ func (p *Plugin) Handler() http.Handler {
 	p.routeParsers(mux)
 	p.routeChunkers(mux)
 	p.routeHooks(mux)
+	p.routeIM(mux)
 	p.routeUI(mux)
 	p.routeEvents(mux)
 	p.routeOptions(mux)

@@ -260,6 +260,63 @@ paths:
                       - type: object
                         properties: { append: { type: string, description: Markdown added after the answer } }
         default: { $ref: "#/components/responses/Error" }
+  /v1/im/{id}/callback:
+    post:
+      summary: Handle a request an IM platform sent to a channel's callback URL
+      description: |
+        For contributes.imChannels. config.instance holds the channel's
+        credentials. Verify the request, answer what the platform expects
+        (a verification challenge, an ack) and, when it carries a user's
+        message, return it: WeKnora answers it and calls send.
+      parameters: [{ $ref: "#/components/parameters/ContributionID" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/Envelope"
+                - properties: { input: { $ref: "#/components/schemas/WebhookRequest" } }
+      responses:
+        "200":
+          description: The answer and the message
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [output]
+                properties:
+                  output:
+                    type: object
+                    properties:
+                      response: { $ref: "#/components/schemas/WebhookResponse" }
+                      message: { $ref: "#/components/schemas/IMMessage" }
+        default: { $ref: "#/components/responses/Error" }
+  /v1/im/{id}/send:
+    post:
+      summary: Send WeKnora's reply to a message
+      parameters: [{ $ref: "#/components/parameters/ContributionID" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/Envelope"
+                - properties:
+                    input:
+                      type: object
+                      required: [message, content]
+                      properties:
+                        message: { $ref: "#/components/schemas/IMMessage" }
+                        content: { type: string, description: The reply, Markdown }
+      responses:
+        "200":
+          description: Sent
+          content:
+            application/json:
+              schema: { type: object, required: [output], properties: { output: { type: object } } }
+        default: { $ref: "#/components/responses/Error" }
   /v1/ui/request:
     post:
       summary: Answer a request from one of the plugin's pages
@@ -612,6 +669,18 @@ components:
         query: { type: string }
         answer: { type: string }
         sessionId: { type: string }
+    IMMessage:
+      type: object
+      required: [userId, chatId, content]
+      properties:
+        userId: { type: string }
+        userName: { type: string }
+        chatId: { type: string, description: The conversation (the user for direct chats) }
+        chatType: { enum: [direct, group] }
+        content: { type: string }
+        messageId: { type: string }
+        threadId: { type: string }
+        extra: { type: object, additionalProperties: { type: string }, description: What the plugin needs to reply }
     OptionsInput:
       type: object
       required: [field, scope]

@@ -77,8 +77,8 @@ func TestValidateReportsEveryProblem(t *testing.T) {
 		Version:       "1.0",
 		Runtime:       Runtime{Type: RuntimeHost},
 		Contributes: Contributions{
-			"widgets":       {{ID: "x", Name: Text("X", nil)}},
-			PointIMChannels: {{ID: "im", Name: Text("IM", nil)}},
+			"widgets":  {{ID: "x", Name: Text("X", nil)}},
+			PointTools: {{ID: "t", Name: Text("T", nil)}},
 			PointConnectors: {
 				{ID: "dup", Name: Text("A", nil), Aliases: []string{"old"}},
 				{ID: "dup"},
@@ -98,7 +98,7 @@ func TestValidateReportsEveryProblem(t *testing.T) {
 		"runtime.entry",
 		"apiVersion must be",
 		"contributes.widgets is not a known extension point",
-		"contributes.imChannels is not open to third-party plugins yet",
+		"contributes.tools is not open to third-party plugins yet",
 		`"dup" is declared twice`,
 		"contributes.connectors[1].name is required",
 		"aliases may only be declared by builtin plugins",

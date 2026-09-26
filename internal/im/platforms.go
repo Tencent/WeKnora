@@ -56,6 +56,9 @@ func LookupPlatformInfo(id string) PlatformInfo {
 	if build, ok := platformInfos[id]; ok {
 		return build()
 	}
+	if info, _, ok := pluginPlatform(id); ok {
+		return info
+	}
 	return PlatformInfo{ID: id, Name: id, Order: 1000, Modes: []string{ModeWebSocket}}
 }
 
@@ -84,13 +87,14 @@ func (s *Service) Platforms() []string {
 }
 
 // PlatformInfos returns the metadata of every registered platform in display
-// order.
+// order, plugins' after the builtins.
 func (s *Service) PlatformInfos() []PlatformInfo {
 	ids := s.Platforms()
 	out := make([]PlatformInfo, 0, len(ids))
 	for _, id := range ids {
 		out = append(out, LookupPlatformInfo(id))
 	}
+	out = append(out, listPluginPlatforms()...)
 	sort.SliceStable(out, func(i, j int) bool { return out[i].Order < out[j].Order })
 	return out
 }

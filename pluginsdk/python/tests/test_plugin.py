@@ -82,6 +82,7 @@ class PluginTest(unittest.TestCase):
                     "parsers": ["upper"],
                     "chunkers": ["paragraphs"],
                     "pipelineHooks": ["guard"],
+                    "imChannels": ["chat"],
                     "webhooks": ["inbox"],
                     "options": ["projects"],
                     "mcpServers": ["issues"],
@@ -146,6 +147,22 @@ class PluginTest(unittest.TestCase):
         self.assertEqual(body["output"], {"append": "_checked_"})
         status, body = self.c.call("/v1/hooks/guard/rewriteQuery", {"query": "q", "rewrittenQuery": "q"})
         self.assertEqual((status, body["error"]["code"]), (404, "not_found"))
+
+    def test_im_channel(self):
+        from fixture import plugin
+
+        def req(body):
+            return {"method": "POST", "path": "/", "body": base64.b64encode(json.dumps(body).encode()).decode()}
+
+        status, body = self.c.call("/v1/im/chat/callback", req({"challenge": "abc"}))
+        self.assertEqual(status, 200, body)
+        self.assertEqual(body["output"]["response"]["body"], base64.b64encode(b"abc").decode())
+        status, body = self.c.call("/v1/im/chat/callback", req({"from": "u1", "text": "hi"}))
+        msg = body["output"]["message"]
+        self.assertEqual((msg["userId"], msg["content"], msg["chatType"]), ("u1", "hi", "group"))
+        status, body = self.c.call("/v1/im/chat/send", {"message": msg, "content": "hello"}, {"instance": {"token": "t"}})
+        self.assertEqual((status, body.get("output")), (200, {}), body)
+        self.assertEqual(plugin._im["chat"].sent, [("u1", "hello", "t")])
 
     def test_events(self):
         from fixture import seen_events

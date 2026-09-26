@@ -138,6 +138,35 @@ contributes:
 In Python: `@plugin.hook("guard", "filterResults")` on `fn(call, input)`
 returning `{"keep": [...]}`.
 
+## IM channels
+
+An IM channel brings a chat platform that calls back over HTTP. WeKnora
+relays each request to the channel's callback URL to `Callback`, with the
+channel's credentials in `call.Config.Instance`; return what the platform
+should receive and the user's message, if there is one. WeKnora answers it
+with the channel's agent and calls `Send` with the reply.
+
+```go
+p.IMChannel("zulip", zulipChannel{})
+
+func (zulipChannel) Callback(ctx context.Context, call *pluginsdk.Call,
+	req pluginapi.WebhookRequest) (pluginapi.IMCallbackOutput, error) {
+	// verify req with call.Config.Instance["token"], then:
+	return pluginapi.IMCallbackOutput{Message: &pluginapi.IMMessage{
+		UserID: from, ChatID: stream, ChatType: "group", Content: text,
+	}}, nil
+}
+```
+
+```yaml
+contributes:
+  imChannels:
+    - { id: zulip, name: { en-US: Zulip }, instanceSchema: schemas/channel.json }
+```
+
+In Python: `@plugin.im_channel("zulip")` on a class with
+`callback(call, req)` and `send(call, message, content)`.
+
 ## Pages
 
 A plugin can add pages to the app:

@@ -62,7 +62,7 @@ type PointInfo struct {
 var points = []PointInfo{
 	{Point: PointModelVendors, ThirdParty: true, Declarative: true},
 	{Point: PointConnectors, ThirdParty: true},
-	{Point: PointIMChannels},
+	{Point: PointIMChannels, ThirdParty: true},
 	{Point: PointWebSearch, ThirdParty: true},
 	{Point: PointTools},
 	{Point: PointParsers, ThirdParty: true},

@@ -133,7 +133,7 @@ func (h *IMHandler) CreateIMChannel(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": disabledIntegrationError})
 		return
 	}
-	if !validIMPlatforms[req.Platform] {
+	if !validIMPlatforms[req.Platform] && !im.IsPluginPlatform(req.Platform) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": invalidIMPlatformError})
 		return
 	}
@@ -498,7 +498,7 @@ func (h *IMHandler) IMCallback(c *gin.Context) {
 	}
 
 	defaultMode := "websocket"
-	if channel.Platform == "mattermost" || channel.Platform == "yunzhijia" {
+	if channel.Platform == "mattermost" || channel.Platform == "yunzhijia" || im.IsPluginPlatform(channel.Platform) {
 		defaultMode = "webhook"
 	}
 	if im.ResolveMode(channel, defaultMode) != "webhook" ||

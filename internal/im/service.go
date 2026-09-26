@@ -1113,7 +1113,7 @@ func (s *Service) StartChannel(channel *IMChannel) error {
 
 	s.mu.Lock()
 	s.stopLeaderRetryLocked(channel.ID)
-	factory, ok := s.adapterFactories[channel.Platform]
+	factory, ok := s.factoryFor(channel.Platform)
 	if !ok {
 		s.mu.Unlock()
 		return fmt.Errorf("no adapter factory for platform: %s", channel.Platform)
@@ -1428,7 +1428,7 @@ func (s *Service) wsLeaderRetryLoop(ctx context.Context, channel *IMChannel, sta
 				logger.Infof(context.Background(),
 					"[IM] Acquired leadership for channel %s, starting adapter", channel.ID)
 				s.mu.RLock()
-				factory, ok := s.adapterFactories[channel.Platform]
+				factory, ok := s.factoryFor(channel.Platform)
 				s.mu.RUnlock()
 				if !ok {
 					return

@@ -23,6 +23,7 @@ from . import protocol as p
 from .host import Host
 from .protocol import ErrorCode, PluginError
 from .types import (
+    IMMessage,
     ChunkInput,
     ChunkSpan,
     ConnectorConfig,
@@ -184,7 +185,7 @@ ToolHandler = Callable[[Call, dict], Any]
 #: The MCP revision plugins speak.
 MCP_PROTOCOL_VERSION = "2025-06-18"
 
-_ROUTE = re.compile(r"^/v1/(websearch|connectors|parsers|chunkers|hooks)/([^/]+)/([A-Za-z-]+)$")
+_ROUTE = re.compile(r"^/v1/(websearch|connectors|parsers|chunkers|hooks|im)/([^/]+)/([A-Za-z-]+)$")
 
 
 class Plugin:
@@ -200,6 +201,7 @@ class Plugin:
         self._parsers: Dict[str, ParserFunc] = {}
         self._chunkers: Dict[str, ChunkerFunc] = {}
         self._hooks: Dict[str, Dict[str, HookHandler]] = {}
+        self._im: Dict[str, Any] = {}
         self._validate: Optional[ConfigValidator] = None
         self._ui: Optional[UIHandler] = None
         self._events: Optional[EventHandler] = None
@@ -246,6 +248,23 @@ class Plugin:
         def register(fn: HookHandler) -> HookHandler:
             self._hooks.setdefault(id, {})[stage] = fn
             return fn
+
+        return register
+
+    def im_channel(self, id: str, channel: Any = None) -> Any:
+        """Registers IM channel id (contributes.imChannels): an object with
+        callback(call, WebhookRequest), returning an IMMessage, a
+        WebhookResponse, both as a tuple (response, message), or None; and
+        send(call, message, content) to deliver WeKnora's reply.
+        call.instance holds the channel's credentials. As a decorator
+        on a class it registers an instance."""
+        if channel is not None:
+            self._im[id] = channel() if isinstance(channel, type) else channel
+            return channel
+
+        def register(c: Any) -> Any:
+            self._im[id] = c() if isinstance(c, type) else c
+            return c
 
         return register
 
@@ -350,6 +369,7 @@ class Plugin:
             ("parsers", self._parsers),
             ("chunkers", self._chunkers),
             ("pipelineHooks", self._hooks),
+            ("imChannels", self._im),
             ("webhooks", self._webhooks),
             ("options", self._options),
             ("mcpServers", self._mcp),
@@ -431,6 +451,21 @@ class Plugin:
                 h._send_error(PluginError(ErrorCode.NOT_FOUND, f"no parser {cid!r}"))
             else:
                 self._unary(h, body, lambda call, raw: _parse_output(fn(call, from_wire(ParseInput, raw))))
+            return True
+        if point == "im" and action in ("callback", "send"):
+            c = self._im.get(cid)
+            if c is None:
+                h._send_error(PluginError(ErrorCode.NOT_FOUND, f"no IM channel {cid!r}"))
+            elif action == "callback":
+                self._unary(h, body, lambda call, raw: _im_callback_output(c.callback(call, from_wire(WebhookRequest, raw))))
+            else:
+
+                def send(call: Call, raw: Any) -> Any:
+                    raw = raw or {}
+                    c.send(call, from_wire(IMMessage, raw.get("message") or {}), raw.get("content", ""))
+                    return {}
+
+                self._unary(h, body, send)
             return True
         if point == "hooks":
             fn = self._hooks.get(cid, {}).get(action)
@@ -670,6 +705,22 @@ def _ui_output(out: Any) -> Any:
     wire: dict = {"status": out.status or 200}
     if out.body is not None:
         wire["body"] = to_wire(out.body)
+    return wire
+
+
+def _im_callback_output(out: Any) -> dict:
+    response, message = None, None
+    if isinstance(out, tuple):
+        response, message = out
+    elif isinstance(out, IMMessage):
+        message = out
+    elif isinstance(out, WebhookResponse):
+        response = out
+    wire: dict = {}
+    if response is not None:
+        wire["response"] = response
+    if message is not None:
+        wire["message"] = message
     return wire
 
 

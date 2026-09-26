@@ -253,6 +253,14 @@ contributes:
       stages: [filterResults, answer]
 ```
 
+## IM 渠道
+
+插件可以接入新的 IM 平台（`contributes.imChannels`），与内置的飞书、Slack 等并列出现在智能体「IM 渠道」的平台列表里，凭证表单由插件的 `instanceSchema` 描述，密钥字段同样加密存储、脱敏显示。
+
+- 目前只支持 Webhook 方式：平台把消息推到渠道的回调地址 `/api/v1/im/callback/<渠道 ID>`，WeKnora 把请求原样转给插件。插件校验签名、应答平台要求的握手或确认，并把其中的用户消息交回 WeKnora。
+- WeKnora 用渠道绑定的智能体回答，再请插件把回复发回平台。回复一次性发送，不支持流式卡片。
+- 需要长连接（WebSocket、长轮询）的平台暂不能以插件接入。
+
 ## 插件工具
 
 插件可以给 Agent 提供工具。工具统一按 MCP 服务接入：
