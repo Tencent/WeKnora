@@ -32,6 +32,9 @@ type scriptedUploadSvc struct {
 	lastMetadata         map[string]string
 	lastEnableMultimodel *bool
 	lastChannel          string
+	// customFileName is the path-qualified name the CLI passes so the server
+	// can rebuild the directory tree. Recorded per-call, keyed by base name.
+	customFileName map[string]string
 }
 
 func (s *scriptedUploadSvc) CreateKnowledgeFromFile(
@@ -39,16 +42,21 @@ func (s *scriptedUploadSvc) CreateKnowledgeFromFile(
 	_, filePath string,
 	metadata map[string]string,
 	enableMultimodel *bool,
-	_, channel string,
+	customFileName, channel string,
 	_ *sdk.KnowledgeProcessOverrides,
 ) (*sdk.Knowledge, error) {
-	s.called = append(s.called, filepath.Base(filePath))
+	base := filepath.Base(filePath)
+	s.called = append(s.called, base)
+	if s.customFileName == nil {
+		s.customFileName = make(map[string]string)
+	}
+	s.customFileName[base] = customFileName
 	s.lastMetadata = metadata
 	s.lastEnableMultimodel = enableMultimodel
 	s.lastChannel = channel
-	r, ok := s.results[filepath.Base(filePath)]
+	r, ok := s.results[base]
 	if !ok {
-		return &sdk.Knowledge{ID: "doc_" + filepath.Base(filePath), FileName: filepath.Base(filePath)}, nil
+		return &sdk.Knowledge{ID: "doc_" + base, FileName: base}, nil
 	}
 	return r.k, r.err
 }
@@ -77,6 +85,34 @@ func TestUploadRecursive_WalksAllFiles(t *testing.T) {
 	for _, w := range []string{"a.pdf", "b.pdf", "c.pdf", "Uploaded 3"} {
 		assert.Contains(t, got, w)
 	}
+}
+
+// Files directly under the walked directory keep an empty customFileName so the
+// request is byte-identical to the pre-folder behaviour; only nested files gain
+// a folder prefix, which is what lets the server rebuild the tree.
+func TestUploadRecursive_PreservesFolderStructure(t *testing.T) {
+	_, _ = iostreams.SetForTest(t)
+	dir := t.TempDir()
+	mkTree(t, dir, "root.pdf", "sub/nested.pdf", "sub/deeper/leaf.pdf")
+
+	svc := &scriptedUploadSvc{}
+	opts := &UploadOptions{Recursive: true, Glob: "*"}
+	require.NoError(t, runUploadRecursive(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "kb_xxx", dir))
+
+	assert.Equal(t, "", svc.customFileName["root.pdf"])
+	assert.Equal(t, "sub/nested.pdf", svc.customFileName["nested.pdf"])
+	assert.Equal(t, "sub/deeper/leaf.pdf", svc.customFileName["leaf.pdf"])
+}
+
+// The prefix must be relative to the walked directory, not the process CWD or
+// an absolute path -- an absolute path would leak the uploader's filesystem
+// layout into the knowledge base folder tree.
+func TestKnowledgeRelativePath(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "docs")
+	assert.Equal(t, "a.pdf", knowledgeRelativePath(root, filepath.Join(root, "a.pdf")))
+	assert.Equal(t, "sub/c.pdf", knowledgeRelativePath(root, filepath.Join(root, "sub", "c.pdf")))
+	// Defensive: a path outside root yields no prefix rather than a "../" chain.
+	assert.Equal(t, "", knowledgeRelativePath(root, filepath.Join(root, "..", "outside.pdf")))
 }
 
 func TestUploadRecursive_GlobFilter(t *testing.T) {
