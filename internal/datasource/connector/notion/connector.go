@@ -347,10 +347,19 @@ func (c *Connector) fetchPage(ctx context.Context, client *notionClient, page *n
 	resolveFileUploads(ctx, client, blocks)
 
 	markdown, attachmentList := BlocksToMarkdown(blocks)
+	// A successfully cleared page still exists. Keep its title as content so
+	// ingestion replaces stale text instead of silently acknowledging the edit.
+	if len(blocks) == 0 {
+		title := strings.TrimSpace(page.Title)
+		if title == "" {
+			title = defaultUntitledName
+		}
+		markdown = "# " + title + "\n"
+	}
 
 	var items []types.FetchedItem
 
-	// Only skip truly empty pages (no content at all)
+	// Do not replace unreadable blocks or attachment-only pages with a title.
 	if strings.TrimSpace(markdown) != "" {
 		fileName := page.Title + ".md"
 		if page.Title == "" {
