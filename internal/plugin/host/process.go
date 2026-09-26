@@ -167,8 +167,10 @@ func (p *process) childEnv(socket, token string) []string {
 		"HTTPS_PROXY=" + p.proxy.URL(),
 		"http_proxy=" + p.proxy.URL(),
 		"https_proxy=" + p.proxy.URL(),
-		"NO_PROXY=",
-		"no_proxy=",
+		// The Host API is on this node's loopback; the proxy is for the
+		// outside world.
+		"NO_PROXY=127.0.0.1,localhost,::1",
+		"no_proxy=127.0.0.1,localhost,::1",
 	}
 	for _, k := range []string{"PATH", "LANG", "LC_ALL", "TZ", "SYSTEMROOT", "WINDIR"} {
 		if v, ok := os.LookupEnv(k); ok {

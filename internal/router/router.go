@@ -20,6 +20,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/mcpserver"
 	"github.com/Tencent/WeKnora/internal/middleware"
+	"github.com/Tencent/WeKnora/internal/plugin/hostapi"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 
@@ -92,6 +93,7 @@ type RouterParams struct {
 	DataSourceCredentialsHandler *handler.DataSourceCredentialsHandler
 	PluginHandler                *handler.PluginHandler
 	PluginAdminHandler           *handler.PluginAdminHandler
+	PluginHostAPI                *hostapi.Handler
 	WeKnoraCloudHandler          *handler.WeKnoraCloudHandler
 	WikiPageHandler              *handler.WikiPageHandler
 	MemoryHandler                *handler.MemoryHandler
@@ -205,6 +207,12 @@ func NewRouter(params RouterParams) *gin.Engine {
 	r.GET("/api/v1/local-browser/extension", params.SessionHandler.BrowserSkillExtension)
 	r.POST("/api/v1/local-browser/extension/authorize", params.SessionHandler.BrowserSkillAuthorize)
 	r.POST("/api/v1/local-browser/internal", params.SessionHandler.BrowserSkillInternal)
+
+	// Host API: plugins call back with their own short-lived tokens, which
+	// the handler verifies; user and API key auth do not apply.
+	if params.PluginHostAPI != nil {
+		params.PluginHostAPI.Register(r)
+	}
 
 	// 认证中间件
 	r.Use(middleware.Auth(params.TenantService, params.UserService, params.TenantMemberService, params.TenantAPIKeyService, params.Config))

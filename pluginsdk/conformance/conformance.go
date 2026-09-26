@@ -140,6 +140,15 @@ func Run(ctx context.Context, t Target) Report {
 			return protocolAnswer(err)
 		})
 	}
+	for _, id := range m.Contributes["parsers"] {
+		check("parsers/"+id+" parse answers", func(ctx context.Context) error {
+			var out pluginapi.ParseOutput
+			err := t.Client.Call(ctx, pluginapi.ParsePath(id), envelope(), pluginapi.ParseInput{
+				FileName: "conformance.txt", FileType: "txt", Content: []byte("WeKnora conformance check\n"),
+			}, &out)
+			return protocolAnswer(err)
+		})
+	}
 	for _, id := range m.Contributes["connectors"] {
 		check("connectors/"+id+" validate answers", func(ctx context.Context) error {
 			return protocolAnswer(t.Client.Call(ctx, pluginapi.ConnectorValidatePath(id), envelope(), nil, nil))
@@ -227,7 +236,13 @@ func wantErrorBody(resp *http.Response, code pluginapi.ErrorCode) error {
 		return fmt.Errorf("HTTP %d without a protocol error body: %s", resp.StatusCode, b)
 	}
 	if resp.StatusCode != code.HTTPStatus() || body.Error.Code != code {
-		return fmt.Errorf("want HTTP %d %s, got HTTP %d %s", code.HTTPStatus(), code, resp.StatusCode, body.Error.Code)
+		return fmt.Errorf(
+			"want HTTP %d %s, got HTTP %d %s",
+			code.HTTPStatus(),
+			code,
+			resp.StatusCode,
+			body.Error.Code,
+		)
 	}
 	return nil
 }

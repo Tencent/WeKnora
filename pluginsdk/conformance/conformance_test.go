@@ -65,11 +65,24 @@ func TestSDKPluginConforms(t *testing.T) {
 			},
 		),
 	)
+	p.Parser(
+		"text",
+		pluginsdk.ParserFunc(
+			func(_ context.Context, _ *pluginsdk.Call, in pluginapi.ParseInput) (*pluginapi.ParseOutput, error) {
+				return &pluginapi.ParseOutput{Markdown: string(in.Content)}, nil
+			},
+		),
+	)
 	rep := conformance.Run(context.Background(), target(t, p.Handler()))
+	names := map[string]bool{}
 	for _, r := range rep.Results {
+		names[r.Name] = true
 		if !r.Passed {
 			t.Errorf("%s: %s", r.Name, r.Detail)
 		}
+	}
+	if !names["parsers/text parse answers"] {
+		t.Error("parsers must be checked")
 	}
 	if !rep.Passed() || rep.Plugin != "acme.strict@1.0.0" || len(rep.Results) < 10 {
 		t.Fatalf("report = %+v", rep)

@@ -48,3 +48,17 @@ type PluginVersion struct {
 
 // TableName pins the table so GORM's pluralizer cannot drift.
 func (PluginVersion) TableName() string { return "plugin_versions" }
+
+// PluginKV is one entry of a plugin's key-value store (Host API kv),
+// partitioned by plugin and tenant.
+type PluginKV struct {
+	PluginID  string     `json:"-"         gorm:"type:varchar(128);primaryKey"`
+	TenantID  uint64     `json:"-"         gorm:"primaryKey"`
+	Key       string     `json:"key"       gorm:"type:varchar(256);primaryKey"`
+	Value     JSON       `json:"value"     gorm:"type:json"`
+	ExpiresAt *time.Time `json:"expiresAt,omitempty"`
+	UpdatedAt time.Time  `json:"updatedAt"`
+}
+
+// TableName pins the table so GORM's pluralizer cannot drift.
+func (PluginKV) TableName() string { return "plugin_kv" }

@@ -2,6 +2,7 @@ package interfaces
 
 import (
 	"context"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/plugin/manifest"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -40,4 +41,27 @@ type PluginRepository interface {
 	// GetVersion returns (nil, nil) when the version is not stored.
 	GetVersion(ctx context.Context, pluginID, version string) (*types.PluginVersion, error)
 	SaveVersion(ctx context.Context, v *types.PluginVersion) error
+}
+
+// PluginKVRepository stores plugins' Host API key-value data. Expired
+// entries read as missing.
+type PluginKVRepository interface {
+	// Get returns (nil, nil) for a missing or expired key.
+	Get(ctx context.Context, pluginID string, tenantID uint64, key string) (*types.PluginKV, error)
+	Put(ctx context.Context, e *types.PluginKV) error
+	// Delete reports whether the key existed.
+	Delete(ctx context.Context, pluginID string, tenantID uint64, key string) (bool, error)
+	// List returns live keys starting with prefix, after the given key, in
+	// key order.
+	List(
+		ctx context.Context,
+		pluginID string,
+		tenantID uint64,
+		prefix, after string,
+		limit int,
+	) ([]types.PluginKV, error)
+	// Count counts live keys of a plugin in a tenant.
+	Count(ctx context.Context, pluginID string, tenantID uint64) (int64, error)
+	// DeleteExpired removes entries that expired before now.
+	DeleteExpired(ctx context.Context, now time.Time) (int64, error)
 }

@@ -1,7 +1,7 @@
 # WeKnora plugin SDK (Go)
 
-Build code plugins for WeKnora: web search providers and data source
-connectors that run as their own process. The module has no dependencies.
+Build code plugins for WeKnora: web search providers, data source
+connectors and document parsers that run as their own process. The module has no dependencies.
 
 | Package | What it is |
 | --- | --- |
@@ -69,6 +69,31 @@ decrypted, in three separate scopes:
 
 Keep plugins stateless and never cache a tenant's credentials across calls.
 
+## Parsers
+
+`p.Parser(id, ...)` turns a document (`in.Content`, base64 on the wire) into
+Markdown. WeKnora chunks the text and stores the images the Markdown
+references: return them in `Images` with an `OriginalRef` matching the
+`![](...)` target. Declare the extensions it handles in `plugin.yaml`
+(`fileTypes: [srt, vtt]`). Return a retryable error (`unavailable`,
+`rate_limited`) to have the document retried later; any other error fails
+it for good.
+
+## Calling back into WeKnora (Host API)
+
+A plugin that declares `permissions.hostApi` gets a short-lived token with
+each call; `call.Host()` returns a client for it, or nil without a grant.
+Scopes:
+
+- `kv`: a key-value store of the plugin, separate per workspace, so the
+  plugin needs no database.
+  - `KVGet`, `KVPut` (optional TTL), `KVDelete` and `KVList`.
+  - Keys up to 256 bytes, JSON values up to 64 KB, 10,000 keys per
+    workspace.
+
+The token is valid for a few minutes: use `call.Host()` within the call and
+don't keep it.
+
 ## Packaging
 
 A package is a zip (`.wkp`) with `plugin.yaml` at its root:
@@ -103,7 +128,8 @@ A few rules the manifest and host enforce:
   (`acme.notes/notes`); for connectors and web search that must stay within
   50 characters.
 
-See `examples/plugins/rss` for a complete plugin and its `package.sh`.
+See `examples/plugins/rss` (a connector) and `examples/plugins/subtitles` (a
+parser using the Host API) for complete plugins with their `package.sh`.
 
 ## Testing
 

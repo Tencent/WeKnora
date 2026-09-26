@@ -62,6 +62,7 @@ type Plugin struct {
 	info       Info
 	webSearch  map[string]WebSearcher
 	connectors map[string]Connector
+	parsers    map[string]Parser
 	validate   ConfigValidator
 	logger     *slog.Logger
 	// ShutdownTimeout bounds how long Serve waits for calls in flight after
@@ -75,6 +76,7 @@ func New(info Info) *Plugin {
 		info:            info,
 		webSearch:       map[string]WebSearcher{},
 		connectors:      map[string]Connector{},
+		parsers:         map[string]Parser{},
 		logger:          slog.New(slog.NewTextHandler(os.Stderr, nil)),
 		ShutdownTimeout: 60 * time.Second,
 	}
@@ -100,6 +102,7 @@ func (p *Plugin) Manifest() pluginapi.Manifest {
 	}
 	add("webSearch", keys(p.webSearch))
 	add("connectors", keys(p.connectors))
+	add("parsers", keys(p.parsers))
 	return m
 }
 
@@ -134,6 +137,7 @@ func (p *Plugin) Handler() http.Handler {
 	)
 	p.routeWebSearch(mux)
 	p.routeConnectors(mux)
+	p.routeParsers(mux)
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, pluginapi.Errorf(pluginapi.CodeNotFound, "no endpoint %s %s", r.Method, r.URL.Path))
 	})

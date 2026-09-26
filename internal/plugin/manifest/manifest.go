@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 
 	"golang.org/x/mod/semver"
@@ -150,6 +151,8 @@ type Contribution struct {
 	Path string `json:"path,omitempty"           yaml:"path"`
 	// MCP describes a remote MCP server (mcpServers).
 	MCP *MCPServer `json:"mcp,omitempty"            yaml:"mcp"`
+	// FileTypes are the lower-case extensions a parser handles ("pdf").
+	FileTypes []string `json:"fileTypes,omitempty"      yaml:"fileTypes"`
 	// Extra carries point-specific metadata the generic fields do not cover.
 	Extra map[string]any `json:"extra,omitempty"          yaml:"extra"`
 }
@@ -287,7 +290,19 @@ var egressPattern = regexp.MustCompile(`^(\*\.)?([a-z0-9]([a-z0-9-]*[a-z0-9])?)(
 // follows links anywhere). Private addresses stay unreachable either way.
 const EgressAnyHost = "*"
 
+// HostAPIScopes are the Host API scopes a plugin may ask for in
+// permissions.hostApi.
+var HostAPIScopes = []string{
+	// kv: the plugin's own key-value store in each tenant.
+	"kv",
+}
+
 func (m *Manifest) validatePermissions(add func(string, ...any)) {
+	for _, s := range m.Permissions.HostAPI {
+		if !slices.Contains(HostAPIScopes, s) {
+			add("permissions.hostApi %q is not a Host API scope (known: %s)", s, strings.Join(HostAPIScopes, ", "))
+		}
+	}
 	for _, e := range m.Permissions.Egress {
 		if e != EgressAnyHost && !egressPattern.MatchString(strings.ToLower(e)) {
 			add(
@@ -345,6 +360,9 @@ func (m *Manifest) validateContributions(add func(string, ...any)) {
 				add("%s.aliases may only be declared by builtin plugins", where)
 			}
 			validateDeclarative(point, c, m.Builtin, where, add)
+			if point == PointParsers && !m.Builtin {
+				validateFileTypes(c.FileTypes, where, add)
+			}
 			for _, alias := range c.Aliases {
 				// Aliases share the ID alphabet, which has no '/', so an
 				// alias can never shadow a qualified ID.
@@ -358,6 +376,20 @@ func (m *Manifest) validateContributions(add func(string, ...any)) {
 
 // validateDeclarative checks the fields a declarative contribution needs.
 // Builtins describe their implementation in code instead.
+// fileTypePattern is a lower-case file extension without the dot.
+var fileTypePattern = regexp.MustCompile(`^[a-z0-9]{1,16}$`)
+
+func validateFileTypes(types []string, where string, add func(string, ...any)) {
+	if len(types) == 0 {
+		add("%s.fileTypes is required: the extensions the parser handles, such as [pdf]", where)
+	}
+	for _, t := range types {
+		if !fileTypePattern.MatchString(t) {
+			add("%s.fileTypes %q must be a lower-case extension without the dot", where, t)
+		}
+	}
+}
+
 func validateDeclarative(point Point, c Contribution, builtin bool, where string, add func(string, ...any)) {
 	if builtin {
 		return
