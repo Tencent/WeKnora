@@ -121,6 +121,11 @@ func (s *knowledgeBaseService) GetRepository() interfaces.KnowledgeBaseRepositor
 func (s *knowledgeBaseService) CreateKnowledgeBase(ctx context.Context,
 	kb *types.KnowledgeBase,
 ) (*types.KnowledgeBase, error) {
+	// Chunking bounds are checked before anything is persisted: a KB-level
+	// chunk_size applies to every future document in the shared queue (#3539).
+	if err := validateChunkingSizeBounds(kb.ChunkingConfig); err != nil {
+		return nil, err
+	}
 	// Generate UUID and set creation timestamps
 	if kb.ID == "" {
 		kb.ID = uuid.New().String()
@@ -530,6 +535,11 @@ func (s *knowledgeBaseService) UpdateKnowledgeBase(ctx context.Context,
 	kb.Name = name
 	kb.Description = description
 	if config != nil {
+		// Same bounds as creation: the stored chunking config drives every
+		// future ingestion of this KB (#3539).
+		if err := validateChunkingSizeBounds(config.ChunkingConfig); err != nil {
+			return nil, err
+		}
 		kb.ChunkingConfig = config.ChunkingConfig
 		// Replaced only when the request carried one, so a caller that does not
 		// know about the image settings cannot wipe them.

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 	"strings"
 
@@ -114,6 +115,31 @@ func ResolveProcessConfig(kb *types.KnowledgeBase, overrides *types.KnowledgePro
 	return eff
 }
 
+// Chunk-size bounds mirror the initialization wizard's documentSplitting
+// binding (min=100,max=10000). They exist because chunk_size feeds the shared
+// ingestion queue: a tiny value balloons one document into thousands of
+// chunks — each a DB write and an embedding call — and starves every other
+// tenant's document tasks (#3539).
+const (
+	minChunkSize = 100
+	maxChunkSize = 10000
+)
+
+// validateChunkingSizeBounds rejects pathological chunking values at every
+// entry point that accepts user input: upload-level process overrides, KB
+// creation, and KB updates. A zero ChunkSize means "not set" (the merge step
+// and NormalizeSplitterConfig both treat it as unset) and passes through, so
+// existing callers that omit the field are unaffected.
+func validateChunkingSizeBounds(cfg types.ChunkingConfig) error {
+	if cfg.ChunkSize != 0 && (cfg.ChunkSize < minChunkSize || cfg.ChunkSize > maxChunkSize) {
+		return werrors.NewBadRequestError(fmt.Sprintf("chunk_size 超出允许范围 [%d, %d]", minChunkSize, maxChunkSize))
+	}
+	if cfg.ChunkOverlap < 0 {
+		return werrors.NewBadRequestError("chunk_overlap 不能为负数")
+	}
+	return nil
+}
+
 // validateDefaultFileImportRequirements enforces the VLM/ASR prerequisites that
 // ValidateProcessOverrides would otherwise cover, for imports that ship no
 // per-import overrides and therefore fall back to the KB defaults.
@@ -176,6 +202,12 @@ func ValidateProcessOverrides(
 ) error {
 	if overrides == nil {
 		return nil
+	}
+
+	if overrides.ChunkingConfig != nil {
+		if err := validateChunkingSizeBounds(*overrides.ChunkingConfig); err != nil {
+			return err
+		}
 	}
 
 	hasImage := false
