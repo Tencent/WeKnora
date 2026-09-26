@@ -4,7 +4,7 @@ import test from 'node:test'
 import { reactive } from 'vue'
 
 // The page's side of the bridge, as plugins ship it.
-import { BridgeError, connect } from '../../../../packages/plugin-ui/index.js'
+import { BridgeError, connect, contentHeight } from '../../../../packages/plugin-ui/index.js'
 import { createBridgeHost, createRateLimiter, isAppPath, plainCopy, type BridgeHandlers, type BridgeInit } from './bridgeHost'
 
 type Listener = (event: { data: unknown; source: unknown }) => void
@@ -146,4 +146,24 @@ test('reactive data reaches the page as a plain copy', async () => {
 
   assert.deepEqual(plainCopy(reactive({ a: { b: [1] } })), { a: { b: [1] } })
   assert.equal(plainCopy(undefined), undefined)
+})
+
+test('autoResize measures the content, not the frame', () => {
+  // The frame is 600px tall; the content ends far above it.
+  const el = (bottom: number, style: Record<string, string> = {}) => ({ bottom, style })
+  const child = el(120, { marginBottom: '16px' })
+  const body = { ...el(110, { marginBottom: '8px' }), children: [child, el(600, { position: 'fixed' }), el(0, { display: 'none' })] }
+  const root = el(600, { paddingBottom: '4px', borderBottomWidth: '1px' })
+  const all = [body, root, ...body.children]
+  const win = {
+    scrollY: 10,
+    document: { body: { ...body, getBoundingClientRect: () => ({ bottom: body.bottom }) }, documentElement: { scrollHeight: 600 } },
+    getComputedStyle: (e: { style?: Record<string, string> }) =>
+      all.find((x) => x.style === e.style)?.style ?? root.style,
+  }
+  for (const c of body.children) Object.assign(c, { getBoundingClientRect: () => ({ bottom: c.bottom }) })
+  win.document.body.children = body.children
+  // A child's margin collapsing through the body's: 120 + 16, scrolled by 10,
+  // plus the root's padding and border; the fixed child does not count.
+  assert.equal(contentHeight(win as unknown as Window), 10 + 136 + 4 + 1)
 })

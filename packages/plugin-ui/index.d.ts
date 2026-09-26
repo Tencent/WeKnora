@@ -56,6 +56,11 @@ export interface Bridge {
 }
 
 export interface ConnectOptions {
+  /**
+   * Keep the frame as tall as the page's content (default true): the bottom
+   * of <body> plus its margin, so the frame shrinks as well as grows. A body
+   * stretched to the viewport (height: 100vh) keeps the frame from shrinking.
+   */
   autoResize?: boolean
   applyTheme?: boolean
   timeout?: number
@@ -68,3 +73,5 @@ export class BridgeError extends Error {
 
 export function connect(options?: ConnectOptions): Promise<Bridge>
 export function applyTheme(theme: Theme, doc?: Document): void
+/** The page content's height in pixels, as autoResize reports it. */
+export function contentHeight(win?: Window): number
