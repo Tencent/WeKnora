@@ -4,13 +4,15 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/Tencent/WeKnora/internal/handler"
+	"github.com/Tencent/WeKnora/internal/middleware"
+	"github.com/Tencent/WeKnora/internal/types"
 )
 
 // RegisterPluginRoutes registers the plugin catalog and the workspace's
 // plugin switches. Any member may read the catalog; only admins change the
 // switches. Like the other integration catalogs it stays closed to scoped
 // API keys.
-func RegisterPluginRoutes(r *gin.RouterGroup, h *handler.PluginHandler, g *rbacGuards) {
+func RegisterPluginRoutes(r *gin.RouterGroup, h *handler.PluginHandler, ui *handler.PluginUIHandler, g *rbacGuards) {
 	plugins := g.apiKeyGroup(r.Group("/plugins"), apiKeyFullAccess())
 	{
 		plugins.GET("", g.Viewer(), h.ListPlugins)
@@ -22,6 +24,12 @@ func RegisterPluginRoutes(r *gin.RouterGroup, h *handler.PluginHandler, g *rbacG
 		// Workspace configuration carries credentials — Admin+ to read too.
 		plugins.GET("/:id/config", g.Admin(), h.GetPluginConfig)
 		plugins.PUT("/:id/config", g.Admin(), h.UpdatePluginConfig)
+		if ui != nil {
+			// Any member may use a plugin's pages; a page's minRole is
+			// checked per request, since it depends on the page.
+			ui.SetRoleGuard(func(need types.TenantRole) gin.HandlerFunc { return middleware.RequireRole(need, g.cfg) })
+			plugins.POST("/:id/ui-request", g.Viewer(), ui.Request)
+		}
 	}
 }
 

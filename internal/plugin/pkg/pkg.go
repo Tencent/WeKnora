@@ -216,6 +216,9 @@ func (p *Package) checkReferences() error {
 			case manifest.PointModelVendors:
 				need("model vendor definition", c.Path)
 			}
+			if manifest.IsUIPoint(info.Point) && c.Entry != "" {
+				need("page", c.Entry)
+			}
 			if c.Icon != "" {
 				need("icon", c.Icon)
 			}

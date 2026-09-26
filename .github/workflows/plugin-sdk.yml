@@ -11,11 +11,13 @@ on:
     paths:
       - 'pluginsdk/**'
       - 'examples/plugins/notebooks/**'
+      - 'examples/plugins/links/**'
       - '.github/workflows/plugin-sdk.yml'
   pull_request:
     paths:
       - 'pluginsdk/**'
       - 'examples/plugins/notebooks/**'
+      - 'examples/plugins/links/**'
       - '.github/workflows/plugin-sdk.yml'
 
 defaults:
@@ -70,8 +72,9 @@ jobs:
           python-version: ${{ matrix.python }}
       - name: unittest
         run: python -W error::ResourceWarning -m unittest discover -s tests -v
-      - name: example plugin
-        working-directory: examples/plugins/notebooks
-        run: python -m unittest -v test_main
+      - name: example plugins
+        run: |
+          (cd ../../examples/plugins/notebooks && python -m unittest -v test_main)
+          (cd ../../examples/plugins/links && python -m unittest -v test_main)
       - name: build the package
         run: python -m pip install build && python -m build

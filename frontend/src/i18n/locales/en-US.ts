@@ -2859,6 +2859,11 @@ export default {
       rotateFailed: 'Failed to rotate the secret'
     }
   },
+  pluginPages: {
+    notResponding: 'The plugin page is not responding; it may have failed to load.',
+    requestFailed: 'The plugin request failed',
+    fromPlugin: 'Provided by the plugin {id}'
+  },
   pluginCenter: {
     installed: 'Installed',
     configure: 'Configure',
@@ -2889,7 +2894,10 @@ export default {
       tools: 'Agent tools',
       parsers: 'Document parsing',
       skills: 'Skills',
-      mcpServers: 'MCP servers'
+      mcpServers: 'MCP servers',
+      pages: 'Pages',
+      settingsSections: 'Settings sections',
+      kbTabs: 'Knowledge base tabs'
     }
   },
   schemaForm: {

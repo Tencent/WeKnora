@@ -5379,6 +5379,11 @@ export default {
       rotateFailed: '轮换密钥失败'
     }
   },
+  pluginPages: {
+    notResponding: '插件页面没有响应，可能加载失败。',
+    requestFailed: '插件请求失败',
+    fromPlugin: '由插件 {id} 提供'
+  },
   pluginCenter: {
     installed: '已安装',
     configure: '配置',
@@ -5409,7 +5414,10 @@ export default {
       tools: 'Agent 工具',
       parsers: '文档解析',
       skills: '技能',
-      mcpServers: 'MCP 服务'
+      mcpServers: 'MCP 服务',
+      pages: '页面',
+      settingsSections: '设置页',
+      kbTabs: '知识库页签'
     }
   },
   schemaForm: {

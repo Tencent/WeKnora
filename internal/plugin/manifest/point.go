@@ -17,7 +17,23 @@ const (
 	PointSkills Point = "skills"
 	// PointMCPServers contributes MCP servers whose tools agents can use.
 	PointMCPServers Point = "mcpServers"
+	// PointPages contributes pages of their own, opened from the toolbox.
+	PointPages Point = "pages"
+	// PointSettingsSections contributes sections of the settings dialog.
+	PointSettingsSections Point = "settingsSections"
+	// PointKBTabs contributes tabs of the knowledge base page.
+	PointKBTabs Point = "kbTabs"
 )
+
+// UIRoot is the package directory plugin pages live in. Only files under it
+// are served to browsers.
+const UIRoot = "ui/"
+
+// IsUIPoint reports whether a point contributes a sandboxed page (an entry
+// HTML file under UIRoot) rather than a capability.
+func IsUIPoint(p Point) bool {
+	return p == PointPages || p == PointSettingsSections || p == PointKBTabs
+}
 
 // PointInfo describes an extension point.
 type PointInfo struct {
@@ -43,6 +59,11 @@ var points = []PointInfo{
 	{Point: PointParsers, ThirdParty: true},
 	{Point: PointSkills, ThirdParty: true, Declarative: true},
 	{Point: PointMCPServers, ThirdParty: true, Declarative: true},
+	// Pages are static files; a plugin with code can also answer their
+	// requests (the ui/request endpoint).
+	{Point: PointPages, ThirdParty: true, Declarative: true},
+	{Point: PointSettingsSections, ThirdParty: true, Declarative: true},
+	{Point: PointKBTabs, ThirdParty: true, Declarative: true},
 }
 
 // Points returns every known extension point in display order.

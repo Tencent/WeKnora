@@ -2859,6 +2859,11 @@ export default {
       rotateFailed: 'シークレットのローテーションに失敗しました'
     }
   },
+  pluginPages: {
+    notResponding: 'プラグインページが応答しません。読み込みに失敗した可能性があります。',
+    requestFailed: 'プラグインへのリクエストに失敗しました',
+    fromPlugin: 'プラグイン {id} が提供'
+  },
   pluginCenter: {
     installed: 'インストール済み',
     configure: '設定',
@@ -2889,7 +2894,10 @@ export default {
       tools: 'エージェントツール',
       parsers: 'ドキュメント解析',
       skills: 'スキル',
-      mcpServers: 'MCP サーバー'
+      mcpServers: 'MCP サーバー',
+      pages: 'ページ',
+      settingsSections: '設定セクション',
+      kbTabs: 'ナレッジベースのタブ'
     }
   },
   schemaForm: {

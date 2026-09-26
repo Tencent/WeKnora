@@ -189,6 +189,35 @@ paths:
                 required: [output]
                 properties: { output: { $ref: "#/components/schemas/ParseOutput" } }
         default: { $ref: "#/components/responses/Error" }
+  /v1/ui/request:
+    post:
+      summary: Answer a request from one of the plugin's pages
+      description: |
+        Plugin pages (pages, settingsSections, kbTabs) run in a sandboxed
+        iframe and reach the plugin only through the WeKnora bridge.
+        WeKnora checks the caller may open the page (its minRole) and
+        forwards the request with the usual envelope. Method and path are
+        the page's own routing. Plugins with pages that make no requests
+        answer not_found. The manifest lists "ui": ["request"] under
+        contributes when the plugin answers.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/Envelope"
+                - properties: { input: { $ref: "#/components/schemas/UIRequest" } }
+      responses:
+        "200":
+          description: What the page receives
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [output]
+                properties: { output: { $ref: "#/components/schemas/UIResponse" } }
+        default: { $ref: "#/components/responses/Error" }
 components:
   securitySchemes:
     hostToken: { type: http, scheme: bearer }
@@ -346,6 +375,20 @@ components:
               mimeType: { type: string }
               data: { type: string, contentEncoding: base64 }
         metadata: { type: object, additionalProperties: { type: string } }
+    UIRequest:
+      type: object
+      required: [mount, method, path]
+      properties:
+        mount: { type: string, description: '"<point>/<id>" of the page, e.g. pages/links' }
+        method: { type: string }
+        path: { type: string }
+        body: { description: JSON the page sent }
+        role: { enum: [viewer, contributor, admin, owner] }
+    UIResponse:
+      type: object
+      properties:
+        status: { type: integer, description: HTTP-style status for the page; 200 when absent }
+        body: { description: JSON returned to the page }
     Event:
       type: object
       required: [type]

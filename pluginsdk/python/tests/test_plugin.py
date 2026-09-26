@@ -76,7 +76,12 @@ class PluginTest(unittest.TestCase):
                 "id": "acme.fixture",
                 "version": "1.0.0",
                 "apiVersion": "weknora.plugin/v1",
-                "contributes": {"webSearch": ["echo"], "connectors": ["notes"], "parsers": ["upper"]},
+                "contributes": {
+                    "webSearch": ["echo"],
+                    "connectors": ["notes"],
+                    "parsers": ["upper"],
+                    "ui": ["request"],
+                },
             },
         )
         self.assertEqual(json.loads(self.c.request("GET", "/v1/health")[2]), {"status": "ok"})
@@ -116,6 +121,14 @@ class PluginTest(unittest.TestCase):
         self.assertTrue(out["markdown"].startswith("HELLO"))
         self.assertEqual(out["images"], [{"originalRef": "img/dot.png", "data": base64.b64encode(b"\x89PNG").decode(), "mimeType": "image/png"}])
         self.assertEqual(out["metadata"], {"fileType": "txt"})
+
+    def test_ui_requests(self):
+        req = {"mount": "pages/links", "method": "PUT", "path": "/links", "body": {"a": 1}, "role": "admin"}
+        status, body = self.c.call("/v1/ui/request", req)
+        self.assertEqual(status, 200)
+        self.assertEqual(body["output"], {"status": 200, "body": {**req}})
+        status, body = self.c.call("/v1/ui/request", dict(req, path="/missing"))
+        self.assertEqual(body["output"], {"status": 404, "body": {"error": "no such thing"}})
 
     def test_connector_unary(self):
         cfg = {"instance": {"credentials": {"token": "ok"}, "settings": {}, "resourceIds": []}}
@@ -160,6 +173,9 @@ class WireTest(unittest.TestCase):
         t = parse_time("2026-09-25T16:22:58.135616789Z")
         self.assertEqual(t, datetime(2026, 9, 25, 16, 22, 58, 135616, tzinfo=timezone.utc))
         self.assertEqual(to_wire(Cursor(last_sync_time=t)), {"lastSyncTime": "2026-09-25T16:22:58.135616Z"})
+        # Go trims trailing zeros, so any number of digits arrives.
+        for raw, micros in (("2026-09-26T10:51:18.63664+08:00", 636640), ("2026-09-26T10:51:18.5Z", 500000)):
+            self.assertEqual(parse_time(raw).microsecond, micros)
         naive = datetime(2026, 1, 2, 3, 4, 5)
         self.assertEqual(to_wire(naive), "2026-01-02T03:04:05Z")
 

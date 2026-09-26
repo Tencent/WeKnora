@@ -59,6 +59,9 @@ type PluginContributionDTO struct {
 	manifest.Contribution
 	PluginID    string `json:"pluginId"`
 	QualifiedID string `json:"qualifiedId"`
+	// Version is the plugin's active version; page files are served under
+	// it.
+	Version string `json:"version,omitempty"`
 	// Enabled reports whether the caller's tenant has the plugin enabled.
 	Enabled bool `json:"enabled"`
 }
@@ -208,12 +211,16 @@ func (h *PluginHandler) ListContributions(c *gin.Context) {
 		entries := h.registry.Contributions(info.Point)
 		list := make([]PluginContributionDTO, 0, len(entries))
 		for _, e := range entries {
-			list = append(list, PluginContributionDTO{
+			dto := PluginContributionDTO{
 				Contribution: e.Contribution,
 				PluginID:     e.PluginID,
 				QualifiedID:  e.QualifiedID,
 				Enabled:      enabled[e.PluginID],
-			})
+			}
+			if m, ok := h.registry.Plugin(e.PluginID); ok {
+				dto.Version = m.Version
+			}
+			list = append(list, dto)
 		}
 		out.Contributions[info.Point] = list
 	}

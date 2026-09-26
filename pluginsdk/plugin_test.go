@@ -257,3 +257,38 @@ func TestServeHostHandshake(t *testing.T) {
 		t.Fatalf("shutdown: %v", err)
 	}
 }
+
+func TestUIRequests(t *testing.T) {
+	ctx := context.Background()
+	p := New(Info{ID: "acme.ui", Version: "1.0.0"})
+	srv := httptest.NewServer(p.Handler())
+	defer srv.Close()
+	c := client.New(srv.URL, nil, nil)
+	req := pluginapi.UIRequest{Mount: "pages/links", Method: "GET", Path: "/links", Role: "admin"}
+	err := c.Call(ctx, pluginapi.UIRequestPath, pluginapi.Envelope{}, req, nil)
+	if !isCode(err, pluginapi.CodeNotFound) {
+		t.Fatalf("no handler = %v", err)
+	}
+
+	p.UI(func(_ context.Context, call *Call, in pluginapi.UIRequest) (*pluginapi.UIResponse, error) {
+		if in.Path == "/missing" {
+			return &pluginapi.UIResponse{Status: 404}, nil
+		}
+		return UIJSON(0, map[string]any{"mount": in.Mount, "path": in.Path, "role": in.Role, "tenant": call.TenantID})
+	})
+	if m := p.Manifest(); len(m.Contributes["ui"]) != 1 {
+		t.Fatalf("manifest = %+v", m)
+	}
+	var out pluginapi.UIResponse
+	env := pluginapi.Envelope{Context: pluginapi.Context{TenantID: 3}}
+	if err := c.Call(ctx, pluginapi.UIRequestPath, env, req, &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.Status != 200 || string(out.Body) != `{"mount":"pages/links","path":"/links","role":"admin","tenant":3}` {
+		t.Fatalf("out = %d %s", out.Status, out.Body)
+	}
+	req.Path = "/missing"
+	if err := c.Call(ctx, pluginapi.UIRequestPath, env, req, &out); err != nil || out.Status != 404 {
+		t.Fatalf("status = %d, %v", out.Status, err)
+	}
+}

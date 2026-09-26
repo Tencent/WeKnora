@@ -149,6 +149,14 @@ func Run(ctx context.Context, t Target) Report {
 			return protocolAnswer(err)
 		})
 	}
+	if len(m.Contributes["ui"]) > 0 {
+		check("ui/request answers", func(ctx context.Context) error {
+			var out pluginapi.UIResponse
+			in := pluginapi.UIRequest{Mount: "pages/conformance", Method: http.MethodGet, Path: "/", Role: "viewer"}
+			err := t.Client.Call(ctx, pluginapi.UIRequestPath, envelope(), in, &out)
+			return protocolAnswer(err)
+		})
+	}
 	for _, id := range m.Contributes["connectors"] {
 		check("connectors/"+id+" validate answers", func(ctx context.Context) error {
 			return protocolAnswer(t.Client.Call(ctx, pluginapi.ConnectorValidatePath(id), envelope(), nil, nil))

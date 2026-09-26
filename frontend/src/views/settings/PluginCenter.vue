@@ -90,6 +90,7 @@
 </template>
 
 <script setup lang="ts">
+import { usePluginPagesStore } from '@/stores/pluginPages'
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { MessagePlugin } from 'tdesign-vue-next'
@@ -150,6 +151,8 @@ async function load() {
   }
 }
 
+const pluginPages = usePluginPagesStore()
+
 async function toggle(p: TenantPlugin, enabled: boolean) {
   const id = p.manifest.id
   pending.value = new Set([...pending.value, id])
@@ -157,6 +160,8 @@ async function toggle(p: TenantPlugin, enabled: boolean) {
     const res = await setPluginEnabled(id, enabled)
     const updated = res.data
     plugins.value = plugins.value.map((x) => (x.manifest.id === id ? { ...x, ...updated } : x))
+    // The plugin's pages, settings sections and tabs come and go with it.
+    void pluginPages.ensure(true).catch(() => {})
     MessagePlugin.success(enabled ? t('pluginCenter.enabledToast') : t('pluginCenter.disabledToast'))
   } catch (e: any) {
     MessagePlugin.error(e?.message || t('pluginCenter.saveFailed'))

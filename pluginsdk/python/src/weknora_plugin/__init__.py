@@ -35,6 +35,8 @@ from .types import (
     Resource,
     SearchInput,
     SearchResult,
+    UIRequest,
+    UIResponse,
 )
 
 __version__ = "0.1.0"
@@ -63,5 +65,7 @@ __all__ = [
     "SearchResult",
     "Stream",
     "StreamClosed",
+    "UIRequest",
+    "UIResponse",
     "invalid_config",
 ]

@@ -5377,6 +5377,11 @@ export default {
       rotateFailed: '비밀 키를 교체하지 못했습니다'
     }
   },
+  pluginPages: {
+    notResponding: '플러그인 페이지가 응답하지 않습니다. 로드에 실패했을 수 있습니다.',
+    requestFailed: '플러그인 요청에 실패했습니다',
+    fromPlugin: '플러그인 {id} 제공'
+  },
   pluginCenter: {
     installed: '설치됨',
     configure: '설정',
@@ -5407,7 +5412,10 @@ export default {
       tools: '에이전트 도구',
       parsers: '문서 파싱',
       skills: '스킬',
-      mcpServers: 'MCP 서버'
+      mcpServers: 'MCP 서버',
+      pages: '페이지',
+      settingsSections: '설정 섹션',
+      kbTabs: '지식 베이스 탭'
     }
   },
   schemaForm: {

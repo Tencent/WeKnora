@@ -63,6 +63,20 @@ class Notes:
 def validate(call) -> None: ...
 ```
 
+**Pages.** Requests from the plugin's pages (`pages`,
+`settingsSections`, `kbTabs` in plugin.yaml) arrive at one handler. Return a
+`UIResponse`, or any JSON value for a 200:
+
+```python
+@plugin.ui
+def ui(call, req: UIRequest):
+    # req.mount ("pages/links"), req.method, req.path, req.body, req.role
+    return UIResponse(status=200, body=links)
+```
+
+The pages themselves are HTML under `ui/` that use
+[`@weknora/plugin-ui`](../../packages/plugin-ui).
+
 ## Errors
 
 Raise `PluginError(ErrorCode.X, "message")` to choose what WeKnora sees:

@@ -218,3 +218,29 @@ func TestStoredTypeIDLength(t *testing.T) {
 		t.Fatalf("want a length error, got %v", err)
 	}
 }
+
+func TestUIContributions(t *testing.T) {
+	base := func(c Contribution) *Manifest {
+		c.ID, c.Name = "links", Text("Links", nil)
+		return &Manifest{
+			SchemaVersion: SchemaVersion, ID: "acme.x", Version: "1.0.0",
+			Name: Text("X", nil), Publisher: Publisher{ID: "acme"}, Runtime: Runtime{Type: RuntimeDeclarative},
+			Contributes: Contributions{PointPages: {c}},
+		}
+	}
+	if err := base(Contribution{Entry: "ui/index.html", MinRole: "contributor"}).Validate(); err != nil {
+		t.Fatalf("a declarative plugin may have pages: %v", err)
+	}
+	for _, c := range []Contribution{
+		{}, {Entry: "index.html"}, {Entry: "ui/../main.py"}, {Entry: "ui/app.js"}, {Entry: "ui/x.html", MinRole: "god"},
+	} {
+		if err := base(c).Validate(); err == nil {
+			t.Errorf("%+v should be refused", c)
+		}
+	}
+	if UIMinRole(PointSettingsSections, Contribution{}) != "admin" ||
+		UIMinRole(PointPages, Contribution{}) != "viewer" ||
+		UIMinRole(PointKBTabs, Contribution{MinRole: "owner"}) != "owner" {
+		t.Fatal("min role defaults")
+	}
+}
