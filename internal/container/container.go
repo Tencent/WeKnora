@@ -76,6 +76,7 @@ import (
 	plugindriver "github.com/Tencent/WeKnora/internal/plugin/driver"
 	pluginevents "github.com/Tencent/WeKnora/internal/plugin/events"
 	pluginmanifest "github.com/Tencent/WeKnora/internal/plugin/manifest"
+	pluginoauth "github.com/Tencent/WeKnora/internal/plugin/oauth"
 	"github.com/Tencent/WeKnora/internal/plugin/reconcile"
 	pluginregistry "github.com/Tencent/WeKnora/internal/plugin/registry"
 	pluginremote "github.com/Tencent/WeKnora/internal/plugin/remote"
@@ -627,6 +628,9 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(handler.NewPluginUIHandler))
 	must(container.Provide(pluginwebhook.NewTokensFromEnv))
 	must(container.Provide(handler.NewPluginWebhookHandler))
+	must(container.Provide(repository.NewPluginOAuthRepository))
+	must(container.Provide(pluginoauth.NewService))
+	must(container.Provide(handler.NewPluginFormsHandler))
 	logger.Debugf(ctx, "[Container] HTTP handlers registered")
 
 	// Wire the chat package's local image resolver so multimodal chat can read

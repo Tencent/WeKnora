@@ -28,6 +28,7 @@
         :is="resolveWidget(field.schema)"
         v-else
         :model-value="value[field.key]"
+        :path="join(field.key)"
         :schema="field.schema"
         :placeholder="text(field.schema, 'placeholder')"
         :disabled="disabled"

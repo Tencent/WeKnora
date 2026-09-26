@@ -161,3 +161,36 @@ export function getPluginConfig(id: string) {
 export function updatePluginConfig(id: string, values: ConfigValue) {
   return put<{ data: PluginConfig }>(`/api/v1/plugins/${encodeURIComponent(id)}/config`, { values })
 }
+
+/** Which configuration a plugin form edits. */
+export type PluginFormScope = 'system' | 'tenant' | 'instance'
+
+export interface PluginOptionsRequest {
+  name: string
+  field: string
+  scope: PluginFormScope
+  /** "<point>/<id>" of the instance form ("connectors/jira"). */
+  contribution?: string
+  /** The instance being edited; its stored secrets fill in redacted ones. */
+  instanceId?: string
+  /** What the form holds now, in the scope's shape. */
+  values: ConfigValue
+  query?: string
+}
+
+/** A field's choices from the plugin (x-options). */
+export function pluginFormOptions(pluginId: string, req: PluginOptionsRequest) {
+  return post<{ data: { options: Array<{ value: string; label?: string; description?: string }> } }>(
+    `/api/v1/plugins/${encodeURIComponent(pluginId)}/options`, req,
+  )
+}
+
+/** Starts connecting an x-oauth field; the tokens stay on the server. */
+export function startPluginOAuth(
+  pluginId: string,
+  req: { scope: PluginFormScope; contribution?: string; field: string },
+) {
+  return post<{ data: { authorizeUrl: string; state: string; redirectUri: string } }>(
+    `/api/v1/plugins/${encodeURIComponent(pluginId)}/oauth/start`, req,
+  )
+}

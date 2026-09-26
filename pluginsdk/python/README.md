@@ -89,6 +89,23 @@ def notes(call, req: WebhookRequest):    # req.headers, req.body, req.json()
     return WebhookResponse(status=204)
 ```
 
+**Dynamic choices.** A field with `x-options: {name: projects}` in a
+config schema gets its choices from the plugin. Return `Option`s or
+`(value, label)` pairs:
+
+```python
+@plugin.options("projects")
+def projects(call, inp: OptionsInput):
+    # inp.scope, inp.field, inp.query; the form's values are in call.tenant / call.instance
+    if not call.tenant.get("token"):
+        raise invalid_config("enter the token first", {"token": "required"})
+    return [("p1", "Project one"), ("p2", "Project two")]
+```
+
+**OAuth.** An `x-oauth` field needs no code: WeKnora runs the flow, and
+the plugin finds a fresh access token where the field is (see the
+[Go SDK README](../README.md#dynamic-choices-and-oauth)).
+
 ## Errors
 
 Raise `PluginError(ErrorCode.X, "message")` to choose what WeKnora sees:

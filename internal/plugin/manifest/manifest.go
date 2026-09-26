@@ -155,6 +155,9 @@ type Contribution struct {
 	MCP *MCPServer `json:"mcp,omitempty"            yaml:"mcp"`
 	// FileTypes are the lower-case extensions a parser handles ("pdf").
 	FileTypes []string `json:"fileTypes,omitempty"      yaml:"fileTypes"`
+	// InstanceSchemaJSON is the instanceSchema file's content as JSON,
+	// filled when the package is opened so every node can read it.
+	InstanceSchemaJSON json.RawMessage `json:"instanceSchemaJson,omitempty" yaml:"-"`
 	// Entry is the HTML page of a UI contribution (pages, settingsSections,
 	// kbTabs), a path under UIRoot.
 	Entry string `json:"entry,omitempty"          yaml:"entry"`
@@ -284,6 +287,18 @@ func (m *Manifest) validateRuntime(add func(string, ...any)) {
 		}
 		if m.Runtime.Entry == "" {
 			add("runtime.entry is required for host plugins")
+		}
+		if r := m.Runtime.Resources; r != nil {
+			if r.CPU != "" {
+				if _, err := ParseCPU(r.CPU); err != nil {
+					add("runtime.resources.%v", err)
+				}
+			}
+			if r.Memory != "" {
+				if _, err := ParseMemory(r.Memory); err != nil {
+					add("runtime.resources.%v", err)
+				}
+			}
 		}
 	default:
 		add("runtime.type %q is not one of builtin, declarative, host, remote, kubernetes", m.Runtime.Type)

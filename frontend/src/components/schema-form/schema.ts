@@ -34,6 +34,32 @@ export interface ConfigSchema {
   'x-group'?: string
   'x-order'?: number
   'x-model-types'?: string[]
+  'x-options'?: OptionsSource
+  'x-oauth'?: OAuthSpec
+}
+
+/** x-options: the field's choices come from the plugin. */
+export interface OptionsSource {
+  /** The plugin's options endpoint. */
+  name: string
+  /** Dotted paths of fields the choices depend on; they reload when those change. */
+  dependsOn?: string[]
+  /** Ask the plugin with what the user types. */
+  search?: boolean
+}
+
+/** x-oauth: the field holds a connection WeKnora authorized. */
+export interface OAuthSpec {
+  authorizeUrl: string
+  tokenUrl?: string
+  scopes?: string[]
+}
+
+/** Prefix of an x-oauth field's value (same as configschema.OAuthRefPrefix). */
+export const OAUTH_REF_PREFIX = 'oauth:'
+
+export function isOAuthRef(v: unknown): v is string {
+  return typeof v === 'string' && v.length > OAUTH_REF_PREFIX.length && v.startsWith(OAUTH_REF_PREFIX)
 }
 
 export type ConfigValue = Record<string, unknown>
@@ -237,6 +263,10 @@ function validateValue(
     case 'string': {
       if (typeof v !== 'string') return add('type')
       if (schema['x-secret'] && v === REDACTED_SECRET) return
+      if (schema['x-oauth']) {
+        if (!isOAuthRef(v)) add('format')
+        return
+      }
       const n = [...v].length
       if (schema.minLength !== undefined && n < schema.minLength) add('min_length')
       if (schema.maxLength !== undefined && n > schema.maxLength) add('max_length')
@@ -257,7 +287,8 @@ function validateValue(
       if (typeof v !== 'boolean') return add('type')
       break
   }
-  const choices = choicesOf(schema)
+  // x-options choices are the plugin's to check.
+  const choices = schema['x-options'] ? [] : choicesOf(schema)
   if (choices.length && !choices.some(c => looselyEqual(c.value, v))) add('enum')
 }
 

@@ -11,6 +11,7 @@ import { createRenderer, h, nextTick, reactive, ref } from 'vue'
 const require = createRequire(import.meta.url)
 // The dialog validates credentials with the real schema helpers.
 const schemaModule = require('../../../components/schema-form/schema.ts')
+const sourceModule = require('../../../components/schema-form/source.ts')
 const filename = fileURLToPath(new URL('./DataSourceEditorDialog.vue', import.meta.url))
 const { descriptor } = parse(readFileSync(filename, 'utf8'), { filename })
 const script = compileScript(descriptor, { id: 'datasource-editor-test' }).content
@@ -46,7 +47,10 @@ async function fixture({
             access_token: { type: 'string', title: 'Personal access token', 'x-secret': true, 'x-order': 2 },
           },
         },
-      }, { type: 'yuque', config_schema: { type: 'object', properties: {} } }]
+      }, { type: 'yuque', config_schema: { type: 'object', properties: {} } }, {
+        type: 'acme.jira/jira', plugin_id: 'acme.jira',
+        config_schema: { type: 'object', properties: { site: { type: 'string' } } },
+      }]
     },
     async validateCredentials(type: string, credentials: Record<string, string>) {
       calls.push({ method: 'validateCredentials', args: [type, { ...credentials }] })
@@ -76,6 +80,7 @@ async function fixture({
     },
   })
   const exports: any = {}
+  let formBinding: any
   runInNewContext(compiled, {
     exports,
     require(name: string) {
@@ -92,6 +97,12 @@ async function fixture({
       if (name === 'tdesign-vue-next') return { MessagePlugin: { warning() {}, success() {}, error() {} } }
       if (name === '@/api/datasource') return api
       if (name === '@/components/schema-form/schema') return schemaModule
+      if (name === '@/components/schema-form/source') {
+        return { valueAt: sourceModule.valueAt, provideSchemaFormSource() {} }
+      }
+      if (name === '@/components/schema-form/pluginSource') {
+        return { pluginFormSource: (b: unknown) => { formBinding = b; return {} } }
+      }
       if (name === '@/components/schema-form/useSchemaText') {
         return { useSchemaText: () => (schema: { title?: string }) => schema.title ?? '' }
       }
@@ -117,7 +128,9 @@ async function fixture({
     vm.form.config.credentials = { base_url: 'https://gitlab.example.com', access_token: token }
     await nextTick()
   }
-  return { vm, calls, replace, storedToken: () => storedToken, close: () => app.unmount() }
+  return {
+    vm, calls, replace, formBinding, storedToken: () => storedToken, close: () => app.unmount(),
+  }
 }
 
 test('rotated GitLab credentials are tested without updating the saved data source', async () => {
@@ -268,5 +281,23 @@ test('Cloud hierarchy limitation stays visible after an empty space expansion', 
     f.vm.resources = [{ ...f.vm.resources[0], has_children: false }]
     await nextTick()
     assert.equal(f.vm.visibleTree.some((row: any) => row.noticeAfter), true)
+  } finally { f.close() }
+})
+
+test('plugin connector forms ask the plugin behind the connector type', async () => {
+  const f = await fixture({ type: 'acme.jira/jira', settings: { project: 'p1' } })
+  try {
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    assert.deepEqual(JSON.parse(JSON.stringify(f.formBinding.target())), {
+      pluginId: 'acme.jira', scope: 'instance', contribution: 'connectors/jira', instanceId: 'source-one',
+    })
+    f.vm.form.config.credentials = { site: 'acme' }
+    assert.equal(f.formBinding.dependency('site'), 'acme')
+    assert.equal(f.formBinding.dependency('project'), 'p1')
+    assert.deepEqual(JSON.parse(JSON.stringify(f.formBinding.values())), {
+      credentials: { site: 'acme' }, settings: { project: 'p1' }, resourceIds: [],
+    })
+    f.vm.form.type = 'gitlab'
+    assert.equal(f.formBinding.target(), undefined)
   } finally { f.close() }
 })

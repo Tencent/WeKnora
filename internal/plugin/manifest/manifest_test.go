@@ -244,3 +244,24 @@ func TestUIContributions(t *testing.T) {
 		t.Fatal("min role defaults")
 	}
 }
+
+func TestResourceAmounts(t *testing.T) {
+	for in, want := range map[string]int64{"500m": 500, "0.5": 500, "2": 2000} {
+		if got, err := ParseCPU(in); err != nil || got != want {
+			t.Errorf("ParseCPU(%q) = %d, %v", in, got, err)
+		}
+	}
+	for in, want := range map[string]int64{"512Mi": 512 << 20, "1Gi": 1 << 30, "500M": 500e6, "1024": 1024} {
+		if got, err := ParseMemory(in); err != nil || got != want {
+			t.Errorf("ParseMemory(%q) = %d, %v", in, got, err)
+		}
+	}
+	for _, bad := range []string{"", "-1", "lots", "0m"} {
+		if _, err := ParseCPU(bad); err == nil {
+			t.Errorf("ParseCPU(%q) accepted", bad)
+		}
+		if _, err := ParseMemory(bad); err == nil {
+			t.Errorf("ParseMemory(%q) accepted", bad)
+		}
+	}
+}

@@ -344,3 +344,31 @@ func TestEventsAndWebhooks(t *testing.T) {
 		t.Fatalf("unknown webhook = %v", err)
 	}
 }
+
+func TestOptions(t *testing.T) {
+	ctx := context.Background()
+	p := New(Info{ID: "acme.opts", Version: "1.0.0"})
+	p.Options("projects", func(_ context.Context, call *Call, in pluginapi.OptionsInput) ([]pluginapi.Option, error) {
+		if call.Config.Tenant["token"] == nil {
+			return nil, pluginapi.InvalidConfig("enter a token first", map[string]string{"token": "required"})
+		}
+		return []pluginapi.Option{{Value: "p1", Label: "Project " + in.Query}}, nil
+	})
+	if m := p.Manifest(); m.Contributes["options"][0] != "projects" {
+		t.Fatalf("manifest = %+v", m)
+	}
+	srv := httptest.NewServer(p.Handler())
+	defer srv.Close()
+	c := client.New(srv.URL, nil, nil)
+	in := pluginapi.OptionsInput{Field: "project", Scope: "tenant", Query: "x"}
+	var out pluginapi.OptionsOutput
+	err := c.Call(ctx, pluginapi.OptionsPath("projects"), pluginapi.Envelope{}, in, &out)
+	if !isCode(err, pluginapi.CodeInvalidConfig) {
+		t.Fatalf("without a token = %v", err)
+	}
+	env := pluginapi.Envelope{Config: pluginapi.Config{Tenant: map[string]any{"token": "t"}}}
+	err = c.Call(ctx, pluginapi.OptionsPath("projects"), env, in, &out)
+	if err != nil || out.Options[0].Label != "Project x" {
+		t.Fatalf("options = %+v, %v", out, err)
+	}
+}

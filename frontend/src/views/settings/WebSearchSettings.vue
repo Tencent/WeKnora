@@ -271,6 +271,8 @@ import {
 } from '@/api/web-search-provider'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import SchemaForm from '@/components/schema-form/SchemaForm.vue'
+import { pluginFormSource } from '@/components/schema-form/pluginSource'
+import { provideSchemaFormSource } from '@/components/schema-form/source'
 import {
   inGroup,
   isPlainObject,
@@ -354,6 +356,28 @@ const selectedProviderType = computed(() => {
 const EMPTY_SCHEMA: ConfigSchema = { type: 'object', properties: {} }
 
 const parametersSchema = computed<ConfigSchema>(() => selectedProviderType.value?.config_schema ?? EMPTY_SCHEMA)
+
+// Plugin providers' x-options / x-oauth fields ask the plugin. Its schema is
+// flat: api_key plus fields the form keeps under extra_config.
+const EXTRA = 'extra_config.'
+function pluginInstanceValues(): ConfigValue {
+  const { extra_config: extra, ...rest } = providerForm.value.parameters
+  return { ...rest, ...(extra && typeof extra === 'object' ? (extra as ConfigValue) : {}) }
+}
+provideSchemaFormSource(pluginFormSource({
+  target: () => {
+    const type = selectedProviderType.value
+    if (!type?.plugin_id || !type.id.startsWith(`${type.plugin_id}/`)) return undefined
+    return {
+      pluginId: type.plugin_id,
+      scope: 'instance',
+      contribution: `webSearch/${type.id.slice(type.plugin_id.length + 1)}`,
+      instanceId: editingProvider.value?.id,
+    }
+  },
+  values: pluginInstanceValues,
+  field: path => (path.startsWith(EXTRA) ? path.slice(EXTRA.length) : path),
+}))
 
 const hasGroup = (group: string) => orderedFields(parametersSchema.value).some(f => inGroup(f.schema, group))
 

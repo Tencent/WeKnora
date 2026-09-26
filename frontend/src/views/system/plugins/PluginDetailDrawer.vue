@@ -142,6 +142,8 @@ import { MessagePlugin } from 'tdesign-vue-next'
 
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import SchemaForm from '@/components/schema-form/SchemaForm.vue'
+import { pluginFormSource } from '@/components/schema-form/pluginSource'
+import { provideSchemaFormSource } from '@/components/schema-form/source'
 import { validateConfig, type ConfigSchema, type ConfigValue, type FieldError } from '@/components/schema-form/schema'
 import { getPlugin, type PluginInstance } from '@/api/plugin'
 import {
@@ -183,6 +185,12 @@ const instances = ref<PluginInstance[]>([])
 const instanceError = ref('')
 const systemSchema = ref<ConfigSchema | null>(null)
 const configValues = ref<ConfigValue>({})
+
+// x-options / x-oauth fields of the platform configuration ask the plugin.
+provideSchemaFormSource(pluginFormSource({
+  target: () => (props.plugin ? { pluginId: props.plugin.id, scope: 'system' } : undefined),
+  values: () => configValues.value,
+}))
 const configErrors = ref<FieldError[]>([])
 const saving = ref(false)
 const activating = ref('')

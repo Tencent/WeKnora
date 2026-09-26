@@ -134,6 +134,20 @@ func (p *Package) loadConfigSchemas() error {
 		return errors.Join(errs...)
 	}
 	m.Config.SystemSchema, m.Config.TenantSchema = systemRaw, tenantRaw
+	schemas := []*configschema.Schema{system, tenant}
+	for point, list := range m.Contributes {
+		for i := range list {
+			if list[i].InstanceSchema == "" {
+				continue
+			}
+			s, raw := load(list[i].InstanceSchema)
+			m.Contributes[point][i].InstanceSchemaJSON = raw
+			schemas = append(schemas, s)
+		}
+	}
+	if len(errs) > 0 {
+		return errors.Join(errs...)
+	}
 
 	declared := func(s *configschema.Schema, key string) bool {
 		return s != nil && s.Properties[key] != nil
@@ -154,6 +168,22 @@ func (p *Package) loadConfigSchemas() error {
 					errs = append(errs, fmt.Errorf(
 						"mcpServers.%s header %s uses ${%s.%s}, which the %s schema does not declare",
 						c.ID, name, ref.Scope, ref.Key, which))
+				}
+			}
+		}
+	}
+	// An OAuth app is the platform's: its client ID and secret come from the
+	// system configuration.
+	for _, s := range schemas {
+		for path, spec := range s.OAuthFields() {
+			for _, v := range []string{spec.ClientID, spec.ClientSecret} {
+				for _, ref := range manifest.TemplateRefs(v) {
+					if ref.Scope != manifest.ScopeSystem || !declared(system, ref.Key) {
+						errs = append(errs, fmt.Errorf(
+							"%s: x-oauth client credentials may only use ${system.<key>} the config.system "+
+								"schema declares, not ${%s.%s}",
+							path, ref.Scope, ref.Key))
+					}
 				}
 			}
 		}

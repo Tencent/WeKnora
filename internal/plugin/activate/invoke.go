@@ -5,6 +5,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/plugin/configschema"
 	"github.com/Tencent/WeKnora/internal/plugin/install"
 	"github.com/Tencent/WeKnora/internal/plugin/manifest"
 	"github.com/Tencent/WeKnora/internal/plugin/tenancy"
@@ -41,6 +43,65 @@ type Invoker struct {
 	// webhooks and publicBase give plugins their workspace's webhook URLs.
 	webhooks   *webhook.Tokens
 	publicBase string
+	oauth      OAuthResolver
+}
+
+// OAuthResolver turns a form field's "oauth:<id>" into an access token.
+type OAuthResolver interface {
+	AccessToken(ctx context.Context, pluginID string, tenantID uint64, ref string) (string, error)
+}
+
+// SetOAuth lets calls carry fresh access tokens in place of OAuth
+// references.
+func (iv *Invoker) SetOAuth(r OAuthResolver) {
+	iv.mu.Lock()
+	iv.oauth = r
+	iv.mu.Unlock()
+}
+
+// resolveOAuth returns a configuration with every "oauth:<id>" string
+// replaced by the connection's access token, copying what it changes so a
+// caller's cached configuration keeps its references. A connection that is
+// gone or cannot be refreshed becomes "": the plugin sees no token and
+// reports unauthorized.
+func (iv *Invoker) resolveOAuth(
+	ctx context.Context, pluginID string, tenantID uint64, cfg map[string]any,
+) map[string]any {
+	iv.mu.RLock()
+	r := iv.oauth
+	iv.mu.RUnlock()
+	if r == nil || cfg == nil {
+		return cfg
+	}
+	var walk func(v any) any
+	walk = func(v any) any {
+		switch t := v.(type) {
+		case string:
+			if !configschema.IsOAuthRef(t) {
+				return t
+			}
+			tok, err := r.AccessToken(ctx, pluginID, tenantID, t)
+			if err != nil {
+				logger.Warnf(ctx, "[plugin] %s: OAuth connection %s: %v", pluginID, t, err)
+				return ""
+			}
+			return tok
+		case map[string]any:
+			out := make(map[string]any, len(t))
+			for k, x := range t {
+				out[k] = walk(x)
+			}
+			return out
+		case []any:
+			out := make([]any, len(t))
+			for i, x := range t {
+				out[i] = walk(x)
+			}
+			return out
+		}
+		return v
+	}
+	return walk(cfg).(map[string]any)
 }
 
 // SetWebhooks lets calls carry the workspace's webhook URLs, when WeKnora's
@@ -154,6 +215,10 @@ func (iv *Invoker) Envelope(
 		}
 		env.Config.Tenant = cfg
 	}
+	// System connections belong to the platform (tenant 0).
+	env.Config.System = iv.resolveOAuth(ctx, m.ID, 0, env.Config.System)
+	env.Config.Tenant = iv.resolveOAuth(ctx, m.ID, env.Context.TenantID, env.Config.Tenant)
+	env.Config.Instance = iv.resolveOAuth(ctx, m.ID, env.Context.TenantID, env.Config.Instance)
 	return env, nil
 }
 
@@ -192,6 +257,36 @@ func (iv *Invoker) Call(
 	env, err := iv.Envelope(ctx, m, instance)
 	if err != nil {
 		return err
+	}
+	return present(m.ID, c.Call(ctx, path, env, input, out))
+}
+
+// ConfigOverride replaces configuration scopes for one call: a form being
+// edited asks the plugin with what it holds, not what is stored. A nil scope
+// keeps the stored one.
+type ConfigOverride struct {
+	System map[string]any
+	Tenant map[string]any
+}
+
+// CallOverriding is Call with some configuration scopes replaced.
+func (iv *Invoker) CallOverriding(
+	ctx context.Context, m *manifest.Manifest, path string, instance map[string]any, override ConfigOverride,
+	input, out any,
+) error {
+	c, err := iv.clients.Client(ctx, m)
+	if err != nil {
+		return present(m.ID, err)
+	}
+	env, err := iv.Envelope(ctx, m, instance)
+	if err != nil {
+		return err
+	}
+	if override.System != nil {
+		env.Config.System = iv.resolveOAuth(ctx, m.ID, 0, override.System)
+	}
+	if override.Tenant != nil {
+		env.Config.Tenant = iv.resolveOAuth(ctx, m.ID, env.Context.TenantID, override.Tenant)
 	}
 	return present(m.ID, c.Call(ctx, path, env, input, out))
 }

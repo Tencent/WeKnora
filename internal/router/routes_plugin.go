@@ -14,7 +14,7 @@ import (
 // API keys.
 func RegisterPluginRoutes(
 	r *gin.RouterGroup, h *handler.PluginHandler, ui *handler.PluginUIHandler, hooks *handler.PluginWebhookHandler,
-	g *rbacGuards,
+	forms *handler.PluginFormsHandler, g *rbacGuards,
 ) {
 	plugins := g.apiKeyGroup(r.Group("/plugins"), apiKeyFullAccess())
 	{
@@ -36,6 +36,12 @@ func RegisterPluginRoutes(
 		// Webhook URLs carry their secret — Admin+.
 		if hooks != nil {
 			plugins.GET("/:id/webhooks", g.Admin(), hooks.List)
+		}
+		// Plugin forms are filled by workspace admins, or system admins
+		// for the platform configuration (checked per request).
+		if forms != nil {
+			plugins.POST("/:id/options", g.AdminOrSystemAdmin(), forms.Options)
+			plugins.POST("/:id/oauth/start", g.AdminOrSystemAdmin(), forms.OAuthStart)
 		}
 	}
 }

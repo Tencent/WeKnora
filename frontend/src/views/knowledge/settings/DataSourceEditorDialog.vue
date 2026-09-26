@@ -26,6 +26,8 @@ import {
   type ConfigSchema,
   type FieldError,
 } from '@/components/schema-form/schema'
+import { pluginFormSource } from '@/components/schema-form/pluginSource'
+import { provideSchemaFormSource, valueAt } from '@/components/schema-form/source'
 import { useSchemaText } from '@/components/schema-form/useSchemaText'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import DataSourceTypeIcon from './DataSourceTypeIcon.vue'
@@ -540,6 +542,27 @@ const credentialSchema = computed<ConfigSchema>(() => currentDef.value?.config_s
 // Settings form of connectors without a built-in settings UI (plugins).
 const settingsSchema = computed<ConfigSchema | null>(() => currentDef.value?.settings_schema ?? null)
 const settingsErrors = ref<FieldError[]>([])
+
+// Plugin connector fields with x-options / x-oauth ask the plugin, with the
+// instance the form holds (the stored credentials fill in what edit mode hides).
+provideSchemaFormSource(pluginFormSource({
+  target: () => {
+    const def = currentDef.value
+    if (!def?.plugin_id || !def.type.startsWith(`${def.plugin_id}/`)) return undefined
+    return {
+      pluginId: def.plugin_id,
+      scope: 'instance',
+      contribution: `connectors/${def.type.slice(def.plugin_id.length + 1)}`,
+      instanceId: props.dataSource?.id,
+    }
+  },
+  values: () => ({
+    credentials: form.value.config.credentials,
+    settings: form.value.config.settings,
+    resourceIds: form.value.config.resource_ids,
+  }),
+  dependency: path => valueAt(form.value.config.credentials, path) ?? valueAt(form.value.config.settings, path),
+}))
 const labelI18n = computed(() => ({ t: (k: string) => t(k), te: (k: string) => te(k), locale: locale.value }))
 const labelOf = (def: ConnectorMeta) => connectorName(def, labelI18n.value)
 

@@ -139,6 +139,12 @@ func (vd *validator) value(s *Schema, v any, path string) {
 			add(CodeType, "must be a string")
 			return
 		}
+		if s.OAuth != nil {
+			if str != "" && !IsOAuthRef(str) {
+				add(CodeFormat, "must be connected through its OAuth button")
+			}
+			return
+		}
 		validateString(s, str, add)
 	case TypeNumber, TypeInteger:
 		n, ok := toFloat(v)

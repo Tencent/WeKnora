@@ -85,6 +85,13 @@ def on_event(call, ev):
     seen_events.append((ev.id, ev.type, ev.attempt, call.tenant_id, (ev.data or {}).get("knowledgeId")))
 
 
+@plugin.options("projects")
+def projects(call, inp):
+    if not call.tenant.get("token"):
+        raise invalid_config("enter a token first", {"token": "required"})
+    return [("p1", f"Project {inp.query}"), ("p2", "Other")]
+
+
 @plugin.webhook("inbox")
 def inbox(call, req):
     if req.headers.get("X-Signature") != "ok":

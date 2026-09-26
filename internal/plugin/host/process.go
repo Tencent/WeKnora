@@ -278,12 +278,17 @@ func (p *process) launch(ctx context.Context, entry string) (*launched, error) {
 		return nil, fmt.Errorf("start %s: %w", filepath.Base(entry), err)
 	}
 	id := p.spec.m.ID + "@" + p.spec.m.Version
+	releaseLimits := applyLimits(cmd.Process.Pid, id, limitsFor(p.spec.m))
 	handshake := make(chan pluginapi.Handshake, 1)
 	hsErr := make(chan error, 1)
 	go forwardLogs(stderr, id, nil, nil)
 	go forwardLogs(stdout, id, handshake, hsErr)
 	exited := make(chan error, 1)
-	go func() { exited <- cmd.Wait() }()
+	go func() {
+		err := cmd.Wait()
+		releaseLimits()
+		exited <- err
+	}()
 
 	kill := func() {
 		stopChild(cmd, exited)
