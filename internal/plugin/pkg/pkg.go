@@ -7,6 +7,7 @@ package pkg
 import (
 	"archive/zip"
 	"bytes"
+	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
@@ -22,6 +23,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/plugin/configschema"
 	"github.com/Tencent/WeKnora/internal/plugin/manifest"
+	"github.com/Tencent/WeKnora/pluginsdk/pluginsign"
 )
 
 // ManifestFile is the manifest's name at the package root.
@@ -42,8 +44,20 @@ type Package struct {
 	// cached under it.
 	Digest string
 	// Size is the archive size in bytes.
-	Size  int64
-	files map[string][]byte
+	Size int64
+	// Signature is the package's plugin.sig, nil when it is unsigned. It is
+	// only a claim until VerifySignature checks it against a trusted key.
+	Signature *pluginsign.Signature
+	files     map[string][]byte
+}
+
+// VerifySignature checks the package's signature with the public key of the
+// key it names.
+func (p *Package) VerifySignature(pub ed25519.PublicKey) error {
+	if p.Signature == nil {
+		return errors.New("the package is not signed")
+	}
+	return p.Signature.Verify(p.files, pub)
 }
 
 // Open reads and validates a package archive. Archives whose content sits in
@@ -87,7 +101,7 @@ func Open(data []byte) (*Package, error) {
 		}
 		files[name] = b
 	}
-	files = stripSingleRoot(files)
+	files = pluginsign.StripSingleRoot(files)
 
 	raw, ok := files[ManifestFile]
 	if !ok {
@@ -97,8 +111,15 @@ func Open(data []byte) (*Package, error) {
 	if err != nil {
 		return nil, err
 	}
+	sig, err := pluginsign.Read(files)
+	if err != nil {
+		return nil, err
+	}
 	sum := sha256.Sum256(data)
-	p := &Package{Manifest: m, Digest: "sha256:" + hex.EncodeToString(sum[:]), Size: int64(len(data)), files: files}
+	p := &Package{
+		Manifest: m, Digest: "sha256:" + hex.EncodeToString(sum[:]), Size: int64(len(data)),
+		Signature: sig, files: files,
+	}
 	if err := p.checkReferences(); err != nil {
 		return nil, err
 	}
@@ -299,27 +320,6 @@ func cleanName(name string) (string, error) {
 		return "", fmt.Errorf("package entry %q escapes the package root", name)
 	}
 	return clean, nil
-}
-
-// stripSingleRoot drops a single top-level directory shared by every file,
-// unless the manifest already sits at the root.
-func stripSingleRoot(files map[string][]byte) map[string][]byte {
-	if _, ok := files[ManifestFile]; ok || len(files) == 0 {
-		return files
-	}
-	var root string
-	for name := range files {
-		top, _, found := strings.Cut(name, "/")
-		if !found || (root != "" && top != root) {
-			return files
-		}
-		root = top
-	}
-	out := make(map[string][]byte, len(files))
-	for name, b := range files {
-		out[strings.TrimPrefix(name, root+"/")] = b
-	}
-	return out
 }
 
 // maxIconBytes caps the icon carried in the manifest; a larger one is left

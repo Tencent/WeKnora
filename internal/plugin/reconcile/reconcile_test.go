@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/plugin/manifest"
+	"github.com/Tencent/WeKnora/internal/plugin/pkg"
 	"github.com/Tencent/WeKnora/internal/plugin/plugintest"
 	"github.com/Tencent/WeKnora/internal/plugin/registry"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -111,6 +112,32 @@ func TestReconcileReportsFailures(t *testing.T) {
 	}
 	if _, ok := reg.Plugin("acme.kit"); ok {
 		t.Fatal("a package that failed verification must not be registered")
+	}
+}
+
+// A package the platform refuses (below its minimum trust) fails with the
+// reason and is not fetched again every pass.
+func TestAdmitRefusesPackages(t *testing.T) {
+	ctx := context.Background()
+	repo, store, reg, act := plugintest.NewMemRepo(), &plugintest.MemStore{}, registry.New(), &recorder{}
+	calls := 0
+	r := New(Options{
+		Repo: repo, Store: store, Registry: reg, CacheDir: t.TempDir(), Activators: []Activator{act},
+		Admit: func(*pkg.Package) error { calls++; return fmt.Errorf("below the minimum trust") },
+	})
+	plugintest.Install(t, repo, store, plugintest.KitPackage(t, "1.0.0"), types.PluginStateEnabled)
+	if err := r.Reconcile(ctx); err == nil || !strings.Contains(err.Error(), "minimum trust") {
+		t.Fatalf("want admit error, got %v", err)
+	}
+	if s, _ := r.Status("acme.kit"); s.State != StateFailed || !strings.Contains(s.Error, "minimum trust") {
+		t.Fatalf("status = %+v", s)
+	}
+	if _, ok := reg.Plugin("acme.kit"); ok || len(act.calls) != 0 {
+		t.Fatalf("a refused package was loaded: %v", act.calls)
+	}
+	_ = r.Reconcile(ctx)
+	if calls != 1 {
+		t.Fatalf("admit ran %d times; a refused version waits for a change", calls)
 	}
 }
 

@@ -97,6 +97,14 @@
           <li v-for="v in versions" :key="v.version">
             <span class="version">v{{ v.version }}</span>
             <code class="line-list__muted">{{ shortDigest(v.digest) }}</code>
+            <t-tag
+              size="small"
+              variant="light"
+              :theme="trustTheme(v.trust)"
+              :title="v.signer_key_id ? t('pluginAdmin.trust.signedBy', { key: v.signer_key_id }) : undefined"
+            >
+              {{ t(`pluginAdmin.trust.${v.trust || 'community'}`) }}
+            </t-tag>
             <span class="line-list__muted">{{ formatBytes(v.size) }} · {{ formatDate(v.created_at) }}</span>
             <t-tag v-if="v.version === plugin.active_version" size="small" variant="light" theme="primary">
               {{ t('pluginAdmin.detail.active') }}
@@ -165,6 +173,7 @@ import {
   isPackageUrl,
   shortDigest,
   sortVersions,
+  trustTheme,
 } from '../pluginManagementState'
 
 const props = defineProps<{ visible: boolean; plugin: InstalledPlugin | null }>()

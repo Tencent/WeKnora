@@ -7,6 +7,20 @@ import type { PluginConfig, PluginManifest } from '@/api/plugin'
 const BASE = '/api/v1/system/admin/plugins'
 const PACKAGE_TIMEOUT = 5 * 60 * 1000
 
+/**
+ * How far the platform trusts a package, from its signature: official and
+ * verified packages are signed by a key in the platform's trust store.
+ */
+export type TrustLevel = 'official' | 'verified' | 'community'
+
+export interface TrustVerdict {
+  level: TrustLevel
+  /** The key that signed the package, trusted or not. */
+  keyId?: string
+  /** The signing key is in the platform's trust store. */
+  trusted?: boolean
+}
+
 /** What installing a package would do. */
 export type InstallChange = 'install' | 'upgrade' | 'downgrade' | 'reinstall'
 
@@ -15,6 +29,7 @@ export interface PluginPreview {
   digest: string
   size: number
   change: InstallChange
+  trust: TrustVerdict
   installedVersion?: string
 }
 
@@ -24,6 +39,9 @@ export interface PluginVersion {
   digest: string
   manifest: PluginManifest
   size: number
+  /** Trust when the version was stored; older rows read community. */
+  trust?: TrustLevel
+  signer_key_id?: string
   created_by: string
   created_at: string
 }

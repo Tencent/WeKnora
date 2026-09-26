@@ -27,6 +27,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/plugin/manifest"
 	"github.com/Tencent/WeKnora/internal/plugin/pkg"
 	"github.com/Tencent/WeKnora/internal/plugin/reconcile"
+	"github.com/Tencent/WeKnora/internal/plugin/trust"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/Tencent/WeKnora/internal/utils"
@@ -92,6 +93,7 @@ type Service struct {
 	hostVersion string
 	client      *http.Client
 	checks      []PackageCheck
+	trust       *trust.Store
 }
 
 // PackageCheck is a domain's install-time verdict on a package, such as
@@ -104,6 +106,13 @@ func (s *Service) WithChecks(checks ...PackageCheck) *Service {
 	return s
 }
 
+// WithTrust sets the trust store packages are judged by; without one every
+// package is community and accepted.
+func (s *Service) WithTrust(store *trust.Store) *Service {
+	s.trust = store
+	return s
+}
+
 // NewService creates a Service. hostVersion is the running WeKnora version
 // that engines ranges are checked against.
 func NewService(
@@ -111,9 +120,10 @@ func NewService(
 ) *Service {
 	cfg := utils.DefaultSSRFSafeHTTPClientConfig()
 	cfg.Timeout = 2 * time.Minute
+	anyTrust, _ := trust.NewStore(nil, trust.Community)
 	return &Service{
 		repo: repo, store: store, sync: sync, hostVersion: hostVersion,
-		client: utils.NewSSRFSafeHTTPClient(cfg),
+		client: utils.NewSSRFSafeHTTPClient(cfg), trust: anyTrust,
 	}
 }
 
@@ -134,6 +144,8 @@ type Preview struct {
 	Digest   string             `json:"digest"`
 	Size     int64              `json:"size"`
 	Change   Change             `json:"change"`
+	// Trust is how far the platform trusts the package, from its signature.
+	Trust trust.Verdict `json:"trust"`
 	// InstalledVersion is the active version when the plugin is installed.
 	InstalledVersion string `json:"installedVersion,omitempty"`
 }
@@ -158,11 +170,11 @@ type View struct {
 
 // Inspect opens a package and says what installing it would do.
 func (s *Service) Inspect(ctx context.Context, data []byte) (*Preview, error) {
-	p, err := s.open(data)
+	p, verdict, err := s.open(data)
 	if err != nil {
 		return nil, err
 	}
-	out := &Preview{Manifest: p.Manifest, Digest: p.Digest, Size: p.Size, Change: ChangeInstall}
+	out := &Preview{Manifest: p.Manifest, Digest: p.Digest, Size: p.Size, Change: ChangeInstall, Trust: verdict}
 	row, err := s.repo.GetPlugin(ctx, p.Manifest.ID)
 	if err != nil {
 		return nil, err
@@ -181,30 +193,40 @@ func (s *Service) Inspect(ctx context.Context, data []byte) (*Preview, error) {
 	return out, nil
 }
 
-// open validates a package for installation on this platform.
-func (s *Service) open(data []byte) (*pkg.Package, error) {
+// open validates a package for installation on this platform and says how
+// far it is trusted.
+func (s *Service) open(data []byte) (*pkg.Package, trust.Verdict, error) {
 	p, err := pkg.Open(data)
 	if err != nil {
-		return nil, &InvalidError{Err: err}
+		return nil, trust.Verdict{}, &InvalidError{Err: err}
 	}
+	verdict, err := s.trust.Check(p)
+	if err != nil {
+		return nil, verdict, &InvalidError{Err: err}
+	}
+	return p, verdict, s.check(p)
+}
+
+// check applies the platform's runtime, engine and domain checks.
+func (s *Service) check(p *pkg.Package) error {
 	if !supportedRuntimes[p.Manifest.Runtime.Type] {
-		return nil, invalid("runtime %q is not supported yet; declarative, host and remote plugins can be installed",
+		return invalid("runtime %q is not supported yet; declarative, host and remote plugins can be installed",
 			p.Manifest.Runtime.Type)
 	}
 	if p.Manifest.Runtime.Type == manifest.RuntimeHost {
 		if err := checkHostRuntime(p); err != nil {
-			return nil, err
+			return err
 		}
 	}
 	if err := p.Manifest.CheckEngines(s.hostVersion); err != nil {
-		return nil, &InvalidError{Err: err}
+		return &InvalidError{Err: err}
 	}
 	for _, check := range s.checks {
 		if err := check(p); err != nil {
-			return nil, &InvalidError{Err: err}
+			return &InvalidError{Err: err}
 		}
 	}
-	return p, nil
+	return nil
 }
 
 // Request installs or upgrades a plugin from a package.
@@ -225,7 +247,7 @@ type Request struct {
 // tenant still opts in. The permissions the manifest asks for are recorded
 // as granted.
 func (s *Service) Install(ctx context.Context, req Request) (*View, error) {
-	p, err := s.open(req.Data)
+	p, verdict, err := s.open(req.Data)
 	if err != nil {
 		return nil, err
 	}
@@ -250,7 +272,8 @@ func (s *Service) Install(ctx context.Context, req Request) (*View, error) {
 		manifestJSON, _ := json.Marshal(m)
 		if err := s.repo.SaveVersion(ctx, &types.PluginVersion{
 			PluginID: m.ID, Version: m.Version, Digest: p.Digest, Manifest: types.JSON(manifestJSON),
-			PackageURI: uri, Size: p.Size, CreatedBy: req.UserID, CreatedAt: time.Now(),
+			PackageURI: uri, Size: p.Size, Trust: string(verdict.Level), SignerKeyID: verdict.KeyID,
+			CreatedBy: req.UserID, CreatedAt: time.Now(),
 		}); err != nil {
 			return nil, err
 		}
@@ -289,7 +312,7 @@ func (s *Service) Install(ctx context.Context, req Request) (*View, error) {
 	if err := s.repo.SavePlugin(ctx, row); err != nil {
 		return nil, err
 	}
-	logger.Infof(ctx, "[plugin] %s installed %s %s (%s)", req.UserID, m.ID, m.Version, p.Digest)
+	logger.Infof(ctx, "[plugin] %s installed %s %s (%s, %s)", req.UserID, m.ID, m.Version, p.Digest, verdict.Level)
 	v, err := s.apply(ctx, m.ID)
 	if v != nil {
 		v.IssuedSecret = issued
@@ -497,6 +520,9 @@ func (s *Service) Activate(ctx context.Context, id, version string) (*View, erro
 	}
 	if v == nil {
 		return nil, invalid("version %s of %s is not stored", version, id)
+	}
+	if err := s.trust.Admit(trust.Level(v.Trust)); err != nil {
+		return nil, &InvalidError{Err: err}
 	}
 	var m manifest.Manifest
 	if err := json.Unmarshal(v.Manifest, &m); err == nil {

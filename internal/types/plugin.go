@@ -44,10 +44,14 @@ type PluginVersion struct {
 	Digest   string `json:"digest" gorm:"type:varchar(80)"`
 	Manifest JSON   `json:"manifest" gorm:"type:json"`
 	// PackageURI is where the archive is stored (FileService path).
-	PackageURI string    `json:"-" gorm:"type:varchar(1024)"`
-	Size       int64     `json:"size"`
-	CreatedBy  string    `json:"created_by" gorm:"type:varchar(36)"`
-	CreatedAt  time.Time `json:"created_at"`
+	PackageURI string `json:"-" gorm:"type:varchar(1024)"`
+	Size       int64  `json:"size"`
+	// Trust is how far the package was trusted when stored: community,
+	// verified or official. SignerKeyID names the key that signed it.
+	Trust       string    `json:"trust" gorm:"type:varchar(16)"`
+	SignerKeyID string    `json:"signer_key_id,omitempty" gorm:"type:varchar(128)"`
+	CreatedBy   string    `json:"created_by" gorm:"type:varchar(36)"`
+	CreatedAt   time.Time `json:"created_at"`
 }
 
 // TableName pins the table so GORM's pluralizer cannot drift.

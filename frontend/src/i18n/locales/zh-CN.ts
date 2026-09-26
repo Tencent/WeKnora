@@ -5295,6 +5295,14 @@ export default {
       downgrade: '从 v{from} 降级',
       reinstall: '重新安装'
     },
+    trust: {
+      official: '官方',
+      verified: '已验证',
+      community: '社区',
+      signedBy: '由 {key} 签名',
+      untrustedKey: '由未受信任的密钥 {key} 签名，按社区插件对待',
+      unsigned: '未签名，按社区插件对待'
+    },
     permission: {
       anyHost: '任意公网地址',
       remote: '访问远程服务',

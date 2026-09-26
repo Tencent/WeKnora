@@ -81,6 +81,7 @@ import (
 	pluginregistry "github.com/Tencent/WeKnora/internal/plugin/registry"
 	pluginremote "github.com/Tencent/WeKnora/internal/plugin/remote"
 	plugintenancy "github.com/Tencent/WeKnora/internal/plugin/tenancy"
+	plugintrust "github.com/Tencent/WeKnora/internal/plugin/trust"
 	pluginwebhook "github.com/Tencent/WeKnora/internal/plugin/webhook"
 	"github.com/Tencent/WeKnora/internal/router"
 	"github.com/Tencent/WeKnora/internal/sandbox"
@@ -619,6 +620,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(repository.NewPluginRepository))
 	must(container.Invoke(bindPluginActivators))
 	must(container.Provide(newPluginPackageStore))
+	must(container.Provide(plugintrust.FromEnv))
 	must(container.Provide(newPluginReconciler))
 	must(container.Invoke(startPluginReconciler))
 	must(container.Provide(newPluginInstaller))

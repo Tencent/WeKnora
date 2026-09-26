@@ -2,6 +2,7 @@ package install
 
 import (
 	"context"
+	"crypto/ed25519"
 	"errors"
 	"os"
 	goruntime "runtime"
@@ -11,8 +12,10 @@ import (
 	"github.com/Tencent/WeKnora/internal/plugin/plugintest"
 	"github.com/Tencent/WeKnora/internal/plugin/reconcile"
 	"github.com/Tencent/WeKnora/internal/plugin/registry"
+	"github.com/Tencent/WeKnora/internal/plugin/trust"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/utils"
+	"github.com/Tencent/WeKnora/pluginsdk/pluginsign"
 )
 
 func newService(t *testing.T) (*Service, *plugintest.MemRepo, *plugintest.MemStore, *registry.Registry) {
@@ -257,5 +260,43 @@ func TestInstallRemotePlugins(t *testing.T) {
 	}
 	if _, err := s.RotateSecret(ctx, "acme.none"); !errors.Is(err, ErrNotInstalled) {
 		t.Fatalf("rotating a missing plugin = %v", err)
+	}
+}
+
+func TestInstallRecordsTrustAndEnforcesTheMinimum(t *testing.T) {
+	ctx := context.Background()
+	s, repo, _, _ := newService(t)
+	pub, priv, _ := ed25519.GenerateKey(nil)
+	store, err := trust.NewStore([]trust.Key{{ID: "market", PublicKey: pub, Level: trust.Verified}}, trust.Community)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.WithTrust(store)
+
+	signed, err := pluginsign.SignArchive(plugintest.KitPackage(t, "1.1.0"), "market", priv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	preview, err := s.Inspect(ctx, signed)
+	if err != nil || preview.Trust.Level != trust.Verified || preview.Trust.KeyID != "market" {
+		t.Fatalf("signed preview = %+v, %v", preview, err)
+	}
+	if _, err := s.Install(ctx, Request{Data: plugintest.KitPackage(t, "1.0.0")}); err != nil {
+		t.Fatalf("community install under a community minimum: %v", err)
+	}
+	if _, err := s.Install(ctx, Request{Data: signed}); err != nil {
+		t.Fatalf("signed install: %v", err)
+	}
+	if v, _ := repo.GetVersion(ctx, "acme.kit", "1.1.0"); v.Trust != "verified" || v.SignerKeyID != "market" {
+		t.Fatalf("stored version = %+v", v)
+	}
+
+	strict, _ := trust.NewStore([]trust.Key{{ID: "market", PublicKey: pub, Level: trust.Verified}}, trust.Verified)
+	s.WithTrust(strict)
+	if _, err := s.Inspect(ctx, plugintest.KitPackage(t, "1.2.0")); !isInvalid(err) {
+		t.Fatalf("an unsigned package under a verified minimum: %v", err)
+	}
+	if _, err := s.Activate(ctx, "acme.kit", "1.0.0"); !isInvalid(err) {
+		t.Fatalf("rolling back to a community version under a verified minimum: %v", err)
 	}
 }

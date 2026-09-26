@@ -65,12 +65,18 @@
             <t-tag size="small" variant="light" :theme="changeTheme">
               {{ t(`pluginAdmin.change.${preview.change}`, { from: preview.installedVersion ?? '' }) }}
             </t-tag>
+            <t-tag size="small" variant="light" :theme="trustTheme(preview.trust.level)">
+              {{ t(`pluginAdmin.trust.${preview.trust.level}`) }}
+            </t-tag>
           </div>
           <div class="review-head__meta">
             {{ preview.manifest.id }} · v{{ preview.manifest.version }} · {{ formatBytes(preview.size) }}
           </div>
           <div class="review-head__meta">
             {{ t('pluginAdmin.publisher') }}: {{ preview.manifest.publisher.name || preview.manifest.publisher.id }}
+          </div>
+          <div class="review-head__meta">
+            {{ t(`pluginAdmin.trust.${signature.key}`, { key: signature.keyId }) }}
           </div>
           <p v-if="description" class="review-head__desc">{{ description }}</p>
         </div>
@@ -155,6 +161,8 @@ import {
   permissionLines,
   remoteHosts,
   remoteUrlReady,
+  trustNote,
+  trustTheme,
 } from '../pluginManagementState'
 import { hasTenantConfig } from '../../settings/pluginCenterState'
 
@@ -220,6 +228,7 @@ const permissions = computed(() => permissionLines(preview.value?.manifest.permi
 const hosts = computed(() => (preview.value ? remoteHosts(preview.value.manifest) : []))
 const description = computed(() => (preview.value ? localizedText(preview.value.manifest.description, locale.value) : ''))
 const icon = computed(() => pluginIconUrl(preview.value?.manifest))
+const signature = computed(() => trustNote(preview.value?.trust ?? { level: 'community' }))
 const initial = computed(() =>
   (preview.value ? localizedText(preview.value.manifest.name, locale.value) : '?').trim().charAt(0).toUpperCase(),
 )

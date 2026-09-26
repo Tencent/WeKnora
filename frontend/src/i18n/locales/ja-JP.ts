@@ -2774,6 +2774,14 @@ export default {
       downgrade: 'v{from} からダウングレード',
       reinstall: '再インストール'
     },
+    trust: {
+      official: '公式',
+      verified: '検証済み',
+      community: 'コミュニティ',
+      signedBy: '{key} により署名',
+      untrustedKey: '信頼されていない鍵 {key} により署名。コミュニティ扱い',
+      unsigned: '署名なし。コミュニティ扱い'
+    },
     permission: {
       anyHost: '任意の公開ホスト',
       remote: 'リモートサービス',

@@ -14,6 +14,8 @@ import {
   remoteHosts,
   remoteUrlReady,
   shortDigest,
+  trustNote,
+  trustTheme,
   sortVersions,
 } from './pluginManagementState'
 
@@ -88,4 +90,13 @@ test('remoteUrlReady asks a new remote plugin for its service URL', () => {
   assert.equal(remoteUrlReady(remote('upgrade'), 'nope'), false)
   assert.equal(remoteUrlReady({ manifest: { runtime: { type: 'host' } }, change: 'install' }, ''), true)
   assert.equal(remoteUrlReady(null, ''), true)
+})
+
+test('trust tags and signature notes', () => {
+  assert.equal(trustTheme('official'), 'success')
+  assert.equal(trustTheme('verified'), 'primary')
+  assert.equal(trustTheme(undefined), 'default')
+  assert.deepEqual(trustNote({ level: 'community' }), { key: 'unsigned', keyId: '' })
+  assert.deepEqual(trustNote({ level: 'community', keyId: 'x' }), { key: 'untrustedKey', keyId: 'x' })
+  assert.deepEqual(trustNote({ level: 'verified', keyId: 'm', trusted: true }), { key: 'signedBy', keyId: 'm' })
 })

@@ -9,6 +9,7 @@ connectors and document parsers that run as their own process. The module has no
 | `pluginsdk` | Write a plugin: register contributions, then `Serve`. |
 | `client` | Call a plugin, as WeKnora does. |
 | `conformance`, `cmd/weknora-plugin-conformance` | Check that a plugin speaks the protocol. |
+| `pluginsign`, `cmd/weknora-plugin` | Sign a package and verify a signature. |
 
 Writing Python? [`python/`](python/README.md) is the same SDK for Python
 3.9+, with only the standard library.
@@ -357,6 +358,24 @@ Complete plugins with their `package.sh`:
 - `examples/plugins/jira`: a Jira Cloud connector with an OAuth field, dynamic
   options, incremental sync with deletions; agent tools with result views; and
   a skill.
+
+## Signing
+
+A signed package tells WeKnora who published it. A platform that lists your
+public key in its trust store shows the package as verified (or official)
+and, if it only accepts verified plugins, lets it install at all. An unsigned
+package is a community package.
+
+```bash
+go install github.com/Tencent/WeKnora/pluginsdk/cmd/weknora-plugin@latest
+weknora-plugin keygen -out acme.key     # prints the public key: ed25519:...
+weknora-plugin sign -key acme.key -key-id acme-2026 acme-search-1.0.0.wkp
+weknora-plugin verify -pubkey ed25519:... acme-search-1.0.0.wkp
+```
+
+`sign` adds `plugin.sig` to the package. The signature covers every other
+file, so sign last and publish the digest of the signed package. Keep the
+private key out of the repository.
 
 ## Testing
 

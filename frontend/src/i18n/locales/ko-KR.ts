@@ -5293,6 +5293,14 @@ export default {
       downgrade: 'v{from}에서 다운그레이드',
       reinstall: '재설치'
     },
+    trust: {
+      official: '공식',
+      verified: '검증됨',
+      community: '커뮤니티',
+      signedBy: '{key} 서명',
+      untrustedKey: '신뢰하지 않는 키 {key}로 서명됨. 커뮤니티로 취급',
+      unsigned: '서명 없음. 커뮤니티로 취급'
+    },
     permission: {
       anyHost: '모든 공개 호스트',
       remote: '원격 서비스',

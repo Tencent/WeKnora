@@ -2774,6 +2774,14 @@ export default {
       downgrade: 'Downgrade from v{from}',
       reinstall: 'Reinstall'
     },
+    trust: {
+      official: 'Official',
+      verified: 'Verified',
+      community: 'Community',
+      signedBy: 'Signed by {key}',
+      untrustedKey: 'Signed by {key}, a key this platform does not trust; treated as community',
+      unsigned: 'Unsigned; treated as community'
+    },
     permission: {
       anyHost: 'Any public host',
       remote: 'Remote service',

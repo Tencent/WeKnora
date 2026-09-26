@@ -107,6 +107,7 @@ type Reconciler struct {
 	interval   time.Duration
 	runtimes   map[string]bool
 	accept     func(*manifest.Manifest) bool
+	admit      func(*pkg.Package) error
 	role       string
 
 	mu      sync.Mutex // serializes passes
@@ -158,6 +159,10 @@ type Options struct {
 	// Accept further limits the node by the active version's manifest (a
 	// plugin host that runs python plugins only); nil accepts all.
 	Accept func(*manifest.Manifest) bool
+	// Admit is the last word on a package before it loads, such as the
+	// platform's minimum trust level; nil admits all. A refused plugin
+	// fails with the reason in its status.
+	Admit func(*pkg.Package) error
 	// Role names what the node is in status reports, e.g. "plugin-host".
 	Role string
 }
@@ -180,7 +185,7 @@ func New(o Options) *Reconciler {
 	return &Reconciler{
 		repo: o.Repo, store: o.Store, registry: o.Registry, cacheDir: o.CacheDir, rdb: o.Redis,
 		activators: o.Activators, instanceID: uuid.NewString(), interval: o.Interval,
-		runtimes: runtimes, accept: o.Accept, role: o.Role,
+		runtimes: runtimes, accept: o.Accept, admit: o.Admit, role: o.Role,
 		loaded: map[string]*Loaded{}, digests: map[string]string{}, retries: map[string]retry{},
 		status: map[string]Status{}, now: time.Now,
 	}
@@ -291,6 +296,17 @@ func (r *Reconciler) ensure(ctx context.Context, row types.InstalledPlugin) erro
 	}
 	if p.Manifest.ID != row.ID {
 		return fmt.Errorf("package is plugin %s, not %s", p.Manifest.ID, row.ID)
+	}
+	if r.admit != nil {
+		if err := r.admit(p); err != nil {
+			if _, had := r.loaded[row.ID]; had {
+				r.unload(ctx, row.ID)
+			}
+			// The verdict holds until the version or the platform's
+			// settings change; do not fetch the package every pass.
+			r.retries[row.ID] = retry{key: loadKey, attempts: 1, next: r.now().Add(retryCeiling)}
+			return err
+		}
 	}
 	dir, err := r.extract(p)
 	if err != nil {

@@ -5293,6 +5293,14 @@ export default {
       downgrade: 'Откат с v{from}',
       reinstall: 'Переустановка'
     },
+    trust: {
+      official: 'Официальный',
+      verified: 'Проверенный',
+      community: 'Сообщество',
+      signedBy: 'Подписан ключом {key}',
+      untrustedKey: 'Подписан недоверенным ключом {key}; считается пакетом сообщества',
+      unsigned: 'Без подписи; считается пакетом сообщества'
+    },
     permission: {
       anyHost: 'Любой публичный хост',
       remote: 'Удалённый сервис',

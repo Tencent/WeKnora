@@ -24,10 +24,12 @@ import (
 	"github.com/Tencent/WeKnora/internal/plugin/install"
 	"github.com/Tencent/WeKnora/internal/plugin/manifest"
 	pluginoauth "github.com/Tencent/WeKnora/internal/plugin/oauth"
+	"github.com/Tencent/WeKnora/internal/plugin/pkg"
 	"github.com/Tencent/WeKnora/internal/plugin/reconcile"
 	pluginregistry "github.com/Tencent/WeKnora/internal/plugin/registry"
 	"github.com/Tencent/WeKnora/internal/plugin/remote"
 	plugintenancy "github.com/Tencent/WeKnora/internal/plugin/tenancy"
+	plugintrust "github.com/Tencent/WeKnora/internal/plugin/trust"
 	"github.com/Tencent/WeKnora/internal/plugin/webhook"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/Tencent/WeKnora/pluginsdk/client"
@@ -205,18 +207,31 @@ func newPluginReconciler(
 	reg *pluginregistry.Registry,
 	rdb *redis.Client,
 	activators pluginActivators,
+	trusted *plugintrust.Store,
 ) *reconcile.Reconciler {
 	return reconcile.New(reconcile.Options{
 		Repo: repo, Store: store, Registry: reg, Redis: rdb, Activators: activators.list(),
+		Admit: admitTrusted(trusted),
 	})
+}
+
+// admitTrusted loads only packages at or above the platform's minimum trust
+// level, so raising it also stops plugins installed before.
+func admitTrusted(trusted *plugintrust.Store) func(*pkg.Package) error {
+	return func(p *pkg.Package) error {
+		_, err := trusted.Check(p)
+		return err
+	}
 }
 
 func newPluginInstaller(
 	repo interfaces.PluginRepository,
 	store reconcile.PackageStore,
 	r *reconcile.Reconciler,
+	trusted *plugintrust.Store,
 ) *install.Service {
-	return install.NewService(repo, store, r, handler.Version).WithChecks(activate.CheckModelVendors)
+	return install.NewService(repo, store, r, handler.Version).
+		WithChecks(activate.CheckModelVendors).WithTrust(trusted)
 }
 
 // startPluginReconciler loads installed plugins before the server takes

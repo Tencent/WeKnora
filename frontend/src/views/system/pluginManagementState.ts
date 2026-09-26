@@ -1,7 +1,7 @@
 // Pure helpers behind PluginManagement.vue, kept free of Vue so they run
 // under node:test.
 import type { ExtensionPoint, PluginManifest, PluginPermissions } from '../../api/plugin'
-import type { InstalledPlugin, PluginVersion } from '../../api/system/plugins'
+import type { InstalledPlugin, PluginVersion, TrustLevel, TrustVerdict } from '../../api/system/plugins'
 import { localizedText } from '../../utils/localizedText'
 import { EXTENSION_POINTS } from '../settings/pluginCenterState'
 
@@ -23,6 +23,19 @@ export function formatBytes(n: number): string {
 export function shortDigest(digest: string): string {
   const hex = digest.replace(/^sha256:/, '')
   return hex.slice(0, 12)
+}
+
+/** The tag theme of a trust level: official and verified stand out. */
+export function trustTheme(level: TrustLevel | undefined): 'success' | 'primary' | 'default' {
+  if (level === 'official') return 'success'
+  if (level === 'verified') return 'primary'
+  return 'default'
+}
+
+/** What a package's signature says, as a pluginAdmin.trust message. */
+export function trustNote(v: TrustVerdict): { key: 'signedBy' | 'untrustedKey' | 'unsigned'; keyId: string } {
+  if (!v.keyId) return { key: 'unsigned', keyId: '' }
+  return { key: v.trusted ? 'signedBy' : 'untrustedKey', keyId: v.keyId }
 }
 
 /** One line of what a package would add, for the install review. */

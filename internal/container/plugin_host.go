@@ -20,6 +20,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/plugin/manifest"
 	"github.com/Tencent/WeKnora/internal/plugin/reconcile"
 	pluginregistry "github.com/Tencent/WeKnora/internal/plugin/registry"
+	plugintrust "github.com/Tencent/WeKnora/internal/plugin/trust"
 )
 
 // Standalone plugin host settings.
@@ -74,10 +75,15 @@ func RunPluginHost(ctx context.Context) error {
 	if u, err := url.Parse(hostAPI); err == nil && u.Hostname() != "" {
 		mgr.SetDirectHosts(u.Hostname())
 	}
+	trusted, err := plugintrust.FromEnv()
+	if err != nil {
+		return err
+	}
 	r := reconcile.New(reconcile.Options{
 		Repo: repository.NewPluginRepository(db), Store: store, Registry: pluginregistry.New(), Redis: rdb,
 		Activators: []reconcile.Activator{mgr}, Runtimes: []manifest.RuntimeType{manifest.RuntimeHost},
 		Accept: func(m *manifest.Manifest) bool { return mgr.Runs(m.Runtime.Kind) }, Role: "plugin-host",
+		Admit: admitTrusted(trusted),
 	})
 	mgr.SetReporter(r)
 

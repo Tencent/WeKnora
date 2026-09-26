@@ -31,6 +31,44 @@
 
 同一插件再次安装更高版本即升级，旧版本保留，可在详情中回滚。
 
+### 插件签名与信任等级
+
+插件包可以带签名（包根目录的 `plugin.sig`）。WeKnora 按签名把插件包分为三级，安装审阅页和版本列表中会标出：
+
+| 等级 | 含义 |
+|---|---|
+| 官方（official） | 由平台信任列表中 `official` 级的密钥签名，通常是 WeKnora 团队 |
+| 已验证（verified） | 由平台信任列表中 `verified` 级的密钥签名，例如审核过插件的市场或平台认可的发布者 |
+| 社区（community） | 未签名，或签名密钥不在信任列表中 |
+
+签名覆盖包内除 `plugin.sig` 外的所有文件。签名存在但对不上（文件被改过、签名伪造，或密钥签了它无权签的发布者），安装直接被拒绝。
+
+信任列表是一个 YAML 文件，路径由 `WEKNORA_PLUGIN_TRUSTED_KEYS` 指定：
+
+```yaml
+keys:
+  - id: weknora-2026            # 签名时使用的密钥 ID
+    publicKey: ed25519:BASE64...  # weknora-plugin keygen 输出的公钥
+    level: official
+  - id: acme-2026
+    publicKey: ed25519:BASE64...
+    level: verified
+    publishers: [acme]          # 可选：只认该发布者的插件
+```
+
+`WEKNORA_PLUGIN_MIN_TRUST` 设置平台接受的最低等级，默认 `community`（全部接受）。调高后，低于该等级的插件包不能安装，也不能切换到这类版本；已安装的不再加载，详情中显示原因。
+
+发布者用 SDK 自带的命令行生成密钥并签名：
+
+```bash
+go install github.com/Tencent/WeKnora/pluginsdk/cmd/weknora-plugin@latest
+weknora-plugin keygen -out acme.key          # 输出公钥，交给平台管理员
+weknora-plugin sign -key acme.key -key-id acme-2026 acme-search-1.0.0.wkp
+weknora-plugin verify -pubkey ed25519:... acme-search-1.0.0.wkp
+```
+
+签名会改变插件包的摘要，请在签名之后再计算或公布摘要。
+
 ### 远程插件
 
 `runtime.type: remote` 的插件在安装时还需填写服务地址：
