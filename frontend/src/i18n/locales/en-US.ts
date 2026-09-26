@@ -2955,6 +2955,7 @@ export default {
       webSearch: 'Web search',
       tools: 'Agent tools',
       parsers: 'Document parsing',
+      chunkers: 'Chunkers',
       skills: 'Skills',
       mcpServers: 'MCP servers',
       pages: 'Pages',
@@ -4095,10 +4096,15 @@ export default {
       parentChunkSizeDescription: 'Size of the context chunk returned to the LLM (512–8192). Default 4096 ≈ 1000 English tokens, fits comfortably in any modern LLM context window.',
       childChunkSizeLabel: 'Child Chunk Size',
       childChunkSizeDescription: 'Size of the embedded chunk used for vector match (64–2048). Default 384 ≈ 80 tokens — sweet spot for sentence-transformer / BGE-style embedders.',
+      pluginStrategy: 'Provided by plugin {id}; the builtin strategies take over when it cannot answer.',
       strategyLabel: 'Chunking Strategy',
       strategyDescription: 'Choose how documents are split into chunks. The Automatic mode profiles each document and picks the best strategy.',
       strategyPlaceholder: 'Select a chunking strategy (splits by length if left empty)',
       strategies: {
+        plugin: {
+          label: 'Plugin chunker',
+          tooltip: 'A plugin decides where to cut.'
+        },
         auto: {
           label: 'Automatic',
           tooltip: 'A document profiler picks between heading-aware, structure-aware and length-based splitting per upload.'

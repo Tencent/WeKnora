@@ -42,7 +42,7 @@ func Split(text string, cfg SplitterConfig) []Chunk {
 	var lastOut []Chunk
 	for i, tier := range chain {
 		out := runTier(tier, text, cfg, profile)
-		if v := ValidateChunks(out, totalChars, cfg.ChunkSize); v.OK {
+		if v := validateTier(tier, out, totalChars, cfg.ChunkSize); v.OK {
 			return out
 		} else {
 			logger.Debugf(context.Background(), "chunker: tier %s rejected: %s", tier, v.Reason)
@@ -102,7 +102,7 @@ func SplitWithDiagnostics(text string, cfg SplitterConfig) ([]Chunk, *Diagnostic
 	var lastTier StrategyTier
 	for i, tier := range chain {
 		out := runTier(tier, text, cfg, profile)
-		v := ValidateChunks(out, totalChars, cfg.ChunkSize)
+		v := validateTier(tier, out, totalChars, cfg.ChunkSize)
 		if v.OK {
 			diag.SelectedTier = tier
 			return out, diag
@@ -148,6 +148,11 @@ func SplitParentChildWithDiagnostics(text string, parentCfg, childCfg SplitterCo
 func splitParentChild(text string, parentCfg, childCfg SplitterConfig, withDiagnostics bool) (ParentChildResult, *Diagnostics) {
 	parentCfg = ensureDefaults(parentCfg)
 	childCfg = ensureDefaults(childCfg)
+	// A plugin chunker cuts the parents; asking it again for every parent's
+	// children would be a call per parent, so children use the profiler.
+	if IsPluginStrategy(childCfg.Strategy) {
+		childCfg.Strategy, childCfg.external = StrategyAuto, nil
+	}
 
 	var (
 		parents []Chunk
@@ -230,6 +235,7 @@ func DeriveParentChildConfigs(base SplitterConfig, parentSize, childSize int) (p
 		Separators:   base.Separators,
 		Strategy:     base.Strategy,
 		Languages:    base.Languages,
+		external:     base.external,
 	}
 	child = SplitterConfig{
 		ChunkSize:    childSize,
@@ -287,9 +293,23 @@ func resolveChainWithProfile(text string, cfg SplitterConfig) ([]StrategyTier, *
 	case StrategyAuto:
 		fallthrough
 	default:
+		// A plugin's chunker goes first; if it cannot answer, the
+		// profiler's choice takes over.
 		profile := ProfileDocument(text)
-		return SelectStrategy(profile), profile
+		chain := SelectStrategy(profile)
+		if IsPluginStrategy(cfg.Strategy) && cfg.external != nil {
+			chain = append([]StrategyTier{TierPlugin}, chain...)
+		}
+		return chain, profile
 	}
+}
+
+// validateTier checks one tier's output.
+func validateTier(tier StrategyTier, out []Chunk, totalChars, chunkSize int) ValidationResult {
+	if tier == TierPlugin {
+		return validatePluginChunks(out, chunkSize)
+	}
+	return ValidateChunks(out, totalChars, chunkSize)
 }
 
 // runTier dispatches the splitter implementation for the given tier.
@@ -309,6 +329,8 @@ func runTier(tier StrategyTier, text string, cfg SplitterConfig, profile *DocPro
 		return splitByHeuristics(text, cfg, profile)
 	case TierLegacy:
 		return SplitText(text, cfg)
+	case TierPlugin:
+		return splitByPlugin(text, cfg)
 	}
 	return SplitText(text, cfg)
 }

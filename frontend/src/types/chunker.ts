@@ -2,7 +2,7 @@
 // produced by internal/handler/chunker_debug.go. Used by the KB editor's
 // chunking debug panel to render tier-info / chunk-cards / size stats.
 
-export type StrategyTier = 'heading' | 'heuristic' | 'recursive' | 'legacy'
+export type StrategyTier = 'heading' | 'heuristic' | 'recursive' | 'legacy' | 'plugin'
 
 export interface TierRejection {
   tier: StrategyTier

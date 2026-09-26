@@ -5,7 +5,7 @@ import { localizedText } from '../../utils/localizedText'
 
 /** Extension points in the order the plugin center shows them. */
 export const EXTENSION_POINTS: ExtensionPoint[] = [
-  'modelVendors', 'connectors', 'imChannels', 'webSearch', 'tools', 'parsers', 'skills', 'mcpServers',
+  'modelVendors', 'connectors', 'imChannels', 'webSearch', 'tools', 'parsers', 'chunkers', 'skills', 'mcpServers',
   'pages', 'settingsSections', 'kbTabs', 'webhooks',
 ]
 

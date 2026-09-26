@@ -15,6 +15,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/handler"
+	"github.com/Tencent/WeKnora/internal/infrastructure/chunker"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/plugin/activate"
 	pluginevents "github.com/Tencent/WeKnora/internal/plugin/events"
@@ -98,13 +99,14 @@ func newPluginHostAPI(
 // services exist.
 func bindPluginActivators(
 	a pluginActivators, t *plugintenancy.Service, repo interfaces.PluginRepository,
-	skills *service.TenantSkillService,
+	skills *service.TenantSkillService, reg *pluginregistry.Registry,
 ) {
 	a.MCP.Bind(t, repo)
 	a.MCP.SetInvoker(a.Invoker)
 	a.Invoker.Bind(t, repo)
 	a.Skills.Bind(t)
 	skills.SetPluginSkills(a.Skills)
+	chunker.SetPluginSplitter(activate.PluginChunker(a.Invoker, reg, t))
 }
 
 // newPluginHostManager is this node's embedded plugin host. It runs the

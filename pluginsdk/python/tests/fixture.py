@@ -10,6 +10,7 @@ import time
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src"))
 
 from weknora_plugin import (  # noqa: E402
+    ChunkSpan,
     Cursor,
     ErrorCode,
     FetchedItem,
@@ -54,6 +55,17 @@ def parse(call, doc):
         images=[ParsedImage(original_ref="img/dot.png", data=b"\x89PNG", mime_type="image/png")],
         metadata={"fileType": doc.file_type},
     )
+
+
+@plugin.chunker("paragraphs")
+def paragraphs(call, inp):
+    if inp.text == "out of range":
+        return [(0, 100)]
+    spans, start = [], 0
+    for part in inp.text.split("\n\n"):
+        spans.append(ChunkSpan(start=start, end=start + len(part), context_header=f"size {inp.chunk_size}"))
+        start += len(part) + 2
+    return spans
 
 
 @plugin.connector("notes")

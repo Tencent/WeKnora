@@ -84,7 +84,7 @@ func (r *pluginRepository) GetVersion(ctx context.Context, pluginID, version str
 // SaveVersion inserts or updates the row keyed by (plugin_id, version).
 func (r *pluginRepository) SaveVersion(ctx context.Context, v *types.PluginVersion) error {
 	return r.db.WithContext(ctx).Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "plugin_id"}, {Name: "version"}},
+		Columns: []clause.Column{{Name: "plugin_id"}, {Name: "version"}},
 		DoUpdates: clause.AssignmentColumns([]string{
 			"digest", "manifest", "package_uri", "size", "trust", "signer_key_id", "created_by",
 		}),

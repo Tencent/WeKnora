@@ -23,6 +23,8 @@ from . import protocol as p
 from .host import Host
 from .protocol import ErrorCode, PluginError
 from .types import (
+    ChunkInput,
+    ChunkSpan,
     ConnectorConfig,
     Cursor,
     FetchInput,
@@ -165,6 +167,7 @@ class Stream:
 
 WebSearchFunc = Callable[[Call, SearchInput], List[SearchResult]]
 ParserFunc = Callable[[Call, ParseInput], ParseOutput]
+ChunkerFunc = Callable[[Call, ChunkInput], List[ChunkSpan]]
 ConfigValidator = Callable[[Call], None]
 UIHandler = Callable[[Call, UIRequest], Any]
 EventHandler = Callable[[Call, EventDelivery], None]
@@ -175,7 +178,7 @@ ToolHandler = Callable[[Call, dict], Any]
 #: The MCP revision plugins speak.
 MCP_PROTOCOL_VERSION = "2025-06-18"
 
-_ROUTE = re.compile(r"^/v1/(websearch|connectors|parsers)/([^/]+)/([a-z-]+)$")
+_ROUTE = re.compile(r"^/v1/(websearch|connectors|parsers|chunkers)/([^/]+)/([a-z-]+)$")
 
 
 class Plugin:
@@ -189,6 +192,7 @@ class Plugin:
         self._web_search: Dict[str, WebSearchFunc] = {}
         self._connectors: Dict[str, Any] = {}
         self._parsers: Dict[str, ParserFunc] = {}
+        self._chunkers: Dict[str, ChunkerFunc] = {}
         self._validate: Optional[ConfigValidator] = None
         self._ui: Optional[UIHandler] = None
         self._events: Optional[EventHandler] = None
@@ -219,6 +223,11 @@ class Plugin:
         """Registers parser id: fn(call, ParseInput) returns a ParseOutput
         (or the Markdown as a str)."""
         return self._register(self._parsers, id, fn)
+
+    def chunker(self, id: str, fn: Optional[ChunkerFunc] = None) -> Any:
+        """Registers chunker id: fn(call, ChunkInput) returns where to cut,
+        a list of ChunkSpan (or (start, end) pairs) indexing input.text."""
+        return self._register(self._chunkers, id, fn)
 
     def connector(self, id: str, connector: Any = None) -> Any:
         """Registers connector id: an object with validate(call, cfg),
@@ -319,6 +328,7 @@ class Plugin:
             ("webSearch", self._web_search),
             ("connectors", self._connectors),
             ("parsers", self._parsers),
+            ("chunkers", self._chunkers),
             ("webhooks", self._webhooks),
             ("options", self._options),
             ("mcpServers", self._mcp),
@@ -400,6 +410,18 @@ class Plugin:
                 h._send_error(PluginError(ErrorCode.NOT_FOUND, f"no parser {cid!r}"))
             else:
                 self._unary(h, body, lambda call, raw: _parse_output(fn(call, from_wire(ParseInput, raw))))
+            return True
+        if point == "chunkers" and action == "split":
+            fn = self._chunkers.get(cid)
+            if fn is None:
+                h._send_error(PluginError(ErrorCode.NOT_FOUND, f"no chunker {cid!r}"))
+            else:
+
+                def split(call: Call, raw: Any) -> Any:
+                    inp = from_wire(ChunkInput, raw)
+                    return {"chunks": _chunk_output(fn(call, inp), len(inp.text))}
+
+                self._unary(h, body, split)
             return True
         if point == "connectors" and action in ("validate", "list-resources", "resolve-ancestors", "fetch"):
             c = self._connectors.get(cid)
@@ -621,6 +643,17 @@ def _ui_output(out: Any) -> Any:
     if out.body is not None:
         wire["body"] = to_wire(out.body)
     return wire
+
+
+def _chunk_output(out: Any, n: int) -> list:
+    spans = []
+    for s in out or []:
+        if not isinstance(s, ChunkSpan):
+            s = ChunkSpan(start=s[0], end=s[1])
+        if s.start < 0 or s.end <= s.start or s.end > n:
+            raise PluginError(ErrorCode.INTERNAL, f"chunk [{s.start}, {s.end}) is outside the {n}-character text")
+        spans.append(s)
+    return spans
 
 
 def _parse_output(out: Any) -> Any:

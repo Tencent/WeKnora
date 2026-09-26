@@ -83,6 +83,29 @@ references: return them in `Images` with an `OriginalRef` matching the
 `rate_limited`) to have the document retried later; any other error fails
 it for good.
 
+## Chunkers
+
+A chunker decides where a knowledge base's documents are cut. Workspaces
+pick it as the chunking strategy (`plugin:acme.legal/clauses`). Return spans
+of the text in characters (runes); WeKnora takes the text itself, and falls
+back to its own strategies if the chunker fails.
+
+```go
+p.Chunker("clauses", pluginsdk.ChunkerFunc(
+	func(ctx context.Context, call *pluginsdk.Call, in pluginapi.ChunkInput) ([]pluginapi.ChunkSpan, error) {
+		return splitAtClauses([]rune(in.Text), in.ChunkSize), nil
+	}))
+```
+
+```yaml
+contributes:
+  chunkers:
+    - { id: clauses, name: { en-US: By clause } }
+```
+
+In Python, `@plugin.chunker("clauses")` returns `ChunkSpan`s or
+`(start, end)` pairs; string indices are already characters.
+
 ## Pages
 
 A plugin can add pages to the app:

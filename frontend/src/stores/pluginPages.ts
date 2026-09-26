@@ -2,7 +2,12 @@ import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 
 import { listContributions, type ContributionListing, type ExtensionPoint } from '@/api/plugin'
-import { findContribution, switchedOffContribution, switchedOffIcon } from '@/extensions/pluginContributions'
+import {
+  chunkerStrategies,
+  findContribution,
+  switchedOffContribution,
+  switchedOffIcon,
+} from '@/extensions/pluginContributions'
 import { useAuthStore } from '@/stores/auth'
 import { pagesOf, type PagePoint, type PluginPage } from '@/extensions/pluginFrame/pluginPages'
 
@@ -59,6 +64,8 @@ export const usePluginPagesStore = defineStore('pluginPages', () => {
     /** The icon of that switched-off plugin, for instance lists. */
     switchedOffIcon: (point: ExtensionPoint, typeId: string | undefined) =>
       switchedOffIcon(listing.value, point, typeId),
+    /** Plugin chunkers as chunking strategy choices. */
+    chunkers: (locale: string, current?: string) => chunkerStrategies(listing.value, locale, current),
     pages: visible('pages'),
     settingsSections: visible('settingsSections'),
     kbTabs: visible('kbTabs'),

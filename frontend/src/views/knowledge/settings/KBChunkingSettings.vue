@@ -216,6 +216,7 @@ import { ref, watch, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ChevronRightIcon } from 'tdesign-icons-vue-next'
 import KBChunkingDebug from './KBChunkingDebug.vue'
+import { usePluginPagesStore } from '@/stores/pluginPages'
 
 interface ParserEngineRule {
   file_types: string[]
@@ -273,7 +274,7 @@ const emit = defineEmits<{
   'update:config': [value: ChunkingConfig]
 }>()
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 
 const localChunkSize = ref(props.config.chunkSize)
 const localChunkOverlap = ref(props.config.chunkOverlap)
@@ -285,6 +286,9 @@ const localStrategy = ref(props.config.strategy ?? '')
 const localTokenLimit = ref(props.config.tokenLimit ?? 0)
 const localLanguages = ref<string[]>([...(props.config.languages ?? [])])
 const advancedOpen = ref(false)
+
+const pluginPages = usePluginPagesStore()
+void pluginPages.ensure().catch(() => {})
 
 const strategyOptions = computed(() => [
   {
@@ -306,7 +310,14 @@ const strategyOptions = computed(() => [
     label: t('knowledgeEditor.chunking.strategies.legacy.label'),
     value: 'legacy',
     tooltip: t('knowledgeEditor.chunking.strategies.legacy.tooltip')
-  }
+  },
+  // Chunkers of the workspace's plugins; the builtin tiers take over when
+  // one cannot answer.
+  ...pluginPages.chunkers(locale.value, localStrategy.value).map((c) => ({
+    label: c.enabled ? c.label : `${c.label} (${t('pluginOff.label')})`,
+    value: c.value,
+    tooltip: [c.tooltip, t('knowledgeEditor.chunking.pluginStrategy', { id: c.pluginId })].filter(Boolean).join(' '),
+  })),
 ])
 
 const currentStrategyInfo = computed(() => {

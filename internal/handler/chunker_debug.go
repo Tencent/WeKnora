@@ -158,6 +158,7 @@ func PreviewChunking(c *gin.Context) {
 		TokenLimit:   req.ChunkingConfig.TokenLimit,
 		Languages:    req.ChunkingConfig.Languages,
 	})
+	cfg = chunker.WithPlugins(c.Request.Context(), cfg)
 
 	// Run the splitter on a goroutine so we can honor the request timeout.
 	// The splitter is CPU-bound and doesn't accept a context — wrapping

@@ -4173,6 +4173,7 @@ export default {
       parentChunkSizeDescription: '返回给 LLM 的上下文块大小（512-8192）。默认 4096 ≈ 1000 英文 tokens，适合所有现代 LLM 上下文窗口。',
       childChunkSizeLabel: '子块大小',
       childChunkSizeDescription: '用于向量匹配的嵌入块大小（64-2048）。默认 384 ≈ 80 tokens，是 sentence-transformer / BGE 类嵌入模型的最佳点。',
+      pluginStrategy: '由插件 {id} 提供；插件无法处理时改用内置策略。',
       strategyLabel: '分块策略',
       strategyDescription: '选择文档的分块方式。自动模式会分析每个文档的结构并选择最佳策略。',
       strategyPlaceholder: '选择分块策略（不填则按长度切分）',
@@ -4221,6 +4222,10 @@ export default {
         zh: '中文'
       },
       strategies: {
+        plugin: {
+          label: '插件分块器',
+          tooltip: '由插件决定切分位置。'
+        },
         legacy: {
           label: '按长度切分',
           tooltip: '忽略结构，仅按字符数和分隔符递归切分——原始行为。当上述策略对你的内容效果不佳时使用。'
@@ -5478,6 +5483,7 @@ export default {
       webSearch: '联网搜索',
       tools: 'Agent 工具',
       parsers: '文档解析',
+      chunkers: '分块器',
       skills: '技能',
       mcpServers: 'MCP 服务',
       pages: '页面',

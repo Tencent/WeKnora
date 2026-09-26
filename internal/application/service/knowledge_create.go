@@ -1344,6 +1344,9 @@ func (s *knowledgeService) triggerManualProcessing(ctx context.Context,
 
 	// Manual content is markdown - chunk directly with Go chunker
 	chunkCfg := buildSplitterConfigFromChunking(eff.ChunkingConfig)
+	// A plugin chunker, when the knowledge base picked one, cuts for this
+	// workspace.
+	chunkCfg = chunker.WithPlugins(ctx, chunkCfg)
 
 	var parsed []types.ParsedChunk
 	opts := ProcessChunksOptions{

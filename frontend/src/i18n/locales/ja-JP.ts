@@ -2955,6 +2955,7 @@ export default {
       webSearch: 'Web 検索',
       tools: 'エージェントツール',
       parsers: 'ドキュメント解析',
+      chunkers: 'チャンカー',
       skills: 'スキル',
       mcpServers: 'MCP サーバー',
       pages: 'ページ',
@@ -4095,10 +4096,15 @@ export default {
       parentChunkSizeDescription: 'LLMに返すコンテキストチャンクのサイズ（512〜8192）。デフォルトの4096は英語で約1000トークンで、最近のLLMのコンテキストウィンドウに十分収まります。',
       childChunkSizeLabel: '子チャンクのサイズ',
       childChunkSizeDescription: 'ベクトル一致に使う埋め込み対象チャンクのサイズ（64〜2048）。デフォルトの384は約80トークンで、sentence-transformerやBGE系の埋め込みモデルに最適です。',
+      pluginStrategy: 'プラグイン {id} が提供。処理できない場合は組み込みの戦略を使います。',
       strategyLabel: 'チャンク分割戦略',
       strategyDescription: 'ドキュメントをチャンクに分割する方法を選択します。自動モードはドキュメントごとに特性を分析し、最適な戦略を選びます。',
       strategyPlaceholder: 'チャンク分割戦略を選択（空欄の場合は文字数で分割）',
       strategies: {
+        plugin: {
+          label: 'プラグインのチャンカー',
+          tooltip: 'プラグインが分割位置を決めます。'
+        },
         auto: {
           label: '自動',
           tooltip: 'ドキュメントの特性分析により、アップロードごとに見出しベース・構造ベース・文字数ベースの分割を選び分けます。'

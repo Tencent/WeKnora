@@ -80,6 +80,7 @@ class PluginTest(unittest.TestCase):
                     "webSearch": ["echo"],
                     "connectors": ["notes"],
                     "parsers": ["upper"],
+                    "chunkers": ["paragraphs"],
                     "webhooks": ["inbox"],
                     "options": ["projects"],
                     "mcpServers": ["issues"],
@@ -125,6 +126,16 @@ class PluginTest(unittest.TestCase):
         self.assertTrue(out["markdown"].startswith("HELLO"))
         self.assertEqual(out["images"], [{"originalRef": "img/dot.png", "data": base64.b64encode(b"\x89PNG").decode(), "mimeType": "image/png"}])
         self.assertEqual(out["metadata"], {"fileType": "txt"})
+
+    def test_chunker(self):
+        status, body = self.c.call("/v1/chunkers/paragraphs/split", {"text": "第一段\n\nsecond", "chunkSize": 300})
+        self.assertEqual(status, 200)
+        self.assertEqual(
+            body["output"]["chunks"],
+            [{"start": 0, "end": 3, "contextHeader": "size 300"}, {"start": 5, "end": 11, "contextHeader": "size 300"}],
+        )
+        status, body = self.c.call("/v1/chunkers/paragraphs/split", {"text": "out of range"})
+        self.assertEqual(body["error"]["code"], "internal")
 
     def test_events(self):
         from fixture import seen_events

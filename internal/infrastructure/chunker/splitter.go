@@ -71,6 +71,10 @@ type SplitterConfig struct {
 	TokenLimit int
 	// Languages hints multilingual heuristic patterns. Empty = auto-detect.
 	Languages []string
+
+	// external reaches the plugin chunker a "plugin:" Strategy names; set
+	// by WithPlugins for the calling workspace.
+	external func(chunker, text string, cfg SplitterConfig) ([]Span, error)
 }
 
 // Default chunk sizing constants. Single source of truth for the entire

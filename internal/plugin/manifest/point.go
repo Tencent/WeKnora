@@ -13,6 +13,9 @@ const (
 	PointWebSearch    Point = "webSearch"
 	PointTools        Point = "tools"
 	PointParsers      Point = "parsers"
+	// PointChunkers contributes chunking strategies a knowledge base can
+	// pick: the plugin says where to cut, WeKnora takes the text.
+	PointChunkers Point = "chunkers"
 	// PointSkills contributes SKILL.md skill directories from the package.
 	PointSkills Point = "skills"
 	// PointMCPServers contributes MCP servers whose tools agents can use.
@@ -60,6 +63,7 @@ var points = []PointInfo{
 	{Point: PointWebSearch, ThirdParty: true},
 	{Point: PointTools},
 	{Point: PointParsers, ThirdParty: true},
+	{Point: PointChunkers, ThirdParty: true},
 	{Point: PointSkills, ThirdParty: true, Declarative: true},
 	{Point: PointMCPServers, ThirdParty: true, Declarative: true},
 	// Pages are static files; a plugin with code can also answer their

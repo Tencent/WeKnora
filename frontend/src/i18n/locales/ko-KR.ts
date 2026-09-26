@@ -4171,6 +4171,7 @@ export default {
       parentChunkSizeDescription: 'LLM에 반환되는 컨텍스트 청크 크기 (512-8192). 기본값 4096 ≈ 1000 영어 토큰, 모든 현대 LLM 컨텍스트에 적합.',
       childChunkSizeLabel: '자식 청크 크기',
       childChunkSizeDescription: '벡터 매칭에 사용되는 임베딩 청크 크기 (64-2048). 기본값 384 ≈ 80 토큰 — sentence-transformer / BGE 임베더의 최적점.',
+      pluginStrategy: '플러그인 {id} 제공. 처리할 수 없으면 기본 전략을 사용합니다.',
       strategyLabel: '청킹 전략',
       strategyDescription: '문서를 청크로 분할하는 방법을 선택합니다. 자동 모드는 문서를 프로파일링하여 최적의 전략을 선택합니다.',
       strategyPlaceholder: '청킹 전략 선택 (비워 두면 길이로 분할)',
@@ -4219,6 +4220,10 @@ export default {
         zh: '중국어'
       },
       strategies: {
+        plugin: {
+          label: '플러그인 청커',
+          tooltip: '플러그인이 자를 위치를 정합니다.'
+        },
         legacy: {
           label: '길이 기준',
           tooltip: '구조를 무시하고 문자 수와 구분자로만 재귀 분할합니다 — 원래 동작. 위 전략들이 콘텐츠에서 잘못 작동할 때 사용하세요.'
@@ -5476,6 +5481,7 @@ export default {
       webSearch: '웹 검색',
       tools: '에이전트 도구',
       parsers: '문서 파싱',
+      chunkers: '청커',
       skills: '스킬',
       mcpServers: 'MCP 서버',
       pages: '페이지',

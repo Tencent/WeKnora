@@ -2,7 +2,13 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import type { ContributionListing } from '../api/plugin'
-import { findContribution, safeIconData, switchedOffContribution, switchedOffIcon } from './pluginContributions'
+import {
+  chunkerStrategies,
+  findContribution,
+  safeIconData,
+  switchedOffContribution,
+  switchedOffIcon,
+} from './pluginContributions'
 
 const listing = {
   points: [],
@@ -41,4 +47,25 @@ test('switched-off plugins lend their icon to their instances', () => {
   assert.equal(switchedOffIcon(withIcons, 'connectors', 'acme.jira/jira'), 'data:image/png;base64,iVBOR')
   assert.equal(switchedOffIcon(withIcons, 'connectors', 'notion'), undefined, 'the plugin is on')
   assert.equal(switchedOffIcon(listing, 'connectors', 'acme.jira/jira'), undefined)
+})
+
+test('chunkerStrategies lists switched-on chunkers and the current one', () => {
+  const listing = {
+    points: [],
+    contributions: {
+      chunkers: [
+        { id: 'clauses', qualifiedId: 'acme.legal/clauses', pluginId: 'acme.legal', enabled: true, name: { default: 'By clause', 'zh-CN': '按条款' } },
+        { id: 'pages', qualifiedId: 'acme.pdf/pages', pluginId: 'acme.pdf', enabled: false, name: { default: 'By page' } },
+      ],
+    },
+  } as unknown as ContributionListing
+  assert.deepEqual(chunkerStrategies(listing, 'zh-CN').map((c) => [c.value, c.label]), [
+    ['plugin:acme.legal/clauses', '按条款'],
+  ])
+  const withCurrent = chunkerStrategies(listing, 'en-US', 'plugin:acme.pdf/pages')
+  assert.deepEqual(withCurrent.map((c) => [c.value, c.enabled]), [
+    ['plugin:acme.legal/clauses', true],
+    ['plugin:acme.pdf/pages', false],
+  ])
+  assert.deepEqual(chunkerStrategies(null, 'en-US'), [])
 })

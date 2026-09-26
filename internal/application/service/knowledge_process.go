@@ -3924,6 +3924,9 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 	// Step 3: Split into chunks using Go chunker. Line endings and inline
 	// HTML tables were normalized before image resolution above.
 	chunkCfg := buildSplitterConfigFromChunking(eff.ChunkingConfig)
+	// A plugin chunker, when the knowledge base picked one, cuts for this
+	// workspace.
+	chunkCfg = chunker.WithPlugins(ctx, chunkCfg)
 
 	processOpts := ProcessChunksOptions{
 		EnableQuestionGeneration: payload.EnableQuestionGeneration,

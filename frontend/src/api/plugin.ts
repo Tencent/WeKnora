@@ -12,6 +12,7 @@ export type ExtensionPoint =
   | 'webSearch'
   | 'tools'
   | 'parsers'
+  | 'chunkers'
   | 'skills'
   | 'mcpServers'
   | 'pages'

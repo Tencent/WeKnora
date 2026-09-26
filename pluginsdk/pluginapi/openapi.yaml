@@ -189,6 +189,34 @@ paths:
                 required: [output]
                 properties: { output: { $ref: "#/components/schemas/ParseOutput" } }
         default: { $ref: "#/components/responses/Error" }
+  /v1/chunkers/{id}/split:
+    post:
+      summary: Say where to cut a document into chunks
+      description: |
+        For knowledge bases whose chunking strategy is this chunker. Answer
+        spans of the text as [start, end) offsets in characters (Unicode
+        code points); WeKnora takes each chunk's text from the document. An
+        error, or a span outside the text, sends chunking back to the
+        builtin strategies.
+      parameters: [{ $ref: "#/components/parameters/ContributionID" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/Envelope"
+                - properties: { input: { $ref: "#/components/schemas/ChunkInput" } }
+      responses:
+        "200":
+          description: Where to cut
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [output]
+                properties: { output: { $ref: "#/components/schemas/ChunkOutput" } }
+        default: { $ref: "#/components/responses/Error" }
   /v1/ui/request:
     post:
       summary: Answer a request from one of the plugin's pages
@@ -488,6 +516,29 @@ components:
               mimeType: { type: string }
               data: { type: string, contentEncoding: base64 }
         metadata: { type: object, additionalProperties: { type: string } }
+    ChunkInput:
+      type: object
+      required: [text]
+      properties:
+        text: { type: string, description: The document as Markdown }
+        chunkSize: { type: integer, description: Target chunk length in characters }
+        chunkOverlap: { type: integer }
+        separators: { type: array, items: { type: string } }
+        tokenLimit: { type: integer, description: Cap in approximate tokens, when set }
+        languages: { type: array, items: { type: string } }
+    ChunkOutput:
+      type: object
+      required: [chunks]
+      properties:
+        chunks:
+          type: array
+          items:
+            type: object
+            required: [start, end]
+            properties:
+              start: { type: integer, description: First character (code point) of the chunk }
+              end: { type: integer, description: One past the last character }
+              contextHeader: { type: string, description: Prepended for embedding, such as its headings }
     OptionsInput:
       type: object
       required: [field, scope]

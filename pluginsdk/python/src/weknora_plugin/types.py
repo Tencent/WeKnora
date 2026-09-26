@@ -231,6 +231,29 @@ class ParseOutput:
 
 
 @dataclass
+class ChunkInput:
+    """A document (Markdown) to cut into chunks, with the knowledge base's
+    chunking settings as hints. Sizes count characters."""
+
+    text: str = ""
+    chunk_size: int = 0
+    chunk_overlap: int = 0
+    separators: List[str] = field(default_factory=list)
+    token_limit: int = 0
+    languages: List[str] = field(default_factory=list)
+
+
+@dataclass
+class ChunkSpan:
+    """One chunk: text[start:end] in characters (Python string indices).
+    context_header is prepended for embedding, such as its headings."""
+
+    start: int
+    end: int
+    context_header: str = ""
+
+
+@dataclass
 class KVEntry:
     key: str
     value: Any = None

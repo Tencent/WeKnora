@@ -63,6 +63,7 @@ type Plugin struct {
 	webSearch  map[string]WebSearcher
 	connectors map[string]Connector
 	parsers    map[string]Parser
+	chunkers   map[string]Chunker
 	ui         UIHandler
 	events     EventHandler
 	webhooks   map[string]WebhookHandler
@@ -82,6 +83,7 @@ func New(info Info) *Plugin {
 		webSearch:       map[string]WebSearcher{},
 		connectors:      map[string]Connector{},
 		parsers:         map[string]Parser{},
+		chunkers:        map[string]Chunker{},
 		webhooks:        map[string]WebhookHandler{},
 		options:         map[string]OptionsHandler{},
 		mcp:             map[string]*mcpServer{},
@@ -111,6 +113,7 @@ func (p *Plugin) Manifest() pluginapi.Manifest {
 	add("webSearch", keys(p.webSearch))
 	add("connectors", keys(p.connectors))
 	add("parsers", keys(p.parsers))
+	add("chunkers", keys(p.chunkers))
 	add("webhooks", keys(p.webhooks))
 	add("options", keys(p.options))
 	add("mcpServers", keys(p.mcp))
@@ -155,6 +158,7 @@ func (p *Plugin) Handler() http.Handler {
 	p.routeWebSearch(mux)
 	p.routeConnectors(mux)
 	p.routeParsers(mux)
+	p.routeChunkers(mux)
 	p.routeUI(mux)
 	p.routeEvents(mux)
 	p.routeOptions(mux)
