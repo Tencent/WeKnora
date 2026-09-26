@@ -9,9 +9,9 @@ from __future__ import annotations
 import re
 from urllib.parse import urlparse
 
-from weknora_plugin import ErrorCode, Plugin, PluginError, UIResponse
+from weknora_plugin import KV_MAX_VALUE_BYTES, ErrorCode, Plugin, PluginError, UIResponse, kv_value_size
 
-plugin = Plugin("weknora-examples.links", "1.1.0")
+plugin = Plugin("weknora-examples.links", "1.1.1")
 
 MAX_LINKS = 200
 EDITORS = {"contributor", "admin", "owner"}
@@ -32,6 +32,14 @@ def clean_links(value) -> list:
         if parsed.scheme not in ("http", "https") or not parsed.netloc:
             raise ValueError(f"{url or 'an empty url'} is not an http(s) link")
         out.append({"title": title or parsed.netloc, "url": url[:2000]})
+    # A list is one value in the store, which holds 64 KB: long URLs or
+    # titles fill it before the count does.
+    size = kv_value_size(out)
+    if size > KV_MAX_VALUE_BYTES:
+        raise ValueError(
+            f"these links take {size // 1024} KB, over the {KV_MAX_VALUE_BYTES // 1024} KB they can take together; "
+            "remove some or shorten them"
+        )
     return out
 
 

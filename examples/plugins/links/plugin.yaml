@@ -1,6 +1,6 @@
 schemaVersion: 1
 id: weknora-examples.links
-version: 1.1.0
+version: 1.1.1
 apiVersion: weknora.plugin/v1
 name: { en-US: Team links, zh-CN: 团队链接 }
 description:
