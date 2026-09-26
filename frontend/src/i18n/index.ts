@@ -4,6 +4,7 @@ import ruRU from './locales/ru-RU.ts'
 import enUS from './locales/en-US.ts'
 import koKR from './locales/ko-KR.ts'
 import jaJP from './locales/ja-JP.ts'
+import plPL from './locales/pl-PL.ts'
 import { BUILT_IN_DEFAULT, resolveDefaultLocale } from './resolveDefaultLocale.ts'
 
 const messages = {
@@ -11,7 +12,8 @@ const messages = {
   'en-US': enUS,
   'ru-RU': ruRU,
   'ko-KR': koKR,
-  'ja-JP': jaJP
+  'ja-JP': jaJP,
+  'pl-PL': plPL
 }
 
 // User's explicit past choice wins; otherwise use the deployment default.
@@ -23,7 +25,8 @@ const savedLocale = localStorage.getItem('locale') || resolveDefaultLocale(
 const i18n = createI18n({
   legacy: false,
   locale: savedLocale,
-  fallbackLocale: BUILT_IN_DEFAULT,
+  // Polish falls back to English (not the built-in zh-CN) for keys added upstream before they are translated.
+  fallbackLocale: { 'pl-PL': ['en-US'], default: [BUILT_IN_DEFAULT] },
   globalInjection: true,
   // Some translations intentionally embed `<strong>` markup (e.g. agent step summaries).
   // We render them via v-html with our own sanitization, so silence vue-i18n's HTML warning
