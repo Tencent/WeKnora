@@ -2,7 +2,8 @@
 //
 // This file is the Go mirror of `frontend/src/utils/tool-capabilities.ts`.
 // They MUST be kept in sync: whenever you add a tool to the registry with
-// specific KB requirements, update both maps.
+// specific KB requirements, update both maps. capabilities_frontend_test.go
+// fails when they differ.
 //
 // Why duplicate it? The frontend uses it to gray out tools and filter KBs
 // in the agent editor and `@` mention menu; the backend uses it as the

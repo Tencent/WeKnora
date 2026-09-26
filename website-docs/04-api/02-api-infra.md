@@ -304,9 +304,11 @@ curl -X POST $BASE/api/v1/web-search-providers/wsp-1/test -H "Authorization: Bea
 
 ### GET /api/v1/datasource/types
 
-用途：可用连接器目录。权限：Viewer+。
+用途：可创建的连接器目录，只含当前部署已注册的连接器。权限：Viewer+。
 
-响应：200 `[{type,name,description,icon,priority,auth_type,capabilities}]`
+响应：200 `[{type,name,description,icon,priority,auth_type,capabilities,doc_url,permission_doc_url,permission_page_url,required_permissions,config_schema}]`
+
+`config_schema` 用 JSON Schema 子集描述该连接器 `config.credentials` 的字段，`x-secret: true` 标记的字段为密钥；前端按它渲染凭证表单。`doc_url`、`permission_*`、`required_permissions` 是凭证表单旁的接入指引。
 
 ```bash
 curl $BASE/api/v1/datasource/types -H "Authorization: Bearer $TOKEN"
@@ -477,6 +479,43 @@ curl "$BASE/api/v1/datasource/ds-1/logs?limit=10" -H "Authorization: Bearer $TOK
 
 ```bash
 curl $BASE/api/v1/datasource/logs/log-1 -H "Authorization: Bearer $TOKEN"
+```
+
+## 插件（/api/v1/plugins）
+
+插件目录与空间级开关。内置能力（模型厂商、数据源、IM 渠道、联网搜索、Agent 工具、文档解析引擎）按厂商分组，以内置插件的形式列出，例如 `weknora.feishu` 同时提供飞书知识库、飞书云盘两个数据源和飞书 IM 渠道。Handler: `internal/handler/plugin.go`。
+
+### GET /api/v1/plugins
+
+用途：列出全部插件及当前空间是否启用。权限：Viewer+。
+
+响应：200 `{"success":true,"data":[{"manifest":{...},"enabled":true,"updatedAt":"..."}]}`。`manifest.contributes` 按扩展点列出贡献（`modelVendors`、`connectors`、`imChannels`、`webSearch`、`tools`、`parsers`），`required: true` 的插件不能停用。
+
+```bash
+curl $BASE/api/v1/plugins -H "Authorization: Bearer $TOKEN"
+```
+
+### GET /api/v1/plugins/:id
+
+用途：单个插件，结构同上。权限：Viewer+。
+
+### GET /api/v1/plugins/contributions
+
+用途：按扩展点列出全部贡献，可用 `?point=connectors` 只取一个扩展点。每项带 `pluginId`、`qualifiedId`（如 `weknora.feishu/feishu`）、`aliases`（存量数据使用的短名）和 `enabled`。权限：Viewer+。
+
+### PUT /api/v1/plugins/:id/enabled
+
+用途：为当前空间启用或停用插件。停用后，该插件的贡献不再出现在 `/datasource/types`、`/web-search-providers/types`、`/im-channels/platforms`、`/models/providers` 中，新建对应实例返回 400；已有实例不受影响。必需插件不能停用（400）。权限：Admin+。
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `enabled` | bool | 是 | 是否启用 |
+
+响应：200 `{"success":true,"data":{"manifest":{...},"enabled":false}}`
+
+```bash
+curl -X PUT $BASE/api/v1/plugins/weknora.notion/enabled -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' -d '{"enabled":false}'
 ```
 
 ## 实现参考

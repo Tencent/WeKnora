@@ -1,78 +1,7 @@
 <template>
   <div class="tool-result-renderer">
-    <!-- Search Results -->
-    <SearchResults v-if="displayType === 'search_results'" :data="toolData as SearchResultsData"
-      :arguments="toolArguments" />
-
-    <!-- Chunk Detail -->
-    <ChunkDetail v-else-if="displayType === 'chunk_detail'" :data="toolData as ChunkDetailData" />
-
-    <!-- Related Chunks -->
-    <RelatedChunks v-else-if="displayType === 'related_chunks'" :data="toolData as RelatedChunksData" />
-
-    <!-- Knowledge Base List -->
-    <KnowledgeBaseList v-else-if="displayType === 'knowledge_base_list'" :data="toolData as KnowledgeBaseListData" />
-
-    <!-- Document Info -->
-    <DocumentInfo v-else-if="displayType === 'document_info'" :data="toolData as DocumentInfoData" />
-
-    <!-- Graph Query Results -->
-    <GraphQueryResults v-else-if="displayType === 'graph_query_results'" :data="toolData as GraphQueryResultsData" />
-
-    <!-- Thinking Display -->
-    <ThinkingDisplay v-else-if="displayType === 'thinking'" :data="toolData as ThinkingData" />
-
-    <!-- Plan Display -->
-    <PlanDisplay v-else-if="displayType === 'plan'" :data="toolData as PlanData" />
-
-    <!-- Database Query Display -->
-    <DatabaseQuery v-else-if="displayType === 'database_query'" :data="toolData as DatabaseQueryData" />
-
-    <!-- Web Search Results Display -->
-    <WebSearchResults v-else-if="displayType === 'web_search_results'" :data="toolData as WebSearchResultsData" />
-
-    <!-- Web Fetch Results Display -->
-    <WebFetchResults v-else-if="displayType === 'web_fetch_results'" :data="toolData as WebFetchResultsData" />
-
-    <!-- Grep Results Display -->
-    <GrepResults v-else-if="displayType === 'grep_results'" :data="toolData as GrepResultsData" />
-
-    <!-- Knowledge Chunks List -->
-    <KnowledgeChunksList v-else-if="displayType === 'knowledge_chunks_list'"
-      :data="toolData as KnowledgeChunksListData" />
-
-    <!-- Wiki Edit Results Display -->
-    <WikiEditResult
-      v-else-if="displayType === 'wiki_write_page' || displayType === 'wiki_replace_text' || displayType === 'wiki_rename_page' || displayType === 'wiki_delete_page'"
-      :data="toolData as WikiEditData" />
-
-    <ShellExecResult
-      v-else-if="displayType === 'shell_exec'"
-      :data="toolData as ShellExecData"
-      :output="output"
-      :arguments="toolArguments"
-    />
-
-    <SandboxFilesResult
-      v-else-if="displayType === 'list_sandbox_files'"
-      :data="toolData as ListSandboxFilesData"
-    />
-
-    <WriteSandboxFileResult
-      v-else-if="displayType === 'write_sandbox_file' || displayType === 'edit_sandbox_file'"
-      :data="toolData as WriteSandboxFileData"
-    />
-
-    <ReadSkillResult
-      v-else-if="displayType === 'read_skill'"
-      :data="toolData as ReadSkillData"
-    />
-
-    <McpToolResult
-      v-else-if="displayType === 'mcp_discovery' || displayType === 'mcp_call'"
-      :discovery="displayType === 'mcp_discovery'" :data="toolData"
-      :output="output" :arguments="toolArguments" :success="success"
-    />
+    <!-- Views come from the tool result registry: builtins plus plugin views. -->
+    <component :is="view.component" v-if="view" v-bind="viewProps" />
 
     <!-- Fallback: Display raw output -->
     <div v-else class="fallback-output">
@@ -88,47 +17,11 @@
 
 <script setup lang="ts">
 import { computed } from 'vue';
-import type {
-  DisplayType,
-  SearchResultsData,
-  ChunkDetailData,
-  RelatedChunksData,
-  KnowledgeBaseListData,
-  DocumentInfoData,
-  GraphQueryResultsData,
-  ThinkingData,
-  PlanData,
-  DatabaseQueryData,
-  WebSearchResultsData,
-  WebFetchResultsData,
-  GrepResultsData,
-  KnowledgeChunksListData,
-  WikiEditData,
-  ShellExecData,
-  ListSandboxFilesData,
-  WriteSandboxFileData,
-  ReadSkillData
-} from '@/types/tool-results';
+import type { DisplayType } from '@/types/tool-results';
+import { registerBuiltinToolResultViews } from '@/extensions/builtin/toolResultViews';
+import { toolResultProps, toolResultViews } from '@/extensions/toolResultViews';
 
-import SearchResults from './tool-results/SearchResults.vue';
-import ChunkDetail from './tool-results/ChunkDetail.vue';
-import RelatedChunks from './tool-results/RelatedChunks.vue';
-import KnowledgeBaseList from './tool-results/KnowledgeBaseList.vue';
-import DocumentInfo from './tool-results/DocumentInfo.vue';
-import GraphQueryResults from './tool-results/GraphQueryResults.vue';
-import ThinkingDisplay from './tool-results/ThinkingDisplay.vue';
-import PlanDisplay from './tool-results/PlanDisplay.vue';
-import DatabaseQuery from './tool-results/DatabaseQuery.vue';
-import WebSearchResults from './tool-results/WebSearchResults.vue';
-import WebFetchResults from './tool-results/WebFetchResults.vue';
-import GrepResults from './tool-results/GrepResults.vue';
-import KnowledgeChunksList from './tool-results/KnowledgeChunksList.vue';
-import WikiEditResult from './tool-results/WikiEditResult.vue';
-import ShellExecResult from './tool-results/ShellExecResult.vue';
-import SandboxFilesResult from './tool-results/SandboxFilesResult.vue';
-import WriteSandboxFileResult from './tool-results/WriteSandboxFileResult.vue';
-import ReadSkillResult from './tool-results/ReadSkillResult.vue';
-import McpToolResult from './tool-results/McpToolResult.vue';
+registerBuiltinToolResultViews();
 
 interface Props {
   success?: boolean;
@@ -140,10 +33,20 @@ interface Props {
 
 const props = withDefaults(defineProps<Props>(), { success: undefined });
 
-const displayType = computed(() => props.displayType);
-const toolData = computed(() => props.toolData || {});
 const output = computed(() => props.output || '');
-const toolArguments = computed(() => props.arguments || {});
+
+const view = computed(() => (props.displayType ? toolResultViews.get(props.displayType) : undefined));
+const viewProps = computed(() =>
+  view.value
+    ? toolResultProps(view.value, {
+      displayType: props.displayType ?? '',
+      data: props.toolData || {},
+      output: output.value,
+      arguments: props.arguments || {},
+      success: props.success,
+    })
+    : {},
+);
 </script>
 
 <style lang="less" scoped>

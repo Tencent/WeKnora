@@ -7,6 +7,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/datasource"
 	"github.com/Tencent/WeKnora/internal/handler/dto"
+	"github.com/Tencent/WeKnora/internal/plugin/manifest"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/gin-gonic/gin"
@@ -14,18 +15,22 @@ import (
 
 // DataSourceHandler handles HTTP requests for data source management
 type DataSourceHandler struct {
-	service   interfaces.DataSourceService
-	kbService interfaces.KnowledgeBaseService
+	pluginGated
+	service    interfaces.DataSourceService
+	kbService  interfaces.KnowledgeBaseService
+	connectors *datasource.ConnectorRegistry
 }
 
 // NewDataSourceHandler creates a new data source handler
 func NewDataSourceHandler(
 	service interfaces.DataSourceService,
 	kbService interfaces.KnowledgeBaseService,
+	connectors *datasource.ConnectorRegistry,
 ) *DataSourceHandler {
 	return &DataSourceHandler{
-		service:   service,
-		kbService: kbService,
+		service:    service,
+		kbService:  kbService,
+		connectors: connectors,
 	}
 }
 
@@ -106,6 +111,10 @@ func (h *DataSourceHandler) CreateDataSource(c *gin.Context) {
 
 	if _, status, msg := h.getOwnedKnowledgeBase(ctx, tenantID, req.KnowledgeBaseID); status != http.StatusOK {
 		c.JSON(status, gin.H{"error": msg})
+		return
+	}
+	if !h.pluginFilter(c)(manifest.PointConnectors, req.Type) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": disabledIntegrationError})
 		return
 	}
 
@@ -607,6 +616,18 @@ func (h *DataSourceHandler) GetSyncLog(c *gin.Context) {
 // @Success 200 {object} []datasource.ConnectorMetadata
 // @Router /datasource/types [get]
 func (h *DataSourceHandler) GetAvailableConnectors(c *gin.Context) {
-	connectors := datasource.ListAvailableConnectors()
-	c.JSON(http.StatusOK, connectors)
+	// Only connectors that can actually be created: the metadata table also
+	// describes ones not implemented yet.
+	if h.connectors == nil {
+		c.JSON(http.StatusOK, []datasource.ConnectorMetadata{})
+		return
+	}
+	enabled := h.pluginFilter(c)
+	out := make([]datasource.ConnectorMetadata, 0)
+	for _, meta := range h.connectors.Metadata() {
+		if enabled(manifest.PointConnectors, meta.Type) {
+			out = append(out, meta)
+		}
+	}
+	c.JSON(http.StatusOK, out)
 }

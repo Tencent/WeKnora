@@ -14,6 +14,7 @@ import {
   REGISTERED_AUDIT_ACTION_ENTRIES,
 } from './auditActionRegistry.ts'
 import { AUDIT_ACTION_LOCALE_DEFAULTS, getAuditActionLocaleDefault } from './auditActionLocaleDefaults.ts'
+import { BACKEND_SCHEMA_I18N_KEYS } from './backendSchemaKeys.ts'
 import { writeLocaleModule } from './localeSerialize.ts'
 
 import enUS from './locales/en-US.ts'
@@ -285,7 +286,8 @@ function addTemplatePattern(usage: I18nUsage, template: string): void {
 
 export function collectI18nUsageFromSources(rootDir = SOURCE_ROOT): I18nUsage {
   const usage: I18nUsage = {
-    staticKeys: new Set<string>(),
+    // Backend config schemas name these keys; count them as used.
+    staticKeys: new Set<string>(BACKEND_SCHEMA_I18N_KEYS),
     prefixes: new Set<string>(EXTRA_PREFIXES),
     segmentPatterns: [],
   }

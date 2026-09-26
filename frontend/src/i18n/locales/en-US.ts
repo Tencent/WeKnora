@@ -2249,6 +2249,18 @@ export default {
     baseUrlLabel: 'Instance URL',
     baseUrlPlaceholder: 'https://searxng.example.com',
     apiKeyPlaceholder: 'Enter API key',
+    configFields: {
+      searchEngine: 'Search engine',
+      searchEngineDesc: 'Select the Zhipu search engine and per-request price tier.',
+      searchStd: 'Standard · ¥0.01/request',
+      searchPro: 'Pro · ¥0.03/request',
+      searchSogou: 'Sogou · ¥0.05/request',
+      searchQuark: 'Quark · ¥0.05/request',
+      contentSize: 'Content size',
+      contentSizeDesc: 'Medium returns concise summaries; high returns more context.',
+      contentMedium: 'Medium',
+      contentHigh: 'High'
+    },
     toasts: {
       providerCreated: 'Search provider created',
       providerUpdated: 'Search provider updated',
@@ -2715,6 +2727,43 @@ export default {
       parseTenantFailed: 'Failed to parse workspace information',
       parseKnowledgeBasesFailed: 'Failed to parse knowledge base list',
       parseCurrentKnowledgeBaseFailed: 'Failed to parse current knowledge base'
+    }
+  },
+  pluginCenter: {
+    navGroup: 'Extensions',
+    title: 'Plugins',
+    description: 'Every plugin this deployment provides, builtins included. Enable or disable them for this workspace: a disabled plugin\'s integrations leave the type lists and cannot be created, while existing ones keep working.',
+    searchPlaceholder: 'Search plugins, IDs or integrations',
+    allPoints: 'All',
+    empty: 'No matching plugins',
+    builtin: 'Builtin',
+    required: 'Required',
+    requiredHint: 'WeKnora needs this plugin; it cannot be disabled',
+    adminOnly: 'Only workspace admins can enable or disable plugins',
+    loadFailed: 'Failed to load plugins',
+    saveFailed: 'Failed to save the plugin setting',
+    enabledToast: 'Plugin enabled',
+    disabledToast: 'Plugin disabled',
+    points: {
+      modelVendors: 'Model vendors',
+      connectors: 'Data sources',
+      imChannels: 'IM channels',
+      webSearch: 'Web search',
+      tools: 'Agent tools',
+      parsers: 'Document parsing'
+    }
+  },
+  schemaForm: {
+    errors: {
+      required: 'This field is required',
+      type: 'Invalid value',
+      enum: 'Not one of the allowed values',
+      min_length: 'Too short',
+      max_length: 'Too long',
+      pattern: 'Does not match the expected format',
+      minimum: 'Value is too small',
+      maximum: 'Value is too large',
+      format: 'Enter a full address such as https://example.com'
     }
   },
   common: {
@@ -6858,6 +6907,7 @@ export default {
     resourceHint: 'Select the spaces or folders to sync',
     untitled: 'Untitled',
     resourceLoadFailed: 'Failed to load resources',
+    typesLoadFailed: 'Failed to load data source types',
     noResources: 'No wiki spaces found',
     noResourcesDesc: 'The app needs wiki access via a group chat to fetch content',
     noResourcesDesc_notion: 'The app needs Notion page access permissions to fetch content',

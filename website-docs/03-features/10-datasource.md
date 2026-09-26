@@ -178,7 +178,7 @@
 
 | 方法与路径 | 权限 | 说明 |
 | --- | --- | --- |
-| `GET /api/v1/datasource/types` | Viewer | 可用连接器元数据列表（`ListAvailableConnectors`，按 Priority 排序） |
+| `GET /api/v1/datasource/types` | Viewer | 已注册连接器的元数据与凭证表单 Schema（`ConnectorRegistry.Metadata`，按 Priority 排序） |
 | `POST /api/v1/datasource/validate-credentials` | Admin | 用裸凭据测试连通性（不落库），供创建向导的"测试连接"按钮 |
 | `POST /api/v1/datasource` | Admin | 创建数据源（校验 KB 归属租户 → 校验连接器类型 → 在线 Validate → 落库 → 注册 cron） |
 | `GET /api/v1/datasource?kb_id=` | Viewer | 按知识库列出数据源（附带最近一次 SyncLog） |
@@ -394,7 +394,7 @@ registry.Register(rssConnector.NewConnector())                      // rss
 registry.Register(gitlabConnector.NewConnector())                   // gitlab
 ```
 
-> 注意：`connector.go` 中的 `ConnectorMetadataRegistry` 仍包含尚未实现的连接器（GitHub、Google Drive、OneDrive、Web Crawler、Slack、IMAP 等）。当前实际注册可用的类型为：`feishu`、`lark`、`feishu_drive`、`lark_drive`、`notion`、`confluence`、`yuque`、`dingtalk`、`ima`、`rss`、`gitlab`。未注册类型在创建数据源时会被 `connectorRegistry.Get()` 以 `ErrConnectorNotFound` 拒绝。
+> 注意：`connector.go` 中的 `ConnectorMetadataRegistry` 仍包含尚未实现的连接器（GitHub、Google Drive、OneDrive、Web Crawler、Slack、IMAP 等），`/datasource/types` 不会返回它们。当前实际注册可用的类型为：`feishu`、`lark`、`feishu_drive`、`lark_drive`、`notion`、`confluence`、`yuque`、`dingtalk`、`ima`、`rss`、`gitlab`。未注册类型在创建数据源时会被 `connectorRegistry.Get()` 以 `ErrConnectorNotFound` 拒绝。
 
 ### 数据模型（internal/types/datasource.go）
 

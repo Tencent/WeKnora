@@ -2249,6 +2249,18 @@ export default {
     baseUrlLabel: 'インスタンスURL',
     baseUrlPlaceholder: 'https://searxng.example.com',
     apiKeyPlaceholder: 'APIキーを入力',
+    configFields: {
+      searchEngine: '検索エンジン',
+      searchEngineDesc: 'Zhipu の検索エンジンとリクエストごとの料金プランを選択します。',
+      searchStd: 'スタンダード · ¥0.01/回',
+      searchPro: 'プロ · ¥0.03/回',
+      searchSogou: 'Sogou · ¥0.05/回',
+      searchQuark: 'Quark · ¥0.05/回',
+      contentSize: '要約の長さ',
+      contentSizeDesc: '中は簡潔な要約、詳細はより多くの文脈を返します。',
+      contentMedium: '中',
+      contentHigh: '詳細'
+    },
     toasts: {
       providerCreated: '検索プロバイダを作成しました',
       providerUpdated: '検索プロバイダを更新しました',
@@ -2715,6 +2727,43 @@ export default {
       parseTenantFailed: 'ワークスペース情報の解析に失敗しました',
       parseKnowledgeBasesFailed: 'ナレッジベース一覧の解析に失敗しました',
       parseCurrentKnowledgeBaseFailed: '現在のナレッジベースの解析に失敗しました'
+    }
+  },
+  pluginCenter: {
+    navGroup: '拡張',
+    title: 'プラグイン',
+    description: 'このデプロイが提供するすべてのプラグイン（組み込みを含む）を表示し、このワークスペースで有効／無効にします。無効にしたプラグインの連携は種類一覧から消えて新規作成できなくなりますが、既存のものは引き続き動作します。',
+    searchPlaceholder: 'プラグイン名・ID・連携を検索',
+    allPoints: 'すべて',
+    empty: '一致するプラグインはありません',
+    builtin: '組み込み',
+    required: '必須',
+    requiredHint: 'WeKnora に必須のため無効にできません',
+    adminOnly: 'プラグインの有効化・無効化はワークスペース管理者のみ可能です',
+    loadFailed: 'プラグインを読み込めませんでした',
+    saveFailed: 'プラグイン設定を保存できませんでした',
+    enabledToast: 'プラグインを有効にしました',
+    disabledToast: 'プラグインを無効にしました',
+    points: {
+      modelVendors: 'モデルベンダー',
+      connectors: 'データソース',
+      imChannels: 'IM チャネル',
+      webSearch: 'Web 検索',
+      tools: 'エージェントツール',
+      parsers: 'ドキュメント解析'
+    }
+  },
+  schemaForm: {
+    errors: {
+      required: 'この項目は必須です',
+      type: '値が正しくありません',
+      enum: '選択可能な値ではありません',
+      min_length: '短すぎます',
+      max_length: '長すぎます',
+      pattern: '形式が正しくありません',
+      minimum: '値が小さすぎます',
+      maximum: '値が大きすぎます',
+      format: 'https://example.com のような完全なアドレスを入力してください'
     }
   },
   common: {
@@ -6858,6 +6907,7 @@ export default {
     resourceHint: '同期するスペースまたはフォルダを選択してください',
     untitled: '無題',
     resourceLoadFailed: 'リソースの読み込みに失敗しました',
+    typesLoadFailed: 'データソースの種類を読み込めませんでした',
     noResources: 'Wikiスペースが見つかりません',
     noResourcesDesc: 'コンテンツを取得するには、グループチャット経由でアプリにWikiのアクセス権限を付与する必要があります',
     noResourcesDesc_notion: 'コンテンツを取得するには、アプリにNotionページのアクセス権限が必要です',

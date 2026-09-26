@@ -83,7 +83,7 @@ func TestDataSource_GetSyncLogs_ValidLimitWithinBounds(t *testing.T) {
 			return &types.KnowledgeBase{ID: "kb1", TenantID: 1}, nil
 		},
 	}
-	h := NewDataSourceHandler(dsSvc, kbSvc)
+	h := NewDataSourceHandler(dsSvc, kbSvc, nil)
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/datasource/ds1/logs?limit=50&offset=25", nil)
@@ -116,7 +116,7 @@ func TestDataSource_GetSyncLogs_LimitExceedingMaximum(t *testing.T) {
 			return &types.KnowledgeBase{ID: "kb1", TenantID: 1}, nil
 		},
 	}
-	h := NewDataSourceHandler(dsSvc, kbSvc)
+	h := NewDataSourceHandler(dsSvc, kbSvc, nil)
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/datasource/ds1/logs?limit=999", nil)
@@ -156,7 +156,7 @@ func TestDataSource_GetSyncLogs_MissingLimitDefaultsCorrectly(t *testing.T) {
 			return &types.KnowledgeBase{ID: "kb1", TenantID: 1}, nil
 		},
 	}
-	h := NewDataSourceHandler(dsSvc, kbSvc)
+	h := NewDataSourceHandler(dsSvc, kbSvc, nil)
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/datasource/ds1/logs", nil)
@@ -189,7 +189,7 @@ func TestDataSource_GetSyncLogs_NonNumericLimitRejected(t *testing.T) {
 			return &types.KnowledgeBase{ID: "kb1", TenantID: 1}, nil
 		},
 	}
-	h := NewDataSourceHandler(dsSvc, kbSvc)
+	h := NewDataSourceHandler(dsSvc, kbSvc, nil)
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/datasource/ds1/logs?limit=abc", nil)
@@ -216,7 +216,7 @@ func TestDataSource_GetSyncLogs_ZeroLimitRejected(t *testing.T) {
 			return &types.KnowledgeBase{ID: "kb1", TenantID: 1}, nil
 		},
 	}
-	h := NewDataSourceHandler(dsSvc, kbSvc)
+	h := NewDataSourceHandler(dsSvc, kbSvc, nil)
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/datasource/ds1/logs?limit=0", nil)
@@ -243,7 +243,7 @@ func TestDataSource_GetSyncLogs_NegativeLimitRejected(t *testing.T) {
 			return &types.KnowledgeBase{ID: "kb1", TenantID: 1}, nil
 		},
 	}
-	h := NewDataSourceHandler(dsSvc, kbSvc)
+	h := NewDataSourceHandler(dsSvc, kbSvc, nil)
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/datasource/ds1/logs?limit=-5", nil)

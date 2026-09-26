@@ -997,6 +997,7 @@ export default {
     resourceHint: '选择要同步的内容空间/文件夹',
     untitled: '无标题',
     resourceLoadFailed: '加载资源列表失败',
+    typesLoadFailed: '加载数据源类型失败',
     noResources: '未找到可同步的知识库空间',
     noResourcesDesc: '应用需要通过群聊获得知识库访问权限才能拉取内容',
     noResourcesDesc_notion: '应用需要获得 Notion 页面的访问权限才能拉取内容',
@@ -5250,6 +5251,43 @@ export default {
     belongsToOrg: '所属空间：',
     noCompatibleKbForAgent: '当前智能体的工具与作用域内知识库的能力不匹配，暂无可引用的知识库。'
   },
+  pluginCenter: {
+    navGroup: '扩展',
+    title: '插件',
+    description: '查看当前部署提供的全部插件（含内置插件），并为本空间启用或停用。停用后，该插件的集成不再出现在类型列表中、不能新建，已有实例不受影响。',
+    searchPlaceholder: '搜索插件名称、ID 或集成',
+    allPoints: '全部',
+    empty: '没有匹配的插件',
+    builtin: '内置',
+    required: '必需',
+    requiredHint: 'WeKnora 运行所必需，不能停用',
+    adminOnly: '仅空间管理员可以启用或停用插件',
+    loadFailed: '加载插件列表失败',
+    saveFailed: '保存插件设置失败',
+    enabledToast: '插件已启用',
+    disabledToast: '插件已停用',
+    points: {
+      modelVendors: '模型厂商',
+      connectors: '数据源',
+      imChannels: 'IM 渠道',
+      webSearch: '联网搜索',
+      tools: 'Agent 工具',
+      parsers: '文档解析'
+    }
+  },
+  schemaForm: {
+    errors: {
+      required: '此项为必填',
+      type: '格式不正确',
+      enum: '不是可选的值',
+      min_length: '长度过短',
+      max_length: '长度过长',
+      pattern: '格式不符合要求',
+      minimum: '数值过小',
+      maximum: '数值过大',
+      format: '请输入完整的地址，如 https://example.com'
+    }
+  },
   common: {
     add: '添加',
     me: '我',
@@ -5806,6 +5844,18 @@ export default {
     baseUrlLabel: '实例地址',
     baseUrlPlaceholder: 'https://searxng.example.com',
     apiKeyPlaceholder: '请输入 API 密钥',
+    configFields: {
+      searchEngine: '搜索引擎',
+      searchEngineDesc: '选择智谱搜索引擎及对应的单次调用价格档位。',
+      searchStd: '基础版 · ¥0.01/次',
+      searchPro: '高级版 · ¥0.03/次',
+      searchSogou: '搜狗 · ¥0.05/次',
+      searchQuark: '夸克 · ¥0.05/次',
+      contentSize: '摘要长度',
+      contentSizeDesc: '中等返回精简摘要；详细返回更多上下文。',
+      contentMedium: '中等',
+      contentHigh: '详细'
+    },
     toasts: {
       providerCreated: '搜索引擎配置已创建',
       providerUpdated: '搜索引擎配置已更新',

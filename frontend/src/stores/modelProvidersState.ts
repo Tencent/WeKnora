@@ -11,6 +11,7 @@ import type {
   ModelProviderExtraField,
   ModelProviderOption,
 } from '@/api/initialization'
+import type { ConfigSchema } from '@/components/schema-form/schema'
 
 /** Editor model types → backend ModelType names used by ExtraField.model_types. */
 const FRONTEND_TO_BACKEND_MODEL_TYPE: Record<string, string> = {
@@ -39,6 +40,30 @@ export function extraFieldAppliesTo(field: Pick<ModelProviderExtraField, 'model_
   if (!restricted || restricted.length === 0) return true
   const wanted = normalizeModelType(modelType)
   return restricted.some((entry) => normalizeModelType(entry) === wanted)
+}
+
+/**
+ * A vendor's config schema narrowed to the plain extra_config fields shown at
+ * one model type. Secret fields are left out (they fill the app_secret
+ * credential slot, edited separately), and so are keys the editor controls
+ * itself.
+ */
+export function plainExtraConfigSchema(
+  schema: ConfigSchema | null | undefined,
+  modelType: string,
+  reservedKeys: ReadonlySet<string> = new Set(),
+): ConfigSchema {
+  const properties: Record<string, ConfigSchema> = {}
+  for (const [key, prop] of Object.entries(schema?.properties ?? {})) {
+    if (prop['x-secret'] || reservedKeys.has(key)) continue
+    if (!extraFieldAppliesTo({ model_types: prop['x-model-types'] }, modelType)) continue
+    properties[key] = prop
+  }
+  return {
+    type: 'object',
+    properties,
+    required: (schema?.required ?? []).filter((key) => key in properties),
+  }
 }
 
 /** Extra fields to render for a provider at one model type. */

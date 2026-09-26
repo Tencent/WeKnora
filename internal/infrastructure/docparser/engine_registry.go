@@ -50,6 +50,13 @@ func RegisterEngine(e EngineRegistration) {
 	localEngines = append(localEngines, e)
 }
 
+// Engines returns the locally registered engines in registration order.
+func Engines() []EngineRegistration {
+	out := make([]EngineRegistration, len(localEngines))
+	copy(out, localEngines)
+	return out
+}
+
 // lookupEngine returns the locally registered engine with this name.
 func lookupEngine(name string) (EngineRegistration, bool) {
 	for _, engine := range localEngines {

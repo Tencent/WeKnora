@@ -426,7 +426,7 @@ func registerWebSearchProviders(registry *infra_web_search.Registry) {
 }
 ```
 
-4. 前端的 provider 下拉与参数表单如需展示新引擎，同步 `frontend/` 相应配置页组件；租户配置持久化在 `web_search_providers` 表。
+4. 在 `types.GetWebSearchProviderTypes()` 增加类型条目（`RequiresAPIKey` / `RequiresBaseURL` / `ConfigFields` 等）。前端按其派生的 `config_schema` 渲染参数表单，无需改前端；若字段标题引用前端文案 key（`x-i18n-keys`），把 key 加进 `frontend/src/i18n/backendSchemaKeys.ts`。租户配置持久化在 `web_search_providers` 表。
 
 ---
 
@@ -511,7 +511,7 @@ if err := registry.Register(mysourceConnector.NewConnector()); err != nil {
 ```
 
 3. **注册点二：`internal/datasource/connector.go` 的 `ConnectorMetadataRegistry`** — 增加类型常量（`internal/types` 的 `ConnectorTypeXxx`）与元数据条目（Name/Description/AuthType/Capabilities）；
-4. 同步配置结构：`types.DataSourceConfig` 若需新增凭证字段，注意加密存储约定；前端数据源接入页按元数据渲染；
+4. **凭证表单：`internal/datasource/connector_forms.go` 的 `connectorForms`** — 用 config schema 描述该连接器的 `credentials` 字段（密钥字段标 `Secret`，条件字段用 `VisibleIf`），并给出接入指引链接与所需权限。前端数据源接入页按 `/datasource/types` 返回的 `config_schema` 渲染，无需改前端；引用的前端文案 key 需加进 `frontend/src/i18n/backendSchemaKeys.ts`；
 5. 复用 `internal/datasource` 的公共工具：用户可填写的 API 地址先经 `ValidateConnectorBaseURL` 做 SSRF 校验，HTTP 请求使用 `NewConnectorHTTPClient`（带重定向与拨号期 SSRF 防护），生成文件名使用 `SanitizeFileName`。
 
 ---
@@ -593,7 +593,7 @@ func registerIMAdapterFactories(imService *imPkg.Service) {
 }
 ```
 
-4. 渠道配置持久化在 `im_channels` 表，会话映射在 `im_channel_sessions`；前端渠道管理页需增加对应平台的配置表单。
+4. 在 `internal/im/platforms.go` 的 `platformInfos` 登记平台元数据：支持的接入模式（默认在前）、是否支持话题、控制台链接，以及用 config schema 描述的凭证字段（密钥标 `Secret`，仅某种模式使用的字段用 `VisibleIf: {"$mode": ...}`）。前端渠道管理页按 `/im-channels/platforms` 渲染，无需改表单；引用的前端文案 key 加进 `frontend/src/i18n/backendSchemaKeys.ts`，平台图标放 `frontend/src/assets/img/im/`。渠道配置持久化在 `im_channels` 表，会话映射在 `im_channel_sessions`。
 
 ---
 

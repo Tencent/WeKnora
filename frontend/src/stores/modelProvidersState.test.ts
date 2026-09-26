@@ -12,6 +12,7 @@ import {
   loadProvidersForType,
   mergeProviderIndex,
   normalizeModelType,
+  plainExtraConfigSchema,
   pickLocalized,
   providerDescription,
   providerIcon,
@@ -257,4 +258,23 @@ test('extraFieldPlaceholder resolves the locale and tolerates no placeholder', (
     'match the reranker actually deployed behind this endpoint',
   )
   assert.equal(extraFieldPlaceholder({ key: 'k', label: 'k', type: 'string' }, 'zh-CN'), '')
+})
+
+test('plainExtraConfigSchema keeps plain fields for the model type', () => {
+  const schema = {
+    type: 'object' as const,
+    required: ['region', 'secret_key'],
+    properties: {
+      region: { type: 'string' as const, oneOf: [{ const: 'bj', title: 'Beijing' }] },
+      secret_key: { type: 'string' as const, 'x-secret': true, 'x-model-types': ['Rerank'] },
+      instruction: { type: 'string' as const, 'x-model-types': ['Rerank'] },
+      thinking_control: { type: 'string' as const },
+    },
+  }
+  const rerank = plainExtraConfigSchema(schema, 'rerank', new Set(['thinking_control']))
+  assert.deepEqual(Object.keys(rerank.properties!).sort(), ['instruction', 'region'])
+  assert.deepEqual(rerank.required, ['region'])
+  const chat = plainExtraConfigSchema(schema, 'chat', new Set(['thinking_control']))
+  assert.deepEqual(Object.keys(chat.properties!), ['region'])
+  assert.deepEqual(plainExtraConfigSchema(undefined, 'chat').properties, {})
 })

@@ -995,6 +995,7 @@ export default {
     resourceHint: 'Выберите пространства или папки для синхронизации',
     untitled: 'Без названия',
     resourceLoadFailed: 'Не удалось загрузить список ресурсов',
+    typesLoadFailed: 'Не удалось загрузить типы источников данных',
     noResources: 'Пространства вики не найдены',
     noResourcesDesc: 'Приложению требуется доступ к вики через групповой чат для получения контента',
     noResourcesDesc_notion: 'Приложению требуются права доступа к странице Notion для получения контента',
@@ -5248,6 +5249,43 @@ export default {
     belongsToOrg: 'Пространство: ',
     noCompatibleKbForAgent: 'Инструменты текущего агента не соответствуют возможностям ни одной базы знаний в области видимости — нечего упомянуть.'
   },
+  pluginCenter: {
+    navGroup: 'Расширения',
+    title: 'Плагины',
+    description: 'Все плагины этого развертывания, включая встроенные. Включайте и отключайте их для рабочего пространства: интеграции отключенного плагина пропадают из списков типов и не создаются, а существующие продолжают работать.',
+    searchPlaceholder: 'Поиск по названию, ID или интеграции',
+    allPoints: 'Все',
+    empty: 'Подходящих плагинов нет',
+    builtin: 'Встроенный',
+    required: 'Обязательный',
+    requiredHint: 'Этот плагин нужен WeKnora, его нельзя отключить',
+    adminOnly: 'Включать и отключать плагины могут только администраторы пространства',
+    loadFailed: 'Не удалось загрузить плагины',
+    saveFailed: 'Не удалось сохранить настройку плагина',
+    enabledToast: 'Плагин включен',
+    disabledToast: 'Плагин отключен',
+    points: {
+      modelVendors: 'Поставщики моделей',
+      connectors: 'Источники данных',
+      imChannels: 'IM-каналы',
+      webSearch: 'Веб-поиск',
+      tools: 'Инструменты агента',
+      parsers: 'Разбор документов'
+    }
+  },
+  schemaForm: {
+    errors: {
+      required: 'Обязательное поле',
+      type: 'Недопустимое значение',
+      enum: 'Недопустимый вариант',
+      min_length: 'Слишком коротко',
+      max_length: 'Слишком длинно',
+      pattern: 'Неверный формат',
+      minimum: 'Слишком маленькое значение',
+      maximum: 'Слишком большое значение',
+      format: 'Введите полный адрес, например https://example.com'
+    }
+  },
   common: {
     add: 'Добавить',
     me: 'Я',
@@ -5804,6 +5842,18 @@ export default {
     baseUrlLabel: 'URL экземпляра',
     baseUrlPlaceholder: 'https://searxng.example.com',
     apiKeyPlaceholder: 'Введите API-ключ',
+    configFields: {
+      searchEngine: 'Поисковая система',
+      searchEngineDesc: 'Выберите поисковую систему Zhipu и тариф за запрос.',
+      searchStd: 'Стандарт · ¥0.01/запрос',
+      searchPro: 'Pro · ¥0.03/запрос',
+      searchSogou: 'Sogou · ¥0.05/запрос',
+      searchQuark: 'Quark · ¥0.05/запрос',
+      contentSize: 'Объём сводки',
+      contentSizeDesc: 'Средний — краткие сводки; подробный — больше контекста.',
+      contentMedium: 'Средний',
+      contentHigh: 'Подробный'
+    },
     toasts: {
       providerCreated: 'Поисковый провайдер создан',
       providerUpdated: 'Поисковый провайдер обновлён',
