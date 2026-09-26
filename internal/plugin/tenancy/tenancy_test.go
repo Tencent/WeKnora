@@ -297,3 +297,16 @@ func TestAudienceHidesPlugins(t *testing.T) {
 		t.Fatal("back in the audience, tenant 8's switch comes back")
 	}
 }
+
+// A workspace's own plugin is switched on as it registers, even before it
+// loads on this node.
+func TestEnableOwnBeforeThePluginLoads(t *testing.T) {
+	s, repo := newService(t)
+	ctx := context.Background()
+	if err := s.EnableOwn(ctx, 7, "team.search", "u1"); err != nil {
+		t.Fatal(err)
+	}
+	if row := repo.rows[7]["team.search"]; !row.Enabled || row.UpdatedBy != "u1" {
+		t.Fatalf("switch = %+v", row)
+	}
+}

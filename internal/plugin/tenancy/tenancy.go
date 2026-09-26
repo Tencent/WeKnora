@@ -108,6 +108,20 @@ func (s *Service) SetEnabled(
 	}, "enabled")
 }
 
+// EnableOwn switches on a workspace's own plugin as the workspace registers
+// it. The installer has checked that the plugin is the workspace's, so
+// unlike SetEnabled it does not need the plugin loaded on this node: one
+// whose service is not up yet is on once it loads.
+func (s *Service) EnableOwn(ctx context.Context, tenantID uint64, pluginID, updatedBy string) error {
+	return s.repo.Upsert(ctx, &types.PluginTenantSetting{
+		TenantID:  tenantID,
+		PluginID:  pluginID,
+		Enabled:   true,
+		UpdatedBy: updatedBy,
+		UpdatedAt: time.Now(),
+	}, "enabled")
+}
+
 // enabledByDefault is a plugin's switch in a tenant that never set it:
 // builtins are on, installed plugins wait for a tenant admin to opt in.
 func enabledByDefault(m *manifest.Manifest) bool { return m.Builtin }
