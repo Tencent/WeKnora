@@ -16,6 +16,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/plugin/reconcile"
 	"github.com/Tencent/WeKnora/internal/plugin/registry"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/utils"
 )
 
 func TestPluginAdminMarket(t *testing.T) {
@@ -41,7 +42,8 @@ func TestPluginAdminMarket(t *testing.T) {
 			`{"version":"1.1.0","url":"kit.wkp","digest":"` + digest + `"}]}]}`))
 	}))
 	defer srv.Close()
-	t.Setenv("SSRF_WHITELIST", "127.0.0.1")
+	utils.SetSSRFWhitelistFromRaw("127.0.0.1")
+	t.Cleanup(func() { utils.SetSSRFWhitelistFromRaw("") })
 
 	engine := func(h *PluginAdminHandler) *gin.Engine {
 		e := gin.New()

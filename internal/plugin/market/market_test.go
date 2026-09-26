@@ -7,6 +7,8 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+
+	"github.com/Tencent/WeKnora/internal/utils"
 )
 
 const digestA = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -66,7 +68,8 @@ func TestClientFetches(t *testing.T) {
 			`{"version":"1.0.0","url":"x.wkp","digest":"` + digestA + `"}]}]}`))
 	}))
 	defer srv.Close()
-	t.Setenv("SSRF_WHITELIST", "127.0.0.1")
+	utils.SetSSRFWhitelistFromRaw("127.0.0.1")
+	t.Cleanup(func() { utils.SetSSRFWhitelistFromRaw("") })
 	listings, _, err := New(srv.URL+"/index.json", "0.5.0", srv.Client()).List(context.Background())
 	if err != nil || len(listings) != 1 || listings[0].Latest.URL != srv.URL+"/x.wkp" {
 		t.Fatalf("list = %+v, %v", listings, err)
