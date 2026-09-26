@@ -2390,6 +2390,9 @@ const handleConfirm = () => {
 
 .setting-row-vertical {
   flex-direction: column;
+  // stretch 而非继承的 flex-start：竖排行的子块（如图片解析方案面板）必须
+  // 占满整行，内部控件才能与其它行的开关一样靠右对齐（与知识库编辑器一致）。
+  align-items: stretch;
   gap: 12px;
 
   .setting-info,
