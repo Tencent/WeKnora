@@ -120,11 +120,11 @@ func convertEvent(region Region, event *larkim.P2MessageReceiveV1) *im.IncomingM
 	// delivers (or doesn't). This is the single chokepoint for all message
 	// types — adding it here catches text/file/image/post uniformly.
 	logger.Infof(context.Background(),
-		"[%s][RX] msg_type=%q chat_type=%q chat_id=%q msg_id=%q root_id=%q parent_id=%q thread_id=%q content=%q",
+		"[%s][RX] msg_type=%q chat_type=%q chat_id=%q msg_id=%q root_id=%q parent_id=%q thread_id=%q content=%q mentions=%v",
 		region.Label,
 		ptrStr(msg.MessageType), ptrStr(msg.ChatType), ptrStr(msg.ChatId),
 		ptrStr(msg.MessageId), ptrStr(msg.RootId), ptrStr(msg.ParentId),
-		ptrStr(msg.ThreadId), ptrStr(msg.Content),
+		ptrStr(msg.ThreadId), ptrStr(msg.Content), describeMentions(msg.Mentions),
 	)
 
 	if msg.MessageType == nil {
@@ -132,6 +132,15 @@ func convertEvent(region Region, event *larkim.P2MessageReceiveV1) *im.IncomingM
 	}
 
 	msgType := *msg.MessageType
+
+	// In group chats Feishu delivers every message, not just the ones aimed at
+	// this bot. Only handle a group message when the bot itself is explicitly
+	// @-mentioned. Feishu reports bot mentions as mentioned_type="bot".
+	isGroup := msg.ChatType != nil && *msg.ChatType == "group"
+	if isGroup && !mentionsBot(msg.Mentions) {
+		logger.Infof(context.Background(), "[%s][RX] ignoring group message without bot mention: msg_id=%q", region.Label, ptrStr(msg.MessageId))
+		return nil
+	}
 
 	// Sender info
 	openID := ""
@@ -167,6 +176,38 @@ func convertEvent(region Region, event *larkim.P2MessageReceiveV1) *im.IncomingM
 	default:
 		return nil
 	}
+}
+
+// mentionsBot reports whether a Feishu group event explicitly @-mentions a bot.
+func mentionsBot(mentions []*larkim.MentionEvent) bool {
+	for _, mention := range mentions {
+		if mention == nil {
+			continue
+		}
+		if mention.MentionedType != nil && *mention.MentionedType == "bot" {
+			return true
+		}
+	}
+	return false
+}
+
+// describeMentions renders mention metadata compactly for receive logs.
+func describeMentions(mentions []*larkim.MentionEvent) []string {
+	out := make([]string, 0, len(mentions))
+	for _, mention := range mentions {
+		if mention == nil {
+			continue
+		}
+		key := ptrStr(mention.Key)
+		mentionedType := ptrStr(mention.MentionedType)
+		name := ptrStr(mention.Name)
+		openID := ""
+		if mention.Id != nil && mention.Id.OpenId != nil {
+			openID = *mention.Id.OpenId
+		}
+		out = append(out, fmt.Sprintf("key=%s type=%s name=%s open_id=%s", key, mentionedType, name, openID))
+	}
+	return out
 }
 
 // convertTextEvent handles text message type.
