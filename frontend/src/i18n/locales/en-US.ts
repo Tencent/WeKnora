@@ -2811,6 +2811,16 @@ export default {
         unavailable: 'Incompatible'
       }
     },
+    audience: {
+      title: 'Visible to',
+      hint: 'When limited, only the chosen workspaces see and can enable the plugin. Others lose sight of it; their switch and settings are kept for when they are let back in.',
+      all: 'All workspaces',
+      some: 'Selected workspaces',
+      placeholder: 'Search and pick workspaces',
+      none: 'No workspace selected: none can use the plugin.',
+      saved: 'Visibility updated',
+      saveFailed: 'Could not update visibility'
+    },
     install: {
       title: 'Install plugin',
       description: 'Upload a .wkp package or give its download URL, review it, then install.',

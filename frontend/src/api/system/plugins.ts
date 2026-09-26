@@ -69,6 +69,8 @@ export interface InstalledPlugin {
   manifest?: PluginManifest
   versions: PluginVersion[]
   node?: PluginNodeStatus
+  /** The workspaces the plugin is limited to; absent when every workspace sees it. */
+  audience?: number[] | null
   /** Where a remote plugin's service runs. */
   remote_url?: string
   /** A remote plugin's new signing secret, only in the response that issued it. */
@@ -173,6 +175,20 @@ export function setInstalledPluginEnabled(id: string, enabled: boolean) {
 
 export function activatePluginVersion(id: string, version: string) {
   return put<{ data: InstalledPlugin }>(`${BASE}/${encodeURIComponent(id)}/active-version`, { version })
+}
+
+/** Workspaces for the audience picker: by keyword (name or ID), or by IDs. */
+export function listAudienceTenants(q: { keyword?: string; ids?: number[] }) {
+  const params = new URLSearchParams()
+  if (q.keyword) params.set('keyword', q.keyword)
+  if (q.ids?.length) params.set('ids', q.ids.join(','))
+  const qs = params.toString()
+  return get<{ data: Array<{ id: number; name: string }> }>(`${BASE}/tenants${qs ? `?${qs}` : ''}`)
+}
+
+/** Limits a plugin to some workspaces; null lets every workspace see it. */
+export function setPluginAudience(id: string, tenants: number[] | null) {
+  return put<{ data: InstalledPlugin }>(`${BASE}/${encodeURIComponent(id)}/audience`, { tenants })
 }
 
 export function setPluginRemoteUrl(id: string, url: string) {

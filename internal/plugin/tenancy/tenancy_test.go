@@ -160,7 +160,8 @@ func TestInstalledPluginsWaitForTenantOptIn(t *testing.T) {
 	ctx := context.Background()
 	kit := &manifest.Manifest{
 		SchemaVersion: manifest.SchemaVersion, ID: "acme.kit", Version: "1.0.0", Name: manifest.Text("Kit", nil),
-		Publisher: manifest.Publisher{ID: "acme"}, Runtime: manifest.Runtime{Type: manifest.RuntimeDeclarative},
+		Publisher: manifest.Publisher{ID: "acme"}, APIVersion: "weknora.plugin/v1",
+		Runtime: manifest.Runtime{Type: manifest.RuntimeHost, Kind: "binary", Entry: "bin/x"},
 		Contributes: manifest.Contributions{
 			manifest.PointMCPServers: {{
 				ID: "search", Name: manifest.Text("Search", nil),
@@ -197,7 +198,8 @@ func TestTenantConfigRoundTrip(t *testing.T) {
 	ctx := context.Background()
 	kit := &manifest.Manifest{
 		SchemaVersion: manifest.SchemaVersion, ID: "acme.kit", Version: "1.0.0", Name: manifest.Text("Kit", nil),
-		Publisher: manifest.Publisher{ID: "acme"}, Runtime: manifest.Runtime{Type: manifest.RuntimeDeclarative},
+		Publisher: manifest.Publisher{ID: "acme"}, APIVersion: "weknora.plugin/v1",
+		Runtime: manifest.Runtime{Type: manifest.RuntimeHost, Kind: "binary", Entry: "bin/x"},
 		Config: manifest.ConfigSchemas{
 			TenantSchema: []byte(`{"type":"object","required":["api_key"],` +
 				`"properties":{"api_key":{"type":"string","x-secret":true},"region":{"type":"string"}}}`),
@@ -239,5 +241,59 @@ func TestTenantConfigRoundTrip(t *testing.T) {
 	}
 	if !s.ContributionEnabled(ctx, 1, manifest.PointMCPServers, "acme.kit/search") {
 		t.Fatal("saving config must keep the plugin enabled")
+	}
+}
+
+// A plugin limited to some tenants does not exist for the others: not
+// listed, never enabled, its switch and configuration out of reach.
+func TestAudienceHidesPlugins(t *testing.T) {
+	ctx := context.Background()
+	reg := registry.New()
+	m := &manifest.Manifest{
+		SchemaVersion: manifest.SchemaVersion, ID: "acme.search", Version: "1.0.0", Name: manifest.Text("S", nil),
+		Publisher: manifest.Publisher{ID: "acme"}, APIVersion: "weknora.plugin/v1",
+		Runtime: manifest.Runtime{Type: manifest.RuntimeHost, Kind: "binary", Entry: "bin/x"},
+		Config: manifest.ConfigSchemas{
+			TenantSchema: []byte(`{"type":"object","properties":{"k":{"type":"string"}}}`),
+		},
+		Contributes: manifest.Contributions{manifest.PointWebSearch: {{ID: "s", Name: manifest.Text("S", nil)}}},
+	}
+	reg.SetAudience("acme.search", []uint64{7})
+	if err := reg.Register(m); err != nil {
+		t.Fatal(err)
+	}
+	repo := &memRepo{}
+	s := NewService(reg, repo)
+	for _, tenant := range []uint64{7, 8} {
+		_ = repo.Upsert(ctx, &types.PluginTenantSetting{TenantID: tenant, PluginID: "acme.search", Enabled: true})
+	}
+
+	list, _ := s.List(ctx, 8)
+	if len(list) != 0 {
+		t.Fatalf("tenant 8 sees %v", list)
+	}
+	if on, _ := s.PluginEnabled(ctx, 8, "acme.search"); on {
+		t.Fatal("an out-of-audience tenant has the plugin enabled")
+	}
+	if s.ContributionEnabled(ctx, 8, manifest.PointWebSearch, "acme.search/s") {
+		t.Fatal("an out-of-audience tenant can use a contribution")
+	}
+	if err := s.SetEnabled(ctx, 8, "acme.search", true, "u"); !errors.Is(err, ErrUnknownPlugin) {
+		t.Fatalf("switch for tenant 8: %v", err)
+	}
+	if _, err := s.Config(ctx, 8, "acme.search"); !errors.Is(err, ErrUnknownPlugin) {
+		t.Fatalf("config for tenant 8: %v", err)
+	}
+
+	if list, _ := s.List(ctx, 7); len(list) != 1 || !list[0].Enabled {
+		t.Fatalf("tenant 7 = %v", list)
+	}
+	if !s.ContributionEnabled(ctx, 7, manifest.PointWebSearch, "acme.search/s") {
+		t.Fatal("the audience's tenant lost the plugin")
+	}
+
+	reg.SetAudience("acme.search", nil)
+	if on, _ := s.PluginEnabled(ctx, 8, "acme.search"); !on {
+		t.Fatal("back in the audience, tenant 8's switch comes back")
 	}
 }

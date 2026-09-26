@@ -1,9 +1,11 @@
 package handler
 
 import (
+	"context"
 	stderrors "errors"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -21,6 +23,21 @@ import (
 type PluginAdminHandler struct {
 	service *install.Service
 	market  *market.Client
+	tenants PluginAudienceTenants
+}
+
+// PluginAudienceTenants finds the workspaces a plugin's audience can name.
+type PluginAudienceTenants interface {
+	SearchTenants(
+		ctx context.Context, keyword string, tenantID uint64, page, pageSize int,
+	) ([]*types.Tenant, int64, error)
+	GetTenantsByIDs(ctx context.Context, ids []uint64) (map[uint64]*types.Tenant, error)
+}
+
+// WithTenants lets the handler look workspaces up for plugin audiences.
+func (h *PluginAdminHandler) WithTenants(t PluginAudienceTenants) *PluginAdminHandler {
+	h.tenants = t
+	return h
 }
 
 // NewPluginAdminHandler creates a PluginAdminHandler.
@@ -348,6 +365,105 @@ func (h *PluginAdminHandler) RotatePluginSecret(c *gin.Context) {
 		return
 	}
 	h.ok(c, view)
+}
+
+// SetPluginAudienceRequest limits a plugin to some workspaces.
+type SetPluginAudienceRequest struct {
+	// Tenants are the workspaces that see the plugin; null (or absent)
+	// lets every workspace see it.
+	Tenants *[]uint64 `json:"tenants"`
+}
+
+// SetPluginAudience godoc
+// @Summary      设置插件的可见空间
+// @Description  tenants 为空间 ID 列表时，只有这些空间能看到并启用该插件；为 null 时所有空间可见。
+// @Description  范围外的空间保留原有开关和配置，重新纳入后恢复
+// @Tags         System
+// @Accept       json
+// @Produce      json
+// @Param        id       path      string                    true  "插件 ID"
+// @Param        request  body      SetPluginAudienceRequest  true  "可见空间"
+// @Success      200      {object}  map[string]interface{}
+// @Security     Bearer
+// @Router       /system/admin/plugins/{id}/audience [put]
+func (h *PluginAdminHandler) SetPluginAudience(c *gin.Context) {
+	var req SetPluginAudienceRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		_ = c.Error(errors.NewBadRequestError("tenants must be a list of workspace IDs or null"))
+		return
+	}
+	var tenants []uint64
+	if req.Tenants != nil {
+		tenants = append([]uint64{}, *req.Tenants...)
+	}
+	view, err := h.service.SetAudience(c.Request.Context(), c.Param("id"), tenants)
+	if err != nil {
+		h.fail(c, err)
+		return
+	}
+	h.ok(c, view)
+}
+
+// PluginAudienceTenant is a workspace as the audience picker shows it.
+type PluginAudienceTenant struct {
+	ID   uint64 `json:"id"`
+	Name string `json:"name"`
+}
+
+// ListPluginAudienceTenants godoc
+// @Summary      查找可作为插件可见范围的空间
+// @Description  按关键词（名称或 ID）搜索空间，或用 ids（逗号分隔）取回指定空间；只返回 ID 和名称，最多 50 个
+// @Tags         System
+// @Produce      json
+// @Param        keyword  query     string  false  "关键词"
+// @Param        ids      query     string  false  "空间 ID，逗号分隔"
+// @Success      200      {object}  map[string]interface{}
+// @Security     Bearer
+// @Router       /system/admin/plugins/tenants [get]
+func (h *PluginAdminHandler) ListPluginAudienceTenants(c *gin.Context) {
+	if h.tenants == nil {
+		h.ok(c, []PluginAudienceTenant{})
+		return
+	}
+	ctx := c.Request.Context()
+	out := []PluginAudienceTenant{}
+	if raw := strings.TrimSpace(c.Query("ids")); raw != "" {
+		var ids []uint64
+		for _, part := range strings.Split(raw, ",") {
+			if id, err := strconv.ParseUint(strings.TrimSpace(part), 10, 64); err == nil {
+				ids = append(ids, id)
+			}
+		}
+		if len(ids) > 200 {
+			ids = ids[:200]
+		}
+		found, err := h.tenants.GetTenantsByIDs(ctx, ids)
+		if err != nil {
+			h.fail(c, err)
+			return
+		}
+		for _, id := range ids {
+			if t, ok := found[id]; ok && t != nil {
+				out = append(out, PluginAudienceTenant{ID: t.ID, Name: t.Name})
+			}
+		}
+		h.ok(c, out)
+		return
+	}
+	keyword := strings.TrimSpace(c.Query("keyword"))
+	var byID uint64
+	if id, err := strconv.ParseUint(keyword, 10, 64); err == nil {
+		byID, keyword = id, ""
+	}
+	found, _, err := h.tenants.SearchTenants(ctx, keyword, byID, 1, 50)
+	if err != nil {
+		h.fail(c, err)
+		return
+	}
+	for _, t := range found {
+		out = append(out, PluginAudienceTenant{ID: t.ID, Name: t.Name})
+	}
+	h.ok(c, out)
 }
 
 // UninstallPlugin godoc

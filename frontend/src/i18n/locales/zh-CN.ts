@@ -5332,6 +5332,16 @@ export default {
         unavailable: '不兼容'
       }
     },
+    audience: {
+      title: '可见范围',
+      hint: '限定后，只有所选空间能看到并启用该插件；其他空间看不到它，已有的开关和配置保留，重新纳入后恢复。',
+      all: '所有空间',
+      some: '指定空间',
+      placeholder: '搜索并选择空间',
+      none: '未选择任何空间：没有空间能使用该插件。',
+      saved: '可见范围已更新',
+      saveFailed: '更新可见范围失败'
+    },
     install: {
       title: '安装插件',
       description: '上传 .wkp 插件包或填写下载地址，审阅后安装。',

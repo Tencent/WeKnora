@@ -217,6 +217,9 @@ func (r *Reconciler) Reconcile(ctx context.Context) error {
 			continue
 		}
 		desired[row.ID] = true
+		// Before loading, so a plugin limited to some tenants is never
+		// everyone's, not even for a moment.
+		r.registry.SetAudience(row.ID, row.AudienceTenants())
 		if err := r.ensure(ctx, row); err != nil {
 			errs = append(errs, fmt.Errorf("plugin %s: %w", row.ID, err))
 			r.setStatus(row.ID, Status{Version: row.ActiveVersion, State: StateFailed, Error: err.Error()})

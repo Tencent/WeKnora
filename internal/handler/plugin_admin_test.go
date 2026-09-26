@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -78,5 +79,57 @@ func TestPluginAdminMarket(t *testing.T) {
 	other := "sha256:" + strings.Repeat("0", 64)
 	if w := call(e, http.MethodPost, "/inspect", `{"url":"`+pkgURL+`","digest":"`+other+`"}`, hdr); w.Code != 400 {
 		t.Fatalf("inspect with another digest = %d %s", w.Code, w.Body.String())
+	}
+}
+
+type fakeAudienceTenants struct{ all []*types.Tenant }
+
+func (f fakeAudienceTenants) SearchTenants(
+	_ context.Context, keyword string, tenantID uint64, _, _ int,
+) ([]*types.Tenant, int64, error) {
+	var out []*types.Tenant
+	for _, t := range f.all {
+		if (tenantID == 0 || t.ID == tenantID) && strings.Contains(t.Name, keyword) {
+			out = append(out, t)
+		}
+	}
+	return out, int64(len(out)), nil
+}
+
+func (f fakeAudienceTenants) GetTenantsByIDs(_ context.Context, ids []uint64) (map[uint64]*types.Tenant, error) {
+	out := map[uint64]*types.Tenant{}
+	for _, t := range f.all {
+		for _, id := range ids {
+			if t.ID == id {
+				out[id] = t
+			}
+		}
+	}
+	return out, nil
+}
+
+func TestPluginAudienceTenants(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	h := NewPluginAdminHandler(nil).WithTenants(fakeAudienceTenants{all: []*types.Tenant{
+		{ID: 7, Name: "Sales", Description: "secret"}, {ID: 8, Name: "Support"},
+	}})
+	e := gin.New()
+	e.Use(middleware.ErrorHandler())
+	e.GET("/tenants", h.ListPluginAudienceTenants)
+	get := func(q string) string {
+		w := call(e, http.MethodGet, "/tenants"+q, "", nil)
+		return w.Body.String()
+	}
+	if got := get("?keyword=Sup"); !strings.Contains(got, `"name":"Support"`) || strings.Contains(got, "Sales") {
+		t.Fatalf("keyword = %s", got)
+	}
+	if got := get("?keyword=7"); !strings.Contains(got, `"id":7`) || strings.Contains(got, `"id":8`) {
+		t.Fatalf("by id = %s", got)
+	}
+	if got := get("?ids=8,7,x"); got != `{"data":[{"id":8,"name":"Support"},{"id":7,"name":"Sales"}],"success":true}` {
+		t.Fatalf("ids = %s", got)
+	}
+	if got := get(""); strings.Contains(got, "secret") {
+		t.Fatalf("leaks tenant fields: %s", got)
 	}
 }

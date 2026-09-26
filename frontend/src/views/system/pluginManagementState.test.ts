@@ -18,6 +18,8 @@ import {
   trustTheme,
   filterMarket,
   marketAction,
+  audienceOf,
+  sameAudience,
   sortVersions,
 } from './pluginManagementState'
 
@@ -121,4 +123,14 @@ test('marketplace search and actions', () => {
   assert.equal(marketAction(entry('a', { installedVersion: '1.0.0' })), 'upgrade')
   assert.equal(marketAction(entry('a', { installedVersion: '1.2.0' })), 'installed')
   assert.equal(marketAction(entry('a', { latest: null })), 'unavailable')
+})
+
+test('plugin audiences', () => {
+  assert.equal(audienceOf({}), null)
+  assert.equal(audienceOf({ audience: null }), null)
+  assert.deepEqual(audienceOf({ audience: [9, 7] }), [7, 9])
+  assert.ok(sameAudience(null, null))
+  assert.ok(!sameAudience(null, []))
+  assert.ok(sameAudience([7, 9, 9], [9, 7]))
+  assert.ok(!sameAudience([7], [7, 9]))
 })

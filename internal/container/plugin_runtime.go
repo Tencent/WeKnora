@@ -237,8 +237,8 @@ func newPluginInstaller(
 
 // newPluginAdminHandler serves plugin installation, with the marketplace
 // WEKNORA_PLUGIN_INDEX_URL names.
-func newPluginAdminHandler(service *install.Service) *handler.PluginAdminHandler {
-	return handler.NewPluginAdminHandler(service).WithMarket(market.FromEnv(handler.Version))
+func newPluginAdminHandler(service *install.Service, tenants interfaces.TenantService) *handler.PluginAdminHandler {
+	return handler.NewPluginAdminHandler(service).WithMarket(market.FromEnv(handler.Version)).WithTenants(tenants)
 }
 
 // startPluginReconciler loads installed plugins before the server takes

@@ -44,7 +44,7 @@ func (r *pluginRepository) GetPlugin(ctx context.Context, id string) (*types.Ins
 // column but its identity and creation.
 var pluginUpdateColumns = []string{
 	"owner_tenant_id", "source", "active_version", "desired_state", "runtime",
-	"granted_perms", "system_config", "remote_url", "remote_secret", "updated_at",
+	"granted_perms", "system_config", "audience", "remote_url", "remote_secret", "updated_at",
 }
 
 func (r *pluginRepository) SavePlugin(ctx context.Context, p *types.InstalledPlugin) error {
@@ -85,6 +85,8 @@ func (r *pluginRepository) GetVersion(ctx context.Context, pluginID, version str
 func (r *pluginRepository) SaveVersion(ctx context.Context, v *types.PluginVersion) error {
 	return r.db.WithContext(ctx).Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "plugin_id"}, {Name: "version"}},
-		DoUpdates: clause.AssignmentColumns([]string{"digest", "manifest", "package_uri", "size", "created_by"}),
+		DoUpdates: clause.AssignmentColumns([]string{
+			"digest", "manifest", "package_uri", "size", "trust", "signer_key_id", "created_by",
+		}),
 	}).Create(v).Error
 }

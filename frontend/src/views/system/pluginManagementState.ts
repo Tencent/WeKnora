@@ -38,6 +38,19 @@ export function trustNote(v: TrustVerdict): { key: 'signedBy' | 'untrustedKey' |
   return { key: v.trusted ? 'signedBy' : 'untrustedKey', keyId: v.keyId }
 }
 
+/** The workspaces a plugin is limited to, or null when every workspace sees it. */
+export function audienceOf(p: Pick<InstalledPlugin, 'audience'> | null | undefined): number[] | null {
+  return Array.isArray(p?.audience) ? [...p.audience].sort((a, b) => a - b) : null
+}
+
+/** Whether two audiences name the same workspaces (null: everyone). */
+export function sameAudience(a: readonly number[] | null, b: readonly number[] | null): boolean {
+  if (a === null || b === null) return a === b
+  const x = [...new Set(a)].sort((m, n) => m - n)
+  const y = [...new Set(b)].sort((m, n) => m - n)
+  return x.length === y.length && x.every((v, i) => v === y[i])
+}
+
 /** Marketplace entries matching a search over name, ID, publisher and description. */
 export function filterMarket(list: readonly MarketPlugin[], query: string, locale: string): MarketPlugin[] {
   const q = query.trim().toLowerCase()

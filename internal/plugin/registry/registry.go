@@ -31,14 +31,18 @@ type Registry struct {
 	// index resolves qualified IDs and builtin aliases per point.
 	index map[manifest.Point]map[string]*Entry
 	seq   int
+	// audience limits plugins to some tenants; a plugin without an entry
+	// is everyone's.
+	audience map[string]map[uint64]bool
 }
 
 // New returns an empty registry.
 func New() *Registry {
 	return &Registry{
-		plugins: make(map[string]*manifest.Manifest),
-		entries: make(map[manifest.Point][]*Entry),
-		index:   make(map[manifest.Point]map[string]*Entry),
+		plugins:  make(map[string]*manifest.Manifest),
+		entries:  make(map[manifest.Point][]*Entry),
+		index:    make(map[manifest.Point]map[string]*Entry),
+		audience: make(map[string]map[uint64]bool),
 	}
 }
 
@@ -90,7 +94,33 @@ func (r *Registry) Unregister(id string) error {
 		return fmt.Errorf("builtin plugin %s cannot be removed", id)
 	}
 	r.removeLocked(id)
+	delete(r.audience, id)
 	return nil
+}
+
+// SetAudience limits a plugin to some tenants; nil gives it to everyone and
+// an empty slice to no one. It may be set before the plugin registers.
+func (r *Registry) SetAudience(id string, tenants []uint64) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if tenants == nil {
+		delete(r.audience, id)
+		return
+	}
+	set := make(map[uint64]bool, len(tenants))
+	for _, t := range tenants {
+		set[t] = true
+	}
+	r.audience[id] = set
+}
+
+// VisibleTo reports whether a tenant may see a plugin at all. Tenant ID 0
+// (no workspace: the platform itself) sees everything.
+func (r *Registry) VisibleTo(id string, tenantID uint64) bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	set, limited := r.audience[id]
+	return !limited || tenantID == 0 || set[tenantID]
 }
 
 // checkKeysLocked verifies that m's IDs and aliases are free, ignoring the

@@ -202,7 +202,9 @@ func (h *PluginHandler) ListContributions(c *gin.Context) {
 		Points:        points,
 		Contributions: make(map[manifest.Point][]PluginContributionDTO, len(points)),
 	}
-	enabled := map[string]bool{}
+	// Plugins the tenant may not see are absent from its list, and so from
+	// these maps.
+	enabled, visible := map[string]bool{}, map[string]bool{}
 	plugins, err := h.tenantPlugins(c)
 	if err != nil {
 		_ = c.Error(errors.NewInternalServerError("failed to load plugin settings"))
@@ -210,11 +212,15 @@ func (h *PluginHandler) ListContributions(c *gin.Context) {
 	}
 	for _, p := range plugins {
 		enabled[p.Manifest.ID] = p.Enabled
+		visible[p.Manifest.ID] = true
 	}
 	for _, info := range points {
 		entries := h.registry.Contributions(info.Point)
 		list := make([]PluginContributionDTO, 0, len(entries))
 		for _, e := range entries {
+			if !visible[e.PluginID] {
+				continue
+			}
 			dto := PluginContributionDTO{
 				Contribution: e.Contribution,
 				PluginID:     e.PluginID,

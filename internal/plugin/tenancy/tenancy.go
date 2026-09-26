@@ -41,7 +41,7 @@ type TenantPlugin struct {
 	UpdatedAt time.Time `json:"updatedAt,omitzero"`
 }
 
-// List returns every known plugin with the tenant's switch.
+// List returns every plugin the tenant may see with the tenant's switch.
 func (s *Service) List(ctx context.Context, tenantID uint64) ([]TenantPlugin, error) {
 	rows, err := s.repo.List(ctx, tenantID)
 	if err != nil {
@@ -54,6 +54,9 @@ func (s *Service) List(ctx context.Context, tenantID uint64) ([]TenantPlugin, er
 	plugins := s.registry.Plugins()
 	out := make([]TenantPlugin, 0, len(plugins))
 	for _, m := range plugins {
+		if !s.registry.VisibleTo(m.ID, tenantID) {
+			continue
+		}
 		tp := TenantPlugin{Manifest: m, Enabled: enabledByDefault(m)}
 		if r, ok := byID[m.ID]; ok {
 			tp.Enabled = r.Enabled || m.Required
@@ -69,7 +72,7 @@ func (s *Service) List(ctx context.Context, tenantID uint64) ([]TenantPlugin, er
 // the plugin.
 func (s *Service) PluginEnabled(ctx context.Context, tenantID uint64, pluginID string) (bool, error) {
 	m, ok := s.registry.Plugin(pluginID)
-	if !ok {
+	if !ok || !s.registry.VisibleTo(pluginID, tenantID) {
 		return false, nil
 	}
 	if m.Required {
@@ -90,7 +93,7 @@ func (s *Service) SetEnabled(
 	ctx context.Context, tenantID uint64, pluginID string, enabled bool, updatedBy string,
 ) error {
 	m, ok := s.registry.Plugin(pluginID)
-	if !ok {
+	if !ok || !s.registry.VisibleTo(pluginID, tenantID) {
 		return ErrUnknownPlugin
 	}
 	if !enabled && m.Required {
@@ -126,6 +129,9 @@ func (s *Service) EnabledFilter(ctx context.Context, tenantID uint64) func(manif
 		e, ok := s.registry.Resolve(point, id)
 		if !ok {
 			return true
+		}
+		if !s.registry.VisibleTo(e.PluginID, tenantID) {
+			return false
 		}
 		m, ok := s.registry.Plugin(e.PluginID)
 		if !ok || m.Required || failOpen {

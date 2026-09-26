@@ -63,6 +63,34 @@
         </ul>
       </section>
 
+      <section class="setting-drawer__section">
+        <h4 class="setting-drawer__section-title">{{ t('pluginAdmin.audience.title') }}</h4>
+        <p class="form-desc">{{ t('pluginAdmin.audience.hint') }}</p>
+        <t-radio-group v-model="audienceMode" variant="default-filled" size="small">
+          <t-radio-button value="all">{{ t('pluginAdmin.audience.all') }}</t-radio-button>
+          <t-radio-button value="some">{{ t('pluginAdmin.audience.some') }}</t-radio-button>
+        </t-radio-group>
+        <t-select
+          v-if="audienceMode === 'some'"
+          v-model="audienceTenants"
+          multiple
+          filterable
+          clearable
+          :loading="tenantsLoading"
+          :options="tenantOptions"
+          :placeholder="t('pluginAdmin.audience.placeholder')"
+          :on-search="searchTenantOptions"
+        />
+        <p v-if="audienceMode === 'some' && audienceTenants.length === 0" class="form-desc form-desc--warn">
+          {{ t('pluginAdmin.audience.none') }}
+        </p>
+        <div>
+          <t-button size="small" theme="primary" :loading="savingAudience" :disabled="!audienceDirty" @click="saveAudience">
+            {{ t('common.save') }}
+          </t-button>
+        </div>
+      </section>
+
       <section v-if="plugin.runtime === 'remote'" class="setting-drawer__section">
         <h4 class="setting-drawer__section-title">{{ t('pluginAdmin.detail.remote') }}</h4>
         <div class="remote-row">
@@ -157,7 +185,9 @@ import { getPlugin, type PluginInstance } from '@/api/plugin'
 import {
   activatePluginVersion,
   getPluginSystemConfig,
+  listAudienceTenants,
   rotatePluginSecret,
+  setPluginAudience,
   setPluginRemoteUrl,
   uninstallPlugin,
   updatePluginSystemConfig,
@@ -166,11 +196,13 @@ import {
 import { localizedText } from '@/utils/localizedText'
 
 import {
+  audienceOf,
   compareVersions,
   contributionLines,
   formatBytes,
   hasSystemConfig,
   isPackageUrl,
+  sameAudience,
   shortDigest,
   sortVersions,
   trustTheme,
@@ -209,6 +241,57 @@ const urlDraft = ref('')
 const savingUrl = ref(false)
 const rotating = ref(false)
 
+// Which workspaces see the plugin.
+const audienceMode = ref<'all' | 'some'>('all')
+const audienceTenants = ref<number[]>([])
+const savingAudience = ref(false)
+const tenantsLoading = ref(false)
+const tenantNames = ref(new Map<number, string>())
+const tenantOptions = computed(() => {
+  const ids = new Set<number>([...tenantNames.value.keys(), ...audienceTenants.value])
+  return [...ids].map(id => ({ value: id, label: `${tenantNames.value.get(id) ?? '#' + id} (${id})` }))
+})
+const audienceDraft = computed(() => (audienceMode.value === 'all' ? null : audienceTenants.value))
+const audienceDirty = computed(() => !sameAudience(audienceDraft.value, audienceOf(props.plugin)))
+
+function resetAudience() {
+  const a = audienceOf(props.plugin)
+  audienceMode.value = a === null ? 'all' : 'some'
+  audienceTenants.value = a ?? []
+}
+
+async function loadTenantNames(q: { keyword?: string; ids?: number[] }) {
+  tenantsLoading.value = true
+  try {
+    const res = await listAudienceTenants(q)
+    const next = new Map(tenantNames.value)
+    for (const tn of res.data ?? []) next.set(tn.id, tn.name)
+    tenantNames.value = next
+  } catch {
+    // The picker still takes the IDs it has.
+  } finally {
+    tenantsLoading.value = false
+  }
+}
+
+function searchTenantOptions(keyword = '') {
+  void loadTenantNames({ keyword: keyword.trim() || undefined })
+}
+
+async function saveAudience() {
+  if (!props.plugin) return
+  savingAudience.value = true
+  try {
+    const res = await setPluginAudience(props.plugin.id, audienceDraft.value)
+    emit('changed', res.data)
+    MessagePlugin.success(t('pluginAdmin.audience.saved'))
+  } catch (e: any) {
+    MessagePlugin.error(e?.message || t('pluginAdmin.audience.saveFailed'))
+  } finally {
+    savingAudience.value = false
+  }
+}
+
 const formatDate = (s: string) => (s ? new Date(s).toLocaleString(locale.value) : '')
 
 async function loadNodes(id: string) {
@@ -241,8 +324,13 @@ watch(
   ([visible, id]) => {
     if (!visible || !id) return
     editingUrl.value = false
+    resetAudience()
     void loadNodes(id)
     void loadConfig(id)
+    const current = audienceOf(props.plugin) ?? []
+    void loadTenantNames(current.length ? { ids: current } : {}).then(() => {
+      if (current.length) void loadTenantNames({})
+    })
   },
   { immediate: true },
 )
@@ -403,6 +491,10 @@ async function uninstall() {
   font-size: var(--app-text-sm);
   line-height: 1.5;
   color: var(--td-text-color-placeholder);
+}
+
+.form-desc--warn {
+  color: var(--td-warning-color);
 }
 
 .remote-row {

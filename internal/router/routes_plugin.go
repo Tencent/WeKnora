@@ -58,11 +58,13 @@ func RegisterPluginAdminRoutes(r *gin.RouterGroup, h *handler.PluginAdminHandler
 		// Registered before /:id so the static segment wins.
 		plugins.POST("/inspect", h.InspectPlugin)
 		plugins.GET("/market", h.ListMarketPlugins)
+		plugins.GET("/tenants", h.ListPluginAudienceTenants)
 		plugins.GET("/:id", h.GetInstalledPlugin)
 		plugins.DELETE("/:id", h.UninstallPlugin)
 		plugins.PUT("/:id/enabled", h.SetInstalledPluginEnabled)
 		plugins.PUT("/:id/active-version", h.ActivatePluginVersion)
 		plugins.PUT("/:id/remote-url", h.SetPluginRemoteURL)
+		plugins.PUT("/:id/audience", h.SetPluginAudience)
 		plugins.POST("/:id/secret/rotate", h.RotatePluginSecret)
 		plugins.GET("/:id/config", h.GetPluginSystemConfig)
 		plugins.PUT("/:id/config", h.UpdatePluginSystemConfig)

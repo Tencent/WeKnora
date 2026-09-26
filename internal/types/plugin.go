@@ -1,6 +1,9 @@
 package types
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 // Desired states of an installed plugin.
 const (
@@ -24,6 +27,9 @@ type InstalledPlugin struct {
 	// GrantedPerms is the manifest permissions an administrator accepted.
 	GrantedPerms JSON `json:"granted_perms" gorm:"type:json"`
 	SystemConfig JSON `json:"system_config,omitempty" gorm:"type:json"`
+	// Audience limits the plugin to these tenant IDs (a JSON array); empty
+	// means every tenant sees it.
+	Audience JSON `json:"audience,omitempty" gorm:"type:json"`
 	// RemoteURL is where a remote plugin is served; RemoteSecret (sealed)
 	// signs the calls to it. Other runtimes leave both empty.
 	RemoteURL    string    `json:"remote_url,omitempty" gorm:"type:varchar(1024)"`
@@ -35,6 +41,20 @@ type InstalledPlugin struct {
 
 // TableName pins the table so GORM's pluralizer cannot drift.
 func (InstalledPlugin) TableName() string { return "plugins" }
+
+// AudienceTenants returns the tenants the plugin is limited to, or nil when
+// every tenant sees it. A limit to no tenant is an empty, non-nil slice.
+func (p InstalledPlugin) AudienceTenants() []uint64 {
+	if len(p.Audience) == 0 || string(p.Audience) == "null" {
+		return nil
+	}
+	out := []uint64{}
+	if json.Unmarshal(p.Audience, &out) != nil {
+		// Unreadable: see it as limited to no one rather than everyone.
+		return []uint64{}
+	}
+	return out
+}
 
 // PluginVersion is one stored package version of an installed plugin.
 type PluginVersion struct {

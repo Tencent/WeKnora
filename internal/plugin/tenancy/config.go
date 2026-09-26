@@ -22,9 +22,9 @@ type TenantConfig struct {
 	UpdatedAt time.Time      `json:"updatedAt,omitzero"`
 }
 
-func (s *Service) tenantSchema(pluginID string) (*configschema.Schema, json.RawMessage, error) {
+func (s *Service) tenantSchema(tenantID uint64, pluginID string) (*configschema.Schema, json.RawMessage, error) {
 	m, ok := s.registry.Plugin(pluginID)
-	if !ok {
+	if !ok || !s.registry.VisibleTo(pluginID, tenantID) {
 		return nil, nil, ErrUnknownPlugin
 	}
 	raw := m.Config.TenantSchema
@@ -51,7 +51,7 @@ func storedValues(row *types.PluginTenantSetting) map[string]any {
 
 // Config returns the tenant's configuration of a plugin, secrets redacted.
 func (s *Service) Config(ctx context.Context, tenantID uint64, pluginID string) (*TenantConfig, error) {
-	schema, raw, err := s.tenantSchema(pluginID)
+	schema, raw, err := s.tenantSchema(tenantID, pluginID)
 	if err != nil {
 		return nil, err
 	}
@@ -72,7 +72,7 @@ func (s *Service) Config(ctx context.Context, tenantID uint64, pluginID string) 
 func (s *Service) SetConfig(
 	ctx context.Context, tenantID uint64, pluginID string, values map[string]any, updatedBy string,
 ) (*TenantConfig, error) {
-	schema, _, err := s.tenantSchema(pluginID)
+	schema, _, err := s.tenantSchema(tenantID, pluginID)
 	if err != nil {
 		return nil, err
 	}
@@ -105,7 +105,7 @@ func (s *Service) SetConfig(
 // OpenConfig returns the tenant's configuration with secrets decrypted, for
 // code about to use it, and when it last changed.
 func (s *Service) OpenConfig(ctx context.Context, tenantID uint64, pluginID string) (map[string]any, time.Time, error) {
-	schema, _, err := s.tenantSchema(pluginID)
+	schema, _, err := s.tenantSchema(tenantID, pluginID)
 	if errors.Is(err, ErrNoTenantConfig) {
 		return map[string]any{}, time.Time{}, nil
 	}

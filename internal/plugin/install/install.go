@@ -16,6 +16,7 @@ import (
 	"net/url"
 	"os/exec"
 	goruntime "runtime"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -497,6 +498,30 @@ func (s *Service) SetEnabled(ctx context.Context, id string, enabled bool) (*Vie
 	row.DesiredState = types.PluginStateDisabled
 	if enabled {
 		row.DesiredState = types.PluginStateEnabled
+	}
+	if err := s.repo.SavePlugin(ctx, row); err != nil {
+		return nil, err
+	}
+	return s.apply(ctx, id)
+}
+
+// SetAudience limits an installed plugin to some tenants; nil gives it back
+// to every tenant. Tenants outside the audience no longer see it: their
+// switch and configuration are kept for when they are let back in.
+func (s *Service) SetAudience(ctx context.Context, id string, tenants []uint64) (*View, error) {
+	row, err := s.repo.GetPlugin(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if row == nil {
+		return nil, ErrNotInstalled
+	}
+	row.Audience = nil
+	if tenants != nil {
+		sort.Slice(tenants, func(i, j int) bool { return tenants[i] < tenants[j] })
+		tenants = slices.Compact(tenants)
+		b, _ := json.Marshal(tenants)
+		row.Audience = types.JSON(b)
 	}
 	if err := s.repo.SavePlugin(ctx, row); err != nil {
 		return nil, err

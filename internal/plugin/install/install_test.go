@@ -300,3 +300,27 @@ func TestInstallRecordsTrustAndEnforcesTheMinimum(t *testing.T) {
 		t.Fatalf("rolling back to a community version under a verified minimum: %v", err)
 	}
 }
+
+func TestSetAudience(t *testing.T) {
+	ctx := context.Background()
+	s, repo, _, reg := newService(t)
+	if _, err := s.Install(ctx, Request{Data: plugintest.KitPackage(t, "1.0.0")}); err != nil {
+		t.Fatal(err)
+	}
+	v, err := s.SetAudience(ctx, "acme.kit", []uint64{9, 7, 9})
+	if err != nil || string(v.Audience) != "[7,9]" {
+		t.Fatalf("audience = %s, %v", v.Audience, err)
+	}
+	if reg.VisibleTo("acme.kit", 8) || !reg.VisibleTo("acme.kit", 7) {
+		t.Fatal("the node did not apply the audience")
+	}
+	if _, err := s.SetAudience(ctx, "acme.kit", nil); err != nil {
+		t.Fatal(err)
+	}
+	if row, _ := repo.GetPlugin(ctx, "acme.kit"); row.AudienceTenants() != nil || !reg.VisibleTo("acme.kit", 8) {
+		t.Fatalf("audience not cleared: %s", row.Audience)
+	}
+	if _, err := s.SetAudience(ctx, "acme.missing", nil); !errors.Is(err, ErrNotInstalled) {
+		t.Fatalf("unknown plugin: %v", err)
+	}
+}
