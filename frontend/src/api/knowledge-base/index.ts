@@ -220,6 +220,43 @@ export interface ImageProcessingConfig {
   model_id?: string;
   image_actions?: ImageActionsConfig;
   image_attrs_enabled?: boolean;
+  /** Which image pipeline runs for this base; empty means "follow the switch". */
+  image_pipeline?: string;
+  /** That pipeline's private tunables, keyed by field. See ImagePipelineField. */
+  image_pipeline_params?: Record<string, unknown>;
+}
+
+// Mirrors types.ImagePipelineSpec and types.ImageFieldDef.
+//
+// A field is private to the pipeline that declared it, which is why two
+// pipelines may both own a field called "enable_ocr". The knowledge base stores
+// them per pipeline rather than in one flat map, and the panel renders one
+// control per field without naming any pipeline.
+export interface ImagePipelineField {
+  key: string;
+  type: 'bool' | 'string' | 'enum';
+  label: string;
+  description: string;
+  default: unknown;
+  options: string[] | null;
+}
+
+export interface ImagePipelineSpec {
+  id: string;
+  name: string;
+  /** How the pipeline works, shown under the pick; i18n overlays on top. */
+  description: string;
+  fields: ImagePipelineField[];
+}
+
+// Fetch every registered image pipeline. The backend owns the list, so a
+// pipeline added there shows up here as an option with no frontend change. The
+// registry is global, not per-KB, hence the top-level route.
+export async function fetchImagePipelines(): Promise<ImagePipelineSpec[]> {
+  const res = await get<{ success: boolean; data: ImagePipelineSpec[] }>(
+    `/api/v1/image-pipelines`,
+  );
+  return res.data;
 }
 
 export type VectorStoreSource = 'env' | 'user' | 'shared' | 'unavailable';

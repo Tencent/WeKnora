@@ -298,13 +298,15 @@ func TestProcessImageObservesAndDescribes(t *testing.T) {
 	}
 
 	payload := &types.ImageMultimodalPayload{
-		TenantID:          1,
-		KnowledgeID:       "k-1",
-		KnowledgeBaseID:   "kb-1",
-		ImageURL:          "local://img/0.png",
-		ChunkID:           "chunk-a",
-		EnableOCR:         true,
-		EnableCaption:     true,
+		TenantID:        1,
+		KnowledgeID:     "k-1",
+		KnowledgeBaseID: "kb-1",
+		ImageURL:        "local://img/0.png",
+		ChunkID:         "chunk-a",
+		ImagePipelineParams: map[string]any{
+			smartFieldKeyAllowOCR:       true,
+			smartFieldKeyCaptureCaption: true,
+		},
 		ImageAttrsEnabled: true,
 		ImageActions:      types.DefaultImageActions(),
 	}
@@ -362,13 +364,15 @@ func TestProcessImageMarksObservationFailed(t *testing.T) {
 	}
 
 	payload := &types.ImageMultimodalPayload{
-		TenantID:          1,
-		KnowledgeID:       "k-1",
-		KnowledgeBaseID:   "kb-1",
-		ImageURL:          "local://img/0.png",
-		ChunkID:           "chunk-a",
-		EnableOCR:         true,
-		EnableCaption:     true,
+		TenantID:        1,
+		KnowledgeID:     "k-1",
+		KnowledgeBaseID: "kb-1",
+		ImageURL:        "local://img/0.png",
+		ChunkID:         "chunk-a",
+		ImagePipelineParams: map[string]any{
+			smartFieldKeyAllowOCR:       true,
+			smartFieldKeyCaptureCaption: true,
+		},
 		ImageAttrsEnabled: true,
 		ImageActions:      types.DefaultImageActions(),
 	}
@@ -410,13 +414,16 @@ func TestProcessImageSkipsOCRForQuietAttr(t *testing.T) {
 	}
 
 	payload := &types.ImageMultimodalPayload{
-		TenantID:          1,
-		KnowledgeID:       "k-1",
-		KnowledgeBaseID:   "kb-1",
-		ImageURL:          "local://img/0.png",
-		ChunkID:           "chunk-a",
-		EnableOCR:         true, // whole-task switch stays on; the observation is what vetoes
-		EnableCaption:     true,
+		TenantID:        1,
+		KnowledgeID:     "k-1",
+		KnowledgeBaseID: "kb-1",
+		ImageURL:        "local://img/0.png",
+		ChunkID:         "chunk-a",
+		// The ceiling stays on; the observation is what vetoes.
+		ImagePipelineParams: map[string]any{
+			smartFieldKeyAllowOCR:       true,
+			smartFieldKeyCaptureCaption: true,
+		},
 		ImageAttrsEnabled: true,
 		ImageActions:      types.DefaultImageActions(),
 	}
@@ -463,13 +470,15 @@ func TestProcessImageKeepsAttrsButDropsCaptionWhenCaptionsAreOff(t *testing.T) {
 	}
 
 	payload := &types.ImageMultimodalPayload{
-		TenantID:          1,
-		KnowledgeID:       "k-1",
-		KnowledgeBaseID:   "kb-1",
-		ImageURL:          "local://img/0.png",
-		ChunkID:           "chunk-a",
-		EnableOCR:         true,
-		EnableCaption:     false,
+		TenantID:        1,
+		KnowledgeID:     "k-1",
+		KnowledgeBaseID: "kb-1",
+		ImageURL:        "local://img/0.png",
+		ChunkID:         "chunk-a",
+		ImagePipelineParams: map[string]any{
+			smartFieldKeyAllowOCR:       true,
+			smartFieldKeyCaptureCaption: false,
+		},
 		ImageAttrsEnabled: true,
 		ImageActions:      types.DefaultImageActions(),
 	}
@@ -522,13 +531,15 @@ func TestProcessImageProseAnswerIsStillCaptionedAndOCRed(t *testing.T) {
 	}
 
 	payload := &types.ImageMultimodalPayload{
-		TenantID:          1,
-		KnowledgeID:       "k-1",
-		KnowledgeBaseID:   "kb-1",
-		ImageURL:          "local://img/0.png",
-		ChunkID:           "chunk-a",
-		EnableOCR:         true,
-		EnableCaption:     true,
+		TenantID:        1,
+		KnowledgeID:     "k-1",
+		KnowledgeBaseID: "kb-1",
+		ImageURL:        "local://img/0.png",
+		ChunkID:         "chunk-a",
+		ImagePipelineParams: map[string]any{
+			smartFieldKeyAllowOCR:       true,
+			smartFieldKeyCaptureCaption: true,
+		},
 		ImageAttrsEnabled: true,
 		ImageActions:      types.DefaultImageActions(),
 	}
@@ -577,13 +588,15 @@ func TestProcessImageLabelOnlyAnswerKeepsAttrsWithoutCaption(t *testing.T) {
 	}
 
 	payload := &types.ImageMultimodalPayload{
-		TenantID:          1,
-		KnowledgeID:       "k-1",
-		KnowledgeBaseID:   "kb-1",
-		ImageURL:          "local://img/0.png",
-		ChunkID:           "chunk-a",
-		EnableOCR:         true,
-		EnableCaption:     true,
+		TenantID:        1,
+		KnowledgeID:     "k-1",
+		KnowledgeBaseID: "kb-1",
+		ImageURL:        "local://img/0.png",
+		ChunkID:         "chunk-a",
+		ImagePipelineParams: map[string]any{
+			smartFieldKeyAllowOCR:       true,
+			smartFieldKeyCaptureCaption: true,
+		},
 		ImageAttrsEnabled: true,
 		ImageActions:      types.DefaultImageActions(),
 	}
@@ -625,13 +638,15 @@ func TestProcessImageCaptionOCRPipeline(t *testing.T) {
 	}
 
 	payload := &types.ImageMultimodalPayload{
-		TenantID:          1,
-		KnowledgeID:       "k-1",
-		KnowledgeBaseID:   "kb-1",
-		ImageURL:          "local://img/0.png",
-		ChunkID:           "chunk-a",
-		EnableOCR:         true,
-		EnableCaption:     true,
+		TenantID:        1,
+		KnowledgeID:     "k-1",
+		KnowledgeBaseID: "kb-1",
+		ImageURL:        "local://img/0.png",
+		ChunkID:         "chunk-a",
+		ImagePipelineParams: map[string]any{
+			captionFieldKeyEnableCaption: true,
+			captionFieldKeyEnableOCR:     true,
+		},
 		ImageAttrsEnabled: false,
 		// An action table is present but must be ignored: caption+OCR mode has
 		// no observation to feed it.
@@ -667,13 +682,15 @@ func TestProcessImageSkipsUnreadableImage(t *testing.T) {
 
 	fake := &attrsFakeVLM{}
 	payload := &types.ImageMultimodalPayload{
-		TenantID:          1,
-		KnowledgeID:       "k-1",
-		KnowledgeBaseID:   "kb-1",
-		ImageURL:          "local://img/0.png",
-		ChunkID:           "chunk-a",
-		EnableOCR:         true,
-		EnableCaption:     true,
+		TenantID:        1,
+		KnowledgeID:     "k-1",
+		KnowledgeBaseID: "kb-1",
+		ImageURL:        "local://img/0.png",
+		ChunkID:         "chunk-a",
+		ImagePipelineParams: map[string]any{
+			smartFieldKeyAllowOCR:       true,
+			smartFieldKeyCaptureCaption: true,
+		},
 		ImageAttrsEnabled: true,
 		ImageActions:      types.DefaultImageActions(),
 	}
