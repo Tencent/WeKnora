@@ -31,6 +31,40 @@
 
 同一插件再次安装更高版本即升级，旧版本保留，可在详情中回滚。
 
+### 插件市场
+
+设置 `WEKNORA_PLUGIN_INDEX_URL` 指向一个插件索引后，「安装插件」中多出「从插件市场」，可按名称、ID 或发布者搜索，显示已安装版本与可升级版本。选中后照常审阅，安装时校验索引中登记的摘要，下载到的包与索引不符会被拒绝。
+
+索引是一个 JSON 文件，任何能提供静态文件的地方都可以托管：
+
+```json
+{
+  "schemaVersion": 1,
+  "plugins": [
+    {
+      "id": "acme.search",
+      "name": { "default": "Acme Search", "zh-CN": "Acme 搜索" },
+      "description": { "default": "Search the Acme knowledge graph." },
+      "publisher": { "id": "acme", "name": "Acme" },
+      "icon": "https://plugins.example.com/acme-search.png",
+      "categories": ["search"],
+      "versions": [
+        {
+          "version": "1.1.0",
+          "url": "packages/acme-search-1.1.0.wkp",
+          "digest": "sha256:…",
+          "engines": { "weknora": ">=0.5.0" }
+        }
+      ]
+    }
+  ]
+}
+```
+
+- `url` 可以是相对索引地址的路径；`digest` 是插件包的 SHA-256（签名之后计算）。
+- 列表中给出本平台能运行的最新版本；所有版本都不兼容的插件标为不兼容。
+- 索引本身不决定可信度。审核插件的市场应该用自己的密钥签名插件包，平台把该密钥以 `verified` 级加入信任列表。
+
 ### 插件签名与信任等级
 
 插件包可以带签名（包根目录的 `plugin.sig`）。WeKnora 按签名把插件包分为三级，安装审阅页和版本列表中会标出：

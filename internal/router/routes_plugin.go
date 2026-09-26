@@ -57,6 +57,7 @@ func RegisterPluginAdminRoutes(r *gin.RouterGroup, h *handler.PluginAdminHandler
 		plugins.POST("", h.InstallPlugin)
 		// Registered before /:id so the static segment wins.
 		plugins.POST("/inspect", h.InspectPlugin)
+		plugins.GET("/market", h.ListMarketPlugins)
 		plugins.GET("/:id", h.GetInstalledPlugin)
 		plugins.DELETE("/:id", h.UninstallPlugin)
 		plugins.PUT("/:id/enabled", h.SetInstalledPluginEnabled)

@@ -2796,13 +2796,29 @@ export default {
       copied: 'コピーしました',
       done: '保存しました'
     },
+    market: {
+      loading: 'マーケットを読み込み中…',
+      loadFailed: 'マーケットを読み込めませんでした',
+      notConfigured: 'マーケットが設定されていません。サーバーで WEKNORA_PLUGIN_INDEX_URL にプラグインインデックスを設定すると、ここで閲覧できます。',
+      search: '名前、ID、発行者で検索',
+      empty: '一致するプラグインはありません',
+      installed: 'v{version} インストール済み',
+      source: 'インデックス：{url}。インストール前にパッケージを確認し、掲載されたダイジェストと照合します。信頼度はパッケージの署名で決まります。',
+      action: {
+        install: 'インストール',
+        upgrade: 'アップグレード',
+        installed: '最新',
+        unavailable: '非対応'
+      }
+    },
     install: {
       title: 'プラグインをインストール',
       description: '.wkp パッケージをアップロードするかダウンロード URL を指定し、確認してからインストールします。',
       sourceSection: 'パッケージ',
       mode: {
         upload: 'ファイルをアップロード',
-        url: 'URL から'
+        url: 'URL から',
+        market: 'マーケットから'
       },
       fileLabel: 'パッケージファイル',
       chooseFile: 'ファイルを選択',

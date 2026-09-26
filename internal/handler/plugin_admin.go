@@ -11,6 +11,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/plugin/install"
+	"github.com/Tencent/WeKnora/internal/plugin/market"
 	"github.com/Tencent/WeKnora/internal/plugin/pkg"
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -19,11 +20,19 @@ import (
 // for the whole platform.
 type PluginAdminHandler struct {
 	service *install.Service
+	market  *market.Client
 }
 
 // NewPluginAdminHandler creates a PluginAdminHandler.
 func NewPluginAdminHandler(service *install.Service) *PluginAdminHandler {
 	return &PluginAdminHandler{service: service}
+}
+
+// WithMarket sets the marketplace index administrators browse; nil leaves
+// the platform without one.
+func (h *PluginAdminHandler) WithMarket(m *market.Client) *PluginAdminHandler {
+	h.market = m
+	return h
 }
 
 // PluginPackageRequest locates a package by URL; uploads send the archive as
@@ -126,7 +135,55 @@ func (h *PluginAdminHandler) InspectPlugin(c *gin.Context) {
 		h.fail(c, err)
 		return
 	}
+	// A digest given up front (a marketplace listing's) must be what came.
+	if in.digest != "" && in.digest != preview.Digest {
+		_ = c.Error(errors.NewBadRequestError(
+			"the package does not match its listed digest (got " + preview.Digest + ", listed " + in.digest + ")"))
+		return
+	}
 	h.ok(c, preview)
+}
+
+// MarketPluginListing is a marketplace entry with what is installed.
+type MarketPluginListing struct {
+	market.Listing
+	InstalledVersion string `json:"installedVersion,omitempty"`
+}
+
+// ListMarketPlugins godoc
+// @Summary      浏览插件市场
+// @Description  读取 WEKNORA_PLUGIN_INDEX_URL 指向的插件索引，列出插件、本平台可运行的最新版本和已安装版本。
+// @Description  安装时走 inspect/install，并带上索引中的摘要
+// @Tags         System
+// @Produce      json
+// @Success      200  {object}  map[string]interface{}
+// @Security     Bearer
+// @Router       /system/admin/plugins/market [get]
+func (h *PluginAdminHandler) ListMarketPlugins(c *gin.Context) {
+	if h.market == nil {
+		h.ok(c, gin.H{"configured": false, "plugins": []MarketPluginListing{}})
+		return
+	}
+	listings, skipped, err := h.market.List(c.Request.Context())
+	if err != nil {
+		logger.Warnf(c.Request.Context(), "[plugin] read the marketplace index: %v", err)
+		c.JSON(http.StatusBadGateway, gin.H{"success": false, "error": gin.H{"message": err.Error()}})
+		return
+	}
+	installed := map[string]string{}
+	views, err := h.service.List(c.Request.Context())
+	if err != nil {
+		h.fail(c, err)
+		return
+	}
+	for _, v := range views {
+		installed[v.ID] = v.ActiveVersion
+	}
+	out := make([]MarketPluginListing, 0, len(listings))
+	for _, l := range listings {
+		out = append(out, MarketPluginListing{Listing: l, InstalledVersion: installed[l.ID]})
+	}
+	h.ok(c, gin.H{"configured": true, "indexUrl": h.market.URL(), "plugins": out, "skipped": skipped})
 }
 
 // InstallPlugin godoc

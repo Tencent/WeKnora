@@ -5315,13 +5315,29 @@ export default {
       copied: '복사했습니다',
       done: '저장했습니다'
     },
+    market: {
+      loading: '마켓을 읽는 중…',
+      loadFailed: '마켓을 읽지 못했습니다',
+      notConfigured: '마켓이 설정되어 있지 않습니다. 서버에서 WEKNORA_PLUGIN_INDEX_URL을 플러그인 인덱스로 설정하면 여기서 둘러볼 수 있습니다.',
+      search: '이름, ID 또는 게시자로 검색',
+      empty: '일치하는 플러그인이 없습니다',
+      installed: 'v{version} 설치됨',
+      source: '인덱스: {url}. 설치 전에 패키지를 검토하고 게시된 다이제스트와 대조합니다. 신뢰 수준은 패키지 서명으로 정해집니다.',
+      action: {
+        install: '설치',
+        upgrade: '업그레이드',
+        installed: '최신',
+        unavailable: '호환되지 않음'
+      }
+    },
     install: {
       title: '플러그인 설치',
       description: '.wkp 패키지를 업로드하거나 다운로드 URL을 입력하고, 검토한 뒤 설치합니다.',
       sourceSection: '패키지',
       mode: {
         upload: '파일 업로드',
-        url: 'URL에서'
+        url: 'URL에서',
+        market: '마켓에서'
       },
       fileLabel: '패키지 파일',
       chooseFile: '파일 선택',

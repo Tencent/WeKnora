@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import type { PluginManifest } from '../../api/plugin'
-import type { InstalledPlugin, PluginVersion } from '../../api/system/plugins'
+import type { InstalledPlugin, MarketPlugin, PluginVersion } from '../../api/system/plugins'
 import {
   compareVersions,
   contributionLines,
@@ -16,6 +16,8 @@ import {
   shortDigest,
   trustNote,
   trustTheme,
+  filterMarket,
+  marketAction,
   sortVersions,
 } from './pluginManagementState'
 
@@ -99,4 +101,24 @@ test('trust tags and signature notes', () => {
   assert.deepEqual(trustNote({ level: 'community' }), { key: 'unsigned', keyId: '' })
   assert.deepEqual(trustNote({ level: 'community', keyId: 'x' }), { key: 'untrustedKey', keyId: 'x' })
   assert.deepEqual(trustNote({ level: 'verified', keyId: 'm', trusted: true }), { key: 'signedBy', keyId: 'm' })
+})
+
+test('marketplace search and actions', () => {
+  const entry = (id: string, extra: Partial<MarketPlugin> = {}): MarketPlugin => ({
+    id,
+    name: { default: id },
+    publisher: { id: 'acme', name: 'Acme Corp' },
+    versions: [],
+    latest: { version: '1.2.0', url: 'u', digest: 'd' },
+    ...extra,
+  })
+  const list = [entry('acme.search', { categories: ['search'] }), entry('globex.crm', { publisher: { id: 'globex' } })]
+  assert.deepEqual(filterMarket(list, 'ACME', 'en-US').map(p => p.id), ['acme.search'])
+  assert.deepEqual(filterMarket(list, 'search', 'en-US').map(p => p.id), ['acme.search'])
+  assert.equal(filterMarket(list, ' ', 'en-US').length, 2)
+
+  assert.equal(marketAction(entry('a')), 'install')
+  assert.equal(marketAction(entry('a', { installedVersion: '1.0.0' })), 'upgrade')
+  assert.equal(marketAction(entry('a', { installedVersion: '1.2.0' })), 'installed')
+  assert.equal(marketAction(entry('a', { latest: null })), 'unavailable')
 })

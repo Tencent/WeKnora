@@ -1,7 +1,7 @@
 // Pure helpers behind PluginManagement.vue, kept free of Vue so they run
 // under node:test.
 import type { ExtensionPoint, PluginManifest, PluginPermissions } from '../../api/plugin'
-import type { InstalledPlugin, PluginVersion, TrustLevel, TrustVerdict } from '../../api/system/plugins'
+import type { InstalledPlugin, MarketPlugin, PluginVersion, TrustLevel, TrustVerdict } from '../../api/system/plugins'
 import { localizedText } from '../../utils/localizedText'
 import { EXTENSION_POINTS } from '../settings/pluginCenterState'
 
@@ -36,6 +36,29 @@ export function trustTheme(level: TrustLevel | undefined): 'success' | 'primary'
 export function trustNote(v: TrustVerdict): { key: 'signedBy' | 'untrustedKey' | 'unsigned'; keyId: string } {
   if (!v.keyId) return { key: 'unsigned', keyId: '' }
   return { key: v.trusted ? 'signedBy' : 'untrustedKey', keyId: v.keyId }
+}
+
+/** Marketplace entries matching a search over name, ID, publisher and description. */
+export function filterMarket(list: readonly MarketPlugin[], query: string, locale: string): MarketPlugin[] {
+  const q = query.trim().toLowerCase()
+  if (!q) return [...list]
+  return list.filter(p =>
+    [
+      p.id,
+      localizedText(p.name, locale),
+      localizedText(p.description, locale),
+      p.publisher?.name ?? '',
+      p.publisher?.id ?? '',
+      ...(p.categories ?? []),
+    ].some(s => s.toLowerCase().includes(q)),
+  )
+}
+
+/** What picking a marketplace entry would do, for its button. */
+export function marketAction(p: MarketPlugin): 'install' | 'upgrade' | 'installed' | 'unavailable' {
+  if (!p.latest) return 'unavailable'
+  if (!p.installedVersion) return 'install'
+  return compareVersions(p.latest.version, p.installedVersion) > 0 ? 'upgrade' : 'installed'
 }
 
 /** One line of what a package would add, for the install review. */

@@ -15,7 +15,7 @@
       <h4 class="setting-drawer__section-title">{{ t('pluginAdmin.install.sourceSection') }}</h4>
       <div class="option-chips">
         <button
-          v-for="m in (['upload', 'url'] as const)"
+          v-for="m in (['upload', 'url', 'market'] as const)"
           :key="m"
           type="button"
           class="option-chip"
@@ -38,6 +38,55 @@
           <input ref="fileInput" type="file" accept=".wkp,.zip" hidden @change="onFile" />
         </div>
         <p class="form-desc">{{ t('pluginAdmin.install.fileHint') }}</p>
+      </div>
+
+      <div v-else-if="mode === 'market'" class="form-item">
+        <p v-if="marketLoading" class="form-desc">{{ t('pluginAdmin.market.loading') }}</p>
+        <t-alert v-else-if="marketError" theme="error" :message="marketError" />
+        <p v-else-if="market && !market.configured" class="form-desc">{{ t('pluginAdmin.market.notConfigured') }}</p>
+        <template v-else-if="market">
+          <t-input v-model="marketQuery" clearable :placeholder="t('pluginAdmin.market.search')" />
+          <p v-if="marketList.length === 0" class="form-desc">{{ t('pluginAdmin.market.empty') }}</p>
+          <ul v-else class="market-list">
+            <li
+              v-for="p in marketList"
+              :key="p.id"
+              class="market-list__item"
+              :class="{ 'is-picked': picked?.id === p.id }"
+            >
+              <div class="market-list__badge" :class="{ 'market-list__badge--logo': !!p.icon }">
+                <img v-if="p.icon" :src="p.icon" alt="" class="market-list__badge-img" />
+                <template v-else>{{ localizedText(p.name, locale).trim().charAt(0).toUpperCase() }}</template>
+              </div>
+              <div class="market-list__text">
+                <div class="market-list__name">
+                  {{ localizedText(p.name, locale) }}
+                  <t-tag v-if="p.installedVersion" size="small" variant="light">
+                    {{ t('pluginAdmin.market.installed', { version: p.installedVersion }) }}
+                  </t-tag>
+                </div>
+                <div class="market-list__meta">
+                  {{ p.id }}<template v-if="p.latest"> · v{{ p.latest.version }}</template>
+                  · {{ p.publisher?.name || p.publisher?.id }}
+                </div>
+                <p v-if="localizedText(p.description, locale)" class="market-list__desc">
+                  {{ localizedText(p.description, locale) }}
+                </p>
+                <p v-if="p.incompatible" class="market-list__warn">{{ p.incompatible }}</p>
+              </div>
+              <t-button
+                size="small"
+                :variant="marketAction(p) === 'installed' ? 'text' : 'outline'"
+                :disabled="busy || marketAction(p) === 'unavailable' || marketAction(p) === 'installed'"
+                :loading="busy && picked?.id === p.id"
+                @click="pick(p)"
+              >
+                {{ t(`pluginAdmin.market.action.${marketAction(p)}`) }}
+              </t-button>
+            </li>
+          </ul>
+          <p class="form-desc">{{ t('pluginAdmin.market.source', { url: market.indexUrl }) }}</p>
+        </template>
       </div>
 
       <div v-else class="form-item">
@@ -146,7 +195,10 @@ import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import {
   inspectPluginPackage,
   installPluginPackage,
+  listMarketPlugins,
   type InstalledPlugin,
+  type MarketListing,
+  type MarketPlugin,
   type PackageSource,
   type PluginPreview,
 } from '@/api/system/plugins'
@@ -155,6 +207,8 @@ import { localizedText } from '@/utils/localizedText'
 import {
   EGRESS_ANY_HOST,
   contributionLines,
+  filterMarket,
+  marketAction,
   formatBytes,
   hasSystemConfig,
   isPackageUrl,
@@ -177,13 +231,20 @@ const emit = defineEmits<{
 
 const { t, locale } = useI18n()
 
-const mode = ref<'upload' | 'url'>('upload')
+type Mode = 'upload' | 'url' | 'market'
+const mode = ref<Mode>('upload')
 const file = ref<File | null>(null)
 const url = ref('')
 const remoteUrl = ref('')
 const fileInput = ref<HTMLInputElement | null>(null)
 const preview = ref<PluginPreview | null>(null)
 const busy = ref(false)
+const market = ref<MarketListing | null>(null)
+const marketLoading = ref(false)
+const marketError = ref('')
+const marketQuery = ref('')
+const picked = ref<MarketPlugin | null>(null)
+const marketList = computed(() => filterMarket(market.value?.plugins ?? [], marketQuery.value, locale.value))
 
 watch(
   () => props.visible,
@@ -194,12 +255,36 @@ watch(
     url.value = ''
     remoteUrl.value = ''
     preview.value = null
+    picked.value = null
+    marketQuery.value = ''
+    market.value = null
   },
 )
 
-function setMode(m: 'upload' | 'url') {
+function setMode(m: Mode) {
   mode.value = m
   preview.value = null
+  picked.value = null
+  if (m === 'market' && !market.value && !marketLoading.value) void loadMarket()
+}
+
+async function loadMarket() {
+  marketLoading.value = true
+  marketError.value = ''
+  try {
+    const res = await listMarketPlugins()
+    market.value = res.data
+  } catch (e: any) {
+    marketError.value = e?.message || t('pluginAdmin.market.loadFailed')
+  } finally {
+    marketLoading.value = false
+  }
+}
+
+function pick(p: MarketPlugin) {
+  picked.value = p
+  preview.value = null
+  void inspect()
 }
 
 function onFile(e: Event) {
@@ -212,6 +297,10 @@ function onFile(e: Event) {
 
 const source = computed<PackageSource | null>(() => {
   if (mode.value === 'upload') return file.value ? { file: file.value } : null
+  if (mode.value === 'market') {
+    const v = picked.value?.latest
+    return v ? { url: v.url, digest: v.digest } : null
+  }
   return isPackageUrl(url.value) ? { url: url.value.trim() } : null
 })
 
@@ -453,5 +542,71 @@ async function onConfirm() {
 
 .review-alert {
   margin-top: 4px;
+}
+
+.market-list {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 420px;
+  overflow-y: auto;
+
+  &__item {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 10px;
+    border: 1px solid var(--td-component-stroke);
+    border-radius: var(--app-radius-md);
+
+    &.is-picked {
+      border-color: var(--td-brand-color);
+    }
+  }
+
+  &__badge {
+    .provider-card-badge();
+    .provider-card-badge-color(#0052d9);
+  }
+
+  &__badge-img {
+    .provider-card-badge-img();
+  }
+
+  &__text {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  &__name {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-weight: 500;
+    color: var(--td-text-color-primary);
+  }
+
+  &__meta {
+    font-size: var(--app-text-xs);
+    font-family: var(--app-font-family-mono);
+    color: var(--td-text-color-placeholder);
+  }
+
+  &__desc,
+  &__warn {
+    margin: 2px 0 0;
+    font-size: var(--app-text-sm);
+    color: var(--td-text-color-secondary);
+  }
+
+  &__warn {
+    color: var(--td-warning-color);
+  }
 }
 </style>

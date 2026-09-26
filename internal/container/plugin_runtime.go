@@ -23,6 +23,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/plugin/hostpool"
 	"github.com/Tencent/WeKnora/internal/plugin/install"
 	"github.com/Tencent/WeKnora/internal/plugin/manifest"
+	"github.com/Tencent/WeKnora/internal/plugin/market"
 	pluginoauth "github.com/Tencent/WeKnora/internal/plugin/oauth"
 	"github.com/Tencent/WeKnora/internal/plugin/pkg"
 	"github.com/Tencent/WeKnora/internal/plugin/reconcile"
@@ -232,6 +233,12 @@ func newPluginInstaller(
 ) *install.Service {
 	return install.NewService(repo, store, r, handler.Version).
 		WithChecks(activate.CheckModelVendors).WithTrust(trusted)
+}
+
+// newPluginAdminHandler serves plugin installation, with the marketplace
+// WEKNORA_PLUGIN_INDEX_URL names.
+func newPluginAdminHandler(service *install.Service) *handler.PluginAdminHandler {
+	return handler.NewPluginAdminHandler(service).WithMarket(market.FromEnv(handler.Version))
 }
 
 // startPluginReconciler loads installed plugins before the server takes

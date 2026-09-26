@@ -75,8 +75,50 @@ export interface InstalledPlugin {
   issuedSecret?: string
 }
 
-/** A package to inspect or install: an uploaded file or a URL. */
-export type PackageSource = { file: File } | { url: string }
+/**
+ * A package to inspect or install: an uploaded file or a URL. A digest given
+ * with a URL (a marketplace listing's) must match what is downloaded.
+ */
+export type PackageSource = { file: File } | { url: string; digest?: string }
+
+/** A published package in the marketplace index. */
+export interface MarketVersion {
+  version: string
+  url: string
+  digest: string
+  size?: number
+  engines?: { weknora?: string }
+  runtime?: string
+}
+
+/** A marketplace entry as this platform sees it. */
+export interface MarketPlugin {
+  id: string
+  name: PluginManifest['name']
+  description?: PluginManifest['description']
+  publisher: PluginManifest['publisher']
+  icon?: string
+  homepage?: string
+  categories?: string[]
+  versions: MarketVersion[]
+  /** The newest version this WeKnora runs; null when none does. */
+  latest: MarketVersion | null
+  incompatible?: string
+  installedVersion?: string
+}
+
+export interface MarketListing {
+  configured: boolean
+  indexUrl?: string
+  plugins: MarketPlugin[]
+  /** Index entries left out as malformed. */
+  skipped?: string[]
+}
+
+/** The marketplace index WEKNORA_PLUGIN_INDEX_URL names. */
+export function listMarketPlugins() {
+  return get<{ data: MarketListing }>(`${BASE}/market`, { timeout: 30_000 })
+}
 
 function packageForm(file: File, digest?: string, remoteUrl?: string) {
   const form = new FormData()
@@ -101,7 +143,11 @@ export function inspectPluginPackage(source: PackageSource) {
       data: PluginPreview
     }>
   }
-  return post<{ data: PluginPreview }>(`${BASE}/inspect`, { url: source.url }, { timeout: PACKAGE_TIMEOUT })
+  return post<{ data: PluginPreview }>(
+    `${BASE}/inspect`,
+    { url: source.url, digest: source.digest },
+    { timeout: PACKAGE_TIMEOUT },
+  )
 }
 
 /**

@@ -5317,13 +5317,29 @@ export default {
       copied: '已复制',
       done: '我已保存'
     },
+    market: {
+      loading: '正在读取插件市场…',
+      loadFailed: '读取插件市场失败',
+      notConfigured: '本平台还没有配置插件市场。在服务端设置 WEKNORA_PLUGIN_INDEX_URL 指向插件索引后即可在此浏览。',
+      search: '搜索插件名称、ID 或发布者',
+      empty: '没有匹配的插件',
+      installed: '已安装 v{version}',
+      source: '索引：{url}。安装前仍会审阅插件包，并校验索引中的摘要；可信度取决于包的签名。',
+      action: {
+        install: '安装',
+        upgrade: '升级',
+        installed: '已是最新',
+        unavailable: '不兼容'
+      }
+    },
     install: {
       title: '安装插件',
       description: '上传 .wkp 插件包或填写下载地址，审阅后安装。',
       sourceSection: '插件包',
       mode: {
         upload: '上传文件',
-        url: '从 URL 下载'
+        url: '从 URL 下载',
+        market: '从插件市场'
       },
       fileLabel: '插件包文件',
       chooseFile: '选择文件',

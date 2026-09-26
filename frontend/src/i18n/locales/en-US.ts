@@ -2796,13 +2796,29 @@ export default {
       copied: 'Copied',
       done: 'I have saved it'
     },
+    market: {
+      loading: 'Reading the marketplace…',
+      loadFailed: 'Could not read the marketplace',
+      notConfigured: 'No marketplace is configured. Set WEKNORA_PLUGIN_INDEX_URL on the server to a plugin index to browse it here.',
+      search: 'Search by name, ID or publisher',
+      empty: 'No matching plugins',
+      installed: 'v{version} installed',
+      source: 'Index: {url}. Packages are still reviewed before installing and checked against the listed digest; trust comes from the package signature.',
+      action: {
+        install: 'Install',
+        upgrade: 'Upgrade',
+        installed: 'Up to date',
+        unavailable: 'Incompatible'
+      }
+    },
     install: {
       title: 'Install plugin',
       description: 'Upload a .wkp package or give its download URL, review it, then install.',
       sourceSection: 'Package',
       mode: {
         upload: 'Upload file',
-        url: 'From URL'
+        url: 'From URL',
+        market: 'From marketplace'
       },
       fileLabel: 'Package file',
       chooseFile: 'Choose file',
