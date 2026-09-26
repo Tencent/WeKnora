@@ -145,6 +145,27 @@ func isTransientError(err error) bool {
 	return false
 }
 
+// maxLLMRetryAfter caps how long a vendor's Retry-After may hold a turn
+// between two attempts. A longer wait is not worth keeping the user on a
+// silent turn for; the retry then goes out at the cap and, if the vendor is
+// still limiting, the turn fails the usual way.
+const maxLLMRetryAfter = 30 * time.Second
+
+// llmRetryDelay is the wait before retry number attempt (1-based). It is the
+// linear backoff, raised to the vendor's Retry-After when a 429/503 reply
+// carried one, so a rate-limited request is not re-sent before the provider
+// said it would accept it.
+func llmRetryDelay(err error, attempt int) time.Duration {
+	delay := time.Duration(attempt) * time.Second
+	var httpErr *api.HTTPError
+	if errors.As(err, &httpErr) {
+		if wait := min(httpErr.RetryAfter(), maxLLMRetryAfter); wait > delay {
+			delay = wait
+		}
+	}
+	return delay
+}
+
 // getLLMStallTimeout returns how long an LLM stream may go silent before it is
 // cancelled, from AgentConfig.LLMCallTimeout or the default.
 func (e *AgentEngine) getLLMStallTimeout() time.Duration {
