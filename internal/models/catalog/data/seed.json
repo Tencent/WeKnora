@@ -959,6 +959,41 @@
         "source": "https://learn.microsoft.com/azure/ai-foundry/openai/how-to/reasoning"
       }
     ],
+    "cheaperinference": [
+      {
+        "id": "gpt-5.4-mini",
+        "name": "GPT-5.4 Mini",
+        "reasoning": true,
+        "input": [
+          "text",
+          "image"
+        ],
+        "context_window": 400000,
+        "source": "https://cheaperinference.com/#models"
+      },
+      {
+        "id": "gpt-5.4",
+        "name": "GPT-5.4",
+        "reasoning": true,
+        "input": [
+          "text",
+          "image"
+        ],
+        "context_window": 1000000,
+        "source": "https://cheaperinference.com/#models"
+      },
+      {
+        "id": "claude-sonnet-5",
+        "name": "Claude Sonnet 5",
+        "reasoning": true,
+        "input": [
+          "text"
+        ],
+        "context_window": 1000000,
+        "max_output_tokens": 64000,
+        "source": "https://cheaperinference.com/#models"
+      }
+    ],
     "deepseek": [
       {
         "id": "deepseek-v4-pro",
