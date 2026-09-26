@@ -146,8 +146,13 @@ func (d nodeDriver) Status(ctx context.Context, pluginID string) ([]driver.Insta
 		default:
 			state = driver.StateStopped
 		}
+		egress := n.Egress
+		if egress == "" && d.rt == manifest.RuntimeRemote {
+			// The service runs where WeKnora has no say.
+			egress = driver.EgressUnmanaged
+		}
 		out = append(out, driver.InstanceStatus{
-			Node: n.Node, Version: n.Version, State: state, Error: n.Error, UpdatedAt: n.UpdatedAt,
+			Node: n.Node, Version: n.Version, State: state, Error: n.Error, UpdatedAt: n.UpdatedAt, Egress: egress,
 		})
 	}
 	return out, nil

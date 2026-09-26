@@ -24,6 +24,7 @@ import (
 	"github.com/redis/go-redis/v9"
 
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/plugin/driver"
 	"github.com/Tencent/WeKnora/internal/plugin/manifest"
 	"github.com/Tencent/WeKnora/internal/plugin/pkg"
 	"github.com/Tencent/WeKnora/internal/plugin/registry"
@@ -67,6 +68,14 @@ type InPlaceActivator interface {
 	ActivatesInPlace()
 }
 
+// EgressReporter is an Activator that runs plugin code and knows how the
+// code's outbound traffic is controlled, for the node's status report.
+type EgressReporter interface {
+	Activator
+	// Egress is empty for a plugin the activator does not run.
+	Egress(pluginID string) driver.EgressMode
+}
+
 // PendingError is returned by an activator that started the plugin but
 // finishes in the background, such as a kubernetes rollout: the plugin is
 // loaded and shows as degraded with the reason until the activator reports
@@ -85,6 +94,9 @@ type Status struct {
 	State     string    `json:"state"`
 	Error     string    `json:"error,omitempty"`
 	UpdatedAt time.Time `json:"updatedAt"`
+	// Egress is how the plugin's outbound traffic is controlled where this
+	// node runs its code; empty when the node runs none of it.
+	Egress driver.EgressMode `json:"egress,omitempty"`
 }
 
 // Node states reported in Status.
@@ -388,12 +400,27 @@ func (r *Reconciler) ensure(ctx context.Context, row types.InstalledPlugin) erro
 	delete(r.retries, row.ID)
 	if err := errors.Join(pending...); err != nil {
 		logger.Infof(ctx, "[plugin] loaded %s %s; pending: %v", row.ID, row.ActiveVersion, err)
-		r.setStatus(row.ID, Status{Version: row.ActiveVersion, State: StateDegraded, Error: err.Error()})
+		r.setStatus(row.ID, Status{
+			Version: row.ActiveVersion, State: StateDegraded, Error: err.Error(), Egress: r.egress(row.ID),
+		})
 		return nil
 	}
 	logger.Infof(ctx, "[plugin] loaded %s %s", row.ID, row.ActiveVersion)
-	r.setStatus(row.ID, Status{Version: row.ActiveVersion, State: StateReady})
+	r.setStatus(row.ID, Status{Version: row.ActiveVersion, State: StateReady, Egress: r.egress(row.ID)})
 	return nil
+}
+
+// egress asks the activators how this node controls a plugin's outbound
+// traffic.
+func (r *Reconciler) egress(pluginID string) driver.EgressMode {
+	for _, a := range r.activators {
+		if e, ok := a.(EgressReporter); ok {
+			if mode := e.Egress(pluginID); mode != "" {
+				return mode
+			}
+		}
+	}
+	return ""
 }
 
 // runsElsewhere reports whether two versions of a plugin run in different
