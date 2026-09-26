@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
+	"golang.org/x/sync/singleflight"
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/plugin/host"
@@ -29,7 +30,7 @@ import (
 )
 
 // Heartbeat timing: a host refreshes its record every HeartbeatInterval and
-// drops out HeartbeatTTL after its last one.
+// drops out HeartbeatTTL after its last one, when Redis expires the record.
 const (
 	HeartbeatInterval = 5 * time.Second
 	HeartbeatTTL      = 15 * time.Second
@@ -44,6 +45,16 @@ func keyPrefix() string {
 		return keyBase + ns + ":"
 	}
 	return keyBase
+}
+
+// indexKey is the set of host IDs, so app nodes need not scan the keyspace.
+// IDs whose record expired are dropped from it by the app nodes reading it.
+func indexKey() string {
+	const base = "weknora:plugin-hosts"
+	if ns := strings.TrimSpace(os.Getenv("WEKNORA_REDIS_NAMESPACE")); ns != "" {
+		return base + ":" + ns
+	}
+	return base
 }
 
 // ErrNoClusterKey means neither SYSTEM_AES_KEY nor JWT_SECRET is set, so
@@ -117,7 +128,12 @@ func (a *Announcer) Announce(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	return a.rdb.Set(ctx, keyPrefix()+a.id, b, HeartbeatTTL).Err()
+	_, err = a.rdb.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
+		pipe.Set(ctx, keyPrefix()+a.id, b, HeartbeatTTL)
+		pipe.SAdd(ctx, indexKey(), a.id)
+		return nil
+	})
+	return err
 }
 
 // Run announces every HeartbeatInterval until ctx ends, then withdraws the
@@ -132,7 +148,11 @@ func (a *Announcer) Run(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			wctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-			_ = a.rdb.Del(wctx, keyPrefix()+a.id).Err()
+			_, _ = a.rdb.TxPipelined(wctx, func(pipe redis.Pipeliner) error {
+				pipe.Del(wctx, keyPrefix()+a.id)
+				pipe.SRem(wctx, indexKey(), a.id)
+				return nil
+			})
 			cancel()
 			return
 		case <-t.C:
@@ -142,10 +162,11 @@ func (a *Announcer) Run(ctx context.Context) {
 
 // Pool is an app node's view of the plugin hosts.
 type Pool struct {
-	rdb  *redis.Client
-	key  []byte
-	http *http.Client
-	now  func() time.Time
+	rdb   *redis.Client
+	key   []byte
+	http  *http.Client
+	now   func() time.Time
+	fetch singleflight.Group
 
 	mu      sync.Mutex
 	hosts   []Info
@@ -163,61 +184,86 @@ func NewPool(rdb *redis.Client, key []byte) *Pool {
 }
 
 // Hosts lists the live plugin hosts.
-func (p *Pool) Hosts(ctx context.Context) ([]Info, error) {
+func (p *Pool) Hosts(ctx context.Context) ([]Info, error) { return p.view(ctx, refreshAfter) }
+
+// view is the hosts as read from Redis at most maxAge ago. One read at a
+// time goes to Redis; calls meanwhile share it.
+func (p *Pool) view(ctx context.Context, maxAge time.Duration) ([]Info, error) {
 	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.hosts != nil && p.now().Sub(p.fetched) < refreshAfter {
-		return p.hosts, nil
+	hosts, fetched := p.hosts, p.fetched
+	p.mu.Unlock()
+	if hosts != nil && p.now().Sub(fetched) < maxAge {
+		return hosts, nil
 	}
-	hosts, err := p.fetch(ctx)
+	v, err, _ := p.fetch.Do("hosts", func() (any, error) {
+		// A read that finished while this one waited is fresh enough.
+		p.mu.Lock()
+		hosts, fetched := p.hosts, p.fetched
+		p.mu.Unlock()
+		if hosts != nil && p.now().Sub(fetched) < maxAge {
+			return hosts, nil
+		}
+		rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		hosts, err := p.read(rctx)
+		if err != nil {
+			return nil, err
+		}
+		p.mu.Lock()
+		p.hosts, p.fetched = hosts, p.now()
+		p.mu.Unlock()
+		return hosts, nil
+	})
 	if err != nil {
-		if p.hosts != nil {
+		if hosts != nil {
 			logger.Warnf(ctx, "[plugin] read plugin hosts, keeping the last view: %v", err)
-			return p.hosts, nil
+			return hosts, nil
 		}
 		return nil, err
 	}
-	p.hosts, p.fetched = hosts, p.now()
-	return hosts, nil
+	return v.([]Info), nil
 }
 
-func (p *Pool) fetch(ctx context.Context) ([]Info, error) {
-	var keys []string
-	iter := p.rdb.Scan(ctx, 0, keyPrefix()+"*", 100).Iterator()
-	for iter.Next(ctx) {
-		keys = append(keys, iter.Val())
-	}
-	if err := iter.Err(); err != nil {
+// read reads the live hosts: those in the index whose record has not
+// expired. Liveness is the record's TTL in Redis, not the hosts' clocks.
+func (p *Pool) read(ctx context.Context) ([]Info, error) {
+	ids, err := p.rdb.SMembers(ctx, indexKey()).Result()
+	if err != nil {
 		return nil, err
 	}
 	hosts := []Info{}
-	if len(keys) == 0 {
+	if len(ids) == 0 {
 		return hosts, nil
+	}
+	keys := make([]string, len(ids))
+	for i, id := range ids {
+		keys[i] = keyPrefix() + id
 	}
 	vals, err := p.rdb.MGet(ctx, keys...).Result()
 	if err != nil {
 		return nil, err
 	}
-	for _, v := range vals {
+	var gone []any
+	for i, v := range vals {
 		s, ok := v.(string)
 		if !ok {
+			gone = append(gone, ids[i])
 			continue
 		}
 		var info Info
-		if json.Unmarshal([]byte(s), &info) == nil && info.URL != "" &&
-			p.now().Sub(info.UpdatedAt) < HeartbeatTTL {
+		if json.Unmarshal([]byte(s), &info) == nil && info.URL != "" {
 			hosts = append(hosts, info)
 		}
+	}
+	if len(gone) > 0 {
+		// A host that comes back adds itself again with its next heartbeat.
+		_ = p.rdb.SRem(ctx, indexKey(), gone...).Err()
 	}
 	return hosts, nil
 }
 
-// Client reaches a plugin version on the least busy host that runs it.
-func (p *Pool) Client(ctx context.Context, pluginID, version string) (*client.Client, error) {
-	hosts, err := p.Hosts(ctx)
-	if err != nil {
-		return nil, pluginapi.Errorf(pluginapi.CodeUnavailable, "read plugin hosts: %v", err)
-	}
+// leastBusy picks a host running a plugin version, among the least busy.
+func leastBusy(hosts []Info, pluginID, version string) (Info, bool) {
 	var best []Info
 	for _, h := range hosts {
 		if !h.runs(pluginID, version) {
@@ -231,10 +277,22 @@ func (p *Pool) Client(ctx context.Context, pluginID, version string) (*client.Cl
 		}
 	}
 	if len(best) == 0 {
+		return Info{}, false
+	}
+	return best[rand.IntN(len(best))], true //nolint:gosec // load spreading, not security
+}
+
+// Client reaches a plugin version on the least busy host that runs it.
+func (p *Pool) Client(ctx context.Context, pluginID, version string) (*client.Client, error) {
+	hosts, err := p.Hosts(ctx)
+	if err != nil {
+		return nil, pluginapi.Errorf(pluginapi.CodeUnavailable, "read plugin hosts: %v", err)
+	}
+	h, ok := leastBusy(hosts, pluginID, version)
+	if !ok {
 		return nil, pluginapi.Errorf(pluginapi.CodeUnavailable,
 			"no plugin host runs %s@%s; is weknora plugin-host up?", pluginID, version)
 	}
-	h := best[rand.IntN(len(best))] //nolint:gosec // load spreading, not security
 	base := fmt.Sprintf("%s%s%s/%s", h.URL, host.GatewayPrefix, pluginID, version)
 	p.mu.Lock()
 	defer p.mu.Unlock()

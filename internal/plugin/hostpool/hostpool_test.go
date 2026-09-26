@@ -2,6 +2,7 @@ package hostpool
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os/exec"
@@ -127,7 +128,7 @@ func TestHostsAgeOutAndWithdraw(t *testing.T) {
 		t.Fatalf("hosts = %+v, %v", hosts, err)
 	}
 
-	// A host that stops announcing drops out when its record expires.
+	// A stopped host withdraws its record.
 	stop()
 	<-done
 	if mr.Exists(keyPrefix() + "h1") {
@@ -138,12 +139,24 @@ func TestHostsAgeOutAndWithdraw(t *testing.T) {
 		t.Fatalf("hosts after withdrawal = %+v", hosts)
 	}
 
-	// A record that outlived its heartbeat (clock skew, a stuck host) is
-	// ignored even if Redis still has it.
-	_ = NewAnnouncer(rdb, mgr, "h2", "http://h2:8081").Announce(ctx)
-	now = now.Add(refreshAfter + HeartbeatTTL)
+	// Liveness is the record's TTL, not the host's clock: a host whose
+	// clock is far behind stays listed while it announces, and one that
+	// stopped announcing drops out when Redis expires its record.
+	b, _ := json.Marshal(Info{ID: "h2", URL: "http://h2:8081", UpdatedAt: time.Now().Add(-time.Hour)})
+	_ = mr.Set(keyPrefix()+"h2", string(b))
+	mr.SetTTL(keyPrefix()+"h2", HeartbeatTTL)
+	_, _ = mr.SetAdd(indexKey(), "h2")
+	now = now.Add(refreshAfter)
+	if hosts, _ := pool.Hosts(ctx); len(hosts) != 1 || hosts[0].ID != "h2" {
+		t.Fatalf("a live host with a skewed clock = %+v", hosts)
+	}
+	mr.FastForward(HeartbeatTTL)
+	now = now.Add(refreshAfter)
 	if hosts, _ := pool.Hosts(ctx); len(hosts) != 0 {
-		t.Fatalf("stale hosts = %+v", hosts)
+		t.Fatalf("expired hosts = %+v", hosts)
+	}
+	if ok, _ := mr.SIsMember(indexKey(), "h2"); ok {
+		t.Fatal("an expired host must leave the index")
 	}
 }
 
