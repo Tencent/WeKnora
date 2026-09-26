@@ -55,8 +55,12 @@ type Manifest struct {
 	Description LocalizedText `json:"description,omitzero" yaml:"description"`
 	Publisher   Publisher     `json:"publisher"            yaml:"publisher"`
 	Icon        string        `json:"icon,omitempty"       yaml:"icon"`
-	Homepage    string        `json:"homepage,omitempty"   yaml:"homepage"`
-	License     string        `json:"license,omitempty"    yaml:"license"`
+	// IconData is the icon as a data: URI, filled when the package is
+	// opened (and for builtins, from their brand assets) so lists can show
+	// it without reading the package.
+	IconData string `json:"iconData,omitempty" yaml:"-"`
+	Homepage string `json:"homepage,omitempty"   yaml:"homepage"`
+	License  string `json:"license,omitempty"    yaml:"license"`
 
 	// Builtin marks a plugin compiled into WeKnora. It cannot be set from a
 	// manifest file.
@@ -165,6 +169,10 @@ type Contribution struct {
 	// Entry is the HTML page of a UI contribution (pages, settingsSections,
 	// kbTabs), a path under UIRoot.
 	Entry string `json:"entry,omitempty"          yaml:"entry"`
+	// Editor is a page under ui/ that helps fill in an instance of the
+	// contribution (connectors, webSearch): shown below the generated form,
+	// it reads and sets the form's values through the page bridge.
+	Editor string `json:"editor,omitempty"         yaml:"editor"`
 	// MinRole is the workspace role a UI contribution needs: viewer (the
 	// default for pages and tabs), contributor, admin (the default for
 	// settings sections) or owner.
@@ -174,14 +182,23 @@ type Contribution struct {
 }
 
 // UIMinRole is the role a UI contribution needs, with the point's default.
+// Instance editors need an admin, like the instances they edit.
 func UIMinRole(point Point, c Contribution) string {
 	if c.MinRole != "" {
 		return c.MinRole
 	}
-	if point == PointSettingsSections {
+	if point == PointSettingsSections || HasEditor(point, c) {
 		return "admin"
 	}
 	return "viewer"
+}
+
+// EditorPoints are the points whose instances a plugin page may help edit.
+var EditorPoints = []Point{PointConnectors, PointWebSearch}
+
+// HasEditor reports whether a contribution brings an instance editor page.
+func HasEditor(point Point, c Contribution) bool {
+	return c.Editor != "" && slices.Contains(EditorPoints, point)
 }
 
 // MCPServer is a remote MCP server a plugin contributes.
@@ -334,6 +351,9 @@ const EgressAnyHost = "*"
 var HostAPIScopes = []string{
 	// kv: the plugin's own key-value store in each tenant.
 	"kv",
+	// datasources: list the tenant's data sources of the plugin's own
+	// connectors and start their syncs.
+	"datasources",
 }
 
 func (m *Manifest) validatePermissions(add func(string, ...any)) {
@@ -417,6 +437,9 @@ func (m *Manifest) validateContributions(add func(string, ...any)) {
 			if IsUIPoint(point) {
 				validateUI(c, where, add)
 			}
+			if c.Editor != "" {
+				validateEditor(point, c, where, add)
+			}
 			if point == PointParsers && !m.Builtin {
 				validateFileTypes(c.FileTypes, where, add)
 			}
@@ -497,6 +520,17 @@ func validateUI(c Contribution, where string, add func(string, ...any)) {
 	case "", "viewer", "contributor", "admin", "owner":
 	default:
 		add("%s.minRole must be viewer, contributor, admin or owner", where)
+	}
+}
+
+func validateEditor(point Point, c Contribution, where string, add func(string, ...any)) {
+	switch {
+	case !slices.Contains(EditorPoints, point):
+		add("%s.editor: only connectors and webSearch have instance editors", where)
+	case !isPackagePath(c.Editor) || !strings.HasPrefix(c.Editor, UIRoot):
+		add("%s.editor %q must be a file under %s", where, c.Editor, UIRoot)
+	case !strings.HasSuffix(c.Editor, ".html"):
+		add("%s.editor %q must be an .html file", where, c.Editor)
 	}
 }
 

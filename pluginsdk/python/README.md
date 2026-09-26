@@ -145,6 +145,10 @@ host.kv_put("cursor", {"page": 3}, ttl=3600)
 host.kv_get("cursor", default={})
 ```
 
+With the `datasources` scope, `host.data_sources()` lists the workspace's
+data sources of the plugin's connectors and `host.sync_data_source(id)`
+starts an incremental sync of one.
+
 The token behind it lasts a few minutes: use it within the call.
 
 ## Running

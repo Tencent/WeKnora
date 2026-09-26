@@ -19,6 +19,8 @@ import {
   type Resource,
 } from '@/api/datasource'
 import SchemaForm from '@/components/schema-form/SchemaForm.vue'
+import PluginFrame from '@/extensions/pluginFrame/PluginFrame.vue'
+import type { FramePage } from '@/extensions/pluginFrame/pluginPages'
 import {
   applyDefaults,
   schemaAt,
@@ -542,6 +544,32 @@ const credentialSchema = computed<ConfigSchema>(() => currentDef.value?.config_s
 // Settings form of connectors without a built-in settings UI (plugins).
 const settingsSchema = computed<ConfigSchema | null>(() => currentDef.value?.settings_schema ?? null)
 const settingsErrors = ref<FieldError[]>([])
+
+// A plugin connector may bring its own editor page (manifest editor): it
+// sits below the generated form, sees the instance in the plugin's shape
+// and merges values back.
+const editorPage = computed<FramePage | null>(() => {
+  const def = currentDef.value
+  if (!def?.plugin_id || !def.editor || !def.plugin_version || !def.type.startsWith(`${def.plugin_id}/`)) return null
+  return {
+    pluginId: def.plugin_id,
+    version: def.plugin_version,
+    mount: `connectors/${def.type.slice(def.plugin_id.length + 1)}`,
+    entry: def.editor,
+    name: { default: labelOf(def) },
+  }
+})
+
+function pluginFormValues(): Record<string, unknown> {
+  return { credentials: form.value.config.credentials, settings: form.value.config.settings }
+}
+
+function setPluginFormValues(values: Record<string, unknown>) {
+  const pick = (v: unknown) => (v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : {})
+  form.value.config.settings = { ...form.value.config.settings, ...pick(values.settings) }
+  // Credentials only count where the form sends them (creating, replacing).
+  form.value.config.credentials = { ...form.value.config.credentials, ...pick(values.credentials) }
+}
 
 // Plugin connector fields with x-options / x-oauth ask the plugin, with the
 // instance the form holds (the stored credentials fill in what edit mode hides).
@@ -1424,18 +1452,28 @@ const drawerConfirmText = computed(() => {
             :schema="credentialSchema"
             :errors="credentialErrors"
           />
-          <SchemaForm
-            v-if="settingsSchema"
-            v-model="form.config.settings"
-            :schema="settingsSchema"
-            :errors="settingsErrors"
-          />
           <div v-if="isEdit && replaceCredentialsMode" class="credential-edit-actions">
             <t-button size="small" variant="text" @click="cancelReplaceCredentials">
               {{ t('common.cancel') }}
             </t-button>
           </div>
         </template>
+        <!-- Settings (and a plugin's editor page) stay editable while the
+             stored credentials are kept. -->
+        <SchemaForm
+          v-if="settingsSchema"
+          v-model="form.config.settings"
+          :schema="settingsSchema"
+          :errors="settingsErrors"
+        />
+        <PluginFrame
+          v-if="editorPage"
+          :key="editorPage.mount"
+          :page="editorPage"
+          :context="{ instanceId: props.dataSource?.id }"
+          :form-values="pluginFormValues()"
+          :set-values="setPluginFormValues"
+        />
       </section>
     </template>
 

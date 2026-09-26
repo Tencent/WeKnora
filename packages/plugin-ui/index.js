@@ -146,8 +146,18 @@ export function connect(options = {}) {
       /** Closes the page, where the mount allows it. */
       close: () => call('ui.close', {}),
       /**
-       * Listens to app events: theme, locale, and init (the mount's context
-       * changed, e.g. another knowledge base). Returns an unsubscribe function.
+       * The form an instance editor page sits in (connectors, webSearch
+       * editors). context.context.values holds its values when the page
+       * starts; the "values" event reports later changes.
+       */
+      form: {
+        /** Merges values into the form, in the shape the plugin's schema has. */
+        set: (values) => call('form.set', { values }),
+      },
+      /**
+       * Listens to app events: theme, locale, init (the mount's context
+       * changed, e.g. another knowledge base) and values (an editor's form
+       * changed). Returns an unsubscribe function.
        */
       on(name, fn) {
         if (!listeners.has(name)) listeners.set(name, new Set())

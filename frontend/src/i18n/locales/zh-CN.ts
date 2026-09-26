@@ -5380,6 +5380,10 @@ export default {
       rotateFailed: '轮换密钥失败'
     }
   },
+  pluginOff: {
+    label: '插件已停用',
+    hint: '所属插件已在本空间停用：不能再新建此类项，已有的照常工作。管理员可在「设置 → 插件」中重新启用。'
+  },
   pluginToolView: {
     empty: '没有结果'
   },

@@ -25,6 +25,24 @@ func terminal(status string) bool {
 	return status == types.ParseStatusCompleted || status == types.ParseStatusFailed
 }
 
+// PublishKnowledge raises knowledge.ingested or knowledge.failed for a row
+// that reached that status outside the watched repository methods (bulk
+// updates, recovery sweeps).
+func PublishKnowledge(ctx context.Context, k *types.Knowledge) { publishKnowledge(ctx, k) }
+
+// PublishDeleted raises knowledge.deleted for rows that were deleted.
+func PublishDeleted(ctx context.Context, tenantID uint64, rows []*types.Knowledge) {
+	for _, k := range rows {
+		if k == nil {
+			continue
+		}
+		Publish(ctx, tenantID, pluginapi.EventKnowledgeDeleted, pluginapi.KnowledgeEventData{
+			KnowledgeBaseID: k.KnowledgeBaseID, KnowledgeID: k.ID, Title: k.Title,
+			FileName: k.FileName, FileType: k.FileType, Source: k.Source,
+		})
+	}
+}
+
 // publishKnowledge raises the event for a row that just reached status.
 func publishKnowledge(ctx context.Context, k *types.Knowledge) {
 	if k == nil {

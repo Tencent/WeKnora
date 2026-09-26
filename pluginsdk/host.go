@@ -112,3 +112,20 @@ func (h *Host) KVList(ctx context.Context, prefix, after string, limit int) (*pl
 	var out pluginapi.KVList
 	return &out, h.do(ctx, http.MethodGet, pluginapi.HostKVListPath, q, nil, &out)
 }
+
+// DataSources lists the workspace's data sources of the plugin's
+// connectors (scope "datasources").
+func (h *Host) DataSources(ctx context.Context) ([]pluginapi.DataSourceInfo, error) {
+	var out pluginapi.DataSourceList
+	if err := h.do(ctx, http.MethodGet, pluginapi.HostDataSourcesPath, nil, nil, &out); err != nil {
+		return nil, err
+	}
+	return out.DataSources, nil
+}
+
+// SyncDataSource starts an incremental sync of one of them, unless one is
+// already running (scope "datasources").
+func (h *Host) SyncDataSource(ctx context.Context, id string) (*pluginapi.SyncStarted, error) {
+	var out pluginapi.SyncStarted
+	return &out, h.do(ctx, http.MethodPost, pluginapi.HostDataSourceSyncPath(url.PathEscape(id)), nil, struct{}{}, &out)
+}

@@ -631,6 +631,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(repository.NewPluginOAuthRepository))
 	must(container.Provide(pluginoauth.NewService))
 	must(container.Provide(handler.NewPluginFormsHandler))
+	must(container.Invoke(bindPluginHostDataSources))
 	logger.Debugf(ctx, "[Container] HTTP handlers registered")
 
 	// Wire the chat package's local image resolver so multimodal chat can read

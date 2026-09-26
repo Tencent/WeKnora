@@ -41,6 +41,7 @@
         <div class="provider-card__body">
           <div class="provider-card__header">
             <h3 class="provider-card__title" :title="entity.name">{{ entity.name }}</h3>
+            <PluginOffTag point="webSearch" :type-id="entity.provider" />
             <div
               v-if="getProviderOptions(entity).length > 0"
               class="provider-card__actions"
@@ -239,6 +240,15 @@
             :errors="formErrors"
           />
 
+          <PluginFrame
+            v-if="editorPage"
+            :key="editorPage.mount"
+            :page="editorPage"
+            :context="{ instanceId: editingProvider?.id }"
+            :form-values="pluginInstanceValues()"
+            :set-values="setPluginInstanceValues"
+          />
+
           <div class="form-item">
             <label class="form-label">{{ t('webSearchSettings.setAsDefault') }}</label>
             <div class="vision-toggle">
@@ -271,6 +281,9 @@ import {
 } from '@/api/web-search-provider'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import SchemaForm from '@/components/schema-form/SchemaForm.vue'
+import PluginOffTag from '@/components/plugins/PluginOffTag.vue'
+import PluginFrame from '@/extensions/pluginFrame/PluginFrame.vue'
+import type { FramePage } from '@/extensions/pluginFrame/pluginPages'
 import { pluginFormSource } from '@/components/schema-form/pluginSource'
 import { provideSchemaFormSource } from '@/components/schema-form/source'
 import {
@@ -378,6 +391,33 @@ provideSchemaFormSource(pluginFormSource({
   values: pluginInstanceValues,
   field: path => (path.startsWith(EXTRA) ? path.slice(EXTRA.length) : path),
 }))
+
+// A plugin provider type may bring its own editor page (manifest editor),
+// working on the same flat values its instance schema has.
+const editorPage = computed<FramePage | null>(() => {
+  const type = selectedProviderType.value
+  if (!type?.plugin_id || !type.editor || !type.plugin_version || !type.id.startsWith(`${type.plugin_id}/`)) return null
+  return {
+    pluginId: type.plugin_id,
+    version: type.plugin_version,
+    mount: `webSearch/${type.id.slice(type.plugin_id.length + 1)}`,
+    entry: type.editor,
+    name: { default: type.name },
+  }
+})
+
+function setPluginInstanceValues(values: Record<string, unknown>) {
+  const params = { ...providerForm.value.parameters }
+  const current = params.extra_config
+  const extra: ConfigValue = { ...(current && typeof current === 'object' ? (current as ConfigValue) : {}) }
+  for (const [k, v] of Object.entries(values)) {
+    if (k === 'api_key') params.api_key = v
+    // Extra settings are stored as strings.
+    else extra[k] = v === undefined || v === null ? undefined : String(v)
+  }
+  params.extra_config = extra
+  providerForm.value.parameters = params
+}
 
 const hasGroup = (group: string) => orderedFields(parametersSchema.value).some(f => inGroup(f.schema, group))
 

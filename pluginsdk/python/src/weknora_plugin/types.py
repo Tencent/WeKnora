@@ -245,6 +245,28 @@ class KVList:
 
 
 @dataclass
+class DataSourceInfo:
+    """One data source of the plugin's connectors in the workspace."""
+
+    id: str
+    name: str = ""
+    knowledge_base_id: str = ""
+    connector: str = ""
+    resource_ids: List[str] = field(default_factory=list)
+    status: str = ""
+    last_sync_at: Optional[datetime] = None
+
+
+@dataclass
+class SyncStarted:
+    """What became of a sync request: "queued", or "running" when a sync
+    had already started."""
+
+    status: str
+    sync_log_id: str = ""
+
+
+@dataclass
 class UIRequest:
     """A request one of the plugin's pages made through the WeKnora bridge.
     mount is "<point>/<id>" ("pages/links"); method and path are the page's

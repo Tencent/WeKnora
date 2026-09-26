@@ -8,6 +8,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -101,6 +102,7 @@ func Open(data []byte) (*Package, error) {
 	if err := p.checkReferences(); err != nil {
 		return nil, err
 	}
+	p.Manifest.IconData = p.iconData(p.Manifest.Icon)
 	if err := p.loadConfigSchemas(); err != nil {
 		return nil, err
 	}
@@ -249,6 +251,9 @@ func (p *Package) checkReferences() error {
 			if manifest.IsUIPoint(info.Point) && c.Entry != "" {
 				need("page", c.Entry)
 			}
+			if c.Editor != "" {
+				need("editor page", c.Editor)
+			}
 			for _, v := range c.ToolViews {
 				if v.View == manifest.ToolViewPage {
 					need("tool result page", v.Entry)
@@ -315,4 +320,25 @@ func stripSingleRoot(files map[string][]byte) map[string][]byte {
 		out[strings.TrimPrefix(name, root+"/")] = b
 	}
 	return out
+}
+
+// maxIconBytes caps the icon carried in the manifest; a larger one is left
+// out and lists show the plugin's initial.
+const maxIconBytes = 64 << 10
+
+// iconData is a package icon as a data: URI, or "" when there is none or it
+// is not a small SVG, PNG, JPEG or WebP image.
+func (p *Package) iconData(file string) string {
+	b, ok := p.ReadFile(file)
+	if !ok || len(b) == 0 || len(b) > maxIconBytes {
+		return ""
+	}
+	mime := map[string]string{
+		".svg": "image/svg+xml", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+		".webp": "image/webp",
+	}[strings.ToLower(path.Ext(file))]
+	if mime == "" {
+		return ""
+	}
+	return "data:" + mime + ";base64," + base64.StdEncoding.EncodeToString(b)
 }

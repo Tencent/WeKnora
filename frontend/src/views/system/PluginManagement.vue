@@ -32,7 +32,10 @@
         @click="openDetail(p)"
         @keydown.enter="openDetail(p)"
       >
-        <div class="plugin-card__badge">{{ initial(p) }}</div>
+        <div class="plugin-card__badge" :class="{ 'plugin-card__badge--logo': !!pluginIconUrl(p.manifest) }">
+          <img v-if="pluginIconUrl(p.manifest)" :src="pluginIconUrl(p.manifest)" alt="" class="plugin-card__badge-img" />
+          <template v-else>{{ initial(p) }}</template>
+        </div>
         <div class="plugin-card__body">
           <div class="plugin-card__title">
             <span class="plugin-card__name">{{ nameOf(p) }}</span>
@@ -88,6 +91,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { pluginIconUrl } from '@/extensions/pluginIcon'
 import { MessagePlugin } from 'tdesign-vue-next'
 
 import { listInstalledPlugins, setInstalledPluginEnabled, type InstalledPlugin } from '@/api/system/plugins'
@@ -236,6 +240,10 @@ onMounted(load)
 .plugin-card__badge {
   .provider-card-badge();
   .provider-card-badge-color(#0052d9);
+}
+
+.plugin-card__badge-img {
+  .provider-card-badge-img();
 }
 
 .plugin-card__body {

@@ -16,6 +16,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/agent"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/chat"
+	pluginevents "github.com/Tencent/WeKnora/internal/plugin/events"
 	"github.com/Tencent/WeKnora/internal/searchutil"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -788,7 +789,23 @@ func (s *wikiIngestService) releaseIngestForUnavailableWiki(ctx context.Context,
 	}
 	logger.Warnf(ctx, "wiki ingest: KB %s unavailable (%s), dropped pending ingest for %d document(s)",
 		kbID, reason, len(knowledgeIDs))
+	s.publishReleased(cleanupCtx, knowledgeIDs)
 	return nil
+}
+
+// publishReleased tells plugins about documents the drain completed: the
+// release promoted them past the watched repository methods. Documents
+// still waiting on other work stay finalizing and say nothing yet.
+func (s *wikiIngestService) publishReleased(ctx context.Context, knowledgeIDs []string) {
+	if s.knowledgeRepo == nil {
+		return
+	}
+	for _, id := range knowledgeIDs {
+		k, err := s.knowledgeRepo.GetKnowledgeByIDOnly(ctx, id)
+		if err == nil && k != nil && k.ParseStatus == types.ParseStatusCompleted {
+			pluginevents.PublishKnowledge(ctx, k)
+		}
+	}
 }
 
 func (s *wikiIngestService) enqueueFinalizeRow(ctx context.Context, op *types.TaskPendingOp) bool {

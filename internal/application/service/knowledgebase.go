@@ -15,6 +15,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/datasource"
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
+	pluginevents "github.com/Tencent/WeKnora/internal/plugin/events"
 	"github.com/Tencent/WeKnora/internal/storageallowlist"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -1002,6 +1003,9 @@ func (s *knowledgeBaseService) ProcessKBDelete(ctx context.Context, t *asynq.Tas
 			})
 			return err
 		}
+		// After the rows are gone: a retry of this task lists none, so
+		// plugins hear of each document once.
+		pluginevents.PublishDeleted(ctx, tenantID, knowledgeList)
 	}
 
 	logger.Infof(ctx, "KB resource cleanup finished, knowledge base ID: %s", kbID)

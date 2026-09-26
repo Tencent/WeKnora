@@ -111,3 +111,20 @@ test('helpers', () => {
   t = 1000
   assert.equal(allow(), true)
 })
+
+test('an editor page sets its form and hears its changes', async () => {
+  const set: unknown[] = []
+  const { frame, host } = setup({ setValues: (v) => set.push(v) })
+  const wk = await connect({ window: frame as unknown as Window, autoResize: false, applyTheme: false })
+  await wk.form.set({ settings: { project: 'ENG' } })
+  await assert.rejects(wk.form.set('nope' as unknown as Record<string, unknown>), /must be an object/)
+  assert.deepEqual(set, [{ settings: { project: 'ENG' } }])
+  const heard = new Promise((resolve) => wk.on('values', resolve))
+  host.send('values', { settings: { project: 'OPS' } })
+  assert.deepEqual(await heard, { settings: { project: 'OPS' } })
+
+  // Pages outside a form have none.
+  const other = setup()
+  const page = await connect({ window: other.frame as unknown as Window, autoResize: false, applyTheme: false })
+  await assert.rejects(page.form.set({ a: 1 }), /not in a form/)
+})

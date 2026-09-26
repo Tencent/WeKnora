@@ -9,8 +9,8 @@ import urllib.request
 from datetime import timedelta
 from typing import Any, Optional, Tuple, Union
 
-from .protocol import HOST_KV_LIST_PATH, HOST_KV_PATH, ErrorCode, PluginError
-from .types import KVEntry, KVList, from_wire
+from .protocol import HOST_DATA_SOURCES_PATH, HOST_KV_LIST_PATH, HOST_KV_PATH, ErrorCode, PluginError
+from .types import DataSourceInfo, KVEntry, KVList, SyncStarted, from_wire
 
 
 class Host:
@@ -93,3 +93,15 @@ class Host:
             if not page.next:
                 return tuple(out)
             after = page.next
+
+    def data_sources(self) -> "Tuple[DataSourceInfo, ...]":
+        """The workspace's data sources of the plugin's connectors (scope
+        "datasources")."""
+        out = self._do("GET", HOST_DATA_SOURCES_PATH) or {}
+        return tuple(from_wire(DataSourceInfo, d) for d in out.get("dataSources") or [])
+
+    def sync_data_source(self, id: str) -> SyncStarted:
+        """Starts an incremental sync of one of them, unless one is already
+        running; status is "queued" or "running" (scope "datasources")."""
+        path = HOST_DATA_SOURCES_PATH + "/" + urllib.parse.quote(id, safe="") + "/sync"
+        return from_wire(SyncStarted, self._do("POST", path, body={}))

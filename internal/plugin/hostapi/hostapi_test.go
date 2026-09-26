@@ -109,3 +109,80 @@ func TestKVThroughTheSDK(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, pluginapi.CodeBadRequest, e.Code)
 }
+
+type fakeSyncer struct {
+	started []string
+	running map[string]time.Time
+}
+
+func (f *fakeSyncer) ManualSync(_ context.Context, id string) (*types.SyncLog, error) {
+	f.started = append(f.started, id)
+	return &types.SyncLog{ID: "log-" + id}, nil
+}
+
+func (f *fakeSyncer) GetSyncLogs(_ context.Context, id string, _, _ int) ([]*types.SyncLog, error) {
+	if at, ok := f.running[id]; ok {
+		return []*types.SyncLog{{ID: "busy", Status: types.SyncLogStatusRunning, StartedAt: at}}, nil
+	}
+	return nil, nil
+}
+
+func TestDataSourcesThroughTheSDK(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&types.DataSource{}))
+	ctx := context.Background()
+	repo := repository.NewDataSourceRepository(db)
+	for _, ds := range []*types.DataSource{
+		{
+			ID: "mine", TenantID: 1, Name: "Jira ENG", Type: "acme.x/jira", KnowledgeBaseID: "kb",
+			Config: types.JSON(`{"resource_ids":["ENG"]}`), Status: types.DataSourceStatusActive,
+		},
+		{ID: "stuck", TenantID: 1, Name: "Jira OPS", Type: "acme.x/jira", Status: types.DataSourceStatusActive},
+		{ID: "stale", TenantID: 1, Name: "Old run", Type: "acme.x/jira", Status: types.DataSourceStatusActive},
+		{ID: "other-plugin", TenantID: 1, Type: "acme.xy/jira"},
+		{ID: "like-escape", TenantID: 1, Type: "acmeaxbjira"},
+		{ID: "other-tenant", TenantID: 2, Type: "acme.x/jira"},
+	} {
+		require.NoError(t, repo.Create(ctx, ds))
+	}
+	syncer := &fakeSyncer{running: map[string]time.Time{
+		"stuck": time.Now().Add(-time.Minute), "stale": time.Now().Add(-2 * runningSyncWindow),
+	}}
+	iss := NewIssuer([]byte("k"))
+	h := NewHandler(iss, nil)
+	h.SetDataSources(NewDataSources(repo.(DataSourceStore), syncer))
+	r := gin.New()
+	h.Register(r)
+	srv := httptest.NewServer(r)
+	defer srv.Close()
+
+	host := hostCall(t, srv.URL, iss, 1, ScopeDataSources).Host()
+	list, err := host.DataSources(ctx)
+	require.NoError(t, err)
+	require.Len(t, list, 3, "only this plugin's data sources in this tenant")
+	require.Equal(t, "jira", list[0].Connector)
+	require.Equal(t, []string{"ENG"}, list[0].ResourceIDs)
+	require.Equal(t, "kb", list[0].KnowledgeBaseID)
+
+	started, err := host.SyncDataSource(ctx, "mine")
+	require.NoError(t, err)
+	require.Equal(t, pluginapi.SyncQueued, started.Status)
+	require.Equal(t, "log-mine", started.SyncLogID)
+	busy, err := host.SyncDataSource(ctx, "stuck")
+	require.NoError(t, err)
+	require.Equal(t, pluginapi.SyncRunning, busy.Status, "a running sync is not queued twice")
+	_, err = host.SyncDataSource(ctx, "stale")
+	require.NoError(t, err)
+	require.Equal(t, []string{"mine", "stale"}, syncer.started, "a run stuck for long does not block")
+
+	for _, id := range []string{"other-plugin", "other-tenant", "nope"} {
+		_, err = host.SyncDataSource(ctx, id)
+		pe, ok := pluginapi.AsError(err)
+		require.True(t, ok && pe.Code == pluginapi.CodeNotFound, "%s: %v", id, err)
+	}
+	_, err = hostCall(t, srv.URL, iss, 1, "kv").Host().DataSources(ctx)
+	pe, ok := pluginapi.AsError(err)
+	require.True(t, ok && pe.Code == pluginapi.CodeUnauthorized, "the scope is required: %v", err)
+}

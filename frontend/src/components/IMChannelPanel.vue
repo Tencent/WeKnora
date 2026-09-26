@@ -23,6 +23,7 @@
             <div class="channel-card__body">
               <div class="channel-card__header">
                 <h3 class="channel-card__title">{{ channel.name || $t('agentEditor.im.unnamed') }}</h3>
+                <PluginOffTag point="imChannels" :type-id="channel.platform" />
                 <t-tag v-if="!channel.enabled" size="small" variant="light" theme="warning">
                   {{ $t('agentEditor.im.disabled') }}
                 </t-tag>
@@ -333,6 +334,7 @@ import mattermostLogo from '@/assets/img/im/mattermost.svg';
 import wechatLogo from '@/assets/img/im/wechat.svg';
 import qqbotLogo from '@/assets/img/im/qqbot.png';
 import yunzhijiaLogo from '@/assets/img/im/yunzhijia.svg';
+import PluginOffTag from '@/components/plugins/PluginOffTag.vue';
 
 type IMPlatform = IMChannel['platform'];
 type IMLocale = NonNullable<IMChannel['locale']>;

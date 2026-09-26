@@ -80,6 +80,7 @@
           <div class="model-card__body">
             <div class="model-card__header">
               <h3 class="model-card__title">{{ modelDisplayName(model) }}</h3>
+              <PluginOffTag v-if="model.provider" point="modelVendors" :type-id="model.provider" />
               <span v-if="model.isBuiltin" class="model-card__lock" :title="$t('modelSettings.builtinTag')"
                 :aria-label="$t('modelSettings.builtinTag')">
                 <t-icon :name="authStore.isSystemAdmin ? 'edit-1' : 'lock-on'" />
@@ -310,6 +311,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useUIStore } from '@/stores/ui'
 import { focusKbEditorSection } from '@/config/contextualGuides'
 import { useChatResourcesStore } from '@/stores/chatResources'
+import PluginOffTag from '@/components/plugins/PluginOffTag.vue'
 import { useModelProvidersStore } from '@/stores/modelProviders'
 import { docsUrl } from '@/utils/docsUrl'
 import {

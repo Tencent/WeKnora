@@ -317,3 +317,31 @@ contributes:
 		}
 	}
 }
+
+func TestInstanceEditors(t *testing.T) {
+	base := `schemaVersion: 1
+id: acme.jira
+version: 1.0.0
+apiVersion: weknora.plugin/v1
+name: { en-US: Jira }
+publisher: { id: acme }
+runtime: { type: host, kind: binary, entry: bin/x }
+contributes:
+  %s:
+    - { id: jira, name: Jira, editor: %s }
+`
+	m, err := Parse([]byte(fmt.Sprintf(base, "connectors", "ui/editor.html")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := m.Contributes[PointConnectors][0]
+	if !HasEditor(PointConnectors, c) || UIMinRole(PointConnectors, c) != "admin" {
+		t.Fatalf("editor = %+v", c)
+	}
+	bad := [][2]string{{"connectors", "editor.html"}, {"connectors", "ui/editor.js"}, {"parsers", "ui/editor.html"}}
+	for _, tc := range bad {
+		if _, err := Parse([]byte(fmt.Sprintf(base, tc[0], tc[1]))); err == nil {
+			t.Errorf("%v accepted", tc)
+		}
+	}
+}

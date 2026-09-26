@@ -3,6 +3,7 @@ package pkg
 import (
 	"archive/zip"
 	"bytes"
+	"encoding/base64"
 	"strings"
 	"testing"
 
@@ -136,5 +137,30 @@ func TestManifestRejectsEscapingPaths(t *testing.T) {
 	bad := strings.Replace(kitManifest, "path: skills/triage", "path: ../skills", 1)
 	if _, err := manifest.Parse([]byte(bad)); err == nil || !strings.Contains(err.Error(), "inside the package") {
 		t.Fatalf("want path error, got %v", err)
+	}
+}
+
+func TestOpenCarriesTheIcon(t *testing.T) {
+	withIcon := func(icon, file, content string) *Package {
+		t.Helper()
+		m := strings.Replace(kitManifest, "publisher: { id: acme }", "publisher: { id: acme }\nicon: "+icon, 1)
+		p, err := Open(zipOf(t, map[string]string{
+			"plugin.yaml": m, "config/tenant.yaml": tenantSchema, "skills/triage/SKILL.md": "x", file: content,
+		}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	svg := `<svg xmlns="http://www.w3.org/2000/svg"/>`
+	if got := withIcon("icon.svg", "icon.svg", svg).Manifest.IconData; got != "data:image/svg+xml;base64,"+
+		base64.StdEncoding.EncodeToString([]byte(svg)) {
+		t.Fatalf("icon = %q", got)
+	}
+	if got := withIcon("icon.svg", "icon.svg", strings.Repeat("x", maxIconBytes+1)).Manifest.IconData; got != "" {
+		t.Fatal("an oversized icon is left out")
+	}
+	if got := withIcon("icon.gif", "icon.gif", "GIF89a").Manifest.IconData; got != "" {
+		t.Fatal("only image types lists can show are carried")
 	}
 }

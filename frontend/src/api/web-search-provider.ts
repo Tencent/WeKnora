@@ -45,6 +45,9 @@ export interface WebSearchProviderTypeInfo {
   names?: Record<string, string>
   icon?: string
   plugin_id?: string
+  /** The plugin's own editor page (under ui/) and the version serving it. */
+  plugin_version?: string
+  editor?: string
 }
 
 export interface WebSearchProviderConfigField {

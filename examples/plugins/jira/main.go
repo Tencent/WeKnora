@@ -43,6 +43,7 @@ func newPlugin() *pluginsdk.Plugin {
 	p.Options("sites", siteOptions)
 	p.Options("issue_types", issueTypeOptions)
 	registerTools(p)
+	p.Webhook("issues", issueWebhook)
 	return p
 }
 

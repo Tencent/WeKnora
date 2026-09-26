@@ -43,6 +43,8 @@ type Manager struct {
 	kinds map[string]bool
 	// standalone hosts have no one to hand other kinds to.
 	standalone bool
+	// hostAPI is this node's Host API on loopback, for sandboxed plugins.
+	hostAPI string
 	// direct are hosts plugins reach without the egress proxy: the Host API
 	// when it is not on this machine.
 	direct []string
@@ -132,6 +134,14 @@ func (m *Manager) SetDirectHosts(hosts ...string) {
 	m.mu.Unlock()
 }
 
+// SetHostAPIAddr names this node's Host API on loopback ("127.0.0.1:8080"),
+// which sandboxed plugins (WEKNORA_PLUGIN_NETNS) reach through a relay.
+func (m *Manager) SetHostAPIAddr(addr string) {
+	m.mu.Lock()
+	m.hostAPI = addr
+	m.mu.Unlock()
+}
+
 // SetReporter wires health changes to the reconciler.
 func (m *Manager) SetReporter(r StateReporter) {
 	m.mu.Lock()
@@ -165,9 +175,9 @@ func (m *Manager) Activate(ctx context.Context, l *reconcile.Loaded) error {
 	}
 	id := l.Manifest.ID
 	m.mu.Lock()
-	direct := m.direct
+	direct, hostAPI := m.direct, m.hostAPI
 	m.mu.Unlock()
-	p, err := startProcess(spec{m: l.Manifest, dir: l.Dir, direct: direct}, func(s State, err error) {
+	p, err := startProcess(spec{m: l.Manifest, dir: l.Dir, direct: direct, hostAPI: hostAPI}, func(s State, err error) {
 		m.report(id, s, err)
 	})
 	if err != nil {

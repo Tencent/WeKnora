@@ -20,6 +20,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/plugin/manifest"
+	"github.com/Tencent/WeKnora/internal/plugin/sandbox"
 	"github.com/Tencent/WeKnora/internal/utils"
 	"github.com/Tencent/WeKnora/pluginsdk/client"
 	"github.com/Tencent/WeKnora/pluginsdk/pluginapi"
@@ -53,6 +54,9 @@ type spec struct {
 	dir string // extracted package
 	// direct are hosts reached without the egress proxy.
 	direct []string
+	// hostAPI is the loopback address of this node's Host API, relayed into
+	// a sandboxed plugin's network namespace.
+	hostAPI string
 }
 
 // Kinds of host plugin this host runs.
@@ -266,6 +270,14 @@ func (p *process) launch(ctx context.Context, entry string) (*launched, error) {
 	cmd.Dir = p.spec.dir
 	cmd.Env = p.childEnv(network, socket, token)
 	configureChild(cmd)
+	var box *sandboxed
+	if netnsEnabled() {
+		var err error
+		if box, err = p.sandbox(cmd); err != nil {
+			return nil, err
+		}
+		cmd = box.cmd
+	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return nil, err
@@ -275,10 +287,21 @@ func (p *process) launch(ctx context.Context, entry string) (*launched, error) {
 		return nil, err
 	}
 	if err := cmd.Start(); err != nil {
+		if box != nil {
+			box.release()
+			return nil, fmt.Errorf("start %s in a network namespace (%s; the system must allow unprivileged "+
+				"user namespaces): %w", filepath.Base(entry), envNetns, err)
+		}
 		return nil, fmt.Errorf("start %s: %w", filepath.Base(entry), err)
 	}
 	id := p.spec.m.ID + "@" + p.spec.m.Version
 	releaseLimits := applyLimits(cmd.Process.Pid, id, limitsFor(p.spec.m))
+	if box != nil {
+		releaseLimits = chain(releaseLimits, box.release)
+		if err := box.start(); err != nil {
+			_ = cmd.Process.Kill()
+		}
+	}
 	handshake := make(chan pluginapi.Handshake, 1)
 	hsErr := make(chan error, 1)
 	go forwardLogs(stderr, id, nil, nil)
@@ -303,6 +326,11 @@ func (p *process) launch(ctx context.Context, entry string) (*launched, error) {
 		return nil, err
 	case err := <-exited:
 		exited <- err // keep it for supervise
+		var exit *exec.ExitError
+		if box != nil && errors.As(err, &exit) && exit.ExitCode() == sandbox.ExitSetupFailed {
+			return nil, fmt.Errorf("the plugin's network namespace could not be set up (%s needs unprivileged "+
+				"user namespaces; on Ubuntu 24.04 kernel.apparmor_restrict_unprivileged_userns=0)", envNetns)
+		}
 		return nil, fmt.Errorf("plugin exited before it was ready: %v", err)
 	case <-timer.C:
 		kill()
@@ -529,5 +557,13 @@ func stopChild(cmd *exec.Cmd, exited chan error) {
 		_ = cmd.Process.Kill()
 		err := <-exited
 		exited <- err
+	}
+}
+
+func chain(fns ...func()) func() {
+	return func() {
+		for _, f := range fns {
+			f()
+		}
 	}
 }

@@ -2859,6 +2859,10 @@ export default {
       rotateFailed: 'Failed to rotate the secret'
     }
   },
+  pluginOff: {
+    label: 'Plugin off',
+    hint: 'The plugin providing this is switched off in this workspace: no new ones can be added, existing ones keep working. Admins can switch it back on in Settings → Plugins.'
+  },
   pluginToolView: {
     empty: 'No results'
   },

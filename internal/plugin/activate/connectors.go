@@ -100,6 +100,7 @@ func connectorMetadata(
 		Description: c.Description.Default, Descriptions: c.Description.Locales,
 		Icon: icon, Priority: 1000 + c.Order, AuthType: "plugin", Capabilities: caps,
 		ConfigSchema: creds, SettingsSchema: settings, PluginID: l.Manifest.ID,
+		PluginVersion: l.Manifest.Version, Editor: c.Editor,
 	}, nil
 }
 

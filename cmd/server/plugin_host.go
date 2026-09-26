@@ -7,6 +7,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/container"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/plugin/sandbox"
 )
 
 // runPluginHost is `WeKnora plugin-host`: a standalone plugin host that
@@ -25,6 +26,10 @@ func runPluginHost() int {
 func subcommand() (code int, ran bool) {
 	if len(os.Args) > 1 && os.Args[1] == "plugin-host" {
 		return runPluginHost(), true
+	}
+	// The helper a sandboxed plugin runs in (WEKNORA_PLUGIN_NETNS).
+	if len(os.Args) > 1 && os.Args[1] == sandbox.Subcommand {
+		return sandbox.Main(os.Args[2:]), true
 	}
 	return 0, false
 }

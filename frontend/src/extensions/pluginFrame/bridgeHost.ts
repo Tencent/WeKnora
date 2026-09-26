@@ -36,6 +36,11 @@ export interface BridgeHandlers {
   navigate(path: string): void
   resize(height: number): void
   close(): void
+  /**
+   * Sets values of the form an instance editor page sits in (merged into
+   * what the form holds). Only editor mounts have a form.
+   */
+  setValues?(values: Record<string, unknown>): void
 }
 
 export type ToastTheme = 'info' | 'success' | 'warning' | 'error'
@@ -152,6 +157,12 @@ export function createBridgeHost(opts: BridgeHostOptions): BridgeHost {
       case 'ui.close':
         h.close()
         return null
+      case 'form.set': {
+        if (!h.setValues) throw new BridgeCallError('this page is not in a form', 404)
+        if (!isObject(params.values)) throw new BridgeCallError('values must be an object', 400)
+        h.setValues(params.values)
+        return null
+      }
       default:
         throw new BridgeCallError(`unknown method ${method}`, 404)
     }

@@ -65,6 +65,8 @@ export interface PluginManifest {
   description?: LocalizedText
   publisher: { id: string; name?: string; url?: string }
   icon?: string
+  /** The icon as a data: URI (from the package, or a builtin vendor's logo). */
+  iconData?: string
   homepage?: string
   license?: string
   builtin?: boolean

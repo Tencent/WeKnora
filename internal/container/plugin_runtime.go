@@ -82,11 +82,7 @@ func newPluginHostAPI(
 	// Plugins on this node always use loopback; the public address is for
 	// plugins elsewhere (remote, on a plugin host), which reach this node
 	// the way the deployment routes to it.
-	port := 8080
-	if cfg != nil && cfg.Server != nil && cfg.Server.Port > 0 {
-		port = cfg.Server.Port
-	}
-	iv.SetHostAPI(issuer, fmt.Sprintf("http://127.0.0.1:%d", port))
+	iv.SetHostAPI(issuer, fmt.Sprintf("http://127.0.0.1:%d", serverPort(cfg)))
 	iv.SetPublicHostAPI(strings.TrimSpace(os.Getenv("WEKNORA_PLUGIN_HOST_API_URL")))
 	kv := hostapi.NewKV(repo)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -111,10 +107,19 @@ func bindPluginActivators(
 // newPluginHostManager is this node's embedded plugin host. It runs the
 // kinds WEKNORA_PLUGIN_EMBEDDED_KINDS names (default: every kind this
 // machine can run; "none" leaves all host plugins to standalone hosts).
-func newPluginHostManager() *host.Manager {
+func newPluginHostManager(cfg *config.Config) *host.Manager {
 	m := host.NewManager()
 	m.SetKinds(host.KindsFromEnv("WEKNORA_PLUGIN_EMBEDDED_KINDS"))
+	m.SetHostAPIAddr(fmt.Sprintf("127.0.0.1:%d", serverPort(cfg)))
 	return m
+}
+
+// serverPort is the port this node serves on (the Host API's, on loopback).
+func serverPort(cfg *config.Config) int {
+	if cfg != nil && cfg.Server != nil && cfg.Server.Port > 0 {
+		return cfg.Server.Port
+	}
+	return 8080
 }
 
 // newPluginHostPool finds standalone plugin hosts (weknora plugin-host) in
@@ -234,4 +239,14 @@ func startPluginReconciler(
 		remoteManager.Close()
 		return nil
 	})
+}
+
+// bindPluginHostDataSources enables the Host API's datasources scope once
+// the data source service exists.
+func bindPluginHostDataSources(
+	h *hostapi.Handler, repo interfaces.DataSourceRepository, svc interfaces.DataSourceService,
+) {
+	if store, ok := repo.(hostapi.DataSourceStore); ok {
+		h.SetDataSources(hostapi.NewDataSources(store, svc))
+	}
 }

@@ -46,3 +46,43 @@ const (
 	KVMaxKeys       = 10000 // per plugin and tenant
 	KVMaxListLimit  = 1000
 )
+
+// HostDataSourcesPath lists the workspace's data sources of the plugin's
+// connectors (scope "datasources"): GET answers a DataSourceList.
+const HostDataSourcesPath = "/api/v1/plugin-host/datasources"
+
+// HostDataSourceSyncPath starts an incremental sync of one of them: POST
+// answers a SyncStarted. A plugin calls it when the source tells it
+// something changed (a webhook), instead of waiting for the schedule.
+func HostDataSourceSyncPath(id string) string { return HostDataSourcesPath + "/" + id + "/sync" }
+
+// DataSourceInfo is one data source of the plugin's connectors.
+type DataSourceInfo struct {
+	ID              string `json:"id"`
+	Name            string `json:"name"`
+	KnowledgeBaseID string `json:"knowledgeBaseId"`
+	// Connector is the local ID of the connector (contributes.connectors[].id).
+	Connector string `json:"connector"`
+	// ResourceIDs are the selected resources (projects, spaces).
+	ResourceIDs []string   `json:"resourceIds"`
+	Status      string     `json:"status"`
+	LastSyncAt  *time.Time `json:"lastSyncAt,omitempty"`
+}
+
+// DataSourceList lists data sources.
+type DataSourceList struct {
+	DataSources []DataSourceInfo `json:"dataSources"`
+}
+
+// Sync states SyncStarted reports.
+const (
+	SyncQueued = "queued"
+	// SyncRunning means a sync had already started; it is not queued again.
+	SyncRunning = "running"
+)
+
+// SyncStarted says what became of a sync request.
+type SyncStarted struct {
+	Status    string `json:"status"`
+	SyncLogID string `json:"syncLogId,omitempty"`
+}

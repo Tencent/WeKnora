@@ -54,6 +54,14 @@ the user's time zone, as JQL requires.
 **Full syncs** also remove the documents of issues that were deleted, moved
 out of the selected projects, or no longer match the filters.
 
+**Live updates.** The plugin's `issues` webhook (its URL is in Settings →
+Plugins → Jira) takes Jira's issue events. Register it in Jira (Settings →
+System → WebHooks) for issue created, updated and deleted.
+- Each event syncs the data sources following the issue's project right
+  away, through the Host API's `datasources` scope.
+- If the Jira webhook has a secret, enter it in the plugin's configuration;
+  calls without a matching `X-Hub-Signature` are refused.
+
 ## Test
 
 ```bash

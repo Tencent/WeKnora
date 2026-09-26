@@ -141,6 +141,10 @@ type WebSearchProviderTypeInfo struct {
 	Icon string `json:"icon,omitempty"`
 	// PluginID names the installed plugin providing the type.
 	PluginID string `json:"plugin_id,omitempty"`
+	// PluginVersion and Editor locate the plugin's own editor page (a
+	// file under ui/), shown below the generated form.
+	PluginVersion string `json:"plugin_version,omitempty"`
+	Editor        string `json:"editor,omitempty"`
 	// Whether the provider requires an API key
 	RequiresAPIKey bool `json:"requires_api_key"`
 	// Whether the provider accepts an optional API key (keyless by default, but a

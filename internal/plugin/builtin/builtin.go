@@ -8,6 +8,7 @@
 package builtin
 
 import (
+	"encoding/base64"
 	"sort"
 	"strings"
 
@@ -94,6 +95,14 @@ func Manifests(src Sources) []*manifest.Manifest {
 			Extra:       map[string]any{"modelTypes": d.ModelTypes},
 		})
 	}
+	for _, d := range src.ModelVendors {
+		// The vendor's logo stands for its plugin.
+		if len(d.Icon) > 0 {
+			if m := b.plugins[pluginID(b.vendor(manifest.PointModelVendors, d.ID))]; m != nil && m.IconData == "" {
+				m.IconData = "data:image/svg+xml;base64," + base64.StdEncoding.EncodeToString(d.Icon)
+			}
+		}
+	}
 	for _, c := range src.Connectors {
 		b.add(manifest.PointConnectors, c.Type, manifest.Contribution{
 			ID:           c.Type,
@@ -155,11 +164,15 @@ type builder struct {
 }
 
 func (b *builder) add(point manifest.Point, id string, c manifest.Contribution) {
-	vendor := id
+	b.addTo(b.vendor(point, id), point, id, c)
+}
+
+// vendor is the plugin key a builtin contribution files under.
+func (b *builder) vendor(point manifest.Point, id string) string {
 	if v, ok := vendorOverrides[point][id]; ok {
-		vendor = v
+		return v
 	}
-	b.addTo(vendor, point, id, c)
+	return id
 }
 
 // addTo files a contribution under a vendor's plugin. The contribution keeps

@@ -241,6 +241,10 @@ type ConnectorMetadata struct {
 	Descriptions map[string]string `json:"descriptions,omitempty"`
 	// PluginID names the installed plugin providing the connector.
 	PluginID string `json:"plugin_id,omitempty"`
+	// PluginVersion and Editor locate the plugin's own editor page (a
+	// file under ui/), shown below the generated form.
+	PluginVersion string `json:"plugin_version,omitempty"`
+	Editor        string `json:"editor,omitempty"`
 }
 
 // GetConnectorMetadata returns metadata for all available connectors

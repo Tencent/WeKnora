@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path"
+	"slices"
 	"strings"
 	"sync"
 
@@ -41,7 +42,7 @@ func (a *UIPages) Activate(_ context.Context, l *reconcile.Loaded) error {
 	for point, list := range l.Manifest.Contributes {
 		has = has || manifest.IsUIPoint(point)
 		for _, c := range list {
-			has = has || (point == manifest.PointMCPServers && c.HasToolPages())
+			has = has || (point == manifest.PointMCPServers && c.HasToolPages()) || manifest.HasEditor(point, c)
 		}
 	}
 	a.mu.Lock()
@@ -102,13 +103,16 @@ func (a *UIPages) Mount(pluginID, mount string) (Mount, error) {
 	p, ok := a.loaded[pluginID]
 	a.mu.RUnlock()
 	point, id, found := strings.Cut(mount, "/")
-	toolPages := manifest.Point(point) == manifest.PointMCPServers
-	if !ok || !found || (!manifest.IsUIPoint(manifest.Point(point)) && !toolPages) {
+	pt := manifest.Point(point)
+	toolPages := pt == manifest.PointMCPServers
+	editors := slices.Contains(manifest.EditorPoints, pt)
+	if !ok || !found || (!manifest.IsUIPoint(pt) && !toolPages && !editors) {
 		return Mount{}, ErrNoPage
 	}
-	for _, c := range p.m.Contributes[manifest.Point(point)] {
-		// A tool result page answers to its server: "mcpServers/<id>".
-		if c.ID == id && (!toolPages || c.HasToolPages()) {
+	for _, c := range p.m.Contributes[pt] {
+		// A tool result page answers to its server ("mcpServers/<id>"), an
+		// instance editor to its contribution ("connectors/<id>").
+		if c.ID == id && (!toolPages || c.HasToolPages()) && (!editors || manifest.HasEditor(pt, c)) {
 			return Mount{Manifest: p.m, Point: manifest.Point(point), Contribution: c}, nil
 		}
 	}

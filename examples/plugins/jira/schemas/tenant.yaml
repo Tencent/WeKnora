@@ -71,3 +71,12 @@ properties:
     x-i18n:
       title: { zh-CN: API 令牌 }
       description: { zh-CN: 在 id.atlassian.com → 安全 → API 令牌 中创建 }
+  webhook_secret:
+    type: string
+    title: Webhook secret
+    description: The secret set on the Jira webhook, if any; Jira then signs each call
+    x-order: 20
+    x-secret: true
+    x-i18n:
+      title: { zh-CN: Webhook 密钥 }
+      description: { zh-CN: 若在 Jira 的 Webhook 中设置了密钥请填写，Jira 会用它为每次调用签名 }

@@ -104,6 +104,16 @@ p.UI(func(ctx context.Context, call *pluginsdk.Call, req pluginapi.UIRequest) (*
 WeKnora refuses a caller below the page's `minRole` before the call.
 The handler can check `req.Role` for anything finer.
 
+**Instance editors.** A connector or web search contribution can name an
+`editor` page (`editor: ui/editor.html`) for settings a schema form cannot
+express. It shows below the generated form:
+- `context.context.values` holds the instance, in the shape the plugin's
+  `instanceSchema` has (connectors: `{credentials, settings}`).
+- `wk.form.set(values)` merges values into the form; the `values` event
+  reports what the user changes.
+- Its requests use the mount `connectors/<id>` or `webSearch/<id>` and need
+  an admin.
+
 ## Events
 
 List the events a plugin wants in `permissions.events`. The administrator
@@ -283,6 +293,13 @@ Scopes:
   - `KVGet`, `KVPut` (optional TTL), `KVDelete` and `KVList`.
   - Keys up to 256 bytes, JSON values up to 64 KB, 10,000 keys per
     workspace.
+- `datasources`: the workspace's data sources of the plugin's own
+  connectors.
+  - `DataSources` lists them with their selected resources.
+  - `SyncDataSource` starts an incremental sync, unless one is already
+    running (answering `running`).
+  - Pair it with a webhook so changes arrive at once instead of at the
+    next scheduled sync; the Jira example does.
 
 The token is valid for a few minutes: use `call.Host()` within the call and
 don't keep it.

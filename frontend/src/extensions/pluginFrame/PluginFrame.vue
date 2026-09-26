@@ -43,8 +43,14 @@ const props = withDefaults(
     context?: Record<string, unknown>
     /** Fill the container instead of growing with the page's content. */
     fill?: boolean
+    /**
+     * The form an instance editor page sits in: its values (sent to the page
+     * as context.values and on every change) and how the page sets them.
+     */
+    formValues?: Record<string, unknown>
+    setValues?: (values: Record<string, unknown>) => void
   }>(),
-  { context: () => ({}), fill: false },
+  { context: () => ({}), fill: false, formValues: undefined, setValues: undefined },
 )
 const emit = defineEmits<{ close: [] }>()
 
@@ -66,7 +72,10 @@ const initData = (): BridgeInit => ({
   locale: locale.value,
   role: auth.canAccessAllTenants ? 'admin' : auth.currentTenantRole || 'viewer',
   theme: readTheme(),
-  context: { ...props.context },
+  // A plain copy: reactive form state cannot cross postMessage.
+  context: props.formValues
+    ? { ...props.context, values: JSON.parse(JSON.stringify(props.formValues)) }
+    : { ...props.context },
 })
 
 const host = createBridgeHost({
@@ -112,8 +121,17 @@ const host = createBridgeHost({
     close() {
       emit('close')
     },
+    ...(props.setValues ? { setValues: (values: Record<string, unknown>) => props.setValues?.(values) } : {}),
   },
 })
+
+// The page hears what the user types into the rest of the form.
+watch(
+  () => (props.formValues ? JSON.stringify(props.formValues) : ''),
+  (now, before) => {
+    if (ready.value && now && now !== before) host.send('values', JSON.parse(now))
+  },
+)
 
 const onMessage = (event: MessageEvent) => host.handle(event)
 let themeObserver: MutationObserver | null = null

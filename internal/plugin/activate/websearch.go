@@ -107,6 +107,7 @@ func webSearchType(l *reconcile.Loaded, c manifest.Contribution, id string) (inf
 	info := types.WebSearchProviderTypeInfo{
 		ID: id, Name: c.Name.Default, Names: c.Name.Locales, Description: c.Description.Default,
 		RequiresAPIKey: requiresKey, Icon: icon, PluginID: l.Manifest.ID, ConfigSchema: schema,
+		PluginVersion: l.Manifest.Version, Editor: c.Editor,
 	}
 	validate := func(params types.WebSearchProviderParameters) error {
 		value := map[string]any{"api_key": params.APIKey}

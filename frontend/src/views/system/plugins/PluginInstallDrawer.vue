@@ -55,7 +55,10 @@
     <section v-if="preview" class="setting-drawer__section">
       <h4 class="setting-drawer__section-title">{{ t('pluginAdmin.install.reviewSection') }}</h4>
       <div class="review-head">
-        <div class="review-head__badge">{{ initial }}</div>
+        <div class="review-head__badge" :class="{ 'review-head__badge--logo': !!icon }">
+          <img v-if="icon" :src="icon" alt="" class="review-head__badge-img" />
+          <template v-else>{{ initial }}</template>
+        </div>
         <div class="review-head__text">
           <div class="review-head__name">
             {{ localizedText(preview.manifest.name, locale) }}
@@ -130,6 +133,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { pluginIconUrl } from '@/extensions/pluginIcon'
 import { MessagePlugin } from 'tdesign-vue-next'
 
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
@@ -215,6 +219,7 @@ const contributions = computed(() => (preview.value ? contributionLines(preview.
 const permissions = computed(() => permissionLines(preview.value?.manifest.permissions))
 const hosts = computed(() => (preview.value ? remoteHosts(preview.value.manifest) : []))
 const description = computed(() => (preview.value ? localizedText(preview.value.manifest.description, locale.value) : ''))
+const icon = computed(() => pluginIconUrl(preview.value?.manifest))
 const initial = computed(() =>
   (preview.value ? localizedText(preview.value.manifest.name, locale.value) : '?').trim().charAt(0).toUpperCase(),
 )
@@ -348,6 +353,10 @@ async function onConfirm() {
   &__badge {
     .provider-card-badge();
     .provider-card-badge-color(#0052d9);
+  }
+
+  &__badge-img {
+    .provider-card-badge-img();
   }
 
   &__text {

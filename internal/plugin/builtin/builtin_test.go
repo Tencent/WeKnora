@@ -18,7 +18,7 @@ func sampleSources() Sources {
 	return Sources{
 		Version: "v0.8.2",
 		ModelVendors: []*providers.Definition{
-			{ID: "zhipu", Name: "Zhipu AI", Names: map[string]string{"zh-CN": "智谱"}},
+			{ID: "zhipu", Name: "Zhipu AI", Names: map[string]string{"zh-CN": "智谱"}, Icon: []byte("<svg/>")},
 			{ID: "azure_openai", Name: "Azure OpenAI"},
 		},
 		Connectors: []datasource.ConnectorMetadata{
@@ -49,6 +49,10 @@ func TestManifestsGroupByVendor(t *testing.T) {
 		if byID[id] == nil {
 			t.Fatalf("missing plugin %s", id)
 		}
+	}
+
+	if byID["weknora.zhipu"].IconData != "data:image/svg+xml;base64,PHN2Zy8+" || byID["weknora.feishu"].IconData != "" {
+		t.Fatalf("a model vendor's logo stands for its plugin: %q", byID["weknora.zhipu"].IconData)
 	}
 
 	feishu := byID["weknora.feishu"]

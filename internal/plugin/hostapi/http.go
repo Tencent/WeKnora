@@ -22,12 +22,16 @@ const claimsKey = "pluginHostClaims"
 
 // Handler serves the Host API.
 type Handler struct {
-	issuer *Issuer
-	kv     *KV
+	issuer      *Issuer
+	kv          *KV
+	dataSources *DataSources
 }
 
 // NewHandler creates the Host API handler.
 func NewHandler(issuer *Issuer, kv *KV) *Handler { return &Handler{issuer: issuer, kv: kv} }
+
+// SetDataSources enables the datasources scope.
+func (h *Handler) SetDataSources(d *DataSources) { h.dataSources = d }
 
 func writeErr(c *gin.Context, err error) {
 	var e *pluginapi.Error
@@ -77,6 +81,35 @@ func (h *Handler) Register(r gin.IRouter) {
 	kv.PUT("", h.kvPut)
 	kv.DELETE("", h.kvDelete)
 	kv.GET("/list", h.kvList)
+	ds := g.Group("/datasources", h.authenticate(ScopeDataSources))
+	ds.GET("", h.dataSourceList)
+	ds.POST("/:id/sync", h.dataSourceSync)
+}
+
+func (h *Handler) dataSourceList(c *gin.Context) {
+	if h.dataSources == nil {
+		writeErr(c, pluginapi.Errorf(pluginapi.CodeUnavailable, "data sources are not available on this node"))
+		return
+	}
+	out, err := h.dataSources.List(c.Request.Context(), claimsOf(c))
+	if err != nil {
+		writeErr(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, out)
+}
+
+func (h *Handler) dataSourceSync(c *gin.Context) {
+	if h.dataSources == nil {
+		writeErr(c, pluginapi.Errorf(pluginapi.CodeUnavailable, "data sources are not available on this node"))
+		return
+	}
+	out, err := h.dataSources.Sync(c.Request.Context(), claimsOf(c), c.Param("id"))
+	if err != nil {
+		writeErr(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, out)
 }
 
 func (h *Handler) kvGet(c *gin.Context) {

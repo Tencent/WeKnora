@@ -42,8 +42,15 @@ export interface Bridge {
   navigate(path: string): Promise<void>
   resize(height: number): Promise<void>
   close(): Promise<void>
+  /** The form an instance editor page sits in (connectors, webSearch editors). */
+  form: {
+    /** Merges values into the form, in the shape the plugin's schema has. */
+    set(values: Record<string, unknown>): Promise<void>
+  }
   on(name: 'theme', fn: (theme: Theme) => void): () => void
   on(name: 'locale', fn: (locale: string) => void): () => void
+  /** An editor's form changed; values are in the plugin's schema shape. */
+  on(name: 'values', fn: (values: Record<string, unknown>) => void): () => void
   /** The mount's context changed (another knowledge base). */
   on(name: 'init', fn: (context: PageContext) => void): () => void
 }

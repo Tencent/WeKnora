@@ -1,15 +1,17 @@
 import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 
-import { listContributions, type ContributionListing } from '@/api/plugin'
+import { listContributions, type ContributionListing, type ExtensionPoint } from '@/api/plugin'
+import { findContribution, switchedOffContribution } from '@/extensions/pluginContributions'
 import { useAuthStore } from '@/stores/auth'
 import { pagesOf, type PagePoint, type PluginPage } from '@/extensions/pluginFrame/pluginPages'
 
 import { createCachedResource } from './resourceCache'
 
 /**
- * The plugin pages of the current workspace (toolbox pages, settings
- * sections, knowledge base tabs). No TTL: reloaded when the workspace
+ * The plugin contributions of the current workspace: its plugin pages
+ * (toolbox pages, settings sections, knowledge base tabs), and which
+ * contributions belong to switched-off plugins. No TTL: reloaded when the workspace
  * changes, and invalidated when a plugin is switched on or off.
  */
 export const usePluginPagesStore = defineStore('pluginPages', () => {
@@ -48,6 +50,12 @@ export const usePluginPagesStore = defineStore('pluginPages', () => {
   return {
     ensure,
     invalidate,
+    /** The contribution an instance type names, if a plugin provides it. */
+    contribution: (point: ExtensionPoint, typeId: string | undefined) =>
+      findContribution(listing.value, point, typeId),
+    /** The contribution, when its plugin is switched off in this workspace. */
+    switchedOff: (point: ExtensionPoint, typeId: string | undefined) =>
+      switchedOffContribution(listing.value, point, typeId),
     pages: visible('pages'),
     settingsSections: visible('settingsSections'),
     kbTabs: visible('kbTabs'),

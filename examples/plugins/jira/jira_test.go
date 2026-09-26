@@ -3,6 +3,9 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"go/parser"
@@ -585,5 +588,68 @@ func TestAgentTools(t *testing.T) {
 		pluginapi.OptionsInput{Field: "site", Scope: pluginapi.OptionsScopeTenant}, &sites)
 	if err != nil || len(sites.Options) != 1 || sites.Options[0].Value != cloudID {
 		t.Fatalf("tenant sites = %+v, %v", sites, err)
+	}
+}
+
+// Jira's issue events sync the data sources following the issue's project.
+func TestIssueWebhookSyncsDataSources(t *testing.T) {
+	var synced []string
+	host := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer tok" {
+			http.Error(w, "no", http.StatusUnauthorized)
+			return
+		}
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == pluginapi.HostDataSourcesPath:
+			writeJSON(w, pluginapi.DataSourceList{DataSources: []pluginapi.DataSourceInfo{
+				{ID: "ds-eng", Connector: "jira", ResourceIDs: []string{"ENG", "OPS"}},
+				{ID: "ds-ops", Connector: "jira", ResourceIDs: []string{"OPS"}},
+			}})
+		case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/sync"):
+			synced = append(synced, strings.Split(r.URL.Path, "/")[5])
+			writeJSON(w, pluginapi.SyncStarted{Status: pluginapi.SyncQueued})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer host.Close()
+	r := newRun(t)
+	send := func(body string, headers map[string]string, tenant map[string]any) pluginapi.WebhookResponse {
+		t.Helper()
+		var out pluginapi.WebhookResponse
+		env := pluginapi.Envelope{
+			Context: pluginapi.Context{TenantID: 7, Host: &pluginapi.HostAccess{URL: host.URL, Token: "tok"}},
+			Config:  pluginapi.Config{Tenant: tenant},
+		}
+		req := pluginapi.WebhookRequest{Method: http.MethodPost, Path: "/", Headers: headers, Body: []byte(body)}
+		if err := r.client.Call(context.Background(), pluginapi.WebhookPath("issues"), env, req, &out); err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+	event := `{"webhookEvent":"jira:issue_updated","issue":{"key":"ENG-7","fields":{"project":{"key":"ENG"}}}}`
+	if out := send(event, nil, nil); out.Status != http.StatusAccepted ||
+		strings.Join(synced, ",") != "ds-eng" || !strings.Contains(string(out.Body), `"synced":["ds-eng"]`) {
+		t.Fatalf("webhook = %d %s, synced %v", out.Status, out.Body, synced)
+	}
+
+	// With a secret, only signed calls count.
+	secret := map[string]any{"webhook_secret": "s3cret"}
+	opsEvent := `{"webhookEvent":"jira:issue_created","issue":{"key":"OPS-1","fields":{}}}`
+	forged := map[string]string{"X-Hub-Signature": "sha256=00"}
+	if out := send(opsEvent, forged, secret); out.Status != http.StatusUnauthorized {
+		t.Fatalf("forged = %d", out.Status)
+	}
+	mac := hmac.New(sha256.New, []byte("s3cret"))
+	mac.Write([]byte(opsEvent))
+	sig := "sha256=" + hex.EncodeToString(mac.Sum(nil))
+	synced = nil
+	if out := send(opsEvent, map[string]string{"X-Hub-Signature": sig}, secret); out.Status != http.StatusAccepted ||
+		strings.Join(synced, ",") != "ds-eng,ds-ops" {
+		t.Fatalf("signed = %d, synced %v", out.Status, synced)
+	}
+	synced = nil
+	if out := send(`{"webhookEvent":"comment_created"}`, nil, nil); out.Status != http.StatusAccepted || synced != nil {
+		t.Fatalf("other events are acknowledged and ignored: %d %v", out.Status, synced)
 	}
 }

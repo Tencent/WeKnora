@@ -30,6 +30,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/config"
 	werrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
+	pluginevents "github.com/Tencent/WeKnora/internal/plugin/events"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/robfig/cron/v3"
@@ -473,6 +474,9 @@ func (h *HousekeepingService) recoverStalled(
 			continue
 		}
 		recovered += res.RowsAffected
+		failed := k
+		failed.ParseStatus, failed.ErrorMessage = types.ParseStatusFailed, msg
+		pluginevents.PublishKnowledge(ctx, &failed)
 		if site != nil {
 			h.closeStalledSpans(ctx, k.ID, site, msg)
 		}

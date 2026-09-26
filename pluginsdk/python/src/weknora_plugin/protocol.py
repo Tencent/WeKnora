@@ -33,6 +33,7 @@ MAX_CLOCK_SKEW = 5 * 60
 
 HOST_KV_PATH = "/api/v1/plugin-host/kv"
 HOST_KV_LIST_PATH = "/api/v1/plugin-host/kv/list"
+HOST_DATA_SOURCES_PATH = "/api/v1/plugin-host/datasources"
 
 
 class ErrorCode(str, Enum):

@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
@@ -140,6 +141,21 @@ func (r *DataSourceRepository) Delete(ctx context.Context, id string) error {
 }
 
 // FindActive retrieves all active data sources (used for scheduling)
+// FindByTenantAndTypePrefix lists a tenant's data sources whose type starts
+// with prefix ("acme.jira/" for a plugin's connectors).
+func (r *DataSourceRepository) FindByTenantAndTypePrefix(
+	ctx context.Context, tenantID uint64, prefix string,
+) ([]*types.DataSource, error) {
+	var out []*types.DataSource
+	pattern := strings.NewReplacer(`\`, `\\`, "%", `\%`, "_", `\_`).Replace(prefix) + "%"
+	err := r.db.WithContext(ctx).
+		Where("tenant_id = ? AND type LIKE ? ESCAPE '\\'", tenantID, pattern).
+		Where("deleted_at IS NULL").
+		Order("created_at").
+		Find(&out).Error
+	return out, err
+}
+
 func (r *DataSourceRepository) FindActive(ctx context.Context) ([]*types.DataSource, error) {
 	var dataSources []*types.DataSource
 	if err := r.db.WithContext(ctx).

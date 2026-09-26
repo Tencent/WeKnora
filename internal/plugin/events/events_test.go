@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 
@@ -65,7 +66,8 @@ func setup(t *testing.T) (*Dispatcher, *queue, *received, *plugintest.MemTenantS
 			Permissions: manifest.Permissions{Events: events},
 		}
 	}
-	listener := plugin("acme.audit", pluginapi.EventKnowledgeIngested, pluginapi.EventKnowledgeFailed)
+	listener := plugin("acme.audit", pluginapi.EventKnowledgeIngested, pluginapi.EventKnowledgeFailed,
+		pluginapi.EventKnowledgeDeleted)
 	other := plugin("acme.other", pluginapi.EventChatAnswered)
 	for _, m := range []*manifest.Manifest{listener, other} {
 		if err := reg.Register(m); err != nil {
@@ -204,5 +206,32 @@ func TestWatchKnowledgePublishesTransitionsOnly(t *testing.T) {
 	want := []string{"knowledge.failed:k1:boom", "knowledge.ingested:k2:"}
 	if len(seen) != 2 || seen[0] != want[0] || seen[1] != want[1] {
 		t.Fatalf("published %v, want %v", seen, want)
+	}
+}
+
+// Bulk paths publish through the helpers: deleting a whole knowledge base,
+// and statuses set outside the watched repository methods.
+func TestPublishHelpers(t *testing.T) {
+	ctx := context.Background()
+	d, q, _, _ := setup(t)
+	SetDefault(d)
+	t.Cleanup(func() { SetDefault(nil) })
+	PublishDeleted(ctx, 7, []*types.Knowledge{
+		{ID: "a", KnowledgeBaseID: "kb", Title: "A"}, nil, {ID: "b", KnowledgeBaseID: "kb"},
+	})
+	stalled := &types.Knowledge{ID: "c", TenantID: 7, ParseStatus: types.ParseStatusFailed, ErrorMessage: "stalled"}
+	PublishKnowledge(ctx, stalled)
+	PublishKnowledge(ctx, &types.Knowledge{ID: "d", TenantID: 7, ParseStatus: types.ParseStatusFinalizing})
+	var seen []string
+	for _, task := range q.take() {
+		var p payload
+		_ = json.Unmarshal(task.Payload(), &p)
+		var data pluginapi.KnowledgeEventData
+		_ = json.Unmarshal(p.Event.Data, &data)
+		seen = append(seen, p.Event.Type+":"+data.KnowledgeID+":"+data.Title+data.Error)
+	}
+	want := "knowledge.deleted:a:A knowledge.deleted:b: knowledge.failed:c:stalled"
+	if strings.Join(seen, " ") != want {
+		t.Fatalf("published %v, want %s", seen, want)
 	}
 }

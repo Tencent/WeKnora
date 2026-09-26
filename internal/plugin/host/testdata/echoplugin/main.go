@@ -5,11 +5,15 @@ package main
 
 import (
 	"context"
+	"io"
 	"log"
+	"net"
+	"net/http"
 	"os"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Tencent/WeKnora/pluginsdk"
 	"github.com/Tencent/WeKnora/pluginsdk/pluginapi"
@@ -36,9 +40,33 @@ func main() {
 		case "pid":
 			return &pluginapi.SearchOutput{Results: []pluginapi.SearchResult{{Title: strconv.Itoa(os.Getpid()), URL: "pid"}}}, nil
 		}
+		// dial:<addr> connects without the proxy; fetch:<url> GETs through
+		// the environment's proxy settings.
+		if addr, ok := strings.CutPrefix(in.Query, "dial:"); ok {
+			c, err := net.DialTimeout("tcp", addr, 2*time.Second)
+			if err != nil {
+				return result("dial failed"), nil
+			}
+			_ = c.Close()
+			return result("dial ok"), nil
+		}
+		if url, ok := strings.CutPrefix(in.Query, "fetch:"); ok {
+			client := &http.Client{Timeout: 5 * time.Second, Transport: &http.Transport{Proxy: http.ProxyFromEnvironment}}
+			resp, err := client.Get(url)
+			if err != nil {
+				return result("fetch failed: " + err.Error()), nil
+			}
+			defer resp.Body.Close()
+			body, _ := io.ReadAll(resp.Body)
+			return result(strconv.Itoa(resp.StatusCode) + " " + strings.TrimSpace(string(body))), nil
+		}
 		return &pluginapi.SearchOutput{Results: []pluginapi.SearchResult{{Title: in.Query, URL: "echo"}}}, nil
 	}))
 	if err := p.Serve(); err != nil {
 		log.Fatal(err)
 	}
+}
+
+func result(title string) *pluginapi.SearchOutput {
+	return &pluginapi.SearchOutput{Results: []pluginapi.SearchResult{{Title: title, URL: "probe"}}}
 }

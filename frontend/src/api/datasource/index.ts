@@ -87,6 +87,9 @@ export interface ConnectorMeta {
   names?: Record<string, string>
   descriptions?: Record<string, string>
   plugin_id?: string
+  /** The plugin's own editor page (under ui/) and the version serving it. */
+  plugin_version?: string
+  editor?: string
 }
 
 export interface Resource {

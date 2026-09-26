@@ -17,6 +17,8 @@ import DataSourceEditorDialog from './DataSourceEditorDialog.vue'
 import DataSourceSyncLogs from './DataSourceSyncLogs.vue'
 import DataSourceTypeIcon from './DataSourceTypeIcon.vue'
 import { connectorName } from './connectorLabels'
+import PluginOffTag from '@/components/plugins/PluginOffTag.vue'
+import { usePluginPagesStore } from '@/stores/pluginPages'
 import { useAuthStore } from '@/stores/auth'
 
 const props = defineProps<{ kbId: string }>()
@@ -147,8 +149,14 @@ function syncModeLabel(mode: string) {
   return t(`datasource.syncMode.${mode}`)
 }
 
+const pluginContributions = usePluginPagesStore()
+
 function connectorLabel(type: string) {
-  return connectorName(connectorMeta.value[type] ?? { type }, { t, te, locale: locale.value })
+  // A switched-off plugin's type is missing from the type list; its
+  // contribution still names it.
+  const c = pluginContributions.contribution('connectors', type)
+  const fallback = c ? { type, name: c.name.default, names: c.name } : { type }
+  return connectorName(connectorMeta.value[type] ?? fallback, { t, te, locale: locale.value })
 }
 
 function scheduleLabel(cron: string) {
@@ -233,6 +241,7 @@ onBeforeUnmount(stopPolling)
           <div class="ds-card__body">
             <div class="ds-card__header">
               <h3 class="ds-card__title" :title="ds.name">{{ ds.name }}</h3>
+              <PluginOffTag point="connectors" :type-id="ds.type" />
               <div class="ds-card__actions" @click.stop>
                 <t-dropdown trigger="click" :min-column-width="140" attach="body">
                   <t-button
