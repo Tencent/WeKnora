@@ -117,6 +117,44 @@ func TestWikiReadPageKeepsSmallPagesIntactBesideLargeOnes(t *testing.T) {
 	assert.Equal(t, []string{"concept/huge"}, result.Data["truncated_slugs"])
 }
 
+// The head/tail window hides the middle of a trimmed page. Because
+// wiki_write_page replaces the whole page, a rewrite based on a truncated read
+// would silently drop every hidden line, so the output must say which pages
+// were cut — and only those.
+func TestWikiReadPageMarksTruncatedPagesInOutput(t *testing.T) {
+	small := newTestWikiPage("kb-1", "concept/small")
+	small.Content = "a compact body that easily fits the budget"
+	service := &fakeWikiPageService{pages: map[string]*types.WikiPage{
+		wikiPageKey("kb-1", "concept/small"): small,
+		wikiPageKey("kb-1", "concept/huge"):  newBulkyWikiPage("kb-1", "concept/huge", 40000),
+	}}
+	tool := NewWikiReadPageTool(service, nil, NewWikiScopesFromKBIDs([]string{"kb-1"}), NewWikiRouteResolver())
+
+	result := readPageOutput(t, context.Background(), tool, []string{"concept/small", "concept/huge"})
+
+	require.Equal(t, []string{"concept/huge"}, result.Data["truncated_slugs"])
+	require.Contains(t, result.Output, "<truncated_pages")
+	marker := result.Output[strings.Index(result.Output, "<truncated_pages"):]
+	marker = marker[:strings.Index(marker, "</truncated_pages>")]
+	assert.Contains(t, marker, "concept/huge", "the trimmed page must be named")
+	assert.NotContains(t, marker, "concept/small", "an intact page must not be named")
+	assert.Contains(t, result.Output, "wiki_write_page",
+		"the hint must warn against rewriting the page from a partial read")
+}
+
+// A read that fits the budget is the common case and must stay noise-free.
+func TestWikiReadPageHasNoTruncationMarkerWhenNothingIsCut(t *testing.T) {
+	service := &fakeWikiPageService{pages: map[string]*types.WikiPage{
+		wikiPageKey("kb-1", "concept/small"): newTestWikiPage("kb-1", "concept/small"),
+	}}
+	tool := NewWikiReadPageTool(service, nil, NewWikiScopesFromKBIDs([]string{"kb-1"}), NewWikiRouteResolver())
+
+	result := readPageOutput(t, context.Background(), tool, []string{"concept/small"})
+
+	assert.Empty(t, result.Data["truncated_slugs"])
+	assert.NotContains(t, result.Output, "<truncated_pages")
+}
+
 // Inlining a full summary for every neighbour costs one query each and used to
 // consume more budget than the bodies the caller actually asked for.
 func TestWikiReadPageCapsInlinedLinkSummaries(t *testing.T) {
