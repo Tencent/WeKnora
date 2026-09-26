@@ -1221,6 +1221,9 @@ const formatToolResultContent = (value: unknown): string => {
 const isMcpTool = (toolName?: string | null): boolean => String(toolName || '').startsWith('mcp_');
 
 const resolveToolDisplayType = (event: any): DisplayType | undefined => {
+  // A plugin's own result view beats the generic MCP call view, also when
+  // the tool was reached through call_mcp_tool.
+  if (event?.display_type === 'plugin_tool_view') return 'plugin_tool_view'
   const mcpType = getMcpToolDisplayType(event?.tool_name)
   if (mcpType) return mcpType
   if (event?.display_type) return event.display_type as DisplayType

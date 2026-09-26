@@ -82,6 +82,7 @@ class PluginTest(unittest.TestCase):
                     "parsers": ["upper"],
                     "webhooks": ["inbox"],
                     "options": ["projects"],
+                    "mcpServers": ["issues"],
                     "ui": ["request"],
                     "events": ["handler"],
                 },
@@ -140,6 +141,30 @@ class PluginTest(unittest.TestCase):
         self.assertEqual((status, body["error"]["code"]), (400, "invalid_config"))
         status, body = self.c.call("/v1/options/projects", inp, {"tenant": {"token": "t"}})
         self.assertEqual(body["output"]["options"], [{"value": "p1", "label": "Project x"}, {"value": "p2", "label": "Other"}])
+
+    def test_tools(self):
+        def send(msg, config=None):
+            status, body = self.c.call("/v1/mcp/issues", dict(msg, jsonrpc="2.0"), config)
+            self.assertEqual(status, 200)
+            return body["output"]
+
+        init = send({"id": 1, "method": "initialize", "params": {"protocolVersion": "2025-06-18"}})
+        self.assertEqual((init["id"], init["result"]["capabilities"]), (1, {"tools": {}}))
+        tools = send({"id": 2, "method": "tools/list"})["result"]["tools"]
+        self.assertEqual([t["name"] for t in tools], ["search"])
+        self.assertEqual(tools[0]["annotations"], {"readOnlyHint": True})
+        out = send({"id": 3, "method": "tools/call", "params": {"name": "search", "arguments": {"q": "login"}}})
+        self.assertEqual(out["result"]["structuredContent"], {"q": "login", "tenant": 7})
+        self.assertEqual(json.loads(out["result"]["content"][0]["text"]), {"q": "login", "tenant": 7})
+        out = send({"id": 4, "method": "tools/call", "params": {"name": "search", "arguments": {"q": "text"}}})
+        self.assertEqual(out["result"], {"content": [{"type": "text", "text": "plain"}]})
+        out = send({"id": 5, "method": "tools/call", "params": {"name": "search", "arguments": {"q": "boom"}}})
+        self.assertEqual(out["result"], {"content": [{"type": "text", "text": "token expired"}], "isError": True})
+        self.assertEqual(send({"id": 6, "method": "tools/call", "params": {"name": "nope"}})["error"]["code"], -32602)
+        self.assertEqual(send({"id": 7, "method": "resources/list"})["result"], {"resources": []})
+        self.assertEqual(send({"id": 8, "method": "completion/complete"})["error"]["code"], -32601)
+        self.assertNotIn("error", send({"method": "notifications/initialized"}))
+        self.assertEqual(self.c.call("/v1/mcp/nope", {"jsonrpc": "2.0", "method": "ping"})[0], 404)
 
     def test_webhooks(self):
         body = base64.b64encode(b'{"a": 1}').decode()

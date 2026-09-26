@@ -3,6 +3,7 @@ package pluginsdk
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http/httptest"
@@ -370,5 +371,79 @@ func TestOptions(t *testing.T) {
 	err = c.Call(ctx, pluginapi.OptionsPath("projects"), env, in, &out)
 	if err != nil || out.Options[0].Label != "Project x" {
 		t.Fatalf("options = %+v, %v", out, err)
+	}
+}
+
+func TestTools(t *testing.T) {
+	ctx := context.Background()
+	p := New(Info{ID: "acme.tools", Version: "1.0.0"})
+	p.Tool("issues", pluginapi.Tool{
+		Name: "search", Description: "Search issues",
+		InputSchema: json.RawMessage(`{"type":"object","properties":{"q":{"type":"string"}}}`),
+	}, func(_ context.Context, call *Call, args json.RawMessage) (*pluginapi.ToolResult, error) {
+		var in struct{ Q string }
+		_ = json.Unmarshal(args, &in)
+		if in.Q == "boom" {
+			return nil, pluginapi.Errorf(pluginapi.CodeUnauthorized, "token expired")
+		}
+		return pluginapi.StructuredResult(map[string]any{"q": in.Q, "site": call.Config.Tenant["site"]}, ""), nil
+	})
+	p.Tool("issues", pluginapi.Tool{Name: "count", Description: "Count"}, nil)
+	if m := p.Manifest(); len(m.Contributes["mcpServers"]) != 1 || m.Contributes["mcpServers"][0] != "issues" {
+		t.Fatalf("manifest = %+v", m)
+	}
+	srv := httptest.NewServer(p.Handler())
+	defer srv.Close()
+	c := client.New(srv.URL, nil, nil)
+	env := pluginapi.Envelope{Config: pluginapi.Config{Tenant: map[string]any{"site": "acme"}}}
+	send := func(id, method, params string) pluginapi.MCPResponse {
+		t.Helper()
+		req := pluginapi.MCPRequest{JSONRPC: "2.0", Method: method}
+		if id != "" {
+			req.ID = json.RawMessage(id)
+		}
+		if params != "" {
+			req.Params = json.RawMessage(params)
+		}
+		var out pluginapi.MCPResponse
+		if err := c.Call(ctx, pluginapi.MCPPath("issues"), env, req, &out); err != nil {
+			t.Fatalf("%s: %v", method, err)
+		}
+		return out
+	}
+
+	if r := send("1", "initialize", `{"protocolVersion":"2025-06-18"}`); r.Error != nil ||
+		!strings.Contains(string(r.Result), `"tools"`) || string(r.ID) != "1" {
+		t.Fatalf("initialize = %+v", r)
+	}
+	var list struct{ Tools []pluginapi.Tool }
+	if r := send("2", "tools/list", ""); json.Unmarshal(r.Result, &list) != nil || len(list.Tools) != 2 ||
+		list.Tools[0].Name != "count" || string(list.Tools[0].InputSchema) != `{"type":"object"}` {
+		t.Fatalf("tools/list = %s", r.Result)
+	}
+	var res pluginapi.ToolResult
+	r := send(`"a"`, "tools/call", `{"name":"search","arguments":{"q":"login"}}`)
+	if json.Unmarshal(r.Result, &res) != nil || res.IsError || res.Content[0].Text != `{"q":"login","site":"acme"}` {
+		t.Fatalf("tools/call = %s", r.Result)
+	}
+	r = send("3", "tools/call", `{"name":"search","arguments":{"q":"boom"}}`)
+	if json.Unmarshal(r.Result, &res) != nil || !res.IsError || res.Content[0].Text != "token expired" {
+		t.Fatalf("a failing tool = %s", r.Result)
+	}
+	if r := send("4", "tools/call", `{"name":"nope"}`); r.Error == nil || r.Error.Code != pluginapi.MCPInvalidParams {
+		t.Fatalf("unknown tool = %+v", r)
+	}
+	if r := send("5", "resources/list", ""); r.Error != nil || string(r.Result) != `{"resources":[]}` {
+		t.Fatalf("resources = %+v", r)
+	}
+	if r := send("6", "completion/complete", ""); r.Error == nil || r.Error.Code != pluginapi.MCPMethodNotFound {
+		t.Fatalf("unsupported method = %+v", r)
+	}
+	if r := send("", "notifications/initialized", ""); r.Error != nil || len(r.Result) != 0 {
+		t.Fatalf("notification = %+v", r)
+	}
+	err := c.Call(ctx, pluginapi.MCPPath("nope"), env, pluginapi.MCPRequest{JSONRPC: "2.0", Method: "ping"}, nil)
+	if !isCode(err, pluginapi.CodeNotFound) {
+		t.Fatalf("unknown server = %v", err)
 	}
 }

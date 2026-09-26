@@ -4,6 +4,7 @@ package activate
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -43,6 +44,7 @@ type MCPServers struct {
 	tenancy *tenancy.Service
 	plugins interfaces.PluginRepository
 	servers map[string][]mcpServer // plugin ID → servers
+	iv      *Invoker
 }
 
 // NewMCPServers creates the MCP server activator. It lists nothing until
@@ -68,9 +70,6 @@ func (a *MCPServers) Activate(_ context.Context, l *reconcile.Loaded) error {
 	var list []mcpServer
 	now := time.Now()
 	for _, c := range l.Manifest.Contributes[manifest.PointMCPServers] {
-		if c.MCP == nil {
-			continue
-		}
 		list = append(list, mcpServer{
 			manifest: l.Manifest, contrib: c, qualifiedID: l.Manifest.ID + "/" + c.ID, activatedAt: now,
 		})
@@ -134,23 +133,31 @@ func (a *MCPServers) Services(ctx context.Context, tenantID uint64) []*types.MCP
 // headers cannot be filled (the workspace has not configured the plugin yet)
 // is listed disabled, so agents skip it and the UI can say why.
 func (a *MCPServers) service(ctx context.Context, tenantID uint64, s mcpServer) *types.MCPService {
-	url := s.contrib.MCP.URL
-	transport := types.MCPTransportType(s.contrib.MCP.Transport)
-	if transport == "" {
-		transport = types.MCPTransportHTTPStreamable
-	}
 	svc := &types.MCPService{
 		ID:            serviceID(tenantID, s.qualifiedID),
 		TenantID:      tenantID,
 		Name:          s.contrib.Name.Default,
 		Description:   s.contrib.Description.Default,
 		Enabled:       true,
-		TransportType: transport,
-		URL:           &url,
 		IsBuiltin:     true,
 		PluginID:      s.manifest.ID,
+		PluginVersion: s.manifest.Version,
+		PluginServer:  s.contrib.ID,
+		ToolViews:     toolViews(s.contrib),
 		CreatedAt:     s.activatedAt,
 		UpdatedAt:     s.activatedAt,
+	}
+	if s.contrib.ServedByPlugin() {
+		// Configuration travels with each call, so the connection never
+		// goes stale when it changes.
+		svc.TransportType = types.MCPTransportPlugin
+		return svc
+	}
+	url := s.contrib.MCP.URL
+	svc.URL = &url
+	svc.TransportType = types.MCPTransportType(s.contrib.MCP.Transport)
+	if svc.TransportType == "" {
+		svc.TransportType = types.MCPTransportHTTPStreamable
 	}
 	headers, updated, err := a.headers(ctx, tenantID, s)
 	if err != nil {
@@ -210,6 +217,20 @@ func (a *MCPServers) headers(ctx context.Context, tenantID uint64, s mcpServer) 
 		out[name] = expanded
 	}
 	return out, updated, nil
+}
+
+// toolViews are a contribution's result views as the chat reads them.
+func toolViews(c manifest.Contribution) map[string]json.RawMessage {
+	if len(c.ToolViews) == 0 {
+		return nil
+	}
+	out := make(map[string]json.RawMessage, len(c.ToolViews))
+	for name, v := range c.ToolViews {
+		if b, err := json.Marshal(v); err == nil {
+			out[name] = b
+		}
+	}
+	return out
 }
 
 func later(a, b time.Time) time.Time {

@@ -246,6 +246,37 @@ paths:
                 required: [output]
                 properties: { output: { $ref: "#/components/schemas/OptionsOutput" } }
         default: { $ref: "#/components/responses/Error" }
+  /v1/mcp/{id}:
+    post:
+      summary: One Model Context Protocol message to the plugin's MCP server
+      description: |
+        For mcpServers contributions declared without a url: the plugin
+        serves the tools itself. The input is one JSON-RPC 2.0 message
+        (initialize, ping, tools/list, tools/call, or a notification); the
+        output is its JSON-RPC response (empty for a notification). Servers
+        are stateless and keep no session. Tool failures the model should see
+        are results with isError, not protocol errors. The manifest lists the
+        server IDs under contributes.mcpServers.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/Envelope"
+                - properties: { input: { $ref: "#/components/schemas/MCPRequest" } }
+      responses:
+        "200":
+          description: The JSON-RPC response
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [output]
+                properties: { output: { $ref: "#/components/schemas/MCPResponse" } }
+        default: { $ref: "#/components/responses/Error" }
   /v1/events:
     post:
       summary: Receive an event the plugin subscribed to (permissions.events)
@@ -478,6 +509,43 @@ components:
               value: {}
               label: { type: string }
               description: { type: string }
+    MCPRequest:
+      type: object
+      required: [jsonrpc, method]
+      properties:
+        jsonrpc: { const: "2.0" }
+        id: { description: Absent for a notification }
+        method: { type: string }
+        params: { type: object }
+    MCPResponse:
+      type: object
+      required: [jsonrpc]
+      properties:
+        jsonrpc: { const: "2.0" }
+        id: {}
+        result: { type: object, description: "tools/call answers a ToolResult" }
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: { type: integer }
+            message: { type: string }
+    ToolResult:
+      type: object
+      required: [content]
+      properties:
+        content:
+          type: array
+          items:
+            type: object
+            required: [type]
+            properties:
+              type: { enum: [text, image] }
+              text: { type: string }
+              data: { type: string, description: Base64 image }
+              mimeType: { type: string }
+        structuredContent: { description: Data for the tool's result view (toolViews) }
+        isError: { type: boolean }
     EventDelivery:
       type: object
       required: [id, type, occurredAt, attempt]

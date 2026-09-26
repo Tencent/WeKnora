@@ -32,6 +32,7 @@ from .types import (
     SearchInput,
     SearchResult,
     EventDelivery,
+    ToolResult,
     OptionsInput,
     UIRequest,
     UIResponse,
@@ -169,6 +170,10 @@ UIHandler = Callable[[Call, UIRequest], Any]
 EventHandler = Callable[[Call, EventDelivery], None]
 WebhookHandler = Callable[[Call, WebhookRequest], Any]
 OptionsHandler = Callable[[Call, OptionsInput], Any]
+ToolHandler = Callable[[Call, dict], Any]
+
+#: The MCP revision plugins speak.
+MCP_PROTOCOL_VERSION = "2025-06-18"
 
 _ROUTE = re.compile(r"^/v1/(websearch|connectors|parsers)/([^/]+)/([a-z-]+)$")
 
@@ -189,6 +194,7 @@ class Plugin:
         self._events: Optional[EventHandler] = None
         self._webhooks: Dict[str, WebhookHandler] = {}
         self._options: Dict[str, OptionsHandler] = {}
+        self._mcp: Dict[str, Dict[str, Tuple[dict, ToolHandler]]] = {}
         #: Seconds serve() waits for calls in flight after SIGTERM.
         self.shutdown_timeout = 60.0
         if logger is None:
@@ -251,6 +257,37 @@ class Plugin:
         invalid_config(...) when the form lacks what the list needs."""
         return self._register(self._options, name, fn)
 
+    def tool(
+        self,
+        server: str,
+        name: str,
+        description: str,
+        input_schema: Optional[dict] = None,
+        *,
+        title: str = "",
+        output_schema: Optional[dict] = None,
+        read_only: bool = False,
+    ) -> Callable[[ToolHandler], ToolHandler]:
+        """Decorator adding a tool to the MCP server the plugin serves as
+        server (contributes.mcpServers[].id, declared without a url):
+        fn(call, args) returns a ToolResult, a str (text for the model) or
+        any JSON value (structured content, shown by the tool's result
+        view). Exceptions become a failed result the model sees. call
+        carries the workspace's configuration."""
+        spec: dict = {"name": name, "description": description, "inputSchema": input_schema or {"type": "object"}}
+        if title:
+            spec["title"] = title
+        if output_schema:
+            spec["outputSchema"] = output_schema
+        if read_only:
+            spec["annotations"] = {"readOnlyHint": True}
+
+        def register(fn: ToolHandler) -> ToolHandler:
+            self._mcp.setdefault(server, {})[name] = (spec, fn)
+            return fn
+
+        return register
+
     def ui(self, fn: UIHandler) -> UIHandler:
         """Registers the handler behind the plugin's pages: fn(call,
         UIRequest) returns a UIResponse, or any JSON value for a 200."""
@@ -284,6 +321,7 @@ class Plugin:
             ("parsers", self._parsers),
             ("webhooks", self._webhooks),
             ("options", self._options),
+            ("mcpServers", self._mcp),
         ):
             if table:
                 contributes[point] = sorted(table)
@@ -326,6 +364,14 @@ class Plugin:
             else:
                 self._unary(h, body, lambda call, raw: {"options": _options_output(fn(call, from_wire(OptionsInput, raw)))})
             return
+        if method == "POST" and path.startswith("/v1/mcp/"):
+            sid = path[len("/v1/mcp/"):]
+            server = self._mcp.get(sid)
+            if server is None:
+                h._send_error(PluginError(ErrorCode.NOT_FOUND, f"no MCP server {sid!r}"))
+            else:
+                self._unary(h, body, lambda call, raw: self._answer_mcp(call, sid, server, raw or {}))
+            return
         if method == "POST" and path.startswith("/v1/webhooks/"):
             hook = self._webhooks.get(path[len("/v1/webhooks/"):])
             if hook is None:
@@ -365,6 +411,57 @@ class Plugin:
                 self._unary(h, body, lambda call, raw: _connector_call(c, action, call, raw), empty=action == "validate")
             return True
         return False
+
+    def _answer_mcp(self, call: Call, sid: str, server: dict, req: dict) -> dict:
+        resp: dict = {"jsonrpc": "2.0"}
+        if "id" in req:
+            resp["id"] = req["id"]
+        method = req.get("method", "")
+        params = req.get("params") or {}
+        if method == "initialize":
+            resp["result"] = {
+                "protocolVersion": MCP_PROTOCOL_VERSION,
+                "capabilities": {"tools": {}},
+                "serverInfo": {"name": f"{self.id}/{sid}", "version": self.version},
+            }
+        elif method == "ping":
+            resp["result"] = {}
+        # Tools only: clients that list resources or prompts anyway get none.
+        elif method == "resources/list":
+            resp["result"] = {"resources": []}
+        elif method == "resources/templates/list":
+            resp["result"] = {"resourceTemplates": []}
+        elif method == "prompts/list":
+            resp["result"] = {"prompts": []}
+        elif method == "tools/list":
+            resp["result"] = {"tools": [server[n][0] for n in sorted(server)]}
+        elif method == "tools/call":
+            entry = server.get(params.get("name", ""))
+            if entry is None:
+                resp["error"] = {"code": -32602, "message": f"no tool {params.get('name', '')}"}
+            else:
+                result = to_wire(self._call_tool(call, entry[1], params.get("arguments") or {}))
+                result.setdefault("content", [])
+                resp["result"] = result
+        elif "id" in req:
+            resp["error"] = {"code": -32601, "message": f"method {method} is not supported"}
+        return resp
+
+    def _call_tool(self, call: Call, fn: ToolHandler, args: dict) -> ToolResult:
+        try:
+            out = fn(call, args)
+        except PluginError as e:
+            return ToolResult.error(e.message)
+        except Exception as e:  # noqa: BLE001 - the model sees the failure
+            self.logger.error("tool failed: %s", "".join(traceback.format_exception(type(e), e, e.__traceback__)))
+            return ToolResult.error(str(e) or type(e).__name__)
+        if isinstance(out, ToolResult):
+            if not out.content:
+                out.content = []
+            return out
+        if isinstance(out, str):
+            return ToolResult.text(out)
+        return ToolResult.structured(out)
 
     def _unary(self, h: "_Handler", body: bytes, fn: Callable[[Call, Any], Any], empty: bool = False) -> None:
         try:

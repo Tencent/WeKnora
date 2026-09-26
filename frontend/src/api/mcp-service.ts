@@ -7,7 +7,7 @@ export interface MCPService {
   description: string
   usage_instructions?: string
   enabled: boolean
-  transport_type: 'sse' | 'http-streamable' | 'stdio'
+  transport_type: 'sse' | 'http-streamable' | 'stdio' | 'plugin'
   url?: string // Optional: required for SSE/HTTP Streamable
   headers?: Record<string, string>
   auth_config?: {

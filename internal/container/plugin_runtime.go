@@ -102,6 +102,7 @@ func bindPluginActivators(
 	skills *service.TenantSkillService,
 ) {
 	a.MCP.Bind(t, repo)
+	a.MCP.SetInvoker(a.Invoker)
 	a.Invoker.Bind(t, repo)
 	a.Skills.Bind(t)
 	skills.SetPluginSkills(a.Skills)

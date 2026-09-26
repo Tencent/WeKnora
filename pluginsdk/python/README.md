@@ -102,6 +102,22 @@ def projects(call, inp: OptionsInput):
     return [("p1", "Project one"), ("p2", "Project two")]
 ```
 
+**Agent tools.** Declare an `mcpServers` contribution without `mcp.url`
+and add tools to it:
+
+```python
+@plugin.tool("tools", "search_issues", "Search issues",
+             {"type": "object", "properties": {"text": {"type": "string"}}}, read_only=True)
+def search_issues(call, args):
+    rows = [...]
+    return ToolResult.structured({"issues": rows}, text="3 issues ...")
+```
+
+Return a `ToolResult`, a `str` (text for the model) or any JSON value
+(structured content for the result view). Exceptions become a failed result
+the model sees. See the [Go SDK README](../README.md#agent-tools) for
+`toolViews`.
+
 **OAuth.** An `x-oauth` field needs no code: WeKnora runs the flow, and
 the plugin finds a fresh access token where the field is (see the
 [Go SDK README](../README.md#dynamic-choices-and-oauth)).

@@ -249,6 +249,11 @@ func (p *Package) checkReferences() error {
 			if manifest.IsUIPoint(info.Point) && c.Entry != "" {
 				need("page", c.Entry)
 			}
+			for _, v := range c.ToolViews {
+				if v.View == manifest.ToolViewPage {
+					need("tool result page", v.Entry)
+				}
+			}
 			if c.Icon != "" {
 				need("icon", c.Icon)
 			}

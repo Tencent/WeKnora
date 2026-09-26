@@ -349,6 +349,15 @@ func CheckServedManifest(want *manifest.Manifest, got *pluginapi.Manifest) error
 	if len(want.Permissions.Events) > 0 && len(got.Contributes["events"]) == 0 {
 		return errors.New("plugin.yaml subscribes to events but the plugin handles none")
 	}
+	servesMCP := map[string]bool{}
+	for _, id := range got.Contributes[string(manifest.PointMCPServers)] {
+		servesMCP[id] = true
+	}
+	for _, c := range want.Contributes[manifest.PointMCPServers] {
+		if c.ServedByPlugin() && !servesMCP[c.ID] {
+			return fmt.Errorf("plugin.yaml declares the MCP server %s but the plugin does not serve it", c.ID)
+		}
+	}
 	for point, contribs := range want.Contributes {
 		if info, ok := manifest.LookupPoint(point); !ok || info.Declarative {
 			continue

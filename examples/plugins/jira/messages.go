@@ -13,6 +13,10 @@ var (
 	msgTokenFields    = message{"Enter the site URL, email and API token first.", "请先填写站点地址、邮箱和 API 令牌。"}
 	msgUnknownAuth    = message{"Unknown sign-in method.", "未知的登录方式。"}
 	msgNoProjects     = message{"Select at least one project to sync.", "请至少选择一个要同步的项目。"}
+	msgToolsNotSetUp  = message{
+		"Jira is not connected for this workspace: an admin sets it up in Settings → Plugins → Jira.",
+		"本空间尚未连接 Jira：请管理员在「设置 → 插件 → Jira」中配置。",
+	}
 )
 
 func say(locale string, m message) string {

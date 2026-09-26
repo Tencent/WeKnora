@@ -27,6 +27,9 @@ export interface PluginPage {
   order: number
 }
 
+/** What a frame needs of a page: tool result pages are not listed pages. */
+export type FramePage = Pick<PluginPage, 'pluginId' | 'version' | 'mount' | 'entry' | 'name'>
+
 /** The role a page needs when the plugin names none. */
 export function defaultMinRole(point: PagePoint): PageRole {
   return point === 'settingsSections' ? 'admin' : 'viewer'

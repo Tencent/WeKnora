@@ -85,6 +85,15 @@ def on_event(call, ev):
     seen_events.append((ev.id, ev.type, ev.attempt, call.tenant_id, (ev.data or {}).get("knowledgeId")))
 
 
+@plugin.tool("issues", "search", "Search issues", {"type": "object", "properties": {"q": {"type": "string"}}}, read_only=True)
+def search_issues(call, args):
+    if args.get("q") == "boom":
+        raise PluginError(ErrorCode.UNAUTHORIZED, "token expired")
+    if args.get("q") == "text":
+        return "plain"
+    return {"q": args.get("q"), "tenant": call.tenant_id}
+
+
 @plugin.options("projects")
 def projects(call, inp):
     if not call.tenant.get("token"):

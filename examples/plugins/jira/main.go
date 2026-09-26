@@ -42,6 +42,7 @@ func newPlugin() *pluginsdk.Plugin {
 	p.Connector("jira", connector{})
 	p.Options("sites", siteOptions)
 	p.Options("issue_types", issueTypeOptions)
+	registerTools(p)
 	return p
 }
 
@@ -290,6 +291,31 @@ func quote(s string) string {
 // item turns an issue into a Markdown document.
 func (c *client) item(is *issue, projectKey string) pluginapi.FetchedItem {
 	f := &is.Fields
+	url := c.issueURL(is.Key)
+	created, updated := f.Created.Time, f.Updated.Time
+	return pluginapi.FetchedItem{
+		ExternalID:       is.ID,
+		Title:            is.Key + " " + f.Summary,
+		Content:          []byte(c.markdown(is)),
+		ContentType:      "text/markdown",
+		FileName:         fileName(is.Key + " " + f.Summary),
+		URL:              url,
+		CreatedAt:        nonZero(created),
+		UpdatedAt:        nonZero(updated),
+		SourceResourceID: projectKey,
+		Metadata: map[string]string{
+			"channel": "jira", "jira_key": is.Key, "project": projectKey, "status": nameOf(f.Status),
+			"issue_type": nameOf(f.IssueType), "assignee": userOf(f.Assignee), "priority": nameOf(f.Priority),
+			"labels": strings.Join(f.Labels, ","),
+		},
+	}
+}
+
+func (c *client) issueURL(key string) string { return c.siteURL + "/browse/" + key }
+
+// markdown renders an issue: its facts, description and comments.
+func (c *client) markdown(is *issue) string {
+	f := &is.Fields
 	var b strings.Builder
 	fmt.Fprintf(&b, "# %s: %s\n\n", is.Key, f.Summary)
 	facts := [][2]string{
@@ -311,8 +337,7 @@ func (c *client) item(is *issue, projectKey string) pluginapi.FetchedItem {
 			fmt.Fprintf(&b, "- **%s:** %s\n", kv[0], kv[1])
 		}
 	}
-	url := c.siteURL + "/browse/" + is.Key
-	fmt.Fprintf(&b, "- **Link:** %s\n", url)
+	fmt.Fprintf(&b, "- **Link:** %s\n", c.issueURL(is.Key))
 	if desc := adfToMarkdown(f.Description); desc != "" {
 		b.WriteString("\n## Description\n\n" + desc + "\n")
 	}
@@ -325,23 +350,7 @@ func (c *client) item(is *issue, projectKey string) pluginapi.FetchedItem {
 			fmt.Fprintf(&b, "\n_%d more comments are not included._\n", more)
 		}
 	}
-	created, updated := f.Created.Time, f.Updated.Time
-	return pluginapi.FetchedItem{
-		ExternalID:       is.ID,
-		Title:            is.Key + " " + f.Summary,
-		Content:          []byte(b.String()),
-		ContentType:      "text/markdown",
-		FileName:         fileName(is.Key + " " + f.Summary),
-		URL:              url,
-		CreatedAt:        nonZero(created),
-		UpdatedAt:        nonZero(updated),
-		SourceResourceID: projectKey,
-		Metadata: map[string]string{
-			"channel": "jira", "jira_key": is.Key, "project": projectKey, "status": nameOf(f.Status),
-			"issue_type": nameOf(f.IssueType), "assignee": userOf(f.Assignee), "priority": nameOf(f.Priority),
-			"labels": strings.Join(f.Labels, ","),
-		},
-	}
+	return b.String()
 }
 
 func nameOf(n *named) string {
@@ -393,13 +402,24 @@ func fileName(title string) string {
 	return name + ".md"
 }
 
-// siteOptions lists the Jira sites the connected account granted.
-func siteOptions(ctx context.Context, call *pluginsdk.Call, _ pluginapi.OptionsInput) ([]pluginapi.Option, error) {
+// formCredentials are the connection fields of the form being filled: a
+// data source's credentials, or the workspace's connection for the tools.
+func formCredentials(call *pluginsdk.Call, in pluginapi.OptionsInput) (credentials, error) {
+	var cr credentials
+	if in.Scope == pluginapi.OptionsScopeTenant {
+		return cr, remarshal(call.Config.Tenant, &cr)
+	}
 	var cfg pluginsdk.ConnectorConfig
 	if err := call.DecodeInstance(&cfg); err != nil {
-		return nil, err
+		return cr, err
 	}
 	cr, _, err := decode(cfg)
+	return cr, err
+}
+
+// siteOptions lists the Jira sites the connected account granted.
+func siteOptions(ctx context.Context, call *pluginsdk.Call, in pluginapi.OptionsInput) ([]pluginapi.Option, error) {
+	cr, err := formCredentials(call, in)
 	if err != nil {
 		return nil, err
 	}
@@ -419,12 +439,12 @@ func siteOptions(ctx context.Context, call *pluginsdk.Call, _ pluginapi.OptionsI
 }
 
 // issueTypeOptions lists the site's issue types by name (JQL matches names).
-func issueTypeOptions(ctx context.Context, call *pluginsdk.Call, _ pluginapi.OptionsInput) ([]pluginapi.Option, error) {
-	var cfg pluginsdk.ConnectorConfig
-	if err := call.DecodeInstance(&cfg); err != nil {
-		return nil, err
-	}
-	cr, _, err := decode(cfg)
+func issueTypeOptions(
+	ctx context.Context,
+	call *pluginsdk.Call,
+	in pluginapi.OptionsInput,
+) ([]pluginapi.Option, error) {
+	cr, err := formCredentials(call, in)
 	if err != nil {
 		return nil, err
 	}

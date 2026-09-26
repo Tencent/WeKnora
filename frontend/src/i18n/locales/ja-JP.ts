@@ -2859,6 +2859,9 @@ export default {
       rotateFailed: 'シークレットのローテーションに失敗しました'
     }
   },
+  pluginToolView: {
+    empty: '結果がありません'
+  },
   pluginPages: {
     notResponding: 'プラグインページが応答しません。読み込みに失敗した可能性があります。',
     requestFailed: 'プラグインへのリクエストに失敗しました',
@@ -5555,6 +5558,7 @@ export default {
     }
   },
   mcpSettings: {
+    transportPlugin: 'プラグイン内蔵',
     fromPlugin: 'プラグイン',
     pluginNotConfigured: 'プラグインが未設定です。プラグインセンターで設定してから使用してください',
     addUsageInstructions: "使用方法を追加",
