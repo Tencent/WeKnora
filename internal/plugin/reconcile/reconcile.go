@@ -105,6 +105,9 @@ type Reconciler struct {
 	activators []Activator
 	instanceID string
 	interval   time.Duration
+	runtimes   map[string]bool
+	accept     func(*manifest.Manifest) bool
+	role       string
 
 	mu      sync.Mutex // serializes passes
 	loaded  map[string]*Loaded
@@ -149,6 +152,14 @@ type Options struct {
 	Redis      *redis.Client // nil on single-node deployments
 	Activators []Activator
 	Interval   time.Duration
+	// Runtimes limits the node to plugins of these runtimes (a standalone
+	// plugin host loads host plugins only); empty means all.
+	Runtimes []manifest.RuntimeType
+	// Accept further limits the node by the active version's manifest (a
+	// plugin host that runs python plugins only); nil accepts all.
+	Accept func(*manifest.Manifest) bool
+	// Role names what the node is in status reports, e.g. "plugin-host".
+	Role string
 }
 
 // New creates a Reconciler.
@@ -159,9 +170,17 @@ func New(o Options) *Reconciler {
 	if o.CacheDir == "" {
 		o.CacheDir = DefaultCacheDir()
 	}
+	var runtimes map[string]bool
+	if len(o.Runtimes) > 0 {
+		runtimes = map[string]bool{}
+		for _, rt := range o.Runtimes {
+			runtimes[string(rt)] = true
+		}
+	}
 	return &Reconciler{
 		repo: o.Repo, store: o.Store, registry: o.Registry, cacheDir: o.CacheDir, rdb: o.Redis,
 		activators: o.Activators, instanceID: uuid.NewString(), interval: o.Interval,
+		runtimes: runtimes, accept: o.Accept, role: o.Role,
 		loaded: map[string]*Loaded{}, digests: map[string]string{}, retries: map[string]retry{},
 		status: map[string]Status{}, now: time.Now,
 	}
@@ -188,7 +207,8 @@ func (r *Reconciler) Reconcile(ctx context.Context) error {
 	var errs []error
 	desired := map[string]bool{}
 	for _, row := range rows {
-		if row.DesiredState != types.PluginStateEnabled {
+		if row.DesiredState != types.PluginStateEnabled || (r.runtimes != nil && !r.runtimes[row.Runtime]) ||
+			!r.accepts(ctx, row) {
 			continue
 		}
 		desired[row.ID] = true
@@ -213,6 +233,23 @@ func (r *Reconciler) Reconcile(ctx context.Context) error {
 	r.statusMu.Unlock()
 	r.publishStatuses(ctx)
 	return errors.Join(errs...)
+}
+
+// accepts applies Options.Accept to a plugin's active version. A version
+// that cannot be read is accepted, so ensure reports why.
+func (r *Reconciler) accepts(ctx context.Context, row types.InstalledPlugin) bool {
+	if r.accept == nil {
+		return true
+	}
+	v, err := r.repo.GetVersion(ctx, row.ID, row.ActiveVersion)
+	if err != nil || v == nil {
+		return true
+	}
+	var m manifest.Manifest
+	if json.Unmarshal(v.Manifest, &m) != nil {
+		return true
+	}
+	return r.accept(&m)
 }
 
 // runtimeTarget identifies where a plugin runs beyond its package: a new

@@ -1,0 +1,157 @@
+{{/*
+Copyright 2025 Tencent
+SPDX-License-Identifier: MIT
+
+WeKnora standalone plugin host (WeKnora plugin-host): runs host plugins for the
+app pods. Hosts announce themselves in Redis and app pods call them directly
+by pod IP through a gateway signed with a key derived from SYSTEM_AES_KEY, so
+no Service is needed.
+*/}}
+{{- if .Values.pluginHost.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "weknora.fullname" . }}-plugin-host
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "weknora.componentLabels" (dict "component" "plugin-host" "context" .) | nindent 4 }}
+spec:
+  replicas: {{ .Values.pluginHost.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "weknora.componentSelectorLabels" (dict "component" "plugin-host" "context" .) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "weknora.componentSelectorLabels" (dict "component" "plugin-host" "context" .) | nindent 8 }}
+    spec:
+      {{- include "weknora.imagePullSecrets" . | nindent 6 }}
+      serviceAccountName: {{ include "weknora.serviceAccountName" . }}
+      # The host withdraws from Redis, then lets calls in flight finish.
+      terminationGracePeriodSeconds: 75
+      {{- with .Values.pluginHost.podSecurityContext | default .Values.global.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: plugin-host
+          image: {{ include "weknora.app.image" . }}
+          imagePullPolicy: {{ .Values.app.image.pullPolicy }}
+          args: ["./WeKnora", "plugin-host"]
+          {{- with .Values.pluginHost.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          ports:
+            - containerPort: 8081
+              name: gateway
+              protocol: TCP
+          env:
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: WEKNORA_PLUGIN_HOST_ADDR
+              value: ":8081"
+            - name: WEKNORA_PLUGIN_HOST_URL
+              value: "http://$(POD_IP):8081"
+            - name: WEKNORA_PLUGIN_HOST_KINDS
+              value: {{ .Values.pluginHost.kinds | quote }}
+            # Plugins granted Host API scopes call the app through its Service.
+            - name: WEKNORA_PLUGIN_HOST_API_URL
+              value: "http://app:{{ .Values.app.service.port }}"
+            - name: TZ
+              value: {{ .Values.app.env.TZ | quote }}
+            # The same database, Redis, storage and secrets as the app.
+            - name: DB_DRIVER
+              value: "postgres"
+            - name: DB_HOST
+              value: "postgres"
+            - name: DB_PORT
+              value: "5432"
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "weknora.secretName" . }}
+                  key: DB_USER
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "weknora.secretName" . }}
+                  key: DB_PASSWORD
+            - name: DB_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "weknora.secretName" . }}
+                  key: DB_NAME
+            - name: REDIS_ADDR
+              value: "redis:6379"
+            - name: REDIS_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "weknora.secretName" . }}
+                  key: REDIS_USERNAME
+                  optional: true
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "weknora.secretName" . }}
+                  key: REDIS_PASSWORD
+            - name: REDIS_DB
+              value: "0"
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "weknora.secretName" . }}
+                  key: JWT_SECRET
+            - name: SYSTEM_AES_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "weknora.secretName" . }}
+                  key: SYSTEM_AES_KEY
+            - name: STORAGE_TYPE
+              value: {{ .Values.app.env.STORAGE_TYPE | quote }}
+            - name: LOCAL_STORAGE_BASE_DIR
+              value: {{ .Values.app.env.LOCAL_STORAGE_BASE_DIR | quote }}
+            {{- with .Values.pluginHost.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          volumeMounts:
+            # Plugin packages live in the app's storage; with STORAGE_TYPE=local
+            # that is this volume, so it must be ReadWriteMany.
+            - name: data-files
+              mountPath: /data/files
+          resources:
+            {{- toYaml .Values.pluginHost.resources | nindent 12 }}
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: gateway
+            initialDelaySeconds: 20
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: gateway
+            periodSeconds: 5
+      volumes:
+        - name: data-files
+          {{- if .Values.dataFiles.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ .Values.dataFiles.persistence.existingClaim | default (printf "%s-data-files" (include "weknora.fullname" .)) }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+      {{- with .Values.pluginHost.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.pluginHost.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.pluginHost.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

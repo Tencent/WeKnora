@@ -147,6 +147,45 @@ app:
   affinity: {}
 
 # -----------------------------------------------------------------------------
+# Plugin host (WeKnora plugin-host)
+# -----------------------------------------------------------------------------
+# Runs installed host plugins in their own pods instead of inside every app
+# pod. Uses the app image, database, Redis and storage. With
+# dataFiles.persistence and STORAGE_TYPE=local the data-files PVC must be
+# ReadWriteMany, since plugin packages live there.
+pluginHost:
+  # -- Enable standalone plugin hosts
+  enabled: false
+
+  # -- Number of plugin host pods; each runs every plugin of its kinds
+  replicaCount: 1
+
+  # -- Kinds of host plugin the plugin hosts run (binary, python)
+  kinds: "binary,python"
+
+  # -- Kinds the app pods keep running themselves ("none" = all to plugin hosts)
+  appKinds: "none"
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "2"
+      memory: 2Gi
+
+  podSecurityContext: {}
+  securityContext:
+    allowPrivilegeEscalation: false
+
+  # -- Additional environment variables (e.g. storage credentials)
+  extraEnv: []
+
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# -----------------------------------------------------------------------------
 # Frontend (Web UI)
 # -----------------------------------------------------------------------------
 frontend:

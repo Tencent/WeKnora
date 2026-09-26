@@ -41,6 +41,9 @@ import (
 )
 
 func main() {
+	if code, ran := subcommand(); ran {
+		os.Exit(code)
+	}
 	// Set Gin mode
 	if os.Getenv("GIN_MODE") == "release" {
 		gin.SetMode(gin.ReleaseMode)

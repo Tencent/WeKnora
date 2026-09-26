@@ -381,6 +381,11 @@ services:
       - OIDC_USER_INFO_MAPPING_EMAIL=${OIDC_USER_INFO_MAPPING_EMAIL:-}
       # 飞书云文档解析模式 export：导出为docx，blocks：根据飞书云文档块解析为markdown。默认为:export
       - FEISHU_DOCX_PARSE_MODE=${FEISHU_DOCX_PARSE_MODE:-export}
+      # ========== 插件 ==========
+      # app 自己运行哪些 kind 的宿主插件（binary,python；none 表示全部交给 plugin-host），默认本机能跑的都跑
+      - WEKNORA_PLUGIN_EMBEDDED_KINDS=${WEKNORA_PLUGIN_EMBEDDED_KINDS:-}
+      # 不在本机运行的插件（remote、plugin-host 上的）回调 Host API 的地址；启用 plugin-host 时设为 http://app:8080
+      - WEKNORA_PLUGIN_HOST_API_URL=${WEKNORA_PLUGIN_HOST_API_URL:-}
     depends_on:
       redis:
         condition: service_started
@@ -393,6 +398,66 @@ services:
     restart: unless-stopped
     extra_hosts:
       - "host.docker.internal:host-gateway"
+
+  # 独立插件宿主（可选，profile: plugin-host）：在单独的容器里运行宿主插件，
+  # 例如把 Python 插件与 app 隔开。与 app 共用镜像、数据库、Redis 和存储，
+  # 通过 Redis 向 app 通告自己，app 用 SYSTEM_AES_KEY 派生的密钥签名调用它。
+  # 启用：docker compose --profile plugin-host up -d，并在 .env 里设
+  #   WEKNORA_PLUGIN_EMBEDDED_KINDS=none（或 binary）
+  #   WEKNORA_PLUGIN_HOST_API_URL=http://app:8080
+  plugin-host:
+    image: wechatopenai/weknora-app:${WEKNORA_VERSION:-latest}
+    container_name: WeKnora-plugin-host
+    profiles:
+      - plugin-host
+    command: ["./WeKnora", "plugin-host"]
+    volumes:
+      # STORAGE_TYPE=local 时插件包存在这里
+      - data-files:/data/files
+    env_file:
+      - .env
+    environment:
+      - GIN_MODE=${GIN_MODE:-release}
+      - TZ=${TZ:-Asia/Shanghai}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - WEKNORA_PLUGIN_HOST_ADDR=:8081
+      - WEKNORA_PLUGIN_HOST_URL=http://plugin-host:8081
+      - WEKNORA_PLUGIN_HOST_KINDS=${WEKNORA_PLUGIN_HOST_KINDS:-}
+      - WEKNORA_PLUGIN_HOST_API_URL=${WEKNORA_PLUGIN_HOST_API_URL:-http://app:8080}
+      - DB_DRIVER=${DB_DRIVER:-postgres}
+      - DB_HOST=${DB_HOST:-postgres}
+      - DB_PORT=${DB_PORT:-5432}
+      - DB_USER=${DB_USER:-}
+      - DB_PASSWORD=${DB_PASSWORD:-}
+      - DB_NAME=${DB_NAME:-}
+      - STORAGE_TYPE=${STORAGE_TYPE:-local}
+      - LOCAL_STORAGE_BASE_DIR=${LOCAL_STORAGE_BASE_DIR:-/data/files}
+      - MINIO_ENDPOINT=${MINIO_ENDPOINT:-minio:9000}
+      - MINIO_ACCESS_KEY_ID=${MINIO_ACCESS_KEY_ID:-minioadmin}
+      - MINIO_SECRET_ACCESS_KEY=${MINIO_SECRET_ACCESS_KEY:-minioadmin}
+      - REDIS_ADDR=${REDIS_ADDR:-redis:6379}
+      - REDIS_USERNAME=${REDIS_USERNAME:-}
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-}
+      - REDIS_DB=${REDIS_DB:-}
+      - WEKNORA_REDIS_NAMESPACE=${WEKNORA_REDIS_NAMESPACE:-}
+      - SYSTEM_AES_KEY=${SYSTEM_AES_KEY:-}
+      - JWT_SECRET=${JWT_SECRET:-}
+      - SSRF_WHITELIST=${SSRF_WHITELIST:-}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    depends_on:
+      redis:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+    networks:
+      - WeKnora-network
+    restart: unless-stopped
+    stop_grace_period: 75s
 
   # Sandbox 镜像：仅用于 build/pull，非常驻。Docker 沙箱默认关闭，需
   # WEKNORA_SANDBOX_DOCKER_ENABLED=true 并挂载 docker.sock 后，app 才会按会话创建容器。

@@ -12,7 +12,12 @@ package host
 import (
 	"context"
 	"fmt"
+	"os"
+	"os/exec"
+	"sort"
+	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/plugin/manifest"
@@ -31,13 +36,101 @@ type StateReporter interface {
 // before the activators that route calls to the plugins.
 type Manager struct {
 	reporter StateReporter
+	inFlight atomic.Int64
 
 	mu    sync.Mutex
 	procs map[string]*process
+	kinds map[string]bool
+	// standalone hosts have no one to hand other kinds to.
+	standalone bool
+	// direct are hosts plugins reach without the egress proxy: the Host API
+	// when it is not on this machine.
+	direct []string
 }
 
-// NewManager creates an empty host.
-func NewManager() *Manager { return &Manager{procs: map[string]*process{}} }
+// NewManager creates an empty host that runs every kind this machine can.
+func NewManager() *Manager {
+	m := &Manager{procs: map[string]*process{}}
+	m.SetKinds(AvailableKinds())
+	return m
+}
+
+// NewStandaloneManager creates the host of a standalone plugin host
+// (weknora plugin-host): it runs the given kinds and refuses the others.
+func NewStandaloneManager(kinds []string) *Manager {
+	m := &Manager{procs: map[string]*process{}, standalone: true}
+	m.SetKinds(kinds)
+	return m
+}
+
+// AvailableKinds are the kinds this machine can run: binaries, and python
+// when an interpreter is installed.
+func AvailableKinds() []string {
+	kinds := []string{KindBinary}
+	if _, err := exec.LookPath(PythonCommand()); err == nil {
+		kinds = append(kinds, KindPython)
+	}
+	return kinds
+}
+
+// KindsFromEnv reads a comma-separated list of kinds from an environment
+// variable: unset means every available kind, "none" means none.
+func KindsFromEnv(name string) []string {
+	raw, ok := os.LookupEnv(name)
+	raw = strings.TrimSpace(raw)
+	if !ok || raw == "" {
+		return AvailableKinds()
+	}
+	if raw == "none" {
+		return nil
+	}
+	var out []string
+	for _, k := range strings.Split(raw, ",") {
+		if k = strings.TrimSpace(k); Supported(k) {
+			out = append(out, k)
+		}
+	}
+	return out
+}
+
+// SetKinds limits the kinds this host runs; plugins of other kinds are left
+// to plugin hosts elsewhere.
+func (m *Manager) SetKinds(kinds []string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.kinds = map[string]bool{}
+	for _, k := range kinds {
+		m.kinds[k] = true
+	}
+}
+
+// Kinds lists the kinds this host runs.
+func (m *Manager) Kinds() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]string, 0, len(m.kinds))
+	for k := range m.kinds {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// Runs reports whether this host runs plugins of a kind.
+func (m *Manager) Runs(kind string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.kinds[kind]
+}
+
+// SetDirectHosts names hosts plugins reach without the egress proxy, such
+// as the Host API's when it is on another machine. It applies to processes
+// started afterwards.
+func (m *Manager) SetDirectHosts(hosts ...string) {
+	m.mu.Lock()
+	m.direct = append([]string(nil), hosts...)
+	m.mu.Unlock()
+}
 
 // SetReporter wires health changes to the reconciler.
 func (m *Manager) SetReporter(r StateReporter) {
@@ -63,8 +156,18 @@ func (m *Manager) Activate(ctx context.Context, l *reconcile.Loaded) error {
 		return fmt.Errorf("runtime.kind %q is not supported by this host; binary and python are",
 			l.Manifest.Runtime.Kind)
 	}
+	if !m.Runs(l.Manifest.Runtime.Kind) {
+		if m.standalone {
+			return fmt.Errorf("this plugin host does not run %s plugins (it runs %s)",
+				l.Manifest.Runtime.Kind, strings.Join(m.Kinds(), ", "))
+		}
+		return nil // a plugin host elsewhere runs it
+	}
 	id := l.Manifest.ID
-	p, err := startProcess(spec{m: l.Manifest, dir: l.Dir}, func(s State, err error) {
+	m.mu.Lock()
+	direct := m.direct
+	m.mu.Unlock()
+	p, err := startProcess(spec{m: l.Manifest, dir: l.Dir, direct: direct}, func(s State, err error) {
 		m.report(id, s, err)
 	})
 	if err != nil {
@@ -122,6 +225,46 @@ func (m *Manager) Client(pluginID string) (*client.Client, error) {
 	}
 	return p.Client()
 }
+
+// Local reports whether a plugin runs on this host.
+func (m *Manager) Local(pluginID string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	_, ok := m.procs[pluginID]
+	return ok
+}
+
+// Running is one plugin this host runs.
+type Running struct {
+	ID      string `json:"id"`
+	Version string `json:"version"`
+	Kind    string `json:"kind"`
+	State   State  `json:"state"`
+}
+
+// Running lists the plugins this host runs and their state.
+func (m *Manager) Running() []Running {
+	m.mu.Lock()
+	procs := make([]*process, 0, len(m.procs))
+	for _, p := range m.procs {
+		procs = append(procs, p)
+	}
+	m.mu.Unlock()
+	out := make([]Running, 0, len(procs))
+	for _, p := range procs {
+		p.mu.RLock()
+		st := p.state
+		p.mu.RUnlock()
+		out = append(out, Running{
+			ID: p.spec.m.ID, Version: p.spec.m.Version, Kind: p.spec.m.Runtime.Kind, State: st,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out
+}
+
+// InFlight is how many gateway calls this host is answering.
+func (m *Manager) InFlight() int64 { return m.inFlight.Load() }
 
 // Close stops every plugin, for shutdown.
 func (m *Manager) Close() {

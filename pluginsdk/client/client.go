@@ -126,6 +126,13 @@ func (c *Client) do(ctx context.Context, method, path string, body []byte, reque
 	return resp, nil
 }
 
+// Raw sends one request as the client would and returns the answer
+// unread, whatever its status: for gateways that relay a plugin's answers,
+// streams included. The caller closes the body.
+func (c *Client) Raw(ctx context.Context, method, path string, body []byte, requestID string) (*http.Response, error) {
+	return c.do(ctx, method, path, body, requestID)
+}
+
 // decodeError turns a non-2xx answer into a protocol error.
 func decodeError(resp *http.Response) error {
 	b, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
