@@ -205,7 +205,9 @@ func TestPluginMCPDirectories(t *testing.T) {
 	}
 	id := serviceID(1, "acme.search/search")
 	older := time.Now().Add(-time.Minute)
-	first := &types.MCPMetadata{TenantID: 1, ServiceID: id, Tools: []*types.MCPTool{{Name: "search"}}, SyncedAt: time.Now()}
+	first := &types.MCPMetadata{
+		TenantID: 1, ServiceID: id, Tools: []*types.MCPTool{{Name: "search"}}, SyncedAt: time.Now(),
+	}
 	if err := meta.SaveMetadata(e.ctx, first); err != nil {
 		t.Fatal(err)
 	}
