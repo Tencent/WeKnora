@@ -66,6 +66,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/datasource/connector/feishu/wiki"
 	gitlabConnector "github.com/Tencent/WeKnora/internal/datasource/connector/gitlab"
 	imaConnector "github.com/Tencent/WeKnora/internal/datasource/connector/ima"
+	jiraConnector "github.com/Tencent/WeKnora/internal/datasource/connector/jira"
 	notionConnector "github.com/Tencent/WeKnora/internal/datasource/connector/notion"
 	rssConnector "github.com/Tencent/WeKnora/internal/datasource/connector/rss"
 	yuqueConnector "github.com/Tencent/WeKnora/internal/datasource/connector/yuque"
@@ -1878,6 +1879,9 @@ func initConnectorRegistry() (*datasource.ConnectorRegistry, error) {
 	}
 	if err := registry.Register(confluenceConnector.NewConnector()); err != nil {
 		errs = errors.Join(errs, fmt.Errorf("register confluence connector: %w", err))
+	}
+	if err := registry.Register(jiraConnector.NewConnector()); err != nil {
+		errs = errors.Join(errs, fmt.Errorf("register jira connector: %w", err))
 	}
 	if err := registry.Register(yuqueConnector.NewConnector()); err != nil {
 		errs = errors.Join(errs, fmt.Errorf("register yuque connector: %w", err))
