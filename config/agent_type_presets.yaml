@@ -46,6 +46,9 @@ agent_type_presets:
       ja-JP:
         label: "RAG Q&A"
         description: "ドキュメントのチャンクに基づく根拠付きの検索型回答。Wikiを有効にしていないドキュメント/FAQナレッジベースに最適です。"
+      pl-PL:
+        label: "Pytania i odpowiedzi RAG"
+        description: "Wyszukiwanie oparte na dowodach we fragmentach dokumentów. Najlepsze dla baz wiedzy z dokumentami lub FAQ bez wiki."
     config:
       system_prompt_id: "progressive_rag_agent"
       temperature: 0.7
@@ -82,6 +85,9 @@ agent_type_presets:
       ja-JP:
         label: "Wiki Q&A"
         description: "Wikiを主体とした回答。Wikiページを検索・閲覧し、リンクをたどります。Wikiを有効にしたナレッジベースが必要です。"
+      pl-PL:
+        label: "Pytania i odpowiedzi wiki"
+        description: "Najpierw wiki: wyszukiwanie, czytanie i przechodzenie po linkach między stronami wiki. Wymaga bazy wiedzy z włączoną wiki."
     config:
       system_prompt_id: "wiki_researcher"
       temperature: 0.7
@@ -116,6 +122,9 @@ agent_type_presets:
       ja-JP:
         label: "ハイブリッド（Wiki + RAG）"
         description: "Wikiページで全体像と背景を把握し、そこからチャンクを掘り下げて正確に引用します。Wikiとチャンクインデックスの両方を有効にしたナレッジベースが必要です。"
+      pl-PL:
+        label: "Hybryda (wiki + RAG)"
+        description: "Strony wiki służą do nawigacji i kontekstu, a fragmenty – do precyzyjnych cytatów. Wymaga baz wiedzy z włączoną wiki ORAZ indeksowaniem fragmentów."
     config:
       system_prompt_id: "hybrid_rag_wiki_agent"
       temperature: 0.7
@@ -165,6 +174,9 @@ agent_type_presets:
       ja-JP:
         label: "データ分析"
         description: "表形式ファイル（CSV/Excel）に対するSQLクエリと統計分析。データファイルを含むナレッジベースと組み合わせてください。"
+      pl-PL:
+        label: "Analiza danych"
+        description: "Zapytania SQL i statystyki na plikach tabelarycznych (CSV / Excel). Połącz z bazą wiedzy zawierającą pliki z danymi."
     config:
       system_prompt_id: "data_analyst"
       temperature: 0.3
@@ -209,5 +221,8 @@ agent_type_presets:
       ja-JP:
         label: "カスタム"
         description: "完全に自由に設定。ツール、プロンプト、ナレッジベースの範囲を手動で選択します。"
+      pl-PL:
+        label: "Niestandardowy"
+        description: "Pełna kontrola. Ręczny wybór narzędzi, promptu i zakresu baz wiedzy."
     # No `config:` block → preset applies no auto-fill.
     # No `kb_filter:`    → all KBs are selectable.

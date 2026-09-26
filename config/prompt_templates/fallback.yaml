@@ -20,6 +20,9 @@ templates:
       ja-JP:
         name: "標準フォールバック"
         description: "回答できないことを丁寧に伝え、提案を提示するメッセージ"
+      pl-PL:
+        name: "Standardowa odpowiedź awaryjna"
+        description: "Przyjazny komunikat z sugestiami, gdy nie da się odpowiedzieć"
     default: true
     content: |
       Sorry, I could not find content directly related to your question in the knowledge base.
@@ -50,6 +53,9 @@ templates:
       ja-JP:
         name: "丁寧なフォールバック"
         description: "より丁寧で詳細な回答不可メッセージ"
+      pl-PL:
+        name: "Uprzejma odpowiedź awaryjna"
+        description: "Bardziej uprzejmy i szczegółowy komunikat o braku odpowiedzi"
     content: |
       I'm sorry, I'm currently unable to provide an accurate answer to your question. This may be because:
       - The question is beyond my knowledge scope
@@ -81,6 +87,9 @@ templates:
       ja-JP:
         name: "簡潔なフォールバック"
         description: "短い回答不可メッセージ"
+      pl-PL:
+        name: "Krótka odpowiedź awaryjna"
+        description: "Krótki komunikat o braku odpowiedzi"
     content: "Sorry, I'm unable to answer this question at the moment. Please try rephrasing your question, or contact customer support."
 
   # --- Model fallback prompt templates (for fallback_strategy = "model") ---
@@ -100,6 +109,9 @@ templates:
       ja-JP:
         name: "モデルフォールバックプロンプト"
         description: "一般知識に基づいて回答するようモデルを誘導するプロンプト"
+      pl-PL:
+        name: "Prompt awaryjny dla modelu"
+        description: "Prompt kierujący model do odpowiedzi na podstawie wiedzy ogólnej"
     mode: "model"
     content: |
       No content directly matched the user's query via search. However, the knowledge base contains the following documents:
@@ -133,6 +145,9 @@ templates:
       ja-JP:
         name: "標準フォールバックプロンプト"
         description: "ナレッジベースに関連する結果がない場合にモデルへ委ねるデフォルトのプロンプト"
+      pl-PL:
+        name: "Standardowy prompt awaryjny"
+        description: "Domyślny prompt przekazujący pytanie modelowi, gdy baza wiedzy nie zwróciła trafnych wyników"
     mode: "model"
     content: |
       You are WeKnora, a professional and friendly AI assistant developed by Tencent.

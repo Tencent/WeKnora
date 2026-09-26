@@ -19,6 +19,9 @@ templates:
       ja-JP:
         name: "挨拶への応答"
         description: "挨拶の意図に対するシステムプロンプト"
+      pl-PL:
+        name: "Odpowiedź na powitanie"
+        description: "Prompt systemowy dla intencji powitania"
     content: |
       You are WeKnora, a professional and friendly intelligent assistant developed by Tencent.
       The user is greeting you, expressing thanks, or saying farewell.
@@ -43,6 +46,9 @@ templates:
       ja-JP:
         name: "雑談への応答"
         description: "雑談の意図に対するシステムプロンプト"
+      pl-PL:
+        name: "Odpowiedź w swobodnej rozmowie"
+        description: "Prompt systemowy do swobodnej rozmowy"
     content: |
       You are WeKnora, a professional and friendly intelligent assistant developed by Tencent, with broad general knowledge.
       The user is engaging in casual conversation that does not require document retrieval.
@@ -69,6 +75,9 @@ templates:
       ja-JP:
         name: "追加質問への応答"
         description: "会話履歴を参照する追加質問に対するシステムプロンプト"
+      pl-PL:
+        name: "Odpowiedź na pytanie uzupełniające"
+        description: "Prompt systemowy dla pytań uzupełniających, które odwołują się do historii rozmowy"
     content: |
       You are WeKnora, a professional intelligent assistant developed by Tencent.
       The user is asking a follow-up question that refers to your previous conversation.
@@ -95,6 +104,9 @@ templates:
       ja-JP:
         name: "画像分析への応答"
         description: "画像のみを理解する意図に対するシステムプロンプト"
+      pl-PL:
+        name: "Odpowiedź z analizą obrazu"
+        description: "Prompt systemowy do samej analizy obrazu"
     content: |
       You are WeKnora, a professional intelligent assistant developed by Tencent, helping interpret the supplied images, OCR, or image descriptions.
       The user wants you to describe, analyze, translate, or extract information from the attached image(s).
@@ -120,6 +132,9 @@ templates:
       ja-JP:
         name: "要約への応答"
         description: "会話要約の意図に対するシステムプロンプト"
+      pl-PL:
+        name: "Odpowiedź z podsumowaniem"
+        description: "Prompt systemowy do podsumowania rozmowy"
     content: |
       You are WeKnora, a professional intelligent assistant developed by Tencent, skilled at information organization and summarization.
       The user wants you to summarize, organize, or distill the previous conversation.
@@ -145,6 +160,9 @@ templates:
       ja-JP:
         name: "Web検索利用不可の応答"
         description: "Web検索の意図を検出したがWeb検索が有効でない場合のシステムプロンプト"
+      pl-PL:
+        name: "Odpowiedź przy niedostępnym wyszukiwaniu w sieci"
+        description: "Prompt systemowy, gdy wykryto intencję wyszukiwania w sieci, ale wyszukiwanie w sieci jest wyłączone"
     content: |
       You are WeKnora, a professional intelligent assistant developed by Tencent.
       You are currently acting as a knowledge assistant whose primary usage scenario is question answering based on the user's personal knowledge base.
@@ -173,6 +191,9 @@ templates:
       ja-JP:
         name: "ドキュメント分析への応答"
         description: "ドキュメントのみを理解する意図に対するシステムプロンプト"
+      pl-PL:
+        name: "Odpowiedź z analizą dokumentu"
+        description: "Prompt systemowy do samej analizy dokumentu"
     content: |
       You are WeKnora, a professional intelligent assistant developed by Tencent, with document analysis capabilities.
       The user wants you to describe, analyze, summarize, translate, or extract information from the attached document(s) or file(s).
