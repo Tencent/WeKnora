@@ -71,7 +71,7 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 	// gates the same extension set, but this path must keep returning
 	// ErrInvalidFileType rather than the shared gate's localized message.
 	logger.Infof(ctx, "Checking file type: %s", fileName)
-	if !isValidFileType(fileName) {
+	if !isValidFileType(ctx, fileName) {
 		logger.Error(ctx, "Invalid file type")
 		return nil, ErrInvalidFileType
 	}
@@ -294,11 +294,11 @@ func (s *knowledgeService) CreateKnowledgeFromFile(ctx context.Context,
 // tagID is optional - when provided, the knowledge will be assigned to the specified tag/category.
 // isFileURL reports whether the given URL should be treated as a direct file download.
 // Priority: URL path has a known file extension first, then fall back to user-provided fileName/fileType hints.
-func isFileURL(rawURL, fileName, fileType string) bool {
+func isFileURL(ctx context.Context, rawURL, fileName, fileType string) bool {
 	u, err := url.Parse(rawURL)
 	if err == nil {
 		ext := strings.ToLower(strings.TrimPrefix(path.Ext(u.Path), "."))
-		if ext != "" && isSupportedImportExtension(ext) {
+		if ext != "" && isSupportedImportExtension(ctx, ext) {
 			return true
 		}
 	}
@@ -314,7 +314,7 @@ func (s *knowledgeService) CreateKnowledgeFromURL(ctx context.Context,
 	logger.Infof(ctx, "Knowledge base ID: %s, URL: %s", kbID, rawURL)
 
 	// Route to file_url logic when the URL points to a downloadable file
-	if isFileURL(rawURL, fileName, fileType) {
+	if isFileURL(ctx, rawURL, fileName, fileType) {
 		return s.createKnowledgeFromFileURL(
 			ctx, kbID, rawURL, fileName, fileType, enableMultimodel, title, tagIDs, channel, processOverrides,
 		)

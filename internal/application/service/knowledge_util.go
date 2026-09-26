@@ -51,8 +51,9 @@ func normalizeFileExtension(ext string) string {
 	return strings.ToLower(strings.TrimPrefix(strings.TrimSpace(ext), "."))
 }
 
-// isSupportedImportExtension reports whether a bare extension can be imported.
-func isSupportedImportExtension(ext string) bool {
+// isSupportedImportExtension reports whether a bare extension can be
+// imported into the workspace ctx carries.
+func isSupportedImportExtension(ctx context.Context, ext string) bool {
 	ext = normalizeFileExtension(ext)
 	if ext == "" || ext == unknownFileType {
 		return false
@@ -60,13 +61,14 @@ func isSupportedImportExtension(ext string) bool {
 	if _, ok := supportedImportFileExtensions[ext]; ok {
 		return true
 	}
-	// Installed plugins' parser engines bring their own file types.
-	return slices.Contains(docparser.PluginFileTypes(), ext)
+	// Installed plugins' parser engines bring their own file types, in the
+	// workspaces that have the plugin on.
+	return slices.Contains(docparser.PluginFileTypes(ctx), ext)
 }
 
 // isValidFileType checks if a filename's extension is supported for import.
-func isValidFileType(filename string) bool {
-	return isSupportedImportExtension(getFileType(filename))
+func isValidFileType(ctx context.Context, filename string) bool {
+	return isSupportedImportExtension(ctx, getFileType(filename))
 }
 
 // isDataTableFileType reports whether an extension is a spreadsheet format.
@@ -77,7 +79,7 @@ func isDataTableFileType(ext string) bool {
 
 // validateImportFileType applies the extension constraints shared by every
 // file import path and reports a user-facing reason when one is violated.
-func validateImportFileType(fileType string) error {
+func validateImportFileType(ctx context.Context, fileType string) error {
 	fileType = normalizeFileExtension(fileType)
 	if fileType == "" || fileType == unknownFileType {
 		return werrors.NewBadRequestError("无法确定文件类型")
@@ -85,7 +87,7 @@ func validateImportFileType(fileType string) error {
 	if IsVideoType(fileType) {
 		return werrors.NewBadRequestError("暂不支持上传视频文件")
 	}
-	if !isSupportedImportExtension(fileType) {
+	if !isSupportedImportExtension(ctx, fileType) {
 		return werrors.NewBadRequestError(fmt.Sprintf("不支持的文件类型: %s", fileType))
 	}
 	return nil

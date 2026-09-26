@@ -74,9 +74,19 @@ func TestPluginParser(t *testing.T) {
 		!slices.Equal(listed.FileTypes, []string{"tiff", "pdf"}) {
 		t.Fatalf("listed = %+v", listed)
 	}
-	if !slices.Contains(docparser.PluginFileTypes(), "tiff") {
+	if !slices.Contains(docparser.PluginFileTypes(ctx), "tiff") {
 		t.Fatal("plugin file types must be importable")
 	}
+	// Once the switches are known, only workspaces with the plugin on
+	// accept its file types.
+	a.Bind(tenantSwitch{on: 7})
+	on := context.WithValue(ctx, types.TenantIDContextKey, uint64(7))
+	off := context.WithValue(ctx, types.TenantIDContextKey, uint64(8))
+	if !slices.Contains(docparser.PluginFileTypes(on), "tiff") ||
+		slices.Contains(docparser.PluginFileTypes(off), "tiff") {
+		t.Fatal("a plugin's file types must be importable exactly where the plugin is on")
+	}
+	a.gate.Store(nil)
 
 	reader, err := docparser.NewReader(ctx, "acme.ocr/ocr", "tiff", false, docparser.ReaderDeps{
 		Overrides: map[string]string{"mineru_api_key": "must-not-leak"},
@@ -117,4 +127,11 @@ func TestPluginParserCannotShadowABuiltin(t *testing.T) {
 	if err := docparser.RegisterPluginEngine(e); err == nil {
 		t.Fatal("a plugin engine must not take a builtin engine's name")
 	}
+}
+
+// tenantSwitch has plugins on in one workspace only.
+type tenantSwitch struct{ on uint64 }
+
+func (s tenantSwitch) PluginEnabled(_ context.Context, tenantID uint64, _ string) (bool, error) {
+	return tenantID == s.on, nil
 }

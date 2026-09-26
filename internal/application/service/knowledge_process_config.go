@@ -147,7 +147,7 @@ func resolveFileImportProcessConfig(
 	processOverrides *types.KnowledgeProcessOverrides,
 	enableMultimodel *bool,
 ) (types.EffectiveProcessConfig, error) {
-	if err := validateImportFileType(fileType); err != nil {
+	if err := validateImportFileType(ctx, fileType); err != nil {
 		return types.EffectiveProcessConfig{}, err
 	}
 

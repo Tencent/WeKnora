@@ -1,6 +1,9 @@
 package service
 
-import "testing"
+import (
+	"context"
+	"testing"
+)
 
 func TestIsValidFileTypeHTML(t *testing.T) {
 	tests := []struct {
@@ -18,7 +21,7 @@ func TestIsValidFileTypeHTML(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := isValidFileType(tt.filename); got != tt.want {
+			if got := isValidFileType(context.Background(), tt.filename); got != tt.want {
 				t.Fatalf("isValidFileType(%q) = %v, want %v", tt.filename, got, tt.want)
 			}
 		})
@@ -48,7 +51,7 @@ func TestIsSupportedImportExtension(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := isSupportedImportExtension(tt.ext); got != tt.want {
+			if got := isSupportedImportExtension(context.Background(), tt.ext); got != tt.want {
 				t.Fatalf("isSupportedImportExtension(%q) = %v, want %v", tt.ext, got, tt.want)
 			}
 		})
@@ -59,10 +62,10 @@ func TestIsSupportedImportExtension(t *testing.T) {
 // otherwise #2447 (xlsx accepted on upload, rejected on URL import) regresses.
 func TestImportExtensionSetIsSharedAcrossPaths(t *testing.T) {
 	for ext := range supportedImportFileExtensions {
-		if !isValidFileType("file." + ext) {
+		if !isValidFileType(context.Background(), "file."+ext) {
 			t.Errorf("isValidFileType rejects supported extension %q", ext)
 		}
-		if err := validateImportFileType(ext); err != nil {
+		if err := validateImportFileType(context.Background(), ext); err != nil {
 			t.Errorf("validateImportFileType(%q) = %v, want nil", ext, err)
 		}
 	}

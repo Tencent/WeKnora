@@ -113,11 +113,20 @@ func pluginEngineList() []EngineRegistration {
 	return out
 }
 
-// PluginFileTypes returns the file types plugin engines parse, so uploads
-// of those types are accepted.
-func PluginFileTypes() []string {
+// PluginEngineGate is implemented by plugin engines only some workspaces
+// may use: EnabledFor reports whether the workspace ctx carries may.
+type PluginEngineGate interface {
+	EnabledFor(ctx context.Context) bool
+}
+
+// PluginFileTypes returns the file types the plugin engines the workspace
+// ctx carries may use parse, so uploads of those types are accepted there.
+func PluginFileTypes(ctx context.Context) []string {
 	var out []string
 	for _, e := range pluginEngineList() {
+		if g, ok := e.(PluginEngineGate); ok && !g.EnabledFor(ctx) {
+			continue
+		}
 		out = append(out, e.FileTypes(true)...)
 	}
 	return out

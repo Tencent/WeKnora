@@ -102,6 +102,7 @@ type pluginEngine struct {
 var (
 	_ docparser.EngineRegistration = (*pluginEngine)(nil)
 	_ docparser.PluginEngineInfo   = (*pluginEngine)(nil)
+	_ docparser.PluginEngineGate   = (*pluginEngine)(nil)
 )
 
 func (e *pluginEngine) gate() *PluginEnabledChecker {
@@ -109,6 +110,19 @@ func (e *pluginEngine) gate() *PluginEnabledChecker {
 		return nil
 	}
 	return e.parsers.gate.Load()
+}
+
+// EnabledFor implements docparser.PluginEngineGate: engines are registered
+// for every node; only workspaces that have the plugin on (and may see it)
+// send it documents.
+func (e *pluginEngine) EnabledFor(ctx context.Context) bool {
+	g := e.gate()
+	if g == nil {
+		return true
+	}
+	tenantID, _ := types.TenantIDFromContext(ctx)
+	on, err := (*g).PluginEnabled(ctx, tenantID, e.m.ID)
+	return err == nil && on
 }
 
 func (e *pluginEngine) Name() string                    { return e.name }
@@ -137,13 +151,8 @@ type remoteParser struct{ engine *pluginEngine }
 // plugin is down, rate limited) is returned as an error so the task is
 // retried; any other failure is final and reported in the result.
 func (r *remoteParser) Read(ctx context.Context, req *types.ReadRequest) (*types.ReadResult, error) {
-	if g := r.engine.gate(); g != nil {
-		// Engines are registered for every node; only workspaces that have
-		// the plugin on (and may see it) send it documents.
-		tenantID, _ := types.TenantIDFromContext(ctx)
-		if on, err := (*g).PluginEnabled(ctx, tenantID, r.engine.m.ID); err != nil || !on {
-			return &types.ReadResult{Error: fmt.Sprintf("plugin %s is off in this workspace", r.engine.m.ID)}, nil
-		}
+	if !r.engine.EnabledFor(ctx) {
+		return &types.ReadResult{Error: fmt.Sprintf("plugin %s is off in this workspace", r.engine.m.ID)}, nil
 	}
 	ctx, cancel := withDefaultTimeout(ctx, parseTimeout)
 	defer cancel()
