@@ -337,13 +337,21 @@ func annotateGraphResult(output string, data map[string]interface{}) string {
 func annotateSearchNotes(output string, data map[string]interface{}) string {
 	omitted := intValue(data, "omitted_for_budget")
 	failures := stringSliceValue(data["partial_failures"])
-	if (omitted <= 0 && len(failures) == 0) || !strings.HasSuffix(output, "</retrieval>") {
+	shown := intValue(data, "retrieval_shown")
+	candidates := intValue(data, "retrieval_candidates")
+	truncated := shown > 0 && candidates > shown
+	if (omitted <= 0 && len(failures) == 0 && !truncated) || !strings.HasSuffix(output, "</retrieval>") {
 		return output
 	}
 	var b strings.Builder
 	if omitted > 0 {
 		fmt.Fprintf(&b, "  <omitted count=\"%d\" reason=\"output_budget\">Lower-ranked results were left out to "+
 			"fit the output size. Narrow the query or lower limit to see them.</omitted>\n", omitted)
+	}
+	if truncated {
+		fmt.Fprintf(&b, "  <subset shown=\"%d\" candidates=\"%d\">Only the top-ranked passages are shown, "+
+			"not every match. A count or a complete list cannot be derived from this view, so say the "+
+			"answer may be incomplete instead of presenting it as the whole set.</subset>\n", shown, candidates)
 	}
 	for _, failure := range failures {
 		fmt.Fprintf(&b, "  <partial_failure>%s — these knowledge bases were not searched.</partial_failure>\n",

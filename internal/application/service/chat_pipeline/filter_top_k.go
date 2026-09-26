@@ -45,6 +45,7 @@ func (p *PluginFilterTopK) OnEvent(ctx context.Context,
 				"before": len(searchResult),
 				"after":  topK,
 			})
+			chatManage.Truncation = &types.RetrievalTruncation{Shown: topK, Candidates: len(searchResult)}
 			searchResult = searchResult[:topK]
 		}
 		return searchResult
