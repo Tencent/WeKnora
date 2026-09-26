@@ -2788,6 +2788,22 @@ export default {
       degraded: '異常',
       stopped: '未読み込み'
     },
+    egress: {
+      mode: {
+        sandboxed: 'サンドボックス',
+        networkPolicy: 'NetworkPolicy',
+        proxy: 'プロキシのみ',
+        unmanaged: '管理外'
+      },
+      hint: {
+        sandboxed: 'プラグインプロセスは専用のネットワーク名前空間で動作し、外部へは送信プロキシ経由でしか接続できません。送信権限は強制されます。',
+        networkPolicy: 'Kubernetes NetworkPolicy により、プラグイン Pod は DNS と WeKnora にのみ接続でき、送信プロキシ経由で外部へ出ます。クラスターのネットワークプラグインが NetworkPolicy に対応している場合に強制されます。',
+        proxy: 'プラグインプロセスには HTTP(S)_PROXY で送信プロキシが渡されますが、これらの変数を無視するコードは直接接続できます。Linux で非特権ユーザー名前空間を許可するとサンドボックス化されます。',
+        unmanaged: 'プラグインは WeKnora が管理できない環境（リモートサービス）で動作するため、送信権限は強制されません。'
+      },
+      unenforced: '送信制限なし',
+      unenforcedHint: 'このプラグインは送信権限を宣言していますが、少なくとも 1 つのインスタンスでは制限が強制されておらず、コードが送信プロキシを迂回して直接接続できます。'
+    },
     source: {
       upload: 'アップロード',
       url: 'URL'

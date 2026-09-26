@@ -24,6 +24,10 @@ import {
   activeTrust,
   audienceSummary,
   filterInstalled,
+  egressEnforced,
+  egressTheme,
+  egressUnenforced,
+  weakestEgress,
 } from './pluginManagementState'
 
 const manifest: PluginManifest = {
@@ -162,4 +166,27 @@ test('installed table filters, trust and visibility', () => {
   assert.deepEqual(audienceSummary(p('x')), { kind: 'all' })
   assert.deepEqual(audienceSummary(p('x', { audience: [3, 4] })), { kind: 'some', count: 2 })
   assert.deepEqual(audienceSummary(p('x', { owner_tenant_id: 7, audience: [7] })), { kind: 'owned', tenant: 7 })
+})
+
+test('egress modes: enforced or not, and which plugins to flag', () => {
+  assert.equal(egressEnforced('sandboxed'), true)
+  assert.equal(egressEnforced('networkPolicy'), true)
+  assert.equal(egressEnforced('proxy'), false)
+  assert.equal(egressEnforced('unmanaged'), false)
+  assert.equal(egressEnforced(undefined), false)
+  assert.equal(egressTheme('sandboxed'), 'success')
+  assert.equal(egressTheme('proxy'), 'warning')
+
+  assert.equal(weakestEgress([]), undefined)
+  assert.equal(weakestEgress([{}, { egress: 'sandboxed' }]), 'sandboxed')
+  assert.equal(weakestEgress([{ egress: 'sandboxed' }, { egress: 'proxy' }, { egress: 'networkPolicy' }]), 'proxy')
+  assert.equal(weakestEgress([{ egress: 'proxy' }, { egress: 'unmanaged' }]), 'unmanaged')
+
+  // Only a plugin that asks for outbound access and is not held to it.
+  assert.equal(egressUnenforced(manifest, 'proxy'), true)
+  assert.equal(egressUnenforced(manifest, 'unmanaged'), true)
+  assert.equal(egressUnenforced(manifest, 'sandboxed'), false)
+  assert.equal(egressUnenforced(manifest, undefined), false)
+  assert.equal(egressUnenforced({ ...manifest, permissions: {} }, 'proxy'), false)
+  assert.equal(egressUnenforced(undefined, 'proxy'), false)
 })

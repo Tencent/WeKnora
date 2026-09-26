@@ -138,10 +138,17 @@ weknora-plugin verify -pubkey ed25519:... acme-search-1.0.0.wkp
 - 在 Linux 上，插件进程按 `runtime.resources` 限制资源：
   - 内存总是受限。插件没有声明时，按 `WEKNORA_PLUGIN_MEMORY_DEFAULT`（如 `1Gi`）限制，未设置则不限。
   - CPU 需要把一个可写的 cgroup v2 目录委托给 WeKnora，并通过 `WEKNORA_PLUGIN_CGROUP` 指定。设置后，每个插件进程进入各自的子 cgroup。
-- 在 Linux 上设置 `WEKNORA_PLUGIN_NETNS=1`，每个插件进程运行在独立的网络命名空间中，只能经出口代理和 Host API 访问外部，无法绕过代理直连。
-  - 需要系统允许非特权用户命名空间：Ubuntu 24.04 需将 `kernel.apparmor_restrict_unprivileged_userns` 设为 0，Docker 默认的 seccomp 配置会拦截。
-  - 条件不满足时插件启动失败并在详情中说明原因，不会在不受限的情况下运行。
-  - 独立 plugin-host 同样适用：插件经出口代理访问 app 节点的 Host API。
+- 在 Linux 上，插件进程默认运行在独立的网络命名空间（网络沙箱）中，只能经出口代理和 Host API 访问外部，无法绕过代理直连。由 `WEKNORA_PLUGIN_NETNS` 控制：
+  - 不设置或 `auto`（默认）：启动第一个插件时探测一次系统是否允许。允许则所有宿主插件都进沙箱；不允许则插件只拿到出口代理（`HTTP(S)_PROXY`），忽略代理变量的代码仍可直连外部，启动日志中有一条警告说明原因和开启方法。
+  - `1`：必须进沙箱。条件不满足时插件启动失败并在详情中说明原因，不会在不受限的情况下运行。
+  - `0`：关闭沙箱。
+  - 非 Linux 系统只经出口代理出网。
+  - 独立 plugin-host 同样适用，各自探测：插件经出口代理访问 app 节点的 Host API。
+- 网络沙箱需要系统允许非特权用户命名空间：
+  - 裸机或虚拟机：Debian 系需 `kernel.unprivileged_userns_clone=1`；Ubuntu 23.10+（含 24.04）需将 `kernel.apparmor_restrict_unprivileged_userns` 设为 0；`user.max_user_namespaces` 不能为 0。
+  - Docker / docker compose：默认的 seccomp 配置会拦截创建用户命名空间，所以官方 compose 默认只经出口代理出网。需要强制时，为 app（和 plugin-host）容器改用放行 `unshare`/`clone` 用户命名空间的 seccomp 配置，或设置 `security_opt: [seccomp:unconfined]`（放宽整个容器的系统调用过滤，docker-compose.yml 中有注释示例）；容器保持 Docker 默认的 AppArmor 配置即可，宿主机的 Ubuntu sysctl 限制不影响它。
+  - Kubernetes / Helm：Pod 的 `seccompProfile` 为 `RuntimeDefault` 时同样会拦截，Helm chart 默认即是（`global.podSecurityContext`），所以默认只经出口代理出网。需要强制时，用 `app.podSecurityContext`（和 `pluginHost.podSecurityContext`）改为放行用户命名空间的 `Localhost` 配置，或 `seccompProfile: { type: Unconfined }`；节点内核同样需满足上一条。
+  - 插件实际的出网方式显示在「插件管理」的插件详情中，见下文「查看出网方式」。
 
 ### 独立插件宿主
 
@@ -179,6 +186,21 @@ Helm 设置 `pluginHost.enabled=true` 即可。使用本地存储（`STORAGE_TYP
 | `WEKNORA_PLUGIN_PYTHON` | 两者 | Python 插件的解释器，默认 `python3` |
 
 独立宿主需要 Redis，且所有节点的 `SYSTEM_AES_KEY`（或 `JWT_SECRET`）必须一致。app 不运行某个 kind、又没有配置独立宿主时，该 kind 的插件在插件详情中显示为加载失败，并说明原因。
+
+### 查看出网方式
+
+「设置 → 插件管理」的插件详情中，「节点状态」为每个实例标注它的出网方式，悬停可查看说明：
+
+| 标签 | 含义 |
+| --- | --- |
+| 网络沙箱 | 宿主插件运行在独立的网络命名空间中，出口代理是唯一出路，`permissions.egress` 被强制执行 |
+| NetworkPolicy | `kubernetes` 插件的 Pod 受 NetworkPolicy 约束，只能访问 DNS 与 WeKnora，经出口代理出网；需集群网络插件支持 NetworkPolicy |
+| 仅代理 | 宿主插件只拿到出口代理，忽略代理变量的代码可以直连外部 |
+| 不受管控 | 远程插件运行在 WeKnora 管不到的地方，出网不受约束 |
+
+标签由实际运行插件的节点上报：内嵌宿主的实例是各 app 节点，独立宿主的实例是 `plugin-host:` 开头的节点；把插件交给独立宿主的 app 节点不运行插件代码，不显示标签。声明式插件没有代码，也不显示。
+
+插件声明了 `permissions.egress`，而至少有一个实例是「仅代理」或「不受管控」时，插件列表的状态旁和详情中会标出「出网未强制」：这时出网白名单只对遵守代理变量的代码有效。
 
 ### Kubernetes 部署
 

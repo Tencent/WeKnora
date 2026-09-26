@@ -241,7 +241,7 @@ func (h *PluginAdminHandler) InstallPlugin(c *gin.Context) {
 		h.fail(c, err)
 		return
 	}
-	h.ok(c, view)
+	h.ok(c, h.withEgress(c.Request.Context(), view))
 }
 
 // ListInstalledPlugins godoc
@@ -258,7 +258,63 @@ func (h *PluginAdminHandler) ListInstalledPlugins(c *gin.Context) {
 		h.fail(c, err)
 		return
 	}
-	h.ok(c, views)
+	out := make([]InstalledPluginDTO, len(views))
+	for i := range views {
+		out[i] = h.withEgress(c.Request.Context(), &views[i])
+	}
+	h.ok(c, out)
+}
+
+// InstalledPluginDTO is an installed plugin as the admin console lists it.
+type InstalledPluginDTO struct {
+	*install.View
+	// Egress is the least controlled egress among the plugin's instances,
+	// so the console can flag a grant that is not enforced everywhere.
+	// Empty for plugins without code or without instances.
+	Egress driver.EgressMode `json:"egress,omitempty"`
+}
+
+// withEgress adds how the plugin's outbound traffic is controlled across
+// the nodes and plugin hosts running it.
+func (h *PluginAdminHandler) withEgress(ctx context.Context, v *install.View) InstalledPluginDTO {
+	out := InstalledPluginDTO{View: v}
+	if h.drivers == nil || v.DesiredState != types.PluginStateEnabled {
+		return out
+	}
+	switch manifest.RuntimeType(v.Runtime) {
+	case manifest.RuntimeBuiltin, manifest.RuntimeDeclarative:
+		return out
+	}
+	d, err := h.drivers.For(manifest.RuntimeType(v.Runtime))
+	if err != nil {
+		return out
+	}
+	instances, err := d.Status(ctx, v.ID)
+	if err != nil {
+		logger.Warnf(ctx, "[plugin] instances of %s: %v", v.ID, err)
+		return out
+	}
+	out.Egress = weakestEgress(instances)
+	return out
+}
+
+// egressRank orders egress modes from enforced to not controlled.
+var egressRank = map[driver.EgressMode]int{
+	driver.EgressSandboxed:     1,
+	driver.EgressNetworkPolicy: 2,
+	driver.EgressProxy:         3,
+	driver.EgressUnmanaged:     4,
+}
+
+// weakestEgress is the least controlled egress mode among instances.
+func weakestEgress(instances []driver.InstanceStatus) driver.EgressMode {
+	var out driver.EgressMode
+	for _, in := range instances {
+		if egressRank[in.Egress] > egressRank[out] {
+			out = in.Egress
+		}
+	}
+	return out
 }
 
 // GetInstalledPlugin godoc
@@ -275,7 +331,7 @@ func (h *PluginAdminHandler) GetInstalledPlugin(c *gin.Context) {
 		h.fail(c, err)
 		return
 	}
-	h.ok(c, view)
+	h.ok(c, h.withEgress(c.Request.Context(), view))
 }
 
 // PluginInstancesDTO is where a plugin runs: its instances on each node.
@@ -340,7 +396,7 @@ func (h *PluginAdminHandler) SetInstalledPluginEnabled(c *gin.Context) {
 		h.fail(c, err)
 		return
 	}
-	h.ok(c, view)
+	h.ok(c, h.withEgress(c.Request.Context(), view))
 }
 
 // ActivatePluginVersionRequest picks a stored version.
@@ -370,7 +426,7 @@ func (h *PluginAdminHandler) ActivatePluginVersion(c *gin.Context) {
 		h.fail(c, err)
 		return
 	}
-	h.ok(c, view)
+	h.ok(c, h.withEgress(c.Request.Context(), view))
 }
 
 // SetPluginRemoteURLRequest moves a remote plugin.
@@ -400,7 +456,7 @@ func (h *PluginAdminHandler) SetPluginRemoteURL(c *gin.Context) {
 		h.fail(c, err)
 		return
 	}
-	h.ok(c, view)
+	h.ok(c, h.withEgress(c.Request.Context(), view))
 }
 
 // RotatePluginSecret godoc
@@ -418,7 +474,7 @@ func (h *PluginAdminHandler) RotatePluginSecret(c *gin.Context) {
 		h.fail(c, err)
 		return
 	}
-	h.ok(c, view)
+	h.ok(c, h.withEgress(c.Request.Context(), view))
 }
 
 // SetPluginAudienceRequest limits a plugin to some workspaces.
@@ -455,7 +511,7 @@ func (h *PluginAdminHandler) SetPluginAudience(c *gin.Context) {
 		h.fail(c, err)
 		return
 	}
-	h.ok(c, view)
+	h.ok(c, h.withEgress(c.Request.Context(), view))
 }
 
 // PluginAudienceTenant is a workspace as the audience picker shows it.

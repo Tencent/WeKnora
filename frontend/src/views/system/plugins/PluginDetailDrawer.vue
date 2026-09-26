@@ -59,16 +59,27 @@
         <h4 class="setting-drawer__section-title">{{ t('pluginAdmin.detail.nodes') }}</h4>
         <p v-if="instanceError" class="form-desc">{{ instanceError }}</p>
         <p v-else-if="instances.length === 0" class="form-desc">{{ t('pluginAdmin.detail.noNodes') }}</p>
-        <ul v-else class="line-list">
-          <li v-for="n in instances" :key="n.node">
-            <t-tag size="small" variant="light" :theme="n.state === 'ready' ? 'success' : 'danger'">
-              {{ t(`pluginAdmin.nodeState.${n.state}`) }}
-            </t-tag>
-            <code>{{ n.node }}</code>
-            <span class="line-list__muted">v{{ n.version }}</span>
-            <span v-if="n.error" class="line-list__error">{{ n.error }}</span>
-          </li>
-        </ul>
+        <template v-else>
+          <div v-if="egressWarning" class="egress-warning">
+            <t-tag size="small" variant="light" theme="warning">{{ t('pluginAdmin.egress.unenforced') }}</t-tag>
+            <span>{{ t('pluginAdmin.egress.unenforcedHint') }}</span>
+          </div>
+          <ul class="line-list">
+            <li v-for="n in instances" :key="n.node">
+              <t-tag size="small" variant="light" :theme="n.state === 'ready' ? 'success' : 'danger'">
+                {{ t(`pluginAdmin.nodeState.${n.state}`) }}
+              </t-tag>
+              <code>{{ n.node }}</code>
+              <span class="line-list__muted">v{{ n.version }}</span>
+              <t-tooltip v-if="n.egress" :content="t(`pluginAdmin.egress.hint.${n.egress}`)">
+                <t-tag size="small" variant="outline" :theme="egressTheme(n.egress)">
+                  {{ t(`pluginAdmin.egress.mode.${n.egress}`) }}
+                </t-tag>
+              </t-tooltip>
+              <span v-if="n.error" class="line-list__error">{{ n.error }}</span>
+            </li>
+          </ul>
+        </template>
       </section>
 
       <section v-if="plugin.owner_tenant_id" class="setting-drawer__section">
@@ -213,6 +224,8 @@ import { localizedText } from '@/utils/localizedText'
 import {
   audienceOf,
   compareVersions,
+  egressTheme,
+  egressUnenforced,
   formatBytes,
   hasSystemConfig,
   isPackageUrl,
@@ -220,6 +233,7 @@ import {
   shortDigest,
   sortVersions,
   trustTheme,
+  weakestEgress,
 } from '../pluginManagementState'
 
 const props = defineProps<{ visible: boolean; plugin: InstalledPlugin | null; pending?: boolean }>()
@@ -238,6 +252,8 @@ const versions = computed(() => sortVersions(props.plugin?.versions ?? []))
 
 const instances = ref<PluginInstance[]>([])
 const instanceError = ref('')
+// The plugin asks for outbound access that some instance is not held to.
+const egressWarning = computed(() => egressUnenforced(manifest.value, weakestEgress(instances.value)))
 const systemSchema = ref<ConfigSchema | null>(null)
 const configValues = ref<ConfigValue>({})
 
@@ -506,6 +522,23 @@ async function uninstall() {
     flex-basis: 100%;
     font-size: var(--app-text-xs);
     color: var(--td-error-color);
+  }
+}
+
+.egress-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding: 8px 12px;
+  border-radius: var(--app-radius-md);
+  font-size: var(--app-text-sm);
+  line-height: 1.5;
+  color: var(--td-text-color-secondary);
+  background: var(--td-warning-color-1);
+
+  .t-tag {
+    flex-shrink: 0;
   }
 }
 

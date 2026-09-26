@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync/atomic"
 )
 
 // Subcommand is the helper's name on WeKnora's command line.
@@ -23,6 +24,23 @@ const Subcommand = "plugin-sandbox"
 // sandbox up (typically: the system refuses unprivileged user namespaces
 // the capabilities they need).
 const ExitSetupFailed = 125
+
+// probeFlag asks the helper only to set the sandbox up, with no plugin to
+// run: whether it can tells the plugin host if this system sandboxes.
+const probeFlag = "--probe"
+
+// ProbeArgs are the helper's arguments for a probe.
+func ProbeArgs() []string { return []string{Subcommand, probeFlag} }
+
+var helper atomic.Bool
+
+// RegisterHelper records that this program runs Main when started with
+// Subcommand, as WeKnora's main does. The plugin host only probes for, and
+// by default uses, a sandbox the program can start.
+func RegisterHelper() { helper.Store(true) }
+
+// HelperRegistered reports whether RegisterHelper was called.
+func HelperRegistered() bool { return helper.Load() }
 
 // Relay forwards a loopback port inside the namespace to a unix socket
 // outside it.

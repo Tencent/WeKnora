@@ -5316,6 +5316,22 @@ export default {
       degraded: '异常',
       stopped: '未加载'
     },
+    egress: {
+      mode: {
+        sandboxed: '网络沙箱',
+        networkPolicy: 'NetworkPolicy',
+        proxy: '仅代理',
+        unmanaged: '不受管控'
+      },
+      hint: {
+        sandboxed: '插件进程运行在独立的网络命名空间中，只能经出口代理访问外部，出网权限被强制执行。',
+        networkPolicy: '插件 Pod 受 Kubernetes NetworkPolicy 约束，只能访问 DNS 与 WeKnora，经出口代理出网；需集群网络插件支持 NetworkPolicy。',
+        proxy: '插件进程经 HTTP(S)_PROXY 使用出口代理，但忽略代理变量的代码仍可直连外部。在 Linux 上允许非特权用户命名空间即可启用网络沙箱。',
+        unmanaged: '插件运行在 WeKnora 无法管控的环境（远程服务），出网权限不受约束。'
+      },
+      unenforced: '出网未强制',
+      unenforcedHint: '该插件声明了出网权限，但至少有一个实例的出网未被强制限制，插件代码可以绕过出口代理直接访问外部。'
+    },
     source: {
       upload: '上传',
       url: 'URL'

@@ -24,6 +24,9 @@ func runPluginHost() int {
 
 // subcommand runs a subcommand named on the command line, if any.
 func subcommand() (code int, ran bool) {
+	// This binary runs the helper below, so the plugin host (embedded or
+	// standalone) can sandbox plugins with it.
+	sandbox.RegisterHelper()
 	if len(os.Args) > 1 && os.Args[1] == "plugin-host" {
 		return runPluginHost(), true
 	}

@@ -176,3 +176,89 @@ func TestPluginAdminInstances(t *testing.T) {
 		t.Fatalf("no driver = %d %s", w.Code, w.Body.String())
 	}
 }
+
+// statusDriver reports fixed instances for one runtime.
+type statusDriver struct {
+	rt        manifest.RuntimeType
+	instances []driver.InstanceStatus
+}
+
+func (d statusDriver) Type() manifest.RuntimeType                     { return d.rt }
+func (statusDriver) Ensure(context.Context, *manifest.Manifest) error { return nil }
+func (statusDriver) Remove(context.Context, string, string) error     { return nil }
+func (statusDriver) Resolve(context.Context, string, uint64) (driver.Endpoint, error) {
+	return driver.Endpoint{}, nil
+}
+
+func (d statusDriver) Status(context.Context, string) ([]driver.InstanceStatus, error) {
+	return d.instances, nil
+}
+
+// The admin list flags a plugin by its least controlled instance: one
+// plugin host without the sandbox is enough for the grant not to hold.
+func TestPluginAdminListsEgress(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repo, store := plugintest.NewMemRepo(), &plugintest.MemStore{}
+	r := reconcile.New(reconcile.Options{Repo: repo, Store: store, Registry: registry.New(), CacheDir: t.TempDir()})
+	svc := install.NewService(repo, store, r, "0.5.0")
+	plugintest.Install(t, repo, store, plugintest.KitPackage(t, "1.0.0"), types.PluginStateEnabled)
+	row, _ := repo.GetPlugin(t.Context(), "acme.kit")
+	row.Runtime = string(manifest.RuntimeHost)
+	_ = repo.SavePlugin(t.Context(), row)
+
+	h := NewPluginAdminHandler(svc).WithDrivers(driver.NewSet(statusDriver{
+		rt: manifest.RuntimeHost, instances: []driver.InstanceStatus{
+			{Node: "app/1"},
+			{Node: "plugin-host:a/1", Egress: driver.EgressSandboxed},
+			{Node: "plugin-host:b/1", Egress: driver.EgressProxy},
+		},
+	}))
+	e := gin.New()
+	e.Use(middleware.ErrorHandler())
+	e.GET("/plugins", h.ListInstalledPlugins)
+	e.GET("/plugins/:id", h.GetInstalledPlugin)
+	var list struct {
+		Data []struct {
+			ID     string            `json:"id"`
+			Egress driver.EgressMode `json:"egress"`
+		} `json:"data"`
+	}
+	w := call(e, http.MethodGet, "/plugins", "", nil)
+	if err := json.Unmarshal(w.Body.Bytes(), &list); err != nil || len(list.Data) != 1 ||
+		list.Data[0].ID != "acme.kit" || list.Data[0].Egress != driver.EgressProxy {
+		t.Fatalf("list = %s", w.Body.String())
+	}
+	var one struct {
+		Data struct {
+			ActiveVersion string            `json:"active_version"`
+			Egress        driver.EgressMode `json:"egress"`
+		} `json:"data"`
+	}
+	w = call(e, http.MethodGet, "/plugins/acme.kit", "", nil)
+	if err := json.Unmarshal(w.Body.Bytes(), &one); err != nil || one.Data.ActiveVersion != "1.0.0" ||
+		one.Data.Egress != driver.EgressProxy {
+		t.Fatalf("get = %s", w.Body.String())
+	}
+}
+
+func TestWeakestEgress(t *testing.T) {
+	for _, tc := range []struct {
+		modes []driver.EgressMode
+		want  driver.EgressMode
+	}{
+		{nil, ""},
+		{[]driver.EgressMode{"", ""}, ""},
+		{[]driver.EgressMode{driver.EgressSandboxed, ""}, driver.EgressSandboxed},
+		{[]driver.EgressMode{driver.EgressNetworkPolicy, driver.EgressSandboxed}, driver.EgressNetworkPolicy},
+		{[]driver.EgressMode{driver.EgressSandboxed, driver.EgressProxy}, driver.EgressProxy},
+		{[]driver.EgressMode{driver.EgressUnmanaged, driver.EgressProxy}, driver.EgressUnmanaged},
+	} {
+		var instances []driver.InstanceStatus
+		for _, m := range tc.modes {
+			instances = append(instances, driver.InstanceStatus{Egress: m})
+		}
+		if got := weakestEgress(instances); got != tc.want {
+			t.Errorf("weakestEgress(%v) = %q, want %q", tc.modes, got, tc.want)
+		}
+	}
+}
