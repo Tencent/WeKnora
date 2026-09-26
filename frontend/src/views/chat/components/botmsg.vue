@@ -203,10 +203,6 @@ const emit = defineEmits(['scroll-bottom', 'render-complete-change', 'fork', 're
 const { t } = useI18n()
 const uiStore = useUIStore();
 let parentMd = ref()
-const { float: citationFloat, rebind: rebindCitations, cancelClose: cancelCitationClose, scheduleClose: scheduleCitationClose } = useChatCitationPopover(parentMd, {
-    getKnowledgeReferences: () => props.session?.knowledge_references,
-    sessionId: () => props.sessionId,
-});
 let reviewUrl = ref('')
 let reviewImg = ref(false)
 let isImgLoading = ref(false);
@@ -249,6 +245,11 @@ const props = defineProps({
         type: Boolean,
         default: false
     }
+});
+// The popover evaluates sessionId during setup, so it must follow defineProps.
+const { float: citationFloat, rebind: rebindCitations, cancelClose: cancelCitationClose, scheduleClose: scheduleCitationClose } = useChatCitationPopover(parentMd, {
+    getKnowledgeReferences: () => props.session?.knowledge_references,
+    sessionId: () => props.sessionId,
 });
 
 const canFork = computed(() => props.canFork === true && !props.embeddedMode)
