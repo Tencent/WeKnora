@@ -116,3 +116,55 @@ func TestRegisterValidates(t *testing.T) {
 		t.Fatal("invalid manifest must be rejected")
 	}
 }
+
+func thirdParty(id, version string, contributes manifest.Contributions) *manifest.Manifest {
+	publisher, _, _ := strings.Cut(id, ".")
+	return &manifest.Manifest{
+		SchemaVersion: manifest.SchemaVersion, ID: id, Version: version, Name: manifest.Text(id, nil),
+		Publisher: manifest.Publisher{ID: publisher}, Runtime: manifest.Runtime{Type: manifest.RuntimeDeclarative},
+		Contributes: contributes,
+	}
+}
+
+func TestReplaceAndUnregister(t *testing.T) {
+	r := New()
+	skill := func(id string) manifest.Contribution {
+		return manifest.Contribution{ID: id, Name: manifest.Text(id, nil), Path: "skills/" + id}
+	}
+	if err := r.Register(builtin("weknora.core", manifest.Contributions{
+		manifest.PointTools: {contribution("thinking", 0, "thinking")},
+	})); err != nil {
+		t.Fatal(err)
+	}
+	v1 := thirdParty("acme.kit", "1.0.0", manifest.Contributions{manifest.PointSkills: {skill("triage"), skill("old")}})
+	if err := r.Replace(v1); err != nil {
+		t.Fatalf("Replace as first install: %v", err)
+	}
+	v2 := thirdParty("acme.kit", "2.0.0", manifest.Contributions{manifest.PointSkills: {skill("triage"), skill("new")}})
+	if err := r.Replace(v2); err != nil {
+		t.Fatalf("upgrade: %v", err)
+	}
+	if m, _ := r.Plugin("acme.kit"); m.Version != "2.0.0" {
+		t.Fatalf("version = %s", m.Version)
+	}
+	if _, ok := r.Resolve(manifest.PointSkills, "acme.kit/old"); ok {
+		t.Fatal("contributions dropped by the upgrade must be gone")
+	}
+	if got := len(r.Contributions(manifest.PointSkills)); got != 2 {
+		t.Fatalf("skills after upgrade = %d, want 2", got)
+	}
+	if err := r.Unregister("acme.kit"); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := r.Plugin("acme.kit"); ok || len(r.Contributions(manifest.PointSkills)) != 0 {
+		t.Fatal("unregister must remove the plugin and its contributions")
+	}
+	if err := r.Unregister("weknora.core"); err == nil {
+		t.Fatal("builtins cannot be removed")
+	}
+	if err := r.Replace(builtin("weknora.core", manifest.Contributions{
+		manifest.PointTools: {contribution("thinking", 0)},
+	})); err == nil {
+		t.Fatal("builtins cannot be replaced")
+	}
+}

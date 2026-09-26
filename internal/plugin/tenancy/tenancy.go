@@ -54,7 +54,7 @@ func (s *Service) List(ctx context.Context, tenantID uint64) ([]TenantPlugin, er
 	plugins := s.registry.Plugins()
 	out := make([]TenantPlugin, 0, len(plugins))
 	for _, m := range plugins {
-		tp := TenantPlugin{Manifest: m, Enabled: true}
+		tp := TenantPlugin{Manifest: m, Enabled: enabledByDefault(m)}
 		if r, ok := byID[m.ID]; ok {
 			tp.Enabled = r.Enabled || m.Required
 			tp.UpdatedAt = r.UpdatedAt
@@ -81,35 +81,39 @@ func (s *Service) SetEnabled(
 		Enabled:   enabled,
 		UpdatedBy: updatedBy,
 		UpdatedAt: time.Now(),
-	})
+	}, "enabled")
 }
+
+// enabledByDefault is a plugin's switch in a tenant that never set it:
+// builtins are on, installed plugins wait for a tenant admin to opt in.
+func enabledByDefault(m *manifest.Manifest) bool { return m.Builtin }
 
 // EnabledFilter implements interfaces.PluginGate. If the switches cannot be
 // read it fails open: offering a disabled integration is recoverable,
 // hiding every integration on a database hiccup is not.
 func (s *Service) EnabledFilter(ctx context.Context, tenantID uint64) func(manifest.Point, string) bool {
-	disabled := map[string]bool{}
+	set := map[string]bool{}
 	rows, err := s.repo.List(ctx, tenantID)
 	if err != nil {
 		logger.Warnf(ctx, "[plugin] read tenant %d plugin switches: %v; treating all as enabled", tenantID, err)
 	}
 	for _, r := range rows {
-		if !r.Enabled {
-			disabled[r.PluginID] = true
-		}
+		set[r.PluginID] = r.Enabled
 	}
+	failOpen := err != nil
 	return func(point manifest.Point, id string) bool {
-		if len(disabled) == 0 {
-			return true
-		}
 		e, ok := s.registry.Resolve(point, id)
 		if !ok {
 			return true
 		}
-		if m, ok := s.registry.Plugin(e.PluginID); ok && m.Required {
+		m, ok := s.registry.Plugin(e.PluginID)
+		if !ok || m.Required || failOpen {
 			return true
 		}
-		return !disabled[e.PluginID]
+		if enabled, ok := set[e.PluginID]; ok {
+			return enabled
+		}
+		return enabledByDefault(m)
 	}
 }
 

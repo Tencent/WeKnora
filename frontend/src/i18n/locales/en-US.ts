@@ -1879,6 +1879,8 @@ export default {
       },
     },
     skills: {
+      pluginSection: 'From enabled plugins',
+      pluginSectionHint: 'Pick a skill a plugin provides to add it to the library; then install it into sandboxes like any other skill.',
       title: 'Skill Management',
       description: 'Skills live in the workspace catalog. Register them first, then install onto one or more sandboxes. An agent can only enable skills that are ready on its sandbox.',
       helpTooltip: 'A catalog skill does not have to be installed anywhere. Scripts only run after the skill is installed into the sandbox image the agent uses. Docker, Cube, and E2B images are not interchangeable — install once per sandbox.',
@@ -2729,10 +2731,117 @@ export default {
       parseCurrentKnowledgeBaseFailed: 'Failed to parse current knowledge base'
     }
   },
+  pluginAdmin: {
+    title: 'Plugin management',
+    description: 'Install and manage plugins for the whole platform. Every workspace sees an installed plugin, and each one enables it for itself; disabling a plugin here unloads it on every node.',
+    installButton: 'Install plugin',
+    empty: 'No plugins installed yet',
+    loadFailed: 'Failed to load installed plugins',
+    saveFailed: 'Failed to save',
+    enabledToast: 'Enabled platform-wide',
+    disabledToast: 'Disabled platform-wide',
+    platformSwitch: 'Enable or disable platform-wide',
+    publisher: 'Publisher',
+    contributions: 'What it adds',
+    permissions: 'Permissions and remote access',
+    state: {
+      running: 'Running',
+      failed: 'Failed to load',
+      disabled: 'Disabled',
+      pending: 'Loading'
+    },
+    nodeState: {
+      ready: 'Ready',
+      starting: 'Starting',
+      degraded: 'Degraded',
+      stopped: 'Not loaded'
+    },
+    source: {
+      upload: 'Upload',
+      url: 'URL'
+    },
+    change: {
+      install: 'New install',
+      upgrade: 'Upgrade from v{from}',
+      downgrade: 'Downgrade from v{from}',
+      reinstall: 'Reinstall'
+    },
+    permission: {
+      remote: 'Remote service',
+      egress: 'Network egress',
+      hostApi: 'WeKnora API',
+      events: 'Events'
+    },
+    install: {
+      title: 'Install plugin',
+      description: 'Upload a .wkp package or give its download URL, review it, then install.',
+      sourceSection: 'Package',
+      mode: {
+        upload: 'Upload file',
+        url: 'From URL'
+      },
+      fileLabel: 'Package file',
+      chooseFile: 'Choose file',
+      noFile: 'No file chosen',
+      fileHint: 'A .wkp file (a zip with plugin.yaml), up to 64 MB.',
+      urlLabel: 'Download URL',
+      urlHint: 'The server downloads this URL; private network addresses are refused.',
+      reviewSection: 'Review before installing',
+      noPermissions: 'This plugin asks for no extra permissions.',
+      configNotice: 'This plugin needs configuration: platform settings are in its details after installing, and workspace admins fill in workspace settings in Plugins.',
+      tenantNotice: 'Once installed the plugin is visible to every workspace but disabled until a workspace admin enables it.',
+      digest: 'Package digest',
+      inspect: 'Inspect package',
+      confirm: {
+        install: 'Install',
+        upgrade: 'Upgrade',
+        downgrade: 'Install older version',
+        reinstall: 'Reinstall'
+      },
+      inspectFailed: 'Could not read the package',
+      failed: 'Install failed',
+      done: 'Installed {name}'
+    },
+    detail: {
+      overview: 'Overview',
+      runtime: 'Runtime',
+      source: 'Source',
+      homepage: 'Homepage',
+      license: 'License',
+      engines: 'Compatible versions',
+      nodes: 'Nodes',
+      noNodes: 'No node has the plugin loaded',
+      versions: 'Versions',
+      active: 'Active',
+      activate: 'Switch to this version',
+      rollback: 'Roll back to this version',
+      activateConfirm: 'Make v{version} the active version? Every node reloads the plugin.',
+      activated: 'Switched to v{version}',
+      activateFailed: 'Failed to switch versions',
+      systemConfig: 'Platform settings',
+      systemConfigHint: 'Apply to every workspace, such as a service region or a platform-wide credential.',
+      configLoadFailed: 'Failed to load platform settings',
+      configSaved: 'Platform settings saved',
+      configSaveFailed: 'Failed to save platform settings',
+      danger: 'Uninstall',
+      uninstallHint: 'Removes the plugin and every stored version. Workspaces\' switches and settings are kept and come back if you reinstall.',
+      uninstall: 'Uninstall plugin',
+      uninstallConfirm: 'Uninstall? Every node unloads the plugin right away.',
+      uninstalled: 'Plugin uninstalled',
+      uninstallFailed: 'Uninstall failed'
+    }
+  },
   pluginCenter: {
+    installed: 'Installed',
+    configure: 'Configure',
+    configTitle: 'Configure {name}',
+    configDescription: 'This workspace\'s settings for the plugin, such as its API key. Secrets are stored encrypted and never shown again.',
+    configLoadFailed: 'Failed to load the plugin configuration',
+    configSaved: 'Plugin configuration saved',
+    configSaveFailed: 'Failed to save the plugin configuration',
     navGroup: 'Extensions',
     title: 'Plugins',
-    description: 'Every plugin this deployment provides, builtins included. Enable or disable them for this workspace: a disabled plugin\'s integrations leave the type lists and cannot be created, while existing ones keep working.',
+    description: 'Every plugin this deployment provides: builtins and the ones a system administrator installed. Enable or disable them for this workspace: a disabled plugin\'s integrations leave the type lists and cannot be created, while existing ones keep working. Installed plugins start disabled until a workspace admin enables them.',
     searchPlaceholder: 'Search plugins, IDs or integrations',
     allPoints: 'All',
     empty: 'No matching plugins',
@@ -2750,7 +2859,9 @@ export default {
       imChannels: 'IM channels',
       webSearch: 'Web search',
       tools: 'Agent tools',
-      parsers: 'Document parsing'
+      parsers: 'Document parsing',
+      skills: 'Skills',
+      mcpServers: 'MCP servers'
     }
   },
   schemaForm: {
@@ -5388,6 +5499,8 @@ export default {
     }
   },
   mcpSettings: {
+    fromPlugin: 'Plugin',
+    pluginNotConfigured: 'The plugin is not configured yet; fill in its settings in Plugins to use it',
     addUsageInstructions: "Add usage instructions",
     noUsageInstructions: "No usage instructions yet",
     title: 'MCP Services',

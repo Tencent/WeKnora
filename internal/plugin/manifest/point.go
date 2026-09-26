@@ -4,10 +4,8 @@ package manifest
 // The string is also the key under `contributes` in a manifest.
 type Point string
 
-// Extension points with a builtin implementation today. Points the design
-// opens later (mcpServers, skills, events, pipelineHooks, ui, ...) are added
-// here when their first contribution lands, so a manifest can never declare a
-// point nothing consumes.
+// Extension points. A point is added here when its first contribution lands,
+// so a manifest can never declare a point nothing consumes.
 const (
 	PointModelVendors Point = "modelVendors"
 	PointConnectors   Point = "connectors"
@@ -15,6 +13,10 @@ const (
 	PointWebSearch    Point = "webSearch"
 	PointTools        Point = "tools"
 	PointParsers      Point = "parsers"
+	// PointSkills contributes SKILL.md skill directories from the package.
+	PointSkills Point = "skills"
+	// PointMCPServers contributes MCP servers whose tools agents can use.
+	PointMCPServers Point = "mcpServers"
 )
 
 // PointInfo describes an extension point.
@@ -23,18 +25,24 @@ type PointInfo struct {
 	// ThirdParty reports whether plugins other than builtins may contribute
 	// to this point yet. Builtins always may.
 	ThirdParty bool `json:"thirdParty"`
+	// Declarative reports whether a plugin without code (runtime
+	// declarative) can contribute here: the manifest and package files
+	// describe the contribution completely.
+	Declarative bool `json:"declarative"`
 }
 
 // points lists every known extension point in display order. Vector stores,
 // object storage and sandboxes are deliberately absent: they are
 // infrastructure owned by WeKnora itself, not extension points.
 var points = []PointInfo{
-	{Point: PointModelVendors},
+	{Point: PointModelVendors, ThirdParty: true, Declarative: true},
 	{Point: PointConnectors},
 	{Point: PointIMChannels},
 	{Point: PointWebSearch},
 	{Point: PointTools},
 	{Point: PointParsers},
+	{Point: PointSkills, ThirdParty: true, Declarative: true},
+	{Point: PointMCPServers, ThirdParty: true, Declarative: true},
 }
 
 // Points returns every known extension point in display order.

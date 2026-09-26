@@ -26,6 +26,7 @@ import WebSearchSettings from '@/views/settings/WebSearchSettings.vue'
 import WeKnoraCloudSettings from '@/views/settings/WeKnoraCloudSettings.vue'
 import ModelCatalog from '@/views/system/ModelCatalog.vue'
 import PlatformAPIKeys from '@/views/system/PlatformAPIKeys.vue'
+import PluginManagement from '@/views/system/PluginManagement.vue'
 import RuntimeQueues from '@/views/system/RuntimeQueues.vue'
 import SystemAuditLog from '@/views/system/SystemAuditLog.vue'
 import SystemSettings from '@/views/system/SystemSettings.vue'
@@ -56,6 +57,7 @@ const COMPONENTS: Record<string, Component> = {
   'runtime-queues': RuntimeQueues,
   'platform-api-keys': PlatformAPIKeys,
   'system-audit-log': SystemAuditLog,
+  'plugin-admin': PluginManagement,
   system: SystemInfo,
 }
 

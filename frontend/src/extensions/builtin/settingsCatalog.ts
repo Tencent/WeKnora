@@ -100,6 +100,7 @@ const ROWS: Record<string, Row[]> = {
     { key: 'runtime-queues', label: 'settings.taskQueue', icon: icon('queue') },
     { key: 'platform-api-keys', label: 'platformApiKeys.title', icon: icon('secured') },
     { key: 'system-audit-log', label: 'system.globalSettings.audit.tabLabel', icon: icon('history') },
+    { key: 'plugin-admin', label: 'pluginAdmin.title', icon: icon('app') },
   ],
   platform: [
     { key: 'system', label: 'settings.versionInfo', icon: icon('info-circle') },

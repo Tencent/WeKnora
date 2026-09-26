@@ -29,10 +29,29 @@ func (r *pluginTenantSettingRepository) List(
 	return rows, err
 }
 
-// Upsert writes the row keyed by (tenant_id, plugin_id).
-func (r *pluginTenantSettingRepository) Upsert(ctx context.Context, s *types.PluginTenantSetting) error {
+func (r *pluginTenantSettingRepository) Get(
+	ctx context.Context, tenantID uint64, pluginID string,
+) (*types.PluginTenantSetting, error) {
+	var rows []types.PluginTenantSetting
+	err := r.db.WithContext(ctx).Where("tenant_id = ? AND plugin_id = ?", tenantID, pluginID).Limit(1).Find(&rows).Error
+	if err != nil || len(rows) == 0 {
+		return nil, err
+	}
+	return &rows[0], nil
+}
+
+// Upsert writes the row keyed by (tenant_id, plugin_id). On conflict only
+// the given columns change, so the switch and the configuration can be
+// saved independently.
+func (r *pluginTenantSettingRepository) Upsert(
+	ctx context.Context, s *types.PluginTenantSetting, columns ...string,
+) error {
+	if len(columns) == 0 {
+		columns = []string{"enabled", "config"}
+	}
+	columns = append(columns, "updated_by", "updated_at")
 	return r.db.WithContext(ctx).Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "tenant_id"}, {Name: "plugin_id"}},
-		DoUpdates: clause.AssignmentColumns([]string{"enabled", "config", "updated_by", "updated_at"}),
+		DoUpdates: clause.AssignmentColumns(columns),
 	}).Create(s).Error
 }

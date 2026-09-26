@@ -358,8 +358,9 @@ type skillSourceRequest struct {
 	// Source is exactly one of: "@owner/slug" or a slash-free slug (ClawHub),
 	// a github.com / gitlab.com / skills.sh / clawhub / skillhub page URL, a
 	// ClawHub skills-sh catalog page or "skills-sh:owner/repo/slug" locator, or
-	// a direct zip/SKILL.md URL. Bare "owner/slug" is rejected: it is both a
-	// ClawHub id and a GitHub repo. The fetch carries no credential.
+	// a direct zip/SKILL.md URL, or "plugin:<plugin id>/<skill id>" for a skill
+	// an installed plugin provides. Bare "owner/slug" is rejected: it is both
+	// a ClawHub id and a GitHub repo. The fetch carries no credential.
 	Source string `json:"source"`
 }
 

@@ -73,6 +73,7 @@ import {
   type SettingsAccessContext,
   type SettingsSection,
 } from '@/extensions/settingsSections'
+import { SYSTEM_ADMIN_SETTINGS_SECTIONS } from '@/config/settingsAccess'
 import { isToolboxSection, toolboxLocation } from '@/config/toolbox'
 import {
   buildSettingsRouteQuery,
@@ -195,7 +196,7 @@ const handleClose = () => {
   // 如果当前路由是设置页，返回上一页
   if (route.path === '/platform/settings') {
     const sec = route.query.section
-    if (sec === 'model-catalog' || sec === 'system-global' || sec === 'runtime-queues' || sec === 'platform-api-keys' || sec === 'system-audit-log') {
+    if (typeof sec === 'string' && SYSTEM_ADMIN_SETTINGS_SECTIONS.has(sec)) {
       router.push('/platform/knowledge-bases')
     } else {
       router.back()

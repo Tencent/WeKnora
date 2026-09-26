@@ -39,13 +39,16 @@ func (s *schemaTestServer) repository(t *testing.T) *weaviateRepository {
 		w.Header().Set("Content-Type", "application/json")
 		switch {
 		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/v1/schema/"):
-			if s.probe != nil {
-				s.probe()
-			}
+			// Read the state before the probe hook: a barrier in the hook
+			// releases every worker at once, and one that reads after
+			// another worker's create would see the class and never race.
 			s.mu.Lock()
 			s.probes++
 			exists := s.exists
 			s.mu.Unlock()
+			if s.probe != nil {
+				s.probe()
+			}
 			if !exists {
 				w.WriteHeader(http.StatusNotFound)
 				return

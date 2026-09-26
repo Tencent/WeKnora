@@ -36,8 +36,12 @@ type MCPServiceResponse struct {
 	StdioConfig       *types.MCPStdioConfig    `json:"stdio_config,omitempty"`
 	EnvVars           types.MCPEnvVars         `json:"env_vars,omitempty"`
 	IsBuiltin         bool                     `json:"is_builtin"`
-	CreatedAt         time.Time                `json:"created_at"`
-	UpdatedAt         time.Time                `json:"updated_at"`
+	// PluginID and PluginError describe a service an installed plugin
+	// provides; see types.MCPService.
+	PluginID    string    `json:"plugin_id,omitempty"`
+	PluginError string    `json:"plugin_error,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
 	// Credentials is the per-field "configured?" map. Embedded on the main
 	// response so the credential UI doesn't need a follow-up GET. The
 	// frontend never sees the actual secret value — only whether one is
@@ -99,6 +103,8 @@ func NewMCPServiceResponse(ctx context.Context, svc *types.MCPService) *MCPServi
 		StdioConfig:       svc.StdioConfig,
 		EnvVars:           svc.EnvVars,
 		IsBuiltin:         svc.IsBuiltin,
+		PluginID:          svc.PluginID,
+		PluginError:       svc.PluginError,
 		CreatedAt:         svc.CreatedAt,
 		UpdatedAt:         svc.UpdatedAt,
 	}
@@ -173,6 +179,8 @@ func NewSharedAgentMCPServiceResponses(svcs []*types.MCPService) []*MCPServiceRe
 			Enabled:           s.Enabled,
 			TransportType:     s.TransportType,
 			IsBuiltin:         s.IsBuiltin,
+			PluginID:          s.PluginID,
+			PluginError:       s.PluginError,
 		})
 	}
 	return out

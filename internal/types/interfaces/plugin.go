@@ -10,7 +10,11 @@ import (
 // PluginTenantSettingRepository stores per-tenant plugin switches.
 type PluginTenantSettingRepository interface {
 	List(ctx context.Context, tenantID uint64) ([]types.PluginTenantSetting, error)
-	Upsert(ctx context.Context, setting *types.PluginTenantSetting) error
+	// Get returns (nil, nil) when the tenant never changed the plugin.
+	Get(ctx context.Context, tenantID uint64, pluginID string) (*types.PluginTenantSetting, error)
+	// Upsert inserts the row, or updates only the given columns of an
+	// existing one (every column when none are given).
+	Upsert(ctx context.Context, setting *types.PluginTenantSetting, columns ...string) error
 }
 
 // PluginGate tells integrations which contributions a tenant has enabled.
@@ -22,4 +26,18 @@ type PluginGate interface {
 	// ID may be qualified or a builtin alias; contributions the registry
 	// does not know count as enabled, leaving existence to the domain.
 	EnabledFilter(ctx context.Context, tenantID uint64) func(point manifest.Point, id string) bool
+}
+
+// PluginRepository stores installed (non-builtin) plugins and their versions.
+type PluginRepository interface {
+	ListPlugins(ctx context.Context) ([]types.InstalledPlugin, error)
+	// GetPlugin returns (nil, nil) when the plugin is not installed.
+	GetPlugin(ctx context.Context, id string) (*types.InstalledPlugin, error)
+	SavePlugin(ctx context.Context, p *types.InstalledPlugin) error
+	// DeletePlugin removes the plugin and every stored version.
+	DeletePlugin(ctx context.Context, id string) error
+	ListVersions(ctx context.Context, pluginID string) ([]types.PluginVersion, error)
+	// GetVersion returns (nil, nil) when the version is not stored.
+	GetVersion(ctx context.Context, pluginID, version string) (*types.PluginVersion, error)
+	SaveVersion(ctx context.Context, v *types.PluginVersion) error
 }

@@ -151,20 +151,9 @@ func (rt *Runtime) applyOverlayValidated(data []byte, baseDir string, validate f
 		}
 		vendor, exists := next[id]
 		if !exists {
-			vendor = &Provider{Definition: &providers.Definition{
-				ID:              id,
-				Name:            id,
-				API:             api.APIOpenAICompletions,
-				DefaultBaseURLs: map[types.ModelType]string{},
-				ModelTypes: []types.ModelType{
-					types.ModelTypeKnowledgeQA,
-				},
-				RequiresAuth: true,
-				Auth:         providers.AuthBearer,
-				Order:        1000,
-			}, catalog: catalog.New(nil)}
+			vendor = newOverlayVendor(id)
 		}
-		if err := applyOverlayProvider(vendor, p, baseDir); err != nil {
+		if err := applyOverlayProvider(vendor, p, baseDir, interpolateEnv); err != nil {
 			return fmt.Errorf("provider %s: %w", id, err)
 		}
 		normalizeProvider(vendor)
@@ -180,7 +169,26 @@ func (rt *Runtime) applyOverlayValidated(data []byte, baseDir string, validate f
 	return nil
 }
 
-func applyOverlayProvider(v *Provider, p OverlayProvider, baseDir string) error {
+// newOverlayVendor is the starting point of a vendor an overlay declares.
+func newOverlayVendor(id string) *Provider {
+	return &Provider{Definition: &providers.Definition{
+		ID:              id,
+		Name:            id,
+		API:             api.APIOpenAICompletions,
+		DefaultBaseURLs: map[types.ModelType]string{},
+		ModelTypes: []types.ModelType{
+			types.ModelTypeKnowledgeQA,
+		},
+		RequiresAuth: true,
+		Auth:         providers.AuthBearer,
+		Order:        1000,
+	}, catalog: catalog.New(nil)}
+}
+
+// applyOverlayProvider patches v. expand rewrites URLs, the API key and
+// header values: the deployment overlay expands environment variables, a
+// plugin's definition is taken literally.
+func applyOverlayProvider(v *Provider, p OverlayProvider, baseDir string, expand func(string) string) error {
 	entries := v.Models()
 	if p.Name != "" {
 		v.Name = p.Name
@@ -204,22 +212,22 @@ func applyOverlayProvider(v *Provider, p OverlayProvider, baseDir string) error 
 		v.API = p.API
 	}
 	if p.BaseURL != "" {
-		v.DefaultBaseURLs[types.ModelTypeKnowledgeQA] = interpolateEnv(p.BaseURL)
+		v.DefaultBaseURLs[types.ModelTypeKnowledgeQA] = expand(p.BaseURL)
 	}
 	for k, u := range p.BaseURLs {
 		t, ok := models.ParseModelType(k)
 		if !ok {
 			return fmt.Errorf("unknown model type %q in base_urls", k)
 		}
-		v.DefaultBaseURLs[t] = interpolateEnv(u)
+		v.DefaultBaseURLs[t] = expand(u)
 	}
 	if p.APIKey != "" {
-		v.DefaultAPIKey = interpolateEnv(p.APIKey)
+		v.DefaultAPIKey = expand(p.APIKey)
 	}
 	if len(p.Headers) > 0 {
 		headers := make(map[string]string, len(p.Headers))
 		for k, val := range p.Headers {
-			headers[k] = interpolateEnv(val)
+			headers[k] = expand(val)
 		}
 		v.Headers = headers
 	}

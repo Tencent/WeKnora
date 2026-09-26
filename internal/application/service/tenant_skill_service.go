@@ -56,6 +56,19 @@ const (
 )
 
 // TenantSkillService owns the skill image lifecycle for sandbox configs.
+// PluginSkillArchiver builds the bundle of a skill an installed plugin
+// provides, for a workspace that has the plugin enabled.
+type PluginSkillArchiver interface {
+	Archive(ctx context.Context, tenantID uint64, source string) ([]byte, error)
+}
+
+// pluginSkillSourcePrefix marks an install source naming a plugin skill.
+const pluginSkillSourcePrefix = "plugin:"
+
+// SetPluginSkills lets installs name skills of installed plugins. It is
+// called once while the container is built.
+func (s *TenantSkillService) SetPluginSkills(a PluginSkillArchiver) { s.pluginSkills = a }
+
 type TenantSkillService struct {
 	skills        repository.TenantSkillRepository
 	configs       repository.TenantSandboxConfigRepository
@@ -86,6 +99,10 @@ type TenantSkillService struct {
 	// sourceHTTP pulls remote skill archives. Nil means the package SSRF-safe
 	// default; tests inject httptest clients.
 	sourceHTTP *http.Client
+
+	// pluginSkills turns a "plugin:<plugin>/<skill>" source into a bundle
+	// from an installed plugin. Nil until the plugin runtime is wired.
+	pluginSkills PluginSkillArchiver
 
 	// cleanupTimeout bounds one piece of compensating work. Injectable so a
 	// test can let an install outlast it, which every real install does.

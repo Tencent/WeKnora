@@ -5,8 +5,36 @@ import { localizedText } from '../../utils/localizedText'
 
 /** Extension points in the order the plugin center shows them. */
 export const EXTENSION_POINTS: ExtensionPoint[] = [
-  'modelVendors', 'connectors', 'imChannels', 'webSearch', 'tools', 'parsers',
+  'modelVendors', 'connectors', 'imChannels', 'webSearch', 'tools', 'parsers', 'skills', 'mcpServers',
 ]
+
+/** Whether the workspace can configure the plugin (it declares config.tenant). */
+export function hasTenantConfig(m: PluginManifest): boolean {
+  return !!m.config?.tenantSchema?.properties && Object.keys(m.config.tenantSchema.properties).length > 0
+}
+
+/**
+ * Skills of enabled plugins, for the skill catalog's "from plugin" picker.
+ * Each carries the install source the backend understands.
+ */
+export function pluginSkillChoices(
+  list: readonly TenantPlugin[],
+  locale: string,
+): Array<{ source: string; name: string; plugin: string; description: string }> {
+  const out: Array<{ source: string; name: string; plugin: string; description: string }> = []
+  for (const p of list) {
+    if (!p.enabled) continue
+    for (const c of p.manifest.contributes.skills ?? []) {
+      out.push({
+        source: `plugin:${p.manifest.id}/${c.id}`,
+        name: localizedText(c.name, locale) || c.id,
+        plugin: localizedText(p.manifest.name, locale) || p.manifest.id,
+        description: localizedText(c.description, locale),
+      })
+    }
+  }
+  return out.sort((a, b) => a.name.localeCompare(b.name, locale))
+}
 
 /** How many contributions a plugin makes at each point, in point order. */
 export function contributionSummary(m: PluginManifest): Array<{ point: ExtensionPoint; count: number }> {

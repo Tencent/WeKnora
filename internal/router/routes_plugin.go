@@ -19,5 +19,27 @@ func RegisterPluginRoutes(r *gin.RouterGroup, h *handler.PluginHandler, g *rbacG
 		plugins.GET("/:id", g.Viewer(), h.GetPlugin)
 		// Turning a plugin off hides its integrations workspace-wide — Admin+.
 		plugins.PUT("/:id/enabled", g.Admin(), h.SetPluginEnabled)
+		// Workspace configuration carries credentials — Admin+ to read too.
+		plugins.GET("/:id/config", g.Admin(), h.GetPluginConfig)
+		plugins.PUT("/:id/config", g.Admin(), h.UpdatePluginConfig)
+	}
+}
+
+// RegisterPluginAdminRoutes registers plugin installation for system
+// administrators. Installing changes every tenant's catalog, so API keys
+// stay default-denied like the rest of /system/admin.
+func RegisterPluginAdminRoutes(r *gin.RouterGroup, h *handler.PluginAdminHandler, g *rbacGuards) {
+	plugins := r.Group("/system/admin/plugins", g.SystemAdmin())
+	{
+		plugins.GET("", h.ListInstalledPlugins)
+		plugins.POST("", h.InstallPlugin)
+		// Registered before /:id so the static segment wins.
+		plugins.POST("/inspect", h.InspectPlugin)
+		plugins.GET("/:id", h.GetInstalledPlugin)
+		plugins.DELETE("/:id", h.UninstallPlugin)
+		plugins.PUT("/:id/enabled", h.SetInstalledPluginEnabled)
+		plugins.PUT("/:id/active-version", h.ActivatePluginVersion)
+		plugins.GET("/:id/config", h.GetPluginSystemConfig)
+		plugins.PUT("/:id/config", h.UpdatePluginSystemConfig)
 	}
 }

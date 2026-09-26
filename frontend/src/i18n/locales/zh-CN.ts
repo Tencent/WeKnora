@@ -2665,6 +2665,8 @@ export default {
     }
   },
   mcpSettings: {
+    fromPlugin: '插件',
+    pluginNotConfigured: '插件尚未配置，请在插件中心填写配置后使用',
     addUsageInstructions: "添加使用说明",
     noUsageInstructions: "尚未填写使用说明",
     title: 'MCP 服务管理',
@@ -5251,10 +5253,117 @@ export default {
     belongsToOrg: '所属空间：',
     noCompatibleKbForAgent: '当前智能体的工具与作用域内知识库的能力不匹配，暂无可引用的知识库。'
   },
+  pluginAdmin: {
+    title: '插件管理',
+    description: '安装与管理本平台的插件。安装后所有空间都能看到，但每个空间需自行启用；停用会在所有节点卸载该插件。',
+    installButton: '安装插件',
+    empty: '还没有安装任何插件',
+    loadFailed: '加载已安装插件失败',
+    saveFailed: '保存失败',
+    enabledToast: '已在全平台启用',
+    disabledToast: '已在全平台停用',
+    platformSwitch: '全平台启用 / 停用',
+    publisher: '发布者',
+    contributions: '提供的能力',
+    permissions: '权限与外部访问',
+    state: {
+      running: '运行中',
+      failed: '加载失败',
+      disabled: '已停用',
+      pending: '加载中'
+    },
+    nodeState: {
+      ready: '就绪',
+      starting: '启动中',
+      degraded: '异常',
+      stopped: '未加载'
+    },
+    source: {
+      upload: '上传',
+      url: 'URL'
+    },
+    change: {
+      install: '新安装',
+      upgrade: '从 v{from} 升级',
+      downgrade: '从 v{from} 降级',
+      reinstall: '重新安装'
+    },
+    permission: {
+      remote: '访问远程服务',
+      egress: '网络出口',
+      hostApi: '调用 WeKnora API',
+      events: '订阅事件'
+    },
+    install: {
+      title: '安装插件',
+      description: '上传 .wkp 插件包或填写下载地址，审阅后安装。',
+      sourceSection: '插件包',
+      mode: {
+        upload: '上传文件',
+        url: '从 URL 下载'
+      },
+      fileLabel: '插件包文件',
+      chooseFile: '选择文件',
+      noFile: '未选择文件',
+      fileHint: '.wkp 文件（包含 plugin.yaml 的 zip），最大 64 MB。',
+      urlLabel: '下载地址',
+      urlHint: '服务端会下载该地址；不允许内网地址。',
+      reviewSection: '安装前审阅',
+      noPermissions: '该插件不申请任何额外权限。',
+      configNotice: '该插件需要配置：平台配置在安装后的详情中填写，空间配置由各空间管理员在插件中心填写。',
+      tenantNotice: '安装后插件对所有空间可见，但默认停用，由各空间管理员自行启用。',
+      digest: '包摘要',
+      inspect: '检查插件包',
+      confirm: {
+        install: '安装',
+        upgrade: '升级',
+        downgrade: '降级安装',
+        reinstall: '重新安装'
+      },
+      inspectFailed: '无法读取插件包',
+      failed: '安装失败',
+      done: '已安装 {name}'
+    },
+    detail: {
+      overview: '概览',
+      runtime: '运行方式',
+      source: '来源',
+      homepage: '主页',
+      license: '许可证',
+      engines: '兼容版本',
+      nodes: '节点状态',
+      noNodes: '当前没有节点加载该插件',
+      versions: '版本',
+      active: '当前版本',
+      activate: '切换到此版本',
+      rollback: '回滚到此版本',
+      activateConfirm: '将当前版本切换为 v{version}？所有节点会重新加载。',
+      activated: '已切换到 v{version}',
+      activateFailed: '切换版本失败',
+      systemConfig: '平台配置',
+      systemConfigHint: '对所有空间生效，例如服务区域或平台统一的凭证。',
+      configLoadFailed: '加载平台配置失败',
+      configSaved: '平台配置已保存',
+      configSaveFailed: '保存平台配置失败',
+      danger: '卸载',
+      uninstallHint: '删除插件及其全部版本；各空间的开关和配置会保留，重新安装后恢复。',
+      uninstall: '卸载插件',
+      uninstallConfirm: '确定卸载？所有节点会立即卸载该插件。',
+      uninstalled: '插件已卸载',
+      uninstallFailed: '卸载失败'
+    }
+  },
   pluginCenter: {
+    installed: '已安装',
+    configure: '配置',
+    configTitle: '配置 {name}',
+    configDescription: '本空间使用该插件时的配置，例如 API 密钥。密钥加密保存，不会再次显示。',
+    configLoadFailed: '加载插件配置失败',
+    configSaved: '插件配置已保存',
+    configSaveFailed: '保存插件配置失败',
     navGroup: '扩展',
     title: '插件',
-    description: '查看当前部署提供的全部插件（含内置插件），并为本空间启用或停用。停用后，该插件的集成不再出现在类型列表中、不能新建，已有实例不受影响。',
+    description: '本部署提供的所有插件，含内置插件与平台管理员安装的插件。在这里为当前空间启用或停用：停用后其集成不再出现在类型列表中、不能新建，已有的照常工作。安装的插件默认停用，需空间管理员启用。',
     searchPlaceholder: '搜索插件名称、ID 或集成',
     allPoints: '全部',
     empty: '没有匹配的插件',
@@ -5272,7 +5381,9 @@ export default {
       imChannels: 'IM 渠道',
       webSearch: '联网搜索',
       tools: 'Agent 工具',
-      parsers: '文档解析'
+      parsers: '文档解析',
+      skills: '技能',
+      mcpServers: 'MCP 服务'
     }
   },
   schemaForm: {
@@ -6282,6 +6393,8 @@ export default {
       },
     },
     skills: {
+      pluginSection: '来自已启用的插件',
+      pluginSectionHint: '选择一个插件提供的技能加入技能库，之后可像其他技能一样安装到沙箱。',
       title: '技能管理',
       description: '技能属于空间目录，可以只登记，也可以装到一份或多份沙箱。智能体只能启用当前沙箱里已就绪的技能。',
       helpTooltip: '目录里的技能可以不装任何沙箱。脚本要跑起来，必须装进智能体所用的那份沙箱镜像。Docker、Cube、E2B 互不通用，装到几份就要装几次。',

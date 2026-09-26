@@ -188,6 +188,22 @@
       </article>
 
       <template v-if="addStep === 0">
+        <section v-if="pluginSkills.length" class="setting-drawer__section">
+          <h4 class="setting-drawer__section-title">{{ $t('settings.skills.pluginSection') }}</h4>
+          <p class="installer-model-hint">{{ $t('settings.skills.pluginSectionHint') }}</p>
+          <div class="plugin-skill-list">
+            <button v-for="s in pluginSkills" :key="s.source" type="button" class="plugin-skill"
+              :class="{ 'is-selected': sourceInput === s.source }" :disabled="addBusy || !!registeredCatalog"
+              :aria-pressed="sourceInput === s.source" @click="pickPluginSkill(s.source)">
+              <span class="plugin-skill__head">
+                <span class="plugin-skill__name">{{ s.name }}</span>
+                <span class="plugin-skill__plugin">{{ s.plugin }}</span>
+              </span>
+              <span v-if="s.description" class="plugin-skill__desc">{{ s.description }}</span>
+            </button>
+          </div>
+        </section>
+
         <section class="setting-drawer__section">
           <h4 class="setting-drawer__section-title">{{ $t('settings.sandbox.skillSourceSection') }}</h4>
           <p class="installer-model-hint">{{ $t('settings.sandbox.skillSourceSectionHint', { size: maxSkillBundleMB })
@@ -351,6 +367,8 @@ import SandboxSkillsPanel from '@/components/SandboxSkillsPanel.vue'
 import SkillFilesDrawer from '@/components/SkillFilesDrawer.vue'
 import SandboxBackendBadge from '@/components/settings/SandboxBackendBadge.vue'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
+import { listPlugins } from '@/api/plugin'
+import { pluginSkillChoices } from './pluginCenterState'
 import ModelSelector from '@/components/ModelSelector.vue'
 import { useConfirmDelete } from '@/components/settings/useConfirmDelete'
 import { useConfigSkillInstallProgress } from '@/composables/useConfigSkillInstallProgress'
@@ -388,7 +406,7 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{ count: [value: number] }>()
 
-const { t, te } = useI18n()
+const { t, te, locale } = useI18n()
 const uiStore = useUIStore()
 const deploymentCapabilities = useDeploymentCapabilitiesStore()
 const confirmDelete = useConfirmDelete()
@@ -934,8 +952,28 @@ function resetAddWizard() {
 
 async function openAdd() {
   resetAddWizard()
+  void loadPluginSkills()
   await loadInstallerModel()
   showAdd.value = true
+}
+
+// Skills of the plugins this workspace enabled register through the same
+// source path as a pasted link, as "plugin:<plugin>/<skill>".
+const pluginSkills = ref<ReturnType<typeof pluginSkillChoices>>([])
+
+async function loadPluginSkills() {
+  try {
+    const res = await listPlugins()
+    pluginSkills.value = pluginSkillChoices(res.data || [], locale.value)
+  } catch {
+    pluginSkills.value = []
+  }
+}
+
+function pickPluginSkill(source: string) {
+  sourceInput.value = sourceInput.value === source ? '' : source
+  pendingFile.value = null
+  if (fileInputRef.value) fileInputRef.value.value = ''
 }
 
 function canJumpAddStep(index: number) {
@@ -2056,6 +2094,73 @@ onUnmounted(() => {
 
 .skill-source-row {
   width: 100%;
+}
+
+.plugin-skill-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 8px;
+}
+
+.plugin-skill {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--td-component-stroke);
+  border-radius: var(--app-radius-md);
+  background: var(--td-bg-color-container);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color var(--app-motion-fast) ease, background var(--app-motion-fast) ease;
+
+  &:hover:not(:disabled) {
+    border-color: var(--td-brand-color);
+  }
+
+  &.is-selected {
+    border-color: var(--td-brand-color);
+    background: color-mix(in srgb, var(--td-brand-color) 6%, transparent);
+  }
+
+  &:disabled {
+    cursor: not-allowed;
+    opacity: 0.6;
+  }
+
+  &__head {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  &__name {
+    font-size: var(--app-text-md);
+    font-weight: 500;
+    color: var(--td-text-color-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  &__plugin {
+    flex: none;
+    font-size: var(--app-text-xs);
+    color: var(--td-text-color-placeholder);
+  }
+
+  &__desc {
+    font-size: var(--app-text-sm);
+    color: var(--td-text-color-secondary);
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
 }
 
 .file-input-hidden {
