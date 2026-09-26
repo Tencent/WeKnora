@@ -585,6 +585,8 @@ import {
 import {
   buildImageProcessingConfig,
   resolveImagePipelineFromKb as resolveKbImagePipeline,
+  IMAGE_PIPELINE_DEFAULT,
+  IMAGE_PIPELINE_SMARTOCR,
 } from '@/utils/imageProcessingConfig'
 import { imageAttrDisplay, imageAttrConditionDisplay } from '@/utils/imageAttrDisplay'
 
@@ -928,7 +930,7 @@ const initFormData = (type: 'document' | 'faq' = 'document') => {
     // 方案没有「留空」选项：多模态开关决定是否处理图片，开了就一定要有
     // 方案可跑，所以默认落在 default（内部名，UI 显示为「传统」）。选中的
     // 方案决定旧观察开关的取值（见 onPipelineChange）。
-    imagePipeline: 'default',
+    imagePipeline: IMAGE_PIPELINE_DEFAULT,
     imagePipelineParams: {} as Record<string, unknown>,
     imageProcessingConfigSnapshot: null as Record<string, unknown> | null,
     asrConfig: {
@@ -1082,11 +1084,12 @@ const loadKBData = async (
       },
       // 旧库迁移：本选择器出现之前保存的知识库没有 image_pipeline，按后端
       // ResolveImagePipelineID 的同一规则落到具体方案——观察开关开着就是
-      // ob_cap_ocr，其余（包括根本没有 image_processing_config 的老库）落到
-      // default。存过的 id 还可能是更名前的 caption_ocr，同样归一到 default。
+      // smartocr，其余（包括根本没有 image_processing_config 的老库）落到
+      // default。存过的 id 还可能是更名前的 caption_ocr / ob_cap_ocr，
+      // 归一化规则在 resolveKbImagePipeline 里，与上传/重新解析弹窗共用。
       imagePipeline: resolveKbImagePipeline(kb),
       // 旧观察开关与选中的方案保持同一个意思：只有智能模式把它点亮。
-      imageAttrsEnabled: resolveKbImagePipeline(kb) === 'ob_cap_ocr',
+      imageAttrsEnabled: resolveKbImagePipeline(kb) === IMAGE_PIPELINE_SMARTOCR,
       imageActions: mergeImageActions(
         (kb as Record<string, any>).image_processing_config?.image_actions,
       ),
@@ -1290,7 +1293,7 @@ const handleMultimodalToggle = () => {
 const onPipelineChange = (value: string) => {
   if (!formData.value) return
   formData.value.imagePipeline = value
-  formData.value.imageAttrsEnabled = value === 'ob_cap_ocr'
+  formData.value.imageAttrsEnabled = value === IMAGE_PIPELINE_SMARTOCR
 }
 
 // 面板报上来的「选中的方案一个动作都没开」。只在多模态开启时阻止保存。

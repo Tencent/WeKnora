@@ -438,7 +438,7 @@
                           />
                         </div>
                         <div
-                          v-if="uiState.multimodalConfig.enabled && uiState.imagePipeline === 'ob_cap_ocr'"
+                          v-if="uiState.multimodalConfig.enabled && uiState.imagePipeline === IMAGE_PIPELINE_SMARTOCR"
                           class="setting-row setting-row-vertical"
                         >
                           <div class="setting-info">
@@ -484,7 +484,7 @@
                              .setting-info / .setting-control 都撑成 100% 宽，水平
                              排布必然溢出，开关被顶到容器右缘之外。挪出来后与其它
                              开关行共用同一套排版，右缘与「图片属性观察」对齐 -->
-                        <template v-if="uiState.multimodalConfig.enabled && uiState.imagePipeline === 'ob_cap_ocr'">
+                        <template v-if="uiState.multimodalConfig.enabled && uiState.imagePipeline === IMAGE_PIPELINE_SMARTOCR">
                           <div class="setting-row">
                             <div class="setting-info">
                               <label>{{ t('knowledgeEditor.advanced.multimodal.imageAttrsOcrOnUnobserved') }}</label>
@@ -662,7 +662,13 @@ import { listKnowledgeTags, mergeImageActions, fetchImageAttrSchema, FALLBACK_IM
 import { imageAttrDisplay, imageAttrConditionDisplay } from '@/utils/imageAttrDisplay'
 import KbUploadSourceDropdown from './KbUploadSourceDropdown.vue'
 import ImagePipelineSettings from '../ImagePipelineSettings.vue'
-import { resolveImagePipelineFromKb } from '@/utils/imageProcessingConfig'
+import {
+  buildPipelineFields,
+  resolveImagePipelineFromKb,
+  normalizeImagePipelineId,
+  IMAGE_PIPELINE_DEFAULT,
+  IMAGE_PIPELINE_SMARTOCR,
+} from '@/utils/imageProcessingConfig'
 import FolderPickerMenu, { type FolderOption } from './FolderPickerMenu.vue'
 import { folderOptionFromPath, sortFolderOptions } from '../folderTree'
 import type { KnowledgeProcessOverrides } from '@/types/knowledgeProcess'
@@ -716,7 +722,7 @@ interface UploadUIState {
   chunkingConfig: ChunkingUIConfig
   multimodalConfig: { enabled: boolean; vllmModelId: string; descriptionLanguage?: string; customInstructions?: string }
   // The image pipeline pick and its private tunables. The pick decides the
-  // legacy image_attrs_enabled switch (only ob_cap_ocr turns it on), which is
+  // legacy image_attrs_enabled switch (only smartocr turns it on), which is
   // derived at write time rather than stored.
   imagePipeline: string
   imagePipelineParams: Record<string, unknown>
@@ -1211,7 +1217,7 @@ function createDefaultUIState(): UploadUIState {
       tableMetadataInstructions: '',
     },
     multimodalConfig: { enabled: false, vllmModelId: '', descriptionLanguage: '', customInstructions: '' },
-    imagePipeline: 'default',
+    imagePipeline: IMAGE_PIPELINE_DEFAULT,
     imagePipelineParams: {},
     imageActions: mergeImageActions(),
     asrConfig: { enabled: false, modelId: '', language: '' },
@@ -1312,9 +1318,7 @@ function buildProcessOverrides(): KnowledgeProcessOverrides {
     enable_multimodel: state.multimodalConfig.enabled,
     // 旧观察开关跟随选中的方案（只有智能模式点亮它），与后端
     // EffectiveProcessConfig 的派生规则一致；方案的显式选择随行下发。
-    image_attrs_enabled: state.imagePipeline === 'ob_cap_ocr',
-    image_pipeline: state.imagePipeline,
-    image_pipeline_params: state.imagePipelineParams,
+    image_attrs_enabled: state.imagePipeline === IMAGE_PIPELINE_SMARTOCR,
     image_actions: {
       ocr: {
         // The KB's own conditions (mergeImageActions keeps a custom list), so
@@ -1350,6 +1354,20 @@ function buildProcessOverrides(): KnowledgeProcessOverrides {
     },
   }
 
+  // 方案的显式选择与私有参数由共享助手产出：没选方案、没有可调参数、或多模态
+  // 关着（此时本节的控件整个不显示，用户没得选）时整段不下发。
+  //
+  // 多模态关着时必须不下发：后端 EffectiveProcessConfig 一见到 image_pipeline
+  // 就会用方案 id 反推 ImageAttrsEnabled，那会把这里显式发的 false 顶回去，
+  // 于是「关掉多模态」对属性观察失去作用。这与知识库编辑器的写法规律一致。
+  Object.assign(
+    overrides,
+    buildPipelineFields(
+      state.multimodalConfig.enabled ? state.imagePipeline : '',
+      state.imagePipelineParams,
+    ),
+  )
+
   if (state.pdfForceScanned) {
     overrides.parser_engine_overrides = {
       pdf_force_scanned: 'true',
@@ -1380,13 +1398,13 @@ function applyOverridesToState(o?: KnowledgeProcessOverrides | null) {
   if (o.parser_engine_rules) s.chunkingConfig.parserEngineRules = o.parser_engine_rules
   if (o.enable_multimodel != null) s.multimodalConfig.enabled = o.enable_multimodel
   if (o.image_pipeline != null) {
-    // 存量覆盖里可能是更名前的 caption_ocr，归一到 default。
-    s.imagePipeline = o.image_pipeline === 'caption_ocr' ? 'default' : o.image_pipeline
+    // 存量覆盖里可能是更名前的 caption_ocr / ob_cap_ocr，交给共享助手归一。
+    s.imagePipeline = normalizeImagePipelineId(o.image_pipeline) || IMAGE_PIPELINE_DEFAULT
   }
   if (o.image_pipeline_params != null) s.imagePipelineParams = o.image_pipeline_params
   else if (o.image_attrs_enabled != null && o.image_pipeline == null) {
     // 旧版覆盖只带观察开关：按同一规则还原出方案选择。
-    s.imagePipeline = o.image_attrs_enabled ? 'ob_cap_ocr' : 'default'
+    s.imagePipeline = o.image_attrs_enabled ? IMAGE_PIPELINE_SMARTOCR : IMAGE_PIPELINE_DEFAULT
   }
   if (o.image_actions) s.imageActions = mergeImageActions(o.image_actions)
   if (o.vlm_config) {

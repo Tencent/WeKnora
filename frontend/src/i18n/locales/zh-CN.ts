@@ -7804,7 +7804,7 @@ export default {
         description: '提取图片中出现的文字。'
       }
     },
-    ob_cap_ocr: {
+    smartocr: {
       name: '智能模式',
       description: '先观察图片特征并进行图片描述，再根据图片特征决定是否调用OCR对图片进行识别，以节省模型调用次数并提升解析速度。'
     }

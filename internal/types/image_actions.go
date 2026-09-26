@@ -133,15 +133,20 @@ var SharedImageActions = []ImageActionSpec{
 type ImagePipelineID string
 
 const (
-	// ImagePipelineObCapOCR observes the registered attributes first, captions
+	// ImagePipelineSmartOCR observes the registered attributes first, captions
 	// in the same answer, then OCRs only when the attribute policy allows it.
 	// The id promises that observation comes before the decision; it does not
 	// promise that those three actions are the whole story.
-	ImagePipelineObCapOCR ImagePipelineID = "ob_cap_ocr"
+	ImagePipelineSmartOCR ImagePipelineID = "smartocr"
 	// ImagePipelineDefault is the manual path: the user picks which parsing
 	// actions run, and each runs for every image with no observation and no
 	// policy. It is the fallback whenever nothing else has been chosen.
 	ImagePipelineDefault ImagePipelineID = "default"
+	// ImagePipelineLegacyObCapOCR is the id ImagePipelineSmartOCR carried
+	// before it was renamed to match the label the panel shows. Configs saved
+	// since 2026-09 may name it, so it is normalized rather than honoured:
+	// see NormalizeImagePipelineID.
+	ImagePipelineLegacyObCapOCR ImagePipelineID = "ob_cap_ocr"
 	// ImagePipelineLegacyCaptionOCR is the id ImagePipelineDefault carried
 	// before the panel was reworked. Stored configs may still name it, so it
 	// is normalized rather than honoured: see NormalizeImagePipelineID.
@@ -153,7 +158,10 @@ const (
 // spelling, so every id that once named a shipped pipeline keeps resolving to
 // its successor; unknown ids pass through unchanged and the caller falls back.
 func NormalizeImagePipelineID(id ImagePipelineID) ImagePipelineID {
-	if id == ImagePipelineLegacyCaptionOCR {
+	switch id {
+	case ImagePipelineLegacyObCapOCR:
+		return ImagePipelineSmartOCR
+	case ImagePipelineLegacyCaptionOCR:
 		return ImagePipelineDefault
 	}
 	return id
@@ -183,7 +191,7 @@ type ImagePipelineSpec struct {
 // the trace label and the pipeline that actually runs can never disagree.
 func ImagePipelineIDFor(attrsEnabled bool) ImagePipelineID {
 	if attrsEnabled {
-		return ImagePipelineObCapOCR
+		return ImagePipelineSmartOCR
 	}
 	return ImagePipelineDefault
 }

@@ -103,7 +103,7 @@ func ResolveProcessConfig(kb *types.KnowledgeBase, overrides *types.KnowledgePro
 		eff.ImagePipelineParams = overrides.ImagePipelineParams
 		// The explicit pick also decides the legacy switch, so the fallback
 		// path and the run agree on which pipeline this document asked for.
-		eff.ImageAttrsEnabled = eff.ImagePipelineID == types.ImagePipelineObCapOCR
+		eff.ImageAttrsEnabled = eff.ImagePipelineID == types.ImagePipelineSmartOCR
 	}
 	if overrides.ImageActions != nil {
 		base := eff.ImageActions

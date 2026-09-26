@@ -260,7 +260,7 @@ func runObservationCaptionAction(ctx context.Context, r *runContext) error {
 	// pinned here: with it, the caption stays a by-product; an API caller
 	// passing false observes the attributes and records nothing to caption.
 	applyImageObservation(r.imageInfo, obs.Attrs, obs.Description, r.out,
-		r.BoolParamOr(obFieldKeyCaptureCaption, true))
+		r.BoolParamOr(smartFieldKeyCaptureCaption, true))
 	if !obs.Observed {
 		// The model ignored the attribute protocol — a user custom instruction
 		// may have derailed the format, or it answered in prose. Nothing is

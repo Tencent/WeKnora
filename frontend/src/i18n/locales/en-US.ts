@@ -7810,7 +7810,7 @@ export default {
         description: 'Extract the text that appears in the image.'
       }
     },
-    ob_cap_ocr: {
+    smartocr: {
       name: 'Smart',
       description:
         'Observe the image attributes and describe the image first, then decide from the attributes whether to run OCR, saving model calls and speeding up parsing.'

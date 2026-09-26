@@ -7804,7 +7804,7 @@ export default {
         description: '画像内に出現するテキストを抽出します。'
       }
     },
-    ob_cap_ocr: {
+    smartocr: {
       name: 'スマート',
       description:
         'まず画像の特徴を観察して説明を生成し、その特徴に基づいて OCR を実行するかどうかを判断します。モデル呼び出しを節約し、解析速度を向上させます。'

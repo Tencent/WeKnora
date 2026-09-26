@@ -110,7 +110,7 @@ const EXTRA_PREFIXES = [
   // being translated without touching the audit.
   'imageAttr.',
   // Image-pipeline panel text is keyed by the registry response too
-  // (imagePipeline.ob_cap_ocr.enable_ocr.label …), likewise runtime-built: a
+  // (imagePipeline.smartocr.label …), likewise runtime-built: a
   // pipeline or field added in the backend must keep being translated without
   // touching the audit. The panel's own wording is literal and lives in the
   // locale files under knowledgeEditor.advanced.multimodal.imagePipeline*.

@@ -7,19 +7,19 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
-func init() { registerImagePipeline(obCapOcrPipeline{}) }
+func init() { registerImagePipeline(smartOcrPipeline{}) }
 
-// obCapOcrPipeline observes first, then decides what to spend next. The id
+// smartOcrPipeline observes first, then decides what to spend next. The id
 // promises that observation comes before the decision, not that caption and OCR
 // are the only things that can happen afterwards — a refine or validate action
 // between the two does not make this name a lie.
-type obCapOcrPipeline struct{}
+type smartOcrPipeline struct{}
 
-func (obCapOcrPipeline) ID() types.ImagePipelineID { return types.ImagePipelineObCapOCR }
+func (smartOcrPipeline) ID() types.ImagePipelineID { return types.ImagePipelineSmartOCR }
 
-func (obCapOcrPipeline) Name() string { return "Observe, caption, then decide on OCR" }
+func (smartOcrPipeline) Name() string { return "Observe, caption, then decide on OCR" }
 
-func (obCapOcrPipeline) Description() string {
+func (smartOcrPipeline) Description() string {
 	return "Observe the image's attributes and describe it first, then decide " +
 		"from the attributes whether OCR is worth a pass, saving model calls."
 }
@@ -31,8 +31,8 @@ func (obCapOcrPipeline) Description() string {
 // two into one field would make an image's fate depend on which pipeline it
 // happened to be handled by.
 const (
-	obFieldKeyAllowOCR       = "allow_ocr"
-	obFieldKeyCaptureCaption = "capture_caption"
+	smartFieldKeyAllowOCR       = "allow_ocr"
+	smartFieldKeyCaptureCaption = "capture_caption"
 )
 
 // Fields declares this pipeline's panel controls. There are none on purpose:
@@ -43,16 +43,16 @@ const (
 // base therefore behaves exactly as it does today, with both defaults true.
 // The empty slice (not nil) keeps the endpoint's JSON an array rather than
 // null, so the panel contract stays uniform across pipelines.
-func (obCapOcrPipeline) Fields() []types.ImageFieldDef { return []types.ImageFieldDef{} }
+func (smartOcrPipeline) Fields() []types.ImageFieldDef { return []types.ImageFieldDef{} }
 
-func (obCapOcrPipeline) Run(ctx context.Context, r *runContext) error {
+func (smartOcrPipeline) Run(ctx context.Context, r *runContext) error {
 	// One request fills both the attribute slots and the caption slot, so there
 	// is no separate caption action to schedule here. The effective values are
 	// recorded before the branches below, not after: the skipped-OCR path is
 	// exactly the one where knowing which switches were in force matters most.
 	r.out["params"] = types.JSONMap{
-		obFieldKeyAllowOCR:       r.BoolParamOr(obFieldKeyAllowOCR, true),
-		obFieldKeyCaptureCaption: r.BoolParamOr(obFieldKeyCaptureCaption, true),
+		smartFieldKeyAllowOCR:       r.BoolParamOr(smartFieldKeyAllowOCR, true),
+		smartFieldKeyCaptureCaption: r.BoolParamOr(smartFieldKeyCaptureCaption, true),
 	}
 	if err := r.execute(ctx, types.ImageActionObservationCaption); err != nil {
 		return err
@@ -62,7 +62,7 @@ func (obCapOcrPipeline) Run(ctx context.Context, r *runContext) error {
 	// only says whether OCR is allowed at all. Both lines are recorded even
 	// when OCR is skipped, because the trace has to show the decision that was
 	// made rather than an OCR chunk that is simply missing.
-	want := r.BoolParamOr(obFieldKeyAllowOCR, true) &&
+	want := r.BoolParamOr(smartFieldKeyAllowOCR, true) &&
 		DecideOCR(r.imageInfo.Attrs, r.payload.ImageActions)
 	r.out["attr_policy"] = types.JSONMap{"ocr": want}
 	r.out["image_attrs"] = r.imageInfo.Attrs.Attrs

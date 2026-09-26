@@ -282,7 +282,7 @@ func (s *ImageMultimodalService) processImage(
 				"image_source_type": payload.ImageSourceType,
 				"parent_chunk_id":   payload.ChunkID,
 				// Which pipeline ran. Reading image_info alone cannot tell a
-				// caption_ocr run from an ob_cap_ocr run that observed and then
+				// default run from a smartocr run that observed and then
 				// skipped OCR.
 				"pipeline": string(pipeline.ID()),
 			})

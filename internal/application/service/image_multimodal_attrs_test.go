@@ -304,8 +304,8 @@ func TestProcessImageObservesAndDescribes(t *testing.T) {
 		ImageURL:        "local://img/0.png",
 		ChunkID:         "chunk-a",
 		ImagePipelineParams: map[string]any{
-			obFieldKeyAllowOCR:       true,
-			obFieldKeyCaptureCaption: true,
+			smartFieldKeyAllowOCR:       true,
+			smartFieldKeyCaptureCaption: true,
 		},
 		ImageAttrsEnabled: true,
 		ImageActions:      types.DefaultImageActions(),
@@ -370,8 +370,8 @@ func TestProcessImageMarksObservationFailed(t *testing.T) {
 		ImageURL:        "local://img/0.png",
 		ChunkID:         "chunk-a",
 		ImagePipelineParams: map[string]any{
-			obFieldKeyAllowOCR:       true,
-			obFieldKeyCaptureCaption: true,
+			smartFieldKeyAllowOCR:       true,
+			smartFieldKeyCaptureCaption: true,
 		},
 		ImageAttrsEnabled: true,
 		ImageActions:      types.DefaultImageActions(),
@@ -421,8 +421,8 @@ func TestProcessImageSkipsOCRForQuietAttr(t *testing.T) {
 		ChunkID:         "chunk-a",
 		// The ceiling stays on; the observation is what vetoes.
 		ImagePipelineParams: map[string]any{
-			obFieldKeyAllowOCR:       true,
-			obFieldKeyCaptureCaption: true,
+			smartFieldKeyAllowOCR:       true,
+			smartFieldKeyCaptureCaption: true,
 		},
 		ImageAttrsEnabled: true,
 		ImageActions:      types.DefaultImageActions(),
@@ -476,8 +476,8 @@ func TestProcessImageKeepsAttrsButDropsCaptionWhenCaptionsAreOff(t *testing.T) {
 		ImageURL:        "local://img/0.png",
 		ChunkID:         "chunk-a",
 		ImagePipelineParams: map[string]any{
-			obFieldKeyAllowOCR:       true,
-			obFieldKeyCaptureCaption: false,
+			smartFieldKeyAllowOCR:       true,
+			smartFieldKeyCaptureCaption: false,
 		},
 		ImageAttrsEnabled: true,
 		ImageActions:      types.DefaultImageActions(),
@@ -537,8 +537,8 @@ func TestProcessImageProseAnswerIsStillCaptionedAndOCRed(t *testing.T) {
 		ImageURL:        "local://img/0.png",
 		ChunkID:         "chunk-a",
 		ImagePipelineParams: map[string]any{
-			obFieldKeyAllowOCR:       true,
-			obFieldKeyCaptureCaption: true,
+			smartFieldKeyAllowOCR:       true,
+			smartFieldKeyCaptureCaption: true,
 		},
 		ImageAttrsEnabled: true,
 		ImageActions:      types.DefaultImageActions(),
@@ -594,8 +594,8 @@ func TestProcessImageLabelOnlyAnswerKeepsAttrsWithoutCaption(t *testing.T) {
 		ImageURL:        "local://img/0.png",
 		ChunkID:         "chunk-a",
 		ImagePipelineParams: map[string]any{
-			obFieldKeyAllowOCR:       true,
-			obFieldKeyCaptureCaption: true,
+			smartFieldKeyAllowOCR:       true,
+			smartFieldKeyCaptureCaption: true,
 		},
 		ImageAttrsEnabled: true,
 		ImageActions:      types.DefaultImageActions(),
@@ -688,8 +688,8 @@ func TestProcessImageSkipsUnreadableImage(t *testing.T) {
 		ImageURL:        "local://img/0.png",
 		ChunkID:         "chunk-a",
 		ImagePipelineParams: map[string]any{
-			obFieldKeyAllowOCR:       true,
-			obFieldKeyCaptureCaption: true,
+			smartFieldKeyAllowOCR:       true,
+			smartFieldKeyCaptureCaption: true,
 		},
 		ImageAttrsEnabled: true,
 		ImageActions:      types.DefaultImageActions(),

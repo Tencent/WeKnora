@@ -65,7 +65,7 @@ func runOneImagePipeline(t *testing.T, attrsEnabled bool, params map[string]any)
 // when an image came out wrong.
 //
 // The two pipelines own different keys on purpose: the default pipeline asks
-// whether to run a step, ob_cap_ocr asks whether OCR may be spent at all. Both
+// whether to run a step, smartocr asks whether OCR may be spent at all. Both
 // default to on, which is what an untouched knowledge base gets.
 func TestImagePipelineActionSequences(t *testing.T) {
 	cases := []struct {
@@ -78,22 +78,22 @@ func TestImagePipelineActionSequences(t *testing.T) {
 		wantVLMCalls int
 	}{
 		{
-			"observation, caption and OCR", true, true, true, types.ImagePipelineObCapOCR,
+			"observation, caption and OCR", true, true, true, types.ImagePipelineSmartOCR,
 			[]types.ImageActionID{types.ImageActionObservationCaption, types.ImageActionOCR},
 			2,
 		},
 		{
-			"observation and caption", true, false, true, types.ImagePipelineObCapOCR,
+			"observation and caption", true, false, true, types.ImagePipelineSmartOCR,
 			[]types.ImageActionID{types.ImageActionObservationCaption, types.ImageActionOCR},
 			2,
 		},
 		{
-			"observation, caption kept", true, true, false, types.ImagePipelineObCapOCR,
+			"observation, caption kept", true, true, false, types.ImagePipelineSmartOCR,
 			[]types.ImageActionID{types.ImageActionObservationCaption},
 			1,
 		},
 		{
-			"observation, caption dropped", true, false, false, types.ImagePipelineObCapOCR,
+			"observation, caption dropped", true, false, false, types.ImagePipelineSmartOCR,
 			[]types.ImageActionID{types.ImageActionObservationCaption},
 			1,
 		},
@@ -120,8 +120,8 @@ func TestImagePipelineActionSequences(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			params := map[string]any{
-				obFieldKeyCaptureCaption:     tc.caption,
-				obFieldKeyAllowOCR:           tc.ocr,
+				smartFieldKeyCaptureCaption:  tc.caption,
+				smartFieldKeyAllowOCR:        tc.ocr,
 				captionFieldKeyEnableCaption: tc.caption,
 				captionFieldKeyEnableOCR:     tc.ocr,
 			}
@@ -228,22 +228,22 @@ func TestParamFallsBackToDeclaredDefault(t *testing.T) {
 }
 
 // TestObservationPipelineDeclaresNoControls pins the panel contract of
-// ob_cap_ocr: the model decides from the observed attributes, so the pipeline
+// smartocr: the model decides from the observed attributes, so the pipeline
 // declares no fields and the panel renders nothing for it. Its two tunables
 // remain readable as parameters for an API caller, defaulting to true — the
 // behaviour an untouched knowledge base has always had.
 func TestObservationPipelineDeclaresNoControls(t *testing.T) {
-	pipeline := imagePipelineRegistry[types.ImagePipelineObCapOCR]
+	pipeline := imagePipelineRegistry[types.ImagePipelineSmartOCR]
 	if fields := pipeline.Fields(); len(fields) != 0 {
-		t.Errorf("ob_cap_ocr declares %d fields, want none — the panel must not offer manual switches",
+		t.Errorf("smartocr declares %d fields, want none — the panel must not offer manual switches",
 			len(fields))
 	}
 	r := &runContext{out: types.JSONMap{}, imageInfo: &types.ImageInfo{}, declared: pipeline.Fields()}
-	if !r.BoolParamOr(obFieldKeyAllowOCR, true) {
+	if !r.BoolParamOr(smartFieldKeyAllowOCR, true) {
 		t.Error("allow_ocr with no params must default to true")
 	}
-	r.params = map[string]any{obFieldKeyAllowOCR: false}
-	if r.BoolParamOr(obFieldKeyAllowOCR, true) {
+	r.params = map[string]any{smartFieldKeyAllowOCR: false}
+	if r.BoolParamOr(smartFieldKeyAllowOCR, true) {
 		t.Error("an explicit allow_ocr=false must override the pinned default")
 	}
 }
@@ -270,8 +270,8 @@ func TestUnknownPipelineFieldIsIgnored(t *testing.T) {
 // model request, and the standalone caption action is never scheduled.
 func TestObservationCaptionSharesOneCall(t *testing.T) {
 	r, model := runOneImagePipeline(t, true, map[string]any{
-		obFieldKeyCaptureCaption: true,
-		obFieldKeyAllowOCR:       false,
+		smartFieldKeyCaptureCaption: true,
+		smartFieldKeyAllowOCR:       false,
 	})
 	if len(model.prompts) != 1 {
 		t.Fatalf("VLM calls = %d (%v), want 1 — observation and caption must share a request",
@@ -299,8 +299,8 @@ func TestObservationCaptionSharesOneCall(t *testing.T) {
 // the attribute policy, which is the case image_info alone cannot explain.
 func TestObservationPipelineTrace(t *testing.T) {
 	r, _ := runOneImagePipeline(t, true, map[string]any{
-		obFieldKeyCaptureCaption: true,
-		obFieldKeyAllowOCR:       false,
+		smartFieldKeyCaptureCaption: true,
+		smartFieldKeyAllowOCR:       false,
 	})
 	if got := r.out["ocr_skipped"]; got != "attr_policy" {
 		t.Errorf(`out["ocr_skipped"] = %v, want "attr_policy"`, got)
@@ -334,17 +334,20 @@ func TestDefaultPipelineTrace(t *testing.T) {
 // TestImagePipelineIDsAreStable pins the two ids and the strings that reach the
 // trace — the labels a reader greps for.
 func TestImagePipelineIDsAreStable(t *testing.T) {
-	if got := types.ImagePipelineIDFor(true); got != types.ImagePipelineObCapOCR {
+	if got := types.ImagePipelineIDFor(true); got != types.ImagePipelineSmartOCR {
 		t.Errorf("ImagePipelineIDFor(true) = %q", got)
 	}
-	if got := string(types.ImagePipelineObCapOCR); got != "ob_cap_ocr" {
-		t.Errorf(`pipeline id = %q, want "ob_cap_ocr"`, got)
+	if got := string(types.ImagePipelineSmartOCR); got != "smartocr" {
+		t.Errorf(`pipeline id = %q, want "smartocr"`, got)
 	}
 	if got := string(types.ImagePipelineDefault); got != "default" {
 		t.Errorf(`pipeline id = %q, want "default"`, got)
 	}
 	if got := string(types.NormalizeImagePipelineID(types.ImagePipelineLegacyCaptionOCR)); got != "default" {
 		t.Errorf(`legacy id normalized = %q, want "default"`, got)
+	}
+	if got := string(types.NormalizeImagePipelineID(types.ImagePipelineLegacyObCapOCR)); got != "smartocr" {
+		t.Errorf(`legacy id normalized = %q, want "smartocr"`, got)
 	}
 }
 
