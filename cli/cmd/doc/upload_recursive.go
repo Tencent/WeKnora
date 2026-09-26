@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
@@ -84,7 +85,13 @@ func runUploadRecursive(ctx context.Context, opts *UploadOptions, fopts *cmdutil
 	channel := cmp.Or(opts.Channel, uploadChannel)
 
 	outcomes, runErr := cmdutil.RunBatch(ctx, matches, func(ctx context.Context, p string) error {
-		k, err := svc.CreateKnowledgeFromFile(ctx, kbID, p, meta, opts.EnableMultimodel, "", channel, nil)
+		// Path-qualified name so the server can rebuild the directory tree.
+		// CreateKnowledgeFromFile splits this into folder_path + file_name
+		// (types.SplitKnowledgeRelativePath), which is the same channel the web
+		// UI's folder upload uses. Passing "" here flattened every file into the
+		// KB root, losing the structure --recursive was asked to walk.
+		customFileName := knowledgeRelativePath(dir, p)
+		k, err := svc.CreateKnowledgeFromFile(ctx, kbID, p, meta, opts.EnableMultimodel, customFileName, channel, nil)
 		if err != nil {
 			// Per-file progress lines are human progress signal; suppress
 			// under --format json so they don't precede the JSON object on stdout.
@@ -145,6 +152,22 @@ func runUploadRecursive(ctx context.Context, opts *UploadOptions, fopts *cmdutil
 		}
 	}
 	return nil
+}
+
+// knowledgeRelativePath returns the path of file relative to root, using
+// forward slashes so the server's SplitKnowledgeRelativePath can split it
+// into folder_path + file_name.
+//
+// A file directly under root yields "" so the request stays byte-identical to
+// the pre-folder behaviour for the common "upload a flat directory" case --
+// only nested files gain a folder prefix. Returns "" if file is not under
+// root (defensive: walkMatches only ever yields paths under root).
+func knowledgeRelativePath(root, file string) string {
+	rel, err := filepath.Rel(root, file)
+	if err != nil || rel == "." || strings.HasPrefix(rel, "..") {
+		return ""
+	}
+	return filepath.ToSlash(rel)
 }
 
 // walkMatches returns every regular file under root whose base name matches
