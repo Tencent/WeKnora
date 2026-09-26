@@ -1,4 +1,3 @@
-import type { ConfigSchema } from '@/components/schema-form/schema'
 import { get, post, put, del } from '../../utils/request'
 
 // --- Types ---
@@ -73,20 +72,6 @@ export interface ConnectorMeta {
   priority: number
   auth_type: string
   capabilities: string[]
-  // Setup guide next to the credential form.
-  doc_url?: string
-  permission_doc_url?: string
-  permission_page_url?: string
-  required_permissions?: string[]
-  // Credential form: describes config.credentials for this connector.
-  config_schema?: ConfigSchema
-  // Settings form (config.settings) for connectors whose settings UI is
-  // not built in, such as plugin connectors.
-  settings_schema?: ConfigSchema
-  // Localized name / description of plugin connectors, keyed by locale.
-  names?: Record<string, string>
-  descriptions?: Record<string, string>
-  plugin_id?: string
 }
 
 export interface Resource {
@@ -103,9 +88,8 @@ export interface Resource {
 
 // --- API calls ---
 
-/** Connectors this deployment can create, with their credential forms. */
 export function getConnectorTypes() {
-  return get<ConnectorMeta[]>('/api/v1/datasource/types')
+  return get('/api/v1/datasource/types')
 }
 
 export function listDataSources(kbId: string) {
@@ -133,12 +117,8 @@ export function validateConnection(id: string) {
 }
 
 // Validate credentials without persisting (during creation or credential replacement).
-export function validateCredentials(
-  type: string,
-  credentials: Record<string, any>,
-  settings?: Record<string, any>,
-) {
-  return post('/api/v1/datasource/validate-credentials', { type, credentials, settings })
+export function validateCredentials(type: string, credentials: Record<string, any>) {
+  return post('/api/v1/datasource/validate-credentials', { type, credentials })
 }
 
 // listResources lists selectable resources for a data source. Pass parentId to

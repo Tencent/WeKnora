@@ -2,12 +2,7 @@ package datasource
 
 import (
 	"context"
-	"fmt"
-	"math"
-	"sort"
-	"sync"
 
-	"github.com/Tencent/WeKnora/internal/plugin/configschema"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -123,21 +118,15 @@ type FullSyncWithCursor interface {
 	) ([]types.FetchedItem, *types.SyncCursor, error)
 }
 
-// ConnectorRegistry manages the registration and lookup of available
-// connectors. Installed plugins add and remove connectors while the server
-// runs, so it is safe for concurrent use.
+// ConnectorRegistry manages the registration and lookup of available connectors
 type ConnectorRegistry struct {
-	mu         sync.RWMutex
 	connectors map[string]Connector
-	// plugins holds the metadata of connectors installed plugins registered.
-	plugins map[string]ConnectorMetadata
 }
 
 // NewConnectorRegistry creates a new connector registry
 func NewConnectorRegistry() *ConnectorRegistry {
 	return &ConnectorRegistry{
 		connectors: make(map[string]Connector),
-		plugins:    make(map[string]ConnectorMetadata),
 	}
 }
 
@@ -149,51 +138,12 @@ func (r *ConnectorRegistry) Register(connector Connector) error {
 	if connector.Type() == "" {
 		return ErrConnectorTypeEmpty
 	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
 	r.connectors[connector.Type()] = connector
 	return nil
 }
 
-// RegisterPlugin adds or replaces a plugin's connector with the metadata it
-// is listed under. It refuses to shadow a builtin connector.
-func (r *ConnectorRegistry) RegisterPlugin(connector Connector, meta ConnectorMetadata) error {
-	if connector == nil {
-		return ErrConnectorNil
-	}
-	t := connector.Type()
-	if t == "" {
-		return ErrConnectorTypeEmpty
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if _, exists := r.connectors[t]; exists {
-		if _, isPlugin := r.plugins[t]; !isPlugin {
-			return fmt.Errorf("connector type %s already exists", t)
-		}
-	}
-	meta.Type = t
-	r.connectors[t] = connector
-	r.plugins[t] = meta
-	return nil
-}
-
-// Unregister removes a plugin's connector; builtins stay. Syncs already
-// running keep the connector they started with.
-func (r *ConnectorRegistry) Unregister(connectorType string) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if _, isPlugin := r.plugins[connectorType]; !isPlugin {
-		return
-	}
-	delete(r.plugins, connectorType)
-	delete(r.connectors, connectorType)
-}
-
 // Get retrieves a connector by type
 func (r *ConnectorRegistry) Get(connectorType string) (Connector, error) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
 	connector, exists := r.connectors[connectorType]
 	if !exists {
 		return nil, ErrConnectorNotFound
@@ -203,8 +153,6 @@ func (r *ConnectorRegistry) Get(connectorType string) (Connector, error) {
 
 // List returns all registered connector types
 func (r *ConnectorRegistry) List() []string {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
 	types := make([]string, 0, len(r.connectors))
 	for t := range r.connectors {
 		types = append(types, t)
@@ -221,26 +169,6 @@ type ConnectorMetadata struct {
 	Priority     int      `json:"priority"`     // Priority order for UI display (lower = higher priority)
 	AuthType     string   `json:"auth_type"`    // "oauth2", "api_key", "token", etc.
 	Capabilities []string `json:"capabilities"` // "incremental", "webhook", "deletion_sync", etc.
-
-	// Setup guide shown next to the credential form: where to create the
-	// app, which scopes to grant and where to grant them.
-	DocURL              string   `json:"doc_url,omitempty"`
-	PermissionDocURL    string   `json:"permission_doc_url,omitempty"`
-	PermissionPageURL   string   `json:"permission_page_url,omitempty"`
-	RequiredPermissions []string `json:"required_permissions,omitempty"`
-	// ConfigSchema describes DataSourceConfig.Credentials for this
-	// connector; the editor renders the credential form from it.
-	ConfigSchema *configschema.Schema `json:"config_schema,omitempty"`
-	// SettingsSchema describes DataSourceConfig.Settings (non-secret
-	// options) for connectors whose settings form is not built into the
-	// frontend, such as plugin connectors.
-	SettingsSchema *configschema.Schema `json:"settings_schema,omitempty"`
-	// Names and Descriptions localize Name and Description, keyed by
-	// locale, for plugin connectors (builtins use frontend locale keys).
-	Names        map[string]string `json:"names,omitempty"`
-	Descriptions map[string]string `json:"descriptions,omitempty"`
-	// PluginID names the installed plugin providing the connector.
-	PluginID string `json:"plugin_id,omitempty"`
 }
 
 // GetConnectorMetadata returns metadata for all available connectors
@@ -258,7 +186,7 @@ var ConnectorMetadataRegistry = map[string]ConnectorMetadata{
 		Type:         types.ConnectorTypeLark,
 		Name:         "Lark",
 		Description:  "Sync documents, wikis, and content from Lark (Feishu international)",
-		Priority:     1,
+		Priority:     0,
 		AuthType:     "oauth2",
 		Capabilities: []string{"incremental", "deletion_sync"},
 	},
@@ -266,7 +194,7 @@ var ConnectorMetadataRegistry = map[string]ConnectorMetadata{
 		Type:         types.ConnectorTypeFeishuDrive,
 		Name:         "Feishu Drive (飞书云盘)",
 		Description:  "Sync documents and files from a Feishu Drive folder",
-		Priority:     2,
+		Priority:     0,
 		AuthType:     "oauth2",
 		Capabilities: []string{"incremental", "deletion_sync"},
 	},
@@ -274,7 +202,7 @@ var ConnectorMetadataRegistry = map[string]ConnectorMetadata{
 		Type:         types.ConnectorTypeLarkDrive,
 		Name:         "Lark Drive",
 		Description:  "Sync documents and files from a Lark Drive folder",
-		Priority:     3,
+		Priority:     0,
 		AuthType:     "oauth2",
 		Capabilities: []string{"incremental", "deletion_sync"},
 	},
@@ -282,7 +210,7 @@ var ConnectorMetadataRegistry = map[string]ConnectorMetadata{
 		Type:         types.ConnectorTypeNotion,
 		Name:         "Notion",
 		Description:  "Sync pages and databases from Notion",
-		Priority:     4,
+		Priority:     1,
 		AuthType:     "api_key",
 		Capabilities: []string{"incremental"},
 	},
@@ -290,7 +218,7 @@ var ConnectorMetadataRegistry = map[string]ConnectorMetadata{
 		Type:         types.ConnectorTypeConfluence,
 		Name:         "Confluence",
 		Description:  "Sync spaces and pages from Atlassian Confluence",
-		Priority:     5,
+		Priority:     2,
 		AuthType:     "api_key",
 		Capabilities: []string{"incremental", "deletion_sync"},
 	},
@@ -298,7 +226,7 @@ var ConnectorMetadataRegistry = map[string]ConnectorMetadata{
 		Type:         types.ConnectorTypeYuque,
 		Name:         "Yuque (语雀)",
 		Description:  "Sync knowledge bases and documents from Yuque",
-		Priority:     6,
+		Priority:     3,
 		AuthType:     "api_key",
 		Capabilities: []string{"incremental"},
 	},
@@ -306,7 +234,7 @@ var ConnectorMetadataRegistry = map[string]ConnectorMetadata{
 		Type:         types.ConnectorTypeIMA,
 		Name:         "Tencent IMA (ima.qq.com)",
 		Description:  "Sync knowledge bases and documents from Tencent IMA",
-		Priority:     8,
+		Priority:     3,
 		AuthType:     "api_key",
 		Capabilities: []string{"incremental", "deletion_sync"},
 	},
@@ -314,7 +242,7 @@ var ConnectorMetadataRegistry = map[string]ConnectorMetadata{
 		Type:         types.ConnectorTypeGitHub,
 		Name:         "GitHub",
 		Description:  "Sync repositories, wikis, and issues from GitHub",
-		Priority:     20,
+		Priority:     4,
 		AuthType:     "oauth2",
 		Capabilities: []string{"incremental"},
 	},
@@ -322,7 +250,7 @@ var ConnectorMetadataRegistry = map[string]ConnectorMetadata{
 		Type:         types.ConnectorTypeGoogleDrive,
 		Name:         "Google Drive",
 		Description:  "Sync documents and files from Google Drive",
-		Priority:     21,
+		Priority:     5,
 		AuthType:     "oauth2",
 		Capabilities: []string{"incremental"},
 	},
@@ -330,7 +258,7 @@ var ConnectorMetadataRegistry = map[string]ConnectorMetadata{
 		Type:         types.ConnectorTypeOneDrive,
 		Name:         "OneDrive / SharePoint",
 		Description:  "Sync documents and files from Microsoft OneDrive",
-		Priority:     22,
+		Priority:     6,
 		AuthType:     "oauth2",
 		Capabilities: []string{"incremental"},
 	},
@@ -346,7 +274,7 @@ var ConnectorMetadataRegistry = map[string]ConnectorMetadata{
 		Type:         types.ConnectorTypeWebCrawler,
 		Name:         "Web Crawler (Sitemap)",
 		Description:  "Crawl websites via Sitemap.xml",
-		Priority:     23,
+		Priority:     9,
 		AuthType:     "none",
 		Capabilities: []string{},
 	},
@@ -354,7 +282,7 @@ var ConnectorMetadataRegistry = map[string]ConnectorMetadata{
 		Type:         types.ConnectorTypeSlack,
 		Name:         "Slack",
 		Description:  "Sync channel messages and files from Slack",
-		Priority:     24,
+		Priority:     10,
 		AuthType:     "oauth2",
 		Capabilities: []string{"incremental"},
 	},
@@ -362,7 +290,7 @@ var ConnectorMetadataRegistry = map[string]ConnectorMetadata{
 		Type:         types.ConnectorTypeIMAP,
 		Name:         "Email (IMAP)",
 		Description:  "Sync email content from IMAP servers",
-		Priority:     25,
+		Priority:     11,
 		AuthType:     "password",
 		Capabilities: []string{},
 	},
@@ -370,7 +298,7 @@ var ConnectorMetadataRegistry = map[string]ConnectorMetadata{
 		Type:         types.ConnectorTypeRSS,
 		Name:         "RSS / Atom Feed",
 		Description:  "Sync articles from RSS/Atom feeds",
-		Priority:     9,
+		Priority:     12,
 		AuthType:     "custom",
 		Capabilities: []string{"incremental"},
 	},
@@ -378,56 +306,30 @@ var ConnectorMetadataRegistry = map[string]ConnectorMetadata{
 		Type:         types.ConnectorTypeGitLab,
 		Name:         "GitLab",
 		Description:  "Sync files from GitLab projects",
-		Priority:     10,
+		Priority:     8,
 		AuthType:     "token",
 		Capabilities: []string{"incremental", "hierarchical"},
 	},
 }
 
-// ListAvailableConnectors returns the metadata of every known connector,
-// including ones not registered yet, with their credential forms, sorted by
-// priority and then type.
+// ListAvailableConnectors returns all available connector metadata
+// sorted by priority
 func ListAvailableConnectors() []ConnectorMetadata {
 	metadata := make([]ConnectorMetadata, 0, len(ConnectorMetadataRegistry))
 	for _, meta := range ConnectorMetadataRegistry {
-		metadata = append(metadata, withForm(meta))
+		metadata = append(metadata, meta)
 	}
-	sort.Slice(metadata, func(i, j int) bool {
-		if metadata[i].Priority != metadata[j].Priority {
-			return metadata[i].Priority < metadata[j].Priority
-		}
-		return metadata[i].Type < metadata[j].Type
-	})
-	return metadata
-}
 
-// Metadata returns the metadata of the connectors registered here, in
-// ListAvailableConnectors order. A registered connector without an entry in
-// ConnectorMetadataRegistry is listed last under its type.
-func (r *ConnectorRegistry) Metadata() []ConnectorMetadata {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	out := make([]ConnectorMetadata, 0, len(r.connectors))
-	seen := make(map[string]bool, len(r.connectors))
-	for _, meta := range ListAvailableConnectors() {
-		if _, ok := r.connectors[meta.Type]; ok {
-			out = append(out, meta)
-			seen[meta.Type] = true
+	// Sort by priority (insertion sort for simplicity)
+	for i := 1; i < len(metadata); i++ {
+		key := metadata[i]
+		j := i - 1
+		for j >= 0 && metadata[j].Priority > key.Priority {
+			metadata[j+1] = metadata[j]
+			j--
 		}
+		metadata[j+1] = key
 	}
-	rest := make([]string, 0)
-	for t := range r.connectors {
-		if !seen[t] {
-			rest = append(rest, t)
-		}
-	}
-	sort.Strings(rest)
-	for _, t := range rest {
-		if meta, ok := r.plugins[t]; ok {
-			out = append(out, meta)
-			continue
-		}
-		out = append(out, ConnectorMetadata{Type: t, Name: t, Priority: math.MaxInt32})
-	}
-	return out
+
+	return metadata
 }

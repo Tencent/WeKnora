@@ -1216,33 +1216,115 @@ func (s *agentService) registerTools(
 
 	// logger.Infof(ctx, "Registering tools: %v, webSearchEnabled: %v", allowedTools, config.WebSearchEnabled)
 	// Register each allowed tool
-	build := &toolBuildContext{
-		ctx:               ctx,
-		config:            config,
-		rerankModel:       rerankModel,
-		sessionID:         sessionID,
-		wikiScopes:        wikiScopes,
-		wikiRoutes:        wikiRoutes,
-		wikiKBIDs:         wikiKBIDs,
-		writableWikiKBIDs: writableWikiKBIDs,
-	}
 	for _, toolName := range allowedTools {
-		if sandboxBoundTools[toolName] {
+		var toolToRegister types.Tool
+
+		switch toolName {
+		case tools.ToolThinking:
+			toolToRegister = tools.NewSequentialThinkingTool()
+		case tools.ToolTodoWrite:
+			toolToRegister = tools.NewTodoWriteTool()
+		case tools.ToolSearchKnowledge:
+			toolToRegister = tools.NewSearchKnowledgeTool(
+				s.knowledgeBaseService,
+				s.knowledgeService,
+				s.chunkService,
+				config.SearchTargets,
+				rerankModel,
+				s.cfg,
+			)
+		case tools.ToolReadDocument:
+			toolToRegister = tools.NewReadDocumentTool(s.knowledgeService, s.chunkService, config.SearchTargets)
+		case tools.ToolListDocuments:
+			toolToRegister = tools.NewListDocumentsTool(s.knowledgeService, config.SearchTargets)
+		case tools.ToolQueryKnowledgeGraph:
+			var chunkRepo interfaces.ChunkRepository
+			if s.chunkService != nil {
+				chunkRepo = s.chunkService.GetRepository()
+			}
+			toolToRegister = tools.NewQueryKnowledgeGraphTool(s.knowledgeBaseService, config.SearchTargets).
+				WithKnowledgeScope(s.knowledgeService).
+				WithGraph(s.graphRepo, chunkRepo)
+		case tools.ToolSearchConversations:
+			// The owner is captured from the caller's identity here, not read
+			// from the model's arguments, so no prompt can redirect the search
+			// at somebody else's conversations.
+			toolToRegister = tools.NewSearchConversationsTool(
+				s.messageService, types.SessionOwnerIDFromContext(ctx), sessionID)
+		case tools.ToolSearchMemory:
+			// Reaching this case means the memory switches were already
+			// checked above, where the tool is injected. Which memory space is
+			// read is resolved from the request context inside the service, so
+			// this tool needs no owner argument and none can be supplied.
+			toolToRegister = tools.NewSearchMemoryTool(s.memoryService)
+		case tools.ToolDatabaseQuery:
+			toolToRegister = tools.NewDatabaseQueryTool(s.db, config.SearchTargets)
+		case tools.ToolWebSearch:
+			toolToRegister = tools.NewWebSearchTool(
+				s.webSearchService,
+				config.WebSearchMaxResults,
+				config.WebSearchProviderID,
+			)
+			logger.Infof(ctx, "Registered web_search tool for session: %s, maxResults: %d, providerID: %s", sessionID, config.WebSearchMaxResults, config.WebSearchProviderID)
+
+		case tools.ToolWebFetch:
+			toolToRegister = tools.NewWebFetchTool()
+			logger.Infof(ctx, "Registered web_fetch tool for session: %s", sessionID)
+
+		case tools.ToolDataAnalysis:
+			toolToRegister = tools.NewDataAnalysisTool(s.knowledgeBaseService, s.knowledgeService, s.tenantService, s.fileService, s.duckdb, sessionID, s.storageResolver).
+				WithSearchTargets(config.SearchTargets)
+			logger.Infof(ctx, "Registered data_analysis tool for session: %s", sessionID)
+
+		case tools.ToolDataSchema:
+			toolToRegister = tools.NewDataSchemaTool(s.knowledgeService, s.chunkService.GetRepository()).
+				WithSearchTargets(config.SearchTargets)
+			logger.Infof(ctx, "Registered data_schema tool")
+
+		// Wiki tools — only registered when wiki KBs are detected
+		case tools.ToolWikiReadPage:
+			toolToRegister = tools.NewWikiReadPageTool(s.wikiPageService, s.knowledgeService, wikiScopes, wikiRoutes)
+		case tools.ToolWikiSearch:
+			toolToRegister = tools.NewWikiSearchTool(s.wikiPageService, s.knowledgeService, wikiScopes, wikiRoutes)
+		case tools.ToolWikiFlagIssue:
+			toolToRegister = tools.NewWikiFlagIssueTool(s.wikiPageService, writableWikiKBIDs, wikiRoutes).
+				WithKnowledgeScope(s.knowledgeService, config.SearchTargets)
+		case tools.ToolWikiReadIssue:
+			toolToRegister = tools.NewWikiReadIssueTool(s.wikiPageService, wikiKBIDs)
+		case tools.ToolWikiUpdateIssue:
+			toolToRegister = tools.NewWikiUpdateIssueTool(s.wikiPageService, writableWikiKBIDs)
+		case tools.ToolWikiWritePage:
+			toolToRegister = tools.NewWikiWritePageTool(
+				s.wikiPageService, writableWikiKBIDs, s.knowledgeService, wikiRoutes,
+			).WithSearchTargets(config.SearchTargets)
+		case tools.ToolWikiReplaceText:
+			toolToRegister = tools.NewWikiReplaceTextTool(
+				s.wikiPageService, writableWikiKBIDs, s.knowledgeService, wikiRoutes,
+			).WithSearchTargets(config.SearchTargets)
+		case tools.ToolWikiRenamePage:
+			toolToRegister = tools.NewWikiRenamePageTool(s.wikiPageService, writableWikiKBIDs, wikiRoutes)
+		case tools.ToolWikiDeletePage:
+			toolToRegister = tools.NewWikiDeletePageTool(s.wikiPageService, writableWikiKBIDs, wikiRoutes)
+
+		case tools.ToolShellExec, tools.ToolReadFile, tools.LegacyToolReadSkill, tools.LegacyToolExecuteSkillScript,
+			tools.ToolListSandboxFiles, tools.LegacyToolReadSandboxFile, tools.ToolWriteSandboxFile,
+			tools.ToolEditSandboxFile:
+			// Bound to the resolved sandbox manager in registerSandboxFileTools
+			// / registerSandboxShellIfAllowed / initializeSkillsManager.
+			// Listing them here would warn "Unknown tool: shell_exec" on every
+			// skill install, then register the real tool a few lines later.
 			continue
-		}
-		factory, ok := builtinToolFactories[toolName]
-		if !ok {
+
+		default:
 			logger.Warnf(ctx, "Unknown tool: %s", toolName)
-			continue
 		}
-		toolToRegister := factory(s, build)
-		if toolToRegister == nil {
-			continue
+
+		if toolToRegister != nil {
+			if toolToRegister.Name() != toolName {
+				logger.Warnf(ctx, "Tool name mismatch: expected %s, got %s", toolName, toolToRegister.Name())
+			}
+			registry.RegisterTool(toolToRegister)
 		}
-		if toolToRegister.Name() != toolName {
-			logger.Warnf(ctx, "Tool name mismatch: expected %s, got %s", toolName, toolToRegister.Name())
-		}
-		registry.RegisterTool(toolToRegister)
 	}
 
 	logger.Infof(ctx, "Registered %d tools", len(registry.ListTools()))

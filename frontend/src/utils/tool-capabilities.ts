@@ -23,8 +23,7 @@
  *
  * IMPORTANT: keep this list aligned with backend tool definitions
  * (`internal/agent/tools/`; this map mirrors
- * `internal/agent/tools/capabilities.go`, and
- * `capabilities_frontend_test.go` there fails when the two differ). A tool missing from this map
+ * `internal/agent/tools/capabilities.go`). A tool missing from this map
  * defaults to "always available" so new tools don't silently start disabled.
  */
 

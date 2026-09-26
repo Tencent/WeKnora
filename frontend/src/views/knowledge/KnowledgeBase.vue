@@ -81,14 +81,10 @@ import {
   type DocumentSortValue,
 } from './documentSorting';
 import { useI18n } from 'vue-i18n';
-import PluginFrame from '@/extensions/pluginFrame/PluginFrame.vue';
-import { findPage } from '@/extensions/pluginFrame/pluginPages';
-import { usePluginPagesStore } from '@/stores/pluginPages';
-import { localizedText } from '@/utils/localizedText';
 import { useMarqueeSelect } from '@/hooks/useMarqueeSelect';
 import type { ParserEngineInfo } from '@/api/system';
 const route = useRoute();
-const { t, locale } = useI18n();
+const { t } = useI18n();
 const kbId = computed(() => (route.params as any).kbId as string || '');
 const kbInfo = ref<any>(null);
 const uploadSourceRef = ref<InstanceType<typeof KbUploadSourceDropdown> | null>(null);
@@ -97,19 +93,9 @@ const docListLoading = ref(true);
 const isFAQ = computed(() => (kbInfo.value?.type || '') === 'faq');
 const isWiki = computed(() => !!kbInfo.value?.indexing_strategy?.wiki_enabled);
 const validTabs = ['documents', 'wiki', 'graph', 'gallery'] as const
-// Plugin tabs are keyed "plugin:<plugin>/<tab>".
-type KbTab = typeof validTabs[number] | `plugin:${string}`
-const isPluginTab = (tab: unknown): tab is `plugin:${string}` => typeof tab === 'string' && tab.startsWith('plugin:')
-const initTab: KbTab = validTabs.includes(route.query.tab as any) || isPluginTab(route.query.tab)
-  ? (route.query.tab as KbTab)
-  : 'documents'
+type KbTab = typeof validTabs[number]
+const initTab = validTabs.includes(route.query.tab as any) ? (route.query.tab as KbTab) : 'documents'
 const activeKbTab = ref<KbTab>(initTab);
-const pluginPages = usePluginPagesStore()
-const pluginPagesLoaded = ref(false)
-void pluginPages.ensure().catch(() => {}).finally(() => {
-  pluginPagesLoaded.value = true
-})
-const activePluginTab = computed(() => (isPluginTab(activeKbTab.value) ? findPage(pluginPages.kbTabs, activeKbTab.value) : undefined))
 
 // Wiki 状态用于面包屑上的索引中指示。父组件自行拉取，避免依赖 WikiBrowser 挂载状态
 // （用户切到"文档" tab 时 WikiBrowser 会卸载，这里仍需持续反映后台索引进度）。
@@ -139,19 +125,11 @@ const kbViewTabs = computed(() => {
     )
   }
   tabs.push({ key: 'gallery', icon: 'image', label: t(`${w}.tabGallery`), tip: t(`${w}.tabGalleryTip`) })
-  for (const page of pluginPages.kbTabs) {
-    const label = localizedText(page.name, locale.value)
-    const tip = page.description ? localizedText(page.description, locale.value) : label
-    tabs.push({ key: page.key as KbTab, icon: 'app', label, tip })
-  }
   return tabs
 })
-const shownKbTab = computed<KbTab>(() => {
-  if (kbViewTabs.value.some((tab) => tab.key === activeKbTab.value)) return activeKbTab.value
-  // A plugin tab named in the URL waits for the plugin tabs to load.
-  if (isPluginTab(activeKbTab.value) && !pluginPagesLoaded.value) return activeKbTab.value
-  return 'documents'
-})
+const shownKbTab = computed<KbTab>(() =>
+  kbViewTabs.value.some((tab) => tab.key === activeKbTab.value) ? activeKbTab.value : 'documents',
+)
 const onWikiStatusChange = (payload: { pendingTasks: number; isActive: boolean; pendingIssues: number }) => {
   wikiStatus.value = payload
 }
@@ -2363,13 +2341,7 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
 
       <!-- wiki/graph tabs only exist on wiki KBs; a stale tab (?tab= or one
            carried over from a previous KB) falls back to documents. -->
-      <!-- A plugin's tab: its page in a sandboxed frame, told which KB it is on. -->
-      <div v-if="activePluginTab && kbId" class="plugin-tab-area">
-        <PluginFrame :page="activePluginTab" :context="{ knowledgeBaseId: kbId }" fill
-          @close="activeKbTab = 'documents'" />
-      </div>
-
-      <template v-if="shownKbTab === 'documents' || (!isWiki && activeKbTab !== 'gallery' && !activePluginTab && !isPluginTab(shownKbTab))">
+      <template v-if="activeKbTab === 'documents' || (!isWiki && activeKbTab !== 'gallery')">
         <div class="knowledge-main">
           <KbFolderTree v-if="showFolderTree && !folderTreeCollapsed" :tree="folderTree" :selected-path="selectedFolderPath"
             :loading="folderTreeLoading" :can-edit="canEdit" :root-label="kbInfo?.name"
@@ -2743,13 +2715,6 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
   flex: 1;
   min-height: 0;
   overflow: hidden;
-}
-
-.plugin-tab-area {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  padding-top: 12px;
 }
 
 // Directory navigation and the document content share the available width.

@@ -812,8 +812,6 @@ export default {
     channelGitLab: 'GitLab',
     channelIma: 'Tencent IMA',
     channelUpload: 'Upload',
-    channelRss: 'RSS',
-    channelExternal: 'External source',
     channelManual: 'Manual',
     channelUrl: 'Web',
     channelUnknown: 'Unknown',
@@ -1881,8 +1879,6 @@ export default {
       },
     },
     skills: {
-      pluginSection: 'From enabled plugins',
-      pluginSectionHint: 'Pick a skill a plugin provides to add it to the library; then install it into sandboxes like any other skill.',
       title: 'Skill Management',
       description: 'Skills live in the workspace catalog. Register them first, then install onto one or more sandboxes. An agent can only enable skills that are ready on its sandbox.',
       helpTooltip: 'A catalog skill does not have to be installed anywhere. Scripts only run after the skill is installed into the sandbox image the agent uses. Docker, Cube, and E2B images are not interchangeable — install once per sandbox.',
@@ -2253,18 +2249,6 @@ export default {
     baseUrlLabel: 'Instance URL',
     baseUrlPlaceholder: 'https://searxng.example.com',
     apiKeyPlaceholder: 'Enter API key',
-    configFields: {
-      searchEngine: 'Search engine',
-      searchEngineDesc: 'Select the Zhipu search engine and per-request price tier.',
-      searchStd: 'Standard · ¥0.01/request',
-      searchPro: 'Pro · ¥0.03/request',
-      searchSogou: 'Sogou · ¥0.05/request',
-      searchQuark: 'Quark · ¥0.05/request',
-      contentSize: 'Content size',
-      contentSizeDesc: 'Medium returns concise summaries; high returns more context.',
-      contentMedium: 'Medium',
-      contentHigh: 'High'
-    },
     toasts: {
       providerCreated: 'Search provider created',
       providerUpdated: 'Search provider updated',
@@ -2731,209 +2715,6 @@ export default {
       parseTenantFailed: 'Failed to parse workspace information',
       parseKnowledgeBasesFailed: 'Failed to parse knowledge base list',
       parseCurrentKnowledgeBaseFailed: 'Failed to parse current knowledge base'
-    }
-  },
-  pluginAdmin: {
-    runtime: {
-      declarative: 'Declarative',
-      host: 'Local process',
-      remote: 'Remote service'
-    },
-    title: 'Plugin management',
-    description: 'Install and manage plugins for the whole platform. Every workspace sees an installed plugin, and each one enables it for itself; disabling a plugin here unloads it on every node.',
-    installButton: 'Install plugin',
-    empty: 'No plugins installed yet',
-    loadFailed: 'Failed to load installed plugins',
-    saveFailed: 'Failed to save',
-    enabledToast: 'Enabled platform-wide',
-    disabledToast: 'Disabled platform-wide',
-    platformSwitch: 'Enable or disable platform-wide',
-    publisher: 'Publisher',
-    contributions: 'What it adds',
-    permissions: 'Permissions and remote access',
-    state: {
-      degraded: 'Restarting',
-      running: 'Running',
-      failed: 'Failed to load',
-      disabled: 'Disabled',
-      pending: 'Loading'
-    },
-    nodeState: {
-      ready: 'Ready',
-      starting: 'Starting',
-      degraded: 'Degraded',
-      stopped: 'Not loaded'
-    },
-    source: {
-      upload: 'Upload',
-      url: 'URL'
-    },
-    change: {
-      install: 'New install',
-      upgrade: 'Upgrade from v{from}',
-      downgrade: 'Downgrade from v{from}',
-      reinstall: 'Reinstall'
-    },
-    permission: {
-      anyHost: 'Any public host',
-      remote: 'Remote service',
-      egress: 'Network egress',
-      hostApi: 'WeKnora API',
-      events: 'Events'
-    },
-    secret: {
-      title: 'Plugin signing secret',
-      description: 'Set this secret as the plugin service\'s WEKNORA_PLUGIN_SECRET environment variable; the service uses it to verify that requests come from WeKnora. It is shown only once and cannot be viewed again after you close this.',
-      copy: 'Copy',
-      copied: 'Copied',
-      done: 'I have saved it'
-    },
-    install: {
-      title: 'Install plugin',
-      description: 'Upload a .wkp package or give its download URL, review it, then install.',
-      sourceSection: 'Package',
-      mode: {
-        upload: 'Upload file',
-        url: 'From URL'
-      },
-      fileLabel: 'Package file',
-      chooseFile: 'Choose file',
-      noFile: 'No file chosen',
-      fileHint: 'A .wkp file (a zip with plugin.yaml), up to 64 MB.',
-      urlLabel: 'Download URL',
-      urlHint: 'The server downloads this URL; private network addresses are refused.',
-      remoteUrlLabel: 'Service URL',
-      remoteUrlHint: 'The plugin service\'s HTTP(S) address. Private network hosts must be listed in SSRF_WHITELIST.',
-      remoteUrlKeep: 'On an upgrade, leave empty to keep the current URL',
-      reviewSection: 'Review before installing',
-      noPermissions: 'This plugin asks for no extra permissions.',
-      configNotice: 'This plugin needs configuration: platform settings are in its details after installing, and workspace admins fill in workspace settings in Plugins.',
-      tenantNotice: 'Once installed the plugin is visible to every workspace but disabled until a workspace admin enables it.',
-      digest: 'Package digest',
-      inspect: 'Inspect package',
-      confirm: {
-        install: 'Install',
-        upgrade: 'Upgrade',
-        downgrade: 'Install older version',
-        reinstall: 'Reinstall'
-      },
-      inspectFailed: 'Could not read the package',
-      failed: 'Install failed',
-      done: 'Installed {name}'
-    },
-    detail: {
-      overview: 'Overview',
-      runtime: 'Runtime',
-      source: 'Source',
-      homepage: 'Homepage',
-      license: 'License',
-      engines: 'Compatible versions',
-      nodes: 'Nodes',
-      noNodes: 'No node has the plugin loaded',
-      versions: 'Versions',
-      active: 'Active',
-      activate: 'Switch to this version',
-      rollback: 'Roll back to this version',
-      activateConfirm: 'Make v{version} the active version? Every node reloads the plugin.',
-      activated: 'Switched to v{version}',
-      activateFailed: 'Failed to switch versions',
-      systemConfig: 'Platform settings',
-      systemConfigHint: 'Apply to every workspace, such as a service region or a platform-wide credential.',
-      configLoadFailed: 'Failed to load platform settings',
-      configSaved: 'Platform settings saved',
-      configSaveFailed: 'Failed to save platform settings',
-      danger: 'Uninstall',
-      uninstallHint: 'Removes the plugin and every stored version. Workspaces\' switches and settings are kept and come back if you reinstall.',
-      uninstall: 'Uninstall plugin',
-      uninstallConfirm: 'Uninstall? Every node unloads the plugin right away.',
-      uninstalled: 'Plugin uninstalled',
-      uninstallFailed: 'Uninstall failed',
-      remote: 'Remote service',
-      remoteUrl: 'Service URL',
-      editUrl: 'Change',
-      urlSaved: 'Service URL updated',
-      urlSaveFailed: 'Failed to update the service URL',
-      rotateSecret: 'Rotate secret',
-      rotateHint: 'Issues a new signing secret. Calls to the service fail until it is given the new one.',
-      rotateConfirm: 'Rotate the secret? The old one stops working immediately.',
-      rotateFailed: 'Failed to rotate the secret'
-    }
-  },
-  pluginToolView: {
-    empty: 'No results'
-  },
-  pluginPages: {
-    notResponding: 'The plugin page is not responding; it may have failed to load.',
-    requestFailed: 'The plugin request failed',
-    fromPlugin: 'Provided by the plugin {id}'
-  },
-  pluginCenter: {
-    installed: 'Installed',
-    configure: 'Configure',
-    webhooks: 'Webhook URLs',
-    webhooksHint: 'Set these URLs up in the third-party service so it sends its events to this plugin. They carry this workspace\'s secret; keep them private.',
-    copy: 'Copy',
-    webhookCopied: 'Webhook URL copied',
-    configTitle: 'Configure {name}',
-    configDescription: 'This workspace\'s settings for the plugin, such as its API key. Secrets are stored encrypted and never shown again.',
-    configLoadFailed: 'Failed to load the plugin configuration',
-    configSaved: 'Plugin configuration saved',
-    configSaveFailed: 'Failed to save the plugin configuration',
-    navGroup: 'Extensions',
-    title: 'Plugins',
-    description: 'Every plugin this deployment provides: builtins and the ones a system administrator installed. Enable or disable them for this workspace: a disabled plugin\'s integrations leave the type lists and cannot be created, while existing ones keep working. Installed plugins start disabled until a workspace admin enables them.',
-    searchPlaceholder: 'Search plugins, IDs or integrations',
-    allPoints: 'All',
-    empty: 'No matching plugins',
-    builtin: 'Builtin',
-    required: 'Required',
-    requiredHint: 'WeKnora needs this plugin; it cannot be disabled',
-    adminOnly: 'Only workspace admins can enable or disable plugins',
-    loadFailed: 'Failed to load plugins',
-    saveFailed: 'Failed to save the plugin setting',
-    enabledToast: 'Plugin enabled',
-    disabledToast: 'Plugin disabled',
-    points: {
-      modelVendors: 'Model vendors',
-      connectors: 'Data sources',
-      imChannels: 'IM channels',
-      webSearch: 'Web search',
-      tools: 'Agent tools',
-      parsers: 'Document parsing',
-      skills: 'Skills',
-      mcpServers: 'MCP servers',
-      pages: 'Pages',
-      settingsSections: 'Settings sections',
-      kbTabs: 'Knowledge base tabs',
-      webhooks: 'Webhooks'
-    }
-  },
-  schemaForm: {
-    errors: {
-      required: 'This field is required',
-      type: 'Invalid value',
-      enum: 'Not one of the allowed values',
-      min_length: 'Too short',
-      max_length: 'Too long',
-      pattern: 'Does not match the expected format',
-      minimum: 'Value is too small',
-      maximum: 'Value is too large',
-      format: 'Enter a full address such as https://example.com'
-    },
-    options: {
-      loading: 'Loading…',
-      empty: 'The plugin offers no choices',
-      retry: 'Retry',
-      failed: 'Could not load the choices'
-    },
-    oauth: {
-      connected: 'Connected',
-      notConnected: 'Not connected',
-      connect: 'Connect',
-      reconnect: 'Reconnect',
-      disconnect: 'Disconnect',
-      popupBlocked: 'The browser blocked the sign-in window. Allow pop-ups and try again.',
-      failed: 'Authorization failed'
     }
   },
   common: {
@@ -5558,9 +5339,6 @@ export default {
     }
   },
   mcpSettings: {
-    transportPlugin: 'Built into plugin',
-    fromPlugin: 'Plugin',
-    pluginNotConfigured: 'The plugin is not configured yet; fill in its settings in Plugins to use it',
     addUsageInstructions: "Add usage instructions",
     noUsageInstructions: "No usage instructions yet",
     title: 'MCP Services',
@@ -7080,7 +6858,6 @@ export default {
     resourceHint: 'Select the spaces or folders to sync',
     untitled: 'Untitled',
     resourceLoadFailed: 'Failed to load resources',
-    typesLoadFailed: 'Failed to load data source types',
     noResources: 'No wiki spaces found',
     noResourcesDesc: 'The app needs wiki access via a group chat to fetch content',
     noResourcesDesc_notion: 'The app needs Notion page access permissions to fetch content',

@@ -13,8 +13,7 @@
         </t-button>
       </div>
       <p class="toolbox-subtitle" style="--wails-draggable: drag">
-        <template v-if="selectedPage">{{ pageDescription(selectedPage) }}</template>
-        <template v-else>{{ t(selectedItem?.description ?? 'toolbox.description') }}</template>
+        {{ t(selectedItem?.description ?? 'toolbox.description') }}
         <t-tooltip v-if="selectedItem && 'help' in selectedItem" :content="t(selectedItem.help)" placement="bottom"
           overlay-class-name="skill-settings__help-tooltip">
           <t-icon name="help-circle" class="toolbox-help" :aria-label="t(selectedItem.help)" />
@@ -22,7 +21,7 @@
       </p>
     </header>
 
-    <template v-if="visibleItems.length || pluginPages.pages.length">
+    <template v-if="visibleItems.length">
       <div class="toolbox-tabs" role="tablist" :aria-label="t('toolbox.title')">
         <button v-for="item in visibleItems" :key="item.key" type="button" role="tab" class="toolbox-tab"
           :aria-selected="selectedItem?.key === item.key" @click="select(item.key)">
@@ -36,18 +35,9 @@
           <span v-else-if="item.key !== 'browserconnection' && counts[item.key] !== undefined"
             class="toolbox-tab-count">{{ counts[item.key] }}</span>
         </button>
-        <button v-for="page in pluginPages.pages" :key="page.key" type="button" role="tab" class="toolbox-tab"
-          :aria-selected="selectedPage?.key === page.key" @click="selectPage(page.key)">
-          <t-icon name="app" size="18px" />
-          <span>{{ localizedText(page.name, locale) }}</span>
-        </button>
       </div>
 
-      <section v-if="selectedPage" class="toolbox-main toolbox-main--plugin" role="tabpanel">
-        <PluginFrame :page="selectedPage" fill @close="select(visibleItems[0]?.key)" />
-      </section>
-
-      <section v-else-if="selectedItem" class="toolbox-main" role="tabpanel">
+      <section v-if="selectedItem" class="toolbox-main" role="tabpanel">
         <div class="toolbox-panel">
           <SkillSettings v-if="selectedItem.key === 'skills'" ref="panel" :key="sandboxId"
             :initial-sandbox-id="sandboxId" @count="counts.skills = $event" />
@@ -79,22 +69,13 @@ import {
 import ResourceIcon from '@/components/icons/ResourceIcon.vue'
 import BrowserIcon from '@/components/icons/BrowserIcon.vue'
 import EmptyState from '@/components/EmptyState.vue'
-import PluginFrame from '@/extensions/pluginFrame/PluginFrame.vue'
-import { findPage, type PluginPage } from '@/extensions/pluginFrame/pluginPages'
-import { usePluginPagesStore } from '@/stores/pluginPages'
-import { localizedText } from '@/utils/localizedText'
 import SkillSettings from '@/views/settings/SkillSettings.vue'
 import McpSettings from '@/views/settings/McpSettings.vue'
 import BrowserConnectionSettings from '@/views/settings/BrowserConnectionSettings.vue'
 
 const route = useRoute()
 const router = useRouter()
-const { t, locale } = useI18n()
-const pluginPages = usePluginPagesStore()
-const pluginPagesLoaded = ref(false)
-void pluginPages.ensure().catch(() => {}).finally(() => {
-  pluginPagesLoaded.value = true
-})
+const { t } = useI18n()
 const authStore = useAuthStore()
 const browserConnection = useBrowserConnectionStore()
 const capabilities = useDeploymentCapabilitiesStore()
@@ -109,14 +90,6 @@ const visibleItems = computed(() => TOOLBOX_ITEMS.filter((item) => canAccessTool
   isSupported: (capability) => capabilities.isSupported(capability),
 })))
 const selectedItem = computed(() => visibleItems.value.find((item) => item.key === requestedSection.value))
-// Plugin pages are tabs too, keyed "plugin:<plugin>/<page>".
-const selectedPage = computed(() => findPage(pluginPages.pages, requestedSection.value))
-const pageDescription = (page: PluginPage) =>
-  page.description ? localizedText(page.description, locale.value) : t('pluginPages.fromPlugin', { id: page.pluginId })
-const selectPage = (key: string) => {
-  if (key === requestedSection.value) return
-  void router.replace({ path: `/platform/toolbox/${encodeURIComponent(key)}` })
-}
 
 const browserStatus = computed(() => {
   if (!browserConnection.loaded || !browserConnection.enabled) return ''
@@ -124,20 +97,16 @@ const browserStatus = computed(() => {
   return browserConnection.device ? 'offline' : 'notPaired'
 })
 
-const select = (section: ToolboxSection | undefined) => {
-  if (!section || section === requestedSection.value) return
+const select = (section: ToolboxSection) => {
+  if (section === requestedSection.value) return
   void router.replace(toolboxLocation(section))
 }
 
 // The bare /toolbox URL, and tools lost to a role or workspace switch, land on
 // the first tool the user can still open.
-watch([selectedItem, selectedPage, visibleItems], () => {
+watch([selectedItem, visibleItems], () => {
   const fallback = visibleItems.value[0]
-  // A plugin page URL waits for the pages to load before falling back.
-  const pendingPage = requestedSection.value.startsWith('plugin:') && !pluginPagesLoaded.value
-  if (!selectedItem.value && !selectedPage.value && !pendingPage && fallback) {
-    void router.replace(toolboxLocation(fallback.key))
-  }
+  if (!selectedItem.value && fallback) void router.replace(toolboxLocation(fallback.key))
 }, { immediate: true })
 
 // Tab badges for tools that are not open; the open panel keeps its own badge current.
@@ -350,13 +319,6 @@ watch(() => visibleItems.value.map((item) => item.key), (keys, previous = []) =>
   overflow-y: auto;
   overflow-x: hidden;
   padding: var(--app-space-5) 0 var(--app-space-8);
-}
-
-// A plugin page fills the tab and scrolls itself.
-.toolbox-main--plugin {
-  display: flex;
-  overflow: hidden;
-  padding-bottom: var(--app-space-5);
 }
 
 .toolbox-panel {

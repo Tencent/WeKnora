@@ -45,12 +45,10 @@ type AsynqTaskParams struct {
 	KnowledgeAutoTag     interfaces.TaskHandler `name:"knowledgeAutoTag"`
 	KnowledgeBaseProfile interfaces.TaskHandler `name:"knowledgeBaseProfile"`
 	WikiIngest           interfaces.TaskHandler `name:"wikiIngest"`
-	// PluginEvents delivers events to plugins (plugin:event).
-	PluginEvents      interfaces.TaskHandler `name:"pluginEvents"`
-	TemporaryDocument interfaces.TemporaryDocumentService
-	MemoryService     interfaces.MemoryService
-	DeadLetterRepo    interfaces.TaskDeadLetterRepository
-	SpanTracker       service.SpanTracker
+	TemporaryDocument    interfaces.TemporaryDocumentService
+	MemoryService        interfaces.MemoryService
+	DeadLetterRepo       interfaces.TaskDeadLetterRepository
+	SpanTracker          service.SpanTracker
 }
 
 // defaultRedisOpTimeout is the previous hard-coded read timeout. The 100ms
@@ -265,7 +263,6 @@ func RunAsynqServer(params AsynqTaskParams) *asynq.ServeMux {
 
 	// Register extract handlers - router will dispatch to appropriate handler
 	mux.HandleFunc(types.TypeChunkExtract, params.ChunkExtractor.Handle)
-	mux.HandleFunc(types.TypePluginEvent, params.PluginEvents.Handle)
 	mux.HandleFunc(types.TypeDataTableSummary, params.DataTableSummary.Handle)
 
 	// Register document processing handler

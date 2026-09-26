@@ -51,10 +51,6 @@ type ParserEngineInfo struct {
 	FileTypes         []string
 	Available         bool
 	UnavailableReason string
-	// PluginID and DisplayNames describe an engine an installed plugin
-	// provides; DisplayNames is keyed by locale.
-	PluginID     string            `json:",omitempty"`
-	DisplayNames map[string]string `json:",omitempty"`
 }
 
 // --- Internal types used by chunking pipeline ---

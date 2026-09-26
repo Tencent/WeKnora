@@ -9,7 +9,6 @@ import (
 	"github.com/Tencent/WeKnora/internal/handler/dto"
 	infra_web_search "github.com/Tencent/WeKnora/internal/infrastructure/web_search"
 	"github.com/Tencent/WeKnora/internal/logger"
-	"github.com/Tencent/WeKnora/internal/plugin/manifest"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
@@ -18,7 +17,6 @@ import (
 
 // WebSearchProviderHandler handles HTTP requests for web search provider CRUD
 type WebSearchProviderHandler struct {
-	pluginGated
 	repo     interfaces.WebSearchProviderRepository
 	service  interfaces.WebSearchProviderService
 	registry *infra_web_search.Registry
@@ -90,11 +88,6 @@ func (h *WebSearchProviderHandler) CreateProvider(c *gin.Context) {
 	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.Warnf(ctx, "Invalid create provider request: %v", err)
 		c.Error(errors.NewBadRequestError(err.Error()))
-		return
-	}
-
-	if !h.pluginFilter(c)(manifest.PointWebSearch, string(req.Provider)) {
-		_ = c.Error(errors.NewBadRequestError(disabledIntegrationError))
 		return
 	}
 
@@ -327,20 +320,9 @@ func (h *WebSearchProviderHandler) DeleteProvider(c *gin.Context) {
 // @Security     ApiKeyAuth
 // @Router       /web-search-providers/types [get]
 func (h *WebSearchProviderHandler) ListProviderTypes(c *gin.Context) {
-	enabled := h.pluginFilter(c)
-	all := types.GetWebSearchProviderTypes()
-	if h.registry != nil {
-		all = append(all, h.registry.PluginTypes()...)
-	}
-	out := make([]types.WebSearchProviderTypeInfo, 0, len(all))
-	for _, info := range all {
-		if enabled(manifest.PointWebSearch, info.ID) {
-			out = append(out, info)
-		}
-	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data":    out,
+		"data":    types.GetWebSearchProviderTypes(),
 	})
 }
 
@@ -408,11 +390,6 @@ func (h *WebSearchProviderHandler) TestProviderRaw(c *gin.Context) {
 	var req TestProviderRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.Error(errors.NewBadRequestError(err.Error()))
-		return
-	}
-
-	if !h.pluginFilter(c)(manifest.PointWebSearch, req.Provider) {
-		_ = c.Error(errors.NewBadRequestError(disabledIntegrationError))
 		return
 	}
 

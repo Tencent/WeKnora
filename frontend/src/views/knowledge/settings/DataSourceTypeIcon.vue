@@ -3,16 +3,10 @@ import { getDatasourceIconUrl, datasourceIconMap } from './datasourceIcons'
 
 const props = withDefaults(defineProps<{
   type: string
-  /** Icon of a plugin connector (a data: URI from its metadata). */
-  iconUrl?: string
-  /** Display name, whose first letter stands in when there is no icon. */
-  label?: string
   size?: number
   /** inline: 类型选择等小尺寸场景；badge: 嵌入 ds-card__badge 等父级徽章容器 */
   variant?: 'inline' | 'badge'
 }>(), {
-  iconUrl: '',
-  label: '',
   size: 20,
   variant: 'inline',
 })
@@ -32,7 +26,7 @@ function fallbackText(type: string) {
     case 'ima':
       return 'I'
     default:
-      return (props.label || type).trim().slice(0, 1).toUpperCase() || '?'
+      return type.slice(0, 1).toUpperCase() || '?'
   }
 }
 </script>
@@ -47,13 +41,6 @@ function fallbackText(type: string) {
       v-if="iconMap[type]"
       :src="iconMap[type]"
       :alt="type"
-      class="ds-type-icon__img"
-      :style="variant === 'inline' ? { width: `${size}px`, height: `${size}px` } : undefined"
-    >
-    <img
-      v-else-if="iconUrl"
-      :src="iconUrl"
-      :alt="label || type"
       class="ds-type-icon__img"
       :style="variant === 'inline' ? { width: `${size}px`, height: `${size}px` } : undefined"
     >

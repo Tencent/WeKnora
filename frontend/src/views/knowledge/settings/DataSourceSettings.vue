@@ -3,36 +3,22 @@ import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
 import {
-  getConnectorTypes,
   listDataSources,
   deleteDataSource,
   triggerSync,
   pauseDataSource,
   resumeDataSource,
-  type ConnectorMeta,
   type DataSource,
 } from '@/api/datasource'
 import { humanizeCron, relativeTime } from '@/utils/cronHumanize'
 import DataSourceEditorDialog from './DataSourceEditorDialog.vue'
 import DataSourceSyncLogs from './DataSourceSyncLogs.vue'
 import DataSourceTypeIcon from './DataSourceTypeIcon.vue'
-import { connectorName } from './connectorLabels'
 import { useAuthStore } from '@/stores/auth'
 
 const props = defineProps<{ kbId: string }>()
 const emit = defineEmits<{ (e: 'count', value: number): void }>()
-const { t, te, locale } = useI18n()
-
-// Connector metadata names plugin connectors, which have no locale keys.
-const connectorMeta = ref<Record<string, ConnectorMeta>>({})
-async function loadConnectorMeta() {
-  try {
-    const list = await getConnectorTypes()
-    connectorMeta.value = Object.fromEntries([...list].map((m) => [m.type, m]))
-  } catch {
-    connectorMeta.value = {}
-  }
-}
+const { t } = useI18n()
 const authStore = useAuthStore()
 
 // 后端 /datasource 的 list/logs 是 Viewer+，但所有写操作（POST/PUT/DELETE
@@ -148,7 +134,7 @@ function syncModeLabel(mode: string) {
 }
 
 function connectorLabel(type: string) {
-  return connectorName(connectorMeta.value[type] ?? { type }, { t, te, locale: locale.value })
+  return t(`datasource.connector.${type}`) || type
 }
 
 function scheduleLabel(cron: string) {
@@ -191,10 +177,7 @@ function onEditorSaved() {
   loadList()
 }
 
-onMounted(() => {
-  void loadConnectorMeta()
-  void loadList()
-})
+onMounted(loadList)
 onBeforeUnmount(stopPolling)
 </script>
 
@@ -223,12 +206,7 @@ onBeforeUnmount(stopPolling)
           @click="canManageDataSource ? openEdit(ds) : undefined"
         >
           <div class="ds-card__badge">
-            <DataSourceTypeIcon
-              :type="ds.type"
-              :icon-url="connectorMeta[ds.type]?.icon"
-              :label="connectorLabel(ds.type)"
-              variant="badge"
-            />
+            <DataSourceTypeIcon :type="ds.type" variant="badge" />
           </div>
           <div class="ds-card__body">
             <div class="ds-card__header">

@@ -328,7 +328,6 @@ func (t *MCPTool) Execute(ctx context.Context, args json.RawMessage) (*types.Too
 	// double storage in memory and accidental exposure in logs/SSE.
 	data := make(map[string]interface{})
 	data["content_items"] = redactImageData(result.Content)
-	addPluginToolView(data, t.service, t.mcpTool.Name, result.StructuredContent)
 
 	logger.GetLogger(ctx).Infof("MCP tool executed successfully: %s (images: %d)", t.mcpTool.Name, len(images))
 

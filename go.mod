@@ -100,7 +100,6 @@ require (
 	github.com/JohannesKaufmann/dom v0.2.0 // indirect
 	github.com/KyleBanks/depth v1.2.1 // indirect
 	github.com/Microsoft/go-winio v0.6.2 // indirect
-	github.com/Tencent/WeKnora/pluginsdk v0.0.0-00010101000000-000000000000
 	github.com/andybalholm/brotli v1.2.0 // indirect
 	github.com/andybalholm/cascadia v1.3.3 // indirect
 	github.com/apache/arrow-go/v18 v18.5.1 // indirect
@@ -360,5 +359,3 @@ replace go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelg
 // The anydoc Go bindings are not published yet (firecrawl/anydoc#30 is still
 // open), so they are vendored. Drop this replace once upstream tags go/vX.Y.Z.
 replace github.com/firecrawl/anydoc/go => ./third_party/anydoc-go
-
-replace github.com/Tencent/WeKnora/pluginsdk => ./pluginsdk

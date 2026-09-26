@@ -3,9 +3,6 @@ package docparser
 import (
 	"context"
 	"fmt"
-	"sort"
-	"strings"
-	"sync"
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -44,101 +41,24 @@ type ReaderDeps struct {
 	WeKnoraCloudCredentials func(ctx context.Context) *types.WeKnoraCloudCredentials
 }
 
-// enginesMu guards the registries: plugin engines come and go while the
-// server runs.
-var enginesMu sync.RWMutex
-
 // localEngines holds all locally registered parser engines, in registration
 // order — which is also the order the engine list is shown in.
 var localEngines []EngineRegistration
 
-// pluginEngines holds engines installed plugins provide, by qualified name
-// ("acme.ocr/ocr"). They are kept apart from localEngines so the builtin
-// plugin catalog never describes them as builtins.
-var pluginEngines = map[string]EngineRegistration{}
-
-// PluginEngineInfo is what a plugin engine adds to the engine list.
-type PluginEngineInfo interface {
-	PluginID() string
-	// DisplayNames localizes the engine's name, keyed by locale.
-	DisplayNames() map[string]string
-}
-
 // RegisterEngine adds an engine to the local registry. Called from init().
 func RegisterEngine(e EngineRegistration) {
-	enginesMu.Lock()
-	defer enginesMu.Unlock()
 	localEngines = append(localEngines, e)
 }
 
-// RegisterPluginEngine adds or replaces a plugin's engine. It refuses a name
-// a builtin engine uses.
-func RegisterPluginEngine(e EngineRegistration) error {
-	enginesMu.Lock()
-	defer enginesMu.Unlock()
-	for _, builtin := range localEngines {
-		if builtin.Name() == e.Name() {
-			return fmt.Errorf("parser engine %s already exists", e.Name())
-		}
-	}
-	pluginEngines[e.Name()] = e
-	return nil
-}
-
-// UnregisterPluginEngine removes a plugin's engine.
-func UnregisterPluginEngine(name string) {
-	enginesMu.Lock()
-	defer enginesMu.Unlock()
-	delete(pluginEngines, name)
-}
-
-// Engines returns the builtin engines in registration order.
-func Engines() []EngineRegistration {
-	enginesMu.RLock()
-	defer enginesMu.RUnlock()
-	out := make([]EngineRegistration, len(localEngines))
-	copy(out, localEngines)
-	return out
-}
-
-// pluginEngineList returns the plugin engines sorted by name.
-func pluginEngineList() []EngineRegistration {
-	enginesMu.RLock()
-	defer enginesMu.RUnlock()
-	out := make([]EngineRegistration, 0, len(pluginEngines))
-	for _, e := range pluginEngines {
-		out = append(out, e)
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Name() < out[j].Name() })
-	return out
-}
-
-// PluginFileTypes returns the file types plugin engines parse, so uploads
-// of those types are accepted.
-func PluginFileTypes() []string {
-	var out []string
-	for _, e := range pluginEngineList() {
-		out = append(out, e.FileTypes(true)...)
-	}
-	return out
-}
-
-// lookupEngine returns the registered engine with this name.
+// lookupEngine returns the locally registered engine with this name.
 func lookupEngine(name string) (EngineRegistration, bool) {
-	enginesMu.RLock()
-	defer enginesMu.RUnlock()
 	for _, engine := range localEngines {
 		if engine.Name() == name {
 			return engine, true
 		}
 	}
-	e, ok := pluginEngines[name]
-	return e, ok
+	return nil, false
 }
-
-// isPluginEngineName reports whether a name is a qualified plugin
-// contribution ID, which no builtin or docreader engine uses.
-func isPluginEngineName(name string) bool { return strings.Contains(name, "/") }
 
 // NewReader builds the reader for an engine.
 //
@@ -151,11 +71,6 @@ func NewReader(
 ) (interfaces.DocReader, error) {
 	if registration, ok := lookupEngine(engine); ok {
 		return registration.NewReader(ctx, deps)
-	}
-	if isPluginEngineName(engine) {
-		// Its plugin was uninstalled or disabled: the Python docreader does
-		// not know it either, so say so instead of sending it there.
-		return nil, errEngineUnavailable(engine, "its plugin is not installed or not running")
 	}
 	if engine == "" && !isURL && IsSimpleFormat(fileType) {
 		return &SimpleFormatReader{}, nil
@@ -190,11 +105,10 @@ func ListAllEngines(
 		remoteMap[re.Name] = re
 	}
 
-	locals := Engines()
-	seen := make(map[string]bool, len(locals))
-	result := make([]types.ParserEngineInfo, 0, len(locals)+len(remoteEngines))
+	seen := make(map[string]bool, len(localEngines))
+	result := make([]types.ParserEngineInfo, 0, len(localEngines)+len(remoteEngines))
 
-	for _, e := range locals {
+	for _, e := range localEngines {
 		name := e.Name()
 		seen[name] = true
 
@@ -225,18 +139,6 @@ func ListAllEngines(
 			continue
 		}
 		result = append(result, re)
-	}
-
-	for _, e := range pluginEngineList() {
-		available, reason := e.CheckAvailable(docreaderConnected, overrides)
-		info := types.ParserEngineInfo{
-			Name: e.Name(), Description: e.Description(), FileTypes: e.FileTypes(docreaderConnected),
-			Available: available, UnavailableReason: reason,
-		}
-		if meta, ok := e.(PluginEngineInfo); ok {
-			info.PluginID, info.DisplayNames = meta.PluginID(), meta.DisplayNames()
-		}
-		result = append(result, info)
 	}
 
 	return result

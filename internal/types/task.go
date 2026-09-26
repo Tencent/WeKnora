@@ -234,7 +234,6 @@ type WorkerServerStat struct {
 const (
 	TypeChunkExtract             = "chunk:extract"
 	TypeDocumentProcess          = "document:process"           // 文档处理任务
-	TypePluginEvent              = "plugin:event"               // 向插件投递业务事件
 	TypeFAQImport                = "faq:import"                 // FAQ导入任务（包含dry run模式）
 	TypeQuestionGeneration       = "question:generation"        // 问题生成任务
 	TypeSummaryGeneration        = "summary:generation"         // 摘要生成任务

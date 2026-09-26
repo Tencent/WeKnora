@@ -409,7 +409,6 @@
 </template>
 
 <script setup lang="ts">
-import { pickLocale } from '@/utils/localizedText'
 import { ref, computed, onMounted, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useUIStore } from '@/stores/ui'
@@ -426,7 +425,7 @@ import {
 } from '@/api/system'
 import { getWeKnoraCloudStatus } from '@/api/model'
 
-const { t, locale } = useI18n()
+const { t } = useI18n()
 const uiStore = useUIStore()
 const authStore = useAuthStore()
 
@@ -547,9 +546,6 @@ function engineInitial(engineName: string): string {
 }
 
 function getEngineDisplayName(engineName: string): string {
-  // Plugin engines name themselves.
-  const names = engines.value.find((e) => e.Name === engineName)?.DisplayNames
-  if (names) return pickLocale(names, locale.value) || names.default || engineName
   const key = `kbSettings.parser.engines.${engineName}.name`
   const translated = t(key)
   return translated !== key ? translated : engineName

@@ -997,7 +997,6 @@ export default {
     resourceHint: '选择要同步的内容空间/文件夹',
     untitled: '无标题',
     resourceLoadFailed: '加载资源列表失败',
-    typesLoadFailed: '加载数据源类型失败',
     noResources: '未找到可同步的知识库空间',
     noResourcesDesc: '应用需要通过群聊获得知识库访问权限才能拉取内容',
     noResourcesDesc_notion: '应用需要获得 Notion 页面的访问权限才能拉取内容',
@@ -2665,9 +2664,6 @@ export default {
     }
   },
   mcpSettings: {
-    transportPlugin: '插件内置',
-    fromPlugin: '插件',
-    pluginNotConfigured: '插件尚未配置，请在插件中心填写配置后使用',
     addUsageInstructions: "添加使用说明",
     noUsageInstructions: "尚未填写使用说明",
     title: 'MCP 服务管理',
@@ -5254,209 +5250,6 @@ export default {
     belongsToOrg: '所属空间：',
     noCompatibleKbForAgent: '当前智能体的工具与作用域内知识库的能力不匹配，暂无可引用的知识库。'
   },
-  pluginAdmin: {
-    runtime: {
-      declarative: '声明式',
-      host: '本机进程',
-      remote: '远程服务'
-    },
-    title: '插件管理',
-    description: '安装与管理本平台的插件。安装后所有空间都能看到，但每个空间需自行启用；停用会在所有节点卸载该插件。',
-    installButton: '安装插件',
-    empty: '还没有安装任何插件',
-    loadFailed: '加载已安装插件失败',
-    saveFailed: '保存失败',
-    enabledToast: '已在全平台启用',
-    disabledToast: '已在全平台停用',
-    platformSwitch: '全平台启用 / 停用',
-    publisher: '发布者',
-    contributions: '提供的能力',
-    permissions: '权限与外部访问',
-    state: {
-      degraded: '重启中',
-      running: '运行中',
-      failed: '加载失败',
-      disabled: '已停用',
-      pending: '加载中'
-    },
-    nodeState: {
-      ready: '就绪',
-      starting: '启动中',
-      degraded: '异常',
-      stopped: '未加载'
-    },
-    source: {
-      upload: '上传',
-      url: 'URL'
-    },
-    change: {
-      install: '新安装',
-      upgrade: '从 v{from} 升级',
-      downgrade: '从 v{from} 降级',
-      reinstall: '重新安装'
-    },
-    permission: {
-      anyHost: '任意公网地址',
-      remote: '访问远程服务',
-      egress: '网络出口',
-      hostApi: '调用 WeKnora API',
-      events: '订阅事件'
-    },
-    secret: {
-      title: '插件签名密钥',
-      description: '把此密钥配置为插件服务的环境变量 WEKNORA_PLUGIN_SECRET，服务据此确认请求来自 WeKnora。密钥只显示这一次，关闭后无法再查看。',
-      copy: '复制',
-      copied: '已复制',
-      done: '我已保存'
-    },
-    install: {
-      title: '安装插件',
-      description: '上传 .wkp 插件包或填写下载地址，审阅后安装。',
-      sourceSection: '插件包',
-      mode: {
-        upload: '上传文件',
-        url: '从 URL 下载'
-      },
-      fileLabel: '插件包文件',
-      chooseFile: '选择文件',
-      noFile: '未选择文件',
-      fileHint: '.wkp 文件（包含 plugin.yaml 的 zip），最大 64 MB。',
-      urlLabel: '下载地址',
-      urlHint: '服务端会下载该地址；不允许内网地址。',
-      remoteUrlLabel: '服务地址',
-      remoteUrlHint: '插件服务的 HTTP(S) 地址。内网地址需要加入 SSRF_WHITELIST。',
-      remoteUrlKeep: '升级时可留空，沿用当前地址',
-      reviewSection: '安装前审阅',
-      noPermissions: '该插件不申请任何额外权限。',
-      configNotice: '该插件需要配置：平台配置在安装后的详情中填写，空间配置由各空间管理员在插件中心填写。',
-      tenantNotice: '安装后插件对所有空间可见，但默认停用，由各空间管理员自行启用。',
-      digest: '包摘要',
-      inspect: '检查插件包',
-      confirm: {
-        install: '安装',
-        upgrade: '升级',
-        downgrade: '降级安装',
-        reinstall: '重新安装'
-      },
-      inspectFailed: '无法读取插件包',
-      failed: '安装失败',
-      done: '已安装 {name}'
-    },
-    detail: {
-      overview: '概览',
-      runtime: '运行方式',
-      source: '来源',
-      homepage: '主页',
-      license: '许可证',
-      engines: '兼容版本',
-      nodes: '节点状态',
-      noNodes: '当前没有节点加载该插件',
-      versions: '版本',
-      active: '当前版本',
-      activate: '切换到此版本',
-      rollback: '回滚到此版本',
-      activateConfirm: '将当前版本切换为 v{version}？所有节点会重新加载。',
-      activated: '已切换到 v{version}',
-      activateFailed: '切换版本失败',
-      systemConfig: '平台配置',
-      systemConfigHint: '对所有空间生效，例如服务区域或平台统一的凭证。',
-      configLoadFailed: '加载平台配置失败',
-      configSaved: '平台配置已保存',
-      configSaveFailed: '保存平台配置失败',
-      danger: '卸载',
-      uninstallHint: '删除插件及其全部版本；各空间的开关和配置会保留，重新安装后恢复。',
-      uninstall: '卸载插件',
-      uninstallConfirm: '确定卸载？所有节点会立即卸载该插件。',
-      uninstalled: '插件已卸载',
-      uninstallFailed: '卸载失败',
-      remote: '远程服务',
-      remoteUrl: '服务地址',
-      editUrl: '修改',
-      urlSaved: '服务地址已更新',
-      urlSaveFailed: '更新服务地址失败',
-      rotateSecret: '轮换密钥',
-      rotateHint: '生成新的签名密钥。服务换上新密钥之前，对它的调用会失败。',
-      rotateConfirm: '确定轮换？旧密钥立即失效。',
-      rotateFailed: '轮换密钥失败'
-    }
-  },
-  pluginToolView: {
-    empty: '没有结果'
-  },
-  pluginPages: {
-    notResponding: '插件页面没有响应，可能加载失败。',
-    requestFailed: '插件请求失败',
-    fromPlugin: '由插件 {id} 提供'
-  },
-  pluginCenter: {
-    installed: '已安装',
-    configure: '配置',
-    webhooks: 'Webhook 地址',
-    webhooksHint: '在第三方系统里配置这些地址，它们会把事件推送给本插件。地址包含本空间的密钥，请勿公开。',
-    copy: '复制',
-    webhookCopied: '已复制 Webhook 地址',
-    configTitle: '配置 {name}',
-    configDescription: '本空间使用该插件时的配置，例如 API 密钥。密钥加密保存，不会再次显示。',
-    configLoadFailed: '加载插件配置失败',
-    configSaved: '插件配置已保存',
-    configSaveFailed: '保存插件配置失败',
-    navGroup: '扩展',
-    title: '插件',
-    description: '本部署提供的所有插件，含内置插件与平台管理员安装的插件。在这里为当前空间启用或停用：停用后其集成不再出现在类型列表中、不能新建，已有的照常工作。安装的插件默认停用，需空间管理员启用。',
-    searchPlaceholder: '搜索插件名称、ID 或集成',
-    allPoints: '全部',
-    empty: '没有匹配的插件',
-    builtin: '内置',
-    required: '必需',
-    requiredHint: 'WeKnora 运行所必需，不能停用',
-    adminOnly: '仅空间管理员可以启用或停用插件',
-    loadFailed: '加载插件列表失败',
-    saveFailed: '保存插件设置失败',
-    enabledToast: '插件已启用',
-    disabledToast: '插件已停用',
-    points: {
-      modelVendors: '模型厂商',
-      connectors: '数据源',
-      imChannels: 'IM 渠道',
-      webSearch: '联网搜索',
-      tools: 'Agent 工具',
-      parsers: '文档解析',
-      skills: '技能',
-      mcpServers: 'MCP 服务',
-      pages: '页面',
-      settingsSections: '设置页',
-      kbTabs: '知识库页签',
-      webhooks: 'Webhook'
-    }
-  },
-  schemaForm: {
-    errors: {
-      required: '此项为必填',
-      type: '格式不正确',
-      enum: '不是可选的值',
-      min_length: '长度过短',
-      max_length: '长度过长',
-      pattern: '格式不符合要求',
-      minimum: '数值过小',
-      maximum: '数值过大',
-      format: '请输入完整的地址，如 https://example.com'
-    },
-    options: {
-      loading: '加载中…',
-      empty: '插件没有可选项',
-      retry: '重试',
-      failed: '加载可选项失败'
-    },
-    oauth: {
-      connected: '已连接',
-      notConnected: '未连接',
-      connect: '连接账号',
-      reconnect: '重新连接',
-      disconnect: '断开',
-      popupBlocked: '浏览器拦截了授权窗口，请允许弹出窗口后重试',
-      failed: '授权失败'
-    }
-  },
   common: {
     add: '添加',
     me: '我',
@@ -6013,18 +5806,6 @@ export default {
     baseUrlLabel: '实例地址',
     baseUrlPlaceholder: 'https://searxng.example.com',
     apiKeyPlaceholder: '请输入 API 密钥',
-    configFields: {
-      searchEngine: '搜索引擎',
-      searchEngineDesc: '选择智谱搜索引擎及对应的单次调用价格档位。',
-      searchStd: '基础版 · ¥0.01/次',
-      searchPro: '高级版 · ¥0.03/次',
-      searchSogou: '搜狗 · ¥0.05/次',
-      searchQuark: '夸克 · ¥0.05/次',
-      contentSize: '摘要长度',
-      contentSizeDesc: '中等返回精简摘要；详细返回更多上下文。',
-      contentMedium: '中等',
-      contentHigh: '详细'
-    },
     toasts: {
       providerCreated: '搜索引擎配置已创建',
       providerUpdated: '搜索引擎配置已更新',
@@ -6451,8 +6232,6 @@ export default {
       },
     },
     skills: {
-      pluginSection: '来自已启用的插件',
-      pluginSectionHint: '选择一个插件提供的技能加入技能库，之后可像其他技能一样安装到沙箱。',
       title: '技能管理',
       description: '技能属于空间目录，可以只登记，也可以装到一份或多份沙箱。智能体只能启用当前沙箱里已就绪的技能。',
       helpTooltip: '目录里的技能可以不装任何沙箱。脚本要跑起来，必须装进智能体所用的那份沙箱镜像。Docker、Cube、E2B 互不通用，装到几份就要装几次。',
@@ -7375,8 +7154,6 @@ export default {
     channelGitLab: 'GitLab',
     channelIma: '腾讯 IMA',
     channelUpload: '上传',
-    channelRss: 'RSS 订阅',
-    channelExternal: '外部数据源',
     channelManual: '手动',
     channelUrl: '网页',
     channelUnknown: '未知',

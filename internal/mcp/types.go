@@ -45,8 +45,6 @@ type ServerInfo struct {
 type CallToolResult struct {
 	Content []ContentItem `json:"content"`
 	IsError bool          `json:"isError,omitempty"`
-	// StructuredContent is the tool's structured result, if it returns one.
-	StructuredContent any `json:"structuredContent,omitempty"`
 }
 
 // ContentItem represents a content item in tool result
