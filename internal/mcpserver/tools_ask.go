@@ -11,6 +11,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/logger"
+	pluginevents "github.com/Tencent/WeKnora/internal/plugin/events"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/google/uuid"
 	"github.com/mark3labs/mcp-go/mcp"
@@ -395,6 +396,8 @@ func (s *Server) runQA(
 	}
 	if err := s.messageService.UpdateMessage(context.WithoutCancel(ctx), assistantMsg); err != nil {
 		logger.Warnf(ctx, "[mcpserver] failed to persist assistant message: %v", err)
+	} else if runErr == nil {
+		pluginevents.PublishAnswer(context.WithoutCancel(ctx), assistantMsg, question)
 	}
 	return text, summarizeReferences(collected), nil
 }

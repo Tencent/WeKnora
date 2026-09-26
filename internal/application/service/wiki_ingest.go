@@ -782,20 +782,22 @@ func (s *wikiIngestService) releaseIngestForUnavailableWiki(ctx context.Context,
 	}
 	cleanupCtx, cancel := wikiIngestCleanupContext(ctx)
 	defer cancel()
-	knowledgeIDs, err := drainer.DrainUnclaimedAndRelease(cleanupCtx, wikiTaskType, wikiTaskScope, kbID,
+	knowledgeIDs, completed, err := drainer.DrainUnclaimedAndRelease(cleanupCtx, wikiTaskType, wikiTaskScope, kbID,
 		WikiOpIngest, time.Now().Add(-wikiClaimStaleAfter))
 	if err != nil {
 		return fmt.Errorf("wiki ingest: KB %s unavailable (%s), drain pending ingest: %w", kbID, reason, err)
 	}
 	logger.Warnf(ctx, "wiki ingest: KB %s unavailable (%s), dropped pending ingest for %d document(s)",
 		kbID, reason, len(knowledgeIDs))
-	s.publishReleased(cleanupCtx, knowledgeIDs)
+	s.publishReleased(cleanupCtx, completed)
 	return nil
 }
 
 // publishReleased tells plugins about documents the drain completed: the
-// release promoted them past the watched repository methods. Documents
-// still waiting on other work stay finalizing and say nothing yet.
+// release promoted them past the watched repository methods. Only the
+// documents this release completed are reported; one a concurrent subtask
+// completed is reported by that subtask. Documents still waiting on other
+// work stay finalizing and say nothing yet.
 func (s *wikiIngestService) publishReleased(ctx context.Context, knowledgeIDs []string) {
 	if s.knowledgeRepo == nil {
 		return

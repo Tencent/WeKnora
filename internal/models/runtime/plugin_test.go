@@ -55,3 +55,36 @@ func TestRegisterPluginVendor(t *testing.T) {
 		t.Fatal("Unregister left the vendor")
 	}
 }
+
+// The console catalog compiles its generation on a runtime without plugin
+// vendors and publishes it with Adopt; the plugin vendors must survive.
+func TestAdoptKeepsPluginVendors(t *testing.T) {
+	target := New()
+	def := []byte(`{"name":"ACME","base_url":"https://a.example/v1","models":[{"id":"m"}]}`)
+	if err := target.RegisterPlugin("acme.ai/acme", def, t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	candidate, err := New().WithOverlay([]byte(`{"providers":{"lab":{"models":[{"id":"sample"}]}}}`), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	target.Adopt(candidate)
+	if _, ok := target.Get("acme.ai/acme"); !ok {
+		t.Fatal("publishing a catalog generation dropped the plugin vendor")
+	}
+	if _, ok := target.Get("lab"); !ok {
+		t.Fatal("the candidate's own vendors were not published")
+	}
+	// Later overlay reloads keep it, and it can still be unregistered.
+	if err := target.Reload([]byte(`{"providers":{}}`), ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := target.Get("acme.ai/acme"); !ok {
+		t.Fatal("reload after adopt dropped the plugin vendor")
+	}
+	target.Unregister("acme.ai/acme")
+	target.Adopt(candidate)
+	if _, ok := target.Get("acme.ai/acme"); ok {
+		t.Fatal("an unregistered plugin vendor came back")
+	}
+}

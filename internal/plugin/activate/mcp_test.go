@@ -235,3 +235,55 @@ func TestPluginMCPDirectories(t *testing.T) {
 		t.Fatal("an unloaded plugin keeps its directories")
 	}
 }
+
+// fakeOAuth hands out the current access token of every connection.
+type fakeOAuth struct{ token string }
+
+func (f *fakeOAuth) AccessToken(context.Context, string, uint64, string) (string, error) {
+	if f.token == "" {
+		return "", errors.New("the connection was revoked")
+	}
+	return f.token, nil
+}
+
+// A header filled from a connected account carries its access token, and a
+// refreshed token reconnects the service.
+func TestPluginMCPHeadersResolveOAuth(t *testing.T) {
+	e := setup(t)
+	oauth := &fakeOAuth{token: "tok-1"}
+	iv := NewInvoker(nil)
+	iv.SetOAuth(oauth)
+	e.mcp.mu.Lock()
+	e.mcp.iv = iv
+	e.mcp.mu.Unlock()
+	if err := e.tenancy.SetEnabled(e.ctx, 1, "acme.search", true, "u"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.installer.SetSystemConfig(e.ctx, "acme.search", map[string]any{"region": "eu"}); err != nil {
+		t.Fatal(err)
+	}
+	ref := "oauth:6f1d0f4c-7a21-4c55-9d0e-5b0c8e5e4f7c"
+	if _, err := e.tenancy.SetConfig(e.ctx, 1, "acme.search", map[string]any{"api_key": ref}, "u"); err != nil {
+		t.Fatal(err)
+	}
+	id := serviceID(1, "acme.search/search")
+	first, _ := e.repo.GetByID(e.ctx, 1, id)
+	if first == nil || !first.Enabled || first.Headers["Authorization"] != "Bearer tok-1" {
+		t.Fatalf("service = %+v", first)
+	}
+	if again, _ := e.repo.GetByID(e.ctx, 1, id); !again.UpdatedAt.Equal(first.UpdatedAt) {
+		t.Fatal("unchanged headers must not reconnect the service")
+	}
+
+	time.Sleep(time.Millisecond)
+	oauth.token = "tok-2"
+	refreshed, _ := e.repo.GetByID(e.ctx, 1, id)
+	if refreshed.Headers["Authorization"] != "Bearer tok-2" || !refreshed.UpdatedAt.After(first.UpdatedAt) {
+		t.Fatalf("a refreshed token must reach the headers and move UpdatedAt: %+v", refreshed)
+	}
+
+	oauth.token = ""
+	if revoked, _ := e.repo.GetByID(e.ctx, 1, id); revoked.Enabled || revoked.PluginError == "" {
+		t.Fatalf("an unusable connection must disable the service: %+v", revoked)
+	}
+}

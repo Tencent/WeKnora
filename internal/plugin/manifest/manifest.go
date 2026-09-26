@@ -42,6 +42,13 @@ const (
 	RuntimeKubernetes RuntimeType = "kubernetes"
 )
 
+// HasCode reports whether plugins of this runtime run code WeKnora can call:
+// host plugins through the plugin host, remote and kubernetes plugins over
+// HTTP.
+func (t RuntimeType) HasCode() bool {
+	return t == RuntimeHost || t == RuntimeRemote || t == RuntimeKubernetes
+}
+
 // Manifest is a plugin's plugin.yaml.
 type Manifest struct {
 	SchemaVersion int    `json:"schemaVersion"        yaml:"schemaVersion"`

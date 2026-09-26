@@ -136,10 +136,14 @@ func (h *PluginFormsHandler) Options(c *gin.Context) {
 }
 
 // codePlugin finds a plugin with code the caller may ask for this scope.
+// The workspace configuration is filled in before the plugin is switched
+// on (connecting an account first, as its GET/PUT /config allow), so the
+// tenant scope only needs a plugin the workspace can see; an instance
+// belongs to an integration, which needs the plugin on.
 func (h *PluginFormsHandler) codePlugin(c *gin.Context, id, scope string) (*manifest.Manifest, bool) {
 	ctx := c.Request.Context()
 	m, ok := h.registry.Plugin(id)
-	if !ok || (m.Runtime.Type != manifest.RuntimeHost && m.Runtime.Type != manifest.RuntimeRemote) {
+	if !ok || !m.Runtime.Type.HasCode() {
 		_ = c.Error(errors.NewNotFoundError("no such plugin with code"))
 		return nil, false
 	}
@@ -151,6 +155,13 @@ func (h *PluginFormsHandler) codePlugin(c *gin.Context, id, scope string) (*mani
 		return m, true
 	}
 	tenantID := c.GetUint64(types.TenantIDContextKey.String())
+	if scope == pluginapi.OptionsScopeTenant {
+		if tenantID == 0 || !h.registry.VisibleTo(id, tenantID) {
+			_ = c.Error(errors.NewNotFoundError("no such plugin in this workspace"))
+			return nil, false
+		}
+		return m, true
+	}
 	if on, err := h.tenancy.PluginEnabled(ctx, tenantID, id); err != nil || !on {
 		_ = c.Error(errors.NewNotFoundError("the plugin is not enabled in this workspace"))
 		return nil, false

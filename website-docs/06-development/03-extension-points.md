@@ -30,13 +30,13 @@ graph LR
     AG --> P4
     P1 -.->|"文件读写"| P9
     P2 -.-> P9
-    CT["container.go<br/>(依赖注入 / 注册中枢)"] -.->|"注册"| P3
-    CT -.->|"注册"| P5
-    CT -.->|"注册"| P6
-    CT -.->|"注册"| P7
+    CT["container.go<br/>(依赖注入)"] -.->|"注册"| P3
+    BI["plugin/builtin/implementations.go<br/>(内置实现注册)"] -.->|"注册"| P5
+    BI -.->|"注册"| P6
+    BI -.->|"注册"| P7
 ```
 
-Go 侧绝大多数扩展点的**注册中枢**是 `internal/container/container.go`（依赖注入容器）：检索引擎 `initRetrieveEngineRegistry()`、联网搜索 `registerWebSearchProviders()`、IM 适配器 `registerIMAdapterFactories()`、数据源连接器 `initConnectorRegistry()`。
+检索引擎在依赖注入容器 `internal/container/container.go` 的 `initRetrieveEngineRegistry()` 中注册。联网搜索、数据源连接器和 IM 适配器的内置实现以**内置插件**的形式集中登记在 `internal/plugin/builtin/implementations.go`：`RegisterWebSearchProviders()`、`NewConnectorRegistry()`、`RegisterIMAdapters()`，容器只调用它们；同包的 `builtin.go` 再根据实际注册的内容生成插件目录里的内置插件描述（见[插件](../03-features/25-plugins.md)）。不改 WeKnora 源码的扩展（第三方联网搜索、连接器、IM 平台等）走插件包。
 
 ---
 
@@ -415,14 +415,18 @@ func (r *Registry) CreateProvider(providerType string, params types.WebSearchPro
 
 1. 在 `internal/types/web_search_provider.go` 增加 `WebSearchProviderType` 常量；
 2. 在 `internal/infrastructure/web_search/` 新建 `mysearch.go`，实现 `WebSearchProvider` 并暴露工厂 `func NewMySearchProvider(params types.WebSearchProviderParameters) (interfaces.WebSearchProvider, error)`；
-3. **注册点：`internal/container/container.go` 的 `registerWebSearchProviders()`**：
+3. **注册点：`internal/plugin/builtin/implementations.go` 的 `RegisterWebSearchProviders()`**（容器的 `registerWebSearchProviders` 只转调它）：
 
 ```go
-func registerWebSearchProviders(registry *infra_web_search.Registry) {
-    registry.Register("duckduckgo", infra_web_search.NewDuckDuckGoProvider)
-    registry.Register("google", infra_web_search.NewGoogleProvider)
-    // ... 在此追加：
-    registry.Register("mysearch", infra_web_search.NewMySearchProvider)
+func RegisterWebSearchProviders(registry *web_search.Registry) {
+    for id, factory := range map[string]web_search.ProviderFactory{
+        "duckduckgo": web_search.NewDuckDuckGoProvider,
+        "google":     web_search.NewGoogleProvider,
+        // ... 在此追加：
+        "mysearch": web_search.NewMySearchProvider,
+    } {
+        registry.Register(id, factory)
+    }
 }
 ```
 
@@ -502,11 +506,13 @@ type StreamingConnector interface {
 ### 新增步骤
 
 1. 在 `internal/datasource/connector/mysource/` 新建包，实现 `Connector`（大数据量建议同时实现 `StreamingConnector`），提供 `NewConnector()`；
-2. **注册点一：`internal/container/container.go` 的 `initConnectorRegistry()`**：
+2. **注册点一：`internal/plugin/builtin/implementations.go` 的 `NewConnectorRegistry()`**（容器的 `initConnectorRegistry` 只转调它），把连接器加进 `connectors` 列表，注册错误会汇总后让启动失败：
 
 ```go
-if err := registry.Register(mysourceConnector.NewConnector()); err != nil {
-    errs = errors.Join(errs, fmt.Errorf("register mysource connector: %w", err))
+connectors := []datasource.Connector{
+    notionConnector.NewConnector(),
+    // ... 在此追加：
+    mysourceConnector.NewConnector(),
 }
 ```
 
@@ -582,14 +588,13 @@ func (s *Service) RegisterAdapterFactory(platform string, factory AdapterFactory
 
 1. 在 `internal/im/adapter.go` 增加 `Platform` 常量；
 2. 新建 `internal/im/myplatform/`，实现 `Adapter`（按需加 `StreamSender`/`FileDownloader`）与 `NewFactory() im.AdapterFactory`；
-3. **注册点：`internal/container/container.go` 的 `registerIMAdapterFactories()`**：
+3. **注册点：`internal/plugin/builtin/implementations.go` 的 `RegisterIMAdapters()`**（容器的 `registerIMService` 先调用它，再 `LoadAndStartChannels()` 启动已有渠道）：
 
 ```go
-func registerIMAdapterFactories(imService *imPkg.Service) {
-    imService.RegisterAdapterFactory("wecom", wecom.NewFactory())
+func RegisterIMAdapters(s *im.Service) {
+    s.RegisterAdapterFactory("wecom", imWecom.NewFactory())
     // ... 在此追加：
-    imService.RegisterAdapterFactory("myplatform", myplatform.NewFactory())
-    if err := imService.LoadAndStartChannels(); err != nil { ... }
+    s.RegisterAdapterFactory("myplatform", myplatform.NewFactory())
 }
 ```
 
@@ -733,8 +738,8 @@ default:
 | 分块策略 | tier 函数 `func(text, cfg, profile) []Chunk` | `internal/infrastructure/chunker/strategy.go` | 同文件 `runTier()` + 策略常量 |
 | 检索引擎 | `RetrieveEngineRepository` | `internal/types/interfaces/retriever.go` | `container.go` `initRetrieveEngineRegistry()`（`RETRIEVE_DRIVER` 门控） |
 | 模型厂商 | `providers.Definition`（+ 协议层 `Reranker` / `Embedder` / `Transcriber`、`chat.Chat`） | `internal/models/providers/definition.go` | `internal/models/providers/builtin.go` `Builtins()` + `internal/models/catalog/data/seed.json` |
-| 联网搜索 | `WebSearchProvider` | `internal/types/interfaces/web_search.go` | `container.go` `registerWebSearchProviders()` |
-| 数据源连接器 | `Connector` / `StreamingConnector` | `internal/datasource/connector.go` | `container.go` `initConnectorRegistry()` + `ConnectorMetadataRegistry` |
-| IM 适配器 | `Adapter`（+`StreamSender`/`FileDownloader`） | `internal/im/adapter.go` | `container.go` `registerIMAdapterFactories()` |
+| 联网搜索 | `WebSearchProvider` | `internal/types/interfaces/web_search.go` | `internal/plugin/builtin/implementations.go` `RegisterWebSearchProviders()` |
+| 数据源连接器 | `Connector` / `StreamingConnector` | `internal/datasource/connector.go` | `internal/plugin/builtin/implementations.go` `NewConnectorRegistry()` + `ConnectorMetadataRegistry` |
+| IM 适配器 | `Adapter`（+`StreamSender`/`FileDownloader`） | `internal/im/adapter.go` | `internal/plugin/builtin/implementations.go` `RegisterIMAdapters()` |
 | Agent 工具 | `types.Tool` | `internal/types/agent.go` | `internal/agent/tools/definitions.go` + `ToolRegistry.RegisterTool` |
 | 存储后端 | `FileService` | `internal/types/interfaces/file.go` | `internal/application/service/file/factory.go` switch |

@@ -176,7 +176,7 @@ func (s *ModelCatalogService) syncLocked(ctx context.Context) (*types.ModelCatal
 	if err == nil {
 		var candidate *modelruntime.Runtime
 		if candidate, err = s.base.WithOverlay(overlay, ""); err == nil {
-			s.target.RestoreSnapshot(candidate.SnapshotCurrent())
+			s.target.Adopt(candidate)
 			s.applied, s.loaded, s.failedErr = row.Version, true, nil
 			return row, nil
 		}
@@ -261,7 +261,7 @@ func (s *ModelCatalogService) change(ctx context.Context, req CatalogUpdate, pub
 	if err := s.repo.Save(ctx, row.Version, next); err != nil {
 		return nil, err
 	}
-	s.target.RestoreSnapshot(candidate.SnapshotCurrent())
+	s.target.Adopt(candidate)
 	s.applied, s.loaded, s.failedErr = next.Version, true, nil
 	if s.audit != nil {
 		details, _ := json.Marshal(map[string]any{

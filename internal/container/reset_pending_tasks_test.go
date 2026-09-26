@@ -377,3 +377,20 @@ func TestRecoverPendingWikiTasks_RecreatesOneTriggerPerLaneAndKB(t *testing.T) {
 	require.NoError(t, db.Model(&types.TaskPendingOp{}).Count(&remaining).Error)
 	assert.Equal(t, int64(4), remaining)
 }
+
+// Replicas starting together find the same stuck rows; only the one whose
+// update changed a row reports it (knowledge.failed), so it is raised once.
+func TestResetStuckKnowledgeReportsRowsOnce(t *testing.T) {
+	db := setupResetPendingDB(t)
+	require.NoError(t, db.Exec(
+		`INSERT INTO knowledges (id, parse_status) VALUES (?, ?), (?, ?)`,
+		"k1", types.ParseStatusProcessing, "k2", types.ParseStatusProcessing,
+	).Error)
+	ids := []string{"k1", "k2"}
+	first, err := resetStuckKnowledge(db, ids)
+	require.NoError(t, err)
+	require.ElementsMatch(t, ids, first)
+	second, err := resetStuckKnowledge(db, ids)
+	require.NoError(t, err)
+	require.Empty(t, second, "a row another replica already reset must not be reported again")
+}

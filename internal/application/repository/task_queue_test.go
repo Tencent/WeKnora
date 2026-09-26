@@ -995,11 +995,13 @@ func TestTaskPendingOps_DrainUnclaimedAndReleaseSparesLiveDocuments(t *testing.T
 	insertFinalizingKnowledge(t, db, "k-live", 1)
 	insertFinalizingKnowledge(t, db, "k-retract-live", 1)
 
-	keys, err := drainer.DrainUnclaimedAndRelease(ctx, types.TypeWikiIngest, types.TaskScopeKnowledgeBase, "kb-1",
-		"ingest", staleBefore)
+	keys, completed, err := drainer.DrainUnclaimedAndRelease(ctx, types.TypeWikiIngest,
+		types.TaskScopeKnowledgeBase, "kb-1", "ingest", staleBefore)
 
 	require.NoError(t, err)
 	assert.ElementsMatch(t, []string{"k-unclaimed", "k-stale"}, keys)
+	// k-stale still waits on another subtask; only k-unclaimed completed here.
+	assert.Equal(t, []string{"k-unclaimed"}, completed)
 	var left []string
 	require.NoError(t, db.Model(&types.TaskPendingOp{}).Order("dedup_key").Pluck("dedup_key", &left).Error)
 	assert.Equal(t, []string{"k-live", "k-live", "k-other-kb", "k-retract", "k-retract-live", "k-retract-live"}, left)
@@ -1028,7 +1030,7 @@ func TestTaskPendingOps_DrainUnclaimedAndReleaseRollsBackOnReleaseFailure(t *tes
 	require.NoError(t, repo.Enqueue(ctx, wikiLane("kb-1", "ingest", "k-1")))
 	require.NoError(t, db.Exec(`DROP TABLE knowledges`).Error)
 
-	keys, err := drainer.DrainUnclaimedAndRelease(ctx, types.TypeWikiIngest, types.TaskScopeKnowledgeBase, "kb-1",
+	keys, _, err := drainer.DrainUnclaimedAndRelease(ctx, types.TypeWikiIngest, types.TaskScopeKnowledgeBase, "kb-1",
 		"ingest", time.Now().Add(-time.Hour))
 
 	require.Error(t, err)

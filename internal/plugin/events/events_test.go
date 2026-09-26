@@ -254,3 +254,49 @@ func TestDeferredKnowledgeWaitsForPlugins(t *testing.T) {
 		t.Fatalf("flushed %d events, want 1", len(tasks))
 	}
 }
+
+// Every runtime with code takes events, kubernetes deployments included.
+func TestSubscribedNeedsCode(t *testing.T) {
+	for rt, want := range map[manifest.RuntimeType]bool{
+		manifest.RuntimeHost: true, manifest.RuntimeRemote: true, manifest.RuntimeKubernetes: true,
+		manifest.RuntimeDeclarative: false, manifest.RuntimeBuiltin: false,
+	} {
+		m := &manifest.Manifest{
+			Runtime:     manifest.Runtime{Type: rt},
+			Permissions: manifest.Permissions{Events: []string{pluginapi.EventChatAnswered}},
+		}
+		if got := subscribed(m, pluginapi.EventChatAnswered); got != want {
+			t.Errorf("%s: subscribed = %v, want %v", rt, got, want)
+		}
+	}
+}
+
+func TestPublishAnswer(t *testing.T) {
+	d, q, _, _ := setup(t)
+	SetDefault(d)
+	t.Cleanup(func() { SetDefault(nil) })
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(7))
+	ctx = context.WithValue(ctx, types.UserIDContextKey, "u1")
+	PublishAnswer(ctx, &types.Message{ID: "m", SessionID: "s", AgentID: "a", Content: "42"}, "why?")
+	tasks := q.take()
+	if len(tasks) != 1 {
+		t.Fatalf("tasks = %d, want 1", len(tasks))
+	}
+	var p payload
+	_ = json.Unmarshal(tasks[0].Payload(), &p)
+	var data pluginapi.ChatEventData
+	_ = json.Unmarshal(p.Event.Data, &data)
+	if p.PluginID != "acme.other" || p.Event.Type != pluginapi.EventChatAnswered ||
+		data != (pluginapi.ChatEventData{
+			SessionID: "s", MessageID: "m", AgentID: "a", UserID: "u1", Question: "why?", Answer: "42",
+		}) {
+		t.Fatalf("published %+v %+v", p, data)
+	}
+}
+
+// Deliveries go to the queue the runtime-queues page shows them in.
+func TestDeliveriesUseTheDeclaredQueue(t *testing.T) {
+	if q, ok := types.QueueForTaskType(TaskType); !ok || q != types.QueueMaintenance {
+		t.Fatalf("plugin events are enqueued on %q but declared on %q", types.QueueMaintenance, q)
+	}
+}

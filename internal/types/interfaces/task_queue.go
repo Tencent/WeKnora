@@ -99,11 +99,12 @@ type TaskPendingOpsScopeCleaner interface {
 // up on a queue lane. DrainUnclaimedAndRelease deletes the lane's op rows for
 // documents no live batch holds (no row claimed at or after staleBefore) and
 // releases one finalizing slot per such document, atomically; it returns the
-// released dedup keys.
+// released dedup keys and, among them, the documents its release completed
+// (took the last slot, so no one else reports their completion).
 type TaskPendingOpsDrainer interface {
 	DrainUnclaimedAndRelease(
 		ctx context.Context, taskType, scope, scopeID, op string, staleBefore time.Time,
-	) ([]string, error)
+	) (released, completed []string, err error)
 }
 
 // TaskPendingOpsKnowledgeBaseGuard atomically persists a KB-scoped operation

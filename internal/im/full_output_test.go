@@ -380,3 +380,31 @@ func TestIMQAFailureReply(t *testing.T) {
 		t.Fatalf("other error = %q, want %q", got, imErrorFallback)
 	}
 }
+
+// A channel answer reaches OnAnswer once (plugins receive chat.answered);
+// a cancelled run is no answer.
+func TestChannelAnswersNotifyOnce(t *testing.T) {
+	service, adapter, _, _ := newFullOutputHarness("最终答案")
+	var got []string
+	service.OnAnswer(func(_ context.Context, m *types.Message, question string) {
+		got = append(got, question+"→"+m.Content)
+	})
+	msg := &IncomingMessage{Platform: PlatformFeishu, UserID: "user-1", Content: "问题"}
+	session := &types.Session{ID: "session-1"}
+	if err := service.handleMessageFullOutput(
+		context.Background(), msg, session, nil, nil, nil, nil, adapter, adapter, "user-key", nil,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got, []string{"问题→最终答案"}) {
+		t.Fatalf("answers notified = %v", got)
+	}
+
+	got = nil
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, _ = service.runQA(ctx, session, "问题", nil, nil, nil, nil, "user-key", nil)
+	if len(got) != 0 {
+		t.Fatalf("a cancelled run notified %v", got)
+	}
+}

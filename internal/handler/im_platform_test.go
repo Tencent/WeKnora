@@ -31,3 +31,14 @@ func TestInvalidIMPlatformError_ListsEveryPlatform(t *testing.T) {
 		}
 	}
 }
+
+// Plugin IM platforms connect over webhooks only: a channel created
+// without a mode gets webhook, never the websocket default of builtins.
+func TestPluginIMMode(t *testing.T) {
+	for mode, want := range map[string]bool{"": true, "webhook": true, "websocket": false, "longpoll": false} {
+		got, ok := pluginIMMode(mode)
+		if ok != want || ok && got != "webhook" {
+			t.Errorf("pluginIMMode(%q) = %q, %v", mode, got, ok)
+		}
+	}
+}

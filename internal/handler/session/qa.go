@@ -28,7 +28,6 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
-	"github.com/Tencent/WeKnora/pluginsdk/pluginapi"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 )
@@ -1930,12 +1929,7 @@ func (h *Handler) completeAssistantMessage(
 	// The stop button completes the message a first time without the
 	// question; the run's own completion follows with it.
 	if userQuery != "" {
-		tenantID, _ := types.TenantIDFromContext(ctx)
-		userID, _ := types.UserIDFromContext(ctx)
-		pluginevents.Publish(ctx, tenantID, pluginapi.EventChatAnswered, pluginapi.ChatEventData{
-			SessionID: assistantMessage.SessionID, MessageID: assistantMessage.ID, AgentID: assistantMessage.AgentID,
-			UserID: userID, Question: userQuery, Answer: assistantMessage.Content,
-		})
+		pluginevents.PublishAnswer(ctx, assistantMessage, userQuery)
 	}
 
 	// Asynchronously index the Q&A pair into the chat history knowledge base for vector search.

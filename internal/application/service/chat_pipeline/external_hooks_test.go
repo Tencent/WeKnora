@@ -37,8 +37,8 @@ func withHooks(t *testing.T, h ExternalHooks) {
 func TestExternalHooksFollowTheBuiltinStages(t *testing.T) {
 	withHooks(t, &fakeHooks{})
 	em := NewEventManager()
+	em.Register(NewPluginFilterTopK(NewEventManager())) // the builtin stage runs first
 	NewPluginExternalHooks(em)
-	em.Register(NewPluginFilterTopK(NewEventManager())) // builtin runs as the next plugin
 
 	cm := &types.ChatManage{}
 	cm.RewriteQuery = "price"
@@ -67,4 +67,55 @@ func TestStreamAppendsTheHooksNote(t *testing.T) {
 	require.Eventually(t, func() bool { return len(bus.finalAnswerContents()) == 2 }, 2*time.Second, 5*time.Millisecond)
 	require.Equal(t, []string{"It costs ", "10.\n\n_note_"}, bus.finalAnswerContents())
 	require.Equal(t, []string{"It costs 10."}, hooks.answers)
+}
+
+type dropAllHooks struct{ fakeHooks }
+
+func (dropAllHooks) FilterResults(context.Context, *types.ChatManage, []*types.SearchResult) []*types.SearchResult {
+	return nil
+}
+
+// Hooks that drop every passage end retrieval like an empty search, so the
+// fallback answer is given instead of an answer from nothing.
+func TestExternalHooksDroppingEverythingFindNothing(t *testing.T) {
+	withHooks(t, &dropAllHooks{})
+	em := NewEventManager()
+	em.Register(NewPluginFilterTopK(NewEventManager()))
+	NewPluginExternalHooks(em)
+	cm := &types.ChatManage{}
+	cm.RerankTopK = 3
+	cm.MergeResult = []*types.SearchResult{{ID: "a"}}
+	require.Equal(t, ErrSearchNothing, em.Trigger(context.Background(), types.FILTER_TOP_K, cm))
+	require.Empty(t, cm.MergeResult)
+
+	// Nothing retrieved in the first place is not the hooks' doing.
+	require.Nil(t, em.Trigger(context.Background(), types.FILTER_TOP_K, &types.ChatManage{}))
+}
+
+// stagePlugin stands for a builtin stage: it works, then calls the next plugin.
+type stagePlugin struct {
+	event types.EventType
+	work  func(*types.ChatManage)
+}
+
+func (s stagePlugin) ActivationEvents() []types.EventType { return []types.EventType{s.event} }
+
+func (s stagePlugin) OnEvent(
+	_ context.Context, _ types.EventType, cm *types.ChatManage, next func() *PluginError,
+) *PluginError {
+	s.work(cm)
+	return next()
+}
+
+// The plugins after query understanding (entity extraction) see the
+// question the hooks rewrote.
+func TestRewrittenQueryReachesLaterStages(t *testing.T) {
+	withHooks(t, &fakeHooks{})
+	em := NewEventManager()
+	em.Register(stagePlugin{types.QUERY_UNDERSTAND, func(cm *types.ChatManage) { cm.RewriteQuery = "price" }})
+	NewPluginExternalHooks(em)
+	var seen string
+	em.Register(stagePlugin{types.QUERY_UNDERSTAND, func(cm *types.ChatManage) { seen = cm.RewriteQuery }})
+	require.Nil(t, em.Trigger(context.Background(), types.QUERY_UNDERSTAND, &types.ChatManage{}))
+	require.Equal(t, "price!", seen)
 }

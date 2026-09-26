@@ -2,6 +2,7 @@ package activate
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -64,7 +65,8 @@ func (p *IMPlatforms) Platform(id string) (im.PlatformInfo, im.AdapterFactory, b
 		handle func(context.Context, *im.IncomingMessage) error,
 	) (im.Adapter, context.CancelFunc, error) {
 		return &pluginIMAdapter{
-			iv: p.iv, m: m, local: e.Contribution.ID, platform: id, channel: channel, handle: handle,
+			iv: p.iv, reg: p.reg, pluginID: m.ID, local: e.Contribution.ID, platform: id,
+			channel: channel, handle: handle,
 		}, nil, nil
 	}
 	return platformInfo(e), factory, true
@@ -86,10 +88,12 @@ func platformInfo(e registry.Entry) im.PlatformInfo {
 	return info
 }
 
-// pluginIMAdapter is one channel of a plugin's IM platform.
+// pluginIMAdapter is one channel of a plugin's IM platform. A channel runs
+// across plugin upgrades, so it looks the plugin up on every call.
 type pluginIMAdapter struct {
 	iv       *Invoker
-	m        *manifest.Manifest
+	reg      *registry.Registry
+	pluginID string
 	local    string
 	platform string
 	channel  *im.IMChannel
@@ -105,8 +109,12 @@ func (a *pluginIMAdapter) call(ctx context.Context, path string, in, out any) er
 	if err != nil {
 		return err
 	}
+	m, ok := a.reg.Plugin(a.pluginID)
+	if !ok || m.Builtin {
+		return fmt.Errorf("plugin %s is not loaded", a.pluginID)
+	}
 	ctx = context.WithValue(ctx, types.TenantIDContextKey, a.channel.TenantID)
-	return a.iv.Call(ctx, a.m, path, creds, in, out)
+	return a.iv.Call(ctx, m, path, creds, in, out)
 }
 
 // HandleURLVerification implements im.Adapter. The plugin reads every

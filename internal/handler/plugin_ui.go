@@ -14,7 +14,6 @@ import (
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/plugin/activate"
-	"github.com/Tencent/WeKnora/internal/plugin/manifest"
 	"github.com/Tencent/WeKnora/internal/plugin/tenancy"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/pluginsdk/pluginapi"
@@ -147,8 +146,7 @@ func (h *PluginUIHandler) Request(c *gin.Context) {
 			return
 		}
 	}
-	rt := mount.Manifest.Runtime.Type
-	if rt != manifest.RuntimeHost && rt != manifest.RuntimeRemote {
+	if !mount.Manifest.Runtime.Type.HasCode() {
 		_ = c.Error(errors.NewNotFoundError("this plugin's pages make no requests"))
 		return
 	}

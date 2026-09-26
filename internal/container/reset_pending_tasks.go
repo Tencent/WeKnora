@@ -2,6 +2,7 @@ package container
 
 import (
 	"context"
+	"errors"
 	"os"
 	"time"
 
@@ -56,25 +57,12 @@ func resetPendingTasks(db *gorm.DB) {
 	// enrichment subtasks were lost with the process).
 	// Update by the resolved ids rather than reusing the GORM chain after
 	// Find() (which makes PostgreSQL emit an invalid UPDATE ... FROM self).
-	stuckIDs := knowledgeIDs(stuckKnowledge)
-	var resetErr error
-	var resetCount int64
-	if len(stuckIDs) > 0 {
-		// Rebuild the query instead of reusing the chain after Find(); reusing it
-		// makes PostgreSQL emit an invalid UPDATE ... FROM self statement.
-		result := stuckKnowledgeParseQuery(db).
-			Where("id IN ?", stuckIDs).
-			Updates(map[string]interface{}{
-				"parse_status":           types.ParseStatusFailed,
-				"error_message":          restartInterruptedMessage,
-				"pending_subtasks_count": 0,
-			})
-		resetErr = result.Error
-		resetCount = result.RowsAffected
-	}
+	stuckIDs, resetErr := resetStuckKnowledge(db, knowledgeIDs(stuckKnowledge))
+	resetCount := len(stuckIDs)
 	if resetErr != nil {
 		logger.Warnf(context.Background(), "Failed to reset pending knowledge tasks: %v", resetErr)
-	} else if resetCount > 0 {
+	}
+	if resetCount > 0 {
 		logger.Infof(context.Background(),
 			"Reset %d stuck knowledge parsing tasks to failed state (distributed=%v)",
 			resetCount, distributed)
@@ -91,7 +79,9 @@ func resetPendingTasks(db *gorm.DB) {
 			logger.Warnf(ctx, "resetPendingTasks: list reset knowledge failed: %v", err)
 		}
 		// Plugins subscribed to knowledge.failed hear of these once they are
-		// loaded; this runs before the plugin runtime starts.
+		// loaded; this runs before the plugin runtime starts. Only the rows
+		// this process reset are reported, so replicas starting together do
+		// not report a row twice.
 		for i := range resetKnowledge {
 			pluginevents.DeferKnowledge(&resetKnowledge[i])
 		}
@@ -139,6 +129,31 @@ func resetPendingTasks(db *gorm.DB) {
 			"Reset %d stuck data source sync tasks to failed state (distributed=%v)",
 			resultSync.RowsAffected, distributed)
 	}
+}
+
+// resetStuckKnowledge fails the rows of ids that are still stuck and
+// returns the ones this call changed. Each row is updated on its own: when
+// replicas start together, only the one whose update changed a row owns it.
+func resetStuckKnowledge(db *gorm.DB, ids []string) ([]string, error) {
+	var reset []string
+	var errs []error
+	for _, id := range ids {
+		// Rebuild the query instead of reusing the chain after Find(); reusing it
+		// makes PostgreSQL emit an invalid UPDATE ... FROM self statement.
+		result := stuckKnowledgeParseQuery(db).
+			Where("id = ?", id).
+			Updates(map[string]interface{}{
+				"parse_status":           types.ParseStatusFailed,
+				"error_message":          restartInterruptedMessage,
+				"pending_subtasks_count": 0,
+			})
+		if result.Error != nil {
+			errs = append(errs, result.Error)
+		} else if result.RowsAffected > 0 {
+			reset = append(reset, id)
+		}
+	}
+	return reset, errors.Join(errs...)
 }
 
 func stuckKnowledgeParseQuery(db *gorm.DB) *gorm.DB {

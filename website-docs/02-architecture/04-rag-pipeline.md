@@ -86,6 +86,7 @@ must(container.Invoke(chatpipeline.NewPluginChatCompletion))       // CHAT_COMPL
 must(container.Invoke(chatpipeline.NewPluginChatCompletionStream)) // CHAT_COMPLETION_STREAM
 must(container.Invoke(chatpipeline.NewPluginFilterTopK))           // FILTER_TOP_K
 must(container.Invoke(chatpipeline.NewPluginQueryUnderstand))      // QUERY_UNDERSTAND（链外层）
+must(container.Invoke(chatpipeline.NewPluginExternalHooks))        // QUERY_UNDERSTAND（链中层）、FILTER_TOP_K（链内层）：插件的问答流程钩子
 must(container.Invoke(chatpipeline.NewPluginLoadHistory))          // LOAD_HISTORY
 must(container.Invoke(chatpipeline.NewPluginMemoryRecall))         // MEMORY_RECALL
 must(container.Invoke(chatpipeline.NewPluginExtractEntity))        // QUERY_UNDERSTAND（链内层）
@@ -101,7 +102,7 @@ must(container.Invoke(chatpipeline.NewPluginMemoryAffinity))       // CHUNK_RERA
 |-----------|---------------|--------|
 | `load_history` | PluginLoadHistory | `load_history.go` |
 | `memory_recall` | PluginMemoryRecall | `memory_recall.go` |
-| `query_understand` | PluginQueryUnderstand → PluginExtractEntity | `query_understand.go`、`extract_entity.go` |
+| `query_understand` | PluginQueryUnderstand → PluginExternalHooks（`rewriteQuery`）→ PluginExtractEntity | `query_understand.go`、`external_hooks.go`、`extract_entity.go` |
 | `chunk_search` | PluginSearch | `search.go`、`query_expansion.go` |
 | `chunk_search_parallel` | PluginSearchParallel（内部组合 PluginSearch + PluginSearchEntity） | `search_parallel.go` |
 | `entity_search` | PluginSearchEntity | `search_entity.go` |
@@ -112,7 +113,7 @@ must(container.Invoke(chatpipeline.NewPluginMemoryAffinity))       // CHUNK_RERA
 | `into_chat_message` | PluginIntoChatMessage | `into_chat_message.go` |
 | `chat_completion` | PluginChatCompletion | `chat_completion.go` |
 | `chat_completion_stream` | PluginChatCompletionStream | `chat_completion_stream.go` |
-| `filter_top_k` | PluginFilterTopK | `filter_top_k.go` |
+| `filter_top_k` | PluginFilterTopK → PluginExternalHooks（`filterResults`，删光结果时返回 `ErrSearchNothing`） | `filter_top_k.go`、`external_hooks.go` |
 
 ### ChatManage：贯穿全程的状态对象 {#_2-3-chatmanage-贯穿全程的状态对象}
 

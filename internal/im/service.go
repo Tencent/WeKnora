@@ -319,6 +319,9 @@ type Service struct {
 	// cmdRegistry holds all registered slash-commands.
 	cmdRegistry *CommandRegistry
 
+	// answered is told about every answer a channel completes (OnAnswer).
+	answered func(ctx context.Context, m *types.Message, question string)
+
 	// channels maps channel ID -> running channel state
 	channels      map[string]*channelState
 	leaderRetries map[string]*leaderRetryState
@@ -2929,6 +2932,8 @@ loop:
 	assistantMsg.IsCompleted = true
 	if err := s.messageService.UpdateMessage(outCtx, assistantMsg); err != nil {
 		logger.Warnf(ctx, "[IM] Failed to update assistant message: %v", err)
+	} else if finalErr == nil {
+		s.notifyAnswered(outCtx, assistantMsg, msg.Content)
 	}
 
 	if finalizeErr != nil && fallbackErr != nil {
@@ -2936,6 +2941,18 @@ loop:
 	}
 	logger.Infof(ctx, "[IM] Stream reply sent: platform=%s user=%s answer_len=%d", msg.Platform, msg.UserID, len(answer))
 	return endErr
+}
+
+// OnAnswer registers fn to be told about every answer a channel completes
+// (plugins receive chat.answered from it). Call it before channels start.
+func (s *Service) OnAnswer(fn func(ctx context.Context, m *types.Message, question string)) {
+	s.answered = fn
+}
+
+func (s *Service) notifyAnswered(ctx context.Context, m *types.Message, question string) {
+	if s.answered != nil {
+		s.answered(ctx, m, question)
+	}
 }
 
 // fallbackNonStream is used when streaming initialization fails.
@@ -3144,6 +3161,8 @@ func (s *Service) runQA(ctx context.Context, session *types.Session, query strin
 	assistantMsg.IsCompleted = true
 	if err := s.messageService.UpdateMessage(ctx, assistantMsg); err != nil {
 		logger.Warnf(ctx, "[IM] Failed to update assistant message: %v", err)
+	} else if qaError == nil {
+		s.notifyAnswered(ctx, assistantMsg, query)
 	}
 
 	// Return raw answer — callers apply cleanIMContent with the appropriate FileService.

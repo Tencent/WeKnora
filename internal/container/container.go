@@ -75,6 +75,7 @@ import (
 	pluginbuiltin "github.com/Tencent/WeKnora/internal/plugin/builtin"
 	plugindriver "github.com/Tencent/WeKnora/internal/plugin/driver"
 	pluginevents "github.com/Tencent/WeKnora/internal/plugin/events"
+	pluginkube "github.com/Tencent/WeKnora/internal/plugin/kube"
 	pluginmanifest "github.com/Tencent/WeKnora/internal/plugin/manifest"
 	pluginoauth "github.com/Tencent/WeKnora/internal/plugin/oauth"
 	"github.com/Tencent/WeKnora/internal/plugin/reconcile"
@@ -517,6 +518,9 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Invoke(chatpipeline.NewPluginChatCompletionStream))
 	must(container.Invoke(chatpipeline.NewPluginFilterTopK))
 	must(container.Invoke(chatpipeline.NewPluginQueryUnderstand))
+	// Plugins' pipeline hooks follow query understanding and top-k filtering
+	// directly: entity extraction must see the rewritten question.
+	must(container.Invoke(chatpipeline.NewPluginExternalHooks))
 	must(container.Invoke(chatpipeline.NewPluginLoadHistory))
 	must(container.Invoke(chatpipeline.NewPluginMemoryRecall))
 	must(container.Invoke(chatpipeline.NewPluginExtractEntity))
@@ -524,7 +528,6 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Invoke(chatpipeline.NewPluginSearchParallel))
 	must(container.Invoke(chatpipeline.NewPluginWikiBoost))
 	must(container.Invoke(chatpipeline.NewPluginMemoryAffinity))
-	must(container.Invoke(chatpipeline.NewPluginExternalHooks))
 	logger.Debugf(ctx, "[Container] Chat pipeline plugins registered")
 
 	// TenantSkillService is provided next to SessionService (handlers need
@@ -658,6 +661,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	// persistence succeeded immediately before trigger enqueue failed). Re-arm
 	// them only after the matching handlers are ready.
 	must(container.Invoke(recoverPendingWikiTasks))
+	must(container.Invoke(flushDeferredPluginEvents))
 
 	logger.Infof(ctx, "[Container] Container initialization completed successfully")
 	return container
@@ -1871,12 +1875,20 @@ func newPluginRegistry(
 }
 
 // newPluginDrivers returns the drivers that run plugins: builtins,
-// declarative packages, the embedded host and remote services; a kubernetes
-// driver joins this set.
-func newPluginDrivers(reg *pluginregistry.Registry, r *reconcile.Reconciler) *plugindriver.Set {
-	return plugindriver.NewSet(plugindriver.NewBuiltin(reg.Plugin),
+// declarative packages, the embedded host and remote services, and
+// kubernetes deployments when this platform runs them.
+func newPluginDrivers(
+	reg *pluginregistry.Registry, r *reconcile.Reconciler, kubeDriver *pluginkube.Driver,
+) *plugindriver.Set {
+	drivers := []plugindriver.Driver{
+		plugindriver.NewBuiltin(reg.Plugin),
 		r.Driver(pluginmanifest.RuntimeDeclarative), r.Driver(pluginmanifest.RuntimeHost),
-		r.Driver(pluginmanifest.RuntimeRemote))
+		r.Driver(pluginmanifest.RuntimeRemote),
+	}
+	if kubeDriver != nil {
+		drivers = append(drivers, r.Driver(pluginmanifest.RuntimeKubernetes))
+	}
+	return plugindriver.NewSet(drivers...)
 }
 
 // installPluginGate gives the integration handlers the tenant plugin switches,
@@ -1901,6 +1913,7 @@ func installPluginGate(
 // its own subpackage to keep this file focused on wiring.
 func registerIMService(imService *imPkg.Service, cleaner interfaces.ResourceCleaner) {
 	pluginbuiltin.RegisterIMAdapters(imService)
+	imService.OnAnswer(pluginevents.PublishAnswer)
 
 	// Load and start all enabled channels from database
 	if err := imService.LoadAndStartChannels(); err != nil {

@@ -23,7 +23,7 @@ import (
 	"github.com/Tencent/WeKnora/pluginsdk/pluginapi"
 )
 
-func formsEngine(t *testing.T) (*gin.Engine, *plugintest.MemTenantSettings) {
+func formsEngine(t *testing.T) (*gin.Engine, *plugintest.MemTenantSettings, *registry.Registry) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	tenantSchema, _ := json.Marshal(map[string]any{"type": "object", "properties": map[string]any{
@@ -75,11 +75,11 @@ func formsEngine(t *testing.T) (*gin.Engine, *plugintest.MemTenantSettings) {
 		c.Set(types.TenantIDContextKey.String(), uint64(7))
 		h.Options(c)
 	})
-	return r, settings
+	return r, settings, reg
 }
 
 func TestPluginFormOptions(t *testing.T) {
-	r, settings := formsEngine(t)
+	r, settings, reg := formsEngine(t)
 	post := func(body string) *httptest.ResponseRecorder {
 		return call(
 			r,
@@ -122,8 +122,17 @@ func TestPluginFormOptions(t *testing.T) {
 	}
 	_ = settings.Upsert(context.Background(),
 		&types.PluginTenantSetting{TenantID: 7, PluginID: "acme.jira", Enabled: false}, "enabled")
+	// The workspace configuration is filled in before switching the plugin
+	// on; an integration instance needs it on.
+	if w := post(`{"name":"projects","field":"project","scope":"tenant"}`); w.Code != http.StatusOK {
+		t.Fatalf("workspace configuration of a switched-off plugin = %d %s", w.Code, w.Body)
+	}
+	if w := post(`{"name":"projects","field":"project","scope":"instance"}`); w.Code != http.StatusNotFound {
+		t.Fatalf("an instance of a switched-off plugin = %d", w.Code)
+	}
+	reg.SetAudience("acme.jira", []uint64{8})
 	if w := post(`{"name":"projects","field":"project","scope":"tenant"}`); w.Code != http.StatusNotFound {
-		t.Fatalf("a switched-off plugin = %d", w.Code)
+		t.Fatalf("a plugin the workspace cannot see = %d", w.Code)
 	}
 }
 

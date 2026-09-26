@@ -4,6 +4,8 @@ package activate
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,6 +16,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/plugin/configschema"
 	"github.com/Tencent/WeKnora/internal/plugin/install"
 	"github.com/Tencent/WeKnora/internal/plugin/manifest"
 	"github.com/Tencent/WeKnora/internal/plugin/reconcile"
@@ -50,13 +53,24 @@ type MCPServers struct {
 	// services) and are cheap to list again, so each node keeps its own and
 	// drops a plugin's when it is loaded again or unloaded.
 	directories map[string]map[string]*types.MCPMetadata
+	// headerStamps record, by plugin ID and service ID, the headers each
+	// URL service was last built with and when they last changed.
+	headerStamps map[string]map[string]headerStamp
+}
+
+type headerStamp struct {
+	digest    string
+	changedAt time.Time
 }
 
 // NewMCPServers creates the MCP server activator. It lists nothing until
 // Bind gives it the tenant switches: the MCP repository it decorates is
 // needed long before the plugin services exist.
 func NewMCPServers() *MCPServers {
-	return &MCPServers{servers: map[string][]mcpServer{}, directories: map[string]map[string]*types.MCPMetadata{}}
+	return &MCPServers{
+		servers: map[string][]mcpServer{}, directories: map[string]map[string]*types.MCPMetadata{},
+		headerStamps: map[string]map[string]headerStamp{},
+	}
 }
 
 // Bind supplies the tenant switches and configuration and the installed
@@ -82,6 +96,7 @@ func (a *MCPServers) Activate(_ context.Context, l *reconcile.Loaded) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	delete(a.directories, l.Manifest.ID)
+	delete(a.headerStamps, l.Manifest.ID)
 	if len(list) == 0 {
 		delete(a.servers, l.Manifest.ID)
 	} else {
@@ -95,6 +110,7 @@ func (a *MCPServers) Deactivate(_ context.Context, pluginID string) error {
 	a.mu.Lock()
 	delete(a.servers, pluginID)
 	delete(a.directories, pluginID)
+	delete(a.headerStamps, pluginID)
 	a.mu.Unlock()
 	return nil
 }
@@ -174,12 +190,59 @@ func (a *MCPServers) service(ctx context.Context, tenantID uint64, s mcpServer) 
 		return svc
 	}
 	svc.Headers = headers
-	if updated.After(svc.UpdatedAt) {
-		// The MCP manager reconnects when UpdatedAt moves, so a changed
-		// credential takes effect on the next call.
-		svc.UpdatedAt = updated
-	}
+	// The MCP manager reconnects when UpdatedAt moves, so a changed
+	// credential takes effect on the next call. A refreshed OAuth token
+	// changes the headers without changing the configuration.
+	svc.UpdatedAt = later(svc.UpdatedAt, updated)
+	svc.UpdatedAt = later(svc.UpdatedAt, a.headersChanged(s.manifest.ID, svc.ID, headers))
 	return svc
+}
+
+// headersChanged returns when a service's headers last changed on this
+// node; zero until they first do.
+func (a *MCPServers) headersChanged(pluginID, id string, headers types.MCPHeaders) time.Time {
+	names := make([]string, 0, len(headers))
+	for name := range headers {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	h := sha256.New()
+	for _, name := range names {
+		_, _ = fmt.Fprintf(h, "%s\x00%s\x00", name, headers[name])
+	}
+	digest := hex.EncodeToString(h.Sum(nil))
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	stamps := a.headerStamps[pluginID]
+	if stamps == nil {
+		stamps = map[string]headerStamp{}
+		a.headerStamps[pluginID] = stamps
+	}
+	st := stamps[id]
+	if st.digest != digest {
+		if st.digest != "" {
+			st.changedAt = time.Now()
+		}
+		st.digest = digest
+		stamps[id] = st
+	}
+	return st.changedAt
+}
+
+// oauthToken resolves a configuration value that names an OAuth connection
+// ("oauth:<id>") the way calls to the plugin do; "" when it cannot.
+func (a *MCPServers) oauthToken(ctx context.Context, pluginID string, tenantID uint64, ref string) string {
+	a.mu.RLock()
+	iv := a.iv
+	a.mu.RUnlock()
+	if iv == nil {
+		return ""
+	}
+	tok, _ := iv.resolveOAuth(ctx, pluginID, tenantID, map[string]any{"v": ref})["v"].(string)
+	if configschema.IsOAuthRef(tok) {
+		return ""
+	}
+	return tok
 }
 
 func (a *MCPServers) headers(ctx context.Context, tenantID uint64, s mcpServer) (types.MCPHeaders, time.Time, error) {
@@ -209,6 +272,15 @@ func (a *MCPServers) headers(ctx context.Context, tenantID uint64, s mcpServer) 
 		v, ok := cfg[key]
 		if !ok || v == nil {
 			return "", false
+		}
+		if ref, isRef := v.(string); isRef && configschema.IsOAuthRef(ref) {
+			// A connected account: the header carries its access token.
+			owner := tenantID
+			if scope == manifest.ScopeSystem {
+				owner = 0
+			}
+			tok := a.oauthToken(ctx, s.manifest.ID, owner, ref)
+			return tok, tok != ""
 		}
 		return fmt.Sprint(v), true
 	}
