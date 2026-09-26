@@ -82,6 +82,20 @@ jobs:
     name: Format, vet, test, and build
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: weknora-ci-only
+          POSTGRES_DB: weknora_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d weknora_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
     steps:
       - uses: actions/checkout@v6
         with:
@@ -141,3 +155,24 @@ jobs:
 
       - name: Build server
         run: go build ./cmd/server
+
+      - name: PostgreSQL Wiki candidate regression
+        env:
+          WEKNORA_TEST_POSTGRES_DSN: host=127.0.0.1 port=5432 user=postgres password=weknora-ci-only dbname=weknora_test sslmode=disable
+          WEKNORA_REQUIRE_POSTGRES_TESTS: "1"
+          POSTGRES_SERVICE_ID: ${{ job.services.postgres.id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Only the disposable service is initialized; no production DSN/secrets.
+          docker exec "$POSTGRES_SERVICE_ID" psql -U postgres -d weknora_test \
+            -v ON_ERROR_STOP=1 -c 'CREATE EXTENSION IF NOT EXISTS pg_trgm'
+          results="$RUNNER_TEMP/wiki-postgres-tests.jsonl"
+          go test -count=1 -json ./internal/application/repository \
+            -run '^TestFindSimilarPages_ExactAliasesPostgres$' | tee "$results"
+          # go test also succeeds if a test is skipped or the selector matches none.
+          # Require the actual named test to pass, not just a green package exit.
+          jq -s -e '
+            any(.[]; .Test == "TestFindSimilarPages_ExactAliasesPostgres" and .Action == "pass")
+            and (all(.[]; .Action != "skip" and .Action != "fail"))
+          ' "$results"

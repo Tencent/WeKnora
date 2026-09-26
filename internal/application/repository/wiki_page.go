@@ -1035,26 +1035,36 @@ func (r *wikiPageRepository) ListByTypeRecent(
 	return entries, nil
 }
 
-// FindSimilarPages returns the top-k entity/concept pages whose lowercase
-// title is most similar to the given query under PostgreSQL pg_trgm
-// trigram similarity. Backed by idx_wiki_pages_title_trgm (GIN
-// gin_trgm_ops, migration 000041). Used by the dedup pre-filter to
-// surface candidate merge targets without loading every entity/concept
-// page into Go.
-//
-// types is an optional page_type allow-list; empty means entity+concept.
-// limit is clamped to [1, 50]. Pages whose title similarity is below
-// 0.1 are dropped server-side via the `%` operator (which respects
-// pg_trgm.similarity_threshold).
+// FindSimilarPages is the single-term form of FindSimilarPagesBatch.
+// Ingest callers should use the batch API to avoid scanning aliases per term.
 func (r *wikiPageRepository) FindSimilarPages(
-	ctx context.Context,
-	kbID string,
-	query string,
-	pageTypes []string,
-	limit int,
+	ctx context.Context, kbID string, query string, pageTypes []string, limit int,
 ) ([]*types.WikiPageLite, error) {
-	if strings.TrimSpace(query) == "" {
-		return nil, nil
+	pages, err := r.FindSimilarPagesBatch(ctx, kbID, []string{query}, pageTypes, limit)
+	return pages[strings.ToLower(strings.TrimSpace(query))], err
+}
+
+// FindSimilarPagesBatch returns candidates keyed by normalized (lower/trimmed)
+// term. Title probes retain the pg_trgm index path; aliases are expanded once
+// for the batch, not once per name/alias. Alias matching still scans the scoped
+// KB and is not an indexed lookup. Exact aliases score 1; ties sort by slug.
+// Limits apply per term (default 20, cap 50); empty types means entity+concept.
+// A candidate is not an automatic merge.
+func (r *wikiPageRepository) FindSimilarPagesBatch(
+	ctx context.Context, kbID string, queries []string, pageTypes []string, limit int,
+) (map[string][]*types.WikiPageLite, error) {
+	terms := make([]string, 0, len(queries))
+	seen := make(map[string]bool, len(queries))
+	for _, query := range queries {
+		q := strings.ToLower(strings.TrimSpace(query))
+		if q != "" && !seen[q] {
+			seen[q] = true
+			terms = append(terms, q)
+		}
+	}
+	out := make(map[string][]*types.WikiPageLite, len(terms))
+	if len(terms) == 0 {
+		return out, nil
 	}
 	if limit <= 0 {
 		limit = 20
@@ -1065,24 +1075,56 @@ func (r *wikiPageRepository) FindSimilarPages(
 	if len(pageTypes) == 0 {
 		pageTypes = []string{types.WikiPageTypeEntity, types.WikiPageTypeConcept}
 	}
-
-	q := strings.ToLower(strings.TrimSpace(query))
-
-	var rows []types.WikiPageLite
-	if err := r.db.WithContext(ctx).
-		Model(&types.WikiPage{}).
-		Select("slug, title, page_type, status, aliases, out_links, similarity(lower(title), ?) AS sim", q).
-		Where("knowledge_base_id = ? AND page_type IN ? AND status <> ? AND lower(title) % ?",
-			kbID, pageTypes, types.WikiPageStatusArchived, q).
-		Order("sim DESC").
-		Limit(limit).
-		Scan(&rows).Error; err != nil {
+	encodedTerms, err := json.Marshal(terms)
+	if err != nil {
 		return nil, err
 	}
-	out := make([]*types.WikiPageLite, len(rows))
-	for i := range rows {
-		r := rows[i]
-		out[i] = &r
+	const fields = "slug, title, page_type, status, aliases, out_links"
+	// Model scoping retains GORM's soft-delete predicate in both branches.
+	scoped := r.db.WithContext(ctx).Model(&types.WikiPage{}).Select(fields).
+		Where("knowledge_base_id = ? AND page_type IN ? AND status <> ?",
+			kbID, pageTypes, types.WikiPageStatusArchived)
+	var rows []struct {
+		MatchedTerm string
+		types.WikiPageLite
+	}
+	// MATERIALIZED prevents the alias scan from being inlined into the lateral
+	// per-term probes. DISTINCT removes repeated aliases on the same page.
+	// Each branch contributes at most limit rows; overlapping pages keep their
+	// highest score before the final per-term limit. Shared aliases may still
+	// legitimately yield multiple distinct pages.
+	err = r.db.WithContext(ctx).Raw(`
+		WITH terms AS MATERIALIZED (
+			SELECT jsonb_array_elements_text(?::jsonb) AS term
+		), alias_hits AS MATERIALIZED (
+			SELECT DISTINCT lower(btrim(alias.value)) AS term, p.*
+			FROM (?) AS p
+			CROSS JOIN LATERAL jsonb_array_elements_text(
+				CASE WHEN jsonb_typeof(p.aliases::jsonb) = 'array'
+					THEN p.aliases::jsonb ELSE '[]'::jsonb END
+			) AS alias(value)
+			WHERE lower(btrim(alias.value)) = ANY(SELECT term FROM terms)
+		)
+		SELECT terms.term AS matched_term, matches.*
+		FROM terms CROSS JOIN LATERAL (
+			SELECT * FROM (
+				SELECT DISTINCT ON (slug) * FROM (
+					(SELECT `+fields+`, similarity(lower(title), terms.term) AS sim
+					 FROM (?) AS titles WHERE lower(title) % terms.term
+					 ORDER BY sim DESC, slug ASC LIMIT ?)
+					UNION ALL
+					(SELECT `+fields+`, 1.0 AS sim FROM alias_hits
+					 WHERE term = terms.term ORDER BY slug ASC LIMIT ?)
+				) AS candidates ORDER BY slug, sim DESC
+			) AS deduplicated ORDER BY sim DESC, slug ASC LIMIT ?
+		) AS matches ORDER BY terms.term, matches.sim DESC, matches.slug ASC`,
+		string(encodedTerms), scoped, scoped, limit, limit, limit).Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	for _, row := range rows {
+		page := row.WikiPageLite
+		out[row.MatchedTerm] = append(out[row.MatchedTerm], &page)
 	}
 	return out, nil
 }

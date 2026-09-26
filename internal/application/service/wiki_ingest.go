@@ -2404,9 +2404,9 @@ func xmlEscape(s string) string {
 
 // deduplicateExtractedBatch deduplicates both entities and concepts against
 // existing wiki pages in a single LLM call. Pre-filters candidates via the
-// pg_trgm trigram index on lower(title) — every new item issues a
-// FindSimilarPages probe and the union of top-K hits across all items is
-// the candidate set. This replaces the legacy "ListAllPages + Go-side
+// pg_trgm trigram index on lower(title) and one shared exact-alias scan.
+// Each distinct name/alias gets its own top-K hits, mapped back only to
+// the originating items. This replaces the legacy "ListAllPages + Go-side
 // surface-form Jaccard" path that scaled O(P × N) on large KBs.
 //
 // The KB-id-keyed query relies on idx_wiki_pages_title_trgm (added in
@@ -2427,59 +2427,7 @@ func (s *wikiIngestService) deduplicateExtractedBatch(
 			s.stabilizeExtractedIdentities(ctx, kbID, types.WikiPageTypeConcept, concepts, nil, nil, batchCtx)
 	}
 
-	// Build the candidate set: for each new item, ask the repo for
-	// the top-K trigram-similar pages and union the results. Dedup by
-	// slug as we go so the prompt only carries each candidate once.
-	//
-	// itemCandidates additionally records, per new item, the slugs that
-	// surfaced for THAT item specifically. The prompt only ever sees the
-	// flattened union, so validMerge below uses this per-item scoping to
-	// reject a merge whose target was pulled in for a *different* item —
-	// the class of hallucination the union otherwise enables (e.g. weak
-	// models emitting entity/tencent-open → entity/hiring-agent, which
-	// share no trigram signal and were never candidates for each other).
-	candidatePages := make(map[string]*types.WikiPageLite)
-	itemCandidates := make(map[string]map[string]bool)
-	probe := func(item extractedItem) {
-		queries := make([]string, 0, 1+len(item.Aliases))
-		if item.Name != "" {
-			queries = append(queries, item.Name)
-		}
-		for _, alias := range item.Aliases {
-			if alias != "" {
-				queries = append(queries, alias)
-			}
-		}
-		own := itemCandidates[item.Slug]
-		if own == nil {
-			own = make(map[string]bool)
-			itemCandidates[item.Slug] = own
-		}
-		for _, q := range queries {
-			pages, err := s.wikiService.FindSimilarPages(ctx, kbID, q,
-				[]string{types.WikiPageTypeEntity, types.WikiPageTypeConcept},
-				dedupCandidateTopK)
-			if err != nil {
-				logger.Warnf(ctx, "wiki ingest: dedup FindSimilarPages(%q) failed: %v", q, err)
-				continue
-			}
-			for _, p := range pages {
-				if p == nil || p.Slug == "" {
-					continue
-				}
-				if _, ok := candidatePages[p.Slug]; !ok {
-					candidatePages[p.Slug] = p
-				}
-				own[p.Slug] = true
-			}
-		}
-	}
-	for _, e := range entities {
-		probe(e)
-	}
-	for _, c := range concepts {
-		probe(c)
-	}
+	candidatePages, itemCandidates := s.collectBatchDedupCandidates(ctx, kbID, entities, concepts)
 	s.attachExactIdentityPages(ctx, kbID, types.WikiPageTypeEntity, entities, candidatePages, itemCandidates, batchCtx)
 	s.attachExactIdentityPages(ctx, kbID, types.WikiPageTypeConcept, concepts, candidatePages, itemCandidates, batchCtx)
 
