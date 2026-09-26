@@ -218,6 +218,29 @@ func TestStoredTypeIDLength(t *testing.T) {
 	if err := m.Validate(); err == nil || !strings.Contains(err.Error(), "longer than the 50 characters") {
 		t.Fatalf("want a length error, got %v", err)
 	}
+
+	// IM platforms are stored in varchar(160) columns.
+	m.ID = "acme." + strings.Repeat("p", 63)
+	m.Contributes = Contributions{PointIMChannels: {{ID: strings.Repeat("c", 100), Name: Text("X", nil)}}}
+	if err := m.Validate(); err == nil || !strings.Contains(err.Error(), "longer than the 160 characters") {
+		t.Fatalf("want an IM platform length error, got %v", err)
+	}
+}
+
+// Versions are stored in varchar(64) columns.
+func TestVersionLength(t *testing.T) {
+	m, err := Parse([]byte(jiraManifest))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.Version = "1.0.0-" + strings.Repeat("a", 58)
+	if err := m.Validate(); err != nil {
+		t.Fatalf("a 64-character version: %v", err)
+	}
+	m.Version += "a"
+	if err := m.Validate(); err == nil || !strings.Contains(err.Error(), "longer than 64") {
+		t.Fatalf("want a version length error, got %v", err)
+	}
 }
 
 func TestUIContributions(t *testing.T) {

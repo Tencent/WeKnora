@@ -527,3 +527,23 @@ func TestHostKindsLeftToPluginHosts(t *testing.T) {
 		t.Fatalf("python run here without an interpreter: %v", err)
 	}
 }
+
+// versionRefused is a repository whose database refuses to store versions.
+type versionRefused struct{ *plugintest.MemRepo }
+
+func (versionRefused) SaveVersion(context.Context, *types.PluginVersion) error {
+	return errors.New("value too long for type character varying(64)")
+}
+
+// A package whose version row could not be stored does not stay behind.
+func TestFailedInstallLeavesNoPackage(t *testing.T) {
+	repo, store := versionRefused{plugintest.NewMemRepo()}, &plugintest.MemStore{}
+	r := reconcile.New(reconcile.Options{Repo: repo, Store: store, Registry: registry.New(), CacheDir: t.TempDir()})
+	s := NewService(repo, store, r, "0.5.0")
+	if _, err := s.Install(context.Background(), Request{Data: plugintest.KitPackage(t, "1.0.0")}); err == nil {
+		t.Fatal("want the database error")
+	}
+	if len(store.Blobs) != 0 {
+		t.Fatalf("the package stayed behind: %d blobs", len(store.Blobs))
+	}
+}

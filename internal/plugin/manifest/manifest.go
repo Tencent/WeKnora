@@ -281,6 +281,8 @@ func (m *Manifest) Validate() error {
 	}
 	if !isStrictSemver(m.Version) {
 		add("version %q is not a semantic version", m.Version)
+	} else if len(m.Version) > maxVersionLength {
+		add("version %q is longer than %d characters", m.Version, maxVersionLength)
 	}
 	if m.Name.IsZero() {
 		add("name is required")
@@ -402,9 +404,15 @@ func (m *Manifest) validatePermissions(add func(string, ...any)) {
 }
 
 // storedTypeIDLimit is how long a qualified contribution ID may be where
-// instances store it in a varchar(50) column (data_sources.type,
-// web_search_providers.provider, knowledges.channel).
-var storedTypeIDLimit = map[Point]int{PointConnectors: 50, PointWebSearch: 50}
+// instances store it: varchar(50) columns (data_sources.type,
+// web_search_providers.provider, knowledges.channel) and varchar(160) ones
+// (im_channels.platform, im_channel_sessions.platform). Postgres refuses a
+// longer value where SQLite would keep it, so the manifest is held to it.
+var storedTypeIDLimit = map[Point]int{PointConnectors: 50, PointWebSearch: 50, PointIMChannels: 160}
+
+// maxVersionLength is the width of the columns versions are stored in
+// (plugin_versions.version, plugins.active_version).
+const maxVersionLength = 64
 
 func (m *Manifest) validateContributions(add func(string, ...any)) {
 	// A plugin that only listens to events contributes nothing else.
