@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/plugin/install"
 	"github.com/Tencent/WeKnora/internal/plugin/plugintest"
@@ -11,6 +12,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/plugin/registry"
 	"github.com/Tencent/WeKnora/internal/plugin/tenancy"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
 
 const searchManifest = `schemaVersion: 1
@@ -41,7 +43,10 @@ type env struct {
 }
 
 // fakeMCPRepo stores one ordinary service per tenant.
-type fakeMCPRepo struct{ updates int }
+type fakeMCPRepo struct {
+	updates int
+	saved   *types.MCPMetadata
+}
 
 func (f *fakeMCPRepo) own(tenantID uint64) *types.MCPService {
 	return &types.MCPService{ID: "stored", TenantID: tenantID, Name: "Mine", Enabled: true}
@@ -165,5 +170,66 @@ func TestPluginMCPServiceFollowsTenantSwitchAndConfig(t *testing.T) {
 	}
 	if list, _ := e.repo.List(e.ctx, 1); len(list) != 1 {
 		t.Fatal("disabling the plugin platform-wide must remove its services")
+	}
+}
+
+func (f *fakeMCPRepo) GetMetadata(_ context.Context, _ uint64, id, _ string) (*types.MCPMetadata, error) {
+	if f.saved != nil && f.saved.ServiceID == id {
+		return f.saved, nil
+	}
+	return nil, nil
+}
+
+func (f *fakeMCPRepo) ListMetadataSummaries(context.Context, uint64, []string) ([]*types.MCPMetadataSummary, error) {
+	if f.saved == nil {
+		return nil, nil
+	}
+	return []*types.MCPMetadataSummary{{ServiceID: f.saved.ServiceID}}, nil
+}
+
+func (f *fakeMCPRepo) SaveMetadata(_ context.Context, m *types.MCPMetadata) error {
+	f.saved = m
+	return nil
+}
+
+// Agents discover MCP tools through stored directory snapshots. Plugin
+// services have no row to reference, so the wrapper keeps theirs.
+func TestPluginMCPDirectories(t *testing.T) {
+	e := setup(t)
+	if err := e.tenancy.SetEnabled(e.ctx, 1, "acme.search", true, "u"); err != nil {
+		t.Fatal(err)
+	}
+	meta, ok := e.mcp.Repository(e.stored).(interfaces.MCPMetadataRepository)
+	if !ok {
+		t.Fatal("the wrapped repository hides directory storage")
+	}
+	id := serviceID(1, "acme.search/search")
+	older := time.Now().Add(-time.Minute)
+	first := &types.MCPMetadata{TenantID: 1, ServiceID: id, Tools: []*types.MCPTool{{Name: "search"}}, SyncedAt: time.Now()}
+	if err := meta.SaveMetadata(e.ctx, first); err != nil {
+		t.Fatal(err)
+	}
+	// An older refresh arriving late does not win.
+	_ = meta.SaveMetadata(e.ctx, &types.MCPMetadata{TenantID: 1, ServiceID: id, SyncedAt: older})
+	got, err := meta.GetMetadata(e.ctx, 1, id, "")
+	if err != nil || got == nil || len(got.Tools) != 1 {
+		t.Fatalf("plugin directory = %+v, %v", got, err)
+	}
+	if other, _ := meta.GetMetadata(e.ctx, 2, id, ""); other != nil {
+		t.Fatal("another workspace reads the directory")
+	}
+	if err := meta.SaveMetadata(e.ctx, &types.MCPMetadata{TenantID: 1, ServiceID: "stored"}); err != nil ||
+		e.stored.saved == nil {
+		t.Fatalf("stored services' directories go to the database: %v", err)
+	}
+	sums, _ := meta.ListMetadataSummaries(e.ctx, 1, []string{""})
+	if len(sums) != 2 {
+		t.Fatalf("summaries = %d", len(sums))
+	}
+	if err := e.mcp.Deactivate(e.ctx, "acme.search"); err != nil {
+		t.Fatal(err)
+	}
+	if len(e.mcp.directories) != 0 {
+		t.Fatal("an unloaded plugin keeps its directories")
 	}
 }

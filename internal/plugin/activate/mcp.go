@@ -43,13 +43,18 @@ type MCPServers struct {
 	tenancy *tenancy.Service
 	plugins interfaces.PluginRepository
 	servers map[string][]mcpServer // plugin ID → servers
+	// directories are the tool directory snapshots of plugin services, by
+	// plugin ID. They cannot be stored (mcp_metadata references stored
+	// services) and are cheap to list again, so each node keeps its own and
+	// drops a plugin's when it is loaded again or unloaded.
+	directories map[string]map[string]*types.MCPMetadata
 }
 
 // NewMCPServers creates the MCP server activator. It lists nothing until
 // Bind gives it the tenant switches: the MCP repository it decorates is
 // needed long before the plugin services exist.
 func NewMCPServers() *MCPServers {
-	return &MCPServers{servers: map[string][]mcpServer{}}
+	return &MCPServers{servers: map[string][]mcpServer{}, directories: map[string]map[string]*types.MCPMetadata{}}
 }
 
 // Bind supplies the tenant switches and configuration and the installed
@@ -77,6 +82,7 @@ func (a *MCPServers) Activate(_ context.Context, l *reconcile.Loaded) error {
 	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	delete(a.directories, l.Manifest.ID)
 	if len(list) == 0 {
 		delete(a.servers, l.Manifest.ID)
 	} else {
@@ -89,6 +95,7 @@ func (a *MCPServers) Activate(_ context.Context, l *reconcile.Loaded) error {
 func (a *MCPServers) Deactivate(_ context.Context, pluginID string) error {
 	a.mu.Lock()
 	delete(a.servers, pluginID)
+	delete(a.directories, pluginID)
 	a.mu.Unlock()
 	return nil
 }
@@ -308,4 +315,108 @@ func (r *mcpRepository) Delete(ctx context.Context, tenantID uint64, id string) 
 		return ErrPluginService
 	}
 	return r.MCPServiceRepository.Delete(ctx, tenantID, id)
+}
+
+// ownerOf is the plugin providing a service ID in a workspace, or "".
+func (a *MCPServers) ownerOf(tenantID uint64, id string) string {
+	for _, s := range a.snapshot() {
+		if serviceID(tenantID, s.qualifiedID) == id {
+			return s.manifest.ID
+		}
+	}
+	return ""
+}
+
+func directoryKey(tenantID uint64, serviceID, principal string) string {
+	return fmt.Sprintf("%d/%s/%s", tenantID, serviceID, principal)
+}
+
+// The repository also stores tool directory snapshots
+// (interfaces.MCPMetadataRepository): plugin services' in memory, the rest
+// in the wrapped repository. Agents discover MCP tools through them.
+var _ interfaces.MCPMetadataRepository = (*mcpRepository)(nil)
+
+func (r *mcpRepository) inner() (interfaces.MCPMetadataRepository, bool) {
+	m, ok := r.MCPServiceRepository.(interfaces.MCPMetadataRepository)
+	return m, ok
+}
+
+// GetMetadata implements interfaces.MCPMetadataRepository.
+func (r *mcpRepository) GetMetadata(
+	ctx context.Context, tenantID uint64, serviceID, principal string,
+) (*types.MCPMetadata, error) {
+	if owner := r.plugins.ownerOf(tenantID, serviceID); owner != "" {
+		a := r.plugins
+		a.mu.RLock()
+		defer a.mu.RUnlock()
+		if m := a.directories[owner][directoryKey(tenantID, serviceID, principal)]; m != nil {
+			cp := *m
+			return &cp, nil
+		}
+		return nil, nil
+	}
+	if inner, ok := r.inner(); ok {
+		return inner.GetMetadata(ctx, tenantID, serviceID, principal)
+	}
+	return nil, nil
+}
+
+// ListMetadataSummaries implements interfaces.MCPMetadataRepository.
+func (r *mcpRepository) ListMetadataSummaries(
+	ctx context.Context, tenantID uint64, principals []string,
+) ([]*types.MCPMetadataSummary, error) {
+	var out []*types.MCPMetadataSummary
+	if inner, ok := r.inner(); ok {
+		rows, err := inner.ListMetadataSummaries(ctx, tenantID, principals)
+		if err != nil {
+			return nil, err
+		}
+		out = rows
+	}
+	wanted := map[string]bool{}
+	for _, p := range principals {
+		wanted[p] = true
+	}
+	a := r.plugins
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	for _, dirs := range a.directories {
+		for _, m := range dirs {
+			if m.TenantID == tenantID && wanted[m.Principal] {
+				out = append(out, &types.MCPMetadataSummary{
+					ServiceID: m.ServiceID, Principal: m.Principal, ConfigFingerprint: m.ConfigFingerprint,
+					ToolCount: len(m.Tools), SyncedAt: m.SyncedAt, ServerName: m.ServerName,
+				})
+			}
+		}
+	}
+	return out, nil
+}
+
+// SaveMetadata implements interfaces.MCPMetadataRepository.
+func (r *mcpRepository) SaveMetadata(ctx context.Context, snapshot *types.MCPMetadata) error {
+	owner := r.plugins.ownerOf(snapshot.TenantID, snapshot.ServiceID)
+	if owner == "" {
+		inner, ok := r.inner()
+		if !ok {
+			return types.ErrMCPMetadataStorage
+		}
+		return inner.SaveMetadata(ctx, snapshot)
+	}
+	a := r.plugins
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	dirs := a.directories[owner]
+	if dirs == nil {
+		dirs = map[string]*types.MCPMetadata{}
+		a.directories[owner] = dirs
+	}
+	key := directoryKey(snapshot.TenantID, snapshot.ServiceID, snapshot.Principal)
+	// Like the stored table: an older refresh must not overwrite a newer one.
+	if prev := dirs[key]; prev != nil && prev.SyncedAt.After(snapshot.SyncedAt) {
+		return nil
+	}
+	cp := *snapshot
+	dirs[key] = &cp
+	return nil
 }
