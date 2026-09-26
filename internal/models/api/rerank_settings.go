@@ -71,17 +71,53 @@ type RerankSettings struct {
 	ExtraBody            map[string]any
 }
 
-// BatchLimits renders the documented ceilings for SplitBatches.
+// DefaultRerankMaxDocuments bounds one rerank request for a vendor that
+// documents no per-request ceiling of its own.
+//
+// Splitting only on what the catalog states is not enough: most rerank vendors
+// state nothing, and "no ceiling declared" used to mean "put the whole
+// candidate set in one request", which is how an undocumented per-request
+// limit becomes an HTTP 400 and a silently unranked retrieval (#3559).
+//
+// The vendors in that state publish no number to declare here. SiliconFlow's
+// rate-limit page documents RPM/TPM for its rerankers, not a request size
+// (https://docs.siliconflow.com/cn/userguide/rate-limits/rate-limit-and-upgradation),
+// and its request schema states only minimums; Jina's contract bounds a single
+// document by the model's token limit; Novita's schema has no such field;
+// OpenRouter, LiteLLM, GPUStack and generic pass a request through to whatever
+// serves it. Speed belongs to internal/models/limiter, and a token budget
+// cannot be declared here because these ceilings are counted in runes.
+//
+// 60 is the smallest ceiling this catalog does document (lkeap's), so a vendor
+// whose ceiling is unknown is never asked for more documents in one request
+// than a vendor we do have documentation for accepts. It bounds the request,
+// it does not claim anything about the vendor: a vendor whose real ceiling is
+// higher says so with max_documents, and the batches grow back to it. Rerank
+// only — the embedding path has its own batch size (BATCH_EMBED_SIZE) and is
+// left alone.
+const DefaultRerankMaxDocuments = 60
+
+// BatchLimits renders the ceilings for SplitBatches. A vendor that documents
+// nothing still gets a bounded request instead of an unbounded one.
 func (s RerankSettings) BatchLimits() BatchLimits {
+	maxItems := s.MaxDocuments
+	if maxItems <= 0 && s.MaxRequestChars <= 0 {
+		// Nothing documented at all, so bound the request: one request
+		// carrying the entire candidate set is the failure this guards. A
+		// vendor that documented a request budget instead keeps it — the
+		// default is not a second ceiling on top of theirs.
+		maxItems = DefaultRerankMaxDocuments
+	}
 	return BatchLimits{
-		MaxItems:      s.MaxDocuments,
+		MaxItems:      maxItems,
 		MaxItemRunes:  s.MaxDocumentChars,
 		MaxTotalRunes: s.MaxRequestChars,
 	}
 }
 
 // DefaultRerank is the protocol baseline: ask for every document, expect a
-// 0..1 relevance score, enforce no ceiling the vendor did not state.
+// 0..1 relevance score, enforce no ceiling the vendor did not state
+// (BatchLimits still bounds the request itself, see DefaultRerankMaxDocuments).
 func DefaultRerank() RerankSettings {
 	return RerankSettings{
 		ScoreScale: ScoreProbability,
