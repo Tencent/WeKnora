@@ -571,7 +571,7 @@ func (e *AgentEngine) callLLMWithRetry(
 	if err != nil && isTransientError(err) {
 		// Retry transient errors (timeout, rate limit, server errors) up to maxLLMRetries times
 		for retry := 1; retry <= maxLLMRetries; retry++ {
-			retryDelay := time.Duration(retry) * time.Second
+			retryDelay := llmRetryDelay(err, retry)
 			logger.Warnf(ctx, "[Agent][Round-%d] LLM transient error (attempt %d/%d), retrying in %v: %v",
 				round, retry, maxLLMRetries, retryDelay, err)
 			// A stop pressed during the backoff ends the turn now rather than

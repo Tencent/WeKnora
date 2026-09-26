@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
@@ -139,7 +141,7 @@ func (e Endpoint) Do(req *http.Request) (*http.Response, error) {
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 		_ = resp.Body.Close()
-		return nil, &HTTPError{StatusCode: resp.StatusCode, Body: string(body)}
+		return nil, &HTTPError{StatusCode: resp.StatusCode, Body: string(body), Header: resp.Header}
 	}
 	return resp, nil
 }
@@ -201,10 +203,43 @@ func (e *TransportError) Unwrap() error { return e.Err }
 type HTTPError struct {
 	StatusCode int
 	Body       string
+	// Header is the reply's headers, kept so a retry can honour the vendor's
+	// Retry-After on a 429 or 503 instead of guessing its own backoff.
+	Header http.Header
 }
 
 func (e *HTTPError) Error() string {
 	return fmt.Sprintf("API request failed with status %d: %s", e.StatusCode, e.Body)
+}
+
+// RetryAfter is how long the vendor asked the caller to wait before trying
+// again, from the Retry-After header in either of its two forms (delay in
+// seconds or an HTTP date). It is zero when the header is absent, malformed
+// or already in the past.
+func (e *HTTPError) RetryAfter() time.Duration {
+	if e == nil {
+		return 0
+	}
+	return parseRetryAfter(e.Header.Get("Retry-After"), time.Now())
+}
+
+func parseRetryAfter(value string, now time.Time) time.Duration {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return 0
+	}
+	if secs, err := strconv.Atoi(value); err == nil {
+		if secs <= 0 {
+			return 0
+		}
+		return time.Duration(secs) * time.Second
+	}
+	if at, err := http.ParseTime(value); err == nil {
+		if d := at.Sub(now); d > 0 {
+			return d
+		}
+	}
+	return 0
 }
 
 // LogRequest emits the standard request log line with image payloads
