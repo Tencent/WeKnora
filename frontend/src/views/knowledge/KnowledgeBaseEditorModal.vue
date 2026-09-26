@@ -371,11 +371,10 @@
                   {{ $t('knowledgeEditor.advanced.multimodal.imagePipelineSectionDescription') }}
                 </p>
               </div>
-              <!-- The panel and the switch it replaces answer the same question
-                   from opposite ends: the switch said whether to observe, the
-                   list says which pipeline runs. Whatever is picked here is also
-                   written to imageAttrsEnabled, so a base edited through the UI
-                   keeps the older switch in step. -->
+              <!-- 面板取代了旧的观察开关：顶部多模态开关决定是否处理图片，
+                   这里决定怎么处理。选择器没有空选项，默认 caption_ocr；
+                   选中的流水线同时写回 imageAttrsEnabled（只有观察属性流水线
+                   点亮它），旧开关与属性面板跟随同一取值。 -->
               <ImagePipelineSettings
                 v-model:params="formData.imagePipelineParams"
                 :pipeline-id="formData.imagePipeline"
@@ -922,9 +921,10 @@ const initFormData = (type: 'document' | 'faq' = 'document') => {
     // .on_unobserved 直接被开关绑定，缺省会让打开开关的瞬间渲染崩溃。
     imageAttrsEnabled: false,
     imageActions: mergeImageActions(),
-    // imagePipeline 为空表示「沿用旧的 imageAttrsEnabled 开关」，由后端
-    // ResolveImagePipelineID 推导；只有用户在下拉里显式选过才写值。
-    imagePipeline: '',
+    // 流水线没有「留空」选项：多模态开关决定是否处理图片，开了就一定要有
+    // 流水线可跑，所以默认落在 caption_ocr。选中的流水线决定旧观察开关的
+    // 取值（见 onPipelineChange）。
+    imagePipeline: 'caption_ocr',
     imagePipelineParams: {} as Record<string, unknown>,
     imageProcessingConfigSnapshot: null as Record<string, unknown> | null,
     asrConfig: {
@@ -1076,20 +1076,24 @@ const loadKBData = async (
         descriptionLanguage: kb.vlm_config?.description_language || '',
         customInstructions: kb.vlm_config?.custom_instructions || ''
       },
+      // 旧库迁移：本选择器出现之前保存的知识库没有 image_pipeline，按后端
+      // ResolveImagePipelineID 的同一规则落到具体流水线——观察开关开着就是
+      // ob_cap_ocr，其余（包括根本没有 image_processing_config 的老库）落到
+      // 默认的 caption_ocr。下拉里没有空选项，所以这里必须解析出一个值。
+      imagePipeline:
+        ((kb as Record<string, any>).image_processing_config?.image_pipeline as string) ||
+        (!!(kb as Record<string, any>).image_processing_config?.image_attrs_enabled
+          ? 'ob_cap_ocr'
+          : 'caption_ocr'),
+      // 旧观察开关与选中的流水线保持同一个意思：只有观察属性流水线把它点亮。
       imageAttrsEnabled:
-        !!(kb as Record<string, any>).image_processing_config?.image_attrs_enabled,
+        (((kb as Record<string, any>).image_processing_config?.image_pipeline as string) ||
+          (!!(kb as Record<string, any>).image_processing_config?.image_attrs_enabled
+            ? 'ob_cap_ocr'
+            : 'caption_ocr')) === 'ob_cap_ocr',
       imageActions: mergeImageActions(
         (kb as Record<string, any>).image_processing_config?.image_actions,
       ),
-      // A base saved before the selector existed has no image_pipeline. The
-      // backend would then resolve from the old switch, so the panel shows what
-      // the base actually does today — ob_cap_ocr when observation is on — and
-      // saving writes that back explicitly.
-      imagePipeline:
-        ((kb as Record<string, any>).image_processing_config?.image_pipeline as string) ??
-        (!!(kb as Record<string, any>).image_processing_config?.image_attrs_enabled
-          ? 'ob_cap_ocr'
-          : ''),
       imagePipelineParams:
         ((kb as Record<string, any>).image_processing_config?.image_pipeline_params as Record<
           string,
@@ -1277,18 +1281,15 @@ const handleMultimodalToggle = () => {
 }
 
 /**
- * The pipeline pick also decides the older observation switch: a non-empty pick
- * is an explicit choice of the new way, and every pipeline in the registry so
- * far observes images, so the switch stays on and the base keeps reading the
- * same through either mechanism. Clearing the pick hands control back to that
- * switch, which is then left untouched.
+ * 流水线参数的清理由 ImagePipelineSettings 自己完成（切换即清空上一条的
+ * 私有参数）；这里只负责让旧的观察开关跟上选择——只有观察属性流水线把它
+ * 点亮，这样无论从哪个控件看，知识库读到的是同一个意思，下方的属性面板
+ * 也跟随这个开关显隐。
  */
 const onPipelineChange = (value: string) => {
   if (!formData.value) return
   formData.value.imagePipeline = value
-  if (value) {
-    formData.value.imageAttrsEnabled = true
-  }
+  formData.value.imageAttrsEnabled = value === 'ob_cap_ocr'
 }
 
 const handleMultimodalVLLMChange = (modelId: string) => {
@@ -1503,7 +1504,9 @@ const buildSubmitData = () => {
       imageAttrsEnabled: formData.value.imageAttrsEnabled,
       onUnobserved: formData.value.imageActions.ocr.on_unobserved,
       defaultOn: displaySchema.value.default_actions.ocr.on,
-      pipelineId: formData.value.imagePipeline,
+      // 多模态开关决定是否处理图片：关闭时不写流水线字段（buildImageProcessingConfig
+      // 对空 pipelineId 的处理是删掉这两个字段），配置里只留下观察开关的语义。
+      pipelineId: formData.value.multimodalConfig.enabled ? formData.value.imagePipeline : '',
       pipelineParams: formData.value.imagePipelineParams,
     })
     if (built) {

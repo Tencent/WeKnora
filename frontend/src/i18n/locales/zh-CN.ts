@@ -4094,7 +4094,7 @@ export default {
         imageAttrsSchemaDescription: '模型会观察以下属性（由后端注册表定义）以驱动 OCR 策略',
         imagePipelineSectionLabel: '图片流水线',
         imagePipelineSectionDescription:
-          '每张图片按此处选中的流水线处理；可选流水线与可调参数都由后端注册表下发，前端只负责选择。留空表示沿用上面的观察开关。',
+          '多模态开启后，每张图片都按此处选中的流水线处理；可选流水线与可调参数由后端注册表下发，前端只负责选择。',
         imagePipelineLabel: '选择流水线',
         imagePipelineDescription:
           '不同流水线对图片的处理方式不同。切换流水线会清空刚才为该流水线设置的参数。',
@@ -7788,6 +7788,25 @@ export default {
         'true': { label: '是', description: '是 —— 图表、曲线或示意图' },
         'false': { label: '否', description: '否 —— 照片、插画、图标或装饰图' }
       }
+    }
+  },
+  // 流水线选择面板的覆盖文案：按流水线 id 与字段 key 索引（后端注册表给出
+  // id 与 key，这里只做翻译）。未覆盖的流水线或字段回落到后端自带的英文
+  // 说明，所以新增流水线不会显示成键名。
+  imagePipeline: {
+    caption_ocr: {
+      name: '传统',
+      enable_caption: {
+        label: '图片描述',
+        description: '让模型为每张图片生成一句内容描述，作为图片的说明文字。'
+      },
+      enable_ocr: {
+        label: '文字识别',
+        description: '提取图片中出现的文字，无论图片是否包含文字。'
+      }
+    },
+    ob_cap_ocr: {
+      name: '观察属性'
     }
   }
 }

@@ -10,7 +10,7 @@ export interface ImageProcessingEdits {
   onUnobserved: boolean
   /** The registry's current default OCR conditions (GET /image-attrs/schema). */
   defaultOn: ImageAttrConditionLike[]
-  /** The pipeline picked in the panel; empty means "resolve from the switch". */
+  /** The pipeline picked in the panel; empty means multimodal is off and the fields go away. */
   pipelineId: string
   /** That pipeline's private tunables, keyed by field. */
   pipelineParams: Record<string, unknown>
@@ -52,12 +52,10 @@ export function buildImageProcessingConfig(
     },
   }
   // The pick carries the panel's own answer, so it replaces whatever the
-  // snapshot had — including by removing it. An empty pick is not a value of
-  // its own: it asks the backend to resolve from image_attrs_enabled, which it
-  // already does when the field is absent, so the pair is dropped rather than
-  // written as an empty pair. Dropping it is what makes clearing the pick
-  // register as the change it is, instead of leaving the previous pipeline
-  // silently in charge.
+  // snapshot had — including by removing it. An empty pick (the multimodal
+  // switch is off) is not a value of its own: the backend resolves from
+  // image_attrs_enabled when the field is absent, so the pair is dropped
+  // rather than written as an empty pair.
   if (edits.pipelineId) {
     built.image_pipeline = edits.pipelineId
   } else {

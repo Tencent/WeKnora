@@ -4092,7 +4092,7 @@ export default {
         imageAttrsSchemaDescription: '모델은 아래 속성(백엔드 레지스트리 정의)을 관찰해 OCR 정책을 결정합니다',
         imagePipelineSectionLabel: '이미지 파이프라인',
         imagePipelineSectionDescription:
-          '선택한 파이프라인으로 각 이미지를 처리합니다. 파이프라인 목록과 조정 항목은 백엔드 레지스트리에서 내려오므로 여기서는 선택만 합니다. 비워 두면 위의 관찰 스위치를 따릅니다.',
+          '멀티모달이 켜져 있으면 각 이미지는 여기서 선택한 파이프라인으로 처리됩니다. 파이프라인 목록과 조정 항목은 백엔드 레지스트리에서 내려오므로 여기서는 선택만 합니다.',
         imagePipelineLabel: '파이프라인',
         imagePipelineDescription:
           '파이프라인마다 이미지 처리 방식이 다릅니다. 전환하면 이전 파이프라인에서 설정한 매개변수가 지워집니다.',
@@ -7786,6 +7786,26 @@ export default {
         'true': { label: '예', description: '예 —— 차트, 그래프, 도표' },
         'false': { label: '아니오', description: '아니오 —— 사진, 삽화, 아이콘, 장식' }
       }
+    }
+  },
+  // 파이프라인 패널의 오버레이 문구: 파이프라인 id와 필드 key로 색인합니다
+  // (둘 다 백엔드 레지스트리가 제공하며 여기서는 번역만 합니다). 여기서
+  // 다루지 않은 부분은 백엔드 자체 문구로 폴백되므로, 새 파이프라인이 키
+  // 이름 그대로 표시되는 일은 없습니다.
+  imagePipeline: {
+    caption_ocr: {
+      name: '전통',
+      enable_caption: {
+        label: '이미지 설명',
+        description: '각 이미지에 대한 한 줄 설명을 생성해 캡션으로 저장합니다.'
+      },
+      enable_ocr: {
+        label: '문자 인식',
+        description: '이미지에 텍스트가 포함되어 있는지와 관계없이 이미지 속 텍스트를 추출합니다.'
+      }
+    },
+    ob_cap_ocr: {
+      name: '속성 관찰'
     }
   }
 }

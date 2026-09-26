@@ -3957,7 +3957,7 @@ export default {
         imageAttrsSchemaDescription: 'The model observes the attributes below (defined by the backend registry) to drive the OCR policy',
         imagePipelineSectionLabel: 'Image pipeline',
         imagePipelineSectionDescription:
-          'Images are processed by the pipeline picked here. The list of pipelines and of their tunables comes from the backend registry, so the panel only selects. Leaving it empty keeps the observation switch above in charge.',
+          'While multimodal is on, every image is processed by the pipeline picked here. The list of pipelines and of their tunables comes from the backend registry, so the panel only selects.',
         imagePipelineLabel: 'Pipeline',
         imagePipelineDescription:
           'Pipelines differ in how they treat an image. Switching pipeline clears the parameters you set for the one you leave.',
@@ -7792,6 +7792,26 @@ export default {
         'true': { label: 'Yes', description: 'a chart, graph or diagram with plotted values' },
         'false': { label: 'No', description: 'a photo, drawing, icon or decoration' }
       }
+    }
+  },
+  // Overlay wording for the pipeline panel, indexed by pipeline id and field
+  // key (the backend registry supplies both; this only translates). Anything
+  // not covered here falls back to the backend's own wording, so a new
+  // pipeline never shows up as a bare key.
+  imagePipeline: {
+    caption_ocr: {
+      name: 'Traditional',
+      enable_caption: {
+        label: 'Image caption',
+        description: 'Ask the model for a one-line description of every image and store it as the caption.'
+      },
+      enable_ocr: {
+        label: 'OCR',
+        description: 'Extract the text every image carries, whether or not the image contains any.'
+      }
+    },
+    ob_cap_ocr: {
+      name: 'Observation'
     }
   }
 }
