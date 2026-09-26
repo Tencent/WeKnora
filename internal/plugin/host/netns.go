@@ -2,11 +2,13 @@ package host
 
 import (
 	"context"
+	"errors"
 	"os"
 	"strings"
 	"sync"
 
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/plugin/sandbox"
 )
 
 // envNetns says whether host plugins run in their own network namespace
@@ -42,6 +44,10 @@ func netnsFromEnv() netnsSetting {
 	return netnsAuto
 }
 
+// errNoHelper: the program does not dispatch the sandbox helper (the
+// desktop app, test binaries), so it cannot sandbox plugins on any system.
+var errNoHelper = errors.New("this program does not include the " + sandbox.Subcommand + " helper")
+
 // sandboxCheck is whether this system can sandbox plugins, found out once.
 var sandboxCheck struct {
 	once sync.Once
@@ -62,7 +68,7 @@ func sandboxUnavailable() error {
 		case err == nil:
 			logger.Infof(ctx, "[plugin] host plugins run in their own network namespace; "+
 				"the egress proxy is their only way out")
-		case !sandboxOS:
+		case !sandboxOS || errors.Is(err, errNoHelper):
 			logger.Infof(ctx, "[plugin] host plugins run with the egress proxy only: %v", err)
 		default:
 			logger.Warnf(ctx, "[plugin] host plugins run WITHOUT a network sandbox: %v. Their egress grants are "+

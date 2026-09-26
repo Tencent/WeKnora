@@ -118,7 +118,7 @@ const probeTimeout = 10 * time.Second
 // whether this system sandboxes plugins.
 func probeSandbox() error {
 	if !sandbox.HelperRegistered() {
-		return errors.New("this program does not include the " + sandbox.Subcommand + " helper")
+		return errNoHelper
 	}
 	self, err := os.Executable()
 	if err != nil {
