@@ -73,6 +73,18 @@ export function isOAuthResult(
   )
 }
 
+/**
+ * Sorts a failed options request: a plugin answering invalid_config says the
+ * form lacks what the list needs (no token yet), which the form shows as a
+ * hint; anything else is an error worth retrying.
+ */
+export function optionsFailure(e: unknown): { hint?: string; error?: string } {
+  const err = e as { message?: string; error?: { code?: string; message?: string } } | null
+  const message = err?.error?.message || err?.message || ''
+  if (err?.error?.code === 'invalid_config') return { hint: message }
+  return { error: message }
+}
+
 /** The values dependsOn names, keyed by path, for reload decisions. */
 export function dependencyKey(source: SchemaFormSource | undefined, spec: OptionsSource | undefined): string {
   if (!source || !spec?.dependsOn?.length) return ''

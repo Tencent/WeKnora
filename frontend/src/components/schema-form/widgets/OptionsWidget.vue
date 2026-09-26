@@ -25,6 +25,7 @@
       :disabled="disabled"
       @update:model-value="onText"
     />
+    <p v-if="hint" class="options-widget__hint">{{ hint }}</p>
     <p v-if="error" class="options-widget__error">
       {{ error }}
       <t-link theme="primary" size="small" @click="load(query)">{{ t('schemaForm.options.retry') }}</t-link>
@@ -36,7 +37,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
-import { dependencyKey, useSchemaFormSource, type FieldOption } from '../source'
+import { dependencyKey, optionsFailure, useSchemaFormSource, type FieldOption } from '../source'
 import type { WidgetProps } from './types'
 
 // Choices the plugin lists for this field (x-options), reloaded when the
@@ -53,6 +54,9 @@ const multiple = computed(() => props.schema.type === 'array')
 const options = ref<FieldOption[]>([])
 const loading = ref(false)
 const error = ref('')
+// What the plugin needs before it can list anything ("connect an account
+// first"): shown quietly, and cleared by the next load.
+const hint = ref('')
 const query = ref('')
 let loadedKey: string | null = null
 let seq = 0
@@ -78,13 +82,16 @@ async function load(q = '') {
   const mine = ++seq
   loading.value = true
   error.value = ''
+  hint.value = ''
   try {
     const got = await source.options(props.path ?? '', spec.value, q)
     if (mine === seq) options.value = got
   } catch (e) {
     if (mine === seq) {
       options.value = []
-      error.value = (e as { message?: string })?.message || t('schemaForm.options.failed')
+      const failure = optionsFailure(e)
+      if (failure.hint !== undefined) hint.value = failure.hint
+      else error.value = failure.error || t('schemaForm.options.failed')
     }
   } finally {
     if (mine === seq) loading.value = false
@@ -149,6 +156,13 @@ function onText(v: string) {
   padding: 8px 12px;
   color: var(--td-text-color-placeholder);
   font-size: var(--app-text-sm);
+}
+
+.options-widget__hint {
+  margin: 0;
+  color: var(--td-text-color-placeholder);
+  font-size: var(--app-text-sm);
+  line-height: 1.5;
 }
 
 .options-widget__error {

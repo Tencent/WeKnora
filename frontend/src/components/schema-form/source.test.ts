@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import { isOAuthRef, validateConfig, type ConfigSchema } from './schema'
-import { dependencyKey, isOAuthResult, valueAt, type SchemaFormSource } from './source'
+import { dependencyKey, isOAuthResult, optionsFailure, valueAt, type SchemaFormSource } from './source'
 
 const schema: ConfigSchema = {
   type: 'object',
@@ -51,4 +51,13 @@ test('choices reload only when the fields they depend on change', () => {
   assert.equal(dependencyKey(source, { name: 'projects' }), '')
   assert.equal(dependencyKey(undefined, spec), '')
   assert.equal(valueAt({ a: [1] }, 'a.0'), undefined)
+})
+
+test('a plugin asking for more input is a hint, other failures are errors', () => {
+  assert.deepEqual(optionsFailure({ status: 400, message: 'connect first', error: { code: 'invalid_config', message: 'connect first' } }),
+    { hint: 'connect first' })
+  assert.deepEqual(optionsFailure({ status: 400, message: 'bad', error: { code: 'unauthorized', message: 'token expired' } }),
+    { error: 'token expired' })
+  assert.deepEqual(optionsFailure({ status: 502, message: 'plugin down' }), { error: 'plugin down' })
+  assert.deepEqual(optionsFailure(null), { error: '' })
 })
