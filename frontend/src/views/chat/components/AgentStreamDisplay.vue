@@ -1223,7 +1223,7 @@ const isMcpTool = (toolName?: string | null): boolean => String(toolName || '').
 const resolveToolDisplayType = (event: any): DisplayType | undefined => {
   // A plugin's own result view beats the generic MCP call view, also when
   // the tool was reached through call_mcp_tool.
-  if (event?.display_type === 'plugin_tool_view') return 'plugin_tool_view'
+  if (isPluginToolView(event)) return 'plugin_tool_view'
   const mcpType = getMcpToolDisplayType(event?.tool_name)
   if (mcpType) return mcpType
   if (event?.display_type) return event.display_type as DisplayType
@@ -1323,8 +1323,13 @@ const buildToolResultReference = (
   }];
 };
 
+// A plugin tool whose result has a view expands in place to show it,
+// instead of opening the text-only references drawer MCP tools use.
+const isPluginToolView = (event: any): boolean =>
+  event?.display_type === 'plugin_tool_view' || event?.tool_data?.display_type === 'plugin_tool_view';
+
 function getToolReferenceItems(event: any): KnowledgeReferenceLike[] {
-  if (!event || event.pending) return [];
+  if (!event || event.pending || isPluginToolView(event)) return [];
   const toolName = event.tool_name;
   const toolData = event.tool_data;
 
@@ -2242,6 +2247,7 @@ const isReferenceDrawerTool = (toolName?: string | null): boolean =>
   toolName === 'wiki_read_source_doc';
 
 const hasExpandableResults = (event: any): boolean => {
+  if (isPluginToolView(event)) return !event.pending;
   if (isReferenceDrawerTool(event?.tool_name)) return false;
   return hasResults(event);
 };

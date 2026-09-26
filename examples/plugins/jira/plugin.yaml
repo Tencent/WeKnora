@@ -47,7 +47,7 @@ contributes:
           view: table
           items: issues
           columns:
-            - { field: key, link: url }
+            - { field: key, title: { en-US: Key, zh-CN: 编号 }, link: url }
             - { field: summary, title: { en-US: Summary, zh-CN: 摘要 } }
             - { field: status, title: { en-US: Status, zh-CN: 状态 } }
             - { field: assignee, title: { en-US: Assignee, zh-CN: 负责人 } }
