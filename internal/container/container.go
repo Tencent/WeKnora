@@ -627,6 +627,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(newPluginDrivers))
 	must(container.Provide(handler.NewPluginHandler))
 	must(container.Provide(newPluginAdminHandler))
+	must(container.Provide(handler.NewTenantPluginHandler))
 	must(container.Provide(handler.NewPluginUIHandler))
 	must(container.Provide(pluginwebhook.NewTokensFromEnv))
 	must(container.Provide(handler.NewPluginWebhookHandler))

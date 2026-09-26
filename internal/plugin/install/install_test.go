@@ -324,3 +324,80 @@ func TestSetAudience(t *testing.T) {
 		t.Fatalf("unknown plugin: %v", err)
 	}
 }
+
+func ownedPackage(t *testing.T, id, version string, extra ...string) []byte {
+	t.Helper()
+	manifest := "schemaVersion: 1\nid: " + id + "\nversion: " + version + "\napiVersion: weknora.plugin/v1\n" +
+		"name: { en-US: Own }\npublisher: { id: " + strings.Split(id, ".")[0] + " }\nruntime: { type: remote }\n" +
+		"contributes:\n  webSearch:\n    - { id: s, name: S }\n"
+	for _, line := range extra {
+		manifest += line + "\n"
+	}
+	return plugintest.Zip(t, map[string]string{"plugin.yaml": manifest})
+}
+
+func TestWorkspaceOwnedPlugins(t *testing.T) {
+	ctx := context.Background()
+	utils.SetSSRFWhitelistFromRaw("plugins.example.com")
+	t.Cleanup(func() { utils.SetSSRFWhitelistFromRaw("") })
+	s, _, _, reg := newService(t)
+	allowed := false
+	s.WithTenantPlugins(func(context.Context) bool { return allowed })
+	own := ownedPackage(t, "team.search", "1.0.0")
+	req := Request{Data: own, RemoteURL: "https://plugins.example.com/search"}
+
+	if _, err := s.InstallOwned(ctx, 7, req); !errors.Is(err, ErrTenantPluginsOff) {
+		t.Fatalf("switched off: %v", err)
+	}
+	allowed = true
+	if _, err := s.InstallOwned(ctx, 7, Request{Data: plugintest.KitPackage(t, "1.0.0")}); !isInvalid(err) {
+		t.Fatalf("a declarative package: %v", err)
+	}
+	pages := plugintest.Zip(t, map[string]string{
+		"plugin.yaml": "schemaVersion: 1\nid: team.pages\nversion: 1.0.0\napiVersion: weknora.plugin/v1\n" +
+			"name: P\npublisher: { id: team }\nruntime: { type: remote }\n" +
+			"contributes:\n  pages:\n    - { id: p, name: P, entry: ui/p.html }\n",
+		"ui/p.html": "<html></html>",
+	})
+	if _, err := s.InspectOwned(ctx, 7, pages); err == nil || !strings.Contains(err.Error(), "cannot add pages") {
+		t.Fatalf("a page in a workspace's plugin: %v", err)
+	}
+
+	v, err := s.InstallOwned(ctx, 7, req)
+	if err != nil || v.OwnerTenantID == nil || *v.OwnerTenantID != 7 || v.IssuedSecret == "" {
+		t.Fatalf("install owned = %+v, %v", v, err)
+	}
+	if !reg.VisibleTo("team.search", 7) || reg.VisibleTo("team.search", 8) {
+		t.Fatal("a workspace's plugin must be its own")
+	}
+	if _, err := s.SetAudience(ctx, "team.search", nil); !isInvalid(err) {
+		t.Fatalf("widening a workspace's plugin: %v", err)
+	}
+	if _, err := s.InstallOwned(ctx, 8, req); !isInvalid(err) {
+		t.Fatalf("another workspace took the ID: %v", err)
+	}
+	if _, err := s.Install(ctx, req); !isInvalid(err) {
+		t.Fatalf("the platform installed over a workspace's plugin: %v", err)
+	}
+	if list, _ := s.ListOwned(ctx, 8); len(list) != 0 {
+		t.Fatalf("workspace 8 lists %v", list)
+	}
+	if err := s.UninstallOwned(ctx, 8, "team.search"); !errors.Is(err, ErrNotInstalled) {
+		t.Fatalf("workspace 8 removed workspace 7's plugin: %v", err)
+	}
+	if _, err := s.RotateSecretOwned(ctx, 7, "team.search"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.UninstallOwned(ctx, 7, "team.search"); err != nil {
+		t.Fatal(err)
+	}
+
+	// A workspace cannot take a platform plugin's ID either.
+	if _, err := s.Install(ctx, Request{Data: plugintest.KitPackage(t, "1.0.0")}); err != nil {
+		t.Fatal(err)
+	}
+	taken := Request{Data: ownedPackage(t, "acme.kit", "2.0.0"), RemoteURL: "https://plugins.example.com/kit"}
+	if _, err := s.InstallOwned(ctx, 7, taken); !isInvalid(err) {
+		t.Fatalf("a workspace took a platform plugin's ID: %v", err)
+	}
+}

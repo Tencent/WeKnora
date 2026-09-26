@@ -1,8 +1,8 @@
 <template>
   <SettingDrawer
     :visible="visible"
-    :title="t('pluginAdmin.install.title')"
-    :description="t('pluginAdmin.install.description')"
+    :title="tenant ? t('pluginCenter.own.title') : t('pluginAdmin.install.title')"
+    :description="tenant ? t('pluginCenter.own.description') : t('pluginAdmin.install.description')"
     icon="download"
     width="640px"
     :confirm-text="confirmText"
@@ -15,7 +15,7 @@
       <h4 class="setting-drawer__section-title">{{ t('pluginAdmin.install.sourceSection') }}</h4>
       <div class="option-chips">
         <button
-          v-for="m in (['upload', 'url', 'market'] as const)"
+          v-for="m in modes"
           :key="m"
           type="button"
           class="option-chip"
@@ -179,7 +179,11 @@
         class="review-alert"
         :message="t('pluginAdmin.install.configNotice')"
       />
-      <t-alert theme="warning" class="review-alert" :message="t('pluginAdmin.install.tenantNotice')" />
+      <t-alert
+        theme="warning"
+        class="review-alert"
+        :message="tenant ? t('pluginCenter.own.notice') : t('pluginAdmin.install.tenantNotice')"
+      />
       <p class="form-desc">{{ t('pluginAdmin.install.digest') }}: <code>{{ preview.digest }}</code></p>
     </section>
   </SettingDrawer>
@@ -192,10 +196,10 @@ import { pluginIconUrl } from '@/extensions/pluginIcon'
 import { MessagePlugin } from 'tdesign-vue-next'
 
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
+import { tenantPackages } from '@/api/tenantPlugins'
 import {
-  inspectPluginPackage,
-  installPluginPackage,
   listMarketPlugins,
+  platformPackages,
   type InstalledPlugin,
   type MarketListing,
   type MarketPlugin,
@@ -223,7 +227,9 @@ import { hasTenantConfig } from '../../settings/pluginCenterState'
 // Installing is two steps on purpose: inspect shows what the package would
 // add and reach, and install sends the reviewed digest so the server refuses
 // a package that changed in between (a URL that now serves something else).
-const props = defineProps<{ visible: boolean }>()
+// scope tenant registers the workspace's own remote plugin instead of
+// installing one for the platform: no marketplace, the tenant endpoints.
+const props = defineProps<{ visible: boolean; scope?: 'system' | 'tenant' }>()
 const emit = defineEmits<{
   'update:visible': [value: boolean]
   installed: [plugin: InstalledPlugin]
@@ -233,6 +239,9 @@ const { t, locale } = useI18n()
 
 type Mode = 'upload' | 'url' | 'market'
 const mode = ref<Mode>('upload')
+const tenant = computed(() => props.scope === 'tenant')
+const api = computed(() => (tenant.value ? tenantPackages : platformPackages))
+const modes = computed<Mode[]>(() => (tenant.value ? ['upload', 'url'] : ['upload', 'url', 'market']))
 const file = ref<File | null>(null)
 const url = ref('')
 const remoteUrl = ref('')
@@ -339,7 +348,7 @@ async function inspect() {
   if (!source.value) return
   busy.value = true
   try {
-    const res = await inspectPluginPackage(source.value)
+    const res = await api.value.inspect(source.value)
     preview.value = res.data
   } catch (e: any) {
     preview.value = null
@@ -357,7 +366,7 @@ async function onConfirm() {
   if (!source.value) return
   busy.value = true
   try {
-    const res = await installPluginPackage(
+    const res = await api.value.install(
       source.value,
       preview.value.digest,
       isRemote.value ? remoteUrl.value.trim() : undefined,

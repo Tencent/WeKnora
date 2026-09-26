@@ -3430,6 +3430,7 @@ export default {
           wiki_concurrency: '상위 작업과 분리된 전용 Wiki 워커 풀의 프로세스별 동시성입니다. 최소값은 1이며 적용하려면 서비스를 재시작해야 합니다.'
         },
         tenant: {
+          plugin_remote_enabled: '공간 관리자가 자체 원격 플러그인(자체 서버에서 실행, 페이지 없음, 해당 공간에만 표시)을 등록할 수 있는지 여부. 끄면 새 등록과 업그레이드가 불가하며 등록된 플러그인은 계속 동작합니다. 즉시 적용됩니다.',
           max_owned_per_user: '슈퍼유저가 아닌 사용자가 셀프 서비스로 소유할 수 있는 최대 워크스페이스 수입니다. 워크스페이스 생성 시마다 읽으며 저장 즉시 적용됩니다. 0은 내장 기본값 10을 사용하고, 음수는 제한을 완전히 해제합니다(공개 배포에는 권장하지 않음).',
           self_service_creation_enabled: '비슈퍼유저가 공간을 직접 만들 수 있는지 설정합니다. 비활성화하면 일반 사용자는 초대로만 기존 공간에 참여할 수 있으며, 크로스 워크스페이스 슈퍼유저는 계속 만들 수 있습니다.',
           default_storage_quota_gb: '신규 워크스페이스 생성 시 기본으로 할당되는 저장 용량(GB)으로, 벡터·원본·텍스트·인덱스 등을 포함합니다. 생성 시에만 읽으며, 변경은 이후 생성되는 워크스페이스에만 적용되고 기존 워크스페이스에는 소급되지 않습니다. 0 또는 음수는 내장 기본값 10GB를 사용합니다.',
@@ -3461,6 +3462,7 @@ export default {
           wiki_concurrency: 'Wiki 워커 동시성'
         },
         tenant: {
+          plugin_remote_enabled: '공간 자체 플러그인 등록 허용',
           max_owned_per_user: '사용자당 최대 워크스페이스 수',
           self_service_creation_enabled: '사용자 공간 직접 생성 허용',
           default_storage_quota_gb: '신규 워크스페이스 기본 저장 용량 (GB)',
@@ -5253,6 +5255,7 @@ export default {
     noCompatibleKbForAgent: '현재 에이전트의 도구와 범위 내 지식베이스의 기능이 일치하지 않아 참조할 수 있는 지식베이스가 없습니다.'
   },
   pluginAdmin: {
+    ownedBy: '공간 {tenant} 자체',
     runtime: {
       declarative: '선언형',
       host: '로컬 프로세스',
@@ -5331,6 +5334,7 @@ export default {
       }
     },
     audience: {
+      owned: '공간 {tenant}이(가) 등록한 자체 플러그인으로, 해당 공간에만 보입니다.',
       title: '공개 범위',
       hint: '제한하면 선택한 공간만 플러그인을 보고 활성화할 수 있습니다. 다른 공간에서는 보이지 않으며, 스위치와 설정은 유지되어 다시 포함하면 복원됩니다.',
       all: '모든 공간',
@@ -5425,6 +5429,21 @@ export default {
     fromPlugin: '플러그인 {id} 제공'
   },
   pluginCenter: {
+    own: {
+      register: '자체 플러그인 등록',
+      title: '이 공간의 자체 플러그인 등록',
+      description: '원격 플러그인 .wkp 패키지를 업로드하거나 URL을 입력하고, 서비스 주소를 입력하세요. 플러그인 코드는 자체 서버에서 실행됩니다.',
+      notice: '등록하면 이 공간에만 보이며 이 공간에서 바로 활성화됩니다. 원격 플러그인만 가능하며 페이지를 추가할 수 없습니다.',
+      tag: '이 공간',
+      manage: '관리',
+      update: '패키지 업데이트',
+      editUrl: '서비스 URL 변경',
+      urlTitle: '서비스 URL 변경',
+      remove: '삭제',
+      removeConfirm: '이 플러그인을 삭제할까요? 연동이 즉시 중단됩니다.',
+      removed: '플러그인을 삭제했습니다',
+      removeFailed: '삭제하지 못했습니다'
+    },
     installed: '설치됨',
     configure: '설정',
     webhooks: 'Webhook URL',

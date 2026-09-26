@@ -6,9 +6,15 @@
     </div>
 
     <div class="plugin-center__toolbar">
-      <t-input v-model="query" class="plugin-center__search" clearable :placeholder="t('pluginCenter.searchPlaceholder')">
-        <template #prefix-icon><t-icon name="search" /></template>
-      </t-input>
+      <div class="plugin-center__toolbar-row">
+        <t-input v-model="query" class="plugin-center__search" clearable :placeholder="t('pluginCenter.searchPlaceholder')">
+          <template #prefix-icon><t-icon name="search" /></template>
+        </t-input>
+        <t-button v-if="canManage && own.allowed" variant="outline" @click="ownOpen = true">
+          <template #icon><t-icon name="add" /></template>
+          {{ t('pluginCenter.own.register') }}
+        </t-button>
+      </div>
       <div class="option-chips">
         <button type="button" class="option-chip" :class="{ 'option-chip--active': point === '' }" @click="point = ''">
           {{ t('pluginCenter.allPoints') }}
@@ -40,6 +46,9 @@
           <div class="plugin-card__title">
             <span class="plugin-card__name">{{ nameOf(p) }}</span>
             <t-tag v-if="p.manifest.builtin" size="small" variant="light">{{ t('pluginCenter.builtin') }}</t-tag>
+            <t-tag v-else-if="ownedIds.has(p.manifest.id)" size="small" variant="light" theme="primary">
+              {{ t('pluginCenter.own.tag') }}
+            </t-tag>
             <t-tag v-else size="small" variant="light" theme="warning">{{ t('pluginCenter.installed') }}</t-tag>
             <t-tag v-if="p.manifest.required" size="small" variant="light" theme="primary">
               {{ t('pluginCenter.required') }}
@@ -71,9 +80,31 @@
           >
             {{ t('pluginCenter.configure') }}
           </t-button>
+          <t-dropdown
+            v-if="canManage && ownedIds.has(p.manifest.id)"
+            :options="ownActions"
+            trigger="click"
+            @click="(item: { value: OwnAction }) => onOwnAction(p.manifest.id, item.value)"
+          >
+            <t-button size="small" variant="text" theme="primary">{{ t('pluginCenter.own.manage') }}</t-button>
+          </t-dropdown>
         </div>
       </div>
     </div>
+
+    <PluginInstallDrawer v-model:visible="ownOpen" scope="tenant" @installed="onOwnInstalled" />
+    <PluginSecretDialog v-model:secret="issuedSecret" />
+    <t-dialog
+      :visible="!!urlPlugin"
+      :header="t('pluginCenter.own.urlTitle')"
+      :confirm-btn="{ content: t('common.save'), loading: urlSaving, disabled: !isPackageUrl(urlDraft) }"
+      @confirm="saveOwnUrl"
+      @close="urlPlugin = ''"
+      @cancel="urlPlugin = ''"
+    >
+      <p class="plugin-center__hint">{{ t('pluginAdmin.install.remoteUrlHint') }}</p>
+      <t-input v-model="urlDraft" placeholder="https://plugins.example.com/acme-search" @enter="saveOwnUrl" />
+    </t-dialog>
 
     <SettingDrawer
       v-model:visible="configOpen"
@@ -114,7 +145,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { pluginIconUrl } from '@/extensions/pluginIcon'
-import { MessagePlugin } from 'tdesign-vue-next'
+import { DialogPlugin, MessagePlugin } from 'tdesign-vue-next'
 
 import {
   getPluginConfig,
@@ -131,6 +162,17 @@ import { pluginFormSource } from '@/components/schema-form/pluginSource'
 import { provideSchemaFormSource } from '@/components/schema-form/source'
 import { validateConfig, type ConfigSchema, type ConfigValue, type FieldError } from '@/components/schema-form/schema'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
+import PluginSecretDialog from '@/components/plugins/PluginSecretDialog.vue'
+import type { InstalledPlugin } from '@/api/system/plugins'
+import {
+  listTenantPlugins,
+  rotateTenantPluginSecret,
+  setTenantPluginRemoteUrl,
+  uninstallTenantPlugin,
+  type TenantPluginListing,
+} from '@/api/tenantPlugins'
+import PluginInstallDrawer from '@/views/system/plugins/PluginInstallDrawer.vue'
+import { isPackageUrl } from '@/views/system/pluginManagementState'
 import { useAuthStore } from '@/stores/auth'
 import { usePluginPagesStore } from '@/stores/pluginPages'
 import { localizedText } from '@/utils/localizedText'
@@ -183,6 +225,101 @@ async function load() {
     MessagePlugin.error(e?.message || t('pluginCenter.loadFailed'))
   } finally {
     loading.value = false
+  }
+  if (canManage.value) void loadOwn()
+}
+
+// The workspace's own remote plugins, when the platform allows them.
+const own = ref<TenantPluginListing>({ allowed: false, plugins: [] })
+const ownedIds = computed(() => new Set(own.value.plugins.map((p) => p.id)))
+const ownOpen = ref(false)
+const issuedSecret = ref('')
+const urlPlugin = ref('')
+const urlDraft = ref('')
+const urlSaving = ref(false)
+type OwnAction = 'update' | 'url' | 'rotate' | 'remove'
+const ownActions = computed(() => [
+  ...(own.value.allowed ? [{ content: t('pluginCenter.own.update'), value: 'update' as OwnAction }] : []),
+  { content: t('pluginCenter.own.editUrl'), value: 'url' as OwnAction },
+  { content: t('pluginAdmin.detail.rotateSecret'), value: 'rotate' as OwnAction },
+  { content: t('pluginCenter.own.remove'), value: 'remove' as OwnAction, theme: 'error' },
+])
+
+async function loadOwn() {
+  try {
+    const res = await listTenantPlugins()
+    own.value = res.data ?? { allowed: false, plugins: [] }
+  } catch {
+    own.value = { allowed: false, plugins: [] }
+  }
+}
+
+function afterOwnChange(view?: InstalledPlugin) {
+  if (view?.issuedSecret) issuedSecret.value = view.issuedSecret
+  void load()
+  void pluginPages.ensure(true).catch(() => {})
+}
+
+function onOwnInstalled(view: InstalledPlugin) {
+  afterOwnChange(view)
+}
+
+function onOwnAction(id: string, action: OwnAction) {
+  const p = own.value.plugins.find((x) => x.id === id)
+  switch (action) {
+    case 'update':
+      ownOpen.value = true
+      return
+    case 'url':
+      urlPlugin.value = id
+      urlDraft.value = p?.remote_url ?? ''
+      return
+    case 'rotate': {
+      const dlg = DialogPlugin.confirm({
+        header: t('pluginAdmin.detail.rotateSecret'),
+        body: t('pluginAdmin.detail.rotateConfirm'),
+        onConfirm: async () => {
+          dlg.hide()
+          try {
+            afterOwnChange((await rotateTenantPluginSecret(id)).data)
+          } catch (e: any) {
+            MessagePlugin.error(e?.message || t('pluginAdmin.detail.rotateFailed'))
+          }
+        },
+      })
+      return
+    }
+    case 'remove': {
+      const dlg = DialogPlugin.confirm({
+        header: t('pluginCenter.own.remove'),
+        body: t('pluginCenter.own.removeConfirm'),
+        theme: 'danger',
+        onConfirm: async () => {
+          dlg.hide()
+          try {
+            await uninstallTenantPlugin(id)
+            MessagePlugin.success(t('pluginCenter.own.removed'))
+            afterOwnChange()
+          } catch (e: any) {
+            MessagePlugin.error(e?.message || t('pluginCenter.own.removeFailed'))
+          }
+        },
+      })
+    }
+  }
+}
+
+async function saveOwnUrl() {
+  if (!urlPlugin.value || !isPackageUrl(urlDraft.value)) return
+  urlSaving.value = true
+  try {
+    afterOwnChange((await setTenantPluginRemoteUrl(urlPlugin.value, urlDraft.value.trim())).data)
+    urlPlugin.value = ''
+    MessagePlugin.success(t('pluginAdmin.detail.urlSaved'))
+  } catch (e: any) {
+    MessagePlugin.error(e?.message || t('pluginAdmin.detail.urlSaveFailed'))
+  } finally {
+    urlSaving.value = false
   }
 }
 
@@ -293,6 +430,13 @@ onMounted(load)
 
 .plugin-center__search {
   max-width: 360px;
+}
+
+.plugin-center__toolbar-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
 }
 
 // Segmented point filter, same look as the IM channel mode switch.

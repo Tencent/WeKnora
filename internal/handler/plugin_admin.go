@@ -72,6 +72,11 @@ type packageInput struct {
 
 // readPackage returns the package archive from an upload or a URL.
 func (h *PluginAdminHandler) readPackage(c *gin.Context) (packageInput, bool) {
+	return readPluginPackage(c, h.service, h.fail)
+}
+
+// readPluginPackage returns the package archive from an upload or a URL.
+func readPluginPackage(c *gin.Context, service *install.Service, fail func(*gin.Context, error)) (packageInput, bool) {
 	if strings.HasPrefix(c.ContentType(), "application/json") {
 		limitJSONBody(c, skillSourceJSONMaxBytes)
 		var req PluginPackageRequest
@@ -79,9 +84,9 @@ func (h *PluginAdminHandler) readPackage(c *gin.Context) (packageInput, bool) {
 			_ = c.Error(errors.NewBadRequestError("url or an uploaded file is required"))
 			return packageInput{}, false
 		}
-		data, err := h.service.FetchURL(c.Request.Context(), strings.TrimSpace(req.URL))
+		data, err := service.FetchURL(c.Request.Context(), strings.TrimSpace(req.URL))
 		if err != nil {
-			h.fail(c, err)
+			fail(c, err)
 			return packageInput{}, false
 		}
 		return packageInput{

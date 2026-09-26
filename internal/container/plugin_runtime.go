@@ -230,9 +230,13 @@ func newPluginInstaller(
 	store reconcile.PackageStore,
 	r *reconcile.Reconciler,
 	trusted *plugintrust.Store,
+	settings interfaces.SystemSettingService,
 ) *install.Service {
 	return install.NewService(repo, store, r, handler.Version).
-		WithChecks(activate.CheckModelVendors).WithTrust(trusted)
+		WithChecks(activate.CheckModelVendors).WithTrust(trusted).
+		WithTenantPlugins(func(ctx context.Context) bool {
+			return settings.GetBool(ctx, "tenant.plugin_remote_enabled", "WEKNORA_PLUGIN_TENANT_REMOTE", false)
+		})
 }
 
 // newPluginAdminHandler serves plugin installation, with the marketplace

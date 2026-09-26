@@ -95,6 +95,8 @@ type Service struct {
 	client      *http.Client
 	checks      []PackageCheck
 	trust       *trust.Store
+	// tenantPlugins is the platform's switch for workspaces' own plugins.
+	tenantPlugins func(context.Context) bool
 }
 
 // PackageCheck is a domain's install-time verdict on a package, such as
@@ -252,11 +254,26 @@ func (s *Service) Install(ctx context.Context, req Request) (*View, error) {
 	if err != nil {
 		return nil, err
 	}
+	return s.install(ctx, req, p, verdict, nil)
+}
+
+// install stores a package opened for installation; owner is the tenant
+// registering its own plugin, nil for the platform.
+func (s *Service) install(
+	ctx context.Context, req Request, p *pkg.Package, verdict trust.Verdict, owner *uint64,
+) (*View, error) {
 	if req.ExpectedDigest != "" && req.ExpectedDigest != p.Digest {
 		return nil, invalid("the package changed since it was reviewed (digest %s, reviewed %s)",
 			p.Digest, req.ExpectedDigest)
 	}
 	m := p.Manifest
+	row, err := s.repo.GetPlugin(ctx, m.ID)
+	if err != nil {
+		return nil, err
+	}
+	if err := checkOwner(row, m.ID, owner); err != nil {
+		return nil, err
+	}
 	existing, err := s.repo.GetVersion(ctx, m.ID, m.Version)
 	if err != nil {
 		return nil, err
@@ -280,12 +297,14 @@ func (s *Service) Install(ctx context.Context, req Request) (*View, error) {
 		}
 	}
 
-	row, err := s.repo.GetPlugin(ctx, m.ID)
-	if err != nil {
-		return nil, err
-	}
 	if row == nil {
 		row = &types.InstalledPlugin{ID: m.ID, DesiredState: types.PluginStateEnabled, CreatedBy: req.UserID}
+		if owner != nil {
+			// A workspace's own plugin is only ever its own.
+			tenant := *owner
+			audience, _ := json.Marshal([]uint64{tenant})
+			row.OwnerTenantID, row.Audience = &tenant, types.JSON(audience)
+		}
 	}
 	var issued string
 	if m.Runtime.Type == manifest.RuntimeRemote {
@@ -515,6 +534,9 @@ func (s *Service) SetAudience(ctx context.Context, id string, tenants []uint64) 
 	}
 	if row == nil {
 		return nil, ErrNotInstalled
+	}
+	if row.OwnerTenantID != nil {
+		return nil, invalid("%s is workspace %d's own plugin; only that workspace sees it", id, *row.OwnerTenantID)
 	}
 	row.Audience = nil
 	if tenants != nil {

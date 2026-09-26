@@ -69,6 +69,8 @@ export interface InstalledPlugin {
   manifest?: PluginManifest
   versions: PluginVersion[]
   node?: PluginNodeStatus
+  /** Set for a workspace's own plugin: the workspace that registered it. */
+  owner_tenant_id?: number
   /** The workspaces the plugin is limited to; absent when every workspace sees it. */
   audience?: number[] | null
   /** Where a remote plugin's service runs. */
@@ -138,36 +140,51 @@ export function getInstalledPlugin(id: string) {
   return get<{ data: InstalledPlugin }>(`${BASE}/${encodeURIComponent(id)}`)
 }
 
-/** Reads a package and reports what installing it would do, changing nothing. */
-export function inspectPluginPackage(source: PackageSource) {
-  if ('file' in source) {
-    return postUpload(`${BASE}/inspect`, packageForm(source.file), undefined, { timeout: PACKAGE_TIMEOUT }) as Promise<{
-      data: PluginPreview
-    }>
-  }
-  return post<{ data: PluginPreview }>(
-    `${BASE}/inspect`,
-    { url: source.url, digest: source.digest },
-    { timeout: PACKAGE_TIMEOUT },
-  )
+/** Reviewing and installing packages, against one install endpoint. */
+export interface PackageEndpoints {
+  /** Reads a package and reports what installing it would do, changing nothing. */
+  inspect(source: PackageSource): Promise<{ data: PluginPreview }>
+  /**
+   * Installs the package reviewed with inspect; digest pins it to that
+   * package. A remote plugin also needs the URL of its service (optional on
+   * upgrades).
+   */
+  install(source: PackageSource, digest: string, remoteUrl?: string): Promise<{ data: InstalledPlugin }>
 }
 
-/**
- * Installs the package reviewed with inspect; digest pins it to that package.
- * A remote plugin also needs the URL of its service (optional on upgrades).
- */
-export function installPluginPackage(source: PackageSource, digest: string, remoteUrl?: string) {
-  if ('file' in source) {
-    return postUpload(BASE, packageForm(source.file, digest, remoteUrl), undefined, {
-      timeout: PACKAGE_TIMEOUT,
-    }) as Promise<{ data: InstalledPlugin }>
+export function packageEndpoints(base: string): PackageEndpoints {
+  return {
+    inspect(source) {
+      if ('file' in source) {
+        return postUpload(`${base}/inspect`, packageForm(source.file), undefined, {
+          timeout: PACKAGE_TIMEOUT,
+        }) as Promise<{ data: PluginPreview }>
+      }
+      return post<{ data: PluginPreview }>(
+        `${base}/inspect`,
+        { url: source.url, digest: source.digest },
+        { timeout: PACKAGE_TIMEOUT },
+      )
+    },
+    install(source, digest, remoteUrl) {
+      if ('file' in source) {
+        return postUpload(base, packageForm(source.file, digest, remoteUrl), undefined, {
+          timeout: PACKAGE_TIMEOUT,
+        }) as Promise<{ data: InstalledPlugin }>
+      }
+      return post<{ data: InstalledPlugin }>(
+        base,
+        { url: source.url, digest, remote_url: remoteUrl || undefined },
+        { timeout: PACKAGE_TIMEOUT },
+      )
+    },
   }
-  return post<{ data: InstalledPlugin }>(
-    BASE,
-    { url: source.url, digest, remote_url: remoteUrl || undefined },
-    { timeout: PACKAGE_TIMEOUT },
-  )
 }
+
+/** The platform's plugin installation. */
+export const platformPackages = packageEndpoints(BASE)
+export const inspectPluginPackage = platformPackages.inspect
+export const installPluginPackage = platformPackages.install
 
 export function setInstalledPluginEnabled(id: string, enabled: boolean) {
   return put<{ data: InstalledPlugin }>(`${BASE}/${encodeURIComponent(id)}/enabled`, { enabled })

@@ -3432,6 +3432,7 @@ export default {
           wiki_concurrency: '每个服务实例的 Wiki 专用 Worker 并发数，与上游任务池相互隔离。最小值为 1；修改后需重启服务进程方可生效。'
         },
         tenant: {
+          plugin_remote_enabled: '是否允许空间管理员登记本空间自有的远程插件（代码运行在空间自己的服务器上，不能带页面，只有本空间可见）。关闭后不能再登记或升级，已登记的照常运行。修改后立即生效。',
           max_owned_per_user: '每个非超管用户通过自助创建可拥有的最大空间数。每次创建空间时实时读取，修改后立即生效。0 表示使用内置默认值 10；负数表示完全关闭限制（不建议在公开部署使用）。',
           self_service_creation_enabled: '是否允许非超管用户主动创建空间。关闭后，普通用户只能通过邀请加入已有空间；跨空间超管仍可创建。修改后立即生效。',
           default_storage_quota_gb: '新建空间时默认分配的存储配额（GB），包含向量、原文、文本、索引等。仅在创建时读取，修改后只对之后新建的空间生效，不会回写已存在的空间。0 或负数表示使用内置默认值 10GB。',
@@ -3463,6 +3464,7 @@ export default {
           wiki_concurrency: 'Wiki Worker 并发数'
         },
         tenant: {
+          plugin_remote_enabled: '允许空间登记自有插件',
           max_owned_per_user: '每用户最大空间数',
           self_service_creation_enabled: '允许用户自助创建空间',
           default_storage_quota_gb: '新空间默认存储配额 (GB)',
@@ -5255,6 +5257,7 @@ export default {
     noCompatibleKbForAgent: '当前智能体的工具与作用域内知识库的能力不匹配，暂无可引用的知识库。'
   },
   pluginAdmin: {
+    ownedBy: '空间 {tenant} 自有',
     runtime: {
       declarative: '声明式',
       host: '本机进程',
@@ -5333,6 +5336,7 @@ export default {
       }
     },
     audience: {
+      owned: '空间 {tenant} 登记的自有插件，只有该空间可见。',
       title: '可见范围',
       hint: '限定后，只有所选空间能看到并启用该插件；其他空间看不到它，已有的开关和配置保留，重新纳入后恢复。',
       all: '所有空间',
@@ -5427,6 +5431,21 @@ export default {
     fromPlugin: '由插件 {id} 提供'
   },
   pluginCenter: {
+    own: {
+      register: '登记自有插件',
+      title: '登记本空间自有插件',
+      description: '上传远程插件的 .wkp 包或填写下载地址，并填写插件服务的地址。插件代码运行在你们自己的服务器上。',
+      notice: '登记后只有本空间可见，并自动在本空间启用。只接受远程插件，且不能带页面。',
+      tag: '本空间自有',
+      manage: '管理',
+      update: '更新插件包',
+      editUrl: '修改服务地址',
+      urlTitle: '修改服务地址',
+      remove: '删除',
+      removeConfirm: '确定删除该插件？它的集成会立即不可用。',
+      removed: '插件已删除',
+      removeFailed: '删除失败'
+    },
     installed: '已安装',
     configure: '配置',
     webhooks: 'Webhook 地址',

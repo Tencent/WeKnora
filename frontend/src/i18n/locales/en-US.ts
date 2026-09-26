@@ -2734,6 +2734,7 @@ export default {
     }
   },
   pluginAdmin: {
+    ownedBy: 'Workspace {tenant}',
     runtime: {
       declarative: 'Declarative',
       host: 'Local process',
@@ -2812,6 +2813,7 @@ export default {
       }
     },
     audience: {
+      owned: 'Registered by workspace {tenant} as its own; only that workspace sees it.',
       title: 'Visible to',
       hint: 'When limited, only the chosen workspaces see and can enable the plugin. Others lose sight of it; their switch and settings are kept for when they are let back in.',
       all: 'All workspaces',
@@ -2906,6 +2908,21 @@ export default {
     fromPlugin: 'Provided by the plugin {id}'
   },
   pluginCenter: {
+    own: {
+      register: 'Register own plugin',
+      title: 'Register a plugin of this workspace',
+      description: 'Upload a remote plugin package (.wkp) or give its URL, and the address of its service. The plugin code runs on your own servers.',
+      notice: 'Only this workspace will see it, and it is enabled here right away. Only remote plugins are accepted, and they cannot add pages.',
+      tag: 'This workspace',
+      manage: 'Manage',
+      update: 'Update package',
+      editUrl: 'Change service URL',
+      urlTitle: 'Change service URL',
+      remove: 'Remove',
+      removeConfirm: 'Remove this plugin? Its integrations stop working at once.',
+      removed: 'Plugin removed',
+      removeFailed: 'Could not remove the plugin'
+    },
     installed: 'Installed',
     configure: 'Configure',
     webhooks: 'Webhook URLs',
@@ -4877,6 +4894,7 @@ export default {
           docker_enabled: 'Enable Docker sandbox'
         },
         tenant: {
+          plugin_remote_enabled: 'Let workspaces register their own plugins',
           max_owned_per_user: 'Max workspaces owned per user',
           self_service_creation_enabled: 'Allow self-service workspace creation',
           default_storage_quota_gb: 'Default storage quota for new workspaces (GB)',
@@ -4908,6 +4926,7 @@ export default {
           docker_enabled: 'Allow the Docker sandbox backend. A local docker.sock is equivalent to root on the host, so this stays off by default. Only a system admin can turn it on; the change takes effect immediately. Enable it only on a private single-node install that mounts the daemon socket or uses a TLS-protected remote tcp:// endpoint.'
         },
         tenant: {
+          plugin_remote_enabled: 'Whether workspace admins may register remote plugins of their own (code on their own servers, no pages, visible to that workspace only). When off, no new registrations or upgrades; registered ones keep running. Takes effect at once.',
           max_owned_per_user: 'Maximum number of workspaces a non-superuser may own via self-service creation. Read on every workspace creation and takes effect immediately after saving. 0 uses the built-in default of 10; a negative value disables the cap entirely (not recommended on public deployments).',
           self_service_creation_enabled: 'Whether non-superusers may create workspaces themselves. When disabled, regular users can only join existing workspaces by invitation; cross-workspace superusers remain exempt. Takes effect immediately.',
           default_storage_quota_gb: 'Default storage quota (GB) assigned when a new workspace is created, covering vectors, originals, text, indexes, and related data. Read only at creation time — changes apply to newly created workspaces only and do not retroactively update existing workspaces. 0 or a negative value uses the built-in default of 10 GB.',

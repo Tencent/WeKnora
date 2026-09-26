@@ -70,3 +70,20 @@ func RegisterPluginAdminRoutes(r *gin.RouterGroup, h *handler.PluginAdminHandler
 		plugins.PUT("/:id/config", h.UpdatePluginSystemConfig)
 	}
 }
+
+// RegisterTenantPluginRoutes registers workspace admins' own remote plugins.
+// The platform switch (tenant.plugin_remote_enabled) is checked per request.
+func RegisterTenantPluginRoutes(r *gin.RouterGroup, h *handler.TenantPluginHandler, g *rbacGuards) {
+	if h == nil {
+		return
+	}
+	plugins := r.Group("/tenant-plugins", g.Admin())
+	{
+		plugins.GET("", h.ListTenantPlugins)
+		plugins.POST("", h.InstallTenantPlugin)
+		plugins.POST("/inspect", h.InspectTenantPlugin)
+		plugins.DELETE("/:id", h.UninstallTenantPlugin)
+		plugins.PUT("/:id/remote-url", h.SetTenantPluginRemoteURL)
+		plugins.POST("/:id/secret/rotate", h.RotateTenantPluginSecret)
+	}
+}

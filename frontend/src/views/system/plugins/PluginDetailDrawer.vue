@@ -63,7 +63,11 @@
         </ul>
       </section>
 
-      <section class="setting-drawer__section">
+      <section v-if="plugin.owner_tenant_id" class="setting-drawer__section">
+        <h4 class="setting-drawer__section-title">{{ t('pluginAdmin.audience.title') }}</h4>
+        <p class="form-desc">{{ t('pluginAdmin.audience.owned', { tenant: plugin.owner_tenant_id }) }}</p>
+      </section>
+      <section v-else class="setting-drawer__section">
         <h4 class="setting-drawer__section-title">{{ t('pluginAdmin.audience.title') }}</h4>
         <p class="form-desc">{{ t('pluginAdmin.audience.hint') }}</p>
         <t-radio-group v-model="audienceMode" variant="default-filled" size="small">

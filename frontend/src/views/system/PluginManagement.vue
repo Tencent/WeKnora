@@ -39,6 +39,9 @@
         <div class="plugin-card__body">
           <div class="plugin-card__title">
             <span class="plugin-card__name">{{ nameOf(p) }}</span>
+            <t-tag v-if="p.owner_tenant_id" size="small" variant="light">
+              {{ t('pluginAdmin.ownedBy', { tenant: p.owner_tenant_id }) }}
+            </t-tag>
             <t-tooltip :content="p.node?.error" :disabled="!p.node?.error">
               <t-tag size="small" variant="light" :theme="stateTheme(p)">
                 {{ t(`pluginAdmin.state.${installedState(p)}`) }}
@@ -67,18 +70,7 @@
     </div>
 
     <PluginInstallDrawer v-model:visible="installOpen" @installed="upsert" />
-    <t-dialog
-      v-model:visible="secretOpen"
-      :header="t('pluginAdmin.secret.title')"
-      :confirm-btn="{ content: t('pluginAdmin.secret.copy'), theme: 'primary' }"
-      :cancel-btn="{ content: t('pluginAdmin.secret.done') }"
-      :close-on-overlay-click="false"
-      @confirm="copyWithToast(issuedSecret, 'pluginAdmin.secret.copied')"
-      @closed="issuedSecret = ''"
-    >
-      <p>{{ t('pluginAdmin.secret.description') }}</p>
-      <t-textarea :value="issuedSecret" readonly autosize />
-    </t-dialog>
+    <PluginSecretDialog v-model:secret="issuedSecret" />
     <PluginDetailDrawer
       v-model:visible="detailOpen"
       :plugin="selected"
@@ -95,7 +87,7 @@ import { pluginIconUrl } from '@/extensions/pluginIcon'
 import { MessagePlugin } from 'tdesign-vue-next'
 
 import { listInstalledPlugins, setInstalledPluginEnabled, type InstalledPlugin } from '@/api/system/plugins'
-import { copyWithToast } from '@/utils/clipboard'
+import PluginSecretDialog from '@/components/plugins/PluginSecretDialog.vue'
 import { localizedText } from '@/utils/localizedText'
 
 import { contributionSummary } from '../settings/pluginCenterState'
@@ -115,7 +107,6 @@ const pending = ref(new Set<string>())
 const installOpen = ref(false)
 const detailOpen = ref(false)
 // A remote plugin's signing secret, shown once after it is issued.
-const secretOpen = ref(false)
 const issuedSecret = ref('')
 const selectedId = ref('')
 const selected = computed(() => plugins.value.find((p) => p.id === selectedId.value) ?? null)
@@ -151,10 +142,7 @@ async function load() {
 
 function upsert(received: InstalledPlugin) {
   const { issuedSecret: secret, ...p } = received
-  if (secret) {
-    issuedSecret.value = secret
-    secretOpen.value = true
-  }
+  if (secret) issuedSecret.value = secret
   const i = plugins.value.findIndex((x) => x.id === p.id)
   if (i >= 0) plugins.value.splice(i, 1, p)
   else plugins.value = [...plugins.value, p].sort((a, b) => a.id.localeCompare(b.id))

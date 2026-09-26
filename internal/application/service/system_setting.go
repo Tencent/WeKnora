@@ -194,6 +194,16 @@ var registry = map[string]settingSpec{
 		Description: "每个非超管用户通过自助创建可拥有的最大空间数。每次创建空间时实时读取，" +
 			"修改后立即生效。0 表示使用内置默认值 10；负数表示完全关闭限制（不建议在公开部署使用）。",
 	},
+	// tenant.plugin_remote_enabled lets workspace admins register their own
+	// remote plugins (code on their servers; no pages). Off by default.
+	"tenant.plugin_remote_enabled": {
+		Type:     "bool",
+		EnvName:  "WEKNORA_PLUGIN_TENANT_REMOTE",
+		Default:  false,
+		Category: "tenant",
+		Description: "是否允许空间管理员登记本空间自有的远程插件（代码运行在空间自己的服务器上，不能带页面，" +
+			"只有本空间可见）。关闭后不能再登记或升级，已登记的照常运行。修改后立即生效。",
+	},
 	"tenant.self_service_creation_enabled": {
 		Type:     "bool",
 		EnvName:  "WEKNORA_TENANT_SELF_SERVICE_CREATION_ENABLED",

@@ -95,6 +95,7 @@ type RouterParams struct {
 	DataSourceCredentialsHandler *handler.DataSourceCredentialsHandler
 	PluginHandler                *handler.PluginHandler
 	PluginAdminHandler           *handler.PluginAdminHandler
+	TenantPluginHandler          *handler.TenantPluginHandler
 	PluginHostAPI                *hostapi.Handler
 	PluginUIHandler              *handler.PluginUIHandler
 	PluginWebhookHandler         *handler.PluginWebhookHandler
@@ -358,6 +359,7 @@ func NewRouter(params RouterParams) *gin.Engine {
 		RegisterPluginRoutes(v1, params.PluginHandler, params.PluginUIHandler, params.PluginWebhookHandler,
 			params.PluginFormsHandler, rbacGuards)
 		RegisterPluginAdminRoutes(v1, params.PluginAdminHandler, rbacGuards)
+		RegisterTenantPluginRoutes(v1, params.TenantPluginHandler, rbacGuards)
 		RegisterWeKnoraCloudRoutes(v1, params.WeKnoraCloudHandler, rbacGuards)
 		RegisterWikiPageRoutes(v1, params.WikiPageHandler, rbacGuards)
 		RegisterMemoryRoutes(v1, params.MemoryHandler, rbacGuards)
