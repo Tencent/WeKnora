@@ -22,6 +22,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	_ "time/tzdata" // the binaries run where no zone database may be installed (Windows)
 	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/pluginsdk"
@@ -29,7 +30,7 @@ import (
 )
 
 // Version must match plugin.yaml.
-const Version = "1.0.0"
+const Version = "1.1.0"
 
 func main() {
 	if err := newPlugin().Serve(); err != nil {
@@ -123,14 +124,28 @@ func (connector) ListResources(
 
 // syncState is the cursor: per project, the newest update seen (where the
 // next incremental sync starts) and the issues it holds (so a full sync can
-// tell which were deleted).
+// tell which were deleted). Projects no longer selected stay until a full
+// sync has reported their issues gone.
 type syncState struct {
 	Projects map[string]*projectState `json:"projects"`
+	// Full is how far a full sync got, per project, while one is under way.
+	// Checkpoints carry it, so a retry (after a timeout, or with a fresh
+	// OAuth token) resumes the listing instead of starting over; Projects
+	// stays the deletion baseline until the full sync ends.
+	Full map[string]*fullProgress `json:"full,omitempty"`
 }
 
 type projectState struct {
 	Since time.Time `json:"since"`
 	IDs   []string  `json:"ids"`
+}
+
+type fullProgress struct {
+	// Since is the newest update listed: issues come oldest update first,
+	// so the listing resumes there.
+	Since time.Time `json:"since"`
+	Seen  []string  `json:"seen"`
+	Done  bool      `json:"done,omitempty"`
 }
 
 func stateFrom(c *pluginapi.Cursor) syncState {
@@ -150,9 +165,19 @@ func (s syncState) cursor(now time.Time) pluginapi.Cursor {
 	return pluginapi.Cursor{LastSyncTime: &now, State: state}
 }
 
+// syncRun is one Fetch: the site, the filters and where to send items.
+type syncRun struct {
+	c   *client
+	st  settings
+	loc *time.Location // nil when the user's time zone is unknown
+	s   *pluginsdk.Stream
+	now time.Time
+}
+
 // Fetch syncs the selected projects. Issues come oldest update first, so the
 // cursor can advance with every page; a full sync also reports the issues
-// that disappeared (deleted, moved out, or no longer matching the filter).
+// that disappeared (deleted, moved out, no longer matching the filter, or in
+// a project no longer selected).
 func (connector) Fetch(
 	ctx context.Context, call *pluginsdk.Call, cfg pluginsdk.ConnectorConfig, in pluginapi.FetchInput,
 	s *pluginsdk.Stream,
@@ -176,97 +201,215 @@ func (connector) Fetch(
 	if err != nil {
 		return nil, err
 	}
-	// JQL reads dates in the user's time zone.
-	loc, err := time.LoadLocation(me.TimeZone)
-	if err != nil || me.TimeZone == "" {
-		loc = time.UTC
+	r := &syncRun{c: c, st: st, s: s, now: time.Now().UTC()}
+	// JQL reads dates in the user's time zone. Jira may not tell it (the
+	// profile hides it); then buildJQL looks back further instead.
+	if loc, err := time.LoadLocation(me.TimeZone); err == nil && me.TimeZone != "" {
+		r.loc = loc
+	} else {
+		_ = s.Log("warn", fmt.Sprintf("unknown Jira time zone %q: incremental syncs look back %s more",
+			me.TimeZone, unknownZoneSlack))
 	}
-
 	prev := stateFrom(in.Cursor)
-	incremental := in.Mode == pluginapi.FetchIncremental && in.Cursor != nil
-	// Checkpoints are complete snapshots: projects not reached yet keep
-	// their previous state.
+	if in.Mode == pluginapi.FetchIncremental && in.Cursor != nil {
+		return r.incremental(ctx, call, keys, prev)
+	}
+	return r.full(ctx, keys, prev)
+}
+
+// incremental lists the issues updated since the last sync, and reports the
+// deletions the webhook noted.
+func (r *syncRun) incremental(
+	ctx context.Context, call *pluginsdk.Call, keys []string, prev syncState,
+) (*pluginapi.Cursor, error) {
+	gone := deletionNotes(ctx, call)
 	next := syncState{Projects: map[string]*projectState{}}
-	for _, key := range keys {
-		if p := prev.Projects[key]; p != nil {
-			cp := *p
-			next.Projects[key] = &cp
-		} else {
-			next.Projects[key] = &projectState{}
+	for key, p := range prev.Projects {
+		cp := *p
+		next.Projects[key] = &cp
+	}
+	// A full sync that did not finish: keep what it listed, so a later one
+	// can still tell it deleted.
+	for key, fp := range prev.Full {
+		ps := next.project(key)
+		ps.IDs = sortedKeys(setOf(ps.IDs, fp.Seen))
+		if fp.Since.After(ps.Since) {
+			ps.Since = fp.Since
 		}
 	}
 	seen := map[string]bool{}
-	now := time.Now().UTC()
-
 	for _, key := range keys {
-		ps := next.Projects[key]
-		var since time.Time
-		if incremental {
-			since = ps.Since
-		}
-		known := map[string]bool{}
-		for _, id := range ps.IDs {
-			known[id] = true
-		}
-		_ = s.Progress("syncing " + key)
-		err := c.search(ctx, buildJQL(key, st, since, loc), st.comments(), func(page []issue) error {
-			for i := range page {
-				is := &page[i]
-				if err := s.Item(c.item(is, key)); err != nil {
-					return err
-				}
-				seen[is.ID], known[is.ID] = true, true
-				if is.Fields.Updated.After(ps.Since) {
-					ps.Since = is.Fields.Updated.Time
-				}
+		ps := next.project(key)
+		known := setOf(ps.IDs)
+		err := r.list(ctx, key, ps.Since, func(is *issue) {
+			seen[is.ID], known[is.ID] = true, true
+			if is.Fields.Updated.After(ps.Since) {
+				ps.Since = is.Fields.Updated.Time
 			}
+		}, func() error {
 			ps.IDs = sortedKeys(known)
-			return s.Checkpoint(next.cursor(now))
+			return r.s.Checkpoint(next.cursor(r.now))
 		})
 		if err != nil {
 			return nil, err
 		}
 	}
-
-	if !incremental {
-		// Everything was listed: what the last sync had and this one did
-		// not see is gone.
-		for _, key := range keys {
-			var kept []string
-			if p := prev.Projects[key]; p != nil {
-				for _, id := range p.IDs {
-					if seen[id] {
-						continue
-					}
-					gone := pluginapi.FetchedItem{ExternalID: id, IsDeleted: true, SourceResourceID: key}
-					if err := s.Item(gone); err != nil {
-						return nil, err
-					}
+	for _, key := range keys {
+		ps := next.Projects[key]
+		var kept []string
+		for _, id := range ps.IDs {
+			if gone[id] && !seen[id] && r.c.issueGone(ctx, id) {
+				if err := r.s.Item(deleted(id, key)); err != nil {
+					return nil, err
 				}
+				continue
 			}
-			for _, id := range next.Projects[key].IDs {
-				if seen[id] {
-					kept = append(kept, id)
-				}
-			}
-			next.Projects[key].IDs = kept
+			kept = append(kept, id)
 		}
+		ps.IDs = kept
 	}
-	cur := next.cursor(now)
+	cur := next.cursor(r.now)
 	return &cur, nil
 }
 
-func sortedKeys(m map[string]bool) []string {
+// full lists every selected project to the end, then reports what the
+// previous sync had and this one did not list.
+func (r *syncRun) full(ctx context.Context, keys []string, prev syncState) (*pluginapi.Cursor, error) {
+	next := syncState{Projects: prev.Projects, Full: prev.Full}
+	if next.Full == nil {
+		next.Full = map[string]*fullProgress{}
+	}
+	for _, key := range keys {
+		fp := next.Full[key]
+		if fp == nil {
+			fp = &fullProgress{}
+			next.Full[key] = fp
+		}
+		if fp.Done {
+			continue // listed before a retry
+		}
+		seen := setOf(fp.Seen)
+		err := r.list(ctx, key, fp.Since, func(is *issue) {
+			seen[is.ID] = true
+			if is.Fields.Updated.After(fp.Since) {
+				fp.Since = is.Fields.Updated.Time
+			}
+		}, func() error {
+			fp.Seen = sortedKeys(seen)
+			return r.s.Checkpoint(next.cursor(r.now))
+		})
+		if err != nil {
+			return nil, err
+		}
+		fp.Done = true
+		if err := r.s.Checkpoint(next.cursor(r.now)); err != nil {
+			return nil, err
+		}
+	}
+
+	selected := setOf(keys)
+	listed := map[string]bool{}
+	for _, key := range keys {
+		for _, id := range next.Full[key].Seen {
+			listed[id] = true
+		}
+	}
+	// What the last sync had, and what an abandoned run listed in projects
+	// since deselected, is gone unless listed now.
+	had := map[string]map[string]bool{}
+	for key, p := range prev.Projects {
+		had[key] = setOf(p.IDs)
+	}
+	for key, fp := range next.Full {
+		if !selected[key] {
+			had[key] = setOf(mapKeys(had[key]), fp.Seen)
+		}
+	}
+	reported := map[string]bool{}
+	owners := mapKeys(had)
+	sort.Strings(owners)
+	for _, key := range owners {
+		for _, id := range sortedKeys(had[key]) {
+			if listed[id] || reported[id] {
+				continue
+			}
+			reported[id] = true
+			if err := r.s.Item(deleted(id, key)); err != nil {
+				return nil, err
+			}
+		}
+	}
+
+	done := syncState{Projects: map[string]*projectState{}}
+	for _, key := range keys {
+		fp := next.Full[key]
+		done.Projects[key] = &projectState{Since: fp.Since, IDs: fp.Seen}
+	}
+	cur := done.cursor(r.now)
+	return &cur, nil
+}
+
+// list emits a project's issues updated since a time (all when zero):
+// each through seen, then a checkpoint per page.
+func (r *syncRun) list(ctx context.Context, key string, since time.Time, seen func(*issue), page func() error) error {
+	_ = r.s.Progress("syncing " + key)
+	return r.c.search(ctx, buildJQL(key, r.st, since, r.loc), r.st.comments(), func(issues []issue) error {
+		for i := range issues {
+			is := &issues[i]
+			if err := r.s.Item(r.c.item(is, key)); err != nil {
+				return err
+			}
+			seen(is)
+		}
+		return page()
+	})
+}
+
+func (s syncState) project(key string) *projectState {
+	ps := s.Projects[key]
+	if ps == nil {
+		ps = &projectState{}
+		s.Projects[key] = ps
+	}
+	return ps
+}
+
+func deleted(id, projectKey string) pluginapi.FetchedItem {
+	return pluginapi.FetchedItem{ExternalID: id, IsDeleted: true, SourceResourceID: projectKey}
+}
+
+func setOf(lists ...[]string) map[string]bool {
+	out := map[string]bool{}
+	for _, l := range lists {
+		for _, s := range l {
+			out[s] = true
+		}
+	}
+	return out
+}
+
+func mapKeys[V any](m map[string]V) []string {
 	out := make([]string, 0, len(m))
 	for k := range m {
 		out = append(out, k)
 	}
+	return out
+}
+
+func sortedKeys(m map[string]bool) []string {
+	out := mapKeys(m)
 	sort.Strings(out)
 	return out
 }
 
+// unknownZoneSlack is how far back a query looks when the user's time zone
+// is unknown: no zone is further behind UTC.
+const unknownZoneSlack = 12 * time.Hour
+
 // buildJQL is one project's query: the settings' filters, the issues updated
-// since the last sync (to the minute, JQL's precision), oldest first.
+// since the last sync (to the minute, JQL's precision), oldest first. JQL
+// reads the date in the user's time zone; without it (loc nil), the query
+// starts early enough for any zone.
 func buildJQL(key string, st settings, since time.Time, loc *time.Location) string {
 	parts := []string{"project = " + quote(key)}
 	if len(st.IssueTypes) > 0 {
@@ -280,6 +423,9 @@ func buildJQL(key string, st settings, since time.Time, loc *time.Location) stri
 		parts = append(parts, "("+extra+")")
 	}
 	if !since.IsZero() {
+		if loc == nil {
+			since, loc = since.Add(-unknownZoneSlack), time.UTC
+		}
 		parts = append(parts, "updated >= "+quote(since.In(loc).Format("2006/01/02 15:04")))
 	}
 	return strings.Join(parts, " AND ") + " ORDER BY updated ASC"
@@ -425,8 +571,7 @@ func siteOptions(ctx context.Context, call *pluginsdk.Call, in pluginapi.Options
 		return nil, err
 	}
 	if cr.Account == "" {
-		return nil, pluginapi.InvalidConfig(say(call.Locale, msgConnectAccount),
-			map[string]string{"credentials.account": "required"})
+		return nil, noAccount(call.Locale)
 	}
 	sites, err := accessibleSites(ctx, cr.Account)
 	if err != nil {

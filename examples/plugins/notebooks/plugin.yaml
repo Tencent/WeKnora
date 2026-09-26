@@ -1,6 +1,6 @@
 schemaVersion: 1
 id: weknora-examples.notebooks
-version: 1.0.0
+version: 1.0.1
 apiVersion: weknora.plugin/v1
 name: { en-US: Jupyter notebooks, zh-CN: Jupyter 笔记本 }
 description:

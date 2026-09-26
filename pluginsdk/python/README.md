@@ -145,6 +145,12 @@ host.kv_put("cursor", {"page": 3}, ttl=3600)
 host.kv_get("cursor", default={})
 ```
 
+A value is at most 64 KB of JSON (`KV_MAX_VALUE_BYTES`; `kv_value_size(v)`
+measures it). Keep a growing collection as a key per entry and page
+through it with `host.kv_list(prefix, after)`, in key order: one value
+holding it all hits the limit sooner or later, and two calls updating it
+at once each write back a list without the other's change.
+
 With the `datasources` scope, `host.data_sources()` lists the workspace's
 data sources of the plugin's connectors and `host.sync_data_source(id)`
 starts an incremental sync of one.

@@ -126,11 +126,14 @@ class Stream:
         self._write({"type": "checkpoint", "data": to_wire(cursor)})
 
     def progress(self, message: str) -> None:
-        """Reports progress for display."""
+        """Reports how far the sync got; WeKnora writes it to its log at
+        debug level."""
         self._write({"type": "progress", "message": message})
 
     def log(self, level: str, message: str) -> None:
-        """Forwards a line to WeKnora's logs: debug, info, warn or error."""
+        """Writes a line into WeKnora's log at a level (debug, info, warn or
+        error), tagged with the connector. Use it for problems that do not
+        fail the sync, such as one source among several being down."""
         self._write({"type": "log", "level": level, "message": message})
 
     def _finish(self) -> None:

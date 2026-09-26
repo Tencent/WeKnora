@@ -7,8 +7,10 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
+	"regexp"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/Tencent/WeKnora/pluginsdk"
 	"github.com/Tencent/WeKnora/pluginsdk/pluginapi"
@@ -16,7 +18,8 @@ import (
 
 // issueWebhook receives Jira's issue events and syncs the data sources that
 // follow the issue's project, so changes arrive in minutes, not at the next
-// scheduled sync.
+// scheduled sync. An incremental sync lists updated issues only, so a
+// deleted issue also leaves a note it reads (see deletionNotes).
 func issueWebhook(
 	ctx context.Context,
 	call *pluginsdk.Call,
@@ -28,6 +31,7 @@ func issueWebhook(
 	var ev struct {
 		WebhookEvent string `json:"webhookEvent"`
 		Issue        struct {
+			ID     string `json:"id"`
 			Key    string `json:"key"`
 			Fields struct {
 				Project struct {
@@ -48,6 +52,11 @@ func issueWebhook(
 	if host == nil {
 		return nil, pluginapi.Errorf(pluginapi.CodeUnavailable, "the Host API is not available")
 	}
+	if ev.WebhookEvent == "jira:issue_deleted" && issueID.MatchString(ev.Issue.ID) {
+		if err := host.KVPut(ctx, deletionPrefix+ev.Issue.ID, ev.Issue.Key, deletionNoteTTL); err != nil {
+			return nil, err
+		}
+	}
 	sources, err := host.DataSources(ctx)
 	if err != nil {
 		return nil, err
@@ -64,6 +73,40 @@ func issueWebhook(
 	}
 	body, _ := json.Marshal(map[string]any{"project": project, "synced": synced})
 	return &pluginapi.WebhookResponse{Status: http.StatusAccepted, ContentType: "application/json", Body: body}, nil
+}
+
+// Deletion notes are key-value entries "deleted/<issue id>" the webhook
+// leaves. Incremental syncs report the issues they name, once Jira confirms
+// they are gone: the webhook may be unsigned, so a note alone deletes
+// nothing. Notes expire; a full sync finds whatever they missed.
+const (
+	deletionPrefix  = "deleted/"
+	deletionNoteTTL = 7 * 24 * time.Hour
+)
+
+var issueID = regexp.MustCompile(`^[0-9]{1,20}$`)
+
+// deletionNotes are the issue IDs the webhook noted deleted. Without the
+// Host API, or when it fails, there are none: a full sync catches up.
+func deletionNotes(ctx context.Context, call *pluginsdk.Call) map[string]bool {
+	out := map[string]bool{}
+	host := call.Host()
+	if host == nil {
+		return out
+	}
+	for after := ""; ; {
+		page, err := host.KVList(ctx, deletionPrefix, after, pluginapi.KVMaxListLimit)
+		if err != nil {
+			return out
+		}
+		for _, e := range page.Entries {
+			out[strings.TrimPrefix(e.Key, deletionPrefix)] = true
+		}
+		if page.Next == "" {
+			return out
+		}
+		after = page.Next
+	}
 }
 
 // validSignature checks Jira's X-Hub-Signature: "sha256=" and the HMAC of

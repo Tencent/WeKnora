@@ -80,12 +80,15 @@ func (s *Stream) Checkpoint(c pluginapi.Cursor) error {
 	return s.write(ev)
 }
 
-// Progress reports progress for display.
+// Progress reports how far a sync got; WeKnora writes it to its log at
+// debug level.
 func (s *Stream) Progress(message string) error {
 	return s.write(pluginapi.Event{Type: pluginapi.EventProgress, Message: message})
 }
 
-// Log forwards a line to WeKnora's logs (level: debug, info, warn, error).
+// Log writes a line into WeKnora's log at level (debug, info, warn, error),
+// tagged with the connector. Use it for problems that do not fail the sync,
+// such as one source among several being down.
 func (s *Stream) Log(level, message string) error {
 	return s.write(pluginapi.Event{Type: pluginapi.EventLog, Level: level, Message: message})
 }

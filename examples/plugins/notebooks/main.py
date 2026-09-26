@@ -10,7 +10,7 @@ import json
 
 from weknora_plugin import ErrorCode, ParsedImage, ParseOutput, Plugin, PluginError
 
-plugin = Plugin("weknora-examples.notebooks", "1.0.0")
+plugin = Plugin("weknora-examples.notebooks", "1.0.1")
 
 IMAGE_TYPES = {"image/png": "png", "image/jpeg": "jpg"}
 

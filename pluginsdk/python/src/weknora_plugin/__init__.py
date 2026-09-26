@@ -17,9 +17,19 @@ listens on WEKNORA_PLUGIN_ADDR and checks request signatures with
 WEKNORA_PLUGIN_SECRET. The package uses only the standard library.
 """
 
-from .host import Host
+from .host import Host, kv_value_size
 from .plugin import Call, Plugin, Stream, StreamClosed
-from .protocol import API_VERSION, PROTOCOL_VERSION, ErrorCode, PluginError, invalid_config
+from .protocol import (
+    API_VERSION,
+    KV_MAX_KEY_BYTES,
+    KV_MAX_KEYS,
+    KV_MAX_LIST_LIMIT,
+    KV_MAX_VALUE_BYTES,
+    PROTOCOL_VERSION,
+    ErrorCode,
+    PluginError,
+    invalid_config,
+)
 from .types import (
     FETCH_FULL,
     FETCH_INCREMENTAL,
@@ -76,6 +86,10 @@ __all__ = [
     "Host",
     "KVEntry",
     "KVList",
+    "KV_MAX_KEYS",
+    "KV_MAX_KEY_BYTES",
+    "KV_MAX_LIST_LIMIT",
+    "KV_MAX_VALUE_BYTES",
     "Option",
     "OptionsInput",
     "ChunkInput",
@@ -100,4 +114,5 @@ __all__ = [
     "WebhookRequest",
     "WebhookResponse",
     "invalid_config",
+    "kv_value_size",
 ]

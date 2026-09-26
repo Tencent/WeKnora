@@ -1,14 +1,17 @@
 package activate
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/datasource"
+	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/plugin/pkg"
 	"github.com/Tencent/WeKnora/internal/plugin/plugintest"
 	"github.com/Tencent/WeKnora/internal/plugin/reconcile"
@@ -91,6 +94,8 @@ func (feedPlugin) Fetch(
 			return nil, err
 		}
 	}
+	_ = s.Progress("3 posts")
+	_ = s.Log("warn", "feed https://b.example/rss failed: 404")
 	return &pluginapi.Cursor{State: map[string]any{"seen": 3}}, nil
 }
 
@@ -164,9 +169,17 @@ func TestPluginConnector(t *testing.T) {
 
 	streaming := conn.(datasource.StreamingConnector)
 	h := &recordingHandler{}
+	var logs bytes.Buffer
+	logger.SetOutput(&logs)
 	cursor, err := streaming.FetchStream(ctx, cfg, nil, h)
+	logger.SetOutput(os.Stdout)
 	if err != nil {
 		t.Fatal(err)
+	}
+	// The plugin's log lines reach WeKnora's log, tagged with the connector.
+	if line := "[plugin] acme.feeds/feed sync: feed https://b.example/rss failed: 404"; !strings.Contains(
+		logs.String(), line) {
+		t.Fatalf("log = %q, want a line with %q", logs.String(), line)
 	}
 	if strings.Join(h.items, ",") != "post-0|text/markdown,post-1|text/markdown,post-2|text/markdown" ||
 		h.checkpoints != 3 || cursor.ConnectorCursor["seen"].(float64) != 3 || cursor.LastSyncTime.IsZero() {

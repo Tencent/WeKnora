@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/datasource"
+	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/plugin/configschema"
 	"github.com/Tencent/WeKnora/internal/plugin/manifest"
 	"github.com/Tencent/WeKnora/internal/plugin/reconcile"
@@ -294,6 +296,8 @@ func (r *remoteConnector) fetch(
 					return fmt.Errorf("decode checkpoint: %w", err)
 				}
 				return h.Checkpoint(ctx, fromPluginCursor(&c))
+			case pluginapi.EventLog, pluginapi.EventProgress:
+				r.logEvent(ctx, ev)
 			}
 			return nil
 		})
@@ -311,6 +315,33 @@ func (r *remoteConnector) fetch(
 		next.LastSyncTime = time.Now()
 	}
 	return next, nil
+}
+
+// maxPluginLogRunes bounds a line a plugin writes into WeKnora's log.
+const maxPluginLogRunes = 2000
+
+// logEvent writes a sync's log line into WeKnora's log at the plugin's
+// level, and its progress at debug level, tagged with the connector.
+func (r *remoteConnector) logEvent(ctx context.Context, ev pluginapi.Event) {
+	msg := logger.TruncateRunes(strings.TrimSpace(ev.Message), maxPluginLogRunes)
+	if msg == "" {
+		return
+	}
+	const format = "[plugin] %s sync: %s"
+	if ev.Type == pluginapi.EventProgress {
+		logger.Debugf(ctx, format, r.typeID, msg)
+		return
+	}
+	switch strings.ToLower(ev.Level) {
+	case "debug":
+		logger.Debugf(ctx, format, r.typeID, msg)
+	case "warn", "warning":
+		logger.Warnf(ctx, format, r.typeID, msg)
+	case "error":
+		logger.Errorf(ctx, format, r.typeID, msg)
+	default:
+		logger.Infof(ctx, format, r.typeID, msg)
+	}
 }
 
 func toPluginCursor(c *types.SyncCursor) *pluginapi.Cursor {

@@ -49,16 +49,25 @@ Each issue becomes one Markdown document:
 Attachments are not synced.
 
 **Incremental syncs** fetch the issues updated since the newest one seen, in
-the user's time zone, as JQL requires.
+the user's time zone, as JQL requires. When Jira does not reveal the time
+zone (a profile can hide it), they look back 12 hours more, enough for any
+zone.
 
 **Full syncs** also remove the documents of issues that were deleted, moved
-out of the selected projects, or no longer match the filters.
+out of the selected projects, or no longer match the filters, and of the
+projects no longer selected. A full sync checkpoints each page: when it
+fails part way (a timeout, an expired OAuth token), the retry goes on from
+there.
 
 **Live updates.** The plugin's `issues` webhook (its URL is in Settings →
 Plugins → Jira) takes Jira's issue events. Register it in Jira (Settings →
 System → WebHooks) for issue created, updated and deleted.
 - Each event syncs the data sources following the issue's project right
   away, through the Host API's `datasources` scope.
+- An incremental sync only sees updated issues, so a delete event also
+  leaves a note in the plugin's key-value store (scope `kv`) for a week.
+  The sync removes a noted issue once Jira confirms it is gone, so a
+  forged event deletes nothing.
 - If the Jira webhook has a secret, enter it in the plugin's configuration;
   calls without a matching `X-Hub-Signature` are refused.
 

@@ -18,7 +18,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
 from fixture import plugin  # noqa: E402
-from weknora_plugin import ErrorCode, Host, PluginError  # noqa: E402
+from weknora_plugin import ErrorCode, Host, PluginError, kv_value_size  # noqa: E402
 from weknora_plugin import protocol as p  # noqa: E402
 from weknora_plugin.types import Cursor, FetchInput, from_wire, parse_time, to_wire  # noqa: E402
 
@@ -299,6 +299,7 @@ class SignatureTest(unittest.TestCase):
 
 class FakeHostAPI(BaseHTTPRequestHandler):
     store: dict = {}
+    raw_puts: list = []
 
     def _reply(self, status, body=None):
         raw = b"" if body is None else json.dumps(body).encode()
@@ -331,7 +332,9 @@ class FakeHostAPI(BaseHTTPRequestHandler):
     def do_PUT(self):
         if not self._authorized():
             return
-        body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        raw = self.rfile.read(int(self.headers["Content-Length"]))
+        self.raw_puts.append(raw)
+        body = json.loads(raw)
         self.store[body["key"]] = body["value"]
         self._reply(200, {"key": body["key"], "value": body["value"]})
 
@@ -361,6 +364,12 @@ class HostTest(unittest.TestCase):
             self.assertEqual([e.key for e in h.kv_items()], ["a", "b", "c"])
             h.kv_delete("a")
             self.assertIsNone(h.kv_entry("a"))
+            # Values go as compact UTF-8: the store's size limit counts bytes.
+            h.kv_put("zh", {"t": "中文"})
+            self.assertEqual(FakeHostAPI.raw_puts[-1], '{"key":"zh","value":{"t":"中文"}}'.encode())
+            self.assertEqual(h.kv_get("zh"), {"t": "中文"})
+            self.assertEqual(kv_value_size({"t": "中文"}), 14)
+            self.assertEqual(kv_value_size("\ud800"), 8)
             with self.assertRaises(PluginError) as ctx:
                 Host(url, "wrong").kv_get("b")
             self.assertEqual(ctx.exception.code, ErrorCode.UNAUTHORIZED)

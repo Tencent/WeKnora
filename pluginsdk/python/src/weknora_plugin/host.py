@@ -13,6 +13,22 @@ from .protocol import HOST_DATA_SOURCES_PATH, HOST_KV_LIST_PATH, HOST_KV_PATH, E
 from .types import DataSourceInfo, KVEntry, KVList, SyncStarted, from_wire
 
 
+def _encode(value: Any) -> bytes:
+    # UTF-8 as is, without spaces: the store counts bytes, and \uXXXX escapes
+    # would make CJK text cost six bytes a character instead of three. Only
+    # text UTF-8 cannot carry (lone surrogates) falls back to escapes.
+    try:
+        return json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    except UnicodeEncodeError:
+        return json.dumps(value, separators=(",", ":")).encode()
+
+
+def kv_value_size(value: Any) -> int:
+    """The bytes value takes in the key-value store, as Host.kv_put sends
+    it; the store refuses more than KV_MAX_VALUE_BYTES."""
+    return len(_encode(value))
+
+
 class Host:
     """Reaches the Host API with the short-lived token of one call. Use it
     within the call; the token expires in minutes."""
@@ -29,7 +45,7 @@ class Host:
         data = None
         headers = {"Authorization": "Bearer " + self._token}
         if body is not None:
-            data = json.dumps(body).encode()
+            data = _encode(body)
             headers["Content-Type"] = "application/json"
         req = urllib.request.Request(url, data=data, method=method, headers=headers)
         try:

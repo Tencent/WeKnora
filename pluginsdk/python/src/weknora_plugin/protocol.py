@@ -35,6 +35,14 @@ HOST_KV_PATH = "/api/v1/plugin-host/kv"
 HOST_KV_LIST_PATH = "/api/v1/plugin-host/kv/list"
 HOST_DATA_SOURCES_PATH = "/api/v1/plugin-host/datasources"
 
+# Limits of the key-value store: a value is at most KV_MAX_VALUE_BYTES of
+# JSON (kv_value_size measures it), and a plugin keeps at most KV_MAX_KEYS
+# keys per workspace.
+KV_MAX_KEY_BYTES = 256
+KV_MAX_VALUE_BYTES = 64 << 10
+KV_MAX_KEYS = 10000
+KV_MAX_LIST_LIMIT = 1000
+
 
 class ErrorCode(str, Enum):
     """Classifies a failed call; WeKnora reacts to each differently."""

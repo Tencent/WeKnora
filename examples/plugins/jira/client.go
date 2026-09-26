@@ -65,8 +65,7 @@ func newClient(ctx context.Context, cr credentials, locale string) (*client, err
 	switch cr.Auth {
 	case "", "oauth":
 		if cr.Account == "" {
-			return nil, pluginapi.InvalidConfig(say(locale, msgConnectAccount),
-				map[string]string{"credentials.account": "required"})
+			return nil, noAccount(locale)
 		}
 		if cr.Site == "" {
 			return nil, pluginapi.InvalidConfig(say(locale, msgChooseSite),
@@ -110,6 +109,16 @@ func newClient(ctx context.Context, cr credentials, locale string) (*client, err
 	default:
 		return nil, pluginapi.InvalidConfig(say(locale, msgUnknownAuth),
 			map[string]string{"credentials.auth": "enum"})
+	}
+}
+
+// noAccount answers an OAuth field without a token: never connected, or a
+// connection WeKnora can no longer refresh. Either way the account must be
+// connected (again), which unauthorized tells WeKnora; the field shows it.
+func noAccount(locale string) *pluginapi.Error {
+	return &pluginapi.Error{
+		Code: pluginapi.CodeUnauthorized, Message: say(locale, msgConnectAccount),
+		Details: &pluginapi.ErrorDetails{Fields: map[string]string{"credentials.account": "required"}},
 	}
 }
 
@@ -256,6 +265,14 @@ func (c *client) projects(ctx context.Context) ([]project, error) {
 type issueType struct {
 	Name    string `json:"name"`
 	Subtask bool   `json:"subtask"`
+}
+
+// issueGone says whether Jira confirms an issue no longer exists (or can no
+// longer be seen). Any other answer, errors included, keeps it.
+func (c *client) issueGone(ctx context.Context, id string) bool {
+	err := c.do(ctx, http.MethodGet, "/rest/api/3/issue/"+url.PathEscape(id)+"?fields=id", nil, nil)
+	pe, ok := pluginapi.AsError(err)
+	return ok && pe.Code == pluginapi.CodeNotFound
 }
 
 func (c *client) issueTypes(ctx context.Context) ([]issueType, error) {

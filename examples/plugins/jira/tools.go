@@ -47,7 +47,8 @@ func toolClient(ctx context.Context, call *pluginsdk.Call) (*client, error) {
 		return nil, err
 	}
 	c, err := newClient(ctx, cr, call.Locale)
-	if pe, ok := pluginapi.AsError(err); ok && pe.Code == pluginapi.CodeInvalidConfig {
+	// Problems with the connection's fields: not set up (or no longer).
+	if pe, ok := pluginapi.AsError(err); ok && pe.Details != nil && len(pe.Details.Fields) > 0 {
 		return nil, fmt.Errorf("%s %s", say(call.Locale, msgToolsNotSetUp), pe.Message)
 	}
 	return c, err
