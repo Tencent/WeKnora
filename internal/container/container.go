@@ -626,6 +626,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(newPluginReconciler))
 	must(container.Invoke(startPluginReconciler))
 	must(container.Provide(newPluginInstaller))
+	must(container.Invoke(service.BindTenantPlugins))
 	must(container.Provide(newPluginDrivers))
 	must(container.Provide(handler.NewPluginHandler))
 	must(container.Provide(newPluginAdminHandler))

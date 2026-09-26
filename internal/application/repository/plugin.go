@@ -74,6 +74,22 @@ func (r *pluginRepository) DeletePlugin(ctx context.Context, id string) error {
 	})
 }
 
+func (r *pluginRepository) DeleteTenantData(ctx context.Context, tenantID uint64) error {
+	if tenantID == 0 {
+		return errors.New("tenant 0 is the platform")
+	}
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		for _, model := range []any{
+			&types.PluginTenantSetting{}, &types.PluginKV{}, &types.PluginOAuthConnection{},
+		} {
+			if err := tx.Where("tenant_id = ?", tenantID).Delete(model).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
 func (r *pluginRepository) ListVersions(ctx context.Context, pluginID string) ([]types.PluginVersion, error) {
 	var rows []types.PluginVersion
 	err := r.db.WithContext(ctx).Where("plugin_id = ?", pluginID).Order("created_at DESC").Find(&rows).Error

@@ -547,3 +547,39 @@ func TestFailedInstallLeavesNoPackage(t *testing.T) {
 		t.Fatalf("the package stayed behind: %d blobs", len(store.Blobs))
 	}
 }
+
+// Removing a workspace uninstalls only its own plugins and drops its
+// plugin data.
+func TestRemoveTenant(t *testing.T) {
+	ctx := context.Background()
+	utils.SetSSRFWhitelistFromRaw("plugins.example.com")
+	t.Cleanup(func() { utils.SetSSRFWhitelistFromRaw("") })
+	s, repo, _, reg := newService(t)
+	s.WithTenantPlugins(func(context.Context) bool { return true })
+	for tenant, id := range map[uint64]string{7: "team.seven", 8: "team.eight"} {
+		req := Request{Data: ownedPackage(t, id, "1.0.0"), RemoteURL: "https://plugins.example.com/" + id}
+		if _, err := s.InstallOwned(ctx, tenant, req); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := s.Install(ctx, Request{Data: plugintest.KitPackage(t, "1.0.0")}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RemoveTenant(ctx, 7); err != nil {
+		t.Fatal(err)
+	}
+	if row, _ := repo.GetPlugin(ctx, "team.seven"); row != nil {
+		t.Fatal("the workspace's plugin is still installed")
+	}
+	if _, ok := reg.Plugin("team.seven"); ok {
+		t.Fatal("the workspace's plugin is still loaded")
+	}
+	for _, id := range []string{"team.eight", "acme.kit"} {
+		if row, _ := repo.GetPlugin(ctx, id); row == nil {
+			t.Fatalf("%s was removed", id)
+		}
+	}
+	if len(repo.DeletedTenants) != 1 || repo.DeletedTenants[0] != 7 {
+		t.Fatalf("plugin data removed for %v", repo.DeletedTenants)
+	}
+}

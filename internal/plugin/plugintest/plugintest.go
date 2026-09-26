@@ -20,6 +20,8 @@ type MemRepo struct {
 	mu       sync.Mutex
 	plugins  map[string]types.InstalledPlugin
 	versions map[string]types.PluginVersion
+	// DeletedTenants are the tenants DeleteTenantData was called for.
+	DeletedTenants []uint64
 }
 
 // NewMemRepo returns an empty in-memory PluginRepository.
@@ -76,6 +78,14 @@ func (m *MemRepo) DeletePlugin(_ context.Context, id string) error {
 			delete(m.versions, k)
 		}
 	}
+	return nil
+}
+
+// DeleteTenantData records the tenants whose plugin data was removed.
+func (m *MemRepo) DeleteTenantData(_ context.Context, tenantID uint64) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.DeletedTenants = append(m.DeletedTenants, tenantID)
 	return nil
 }
 

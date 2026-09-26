@@ -3,10 +3,12 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	werrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/plugin/install"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
@@ -23,6 +25,21 @@ type ListTenantsParams struct {
 type tenantService struct {
 	repo        interfaces.TenantRepository // Repository for tenant data operations
 	storageRepo interfaces.StorageBackendRepository
+	plugins     TenantPlugins
+}
+
+// TenantPlugins removes what a workspace being deleted has in the plugin
+// system: its own plugins and its plugin data.
+type TenantPlugins interface {
+	RemoveTenant(ctx context.Context, tenantID uint64) error
+}
+
+// BindTenantPlugins makes deleting a workspace remove its plugins, which
+// every node would otherwise keep loading.
+func BindTenantPlugins(t interfaces.TenantService, plugins *install.Service) {
+	if s, ok := t.(*tenantService); ok && plugins != nil {
+		s.plugins = plugins
+	}
 }
 
 // NewTenantService creates a new tenant service instance
@@ -188,6 +205,17 @@ func (s *tenantService) DeleteTenant(ctx context.Context, id uint64) error {
 		}
 	} else {
 		logger.Infof(ctx, "Deleting tenant, ID: %d, name: %s", id, tenant.Name)
+	}
+
+	// First, so a failure leaves the workspace to delete again rather than
+	// its plugins running for no one.
+	if s.plugins != nil {
+		if err := s.plugins.RemoveTenant(ctx, id); err != nil {
+			logger.ErrorWithFields(ctx, err, map[string]interface{}{
+				"tenant_id": id,
+			})
+			return fmt.Errorf("remove the workspace's plugins: %w", err)
+		}
 	}
 
 	err = s.repo.DeleteTenant(ctx, id)
