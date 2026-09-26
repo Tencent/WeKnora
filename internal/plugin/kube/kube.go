@@ -24,6 +24,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -36,9 +37,13 @@ const (
 	// DefaultPort is where a plugin image serves unless runtime.port says.
 	DefaultPort = 8080
 	// fieldManager owns the applied fields.
-	fieldManager   = "weknora"
-	readyTimeout   = 5 * time.Minute
-	pollInterval   = 2 * time.Second
+	fieldManager = "weknora"
+	readyTimeout = 5 * time.Minute
+	pollInterval = 2 * time.Second
+	// stuckInterval is how often a rollout that overran readyTimeout is
+	// checked again: a fixed pull secret or a new node may still let it
+	// finish.
+	stuckInterval  = 30 * time.Second
 	requestTimeout = 30 * time.Second
 	serviceAcct    = "/var/run/secrets/kubernetes.io/serviceaccount"
 )
@@ -133,6 +138,18 @@ type Driver struct {
 	http      *http.Client
 	endpoints Endpoints
 	timeout   time.Duration
+	stuck     time.Duration
+
+	mu sync.Mutex
+	// owned are the plugins this driver deployed: it deactivates only
+	// those, not every plugin the reconciler unloads.
+	owned map[string]bool
+	// rollouts cancels a plugin's rollout still finishing in the
+	// background.
+	rollouts map[string]context.CancelFunc
+	// serveMu orders registering a service against unregistering it, so a
+	// rollout that finishes as its plugin is deactivated leaves nothing.
+	serveMu sync.Mutex
 }
 
 // New creates the driver.
@@ -147,8 +164,9 @@ func New(cfg *Config, endpoints Endpoints) (*Driver, error) {
 		tlsCfg.RootCAs = pool
 	}
 	return &Driver{
-		cfg: cfg, endpoints: endpoints, timeout: readyTimeout,
-		http: &http.Client{Timeout: requestTimeout, Transport: &http.Transport{TLSClientConfig: tlsCfg}},
+		cfg: cfg, endpoints: endpoints, timeout: readyTimeout, stuck: stuckInterval,
+		http:  &http.Client{Timeout: requestTimeout, Transport: &http.Transport{TLSClientConfig: tlsCfg}},
+		owned: map[string]bool{}, rollouts: map[string]context.CancelFunc{},
 	}, nil
 }
 
@@ -161,8 +179,21 @@ func (d *Driver) ActivatesInPlace() {}
 
 var nonName = regexp.MustCompile(`[^a-z0-9-]+`)
 
-// ResourceName is the name of a plugin's Deployment, Service and Secret.
+// ResourceName is the name of a plugin's Deployment, Service and Secret: a
+// readable prefix and a hash of the whole ID, so IDs that read alike
+// (acme.foo-bar, acme-foo.bar) or share a long prefix never share one.
 func ResourceName(pluginID string) string {
+	n := strings.Trim(nonName.ReplaceAllString(strings.ToLower(pluginID), "-"), "-")
+	if len(n) > 40 {
+		n = strings.TrimRight(n[:40], "-")
+	}
+	sum := sha256.Sum256([]byte(pluginID))
+	return "wkp-" + n + "-" + hex.EncodeToString(sum[:5])
+}
+
+// legacyResourceName is the name earlier versions gave a plugin's
+// resources; they are removed once the plugin runs under its new name.
+func legacyResourceName(pluginID string) string {
 	n := "wkp-" + strings.Trim(nonName.ReplaceAllString(strings.ToLower(pluginID), "-"), "-")
 	if len(n) > 50 {
 		n = strings.TrimRight(n[:50], "-")
@@ -170,8 +201,11 @@ func ResourceName(pluginID string) string {
 	return n
 }
 
-// Activate implements reconcile.Activator: apply the plugin's resources,
-// wait for the rollout and register the service. Other runtimes are
+// Activate implements reconcile.Activator: apply the plugin's resources and
+// register the service. A rollout that is not done at once finishes in the
+// background: Activate returns a reconcile.PendingError and the plugin
+// reports ready through Loaded.Report, so a slow image pull holds up
+// neither the reconciler nor the node's startup. Other runtimes are
 // ignored.
 func (d *Driver) Activate(ctx context.Context, l *reconcile.Loaded) error {
 	m := l.Manifest
@@ -182,40 +216,168 @@ func (d *Driver) Activate(ctx context.Context, l *reconcile.Loaded) error {
 	if err != nil || secret == "" {
 		return fmt.Errorf("the plugin's signing secret is not readable: %v", err)
 	}
+	d.stopRollout(m.ID)
+	d.mu.Lock()
+	d.owned[m.ID] = true
+	d.mu.Unlock()
 	name := ResourceName(m.ID)
 	for _, obj := range Resources(d.cfg, m, name, secret) {
 		if err := d.apply(ctx, obj); err != nil {
 			return err
 		}
 	}
-	if err := d.waitReady(ctx, name); err != nil {
-		return err
+	if ready, _, err := d.rolledOut(ctx, name); err == nil && ready {
+		// Nothing changed since it last rolled out (a node restarting).
+		return d.serve(ctx, m, name, secret)
 	}
+	rctx, cancel := context.WithCancel(context.Background())
+	d.mu.Lock()
+	d.rollouts[m.ID] = cancel
+	d.mu.Unlock()
+	go d.rollout(rctx, l, name, secret)
+	return reconcile.Pending(fmt.Errorf("rolling out %s/%s", d.cfg.Namespace, name))
+}
+
+// rollout waits for a plugin's Deployment in the background and serves it
+// once it is ready, reporting a rollout that overran the timeout (and keeps
+// waiting for it).
+func (d *Driver) rollout(ctx context.Context, l *reconcile.Loaded, name, secret string) {
+	report := func(healthy bool, err error) {
+		if l.Report != nil {
+			l.Report(healthy, err)
+		}
+	}
+	interval := pollInterval
+	for {
+		err := d.waitReady(ctx, name, interval)
+		if err == nil {
+			err = d.serve(ctx, l.Manifest, name, secret)
+		}
+		if ctx.Err() != nil {
+			return
+		}
+		if err == nil {
+			d.finishRollout(ctx, l.Manifest.ID)
+			report(true, nil)
+			return
+		}
+		logger.Warnf(ctx, "[plugin] kubernetes %s: %v", l.Manifest.ID, err)
+		report(false, err)
+		interval = d.stuck
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(interval):
+		}
+	}
+}
+
+// serve registers a rolled-out plugin with the remote plugin manager and
+// removes what an earlier version left under the legacy name.
+func (d *Driver) serve(ctx context.Context, m *manifest.Manifest, name, secret string) error {
 	url, err := d.serviceURL(ctx, name)
 	if err != nil {
 		return err
 	}
+	d.serveMu.Lock()
+	if err := ctx.Err(); err != nil {
+		d.serveMu.Unlock()
+		return err
+	}
+	err = d.endpoints.ServeDeployed(ctx, m, url, secret)
+	d.serveMu.Unlock()
+	if err != nil {
+		return err
+	}
 	logger.Infof(ctx, "[plugin] kubernetes %s %s rolled out as %s/%s", m.ID, m.Version, d.cfg.Namespace, name)
-	return d.endpoints.ServeDeployed(ctx, m, url, secret)
+	if legacy := legacyResourceName(m.ID); legacy != name {
+		if err := d.deleteResources(ctx, m.ID, legacy); err != nil {
+			logger.Warnf(ctx, "[plugin] kubernetes %s: remove resources under the old name %s: %v", m.ID, legacy, err)
+		}
+	}
+	return nil
+}
+
+func (d *Driver) stopRollout(pluginID string) {
+	d.mu.Lock()
+	cancel := d.rollouts[pluginID]
+	delete(d.rollouts, pluginID)
+	d.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+}
+
+// finishRollout forgets a rollout that completed, unless a newer one
+// replaced it.
+func (d *Driver) finishRollout(ctx context.Context, pluginID string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if ctx.Err() == nil {
+		delete(d.rollouts, pluginID)
+	}
 }
 
 // Deactivate implements reconcile.Activator: unregister the service and
-// delete its resources.
+// delete its resources. Plugins this driver did not deploy are left alone.
 func (d *Driver) Deactivate(ctx context.Context, pluginID string) error {
+	d.stopRollout(pluginID)
+	d.mu.Lock()
+	owned := d.owned[pluginID]
+	delete(d.owned, pluginID)
+	d.mu.Unlock()
+	if !owned {
+		return nil
+	}
+	d.serveMu.Lock()
 	_ = d.endpoints.Deactivate(ctx, pluginID)
-	name := ResourceName(pluginID)
+	d.serveMu.Unlock()
+	err := d.deleteResources(ctx, pluginID, ResourceName(pluginID))
+	if legacy := legacyResourceName(pluginID); legacy != ResourceName(pluginID) {
+		err = errors.Join(err, d.deleteResources(ctx, pluginID, legacy))
+	}
+	return err
+}
+
+// resourcePaths are the API paths of a plugin's resources, by name.
+var resourcePaths = []string{
+	"/apis/apps/v1/namespaces/%s/deployments/%s",
+	"/api/v1/namespaces/%s/services/%s",
+	"/api/v1/namespaces/%s/secrets/%s",
+}
+
+// deleteResources deletes the resources named name that belong to the
+// plugin: another plugin's, under a name that collided, stay.
+func (d *Driver) deleteResources(ctx context.Context, pluginID, name string) error {
 	var errs []error
-	for _, path := range []string{
-		"/apis/apps/v1/namespaces/%s/deployments/%s",
-		"/api/v1/namespaces/%s/services/%s",
-		"/api/v1/namespaces/%s/secrets/%s",
-	} {
+	for _, p := range resourcePaths {
+		path := fmt.Sprintf(p, d.cfg.Namespace, name)
+		status, resp, err := d.do(ctx, http.MethodGet, path, "", nil)
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
 		// Every node deactivates; a resource another node removed is fine.
-		status, _, err := d.do(ctx, http.MethodDelete, fmt.Sprintf(path, d.cfg.Namespace, name), "", nil)
+		if status == http.StatusNotFound {
+			continue
+		}
+		if status != http.StatusOK {
+			errs = append(errs, fmt.Errorf("read %s: HTTP %d", path, status))
+			continue
+		}
+		var obj struct {
+			Metadata struct {
+				Annotations map[string]string `json:"annotations"`
+			} `json:"metadata"`
+		}
+		if json.Unmarshal(resp, &obj) != nil || obj.Metadata.Annotations["weknora.plugin/id"] != pluginID {
+			continue
+		}
+		status, _, err = d.do(ctx, http.MethodDelete, path, "", nil)
 		if err != nil {
 			errs = append(errs, err)
 		} else if status >= 300 && status != http.StatusNotFound {
-			errs = append(errs, fmt.Errorf("delete %s: HTTP %d", fmt.Sprintf(path, d.cfg.Namespace, name), status))
+			errs = append(errs, fmt.Errorf("delete %s: HTTP %d", path, status))
 		}
 	}
 	return errors.Join(errs...)
@@ -337,40 +499,19 @@ func (d *Driver) apply(ctx context.Context, obj Object) error {
 	return nil
 }
 
-// waitReady waits until the Deployment's current spec is rolled out and
-// serving.
-func (d *Driver) waitReady(ctx context.Context, name string) error {
+// waitReady waits up to the driver's timeout until the Deployment's current
+// spec is rolled out and serving, checking every interval.
+func (d *Driver) waitReady(ctx context.Context, name string, interval time.Duration) error {
 	ctx, cancel := context.WithTimeout(ctx, d.timeout)
 	defer cancel()
-	path := fmt.Sprintf("/apis/apps/v1/namespaces/%s/deployments/%s", d.cfg.Namespace, name)
 	var last string
 	for {
-		status, resp, err := d.do(ctx, http.MethodGet, path, "", nil)
-		if err == nil && status == http.StatusOK {
-			var dep struct {
-				Metadata struct{ Generation int64 } `json:"metadata"`
-				Status   struct {
-					ObservedGeneration int64 `json:"observedGeneration"`
-					Replicas           int   `json:"replicas"`
-					UpdatedReplicas    int   `json:"updatedReplicas"`
-					AvailableReplicas  int   `json:"availableReplicas"`
-					Conditions         []struct {
-						Type, Status, Reason, Message string
-					} `json:"conditions"`
-				} `json:"status"`
-			}
-			if json.Unmarshal(resp, &dep) == nil {
-				s := dep.Status
-				if s.ObservedGeneration >= dep.Metadata.Generation && s.UpdatedReplicas >= 1 &&
-					s.AvailableReplicas >= 1 && s.Replicas == s.UpdatedReplicas {
-					return nil
-				}
-				for _, c := range s.Conditions {
-					if c.Status == "False" && c.Message != "" {
-						last = c.Message
-					}
-				}
-			}
+		ready, msg, err := d.rolledOut(ctx, name)
+		if err == nil && ready {
+			return nil
+		}
+		if msg != "" {
+			last = msg
 		}
 		select {
 		case <-ctx.Done():
@@ -378,9 +519,49 @@ func (d *Driver) waitReady(ctx context.Context, name string) error {
 				last = "no pod became ready"
 			}
 			return fmt.Errorf("deployment %s/%s did not roll out: %s", d.cfg.Namespace, name, last)
-		case <-time.After(pollInterval):
+		case <-time.After(interval):
 		}
 	}
+}
+
+// rolledOut checks the Deployment once: whether its current spec is rolled
+// out and serving, and if not, the latest reason Kubernetes gives.
+func (d *Driver) rolledOut(ctx context.Context, name string) (bool, string, error) {
+	path := fmt.Sprintf("/apis/apps/v1/namespaces/%s/deployments/%s", d.cfg.Namespace, name)
+	status, resp, err := d.do(ctx, http.MethodGet, path, "", nil)
+	if err != nil {
+		return false, "", err
+	}
+	if status != http.StatusOK {
+		return false, "", fmt.Errorf("read deployment %s: HTTP %d", name, status)
+	}
+	var dep struct {
+		Metadata struct{ Generation int64 } `json:"metadata"`
+		Status   struct {
+			ObservedGeneration int64 `json:"observedGeneration"`
+			Replicas           int   `json:"replicas"`
+			UpdatedReplicas    int   `json:"updatedReplicas"`
+			AvailableReplicas  int   `json:"availableReplicas"`
+			Conditions         []struct {
+				Type, Status, Reason, Message string
+			} `json:"conditions"`
+		} `json:"status"`
+	}
+	if err := json.Unmarshal(resp, &dep); err != nil {
+		return false, "", err
+	}
+	s := dep.Status
+	if s.ObservedGeneration >= dep.Metadata.Generation && s.UpdatedReplicas >= 1 &&
+		s.AvailableReplicas >= 1 && s.Replicas == s.UpdatedReplicas {
+		return true, "", nil
+	}
+	var msg string
+	for _, c := range s.Conditions {
+		if c.Status == "False" && c.Message != "" {
+			msg = c.Message
+		}
+	}
+	return false, msg, nil
 }
 
 // serviceURL is where WeKnora reaches the plugin's Service.

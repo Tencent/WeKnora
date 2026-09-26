@@ -8,6 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/Tencent/WeKnora/internal/errors"
+	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/plugin/install"
 	"github.com/Tencent/WeKnora/internal/plugin/tenancy"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -103,7 +104,14 @@ func (h *TenantPluginHandler) InstallTenantPlugin(c *gin.Context) {
 	}
 	if h.tenancy != nil {
 		// Registering is choosing to use it.
-		_ = h.tenancy.SetEnabled(ctx, tenantOf(c), view.ID, true, userID)
+		if err := h.tenancy.EnableOwn(ctx, tenantOf(c), view.ID, userID); err != nil {
+			logger.Errorf(ctx, "[plugin] switch on %s for tenant %d: %v", view.ID, tenantOf(c), err)
+			// The plugin is registered and its secret is shown only now:
+			// it goes back with the error.
+			_ = c.Error(errors.NewInternalServerError("the plugin is registered but could not be switched on " +
+				"in this workspace; switch it on in the plugin list").WithDetails(view))
+			return
+		}
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": view})
 }

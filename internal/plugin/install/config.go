@@ -76,7 +76,7 @@ func (s *Service) SetSystemConfig(ctx context.Context, id string, values map[str
 		return nil, err
 	}
 	row.SystemConfig = types.JSON(b)
-	if err := s.repo.SavePlugin(ctx, row); err != nil {
+	if err := s.repo.UpdatePlugin(ctx, row, "system_config"); err != nil {
 		return nil, err
 	}
 	return s.GetSystemConfig(ctx, id)

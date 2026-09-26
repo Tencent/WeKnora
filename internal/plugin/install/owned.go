@@ -3,6 +3,7 @@ package install
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/Tencent/WeKnora/internal/plugin/manifest"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -148,6 +149,29 @@ func (s *Service) RotateSecretOwned(ctx context.Context, tenantID uint64, id str
 		return nil, err
 	}
 	return s.RotateSecret(ctx, id)
+}
+
+// RemoveTenant removes what a workspace being deleted has in the plugin
+// system: its own plugins, everywhere, and its switches, configuration,
+// key-value data and OAuth connections for every plugin.
+func (s *Service) RemoveTenant(ctx context.Context, tenantID uint64) error {
+	rows, err := s.repo.ListPlugins(ctx)
+	if err != nil {
+		return err
+	}
+	var errs []error
+	for _, row := range rows {
+		if row.OwnerTenantID == nil || *row.OwnerTenantID != tenantID {
+			continue
+		}
+		if err := s.Uninstall(ctx, row.ID); err != nil && !errors.Is(err, ErrNotInstalled) {
+			errs = append(errs, fmt.Errorf("uninstall %s: %w", row.ID, err))
+		}
+	}
+	if err := s.repo.DeleteTenantData(ctx, tenantID); err != nil {
+		errs = append(errs, fmt.Errorf("delete plugin data: %w", err))
+	}
+	return errors.Join(errs...)
 }
 
 // UninstallOwned removes a workspace's own plugin.

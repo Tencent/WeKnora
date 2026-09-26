@@ -20,6 +20,8 @@ type MemRepo struct {
 	mu       sync.Mutex
 	plugins  map[string]types.InstalledPlugin
 	versions map[string]types.PluginVersion
+	// DeletedTenants are the tenants DeleteTenantData was called for.
+	DeletedTenants []uint64
 }
 
 // NewMemRepo returns an empty in-memory PluginRepository.
@@ -56,6 +58,16 @@ func (m *MemRepo) SavePlugin(_ context.Context, p *types.InstalledPlugin) error 
 	return nil
 }
 
+// UpdatePlugin overwrites an existing row; the columns are not told apart.
+func (m *MemRepo) UpdatePlugin(_ context.Context, p *types.InstalledPlugin, _ ...string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.plugins[p.ID]; ok {
+		m.plugins[p.ID] = *p
+	}
+	return nil
+}
+
 // DeletePlugin removes a row and its versions.
 func (m *MemRepo) DeletePlugin(_ context.Context, id string) error {
 	m.mu.Lock()
@@ -66,6 +78,14 @@ func (m *MemRepo) DeletePlugin(_ context.Context, id string) error {
 			delete(m.versions, k)
 		}
 	}
+	return nil
+}
+
+// DeleteTenantData records the tenants whose plugin data was removed.
+func (m *MemRepo) DeleteTenantData(_ context.Context, tenantID uint64) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.DeletedTenants = append(m.DeletedTenants, tenantID)
 	return nil
 }
 

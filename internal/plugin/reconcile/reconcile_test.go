@@ -313,3 +313,90 @@ func TestRuntimesLimitWhatANodeLoads(t *testing.T) {
 		t.Fatal("an unaccepted plugin has no status here")
 	}
 }
+
+// inPlace is a runtime that swaps versions itself.
+type inPlace struct{ recorder }
+
+func (a *inPlace) ActivatesInPlace() {}
+
+// kitRuntime is acme.kit at a version running in the given runtime.
+func kitRuntime(t *testing.T, version, runtime string) []byte {
+	apiVersion := ""
+	if runtime != "declarative" {
+		apiVersion = "apiVersion: weknora.plugin/v1\n"
+	}
+	return plugintest.Zip(t, map[string]string{
+		"plugin.yaml": "schemaVersion: 1\nid: acme.kit\nversion: " + version + "\n" + apiVersion +
+			"name: { en-US: ACME Kit }\npublisher: { id: acme }\nruntime: { type: " + runtime + " }\n" +
+			"contributes:\n  skills:\n    - { id: triage, name: Triage, path: skills/triage }\n",
+		"skills/triage/SKILL.md": "---\nname: triage\ndescription: Triage issues by severity.\n---\n" + version,
+	})
+}
+
+// A runtime swaps an upgrade in place, but a version that moves to another
+// runtime first stops the previous one wherever it ran.
+func TestRuntimeSwitchDeactivatesInPlaceActivators(t *testing.T) {
+	ctx := context.Background()
+	repo, store, rt := plugintest.NewMemRepo(), &plugintest.MemStore{}, &inPlace{}
+	r := New(Options{
+		Repo: repo, Store: store, Registry: registry.New(), CacheDir: t.TempDir(), Activators: []Activator{rt},
+	})
+	plugintest.Install(t, repo, store, kitRuntime(t, "1.0.0", "remote"), types.PluginStateEnabled)
+	_ = r.Reconcile(ctx)
+	plugintest.Install(t, repo, store, kitRuntime(t, "1.1.0", "remote"), types.PluginStateEnabled)
+	_ = r.Reconcile(ctx)
+	plugintest.Install(t, repo, store, kitRuntime(t, "2.0.0", "declarative"), types.PluginStateEnabled)
+	if err := r.Reconcile(ctx); err != nil {
+		t.Fatal(err)
+	}
+	want := "activate acme.kit@1.0.0,activate acme.kit@1.1.0,deactivate acme.kit,activate acme.kit@2.0.0"
+	if got := strings.Join(rt.calls, ","); got != want {
+		t.Fatalf("calls = %s", got)
+	}
+}
+
+// pending is a runtime that finishes starting in the background.
+type pending struct {
+	recorder
+	report func(bool, error)
+}
+
+func (a *pending) Activate(ctx context.Context, l *Loaded) error {
+	_ = a.recorder.Activate(ctx, l)
+	a.report = l.Report
+	return Pending(fmt.Errorf("rolling out"))
+}
+
+// A pending activation loads the plugin as degraded, is not retried, and
+// becomes ready when the activator reports back.
+func TestPendingActivation(t *testing.T) {
+	ctx := context.Background()
+	repo, store, act := plugintest.NewMemRepo(), &plugintest.MemStore{}, &pending{}
+	r := New(Options{
+		Repo: repo, Store: store, Registry: registry.New(), CacheDir: t.TempDir(), Activators: []Activator{act},
+	})
+	plugintest.Install(t, repo, store, plugintest.KitPackage(t, "1.0.0"), types.PluginStateEnabled)
+	if err := r.Reconcile(ctx); err != nil {
+		t.Fatalf("a pending activation is not a failure: %v", err)
+	}
+	if s, _ := r.Status("acme.kit"); s.State != StateDegraded || !strings.Contains(s.Error, "rolling out") {
+		t.Fatalf("status = %+v", s)
+	}
+	_ = r.Reconcile(ctx)
+	if len(act.calls) != 1 {
+		t.Fatalf("a pending plugin was activated again: %v", act.calls)
+	}
+	act.report(true, nil)
+	if s, _ := r.Status("acme.kit"); s.State != StateReady {
+		t.Fatalf("status after the report = %+v", s)
+	}
+
+	// A report from a version that is gone changes nothing.
+	stale := act.report
+	plugintest.Install(t, repo, store, plugintest.KitPackage(t, "1.1.0"), types.PluginStateEnabled)
+	_ = r.Reconcile(ctx)
+	stale(true, nil)
+	if s, _ := r.Status("acme.kit"); s.State != StateDegraded || s.Version != "1.1.0" {
+		t.Fatalf("status after a stale report = %+v", s)
+	}
+}

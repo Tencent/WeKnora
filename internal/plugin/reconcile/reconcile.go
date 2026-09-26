@@ -42,6 +42,10 @@ type Loaded struct {
 	// Installed is the plugin's row: where a remote plugin runs and its
 	// sealed secret.
 	Installed types.InstalledPlugin
+	// Report records how the plugin fares after Activate returned, for an
+	// activator that finishes in the background (see Pending). It does
+	// nothing once this version is no longer the loaded one.
+	Report func(healthy bool, err error)
 }
 
 // Activator wires one domain to plugin contributions: it registers what a
@@ -56,11 +60,24 @@ type Activator interface {
 
 // InPlaceActivator swaps an upgraded plugin itself inside Activate (the host
 // starts the new process before stopping the old one), so it is not
-// deactivated first.
+// deactivated first, unless the new version runs elsewhere (another runtime
+// type or kind), which the old runtime would never hear about.
 type InPlaceActivator interface {
 	Activator
 	ActivatesInPlace()
 }
+
+// PendingError is returned by an activator that started the plugin but
+// finishes in the background, such as a kubernetes rollout: the plugin is
+// loaded and shows as degraded with the reason until the activator reports
+// it healthy through Loaded.Report.
+type PendingError struct{ Err error }
+
+func (e *PendingError) Error() string { return e.Err.Error() }
+func (e *PendingError) Unwrap() error { return e.Err }
+
+// Pending wraps err as a PendingError.
+func Pending(err error) error { return &PendingError{Err: err} }
 
 // Status is how a plugin fares on this node.
 type Status struct {
@@ -325,16 +342,34 @@ func (r *Reconciler) ensure(ctx context.Context, row types.InstalledPlugin) erro
 		return err
 	}
 	l := &Loaded{Manifest: p.Manifest, Package: p, Dir: dir, Installed: row}
-	var errs []error
+	l.Report = func(healthy bool, err error) { r.reportLoaded(l, healthy, err) }
+	var errs, pending []error
+	prev, had := r.loaded[row.ID]
+	moved := had && runsElsewhere(prev.Manifest, p.Manifest)
+	if moved {
+		// The runtimes that ran the previous version ignore the new one:
+		// stop it everywhere first, routes before processes.
+		for i := len(r.activators) - 1; i >= 0; i-- {
+			a := r.activators[i]
+			if err := a.Deactivate(ctx, row.ID); err != nil {
+				errs = append(errs, fmt.Errorf("%s: deactivate previous version: %w", a.Name(), err))
+			}
+		}
+	}
 	for _, a := range r.activators {
 		_, inPlace := a.(InPlaceActivator)
-		if _, had := r.loaded[row.ID]; had && !inPlace {
+		if had && !inPlace && !moved {
 			if err := a.Deactivate(ctx, row.ID); err != nil {
 				errs = append(errs, fmt.Errorf("%s: deactivate previous version: %w", a.Name(), err))
 			}
 		}
 		if err := a.Activate(ctx, l); err != nil {
-			errs = append(errs, fmt.Errorf("%s: %w", a.Name(), err))
+			var pe *PendingError
+			if errors.As(err, &pe) {
+				pending = append(pending, fmt.Errorf("%s: %w", a.Name(), err))
+			} else {
+				errs = append(errs, fmt.Errorf("%s: %w", a.Name(), err))
+			}
 		}
 	}
 	r.loaded[row.ID] = l
@@ -351,9 +386,33 @@ func (r *Reconciler) ensure(ctx context.Context, row types.InstalledPlugin) erro
 	}
 	r.digests[row.ID] = loadKey
 	delete(r.retries, row.ID)
+	if err := errors.Join(pending...); err != nil {
+		logger.Infof(ctx, "[plugin] loaded %s %s; pending: %v", row.ID, row.ActiveVersion, err)
+		r.setStatus(row.ID, Status{Version: row.ActiveVersion, State: StateDegraded, Error: err.Error()})
+		return nil
+	}
 	logger.Infof(ctx, "[plugin] loaded %s %s", row.ID, row.ActiveVersion)
 	r.setStatus(row.ID, Status{Version: row.ActiveVersion, State: StateReady})
 	return nil
+}
+
+// runsElsewhere reports whether two versions of a plugin run in different
+// runtimes (remote, then host) or kinds (a python host plugin, then a
+// binary one another host runs).
+func runsElsewhere(prev, next *manifest.Manifest) bool {
+	return prev.Runtime.Type != next.Runtime.Type || prev.Runtime.Kind != next.Runtime.Kind
+}
+
+// reportLoaded is Loaded.Report: runtime health for the version still
+// loaded. It waits for a pass in progress, so the version it reports on has
+// its status by then.
+func (r *Reconciler) reportLoaded(l *Loaded, healthy bool, err error) {
+	r.mu.Lock()
+	current := r.loaded[l.Manifest.ID] == l && r.digests[l.Manifest.ID] != ""
+	r.mu.Unlock()
+	if current {
+		r.ReportRuntime(l.Manifest.ID, healthy, err)
+	}
 }
 
 func dirExists(dir string) bool {
