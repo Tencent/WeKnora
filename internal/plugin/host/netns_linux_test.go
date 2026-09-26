@@ -13,12 +13,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/plugin/driver"
 	"github.com/Tencent/WeKnora/internal/plugin/sandbox"
 )
 
 // TestMain lets the test binary be the sandbox helper, as WeKnora's binary
 // is in production.
 func TestMain(m *testing.M) {
+	sandbox.RegisterHelper()
 	if len(os.Args) > 1 && os.Args[1] == sandbox.Subcommand {
 		os.Exit(sandbox.Main(os.Args[2:]))
 	}
@@ -47,6 +49,9 @@ func TestSandboxedPluginOnlyReachesTheProxyAndHostAPI(t *testing.T) {
 			t.Skipf("unprivileged user namespaces are not available here: %v", err)
 		}
 		t.Fatalf("Activate: %v", err)
+	}
+	if got := m.Egress("acme.echo"); got != driver.EgressSandboxed {
+		t.Fatalf("egress = %q", got)
 	}
 	// Direct connections to the host's loopback do not exist in there.
 	if got, err := search(t, m, "dial:"+other.Addr().String()); err != nil || got != "dial failed" {
@@ -83,5 +88,39 @@ func TestSandboxedPluginStopsOnSIGTERM(t *testing.T) {
 	m.Close()
 	if took := time.Since(start); took > 5*time.Second {
 		t.Fatalf("stopping a sandboxed plugin took %s; it waited for the kill", took)
+	}
+}
+
+// Unset, WEKNORA_PLUGIN_NETNS sandboxes plugins when this system lets it,
+// and runs them with the proxy only when it does not: never a failed start.
+func TestAutoModeProbesTheSystem(t *testing.T) {
+	fastTimings(t)
+	t.Setenv(envNetns, "")
+	setSandboxCheck(t, probeSandbox)
+	other, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = other.Close() }()
+
+	probeErr := sandboxUnavailable()
+	t.Logf("sandbox probe: %v", probeErr)
+	m := NewManager()
+	defer m.Close()
+	if err := m.Activate(context.Background(), install(t, "1.0.0", "")); err != nil {
+		t.Fatalf("Activate: %v", err)
+	}
+	dial, err := search(t, m, "dial:"+other.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if probeErr != nil {
+		if got := m.Egress("acme.echo"); got != driver.EgressProxy || dial == "dial failed" {
+			t.Fatalf("unsandboxed: egress = %q, direct dial = %q", got, dial)
+		}
+		return
+	}
+	if got := m.Egress("acme.echo"); got != driver.EgressSandboxed || dial != "dial failed" {
+		t.Fatalf("sandboxed: egress = %q, direct dial = %q", got, dial)
 	}
 }

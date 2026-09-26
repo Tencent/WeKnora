@@ -3,6 +3,9 @@
 package host
 
 import (
+	"bytes"
+	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -11,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -72,16 +76,7 @@ func (p *process) sandbox(cmd *exec.Cmd) (*sandboxed, error) {
 
 	wrapped := exec.Command(self, sandbox.Args(relays, append([]string{cmd.Path}, cmd.Args[1:]...))...)
 	wrapped.Dir, wrapped.Env = cmd.Dir, cmd.Env
-	uid, gid := os.Getuid(), os.Getgid()
-	wrapped.SysProcAttr = &syscall.SysProcAttr{
-		Setpgid: true, Pdeathsig: syscall.SIGKILL,
-		Cloneflags: syscall.CLONE_NEWUSER | syscall.CLONE_NEWNET,
-		// Root in its own user namespace only: enough to bring loopback
-		// up, no power outside.
-		UidMappings:                []syscall.SysProcIDMap{{ContainerID: 0, HostID: uid, Size: 1}},
-		GidMappings:                []syscall.SysProcIDMap{{ContainerID: 0, HostID: gid, Size: 1}},
-		GidMappingsEnableSetgroups: false,
-	}
+	wrapped.SysProcAttr = namespaceAttr()
 	stdin, err := wrapped.StdinPipe()
 	if err != nil {
 		release()
@@ -96,6 +91,62 @@ func (p *process) sandbox(cmd *exec.Cmd) (*sandboxed, error) {
 		},
 		release: release,
 	}, nil
+}
+
+// sandboxOS: network namespaces are Linux's.
+const sandboxOS = true
+
+// namespaceAttr starts the helper in a new user and network namespace.
+func namespaceAttr() *syscall.SysProcAttr {
+	uid, gid := os.Getuid(), os.Getgid()
+	return &syscall.SysProcAttr{
+		Setpgid: true, Pdeathsig: syscall.SIGKILL,
+		Cloneflags: syscall.CLONE_NEWUSER | syscall.CLONE_NEWNET,
+		// Root in its own user namespace only: enough to bring loopback
+		// up, no power outside.
+		UidMappings:                []syscall.SysProcIDMap{{ContainerID: 0, HostID: uid, Size: 1}},
+		GidMappings:                []syscall.SysProcIDMap{{ContainerID: 0, HostID: gid, Size: 1}},
+		GidMappingsEnableSetgroups: false,
+	}
+}
+
+// probeTimeout bounds the sandbox probe.
+const probeTimeout = 10 * time.Second
+
+// probeSandbox starts the sandbox helper the way a plugin is started, with
+// nothing to run: whether it gets its namespaces and loopback up tells
+// whether this system sandboxes plugins.
+func probeSandbox() error {
+	if !sandbox.HelperRegistered() {
+		return errors.New("this program does not include the " + sandbox.Subcommand + " helper")
+	}
+	self, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), probeTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, self, sandbox.ProbeArgs()...)
+	cmd.Env = []string{}
+	cmd.SysProcAttr = namespaceAttr()
+	var out bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &out, &out
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("the system refuses to create a user namespace (%w)", err)
+	}
+	err = cmd.Wait()
+	var exit *exec.ExitError
+	switch {
+	case err == nil:
+		return nil
+	case errors.As(err, &exit) && exit.ExitCode() == sandbox.ExitSetupFailed:
+		return fmt.Errorf("a user namespace lacks the rights to set up its network (%s)",
+			strings.TrimSpace(out.String()))
+	case ctx.Err() != nil:
+		return fmt.Errorf("the sandbox probe did not finish within %s", probeTimeout)
+	default:
+		return fmt.Errorf("the sandbox probe failed: %v %s", err, strings.TrimSpace(out.String()))
+	}
 }
 
 // forwardTo relays connections from ln to a TCP address.

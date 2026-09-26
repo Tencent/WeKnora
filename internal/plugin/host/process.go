@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/plugin/driver"
 	"github.com/Tencent/WeKnora/internal/plugin/manifest"
 	"github.com/Tencent/WeKnora/internal/plugin/sandbox"
 	"github.com/Tencent/WeKnora/internal/utils"
@@ -143,6 +144,9 @@ type process struct {
 	done    chan struct{}
 	proxy   *egressProxy
 	sockDir string
+	// sandboxed: the plugin runs in its own network namespace (decided
+	// once, for every restart).
+	sandboxed bool
 }
 
 // launched is one started child.
@@ -171,7 +175,10 @@ func startProcess(sp spec, onState func(State, error)) (*process, error) {
 		return nil, err
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	p := &process{spec: sp, onState: onState, cancel: cancel, done: make(chan struct{}), proxy: proxy, sockDir: sockDir}
+	p := &process{
+		spec: sp, onState: onState, cancel: cancel, done: make(chan struct{}), proxy: proxy, sockDir: sockDir,
+		sandboxed: useSandbox(),
+	}
 	p.setState(StateStarting, nil)
 	first, err := p.launch(ctx, entry)
 	if err != nil {
@@ -229,7 +236,7 @@ func (p *process) childEnv(network, socket, token string) []string {
 	// the proxy is for the outside world. A sandboxed plugin has no route
 	// to a direct host: it goes through the proxy, which lets it pass.
 	noProxy := []string{"127.0.0.1", "localhost", "::1"}
-	if !netnsEnabled() {
+	if !p.sandboxed {
 		noProxy = append(noProxy, p.spec.direct...)
 	}
 	noProxyList := strings.Join(noProxy, ",")
@@ -294,7 +301,7 @@ func (p *process) launch(ctx context.Context, entry string) (*launched, error) {
 	cmd.Env = p.childEnv(network, socket, token)
 	configureChild(cmd)
 	var box *sandboxed
-	if netnsEnabled() {
+	if p.sandboxed {
 		var err error
 		if box, err = p.sandbox(cmd); err != nil {
 			return nil, err
@@ -492,6 +499,14 @@ func (p *process) setClient(c *client.Client) {
 	if old != nil && old != c {
 		old.Close()
 	}
+}
+
+// egress is how the plugin's outbound traffic is held to its grant.
+func (p *process) egress() driver.EgressMode {
+	if p.sandboxed {
+		return driver.EgressSandboxed
+	}
+	return driver.EgressProxy
 }
 
 // Client returns the client of the running child, or an unavailable error.

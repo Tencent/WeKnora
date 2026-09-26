@@ -20,6 +20,9 @@ import (
 // plugin inherits them), sets up loopback and the relays, runs the plugin
 // and exits with its status.
 func Main(args []string) int {
+	if len(args) == 1 && args[0] == probeFlag {
+		return probe()
+	}
 	relays, command, err := parseArgs(args)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "plugin-sandbox:", err)
@@ -64,6 +67,22 @@ func Main(args []string) int {
 		fmt.Fprintln(os.Stderr, "plugin-sandbox:", err)
 		return 2
 	}
+	return 0
+}
+
+// probe sets the sandbox up as for a plugin, loopback and a listener on it,
+// and exits.
+func probe() int {
+	if err := loopbackUp(); err != nil {
+		fmt.Fprintln(os.Stderr, "plugin-sandbox: bring up loopback in a new network namespace:", err)
+		return ExitSetupFailed
+	}
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "plugin-sandbox: listen on loopback in a new network namespace:", err)
+		return ExitSetupFailed
+	}
+	_ = ln.Close()
 	return 0
 }
 

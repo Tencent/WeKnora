@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/plugin/driver"
 	"github.com/Tencent/WeKnora/internal/plugin/manifest"
 	"github.com/Tencent/WeKnora/internal/plugin/reconcile"
 	"github.com/Tencent/WeKnora/pluginsdk/client"
@@ -150,7 +151,7 @@ func (m *Manager) SetDirectHosts(hosts ...string) {
 }
 
 // SetHostAPIAddr names this node's Host API on loopback ("127.0.0.1:8080"),
-// which sandboxed plugins (WEKNORA_PLUGIN_NETNS) reach through a relay.
+// which sandboxed plugins (see WEKNORA_PLUGIN_NETNS) reach through a relay.
 func (m *Manager) SetHostAPIAddr(addr string) {
 	m.mu.Lock()
 	m.hostAPI = addr
@@ -318,6 +319,18 @@ func (m *Manager) Local(pluginID string) bool {
 	defer m.mu.Unlock()
 	_, ok := m.procs[pluginID]
 	return ok
+}
+
+// Egress implements reconcile.EgressReporter: how the outbound traffic of
+// a plugin this host runs is controlled; empty when it runs elsewhere.
+func (m *Manager) Egress(pluginID string) driver.EgressMode {
+	m.mu.Lock()
+	p := m.procs[pluginID]
+	m.mu.Unlock()
+	if p == nil {
+		return ""
+	}
+	return p.egress()
 }
 
 // Running is one plugin this host runs.
