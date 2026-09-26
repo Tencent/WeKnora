@@ -5464,6 +5464,8 @@ export default {
       reconnect: '다시 연결',
       disconnect: '연결 해제',
       popupBlocked: '브라우저가 인증 창을 차단했습니다. 팝업을 허용한 뒤 다시 시도하세요.',
+      waitingBrowser: '브라우저에서 인증 페이지를 열었습니다. 완료한 뒤 여기로 돌아오세요.',
+      cancel: '취소',
       failed: '인증에 실패했습니다'
     }
   },

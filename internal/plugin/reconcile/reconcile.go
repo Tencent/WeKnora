@@ -278,7 +278,13 @@ func (r *Reconciler) ensure(ctx context.Context, row types.InstalledPlugin) erro
 	}
 	loadKey := v.Digest + "|" + runtimeTarget(row)
 	if r.digests[row.ID] == loadKey {
-		return nil
+		l := r.loaded[row.ID]
+		if l == nil || dirExists(l.Dir) {
+			return nil
+		}
+		// The extracted files are gone (the OS purged a temp directory):
+		// extract and load again.
+		logger.Warnf(ctx, "[plugin] %s: extracted files at %s are gone; reloading", row.ID, l.Dir)
 	}
 	if rt, ok := r.retries[row.ID]; ok && rt.key == loadKey && r.now().Before(rt.next) {
 		return nil // still failed; its status says why
@@ -345,6 +351,11 @@ func (r *Reconciler) ensure(ctx context.Context, row types.InstalledPlugin) erro
 	logger.Infof(ctx, "[plugin] loaded %s %s", row.ID, row.ActiveVersion)
 	r.setStatus(row.ID, Status{Version: row.ActiveVersion, State: StateReady})
 	return nil
+}
+
+func dirExists(dir string) bool {
+	info, err := os.Stat(dir)
+	return err == nil && info.IsDir()
 }
 
 func (r *Reconciler) unload(ctx context.Context, id string) {

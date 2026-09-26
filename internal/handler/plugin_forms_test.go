@@ -145,3 +145,46 @@ func TestPluginOAuthCallbackPage(t *testing.T) {
 		t.Fatalf("callback posts to an origin: %s", body)
 	}
 }
+
+func TestPluginOAuthResultAndDesktopOrigin(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	reg := registry.New()
+	h := NewPluginFormsHandler(reg, nil, nil, nil, nil, nil,
+		pluginoauth.NewService(reg, plugintest.NewMemRepo(), nil, nil))
+	r := gin.New()
+	r.Use(middleware.ErrorHandler())
+	r.GET("/plugins/:id/oauth/result", h.OAuthResult)
+	var res struct {
+		Data struct {
+			Status string `json:"status"`
+		} `json:"data"`
+	}
+	w := call(r, http.MethodGet, "/plugins/acme.jira/oauth/result?state=nope", "", nil)
+	if err := json.Unmarshal(w.Body.Bytes(), &res); err != nil || res.Data.Status != "pending" {
+		t.Fatalf("unknown state = %d %s", w.Code, w.Body.String())
+	}
+	if w := call(r, http.MethodGet, "/plugins/acme.jira/oauth/result", "", nil); w.Code != http.StatusBadRequest {
+		t.Fatalf("missing state = %d", w.Code)
+	}
+
+	t.Setenv("APP_EXTERNAL_URL", "")
+	SetDesktopLoopbackURL("http://127.0.0.1:4321/")
+	t.Cleanup(func() { SetDesktopLoopbackURL("") })
+	for host, want := range map[string]string{
+		"wails":            "http://127.0.0.1:4321",
+		"wails.localhost":  "http://127.0.0.1:4321",
+		"127.0.0.1:4321":   "http://127.0.0.1:4321",
+		"192.168.1.9:4321": "http://192.168.1.9:4321",
+	} {
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		c.Request = httptest.NewRequest(http.MethodPost, "/", nil)
+		c.Request.Host = host
+		origin, base := appOrigin(c)
+		if base != want {
+			t.Fatalf("%s: base = %q, want %q", host, base, want)
+		}
+		if (host == "wails" || host == "wails.localhost") != (origin == "") {
+			t.Fatalf("%s: origin = %q; only the webview has none", host, origin)
+		}
+	}
+}

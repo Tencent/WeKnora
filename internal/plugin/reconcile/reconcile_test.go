@@ -141,6 +141,34 @@ func TestAdmitRefusesPackages(t *testing.T) {
 	}
 }
 
+// A plugin whose extracted files disappeared (a purged temp directory) is
+// extracted and loaded again.
+func TestReconcileReextractsMissingFiles(t *testing.T) {
+	ctx := context.Background()
+	repo, store, act := plugintest.NewMemRepo(), &plugintest.MemStore{}, &recorder{}
+	r := New(Options{
+		Repo: repo, Store: store, Registry: registry.New(), CacheDir: t.TempDir(), Activators: []Activator{act},
+	})
+	plugintest.Install(t, repo, store, plugintest.KitPackage(t, "1.0.0"), types.PluginStateEnabled)
+	if err := r.Reconcile(ctx); err != nil {
+		t.Fatal(err)
+	}
+	dir := r.Loaded()[0].Dir
+	if err := os.RemoveAll(dir); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Reconcile(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(r.Loaded()[0].Dir, "skills/triage/SKILL.md")); err != nil {
+		t.Fatalf("files not extracted again: %v", err)
+	}
+	want := "activate acme.kit@1.0.0,deactivate acme.kit,activate acme.kit@1.0.0"
+	if got := strings.Join(act.calls, ","); got != want {
+		t.Fatalf("calls = %s", got)
+	}
+}
+
 func TestActivatorFailureMarksPluginFailed(t *testing.T) {
 	ctx := context.Background()
 	repo, store := plugintest.NewMemRepo(), &plugintest.MemStore{}

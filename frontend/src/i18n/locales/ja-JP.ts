@@ -2945,6 +2945,8 @@ export default {
       reconnect: '再接続',
       disconnect: '切断',
       popupBlocked: 'ブラウザが認可ウィンドウをブロックしました。ポップアップを許可して再試行してください。',
+      waitingBrowser: 'ブラウザで認可ページを開きました。完了したらここに戻ってください。',
+      cancel: 'キャンセル',
       failed: '認可に失敗しました'
     }
   },

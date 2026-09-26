@@ -201,6 +201,8 @@ Helm 设置 `pluginHost.enabled=true` 即可。使用本地存储（`STORAGE_TYP
 
 回调地址取自 `APP_EXTERNAL_URL`；未设置时，使用浏览器访问 WeKnora 所用的地址。
 
+桌面端在系统浏览器中打开授权页，回调地址是本机后端的 `http://127.0.0.1:<端口>/api/v1/plugin-oauth/callback`。端口默认每次启动随机分配；第三方平台要求回调地址完全一致时，先在桌面端设置中固定端口，再用该地址注册 OAuth 应用。授权完成后回到 WeKnora，表单会自动显示已连接。
+
 ## 开发插件
 
 - **Go**：[pluginsdk](https://github.com/Tencent/WeKnora/tree/main/pluginsdk)，含协议定义、SDK、客户端和一致性测试工具 `weknora-plugin-conformance`。

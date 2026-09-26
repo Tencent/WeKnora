@@ -27,6 +27,19 @@ export interface SchemaFormSource {
   dependency(path: string): unknown
   options(field: string, source: OptionsSource, query: string): Promise<FieldOption[]>
   startOAuth(field: string): Promise<OAuthStart>
+  /**
+   * Polls how an authorization ended, for when the callback page cannot
+   * post it back (the desktop app authorizes in the system browser).
+   */
+  oauthResult?(state: string): Promise<OAuthPoll>
+}
+
+/** An authorization's outcome as polled; pending until it comes back. */
+export interface OAuthPoll {
+  status: 'pending' | 'done'
+  ok?: boolean
+  connection?: string
+  error?: string
 }
 
 const key: InjectionKey<SchemaFormSource> = Symbol('schema-form-source')
@@ -37,6 +50,18 @@ export function provideSchemaFormSource(source: SchemaFormSource) {
 
 export function useSchemaFormSource(): SchemaFormSource | undefined {
   return inject(key, undefined)
+}
+
+/**
+ * Opens a URL in the system browser when the app runs as the desktop app
+ * (whose webview cannot host the provider's consent popup); undefined in a
+ * browser.
+ */
+export function systemBrowser(
+  w: { runtime?: { BrowserOpenURL?: (url: string) => void } } = globalThis as never,
+): ((url: string) => void) | undefined {
+  const open = w.runtime?.BrowserOpenURL
+  return typeof open === 'function' ? (url: string) => open(url) : undefined
 }
 
 /** The OAuth result the callback page posts to the form that opened it. */
@@ -65,6 +90,7 @@ export function isOAuthResult(
   }
   const d = ev.data as Partial<OAuthMessage> | null
   return (
+    !!popup &&
     ev.source === popup &&
     ev.origin === origin &&
     !!d &&

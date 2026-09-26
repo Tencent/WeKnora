@@ -223,6 +223,9 @@ func main() {
 	configureDesktopStorage(execPath)
 	configureDesktopFileStorage(execPath)
 	logger.ConfigureFromEnv()
+	if home, err := os.UserHomeDir(); err == nil {
+		configureDesktopPlugins(home)
+	}
 
 	// Set Gin mode
 	if os.Getenv("GIN_MODE") == "release" {
@@ -239,6 +242,15 @@ func main() {
 		panic(fmt.Sprintf("initialize desktop signing key: %v", err))
 	}
 	runtime.LogStartupEnv(context.Background())
+
+	// Listen before building the container: plugins call back into the
+	// backend (the Host API) on the port the config names, so it must be
+	// the port actually bound rather than config.yaml's default.
+	// 127.0.0.1 + saved port from settings (desktop-prefs.json), or :0 for random free port.
+	listener, listenErr := listenWithRetry(desktopBackendListenAddr(), 10, 300*time.Millisecond)
+	if listenErr == nil {
+		_ = os.Setenv("SERVER_PORT", strconv.Itoa(listener.Addr().(*net.TCPAddr).Port))
+	}
 
 	// Build dependency injection container
 	c := container.BuildContainer(runtime.GetContainer())
@@ -277,12 +289,8 @@ func main() {
 
 			runtime.LogGinRouteCount(context.Background())
 
-			// 127.0.0.1 + saved port from settings (desktop-prefs.json), or :0 for random free port.
-			addr := desktopBackendListenAddr()
-
-			listener, err := listenWithRetry(addr, 10, 300*time.Millisecond)
-			if err != nil {
-				return fmt.Errorf("failed to start server: %v", err)
+			if listenErr != nil {
+				return fmt.Errorf("failed to start server: %v", listenErr)
 			}
 
 			tcpAddr := listener.Addr().(*net.TCPAddr)
@@ -290,6 +298,8 @@ func main() {
 			app.listenPublic = LoadDesktopHTTPBindPublic()
 			// Reverse proxy and webview API calls always use loopback; avoid 0.0.0.0 / [::] as dial target.
 			app.backendURL = fmt.Sprintf("http://127.0.0.1:%d", port)
+			// Plugin OAuth runs in the system browser, which comes back here.
+			handler.SetDesktopLoopbackURL(app.backendURL)
 			app.apiLanBaseURL = ""
 			if app.listenPublic {
 				if ip := desktopPreferredLANIPv4(); ip != nil {
@@ -314,6 +324,7 @@ func main() {
 					server.Close()
 				}
 				resourceCleaner.Cleanup(shutdownCtx)
+				close(app.stopped)
 			}()
 
 			// Also listen for OS signals just in case
@@ -321,7 +332,7 @@ func main() {
 			signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM)
 			go func() {
 				<-signals
-				app.shutdownCh <- struct{}{} // trigger shutdown
+				app.requestShutdown()
 			}()
 
 			logger.Infof(context.Background(), "Server is running at %s (proxy -> %s)", tcpAddr.String(), app.backendURL)

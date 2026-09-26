@@ -2945,6 +2945,8 @@ export default {
       reconnect: 'Reconnect',
       disconnect: 'Disconnect',
       popupBlocked: 'The browser blocked the sign-in window. Allow pop-ups and try again.',
+      waitingBrowser: 'The sign-in page opened in your browser. Come back here when you are done.',
+      cancel: 'Cancel',
       failed: 'Authorization failed'
     }
   },

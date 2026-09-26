@@ -5466,6 +5466,8 @@ export default {
       reconnect: '重新连接',
       disconnect: '断开',
       popupBlocked: '浏览器拦截了授权窗口，请允许弹出窗口后重试',
+      waitingBrowser: '已在系统浏览器中打开授权页，完成后回到这里。',
+      cancel: '取消',
       failed: '授权失败'
     }
   },

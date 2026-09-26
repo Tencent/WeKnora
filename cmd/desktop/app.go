@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"sync/atomic"
+	"time"
 
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
@@ -17,13 +19,17 @@ type App struct {
 	apiLanBaseURL string
 	listenPublic  bool
 	shutdownCh    chan struct{}
-	pickingDir    atomic.Bool
+	shutdownOnce  sync.Once
+	// stopped closes once the backend has shut down and cleaned up.
+	stopped    chan struct{}
+	pickingDir atomic.Bool
 }
 
 // NewApp creates a new App application struct.
 func NewApp() *App {
 	return &App{
 		shutdownCh: make(chan struct{}, 1),
+		stopped:    make(chan struct{}),
 	}
 }
 
@@ -32,8 +38,22 @@ func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 }
 
+// requestShutdown asks the backend to stop; later calls do nothing.
+func (a *App) requestShutdown() {
+	a.shutdownOnce.Do(func() { a.shutdownCh <- struct{}{} })
+}
+
+// backendStopTimeout bounds how long quitting waits for the backend.
+const backendStopTimeout = 15 * time.Second
+
+// shutdown stops the backend and waits for its cleanup, which stops plugin
+// processes: they run in their own process groups and would outlive the app.
 func (a *App) shutdown(ctx context.Context) {
-	a.shutdownCh <- struct{}{}
+	a.requestShutdown()
+	select {
+	case <-a.stopped:
+	case <-time.After(backendStopTimeout):
+	}
 }
 
 // GetAPIBaseURL returns the local HTTP base URL for REST API calls (e.g. http://127.0.0.1:PORT/api/v1).

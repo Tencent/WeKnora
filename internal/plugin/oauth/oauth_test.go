@@ -3,6 +3,7 @@ package oauth
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -154,6 +155,17 @@ func TestAuthorizeExchangeAndRefresh(t *testing.T) {
 	res := s.Complete(ctx, state, "the-code", "")
 	if res.Err != nil || res.Origin != "https://app.example.com" || res.ConnectionID == "" || p.verifier == "" {
 		t.Fatalf("complete = %+v verifier %q", res, p.verifier)
+	}
+	// The form that started it can collect the outcome by polling, once,
+	// and only as the user who started it.
+	if _, err := s.Outcome(ctx, state, "u2"); !errors.Is(err, ErrOutcomePending) {
+		t.Fatalf("another user's poll = %v", err)
+	}
+	if o, err := s.Outcome(ctx, state, "u1"); err != nil || !o.OK || o.ConnectionID != res.ConnectionID {
+		t.Fatalf("outcome = %+v, %v", o, err)
+	}
+	if _, err := s.Outcome(ctx, state, "u1"); !errors.Is(err, ErrOutcomePending) {
+		t.Fatalf("an outcome is collected once, got %v", err)
 	}
 	if again := s.Complete(ctx, state, "the-code", ""); again.Err == nil {
 		t.Fatal("a state must not be usable twice")

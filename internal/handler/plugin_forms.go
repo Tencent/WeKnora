@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	stderrors "errors"
 	"html/template"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -298,14 +299,71 @@ func (h *PluginFormsHandler) OAuthStart(c *gin.Context) {
 	}})
 }
 
+// OAuthResult godoc
+// @Summary      查询插件字段 OAuth 授权的结果
+// @Description  回调页无法把结果交回表单时（桌面端在系统浏览器中授权），表单轮询此接口；结果只能取一次
+// @Tags         Plugins
+// @Produce      json
+// @Param        id     path      string  true  "插件 ID"
+// @Param        state  query     string  true  "oauth/start 返回的 state"
+// @Success      200    {object}  map[string]interface{}
+// @Security     Bearer
+// @Router       /plugins/{id}/oauth/result [get]
+func (h *PluginFormsHandler) OAuthResult(c *gin.Context) {
+	state := c.Query("state")
+	if state == "" {
+		_ = c.Error(errors.NewBadRequestError("state is required"))
+		return
+	}
+	userID, _ := types.UserIDFromContext(c.Request.Context())
+	o, err := h.oauth.Outcome(c.Request.Context(), state, userID)
+	if stderrors.Is(err, pluginoauth.ErrOutcomePending) {
+		c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{"status": "pending"}})
+		return
+	}
+	if err != nil {
+		_ = c.Error(errors.NewInternalServerError("read the authorization result"))
+		return
+	}
+	data := gin.H{"status": "done", "ok": o.OK, "error": o.Error}
+	if o.OK {
+		data["connection"] = configschema.OAuthRefPrefix + o.ConnectionID
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": data})
+}
+
+// desktopLoopbackURL is where the desktop app's backend listens, for a
+// system browser to come back to; cmd/desktop sets it.
+var desktopLoopbackURL string
+
+// SetDesktopLoopbackURL is called by cmd/desktop once its backend listens.
+func SetDesktopLoopbackURL(u string) { desktopLoopbackURL = strings.TrimSuffix(u, "/") }
+
+// fromDesktopWebview reports a request the desktop app's webview made
+// through its proxy, which keeps the webview's host: "wails" on macOS,
+// "wails.localhost" on Windows.
+func fromDesktopWebview(c *gin.Context) bool {
+	host := c.Request.Host
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+	return desktopLoopbackURL != "" && (host == "wails" || host == "wails.localhost")
+}
+
 // appOrigin is the app's origin (where the callback page reports back) and
 // the base URL authorization servers send the browser to: APP_EXTERNAL_URL
-// when set, else the origin the browser called from.
+// when set, else the origin the browser called from. The desktop webview's
+// origin is no place a browser can go back to; there the system browser
+// returns to the backend's loopback address and the form polls for the
+// result (no origin to report to).
 func appOrigin(c *gin.Context) (origin, base string) {
 	if ext := strings.TrimSuffix(strings.TrimSpace(os.Getenv("APP_EXTERNAL_URL")), "/"); ext != "" {
 		if u, err := url.Parse(ext); err == nil && u.Host != "" {
 			return u.Scheme + "://" + u.Host, ext
 		}
+	}
+	if fromDesktopWebview(c) {
+		return "", desktopLoopbackURL
 	}
 	if o := c.GetHeader("Origin"); strings.HasPrefix(o, "http://") || strings.HasPrefix(o, "https://") {
 		return o, o

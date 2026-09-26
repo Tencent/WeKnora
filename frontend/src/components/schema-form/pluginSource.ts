@@ -1,4 +1,4 @@
-import { pluginFormOptions, startPluginOAuth, type PluginFormScope } from '@/api/plugin'
+import { pluginFormOptions, pluginOAuthResult, startPluginOAuth, type PluginFormScope } from '@/api/plugin'
 
 import type { ConfigValue } from './schema'
 import { valueAt, type SchemaFormSource } from './source'
@@ -44,6 +44,10 @@ export function pluginFormSource(b: PluginFormBinding): SchemaFormSource {
       const res = await startPluginOAuth(t.pluginId, {
         scope: t.scope, contribution: t.contribution, field: field(path),
       })
+      return res.data
+    },
+    async oauthResult(state) {
+      const res = await pluginOAuthResult(need().pluginId, state)
       return res.data
     },
   }

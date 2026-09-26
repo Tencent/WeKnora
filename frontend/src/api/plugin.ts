@@ -198,3 +198,10 @@ export function startPluginOAuth(
     `/api/v1/plugins/${encodeURIComponent(pluginId)}/oauth/start`, req,
   )
 }
+
+/** How an authorization ended, collected once; pending until it comes back. */
+export function pluginOAuthResult(pluginId: string, state: string) {
+  return get<{ data: { status: 'pending' | 'done'; ok?: boolean; connection?: string; error?: string } }>(
+    `/api/v1/plugins/${encodeURIComponent(pluginId)}/oauth/result?state=${encodeURIComponent(state)}`,
+  )
+}

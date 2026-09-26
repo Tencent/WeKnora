@@ -178,7 +178,7 @@ func (s *Service) Start(ctx context.Context, t Target, userID, origin, baseURL s
 		opts = append(opts, oauth2.SetAuthURLParam(k, v))
 	}
 	opts = append(opts, oauth2.AccessTypeOffline)
-	if err := s.states.put(ctx, state, st); err != nil {
+	if err := s.states.putPending(ctx, state, st); err != nil {
 		return "", "", err
 	}
 	return cfg.AuthCodeURL(state, opts...), state, nil
@@ -193,12 +193,45 @@ type Result struct {
 }
 
 // Complete exchanges the code the authorization server sent back and keeps
-// the tokens as a new connection.
+// the tokens as a new connection. The outcome is also kept for Outcome.
 func (s *Service) Complete(ctx context.Context, state, code, errParam string) Result {
-	st, ok, err := s.states.take(ctx, state)
+	st, ok, err := s.states.takePending(ctx, state)
 	if err != nil || !ok {
 		return Result{State: state, Err: errors.New("this authorization expired or was already used; try again")}
 	}
+	res := s.complete(ctx, st, state, code, errParam)
+	o := Outcome{UserID: st.UserID, OK: res.Err == nil, ConnectionID: res.ConnectionID}
+	if res.Err != nil {
+		o.Error = res.Err.Error()
+	}
+	if err := s.states.putOutcome(ctx, state, o); err != nil {
+		logger.Warnf(ctx, "[plugin] keep OAuth outcome for %s: %v", st.Target.PluginID, err)
+	}
+	return res
+}
+
+// ErrOutcomePending means an authorization has not come back yet (or never
+// will: the outcome of an abandoned one is simply never there).
+var ErrOutcomePending = errors.New("the authorization has not finished")
+
+// Outcome hands the user who started an authorization its outcome, once.
+func (s *Service) Outcome(ctx context.Context, state, userID string) (Outcome, error) {
+	o, ok, err := s.states.takeOutcome(ctx, state)
+	if err != nil {
+		return Outcome{}, err
+	}
+	if !ok {
+		return Outcome{}, ErrOutcomePending
+	}
+	if o.UserID != userID {
+		// Not theirs to collect; put it back for its owner.
+		_ = s.states.putOutcome(ctx, state, o)
+		return Outcome{}, ErrOutcomePending
+	}
+	return o, nil
+}
+
+func (s *Service) complete(ctx context.Context, st pending, state, code, errParam string) Result {
 	res := Result{State: state, Origin: st.Origin}
 	if errParam != "" {
 		res.Err = fmt.Errorf("the authorization was refused: %s", errParam)

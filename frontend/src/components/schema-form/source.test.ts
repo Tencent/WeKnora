@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import { isOAuthRef, validateConfig, type ConfigSchema } from './schema'
-import { dependencyKey, isOAuthResult, optionsFailure, valueAt, type SchemaFormSource } from './source'
+import { dependencyKey, isOAuthResult, optionsFailure, systemBrowser, valueAt, type SchemaFormSource } from './source'
 
 const schema: ConfigSchema = {
   type: 'object',
@@ -60,4 +60,12 @@ test('a plugin asking for more input is a hint, other failures are errors', () =
     { error: 'token expired' })
   assert.deepEqual(optionsFailure({ status: 502, message: 'plugin down' }), { error: 'plugin down' })
   assert.deepEqual(optionsFailure(null), { error: '' })
+})
+
+test('systemBrowser is the desktop runtime opener, absent in a browser', () => {
+  assert.equal(systemBrowser({}), undefined)
+  const opened: string[] = []
+  const open = systemBrowser({ runtime: { BrowserOpenURL: (u: string) => opened.push(u) } })
+  open?.('https://auth.example.com/authorize')
+  assert.deepEqual(opened, ['https://auth.example.com/authorize'])
 })
