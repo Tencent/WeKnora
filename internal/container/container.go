@@ -518,6 +518,9 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Invoke(chatpipeline.NewPluginChatCompletionStream))
 	must(container.Invoke(chatpipeline.NewPluginFilterTopK))
 	must(container.Invoke(chatpipeline.NewPluginQueryUnderstand))
+	// Plugins' pipeline hooks follow query understanding and top-k filtering
+	// directly: entity extraction must see the rewritten question.
+	must(container.Invoke(chatpipeline.NewPluginExternalHooks))
 	must(container.Invoke(chatpipeline.NewPluginLoadHistory))
 	must(container.Invoke(chatpipeline.NewPluginMemoryRecall))
 	must(container.Invoke(chatpipeline.NewPluginExtractEntity))
@@ -525,7 +528,6 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Invoke(chatpipeline.NewPluginSearchParallel))
 	must(container.Invoke(chatpipeline.NewPluginWikiBoost))
 	must(container.Invoke(chatpipeline.NewPluginMemoryAffinity))
-	must(container.Invoke(chatpipeline.NewPluginExternalHooks))
 	logger.Debugf(ctx, "[Container] Chat pipeline plugins registered")
 
 	// TenantSkillService is provided next to SessionService (handlers need

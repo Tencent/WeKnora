@@ -90,3 +90,25 @@ func TestDeferredPluginEventsFlushAfterTaskHandlers(t *testing.T) {
 		}
 	}
 }
+
+// Plugins' pipeline hooks work before the plugins registered after them:
+// they must follow query understanding and top-k filtering and come
+// before entity extraction.
+func TestPipelineHooksFollowTheirBuiltinStages(t *testing.T) {
+	src, err := os.ReadFile("container.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	at := func(s string) int {
+		i := strings.Index(string(src), "container.Invoke(chatpipeline."+s+")")
+		if i < 0 {
+			t.Fatalf("%s is not registered", s)
+		}
+		return i
+	}
+	hooks := at("NewPluginExternalHooks")
+	if hooks < at("NewPluginQueryUnderstand") || hooks < at("NewPluginFilterTopK") ||
+		hooks > at("NewPluginExtractEntity") {
+		t.Fatal("pipeline hooks must be registered after query understanding and before entity extraction")
+	}
+}

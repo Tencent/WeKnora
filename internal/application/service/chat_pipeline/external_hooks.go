@@ -32,11 +32,15 @@ func hooks() ExternalHooks {
 	return nil
 }
 
-// PluginExternalHooks runs the rewriteQuery and filterResults hooks after
-// the builtin stages they follow.
+// PluginExternalHooks runs the rewriteQuery and filterResults hooks right
+// after the builtin stages they follow (query understanding, top-k
+// filtering) and before the other plugins of those events, so entity
+// extraction sees the rewritten question.
 type PluginExternalHooks struct{}
 
-// NewPluginExternalHooks registers the hook stages with the pipeline.
+// NewPluginExternalHooks registers the hook stages with the pipeline. Like
+// every stage, a hook works before it calls the next plugin, so it must be
+// registered right after the builtin stages it follows.
 func NewPluginExternalHooks(eventManager *EventManager) *PluginExternalHooks {
 	p := &PluginExternalHooks{}
 	eventManager.Register(p)
@@ -48,32 +52,37 @@ func (p *PluginExternalHooks) ActivationEvents() []types.EventType {
 	return []types.EventType{types.QUERY_UNDERSTAND, types.FILTER_TOP_K}
 }
 
-// OnEvent implements Plugin: the builtin stage runs first, then the hooks
-// see its result.
+// OnEvent implements Plugin: the builtin stage before it has run, the
+// hooks see its result and the plugins after it see theirs. Hooks that drop
+// every passage leave nothing to answer from, which ends retrieval like an
+// empty search (ErrSearchNothing: the fallback answer).
 func (p *PluginExternalHooks) OnEvent(
 	ctx context.Context, eventType types.EventType, cm *types.ChatManage, next func() *PluginError,
 ) *PluginError {
-	if err := next(); err != nil {
-		return err
-	}
 	h := hooks()
 	if h == nil {
-		return nil
+		return next()
 	}
 	switch eventType {
 	case types.QUERY_UNDERSTAND:
 		cm.RewriteQuery = h.RewriteQuery(ctx, cm, cm.RewriteQuery)
 	case types.FILTER_TOP_K:
+		var list *[]*types.SearchResult
 		switch {
 		case len(cm.MergeResult) > 0:
-			cm.MergeResult = h.FilterResults(ctx, cm, cm.MergeResult)
+			list = &cm.MergeResult
 		case len(cm.RerankResult) > 0:
-			cm.RerankResult = h.FilterResults(ctx, cm, cm.RerankResult)
+			list = &cm.RerankResult
 		case len(cm.SearchResult) > 0:
-			cm.SearchResult = h.FilterResults(ctx, cm, cm.SearchResult)
+			list = &cm.SearchResult
+		}
+		if list != nil {
+			if *list = h.FilterResults(ctx, cm, *list); len(*list) == 0 {
+				return ErrSearchNothing
+			}
 		}
 	}
-	return nil
+	return next()
 }
 
 // AnswerAppendix is the Markdown hooks add after a finished answer, with
