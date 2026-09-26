@@ -1255,7 +1255,17 @@ func (s *wikiIngestService) mapOneDocument(
 	// was in flight, we must NOT proceed to LLM extraction — doing so would
 	// create wiki pages whose source_refs point at a ghost knowledge ID,
 	// permanently unreachable via wiki_read_source_doc.
-	if s.isKnowledgeGone(ctx, payload.KnowledgeBaseID, knowledgeID) {
+	gone, lookupErr := s.isKnowledgeGone(ctx, payload.KnowledgeBaseID, knowledgeID)
+	if lookupErr != nil {
+		// The lookup itself failed (canceled/deadline/DB) — that is not
+		// proof of deletion. Fail the op so it lands in failedOps and gets
+		// retried instead of being silently trimmed as deleted. The span
+		// write uses a detached context so a canceled lookup still closes
+		// the postprocess.wiki span instead of leaving it running.
+		s.tracker().FailSpan(context.WithoutCancel(ctx), wikiSpan, "SOURCE_LOOKUP_FAILED", lookupErr.Error(), lookupErr)
+		return nil, nil, fmt.Errorf("wiki ingest: source lookup failed for knowledge %s: %w", knowledgeID, lookupErr)
+	}
+	if gone {
 		logger.Infof(ctx, "wiki ingest: knowledge %s has been deleted, skip map", knowledgeID)
 		s.tracker().SkipSpan(ctx, wikiSpan, "knowledge_deleted")
 		return nil, nil, nil
@@ -1790,8 +1800,12 @@ func (s *wikiIngestService) reduceSlugUpdates(
 	// source document may be deleted. Drop any addition/summary updates whose
 	// knowledge no longer exists so we don't resurrect a ghost source_ref.
 	// Retract updates are kept — they actively remove refs, which is what we
-	// want when the doc is gone.
-	updates = s.filterLiveUpdates(ctx, kbID, updates)
+	// want when the doc is gone. A source-lookup failure is NOT a deletion:
+	// fail the reduce so the updates are retried instead of dropped.
+	updates, err = s.filterLiveUpdates(ctx, kbID, updates)
+	if err != nil {
+		return false, "", false, fmt.Errorf("wiki ingest: reduce source lookup failed: %w", err)
+	}
 	if len(updates) == 0 {
 		return false, "", false, nil
 	}
