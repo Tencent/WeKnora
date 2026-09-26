@@ -47,6 +47,27 @@ const (
 	StateStopped InstanceState = "stopped"
 )
 
+// EgressMode is how an instance's outbound traffic is held to the
+// manifest's permissions.egress.
+type EgressMode string
+
+// Egress modes, from enforced to not controlled.
+const (
+	// EgressSandboxed: the process runs in its own network namespace; the
+	// egress proxy is its only way out.
+	EgressSandboxed EgressMode = "sandboxed"
+	// EgressNetworkPolicy: a Kubernetes NetworkPolicy lets the pod reach only
+	// DNS and WeKnora, whose egress proxy applies the grant. Enforced when the
+	// cluster's network plugin enforces NetworkPolicy.
+	EgressNetworkPolicy EgressMode = "networkPolicy"
+	// EgressProxy: the process is given the egress proxy, but code that
+	// ignores the proxy variables can connect directly.
+	EgressProxy EgressMode = "proxy"
+	// EgressUnmanaged: the plugin runs on infrastructure WeKnora does not
+	// control (a remote service).
+	EgressUnmanaged EgressMode = "unmanaged"
+)
+
 // InstanceStatus reports one instance of a plugin, for the plugin center.
 type InstanceStatus struct {
 	// Node is the WeKnora node or plugin host running the instance.
@@ -55,6 +76,9 @@ type InstanceStatus struct {
 	State     InstanceState `json:"state"`
 	Error     string        `json:"error,omitempty"`
 	UpdatedAt time.Time     `json:"updatedAt"`
+	// Egress is how the instance's outbound traffic is controlled; empty for
+	// plugins without code.
+	Egress EgressMode `json:"egress,omitempty"`
 }
 
 // Driver runs plugins of one runtime type.
