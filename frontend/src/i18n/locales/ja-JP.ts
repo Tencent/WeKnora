@@ -811,6 +811,7 @@ export default {
     channelYuque: 'Yuque',
     channelGitLab: 'GitLab',
     channelIma: 'Tencent IMA',
+    channelOpds: 'OPDSカタログ',
     channelUpload: 'アップロード',
     channelManual: '手動作成',
     channelUrl: 'Web',
@@ -6925,6 +6926,7 @@ export default {
       yuque: 'Yuque',
       dingtalk: 'DingTalkドキュメント',
       rss: 'RSS / Atomフィード',
+      opds: 'OPDSカタログ',
       ima: 'Tencent IMA',
       gitlab: 'GitLab'
     },
@@ -6938,6 +6940,7 @@ export default {
       yuque: 'Yuqueのナレッジベースからドキュメントを同期します',
       dingtalk: 'DingTalkナレッジベースのオンラインドキュメントを同期',
       rss: 'RSS / Atomフィードから記事を同期します',
+      opds: 'OPDSカタログから電子書籍を同期します（Calibre-Web、Kavita、Komga など）',
       ima: 'Tencent IMAのナレッジベースからドキュメント、ノート、ファイルを同期します（AIセッションと動画の解析は非対応）',
       gitlab: 'GitLabプロジェクトからファイルを同期します'
     },
@@ -6976,6 +6979,10 @@ export default {
       baseUrlHint: '空欄の場合はデフォルトのパブリッククラウドのアドレスを使用します。プライベート/エンタープライズ導入の場合や、リバースプロキシ経由でアクセスする場合は、カスタムアドレスを入力してください（例: https://api-proxy.example.com）。',
       feedUrls: 'フィードURL',
       feedUrlsHint: '1行に1つのRSS / AtomフィードURLを入力します。複数のフィードを指定できます。',
+      catalogUrls: 'カタログURL',
+      catalogUrlsHint: '1行に1つのOPDSカタログURLを入力します。ナビゲーションフィードとアクイジションフィードの両方に対応します。',
+      opdsUsername: 'ユーザー名（任意）',
+      opdsPassword: 'パスワード（任意）',
       authHeaders: 'カスタムヘッダー（任意）',
       authHeadersHint: '非公開フィード用です。1行に1つ「名前: 値」の形式で入力します（例: Authorization: Bearer xxxx）'
     },

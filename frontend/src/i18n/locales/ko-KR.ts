@@ -1128,6 +1128,10 @@ export default {
       baseUrlHint: "비워두면 기본 퍼블릭 클라우드 주소가 사용됩니다. 프라이빗/엔터프라이즈 배포거나 리버스 프록시를 통해 액세스해야 하는 경우 사용자 정의 주소를 입력하세요 (예: https://api-proxy.example.com)",
       feedUrls: '피드 주소',
       feedUrlsHint: '한 줄에 하나씩 RSS / Atom 피드 주소를 입력하세요. 여러 개를 함께 입력할 수 있습니다.',
+      catalogUrls: '카탈로그 주소',
+      catalogUrlsHint: '한 줄에 하나씩 OPDS 카탈로그 주소를 입력하세요. 탐색 피드와 획득 피드를 모두 지원합니다.',
+      opdsUsername: '사용자 이름 (선택)',
+      opdsPassword: '비밀번호 (선택)',
       authHeaders: '사용자 지정 헤더 (선택)',
       authHeadersHint: '비공개 피드 접근용. 한 줄에 하나씩 「이름: 값」 형식으로 입력하세요. 예: Authorization: Bearer xxxx'
     },
@@ -1145,6 +1149,7 @@ export default {
       dingtalk: 'DingTalk 지식베이스의 온라인 문서 동기화',
       ima: 'Tencent IMA 지식베이스에서 문서, 노트 및 파일 동기화 (AI 세션과 동영상 분석은 지원되지 않음)',
       rss: 'RSS / Atom 피드에서 글 동기화',
+      opds: 'OPDS 카탈로그에서 전자책 동기화 (Calibre-Web, Kavita, Komga 등)',
       gitlab: 'GitLab 프로젝트의 파일 동기화'
     },
     connector: {
@@ -1158,6 +1163,7 @@ export default {
       dingtalk: 'DingTalk 문서',
       ima: 'Tencent IMA',
       rss: 'RSS / Atom 피드',
+      opds: 'OPDS 카탈로그',
       gitlab: 'GitLab'
     },
     logDetail: {
@@ -7151,6 +7157,7 @@ export default {
     channelYuque: 'Yuque',
     channelGitLab: 'GitLab',
     channelIma: 'Tencent IMA',
+    channelOpds: 'OPDS 카탈로그',
     channelUpload: '업로드',
     channelManual: '수동',
     channelUrl: '웹',

@@ -38,6 +38,11 @@ const (
 	ConnectorTypeRSS         = "rss"
 	ConnectorTypeGitLab      = "gitlab"
 	ConnectorTypeIMA         = "ima"
+	// ConnectorTypeOPDS is an OPDS (Open Publication Distribution System)
+	// catalog: an Atom-based e-book library feed. Catalog URLs are non-secret
+	// configuration (Settings); Basic credentials and custom headers are
+	// secrets (Credentials).
+	ConnectorTypeOPDS = "opds"
 
 	// Sync modes
 	SyncModeIncremental = "incremental"
@@ -245,8 +250,9 @@ func (d DataSourceConfig) HasCredentials() bool {
 }
 
 // HasConfiguredCredentials reports whether user-facing secret credentials are
-// stored. RSS feed URLs are non-secret configuration (settings); only
-// auth_headers count as credentials for that connector.
+// stored. RSS feed URLs and OPDS catalog URLs are non-secret configuration
+// (settings); only auth_headers (and, for OPDS, username/password) count as
+// credentials for those connectors.
 func (d DataSourceConfig) HasConfiguredCredentials(connectorType string) bool {
 	if len(d.Credentials) == 0 {
 		return false
@@ -259,6 +265,13 @@ func (d DataSourceConfig) HasConfiguredCredentials(connectorType string) bool {
 		}
 		s, ok := raw.(string)
 		return ok && strings.TrimSpace(s) != ""
+	case ConnectorTypeOPDS:
+		for _, key := range []string{"username", "password", "auth_headers"} {
+			if s, ok := d.Credentials[key].(string); ok && strings.TrimSpace(s) != "" {
+				return true
+			}
+		}
+		return false
 	default:
 		return len(d.Credentials) > 0
 	}
@@ -273,6 +286,11 @@ func (d *DataSourceConfig) StripNonSecretCredentials(connectorType string) {
 	switch connectorType {
 	case ConnectorTypeRSS:
 		delete(d.Credentials, "feed_urls")
+		if len(d.Credentials) == 0 {
+			d.Credentials = nil
+		}
+	case ConnectorTypeOPDS:
+		delete(d.Credentials, "catalog_urls")
 		if len(d.Credentials) == 0 {
 			d.Credentials = nil
 		}

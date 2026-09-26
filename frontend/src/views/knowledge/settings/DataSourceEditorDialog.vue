@@ -103,7 +103,7 @@ function cancelReplaceCredentials() {
   replaceCredentialsMode.value = false
   pendingRemoveCredentials.value = false
   form.value.config.credentials = {}
-  rssAuthHeaders.value = []
+  customAuthHeaders.value = []
   testResult.value = credentialsConfigured.value ? 'success' : ''
   testErrorMsg.value = ''
 }
@@ -113,7 +113,25 @@ interface CustomHeaderItem {
   value: string
 }
 
-const rssAuthHeaders = ref<CustomHeaderItem[]>([])
+// Connectors whose credential fields include a `custom_headers` editor (RSS,
+// OPDS). Kept in one place so adding a connector does not mean hunting down
+// every `type === 'rss'` check.
+const CONNECTORS_WITH_CUSTOM_HEADERS = ['rss', 'opds']
+
+function hasCustomHeadersField(): boolean {
+  return CONNECTORS_WITH_CUSTOM_HEADERS.includes(form.value.type)
+}
+
+// The Settings key holding a connector's non-secret source URLs, for the
+// connectors that configure them as a free-text list (RSS feeds, OPDS catalogs).
+// Returns null for every other connector.
+function sourceUrlsSettingsKey(type: string): 'feed_urls' | 'catalog_urls' | null {
+  if (type === 'rss') return 'feed_urls'
+  if (type === 'opds') return 'catalog_urls'
+  return null
+}
+
+const customAuthHeaders = ref<CustomHeaderItem[]>([])
 
 function serializeAuthHeaders(items: CustomHeaderItem[]): string {
   return items
@@ -122,9 +140,9 @@ function serializeAuthHeaders(items: CustomHeaderItem[]): string {
     .join('\n')
 }
 
-function syncRssAuthHeadersToCredentials() {
-  if (form.value.type !== 'rss') return
-  const serialized = serializeAuthHeaders(rssAuthHeaders.value)
+function syncCustomAuthHeadersToCredentials() {
+  if (!hasCustomHeadersField()) return
+  const serialized = serializeAuthHeaders(customAuthHeaders.value)
   if (serialized) {
     form.value.config.credentials.auth_headers = serialized
   } else {
@@ -132,27 +150,30 @@ function syncRssAuthHeadersToCredentials() {
   }
 }
 
-// Feed URLs may still live in credentials on older rows (not returned by the
-// API). The backend copies them into settings on read; fall back to the
-// selected feed resource IDs when settings are still empty.
-function hydrateRssFeedUrlsFromConfig(config: { settings?: Record<string, any>; resource_ids?: string[] }) {
+// Feed/catalog URLs may still live in credentials on older rows (not returned
+// by the API). The backend copies them into settings on read; fall back to the
+// selected resource IDs when settings are still empty.
+function hydrateSourceUrlsFromConfig(
+  config: { settings?: Record<string, any>; resource_ids?: string[] },
+  settingsKey: 'feed_urls' | 'catalog_urls',
+) {
   const settings = config.settings || {}
-  if (String(settings.feed_urls || '').trim()) {
+  if (String(settings[settingsKey] || '').trim()) {
     return { ...settings }
   }
   const ids = config.resource_ids || []
   if (ids.length === 0) {
     return { ...settings }
   }
-  return { ...settings, feed_urls: ids.join('\n') }
+  return { ...settings, [settingsKey]: ids.join('\n') }
 }
 
-function addRssAuthHeader() {
-  rssAuthHeaders.value.push({ key: '', value: '' })
+function addCustomAuthHeader() {
+  customAuthHeaders.value.push({ key: '', value: '' })
 }
 
-function removeRssAuthHeader(idx: number) {
-  rssAuthHeaders.value.splice(idx, 1)
+function removeCustomAuthHeader(idx: number) {
+  customAuthHeaders.value.splice(idx, 1)
 }
 
 function needsConnectionTest(): boolean {
@@ -722,6 +743,22 @@ const connectorDefs = computed<ConnectorDef[]>(() => [
     ],
   },
   {
+    // OPDS e-book catalogs (Calibre-Web, Kavita, Komga, …). Catalog URLs live
+    // in Settings; Basic credentials and custom headers are secrets. All
+    // credential fields are optional because public catalogs need none.
+    type: 'opds',
+    available: true,
+    docUrl: '',
+    permissionDocUrl: '',
+    permissionPageUrl: '',
+    requiredPermissions: [],
+    fields: [
+      { key: 'username', labelKey: 'datasource.field.opdsUsername', placeholder: '', optional: true },
+      { key: 'password', labelKey: 'datasource.field.opdsPassword', placeholder: '', optional: true, secret: true },
+      { key: 'auth_headers', labelKey: 'datasource.field.authHeaders', placeholder: '', optional: true, hintKey: 'datasource.field.authHeadersHint', fieldType: 'custom_headers' },
+    ],
+  },
+  {
     type: 'gitlab', available: true, docUrl: '', permissionDocUrl: '', permissionPageUrl: '', requiredPermissions: [],
     fields: [
       { key: 'base_url', labelKey: 'datasource.gitlab.baseUrl', placeholder: 'https://gitlab.example.com' },
@@ -772,7 +809,7 @@ watch(visible, async (v) => {
   driveFolderToken.value = ''
   driveFolderTokenError.value = ''
   driveRootLoaded.value = false
-  rssAuthHeaders.value = []
+  customAuthHeaders.value = []
   gitlabProjects.value = []
 
   if (isEdit.value && props.dataSource) {
@@ -790,8 +827,8 @@ watch(visible, async (v) => {
       config: {
         credentials: {},
         resource_ids: editConfig.resource_ids || [],
-        settings: props.dataSource.type === 'rss'
-          ? hydrateRssFeedUrlsFromConfig(editConfig)
+        settings: sourceUrlsSettingsKey(props.dataSource.type)
+          ? hydrateSourceUrlsFromConfig(editConfig, sourceUrlsSettingsKey(props.dataSource.type)!)
           : (editConfig.settings || {}),
       },
       sync_schedule: props.dataSource.sync_schedule,
@@ -847,9 +884,9 @@ watch(
 )
 
 watch(
-  rssAuthHeaders,
+  customAuthHeaders,
   () => {
-    syncRssAuthHeadersToCredentials()
+    syncCustomAuthHeadersToCredentials()
     if (needsConnectionTest()) {
       testResult.value = ''
       testErrorMsg.value = ''
@@ -883,15 +920,15 @@ function selectType(def: ConnectorDef) {
     form.value.config.settings = { ...form.value.config.settings, folder_mode: 'toc' }
   }
   if (isGitLabConnector(def.type)) addGitLabProject()
-  rssAuthHeaders.value = []
+  customAuthHeaders.value = []
   step.value = 1
 }
 
 // --- Test connection ---
 async function testConnection() {
-  syncRssAuthHeadersToCredentials()
+  syncCustomAuthHeadersToCredentials()
   syncConfluencePublicFieldsToSettings()
-  if (!validateRssFeedUrls()) return
+  if (!validateSourceUrls()) return
   if (!isEdit.value || !credentialsConfigured.value || replaceCredentialsMode.value) {
     const fields = displayedCredentialFields.value
     for (const f of fields) {
@@ -918,9 +955,11 @@ async function testConnection() {
       await validateConnection(tempDsId.value)
     } else {
       const creds = { ...form.value.config.credentials }
-      if (form.value.type === 'rss') {
-        // validate-credentials is credentials-only; feed URLs live in settings.
-        creds.feed_urls = form.value.config.settings.feed_urls
+      const urlsKey = sourceUrlsSettingsKey(form.value.type)
+      if (urlsKey) {
+        // validate-credentials is credentials-only; the source URLs live in
+        // settings, so pass them through for the backend's parseConfig.
+        creds[urlsKey] = form.value.config.settings[urlsKey]
       }
       await validateCredentials(form.value.type, creds)
     }
@@ -1077,18 +1116,22 @@ function toggleResource(id: string) {
   selectedResourceIds.value = [...cover]
 }
 
-function validateRssFeedUrls(): boolean {
-  if (form.value.type !== 'rss') return true
-  if (!String(form.value.config.settings.feed_urls || '').trim()) {
-    MessagePlugin.warning(`${t('datasource.field.feedUrls')} ${t('datasource.isRequired')}`)
+// Source URLs are required for the connectors that configure them as a
+// free-text list (RSS feeds, OPDS catalogs); every other connector is exempt.
+function validateSourceUrls(): boolean {
+  const key = sourceUrlsSettingsKey(form.value.type)
+  if (!key) return true
+  if (!String(form.value.config.settings[key] || '').trim()) {
+    const labelKey = key === 'feed_urls' ? 'datasource.field.feedUrls' : 'datasource.field.catalogUrls'
+    MessagePlugin.warning(`${t(labelKey)} ${t('datasource.isRequired')}`)
     return false
   }
   return true
 }
 
 function validateStep1Fields(): boolean {
-  syncRssAuthHeadersToCredentials()
-  if (!validateRssFeedUrls()) return false
+  syncCustomAuthHeadersToCredentials()
+  if (!validateSourceUrls()) return false
   if (isEdit.value && credentialsConfigured.value && !replaceCredentialsMode.value) {
     return true
   }
@@ -1173,7 +1216,7 @@ function buildConfigPayload(): Record<string, unknown> {
 // the whole submit on failure so we don't leave the row partially saved.
 async function commitCredentialsIfNeeded(dsId: string): Promise<boolean> {
   if (!isEdit.value || !replaceCredentialsMode.value) return true
-  syncRssAuthHeadersToCredentials()
+  syncCustomAuthHeadersToCredentials()
   syncConfluencePublicFieldsToSettings()
   const filled = Object.entries(form.value.config.credentials).filter(
     ([, v]) => typeof v === 'string' ? v !== '' : v != null,
@@ -1184,7 +1227,7 @@ async function commitCredentialsIfNeeded(dsId: string): Promise<boolean> {
     credentialsConfigured.value = true
     replaceCredentialsMode.value = false
     form.value.config.credentials = {}
-    rssAuthHeaders.value = []
+    customAuthHeaders.value = []
     return true
   } catch (e: any) {
     MessagePlugin.error(e?.message || e?.error || t('credential.saveFailed'))
@@ -1524,6 +1567,21 @@ const drawerConfirmText = computed(() => {
         </div>
       </section>
 
+      <section v-if="form.type === 'opds'" class="setting-drawer__section">
+        <h4 class="setting-drawer__section-title">{{ t('datasource.field.catalogUrls') }}</h4>
+        <div class="form-item">
+          <label class="form-label required">{{ t('datasource.field.catalogUrls') }}</label>
+          <t-textarea
+            v-model="form.config.settings.catalog_urls"
+            placeholder="https://calibre.example.com/opds"
+            :autosize="{ minRows: 2, maxRows: 6 }"
+            autocomplete="off"
+            spellcheck="false"
+          />
+          <p class="form-desc">{{ t('datasource.field.catalogUrlsHint') }}</p>
+        </div>
+      </section>
+
       <section v-if="form.type === 'rss'" class="setting-drawer__section">
         <h4 class="setting-drawer__section-title">{{ t('datasource.field.feedUrls') }}</h4>
         <div class="form-item">
@@ -1617,14 +1675,14 @@ const drawerConfirmText = computed(() => {
             <template v-if="field.fieldType === 'custom_headers'">
               <div class="custom-headers-header">
                 <label class="form-label" style="margin-bottom: 0;">{{ t(field.labelKey) }}</label>
-                <t-button variant="text" size="small" theme="primary" @click="addRssAuthHeader">
+                <t-button variant="text" size="small" theme="primary" @click="addCustomAuthHeader">
                   <template #icon><t-icon name="add" /></template>
                   {{ t('model.editor.customHeadersAdd') }}
                 </t-button>
               </div>
               <p v-if="field.hintKey" class="form-desc custom-headers-desc">{{ t(field.hintKey) }}</p>
-              <div v-if="rssAuthHeaders.length > 0" class="custom-headers-list">
-                <div v-for="(item, idx) in rssAuthHeaders" :key="idx" class="custom-header-row">
+              <div v-if="customAuthHeaders.length > 0" class="custom-headers-list">
+                <div v-for="(item, idx) in customAuthHeaders" :key="idx" class="custom-header-row">
                   <t-input
                     v-model="item.key"
                     :placeholder="t('model.editor.customHeadersKeyPlaceholder')"
@@ -1645,7 +1703,7 @@ const drawerConfirmText = computed(() => {
                     size="small"
                     class="custom-header-remove"
                     :aria-label="t('common.delete')"
-                    @click="removeRssAuthHeader(idx)"
+                    @click="removeCustomAuthHeader(idx)"
                   >
                     <t-icon name="close" />
                   </t-button>
