@@ -606,6 +606,11 @@ func TestChatStreamUndecodableEventFailsTheStream(t *testing.T) {
 			if !strings.Contains(ev.Content, "decode stream chunk") {
 				t.Errorf("error content = %q", ev.Content)
 			}
+			// The marker is what the agent's retry classifier reads once the
+			// error has been flattened into this content string.
+			if !strings.Contains(ev.Content, types.StreamChunkCorruptError) {
+				t.Errorf("error content %q lost the retryable marker", ev.Content)
+			}
 			continue
 		}
 		answer += ev.Content

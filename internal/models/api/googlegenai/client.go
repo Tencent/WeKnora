@@ -371,7 +371,11 @@ func (c *Client) processStream(
 
 		var env rawResponse
 		if err := json.Unmarshal(event.Data, &env); err != nil {
-			assembler.Fail(ch, fmt.Errorf("decode stream chunk: %w", err))
+			// A frame that will not decode is a hole in the answer, so the
+			// round fails; the tag marks it as transport damage the caller may
+			// retry rather than a rejected request.
+			assembler.Fail(ch, fmt.Errorf("decode stream chunk: %w: %w",
+				api.ErrCorruptStreamChunk, err))
 			return
 		}
 		if env.Error != nil && env.Error.Message != "" {

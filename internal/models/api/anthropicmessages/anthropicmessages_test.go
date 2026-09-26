@@ -267,6 +267,47 @@ func TestChatStream(t *testing.T) {
 	assert.Equal(t, 9, last.Usage.CompletionTokens)
 }
 
+// An SSE frame that will not decode is a hole in the answer — a truncated
+// packet or a gateway error page — so the round fails instead of skipping it
+// and reaching EOF as a clean stop. The frame is tagged with the marker the
+// retry classifier reads after the error has been flattened into the error
+// chunk's content.
+func TestChatStream_UndecodableEventFailsTheStream(t *testing.T) {
+	t.Setenv("SSRF_WHITELIST", "127.0.0.1")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(`event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hel"}}
+
+event: content_block_delta
+data: <html>502 Bad Gateway</html>
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"lo"}}
+
+`))
+	}))
+	defer server.Close()
+
+	c := newClient(t, server.URL, nil)
+	ch, err := c.ChatStream(context.Background(), []api.Message{{Role: "user", Content: "Hi"}}, nil)
+	require.NoError(t, err)
+
+	var sawError bool
+	var answer strings.Builder
+	for chunk := range ch {
+		if chunk.ResponseType == types.ResponseTypeError {
+			sawError = true
+			assert.Contains(t, chunk.Content, "decode SSE response")
+			assert.Contains(t, chunk.Content, types.StreamChunkCorruptError)
+			continue
+		}
+		answer.WriteString(chunk.Content)
+	}
+	assert.True(t, sawError, "an undecodable frame must surface as an error, not as a short answer")
+	assert.Equal(t, "Hel", answer.String(), "decoding stops at the bad frame")
+}
+
 func TestChat_SSEBodyOnNonStream(t *testing.T) {
 	t.Setenv("SSRF_WHITELIST", "127.0.0.1")
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
