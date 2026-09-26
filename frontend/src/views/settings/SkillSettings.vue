@@ -24,6 +24,10 @@
     </div>
 
     <template v-else>
+      <t-input v-if="catalog.length > 0" v-model="query" class="list-search" :placeholder="$t('menu.search')"
+        :aria-label="$t('menu.search')" clearable>
+        <template #prefix-icon><t-icon name="search" size="16px" /></template>
+      </t-input>
       <div v-if="catalog.length === 0" class="empty-state">
         <t-empty :description="skillText('emptyDesc')" />
         <p v-if="skillConfigs.length === 0" class="empty-hint">
@@ -40,8 +44,15 @@
         </div>
       </div>
 
+      <div v-else-if="filteredCatalog.length === 0" class="empty-state">
+        <t-empty :description="$t('common.noResult')" />
+        <div class="empty-actions">
+          <t-button variant="outline" @click="query = ''">{{ $t('common.clear') }}</t-button>
+          <t-button variant="text" @click="openAdd">{{ $t('settings.skills.addSkill') }}</t-button>
+        </div>
+      </div>
       <div v-else class="skill-list">
-        <article v-for="item in catalog" :key="item.id" class="skill-card" :class="{
+        <article v-for="item in filteredCatalog" :key="item.id" class="skill-card" :class="{
           'skill-card--focused': focusedCatalogId === item.id,
           'skill-card--installed': liveInstalls(item).length > 0,
           'skill-card--idle': liveInstalls(item).length === 0,
@@ -354,6 +365,7 @@ import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import ModelSelector from '@/components/ModelSelector.vue'
 import { useConfirmDelete } from '@/components/settings/useConfirmDelete'
 import { useConfigSkillInstallProgress } from '@/composables/useConfigSkillInstallProgress'
+import { matchesResourceQuery } from '@/utils/resourceListSearch'
 import { SKILL_ICON } from '@/types/mention'
 import { useUIStore } from '@/stores/ui'
 import { useDeploymentCapabilitiesStore } from '@/stores/deploymentCapabilities'
@@ -409,6 +421,8 @@ const records = ref<SandboxConfigRecord[]>([])
 const scriptsDisabled = ref(false)
 const policySaving = ref(false)
 const catalog = ref<SkillCatalogItem[]>([])
+const query = ref('')
+const filteredCatalog = computed(() => catalog.value.filter((item) => matchesResourceQuery(item, query.value)))
 const focusedCatalogId = ref('')
 const deletingId = ref('')
 const showAdd = ref(false)
@@ -1311,6 +1325,10 @@ onUnmounted(() => {
 @import (reference) '@/components/css/provider-card.less';
 
 @import (reference) '@/components/css/settings-section.less';
+
+.list-search {
+  margin-bottom: 20px;
+}
 
 .skill-settings {
   width: 100%;

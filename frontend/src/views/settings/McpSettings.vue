@@ -12,12 +12,23 @@
     </div>
 
     <template v-else>
+      <t-input v-if="services.length > 0" v-model="query" class="list-search" :placeholder="$t('menu.search')"
+        :aria-label="$t('menu.search')" clearable>
+        <template #prefix-icon><t-icon name="search" size="16px" /></template>
+      </t-input>
       <div v-if="services.length === 0 && !authStore.hasRole('admin')" class="empty-state">
         <t-empty :description="$t('mcpSettings.empty')" />
       </div>
 
+      <div v-else-if="services.length > 0 && filteredServices.length === 0" class="empty-state">
+        <t-empty :description="$t('common.noResult')" />
+        <t-button variant="outline" @click="query = ''">{{ $t('common.clear') }}</t-button>
+        <t-button v-if="authStore.hasRole('admin')" variant="text" @click="handleAdd">
+          {{ $t('mcpSettings.addService') }}
+        </t-button>
+      </div>
       <div v-else class="services-grid">
-        <article v-for="service in services" :key="service.id" class="service-card">
+        <article v-for="service in filteredServices" :key="service.id" class="service-card">
           <div class="service-card__main">
             <div class="service-card__body">
               <div class="service-card__header">
@@ -109,7 +120,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { computed, ref, onMounted } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { AddIcon } from 'tdesign-icons-vue-next'
 import { useI18n } from 'vue-i18n'
@@ -122,6 +133,7 @@ import {
 import McpServiceDialog from './components/McpServiceDialog.vue'
 import { useConfirmDelete } from '@/components/settings/useConfirmDelete'
 import { useAuthStore } from '@/stores/auth'
+import { matchesResourceQuery } from '@/utils/resourceListSearch'
 
 const emit = defineEmits<{ count: [value: number] }>()
 const { t } = useI18n()
@@ -136,6 +148,10 @@ const currentService = ref<MCPService | null>(null)
 const dialogInitialStep = ref<0 | 1>(0)
 const togglingIds = ref(new Set<string>())
 const serviceUsage = (service: MCPService) => service.usage_instructions?.trim() || service.description?.trim() || ''
+const query = ref('')
+const filteredServices = computed(() => services.value.filter((service) =>
+  matchesResourceQuery({ name: service.name, description: serviceUsage(service) }, query.value),
+))
 
 // Load MCP services
 const loadServices = async () => {
@@ -254,6 +270,10 @@ defineExpose({ openAdd: handleAdd })
 
 .section-header {
   .settings-section-header();
+}
+
+.list-search {
+  margin-bottom: 20px;
 }
 
 .loading-container {
