@@ -52,6 +52,7 @@ func TestIMChannelNormalizesAndValidatesLocale(t *testing.T) {
 		{name: "empty uses deployment default", locale: "", want: ""},
 		{name: "supported locale", locale: "ja-JP", want: "ja-JP"},
 		{name: "trims supported locale", locale: "  ko-KR  ", want: "ko-KR"},
+		{name: "supported polish locale", locale: "pl-PL", want: "pl-PL"},
 		{name: "rejects unsupported locale", locale: "fr-FR", wantErr: true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
