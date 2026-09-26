@@ -6,7 +6,9 @@ import (
 )
 
 // BatchLimits are the per-request ceilings a vendor documents. A zero field
-// means the vendor states no limit, and nothing is enforced for it.
+// means the vendor states no limit, and nothing is enforced for it — callers
+// that need a bound when nothing is documented apply their own default to the
+// limits they pass in (see DefaultRerankMaxDocuments).
 type BatchLimits struct {
 	// MaxItems caps how many documents one request may carry.
 	MaxItems int
