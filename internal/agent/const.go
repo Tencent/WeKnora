@@ -109,6 +109,13 @@ var transientErrorMarkers = []string{
 	// partial response.
 	"deadline exceeded", "stalled", "unexpected eof",
 	strings.ToLower(types.StreamEndedEarlyError),
+	// A chunk the endpoint or a proxy mangled (truncated frame, HTML error
+	// page, bad JSON) leaves a hole in the answer. The round is failed on
+	// purpose — skipping the chunk would store a truncated reply as the
+	// model's answer — but the corruption is transport-level, so one retry is
+	// worth attempting. Matched by marker text because the streaming path
+	// flattens the error into StreamResponse.Content before the agent sees it.
+	strings.ToLower(types.StreamChunkCorruptError),
 }
 
 // transientStatusPattern matches a retryable HTTP status as a whole number, so
@@ -131,6 +138,14 @@ func isTransientError(err error) bool {
 	var transportErr *api.TransportError
 	if errors.As(err, &transportErr) || errors.Is(err, context.DeadlineExceeded) ||
 		errors.Is(err, io.ErrUnexpectedEOF) {
+		return true
+	}
+	// A chunk that arrived but would not decode is the stream being damaged,
+	// not the request being rejected: the same request can come back whole.
+	// This is deliberately separate from the cut-off stream above — there the
+	// body simply ran out (EndAtEOF), here every byte arrived and one frame of
+	// it was mangled.
+	if errors.Is(err, api.ErrCorruptStreamChunk) {
 		return true
 	}
 	errStr := strings.ToLower(err.Error())
