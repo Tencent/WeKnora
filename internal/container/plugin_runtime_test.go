@@ -2,6 +2,7 @@ package container
 
 import (
 	"context"
+	"os"
 	"strings"
 	"testing"
 
@@ -68,5 +69,24 @@ func TestPluginClientsRouteToThePool(t *testing.T) {
 	_, err = clients.Client(ctx, pythonPlugin().Manifest)
 	if pe, ok := pluginapi.AsError(err); !ok || !strings.Contains(pe.Message, "not running on this node") {
 		t.Fatalf("without a pool the node's own host answers, got %v", err)
+	}
+}
+
+// Events held since startup are flushed only once the task handlers exist:
+// Lite runs tasks in process and drops a task with no handler.
+func TestDeferredPluginEventsFlushAfterTaskHandlers(t *testing.T) {
+	src, err := os.ReadFile("container.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	flush := strings.Index(string(src), "container.Invoke(flushDeferredPluginEvents)")
+	for _, handlers := range []string{
+		"container.Invoke(startPluginReconciler)",
+		"container.Invoke(router.RunAsynqServer)",
+		"container.Invoke(router.RegisterSyncHandlers)",
+	} {
+		if at := strings.Index(string(src), handlers); at < 0 || flush < at {
+			t.Fatalf("deferred plugin events must be flushed after %s", handlers)
+		}
 	}
 }

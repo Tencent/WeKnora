@@ -274,6 +274,15 @@ func newPluginAdminHandler(service *install.Service, tenants interfaces.TenantSe
 	return handler.NewPluginAdminHandler(service).WithMarket(market.FromEnv(handler.Version)).WithTenants(tenants)
 }
 
+// flushDeferredPluginEvents publishes the events held since startup
+// (documents the startup reset failed). It runs once the plugins are loaded,
+// so the events find their subscribers, and once the task handlers are
+// registered: in Lite mode delivery runs in process and a task enqueued
+// before the plugin event handler exists is dropped.
+func flushDeferredPluginEvents() {
+	pluginevents.FlushDeferred(context.Background())
+}
+
 // startPluginReconciler loads installed plugins before the server takes
 // traffic, then keeps this node in step with the others.
 func startPluginReconciler(
@@ -288,9 +297,6 @@ func startPluginReconciler(
 	remoteManager.SetReporter(r)
 	ctx, cancel := context.WithCancel(context.Background())
 	r.Start(ctx)
-	// The first reconcile loaded the plugins: events held since startup
-	// (documents the startup reset failed) now find their subscribers.
-	pluginevents.FlushDeferred(ctx)
 	cleaner.RegisterWithName("PluginReconciler", func() error {
 		cancel()
 		hostManager.Close()
