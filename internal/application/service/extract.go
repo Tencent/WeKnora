@@ -851,6 +851,9 @@ func (s *DataTableSummaryService) generateTableDescription(ctx context.Context, 
 	if err != nil {
 		return "", fmt.Errorf("failed to generate table description: %w", err)
 	}
+	if _, err := validateSummaryOutput(response); err != nil {
+		return "", fmt.Errorf("failed to generate table description: %w", err)
+	}
 
 	return fmt.Sprintf("# Table Summary\n\nTable name: %s\n\n%s", tableName, response.Content), nil
 }
@@ -874,6 +877,9 @@ func (s *DataTableSummaryService) generateColumnDescriptions(ctx context.Context
 		Thinking:    &thinking,
 	})
 	if err != nil {
+		return "", fmt.Errorf("failed to generate column descriptions: %w", err)
+	}
+	if _, err := validateSummaryOutput(response); err != nil {
 		return "", fmt.Errorf("failed to generate column descriptions: %w", err)
 	}
 
