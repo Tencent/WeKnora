@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import type { ContributionListing } from '../api/plugin'
-import { findContribution, safeIconData, switchedOffContribution } from './pluginContributions'
+import { findContribution, safeIconData, switchedOffContribution, switchedOffIcon } from './pluginContributions'
 
 const listing = {
   points: [],
@@ -34,4 +34,11 @@ test('plugin icons are image data URIs only', () => {
   for (const bad of ['data:text/html;base64,PGgxPg==', 'javascript:alert(1)', 'https://x/icon.svg', '', undefined]) {
     assert.equal(safeIconData(bad), undefined)
   }
+})
+
+test('switched-off plugins lend their icon to their instances', () => {
+  const withIcons = { ...listing, pluginIcons: { 'acme.jira': 'data:image/png;base64,iVBOR', 'weknora.notion': 'data:image/png;base64,AAAA' } }
+  assert.equal(switchedOffIcon(withIcons, 'connectors', 'acme.jira/jira'), 'data:image/png;base64,iVBOR')
+  assert.equal(switchedOffIcon(withIcons, 'connectors', 'notion'), undefined, 'the plugin is on')
+  assert.equal(switchedOffIcon(listing, 'connectors', 'acme.jira/jira'), undefined)
 })

@@ -127,8 +127,10 @@ func TestPluginHandlerTogglesPluginsPerTenant(t *testing.T) {
 			},
 		}
 	}
+	notion := builtinPlugin("weknora.notion", false, manifest.PointConnectors, "notion")
+	notion.IconData = "data:image/svg+xml;base64,PHN2Zy8+"
 	for _, m := range []*manifest.Manifest{
-		builtinPlugin("weknora.notion", false, manifest.PointConnectors, "notion"),
+		notion,
 		builtinPlugin("weknora.agent-tools", true, manifest.PointTools, "thinking"),
 	} {
 		if err := reg.Register(m); err != nil {
@@ -166,10 +168,14 @@ func TestPluginHandlerTogglesPluginsPerTenant(t *testing.T) {
 	var contribs struct {
 		Data struct {
 			Contributions map[string][]map[string]any `json:"contributions"`
+			PluginIcons   map[string]string           `json:"pluginIcons"`
 		} `json:"data"`
 	}
 	if code := getJSON(t, r, "/plugins/contributions?point=connectors", &contribs); code != http.StatusOK {
 		t.Fatalf("contributions status = %d", code)
+	}
+	if contribs.Data.PluginIcons["weknora.notion"] != notion.IconData {
+		t.Fatalf("a switched-off plugin's icon rides along: %v", contribs.Data.PluginIcons)
 	}
 	if got := contribs.Data.Contributions["connectors"]; len(got) != 1 || got[0]["enabled"] != false {
 		t.Fatalf("disabled plugin's contribution should read disabled: %v", got)

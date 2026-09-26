@@ -233,7 +233,7 @@ onBeforeUnmount(stopPolling)
           <div class="ds-card__badge">
             <DataSourceTypeIcon
               :type="ds.type"
-              :icon-url="connectorMeta[ds.type]?.icon"
+              :icon-url="connectorMeta[ds.type]?.icon ?? pluginContributions.switchedOffIcon('connectors', ds.type)"
               :label="connectorLabel(ds.type)"
               variant="badge"
             />

@@ -70,6 +70,10 @@ type PluginContributionDTO struct {
 type PluginContributionsDTO struct {
 	Points        []manifest.PointInfo                       `json:"points"`
 	Contributions map[manifest.Point][]PluginContributionDTO `json:"contributions"`
+	// PluginIcons are the icons (data URIs) of plugins the tenant switched
+	// off: their types leave the type lists, and instance lists still need
+	// an icon for them.
+	PluginIcons map[string]string `json:"pluginIcons,omitempty"`
 }
 
 // ListPlugins godoc
@@ -219,6 +223,12 @@ func (h *PluginHandler) ListContributions(c *gin.Context) {
 			}
 			if m, ok := h.registry.Plugin(e.PluginID); ok {
 				dto.Version = m.Version
+				if !dto.Enabled && m.IconData != "" {
+					if out.PluginIcons == nil {
+						out.PluginIcons = map[string]string{}
+					}
+					out.PluginIcons[m.ID] = m.IconData
+				}
 			}
 			list = append(list, dto)
 		}

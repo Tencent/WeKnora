@@ -48,6 +48,8 @@ export interface ListedContribution extends PluginContribution {
 export interface ContributionListing {
   points: Array<{ point: ExtensionPoint; thirdParty: boolean; declarative: boolean }>
   contributions: Partial<Record<ExtensionPoint, ListedContribution[]>>
+  /** Icons (data URIs) of the plugins the workspace switched off. */
+  pluginIcons?: Record<string, string>
 }
 
 export interface PluginPermissions {

@@ -27,6 +27,16 @@ export function switchedOffContribution(
   return c && !c.enabled ? c : undefined
 }
 
+/** The icon of a switched-off plugin behind an instance type, if it has one. */
+export function switchedOffIcon(
+  listing: ContributionListing | null | undefined,
+  point: ExtensionPoint,
+  typeId: string | undefined,
+): string | undefined {
+  const c = switchedOffContribution(listing, point, typeId)
+  return c ? safeIconData(listing?.pluginIcons?.[c.pluginId]) : undefined
+}
+
 /** A plugin's icon data URI, when it is an image one (never a script). */
 export function safeIconData(v: string | undefined): string | undefined {
   return v && /^data:image\/(svg\+xml|png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(v) ? v : undefined
