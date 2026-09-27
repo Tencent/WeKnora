@@ -1168,6 +1168,12 @@ export default {
       cancelled: 'キャンセル済み'
     },
     errorCode: {
+      DOCREADER_UNAVAILABLE: "文書解析サービスを利用できません",
+      DOCREADER_UNAVAILABLE_SUGGESTION: "DocReader に接続できないか、接続が切断されました。サービスの稼働状態、再起動の繰り返し、ネットワークを確認し、復旧後に再試行してください。再アップロードは不要です。",
+      DOCREADER_TIMEOUT: "文書解析がタイムアウトしました",
+      DOCREADER_TIMEOUT_SUGGESTION: "DocReader の稼働状態と負荷を確認してから再試行してください。必要に応じて大きなファイルを分割してください。",
+      DOCREADER_PARSE_FAILED: "文書解析に失敗しました",
+      DOCREADER_PARSE_FAILED_SUGGESTION: "ファイル形式を確認し、管理者に今回の DocReader ログの確認を依頼してください。",
       TASK_STALLED: '進捗がないため自動停止しました',
       TASK_STALLED_SUGGESTION: 'しきい値を超えても進捗がなく、キューにも対応するタスクがないため失敗としてマークされました。「再試行」を押してください。繰り返し発生する場合は、この段階が依存するサービス（文書解析、モデル、ベクトルストア）を確認してください。',
       UNKNOWN_SUGGESTION: '詳細はアプリケーションログを確認してください。'
@@ -4075,6 +4081,13 @@ export default {
     referenceSourceView: '原文を表示',
     referenceSourceRelocate: '再度位置を特定',
     referenceSourceLocating: '引用箇所を特定しています…',
+    referenceSourceExact: "原文の該当箇所を特定しました",
+    referenceSourcePartial: "確認できた原文を強調表示しています。引用の一部は未照合です",
+    referenceSourceBlock: "原文の領域を表示しています。文字の完全一致は未確認です",
+    referenceSourceAmbiguous: "一致する箇所が複数あり、特定できません",
+    referenceSourceStale: "原文または内容が更新され、引用箇所を特定できません",
+    referenceSourcePrevious: "前の引用箇所",
+    referenceSourceNext: "次の引用箇所",
     referenceSourceFoundPage: '{page} ページで見つかりました',
     referenceSourceNotFound: '引用箇所を特定できなかったため、原文を開きました',
     referenceSourceOpenWeb: '元の Web ページで該当箇所を開く',

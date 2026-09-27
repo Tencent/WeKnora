@@ -3872,6 +3872,9 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 	if convertResult != nil {
 		parsedMarkdown = convertResult.MarkdownContent
 		sourceBlocks = convertResult.SourceBlocks
+		for i := range sourceBlocks {
+			sourceBlocks[i].Locator.SourceHash = knowledge.FileHash
+		}
 	}
 	sanitizeReadResult(convertResult)
 	if convertResult != nil {
@@ -4109,16 +4112,11 @@ func (s *knowledgeService) convert(
 
 	result, err := s.callDocReaderWithTimeout(ctx, reader, req)
 	if err != nil {
-		// Distinguish DocReader timeout (a knowable user-facing
-		// failure) from generic read errors so the UI can suggest
-		// "split this large file" specifically when relevant.
-		code := werrors.ErrCodeDocReaderParseFailed
-		if errors.Is(err, context.DeadlineExceeded) || strings.Contains(err.Error(), "docreader call timeout") {
-			code = werrors.ErrCodeDocReaderTimeout
-		}
+		code, message := docReaderFailure(err)
+		logger.Errorf(ctx, "[convert] DocReader failed knowledge=%s code=%s: %v", knowledge.ID, code, err)
 		s.failStage(ctx, knowledge.ID, types.StageDocReader,
-			code, "document read failed", err)
-		return s.failKnowledge(ctx, knowledge, isLastRetry, "document read failed: %v", err)
+			code, message, err)
+		return s.failKnowledge(ctx, knowledge, isLastRetry, "%s", message)
 	}
 	sanitizeReadResult(result)
 	if result.Error != "" {
@@ -4292,15 +4290,9 @@ func (s *knowledgeService) enqueueImageMultimodalTasks(
 	for idx, img := range images {
 		// Match image to the ParsedChunk whose content contains the image URL.
 		// ChunkID was populated by processChunks with the real DB UUID.
-		chunkID := ""
-		for _, c := range chunks {
-			if strings.Contains(c.Content, img.ServingURL) {
-				chunkID = c.ChunkID
-				break
-			}
-		}
-		if chunkID == "" && len(chunks) > 0 {
-			chunkID = chunks[0].ChunkID
+		chunkID := imageChunkOwner(img.ServingURL, chunks)
+		if chunkID == "" {
+			logger.Warnf(ctx, "Image has no owning text chunk: knowledge=%s image=%s", knowledge.ID, img.ServingURL)
 		}
 
 		payload := types.ImageMultimodalPayload{

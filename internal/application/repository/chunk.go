@@ -414,6 +414,7 @@ func (r *chunkRepository) SaveChunkRevision(
 			Updates(map[string]interface{}{
 				"content":          common.CleanInvalidUTF8(chunk.Content),
 				"source_content":   common.CleanInvalidUTF8(chunk.SourceContent),
+				"source_locators":  chunk.SourceLocators,
 				"content_revision": chunk.ContentRevision,
 				"is_enabled":       chunk.IsEnabled,
 				"metadata":         chunk.Metadata,
