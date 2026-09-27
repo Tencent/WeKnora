@@ -14,6 +14,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/agent"
 	apprepo "github.com/Tencent/WeKnora/internal/application/repository"
+	"github.com/Tencent/WeKnora/internal/common"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
@@ -665,6 +666,7 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 				changed        bool
 				affectedType   string
 				additionFailed bool
+				updateDeferred bool
 				reduceErr      error
 			)
 			// Serialize same-slug read-modify-write across concurrent batches
@@ -678,7 +680,7 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 						reduceErr = fmt.Errorf("wiki reduce panicked for slug %s: %v", slug, r)
 					}
 				}()
-				changed, affectedType, additionFailed, reduceErr = s.reduceSlugUpdates(
+				changed, affectedType, additionFailed, updateDeferred, reduceErr = s.reduceSlugUpdates(
 					reduceCtx, chatModel, payload.KnowledgeBaseID, slug, updates, payload.TenantID, batchCtx, kidToWikiSpan)
 				return reduceErr
 			})
@@ -709,6 +711,19 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 					rateLimited = true
 					reduceMu.Unlock()
 				}
+			}
+			if updateDeferred {
+				// The page kept its previous body because the rewrite dropped
+				// table rows that are still on it (applyRewriteToPage refused
+				// the write). The update itself is not an error and the page is
+				// not damaged, but this slug's contribution never landed, so the
+				// documents behind it must survive the trim phase and come back
+				// in a later batch — trimming them here would delete their
+				// pending row and lose the addition for good.
+				logger.Warnf(reduceCtx,
+					"wiki ingest: slug %s kept its previous content (rewrite dropped rows), deferring update",
+					slug)
+				collectUnapplied(updates)
 			}
 			if changed {
 				reduceMu.Lock()
@@ -1774,6 +1789,12 @@ func resolveSlugUpdateLanguage(ctx context.Context, updates []SlugUpdate) string
 //     refreshed for it. Callers use this to sanitize dead [[slug]] links
 //     elsewhere (e.g. in the doc's summary page) and to drop the slug from
 //     the wiki log feed so users don't see a clickable entry that 404s.
+//   - updateDeferred:   true iff the page kept its previous body on purpose —
+//     the rewrite dropped table rows that are still on the page, so it was
+//     refused (see applyRewriteToPage). The page is intact but this slug's
+//     update did not land: callers must re-queue the contributing documents
+//     (collectUnapplied) instead of trimming them, exactly as they do for a
+//     busy slug or a failed reduce, or the contribution is lost for good.
 //   - err:              transport / repo error from the persisted upsert.
 func (s *wikiIngestService) reduceSlugUpdates(
 	ctx context.Context,
@@ -1784,7 +1805,7 @@ func (s *wikiIngestService) reduceSlugUpdates(
 	tenantID uint64,
 	batchCtx *WikiBatchContext,
 	kidToWikiSpan map[string]*Span,
-) (changed bool, affectedType string, additionFailed bool, err error) {
+) (changed bool, affectedType string, additionFailed bool, updateDeferred bool, err error) {
 	// Final safety net for the ingest/delete race: between Map (which already
 	// checks isKnowledgeGone) and Reduce there is a long LLM call where the
 	// source document may be deleted. Drop any addition/summary updates whose
@@ -1793,7 +1814,7 @@ func (s *wikiIngestService) reduceSlugUpdates(
 	// want when the doc is gone.
 	updates = s.filterLiveUpdates(ctx, kbID, updates)
 	if len(updates) == 0 {
-		return false, "", false, nil
+		return false, "", false, false, nil
 	}
 
 	// Per-slug page span attribution: a single slug can receive
@@ -1877,7 +1898,7 @@ func (s *wikiIngestService) reduceSlugUpdates(
 			}
 		}
 		if !hasAdditions {
-			return false, "", false, nil
+			return false, "", false, false, nil
 		}
 
 		page = &types.WikiPage{
@@ -1932,7 +1953,7 @@ func (s *wikiIngestService) reduceSlugUpdates(
 		} else {
 			_, err = s.wikiService.CreatePage(ctx, page)
 		}
-		return changed, affectedType, false, err
+		return changed, affectedType, false, false, err
 	}
 
 	var remainingSourcesContent strings.Builder
@@ -2095,8 +2116,9 @@ func (s *wikiIngestService) reduceSlugUpdates(
 		if len(additions) > 0 {
 			hasAdditionsStr = "1"
 		}
+		hasRetractions := len(retracts) > 0
 		hasRetractionsStr := ""
-		if len(retracts) > 0 {
+		if hasRetractions {
 			hasRetractionsStr = "1"
 		}
 
@@ -2138,16 +2160,43 @@ func (s *wikiIngestService) reduceSlugUpdates(
 			// encoded context back to their real slugs BEFORE the content is
 			// parsed/stored, so out_links reflect real pages again.
 			updatedContent = slugHandles.decodeContent(updatedContent)
-			updatedSummary, updatedBody := splitSummaryLine(updatedContent)
-			if updatedBody != "" {
-				page.Content = updatedBody
+
+			// The editor answered in full (this is not a finish_reason=length
+			// truncation — generateWithTemplateResult already continued and
+			// refused those), but "in full" often means "without the last
+			// thirty rows of the table". applyRewriteToPage refuses that
+			// rewrite instead of shrinking the page; see
+			// wiki_rewrite_row_guard.go.
+			applied, dropped := applyRewriteToPage(page, updatedContent, hasRetractions)
+			if applied {
+				changed = true
 			} else {
-				page.Content = updatedContent
+				// The page keeps every row, but this slug's update did not
+				// land: the contributing documents have to be re-queued rather
+				// than trimmed, or the trim phase deletes their rows and the
+				// addition is gone for good (same reason as a busy slug or a
+				// failed reduce — see collectUnapplied).
+				updateDeferred = true
+				// Loud on purpose: the page keeps the rows, but this document's
+				// new information did not land, and nothing else in the batch
+				// records that. Without this line the only symptom would be the
+				// page quietly not changing.
+				examples := dropped
+				if len(examples) > wikiDroppedRowLogLimit {
+					examples = examples[:wikiDroppedRowLogLimit]
+				}
+				logger.Warnf(ctx,
+					"wiki ingest: refusing page rewrite for slug %s — the model dropped %d table "+
+						"row(s) that are still on the page (e.g. %s); those rows are still in the "+
+						"source documents and the model simply did not re-emit them, so the existing "+
+						"page is kept unchanged",
+					slug, len(dropped), strings.Join(examples, ", "))
+				common.PipelineWarn(ctx, "WikiIngest", "page_rewrite_dropped_rows", map[string]interface{}{
+					"slug":         slug,
+					"dropped_rows": len(dropped),
+					"examples":     strings.Join(examples, ", "),
+				})
 			}
-			if updatedSummary != "" {
-				page.Summary = updatedSummary
-			}
-			changed = true
 		} else if err != nil {
 			logger.Warnf(ctx, "wiki ingest: update/retract failed for slug %s: %v", slug, err)
 			// Flag addition failures so the batch can sanitize stale
@@ -2187,10 +2236,10 @@ func (s *wikiIngestService) reduceSlugUpdates(
 		} else {
 			_, err = s.wikiService.CreatePage(ctx, page)
 		}
-		return true, affectedType, additionFailed, err
+		return true, affectedType, additionFailed, updateDeferred, err
 	}
 
-	return false, "", additionFailed, nil
+	return false, "", additionFailed, updateDeferred, nil
 }
 
 // mergeChunkRefs unions the chunk IDs currently on the page with the ones
