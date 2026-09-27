@@ -273,6 +273,14 @@ func (c *notionClient) GetBlockChildrenFlat(ctx context.Context, blockID string)
 const maxBlockDepth = 5       // Limit recursion depth — deeper content has diminishing value for knowledge bases
 const maxBlocksPerPage = 1000 // Limit total blocks fetched per page to prevent runaway API calls
 
+// blocksTruncated reports whether the maxBlocksPerPage cap stopped pagination
+// while the API still offered another page — i.e. whether content was actually
+// dropped. Hitting the cap on the last page of a document is not truncation,
+// so the caller can warn without a false positive.
+func blocksTruncated(currentCount int, hasMore bool, nextCursor string) bool {
+	return currentCount >= maxBlocksPerPage && hasMore && nextCursor != ""
+}
+
 // GetBlockChildrenAll recursively fetches all blocks under a given block ID,
 // building a tree structure with Children populated for blocks with has_children=true.
 // child_page and child_database blocks are NOT recursed into (handled by connector layer).
@@ -307,6 +315,14 @@ func (c *notionClient) getBlockChildrenRecursive(ctx context.Context, blockID st
 		}
 
 		allBlocks = append(allBlocks, blocks...)
+
+		// The cap below stops pagination unconditionally; without this warning
+		// the dropped blocks (and any child_page/child_database they contain,
+		// which the connector layer never visits) vanish silently.
+		if blocksTruncated(len(allBlocks), resp.HasMore, resp.NextCursor) {
+			logger.Warnf(ctx, "[Notion] block %s exceeded %d blocks; truncating, remaining blocks are not synced",
+				blockID, maxBlocksPerPage)
+		}
 
 		if len(allBlocks) >= maxBlocksPerPage || !resp.HasMore || resp.NextCursor == "" {
 			break
