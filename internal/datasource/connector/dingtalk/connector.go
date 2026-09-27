@@ -344,17 +344,21 @@ func sampleWorkspace(
 }
 
 // verifyDocument proves one visible document is readable. Native documents are
-// probed through their own read API — the blocks API for adoc — while uploaded
-// files resolve their 钉盘 download location, which exercises the same
-// permissions and returns the same errors a real download would, without
-// transferring the payload.
+// probed through their own read API — the blocks API for adoc, the workbooks
+// API for a native spreadsheet — while uploaded files resolve their 钉盘
+// download location, which exercises the same permissions and returns the same
+// errors a real download would, without transferring the payload.
 //
 // #3782 landed a narrower version of this probe (the blocks API only) with a
 // comment saying uploaded files and native spreadsheets join it "when their
-// ingest paths land". This is that follow-up: an uploaded file is not an adoc,
-// so probing it through documentBlocks would report a readable file as
-// unreadable and reject a working data source.
+// ingest paths land". This is that follow-up for both: neither an uploaded file
+// nor a workbook is an adoc, so probing either through documentBlocks would
+// report a readable selection as unreadable and reject a working data source.
 func verifyDocument(ctx context.Context, api dingTalkAPI, document node) error {
+	if document.isSheet() {
+		_, err := api.listSheets(ctx, document.ID)
+		return err
+	}
 	if document.isOnlineDocument() {
 		_, err := api.documentBlocks(ctx, document.ID)
 		return err
@@ -1140,8 +1144,9 @@ func warnUnknownBlockTypes(ctx context.Context, document node, rendered renderRe
 }
 
 // readDocument turns one supported wiki node into a FetchedItem. Native adoc
-// documents are rendered from their blocks, and uploaded files are transferred
-// byte-for-byte so WeKnora's own parsers can read them.
+// documents are rendered from their blocks, native spreadsheets (axls) are
+// rendered from their worksheets through the workbooks API, and uploaded files
+// are transferred byte-for-byte so WeKnora's own parsers can read them.
 func readDocument(
 	ctx context.Context,
 	api dingTalkAPI,
@@ -1159,6 +1164,18 @@ func readDocument(
 		// The renderer stays context-free; the warning is emitted here, where
 		// both the request context and the node identity are known. Uploaded
 		// files take the default branch and have no rendering step to lose.
+		warnUnknownBlockTypes(ctx, document, rendered)
+		return fetchedDocument(sourceResourceID, workspaceID, document, rendered), nil
+	case document.isSheet():
+		// A spreadsheet is one document to its users and one knowledge entry
+		// here, so every worksheet is rendered into a single markdown body.
+		// Without this branch an axls node would fall through to the default
+		// branch and be downloaded as a binary file, which DingTalk does not
+		// serve for a native workbook.
+		rendered, err := renderWorkbook(ctx, api, document.ID, document.title())
+		if err != nil {
+			return types.FetchedItem{}, err
+		}
 		warnUnknownBlockTypes(ctx, document, rendered)
 		return fetchedDocument(sourceResourceID, workspaceID, document, rendered), nil
 	default:
