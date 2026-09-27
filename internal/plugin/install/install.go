@@ -325,6 +325,22 @@ func (s *Service) install(
 		return nil, invalid("version %s of %s is already installed with different contents; "+
 			"publish the change under a new version", m.Version, m.ID)
 	}
+	if existing != nil {
+		// Same package again: the chance to put back a stored copy that was
+		// lost (a purged bucket), which nothing else can repair.
+		if _, getErr := s.store.Get(ctx, existing.PackageURI); getErr != nil {
+			uri, err := s.store.Put(ctx, p.Digest, req.Data)
+			if err != nil {
+				return nil, err
+			}
+			logger.Warnf(ctx, "[plugin] %s %s: the stored package was unreadable (%v); stored it again",
+				m.ID, m.Version, getErr)
+			existing.PackageURI = uri
+			if err := s.repo.SaveVersion(ctx, existing); err != nil {
+				return nil, err
+			}
+		}
+	}
 	if existing == nil {
 		uri, err := s.store.Put(ctx, p.Digest, req.Data)
 		if err != nil {
@@ -664,24 +680,27 @@ func (s *Service) Activate(ctx context.Context, id, version string) (*View, erro
 	if v == nil {
 		return nil, invalid("version %s of %s is not stored", version, id)
 	}
-	if err := s.trust.Admit(trust.Level(v.Trust)); err != nil {
-		return nil, &InvalidError{Err: err}
-	}
 	// The version must still pass what installing it did: this platform
-	// may have changed since (runtimes, interpreters, model vendors).
+	// may have changed since (trusted keys, runtimes, interpreters, model
+	// vendors). Its trust is judged again rather than read from the record:
+	// every node judges the package as it loads it, and a version they
+	// refuse would take the running one down with it.
 	data, err := s.store.Get(ctx, v.PackageURI)
 	if err != nil {
 		return nil, fmt.Errorf("read the stored package of %s %s: %w", id, version, err)
 	}
-	p, err := pkg.Open(data)
+	p, verdict, err := s.open(data)
 	if err != nil {
-		return nil, &InvalidError{Err: err}
+		return nil, err
 	}
 	if p.Digest != v.Digest || p.Manifest.ID != id || p.Manifest.Version != version {
 		return nil, invalid("the stored package of %s %s does not match its record", id, version)
 	}
-	if err := s.check(p); err != nil {
-		return nil, err
+	if string(verdict.Level) != v.Trust || verdict.KeyID != v.SignerKeyID {
+		v.Trust, v.SignerKeyID = string(verdict.Level), verdict.KeyID
+		if err := s.repo.SaveVersion(ctx, v); err != nil {
+			return nil, err
+		}
 	}
 	m := p.Manifest
 	perms, _ := json.Marshal(m.Permissions)

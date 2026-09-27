@@ -14,6 +14,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/config"
+	"github.com/Tencent/WeKnora/internal/handler"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/plugin/host"
 	"github.com/Tencent/WeKnora/internal/plugin/hostpool"
@@ -90,7 +91,7 @@ func RunPluginHost(ctx context.Context) error {
 		Repo: repository.NewPluginRepository(db), Store: store, Registry: pluginregistry.New(), Redis: rdb,
 		Activators: []reconcile.Activator{mgr}, Runtimes: []manifest.RuntimeType{manifest.RuntimeHost},
 		Accept: func(m *manifest.Manifest) bool { return mgr.Runs(m.Runtime.Kind) }, Role: "plugin-host",
-		Admit: admitTrusted(trusted),
+		Admit: admitTrusted(trusted), HostVersion: handler.Version,
 	})
 	mgr.SetReporter(r)
 

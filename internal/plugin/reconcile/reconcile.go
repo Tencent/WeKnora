@@ -259,6 +259,7 @@ type Reconciler struct {
 	accept     func(*manifest.Manifest) bool
 	admit      func(*pkg.Package) error
 	role       string
+	hostVer    string
 
 	mu      sync.Mutex // serializes passes
 	loaded  map[string]*Loaded
@@ -318,6 +319,10 @@ type Options struct {
 	Admit func(*pkg.Package) error
 	// Role names what the node is in status reports, e.g. "plugin-host".
 	Role string
+	// HostVersion is this node's WeKnora version, checked against a
+	// package's engines.weknora as it loads (installing checked the
+	// installing node only; this one may run another version).
+	HostVersion string
 }
 
 // New creates a Reconciler.
@@ -338,7 +343,7 @@ func New(o Options) *Reconciler {
 	return &Reconciler{
 		repo: o.Repo, store: o.Store, registry: o.Registry, cacheDir: o.CacheDir, rdb: o.Redis,
 		activators: o.Activators, instanceID: uuid.NewString(), interval: o.Interval,
-		runtimes: runtimes, accept: o.Accept, admit: o.Admit, role: o.Role,
+		runtimes: runtimes, accept: o.Accept, admit: o.Admit, role: o.Role, hostVer: o.HostVersion,
 		loaded: map[string]*Loaded{}, digests: map[string]string{}, retries: map[string]retry{},
 		staging: map[string]*staging{},
 		status:  map[string]Status{}, now: time.Now,
@@ -514,6 +519,10 @@ func (r *Reconciler) ensure(ctx context.Context, row types.InstalledPlugin) erro
 	}
 	if p.Manifest.ID != row.ID {
 		return r.failed(prev, row, loadKey, fmt.Errorf("package is plugin %s, not %s", p.Manifest.ID, row.ID))
+	}
+	// A node on another WeKnora version keeps what it runs.
+	if err := p.Manifest.CheckEngines(r.hostVer); err != nil {
+		return r.failed(prev, row, loadKey, fmt.Errorf("this node runs WeKnora %s: %w", r.hostVer, err))
 	}
 	if r.admit != nil {
 		if err := r.admit(p); err != nil {

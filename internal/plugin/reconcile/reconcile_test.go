@@ -640,6 +640,29 @@ func TestUnreadableUpgradeKeepsThePreviousVersion(t *testing.T) {
 	}
 }
 
+// A node on a WeKnora version outside a version's engines range keeps the
+// version it runs (installing checked another node's version).
+func TestUpgradeForAnotherWeKnoraKeepsThePreviousVersion(t *testing.T) {
+	ctx := context.Background()
+	repo, store, reg, act := plugintest.NewMemRepo(), &plugintest.MemStore{}, registry.New(), &recorder{}
+	r := New(Options{
+		Repo: repo, Store: store, Registry: reg, CacheDir: t.TempDir(), Activators: []Activator{act},
+		HostVersion: "0.5.0",
+	})
+	plugintest.Install(t, repo, store, plugintest.KitPackage(t, "1.0.0"), types.PluginStateEnabled)
+	if err := r.Reconcile(ctx); err != nil {
+		t.Fatal(err)
+	}
+	plugintest.Install(t, repo, store,
+		plugintest.KitPackageWith(t, "1.1.0", "", "engines: { weknora: '>=0.9.0' }"), types.PluginStateEnabled)
+	if err := r.Reconcile(ctx); err == nil || !strings.Contains(err.Error(), "WeKnora 0.5.0") {
+		t.Fatalf("want an engines error, got %v", err)
+	}
+	if s, _ := r.Status("acme.kit"); s.State != StateReady || s.Version != "1.0.0" || s.UpgradeVersion != "1.1.0" {
+		t.Fatalf("status = %+v", s)
+	}
+}
+
 // retiring is a runtime that retires what it no longer runs.
 type retiring struct{ recorder }
 

@@ -301,6 +301,29 @@ func TestInstallRecordsTrustAndEnforcesTheMinimum(t *testing.T) {
 	if _, err := s.Activate(ctx, "acme.kit", "1.0.0"); !isInvalid(err) {
 		t.Fatalf("rolling back to a community version under a verified minimum: %v", err)
 	}
+
+	// The key is no longer trusted: its version is judged again, as every
+	// node will judge it, not by what was recorded when it was stored.
+	if _, err := s.Install(ctx, Request{Data: mustSign(t, plugintest.KitPackage(t, "1.3.0"), priv)}); err != nil {
+		t.Fatal(err)
+	}
+	untrusted, _ := trust.NewStore(nil, trust.Verified)
+	s.WithTrust(untrusted)
+	if _, err := s.Activate(ctx, "acme.kit", "1.1.0"); !isInvalid(err) {
+		t.Fatalf("rolling back to a version of a key no longer trusted: %v", err)
+	}
+	if row, _ := repo.GetPlugin(ctx, "acme.kit"); row.ActiveVersion != "1.3.0" {
+		t.Fatalf("active = %s", row.ActiveVersion)
+	}
+}
+
+func mustSign(t *testing.T, data []byte, priv ed25519.PrivateKey) []byte {
+	t.Helper()
+	signed, err := pluginsign.SignArchive(data, "market", priv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return signed
 }
 
 func TestSetAudience(t *testing.T) {
@@ -545,6 +568,27 @@ func TestFailedInstallLeavesNoPackage(t *testing.T) {
 	}
 	if len(store.Blobs) != 0 {
 		t.Fatalf("the package stayed behind: %d blobs", len(store.Blobs))
+	}
+}
+
+// Installing the same package again puts back a stored copy that was lost.
+func TestReinstallRestoresALostPackage(t *testing.T) {
+	ctx := context.Background()
+	s, repo, store, _ := newService(t)
+	data := plugintest.KitPackage(t, "1.0.0")
+	if _, err := s.Install(ctx, Request{Data: data}); err != nil {
+		t.Fatal(err)
+	}
+	store.Blobs = map[string][]byte{} // a purged bucket
+	if _, err := s.Install(ctx, Request{Data: data}); err != nil {
+		t.Fatalf("install again: %v", err)
+	}
+	v, err := repo.GetVersion(ctx, "acme.kit", "1.0.0")
+	if err != nil || v == nil {
+		t.Fatal(v, err)
+	}
+	if _, err := store.Get(ctx, v.PackageURI); err != nil {
+		t.Fatalf("the package is still missing: %v", err)
 	}
 }
 

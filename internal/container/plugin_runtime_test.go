@@ -203,3 +203,31 @@ func TestPluginEgressProxyServes(t *testing.T) {
 		t.Fatalf("a host outside the grant = %d", got)
 	}
 }
+
+// Without a kubernetes driver a kubernetes plugin fails to load, saying
+// why, instead of showing as running.
+func TestKubernetesPluginsFailWithoutADriver(t *testing.T) {
+	kubePlugin := &reconcile.Loaded{Manifest: &manifest.Manifest{
+		ID: "acme.k", Runtime: manifest.Runtime{Type: manifest.RuntimeKubernetes},
+	}}
+	if _, err := (noKube{}).Stage(context.Background(), nil, kubePlugin); err == nil ||
+		!strings.Contains(err.Error(), "WEKNORA_PLUGIN_K8S_NAMESPACE") {
+		t.Fatalf("err = %v", err)
+	}
+	hostPlugin := &reconcile.Loaded{Manifest: &manifest.Manifest{
+		ID: "acme.h", Runtime: manifest.Runtime{Type: manifest.RuntimeHost},
+	}}
+	if _, err := (noKube{}).Stage(context.Background(), nil, hostPlugin); err != nil {
+		t.Fatal(err)
+	}
+	var none pluginActivators
+	found := false
+	for _, a := range none.list() {
+		if _, ok := a.(noKube); ok {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("a node without a driver has no stand-in")
+	}
+}

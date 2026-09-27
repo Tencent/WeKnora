@@ -81,10 +81,29 @@ func (a pluginActivators) list() []reconcile.Activator {
 	runtimes := []reconcile.Activator{a.Host, a.Remote}
 	if a.Kube != nil {
 		runtimes = append(runtimes, a.Kube)
+	} else {
+		runtimes = append(runtimes, noKube{})
 	}
 	return append(runtimes,
 		a.Delegation, a.WebSearch, a.Connectors, a.Parsers, a.UIPages, a.Vendors, a.MCP, a.Skills)
 }
+
+// noKube stands in for the kubernetes driver on a node without one: a
+// kubernetes plugin fails to load there, saying why, rather than showing as
+// running while nothing runs it (installed while the platform had a
+// cluster).
+type noKube struct{}
+
+func (noKube) Name() string { return "kubernetes" }
+
+func (noKube) Stage(_ context.Context, _, l *reconcile.Loaded) (reconcile.Staged, error) {
+	if l.Manifest.Runtime.Type == manifest.RuntimeKubernetes {
+		return nil, fmt.Errorf("kubernetes plugins need a cluster: set WEKNORA_PLUGIN_K8S_NAMESPACE on this node")
+	}
+	return reconcile.Unchanged, nil
+}
+
+func (noKube) Deactivate(context.Context, string) error { return nil }
 
 // newPluginKubeDriver runs kubernetes plugins when the platform names a
 // namespace for them (WEKNORA_PLUGIN_K8S_NAMESPACE); nil otherwise.
@@ -350,7 +369,7 @@ func newPluginReconciler(
 ) *reconcile.Reconciler {
 	return reconcile.New(reconcile.Options{
 		Repo: repo, Store: store, Registry: reg, Redis: rdb, Activators: activators.list(),
-		Admit: admitTrusted(trusted),
+		Admit: admitTrusted(trusted), HostVersion: handler.Version,
 	})
 }
 
