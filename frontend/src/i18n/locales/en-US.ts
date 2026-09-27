@@ -1168,6 +1168,12 @@ export default {
       cancelled: 'Cancelled'
     },
     errorCode: {
+      DOCREADER_UNAVAILABLE: "Document parsing service unavailable",
+      DOCREADER_UNAVAILABLE_SUGGESTION: "Cannot connect to DocReader, or the connection was interrupted. Check service health, restart loops, and network access. Retry after recovery; uploading the file again is unnecessary.",
+      DOCREADER_TIMEOUT: "Document parsing timed out",
+      DOCREADER_TIMEOUT_SUGGESTION: "Check DocReader health and load before retrying. Split large files if needed.",
+      DOCREADER_PARSE_FAILED: "Document parsing failed",
+      DOCREADER_PARSE_FAILED_SUGGESTION: "Check the file format and ask an administrator to inspect the DocReader logs for this attempt.",
       TASK_STALLED: 'Stopped after no progress',
       TASK_STALLED_SUGGESTION: 'Processing made no progress past the time limit and had no task left in the queue, so it was marked as failed. Click Retry; if this keeps happening, check the service this stage depends on (document parsing, model, or vector store).',
       UNKNOWN_SUGGESTION: 'Check the application logs for details.'
@@ -4075,6 +4081,13 @@ export default {
     referenceSourceView: 'View in original',
     referenceSourceRelocate: 'Locate again',
     referenceSourceLocating: 'Locating the cited passage…',
+    referenceSourceExact: "Located the source passage",
+    referenceSourcePartial: "Verified source passages highlighted; part of the citation remains unmatched",
+    referenceSourceBlock: "Located the source region; exact text not confirmed",
+    referenceSourceAmbiguous: "Multiple matching passages; the location is ambiguous",
+    referenceSourceStale: "The source or content changed; this citation cannot be located precisely",
+    referenceSourcePrevious: "Previous citation location",
+    referenceSourceNext: "Next citation location",
     referenceSourceFoundPage: 'Found on page {page}',
     referenceSourceNotFound: 'Could not pinpoint the cited passage; the original is open',
     referenceSourceOpenWeb: 'Open the web page at this passage',

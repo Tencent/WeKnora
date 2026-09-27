@@ -14,7 +14,7 @@ func TextBlocks(content string) []types.SourceBlock {
 		if start >= 0 && end > start {
 			blocks = append(blocks, types.SourceBlock{
 				Start: start, End: end,
-				Locator: types.SourceLocator{Type: types.SourceLocatorText, Start: start, End: end},
+				Locator: types.SourceLocator{Type: types.SourceLocatorText, Mapping: "exact", Start: start, End: end},
 			})
 		}
 		start = -1

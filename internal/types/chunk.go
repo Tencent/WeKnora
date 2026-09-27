@@ -84,6 +84,8 @@ func (f ChunkFlags) ToggleFlag(flag ChunkFlags) ChunkFlags {
 
 // ImageInfo 表示与 Chunk 关联的图片信息
 type ImageInfo struct {
+	// SHA256 identifies the exact stored image bytes across parser and preview.
+	SHA256 string `json:"sha256,omitempty"`
 	// 图片URL（COS）
 	URL string `json:"url"          gorm:"type:text"`
 	// 原始图片URL
