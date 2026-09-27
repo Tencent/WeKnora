@@ -509,6 +509,10 @@ runtime: { type: remote }
 2. **Keep the secret.** Installing shows a signing secret once. Start the
    service with it as `WEKNORA_PLUGIN_SECRET` (and `WEKNORA_PLUGIN_ADDR`,
    default `:8080`). The SDK rejects requests without a valid signature.
+   A signature covers the time, method, path and body of one request, so it
+   cannot be replayed to another endpoint; a proxy in front of the service
+   may strip a path prefix. Bodies over 512 MiB are refused unread, and so
+   are requests while 1 GiB of bodies is being handled (callers retry).
 3. **Private hosts.** A service on a private network must be listed in
    WeKnora's `SSRF_WHITELIST`.
 4. **Host API.** Remote plugins get a Host API token only when

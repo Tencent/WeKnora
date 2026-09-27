@@ -1,7 +1,10 @@
 package pluginapi
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 )
@@ -28,15 +31,64 @@ func TestHandshake(t *testing.T) {
 func TestSignature(t *testing.T) {
 	secret, body, now := []byte("k"), []byte(`{"a":1}`), time.Now()
 	ts := strconv.FormatInt(now.Unix(), 10)
-	sig := Sign(secret, now.Unix(), body)
-	if err := VerifySignature(secret, ts, sig, body, now); err != nil {
+	path, other := "/p/acme.a/1.0.0/v1/search/s", "/p/acme.b/1.0.0/v1/search/s"
+	sig := Sign(secret, now.Unix(), "POST", path, body)
+	if err := VerifySignature(secret, ts, sig, "POST", path, path, body, now); err != nil {
 		t.Fatal(err)
 	}
-	if VerifySignature(secret, ts, sig, []byte(`{"a":2}`), now) == nil {
-		t.Fatal("a changed body must fail")
+	// A proxy in front may strip a prefix.
+	if err := VerifySignature(secret, ts, sig, "POST", path, "/v1/search/s", body, now); err != nil {
+		t.Fatal(err)
 	}
-	if VerifySignature(secret, ts, sig, body, now.Add(10*time.Minute)) == nil {
-		t.Fatal("a replayed old request must fail")
+	for name, err := range map[string]error{
+		"changed body":       VerifySignature(secret, ts, sig, "POST", path, path, []byte(`{"a":2}`), now),
+		"old request":        VerifySignature(secret, ts, sig, "POST", path, path, body, now.Add(10*time.Minute)),
+		"other method":       VerifySignature(secret, ts, sig, "PUT", path, path, body, now),
+		"other plugin":       VerifySignature(secret, ts, sig, "POST", path, other, body, now),
+		"forged signed path": VerifySignature(secret, ts, sig, "POST", other, other, body, now),
+		"no signed path":     VerifySignature(secret, ts, sig, "POST", "", path, body, now),
+	} {
+		if err == nil {
+			t.Errorf("%s must fail", name)
+		}
+	}
+}
+
+// A signed body is read only after the cheap checks pass, within a size
+// limit and a budget of bodies held at once.
+func TestReadSigned(t *testing.T) {
+	secret, now := []byte("k"), time.Now()
+	request := func(body string, sign bool) *http.Request {
+		r := httptest.NewRequest(http.MethodPost, "/v1/search/s", strings.NewReader(body))
+		if sign {
+			SignRequest(r, secret, []byte(body))
+		}
+		return r
+	}
+	if _, _, err := ReadSigned(request("{}", false), secret, 10, nil, now); err == nil || err.Code != CodeUnauthorized {
+		t.Fatalf("unsigned: %v", err)
+	}
+	if _, _, err := ReadSigned(request("0123456789ab", true), secret, 10, nil, now); err == nil ||
+		err.Code != CodeBadRequest {
+		t.Fatalf("over the limit: %v", err)
+	}
+	budget := NewBodyBudget(4)
+	body, release, err := ReadSigned(request("abc", true), secret, 10, budget, now)
+	if err != nil || string(body) != "abc" {
+		t.Fatalf("signed: %q, %v", body, err)
+	}
+	if _, _, err := ReadSigned(request("xy", true), secret, 10, budget, now); err == nil || !err.Retryable {
+		t.Fatalf("over the budget while the first body is held: %v", err)
+	}
+	release()
+	release() // harmless twice
+	if _, rel, err := ReadSigned(request("xy", true), secret, 10, budget, now); err != nil {
+		t.Fatalf("after release: %v", err)
+	} else {
+		rel()
+	}
+	if budget.free != 4 {
+		t.Fatalf("budget leaked: %d free", budget.free)
 	}
 }
 

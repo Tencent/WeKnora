@@ -16,6 +16,7 @@ PROTOCOL_HEADER = "X-WeKnora-Protocol"
 REQUEST_ID_HEADER = "X-Request-Id"
 SIGNATURE_HEADER = "X-WeKnora-Signature"
 TIMESTAMP_HEADER = "X-WeKnora-Timestamp"
+SIGNED_PATH_HEADER = "X-WeKnora-Signed-Path"
 NDJSON_CONTENT_TYPE = "application/x-ndjson"
 
 # Environment a host plugin is started with.
@@ -130,18 +131,17 @@ def invalid_config(message: str, fields: Dict[str, str]) -> PluginError:
     return PluginError(ErrorCode.INVALID_CONFIG, message, fields=fields)
 
 
-def sign(secret: bytes, timestamp: int, body: bytes) -> str:
-    """The signature of a request body at a unix timestamp: hex HMAC-SHA256
-    over ``"<timestamp>.<body>"``."""
-    mac = hmac.new(secret, f"{timestamp}.".encode(), hashlib.sha256)
+def sign(secret: bytes, timestamp: int, method: str, path: str, body: bytes) -> str:
+    """The signature of a request: hex HMAC-SHA256 over
+    ``"<timestamp>\\n<METHOD>\\n<path>\\n<body>"``, where path is the one the
+    request was sent to."""
+    mac = hmac.new(secret, f"{timestamp}\n{method}\n{path}\n".encode(), hashlib.sha256)
     mac.update(body)
     return mac.hexdigest()
 
 
-def verify_signature(
-    secret: bytes, timestamp: str, signature: str, body: bytes, now: Optional[float] = None
-) -> None:
-    """Checks a signed request; raises ValueError when it does not hold."""
+def check_timestamp(timestamp: str, now: Optional[float] = None) -> int:
+    """Reads a request timestamp; raises ValueError when it is not current."""
     try:
         ts = int(timestamp)
     except (TypeError, ValueError):
@@ -149,7 +149,31 @@ def verify_signature(
     now = time.time() if now is None else now
     if abs(now - ts) > MAX_CLOCK_SKEW:
         raise ValueError("request timestamp is outside the allowed clock skew")
-    if not hmac.compare_digest(sign(secret, ts, body), signature or ""):
+    return ts
+
+
+def check_signed_path(signed: str, received: str) -> None:
+    """Accepts the path a request was signed for when the path it arrived at
+    is that path or ends it (a proxy may strip a prefix); raises ValueError
+    otherwise."""
+    if not signed or not received.startswith("/") or not signed.endswith(received):
+        raise ValueError("request was signed for another path")
+
+
+def verify_signature(
+    secret: bytes,
+    timestamp: str,
+    signature: str,
+    method: str,
+    signed_path: str,
+    path: str,
+    body: bytes,
+    now: Optional[float] = None,
+) -> None:
+    """Checks a signed request; raises ValueError when it does not hold."""
+    ts = check_timestamp(timestamp, now)
+    check_signed_path(signed_path, path)
+    if not hmac.compare_digest(sign(secret, ts, method, signed_path, body), signature or ""):
         raise ValueError("bad signature")
 
 

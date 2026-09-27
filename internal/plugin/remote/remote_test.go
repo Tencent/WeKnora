@@ -1,10 +1,8 @@
 package remote
 
 import (
-	"bytes"
 	"context"
 	"errors"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -42,14 +40,12 @@ func newService(t *testing.T, version, secret string) *service {
 			http.Error(w, "down", http.StatusBadGateway)
 			return
 		}
-		body, _ := io.ReadAll(r.Body)
-		err := pluginapi.VerifySignature([]byte(secret), r.Header.Get(pluginapi.TimestampHeader),
-			r.Header.Get(pluginapi.SignatureHeader), body, time.Now())
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusUnauthorized)
+		_, release, perr := pluginapi.ReadSigned(r, []byte(secret), 1<<20, nil, time.Now())
+		if perr != nil {
+			http.Error(w, perr.Error(), http.StatusUnauthorized)
 			return
 		}
-		r.Body = io.NopCloser(bytes.NewReader(body))
+		defer release()
 		h.ServeHTTP(w, r)
 	}))
 	t.Cleanup(s.Close)

@@ -3,7 +3,6 @@ package host
 import (
 	"bytes"
 	"encoding/json"
-	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -19,9 +18,12 @@ const GatewayPrefix = "/p/"
 // document.
 const maxGatewayBody = 512 << 20
 
+// gatewayBodies bounds the request bodies the gateway holds at once.
+var gatewayBodies = pluginapi.NewBodyBudget(2 * maxGatewayBody)
+
 // Gateway serves the plugins this host runs to the other WeKnora nodes, at
 // /p/{pluginId}/{version}/... Requests must be signed with the cluster key
-// (pluginapi.Sign over the body); answers, streams included, are relayed as
+// (pluginapi.Sign, which covers the path and so the plugin); answers, streams included, are relayed as
 // the plugin gives them.
 func (m *Manager) Gateway(key []byte) http.Handler {
 	mux := http.NewServeMux()
@@ -43,21 +45,13 @@ func gatewayError(w http.ResponseWriter, e *pluginapi.Error) {
 }
 
 func (m *Manager) relay(w http.ResponseWriter, r *http.Request, key []byte) {
-	body, err := io.ReadAll(io.LimitReader(r.Body, maxGatewayBody+1))
-	if err != nil {
-		gatewayError(w, pluginapi.Errorf(pluginapi.CodeBadRequest, "read request: %v", err))
+	body, release, perr := pluginapi.ReadSigned(r, key, maxGatewayBody, gatewayBodies, time.Now())
+	if perr != nil {
+		perr.Message = "gateway: " + perr.Message
+		gatewayError(w, perr)
 		return
 	}
-	if len(body) > maxGatewayBody {
-		gatewayError(w, pluginapi.Errorf(pluginapi.CodeBadRequest, "request is over %d bytes", maxGatewayBody))
-		return
-	}
-	err = pluginapi.VerifySignature(key, r.Header.Get(pluginapi.TimestampHeader),
-		r.Header.Get(pluginapi.SignatureHeader), body, time.Now())
-	if err != nil {
-		gatewayError(w, pluginapi.Errorf(pluginapi.CodeUnauthorized, "gateway: %v", err))
-		return
-	}
+	defer release()
 	parts := strings.SplitN(strings.TrimPrefix(r.URL.Path, GatewayPrefix), "/", 3)
 	if len(parts) < 3 || parts[0] == "" || parts[1] == "" {
 		gatewayError(w, pluginapi.Errorf(pluginapi.CodeNotFound, "no endpoint %s", r.URL.Path))

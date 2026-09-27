@@ -18,12 +18,10 @@
 package pluginsdk
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -367,21 +365,20 @@ func bearerAuth(token string) middleware {
 // limit of WeKnora's plugin host gateway too.
 const maxBody = 512 << 20
 
+// bodyBudget bounds the signed request bodies held at once: a remote plugin
+// is reachable by anyone, and each request is read whole before its
+// signature can be checked.
+var bodyBudget = pluginapi.NewBodyBudget(2 * maxBody)
+
 func signatureAuth(secret []byte) middleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			body, err := io.ReadAll(io.LimitReader(r.Body, maxBody+1))
-			if err != nil || len(body) > maxBody {
-				writeError(w, pluginapi.Errorf(pluginapi.CodeBadRequest, "request body unreadable or too large"))
+			_, release, perr := pluginapi.ReadSigned(r, secret, maxBody, bodyBudget, time.Now())
+			if perr != nil {
+				writeError(w, perr)
 				return
 			}
-			err = pluginapi.VerifySignature(secret, r.Header.Get(pluginapi.TimestampHeader),
-				r.Header.Get(pluginapi.SignatureHeader), body, time.Now())
-			if err != nil {
-				writeError(w, pluginapi.Errorf(pluginapi.CodeUnauthorized, "%v", err))
-				return
-			}
-			r.Body = io.NopCloser(bytes.NewReader(body))
+			defer release()
 			next.ServeHTTP(w, r)
 		})
 	}

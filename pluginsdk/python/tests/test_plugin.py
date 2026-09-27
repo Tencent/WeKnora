@@ -282,19 +282,28 @@ class WireTest(unittest.TestCase):
 class SignatureTest(unittest.TestCase):
     def test_sign_and_verify(self):
         now = 1_700_000_000
-        sig = p.sign(b"s3cret", now, b"{}")
-        p.verify_signature(b"s3cret", str(now), sig, b"{}", now=now)
+        path = "/p/acme.a/1.0.0/v1/search/s"
+        sig = p.sign(b"s3cret", now, "POST", path, b"{}")
+        p.verify_signature(b"s3cret", str(now), sig, "POST", path, path, b"{}", now=now)
+        # A proxy in front may strip a prefix.
+        p.verify_signature(b"s3cret", str(now), sig, "POST", path, "/v1/search/s", b"{}", now=now)
         with self.assertRaisesRegex(ValueError, "bad signature"):
-            p.verify_signature(b"other", str(now), sig, b"{}", now=now)
+            p.verify_signature(b"other", str(now), sig, "POST", path, path, b"{}", now=now)
+        with self.assertRaisesRegex(ValueError, "bad signature"):
+            p.verify_signature(b"s3cret", str(now), sig, "PUT", path, path, b"{}", now=now)
+        with self.assertRaisesRegex(ValueError, "another path"):
+            p.verify_signature(b"s3cret", str(now), sig, "POST", path, "/p/acme.b/1.0.0/v1/search/s", b"{}", now=now)
         with self.assertRaisesRegex(ValueError, "clock skew"):
-            p.verify_signature(b"s3cret", str(now), sig, b"{}", now=now + 600)
+            p.verify_signature(b"s3cret", str(now), sig, "POST", path, path, b"{}", now=now + 600)
 
     def test_matches_go(self):
-        # pluginapi.Sign([]byte("k"), 1, []byte("b")) in Go.
+        # pluginapi.Sign([]byte("k"), 1, "POST", "/v1/x", []byte("b")) in Go.
         import hashlib
         import hmac
 
-        self.assertEqual(p.sign(b"k", 1, b"b"), hmac.new(b"k", b"1.b", hashlib.sha256).hexdigest())
+        self.assertEqual(
+            p.sign(b"k", 1, "POST", "/v1/x", b"b"), hmac.new(b"k", b"1\nPOST\n/v1/x\nb", hashlib.sha256).hexdigest()
+        )
 
 
 class FakeHostAPI(BaseHTTPRequestHandler):
@@ -444,10 +453,18 @@ class ServeTest(unittest.TestCase):
                 time.sleep(0.05)
         body = json.dumps(dict(ENVELOPE, input={"query": "q"})).encode()
         ts = int(time.time())
-        status, _, _ = c.request("POST", "/v1/websearch/echo/search", body, {p.TIMESTAMP_HEADER: str(ts), p.SIGNATURE_HEADER: p.sign(b"other", ts, body)})
+        status, _, _ = c.request("POST", "/v1/websearch/echo/search", body, {p.TIMESTAMP_HEADER: str(ts), p.SIGNED_PATH_HEADER: "/v1/websearch/echo/search", p.SIGNATURE_HEADER: p.sign(b"other", ts, "POST", "/v1/websearch/echo/search", body)})
         self.assertEqual(status, 401)
-        status, _, data = c.request("POST", "/v1/websearch/echo/search", body, {p.TIMESTAMP_HEADER: str(ts), p.SIGNATURE_HEADER: p.sign(b"s3cret", ts, body)})
+        status, _, data = c.request("POST", "/v1/websearch/echo/search", body, {p.TIMESTAMP_HEADER: str(ts), p.SIGNED_PATH_HEADER: "/v1/websearch/echo/search", p.SIGNATURE_HEADER: p.sign(b"s3cret", ts, "POST", "/v1/websearch/echo/search", body)})
         self.assertEqual(status, 200, data)
+        # Signed for another endpoint.
+        other = {p.TIMESTAMP_HEADER: str(ts), p.SIGNED_PATH_HEADER: "/v1/websearch/other/search", p.SIGNATURE_HEADER: p.sign(b"s3cret", ts, "POST", "/v1/websearch/other/search", body)}
+        status, _, _ = c.request("POST", "/v1/websearch/echo/search", body, other)
+        self.assertEqual(status, 401)
+        # Refused before a byte of an oversize body is read.
+        big = {p.TIMESTAMP_HEADER: str(ts), p.SIGNED_PATH_HEADER: "/v1/websearch/echo/search", p.SIGNATURE_HEADER: "0" * 64, "Content-Length": str((512 << 20) + 1)}
+        status, _, _ = c.request("POST", "/v1/websearch/echo/search", b"", big)
+        self.assertEqual(status, 400)
 
     def test_shutdown_drains_calls_in_flight(self):
         port = _free_port()
@@ -461,7 +478,7 @@ class ServeTest(unittest.TestCase):
                 time.sleep(0.05)
         body = json.dumps(dict(ENVELOPE, input={"query": "slow"})).encode()
         ts = int(time.time())
-        headers = {p.TIMESTAMP_HEADER: str(ts), p.SIGNATURE_HEADER: p.sign(b"s3cret", ts, body)}
+        headers = {p.TIMESTAMP_HEADER: str(ts), p.SIGNED_PATH_HEADER: "/v1/websearch/echo/search", p.SIGNATURE_HEADER: p.sign(b"s3cret", ts, "POST", "/v1/websearch/echo/search", body)}
         result = {}
         t = threading.Thread(target=lambda: result.update(r=c.request("POST", "/v1/websearch/echo/search", body, headers)))
         t.start()

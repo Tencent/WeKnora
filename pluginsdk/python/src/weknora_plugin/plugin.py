@@ -642,7 +642,7 @@ class Plugin:
     def test_server(self, auth: Optional[Callable[["_Handler", bytes], Optional[str]]] = None) -> "_Server":
         """Serves the plugin on a free loopback port without authentication
         (or with the given check), for tests. Call shutdown() when done."""
-        server = _TCPServer(("127.0.0.1", 0), self, auth or (lambda h, b: None))
+        server = _TCPServer(("127.0.0.1", 0), self, _CheckBody(auth) if auth else _Auth())
         threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.1}, daemon=True).start()
         return server
 
@@ -744,48 +744,132 @@ def _parse_output(out: Any) -> Any:
     return out
 
 
-# Authentication: a check returns an error message, or None to let the
-# request through.
+# Authentication: each check returns an error message, or None to let the
+# request through. ``before`` runs on the headers, before the body is read;
+# ``after`` on the body.
+
+# A parse call carries the whole document, base64-encoded; this is the limit
+# of WeKnora's plugin host gateway too.
+MAX_BODY = 512 << 20
 
 
-def _bearer(token: str) -> Callable[["_Handler", bytes], Optional[str]]:
-    want = "Bearer " + token
+class _Auth:
+    def before(self, h: "_Handler") -> Optional[str]:
+        return None
 
-    def check(h: "_Handler", _: bytes) -> Optional[str]:
-        if hmac.compare_digest(h.headers.get("Authorization", ""), want):
+    def after(self, h: "_Handler", body: bytes) -> Optional[str]:
+        return None
+
+
+class _bearer(_Auth):
+    def __init__(self, token: str) -> None:
+        self.want = "Bearer " + token
+
+    def before(self, h: "_Handler") -> Optional[str]:
+        if hmac.compare_digest(h.headers.get("Authorization", ""), self.want):
             return None
         return "missing or wrong host token"
 
-    return check
 
+class _signed(_Auth):
+    def __init__(self, secret: bytes) -> None:
+        self.secret = secret
 
-def _signed(secret: bytes) -> Callable[["_Handler", bytes], Optional[str]]:
-    def check(h: "_Handler", body: bytes) -> Optional[str]:
+    def before(self, h: "_Handler") -> Optional[str]:
+        try:
+            p.check_timestamp(h.headers.get(p.TIMESTAMP_HEADER, ""))
+            p.check_signed_path(h.headers.get(p.SIGNED_PATH_HEADER, ""), h.request_path())
+        except ValueError as e:
+            return str(e)
+        if len(h.headers.get(p.SIGNATURE_HEADER, "")) != 64:
+            return f"missing or malformed {p.SIGNATURE_HEADER}"
+        return None
+
+    def after(self, h: "_Handler", body: bytes) -> Optional[str]:
         try:
             p.verify_signature(
-                secret, h.headers.get(p.TIMESTAMP_HEADER, ""), h.headers.get(p.SIGNATURE_HEADER, ""), body
+                self.secret,
+                h.headers.get(p.TIMESTAMP_HEADER, ""),
+                h.headers.get(p.SIGNATURE_HEADER, ""),
+                h.command,
+                h.headers.get(p.SIGNED_PATH_HEADER, ""),
+                h.request_path(),
+                body,
             )
         except ValueError as e:
             return str(e)
         return None
 
-    return check
+
+class _CheckBody(_Auth):
+    """A check on the whole request, given to test_server."""
+
+    def __init__(self, check: Callable[["_Handler", bytes], Optional[str]]) -> None:
+        self.check = check
+
+    def after(self, h: "_Handler", body: bytes) -> Optional[str]:
+        return self.check(h, body)
+
+
+class _BodyBudget:
+    """Bounds the request bodies held at once: a remote plugin is reachable
+    by anyone, and each request is read whole before its signature can be
+    checked."""
+
+    def __init__(self, limit: int) -> None:
+        self.free = limit
+        self.lock = threading.Lock()
+
+    def take(self, n: int) -> bool:
+        with self.lock:
+            if n > self.free:
+                return False
+            self.free -= n
+            return True
+
+    def give(self, n: int) -> None:
+        with self.lock:
+            self.free += n
 
 
 class _Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
     server: "_Server"
 
+    def request_path(self) -> str:
+        return self.path.split("?", 1)[0]
+
+    def _refuse(self, err: PluginError) -> None:
+        # The body is left unread: the connection cannot carry another call.
+        self.close_connection = True
+        self._send_error(err)
+
     def _handle(self) -> None:
-        length = int(self.headers.get("Content-Length") or 0)
-        body = self.rfile.read(length) if length > 0 else b""
-        path = self.path.split("?", 1)[0]
-        problem = self.server.auth(self, body)
+        auth = self.server.auth
+        problem = auth.before(self)
         if problem is not None:
-            self._send_error(PluginError(ErrorCode.UNAUTHORIZED, problem))
+            self._refuse(PluginError(ErrorCode.UNAUTHORIZED, problem))
             return
-        with self.server.in_flight():
-            self.server.plugin._dispatch(self, self.command, path, body)
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            length = -1
+        if length < 0 or length > MAX_BODY:
+            self._refuse(PluginError(ErrorCode.BAD_REQUEST, f"request body over {MAX_BODY} bytes or unreadable"))
+            return
+        if not self.server.bodies.take(length):
+            self._refuse(PluginError(ErrorCode.UNAVAILABLE, "too many large requests at once; try again", retryable=True))
+            return
+        try:
+            body = self.rfile.read(length) if length > 0 else b""
+            problem = auth.after(self, body)
+            if problem is not None:
+                self._send_error(PluginError(ErrorCode.UNAUTHORIZED, problem))
+                return
+            with self.server.in_flight():
+                self.server.plugin._dispatch(self, self.command, self.request_path(), body)
+        finally:
+            self.server.bodies.give(length)
 
     do_GET = do_POST = do_PUT = do_DELETE = do_PATCH = _handle
 
@@ -810,9 +894,10 @@ class _Handler(BaseHTTPRequestHandler):
 class _Server(socketserver.ThreadingMixIn, HTTPServer):
     daemon_threads = True
 
-    def __init__(self, address: Any, plugin: Plugin, auth: Callable[[_Handler, bytes], Optional[str]]) -> None:
+    def __init__(self, address: Any, plugin: Plugin, auth: _Auth) -> None:
         self.plugin = plugin
         self.auth = auth
+        self.bodies = _BodyBudget(2 * MAX_BODY)
         self._active = 0
         self._active_lock = threading.Condition()
         super().__init__(address, _Handler)

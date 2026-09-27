@@ -12,7 +12,6 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
@@ -38,9 +37,7 @@ type Signed []byte
 
 // Apply implements Auth.
 func (s Signed) Apply(req *http.Request, body []byte) error {
-	ts := time.Now().Unix()
-	req.Header.Set(pluginapi.TimestampHeader, strconv.FormatInt(ts, 10))
-	req.Header.Set(pluginapi.SignatureHeader, pluginapi.Sign(s, ts, body))
+	pluginapi.SignRequest(req, s, body)
 	return nil
 }
 

@@ -21,11 +21,15 @@ const APIVersion = "weknora.plugin/v1"
 const (
 	ProtocolHeader  = "X-WeKnora-Protocol"
 	RequestIDHeader = "X-Request-Id"
-	// SignatureHeader and TimestampHeader authenticate calls to remote
-	// plugins: hex HMAC-SHA256 over "<timestamp>.<body>" with the shared
-	// secret. Host plugins get a bearer token instead.
-	SignatureHeader = "X-WeKnora-Signature"
-	TimestampHeader = "X-WeKnora-Timestamp"
+	// SignatureHeader, TimestampHeader and SignedPathHeader authenticate
+	// calls to remote plugins (and to plugin hosts): hex HMAC-SHA256 with the
+	// shared secret over "<timestamp>\n<METHOD>\n<signed path>\n<body>"
+	// (see Sign). The signed path is the one the request was sent to; the
+	// path it arrives at must end it. Host plugins get a bearer token
+	// instead.
+	SignatureHeader  = "X-WeKnora-Signature"
+	TimestampHeader  = "X-WeKnora-Timestamp"
+	SignedPathHeader = "X-WeKnora-Signed-Path"
 )
 
 // NDJSONContentType is the content type of streaming answers.
