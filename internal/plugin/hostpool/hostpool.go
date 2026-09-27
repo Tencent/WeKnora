@@ -111,10 +111,23 @@ func (i Info) runs(pluginID, version string) bool {
 	return false
 }
 
-// has reports whether the host runs any version of a plugin, in any state.
-func (i Info) has(pluginID string) bool {
+// coming reports whether the host is about to serve a plugin version: it
+// runs another version (an upgrade under way) or is starting this one. A
+// version restarting after a crash is not coming soon enough to wait for.
+func (i Info) coming(pluginID, version string) bool {
 	for _, p := range i.Plugins {
-		if p.ID == pluginID {
+		if p.ID == pluginID && (p.Version != version || p.State == host.StateStarting) {
+			return true
+		}
+	}
+	return false
+}
+
+// failing reports whether the host runs a plugin version that is restarting
+// after a crash or failing its health checks.
+func (i Info) failing(pluginID, version string) bool {
+	for _, p := range i.Plugins {
+		if p.ID == pluginID && p.Version == version && p.State == host.StateDegraded {
 			return true
 		}
 	}
@@ -243,6 +256,7 @@ func (p *Pool) view(ctx context.Context, maxAge time.Duration) ([]Info, error) {
 		}
 		p.mu.Lock()
 		p.hosts, p.fetched = hosts, p.now()
+		p.pruneClientsLocked(hosts)
 		p.mu.Unlock()
 		return hosts, nil
 	})
@@ -316,8 +330,8 @@ func leastBusy(hosts []Info, pluginID, version string) (Info, bool) {
 
 // pick finds a host for a plugin version. A view without one is read
 // again: the host may have announced the version since. While a host runs
-// another version of the plugin, an upgrade is under way there and pick
-// waits a while for it.
+// another version of the plugin, or starts this one, pick waits a while
+// for it; a version restarting after a crash fails the call at once.
 func (p *Pool) pick(ctx context.Context, pluginID, version string) (Info, error) {
 	hosts, err := p.view(ctx, refreshAfter)
 	if err != nil {
@@ -333,11 +347,11 @@ func (p *Pool) pick(ctx context.Context, pluginID, version string) (Info, error)
 				return h, nil
 			}
 		}
-		upgrading := false
+		coming := false
 		for _, h := range hosts {
-			upgrading = upgrading || h.has(pluginID)
+			coming = coming || h.coming(pluginID, version)
 		}
-		if !upgrading || time.Now().After(deadline) {
+		if !coming || time.Now().After(deadline) {
 			break
 		}
 		select {
@@ -347,8 +361,37 @@ func (p *Pool) pick(ctx context.Context, pluginID, version string) (Info, error)
 		case <-time.After(missRefresh):
 		}
 	}
+	for _, h := range hosts {
+		if h.failing(pluginID, version) {
+			return Info{}, pluginapi.Errorf(pluginapi.CodeUnavailable,
+				"%s@%s is restarting after a failure on plugin host %s", pluginID, version, h.ID)
+		}
+	}
 	return Info{}, pluginapi.Errorf(pluginapi.CodeUnavailable,
 		"no plugin host runs %s@%s; is weknora plugin-host up?", pluginID, version)
+}
+
+// gatewayBase is where a host serves a plugin version.
+func gatewayBase(hostURL, pluginID, version string) string {
+	return fmt.Sprintf("%s%s%s/%s", hostURL, host.GatewayPrefix, pluginID, version)
+}
+
+// pruneClientsLocked drops the clients of plugin versions no live host has
+// any more: every version and host a pool ever reached would stay
+// otherwise. They share the pool's connections, so there is nothing to
+// close.
+func (p *Pool) pruneClientsLocked(hosts []Info) {
+	live := map[string]bool{}
+	for _, h := range hosts {
+		for _, pl := range h.Plugins {
+			live[gatewayBase(h.URL, pl.ID, pl.Version)] = true
+		}
+	}
+	for base := range p.clients {
+		if !live[base] {
+			delete(p.clients, base)
+		}
+	}
 }
 
 // Client reaches a plugin version on the least busy host that runs it.
@@ -357,7 +400,7 @@ func (p *Pool) Client(ctx context.Context, pluginID, version string) (*client.Cl
 	if err != nil {
 		return nil, err
 	}
-	base := fmt.Sprintf("%s%s%s/%s", h.URL, host.GatewayPrefix, pluginID, version)
+	base := gatewayBase(h.URL, pluginID, version)
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	c, ok := p.clients[base]

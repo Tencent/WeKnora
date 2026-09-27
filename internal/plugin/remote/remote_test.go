@@ -23,18 +23,24 @@ import (
 // taken down.
 type service struct {
 	*httptest.Server
-	down atomic.Bool
+	down    atomic.Bool
+	handler atomic.Value // http.Handler
 }
 
-func newService(t *testing.T, version, secret string) *service {
-	t.Helper()
+// serve makes the service answer as a version of the plugin.
+func (s *service) serve(version string) {
 	p := pluginsdk.New(pluginsdk.Info{ID: "acme.search", Version: version})
 	p.WebSearch("web", pluginsdk.WebSearchFunc(
 		func(context.Context, *pluginsdk.Call, pluginapi.SearchInput) (*pluginapi.SearchOutput, error) {
 			return &pluginapi.SearchOutput{}, nil
 		}))
-	h := p.Handler()
+	s.handler.Store(p.Handler())
+}
+
+func newService(t *testing.T, version, secret string) *service {
+	t.Helper()
 	s := &service{}
+	s.serve(version)
 	s.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if s.down.Load() {
 			http.Error(w, "down", http.StatusBadGateway)
@@ -46,7 +52,7 @@ func newService(t *testing.T, version, secret string) *service {
 			return
 		}
 		defer release()
-		h.ServeHTTP(w, r)
+		s.handler.Load().(http.Handler).ServeHTTP(w, r)
 	}))
 	t.Cleanup(s.Close)
 	return s
@@ -87,6 +93,34 @@ func allowLoopback(t *testing.T) {
 	t.Cleanup(func() { utils.SetSSRFWhitelistFromRaw("") })
 }
 
+// A version the service does not serve yet waits for it, and is ready as
+// soon as the service serves it: the previous version keeps the calls
+// until then.
+func TestUpgradeWaitsForTheService(t *testing.T) {
+	allowLoopback(t)
+	ctx := context.Background()
+	svc := newService(t, "1.0.0", "s3cret")
+	m := NewManager()
+	defer m.Close()
+	st, err := m.Stage(ctx, nil, loaded("2.0.0", svc.URL, "s3cret"))
+	var pending *reconcile.PendingError
+	if !errors.As(err, &pending) {
+		t.Fatalf("stage = %v", err)
+	}
+	waiting := st.(reconcile.Waiting)
+	if ready, _ := waiting.Ready(ctx); ready {
+		t.Fatal("ready while the service serves 1.0.0")
+	}
+	svc.serve("2.0.0")
+	if ready, _ := waiting.Ready(ctx); !ready {
+		t.Fatal("not ready once the service serves 2.0.0")
+	}
+	st.Commit()
+	if _, err := m.Client("acme.search"); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestActivateVerifiesAndSignsCalls(t *testing.T) {
 	allowLoopback(t)
 	ctx := context.Background()
@@ -98,8 +132,9 @@ func TestActivateVerifiesAndSignsCalls(t *testing.T) {
 		!strings.Contains(err.Error(), "not healthy") {
 		t.Fatalf("wrong secret = %v", err)
 	}
-	if err := reconcile.Activate(ctx, m, loaded("2.0.0", svc.URL, "s3cret")); err == nil ||
-		!strings.Contains(err.Error(), "the package is acme.search@2.0.0") {
+	var pending *reconcile.PendingError
+	if err := reconcile.Activate(ctx, m, loaded("2.0.0", svc.URL, "s3cret")); !errors.As(err, &pending) ||
+		!strings.Contains(err.Error(), "to serve 2.0.0 (it serves 1.0.0)") {
 		t.Fatalf("other version = %v", err)
 	}
 	if err := reconcile.Activate(ctx, m, loaded("1.0.0", "", "s3cret")); err == nil {

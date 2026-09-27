@@ -24,6 +24,10 @@ type NodeStatus struct {
 
 const statusKeyBase = "weknora:plugins:status"
 
+// nodeForgottenAfter is how many stale periods a node's report is kept
+// after it stopped reporting, then dropped.
+const nodeForgottenAfter = 10
+
 func statusKey(pluginID string) string {
 	if ns := strings.TrimSpace(os.Getenv("WEKNORA_REDIS_NAMESPACE")); ns != "" {
 		return statusKeyBase + ":" + ns + ":" + pluginID
@@ -98,13 +102,26 @@ func (r *Reconciler) NodeStatuses(ctx context.Context, pluginID string) ([]NodeS
 		return nil, fmt.Errorf("read node status: %w", err)
 	}
 	var out []NodeStatus
+	var gone []string
 	self := r.NodeName()
 	for node, raw := range fields {
 		var ns NodeStatus
-		if json.Unmarshal([]byte(raw), &ns) != nil || node == self || time.Since(ns.SeenAt) > r.staleAfter() {
+		if json.Unmarshal([]byte(raw), &ns) != nil {
+			gone = append(gone, node)
+			continue
+		}
+		// The key lives as long as any node reports: a node that is gone
+		// for good (a replaced pod) would stay in it for ever.
+		if age := time.Since(ns.SeenAt); age > nodeForgottenAfter*r.staleAfter() {
+			gone = append(gone, node)
+			continue
+		} else if node == self || age > r.staleAfter() {
 			continue
 		}
 		out = append(out, ns)
+	}
+	if len(gone) > 0 {
+		_ = r.rdb.HDel(ctx, statusKey(pluginID), gone...).Err()
 	}
 	if hasLocal {
 		out = append(out, NodeStatus{Node: self, Status: local, SeenAt: time.Now()})

@@ -28,8 +28,10 @@ type fakeAPI struct {
 	polls   int
 	// readyAfter is how many deployment reads see it not yet rolled out.
 	readyAfter int
-	// failApply fails applying paths that contain it.
-	failApply string
+	// failApply fails applying paths that contain it; failDelete fails
+	// every delete while set.
+	failApply  string
+	failDelete bool
 }
 
 func (f *fakeAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -85,6 +87,10 @@ func (f *fakeAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		_ = json.NewEncoder(w).Encode(out)
 	case http.MethodDelete:
+		if f.failDelete {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
 		f.deleted = append(f.deleted, r.URL.Path)
 		delete(f.applied, r.URL.Path)
 	}
@@ -212,6 +218,40 @@ func TestDriverDeploysAndRemoves(t *testing.T) {
 	}
 	if len(api.deleted) != 3 || len(api.applied) != 0 || len(ep.removed) != 1 {
 		t.Fatalf("deleted %v, left %v, unregistered %v", api.deleted, api.applied, ep.removed)
+	}
+}
+
+// A removal that fails is tried again until it succeeds: the plugin is no
+// longer the node's to deactivate, and nothing else would remove them.
+func TestFailedRemovalIsRetried(t *testing.T) {
+	old := removalRetry
+	removalRetry = 50 * time.Millisecond
+	t.Cleanup(func() { removalRetry = old })
+	api := &fakeAPI{applied: map[string]map[string]any{}}
+	d, _ := newDriver(t, api)
+	if err := reconcile.Activate(context.Background(), d, loaded(t, "acme.search")); err != nil {
+		t.Fatal(err)
+	}
+	api.mu.Lock()
+	api.failDelete = true
+	api.mu.Unlock()
+	if err := d.Deactivate(context.Background(), "acme.search"); err == nil {
+		t.Fatal("want the API error")
+	}
+	path := "/apis/apps/v1/namespaces/plugins/deployments/" + ResourceName("acme.search")
+	time.Sleep(3 * removalRetry)
+	if !api.has(path) {
+		t.Fatal("removed while the API refused")
+	}
+	api.mu.Lock()
+	api.failDelete = false
+	api.mu.Unlock()
+	deadline := time.Now().Add(5 * time.Second)
+	for api.has(path) {
+		if time.Now().After(deadline) {
+			t.Fatal("the deployment was never removed")
+		}
+		time.Sleep(removalRetry)
 	}
 }
 

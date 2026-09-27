@@ -114,14 +114,60 @@ func (m *Manager) Stage(ctx context.Context, _, l *reconcile.Loaded) (reconcile.
 		return nil, errors.New("the remote plugin has no signing secret")
 	}
 	c := m.newClient(url, []byte(secret))
-	if err := check(ctx, c, l.Manifest); err != nil {
+	cctx, cancel := context.WithTimeout(ctx, checkTimeout)
+	err = verify(cctx, c, l.Manifest)
+	cancel()
+	later := context.WithoutCancel(ctx)
+	var other *servesOtherVersion
+	if errors.As(err, &other) {
+		// The service is being upgraded after WeKnora was (or not yet): the
+		// version it serves now keeps the calls, and this one takes over
+		// within seconds of the service serving it.
+		st := &serviceStage{m: m, ctx: later, mf: l.Manifest, url: url, c: c}
+		return st, reconcile.Pending(fmt.Errorf("waiting for the service at %s to serve %s (it serves %s)",
+			url, l.Manifest.Version, other.version))
+	}
+	if err != nil {
+		c.Close()
 		return nil, err
 	}
 	return reconcile.Swap{
-		OnCommit: func() { m.serve(ctx, l.Manifest, url, c, false) },
+		OnCommit: func() { m.serve(later, l.Manifest, url, c, false) },
 		OnAbort:  c.Close,
 	}, nil
 }
+
+// servesOtherVersion is a service answering as another version of the
+// plugin: it has not been upgraded (or rolled back) to this one yet.
+type servesOtherVersion struct{ version string }
+
+func (e *servesOtherVersion) Error() string {
+	return "plugin service serves version " + e.version
+}
+
+// serviceStage is a remote plugin version waiting for its service to serve
+// it. An upgrade commits once it does; a first load commits at once and
+// shows degraded until then.
+type serviceStage struct {
+	m   *Manager
+	ctx context.Context
+	mf  *manifest.Manifest
+	url string
+	c   *client.Client
+}
+
+// Ready implements reconcile.Waiting.
+func (s *serviceStage) Ready(ctx context.Context) (bool, error) {
+	cctx, cancel := context.WithTimeout(ctx, checkTimeout)
+	defer cancel()
+	return verify(cctx, s.c, s.mf) == nil, nil
+}
+
+// Commit implements reconcile.Staged.
+func (s *serviceStage) Commit() { s.m.serve(s.ctx, s.mf, s.url, s.c, false) }
+
+// Abort implements reconcile.Staged.
+func (s *serviceStage) Abort() { s.c.Close() }
 
 // Deployed is a plugin service WeKnora deployed itself, checked and ready
 // to take the plugin's calls.
@@ -202,6 +248,9 @@ func verify(ctx context.Context, c *client.Client, want *manifest.Manifest) erro
 	got, err := c.Manifest(ctx)
 	if err != nil {
 		return fmt.Errorf("read plugin manifest: %w", err)
+	}
+	if got.ID == want.ID && got.Version != want.Version {
+		return &servesOtherVersion{version: got.Version}
 	}
 	return host.CheckServedManifest(want, got)
 }

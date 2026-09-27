@@ -405,6 +405,7 @@ func (r *Reconciler) Reconcile(ctx context.Context) error {
 	}
 	r.statusMu.Unlock()
 	r.publishStatuses(ctx)
+	r.sweepCache(ctx)
 	return errors.Join(errs...)
 }
 

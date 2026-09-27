@@ -271,3 +271,29 @@ func TestIdlePluginsCountAsRunning(t *testing.T) {
 		t.Fatal("a degraded plugin must not")
 	}
 }
+
+// Only an upgrade or a start is worth waiting for: a version restarting
+// after a crash fails the call at once, saying so.
+func TestComingAndFailingVersions(t *testing.T) {
+	restarting := Info{ID: "h1", Plugins: []host.Running{{ID: "acme.py", Version: "1.0.0", State: host.StateDegraded}}}
+	if restarting.coming("acme.py", "1.0.0") || !restarting.failing("acme.py", "1.0.0") {
+		t.Fatal("a crashed version is failing, not coming")
+	}
+	starting := Info{Plugins: []host.Running{{ID: "acme.py", Version: "1.0.0", State: host.StateStarting}}}
+	upgrading := Info{Plugins: []host.Running{{ID: "acme.py", Version: "0.9.0", State: host.StateReady}}}
+	if !starting.coming("acme.py", "1.0.0") || !upgrading.coming("acme.py", "1.0.0") {
+		t.Fatal("a start and an upgrade are coming")
+	}
+}
+
+// Clients of plugin versions no host has any more are dropped.
+func TestPoolDropsClientsOfGoneVersions(t *testing.T) {
+	p := &Pool{clients: map[string]*client.Client{}}
+	keep := gatewayBase("http://h1:8081", "acme.py", "2.0.0")
+	gone := gatewayBase("http://h1:8081", "acme.py", "1.0.0")
+	p.clients[keep], p.clients[gone] = client.New(keep, nil, nil), client.New(gone, nil, nil)
+	p.pruneClientsLocked([]Info{{URL: "http://h1:8081", Plugins: []host.Running{{ID: "acme.py", Version: "2.0.0"}}}})
+	if _, ok := p.clients[gone]; ok || p.clients[keep] == nil {
+		t.Fatalf("clients = %v", p.clients)
+	}
+}

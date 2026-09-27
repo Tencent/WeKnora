@@ -2,6 +2,7 @@ package reconcile
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -200,5 +201,30 @@ func TestNodesReportUsage(t *testing.T) {
 	}
 	if got["a"].MemoryBytes != 10<<20 || got["a"].Idle || !got["b"].Idle {
 		t.Fatalf("usage by node = %+v", got)
+	}
+}
+
+// A node gone for good drops out of the shared status after a while, even
+// though the other nodes keep the key alive.
+func TestGoneNodesAreForgotten(t *testing.T) {
+	mr := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	repo, store := plugintest.NewMemRepo(), &plugintest.MemStore{}
+	r := New(Options{
+		Repo: repo, Store: store, Registry: registry.New(), CacheDir: t.TempDir(), Redis: rdb,
+		Interval: time.Minute, Role: "a",
+	})
+	ctx := context.Background()
+	key := statusKey("acme.kit")
+	recent, _ := json.Marshal(NodeStatus{Node: "b", SeenAt: time.Now().Add(-5 * time.Minute)})
+	gone, _ := json.Marshal(NodeStatus{Node: "c", SeenAt: time.Now().Add(-nodeForgottenAfter * 4 * time.Minute)})
+	mr.HSet(key, "b", string(recent))
+	mr.HSet(key, "c", string(gone))
+	if _, err := r.NodeStatuses(ctx, "acme.kit"); err != nil {
+		t.Fatal(err)
+	}
+	if mr.HGet(key, "c") != "" || mr.HGet(key, "b") == "" {
+		fields, _ := mr.HKeys(key)
+		t.Fatalf("fields = %v", fields)
 	}
 }

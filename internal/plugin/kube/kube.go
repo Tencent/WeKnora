@@ -312,8 +312,9 @@ type Driver struct {
 	// those, not every plugin the reconciler unloads.
 	owned map[string]bool
 	// rollouts cancels a plugin's rollout still finishing in the
-	// background.
+	// background; removals, a removal retried after it failed.
 	rollouts map[string]context.CancelFunc
+	removals map[string]*removal
 	// serveMu orders registering a service against unregistering it, so a
 	// rollout that finishes as its plugin is deactivated leaves nothing.
 	serveMu sync.Mutex
@@ -333,7 +334,7 @@ func New(cfg *Config, endpoints Endpoints) (*Driver, error) {
 	return &Driver{
 		cfg: cfg, endpoints: endpoints, timeout: readyTimeout, stuck: stuckInterval,
 		http:  &http.Client{Timeout: requestTimeout, Transport: &http.Transport{TLSClientConfig: tlsCfg}},
-		owned: map[string]bool{}, rollouts: map[string]context.CancelFunc{},
+		owned: map[string]bool{}, rollouts: map[string]context.CancelFunc{}, removals: map[string]*removal{},
 	}, nil
 }
 
@@ -393,6 +394,7 @@ func (d *Driver) Stage(ctx context.Context, prev, l *reconcile.Loaded) (reconcil
 		return nil, fmt.Errorf("the plugin's signing secret is not readable: %v", err)
 	}
 	d.stopRollout(m.ID)
+	d.stopRemoval(m.ID)
 	d.mu.Lock()
 	d.owned[m.ID] = true
 	d.mu.Unlock()
@@ -636,11 +638,77 @@ func (d *Driver) Deactivate(ctx context.Context, pluginID string) error {
 	d.serveMu.Lock()
 	d.endpoints.WithdrawDeployed(ctx, pluginID)
 	d.serveMu.Unlock()
+	err := d.removeAll(ctx, pluginID)
+	if err != nil {
+		// Nothing else would remove them: the plugin is no longer this
+		// node's to deactivate.
+		d.retryRemoval(pluginID)
+	}
+	return err
+}
+
+func (d *Driver) removeAll(ctx context.Context, pluginID string) error {
 	err := d.deleteResources(ctx, pluginID, ResourceName(pluginID))
 	if legacy := legacyResourceName(pluginID); legacy != ResourceName(pluginID) {
 		err = errors.Join(err, d.deleteResources(ctx, pluginID, legacy))
 	}
 	return err
+}
+
+// removalRetry is how often a failed removal is tried again.
+var removalRetry = time.Minute
+
+// removal is a removal being retried.
+type removal struct{ cancel context.CancelFunc }
+
+// retryRemoval keeps removing a plugin's resources until it succeeds, or
+// the plugin is deployed again (Stage stops it).
+func (d *Driver) retryRemoval(pluginID string) {
+	ctx, cancel := context.WithCancel(context.Background())
+	rm := &removal{cancel: cancel}
+	d.mu.Lock()
+	if old := d.removals[pluginID]; old != nil {
+		old.cancel()
+	}
+	d.removals[pluginID] = rm
+	d.mu.Unlock()
+	go func() {
+		defer func() {
+			d.mu.Lock()
+			if d.removals[pluginID] == rm {
+				delete(d.removals, pluginID)
+			}
+			d.mu.Unlock()
+			cancel()
+		}()
+		t := time.NewTicker(removalRetry)
+		defer t.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+			}
+			err := d.removeAll(ctx, pluginID)
+			if err == nil {
+				logger.Infof(ctx, "[plugin] kubernetes %s: removed its resources on a retry", pluginID)
+				return
+			}
+			logger.Warnf(ctx, "[plugin] kubernetes %s: remove its resources: %v; trying again in %s",
+				pluginID, err, removalRetry)
+		}
+	}()
+}
+
+// stopRemoval stops a retried removal of a plugin being deployed again.
+func (d *Driver) stopRemoval(pluginID string) {
+	d.mu.Lock()
+	rm := d.removals[pluginID]
+	delete(d.removals, pluginID)
+	d.mu.Unlock()
+	if rm != nil {
+		rm.cancel()
+	}
 }
 
 // resourcePaths are the API paths of a plugin's resources, by name. The
