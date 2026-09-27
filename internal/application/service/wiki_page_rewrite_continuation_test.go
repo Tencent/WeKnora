@@ -46,14 +46,14 @@ func (m *scriptedTemplateChatModel) GetModelID() string   { return "scripted" }
 
 // certLedgerRows renders a Markdown table row.
 func certLedgerRow(i int) string {
-	return fmt.Sprintf("| %d | 持证人%d | 杭州安恒信息技术股份有限公司 | 2020-01-01 | 2099-01-01 |", i, i)
+	return fmt.Sprintf("| %d | 成员%d | 示例科技有限公司 | 2020-01-01 | 2099-01-01 |", i, i)
 }
 
-// certLedgerBlock renders the first n rows of a 146-row certificate ledger — the
-// shape of the production page that came back short.
+// certLedgerBlock renders the first n rows of a certificate ledger — the shape of
+// a table-heavy page whose rewrite came back short.
 func certLedgerBlock(first, last int) string {
 	var b strings.Builder
-	b.WriteString("SUMMARY: 持证人台账\n# 持证人台账\n\n| 编号 | 姓名 | 所属公司 | 有效期起 | 有效期止 |\n")
+	b.WriteString("SUMMARY: 证书台账\n# 证书台账\n\n| 编号 | 姓名 | 所属公司 | 有效期起 | 有效期止 |\n")
 	b.WriteString("| --- | --- | --- | --- | --- |\n")
 	for i := first; i <= last; i++ {
 		b.WriteString(certLedgerRow(i))
@@ -76,11 +76,11 @@ func countLedgerRows(s string) int {
 func modifyTemplateData() map[string]string {
 	return map[string]string{
 		"HasAdditions":         "1",
-		"PageSlug":             "entity/cisp-pte",
-		"PageTitle":            "CISP-PTE 持证人台账",
+		"PageSlug":             "entity/cert-ledger",
+		"PageTitle":            "Example 证书台账",
 		"PageType":             "entity",
 		"ExistingContent":      "(New page)",
-		"NewContent":           certLedgerBlock(1, 146),
+		"NewContent":           certLedgerBlock(1, 90),
 		"AvailableSlugs":       "",
 		"Language":             "Chinese",
 		"InstructionScope":     "wiki_content",
@@ -91,12 +91,12 @@ func modifyTemplateData() map[string]string {
 // TestPageRewriteContinuesWhenProviderHitsCompletionBudget is the regression
 // for the "long list comes back short" report: the editor emits a page top-down,
 // the provider stops it at the completion budget (finish_reason=length) and the
-// fragment used to be persisted verbatim — a 146-row source table became a
-// 119-row page with nothing in the logs saying "truncated".
+// fragment used to be persisted verbatim — the page was written half-finished
+// with nothing in the logs saying "truncated".
 func TestPageRewriteContinuesWhenProviderHitsCompletionBudget(t *testing.T) {
 	model := &scriptedTemplateChatModel{responses: []*types.ChatResponse{
-		{Content: certLedgerBlock(1, 119), FinishReason: "length"},
-		{Content: certLedgerBlock(120, 146), FinishReason: "stop"},
+		{Content: certLedgerBlock(1, 61), FinishReason: "length"},
+		{Content: certLedgerBlock(62, 90), FinishReason: "stop"},
 	}}
 	service := &wikiIngestService{}
 
@@ -106,10 +106,10 @@ func TestPageRewriteContinuesWhenProviderHitsCompletionBudget(t *testing.T) {
 		t.Fatalf("generateWithTemplateResult() error = %v", err)
 	}
 
-	if got := countLedgerRows(result.Content); got != 148 {
-		t.Fatalf("stitched page has %d table rows, want 148 (146 holders + header + separator)", got)
+	if got := countLedgerRows(result.Content); got != 92 {
+		t.Fatalf("stitched page has %d table rows, want 92 (90 holders + header + separator)", got)
 	}
-	if !strings.Contains(result.Content, certLedgerRow(146)) {
+	if !strings.Contains(result.Content, certLedgerRow(90)) {
 		t.Fatal("stitched page is missing the last holder row")
 	}
 	if strings.Contains(result.Content, wikiPageModifyContinuationDone) {
@@ -126,7 +126,7 @@ func TestPageRewriteContinuesWhenProviderHitsCompletionBudget(t *testing.T) {
 	if len(second) != 4 {
 		t.Fatalf("continuation request has %d messages, want 4 (system, user, assistant, user)", len(second))
 	}
-	if second[2].Role != "assistant" || second[2].Content != certLedgerBlock(1, 119) {
+	if second[2].Role != "assistant" || second[2].Content != certLedgerBlock(1, 61) {
 		t.Fatal("continuation request did not replay the partial page as an assistant turn")
 	}
 	if second[3].Role != "user" || second[3].Content != agent.WikiPageModifyContinuationPrompt {
@@ -134,7 +134,7 @@ func TestPageRewriteContinuesWhenProviderHitsCompletionBudget(t *testing.T) {
 	}
 	// The evidence block must survive: the tail is written from the same source
 	// material, not from the model's memory of the fragment.
-	if !strings.Contains(second[1].Content, certLedgerRow(146)) {
+	if !strings.Contains(second[1].Content, certLedgerRow(90)) {
 		t.Fatal("continuation request dropped the source evidence block")
 	}
 }
@@ -165,7 +165,7 @@ func TestPageRewriteStopsAtContinuationCap(t *testing.T) {
 // TestPageRewriteAcceptsCompletePageUnchanged pins the no-op path: a rewrite
 // that stops naturally is returned as-is, with a single call.
 func TestPageRewriteAcceptsCompletePageUnchanged(t *testing.T) {
-	page := certLedgerBlock(1, 146)
+	page := certLedgerBlock(1, 90)
 	model := &scriptedTemplateChatModel{responses: []*types.ChatResponse{
 		{Content: page, FinishReason: "stop"},
 	}}
@@ -209,7 +209,7 @@ func TestContinuationIsScopedToPageRewrites(t *testing.T) {
 // TestPageRewriteContinuationDoneSentinel checks that a model which reports the
 // page was already complete does not have its sentinel appended to the page.
 func TestPageRewriteContinuationDoneSentinel(t *testing.T) {
-	page := certLedgerBlock(1, 146)
+	page := certLedgerBlock(1, 90)
 	model := &scriptedTemplateChatModel{responses: []*types.ChatResponse{
 		{Content: page, FinishReason: "length"},
 		{Content: " (complete) ", FinishReason: "length"},
