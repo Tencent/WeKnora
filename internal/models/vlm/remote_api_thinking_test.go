@@ -48,7 +48,8 @@ func TestPredictForwardsThinkingSwitch(t *testing.T) {
 		{
 			name: "thinking off",
 			call: func(v *RemoteAPIVLM) error {
-				_, err := v.PredictWithOptions(context.Background(), [][]byte{png}, "p", &PredictOptions{Thinking: &falseVal})
+				opts := &PredictOptions{Thinking: &falseVal}
+				_, err := v.PredictWithOptions(context.Background(), [][]byte{png}, "p", opts)
 				return err
 			},
 			wantOn: false,
@@ -56,7 +57,8 @@ func TestPredictForwardsThinkingSwitch(t *testing.T) {
 		{
 			name: "thinking on",
 			call: func(v *RemoteAPIVLM) error {
-				_, err := v.PredictWithOptions(context.Background(), [][]byte{png}, "p", &PredictOptions{Thinking: &trueVal})
+				opts := &PredictOptions{Thinking: &trueVal}
+				_, err := v.PredictWithOptions(context.Background(), [][]byte{png}, "p", opts)
 				return err
 			},
 			wantOn: true,
@@ -70,8 +72,11 @@ func TestPredictForwardsThinkingSwitch(t *testing.T) {
 			wantNone: true,
 		},
 		{
-			name:     "plain Predict",
-			call:     func(v *RemoteAPIVLM) error { _, err := v.Predict(context.Background(), [][]byte{png}, "p"); return err },
+			name: "plain Predict",
+			call: func(v *RemoteAPIVLM) error {
+				_, err := v.Predict(context.Background(), [][]byte{png}, "p")
+				return err
+			},
 			wantNone: true,
 		},
 	} {

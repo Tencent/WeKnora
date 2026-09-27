@@ -243,7 +243,8 @@ func TestObservationPipelineDeclaresNoActionControls(t *testing.T) {
 	pipeline := imagePipelineRegistry[types.ImagePipelineSmartOCR]
 	for _, field := range pipeline.Fields() {
 		if field.DecidesAction {
-			t.Errorf("smartocr declares field %q as an action control; the observed attributes decide that, not the user",
+			t.Errorf("smartocr declares field %q as an action control; "+
+				"the observed attributes decide that, not the user",
 				field.Key)
 		}
 	}
@@ -301,7 +302,8 @@ func TestPipelineRulesMatchTheirFields(t *testing.T) {
 func TestManualPipelineDeclaresRules(t *testing.T) {
 	pipeline := imagePipelineRegistry[types.ImagePipelineDefault]
 	if len(pipeline.Rules()) == 0 {
-		t.Fatal("the manual pipeline declares no rule, so a knowledge base set to run nothing would save without warning")
+		t.Fatal("the manual pipeline declares no rule, so a knowledge base " +
+			"set to run nothing would save without warning")
 	}
 	// A thinking switch tunes the call; like the smart pipeline's, it may be off
 	// for every image without leaving anything unprocessed.

@@ -42,8 +42,10 @@ func TestManualPipelineAcceptsOneActionOn(t *testing.T) {
 		// base saved before these fields existed gets.
 		{},
 		// A thinking switch off changes nothing about whether the actions run.
-		{captionFieldKeyEnableCaption: true, captionFieldKeyEnableOCR: true,
-			imageFieldKeyCaptionThinking: false, imageFieldKeyOCRThinking: false},
+		{
+			captionFieldKeyEnableCaption: true, captionFieldKeyEnableOCR: true,
+			imageFieldKeyCaptionThinking: false, imageFieldKeyOCRThinking: false,
+		},
 		// Values that reached the pipeline through a form may arrive as strings.
 		{captionFieldKeyEnableCaption: "true", captionFieldKeyEnableOCR: "false"},
 	}
@@ -81,7 +83,8 @@ func TestManualPipelineRejectsOffByValue(t *testing.T) {
 // ship out of blocking the save. The run falls back the same way, so a
 // configuration that can no longer be reproduced must still be editable.
 func TestUnknownPipelineIDSkipsValidation(t *testing.T) {
-	if err := ValidateImagePipelineParams(types.ImagePipelineID("pipeline_from_a_future_release"), map[string]any{}); err != nil {
+	err := ValidateImagePipelineParams(types.ImagePipelineID("pipeline_from_a_future_release"), map[string]any{})
+	if err != nil {
 		t.Errorf("Validate(unknown id) = %v, want nil", err)
 	}
 }

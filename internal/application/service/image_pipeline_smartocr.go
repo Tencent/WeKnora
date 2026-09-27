@@ -54,18 +54,25 @@ const (
 func (smartOcrPipeline) Fields() []types.ImageFieldDef {
 	return []types.ImageFieldDef{
 		{
-			Key:         smartFieldKeyDescribeThinking,
-			Type:        types.ImageFieldTypeBool,
-			Label:       "Describe with thinking",
-			Description: "Let the model reason before it describes the image and reports its attributes. Costs a longer run; use it for images whose content has to be worked out, such as charts and diagrams.",
-			Default:     false,
+			Key:   smartFieldKeyDescribeThinking,
+			Type:  types.ImageFieldTypeBool,
+			Label: "Describe with thinking",
+			// Warning, not recommendation: on some models long reasoning can
+			// crowd out the answer itself and leave the description empty.
+			Description: "Let the model think before it describes the image " +
+				"and reports its attributes. Rarely needed: it costs latency, " +
+				"and on some models long reasoning truncates the description. " +
+				"Enable only when necessary.",
+			Default: false,
 		},
 		{
-			Key:         smartFieldKeyTextThinking,
-			Type:        types.ImageFieldTypeBool,
-			Label:       "Text recognition with thinking",
-			Description: "Let the model reason before transcribing. Use it for dense or degraded text, such as scanned pages and tables.",
-			Default:     false,
+			Key:   smartFieldKeyTextThinking,
+			Type:  types.ImageFieldTypeBool,
+			Label: "Text recognition with thinking",
+			Description: "Let the model think before transcribing. " +
+				"Rarely needed: it costs latency, and on some models long " +
+				"reasoning truncates the text. Enable only when necessary.",
+			Default: false,
 		},
 	}
 }

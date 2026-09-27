@@ -5,6 +5,7 @@
 // store something the pipeline would not run. Both sides read the same rules
 // out of the spec, so a rule added here shows up in the UI with no frontend
 // change; the frontend's own copy of this evaluation is tested against these.
+
 package service
 
 import (
