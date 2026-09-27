@@ -160,7 +160,7 @@ weknora-plugin verify -pubkey ed25519:... acme-search-1.0.0.wkp
   - 默认不回收；桌面端默认 `10m`。
   - 停掉的插件仍在「插件管理」中显示为运行中，路由、独立宿主的通告都不受影响；升级时照常先启动新版本校验，再按空闲时间回收。
   - 插件在两次调用之间要做事（如后台轮询、长连接）时，在 `plugin.yaml` 中声明 `runtime.keepAlive: true`，始终常驻；声明了 `singleton` 的插件同样常驻。
-- 内存占用：「插件管理」列表的「内存」列显示插件各实例的常驻内存（RSS）合计，插件详情的「节点状态」逐个节点显示；被空闲回收的显示「空闲」。统计的是插件进程所在的整个进程组，包括插件派生的子进程和 Linux 网络沙箱的转发进程。
+- 内存占用：「插件管理」列表的「内存」列显示插件各实例的常驻内存（RSS）合计，插件详情的「节点状态」逐个节点显示；被空闲回收的显示「空闲」。统计的是插件进程所在的整个进程组，包括插件派生的子进程。
   - Linux 读 `/proc`，macOS 等系统每次采样运行一次 `ps`；Windows 不统计。采样结果缓存 10 秒，各节点随状态每 30 秒上报一次。
   - 远程插件与 Kubernetes 插件不统计，显示为「—」。
 - 在 Linux 上，插件进程按 `runtime.resources` 限制资源：
@@ -171,6 +171,7 @@ weknora-plugin verify -pubkey ed25519:... acme-search-1.0.0.wkp
   - `1`：必须进沙箱。条件不满足时插件启动失败并在详情中说明原因，不会在不受限的情况下运行。
   - `0`：关闭沙箱。
   - 非 Linux 系统只经出口代理出网。
+  - 沙箱不额外常驻进程：WeKnora 以 `plugin-sandbox` 子命令进入新的命名空间，建好出口代理和 Host API 的回环监听并交给宿主后，直接变成插件进程本身。代价是插件每次启动多出约 0.3 秒（WeKnora 程序自身的启动时间），空闲回收后的首次调用也包括在内。
   - 独立 plugin-host 同样适用，各自探测：插件经出口代理访问 app 节点的 Host API。
 - 网络沙箱需要系统允许非特权用户命名空间：
   - 裸机或虚拟机：Debian 系需 `kernel.unprivileged_userns_clone=1`；Ubuntu 23.10+（含 24.04）需将 `kernel.apparmor_restrict_unprivileged_userns` 设为 0；`user.max_user_namespaces` 不能为 0。

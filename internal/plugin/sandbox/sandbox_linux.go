@@ -3,27 +3,24 @@
 package sandbox
 
 import (
-	"errors"
 	"fmt"
 	"io"
 	"net"
 	"os"
-	"os/exec"
-	"os/signal"
-	"syscall"
 
 	"golang.org/x/sys/unix"
 )
 
 // Main is the helper, already inside the namespaces. It waits for the plugin
 // host to say "go" on stdin (after resource limits are on the helper, so the
-// plugin inherits them), sets up loopback and the relays, runs the plugin
-// and exits with its status.
+// plugin, which it becomes, keeps them), brings loopback up, hands the plugin
+// host a listening socket for each port on PortsFD, and execs the plugin.
+// It returns only if it could not.
 func Main(args []string) int {
 	if len(args) == 1 && args[0] == probeFlag {
 		return probe()
 	}
-	relays, command, err := parseArgs(args)
+	ports, command, err := parseArgs(args)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "plugin-sandbox:", err)
 		return 2
@@ -37,37 +34,50 @@ func Main(args []string) int {
 		fmt.Fprintln(os.Stderr, "plugin-sandbox: bring up loopback in the plugin's network namespace:", err)
 		return ExitSetupFailed
 	}
-	for _, r := range relays {
-		if err := relay(r); err != nil {
-			fmt.Fprintln(os.Stderr, "plugin-sandbox:", err)
+	fds := make([]int, 0, len(ports))
+	for _, port := range ports {
+		fd, err := listenLoopback(port)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "plugin-sandbox: listen on port %d: %v\n", port, err)
 			return ExitSetupFailed
 		}
+		fds = append(fds, fd)
 	}
-	cmd := exec.Command(command[0], command[1:]...)
-	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
-	cmd.SysProcAttr = &syscall.SysProcAttr{Pdeathsig: syscall.SIGKILL}
-	// The plugin host signals the helper to stop the plugin: pass it on, so
-	// the plugin drains its calls, and wait for it to exit.
-	sigs := make(chan os.Signal, 2)
-	signal.Notify(sigs, syscall.SIGTERM, syscall.SIGINT)
-	err = cmd.Start()
-	if err == nil {
-		go func() {
-			for s := range sigs {
-				_ = cmd.Process.Signal(s)
-			}
-		}()
-		err = cmd.Wait()
+	if err := unix.Sendmsg(PortsFD, []byte{'p'}, unix.UnixRights(fds...), nil, 0); err != nil {
+		fmt.Fprintln(os.Stderr, "plugin-sandbox: hand the listening sockets to the plugin host:", err)
+		return ExitSetupFailed
 	}
+	// The plugin host holds them now; the plugin gets none of these, and
+	// no stdin (the go-ahead pipe is done).
+	for _, fd := range fds {
+		_ = unix.Close(fd)
+	}
+	_ = unix.Close(PortsFD)
+	if null, err := unix.Open(os.DevNull, unix.O_RDONLY, 0); err == nil {
+		_ = unix.Dup2(null, 0)
+		_ = unix.Close(null)
+	}
+	err = unix.Exec(command[0], command, os.Environ())
+	fmt.Fprintf(os.Stderr, "plugin-sandbox: run %s: %v\n", command[0], err)
+	return 127
+}
+
+// listenLoopback opens a listening TCP socket on 127.0.0.1:port.
+func listenLoopback(port int) (int, error) {
+	fd, err := unix.Socket(unix.AF_INET, unix.SOCK_STREAM|unix.SOCK_CLOEXEC, 0)
 	if err != nil {
-		var exit *exec.ExitError
-		if errors.As(err, &exit) {
-			return exit.ExitCode()
-		}
-		fmt.Fprintln(os.Stderr, "plugin-sandbox:", err)
-		return 2
+		return -1, err
 	}
-	return 0
+	addr := &unix.SockaddrInet4{Port: port, Addr: [4]byte{127, 0, 0, 1}}
+	if err := unix.Bind(fd, addr); err != nil {
+		_ = unix.Close(fd)
+		return -1, err
+	}
+	if err := unix.Listen(fd, unix.SOMAXCONN); err != nil {
+		_ = unix.Close(fd)
+		return -1, err
+	}
+	return fd, nil
 }
 
 // probe sets the sandbox up as for a plugin, loopback and a listener on it,
@@ -102,47 +112,6 @@ func loopbackUp() error {
 	}
 	ifr.SetUint16(ifr.Uint16() | unix.IFF_UP)
 	return unix.IoctlIfreq(fd, unix.SIOCSIFFLAGS, ifr)
-}
-
-func relay(r Relay) error {
-	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", r.Port))
-	if err != nil {
-		return fmt.Errorf("listen on port %d: %w", r.Port, err)
-	}
-	go func() {
-		for {
-			in, err := ln.Accept()
-			if err != nil {
-				return
-			}
-			go func() {
-				defer func() { _ = in.Close() }()
-				out, err := net.Dial("unix", r.Socket)
-				if err != nil {
-					return
-				}
-				defer func() { _ = out.Close() }()
-				pipe(in, out)
-			}()
-		}
-	}()
-	return nil
-}
-
-// pipe copies both ways until either side is done.
-func pipe(a, b net.Conn) {
-	done := make(chan struct{}, 2)
-	cp := func(dst, src net.Conn) {
-		_, _ = io.Copy(dst, src)
-		if c, ok := dst.(interface{ CloseWrite() error }); ok {
-			_ = c.CloseWrite()
-		}
-		done <- struct{}{}
-	}
-	go cp(a, b)
-	go cp(b, a)
-	<-done
-	<-done
 }
 
 // Supported reports whether this system can run plugins in a sandbox.

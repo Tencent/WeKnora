@@ -74,7 +74,7 @@ type spec struct {
 	dir string // extracted package
 	// direct are host:port addresses reached without the egress proxy.
 	direct []string
-	// hostAPI is the loopback address of this node's Host API, relayed into
+	// hostAPI is the loopback address of this node's Host API, forwarded into
 	// a sandboxed plugin's network namespace.
 	hostAPI string
 }

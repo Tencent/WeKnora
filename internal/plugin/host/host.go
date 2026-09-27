@@ -173,7 +173,8 @@ func (m *Manager) SetIdleTimeout(d time.Duration) {
 }
 
 // SetHostAPIAddr names this node's Host API on loopback ("127.0.0.1:8080"),
-// which sandboxed plugins (see WEKNORA_PLUGIN_NETNS) reach through a relay.
+// which sandboxed plugins (see WEKNORA_PLUGIN_NETNS) reach on the same port
+// inside their namespace, forwarded by this host.
 func (m *Manager) SetHostAPIAddr(addr string) {
 	m.mu.Lock()
 	m.hostAPI = addr

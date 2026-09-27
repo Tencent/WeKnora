@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -68,8 +69,8 @@ func TestSandboxedPluginOnlyReachesTheProxyAndHostAPI(t *testing.T) {
 	}
 }
 
-// A sandboxed plugin gets SIGTERM, through the helper, and exits on it: a
-// stop does not wait out the grace period for the kill.
+// A sandboxed plugin gets SIGTERM and exits on it: a stop does not wait out
+// the grace period for the kill.
 func TestSandboxedPluginStopsOnSIGTERM(t *testing.T) {
 	fastTimings(t)
 	stopGrace = 20 * time.Second
@@ -123,5 +124,45 @@ func TestAutoModeProbesTheSystem(t *testing.T) {
 	}
 	if got := m.Egress("acme.echo"); got != driver.EgressSandboxed || dial != "dial failed" {
 		t.Fatalf("sandboxed: egress = %q, direct dial = %q", got, dial)
+	}
+}
+
+// The sandbox helper becomes the plugin: the process the host started is
+// the plugin itself, alone in its process group, with no helper left
+// relaying in the namespace.
+func TestSandboxLeavesOnlyThePlugin(t *testing.T) {
+	fastTimings(t)
+	t.Setenv(envNetns, "1")
+	m := NewManager()
+	defer m.Close()
+	if err := reconcile.Activate(context.Background(), m, install(t, "1.0.0", "")); err != nil {
+		if strings.Contains(err.Error(), "user namespaces") {
+			t.Skipf("unprivileged user namespaces are not available here: %v", err)
+		}
+		t.Fatalf("Activate: %v", err)
+	}
+	pid, err := search(t, m, "pid")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.mu.Lock()
+	started := m.procs["acme.echo"].group.Load()
+	m.mu.Unlock()
+	if pid != strconv.FormatInt(started, 10) {
+		t.Fatalf("the plugin runs as pid %s, the host started %d: a helper is still in between", pid, started)
+	}
+	members := 0
+	entries, _ := os.ReadDir("/proc")
+	for _, e := range entries {
+		stat, err := os.ReadFile("/proc/" + e.Name() + "/stat")
+		if err != nil {
+			continue
+		}
+		if pgrp, _, ok := parseStat(stat); ok && int64(pgrp) == started {
+			members++
+		}
+	}
+	if members != 1 {
+		t.Fatalf("%d processes in the plugin's group, want the plugin alone", members)
 	}
 }
