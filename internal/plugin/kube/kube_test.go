@@ -28,6 +28,8 @@ type fakeAPI struct {
 	polls   int
 	// readyAfter is how many deployment reads see it not yet rolled out.
 	readyAfter int
+	// failApply fails applying paths that contain it.
+	failApply string
 }
 
 func (f *fakeAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -39,6 +41,10 @@ func (f *fakeAPI) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	switch r.Method {
 	case http.MethodPatch:
+		if f.failApply != "" && strings.Contains(r.URL.Path, f.failApply) {
+			w.WriteHeader(http.StatusTooManyRequests)
+			return
+		}
 		if r.Header.Get("Content-Type") != "application/apply-patch+yaml" ||
 			r.URL.Query().Get("fieldManager") != "weknora" {
 			w.WriteHeader(http.StatusBadRequest)
@@ -751,5 +757,42 @@ func TestAbortedUpgradeRestoresThePreviousVersion(t *testing.T) {
 	defer d.mu.Unlock()
 	if len(d.rollouts) != 0 {
 		t.Fatal("the aborted rollout still runs")
+	}
+}
+
+// A node that fails to apply (a restarted node whose API calls are
+// throttled) leaves the cluster's resources to the nodes serving them: it
+// deletes nothing and rolls nothing back, and says why.
+func TestFailedApplyLeavesTheSharedResources(t *testing.T) {
+	api := &fakeAPI{applied: map[string]map[string]any{}}
+	serving, _ := newDriver(t, api)
+	ctx := context.Background()
+	v1 := loaded(t, "acme.search")
+	if err := reconcile.Activate(ctx, serving, v1); err != nil {
+		t.Fatal(err)
+	}
+	before := len(api.applied)
+
+	// Another node, restarted: nothing loaded yet.
+	api.mu.Lock()
+	api.failApply = "/deployments/"
+	api.mu.Unlock()
+	restarted, err := New(serving.cfg, &fakeEndpoints{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := restarted.Stage(ctx, nil, v1); err == nil || !strings.Contains(err.Error(), "429") {
+		t.Fatalf("want the apply error, got %v", err)
+	}
+	// And one upgrading, whose previous version must not be put back.
+	if _, err := restarted.Stage(ctx, v1, withVersion(v1, "1.3.0")); err == nil {
+		t.Fatal("want the apply error")
+	}
+	if len(api.deleted) != 0 || len(api.applied) != before {
+		t.Fatalf("a failed apply deleted %v, left %d of %d resources", api.deleted, len(api.applied), before)
+	}
+	depPath := "/apis/apps/v1/namespaces/plugins/deployments/" + ResourceName("acme.search")
+	if b, _ := json.Marshal(api.applied[depPath]); !strings.Contains(string(b), `"weknora.plugin/version":"1.2.0"`) {
+		t.Fatalf("the serving deployment changed: %s", b)
 	}
 }

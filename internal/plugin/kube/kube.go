@@ -398,7 +398,10 @@ func (d *Driver) Stage(ctx context.Context, prev, l *reconcile.Loaded) (reconcil
 	d.mu.Unlock()
 	st := &rolloutStage{d: d, ctx: later, prev: prev, m: m, name: ResourceName(m.ID)}
 	if err := d.applyAll(ctx, m, st.name, secret); err != nil {
-		st.restore()
+		// The resources are the cluster's, shared by every node: this
+		// node failing to apply (the API unreachable from here) must not
+		// roll them back or delete them under the others. The retry
+		// applies again.
 		return nil, err
 	}
 	if ready, _, err := d.rolledOut(ctx, st.name); err == nil && ready {
@@ -504,7 +507,10 @@ func (s *rolloutStage) serveLocked() {
 }
 
 // Abort implements reconcile.Staged: stop waiting for the rollout and put
-// the previous version's resources back.
+// the previous version's resources back. The reconciler aborts on what the
+// database says (a newer version, a rollback, the plugin turned off), which
+// every node agrees on, so each node undoing the shared resources the same
+// way is safe.
 func (s *rolloutStage) Abort() {
 	s.d.stopRollout(s.m.ID)
 	s.mu.Lock()
