@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -20,9 +21,46 @@ type fakeAPI struct {
 	nodeErrors  map[string]error
 	blockErrors map[string]error
 	blockCalls  map[string]int
+
+	// workspaceCalls counts workspace listings, so a test can prove a selection
+	// that needs no workspace tree never asks for one.
+	workspaceCalls int
+
+	// getNodes holds nodes that are reachable by id but absent from every
+	// parent listing — exactly the personal-space case — while getNodeErrors
+	// and getNodeCalls make a direct read observable.
+	getNodes      map[string]node
+	getNodeErrors map[string]error
+	getNodeCalls  map[string]int
+
+	// Multi-dimensional tables (able). Tables are listed per Base, fields per
+	// table and records one page at a time; notableRecordsFunc, when set,
+	// synthesises a page from the requested token so pagination and the record
+	// cap can be exercised without materialising thousands of rows.
+	notableTables      map[string][]notableTable
+	notableFields      map[string][]notableField
+	notablePages       map[string]notableRecordPage
+	notableTableErrors map[string]error
+	notableFieldErrors map[string]error
+	notableError       error
+	notableTableCalls  map[string]int
+	notableFieldCalls  map[string]int
+	notableRecordCalls []string
+	notableRecordsFunc func(baseID, tableID, nextToken string) (notableRecordPage, error)
+}
+
+// notableTableKey addresses one table's metadata in the fake.
+func notableTableKey(baseID, tableID string) string {
+	return baseID + "/" + tableID
+}
+
+// notablePageKey addresses one records/list page; the empty token is page one.
+func notablePageKey(baseID, tableID, nextToken string) string {
+	return notableTableKey(baseID, tableID) + "/" + nextToken
 }
 
 func (f *fakeAPI) listWorkspaces(context.Context) ([]workspace, error) {
+	f.workspaceCalls++
 	return f.workspaces, nil
 }
 
@@ -37,6 +75,70 @@ func (f *fakeAPI) listNodes(_ context.Context, parentID string) ([]node, error) 
 func (f *fakeAPI) listNodesPage(ctx context.Context, parentID, _ string) ([]node, string, error) {
 	nodes, err := f.listNodes(ctx, parentID)
 	return nodes, "", err
+}
+
+// getNode resolves a node by id: the explicit index first — that is how a
+// personal-space node exists without appearing in any listing — then the parent
+// listings, so every existing fixture keeps resolving.
+func (f *fakeAPI) getNode(_ context.Context, nodeID string) (node, error) {
+	if f.getNodeCalls == nil {
+		f.getNodeCalls = make(map[string]int)
+	}
+	f.getNodeCalls[nodeID]++
+	if err := f.getNodeErrors[nodeID]; err != nil {
+		return node{}, err
+	}
+	if item, exists := f.getNodes[nodeID]; exists {
+		return item, nil
+	}
+	for _, children := range f.nodes {
+		if item, exists := childByID(children, nodeID); exists {
+			return item, nil
+		}
+	}
+	return node{}, fmt.Errorf("%w: DingTalk node %q is unavailable",
+		datasource.ErrResourceNotFound, nodeID)
+}
+
+func (f *fakeAPI) listNotableTables(_ context.Context, baseID string) ([]notableTable, error) {
+	if f.notableTableCalls == nil {
+		f.notableTableCalls = make(map[string]int)
+	}
+	f.notableTableCalls[baseID]++
+	if err := f.notableTableErrors[baseID]; err != nil {
+		return nil, err
+	}
+	return f.notableTables[baseID], nil
+}
+
+func (f *fakeAPI) listNotableFields(
+	_ context.Context,
+	baseID, tableID string,
+) ([]notableField, error) {
+	if f.notableFieldCalls == nil {
+		f.notableFieldCalls = make(map[string]int)
+	}
+	key := notableTableKey(baseID, tableID)
+	f.notableFieldCalls[key]++
+	if err := f.notableFieldErrors[key]; err != nil {
+		return nil, err
+	}
+	return f.notableFields[key], nil
+}
+
+func (f *fakeAPI) listNotableRecords(
+	_ context.Context,
+	baseID, tableID, nextToken string,
+) (notableRecordPage, error) {
+	key := notableTableKey(baseID, tableID)
+	f.notableRecordCalls = append(f.notableRecordCalls, key+"/"+nextToken)
+	if f.notableRecordsFunc != nil {
+		return f.notableRecordsFunc(baseID, tableID, nextToken)
+	}
+	if f.notableError != nil {
+		return notableRecordPage{}, f.notableError
+	}
+	return f.notablePages[notablePageKey(baseID, tableID, nextToken)], nil
 }
 
 func (f *fakeAPI) documentBlocks(_ context.Context, documentID string) ([]json.RawMessage, error) {
@@ -360,6 +462,116 @@ func TestConnectorRejectsCrossWorkspaceResourcePath(t *testing.T) {
 	if !errors.As(err, &partial) || len(items) != 1 ||
 		!strings.Contains(items[0].Metadata["error"], "different workspace") || len(api.blockCalls) != 0 {
 		t.Fatalf("FetchAll() = %#v, %v; want isolated workspace mismatch", items, err)
+	}
+}
+
+// A node in a workspace that GET /v2.0/wiki/workspaces never returns — the
+// operator's personal space — is still a valid explicit selection. The
+// reference names the node, so the connector reads that node by id instead of
+// requiring its workspace to be enumerated.
+func TestFetchAllResolvesExplicitNodeOutsideTheWorkspaceListing(t *testing.T) {
+	api := &fakeAPI{
+		// Only team workspaces are listed; the personal space is not.
+		workspaces: []workspace{{ID: "team", RootNodeID: "team-root", Name: "Team"}},
+		getNodes: map[string]node{
+			"personal-doc": {
+				ID: "personal-doc", WorkspaceID: "personal-space",
+				Name: "Weekly.adoc", Type: "FILE", Category: "ALIDOC", Extension: "adoc",
+				ModifiedTimestamp: 1_767_508_041_000,
+			},
+		},
+		blocks: map[string][]json.RawMessage{
+			"personal-doc": {rawJSON(`{
+				"blockType":"paragraph",
+				"children":[{"elementType":"text","text":"Week 12"}]
+			}`)},
+		},
+	}
+	resourceID, err := encodeResourceReference(resourceReference{
+		WorkspaceID: "personal-space", NodeID: "personal-doc",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	items, err := testConnector(api).FetchAll(
+		context.Background(), testConfig(resourceID), []string{resourceID},
+	)
+	if err != nil {
+		t.Fatalf("FetchAll() error = %v", err)
+	}
+	if len(items) != 1 || items[0].ExternalID != "personal-doc" ||
+		items[0].SourceResourceID != resourceID ||
+		string(items[0].Content) != "# Weekly.adoc\n\nWeek 12\n" {
+		t.Fatalf("FetchAll() = %#v, want the personal-space document", items)
+	}
+	if api.getNodeCalls["personal-doc"] != 1 {
+		t.Fatalf("node reads = %#v, want the node read by id", api.getNodeCalls)
+	}
+	if items[0].Metadata["workspace_id"] != "personal-space" {
+		t.Fatalf("workspace metadata = %#v", items[0].Metadata)
+	}
+}
+
+// The exception is limited to references that name a node. A whole-workspace
+// selection still needs the listing, because that is the only way to learn the
+// workspace root.
+func TestFetchAllRejectsUnlistedWorkspaceWithoutAnExplicitNode(t *testing.T) {
+	api := &fakeAPI{
+		workspaces: []workspace{{ID: "team", RootNodeID: "team-root", Name: "Team"}},
+	}
+
+	items, err := testConnector(api).FetchAll(
+		context.Background(), testConfig("personal-space"), []string{"personal-space"},
+	)
+	var partial *datasource.PartialFetchError
+	if !errors.As(err, &partial) || len(items) != 1 {
+		t.Fatalf("FetchAll() = %#v, %v; want one failed resource", items, err)
+	}
+	if items[0].Metadata["error_reason_code"] != "dingtalk_resource_failed" ||
+		!strings.Contains(items[0].Metadata["error"], `workspace "personal-space" is unavailable`) {
+		t.Fatalf("failure item = %#v", items[0])
+	}
+	if len(api.getNodeCalls) != 0 {
+		t.Fatalf("an unnamed node was read: %#v", api.getNodeCalls)
+	}
+}
+
+// Expanding an explicit folder outside the workspace listing works the same
+// way: the folder is read by id and then its children are listed.
+func TestListResourcesExpandsAnExplicitNodeOutsideTheWorkspaceListing(t *testing.T) {
+	api := &fakeAPI{
+		workspaces: []workspace{{ID: "team", RootNodeID: "team-root", Name: "Team"}},
+		getNodes: map[string]node{
+			"personal-folder": {
+				ID: "personal-folder", WorkspaceID: "personal-space",
+				Name: "我的文档", Type: "FOLDER", HasChildren: true,
+			},
+		},
+		nodes: map[string][]node{
+			"personal-folder": {{
+				ID: "personal-doc", WorkspaceID: "personal-space", Name: "Plan.adoc",
+				Type: "FILE", Category: "ALIDOC", Extension: "adoc",
+			}},
+		},
+	}
+	resourceID, err := encodeResourceReference(resourceReference{
+		WorkspaceID: "personal-space", NodeID: "personal-folder",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	resources, err := testConnector(api).ListResources(context.Background(), testConfig(), resourceID)
+	if err != nil {
+		t.Fatalf("ListResources() error = %v", err)
+	}
+	if len(resources) != 1 || resources[0].Type != "document" || resources[0].Name != "Plan.adoc" {
+		t.Fatalf("ListResources() = %#v, want the folder's document", resources)
+	}
+	ref, err := decodeResourceReference(resources[0].ExternalID)
+	if err != nil || ref.NodeID != "personal-doc" || ref.WorkspaceID != "personal-space" {
+		t.Fatalf("child reference = %#v, %v", ref, err)
 	}
 }
 

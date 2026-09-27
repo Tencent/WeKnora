@@ -21,6 +21,16 @@ import (
 const (
 	cursorVersion     = 2
 	maxTraversalNodes = 1_000_000
+
+	// resourceTypeBase and resourceTypeBaseChild are the picker types of a
+	// multi-dimensional table and of the wiki documents living under one. They
+	// are distinct from the listing's "folder"/"document" because what selecting
+	// them syncs differs: a base= reference ingests every table of the Base as
+	// one document, while each child is a separate wiki node that syncs only
+	// when it is selected itself. The picker labels both, so a reader cannot
+	// mistake the children for the Base's content.
+	resourceTypeBase      = "base"
+	resourceTypeBaseChild = "base_child"
 )
 
 // mediaExtensions are the file types this connector deliberately never
@@ -107,6 +117,10 @@ const maxValidateProbes = 5
 // Validate checks the application credentials and operator access, including
 // node listing and a sample document read when one is visible in a workspace.
 //
+// A saved base= selection is content in its own right and is probed first: a
+// Base lives outside the workspace tree, so proving it readable proves the
+// credentials even when no workspace is reachable.
+//
 // The operator is not expected to reach every workspace in the tenant: app
 // credentials are valid as long as one reachable workspace yields one readable
 // document. Reading the first document of the first workspace and failing on it
@@ -118,6 +132,24 @@ func (c *Connector) Validate(ctx context.Context, dataSourceConfig *types.DataSo
 		return err
 	}
 	api := c.api(cfg)
+
+	// Each base reference is probed through the same call the sync uses, so a
+	// pass here means the selection will really produce content.
+	var baseErr error
+	for _, resourceID := range dataSourceConfig.ResourceIDs {
+		ref, err := decodeResourceReference(resourceID)
+		if err != nil || ref.BaseID == "" {
+			// A malformed selection is reported by the sync, which has the
+			// per-scope failure channel to carry it.
+			continue
+		}
+		if _, err := api.listNotableTables(ctx, ref.BaseID); err != nil {
+			baseErr = fmt.Errorf("base %q: %w", ref.BaseID, err)
+			continue
+		}
+		return nil
+	}
+
 	workspaces, err := api.listWorkspaces(ctx)
 	if err != nil {
 		return fmt.Errorf("validate DingTalk data source: %w", err)
@@ -166,6 +198,13 @@ func (c *Connector) Validate(ctx context.Context, dataSourceConfig *types.DataSo
 		if probes >= maxValidateProbes {
 			break
 		}
+	}
+	// A selected Base that exists but cannot be read is reported before the
+	// acceptances below: unlike an unexplored folder it is not an unknown, it is
+	// a selection that was probed and failed, so the data source would sync
+	// nothing from it.
+	if baseErr != nil {
+		return fmt.Errorf("validate DingTalk data source: %w", baseErr)
 	}
 	// Folders were left unexplored, because the listing budget ran out or a
 	// folder could not be listed, so an unreadable document elsewhere does not
@@ -321,9 +360,69 @@ func (c *Connector) ListResources(
 		return resources, nil
 	}
 
+	// A describe request names a saved reference, not a parent whose children
+	// are wanted: it answers with one row for the reference itself. It comes
+	// first because the describe form is not a resource reference and would not
+	// decode as one. The log line says which of the two the picker asked for, so
+	// a name lookup is never mistaken for an expansion in the server log.
+	if reference, isDescribe := strings.CutPrefix(parentID, describedResourcePrefix); isDescribe {
+		logger.Debugf(ctx, "[DingTalk] describe resource %s", reference)
+		resource, err := describeResource(ctx, api, reference)
+		if err != nil {
+			return nil, err
+		}
+		return []types.Resource{resource}, nil
+	}
 	parentRef, err := decodeResourceReference(parentID)
 	if err != nil {
 		return nil, err
+	}
+	if parentRef.BaseID != "" {
+		// A Base is a wiki node, so GET /v2.0/wiki/nodes?parentNodeId=<baseId>
+		// lists the documents that live under it and the picker can expand one
+		// like any other node. The listing is reached through the id the
+		// reference already carries: a Base is self-addressing, so this works
+		// even when its workspace is never enumerated. The children are wiki
+		// nodes, not the Base's tables — the tables are what the sync reads, and
+		// the Base's own row says so.
+		children, err := api.listNodes(ctx, parentRef.BaseID)
+		if err != nil {
+			return nil, err
+		}
+		resources := make([]types.Resource, 0, len(children))
+		for _, child := range children {
+			if !child.isFolder() && !child.isDocument() {
+				continue
+			}
+			// A child is addressed as a bare node reference: its own id is what
+			// resolves it, and it cannot hang off a workspace-rooted ancestor
+			// path because a Base is not a workspace root.
+			childRef := parentRef.child(child.ID)
+			resourceID, err := encodeResourceReference(childRef)
+			if err != nil {
+				return nil, err
+			}
+			resources = append(resources, types.Resource{
+				ExternalID:  resourceID,
+				Name:        child.title(),
+				Type:        resourceTypeBaseChild,
+				URL:         child.URL,
+				ModifiedAt:  child.modifiedAt(),
+				ParentID:    parentID,
+				HasChildren: child.isFolder(),
+				Metadata: map[string]interface{}{
+					// The child reports the workspace it lives in: a base
+					// reference names none, and the workspace of a Base is not
+					// enumerable in the first place.
+					"workspace_id": child.WorkspaceID,
+					"node_id":      child.ID,
+					"category":     child.Category,
+					"extension":    child.Extension,
+				},
+			})
+		}
+		sortResources(resources)
+		return resources, nil
 	}
 	parentNodeID := parentRef.NodeID
 	if parentNodeID == "" {
@@ -333,8 +432,17 @@ func (c *Connector) ListResources(
 		}
 		item, exists := workspaceByID(workspaces, parentRef.WorkspaceID)
 		if !exists {
-			return nil, fmt.Errorf("%w: DingTalk workspace %q is unavailable",
-				datasource.ErrResourceNotFound, parentRef.WorkspaceID)
+			// A workspace that is not in the listing is not a failure here.
+			// Personal spaces are readable by id but are never enumerated, and
+			// the picker asks for a saved selection's ancestors when it reveals
+			// it: answering "no children" is correct, whereas an error surfaces
+			// as a spurious failure toast for a data source that syncs fine.
+			// The sync path keeps the strict check, because a whole workspace
+			// that cannot be enumerated genuinely cannot be synced.
+			logger.Debugf(ctx,
+				"[DingTalk] workspace %q is not in the listing; reporting no children",
+				parentRef.WorkspaceID)
+			return []types.Resource{}, nil
 		}
 		parentNodeID = strings.TrimSpace(item.RootNodeID)
 		if parentNodeID == "" {
@@ -374,6 +482,11 @@ func (c *Connector) ListResources(
 				parentID)
 			return []types.Resource{}, nil
 		}
+		// Adopt the resolved reference rather than the saved one: a bare node
+		// reference names no workspace, and its children must embed the
+		// workspace the node itself reported or their ids could not be resolved
+		// on the next call.
+		parentRef = scopes[0].Reference
 		parentNodeID = scopes[0].StartNodeID
 	}
 
@@ -386,7 +499,8 @@ func (c *Connector) ListResources(
 		if !child.isFolder() && !child.isDocument() {
 			continue
 		}
-		if child.WorkspaceID != "" && child.WorkspaceID != parentRef.WorkspaceID {
+		if child.WorkspaceID != "" && parentRef.WorkspaceID != "" &&
+			child.WorkspaceID != parentRef.WorkspaceID {
 			return nil, fmt.Errorf("DingTalk node %q belongs to a different workspace", child.ID)
 		}
 		childRef := parentRef.child(child.ID)
@@ -562,6 +676,12 @@ type syncScope struct {
 }
 
 func (s syncScope) contains(candidate syncScope) bool {
+	// A Base has no workspace and no node, so the workspace comparison below
+	// would make every Base scope look like it covers every other one. Two
+	// Bases are only related when they are the same Base.
+	if s.Reference.BaseID != "" || candidate.Reference.BaseID != "" {
+		return s.Reference.BaseID != "" && s.Reference.BaseID == candidate.Reference.BaseID
+	}
 	if s.Reference.WorkspaceID != candidate.Reference.WorkspaceID {
 		return false
 	}
@@ -599,9 +719,15 @@ func (c *Connector) sync(
 	}
 
 	api := c.api(cfg)
-	workspaces, err := api.listWorkspaces(ctx)
-	if err != nil {
-		return nil, nil, err
+	// A Base lives outside the workspace tree, so a selection made only of
+	// base references must not depend on the workspace listing at all: it is
+	// resolved by id, and a tenant whose listing is unavailable can still sync it.
+	var workspaces []workspace
+	if workspaceListingRequired(selected) {
+		workspaces, err = api.listWorkspaces(ctx)
+		if err != nil {
+			return nil, nil, err
+		}
 	}
 	scopes, failures, err := resolveSyncScopes(ctx, api, workspaces, selected)
 	if err != nil {
@@ -638,6 +764,34 @@ func (c *Connector) sync(
 			if stored := previous.Resources[scope.ResourceID]; stored != nil {
 				oldRevisions = stored
 			}
+		}
+		if baseID := scope.Reference.BaseID; baseID != "" {
+			// A Base is one object with no tree: nothing to scan and nothing to
+			// skip, so the scope yields exactly one item. Its tables are counted
+			// as one unit in the summary line for the same reason.
+			item, readErr := readBase(ctx, api, scope.ResourceID, baseID)
+			if readErr != nil {
+				if isContextError(readErr) {
+					return nil, nil, readErr
+				}
+				next.Resources[scope.ResourceID] = cloneRevisions(oldRevisions)
+				logger.Warnf(ctx, "[DingTalk] read base %s failed, will retry next sync: %v",
+					baseID, readErr)
+				items = append(items, failedBase(scope.ResourceID, baseID, readErr))
+				logger.Infof(ctx, "[DingTalk] scope base/%s: total=1 synced=0 skipped=0 failed=1",
+					baseID)
+				failedDocuments++
+				continue
+			}
+			seenDocuments[baseID] = struct{}{}
+			items = append(items, item)
+			// A Base exposes no revision the connector could compare, so it is
+			// re-read on every sync. Recording it keeps it out of the deletion
+			// reconciliation below, which must never delete a live selection.
+			next.Resources[scope.ResourceID] = map[string]string{baseID: ""}
+			logger.Infof(ctx, "[DingTalk] scope base/%s: total=1 synced=1 skipped=0 failed=0",
+				baseID)
+			continue
 		}
 		documents, skipped, err := scanScope(ctx, api, scope)
 		if err != nil {
@@ -771,6 +925,11 @@ func resolveSyncScopes(
 ) ([]syncScope, map[string]error, error) {
 	byID := make(map[string]workspace, len(workspaces))
 	for _, item := range workspaces {
+		// An entry keyed by the empty id would make the bare node form look like
+		// an enumerated workspace, which it must never be.
+		if strings.TrimSpace(item.ID) == "" {
+			continue
+		}
 		byID[item.ID] = item
 	}
 	childrenCache := make(map[string][]node)
@@ -795,63 +954,64 @@ func resolveSyncScopes(
 		if err != nil {
 			return syncScope{}, err
 		}
-		item, exists := byID[ref.WorkspaceID]
-		if !exists {
-			return syncScope{}, fmt.Errorf("%w: DingTalk workspace %q is unavailable",
-				datasource.ErrResourceNotFound, ref.WorkspaceID)
+		if ref.BaseID != "" {
+			// A Base is addressed by its own id and has no workspace to look
+			// up, so it resolves without the workspace listing.
+			return syncScope{ResourceID: canonicalID, Reference: ref}, nil
 		}
+
+		item, enumerated := byID[ref.WorkspaceID]
 		rootNodeID := strings.TrimSpace(item.RootNodeID)
-		if rootNodeID == "" {
-			return syncScope{}, fmt.Errorf("DingTalk workspace %q has no root node", ref.WorkspaceID)
-		}
 		if ref.NodeID == "" {
+			// The whole-workspace form has no other way to learn the workspace
+			// root, so this is the one form that requires the workspace to be
+			// enumerated.
+			if !enumerated {
+				return syncScope{}, fmt.Errorf("%w: DingTalk workspace %q is unavailable",
+					datasource.ErrResourceNotFound, ref.WorkspaceID)
+			}
+			if rootNodeID == "" {
+				return syncScope{}, fmt.Errorf("DingTalk workspace %q has no root node", ref.WorkspaceID)
+			}
 			return syncScope{
 				ResourceID: canonicalID, Reference: ref, StartNodeID: rootNodeID,
 			}, nil
 		}
 
-		parentNodeID := rootNodeID
-		for _, ancestorID := range ref.Ancestors {
-			children, err := listChildren(parentNodeID)
+		// An explicitly referenced node must resolve even when its workspace is
+		// never enumerated: GET /v2.0/wiki/workspaces returns team workspaces
+		// only, so a node in the operator's personal space is reachable by id
+		// but absent from that list. When the workspace is enumerated its tree
+		// is walked as before; otherwise — the bare node form included, which
+		// names no workspace at all — the node is read directly and the wiki API
+		// decides whether it is readable.
+		if enumerated && rootNodeID != "" {
+			selectedNode, err := walkToSelectedNode(ref, rootNodeID, listChildren)
 			if err != nil {
-				return syncScope{}, fmt.Errorf("resolve DingTalk resource path: %w", err)
+				return syncScope{}, err
 			}
-			ancestor, exists := childByID(children, ancestorID)
-			if !exists || !ancestor.isFolder() {
-				return syncScope{}, fmt.Errorf("%w: DingTalk ancestor %q is unavailable",
-					datasource.ErrResourceNotFound, ancestorID)
-			}
-			if ancestor.WorkspaceID != "" && ancestor.WorkspaceID != ref.WorkspaceID {
-				return syncScope{}, fmt.Errorf("DingTalk ancestor %q belongs to a different workspace", ancestorID)
-			}
-			parentNodeID = ancestor.ID
+			return scopeForNode(ref, canonicalID, selectedNode)
 		}
-		children, err := listChildren(parentNodeID)
+
+		selectedNode, err := api.getNode(ctx, ref.NodeID)
 		if err != nil {
-			return syncScope{}, fmt.Errorf("resolve DingTalk resource: %w", err)
+			return syncScope{}, fmt.Errorf("resolve DingTalk node %q: %w", ref.NodeID, err)
 		}
-		selectedNode, exists := childByID(children, ref.NodeID)
-		if !exists {
-			return syncScope{}, fmt.Errorf("%w: DingTalk node %q is unavailable",
-				datasource.ErrResourceNotFound, ref.NodeID)
+		if ref.WorkspaceID == "" {
+			// The bare node form names no workspace: the user cannot know one,
+			// and a personal-space node is in no listed workspace anyway. The
+			// node reports the workspace it lives in, so the scope adopts it —
+			// the scope label, the cursor key and the metadata of every document
+			// below then carry the workspace the reference omitted. Re-encoding
+			// the canonical id makes the cursor key identical whether the same
+			// node was picked from the tree or pasted.
+			ref.WorkspaceID = strings.TrimSpace(selectedNode.WorkspaceID)
+			canonicalID, err = encodeResourceReference(ref)
+			if err != nil {
+				return syncScope{}, err
+			}
 		}
-		if selectedNode.WorkspaceID != "" && selectedNode.WorkspaceID != ref.WorkspaceID {
-			return syncScope{}, fmt.Errorf("DingTalk node %q belongs to a different workspace", ref.NodeID)
-		}
-		switch {
-		case selectedNode.isFolder():
-			return syncScope{
-				ResourceID: canonicalID, Reference: ref, StartNodeID: selectedNode.ID,
-			}, nil
-		case selectedNode.isDocument():
-			document := selectedNode
-			return syncScope{
-				ResourceID: canonicalID, Reference: ref, Document: &document,
-			}, nil
-		default:
-			return syncScope{}, fmt.Errorf("DingTalk node %q is not a supported online document or folder",
-				ref.NodeID)
-		}
+		return scopeForNode(ref, canonicalID, selectedNode)
 	}
 	var scopes []syncScope
 	failures := make(map[string]error)
@@ -895,6 +1055,91 @@ func resolveSyncScopes(
 		}
 	}
 	return compacted, failures, nil
+}
+
+// walkToSelectedNode follows a saved reference's ancestor path from the
+// workspace root and returns the selected node. This is the strict resolution:
+// every ancestor must exist, be a folder and belong to the same workspace, so a
+// stale saved path is reported instead of fetching something else.
+func walkToSelectedNode(
+	ref resourceReference,
+	rootNodeID string,
+	listChildren func(string) ([]node, error),
+) (node, error) {
+	parentNodeID := rootNodeID
+	for _, ancestorID := range ref.Ancestors {
+		children, err := listChildren(parentNodeID)
+		if err != nil {
+			return node{}, fmt.Errorf("resolve DingTalk resource path: %w", err)
+		}
+		ancestor, exists := childByID(children, ancestorID)
+		if !exists || !ancestor.isFolder() {
+			return node{}, fmt.Errorf("%w: DingTalk ancestor %q is unavailable",
+				datasource.ErrResourceNotFound, ancestorID)
+		}
+		if ancestor.WorkspaceID != "" && ancestor.WorkspaceID != ref.WorkspaceID {
+			return node{}, fmt.Errorf("DingTalk ancestor %q belongs to a different workspace", ancestorID)
+		}
+		parentNodeID = ancestor.ID
+	}
+	children, err := listChildren(parentNodeID)
+	if err != nil {
+		return node{}, fmt.Errorf("resolve DingTalk resource: %w", err)
+	}
+	selectedNode, exists := childByID(children, ref.NodeID)
+	if !exists {
+		return node{}, fmt.Errorf("%w: DingTalk node %q is unavailable",
+			datasource.ErrResourceNotFound, ref.NodeID)
+	}
+	return selectedNode, nil
+}
+
+// scopeForNode turns a resolved node into a sync scope, refusing a node that
+// belongs to a different workspace than the reference names. Both resolution
+// paths share it so a directly read node is checked exactly like a listed one.
+func scopeForNode(ref resourceReference, canonicalID string, selectedNode node) (syncScope, error) {
+	if strings.TrimSpace(selectedNode.ID) == "" {
+		return syncScope{}, fmt.Errorf("%w: DingTalk node %q is unavailable",
+			datasource.ErrResourceNotFound, ref.NodeID)
+	}
+	if selectedNode.WorkspaceID != "" && ref.WorkspaceID != "" &&
+		selectedNode.WorkspaceID != ref.WorkspaceID {
+		return syncScope{}, fmt.Errorf("DingTalk node %q belongs to a different workspace", ref.NodeID)
+	}
+	switch {
+	case selectedNode.isFolder():
+		return syncScope{
+			ResourceID: canonicalID, Reference: ref, StartNodeID: selectedNode.ID,
+		}, nil
+	case selectedNode.isDocument():
+		document := selectedNode
+		return syncScope{
+			ResourceID: canonicalID, Reference: ref, Document: &document,
+		}, nil
+	default:
+		return syncScope{}, fmt.Errorf("DingTalk node %q is not a supported online document or folder",
+			ref.NodeID)
+	}
+}
+
+// workspaceListingRequired reports whether any selection has to consult the
+// workspace tree. A base reference has no workspace at all, and a bare node
+// reference names none: both are resolved by id and must keep working when the
+// listing does not. A node reference that does name a workspace still uses the
+// listing when it is available, so a saved ancestor path is validated against
+// the real tree; the listing is a prerequisite only for the whole-workspace
+// form, which has no other way to learn the root.
+func workspaceListingRequired(resourceIDs []string) bool {
+	for _, resourceID := range resourceIDs {
+		// Anything that is not provably self-addressing — a Base, or a node
+		// named without a workspace — keeps the previous conservative answer.
+		if ref, err := decodeResourceReference(resourceID); err == nil &&
+			(ref.BaseID != "" || (ref.NodeID != "" && ref.WorkspaceID == "")) {
+			continue
+		}
+		return true
+	}
+	return false
 }
 
 func childByID(children []node, nodeID string) (node, bool) {
@@ -950,7 +1195,9 @@ func scanWorkspace(
 			if child.ID == "" {
 				continue
 			}
-			if child.WorkspaceID != "" && child.WorkspaceID != workspaceID {
+			// An unknown workspace contradicts nothing: a bare node reference
+			// whose provider reported no workspace must still scan.
+			if workspaceID != "" && child.WorkspaceID != "" && child.WorkspaceID != workspaceID {
 				return nil, nil, fmt.Errorf("DingTalk node %q belongs to a different workspace", child.ID)
 			}
 			if _, seen := seenNodes[child.ID]; seen {
@@ -1099,6 +1346,24 @@ func failedDocument(
 			"error":             err.Error(),
 			"error_reason_code": "dingtalk_document_failed",
 			"error_reason":      "DingTalk document could not be read; retry on the next sync",
+		},
+	}
+}
+
+// failedBase reports an unreadable Base selection the way a failed document is
+// reported: retryable, with no content, so a sync never looks clean while an
+// explicitly selected resource produced nothing.
+func failedBase(sourceResourceID, baseID string, err error) types.FetchedItem {
+	return types.FetchedItem{
+		ExternalID:       baseID,
+		Title:            baseID,
+		SourceResourceID: sourceResourceID,
+		Metadata: map[string]string{
+			"channel":           types.ChannelDingtalk,
+			"base_id":           baseID,
+			"error":             err.Error(),
+			"error_reason_code": "dingtalk_document_failed",
+			"error_reason":      "DingTalk multi-dimensional table could not be read; retry on the next sync",
 		},
 	}
 }
