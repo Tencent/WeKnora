@@ -280,20 +280,20 @@ func newPluginDelegation(h *host.Manager, pool *hostpool.Pool) *pluginDelegation
 
 func (d *pluginDelegation) Name() string { return "plugin-hosts" }
 
-func (d *pluginDelegation) Activate(ctx context.Context, l *reconcile.Loaded) error {
+func (d *pluginDelegation) Stage(ctx context.Context, _, l *reconcile.Loaded) (reconcile.Staged, error) {
 	m := l.Manifest
 	if m.Runtime.Type != manifest.RuntimeHost || d.host.Runs(m.Runtime.Kind) {
-		return nil
+		return reconcile.Unchanged, nil
 	}
 	if d.pool == nil {
-		return fmt.Errorf("this node does not run %s plugins (WEKNORA_PLUGIN_EMBEDDED_KINDS) and no plugin host "+
+		return nil, fmt.Errorf("this node does not run %s plugins (WEKNORA_PLUGIN_EMBEDDED_KINDS) and no plugin host "+
 			"is configured; run weknora plugin-host with Redis and the same SYSTEM_AES_KEY", m.Runtime.Kind)
 	}
 	if !d.pool.Runs(ctx, m.ID, m.Version) {
 		logger.Infof(ctx, "[plugin] %s@%s waits for a plugin host that runs %s plugins",
 			m.ID, m.Version, m.Runtime.Kind)
 	}
-	return nil
+	return reconcile.Unchanged, nil
 }
 
 func (d *pluginDelegation) Deactivate(context.Context, string) error { return nil }

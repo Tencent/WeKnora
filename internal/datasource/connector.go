@@ -167,14 +167,29 @@ func (r *ConnectorRegistry) RegisterPlugin(connector Connector, meta ConnectorMe
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if err := r.checkPluginLocked(t); err != nil {
+		return err
+	}
+	meta.Type = t
+	r.connectors[t] = connector
+	r.plugins[t] = meta
+	return nil
+}
+
+// CheckPlugin reports whether RegisterPlugin would take a connector type:
+// it refuses one a builtin connector has.
+func (r *ConnectorRegistry) CheckPlugin(connectorType string) error {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.checkPluginLocked(connectorType)
+}
+
+func (r *ConnectorRegistry) checkPluginLocked(t string) error {
 	if _, exists := r.connectors[t]; exists {
 		if _, isPlugin := r.plugins[t]; !isPlugin {
 			return fmt.Errorf("connector type %s already exists", t)
 		}
 	}
-	meta.Type = t
-	r.connectors[t] = connector
-	r.plugins[t] = meta
 	return nil
 }
 

@@ -8,7 +8,6 @@ import (
 	"path"
 	"sort"
 	"strings"
-	"sync"
 
 	"gopkg.in/yaml.v3"
 
@@ -30,63 +29,43 @@ type WebSearch struct {
 	iv       *Invoker
 	registry *infra_web_search.Registry
 
-	mu         sync.Mutex
-	registered map[string][]string // plugin ID → provider type IDs
+	registered registrations // provider type IDs
 }
 
 // NewWebSearch creates the web search activator.
 func NewWebSearch(iv *Invoker, registry *infra_web_search.Registry) *WebSearch {
-	return &WebSearch{iv: iv, registry: registry, registered: map[string][]string{}}
+	return &WebSearch{iv: iv, registry: registry, registered: newRegistrations()}
 }
 
 // Name implements reconcile.Activator.
 func (a *WebSearch) Name() string { return "webSearch" }
 
-// Activate implements reconcile.Activator: all of a plugin's providers or
+// Stage implements reconcile.Activator: all of a plugin's providers or
 // none.
-func (a *WebSearch) Activate(_ context.Context, l *reconcile.Loaded) error {
-	var ids []string
+func (a *WebSearch) Stage(_ context.Context, _, l *reconcile.Loaded) (reconcile.Staged, error) {
+	var entries []entry
 	for _, c := range l.Manifest.Contributes[manifest.PointWebSearch] {
 		id := manifest.QualifiedID(l.Manifest.ID, c.ID)
 		pt, err := webSearchType(l, c, id)
 		if err == nil {
-			m, local := l.Manifest, c.ID
-			err = a.registry.RegisterPlugin(
-				pt,
-				func(params types.WebSearchProviderParameters) (interfaces.WebSearchProvider, error) {
-					return &remoteSearch{
-						iv:       a.iv,
-						m:        m,
-						local:    local,
-						typeID:   id,
-						instance: webSearchInstance(params),
-					}, nil
-				},
-			)
+			err = a.registry.CheckPlugin(id)
 		}
 		if err != nil {
-			for _, done := range ids {
-				a.registry.Unregister(done)
-			}
-			return fmt.Errorf("webSearch %s: %w", c.ID, err)
+			return nil, fmt.Errorf("webSearch %s: %w", c.ID, err)
 		}
-		ids = append(ids, id)
+		m, local := l.Manifest, c.ID
+		factory := func(params types.WebSearchProviderParameters) (interfaces.WebSearchProvider, error) {
+			return &remoteSearch{iv: a.iv, m: m, local: local, typeID: id, instance: webSearchInstance(params)}, nil
+		}
+		register := func() error { return a.registry.RegisterPlugin(pt, factory) }
+		entries = append(entries, entry{id: id, register: register})
 	}
-	a.mu.Lock()
-	a.registered[l.Manifest.ID] = ids
-	a.mu.Unlock()
-	return nil
+	return a.registered.stage("webSearch", l.Manifest.ID, entries, a.registry.Unregister), nil
 }
 
 // Deactivate implements reconcile.Activator.
 func (a *WebSearch) Deactivate(_ context.Context, pluginID string) error {
-	a.mu.Lock()
-	ids := a.registered[pluginID]
-	delete(a.registered, pluginID)
-	a.mu.Unlock()
-	for _, id := range ids {
-		a.registry.Unregister(id)
-	}
+	a.registered.remove(pluginID, a.registry.Unregister)
 	return nil
 }
 

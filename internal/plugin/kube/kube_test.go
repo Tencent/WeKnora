@@ -143,7 +143,7 @@ func loaded(t *testing.T, id string) *reconcile.Loaded {
 func TestDriverDeploysAndRemoves(t *testing.T) {
 	api := &fakeAPI{applied: map[string]map[string]any{}}
 	d, ep := newDriver(t, api)
-	if err := d.Activate(context.Background(), loaded(t, "acme.search")); err != nil {
+	if err := reconcile.Activate(context.Background(), d, loaded(t, "acme.search")); err != nil {
 		t.Fatal(err)
 	}
 	if ep.url != "http://10.0.0.5:30123" || ep.secret != "sekrit" {
@@ -187,7 +187,7 @@ func TestDriverDeploysAndRemoves(t *testing.T) {
 func TestDeactivateLeavesOtherPluginsAlone(t *testing.T) {
 	api := &fakeAPI{applied: map[string]map[string]any{}}
 	d, ep := newDriver(t, api)
-	if err := d.Activate(context.Background(), loaded(t, "acme.foo-bar")); err != nil {
+	if err := reconcile.Activate(context.Background(), d, loaded(t, "acme.foo-bar")); err != nil {
 		t.Fatal(err)
 	}
 	if err := d.Deactivate(context.Background(), "acme.host"); err != nil {
@@ -222,7 +222,7 @@ func TestLegacyResourcesAreRemoved(t *testing.T) {
 	api.applied[other] = map[string]any{"metadata": map[string]any{
 		"annotations": map[string]any{"weknora.plugin/id": "acme-search.x"},
 	}}
-	if err := d.Activate(context.Background(), l); err != nil {
+	if err := reconcile.Activate(context.Background(), d, l); err != nil {
 		t.Fatal(err)
 	}
 	if api.has("/apis/apps/v1/namespaces/plugins/deployments/"+legacy) ||
@@ -249,7 +249,7 @@ func TestRolloutFinishesInTheBackground(t *testing.T) {
 		}
 		reports <- err
 	}
-	err := d.Activate(context.Background(), l)
+	err := reconcile.Activate(context.Background(), d, l)
 	var pending *reconcile.PendingError
 	if !errors.As(err, &pending) {
 		t.Fatalf("Activate = %v, want pending", err)
@@ -293,7 +293,7 @@ func TestDriverReportsAStuckRollout(t *testing.T) {
 		Manifest: m, Installed: types.InstalledPlugin{RemoteSecret: sealed},
 		Report: func(_ bool, err error) { reports <- err },
 	}
-	if err := d.Activate(context.Background(), l); err == nil {
+	if err := reconcile.Activate(context.Background(), d, l); err == nil {
 		t.Fatal("a rollout still going must be pending")
 	}
 	select {
@@ -442,7 +442,7 @@ func TestDeactivateDeletesTheNetworkPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := d.Activate(context.Background(), loaded(t, "acme.search")); err != nil {
+	if err := reconcile.Activate(context.Background(), d, loaded(t, "acme.search")); err != nil {
 		t.Fatal(err)
 	}
 	policy := networkPolicyPath("plugins", ResourceName("acme.search"))
@@ -468,7 +468,7 @@ func TestDisabledPolicyIsRemoved(t *testing.T) {
 	api.applied[stale] = map[string]any{"metadata": map[string]any{
 		"annotations": map[string]any{"weknora.plugin/id": "acme.search"},
 	}}
-	if err := d.Activate(context.Background(), l); err != nil {
+	if err := reconcile.Activate(context.Background(), d, l); err != nil {
 		t.Fatal(err)
 	}
 	if api.has(stale) {
@@ -483,7 +483,7 @@ func TestDisabledPolicyIsRemoved(t *testing.T) {
 		api.ServeHTTP(w, r)
 	})
 	d, _ = newDriver(t, forbidden)
-	if err := d.Activate(context.Background(), l); err != nil {
+	if err := reconcile.Activate(context.Background(), d, l); err != nil {
 		t.Fatal(err)
 	}
 	if err := d.Deactivate(context.Background(), "acme.search"); err != nil {

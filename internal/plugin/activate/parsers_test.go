@@ -58,7 +58,7 @@ func TestPluginParser(t *testing.T) {
 		t.Fatal(err)
 	}
 	a := NewParsers(NewInvoker(fakeClients{client.New(srv.URL, nil, nil)}))
-	if err := a.Activate(ctx, &reconcile.Loaded{Manifest: p.Manifest, Package: p}); err != nil {
+	if err := reconcile.Activate(ctx, a, &reconcile.Loaded{Manifest: p.Manifest, Package: p}); err != nil {
 		t.Fatalf("Activate: %v", err)
 	}
 	defer func() { _ = a.Deactivate(ctx, "acme.ocr") }()

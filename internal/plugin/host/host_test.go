@@ -146,7 +146,7 @@ func TestHostRunsRestartsAndStopsAPlugin(t *testing.T) {
 	m.SetReporter(rep)
 	defer m.Close()
 
-	if err := m.Activate(ctx, install(t, "1.0.0", "")); err != nil {
+	if err := reconcile.Activate(ctx, m, install(t, "1.0.0", "")); err != nil {
 		t.Fatalf("Activate: %v", err)
 	}
 	if got, err := search(t, m, "hello"); err != nil || got != "hello" {
@@ -191,19 +191,20 @@ func TestHostRefusesAProcessThatIsNotThePackage(t *testing.T) {
 	fastTimings(t)
 	m := NewManager()
 	defer m.Close()
-	err := m.Activate(context.Background(), install(t, "1.0.0", "9.9.9"))
+	err := reconcile.Activate(context.Background(), m, install(t, "1.0.0", "9.9.9"))
 	if err == nil || !strings.Contains(err.Error(), "reports acme.echo@9.9.9") {
 		t.Fatalf("want a manifest mismatch, got %v", err)
 	}
 	l := install(t, "1.0.0", "")
 	l.Manifest.Contributes[manifest.PointWebSearch] = append(l.Manifest.Contributes[manifest.PointWebSearch],
 		manifest.Contribution{ID: "missing", Name: manifest.Text("Missing", nil)})
-	if err := m.Activate(context.Background(), l); err == nil || !strings.Contains(err.Error(), "webSearch/missing") {
+	err = reconcile.Activate(context.Background(), m, l)
+	if err == nil || !strings.Contains(err.Error(), "webSearch/missing") {
 		t.Fatalf("want a missing contribution error, got %v", err)
 	}
 	l = install(t, "1.0.0", "")
 	l.Manifest.Runtime.Entry = "bin/{os}-{arch}/nope"
-	if err := m.Activate(context.Background(), l); err == nil || !strings.Contains(err.Error(), "has no") {
+	if err := reconcile.Activate(context.Background(), m, l); err == nil || !strings.Contains(err.Error(), "has no") {
 		t.Fatalf("want a missing build error, got %v", err)
 	}
 }
@@ -213,16 +214,54 @@ func TestUpgradeSwapsProcessesInPlace(t *testing.T) {
 	ctx := context.Background()
 	m := NewManager()
 	defer m.Close()
-	if err := m.Activate(ctx, install(t, "1.0.0", "")); err != nil {
+	if err := reconcile.Activate(ctx, m, install(t, "1.0.0", "")); err != nil {
 		t.Fatal(err)
 	}
 	pid1, _ := search(t, m, "pid")
-	if err := m.Activate(ctx, install(t, "1.1.0", "")); err != nil {
+	if err := reconcile.Activate(ctx, m, install(t, "1.1.0", "")); err != nil {
 		t.Fatal(err)
 	}
 	pid2, err := search(t, m, "pid")
 	if err != nil || pid2 == pid1 {
 		t.Fatalf("after upgrade pid = %s (was %s), %v", pid2, pid1, err)
+	}
+}
+
+// A staged version gets no calls until it commits, an aborted one stops,
+// and a version that fails to start leaves the running one serving.
+func TestStagedVersionsWaitForTheCommit(t *testing.T) {
+	fastTimings(t)
+	ctx := context.Background()
+	m := NewManager()
+	rep := &reports{}
+	m.SetReporter(rep)
+	defer m.Close()
+	v1 := install(t, "1.0.0", "")
+	if err := reconcile.Activate(ctx, m, v1); err != nil {
+		t.Fatal(err)
+	}
+	pid1, _ := search(t, m, "pid")
+
+	staged, err := m.Stage(ctx, v1, install(t, "1.1.0", ""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pid, _ := search(t, m, "pid"); pid != pid1 {
+		t.Fatalf("a staged version got a call before its commit: pid %s, was %s", pid, pid1)
+	}
+	staged.Abort()
+	if pid, _ := search(t, m, "pid"); pid != pid1 {
+		t.Fatalf("an aborted stage replaced the running version: pid %s, was %s", pid, pid1)
+	}
+
+	if _, err := m.Stage(ctx, v1, install(t, "1.2.0", "9.9.9")); err == nil {
+		t.Fatal("want a version that does not start to fail staging")
+	}
+	if pid, err := search(t, m, "pid"); err != nil || pid != pid1 {
+		t.Fatalf("after a failed stage pid = %s (was %s), %v", pid, pid1, err)
+	}
+	if strings.Contains(rep.String(), "false") {
+		t.Fatalf("a staged process reported for the running one: %s", rep)
 	}
 }
 
@@ -234,7 +273,7 @@ func TestUpgradeLetsTheOldProcessFinishItsCalls(t *testing.T) {
 	ctx := context.Background()
 	m := NewManager()
 	defer m.Close()
-	if err := m.Activate(ctx, install(t, "1.0.0", "")); err != nil {
+	if err := reconcile.Activate(ctx, m, install(t, "1.0.0", "")); err != nil {
 		t.Fatal(err)
 	}
 	inFlight := make(chan error, 1)
@@ -246,7 +285,7 @@ func TestUpgradeLetsTheOldProcessFinishItsCalls(t *testing.T) {
 		inFlight <- err
 	}()
 	time.Sleep(300 * time.Millisecond)
-	if err := m.Activate(ctx, install(t, "1.1.0", "")); err != nil {
+	if err := reconcile.Activate(ctx, m, install(t, "1.1.0", "")); err != nil {
 		t.Fatal(err)
 	}
 	select {
@@ -270,14 +309,14 @@ func TestStandaloneHostHandsOverAnUpgrade(t *testing.T) {
 	defer m.Close()
 	changes := make(chan struct{}, 100)
 	m.OnChange(func() { changes <- struct{}{} })
-	if err := m.Activate(ctx, install(t, "1.0.0", "")); err != nil {
+	if err := reconcile.Activate(ctx, m, install(t, "1.0.0", "")); err != nil {
 		t.Fatal(err)
 	}
 	pid1, _ := search(t, m, "pid")
 	for len(changes) > 0 {
 		<-changes
 	}
-	if err := m.Activate(ctx, install(t, "1.1.0", "")); err != nil {
+	if err := reconcile.Activate(ctx, m, install(t, "1.1.0", "")); err != nil {
 		t.Fatal(err)
 	}
 	if len(changes) == 0 {

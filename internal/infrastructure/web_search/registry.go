@@ -38,16 +38,31 @@ func NewRegistry() *Registry {
 	}
 }
 
+// CheckPlugin reports whether RegisterPlugin would take a provider type ID:
+// it refuses one a builtin type has.
+func (r *Registry) CheckPlugin(id string) error {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.checkPluginLocked(id)
+}
+
+func (r *Registry) checkPluginLocked(id string) error {
+	if _, exists := r.factories[id]; exists {
+		if _, isPlugin := r.plugins[id]; !isPlugin {
+			return fmt.Errorf("web search provider type %s already exists", id)
+		}
+	}
+	return nil
+}
+
 // RegisterPlugin adds or replaces a plugin's provider type. It refuses to
 // shadow a builtin type.
 func (r *Registry) RegisterPlugin(t PluginType, factory ProviderFactory) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	id := t.Info.ID
-	if _, exists := r.factories[id]; exists {
-		if _, isPlugin := r.plugins[id]; !isPlugin {
-			return fmt.Errorf("web search provider type %s already exists", id)
-		}
+	if err := r.checkPluginLocked(id); err != nil {
+		return err
 	}
 	r.factories[id] = factory
 	r.plugins[id] = t

@@ -84,25 +84,26 @@ func (a *MCPServers) Bind(t *tenancy.Service, plugins interfaces.PluginRepositor
 // Name implements reconcile.Activator.
 func (a *MCPServers) Name() string { return "mcpServers" }
 
-// Activate implements reconcile.Activator.
-func (a *MCPServers) Activate(_ context.Context, l *reconcile.Loaded) error {
-	var list []mcpServer
-	now := time.Now()
-	for _, c := range l.Manifest.Contributes[manifest.PointMCPServers] {
-		list = append(list, mcpServer{
-			manifest: l.Manifest, contrib: c, qualifiedID: l.Manifest.ID + "/" + c.ID, activatedAt: now,
-		})
-	}
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	delete(a.directories, l.Manifest.ID)
-	delete(a.headerStamps, l.Manifest.ID)
-	if len(list) == 0 {
-		delete(a.servers, l.Manifest.ID)
-	} else {
-		a.servers[l.Manifest.ID] = list
-	}
-	return nil
+// Stage implements reconcile.Activator.
+func (a *MCPServers) Stage(_ context.Context, _, l *reconcile.Loaded) (reconcile.Staged, error) {
+	return reconcile.Swap{OnCommit: func() {
+		var list []mcpServer
+		now := time.Now()
+		for _, c := range l.Manifest.Contributes[manifest.PointMCPServers] {
+			list = append(list, mcpServer{
+				manifest: l.Manifest, contrib: c, qualifiedID: l.Manifest.ID + "/" + c.ID, activatedAt: now,
+			})
+		}
+		a.mu.Lock()
+		defer a.mu.Unlock()
+		delete(a.directories, l.Manifest.ID)
+		delete(a.headerStamps, l.Manifest.ID)
+		if len(list) == 0 {
+			delete(a.servers, l.Manifest.ID)
+		} else {
+			a.servers[l.Manifest.ID] = list
+		}
+	}}, nil
 }
 
 // Deactivate implements reconcile.Activator.

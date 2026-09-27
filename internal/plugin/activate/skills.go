@@ -45,16 +45,17 @@ func (a *Skills) Bind(t *tenancy.Service) {
 // Name implements reconcile.Activator.
 func (a *Skills) Name() string { return "skills" }
 
-// Activate implements reconcile.Activator.
-func (a *Skills) Activate(_ context.Context, l *reconcile.Loaded) error {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if len(l.Manifest.Contributes[manifest.PointSkills]) == 0 {
-		delete(a.loaded, l.Manifest.ID)
-		return nil
-	}
-	a.loaded[l.Manifest.ID] = l
-	return nil
+// Stage implements reconcile.Activator.
+func (a *Skills) Stage(_ context.Context, _, l *reconcile.Loaded) (reconcile.Staged, error) {
+	return reconcile.Swap{OnCommit: func() {
+		a.mu.Lock()
+		defer a.mu.Unlock()
+		if len(l.Manifest.Contributes[manifest.PointSkills]) == 0 {
+			delete(a.loaded, l.Manifest.ID)
+			return
+		}
+		a.loaded[l.Manifest.ID] = l
+	}}, nil
 }
 
 // Deactivate implements reconcile.Activator.

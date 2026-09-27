@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/datasource"
@@ -26,13 +25,12 @@ type Connectors struct {
 	iv       *Invoker
 	registry *datasource.ConnectorRegistry
 
-	mu         sync.Mutex
-	registered map[string][]string
+	registered registrations // connector types
 }
 
 // NewConnectors creates the connector activator.
 func NewConnectors(iv *Invoker, registry *datasource.ConnectorRegistry) *Connectors {
-	return &Connectors{iv: iv, registry: registry, registered: map[string][]string{}}
+	return &Connectors{iv: iv, registry: registry, registered: newRegistrations()}
 }
 
 // Name implements reconcile.Activator.
@@ -42,40 +40,28 @@ func (a *Connectors) Name() string { return "connectors" }
 // credentials.
 const settingsGroup = "settings"
 
-// Activate implements reconcile.Activator: all of a plugin's connectors or
+// Stage implements reconcile.Activator: all of a plugin's connectors or
 // none.
-func (a *Connectors) Activate(_ context.Context, l *reconcile.Loaded) error {
-	var ids []string
+func (a *Connectors) Stage(_ context.Context, _, l *reconcile.Loaded) (reconcile.Staged, error) {
+	var entries []entry
 	for _, c := range l.Manifest.Contributes[manifest.PointConnectors] {
 		id := manifest.QualifiedID(l.Manifest.ID, c.ID)
 		meta, err := connectorMetadata(l, c, id)
 		if err == nil {
-			rc := &remoteConnector{iv: a.iv, m: l.Manifest, local: c.ID, typeID: id}
-			err = a.registry.RegisterPlugin(rc, meta)
+			err = a.registry.CheckPlugin(id)
 		}
 		if err != nil {
-			for _, done := range ids {
-				a.registry.Unregister(done)
-			}
-			return fmt.Errorf("connector %s: %w", c.ID, err)
+			return nil, fmt.Errorf("connector %s: %w", c.ID, err)
 		}
-		ids = append(ids, id)
+		rc := &remoteConnector{iv: a.iv, m: l.Manifest, local: c.ID, typeID: id}
+		entries = append(entries, entry{id: id, register: func() error { return a.registry.RegisterPlugin(rc, meta) }})
 	}
-	a.mu.Lock()
-	a.registered[l.Manifest.ID] = ids
-	a.mu.Unlock()
-	return nil
+	return a.registered.stage("connector", l.Manifest.ID, entries, a.registry.Unregister), nil
 }
 
 // Deactivate implements reconcile.Activator.
 func (a *Connectors) Deactivate(_ context.Context, pluginID string) error {
-	a.mu.Lock()
-	ids := a.registered[pluginID]
-	delete(a.registered, pluginID)
-	a.mu.Unlock()
-	for _, id := range ids {
-		a.registry.Unregister(id)
-	}
+	a.registered.remove(pluginID, a.registry.Unregister)
 	return nil
 }
 

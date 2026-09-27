@@ -78,7 +78,7 @@ func TestPluginServedMCPServer(t *testing.T) {
 	a := NewMCPServers()
 	a.Bind(ten, plugins)
 	a.SetInvoker(iv)
-	if err := a.Activate(ctx, &reconcile.Loaded{Manifest: opened.Manifest, Package: opened}); err != nil {
+	if err := reconcile.Activate(ctx, a, &reconcile.Loaded{Manifest: opened.Manifest, Package: opened}); err != nil {
 		t.Fatal(err)
 	}
 

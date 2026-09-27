@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"path"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -28,13 +27,12 @@ type Parsers struct {
 	// gate keeps a workspace's documents away from plugins it has off.
 	gate atomic.Pointer[PluginEnabledChecker]
 
-	mu         sync.Mutex
-	registered map[string][]string
+	registered registrations // engine names
 }
 
 // NewParsers creates the parser activator.
 func NewParsers(iv *Invoker) *Parsers {
-	return &Parsers{iv: iv, registered: map[string][]string{}}
+	return &Parsers{iv: iv, registered: newRegistrations()}
 }
 
 // Bind supplies the tenant switches parses are checked against.
@@ -43,37 +41,26 @@ func (a *Parsers) Bind(gate PluginEnabledChecker) { a.gate.Store(&gate) }
 // Name implements reconcile.Activator.
 func (a *Parsers) Name() string { return "parsers" }
 
-// Activate implements reconcile.Activator: all of a plugin's parsers or none.
-func (a *Parsers) Activate(_ context.Context, l *reconcile.Loaded) error {
-	var ids []string
+// Stage implements reconcile.Activator: all of a plugin's parsers or none.
+func (a *Parsers) Stage(_ context.Context, _, l *reconcile.Loaded) (reconcile.Staged, error) {
+	var entries []entry
 	for _, c := range l.Manifest.Contributes[manifest.PointParsers] {
 		e := &pluginEngine{
 			iv: a.iv, parsers: a, m: l.Manifest, local: c.ID, name: manifest.QualifiedID(l.Manifest.ID, c.ID),
 			description: c.Description.Default, names: displayNames(c.Name), fileTypes: c.FileTypes,
 		}
-		if err := docparser.RegisterPluginEngine(e); err != nil {
-			for _, done := range ids {
-				docparser.UnregisterPluginEngine(done)
-			}
-			return fmt.Errorf("parser %s: %w", c.ID, err)
+		if err := docparser.CheckPluginEngine(e.name); err != nil {
+			return nil, fmt.Errorf("parser %s: %w", c.ID, err)
 		}
-		ids = append(ids, e.name)
+		register := func() error { return docparser.RegisterPluginEngine(e) }
+		entries = append(entries, entry{id: e.name, register: register})
 	}
-	a.mu.Lock()
-	a.registered[l.Manifest.ID] = ids
-	a.mu.Unlock()
-	return nil
+	return a.registered.stage("parser", l.Manifest.ID, entries, docparser.UnregisterPluginEngine), nil
 }
 
 // Deactivate implements reconcile.Activator.
 func (a *Parsers) Deactivate(_ context.Context, pluginID string) error {
-	a.mu.Lock()
-	ids := a.registered[pluginID]
-	delete(a.registered, pluginID)
-	a.mu.Unlock()
-	for _, id := range ids {
-		docparser.UnregisterPluginEngine(id)
-	}
+	a.registered.remove(pluginID, docparser.UnregisterPluginEngine)
 	return nil
 }
 

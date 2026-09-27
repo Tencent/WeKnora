@@ -69,7 +69,7 @@ func TestPoolReachesAPluginThroughAHost(t *testing.T) {
 	// The plugin host: a manager running the plugin behind its gateway.
 	mgr := host.NewManager()
 	defer mgr.Close()
-	if err := mgr.Activate(ctx, echoPackage(t)); err != nil {
+	if err := reconcile.Activate(ctx, mgr, echoPackage(t)); err != nil {
 		t.Fatal(err)
 	}
 	gw := httptest.NewServer(mgr.Gateway(key))
@@ -187,7 +187,7 @@ func TestUpgradeOnAHostHandsOver(t *testing.T) {
 	mgr := host.NewStandaloneManager([]string{host.KindBinary})
 	defer mgr.Close()
 	v1 := echoPackage(t)
-	if err := mgr.Activate(ctx, v1); err != nil {
+	if err := reconcile.Activate(ctx, mgr, v1); err != nil {
 		t.Fatal(err)
 	}
 	gw := httptest.NewServer(mgr.Gateway(key))
@@ -208,7 +208,7 @@ func TestUpgradeOnAHostHandsOver(t *testing.T) {
 	m2.Version = "2.0.0"
 	v2.Manifest = &m2
 	_ = os.WriteFile(filepath.Join(v2.Dir, "version"), []byte("2.0.0"), 0o644)
-	if err := mgr.Activate(ctx, &v2); err != nil {
+	if err := reconcile.Activate(ctx, mgr, &v2); err != nil {
 		t.Fatal(err)
 	}
 	// Well within a heartbeat.

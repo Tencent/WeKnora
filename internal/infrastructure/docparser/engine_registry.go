@@ -76,12 +76,27 @@ func RegisterEngine(e EngineRegistration) {
 func RegisterPluginEngine(e EngineRegistration) error {
 	enginesMu.Lock()
 	defer enginesMu.Unlock()
-	for _, builtin := range localEngines {
-		if builtin.Name() == e.Name() {
-			return fmt.Errorf("parser engine %s already exists", e.Name())
-		}
+	if err := checkPluginEngineLocked(e.Name()); err != nil {
+		return err
 	}
 	pluginEngines[e.Name()] = e
+	return nil
+}
+
+// CheckPluginEngine reports whether RegisterPluginEngine would take a name:
+// it refuses a builtin engine's.
+func CheckPluginEngine(name string) error {
+	enginesMu.RLock()
+	defer enginesMu.RUnlock()
+	return checkPluginEngineLocked(name)
+}
+
+func checkPluginEngineLocked(name string) error {
+	for _, builtin := range localEngines {
+		if builtin.Name() == name {
+			return fmt.Errorf("parser engine %s already exists", name)
+		}
+	}
 	return nil
 }
 

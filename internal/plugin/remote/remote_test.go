@@ -98,18 +98,18 @@ func TestActivateVerifiesAndSignsCalls(t *testing.T) {
 	m := NewManager()
 	defer m.Close()
 
-	if err := m.Activate(ctx, loaded("1.0.0", svc.URL, "wrong")); err == nil ||
+	if err := reconcile.Activate(ctx, m, loaded("1.0.0", svc.URL, "wrong")); err == nil ||
 		!strings.Contains(err.Error(), "not healthy") {
 		t.Fatalf("wrong secret = %v", err)
 	}
-	if err := m.Activate(ctx, loaded("2.0.0", svc.URL, "s3cret")); err == nil ||
+	if err := reconcile.Activate(ctx, m, loaded("2.0.0", svc.URL, "s3cret")); err == nil ||
 		!strings.Contains(err.Error(), "the package is acme.search@2.0.0") {
 		t.Fatalf("other version = %v", err)
 	}
-	if err := m.Activate(ctx, loaded("1.0.0", "", "s3cret")); err == nil {
+	if err := reconcile.Activate(ctx, m, loaded("1.0.0", "", "s3cret")); err == nil {
 		t.Fatal("no URL should fail")
 	}
-	if err := m.Activate(ctx, loaded("1.0.0", svc.URL, "s3cret")); err != nil {
+	if err := reconcile.Activate(ctx, m, loaded("1.0.0", svc.URL, "s3cret")); err != nil {
 		t.Fatal(err)
 	}
 	c, err := m.Client("acme.search")
@@ -134,7 +134,7 @@ func TestActivateRefusesPrivateAddresses(t *testing.T) {
 	svc := newService(t, "1.0.0", "s3cret")
 	m := NewManager()
 	defer m.Close()
-	err := m.Activate(context.Background(), loaded("1.0.0", svc.URL, "s3cret"))
+	err := reconcile.Activate(context.Background(), m, loaded("1.0.0", svc.URL, "s3cret"))
 	if err == nil || !strings.Contains(err.Error(), "not allowed") {
 		t.Fatalf("loopback without whitelist = %v", err)
 	}
@@ -150,7 +150,7 @@ func TestSealedSecret(t *testing.T) {
 	svc := newService(t, "1.0.0", "s3cret")
 	m := NewManager()
 	defer m.Close()
-	if err := m.Activate(context.Background(), loaded("1.0.0", svc.URL, sealed)); err != nil {
+	if err := reconcile.Activate(context.Background(), m, loaded("1.0.0", svc.URL, sealed)); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -163,7 +163,7 @@ func TestHealthChecksReportOutages(t *testing.T) {
 	rep := &reports{}
 	m.SetReporter(rep)
 	defer m.Close()
-	if err := m.Activate(context.Background(), loaded("1.0.0", svc.URL, "s3cret")); err != nil {
+	if err := reconcile.Activate(context.Background(), m, loaded("1.0.0", svc.URL, "s3cret")); err != nil {
 		t.Fatal(err)
 	}
 
@@ -192,5 +192,40 @@ func waitFor(t *testing.T, cond func() bool) {
 			t.Fatal("timed out")
 		}
 		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// A new version that does not check out leaves the running endpoint in
+// place; one that does takes over only at the commit.
+func TestStagedEndpointWaitsForTheCommit(t *testing.T) {
+	allowLoopback(t)
+	ctx := context.Background()
+	v1, v2 := newService(t, "1.0.0", "s3cret"), newService(t, "2.0.0", "s3cret")
+	m := NewManager()
+	defer m.Close()
+	running := loaded("1.0.0", v1.URL, "s3cret")
+	if err := reconcile.Activate(ctx, m, running); err != nil {
+		t.Fatal(err)
+	}
+	c1, _ := m.Client("acme.search")
+
+	// The new version's service is not deployed yet: v1 still answers 1.0.0.
+	if _, err := m.Stage(ctx, running, loaded("2.0.0", v1.URL, "s3cret")); err == nil {
+		t.Fatal("want a version mismatch")
+	}
+	if c, err := m.Client("acme.search"); err != nil || c != c1 {
+		t.Fatalf("a failed stage replaced the endpoint: %v", err)
+	}
+
+	staged, err := m.Stage(ctx, running, loaded("2.0.0", v2.URL, "s3cret"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c, _ := m.Client("acme.search"); c != c1 {
+		t.Fatal("a staged endpoint took calls before its commit")
+	}
+	staged.Commit()
+	if c, err := m.Client("acme.search"); err != nil || c == c1 {
+		t.Fatalf("the commit did not switch endpoints: %v", err)
 	}
 }

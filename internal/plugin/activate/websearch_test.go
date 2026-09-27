@@ -94,7 +94,7 @@ func TestPluginWebSearchProvider(t *testing.T) {
 
 	registry := infra_web_search.NewRegistry()
 	a := NewWebSearch(NewInvoker(fakeClients{client.New(srv.URL, nil, nil)}), registry)
-	if err := a.Activate(ctx, searchLoaded(t, braveSchema)); err != nil {
+	if err := reconcile.Activate(ctx, a, searchLoaded(t, braveSchema)); err != nil {
 		t.Fatalf("Activate: %v", err)
 	}
 
@@ -152,7 +152,7 @@ func TestPluginWebSearchSchemaRules(t *testing.T) {
 		"secret field": "type: object\nproperties: { token: { type: string, x-secret: true } }\n",
 		"number field": "type: object\nproperties: { limit: { type: integer } }\n",
 	} {
-		if err := a.Activate(context.Background(), searchLoaded(t, schema)); err == nil {
+		if err := reconcile.Activate(context.Background(), a, searchLoaded(t, schema)); err == nil {
 			t.Errorf("%s: want an activation error", name)
 		}
 	}

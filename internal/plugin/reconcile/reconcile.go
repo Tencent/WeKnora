@@ -51,21 +51,62 @@ type Loaded struct {
 
 // Activator wires one domain to plugin contributions: it registers what a
 // loaded plugin contributes (skills, MCP servers, model vendors) and removes
-// it again. Activate is called again for each new version, after Deactivate
-// for the old one.
+// it again.
+//
+// A version loads in two steps, so an upgrade that fails leaves the running
+// version in place: every activator stages the new version beside the one
+// it serves, and only when all of them staged does each commit.
 type Activator interface {
 	Name() string
-	Activate(ctx context.Context, l *Loaded) error
+	// Stage readies next without changing what the activator serves: it
+	// checks what next contributes and starts what must run, but routes
+	// nothing to it. prev is the version loaded now, nil on a first load.
+	// On failure it leaves nothing behind and returns a nil Staged. A
+	// PendingError comes with a Staged: the plugin commits and finishes
+	// starting in the background.
+	Stage(ctx context.Context, prev, next *Loaded) (Staged, error)
+	// Deactivate removes everything the activator has for a plugin.
 	Deactivate(ctx context.Context, pluginID string) error
 }
 
-// InPlaceActivator swaps an upgraded plugin itself inside Activate (the host
-// starts the new process before stopping the old one), so it is not
-// deactivated first, unless the new version runs elsewhere (another runtime
-// type or kind), which the old runtime would never hear about.
-type InPlaceActivator interface {
-	Activator
-	ActivatesInPlace()
+// Staged is a version an activator staged.
+type Staged interface {
+	// Commit serves the staged version in place of the previous one. It
+	// cannot fail: whatever could go wrong went wrong in Stage.
+	Commit()
+	// Abort drops the staged version; the previous one stays.
+	Abort()
+}
+
+// Swap is a Staged from two functions; either may be nil.
+type Swap struct{ OnCommit, OnAbort func() }
+
+// Commit implements Staged.
+func (s Swap) Commit() {
+	if s.OnCommit != nil {
+		s.OnCommit()
+	}
+}
+
+// Abort implements Staged.
+func (s Swap) Abort() {
+	if s.OnAbort != nil {
+		s.OnAbort()
+	}
+}
+
+// Unchanged is the Staged of an activator with nothing to do for a version.
+var Unchanged Staged = Swap{}
+
+// Activate stages l on a and commits it at once, for callers outside a
+// reconciler pass (tests, tools). A PendingError is returned after the
+// commit.
+func Activate(ctx context.Context, a Activator, l *Loaded) error {
+	s, err := a.Stage(ctx, nil, l)
+	if s != nil {
+		s.Commit()
+	}
+	return err
 }
 
 // EgressReporter is an Activator that runs plugin code and knows how the
@@ -97,6 +138,10 @@ type Status struct {
 	// Egress is how the plugin's outbound traffic is controlled where this
 	// node runs its code; empty when the node runs none of it.
 	Egress driver.EgressMode `json:"egress,omitempty"`
+	// UpgradeVersion is a newer active version the node failed to load;
+	// it keeps serving Version meanwhile and says why in UpgradeError.
+	UpgradeVersion string `json:"upgradeVersion,omitempty"`
+	UpgradeError   string `json:"upgradeError,omitempty"`
 }
 
 // Node states reported in Status.
@@ -251,7 +296,10 @@ func (r *Reconciler) Reconcile(ctx context.Context) error {
 		r.registry.SetAudience(row.ID, row.AudienceTenants())
 		if err := r.ensure(ctx, row); err != nil {
 			errs = append(errs, fmt.Errorf("plugin %s: %w", row.ID, err))
-			r.setStatus(row.ID, Status{Version: row.ActiveVersion, State: StateFailed, Error: err.Error()})
+			var kept *upgradeError
+			if !errors.As(err, &kept) {
+				r.setStatus(row.ID, Status{Version: row.ActiveVersion, State: StateFailed, Error: err.Error()})
+			}
 		}
 	}
 	for id := range r.loaded {
@@ -259,11 +307,12 @@ func (r *Reconciler) Reconcile(ctx context.Context) error {
 			r.unload(ctx, id)
 		}
 	}
-	// A plugin that never loaded has a status but no digest.
+	// A plugin that never loaded has a status but nothing loaded.
 	r.statusMu.Lock()
 	for id := range r.status {
 		if !desired[id] {
 			delete(r.status, id)
+			delete(r.retries, id)
 			r.forgetStatus(ctx, id)
 		}
 	}
@@ -299,6 +348,19 @@ func runtimeTarget(row types.InstalledPlugin) string {
 	return hex.EncodeToString(sum[:8])
 }
 
+// upgradeError is a new version that failed to load while the previous
+// one keeps running.
+type upgradeError struct {
+	version string
+	err     error
+}
+
+func (e *upgradeError) Error() string {
+	return fmt.Sprintf("version %s failed to load; the previous version keeps running: %v", e.version, e.err)
+}
+
+func (e *upgradeError) Unwrap() error { return e.err }
+
 // ensure loads the active version of one plugin unless it already is.
 func (r *Reconciler) ensure(ctx context.Context, row types.InstalledPlugin) error {
 	v, err := r.repo.GetVersion(ctx, row.ID, row.ActiveVersion)
@@ -309,35 +371,42 @@ func (r *Reconciler) ensure(ctx context.Context, row types.InstalledPlugin) erro
 		return fmt.Errorf("version %s is not stored", row.ActiveVersion)
 	}
 	loadKey := v.Digest + "|" + runtimeTarget(row)
+	prev := r.loaded[row.ID]
 	if r.digests[row.ID] == loadKey {
-		l := r.loaded[row.ID]
-		if l == nil || dirExists(l.Dir) {
+		if prev == nil || dirExists(prev.Dir) {
+			// Back on the loaded version (an upgrade rolled back): the
+			// upgrade that failed is no longer wanted.
+			delete(r.retries, row.ID)
+			r.clearUpgrade(row.ID)
 			return nil
 		}
 		// The extracted files are gone (the OS purged a temp directory):
 		// extract and load again.
-		logger.Warnf(ctx, "[plugin] %s: extracted files at %s are gone; reloading", row.ID, l.Dir)
+		logger.Warnf(ctx, "[plugin] %s: extracted files at %s are gone; reloading", row.ID, prev.Dir)
 	}
 	if rt, ok := r.retries[row.ID]; ok && rt.key == loadKey && r.now().Before(rt.next) {
 		return nil // still failed; its status says why
 	}
 	data, err := r.store.Get(ctx, v.PackageURI)
 	if err != nil {
-		return err
+		return r.failed(prev, row, loadKey, err)
 	}
 	p, err := pkg.Open(data)
 	if err != nil {
-		return err
+		return r.failed(prev, row, loadKey, err)
 	}
 	if p.Digest != v.Digest {
-		return fmt.Errorf("stored package digest %s does not match %s", p.Digest, v.Digest)
+		return r.failed(prev, row, loadKey,
+			fmt.Errorf("stored package digest %s does not match %s", p.Digest, v.Digest))
 	}
 	if p.Manifest.ID != row.ID {
-		return fmt.Errorf("package is plugin %s, not %s", p.Manifest.ID, row.ID)
+		return r.failed(prev, row, loadKey, fmt.Errorf("package is plugin %s, not %s", p.Manifest.ID, row.ID))
 	}
 	if r.admit != nil {
 		if err := r.admit(p); err != nil {
-			if _, had := r.loaded[row.ID]; had {
+			// The platform's policy refuses the plugin, not only this
+			// version: the previous one stops too.
+			if prev != nil {
 				r.unload(ctx, row.ID)
 			}
 			// The verdict holds until the version or the platform's
@@ -348,54 +417,21 @@ func (r *Reconciler) ensure(ctx context.Context, row types.InstalledPlugin) erro
 	}
 	dir, err := r.extract(p)
 	if err != nil {
-		return err
-	}
-	if err := r.registry.Replace(p.Manifest); err != nil {
-		return err
+		return r.failed(prev, row, loadKey, err)
 	}
 	l := &Loaded{Manifest: p.Manifest, Package: p, Dir: dir, Installed: row}
 	l.Report = func(healthy bool, err error) { r.reportLoaded(l, healthy, err) }
-	var errs, pending []error
-	prev, had := r.loaded[row.ID]
-	moved := had && runsElsewhere(prev.Manifest, p.Manifest)
-	if moved {
+	if prev != nil && runsElsewhere(prev.Manifest, p.Manifest) {
 		// The runtimes that ran the previous version ignore the new one:
-		// stop it everywhere first, routes before processes.
-		for i := len(r.activators) - 1; i >= 0; i-- {
-			a := r.activators[i]
-			if err := a.Deactivate(ctx, row.ID); err != nil {
-				errs = append(errs, fmt.Errorf("%s: deactivate previous version: %w", a.Name(), err))
-			}
-		}
+		// stop it everywhere first.
+		r.drop(ctx, row.ID)
+		prev = nil
 	}
-	for _, a := range r.activators {
-		_, inPlace := a.(InPlaceActivator)
-		if had && !inPlace && !moved {
-			if err := a.Deactivate(ctx, row.ID); err != nil {
-				errs = append(errs, fmt.Errorf("%s: deactivate previous version: %w", a.Name(), err))
-			}
-		}
-		if err := a.Activate(ctx, l); err != nil {
-			var pe *PendingError
-			if errors.As(err, &pe) {
-				pending = append(pending, fmt.Errorf("%s: %w", a.Name(), err))
-			} else {
-				errs = append(errs, fmt.Errorf("%s: %w", a.Name(), err))
-			}
-		}
+	pending, err := r.activate(ctx, prev, l)
+	if err != nil {
+		return r.failed(prev, row, loadKey, err)
 	}
 	r.loaded[row.ID] = l
-	if err := errors.Join(errs...); err != nil {
-		rt := r.retries[row.ID]
-		if rt.key != loadKey {
-			rt = retry{key: loadKey}
-		}
-		rt.attempts++
-		rt.next = r.now().Add(retryDelay(rt.attempts))
-		r.retries[row.ID] = rt
-		delete(r.digests, row.ID)
-		return err
-	}
 	r.digests[row.ID] = loadKey
 	delete(r.retries, row.ID)
 	if err := errors.Join(pending...); err != nil {
@@ -408,6 +444,83 @@ func (r *Reconciler) ensure(ctx context.Context, row types.InstalledPlugin) erro
 	logger.Infof(ctx, "[plugin] loaded %s %s", row.ID, row.ActiveVersion)
 	r.setStatus(row.ID, Status{Version: row.ActiveVersion, State: StateReady, Egress: r.egress(row.ID)})
 	return nil
+}
+
+// activate stages next on every activator and commits them all, or aborts
+// them all and leaves prev as it was. Activators stage in reverse order:
+// the domains only check what a package contributes, so a bad package
+// fails before a runtime starts anything. They commit in order, runtimes
+// first, so a code plugin is reachable before anything routes calls to it.
+func (r *Reconciler) activate(ctx context.Context, prev, next *Loaded) (pending []error, err error) {
+	staged := make([]Staged, 0, len(r.activators))
+	abort := func() {
+		for i := len(staged) - 1; i >= 0; i-- {
+			staged[i].Abort()
+		}
+	}
+	for i := len(r.activators) - 1; i >= 0; i-- {
+		a := r.activators[i]
+		s, err := a.Stage(ctx, prev, next)
+		var pe *PendingError
+		switch {
+		case err == nil:
+		case errors.As(err, &pe) && s != nil:
+			pending = append(pending, fmt.Errorf("%s: %w", a.Name(), err))
+		default:
+			abort()
+			return nil, fmt.Errorf("%s: %w", a.Name(), err)
+		}
+		if s == nil {
+			s = Unchanged
+		}
+		staged = append(staged, s)
+	}
+	// The registry swaps in one step, so it goes first: if it refuses the
+	// manifest, nothing has changed yet.
+	if err := r.registry.Replace(next.Manifest); err != nil {
+		abort()
+		return nil, err
+	}
+	for i := len(staged) - 1; i >= 0; i-- {
+		staged[i].Commit()
+	}
+	return pending, nil
+}
+
+// failed records a version that did not load and when to try it again. A
+// plugin with a previous version loaded keeps it and reports the upgrade
+// as failed; the error says so.
+func (r *Reconciler) failed(prev *Loaded, row types.InstalledPlugin, loadKey string, err error) error {
+	rt := r.retries[row.ID]
+	if rt.key != loadKey {
+		rt = retry{key: loadKey}
+	}
+	rt.attempts++
+	rt.next = r.now().Add(retryDelay(rt.attempts))
+	r.retries[row.ID] = rt
+	if prev == nil {
+		return err
+	}
+	r.statusMu.Lock()
+	s := r.status[row.ID]
+	s.UpgradeVersion, s.UpgradeError = row.ActiveVersion, err.Error()
+	s.UpdatedAt = time.Now()
+	r.status[row.ID] = s
+	r.statusMu.Unlock()
+	return &upgradeError{version: row.ActiveVersion, err: err}
+}
+
+// clearUpgrade forgets a failed upgrade of a plugin.
+func (r *Reconciler) clearUpgrade(pluginID string) {
+	r.statusMu.Lock()
+	defer r.statusMu.Unlock()
+	s, ok := r.status[pluginID]
+	if !ok || s.UpgradeVersion == "" {
+		return
+	}
+	s.UpgradeVersion, s.UpgradeError = "", ""
+	s.UpdatedAt = time.Now()
+	r.status[pluginID] = s
 }
 
 // egress asks the activators how this node controls a plugin's outbound
@@ -448,6 +561,17 @@ func dirExists(dir string) bool {
 }
 
 func (r *Reconciler) unload(ctx context.Context, id string) {
+	r.drop(ctx, id)
+	delete(r.retries, id)
+	r.statusMu.Lock()
+	delete(r.status, id)
+	r.statusMu.Unlock()
+	r.forgetStatus(ctx, id)
+	logger.Infof(ctx, "[plugin] unloaded %s", id)
+}
+
+// drop removes a loaded plugin from every activator and the registry.
+func (r *Reconciler) drop(ctx context.Context, id string) {
 	// Reverse order: routes go before the processes they route to.
 	for i := len(r.activators) - 1; i >= 0; i-- {
 		a := r.activators[i]
@@ -460,12 +584,6 @@ func (r *Reconciler) unload(ctx context.Context, id string) {
 	}
 	delete(r.loaded, id)
 	delete(r.digests, id)
-	delete(r.retries, id)
-	r.statusMu.Lock()
-	delete(r.status, id)
-	r.statusMu.Unlock()
-	r.forgetStatus(ctx, id)
-	logger.Infof(ctx, "[plugin] unloaded %s", id)
 }
 
 // extract writes the package under cacheDir/<digest>, once per digest. An

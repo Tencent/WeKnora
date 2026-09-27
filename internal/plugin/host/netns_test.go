@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/plugin/driver"
+	"github.com/Tencent/WeKnora/internal/plugin/reconcile"
 )
 
 // setSandboxCheck replaces the sandbox probe and forgets its outcome.
@@ -93,7 +94,7 @@ func TestAutoModeFallsBackToTheProxy(t *testing.T) {
 	if got := m.Egress("acme.echo"); got != "" {
 		t.Fatalf("egress before start = %q", got)
 	}
-	if err := m.Activate(context.Background(), install(t, "1.0.0", "")); err != nil {
+	if err := reconcile.Activate(context.Background(), m, install(t, "1.0.0", "")); err != nil {
 		t.Fatalf("Activate: %v", err)
 	}
 	if got := m.Egress("acme.echo"); got != driver.EgressProxy {

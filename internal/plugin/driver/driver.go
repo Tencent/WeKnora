@@ -79,6 +79,10 @@ type InstanceStatus struct {
 	// Egress is how the instance's outbound traffic is controlled; empty for
 	// plugins without code.
 	Egress EgressMode `json:"egress,omitempty"`
+	// UpgradeVersion is a newer version the instance failed to load; it
+	// keeps running Version meanwhile and says why in UpgradeError.
+	UpgradeVersion string `json:"upgradeVersion,omitempty"`
+	UpgradeError   string `json:"upgradeError,omitempty"`
 }
 
 // Driver runs plugins of one runtime type.

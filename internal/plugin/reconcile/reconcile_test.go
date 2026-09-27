@@ -20,20 +20,41 @@ import (
 type recorder struct {
 	calls []string
 	fail  bool
+	// failVersion fails staging that version only.
+	failVersion string
+	// log, when set, gets the calls of several recorders in order.
+	log  *[]string
+	name string
 }
 
-func (a *recorder) Name() string { return "recorder" }
-
-func (a *recorder) Activate(_ context.Context, l *Loaded) error {
-	a.calls = append(a.calls, "activate "+l.Manifest.ID+"@"+l.Manifest.Version)
-	if a.fail {
-		return fmt.Errorf("boom")
+func (a *recorder) Name() string {
+	if a.name != "" {
+		return a.name
 	}
-	return nil
+	return "recorder"
+}
+
+func (a *recorder) record(call string) {
+	a.calls = append(a.calls, call)
+	if a.log != nil {
+		*a.log = append(*a.log, a.Name()+" "+call)
+	}
+}
+
+func (a *recorder) Stage(_ context.Context, _, next *Loaded) (Staged, error) {
+	v := next.Manifest.ID + "@" + next.Manifest.Version
+	a.record("stage " + v)
+	if a.fail || next.Manifest.Version == a.failVersion {
+		return nil, fmt.Errorf("boom")
+	}
+	return Swap{
+		OnCommit: func() { a.record("commit " + v) },
+		OnAbort:  func() { a.record("abort " + v) },
+	}, nil
 }
 
 func (a *recorder) Deactivate(_ context.Context, id string) error {
-	a.calls = append(a.calls, "deactivate "+id)
+	a.record("deactivate " + id)
 	return nil
 }
 
@@ -63,7 +84,7 @@ func TestReconcileLoadsUpgradesAndUnloads(t *testing.T) {
 
 	// A second pass with nothing changed does nothing.
 	_ = r.Reconcile(ctx)
-	if len(act.calls) != 1 {
+	if len(act.calls) != 2 {
 		t.Fatalf("calls = %v", act.calls)
 	}
 
@@ -87,7 +108,7 @@ func TestReconcileLoadsUpgradesAndUnloads(t *testing.T) {
 	if _, ok := r.Status("acme.kit"); ok {
 		t.Fatal("unloaded plugin should have no status")
 	}
-	want := "activate acme.kit@1.0.0,deactivate acme.kit,activate acme.kit@1.1.0,deactivate acme.kit"
+	want := "stage acme.kit@1.0.0,commit acme.kit@1.0.0,stage acme.kit@1.1.0,commit acme.kit@1.1.0,deactivate acme.kit"
 	if got := strings.Join(act.calls, ","); got != want {
 		t.Fatalf("calls = %s", got)
 	}
@@ -163,7 +184,7 @@ func TestReconcileReextractsMissingFiles(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(r.Loaded()[0].Dir, "skills/triage/SKILL.md")); err != nil {
 		t.Fatalf("files not extracted again: %v", err)
 	}
-	want := "activate acme.kit@1.0.0,deactivate acme.kit,activate acme.kit@1.0.0"
+	want := "stage acme.kit@1.0.0,commit acme.kit@1.0.0,stage acme.kit@1.0.0,commit acme.kit@1.0.0"
 	if got := strings.Join(act.calls, ","); got != want {
 		t.Fatalf("calls = %s", got)
 	}
@@ -182,6 +203,9 @@ func TestActivatorFailureMarksPluginFailed(t *testing.T) {
 	}
 	if s, _ := r.Status("acme.kit"); s.State != StateFailed || !strings.Contains(s.Error, "boom") {
 		t.Fatalf("status = %+v", s)
+	}
+	if _, ok := r.registry.Plugin("acme.kit"); ok || len(r.Loaded()) != 0 {
+		t.Fatal("a plugin that failed to stage must not be half loaded")
 	}
 }
 
@@ -207,12 +231,12 @@ func TestFailedActivationIsRetriedWithBackoff(t *testing.T) {
 	}
 	now = now.Add(time.Second)
 	_ = r.Reconcile(ctx)
-	if len(act.calls) != 3 { // deactivate the half-loaded plugin, activate again
+	if len(act.calls) != 2 {
 		t.Fatalf("calls = %v", act.calls)
 	}
 	now = now.Add(retryFloor)
 	_ = r.Reconcile(ctx)
-	if len(act.calls) != 3 {
+	if len(act.calls) != 2 {
 		t.Fatalf("the second retry should wait twice as long: %v", act.calls)
 	}
 
@@ -225,7 +249,7 @@ func TestFailedActivationIsRetriedWithBackoff(t *testing.T) {
 		t.Fatalf("status = %+v", s)
 	}
 	_ = r.Reconcile(ctx)
-	if len(act.calls) != 5 {
+	if len(act.calls) != 4 {
 		t.Fatalf("a loaded plugin should stay loaded: %v", act.calls)
 	}
 
@@ -274,7 +298,7 @@ func TestReconcileReloadsOnRuntimeTargetChange(t *testing.T) {
 	_ = repo.SavePlugin(ctx, row)
 	_ = r.Reconcile(ctx)
 
-	if len(act.calls) != 5 || act.calls[1] != "deactivate acme.kit" {
+	if len(act.calls) != 6 || act.calls[2] != "stage acme.kit@1.0.0" {
 		t.Fatalf("calls = %v, want a reload per change", act.calls)
 	}
 	if got := r.Loaded()[0].Installed.RemoteSecret; got != "s2" {
@@ -314,11 +338,6 @@ func TestRuntimesLimitWhatANodeLoads(t *testing.T) {
 	}
 }
 
-// inPlace is a runtime that swaps versions itself.
-type inPlace struct{ recorder }
-
-func (a *inPlace) ActivatesInPlace() {}
-
 // kitRuntime is acme.kit at a version running in the given runtime.
 func kitRuntime(t *testing.T, version, runtime string) []byte {
 	apiVersion := ""
@@ -333,11 +352,11 @@ func kitRuntime(t *testing.T, version, runtime string) []byte {
 	})
 }
 
-// A runtime swaps an upgrade in place, but a version that moves to another
-// runtime first stops the previous one wherever it ran.
-func TestRuntimeSwitchDeactivatesInPlaceActivators(t *testing.T) {
+// An upgrade is staged beside the running version, but a version that
+// moves to another runtime first stops the previous one wherever it ran.
+func TestRuntimeSwitchDeactivatesFirst(t *testing.T) {
 	ctx := context.Background()
-	repo, store, rt := plugintest.NewMemRepo(), &plugintest.MemStore{}, &inPlace{}
+	repo, store, rt := plugintest.NewMemRepo(), &plugintest.MemStore{}, &recorder{}
 	r := New(Options{
 		Repo: repo, Store: store, Registry: registry.New(), CacheDir: t.TempDir(), Activators: []Activator{rt},
 	})
@@ -349,7 +368,8 @@ func TestRuntimeSwitchDeactivatesInPlaceActivators(t *testing.T) {
 	if err := r.Reconcile(ctx); err != nil {
 		t.Fatal(err)
 	}
-	want := "activate acme.kit@1.0.0,activate acme.kit@1.1.0,deactivate acme.kit,activate acme.kit@2.0.0"
+	want := "stage acme.kit@1.0.0,commit acme.kit@1.0.0,stage acme.kit@1.1.0,commit acme.kit@1.1.0," +
+		"deactivate acme.kit,stage acme.kit@2.0.0,commit acme.kit@2.0.0"
 	if got := strings.Join(rt.calls, ","); got != want {
 		t.Fatalf("calls = %s", got)
 	}
@@ -361,10 +381,10 @@ type pending struct {
 	report func(bool, error)
 }
 
-func (a *pending) Activate(ctx context.Context, l *Loaded) error {
-	_ = a.recorder.Activate(ctx, l)
-	a.report = l.Report
-	return Pending(fmt.Errorf("rolling out"))
+func (a *pending) Stage(ctx context.Context, prev, next *Loaded) (Staged, error) {
+	s, _ := a.recorder.Stage(ctx, prev, next)
+	a.report = next.Report
+	return s, Pending(fmt.Errorf("rolling out"))
 }
 
 // A pending activation loads the plugin as degraded, is not retried, and
@@ -383,7 +403,7 @@ func TestPendingActivation(t *testing.T) {
 		t.Fatalf("status = %+v", s)
 	}
 	_ = r.Reconcile(ctx)
-	if len(act.calls) != 1 {
+	if len(act.calls) != 2 {
 		t.Fatalf("a pending plugin was activated again: %v", act.calls)
 	}
 	act.report(true, nil)
@@ -398,5 +418,114 @@ func TestPendingActivation(t *testing.T) {
 	stale(true, nil)
 	if s, _ := r.Status("acme.kit"); s.State != StateDegraded || s.Version != "1.1.0" {
 		t.Fatalf("status after a stale report = %+v", s)
+	}
+}
+
+// An upgrade that fails to stage leaves the running version serving: the
+// activators that staged it abort, nothing is deactivated, and the status
+// reports the version that failed until it loads or is rolled back.
+func TestFailedUpgradeKeepsThePreviousVersion(t *testing.T) {
+	ctx := context.Background()
+	var log []string
+	runtime := &recorder{name: "runtime", failVersion: "1.1.0", log: &log}
+	domain := &recorder{name: "domain", log: &log}
+	repo, store, reg := plugintest.NewMemRepo(), &plugintest.MemStore{}, registry.New()
+	r := New(Options{
+		Repo: repo, Store: store, Registry: reg, CacheDir: t.TempDir(), Activators: []Activator{runtime, domain},
+	})
+	now := time.Unix(1000, 0)
+	r.now = func() time.Time { return now }
+
+	plugintest.Install(t, repo, store, plugintest.KitPackage(t, "1.0.0"), types.PluginStateEnabled)
+	if err := r.Reconcile(ctx); err != nil {
+		t.Fatal(err)
+	}
+	// Domains stage first; runtimes commit first.
+	want := "domain stage acme.kit@1.0.0,runtime stage acme.kit@1.0.0," +
+		"runtime commit acme.kit@1.0.0,domain commit acme.kit@1.0.0"
+	if got := strings.Join(log, ","); got != want {
+		t.Fatalf("calls = %s", got)
+	}
+
+	log = nil
+	plugintest.Install(t, repo, store, plugintest.KitPackage(t, "1.1.0"), types.PluginStateEnabled)
+	err := r.Reconcile(ctx)
+	if err == nil || !strings.Contains(err.Error(), "previous version keeps running") {
+		t.Fatalf("want an upgrade error, got %v", err)
+	}
+	want = "domain stage acme.kit@1.1.0,runtime stage acme.kit@1.1.0,domain abort acme.kit@1.1.0"
+	if got := strings.Join(log, ","); got != want {
+		t.Fatalf("calls = %s", got)
+	}
+	if m, _ := reg.Plugin("acme.kit"); m.Version != "1.0.0" {
+		t.Fatalf("registry has %s", m.Version)
+	}
+	if l := r.Loaded(); len(l) != 1 || l[0].Manifest.Version != "1.0.0" {
+		t.Fatalf("loaded = %+v", l)
+	}
+	s, _ := r.Status("acme.kit")
+	if s.State != StateReady || s.Version != "1.0.0" || s.UpgradeVersion != "1.1.0" ||
+		!strings.Contains(s.UpgradeError, "runtime: boom") {
+		t.Fatalf("status = %+v", s)
+	}
+
+	// Tried again after the backoff, still failing, still serving 1.0.0.
+	log = nil
+	now = now.Add(retryFloor)
+	_ = r.Reconcile(ctx)
+	if len(log) != 3 {
+		t.Fatalf("calls = %v", log)
+	}
+	if s, _ := r.Status("acme.kit"); s.Version != "1.0.0" || s.UpgradeVersion != "1.1.0" {
+		t.Fatalf("status = %+v", s)
+	}
+
+	// Rolled back: nothing to load, and the failed upgrade is forgotten.
+	log = nil
+	row, _ := repo.GetPlugin(ctx, "acme.kit")
+	row.ActiveVersion = "1.0.0"
+	_ = repo.SavePlugin(ctx, row)
+	if err := r.Reconcile(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if len(log) != 0 {
+		t.Fatalf("calls = %v", log)
+	}
+	if s, _ := r.Status("acme.kit"); s.State != StateReady || s.UpgradeVersion != "" || s.UpgradeError != "" {
+		t.Fatalf("status = %+v", s)
+	}
+
+	// Upgraded again once the cause is fixed.
+	runtime.failVersion = ""
+	row.ActiveVersion = "1.1.0"
+	_ = repo.SavePlugin(ctx, row)
+	if err := r.Reconcile(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if s, _ := r.Status("acme.kit"); s.Version != "1.1.0" || s.UpgradeVersion != "" {
+		t.Fatalf("status = %+v", s)
+	}
+}
+
+// A new version whose package cannot be read leaves the running one too.
+func TestUnreadableUpgradeKeepsThePreviousVersion(t *testing.T) {
+	ctx := context.Background()
+	repo, store, reg, act := plugintest.NewMemRepo(), &plugintest.MemStore{}, registry.New(), &recorder{}
+	r := New(Options{Repo: repo, Store: store, Registry: reg, CacheDir: t.TempDir(), Activators: []Activator{act}})
+	plugintest.Install(t, repo, store, plugintest.KitPackage(t, "1.0.0"), types.PluginStateEnabled)
+	if err := r.Reconcile(ctx); err != nil {
+		t.Fatal(err)
+	}
+	plugintest.Install(t, repo, store, plugintest.KitPackage(t, "1.1.0"), types.PluginStateEnabled)
+	v, _ := repo.GetVersion(ctx, "acme.kit", "1.1.0")
+	store.Blobs[v.PackageURI] = plugintest.KitPackage(t, "6.6.6")
+	if err := r.Reconcile(ctx); err == nil || !strings.Contains(err.Error(), "does not match") {
+		t.Fatalf("want a digest error, got %v", err)
+	}
+	if s, _ := r.Status("acme.kit"); s.State != StateReady || s.Version != "1.0.0" || s.UpgradeVersion != "1.1.0" {
+		t.Fatalf("status = %+v", s)
+	}
+	if len(act.calls) != 2 {
+		t.Fatalf("calls = %v", act.calls)
 	}
 }

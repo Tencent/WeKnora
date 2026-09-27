@@ -39,19 +39,19 @@ func TestDelegationNeedsPluginHosts(t *testing.T) {
 	h := host.NewManager()
 	h.SetKinds([]string{host.KindBinary})
 
-	err := newPluginDelegation(h, nil).Activate(ctx, pythonPlugin())
+	err := reconcile.Activate(ctx, newPluginDelegation(h, nil), pythonPlugin())
 	if err == nil || !strings.Contains(err.Error(), "no plugin host is configured") {
 		t.Fatalf("without plugin hosts = %v", err)
 	}
 
 	mr := miniredis.RunT(t)
 	pool := hostpool.NewPool(redis.NewClient(&redis.Options{Addr: mr.Addr()}), []byte("k"))
-	if err := newPluginDelegation(h, pool).Activate(ctx, pythonPlugin()); err != nil {
+	if err := reconcile.Activate(ctx, newPluginDelegation(h, pool), pythonPlugin()); err != nil {
 		t.Fatalf("with plugin hosts configured, a missing one is not a load failure: %v", err)
 	}
 
 	h.SetKinds([]string{host.KindPython})
-	if err := newPluginDelegation(h, nil).Activate(ctx, pythonPlugin()); err != nil {
+	if err := reconcile.Activate(ctx, newPluginDelegation(h, nil), pythonPlugin()); err != nil {
 		t.Fatalf("a kind the node runs needs no plugin host: %v", err)
 	}
 }

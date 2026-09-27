@@ -8,7 +8,6 @@ import (
 	"os"
 	"path"
 	"path/filepath"
-	"sync"
 
 	"gopkg.in/yaml.v3"
 
@@ -25,51 +24,42 @@ import (
 type ModelVendors struct {
 	rt *modelruntime.Runtime
 
-	mu         sync.Mutex
-	registered map[string][]string // plugin ID → vendor IDs
+	registered registrations // vendor IDs
 }
 
 // NewModelVendors creates the model vendor activator on the default runtime.
 func NewModelVendors() *ModelVendors {
-	return &ModelVendors{rt: modelruntime.Default(), registered: map[string][]string{}}
+	return &ModelVendors{rt: modelruntime.Default(), registered: newRegistrations()}
 }
 
 // Name implements reconcile.Activator.
 func (a *ModelVendors) Name() string { return "modelVendors" }
 
-// Activate implements reconcile.Activator. It registers all of a plugin's
+// Stage implements reconcile.Activator. It registers all of a plugin's
 // vendors or none.
-func (a *ModelVendors) Activate(_ context.Context, l *reconcile.Loaded) error {
-	var ids []string
+func (a *ModelVendors) Stage(_ context.Context, _, l *reconcile.Loaded) (reconcile.Staged, error) {
+	var entries []entry
 	for _, c := range l.Manifest.Contributes[manifest.PointModelVendors] {
 		id := manifest.QualifiedID(l.Manifest.ID, c.ID)
+		var v *modelruntime.PluginVendor
 		def, err := vendorDefinition(l.Package, c)
 		if err == nil {
-			err = a.rt.RegisterPlugin(id, def, filepath.Join(l.Dir, filepath.FromSlash(path.Dir(c.Path))))
+			v, err = modelruntime.PreparePlugin(id, def, filepath.Join(l.Dir, filepath.FromSlash(path.Dir(c.Path))))
+		}
+		if err == nil {
+			err = a.rt.CheckPlugin(id)
 		}
 		if err != nil {
-			for _, done := range ids {
-				a.rt.Unregister(done)
-			}
-			return fmt.Errorf("model vendor %s: %w", c.ID, err)
+			return nil, fmt.Errorf("model vendor %s: %w", c.ID, err)
 		}
-		ids = append(ids, id)
+		entries = append(entries, entry{id: v.ID(), register: func() error { return a.rt.InstallPlugin(v) }})
 	}
-	a.mu.Lock()
-	a.registered[l.Manifest.ID] = ids
-	a.mu.Unlock()
-	return nil
+	return a.registered.stage("model vendor", l.Manifest.ID, entries, a.rt.Unregister), nil
 }
 
 // Deactivate implements reconcile.Activator.
 func (a *ModelVendors) Deactivate(_ context.Context, pluginID string) error {
-	a.mu.Lock()
-	ids := a.registered[pluginID]
-	delete(a.registered, pluginID)
-	a.mu.Unlock()
-	for _, id := range ids {
-		a.rt.Unregister(id)
-	}
+	a.registered.remove(pluginID, a.rt.Unregister)
 	return nil
 }
 

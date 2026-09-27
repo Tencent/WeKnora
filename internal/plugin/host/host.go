@@ -185,37 +185,43 @@ func (m *Manager) SetReporter(r StateReporter) {
 // Name implements reconcile.Activator.
 func (m *Manager) Name() string { return "host" }
 
-// ActivatesInPlace implements reconcile.InPlaceActivator: an upgrade starts
-// the new process before the old one stops.
-func (m *Manager) ActivatesInPlace() {}
-
-// Activate starts a host plugin and returns once it is ready. Other runtimes
-// are ignored. A new version replaces the old process only after it started.
-func (m *Manager) Activate(ctx context.Context, l *reconcile.Loaded) error {
+// Stage starts a host plugin beside the running version and returns once
+// it is ready; calls go to it from the commit on, and the previous process
+// stops then. Other runtimes are ignored.
+func (m *Manager) Stage(ctx context.Context, _, l *reconcile.Loaded) (reconcile.Staged, error) {
 	if l.Manifest.Runtime.Type != manifest.RuntimeHost {
-		return nil
+		return reconcile.Unchanged, nil
 	}
 	if !Supported(l.Manifest.Runtime.Kind) {
-		return fmt.Errorf("runtime.kind %q is not supported by this host; binary and python are",
+		return nil, fmt.Errorf("runtime.kind %q is not supported by this host; binary and python are",
 			l.Manifest.Runtime.Kind)
 	}
 	if !m.Runs(l.Manifest.Runtime.Kind) {
 		if m.standalone {
-			return fmt.Errorf("this plugin host does not run %s plugins (it runs %s)",
+			return nil, fmt.Errorf("this plugin host does not run %s plugins (it runs %s)",
 				l.Manifest.Runtime.Kind, strings.Join(m.Kinds(), ", "))
 		}
-		return nil // a plugin host elsewhere runs it
+		return reconcile.Unchanged, nil // a plugin host elsewhere runs it
 	}
 	id := l.Manifest.ID
 	m.mu.Lock()
 	direct, hostAPI := m.direct, m.hostAPI
 	m.mu.Unlock()
-	p, err := startProcess(spec{m: l.Manifest, dir: l.Dir, direct: direct, hostAPI: hostAPI}, func(s State, err error) {
-		m.report(id, s, err)
-	})
+	p, err := startProcess(spec{m: l.Manifest, dir: l.Dir, direct: direct, hostAPI: hostAPI},
+		func(p *process, s State, err error) { m.report(id, p, s, err) })
 	if err != nil {
-		return err
+		return nil, err
 	}
+	return reconcile.Swap{
+		OnCommit: func() { m.serve(ctx, l.Manifest, p) },
+		OnAbort:  func() { m.retire(p) },
+	}, nil
+}
+
+// serve routes a plugin's calls to a started process and retires the one
+// it replaces.
+func (m *Manager) serve(ctx context.Context, mf *manifest.Manifest, p *process) {
+	id := mf.ID
 	m.mu.Lock()
 	old := m.procs[id]
 	m.procs[id] = p
@@ -234,8 +240,7 @@ func (m *Manager) Activate(ctx context.Context, l *reconcile.Loaded) error {
 		time.AfterFunc(handoverWindow, func() { m.endHandover(id, handed) })
 	}
 	m.changed()
-	logger.Infof(ctx, "[plugin] host started %s %s", id, l.Manifest.Version)
-	return nil
+	logger.Infof(ctx, "[plugin] host started %s %s", id, mf.Version)
 }
 
 // endHandover stops serving a plugin's previous version, unless it was
@@ -283,12 +288,15 @@ func (m *Manager) retire(p *process) {
 	}()
 }
 
-func (m *Manager) report(pluginID string, s State, err error) {
+// report passes a process's state to the reconciler, unless the process
+// is not the one serving the plugin (staged, or being replaced).
+func (m *Manager) report(pluginID string, p *process, s State, err error) {
 	m.changed()
 	m.mu.Lock()
 	r := m.reporter
+	serving := m.procs[pluginID] == p
 	m.mu.Unlock()
-	if r == nil {
+	if r == nil || !serving {
 		return
 	}
 	switch s {

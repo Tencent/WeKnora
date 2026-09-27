@@ -129,7 +129,7 @@ func TestPluginConnector(t *testing.T) {
 	}
 	registry := datasource.NewConnectorRegistry()
 	a := NewConnectors(NewInvoker(fakeClients{client.New(srv.URL, nil, nil)}), registry)
-	if err := a.Activate(ctx, &reconcile.Loaded{Manifest: p.Manifest, Package: p}); err != nil {
+	if err := reconcile.Activate(ctx, a, &reconcile.Loaded{Manifest: p.Manifest, Package: p}); err != nil {
 		t.Fatalf("Activate: %v", err)
 	}
 

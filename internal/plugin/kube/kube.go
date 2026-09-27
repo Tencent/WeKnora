@@ -328,10 +328,6 @@ func New(cfg *Config, endpoints Endpoints) (*Driver, error) {
 // Name implements reconcile.Activator.
 func (d *Driver) Name() string { return "kubernetes" }
 
-// ActivatesInPlace implements reconcile.InPlaceActivator: a new version is
-// rolled out over the running one.
-func (d *Driver) ActivatesInPlace() {}
-
 var nonName = regexp.MustCompile(`[^a-z0-9-]+`)
 
 // ResourceName is the name of a plugin's Deployment, Service and Secret: a
@@ -356,13 +352,26 @@ func legacyResourceName(pluginID string) string {
 	return n
 }
 
-// Activate implements reconcile.Activator: apply the plugin's resources and
-// register the service. A rollout that is not done at once finishes in the
-// background: Activate returns a reconcile.PendingError and the plugin
-// reports ready through Loaded.Report, so a slow image pull holds up
-// neither the reconciler nor the node's startup. Other runtimes are
-// ignored.
-func (d *Driver) Activate(ctx context.Context, l *reconcile.Loaded) error {
+// Stage implements reconcile.Activator: apply the plugin's resources and
+// register the service. Kubernetes rolls a new version out over the
+// running one, keeping the old pod until the new one is ready, so staging
+// does all the work and the commit has none left. A rollout that is not
+// done at once finishes in the background: Stage returns a
+// reconcile.PendingError and the plugin reports ready through
+// Loaded.Report, so a slow image pull holds up neither the reconciler nor
+// the node's startup. Other runtimes are ignored.
+func (d *Driver) Stage(ctx context.Context, _, l *reconcile.Loaded) (reconcile.Staged, error) {
+	if err := d.activate(ctx, l); err != nil {
+		var pending *reconcile.PendingError
+		if errors.As(err, &pending) {
+			return reconcile.Unchanged, err
+		}
+		return nil, err
+	}
+	return reconcile.Unchanged, nil
+}
+
+func (d *Driver) activate(ctx context.Context, l *reconcile.Loaded) error {
 	m := l.Manifest
 	if m.Runtime.Type != manifest.RuntimeKubernetes {
 		return nil

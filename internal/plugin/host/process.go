@@ -133,7 +133,7 @@ func entryPath(m *manifest.Manifest, dir string) (string, error) {
 // process is one running plugin version and its supervisor.
 type process struct {
 	spec    spec
-	onState func(State, error)
+	onState func(*process, State, error)
 
 	mu      sync.RWMutex
 	client  *client.Client
@@ -158,7 +158,7 @@ type launched struct {
 
 // startProcess starts the plugin, waits until it is ready and keeps it
 // running until stop. It returns once the first start succeeded or failed.
-func startProcess(sp spec, onState func(State, error)) (*process, error) {
+func startProcess(sp spec, onState func(*process, State, error)) (*process, error) {
 	entry, err := entryPath(sp.m, sp.dir)
 	if err != nil {
 		return nil, err
@@ -487,7 +487,7 @@ func (p *process) setState(s State, err error) {
 	p.state, p.lastErr = s, err
 	p.mu.Unlock()
 	if changed && p.onState != nil {
-		p.onState(s, err)
+		p.onState(p, s, err)
 	}
 }
 

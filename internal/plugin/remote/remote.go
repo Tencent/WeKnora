@@ -86,50 +86,64 @@ func (m *Manager) SetReporter(r host.StateReporter) {
 // Name implements reconcile.Activator.
 func (m *Manager) Name() string { return "remote" }
 
-// ActivatesInPlace implements reconcile.InPlaceActivator: a new URL or
-// version takes over from the old endpoint without a gap.
-func (m *Manager) ActivatesInPlace() {}
-
-// Activate checks that the registered service is up and serves the
-// installed package, then keeps health-checking it. Other runtimes are
-// ignored.
-func (m *Manager) Activate(ctx context.Context, l *reconcile.Loaded) error {
+// Stage checks that the registered service is up and serves the installed
+// package. From the commit on, calls go to it, a new URL or version taking
+// over from the old endpoint without a gap, and it is health-checked.
+// Other runtimes are ignored.
+func (m *Manager) Stage(ctx context.Context, _, l *reconcile.Loaded) (reconcile.Staged, error) {
 	if l.Manifest.Runtime.Type != manifest.RuntimeRemote {
-		return nil
+		return reconcile.Unchanged, nil
 	}
 	url := l.Installed.RemoteURL
 	if url == "" {
-		return errors.New("no service URL is registered for this remote plugin")
+		return nil, errors.New("no service URL is registered for this remote plugin")
 	}
 	if err := utils.ValidateURLForSSRF(url); err != nil {
-		return fmt.Errorf("service URL is not allowed: %w", err)
+		return nil, fmt.Errorf("service URL is not allowed: %w", err)
 	}
 	secret, err := utils.DecryptStoredSecret(l.Installed.RemoteSecret)
 	if err != nil {
-		return fmt.Errorf("decrypt the plugin secret: %w", err)
+		return nil, fmt.Errorf("decrypt the plugin secret: %w", err)
 	}
 	if secret == "" {
-		return errors.New("the remote plugin has no signing secret")
+		return nil, errors.New("the remote plugin has no signing secret")
 	}
-	return m.serve(ctx, l.Manifest, url, m.newClient(url, []byte(secret)))
+	c := m.newClient(url, []byte(secret))
+	if err := check(ctx, c, l.Manifest); err != nil {
+		return nil, err
+	}
+	return reconcile.Swap{
+		OnCommit: func() { m.serve(ctx, l.Manifest, url, c) },
+		OnAbort:  c.Close,
+	}, nil
 }
 
 // ServeDeployed registers a plugin service WeKnora deployed itself (the
 // kubernetes driver) at url: checked and health-watched like a remote
 // plugin, but reached on the cluster's private addresses.
 func (m *Manager) ServeDeployed(ctx context.Context, mf *manifest.Manifest, url, secret string) error {
-	return m.serve(ctx, mf, url, m.newTrustedClient(url, []byte(secret)))
+	c := m.newTrustedClient(url, []byte(secret))
+	if err := check(ctx, c, mf); err != nil {
+		return err
+	}
+	m.serve(ctx, mf, url, c)
+	return nil
 }
 
-func (m *Manager) serve(ctx context.Context, mf *manifest.Manifest, url string, c *client.Client) error {
+// check verifies a new client's service within the check timeout and
+// closes the client if it fails.
+func check(ctx context.Context, c *client.Client, mf *manifest.Manifest) error {
 	cctx, cancel := context.WithTimeout(ctx, checkTimeout)
 	err := verify(cctx, c, mf)
 	cancel()
 	if err != nil {
 		c.Close()
-		return err
 	}
+	return err
+}
 
+// serve routes a plugin's calls to a checked client and health-watches it.
+func (m *Manager) serve(ctx context.Context, mf *manifest.Manifest, url string, c *client.Client) {
 	id := mf.ID
 	wctx, stop := context.WithCancel(context.Background())
 	e := &endpoint{m: mf, c: c, cancel: stop, done: make(chan struct{})}
@@ -142,7 +156,6 @@ func (m *Manager) serve(ctx context.Context, mf *manifest.Manifest, url string, 
 	}
 	go m.watch(wctx, id, e)
 	logger.Infof(ctx, "[plugin] remote %s %s at %s", id, mf.Version, url)
-	return nil
 }
 
 // verify checks that the service is healthy and is the installed package.

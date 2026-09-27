@@ -36,8 +36,8 @@ func NewUIPages() *UIPages { return &UIPages{loaded: map[string]uiPlugin{}} }
 // Name implements reconcile.Activator.
 func (a *UIPages) Name() string { return "ui" }
 
-// Activate implements reconcile.Activator.
-func (a *UIPages) Activate(_ context.Context, l *reconcile.Loaded) error {
+// Stage implements reconcile.Activator.
+func (a *UIPages) Stage(_ context.Context, _, l *reconcile.Loaded) (reconcile.Staged, error) {
 	has := false
 	for point, list := range l.Manifest.Contributes {
 		has = has || manifest.IsUIPoint(point)
@@ -45,14 +45,15 @@ func (a *UIPages) Activate(_ context.Context, l *reconcile.Loaded) error {
 			has = has || (point == manifest.PointMCPServers && c.HasToolPages()) || manifest.HasEditor(point, c)
 		}
 	}
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if has {
-		a.loaded[l.Manifest.ID] = uiPlugin{m: l.Manifest, dir: l.Dir}
-	} else {
-		delete(a.loaded, l.Manifest.ID)
-	}
-	return nil
+	return reconcile.Swap{OnCommit: func() {
+		a.mu.Lock()
+		defer a.mu.Unlock()
+		if has {
+			a.loaded[l.Manifest.ID] = uiPlugin{m: l.Manifest, dir: l.Dir}
+		} else {
+			delete(a.loaded, l.Manifest.ID)
+		}
+	}}, nil
 }
 
 // Deactivate implements reconcile.Activator.

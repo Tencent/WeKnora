@@ -86,7 +86,7 @@ func TestHostRunsAPythonPlugin(t *testing.T) {
 	defer m.Close()
 
 	l := installPython(t)
-	if err := m.Activate(ctx, l); err != nil {
+	if err := reconcile.Activate(ctx, m, l); err != nil {
 		t.Fatalf("Activate: %v", err)
 	}
 	if got, err := search(t, m, "hello"); err != nil || got != "hello" {
@@ -136,13 +136,14 @@ func TestKindsDecideWhereAPluginRuns(t *testing.T) {
 	embedded := NewManager()
 	embedded.SetKinds([]string{KindPython})
 	defer embedded.Close()
-	if err := embedded.Activate(ctx, l); err != nil || embedded.Local("acme.echo") {
+	if err := reconcile.Activate(ctx, embedded, l); err != nil || embedded.Local("acme.echo") {
 		t.Fatalf("an app node hands other kinds on: %v", err)
 	}
 
 	standalone := NewStandaloneManager([]string{KindPython})
 	defer standalone.Close()
-	if err := standalone.Activate(ctx, l); err == nil || !strings.Contains(err.Error(), "does not run binary") {
+	err := reconcile.Activate(ctx, standalone, l)
+	if err == nil || !strings.Contains(err.Error(), "does not run binary") {
 		t.Fatalf("a standalone host refuses other kinds, got %v", err)
 	}
 

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/plugin/driver"
+	"github.com/Tencent/WeKnora/internal/plugin/reconcile"
 	"github.com/Tencent/WeKnora/internal/plugin/sandbox"
 )
 
@@ -43,7 +44,7 @@ func TestSandboxedPluginOnlyReachesTheProxyAndHostAPI(t *testing.T) {
 	m := NewManager()
 	m.SetHostAPIAddr(strings.TrimPrefix(hostAPI.URL, "http://"))
 	defer m.Close()
-	if err := m.Activate(context.Background(), install(t, "1.0.0", "")); err != nil {
+	if err := reconcile.Activate(context.Background(), m, install(t, "1.0.0", "")); err != nil {
 		if strings.Contains(err.Error(), "user namespaces") {
 			// GitHub's Ubuntu 24.04 runners restrict them.
 			t.Skipf("unprivileged user namespaces are not available here: %v", err)
@@ -75,7 +76,7 @@ func TestSandboxedPluginStopsOnSIGTERM(t *testing.T) {
 	t.Setenv(envNetns, "1")
 	m := NewManager()
 	defer m.Close()
-	if err := m.Activate(context.Background(), install(t, "1.0.0", "")); err != nil {
+	if err := reconcile.Activate(context.Background(), m, install(t, "1.0.0", "")); err != nil {
 		if strings.Contains(err.Error(), "user namespaces") {
 			t.Skipf("unprivileged user namespaces are not available here: %v", err)
 		}
@@ -107,7 +108,7 @@ func TestAutoModeProbesTheSystem(t *testing.T) {
 	t.Logf("sandbox probe: %v", probeErr)
 	m := NewManager()
 	defer m.Close()
-	if err := m.Activate(context.Background(), install(t, "1.0.0", "")); err != nil {
+	if err := reconcile.Activate(context.Background(), m, install(t, "1.0.0", "")); err != nil {
 		t.Fatalf("Activate: %v", err)
 	}
 	dial, err := search(t, m, "dial:"+other.Addr().String())

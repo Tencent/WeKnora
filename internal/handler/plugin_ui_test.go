@@ -56,7 +56,7 @@ func uiEngine(t *testing.T, rt manifest.RuntimeType, role types.TenantRole) *gin
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	pages := activate.NewUIPages()
-	if err := pages.Activate(context.Background(), uiPlugin(t, rt)); err != nil {
+	if err := reconcile.Activate(context.Background(), pages, uiPlugin(t, rt)); err != nil {
 		t.Fatal(err)
 	}
 	p := pluginsdk.New(pluginsdk.Info{ID: "acme.ui", Version: "1.0.0"})
