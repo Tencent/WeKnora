@@ -281,10 +281,20 @@ func (cfg *Config) Egress() driver.EgressMode {
 // Endpoints is where the driver hands a deployed plugin over: the remote
 // plugin manager, which checks and health-watches it.
 type Endpoints interface {
-	ServeDeployed(ctx context.Context, m *manifest.Manifest, url, secret string) error
-	// WithdrawDeployed unregisters what ServeDeployed registered, leaving
-	// a remote plugin's service alone.
+	// PrepareDeployed checks a rolled-out service; it takes calls once
+	// served.
+	PrepareDeployed(ctx context.Context, m *manifest.Manifest, url, secret string) (Deployment, error)
+	// WithdrawDeployed unregisters a served deployment, leaving a remote
+	// plugin's service alone.
 	WithdrawDeployed(ctx context.Context, pluginID string)
+}
+
+// Deployment is a rolled-out service that passed its checks.
+type Deployment interface {
+	// Serve routes the plugin's calls to the service.
+	Serve(ctx context.Context)
+	// Close drops a service that was never served.
+	Close()
 }
 
 // Driver is the kubernetes runtime as a reconcile.Activator. It must come
@@ -354,46 +364,61 @@ func legacyResourceName(pluginID string) string {
 	return n
 }
 
-// Stage implements reconcile.Activator: apply the plugin's resources and
-// register the service. Kubernetes rolls a new version out over the
-// running one, keeping the old pod until the new one is ready, so staging
-// does all the work and the commit has none left. A rollout that is not
-// done at once finishes in the background: Stage returns a
-// reconcile.PendingError and the plugin reports ready through
-// Loaded.Report, so a slow image pull holds up neither the reconciler nor
-// the node's startup. Other runtimes are ignored.
-func (d *Driver) Stage(ctx context.Context, _, l *reconcile.Loaded) (reconcile.Staged, error) {
-	if l.Manifest.Runtime.Type != manifest.RuntimeKubernetes {
+// Stage implements reconcile.Activator: apply the plugin's resources, so
+// Kubernetes rolls the new version out over the running one (keeping the
+// old pod until the new one is ready), and check the service once it is
+// ready. Calls go to it from the commit on, or from when it is ready if
+// that comes later. A rollout that is not done at once finishes in the
+// background: Stage returns a reconcile.PendingError with a staged version
+// that reports when it is ready, so a slow image pull holds up neither the
+// reconciler nor the node's startup, and the running version serves until
+// then.
+func (d *Driver) Stage(ctx context.Context, prev, l *reconcile.Loaded) (reconcile.Staged, error) {
+	m := l.Manifest
+	// The staged version is served, restored or removed after this call,
+	// perhaps once ctx is done (a request that installed the plugin); the
+	// API client's timeouts bound that work.
+	later := context.WithoutCancel(ctx)
+	if m.Runtime.Type != manifest.RuntimeKubernetes {
 		// A version that no longer runs here: its deployment goes once
 		// the new runtime has taken over.
-		id := l.Manifest.ID
 		return reconcile.Swap{OnRetire: func() {
-			if err := d.Deactivate(ctx, id); err != nil {
-				logger.Warnf(ctx, "[plugin] kubernetes %s: remove the previous deployment: %v", id, err)
+			if err := d.Deactivate(later, m.ID); err != nil {
+				logger.Warnf(ctx, "[plugin] kubernetes %s: remove the previous deployment: %v", m.ID, err)
 			}
 		}}, nil
 	}
-	if err := d.activate(ctx, l); err != nil {
-		var pending *reconcile.PendingError
-		if errors.As(err, &pending) {
-			return reconcile.Unchanged, err
-		}
-		return nil, err
-	}
-	return reconcile.Unchanged, nil
-}
-
-func (d *Driver) activate(ctx context.Context, l *reconcile.Loaded) error {
-	m := l.Manifest
 	secret, err := utils.DecryptStoredSecret(l.Installed.RemoteSecret)
 	if err != nil || secret == "" {
-		return fmt.Errorf("the plugin's signing secret is not readable: %v", err)
+		return nil, fmt.Errorf("the plugin's signing secret is not readable: %v", err)
 	}
 	d.stopRollout(m.ID)
 	d.mu.Lock()
 	d.owned[m.ID] = true
 	d.mu.Unlock()
-	name := ResourceName(m.ID)
+	st := &rolloutStage{d: d, ctx: later, prev: prev, m: m, name: ResourceName(m.ID)}
+	if err := d.applyAll(ctx, m, st.name, secret); err != nil {
+		st.restore()
+		return nil, err
+	}
+	if ready, _, err := d.rolledOut(ctx, st.name); err == nil && ready {
+		// Nothing changed since it last rolled out (a node restarting).
+		if dep, err := d.prepare(ctx, m, st.name, secret); err == nil {
+			st.ready = dep
+			return st, nil
+		}
+	}
+	rctx, cancel := context.WithCancel(context.Background())
+	st.rctx = rctx
+	d.mu.Lock()
+	d.rollouts[m.ID] = cancel
+	d.mu.Unlock()
+	go d.rollout(rctx, l, st, secret)
+	return st, reconcile.Pending(fmt.Errorf("rolling out %s/%s", d.cfg.Namespace, st.name))
+}
+
+// applyAll applies a version's resources.
+func (d *Driver) applyAll(ctx context.Context, m *manifest.Manifest, name, secret string) error {
 	for _, obj := range Resources(d.cfg, m, name, secret) {
 		if err := d.apply(ctx, obj); err != nil {
 			return err
@@ -406,22 +431,114 @@ func (d *Driver) activate(ctx context.Context, l *reconcile.Loaded) error {
 			logger.Warnf(ctx, "[plugin] kubernetes %s: remove its network policy: %v", m.ID, err)
 		}
 	}
-	if ready, _, err := d.rolledOut(ctx, name); err == nil && ready {
-		// Nothing changed since it last rolled out (a node restarting).
-		return d.serve(ctx, m, name, secret)
-	}
-	rctx, cancel := context.WithCancel(context.Background())
-	d.mu.Lock()
-	d.rollouts[m.ID] = cancel
-	d.mu.Unlock()
-	go d.rollout(rctx, l, name, secret)
-	return reconcile.Pending(fmt.Errorf("rolling out %s/%s", d.cfg.Namespace, name))
+	return nil
 }
 
-// rollout waits for a plugin's Deployment in the background and serves it
-// once it is ready, reporting a rollout that overran the timeout (and keeps
-// waiting for it).
-func (d *Driver) rollout(ctx context.Context, l *reconcile.Loaded, name, secret string) {
+// rolloutStage is a version the driver applied. It is served from the
+// commit on, or from when the rollout is ready if that comes later.
+type rolloutStage struct {
+	d    *Driver
+	ctx  context.Context
+	prev *reconcile.Loaded
+	m    *manifest.Manifest
+	name string
+	// rctx is the background rollout's context, cancelled when the plugin
+	// is deactivated; nil when the version was ready at once.
+	rctx context.Context
+
+	mu        sync.Mutex
+	ready     Deployment // checked, not served yet
+	committed bool
+	served    bool
+	aborted   bool
+}
+
+// Commit implements reconcile.Staged.
+func (s *rolloutStage) Commit() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.committed = true
+	s.serveLocked()
+}
+
+// Ready implements reconcile.Waiting: the rollout finished and the service
+// passed its checks.
+func (s *rolloutStage) Ready(context.Context) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.ready != nil, nil
+}
+
+// markReady records a checked service, and serves it if the version was
+// committed already. It reports false if the stage was aborted meanwhile.
+func (s *rolloutStage) markReady(dep Deployment) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.aborted {
+		dep.Close()
+		return false
+	}
+	s.ready = dep
+	if s.committed {
+		s.serveLocked()
+	}
+	return true
+}
+
+func (s *rolloutStage) serveLocked() {
+	if s.ready == nil || s.served {
+		return
+	}
+	s.d.serveMu.Lock()
+	defer s.d.serveMu.Unlock()
+	if s.rctx != nil && s.rctx.Err() != nil {
+		// Deactivated as the rollout finished: serve nothing.
+		s.ready.Close()
+		s.ready = nil
+		return
+	}
+	s.served = true
+	s.ready.Serve(s.ctx)
+	logger.Infof(s.ctx, "[plugin] kubernetes %s %s rolled out as %s/%s", s.m.ID, s.m.Version, s.d.cfg.Namespace, s.name)
+	s.d.removeLegacy(s.ctx, s.m.ID, s.name)
+}
+
+// Abort implements reconcile.Staged: stop waiting for the rollout and put
+// the previous version's resources back.
+func (s *rolloutStage) Abort() {
+	s.d.stopRollout(s.m.ID)
+	s.mu.Lock()
+	s.aborted = true
+	if s.ready != nil && !s.served {
+		s.ready.Close()
+	}
+	s.mu.Unlock()
+	s.restore()
+}
+
+// restore puts back what ran before the stage: the previous version's
+// resources, or none if it did not run on kubernetes.
+func (s *rolloutStage) restore() {
+	d, id := s.d, s.m.ID
+	if s.prev != nil && s.prev.Manifest.Runtime.Type == manifest.RuntimeKubernetes {
+		secret, err := utils.DecryptStoredSecret(s.prev.Installed.RemoteSecret)
+		if err == nil {
+			err = d.applyAll(s.ctx, s.prev.Manifest, s.name, secret)
+		}
+		if err != nil {
+			logger.Warnf(s.ctx, "[plugin] kubernetes %s: restore version %s: %v", id, s.prev.Manifest.Version, err)
+		}
+		return
+	}
+	if err := d.Deactivate(s.ctx, id); err != nil {
+		logger.Warnf(s.ctx, "[plugin] kubernetes %s: remove the staged deployment: %v", id, err)
+	}
+}
+
+// rollout waits for a plugin's Deployment in the background and checks its
+// service once it is ready, reporting a rollout that overran the timeout
+// (and keeps waiting for it).
+func (d *Driver) rollout(ctx context.Context, l *reconcile.Loaded, st *rolloutStage, secret string) {
 	report := func(healthy bool, err error) {
 		if l.Report != nil {
 			l.Report(healthy, err)
@@ -429,14 +546,21 @@ func (d *Driver) rollout(ctx context.Context, l *reconcile.Loaded, name, secret 
 	}
 	interval := pollInterval
 	for {
-		err := d.waitReady(ctx, name, interval)
+		err := d.waitReady(ctx, st.name, interval)
+		var dep Deployment
 		if err == nil {
-			err = d.serve(ctx, l.Manifest, name, secret)
+			dep, err = d.prepare(ctx, l.Manifest, st.name, secret)
 		}
 		if ctx.Err() != nil {
+			if dep != nil {
+				dep.Close()
+			}
 			return
 		}
 		if err == nil {
+			if !st.markReady(dep) {
+				return
+			}
 			d.finishRollout(ctx, l.Manifest.ID)
 			report(true, nil)
 			return
@@ -452,30 +576,24 @@ func (d *Driver) rollout(ctx context.Context, l *reconcile.Loaded, name, secret 
 	}
 }
 
-// serve registers a rolled-out plugin with the remote plugin manager and
-// removes what an earlier version left under the legacy name.
-func (d *Driver) serve(ctx context.Context, m *manifest.Manifest, name, secret string) error {
+// prepare checks a rolled-out plugin's service.
+func (d *Driver) prepare(ctx context.Context, m *manifest.Manifest, name, secret string) (Deployment, error) {
 	url, err := d.serviceURL(ctx, name)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	d.serveMu.Lock()
-	if err := ctx.Err(); err != nil {
-		d.serveMu.Unlock()
-		return err
+	return d.endpoints.PrepareDeployed(ctx, m, url, secret)
+}
+
+// removeLegacy removes what an earlier version left under the legacy name.
+func (d *Driver) removeLegacy(ctx context.Context, pluginID, name string) {
+	legacy := legacyResourceName(pluginID)
+	if legacy == name {
+		return
 	}
-	err = d.endpoints.ServeDeployed(ctx, m, url, secret)
-	d.serveMu.Unlock()
-	if err != nil {
-		return err
+	if err := d.deleteResources(ctx, pluginID, legacy); err != nil {
+		logger.Warnf(ctx, "[plugin] kubernetes %s: remove resources under the old name %s: %v", pluginID, legacy, err)
 	}
-	logger.Infof(ctx, "[plugin] kubernetes %s %s rolled out as %s/%s", m.ID, m.Version, d.cfg.Namespace, name)
-	if legacy := legacyResourceName(m.ID); legacy != name {
-		if err := d.deleteResources(ctx, m.ID, legacy); err != nil {
-			logger.Warnf(ctx, "[plugin] kubernetes %s: remove resources under the old name %s: %v", m.ID, legacy, err)
-		}
-	}
-	return nil
 }
 
 func (d *Driver) stopRollout(pluginID string) {

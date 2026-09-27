@@ -123,15 +123,40 @@ func (m *Manager) Stage(ctx context.Context, _, l *reconcile.Loaded) (reconcile.
 	}, nil
 }
 
-// ServeDeployed registers a plugin service WeKnora deployed itself (the
-// kubernetes driver) at url: checked and health-watched like a remote
-// plugin, but reached on the cluster's private addresses.
-func (m *Manager) ServeDeployed(ctx context.Context, mf *manifest.Manifest, url, secret string) error {
+// Deployed is a plugin service WeKnora deployed itself, checked and ready
+// to take the plugin's calls.
+type Deployed struct {
+	m   *Manager
+	mf  *manifest.Manifest
+	url string
+	c   *client.Client
+}
+
+// PrepareDeployed checks a plugin service WeKnora deployed itself (the
+// kubernetes driver) at url, reached on the cluster's private addresses.
+// Serve registers it; Close drops it unregistered.
+func (m *Manager) PrepareDeployed(ctx context.Context, mf *manifest.Manifest, url, secret string) (*Deployed, error) {
 	c := m.newTrustedClient(url, []byte(secret))
 	if err := check(ctx, c, mf); err != nil {
+		return nil, err
+	}
+	return &Deployed{m: m, mf: mf, url: url, c: c}, nil
+}
+
+// Serve routes the plugin's calls to the service and health-watches it
+// like a remote plugin's.
+func (d *Deployed) Serve(ctx context.Context) { d.m.serve(ctx, d.mf, d.url, d.c, true) }
+
+// Close drops a service that was never served.
+func (d *Deployed) Close() { d.c.Close() }
+
+// ServeDeployed checks and serves a deployed service at once.
+func (m *Manager) ServeDeployed(ctx context.Context, mf *manifest.Manifest, url, secret string) error {
+	d, err := m.PrepareDeployed(ctx, mf, url, secret)
+	if err != nil {
 		return err
 	}
-	m.serve(ctx, mf, url, c, true)
+	d.Serve(ctx)
 	return nil
 }
 

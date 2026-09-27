@@ -153,7 +153,7 @@ func (d nodeDriver) Status(ctx context.Context, pluginID string) ([]driver.Insta
 		}
 		out = append(out, driver.InstanceStatus{
 			Node: n.Node, Version: n.Version, State: state, Error: n.Error, UpdatedAt: n.UpdatedAt, Egress: egress,
-			UpgradeVersion: n.UpgradeVersion, UpgradeError: n.UpgradeError,
+			UpgradeVersion: n.UpgradeVersion, UpgradeState: n.UpgradeState, UpgradeError: n.UpgradeError,
 		})
 	}
 	return out, nil

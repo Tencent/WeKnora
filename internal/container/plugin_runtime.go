@@ -103,7 +103,21 @@ func newPluginKubeDriver(r *remote.Manager, appCfg *config.Config) (*kube.Driver
 	}
 	logger.Infof(context.Background(), "[plugin] kubernetes plugins run in namespace %s (%s services, egress %s)",
 		cfg.Namespace, cfg.ServiceType, cfg.Egress())
-	return kube.New(cfg, r)
+	return kube.New(cfg, kubeEndpoints{r})
+}
+
+// kubeEndpoints hands deployed kubernetes plugins to the remote plugin
+// manager.
+type kubeEndpoints struct{ *remote.Manager }
+
+func (e kubeEndpoints) PrepareDeployed(
+	ctx context.Context, m *manifest.Manifest, url, secret string,
+) (kube.Deployment, error) {
+	d, err := e.Manager.PrepareDeployed(ctx, m, url, secret)
+	if err != nil {
+		return nil, err
+	}
+	return d, nil
 }
 
 // pluginEgressKey derives the cluster egress proxy's credentials key from
@@ -280,7 +294,10 @@ func newPluginDelegation(h *host.Manager, pool *hostpool.Pool) *pluginDelegation
 
 func (d *pluginDelegation) Name() string { return "plugin-hosts" }
 
-func (d *pluginDelegation) Stage(ctx context.Context, _, l *reconcile.Loaded) (reconcile.Staged, error) {
+// Stage implements reconcile.Activator. An upgrade waits until a plugin
+// host runs the new version, so calls keep going to the previous one on
+// the hosts meanwhile.
+func (d *pluginDelegation) Stage(ctx context.Context, prev, l *reconcile.Loaded) (reconcile.Staged, error) {
 	m := l.Manifest
 	if m.Runtime.Type != manifest.RuntimeHost || d.host.Runs(m.Runtime.Kind) {
 		return reconcile.Unchanged, nil
@@ -289,11 +306,28 @@ func (d *pluginDelegation) Stage(ctx context.Context, _, l *reconcile.Loaded) (r
 		return nil, fmt.Errorf("this node does not run %s plugins (WEKNORA_PLUGIN_EMBEDDED_KINDS) and no plugin host "+
 			"is configured; run weknora plugin-host with Redis and the same SYSTEM_AES_KEY", m.Runtime.Kind)
 	}
-	if !d.pool.Runs(ctx, m.ID, m.Version) {
+	if d.pool.Runs(ctx, m.ID, m.Version) {
+		return reconcile.Unchanged, nil
+	}
+	if prev == nil {
 		logger.Infof(ctx, "[plugin] %s@%s waits for a plugin host that runs %s plugins",
 			m.ID, m.Version, m.Runtime.Kind)
+		return reconcile.Unchanged, nil
 	}
-	return reconcile.Unchanged, nil
+	return hostedVersion{pool: d.pool, m: m},
+		reconcile.Pending(fmt.Errorf("waiting for a plugin host to run %s@%s", m.ID, m.Version))
+}
+
+// hostedVersion is a version staged on the plugin hosts: ready once one
+// runs it.
+type hostedVersion struct {
+	reconcile.Swap
+	pool *hostpool.Pool
+	m    *manifest.Manifest
+}
+
+func (h hostedVersion) Ready(ctx context.Context) (bool, error) {
+	return h.pool.Runs(ctx, h.m.ID, h.m.Version), nil
 }
 
 func (d *pluginDelegation) Deactivate(context.Context, string) error { return nil }

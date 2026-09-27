@@ -94,14 +94,42 @@ func (f *fakeAPI) has(path string) bool {
 type fakeEndpoints struct {
 	mu          sync.Mutex
 	url, secret string
+	version     string // of the served deployment
+	checked     int
+	closed      int
 	removed     []string
 }
 
-func (f *fakeEndpoints) ServeDeployed(_ context.Context, _ *manifest.Manifest, url, secret string) error {
+func (f *fakeEndpoints) PrepareDeployed(
+	_ context.Context, m *manifest.Manifest, url, secret string,
+) (Deployment, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.url, f.secret = url, secret
-	return nil
+	f.checked++
+	return &fakeDeployment{f: f, version: m.Version, url: url, secret: secret}, nil
+}
+
+func (f *fakeEndpoints) served() string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.version
+}
+
+type fakeDeployment struct {
+	f                    *fakeEndpoints
+	version, url, secret string
+}
+
+func (d *fakeDeployment) Serve(context.Context) {
+	d.f.mu.Lock()
+	defer d.f.mu.Unlock()
+	d.f.url, d.f.secret, d.f.version = d.url, d.secret, d.version
+}
+
+func (d *fakeDeployment) Close() {
+	d.f.mu.Lock()
+	defer d.f.mu.Unlock()
+	d.f.closed++
 }
 
 func (f *fakeEndpoints) WithdrawDeployed(_ context.Context, id string) {
@@ -624,5 +652,104 @@ func TestMovingAwayRemovesTheDeploymentAtTheCommit(t *testing.T) {
 	staged.(reconcile.Retiring).Retire()
 	if len(api.deleted) != 3 || len(ep.removed) != 1 {
 		t.Fatalf("another plugin's commit deleted %v, unregistered %v", api.deleted, ep.removed)
+	}
+}
+
+// withVersion is l at another version.
+func withVersion(l *reconcile.Loaded, version string) *reconcile.Loaded {
+	m := *l.Manifest
+	m.Version = version
+	next := *l
+	next.Manifest = &m
+	return &next
+}
+
+// An upgrade whose rollout finishes in the background is served only from
+// its commit: the running version takes the calls until the reconciler
+// commits, and a rollout ready before the commit waits for it.
+func TestUpgradeIsServedFromTheCommit(t *testing.T) {
+	api := &fakeAPI{applied: map[string]map[string]any{}}
+	d, ep := newDriver(t, api)
+	ctx := context.Background()
+	prev := loaded(t, "acme.search")
+	if err := reconcile.Activate(ctx, d, prev); err != nil {
+		t.Fatal(err)
+	}
+	if ep.served() != "1.2.0" {
+		t.Fatalf("served %q", ep.served())
+	}
+
+	api.mu.Lock()
+	api.polls, api.readyAfter = 0, 2
+	api.mu.Unlock()
+	next := withVersion(prev, "1.3.0")
+	ready := make(chan struct{}, 1)
+	next.Report = func(healthy bool, _ error) {
+		if healthy {
+			ready <- struct{}{}
+		}
+	}
+	staged, err := d.Stage(ctx, prev, next)
+	var pending *reconcile.PendingError
+	if !errors.As(err, &pending) {
+		t.Fatalf("Stage = %v, want pending", err)
+	}
+	select {
+	case <-ready:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the rollout never reported")
+	}
+	if ok, _ := staged.(reconcile.Waiting).Ready(ctx); !ok {
+		t.Fatal("reported ready but not Ready")
+	}
+	if ep.served() != "1.2.0" {
+		t.Fatalf("a rollout was served before its commit: %s", ep.served())
+	}
+	staged.Commit()
+	if ep.served() != "1.3.0" {
+		t.Fatalf("the commit served %s", ep.served())
+	}
+}
+
+// An upgrade aborted while it rolls out puts the previous version's
+// resources back and serves nothing.
+func TestAbortedUpgradeRestoresThePreviousVersion(t *testing.T) {
+	api := &fakeAPI{applied: map[string]map[string]any{}}
+	d, ep := newDriver(t, api)
+	ctx := context.Background()
+	prev := loaded(t, "acme.search")
+	if err := reconcile.Activate(ctx, d, prev); err != nil {
+		t.Fatal(err)
+	}
+	api.mu.Lock()
+	api.polls, api.readyAfter = 0, 1000
+	api.mu.Unlock()
+	next := withVersion(prev, "1.3.0")
+	next.Manifest.Runtime.Image = "ghcr.io/acme/search:1.3.0"
+	// Staged by a request that has ended by the time the upgrade aborts.
+	reqCtx, endRequest := context.WithCancel(ctx)
+	staged, _ := d.Stage(reqCtx, prev, next)
+	endRequest()
+	depPath := "/apis/apps/v1/namespaces/plugins/deployments/" + ResourceName("acme.search")
+	image := func() string {
+		api.mu.Lock()
+		defer api.mu.Unlock()
+		b, _ := json.Marshal(api.applied[depPath])
+		return regexp.MustCompile(`"image":"([^"]+)"`).FindStringSubmatch(string(b))[1]
+	}
+	if image() != "ghcr.io/acme/search:1.3.0" {
+		t.Fatalf("staged image = %s", image())
+	}
+	staged.Abort()
+	if image() != "ghcr.io/acme/search:1.2.0" {
+		t.Fatalf("image after the abort = %s", image())
+	}
+	if ep.served() != "1.2.0" {
+		t.Fatalf("served %s after the abort", ep.served())
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if len(d.rollouts) != 0 {
+		t.Fatal("the aborted rollout still runs")
 	}
 }

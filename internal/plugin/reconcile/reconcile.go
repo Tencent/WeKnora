@@ -64,14 +64,17 @@ type Activator interface {
 	// A runtime that ran prev but does not run next (the plugin moved to
 	// another runtime) stops it once the new runtime took over (Retiring).
 	// On failure it leaves nothing behind and returns a nil Staged. A
-	// PendingError comes with a Staged: the plugin commits and finishes
-	// starting in the background.
+	// PendingError comes with a Staged that finishes starting in the
+	// background and should be Waiting: an upgrade commits once it is
+	// ready (a first load commits at once and shows degraded meanwhile).
 	Stage(ctx context.Context, prev, next *Loaded) (Staged, error)
 	// Deactivate removes everything the activator has for a plugin.
 	Deactivate(ctx context.Context, pluginID string) error
 }
 
-// Staged is a version an activator staged.
+// Staged is a version an activator staged. Its methods may run long after
+// Stage returned (an upgrade waiting for its runtime), when Stage's context
+// is done: work they do must not depend on it.
 type Staged interface {
 	// Commit serves the staged version in place of the previous one. It
 	// cannot fail: whatever could go wrong went wrong in Stage.
@@ -86,6 +89,16 @@ type Staged interface {
 type Retiring interface {
 	Staged
 	Retire()
+}
+
+// Waiting is a Staged that came with a PendingError and finishes starting
+// in the background. The previous version serves until every Waiting
+// activator of an upgrade is ready; one that is not Waiting counts as ready.
+// Loaded.Report(true, nil) asks the reconciler to check at once; it also
+// checks every few seconds.
+type Waiting interface {
+	Staged
+	Ready(ctx context.Context) (bool, error)
 }
 
 // Swap is a Staged from functions; any may be nil.
@@ -158,11 +171,24 @@ type Status struct {
 	// Egress is how the plugin's outbound traffic is controlled where this
 	// node runs its code; empty when the node runs none of it.
 	Egress driver.EgressMode `json:"egress,omitempty"`
-	// UpgradeVersion is a newer active version the node failed to load;
-	// it keeps serving Version meanwhile and says why in UpgradeError.
+	// UpgradeVersion is a newer active version the node has not loaded
+	// yet: it is still starting (UpgradeState pending) or failed to load
+	// (failed). The node keeps serving Version meanwhile; UpgradeError
+	// says what it waits for or why it failed.
 	UpgradeVersion string `json:"upgradeVersion,omitempty"`
+	UpgradeState   string `json:"upgradeState,omitempty"`
 	UpgradeError   string `json:"upgradeError,omitempty"`
 }
+
+// Upgrade states reported in Status.
+const (
+	UpgradePending = "pending"
+	UpgradeFailed  = "failed"
+)
+
+// stagingPoll is how often the reconciler checks whether an upgrade waiting
+// for its runtime is ready.
+const stagingPoll = 5 * time.Second
 
 // Node states reported in Status.
 const (
@@ -210,7 +236,10 @@ type Reconciler struct {
 	// retries holds plugins whose activation failed: a process that would
 	// not start, a remote service that was down. They are tried again with
 	// backoff until they load or change.
-	retries  map[string]retry
+	retries map[string]retry
+	// staging holds upgrades staged but waiting for a runtime to be ready;
+	// the previous version serves until they commit.
+	staging  map[string]*staging
 	now      func() time.Time
 	statusMu sync.RWMutex
 	status   map[string]Status
@@ -281,7 +310,8 @@ func New(o Options) *Reconciler {
 		activators: o.Activators, instanceID: uuid.NewString(), interval: o.Interval,
 		runtimes: runtimes, accept: o.Accept, admit: o.Admit, role: o.Role,
 		loaded: map[string]*Loaded{}, digests: map[string]string{}, retries: map[string]retry{},
-		status: map[string]Status{}, now: time.Now,
+		staging: map[string]*staging{},
+		status:  map[string]Status{}, now: time.Now,
 	}
 }
 
@@ -392,6 +422,13 @@ func (r *Reconciler) ensure(ctx context.Context, row types.InstalledPlugin) erro
 	}
 	loadKey := v.Digest + "|" + runtimeTarget(row)
 	prev := r.loaded[row.ID]
+	if st := r.staging[row.ID]; st != nil {
+		if st.key == loadKey {
+			return r.checkStaging(ctx, row.ID)
+		}
+		// A newer version, or a rollback, supersedes the one waiting.
+		r.abortStaging(row.ID)
+	}
 	if r.digests[row.ID] == loadKey {
 		if prev == nil || dirExists(prev.Dir) {
 			// Back on the loaded version (an upgrade rolled back): the
@@ -441,8 +478,20 @@ func (r *Reconciler) ensure(ctx context.Context, row types.InstalledPlugin) erro
 	}
 	l := &Loaded{Manifest: p.Manifest, Package: p, Dir: dir, Installed: row}
 	l.Report = func(healthy bool, err error) { r.reportLoaded(l, healthy, err) }
-	pending, err := r.activate(ctx, prev, l)
+	staged, pending, err := r.stage(ctx, prev, l)
 	if err != nil {
+		return r.failed(prev, row, loadKey, err)
+	}
+	if len(pending) > 0 && prev != nil {
+		// The previous version serves until the new one is ready.
+		r.staging[row.ID] = &staging{l: l, key: loadKey, staged: staged}
+		delete(r.retries, row.ID)
+		reason := errors.Join(pending...)
+		logger.Infof(ctx, "[plugin] staged %s %s; waiting: %v", row.ID, row.ActiveVersion, reason)
+		r.setUpgrade(row.ID, row.ActiveVersion, UpgradePending, reason.Error())
+		return nil
+	}
+	if err := r.commit(l.Manifest, staged); err != nil {
 		return r.failed(prev, row, loadKey, err)
 	}
 	r.loaded[row.ID] = l
@@ -460,17 +509,14 @@ func (r *Reconciler) ensure(ctx context.Context, row types.InstalledPlugin) erro
 	return nil
 }
 
-// activate stages next on every activator and commits them all, or aborts
-// them all and leaves prev as it was. Activators stage in reverse order:
-// the domains only check what a package contributes, so a bad package
-// fails before a runtime starts anything. They commit in order, runtimes
-// first, so a code plugin is reachable before anything routes calls to it,
-// and retire what they no longer run only after every commit, so a plugin
-// that moved runtimes is served by the new one before the old one stops.
-func (r *Reconciler) activate(ctx context.Context, prev, next *Loaded) (pending []error, err error) {
-	staged := make([]Staged, 0, len(r.activators))
-	abort := func() {
-		for i := len(staged) - 1; i >= 0; i-- {
+// stage stages next on every activator, or aborts them all and leaves prev
+// as it was. Activators stage in reverse order: the domains only check what
+// a package contributes, so a bad package fails before a runtime starts
+// anything. The staged versions come back in commit order.
+func (r *Reconciler) stage(ctx context.Context, prev, next *Loaded) (staged []Staged, pending []error, err error) {
+	staged = make([]Staged, len(r.activators))
+	abort := func(from int) {
+		for i := from; i < len(staged); i++ {
 			staged[i].Abort()
 		}
 	}
@@ -483,29 +529,120 @@ func (r *Reconciler) activate(ctx context.Context, prev, next *Loaded) (pending 
 		case errors.As(err, &pe) && s != nil:
 			pending = append(pending, fmt.Errorf("%s: %w", a.Name(), err))
 		default:
-			abort()
-			return nil, fmt.Errorf("%s: %w", a.Name(), err)
+			abort(i + 1)
+			return nil, nil, fmt.Errorf("%s: %w", a.Name(), err)
 		}
 		if s == nil {
 			s = Unchanged
 		}
-		staged = append(staged, s)
+		staged[i] = s
 	}
+	return staged, pending, nil
+}
+
+// commit makes staged versions the served ones, or aborts them all if the
+// registry refuses the manifest. Activators commit in order, runtimes
+// first, so a code plugin is reachable before anything routes calls to it,
+// and retire what they no longer run only after every commit, so a plugin
+// that moved runtimes is served by the new one before the old one stops.
+func (r *Reconciler) commit(m *manifest.Manifest, staged []Staged) error {
 	// The registry swaps in one step, so it goes first: if it refuses the
 	// manifest, nothing has changed yet.
-	if err := r.registry.Replace(next.Manifest); err != nil {
-		abort()
-		return nil, err
+	if err := r.registry.Replace(m); err != nil {
+		for i := len(staged) - 1; i >= 0; i-- {
+			staged[i].Abort()
+		}
+		return err
 	}
-	for i := len(staged) - 1; i >= 0; i-- {
-		staged[i].Commit()
+	for _, s := range staged {
+		s.Commit()
 	}
-	for i := len(staged) - 1; i >= 0; i-- {
-		if s, ok := staged[i].(Retiring); ok {
+	for _, s := range staged {
+		if s, ok := s.(Retiring); ok {
 			s.Retire()
 		}
 	}
-	return pending, nil
+	return nil
+}
+
+// staging is an upgrade staged on every activator, waiting for a runtime
+// to be ready before it commits.
+type staging struct {
+	l      *Loaded
+	key    string
+	staged []Staged // in commit order
+}
+
+// ready reports whether every waiting activator is ready, or why not.
+func (st *staging) ready(ctx context.Context) (bool, error) {
+	for _, s := range st.staged {
+		if w, ok := s.(Waiting); ok {
+			if ok, err := w.Ready(ctx); !ok || err != nil {
+				return false, err
+			}
+		}
+	}
+	return true, nil
+}
+
+// checkStaging commits a waiting upgrade once it is ready.
+func (r *Reconciler) checkStaging(ctx context.Context, id string) error {
+	st := r.staging[id]
+	if st == nil {
+		return nil
+	}
+	ready, err := st.ready(ctx)
+	if err != nil {
+		r.setUpgrade(id, st.l.Manifest.Version, UpgradePending, err.Error())
+	}
+	if !ready {
+		return nil
+	}
+	delete(r.staging, id)
+	prev := r.loaded[id]
+	if err := r.commit(st.l.Manifest, st.staged); err != nil {
+		return r.failed(prev, st.l.Installed, st.key, err)
+	}
+	r.loaded[id] = st.l
+	r.digests[id] = st.key
+	delete(r.retries, id)
+	logger.Infof(ctx, "[plugin] loaded %s %s", id, st.l.Manifest.Version)
+	r.setStatus(id, Status{Version: st.l.Manifest.Version, State: StateReady, Egress: r.egress(id)})
+	return nil
+}
+
+// abortStaging drops a waiting upgrade; the previous version stays.
+func (r *Reconciler) abortStaging(id string) {
+	st := r.staging[id]
+	if st == nil {
+		return
+	}
+	delete(r.staging, id)
+	for i := len(st.staged) - 1; i >= 0; i-- {
+		st.staged[i].Abort()
+	}
+	r.clearUpgrade(id)
+}
+
+// CheckStaging commits the waiting upgrades that are ready. The reconciler
+// runs it every few seconds while any wait.
+func (r *Reconciler) CheckStaging(ctx context.Context) {
+	r.mu.Lock()
+	if len(r.staging) == 0 {
+		r.mu.Unlock()
+		return
+	}
+	ids := make([]string, 0, len(r.staging))
+	for id := range r.staging {
+		ids = append(ids, id)
+	}
+	for _, id := range ids {
+		if err := r.checkStaging(ctx, id); err != nil {
+			logger.Warnf(ctx, "[plugin] %s: %v", id, err)
+		}
+	}
+	r.mu.Unlock()
+	r.publishStatuses(ctx)
 }
 
 // failed records a version that did not load and when to try it again. A
@@ -522,13 +659,18 @@ func (r *Reconciler) failed(prev *Loaded, row types.InstalledPlugin, loadKey str
 	if prev == nil {
 		return err
 	}
-	r.statusMu.Lock()
-	s := r.status[row.ID]
-	s.UpgradeVersion, s.UpgradeError = row.ActiveVersion, err.Error()
-	s.UpdatedAt = time.Now()
-	r.status[row.ID] = s
-	r.statusMu.Unlock()
+	r.setUpgrade(row.ID, row.ActiveVersion, UpgradeFailed, err.Error())
 	return &upgradeError{version: row.ActiveVersion, err: err}
+}
+
+// setUpgrade records a newer version the node has not loaded yet.
+func (r *Reconciler) setUpgrade(pluginID, version, state, reason string) {
+	r.statusMu.Lock()
+	defer r.statusMu.Unlock()
+	s := r.status[pluginID]
+	s.UpgradeVersion, s.UpgradeState, s.UpgradeError = version, state, reason
+	s.UpdatedAt = time.Now()
+	r.status[pluginID] = s
 }
 
 // clearUpgrade forgets a failed upgrade of a plugin.
@@ -539,7 +681,7 @@ func (r *Reconciler) clearUpgrade(pluginID string) {
 	if !ok || s.UpgradeVersion == "" {
 		return
 	}
-	s.UpgradeVersion, s.UpgradeError = "", ""
+	s.UpgradeVersion, s.UpgradeState, s.UpgradeError = "", "", ""
 	s.UpdatedAt = time.Now()
 	r.status[pluginID] = s
 }
@@ -558,14 +700,27 @@ func (r *Reconciler) egress(pluginID string) driver.EgressMode {
 }
 
 // reportLoaded is Loaded.Report: runtime health for the version still
-// loaded. It waits for a pass in progress, so the version it reports on has
-// its status by then.
+// loaded, or news of an upgrade still starting. It waits for a pass in
+// progress, so the version it reports on has its status by then.
 func (r *Reconciler) reportLoaded(l *Loaded, healthy bool, err error) {
+	id := l.Manifest.ID
 	r.mu.Lock()
-	current := r.loaded[l.Manifest.ID] == l && r.digests[l.Manifest.ID] != ""
+	if st := r.staging[id]; st != nil && st.l == l {
+		if healthy {
+			if err := r.checkStaging(context.Background(), id); err != nil {
+				logger.Warnf(context.Background(), "[plugin] %s: %v", id, err)
+			}
+		} else if err != nil {
+			r.setUpgrade(id, l.Manifest.Version, UpgradePending, err.Error())
+		}
+		r.mu.Unlock()
+		r.publishStatuses(context.Background())
+		return
+	}
+	current := r.loaded[id] == l && r.digests[id] != ""
 	r.mu.Unlock()
 	if current {
-		r.ReportRuntime(l.Manifest.ID, healthy, err)
+		r.ReportRuntime(id, healthy, err)
 	}
 }
 
@@ -575,6 +730,7 @@ func dirExists(dir string) bool {
 }
 
 func (r *Reconciler) unload(ctx context.Context, id string) {
+	r.abortStaging(id)
 	// Reverse order: routes go before the processes they route to.
 	for i := len(r.activators) - 1; i >= 0; i-- {
 		a := r.activators[i]
@@ -716,10 +872,15 @@ func (r *Reconciler) Start(ctx context.Context) {
 func (r *Reconciler) loop(ctx context.Context, wake <-chan struct{}) {
 	t := time.NewTicker(r.interval)
 	defer t.Stop()
+	poll := time.NewTicker(stagingPoll)
+	defer poll.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
+		case <-poll.C:
+			r.CheckStaging(ctx)
+			continue
 		case <-t.C:
 		case <-wake:
 		}

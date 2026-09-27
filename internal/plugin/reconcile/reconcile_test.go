@@ -379,15 +379,23 @@ func TestRuntimeSwitchIsStaged(t *testing.T) {
 type pending struct {
 	recorder
 	report func(bool, error)
+	ready  bool
 }
 
 func (a *pending) Stage(ctx context.Context, prev, next *Loaded) (Staged, error) {
 	s, _ := a.recorder.Stage(ctx, prev, next)
-	a.report = next.Report
-	return s, Pending(fmt.Errorf("rolling out"))
+	a.report, a.ready = next.Report, false
+	return &waitStage{Staged: s, a: a}, Pending(fmt.Errorf("rolling out"))
 }
 
-// A pending activation loads the plugin as degraded, is not retried, and
+type waitStage struct {
+	Staged
+	a *pending
+}
+
+func (w *waitStage) Ready(context.Context) (bool, error) { return w.a.ready, nil }
+
+// A pending first load loads the plugin as degraded, is not retried, and
 // becomes ready when the activator reports back.
 func TestPendingActivation(t *testing.T) {
 	ctx := context.Background()
@@ -410,14 +418,84 @@ func TestPendingActivation(t *testing.T) {
 	if s, _ := r.Status("acme.kit"); s.State != StateReady {
 		t.Fatalf("status after the report = %+v", s)
 	}
+}
 
-	// A report from a version that is gone changes nothing.
+// A pending upgrade waits: the previous version serves until the new one
+// is ready, then it commits; a report from the previous version, or news
+// that the new one is still starting, changes nothing.
+func TestPendingUpgradeWaitsForTheRuntime(t *testing.T) {
+	ctx := context.Background()
+	reg := registry.New()
+	repo, store, act := plugintest.NewMemRepo(), &plugintest.MemStore{}, &pending{}
+	r := New(Options{Repo: repo, Store: store, Registry: reg, CacheDir: t.TempDir(), Activators: []Activator{act}})
+	plugintest.Install(t, repo, store, plugintest.KitPackage(t, "1.0.0"), types.PluginStateEnabled)
+	_ = r.Reconcile(ctx)
+	act.ready = true
+	act.report(true, nil)
 	stale := act.report
+
+	plugintest.Install(t, repo, store, plugintest.KitPackage(t, "1.1.0"), types.PluginStateEnabled)
+	if err := r.Reconcile(ctx); err != nil {
+		t.Fatalf("a pending upgrade is not a failure: %v", err)
+	}
+	s, _ := r.Status("acme.kit")
+	if s.State != StateReady || s.Version != "1.0.0" ||
+		s.UpgradeVersion != "1.1.0" || s.UpgradeState != UpgradePending {
+		t.Fatalf("status while pending = %+v", s)
+	}
+	if m, _ := reg.Plugin("acme.kit"); m.Version != "1.0.0" {
+		t.Fatalf("registry has %s while the upgrade waits", m.Version)
+	}
+	stale(true, nil)
+	act.report(false, fmt.Errorf("image pull backoff"))
+	_ = r.Reconcile(ctx)
+	r.CheckStaging(ctx)
+	if s, _ := r.Status("acme.kit"); s.Version != "1.0.0" || !strings.Contains(s.UpgradeError, "image pull") {
+		t.Fatalf("status while still pending = %+v", s)
+	}
+	if got := strings.Join(act.calls, ","); got != "stage acme.kit@1.0.0,commit acme.kit@1.0.0,stage acme.kit@1.1.0" {
+		t.Fatalf("calls = %s", got)
+	}
+
+	act.ready = true
+	act.report(true, nil)
+	s, _ = r.Status("acme.kit")
+	if s.State != StateReady || s.Version != "1.1.0" || s.UpgradeVersion != "" {
+		t.Fatalf("status after the upgrade = %+v", s)
+	}
+	if m, _ := reg.Plugin("acme.kit"); m.Version != "1.1.0" {
+		t.Fatalf("registry has %s after the upgrade", m.Version)
+	}
+}
+
+// A pending upgrade the platform rolls back, or replaces with another
+// version, is aborted; the one serving stays.
+func TestPendingUpgradeIsAbortedByARollback(t *testing.T) {
+	ctx := context.Background()
+	repo, store, act := plugintest.NewMemRepo(), &plugintest.MemStore{}, &pending{}
+	r := New(Options{
+		Repo: repo, Store: store, Registry: registry.New(), CacheDir: t.TempDir(), Activators: []Activator{act},
+	})
+	plugintest.Install(t, repo, store, plugintest.KitPackage(t, "1.0.0"), types.PluginStateEnabled)
+	_ = r.Reconcile(ctx)
 	plugintest.Install(t, repo, store, plugintest.KitPackage(t, "1.1.0"), types.PluginStateEnabled)
 	_ = r.Reconcile(ctx)
-	stale(true, nil)
-	if s, _ := r.Status("acme.kit"); s.State != StateDegraded || s.Version != "1.1.0" {
-		t.Fatalf("status after a stale report = %+v", s)
+
+	row, _ := repo.GetPlugin(ctx, "acme.kit")
+	row.ActiveVersion = "1.0.0"
+	_ = repo.SavePlugin(ctx, row)
+	_ = r.Reconcile(ctx)
+	want := "stage acme.kit@1.0.0,commit acme.kit@1.0.0,stage acme.kit@1.1.0,abort acme.kit@1.1.0"
+	if got := strings.Join(act.calls, ","); got != want {
+		t.Fatalf("calls = %s", got)
+	}
+	if s, _ := r.Status("acme.kit"); s.Version != "1.0.0" || s.UpgradeVersion != "" {
+		t.Fatalf("status after the rollback = %+v", s)
+	}
+	act.ready = true
+	r.CheckStaging(ctx)
+	if l := r.Loaded(); l[0].Manifest.Version != "1.0.0" {
+		t.Fatalf("an aborted upgrade committed: %s", l[0].Manifest.Version)
 	}
 }
 

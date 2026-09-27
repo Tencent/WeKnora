@@ -2,6 +2,7 @@ package container
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -53,6 +54,31 @@ func TestDelegationNeedsPluginHosts(t *testing.T) {
 	h.SetKinds([]string{host.KindPython})
 	if err := reconcile.Activate(ctx, newPluginDelegation(h, nil), pythonPlugin()); err != nil {
 		t.Fatalf("a kind the node runs needs no plugin host: %v", err)
+	}
+}
+
+// An upgrade of a plugin the plugin hosts run waits until one of them runs
+// the new version, so calls keep going to the previous one.
+func TestDelegatedUpgradeWaitsForAPluginHost(t *testing.T) {
+	ctx := context.Background()
+	h := host.NewManager()
+	h.SetKinds([]string{host.KindBinary})
+	mr := miniredis.RunT(t)
+	pool := hostpool.NewPool(redis.NewClient(&redis.Options{Addr: mr.Addr()}), []byte("k"))
+	prev, next := pythonPlugin(), pythonPlugin()
+	next.Manifest = &manifest.Manifest{ID: "acme.py", Version: "1.1.0", Runtime: prev.Manifest.Runtime}
+
+	staged, err := newPluginDelegation(h, pool).Stage(ctx, prev, next)
+	var pending *reconcile.PendingError
+	if !errors.As(err, &pending) {
+		t.Fatalf("want the upgrade to wait, got %v", err)
+	}
+	w, ok := staged.(reconcile.Waiting)
+	if !ok {
+		t.Fatalf("staged %T does not wait", staged)
+	}
+	if ready, _ := w.Ready(ctx); ready {
+		t.Fatal("ready without a plugin host running the new version")
 	}
 }
 
