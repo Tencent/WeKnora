@@ -267,6 +267,7 @@ func (r *remoteConnector) fetch(
 	if cfg != nil {
 		in.ResourceIDs = cfg.ResourceIDs
 	}
+	var checkpoint *types.SyncCursor
 	end, err := r.iv.Stream(ctx, r.m, pluginapi.ConnectorFetchPath(r.local), instanceOf(cfg), in,
 		func(ev pluginapi.Event) error {
 			switch ev.Type {
@@ -281,7 +282,8 @@ func (r *remoteConnector) fetch(
 				if err := json.Unmarshal(ev.Data, &c); err != nil {
 					return fmt.Errorf("decode checkpoint: %w", err)
 				}
-				return h.Checkpoint(ctx, fromPluginCursor(&c))
+				checkpoint = fromPluginCursor(&c)
+				return h.Checkpoint(ctx, checkpoint)
 			case pluginapi.EventLog, pluginapi.EventProgress:
 				r.logEvent(ctx, ev)
 			}
@@ -297,6 +299,19 @@ func (r *remoteConnector) fetch(
 		}
 	}
 	next := fromPluginCursor(&final)
+	if final.State == nil {
+		// An end without a cursor does not wipe the one saved at the last
+		// checkpoint, or the one the sync started from.
+		switch {
+		case checkpoint != nil:
+			next.ConnectorCursor = checkpoint.ConnectorCursor
+			if final.LastSyncTime == nil {
+				next.LastSyncTime = checkpoint.LastSyncTime
+			}
+		case cursor != nil && cursor.ConnectorCursor != nil:
+			next.ConnectorCursor = cursor.ConnectorCursor
+		}
+	}
 	if next.LastSyncTime.IsZero() {
 		next.LastSyncTime = time.Now()
 	}

@@ -8,11 +8,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/Tencent/WeKnora/pluginsdk/pluginapi"
@@ -137,9 +139,18 @@ func decodeError(resp *http.Response) error {
 	if json.Unmarshal(b, &body) == nil && body.Error.Code != "" {
 		return &body.Error
 	}
+	// Without a protocol answer (a proxy's page), the status says whether
+	// trying again later can help.
 	code := pluginapi.CodeInternal
-	if resp.StatusCode == http.StatusServiceUnavailable || resp.StatusCode == http.StatusBadGateway {
+	switch resp.StatusCode {
+	case http.StatusServiceUnavailable, http.StatusBadGateway, http.StatusGatewayTimeout,
+		http.StatusRequestTimeout:
 		code = pluginapi.CodeUnavailable
+	case http.StatusTooManyRequests:
+		return &TransportError{Err: &pluginapi.Error{
+			Code: pluginapi.CodeRateLimited, Retryable: true,
+			Message: fmt.Sprintf("plugin answered HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(b))),
+		}}
 	}
 	return transport(code, "plugin answered HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(b)))
 }
@@ -201,7 +212,11 @@ func (c *Client) Call(ctx context.Context, path string, env pluginapi.Envelope, 
 		return decodeError(resp)
 	}
 	var wrapped pluginapi.Output
-	if err := json.NewDecoder(resp.Body).Decode(&wrapped); err != nil {
+	lr := &io.LimitedReader{R: resp.Body, N: MaxOutputBytes + 1}
+	if err := json.NewDecoder(lr).Decode(&wrapped); err != nil {
+		if lr.N <= 0 {
+			return transport(pluginapi.CodeInternal, "plugin output is over %d bytes", MaxOutputBytes)
+		}
 		return transport(pluginapi.CodeInternal, "decode plugin output: %v", err)
 	}
 	if out == nil || len(wrapped.Output) == 0 {
@@ -212,6 +227,30 @@ func (c *Client) Call(ctx context.Context, path string, env pluginapi.Envelope, 
 
 // MaxEventBytes bounds one NDJSON line (one fetched item).
 const MaxEventBytes = 64 << 20
+
+// MaxOutputBytes bounds the answer to one call (a parsed document).
+const MaxOutputBytes = 512 << 20
+
+// StreamIdleTimeout is how long a stream may go without a line before it
+// counts as stalled. A plugin busy on one item sends progress (or log)
+// events to show it is alive.
+var StreamIdleTimeout = 10 * time.Minute
+
+// idleReader cancels its request once no bytes arrived for a while.
+type idleReader struct {
+	r       io.Reader
+	timer   *time.Timer
+	idle    time.Duration
+	stalled atomic.Bool
+}
+
+func (ir *idleReader) Read(p []byte) (int, error) {
+	n, err := ir.r.Read(p)
+	if n > 0 {
+		ir.timer.Reset(ir.idle)
+	}
+	return n, err
+}
 
 // Stream posts an envelope and hands each event to fn until the stream ends.
 // It returns the "end" event's data, the "error" event as an error, or an
@@ -224,15 +263,27 @@ func (c *Client) Stream(
 	if err != nil {
 		return nil, err
 	}
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	ir := &idleReader{idle: StreamIdleTimeout}
+	ir.timer = time.AfterFunc(ir.idle, func() {
+		ir.stalled.Store(true)
+		cancel()
+	})
+	defer ir.timer.Stop()
 	resp, err := c.do(ctx, http.MethodPost, path, body, env.Context.RequestID)
 	if err != nil {
+		if ir.stalled.Load() {
+			return nil, transport(pluginapi.CodeUnavailable, "plugin did not answer within %s", ir.idle)
+		}
 		return nil, err
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode/100 != 2 {
 		return nil, decodeError(resp)
 	}
-	sc := bufio.NewScanner(resp.Body)
+	ir.r = resp.Body
+	sc := bufio.NewScanner(ir)
 	sc.Buffer(make([]byte, 0, 64<<10), MaxEventBytes)
 	for sc.Scan() {
 		line := bytes.TrimSpace(sc.Bytes())
@@ -257,6 +308,13 @@ func (c *Client) Stream(
 		}
 	}
 	if err := sc.Err(); err != nil {
+		switch {
+		case errors.Is(err, bufio.ErrTooLong):
+			// It will be as long on every try.
+			return nil, transport(pluginapi.CodeInternal, "a stream event is over %d bytes", MaxEventBytes)
+		case ir.stalled.Load():
+			return nil, transport(pluginapi.CodeUnavailable, "stream stalled: nothing for %s", ir.idle)
+		}
 		return nil, transport(pluginapi.CodeUnavailable, "stream broken: %v", err)
 	}
 	return nil, transport(pluginapi.CodeUnavailable, "stream ended without an end event")

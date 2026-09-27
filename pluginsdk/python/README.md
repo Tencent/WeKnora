@@ -171,7 +171,9 @@ The token behind it lasts a few minutes: use it within the call.
 
 On SIGTERM it stops accepting calls and lets the ones in flight finish.
 Each thread handles one call. `call.deadline` says when WeKnora stops
-waiting.
+waiting, and `call.cancelled()` whether it already did (the deadline passed
+or it hung up): long work should check it and give up. A `TimeoutError`
+raised by the plugin reaches WeKnora as a retryable failure.
 
 ## Packaging for the plugin host
 

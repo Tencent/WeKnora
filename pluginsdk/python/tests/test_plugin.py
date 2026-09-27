@@ -106,12 +106,28 @@ class PluginTest(unittest.TestCase):
         self.assertEqual((status, body["error"]), (503, {"code": "unavailable", "message": "upstream is down", "retryable": True}))
         status, body = self.c.call("/v1/websearch/echo/search", {"query": "crash"})
         self.assertEqual((status, body["error"]["code"], body["error"]["message"]), (500, "internal", "boom"))
+        status, body = self.c.call("/v1/websearch/echo/search", {"query": "timeout"})
+        self.assertEqual((status, body["error"]["code"], body["error"]["retryable"]), (503, "unavailable", True))
         status, body = self.c.call("/v1/websearch/nope/search", {"query": "x"})
         self.assertEqual((status, body["error"]["code"]), (404, "not_found"))
         status, body = self.c.call("/v1/no-such-endpoint")
         self.assertEqual((status, body["error"]["code"]), (404, "not_found"))
         status, _, data = self.c.request("POST", "/v1/config/validate", b"{not json")
         self.assertEqual((status, json.loads(data)["error"]["code"]), (400, "bad_request"))
+
+    def test_cancelled(self):
+        status, body = self.c.call("/v1/websearch/echo/search", {"query": "cancelled?"})
+        self.assertEqual((status, body["output"]["results"][0]["title"]), (200, "False"))
+        env = {"context": {"deadline": "2020-01-01T00:00:00Z"}}
+        from weknora_plugin.plugin import Call
+
+        self.assertTrue(Call(env).cancelled())
+        a, b = socket.socketpair()
+        call = Call({}, a)
+        self.assertFalse(call.cancelled())
+        b.close()
+        self.assertTrue(call.cancelled())
+        a.close()
 
     def test_config_validate(self):
         status, body = self.c.call("/v1/config/validate", config={"tenant": {"region": "eu"}})

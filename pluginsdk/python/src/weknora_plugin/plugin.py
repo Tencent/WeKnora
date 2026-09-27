@@ -51,7 +51,8 @@ class Call:
     """One request's caller and configuration. Configuration secrets are
     already decrypted; do not keep them beyond the call."""
 
-    def __init__(self, envelope: dict) -> None:
+    def __init__(self, envelope: dict, conn: Optional[socket.socket] = None) -> None:
+        self._conn = conn
         ctx = envelope.get("context") or {}
         cfg = envelope.get("config") or {}
         self.tenant_id: int = int(ctx.get("tenantId") or 0)
@@ -76,6 +77,22 @@ class Call:
         if self.deadline is None:
             return None
         return (self.deadline - datetime.now(timezone.utc)).total_seconds()
+
+    def cancelled(self) -> bool:
+        """Whether WeKnora stopped waiting: the deadline passed or it hung
+        up. Long work should check it and give up."""
+        left = self.time_left()
+        if left is not None and left <= 0:
+            return True
+        dontwait = getattr(socket, "MSG_DONTWAIT", 0)
+        if self._conn is None or not dontwait:  # Windows cannot tell
+            return False
+        try:
+            return self._conn.recv(1, socket.MSG_PEEK | dontwait) == b""
+        except (BlockingIOError, InterruptedError):
+            return False
+        except OSError:
+            return True
 
     def host(self) -> Optional[Host]:
         """The Host API client of this call, or None when the plugin was
@@ -554,7 +571,7 @@ class Plugin:
     def _unary(self, h: "_Handler", body: bytes, fn: Callable[[Call, Any], Any], empty: bool = False) -> None:
         try:
             env = _envelope(body)
-            out = fn(Call(env), env.get("input"))
+            out = fn(Call(env, h.connection), env.get("input"))
             h._send_json(200, {"output": {} if empty else to_wire(out)})
         except Exception as e:  # noqa: BLE001 - every failure becomes a protocol error
             h._send_error(self._as_error(e))
@@ -562,7 +579,7 @@ class Plugin:
     def _fetch(self, h: "_Handler", c: Any, body: bytes) -> None:
         try:
             env = _envelope(body)
-            call = Call(env)
+            call = Call(env, h.connection)
             cfg = _connector_config(call)
             inp = from_wire(FetchInput, env.get("input"))
         except Exception as e:  # noqa: BLE001
@@ -581,6 +598,9 @@ class Plugin:
     def _as_error(self, e: Exception) -> PluginError:
         if isinstance(e, PluginError):
             return e
+        if isinstance(e, TimeoutError):  # socket.timeout too
+            # As the Go SDK classes a deadline: worth another try.
+            return PluginError(ErrorCode.UNAVAILABLE, f"deadline exceeded: {e}", retryable=True)
         self.logger.error("plugin call failed: %s", "".join(traceback.format_exception(type(e), e, e.__traceback__)))
         return PluginError(ErrorCode.INTERNAL, str(e) or type(e).__name__)
 

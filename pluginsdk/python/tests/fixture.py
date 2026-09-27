@@ -43,6 +43,10 @@ def search(call, q):
         raise PluginError(ErrorCode.UNAVAILABLE, "upstream is down")
     if q.query == "crash":
         raise RuntimeError("boom")
+    if q.query == "timeout":
+        raise TimeoutError("upstream took too long")
+    if q.query == "cancelled?":
+        return [SearchResult(title=str(call.cancelled()), url="https://example.com/")]
     if q.query == "slow":
         time.sleep(0.5)
     return [SearchResult(title=q.query, url=f"https://example.com/?tenant={call.tenant_id}", snippet=call.locale)]

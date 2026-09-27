@@ -213,3 +213,51 @@ func TestPluginConnectorCannotShadowABuiltin(t *testing.T) {
 		t.Fatal("Unregister must not remove builtins")
 	}
 }
+
+// cursorlessFeed checkpoints when told to and ends without a cursor.
+type cursorlessFeed struct{ feedPlugin }
+
+func (cursorlessFeed) Fetch(
+	_ context.Context, _ *pluginsdk.Call, cfg pluginsdk.ConnectorConfig, _ pluginapi.FetchInput, s *pluginsdk.Stream,
+) (*pluginapi.Cursor, error) {
+	if cfg.Settings["checkpoint"] == true {
+		if err := s.Checkpoint(pluginapi.Cursor{State: map[string]any{"page": "p2"}}); err != nil {
+			return nil, err
+		}
+	}
+	return nil, nil
+}
+
+// A sync that ends without a cursor keeps the one of its last checkpoint,
+// or the one it started from: it never wipes the connector's place.
+func TestFetchEndingWithoutACursorKeepsItsPlace(t *testing.T) {
+	ctx := context.Background()
+	plugin := pluginsdk.New(pluginsdk.Info{ID: "acme.feeds", Version: "1.0.0"})
+	plugin.Connector("feed", cursorlessFeed{})
+	srv := httptest.NewServer(plugin.Handler())
+	defer srv.Close()
+	p, err := pkg.Open(plugintest.Zip(t, map[string]string{
+		"plugin.yaml": feedPluginManifest, "bin/feeds": "x", "schemas/feed.yaml": feedSchema,
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry := datasource.NewConnectorRegistry()
+	a := NewConnectors(NewInvoker(fakeClients{client.New(srv.URL, nil, nil)}), registry)
+	if err := reconcile.Activate(ctx, a, &reconcile.Loaded{Manifest: p.Manifest, Package: p}); err != nil {
+		t.Fatal(err)
+	}
+	conn, _ := registry.Get("acme.feeds/feed")
+	streaming := conn.(datasource.StreamingConnector)
+	start := &types.SyncCursor{ConnectorCursor: map[string]any{"page": "p1"}}
+
+	cfg := &types.DataSourceConfig{Settings: map[string]any{"checkpoint": true}}
+	next, err := streaming.FetchStream(ctx, cfg, start, &recordingHandler{})
+	if err != nil || next.ConnectorCursor["page"] != "p2" {
+		t.Fatalf("after a checkpoint: %+v, %v", next, err)
+	}
+	next, err = streaming.FetchStream(ctx, &types.DataSourceConfig{}, start, &recordingHandler{})
+	if err != nil || next.ConnectorCursor["page"] != "p1" || next.LastSyncTime.IsZero() {
+		t.Fatalf("without one: %+v, %v", next, err)
+	}
+}
