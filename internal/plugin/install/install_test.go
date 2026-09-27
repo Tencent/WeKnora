@@ -583,3 +583,25 @@ func TestRemoveTenant(t *testing.T) {
 		t.Fatalf("plugin data removed for %v", repo.DeletedTenants)
 	}
 }
+
+// ctxSyncer records whether the reconcile pass and the broadcast got a live
+// context.
+type ctxSyncer struct{ reconcileErr, notifyErr error }
+
+func (s *ctxSyncer) Reconcile(ctx context.Context) error  { s.reconcileErr = ctx.Err(); return nil }
+func (s *ctxSyncer) Notify(ctx context.Context)           { s.notifyErr = ctx.Err() }
+func (*ctxSyncer) Status(string) (reconcile.Status, bool) { return reconcile.Status{}, false }
+
+// A change is reconciled and broadcast to the end even when the request
+// that made it goes away meanwhile.
+func TestApplyOutlivesTheRequest(t *testing.T) {
+	repo, store := plugintest.NewMemRepo(), &plugintest.MemStore{}
+	sync := &ctxSyncer{}
+	s := NewService(repo, store, sync, "0.5.0")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, _ = s.apply(ctx, "acme.kit")
+	if sync.reconcileErr != nil || sync.notifyErr != nil {
+		t.Fatalf("reconcile saw %v, notify saw %v", sync.reconcileErr, sync.notifyErr)
+	}
+}

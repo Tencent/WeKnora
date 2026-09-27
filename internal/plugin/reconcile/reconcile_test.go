@@ -641,3 +641,68 @@ func TestRetiringFollowsEveryCommit(t *testing.T) {
 		t.Fatalf("calls = %s", got)
 	}
 }
+
+// flakyRepo fails reading versions while down.
+type flakyRepo struct {
+	*plugintest.MemRepo
+	down bool
+}
+
+func (r *flakyRepo) GetVersion(ctx context.Context, id, version string) (*types.PluginVersion, error) {
+	if r.down {
+		return nil, fmt.Errorf("database is down")
+	}
+	return r.MemRepo.GetVersion(ctx, id, version)
+}
+
+// A loaded plugin whose active version cannot be read (a database error, a
+// pass whose request went away) keeps serving and keeps its status, which
+// runtime reports go on updating.
+func TestFailedCheckKeepsALoadedPluginServing(t *testing.T) {
+	ctx := context.Background()
+	repo, store, act := &flakyRepo{MemRepo: plugintest.NewMemRepo()}, &plugintest.MemStore{}, &recorder{}
+	r := New(Options{
+		Repo: repo, Store: store, Registry: registry.New(), CacheDir: t.TempDir(), Activators: []Activator{act},
+	})
+	plugintest.Install(t, repo.MemRepo, store, plugintest.KitPackage(t, "1.0.0"), types.PluginStateEnabled)
+	if err := r.Reconcile(ctx); err != nil {
+		t.Fatal(err)
+	}
+	repo.down = true
+	if err := r.Reconcile(ctx); err == nil || !strings.Contains(err.Error(), "keeps running") {
+		t.Fatalf("want the check error, got %v", err)
+	}
+	if s, _ := r.Status("acme.kit"); s.State != StateReady || s.Version != "1.0.0" {
+		t.Fatalf("status after a failed check = %+v", s)
+	}
+	r.ReportRuntime("acme.kit", false, fmt.Errorf("crashed"))
+	if s, _ := r.Status("acme.kit"); s.State != StateDegraded {
+		t.Fatalf("a runtime report after a failed check was ignored: %+v", s)
+	}
+	if len(r.Loaded()) != 1 || len(act.calls) != 2 {
+		t.Fatalf("loaded %d, calls %v", len(r.Loaded()), act.calls)
+	}
+
+	// A failed status left over from before heals once the plugin checks
+	// out again.
+	repo.down = false
+	r.setStatus("acme.kit", Status{Version: "1.0.0", State: StateFailed, Error: "stale"})
+	if err := r.Reconcile(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if s, _ := r.Status("acme.kit"); s.State != StateReady || s.Error != "" {
+		t.Fatalf("a stale failed status stayed: %+v", s)
+	}
+}
+
+// A plugin not loaded yet whose version cannot be read fails as before.
+func TestFailedCheckOfANewPluginFails(t *testing.T) {
+	ctx := context.Background()
+	repo, store := &flakyRepo{MemRepo: plugintest.NewMemRepo(), down: true}, &plugintest.MemStore{}
+	r := New(Options{Repo: repo, Store: store, Registry: registry.New(), CacheDir: t.TempDir()})
+	plugintest.Install(t, repo.MemRepo, store, plugintest.KitPackage(t, "1.0.0"), types.PluginStateEnabled)
+	_ = r.Reconcile(ctx)
+	if s, _ := r.Status("acme.kit"); s.State != StateFailed {
+		t.Fatalf("status = %+v", s)
+	}
+}

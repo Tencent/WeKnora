@@ -365,7 +365,9 @@ func (r *Reconciler) Reconcile(ctx context.Context) error {
 		r.registry.SetAudience(row.ID, row.AudienceTenants())
 		if err := r.ensure(ctx, row); err != nil {
 			errs = append(errs, fmt.Errorf("plugin %s: %w", row.ID, err))
-			var kept *upgradeError
+			// A plugin still serving keeps its status; the error is in
+			// the log and, for a failed upgrade, in the status already.
+			var kept servingError
 			if !errors.As(err, &kept) {
 				r.setStatus(row.ID, Status{Version: row.ActiveVersion, State: StateFailed, Error: err.Error()})
 			}
@@ -417,6 +419,13 @@ func runtimeTarget(row types.InstalledPlugin) string {
 	return hex.EncodeToString(sum[:8])
 }
 
+// servingError is a failure that leaves a loaded plugin serving, so its
+// status is not marked failed.
+type servingError interface {
+	error
+	keepsServing()
+}
+
 // upgradeError is a new version that failed to load while the previous
 // one keeps running.
 type upgradeError struct {
@@ -429,18 +438,34 @@ func (e *upgradeError) Error() string {
 }
 
 func (e *upgradeError) Unwrap() error { return e.err }
+func (*upgradeError) keepsServing()   {}
+
+// checkError is a loaded plugin whose active version could not be read (a
+// database error, a pass cut short): it keeps serving what it runs.
+type checkError struct{ err error }
+
+func (e *checkError) Error() string {
+	return fmt.Sprintf("could not check the active version; the loaded one keeps running: %v", e.err)
+}
+
+func (e *checkError) Unwrap() error { return e.err }
+func (*checkError) keepsServing()   {}
 
 // ensure loads the active version of one plugin unless it already is.
 func (r *Reconciler) ensure(ctx context.Context, row types.InstalledPlugin) error {
+	prev := r.loaded[row.ID]
 	v, err := r.repo.GetVersion(ctx, row.ID, row.ActiveVersion)
+	if err == nil && v == nil {
+		err = fmt.Errorf("version %s is not stored", row.ActiveVersion)
+	}
 	if err != nil {
+		if prev != nil {
+			// The loaded version keeps serving; the next pass checks again.
+			return &checkError{err: err}
+		}
 		return err
 	}
-	if v == nil {
-		return fmt.Errorf("version %s is not stored", row.ActiveVersion)
-	}
 	loadKey := v.Digest + "|" + runtimeTarget(row)
-	prev := r.loaded[row.ID]
 	if st := r.staging[row.ID]; st != nil {
 		if st.key == loadKey {
 			return r.checkStaging(ctx, row.ID)
@@ -454,6 +479,7 @@ func (r *Reconciler) ensure(ctx context.Context, row types.InstalledPlugin) erro
 			// upgrade that failed is no longer wanted.
 			delete(r.retries, row.ID)
 			r.clearUpgrade(row.ID)
+			r.clearFailed(row.ID)
 			return nil
 		}
 		// The extracted files are gone (the OS purged a temp directory):
@@ -688,6 +714,22 @@ func (r *Reconciler) setUpgrade(pluginID, version, state, reason string) {
 	defer r.statusMu.Unlock()
 	s := r.status[pluginID]
 	s.UpgradeVersion, s.UpgradeState, s.UpgradeError = version, state, reason
+	s.UpdatedAt = time.Now()
+	r.status[pluginID] = s
+}
+
+// clearFailed sets a plugin that serves its active version back to ready
+// if its status says it failed: a status left from before (an earlier
+// pass that could not check it) must not hide the runtime's own reports,
+// which a failed status ignores.
+func (r *Reconciler) clearFailed(pluginID string) {
+	r.statusMu.Lock()
+	defer r.statusMu.Unlock()
+	s, ok := r.status[pluginID]
+	if !ok || s.State != StateFailed {
+		return
+	}
+	s.State, s.Error = StateReady, ""
 	s.UpdatedAt = time.Now()
 	r.status[pluginID] = s
 }

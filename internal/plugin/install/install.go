@@ -741,9 +741,13 @@ func (s *Service) Uninstall(ctx context.Context, id string) error {
 // apply reconciles this node now, tells the others, and returns the result.
 // A plugin that fails to load is still installed; its View says why.
 func (s *Service) apply(ctx context.Context, id string) (*View, error) {
-	if err := s.sync.Reconcile(ctx); err != nil {
+	// The change is stored: the pass and the broadcast run to the end even
+	// if the request that made it goes away, or this node's plugins would
+	// be half reconciled and the others not told.
+	bg := context.WithoutCancel(ctx)
+	if err := s.sync.Reconcile(bg); err != nil {
 		logger.Warnf(ctx, "[plugin] reconcile after changing %s: %v", id, err)
 	}
-	s.sync.Notify(ctx)
+	s.sync.Notify(bg)
 	return s.Get(ctx, id)
 }
