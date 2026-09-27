@@ -1727,18 +1727,29 @@ func initNeo4jClient() (neo4j.Driver, error) {
 	uri := os.Getenv("NEO4J_URI")
 	username := os.Getenv("NEO4J_USERNAME")
 	password := os.Getenv("NEO4J_PASSWORD")
+	engine, err := graphDatabaseEngine(os.Getenv("GRAPH_DATABASE_ENGINE"))
+	if err != nil {
+		return nil, err
+	}
+	if engine == "neo4j" {
+		if username == "" {
+			username = "neo4j"
+		}
+		if password == "" {
+			password = "password"
+		}
+	}
 
 	// Retry configuration
 	maxRetries := 30                 // Max retry attempts
 	retryInterval := 2 * time.Second // Wait between retries
 
 	var driver neo4j.Driver
-	var err error
 
 	for attempt := 1; attempt <= maxRetries; attempt++ {
 		driver, err = neo4j.NewDriver(uri, neo4j.BasicAuth(username, password, ""))
 		if err != nil {
-			logger.Warnf(ctx, "Failed to create Neo4j driver (attempt %d/%d): %v", attempt, maxRetries, err)
+			logger.Warnf(ctx, "Failed to create %s driver (attempt %d/%d): %v", engine, attempt, maxRetries, err)
 			time.Sleep(retryInterval)
 			continue
 		}
@@ -1746,17 +1757,28 @@ func initNeo4jClient() (neo4j.Driver, error) {
 		err = driver.VerifyAuthentication(ctx, nil)
 		if err == nil {
 			if attempt > 1 {
-				logger.Infof(ctx, "Successfully connected to Neo4j after %d attempts", attempt)
+				logger.Infof(ctx, "Successfully connected to %s after %d attempts", engine, attempt)
 			}
 			return driver, nil
 		}
 
-		logger.Warnf(ctx, "Failed to verify Neo4j authentication (attempt %d/%d): %v", attempt, maxRetries, err)
+		logger.Warnf(ctx, "Failed to verify %s authentication (attempt %d/%d): %v", engine, attempt, maxRetries, err)
 		driver.Close(ctx)
 		time.Sleep(retryInterval)
 	}
 
-	return nil, fmt.Errorf("failed to connect to Neo4j after %d attempts: %w", maxRetries, err)
+	return nil, fmt.Errorf("failed to connect to %s after %d attempts: %w", engine, maxRetries, err)
+}
+
+func graphDatabaseEngine(value string) (string, error) {
+	engine := strings.ToLower(strings.TrimSpace(value))
+	if engine == "" {
+		return "neo4j", nil
+	}
+	if engine != "neo4j" && engine != "memgraph" {
+		return "", fmt.Errorf("unsupported GRAPH_DATABASE_ENGINE %q (expected neo4j or memgraph)", engine)
+	}
+	return engine, nil
 }
 
 func NewDuckDB() (*sql.DB, error) {

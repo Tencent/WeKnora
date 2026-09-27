@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"unicode"
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -73,10 +74,14 @@ func (n *Neo4jRepository) addGraph(ctx context.Context, namespace types.NameSpac
 
 	_, err := session.ExecuteWrite(ctx, func(tx neo4j.ManagedTransaction) (interface{}, error) {
 		// Node import query
-		node_import_query := `
+		nodeImportQuery := `
 			UNWIND $data AS row
-			CALL apoc.merge.node(row.labels, {name: row.name, kg: row.knowledge_id}, row.props, {}) YIELD node
-			SET node.chunks = apoc.coll.union(node.chunks, row.chunks)
+			MERGE (node:` + n.Label(namespace) + ` {name: row.name, kg: row.knowledge_id})
+			ON CREATE SET node.attributes = row.attributes
+			SET node.chunks = CASE
+				WHEN node.chunks IS NULL THEN row.chunks
+				ELSE node.chunks + [chunk IN row.chunks WHERE NOT chunk IN node.chunks]
+			END
 			RETURN distinct 'done' AS result
 		`
 		nodeData := []map[string]interface{}{}
@@ -84,36 +89,32 @@ func (n *Neo4jRepository) addGraph(ctx context.Context, namespace types.NameSpac
 			nodeData = append(nodeData, map[string]interface{}{
 				"name":         node.Name,
 				"knowledge_id": namespace.Knowledge,
-				"props":        map[string][]string{"attributes": node.Attributes},
+				"attributes":   node.Attributes,
 				"chunks":       node.Chunks,
-				"labels":       n.Labels(namespace),
 			})
 		}
-		if _, err := tx.Run(ctx, node_import_query, map[string]interface{}{"data": nodeData}); err != nil {
-			return nil, fmt.Errorf("failed to create nodes: %v", err)
+		if len(nodeData) > 0 {
+			if _, err := tx.Run(ctx, nodeImportQuery, map[string]interface{}{"data": nodeData}); err != nil {
+				return nil, fmt.Errorf("failed to create nodes: %v", err)
+			}
 		}
 
-		// Relationship import query
-		rel_import_query := `
-			UNWIND $data AS row
-			CALL apoc.merge.node(row.source_labels, {name: row.source, kg: row.knowledge_id}, {}, {}) YIELD node as source
-			CALL apoc.merge.node(row.target_labels, {name: row.target, kg: row.knowledge_id}, {}, {}) YIELD node as target
-			CALL apoc.merge.relationship(source, row.type, {}, row.attributes, target) YIELD rel
-			RETURN distinct 'done'
-		`
-		relData := []map[string]interface{}{}
+		relationshipsByType := make(map[string][]map[string]interface{})
 		for _, rel := range graph.Relation {
-			relData = append(relData, map[string]interface{}{
-				"source":        rel.Node1,
-				"target":        rel.Node2,
-				"knowledge_id":  namespace.Knowledge,
-				"type":          rel.Type,
-				"source_labels": n.Labels(namespace),
-				"target_labels": n.Labels(namespace),
+			relationshipsByType[rel.Type] = append(relationshipsByType[rel.Type], map[string]interface{}{
+				"source":       rel.Node1,
+				"target":       rel.Node2,
+				"knowledge_id": namespace.Knowledge,
 			})
 		}
-		if _, err := tx.Run(ctx, rel_import_query, map[string]interface{}{"data": relData}); err != nil {
-			return nil, fmt.Errorf("failed to create relationships: %v", err)
+		for relType, relData := range relationshipsByType {
+			query, err := relationshipImportQuery(n.Label(namespace), relType)
+			if err != nil {
+				return nil, err
+			}
+			if _, err := tx.Run(ctx, query, map[string]interface{}{"data": relData}); err != nil {
+				return nil, fmt.Errorf("failed to create relationships: %v", err)
+			}
 		}
 		return nil, nil
 	})
@@ -137,26 +138,11 @@ func (n *Neo4jRepository) DelGraph(ctx context.Context, namespaces []types.NameS
 		for _, namespace := range namespaces {
 			labelExpr := n.Label(namespace)
 
-			deleteRelsQuery := `
-				CALL apoc.periodic.iterate(
-					"MATCH (n:` + labelExpr + ` {kg: $knowledge_id})-[r]-(m:` + labelExpr + ` {kg: $knowledge_id}) RETURN r",
-					"DELETE r",
-					{batchSize: 1000, parallel: true, params: {knowledge_id: $knowledge_id}}
-				) YIELD batches, total
-				RETURN total
-        	`
+			deleteRelsQuery, deleteNodesQuery := graphDeleteQueries(labelExpr)
 			if _, err := tx.Run(ctx, deleteRelsQuery, map[string]interface{}{"knowledge_id": namespace.Knowledge}); err != nil {
 				return nil, fmt.Errorf("failed to delete relationships: %v", err)
 			}
 
-			deleteNodesQuery := `
-				CALL apoc.periodic.iterate(
-					"MATCH (n:` + labelExpr + ` {kg: $knowledge_id}) RETURN n",
-					"DELETE n",
-					{batchSize: 1000, parallel: true, params: {knowledge_id: $knowledge_id}}
-				) YIELD batches, total
-				RETURN total
-        	`
 			if _, err := tx.Run(ctx, deleteNodesQuery, map[string]interface{}{"knowledge_id": namespace.Knowledge}); err != nil {
 				return nil, fmt.Errorf("failed to delete nodes: %v", err)
 			}
@@ -168,6 +154,30 @@ func (n *Neo4jRepository) DelGraph(ctx context.Context, namespaces []types.NameS
 	}
 	logger.Infof(ctx, "delete graph result: %v", result)
 	return nil
+}
+
+func relationshipImportQuery(labelExpr, relType string) (string, error) {
+	if strings.TrimSpace(relType) == "" || strings.IndexFunc(relType, unicode.IsControl) >= 0 {
+		return "", fmt.Errorf("invalid relationship type %q", relType)
+	}
+	return `
+		UNWIND $data AS row
+		MERGE (source:` + labelExpr + ` {name: row.source, kg: row.knowledge_id})
+		ON CREATE SET source.attributes = [], source.chunks = []
+		MERGE (target:` + labelExpr + ` {name: row.target, kg: row.knowledge_id})
+		ON CREATE SET target.attributes = [], target.chunks = []
+		MERGE (source)-[rel:` + quoteCypherIdentifier(relType) + `]->(target)
+		RETURN distinct 'done'
+	`, nil
+}
+
+func graphDeleteQueries(labelExpr string) (string, string) {
+	return `MATCH (n:` + labelExpr + ` {kg: $knowledge_id})-[r]-(m:` + labelExpr + ` {kg: $knowledge_id}) DELETE r`,
+		`MATCH (n:` + labelExpr + ` {kg: $knowledge_id}) DETACH DELETE n`
+}
+
+func quoteCypherIdentifier(identifier string) string {
+	return "`" + strings.ReplaceAll(identifier, "`", "``") + "`"
 }
 
 // SearchNode searches for nodes in the Neo4j repository.

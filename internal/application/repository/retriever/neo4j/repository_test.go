@@ -222,3 +222,33 @@ func TestDecodeGraphSearchReportsInvalidRecordsAndStreamErrors(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, graph.Node[0].Attributes)
 }
+
+func TestMemgraphCompatibleCypherAvoidsAPOC(t *testing.T) {
+	query, err := relationshipImportQuery("ENTITY_kb:ENTITY_doc", "MENTIONS")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"MERGE (source:ENTITY_kb:ENTITY_doc", "MERGE (source)-[rel:`MENTIONS`]->(target)"} {
+		if !strings.Contains(query, want) {
+			t.Errorf("relationship query missing %q: %s", want, query)
+		}
+	}
+	if strings.Contains(strings.ToLower(query), "apoc.") {
+		t.Fatalf("relationship query must not depend on APOC: %s", query)
+	}
+	escaped, err := relationshipImportQuery("ENTITY_kb", "TYPE WITH `TICK`")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(escaped, "[rel:`TYPE WITH ``TICK```]") {
+		t.Fatalf("relationship type was not escaped as an identifier: %s", escaped)
+	}
+	if _, err := relationshipImportQuery("ENTITY_kb", "\n"); err == nil {
+		t.Fatal("expected an empty relationship type to be rejected")
+	}
+
+	deleteRels, deleteNodes := graphDeleteQueries("ENTITY_kb:ENTITY_doc")
+	if !strings.Contains(deleteRels, "DELETE r") || !strings.Contains(deleteNodes, "DETACH DELETE n") {
+		t.Fatalf("unexpected deletion queries: %s / %s", deleteRels, deleteNodes)
+	}
+}

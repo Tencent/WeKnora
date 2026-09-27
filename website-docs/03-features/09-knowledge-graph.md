@@ -4,7 +4,7 @@
 
 该功能适用于人物、组织、产品或条款之间关系较多的资料。启用后会增加入库阶段的模型调用，并需要部署 Neo4j。
 
-图谱存储使用 Neo4j，并依赖 APOC 插件。
+图谱存储支持 Neo4j 与 Memgraph，通过 Bolt/Cypher 连接。写入、查询和删除使用两者共有的 Cypher，不依赖 APOC。
 
 ## 开启配置
 
@@ -20,10 +20,19 @@
 | `NEO4J_URI` | string | `bolt://neo4j:7687` | Neo4j 连接地址 |
 | `NEO4J_USERNAME` | string | `neo4j` | 用户名 |
 | `NEO4J_PASSWORD` | string | `password` | 密码 |
+| `GRAPH_DATABASE_ENGINE` | string | `neo4j` | 图数据库类型：`neo4j` 或 `memgraph`。`NEO4J_ENABLE` 仍是图谱功能开关，旧部署无需修改 |
 
 `initNeo4jClient` 启动时最多重试 30 次（间隔 2s）建立并验证连接；未启用时返回 `nil` driver，此时 `Neo4jRepository` 的所有方法降级为 no-op（日志 `NOT SUPPORT RETRIEVE GRAPH`）。`GET /system` 信息接口通过 `getGraphDatabaseEngine()` 报告 `"Neo4j"` 或 `"Not Enabled"`（`internal/handler/system.go`）。
 
-docker-compose 的 `neo4j` 服务预装 APOC：`NEO4JLABS_PLUGINS=["apoc"]`（图谱写入依赖 `apoc.merge.node` / `apoc.merge.relationship`，删除依赖 `apoc.periodic.iterate`）。
+Docker Compose 可选 `neo4j` 和 `memgraph` profile。Neo4j 仍是默认引擎。Memgraph 示例：
+
+```bash
+GRAPH_DATABASE_ENGINE=memgraph NEO4J_ENABLE=true \\
+NEO4J_URI=bolt://memgraph:7687 NEO4J_USERNAME= NEO4J_PASSWORD= \\
+docker compose --profile memgraph up -d
+```
+
+Memgraph 默认不启用认证；生产部署请按 Memgraph 的认证配置设置用户名和密码。对外暴露 Bolt 端口前应配置访问控制。
 
 ### 知识库级开关：IndexingStrategy + ExtractConfig {#_2-知识库级开关-indexingstrategy-extractconfig}
 
