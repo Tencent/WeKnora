@@ -5,6 +5,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/plugin/manifest"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"gorm.io/gorm"
@@ -85,6 +86,61 @@ func (r *pluginRepository) DeleteTenantData(ctx context.Context, tenantID uint64
 			if err := tx.Where("tenant_id = ?", tenantID).Delete(model).Error; err != nil {
 				return err
 			}
+		}
+		return nil
+	})
+}
+
+func (r *pluginRepository) SaveTombstone(ctx context.Context, t *types.PluginTombstone) error {
+	return r.db.WithContext(ctx).Save(t).Error
+}
+
+func (r *pluginRepository) GetTombstone(ctx context.Context, pluginID string) (*types.PluginTombstone, error) {
+	var t types.PluginTombstone
+	err := r.db.WithContext(ctx).Where("plugin_id = ?", pluginID).First(&t).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &t, nil
+}
+
+func (r *pluginRepository) DeleteTombstone(ctx context.Context, pluginID string) error {
+	return r.db.WithContext(ctx).Where("plugin_id = ?", pluginID).Delete(&types.PluginTombstone{}).Error
+}
+
+func (r *pluginRepository) PurgePluginData(ctx context.Context, pluginID string, mcpServers []string) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		for _, model := range []any{
+			&types.PluginTenantSetting{}, &types.PluginKV{}, &types.PluginOAuthConnection{},
+		} {
+			if err := tx.Where("plugin_id = ?", pluginID).Delete(model).Error; err != nil {
+				return err
+			}
+		}
+		if len(mcpServers) == 0 {
+			return nil
+		}
+		// Tool policies are stored per workspace under a service ID derived
+		// from the workspace and the server.
+		var tenants []uint64
+		if err := tx.Model(&types.MCPToolApproval{}).Distinct().Pluck("tenant_id", &tenants).Error; err != nil {
+			return err
+		}
+		var ids []string
+		for _, t := range tenants {
+			for _, s := range mcpServers {
+				ids = append(ids, manifest.MCPServiceID(t, s))
+			}
+		}
+		for len(ids) > 0 {
+			n := min(len(ids), 500)
+			if err := tx.Where("service_id IN ?", ids[:n]).Delete(&types.MCPToolApproval{}).Error; err != nil {
+				return err
+			}
+			ids = ids[n:]
 		}
 		return nil
 	})

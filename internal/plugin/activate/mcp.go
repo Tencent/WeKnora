@@ -13,8 +13,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/uuid"
-
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/plugin/configschema"
 	"github.com/Tencent/WeKnora/internal/plugin/install"
@@ -28,9 +26,6 @@ import (
 // ErrPluginService is returned when a caller tries to change an MCP service
 // a plugin provides.
 var ErrPluginService = errors.New("this MCP service is provided by a plugin and cannot be changed")
-
-// mcpNamespace seeds the IDs of plugin MCP services.
-var mcpNamespace = uuid.MustParse("5b0c8e5e-4f7c-4a55-9d0e-6f1d0f4c7a21")
 
 type mcpServer struct {
 	manifest    *manifest.Manifest
@@ -119,7 +114,7 @@ func (a *MCPServers) Deactivate(_ context.Context, pluginID string) error {
 // serviceID is a plugin MCP service's ID in one workspace. It is stable
 // across nodes and restarts, so agents can keep it in their configuration.
 func serviceID(tenantID uint64, qualifiedID string) string {
-	return uuid.NewSHA1(mcpNamespace, fmt.Appendf(nil, "%d/%s", tenantID, qualifiedID)).String()
+	return manifest.MCPServiceID(tenantID, qualifiedID)
 }
 
 func (a *MCPServers) snapshot() []mcpServer {

@@ -187,7 +187,7 @@ func hostPortOf(raw string) string {
 // (remote, on a plugin host) only through WEKNORA_PLUGIN_HOST_API_URL.
 func newPluginHostAPI(
 	cfg *config.Config, iv *activate.Invoker, repo interfaces.PluginKVRepository, cleaner interfaces.ResourceCleaner,
-	hooks *webhook.Tokens, oauth *pluginoauth.Service,
+	hooks *webhook.Tokens, oauth *pluginoauth.Service, t *plugintenancy.Service,
 ) *hostapi.Handler {
 	iv.SetWebhooks(hooks, webhook.PublicBase())
 	iv.SetOAuth(oauth)
@@ -201,7 +201,11 @@ func newPluginHostAPI(
 	ctx, cancel := context.WithCancel(context.Background())
 	kv.StartSweeper(ctx, 10*time.Minute)
 	cleaner.RegisterWithName("PluginKVSweeper", func() error { cancel(); return nil })
-	return hostapi.NewHandler(issuer, kv)
+	h := hostapi.NewHandler(issuer, kv)
+	// A token outlives the switch it was issued under (up to its call's
+	// deadline): each request checks the switch again.
+	h.SetGate(t.PluginEnabled)
+	return h
 }
 
 // bindPluginActivators hands the activators what they need once the plugin

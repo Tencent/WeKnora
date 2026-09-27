@@ -31,7 +31,7 @@ func TestDeleteTenantRemovesItsPlugins(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, db.AutoMigrate(&types.Tenant{}, &types.TenantMember{}, &types.StorageBackend{},
 		&types.InstalledPlugin{}, &types.PluginVersion{}, &types.PluginTenantSetting{}, &types.PluginKV{},
-		&types.PluginOAuthConnection{}))
+		&types.PluginOAuthConnection{}, &types.PluginTombstone{}))
 	tenants := service.NewTenantService(repository.NewTenantRepository(db), repository.NewStorageBackendRepository(db))
 	plugins := repository.NewPluginRepository(db)
 	store := &plugintest.MemStore{}

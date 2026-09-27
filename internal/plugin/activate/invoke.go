@@ -2,6 +2,7 @@ package activate
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
@@ -146,6 +147,59 @@ func (iv *Invoker) Bind(t *tenancy.Service, plugins interfaces.PluginRepository)
 	iv.mu.Unlock()
 }
 
+type configuringKey struct{}
+
+// Configuring marks calls a workspace makes while it fills in a plugin's
+// configuration (dynamic options of its tenant form), which it does before
+// switching the plugin on: they need the plugin visible to the workspace,
+// not on, and carry no Host API access.
+func Configuring(ctx context.Context) context.Context {
+	return context.WithValue(ctx, configuringKey{}, true)
+}
+
+func isConfiguring(ctx context.Context) bool {
+	v, _ := ctx.Value(configuringKey{}).(bool)
+	return v
+}
+
+// gate refuses a call on behalf of a workspace that has the plugin off or
+// may not see it: every workspace call goes through here, background ones
+// (syncs, events, IM) included, so switching a plugin off or narrowing its
+// audience stops workspace data going to it at once. A switch that cannot
+// be read refuses too, and may be retried.
+func gate(ctx context.Context, t *tenancy.Service, tenantID uint64, pluginID string, configuring bool) error {
+	if configuring {
+		if t.Visible(pluginID, tenantID) {
+			return nil
+		}
+		return offError(pluginID)
+	}
+	on, err := t.PluginEnabled(ctx, tenantID, pluginID)
+	if err != nil {
+		return &pluginapi.Error{
+			Code: pluginapi.CodeUnavailable, Retryable: true,
+			Message: fmt.Sprintf("read whether plugin %s is on: %v", pluginID, err),
+		}
+	}
+	if !on {
+		return offError(pluginID)
+	}
+	return nil
+}
+
+// pluginOffError is tenancy.ErrPluginOff for one plugin, and a protocol
+// error that is not retried, for callers that tell errors apart either way.
+type pluginOffError struct{ pe *pluginapi.Error }
+
+func (e *pluginOffError) Error() string   { return e.pe.Message }
+func (e *pluginOffError) Unwrap() []error { return []error{tenancy.ErrPluginOff, e.pe} }
+
+func offError(pluginID string) error {
+	return &pluginOffError{pe: &pluginapi.Error{
+		Code: pluginapi.CodeUnauthorized, Message: fmt.Sprintf("plugin %s is off in this workspace", pluginID),
+	}}
+}
+
 // Default timeouts per call kind, used when the caller set no deadline.
 const (
 	searchTimeout   = 10 * time.Second
@@ -184,6 +238,14 @@ func (iv *Invoker) Envelope(
 	}
 	iv.mu.RLock()
 	t, plugins, tokens, hostURL := iv.tenancy, iv.plugins, iv.tokens, iv.hostURL
+	iv.mu.RUnlock()
+	configuring := isConfiguring(ctx)
+	if t != nil && env.Context.TenantID != 0 {
+		if err := gate(ctx, t, env.Context.TenantID, m.ID, configuring); err != nil {
+			return env, err
+		}
+	}
+	iv.mu.RLock()
 	if !iv.clients.OnThisNode(m.ID) {
 		hostURL = iv.publicHostURL
 	}
@@ -197,7 +259,9 @@ func (iv *Invoker) Envelope(
 			env.Context.Webhooks[c.ID] = publicBase + hooks.Path(m.ID, c.ID, env.Context.TenantID)
 		}
 	}
-	if tokens != nil && hostURL != "" && env.Context.TenantID != 0 && len(m.Permissions.HostAPI) > 0 {
+	// A workspace configuring a plugin it has not switched on gets no way
+	// into its data.
+	if tokens != nil && hostURL != "" && env.Context.TenantID != 0 && !configuring && len(m.Permissions.HostAPI) > 0 {
 		var deadline time.Time
 		if env.Context.Deadline != nil {
 			deadline = *env.Context.Deadline

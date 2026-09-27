@@ -19,6 +19,9 @@ var (
 	ErrUnknownPlugin = errors.New("unknown plugin")
 	// ErrRequiredPlugin is returned when disabling a plugin WeKnora needs.
 	ErrRequiredPlugin = errors.New("this plugin is required and cannot be disabled")
+	// ErrPluginOff is returned for a call a workspace makes to a plugin it
+	// has switched off or may not see: nothing is sent to the plugin.
+	ErrPluginOff = errors.New("the plugin is off in this workspace")
 )
 
 // Service reads and changes tenant plugin switches. It implements
@@ -86,6 +89,13 @@ func (s *Service) PluginEnabled(ctx context.Context, tenantID uint64, pluginID s
 		return enabledByDefault(m), nil
 	}
 	return row.Enabled, nil
+}
+
+// Visible reports whether a tenant may see a loaded plugin (its audience),
+// whether or not it switched it on.
+func (s *Service) Visible(pluginID string, tenantID uint64) bool {
+	_, ok := s.registry.Plugin(pluginID)
+	return ok && s.registry.VisibleTo(pluginID, tenantID)
 }
 
 // SetEnabled turns a plugin on or off for a tenant.

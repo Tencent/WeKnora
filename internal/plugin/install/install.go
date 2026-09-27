@@ -346,6 +346,9 @@ func (s *Service) install(
 
 	isNew := row == nil
 	if isNew {
+		if err := s.settleLeftovers(ctx, m, owner, verdict); err != nil {
+			return nil, err
+		}
 		row = &types.InstalledPlugin{ID: m.ID, DesiredState: types.PluginStateEnabled, CreatedBy: req.UserID}
 		if owner != nil {
 			// A workspace's own plugin is only ever its own.
@@ -723,19 +726,76 @@ func (s *Service) Uninstall(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
+	// Workspaces' switches, configuration and data stay for a reinstall;
+	// the tombstone says whose they are, so only the same owner and signer
+	// get them back.
+	tomb := &types.PluginTombstone{PluginID: id, OwnerTenantID: row.OwnerTenantID, CreatedAt: time.Now()}
+	for _, v := range versions {
+		if v.Version == row.ActiveVersion {
+			tomb.SignerKeyID = trustedSigner(v)
+		}
+	}
+	if err := s.repo.SaveTombstone(ctx, tomb); err != nil {
+		return err
+	}
 	if err := s.repo.DeletePlugin(ctx, id); err != nil {
 		return err
 	}
-	if err := s.sync.Reconcile(ctx); err != nil {
+	bg := context.WithoutCancel(ctx)
+	if err := s.sync.Reconcile(bg); err != nil {
 		logger.Warnf(ctx, "[plugin] reconcile after uninstalling %s: %v", id, err)
 	}
-	s.sync.Notify(ctx)
+	s.sync.Notify(bg)
 	for _, v := range versions {
 		if err := s.store.Delete(ctx, v.PackageURI); err != nil {
 			logger.Warnf(ctx, "[plugin] delete package %s: %v", v.PackageURI, err)
 		}
 	}
 	return nil
+}
+
+// trustedSigner is the key that signed a stored version, if the platform
+// trusted it: an untrusted key ID is only what the package claims.
+func trustedSigner(v types.PluginVersion) string {
+	switch trust.Level(v.Trust) {
+	case trust.Official, trust.Verified:
+		return v.SignerKeyID
+	}
+	return ""
+}
+
+// settleLeftovers decides what a plugin installed under a free ID inherits
+// from an uninstalled plugin that had it: workspace switches and
+// configuration, key-value data, OAuth connections and tool policies stay
+// for a plugin from the same owner (the platform, or the same workspace)
+// signed by the same trusted key, and are removed for any other, which
+// would otherwise receive them.
+func (s *Service) settleLeftovers(ctx context.Context, m *manifest.Manifest, owner *uint64, v trust.Verdict) error {
+	tomb, err := s.repo.GetTombstone(ctx, m.ID)
+	if err != nil {
+		return err
+	}
+	signer := ""
+	if v.Trusted {
+		signer = v.KeyID
+	}
+	if tomb == nil || !tomb.SameAs(owner, signer) {
+		servers := make([]string, 0, len(m.Contributes[manifest.PointMCPServers]))
+		for _, c := range m.Contributes[manifest.PointMCPServers] {
+			servers = append(servers, manifest.QualifiedID(m.ID, c.ID))
+		}
+		if err := s.repo.PurgePluginData(ctx, m.ID, servers); err != nil {
+			return err
+		}
+		if tomb != nil {
+			logger.Infof(ctx, "[plugin] %s comes from another owner or signer than the plugin uninstalled "+
+				"under that ID; removed what workspaces kept of it", m.ID)
+		}
+	}
+	if tomb == nil {
+		return nil
+	}
+	return s.repo.DeleteTombstone(ctx, m.ID)
 }
 
 // apply reconciles this node now, tells the others, and returns the result.

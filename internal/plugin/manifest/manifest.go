@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/google/uuid"
 	"golang.org/x/mod/semver"
 	"gopkg.in/yaml.v3"
 
@@ -618,4 +619,14 @@ func isPackagePath(p string) bool {
 		}
 	}
 	return true
+}
+
+// mcpNamespace seeds the IDs of plugin MCP services.
+var mcpNamespace = uuid.MustParse("5b0c8e5e-4f7c-4a55-9d0e-6f1d0f4c7a21")
+
+// MCPServiceID is the ID of a plugin MCP server (qualified ID) in one
+// workspace. It is stable across nodes and restarts, so agents can keep it
+// in their configuration and tool policies are stored under it.
+func MCPServiceID(tenantID uint64, qualifiedID string) string {
+	return uuid.NewSHA1(mcpNamespace, fmt.Appendf(nil, "%d/%s", tenantID, qualifiedID)).String()
 }

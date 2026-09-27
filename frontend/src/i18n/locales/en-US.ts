@@ -2951,7 +2951,7 @@ export default {
       configSaved: 'Platform settings saved',
       configSaveFailed: 'Failed to save platform settings',
       danger: 'Uninstall',
-      uninstallHint: 'Removes the plugin and every stored version. Workspaces\' switches and settings are kept and come back if you reinstall.',
+      uninstallHint: 'Removes the plugin and every stored version. Workspaces\' switches, settings and plugin data are kept, but only a reinstall from the same owner (the platform or the same workspace) with the same trusted signature gets them back; any other plugin taking this ID has them removed first.',
       uninstall: 'Uninstall plugin',
       uninstallConfirm: 'Uninstall? Every node unloads the plugin right away.',
       uninstalled: 'Plugin uninstalled',
@@ -2969,7 +2969,7 @@ export default {
   },
   pluginOff: {
     label: 'Plugin off',
-    hint: 'The plugin providing this is switched off in this workspace: no new ones can be added, existing ones keep working. Admins can switch it back on in Settings → Plugins.'
+    hint: 'The plugin providing this is switched off in this workspace: this is paused, nothing is sent to the plugin, and no new ones can be added. It resumes once an admin switches the plugin back on in Settings → Plugins.'
   },
   pluginToolView: {
     empty: 'No results',
@@ -3044,7 +3044,7 @@ export default {
     configSaveFailed: 'Failed to save the plugin configuration',
     navGroup: 'Extensions',
     title: 'Plugins',
-    description: 'Turn plugins on for this workspace. Switching one off stops new integrations from it; existing ones keep working.',
+    description: 'Turn plugins on for this workspace. Switching one off stops sending it anything from this workspace: its integrations pause and no new ones can be added until it is back on.',
     searchPlaceholder: 'Search plugins, IDs or integrations',
     allPoints: 'All',
     empty: 'No matching plugins',

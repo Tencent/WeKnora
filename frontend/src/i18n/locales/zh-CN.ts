@@ -5479,7 +5479,7 @@ export default {
       configSaved: '平台配置已保存',
       configSaveFailed: '保存平台配置失败',
       danger: '卸载',
-      uninstallHint: '删除插件及其全部版本；各空间的开关和配置会保留，重新安装后恢复。',
+      uninstallHint: '删除插件及其全部版本。各空间的开关、配置和插件数据会保留，但只有同一来源（平台或同一空间）、同一受信任签名的插件重新安装后才会恢复；其他插件使用这个 ID 时，会先清除这些数据。',
       uninstall: '卸载插件',
       uninstallConfirm: '确定卸载？所有节点会立即卸载该插件。',
       uninstalled: '插件已卸载',
@@ -5497,7 +5497,7 @@ export default {
   },
   pluginOff: {
     label: '插件已停用',
-    hint: '所属插件已在本空间停用：不能再新建此类项，已有的照常工作。管理员可在「设置 → 插件」中重新启用。'
+    hint: '所属插件已在本空间停用：此项已暂停，不会再向插件发送任何内容，也不能新建此类项。管理员在「设置 → 插件」中重新启用后自动恢复。'
   },
   pluginToolView: {
     empty: '没有结果',
@@ -5572,7 +5572,7 @@ export default {
     configSaveFailed: '保存插件配置失败',
     navGroup: '扩展',
     title: '插件',
-    description: '为本空间启用插件。停用后它提供的集成不能再新建，已有的照常工作。',
+    description: '为本空间启用插件。停用后不再向它发送本空间的任何数据：它提供的集成全部暂停、不能新建，重新启用后恢复。',
     searchPlaceholder: '搜索插件名称、ID 或集成',
     allPoints: '全部',
     empty: '没有匹配的插件',

@@ -16,6 +16,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/application/access"
 	"github.com/Tencent/WeKnora/internal/datasource"
 	"github.com/Tencent/WeKnora/internal/logger"
+	plugintenancy "github.com/Tencent/WeKnora/internal/plugin/tenancy"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -649,18 +650,8 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 	connector, err := s.connectorRegistry.Get(ds.Type)
 	if err != nil {
 		logger.Errorf(ctx, "connector not found: type=%s", ds.Type)
-		syncLog.Status = types.SyncLogStatusFailed
-		syncLog.FinishedAt = timePtr(time.Now().UTC())
-		syncLog.ErrorMessage = fmt.Sprintf("Connector not found: %s", ds.Type)
-		_ = s.syncLogRepo.Update(ctx, syncLog)
-		if !wasPaused {
-			ds.Status = types.DataSourceStatusError
-		}
-		ds.ErrorMessage = syncLog.ErrorMessage
-		_ = s.dsRepo.Update(ctx, ds)
-		// Retrying cannot bring a connector back (its plugin was removed or
-		// disabled); the next scheduled or manual sync will try again.
-		return fmt.Errorf("%w: %w", asynq.SkipRetry, err)
+		// Its plugin was removed, turned off or did not load on this node.
+		return s.skipSyncForPlugin(ctx, ds, syncLog, fmt.Sprintf("Connector not found: %s", ds.Type), err)
 	}
 
 	// Parse configuration
@@ -728,6 +719,9 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 			}
 		}
 		logger.Errorf(ctx, "fetch operation failed: %v", fetchErr)
+		if errors.Is(fetchErr, plugintenancy.ErrPluginOff) {
+			return s.skipSyncForPlugin(ctx, ds, syncLog, fmt.Sprintf("Fetch failed: %v", fetchErr), fetchErr)
+		}
 		syncLog.Status = types.SyncLogStatusFailed
 		syncLog.FinishedAt = timePtr(time.Now().UTC())
 		syncLog.ErrorMessage = fmt.Sprintf("Fetch failed: %v", fetchErr)
@@ -1076,6 +1070,23 @@ func streamingFetch(
 // processSyncStreaming runs a sync through a StreamingConnector, ingesting each
 // item as it arrives and checkpointing progress so the run is memory-bounded and
 // resumable after a timeout.
+// skipSyncForPlugin ends a sync its connector's plugin cannot serve: removed,
+// turned off for the workspace, left out of its audience, or not loaded on
+// this node. The run fails with the reason, but the data source keeps its
+// status, so its schedule syncs again once the plugin is back; retrying
+// now would fail the same way.
+func (s *DataSourceService) skipSyncForPlugin(
+	ctx context.Context, ds *types.DataSource, syncLog *types.SyncLog, message string, cause error,
+) error {
+	syncLog.Status = types.SyncLogStatusFailed
+	syncLog.FinishedAt = timePtr(time.Now().UTC())
+	syncLog.ErrorMessage = message
+	_ = s.syncLogRepo.Update(ctx, syncLog)
+	ds.ErrorMessage = message
+	_ = s.dsRepo.Update(ctx, ds)
+	return fmt.Errorf("%w: %w", asynq.SkipRetry, cause)
+}
+
 func (s *DataSourceService) processSyncStreaming(
 	ctx context.Context, sc datasource.StreamingConnector,
 	ds *types.DataSource, syncLog *types.SyncLog,
@@ -1123,6 +1134,10 @@ func (s *DataSourceService) processSyncStreaming(
 	}
 
 	nextCursor, fetchErr := streamingFetch(ctx, sc, config, forceFull, startCursor, fullBaseline, handler)
+	if errors.Is(fetchErr, plugintenancy.ErrPluginOff) && result.Total == 0 {
+		logger.Errorf(ctx, "streaming fetch failed: %v", fetchErr)
+		return s.skipSyncForPlugin(ctx, ds, syncLog, fmt.Sprintf("Fetch failed: %v", fetchErr), fetchErr)
+	}
 	if fetchErr != nil {
 		// Progress so far is already checkpointed onto ds.LastSyncCursor; leave
 		// it in place so the Asynq retry resumes from there. Persist counts.

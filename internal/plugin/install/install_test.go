@@ -605,3 +605,74 @@ func TestApplyOutlivesTheRequest(t *testing.T) {
 		t.Fatalf("reconcile saw %v, notify saw %v", sync.reconcileErr, sync.notifyErr)
 	}
 }
+
+// What workspaces kept of an uninstalled plugin goes to a plugin installed
+// under its ID only from the same owner and trusted signer; any other
+// starts clean.
+func TestReinstallInheritsOnlyFromTheSameOwnerAndSigner(t *testing.T) {
+	ctx := context.Background()
+	s, repo, _, _ := newService(t)
+	pub, priv, _ := ed25519.GenerateKey(nil)
+	store, err := trust.NewStore([]trust.Key{{ID: "acme", PublicKey: pub, Level: trust.Verified}}, trust.Community)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.WithTrust(store)
+	signed := func(version string) []byte {
+		b, err := pluginsign.SignArchive(plugintest.KitPackage(t, version), "acme", priv)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return b
+	}
+	put := func(data []byte, owner *uint64) {
+		t.Helper()
+		p, verdict, err := s.open(data)
+		if err == nil {
+			_, err = s.install(ctx, Request{Data: data}, p, verdict, owner)
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	remove := func() {
+		t.Helper()
+		if err := s.Uninstall(ctx, "acme.kit"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tenant := func(id uint64) *uint64 { return &id }
+	// reinstall installs data and checks whether what the uninstalled
+	// plugin left was purged.
+	reinstall := func(what string, data []byte, owner *uint64, wantPurge bool) {
+		t.Helper()
+		before := len(repo.Purged)
+		put(data, owner)
+		if purged := len(repo.Purged) > before; purged != wantPurge {
+			t.Fatalf("%s: purged = %v, want %v", what, purged, wantPurge)
+		}
+		if tomb, _ := repo.GetTombstone(ctx, "acme.kit"); tomb != nil {
+			t.Fatalf("%s: the tombstone outlived the install", what)
+		}
+	}
+
+	put(signed("1.0.0"), nil)
+	remove()
+	tomb, _ := repo.GetTombstone(ctx, "acme.kit")
+	if tomb == nil || tomb.SignerKeyID != "acme" || tomb.OwnerTenantID != nil {
+		t.Fatalf("tombstone = %+v", tomb)
+	}
+	reinstall("same signer", signed("1.0.1"), nil, false)
+	remove()
+	reinstall("unsigned after signed", plugintest.KitPackage(t, "1.0.2"), nil, true)
+	remove()
+	reinstall("unsigned again", plugintest.KitPackage(t, "1.0.3"), nil, false)
+	remove()
+	reinstall("a workspace's own", plugintest.KitPackage(t, "1.0.4"), tenant(7), true)
+	remove()
+	reinstall("the same workspace", plugintest.KitPackage(t, "1.0.5"), tenant(7), false)
+	remove()
+	reinstall("another workspace", plugintest.KitPackage(t, "1.0.6"), tenant(8), true)
+	remove()
+	reinstall("the platform after a workspace", plugintest.KitPackage(t, "1.0.7"), nil, true)
+}

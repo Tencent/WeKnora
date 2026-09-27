@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"testing"
 
@@ -22,11 +23,52 @@ type MemRepo struct {
 	versions map[string]types.PluginVersion
 	// DeletedTenants are the tenants DeleteTenantData was called for.
 	DeletedTenants []uint64
+	tombstones     map[string]types.PluginTombstone
+	// Purged are the PurgePluginData calls, as "<plugin> <mcp servers>".
+	Purged []string
 }
 
 // NewMemRepo returns an empty in-memory PluginRepository.
 func NewMemRepo() *MemRepo {
-	return &MemRepo{plugins: map[string]types.InstalledPlugin{}, versions: map[string]types.PluginVersion{}}
+	return &MemRepo{
+		plugins: map[string]types.InstalledPlugin{}, versions: map[string]types.PluginVersion{},
+		tombstones: map[string]types.PluginTombstone{},
+	}
+}
+
+// SaveTombstone remembers an uninstalled plugin.
+func (m *MemRepo) SaveTombstone(_ context.Context, t *types.PluginTombstone) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.tombstones[t.PluginID] = *t
+	return nil
+}
+
+// GetTombstone returns (nil, nil) when none is kept.
+func (m *MemRepo) GetTombstone(_ context.Context, id string) (*types.PluginTombstone, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	t, ok := m.tombstones[id]
+	if !ok {
+		return nil, nil
+	}
+	return &t, nil
+}
+
+// DeleteTombstone forgets an uninstalled plugin.
+func (m *MemRepo) DeleteTombstone(_ context.Context, id string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.tombstones, id)
+	return nil
+}
+
+// PurgePluginData records the call.
+func (m *MemRepo) PurgePluginData(_ context.Context, id string, mcpServers []string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.Purged = append(m.Purged, strings.TrimSpace(id+" "+strings.Join(mcpServers, ",")))
+	return nil
 }
 
 // ListPlugins returns every row.

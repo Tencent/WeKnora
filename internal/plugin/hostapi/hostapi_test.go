@@ -2,6 +2,7 @@ package hostapi
 
 import (
 	"context"
+	"errors"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -209,4 +210,44 @@ func TestTokenLifetimeFollowsTheCallDeadline(t *testing.T) {
 		_, err = later.Verify(tok)
 		require.NoError(t, err, "%s: the token must verify until it expires", tc.name)
 	}
+}
+
+// A token outlives the switch it was issued under: every request checks
+// again, so a plugin switched off, left out of the audience or uninstalled
+// loses its way in at once.
+func TestGateRefusesPluginsSwitchedOff(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&types.PluginKV{}))
+	iss := NewIssuer([]byte("k"))
+	h := NewHandler(iss, NewKV(repository.NewPluginKVRepository(db)))
+	on, gateErr := true, error(nil)
+	var asked []string
+	h.SetGate(func(_ context.Context, tenantID uint64, pluginID string) (bool, error) {
+		asked = append(asked, pluginID)
+		require.Equal(t, uint64(1), tenantID)
+		return on, gateErr
+	})
+	r := gin.New()
+	h.Register(r)
+	srv := httptest.NewServer(r)
+	defer srv.Close()
+	ctx := context.Background()
+	host := hostCall(t, srv.URL, iss, 1, "kv").Host()
+
+	var got int
+	_, err = host.KVGet(ctx, "k", &got)
+	require.NoError(t, err)
+	require.Equal(t, []string{"acme.x"}, asked)
+
+	on = false
+	_, err = host.KVGet(ctx, "k", &got)
+	require.ErrorContains(t, err, "off in this workspace")
+
+	on, gateErr = true, errors.New("database is down")
+	_, err = host.KVGet(ctx, "k", &got)
+	e, ok := pluginapi.AsError(err)
+	require.True(t, ok)
+	require.True(t, e.Retryable)
 }

@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	stderrors "errors"
 	"html/template"
@@ -99,6 +100,9 @@ func (h *PluginFormsHandler) Options(c *gin.Context) {
 	var instance map[string]any
 	switch req.Scope {
 	case pluginapi.OptionsScopeSystem:
+		// The platform's configuration: no workspace is calling, whichever
+		// one the administrator is in.
+		ctx = context.WithValue(ctx, types.TenantIDContextKey, uint64(0))
 		stored, _, err := install.OpenSystemConfig(ctx, h.plugins, m)
 		if err != nil {
 			h.fail(c, err)
@@ -106,6 +110,8 @@ func (h *PluginFormsHandler) Options(c *gin.Context) {
 		}
 		override.System = mergeForm(m.Config.SystemSchema, stored, values)
 	case pluginapi.OptionsScopeTenant:
+		// Filled in before the plugin is switched on.
+		ctx = activate.Configuring(ctx)
 		stored, _, err := h.tenancy.OpenConfig(ctx, tenantID, m.ID)
 		if err != nil {
 			h.fail(c, err)

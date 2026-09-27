@@ -20,7 +20,8 @@ type PluginTenantSettingRepository interface {
 
 // PluginGate tells integrations which contributions a tenant has enabled.
 // A disabled plugin's contributions are left out of type listings and cannot
-// back new instances; existing instances keep working.
+// back new instances; calls existing instances make to the plugin are
+// refused where they are made (the plugin invoker), so they pause.
 type PluginGate interface {
 	// EnabledFilter returns a predicate for one tenant, reading the
 	// tenant's switches once so a listing checks many items cheaply. The
@@ -44,6 +45,15 @@ type PluginRepository interface {
 	// DeleteTenantData removes a deleted tenant's plugin switches and
 	// configuration, key-value data and OAuth connections.
 	DeleteTenantData(ctx context.Context, tenantID uint64) error
+	// SaveTombstone remembers who an uninstalled plugin was.
+	SaveTombstone(ctx context.Context, t *types.PluginTombstone) error
+	// GetTombstone returns (nil, nil) when none is kept.
+	GetTombstone(ctx context.Context, pluginID string) (*types.PluginTombstone, error)
+	DeleteTombstone(ctx context.Context, pluginID string) error
+	// PurgePluginData removes what workspaces and the platform kept of a
+	// plugin: switches and configuration, key-value data, OAuth connections,
+	// and the tool policies of its MCP servers (qualified IDs).
+	PurgePluginData(ctx context.Context, pluginID string, mcpServers []string) error
 	ListVersions(ctx context.Context, pluginID string) ([]types.PluginVersion, error)
 	// GetVersion returns (nil, nil) when the version is not stored.
 	GetVersion(ctx context.Context, pluginID, version string) (*types.PluginVersion, error)

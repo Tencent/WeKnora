@@ -91,6 +91,31 @@ type PluginKV struct {
 // TableName pins the table so GORM's pluralizer cannot drift.
 func (PluginKV) TableName() string { return "plugin_kv" }
 
+// PluginTombstone is who an uninstalled plugin was: its owner (nil for the
+// platform) and the trusted key that signed its active version ("" when
+// none did). Its data stays for a reinstall from the same owner and signer.
+type PluginTombstone struct {
+	PluginID      string `gorm:"type:varchar(128);primaryKey"`
+	OwnerTenantID *uint64
+	SignerKeyID   string `gorm:"type:varchar(128);not null;default:''"`
+	CreatedAt     time.Time
+}
+
+// TableName pins the table so GORM's pluralizer cannot drift.
+func (PluginTombstone) TableName() string { return "plugin_tombstones" }
+
+// SameAs reports whether a plugin from owner, signed by signerKeyID, is the
+// one the tombstone remembers.
+func (t *PluginTombstone) SameAs(owner *uint64, signerKeyID string) bool {
+	if (t.OwnerTenantID == nil) != (owner == nil) {
+		return false
+	}
+	if owner != nil && *t.OwnerTenantID != *owner {
+		return false
+	}
+	return t.SignerKeyID == signerKeyID
+}
+
 // PluginOAuthConnection is an authorization a plugin form field made with
 // its OAuth button (x-oauth). The field holds "oauth:<ID>"; the tokens stay
 // here, sealed (enc:v1), and never reach the browser.

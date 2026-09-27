@@ -12,6 +12,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/schema"
 
+	"github.com/Tencent/WeKnora/internal/plugin/manifest"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -229,4 +230,54 @@ func TestPluginUpdateColumnsCoverTheTable(t *testing.T) {
 		}
 		require.Contains(t, pluginUpdateColumns, name, "SavePlugin does not update %s", name)
 	}
+}
+
+// Purging a plugin removes what workspaces and the platform kept of it, and
+// the tool policies of its MCP servers, and nothing of other plugins.
+func TestPurgePluginData(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+uuid.NewString()+"?mode=memory&cache=shared"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&types.PluginTenantSetting{}, &types.PluginKV{},
+		&types.PluginOAuthConnection{}, &types.MCPToolApproval{}, &types.PluginTombstone{}))
+	repo := NewPluginRepository(db)
+	ctx := context.Background()
+	create := func(row any) { require.NoError(t, db.Create(row).Error) }
+	for _, p := range []string{"acme.x", "acme.y"} {
+		for _, tenant := range []uint64{0, 7} {
+			if tenant != 0 {
+				create(&types.PluginTenantSetting{TenantID: tenant, PluginID: p, Enabled: true})
+				create(&types.PluginKV{PluginID: p, TenantID: tenant, Key: "k", Value: types.JSON(`1`)})
+			}
+			create(&types.PluginOAuthConnection{ID: uuid.NewString(), PluginID: p, TenantID: tenant})
+			create(&types.MCPToolApproval{
+				ID: uuid.NewString(), TenantID: tenant, ToolName: "t",
+				ServiceID: manifest.MCPServiceID(tenant, p+"/srv"),
+			})
+		}
+	}
+	require.NoError(t, repo.PurgePluginData(ctx, "acme.x", []string{"acme.x/srv"}))
+	for model, want := range map[any]int64{
+		&types.PluginTenantSetting{}: 1, &types.PluginKV{}: 1,
+		&types.PluginOAuthConnection{}: 2, &types.MCPToolApproval{}: 2,
+	} {
+		var n int64
+		require.NoError(t, db.Model(model).Count(&n).Error)
+		require.Equal(t, want, n, "%T", model)
+	}
+	var left int64
+	require.NoError(t,
+		db.Model(&types.PluginOAuthConnection{}).Where("plugin_id = ?", "acme.x").Count(&left).Error)
+	require.Zero(t, left)
+
+	owner := uint64(7)
+	tombstone := &types.PluginTombstone{PluginID: "acme.x", OwnerTenantID: &owner, SignerKeyID: "k"}
+	require.NoError(t, repo.SaveTombstone(ctx, tombstone))
+	tomb, err := repo.GetTombstone(ctx, "acme.x")
+	require.NoError(t, err)
+	require.True(t, tomb.SameAs(&owner, "k"))
+	require.False(t, tomb.SameAs(nil, "k"))
+	require.NoError(t, repo.DeleteTombstone(ctx, "acme.x"))
+	tomb, err = repo.GetTombstone(ctx, "acme.x")
+	require.NoError(t, err)
+	require.Nil(t, tomb)
 }

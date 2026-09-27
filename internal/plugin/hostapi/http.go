@@ -1,6 +1,7 @@
 package hostapi
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -25,10 +26,19 @@ type Handler struct {
 	issuer      *Issuer
 	kv          *KV
 	dataSources *DataSources
+	gate        Gate
 }
+
+// Gate reports whether a workspace has a plugin on and may see it.
+type Gate func(ctx context.Context, tenantID uint64, pluginID string) (bool, error)
 
 // NewHandler creates the Host API handler.
 func NewHandler(issuer *Issuer, kv *KV) *Handler { return &Handler{issuer: issuer, kv: kv} }
+
+// SetGate makes every request check that the token's workspace still has
+// the plugin on: a token issued before the plugin was switched off, left
+// out of the audience or uninstalled is refused.
+func (h *Handler) SetGate(g Gate) { h.gate = g }
 
 // SetDataSources enables the datasources scope.
 func (h *Handler) SetDataSources(d *DataSources) { h.dataSources = d }
@@ -61,6 +71,17 @@ func (h *Handler) authenticate(scope string) gin.HandlerFunc {
 				pluginapi.Errorf(pluginapi.CodeUnauthorized, "the plugin was not granted the %q scope", scope),
 			)
 			return
+		}
+		if h.gate != nil {
+			on, err := h.gate(c.Request.Context(), claims.TenantID, claims.PluginID)
+			if err != nil {
+				writeErr(c, pluginapi.Errorf(pluginapi.CodeUnavailable, "check the plugin's switch: %v", err))
+				return
+			}
+			if !on {
+				writeErr(c, pluginapi.Errorf(pluginapi.CodeUnauthorized, "the plugin is off in this workspace"))
+				return
+			}
 		}
 		c.Set(claimsKey, claims)
 		c.Next()
