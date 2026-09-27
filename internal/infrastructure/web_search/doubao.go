@@ -42,6 +42,8 @@ type DoubaoProvider struct {
 	needContent bool
 }
 
+// NewDoubaoProvider validates the parameters and returns a Doubao search
+// provider, or the parameter error.
 func NewDoubaoProvider(params types.WebSearchProviderParameters) (interfaces.WebSearchProvider, error) {
 	if err := ValidateDoubaoParameters(params); err != nil {
 		return nil, err
@@ -59,6 +61,8 @@ func NewDoubaoProvider(params types.WebSearchProviderParameters) (interfaces.Web
 	}, nil
 }
 
+// ValidateDoubaoParameters checks the API key and the optional time_range
+// extra config (YYYY-MM-DD..YYYY-MM-DD).
 func ValidateDoubaoParameters(params types.WebSearchProviderParameters) error {
 	if strings.TrimSpace(params.APIKey) == "" {
 		return fmt.Errorf("api key is required for doubao provider")
@@ -89,7 +93,12 @@ func (p *DoubaoProvider) Name() string { return "doubao" }
 
 // Search runs one Doubao web-search request and maps the results into the
 // shared WebSearchResult shape.
-func (p *DoubaoProvider) Search(ctx context.Context, query string, maxResults int, includeDate bool) ([]*types.WebSearchResult, error) {
+func (p *DoubaoProvider) Search(
+	ctx context.Context,
+	query string,
+	maxResults int,
+	includeDate bool,
+) ([]*types.WebSearchResult, error) {
 	query = strings.TrimSpace(query)
 	if query == "" {
 		return nil, fmt.Errorf("query is empty")
