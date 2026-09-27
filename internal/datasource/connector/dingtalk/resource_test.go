@@ -54,12 +54,43 @@ func TestResourceReferenceRejectsMalformedOrCyclicIDs(t *testing.T) {
 
 	for _, raw := range []string{
 		resourceIDPrefix + "workspace=space",
-		resourceIDPrefix + "node=doc",
 		resourceIDPrefix + "workspace=space&workspace=other&node=doc",
 		resourceIDPrefix + "workspace=space&node=doc&unexpected=value",
 	} {
 		if _, err := decodeResourceReference(raw); err == nil {
 			t.Fatalf("decodeResourceReference(%q) error = nil", raw)
+		}
+	}
+}
+
+// The bare node form ("dingtalk:v1?node=<id>") is the manual entry path: it
+// exists because some content is readable by id but is never enumerated, so the
+// picker cannot offer it — a personal-space document (GET /v2.0/wiki/workspaces
+// lists team workspaces only) and a multi-dimensional table (nothing lists
+// Bases). It used to be rejected along with the other malformed ids because a
+// node without a workspace could not be resolved; it can now, because the node
+// itself reports its workspace (see resolveSyncScopes).
+func TestResourceReferenceAcceptsABareNodeID(t *testing.T) {
+	for _, nodeID := range []string{"personal-doc", "node_7f3a9c2e5b1d4a8c6e0f", "doc_42"} {
+		encoded, err := encodeResourceReference(resourceReference{NodeID: nodeID})
+		if err != nil {
+			t.Fatalf("encodeResourceReference(node=%q) error = %v", nodeID, err)
+		}
+		if want := resourceIDPrefix + "node=" + nodeID; encoded != want {
+			t.Fatalf("encoded bare node = %q, want %q", encoded, want)
+		}
+		decoded, err := decodeResourceReference(encoded)
+		if err != nil {
+			t.Fatalf("decodeResourceReference(%q) error = %v", encoded, err)
+		}
+		if decoded.NodeID != nodeID || decoded.WorkspaceID != "" || len(decoded.Ancestors) != 0 {
+			t.Fatalf("decoded bare node = %#v", decoded)
+		}
+		// The decoded reference must survive a second encode unchanged: the id
+		// is what the cursor and the child references are keyed by.
+		again, err := encodeResourceReference(decoded)
+		if err != nil || again != encoded {
+			t.Fatalf("re-encoded bare node = %q, %v; want %q", again, err, encoded)
 		}
 	}
 }
