@@ -74,6 +74,7 @@ make dev-restart  # 重启
 | `opensearch-dashboards` | `opensearchproject/opensearch-dashboards:3.3.0` | `5601` | profile `opensearch-ui`（按需单独启动） |
 | `milvus` | `milvusdb/milvus:v2.6.11`（standalone，内嵌 etcd） | `19530` / `9091` | profile `milvus` / `full` |
 | `neo4j` | `neo4j:latest`（APOC 插件） | `7474` / `7687` | `--neo4j` / `--full` |
+| `memgraph` | `memgraph/memgraph:3.7.1` | `7687` / `7444` | profile `memgraph`；本地 app 使用 `GRAPH_DATABASE_ENGINE=memgraph`、`NEO4J_URI=bolt://localhost:7687` |
 | `dex` | `dexidp/dex:latest`（OIDC 测试身份源，配置 `misc/dex-config.yaml`） | `5556` | `--dex` / `--full` |
 | `langfuse-web` / `langfuse-worker` / `langfuse-clickhouse` / `langfuse-minio` / `langfuse-db-init` | Langfuse v3 自建栈，复用 dev 的 postgres（独立 `langfuse` 库）与 redis（DB 1） | web `3000`、minio `9100/9101` | `--langfuse`（`dev.sh` 默认开启，`--no-langfuse` 关闭） |
 | `odl-hybrid` | 本地构建 `docker/Dockerfile.odl-hybrid`（Docling PDF 后端） | `5002` | `--odl-hybrid`（镜像较大，按需） |
