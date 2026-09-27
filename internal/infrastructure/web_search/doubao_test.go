@@ -29,7 +29,7 @@ func TestDoubaoProviderSearch(t *testing.T) {
 		}
 		if request.Query != "WeKnora" || request.SearchType != "web" || request.Count != 2 ||
 			request.TimeRange != "2026-09-12..2026-09-14" || !request.Filter.NeedContent ||
-			!request.Filter.NeedUrl || request.ContentFormats != "markdown" || request.QueryControl.QueryRewrite {
+			!request.Filter.NeedURL || request.ContentFormats != "markdown" || request.QueryControl.QueryRewrite {
 			t.Fatalf("unexpected request: %+v", request)
 		}
 		w.Header().Set("Content-Type", "application/json")
@@ -89,7 +89,7 @@ func TestDoubaoProviderSearchDates(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				var response doubaoSearchResponse
 				response.Result.WebResults = []doubaoWebResult{{
-					Title: "Result", Url: "https://example.com", PublishTime: tt.publishTime,
+					Title: "Result", URL: "https://example.com", PublishTime: tt.publishTime,
 				}}
 				w.Header().Set("Content-Type", "application/json")
 				if err := json.NewEncoder(w).Encode(response); err != nil {

@@ -61,7 +61,7 @@ func NewDoubaoProvider(params types.WebSearchProviderParameters) (interfaces.Web
 
 func ValidateDoubaoParameters(params types.WebSearchProviderParameters) error {
 	if strings.TrimSpace(params.APIKey) == "" {
-		return fmt.Errorf("API key is required for Doubao provider")
+		return fmt.Errorf("api key is required for doubao provider")
 	}
 	if timeRange := strings.TrimSpace(params.ExtraConfig["time_range"]); timeRange != "" {
 		match := doubaoTimeRangePattern.FindStringSubmatch(timeRange)
@@ -87,6 +87,8 @@ func doubaoNeedContent(extraConfig map[string]string) bool {
 
 func (p *DoubaoProvider) Name() string { return "doubao" }
 
+// Search runs one Doubao web-search request and maps the results into the
+// shared WebSearchResult shape.
 func (p *DoubaoProvider) Search(ctx context.Context, query string, maxResults int, includeDate bool) ([]*types.WebSearchResult, error) {
 	query = strings.TrimSpace(query)
 	if query == "" {
@@ -104,7 +106,7 @@ func (p *DoubaoProvider) Search(ctx context.Context, query string, maxResults in
 		SearchType:     "web",
 		Count:          maxResults,
 		TimeRange:      p.timeRange,
-		Filter:         doubaoSearchFilter{NeedContent: p.needContent, NeedUrl: true},
+		Filter:         doubaoSearchFilter{NeedContent: p.needContent, NeedURL: true},
 		ContentFormats: "markdown",
 		QueryControl:   doubaoQueryControl{QueryRewrite: false},
 	})
@@ -140,7 +142,7 @@ func (p *DoubaoProvider) Search(ctx context.Context, query string, maxResults in
 	}
 	results := make([]*types.WebSearchResult, 0, len(response.Result.WebResults))
 	for _, item := range response.Result.WebResults {
-		if strings.TrimSpace(item.Title) == "" && strings.TrimSpace(item.Url) == "" {
+		if strings.TrimSpace(item.Title) == "" && strings.TrimSpace(item.URL) == "" {
 			continue
 		}
 		// The API returns both a Snippet and a longer Summary; prefer the
@@ -151,7 +153,7 @@ func (p *DoubaoProvider) Search(ctx context.Context, query string, maxResults in
 		}
 		result := &types.WebSearchResult{
 			Title:   item.Title,
-			URL:     item.Url,
+			URL:     item.URL,
 			Snippet: snippet,
 			Content: strings.TrimSpace(item.Content),
 			Source:  "doubao",
@@ -176,7 +178,7 @@ func readDoubaoResponseBody(reader io.Reader) ([]byte, error) {
 		return nil, fmt.Errorf("failed to read Doubao response: %w", err)
 	}
 	if len(body) > maxDoubaoResponseBytes {
-		return nil, fmt.Errorf("Doubao response exceeds %d bytes", maxDoubaoResponseBytes)
+		return nil, fmt.Errorf("doubao response exceeds %d bytes", maxDoubaoResponseBytes)
 	}
 	return body, nil
 }
@@ -192,7 +194,7 @@ func doubaoHTTPError(statusCode int, body []byte) error {
 			detail = strings.TrimSpace(apiError.Msg)
 		}
 		if detail != "" {
-			return fmt.Errorf("Doubao API returned status %d: %s", statusCode, detail)
+			return fmt.Errorf("doubao API returned status %d: %s", statusCode, detail)
 		}
 	}
 	detail := strings.TrimSpace(string(body))
@@ -200,9 +202,9 @@ func doubaoHTTPError(statusCode int, body []byte) error {
 		detail = detail[:4096]
 	}
 	if detail == "" {
-		return fmt.Errorf("Doubao API returned status %d", statusCode)
+		return fmt.Errorf("doubao API returned status %d", statusCode)
 	}
-	return fmt.Errorf("Doubao API returned status %d: %s", statusCode, detail)
+	return fmt.Errorf("doubao API returned status %d: %s", statusCode, detail)
 }
 
 // parseDoubaoPublishTime parses the API's ISO-8601 PublishTime, which carries
@@ -229,7 +231,7 @@ type doubaoSearchRequest struct {
 
 type doubaoSearchFilter struct {
 	NeedContent bool `json:"NeedContent"`
-	NeedUrl     bool `json:"NeedUrl"`
+	NeedURL     bool `json:"NeedUrl"`
 }
 
 type doubaoQueryControl struct {
@@ -246,7 +248,7 @@ type doubaoSearchResponse struct {
 type doubaoWebResult struct {
 	Title       string `json:"Title"`
 	SiteName    string `json:"SiteName"`
-	Url         string `json:"Url"`
+	URL         string `json:"Url"`
 	Snippet     string `json:"Snippet"`
 	Summary     string `json:"Summary"`
 	Content     string `json:"Content"`
