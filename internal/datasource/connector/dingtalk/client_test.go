@@ -306,3 +306,65 @@ func TestDocumentBlocksReadsMultiplePagesAndAcceptsEmptyDocument(t *testing.T) {
 		t.Fatalf("empty document: %#v, %v", blocks, err)
 	}
 }
+
+// Spreadsheets are read through the workbooks API: the wiki node id is the
+// workbook id, sheets are listed and measured separately, and cells are fetched
+// per A1-style ranges window. Cells have arrived as plain strings and as
+// {"text": ...} objects, so both shapes must render.
+func TestClientReadsWorkbookSheetsAndRanges(t *testing.T) {
+	var requests []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests = append(requests, r.URL.EscapedPath())
+		if r.URL.Query().Get("operatorId") != "union/user" {
+			t.Errorf("sheet request query = %#v", r.URL.Query())
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/v1.0/doc/workbooks/book/key/sheets":
+			_, _ = w.Write([]byte(`{"value":[{"name":"概要","id":"sheet-1"},{"name":"细节","id":"st-2"}]}`))
+		case "/v1.0/doc/workbooks/book/key/sheets/sheet-1":
+			_, _ = w.Write([]byte(`{
+				"name":"概要","id":"sheet-1","rowCount":200,"columnCount":40,
+				"lastNonEmptyRow":13,"lastNonEmptyColumn":2,"visibility":"visible"
+			}`))
+		case "/v1.0/doc/workbooks/book/key/sheets/sheet-1/ranges/A1:B2":
+			_, _ = w.Write([]byte(`{"values":[
+				[{"text":"项目"},{"text":"内容"}],
+				["评估对象",null]
+			]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	c := testClient(server)
+	c.token = "cached"
+	c.tokenExpiry = time.Now().Add(time.Hour)
+
+	sheets, err := c.listSheets(context.Background(), "book/key")
+	if err != nil || len(sheets) != 2 || sheets[0].ID != "sheet-1" || sheets[1].Name != "细节" {
+		t.Fatalf("listSheets() = %#v, %v", sheets, err)
+	}
+	info, err := c.sheetInfo(context.Background(), "book/key", "sheet-1")
+	if err != nil || info.LastNonEmptyRow != 13 || info.LastNonEmptyColumn != 2 || info.Name != "概要" {
+		t.Fatalf("sheetInfo() = %#v, %v", info, err)
+	}
+	rows, err := c.sheetRange(context.Background(), "book/key", "sheet-1", "A1:B2")
+	if err != nil {
+		t.Fatalf("sheetRange() error = %v", err)
+	}
+	if len(rows) != 2 || len(rows[0]) != 2 ||
+		rows[0][0] != "项目" || rows[0][1] != "内容" ||
+		rows[1][0] != "评估对象" || rows[1][1] != "" {
+		t.Fatalf("sheetRange() = %#v", rows)
+	}
+	wantRequests := []string{
+		"/v1.0/doc/workbooks/book%2Fkey/sheets",
+		"/v1.0/doc/workbooks/book%2Fkey/sheets/sheet-1",
+		"/v1.0/doc/workbooks/book%2Fkey/sheets/sheet-1/ranges/A1:B2",
+	}
+	if strings.Join(requests, " ") != strings.Join(wantRequests, " ") {
+		t.Fatalf("sheet endpoints called with %#v, want %#v", requests, wantRequests)
+	}
+}

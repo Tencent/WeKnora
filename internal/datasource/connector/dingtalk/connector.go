@@ -270,7 +270,15 @@ func firstValidateDocument(
 // same change. Types that are not ingestible yet are therefore not documents
 // yet: uploaded files and native spreadsheets join all three together when
 // their ingest paths land, instead of being probed here in advance.
+// verifyDocument proves one visible document is readable, through the read API
+// that backs its own ingest path: the blocks API for adoc, the workbooks API for
+// a native spreadsheet. Probing a workbook through the blocks API would report a
+// readable selection as broken, so each type is probed the way it is read.
 func verifyDocument(ctx context.Context, api dingTalkAPI, document node) error {
+	if document.isSheet() {
+		_, err := api.listSheets(ctx, document.ID)
+		return err
+	}
 	_, err := api.documentBlocks(ctx, document.ID)
 	return err
 }
@@ -681,7 +689,20 @@ func (c *Connector) sync(
 				continue
 			}
 
-			blocks, err := api.documentBlocks(ctx, document.ID)
+			// A native spreadsheet (axls) is one document to its users and one
+			// knowledge entry here, so its worksheets are rendered into a single
+			// markdown body through the workbooks API; every other supported
+			// node is still an adoc document read block by block.
+			var rendered renderResult
+			if document.isSheet() {
+				rendered, err = renderWorkbook(ctx, api, document.ID, document.title())
+			} else {
+				var blocks []json.RawMessage
+				blocks, err = api.documentBlocks(ctx, document.ID)
+				if err == nil {
+					rendered = renderDocument(document.title(), blocks)
+				}
+			}
 			if err != nil {
 				if isContextError(err) {
 					return nil, nil, err
@@ -700,7 +721,6 @@ func (c *Connector) sync(
 				}
 				continue
 			}
-			rendered := renderDocument(document.title(), blocks)
 			// The renderer stays context-free; the warning is emitted here,
 			// where both the request context and the node identity are known.
 			warnUnknownBlockTypes(ctx, document, rendered)
