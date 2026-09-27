@@ -354,14 +354,22 @@ func copiedSourceID(sourceID, sourceChunkID, targetChunkID string) string {
 
 func (r *sqliteRepository) BatchUpdateChunkEnabledStatus(ctx context.Context, chunkStatusMap map[string]bool) error {
 	for chunkID, enabled := range chunkStatusMap {
-		r.db.WithContext(ctx).Model(&sqliteEmbedding{}).Where("chunk_id = ?", chunkID).Update("is_enabled", enabled)
+		if err := r.db.WithContext(ctx).Model(&sqliteEmbedding{}).
+			Where("chunk_id = ?", chunkID).
+			Update("is_enabled", enabled).Error; err != nil {
+			return fmt.Errorf("[SQLite] failed to update is_enabled for chunk %s: %w", chunkID, err)
+		}
 	}
 	return nil
 }
 
 func (r *sqliteRepository) BatchUpdateChunkTagID(ctx context.Context, chunkTagMap map[string]string) error {
 	for chunkID, tagID := range chunkTagMap {
-		r.db.WithContext(ctx).Model(&sqliteEmbedding{}).Where("chunk_id = ?", chunkID).Update("tag_id", tagID)
+		if err := r.db.WithContext(ctx).Model(&sqliteEmbedding{}).
+			Where("chunk_id = ?", chunkID).
+			Update("tag_id", tagID).Error; err != nil {
+			return fmt.Errorf("[SQLite] failed to update tag_id for chunk %s: %w", chunkID, err)
+		}
 	}
 	return nil
 }
