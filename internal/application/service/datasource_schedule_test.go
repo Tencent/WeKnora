@@ -38,6 +38,26 @@ func TestDataSourceUpdateRejectsInvalidSchedule(t *testing.T) {
 	require.Equal(t, 1, f.scheduler.EntryCount())
 }
 
+// A data source keeps its type: another type would get its credentials.
+func TestDataSourceUpdateKeepsItsType(t *testing.T) {
+	f := newSQLiteDataSourceDeleteFixture(t)
+	svc := &DataSourceService{dsRepo: f.dsRepo, scheduler: f.scheduler}
+	moved := *f.ds
+	moved.Type = "acme.evil/grab"
+	_, err := svc.UpdateDataSource(context.Background(), &moved)
+	require.ErrorContains(t, err, "type is not allowed")
+	saved, readErr := svc.GetDataSource(context.Background(), f.ds.ID)
+	require.NoError(t, readErr)
+	require.Equal(t, f.ds.Type, saved.Type)
+
+	untyped := *f.ds
+	untyped.Type = ""
+	untyped.Name = "renamed"
+	updated, err := svc.UpdateDataSource(context.Background(), &untyped)
+	require.NoError(t, err)
+	require.Equal(t, f.ds.Type, updated.Type)
+}
+
 func TestDataSourceCreateRejectsInvalidSchedule(t *testing.T) {
 	f := newSQLiteDataSourceDeleteFixture(t)
 	registry := datasource.NewConnectorRegistry()

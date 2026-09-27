@@ -137,7 +137,8 @@ func (a *MCPServers) Services(ctx context.Context, tenantID uint64) []*types.MCP
 	if len(servers) == 0 {
 		return nil
 	}
-	enabled := a.tenancy.EnabledFilter(ctx, tenantID)
+	// Agents call the servers listed here directly: this is the call gate.
+	enabled := a.tenancy.CallFilter(ctx, tenantID)
 	var out []*types.MCPService
 	for _, s := range servers {
 		if !enabled(manifest.PointMCPServers, s.qualifiedID) {

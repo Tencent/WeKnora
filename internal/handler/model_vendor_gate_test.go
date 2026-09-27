@@ -28,6 +28,10 @@ func (offVendorGate) EnabledFilter(context.Context, uint64) func(manifest.Point,
 	}
 }
 
+func (g offVendorGate) CallFilter(ctx context.Context, tenantID uint64) func(manifest.Point, string) bool {
+	return g.EnabledFilter(ctx, tenantID)
+}
+
 func registerOffVendor(t *testing.T) {
 	t.Helper()
 	if err := modelruntime.RegisterPlugin("acme.ai/acme",

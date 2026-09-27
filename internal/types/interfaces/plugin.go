@@ -30,6 +30,9 @@ type PluginGate interface {
 	// ID may be qualified or a builtin alias; contributions the registry
 	// does not know count as enabled, leaving existence to the domain.
 	EnabledFilter(ctx context.Context, tenantID uint64) func(point manifest.Point, id string) bool
+	// CallFilter is EnabledFilter for using a contribution now rather than
+	// listing it: it fails closed when the switches cannot be read.
+	CallFilter(ctx context.Context, tenantID uint64) func(point manifest.Point, id string) bool
 }
 
 // PluginRepository stores installed (non-builtin) plugins and their versions.

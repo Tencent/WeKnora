@@ -145,7 +145,9 @@ func TestSetEnabledRejectsRequiredAndUnknown(t *testing.T) {
 	}
 }
 
-func TestEnabledFilterFailsOpen(t *testing.T) {
+// Unreadable switches keep integrations listed, but using one is refused:
+// a plugin the workspace turned off must not get its data on a hiccup.
+func TestEnabledFilterFailsOpenAndCallFilterClosed(t *testing.T) {
 	s, repo := newService(t)
 	ctx := context.Background()
 	if err := s.SetEnabled(ctx, 1, "weknora.feishu", false, "u1"); err != nil {
@@ -154,6 +156,12 @@ func TestEnabledFilterFailsOpen(t *testing.T) {
 	repo.err = errors.New("db down")
 	if !s.ContributionEnabled(ctx, 1, manifest.PointConnectors, "feishu") {
 		t.Fatal("unreadable switches must not hide integrations")
+	}
+	if s.ContributionUsable(ctx, 1, manifest.PointConnectors, "feishu") {
+		t.Fatal("unreadable switches must not let a call through")
+	}
+	if !s.ContributionUsable(ctx, 1, manifest.PointTools, "thinking") {
+		t.Fatal("a required builtin needs no switch")
 	}
 }
 

@@ -38,7 +38,7 @@ func (s *modelService) CheckModelVendor(ctx context.Context, model *types.Model)
 		return nil // no workspace to ask
 	}
 	vendor := modelruntime.VendorID(model.Parameters.Provider, model.Parameters.BaseURL)
-	if s.gate.EnabledFilter(ctx, tenantID)(manifest.PointModelVendors, vendor) {
+	if s.gate.CallFilter(ctx, tenantID)(manifest.PointModelVendors, vendor) {
 		return nil
 	}
 	return fmt.Errorf("%w: model %s uses vendor %s, whose plugin this workspace has turned off; "+

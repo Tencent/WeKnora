@@ -137,27 +137,44 @@ func (s *Service) EnableOwn(ctx context.Context, tenantID uint64, pluginID, upda
 // builtins are on, installed plugins wait for a tenant admin to opt in.
 func enabledByDefault(m *manifest.Manifest) bool { return m.Builtin }
 
-// EnabledFilter implements interfaces.PluginGate. If the switches cannot be
-// read it fails open: offering a disabled integration is recoverable,
-// hiding every integration on a database hiccup is not. The switches are
-// read on the first question about an installed plugin's contribution, so
-// checking a built-in costs nothing.
+// EnabledFilter implements interfaces.PluginGate, for listings and forms.
+// If the switches cannot be read it fails open: offering a disabled
+// integration is recoverable, hiding every integration on a database hiccup
+// is not. The switches are read on the first question about an installed
+// plugin's contribution, so checking a built-in costs nothing.
 func (s *Service) EnabledFilter(ctx context.Context, tenantID uint64) func(manifest.Point, string) bool {
+	return s.filter(ctx, tenantID, true)
+}
+
+// CallFilter implements interfaces.PluginGate, for using a contribution
+// now: calling a model vendor or MCP server, handing out a skill. If the
+// switches cannot be read it fails closed, since a plugin the workspace
+// turned off must not get its data on a database hiccup.
+func (s *Service) CallFilter(ctx context.Context, tenantID uint64) func(manifest.Point, string) bool {
+	return s.filter(ctx, tenantID, false)
+}
+
+func (s *Service) filter(ctx context.Context, tenantID uint64, openOnError bool) func(manifest.Point, string) bool {
 	var (
-		once     sync.Once
-		set      map[string]bool
-		failOpen bool
+		once    sync.Once
+		set     map[string]bool
+		readErr error
 	)
 	switches := func() {
 		set = map[string]bool{}
 		rows, err := s.repo.List(ctx, tenantID)
 		if err != nil {
-			logger.Warnf(ctx, "[plugin] read tenant %d plugin switches: %v; treating all as enabled", tenantID, err)
+			treat := "turned off"
+			if openOnError {
+				treat = "enabled"
+			}
+			logger.Warnf(ctx, "[plugin] read tenant %d plugin switches: %v; treating installed plugins as %s",
+				tenantID, err, treat)
 		}
 		for _, r := range rows {
 			set[r.PluginID] = r.Enabled
 		}
-		failOpen = err != nil
+		readErr = err
 	}
 	return func(point manifest.Point, id string) bool {
 		e, ok := s.registry.Resolve(point, id)
@@ -172,8 +189,8 @@ func (s *Service) EnabledFilter(ctx context.Context, tenantID uint64) func(manif
 			return true
 		}
 		once.Do(switches)
-		if failOpen {
-			return true
+		if readErr != nil {
+			return openOnError
 		}
 		if enabled, ok := set[e.PluginID]; ok {
 			return enabled
@@ -182,7 +199,14 @@ func (s *Service) EnabledFilter(ctx context.Context, tenantID uint64) func(manif
 	}
 }
 
-// ContributionEnabled checks one contribution; see EnabledFilter.
+// ContributionEnabled checks one contribution for a listing; see
+// EnabledFilter.
 func (s *Service) ContributionEnabled(ctx context.Context, tenantID uint64, point manifest.Point, id string) bool {
 	return s.EnabledFilter(ctx, tenantID)(point, id)
+}
+
+// ContributionUsable checks one contribution about to be used; see
+// CallFilter.
+func (s *Service) ContributionUsable(ctx context.Context, tenantID uint64, point manifest.Point, id string) bool {
+	return s.CallFilter(ctx, tenantID)(point, id)
 }

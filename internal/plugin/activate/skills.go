@@ -79,7 +79,7 @@ func (a *Skills) Archive(ctx context.Context, tenantID uint64, source string) ([
 	l, loaded := a.loaded[pluginID]
 	t := a.tenancy
 	a.mu.RUnlock()
-	if !loaded || t == nil || !t.ContributionEnabled(ctx, tenantID, manifest.PointSkills, qualified) {
+	if !loaded || t == nil || !t.ContributionUsable(ctx, tenantID, manifest.PointSkills, qualified) {
 		return nil, fmt.Errorf("%w: %s", ErrUnknownSkill, qualified)
 	}
 	for _, c := range l.Manifest.Contributes[manifest.PointSkills] {

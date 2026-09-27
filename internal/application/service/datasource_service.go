@@ -173,6 +173,16 @@ func (s *DataSourceService) UpdateDataSource(ctx context.Context, ds *types.Data
 	if ds.TenantID != existing.TenantID {
 		return nil, datasource.ErrDataSourceInvalid
 	}
+	// The stored credentials belong to the connector they were entered for:
+	// switching the type would hand them to another connector (another
+	// plugin), past the check that its plugin is on. A new type is a new
+	// data source.
+	if ds.Type == "" {
+		ds.Type = existing.Type
+	}
+	if ds.Type != existing.Type {
+		return nil, fmt.Errorf("changing a data source's type is not allowed; create a new data source")
+	}
 	if err := datasource.ValidateSyncSchedule(ds.SyncSchedule); err != nil {
 		return nil, err
 	}
