@@ -1617,7 +1617,7 @@ const handleConfirm = () => {
   }
   if (!validateBeforeConfirm()) return
   if (uiState.value.multimodalConfig.enabled && imagePipelineInvalid.value) {
-    MessagePlugin.warning(t('imagePipeline.noActionSelected'))
+    MessagePlugin.warning(t('imagePipeline.errors.noActionEnabled'))
     return
   }
 

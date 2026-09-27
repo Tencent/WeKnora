@@ -1448,10 +1448,11 @@ const validateForm = (): boolean => {
     return false
   }
 
-  // 选中的解析方案一个动作都没开（如传统方案两个开关都关）：跑起来什么都
-  // 不会做，属于配置错误而不是合法选择。
+  // 选中的解析方案违反了它自己的规则（如传统方案两个动作开关都关）：跑起来
+  // 什么都不会做，属于配置错误而不是合法选择。提示文案与面板底部那几行同源，
+  // 因此规则加得多、提示也就跟着变，这里不必跟着改。
   if (formData.value.multimodalConfig.enabled && imagePipelineInvalid.value) {
-    MessagePlugin.warning(t('imagePipeline.noActionSelected'))
+    MessagePlugin.warning(t('imagePipeline.errors.noActionEnabled'))
     currentSection.value = 'multimodal'
     return false
   }

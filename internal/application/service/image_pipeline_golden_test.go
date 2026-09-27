@@ -22,6 +22,14 @@ func (s *stubVLM) Predict(_ context.Context, _ [][]byte, prompt string) (string,
 	return "stubbed answer\n", nil
 }
 
+// PredictWithOptions forwards to Predict: the stub records prompts, so the
+// switch the pipeline asked for is not part of what it pins.
+func (s *stubVLM) PredictWithOptions(
+	_ context.Context, _ [][]byte, prompt string, _ *vlm.PredictOptions,
+) (string, error) {
+	return s.Predict(context.Background(), nil, prompt)
+}
+
 func (s *stubVLM) GetModelName() string { return "stub" }
 func (s *stubVLM) GetModelID() string   { return "stub" }
 
@@ -227,16 +235,17 @@ func TestParamFallsBackToDeclaredDefault(t *testing.T) {
 	}
 }
 
-// TestObservationPipelineDeclaresNoControls pins the panel contract of
-// smartocr: the model decides from the observed attributes, so the pipeline
-// declares no fields and the panel renders nothing for it. Its two tunables
-// remain readable as parameters for an API caller, defaulting to true — the
-// behaviour an untouched knowledge base has always had.
-func TestObservationPipelineDeclaresNoControls(t *testing.T) {
+// TestObservationPipelineDeclaresNoActionControls pins the panel contract of
+// smartocr: the observed attributes decide which work happens, so the panel
+// gets no switch that turns an action on or off. The two thinking switches are
+// the exception — they change how a call runs, not whether one does.
+func TestObservationPipelineDeclaresNoActionControls(t *testing.T) {
 	pipeline := imagePipelineRegistry[types.ImagePipelineSmartOCR]
-	if fields := pipeline.Fields(); len(fields) != 0 {
-		t.Errorf("smartocr declares %d fields, want none — the panel must not offer manual switches",
-			len(fields))
+	for _, field := range pipeline.Fields() {
+		if field.DecidesAction {
+			t.Errorf("smartocr declares field %q as an action control; the observed attributes decide that, not the user",
+				field.Key)
+		}
 	}
 	r := &runContext{out: types.JSONMap{}, imageInfo: &types.ImageInfo{}, declared: pipeline.Fields()}
 	if !r.BoolParamOr(smartFieldKeyAllowOCR, true) {
@@ -245,6 +254,78 @@ func TestObservationPipelineDeclaresNoControls(t *testing.T) {
 	r.params = map[string]any{smartFieldKeyAllowOCR: false}
 	if r.BoolParamOr(smartFieldKeyAllowOCR, true) {
 		t.Error("an explicit allow_ocr=false must override the pinned default")
+	}
+}
+
+// TestPipelineRulesMatchTheirFields pins that a rule names fields the pipeline
+// actually offers, and that it names action controls rather than switches that
+// only tune a call: a rule over a field that runs anyway would never be broken,
+// and a rule naming a field the panel does not render could not be fixed by
+// the user who has to fix it.
+func TestPipelineRulesMatchTheirFields(t *testing.T) {
+	for _, id := range []types.ImagePipelineID{types.ImagePipelineDefault, types.ImagePipelineSmartOCR} {
+		pipeline := imagePipelineRegistry[id]
+		for _, rule := range pipeline.Rules() {
+			if rule.MessageKey == "" {
+				t.Errorf("%s rule over %v carries no message key, so the panel could only say that something is wrong",
+					id, rule.AtLeastOne)
+			}
+			for _, key := range rule.AtLeastOne {
+				var field types.ImageFieldDef
+				found := false
+				for _, candidate := range pipeline.Fields() {
+					if candidate.Key == key {
+						field, found = candidate, true
+						break
+					}
+				}
+				if !found {
+					t.Errorf("%s rule names field %q, which this pipeline does not declare", id, key)
+					continue
+				}
+				if field.DecidesAction {
+					continue
+				}
+				t.Errorf("%s rule names field %q, which only tunes a call that runs either way", id, key)
+			}
+		}
+	}
+}
+
+// TestManualPipelineDeclaresRules pins the other half of the same contract: the
+// pipeline that leaves every action to the operator's switches must say so, or
+// the panel would never warn that a knowledge base is set to process images by
+// running nothing. The two halves together are what keep the "at least one
+// action has to stay on" check off the smart pipeline, whose actions it cannot
+// switch off, and on the manual one, where they are the user's to decide.
+func TestManualPipelineDeclaresRules(t *testing.T) {
+	pipeline := imagePipelineRegistry[types.ImagePipelineDefault]
+	if len(pipeline.Rules()) == 0 {
+		t.Fatal("the manual pipeline declares no rule, so a knowledge base set to run nothing would save without warning")
+	}
+	// A thinking switch tunes the call; like the smart pipeline's, it may be off
+	// for every image without leaving anything unprocessed.
+	for _, field := range pipeline.Fields() {
+		if strings.Contains(field.Key, "thinking") && field.DecidesAction {
+			t.Errorf("thinking switch %q must not decide an action; the call runs either way", field.Key)
+		}
+	}
+}
+
+// TestSmartPipelineDeclaresNoRules pins that the pipeline which schedules its
+// own actions declares no rule at all — the observed attributes decide the work,
+// so no combination of the switches it offers can be invalid, and the panel has
+// nothing to warn about.
+func TestSmartPipelineDeclaresNoRules(t *testing.T) {
+	pipeline := imagePipelineRegistry[types.ImagePipelineSmartOCR]
+	if len(pipeline.Rules()) != 0 {
+		t.Errorf("smartocr declares %d rules; it switches its own actions on and off", len(pipeline.Rules()))
+	}
+	if err := pipeline.Validate(map[string]any{
+		smartFieldKeyDescribeThinking: false,
+		smartFieldKeyTextThinking:     false,
+	}); err != nil {
+		t.Errorf("smartocr with both thinking switches off = %v, want nil", err)
 	}
 }
 

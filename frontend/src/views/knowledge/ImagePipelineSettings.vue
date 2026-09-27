@@ -10,7 +10,13 @@
  */
 import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { fetchImagePipelines, type ImagePipelineField, type ImagePipelineSpec } from '@/api/knowledge-base'
+import {
+  fetchImagePipelines,
+  validateImagePipelines,
+  type ImagePipelineField,
+  type ImagePipelineSpec,
+  type ImagePipelineViolation,
+} from '@/api/knowledge-base'
 
 const props = defineProps<{
   /** The selected pipeline id. */
@@ -40,19 +46,47 @@ const current = computed<ImagePipelineSpec | undefined>(() =>
 /** Its fields, in the order the backend declared them. */
 const fields = computed<ImagePipelineField[]>(() => current.value?.fields ?? [])
 
-/**
- * A pipeline configured to do nothing. Stated generically rather than against
- * one pipeline: if every declared field is a switch and all of them are off,
- * no action would run for any image. The parent blocks the save; this drives
- * the inline message.
- */
-const invalid = computed<boolean>(() => {
-  const bools = fields.value.filter((field) => field.type === 'bool')
-  if (bools.length === 0 || bools.length !== fields.value.length) return false
-  return bools.every((field) => !paramValue(field))
-})
+// Every rule the selected pipeline breaks, reported by the backend and in the
+// backend's own terms: each violation carries the i18n key of its own wording
+// and the name of the control to point at. Nothing here decides what is
+// forbidden — the rules travel with the spec, so adding one to a pipeline needs
+// no change to this file, and a pipeline whose actions are not the user's to
+// switch off declares none and can never land in this list.
+const violations = ref<ImagePipelineViolation[]>([])
+const validationFailed = ref(false)
+
+const invalid = computed<boolean>(() => violations.value.length > 0)
 
 watch(invalid, (value) => emit('update:invalid', value), { immediate: true })
+
+/** The debounce keeps a dribbled change from posting on every keystroke. */
+let validationTimer: ReturnType<typeof setTimeout> | undefined
+
+function scheduleValidation() {
+  if (validationTimer) clearTimeout(validationTimer)
+  validationTimer = setTimeout(() => void validate(), 300)
+}
+
+async function validate() {
+  const spec = current.value
+  if (!spec) {
+    violations.value = []
+    return
+  }
+  try {
+    const result = await validateImagePipelines(spec.id, props.params ?? {})
+    violations.value = result.violations ?? []
+    validationFailed.value = false
+  } catch (error) {
+    // An unreachable check is not a verdict. The panel must not block saving on
+    // a network hiccup, and the save path asks the backend again anyway.
+    violations.value = []
+    validationFailed.value = true
+    console.error('[ImagePipelineSettings] validation request failed', error)
+  }
+}
+
+watch(() => [props.pipelineId, props.params], scheduleValidation)
 
 /**
  * A field's declared default. The backend sends JSON, so an unset key arrives
@@ -115,6 +149,9 @@ async function load() {
   } finally {
     loading.value = false
   }
+  // The registry arrived, so the current pick can now be checked against it;
+  // before that there was no rule to check it against.
+  scheduleValidation()
 }
 
 onMounted(load)
@@ -188,8 +225,21 @@ watch(() => props.pipelineId, () => {
         </div>
       </div>
 
-      <p v-if="invalid" class="image-pipeline-desc image-pipeline-desc--error">
-        {{ $t('imagePipeline.noActionSelected') }}
+      <!-- Every broken rule, listed rather than summarised: each line names what
+           is wrong and, through the field it points at, which control to turn
+           back on. Sits at the foot of the panel, next to the button the user
+           has to press to lose it. -->
+      <ul v-if="invalid" class="image-pipeline-violations">
+        <li
+          v-for="violation in violations"
+          :key="`${violation.message_key}:${violation.field ?? ''}`"
+          class="image-pipeline-desc image-pipeline-desc--error"
+        >
+          {{ $t(violation.message_key) || violation.message_key }}
+        </li>
+      </ul>
+      <p v-else-if="validationFailed" class="image-pipeline-desc">
+        {{ $t('knowledgeEditor.advanced.multimodal.imagePipelineValidateError') }}
       </p>
     </template>
   </div>
@@ -253,6 +303,14 @@ watch(() => props.pipelineId, () => {
     &--error {
       color: var(--error-color, #d54941);
     }
+  }
+
+  // One line per broken rule, kept compact so that several of them still read
+  // as a footnote to the button rather than as a second form.
+  .image-pipeline-violations {
+    margin: 0;
+    padding-left: 1em;
+    list-style: disc;
   }
 }
 </style>

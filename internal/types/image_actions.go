@@ -79,6 +79,11 @@ type ImageFieldDef struct {
 	Default any `json:"default"`
 	// Options enumerates the allowed values of an enum field.
 	Options []string `json:"options"`
+	// DecidesAction marks a field that turns one of the pipeline's actions on or
+	// off, as opposed to one that tunes a call the pipeline always makes. Only
+	// such a field can leave a pipeline with nothing left to do, and only such
+	// a field is named by the rules of ImagePipelineRules.
+	DecidesAction bool `json:"decides_action"`
 }
 
 // ImageFieldType is the control a tunable renders as.
@@ -185,6 +190,10 @@ type ImagePipelineSpec struct {
 	// two pipelines can each own a field named "enable_ocr" without either
 	// seeing the other's.
 	Fields []ImageFieldDef `json:"fields"`
+	// Rules are conditions over those fields that have to hold before the
+	// knowledge base can save them. Empty means the pipeline accepts any
+	// combination of what it offers.
+	Rules []ImagePipelineRules `json:"rules,omitempty"`
 }
 
 // ImagePipelineIDFor maps the attribute-observation switch to a pipeline id, so
@@ -194,4 +203,47 @@ func ImagePipelineIDFor(attrsEnabled bool) ImagePipelineID {
 		return ImagePipelineSmartOCR
 	}
 	return ImagePipelineDefault
+}
+
+// ImagePipelineRules are the conditions a pipeline's tunables have to meet
+// before they can be saved. They travel with the pipeline's spec, and the
+// settings panel evaluates them generically: the frontend knows no rule of its
+// own, it only reads what the pipeline here declared and reports the result.
+// A pipeline whose choices cannot conflict — the smart one schedules its own
+// actions — declares none, and no switch it offers can ever be called invalid.
+type ImagePipelineRules struct {
+	// AtLeastOne is satisfied when at least one field of Fields is on, and
+	// fails when all of them are off: a set of switches that would leave the
+	// image with nothing done to it.
+	AtLeastOne []string `json:"at_least_one,omitempty"`
+	// MessageKey is the frontend i18n key for the warning shown when this rule
+	// is not met.
+	MessageKey string `json:"message_key"`
+	// Field names the control the panel points at, so the user is told which
+	// switch to turn back on rather than simply that something is wrong.
+	// The first of Fields when it is left empty.
+	Field string `json:"field,omitempty"`
+}
+
+// ImagePipelineValidationError is what a pipeline returns when the tunables a
+// knowledge base saved for it cannot be run as they stand. It carries an i18n
+// key rather than a sentence: the settings panel asks the backend whether what
+// it shows can be saved, and every string on that panel is translated on the
+// frontend — a bare English sentence here would be the one string in the UI
+// that escapes the overlay.
+type ImagePipelineValidationError struct {
+	// MessageKey is the frontend i18n key naming what is wrong.
+	MessageKey string `json:"message_key"`
+	// Field names the field at fault when a single one is. The panel points at
+	// that control instead of at the section, which is what makes "switch one
+	// of them back on" actionable. Empty means the whole configuration is at
+	// fault.
+	Field string `json:"field,omitempty"`
+}
+
+func (e *ImagePipelineValidationError) Error() string {
+	if e.Field == "" {
+		return "image pipeline configuration is invalid: " + e.MessageKey
+	}
+	return "image pipeline field " + e.Field + " is invalid: " + e.MessageKey
 }
