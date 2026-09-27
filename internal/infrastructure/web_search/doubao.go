@@ -89,6 +89,7 @@ func doubaoNeedContent(extraConfig map[string]string) bool {
 	return strings.TrimSpace(extraConfig["need_content"]) != "false"
 }
 
+// Name returns the provider type identifier.
 func (p *DoubaoProvider) Name() string { return "doubao" }
 
 // Search runs one Doubao web-search request and maps the results into the
