@@ -282,7 +282,9 @@ func (cfg *Config) Egress() driver.EgressMode {
 // plugin manager, which checks and health-watches it.
 type Endpoints interface {
 	ServeDeployed(ctx context.Context, m *manifest.Manifest, url, secret string) error
-	Deactivate(ctx context.Context, pluginID string) error
+	// WithdrawDeployed unregisters what ServeDeployed registered, leaving
+	// a remote plugin's service alone.
+	WithdrawDeployed(ctx context.Context, pluginID string)
 }
 
 // Driver is the kubernetes runtime as a reconcile.Activator. It must come
@@ -361,6 +363,16 @@ func legacyResourceName(pluginID string) string {
 // Loaded.Report, so a slow image pull holds up neither the reconciler nor
 // the node's startup. Other runtimes are ignored.
 func (d *Driver) Stage(ctx context.Context, _, l *reconcile.Loaded) (reconcile.Staged, error) {
+	if l.Manifest.Runtime.Type != manifest.RuntimeKubernetes {
+		// A version that no longer runs here: its deployment goes once
+		// the new runtime has taken over.
+		id := l.Manifest.ID
+		return reconcile.Swap{OnRetire: func() {
+			if err := d.Deactivate(ctx, id); err != nil {
+				logger.Warnf(ctx, "[plugin] kubernetes %s: remove the previous deployment: %v", id, err)
+			}
+		}}, nil
+	}
 	if err := d.activate(ctx, l); err != nil {
 		var pending *reconcile.PendingError
 		if errors.As(err, &pending) {
@@ -373,9 +385,6 @@ func (d *Driver) Stage(ctx context.Context, _, l *reconcile.Loaded) (reconcile.S
 
 func (d *Driver) activate(ctx context.Context, l *reconcile.Loaded) error {
 	m := l.Manifest
-	if m.Runtime.Type != manifest.RuntimeKubernetes {
-		return nil
-	}
 	secret, err := utils.DecryptStoredSecret(l.Installed.RemoteSecret)
 	if err != nil || secret == "" {
 		return fmt.Errorf("the plugin's signing secret is not readable: %v", err)
@@ -501,7 +510,7 @@ func (d *Driver) Deactivate(ctx context.Context, pluginID string) error {
 		return nil
 	}
 	d.serveMu.Lock()
-	_ = d.endpoints.Deactivate(ctx, pluginID)
+	d.endpoints.WithdrawDeployed(ctx, pluginID)
 	d.serveMu.Unlock()
 	err := d.deleteResources(ctx, pluginID, ResourceName(pluginID))
 	if legacy := legacyResourceName(pluginID); legacy != ResourceName(pluginID) {

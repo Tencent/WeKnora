@@ -352,9 +352,9 @@ func kitRuntime(t *testing.T, version, runtime string) []byte {
 	})
 }
 
-// An upgrade is staged beside the running version, but a version that
-// moves to another runtime first stops the previous one wherever it ran.
-func TestRuntimeSwitchDeactivatesFirst(t *testing.T) {
+// A version that moves to another runtime is staged like any upgrade: the
+// runtimes swap at the commit, and nothing is deactivated first.
+func TestRuntimeSwitchIsStaged(t *testing.T) {
 	ctx := context.Background()
 	repo, store, rt := plugintest.NewMemRepo(), &plugintest.MemStore{}, &recorder{}
 	r := New(Options{
@@ -369,7 +369,7 @@ func TestRuntimeSwitchDeactivatesFirst(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := "stage acme.kit@1.0.0,commit acme.kit@1.0.0,stage acme.kit@1.1.0,commit acme.kit@1.1.0," +
-		"deactivate acme.kit,stage acme.kit@2.0.0,commit acme.kit@2.0.0"
+		"stage acme.kit@2.0.0,commit acme.kit@2.0.0"
 	if got := strings.Join(rt.calls, ","); got != want {
 		t.Fatalf("calls = %s", got)
 	}
@@ -527,5 +527,39 @@ func TestUnreadableUpgradeKeepsThePreviousVersion(t *testing.T) {
 	}
 	if len(act.calls) != 2 {
 		t.Fatalf("calls = %v", act.calls)
+	}
+}
+
+// retiring is a runtime that retires what it no longer runs.
+type retiring struct{ recorder }
+
+func (a *retiring) Stage(ctx context.Context, prev, next *Loaded) (Staged, error) {
+	s, err := a.recorder.Stage(ctx, prev, next)
+	if err != nil {
+		return nil, err
+	}
+	v := next.Manifest.Version
+	return Swap{OnCommit: s.Commit, OnAbort: s.Abort, OnRetire: func() { a.record("retire before " + v) }}, nil
+}
+
+// Runtimes retire what they no longer run only after every activator
+// committed, so the runtime a plugin moved to has taken over by then.
+func TestRetiringFollowsEveryCommit(t *testing.T) {
+	ctx := context.Background()
+	var log []string
+	a := &retiring{recorder{name: "a", log: &log}}
+	b := &retiring{recorder{name: "b", log: &log}}
+	repo, store := plugintest.NewMemRepo(), &plugintest.MemStore{}
+	r := New(Options{
+		Repo: repo, Store: store, Registry: registry.New(), CacheDir: t.TempDir(), Activators: []Activator{a, b},
+	})
+	plugintest.Install(t, repo, store, plugintest.KitPackage(t, "1.0.0"), types.PluginStateEnabled)
+	if err := r.Reconcile(ctx); err != nil {
+		t.Fatal(err)
+	}
+	want := "b stage acme.kit@1.0.0,a stage acme.kit@1.0.0,a commit acme.kit@1.0.0,b commit acme.kit@1.0.0," +
+		"a retire before 1.0.0,b retire before 1.0.0"
+	if got := strings.Join(log, ","); got != want {
+		t.Fatalf("calls = %s", got)
 	}
 }

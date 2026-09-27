@@ -229,3 +229,49 @@ func TestStagedEndpointWaitsForTheCommit(t *testing.T) {
 		t.Fatalf("the commit did not switch endpoints: %v", err)
 	}
 }
+
+// A plugin that moves off its remote service keeps it until the old
+// runtime retires, after every commit, and a remote plugin's switch leaves a service the
+// kubernetes driver deployed to that driver.
+func TestMovingAwayWithdrawsTheServiceAtTheCommit(t *testing.T) {
+	allowLoopback(t)
+	ctx := context.Background()
+	svc := newService(t, "1.0.0", "s3cret")
+	m := NewManager()
+	defer m.Close()
+	running := loaded("1.0.0", svc.URL, "s3cret")
+	if err := reconcile.Activate(ctx, m, running); err != nil {
+		t.Fatal(err)
+	}
+	onHost := loaded("2.0.0", "", "")
+	onHost.Manifest.Runtime = manifest.Runtime{Type: manifest.RuntimeHost, Kind: "binary", Entry: "bin/x"}
+	staged, err := m.Stage(ctx, running, onHost)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !m.Owns("acme.search") {
+		t.Fatal("staging withdrew the running service")
+	}
+	staged.Commit()
+	if !m.Owns("acme.search") {
+		t.Fatal("the service was withdrawn before every activator committed")
+	}
+	staged.(reconcile.Retiring).Retire()
+	if m.Owns("acme.search") {
+		t.Fatal("retiring kept the remote service")
+	}
+
+	if err := m.ServeDeployed(ctx, running.Manifest, svc.URL, "s3cret"); err != nil {
+		t.Fatal(err)
+	}
+	staged, _ = m.Stage(ctx, nil, onHost)
+	staged.Commit()
+	staged.(reconcile.Retiring).Retire()
+	if !m.Owns("acme.search") {
+		t.Fatal("a remote switch withdrew a deployed service")
+	}
+	m.WithdrawDeployed(ctx, "acme.search")
+	if m.Owns("acme.search") {
+		t.Fatal("WithdrawDeployed kept the deployed service")
+	}
+}

@@ -43,10 +43,13 @@ type Manager struct {
 
 // endpoint is one registered remote plugin.
 type endpoint struct {
-	m      *manifest.Manifest
-	c      *client.Client
-	cancel context.CancelFunc
-	done   chan struct{}
+	m *manifest.Manifest
+	// deployed marks a service WeKnora deployed itself (ServeDeployed):
+	// the kubernetes driver withdraws it, not a remote plugin's switch.
+	deployed bool
+	c        *client.Client
+	cancel   context.CancelFunc
+	done     chan struct{}
 
 	mu sync.Mutex
 	// err is why the service cannot be called right now: unreachable,
@@ -88,11 +91,13 @@ func (m *Manager) Name() string { return "remote" }
 
 // Stage checks that the registered service is up and serves the installed
 // package. From the commit on, calls go to it, a new URL or version taking
-// over from the old endpoint without a gap, and it is health-checked.
-// Other runtimes are ignored.
+// over from the old endpoint without a gap, and it is health-checked. A
+// version that no longer runs remotely withdraws the service once the new
+// runtime took over.
 func (m *Manager) Stage(ctx context.Context, _, l *reconcile.Loaded) (reconcile.Staged, error) {
 	if l.Manifest.Runtime.Type != manifest.RuntimeRemote {
-		return reconcile.Unchanged, nil
+		id := l.Manifest.ID
+		return reconcile.Swap{OnRetire: func() { m.withdraw(ctx, id, false) }}, nil
 	}
 	url := l.Installed.RemoteURL
 	if url == "" {
@@ -113,7 +118,7 @@ func (m *Manager) Stage(ctx context.Context, _, l *reconcile.Loaded) (reconcile.
 		return nil, err
 	}
 	return reconcile.Swap{
-		OnCommit: func() { m.serve(ctx, l.Manifest, url, c) },
+		OnCommit: func() { m.serve(ctx, l.Manifest, url, c, false) },
 		OnAbort:  c.Close,
 	}, nil
 }
@@ -126,8 +131,14 @@ func (m *Manager) ServeDeployed(ctx context.Context, mf *manifest.Manifest, url,
 	if err := check(ctx, c, mf); err != nil {
 		return err
 	}
-	m.serve(ctx, mf, url, c)
+	m.serve(ctx, mf, url, c, true)
 	return nil
+}
+
+// WithdrawDeployed unregisters a service ServeDeployed registered, but not
+// a remote plugin's service registered since.
+func (m *Manager) WithdrawDeployed(ctx context.Context, pluginID string) {
+	m.withdraw(ctx, pluginID, true)
 }
 
 // check verifies a new client's service within the check timeout and
@@ -143,10 +154,10 @@ func check(ctx context.Context, c *client.Client, mf *manifest.Manifest) error {
 }
 
 // serve routes a plugin's calls to a checked client and health-watches it.
-func (m *Manager) serve(ctx context.Context, mf *manifest.Manifest, url string, c *client.Client) {
+func (m *Manager) serve(ctx context.Context, mf *manifest.Manifest, url string, c *client.Client, deployed bool) {
 	id := mf.ID
 	wctx, stop := context.WithCancel(context.Background())
-	e := &endpoint{m: mf, c: c, cancel: stop, done: make(chan struct{})}
+	e := &endpoint{m: mf, deployed: deployed, c: c, cancel: stop, done: make(chan struct{})}
 	m.mu.Lock()
 	old := m.endpoints[id]
 	m.endpoints[id] = e
@@ -241,6 +252,21 @@ func (m *Manager) Deactivate(ctx context.Context, pluginID string) error {
 		logger.Infof(ctx, "[plugin] remote %s unregistered", pluginID)
 	}
 	return nil
+}
+
+// withdraw unregisters a plugin's service if it is a deployed one or not,
+// as asked.
+func (m *Manager) withdraw(ctx context.Context, pluginID string, deployed bool) {
+	m.mu.Lock()
+	e := m.endpoints[pluginID]
+	if e == nil || e.deployed != deployed {
+		m.mu.Unlock()
+		return
+	}
+	delete(m.endpoints, pluginID)
+	m.mu.Unlock()
+	e.close()
+	logger.Infof(ctx, "[plugin] remote %s unregistered", pluginID)
 }
 
 // Client returns the client of a registered remote plugin. The error is a

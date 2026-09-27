@@ -61,6 +61,8 @@ type Activator interface {
 	// Stage readies next without changing what the activator serves: it
 	// checks what next contributes and starts what must run, but routes
 	// nothing to it. prev is the version loaded now, nil on a first load.
+	// A runtime that ran prev but does not run next (the plugin moved to
+	// another runtime) stops it once the new runtime took over (Retiring).
 	// On failure it leaves nothing behind and returns a nil Staged. A
 	// PendingError comes with a Staged: the plugin commits and finishes
 	// starting in the background.
@@ -78,8 +80,16 @@ type Staged interface {
 	Abort()
 }
 
-// Swap is a Staged from two functions; either may be nil.
-type Swap struct{ OnCommit, OnAbort func() }
+// Retiring is a Staged that also has something to stop once every
+// activator committed, such as the runtime a plugin moved away from: the
+// new runtime has taken the calls over by then.
+type Retiring interface {
+	Staged
+	Retire()
+}
+
+// Swap is a Staged from functions; any may be nil.
+type Swap struct{ OnCommit, OnAbort, OnRetire func() }
 
 // Commit implements Staged.
 func (s Swap) Commit() {
@@ -95,6 +105,13 @@ func (s Swap) Abort() {
 	}
 }
 
+// Retire implements Retiring.
+func (s Swap) Retire() {
+	if s.OnRetire != nil {
+		s.OnRetire()
+	}
+}
+
 // Unchanged is the Staged of an activator with nothing to do for a version.
 var Unchanged Staged = Swap{}
 
@@ -105,6 +122,9 @@ func Activate(ctx context.Context, a Activator, l *Loaded) error {
 	s, err := a.Stage(ctx, nil, l)
 	if s != nil {
 		s.Commit()
+		if r, ok := s.(Retiring); ok {
+			r.Retire()
+		}
 	}
 	return err
 }
@@ -421,12 +441,6 @@ func (r *Reconciler) ensure(ctx context.Context, row types.InstalledPlugin) erro
 	}
 	l := &Loaded{Manifest: p.Manifest, Package: p, Dir: dir, Installed: row}
 	l.Report = func(healthy bool, err error) { r.reportLoaded(l, healthy, err) }
-	if prev != nil && runsElsewhere(prev.Manifest, p.Manifest) {
-		// The runtimes that ran the previous version ignore the new one:
-		// stop it everywhere first.
-		r.drop(ctx, row.ID)
-		prev = nil
-	}
 	pending, err := r.activate(ctx, prev, l)
 	if err != nil {
 		return r.failed(prev, row, loadKey, err)
@@ -450,7 +464,9 @@ func (r *Reconciler) ensure(ctx context.Context, row types.InstalledPlugin) erro
 // them all and leaves prev as it was. Activators stage in reverse order:
 // the domains only check what a package contributes, so a bad package
 // fails before a runtime starts anything. They commit in order, runtimes
-// first, so a code plugin is reachable before anything routes calls to it.
+// first, so a code plugin is reachable before anything routes calls to it,
+// and retire what they no longer run only after every commit, so a plugin
+// that moved runtimes is served by the new one before the old one stops.
 func (r *Reconciler) activate(ctx context.Context, prev, next *Loaded) (pending []error, err error) {
 	staged := make([]Staged, 0, len(r.activators))
 	abort := func() {
@@ -483,6 +499,11 @@ func (r *Reconciler) activate(ctx context.Context, prev, next *Loaded) (pending 
 	}
 	for i := len(staged) - 1; i >= 0; i-- {
 		staged[i].Commit()
+	}
+	for i := len(staged) - 1; i >= 0; i-- {
+		if s, ok := staged[i].(Retiring); ok {
+			s.Retire()
+		}
 	}
 	return pending, nil
 }
@@ -536,13 +557,6 @@ func (r *Reconciler) egress(pluginID string) driver.EgressMode {
 	return ""
 }
 
-// runsElsewhere reports whether two versions of a plugin run in different
-// runtimes (remote, then host) or kinds (a python host plugin, then a
-// binary one another host runs).
-func runsElsewhere(prev, next *manifest.Manifest) bool {
-	return prev.Runtime.Type != next.Runtime.Type || prev.Runtime.Kind != next.Runtime.Kind
-}
-
 // reportLoaded is Loaded.Report: runtime health for the version still
 // loaded. It waits for a pass in progress, so the version it reports on has
 // its status by then.
@@ -561,17 +575,6 @@ func dirExists(dir string) bool {
 }
 
 func (r *Reconciler) unload(ctx context.Context, id string) {
-	r.drop(ctx, id)
-	delete(r.retries, id)
-	r.statusMu.Lock()
-	delete(r.status, id)
-	r.statusMu.Unlock()
-	r.forgetStatus(ctx, id)
-	logger.Infof(ctx, "[plugin] unloaded %s", id)
-}
-
-// drop removes a loaded plugin from every activator and the registry.
-func (r *Reconciler) drop(ctx context.Context, id string) {
 	// Reverse order: routes go before the processes they route to.
 	for i := len(r.activators) - 1; i >= 0; i-- {
 		a := r.activators[i]
@@ -584,6 +587,12 @@ func (r *Reconciler) drop(ctx context.Context, id string) {
 	}
 	delete(r.loaded, id)
 	delete(r.digests, id)
+	delete(r.retries, id)
+	r.statusMu.Lock()
+	delete(r.status, id)
+	r.statusMu.Unlock()
+	r.forgetStatus(ctx, id)
+	logger.Infof(ctx, "[plugin] unloaded %s", id)
 }
 
 // extract writes the package under cacheDir/<digest>, once per digest. An

@@ -265,6 +265,36 @@ func TestStagedVersionsWaitForTheCommit(t *testing.T) {
 	}
 }
 
+// A plugin that moves to another runtime keeps its process until every
+// activator committed and the old runtime retires.
+func TestMovingAwayStopsTheProcessAtTheCommit(t *testing.T) {
+	fastTimings(t)
+	ctx := context.Background()
+	m := NewManager()
+	defer m.Close()
+	prev := install(t, "1.0.0", "")
+	if err := reconcile.Activate(ctx, m, prev); err != nil {
+		t.Fatal(err)
+	}
+	next := install(t, "2.0.0", "")
+	next.Manifest.Runtime = manifest.Runtime{Type: manifest.RuntimeRemote}
+	staged, err := m.Stage(ctx, prev, next)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := search(t, m, "hello"); err != nil {
+		t.Fatalf("staging stopped the running process: %v", err)
+	}
+	staged.Commit()
+	if !m.Local("acme.echo") {
+		t.Fatal("the process stopped before every activator committed")
+	}
+	staged.(reconcile.Retiring).Retire()
+	if m.Local("acme.echo") {
+		t.Fatal("retiring kept the process")
+	}
+}
+
 // An upgrade does not wait for the old process to finish its calls: it
 // drains them in the background, up to the stop grace period.
 func TestUpgradeLetsTheOldProcessFinishItsCalls(t *testing.T) {

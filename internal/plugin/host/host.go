@@ -187,10 +187,18 @@ func (m *Manager) Name() string { return "host" }
 
 // Stage starts a host plugin beside the running version and returns once
 // it is ready; calls go to it from the commit on, and the previous process
-// stops then. Other runtimes are ignored.
+// stops then. A version this host does not run (another runtime, or a kind
+// a plugin host elsewhere runs) stops the previous process once the new
+// runtime took over.
 func (m *Manager) Stage(ctx context.Context, _, l *reconcile.Loaded) (reconcile.Staged, error) {
+	id := l.Manifest.ID
+	elsewhere := reconcile.Swap{OnRetire: func() {
+		if m.Local(id) {
+			_ = m.Deactivate(ctx, id)
+		}
+	}}
 	if l.Manifest.Runtime.Type != manifest.RuntimeHost {
-		return reconcile.Unchanged, nil
+		return elsewhere, nil
 	}
 	if !Supported(l.Manifest.Runtime.Kind) {
 		return nil, fmt.Errorf("runtime.kind %q is not supported by this host; binary and python are",
@@ -201,9 +209,8 @@ func (m *Manager) Stage(ctx context.Context, _, l *reconcile.Loaded) (reconcile.
 			return nil, fmt.Errorf("this plugin host does not run %s plugins (it runs %s)",
 				l.Manifest.Runtime.Kind, strings.Join(m.Kinds(), ", "))
 		}
-		return reconcile.Unchanged, nil // a plugin host elsewhere runs it
+		return elsewhere, nil // a plugin host elsewhere runs it
 	}
-	id := l.Manifest.ID
 	m.mu.Lock()
 	direct, hostAPI := m.direct, m.hostAPI
 	m.mu.Unlock()

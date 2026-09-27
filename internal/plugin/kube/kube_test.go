@@ -104,11 +104,10 @@ func (f *fakeEndpoints) ServeDeployed(_ context.Context, _ *manifest.Manifest, u
 	return nil
 }
 
-func (f *fakeEndpoints) Deactivate(_ context.Context, id string) error {
+func (f *fakeEndpoints) WithdrawDeployed(_ context.Context, id string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.removed = append(f.removed, id)
-	return nil
 }
 
 func newDriver(t *testing.T, api http.Handler) (*Driver, *fakeEndpoints) {
@@ -586,5 +585,44 @@ func TestEgressConfigFromEnv(t *testing.T) {
 				t.Fatalf("cfg = %+v, err = %v", cfg, err)
 			}
 		})
+	}
+}
+
+// A plugin that moves off kubernetes keeps its deployment until the old
+// runtime retires, after every commit; a plugin the driver never deployed
+// is left alone.
+func TestMovingAwayRemovesTheDeploymentAtTheCommit(t *testing.T) {
+	api := &fakeAPI{applied: map[string]map[string]any{}}
+	d, ep := newDriver(t, api)
+	ctx := context.Background()
+	prev := loaded(t, "acme.search")
+	if err := reconcile.Activate(ctx, d, prev); err != nil {
+		t.Fatal(err)
+	}
+	next := loaded(t, "acme.search")
+	next.Manifest.Runtime = manifest.Runtime{Type: manifest.RuntimeHost, Kind: "binary", Entry: "bin/x"}
+	staged, err := d.Stage(ctx, prev, next)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(api.deleted) != 0 || len(ep.removed) != 0 {
+		t.Fatalf("staging removed %v, unregistered %v", api.deleted, ep.removed)
+	}
+	staged.Commit()
+	if len(api.deleted) != 0 {
+		t.Fatalf("the commit deleted %v before the new runtime took over", api.deleted)
+	}
+	staged.(reconcile.Retiring).Retire()
+	if len(api.deleted) != 3 || len(ep.removed) != 1 {
+		t.Fatalf("retiring deleted %v, unregistered %v", api.deleted, ep.removed)
+	}
+
+	other := loaded(t, "acme.other")
+	other.Manifest.Runtime = next.Manifest.Runtime
+	staged, _ = d.Stage(ctx, nil, other)
+	staged.Commit()
+	staged.(reconcile.Retiring).Retire()
+	if len(api.deleted) != 3 || len(ep.removed) != 1 {
+		t.Fatalf("another plugin's commit deleted %v, unregistered %v", api.deleted, ep.removed)
 	}
 }
