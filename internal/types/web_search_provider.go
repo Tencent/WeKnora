@@ -380,8 +380,9 @@ func GetWebSearchProviderTypes() []WebSearchProviderTypeInfo {
 			Name:           "Volcano Doubao Search",
 			RequiresAPIKey: true,
 			SupportsProxy:  true,
-			Description:    "Volcano Doubao Search Custom Edition (豆包搜索) — server-side date-range filtering with full markdown content",
-			DocsURL:        "https://www.volcengine.com/product/doubao_search",
+			Description: "Volcano Doubao Search Custom Edition (豆包搜索) — " +
+				"server-side date-range filtering with full markdown content",
+			DocsURL: "https://www.volcengine.com/product/doubao_search",
 			ConfigFields: []WebSearchProviderConfigField{
 				{
 					Key:         "time_range",

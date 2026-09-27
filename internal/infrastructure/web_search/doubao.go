@@ -119,12 +119,13 @@ func (p *DoubaoProvider) Search(ctx context.Context, query string, maxResults in
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Content-Type", "application/json")
 
-	logger.Infof(ctx, "[WebSearch][Doubao] query=%q maxResults=%d timeRange=%s needContent=%t", query, maxResults, p.timeRange, p.needContent)
+	logger.Infof(ctx, "[WebSearch][Doubao] query=%q maxResults=%d timeRange=%s needContent=%t",
+		query, maxResults, p.timeRange, p.needContent)
 	resp, err := p.client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to execute Doubao request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	respBody, err := readDoubaoResponseBody(resp.Body)
 	if err != nil {
 		return nil, err

@@ -34,8 +34,11 @@ func TestDoubaoProviderSearch(t *testing.T) {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"Result":{"ResultCount":3,"WebResults":[
-			{"Title":"First","SiteName":"财富号","Url":"https://example.com/1","Snippet":"Snippet","Summary":"Longer summary","Content":"# Full markdown","PublishTime":"2026-09-14T18:39:00+08:00"},
-			{"Title":"Second","Url":"https://example.com/2","Snippet":"Fallback snippet","Content":"","PublishTime":"invalid"},
+			{"Title":"First","SiteName":"财富号","Url":"https://example.com/1","Snippet":"Snippet",
+				"Summary":"Longer summary","Content":"# Full markdown",
+				"PublishTime":"2026-09-14T18:39:00+08:00"},
+			{"Title":"Second","Url":"https://example.com/2","Snippet":"Fallback snippet",
+				"Content":"","PublishTime":"invalid"},
 			{"Title":"Third","Url":"https://example.com/3","Snippet":"must be capped"}
 		]}}`))
 	}))
@@ -61,7 +64,8 @@ func TestDoubaoProviderSearch(t *testing.T) {
 	if results[0].Source != "doubao" || results[0].Title != "First" || results[0].URL != "https://example.com/1" {
 		t.Fatalf("unexpected first result: %+v", results[0])
 	}
-	if want := time.Date(2026, 9, 14, 10, 39, 0, 0, time.UTC); results[0].PublishedAt == nil || !results[0].PublishedAt.Equal(want) {
+	want := time.Date(2026, 9, 14, 10, 39, 0, 0, time.UTC)
+	if results[0].PublishedAt == nil || !results[0].PublishedAt.Equal(want) {
 		t.Fatalf("date = %v, want %v", results[0].PublishedAt, want)
 	}
 	if results[1].PublishedAt != nil {
@@ -84,7 +88,9 @@ func TestDoubaoProviderSearchDates(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				var response doubaoSearchResponse
-				response.Result.WebResults = []doubaoWebResult{{Title: "Result", Url: "https://example.com", PublishTime: tt.publishTime}}
+				response.Result.WebResults = []doubaoWebResult{{
+					Title: "Result", Url: "https://example.com", PublishTime: tt.publishTime,
+				}}
 				w.Header().Set("Content-Type", "application/json")
 				if err := json.NewEncoder(w).Encode(response); err != nil {
 					t.Error(err)
@@ -117,14 +123,22 @@ func TestValidateDoubaoParameters(t *testing.T) {
 	for _, bad := range []string{
 		"2026-09-12", "2026-9-12..2026-09-14", "2026-09-14..2026-09-12", "a..b",
 	} {
-		if err := ValidateDoubaoParameters(types.WebSearchProviderParameters{APIKey: "sk-test", ExtraConfig: map[string]string{"time_range": bad}}); err == nil {
+		params := types.WebSearchProviderParameters{
+			APIKey:      "sk-test",
+			ExtraConfig: map[string]string{"time_range": bad},
+		}
+		if err := ValidateDoubaoParameters(params); err == nil {
 			t.Fatalf("expected invalid time_range error for %q", bad)
 		}
 	}
 	if err := ValidateDoubaoParameters(types.WebSearchProviderParameters{APIKey: "sk-test"}); err != nil {
 		t.Fatalf("default parameters: %v", err)
 	}
-	if err := ValidateDoubaoParameters(types.WebSearchProviderParameters{APIKey: "sk-test", ExtraConfig: map[string]string{"time_range": "2026-09-12..2026-09-14"}}); err != nil {
+	validParams := types.WebSearchProviderParameters{
+		APIKey:      "sk-test",
+		ExtraConfig: map[string]string{"time_range": "2026-09-12..2026-09-14"},
+	}
+	if err := ValidateDoubaoParameters(validParams); err != nil {
 		t.Fatalf("valid time_range: %v", err)
 	}
 }

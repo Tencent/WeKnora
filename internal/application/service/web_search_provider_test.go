@@ -111,7 +111,8 @@ func TestValidateProviderParametersDoubao(t *testing.T) {
 	if err := validateProviderParameters(types.WebSearchProviderTypeDoubao, invalid); err == nil {
 		t.Fatal("inverted Doubao time_range was accepted")
 	}
-	if err := validateProviderParameters(types.WebSearchProviderTypeDoubao, types.WebSearchProviderParameters{}); err == nil {
+	noParams := types.WebSearchProviderParameters{}
+	if err := validateProviderParameters(types.WebSearchProviderTypeDoubao, noParams); err == nil {
 		t.Fatal("missing Doubao API key was accepted")
 	}
 	if !isValidProviderType(types.WebSearchProviderTypeDoubao) {
