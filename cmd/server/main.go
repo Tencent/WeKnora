@@ -99,10 +99,6 @@ func main() {
 			sig := <-signals
 			logger.Infof(context.Background(), "Received signal: %v, starting server shutdown...", sig)
 
-			// Close listener first to release port immediately,
-			// so the next process can bind during our graceful drain.
-			listener.Close()
-
 			shutdownTimeout := cfg.Server.ShutdownTimeout
 			if shutdownTimeout == 0 {
 				shutdownTimeout = 30 * time.Second
@@ -117,13 +113,25 @@ func main() {
 				server.Close()
 			}()
 
+			// Do NOT close the listener manually before Shutdown: Serve would
+			// return the raw accept error ("use of closed network connection")
+			// instead of ErrServerClosed, the invoke error path would call
+			// logger.Fatalf → os.Exit(1), and every ResourceCleaner entry
+			// (BrowserSkill daemon, sandbox, pools) would be skipped — leaking
+			// child processes. Shutdown closes all listeners as its first step,
+			// which releases the port just as fast without the race.
 			if err := server.Shutdown(shutdownCtx); err != nil {
 				logger.Errorf(context.Background(), "Server forced to shutdown: %v", err)
 				server.Close()
 			}
 
 			logger.Info(context.Background(), "Cleaning up resources...")
-			errs := resourceCleaner.Cleanup(shutdownCtx)
+			// Cleanup gets its own budget: a slow drain may consume most of
+			// shutdownTimeout, and an expired context would make Cleanup skip
+			// every registered function without running any of them.
+			cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), shutdownTimeout)
+			defer cleanupCancel()
+			errs := resourceCleaner.Cleanup(cleanupCtx)
 			if len(errs) > 0 {
 				logger.Errorf(context.Background(), "Errors occurred during resource cleanup: %v", errs)
 			}
