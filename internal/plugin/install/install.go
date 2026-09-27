@@ -29,6 +29,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/plugin/manifest"
 	"github.com/Tencent/WeKnora/internal/plugin/pkg"
 	"github.com/Tencent/WeKnora/internal/plugin/reconcile"
+	"github.com/Tencent/WeKnora/internal/plugin/remote"
 	"github.com/Tencent/WeKnora/internal/plugin/trust"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -429,6 +430,9 @@ func checkRemoteURL(raw string) error {
 	}
 	if err := utils.ValidateURLForSSRF(raw); err != nil {
 		return invalid("service URL is not allowed (private hosts must be in SSRF_WHITELIST): %v", err)
+	}
+	if err := remote.CheckScheme(raw); err != nil {
+		return &InvalidError{Err: err}
 	}
 	return nil
 }

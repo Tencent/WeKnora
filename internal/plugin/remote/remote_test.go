@@ -306,3 +306,20 @@ func TestMovingAwayWithdrawsTheServiceAtTheCommit(t *testing.T) {
 		t.Fatal("WithdrawDeployed kept the deployed service")
 	}
 }
+
+// Calls carry decrypted secrets: plain http only to a network the platform
+// named.
+func TestCheckScheme(t *testing.T) {
+	utils.SetSSRFWhitelistFromRaw("plugins.internal")
+	t.Cleanup(func() { utils.SetSSRFWhitelistFromRaw("") })
+	for raw, ok := range map[string]bool{
+		"https://plugins.example.com":  true,
+		"http://plugins.internal:8080": true,
+		"http://plugins.example.com":   false,
+		"ftp://plugins.example.com":    false,
+	} {
+		if err := CheckScheme(raw); (err == nil) != ok {
+			t.Errorf("%s: %v", raw, err)
+		}
+	}
+}

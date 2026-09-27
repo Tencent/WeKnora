@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	neturl "net/url"
 	"sync"
 	"time"
 
@@ -106,6 +107,9 @@ func (m *Manager) Stage(ctx context.Context, _, l *reconcile.Loaded) (reconcile.
 	if err := utils.ValidateURLForSSRF(url); err != nil {
 		return nil, fmt.Errorf("service URL is not allowed: %w", err)
 	}
+	if err := CheckScheme(url); err != nil {
+		return nil, err
+	}
 	secret, err := utils.DecryptStoredSecret(l.Installed.RemoteSecret)
 	if err != nil {
 		return nil, fmt.Errorf("decrypt the plugin secret: %w", err)
@@ -135,6 +139,27 @@ func (m *Manager) Stage(ctx context.Context, _, l *reconcile.Loaded) (reconcile.
 		OnCommit: func() { m.serve(later, l.Manifest, url, c, false) },
 		OnAbort:  c.Close,
 	}, nil
+}
+
+// CheckScheme accepts https for a remote plugin's service, and http only on
+// a network the platform named (SSRF_WHITELIST): every call carries the
+// workspace's configuration, secrets decrypted, which plain http would show
+// to anyone on the way.
+func CheckScheme(raw string) error {
+	u, err := neturl.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("service URL: %w", err)
+	}
+	switch {
+	case u.Scheme == "https":
+		return nil
+	case u.Scheme == "http" && utils.IsSSRFWhitelisted(u.Hostname()):
+		return nil
+	case u.Scheme == "http":
+		return fmt.Errorf("service URL must use https: calls carry the workspace's secrets " +
+			"(plain http is accepted only for hosts in SSRF_WHITELIST)")
+	}
+	return fmt.Errorf("service URL must be an https URL")
 }
 
 // servesOtherVersion is a service answering as another version of the

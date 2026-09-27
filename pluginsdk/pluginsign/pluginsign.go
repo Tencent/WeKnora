@@ -28,6 +28,7 @@ import (
 	"path"
 	"sort"
 	"strings"
+	"unicode"
 )
 
 // SignatureFile is the signature's name at the package root.
@@ -198,6 +199,9 @@ func readZip(zr *zip.Reader) (map[string][]byte, error) {
 		if err != nil {
 			return nil, err
 		}
+		if _, dup := files[name]; dup {
+			return nil, fmt.Errorf("package has %s twice", name)
+		}
 		rc, err := f.Open()
 		if err != nil {
 			return nil, err
@@ -213,6 +217,9 @@ func readZip(zr *zip.Reader) (map[string][]byte, error) {
 }
 
 func cleanName(name string) (string, error) {
+	if strings.IndexFunc(name, unicode.IsControl) >= 0 {
+		return "", fmt.Errorf("package entry %q has a control character in its name", name)
+	}
 	n := strings.ReplaceAll(name, "\\", "/")
 	clean := path.Clean(n)
 	if strings.HasPrefix(n, "/") || clean == ".." || strings.HasPrefix(clean, "../") || clean == "." {

@@ -164,3 +164,23 @@ func TestOpenCarriesTheIcon(t *testing.T) {
 		t.Fatal("only image types lists can show are carried")
 	}
 }
+
+// Entry names that could make the signed digest ambiguous, and entries
+// that appear twice, are refused.
+func TestOpenRefusesAmbiguousEntries(t *testing.T) {
+	if _, err := Open(zipOf(t, map[string]string{
+		"plugin.yaml": kitManifest, "notes\n.txt": "x",
+	})); err == nil || !strings.Contains(err.Error(), "control character") {
+		t.Fatalf("control character: %v", err)
+	}
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	for _, e := range [][2]string{{"plugin.yaml", kitManifest}, {"a/b.txt", "one"}, {"a//b.txt", "two"}} {
+		w, _ := zw.Create(e[0])
+		_, _ = w.Write([]byte(e[1]))
+	}
+	_ = zw.Close()
+	if _, err := Open(buf.Bytes()); err == nil || !strings.Contains(err.Error(), "twice") {
+		t.Fatalf("duplicate: %v", err)
+	}
+}

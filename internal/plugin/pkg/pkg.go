@@ -18,6 +18,7 @@ import (
 	"path"
 	"sort"
 	"strings"
+	"unicode"
 
 	"gopkg.in/yaml.v3"
 
@@ -90,6 +91,10 @@ func Open(data []byte) (*Package, error) {
 		}
 		if f.UncompressedSize64 > MaxFileBytes {
 			return nil, fmt.Errorf("package entry %s is over the %d byte limit", name, MaxFileBytes)
+		}
+		if _, dup := files[name]; dup {
+			// Tools disagree on which one counts; so would reviewers.
+			return nil, fmt.Errorf("package has %s twice", name)
 		}
 		b, err := readEntry(f)
 		if err != nil {
@@ -311,6 +316,11 @@ func readEntry(f *zip.File) ([]byte, error) {
 // cleanName normalizes an archive entry name and rejects any that would
 // escape the package root.
 func cleanName(name string) (string, error) {
+	// A control character could make two different file lists hash alike
+	// in the signed content digest ("<path>\x00<hash>\n" lines).
+	if strings.IndexFunc(name, unicode.IsControl) >= 0 {
+		return "", fmt.Errorf("package entry %q has a control character in its name", name)
+	}
 	n := strings.ReplaceAll(name, "\\", "/")
 	if strings.HasPrefix(n, "/") || strings.Contains(n, ":") {
 		return "", fmt.Errorf("package entry %q has an absolute path", name)
