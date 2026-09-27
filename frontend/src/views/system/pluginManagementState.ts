@@ -159,6 +159,20 @@ export function installedState(p: InstalledPlugin): InstalledState {
   }
 }
 
+/** What the memory column shows for a plugin. */
+export type MemoryCell =
+  | { kind: 'bytes'; bytes: number; measured: number; idle: number }
+  | { kind: 'idle'; idle: number }
+  | { kind: 'none' }
+
+export function memoryCell(p: Pick<InstalledPlugin, 'memory' | 'desired_state'>): MemoryCell {
+  const m = p.memory
+  if (p.desired_state === 'disabled' || !m) return { kind: 'none' }
+  if (m.measured > 0) return { kind: 'bytes', bytes: m.bytes, measured: m.measured, idle: m.idle }
+  if (m.idle > 0) return { kind: 'idle', idle: m.idle }
+  return { kind: 'none' }
+}
+
 /** The tag theme of an unfinished upgrade: a failed one warns. */
 export function upgradeTheme(state: UpgradeState | undefined): 'warning' | 'primary' {
   return state === 'failed' ? 'warning' : 'primary'

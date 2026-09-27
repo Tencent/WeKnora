@@ -16,6 +16,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -147,6 +148,9 @@ type process struct {
 	changed chan struct{}
 
 	activity *activity
+	// group is the process group of the running child (its pid: children
+	// start their own group), 0 while none runs.
+	group atomic.Int64
 	// park asks the supervisor to stop the idle child; wake to start it.
 	park chan struct{}
 	wake chan struct{}
@@ -202,6 +206,7 @@ func startProcess(sp spec, onState func(*process, State, error)) (*process, erro
 		return nil, err
 	}
 	// Ready before Activate returns: callers route to the plugin right away.
+	p.group.Store(int64(first.cmd.Process.Pid))
 	p.setClient(first.client)
 	p.setState(StateReady, nil)
 	go p.supervise(ctx, entry, first)
@@ -575,9 +580,11 @@ func (p *process) supervise(ctx context.Context, entry string, cur *launched) {
 	defer close(p.done)
 	backoff := restartBackoffFloor
 	for {
+		p.group.Store(int64(cur.cmd.Process.Pid))
 		p.setClient(cur.client)
 		p.setState(StateReady, nil)
 		exitErr := p.watch(ctx, cur)
+		p.group.Store(0)
 		p.setClient(nil)
 		if ctx.Err() != nil {
 			p.setState(StateStopped, nil)

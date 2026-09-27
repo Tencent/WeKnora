@@ -56,6 +56,10 @@ func (r *Reconciler) publishStatuses(ctx context.Context) {
 		snapshot[id] = s
 	}
 	r.statusMu.RUnlock()
+	for id, s := range snapshot {
+		s.Usage = r.usage(id)
+		snapshot[id] = s
+	}
 	node, now := r.NodeName(), time.Now()
 	pipe := r.rdb.Pipeline()
 	for id, s := range snapshot {
@@ -154,6 +158,7 @@ func (d nodeDriver) Status(ctx context.Context, pluginID string) ([]driver.Insta
 		out = append(out, driver.InstanceStatus{
 			Node: n.Node, Version: n.Version, State: state, Error: n.Error, UpdatedAt: n.UpdatedAt, Egress: egress,
 			UpgradeVersion: n.UpgradeVersion, UpgradeState: n.UpgradeState, UpgradeError: n.UpgradeError,
+			MemoryBytes: n.MemoryBytes, Idle: n.Idle,
 		})
 	}
 	return out, nil

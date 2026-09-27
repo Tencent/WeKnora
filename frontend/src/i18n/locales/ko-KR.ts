@@ -5274,7 +5274,8 @@ export default {
       runtime: '실행 방식',
       trust: '신뢰',
       audience: '공개 범위',
-      state: '상태'
+      state: '상태',
+      memory: '메모리'
     },
     menu: {
       detail: '상세 보기',
@@ -5336,6 +5337,12 @@ export default {
       hint: '인스턴스 {count}개가 여전히 v{running}을(를) 실행 중',
       pendingNode: 'v{version}(으)로 업그레이드 중',
       failedNode: 'v{version}(으)로 업그레이드 실패'
+    },
+    memory: {
+      idle: '유휴',
+      idleHint: '인스턴스 {count}개가 호출이 없어 중지됨. 다음 호출 시 시작됩니다',
+      total: '인스턴스 {count}개 합계',
+      node: '메모리 {size}'
     },
     source: {
       upload: '업로드',

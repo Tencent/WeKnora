@@ -17,6 +17,7 @@ import {
   trustNote,
   trustTheme,
   upgradeTheme,
+  memoryCell,
   filterMarket,
   marketAction,
   audienceOf,
@@ -199,4 +200,14 @@ test('egress modes: enforced or not, and which plugins to flag', () => {
 test('upgrade themes', () => {
   assert.equal(upgradeTheme('failed'), 'warning')
   assert.equal(upgradeTheme('pending'), 'primary')
+})
+
+test('memory column', () => {
+  const on = 'enabled' as const
+  assert.deepEqual(memoryCell({ desired_state: on }), { kind: 'none' })
+  assert.deepEqual(memoryCell({ desired_state: 'disabled', memory: { bytes: 1, measured: 1, idle: 0 } }), { kind: 'none' })
+  assert.deepEqual(memoryCell({ desired_state: on, memory: { bytes: 5, measured: 2, idle: 1 } }), {
+    kind: 'bytes', bytes: 5, measured: 2, idle: 1,
+  })
+  assert.deepEqual(memoryCell({ desired_state: on, memory: { bytes: 0, measured: 0, idle: 3 } }), { kind: 'idle', idle: 3 })
 })

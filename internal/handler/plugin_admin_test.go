@@ -310,3 +310,15 @@ func TestUpgradeOf(t *testing.T) {
 		t.Fatalf("upgrade = %+v", u)
 	}
 }
+
+func TestMemoryOf(t *testing.T) {
+	if memoryOf([]driver.InstanceStatus{{Node: "remote"}}) != nil {
+		t.Fatal("instances without a measurement sum up to nothing")
+	}
+	got := memoryOf([]driver.InstanceStatus{
+		{MemoryBytes: 10 << 20}, {MemoryBytes: 6 << 20}, {Idle: true}, {},
+	})
+	if got == nil || *got != (PluginMemoryDTO{Bytes: 16 << 20, Measured: 2, Idle: 1}) {
+		t.Fatalf("memory = %+v", got)
+	}
+}

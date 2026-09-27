@@ -5276,7 +5276,8 @@ export default {
       runtime: '运行方式',
       trust: '信任',
       audience: '可见范围',
-      state: '状态'
+      state: '状态',
+      memory: '内存'
     },
     menu: {
       detail: '查看详情',
@@ -5338,6 +5339,12 @@ export default {
       hint: '{count} 个实例仍在运行 v{running}',
       pendingNode: '正在升级到 v{version}',
       failedNode: '升级到 v{version} 失败'
+    },
+    memory: {
+      idle: '空闲',
+      idleHint: '{count} 个实例因没有调用已停止进程，下次调用时启动',
+      total: '{count} 个实例合计',
+      node: '内存 {size}'
     },
     source: {
       upload: '上传',

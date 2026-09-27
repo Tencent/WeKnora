@@ -50,13 +50,14 @@
               <th>{{ t('pluginAdmin.columns.runtime') }}</th>
               <th>{{ t('pluginAdmin.columns.trust') }}</th>
               <th>{{ t('pluginAdmin.columns.audience') }}</th>
+              <th>{{ t('pluginAdmin.columns.memory') }}</th>
               <th>{{ t('pluginAdmin.columns.state') }}</th>
               <th class="plugin-table__menu-col" />
             </tr>
           </thead>
           <tbody>
             <tr v-if="visible.length === 0">
-              <td colspan="7" class="plugin-table__empty">{{ t('pluginAdmin.noMatch') }}</td>
+              <td colspan="8" class="plugin-table__empty">{{ t('pluginAdmin.noMatch') }}</td>
             </tr>
             <tr
               v-for="p in visible"
@@ -83,6 +84,21 @@
                 <span class="trust" :class="`trust--${activeTrust(p)}`">{{ t(`pluginAdmin.trust.${activeTrust(p)}`) }}</span>
               </td>
               <td>{{ audienceLabel(p) }}</td>
+              <td class="plugin-row__num">
+                <template v-for="m in [memoryCell(p)]" :key="m.kind">
+                  <t-tooltip v-if="m.kind === 'bytes'">
+                    <template #content>
+                      <div>{{ t('pluginAdmin.memory.total', { count: m.measured }) }}</div>
+                      <div v-if="m.idle">{{ t('pluginAdmin.memory.idleHint', { count: m.idle }) }}</div>
+                    </template>
+                    <span>{{ formatBytes(m.bytes) }}</span>
+                  </t-tooltip>
+                  <t-tooltip v-else-if="m.kind === 'idle'" :content="t('pluginAdmin.memory.idleHint', { count: m.idle })">
+                    <span class="memory-idle">{{ t('pluginAdmin.memory.idle') }}</span>
+                  </t-tooltip>
+                  <span v-else class="memory-none">—</span>
+                </template>
+              </td>
               <td>
                 <div class="plugin-row__state">
                   <t-tooltip :content="p.node?.error" :disabled="!p.node?.error">
@@ -154,6 +170,8 @@ import {
   activeTrust,
   audienceSummary,
   egressUnenforced,
+  formatBytes,
+  memoryCell,
   filterInstalled,
   installedState,
   matchesAdminFilter,
@@ -386,6 +404,11 @@ onMounted(load)
 
 .plugin-row__num {
   font-variant-numeric: tabular-nums;
+}
+
+.memory-idle,
+.memory-none {
+  color: var(--td-text-color-placeholder);
 }
 
 .plugin-row__state {

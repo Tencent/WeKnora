@@ -130,3 +130,61 @@ func waitFor(t *testing.T, cond func() bool) {
 		time.Sleep(10 * time.Millisecond)
 	}
 }
+
+// usageActivator reports fixed usage for every plugin.
+type usageActivator struct {
+	recorder
+	usage Usage
+}
+
+func (a *usageActivator) Usage(string) (Usage, bool) { return a.usage, true }
+
+// What a plugin's processes use is part of each node's report, read when
+// the report is made; a single node without Redis shows its own.
+func TestNodesReportUsage(t *testing.T) {
+	ctx := context.Background()
+	repo, store := plugintest.NewMemRepo(), &plugintest.MemStore{}
+	plugintest.Install(t, repo, store, plugintest.KitPackage(t, "1.0.0"), types.PluginStateEnabled)
+
+	act := &usageActivator{usage: Usage{MemoryBytes: 12 << 20}}
+	single := New(Options{
+		Repo: repo, Store: store, Registry: registry.New(), CacheDir: t.TempDir(), Activators: []Activator{act},
+	})
+	if err := single.Reconcile(ctx); err != nil {
+		t.Fatal(err)
+	}
+	instances, err := single.Driver(manifest.RuntimeHost).Status(ctx, "acme.kit")
+	if err != nil || len(instances) != 1 || instances[0].MemoryBytes != 12<<20 {
+		t.Fatalf("instances = %+v, %v", instances, err)
+	}
+	act.usage = Usage{Idle: true}
+	if s, _ := single.Status("acme.kit"); !s.Idle || s.MemoryBytes != 0 {
+		t.Fatalf("status = %+v", s)
+	}
+
+	mr := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	newNode := func(role string, u Usage) *Reconciler {
+		return New(Options{
+			Repo: repo, Store: store, Registry: registry.New(), CacheDir: t.TempDir(), Redis: rdb,
+			Interval: time.Hour, Role: role, Activators: []Activator{&usageActivator{usage: u}},
+		})
+	}
+	a, b := newNode("a", Usage{MemoryBytes: 10 << 20}), newNode("b", Usage{Idle: true})
+	for _, r := range []*Reconciler{a, b} {
+		if err := r.Reconcile(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	instances, err = a.Driver(manifest.RuntimeHost).Status(ctx, "acme.kit")
+	if err != nil || len(instances) != 2 {
+		t.Fatalf("instances = %+v, %v", instances, err)
+	}
+	got := map[string]driver.InstanceStatus{}
+	for _, in := range instances {
+		got[in.Node[:1]] = in
+	}
+	if got["a"].MemoryBytes != 10<<20 || got["a"].Idle || !got["b"].Idle {
+		t.Fatalf("usage by node = %+v", got)
+	}
+}

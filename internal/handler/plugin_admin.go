@@ -276,6 +276,18 @@ type InstalledPluginDTO struct {
 	// Upgrade is set while instances have not loaded the active version:
 	// still starting it, or failed to. They keep running the previous one.
 	Upgrade *PluginUpgradeDTO `json:"upgrade,omitempty"`
+	// Memory sums up what the plugin's processes use; nil when no instance
+	// is measured or idle (remote and kubernetes plugins).
+	Memory *PluginMemoryDTO `json:"memory,omitempty"`
+}
+
+// PluginMemoryDTO sums up the resident memory of a plugin's instances.
+type PluginMemoryDTO struct {
+	// Bytes is the total over the measured instances.
+	Bytes    int64 `json:"bytes"`
+	Measured int   `json:"measured"`
+	// Idle counts instances stopped for going without calls.
+	Idle int `json:"idle"`
 }
 
 // PluginUpgradeDTO sums up the instances that have not loaded the active
@@ -292,8 +304,8 @@ type PluginUpgradeDTO struct {
 }
 
 // withEgress adds what the plugin's instances report: how its outbound
-// traffic is controlled across the nodes and plugin hosts running it, and
-// an upgrade they have not finished.
+// traffic is controlled across the nodes and plugin hosts running it, an
+// upgrade they have not finished, and the memory they use.
 func (h *PluginAdminHandler) withEgress(ctx context.Context, v *install.View) InstalledPluginDTO {
 	out := InstalledPluginDTO{View: v}
 	if h.drivers == nil || v.DesiredState != types.PluginStateEnabled ||
@@ -311,7 +323,27 @@ func (h *PluginAdminHandler) withEgress(ctx context.Context, v *install.View) In
 	}
 	out.Egress = weakestEgress(instances)
 	out.Upgrade = upgradeOf(instances)
+	out.Memory = memoryOf(instances)
 	return out
+}
+
+// memoryOf sums up the instances' memory; nil when none is measured or
+// idle.
+func memoryOf(instances []driver.InstanceStatus) *PluginMemoryDTO {
+	var out PluginMemoryDTO
+	for _, in := range instances {
+		switch {
+		case in.Idle:
+			out.Idle++
+		case in.MemoryBytes > 0:
+			out.Measured++
+			out.Bytes += in.MemoryBytes
+		}
+	}
+	if out.Measured == 0 && out.Idle == 0 {
+		return nil
+	}
+	return &out
 }
 
 // upgradeOf sums up instances with an upgrade they have not loaded; nil

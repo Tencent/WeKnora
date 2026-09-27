@@ -150,6 +150,23 @@ type EgressReporter interface {
 	Egress(pluginID string) driver.EgressMode
 }
 
+// UsageReporter is an Activator that runs plugin code and can say what a
+// plugin's processes use on this node, for the node's status report.
+type UsageReporter interface {
+	Activator
+	// Usage is false for a plugin the activator does not run here.
+	Usage(pluginID string) (Usage, bool)
+}
+
+// Usage is what a plugin's processes use on one node.
+type Usage struct {
+	// MemoryBytes is the resident memory of the plugin's processes; 0 when
+	// not measured (the plugin is starting, or the system cannot tell).
+	MemoryBytes int64 `json:"memoryBytes,omitempty"`
+	// Idle: stopped for going without calls; the next call starts it.
+	Idle bool `json:"idle,omitempty"`
+}
+
 // PendingError is returned by an activator that started the plugin but
 // finishes in the background, such as a kubernetes rollout: the plugin is
 // loaded and shows as degraded with the reason until the activator reports
@@ -178,6 +195,8 @@ type Status struct {
 	UpgradeVersion string `json:"upgradeVersion,omitempty"`
 	UpgradeState   string `json:"upgradeState,omitempty"`
 	UpgradeError   string `json:"upgradeError,omitempty"`
+	// Usage is what the plugin's processes use here, as of the report.
+	Usage
 }
 
 // Upgrade states reported in Status.
@@ -825,9 +844,24 @@ func (r *Reconciler) ReportRuntime(pluginID string, healthy bool, err error) {
 // Status reports how one plugin fares on this node.
 func (r *Reconciler) Status(pluginID string) (Status, bool) {
 	r.statusMu.RLock()
-	defer r.statusMu.RUnlock()
 	s, ok := r.status[pluginID]
+	r.statusMu.RUnlock()
+	if ok {
+		s.Usage = r.usage(pluginID)
+	}
 	return s, ok
+}
+
+// usage asks the activators what a plugin's processes use on this node.
+func (r *Reconciler) usage(pluginID string) Usage {
+	for _, a := range r.activators {
+		if u, ok := a.(UsageReporter); ok {
+			if got, ok := u.Usage(pluginID); ok {
+				return got
+			}
+		}
+	}
+	return Usage{}
 }
 
 // Loaded returns the plugins loaded on this node, sorted by ID.

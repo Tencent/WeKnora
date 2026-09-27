@@ -2748,7 +2748,8 @@ export default {
       runtime: 'Runtime',
       trust: 'Trust',
       audience: 'Visible to',
-      state: 'Status'
+      state: 'Status',
+      memory: 'Memory'
     },
     menu: {
       detail: 'View details',
@@ -2810,6 +2811,12 @@ export default {
       hint: '{count} instance(s) still run v{running}',
       pendingNode: 'Upgrading to v{version}',
       failedNode: 'Upgrade to v{version} failed'
+    },
+    memory: {
+      idle: 'Idle',
+      idleHint: '{count} instance(s) stopped for going without calls; the next call starts them',
+      total: 'Total of {count} instance(s)',
+      node: 'Memory {size}'
     },
     source: {
       upload: 'Upload',

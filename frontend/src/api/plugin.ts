@@ -120,6 +120,10 @@ export interface PluginInstance {
   upgradeVersion?: string
   upgradeState?: UpgradeState
   upgradeError?: string
+  /** Resident memory of the instance's processes; absent when not measured. */
+  memoryBytes?: number
+  /** Stopped for going without calls; the next call starts it. */
+  idle?: boolean
 }
 
 /** Where an upgrade an instance has not loaded stands. */

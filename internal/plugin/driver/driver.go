@@ -86,6 +86,11 @@ type InstanceStatus struct {
 	UpgradeVersion string `json:"upgradeVersion,omitempty"`
 	UpgradeState   string `json:"upgradeState,omitempty"`
 	UpgradeError   string `json:"upgradeError,omitempty"`
+	// MemoryBytes is the resident memory of the instance's processes; 0
+	// when not measured. Idle: stopped for going without calls, it starts
+	// on the next one.
+	MemoryBytes int64 `json:"memoryBytes,omitempty"`
+	Idle        bool  `json:"idle,omitempty"`
 }
 
 // Driver runs plugins of one runtime type.

@@ -58,6 +58,17 @@ export interface PluginNodeStatus {
   upgradeVersion?: string
   upgradeState?: UpgradeState
   upgradeError?: string
+  memoryBytes?: number
+  idle?: boolean
+}
+
+/** The resident memory of a plugin's instances, summed up. */
+export interface PluginMemory {
+  /** Total over the measured instances. */
+  bytes: number
+  measured: number
+  /** Instances stopped for going without calls. */
+  idle: number
 }
 
 /**
@@ -91,6 +102,8 @@ export interface InstalledPlugin {
   egress?: EgressMode
   /** Set while instances have not loaded the active version. */
   upgrade?: PluginUpgrade
+  /** Absent when no instance is measured or idle (remote, kubernetes). */
+  memory?: PluginMemory
   /** Set for a workspace's own plugin: the workspace that registered it. */
   owner_tenant_id?: number
   /** The workspaces the plugin is limited to; absent when every workspace sees it. */

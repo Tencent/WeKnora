@@ -64,6 +64,8 @@ type Manager struct {
 	idleTimeout time.Duration
 	reaperOnce  sync.Once
 	reaperStop  chan struct{}
+
+	memory *memorySampler
 }
 
 // handoverWindow is how long a standalone host keeps serving the previous
@@ -74,7 +76,10 @@ var handoverWindow = reconcile.DefaultInterval + 15*time.Second
 
 // NewManager creates an empty host that runs every kind this machine can.
 func NewManager() *Manager {
-	m := &Manager{procs: map[string]*process{}, idleTimeout: IdleTimeoutFromEnv(), reaperStop: make(chan struct{})}
+	m := &Manager{
+		procs: map[string]*process{}, idleTimeout: IdleTimeoutFromEnv(), reaperStop: make(chan struct{}),
+		memory: newMemorySampler(),
+	}
 	m.SetKinds(AvailableKinds())
 	return m
 }
@@ -84,7 +89,7 @@ func NewManager() *Manager {
 func NewStandaloneManager(kinds []string) *Manager {
 	m := &Manager{
 		procs: map[string]*process{}, standalone: true, handingOver: map[string]*process{},
-		idleTimeout: IdleTimeoutFromEnv(), reaperStop: make(chan struct{}),
+		idleTimeout: IdleTimeoutFromEnv(), reaperStop: make(chan struct{}), memory: newMemorySampler(),
 	}
 	m.SetKinds(kinds)
 	return m

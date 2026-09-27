@@ -5274,7 +5274,8 @@ export default {
       runtime: 'Запуск',
       trust: 'Доверие',
       audience: 'Доступен',
-      state: 'Статус'
+      state: 'Статус',
+      memory: 'Память'
     },
     menu: {
       detail: 'Подробнее',
@@ -5336,6 +5337,12 @@ export default {
       hint: 'Экземпляров, работающих на v{running}: {count}',
       pendingNode: 'Обновление до v{version}',
       failedNode: 'Не удалось обновить до v{version}'
+    },
+    memory: {
+      idle: 'Простаивает',
+      idleHint: 'Экземпляров остановлено без вызовов: {count}; следующий вызов их запустит',
+      total: 'Всего по экземплярам: {count}',
+      node: 'Память {size}'
     },
     source: {
       upload: 'Загрузка',

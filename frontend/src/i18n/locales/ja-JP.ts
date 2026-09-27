@@ -2748,7 +2748,8 @@ export default {
       runtime: '実行方式',
       trust: '信頼',
       audience: '公開範囲',
-      state: '状態'
+      state: '状態',
+      memory: 'メモリ'
     },
     menu: {
       detail: '詳細を表示',
@@ -2810,6 +2811,12 @@ export default {
       hint: '{count} 個のインスタンスは v{running} のまま稼働中',
       pendingNode: 'v{version} へアップグレード中',
       failedNode: 'v{version} へのアップグレードに失敗'
+    },
+    memory: {
+      idle: 'アイドル',
+      idleHint: '{count} 個のインスタンスは呼び出しがないため停止中。次の呼び出しで起動します',
+      total: '{count} 個のインスタンスの合計',
+      node: 'メモリ {size}'
     },
     source: {
       upload: 'アップロード',

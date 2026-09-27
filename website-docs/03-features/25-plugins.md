@@ -160,6 +160,9 @@ weknora-plugin verify -pubkey ed25519:... acme-search-1.0.0.wkp
   - 默认不回收；桌面端默认 `10m`。
   - 停掉的插件仍在「插件管理」中显示为运行中，路由、独立宿主的通告都不受影响；升级时照常先启动新版本校验，再按空闲时间回收。
   - 插件在两次调用之间要做事（如后台轮询、长连接）时，在 `plugin.yaml` 中声明 `runtime.keepAlive: true`，始终常驻；声明了 `singleton` 的插件同样常驻。
+- 内存占用：「插件管理」列表的「内存」列显示插件各实例的常驻内存（RSS）合计，插件详情的「节点状态」逐个节点显示；被空闲回收的显示「空闲」。统计的是插件进程所在的整个进程组，包括插件派生的子进程和 Linux 网络沙箱的转发进程。
+  - Linux 读 `/proc`，macOS 等系统每次采样运行一次 `ps`；Windows 不统计。采样结果缓存 10 秒，各节点随状态每 30 秒上报一次。
+  - 远程插件与 Kubernetes 插件不统计，显示为「—」。
 - 在 Linux 上，插件进程按 `runtime.resources` 限制资源：
   - 内存总是受限。插件没有声明时，按 `WEKNORA_PLUGIN_MEMORY_DEFAULT`（如 `1Gi`）限制，未设置则不限。
   - CPU 需要把一个可写的 cgroup v2 目录委托给 WeKnora，并通过 `WEKNORA_PLUGIN_CGROUP` 指定。设置后，每个插件进程进入各自的子 cgroup。

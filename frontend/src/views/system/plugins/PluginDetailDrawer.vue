@@ -71,6 +71,12 @@
               </t-tag>
               <code>{{ n.node }}</code>
               <span class="line-list__muted">v{{ n.version }}</span>
+              <t-tooltip v-if="n.idle" :content="t('pluginAdmin.memory.idleHint', { count: 1 })">
+                <t-tag size="small" variant="outline">{{ t('pluginAdmin.memory.idle') }}</t-tag>
+              </t-tooltip>
+              <span v-else-if="n.memoryBytes" class="line-list__muted">
+                {{ t('pluginAdmin.memory.node', { size: formatBytes(n.memoryBytes) }) }}
+              </span>
               <t-tooltip v-if="n.egress" :content="t(`pluginAdmin.egress.hint.${n.egress}`)">
                 <t-tag size="small" variant="outline" :theme="egressTheme(n.egress)">
                   {{ t(`pluginAdmin.egress.mode.${n.egress}`) }}
