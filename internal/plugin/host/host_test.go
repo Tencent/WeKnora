@@ -112,7 +112,7 @@ func fastTimings(t *testing.T) {
 
 func search(t *testing.T, m *Manager, q string) (string, error) {
 	t.Helper()
-	c, err := m.Client("acme.echo")
+	c, err := m.Client(context.Background(), "acme.echo")
 	if err != nil {
 		return "", err
 	}
@@ -175,7 +175,7 @@ func TestHostRunsRestartsAndStopsAPlugin(t *testing.T) {
 	if err := m.Deactivate(ctx, "acme.echo"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := m.Client("acme.echo"); err == nil {
+	if _, err := m.Client(context.Background(), "acme.echo"); err == nil {
 		t.Fatal("a stopped plugin must have no client")
 	}
 	if runtime.GOOS != "windows" {

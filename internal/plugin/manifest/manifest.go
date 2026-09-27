@@ -106,13 +106,20 @@ type Runtime struct {
 	Entry string `json:"entry,omitempty"     yaml:"entry"`
 	// Singleton allows only one live instance across the cluster (long-lived
 	// connections such as an IM WebSocket).
-	Singleton bool       `json:"singleton,omitempty" yaml:"singleton"`
+	Singleton bool `json:"singleton,omitempty" yaml:"singleton"`
+	// KeepAlive keeps a host plugin running while it is idle, where the
+	// platform stops idle plugins (WEKNORA_PLUGIN_IDLE_TIMEOUT): for
+	// plugins that work between calls, such as background polling.
+	KeepAlive bool       `json:"keepAlive,omitempty" yaml:"keepAlive"`
 	Resources *Resources `json:"resources,omitempty" yaml:"resources"`
 	// Image is the container image of a kubernetes plugin; Port is where
 	// it serves the protocol (default 8080).
 	Image string `json:"image,omitempty" yaml:"image"`
 	Port  int    `json:"port,omitempty"  yaml:"port"`
 }
+
+// Resident reports whether a host plugin must keep running while idle.
+func (r Runtime) Resident() bool { return r.KeepAlive || r.Singleton }
 
 // Resources caps a host plugin process.
 type Resources struct {

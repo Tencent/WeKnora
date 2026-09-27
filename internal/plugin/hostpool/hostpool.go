@@ -103,7 +103,8 @@ type Info struct {
 // runs reports whether the host serves a plugin version right now.
 func (i Info) runs(pluginID, version string) bool {
 	for _, p := range i.Plugins {
-		if p.ID == pluginID && p.Version == version && p.State == host.StateReady {
+		// An idle plugin starts on its first call.
+		if p.ID == pluginID && p.Version == version && (p.State == host.StateReady || p.State == host.StateIdle) {
 			return true
 		}
 	}

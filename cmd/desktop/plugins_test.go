@@ -40,7 +40,11 @@ func TestConfigureDesktopPluginsKeepsExplicitSettings(t *testing.T) {
 	t.Setenv("WEKNORA_PLUGIN_CACHE_DIR", "")
 	t.Setenv("WEKNORA_PLUGIN_PYTHON", "/custom/python3")
 	t.Setenv("WEKNORA_PLUGIN_EMBEDDED_KINDS", "")
+	t.Setenv("WEKNORA_PLUGIN_IDLE_TIMEOUT", "0")
 	configureDesktopPlugins(home)
+	if got := os.Getenv("WEKNORA_PLUGIN_IDLE_TIMEOUT"); got != "0" {
+		t.Fatalf("an explicit idle timeout was replaced: %q", got)
+	}
 	if got := os.Getenv("WEKNORA_PLUGIN_CACHE_DIR"); got != filepath.Join(home, ".weknora", "data", "plugins") {
 		t.Fatalf("cache dir = %q", got)
 	}
@@ -49,5 +53,16 @@ func TestConfigureDesktopPluginsKeepsExplicitSettings(t *testing.T) {
 	}
 	if got := os.Getenv("WEKNORA_PLUGIN_EMBEDDED_KINDS"); got != "" {
 		t.Fatalf("kinds changed despite an explicit interpreter: %q", got)
+	}
+}
+
+func TestConfigureDesktopPluginsStopsIdlePlugins(t *testing.T) {
+	t.Setenv("WEKNORA_PLUGIN_CACHE_DIR", t.TempDir())
+	t.Setenv("WEKNORA_PLUGIN_PYTHON", "/custom/python3")
+	t.Setenv("WEKNORA_PLUGIN_IDLE_TIMEOUT", "")
+	_ = os.Unsetenv("WEKNORA_PLUGIN_IDLE_TIMEOUT")
+	configureDesktopPlugins(t.TempDir())
+	if got := os.Getenv("WEKNORA_PLUGIN_IDLE_TIMEOUT"); got != desktopIdleTimeout {
+		t.Fatalf("idle timeout = %q", got)
 	}
 }

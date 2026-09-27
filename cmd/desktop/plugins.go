@@ -17,8 +17,12 @@ import (
 // directory, which macOS purges while the app runs. And a Finder-launched
 // app only has launchd's PATH, where python3 is at best Apple's stub that
 // offers to install the developer tools; python plugins get an interpreter
-// found in the usual places, or are left off.
+// found in the usual places, or are left off. Plugins stop after 10
+// minutes without calls, so a laptop does not keep them all running.
 func configureDesktopPlugins(home string) {
+	if _, set := os.LookupEnv("WEKNORA_PLUGIN_IDLE_TIMEOUT"); !set {
+		_ = os.Setenv("WEKNORA_PLUGIN_IDLE_TIMEOUT", desktopIdleTimeout)
+	}
 	if strings.TrimSpace(os.Getenv("WEKNORA_PLUGIN_CACHE_DIR")) == "" {
 		dir := filepath.Join(home, ".weknora", "data", "plugins")
 		if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -38,6 +42,9 @@ func configureDesktopPlugins(home string) {
 	logger.Infof(context.Background(), "No python3 found for python plugins; only binary plugins will run")
 	_ = os.Setenv("WEKNORA_PLUGIN_EMBEDDED_KINDS", "binary")
 }
+
+// desktopIdleTimeout is how long a desktop plugin runs without calls.
+const desktopIdleTimeout = "10m"
 
 // desktopPython finds a python3 a desktop app can run: on PATH, then where
 // Homebrew, python.org and pyenv put it. On macOS /usr/bin/python3 counts

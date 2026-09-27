@@ -258,3 +258,16 @@ func waitFor(t *testing.T, cond func() bool) {
 		time.Sleep(10 * time.Millisecond)
 	}
 }
+
+// A plugin the host stopped for being idle still counts: the gateway starts
+// it on the first call.
+func TestIdlePluginsCountAsRunning(t *testing.T) {
+	i := Info{Plugins: []host.Running{{ID: "acme.py", Version: "1.0.0", State: host.StateIdle}}}
+	if !i.runs("acme.py", "1.0.0") {
+		t.Fatal("an idle plugin must count as running")
+	}
+	i.Plugins[0].State = host.StateDegraded
+	if i.runs("acme.py", "1.0.0") {
+		t.Fatal("a degraded plugin must not")
+	}
+}

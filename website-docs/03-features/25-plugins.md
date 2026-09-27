@@ -156,6 +156,10 @@ weknora-plugin verify -pubkey ed25519:... acme-search-1.0.0.wkp
 - 出网流量经宿主的出口代理，只放行插件在 `permissions.egress` 中声明的域名，内网地址一律拒绝。
 - 宿主检查运行的进程与安装的包一致，健康检查失败时按退避重启，并在插件详情中显示为「异常」。
 - Python 插件使用本机的 `python3`（可用 `WEKNORA_PLUGIN_PYTHON` 指定解释器）。Docker app 镜像已带 Python。
+- 空闲回收：设置 `WEKNORA_PLUGIN_IDLE_TIMEOUT`（如 `10m`）后，插件在这段时间内没有任何调用（健康检查不算）就停掉进程，下一次调用时再启动，这次调用会多等一次启动时间（示例插件实测：Go 约 10 ms，Python 约 70 ms，视插件自身的初始化而定）。有调用进行中（包括连接器的流式同步）时不会回收。
+  - 默认不回收；桌面端默认 `10m`。
+  - 停掉的插件仍在「插件管理」中显示为运行中，路由、独立宿主的通告都不受影响；升级时照常先启动新版本校验，再按空闲时间回收。
+  - 插件在两次调用之间要做事（如后台轮询、长连接）时，在 `plugin.yaml` 中声明 `runtime.keepAlive: true`，始终常驻；声明了 `singleton` 的插件同样常驻。
 - 在 Linux 上，插件进程按 `runtime.resources` 限制资源：
   - 内存总是受限。插件没有声明时，按 `WEKNORA_PLUGIN_MEMORY_DEFAULT`（如 `1Gi`）限制，未设置则不限。
   - CPU 需要把一个可写的 cgroup v2 目录委托给 WeKnora，并通过 `WEKNORA_PLUGIN_CGROUP` 指定。设置后，每个插件进程进入各自的子 cgroup。

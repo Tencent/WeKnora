@@ -58,6 +58,12 @@ type Manager struct {
 	// hosts only).
 	handingOver map[string]*process
 	onChange    func()
+
+	// idleTimeout stops plugins without calls for that long; 0 keeps them
+	// running. The reaper starts with the first plugin.
+	idleTimeout time.Duration
+	reaperOnce  sync.Once
+	reaperStop  chan struct{}
 }
 
 // handoverWindow is how long a standalone host keeps serving the previous
@@ -68,7 +74,7 @@ var handoverWindow = reconcile.DefaultInterval + 15*time.Second
 
 // NewManager creates an empty host that runs every kind this machine can.
 func NewManager() *Manager {
-	m := &Manager{procs: map[string]*process{}}
+	m := &Manager{procs: map[string]*process{}, idleTimeout: IdleTimeoutFromEnv(), reaperStop: make(chan struct{})}
 	m.SetKinds(AvailableKinds())
 	return m
 }
@@ -76,7 +82,10 @@ func NewManager() *Manager {
 // NewStandaloneManager creates the host of a standalone plugin host
 // (weknora plugin-host): it runs the given kinds and refuses the others.
 func NewStandaloneManager(kinds []string) *Manager {
-	m := &Manager{procs: map[string]*process{}, standalone: true, handingOver: map[string]*process{}}
+	m := &Manager{
+		procs: map[string]*process{}, standalone: true, handingOver: map[string]*process{},
+		idleTimeout: IdleTimeoutFromEnv(), reaperStop: make(chan struct{}),
+	}
 	m.SetKinds(kinds)
 	return m
 }
@@ -147,6 +156,14 @@ func (m *Manager) Runs(kind string) bool {
 func (m *Manager) SetDirectHosts(hosts ...string) {
 	m.mu.Lock()
 	m.direct = append([]string(nil), hosts...)
+	m.mu.Unlock()
+}
+
+// SetIdleTimeout stops plugins that go without calls for d until their
+// next call; 0 keeps them running. Set it before the first plugin starts.
+func (m *Manager) SetIdleTimeout(d time.Duration) {
+	m.mu.Lock()
+	m.idleTimeout = d
 	m.mu.Unlock()
 }
 
@@ -229,6 +246,7 @@ func (m *Manager) Stage(ctx context.Context, _, l *reconcile.Loaded) (reconcile.
 // it replaces.
 func (m *Manager) serve(ctx context.Context, mf *manifest.Manifest, p *process) {
 	id := mf.ID
+	m.startReaper()
 	m.mu.Lock()
 	old := m.procs[id]
 	m.procs[id] = p
@@ -248,6 +266,21 @@ func (m *Manager) serve(ctx context.Context, mf *manifest.Manifest, p *process) 
 	}
 	m.changed()
 	logger.Infof(ctx, "[plugin] host started %s %s", id, mf.Version)
+}
+
+// startReaper starts stopping idle plugins, once, if the host is set to.
+func (m *Manager) startReaper() {
+	m.mu.Lock()
+	timeout := m.idleTimeout
+	m.mu.Unlock()
+	if timeout <= 0 {
+		return
+	}
+	m.reaperOnce.Do(func() {
+		logger.Infof(context.Background(), "[plugin] host plugins stop after %s without calls (%s)",
+			timeout, envIdleTimeout)
+		go m.idleReaper(timeout, m.reaperStop)
+	})
 }
 
 // endHandover stops serving a plugin's previous version, unless it was
@@ -314,9 +347,10 @@ func (m *Manager) report(pluginID string, p *process, s State, err error) {
 	}
 }
 
-// Client returns a client for a running plugin. The error is a retryable
+// Client returns a client for a running plugin, starting it if it was
+// stopped for being idle (ctx bounds the wait). The error is a retryable
 // pluginapi unavailable error while the plugin is starting or restarting.
-func (m *Manager) Client(pluginID string) (*client.Client, error) {
+func (m *Manager) Client(ctx context.Context, pluginID string) (*client.Client, error) {
 	m.mu.Lock()
 	p := m.procs[pluginID]
 	m.mu.Unlock()
@@ -325,7 +359,7 @@ func (m *Manager) Client(pluginID string) (*client.Client, error) {
 			Code: pluginapi.CodeUnavailable, Message: fmt.Sprintf("plugin %s is not running on this node", pluginID),
 		}
 	}
-	return p.Client()
+	return p.Client(ctx)
 }
 
 // Local reports whether a plugin runs on this host.
@@ -391,7 +425,13 @@ func (m *Manager) InFlight() int64 { return m.inFlight.Load() }
 
 // Close stops every plugin, for shutdown.
 func (m *Manager) Close() {
+	m.reaperOnce.Do(func() {}) // no reaper starts after this
 	m.mu.Lock()
+	select {
+	case <-m.reaperStop:
+	default:
+		close(m.reaperStop)
+	}
 	procs := make([]*process, 0, len(m.procs)+len(m.handingOver))
 	for _, p := range m.procs {
 		procs = append(procs, p)

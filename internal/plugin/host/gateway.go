@@ -77,7 +77,7 @@ func (m *Manager) relay(w http.ResponseWriter, r *http.Request, key []byte) {
 		gatewayError(w, pluginapi.Errorf(pluginapi.CodeUnavailable, "this host does not run %s@%s", id, version))
 		return
 	}
-	c, err := p.Client()
+	c, err := p.Client(r.Context())
 	if err != nil {
 		if pe, ok := pluginapi.AsError(err); ok {
 			gatewayError(w, pe)

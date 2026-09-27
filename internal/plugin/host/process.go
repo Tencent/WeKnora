@@ -62,6 +62,9 @@ const (
 	StateReady    State = "ready"
 	StateDegraded State = "degraded"
 	StateStopped  State = "stopped"
+	// StateIdle: stopped after going without calls; the next call starts
+	// it again (WEKNORA_PLUGIN_IDLE_TIMEOUT).
+	StateIdle State = "idle"
 )
 
 // spec is everything needed to start one plugin version.
@@ -139,6 +142,14 @@ type process struct {
 	client  *client.Client
 	state   State
 	lastErr error
+	// changed is closed and replaced on every state change, for callers
+	// waiting for an idle plugin to start.
+	changed chan struct{}
+
+	activity *activity
+	// park asks the supervisor to stop the idle child; wake to start it.
+	park chan struct{}
+	wake chan struct{}
 
 	cancel  context.CancelFunc
 	done    chan struct{}
@@ -177,7 +188,8 @@ func startProcess(sp spec, onState func(*process, State, error)) (*process, erro
 	ctx, cancel := context.WithCancel(context.Background())
 	p := &process{
 		spec: sp, onState: onState, cancel: cancel, done: make(chan struct{}), proxy: proxy, sockDir: sockDir,
-		sandboxed: useSandbox(),
+		sandboxed: useSandbox(), changed: make(chan struct{}), activity: newActivity(),
+		park: make(chan struct{}, 1), wake: make(chan struct{}, 1),
 	}
 	p.setState(StateStarting, nil)
 	first, err := p.launch(ctx, entry)
@@ -373,7 +385,7 @@ func (p *process) launch(ctx context.Context, entry string) (*launched, error) {
 		kill()
 		return nil, fmt.Errorf("plugin listens on %s %s, not where it was told", hs.Network, hs.Address)
 	}
-	c := client.ForHandshake(hs, client.Bearer(token))
+	c := processClient(hs, client.Bearer(token), p.activity)
 	cctx, cancel := context.WithTimeout(ctx, healthTimeout)
 	defer cancel()
 	if err := c.Health(cctx); err != nil {
@@ -483,12 +495,23 @@ func readLogLine(br *bufio.Reader) (line string, truncated bool, err error) {
 
 func (p *process) setState(s State, err error) {
 	p.mu.Lock()
-	changed := p.state != s || (err != nil) != (p.lastErr != nil)
-	p.state, p.lastErr = s, err
+	changed := p.setStateLocked(s, err)
 	p.mu.Unlock()
 	if changed && p.onState != nil {
 		p.onState(p, s, err)
 	}
+}
+
+// setStateLocked records a state with p.mu held and wakes the callers
+// waiting on it; it reports whether anything changed.
+func (p *process) setStateLocked(s State, err error) bool {
+	changed := p.state != s || (err != nil) != (p.lastErr != nil)
+	p.state, p.lastErr = s, err
+	if changed {
+		close(p.changed)
+		p.changed = make(chan struct{})
+	}
+	return changed
 }
 
 func (p *process) setClient(c *client.Client) {
@@ -509,18 +532,41 @@ func (p *process) egress() driver.EgressMode {
 	return driver.EgressProxy
 }
 
-// Client returns the client of the running child, or an unavailable error.
-func (p *process) Client() (*client.Client, error) {
-	p.mu.RLock()
-	defer p.mu.RUnlock()
-	if p.client == nil || p.state != StateReady {
-		msg := fmt.Sprintf("plugin %s is %s", p.spec.m.ID, p.state)
-		if p.lastErr != nil {
-			msg += ": " + p.lastErr.Error()
+// Client returns the client of the running child, starting an idle one
+// and waiting for it (bounded by ctx), or an unavailable error.
+func (p *process) Client(ctx context.Context) (*client.Client, error) {
+	for {
+		p.mu.RLock()
+		st, c, changed, lastErr := p.state, p.client, p.changed, p.lastErr
+		if st == StateReady && c != nil {
+			// Counts as use, so the plugin is not stopped for being
+			// idle before the call goes out.
+			p.activity.touch()
+			p.mu.RUnlock()
+			return c, nil
 		}
-		return nil, &pluginapi.Error{Code: pluginapi.CodeUnavailable, Message: msg, Retryable: true}
+		p.mu.RUnlock()
+		switch st {
+		case StateIdle:
+			p.requestWake()
+		case StateStarting:
+		default:
+			msg := fmt.Sprintf("plugin %s is %s", p.spec.m.ID, st)
+			if lastErr != nil {
+				msg += ": " + lastErr.Error()
+			}
+			return nil, &pluginapi.Error{Code: pluginapi.CodeUnavailable, Message: msg, Retryable: true}
+		}
+		select {
+		case <-changed:
+		case <-ctx.Done():
+			return nil, &pluginapi.Error{
+				Code:      pluginapi.CodeUnavailable,
+				Message:   fmt.Sprintf("plugin %s is starting: %v", p.spec.m.ID, ctx.Err()),
+				Retryable: true,
+			}
+		}
 	}
-	return p.client, nil
 }
 
 // supervise keeps the plugin running: health checks, restart with backoff
@@ -536,6 +582,27 @@ func (p *process) supervise(ctx context.Context, entry string, cur *launched) {
 		if ctx.Err() != nil {
 			p.setState(StateStopped, nil)
 			return
+		}
+		if errors.Is(exitErr, errParked) {
+			logger.Infof(ctx, "[plugin] %s stopped while idle; the next call starts it", p.spec.m.ID)
+			select {
+			case <-ctx.Done():
+				p.setState(StateStopped, nil)
+				return
+			case <-p.wake:
+			}
+			p.setState(StateStarting, nil)
+			next, err := p.launch(ctx, entry)
+			if err == nil {
+				cur = next
+				logger.Infof(ctx, "[plugin] %s started for a call", p.spec.m.ID)
+				continue
+			}
+			if ctx.Err() != nil {
+				p.setState(StateStopped, nil)
+				return
+			}
+			exitErr = err
 		}
 		logger.Warnf(ctx, "[plugin] %s stopped unexpectedly: %v; restarting in %s", p.spec.m.ID, exitErr, backoff)
 		p.setState(StateDegraded, exitErr)
@@ -580,6 +647,12 @@ func (p *process) watch(ctx context.Context, cur *launched) error {
 		case <-ctx.Done():
 			stopChild(cur.cmd, cur.exited)
 			return nil
+		case <-p.park:
+			if !p.parkIntended() {
+				continue // a stale signal: the plugin restarted since
+			}
+			stopChild(cur.cmd, cur.exited)
+			return errParked
 		case <-t.C:
 			hctx, cancel := context.WithTimeout(ctx, healthTimeout)
 			err := cur.client.Health(hctx)

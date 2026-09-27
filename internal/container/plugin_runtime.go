@@ -272,7 +272,7 @@ func (c pluginClients) Client(ctx context.Context, m *manifest.Manifest) (*clien
 	case c.remote.Owns(m.ID):
 		return c.remote.Client(m.ID)
 	case c.host.Local(m.ID) || c.pool == nil || m.Runtime.Type != manifest.RuntimeHost:
-		return c.host.Client(m.ID)
+		return c.host.Client(ctx, m.ID)
 	default:
 		return c.pool.Client(ctx, m.ID, m.Version)
 	}

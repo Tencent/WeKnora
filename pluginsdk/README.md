@@ -440,6 +440,12 @@ A few rules the manifest and host enforce:
   caps the process (Linux). Memory is always capped. CPU is capped only
   when the platform delegates a cgroup to WeKnora
   (`WEKNORA_PLUGIN_CGROUP`).
+- **Idle plugins.** A platform may stop a plugin that has had no calls for
+  a while (`WEKNORA_PLUGIN_IDLE_TIMEOUT`; the desktop app does after 10
+  minutes) and start it again on the next call. Keep no state between
+  calls that you cannot rebuild, and do no work in the background. If the
+  plugin must keep running (polling, a long-lived connection), declare
+  `runtime: { ..., keepAlive: true }`.
 - **IDs.** Contribution IDs are qualified with the plugin ID
   (`acme.notes/notes`); for connectors and web search that must stay within
   50 characters.
