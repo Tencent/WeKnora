@@ -262,3 +262,51 @@ func TestWeakestEgress(t *testing.T) {
 		}
 	}
 }
+
+// The admin list says when instances have not loaded the active version,
+// for declarative plugins too: failed if any failed, with the version they
+// still run.
+func TestPluginAdminListsUnfinishedUpgrades(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repo, store := plugintest.NewMemRepo(), &plugintest.MemStore{}
+	r := reconcile.New(reconcile.Options{Repo: repo, Store: store, Registry: registry.New(), CacheDir: t.TempDir()})
+	svc := install.NewService(repo, store, r, "0.5.0")
+	plugintest.Install(t, repo, store, plugintest.KitPackage(t, "1.1.0"), types.PluginStateEnabled)
+
+	h := NewPluginAdminHandler(svc).WithDrivers(driver.NewSet(statusDriver{
+		rt: manifest.RuntimeDeclarative, instances: []driver.InstanceStatus{
+			{Node: "a/1", Version: "1.1.0"},
+			{Node: "b/1", Version: "1.0.0", UpgradeVersion: "1.1.0", UpgradeState: "pending", UpgradeError: "starting"},
+			{Node: "c/1", Version: "1.0.0", UpgradeVersion: "1.1.0", UpgradeState: "failed", UpgradeError: "boom"},
+		},
+	}))
+	e := gin.New()
+	e.Use(middleware.ErrorHandler())
+	e.GET("/plugins", h.ListInstalledPlugins)
+	var list struct {
+		Data []struct {
+			Upgrade *PluginUpgradeDTO `json:"upgrade"`
+		} `json:"data"`
+	}
+	w := call(e, http.MethodGet, "/plugins", "", nil)
+	if err := json.Unmarshal(w.Body.Bytes(), &list); err != nil || len(list.Data) != 1 {
+		t.Fatalf("list = %s", w.Body.String())
+	}
+	want := PluginUpgradeDTO{Version: "1.1.0", State: "failed", Error: "boom", Running: "1.0.0", Instances: 2}
+	if u := list.Data[0].Upgrade; u == nil || *u != want {
+		t.Fatalf("upgrade = %+v", u)
+	}
+}
+
+func TestUpgradeOf(t *testing.T) {
+	if upgradeOf([]driver.InstanceStatus{{Version: "1.0.0"}}) != nil {
+		t.Fatal("no upgrade expected")
+	}
+	u := upgradeOf([]driver.InstanceStatus{
+		{Version: "1.0.0", UpgradeVersion: "2.0.0", UpgradeState: "pending", UpgradeError: "rolling out"},
+		{Version: "1.0.0", UpgradeVersion: "2.0.0", UpgradeState: "pending", UpgradeError: "later"},
+	})
+	if u == nil || u.State != "pending" || u.Error != "rolling out" || u.Instances != 2 {
+		t.Fatalf("upgrade = %+v", u)
+	}
+}

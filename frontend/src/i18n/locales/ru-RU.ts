@@ -5330,6 +5330,13 @@ export default {
       unenforced: 'Исходящий трафик не ограничен',
       unenforcedHint: 'Плагин запрашивает исходящий доступ, но хотя бы один его экземпляр не ограничен разрешениями: его код может обойти исходящий прокси и подключиться напрямую.'
     },
+    upgrade: {
+      pending: 'Обновление · v{version}',
+      failed: 'Сбой обновления · v{version}',
+      hint: 'Экземпляров, работающих на v{running}: {count}',
+      pendingNode: 'Обновление до v{version}',
+      failedNode: 'Не удалось обновить до v{version}'
+    },
     source: {
       upload: 'Загрузка',
       url: 'URL'

@@ -17,6 +17,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/plugin/manifest"
 	"github.com/Tencent/WeKnora/internal/plugin/market"
 	"github.com/Tencent/WeKnora/internal/plugin/pkg"
+	"github.com/Tencent/WeKnora/internal/plugin/reconcile"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -272,17 +273,31 @@ type InstalledPluginDTO struct {
 	// so the console can flag a grant that is not enforced everywhere.
 	// Empty for plugins without code or without instances.
 	Egress driver.EgressMode `json:"egress,omitempty"`
+	// Upgrade is set while instances have not loaded the active version:
+	// still starting it, or failed to. They keep running the previous one.
+	Upgrade *PluginUpgradeDTO `json:"upgrade,omitempty"`
 }
 
-// withEgress adds how the plugin's outbound traffic is controlled across
-// the nodes and plugin hosts running it.
+// PluginUpgradeDTO sums up the instances that have not loaded the active
+// version: failed if any failed, else pending.
+type PluginUpgradeDTO struct {
+	Version string `json:"version"`
+	State   string `json:"state"`
+	// Error is what the first such instance waits for or why it failed.
+	Error string `json:"error,omitempty"`
+	// Running is the version those instances run meanwhile.
+	Running string `json:"running"`
+	// Instances counts them.
+	Instances int `json:"instances"`
+}
+
+// withEgress adds what the plugin's instances report: how its outbound
+// traffic is controlled across the nodes and plugin hosts running it, and
+// an upgrade they have not finished.
 func (h *PluginAdminHandler) withEgress(ctx context.Context, v *install.View) InstalledPluginDTO {
 	out := InstalledPluginDTO{View: v}
-	if h.drivers == nil || v.DesiredState != types.PluginStateEnabled {
-		return out
-	}
-	switch manifest.RuntimeType(v.Runtime) {
-	case manifest.RuntimeBuiltin, manifest.RuntimeDeclarative:
+	if h.drivers == nil || v.DesiredState != types.PluginStateEnabled ||
+		manifest.RuntimeType(v.Runtime) == manifest.RuntimeBuiltin {
 		return out
 	}
 	d, err := h.drivers.For(manifest.RuntimeType(v.Runtime))
@@ -295,6 +310,29 @@ func (h *PluginAdminHandler) withEgress(ctx context.Context, v *install.View) In
 		return out
 	}
 	out.Egress = weakestEgress(instances)
+	out.Upgrade = upgradeOf(instances)
+	return out
+}
+
+// upgradeOf sums up instances with an upgrade they have not loaded; nil
+// when there are none.
+func upgradeOf(instances []driver.InstanceStatus) *PluginUpgradeDTO {
+	var out *PluginUpgradeDTO
+	for _, in := range instances {
+		if in.UpgradeVersion == "" {
+			continue
+		}
+		if out == nil {
+			out = &PluginUpgradeDTO{Version: in.UpgradeVersion, State: in.UpgradeState, Running: in.Version}
+		}
+		out.Instances++
+		if in.UpgradeState == reconcile.UpgradeFailed && out.State != reconcile.UpgradeFailed {
+			out.State, out.Error, out.Running = reconcile.UpgradeFailed, "", in.Version
+		}
+		if out.Error == "" && in.UpgradeState == out.State {
+			out.Error = in.UpgradeError
+		}
+	}
 	return out
 }
 

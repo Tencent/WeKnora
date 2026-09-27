@@ -113,7 +113,17 @@ export interface PluginInstance {
   updatedAt: string
   /** Absent for plugins without code and nodes that leave the plugin to plugin hosts. */
   egress?: EgressMode
+  /**
+   * A newer version the instance has not loaded: still starting it, or
+   * failed to. It runs version meanwhile; upgradeError says why.
+   */
+  upgradeVersion?: string
+  upgradeState?: UpgradeState
+  upgradeError?: string
 }
+
+/** Where an upgrade an instance has not loaded stands. */
+export type UpgradeState = 'pending' | 'failed'
 
 /** A plugin configuration: its schema and values, secrets redacted. */
 export interface PluginConfig {

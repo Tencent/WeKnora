@@ -2804,6 +2804,13 @@ export default {
       unenforced: 'Egress not enforced',
       unenforcedHint: 'This plugin asks for outbound access, but at least one of its instances is not held to the grant: its code can bypass the egress proxy and connect directly.'
     },
+    upgrade: {
+      pending: 'Upgrading · v{version}',
+      failed: 'Upgrade failed · v{version}',
+      hint: '{count} instance(s) still run v{running}',
+      pendingNode: 'Upgrading to v{version}',
+      failedNode: 'Upgrade to v{version} failed'
+    },
     source: {
       upload: 'Upload',
       url: 'URL'

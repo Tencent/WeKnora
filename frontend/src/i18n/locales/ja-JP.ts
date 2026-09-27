@@ -2804,6 +2804,13 @@ export default {
       unenforced: '送信制限なし',
       unenforcedHint: 'このプラグインは送信権限を宣言していますが、少なくとも 1 つのインスタンスでは制限が強制されておらず、コードが送信プロキシを迂回して直接接続できます。'
     },
+    upgrade: {
+      pending: 'アップグレード中 · v{version}',
+      failed: 'アップグレード失敗 · v{version}',
+      hint: '{count} 個のインスタンスは v{running} のまま稼働中',
+      pendingNode: 'v{version} へアップグレード中',
+      failedNode: 'v{version} へのアップグレードに失敗'
+    },
     source: {
       upload: 'アップロード',
       url: 'URL'

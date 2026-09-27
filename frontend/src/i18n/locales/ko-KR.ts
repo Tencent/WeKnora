@@ -5330,6 +5330,13 @@ export default {
       unenforced: '이그레스 미강제',
       unenforcedHint: '이 플러그인은 이그레스 권한을 선언했지만 적어도 하나의 인스턴스에서 제한이 강제되지 않아, 코드가 이그레스 프록시를 우회해 직접 연결할 수 있습니다.'
     },
+    upgrade: {
+      pending: '업그레이드 중 · v{version}',
+      failed: '업그레이드 실패 · v{version}',
+      hint: '인스턴스 {count}개가 여전히 v{running}을(를) 실행 중',
+      pendingNode: 'v{version}(으)로 업그레이드 중',
+      failedNode: 'v{version}(으)로 업그레이드 실패'
+    },
     source: {
       upload: '업로드',
       url: 'URL'

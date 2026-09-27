@@ -1,6 +1,6 @@
 // Pure helpers behind PluginManagement.vue, kept free of Vue so they run
 // under node:test.
-import type { EgressMode, ExtensionPoint, PluginManifest, PluginPermissions } from '../../api/plugin'
+import type { EgressMode, ExtensionPoint, PluginManifest, PluginPermissions, UpgradeState } from '../../api/plugin'
 import type { InstalledPlugin, MarketPlugin, PluginVersion, TrustLevel, TrustVerdict } from '../../api/system/plugins'
 import { localizedText } from '../../utils/localizedText'
 import { EXTENSION_POINTS } from '../settings/pluginCenterState'
@@ -159,6 +159,11 @@ export function installedState(p: InstalledPlugin): InstalledState {
   }
 }
 
+/** The tag theme of an unfinished upgrade: a failed one warns. */
+export function upgradeTheme(state: UpgradeState | undefined): 'warning' | 'primary' {
+  return state === 'failed' ? 'warning' : 'primary'
+}
+
 /** Whether an egress mode holds plugin code to its grant. */
 export function egressEnforced(mode: EgressMode | undefined): boolean {
   return mode === 'sandboxed' || mode === 'networkPolicy'
@@ -225,7 +230,7 @@ export function matchesAdminFilter(p: InstalledPlugin, f: AdminFilter): boolean 
   switch (f) {
     case 'problem': {
       const s = installedState(p)
-      return s === 'failed' || s === 'degraded'
+      return s === 'failed' || s === 'degraded' || p.upgrade?.state === 'failed'
     }
     case 'disabled':
       return p.desired_state === 'disabled'

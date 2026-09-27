@@ -76,7 +76,13 @@
                   {{ t(`pluginAdmin.egress.mode.${n.egress}`) }}
                 </t-tag>
               </t-tooltip>
+              <t-tag v-if="n.upgradeVersion" size="small" variant="light" :theme="upgradeTheme(n.upgradeState)">
+                {{ t(`pluginAdmin.upgrade.${n.upgradeState === 'failed' ? 'failedNode' : 'pendingNode'}`, { version: n.upgradeVersion }) }}
+              </t-tag>
               <span v-if="n.error" class="line-list__error">{{ n.error }}</span>
+              <span v-if="n.upgradeError" class="line-list__error" :class="{ 'line-list__error--info': n.upgradeState !== 'failed' }">
+                {{ n.upgradeError }}
+              </span>
             </li>
           </ul>
         </template>
@@ -233,6 +239,7 @@ import {
   shortDigest,
   sortVersions,
   trustTheme,
+  upgradeTheme,
   weakestEgress,
 } from '../pluginManagementState'
 
@@ -522,6 +529,10 @@ async function uninstall() {
     flex-basis: 100%;
     font-size: var(--app-text-xs);
     color: var(--td-error-color);
+
+    &--info {
+      color: var(--td-text-color-secondary);
+    }
   }
 }
 

@@ -76,7 +76,8 @@
                   </div>
                 </div>
               </td>
-              <td class="plugin-row__num">v{{ p.active_version }}</td>
+              <!-- While an upgrade is unfinished the instances still run the previous version. -->
+              <td class="plugin-row__num">v{{ p.upgrade?.running || p.active_version }}</td>
               <td>{{ runtimeLabel(p.runtime) }}</td>
               <td>
                 <span class="trust" :class="`trust--${activeTrust(p)}`">{{ t(`pluginAdmin.trust.${activeTrust(p)}`) }}</span>
@@ -86,6 +87,15 @@
                 <div class="plugin-row__state">
                   <t-tooltip :content="p.node?.error" :disabled="!p.node?.error">
                     <span class="state" :class="`state--${installedState(p)}`">{{ t(`pluginAdmin.state.${installedState(p)}`) }}</span>
+                  </t-tooltip>
+                  <t-tooltip v-if="p.upgrade">
+                    <template #content>
+                      <div>{{ t('pluginAdmin.upgrade.hint', { count: p.upgrade.instances, running: p.upgrade.running }) }}</div>
+                      <div v-if="p.upgrade.error" class="upgrade-flag__error">{{ p.upgrade.error }}</div>
+                    </template>
+                    <span class="upgrade-flag" :class="`upgrade-flag--${p.upgrade.state}`">
+                      {{ t(`pluginAdmin.upgrade.${p.upgrade.state}`, { version: p.upgrade.version }) }}
+                    </span>
                   </t-tooltip>
                   <t-tooltip v-if="egressUnenforced(p.manifest, p.egress)" :content="t('pluginAdmin.egress.unenforcedHint')">
                     <span class="egress-flag">{{ t('pluginAdmin.egress.unenforced') }}</span>
@@ -391,6 +401,29 @@ onMounted(load)
   font-size: var(--app-text-sm);
   color: var(--td-warning-color);
   background: var(--td-warning-color-1);
+}
+.upgrade-flag {
+  padding: 1px 6px;
+  border-radius: var(--app-radius-xs);
+  font-size: var(--app-text-sm);
+  white-space: nowrap;
+
+  &--pending {
+    color: var(--td-brand-color);
+    background: var(--td-brand-color-light);
+  }
+
+  &--failed {
+    color: var(--td-warning-color);
+    background: var(--td-warning-color-1);
+  }
+
+  &__error {
+    margin-top: 4px;
+    max-width: 360px;
+    word-break: break-word;
+    opacity: 0.8;
+  }
 }
 
 // Community is the default and stays quiet; official and verified stand out.

@@ -2,7 +2,7 @@
 import { del, get, post, postUpload, put } from '@/utils/request'
 
 import type { ConfigValue } from '@/components/schema-form/schema'
-import type { EgressMode, PluginConfig, PluginInstance, PluginManifest } from '@/api/plugin'
+import type { EgressMode, PluginConfig, PluginInstance, PluginManifest, UpgradeState } from '@/api/plugin'
 
 const BASE = '/api/v1/system/admin/plugins'
 const PACKAGE_TIMEOUT = 5 * 60 * 1000
@@ -55,6 +55,23 @@ export interface PluginNodeStatus {
   error?: string
   updatedAt: string
   egress?: EgressMode
+  upgradeVersion?: string
+  upgradeState?: UpgradeState
+  upgradeError?: string
+}
+
+/**
+ * Instances that have not loaded the active version, summed up: failed if
+ * any failed, else pending. They keep running the previous version.
+ */
+export interface PluginUpgrade {
+  version: string
+  state: UpgradeState
+  /** What the first such instance waits for, or why it failed. */
+  error?: string
+  /** The version they run meanwhile. */
+  running: string
+  instances: number
 }
 
 export interface InstalledPlugin {
@@ -72,6 +89,8 @@ export interface InstalledPlugin {
   node?: PluginNodeStatus
   /** The least controlled egress mode among the plugin's instances. */
   egress?: EgressMode
+  /** Set while instances have not loaded the active version. */
+  upgrade?: PluginUpgrade
   /** Set for a workspace's own plugin: the workspace that registered it. */
   owner_tenant_id?: number
   /** The workspaces the plugin is limited to; absent when every workspace sees it. */

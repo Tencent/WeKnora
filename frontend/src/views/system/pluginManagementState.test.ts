@@ -16,6 +16,7 @@ import {
   shortDigest,
   trustNote,
   trustTheme,
+  upgradeTheme,
   filterMarket,
   marketAction,
   audienceOf,
@@ -150,11 +151,15 @@ test('installed table filters, trust and visibility', () => {
     p('a.broken', { node: { version: '1', state: 'failed', updatedAt: '' } }),
     p('c.off', { desired_state: 'disabled' }),
     p('d.own', { owner_tenant_id: 7, manifest }),
+    p('e.stuck', { upgrade: { version: '2.0.0', state: 'failed', running: '1.0.0', instances: 1 } }),
+    p('f.rolling', { upgrade: { version: '2.0.0', state: 'pending', running: '1.0.0', instances: 1 } }),
   ]
   const ids = (filter: 'all' | 'problem' | 'disabled' | 'owned', query = '') =>
     filterInstalled(list, { filter, query, locale: 'en-US' }).map((x) => x.id)
-  assert.deepEqual(ids('all'), ['a.broken', 'b.ok', 'c.off', 'd.own'])
-  assert.deepEqual(ids('problem'), ['a.broken'])
+  assert.deepEqual(ids('all'), ['a.broken', 'b.ok', 'c.off', 'd.own', 'e.stuck', 'f.rolling'])
+  // A failed upgrade is a problem even while the previous version serves;
+  // one still rolling out is not.
+  assert.deepEqual(ids('problem'), ['a.broken', 'e.stuck'])
   assert.deepEqual(ids('disabled'), ['c.off'])
   assert.deepEqual(ids('owned'), ['d.own'])
   assert.deepEqual(ids('all', 'acme search'), ['d.own'])
@@ -189,4 +194,9 @@ test('egress modes: enforced or not, and which plugins to flag', () => {
   assert.equal(egressUnenforced(manifest, undefined), false)
   assert.equal(egressUnenforced({ ...manifest, permissions: {} }, 'proxy'), false)
   assert.equal(egressUnenforced(undefined, 'proxy'), false)
+})
+
+test('upgrade themes', () => {
+  assert.equal(upgradeTheme('failed'), 'warning')
+  assert.equal(upgradeTheme('pending'), 'primary')
 })

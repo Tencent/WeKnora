@@ -5332,6 +5332,13 @@ export default {
       unenforced: '出网未强制',
       unenforcedHint: '该插件声明了出网权限，但至少有一个实例的出网未被强制限制，插件代码可以绕过出口代理直接访问外部。'
     },
+    upgrade: {
+      pending: '升级中 · v{version}',
+      failed: '升级失败 · v{version}',
+      hint: '{count} 个实例仍在运行 v{running}',
+      pendingNode: '正在升级到 v{version}',
+      failedNode: '升级到 v{version} 失败'
+    },
     source: {
       upload: '上传',
       url: 'URL'
