@@ -124,6 +124,15 @@ func (c *Connector) Validate(ctx context.Context, dataSourceConfig *types.DataSo
 			if !child.isDocument() {
 				continue
 			}
+			// A native spreadsheet is read through the workbooks API, so it is
+			// probed with that same call: probing a workbook through the blocks
+			// API would report a readable selection as broken.
+			if child.isSheet() {
+				if _, err := api.listSheets(ctx, child.ID); err != nil {
+					return fmt.Errorf("validate DingTalk data source: %w", err)
+				}
+				return nil
+			}
 			if _, err := api.documentBlocks(ctx, child.ID); err != nil {
 				return fmt.Errorf("validate DingTalk data source: %w", err)
 			}
@@ -540,7 +549,20 @@ func (c *Connector) sync(
 				continue
 			}
 
-			blocks, err := api.documentBlocks(ctx, document.ID)
+			// A native spreadsheet (axls) is one document to its users and one
+			// knowledge entry here, so its worksheets are rendered into a single
+			// markdown body through the workbooks API; every other supported
+			// node is still an adoc document read block by block.
+			var rendered renderResult
+			if document.isSheet() {
+				rendered, err = renderWorkbook(ctx, api, document.ID, document.title())
+			} else {
+				var blocks []json.RawMessage
+				blocks, err = api.documentBlocks(ctx, document.ID)
+				if err == nil {
+					rendered = renderDocument(document.title(), blocks)
+				}
+			}
 			if err != nil {
 				if isContextError(err) {
 					return nil, nil, err
@@ -559,7 +581,6 @@ func (c *Connector) sync(
 				}
 				continue
 			}
-			rendered := renderDocument(document.title(), blocks)
 			// The renderer stays context-free; the warning is emitted here,
 			// where both the request context and the node identity are known.
 			warnUnknownBlockTypes(ctx, document, rendered)
