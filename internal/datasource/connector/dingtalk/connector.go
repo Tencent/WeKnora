@@ -13,6 +13,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/datasource"
+	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -20,6 +21,53 @@ const (
 	cursorVersion     = 2
 	maxTraversalNodes = 1_000_000
 )
+
+// mediaExtensions are the file types this connector deliberately never
+// downloads: media carries no text WeKnora could index.
+var mediaExtensions = map[string]struct{}{
+	"mp4": {}, "mov": {}, "avi": {}, "mkv": {}, "flv": {}, "wmv": {}, "m4v": {}, "webm": {},
+	"mp3": {}, "wav": {}, "m4a": {}, "aac": {}, "flac": {},
+}
+
+// unsupportedDocumentExtensions names the native DingTalk document types the
+// wiki API lists but this connector has no ingest path for, so a skip can name
+// the concrete type instead of only saying the node is unsupported. The
+// remaining types expose no read API at all.
+var unsupportedDocumentExtensions = map[string]string{
+	"able":  "DingTalk multi-dimensional table",
+	"amind": "DingTalk mind map",
+	"appt":  "DingTalk presentation",
+	"adraw": "DingTalk drawing",
+}
+
+// skipReason explains, in the words of the sync log, why a node the connector
+// just listed will not be ingested. Both answers are deterministic: retrying
+// the sync can never turn such a node into a document, which is what separates
+// a skip from a failed read that must be retried.
+func skipReason(n node) string {
+	extension := strings.ToLower(strings.TrimSpace(n.Extension))
+	_, knownMediaExtension := mediaExtensions[extension]
+	if strings.EqualFold(n.Category, "VIDEO") || knownMediaExtension {
+		return "video/media files are deliberately not downloaded by this connector"
+	}
+	if label := unsupportedDocumentExtensions[extension]; label != "" {
+		return label + " has no ingest path in this connector yet"
+	}
+	return "no ingest path for this DingTalk node type in this connector yet"
+}
+
+// scopeLabel names a sync scope the way an operator can match it in DingTalk:
+// the workspace followed by the node the scan starts from.
+func scopeLabel(scope syncScope) string {
+	nodeID := scope.StartNodeID
+	if scope.Document != nil {
+		nodeID = scope.Document.ID
+	}
+	if nodeID == "" {
+		return scope.Reference.WorkspaceID
+	}
+	return scope.Reference.WorkspaceID + "/" + nodeID
+}
 
 var (
 	_ datasource.Connector          = (*Connector)(nil)
@@ -162,9 +210,27 @@ func (c *Connector) ListResources(
 		if failure := failures[parentID]; failure != nil {
 			return nil, failure
 		}
-		if len(scopes) != 1 || scopes[0].Document != nil {
-			return nil, fmt.Errorf("%w: DingTalk resource %q is not an expandable folder",
-				datasource.ErrResourceNotFound, parentID)
+		if len(scopes) != 1 {
+			// One reference resolves to exactly one scope. Any other count means
+			// there is nothing behind it that could be listed; the picker reads
+			// an error as a failed expansion, so the honest empty listing is
+			// returned instead.
+			logger.Warnf(ctx,
+				"[DingTalk] expand %s: resolved %d scopes, want one; reporting no children",
+				parentID, len(scopes))
+			return []types.Resource{}, nil
+		}
+		if scopes[0].Document != nil {
+			// A document is a leaf: it genuinely has no children. Returning an
+			// error here (the previous "is not an expandable folder") surfaces
+			// in the picker as a failure toast for a selection that syncs fine,
+			// so the empty listing is the correct answer. The picker is told
+			// HasChildren=false for a document, which is what keeps it from
+			// offering the expander in the first place.
+			logger.Warnf(ctx,
+				"[DingTalk] expand %s: the reference is a document, not a folder; reporting no children",
+				parentID)
+			return []types.Resource{}, nil
 		}
 		parentNodeID = scopes[0].StartNodeID
 	}
@@ -431,7 +497,7 @@ func (c *Connector) sync(
 				oldRevisions = stored
 			}
 		}
-		documents, err := scanScope(ctx, api, scope)
+		documents, skipped, err := scanScope(ctx, api, scope)
 		if err != nil {
 			if isContextError(err) {
 				return nil, nil, err
@@ -439,13 +505,26 @@ func (c *Connector) sync(
 			// Never infer deletions from an incomplete tree. Other independent
 			// selections may still complete, while this scope keeps its previous
 			// cursor and is retried on the next run.
+			logger.Warnf(ctx, "[DingTalk] scan scope %s failed, will retry next sync: %v",
+				scopeLabel(scope), err)
 			complete = false
 			next.Resources[scope.ResourceID] = cloneRevisions(oldRevisions)
 			items = append(items, failedResource(scope.ResourceID, err))
 			continue
 		}
+
+		// Skipped nodes are deterministic: this connector has no ingest path for
+		// them, so they are reported once and never retried — unlike a failed
+		// read below, which must stay retryable.
+		for _, node := range skipped {
+			logger.Infof(ctx, "[DingTalk] skip node %s (name=%q type=%s category=%s extension=%s): %s",
+				node.ID, node.title(), node.Type, node.Category, node.Extension, skipReason(node))
+		}
+
 		newRevisions := make(map[string]string, len(documents))
 		currentDocuments := make(map[string]struct{}, len(documents))
+		synced := 0
+		failed := 0
 
 		for _, document := range documents {
 			if document.ID == "" {
@@ -465,10 +544,13 @@ func (c *Connector) sync(
 				if isContextError(err) {
 					return nil, nil, err
 				}
+				logger.Warnf(ctx,
+					"[DingTalk] read document %s (name=%q extension=%s) failed, will retry next sync: %v",
+					document.ID, document.title(), document.Extension, err)
 				items = append(items, failedDocument(
 					scope.ResourceID, scope.Reference.WorkspaceID, document, err,
 				))
-				failedDocuments++
+				failed++
 				if existed {
 					// Do not advance failed documents. The next incremental run
 					// must retry them even if modifiedTime remains unchanged.
@@ -480,6 +562,7 @@ func (c *Connector) sync(
 			items = append(items, fetchedDocument(
 				scope.ResourceID, scope.Reference.WorkspaceID, document, rendered,
 			))
+			synced++
 			newRevisions[document.ID] = revision
 		}
 
@@ -492,6 +575,14 @@ func (c *Connector) sync(
 			}
 		}
 		next.Resources[scope.ResourceID] = newRevisions
+
+		// One line per scope, in the same shape as the IMA connector's. total
+		// counts every file the scope listed — synced + still-unchanged +
+		// failed + skipped — so a scope that quietly loses two thirds of its
+		// nodes can no longer look like a clean run.
+		logger.Infof(ctx, "[DingTalk] scope %s: total=%d synced=%d skipped=%d failed=%d",
+			scopeLabel(scope), len(documents)+len(skipped), synced, len(skipped), failed)
+		failedDocuments += failed
 	}
 
 	// Reconcile the union of all selections. Moving a document between two
@@ -670,27 +761,34 @@ func childByID(children []node, nodeID string) (node, bool) {
 	return node{}, false
 }
 
-func scanScope(ctx context.Context, api dingTalkAPI, scope syncScope) ([]node, error) {
+// scanScope lists every ingestible document in one scope, together with the
+// nodes it saw but cannot ingest. The skipped nodes are returned rather than
+// discarded so the caller can report them: a full sync must never look clean
+// while silently dropping part of the tree.
+func scanScope(ctx context.Context, api dingTalkAPI, scope syncScope) ([]node, []node, error) {
 	if scope.Document != nil {
-		return []node{*scope.Document}, nil
+		return []node{*scope.Document}, nil, nil
 	}
 	return scanWorkspace(ctx, api, scope.Reference.WorkspaceID, scope.StartNodeID)
 }
 
+// scanWorkspace walks a workspace subtree breadth-first. Folders are traversal
+// only; every file is either an ingestible document or a skip.
 func scanWorkspace(
 	ctx context.Context,
 	api dingTalkAPI,
 	workspaceID string,
 	rootNodeID string,
-) ([]node, error) {
+) ([]node, []node, error) {
 	queue := []string{rootNodeID}
 	visitedParents := make(map[string]struct{})
 	seenNodes := make(map[string]struct{})
 	var documents []node
+	var skipped []node
 
 	for len(queue) > 0 {
 		if err := ctx.Err(); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		parentID := queue[0]
 		queue = queue[1:]
@@ -701,24 +799,30 @@ func scanWorkspace(
 
 		children, err := api.listNodes(ctx, parentID)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		for _, child := range children {
 			if child.ID == "" {
 				continue
 			}
 			if child.WorkspaceID != "" && child.WorkspaceID != workspaceID {
-				return nil, fmt.Errorf("DingTalk node %q belongs to a different workspace", child.ID)
+				return nil, nil, fmt.Errorf("DingTalk node %q belongs to a different workspace", child.ID)
 			}
 			if _, seen := seenNodes[child.ID]; seen {
 				continue
 			}
 			seenNodes[child.ID] = struct{}{}
 			if len(seenNodes) > maxTraversalNodes {
-				return nil, fmt.Errorf("DingTalk workspace exceeds %d nodes", maxTraversalNodes)
+				return nil, nil, fmt.Errorf("DingTalk workspace exceeds %d nodes", maxTraversalNodes)
 			}
-			if child.isDocument() {
+			switch {
+			case child.isDocument():
 				documents = append(documents, child)
+			case child.isFolder():
+				// Containers hold no content of their own, so they are never
+				// reported as skipped.
+			default:
+				skipped = append(skipped, child)
 			}
 			if child.isFolder() || child.HasChildren {
 				queue = append(queue, child.ID)
@@ -728,7 +832,10 @@ func scanWorkspace(
 	sort.SliceStable(documents, func(i, j int) bool {
 		return documents[i].ID < documents[j].ID
 	})
-	return documents, nil
+	sort.SliceStable(skipped, func(i, j int) bool {
+		return skipped[i].ID < skipped[j].ID
+	})
+	return documents, skipped, nil
 }
 
 func cloneRevisions(revisions map[string]string) map[string]string {
