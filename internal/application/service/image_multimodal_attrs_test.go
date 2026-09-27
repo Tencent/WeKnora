@@ -38,6 +38,14 @@ func (f *attrsFakeVLM) Predict(_ context.Context, imgBytes [][]byte, prompt stri
 	return f.reply(prompt, len(imgBytes))
 }
 
+// PredictWithOptions is the per-call form; a fake answers it exactly as Predict
+// does, since the tests pin the prompt and the call count, not the switch.
+func (f *attrsFakeVLM) PredictWithOptions(
+	_ context.Context, imgBytes [][]byte, prompt string, _ *vlm.PredictOptions,
+) (string, error) {
+	return f.Predict(context.Background(), imgBytes, prompt)
+}
+
 func (f *attrsFakeVLM) GetModelName() string { return "attrs-fake-vlm" }
 func (f *attrsFakeVLM) GetModelID() string   { return "attrs-fake-vlm-id" }
 

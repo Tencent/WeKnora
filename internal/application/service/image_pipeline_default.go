@@ -32,29 +32,79 @@ const (
 	captionFieldKeyEnableOCR     = "enable_ocr"
 )
 
-// Fields declares the two switches the panel renders for this pipeline. Both
-// default to true, which is what a knowledge base configured before these
-// fields existed gets: caption and OCR, as before.
+// Fields declares the switches the panel renders for this pipeline. Caption and
+// OCR default to true, which is what a knowledge base configured before these
+// fields existed gets: both actions run, as before. The two thinking switches
+// default to false for the opposite reason — they are new work, and an action
+// that reasons costs a second full pass before it can say anything at all.
 func (defaultPipeline) Fields() []types.ImageFieldDef {
 	return []types.ImageFieldDef{
 		{
-			Key:         captionFieldKeyEnableCaption,
-			Type:        types.ImageFieldTypeBool,
-			Label:       "Enable caption",
-			Description: "Ask the model for a one-line description of every image and store it as the caption.",
-			Default:     true,
+			Key:           captionFieldKeyEnableCaption,
+			Type:          types.ImageFieldTypeBool,
+			Label:         "Enable caption",
+			Description:   "Ask the model for a one-line description of every image and store it as the caption.",
+			Default:       true,
+			DecidesAction: true,
 		},
 		{
-			Key:         captionFieldKeyEnableOCR,
+			Key:           captionFieldKeyEnableOCR,
+			Type:          types.ImageFieldTypeBool,
+			Label:         "Enable OCR",
+			Description:   "Extract the text that appears in the image.",
+			Default:       true,
+			DecidesAction: true,
+		},
+		{
+			Key:         imageFieldKeyCaptionThinking,
 			Type:        types.ImageFieldTypeBool,
-			Label:       "Enable OCR",
-			Description: "Extract the text that appears in the image.",
-			Default:     true,
+			Label:       "Caption with thinking",
+			Description: "Let the model reason before writing the caption. Costs a longer run; use it for images whose content has to be worked out, such as charts and diagrams.",
+			Default:     false,
+			// No DecidesAction: an image is still captioned with thinking off,
+			// just faster and with less care, so this switch cannot be the one
+			// that leaves the pipeline with nothing to do.
+		},
+		{
+			Key:         imageFieldKeyOCRThinking,
+			Type:        types.ImageFieldTypeBool,
+			Label:       "OCR with thinking",
+			Description: "Let the model reason before transcribing. Use it for dense or degraded text, such as scanned pages and tables.",
+			Default:     false,
+			// Same reasoning as above: an image with no text still yields no OCR.
 		},
 	}
 }
 
+// Rules is what the panel has to be told: caption and OCR can each be turned
+// off by hand, and a knowledge base that turned off both would process every
+// image by doing nothing to it, so at least one has to stay on. The thinking
+// switches are deliberately absent — they tune the calls, and the actions they
+// tune run whether they are on or off.
+//
+// The pair reads as one rule and not two because "off and off" is the only
+// forbidden combination: caption off alone still leaves the image OCRed, and
+// OCR off alone still leaves it described.
+func (defaultPipeline) Rules() []types.ImagePipelineRules {
+	return []types.ImagePipelineRules{{
+		AtLeastOne: []string{captionFieldKeyEnableCaption, captionFieldKeyEnableOCR},
+		MessageKey: "imagePipeline.errors.noActionEnabled",
+	}}
+}
+
+// Validate is the rule above, enforced where it cannot be argued with.
+func (defaultPipeline) Validate(params map[string]any) error {
+	return firstImagePipelineError(
+		EvaluateImagePipelineRules(defaultPipeline{}.Rules(), defaultPipeline{}.Fields(), params),
+	)
+}
+
 func (defaultPipeline) Run(ctx context.Context, r *runContext) error {
+	// The keys the shared actions read. Set before anything runs, so that a
+	// guard returning early below still leaves them filled in.
+	r.captionThinkingKey = imageFieldKeyCaptionThinking
+	r.ocrThinkingKey = imageFieldKeyOCRThinking
+
 	// Both switches belong to this pipeline alone. Neither is a whole-task
 	// limit: an image handled by another pipeline may skip its caption while
 	// this one still captures it, so the field names are only meaningful

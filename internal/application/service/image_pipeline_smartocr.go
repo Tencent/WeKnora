@@ -33,19 +33,63 @@ func (smartOcrPipeline) Description() string {
 const (
 	smartFieldKeyAllowOCR       = "allow_ocr"
 	smartFieldKeyCaptureCaption = "capture_caption"
+	// This pipeline names the two thinking switches after what it asks the
+	// model for — the observation call writes the description *and* reports
+	// the attributes — rather than after the shared action names, because a
+	// key may be declared by one pipeline only.
+	smartFieldKeyDescribeThinking = "describe_thinking"
+	smartFieldKeyTextThinking     = "text_thinking"
 )
 
-// Fields declares this pipeline's panel controls. There are none on purpose:
-// the model decides from the observed attributes whether OCR is worth a second
-// pass, and the caption the observation produced is always kept. The two
-// tunables below stay readable as parameters, so an API caller can still set a
-// hard ceiling, but they are not offered as switches — an untouched knowledge
-// base therefore behaves exactly as it does today, with both defaults true.
-// The empty slice (not nil) keeps the endpoint's JSON an array rather than
-// null, so the panel contract stays uniform across pipelines.
-func (smartOcrPipeline) Fields() []types.ImageFieldDef { return []types.ImageFieldDef{} }
+// Fields declares this pipeline's panel controls. The model decides from the
+// observed attributes whether OCR is worth a second pass, and the caption the
+// observation produced is always kept, so there is no ceiling and no caption
+// switch to expose. Only the two thinking switches are offered: they change
+// how the two model calls work, not which ones happen.
+//
+// The caption key here is the same one the manual pipeline renders, and it
+// drives the same action — this pipeline reaches the caption through the
+// observation call rather than through a caption action of its own. A knowledge
+// base that never touched these switches still behaves as it always did.
+func (smartOcrPipeline) Fields() []types.ImageFieldDef {
+	return []types.ImageFieldDef{
+		{
+			Key:         smartFieldKeyDescribeThinking,
+			Type:        types.ImageFieldTypeBool,
+			Label:       "Describe with thinking",
+			Description: "Let the model reason before it describes the image and reports its attributes. Costs a longer run; use it for images whose content has to be worked out, such as charts and diagrams.",
+			Default:     false,
+		},
+		{
+			Key:         smartFieldKeyTextThinking,
+			Type:        types.ImageFieldTypeBool,
+			Label:       "Text recognition with thinking",
+			Description: "Let the model reason before transcribing. Use it for dense or degraded text, such as scanned pages and tables.",
+			Default:     false,
+		},
+	}
+}
+
+// Rules returns nothing, and that is the whole answer to "what may not this
+// pipeline be set to?": observation, description and OCR are scheduled by the
+// attributes the model observed, not by the user, so no combination of the two
+// switches it offers can leave an image untouched. The panel, which evaluates
+// rules generically, therefore never warns here.
+func (smartOcrPipeline) Rules() []types.ImagePipelineRules {
+	return nil
+}
+
+// Validate accepts everything: see Rules above.
+func (smartOcrPipeline) Validate(_ map[string]any) error {
+	return nil
+}
 
 func (smartOcrPipeline) Run(ctx context.Context, r *runContext) error {
+	// The keys the shared actions read, set before the observation runs so the
+	// OCR branch below leaves them filled in either way.
+	r.captionThinkingKey = smartFieldKeyDescribeThinking
+	r.ocrThinkingKey = smartFieldKeyTextThinking
+
 	// One request fills both the attribute slots and the caption slot, so there
 	// is no separate caption action to schedule here. The effective values are
 	// recorded before the branches below, not after: the skipped-OCR path is
