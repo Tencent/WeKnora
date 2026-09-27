@@ -157,6 +157,7 @@ weknora-plugin verify -pubkey ed25519:... acme-search-1.0.0.wkp
 - 插件进程只拿到 `WEKNORA_PLUGIN_*` 环境变量，看不到数据库密码等 WeKnora 密钥。
 - 出网流量经宿主的出口代理，只放行插件在 `permissions.egress` 中声明的域名，内网地址一律拒绝。
 - 宿主检查运行的进程与安装的包一致，健康检查失败时按退避重启，并在插件详情中显示为「异常」。
+- 插件包解压在本机的缓存目录中。每次启动插件（包括崩溃重启、空闲回收后的再次启动）前，宿主都按插件包核对一遍：被改动或缺失的文件重新写回，包里没有的文件删除，日志中有一条警告列出改动。这样，同一用户下的其他进程在插件目录里改写或植入的文件（例如 Python 会自动加载的 `sitecustomize.py`）不会随插件运行。
 - Python 插件使用本机的 `python3`（可用 `WEKNORA_PLUGIN_PYTHON` 指定解释器）。Docker app 镜像已带 Python。
 - 空闲回收：设置 `WEKNORA_PLUGIN_IDLE_TIMEOUT`（如 `10m`）后，插件在这段时间内没有任何调用（健康检查不算）就停掉进程，下一次调用时再启动，这次调用会多等一次启动时间（示例插件实测：Go 约 10 ms，Python 约 70 ms，视插件自身的初始化而定）。有调用进行中（包括连接器的流式同步）时不会回收。
   - 默认不回收；桌面端默认 `10m`。
@@ -168,8 +169,14 @@ weknora-plugin verify -pubkey ed25519:... acme-search-1.0.0.wkp
 - 在 Linux 上，插件进程按 `runtime.resources` 限制资源：
   - 内存总是受限。插件没有声明时，按 `WEKNORA_PLUGIN_MEMORY_DEFAULT`（如 `1Gi`）限制，未设置则不限。
   - CPU 需要把一个可写的 cgroup v2 目录委托给 WeKnora，并通过 `WEKNORA_PLUGIN_CGROUP` 指定。设置后，每个插件进程进入各自的子 cgroup。
+- 在 Linux 上，插件进程默认由 Landlock 做文件隔离。插件与 WeKnora 以同一个系统用户运行，隔离后只能读系统目录（`/usr`、`/lib`、`/etc`、`/sys` 等）、自己的插件包和解释器，只能写自己的临时目录（`HOME`、`TMPDIR`），读不到 WeKnora 的配置和数据、其他插件的文件和其他进程的 `/proc` 信息。插件包目录只读，插件也改不了自己的文件。由 `WEKNORA_PLUGIN_LANDLOCK` 控制：
+  - 不设置或 `auto`（默认）：内核支持 Landlock（Linux 5.13+，且 Landlock 在启用的 LSM 中）就隔离；不支持时启动日志中有一条警告，插件能读写 WeKnora 的用户能读写的一切，「插件管理」中标出「文件未隔离」。
+  - `1`：必须隔离，条件不满足时插件启动失败。
+  - `0`：关闭。
+  - Docker 默认的 seccomp 配置放行 Landlock，官方 compose 下无需额外设置；Kubernetes 的 `RuntimeDefault` 通常也放行，以启动日志为准。
+  - Landlock 由上面的 `plugin-sandbox` 子命令在变成插件前设置，与网络沙箱共用这一步；只开文件隔离时插件启动同样多出约 0.3 秒。
 - 在 Linux 上，插件进程默认运行在独立的网络命名空间（网络沙箱）中，只能经出口代理和 Host API 访问外部，无法绕过代理直连。由 `WEKNORA_PLUGIN_NETNS` 控制：
-  - 不设置或 `auto`（默认）：启动第一个插件时探测一次系统是否允许。允许则所有宿主插件都进沙箱；不允许则插件只拿到出口代理（`HTTP(S)_PROXY`），忽略代理变量的代码仍可直连外部，启动日志中有一条警告说明原因和开启方法。
+  - 不设置或 `auto`（默认）：启动第一个插件时探测一次系统是否允许。允许则所有宿主插件都进沙箱；不允许时启动日志中有一条警告说明原因和开启方法，插件经出口代理（`HTTP(S)_PROXY`）出网。这时在 Linux 6.7+ 上，Landlock 还把插件的 TCP 连接限制在出口代理和 Host API 的端口上，忽略代理变量的代码连不到其他端口；更早的内核上，这类代码仍可直连外部。
   - `1`：必须进沙箱。条件不满足时插件启动失败并在详情中说明原因，不会在不受限的情况下运行。
   - `0`：关闭沙箱。
   - 非 Linux 系统只经出口代理出网。
@@ -177,9 +184,10 @@ weknora-plugin verify -pubkey ed25519:... acme-search-1.0.0.wkp
   - 独立 plugin-host 同样适用，各自探测：插件经出口代理访问 app 节点的 Host API。
 - 网络沙箱需要系统允许非特权用户命名空间：
   - 裸机或虚拟机：Debian 系需 `kernel.unprivileged_userns_clone=1`；Ubuntu 23.10+（含 24.04）需将 `kernel.apparmor_restrict_unprivileged_userns` 设为 0；`user.max_user_namespaces` 不能为 0。
-  - Docker / docker compose：默认的 seccomp 配置会拦截创建用户命名空间，所以官方 compose 默认只经出口代理出网。需要强制时，为 app（和 plugin-host）容器改用放行 `unshare`/`clone` 用户命名空间的 seccomp 配置，或设置 `security_opt: [seccomp:unconfined]`（放宽整个容器的系统调用过滤，docker-compose.yml 中有注释示例）；容器保持 Docker 默认的 AppArmor 配置即可，宿主机的 Ubuntu sysctl 限制不影响它。
-  - Kubernetes / Helm：Pod 的 `seccompProfile` 为 `RuntimeDefault` 时同样会拦截，Helm chart 默认即是（`global.podSecurityContext`），所以默认只经出口代理出网。需要强制时，用 `app.podSecurityContext`（和 `pluginHost.podSecurityContext`）改为放行用户命名空间的 `Localhost` 配置，或 `seccompProfile: { type: Unconfined }`；节点内核同样需满足上一条。
-  - 插件实际的出网方式显示在「插件管理」的插件详情中，见下文「查看出网方式」。
+  - Docker / docker compose：Docker 默认的 seccomp 配置会拦截创建用户命名空间。官方 compose 为 app 和 plugin-host 改用仓库中的 `docker/seccomp-plugins.json`：它是 Docker 的默认配置（取自 moby/profiles，文件内注明了版本），只多放行 `clone` 创建用户和网络命名空间，不放行其他命名空间。自己编排容器时，用 `--security-opt seccomp=docker/seccomp-plugins.json` 同样设置。
+  - 宿主机的内核设置对容器同样生效：Ubuntu 23.10+（含 24.04）宿主上，`kernel.apparmor_restrict_unprivileged_userns=1` 时，即使换了 seccomp 配置、关掉容器的 AppArmor，网络沙箱仍不可用，插件改由 Landlock 限制 TCP 出口（见上）。要用网络沙箱，需在宿主上把它设为 0。
+  - Kubernetes / Helm：Pod 的 `seccompProfile` 为 `RuntimeDefault` 时同样会拦截，Helm chart 默认即是（`global.podSecurityContext`），所以默认不进网络沙箱。需要时，把 `docker/seccomp-plugins.json` 放到节点的 kubelet seccomp 目录，用 `app.podSecurityContext`（和 `pluginHost.podSecurityContext`）改为 `seccompProfile: { type: Localhost, localhostProfile: <文件名> }`；节点内核同样需满足上一条。
+  - 插件实际的出网方式和文件隔离显示在「插件管理」的插件详情中，见下文「查看出网方式与文件隔离」。
 
 ### 独立插件宿主
 
@@ -218,7 +226,7 @@ Helm 设置 `pluginHost.enabled=true` 即可。使用本地存储（`STORAGE_TYP
 
 独立宿主需要 Redis，且所有节点的 `SYSTEM_AES_KEY`（或 `JWT_SECRET`）必须一致。app 不运行某个 kind、又没有配置独立宿主时，该 kind 的插件在插件详情中显示为加载失败，并说明原因。
 
-### 查看出网方式
+### 查看出网方式与文件隔离
 
 「设置 → 插件管理」的插件详情中，「节点状态」为每个实例标注它的出网方式，悬停可查看说明：
 
@@ -226,12 +234,15 @@ Helm 设置 `pluginHost.enabled=true` 即可。使用本地存储（`STORAGE_TYP
 | --- | --- |
 | 网络沙箱 | 宿主插件运行在独立的网络命名空间中，出口代理是唯一出路，`permissions.egress` 被强制执行 |
 | NetworkPolicy | `kubernetes` 插件的 Pod 受 NetworkPolicy 约束，只能访问 DNS 与 WeKnora，经出口代理出网；需集群网络插件支持 NetworkPolicy |
+| 限制 TCP 端口 | 宿主插件不在网络沙箱中，但 Landlock 只允许它连接出口代理和 Host API 的端口：忽略代理变量的代码连不到其他端口，只是这些端口号在其他主机上同样能连，UDP（如 QUIC、DNS）不受限制 |
 | 仅代理 | 宿主插件只拿到出口代理，忽略代理变量的代码可以直连外部 |
 | 不受管控 | 远程插件运行在 WeKnora 管不到的地方，出网不受约束 |
 
 标签由实际运行插件的节点上报：内嵌宿主的实例是各 app 节点，独立宿主的实例是 `plugin-host:` 开头的节点；把插件交给独立宿主的 app 节点不运行插件代码，不显示标签。声明式插件没有代码，也不显示。
 
-插件声明了 `permissions.egress`，而至少有一个实例是「仅代理」或「不受管控」时，插件列表的状态旁和详情中会标出「出网未强制」：这时出网白名单只对遵守代理变量的代码有效。
+插件声明了 `permissions.egress`，而至少有一个实例是「限制 TCP 端口」「仅代理」或「不受管控」时，插件列表的状态旁和详情中会标出「出网未强制」：这时出网白名单只对遵守代理变量的代码完全有效。
+
+同一处也标注每个实例的文件隔离：「文件隔离」表示插件只能访问系统文件、自己的插件包和临时目录（Landlock，或 `kubernetes` 插件自己的容器）；「文件未隔离」表示插件能读写 WeKnora 的用户能读写的一切，这时插件列表的状态旁也会标出「文件未隔离」。远程插件与声明式插件不显示。
 
 ### Kubernetes 部署
 

@@ -393,12 +393,13 @@ services:
         condition: service_healthy
       docreader:
         condition: service_healthy
-    # 宿主插件的网络沙箱（WEKNORA_PLUGIN_NETNS，默认 auto）需要创建用户命名空间，
-    # Docker 默认的 seccomp 配置会拦截，插件因此只经出口代理出网（启动日志有一条警告）。
-    # 需要强制出网限制时，改用放行 unshare/clone 用户命名空间的 seccomp 配置，
-    # 或（放宽容器的系统调用过滤）取消下面的注释。plugin-host 同理。
-    # security_opt:
-    #   - seccomp:unconfined
+    # 宿主插件的沙箱。Landlock 文件隔离（WEKNORA_PLUGIN_LANDLOCK）在 Docker 默认配置下即可用；
+    # 网络沙箱（WEKNORA_PLUGIN_NETNS）要创建用户命名空间，Docker 默认的 seccomp 配置会拦截。
+    # docker/seccomp-plugins.json 是 Docker 的默认配置，只多放行 clone 创建用户与网络命名空间。
+    # Ubuntu 23.10+ 宿主另需 sysctl kernel.apparmor_restrict_unprivileged_userns=0，否则网络沙箱
+    # 仍不可用，插件改由 Landlock 限制 TCP 出口（Linux 6.7+），启动日志有一条警告。plugin-host 同理。
+    security_opt:
+      - seccomp=./docker/seccomp-plugins.json
     networks:
       - WeKnora-network
     restart: unless-stopped
@@ -449,9 +450,9 @@ services:
       - SYSTEM_AES_KEY=${SYSTEM_AES_KEY:-}
       - JWT_SECRET=${JWT_SECRET:-}
       - SSRF_WHITELIST=${SSRF_WHITELIST:-}
-    # 网络沙箱需要的 seccomp 放行，见 app 服务的说明
-    # security_opt:
-    #   - seccomp:unconfined
+    # 宿主插件的沙箱，见 app 服务的说明
+    security_opt:
+      - seccomp=./docker/seccomp-plugins.json
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8081/healthz"]
       interval: 30s

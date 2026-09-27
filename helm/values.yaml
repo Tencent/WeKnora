@@ -80,7 +80,12 @@ app:
       cpu: "1"
       memory: 1Gi
 
-  # -- Pod security context override
+  # -- Pod security context override. The host plugins' network sandbox
+  # (WEKNORA_PLUGIN_NETNS) needs a seccomp profile that lets them create user
+  # namespaces, which RuntimeDefault refuses: e.g. docker/seccomp-plugins.json
+  # installed on the nodes, as
+  # { seccompProfile: { type: Localhost, localhostProfile: <file> } }.
+  # Their file isolation (Landlock) works with RuntimeDefault.
   podSecurityContext: {}
 
   # -- Container security context override
