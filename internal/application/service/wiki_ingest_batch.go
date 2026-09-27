@@ -2270,7 +2270,17 @@ func (s *wikiIngestService) reduceSlugUpdates(
 		// on top of what was already there, deduplicated.
 		page.ChunkRefs = mergeChunkRefs(page.ChunkRefs, additions)
 		if exists {
-			_, err = s.wikiService.UpdatePage(ctx, page)
+			// A retraction removes a deleted document's contribution on
+			// purpose, so this write is allowed to drop the table rows that
+			// contribution owned. Saying so explicitly is what lets the choke
+			// point in UpdatePage refuse an accidental truncation everywhere
+			// else; without it a retract round would be refused and the stale
+			// content would stay on the page for good.
+			writeCtx := ctx
+			if len(retracts) > 0 {
+				writeCtx = types.WithWikiShrinkAllowed(ctx)
+			}
+			_, err = s.wikiService.UpdatePage(writeCtx, page)
 		} else {
 			_, err = s.wikiService.CreatePage(ctx, page)
 		}

@@ -13,6 +13,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/application/access"
 	"github.com/Tencent/WeKnora/internal/application/repository"
+	"github.com/Tencent/WeKnora/internal/common"
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -131,6 +132,55 @@ func (s *wikiPageService) UpdatePage(ctx context.Context, page *types.WikiPage) 
 		return nil, fmt.Errorf("get existing page: %w", err)
 	}
 	stripWikiPageInlineChunkCitations(page)
+
+	// ── Truncation choke point ─────────────────────────────────────────────
+	//
+	// Machine edits hand the *whole* page to a model and persist whatever comes
+	// back, and markdown tables are the shape it gets wrong most often: a
+	// hundred-row certificate ledger returns with thirty rows, finish_reason=
+	// stop, no provider error. That is not the completion-budget truncation
+	// handled on the ingest side (which continues and then refuses) — the answer
+	// is complete, it is simply short on rows. Storing it shrinks the page with
+	// no error, no failed addition, and a revision entry that reads like any
+	// other edit. Measured on a table-heavy knowledge base: a bulk ingest left a
+	// batch of untouched pages shorter than before it ran.
+	//
+	// The check lives here, on the one write path every caller shares, because a
+	// guard in the ingest caller only covers the ingest caller: the agent's
+	// whole-page writer hands its own model output to this same method.
+	//
+	// Deliberate shrinkages are exempt: a human deleting rows through the wiki
+	// UI, a revert to an older (possibly shorter) revision, and any caller that
+	// knows it is removing content and says so with types.WithWikiShrinkAllowed
+	// (the ingest retract path and the agent's exact-text replacement do).
+	source := types.WikiEditSourceFromContext(ctx)
+	if source != types.WikiEditSourceUser && source != types.WikiEditSourceRevert &&
+		!types.WikiShrinkAllowedFromContext(ctx) {
+		if missing := wikiWriteMissingRowIdentities(existing.Content, page.Content); len(missing) > 0 {
+			examples := strings.Join(wikiWriteDroppedRowExamples(missing), ", ")
+			logger.Warnf(ctx,
+				"wiki page write refused (rewrite dropped %d table row(s) still on the page): "+
+					"slug=%s source=%s rows %d -> %d, content %d -> %d chars; keeping the stored version (e.g. %s)",
+				len(missing), page.Slug, source,
+				len(wikiWriteTableRowIdentities(existing.Content)), len(wikiWriteTableRowIdentities(page.Content)),
+				len(existing.Content), len(page.Content), examples)
+			common.PipelineWarn(ctx, "WikiWrite", "page_write_dropped_table_rows", map[string]interface{}{
+				"slug":         page.Slug,
+				"source":       source,
+				"dropped_rows": len(missing),
+				"examples":     examples,
+			})
+			if source == types.WikiEditSourceAgent {
+				// A silent refusal would tell the agent it edited a page it did
+				// not touch, so the agent path reports the refusal instead: the
+				// model can re-emit the page with the rows, or use the
+				// exact-text replacement tool when the removal is intentional.
+				return nil, fmt.Errorf("%w: slug %s lost %d row(s) (e.g. %s); the stored page is unchanged",
+					ErrWikiWriteDroppedTableRows, page.Slug, len(missing), examples)
+			}
+			return existing, nil
+		}
+	}
 
 	oldOutLinks := existing.OutLinks
 
