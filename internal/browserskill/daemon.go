@@ -8,7 +8,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -143,7 +145,7 @@ func (m *Manager) start(ctx context.Context) (*daemon, error) {
 		"--session-idle",
 		"30m",
 	)
-	cmd.Env = append(os.Environ(), "BSK_HOME="+home)
+	cmd.Env = append(daemonEnv(os.Environ()), "BSK_HOME="+home)
 	cmd.Stdout = io.Discard
 	cmd.Stderr = io.Discard
 	if err = cmd.Start(); err != nil {
@@ -189,4 +191,32 @@ func (m *Manager) start(ctx context.Context) (*daemon, error) {
 			}
 		}
 	}
+}
+
+// secretEnvMarkers name the variables WeKnora keeps its own secrets in
+// (the AES and JWT keys, database, Redis and object storage credentials,
+// vendor API keys), as whole names or parts of them.
+var secretEnvMarkers = []string{
+	"SECRET", "PASSWORD", "PASSWD", "TOKEN", "_KEY", "KEY_", "CREDENTIAL", "_DSN", "DATABASE_URL",
+	"DB_", "REDIS_", "MINIO_", "POSTGRES", "NEO4J_", "COS_", "OSS_", "S3_", "AWS_", "TOS_",
+}
+
+// daemonEnv is the environment of the browser daemon: WeKnora's, less its
+// secrets. The daemon runs for hours as WeKnora's user and, unlike WeKnora
+// itself, can be read by other processes of that user (host plugins) under
+// /proc/<pid>/environ.
+func daemonEnv(environ []string) []string {
+	out := make([]string, 0, len(environ))
+	for _, kv := range environ {
+		name, _, _ := strings.Cut(kv, "=")
+		if !secretEnvName(name) {
+			out = append(out, kv)
+		}
+	}
+	return out
+}
+
+func secretEnvName(name string) bool {
+	upper := strings.ToUpper(name)
+	return slices.ContainsFunc(secretEnvMarkers, func(m string) bool { return strings.Contains(upper, m) })
 }
