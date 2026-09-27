@@ -12,6 +12,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/application/access"
 	"github.com/Tencent/WeKnora/internal/application/repository"
+	chatpipeline "github.com/Tencent/WeKnora/internal/application/service/chat_pipeline"
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	"github.com/Tencent/WeKnora/internal/common"
 	werrors "github.com/Tencent/WeKnora/internal/errors"
@@ -864,15 +865,47 @@ type documentProfileOutput struct {
 	TypicalQuestion string   `json:"typical_question"`
 }
 
+// summaryReplyIsJSONShaped reports whether the reply opens like a JSON payload,
+// either directly or inside a markdown code fence. Only such replies are held
+// to the structured contract below; anything else is a legacy plain-text
+// summary.
+func summaryReplyIsJSONShaped(content string) bool {
+	content = strings.TrimSpace(content)
+	if rest, ok := strings.CutPrefix(content, "```"); ok {
+		// Drop the fence's info string (```json) and the newline after it.
+		if idx := strings.IndexByte(rest, '\n'); idx >= 0 {
+			content = strings.TrimSpace(rest[idx+1:])
+		} else {
+			return false
+		}
+	}
+	return strings.HasPrefix(content, "{") || strings.HasPrefix(content, "[")
+}
+
 // parseDocumentSummaryOutput accepts both the structured JSON reply and a
 // legacy plain-text summary (custom templates, older models). Plain text is
 // stored as the summary with no profile, so nothing that worked before
 // regresses; only the knowledge-base aggregation loses that document's topics.
-func parseDocumentSummaryOutput(content string) *documentSummaryResult {
+//
+// A reply that opens like JSON is held to the JSON contract instead: a broken
+// object (output cut off at MaxTokens, an unescaped newline inside a string)
+// or an object with no usable text returns errSummaryOutputNotParsable. The
+// raw reply used to be stored as the summary, which put half a JSON object in
+// knowledges.description, marked the summary completed so Asynq never retried
+// it, and embedded the same fragment into the RAG index.
+func parseDocumentSummaryOutput(content string) (*documentSummaryResult, error) {
 	content = strings.TrimSpace(content)
+	if content == "" {
+		return nil, errEmptySummaryOutput
+	}
+	jsonShaped := summaryReplyIsJSONShaped(content)
 	var out documentProfileOutput
 	if err := common.ParseLLMJsonResponse(content, &out); err != nil {
-		return &documentSummaryResult{Summary: content}
+		if jsonShaped {
+			return nil, fmt.Errorf("%w: %w", errSummaryOutputNotParsable, err)
+		}
+		// Legacy plain text: keep it as the summary with no profile.
+		return &documentSummaryResult{Summary: content}, nil
 	}
 	summary := strings.TrimSpace(out.Summary)
 	profile := (&types.KnowledgeProfile{
@@ -885,11 +918,15 @@ func parseDocumentSummaryOutput(content string) *documentSummaryResult {
 		summary = profile.Gist
 	}
 	if summary == "" {
-		// JSON without usable text: fall back to the raw content so the
-		// caller's empty-output handling still applies.
-		return &documentSummaryResult{Summary: content}
+		if jsonShaped {
+			// JSON without usable text is as unusable as broken JSON: the
+			// caller must fail the attempt instead of storing the object.
+			return nil, errSummaryOutputNotParsable
+		}
+		// Plain text that happened to contain balanced JSON punctuation.
+		return &documentSummaryResult{Summary: content}, nil
 	}
-	return &documentSummaryResult{Summary: summary, Profile: profile}
+	return &documentSummaryResult{Summary: summary, Profile: profile}, nil
 }
 
 // buildSummaryChunkContent is the text embedded for the document-level
@@ -921,16 +958,28 @@ const imageDominatedTextThreshold = 200
 var (
 	errInsufficientSummaryContent = errors.New("insufficient text content for summary generation")
 	errEmptySummaryOutput         = errors.New("summary model returned empty output")
+	// errSummaryOutputNotParsable marks a reply that is JSON-shaped but yields
+	// no usable summary text — broken JSON (cut off at the completion budget,
+	// unescaped newline) or an object without summary/gist. It is deliberately
+	// not stored: the raw reply is not a summary.
+	errSummaryOutputNotParsable = errors.New("summary model returned JSON without a usable summary")
+	// errSummaryOutputTruncated marks a reply the provider stopped at the
+	// completion budget, so its JSON can never be trusted as complete.
+	errSummaryOutputTruncated = errors.New("summary model output was truncated at the completion budget")
 )
 
 const summaryFallbackMaxRunes = 500
 
 // validateSummaryOutput rejects successful model responses that contain no
-// user-visible text. Treating whitespace-only output as an error lets Asynq
-// retry the summary task instead of persisting description="" as completed.
+// user-visible text, and responses the provider cut off at the completion
+// budget. Treating either as an error lets Asynq retry the summary task
+// instead of persisting description="" — or half a JSON object — as completed.
 func validateSummaryOutput(response *types.ChatResponse) (string, error) {
 	if response == nil {
 		return "", errEmptySummaryOutput
+	}
+	if chatpipeline.IsLengthFinishReason(response.FinishReason) {
+		return "", errSummaryOutputTruncated
 	}
 	content := strings.TrimSpace(response.Content)
 	if content == "" {
@@ -1178,7 +1227,11 @@ func (s *knowledgeService) getSummary(ctx context.Context,
 		logger.GetLogger(ctx).WithField("error", err).Warnf("GetSummary returned no usable content")
 		return nil, err
 	}
-	result := parseDocumentSummaryOutput(content)
+	result, err := parseDocumentSummaryOutput(content)
+	if err != nil {
+		logger.GetLogger(ctx).WithField("error", err).Warnf("GetSummary returned unusable content")
+		return nil, err
+	}
 	logger.GetLogger(ctx).WithField("summary", result.Summary).
 		WithField("has_profile", result.Profile != nil).Infof("GetSummary success")
 	return result, nil

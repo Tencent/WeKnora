@@ -113,6 +113,7 @@ func TestValidateSummaryOutput(t *testing.T) {
 		response  *types.ChatResponse
 		want      string
 		wantError bool
+		wantErr   error // checked when set; otherwise wantError means errEmptySummaryOutput
 	}{
 		{name: "nil response rejected", response: nil, wantError: true},
 		{name: "empty response rejected", response: &types.ChatResponse{}, wantError: true},
@@ -126,14 +127,35 @@ func TestValidateSummaryOutput(t *testing.T) {
 			response: &types.ChatResponse{Content: "  useful summary \n"},
 			want:     "useful summary",
 		},
+		{
+			name:      "response truncated at the budget is rejected",
+			response:  &types.ChatResponse{Content: `{"summary": "half a doc`, FinishReason: "length"},
+			wantError: true,
+			wantErr:   errSummaryOutputTruncated,
+		},
+		{
+			name:      "max_tokens truncation is rejected the same way",
+			response:  &types.ChatResponse{Content: "partial", FinishReason: "max_tokens"},
+			wantError: true,
+			wantErr:   errSummaryOutputTruncated,
+		},
+		{
+			name:     "a normal stop is accepted",
+			response: &types.ChatResponse{Content: "useful summary", FinishReason: "stop"},
+			want:     "useful summary",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := validateSummaryOutput(tt.response)
 			if tt.wantError {
-				if !errors.Is(err, errEmptySummaryOutput) {
-					t.Fatalf("expected errEmptySummaryOutput, got %v", err)
+				wantErr := tt.wantErr
+				if wantErr == nil {
+					wantErr = errEmptySummaryOutput
+				}
+				if !errors.Is(err, wantErr) {
+					t.Fatalf("expected %v, got %v", wantErr, err)
 				}
 				return
 			}
