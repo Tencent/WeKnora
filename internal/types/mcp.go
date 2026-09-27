@@ -151,6 +151,9 @@ type MCPTool struct {
 	InputSchema json.RawMessage `json:"inputSchema"` // JSON Schema for tool parameters
 	// RequireApproval when true: agent execution pauses until the user approves in UI (issue #1173).
 	RequireApproval bool `json:"require_approval,omitempty"`
+	// Repeatable: the server annotates the tool read-only or idempotent, so
+	// calling it again after an ambiguous failure does no harm.
+	Repeatable bool `json:"repeatable,omitempty"`
 }
 
 // MCPToolApproval persists per-tool policies for an MCP service, including

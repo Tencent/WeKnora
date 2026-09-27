@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"strings"
 	"testing"
@@ -178,4 +179,40 @@ func TestRawToolsUsesOAuthLifecycleAndPreservesTransportErrors(t *testing.T) {
 	require.ErrorIs(t, err, sentinel)
 	var transportErr *transport.Error
 	require.ErrorAs(t, err, &transportErr)
+}
+
+// Tools annotated read-only or idempotent may be called again after an
+// ambiguous failure; others may not.
+func TestRawToolsReadRepeatableAnnotations(t *testing.T) {
+	c := &mcpGoClient{client: client.NewClient(&rawToolsTransport{
+		send: func(context.Context, transport.JSONRPCRequest) (*transport.JSONRPCResponse, error) {
+			return &transport.JSONRPCResponse{Result: json.RawMessage(`{"tools":[
+				{"name":"search","annotations":{"readOnlyHint":true}},
+				{"name":"upsert","annotations":{"idempotentHint":true}},
+				{"name":"create_ticket","annotations":{"destructiveHint":false}},
+				{"name":"plain"}]}`)}, nil
+		},
+	})}
+	c.initialized.Store(true)
+	tools, err := c.ListTools(context.Background())
+	require.NoError(t, err)
+	got := map[string]bool{}
+	for _, tool := range tools {
+		got[tool.Name] = tool.Repeatable
+	}
+	require.Equal(t, map[string]bool{"search": true, "upsert": true, "create_ticket": false, "plain": false}, got)
+}
+
+func TestUndelivered(t *testing.T) {
+	for err, want := range map[error]bool{
+		ErrNotConnected: true,
+		fmt.Errorf("failed to call tool: %w", transport.NewError(transport.ErrSessionTerminated)): true,
+		&net.OpError{Op: "dial", Err: errors.New("connection refused")}:                           true,
+		errors.New("request failed with status 400: Invalid session ID"):                          true,
+		context.DeadlineExceeded: false,
+		&net.OpError{Op: "read", Err: errors.New("connection reset by peer")}: false,
+		errors.New("request failed with status 502"):                          false,
+	} {
+		require.Equal(t, want, Undelivered(err), "%v", err)
+	}
 }

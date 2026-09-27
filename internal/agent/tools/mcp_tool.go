@@ -279,7 +279,10 @@ func (t *MCPTool) Execute(ctx context.Context, args json.RawMessage) (*types.Too
 		}
 
 		result, err := client.CallTool(callCtx, t.mcpTool.Name, input)
-		if err != nil && !isStdio {
+		// Once more on a fresh connection only when the call cannot have run
+		// the tool, or the tool says running it twice is harmless: a tool that
+		// files a ticket must not file it twice after a timeout.
+		if err != nil && !isStdio && (mcp.Undelivered(err) || t.mcpTool.Repeatable) {
 			logger.GetLogger(callCtx).Warnf("MCP tool call failed, retrying with fresh connection: %v", err)
 			_ = client.Disconnect()
 

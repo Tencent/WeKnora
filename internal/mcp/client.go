@@ -526,6 +526,10 @@ func (c *mcpGoClient) listRawTools(ctx context.Context) ([]*types.MCPTool, error
 				Name        string          `json:"name"`
 				Description string          `json:"description"`
 				InputSchema json.RawMessage `json:"inputSchema"`
+				Annotations struct {
+					ReadOnlyHint   bool `json:"readOnlyHint"`
+					IdempotentHint bool `json:"idempotentHint"`
+				} `json:"annotations"`
 			} `json:"tools"`
 			NextCursor string `json:"nextCursor"`
 		}
@@ -540,7 +544,10 @@ func (c *mcpGoClient) listRawTools(ctx context.Context) ([]*types.MCPTool, error
 			}
 			tools = append(
 				tools,
-				&types.MCPTool{Name: tool.Name, Description: tool.Description, InputSchema: tool.InputSchema},
+				&types.MCPTool{
+					Name: tool.Name, Description: tool.Description, InputSchema: tool.InputSchema,
+					Repeatable: tool.Annotations.ReadOnlyHint || tool.Annotations.IdempotentHint,
+				},
 			)
 		}
 		if len(tools) > maxToolsPerService {
