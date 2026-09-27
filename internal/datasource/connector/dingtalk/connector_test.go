@@ -14,12 +14,17 @@ import (
 )
 
 type fakeAPI struct {
-	workspaces  []workspace
-	nodes       map[string][]node
-	blocks      map[string][]json.RawMessage
-	nodeErrors  map[string]error
-	blockErrors map[string]error
-	blockCalls  map[string]int
+	workspaces   []workspace
+	nodes        map[string][]node
+	blocks       map[string][]json.RawMessage
+	downloads    map[string][]byte
+	nodeErrors   map[string]error
+	blockErrors  map[string]error
+	verifyErrors map[string]error
+	dlErrors     map[string]error
+	blockCalls   map[string]int
+	verifyCalls  map[string]int
+	dlCalls      map[string]int
 }
 
 func (f *fakeAPI) listWorkspaces(context.Context) ([]workspace, error) {
@@ -48,6 +53,25 @@ func (f *fakeAPI) documentBlocks(_ context.Context, documentID string) ([]json.R
 		return nil, err
 	}
 	return f.blocks[documentID], nil
+}
+
+func (f *fakeAPI) verifyDocumentDownload(_ context.Context, documentID string) error {
+	if f.verifyCalls == nil {
+		f.verifyCalls = make(map[string]int)
+	}
+	f.verifyCalls[documentID]++
+	return f.verifyErrors[documentID]
+}
+
+func (f *fakeAPI) downloadDocument(_ context.Context, documentID string) ([]byte, error) {
+	if f.dlCalls == nil {
+		f.dlCalls = make(map[string]int)
+	}
+	f.dlCalls[documentID]++
+	if err := f.dlErrors[documentID]; err != nil {
+		return nil, err
+	}
+	return f.downloads[documentID], nil
 }
 
 func testConnector(api dingTalkAPI) *Connector {
@@ -769,6 +793,289 @@ func TestSkipReasonDistinguishesMediaFromUnimplementedTypes(t *testing.T) {
 		t.Run(testCase.label, func(t *testing.T) {
 			if got := skipReason(testCase.node); got != testCase.want {
 				t.Fatalf("skipReason() = %q, want %q", got, testCase.want)
+			}
+		})
+	}
+}
+
+// binaryNode is an uploaded file as the wiki API lists it: a FILE in the
+// DOCUMENT category carrying the original extension.
+func binaryNode(id, name, extension string) node {
+	return node{
+		ID: id, WorkspaceID: "space", Name: name, Type: "FILE",
+		Category: "DOCUMENT", Extension: extension, ModifiedTime: "2026-07-25T08:00:00Z",
+	}
+}
+
+func uploadedDocumentsFixture() *fakeAPI {
+	return &fakeAPI{
+		workspaces: []workspace{{ID: "space", RootNodeID: "root"}},
+		nodes: map[string][]node{
+			"root": {
+				{
+					ID: "adoc", WorkspaceID: "space", Name: "Runbook.adoc", Type: "FILE",
+					Category: "ALIDOC", Extension: "adoc", ModifiedTime: "r1",
+				},
+				binaryNode("docx", "Manual v4.10.1.docx", "docx"),
+				binaryNode("pptx", "Deck.pptx", "pptx"),
+				binaryNode("xlsx", "Sheet.xlsx", "xlsx"),
+				binaryNode("pdf", "Policy.pdf", "pdf"),
+				{
+					ID: "video", WorkspaceID: "space", Name: "Lesson.mp4", Type: "FILE",
+					Category: "VIDEO", Extension: "mp4",
+				},
+				{
+					ID: "aitable", WorkspaceID: "space", Name: "Table.able", Type: "FILE",
+					Category: "ALIDOC", Extension: "able",
+				},
+			},
+		},
+		blocks: map[string][]json.RawMessage{
+			"adoc": {rawJSON(`{"blockType":"paragraph","paragraph":{"text":"run"}}`)},
+		},
+		downloads: map[string][]byte{
+			"docx": []byte("PK\x03\x04word-bytes"),
+			"pptx": []byte("PK\x03\x04slides-bytes"),
+			"xlsx": []byte("PK\x03\x04sheet-bytes"),
+			"pdf":  []byte("%PDF-1.7-policy-bytes"),
+		},
+	}
+}
+
+// Uploaded Office and PDF files must be downloaded byte-for-byte with a
+// concrete content type and a file name that keeps exactly one extension, while
+// adoc keeps going through the blocks API and unsupported nodes are left out.
+func TestFetchAllDownloadsUploadedDocuments(t *testing.T) {
+	api := uploadedDocumentsFixture()
+	items, err := testConnector(api).FetchAll(
+		context.Background(), testConfig("space"), []string{"space"},
+	)
+	if err != nil {
+		t.Fatalf("FetchAll() error = %v", err)
+	}
+	if len(items) != 5 {
+		t.Fatalf("FetchAll() returned %d items, want 5: %#v", len(items), items)
+	}
+
+	byID := make(map[string]types.FetchedItem, len(items))
+	for _, item := range items {
+		byID[item.ExternalID] = item
+	}
+	for _, skipped := range []string{"video", "aitable"} {
+		if _, exists := byID[skipped]; exists {
+			t.Fatalf("unsupported node %q was synced: %#v", skipped, byID[skipped])
+		}
+	}
+	if api.blockCalls["adoc"] != 1 || len(api.blockCalls) != 1 {
+		t.Fatalf("block calls = %#v, want only the adoc document", api.blockCalls)
+	}
+	if len(api.dlCalls) != 4 {
+		t.Fatalf("download calls = %#v, want one per uploaded document", api.dlCalls)
+	}
+
+	want := []struct {
+		id          string
+		contentType string
+		fileName    string
+		content     string
+	}{
+		{
+			"docx",
+			"application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+			"Manual v4.10.1.docx",
+			"PK\x03\x04word-bytes",
+		},
+		{
+			"pptx",
+			"application/vnd.openxmlformats-officedocument.presentationml.presentation",
+			"Deck.pptx",
+			"PK\x03\x04slides-bytes",
+		},
+		{
+			"xlsx",
+			"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+			"Sheet.xlsx",
+			"PK\x03\x04sheet-bytes",
+		},
+		{"pdf", "application/pdf", "Policy.pdf", "%PDF-1.7-policy-bytes"},
+	}
+	for _, expected := range want {
+		item, exists := byID[expected.id]
+		if !exists {
+			t.Fatalf("uploaded document %q was not synced: %#v", expected.id, byID)
+		}
+		if string(item.Content) != expected.content || item.ContentType != expected.contentType ||
+			item.FileName != expected.fileName {
+			t.Fatalf("%s item = %#v (content_type %q, file_name %q)",
+				expected.id, item, item.ContentType, item.FileName)
+		}
+		if item.SourceResourceID != "space" || item.Metadata["extension"] == "" ||
+			item.Metadata["channel"] != types.ChannelDingtalk {
+			t.Fatalf("%s metadata = %#v", expected.id, item.Metadata)
+		}
+		if item.URL == "" || item.UpdatedAt.IsZero() {
+			t.Fatalf("%s lost its URL or timestamp: %#v", expected.id, item)
+		}
+	}
+	if byID["adoc"].ContentType != "text/markdown" ||
+		string(byID["adoc"].Content) != "# Runbook.adoc\n\nrun\n" {
+		t.Fatalf("adoc item = %#v", byID["adoc"])
+	}
+}
+
+// Selecting an uploaded file directly must resolve to a single-document scope.
+func TestFetchAllHandlesUploadedDocumentSelection(t *testing.T) {
+	api := uploadedDocumentsFixture()
+	resourceID, err := encodeResourceReference(resourceReference{
+		WorkspaceID: "space", NodeID: "docx",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	items, err := testConnector(api).FetchAll(
+		context.Background(), testConfig(resourceID), []string{resourceID},
+	)
+	if err != nil {
+		t.Fatalf("FetchAll() error = %v", err)
+	}
+	if len(items) != 1 || items[0].ExternalID != "docx" ||
+		string(items[0].Content) != "PK\x03\x04word-bytes" ||
+		items[0].SourceResourceID != resourceID {
+		t.Fatalf("FetchAll() = %#v", items)
+	}
+	if len(api.dlCalls) != 1 || api.dlCalls["docx"] != 1 {
+		t.Fatalf("download calls = %#v", api.dlCalls)
+	}
+}
+
+// A failed download must surface as a retryable failure item and must not
+// advance the cursor, exactly like a failed block read.
+func TestIncrementalSyncRetriesUploadedDownloadFailures(t *testing.T) {
+	api := uploadedDocumentsFixture()
+	document := binaryNode("docx", "Manual v4.10.1.docx", "docx")
+	document.ModifiedTimestamp = 1_768_000_000_000
+	api.nodes["root"] = []node{document}
+	api.dlErrors = map[string]error{"docx": errors.New("unsupported file type")}
+
+	cursorMap, err := encodeCursor(&cursorState{
+		Version:   cursorVersion,
+		Resources: map[string]map[string]string{"space": {"docx": "r1"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	items, next, syncErr := testConnector(api).FetchIncremental(
+		context.Background(), testConfig("space"), &types.SyncCursor{ConnectorCursor: cursorMap},
+	)
+	var partial *datasource.PartialFetchError
+	if !errors.As(syncErr, &partial) {
+		t.Fatalf("FetchIncremental() error = %v, want PartialFetchError", syncErr)
+	}
+	if len(items) != 1 || items[0].Metadata["error_reason_code"] != "dingtalk_document_failed" ||
+		!strings.Contains(items[0].Metadata["error"], "unsupported file type") ||
+		len(items[0].Content) != 0 {
+		t.Fatalf("failure item = %#v", items)
+	}
+	state, err := decodeCursor(next)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Resources["space"]["docx"] != "r1" {
+		t.Fatalf("failed download advanced the cursor: %#v", state.Resources)
+	}
+
+	// The same document succeeds once the provider recovers.
+	delete(api.dlErrors, "docx")
+	items, _, err = testConnector(api).FetchIncremental(
+		context.Background(), testConfig("space"), &types.SyncCursor{ConnectorCursor: cursorMap},
+	)
+	if err != nil || len(items) != 1 || string(items[0].Content) != "PK\x03\x04word-bytes" {
+		t.Fatalf("retry result = %#v, %v", items, err)
+	}
+}
+
+// Validate must prove an uploaded document is reachable without paying for the
+// transfer, and must still report a provider refusal.
+func TestValidateProbesUploadedDocumentsWithoutDownloading(t *testing.T) {
+	api := &fakeAPI{
+		workspaces: []workspace{{ID: "space", RootNodeID: "root", Name: "Space"}},
+		nodes: map[string][]node{
+			"root": {binaryNode("docx", "Manual.docx", "docx")},
+		},
+	}
+
+	if err := testConnector(api).Validate(context.Background(), testConfig()); err != nil {
+		t.Fatalf("Validate() error = %v", err)
+	}
+	if api.verifyCalls["docx"] != 1 || len(api.dlCalls) != 0 {
+		t.Fatalf("verify calls = %#v, download calls = %#v", api.verifyCalls, api.dlCalls)
+	}
+
+	api.verifyErrors = map[string]error{"docx": errors.New("missing Storage.File.Read")}
+	err := testConnector(api).Validate(context.Background(), testConfig())
+	if err == nil || !strings.Contains(err.Error(), "missing Storage.File.Read") {
+		t.Fatalf("Validate() error = %v, want provider refusal", err)
+	}
+}
+
+func TestBinaryDocumentFileNameKeepsASingleExtension(t *testing.T) {
+	for _, testCase := range []struct {
+		name      string
+		extension string
+		want      string
+	}{
+		{"Manual v4.10.1.docx", "docx", "Manual v4.10.1.docx"},
+		{"Deck", "pptx", "Deck.pptx"},
+		{"Report.PDF", "pdf", "Report.pdf"},
+		{"quarterly/2026:sheet.xlsx", "xlsx", "quarterly_2026_sheet.xlsx"},
+		{"", "xlsx", "untitled.xlsx"},
+		{".pdf", "pdf", "untitled.pdf"},
+	} {
+		t.Run(testCase.name+"."+testCase.extension, func(t *testing.T) {
+			got := binaryDocumentFileName(node{Name: testCase.name, Extension: testCase.extension})
+			if got != testCase.want {
+				t.Fatalf("binaryDocumentFileName() = %q, want %q", got, testCase.want)
+			}
+		})
+	}
+}
+
+// A node is ingestible only when this connector has a read path for it: the
+// blocks API for adoc and the 钉盘 download API for uploaded files. Native
+// DingTalk types — spreadsheets included, until the workbooks path exists —
+// stay out, so nothing is ever enumerated that the sync cannot read.
+func TestNodeDocumentClassification(t *testing.T) {
+	for _, testCase := range []struct {
+		label    string
+		node     node
+		document bool
+		online   bool
+		binary   bool
+	}{
+		{"adoc", node{Type: "FILE", Category: "ALIDOC", Extension: "adoc"}, true, true, false},
+		{"axls", node{Type: "FILE", Category: "ALIDOC", Extension: "axls"}, false, false, false},
+		{"docx", node{Type: "FILE", Category: "DOCUMENT", Extension: "docx"}, true, false, true},
+		{"pptx", node{Type: "FILE", Category: "DOCUMENT", Extension: "pptx"}, true, false, true},
+		{"xlsx", node{Type: "FILE", Category: "DOCUMENT", Extension: "xlsx"}, true, false, true},
+		{"pdf", node{Type: "FILE", Category: "DOCUMENT", Extension: "pdf"}, true, false, true},
+		{"uppercase", node{Type: "file", Category: "document", Extension: "PDF"}, true, false, true},
+		{"mp4", node{Type: "FILE", Category: "VIDEO", Extension: "mp4"}, false, false, false},
+		{"aitable", node{Type: "FILE", Category: "ALIDOC", Extension: "able"}, false, false, false},
+		{"mindmap", node{Type: "FILE", Category: "ALIDOC", Extension: "amind"}, false, false, false},
+		{"upload category", node{Type: "FILE", Category: "FILE", Extension: "pdf"}, false, false, false},
+		{"other category", node{Type: "FILE", Category: "OTHER", Extension: "docx"}, false, false, false},
+		{"folder", node{Type: "FOLDER", Extension: "docx"}, false, false, false},
+		{"no extension", node{Type: "FILE", Category: "DOCUMENT"}, false, false, false},
+	} {
+		t.Run(testCase.label, func(t *testing.T) {
+			if got := testCase.node.isDocument(); got != testCase.document {
+				t.Fatalf("isDocument() = %v, want %v", got, testCase.document)
+			}
+			if got := testCase.node.isOnlineDocument(); got != testCase.online {
+				t.Fatalf("isOnlineDocument() = %v, want %v", got, testCase.online)
+			}
+			if got := testCase.node.isBinaryDocument(); got != testCase.binary {
+				t.Fatalf("isBinaryDocument() = %v, want %v", got, testCase.binary)
 			}
 		})
 	}

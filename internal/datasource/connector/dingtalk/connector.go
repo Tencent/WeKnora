@@ -77,7 +77,8 @@ var (
 
 type apiFactory func(*config) dingTalkAPI
 
-// Connector imports native DingTalk documents through the Wiki and Blocks APIs.
+// Connector imports DingTalk wiki documents: native adoc documents through the
+// blocks API, and uploaded Office/PDF files through the 钉盘 download API.
 type Connector struct {
 	newAPI apiFactory
 }
@@ -263,16 +264,23 @@ func firstValidateDocument(
 	return node{}, false, unexplored, nil
 }
 
-// verifyDocument proves one visible document is readable by calling the read
-// API that backs its ingest path — the blocks API for adoc today. The caller
-// only reaches this function for nodes isDocument accepts, and a native type
-// becomes a document, gains a sync read path and gains its probe here in the
-// same change. Types that are not ingestible yet are therefore not documents
-// yet: uploaded files and native spreadsheets join all three together when
-// their ingest paths land, instead of being probed here in advance.
+// verifyDocument proves one visible document is readable. Native documents are
+// probed through their own read API — the blocks API for adoc — while uploaded
+// files resolve their 钉盘 download location, which exercises the same
+// permissions and returns the same errors a real download would, without
+// transferring the payload.
+//
+// #3782 landed a narrower version of this probe (the blocks API only) with a
+// comment saying uploaded files and native spreadsheets join it "when their
+// ingest paths land". This is that follow-up: an uploaded file is not an adoc,
+// so probing it through documentBlocks would report a readable file as
+// unreadable and reject a working data source.
 func verifyDocument(ctx context.Context, api dingTalkAPI, document node) error {
-	_, err := api.documentBlocks(ctx, document.ID)
-	return err
+	if document.isOnlineDocument() {
+		_, err := api.documentBlocks(ctx, document.ID)
+		return err
+	}
+	return api.verifyDocumentDownload(ctx, document.ID)
 }
 
 // ListResources lazily lists selectable workspaces, folders and documents.
@@ -681,7 +689,7 @@ func (c *Connector) sync(
 				continue
 			}
 
-			blocks, err := api.documentBlocks(ctx, document.ID)
+			item, err := readDocument(ctx, api, scope.ResourceID, scope.Reference.WorkspaceID, document)
 			if err != nil {
 				if isContextError(err) {
 					return nil, nil, err
@@ -700,13 +708,7 @@ func (c *Connector) sync(
 				}
 				continue
 			}
-			rendered := renderDocument(document.title(), blocks)
-			// The renderer stays context-free; the warning is emitted here,
-			// where both the request context and the node identity are known.
-			warnUnknownBlockTypes(ctx, document, rendered)
-			items = append(items, fetchedDocument(
-				scope.ResourceID, scope.Reference.WorkspaceID, document, rendered,
-			))
+			items = append(items, item)
 			synced++
 			newRevisions[document.ID] = revision
 		}
@@ -1049,37 +1051,140 @@ func warnUnknownBlockTypes(ctx context.Context, document node, rendered renderRe
 	common.PipelineWarn(ctx, "DingTalkConnector", "unknown_block_types", unknown.fields())
 }
 
-func fetchedDocument(
+// readDocument turns one supported wiki node into a FetchedItem. Native adoc
+// documents are rendered from their blocks, and uploaded files are transferred
+// byte-for-byte so WeKnora's own parsers can read them.
+func readDocument(
+	ctx context.Context,
+	api dingTalkAPI,
 	sourceResourceID string,
 	workspaceID string,
 	document node,
-	rendered renderResult,
-) types.FetchedItem {
-	metadata := map[string]string{
+) (types.FetchedItem, error) {
+	switch {
+	case document.isOnlineDocument():
+		blocks, err := api.documentBlocks(ctx, document.ID)
+		if err != nil {
+			return types.FetchedItem{}, err
+		}
+		rendered := renderDocument(document.title(), blocks)
+		// The renderer stays context-free; the warning is emitted here, where
+		// both the request context and the node identity are known. Uploaded
+		// files take the default branch and have no rendering step to lose.
+		warnUnknownBlockTypes(ctx, document, rendered)
+		return fetchedDocument(sourceResourceID, workspaceID, document, rendered), nil
+	default:
+		data, err := api.downloadDocument(ctx, document.ID)
+		if err != nil {
+			return types.FetchedItem{}, err
+		}
+		return fetchedBinaryDocument(sourceResourceID, workspaceID, document, data), nil
+	}
+}
+
+// documentMetadata describes a wiki node the same way for rendered and
+// downloaded documents, so both stay searchable by their DingTalk identity.
+func documentMetadata(workspaceID string, document node) map[string]string {
+	return map[string]string{
 		"channel":      types.ChannelDingtalk,
 		"workspace_id": workspaceID,
 		"node_id":      document.ID,
 		"category":     document.Category,
 		"extension":    document.Extension,
 	}
+}
+
+// documentURL is the address a reader can open the node at in DingTalk.
+func documentURL(document node) string {
+	if url := strings.TrimSpace(document.URL); url != "" {
+		return url
+	}
+	return "https://alidocs.dingtalk.com/i/nodes/" + url.PathEscape(document.ID)
+}
+
+func fetchedDocument(
+	sourceResourceID string,
+	workspaceID string,
+	document node,
+	rendered renderResult,
+) types.FetchedItem {
+	metadata := documentMetadata(workspaceID, document)
 	if len(rendered.UnknownTypes) > 0 {
 		metadata["unknown_block_types"] = strings.Join(rendered.UnknownTypes, ",")
-	}
-	documentURL := strings.TrimSpace(document.URL)
-	if documentURL == "" {
-		documentURL = "https://alidocs.dingtalk.com/i/nodes/" + url.PathEscape(document.ID)
 	}
 	return types.FetchedItem{
 		ExternalID:       document.ID,
 		Title:            document.title(),
 		Content:          []byte(rendered.Markdown),
 		ContentType:      "text/markdown",
-		FileName:         sanitizeFilename(document.title()) + ".md",
-		URL:              documentURL,
+		FileName:         renderedDocumentFileName(document.title()),
+		URL:              documentURL(document),
 		UpdatedAt:        document.modifiedAt(),
 		Metadata:         metadata,
 		SourceResourceID: sourceResourceID,
 	}
+}
+
+// renderedDocumentFileName names a document this connector renders as markdown.
+// The node's name is used as reported — a DingTalk name normally carries its
+// own extension — but ".md" is appended exactly once, so a name that already
+// ends in .md does not grow a second extension.
+func renderedDocumentFileName(title string) string {
+	name := sanitizeFilename(title)
+	if stem, trimmed := trimSuffixFold(name, ".md"); trimmed {
+		name = stem
+	}
+	return name + ".md"
+}
+
+// fetchedBinaryDocument wraps an uploaded file's raw bytes. The file name keeps
+// the original extension because that is what selects the parser during
+// ingestion; the MIME type records the same fact and is set to a concrete Office
+// type rather than the generic octet-stream the object store reports.
+func fetchedBinaryDocument(
+	sourceResourceID string,
+	workspaceID string,
+	document node,
+	data []byte,
+) types.FetchedItem {
+	contentType, ok := document.binaryContentType()
+	if !ok {
+		contentType = "application/octet-stream"
+	}
+	return types.FetchedItem{
+		ExternalID:       document.ID,
+		Title:            document.title(),
+		Content:          data,
+		ContentType:      contentType,
+		FileName:         binaryDocumentFileName(document),
+		URL:              documentURL(document),
+		UpdatedAt:        document.modifiedAt(),
+		Metadata:         documentMetadata(workspaceID, document),
+		SourceResourceID: sourceResourceID,
+	}
+}
+
+// binaryDocumentFileName derives the stored file name. DingTalk node names
+// normally already end in the extension, so it is replaced rather than
+// appended: "Manual.docx" must not become "Manual.docx.docx".
+func binaryDocumentFileName(document node) string {
+	extension := strings.ToLower(strings.TrimSpace(document.Extension))
+	name := strings.TrimSpace(document.title())
+	if extension == "" {
+		return sanitizeFilename(name)
+	}
+	if stem, ok := trimSuffixFold(name, "."+extension); ok {
+		name = stem
+	}
+	return sanitizeFilename(name) + "." + extension
+}
+
+// trimSuffixFold removes suffix from value, comparing case-insensitively.
+func trimSuffixFold(value, suffix string) (string, bool) {
+	if !strings.HasSuffix(strings.ToLower(value), strings.ToLower(suffix)) {
+		return value, false
+	}
+	return value[:len(value)-len(suffix)], true
 }
 
 func failedDocument(

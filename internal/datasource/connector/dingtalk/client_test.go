@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -255,6 +256,248 @@ func TestReadBodyRejectsOversizedResponses(t *testing.T) {
 	if _, err := readBody(body); err == nil ||
 		!strings.Contains(err.Error(), "response exceeds") {
 		t.Fatalf("readBody() error = %v", err)
+	}
+}
+
+// The whole uploaded-file chain, as verified against the live tenant:
+// node UUID → numeric 钉盘 ids → pre-signed URL → raw bytes.
+func TestClientDownloadsUploadedDocumentThroughStorageAPI(t *testing.T) {
+	const payload = "PK\x03\x04word-bytes"
+	var dentryQueries, downloadQueries, objectFetches int
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/v1.0/oauth2/accessToken":
+			_, _ = w.Write([]byte(`{"accessToken":"token","expireIn":7200}`))
+		case strings.HasSuffix(r.URL.Path, "/queryDentryId"):
+			dentryQueries++
+			if r.Method != http.MethodGet ||
+				r.URL.EscapedPath() != "/v2.0/doc/dentries/node%2Fid/queryDentryId" {
+				t.Errorf("dentry request = %s %s", r.Method, r.URL.EscapedPath())
+			}
+			if r.URL.Query().Get("operatorId") != "union/user" ||
+				r.Header.Get("x-acs-dingtalk-access-token") != "token" {
+				t.Errorf("dentry request query = %#v, headers = %#v", r.URL.Query(), r.Header)
+			}
+			_, _ = w.Write([]byte(
+				`{"dentryId":"123456789012","spaceId":"9876543210","dentryUuid":"node/id"}`,
+			))
+		case strings.HasSuffix(r.URL.Path, "/downloadInfos/query"):
+			downloadQueries++
+			if r.Method != http.MethodPost ||
+				r.URL.Path != "/v1.0/storage/spaces/9876543210/dentries/123456789012/downloadInfos/query" {
+				t.Errorf("download request = %s %s", r.Method, r.URL.Path)
+			}
+			if r.URL.Query().Get("unionId") != "union/user" {
+				t.Errorf("download request query = %#v", r.URL.Query())
+			}
+			body, _ := io.ReadAll(r.Body)
+			if !strings.Contains(string(body), `"preferIntranet":false`) ||
+				!strings.Contains(string(body), `"version":1`) {
+				t.Errorf("download request body = %s", body)
+			}
+			_, _ = w.Write([]byte(`{
+				"protocol":"HEADER_SIGNATURE",
+				"headerSignatureInfo":{
+					"headers":{"Authorization":"OSS key:signature","x-oss-date":"Sun, 27 Sep 2026 03:34:30 GMT"},
+					"resourceUrls":["http://` + r.Host + `/oss/object"],
+					"expirationSeconds":900
+				}
+			}`))
+		case r.URL.Path == "/oss/object":
+			objectFetches++
+			if r.Header.Get("Authorization") != "OSS key:signature" ||
+				r.Header.Get("x-oss-date") != "Sun, 27 Sep 2026 03:34:30 GMT" {
+				t.Errorf("signed request headers = %#v", r.Header)
+			}
+			if r.Header.Get("Accept-Encoding") != "identity" {
+				t.Errorf("signed request encoding = %q", r.Header.Get("Accept-Encoding"))
+			}
+			_, _ = w.Write([]byte(payload))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	client := testClient(server)
+	data, err := client.downloadDocument(context.Background(), "node/id")
+	if err != nil {
+		t.Fatalf("downloadDocument() error = %v", err)
+	}
+	if string(data) != payload {
+		t.Fatalf("downloadDocument() = %q, want %q", data, payload)
+	}
+	if dentryQueries != 1 || downloadQueries != 1 || objectFetches != 1 {
+		t.Fatalf("requests dentry=%d download=%d object=%d",
+			dentryQueries, downloadQueries, objectFetches)
+	}
+
+	// Validation resolves the same location without transferring the payload.
+	if err := client.verifyDocumentDownload(context.Background(), "node/id"); err != nil {
+		t.Fatalf("verifyDocumentDownload() error = %v", err)
+	}
+	if downloadQueries != 2 || objectFetches != 1 {
+		t.Fatalf("verify transferred bytes: download=%d object=%d", downloadQueries, objectFetches)
+	}
+}
+
+func TestClientRejectsIncompleteDentryResponse(t *testing.T) {
+	for _, body := range []string{
+		`{"dentryId":"1"}`,
+		`{"spaceId":"2"}`,
+		`{"dentryId":" ","spaceId":"2"}`,
+		`{}`,
+	} {
+		t.Run(body, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(body))
+			}))
+			defer server.Close()
+			c := testClient(server)
+			c.token = "cached"
+			c.tokenExpiry = time.Now().Add(time.Hour)
+			if _, err := c.resolveDentry(context.Background(), "doc"); err == nil {
+				t.Fatalf("resolveDentry() accepted %s", body)
+			}
+		})
+	}
+}
+
+func TestClientRejectsDownloadWithoutResourceURL(t *testing.T) {
+	for _, body := range []string{
+		`{}`,
+		`{"protocol":"HEADER_SIGNATURE","headerSignatureInfo":null}`,
+		`{"protocol":"HEADER_SIGNATURE","headerSignatureInfo":{"resourceUrls":[]}}`,
+		`{"protocol":"SIGNATURE","headerSignatureInfo":{"resourceUrls":[" "]}}`,
+	} {
+		t.Run(body, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(body))
+			}))
+			defer server.Close()
+			c := testClient(server)
+			c.token = "cached"
+			c.tokenExpiry = time.Now().Add(time.Hour)
+			_, err := c.requestDownloadURL(context.Background(), dentryRef{DentryID: "1", SpaceID: "2"})
+			if err == nil {
+				t.Fatalf("requestDownloadURL() accepted %s", body)
+			}
+		})
+	}
+}
+
+// An expired pre-signed URL must be re-signed rather than failing the document.
+func TestClientResignsDownloadURLAfterObjectStoreRefusal(t *testing.T) {
+	var downloadQueries, objectFetches int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/queryDentryId"):
+			_, _ = w.Write([]byte(`{"dentryId":"1","spaceId":"2"}`))
+		case strings.HasSuffix(r.URL.Path, "/downloadInfos/query"):
+			downloadQueries++
+			_, _ = w.Write([]byte(`{"protocol":"HEADER_SIGNATURE","headerSignatureInfo":{
+				"headers":{"Authorization":"OSS key:sig` + string(rune('0'+downloadQueries)) + `"},
+				"resourceUrls":["http://` + r.Host + `/oss/object"]}}`))
+		case r.URL.Path == "/oss/object":
+			objectFetches++
+			if objectFetches == 1 {
+				w.WriteHeader(http.StatusForbidden)
+				_, _ = w.Write([]byte(`<Error><Code>SignatureDoesNotMatch</Code></Error>`))
+				return
+			}
+			if r.Header.Get("Authorization") != "OSS key:sig2" {
+				t.Errorf("retry reused the stale signature: %#v", r.Header)
+			}
+			_, _ = w.Write([]byte("bytes"))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	c := testClient(server)
+	c.token = "cached"
+	c.tokenExpiry = time.Now().Add(time.Hour)
+	data, err := c.downloadDocument(context.Background(), "doc")
+	if err != nil {
+		t.Fatalf("downloadDocument() error = %v", err)
+	}
+	if string(data) != "bytes" || downloadQueries != 2 || objectFetches != 2 {
+		t.Fatalf("data = %q, download=%d object=%d", data, downloadQueries, objectFetches)
+	}
+}
+
+func TestClientBoundsDocumentDownloads(t *testing.T) {
+	t.Run("declared length", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			switch {
+			case strings.HasSuffix(r.URL.Path, "/queryDentryId"):
+				_, _ = w.Write([]byte(`{"dentryId":"1","spaceId":"2"}`))
+			case strings.HasSuffix(r.URL.Path, "/downloadInfos/query"):
+				_, _ = w.Write([]byte(`{"protocol":"HEADER_SIGNATURE","headerSignatureInfo":{
+					"resourceUrls":["http://` + r.Host + `/oss/object"]}}`))
+			default:
+				w.Header().Set("Content-Length", strconv.Itoa(4096))
+				w.WriteHeader(http.StatusOK)
+			}
+		}))
+		defer server.Close()
+
+		c := testClient(server)
+		c.token = "cached"
+		c.tokenExpiry = time.Now().Add(time.Hour)
+		c.downloadLimit = 1024
+		data, err := c.downloadDocument(context.Background(), "doc")
+		if err == nil || !strings.Contains(err.Error(), "exceeds the 1024 byte download limit") {
+			t.Fatalf("downloadDocument() = %q, %v; want a size refusal", data, err)
+		}
+	})
+
+	t.Run("streamed length", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			switch {
+			case strings.HasSuffix(r.URL.Path, "/queryDentryId"):
+				_, _ = w.Write([]byte(`{"dentryId":"1","spaceId":"2"}`))
+			case strings.HasSuffix(r.URL.Path, "/downloadInfos/query"):
+				_, _ = w.Write([]byte(`{"protocol":"HEADER_SIGNATURE","headerSignatureInfo":{
+					"resourceUrls":["http://` + r.Host + `/oss/object"]}}`))
+			default:
+				// Flushing first drops Content-Length, so only the streaming
+				// guard can stop an over-sized body.
+				w.WriteHeader(http.StatusOK)
+				if flusher, ok := w.(http.Flusher); ok {
+					flusher.Flush()
+				}
+				_, _ = w.Write([]byte(strings.Repeat("x", 4096)))
+			}
+		}))
+		defer server.Close()
+
+		c := testClient(server)
+		c.token = "cached"
+		c.tokenExpiry = time.Now().Add(time.Hour)
+		c.downloadLimit = 1024
+		if _, err := c.downloadDocument(context.Background(), "doc"); err == nil ||
+			!strings.Contains(err.Error(), "1024 byte download limit") {
+			t.Fatalf("downloadDocument() error = %v, want a size refusal", err)
+		}
+	})
+}
+
+func TestReadLimitedRejectsOverlongBody(t *testing.T) {
+	if data, err := readLimited(strings.NewReader("1234"), 4); err != nil || string(data) != "1234" {
+		t.Fatalf("readLimited() = %q, %v", data, err)
+	}
+	if _, err := readLimited(strings.NewReader("12345"), 4); err == nil ||
+		!strings.Contains(err.Error(), "download limit") {
+		t.Fatalf("readLimited() error = %v", err)
 	}
 }
 
