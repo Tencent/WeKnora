@@ -823,8 +823,11 @@ func (r *Reconciler) extract(p *pkg.Package) (string, error) {
 		return "", fmt.Errorf("plugin cache %s: %w (set WEKNORA_PLUGIN_CACHE_DIR)", r.cacheDir, err)
 	}
 	dir := filepath.Join(r.cacheDir, strings.TrimPrefix(p.Digest, "sha256:"))
-	if _, err := os.Stat(filepath.Join(dir, pkg.ManifestFile)); err == nil {
-		return dir, nil
+	if info, err := os.Stat(dir); err == nil && info.IsDir() {
+		// Extracted before: make sure it still is the package (a temp
+		// cleaner may have taken files, another process of WeKnora's user
+		// changed or planted some).
+		return dir, r.restore(p, dir)
 	}
 	tmp := dir + ".tmp-" + uuid.NewString()[:8]
 	for _, name := range p.Files("") {
@@ -846,12 +849,25 @@ func (r *Reconciler) extract(p *pkg.Package) (string, error) {
 	if err := os.Rename(tmp, dir); err != nil {
 		_ = os.RemoveAll(tmp)
 		// Another pass extracted the same digest first.
-		if _, statErr := os.Stat(filepath.Join(dir, pkg.ManifestFile)); statErr == nil {
-			return dir, nil
+		if info, statErr := os.Stat(dir); statErr == nil && info.IsDir() {
+			return dir, r.restore(p, dir)
 		}
 		return "", err
 	}
 	return dir, nil
+}
+
+// restore puts an extracted package back as it was and says what differed.
+func (r *Reconciler) restore(p *pkg.Package, dir string) error {
+	changed, err := pkg.Restore(p, dir)
+	if err != nil {
+		return fmt.Errorf("restore the extracted package at %s: %w", dir, err)
+	}
+	if len(changed) > 0 {
+		logger.Warnf(context.Background(), "[plugin] %s: the extracted package at %s differed from the package; "+
+			"restored %v", p.Manifest.ID, dir, changed)
+	}
+	return nil
 }
 
 func (r *Reconciler) setStatus(id string, s Status) {

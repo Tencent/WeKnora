@@ -237,7 +237,7 @@ func (m *Manager) Stage(ctx context.Context, _, l *reconcile.Loaded) (reconcile.
 	m.mu.Lock()
 	direct, hostAPI := m.direct, m.hostAPI
 	m.mu.Unlock()
-	p, err := startProcess(spec{m: l.Manifest, dir: l.Dir, direct: direct, hostAPI: hostAPI},
+	p, err := startProcess(spec{m: l.Manifest, dir: l.Dir, pkg: l.Package, direct: direct, hostAPI: hostAPI},
 		func(p *process, s State, err error) { m.report(id, p, s, err) })
 	if err != nil {
 		return nil, err

@@ -22,6 +22,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/plugin/driver"
 	"github.com/Tencent/WeKnora/internal/plugin/manifest"
+	"github.com/Tencent/WeKnora/internal/plugin/pkg"
 	"github.com/Tencent/WeKnora/internal/plugin/sandbox"
 	"github.com/Tencent/WeKnora/internal/utils"
 	"github.com/Tencent/WeKnora/pluginsdk/client"
@@ -72,6 +73,9 @@ const (
 type spec struct {
 	m   *manifest.Manifest
 	dir string // extracted package
+	// pkg is the package dir was extracted from; every start puts dir back
+	// as the package holds it (nil in tests that build dir by hand).
+	pkg *pkg.Package
 	// direct are host:port addresses reached without the egress proxy.
 	direct []string
 	// hostAPI is the loopback address of this node's Host API, forwarded into
@@ -307,9 +311,32 @@ func (p *process) command(entry string) *exec.Cmd {
 
 // launch starts the child and waits for handshake, health and a manifest
 // that matches the installed package.
+// restoreFiles puts the extracted package back as the package holds it
+// before a start: what another process of WeKnora's user changed or planted
+// there since the last start does not run with the plugin.
+func (p *process) restoreFiles() error {
+	if p.spec.pkg == nil {
+		return nil
+	}
+	changed, err := pkg.Restore(p.spec.pkg, p.spec.dir)
+	if err != nil {
+		return fmt.Errorf("restore the plugin's files: %w", err)
+	}
+	if len(changed) == 0 {
+		return nil
+	}
+	logger.Warnf(context.Background(), "[plugin] %s: files differed from the package since the last start; "+
+		"restored %v", p.spec.m.ID, changed)
+	_, err = entryPath(p.spec.m, p.spec.dir) // a rewritten entry lost its mode
+	return err
+}
+
 func (p *process) launch(ctx context.Context, entry string) (*launched, error) {
 	network, socket := p.listenAddress()
 	if network == "unix" {
+	if err := p.restoreFiles(); err != nil {
+		return nil, err
+	}
 		_ = os.Remove(socket)
 	}
 	token := randomToken()

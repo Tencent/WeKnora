@@ -190,6 +190,38 @@ func TestReconcileReextractsMissingFiles(t *testing.T) {
 	}
 }
 
+// A package extracted before (by an earlier run on the same cache) is put
+// back as the package holds it before it is loaded again: files taken are
+// written again, files planted there are removed.
+func TestReconcileRestoresAnExtractedPackage(t *testing.T) {
+	ctx := context.Background()
+	repo, store, cache := plugintest.NewMemRepo(), &plugintest.MemStore{}, t.TempDir()
+	plugintest.Install(t, repo, store, plugintest.KitPackage(t, "1.0.0"), types.PluginStateEnabled)
+	first := New(Options{Repo: repo, Store: store, Registry: registry.New(), CacheDir: cache})
+	if err := first.Reconcile(ctx); err != nil {
+		t.Fatal(err)
+	}
+	dir := first.Loaded()[0].Dir
+	skill := filepath.Join(dir, "skills/triage/SKILL.md")
+	planted := filepath.Join(dir, "skills/triage/run.sh")
+	_ = os.Remove(skill)
+	_ = os.WriteFile(planted, []byte("#!/bin/sh"), 0o755)
+
+	again := New(Options{Repo: repo, Store: store, Registry: registry.New(), CacheDir: cache})
+	if err := again.Reconcile(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if again.Loaded()[0].Dir != dir {
+		t.Fatalf("extracted to %s, not the cached %s", again.Loaded()[0].Dir, dir)
+	}
+	if _, err := os.Stat(skill); err != nil {
+		t.Fatalf("the missing file was not written again: %v", err)
+	}
+	if _, err := os.Stat(planted); !os.IsNotExist(err) {
+		t.Fatalf("the planted file is still there: %v", err)
+	}
+}
+
 func TestActivatorFailureMarksPluginFailed(t *testing.T) {
 	ctx := context.Background()
 	repo, store := plugintest.NewMemRepo(), &plugintest.MemStore{}
