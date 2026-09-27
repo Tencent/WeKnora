@@ -136,15 +136,7 @@ func (h *PluginWebhookHandler) Receive(c *gin.Context) {
 		c.Status(status)
 		return
 	}
-	status := out.Status
-	if status < 100 || status > 599 {
-		status = http.StatusOK
-	}
-	ctype := out.ContentType
-	if ctype == "" {
-		ctype = "application/octet-stream"
-	}
-	c.Data(status, ctype, out.Body)
+	webhook.WriteResponse(c, out.Status, out.ContentType, out.Body)
 }
 
 // PluginWebhookDTO is one webhook of a plugin, with the workspace's URL.

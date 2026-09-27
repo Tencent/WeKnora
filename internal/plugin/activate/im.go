@@ -15,6 +15,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/plugin/configschema"
 	"github.com/Tencent/WeKnora/internal/plugin/manifest"
 	"github.com/Tencent/WeKnora/internal/plugin/registry"
+	"github.com/Tencent/WeKnora/internal/plugin/webhook"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/pluginsdk/pluginapi"
 )
@@ -145,15 +146,7 @@ func (a *pluginIMAdapter) HandleURLVerification(c *gin.Context) bool {
 		return true
 	}
 	if r := out.Response; r != nil {
-		status := r.Status
-		if status < 100 || status > 599 {
-			status = http.StatusOK
-		}
-		ctype := r.ContentType
-		if ctype == "" {
-			ctype = "application/octet-stream"
-		}
-		c.Data(status, ctype, r.Body)
+		webhook.WriteResponse(c, r.Status, r.ContentType, r.Body)
 	} else {
 		c.Data(http.StatusOK, "application/json", []byte("{}"))
 	}

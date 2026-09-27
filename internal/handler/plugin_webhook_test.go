@@ -94,6 +94,11 @@ func TestPluginWebhooksRelayCalls(t *testing.T) {
 	if w.Code != 202 || w.Header().Get("Content-Type") != "application/json" {
 		t.Fatalf("relay = %d %s", w.Code, w.Body)
 	}
+	// Served on WeKnora's origin: inert in a browser whatever the plugin sent.
+	if csp := w.Header().Get("Content-Security-Policy"); !strings.HasPrefix(csp, "sandbox") ||
+		w.Header().Get("X-Content-Type-Options") != "nosniff" {
+		t.Fatalf("callback answer headers = %v", w.Header())
+	}
 	var got map[string]any
 	_ = json.Unmarshal(w.Body.Bytes(), &got)
 	if got["tenant"] != float64(7) || got["path"] != "/issues" || got["query"] != "since=1" ||

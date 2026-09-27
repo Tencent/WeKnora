@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -116,8 +117,9 @@ func TestPluginIMChannel(t *testing.T) {
 		}
 		return w
 	}
-	if w := callback(`{"challenge":"abc"}`); w.Code != 200 || w.Body.String() != "abc" {
-		t.Fatalf("challenge = %d %q", w.Code, w.Body.String())
+	if w := callback(`{"challenge":"abc"}`); w.Code != 200 || w.Body.String() != "abc" ||
+		!strings.HasPrefix(w.Header().Get("Content-Security-Policy"), "sandbox") {
+		t.Fatalf("challenge = %d %q %v", w.Code, w.Body.String(), w.Header())
 	}
 	if w := callback(`{"text":"hello","from":"u1"}`); w.Code != 200 || w.Body.String() != "{}" {
 		t.Fatalf("message ack = %d %q", w.Code, w.Body.String())
