@@ -44,6 +44,9 @@ type ModelService interface {
 	GetVLMModel(ctx context.Context, modelId string) (vlm.VLM, error)
 	// GetASRModel gets an automatic speech recognition model
 	GetASRModel(ctx context.Context, modelId string) (asr.ASR, error)
+	// CheckModelVendor refuses a model whose vendor comes from a plugin its
+	// workspace turned off; the Get*Model methods check it themselves.
+	CheckModelVendor(ctx context.Context, model *types.Model) error
 }
 
 // ModelRepository defines the model repository interface

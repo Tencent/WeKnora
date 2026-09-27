@@ -56,6 +56,34 @@ func TestRegisterPluginVendor(t *testing.T) {
 	}
 }
 
+// A plugin vendor is only chosen by its ID, in any case: a row naming no
+// vendor never lands on one by its URL, and checks see the ID Resolve uses.
+func TestPluginVendorsAreChosenByIDOnly(t *testing.T) {
+	rt := New()
+	def := `{"name":"ACME AI","base_url":"https://api.acme.example/v1","url_patterns":["acme.example"]}`
+	if err := rt.RegisterPlugin("acme.ai/acme", []byte(def), t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	if got := rt.VendorID("", "https://api.acme.example/v1"); got == "acme.ai/acme" {
+		t.Fatal("a row naming no vendor was taken by a plugin vendor's URL pattern")
+	}
+	if got := rt.DetectByURL("https://api.acme.example/v1"); got == "acme.ai/acme" {
+		t.Fatal("URL detection offered a plugin vendor")
+	}
+	for _, provider := range []string{"acme.ai/acme", "ACME.AI/Acme", " acme.ai/acme "} {
+		if got := rt.VendorID(provider, ""); got != "acme.ai/acme" {
+			t.Errorf("VendorID(%q) = %q", provider, got)
+		}
+		resolved, err := rt.Resolve(Ref{Provider: provider, Model: "m"})
+		if err != nil || resolved.Vendor.ID != "acme.ai/acme" {
+			t.Errorf("Resolve(%q) used %v, %v", provider, resolved, err)
+		}
+	}
+	if got := rt.VendorID("openai", ""); got != "openai" {
+		t.Fatalf("VendorID(openai) = %q", got)
+	}
+}
+
 // The console catalog compiles its generation on a runtime without plugin
 // vendors and publishes it with Adopt; the plugin vendors must survive.
 func TestAdoptKeepsPluginVendors(t *testing.T) {

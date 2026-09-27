@@ -200,6 +200,10 @@ func (s *knowledgeService) getVLMConfig(ctx context.Context, kb *types.Knowledge
 	if err != nil {
 		return nil, err
 	}
+	// docreader calls the model's vendor itself.
+	if err := s.modelService.CheckModelVendor(ctx, model); err != nil {
+		return nil, err
+	}
 
 	interfaceType := model.Parameters.InterfaceType
 	if interfaceType == "" {

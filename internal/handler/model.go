@@ -100,7 +100,9 @@ func (h *ModelHandler) CreateModel(c *gin.Context) {
 		_ = c.Error(errors.NewBadRequestError(err.Error()))
 		return
 	}
-	if p := req.Parameters.Provider; p != "" && !h.pluginFilter(c)(manifest.PointModelVendors, p) {
+	// By the vendor the runtime uses: a provider in another case is the same.
+	vendor := modelruntime.VendorID(req.Parameters.Provider, req.Parameters.BaseURL)
+	if !h.pluginFilter(c)(manifest.PointModelVendors, vendor) {
 		_ = c.Error(errors.NewBadRequestError(disabledIntegrationError))
 		return
 	}
@@ -691,6 +693,14 @@ func (h *ModelHandler) UpdateModel(c *gin.Context) {
 		dto.VendorRef{Provider: model.Parameters.Provider, BaseURL: model.Parameters.BaseURL},
 		dto.VendorRef{Provider: newParams.Provider, BaseURL: newParams.BaseURL},
 	)
+	// Moving the model to a vendor whose plugin the workspace turned off is
+	// refused like creating one; a model already there keeps its edits.
+	if vendor := modelruntime.VendorID(newParams.Provider, newParams.BaseURL); vendor !=
+		modelruntime.VendorID(model.Parameters.Provider, model.Parameters.BaseURL) &&
+		!h.pluginFilter(c)(manifest.PointModelVendors, vendor) {
+		_ = c.Error(errors.NewBadRequestError(disabledIntegrationError))
+		return
+	}
 	model.Parameters = newParams
 
 	model.Source = req.Source

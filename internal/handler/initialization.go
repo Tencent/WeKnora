@@ -1946,6 +1946,10 @@ func (h *InitializationHandler) CheckRemoteModel(c *gin.Context) {
 	}
 
 	model := h.buildTestModel(&req, types.ModelTypeKnowledgeQA, types.ModelSourceRemote)
+	if err := h.modelService.CheckModelVendor(ctx, model); err != nil {
+		_ = c.Error(errors.NewBadRequestError(disabledIntegrationError))
+		return
+	}
 	available, message := h.checkChatModelConnection(ctx, model, appID, appSecret)
 
 	logger.Infof(ctx, "Remote model check completed, available: %v, message: %s", available, message)
@@ -2020,6 +2024,10 @@ func (h *InitializationHandler) TestEmbeddingModel(c *gin.Context) {
 	}
 
 	model := h.buildTestModel(&req, types.ModelTypeEmbedding, types.ModelSourceRemote)
+	if err := h.modelService.CheckModelVendor(ctx, model); err != nil {
+		_ = c.Error(errors.NewBadRequestError(disabledIntegrationError))
+		return
+	}
 	emb, err := embedding.NewEmbedder(embedding.ConfigFromModel(model, appID, appSecret), h.pooler, h.ollamaService)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{"model": utils.SanitizeForLog(req.ModelName)})
@@ -2172,6 +2180,10 @@ func (h *InitializationHandler) CheckRerankModel(c *gin.Context) {
 	}
 
 	model := h.buildTestModel(&req, types.ModelTypeRerank, types.ModelSourceRemote)
+	if err := h.modelService.CheckModelVendor(ctx, model); err != nil {
+		_ = c.Error(errors.NewBadRequestError(disabledIntegrationError))
+		return
+	}
 	// LKEAP and Volcengine rerank sign with a key pair stored on the row
 	// itself, not with the tenant's WeKnora Cloud credentials.
 	if p := model.Parameters.Provider; p == providers.LkeapID || p == providers.VolcengineID {
@@ -2231,6 +2243,10 @@ func (h *InitializationHandler) CheckASRModel(c *gin.Context) {
 	// 用统一构造器生成测试用 *types.Model（ASR 不涉及 WeKnoraCloud 凭证），
 	// 发送一段极短的静默 WAV 音频验证 /v1/audio/transcriptions 端点可达。
 	model := h.buildTestModel(&req, types.ModelTypeASR, types.ModelSourceRemote)
+	if err := h.modelService.CheckModelVendor(ctx, model); err != nil {
+		_ = c.Error(errors.NewBadRequestError(disabledIntegrationError))
+		return
+	}
 	asrInstance, err := asr.NewASR(asr.ConfigFromModel(model))
 	if err != nil {
 		logger.Errorf(ctx, "Failed to create ASR instance for check: %v", err)

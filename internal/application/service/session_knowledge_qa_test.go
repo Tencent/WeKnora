@@ -135,6 +135,8 @@ func (s *stubModelService) GetASRModel(context.Context, string) (asr.ASR, error)
 	return nil, nil
 }
 
+func (s *stubModelService) CheckModelVendor(context.Context, *types.Model) error { return nil }
+
 func TestHandleModelFallback_IncludesHistoryMessages(t *testing.T) {
 	chatModel := &captureChatModel{}
 	svc := &sessionService{

@@ -21,7 +21,9 @@ type PluginTenantSettingRepository interface {
 // PluginGate tells integrations which contributions a tenant has enabled.
 // A disabled plugin's contributions are left out of type listings and cannot
 // back new instances; calls existing instances make to the plugin are
-// refused where they are made (the plugin invoker), so they pause.
+// refused where they are made (the plugin invoker), so they pause. Models
+// of a plugin's vendor call the vendor, not the plugin: the model service
+// refuses them (ModelService.CheckModelVendor).
 type PluginGate interface {
 	// EnabledFilter returns a predicate for one tenant, reading the
 	// tenant's switches once so a listing checks many items cheaply. The

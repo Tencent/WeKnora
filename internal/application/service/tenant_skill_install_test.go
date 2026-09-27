@@ -3366,6 +3366,7 @@ func (s *installModelService) GetChatModel(_ context.Context, modelID string) (c
 }
 func (s *installModelService) GetVLMModel(context.Context, string) (vlm.VLM, error) { return nil, nil }
 func (s *installModelService) GetASRModel(context.Context, string) (asr.ASR, error) { return nil, nil }
+func (s *installModelService) CheckModelVendor(context.Context, *types.Model) error { return nil }
 
 type installChat struct{ id string }
 

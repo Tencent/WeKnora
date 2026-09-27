@@ -11,11 +11,13 @@ import (
 )
 
 type memRepo struct {
-	rows map[uint64]map[string]types.PluginTenantSetting
-	err  error
+	rows  map[uint64]map[string]types.PluginTenantSetting
+	err   error
+	lists int
 }
 
 func (m *memRepo) List(_ context.Context, tenantID uint64) ([]types.PluginTenantSetting, error) {
+	m.lists++
 	if m.err != nil {
 		return nil, m.err
 	}
@@ -152,6 +154,28 @@ func TestEnabledFilterFailsOpen(t *testing.T) {
 	repo.err = errors.New("db down")
 	if !s.ContributionEnabled(ctx, 1, manifest.PointConnectors, "feishu") {
 		t.Fatal("unreadable switches must not hide integrations")
+	}
+}
+
+// A filter reads the switches once, and only when asked about a plugin a
+// tenant can switch: checking required builtins and unknown IDs (a model
+// on a built-in vendor, on every call) costs no query.
+func TestEnabledFilterReadsSwitchesOnDemand(t *testing.T) {
+	s, repo := newService(t)
+	enabled := s.EnabledFilter(context.Background(), 1)
+	if !enabled(manifest.PointTools, "thinking") || !enabled(manifest.PointModelVendors, "openai") {
+		t.Fatal("required builtins and unknown IDs are enabled")
+	}
+	if repo.lists != 0 {
+		t.Fatalf("read the switches %d times for nothing a tenant switches", repo.lists)
+	}
+	for range 3 {
+		if !enabled(manifest.PointConnectors, "feishu") {
+			t.Fatal("feishu is on by default")
+		}
+	}
+	if repo.lists != 1 {
+		t.Fatalf("read the switches %d times, want once", repo.lists)
 	}
 }
 

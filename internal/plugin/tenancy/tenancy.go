@@ -5,6 +5,7 @@ package tenancy
 import (
 	"context"
 	"errors"
+	"sync"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -138,17 +139,26 @@ func enabledByDefault(m *manifest.Manifest) bool { return m.Builtin }
 
 // EnabledFilter implements interfaces.PluginGate. If the switches cannot be
 // read it fails open: offering a disabled integration is recoverable,
-// hiding every integration on a database hiccup is not.
+// hiding every integration on a database hiccup is not. The switches are
+// read on the first question about an installed plugin's contribution, so
+// checking a built-in costs nothing.
 func (s *Service) EnabledFilter(ctx context.Context, tenantID uint64) func(manifest.Point, string) bool {
-	set := map[string]bool{}
-	rows, err := s.repo.List(ctx, tenantID)
-	if err != nil {
-		logger.Warnf(ctx, "[plugin] read tenant %d plugin switches: %v; treating all as enabled", tenantID, err)
+	var (
+		once     sync.Once
+		set      map[string]bool
+		failOpen bool
+	)
+	switches := func() {
+		set = map[string]bool{}
+		rows, err := s.repo.List(ctx, tenantID)
+		if err != nil {
+			logger.Warnf(ctx, "[plugin] read tenant %d plugin switches: %v; treating all as enabled", tenantID, err)
+		}
+		for _, r := range rows {
+			set[r.PluginID] = r.Enabled
+		}
+		failOpen = err != nil
 	}
-	for _, r := range rows {
-		set[r.PluginID] = r.Enabled
-	}
-	failOpen := err != nil
 	return func(point manifest.Point, id string) bool {
 		e, ok := s.registry.Resolve(point, id)
 		if !ok {
@@ -158,7 +168,11 @@ func (s *Service) EnabledFilter(ctx context.Context, tenantID uint64) func(manif
 			return false
 		}
 		m, ok := s.registry.Plugin(e.PluginID)
-		if !ok || m.Required || failOpen {
+		if !ok || m.Required {
+			return true
+		}
+		once.Do(switches)
+		if failOpen {
 			return true
 		}
 		if enabled, ok := set[e.PluginID]; ok {

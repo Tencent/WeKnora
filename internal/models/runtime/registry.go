@@ -130,7 +130,7 @@ func (rt *Runtime) selectProvider(id, baseURL string) *Provider {
 	defer rt.mu.RUnlock()
 	id = strings.ToLower(strings.TrimSpace(id))
 	if id == "" {
-		id = detectByURL(rt.providers, baseURL)
+		id = detectByURL(rt.providers, rt.plugins, baseURL)
 	}
 	if p, ok := rt.providers[id]; ok {
 		return p
@@ -138,10 +138,17 @@ func (rt *Runtime) selectProvider(id, baseURL string) *Provider {
 	return rt.providers[providers.GenericID]
 }
 
-func detectByURL(definitions map[string]*Provider, baseURL string) string {
+// detectByURL picks the vendor whose URL pattern matches baseURL best.
+// Plugin vendors (skip) are only ever chosen by ID: a plugin installed later
+// must not take over rows that name no vendor, nor reach workspaces that did
+// not turn it on.
+func detectByURL(definitions, skip map[string]*Provider, baseURL string) string {
 	id, bestLen, bestOrder := providers.GenericID, 0, int(^uint(0)>>1)
 	lower := strings.ToLower(baseURL)
 	for candidate, p := range definitions {
+		if _, ok := skip[candidate]; ok {
+			continue
+		}
 		for _, pattern := range p.URLPatterns {
 			if pattern != "" && strings.Contains(lower, strings.ToLower(pattern)) &&
 				(len(pattern) > bestLen || len(pattern) == bestLen &&
@@ -157,7 +164,19 @@ func detectByURL(definitions map[string]*Provider, baseURL string) string {
 func (rt *Runtime) DetectByURL(baseURL string) string {
 	rt.mu.RLock()
 	defer rt.mu.RUnlock()
-	return detectByURL(rt.providers, baseURL)
+	return detectByURL(rt.providers, rt.plugins, baseURL)
+}
+
+// VendorID is the ID of the vendor Resolve uses for a model's provider and
+// base URL: the provider as the runtime matches it (case and spaces do not
+// count), the vendor its URL points to when it names none, the generic
+// vendor when it is unknown. Checks on who may use a vendor go by this ID,
+// not by what a row stores.
+func (rt *Runtime) VendorID(provider, baseURL string) string {
+	if p := rt.selectProvider(provider, baseURL); p != nil {
+		return p.ID
+	}
+	return ""
 }
 
 // List returns owned provider views from one generation, ordered by Order and ID.
@@ -209,6 +228,9 @@ func List() []*Provider { return Default().List() }
 
 // ListByType queries the default runtime for one capability.
 func ListByType(kind types.ModelType) []*Provider { return Default().ListByType(kind) }
+
+// VendorID asks the default runtime; see Runtime.VendorID.
+func VendorID(provider, baseURL string) string { return Default().VendorID(provider, baseURL) }
 
 // DetectByURL infers a legacy provider using the default runtime.
 func DetectByURL(baseURL string) string { return Default().DetectByURL(baseURL) }

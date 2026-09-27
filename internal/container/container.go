@@ -1894,7 +1894,8 @@ func newPluginDrivers(
 
 // installPluginGate gives the integration handlers the tenant plugin switches,
 // so a disabled plugin's integrations drop out of type listings and cannot
-// back new instances.
+// back new instances; and the model service, so models of a disabled
+// plugin's vendor stop working.
 func installPluginGate(
 	gate interfaces.PluginGate,
 	models *handler.ModelHandler,
@@ -1902,8 +1903,12 @@ func installPluginGate(
 	dataSources *handler.DataSourceHandler,
 	imHandler *handler.IMHandler,
 	system *handler.SystemHandler,
+	modelService interfaces.ModelService,
 ) {
 	gated := []interface{ SetPluginGate(interfaces.PluginGate) }{models, webSearch, dataSources, imHandler, system}
+	if svc, ok := modelService.(interface{ SetPluginGate(interfaces.PluginGate) }); ok {
+		gated = append(gated, svc)
+	}
 	for _, h := range gated {
 		h.SetPluginGate(gate)
 	}

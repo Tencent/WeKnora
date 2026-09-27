@@ -31,6 +31,8 @@ type modelService struct {
 	ollamaService *ollama.OllamaService
 	pooler        embedding.EmbedderPooler
 	tenantService interfaces.TenantService
+	// gate refuses models whose plugin vendor the workspace turned off.
+	gate interfaces.PluginGate
 }
 
 // NewModelService creates a new model service instance
@@ -494,6 +496,9 @@ func (s *modelService) GetEmbeddingModel(ctx context.Context, modelId string) (e
 
 	logger.Infof(ctx, "Getting embedding model: %s, source: %s", model.Name, model.Source)
 
+	if err := s.CheckModelVendor(ctx, model); err != nil {
+		return nil, err
+	}
 	appID, appSecret := s.resolveWeKnoraCloudCredentials(ctx, &model.Parameters)
 
 	embedder, err := embedding.NewEmbedder(embedding.ConfigFromModel(model, appID, appSecret), s.pooler, s.ollamaService)
@@ -541,6 +546,9 @@ func (s *modelService) GetEmbeddingModelForTenant(ctx context.Context, modelId s
 
 	logger.Infof(ctx, "Getting cross-tenant embedding model: %s, source: %s, tenant: %d", model.Name, model.Source, tenantID)
 
+	if err := s.CheckModelVendor(ctx, model); err != nil {
+		return nil, err
+	}
 	appID, appSecret := s.resolveWeKnoraCloudCredentials(ctx, &model.Parameters)
 
 	embedder, err := embedding.NewEmbedder(embedding.ConfigFromModel(model, appID, appSecret), s.pooler, s.ollamaService)
@@ -571,6 +579,9 @@ func (s *modelService) GetRerankModel(ctx context.Context, modelId string) (rera
 
 	logger.Infof(ctx, "Getting rerank model: %s, source: %s", model.Name, model.Source)
 
+	if err := s.CheckModelVendor(ctx, model); err != nil {
+		return nil, err
+	}
 	appID, appSecret := s.resolveWeKnoraCloudCredentials(ctx, &model.Parameters)
 
 	reranker, err := rerank.NewReranker(rerank.ConfigFromModel(model, appID, appSecret))
@@ -614,6 +625,9 @@ func (s *modelService) GetChatModel(ctx context.Context, modelId string) (chat.C
 
 	logger.Infof(ctx, "Getting chat model: %s, source: %s", model.Name, model.Source)
 
+	if err := s.CheckModelVendor(ctx, model); err != nil {
+		return nil, err
+	}
 	appID, appSecret := s.resolveWeKnoraCloudCredentials(ctx, &model.Parameters)
 
 	chatModel, err := chat.NewChat(chat.ConfigFromModel(model, appID, appSecret), s.ollamaService)
@@ -651,6 +665,9 @@ func (s *modelService) GetVLMModel(ctx context.Context, modelId string) (vlm.VLM
 
 	logger.Infof(ctx, "Getting VLM model: %s, source: %s", model.Name, model.Source)
 
+	if err := s.CheckModelVendor(ctx, model); err != nil {
+		return nil, err
+	}
 	appID, appSecret := s.resolveWeKnoraCloudCredentials(ctx, &model.Parameters)
 
 	vlmModel, err := vlm.NewVLM(vlm.ConfigFromModel(model, appID, appSecret), s.ollamaService)
@@ -691,6 +708,9 @@ func (s *modelService) GetASRModel(ctx context.Context, modelId string) (asr.ASR
 
 	logger.Infof(ctx, "Getting ASR model: %s, source: %s", model.Name, model.Source)
 
+	if err := s.CheckModelVendor(ctx, model); err != nil {
+		return nil, err
+	}
 	sttModel, err := asr.NewASR(asr.ConfigFromModel(model))
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{
