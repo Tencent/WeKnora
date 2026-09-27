@@ -95,6 +95,8 @@ func TestValidateProviderParametersSerply(t *testing.T) {
 	blank := types.WebSearchProviderParameters{APIKey: "   "}
 	if err := validateProviderParameters(types.WebSearchProviderTypeSerply, blank); err == nil {
 		t.Fatal("blank Serply API key was accepted")
+	}
+}
 
 func TestValidateProviderParametersDoubao(t *testing.T) {
 	valid := types.WebSearchProviderParameters{
