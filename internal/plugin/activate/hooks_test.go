@@ -100,3 +100,42 @@ func TestPipelineHooks(t *testing.T) {
 		t.Fatalf("a workspace with the plugin off was hooked: %q", got)
 	}
 }
+
+// A filter that fails holds the results back, unless it declares its
+// failure harmless (failOpen).
+func TestFailingFilterHoldsResultsBack(t *testing.T) {
+	plugin := pluginsdk.New(pluginsdk.Info{ID: "acme.guard", Version: "1.0.0"})
+	plugin.PipelineHook("guard", pluginsdk.PipelineHook{
+		FilterResults: func(context.Context, *pluginsdk.Call, pluginapi.FilterResultsInput,
+		) (pluginapi.FilterResultsOutput, error) {
+			return pluginapi.FilterResultsOutput{}, pluginapi.Errorf(pluginapi.CodeUnavailable, "acl service down")
+		},
+	})
+	srv := httptest.NewServer(plugin.Handler())
+	defer srv.Close()
+	results := []*types.SearchResult{{ID: "a", Content: "confidential margin"}}
+	cm := &types.ChatManage{}
+	cm.TenantID, cm.Query = 7, "margin"
+	for _, failOpen := range []bool{false, true} {
+		manifest := guardManifest
+		if failOpen {
+			manifest += "      failOpen: true\n"
+		}
+		p, err := pkg.Open(plugintest.Zip(t, map[string]string{"plugin.yaml": manifest, "bin/guard": "x"}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		reg := registry.New()
+		if err := reg.Register(p.Manifest); err != nil {
+			t.Fatal(err)
+		}
+		h := NewPipelineHooks(NewInvoker(fakeClients{client.New(srv.URL, nil, nil)}), reg, enabledFor{7: true})
+		got := h.FilterResults(context.Background(), cm, results)
+		if failOpen && len(got) != 1 {
+			t.Fatalf("failOpen: results = %v", got)
+		}
+		if !failOpen && len(got) != 0 {
+			t.Fatalf("a failed filter let %v through", got)
+		}
+	}
+}

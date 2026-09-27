@@ -200,19 +200,11 @@ func offError(pluginID string) error {
 	}}
 }
 
-// Default timeouts per call kind, used when the caller set no deadline.
+// Longest a call of a kind may take; a caller's earlier deadline wins.
 const (
 	searchTimeout   = 10 * time.Second
 	metadataTimeout = time.Minute
 )
-
-// withDefaultTimeout bounds ctx unless it already has a deadline.
-func withDefaultTimeout(ctx context.Context, d time.Duration) (context.Context, context.CancelFunc) {
-	if _, ok := ctx.Deadline(); ok {
-		return context.WithCancel(ctx)
-	}
-	return context.WithTimeout(ctx, d)
-}
 
 // Envelope builds the call envelope for a plugin with an instance config.
 func (iv *Invoker) Envelope(

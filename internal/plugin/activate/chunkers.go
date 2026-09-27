@@ -12,8 +12,8 @@ import (
 	"github.com/Tencent/WeKnora/pluginsdk/pluginapi"
 )
 
-// chunkTimeout bounds one plugin chunking call when the caller set no
-// deadline. The builtin tiers take over when it runs out.
+// chunkTimeout bounds one plugin chunking call, also inside a background
+// task with a longer deadline. The builtin tiers take over when it runs out.
 const chunkTimeout = 2 * time.Minute
 
 // PluginEnabledChecker is whether a workspace has a plugin on (fails closed).
@@ -39,7 +39,7 @@ func PluginChunker(iv *Invoker, reg *registry.Registry, gate PluginEnabledChecke
 		if on, err := gate.PluginEnabled(ctx, tenantID, m.ID); err != nil || !on {
 			return nil, fmt.Errorf("plugin %s is off in this workspace", m.ID)
 		}
-		ctx, cancel := withDefaultTimeout(ctx, chunkTimeout)
+		ctx, cancel := context.WithTimeout(ctx, chunkTimeout)
 		defer cancel()
 		in := pluginapi.ChunkInput{
 			Text: text, ChunkSize: cfg.ChunkSize, ChunkOverlap: cfg.ChunkOverlap, Separators: cfg.Separators,

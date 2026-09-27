@@ -17,7 +17,8 @@ import (
 	"github.com/Tencent/WeKnora/pluginsdk/pluginapi"
 )
 
-// parseTimeout bounds one plugin parse when the caller set no deadline.
+// parseTimeout bounds one plugin parse, also inside a background task with
+// a longer deadline.
 const parseTimeout = 10 * time.Minute
 
 // Parsers registers code plugins' document parsers as parser engines under
@@ -141,7 +142,7 @@ func (r *remoteParser) Read(ctx context.Context, req *types.ReadRequest) (*types
 	if !r.engine.EnabledFor(ctx) {
 		return &types.ReadResult{Error: fmt.Sprintf("plugin %s is off in this workspace", r.engine.m.ID)}, nil
 	}
-	ctx, cancel := withDefaultTimeout(ctx, parseTimeout)
+	ctx, cancel := context.WithTimeout(ctx, parseTimeout)
 	defer cancel()
 	in := pluginapi.ParseInput{
 		FileName: req.FileName, FileType: strings.ToLower(strings.TrimPrefix(req.FileType, ".")),

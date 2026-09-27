@@ -111,8 +111,11 @@ In Python, `@plugin.chunker("clauses")` returns `ChunkSpan`s or
 A pipeline hook takes part in knowledge Q&A: `rewriteQuery` may replace the
 question retrieval uses, `filterResults` may drop and reorder retrieved
 passages (return the IDs to keep), `answer` may append Markdown after the
-finished answer. WeKnora waits a few seconds at most and carries on without
-a hook that fails.
+finished answer. WeKnora waits 5 seconds per hook and 10 per stage at
+most, and carries on without a hook that fails, except at `filterResults`:
+there a failure holds the passages back (the answer is given as if nothing
+was found), since a filter may be what keeps passages from a user. A hook
+that only reorders can declare `failOpen: true` to let them through instead.
 
 ```go
 p.PipelineHook("guard", pluginsdk.PipelineHook{

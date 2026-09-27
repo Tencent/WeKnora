@@ -237,7 +237,7 @@ func (r *remoteSearch) Search(
 func (r *remoteSearch) SearchWithFilters(
 	ctx context.Context, query string, maxResults int, includeDate bool, filters types.WebSearchFilters,
 ) ([]*types.WebSearchResult, error) {
-	ctx, cancel := withDefaultTimeout(ctx, searchTimeout)
+	ctx, cancel := context.WithTimeout(ctx, searchTimeout)
 	defer cancel()
 	in := pluginapi.SearchInput{
 		Query: query, MaxResults: maxResults, IncludeDate: includeDate,

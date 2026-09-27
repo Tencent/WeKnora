@@ -158,7 +158,7 @@ func nonNil(m map[string]any) map[string]any {
 
 // Validate implements datasource.Connector.
 func (r *remoteConnector) Validate(ctx context.Context, cfg *types.DataSourceConfig) error {
-	ctx, cancel := withDefaultTimeout(ctx, metadataTimeout)
+	ctx, cancel := context.WithTimeout(ctx, metadataTimeout)
 	defer cancel()
 	return r.iv.Call(ctx, r.m, pluginapi.ConnectorValidatePath(r.local), instanceOf(cfg), nil, nil)
 }
@@ -167,7 +167,7 @@ func (r *remoteConnector) Validate(ctx context.Context, cfg *types.DataSourceCon
 func (r *remoteConnector) ListResources(
 	ctx context.Context, cfg *types.DataSourceConfig, parentID string,
 ) ([]types.Resource, error) {
-	ctx, cancel := withDefaultTimeout(ctx, metadataTimeout)
+	ctx, cancel := context.WithTimeout(ctx, metadataTimeout)
 	defer cancel()
 	var out pluginapi.ListResourcesOutput
 	err := r.iv.Call(ctx, r.m, pluginapi.ConnectorListResourcesPath(r.local), instanceOf(cfg),
@@ -193,7 +193,7 @@ func (r *remoteConnector) ListResources(
 func (r *remoteConnector) ResolveResourceAncestors(
 	ctx context.Context, cfg *types.DataSourceConfig, resourceIDs []string,
 ) ([]string, error) {
-	ctx, cancel := withDefaultTimeout(ctx, metadataTimeout)
+	ctx, cancel := context.WithTimeout(ctx, metadataTimeout)
 	defer cancel()
 	var out pluginapi.ResolveAncestorsOutput
 	err := r.iv.Call(ctx, r.m, pluginapi.ConnectorResolveAncestorsPath(r.local), instanceOf(cfg),

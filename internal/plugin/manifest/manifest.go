@@ -184,6 +184,11 @@ type Contribution struct {
 	FileTypes []string `json:"fileTypes,omitempty"      yaml:"fileTypes"`
 	// Stages are the chat pipeline stages a pipeline hook joins.
 	Stages []string `json:"stages,omitempty"         yaml:"stages"`
+	// FailOpen lets the results through unfiltered when a pipeline hook's
+	// filterResults fails or runs out of time. By default they are held
+	// back, since a filter may be what keeps passages from a user; a hook
+	// that only reorders can say its failure is harmless.
+	FailOpen bool `json:"failOpen,omitempty"       yaml:"failOpen"`
 	// InstanceSchemaJSON is the instanceSchema file's content as JSON,
 	// filled when the package is opened so every node can read it.
 	InstanceSchemaJSON json.RawMessage `json:"instanceSchemaJson,omitempty" yaml:"-"`
@@ -491,6 +496,9 @@ func (m *Manifest) validateContributions(add func(string, ...any)) {
 				validateStages(c.Stages, where, add)
 			} else if len(c.Stages) > 0 {
 				add("%s.stages belong to pipelineHooks", where)
+			}
+			if c.FailOpen && (point != PointPipelineHooks || !slices.Contains(c.Stages, StageFilterResults)) {
+				add("%s.failOpen belongs to pipelineHooks at %s", where, StageFilterResults)
 			}
 			for _, alias := range c.Aliases {
 				// Aliases share the ID alphabet, which has no '/', so an

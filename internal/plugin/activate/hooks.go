@@ -13,12 +13,17 @@ import (
 	"github.com/Tencent/WeKnora/pluginsdk/pluginapi"
 )
 
-// hookTimeout bounds one pipeline hook call: the user is waiting.
-const hookTimeout = 5 * time.Second
+// hookTimeout bounds one pipeline hook call, and stageTimeout all the hooks
+// at one stage together: the user is waiting.
+const (
+	hookTimeout  = 5 * time.Second
+	stageTimeout = 10 * time.Second
+)
 
 // PipelineHooks calls the pipeline hooks of the plugins a workspace has on,
 // in registration order. It implements chatpipeline.ExternalHooks: a hook
-// that fails or runs out of time is skipped.
+// that fails or runs out of time is skipped, except at filterResults, where
+// the results are held back unless the hook declares failOpen.
 type PipelineHooks struct {
 	iv   *Invoker
 	reg  *registry.Registry
@@ -31,18 +36,19 @@ func NewPipelineHooks(iv *Invoker, reg *registry.Registry, gate PluginEnabledChe
 }
 
 type activeHook struct {
-	m  *manifest.Manifest
-	id string
+	m        *manifest.Manifest
+	id       string
+	failOpen bool
 }
 
 // active lists the hooks at a stage for the conversation's workspace, and
-// the context to call them with.
+// the context to call them with, which bounds the stage; cancel releases it.
 func (h *PipelineHooks) active(
 	ctx context.Context, cm *types.ChatManage, stage string,
-) (context.Context, []activeHook) {
+) (_ context.Context, cancel context.CancelFunc, _ []activeHook) {
 	entries := h.reg.Contributions(manifest.PointPipelineHooks)
 	if len(entries) == 0 {
-		return ctx, nil
+		return ctx, func() {}, nil
 	}
 	tenantID := cm.TenantID
 	if tenantID == 0 {
@@ -62,17 +68,21 @@ func (h *PipelineHooks) active(
 			on[e.PluginID] = enabled
 		}
 		if m, loaded := h.reg.Plugin(e.PluginID); enabled && loaded {
-			out = append(out, activeHook{m: m, id: e.Contribution.ID})
+			out = append(out, activeHook{m: m, id: e.Contribution.ID, failOpen: e.Contribution.FailOpen})
 		}
 	}
-	return ctx, out
+	if len(out) == 0 {
+		return ctx, func() {}, nil
+	}
+	ctx, cancel = context.WithTimeout(ctx, stageTimeout)
+	return ctx, cancel, out
 }
 
 func (h *PipelineHooks) call(ctx context.Context, hook activeHook, stage string, in, out any) bool {
 	ctx, cancel := context.WithTimeout(ctx, hookTimeout)
 	defer cancel()
 	if err := h.iv.Call(ctx, hook.m, pluginapi.HookPath(hook.id, stage), nil, in, out); err != nil {
-		logger.Warnf(ctx, "[plugin] pipeline hook %s/%s at %s skipped: %v", hook.m.ID, hook.id, stage, err)
+		logger.Warnf(ctx, "[plugin] pipeline hook %s/%s at %s failed: %v", hook.m.ID, hook.id, stage, err)
 		return false
 	}
 	return true
@@ -80,7 +90,8 @@ func (h *PipelineHooks) call(ctx context.Context, hook activeHook, stage string,
 
 // RewriteQuery implements chatpipeline.ExternalHooks.
 func (h *PipelineHooks) RewriteQuery(ctx context.Context, cm *types.ChatManage, rewritten string) string {
-	ctx, hooks := h.active(ctx, cm, manifest.StageRewriteQuery)
+	ctx, cancel, hooks := h.active(ctx, cm, manifest.StageRewriteQuery)
+	defer cancel()
 	for _, hook := range hooks {
 		var out pluginapi.RewriteQueryOutput
 		in := pluginapi.RewriteQueryInput{Query: cm.Query, RewrittenQuery: rewritten, SessionID: cm.SessionID}
@@ -95,7 +106,8 @@ func (h *PipelineHooks) RewriteQuery(ctx context.Context, cm *types.ChatManage, 
 func (h *PipelineHooks) FilterResults(
 	ctx context.Context, cm *types.ChatManage, results []*types.SearchResult,
 ) []*types.SearchResult {
-	ctx, hooks := h.active(ctx, cm, manifest.StageFilterResults)
+	ctx, cancel, hooks := h.active(ctx, cm, manifest.StageFilterResults)
+	defer cancel()
 	query := cm.RewriteQuery
 	if query == "" {
 		query = cm.Query
@@ -109,7 +121,16 @@ func (h *PipelineHooks) FilterResults(
 			}
 		}
 		var out pluginapi.FilterResultsOutput
-		if !h.call(ctx, hook, manifest.StageFilterResults, in, &out) || out.Keep == nil {
+		if !h.call(ctx, hook, manifest.StageFilterResults, in, &out) {
+			if hook.failOpen {
+				continue
+			}
+			// The filter may be what keeps passages from this user.
+			logger.Warnf(ctx, "[plugin] pipeline hook %s/%s did not filter the results; holding them back",
+				hook.m.ID, hook.id)
+			return nil
+		}
+		if out.Keep == nil {
 			continue
 		}
 		results = keepResults(results, out.Keep)
@@ -138,7 +159,8 @@ func keepResults(results []*types.SearchResult, keep []string) []*types.SearchRe
 
 // AnswerAppendix implements chatpipeline.ExternalHooks.
 func (h *PipelineHooks) AnswerAppendix(ctx context.Context, cm *types.ChatManage, answer string) string {
-	ctx, hooks := h.active(ctx, cm, manifest.StageAnswer)
+	ctx, cancel, hooks := h.active(ctx, cm, manifest.StageAnswer)
+	defer cancel()
 	var parts []string
 	for _, hook := range hooks {
 		var out pluginapi.AnswerOutput
