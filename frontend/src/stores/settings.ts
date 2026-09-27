@@ -526,7 +526,7 @@ export const useSettingsStore = defineStore("settings", {
 
     // 根据 session.last_request_state 覆盖输入栏相关字段。
     // 只触碰本次记录的字段，**不**清空 store 中其它无关字段（如模型列表）。
-    // 任何字段缺失则保留 store 现值，做"尽力恢复"。
+    // 一般字段缺失时做"尽力恢复"；知识库范围例外，缺失代表本会话未选中知识库。
     applyLastRequestState(state: SessionLastRequestStatePayload | null | undefined) {
       if (!state) return;
       this._isApplyingSessionState = true;
@@ -545,9 +545,11 @@ export const useSettingsStore = defineStore("settings", {
           const current = this.settings.conversationModels || defaultSettings.conversationModels;
           this.settings.conversationModels = { ...current, selectedChatModelId: state.model_id || "" };
         }
-        if (Array.isArray(state.knowledge_base_ids)) {
-          this.settings.selectedKnowledgeBases = [...state.knowledge_base_ids];
-        }
+        // 后端会用 omitempty 省略空列表，所以缺失值表示“本会话没有 KB 范围”，
+        // 而不是“保留上一个会话的选择”。后者会把过期的 @KB 继续发给服务端。
+        this.settings.selectedKnowledgeBases = Array.isArray(state.knowledge_base_ids)
+          ? [...state.knowledge_base_ids]
+          : [];
         if (Array.isArray(state.knowledge_ids)) {
           this.settings.selectedFiles = [...state.knowledge_ids];
           // selectedFileKbMap 此时无法重建（state 里没存 KB 归属），交给前端按
