@@ -53,7 +53,8 @@ func TestNodesConvergeThroughRedis(t *testing.T) {
 	}
 }
 
-// egressActivator runs every plugin with one egress mode.
+// egressActivator runs every plugin with one egress mode, and keeps it to
+// its files unless that mode is proxy.
 type egressActivator struct {
 	recorder
 	mode driver.EgressMode
@@ -61,8 +62,16 @@ type egressActivator struct {
 
 func (a *egressActivator) Egress(string) driver.EgressMode { return a.mode }
 
-// Each node reports how it controls the egress of the plugin code it runs,
-// and the instances show every node's own report.
+func (a *egressActivator) Files(string) driver.FilesMode {
+	if a.mode == driver.EgressProxy {
+		return driver.FilesShared
+	}
+	return driver.FilesConfined
+}
+
+// Each node reports how it controls the egress of the plugin code it runs
+// and whether it keeps it to its files, and the instances show every node's
+// own report.
 func TestNodesReportTheirOwnEgress(t *testing.T) {
 	mr := miniredis.RunT(t)
 	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
@@ -82,7 +91,7 @@ func TestNodesReportTheirOwnEgress(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if s, _ := a.Status("acme.kit"); s.Egress != driver.EgressSandboxed {
+	if s, _ := a.Status("acme.kit"); s.Egress != driver.EgressSandboxed || s.Files != driver.FilesConfined {
 		t.Fatalf("status = %+v", s)
 	}
 	instances, err := a.Driver(manifest.RuntimeHost).Status(ctx, "acme.kit")
@@ -90,11 +99,16 @@ func TestNodesReportTheirOwnEgress(t *testing.T) {
 		t.Fatalf("instances = %+v, %v", instances, err)
 	}
 	got := map[string]driver.EgressMode{}
+	files := map[string]driver.FilesMode{}
 	for _, in := range instances {
 		got[in.Node[:1]] = in.Egress
+		files[in.Node[:1]] = in.Files
 	}
 	if got["a"] != driver.EgressSandboxed || got["b"] != driver.EgressProxy {
 		t.Fatalf("egress by node = %v", got)
+	}
+	if files["a"] != driver.FilesConfined || files["b"] != driver.FilesShared {
+		t.Fatalf("files by node = %v", files)
 	}
 }
 

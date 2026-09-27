@@ -60,12 +60,30 @@ const (
 	// DNS and WeKnora, whose egress proxy applies the grant. Enforced when the
 	// cluster's network plugin enforces NetworkPolicy.
 	EgressNetworkPolicy EgressMode = "networkPolicy"
+	// EgressTCPLimited: Landlock lets the process open TCP connections only
+	// to the egress proxy's and the Host API's ports, but on any host, and
+	// UDP (QUIC, DNS) is not held.
+	EgressTCPLimited EgressMode = "tcpLimited"
 	// EgressProxy: the process is given the egress proxy, but code that
 	// ignores the proxy variables can connect directly.
 	EgressProxy EgressMode = "proxy"
 	// EgressUnmanaged: the plugin runs on infrastructure WeKnora does not
 	// control (a remote service).
 	EgressUnmanaged EgressMode = "unmanaged"
+)
+
+// FilesMode is whether an instance's code can reach the files of the
+// machine it runs on beyond its own.
+type FilesMode string
+
+// Files modes.
+const (
+	// FilesConfined: the code reaches the system's files, its package and a
+	// directory of its own: Landlock, or a container of its own.
+	FilesConfined FilesMode = "confined"
+	// FilesShared: the code runs as WeKnora's user and can read and change
+	// what that user can, WeKnora's data and other plugins' included.
+	FilesShared FilesMode = "shared"
 )
 
 // InstanceStatus reports one instance of a plugin, for the plugin center.
@@ -79,6 +97,9 @@ type InstanceStatus struct {
 	// Egress is how the instance's outbound traffic is controlled; empty for
 	// plugins without code.
 	Egress EgressMode `json:"egress,omitempty"`
+	// Files is whether the instance's code is kept to its own files; empty
+	// for plugins without code and for remote services.
+	Files FilesMode `json:"files,omitempty"`
 	// UpgradeVersion is a newer version the instance has not loaded yet:
 	// still starting (UpgradeState pending) or failed (failed). It keeps
 	// running Version meanwhile; UpgradeError says what it waits for or

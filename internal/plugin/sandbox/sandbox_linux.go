@@ -7,20 +7,21 @@ import (
 	"io"
 	"net"
 	"os"
+	"runtime"
 
 	"golang.org/x/sys/unix"
 )
 
-// Main is the helper, already inside the namespaces. It waits for the plugin
-// host to say "go" on stdin (after resource limits are on the helper, so the
-// plugin, which it becomes, keeps them), brings loopback up, hands the plugin
-// host a listening socket for each port on PortsFD, and execs the plugin.
-// It returns only if it could not.
+// Main is the helper, already inside its namespaces if it has them. It
+// waits for the plugin host to say "go" on stdin (after resource limits are
+// on the helper, so the plugin, which it becomes, keeps them), sets up what
+// the arguments ask (see Spec) and execs the plugin. It returns only if it
+// could not.
 func Main(args []string) int {
 	if len(args) == 1 && args[0] == probeFlag {
 		return probe()
 	}
-	ports, command, err := parseArgs(args)
+	spec, command, err := parseArgs(args)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "plugin-sandbox:", err)
 		return 2
@@ -30,6 +31,34 @@ func Main(args []string) int {
 		fmt.Fprintln(os.Stderr, "plugin-sandbox: no go-ahead from the plugin host:", err)
 		return 2
 	}
+	if spec.Netns {
+		if code := handOverPorts(spec.Ports); code != 0 {
+			return code
+		}
+	}
+	// No stdin for the plugin: the go-ahead pipe is done.
+	if null, err := unix.Open(os.DevNull, unix.O_RDONLY, 0); err == nil {
+		_ = unix.Dup2(null, 0)
+		_ = unix.Close(null)
+	}
+	// Landlock and no_new_privs apply to the thread that sets them: the
+	// same thread has to exec the plugin.
+	runtime.LockOSThread()
+	if spec.Landlock {
+		if err := restrict(spec); err != nil {
+			fmt.Fprintln(os.Stderr, "plugin-sandbox: restrict the plugin's files with Landlock:", err)
+			return ExitSetupFailed
+		}
+	}
+	err = unix.Exec(command[0], command, os.Environ())
+	fmt.Fprintf(os.Stderr, "plugin-sandbox: run %s: %v\n", command[0], err)
+	return 127
+}
+
+// handOverPorts brings loopback up in the plugin's network namespace and
+// hands the plugin host a listening socket for each port on PortsFD; it
+// returns the exit status when it cannot.
+func handOverPorts(ports []int) int {
 	if err := loopbackUp(); err != nil {
 		fmt.Fprintln(os.Stderr, "plugin-sandbox: bring up loopback in the plugin's network namespace:", err)
 		return ExitSetupFailed
@@ -47,19 +76,12 @@ func Main(args []string) int {
 		fmt.Fprintln(os.Stderr, "plugin-sandbox: hand the listening sockets to the plugin host:", err)
 		return ExitSetupFailed
 	}
-	// The plugin host holds them now; the plugin gets none of these, and
-	// no stdin (the go-ahead pipe is done).
+	// The plugin host holds them now; the plugin gets none of these.
 	for _, fd := range fds {
 		_ = unix.Close(fd)
 	}
 	_ = unix.Close(PortsFD)
-	if null, err := unix.Open(os.DevNull, unix.O_RDONLY, 0); err == nil {
-		_ = unix.Dup2(null, 0)
-		_ = unix.Close(null)
-	}
-	err = unix.Exec(command[0], command, os.Environ())
-	fmt.Fprintf(os.Stderr, "plugin-sandbox: run %s: %v\n", command[0], err)
-	return 127
+	return 0
 }
 
 // listenLoopback opens a listening TCP socket on 127.0.0.1:port.

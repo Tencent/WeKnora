@@ -873,7 +873,8 @@ func stringMap(m map[string]string) map[string]any {
 func (d *Driver) Egress() driver.EgressMode { return d.cfg.Egress() }
 
 // Statuses reports the kubernetes plugins' instances as inner does (one per
-// node that loaded the plugin), with how their pods' egress is controlled.
+// node that loaded the plugin), with how their pods' egress is controlled;
+// a pod has files of its own.
 func (d *Driver) Statuses(inner driver.Driver) driver.Driver {
 	return egressStatus{Driver: inner, mode: d.Egress()}
 }
@@ -887,6 +888,7 @@ func (s egressStatus) Status(ctx context.Context, pluginID string) ([]driver.Ins
 	out, err := s.Driver.Status(ctx, pluginID)
 	for i := range out {
 		out[i].Egress = s.mode
+		out[i].Files = driver.FilesConfined
 	}
 	return out, err
 }

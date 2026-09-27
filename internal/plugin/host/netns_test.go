@@ -88,6 +88,7 @@ func TestUseSandbox(t *testing.T) {
 func TestAutoModeFallsBackToTheProxy(t *testing.T) {
 	fastTimings(t)
 	t.Setenv(envNetns, "")
+	t.Setenv(envLandlock, "0") // which would limit TCP instead
 	setSandboxCheck(t, func() error { return errors.New("user namespaces are off") })
 	m := NewManager()
 	defer m.Close()

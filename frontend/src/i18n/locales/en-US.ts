@@ -2793,17 +2793,31 @@ export default {
       mode: {
         sandboxed: 'Sandboxed',
         networkPolicy: 'NetworkPolicy',
+        tcpLimited: 'TCP ports limited',
         proxy: 'Proxy only',
         unmanaged: 'Unmanaged'
       },
       hint: {
         sandboxed: 'The plugin process runs in its own network namespace; the egress proxy is its only way out, so its egress grant is enforced.',
         networkPolicy: 'A Kubernetes NetworkPolicy lets the plugin pod reach only DNS and WeKnora, whose egress proxy applies the grant. Enforced when the cluster network plugin supports NetworkPolicy.',
+        tcpLimited: 'The plugin process is not in a network sandbox, but Landlock lets it open TCP connections only to the egress proxy\'s and the Host API\'s ports. Code that ignores the proxy variables cannot reach other ports, but can reach those port numbers on other hosts, and UDP (QUIC, DNS) is not held. Allow unprivileged user namespaces on Linux to sandbox it.',
         proxy: 'The plugin process is given the egress proxy through HTTP(S)_PROXY, but code that ignores those variables can connect directly. Allow unprivileged user namespaces on Linux to sandbox it.',
         unmanaged: 'The plugin runs where WeKnora has no control (a remote service); its egress grant is not enforced.'
       },
       unenforced: 'Egress not enforced',
       unenforcedHint: 'This plugin asks for outbound access, but at least one of its instances is not held to the grant: its code can bypass the egress proxy and connect directly.'
+    },
+    files: {
+      mode: {
+        confined: 'Files confined',
+        shared: 'Files not isolated'
+      },
+      hint: {
+        confined: 'The plugin reads only the system\'s files, its package and its interpreter, and writes only its own temporary directory: not WeKnora\'s config and data, nor other plugins\' files (Landlock, or a container of its own).',
+        shared: 'The plugin runs as WeKnora\'s system user and can read and change whatever that user can, WeKnora\'s config and data and other plugins\' files included. It is confined automatically on Linux 5.13+ kernels with Landlock.'
+      },
+      shared: 'Files not isolated',
+      sharedHint: 'At least one instance runs the plugin\'s code without file isolation: it can read and change WeKnora\'s config and data and other plugins\' files.'
     },
     upgrade: {
       pending: 'Upgrading · v{version}',

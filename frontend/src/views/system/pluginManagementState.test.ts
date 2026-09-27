@@ -27,9 +27,11 @@ import {
   audienceSummary,
   filterInstalled,
   egressEnforced,
+  filesTheme,
   egressTheme,
   egressUnenforced,
   weakestEgress,
+  weakestFiles,
 } from './pluginManagementState'
 
 const manifest: PluginManifest = {
@@ -177,6 +179,7 @@ test('installed table filters, trust and visibility', () => {
 test('egress modes: enforced or not, and which plugins to flag', () => {
   assert.equal(egressEnforced('sandboxed'), true)
   assert.equal(egressEnforced('networkPolicy'), true)
+  assert.equal(egressEnforced('tcpLimited'), false)
   assert.equal(egressEnforced('proxy'), false)
   assert.equal(egressEnforced('unmanaged'), false)
   assert.equal(egressEnforced(undefined), false)
@@ -187,6 +190,8 @@ test('egress modes: enforced or not, and which plugins to flag', () => {
   assert.equal(weakestEgress([{}, { egress: 'sandboxed' }]), 'sandboxed')
   assert.equal(weakestEgress([{ egress: 'sandboxed' }, { egress: 'proxy' }, { egress: 'networkPolicy' }]), 'proxy')
   assert.equal(weakestEgress([{ egress: 'proxy' }, { egress: 'unmanaged' }]), 'unmanaged')
+  assert.equal(weakestEgress([{ egress: 'tcpLimited' }, { egress: 'networkPolicy' }]), 'tcpLimited')
+  assert.equal(weakestEgress([{ egress: 'tcpLimited' }, { egress: 'proxy' }]), 'proxy')
 
   // Only a plugin that asks for outbound access and is not held to it.
   assert.equal(egressUnenforced(manifest, 'proxy'), true)
@@ -195,6 +200,14 @@ test('egress modes: enforced or not, and which plugins to flag', () => {
   assert.equal(egressUnenforced(manifest, undefined), false)
   assert.equal(egressUnenforced({ ...manifest, permissions: {} }, 'proxy'), false)
   assert.equal(egressUnenforced(undefined, 'proxy'), false)
+})
+
+test('files modes: shared anywhere wins', () => {
+  assert.equal(weakestFiles([]), undefined)
+  assert.equal(weakestFiles([{}, { files: 'confined' }]), 'confined')
+  assert.equal(weakestFiles([{ files: 'confined' }, { files: 'shared' }, { files: 'confined' }]), 'shared')
+  assert.equal(filesTheme('confined'), 'success')
+  assert.equal(filesTheme('shared'), 'warning')
 })
 
 test('upgrade themes', () => {

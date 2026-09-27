@@ -59,6 +59,20 @@ func main() {
 			_ = c.Close()
 			return result("dial ok"), nil
 		}
+		// read:<path> reads a file; write:<path> creates one ($HOME is
+		// expanded).
+		if path, ok := strings.CutPrefix(in.Query, "read:"); ok {
+			if _, err := os.ReadFile(os.ExpandEnv(path)); err != nil {
+				return result("read failed"), nil
+			}
+			return result("read ok"), nil
+		}
+		if path, ok := strings.CutPrefix(in.Query, "write:"); ok {
+			if err := os.WriteFile(os.ExpandEnv(path), []byte("x"), 0o600); err != nil {
+				return result("write failed"), nil
+			}
+			return result("write ok"), nil
+		}
 		if url, ok := strings.CutPrefix(in.Query, "fetch:"); ok {
 			client := &http.Client{Timeout: 5 * time.Second, Transport: &http.Transport{Proxy: http.ProxyFromEnvironment}}
 			resp, err := client.Get(url)

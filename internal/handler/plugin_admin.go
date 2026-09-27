@@ -273,6 +273,9 @@ type InstalledPluginDTO struct {
 	// so the console can flag a grant that is not enforced everywhere.
 	// Empty for plugins without code or without instances.
 	Egress driver.EgressMode `json:"egress,omitempty"`
+	// Files is shared when some instance's code can reach WeKnora's files,
+	// so the console can flag it; empty when no instance says.
+	Files driver.FilesMode `json:"files,omitempty"`
 	// Upgrade is set while instances have not loaded the active version:
 	// still starting it, or failed to. They keep running the previous one.
 	Upgrade *PluginUpgradeDTO `json:"upgrade,omitempty"`
@@ -322,6 +325,7 @@ func (h *PluginAdminHandler) withEgress(ctx context.Context, v *install.View) In
 		return out
 	}
 	out.Egress = weakestEgress(instances)
+	out.Files = weakestFiles(instances)
 	out.Upgrade = upgradeOf(instances)
 	out.Memory = memoryOf(instances)
 	return out
@@ -372,8 +376,23 @@ func upgradeOf(instances []driver.InstanceStatus) *PluginUpgradeDTO {
 var egressRank = map[driver.EgressMode]int{
 	driver.EgressSandboxed:     1,
 	driver.EgressNetworkPolicy: 2,
-	driver.EgressProxy:         3,
-	driver.EgressUnmanaged:     4,
+	driver.EgressTCPLimited:    3,
+	driver.EgressProxy:         4,
+	driver.EgressUnmanaged:     5,
+}
+
+// weakestFiles is shared when any instance's code can reach WeKnora's files.
+func weakestFiles(instances []driver.InstanceStatus) driver.FilesMode {
+	var out driver.FilesMode
+	for _, in := range instances {
+		switch in.Files {
+		case driver.FilesShared:
+			return driver.FilesShared
+		case driver.FilesConfined:
+			out = driver.FilesConfined
+		}
+	}
+	return out
 }
 
 // weakestEgress is the least controlled egress mode among instances.

@@ -98,6 +98,7 @@ func TestSandboxedPluginStopsOnSIGTERM(t *testing.T) {
 func TestAutoModeProbesTheSystem(t *testing.T) {
 	fastTimings(t)
 	t.Setenv(envNetns, "")
+	t.Setenv(envLandlock, "0") // which would limit TCP without a namespace
 	setSandboxCheck(t, probeSandbox)
 	other, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {

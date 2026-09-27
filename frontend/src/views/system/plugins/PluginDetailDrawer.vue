@@ -64,6 +64,10 @@
             <t-tag size="small" variant="light" theme="warning">{{ t('pluginAdmin.egress.unenforced') }}</t-tag>
             <span>{{ t('pluginAdmin.egress.unenforcedHint') }}</span>
           </div>
+          <div v-if="filesWarning" class="egress-warning">
+            <t-tag size="small" variant="light" theme="warning">{{ t('pluginAdmin.files.shared') }}</t-tag>
+            <span>{{ t('pluginAdmin.files.sharedHint') }}</span>
+          </div>
           <ul class="line-list">
             <li v-for="n in instances" :key="n.node">
               <t-tag size="small" variant="light" :theme="n.state === 'ready' ? 'success' : 'danger'">
@@ -80,6 +84,11 @@
               <t-tooltip v-if="n.egress" :content="t(`pluginAdmin.egress.hint.${n.egress}`)">
                 <t-tag size="small" variant="outline" :theme="egressTheme(n.egress)">
                   {{ t(`pluginAdmin.egress.mode.${n.egress}`) }}
+                </t-tag>
+              </t-tooltip>
+              <t-tooltip v-if="n.files" :content="t(`pluginAdmin.files.hint.${n.files}`)">
+                <t-tag size="small" variant="outline" :theme="filesTheme(n.files)">
+                  {{ t(`pluginAdmin.files.mode.${n.files}`) }}
                 </t-tag>
               </t-tooltip>
               <t-tag v-if="n.upgradeVersion" size="small" variant="light" :theme="upgradeTheme(n.upgradeState)">
@@ -238,6 +247,7 @@ import {
   compareVersions,
   egressTheme,
   egressUnenforced,
+  filesTheme,
   formatBytes,
   hasSystemConfig,
   isPackageUrl,
@@ -247,6 +257,7 @@ import {
   trustTheme,
   upgradeTheme,
   weakestEgress,
+  weakestFiles,
 } from '../pluginManagementState'
 
 const props = defineProps<{ visible: boolean; plugin: InstalledPlugin | null; pending?: boolean }>()
@@ -267,6 +278,8 @@ const instances = ref<PluginInstance[]>([])
 const instanceError = ref('')
 // The plugin asks for outbound access that some instance is not held to.
 const egressWarning = computed(() => egressUnenforced(manifest.value, weakestEgress(instances.value)))
+// Some instance's code can reach WeKnora's files.
+const filesWarning = computed(() => weakestFiles(instances.value) === 'shared')
 const systemSchema = ref<ConfigSchema | null>(null)
 const configValues = ref<ConfigValue>({})
 

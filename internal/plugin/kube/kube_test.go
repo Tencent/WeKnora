@@ -530,6 +530,7 @@ func (fakeStatus) Status(context.Context, string) ([]driver.InstanceStatus, erro
 	return []driver.InstanceStatus{{Node: "a"}, {Node: "b", Egress: driver.EgressUnmanaged}}, nil
 }
 
+// Pods report the driver's egress mode, and files of their own.
 func TestStatusesReportTheEgressMode(t *testing.T) {
 	d, err := New(confinedConfig(), &fakeEndpoints{})
 	if err != nil {
@@ -537,8 +538,8 @@ func TestStatusesReportTheEgressMode(t *testing.T) {
 	}
 	out, _ := d.Statuses(fakeStatus{}).Status(context.Background(), "acme.search")
 	for _, s := range out {
-		if s.Egress != driver.EgressNetworkPolicy {
-			t.Fatalf("%s: egress = %q", s.Node, s.Egress)
+		if s.Egress != driver.EgressNetworkPolicy || s.Files != driver.FilesConfined {
+			t.Fatalf("%s: egress = %q, files = %q", s.Node, s.Egress, s.Files)
 		}
 	}
 }

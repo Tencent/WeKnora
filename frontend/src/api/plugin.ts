@@ -99,10 +99,19 @@ export interface TenantPlugin {
 /**
  * How an instance's outbound traffic is held to the plugin's egress grant:
  * sandboxed (own network namespace) and networkPolicy (Kubernetes) enforce
- * it; proxy only hands the process the egress proxy, which code can ignore;
+ * it; tcpLimited lets the process open TCP connections only to the egress
+ * proxy's and the Host API's ports (Landlock), on any host, and not UDP;
+ * proxy only hands the process the egress proxy, which code can ignore;
  * unmanaged runs where WeKnora has no say (a remote service).
  */
-export type EgressMode = 'sandboxed' | 'networkPolicy' | 'proxy' | 'unmanaged'
+export type EgressMode = 'sandboxed' | 'networkPolicy' | 'tcpLimited' | 'proxy' | 'unmanaged'
+
+/**
+ * Whether an instance's code is kept to its own files: confined (Landlock,
+ * or a container of its own) or shared (it can read and change what
+ * WeKnora's user can).
+ */
+export type FilesMode = 'confined' | 'shared'
 
 /** One running instance of a plugin, for the detail view. */
 export interface PluginInstance {
@@ -113,6 +122,8 @@ export interface PluginInstance {
   updatedAt: string
   /** Absent for plugins without code and nodes that leave the plugin to plugin hosts. */
   egress?: EgressMode
+  /** Absent for plugins without code, remote services and such nodes. */
+  files?: FilesMode
   /**
    * A newer version the instance has not loaded: still starting it, or
    * failed to. It runs version meanwhile; upgradeError says why.

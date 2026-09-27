@@ -209,8 +209,8 @@ func TestPluginAdminListsEgress(t *testing.T) {
 	h := NewPluginAdminHandler(svc).WithDrivers(driver.NewSet(statusDriver{
 		rt: manifest.RuntimeHost, instances: []driver.InstanceStatus{
 			{Node: "app/1"},
-			{Node: "plugin-host:a/1", Egress: driver.EgressSandboxed},
-			{Node: "plugin-host:b/1", Egress: driver.EgressProxy},
+			{Node: "plugin-host:a/1", Egress: driver.EgressSandboxed, Files: driver.FilesConfined},
+			{Node: "plugin-host:b/1", Egress: driver.EgressProxy, Files: driver.FilesShared},
 		},
 	}))
 	e := gin.New()
@@ -221,11 +221,13 @@ func TestPluginAdminListsEgress(t *testing.T) {
 		Data []struct {
 			ID     string            `json:"id"`
 			Egress driver.EgressMode `json:"egress"`
+			Files  driver.FilesMode  `json:"files"`
 		} `json:"data"`
 	}
 	w := call(e, http.MethodGet, "/plugins", "", nil)
 	if err := json.Unmarshal(w.Body.Bytes(), &list); err != nil || len(list.Data) != 1 ||
-		list.Data[0].ID != "acme.kit" || list.Data[0].Egress != driver.EgressProxy {
+		list.Data[0].ID != "acme.kit" || list.Data[0].Egress != driver.EgressProxy ||
+		list.Data[0].Files != driver.FilesShared {
 		t.Fatalf("list = %s", w.Body.String())
 	}
 	var one struct {
@@ -252,6 +254,8 @@ func TestWeakestEgress(t *testing.T) {
 		{[]driver.EgressMode{driver.EgressNetworkPolicy, driver.EgressSandboxed}, driver.EgressNetworkPolicy},
 		{[]driver.EgressMode{driver.EgressSandboxed, driver.EgressProxy}, driver.EgressProxy},
 		{[]driver.EgressMode{driver.EgressUnmanaged, driver.EgressProxy}, driver.EgressUnmanaged},
+		{[]driver.EgressMode{driver.EgressTCPLimited, driver.EgressNetworkPolicy}, driver.EgressTCPLimited},
+		{[]driver.EgressMode{driver.EgressTCPLimited, driver.EgressProxy}, driver.EgressProxy},
 	} {
 		var instances []driver.InstanceStatus
 		for _, m := range tc.modes {
@@ -259,6 +263,26 @@ func TestWeakestEgress(t *testing.T) {
 		}
 		if got := weakestEgress(instances); got != tc.want {
 			t.Errorf("weakestEgress(%v) = %q, want %q", tc.modes, got, tc.want)
+		}
+	}
+}
+
+func TestWeakestFiles(t *testing.T) {
+	for _, tc := range []struct {
+		modes []driver.FilesMode
+		want  driver.FilesMode
+	}{
+		{nil, ""},
+		{[]driver.FilesMode{"", driver.FilesConfined}, driver.FilesConfined},
+		{[]driver.FilesMode{driver.FilesShared, driver.FilesConfined}, driver.FilesShared},
+		{[]driver.FilesMode{driver.FilesConfined, driver.FilesShared, ""}, driver.FilesShared},
+	} {
+		var instances []driver.InstanceStatus
+		for _, m := range tc.modes {
+			instances = append(instances, driver.InstanceStatus{Files: m})
+		}
+		if got := weakestFiles(instances); got != tc.want {
+			t.Errorf("weakestFiles(%v) = %q, want %q", tc.modes, got, tc.want)
 		}
 	}
 }

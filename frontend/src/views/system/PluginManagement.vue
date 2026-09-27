@@ -116,6 +116,9 @@
                   <t-tooltip v-if="egressUnenforced(p.manifest, p.egress)" :content="t('pluginAdmin.egress.unenforcedHint')">
                     <span class="egress-flag">{{ t('pluginAdmin.egress.unenforced') }}</span>
                   </t-tooltip>
+                  <t-tooltip v-if="p.files === 'shared'" :content="t('pluginAdmin.files.sharedHint')">
+                    <span class="egress-flag">{{ t('pluginAdmin.files.shared') }}</span>
+                  </t-tooltip>
                 </div>
               </td>
               <td class="plugin-table__menu-col" @click.stop @keydown.enter.stop>
@@ -417,7 +420,8 @@ onMounted(load)
   gap: 8px;
 }
 
-// A plugin granted egress that some instance is not held to.
+// A plugin granted egress that some instance is not held to, or whose code
+// can reach WeKnora's files.
 .egress-flag {
   padding: 1px 6px;
   border-radius: var(--app-radius-xs);

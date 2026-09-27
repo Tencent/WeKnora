@@ -2,7 +2,7 @@
 import { del, get, post, postUpload, put } from '@/utils/request'
 
 import type { ConfigValue } from '@/components/schema-form/schema'
-import type { EgressMode, PluginConfig, PluginInstance, PluginManifest, UpgradeState } from '@/api/plugin'
+import type { EgressMode, FilesMode, PluginConfig, PluginInstance, PluginManifest, UpgradeState } from '@/api/plugin'
 
 const BASE = '/api/v1/system/admin/plugins'
 const PACKAGE_TIMEOUT = 5 * 60 * 1000
@@ -55,6 +55,7 @@ export interface PluginNodeStatus {
   error?: string
   updatedAt: string
   egress?: EgressMode
+  files?: FilesMode
   upgradeVersion?: string
   upgradeState?: UpgradeState
   upgradeError?: string
@@ -100,6 +101,8 @@ export interface InstalledPlugin {
   node?: PluginNodeStatus
   /** The least controlled egress mode among the plugin's instances. */
   egress?: EgressMode
+  /** shared when some instance's code can reach WeKnora's files. */
+  files?: FilesMode
   /** Set while instances have not loaded the active version. */
   upgrade?: PluginUpgrade
   /** Absent when no instance is measured or idle (remote, kubernetes). */

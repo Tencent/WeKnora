@@ -163,9 +163,11 @@ type process struct {
 	done    chan struct{}
 	proxy   *egressProxy
 	sockDir string
-	// sandboxed: the plugin runs in its own network namespace (decided
-	// once, for every restart).
-	sandboxed bool
+	// sandboxed: the plugin runs in its own network namespace; landlocked:
+	// Landlock keeps it to its files (both decided once, for every
+	// restart).
+	sandboxed  bool
+	landlocked bool
 }
 
 // launched is one started child.
@@ -196,7 +198,7 @@ func startProcess(sp spec, onState func(*process, State, error)) (*process, erro
 	ctx, cancel := context.WithCancel(context.Background())
 	p := &process{
 		spec: sp, onState: onState, cancel: cancel, done: make(chan struct{}), proxy: proxy, sockDir: sockDir,
-		sandboxed: useSandbox(), changed: make(chan struct{}), activity: newActivity(),
+		sandboxed: useSandbox(), landlocked: useLandlock(), changed: make(chan struct{}), activity: newActivity(),
 		park: make(chan struct{}, 1), wake: make(chan struct{}, 1),
 	}
 	p.setState(StateStarting, nil)
@@ -309,8 +311,6 @@ func (p *process) command(entry string) *exec.Cmd {
 	return exec.Command(entry)
 }
 
-// launch starts the child and waits for handshake, health and a manifest
-// that matches the installed package.
 // restoreFiles puts the extracted package back as the package holds it
 // before a start: what another process of WeKnora's user changed or planted
 // there since the last start does not run with the plugin.
@@ -331,12 +331,14 @@ func (p *process) restoreFiles() error {
 	return err
 }
 
+// launch starts the child and waits for handshake, health and a manifest
+// that matches the installed package.
 func (p *process) launch(ctx context.Context, entry string) (*launched, error) {
-	network, socket := p.listenAddress()
-	if network == "unix" {
 	if err := p.restoreFiles(); err != nil {
 		return nil, err
 	}
+	network, socket := p.listenAddress()
+	if network == "unix" {
 		_ = os.Remove(socket)
 	}
 	token := randomToken()
@@ -345,7 +347,7 @@ func (p *process) launch(ctx context.Context, entry string) (*launched, error) {
 	cmd.Env = p.childEnv(network, socket, token)
 	configureChild(cmd)
 	var box *sandboxed
-	if p.sandboxed {
+	if p.sandboxed || p.landlocked {
 		var err error
 		if box, err = p.sandbox(cmd); err != nil {
 			return nil, err
@@ -363,6 +365,8 @@ func (p *process) launch(ctx context.Context, entry string) (*launched, error) {
 	if err := cmd.Start(); err != nil {
 		if box != nil {
 			box.release()
+		}
+		if p.sandboxed {
 			return nil, fmt.Errorf("start %s in a network namespace (%s; the system must allow unprivileged "+
 				"user namespaces): %w", filepath.Base(entry), envNetns, err)
 		}
@@ -402,8 +406,7 @@ func (p *process) launch(ctx context.Context, entry string) (*launched, error) {
 		exited <- err // keep it for supervise
 		var exit *exec.ExitError
 		if box != nil && errors.As(err, &exit) && exit.ExitCode() == sandbox.ExitSetupFailed {
-			return nil, fmt.Errorf("the plugin's network namespace could not be set up (%s needs unprivileged "+
-				"user namespaces; on Ubuntu 24.04 kernel.apparmor_restrict_unprivileged_userns=0)", envNetns)
+			return nil, p.sandboxSetupError()
 		}
 		return nil, fmt.Errorf("plugin exited before it was ready: %v", err)
 	case <-timer.C:
@@ -556,12 +559,44 @@ func (p *process) setClient(c *client.Client) {
 	}
 }
 
+// sandboxSetupError says what the sandbox helper could not set up; its own
+// message is in the plugin's log.
+func (p *process) sandboxSetupError() error {
+	if p.sandboxed {
+		return fmt.Errorf("the plugin's sandbox could not be set up; see the plugin's log (%s needs "+
+			"unprivileged user namespaces; on Ubuntu 24.04 kernel.apparmor_restrict_unprivileged_userns=0)",
+			envNetns)
+	}
+	return fmt.Errorf("the plugin's Landlock rules could not be applied; see the plugin's log (%s)", envLandlock)
+}
+
+// limitsTCP: Landlock keeps the plugin, outside a network namespace, to
+// TCP connections to the egress proxy and the Host API.
+func (p *process) limitsTCP() bool {
+	return p.landlocked && !p.sandboxed && sandbox.LandlockABI() >= landlockTCPABI
+}
+
+// landlockTCPABI is the Landlock ABI that limits TCP connections (Linux
+// 6.7).
+const landlockTCPABI = 4
+
 // egress is how the plugin's outbound traffic is held to its grant.
 func (p *process) egress() driver.EgressMode {
-	if p.sandboxed {
+	switch {
+	case p.sandboxed:
 		return driver.EgressSandboxed
+	case p.limitsTCP():
+		return driver.EgressTCPLimited
 	}
 	return driver.EgressProxy
+}
+
+// files is whether the plugin is kept to its own files.
+func (p *process) files() driver.FilesMode {
+	if p.landlocked {
+		return driver.FilesConfined
+	}
+	return driver.FilesShared
 }
 
 // Client returns the client of the running child, starting an idle one

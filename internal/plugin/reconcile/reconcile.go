@@ -150,6 +150,14 @@ type EgressReporter interface {
 	Egress(pluginID string) driver.EgressMode
 }
 
+// FilesReporter is an Activator that runs plugin code and knows whether the
+// code is kept to its own files, for the node's status report.
+type FilesReporter interface {
+	Activator
+	// Files is empty for a plugin the activator does not run.
+	Files(pluginID string) driver.FilesMode
+}
+
 // UsageReporter is an Activator that runs plugin code and can say what a
 // plugin's processes use on this node, for the node's status report.
 type UsageReporter interface {
@@ -188,6 +196,9 @@ type Status struct {
 	// Egress is how the plugin's outbound traffic is controlled where this
 	// node runs its code; empty when the node runs none of it.
 	Egress driver.EgressMode `json:"egress,omitempty"`
+	// Files is whether the plugin's code is kept to its own files where
+	// this node runs it; empty when the node runs none of it.
+	Files driver.FilesMode `json:"files,omitempty"`
 	// UpgradeVersion is a newer active version the node has not loaded
 	// yet: it is still starting (UpgradeState pending) or failed to load
 	// (failed). The node keeps serving Version meanwhile; UpgradeError
@@ -546,11 +557,14 @@ func (r *Reconciler) ensure(ctx context.Context, row types.InstalledPlugin) erro
 		logger.Infof(ctx, "[plugin] loaded %s %s; pending: %v", row.ID, row.ActiveVersion, err)
 		r.setStatus(row.ID, Status{
 			Version: row.ActiveVersion, State: StateDegraded, Error: err.Error(), Egress: r.egress(row.ID),
+			Files: r.files(row.ID),
 		})
 		return nil
 	}
 	logger.Infof(ctx, "[plugin] loaded %s %s", row.ID, row.ActiveVersion)
-	r.setStatus(row.ID, Status{Version: row.ActiveVersion, State: StateReady, Egress: r.egress(row.ID)})
+	r.setStatus(row.ID, Status{
+		Version: row.ActiveVersion, State: StateReady, Egress: r.egress(row.ID), Files: r.files(row.ID),
+	})
 	return nil
 }
 
@@ -652,7 +666,9 @@ func (r *Reconciler) checkStaging(ctx context.Context, id string) error {
 	r.digests[id] = st.key
 	delete(r.retries, id)
 	logger.Infof(ctx, "[plugin] loaded %s %s", id, st.l.Manifest.Version)
-	r.setStatus(id, Status{Version: st.l.Manifest.Version, State: StateReady, Egress: r.egress(id)})
+	r.setStatus(id, Status{
+		Version: st.l.Manifest.Version, State: StateReady, Egress: r.egress(id), Files: r.files(id),
+	})
 	return nil
 }
 
@@ -753,6 +769,19 @@ func (r *Reconciler) egress(pluginID string) driver.EgressMode {
 	for _, a := range r.activators {
 		if e, ok := a.(EgressReporter); ok {
 			if mode := e.Egress(pluginID); mode != "" {
+				return mode
+			}
+		}
+	}
+	return ""
+}
+
+// files asks the activators whether this node keeps a plugin's code to its
+// own files.
+func (r *Reconciler) files(pluginID string) driver.FilesMode {
+	for _, a := range r.activators {
+		if f, ok := a.(FilesReporter); ok {
+			if mode := f.Files(pluginID); mode != "" {
 				return mode
 			}
 		}

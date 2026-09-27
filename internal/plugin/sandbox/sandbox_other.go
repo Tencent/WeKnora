@@ -15,3 +15,6 @@ func Main([]string) int {
 
 // Supported reports whether this system can run plugins in a sandbox.
 func Supported() bool { return false }
+
+// LandlockABI is 0: Landlock is Linux's.
+func LandlockABI() int { return 0 }

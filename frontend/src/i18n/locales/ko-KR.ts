@@ -5319,17 +5319,31 @@ export default {
       mode: {
         sandboxed: '샌드박스',
         networkPolicy: 'NetworkPolicy',
+        tcpLimited: 'TCP 포트 제한',
         proxy: '프록시만',
         unmanaged: '관리 불가'
       },
       hint: {
         sandboxed: '플러그인 프로세스가 전용 네트워크 네임스페이스에서 실행되어 외부로는 이그레스 프록시를 통해서만 나갈 수 있습니다. 이그레스 권한이 강제됩니다.',
         networkPolicy: 'Kubernetes NetworkPolicy로 플러그인 Pod는 DNS와 WeKnora에만 접근할 수 있으며 이그레스 프록시를 통해 외부로 나갑니다. 클러스터 네트워크 플러그인이 NetworkPolicy를 지원할 때 강제됩니다.',
+        tcpLimited: '플러그인 프로세스는 네트워크 샌드박스 밖에 있지만, Landlock이 TCP 연결을 이그레스 프록시와 Host API 포트로만 허용합니다. 프록시 변수를 무시하는 코드도 다른 포트에는 연결할 수 없지만, 같은 포트 번호라면 다른 호스트에도 연결할 수 있고 UDP(QUIC, DNS)는 제한되지 않습니다. Linux에서 비특권 사용자 네임스페이스를 허용하면 샌드박스가 적용됩니다.',
         proxy: '플러그인 프로세스에 HTTP(S)_PROXY로 이그레스 프록시가 주어지지만, 이 변수를 무시하는 코드는 직접 연결할 수 있습니다. Linux에서 비특권 사용자 네임스페이스를 허용하면 샌드박스로 실행됩니다.',
         unmanaged: '플러그인이 WeKnora가 관리할 수 없는 환경(원격 서비스)에서 실행되므로 이그레스 권한이 강제되지 않습니다.'
       },
       unenforced: '이그레스 미강제',
       unenforcedHint: '이 플러그인은 이그레스 권한을 선언했지만 적어도 하나의 인스턴스에서 제한이 강제되지 않아, 코드가 이그레스 프록시를 우회해 직접 연결할 수 있습니다.'
+    },
+    files: {
+      mode: {
+        confined: '파일 격리',
+        shared: '파일 미격리'
+      },
+      hint: {
+        confined: '플러그인은 시스템 파일, 자신의 패키지와 인터프리터만 읽을 수 있고 자신의 임시 디렉터리에만 쓸 수 있습니다. WeKnora의 설정과 데이터, 다른 플러그인의 파일에는 접근할 수 없습니다(Landlock 또는 전용 컨테이너).',
+        shared: '플러그인은 WeKnora의 시스템 사용자로 실행되어 WeKnora의 설정과 데이터, 다른 플러그인의 파일을 포함해 해당 사용자가 접근할 수 있는 모든 것을 읽고 쓸 수 있습니다. Landlock을 지원하는 Linux 5.13+ 커널에서는 자동으로 격리됩니다.'
+      },
+      shared: '파일 미격리',
+      sharedHint: '적어도 하나의 인스턴스에서 플러그인 코드가 파일 격리 없이 실행되어 WeKnora의 설정과 데이터, 다른 플러그인의 파일을 읽고 쓸 수 있습니다.'
     },
     upgrade: {
       pending: '업그레이드 중 · v{version}',

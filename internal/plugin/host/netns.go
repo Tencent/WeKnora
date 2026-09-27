@@ -25,7 +25,8 @@ import (
 // plugin reaches it through the egress proxy, which lets that host pass.
 const envNetns = "WEKNORA_PLUGIN_NETNS"
 
-// netnsSetting is what WEKNORA_PLUGIN_NETNS asks for.
+// netnsSetting is what WEKNORA_PLUGIN_NETNS, or WEKNORA_PLUGIN_LANDLOCK,
+// asks for.
 type netnsSetting int
 
 const (
@@ -34,8 +35,10 @@ const (
 	netnsOff
 )
 
-func netnsFromEnv() netnsSetting {
-	switch strings.ToLower(strings.TrimSpace(os.Getenv(envNetns))) {
+func netnsFromEnv() netnsSetting { return settingFromEnv(envNetns) }
+
+func settingFromEnv(name string) netnsSetting {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(name))) {
 	case "1", "true", "yes", "on":
 		return netnsRequired
 	case "0", "false", "no", "off":

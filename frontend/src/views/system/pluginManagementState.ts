@@ -1,6 +1,6 @@
 // Pure helpers behind PluginManagement.vue, kept free of Vue so they run
 // under node:test.
-import type { EgressMode, ExtensionPoint, PluginManifest, PluginPermissions, UpgradeState } from '../../api/plugin'
+import type { EgressMode, ExtensionPoint, FilesMode, PluginManifest, PluginPermissions, UpgradeState } from '../../api/plugin'
 import type { InstalledPlugin, MarketPlugin, PluginVersion, TrustLevel, TrustVerdict } from '../../api/system/plugins'
 import { localizedText } from '../../utils/localizedText'
 import { EXTENSION_POINTS } from '../settings/pluginCenterState'
@@ -188,7 +188,7 @@ export function egressTheme(mode: EgressMode): 'success' | 'warning' {
   return egressEnforced(mode) ? 'success' : 'warning'
 }
 
-const EGRESS_RANK: Record<EgressMode, number> = { sandboxed: 1, networkPolicy: 2, proxy: 3, unmanaged: 4 }
+const EGRESS_RANK: Record<EgressMode, number> = { sandboxed: 1, networkPolicy: 2, tcpLimited: 3, proxy: 4, unmanaged: 5 }
 
 /** The least controlled egress mode among instances; undefined when none reports one. */
 export function weakestEgress(instances: readonly { egress?: EgressMode }[]): EgressMode | undefined {
@@ -205,6 +205,21 @@ export function weakestEgress(instances: readonly { egress?: EgressMode }[]): Eg
  */
 export function egressUnenforced(m: PluginManifest | undefined, mode: EgressMode | undefined): boolean {
   return !!m?.permissions?.egress?.length && !!mode && !egressEnforced(mode)
+}
+
+/** shared when any instance's code can reach WeKnora's files; undefined when none says. */
+export function weakestFiles(instances: readonly { files?: FilesMode }[]): FilesMode | undefined {
+  let out: FilesMode | undefined
+  for (const { files } of instances) {
+    if (files === 'shared') return 'shared'
+    if (files === 'confined') out = 'confined'
+  }
+  return out
+}
+
+/** The tag theme of a files mode: confined reads as fine, shared warns. */
+export function filesTheme(mode: FilesMode): 'success' | 'warning' {
+  return mode === 'confined' ? 'success' : 'warning'
 }
 
 /** The egress grant meaning any public host. */

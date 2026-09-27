@@ -388,6 +388,18 @@ func (m *Manager) Egress(pluginID string) driver.EgressMode {
 	return p.egress()
 }
 
+// Files implements reconcile.FilesReporter: whether a plugin this host runs
+// is kept to its own files; empty when it runs elsewhere.
+func (m *Manager) Files(pluginID string) driver.FilesMode {
+	m.mu.Lock()
+	p := m.procs[pluginID]
+	m.mu.Unlock()
+	if p == nil {
+		return ""
+	}
+	return p.files()
+}
+
 // Running is one plugin this host runs.
 type Running struct {
 	ID      string `json:"id"`
