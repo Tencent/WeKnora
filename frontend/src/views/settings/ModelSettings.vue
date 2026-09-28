@@ -834,14 +834,16 @@ const handleMenuAction = (data: { value: string }, type: ModelType, model: any) 
   }
 }
 
-// 生成不重复的复制名称
-const generateCopyName = (originalName: string): string => {
+// 为复制配置生成不重复的展示名称，实际模型名称保持不变。
+const generateCopyDisplayName = (originalDisplayName: string): string => {
   const suffix = t('modelSettings.copySuffix')
-  const existingNames = new Set(allModels.value.map(m => m.name))
-  let candidate = `${originalName}${suffix}`
+  const existingDisplayNames = new Set(
+    allModels.value.map(model => model.display_name?.trim() || model.name),
+  )
+  let candidate = `${originalDisplayName}${suffix}`
   let counter = 2
-  while (existingNames.has(candidate)) {
-    candidate = `${originalName}${suffix} ${counter}`
+  while (existingDisplayNames.has(candidate)) {
+    candidate = `${originalDisplayName}${suffix} ${counter}`
     counter += 1
   }
   return candidate
@@ -859,9 +861,10 @@ const copyModel = async (_type: ModelType, modelId: string) => {
   }
 
   try {
+    const originalDisplayName = source.display_name?.trim() || source.name
     const newModel: ModelConfig = {
-      name: generateCopyName(source.name),
-      display_name: source.display_name || '',
+      name: source.name,
+      display_name: generateCopyDisplayName(originalDisplayName),
       type: source.type,
       source: source.source,
       description: source.description || '',
