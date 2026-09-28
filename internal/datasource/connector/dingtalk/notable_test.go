@@ -406,7 +406,9 @@ func TestBaseSelectionDoesNotConsultTheWorkspaceTree(t *testing.T) {
 				ID: "base-child", WorkspaceID: "personal-space", Name: "说明.adoc",
 				Type: "FILE", Category: "ALIDOC", Extension: "adoc",
 			},
-			// A node with no ingest path is not offered as a selectable child.
+			// A Base is not offered as a tree child: only folders and wiki
+			// documents are selectable here, and a Base is added through its
+			// own base= reference.
 			{
 				ID: "nested-able", WorkspaceID: "personal-space", Name: "嵌套.able",
 				Type: "FILE", Category: "ALIDOC", Extension: "able",

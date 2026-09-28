@@ -16,16 +16,16 @@ import (
 
 const (
 	// maxBaseRecords bounds how many records of one table are ingested. It sits
-	// far above real data — the largest live table here holds 35 records — and
-	// exists so one runaway table cannot make a sync unbounded. Hitting it is
-	// reported, never silent.
+	// far above the size a single table is expected to reach, and exists so one
+	// runaway table cannot make a sync unbounded. Hitting it is reported, never
+	// silent.
 	maxBaseRecords = 10_000
 
 	// notableDateLocation is the zone DingTalk stores notable date columns in.
-	// Date-only cells arrive as epoch milliseconds at local midnight in UTC+8:
-	// live data holds 1769788800000 for 2026-01-31, which is 2026-01-30T16:00Z.
-	// Rendering that instant in UTC would print the wrong day, so the
-	// tenant-independent offset the product uses is applied explicitly.
+	// Date-only cells arrive as epoch milliseconds at local midnight in UTC+8,
+	// so a 2026-01-31 cell is the instant 2026-01-30T16:00Z. Rendering that
+	// instant in UTC would print the wrong day, so the tenant-independent
+	// offset the product uses is applied explicitly.
 	notableDateOffset = 8 * 60 * 60
 )
 
