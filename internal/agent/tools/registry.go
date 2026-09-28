@@ -295,6 +295,10 @@ func (r *ToolRegistry) execute(ctx context.Context, tool types.Tool, args json.R
 // run on errgroup goroutines when a round executes in parallel, and errgroup
 // does not carry a panic back to Wait: an unrecovered one from any tool (MCP
 // clients, sandboxes, third-party SDKs) would take down the whole server.
+//
+// recover only covers the goroutine that calls it, so this guards the
+// tool.Execute call alone: a goroutine a tool starts for itself must install
+// its own barrier (GoRecovered / RecoverGoroutine in goroutine.go).
 func executeRecovered(
 	ctx context.Context, tool types.Tool, args json.RawMessage,
 ) (result *types.ToolResult, err error) {
