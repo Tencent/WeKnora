@@ -410,6 +410,43 @@ func TestParseDocumentSummaryOutput(t *testing.T) {
 			wantErr: errSummaryOutputNotParsable,
 		},
 		{
+			// A UTF-8 BOM is not whitespace: before the shape check stripped
+			// it, the leading "{" stayed hidden and this half object was
+			// handed back as the summary.
+			name:    "BOM-prefixed truncated JSON is rejected",
+			content: "\uFEFF" + truncatedJSON,
+			wantErr: errSummaryOutputNotParsable,
+		},
+		{
+			name:    "BOM-prefixed structured JSON still parses",
+			content: "\uFEFF" + fullJSON,
+			want:    "Two sentences.",
+			profile: fullProfile,
+		},
+		{
+			// Prose that opens with a bracketed citation is not broken JSON.
+			name:    "bracketed prose keeps the legacy fallback",
+			content: "[文档摘要] 本文件说明请假制度与年度额度。",
+			want:    "[文档摘要] 本文件说明请假制度与年度额度。",
+		},
+		{
+			name:    "numbered prose keeps the legacy fallback",
+			content: "[1] 本文件说明请假制度与年度额度。",
+			want:    "[1] 本文件说明请假制度与年度额度。",
+		},
+		{
+			// A real JSON array is structured output that does not satisfy the
+			// object contract, so it is rejected rather than stored raw.
+			name:    "JSON array without the object contract is rejected",
+			content: `["a","b"]`,
+			wantErr: errSummaryOutputNotParsable,
+		},
+		{
+			name:    "truncated JSON array is rejected",
+			content: `[{"summary": "half a doc`,
+			wantErr: errSummaryOutputNotParsable,
+		},
+		{
 			name:    "JSON with an unescaped newline is rejected",
 			content: "{\"summary\": \"First line\nSecond line\", \"gist\": \"g\"}",
 			wantErr: errSummaryOutputNotParsable,

@@ -865,21 +865,53 @@ type documentProfileOutput struct {
 	TypicalQuestion string   `json:"typical_question"`
 }
 
-// summaryReplyIsJSONShaped reports whether the reply opens like a JSON payload,
-// either directly or inside a markdown code fence. Only such replies are held
-// to the structured contract below; anything else is a legacy plain-text
-// summary.
-func summaryReplyIsJSONShaped(content string) bool {
-	content = strings.TrimSpace(content)
+// normalizeSummaryReplyContent strips a UTF-8 BOM, the surrounding whitespace
+// and one markdown code fence from a summary reply, so shape detection and
+// parsing look at the same text. A fence without a newline carries no payload
+// we can classify, so it normalizes to the empty string.
+func normalizeSummaryReplyContent(content string) string {
+	content = strings.TrimSpace(strings.TrimPrefix(content, "\uFEFF"))
 	if rest, ok := strings.CutPrefix(content, "```"); ok {
 		// Drop the fence's info string (```json) and the newline after it.
-		if idx := strings.IndexByte(rest, '\n'); idx >= 0 {
-			content = strings.TrimSpace(rest[idx+1:])
-		} else {
-			return false
+		idx := strings.IndexByte(rest, '\n')
+		if idx < 0 {
+			return ""
 		}
+		content = strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(rest[idx+1:]), "```"))
 	}
-	return strings.HasPrefix(content, "{") || strings.HasPrefix(content, "[")
+	return content
+}
+
+// summaryReplyIsJSONShaped reports whether the reply really is a structured
+// JSON payload, either directly or inside a markdown code fence. Only such
+// replies are held to the structured contract below; anything else is a
+// legacy plain-text summary.
+//
+// An object opening ("{") always counts, parseable or not: half an object is
+// exactly the reply that must never be stored as a summary. A bracket opening
+// is ambiguous — "[1] …" and "[文档摘要] …" are prose with a leading citation,
+// not broken JSON — so it only counts when the reply is a JSON array or opens
+// an array of objects/strings.
+func summaryReplyIsJSONShaped(content string) bool {
+	content = normalizeSummaryReplyContent(content)
+	if content == "" {
+		return false
+	}
+	switch content[0] {
+	case '{':
+		return true
+	case '[':
+		var arr []json.RawMessage
+		if json.Unmarshal([]byte(content), &arr) == nil {
+			return true
+		}
+		first := strings.TrimLeft(content[1:], " \t\r\n")
+		return strings.HasPrefix(first, "{") ||
+			strings.HasPrefix(first, "[") ||
+			strings.HasPrefix(first, `"`)
+	default:
+		return false
+	}
 }
 
 // parseDocumentSummaryOutput accepts both the structured JSON reply and a
@@ -894,7 +926,9 @@ func summaryReplyIsJSONShaped(content string) bool {
 // knowledges.description, marked the summary completed so Asynq never retried
 // it, and embedded the same fragment into the RAG index.
 func parseDocumentSummaryOutput(content string) (*documentSummaryResult, error) {
-	content = strings.TrimSpace(content)
+	// Some providers prefix the reply with a UTF-8 BOM; TrimSpace alone would
+	// leave it in place, hide the "{" and let half an object through as prose.
+	content = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(content), "\uFEFF"))
 	if content == "" {
 		return nil, errEmptySummaryOutput
 	}
@@ -971,19 +1005,38 @@ var (
 const summaryFallbackMaxRunes = 500
 
 // validateSummaryOutput rejects successful model responses that contain no
-// user-visible text, and responses the provider cut off at the completion
-// budget. Treating either as an error lets Asynq retry the summary task
-// instead of persisting description="" — or half a JSON object — as completed.
+// user-visible text. It only looks at the content shape: a provider that
+// stopped at the completion budget can still return usable text, and the older
+// plain-text consumers (custom summary templates, table/column descriptions)
+// deliberately keep whatever the model produced.
 func validateSummaryOutput(response *types.ChatResponse) (string, error) {
 	if response == nil {
 		return "", errEmptySummaryOutput
 	}
-	if chatpipeline.IsLengthFinishReason(response.FinishReason) {
-		return "", errSummaryOutputTruncated
-	}
 	content := strings.TrimSpace(response.Content)
 	if content == "" {
 		return "", errEmptySummaryOutput
+	}
+	return content, nil
+}
+
+// validateStructuredSummaryDocument is the validator for the document-summary
+// entry point (getSummary). On top of validateSummaryOutput it rejects a reply
+// the provider cut off at the completion budget — but only when the reply was
+// producing a structured summary, because that is the case where the truncated
+// text is half a JSON object. A plain-text summary that hit the budget is
+// still usable text and keeps the legacy fallback.
+//
+// The shape is judged before the finish reason, so "finish_reason=length" can
+// never turn a plain-text reply into a failure on its own.
+func validateStructuredSummaryDocument(response *types.ChatResponse) (string, error) {
+	content, err := validateSummaryOutput(response)
+	if err != nil {
+		return "", err
+	}
+	structured := summaryReplyIsJSONShaped(content)
+	if structured && chatpipeline.IsLengthFinishReason(response.FinishReason) {
+		return "", errSummaryOutputTruncated
 	}
 	return content, nil
 }
@@ -1222,7 +1275,7 @@ func (s *knowledgeService) getSummary(ctx context.Context,
 		logger.GetLogger(ctx).WithField("error", err).Errorf("GetSummary failed")
 		return nil, err
 	}
-	content, err := validateSummaryOutput(summary)
+	content, err := validateStructuredSummaryDocument(summary)
 	if err != nil {
 		logger.GetLogger(ctx).WithField("error", err).Warnf("GetSummary returned no usable content")
 		return nil, err
