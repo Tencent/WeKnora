@@ -194,7 +194,6 @@ func testMilvusConnection(ctx context.Context, config types.ConnectionConfig) (s
 		Password: config.Password,
 		DBName:   config.Database,
 		DialOptions: []grpc.DialOption{
-			grpc.WithTimeout(5 * time.Second),
 			grpc.WithContextDialer(secutils.SSRFSafeGRPCDialer),
 		},
 	})
@@ -202,16 +201,24 @@ func testMilvusConnection(ctx context.Context, config types.ConnectionConfig) (s
 		logger.Warnf(ctx, "Milvus connection test failed (gRPC status: %s)", status.Code(err))
 		switch status.Code(err) {
 		case codes.Unauthenticated:
-			return "", errors.NewBadRequestError("failed to connect to milvus: authentication failed; check username and password")
+			return "", errors.NewBadRequestError(
+				"failed to connect to milvus: authentication failed; check username and password",
+			)
 		case codes.PermissionDenied:
 			return "", errors.NewBadRequestError("failed to connect to milvus: permission denied; check user access")
 		case codes.NotFound:
 			return "", errors.NewBadRequestError("failed to connect to milvus: database not found; check database name")
 		default:
-			return "", errors.NewBadRequestError("failed to connect to milvus: server unreachable or connection configuration invalid")
+			return "", errors.NewBadRequestError(
+				"failed to connect to milvus: server unreachable or connection configuration invalid",
+			)
 		}
 	}
-	defer client.Close(context.Background())
+	defer func() {
+		if closeErr := client.Close(context.Background()); closeErr != nil {
+			logger.Warnf(ctx, "Failed to close Milvus connection test client: %v", closeErr)
+		}
+	}()
 
 	return "", nil
 }
