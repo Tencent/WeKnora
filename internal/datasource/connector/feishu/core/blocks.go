@@ -344,6 +344,12 @@ type bitableFieldsResponse struct {
 // page_size here is rejected, so fields must be fetched 100 at a time and paged.
 const maxBitableFieldPageSize = 100
 
+// maxBitableFields caps how many fields one embedded table contributes. The
+// list-fields endpoint pages at 100, so this allows 50 pages; a table that keeps
+// handing out fresh page tokens stops here instead of growing the header without
+// bound.
+const maxBitableFields = 5000
+
 // bitableRecord is one entry of bitableRecordsData.Items.
 type bitableRecord struct {
 	Fields map[string]any `json:"fields"`
@@ -376,6 +382,7 @@ func (c *Client) readBitableRecords(ctx context.Context, embedToken string) ([][
 	baseFPath := fmt.Sprintf("/open-apis/bitable/v1/apps/%s/tables/%s/fields?page_size=%d",
 		url.PathEscape(appToken), url.PathEscape(tableID), maxBitableFieldPageSize)
 	fieldPageToken := ""
+	seenFieldPageTokens := make(map[string]struct{})
 	for {
 		fpath := baseFPath
 		if fieldPageToken != "" {
@@ -396,13 +403,26 @@ func (c *Client) readBitableRecords(ctx context.Context, embedToken string) ([][
 			cols = append(cols, bitableColumn{name: f.FieldName, fieldType: f.Type, dateFormatter: formatter})
 		}
 		if len(fieldsResp.Data.Items) == 0 {
-			// Defensive: an empty page with has_more=true would loop forever (this
-			// loop has no size cap of its own). Nothing more to read, so stop.
+			// Defensive: an empty page with has_more=true never advances, so the
+			// size cap below would never trip — stop instead of looping until the
+			// task deadline. Nothing more to read.
 			break
 		}
 		if !fieldsResp.Data.HasMore || fieldsResp.Data.PageToken == "" {
 			break
 		}
+		if len(cols) >= maxBitableFields {
+			logger.Warnf(ctx, "[Feishu] bitable %s exceeded %d fields; truncating", embedToken, maxBitableFields)
+			break
+		}
+		// A repeated non-empty token means the vendor is re-serving a page we
+		// already read; without this the loop would re-append the same fields
+		// until the task deadline (same guard as the wiki/drive pagination).
+		if _, exists := seenFieldPageTokens[fieldsResp.Data.PageToken]; exists {
+			return nil, false, fmt.Errorf("feishu bitable field pagination repeated page token %q",
+				fieldsResp.Data.PageToken)
+		}
+		seenFieldPageTokens[fieldsResp.Data.PageToken] = struct{}{}
 		fieldPageToken = fieldsResp.Data.PageToken
 	}
 
