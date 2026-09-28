@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -352,24 +353,51 @@ func copiedSourceID(sourceID, sourceChunkID, targetChunkID string) string {
 	return uuid.New().String()
 }
 
+// Both batch updates write one statement per chunk, so a failing statement only
+// affects its own row. Errors are therefore accumulated and the whole batch is
+// attempted (like the Milvus and Qdrant engines do) instead of stopping at the
+// first failure and leaving an arbitrary prefix of the map applied, only to be
+// reported as a blanket failure.
 func (r *sqliteRepository) BatchUpdateChunkEnabledStatus(ctx context.Context, chunkStatusMap map[string]bool) error {
+	var updateErrs []error
 	for chunkID, enabled := range chunkStatusMap {
-		if err := r.db.WithContext(ctx).Model(&sqliteEmbedding{}).
-			Where("chunk_id = ?", chunkID).
-			Update("is_enabled", enabled).Error; err != nil {
-			return fmt.Errorf("[SQLite] failed to update is_enabled for chunk %s: %w", chunkID, err)
+		if err := r.updateChunkIndexColumn(ctx, "is_enabled", chunkID, enabled); err != nil {
+			updateErrs = append(updateErrs,
+				fmt.Errorf("[SQLite] failed to update is_enabled for chunk %s: %w", chunkID, err))
 		}
 	}
-	return nil
+	return errors.Join(updateErrs...)
 }
 
 func (r *sqliteRepository) BatchUpdateChunkTagID(ctx context.Context, chunkTagMap map[string]string) error {
+	var updateErrs []error
 	for chunkID, tagID := range chunkTagMap {
-		if err := r.db.WithContext(ctx).Model(&sqliteEmbedding{}).
-			Where("chunk_id = ?", chunkID).
-			Update("tag_id", tagID).Error; err != nil {
-			return fmt.Errorf("[SQLite] failed to update tag_id for chunk %s: %w", chunkID, err)
+		if err := r.updateChunkIndexColumn(ctx, "tag_id", chunkID, tagID); err != nil {
+			updateErrs = append(updateErrs,
+				fmt.Errorf("[SQLite] failed to update tag_id for chunk %s: %w", chunkID, err))
 		}
+	}
+	return errors.Join(updateErrs...)
+}
+
+// updateChunkIndexColumn applies a single per-chunk UPDATE to the retrieval
+// index copy. A statement matching no row is not an error -- that row may never
+// have reached the index -- but it would otherwise stay completely invisible,
+// so it is warned about with the table and chunk it was meant for.
+func (r *sqliteRepository) updateChunkIndexColumn(
+	ctx context.Context, column, chunkID string, value any,
+) error {
+	result := r.db.WithContext(ctx).Model(&sqliteEmbedding{}).
+		Where("chunk_id = ?", chunkID).
+		Update(column, value)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		logger.GetLogger(ctx).Warnf(
+			"[SQLite] update of %s.%s matched 0 rows for chunk %s",
+			sqliteEmbedding{}.TableName(), column, chunkID,
+		)
 	}
 	return nil
 }
@@ -476,6 +504,7 @@ func (r *sqliteRepository) keywordsRetrieve(ctx context.Context, params types.Re
 		RetrieverType:       types.KeywordsRetrieverType,
 	}}, nil
 }
+
 func (r *sqliteRepository) vectorRetrieve(ctx context.Context, params types.RetrieveParams) ([]*types.RetrieveResult, error) {
 	if len(params.Embedding) == 0 {
 		return nil, nil
