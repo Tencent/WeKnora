@@ -94,6 +94,7 @@ func RunPluginHost(ctx context.Context) error {
 		Admit: admitTrusted(trusted), HostVersion: handler.Version,
 	})
 	mgr.SetReporter(r)
+	mgr.SetLeases(hostpool.NewLeases(rdb, r.NodeName()))
 
 	addr := os.Getenv(envPluginHostAddr)
 	if addr == "" {

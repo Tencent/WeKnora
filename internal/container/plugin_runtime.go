@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -423,6 +424,7 @@ func flushDeferredPluginEvents() {
 func startPluginReconciler(
 	r *reconcile.Reconciler, hostManager *host.Manager, remoteManager *remote.Manager,
 	events *pluginevents.Dispatcher, cleaner interfaces.ResourceCleaner,
+	rdb *redis.Client, pool *hostpool.Pool, cfg *config.Config,
 ) {
 	pluginevents.SetDefault(events)
 	if kinds := hostManager.Kinds(); len(kinds) > 0 {
@@ -431,6 +433,14 @@ func startPluginReconciler(
 	hostManager.SetReporter(r)
 	remoteManager.SetReporter(r)
 	ctx, cancel := context.WithCancel(context.Background())
+	if pool != nil {
+		// Before the first pass, so no singleton starts unelected.
+		hostManager.SetLeases(hostpool.NewLeases(rdb, r.NodeName()))
+		url := nodeURL(cfg)
+		go hostpool.NewAnnouncer(rdb, hostManager, r.NodeName(), url).
+			Only(func(p host.Running) bool { return p.Singleton }).Run(ctx)
+		logger.Infof(ctx, "[plugin] singleton plugins this node runs are served to the others at %s", url)
+	}
 	r.Start(ctx)
 	cleaner.RegisterWithName("PluginReconciler", func() error {
 		cancel()
@@ -438,6 +448,35 @@ func startPluginReconciler(
 		remoteManager.Close()
 		return nil
 	})
+}
+
+// envPluginNodeURL is where the other nodes reach this app node's plugin
+// gateway (the singleton plugins it runs for the cluster): default
+// http://<hostname>:<server port>.
+const envPluginNodeURL = "WEKNORA_PLUGIN_NODE_URL"
+
+func nodeURL(cfg *config.Config) string {
+	if u := strings.TrimSpace(os.Getenv(envPluginNodeURL)); u != "" {
+		return strings.TrimSuffix(u, "/")
+	}
+	name, _ := os.Hostname()
+	if name == "" {
+		name = "localhost"
+	}
+	return "http://" + net.JoinHostPort(name, strconv.Itoa(serverPort(cfg)))
+}
+
+// newPluginGateway serves the singleton plugins this node runs to the other
+// nodes, signed with the cluster key; nothing without a cluster.
+func newPluginGateway(h *host.Manager, pool *hostpool.Pool) *handler.PluginGateway {
+	if pool == nil {
+		return &handler.PluginGateway{}
+	}
+	key, err := hostpool.ClusterKey()
+	if err != nil {
+		return &handler.PluginGateway{}
+	}
+	return &handler.PluginGateway{Prefix: host.GatewayPrefix, Handler: h.Gateway(key)}
 }
 
 // bindPluginHostDataSources enables the Host API's datasources scope once

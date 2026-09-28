@@ -141,6 +141,7 @@ type Announcer struct {
 	id   string
 	url  string
 	kick chan struct{}
+	only func(host.Running) bool
 }
 
 // NewAnnouncer announces the host at url (its gateway, as app nodes reach
@@ -151,10 +152,27 @@ func NewAnnouncer(rdb *redis.Client, mgr *host.Manager, id, url string) *Announc
 	}
 }
 
+// Only limits what the host announces, such as an app node announcing the
+// singleton plugins it runs for the cluster and nothing else.
+func (a *Announcer) Only(keep func(host.Running) bool) *Announcer {
+	a.only = keep
+	return a
+}
+
 func (a *Announcer) info() Info {
+	plugins := a.mgr.Running()
+	if a.only != nil {
+		kept := plugins[:0]
+		for _, p := range plugins {
+			if a.only(p) {
+				kept = append(kept, p)
+			}
+		}
+		plugins = kept
+	}
 	return Info{
 		ID: a.id, URL: a.url, OS: runtime.GOOS, Arch: runtime.GOARCH, Kinds: a.mgr.Kinds(),
-		Plugins: a.mgr.Running(), InFlight: a.mgr.InFlight(), UpdatedAt: time.Now(),
+		Plugins: plugins, InFlight: a.mgr.InFlight(), UpdatedAt: time.Now(),
 	}
 }
 

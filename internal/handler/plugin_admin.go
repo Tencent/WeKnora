@@ -724,3 +724,11 @@ func (h *PluginAdminHandler) UpdatePluginSystemConfig(c *gin.Context) {
 	}
 	h.ok(c, cfg)
 }
+
+// PluginGateway serves the plugins this node runs for the whole cluster
+// (singletons holding their lease) to the other nodes, under Prefix; nil
+// Handler on a node without a cluster.
+type PluginGateway struct {
+	Prefix  string
+	Handler http.Handler
+}

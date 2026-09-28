@@ -99,6 +99,7 @@ type RouterParams struct {
 	PluginHostAPI                *hostapi.Handler
 	PluginUIHandler              *handler.PluginUIHandler
 	PluginWebhookHandler         *handler.PluginWebhookHandler
+	PluginGateway                *handler.PluginGateway
 	PluginFormsHandler           *handler.PluginFormsHandler
 	WeKnoraCloudHandler          *handler.WeKnoraCloudHandler
 	WikiPageHandler              *handler.WikiPageHandler
@@ -235,6 +236,11 @@ func NewRouter(params RouterParams) *gin.Engine {
 		hooks := r.Group(webhook.PathPrefix)
 		hooks.Any("/:id/:hook/:token", params.PluginWebhookHandler.Receive)
 		hooks.Any("/:id/:hook/:token/*path", params.PluginWebhookHandler.Receive)
+	}
+	// Other nodes reach the singleton plugins this node runs; calls are
+	// signed with the cluster key, so no login applies.
+	if params.PluginGateway != nil && params.PluginGateway.Handler != nil {
+		r.Any(params.PluginGateway.Prefix+"*path", gin.WrapH(params.PluginGateway.Handler))
 	}
 
 	// 认证中间件

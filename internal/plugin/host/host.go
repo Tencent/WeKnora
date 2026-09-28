@@ -58,6 +58,10 @@ type Manager struct {
 	// hosts only).
 	handingOver map[string]*process
 	onChange    func()
+	// leases elect the node running each singleton plugin (nil: this one);
+	// singletons are those this node runs or stands by for.
+	leases     Leases
+	singletons map[string]*singleton
 
 	// idleTimeout stops plugins without calls for that long; 0 keeps them
 	// running. The reaper starts with the first plugin.
@@ -78,7 +82,7 @@ var handoverWindow = reconcile.DefaultInterval + 15*time.Second
 func NewManager() *Manager {
 	m := &Manager{
 		procs: map[string]*process{}, idleTimeout: IdleTimeoutFromEnv(), reaperStop: make(chan struct{}),
-		memory: newMemorySampler(),
+		memory: newMemorySampler(), singletons: map[string]*singleton{},
 	}
 	m.SetKinds(AvailableKinds())
 	return m
@@ -90,6 +94,7 @@ func NewStandaloneManager(kinds []string) *Manager {
 	m := &Manager{
 		procs: map[string]*process{}, standalone: true, handingOver: map[string]*process{},
 		idleTimeout: IdleTimeoutFromEnv(), reaperStop: make(chan struct{}), memory: newMemorySampler(),
+		singletons: map[string]*singleton{},
 	}
 	m.SetKinds(kinds)
 	return m
@@ -212,7 +217,9 @@ func (m *Manager) Name() string { return "host" }
 // it is ready; calls go to it from the commit on, and the previous process
 // stops then. A version this host does not run (another runtime, or a kind
 // a plugin host elsewhere runs) stops the previous process once the new
-// runtime took over.
+// runtime took over. A singleton plugin is only checked here: from the
+// commit on it runs on the node holding its lease, after the previous
+// version stopped (see runSingleton).
 func (m *Manager) Stage(ctx context.Context, _, l *reconcile.Loaded) (reconcile.Staged, error) {
 	id := l.Manifest.ID
 	elsewhere := reconcile.Swap{OnRetire: func() {
@@ -237,14 +244,23 @@ func (m *Manager) Stage(ctx context.Context, _, l *reconcile.Loaded) (reconcile.
 	m.mu.Lock()
 	direct, hostAPI := m.direct, m.hostAPI
 	m.mu.Unlock()
-	p, err := startProcess(spec{m: l.Manifest, dir: l.Dir, pkg: l.Package, direct: direct, hostAPI: hostAPI},
-		func(p *process, s State, err error) { m.report(id, p, s, err) })
+	sp := spec{m: l.Manifest, dir: l.Dir, pkg: l.Package, direct: direct, hostAPI: hostAPI}
+	if l.Manifest.Runtime.Singleton {
+		if _, err := entryPath(l.Manifest, l.Dir); err != nil {
+			return nil, err
+		}
+		return reconcile.Swap{OnCommit: func() { m.runSingleton(l.Manifest, sp) }}, nil
+	}
+	p, err := startProcess(sp, func(p *process, s State, err error) { m.report(id, p, s, err) })
 	if err != nil {
 		return nil, err
 	}
 	return reconcile.Swap{
-		OnCommit: func() { m.serve(ctx, l.Manifest, p) },
-		OnAbort:  func() { m.retire(p) },
+		OnCommit: func() {
+			m.stopSingleton(id) // the previous version was one
+			m.serve(ctx, l.Manifest, p)
+		},
+		OnAbort: func() { m.retire(p) },
 	}, nil
 }
 
@@ -306,6 +322,8 @@ func (m *Manager) endHandover(id string, p *process) {
 // Deactivate implements reconcile.Activator: it stops the process, which
 // finishes its calls in flight in the background.
 func (m *Manager) Deactivate(ctx context.Context, pluginID string) error {
+	// A singleton's own loop stops its process and gives the lease up.
+	m.stopSingleton(pluginID)
 	m.mu.Lock()
 	p := m.procs[pluginID]
 	delete(m.procs, pluginID)
@@ -406,6 +424,8 @@ type Running struct {
 	Version string `json:"version"`
 	Kind    string `json:"kind"`
 	State   State  `json:"state"`
+	// Singleton: this host runs it for the whole cluster, holding its lease.
+	Singleton bool `json:"singleton,omitempty"`
 }
 
 // Running lists the plugins this host runs and their state, previous
@@ -427,6 +447,7 @@ func (m *Manager) Running() []Running {
 		p.mu.RUnlock()
 		out = append(out, Running{
 			ID: p.spec.m.ID, Version: p.spec.m.Version, Kind: p.spec.m.Runtime.Kind, State: st,
+			Singleton: p.spec.m.Runtime.Singleton,
 		})
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -444,6 +465,14 @@ func (m *Manager) InFlight() int64 { return m.inFlight.Load() }
 // Close stops every plugin, for shutdown.
 func (m *Manager) Close() {
 	m.reaperOnce.Do(func() {}) // no reaper starts after this
+	m.mu.Lock()
+	singletons := m.singletons
+	m.singletons = map[string]*singleton{}
+	m.mu.Unlock()
+	for _, s := range singletons {
+		s.cancel()
+		<-s.done
+	}
 	m.mu.Lock()
 	select {
 	case <-m.reaperStop:
