@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -348,6 +349,14 @@ func (c *notionClient) QueryDatabaseAll(ctx context.Context, id string) ([]notio
 		return records, nil
 	}
 
+	// A capped query reached the data source successfully. Resolving the ID as a
+	// database container would only repeat the same capped query and would bury
+	// the truncation error behind a misleading lookup failure, so surface it here
+	// together with the rows fetched so far.
+	if errors.Is(err, errQueryResultTruncated) {
+		return records, err
+	}
+
 	// If 404, id might be a database container ID — resolve to data_source_id
 	info, dbErr := c.GetDatabaseInfo(ctx, id)
 	if dbErr != nil {
@@ -429,6 +438,15 @@ func (c *notionClient) DownloadFile(ctx context.Context, fileURL string) ([]byte
 
 // --- Shared pagination helper ---
 
+// errQueryResultTruncated reports that a paginated response was cut short by a
+// vendor-side limit, so the rows collected so far are a prefix of the result set
+// rather than all of it. Notion signals this with has_more=false plus
+// request_status.type="incomplete" (for a data source query at the 10,000-row
+// limit: incomplete_reason="query_result_limit_reached"), which without this
+// check is indistinguishable from a complete result set. Callers must not treat
+// rows missing from such a result as deleted at source.
+var errQueryResultTruncated = errors.New("notion paginated response incomplete: vendor limit reached")
+
 // paginatePages fetches all pages from a paginated Notion API endpoint.
 func (c *notionClient) paginatePages(ctx context.Context, method, path string) ([]notionPage, error) {
 	var allPages []notionPage
@@ -472,6 +490,16 @@ func (c *notionClient) paginatePages(ctx context.Context, method, path string) (
 		}
 
 		allPages = append(allPages, pages...)
+
+		// The vendor marks a capped page as incomplete while still reporting
+		// has_more=false, so this per-page check is the only way to tell "cut
+		// short" from "read to the end". Keep the rows this page did return, then
+		// surface the sentinel so callers can use the partial data without reading
+		// absence from it as a source-side deletion.
+		if resp.isIncomplete() {
+			return allPages, fmt.Errorf("%w: %s (path %s, %d records fetched)",
+				errQueryResultTruncated, resp.RequestStatus.IncompleteReason, path, len(allPages))
+		}
 
 		if !resp.HasMore || resp.NextCursor == "" {
 			break
