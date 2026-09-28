@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -17,16 +18,27 @@ import (
 // --- test doubles -----------------------------------------------------------
 
 // wikiPendingRepoForFollowUpTest reuses the cleanup-test repo and makes
-// PendingCount configurable, which is the only input scheduleFollowUp reads.
+// PendingCount and the eligible-document count configurable.
 type wikiPendingRepoForFollowUpTest struct {
 	wikiPendingRepoForCleanupTest
-	pending int64
+	pending      int64
+	claimable    *int64
+	claimableErr error
 }
 
 func (r *wikiPendingRepoForFollowUpTest) PendingCount(
 	context.Context, string, string, string,
 ) (int64, error) {
 	return r.pending, nil
+}
+
+func (r *wikiPendingRepoForFollowUpTest) ClaimableCount(
+	context.Context, string, string, string, time.Time,
+) (int64, error) {
+	if r.claimable != nil {
+		return *r.claimable, r.claimableErr
+	}
+	return r.pending, r.claimableErr
 }
 
 // followUpEnqueuerRecorder captures every trigger scheduleFollowUp enqueues.
@@ -248,47 +260,274 @@ func TestScheduleFollowUpPartialEnqueueFailureStillReportsScheduled(t *testing.T
 	got := svc.scheduleFollowUp(context.Background(),
 		WikiIngestPayload{KnowledgeBaseID: "kb-1"}, wikiFollowUpDelay, 10, 4, false)
 	require.True(t, got)
-	require.Equal(t, 4, rec.count())
+	require.Equal(t, 5, rec.count()) // four follow-ups and one recovery probe
 }
 
-// --- convergence ------------------------------------------------------------
+// Use the actual asynq client so these tests exercise atomic reservations and
+// queue state, rather than merely checking the single-completer arithmetic.
+func newQueuedFollowUpTestService(t *testing.T) (*wikiIngestService, *asynq.Inspector) {
+	t.Helper()
+	mr := miniredis.RunT(t)
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() { _ = rdb.Close() })
+	client := asynq.NewClient(asynq.RedisClientOpt{Addr: mr.Addr()})
+	t.Cleanup(func() { _ = client.Close() })
+	return &wikiIngestService{
+		redisClient: rdb,
+		task:        client,
+		pendingRepo: &wikiPendingRepoForFollowUpTest{pending: 24624},
+	}, asynq.NewInspectorFromRedisClient(rdb)
+}
 
-// TestFollowUpFanOutConvergesUnderCap simulates successive batch completions
-// fanning out on a board whose slots never free (worst case for over-issue)
-// and asserts the per-completion trigger count never exceeds the free slots,
-// i.e. the supply side alone cannot push concurrency past ingest_max_inflight.
-func TestFollowUpFanOutConvergesUnderCap(t *testing.T) {
-	const (
-		maxInflight = 8
-		batchSize   = 10
-	)
-	var (
-		pending     = 1000
-		activeSlots = 1 // the completing batch itself; releases on return
-	)
-	seen := map[int]bool{}
-	for round := 0; round < 6; round++ {
-		n := followUpTriggerCount(pending, batchSize, activeSlots, maxInflight)
-		require.Greater(t, n, 0)
-		require.LessOrEqual(t, n, maxInflight-activeSlots+1,
-			"round %d: supply must not exceed free slots", round)
-		if activeSlots == maxInflight {
-			require.Equal(t, 1, n,
-				"round %d: a full board must clamp supply to the follow-up chain", round)
-		}
-		seen[n] = true
-
-		// The n triggers fire: n-1 of them claim slots (one bounces off the
-		// cap into scheduleCappedRetry when the board is full), each claims a
-		// batch of batchSize rows.
-		newBatches := min(n, maxInflight-activeSlots)
-		pending -= newBatches * batchSize
-		activeSlots = maxInflight
-		if pending <= 0 {
-			pending = 1 // keep the loop meaningful; count stays capped below
-		}
+func expireFollowUpChecks(t *testing.T, svc *wikiIngestService) {
+	t.Helper()
+	ctx := context.Background()
+	ids, err := svc.redisClient.ZRange(ctx, wikiFollowUpPrefix+"kb-1", 0, -1).Result()
+	require.NoError(t, err)
+	for _, id := range ids {
+		require.NoError(t, svc.redisClient.ZAdd(ctx, wikiFollowUpPrefix+"kb-1", redis.Z{
+			Score: float64(time.Now().Add(-time.Minute).UnixMilli()), Member: id,
+		}).Err())
 	}
-	// The first round must have fanned out beyond the follow-up chain —
-	// otherwise this would not be testing convergence at all.
-	require.Greater(t, len(seen), 1)
+}
+
+func TestScheduleFollowUpWorkerPoolBelowCap(t *testing.T) {
+	svc, inspector := newQueuedFollowUpTestService(t)
+	ctx := context.Background()
+	payload := WikiIngestPayload{KnowledgeBaseID: "kb-1"}
+	// Startup recovery has one running batch, whose completion fans out.
+	release, ok := svc.reserveInflightSlot(ctx, "kb-1", 32)
+	require.True(t, ok)
+	require.True(t, svc.scheduleFollowUp(ctx, payload, wikiFollowUpDelay, 10, 32, false))
+	release()
+	queued, err := inspector.ListScheduledTasks("wiki", asynq.PageSize(100))
+	require.NoError(t, err)
+	require.Len(t, queued, 32)
+
+	// Model eight workers dequeuing tasks. Keep their follow-up reservations
+	// until completion, just as the handler does, and consume one queued task
+	// for each finished batch. No model, database or external Redis is used.
+	runningIDs := make([]string, 8)
+	for i := range runningIDs {
+		runningIDs[i] = queued[i].ID
+		require.NoError(t, inspector.DeleteTask("wiki", queued[i].ID))
+	}
+	reserveSlots(t, svc, "kb-1", 8, 32)
+	for completed := 0; completed < 100; completed++ {
+		svc.pendingRepo.(*wikiPendingRepoForFollowUpTest).pending -= 10
+		require.True(t, svc.scheduleFollowUp(ctx, payload, wikiFollowUpDelay, 10, 32, false))
+		worker := completed % len(runningIDs)
+		require.NoError(t, svc.redisClient.ZRem(ctx, wikiFollowUpPrefix+"kb-1", runningIDs[worker]).Err())
+		queued, err = inspector.ListScheduledTasks("wiki", asynq.PageSize(100))
+		require.NoError(t, err)
+		require.NotEmpty(t, queued)
+		runningIDs[worker] = queued[0].ID
+		require.NoError(t, inspector.DeleteTask("wiki", queued[0].ID))
+		info, err := inspector.GetQueueInfo("wiki")
+		require.NoError(t, err)
+		require.LessOrEqual(t, info.Scheduled, 25, "completion %d must not multiply the queue", completed)
+	}
+}
+
+func TestScheduleFollowUpConcurrentCompletionsShareBudget(t *testing.T) {
+	svc, inspector := newQueuedFollowUpTestService(t)
+	reserveSlots(t, svc, "kb-1", 16, 32)
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := 0; i < 16; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			svc.scheduleFollowUp(context.Background(), WikiIngestPayload{KnowledgeBaseID: "kb-1"},
+				wikiFollowUpDelay, 10, 32, false)
+		}()
+	}
+	close(start)
+	wg.Wait()
+	info, err := inspector.GetQueueInfo("wiki")
+	require.NoError(t, err)
+	// Cap + one successor spare + at most one coalesced recovery probe.
+	require.LessOrEqual(t, info.Scheduled, 34)
+	require.Equal(t, int64(33), svc.redisClient.ZCard(context.Background(), wikiFollowUpPrefix+"kb-1").Val())
+}
+
+func TestScheduleFollowUpClaimedRowsOnlyKeepsCrashRecovery(t *testing.T) {
+	svc, inspector := newQueuedFollowUpTestService(t)
+	zero := int64(0)
+	svc.pendingRepo.(*wikiPendingRepoForFollowUpTest).claimable = &zero
+	require.True(t, svc.scheduleFollowUp(context.Background(), WikiIngestPayload{KnowledgeBaseID: "kb-1"},
+		wikiFollowUpDelay, 10, 32, false))
+	tasks, err := inspector.ListScheduledTasks("wiki")
+	require.NoError(t, err)
+	require.Len(t, tasks, 1)
+	require.Equal(t, "wiki-ingest-recheck-kb-1", tasks[0].ID)
+	require.Greater(t, time.Until(tasks[0].NextProcessAt), wikiClaimStaleAfter-time.Second)
+}
+
+func TestFollowUpReservationsKeepLongQueuedTasks(t *testing.T) {
+	svc, inspector := newQueuedFollowUpTestService(t)
+	ctx := context.Background()
+	payload := WikiIngestPayload{KnowledgeBaseID: "kb-1"}
+	require.True(t, svc.scheduleFollowUp(ctx, payload, wikiFollowUpDelay, 10, 4, false))
+	for i := 0; i < 5; i++ {
+		expireFollowUpChecks(t, svc)
+		require.True(t, svc.scheduleFollowUp(ctx, payload, wikiFollowUpDelay, 10, 4, false))
+	}
+	info, err := inspector.GetQueueInfo("wiki")
+	require.NoError(t, err)
+	require.LessOrEqual(t, info.Scheduled, 6) // five reserved tasks plus one probe
+	require.Equal(t, int64(5), svc.redisClient.ZCard(ctx, wikiFollowUpPrefix+"kb-1").Val())
+}
+
+func TestFollowUpReservationsRecoverMissingAndArchivedTasks(t *testing.T) {
+	svc, inspector := newQueuedFollowUpTestService(t)
+	ctx := context.Background()
+	require.True(t, svc.scheduleFollowUp(ctx, WikiIngestPayload{KnowledgeBaseID: "kb-1"},
+		wikiFollowUpDelay, 10, 4, false))
+	tasks, err := inspector.ListScheduledTasks("wiki")
+	require.NoError(t, err)
+	require.NoError(t, inspector.DeleteTask("wiki", tasks[0].ID))
+	require.NoError(t, inspector.ArchiveTask("wiki", tasks[1].ID))
+	expireFollowUpChecks(t, svc)
+	require.NoError(t, svc.reconcileFollowUpTasks(ctx, "kb-1"))
+	ids, err := svc.redisClient.ZRange(ctx, wikiFollowUpPrefix+"kb-1", 0, -1).Result()
+	require.NoError(t, err)
+	require.NotContains(t, ids, tasks[0].ID)
+	require.NotContains(t, ids, tasks[1].ID)
+	require.Len(t, ids, len(tasks)-2)
+}
+
+func TestFollowUpReservationsProtectEnqueueInProgress(t *testing.T) {
+	svc, _ := newQueuedFollowUpTestService(t)
+	ctx := context.Background()
+	ids, err := svc.reserveFollowUpTasks(ctx, "kb-1", 5, 4)
+	require.NoError(t, err)
+	require.Len(t, ids, 5)
+	// The task does not exist yet. Another completer must not recycle its
+	// capacity while the first enqueue is still in flight.
+	more, err := svc.reserveFollowUpTasks(ctx, "kb-1", 5, 4)
+	require.NoError(t, err)
+	require.Empty(t, more)
+	// A producer that died before enqueueing must not consume capacity forever.
+	expireFollowUpChecks(t, svc)
+	more, err = svc.reserveFollowUpTasks(ctx, "kb-1", 5, 4)
+	require.NoError(t, err)
+	require.Len(t, more, 5)
+}
+
+// An enqueue can be committed by Redis even when its response is lost.
+type lostFollowUpEnqueueResponse struct{ client *asynq.Client }
+
+func (q lostFollowUpEnqueueResponse) Enqueue(task *asynq.Task, opts ...asynq.Option) (*asynq.TaskInfo, error) {
+	if _, err := q.client.Enqueue(task, opts...); err != nil {
+		return nil, err
+	}
+	return nil, errors.New("enqueue response lost")
+}
+
+func TestFollowUpReservationsSurviveAmbiguousEnqueueFailure(t *testing.T) {
+	svc, inspector := newQueuedFollowUpTestService(t)
+	client := svc.task.(*asynq.Client)
+	svc.task = lostFollowUpEnqueueResponse{client: client}
+	svc.scheduleFollowUp(context.Background(), WikiIngestPayload{KnowledgeBaseID: "kb-1"},
+		wikiFollowUpDelay, 10, 4, false)
+	svc.task = client
+	expireFollowUpChecks(t, svc)
+	require.NoError(t, svc.reconcileFollowUpTasks(context.Background(), "kb-1"))
+	require.Equal(t, int64(5), svc.redisClient.ZCard(context.Background(), wikiFollowUpPrefix+"kb-1").Val())
+	info, err := inspector.GetQueueInfo("wiki")
+	require.NoError(t, err)
+	require.Equal(t, 6, info.Scheduled) // five real tasks and the recovery probe
+}
+
+func TestFollowUpReservationHandlerLifecycle(t *testing.T) {
+	for _, fail := range []bool{false, true} {
+		t.Run(fmt.Sprintf("retry=%t", fail), func(t *testing.T) {
+			svc, inspector := newQueuedFollowUpTestService(t)
+			kbService := &wikiGuardKBService{}
+			if fail {
+				kbService.err = errors.New("temporary KB lookup failure")
+			}
+			svc.kbService = kbService
+			ctx := context.Background()
+			ids, err := svc.reserveFollowUpTasks(ctx, "kb-1", 1, 1)
+			require.NoError(t, err)
+			require.Len(t, ids, 1)
+			server := asynq.NewServer(asynq.RedisClientOpt{Addr: svc.redisClient.Options().Addr}, asynq.Config{
+				Concurrency: 1, Queues: map[string]int{"wiki": 1},
+				TaskCheckInterval: 10 * time.Millisecond, ShutdownTimeout: time.Second,
+				RetryDelayFunc: func(int, error, *asynq.Task) time.Duration { return time.Hour },
+				LogLevel:       asynq.ErrorLevel,
+			})
+			require.NoError(t, server.Start(asynq.HandlerFunc(svc.ProcessWikiIngest)))
+			t.Cleanup(server.Shutdown)
+			payload, err := json.Marshal(WikiIngestPayload{KnowledgeBaseID: "kb-1"})
+			require.NoError(t, err)
+			_, err = svc.task.Enqueue(asynq.NewTask("wiki:ingest", payload,
+				asynq.Queue("wiki"), asynq.TaskID(ids[0])))
+			require.NoError(t, err)
+			if fail {
+				require.Eventually(t, func() bool {
+					info, err := inspector.GetTaskInfo("wiki", ids[0])
+					return err == nil && info.State == asynq.TaskStateRetry
+				}, 5*time.Second, 10*time.Millisecond)
+				expireFollowUpChecks(t, svc)
+				require.NoError(t, svc.reconcileFollowUpTasks(ctx, "kb-1"))
+				require.Equal(t, int64(1), svc.redisClient.ZCard(ctx, wikiFollowUpPrefix+"kb-1").Val())
+			} else {
+				require.Eventually(t, func() bool {
+					return svc.redisClient.ZCard(ctx, wikiFollowUpPrefix+"kb-1").Val() == 0
+				}, 5*time.Second, 10*time.Millisecond, "successful handler must release its reservation")
+			}
+		})
+	}
+}
+
+func TestFollowUpRecheckCanRearmItself(t *testing.T) {
+	svc, inspector := newQueuedFollowUpTestService(t)
+	server := asynq.NewServer(asynq.RedisClientOpt{Addr: svc.redisClient.Options().Addr}, asynq.Config{
+		Concurrency: 1, Queues: map[string]int{"wiki": 1},
+		TaskCheckInterval: 10 * time.Millisecond, ShutdownTimeout: time.Second,
+		LogLevel: asynq.ErrorLevel,
+	})
+	require.NoError(t, server.Start(asynq.HandlerFunc(func(ctx context.Context, _ *asynq.Task) error {
+		if !svc.scheduleFollowUpRecheck(ctx, WikiIngestPayload{KnowledgeBaseID: "kb-1"}) {
+			return errors.New("could not re-arm probe")
+		}
+		return nil
+	})))
+	t.Cleanup(server.Shutdown)
+	_, err := svc.task.Enqueue(asynq.NewTask("wiki:ingest", nil,
+		asynq.Queue("wiki"), asynq.TaskID("wiki-followup-recheck-kb-1")))
+	require.NoError(t, err)
+	require.Eventually(t, func() bool {
+		info, err := inspector.GetTaskInfo("wiki", "wiki-followup-recheck-kb-1-next")
+		return err == nil && info.State == asynq.TaskStateScheduled
+	}, 5*time.Second, 10*time.Millisecond)
+}
+
+func TestFollowUpReservationsKeepCapacitySeparateForEachKB(t *testing.T) {
+	svc, _ := newQueuedFollowUpTestService(t)
+	ctx := context.Background()
+	first, err := svc.reserveFollowUpTasks(ctx, "kb-1", 5, 4)
+	require.NoError(t, err)
+	require.Len(t, first, 5)
+	second, err := svc.reserveFollowUpTasks(ctx, "kb-2", 5, 4)
+	require.NoError(t, err)
+	require.Len(t, second, 5)
+	more, err := svc.reserveFollowUpTasks(ctx, "kb-1", 5, 4)
+	require.NoError(t, err)
+	require.Empty(t, more)
+}
+
+func TestScheduleFollowUpUsesRepositoryBatchLimit(t *testing.T) {
+	svc, inspector := newQueuedFollowUpTestService(t)
+	svc.pendingRepo.(*wikiPendingRepoForFollowUpTest).pending = 1500
+	reserveSlots(t, svc, "kb-1", 1, 4)
+	require.True(t, svc.scheduleFollowUp(context.Background(), WikiIngestPayload{KnowledgeBaseID: "kb-1"},
+		wikiFollowUpDelay, 2000, 4, false))
+	info, err := inspector.GetQueueInfo("wiki")
+	require.NoError(t, err)
+	require.Equal(t, 2, info.Scheduled, "ClaimBatch can claim at most 1000 documents per batch")
 }
