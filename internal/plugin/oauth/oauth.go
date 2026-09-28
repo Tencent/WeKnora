@@ -168,7 +168,7 @@ func (s *Service) Start(ctx context.Context, t Target, userID, origin, baseURL s
 		return "", "", err
 	}
 	state := randomToken()
-	st := pending{Target: t, UserID: userID, Origin: origin, Redirect: redirect}
+	st := pending{Target: t, UserID: userID, Origin: origin, Redirect: redirect, Bound: origin != ""}
 	var opts []oauth2.AuthCodeOption
 	if spec.PKCE {
 		st.Verifier = oauth2.GenerateVerifier()
@@ -192,12 +192,44 @@ type Result struct {
 	Err          error
 }
 
+// Bound reports the plugin of an authorization that completes only for the
+// user who started it, signed in to WeKnora in the browser coming back
+// (CompleteAs); "" for one the callback completes on its own (Complete).
+func (s *Service) Bound(ctx context.Context, state string) string {
+	st, ok, err := s.states.peekPending(ctx, state)
+	if err != nil || !ok || !st.Bound {
+		return ""
+	}
+	return st.Target.PluginID
+}
+
+// ErrOtherUser refuses to complete an authorization for someone other than
+// the user who started it: a link to an authorization page, sent to another
+// person, would connect that person's account to the sender's workspace.
+var ErrOtherUser = errors.New("this authorization was started by another WeKnora user; " +
+	"start it again from your own form")
+
 // Complete exchanges the code the authorization server sent back and keeps
-// the tokens as a new connection. The outcome is also kept for Outcome.
+// the tokens as a new connection, for an authorization not bound to a
+// signed-in user (the desktop app's). The outcome is also kept for Outcome.
 func (s *Service) Complete(ctx context.Context, state, code, errParam string) Result {
+	return s.completeFor(ctx, state, code, errParam, nil)
+}
+
+// CompleteAs is Complete for the signed-in user userID, which a bound
+// authorization requires to be the one who started it.
+func (s *Service) CompleteAs(ctx context.Context, state, code, errParam, userID string) Result {
+	return s.completeFor(ctx, state, code, errParam, &userID)
+}
+
+func (s *Service) completeFor(ctx context.Context, state, code, errParam string, userID *string) Result {
 	st, ok, err := s.states.takePending(ctx, state)
 	if err != nil || !ok {
 		return Result{State: state, Err: errors.New("this authorization expired or was already used; try again")}
+	}
+	if st.Bound && (userID == nil || *userID != st.UserID) {
+		// Taken all the same: the link cannot be tried again.
+		return Result{State: state, Origin: st.Origin, Err: ErrOtherUser}
 	}
 	res := s.complete(ctx, st, state, code, errParam)
 	o := Outcome{UserID: st.UserID, OK: res.Err == nil, ConnectionID: res.ConnectionID}

@@ -134,6 +134,36 @@ func setup(t *testing.T, p *provider) *Service {
 	return NewService(reg, plugins, &memConnections{rows: map[string]types.PluginOAuthConnection{}}, nil)
 }
 
+// An authorization link sent to someone else does not connect their account
+// to the sender's workspace; the desktop app's, completed in the system
+// browser, needs no session.
+func TestAuthorizationIsBoundToItsUser(t *testing.T) {
+	ctx := context.Background()
+	s := setup(t, newProvider(t))
+	target := Target{PluginID: "acme.jira", TenantID: 7, Scope: ScopeTenant, Field: "account"}
+	_, state, err := s.Start(ctx, target, "u1", "https://app.example.com", "https://weknora.example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res := s.Complete(ctx, state, "the-code", ""); !errors.Is(res.Err, ErrOtherUser) {
+		t.Fatalf("without a session: %v", res.Err)
+	}
+	_, state, _ = s.Start(ctx, target, "u1", "https://app.example.com", "https://weknora.example.com")
+	if res := s.CompleteAs(ctx, state, "the-code", "", "victim"); !errors.Is(res.Err, ErrOtherUser) {
+		t.Fatalf("another user: %v", res.Err)
+	}
+	if res := s.CompleteAs(ctx, state, "the-code", "", "u1"); res.Err == nil {
+		t.Fatal("a refused state was usable again")
+	}
+	_, state, _ = s.Start(ctx, target, "u1", "", "http://127.0.0.1:5173")
+	if s.Bound(ctx, state) != "" {
+		t.Fatal("a desktop authorization is bound")
+	}
+	if res := s.Complete(ctx, state, "the-code", ""); res.Err != nil {
+		t.Fatalf("desktop: %v", res.Err)
+	}
+}
+
 func TestAuthorizeExchangeAndRefresh(t *testing.T) {
 	ctx := context.Background()
 	p := newProvider(t)
@@ -152,7 +182,11 @@ func TestAuthorizeExchangeAndRefresh(t *testing.T) {
 		t.Fatalf("authorize URL = %s", authURL)
 	}
 
-	res := s.Complete(ctx, state, "the-code", "")
+	// A web app's authorization completes for its signed-in user only.
+	if s.Bound(ctx, state) != "acme.jira" {
+		t.Fatal("a web authorization is not bound to its user")
+	}
+	res := s.CompleteAs(ctx, state, "the-code", "", "u1")
 	if res.Err != nil || res.Origin != "https://app.example.com" || res.ConnectionID == "" || p.verifier == "" {
 		t.Fatalf("complete = %+v verifier %q", res, p.verifier)
 	}
@@ -167,7 +201,7 @@ func TestAuthorizeExchangeAndRefresh(t *testing.T) {
 	if _, err := s.Outcome(ctx, state, "u1"); !errors.Is(err, ErrOutcomePending) {
 		t.Fatalf("an outcome is collected once, got %v", err)
 	}
-	if again := s.Complete(ctx, state, "the-code", ""); again.Err == nil {
+	if again := s.CompleteAs(ctx, state, "the-code", "", "u1"); again.Err == nil {
 		t.Fatal("a state must not be usable twice")
 	}
 	ref := configschema.OAuthRefPrefix + res.ConnectionID

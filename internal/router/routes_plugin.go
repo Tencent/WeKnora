@@ -43,6 +43,7 @@ func RegisterPluginRoutes(
 			plugins.POST("/:id/options", g.AdminOrSystemAdmin(), forms.Options)
 			plugins.POST("/:id/oauth/start", g.AdminOrSystemAdmin(), forms.OAuthStart)
 			plugins.GET("/:id/oauth/result", g.AdminOrSystemAdmin(), forms.OAuthResult)
+			plugins.POST("/:id/oauth/complete", g.AdminOrSystemAdmin(), forms.OAuthComplete)
 		}
 	}
 }

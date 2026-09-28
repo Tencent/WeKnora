@@ -23,6 +23,10 @@ type pending struct {
 	Origin   string `json:"origin"`
 	Redirect string `json:"redirect"`
 	Verifier string `json:"verifier,omitempty"`
+	// Bound: the authorization completes only for UserID, signed in to
+	// WeKnora in the browser the provider sends back (the web app's; a
+	// desktop app sends the system browser back, which has no session).
+	Bound bool `json:"bound,omitempty"`
 }
 
 // Outcome is how an authorization ended, kept for the form that started it
@@ -81,6 +85,30 @@ func (s *stateStore) set(ctx context.Context, key string, v any) error {
 	return nil
 }
 
+// peek reads an entry without taking it.
+func (s *stateStore) peek(ctx context.Context, key string, out any) (bool, error) {
+	var raw []byte
+	if s.rdb != nil {
+		b, err := s.rdb.Get(ctx, key).Bytes()
+		if errors.Is(err, redis.Nil) {
+			return false, nil
+		}
+		if err != nil {
+			return false, err
+		}
+		raw = b
+	} else {
+		s.mu.Lock()
+		e, ok := s.mem[key]
+		s.mu.Unlock()
+		if !ok || time.Now().After(e.expires) {
+			return false, nil
+		}
+		raw = e.value
+	}
+	return true, json.Unmarshal(raw, out)
+}
+
 // take returns an entry once and removes it.
 func (s *stateStore) take(ctx context.Context, key string, out any) (bool, error) {
 	var raw []byte
@@ -115,6 +143,12 @@ func (s *stateStore) putPending(ctx context.Context, state string, p pending) er
 func (s *stateStore) takePending(ctx context.Context, state string) (pending, bool, error) {
 	var p pending
 	ok, err := s.take(ctx, storeKey("state", state), &p)
+	return p, ok, err
+}
+
+func (s *stateStore) peekPending(ctx context.Context, state string) (pending, bool, error) {
+	var p pending
+	ok, err := s.peek(ctx, storeKey("state", state), &p)
 	return p, ok, err
 }
 

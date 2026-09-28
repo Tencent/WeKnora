@@ -318,6 +318,41 @@ func (h *PluginFormsHandler) OAuthStart(c *gin.Context) {
 	}})
 }
 
+// PluginOAuthCompleteRequest is what the callback page sends back.
+type PluginOAuthCompleteRequest struct {
+	State string `json:"state" binding:"required"`
+	Code  string `json:"code"`
+	Error string `json:"error"`
+}
+
+// OAuthComplete godoc
+// @Summary      完成插件字段 OAuth 授权
+// @Description  回调页以当前浏览器登录的用户完成授权；只有发起授权的用户能完成
+// @Tags         Plugins
+// @Accept       json
+// @Produce      json
+// @Param        id       path      string                      true  "插件 ID"
+// @Param        request  body      PluginOAuthCompleteRequest  true  "回调参数"
+// @Success      200      {object}  map[string]interface{}
+// @Security     Bearer
+// @Router       /plugins/{id}/oauth/complete [post]
+func (h *PluginFormsHandler) OAuthComplete(c *gin.Context) {
+	var req PluginOAuthCompleteRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		_ = c.Error(errors.NewBadRequestError("state is required"))
+		return
+	}
+	userID, _ := types.UserIDFromContext(c.Request.Context())
+	res := h.oauth.CompleteAs(c.Request.Context(), req.State, req.Code, req.Error, userID)
+	data := gin.H{"ok": res.Err == nil}
+	if res.Err != nil {
+		data["error"] = res.Err.Error()
+	} else {
+		data["connection"] = configschema.OAuthRefPrefix + res.ConnectionID
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": data})
+}
+
 // OAuthResult godoc
 // @Summary      查询插件字段 OAuth 授权的结果
 // @Description  回调页无法把结果交回表单时（桌面端在系统浏览器中授权），表单轮询此接口；结果只能取一次
@@ -417,10 +452,65 @@ var oauthDoneTemplate = template.Must(template.New("oauth").Parse(`<!doctype htm
 </script>
 </body></html>`))
 
+// oauthBoundTemplate finishes an authorization bound to its user: it asks
+// WeKnora to complete it with the session of this browser, on WeKnora's
+// origin, so only the user who started it can (see OAuthComplete).
+var oauthBoundTemplate = template.Must(template.New("oauth-bound").Parse(`<!doctype html>
+<html><head><meta charset="utf-8"><title>WeKnora</title></head>
+<body style="font:14px system-ui,sans-serif;padding:24px">
+<p id="msg">{{.Finishing}}</p>
+<script>
+(function () {
+  var state = {{.State}}, code = {{.Code}}, err = {{.Error}};
+  var msg = document.getElementById('msg');
+  function done(ok, connection, error) {
+    msg.textContent = ok ? {{.Connected}} : error;
+    var m = { type: 'weknora-plugin-oauth', state: state, ok: ok, connection: connection || '', error: error || '' };
+    if (window.opener) {
+      window.opener.postMessage(m, location.origin);
+      if (ok) window.close();
+    }
+  }
+  var token = null, tenant = null;
+  try {
+    token = localStorage.getItem('weknora_token');
+    tenant = localStorage.getItem('weknora_selected_tenant_id');
+  } catch (e) {}
+  if (!token) { done(false, '', {{.SignIn}}); return; }
+  var headers = { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token };
+  if (tenant) headers['X-Tenant-ID'] = tenant;
+  var url = location.pathname.replace(/\/plugin-oauth\/callback$/,
+    '/plugins/' + encodeURIComponent({{.Plugin}}) + '/oauth/complete');
+  fetch(url, { method: 'POST', headers: headers, body: JSON.stringify({ state: state, code: code, error: err }) })
+    .then(function (r) { return r.json(); })
+    .then(function (b) {
+      var d = (b && b.data) || {};
+      if (b && b.success) done(!!d.ok, d.connection, d.error);
+      else done(false, '', (b && b.error && (b.error.message || b.error)) || {{.SignIn}});
+    })
+    .catch(function (e) { done(false, '', String(e)); });
+})();
+</script>
+</body></html>`))
+
 // OAuthCallback is where authorization servers send the browser back. It
 // needs no login (the state names the pending authorization) and answers
-// with a page that hands the result to the form that opened it.
+// with a page that hands the result to the form that opened it. A web
+// app's authorization is completed by that page for the signed-in user who
+// started it (OAuthComplete); only the desktop app's completes here.
 func (h *PluginFormsHandler) OAuthCallback(c *gin.Context) {
+	c.Header("Content-Type", "text/html; charset=utf-8")
+	c.Header("Cache-Control", "no-store")
+	c.Header("Referrer-Policy", "no-referrer")
+	if plugin := h.oauth.Bound(c.Request.Context(), c.Query("state")); plugin != "" {
+		c.Status(http.StatusOK)
+		_ = oauthBoundTemplate.Execute(c.Writer, map[string]any{
+			"State": c.Query("state"), "Code": c.Query("code"), "Error": c.Query("error"), "Plugin": plugin,
+			"Finishing": "Finishing…", "Connected": "Connected. You can close this window.",
+			"SignIn": "Sign in to WeKnora in this browser as the user who started the connection, then try again.",
+		})
+		return
+	}
 	res := h.oauth.Complete(c.Request.Context(), c.Query("state"), c.Query("code"), c.Query("error"))
 	data := map[string]any{
 		"State": res.State, "Origin": res.Origin, "OK": res.Err == nil, "Connection": "", "Error": "",
@@ -431,9 +521,6 @@ func (h *PluginFormsHandler) OAuthCallback(c *gin.Context) {
 	} else {
 		data["Connection"] = configschema.OAuthRefPrefix + res.ConnectionID
 	}
-	c.Header("Content-Type", "text/html; charset=utf-8")
-	c.Header("Cache-Control", "no-store")
-	c.Header("Referrer-Policy", "no-referrer")
 	status := http.StatusOK
 	if res.Err != nil {
 		status = http.StatusBadRequest
