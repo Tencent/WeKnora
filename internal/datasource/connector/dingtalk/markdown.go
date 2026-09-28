@@ -138,25 +138,7 @@ func renderBlock(
 		}
 		builder.WriteByte('\n')
 	case "orderedlist", "unorderedlist":
-		text := renderInlines(value.Children, depth+1, unknown)
-		if text == "" {
-			var nested strings.Builder
-			renderChildBlocks(&nested, value.Children, depth, unknown)
-			text = strings.Join(strings.Fields(strings.TrimSpace(nested.String())), " ")
-		}
-		if text == "" {
-			return
-		}
-		level, marker := int(value.UnorderedList.List.Level), "- "
-		if blockType == "orderedlist" {
-			level, marker = int(value.OrderedList.List.Level), "1. "
-		}
-		if level < 0 {
-			level = 0
-		} else if level > maxRenderDepth {
-			level = maxRenderDepth
-		}
-		fmt.Fprintf(builder, "%s%s%s\n", strings.Repeat("  ", level), marker, text)
+		renderListBlock(builder, value, blockType, depth, 0, unknown)
 	case "callout", "columns":
 		if len(value.Children) == 0 {
 			// The Blocks API only returns first-level blocks. A container with
@@ -175,6 +157,123 @@ func renderBlock(
 		// Preserve useful content when DingTalk introduces a container block
 		// before the connector learns its presentation semantics.
 		renderChildBlocks(builder, value.Children, depth, unknown)
+	}
+}
+
+// renderListBlock renders one list block.
+//
+// Documented shape: children are inline elements and one block is one item —
+// nesting comes from list.level (0-based) and the items of one list are linked
+// by a shared listId across sibling blocks, not by structural nesting. The
+// child walk below also accepts block children, which the contract does not
+// produce: the previous implementation rendered inline children *or* block
+// children (never both), so a payload outside the contract lost whichever kind
+// it did not pick, sometimes without even an unknown-type marker.
+//
+// minLevel is the smallest indent level this list may use; pass 0 for a
+// top-level list.
+func renderListBlock(
+	builder *strings.Builder,
+	value block,
+	blockType string,
+	depth int,
+	minLevel int,
+	unknown map[string]struct{},
+) {
+	if depth > maxRenderDepth {
+		unknown["max_depth"] = struct{}{}
+		return
+	}
+
+	level, marker := int(value.UnorderedList.List.Level), "- "
+	if blockType == "orderedlist" {
+		level, marker = int(value.OrderedList.List.Level), "1. "
+	}
+	if level < minLevel {
+		level = minLevel
+	}
+	if level < 0 {
+		level = 0
+	} else if level > maxRenderDepth {
+		level = maxRenderDepth
+	}
+	indent := strings.Repeat("  ", level)
+
+	// Inline children are the current item's own text and block children are
+	// further items, so walk the children in payload order: consecutive inline
+	// elements form one item, and every block child becomes its own item.
+	var pending strings.Builder
+	flush := func() {
+		if text := pending.String(); text != "" {
+			writeListItem(builder, indent, marker, text)
+		}
+		pending.Reset()
+	}
+	for _, child := range value.Children {
+		childType := blockChildType(child)
+		if childType == "" {
+			pending.WriteString(renderInlines([]json.RawMessage{child}, depth+1, unknown))
+			continue
+		}
+		flush()
+		if childType == "orderedlist" || childType == "unorderedlist" {
+			var nested block
+			if err := json.Unmarshal(child, &nested); err != nil {
+				unknown["invalid_json"] = struct{}{}
+				continue
+			}
+			// Outside the documented contract: the Blocks API returns lists
+			// flat (one block per item, siblings linked by listId, nesting
+			// carried by list.level), so a list child that is itself a list
+			// should not appear. If one does, keep it below its parent rather
+			// than at the same indent, and never drop it.
+			renderListBlock(builder, nested, childType, depth+1, level+1, unknown)
+			continue
+		}
+		var item strings.Builder
+		renderBlock(&item, child, depth+1, unknown)
+		if text := strings.TrimSpace(item.String()); text != "" {
+			writeListItem(builder, indent, marker, text)
+		}
+	}
+	flush()
+}
+
+// blockChildType reports the block type of a list child, or "" when the child
+// is an inline element (including an untyped text run) rather than a block.
+func blockChildType(raw json.RawMessage) string {
+	var probe struct {
+		BlockType   string `json:"blockType"`
+		ElementType string `json:"elementType"`
+	}
+	if err := json.Unmarshal(raw, &probe); err != nil {
+		return ""
+	}
+	if strings.TrimSpace(probe.ElementType) != "" {
+		return ""
+	}
+	return strings.ToLower(strings.TrimSpace(probe.BlockType))
+}
+
+// writeListItem writes one list item. Continuation lines of a multi-line item
+// are aligned under the first line so the value cannot escape its bullet.
+func writeListItem(builder *strings.Builder, indent string, marker string, text string) {
+	lines := strings.Split(text, "\n")
+	builder.WriteString(indent)
+	builder.WriteString(marker)
+	builder.WriteString(lines[0])
+	builder.WriteByte('\n')
+	if len(lines) == 1 {
+		return
+	}
+	continuation := strings.Repeat(" ", len(indent)+len(marker))
+	for _, line := range lines[1:] {
+		if line = strings.TrimRight(line, " \t"); line == "" {
+			continue
+		}
+		builder.WriteString(continuation)
+		builder.WriteString(line)
+		builder.WriteByte('\n')
 	}
 }
 
@@ -229,7 +328,14 @@ func renderInlines(
 			}
 		default:
 			unknown["inline_"+elementType] = struct{}{}
-			builder.WriteString(escapeText(value.Text))
+			// Inline types this renderer does not model can carry their text in
+			// children instead of in a text field (slot is documented that way),
+			// so falling back to children keeps the run from vanishing.
+			if text := escapeText(value.Text); text != "" {
+				builder.WriteString(text)
+			} else {
+				builder.WriteString(renderInlines(value.Children, depth+1, unknown))
+			}
 		}
 	}
 	return builder.String()
