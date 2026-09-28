@@ -318,8 +318,22 @@ const (
 	wikiMinPageBody = 400
 
 	// wikiBudgetReserve holds back room for the <errors>, <truncated_pages> and
-	// <omitted_pages> trailers appended after the pages are rendered.
+	// <omitted_pages> trailers appended after the pages are rendered. It covers
+	// their fixed text and the few slugs an ordinary batch names; the slug lines
+	// themselves are charged exactly once they outgrow this reserve, because a
+	// wide batch can name a page per line (wikiReadPageTrailerBound).
 	wikiBudgetReserve = 600
+
+	// The trailers appended after the pages. Each names one slug per line, so
+	// their size grows with the batch and wikiBudgetReserve is only a floor.
+	wikiTruncatedTrailer = "\n\n<truncated_pages reason=\"output budget exceeded\">\n%s\n</truncated_pages>" +
+		"\n<hint>Only the head and tail of these pages are shown; the middle was cut to " +
+		"fit the output budget. Read each slug on its own before rewriting it with " +
+		"wiki_write_page, which replaces the whole page.</hint>"
+	wikiOmittedTrailer = "\n\n<omitted_pages reason=\"output budget exceeded\">\n%s\n</omitted_pages>" +
+		"\n<hint>These pages were resolved but not rendered. " +
+		"Call wiki_read_page again with fewer slugs to read them.</hint>"
+	wikiErrorsTrailer = "\n\n<errors>\n%s\n</errors>"
 )
 
 // pendingWikiPage is a resolved page whose neighbour summaries, sources and
@@ -371,9 +385,12 @@ func (p pendingWikiPage) render(body string) string {
 // by fair-sharing the body budget, and only when even a minimal body no longer
 // fits are trailing pages dropped — by name, so the model knows to re-read them.
 //
+// reserve is the room held back for the trailers appended after the pages
+// (wikiBudgetReserve for a normal batch).
+//
 // It returns the joined output plus the slugs whose body was trimmed and the
 // slugs that were not rendered at all.
-func renderWikiPagesWithinBudget(pages []pendingWikiPage, budget int) (string, []string, []string) {
+func renderWikiPagesWithinBudget(pages []pendingWikiPage, budget, reserve int) (string, []string, []string) {
 	if len(pages) == 0 {
 		return "", nil, nil
 	}
@@ -393,7 +410,7 @@ func renderWikiPagesWithinBudget(pages []pendingWikiPage, budget int) (string, [
 		total += size
 	}
 
-	usable := budget - wikiBudgetReserve
+	usable := budget - reserve
 	if usable <= 0 || total <= usable {
 		return strings.Join(rendered, separator), nil, nil
 	}
@@ -431,6 +448,41 @@ func renderWikiPagesWithinBudget(pages []pendingWikiPage, budget int) (string, [
 		truncated = append(truncated, pages[i].page.Slug)
 	}
 	return strings.Join(outputs, separator), truncated, omitted
+}
+
+// wikiReadPageTrailers renders the trailers appended after the pages: the slugs
+// whose body was cut, the slugs that were not rendered at all, and the lookup
+// errors.
+func wikiReadPageTrailers(errs, truncatedSlugs, omittedSlugs []string) string {
+	var trailers strings.Builder
+	if len(truncatedSlugs) > 0 {
+		fmt.Fprintf(&trailers, wikiTruncatedTrailer, strings.Join(truncatedSlugs, "\n"))
+	}
+	if len(omittedSlugs) > 0 {
+		fmt.Fprintf(&trailers, wikiOmittedTrailer, strings.Join(omittedSlugs, "\n"))
+	}
+	if len(errs) > 0 {
+		fmt.Fprintf(&trailers, wikiErrorsTrailer, strings.Join(errs, "\n"))
+	}
+	return trailers.String()
+}
+
+// wikiReadPageTrailerBound returns the rune size of the largest trailer this
+// batch can produce, for charging the slugs' lines to the page budget up front.
+// A page is either trimmed or dropped but never both, so even though either
+// list can grow to the whole batch, at most one line per resolved page is ever
+// named. The bound is therefore the fixed trailer text plus one line per slug.
+func wikiReadPageTrailerBound(pages []pendingWikiPage, errs []string) int {
+	// Formatting each trailer with an empty slug list yields its fixed text.
+	bound := utf8.RuneCountInString(fmt.Sprintf(wikiTruncatedTrailer, "")) +
+		utf8.RuneCountInString(fmt.Sprintf(wikiOmittedTrailer, ""))
+	if len(errs) > 0 {
+		bound += utf8.RuneCountInString(fmt.Sprintf(wikiErrorsTrailer, strings.Join(errs, "\n")))
+	}
+	for _, p := range pages {
+		bound += utf8.RuneCountInString(p.page.Slug) + 1
+	}
+	return bound
 }
 
 type wikiReadPageTool struct {
@@ -700,27 +752,22 @@ func (t *wikiReadPageTool) Execute(ctx context.Context, args json.RawMessage) (*
 		return &types.ToolResult{Success: false, Error: strings.Join(errs, "; ")}, nil
 	}
 
-	finalOutput, truncatedSlugs, omittedSlugs := renderWikiPagesWithinBudget(pending, OutputBudget(ctx))
-	if len(truncatedSlugs) > 0 {
-		finalOutput += fmt.Sprintf(
-			"\n\n<truncated_pages reason=\"output budget exceeded\">\n%s\n</truncated_pages>"+
-				"\n<hint>Only the head and tail of these pages are shown; the middle was cut to "+
-				"fit the output budget. Read each slug on its own before rewriting it with "+
-				"wiki_write_page, which replaces the whole page.</hint>",
-			strings.Join(truncatedSlugs, "\n"),
-		)
+	budget := OutputBudget(ctx)
+	finalOutput, truncatedSlugs, omittedSlugs := renderWikiPagesWithinBudget(pending, budget, wikiBudgetReserve)
+	trailers := wikiReadPageTrailers(errs, truncatedSlugs, omittedSlugs)
+	if utf8.RuneCountInString(finalOutput)+utf8.RuneCountInString(trailers) > budget {
+		// wikiBudgetReserve is only a floor: <truncated_pages> and
+		// <omitted_pages> name one slug per line, so a wide batch outgrows it.
+		// Re-render charging the largest trailer this batch can produce, or the
+		// registry's fallback would cut a head/tail window through the
+		// <wiki_page> pairs. When even that bound exceeds the ceiling there is no
+		// page budget left to re-share, so the first render stands.
+		if reserve := wikiReadPageTrailerBound(pending, errs); reserve < budget {
+			finalOutput, truncatedSlugs, omittedSlugs = renderWikiPagesWithinBudget(pending, budget, reserve)
+			trailers = wikiReadPageTrailers(errs, truncatedSlugs, omittedSlugs)
+		}
 	}
-	if len(omittedSlugs) > 0 {
-		finalOutput += fmt.Sprintf(
-			"\n\n<omitted_pages reason=\"output budget exceeded\">\n%s\n</omitted_pages>"+
-				"\n<hint>These pages were resolved but not rendered. "+
-				"Call wiki_read_page again with fewer slugs to read them.</hint>",
-			strings.Join(omittedSlugs, "\n"),
-		)
-	}
-	if len(errs) > 0 {
-		finalOutput += fmt.Sprintf("\n\n<errors>\n%s\n</errors>", strings.Join(errs, "\n"))
-	}
+	finalOutput += trailers
 
 	// Surface ambiguous slugs so the caller (and logs) can see when a slug
 	// resolved to more than one KB.

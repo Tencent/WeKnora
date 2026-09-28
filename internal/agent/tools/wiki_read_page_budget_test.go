@@ -73,6 +73,67 @@ func TestWikiReadPageKeepsEveryRequestedSlugWithinBudget(t *testing.T) {
 	assert.Len(t, result.Data["truncated_slugs"], len(slugs))
 }
 
+// <truncated_pages> and <omitted_pages> name one slug per line, so a wide batch
+// outgrows the fixed wikiBudgetReserve the pages are rendered against. The tool
+// then overshot the ceiling it was handed and the registry's fallback cut a
+// head/tail window through the result, unbalancing <wiki_page> pairs — the very
+// outcome the budget code exists to prevent. The ceiling is per agent
+// (MaxToolOutputChars), so a batch that fits the default can still overflow a
+// smaller one: the trailer's lines must be budgeted, not assumed.
+func TestWikiReadPageKeepsManyTrimmedSlugsInsideTheCeiling(t *testing.T) {
+	slugs := []string{
+		"concept/open-source-accessibility",
+		"entity/open-source-accessibility-community-day",
+		"concept/assistive-technology",
+		"entity/github-multilingual-repositories-dataset",
+		"concept/multilingual-ai",
+		"entity/github-actions-self-hosted-runner",
+		"concept/open-source-license-compatibility",
+		"entity/document-layout-parsing-toolkit",
+		"concept/retrieval-augmented-generation",
+		"entity/vector-database-benchmark-suite",
+		"concept/knowledge-graph-construction",
+		"entity/assistive-technology-vendor-map",
+	}
+	const budget = 2000 // a small per-agent ceiling, far below the default 24000
+	pages := map[string]*types.WikiPage{}
+	for _, slug := range slugs {
+		pages[wikiPageKey("kb-1", slug)] = newBulkyWikiPage("kb-1", slug, 8000)
+	}
+	service := &fakeWikiPageService{pages: pages}
+	args, err := json.Marshal(map[string]any{"slugs": slugs})
+	require.NoError(t, err)
+
+	// The tool is told the same ceiling the registry falls back to, and must
+	// shape pages plus trailers to fit it.
+	tool := NewWikiReadPageTool(service, nil, NewWikiScopesFromKBIDs([]string{"kb-1"}), NewWikiRouteResolver())
+	result := readPageOutput(t, WithOutputBudget(context.Background(), budget), tool, slugs)
+	truncated, _ := result.Data["truncated_slugs"].([]string)
+	omitted, _ := result.Data["omitted_slugs"].([]string)
+	require.Len(t, append(append([]string{}, truncated...), omitted...), len(slugs),
+		"this batch must cut or drop every page")
+	assert.GreaterOrEqual(t, len(truncated)+len(omitted), 8, "the trailers must name many slugs")
+	assert.LessOrEqual(t, utf8.RuneCountInString(result.Output), budget,
+		"the trailer's slug lines are output too and must be charged to the budget")
+
+	// The same read through the registry must arrive with every rendered
+	// <wiki_page> still paired; its head/tail fallback is what breaks them.
+	registry := NewToolRegistry()
+	registry.SetMaxToolOutputSize(budget)
+	registry.RegisterTool(NewWikiReadPageTool(
+		service, nil, NewWikiScopesFromKBIDs([]string{"kb-1"}), NewWikiRouteResolver()))
+	regResult, err := registry.ExecuteTool(context.Background(), ToolWikiReadPage, args)
+	require.NoError(t, err)
+	require.True(t, regResult.Success, "wiki_read_page failed: %s", regResult.Error)
+
+	assertWellFormedPages(t, regResult.Output, len(slugs)-len(omitted))
+	assert.Contains(t, regResult.Output, "</truncated_pages>", "the trailer must survive whole")
+	assert.Contains(t, regResult.Output, "</omitted_pages>", "the trailer must survive whole")
+	for _, slug := range slugs {
+		assert.Contains(t, regResult.Output, slug, "every cut or dropped slug must still be named")
+	}
+}
+
 // Trimming has a floor. Below it, dropping a page by name beats rendering a
 // stub, but the model must be told which slugs it still has not seen.
 func TestWikiReadPageNamesOmittedPagesWhenBudgetIsTooSmall(t *testing.T) {
