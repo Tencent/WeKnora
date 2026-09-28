@@ -259,7 +259,7 @@ func TestReadBodyRejectsOversizedResponses(t *testing.T) {
 	}
 }
 
-// The whole uploaded-file chain, as verified against the live tenant:
+// The whole uploaded-file chain, in the order the provider is called:
 // node UUID → numeric 钉盘 ids → pre-signed URL → raw bytes.
 func TestClientDownloadsUploadedDocumentThroughStorageAPI(t *testing.T) {
 	const payload = "PK\x03\x04word-bytes"
@@ -281,12 +281,12 @@ func TestClientDownloadsUploadedDocumentThroughStorageAPI(t *testing.T) {
 				t.Errorf("dentry request query = %#v, headers = %#v", r.URL.Query(), r.Header)
 			}
 			_, _ = w.Write([]byte(
-				`{"dentryId":"123456789012","spaceId":"9876543210","dentryUuid":"node/id"}`,
+				`{"dentryId":"100000000001","spaceId":"200000000002","dentryUuid":"node/id"}`,
 			))
 		case strings.HasSuffix(r.URL.Path, "/downloadInfos/query"):
 			downloadQueries++
 			if r.Method != http.MethodPost ||
-				r.URL.Path != "/v1.0/storage/spaces/9876543210/dentries/123456789012/downloadInfos/query" {
+				r.URL.Path != "/v1.0/storage/spaces/200000000002/dentries/100000000001/downloadInfos/query" {
 				t.Errorf("download request = %s %s", r.Method, r.URL.Path)
 			}
 			if r.URL.Query().Get("unionId") != "union/user" {

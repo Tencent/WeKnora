@@ -1166,7 +1166,8 @@ func fetchedBinaryDocument(
 
 // binaryDocumentFileName derives the stored file name. DingTalk node names
 // normally already end in the extension, so it is replaced rather than
-// appended: "Manual.docx" must not become "Manual.docx.docx".
+// appended: "Employee-Handbook.docx" must not become
+// "Employee-Handbook.docx.docx".
 func binaryDocumentFileName(document node) string {
 	extension := strings.ToLower(strings.TrimSpace(document.Extension))
 	name := strings.TrimSpace(document.title())

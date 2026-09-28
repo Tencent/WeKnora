@@ -486,7 +486,7 @@ func (c *client) documentBlocks(ctx context.Context, documentID string) ([]json.
 // storage APIs accept only the numeric spaceId/dentryId pair, so every upload
 // is translated first. Response shape:
 //
-//	{"dentryId":"123456789012","spaceId":"9876543210","dentryUuid":"Qnp9...l"}
+//	{"dentryId":"<numeric>","spaceId":"<numeric>","dentryUuid":"<uuid>"}
 type dentryRef struct {
 	DentryID   string `json:"dentryId"`
 	SpaceID    string `json:"spaceId"`
