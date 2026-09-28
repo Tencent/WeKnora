@@ -441,12 +441,16 @@ type FAQImportProgress struct {
 	MergeEntryIndices  []int               `json:"merge_entry_indices,omitempty"`  // 需要合并的条目索引（内部使用，用于重试时跳过识别）
 	MergedCount        int                 `json:"merged_count,omitempty"`         // 合并更新的条目数
 	AddedCount         int                 `json:"added_count,omitempty"`          // 新增的条目数
-	MergeDetails       []FAQMergeDetail    `json:"merge_details,omitempty"`        // 合并详情
-	Message            string              `json:"message"`                        // Status message
-	Error              string              `json:"error"`                          // Error message if failed
-	CreatedAt          int64               `json:"created_at"`                     // Task creation timestamp
-	UpdatedAt          int64               `json:"updated_at"`                     // Last update timestamp
-	DryRun             bool                `json:"dry_run,omitempty"`              // 是否为 dry run 模式
+
+	// 请求的 seq_id 已被占用（含软删行）而重新分配了 id 的条目数
+	SeqIDRemappedCount int `json:"seq_id_remapped_count,omitempty"`
+
+	MergeDetails []FAQMergeDetail `json:"merge_details,omitempty"` // 合并详情
+	Message      string           `json:"message"`                 // Status message
+	Error        string           `json:"error"`                   // Error message if failed
+	CreatedAt    int64            `json:"created_at"`              // Task creation timestamp
+	UpdatedAt    int64            `json:"updated_at"`              // Last update timestamp
+	DryRun       bool             `json:"dry_run,omitempty"`       // 是否为 dry run 模式
 
 	// Result fields (populated when Status == "completed")
 	ImportMode     string    `json:"import_mode,omitempty"`     // 导入模式：append 或 replace
@@ -474,6 +478,9 @@ type FAQImportResult struct {
 	SkippedCount       int `json:"skipped_count"`        // 跳过的条目数（如重复等）
 	MergedCount        int `json:"merged_count"`         // 合并更新的条目数
 	AddedCount         int `json:"added_count"`          // 新增的条目数
+
+	// 请求的 seq_id 已被占用（含软删行）而重新分配了 id 的条目数
+	SeqIDRemappedCount int `json:"seq_id_remapped_count"`
 
 	// 导入模式和时间信息
 	ImportMode string    `json:"import_mode"` // 导入模式：append 或 replace
