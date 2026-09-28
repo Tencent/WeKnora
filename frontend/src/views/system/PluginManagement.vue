@@ -13,6 +13,11 @@
       </div>
     </header>
 
+    <div v-if="secretsPlaintext" class="plugin-admin__notice" role="status">
+      <t-icon name="error-circle" class="plugin-admin__notice-icon" />
+      <span>{{ t('pluginAdmin.secretsPlaintext') }}</span>
+    </div>
+
     <div v-if="loading" class="plugin-admin__state"><t-loading size="small" /></div>
     <div v-else-if="plugins.length === 0" class="plugin-admin__state plugin-admin__state--empty">
       <t-empty :description="t('pluginAdmin.empty')" />
@@ -189,6 +194,8 @@ const runtimeLabel = (rt: string) => (te(`pluginAdmin.runtime.${rt}`) ? t(`plugi
 
 const plugins = ref<InstalledPlugin[]>([])
 const loading = ref(false)
+// Without SYSTEM_AES_KEY the server stores plugins' secrets in plaintext.
+const secretsPlaintext = ref(false)
 const pending = ref(new Set<string>())
 const installOpen = ref(false)
 const detailOpen = ref(false)
@@ -218,6 +225,7 @@ async function load() {
   try {
     const res = await listInstalledPlugins()
     plugins.value = res.data || []
+    secretsPlaintext.value = res.secretsSealed === false
   } catch (e: any) {
     MessagePlugin.error(e?.message || t('pluginAdmin.loadFailed'))
   } finally {
@@ -418,6 +426,26 @@ onMounted(load)
   display: inline-flex;
   align-items: center;
   gap: 8px;
+}
+
+.plugin-admin__notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 16px;
+  padding: 10px 12px;
+  border: 1px solid var(--td-warning-color-3);
+  border-radius: var(--app-radius-md);
+  font-size: var(--app-text-sm);
+  line-height: 1.5;
+  color: var(--td-text-color-primary);
+  background: var(--td-bg-color-container);
+}
+
+.plugin-admin__notice-icon {
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: var(--td-warning-color);
 }
 
 // A plugin granted egress that some instance is not held to, or whose code

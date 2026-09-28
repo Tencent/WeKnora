@@ -171,7 +171,8 @@ function packageForm(file: File, digest?: string, remoteUrl?: string) {
 }
 
 export function listInstalledPlugins() {
-  return get<{ data: InstalledPlugin[] }>(BASE)
+  /** secretsSealed is false without SYSTEM_AES_KEY: secrets are stored in plaintext. */
+  return get<{ data: InstalledPlugin[]; secretsSealed?: boolean }>(BASE)
 }
 
 export function getInstalledPlugin(id: string) {

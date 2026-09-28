@@ -43,6 +43,7 @@ import (
 	plugintrust "github.com/Tencent/WeKnora/internal/plugin/trust"
 	"github.com/Tencent/WeKnora/internal/plugin/webhook"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
+	"github.com/Tencent/WeKnora/internal/utils"
 	"github.com/Tencent/WeKnora/pluginsdk/client"
 )
 
@@ -430,6 +431,11 @@ func startPluginReconciler(
 	rdb *redis.Client, pool *hostpool.Pool, cfg *config.Config,
 ) {
 	pluginevents.SetDefault(events)
+	if utils.GetAESKey() == nil {
+		logger.Warnf(context.Background(), "[plugin] SYSTEM_AES_KEY is not set: plugins' secrets (configuration, "+
+			"OAuth tokens, remote plugins' signing secrets) are stored in plaintext; set a 32-byte key to encrypt "+
+			"those saved from now on")
+	}
 	if kinds := hostManager.Kinds(); len(kinds) > 0 {
 		logger.Infof(context.Background(), "[plugin] this node runs %s host plugins", strings.Join(kinds, ", "))
 	}

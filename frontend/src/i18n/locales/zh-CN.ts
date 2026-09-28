@@ -5264,6 +5264,7 @@ export default {
     noCompatibleKbForAgent: '当前智能体的工具与作用域内知识库的能力不匹配，暂无可引用的知识库。'
   },
   pluginAdmin: {
+    secretsPlaintext: '未设置 SYSTEM_AES_KEY：插件配置里的密钥、OAuth 令牌和远程插件的签名密钥以明文存储在数据库中。设置 32 字节的 SYSTEM_AES_KEY 后，之后保存的会加密存储。',
     searchPlaceholder: '搜索插件名称或 ID',
     noMatch: '没有匹配的插件',
     filters: {

@@ -19,6 +19,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/plugin/pkg"
 	"github.com/Tencent/WeKnora/internal/plugin/reconcile"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/utils"
 )
 
 // PluginAdminHandler lets system administrators install and manage plugins
@@ -263,7 +264,9 @@ func (h *PluginAdminHandler) ListInstalledPlugins(c *gin.Context) {
 	for i := range views {
 		out[i] = h.withEgress(c.Request.Context(), &views[i])
 	}
-	h.ok(c, out)
+	// secretsSealed is false without SYSTEM_AES_KEY: plugins' secrets are
+	// then stored in plaintext, which the console says.
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": out, "secretsSealed": utils.GetAESKey() != nil})
 }
 
 // InstalledPluginDTO is an installed plugin as the admin console lists it.
