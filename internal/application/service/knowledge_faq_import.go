@@ -352,6 +352,7 @@ func (s *knowledgeService) saveFAQImportResultToDatabase(ctx context.Context,
 		SkippedCount:       skippedCount,
 		MergedCount:        progress.MergedCount,
 		AddedCount:         progress.AddedCount,
+		SeqIDRemappedCount: progress.SeqIDRemappedCount,
 		ImportMode:         payload.Mode,
 		ImportedAt:         time.Now(),
 		TaskID:             payload.TaskID,
@@ -374,8 +375,12 @@ func (s *knowledgeService) saveFAQImportResultToDatabase(ctx context.Context,
 		return fmt.Errorf("failed to update knowledge with import result: %w", err)
 	}
 
-	logger.Infof(ctx, "Saved FAQ import result to database: knowledge_id=%s, task_id=%s, total=%d, success=%d, added=%d, merged=%d, failed=%d, partial_failed=%d, skipped=%d",
-		payload.KnowledgeID, payload.TaskID, originalTotalEntries, progress.SuccessCount, progress.AddedCount, progress.MergedCount, progress.FailedCount, progress.PartialFailedCount, skippedCount)
+	logger.Infof(ctx,
+		"Saved FAQ import result to database: knowledge_id=%s, task_id=%s, total=%d, success=%d, "+
+			"added=%d, merged=%d, failed=%d, partial_failed=%d, skipped=%d, seq_id_remapped=%d",
+		payload.KnowledgeID, payload.TaskID, originalTotalEntries, progress.SuccessCount,
+		progress.AddedCount, progress.MergedCount, progress.FailedCount,
+		progress.PartialFailedCount, skippedCount, progress.SeqIDRemappedCount)
 
 	return nil
 }
@@ -1510,6 +1515,7 @@ func (s *knowledgeService) executeFAQImport(ctx context.Context, taskID string, 
 		buildStartTime := time.Now()
 		chunks := make([]*types.Chunk, 0, len(batch))
 		chunkIds := make([]string, 0, len(batch))
+		requestedSeqIDs := make([]int64, 0, len(batch))
 		for idx, entry := range batch {
 			meta, err := sanitizeFAQEntryPayload(&entry)
 			if err != nil {
@@ -1551,6 +1557,7 @@ func (s *knowledgeService) executeFAQImport(ctx context.Context, taskID string, 
 			if entry.ID != nil && *entry.ID > 0 {
 				chunk.SeqID = *entry.ID
 			}
+			requestedSeqIDs = append(requestedSeqIDs, chunk.SeqID)
 			if err := chunk.SetFAQMetadata(meta); err != nil {
 				return fmt.Errorf("failed to set FAQ metadata: %w", err)
 			}
@@ -1575,6 +1582,33 @@ func (s *knowledgeService) executeFAQImport(ctx context.Context, taskID string, 
 			len(chunks),
 			createDuration,
 		)
+
+		// 请求的 seq_id 已被占用时（含被软删的行占用），CreateChunks 会给该条目
+		// 分配一个新的 seq_id：chunks.seq_id 是全局唯一索引，软删不释放索引值。
+		// 这里按批统计并回进度，并把前几条 old → new 打到 Warn，调用方不会以为
+		// id 还是导出里的那个。
+		remappedThisBatch := 0
+		remapExamples := make([]string, 0, 2)
+		for idx, chunk := range chunks {
+			if requestedSeqIDs[idx] > 0 && chunk.SeqID != requestedSeqIDs[idx] {
+				remappedThisBatch++
+				if len(remapExamples) < 2 {
+					remapExamples = append(remapExamples, fmt.Sprintf("%d->%d (entry %d)",
+						requestedSeqIDs[idx], chunk.SeqID, i+idx))
+				}
+			}
+		}
+		if remappedThisBatch > 0 {
+			progress.SeqIDRemappedCount += remappedThisBatch
+			logger.Warnf(
+				ctx,
+				"FAQ import task %s: %d entr(ies) requested an already-taken seq_id "+
+					"(soft-deleted rows included), reassigned new ids: %s",
+				taskID,
+				remappedThisBatch,
+				strings.Join(remapExamples, ", "),
+			)
+		}
 
 		// 索引chunks
 		indexStartTime := time.Now()
@@ -2762,6 +2796,7 @@ func faqTagInfo(tagsByID map[string]*types.KnowledgeTag, tagID string) (int64, s
 //     让用户在 append 模式下看到合并了多少条历史 FAQ 而不是只看到总成功数。
 //
 // 内部 master 原始实现；HEAD 版本之前没有，所有完成消息只有 "正在处理第 N/M 条"。
+// 当有 seq_id 被重分配时额外追加一段，让"导出里的 id ≠ 导入后的 id"在 UI 上可见。
 func (s *knowledgeService) buildFAQImportResultMessage(prefix string, progress *types.FAQImportProgress) string {
 	parts := []string{prefix}
 	parts = append(parts, fmt.Sprintf("上传 %d 条", progress.Total))
@@ -2771,6 +2806,10 @@ func (s *knowledgeService) buildFAQImportResultMessage(prefix string, progress *
 		parts = append(parts, fmt.Sprintf("合并更新 %d 条", progress.MergedCount))
 	} else {
 		parts = append(parts, fmt.Sprintf("成功 %d 条", progress.SuccessCount))
+	}
+
+	if progress.SeqIDRemappedCount > 0 {
+		parts = append(parts, fmt.Sprintf("重分配 ID %d 条", progress.SeqIDRemappedCount))
 	}
 
 	if progress.FailedCount > 0 {

@@ -28,10 +28,10 @@ func (r *faqExportKBLookup) GetKnowledgeBaseByID(_ context.Context, id string) (
 	return r.kb, nil
 }
 
-// TestExportFAQEntriesJSONRoundTripPreservesSeqID 覆盖"导出 → 编辑 → 重新导入"闭环：
-// 导出的 id 必须来自 chunk.seq_id，否则恒为 0，而导入端只在 id > 0 时才恢复 seq_id，
-// 往返就会给每条 FAQ 换一个新 id。
-func TestExportFAQEntriesJSONRoundTripPreservesSeqID(t *testing.T) {
+// TestExportFAQEntriesJSONCarriesChunkSeqID 覆盖导出侧：导出的 id 必须来自
+// chunk.seq_id，而不是投影缺失导致的零值。真正的"导出 → 导入"闭环在
+// TestFAQExportImportRoundTripReassignsTakenSeqIDs（同目录）里跑导入。
+func TestExportFAQEntriesJSONCarriesChunkSeqID(t *testing.T) {
 	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "faq-export.db")), &gorm.Config{})
 	require.NoError(t, err)
 	sqlDB, err := db.DB()
