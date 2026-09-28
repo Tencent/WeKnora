@@ -340,8 +340,8 @@ const handleCancel = () => {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: color-mix(in srgb, var(--td-brand-color) 10%, transparent);
-  color: var(--td-brand-color);
+  background: var(--td-bg-color-secondarycontainer);
+  color: var(--td-text-color-secondary);
   font-size: var(--app-text-lg);
   transition: background var(--app-motion-base) ease;
 }
@@ -486,26 +486,17 @@ const handleCancel = () => {
   }
 }
 
+/* Section titles rely on weight and spacing alone: a coloured bar before
+   every one of them was one more patch of brand green in each drawer. */
 .setting-drawer__body :deep(.setting-drawer__section-title) {
-  font-size: var(--app-text-md);
+  font-size: var(--app-text-base);
   font-weight: 600;
   color: var(--td-text-color-primary);
-  margin: 0 0 4px;
+  margin: 0 0 6px;
   user-select: none;
   display: flex;
   align-items: center;
   gap: 8px;
-
-  /* A subtle leading bar — replaces the previous all-caps + letter-spacing
-     trick (which mangles Chinese). Gives the section title a consistent
-     visual anchor without yelling at the user. */
-  &::before {
-    content: '';
-    width: 3px;
-    height: 14px;
-    background: var(--td-brand-color);
-    border-radius: 2px;
-  }
 }
 
 /* ---------- Footer ---------- */

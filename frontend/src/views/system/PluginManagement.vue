@@ -118,11 +118,18 @@
                       {{ t(`pluginAdmin.upgrade.${p.upgrade.state}`, { version: p.upgrade.version }) }}
                     </span>
                   </t-tooltip>
-                  <t-tooltip v-if="egressUnenforced(p.manifest, p.egress)" :content="t('pluginAdmin.egress.unenforcedHint')">
-                    <span class="egress-flag">{{ t('pluginAdmin.egress.unenforced') }}</span>
-                  </t-tooltip>
-                  <t-tooltip v-if="p.files === 'shared'" :content="t('pluginAdmin.files.sharedHint')">
-                    <span class="egress-flag">{{ t('pluginAdmin.files.shared') }}</span>
+                  <t-tooltip v-if="egressUnenforced(p.manifest, p.egress) || p.files === 'shared'">
+                    <template #content>
+                      <div v-if="egressUnenforced(p.manifest, p.egress)" class="risk-flag__line">
+                        <strong>{{ t('pluginAdmin.egress.unenforced') }}</strong>{{ t('pluginAdmin.egress.unenforcedHint') }}
+                      </div>
+                      <div v-if="p.files === 'shared'" class="risk-flag__line">
+                        <strong>{{ t('pluginAdmin.files.shared') }}</strong>{{ t('pluginAdmin.files.sharedHint') }}
+                      </div>
+                    </template>
+                    <span class="risk-flag">
+                      <t-icon name="error-circle" />{{ t('pluginAdmin.risk') }}
+                    </span>
                   </t-tooltip>
                 </div>
               </td>
@@ -450,12 +457,28 @@ onMounted(load)
 
 // A plugin granted egress that some instance is not held to, or whose code
 // can reach WeKnora's files.
-.egress-flag {
-  padding: 1px 6px;
-  border-radius: var(--app-radius-xs);
+// What the plugin is not held to, in one quiet mark; the tooltip says what.
+.risk-flag {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
   font-size: var(--app-text-sm);
   color: var(--td-warning-color);
-  background: var(--td-warning-color-1);
+  cursor: default;
+}
+
+.risk-flag__line {
+  max-width: 320px;
+  line-height: 1.5;
+
+  strong {
+    margin-right: 6px;
+    font-weight: 600;
+  }
+
+  & + & {
+    margin-top: 6px;
+  }
 }
 .upgrade-flag {
   padding: 1px 6px;

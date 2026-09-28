@@ -2302,15 +2302,6 @@ const handleChunkPageChange = (pageInfo: { current: number }) => {
   display: flex;
   align-items: center;
   gap: 8px;
-
-  &::before {
-    content: '';
-    width: 3px;
-    height: 14px;
-    background: var(--td-brand-color);
-    border-radius: 2px;
-    flex-shrink: 0;
-  }
 }
 
 .doc-detail-rows {

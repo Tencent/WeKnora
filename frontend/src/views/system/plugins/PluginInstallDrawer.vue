@@ -492,7 +492,7 @@ async function onConfirm() {
     }
 
     &.is-done {
-      color: var(--td-brand-color);
+      color: var(--td-text-color-secondary);
     }
   }
 
@@ -508,9 +508,9 @@ async function onConfirm() {
     line-height: 1;
 
     .is-current & {
-      border-color: var(--td-brand-color);
-      background: var(--td-brand-color);
-      color: var(--td-text-color-anti);
+      border-color: var(--td-text-color-primary);
+      background: var(--td-text-color-primary);
+      color: var(--td-bg-color-container);
     }
   }
 }
@@ -569,8 +569,8 @@ async function onConfirm() {
 
   &:hover:not(:disabled),
   &.is-over {
-    border-color: var(--td-brand-color);
-    background: var(--td-brand-color-light);
+    border-color: var(--td-component-border);
+    background: var(--td-bg-color-container-hover);
   }
 
   &:disabled {
@@ -584,8 +584,8 @@ async function onConfirm() {
     place-items: center;
     margin-bottom: 6px;
     border-radius: 50%;
-    background: var(--td-brand-color-1);
-    color: var(--td-brand-color);
+    background: var(--td-bg-color-secondarycontainer);
+    color: var(--td-text-color-secondary);
     font-size: var(--app-text-2xl);
   }
 
@@ -819,7 +819,8 @@ async function onConfirm() {
     }
 
     &.is-picked {
-      background: var(--td-brand-color-light);
+      background: var(--app-selection-bg);
+      box-shadow: inset 2px 0 0 var(--td-text-color-primary);
     }
   }
 

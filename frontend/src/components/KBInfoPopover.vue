@@ -487,15 +487,6 @@ const statRows = computed<Array<{ key: string; label: string; value: number | st
   gap: 8px;
 }
 
-.kb-info-card-body .setting-drawer__section-title::before {
-  content: '';
-  width: 3px;
-  height: 14px;
-  background: var(--td-brand-color);
-  border-radius: 2px;
-  flex-shrink: 0;
-}
-
 .kb-info-card-row {
   display: flex;
   align-items: flex-start;

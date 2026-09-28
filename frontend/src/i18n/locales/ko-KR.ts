@@ -5262,6 +5262,7 @@ export default {
     noCompatibleKbForAgent: '현재 에이전트의 도구와 범위 내 지식베이스의 기능이 일치하지 않아 참조할 수 있는 지식베이스가 없습니다.'
   },
   pluginAdmin: {
+    risk: '격리 부족',
     secretsPlaintext: 'SYSTEM_AES_KEY가 설정되지 않았습니다. 플러그인 설정의 비밀 값, OAuth 토큰, 원격 플러그인 서명 비밀 키가 데이터베이스에 평문으로 저장됩니다. 32바이트 SYSTEM_AES_KEY를 설정하면 이후 저장되는 값은 암호화됩니다.',
     searchPlaceholder: '이름 또는 ID로 검색',
     noMatch: '일치하는 플러그인이 없습니다',

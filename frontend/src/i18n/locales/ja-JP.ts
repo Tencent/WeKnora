@@ -2734,6 +2734,7 @@ export default {
     }
   },
   pluginAdmin: {
+    risk: '分離が不十分',
     secretsPlaintext: 'SYSTEM_AES_KEY が設定されていません。プラグイン設定内のシークレット、OAuth トークン、リモートプラグインの署名シークレットはデータベースに平文で保存されます。32 バイトの SYSTEM_AES_KEY を設定すると、以降に保存されるものは暗号化されます。',
     searchPlaceholder: '名前または ID で検索',
     noMatch: '一致するプラグインはありません',

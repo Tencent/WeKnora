@@ -2734,6 +2734,7 @@ export default {
     }
   },
   pluginAdmin: {
+    risk: 'Not fully isolated',
     secretsPlaintext: 'SYSTEM_AES_KEY is not set: secrets in plugin configuration, OAuth tokens and remote plugins\' signing secrets are stored in plaintext in the database. Set a 32-byte SYSTEM_AES_KEY to encrypt those saved from then on.',
     searchPlaceholder: 'Search by name or ID',
     noMatch: 'No matching plugins',

@@ -52,7 +52,11 @@
             <dd><code class="facts__code">{{ manifest.engines.weknora }}</code></dd>
           </template>
         </dl>
-        <PluginCapabilityList v-if="manifest" :manifest="manifest" show="detail" class="caps" />
+      </section>
+
+      <section v-if="manifest" class="setting-drawer__section">
+        <h4 class="setting-drawer__section-title">{{ t('pluginAdmin.contributions') }}</h4>
+        <PluginCapabilityList :manifest="manifest" show="detail" />
       </section>
 
       <section class="setting-drawer__section">
@@ -60,40 +64,51 @@
         <p v-if="instanceError" class="form-desc">{{ instanceError }}</p>
         <p v-else-if="instances.length === 0" class="form-desc">{{ t('pluginAdmin.detail.noNodes') }}</p>
         <template v-else>
-          <div v-if="egressWarning" class="egress-warning">
-            <t-tag size="small" variant="light" theme="warning">{{ t('pluginAdmin.egress.unenforced') }}</t-tag>
-            <span>{{ t('pluginAdmin.egress.unenforcedHint') }}</span>
-          </div>
-          <div v-if="filesWarning" class="egress-warning">
-            <t-tag size="small" variant="light" theme="warning">{{ t('pluginAdmin.files.shared') }}</t-tag>
-            <span>{{ t('pluginAdmin.files.sharedHint') }}</span>
+          <div v-if="egressWarning || filesWarning" class="notice">
+            <t-icon name="error-circle" class="notice__icon" />
+            <div class="notice__body">
+              <p v-if="egressWarning">
+                <strong>{{ t('pluginAdmin.egress.unenforced') }}</strong>
+                <span>{{ t('pluginAdmin.egress.unenforcedHint') }}</span>
+              </p>
+              <p v-if="filesWarning">
+                <strong>{{ t('pluginAdmin.files.shared') }}</strong>
+                <span>{{ t('pluginAdmin.files.sharedHint') }}</span>
+              </p>
+            </div>
           </div>
           <ul class="line-list">
             <li v-for="n in instances" :key="n.node">
-              <t-tag size="small" variant="light" :theme="n.state === 'ready' ? 'success' : 'danger'">
+              <span class="status" :class="`status--${n.state === 'ready' ? 'ok' : 'bad'}`">
                 {{ t(`pluginAdmin.nodeState.${n.state}`) }}
-              </t-tag>
-              <code>{{ n.node }}</code>
+              </span>
+              <code class="line-list__node">{{ n.node }}</code>
               <span class="line-list__muted">v{{ n.version }}</span>
               <t-tooltip v-if="n.idle" :content="t('pluginAdmin.memory.idleHint', { count: 1 })">
-                <t-tag size="small" variant="outline">{{ t('pluginAdmin.memory.idle') }}</t-tag>
+                <span class="line-list__muted">{{ t('pluginAdmin.memory.idle') }}</span>
               </t-tooltip>
               <span v-else-if="n.memoryBytes" class="line-list__muted">
                 {{ t('pluginAdmin.memory.node', { size: formatBytes(n.memoryBytes) }) }}
               </span>
-              <t-tooltip v-if="n.egress" :content="t(`pluginAdmin.egress.hint.${n.egress}`)">
-                <t-tag size="small" variant="outline" :theme="egressTheme(n.egress)">
-                  {{ t(`pluginAdmin.egress.mode.${n.egress}`) }}
-                </t-tag>
-              </t-tooltip>
-              <t-tooltip v-if="n.files" :content="t(`pluginAdmin.files.hint.${n.files}`)">
-                <t-tag size="small" variant="outline" :theme="filesTheme(n.files)">
-                  {{ t(`pluginAdmin.files.mode.${n.files}`) }}
-                </t-tag>
-              </t-tooltip>
-              <t-tag v-if="n.upgradeVersion" size="small" variant="light" :theme="upgradeTheme(n.upgradeState)">
+              <span class="line-list__modes">
+                <t-tooltip v-if="n.egress" :content="t(`pluginAdmin.egress.hint.${n.egress}`)">
+                  <span class="mode" :class="{ 'mode--weak': egressTheme(n.egress) === 'warning' }">
+                    {{ t(`pluginAdmin.egress.mode.${n.egress}`) }}
+                  </span>
+                </t-tooltip>
+                <t-tooltip v-if="n.files" :content="t(`pluginAdmin.files.hint.${n.files}`)">
+                  <span class="mode" :class="{ 'mode--weak': filesTheme(n.files) === 'warning' }">
+                    {{ t(`pluginAdmin.files.mode.${n.files}`) }}
+                  </span>
+                </t-tooltip>
+              </span>
+              <span
+                v-if="n.upgradeVersion"
+                class="status"
+                :class="`status--${n.upgradeState === 'failed' ? 'warn' : 'busy'}`"
+              >
                 {{ t(`pluginAdmin.upgrade.${n.upgradeState === 'failed' ? 'failedNode' : 'pendingNode'}`, { version: n.upgradeVersion }) }}
-              </t-tag>
+              </span>
               <span v-if="n.error" class="line-list__error">{{ n.error }}</span>
               <span v-if="n.upgradeError" class="line-list__error" :class="{ 'line-list__error--info': n.upgradeState !== 'failed' }">
                 {{ n.upgradeError }}
@@ -110,10 +125,20 @@
       <section v-else class="setting-drawer__section">
         <h4 class="setting-drawer__section-title">{{ t('pluginAdmin.audience.title') }}</h4>
         <p class="form-desc">{{ t('pluginAdmin.audience.hint') }}</p>
-        <t-radio-group v-model="audienceMode" variant="default-filled" size="small">
-          <t-radio-button value="all">{{ t('pluginAdmin.audience.all') }}</t-radio-button>
-          <t-radio-button value="some">{{ t('pluginAdmin.audience.some') }}</t-radio-button>
-        </t-radio-group>
+        <div class="option-chips" role="radiogroup">
+          <button
+            v-for="mode in (['all', 'some'] as const)"
+            :key="mode"
+            type="button"
+            role="radio"
+            class="option-chip"
+            :class="{ 'option-chip--active': audienceMode === mode }"
+            :aria-checked="audienceMode === mode"
+            @click="audienceMode = mode"
+          >
+            {{ t(`pluginAdmin.audience.${mode}`) }}
+          </button>
+        </div>
         <t-select
           v-if="audienceMode === 'some'"
           v-model="audienceTenants"
@@ -169,18 +194,18 @@
           <li v-for="v in versions" :key="v.version">
             <span class="version">v{{ v.version }}</span>
             <code class="line-list__muted">{{ shortDigest(v.digest) }}</code>
-            <t-tag
-              size="small"
-              variant="light"
-              :theme="trustTheme(v.trust)"
+            <span
+              class="pill"
+              :class="{ 'pill--trusted': v.trust === 'official' || v.trust === 'verified' }"
               :title="v.signer_key_id ? t('pluginAdmin.trust.signedBy', { key: v.signer_key_id }) : undefined"
             >
+              <t-icon v-if="v.trust === 'official' || v.trust === 'verified'" name="verified" />
               {{ t(`pluginAdmin.trust.${v.trust || 'community'}`) }}
-            </t-tag>
+            </span>
             <span class="line-list__muted">{{ formatBytes(v.size) }} · {{ formatDate(v.created_at) }}</span>
-            <t-tag v-if="v.version === plugin.active_version" size="small" variant="light" theme="primary">
+            <span v-if="v.version === plugin.active_version" class="status status--ok">
               {{ t('pluginAdmin.detail.active') }}
-            </t-tag>
+            </span>
             <t-popconfirm
               v-else
               :content="t('pluginAdmin.detail.activateConfirm', { version: v.version })"
@@ -477,9 +502,7 @@ async function uninstall() {
 </script>
 
 <style lang="less" scoped>
-.caps {
-  margin-top: 12px;
-}
+@import (reference) '@/components/css/option-chips.less';
 
 .platform-switch {
   display: inline-flex;
@@ -492,9 +515,10 @@ async function uninstall() {
 .facts {
   display: grid;
   grid-template-columns: max-content 1fr;
-  gap: 6px 16px;
+  gap: 8px 20px;
   margin: 0;
-  font-size: var(--app-text-sm);
+  font-size: var(--app-text-md);
+  line-height: 1.5;
 
   dt {
     color: var(--td-text-color-secondary);
@@ -504,6 +528,15 @@ async function uninstall() {
     margin: 0;
     color: var(--td-text-color-primary);
     word-break: break-all;
+  }
+
+  a {
+    color: var(--td-text-color-link);
+    text-decoration: none;
+
+    &:hover {
+      text-decoration: underline;
+    }
   }
 
   &__code {
@@ -526,7 +559,7 @@ async function uninstall() {
     align-items: center;
     flex-wrap: wrap;
     gap: 8px;
-    font-size: var(--app-text-sm);
+    font-size: var(--app-text-md);
     color: var(--td-text-color-primary);
   }
 
@@ -539,9 +572,20 @@ async function uninstall() {
   }
 
   &__muted {
-    font-size: var(--app-text-xs);
+    font-size: var(--app-text-sm);
     color: var(--td-text-color-placeholder);
     word-break: break-all;
+  }
+
+  &__node {
+    font-size: var(--app-text-sm);
+    color: var(--td-text-color-primary);
+  }
+
+  &__modes {
+    display: inline-flex;
+    gap: 8px;
+    margin-left: auto;
   }
 
   &__error {
@@ -555,21 +599,113 @@ async function uninstall() {
   }
 }
 
-.egress-warning {
+// One neutral notice for whatever this plugin is not held to.
+.notice {
   display: flex;
   align-items: flex-start;
-  gap: 8px;
+  gap: 10px;
   margin-bottom: 12px;
-  padding: 8px 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--td-component-stroke);
   border-radius: var(--app-radius-md);
-  font-size: var(--app-text-sm);
-  line-height: 1.5;
-  color: var(--td-text-color-secondary);
-  background: var(--td-warning-color-1);
+  background: var(--td-bg-color-secondarycontainer);
 
-  .t-tag {
+  &__icon {
     flex-shrink: 0;
+    margin-top: 1px;
+    font-size: var(--app-text-lg);
+    color: var(--td-warning-color);
   }
+
+  &__body {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 0;
+
+    p {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      margin: 0;
+      font-size: var(--app-text-sm);
+      line-height: 1.5;
+      color: var(--td-text-color-secondary);
+    }
+
+    strong {
+      font-weight: 600;
+      color: var(--td-text-color-primary);
+    }
+  }
+}
+
+// A state: a coloured dot and plain text, not a filled tag.
+.status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--app-text-md);
+  color: var(--td-text-color-secondary);
+
+  &::before {
+    content: '';
+    width: 6px;
+    height: 6px;
+    border-radius: var(--app-radius-pill);
+    background: var(--td-text-color-placeholder);
+  }
+
+  &--ok::before {
+    background: var(--td-success-color);
+  }
+
+  &--bad::before {
+    background: var(--td-error-color);
+  }
+
+  &--warn::before {
+    background: var(--td-warning-color);
+  }
+
+  &--busy::before {
+    background: var(--td-brand-color);
+  }
+}
+
+.mode {
+  font-size: var(--app-text-sm);
+  color: var(--td-text-color-placeholder);
+  cursor: default;
+
+  &--weak {
+    color: var(--td-warning-color);
+  }
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 0 6px;
+  border: 1px solid var(--td-component-stroke);
+  border-radius: var(--app-radius-pill);
+  font-size: var(--app-text-xs);
+  line-height: 18px;
+  color: var(--td-text-color-secondary);
+
+  &--trusted {
+    color: var(--td-text-color-primary);
+  }
+}
+
+.option-chips {
+  .option-chips();
+  align-self: flex-start;
+}
+
+.option-chip {
+  .option-chip();
 }
 
 .version {
