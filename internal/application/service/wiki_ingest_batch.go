@@ -18,26 +18,16 @@ import (
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
 	"golang.org/x/sync/errgroup"
 )
 
-// followUpTriggerCount decides how many follow-up triggers a completed batch
-// should re-arm for its KB (#3461). Since Phase 3 the consumption side
-// (disjoint claiming, per-slug locks, the inflight cap) fully supports
-// concurrent batches, but nothing created more than one trigger for a KB with
-// a standing backlog — so once uploads stopped, the backlog drained at
-// 1 batch × batch-size per cycle regardless of ingest_max_inflight, leaving
-// the wiki pool and the model server idle.
-//
-// The count is the smaller of (a) how many batches the remaining rows still
-// need and (b) how many slots could be free by the time the triggers fire:
-// the caller's own slot releases right after it returns, hence the +1.
-// activeSlots < 0 means "unknown" (no Redis / Redis error) and maxInflight
-// <= 1 cannot host more than one batch anyway; both collapse to 1, matching
-// the pre-fan-out behaviour. Over-issued triggers are harmless: the ones that
-// cannot get a slot are coalesced by scheduleCappedRetry's fixed TaskID.
+// followUpTriggerCount estimates useful new work from claimable documents and
+// running slots. reserveFollowUpTasks additionally bounds all outstanding
+// follow-ups (scheduled, queued, running and retrying) across batch completions.
+// The +1 allows the completing batch to replace itself before releasing its slot.
 func followUpTriggerCount(pending, batchSize, activeSlots, maxInflight int) int {
 	if pending <= 0 || batchSize <= 0 {
 		return 0
@@ -53,31 +43,9 @@ func followUpTriggerCount(pending, batchSize, activeSlots, maxInflight int) int 
 	return min(batchesNeeded, freeSlots)
 }
 
-// scheduleFollowUp enqueues asynq trigger tasks if there are still pending
-// ops in task_pending_ops for this KB. Returns true when at least one
-// follow-up was scheduled.
-//
-// Post-Phase-3 this backstops the case where a batch drained its claimed
-// window but more rows remain and no other trigger is pending (e.g. a steady
-// trickle of uploads). Standard mode already fans a KB's backlog across
-// concurrent claiming batches, so the short delay is normally just a light
-// debounce rather than a lock-release wait.
-//
-// How many triggers are re-armed follows followUpTriggerCount above: enough
-// to drain the backlog, capped by the free inflight slots, so the concurrent
-// batch count converges on ingest_max_inflight instead of idling at 1.
-//
-// Fan-out is deliberately skipped when rateLimited: widening concurrency
-// during a 429 storm only amplifies the backoff. Lite mode (no Redis) also
-// never fans out — liteLocks serializes batches per KB, so extra triggers
-// would only bounce off ErrWikiIngestConcurrent.
-//
-// `delay` is the ProcessIn before each follow-up fires. Callers pass
-// wikiFollowUpDelay for the normal case and wikiRateLimitBackoff when the
-// batch tripped an upstream rate limit — the released failed rows are
-// eligible immediately, but nothing claims them until a trigger fires, so
-// stretching the follow-up interval is what actually paces retries down
-// during a 429 storm.
+// scheduleFollowUp replenishes the KB's bounded supply of follow-up tasks.
+// Lite mode and rate-limited completions request only one successor. A 429
+// delays this batch's successor; it does not pause other batches in the KB.
 func (s *wikiIngestService) scheduleFollowUp(
 	ctx context.Context,
 	payload WikiIngestPayload,
@@ -93,37 +61,73 @@ func (s *wikiIngestService) scheduleFollowUp(
 		return false
 	}
 
+	if s.redisClient != nil {
+		if counter, ok := s.pendingRepo.(interfaces.TaskPendingOpsClaimableCounter); ok {
+			count, err = counter.ClaimableCount(ctx, wikiTaskType, wikiTaskScope,
+				payload.KnowledgeBaseID, time.Now().Add(-wikiClaimStaleAfter))
+			if err != nil {
+				logger.Warnf(ctx, "wiki ingest: claimable count failed: %v", err)
+				return s.scheduleFollowUpRecheck(ctx, payload)
+			}
+			if count == 0 {
+				return s.scheduleStaleClaimRecheck(ctx, payload)
+			}
+		}
+		// ClaimBatch caps the number of distinct keys at 1000.
+		batchSize = min(batchSize, 1000)
+	}
+
 	// activeSlots stays -1 (unknown → single follow-up) in Lite mode and on
-	// a rate-limited exit; -1 also shows up in the log line as "unknown".
+	// a rate-limited exit.
 	activeSlots := -1
 	if !rateLimited {
 		activeSlots = s.activeInflightSlots(ctx, payload.KnowledgeBaseID)
 	}
 	n := followUpTriggerCount(int(count), batchSize, activeSlots, maxInflight)
 
-	activeStr := fmt.Sprintf("%d", activeSlots)
-	if activeSlots < 0 {
-		activeStr = "unknown"
+	var taskIDs []string
+	if s.redisClient != nil {
+		taskIDs, err = s.reserveFollowUpTasks(ctx, payload.KnowledgeBaseID, n, maxInflight)
+		if err != nil {
+			logger.Warnf(ctx, "wiki ingest: follow-up reservation failed: %v", err)
+			// Keep the pre-fan-out behavior while Redis is unavailable.
+			n = 1
+		} else {
+			n = len(taskIDs)
+			if n == 0 {
+				return s.scheduleFollowUpRecheck(ctx, payload)
+			}
+		}
 	}
-	logger.Infof(ctx,
-		"wiki ingest: %d more documents pending for KB %s, scheduling %d follow-up(s) in %s (active slots %s/%d)",
-		count, payload.KnowledgeBaseID, n, delay, activeStr, maxInflight)
+	logger.Infof(ctx, "wiki ingest: %d claimable documents for KB %s, scheduling %d follow-up(s) in %s",
+		count, payload.KnowledgeBaseID, n, delay)
 
 	langfuse.InjectTracing(ctx, &payload)
 	payloadBytes, _ := json.Marshal(payload)
 	scheduled := false
+	needsRecheck := false
 	for i := 0; i < n; i++ {
-		t := asynq.NewTask(types.TypeWikiIngest, payloadBytes,
+		opts := []asynq.Option{
 			asynq.Queue(types.QueueWiki),
 			asynq.MaxRetry(wikiIngestMaxRetry),
-			asynq.Timeout(60*time.Minute),
-			asynq.ProcessIn(delay), // debounce (or rate-limit backoff) before draining the remainder
-		)
+			asynq.Timeout(60 * time.Minute),
+			asynq.ProcessIn(delay),
+		}
+		if len(taskIDs) > 0 {
+			opts = append(opts, asynq.TaskID(taskIDs[i]))
+		}
+		t := asynq.NewTask(types.TypeWikiIngest, payloadBytes, opts...)
 		if _, err := s.task.Enqueue(t); err != nil {
 			logger.Warnf(ctx, "wiki ingest: follow-up enqueue %d/%d failed: %v", i+1, n, err)
+			// A timeout may mean the enqueue succeeded. Keep its reservation
+			// until reconciliation can establish the actual queue state.
+			needsRecheck = true
 			continue
 		}
 		scheduled = true
+	}
+	if needsRecheck {
+		scheduled = s.scheduleFollowUpRecheck(ctx, payload) || scheduled
 	}
 	return scheduled
 }
@@ -253,7 +257,7 @@ func (s *wikiIngestService) newWikiBatchContext(
 	}
 }
 
-func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task) error {
+func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task) (retErr error) {
 	taskStartedAt := time.Now()
 	retryCount, _ := asynq.GetRetryCount(ctx)
 	maxRetry, _ := asynq.GetMaxRetry(ctx)
@@ -311,6 +315,16 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 		exitStatus = "invalid_payload"
 		return fmt.Errorf("wiki ingest: unmarshal payload: %w", err)
 	}
+
+	defer func() {
+		if p := recover(); p != nil {
+			// Asynq retries panics too: retain the outstanding reservation.
+			panic(p)
+		}
+		if retErr == nil {
+			s.releaseFollowUpTask(ctx, payload.KnowledgeBaseID)
+		}
+	}()
 
 	// Inject context
 	ctx = context.WithValue(ctx, types.TenantIDContextKey, payload.TenantID)
