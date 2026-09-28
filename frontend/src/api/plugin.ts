@@ -195,6 +195,11 @@ export function listPluginWebhooks(id: string) {
   return get<{ data: PluginWebhook[] }>(`/api/v1/plugins/${encodeURIComponent(id)}/webhooks`)
 }
 
+/** Retires the workspace's webhook URLs of a plugin and returns the new ones (Admin+). */
+export function rotatePluginWebhooks(id: string) {
+  return post<{ data: PluginWebhook[] }>(`/api/v1/plugins/${encodeURIComponent(id)}/webhooks/rotate`)
+}
+
 /** The workspace's configuration of a plugin (Admin+). */
 export function getPluginConfig(id: string) {
   return get<{ data: PluginConfig }>(`/api/v1/plugins/${encodeURIComponent(id)}/config`)

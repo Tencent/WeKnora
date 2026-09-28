@@ -60,7 +60,7 @@ func TestEnvelopeCarriesWebhookURLs(t *testing.T) {
 	tokens := webhook.NewTokens([]byte("k"))
 	iv.SetWebhooks(tokens, "https://weknora.example.com")
 	env, err := iv.Envelope(ctx, m, nil)
-	want := "https://weknora.example.com" + tokens.Path("acme.hooks", "inbox", 7)
+	want := "https://weknora.example.com" + tokens.Path("acme.hooks", "inbox", 7, 0)
 	if err != nil || env.Context.Webhooks["inbox"] != want {
 		t.Fatalf("webhooks = %v, %v", env.Context.Webhooks, err)
 	}

@@ -36,6 +36,7 @@ func RegisterPluginRoutes(
 		// Webhook URLs carry their secret — Admin+.
 		if hooks != nil {
 			plugins.GET("/:id/webhooks", g.Admin(), hooks.List)
+			plugins.POST("/:id/webhooks/rotate", g.Admin(), hooks.Rotate)
 		}
 		// Plugin forms are filled by workspace admins, or system admins
 		// for the platform configuration (checked per request).

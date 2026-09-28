@@ -72,6 +72,10 @@ func webhookEngine(t *testing.T) (*gin.Engine, *webhook.Tokens, *plugintest.MemT
 		c.Set(types.TenantIDContextKey.String(), uint64(7))
 		h.List(c)
 	})
+	r.POST("/plugins/:id/webhooks/rotate", func(c *gin.Context) {
+		c.Set(types.TenantIDContextKey.String(), uint64(7))
+		h.Rotate(c)
+	})
 	return r, tokens, settings
 }
 
@@ -87,7 +91,7 @@ func call(r *gin.Engine, method, path string, body string, headers map[string]st
 
 func TestPluginWebhooksRelayCalls(t *testing.T) {
 	r, tokens, settings := webhookEngine(t)
-	url := tokens.Path("acme.hooks", "inbox", 7)
+	url := tokens.Path("acme.hooks", "inbox", 7, 0)
 	signed := map[string]string{"X-Signature": "ok", "Cookie": "session=secret"}
 
 	w := call(r, http.MethodPost, url+"/issues?since=1", `{"id":1}`, signed)
@@ -110,10 +114,10 @@ func TestPluginWebhooksRelayCalls(t *testing.T) {
 	}
 
 	for _, bad := range []string{
-		tokens.Path("acme.hooks", "inbox", 8) + "x",
+		tokens.Path("acme.hooks", "inbox", 8, 0) + "x",
 		strings.Replace(url, "/inbox/", "/other/", 1),
 		webhook.PathPrefix + "/acme.hooks/inbox/7.nope",
-		tokens.Path("acme.nope", "inbox", 7),
+		tokens.Path("acme.nope", "inbox", 7, 0),
 	} {
 		if w := call(r, http.MethodPost, bad, `{}`, signed); w.Code != http.StatusNotFound {
 			t.Errorf("%s = %d", bad, w.Code)
@@ -138,8 +142,34 @@ func TestPluginWebhookList(t *testing.T) {
 	if json.Unmarshal(w.Body.Bytes(), &resp) != nil || len(resp.Data) != 1 {
 		t.Fatalf("list = %s", w.Body)
 	}
-	want := tokens.Path("acme.hooks", "inbox", 7)
+	want := tokens.Path("acme.hooks", "inbox", 7, 0)
 	if resp.Data[0].Path != want || resp.Data[0].URL != "https://weknora.example.com"+want {
 		t.Fatalf("webhook = %+v", resp.Data[0])
+	}
+}
+
+// Changing a workspace's webhook URLs retires the old ones at once; the new
+// ones work, and other workspaces keep theirs.
+func TestPluginWebhooksRotate(t *testing.T) {
+	r, tokens, settings := webhookEngine(t)
+	_ = settings.Upsert(context.Background(),
+		&types.PluginTenantSetting{TenantID: 8, PluginID: "acme.hooks", Enabled: true})
+	old, other := tokens.Path("acme.hooks", "inbox", 7, 0), tokens.Path("acme.hooks", "inbox", 8, 0)
+	signed := map[string]string{"X-Signature": "ok"}
+	w := call(r, http.MethodPost, "/plugins/acme.hooks/webhooks/rotate", "", nil)
+	var resp struct {
+		Data []PluginWebhookDTO `json:"data"`
+	}
+	if json.Unmarshal(w.Body.Bytes(), &resp) != nil || len(resp.Data) != 1 || resp.Data[0].Path == old {
+		t.Fatalf("rotate = %s", w.Body)
+	}
+	if w := call(r, http.MethodPost, old, `{}`, signed); w.Code != http.StatusNotFound {
+		t.Fatalf("the old URL = %d", w.Code)
+	}
+	if w := call(r, http.MethodPost, resp.Data[0].Path, `{}`, signed); w.Code != 202 {
+		t.Fatalf("the new URL = %d", w.Code)
+	}
+	if w := call(r, http.MethodPost, other, `{}`, signed); w.Code != 202 {
+		t.Fatalf("another workspace's URL = %d", w.Code)
 	}
 }

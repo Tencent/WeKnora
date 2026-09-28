@@ -10,9 +10,12 @@ type PluginTenantSetting struct {
 	Enabled  bool   `json:"enabled"`
 	// Config is the tenant-level plugin configuration, secrets sealed per
 	// the plugin's config schema. Unused until plugins declare one.
-	Config    JSON      `json:"config,omitempty" gorm:"type:json"`
-	UpdatedBy string    `json:"updated_by" gorm:"type:varchar(36)"`
-	UpdatedAt time.Time `json:"updated_at"`
+	Config JSON `json:"config,omitempty" gorm:"type:json"`
+	// WebhookEpoch is the generation of the workspace's webhook URLs of the
+	// plugin; bumping it retires them all.
+	WebhookEpoch int64     `json:"webhook_epoch" gorm:"not null;default:0"`
+	UpdatedBy    string    `json:"updated_by" gorm:"type:varchar(36)"`
+	UpdatedAt    time.Time `json:"updated_at"`
 }
 
 // TableName pins the table so GORM's pluralizer cannot drift.

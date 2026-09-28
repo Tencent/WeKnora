@@ -88,7 +88,7 @@ func (h *PluginWebhookHandler) webhookOf(pluginID, id string) (*manifest.Manifes
 // a live webhook of a plugin the workspace has on answers 404.
 func (h *PluginWebhookHandler) Receive(c *gin.Context) {
 	pluginID, hookID, token := c.Param("id"), c.Param("hook"), c.Param("token")
-	tenantID, ok := h.tokens.Verify(pluginID, hookID, token)
+	tenantID, ok := webhook.Tenant(token)
 	if !ok {
 		c.Status(http.StatusNotFound)
 		return
@@ -99,6 +99,15 @@ func (h *PluginWebhookHandler) Receive(c *gin.Context) {
 		return
 	}
 	ctx := c.Request.Context()
+	epoch, err := h.tenancy.WebhookEpoch(ctx, tenantID, pluginID)
+	if err != nil {
+		c.Status(http.StatusServiceUnavailable)
+		return
+	}
+	if !h.tokens.Verify(pluginID, hookID, token, tenantID, epoch) {
+		c.Status(http.StatusNotFound)
+		return
+	}
 	if on, err := h.tenancy.PluginEnabled(ctx, tenantID, pluginID); err != nil || !on {
 		c.Status(http.StatusNotFound)
 		return
@@ -167,6 +176,43 @@ func (h *PluginWebhookHandler) List(c *gin.Context) {
 		return
 	}
 	tenantID := c.GetUint64(types.TenantIDContextKey.String())
+	epoch, err := h.tenancy.WebhookEpoch(c.Request.Context(), tenantID, pluginID)
+	if err != nil {
+		_ = c.Error(errors.NewInternalServerError("read the webhook URLs"))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": h.webhookDTOs(m, tenantID, epoch)})
+}
+
+// Rotate godoc
+// @Summary      更换插件 Webhook 地址
+// @Description  作废本空间该插件的全部 Webhook 地址并换成新地址；其他空间不受影响
+// @Tags         Plugins
+// @Produce      json
+// @Param        id   path      string  true  "插件 ID"
+// @Success      200  {object}  map[string]interface{}
+// @Security     Bearer
+// @Router       /plugins/{id}/webhooks/rotate [post]
+func (h *PluginWebhookHandler) Rotate(c *gin.Context) {
+	pluginID := c.Param("id")
+	m, ok := h.registry.Plugin(pluginID)
+	if !ok {
+		_ = c.Error(errors.NewNotFoundError("plugin not found"))
+		return
+	}
+	tenantID := c.GetUint64(types.TenantIDContextKey.String())
+	userID, _ := types.UserIDFromContext(c.Request.Context())
+	epoch, err := h.tenancy.RotateWebhooks(c.Request.Context(), tenantID, pluginID, userID)
+	if err != nil {
+		_ = c.Error(errors.NewInternalServerError("rotate the webhook URLs"))
+		return
+	}
+	logger.Infof(c.Request.Context(), "[plugin] %s rotated the webhook URLs of %s in tenant %d",
+		userID, pluginID, tenantID)
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": h.webhookDTOs(m, tenantID, epoch)})
+}
+
+func (h *PluginWebhookHandler) webhookDTOs(m *manifest.Manifest, tenantID uint64, epoch int64) []PluginWebhookDTO {
 	base := webhook.PublicBase()
 	out := []PluginWebhookDTO{}
 	for _, w := range m.Contributes[manifest.PointWebhooks] {
@@ -174,12 +220,12 @@ func (h *PluginWebhookHandler) List(c *gin.Context) {
 			ID:          w.ID,
 			Name:        w.Name,
 			Description: w.Description,
-			Path:        h.tokens.Path(m.ID, w.ID, tenantID),
+			Path:        h.tokens.Path(m.ID, w.ID, tenantID, epoch),
 		}
 		if base != "" {
 			dto.URL = base + dto.Path
 		}
 		out = append(out, dto)
 	}
-	c.JSON(http.StatusOK, gin.H{"success": true, "data": out})
+	return out
 }

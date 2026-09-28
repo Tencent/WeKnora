@@ -334,6 +334,8 @@ func (m *MemTenantSettings) Upsert(_ context.Context, s *types.PluginTenantSetti
 			row.Enabled = s.Enabled
 		case "config":
 			row.Config = s.Config
+		case "webhook_epoch":
+			row.WebhookEpoch = s.WebhookEpoch
 		}
 	}
 	row.UpdatedBy, row.UpdatedAt = s.UpdatedBy, s.UpdatedAt

@@ -133,6 +133,37 @@ func (s *Service) EnableOwn(ctx context.Context, tenantID uint64, pluginID, upda
 	}, "enabled")
 }
 
+// WebhookEpoch is the generation of a workspace's webhook URLs of a plugin
+// (0 until first rotated).
+func (s *Service) WebhookEpoch(ctx context.Context, tenantID uint64, pluginID string) (int64, error) {
+	row, err := s.repo.Get(ctx, tenantID, pluginID)
+	if err != nil || row == nil {
+		return 0, err
+	}
+	return row.WebhookEpoch, nil
+}
+
+// RotateWebhooks retires a workspace's webhook URLs of a plugin: the next
+// generation signs new ones. It returns the new generation.
+func (s *Service) RotateWebhooks(ctx context.Context, tenantID uint64, pluginID, updatedBy string) (int64, error) {
+	row, err := s.repo.Get(ctx, tenantID, pluginID)
+	if err != nil {
+		return 0, err
+	}
+	next := &types.PluginTenantSetting{
+		TenantID: tenantID, PluginID: pluginID, WebhookEpoch: 1, UpdatedBy: updatedBy, UpdatedAt: time.Now(),
+	}
+	if row != nil {
+		next.Enabled, next.WebhookEpoch = row.Enabled, row.WebhookEpoch+1
+	} else if m, ok := s.registry.Plugin(pluginID); ok {
+		next.Enabled = enabledByDefault(m)
+	}
+	if err := s.repo.Upsert(ctx, next, "webhook_epoch"); err != nil {
+		return 0, err
+	}
+	return next.WebhookEpoch, nil
+}
+
 // enabledByDefault is a plugin's switch in a tenant that never set it:
 // builtins are on, installed plugins wait for a tenant admin to opt in.
 func enabledByDefault(m *manifest.Manifest) bool { return m.Builtin }

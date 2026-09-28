@@ -46,38 +46,52 @@ func NewTokensFromEnv() *Tokens {
 	return &Tokens{key: mac.Sum(nil)}
 }
 
-func (t *Tokens) mac(pluginID, webhookID string, tenantID uint64) []byte {
+// mac covers the workspace's generation of URLs (epoch), so bumping it
+// retires the URLs given out before. Generation 0 signs as URLs always did.
+func (t *Tokens) mac(pluginID, webhookID string, tenantID uint64, epoch int64) []byte {
 	m := hmac.New(sha256.New, t.key)
-	_, _ = m.Write([]byte(pluginID + "\x00" + webhookID + "\x00" + strconv.FormatUint(tenantID, 10)))
+	msg := pluginID + "\x00" + webhookID + "\x00" + strconv.FormatUint(tenantID, 10)
+	if epoch != 0 {
+		msg += "\x00" + strconv.FormatInt(epoch, 10)
+	}
+	_, _ = m.Write([]byte(msg))
 	return m.Sum(nil)[:macBytes]
 }
 
 // Token is the URL segment naming a workspace: "<tenant>.<mac>".
-func (t *Tokens) Token(pluginID, webhookID string, tenantID uint64) string {
+func (t *Tokens) Token(pluginID, webhookID string, tenantID uint64, epoch int64) string {
 	return strconv.FormatUint(tenantID, 36) + "." +
-		base64.RawURLEncoding.EncodeToString(t.mac(pluginID, webhookID, tenantID))
+		base64.RawURLEncoding.EncodeToString(t.mac(pluginID, webhookID, tenantID, epoch))
 }
 
-// Verify returns the workspace a token names, if it is genuine.
-func (t *Tokens) Verify(pluginID, webhookID, token string) (uint64, bool) {
-	tenant, sig, ok := strings.Cut(token, ".")
+// Tenant reads the workspace a token names, before it is checked.
+func Tenant(token string) (uint64, bool) {
+	tenant, _, ok := strings.Cut(token, ".")
 	if !ok {
 		return 0, false
 	}
 	tenantID, err := strconv.ParseUint(tenant, 36, 64)
-	if err != nil || tenantID == 0 {
-		return 0, false
+	return tenantID, err == nil && tenantID != 0
+}
+
+// Verify reports whether a token is the workspace's current one: epoch is
+// the workspace's generation of URLs for the plugin.
+func (t *Tokens) Verify(pluginID, webhookID, token string, tenantID uint64, epoch int64) bool {
+	_, sig, ok := strings.Cut(token, ".")
+	if !ok {
+		return false
+	}
+	named, ok := Tenant(token)
+	if !ok || named != tenantID {
+		return false
 	}
 	got, err := base64.RawURLEncoding.DecodeString(sig)
-	if err != nil || !hmac.Equal(got, t.mac(pluginID, webhookID, tenantID)) {
-		return 0, false
-	}
-	return tenantID, true
+	return err == nil && hmac.Equal(got, t.mac(pluginID, webhookID, tenantID, epoch))
 }
 
 // Path is the URL path of a webhook for a workspace.
-func (t *Tokens) Path(pluginID, webhookID string, tenantID uint64) string {
-	return PathPrefix + "/" + pluginID + "/" + webhookID + "/" + t.Token(pluginID, webhookID, tenantID)
+func (t *Tokens) Path(pluginID, webhookID string, tenantID uint64, epoch int64) string {
+	return PathPrefix + "/" + pluginID + "/" + webhookID + "/" + t.Token(pluginID, webhookID, tenantID, epoch)
 }
 
 // PublicBase is WeKnora's public address (APP_EXTERNAL_URL), without a

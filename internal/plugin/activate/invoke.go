@@ -243,12 +243,19 @@ func (iv *Invoker) Envelope(
 	}
 	hooks, publicBase := iv.webhooks, iv.publicBase
 	iv.mu.RUnlock()
-	if hooks != nil && publicBase != "" && env.Context.TenantID != 0 {
+	if hooks != nil && publicBase != "" && env.Context.TenantID != 0 && len(m.Contributes[manifest.PointWebhooks]) > 0 {
+		var epoch int64
+		if t != nil {
+			var err error
+			if epoch, err = t.WebhookEpoch(ctx, env.Context.TenantID, m.ID); err != nil {
+				return env, err
+			}
+		}
 		for _, c := range m.Contributes[manifest.PointWebhooks] {
 			if env.Context.Webhooks == nil {
 				env.Context.Webhooks = map[string]string{}
 			}
-			env.Context.Webhooks[c.ID] = publicBase + hooks.Path(m.ID, c.ID, env.Context.TenantID)
+			env.Context.Webhooks[c.ID] = publicBase + hooks.Path(m.ID, c.ID, env.Context.TenantID, epoch)
 		}
 	}
 	// A workspace configuring a plugin it has not switched on gets no way

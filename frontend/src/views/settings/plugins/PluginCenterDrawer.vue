@@ -56,6 +56,14 @@
             </t-button>
           </div>
         </div>
+        <div class="center-drawer__row center-drawer__row--spaced">
+          <div class="center-drawer__row-text">
+            <p>{{ t('pluginCenter.rotateWebhooksHint') }}</p>
+          </div>
+          <t-popconfirm :content="t('pluginCenter.rotateWebhooksConfirm')" @confirm="rotateWebhooks">
+            <t-button size="small" variant="outline" :loading="rotatingWebhooks">{{ t('pluginCenter.rotateWebhooks') }}</t-button>
+          </t-popconfirm>
+        </div>
       </section>
 
       <section v-if="owned && canManage" class="setting-drawer__section">
@@ -111,7 +119,14 @@ import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { MessagePlugin } from 'tdesign-vue-next'
 
-import { getPluginConfig, listPluginWebhooks, updatePluginConfig, type PluginWebhook, type TenantPlugin } from '@/api/plugin'
+import {
+  getPluginConfig,
+  listPluginWebhooks,
+  rotatePluginWebhooks,
+  updatePluginConfig,
+  type PluginWebhook,
+  type TenantPlugin,
+} from '@/api/plugin'
 import type { InstalledPlugin } from '@/api/system/plugins'
 import { rotateTenantPluginSecret, setTenantPluginRemoteUrl, uninstallTenantPlugin } from '@/api/tenantPlugins'
 import PluginBadge from '@/components/plugins/PluginBadge.vue'
@@ -249,6 +264,22 @@ async function saveUrl() {
   }
 }
 
+const rotatingWebhooks = ref(false)
+
+async function rotateWebhooks() {
+  const id = props.plugin?.manifest.id
+  if (!id) return
+  rotatingWebhooks.value = true
+  try {
+    webhooks.value = (await rotatePluginWebhooks(id)).data ?? []
+    MessagePlugin.success(t('pluginCenter.rotateWebhooksDone'))
+  } catch (e: any) {
+    MessagePlugin.error(e?.message || t('pluginCenter.rotateWebhooksFailed'))
+  } finally {
+    rotatingWebhooks.value = false
+  }
+}
+
 async function rotate() {
   const id = props.owned?.id
   if (!id) return
@@ -305,6 +336,10 @@ async function remove() {
   font-size: var(--app-text-sm);
   line-height: 1.5;
   color: var(--td-text-color-placeholder);
+}
+
+.center-drawer__row--spaced {
+  margin-top: 12px;
 }
 
 .center-drawer__webhook + .center-drawer__webhook {
