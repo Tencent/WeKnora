@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"runtime/debug"
 	"sort"
 	"strings"
 	"sync"
@@ -325,6 +326,16 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 	}
 	if err != nil {
 		exitStatus = "get_chat_model_failed"
+		if isFinalAsynqAttempt(ctx) {
+			// The model row exists but cannot be built (a base URL the SSRF
+			// guard rejects, an unknown provider, ...). That fails the same
+			// way on every trigger and before any op is claimed, so no op
+			// ever spends its fail_count budget: without this the KB's
+			// documents stayed in "finalizing" forever while housekeeping
+			// kept re-arming the trigger.
+			return s.releaseIngestForUnavailableWiki(ctx, kb.ID,
+				"synthesis model "+synthesisModelID+" unusable: "+err.Error())
+		}
 		return fmt.Errorf("wiki ingest: get chat model: %w", err)
 	}
 
@@ -393,6 +404,14 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 	}
 
 	logger.Infof(ctx, "wiki ingest: batch processing %d ops for KB %s", len(pendingOps), payload.KnowledgeBaseID)
+	// The parse attempt each document's op was queued under, for the slot
+	// release after reduce (see finalizeWikiSubtask).
+	opAttempts := make(map[string]int, len(pendingOps))
+	for _, op := range pendingOps {
+		if op.Op == WikiOpIngest {
+			opAttempts[op.KnowledgeID] = op.Attempt
+		}
+	}
 
 	// Crash/abort safety net (standard/claim mode only). If this batch exits
 	// abnormally — panic, ctx timeout, or an early error return — BEFORE it
@@ -528,7 +547,7 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 			mapMu.Unlock()
 
 			logger.Infof(mapCtx, "wiki ingest: processing document '%s' (%s)", op.DocTitle, op.KnowledgeID)
-			result, updates, err := s.mapOneDocument(mapCtx, chatModel, payload, op, batchCtx)
+			result, updates, err := s.mapOneDocumentRecovered(mapCtx, chatModel, payload, op, batchCtx)
 			if err != nil {
 				mapMu.Lock()
 				ingestFailed++
@@ -571,7 +590,7 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 				// "finalizing" until the housekeeping sweep marks it
 				// failed. The matching +1 was seeded by
 				// KnowledgePostProcess.SetFinalizing.
-				s.finalizeWikiSubtask(mapCtx, op.KnowledgeID)
+				s.finalizeWikiSubtask(mapCtx, op.KnowledgeID, op.Attempt)
 			}
 			return nil
 		})
@@ -651,6 +670,14 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 			// Serialize same-slug read-modify-write across concurrent batches
 			// (standard mode). runs fn directly in Lite mode.
 			acquired, lockErr := s.withSlugLock(reduceCtx, payload.KnowledgeBaseID, slug, func() error {
+				// errgroup does not recover panics; see mapOneDocumentRecovered.
+				defer func() {
+					if r := recover(); r != nil {
+						logger.Errorf(reduceCtx, "wiki ingest: reduce panicked for slug %s: %v\n%s",
+							slug, r, debug.Stack())
+						reduceErr = fmt.Errorf("wiki reduce panicked for slug %s: %v", slug, r)
+					}
+				}()
 				changed, affectedType, additionFailed, reduceErr = s.reduceSlugUpdates(
 					reduceCtx, chatModel, payload.KnowledgeBaseID, slug, updates, payload.TenantID, batchCtx, kidToWikiSpan)
 				return reduceErr
@@ -809,7 +836,7 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 		// held — the retry (or the dead-letter drain in requeueFailedOps)
 		// releases it once the op reaches a real terminal state.
 		if _, unapplied := unappliedSlugKIDs[r.KnowledgeID]; !unapplied {
-			s.finalizeWikiSubtask(ctx, r.KnowledgeID)
+			s.finalizeWikiSubtask(ctx, r.KnowledgeID, opAttempts[r.KnowledgeID])
 		}
 		if r.WikiSpan == nil {
 			continue
@@ -1177,6 +1204,29 @@ func (s *wikiIngestService) ProcessWikiFinalize(ctx context.Context, t *asynq.Ta
 		time.Since(startedAt).Round(time.Millisecond),
 	)
 	return nil
+}
+
+// mapOneDocumentRecovered runs mapOneDocument and turns a panic into a map
+// failure. errgroup does not recover panics, so one escaping a map worker
+// crashed the process before the batch settled its claims; the op was
+// claimed again later, hit the same panic, and its document never left
+// "finalizing" (in Lite mode the startup recovery crash-looped the server).
+// As a failure it goes through the fail_count budget and, at worst, the
+// dead-letter path, which releases the document's slot.
+func (s *wikiIngestService) mapOneDocumentRecovered(
+	ctx context.Context,
+	chatModel chat.Chat,
+	payload WikiIngestPayload,
+	op WikiPendingOp,
+	batchCtx *WikiBatchContext,
+) (result *docIngestResult, updates []SlugUpdate, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			logger.Errorf(ctx, "wiki ingest: map panicked for knowledge %s: %v\n%s", op.KnowledgeID, r, debug.Stack())
+			result, updates, err = nil, nil, fmt.Errorf("wiki map panicked: %v", r)
+		}
+	}()
+	return s.mapOneDocument(ctx, chatModel, payload, op, batchCtx)
 }
 
 func (s *wikiIngestService) mapOneDocument(

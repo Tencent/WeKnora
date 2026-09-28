@@ -149,7 +149,11 @@ export function statusOf(v: EnvVarView): EnvStatus {
 }
 
 /** The config's display name, falling back to its id so a group is never nameless. */
-export function configLabel(group: Pick<ConfigEnvGroup, 'sandbox_config_id' | 'sandbox_config_name'>): string {
+export function configLabel(
+  group: Pick<ConfigEnvGroup, 'sandbox_config_id' | 'sandbox_config_name'>,
+  hostLabel = '',
+): string {
+  if (hostLabel && group.sandbox_config_id === 'host') return hostLabel
   return group.sandbox_config_name?.trim() || group.sandbox_config_id
 }
 

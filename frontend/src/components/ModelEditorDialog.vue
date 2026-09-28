@@ -646,6 +646,7 @@ import CredentialResource, {
 } from '@/components/credentials/CredentialResource.vue'
 import { shouldShowOllamaUnavailableTip } from '@/components/modelEditorSourceState'
 import { WEKNORA_CLOUD_PROVIDER, WKC_MODEL_KINDS, WKC_MODEL_NAME_BY_KIND } from '@/utils/weknoraCloudModels'
+import { docsUrl } from '@/utils/docsUrl'
 
 interface CustomHeaderItem {
   key: string
@@ -703,8 +704,7 @@ const PROTOCOL_OPTIONS = [
 ] as const
 
 /** Field reference for parameters.spec.compat, per protocol and model type. */
-const COMPAT_DOC_URL =
-  'https://github.com/Tencent/WeKnora/blob/main/website-docs/03-features/06-models.md#协议兼容覆盖-compat-json'
+const COMPAT_DOC_URL = docsUrl('modelsCompat')
 
 /** Legacy thinking_control values still honoured by catalog.Resolve. */
 const LEGACY_THINKING_CONTROL_VALUES = ['none', 'enable_thinking', 'thinking_type', 'chat_template_kwargs'] as const
@@ -753,9 +753,9 @@ const modelTypeChoices = computed(() => ([
 // 厂商列表完全来自后端目录（store 按模型类型缓存）；前端不再维护任何厂商表。
 const loadingProviders = computed(() => providersStore.isLoading(activeModelType.value))
 
-const loadProviders = async () => {
+const loadProviders = async (force = false) => {
   try {
-    await providersStore.ensureLoaded(activeModelType.value)
+    await providersStore.ensureLoaded(activeModelType.value, force)
   } catch (error) {
     console.error('Failed to load providers from API', error)
   }
@@ -1459,8 +1459,10 @@ watch(() => props.visible, (val) => {
     // 检查Ollama服务状态
     checkOllamaServiceStatus()
 
-    // 从 API 加载 Model Provider 列表（编辑已有行时顺便补齐额外字段默认值）
-    loadProviders().then(() => {
+    // 从 API 加载 Model Provider 列表（编辑已有行时顺便补齐额外字段默认值）。
+    // Catalogs can be published by another administrator while this page is
+    // open, so refresh this type without dropping other types' cached lists.
+    loadProviders(true).then(() => {
       if (props.visible && !isEdit.value) applyExtraFieldDefaults()
     })
     advancedOpen.value = false

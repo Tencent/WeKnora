@@ -18,6 +18,9 @@ for (const retired of ['/demo/', '/demo/1/', '/redesign/', '/redesign/1/', '/dem
   assert.equal(await resolveSiteFile(root, retired), null, `Retired demo must not be published: ${retired}`);
 }
 const failures = [];
+for (const entry of await readdir(root)) {
+  if (!['index.html', '404.html', 'docs'].includes(entry)) failures.push(`/${entry}: only index.html, 404.html and docs/ may sit at the site root`);
+}
 // Screenshot.vue renders a labelled placeholder until the image is added, so a
 // missing docs screenshot is reported as pending instead of failing the build.
 const pendingShots = new Set();
@@ -32,6 +35,8 @@ for (const file of pages) {
     for (const [, raw] of tag.matchAll(/(?:href|src|poster)="([^"]+)"/g)) {
       const url = new URL(raw.replaceAll('&amp;', '&'), base);
       if (url.origin !== base.origin) continue;
+      // The upstream router forwards only these two prefixes to this service.
+      if (url.pathname !== base.pathname && url.pathname !== '/' && !url.pathname.startsWith('/docs/')) failures.push(`${route}: ${url.pathname} is outside / and /docs/`);
       if (!checked.has(url.pathname)) checked.set(url.pathname, !!await resolveSiteFile(root, url.pathname));
       if (!checked.get(url.pathname)) {
         if (/class="wk-shot-img"/.test(tag) && url.pathname.startsWith('/docs/screenshots/')) pendingShots.add(url.pathname);

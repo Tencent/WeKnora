@@ -62,10 +62,22 @@ type WorkspaceSandboxPolicy interface {
 }
 
 // HostSandboxManager is Lite's OS sandbox. A nil Manager means this process
-// is not Lite (or cannot enforce a sandbox). Web binaries always inject nil,
-// so empty remote configs resolve to disabled rather than host.
+// cannot enforce a sandbox. Web binaries always inject the zero value, so
+// empty remote configs resolve to disabled rather than host.
 type HostSandboxManager struct {
 	Manager sandbox.Manager
+	// Desktop is true in the Lite desktop build even when this machine cannot
+	// enforce a sandbox. Lite hides remote sandboxes entirely.
+	Desktop bool
+	// SkillTree and SkillInstaller serve local skill installs. Both are nil
+	// unless Manager is.
+	SkillTree      HostSkillTree
+	SkillInstaller HostSkillInstaller
+}
+
+// SkillsAvailable reports whether local skills can be installed and run.
+func (h HostSandboxManager) SkillsAvailable() bool {
+	return h.Desktop && liteHostSandbox(h.Manager) != nil && h.SkillTree != nil && h.SkillInstaller != nil
 }
 
 type resolveOption func(*resolveOptions)
@@ -74,6 +86,11 @@ type resolveOptions struct {
 	// liteHost is Lite's OS sandbox. Nil on the web binary. Named remote
 	// configs never consult it; an empty config on web stays disabled.
 	liteHost sandbox.Manager
+	// liteOnly is the Lite desktop build: named remote configs and pins are
+	// never resolved, whatever an agent or session stored.
+	liteOnly bool
+	// hostSkillInstaller serves the built-in installer's host install session.
+	hostSkillInstaller sandbox.Manager
 }
 
 // withLiteHostSandbox opts a resolve into Lite's host backend when the
@@ -82,11 +99,34 @@ func withLiteHostSandbox(m sandbox.Manager) resolveOption {
 	return func(o *resolveOptions) { o.liteHost = liteHostSandbox(m) }
 }
 
+func withLiteDesktop(desktop bool) resolveOption {
+	return func(o *resolveOptions) { o.liteOnly = desktop }
+}
+
+func withHostSkillInstaller(m sandbox.Manager) resolveOption {
+	return func(o *resolveOptions) { o.hostSkillInstaller = m }
+}
+
 func liteHostSandbox(m sandbox.Manager) sandbox.Manager {
 	if m == nil || m.GetType() != sandbox.SandboxTypeHost {
 		return nil
 	}
 	return m
+}
+
+func resolveLiteSandbox(
+	ctx context.Context, policy WorkspaceSandboxPolicy, tenantID uint64, configID string, o resolveOptions,
+) sandbox.Manager {
+	if workspaceScriptsDisabled(ctx, policy, tenantID) {
+		return sandbox.NewDisabledManager()
+	}
+	if sandbox.IsHostSkillTarget(configID) && o.hostSkillInstaller != nil {
+		return o.hostSkillInstaller
+	}
+	if lite := liteHostSandbox(o.liteHost); lite != nil {
+		return lite
+	}
+	return sandbox.NewDisabledManager()
 }
 
 func applyResolveOptions(opts []resolveOption) resolveOptions {

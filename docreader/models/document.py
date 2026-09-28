@@ -70,6 +70,16 @@ class Document(BaseModel):
     )
 
     chunks: List[Chunk] = Field(default_factory=list, description="document chunks")
+    source_blocks: List[Dict[str, Any]] = Field(
+        default_factory=list,
+        description=(
+            "Ranges of content mapped to positions in the original file: "
+            '{"start": int, "end": int, "locator": {"type": "pdf", "page": 1, '
+            '"bbox": [x0, y0, x1, y1]}}. Offsets are code point indices into '
+            "content, end exclusive; ordinals are 1-based; bbox is fractions of "
+            "the page with the origin at the top-left corner."
+        ),
+    )
     metadata: Dict[str, Any] = Field(
         default_factory=dict,
         description="metadata fields",

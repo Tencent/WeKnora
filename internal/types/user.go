@@ -49,6 +49,29 @@ type UserPreferences struct {
 	// UI hides self-service password rotation until the user sets a known
 	// password via ChangePassword (which clears this flag).
 	OidcOnlyLogin *bool `json:"oidc_only_login,omitempty"`
+
+	// Gallery holds the user's image-gallery UI state: the search
+	// activation mode and the per-attribute search-field toggles. Written
+	// by the gallery's mode / checkbox interactions via the preferences
+	// PUT; read back by GET /knowledge-bases/:id/gallery-config so the
+	// gallery renders the same activation state on every device. Nil = the
+	// user never touched the gallery controls (mode defaults to "all").
+	Gallery *GalleryUserPrefs `json:"gallery,omitempty"`
+}
+
+// GalleryUserPrefs is the user-tier slice of the gallery configuration. The
+// full tier schema (types.GalleryPolicyTier) also allows usage overrides,
+// but those are admin/operator concerns; the user layer only records the
+// activation mode and which search fields they personally switched on.
+type GalleryUserPrefs struct {
+	// Mode is "all" (every search-eligible field active) or "custom"
+	// (per-field Status governs). Empty = "all".
+	Mode string `json:"mode,omitempty"`
+	// Status maps a namespaced attribute id ("builtin:caption") to
+	// "on"/"off". Only consulted in custom mode; an unrecorded field is
+	// off. Source-declared on/off does not exist — activation is always
+	// the user's own record.
+	Status map[string]string `json:"status,omitempty"`
 }
 
 // Value implements driver.Valuer so GORM persists UserPreferences as

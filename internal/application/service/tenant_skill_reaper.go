@@ -265,6 +265,10 @@ func (s *TenantSkillService) skillFilesInLiveImage(
 	if row == nil {
 		return "", false, false
 	}
+	if sandbox.IsHostSkillTarget(row.SandboxConfigID) {
+		tree := s.host.SkillTree
+		return "", tree != nil && tree.Installed(row.Name), tree != nil
+	}
 	live, ok := s.liveSnapshotID(ctx, row)
 	if !ok {
 		return "", false, false
@@ -856,6 +860,11 @@ func (s *TenantSkillService) Start(ctx context.Context) error {
 		s.runSkillReaper(context.Background())
 	}); err != nil {
 		return err
+	}
+	if s.host.SkillsAvailable() {
+		if err := s.host.SkillTree.Sweep(); err != nil {
+			logger.Warnf(ctx, "[skill] sweep local skill tree failed: %v", err)
+		}
 	}
 	s.cron.Start()
 	s.started = true

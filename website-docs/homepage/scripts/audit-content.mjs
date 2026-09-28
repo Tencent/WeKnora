@@ -17,7 +17,7 @@ assert.match(html, /https:\/\/github.com\/user-attachments\/assets\/2819598d-314
 assert.ok(!/<video[^>]+autoplay/i.test(html), 'Do not autoplay the product film');
 const wiki = html.match(/<section id="wiki"[\s\S]*?<\/section>/)?.[0];
 assert.ok(wiki, 'The homepage must include a dedicated Wiki section');
-for (const term of ['/product/wiki-browser.png', '/product/wiki-graph.png', '/product/wiki-revision-history.png', 'id="wiki-gallery"', '/docs/03-features/14-wiki.html', '来源引用', '知识图谱', '版本差异']) {
+for (const term of ['/docs/_home/product/wiki-browser.png', '/docs/_home/product/wiki-graph.png', '/docs/_home/product/wiki-revision-history.png', 'id="wiki-gallery"', '/docs/03-features/14-wiki.html', '来源引用', '知识图谱', '版本差异']) {
   assert.ok(wiki.includes(term), `Missing Wiki showcase content: ${term}`);
 }
 const ids = new Set([...html.matchAll(/\bid="([^"]+)"/g)].map(match => match[1]));
@@ -31,9 +31,9 @@ for (const asset of assets) {
   if (file.isDirectory()) file = await stat(join(path, 'index.html'));
   assert.ok(file.isFile() && file.size > 0, `Missing local asset: ${asset}`);
 }
-const pendingShots = [...html.matchAll(/website-docs\/homepage\/public(\/product\/[\w.-]+)/g)].map(match => match[1]);
+const pendingShots = [...html.matchAll(/website-docs\/homepage\/public(\/docs\/_home\/product\/[\w.-]+)/g)].map(match => match[1]);
 // Gallery slides without a file render their placeholder only once selected; read the flag from the page data.
-for (const [, image] of html.matchAll(/\\?"image\\?":\\?"([\w-]+)\\?"[^{}]*?\\?"available\\?":false/g)) pendingShots.push(`/product/${image}.png`);
+for (const [, image] of html.matchAll(/\\?"image\\?":\\?"([\w-]+)\\?"[^{}]*?\\?"available\\?":false/g)) pendingShots.push(`/docs/_home/product/${image}.png`);
 if (pendingShots.length) console.warn(`Product screenshots still pending (placeholder shown): ${[...new Set(pendingShots)].join(', ')}`);
 assert.match(html, /aria-controls="main-navigation"/);
 assert.match(html, /aria-label="播放 WeKnora 产品介绍视频/);

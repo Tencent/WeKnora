@@ -25,7 +25,7 @@ func TestBuildAutoModeMakesWorkspaceWritable(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Equal(t, ws.Root, p.Cwd)
-	require.Equal(t, NetworkDenied, p.Network)
+	require.Equal(t, NetworkUnrestricted, p.Network)
 
 	var roots []string
 	for _, r := range p.WritableRoots {
@@ -71,6 +71,7 @@ func TestBuildAskModeKeepsWorkspaceReadableButNotWritable(t *testing.T) {
 	require.Contains(t, p.ReadableRoots, ws.Root)
 	require.Empty(t, p.WritableRoots)
 	require.Equal(t, ws.Root, p.Cwd)
+	require.Equal(t, NetworkDenied, p.Network)
 }
 
 // Full access has no policy at all; representing it as a very wide policy
@@ -252,15 +253,21 @@ func TestBuildMakesOtherUsersAndVolumesPrivate(t *testing.T) {
 	}
 }
 
-func TestBuildMakesTempDirsPrivate(t *testing.T) {
+func TestBuildKeepsVarPrivateAndLeavesTmpOpen(t *testing.T) {
 	b, ws := builderFixture(t)
 	p, err := b.Build(ModeAuto, ws)
 	require.NoError(t, err)
-	for _, root := range []string{"/tmp", "/private/tmp", "/var", "/private/var"} {
+	for _, root := range []string{"/var", "/private/var"} {
 		if !filepath.IsAbs(root) {
 			continue
 		}
 		require.Contains(t, p.PrivateRoots, filepath.Clean(root), root)
+	}
+	for _, root := range []string{"/tmp", "/private/tmp"} {
+		if !filepath.IsAbs(root) {
+			continue
+		}
+		require.NotContains(t, p.PrivateRoots, filepath.Clean(root), root)
 	}
 }
 
@@ -333,4 +340,56 @@ func TestRelaxRefusesToGrantAppData(t *testing.T) {
 
 	_, err = b.Relax(base, Grant{WritePath: b.appDataDir})
 	require.Error(t, err)
+}
+
+func skillsBuilder(t *testing.T) (*PolicyBuilder, string) {
+	t.Helper()
+	b, _ := builderFixture(t)
+	root := filepath.Join(b.homeDir, ".weknora", "skills")
+	return b.WithSkillsRoot(root), root
+}
+
+func TestBuildAutoModeReadsButDoesNotWriteSkillsRoot(t *testing.T) {
+	b, root := skillsBuilder(t)
+	_, ws := builderFixture(t)
+	ws.Root = filepath.Join(b.homeDir, "My Project")
+	p, err := b.Build(ModeAuto, ws)
+	require.NoError(t, err)
+	require.Contains(t, p.ReadableRoots, root)
+	for _, w := range p.WritableRoots {
+		require.False(t, PathUnder(w.Path, root) || PathUnder(root, w.Path), w.Path)
+	}
+	require.Equal(t, NetworkUnrestricted, p.Network)
+}
+
+func TestBuildInstallConfinesWritesToVersionDir(t *testing.T) {
+	b, root := skillsBuilder(t)
+	dir := filepath.Join(root, ".versions", "pdf-1")
+	p, err := b.BuildInstall(dir)
+	require.NoError(t, err)
+	require.Equal(t, dir, p.Cwd)
+	require.Equal(t, NetworkUnrestricted, p.Network)
+	require.Equal(t, []WritableRoot{{Path: dir}}, p.WritableRoots)
+	require.Equal(t, b.denyRead(), p.DenyRead)
+	require.Contains(t, p.DenyRead, filepath.Join(b.homeDir, ".ssh"))
+	require.Contains(t, p.DenyRead, b.appDataDir)
+	for _, root := range []string{"/tmp", "/private/tmp"} {
+		if filepath.IsAbs(root) {
+			require.NotContains(t, p.PrivateRoots, filepath.Clean(root), root)
+		}
+	}
+}
+
+func TestBuildInstallRejectsDirOutsideSkillsRoot(t *testing.T) {
+	b, root := skillsBuilder(t)
+	for _, dir := range []string{root, filepath.Join(b.homeDir, "My Project"), "/tmp/pdf-1", "relative"} {
+		_, err := b.BuildInstall(dir)
+		require.ErrorIs(t, err, ErrInstallDirOutsideSkillsRoot, dir)
+	}
+}
+
+func TestBuildInstallRequiresASkillsRoot(t *testing.T) {
+	b, _ := builderFixture(t)
+	_, err := b.BuildInstall(filepath.Join(b.homeDir, ".weknora", "skills", ".versions", "pdf-1"))
+	require.ErrorIs(t, err, ErrInstallDirOutsideSkillsRoot)
 }

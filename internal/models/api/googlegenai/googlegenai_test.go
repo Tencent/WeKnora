@@ -697,3 +697,35 @@ func TestChatStreamSurfacesPromptFeedbackBlock(t *testing.T) {
 		t.Fatal("blocked prompt did not produce an error chunk")
 	}
 }
+
+// Gemini streams end on EOF; the last candidate of a finished message carries
+// a finishReason, so a body that stops without one was cut mid-answer.
+func TestChatStreamEOFWithoutFinishReasonIsIncomplete(t *testing.T) {
+	for _, tc := range []struct {
+		name, body, want string
+	}{
+		{"cut off", `{"candidates":[{"content":{"parts":[{"text":"Hel"}]}}]}`, types.FinishReasonIncomplete},
+		{"finished", `{"candidates":[{"content":{"parts":[{"text":"Hello"}]},"finishReason":"STOP"}]}`, "stop"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("SSRF_WHITELIST", "127.0.0.1")
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = w.Write([]byte("data: " + tc.body + "\n\n"))
+			}))
+			defer srv.Close()
+
+			client := newTestClient(t, srv.URL, nil)
+			ch, err := client.ChatStream(context.Background(), []api.Message{{Role: "user", Content: "hi"}}, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var last types.StreamResponse
+			for ev := range ch {
+				last = ev
+			}
+			if last.ResponseType != types.ResponseTypeAnswer || !last.Done || last.FinishReason != tc.want {
+				t.Fatalf("last event = %+v, want finish reason %q", last, tc.want)
+			}
+		})
+	}
+}

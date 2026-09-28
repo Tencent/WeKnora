@@ -232,6 +232,10 @@ func resolveSandboxForExecution(
 ) (sandbox.Manager, SandboxPin, error) {
 	o := applyResolveOptions(opts)
 
+	if o.liteOnly {
+		return resolveLiteSandbox(ctx, policy, tenantID, agentConfigID, o), SandboxPin{}, nil
+	}
+
 	if pinner != nil && strings.TrimSpace(sessionID) != "" {
 		pinned, err := pinner.Read(ctx, sessionID)
 		if err != nil {

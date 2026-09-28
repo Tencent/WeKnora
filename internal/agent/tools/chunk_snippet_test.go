@@ -104,3 +104,22 @@ func TestExtractChunkMatchSnippet_NonFAQUsesBodyContext(t *testing.T) {
 		t.Fatalf("expected expanded body context: %s", snippet)
 	}
 }
+
+// A Chinese question has no spaces; it is segmented into words so the
+// snippet lands on the matching passage instead of the chunk's opening.
+func TestExtractSnippetForChineseQuery(t *testing.T) {
+	content := strings.Repeat("无关的开头内容。", 60) + "退款申请需要在收货后七天内提交。" + strings.Repeat("其他内容。", 20)
+	snippet := extractSnippetForQueries(content, []string{"退款申请的时限是多久？"})
+	if !strings.Contains(snippet, "退款申请") {
+		t.Fatalf("snippet did not reach the matching passage: %q", snippet)
+	}
+}
+
+func TestSearchQueryTokensSkipsStopwords(t *testing.T) {
+	tokens := searchQueryTokens([]string{"How does the engine start?"})
+	for _, tok := range tokens {
+		if tok == "the" || tok == "does" || tok == "how" {
+			t.Fatalf("stopword %q kept: %v", tok, tokens)
+		}
+	}
+}

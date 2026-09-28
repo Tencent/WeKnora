@@ -8,6 +8,8 @@
 - `/docs/`：直接进入“快速上手”。
 - `/docs/…`：完整文档，保留分类导航、搜索和侧栏。
 
+站点只占用这两个路径：根目录下只有 `index.html`、`404.html` 和 `docs/`。官网的脚本、样式和图片都放在 `/docs/_home/` 下，所以上游网关只需转发 `/`（精确匹配）和 `/docs/` 前缀。`build` 会拒绝引用这两个路径以外资源的页面。
+
 顶栏高 64px、横向铺满。两边使用 README 原版商标，共用颜色、字体和深浅色偏好；Logo 在当前标签返回官网。官网和文档各自使用适合当前页面的导航。
 
 ## 发布方式：静态文件 + Nginx
@@ -36,7 +38,7 @@ sudo mkdir -p /srv/www/weknora/releases/20260915-1
 sudo tar -xzf weknora-site-v0.8.2.tar.gz -C /srv/www/weknora/releases/20260915-1
 ```
 
-解压后该目录下应直接有 `index.html`、`docs/`、`_next/`，无需再套一层 `static-site/`。
+解压后该目录下应直接有 `index.html`、`404.html`、`docs/`，无需再套一层 `static-site/`。
 
 ### 3. 配置域名根目录
 

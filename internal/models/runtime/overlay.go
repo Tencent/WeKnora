@@ -94,20 +94,31 @@ func (rt *Runtime) LoadOverlay(configDir string) error {
 	return rt.loadOverlayValidated(configDir, nil)
 }
 
-// loadOverlayValidated validates every candidate before publishing a generation.
-func (rt *Runtime) loadOverlayValidated(configDir string, validate func(*Provider) error) error {
+// ReadDeploymentOverlay reads config/models.json (or the path in
+// MODELS_CONFIG). A missing file returns nil data and no error; baseDir
+// resolves the overlay's relative icon paths.
+func ReadDeploymentOverlay(configDir string) (data []byte, baseDir string, err error) {
 	path := os.Getenv("MODELS_CONFIG")
 	if path == "" {
 		path = filepath.Join(configDir, "models.json")
 	}
-	data, err := os.ReadFile(path)
+	data, err = os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil
+			return nil, "", nil
 		}
-		return fmt.Errorf("read %s: %w", path, err)
+		return nil, "", fmt.Errorf("read %s: %w", path, err)
 	}
-	return rt.applyOverlayValidated(data, filepath.Dir(path), validate)
+	return data, filepath.Dir(path), nil
+}
+
+// loadOverlayValidated validates every candidate before publishing a generation.
+func (rt *Runtime) loadOverlayValidated(configDir string, validate func(*Provider) error) error {
+	data, baseDir, err := ReadDeploymentOverlay(configDir)
+	if err != nil || data == nil {
+		return err
+	}
+	return rt.applyOverlayValidated(data, baseDir, validate)
 }
 
 // ApplyOverlay applies overlay JSON to the registry. baseDir resolves

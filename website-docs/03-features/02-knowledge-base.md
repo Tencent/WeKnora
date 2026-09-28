@@ -127,7 +127,8 @@ graph TB
     KB --> EMB["EmbeddingModelID / SummaryModelID"]
     KB --> VLM["VLMConfig (视觉模型)"]
     KB --> ASR["ASRConfig (语音识别)"]
-    KB --> IMG["ImageProcessingConfig"]
+    KB --> IMG["ImageProcessingConfig (图片理解)"]
+    IMG --> ICP["ImageAttrsEnabled + ImageActions (属性观察 + 条件 OCR)"]
     KB --> EXT["ExtractConfig (知识图谱)"]
     KB --> FAQ["FAQConfig (仅 faq 类型)"]
     KB --> QG["QuestionGenerationConfig (问题生成)"]
@@ -183,7 +184,32 @@ graph TB
 
 **ASRConfig**：`enabled` / `model_id` / `language`（语言提示，可选）。
 
-**ImageProcessingConfig**：`model_id`。
+**ImageProcessingConfig（图片属性观察与条件 OCR）**：
+
+| 字段 | 类型 | 默认 | 说明 |
+| --- | --- | --- | --- |
+| `model_id` | string | - | 图片理解使用的 VLM 模型 ID（参与模型用量追踪） |
+| `image_attrs_enabled` | bool | false | 图片属性观察管线开关。关闭（默认）＝历史行为：每张图片各发一次描述请求、各发一次 OCR 请求，不做属性观察；开启后第一轮「属性观察＋描述」，再由代码纯函数按观察结果决定该图是否值得再跑一轮 OCR |
+| `image_actions` | object | 见下 | OCR 触发条件：`{ ocr: { on: ImageAttrCondition[], on_unobserved: bool } }`。`on` 为「属性=值」触发条件列表；`on_unobserved` 为属性未被模型观察时的保守兜底（默认 true＝仍 OCR） |
+
+开启 `image_attrs_enabled` 后，模型**不再对图片分类**，只逐项「观察」属性并产出描述。本期激活两个观察项（完整注册表见 `GET /api/v1/image-attrs/schema`，只读、需 Viewer 权限；该注册表是全局的，不随知识库变化）：
+
+| 属性 | 取值 | 含义 |
+| --- | --- | --- |
+| `contain.text` | `none` / `sparse` / `block` | 图内成段文字的密集程度。`block`＝值得 OCR 的正文 |
+| `contain.data_visual` | `true` / `false` | 是否含图表 / 数据可视化（轴标签等也可能含文字） |
+
+OCR 决策是代码纯函数 `DecideOCR`（`internal/application/service/image_attr_decision.go`），不落库：
+
+- 满足 `contain.text == block` **或** `contain.data_visual == true` → 跑 OCR；
+- 策略读取到的属性**缺键**（模型漏答该行，或答了非法取值）→ 按 `on_unobserved` 兜底（默认仍 OCR）；
+- 全部属性都被观察到、且都不命中 → 跳过 OCR。
+
+模型答非所问 / 属性缺失一律按兜底策略处理，观察失误只多花一次调用、不会丢内容。注意**属性缺键是正常结果**：观察失败时不会写入保守默认值（schema 版本 `attrs/2`），因此 `image_attrs` 可能为空对象，读取方需区分「未观察到」与「观察到了负值」。
+
+管线与观察结果记录在每张图的处理轨迹子 span 上，便于核对与排查：input `pipeline` = `observation_driven`（本开关开启）或 `caption_ocr`（关闭，历史行为）；output `attr_policy`（本轮 OCR 决策）、`image_attrs`（观察到的属性）、`ocr_skipped`（`attr_policy`＝被策略跳过 / `disabled`＝OCR 总开关关闭）、`observation_failed`（未形成有效观察）、`chunks_created`。
+
+单次上传 / 重新解析可在请求体的 `process_config`（`KnowledgeProcessOverrides`）里按文档覆盖 `image_attrs_enabled` 与 `image_actions`；未传的项沿用知识库设置。`image_actions` 按 action key 合并（`on` 整体替换）。接口字段见[知识库 API](../04-api/02-api-knowledge.md)，管线细节见[文档解析](03-document-parsing.md)。
 
 **QuestionGenerationConfig（问题生成）**：`enabled`；`question_count` 每分块生成问题数（默认 3，上限 10）；`custom_instructions` 目标受众 / 风格说明。
 

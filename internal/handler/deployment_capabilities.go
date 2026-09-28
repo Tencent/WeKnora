@@ -24,6 +24,7 @@ var DeploymentCapabilityKeys = []string{
 	"settings.sandbox",
 	"settings.sandbox.docker",
 	"settings.sandbox.host",
+	"settings.sandbox.remote",
 }
 
 // DeploymentCapability describes whether a deployment exposes a feature route.
@@ -53,6 +54,7 @@ type DeploymentFeatureAvailability struct {
 	Sandbox       bool
 	SandboxDocker bool
 	SandboxHost   bool
+	SandboxRemote bool
 }
 
 func supportedDeploymentCapability(supported bool) DeploymentCapability {
@@ -92,6 +94,13 @@ func BuildDeploymentCapabilities(
 		sandboxHost.Reason = "route_not_registered"
 	}
 
+	sandboxRemote := DeploymentCapability{Supported: available.Sandbox && available.SandboxRemote}
+	if available.Sandbox && !available.SandboxRemote {
+		sandboxRemote.Reason = "not_supported_in_lite"
+	} else if !available.Sandbox {
+		sandboxRemote.Reason = "route_not_registered"
+	}
+
 	return DeploymentCapabilitiesData{
 		Edition: edition,
 		Capabilities: map[string]DeploymentCapability{
@@ -108,6 +117,7 @@ func BuildDeploymentCapabilities(
 			"settings.sandbox":        supportedDeploymentCapability(available.Sandbox),
 			"settings.sandbox.docker": sandboxDocker,
 			"settings.sandbox.host":   sandboxHost,
+			"settings.sandbox.remote": sandboxRemote,
 		},
 	}
 }

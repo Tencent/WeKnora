@@ -391,9 +391,23 @@ func (r *knowledgeRepository) GetKnowledgeBatch(
 	ctx context.Context, tenantID uint64, ids []string,
 ) ([]*types.Knowledge, error) {
 	var knowledge []*types.Knowledge
-	if err := r.db.WithContext(ctx).Debug().
+	if err := r.db.WithContext(ctx).
 		Where("tenant_id = ? AND id IN ?", tenantID, ids).
 		Find(&knowledge).Error; err != nil {
+		return nil, err
+	}
+	return knowledge, nil
+}
+
+// GetKnowledgeBatchByIDOnly gets knowledge in batch without a tenant filter.
+func (r *knowledgeRepository) GetKnowledgeBatchByIDOnly(
+	ctx context.Context, ids []string,
+) ([]*types.Knowledge, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	var knowledge []*types.Knowledge
+	if err := r.db.WithContext(ctx).Where("id IN ?", ids).Find(&knowledge).Error; err != nil {
 		return nil, err
 	}
 	return knowledge, nil
@@ -653,10 +667,17 @@ func (r *knowledgeRepository) UpdateActiveDeletingKnowledgeColumns(
 // across PostgreSQL and SQLite. The promote UPDATE's WHERE clause
 // (parse_status='finalizing' AND pending_subtasks_count=0) makes it
 // safe to run from any number of concurrent callers — at most one wins.
+// Both run in one transaction: a promote that failed after its decrement
+// committed left the counter at zero with nobody left to promote the row.
 func (r *knowledgeRepository) FinalizeSubtask(
 	ctx context.Context, id string,
 ) (int, bool, error) {
-	promoted, err := finalizeSubtask(r.db.WithContext(ctx), id)
+	var promoted bool
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var err error
+		promoted, err = finalizeSubtask(tx, id)
+		return err
+	})
 	if err != nil {
 		return 0, false, err
 	}

@@ -11,6 +11,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/localsandbox"
 	"github.com/Tencent/WeKnora/internal/localsandbox/adapter"
+	"github.com/Tencent/WeKnora/internal/localsandbox/skilltree"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/sandbox"
 )
@@ -18,7 +19,11 @@ import (
 // Host adapters must not version the user's workspace. This compile-time check
 // keeps WorkspaceCheckpointer from committing a real project if the adapter is
 // ever injected as the process-wide shell runner.
-var _ service.WorkspaceVersioning = (*adapter.Adapter)(nil)
+var (
+	_ service.WorkspaceVersioning = (*adapter.Adapter)(nil)
+	_ service.HostSkillTree       = (*skilltree.Tree)(nil)
+	_ service.HostSkillInstaller  = (*adapter.InstallManager)(nil)
+)
 
 type hostSandboxDeps struct {
 	newBackend func() (localsandbox.Backend, error)
@@ -27,6 +32,7 @@ type hostSandboxDeps struct {
 	// sessionRoot is where auto-allocated session workspaces go. Empty falls
 	// back to ~/Documents/WeKnoraLite.
 	sessionRoot string
+	skillsRoot  string
 	// projects maps a session to a user-approved project directory.
 	// Nil means every session gets an auto-allocated workspace.
 	projects localsandbox.ProjectLookup
@@ -34,11 +40,17 @@ type hostSandboxDeps struct {
 	modes localsandbox.ModeLookup
 }
 
-// buildHostSandboxManager returns the process-wide host backend, or nil when
+type hostSandboxParts struct {
+	manager sandbox.Manager
+	service *localsandbox.Service
+	builder *localsandbox.PolicyBuilder
+}
+
+// buildHostSandbox returns the process-wide host backend parts, or nil when
 // this machine cannot enforce one. Web/server binaries never compile this
 // file (see sandbox_host_stub.go); the desktop build tag is the isolation.
-// Never returns a manager that would run commands unsandboxed.
-func buildHostSandboxManager(deps hostSandboxDeps) sandbox.Manager {
+// Never returns parts that would run commands unsandboxed.
+func buildHostSandbox(deps hostSandboxDeps) *hostSandboxParts {
 	if deps.newBackend == nil {
 		return nil
 	}
@@ -64,9 +76,18 @@ func buildHostSandboxManager(deps hostSandboxDeps) sandbox.Manager {
 	resolver := localsandbox.NewWorkspaceResolver(localsandbox.DirLayout{
 		SessionRoot: sessionRoot,
 	}, deps.projects)
-	builder := localsandbox.NewPolicyBuilder(homeDir, appDataDir)
+	builder := localsandbox.NewPolicyBuilder(homeDir, appDataDir).WithSkillsRoot(deps.skillsRoot)
 	svc := localsandbox.NewService(backend, resolver, builder, deps.modes)
-	return adapter.New(svc)
+	return &hostSandboxParts{manager: adapter.New(svc), service: svc, builder: builder}
+}
+
+// buildHostSandboxManager returns the process-wide host backend, or nil when
+// this machine cannot enforce one.
+func buildHostSandboxManager(deps hostSandboxDeps) sandbox.Manager {
+	if parts := buildHostSandbox(deps); parts != nil {
+		return parts.manager
+	}
+	return nil
 }
 
 // hostModeLookup reads the machine-local approval mode from desktop prefs.
@@ -99,28 +120,52 @@ func provideHostSandboxManager(
 	projects localsandbox.ProjectLookup,
 	modes localsandbox.ModeLookup,
 ) service.HostSandboxManager {
+	out := service.HostSandboxManager{Desktop: true}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		logger.Warnf(context.Background(),
 			"[sandbox] host backend disabled: cannot resolve home directory: %v", err)
-		return service.HostSandboxManager{}
+		return out
 	}
-	mgr := buildHostSandboxManager(hostSandboxDeps{
+	skillsRoot := defaultHostSkillsRoot(home)
+	parts := buildHostSandbox(hostSandboxDeps{
 		newBackend:  localsandbox.NewBackend,
 		homeDir:     home,
 		appDataDir:  hostAppDataDir(home),
 		sessionRoot: "",
+		skillsRoot:  skillsRoot,
 		projects:    projects,
 		modes:       modes,
 	})
-	if mgr != nil {
-		logger.Infof(context.Background(), "[sandbox] host backend enabled")
+	return finishHostSandbox(parts, skillsRoot)
+}
+
+// finishHostSandbox publishes the host backend whenever the OS sandbox is
+// available. A skill tree that cannot be created hides local skill installs
+// and leaves chat on the host manager.
+func finishHostSandbox(parts *hostSandboxParts, skillsRoot string) service.HostSandboxManager {
+	out := service.HostSandboxManager{Desktop: true}
+	if parts == nil {
+		return out
 	}
-	return service.HostSandboxManager{Manager: mgr}
+	logger.Infof(context.Background(), "[sandbox] host backend enabled")
+	out.Manager = parts.manager
+	tree, err := skilltree.New(skillsRoot)
+	if err != nil {
+		logger.Warnf(context.Background(), "[sandbox] local skills unavailable: %v", err)
+		return out
+	}
+	out.SkillTree = tree
+	out.SkillInstaller = adapter.NewInstallManager(parts.service, parts.builder)
+	return out
 }
 
 func defaultHostSessionRoot(homeDir string) string {
 	return filepath.Join(homeDir, "Documents", "WeKnoraLite")
+}
+
+func defaultHostSkillsRoot(homeDir string) string {
+	return filepath.Join(homeDir, ".weknora", "skills")
 }
 
 func hostAppDataDir(home string) string {

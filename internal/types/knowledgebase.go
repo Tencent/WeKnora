@@ -159,8 +159,15 @@ type KnowledgeBase struct {
 type KnowledgeBaseConfig struct {
 	// Chunking configuration
 	ChunkingConfig ChunkingConfig `yaml:"chunking_config"         json:"chunking_config"`
-	// Image processing configuration
-	ImageProcessingConfig ImageProcessingConfig `yaml:"image_processing_config" json:"image_processing_config"`
+	// Image processing configuration.
+	//
+	// nil means "no change" when updating, the same contract IndexingStrategy
+	// uses. A request that does not mention this field must leave the image
+	// settings alone: the attribute-observation switch and the attribute policy
+	// are things a knowledge base accumulates, and a client that predates them
+	// would otherwise reset the lot on any save. Sending an object — empty
+	// included — replaces the whole configuration.
+	ImageProcessingConfig *ImageProcessingConfig `yaml:"image_processing_config" json:"image_processing_config"`
 	// FAQ configuration (only for FAQ type knowledge bases)
 	FAQConfig *FAQConfig `yaml:"faq_config"              json:"faq_config"`
 	// Wiki configuration (only for wiki-enabled knowledge bases)
@@ -533,6 +540,19 @@ func ParseProviderScheme(filePath string) string {
 type ImageProcessingConfig struct {
 	// Model ID
 	ModelID string `yaml:"model_id" json:"model_id"`
+	// ImageActions overrides the built-in attribute→work table (see
+	// DefaultImageActions). A nil value keeps the conservative default: run OCR
+	// for block text, data visuals, and unobserved images.
+	ImageActions *ImageActionsConfig `yaml:"image_actions,omitempty" json:"image_actions,omitempty"`
+	// ImageAttrsEnabled turns the attribute-observed image pipeline on for this
+	// knowledge base. It is off by default on purpose, so upgrading an
+	// existing deployment never changes what happens to documents already
+	// being ingested: with it off every image is described and OCR'd exactly
+	// as before. When on, the describe round also observes image attributes and
+	// the attribute policy decides whether OCR runs for it. A single upload can
+	// override it per document through
+	// KnowledgeProcessOverrides.ImageAttrsEnabled.
+	ImageAttrsEnabled bool `yaml:"image_attrs_enabled,omitempty" json:"image_attrs_enabled,omitempty"` //nolint:lll // one-line struct tag
 }
 
 // Value implements the driver.Valuer interface, used to convert ChunkingConfig to database value

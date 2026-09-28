@@ -33,6 +33,26 @@ type Reranker interface {
 	GetModelID() string
 }
 
+// PassageLimiter is implemented by rerankers whose vendor documents how large
+// a document may be. The rerank stage builds its passages itself (title,
+// chunk body, captions, OCR text, generated questions), so it can fit them to
+// the limit instead of letting one oversized candidate fail the whole
+// request, which the protocol layer rightly refuses to truncate on its own.
+type PassageLimiter interface {
+	// MaxPassageRunes returns the longest document, in runes, one request
+	// can carry beside query. 0 means no documented limit.
+	MaxPassageRunes(query string) int
+}
+
+// MaxPassageRunes reports r's passage limit for query, or 0 when r documents
+// none.
+func MaxPassageRunes(r Reranker, query string) int {
+	if limiter, ok := r.(PassageLimiter); ok {
+		return limiter.MaxPassageRunes(query)
+	}
+	return 0
+}
+
 type RankResult struct {
 	Index          int          `json:"index"`
 	Document       DocumentInfo `json:"document"`

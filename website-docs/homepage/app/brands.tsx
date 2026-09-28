@@ -1,5 +1,6 @@
 import Image from "next/image";
 import { Icon } from "./ui";
+import { homeAssets } from "../../shared/header";
 
 type Integration = { name: string; logo: string } | { name: string; icon: string };
 
@@ -47,7 +48,7 @@ export const modelProviders: Integration[] = [
 export function IntegrationMark({ item }: { item: Integration }) {
   return <>
     {"logo" in item
-      ? <Image src={`/brands/${item.logo}`} alt="" aria-hidden="true" width={22} height={22} />
+      ? <Image src={`${homeAssets}/brands/${item.logo}`} alt="" aria-hidden="true" width={22} height={22} />
       : <Icon name={item.icon} />}
     {item.name}
   </>;

@@ -14,7 +14,7 @@ func TestValidateMinerUOutboundURL_RejectsLoopback(t *testing.T) {
 }
 
 func TestPingMinerU_RejectsPrivateEndpoint(t *testing.T) {
-	ok, msg := PingMinerU("http://127.0.0.1:8080")
+	ok, msg := PingMinerU("http://127.0.0.1:8080", "")
 	assert.False(t, ok)
 	assert.Contains(t, msg, "SSRF")
 }

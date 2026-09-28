@@ -234,7 +234,45 @@
               :placeholder="$t('settings.parser.mineruEndpointPlaceholder')"
               clearable
             />
+            <p class="form-desc">{{ $t('settings.parser.mineruEndpointHint') }}</p>
           </div>
+          <div class="form-item">
+            <label class="form-label">API Key</label>
+            <t-input
+              v-model="config.mineru_server_api_key"
+              type="password"
+              :placeholder="$t('settings.parser.mineruServerApiKeyPlaceholder')"
+              clearable
+            >
+              <template #prefix-icon><t-icon name="lock-on" /></template>
+            </t-input>
+            <p class="form-desc">{{ $t('settings.parser.mineruServerApiKeyHint') }}</p>
+          </div>
+          <div class="form-item">
+            <label class="form-label">{{ $t('settings.parser.mineruTierLabel') }}</label>
+            <t-select v-model="config.mineru_tier" :placeholder="$t('settings.parser.mineruTierDefault')" clearable>
+              <t-option value="flash" :label="$t('settings.parser.mineruTierFlash')" />
+              <t-option value="basic" :label="$t('settings.parser.mineruTierBasic')" />
+              <t-option value="standard" :label="$t('settings.parser.mineruTierStandard')" />
+              <t-option value="advanced" :label="$t('settings.parser.mineruTierAdvanced')" />
+            </t-select>
+            <p class="form-desc">{{ $t('settings.parser.mineruTierHint') }}</p>
+          </div>
+          <div class="form-item">
+            <label class="form-label">{{ $t('settings.parser.parseMethodLabel') }}</label>
+            <t-select v-model="config.mineru_parse_method">
+              <t-option value="auto" :label="$t('settings.parser.parseMethodAuto')" />
+              <t-option value="ocr" :label="$t('settings.parser.parseMethodOCR')" />
+              <t-option value="txt" :label="$t('settings.parser.parseMethodText')" />
+            </t-select>
+            <p class="form-desc">{{ $t('settings.parser.parseMethodHint') }}</p>
+          </div>
+        </section>
+
+        <section v-if="currentEngine.Name === 'mineru'" class="setting-drawer__section">
+          <h4 class="setting-drawer__section-title">{{ $t('settings.parser.mineruLegacySection') }}</h4>
+          <p class="form-desc">{{ $t('settings.parser.mineruLegacySectionHint') }}</p>
+
           <div class="form-item">
             <label class="form-label">Backend</label>
             <t-select v-model="config.mineru_model" :placeholder="$t('settings.parser.defaultPipeline')" clearable>
@@ -253,15 +291,6 @@
               clearable
             />
             <p class="form-desc">{{ $t('settings.parser.vlmServerUrlHint') }}</p>
-          </div>
-          <div class="form-item">
-            <label class="form-label">{{ $t('settings.parser.parseMethodLabel') }}</label>
-            <t-select v-model="config.mineru_parse_method">
-              <t-option value="auto" :label="$t('settings.parser.parseMethodAuto')" />
-              <t-option value="ocr" :label="$t('settings.parser.parseMethodOCR')" />
-              <t-option value="txt" :label="$t('settings.parser.parseMethodText')" />
-            </t-select>
-            <p class="form-desc">{{ $t('settings.parser.parseMethodHint') }}</p>
           </div>
           <div class="form-item">
             <label class="form-label">{{ $t('settings.parser.featuresLabel', '识别选项') }}</label>
@@ -418,6 +447,8 @@ const DEFAULT_PARSER_CONFIG: ParserEngineConfig = {
   docreader_transport: 'grpc',
   mineru_endpoint: '',
   mineru_api_key: '',
+  mineru_server_api_key: '',
+  mineru_tier: '',
   mineru_model: 'pipeline',
   mineru_vlm_server_url: '',
   mineru_enable_formula: true,
@@ -557,6 +588,8 @@ async function loadConfig() {
       docreader_transport: data?.docreader_transport ?? DEFAULT_PARSER_CONFIG.docreader_transport ?? 'grpc',
       mineru_endpoint: data?.mineru_endpoint ?? DEFAULT_PARSER_CONFIG.mineru_endpoint ?? '',
       mineru_api_key: data?.mineru_api_key ?? DEFAULT_PARSER_CONFIG.mineru_api_key ?? '',
+      mineru_server_api_key: data?.mineru_server_api_key ?? DEFAULT_PARSER_CONFIG.mineru_server_api_key ?? '',
+      mineru_tier: data?.mineru_tier ?? DEFAULT_PARSER_CONFIG.mineru_tier ?? '',
       mineru_model: data?.mineru_model ?? DEFAULT_PARSER_CONFIG.mineru_model ?? '',
       mineru_vlm_server_url: data?.mineru_vlm_server_url ?? DEFAULT_PARSER_CONFIG.mineru_vlm_server_url ?? '',
       mineru_enable_formula: data?.mineru_enable_formula ?? DEFAULT_PARSER_CONFIG.mineru_enable_formula ?? true,
@@ -595,6 +628,8 @@ function buildConfigPayload(): ParserEngineConfig {
     docreader_transport: (config.value.docreader_transport ?? 'grpc').trim() || 'grpc',
     mineru_endpoint: config.value.mineru_endpoint?.trim() ?? '',
     mineru_api_key: config.value.mineru_api_key?.trim() ?? '',
+    mineru_server_api_key: config.value.mineru_server_api_key?.trim() ?? '',
+    mineru_tier: config.value.mineru_tier?.trim() ?? '',
     mineru_model: config.value.mineru_model?.trim() ?? '',
     mineru_vlm_server_url: config.value.mineru_vlm_server_url?.trim() ?? '',
     mineru_enable_formula: config.value.mineru_enable_formula,
