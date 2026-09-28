@@ -12,6 +12,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/Tencent/WeKnora/internal/common"
 	"github.com/Tencent/WeKnora/internal/datasource"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -559,6 +560,9 @@ func (c *Connector) sync(
 				continue
 			}
 			rendered := renderDocument(document.title(), blocks)
+			// The renderer stays context-free; the warning is emitted here,
+			// where both the request context and the node identity are known.
+			warnUnknownBlockTypes(ctx, document, rendered)
 			items = append(items, fetchedDocument(
 				scope.ResourceID, scope.Reference.WorkspaceID, document, rendered,
 			))
@@ -849,6 +853,59 @@ func cloneRevisions(revisions map[string]string) map[string]string {
 type renderResult struct {
 	Markdown     string
 	UnknownTypes []string
+}
+
+// unknownBlockTypes identifies a document whose Blocks payload contains types
+// the renderer does not model. The log line and the pipeline event are both
+// built from this value, so the collection logic is testable on its own
+// instead of through log text.
+type unknownBlockTypes struct {
+	NodeID     string
+	Title      string
+	URL        string
+	BlockTypes []string
+}
+
+// collectUnknownBlockTypes reports the unknown block types of a rendered
+// document, or false when the document rendered without loss.
+func collectUnknownBlockTypes(document node, rendered renderResult) (unknownBlockTypes, bool) {
+	if len(rendered.UnknownTypes) == 0 {
+		return unknownBlockTypes{}, false
+	}
+	types := make([]string, len(rendered.UnknownTypes))
+	copy(types, rendered.UnknownTypes)
+	return unknownBlockTypes{
+		NodeID:     document.ID,
+		Title:      document.title(),
+		URL:        strings.TrimSpace(document.URL),
+		BlockTypes: types,
+	}, true
+}
+
+func (u unknownBlockTypes) fields() map[string]interface{} {
+	return map[string]interface{}{
+		"node_id":     u.NodeID,
+		"title":       u.Title,
+		"url":         u.URL,
+		"block_types": strings.Join(u.BlockTypes, ","),
+		"count":       len(u.BlockTypes),
+	}
+}
+
+// warnUnknownBlockTypes surfaces blocks the renderer could not model. The type
+// names also land in document metadata, but metadata is invisible to operators
+// watching sync logs, so the loss is reported as a warning and as a structured
+// pipeline event as well. Content of those blocks is still missing from the
+// rendered Markdown until their payloads are modelled.
+func warnUnknownBlockTypes(ctx context.Context, document node, rendered renderResult) {
+	unknown, ok := collectUnknownBlockTypes(document, rendered)
+	if !ok {
+		return
+	}
+	logger.Warnf(ctx,
+		"[DingTalk] document %s (%s) contains unmodelled block types %s; their text is not rendered",
+		unknown.NodeID, unknown.Title, strings.Join(unknown.BlockTypes, ", "))
+	common.PipelineWarn(ctx, "DingTalkConnector", "unknown_block_types", unknown.fields())
 }
 
 func fetchedDocument(
