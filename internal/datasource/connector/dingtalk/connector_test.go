@@ -709,9 +709,10 @@ func captureLogs(t *testing.T) *bytes.Buffer {
 	return &buffer
 }
 
-// skippedNodesFixture mixes supported documents with the node types this
-// connector deliberately cannot ingest, spread over a folder tree: reporting
-// must survive nesting and must not disturb what is fetched.
+// skippedNodesFixture mixes supported documents with the node types a workspace
+// scan drops — media, a Base (which only syncs through its own selection) and a
+// type with no ingest path — spread over a folder tree: reporting must survive
+// nesting and must not disturb what is fetched.
 func skippedNodesFixture() *fakeAPI {
 	return &fakeAPI{
 		workspaces: []workspace{{ID: "space", RootNodeID: "root", Name: "Space"}},
@@ -753,7 +754,7 @@ func skippedNodesFixture() *fakeAPI {
 	}
 }
 
-// Seeing an unsupported node must not change what is fetched: the supported
+// Seeing a skipped node must not change what is fetched: the supported
 // siblings still sync exactly as before, and nothing is requested for a skip.
 func TestFetchAllKeepsSyncingSupportedSiblingsOfSkippedNodes(t *testing.T) {
 	api := skippedNodesFixture()
@@ -776,10 +777,10 @@ func TestFetchAllKeepsSyncingSupportedSiblingsOfSkippedNodes(t *testing.T) {
 	}
 	for _, skipped := range []string{"video-1", "table-1", "mind-1"} {
 		if _, exists := byID[skipped]; exists {
-			t.Fatalf("unsupported node %q was synced: %#v", skipped, byID[skipped])
+			t.Fatalf("skipped node %q was synced: %#v", skipped, byID[skipped])
 		}
 		if api.blockCalls[skipped] != 0 {
-			t.Fatalf("unsupported node %q was requested: %#v", skipped, api.blockCalls)
+			t.Fatalf("skipped node %q was requested: %#v", skipped, api.blockCalls)
 		}
 	}
 	if len(api.blockCalls) != 2 || api.blockCalls["doc-1"] != 1 || api.blockCalls["doc-2"] != 1 {
@@ -789,7 +790,8 @@ func TestFetchAllKeepsSyncingSupportedSiblingsOfSkippedNodes(t *testing.T) {
 
 // Every node the connector drops must reach the sync log with its identity and
 // the concrete reason it cannot be ingested: media is never downloaded on
-// purpose, while a native DingTalk type simply has no ingest path yet.
+// purpose, a Base syncs only through its own selection, and a native DingTalk
+// type has no ingest path yet.
 func TestSyncLogsEverySkippedNodeWithItsReason(t *testing.T) {
 	api := skippedNodesFixture()
 	logs := captureLogs(t)
@@ -804,7 +806,7 @@ func TestSyncLogsEverySkippedNodeWithItsReason(t *testing.T) {
 		`[DingTalk] skip node video-1 (name="Lesson.mp4" type=FILE category=VIDEO extension=mp4): ` +
 			"video/media files are deliberately not downloaded by this connector",
 		`[DingTalk] skip node table-1 (name="Roadmap.able" type=FILE category=ALIDOC extension=able): ` +
-			"DingTalk multi-dimensional table has no ingest path in this connector yet",
+			"DingTalk multi-dimensional table is ingested only through a base= selection, not as a workspace document",
 		`[DingTalk] skip node mind-1 (name="Plan.amind" type=FILE category=ALIDOC extension=amind): ` +
 			"DingTalk mind map has no ingest path in this connector yet",
 	} {
@@ -931,9 +933,10 @@ func TestScanScopeReportsSkippedNodesAndSingleDocumentScopeHasNone(t *testing.T)
 	}
 }
 
-// The reason has to say which kind of unsupported a node is: a video is skipped
-// on purpose, a native type has simply not been implemented.
-func TestSkipReasonDistinguishesMediaFromUnimplementedTypes(t *testing.T) {
+// The reason has to say which kind of skip a node is: a video is skipped on
+// purpose, a Base syncs only through its own selection, and a native type has
+// simply not been implemented.
+func TestSkipReasonDistinguishesMediaBaseAndUnimplementedTypes(t *testing.T) {
 	for _, testCase := range []struct {
 		label string
 		node  node
@@ -963,9 +966,19 @@ func TestSkipReasonDistinguishesMediaFromUnimplementedTypes(t *testing.T) {
 			"no ingest path for this DingTalk node type in this connector yet",
 		},
 		{
+			// A Base is ingestible, but not as a workspace document: a scan
+			// cannot read one, and its tables come from a base= selection. The
+			// reason must never go back to claiming there is no ingest path.
 			"multidimensional table",
 			node{Type: "FILE", Category: "ALIDOC", Extension: "able"},
-			"DingTalk multi-dimensional table has no ingest path in this connector yet",
+			"DingTalk multi-dimensional table is ingested only through a base= selection, not as a workspace document",
+		},
+		{
+			// A type that genuinely has no ingest path and does carry a
+			// dedicated label: this is what the map's named reason is for.
+			"presentation",
+			node{Type: "FILE", Category: "ALIDOC", Extension: "appt"},
+			"DingTalk presentation has no ingest path in this connector yet",
 		},
 		{
 			"mind map",

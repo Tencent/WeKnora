@@ -605,8 +605,8 @@ function dingtalkManualKindLabel(reference: string): string {
 // DingTalk is the only connector whose selectable content is partly invisible to
 // the tree: a personal-space document and a 多维表 Base are readable by id but
 // nothing enumerates them, so `revealExistingSelections` has nothing to reveal
-// for those refs and the picker would fall back to the bare root list (eight
-// unrelated team knowledge bases). The selection area therefore previews the
+// for those refs and the picker would fall back to the bare root list (every
+// workspace the tenant exposes). The selection area therefore previews the
 // real selection — manual references and tree picks together — instead of
 // relying on the tree to show it.
 interface DingTalkSelectionRow {
@@ -718,16 +718,16 @@ const hasDingTalkManualSelection = computed(() => dingtalkManualReferences.value
 
 // dingtalkTreeExpanded is the explicit expander state of the knowledge-base
 // tree while manual references exist. The picker is collapsed by default then:
-// the selection area is the preview of what will sync, so eight unrelated team
-// knowledge bases must not sit next to one pasted 多维表 as if they were part of
-// it. Expanding changes nothing about the selection itself.
+// the selection area is the preview of what will sync, so the team's knowledge
+// bases must not sit next to one pasted 多维表 as if they were part of it.
+// Expanding changes nothing about the selection itself.
 const dingtalkTreeExpanded = ref(false)
 
 // dingtalkTreeLoaded records that the knowledge-base tree has really been
 // fetched. The tree is listed lazily — the first time the expander is opened —
 // so a data source whose only selection is a pasted 多维表 never asks for the
-// eight team knowledge bases it will not use. Collapsing and re-expanding must
-// not fetch again, which is what this flag answers.
+// knowledge bases it will not use. Collapsing and re-expanding must not fetch
+// again, which is what this flag answers.
 const dingtalkTreeLoaded = ref(false)
 
 // showDingTalkResourceTree gates the tree rows (toolbar + list). Without a
@@ -1394,7 +1394,7 @@ async function ensureTempDataSource(): Promise<string> {
 async function loadResources() {
   // DingTalk with a manual selection shows the preview, not the tree: the
   // knowledge-base tree is collapsed behind its expander, so there is nothing
-  // to fill and the eight team knowledge bases must not be fetched. The tree is
+  // to fill and the team's knowledge bases must not be fetched. The tree is
   // listed when the expander is first opened (see toggleDingTalkResourceTree),
   // which is also the only moment its contents become visible.
   if (isDingTalkConnector(form.value.type) && hasDingTalkManualSelection.value

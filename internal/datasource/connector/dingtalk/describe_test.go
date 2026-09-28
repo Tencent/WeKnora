@@ -200,7 +200,9 @@ func TestListResourcesExpandsABaseThroughTheWikiNodesAPI(t *testing.T) {
 					ID: "child-a", WorkspaceID: "personal-space", Name: "Appendix.adoc",
 					Type: "FILE", Category: "ALIDOC", Extension: "adoc",
 				},
-				// No ingest path: it is not offered as a selectable resource.
+				// A Base is not offered as a tree child: only folders and wiki
+				// documents are selectable here, and a Base is added through
+				// its own base= reference.
 				{
 					ID: "child-able", WorkspaceID: "personal-space", Name: "Nested.able",
 					Type: "FILE", Category: "ALIDOC", Extension: "able",

@@ -165,9 +165,9 @@ type dingTalkAPI interface {
 	getNode(context.Context, string) (node, error)
 	documentBlocks(context.Context, string) ([]json.RawMessage, error)
 	// listNotableTables, listNotableFields and listNotableRecords read a
-	// multi-dimensional table (able) through the notable API. A Base is not a
-	// wiki node and has no listable index, so every call is addressed by the
-	// Base ID the user supplied.
+	// multi-dimensional table (able) through the notable API. A Base is a wiki
+	// node but not a wiki document and has no listable index, so every call is
+	// addressed by the Base ID the user supplied.
 	listNotableTables(context.Context, string) ([]notableTable, error)
 	listNotableFields(context.Context, string, string) ([]notableField, error)
 	listNotableRecords(context.Context, string, string, string) (notableRecordPage, error)

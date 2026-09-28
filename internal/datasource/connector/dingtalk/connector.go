@@ -45,21 +45,32 @@ var mediaExtensions = map[string]struct{}{
 // the concrete type instead of only saying the node is unsupported. The
 // remaining types expose no read API at all.
 var unsupportedDocumentExtensions = map[string]string{
-	"able":  "DingTalk multi-dimensional table",
 	"amind": "DingTalk mind map",
 	"appt":  "DingTalk presentation",
 	"adraw": "DingTalk drawing",
 }
 
+// baseExtension is the wiki node extension of a multi-dimensional table
+// (Base). A Base is ingestible, but not as a workspace document: its tables are
+// read through the notable API only when the Base itself is selected (base=),
+// and a workspace scan cannot turn one into an item. It therefore has its own
+// deliberate-skip reason instead of sitting in the map above, where it would
+// claim there is no ingest path.
+const baseExtension = "able"
+
 // skipReason explains, in the words of the sync log, why a node the connector
-// just listed will not be ingested. Both answers are deterministic: retrying
-// the sync can never turn such a node into a document, which is what separates
-// a skip from a failed read that must be retried.
+// just listed will not be ingested. Every answer is deterministic: retrying the
+// sync can never turn such a node into a document, which is what separates a
+// skip from a failed read that must be retried.
 func skipReason(n node) string {
 	extension := strings.ToLower(strings.TrimSpace(n.Extension))
 	_, knownMediaExtension := mediaExtensions[extension]
 	if strings.EqualFold(n.Category, "VIDEO") || knownMediaExtension {
 		return "video/media files are deliberately not downloaded by this connector"
+	}
+	if extension == baseExtension {
+		return "DingTalk multi-dimensional table is ingested only through a base= selection, " +
+			"not as a workspace document"
 	}
 	if label := unsupportedDocumentExtensions[extension]; label != "" {
 		return label + " has no ingest path in this connector yet"
@@ -809,9 +820,9 @@ func (c *Connector) sync(
 			continue
 		}
 
-		// Skipped nodes are deterministic: this connector has no ingest path for
-		// them, so they are reported once and never retried — unlike a failed
-		// read below, which must stay retryable.
+		// Skipped nodes are deterministic: no retry can turn one into a
+		// document, so they are reported once and never retried — unlike a
+		// failed read below, which must stay retryable.
 		for _, node := range skipped {
 			logger.Infof(ctx, "[DingTalk] skip node %s (name=%q type=%s category=%s extension=%s): %s",
 				node.ID, node.title(), node.Type, node.Category, node.Extension, skipReason(node))
