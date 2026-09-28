@@ -61,12 +61,19 @@ func prepareMessagesWithModelContext(
 	registry.RegisterSearchResults(knowledgeResults)
 	var contextParts []string
 	if len(knowledgeRows) > 0 {
+		data := map[string]interface{}{
+			"display_type": "search_results",
+			"results":      knowledgeRows,
+		}
+		// The FILTER_TOP_K stage may have cut the ranked list; carry the counts
+		// so the model context view can say the passages are a subset.
+		if truncation := chatManage.Truncation; truncation != nil {
+			data["retrieval_shown"] = truncation.Shown
+			data["retrieval_candidates"] = truncation.Candidates
+		}
 		contextParts = append(contextParts, registry.ModelToolResult(&types.ToolResult{
 			Success: true,
-			Data: map[string]interface{}{
-				"display_type": "search_results",
-				"results":      knowledgeRows,
-			},
+			Data:    data,
 		}))
 	}
 	if len(webRows) > 0 {

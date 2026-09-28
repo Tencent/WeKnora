@@ -22,6 +22,30 @@ func TestAnnotateSearchNotes(t *testing.T) {
 	}
 }
 
+func TestAnnotateSearchNotesReportsTruncatedRetrieval(t *testing.T) {
+	t.Parallel()
+	base := "<retrieval mode=\"hybrid\">\n</retrieval>"
+	got := annotateSearchNotes(base, map[string]interface{}{
+		"retrieval_shown":      5,
+		"retrieval_candidates": 146,
+	})
+	if !strings.Contains(got, `<subset shown="5" candidates="146">`) ||
+		!strings.Contains(got, "a complete list cannot be derived from this view") ||
+		!strings.HasSuffix(got, "</retrieval>") {
+		t.Fatalf("annotated = %q", got)
+	}
+	for name, data := range map[string]map[string]interface{}{
+		"complete":        {"retrieval_shown": 5, "retrieval_candidates": 5},
+		"no counts":       {},
+		"shown only":      {"retrieval_shown": 5},
+		"candidates only": {"retrieval_candidates": 146},
+	} {
+		if annotateSearchNotes(base, data) != base {
+			t.Fatalf("%s: a non-truncated retrieval must leave the output unchanged", name)
+		}
+	}
+}
+
 func TestAnnotateGraphResult(t *testing.T) {
 	t.Parallel()
 	base := "<retrieval mode=\"graph\">\n</retrieval>"

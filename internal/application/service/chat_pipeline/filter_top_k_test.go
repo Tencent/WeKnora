@@ -2,6 +2,7 @@ package chatpipeline
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/types"
@@ -57,6 +58,65 @@ func TestPluginFilterTopKUsesDeterministicTieBreakers(t *testing.T) {
 
 	require.Nil(t, err)
 	assert.Equal(t, []string{"chunk-c", "chunk-a", "chunk-b"}, searchResultIDs(chatManage.MergeResult))
+}
+
+// Truncation is the evidence that the prompt context is a subset: it must be
+// recorded exactly when results were dropped.
+func TestPluginFilterTopKRecordsTruncation(t *testing.T) {
+	chatManage := &types.ChatManage{
+		PipelineRequest: types.PipelineRequest{RerankTopK: 2},
+		PipelineState: types.PipelineState{
+			MergeResult: []*types.SearchResult{
+				{ID: "first", KnowledgeID: "doc-a", Score: 0.9},
+				{ID: "second", KnowledgeID: "doc-b", Score: 0.8},
+				{ID: "third", KnowledgeID: "doc-c", Score: 0.7},
+				{ID: "fourth", KnowledgeID: "doc-d", Score: 0.6},
+			},
+		},
+	}
+
+	plugin := &PluginFilterTopK{}
+	err := plugin.OnEvent(
+		context.Background(),
+		types.FILTER_TOP_K,
+		chatManage,
+		func() *PluginError { return nil },
+	)
+
+	require.Nil(t, err)
+	require.Len(t, chatManage.MergeResult, 2)
+	require.NotNil(t, chatManage.Truncation)
+	assert.Equal(t, types.RetrievalTruncation{Shown: 2, Candidates: 4}, *chatManage.Truncation)
+}
+
+// A prompt that saw every candidate must not carry the subset caveat, so the
+// field stays nil when the result count is at or below topK.
+func TestPluginFilterTopKLeavesTruncationNilWhenNothingDropped(t *testing.T) {
+	for _, topK := range []int{2, 5} {
+		t.Run(fmt.Sprintf("topK=%d", topK), func(t *testing.T) {
+			chatManage := &types.ChatManage{
+				PipelineRequest: types.PipelineRequest{RerankTopK: topK},
+				PipelineState: types.PipelineState{
+					MergeResult: []*types.SearchResult{
+						{ID: "first", KnowledgeID: "doc-a", Score: 0.9},
+						{ID: "second", KnowledgeID: "doc-b", Score: 0.8},
+					},
+				},
+			}
+
+			plugin := &PluginFilterTopK{}
+			err := plugin.OnEvent(
+				context.Background(),
+				types.FILTER_TOP_K,
+				chatManage,
+				func() *PluginError { return nil },
+			)
+
+			require.Nil(t, err)
+			require.Len(t, chatManage.MergeResult, 2)
+			assert.Nil(t, chatManage.Truncation)
+		})
+	}
 }
 
 func searchResultIDs(results []*types.SearchResult) []string {
