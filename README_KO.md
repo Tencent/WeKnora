@@ -323,7 +323,7 @@ docker compose up -d    # 새 이미지로 컨테이너 재생성
 
 | 구성 요소 | 선택지 |
 |-----------|--------|
-| [LLM](https://weknora.weixin.qq.com/docs/03-features/06-models) | 27개 내장 벤더. OpenAI / Azure OpenAI / Anthropic / DeepSeek / Qwen (Alibaba Cloud) / Zhipu / Hunyuan / Doubao (Volcengine) / Gemini / MiniMax / NVIDIA / SiliconFlow / OpenRouter / LiteLLM / Ollama 등 |
+| [LLM](https://weknora.weixin.qq.com/docs/03-features/06-models) | 27개 내장 벤더. OpenAI / Azure OpenAI / Anthropic / DeepSeek / Qwen (Alibaba Cloud) / Zhipu / Hunyuan / Doubao (Volcengine) / Gemini / MiniMax / NVIDIA / SiliconFlow / OpenRouter / Requesty / LiteLLM / Ollama 등 |
 | Embedding | Ollama / BGE / GTE / Zhipu / OpenAI 호환 API |
 | 벡터 DB | PostgreSQL (pgvector) / Elasticsearch / OpenSearch / Milvus / Weaviate / Qdrant / Apache Doris / Tencent VectorDB |
 | [오브젝트 스토리지](https://weknora.weixin.qq.com/docs/03-features/19-storage-backends) | 로컬 / Tencent Cloud COS / MinIO / AWS S3 / Volcengine TOS / Alibaba Cloud OSS / Kingsoft Cloud KS3 / Huawei Cloud OBS |
