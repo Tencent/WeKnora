@@ -237,10 +237,13 @@ func (c *Chunk) EmbeddingContent() string {
 // Must be called before CreateInBatches for SQLite compatibility.
 func AssignChunkSeqIDs(tx *gorm.DB, chunks []*Chunk) error {
 	needAssign := false
+	// 同一批里显式指定的 SeqID 也占位：从 MAX(seq_id)+1 起分配会撞上它们。
+	var highestRequested int64
 	for _, c := range chunks {
 		if c.SeqID == 0 {
 			needAssign = true
-			break
+		} else if c.SeqID > highestRequested {
+			highestRequested = c.SeqID
 		}
 	}
 	if !needAssign {
@@ -254,6 +257,9 @@ func AssignChunkSeqIDs(tx *gorm.DB, chunks []*Chunk) error {
 	next := int64(1)
 	if maxSeqID != nil {
 		next = *maxSeqID + 1
+	}
+	if highestRequested >= next {
+		next = highestRequested + 1
 	}
 	for _, c := range chunks {
 		if c.SeqID == 0 {
