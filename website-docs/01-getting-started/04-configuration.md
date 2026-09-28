@@ -47,7 +47,7 @@ flowchart LR
 | `server.port` | int | 8080 | HTTP 监听端口，校验范围 1–65535 |
 | `server.host` | string | "0.0.0.0" | 监听地址 |
 | `server.log_path` | string | 空 | 日志文件路径（也可用环境变量 `LOG_PATH`） |
-| `server.shutdown_timeout` | duration | 30s | 优雅停机超时 |
+| `server.shutdown_timeout` | duration | 30s | 优雅停机总预算。连接排空与资源清理共用，默认留 5s 给清理 |
 
 ### conversation（`ConversationConfig`）——检索问答管线
 
