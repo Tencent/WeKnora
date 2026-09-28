@@ -35,6 +35,7 @@ type headingBlock struct {
 }
 
 type listBlock struct {
+	Text string `json:"text"`
 	List struct {
 		Level flexibleInt `json:"level"`
 	} `json:"list"`
@@ -67,6 +68,7 @@ type attachmentBlock struct {
 // {"rawType":"..."}. It carries no body text, only the original type name.
 type unknownBlock struct {
 	RawType string `json:"rawType"`
+	Text    string `json:"text"`
 }
 
 type inline struct {
@@ -194,6 +196,13 @@ func renderBlock(
 			marker = "unknown:" + rawType
 		}
 		unknown[marker] = struct{}{}
+		// Some unmodelled blocks still carry their body text: the live `sdt`
+		// block is a table of contents and holds the whole thing. The type stays
+		// unknown — the marker above still reports it — but the text must not be
+		// dropped just because the presentation semantics are not modelled.
+		if text := strings.TrimSpace(value.Unknown.Text); text != "" {
+			writeParagraph(builder, escapeText(text))
+		}
 		// Preserve useful content when DingTalk introduces a container block
 		// before the connector learns its presentation semantics.
 		renderChildBlocks(builder, value.Children, depth, unknown)
@@ -242,6 +251,18 @@ func renderListBlock(
 	// Inline children are the current item's own text and block children are
 	// further items, so walk the children in payload order: consecutive inline
 	// elements form one item, and every block child becomes its own item.
+	// The live Blocks API delivers one block per list item, with the item text
+	// in the block's own text field and no children at all: across every list
+	// block of nine production documents there is no children, no list.level
+	// and no listId. Every other text-bearing block type already falls back to
+	// its own text field; lists were the one that did not, so their content was
+	// dropped without even an unknown-type marker — the type is known, it just
+	// carried nothing the renderer read.
+	ownText := strings.TrimSpace(listOwnText(value, blockType))
+	if ownText != "" {
+		writeListItem(builder, indent, marker, escapeText(ownText))
+	}
+
 	var pending strings.Builder
 	flush := func() {
 		if text := pending.String(); text != "" {
@@ -252,6 +273,13 @@ func renderListBlock(
 	for _, child := range value.Children {
 		childType := blockChildType(child)
 		if childType == "" {
+			if ownText != "" {
+				// A shape the API does not produce. The item text is already in
+				// the block's own field, so a second bullet would duplicate it;
+				// surface the shape instead of guessing which one is the item.
+				unknown["list_text_and_inline_children"] = struct{}{}
+				continue
+			}
 			pending.WriteString(renderInlines([]json.RawMessage{child}, depth+1, unknown))
 			continue
 		}
@@ -277,6 +305,15 @@ func renderListBlock(
 		}
 	}
 	flush()
+}
+
+// listOwnText returns the item text a list block carries in its own payload.
+// The live Blocks API puts one item per block and its text here.
+func listOwnText(value block, blockType string) string {
+	if blockType == "orderedlist" {
+		return value.OrderedList.Text
+	}
+	return value.UnorderedList.Text
 }
 
 // blockChildType reports the block type of a list child, or "" when the child
