@@ -5521,6 +5521,11 @@ export default {
   },
   pluginPages: {
     notResponding: '插件页面没有响应，可能加载失败。',
+    openLink: {
+      title: '打开外部链接',
+      body: '插件「{plugin}」要在新窗口打开：{url}。确认后，这个页面再打开同一网站的链接不再询问。',
+      open: '打开'
+    },
     requestFailed: '插件请求失败',
     fromPlugin: '由插件「{name}」提供'
   },

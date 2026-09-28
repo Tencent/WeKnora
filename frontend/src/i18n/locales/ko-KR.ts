@@ -5519,6 +5519,11 @@ export default {
   },
   pluginPages: {
     notResponding: '플러그인 페이지가 응답하지 않습니다. 로드에 실패했을 수 있습니다.',
+    openLink: {
+      title: '외부 링크 열기',
+      body: '플러그인 "{plugin}"이(가) 새 창에서 {url}을(를) 열려고 합니다. 허용하면 이 페이지에서는 같은 사이트의 링크를 다시 묻지 않고 엽니다.',
+      open: '열기'
+    },
     requestFailed: '플러그인 요청에 실패했습니다',
     fromPlugin: '플러그인 「{name}」 제공'
   },

@@ -34,6 +34,7 @@ Ship `index.js` inside the plugin package, for example as
 | `toast(message, theme)` | A toast in the app: info, success, warning or error. |
 | `confirm(message, title?)` | A confirmation dialog; resolves true or false. |
 | `navigate(path)` | Opens a page of the app. |
+| `openLink(url)` | Opens a web page in a new window once the user agrees to its site (asked once per site while the page is open); resolves whether it opened. A page cannot open windows itself: the sandbox has no popups, since a window could carry what the page shows past the plugin's egress grant. `connect()` routes clicks on links to other sites here unless `routeLinks: false`. |
 | `resize(height)` | Sets the frame height. `connect()` does this automatically unless `autoResize: false`: it reports the content's height (the bottom of `<body>` and its children, with margins), so the frame grows and shrinks with the page. Keep `<body>` at its content's height (no `height: 100vh`), or the frame cannot shrink. |
 | `close()` | Closes the page, where the mount allows it. |
 | `on('theme' \| 'locale' \| 'init', fn)` | Theme or language changed, or the mount's context changed (another knowledge base). |

@@ -101,6 +101,7 @@ export function connect(options = {}) {
         if (options.applyTheme !== false) applyTheme(msg.data.theme, win.document)
         if (first) {
           if (options.autoResize !== false) watchHeight(win, bridge)
+          if (options.routeLinks !== false) routeLinks(win, bridge)
           resolveConnect(bridge)
         } else {
           emit('init', msg.data)
@@ -142,6 +143,12 @@ export function connect(options = {}) {
       confirm: (message, title) => call('ui.confirm', { message, title }),
       /** Opens a page of the app, by path ("/platform/knowledge-bases"). */
       navigate: (path) => call('ui.navigate', { path }),
+      /**
+       * Opens a web page in a new window, once the user agrees to its site
+       * (asked once per site). Resolves whether it opened. Pages cannot open
+       * windows themselves; connect() routes clicks on external links here.
+       */
+      openLink: (url) => call('ui.openLink', { url }),
       /** Sets the frame height in pixels (autoResize does this for you). */
       resize: (height) => call('ui.resize', { height }),
       /** Closes the page, where the mount allows it. */
@@ -191,6 +198,27 @@ export function contentHeight(win = globalThis.window) {
   }
   const root = win.getComputedStyle(doc.documentElement)
   return Math.ceil(bottom + px(root.paddingBottom) + px(root.borderBottomWidth))
+}
+
+// routeLinks sends clicks on links to other sites through the bridge: the
+// sandbox would block the window they open, or keep them in the frame.
+function routeLinks(win, bridge) {
+  const doc = win.document
+  if (!doc) return
+  doc.addEventListener('click', (event) => {
+    if (event.defaultPrevented || event.button !== 0) return
+    const a = event.target && event.target.closest ? event.target.closest('a[href]') : null
+    if (!a) return
+    let url
+    try {
+      url = new URL(a.getAttribute('href'), win.location.href)
+    } catch {
+      return
+    }
+    if ((url.protocol !== 'https:' && url.protocol !== 'http:') || url.origin === win.location.origin) return
+    event.preventDefault()
+    bridge.openLink(url.href).catch(() => {})
+  })
 }
 
 function watchHeight(win, bridge) {

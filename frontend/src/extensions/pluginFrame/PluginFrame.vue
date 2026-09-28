@@ -6,7 +6,7 @@
       class="plugin-frame__iframe"
       :src="src"
       :title="title"
-      sandbox="allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox"
+      sandbox="allow-scripts allow-forms"
       referrerpolicy="no-referrer"
       :style="fill ? undefined : { height: `${height}px` }"
     />
@@ -34,8 +34,8 @@ import { pageFileUrl, type FramePage } from './pluginPages'
 // One plugin page in a sandboxed iframe: an opaque origin (no
 // allow-same-origin), so it cannot read WeKnora's storage or call its API.
 // It talks to the app only through the bridge, which answers messages from
-// this iframe alone. Links it opens in a new window leave the sandbox: the
-// new window has its own origin and no way back into the app.
+// this iframe alone. It cannot open windows itself: a link goes through the
+// bridge (ui.openLink), and the user agrees to each site it leads to.
 const props = withDefaults(
   defineProps<{
     page: FramePage
@@ -63,6 +63,8 @@ const ready = ref(false)
 const stalled = ref(false)
 
 const src = computed(() => pageFileUrl(getApiBaseUrl(), props.page))
+// Sites the user agreed this page may open, asked once each.
+const trustedSites = new Set<string>()
 const title = computed(() => localizedText(props.page.name, locale.value))
 
 const initData = (): BridgeInit => ({
@@ -113,6 +115,30 @@ const host = createBridgeHost({
     },
     navigate(path) {
       void router.push(path)
+    },
+    openLink(url) {
+      const site = new URL(url).host
+      const open = () => {
+        window.open(url, '_blank', 'noopener,noreferrer')
+        return true
+      }
+      if (trustedSites.has(site)) return Promise.resolve(open())
+      return new Promise<boolean>((resolve) => {
+        const dialog = DialogPlugin.confirm({
+          header: t('pluginPages.openLink.title'),
+          body: t('pluginPages.openLink.body', { plugin: title.value, url }),
+          confirmBtn: t('pluginPages.openLink.open'),
+          onConfirm: () => {
+            dialog.destroy()
+            trustedSites.add(site)
+            resolve(open())
+          },
+          onClose: () => {
+            dialog.destroy()
+            resolve(false)
+          },
+        })
+      })
     },
     resize(h) {
       height.value = Math.max(h, 48)

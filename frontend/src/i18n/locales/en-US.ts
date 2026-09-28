@@ -2991,6 +2991,11 @@ export default {
   },
   pluginPages: {
     notResponding: 'The plugin page is not responding; it may have failed to load.',
+    openLink: {
+      title: 'Open an external link',
+      body: 'The plugin "{plugin}" wants to open {url} in a new window. Once you agree, this page opens links to the same site without asking.',
+      open: 'Open'
+    },
     requestFailed: 'The plugin request failed',
     fromPlugin: 'Provided by the {name} plugin'
   },

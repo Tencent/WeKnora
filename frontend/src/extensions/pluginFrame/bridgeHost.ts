@@ -34,6 +34,12 @@ export interface BridgeHandlers {
   toast(message: string, theme: ToastTheme): void
   confirm(message: string, title?: string): Promise<boolean>
   navigate(path: string): void
+  /**
+   * Opens a web page in a new window, as the user agrees: the page's
+   * sandbox has no popups of its own, which would carry what it shows past
+   * the plugin's egress grant. Resolves whether it opened.
+   */
+  openLink(url: string): Promise<boolean>
   resize(height: number): void
   close(): void
   /**
@@ -116,6 +122,17 @@ export function plainCopy<T>(value: T): T {
   return value === undefined ? value : JSON.parse(JSON.stringify(value))
 }
 
+/** An http(s) URL, normalized; null for anything else. */
+export function webURL(raw: unknown): string | null {
+  if (typeof raw !== 'string' || raw.length > 4096) return null
+  try {
+    const u = new URL(raw)
+    return u.protocol === 'https:' || u.protocol === 'http:' ? u.href : null
+  } catch {
+    return null
+  }
+}
+
 export function createBridgeHost(opts: BridgeHostOptions): BridgeHost {
   const allow = createRateLimiter(opts.burst ?? 30, opts.perSecond ?? 10, opts.now)
   const post = (msg: Record<string, unknown>) => {
@@ -166,6 +183,11 @@ export function createBridgeHost(opts: BridgeHostOptions): BridgeHost {
         if (!isAppPath(params.path)) throw new BridgeCallError('path must be a path of the app', 400)
         h.navigate(params.path)
         return null
+      case 'ui.openLink': {
+        const url = webURL(params.url)
+        if (!url) throw new BridgeCallError('url must be an http(s) URL', 400)
+        return h.openLink(url)
+      }
       case 'ui.resize': {
         const height = Number(params.height)
         if (!Number.isFinite(height) || height < 0) throw new BridgeCallError('height must be a number', 400)

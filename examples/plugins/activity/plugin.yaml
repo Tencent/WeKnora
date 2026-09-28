@@ -1,6 +1,6 @@
 schemaVersion: 1
 id: weknora-examples.activity
-version: 1.2.0
+version: 1.2.1
 apiVersion: weknora.plugin/v1
 name: { en-US: Activity feed, zh-CN: 动态 }
 description:

@@ -5,7 +5,7 @@ import { reactive } from 'vue'
 
 // The page's side of the bridge, as plugins ship it.
 import { BridgeError, connect, contentHeight } from '../../../../packages/plugin-ui/index.js'
-import { createBridgeHost, createRateLimiter, isAppPath, plainCopy, type BridgeHandlers, type BridgeInit } from './bridgeHost'
+import { createBridgeHost, createRateLimiter, isAppPath, plainCopy, webURL, type BridgeHandlers, type BridgeInit } from './bridgeHost'
 
 type Listener = (event: { data: unknown; source: unknown }) => void
 
@@ -40,6 +40,10 @@ function setup(overrides: Partial<BridgeHandlers> = {}, burst = 30, context: Rec
     toast: (m, t) => calls.push(`toast ${t} ${m}`),
     confirm: async (m) => m === 'yes?',
     navigate: (p) => calls.push(`navigate ${p}`),
+    openLink: async (u) => {
+      calls.push(`open ${u}`)
+      return u.startsWith('https://docs.')
+    },
     resize: (h) => calls.push(`resize ${h}`),
     close: () => calls.push('close'),
     ...overrides,
@@ -73,6 +77,9 @@ test('a page connects, calls its backend and the app', async () => {
   assert.equal(await wk.confirm('no?'), false)
   await wk.navigate('/platform/knowledge-bases')
   await assert.rejects(wk.navigate('//evil.example'), /path of the app/)
+  assert.equal(await wk.openLink('https://docs.example.com/a b'), true)
+  assert.equal(await wk.openLink('https://elsewhere.example/'), false)
+  await assert.rejects(wk.openLink('javascript:alert(1)'), /http\(s\) URL/)
   await wk.resize(321.4)
   await wk.close()
   assert.deepEqual(calls, [
@@ -81,6 +88,8 @@ test('a page connects, calls its backend and the app', async () => {
     'api GET /missing null',
     'toast success saved',
     'navigate /platform/knowledge-bases',
+    'open https://docs.example.com/a%20b',
+    'open https://elsewhere.example/',
     'resize 322',
     'close',
   ])
@@ -103,6 +112,9 @@ test('the app ignores other windows and rate-limits a page', async () => {
 })
 
 test('helpers', () => {
+  assert.equal(webURL('https://x.com/p?q=1'), 'https://x.com/p?q=1')
+  assert.equal(webURL('data:text/html,x'), null)
+  assert.equal(webURL('/relative'), null)
   assert.equal(isAppPath('/platform/x'), true)
   assert.equal(isAppPath('//x.com'), false)
   assert.equal(isAppPath('https://x.com'), false)

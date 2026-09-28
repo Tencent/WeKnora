@@ -11,7 +11,7 @@ from urllib.parse import urlparse
 
 from weknora_plugin import KV_MAX_VALUE_BYTES, ErrorCode, Plugin, PluginError, UIResponse, kv_value_size
 
-plugin = Plugin("weknora-examples.links", "1.1.1")
+plugin = Plugin("weknora-examples.links", "1.1.2")
 
 MAX_LINKS = 200
 EDITORS = {"contributor", "admin", "owner"}

@@ -11,7 +11,7 @@ from datetime import datetime, timedelta, timezone
 
 from weknora_plugin import ErrorCode, Plugin, PluginError, UIResponse, WebhookResponse
 
-plugin = Plugin("weknora-examples.activity", "1.2.0")
+plugin = Plugin("weknora-examples.activity", "1.2.1")
 
 # Each entry is a key of its own under "feed/". One value holding the whole
 # feed would hit the store's size limit, and two events arriving together

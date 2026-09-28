@@ -2991,6 +2991,11 @@ export default {
   },
   pluginPages: {
     notResponding: 'プラグインページが応答しません。読み込みに失敗した可能性があります。',
+    openLink: {
+      title: '外部リンクを開く',
+      body: 'プラグイン「{plugin}」が新しいウィンドウで {url} を開こうとしています。許可すると、このページでは同じサイトへのリンクを確認なしで開きます。',
+      open: '開く'
+    },
     requestFailed: 'プラグインへのリクエストに失敗しました',
     fromPlugin: 'プラグイン「{name}」が提供'
   },

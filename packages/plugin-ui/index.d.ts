@@ -40,6 +40,12 @@ export interface Bridge {
   toast(message: string, theme?: 'info' | 'success' | 'warning' | 'error'): Promise<void>
   confirm(message: string, title?: string): Promise<boolean>
   navigate(path: string): Promise<void>
+  /**
+   * Opens a web page in a new window once the user agrees to its site (asked
+   * once per site); resolves whether it opened. Pages cannot open windows
+   * themselves.
+   */
+  openLink(url: string): Promise<boolean>
   resize(height: number): Promise<void>
   close(): Promise<void>
   /** The form an instance editor page sits in (connectors, webSearch editors). */
@@ -63,6 +69,8 @@ export interface ConnectOptions {
    */
   autoResize?: boolean
   applyTheme?: boolean
+  /** Send clicks on links to other sites through openLink (default true). */
+  routeLinks?: boolean
   timeout?: number
   window?: Window
 }

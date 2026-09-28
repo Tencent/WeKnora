@@ -28,11 +28,14 @@ const PluginUIAssetsPrefix = "/api/v1/plugin-ui/assets"
 // bridge. The page also runs in an iframe sandbox without
 // allow-same-origin, so it cannot read WeKnora's storage.
 // The sandbox directive keeps a page opened on its own (a link to its URL)
-// out of WeKnora's origin too, not only inside PluginFrame's iframe.
+// out of WeKnora's origin too, not only inside PluginFrame's iframe. It
+// opens no windows: links go through the bridge (ui.openLink), which asks
+// the user, since a window would carry what the page shows past the
+// plugin's egress grant.
 const pluginPageCSP = "default-src 'none'; script-src 'self' 'unsafe-inline'; " +
 	"style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; " +
 	"media-src 'self' data: blob:; connect-src 'none'; form-action 'none'; base-uri 'none'; " +
-	"frame-ancestors 'self'; sandbox allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox"
+	"frame-ancestors 'self'; sandbox allow-scripts allow-forms"
 
 // maxUIRequestBody bounds what a page can send in one request.
 const maxUIRequestBody = 1 << 20
