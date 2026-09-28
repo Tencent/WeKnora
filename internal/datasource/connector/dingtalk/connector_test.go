@@ -810,7 +810,7 @@ func uploadedDocumentsFixture() *fakeAPI {
 					ID: "adoc", WorkspaceID: "space", Name: "Runbook.adoc", Type: "FILE",
 					Category: "ALIDOC", Extension: "adoc", ModifiedTime: "r1",
 				},
-				binaryNode("docx", "Manual v4.10.1.docx", "docx"),
+				binaryNode("docx", "Employee-Handbook.docx", "docx"),
 				binaryNode("pptx", "Deck.pptx", "pptx"),
 				binaryNode("xlsx", "Sheet.xlsx", "xlsx"),
 				binaryNode("pdf", "Policy.pdf", "pdf"),
@@ -876,7 +876,7 @@ func TestFetchAllDownloadsUploadedDocuments(t *testing.T) {
 		{
 			"docx",
 			"application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-			"Manual v4.10.1.docx",
+			"Employee-Handbook.docx",
 			"PK\x03\x04word-bytes",
 		},
 		{
@@ -946,7 +946,7 @@ func TestFetchAllHandlesUploadedDocumentSelection(t *testing.T) {
 // advance the cursor, exactly like a failed block read.
 func TestIncrementalSyncRetriesUploadedDownloadFailures(t *testing.T) {
 	api := uploadedDocumentsFixture()
-	document := binaryNode("docx", "Manual v4.10.1.docx", "docx")
+	document := binaryNode("docx", "Employee-Handbook.docx", "docx")
 	document.ModifiedTimestamp = 1_768_000_000_000
 	api.nodes["root"] = []node{document}
 	api.dlErrors = map[string]error{"docx": errors.New("unsupported file type")}
@@ -994,7 +994,7 @@ func TestValidateProbesUploadedDocumentsWithoutDownloading(t *testing.T) {
 	api := &fakeAPI{
 		workspaces: []workspace{{ID: "space", RootNodeID: "root", Name: "Space"}},
 		nodes: map[string][]node{
-			"root": {binaryNode("docx", "Manual.docx", "docx")},
+			"root": {binaryNode("docx", "Employee-Handbook.docx", "docx")},
 		},
 	}
 
@@ -1018,7 +1018,7 @@ func TestBinaryDocumentFileNameKeepsASingleExtension(t *testing.T) {
 		extension string
 		want      string
 	}{
-		{"Manual v4.10.1.docx", "docx", "Manual v4.10.1.docx"},
+		{"Employee-Handbook.docx", "docx", "Employee-Handbook.docx"},
 		{"Deck", "pptx", "Deck.pptx"},
 		{"Report.PDF", "pdf", "Report.pdf"},
 		{"quarterly/2026:sheet.xlsx", "xlsx", "quarterly_2026_sheet.xlsx"},
