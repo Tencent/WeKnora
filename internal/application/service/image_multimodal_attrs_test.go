@@ -82,6 +82,16 @@ func (r *attrsChunkRepo) CreateChunks(_ context.Context, chunks []*types.Chunk) 
 	return nil
 }
 
+func (r *attrsChunkRepo) UpdateChunk(_ context.Context, chunk *types.Chunk) error {
+	for i, c := range r.created {
+		if c.ID == chunk.ID {
+			r.created[i] = chunk
+			return nil
+		}
+	}
+	return fmt.Errorf("chunk %s not found", chunk.ID)
+}
+
 type attrsChunkService struct {
 	interfaces.ChunkService
 	repo *attrsChunkRepo
@@ -89,14 +99,24 @@ type attrsChunkService struct {
 
 func (s *attrsChunkService) GetRepository() interfaces.ChunkRepository { return s.repo }
 
+func (s *attrsChunkService) GetChunkByIDOnly(_ context.Context, id string) (*types.Chunk, error) {
+	for _, c := range s.repo.created {
+		if c.ID == id {
+			return c, nil
+		}
+	}
+	return nil, fmt.Errorf("chunk %s not found", id)
+}
+
 // newAttrsTestService wires a service whose file reads come from memory and
-// whose knowledge base lookup returns nil, which makes indexChunks skip vector
-// work (it bails out on a nil KB). That keeps the test focused on the image
+// whose knowledge base has no embedding pipeline, which makes indexChunks take
+// its "nothing to index" path: the chunks are persisted and marked indexed
+// without touching a retrieval engine. That keeps the test focused on the image
 // pipeline rather than on the retrieval engine.
 func newAttrsTestService(fileSvc interfaces.FileService, repo *attrsChunkRepo) *ImageMultimodalService {
 	return &ImageMultimodalService{
 		chunkService: &attrsChunkService{repo: repo},
-		kbService:    &orphanKBService{},
+		kbService:    &orphanKBService{kb: &types.KnowledgeBase{ID: "kb-1"}},
 		tenantRepo:   &attrsTenantRepo{},
 		fileSvc:      fileSvc,
 	}
