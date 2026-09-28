@@ -169,7 +169,9 @@ func resolveWithVendor(ref Ref, vendor *Provider) (*Resolved, error) {
 	); err != nil {
 		return nil, err
 	}
-	applyLegacyThinkingControl(&completions, ref.Extra[models.ExtraThinkingControl])
+	legacyThinkingControlApplied := applyLegacyThinkingControl(
+		&completions, ref.Extra[models.ExtraThinkingControl],
+	)
 	out.OpenAICompletions = completions
 
 	responses := api.DefaultOpenAIResponses()
@@ -213,9 +215,9 @@ func resolveWithVendor(ref Ref, vendor *Provider) (*Resolved, error) {
 		return nil, err
 	}
 	out.GoogleGenerativeAI = google
-	// An explicit legacy thinking_control is the operator saying "this row
-	// does think, send the switch this way", so it outranks the catalog.
-	if strings.TrimSpace(ref.Extra[models.ExtraThinkingControl]) == "" {
+	// A non-default legacy thinking_control is an explicit per-row override.
+	// An ignored provider default lets the catalog's reasoning metadata apply.
+	if !legacyThinkingControlApplied {
 		out.silenceThinkingForNonReasoningModel()
 	}
 
