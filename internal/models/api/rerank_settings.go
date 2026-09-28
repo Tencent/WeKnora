@@ -74,6 +74,11 @@ type RerankSettings struct {
 // DefaultRerankMaxDocuments bounds one rerank request for a vendor that
 // documents no per-request ceiling of its own.
 //
+// It covers the document count whenever max_documents is unset, even when the
+// vendor documents other ceilings: a request budget in characters and a
+// per-document one bound different dimensions, and neither bounds the count
+// (many short documents fit any character budget).
+//
 // Splitting only on what the catalog states is not enough: most rerank vendors
 // state nothing, and "no ceiling declared" used to mean "put the whole
 // candidate set in one request", which is how an undocumented per-request
@@ -97,15 +102,18 @@ type RerankSettings struct {
 // left alone.
 const DefaultRerankMaxDocuments = 60
 
-// BatchLimits renders the ceilings for SplitBatches. A vendor that documents
-// nothing still gets a bounded request instead of an unbounded one.
+// BatchLimits renders the ceilings for SplitBatches. A vendor that leaves the
+// document count undocumented still gets a bounded request instead of an
+// unbounded one, whatever else it documents.
 func (s RerankSettings) BatchLimits() BatchLimits {
 	maxItems := s.MaxDocuments
-	if maxItems <= 0 && s.MaxRequestChars <= 0 {
-		// Nothing documented at all, so bound the request: one request
-		// carrying the entire candidate set is the failure this guards. A
-		// vendor that documented a request budget instead keeps it — the
-		// default is not a second ceiling on top of theirs.
+	if maxItems <= 0 {
+		// No document-count ceiling is documented. A request budget counted
+		// in characters is not one: 500 one-character documents fit inside a
+		// 2000-character budget, so that vendor would still send the whole
+		// candidate set in a single request — the failure this guards. The
+		// declared budget keeps applying beside the default, and the tighter
+		// of the two splits.
 		maxItems = DefaultRerankMaxDocuments
 	}
 	return BatchLimits{

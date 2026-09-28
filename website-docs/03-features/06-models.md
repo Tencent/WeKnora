@@ -200,7 +200,10 @@
 | `send_return_documents` | bool | false | 是否要求服务端回传文档原文 |
 | `score_scale` | string | `probability` | 分数含义：`probability`（0～1）或 `logit`（未归一化）。填错会让相关度阈值失效 |
 | `truncate` | string | 空 | 服务端截断设置（如 NIM 的 `END`） |
-| `max_documents` / `max_query_chars` / `max_document_chars` / `max_request_chars` | int | 0（不限） | 单次请求的文档数、查询长度、单篇长度与总长度上限，超出自动分批 |
+| `max_documents` | int | 0（取默认上界 60） | 单次请求的文档数上限，超出自动分批。留空或填 0 都按默认上界 60 拆请求（**填 0 不再表示不限**）；需要更大上限时显式填写厂商文档给出的数字，批次随之回到该值 |
+| `max_query_chars` | int | 0（不限） | 查询长度上限，超出按调用失败处理（查询在每个请求里重复，拆文档无法让它变短） |
+| `max_document_chars` | int | 0（不限） | 单篇文档长度上限，超出按调用失败处理 |
+| `max_request_chars` | int | 0（不限） | 单次请求（查询 + 全部文档）的总长度上限，超出自动分批；它与 `max_documents` 同时生效，谁先到就按谁拆 |
 | `max_concurrency` | int | 0（使用默认） | 分批后同时发出的请求数 |
 | `accepts_truncate_prompt_tokens` | bool | false | 服务是否支持 vLLM 的 `truncate_prompt_tokens` |
 | `request_timeout_seconds` | int | 0（默认 60 秒） | 单次请求超时（秒）；超时按调用失败处理，检索回退为召回顺序 |

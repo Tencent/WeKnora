@@ -26,11 +26,19 @@ func TestRerankBatchLimitsBoundAnUndocumentedVendor(t *testing.T) {
 			want:     500,
 		},
 		{
-			// A documented request budget is the vendor's own bound; the
-			// default must not become a second ceiling on top of it.
-			name:     "a documented request budget leaves the item cap unset",
+			// A request budget in characters cannot bound a count: 500
+			// one-character documents fit inside 20000 characters, so the
+			// item cap stays undocumented and the default applies beside it.
+			name:     "a documented request budget does not lift the item cap",
 			settings: RerankSettings{MaxRequestChars: 20000},
-			want:     0,
+			want:     DefaultRerankMaxDocuments,
+		},
+		{
+			// Same for a per-document ceiling: it bounds one item, not how
+			// many of them travel together.
+			name:     "a documented per-document ceiling does not lift the item cap",
+			settings: RerankSettings{MaxDocumentChars: 4096},
+			want:     DefaultRerankMaxDocuments,
 		},
 	}
 
