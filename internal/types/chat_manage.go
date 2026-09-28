@@ -115,6 +115,14 @@ func (i QueryIntent) NeedsKBRetrieval() bool {
 	}
 }
 
+// RetrievalTruncation records how many ranked candidates the FILTER_TOP_K
+// stage cut away before the prompt was rendered. Nil when nothing was dropped,
+// so a prompt only carries the caveat when its context really is a subset.
+type RetrievalTruncation struct {
+	Shown      int `json:"shown"`
+	Candidates int `json:"candidates"`
+}
+
 // PipelineState holds mutable intermediate data that plugins read and write
 // as the pipeline progresses.
 type PipelineState struct {
@@ -138,6 +146,9 @@ type PipelineState struct {
 	ImageDescription     string            `json:"-"`
 	QuotedContext        string            `json:"-"` // Quoted message text, injected at LLM prompt stage
 	SystemPromptOverride string            `json:"-"`
+	// Truncation is set by the FILTER_TOP_K stage when it cut the ranked list,
+	// and nil when the prompt carried every candidate it retrieved.
+	Truncation *RetrievalTruncation `json:"-"`
 	// MemoryPrompt is the long-term memory envelope appended to the system
 	// prompt for this turn, empty when memory is off or nothing matched.
 	MemoryPrompt string `json:"-"`
