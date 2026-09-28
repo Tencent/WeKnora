@@ -444,9 +444,18 @@ func (s *ImageMultimodalService) processImage(
 			c.ChunkType, c.ID, payload.ImageURL, len(c.Content))
 	}
 
-	// Index chunks so they can be retrieved
-	s.indexChunks(ctx, *payload, newChunks, imgBytes, out)
-	out["indexed"] = true
+	// Index chunks so they can be retrieved. The outcome is recorded only once
+	// the write succeeded: the trace used to report indexed: true
+	// unconditionally, so chunks whose index write failed still looked
+	// searchable and the task finished as a success.
+	outcome, indexErr := s.indexChunks(ctx, *payload, newChunks, imgBytes, out)
+	if indexErr != nil {
+		logger.Errorf(ctx, "[ImageMultimodal] %d of %d multimodal chunks were not indexed: %v",
+			outcome.Failed, len(newChunks), indexErr)
+		handleErr = fmt.Errorf("index multimodal chunks: %w", indexErr)
+		return handleErr
+	}
+	out["indexed"] = outcome
 
 	return nil
 }
@@ -642,17 +651,45 @@ func isFinalAsynqAttempt(ctx context.Context) bool {
 	return ok && retried >= maxRetry
 }
 
+// multimodalIndexOutcome is the per-chunk result of one index write, written to
+// out["indexed"] as {"succeeded":N,"failed":M}. It replaces the unconditional
+// `true` this trace used to carry: a persisted-but-unindexed image chunk is
+// invisible to search, so the trace must not claim it was indexed.
+type multimodalIndexOutcome struct {
+	// Succeeded counts the chunks the retrieval engine accepted and that were
+	// marked as indexed afterwards.
+	Succeeded int `json:"succeeded"`
+	// Failed counts the chunks the retrieval engine did not accept, so it is
+	// non-zero only together with the error indexChunks returns. The caller
+	// logs that count and fails the task instead of recording this value.
+	Failed int `json:"failed"`
+}
+
 // indexChunks indexes the newly created multimodal chunks into the retrieval engine
-// so they can participate in semantic search, then embeds the image itself
-// when the knowledge base opted in and its embedding model takes images.
+// so they can participate in semantic search, and reports how many chunks made it.
+// Every failure is returned to the caller: swallowing it left the chunks persisted
+// but unsearchable while the task still finished successfully, so the caller must
+// fail the task (and let asynq retry) instead of recording a successful image.
+// When the knowledge base opted in and its embedding model takes images, it also
+// embeds the image itself (see indexImageVector).
 func (s *ImageMultimodalService) indexChunks(
-	ctx context.Context, payload types.ImageMultimodalPayload, chunks []*types.Chunk,
+	ctx context.Context,
+	payload types.ImageMultimodalPayload,
+	chunks []*types.Chunk,
 	img []byte, out types.JSONMap,
-) {
+) (multimodalIndexOutcome, error) {
+	// Pre-set the failure count: every early return below leaves all chunks
+	// unindexed, and only a completed write lowers it.
+	outcome := multimodalIndexOutcome{Failed: len(chunks)}
+
 	kb, err := s.kbService.GetKnowledgeBaseByIDOnly(ctx, payload.KnowledgeBaseID)
-	if err != nil || kb == nil {
+	if err != nil {
 		logger.Warnf(ctx, "[ImageMultimodal] Failed to get KB for indexing: %v", err)
-		return
+		return outcome, fmt.Errorf("get knowledge base %s: %w", payload.KnowledgeBaseID, err)
+	}
+	if kb == nil {
+		logger.Warnf(ctx, "[ImageMultimodal] Failed to get KB for indexing: knowledge base not found")
+		return outcome, fmt.Errorf("knowledge base %s not found", payload.KnowledgeBaseID)
 	}
 
 	// Skip vector/keyword indexing when the KB has no embedding-based pipeline enabled
@@ -660,7 +697,8 @@ func (s *ImageMultimodalService) indexChunks(
 	// EmbeddingModelID is intentionally empty for such KBs. The multimodal chunks
 	// themselves are already persisted in the DB above, so skipping index here is safe.
 	if !kb.NeedsEmbeddingModel() {
-		logger.Infof(ctx, "[ImageMultimodal] Vector/keyword indexing disabled for KB %s, skipping index for %d multimodal chunks",
+		logger.Infof(ctx,
+			"[ImageMultimodal] Vector/keyword indexing disabled for KB %s, skipping index for %d multimodal chunks",
 			kb.ID, len(chunks))
 		// Still mark chunks as indexed so downstream finalization sees a consistent state.
 		for _, chunk := range chunks {
@@ -674,19 +712,19 @@ func (s *ImageMultimodalService) indexChunks(
 				logger.Warnf(ctx, "[ImageMultimodal] Failed to update chunk %s status to indexed: %v", chunk.ID, uerr)
 			}
 		}
-		return
+		return multimodalIndexOutcome{Succeeded: len(chunks)}, nil
 	}
 
 	embeddingModel, err := s.modelService.GetEmbeddingModel(ctx, kb.EmbeddingModelID)
 	if err != nil {
 		logger.Warnf(ctx, "[ImageMultimodal] Failed to get embedding model for indexing: %v", err)
-		return
+		return outcome, fmt.Errorf("get embedding model %s: %w", kb.EmbeddingModelID, err)
 	}
 
 	tenantInfo, err := s.tenantRepo.GetTenantByID(ctx, payload.TenantID)
 	if err != nil {
 		logger.Warnf(ctx, "[ImageMultimodal] Failed to get tenant for indexing: %v", err)
-		return
+		return outcome, fmt.Errorf("get tenant %d: %w", payload.TenantID, err)
 	}
 	// The factory's unbound path reads TenantInfo from ctx; make sure it's there.
 	ctx = context.WithValue(ctx, types.TenantInfoContextKey, tenantInfo)
@@ -697,7 +735,7 @@ func (s *ImageMultimodalService) indexChunks(
 		ctx, s.retrieveEngine, s.ownership, payload.TenantID, kb.VectorStoreID)
 	if err != nil {
 		logger.Warnf(ctx, "[ImageMultimodal] Failed to init retrieve engine: %v", err)
-		return
+		return outcome, fmt.Errorf("create retrieve engine for KB %s: %w", kb.ID, err)
 	}
 
 	indexInfoList := make([]*types.IndexInfo, 0, len(chunks))
@@ -718,7 +756,7 @@ func (s *ImageMultimodalService) indexChunks(
 
 	if err := engine.BatchIndex(ctx, embeddingModel, indexInfoList); err != nil {
 		logger.Errorf(ctx, "[ImageMultimodal] Failed to index multimodal chunks: %v", err)
-		return
+		return outcome, fmt.Errorf("batch index %d multimodal chunks: %w", len(chunks), err)
 	}
 
 	// Mark chunks as indexed.
@@ -742,6 +780,8 @@ func (s *ImageMultimodalService) indexChunks(
 	if status := s.indexImageVector(ctx, kb, payload, img, chunks, embeddingModel, engine); status != "" {
 		out["image_vector"] = status
 	}
+
+	return multimodalIndexOutcome{Succeeded: len(chunks)}, nil
 }
 
 // indexImageVector embeds the image itself with a multimodal embedding model
