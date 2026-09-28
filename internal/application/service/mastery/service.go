@@ -35,7 +35,7 @@ func (h *CitationTaskHandler) Handle(ctx context.Context, task *asynq.Task) erro
 	if !scope.Valid() || len(payload.Refs) == 0 {
 		return nil
 	}
-	return h.repo.BumpCitation(ctx, scope, payload.Refs)
+	return h.repo.BumpCitationEvent(ctx, scope, payload.MessageID, payload.Refs)
 }
 
 // Service implements interfaces.MasteryService. It resolves the memory scope
@@ -56,7 +56,7 @@ func NewMasteryService(repo interfaces.MasteryRepository, enqueuers ...interface
 	return &Service{repo: repo, enqueuer: enqueuer, config: DefaultConfig()}
 }
 
-func (s *Service) RecordCitations(ctx context.Context, refs []types.MemoryDocAffinity) {
+func (s *Service) RecordCitations(ctx context.Context, messageID string, refs []types.MemoryDocAffinity) {
 	if len(refs) == 0 {
 		return
 	}
@@ -70,7 +70,7 @@ func (s *Service) RecordCitations(ctx context.Context, refs []types.MemoryDocAff
 		}
 		return
 	}
-	payload := types.MasteryCitationPayload{TenantID: scope.TenantID, SubjectID: scope.SubjectID, Refs: refs}
+	payload := types.MasteryCitationPayload{TenantID: scope.TenantID, SubjectID: scope.SubjectID, MessageID: messageID, Refs: refs}
 	body, err := json.Marshal(payload)
 	if err != nil {
 		logger.Warnf(ctx, "mastery: marshal citation task failed: %v", err)
@@ -80,7 +80,7 @@ func (s *Service) RecordCitations(ctx context.Context, refs []types.MemoryDocAff
 		// Enqueue failure is exceptional; preserve the evidence rather than
 		// dropping it, while keeping the normal answer path to one enqueue.
 		logger.Warnf(ctx, "mastery: enqueue citation task failed, falling back to direct write: %v", err)
-		if writeErr := s.repo.BumpCitation(ctx, scope, refs); writeErr != nil {
+		if writeErr := s.repo.BumpCitationEvent(ctx, scope, messageID, refs); writeErr != nil {
 			logger.Warnf(ctx, "mastery: fallback citation write failed: %v", writeErr)
 		}
 	}

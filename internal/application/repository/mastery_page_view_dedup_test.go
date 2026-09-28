@@ -30,10 +30,15 @@ func newMasteryDedupDB(t *testing.T, name string) (*gorm.DB, interfaces.MasteryR
 		&types.MemoryMasteryDaily{},
 		&types.MemoryGuideExposure{},
 		&types.MemorySpreadView{},
+		&types.MemoryCitationEvent{},
 		&types.MemoryCitation{},
 		&types.MemoryAnswerLike{},
 	); err != nil {
 		t.Fatalf("migrate: %v", err)
+	}
+	// Keep the test schema explicit: production migrations define this composite key.
+	if err := db.Exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_mastery_view_scope_test_unique ON memory_page_views (tenant_id, subject_id, knowledge_base_id, slug)").Error; err != nil {
+		t.Fatalf("create page-view unique index: %v", err)
 	}
 	return db, NewMasteryRepository(db)
 }
@@ -169,5 +174,38 @@ func TestBumpPageViewDedupKeepsDailyBucketConsistent(t *testing.T) {
 	}
 	if daily.DurationSum != 20 {
 		t.Errorf("日桶时长不得被折叠，got duration_sum=%d（want 20 = 4×5）", daily.DurationSum)
+	}
+}
+
+func TestBumpCitationEventIsIdempotentAcrossRetries(t *testing.T) {
+	db, repo := newMasteryDedupDB(t, "mastery-citation-idempotency")
+	ctx := context.Background()
+	scope := interfaces.MemoryScope{TenantID: 7, SubjectID: "web_user:alice"}
+	refs := []types.MemoryDocAffinity{{KnowledgeID: "doc-a", KnowledgeBaseID: "kb-1"}, {KnowledgeID: "doc-b", KnowledgeBaseID: "kb-1"}}
+
+	for i := 0; i < 2; i++ {
+		if err := repo.BumpCitationEvent(ctx, scope, "assistant-message-1", refs); err != nil {
+			t.Fatalf("citation delivery #%d: %v", i+1, err)
+		}
+	}
+
+	var rows []types.MemoryCitation
+	if err := db.Where("tenant_id = ? AND subject_id = ?", scope.TenantID, scope.SubjectID).Find(&rows).Error; err != nil {
+		t.Fatalf("load citation aggregates: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("expected two citation aggregates, got %d", len(rows))
+	}
+	for _, row := range rows {
+		if row.CiteCount != 1 {
+			t.Errorf("retry must not increment %s twice, got cite_count=%d", row.KnowledgeID, row.CiteCount)
+		}
+	}
+	var events []types.MemoryCitationEvent
+	if err := db.Where("tenant_id = ? AND subject_id = ? AND message_id = ?", scope.TenantID, scope.SubjectID, "assistant-message-1").Find(&events).Error; err != nil {
+		t.Fatalf("load citation events: %v", err)
+	}
+	if len(events) != 2 {
+		t.Fatalf("expected two immutable events, got %d", len(events))
 	}
 }

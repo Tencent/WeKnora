@@ -1,4 +1,4 @@
--- Migration 000113: index the guidance-exposure lookup that every effective
+-- Migration 000118: index the guidance-exposure lookup that every effective
 -- page view performs.
 --
 -- Recording a page view marks the matching guidance exposure as qualified:
@@ -14,3 +14,5 @@
 
 CREATE INDEX IF NOT EXISTS idx_mastery_exposure_candidate
     ON memory_guide_exposures (tenant_id, subject_id, knowledge_base_id, candidate_slug);
+
+

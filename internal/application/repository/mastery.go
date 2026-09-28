@@ -29,6 +29,42 @@ func (r *masteryRepository) scoped(ctx context.Context, scope interfaces.MemoryS
 		Where("tenant_id = ? AND subject_id = ?", scope.TenantID, scope.SubjectID)
 }
 
+// BumpCitationEvent inserts immutable message-scoped events before updating the aggregates.
+func (r *masteryRepository) BumpCitationEvent(ctx context.Context, scope interfaces.MemoryScope, messageID string, docs []types.MemoryDocAffinity) error {
+	if messageID == "" || len(docs) == 0 {
+		return nil
+	}
+	tx := r.db.WithContext(ctx).Begin()
+	if tx.Error != nil {
+		return tx.Error
+	}
+	tr := &masteryRepository{db: tx}
+	seen := make(map[string]struct{}, len(docs))
+	for _, doc := range docs {
+		if doc.KnowledgeID == "" {
+			continue
+		}
+		if _, ok := seen[doc.KnowledgeID]; ok {
+			continue
+		}
+		seen[doc.KnowledgeID] = struct{}{}
+		event := &types.MemoryCitationEvent{ID: uuid.New().String(), TenantID: scope.TenantID, SubjectID: scope.SubjectID, MessageID: messageID, KnowledgeID: doc.KnowledgeID, KnowledgeBaseID: doc.KnowledgeBaseID}
+		result := tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "tenant_id"}, {Name: "subject_id"}, {Name: "message_id"}, {Name: "knowledge_id"}}, DoNothing: true}).Create(event)
+		if result.Error != nil {
+			tx.Rollback()
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			continue
+		}
+		if err := tr.BumpCitation(ctx, scope, []types.MemoryDocAffinity{doc}); err != nil {
+			tx.Rollback()
+			return err
+		}
+	}
+	return tx.Commit().Error
+}
+
 // BumpCitation records cited docs in the guidance ledger, in two statements no
 // matter how many documents the answer cited.
 //

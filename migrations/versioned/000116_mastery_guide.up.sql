@@ -1,4 +1,4 @@
--- Migration 000111: knowledge guidance (personal knowledge state) ledgers.
+-- Migration 000116: knowledge guidance (personal knowledge state) ledgers.
 --
 -- Four behavior ledgers plus one daily aggregation bucket, all scoped by
 -- (tenant_id, subject_id). They back the personal-knowledge-state overlay on
@@ -6,6 +6,17 @@
 -- (which the reranker keeps using): deleting a person's learning profile
 -- therefore never disturbs existing retrieval personalization or long-term
 -- memory. See the design doc "课题四" for the semantics of each ledger.
+
+CREATE TABLE IF NOT EXISTS memory_citation_events (
+    id VARCHAR(36) PRIMARY KEY,
+    tenant_id BIGINT NOT NULL,
+    subject_id VARCHAR(512) NOT NULL,
+    message_id VARCHAR(36) NOT NULL,
+    knowledge_id VARCHAR(36) NOT NULL,
+    knowledge_base_id VARCHAR(36) NOT NULL DEFAULT '',
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_mastery_citation_event ON memory_citation_events (tenant_id, subject_id, message_id, knowledge_id);
 
 CREATE TABLE IF NOT EXISTS memory_citations (
     id                VARCHAR(36) PRIMARY KEY,
@@ -83,3 +94,5 @@ CREATE TABLE IF NOT EXISTS memory_mastery_daily (
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_mastery_daily_scope
     ON memory_mastery_daily (tenant_id, subject_id, knowledge_base_id, slug, event_type, event_date);
+
+
