@@ -160,11 +160,13 @@ func (c *Connector) Validate(ctx context.Context, dataSourceConfig *types.DataSo
 	return fmt.Errorf("validate DingTalk data source: %w", lastErr)
 }
 
-// verifyDocument proves one visible document is readable. Native documents are
-// probed through their own read API: the blocks API for adoc. Uploaded files
-// and native spreadsheets are not ingestible yet, so they never reach this
-// function; their probes join this function together with the ingest paths that
-// make them selectable.
+// verifyDocument proves one visible document is readable by calling the read
+// API that backs its ingest path — the blocks API for adoc today. The caller
+// only reaches this function for nodes isDocument accepts, and a native type
+// becomes a document, gains a sync read path and gains its probe here in the
+// same change. Types that are not ingestible yet are therefore not documents
+// yet: uploaded files and native spreadsheets join all three together when
+// their ingest paths land, instead of being probed here in advance.
 func verifyDocument(ctx context.Context, api dingTalkAPI, document node) error {
 	_, err := api.documentBlocks(ctx, document.ID)
 	return err

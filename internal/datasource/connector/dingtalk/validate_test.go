@@ -67,6 +67,46 @@ func TestValidateKeepsLookingPastWorkspacesWithoutDocuments(t *testing.T) {
 	}
 }
 
+// A workspace that only holds folders proves nothing: there was no document to
+// read there. Validate must keep looking, and when the next workspace does hold
+// a document the operator cannot read, the data source would sync nothing at
+// all, so Validate must reject it.
+//
+// This is deliberately stricter than stopping at the first listed workspace: an
+// unreadable document means an unusable data source, not an unrelated
+// permission problem, so the failure must name that workspace and document.
+func TestValidateRejectsTenantWhoseOnlyDocumentIsUnreadable(t *testing.T) {
+	api := &fakeAPI{
+		workspaces: []workspace{
+			{ID: "folders", RootNodeID: "root-folders", Name: "Folders"},
+			{ID: "locked", RootNodeID: "root-locked", Name: "Locked"},
+		},
+		nodes: map[string][]node{
+			"root-folders": {
+				{ID: "folder", Name: "Folder", Type: "FOLDER"},
+			},
+			"root-locked": {
+				{ID: "doc-locked", Name: "Secret", Type: "FILE", Category: "ALIDOC", Extension: "adoc"},
+			},
+		},
+		blockErrors: map[string]error{
+			"doc-locked": errors.New("forbidden.accessDenied: the operator has no permission"),
+		},
+	}
+
+	c := testConnector(api)
+	err := c.Validate(context.Background(), testConfig())
+	if err == nil {
+		t.Fatal("Validate must fail: the only document in the tenant is unreadable, " +
+			"so the data source would sync nothing")
+	}
+	for _, want := range []string{`workspace "Locked"`, `document "Secret"`, "no permission"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("Validate error should carry %s, got: %v", want, err)
+		}
+	}
+}
+
 // Every visible document is unreadable, so the data source could never sync
 // anything. That is worth reporting instead of accepting the credentials.
 func TestValidateReportsWhenNoVisibleDocumentIsReadable(t *testing.T) {
@@ -94,8 +134,13 @@ func TestValidateReportsWhenNoVisibleDocumentIsReadable(t *testing.T) {
 	if err == nil {
 		t.Fatal("Validate must fail when no visible document can be read")
 	}
-	if !strings.Contains(err.Error(), "no permission") {
-		t.Fatalf("Validate error should carry the provider cause, got: %v", err)
+	// The operator has to find the offending object in DingTalk, so the error
+	// names the workspace and the document of the last failed probe, not just
+	// the provider cause.
+	for _, want := range []string{`workspace "Beta"`, `document "Doc B"`, "no permission"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("Validate error should carry %s, got: %v", want, err)
+		}
 	}
 }
 
