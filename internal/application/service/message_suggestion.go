@@ -243,7 +243,11 @@ func (s *messageSuggestionService) ValidateAttribution(
 	}
 	found := false
 	for _, question := range set.Questions {
-		if question.ID == attribution.QuestionID && strings.TrimSpace(question.Text) == strings.TrimSpace(query) {
+		// The embed frontend may prepend a "[Host context]" block to the
+		// query when host context (WeKnora.setContext) is enabled; strip it
+		// before comparing with the stored suggestion text, otherwise every
+		// suggestion click on such channels fails attribution (#3820).
+		if question.ID == attribution.QuestionID && strings.TrimSpace(question.Text) == strings.TrimSpace(stripHostContextPrefix(query)) {
 			found = true
 			break
 		}
@@ -252,6 +256,26 @@ func (s *messageSuggestionService) ValidateAttribution(
 		return errors.New("invalid suggestion attribution")
 	}
 	return nil
+}
+
+// hostContextHeader is the marker the embed frontend prepends to outbound
+// queries when host context (WeKnora.setContext) is enabled, see
+// frontend/src/utils/embedContext.ts:
+//
+//	[Host context]
+//	<k: v lines>
+//
+//	<actual query>
+func stripHostContextPrefix(query string) string {
+	const header = "[Host context]\n"
+	if !strings.HasPrefix(query, header) {
+		return query
+	}
+	rest := query[len(header):]
+	if idx := strings.Index(rest, "\n\n"); idx >= 0 {
+		return rest[idx+2:]
+	}
+	return query
 }
 
 func (s *messageSuggestionService) generate(
