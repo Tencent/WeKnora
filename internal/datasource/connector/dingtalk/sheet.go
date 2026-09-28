@@ -15,15 +15,15 @@ const (
 	// in row windows of this height.
 	sheetRowChunk = 200
 
-	// maxSheetRows bounds how many rows of one sheet are ingested. It is
-	// deliberately far above real data: sheets in this tenant measure up to
-	// 2231 rows x 40 columns (and one live workbook holds a 3385-row sheet),
-	// and all of that must sync in full. The cap only stops a pathological or
-	// runaway sheet from making one sync unbounded.
+	// maxSheetRows bounds how many rows of one sheet are ingested. The cap sits
+	// far above ordinary sheet sizes, so real tables sync in full; it only
+	// stops a pathological or runaway sheet from making one sync unbounded.
+	// Rows past the cap are dropped and reported in the sync log.
 	maxSheetRows = 10_000
 
 	// maxSheetColumns bounds how many columns of one sheet are ingested, for
-	// the same reason. The widest live sheet is 40 columns.
+	// the same reason. Columns past the cap are dropped and reported in the
+	// sync log.
 	maxSheetColumns = 256
 )
 
@@ -89,19 +89,21 @@ func renderWorkbook(
 		if err != nil {
 			return renderResult{}, err
 		}
-		if !hasSheetContent(read.Rows) {
-			// An empty sheet contributes no heading and no empty table; it is
-			// not a failure, there is simply nothing in it.
-			continue
-		}
 		if read.truncated() {
 			// Deterministic data loss must be loud: a truncated sheet can never
 			// become complete on a later sync, so it is reported instead of
-			// being silently shortened.
+			// being silently shortened. This runs before the empty-sheet check
+			// below: a sheet whose data all sits past the cap reads as blank
+			// inside it, and an empty check first would drop it without a word.
 			logger.Warnf(ctx,
 				"[DingTalk] sheet %q in workbook %s exceeds the %d row x %d column ingest cap: "+
 					"dropped %s; raise maxSheetRows/maxSheetColumns to sync it in full",
 				listed.Name, workbookID, maxSheetRows, maxSheetColumns, read.droppedExtents())
+		}
+		if !hasSheetContent(read.Rows) {
+			// An empty sheet contributes no heading and no empty table; it is
+			// not a failure, there is simply nothing in it.
+			continue
 		}
 
 		name := strings.TrimSpace(listed.Name)

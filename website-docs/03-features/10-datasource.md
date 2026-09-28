@@ -172,7 +172,7 @@
 #### 钉钉文档（`connector/dingtalk/`）
 
 - **认证**：企业内部应用 Client ID、Client Secret 和有目标知识库访问权限的操作人 Union ID；开通 `Wiki.Workspace.Read`、`Wiki.Node.Read`、`Storage.File.Read` 后发布应用。
-- **范围**：选择知识库、文件夹或单篇 `ALIDOC/adoc` 在线文档，通过公开 Wiki / Blocks API 转为 Markdown。当前不导入钉钉表格，也不依赖异步导出回调。
+- **范围**：选择知识库、文件夹或单篇 `ALIDOC/adoc` 在线文档，通过公开 Wiki / Blocks API 转为 Markdown；`ALIDOC/axls` 表格也可摄取，每张非空工作表按标题合并进同一篇 Markdown。当前仍不导入普通上传附件，也不依赖异步导出回调。
 - **上传文件（默认关闭）**：`Settings.include_uploaded_files`（默认 `false`）开启后，所选范围内钉盘中的普通上传附件（`FILE/DOCUMENT` 的 `docx` / `pptx` / `xlsx` / `pdf`）会被下载并交给 WeKnora 自带解析器入库，文件名保留原扩展名、按扩展名选择解析器；单个文件上限 64 MiB，超出上限即失败且不重试（重签名只会拿到同样的字节）。下载失败（401/403/404 等）会重新申请签名后重试，最多 3 次。
 - **开关的默认值与成本**：`include_uploaded_files` 未设置或非法值一律按 `false` 处理，因此**存量数据源升级后的下一次同步（含增量同步）行为不变**，不会突然开始下载和向量化附件。打开后，这些文件的正文会进入知识库，占用存储并产生 embedding 成本；不需要时请保持关闭。关闭时连接校验、资源列表和同步都会跳过上传附件，同步日志给出的原因是 `include_uploaded_files` 未启用，而不是类型不支持。
 - **开关的作用点**：测试连接（校验）、资源选择列表、全量同步与增量同步共用同一个判据，一处关闭即处处一致。

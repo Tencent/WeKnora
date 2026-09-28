@@ -842,11 +842,23 @@ func TestSkipReasonDistinguishesMediaFromUnimplementedTypes(t *testing.T) {
 		{
 			// Only the types with a name worth printing are in the map; every
 			// other unsupported node gets the generic reason. Kept as a
-			// regression guard on the map.
+			// regression guard on the map. The sample carries no extension:
+			// naming a concrete type here would duplicate that type's own
+			// entry, and naming an ingestible type would make the guard assert
+			// the opposite of what the connector does.
 			"type without a dedicated label",
-			node{Type: "FILE", Category: "ALIDOC", Extension: "axls"},
+			node{Type: "FILE", Category: "ALIDOC"},
 			documentSettings{},
 			"no ingest path for this DingTalk node type in this connector yet",
+		},
+		{
+			// A spreadsheet does have an ingest path, so an axls node that is
+			// still skipped must not be told otherwise: the skip names the type
+			// and the node shape it is read from.
+			"spreadsheet outside its file node shape",
+			node{Type: "FOLDER", Category: "ALIDOC", Extension: "axls"},
+			documentSettings{},
+			"DingTalk spreadsheet is ingested only from a FILE node in the ALIDOC category",
 		},
 		{
 			"multidimensional table",
@@ -1407,7 +1419,7 @@ func TestNodeDocumentClassification(t *testing.T) {
 		binary   bool
 	}{
 		{"adoc", node{Type: "FILE", Category: "ALIDOC", Extension: "adoc"}, true, true, false},
-		{"axls", node{Type: "FILE", Category: "ALIDOC", Extension: "axls"}, false, false, false},
+		{"axls", node{Type: "FILE", Category: "ALIDOC", Extension: "axls"}, true, false, false},
 		{"docx", node{Type: "FILE", Category: "DOCUMENT", Extension: "docx"}, true, false, true},
 		{"pptx", node{Type: "FILE", Category: "DOCUMENT", Extension: "pptx"}, true, false, true},
 		{"xlsx", node{Type: "FILE", Category: "DOCUMENT", Extension: "xlsx"}, true, false, true},
@@ -1431,11 +1443,13 @@ func TestNodeDocumentClassification(t *testing.T) {
 			if got := testCase.node.isBinaryDocument(); got != testCase.binary {
 				t.Fatalf("isBinaryDocument() = %v, want %v", got, testCase.binary)
 			}
-			// Off by default: with every switch unset only the native adoc
-			// path is admitted, and the switch must never admit a node that
+			// Off by default: with every switch unset only the read paths that
+			// need no switch are admitted — adoc, and the workbook path added
+			// with include_sheets — while a switch must never admit a node that
 			// has no read path at all.
-			if got := testCase.node.isIngestible(documentSettings{}); got != testCase.online {
-				t.Fatalf("isIngestible(off) = %v, want %v", got, testCase.online)
+			unguarded := testCase.online || testCase.node.isSheet()
+			if got := testCase.node.isIngestible(documentSettings{}); got != unguarded {
+				t.Fatalf("isIngestible(off) = %v, want %v", got, unguarded)
 			}
 			enabled := documentSettings{IncludeUploadedFiles: true}
 			if got := testCase.node.isIngestible(enabled); got != testCase.document {

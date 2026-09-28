@@ -305,6 +305,83 @@ func TestWorkbookCapsReportTheDroppedExtent(t *testing.T) {
 	}
 }
 
+// A sheet whose data all sits past a cap is still truncated data loss, even
+// when everything inside the cap is blank: the read window comes back empty,
+// the sheet contributes no heading, and the sync log is the only surface left
+// that can tell an operator the table was cut. A connector that looks for
+// content first and warns second drops such a sheet in complete silence.
+func TestWorkbookWarnsAboutTruncatedSheetWithABlankReadWindow(t *testing.T) {
+	for _, testCase := range []struct {
+		label       string
+		info        sheet
+		wantDropped string
+	}{
+		{
+			"rows past the cap",
+			sheet{
+				ID: "sheet-late", Name: "Late",
+				LastNonEmptyRow: maxSheetRows + 50, LastNonEmptyColumn: 2,
+			},
+			fmt.Sprintf("rows %d-%d", maxSheetRows+1, maxSheetRows+50),
+		},
+		{
+			"columns past the cap",
+			sheet{
+				ID: "sheet-late", Name: "Late",
+				LastNonEmptyRow: 1, LastNonEmptyColumn: maxSheetColumns + 4,
+			},
+			fmt.Sprintf("columns %d-%d", maxSheetColumns+1, maxSheetColumns+4),
+		},
+	} {
+		t.Run(testCase.label, func(t *testing.T) {
+			logs := captureLogs(t)
+
+			api := workbookFixture(sheetNode("book-1", "Book.axls"))
+			api.sheets = map[string][]sheet{
+				"book-1": {
+					{ID: "sheet-late", Name: "Late"},
+					{ID: "sheet-blank", Name: "Blank"},
+				},
+			}
+			api.sheetInfos = map[string]sheet{
+				sheetKey("book-1", "sheet-late"): testCase.info,
+				// A sheet that is merely empty, with nothing past a cap, must
+				// stay quiet: the warning is about the cap, not about blanks.
+				sheetKey("book-1", "sheet-blank"): {
+					ID: "sheet-blank", Name: "Blank", LastNonEmptyRow: 3, LastNonEmptyColumn: 2,
+				},
+			}
+			// Every window inside the cap comes back blank: all the data is
+			// past it.
+			api.sheetRangeFunc = func(string, string, string) ([][]string, error) {
+				return nil, nil
+			}
+
+			items, err := testConnector(api).FetchAll(
+				context.Background(), testConfig("space"), []string{"space"},
+			)
+			if err != nil || len(items) != 1 {
+				t.Fatalf("FetchAll() = %#v, %v; want the workbook item", items, err)
+			}
+			if content := string(items[0].Content); strings.Contains(content, "## Late") {
+				t.Fatalf("a blank read window rendered a table:\n%s", content)
+			}
+
+			output := logs.String()
+			want := fmt.Sprintf(
+				"sheet %q in workbook book-1 exceeds the %d row x %d column ingest cap: dropped %s",
+				"Late", maxSheetRows, maxSheetColumns, testCase.wantDropped,
+			)
+			if !strings.Contains(output, want) {
+				t.Fatalf("sync log is missing the truncation warning %q:\n%s", want, output)
+			}
+			if strings.Contains(output, `sheet "Blank"`) {
+				t.Fatalf("an empty sheet inside the cap was reported as truncated:\n%s", output)
+			}
+		})
+	}
+}
+
 // A sheet read that fails — network, rate limit, revoked permission — is a
 // transient workbook failure: the workbook surfaces as a failed item, stays out
 // of the cursor, and syncs once the provider recovers.
