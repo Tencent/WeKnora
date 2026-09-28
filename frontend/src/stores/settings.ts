@@ -545,9 +545,11 @@ export const useSettingsStore = defineStore("settings", {
           const current = this.settings.conversationModels || defaultSettings.conversationModels;
           this.settings.conversationModels = { ...current, selectedChatModelId: state.model_id || "" };
         }
-        if (Array.isArray(state.knowledge_base_ids)) {
-          this.settings.selectedKnowledgeBases = [...state.knowledge_base_ids];
-        }
+        // 后端会用 omitempty 省略空列表，所以缺失值表示“本会话没有 KB 范围”，
+        // 而不是“保留上一个会话的选择”。后者会把过期的 @KB 继续发给服务端。
+        this.settings.selectedKnowledgeBases = Array.isArray(state.knowledge_base_ids)
+          ? [...state.knowledge_base_ids]
+          : [];
         // 服务端省略空的选择项列表；保留现值会把其它会话或全局默认的
         // 文件、标签和工具选择带入本会话。
         this.settings.selectedFiles = Array.isArray(state.knowledge_ids) ? [...state.knowledge_ids] : [];
