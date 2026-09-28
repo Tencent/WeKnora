@@ -9,7 +9,7 @@ func TestParserEngineConfigResolveChatParserEngine(t *testing.T) {
 	}}
 	for input, expected := range map[string]string{
 		"PDF": "mineru", ".docx": "mineru", "xlsx": "markitdown",
-		"txt": "", "pptx": "markitdown", ".PPT": "markitdown",
+		"txt": "", "pptx": "markitdown", ".PPTM": "markitdown", ".PPT": "markitdown",
 	} {
 		if actual := config.ResolveChatParserEngine(input); actual != expected {
 			t.Fatalf("ResolveChatParserEngine(%q) = %q, want %q", input, actual, expected)
