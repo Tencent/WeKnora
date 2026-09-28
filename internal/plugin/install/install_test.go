@@ -4,10 +4,12 @@ import (
 	"context"
 	"crypto/ed25519"
 	"errors"
+	"fmt"
 	"os"
 	goruntime "runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/plugin/manifest"
 	"github.com/Tencent/WeKnora/internal/plugin/pkg"
@@ -719,4 +721,58 @@ func TestReinstallInheritsOnlyFromTheSameOwnerAndSigner(t *testing.T) {
 	reinstall("another workspace", plugintest.KitPackage(t, "1.0.6"), tenant(8), true)
 	remove()
 	reinstall("the platform after a workspace", plugintest.KitPackage(t, "1.0.7"), nil, true)
+}
+
+// A plugin keeps its active version and the five most recent others; the
+// older ones go with their packages.
+func TestInstallPrunesOldVersions(t *testing.T) {
+	ctx := context.Background()
+	s, repo, store, _ := newService(t)
+	for i := range 8 {
+		if _, err := s.Install(ctx, Request{Data: plugintest.KitPackage(t, fmt.Sprintf("1.%d.0", i))}); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(2 * time.Millisecond) // distinct creation times
+	}
+	versions, _ := repo.ListVersions(ctx, "acme.kit")
+	if len(versions) != 1+keptVersions {
+		t.Fatalf("kept %d versions", len(versions))
+	}
+	for _, gone := range []string{"1.0.0", "1.1.0"} {
+		if v, _ := repo.GetVersion(ctx, "acme.kit", gone); v != nil {
+			t.Fatalf("%s was kept", gone)
+		}
+	}
+	if len(store.Blobs) != 1+keptVersions {
+		t.Fatalf("%d packages stored", len(store.Blobs))
+	}
+}
+
+// A workspace registers up to its cap of own plugins; upgrades of those it
+// has are not new ones.
+func TestOwnedPluginLimit(t *testing.T) {
+	ctx := context.Background()
+	utils.SetSSRFWhitelistFromRaw("plugins.example.com")
+	t.Cleanup(func() { utils.SetSSRFWhitelistFromRaw("") })
+	s, _, _, _ := newService(t)
+	s.WithTenantPlugins(func(context.Context) bool { return true }).
+		WithOwnedLimit(func(context.Context) int { return 2 })
+	own := func(id, version string) Request {
+		return Request{Data: ownedPackage(t, id, version), RemoteURL: "https://plugins.example.com/" + id}
+	}
+	for _, id := range []string{"team.a", "team.b"} {
+		if _, err := s.InstallOwned(ctx, 7, own(id, "1.0.0")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var limit ErrOwnedLimit
+	if _, err := s.InstallOwned(ctx, 7, own("team.c", "1.0.0")); !errors.As(err, &limit) || limit.Limit != 2 {
+		t.Fatalf("a third plugin: %v", err)
+	}
+	if _, err := s.InstallOwned(ctx, 7, own("team.a", "1.1.0")); err != nil {
+		t.Fatalf("an upgrade at the cap: %v", err)
+	}
+	if _, err := s.InstallOwned(ctx, 8, own("team.d", "1.0.0")); err != nil {
+		t.Fatalf("another workspace: %v", err)
+	}
 }

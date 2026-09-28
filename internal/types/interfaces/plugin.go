@@ -63,6 +63,8 @@ type PluginRepository interface {
 	// GetVersion returns (nil, nil) when the version is not stored.
 	GetVersion(ctx context.Context, pluginID, version string) (*types.PluginVersion, error)
 	SaveVersion(ctx context.Context, v *types.PluginVersion) error
+	// DeleteVersion removes one stored version's row.
+	DeleteVersion(ctx context.Context, pluginID, version string) error
 }
 
 // PluginKVRepository stores plugins' Host API key-value data. Expired

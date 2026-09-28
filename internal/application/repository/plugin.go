@@ -152,6 +152,11 @@ func (r *pluginRepository) ListVersions(ctx context.Context, pluginID string) ([
 	return rows, err
 }
 
+func (r *pluginRepository) DeleteVersion(ctx context.Context, pluginID, version string) error {
+	return r.db.WithContext(ctx).Where("plugin_id = ? AND version = ?", pluginID, version).
+		Delete(&types.PluginVersion{}).Error
+}
+
 func (r *pluginRepository) GetVersion(ctx context.Context, pluginID, version string) (*types.PluginVersion, error) {
 	var v types.PluginVersion
 	err := r.db.WithContext(ctx).Where("plugin_id = ? AND version = ?", pluginID, version).First(&v).Error

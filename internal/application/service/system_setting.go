@@ -204,6 +204,15 @@ var registry = map[string]settingSpec{
 		Description: "是否允许空间管理员登记本空间自有的远程插件（代码运行在空间自己的服务器上，不能带页面，" +
 			"只有本空间可见）。关闭后不能再登记或升级，已登记的照常运行。修改后立即生效。",
 	},
+	// tenant.plugin_owned_limit caps the plugins one workspace registers.
+	"tenant.plugin_owned_limit": {
+		Type:     "int",
+		EnvName:  "WEKNORA_PLUGIN_TENANT_LIMIT",
+		Default:  int64(20),
+		Category: "tenant",
+		Description: "每个空间最多可登记的自有插件数。登记时实时读取，修改后立即生效；已登记的不受影响。" +
+			"0 或负数表示不限制。",
+	},
 	"tenant.self_service_creation_enabled": {
 		Type:     "bool",
 		EnvName:  "WEKNORA_TENANT_SELF_SERVICE_CREATION_ENABLED",

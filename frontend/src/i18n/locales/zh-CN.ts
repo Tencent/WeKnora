@@ -3433,6 +3433,7 @@ export default {
         },
         tenant: {
           plugin_remote_enabled: '是否允许空间管理员登记本空间自有的远程插件（代码运行在空间自己的服务器上，不能带页面，只有本空间可见）。关闭后不能再登记或升级，已登记的照常运行。修改后立即生效。',
+          plugin_owned_limit: '每个空间最多可登记的自有插件数。登记时实时读取，修改后立即生效；已登记的不受影响。0 或负数表示不限制。',
           max_owned_per_user: '每个非超管用户通过自助创建可拥有的最大空间数。每次创建空间时实时读取，修改后立即生效。0 表示使用内置默认值 10；负数表示完全关闭限制（不建议在公开部署使用）。',
           self_service_creation_enabled: '是否允许非超管用户主动创建空间。关闭后，普通用户只能通过邀请加入已有空间；跨空间超管仍可创建。修改后立即生效。',
           default_storage_quota_gb: '新建空间时默认分配的存储配额（GB），包含向量、原文、文本、索引等。仅在创建时读取，修改后只对之后新建的空间生效，不会回写已存在的空间。0 或负数表示使用内置默认值 10GB。',
@@ -3465,6 +3466,7 @@ export default {
         },
         tenant: {
           plugin_remote_enabled: '允许空间登记自有插件',
+          plugin_owned_limit: '每空间自有插件上限',
           max_owned_per_user: '每用户最大空间数',
           self_service_creation_enabled: '允许用户自助创建空间',
           default_storage_quota_gb: '新空间默认存储配额 (GB)',

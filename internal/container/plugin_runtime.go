@@ -398,6 +398,9 @@ func newPluginInstaller(
 	return s.WithChecks(activate.CheckModelVendors).WithTrust(trusted).
 		WithTenantPlugins(func(ctx context.Context) bool {
 			return settings.GetBool(ctx, "tenant.plugin_remote_enabled", "WEKNORA_PLUGIN_TENANT_REMOTE", false)
+		}).
+		WithOwnedLimit(func(ctx context.Context) int {
+			return int(settings.GetInt(ctx, "tenant.plugin_owned_limit", "WEKNORA_PLUGIN_TENANT_LIMIT", 20))
 		})
 }
 

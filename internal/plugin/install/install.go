@@ -120,8 +120,10 @@ type Service struct {
 	client      *http.Client
 	checks      []PackageCheck
 	trust       *trust.Store
-	// tenantPlugins is the platform's switch for workspaces' own plugins.
+	// tenantPlugins is the platform's switch for workspaces' own plugins,
+	// ownedLimit how many one workspace may register (<= 0: no limit).
 	tenantPlugins func(context.Context) bool
+	ownedLimit    func(context.Context) int
 	// runtimes adds runtimes this platform is set up for (kubernetes).
 	runtimes map[manifest.RuntimeType]bool
 	// embedded reports whether this node runs a host plugin kind itself.
@@ -318,6 +320,11 @@ func (s *Service) install(
 	if err := checkOwner(row, m.ID, owner); err != nil {
 		return nil, err
 	}
+	if row == nil && owner != nil {
+		if err := s.checkOwnedLimit(ctx, *owner); err != nil {
+			return nil, err
+		}
+	}
 	existing, err := s.repo.GetVersion(ctx, m.ID, m.Version)
 	if err != nil {
 		return nil, err
@@ -411,6 +418,7 @@ func (s *Service) install(
 		return nil, err
 	}
 	logger.Infof(ctx, "[plugin] %s installed %s %s (%s, %s)", req.UserID, m.ID, m.Version, p.Digest, verdict.Level)
+	s.pruneVersions(ctx, m.ID, m.Version)
 	v, err := s.apply(ctx, m.ID)
 	if v != nil {
 		v.IssuedSecret = issued

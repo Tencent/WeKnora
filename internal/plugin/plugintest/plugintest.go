@@ -144,6 +144,18 @@ func (m *MemRepo) ListVersions(_ context.Context, id string) ([]types.PluginVers
 	return out, nil
 }
 
+// DeleteVersion removes a version.
+func (m *MemRepo) DeleteVersion(_ context.Context, id, version string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for k, v := range m.versions {
+		if v.PluginID == id && v.Version == version {
+			delete(m.versions, k)
+		}
+	}
+	return nil
+}
+
 // GetVersion returns (nil, nil) for an unknown version.
 func (m *MemRepo) GetVersion(_ context.Context, id, version string) (*types.PluginVersion, error) {
 	m.mu.Lock()
