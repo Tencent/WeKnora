@@ -32,13 +32,24 @@ var mediaExtensions = map[string]struct{}{
 
 // unsupportedDocumentExtensions names the native DingTalk document types the
 // wiki API lists but this connector has no ingest path for, so a skip can name
-// the concrete type instead of only saying the node is unsupported. The
-// remaining types expose no read API at all.
+// the concrete type instead of only saying the node is unsupported. Native
+// types this connector does read (adoc through the blocks API, axls through the
+// workbooks API) are not listed here; see ingestableDocumentExtensions.
 var unsupportedDocumentExtensions = map[string]string{
 	"able":  "DingTalk multi-dimensional table",
 	"amind": "DingTalk mind map",
 	"appt":  "DingTalk presentation",
 	"adraw": "DingTalk drawing",
+}
+
+// ingestableDocumentExtensions names the native DingTalk document types this
+// connector reads end to end. A node of one of these types can still be skipped
+// — a FOLDER carrying a document extension, or a document outside the ALIDOC
+// category — and that skip has to say how the type is read instead of claiming
+// the type has no ingest path.
+var ingestableDocumentExtensions = map[string]string{
+	"adoc": "DingTalk document",
+	"axls": "DingTalk spreadsheet",
 }
 
 // skipReason explains, in the words of the sync log, why a node the connector
@@ -50,6 +61,9 @@ func skipReason(n node) string {
 	_, knownMediaExtension := mediaExtensions[extension]
 	if strings.EqualFold(n.Category, "VIDEO") || knownMediaExtension {
 		return "video/media files are deliberately not downloaded by this connector"
+	}
+	if label := ingestableDocumentExtensions[extension]; label != "" {
+		return label + " is ingested only from a FILE node in the ALIDOC category"
 	}
 	if label := unsupportedDocumentExtensions[extension]; label != "" {
 		return label + " has no ingest path in this connector yet"
@@ -664,8 +678,8 @@ func (c *Connector) sync(
 		}
 
 		// Skipped nodes are deterministic: this connector has no ingest path for
-		// them, so they are reported once and never retried — unlike a failed
-		// read below, which must stay retryable.
+		// the node's type or shape, so they are reported once and never retried —
+		// unlike a failed read below, which must stay retryable.
 		for _, node := range skipped {
 			logger.Infof(ctx, "[DingTalk] skip node %s (name=%q type=%s category=%s extension=%s): %s",
 				node.ID, node.title(), node.Type, node.Category, node.Extension, skipReason(node))

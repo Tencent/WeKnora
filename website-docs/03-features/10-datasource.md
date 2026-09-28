@@ -172,7 +172,7 @@
 #### 钉钉文档（`connector/dingtalk/`）
 
 - **认证**：企业内部应用 Client ID、Client Secret 和有目标知识库访问权限的操作人 Union ID；开通 `Wiki.Workspace.Read`、`Wiki.Node.Read`、`Storage.File.Read` 后发布应用。
-- **范围**：选择知识库、文件夹或单篇 `ALIDOC/adoc` 在线文档，通过公开 Wiki / Blocks API 转为 Markdown。当前不导入钉钉表格或普通上传附件，也不依赖异步导出回调。
+- **范围**：选择知识库、文件夹或单篇 `ALIDOC/adoc` 在线文档，通过公开 Wiki / Blocks API 转为 Markdown；`ALIDOC/axls` 表格也可摄取，每张非空工作表按标题合并进同一篇 Markdown。当前仍不导入普通上传附件，也不依赖异步导出回调。
 - **同步**：按文档 `modifiedTimestamp`（毫秒）增量读取，缺失时回退 `modifiedTime`；合并重叠选择。全量同步也会对照上次游标对账删除，避免 `sync_mode=full` 漏删。目录遍历不完整时暂缓删除。
 - **正文**：公开 Blocks API 只返回文档根下的一级块；高亮块等容器若响应里带有 `children` 会继续渲染，否则在元数据中标记 `nested_blocks_unavailable`，避免把残缺正文当成完整成功。
 - **校验**：测试连接会列出知识库、探测根节点列表，并在根下存在在线文档时试读 Blocks，以便尽早发现缺少 `Wiki.Node.Read` / `Storage.File.Read`。

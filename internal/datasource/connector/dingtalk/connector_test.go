@@ -803,10 +803,21 @@ func TestSkipReasonDistinguishesMediaFromUnimplementedTypes(t *testing.T) {
 		{
 			// Only the types with a name worth printing are in the map; every
 			// other unsupported node gets the generic reason. Kept as a
-			// regression guard on the map.
+			// regression guard on the map. The sample carries no extension:
+			// naming a concrete type here would duplicate that type's own
+			// entry, and naming an ingestible type would make the guard assert
+			// the opposite of what the connector does.
 			"type without a dedicated label",
-			node{Type: "FILE", Category: "ALIDOC", Extension: "axls"},
+			node{Type: "FILE", Category: "ALIDOC"},
 			"no ingest path for this DingTalk node type in this connector yet",
+		},
+		{
+			// A spreadsheet does have an ingest path, so an axls node that is
+			// still skipped must not be told otherwise: the skip names the type
+			// and the node shape it is read from.
+			"spreadsheet outside its file node shape",
+			node{Type: "FOLDER", Category: "ALIDOC", Extension: "axls"},
+			"DingTalk spreadsheet is ingested only from a FILE node in the ALIDOC category",
 		},
 		{
 			"multidimensional table",
