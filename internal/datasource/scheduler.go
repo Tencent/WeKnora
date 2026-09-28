@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/runtime"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -92,8 +93,21 @@ func (s *Scheduler) Start(ctx context.Context) error {
 
 // Stop gracefully stops the cron runner and waits for running jobs to finish.
 func (s *Scheduler) Stop() {
-	ctx := s.cron.Stop()
-	<-ctx.Done()
+	s.StopWithin(0)
+}
+
+// StopWithin is Stop with a bound. timeout <= 0 waits until in-flight jobs
+// finish. A positive timeout lets shutdown continue so one long sync cannot
+// hold every later cleanup hook, including child-process reaping.
+func (s *Scheduler) StopWithin(timeout time.Duration) {
+	if s == nil || s.cron == nil {
+		return
+	}
+	if runtime.WaitFor(s.cron.Stop().Done(), timeout) {
+		return
+	}
+	logger.Warnf(context.Background(),
+		"[Scheduler] in-flight sync still running after %s; continuing shutdown", timeout)
 }
 
 // AddOrUpdate registers (or re-registers) a cron entry for the given data source.
