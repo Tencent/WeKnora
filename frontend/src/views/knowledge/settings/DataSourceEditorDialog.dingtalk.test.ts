@@ -319,9 +319,9 @@ test('a saved manual reference is pre-filled and submitted unchanged', async () 
 })
 
 // The knowledge-base tree is a picker, not a preview: while manual references
-// exist it is collapsed behind an explicit expander, so eight unrelated team
-// knowledge bases are not shown next to one pasted 多维表. Expanding it must
-// still work exactly as before.
+// exist it is collapsed behind an explicit expander, so the team's knowledge
+// bases are not shown next to one pasted 多维表. Expanding it must still work
+// exactly as before.
 const TEAM_RESOURCES = [
   { external_id: 'ws-1', name: 'Team knowledge base', type: 'workspace', has_children: false },
   { external_id: 'ws-2', name: 'Another team knowledge base', type: 'workspace', has_children: false },

@@ -49,11 +49,12 @@ type resourceReference struct {
 	NodeID      string
 	Ancestors   []string
 
-	// BaseID addresses a multi-dimensional table (able). A Base is not a wiki
-	// node: it is a separate object family read through the notable API by its
-	// own id, which cannot be derived from a node id and cannot be enumerated.
-	// A Base has no workspace, so BaseID is never combined with the fields
-	// above.
+	// BaseID addresses a multi-dimensional table (able). A Base is a wiki node
+	// — getNode resolves it and listNodes lists the documents underneath — but
+	// not a wiki document: its tables are read through the notable API by the
+	// Base's own id, and no listing API enumerates Bases, so the id has to come
+	// from the user. The workspace is adopted from the node the Base reports,
+	// so BaseID is never combined with the fields above.
 	BaseID string
 }
 
