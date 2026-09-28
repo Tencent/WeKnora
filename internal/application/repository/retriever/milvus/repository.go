@@ -827,20 +827,33 @@ func (m *milvusRepository) KeywordsRetrieve(ctx context.Context,
 	}
 
 	var allResults []*types.IndexWithScore
+	// A batch where every matching collection failed must not be reported as
+	// "no matches": the caller cannot tell a genuine zero-hit search apart from
+	// a search that never ran. Count both sides and fail loudly when the search
+	// produced nothing but errors.
+	matchedCollections := 0
+	failedCollections := 0
+	var lastFailedErr error
 
 	// Search in all matching collections
 	for _, collectionName := range collections {
 		if !matchesDimensionCollection(collectionName, m.collectionBaseName) {
 			continue
 		}
+		matchedCollections++
+
 		collectionMode, modeErr := m.collectionAnalyzerMode(ctx, collectionName)
 		if modeErr != nil {
+			failedCollections++
+			lastFailedErr = modeErr
 			log.Errorf("[Milvus] Failed to inspect collection %s analyzer mode: %v", collectionName, modeErr)
 			continue
 		}
 
 		expr, paramsMap, err := m.getBaseFilterForQuery(params)
 		if err != nil {
+			failedCollections++
+			lastFailedErr = err
 			log.Errorf("[Milvus] Failed to build base filter: %v", err)
 			continue
 		}
@@ -864,20 +877,37 @@ func (m *milvusRepository) KeywordsRetrieve(ctx context.Context,
 		searchOpt.WithOutputFields("*")
 		resultSet, err := m.client.Search(ctx, searchOpt)
 		if err != nil {
-			log.Errorf("[Milvus] Keywords search failed: %v", err)
+			failedCollections++
+			lastFailedErr = err
+			log.Errorf("[Milvus] Keywords search failed in %s: %v", collectionName, err)
 			continue
 		}
 		sets, scores, err := convertResultSet(resultSet)
 		if err != nil {
-			log.Errorf("[Milvus] Failed to convert result set: %v", err)
+			failedCollections++
+			lastFailedErr = err
+			log.Errorf("[Milvus] Failed to convert result set of %s: %v", collectionName, err)
 			continue
 		}
 		results, scoreErr := buildMilvusIndexResults(sets, scores, types.MatchTypeKeywords)
 		if scoreErr != nil {
-			log.Errorf("[Milvus] Failed to attach keyword scores: %v", scoreErr)
+			failedCollections++
+			lastFailedErr = scoreErr
+			log.Errorf("[Milvus] Failed to attach keyword scores for %s: %v", collectionName, scoreErr)
 			continue
 		}
 		allResults = append(allResults, results...)
+	}
+
+	// Every collection that matched the base name failed, so this call produced
+	// no evidence at all about the knowledge base. Surface the failure instead
+	// of letting callers treat it as "no relevant content".
+	if matchedCollections > 0 && failedCollections == matchedCollections {
+		return nil, fmt.Errorf(
+			"milvus keyword search failed in all %d matched collections: %w",
+			matchedCollections,
+			lastFailedErr,
+		)
 	}
 
 	// Searches across multiple collections return one score-sorted page per
@@ -906,9 +936,26 @@ func (m *milvusRepository) KeywordsRetrieve(ctx context.Context,
 	}
 
 	if len(allResults) == 0 {
-		log.Warnf("[Milvus] No keyword matches found for query: %s", params.Query)
+		if failedCollections > 0 {
+			// Partial failure with zero hits: the remaining collections did
+			// answer, so this is a real zero-hit outcome, but it must not read
+			// as if the search had succeeded everywhere.
+			log.Warnf(
+				"[Milvus] Keywords search returned no matches in the %d collections that answered, "+
+					"but failed in %d of %d matched collections",
+				matchedCollections-failedCollections, failedCollections, matchedCollections,
+			)
+		} else {
+			log.Warnf("[Milvus] No keyword matches found for query: %s", params.Query)
+		}
 	} else {
 		log.Infof("[Milvus] Keywords retrieval found %d results", len(allResults))
+		if failedCollections > 0 {
+			log.Warnf(
+				"[Milvus] Keywords search failed in %d of %d matched collections; results are incomplete",
+				failedCollections, matchedCollections,
+			)
+		}
 	}
 
 	return buildRetrieveResult(allResults, types.KeywordsRetrieverType), nil

@@ -759,6 +759,13 @@ func (q *qdrantRepository) KeywordsRetrieve(ctx context.Context,
 
 	var allResults []*types.IndexWithScore
 	limit := uint32(params.TopK)
+	// A batch where every matching collection failed must not be reported as
+	// "no matches": the caller cannot tell a genuine zero-hit search apart from
+	// a search that never ran. Count both sides and fail loudly when the search
+	// produced nothing but errors.
+	matchedCollections := 0
+	failedCollections := 0
+	var lastFailedErr error
 
 	log.Debugf("[Qdrant] Found %d collections, base name: %s", len(collections), q.collectionBaseName)
 
@@ -775,6 +782,7 @@ func (q *qdrantRepository) KeywordsRetrieve(ctx context.Context,
 			log.Debugf("[Qdrant] Skipping collection %s (doesn't match base name %s)", collectionName, q.collectionBaseName)
 			continue
 		}
+		matchedCollections++
 
 		filter := q.getBaseFilter(params)
 
@@ -800,6 +808,8 @@ func (q *qdrantRepository) KeywordsRetrieve(ctx context.Context,
 			WithPayload:    qdrant.NewWithPayload(true),
 		})
 		if err != nil {
+			failedCollections++
+			lastFailedErr = err
 			log.Warnf("[Qdrant] Keywords search failed in %s: %v", collectionName, err)
 			continue
 		}
@@ -826,15 +836,42 @@ func (q *qdrantRepository) KeywordsRetrieve(ctx context.Context,
 		}
 	}
 
+	// Every collection that matched the base name failed, so this call produced
+	// no evidence at all about the knowledge base. Surface the failure instead
+	// of letting callers treat it as "no relevant content".
+	if matchedCollections > 0 && failedCollections == matchedCollections {
+		return nil, fmt.Errorf(
+			"qdrant keyword search failed in all %d matched collections: %w",
+			matchedCollections,
+			lastFailedErr,
+		)
+	}
+
 	// Limit results to topK
 	if len(allResults) > params.TopK {
 		allResults = allResults[:params.TopK]
 	}
 
-	if len(allResults) == 0 {
-		log.Warnf("[Qdrant] No keyword matches found for query: %s", params.Query)
-	} else {
+	switch {
+	case len(allResults) > 0:
 		log.Infof("[Qdrant] Keywords retrieval found %d results", len(allResults))
+		if failedCollections > 0 {
+			log.Warnf(
+				"[Qdrant] Keywords search failed in %d of %d matched collections; results are incomplete",
+				failedCollections, matchedCollections,
+			)
+		}
+	case failedCollections > 0:
+		// Partial failure with zero hits: the remaining collections did answer,
+		// so this is a real zero-hit outcome, but it must not read as if the
+		// search had succeeded everywhere.
+		log.Warnf(
+			"[Qdrant] Keywords search returned no matches in the %d collections that answered, "+
+				"but failed in %d of %d matched collections",
+			matchedCollections-failedCollections, failedCollections, matchedCollections,
+		)
+	default:
+		log.Warnf("[Qdrant] No keyword matches found for query: %s", params.Query)
 	}
 
 	return buildRetrieveResult(allResults, types.KeywordsRetrieverType), nil
