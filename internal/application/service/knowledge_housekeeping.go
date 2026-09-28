@@ -131,7 +131,8 @@ func (h *HousekeepingService) StopWithin(timeout time.Duration) {
 		return
 	}
 	if !runtime.WaitFor(h.cron.Stop().Done(), timeout) {
-		logger.Warnf(context.Background(), "[Housekeeping] in-flight sweep still running after %s; continuing shutdown", timeout)
+		logger.Warnf(context.Background(),
+			"[Housekeeping] in-flight sweep still running after %s; continuing shutdown", timeout)
 	}
 	h.started = false
 }

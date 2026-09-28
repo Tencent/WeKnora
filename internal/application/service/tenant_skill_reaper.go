@@ -886,7 +886,8 @@ func (s *TenantSkillService) StopWithin(timeout time.Duration) {
 		return
 	}
 	if !runtime.WaitFor(s.cron.Stop().Done(), timeout) {
-		logger.Warnf(context.Background(), "[skill] in-flight reaper still running after %s; continuing shutdown", timeout)
+		logger.Warnf(context.Background(),
+			"[skill] in-flight reaper still running after %s; continuing shutdown", timeout)
 	}
 	s.started = false
 }

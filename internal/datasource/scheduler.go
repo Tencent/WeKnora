@@ -106,7 +106,8 @@ func (s *Scheduler) StopWithin(timeout time.Duration) {
 	if runtime.WaitFor(s.cron.Stop().Done(), timeout) {
 		return
 	}
-	logger.Warnf(context.Background(), "[Scheduler] in-flight sync still running after %s; continuing shutdown", timeout)
+	logger.Warnf(context.Background(),
+		"[Scheduler] in-flight sync still running after %s; continuing shutdown", timeout)
 }
 
 // AddOrUpdate registers (or re-registers) a cron entry for the given data source.
