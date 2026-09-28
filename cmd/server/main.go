@@ -99,37 +99,32 @@ func main() {
 			sig := <-signals
 			logger.Infof(context.Background(), "Received signal: %v, starting server shutdown...", sig)
 
-			shutdownTimeout := cfg.Server.ShutdownTimeout
-			if shutdownTimeout == 0 {
-				shutdownTimeout = 30 * time.Second
-			}
-			shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), shutdownTimeout)
+			drainBudget, cleanupBudget := runtime.ShutdownBudgets(cfg.Server.ShutdownTimeout)
+			shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), drainBudget)
 			defer shutdownCancel()
 
-			// Second signal → force close all connections immediately
+			// Second signal → force close all connections immediately.
 			go func() {
 				sig := <-signals
 				logger.Warnf(context.Background(), "Received second signal: %v, forcing shutdown...", sig)
 				server.Close()
 			}()
 
-			// Do NOT close the listener manually before Shutdown: Serve would
+			// Do NOT close the listener manually before Shutdown. Serve would
 			// return the raw accept error ("use of closed network connection")
-			// instead of ErrServerClosed, the invoke error path would call
-			// logger.Fatalf → os.Exit(1), and every ResourceCleaner entry
-			// (BrowserSkill daemon, sandbox, pools) would be skipped — leaking
-			// child processes. Shutdown closes all listeners as its first step,
-			// which releases the port just as fast without the race.
+			// instead of ErrServerClosed, and logger.Fatalf → os.Exit(1) would
+			// kill the process before ResourceCleaner runs. Shutdown closes
+			// listeners first, so the port is released before the drain.
 			if err := server.Shutdown(shutdownCtx); err != nil {
 				logger.Errorf(context.Background(), "Server forced to shutdown: %v", err)
 				server.Close()
 			}
 
 			logger.Info(context.Background(), "Cleaning up resources...")
-			// Cleanup gets its own budget: a slow drain may consume most of
-			// shutdownTimeout, and an expired context would make Cleanup skip
-			// every registered function without running any of them.
-			cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), shutdownTimeout)
+			// Fresh context sized from the reserved slice of ShutdownTimeout.
+			// Drain must not hand cleanup an already-expired context, and the
+			// two slices must still add up to one supervisor grace period.
+			cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), cleanupBudget)
 			defer cleanupCancel()
 			errs := resourceCleaner.Cleanup(cleanupCtx)
 			if len(errs) > 0 {
