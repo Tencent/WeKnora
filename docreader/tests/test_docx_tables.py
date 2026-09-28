@@ -1,40 +1,13 @@
-import importlib.util
 import io
-import sys
-import types
 import unittest
 from concurrent.futures import ThreadPoolExecutor
-from pathlib import Path
 from unittest.mock import patch
 
 from docx import Document as WordDocument
 
-
-def _load_docx_parser():
-    """Load docx_parser without triggering the heavy package __init__.
-
-    ``docreader/parser/__init__.py`` imports doc_parser -> textract, a heavy
-    dependency unrelated to DOCX parsing. Registering the packages as bare
-    namespaces lets us import only the modules docx_parser actually needs.
-    """
-    root = Path(__file__).resolve().parents[2]
-    docreader_pkg = types.ModuleType("docreader")
-    docreader_pkg.__path__ = [str(root / "docreader")]
-    sys.modules.setdefault("docreader", docreader_pkg)
-    parser_pkg = types.ModuleType("docreader.parser")
-    parser_pkg.__path__ = [str(root / "docreader" / "parser")]
-    sys.modules["docreader.parser"] = parser_pkg
-
-    spec = importlib.util.spec_from_file_location(
-        "docreader.parser.docx_parser", root / "docreader" / "parser" / "docx_parser.py"
-    )
-    module = importlib.util.module_from_spec(spec)
-    sys.modules["docreader.parser.docx_parser"] = module
-    spec.loader.exec_module(module)
-    return module
+from docreader.parser import docx_parser
 
 
-docx_parser = _load_docx_parser()
 DocxParser = docx_parser.DocxParser
 table_to_gfm_markdown = docx_parser.table_to_gfm_markdown
 
