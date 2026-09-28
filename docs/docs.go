@@ -26159,6 +26159,11 @@ const docTemplate = `{
                     "description": "Whether to disable auto title generation",
                     "type": "boolean"
                 },
+                "host_context": {
+                    "description": "HostContext carries embed host metadata separately from the visitor's query.",
+                    "type": "object",
+                    "additionalProperties": {}
+                },
                 "images": {
                     "description": "Attached images for multimodal chat",
                     "type": "array",

@@ -6406,6 +6406,11 @@ definitions:
       disable_title:
         description: Whether to disable auto title generation
         type: boolean
+      host_context:
+        additionalProperties: {}
+        description: HostContext carries embed host metadata separately from the visitor's
+          query.
+        type: object
       images:
         description: Attached images for multimodal chat
         items:
