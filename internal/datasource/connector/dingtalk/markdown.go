@@ -19,6 +19,9 @@ type block struct {
 	OrderedList   listBlock         `json:"orderedList"`
 	UnorderedList listBlock         `json:"unorderedList"`
 	Table         tableBlock        `json:"table"`
+	Code          codeBlock         `json:"code"`
+	Attachment    attachmentBlock   `json:"attachment"`
+	Unknown       unknownBlock      `json:"unknown"`
 	Children      []json.RawMessage `json:"children"`
 }
 
@@ -39,6 +42,31 @@ type listBlock struct {
 
 type tableBlock struct {
 	Cells json.RawMessage `json:"cells"`
+}
+
+// codeBlock is the payload the Blocks API returns for a code block:
+// {"syntax":"bash","text":"...","title":"..."}. The language key is syntax
+// (not "language", as some public references assume) and title is optional.
+type codeBlock struct {
+	Text   string `json:"text"`
+	Syntax string `json:"syntax"`
+	Title  string `json:"title"`
+}
+
+// attachmentBlock identifies a file stored in the document. The payload has no
+// download URL: resourceId is an opaque identifier, not a resolvable address.
+type attachmentBlock struct {
+	Name       string `json:"name"`
+	Size       int64  `json:"size"`
+	Type       string `json:"type"`
+	ViewType   string `json:"viewType"`
+	ResourceID string `json:"resourceId"`
+}
+
+// unknownBlock is the payload of a block whose real type the API did not map:
+// {"rawType":"..."}. It carries no body text, only the original type name.
+type unknownBlock struct {
+	RawType string `json:"rawType"`
 }
 
 type inline struct {
@@ -150,10 +178,22 @@ func renderBlock(
 		renderChildBlocks(builder, value.Children, depth, unknown)
 	case "table":
 		renderTable(builder, parseTableCells(value.Table.Cells))
+	case "code":
+		renderCodeBlock(builder, value, depth, unknown)
+	case "attachment":
+		renderAttachmentBlock(builder, value, depth, unknown)
 	case "":
 		unknown["missing_block_type"] = struct{}{}
 	default:
-		unknown[blockType] = struct{}{}
+		marker := blockType
+		if rawType := strings.TrimSpace(value.Unknown.RawType); rawType != "" {
+			// The payload of this block carries no body text, only the real
+			// type name, so keep that name in the marker instead of the
+			// uninformative "unknown": it is what the metadata and the sync
+			// warning report.
+			marker = "unknown:" + rawType
+		}
+		unknown[marker] = struct{}{}
 		// Preserve useful content when DingTalk introduces a container block
 		// before the connector learns its presentation semantics.
 		renderChildBlocks(builder, value.Children, depth, unknown)
@@ -389,6 +429,113 @@ func writeParagraph(builder *strings.Builder, text string) {
 		builder.WriteString(text)
 		builder.WriteString("\n\n")
 	}
+}
+
+// renderCodeBlock renders a code block as a fenced code block. The language
+// comes from syntax, and a non-empty title becomes a bold line above the fence.
+// A block without text stays unmodelled: an empty fence would only be noise, so
+// the loss is still reported instead.
+func renderCodeBlock(
+	builder *strings.Builder,
+	value block,
+	depth int,
+	unknown map[string]struct{},
+) {
+	if strings.TrimSpace(value.Code.Text) == "" {
+		unknown["code"] = struct{}{}
+		// The documented shape carries no children, but a payload outside the
+		// contract must not lose them.
+		renderChildBlocks(builder, value.Children, depth, unknown)
+		return
+	}
+	if title := oneLine(value.Code.Title); title != "" {
+		fmt.Fprintf(builder, "**%s**\n\n", escapeText(title))
+	}
+	fence := strings.Repeat("`", codeFenceLength(value.Code.Text))
+	builder.WriteString(fence)
+	builder.WriteString(codeInfo(value.Code.Syntax))
+	builder.WriteByte('\n')
+	builder.WriteString(value.Code.Text)
+	if !strings.HasSuffix(value.Code.Text, "\n") {
+		builder.WriteByte('\n')
+	}
+	builder.WriteString(fence)
+	builder.WriteString("\n\n")
+}
+
+// codeFenceLength returns a fence longer than the longest backtick run inside
+// text, so code that itself contains a fence cannot end the block early.
+func codeFenceLength(text string) int {
+	longest := 0
+	for _, run := range strings.FieldsFunc(text, func(r rune) bool { return r != '`' }) {
+		if len(run) > longest {
+			longest = len(run)
+		}
+	}
+	if longest < 2 {
+		return 3
+	}
+	return longest + 1
+}
+
+// codeInfo returns the info string of the fence, or "" when the syntax value
+// cannot be one: a backtick or a line break would break the fence line, and
+// dropping it loses nothing because the code text is written verbatim.
+func codeInfo(syntax string) string {
+	syntax = strings.TrimSpace(syntax)
+	if syntax == "" || strings.ContainsAny(syntax, "`\r\n") {
+		return ""
+	}
+	return syntax
+}
+
+// renderAttachmentBlock renders an attachment as one plain line: the payload
+// holds no download URL, so the renderer names the file instead of fabricating
+// a link that cannot be resolved. An attachment without a name stays
+// unmodelled and is reported.
+func renderAttachmentBlock(
+	builder *strings.Builder,
+	value block,
+	depth int,
+	unknown map[string]struct{},
+) {
+	name := oneLine(value.Attachment.Name)
+	if name == "" {
+		unknown["attachment"] = struct{}{}
+		renderChildBlocks(builder, value.Children, depth, unknown)
+		return
+	}
+	line := "Attachment: " + escapeText(name)
+	if size := humanSize(value.Attachment.Size); size != "" {
+		line += " (" + size + ")"
+	}
+	writeParagraph(builder, line)
+}
+
+// humanSize formats a byte count with one decimal place. A size of zero or
+// below means the API did not report one, so it is omitted rather than shown
+// as "0.0 B".
+func humanSize(size int64) string {
+	if size <= 0 {
+		return ""
+	}
+	const unit = 1024
+	switch {
+	case size < unit:
+		return fmt.Sprintf("%.1f B", float64(size))
+	case size < unit*unit:
+		return fmt.Sprintf("%.1f KB", float64(size)/unit)
+	case size < unit*unit*unit:
+		return fmt.Sprintf("%.1f MB", float64(size)/(unit*unit))
+	default:
+		return fmt.Sprintf("%.1f GB", float64(size)/(unit*unit*unit))
+	}
+}
+
+// oneLine collapses a value that is rendered inline so an embedded line break
+// cannot split the surrounding Markdown construct.
+func oneLine(value string) string {
+	return strings.TrimSpace(strings.NewReplacer("\r", " ", "\n", " ").Replace(value))
 }
 
 func renderTable(builder *strings.Builder, rows [][]string) {

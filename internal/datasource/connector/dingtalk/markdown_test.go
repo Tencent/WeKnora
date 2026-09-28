@@ -129,18 +129,22 @@ func TestRenderDocumentAcceptsOfficialBlockVariants(t *testing.T) {
 	}
 }
 
-// Block types the renderer does not model keep their text unrendered for now,
-// but they must be collected so the connector can report the loss instead of
-// dropping the content silently.
+// A block whose type is modelled but whose payload carries nothing renderable
+// (a code block without text, an attachment without a name) must still be
+// collected, so the loss stays visible instead of turning into an empty
+// fragment of Markdown.
 func TestRenderDocumentCollectsUnknownBlockTypes(t *testing.T) {
 	result := renderDocument("测试文档", []json.RawMessage{
-		rawJSON(`{"blockType":"code","code":{"text":"print(\"hello\")","language":"python"}}`),
-		rawJSON(`{"blockType":"attachment","attachment":{"name":"design.pdf"}}`),
+		rawJSON(`{"blockType":"code","code":{"syntax":"bash"}}`),
+		rawJSON(`{"blockType":"attachment","attachment":{"resourceId":"res-synthetic-1"}}`),
 		rawJSON(`{"blockType":"paragraph","paragraph":{"text":"正文仍然保留"}}`),
 	})
 
 	if !strings.Contains(result.Markdown, "正文仍然保留") {
 		t.Fatalf("known content lost:\n%s", result.Markdown)
+	}
+	if strings.Contains(result.Markdown, "```") || strings.Contains(result.Markdown, "Attachment:") {
+		t.Fatalf("empty payload rendered a fragment:\n%s", result.Markdown)
 	}
 	if want := []string{"attachment", "code"}; !reflect.DeepEqual(result.UnknownTypes, want) {
 		t.Fatalf("UnknownTypes = %#v, want %#v", result.UnknownTypes, want)

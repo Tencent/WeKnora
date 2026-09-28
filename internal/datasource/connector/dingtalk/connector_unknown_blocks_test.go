@@ -58,19 +58,21 @@ func TestUnknownBlockTypesTitleFallsBackToNodeID(t *testing.T) {
 
 // An unmodelled block type must stay visible on the fetch path: it keeps the
 // metadata entry and additionally reaches the structured pipeline event that
-// monitoring keys on. Only the stage/action pair and the document identity are
-// asserted here, never the free-form message.
+// monitoring keys on. A block the API could not map carries only the real type
+// name, and that name is what the metadata and the event must show. Only the
+// stage/action pair and the document identity are asserted here, never the
+// free-form message.
 func TestFetchAllReportsUnknownBlockTypes(t *testing.T) {
 	api := &fakeAPI{
 		workspaces: []workspace{{ID: "space", RootNodeID: "root", Name: "Space"}},
 		nodes: map[string][]node{
 			"root": {{
-				ID: "doc-code", Type: "FILE", Category: "ALIDOC", Extension: "adoc",
+				ID: "doc-unmapped", Type: "FILE", Category: "ALIDOC", Extension: "adoc",
 				Name: "Release notes",
 			}},
 		},
 		blocks: map[string][]json.RawMessage{
-			"doc-code": {rawJSON(`{"blockType":"code","code":{"text":"print(1)","language":"python"}}`)},
+			"doc-unmapped": {rawJSON(`{"blockType":"unknown","unknown":{"rawType":"card"}}`)},
 		},
 		nodeErrors:  make(map[string]error),
 		blockErrors: make(map[string]error),
@@ -87,14 +89,14 @@ func TestFetchAllReportsUnknownBlockTypes(t *testing.T) {
 	if len(items) != 1 {
 		t.Fatalf("FetchAll() returned %d items, want 1", len(items))
 	}
-	if got := items[0].Metadata["unknown_block_types"]; got != "code" {
-		t.Fatalf("metadata unknown_block_types = %q, want %q", got, "code")
+	if got := items[0].Metadata["unknown_block_types"]; got != "unknown:card" {
+		t.Fatalf("metadata unknown_block_types = %q, want %q", got, "unknown:card")
 	}
 	for _, want := range []string{
 		"stage=DingTalkConnector",
 		"action=unknown_block_types",
-		`node_id="doc-code"`,
-		`block_types="code"`,
+		`node_id="doc-unmapped"`,
+		`block_types="unknown:card"`,
 	} {
 		if !strings.Contains(buf.String(), want) {
 			t.Fatalf("pipeline event missing %q:\n%s", want, buf.String())
