@@ -16,6 +16,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/Tencent/WeKnora/internal/utils"
+	pg_query "github.com/pganalyze/pg_query_go/v6"
 )
 
 // DataAnalysisTableName is the only table name the model needs to know when
@@ -72,19 +73,33 @@ func reconcileSQLColumnsWithSchema(sqlText string, schema *TableSchema) (string,
 		}
 	}
 
-	quotedIdentifierPattern := regexp.MustCompile(`"([^"]+)"`)
+	// Use the same SQL lexer as validation so quoted text in literals and
+	// comments is never mistaken for an identifier. Leave invalid SQL to validation.
+	tokens, err := pg_query.Scan(sqlText)
+	if err != nil {
+		return sqlText, nil
+	}
 	fixes := make([]string, 0)
-	rewritten := quotedIdentifierPattern.ReplaceAllStringFunc(sqlText, func(token string) string {
-		name := strings.Trim(token, "\"")
+	var rewritten strings.Builder
+	previous := 0
+	for _, token := range tokens.Tokens {
+		raw := sqlText[token.Start:token.End]
+		if token.Token != pg_query.Token_IDENT || !strings.HasPrefix(raw, `"`) {
+			continue
+		}
+		name := strings.ReplaceAll(raw[1:len(raw)-1], `""`, `"`)
 		canonical, ok := normalizedToCanonical[normalizeIdentifierForMatch(name)]
 		if !ok || canonical == name {
-			return token
+			continue
 		}
 		fixes = append(fixes, fmt.Sprintf("%q -> %q", name, canonical))
-		return fmt.Sprintf(`"%s"`, canonical)
-	})
+		rewritten.WriteString(sqlText[previous:token.Start])
+		fmt.Fprintf(&rewritten, `"%s"`, strings.ReplaceAll(canonical, `"`, `""`))
+		previous = int(token.End)
+	}
+	rewritten.WriteString(sqlText[previous:])
 
-	return rewritten, fixes
+	return rewritten.String(), fixes
 }
 
 func buildMissingColumnSuggestion(sqlErr error, schema *TableSchema) string {
