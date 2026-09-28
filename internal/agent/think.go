@@ -455,7 +455,15 @@ func (e *AgentEngine) streamThinkingToEventBus(
 	)
 	if err != nil {
 		logger.Errorf(ctx, "[Agent][Thinking] Iteration-%d failed: %v", iteration+1, err)
-		return nil, err
+		// The failure still has to tell the caller what already reached the
+		// client: whether anything was emitted is what decides if re-sending
+		// the round would duplicate it (see callLLMWithRetry). llmResult is
+		// nil only when the request never started, i.e. nothing could have
+		// been emitted.
+		if llmResult == nil {
+			return nil, err
+		}
+		return &types.ChatResponse{EmittedAnything: len(emittedEventTypes) > 0}, err
 	}
 
 	// Emit diagnostics: helps identify when answer content went to "thought" vs "final_answer" events
@@ -480,6 +488,7 @@ func (e *AgentEngine) streamThinkingToEventBus(
 		ToolCalls:          llmResult.ToolCalls,
 		FinishReason:       finishReason,
 		AnswerStreamed:     answerStreamed,
+		EmittedAnything:    len(emittedEventTypes) > 0,
 	}
 	if answerStreamed {
 		resp.AnswerEventID = answerID
@@ -571,6 +580,19 @@ func (e *AgentEngine) callLLMWithRetry(
 	if err != nil && isTransientError(err) {
 		// Retry transient errors (timeout, rate limit, server errors) up to maxLLMRetries times
 		for retry := 1; retry <= maxLLMRetries; retry++ {
+			// A re-send streams the round from the start again and the client
+			// appends whatever arrives, so retrying a damaged stream after
+			// part of it already reached the user renders the answer twice:
+			// the partial one, then the whole one. The mangled-frame failure
+			// is the one this agent raises for a stream it knows has a hole,
+			// so it is only re-sent while nothing has been emitted; once text
+			// is on screen, ending the round (degrade or fail) is the lesser
+			// evil. Every other transient error keeps its upstream behaviour.
+			if isCorruptStreamChunkError(err) && response != nil && response.EmittedAnything {
+				logger.Warnf(ctx, "[Agent][Round-%d] Not retrying the damaged stream: "+
+					"the attempt already emitted content and a re-send would duplicate it: %v", round, err)
+				break
+			}
 			retryDelay := llmRetryDelay(err, retry)
 			logger.Warnf(ctx, "[Agent][Round-%d] LLM transient error (attempt %d/%d), retrying in %v: %v",
 				round, retry, maxLLMRetries, retryDelay, err)

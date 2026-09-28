@@ -115,8 +115,14 @@ var transientErrorMarkers = []string{
 	// model's answer — but the corruption is transport-level, so one retry is
 	// worth attempting. Matched by marker text because the streaming path
 	// flattens the error into StreamResponse.Content before the agent sees it.
-	strings.ToLower(types.StreamChunkCorruptError),
+	corruptStreamChunkMarker,
 }
+
+// corruptStreamChunkMarker is types.StreamChunkCorruptError lower-cased for the
+// substring scans. The typed form is api.ErrCorruptStreamChunk; the streaming
+// path flattens the error into StreamResponse.Content before the agent sees it,
+// so the text is the only form that survives as far as the retry loop.
+var corruptStreamChunkMarker = strings.ToLower(types.StreamChunkCorruptError)
 
 // transientStatusPattern matches a retryable HTTP status as a whole number, so
 // "max_tokens 5000" or a request id with 429 inside it does not read as one.
@@ -158,6 +164,22 @@ func isTransientError(err error) bool {
 		}
 	}
 	return false
+}
+
+// isCorruptStreamChunkError reports whether err is the mangled-frame failure
+// api.ErrCorruptStreamChunk names. isTransientError classifies it too, but the
+// retry loop has to pick it out by name: it is the one transient failure the
+// agent refuses to re-send once the failed attempt has already emitted
+// something, because a second attempt would stream the answer over again (see
+// callLLMWithRetry). Both forms are checked for the same reason as above: the
+// typed error survives on the paths that keep it, the marker on the paths that
+// flatten it into text.
+func isCorruptStreamChunkError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return errors.Is(err, api.ErrCorruptStreamChunk) ||
+		strings.Contains(strings.ToLower(err.Error()), corruptStreamChunkMarker)
 }
 
 // maxLLMRetryAfter caps how long a vendor's Retry-After may hold a turn
