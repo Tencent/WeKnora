@@ -16,7 +16,6 @@ import {
   stopEmbedSession,
 } from '@/api/embed'
 import { embedToast } from '@/utils/embedToast'
-import { buildQueryWithHostContext } from '@/utils/embedContext'
 import { fileToDataURI } from '@/utils/embedFile'
 import { useI18n } from 'vue-i18n'
 import { useChatStreamHandler } from '@/composables/useChatStreamHandler'
@@ -249,7 +248,6 @@ export function useEmbedChatSession(options: {
   ) => {
     stopStream()
     prepareForNewOutgoingMessage()
-    const outboundQuery = buildQueryWithHostContext(value, options.hostContext?.value)
     const visitorWebSearchEnabled = opts.webSearchEnabled ?? false
     const imageFiles = (options.allowFileUpload ? opts.imageFiles : undefined) || []
     const attachmentFiles = (options.allowFileUpload ? opts.attachmentFiles : undefined) || []
@@ -318,7 +316,8 @@ export function useEmbedChatSession(options: {
       mentioned_items: [],
       images: imageAttachments.length > 0 ? imageAttachments : undefined,
       attachment_uploads: attachmentUploads.length > 0 ? attachmentUploads : undefined,
-      query: outboundQuery,
+      query: value,
+      host_context: options.hostContext?.value,
       suggestion_attribution: suggestionAttribution || undefined,
       method: 'POST',
       url: endpoint,

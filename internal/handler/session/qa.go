@@ -187,6 +187,16 @@ func (h *Handler) parseQARequest(c *gin.Context, logPrefix string) (*qaRequestCo
 			return nil, nil, errors.NewBadRequestError("invalid suggestion attribution")
 		}
 	}
+	if request.Channel == "embed" && len(request.HostContext) > 0 {
+		query, err := buildQueryWithHostContext(request.Query, request.HostContext)
+		if err != nil {
+			return nil, nil, errors.NewBadRequestError("invalid host context")
+		}
+		if _, valid := secutils.ValidateInputSyntax(query); !valid {
+			return nil, nil, errors.NewBadRequestError("Query content contains invalid content")
+		}
+		request.Query = query
+	}
 
 	// SSRF protection: strip client-supplied URL/Caption fields from image attachments.
 	// The URL field must only be populated server-side by saveImageAttachments; an

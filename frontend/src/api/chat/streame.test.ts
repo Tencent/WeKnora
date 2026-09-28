@@ -2,11 +2,12 @@ import assert from 'node:assert/strict'
 import { after, before, test } from 'node:test'
 import { fileURLToPath } from 'node:url'
 import { createServer, type ViteDevServer } from 'vite'
-import { createSSRApp } from 'vue'
+import { createSSRApp, ref } from 'vue'
 import { renderToString } from 'vue/server-renderer'
 
 let server: ViteDevServer
 let useStream: typeof import('./streame').useStream
+let useEmbedChatSession: typeof import('../../composables/useEmbedChatSession').useEmbedChatSession
 let transport: { requests: Array<{ url: string; options: { body: string } }> }
 const originalStorage = Object.getOwnPropertyDescriptor(globalThis, 'localStorage')
 before(async () => {
@@ -17,6 +18,11 @@ before(async () => {
     '@microsoft/fetch-event-source': `export const requests = []; export async function fetchEventSource(url, options) { requests.push({url, options}); }`,
     '@/utils/index': `export const generateRandomString = () => 'test-request';`,
     '@/i18n': `export default { global: { t: key => key, locale: { value: 'zh-CN' } } };`,
+    '@/api/embed': `export const getEmbedMessageList = async () => ({ data: [] }); export const postEmbedMessageSent = () => {}; export const postEmbedMessageReceived = () => {}; export const relayEmbedWebhookEvent = () => {}; export const stopEmbedSession = async () => {};`,
+    '@/utils/embedToast': `export const embedToast = () => {};`,
+    '@/composables/useChatStreamHandler': `export const useChatStreamHandler = () => ({ prepareForNewOutgoingMessage() {}, processStreamChunk() {}, markInFlightAssistantStopped() {} });`,
+    '@/composables/useStickyBottomOnResize': `export const useStickyBottomOnResize = () => {};`,
+    'vue-i18n': `export const useI18n = () => ({ t: key => key });`,
   }
   server = await createServer({
     configFile: false,
@@ -32,8 +38,39 @@ before(async () => {
     server: { middlewareMode: true, hmr: false }, appType: 'custom',
   })
   ;({ useStream } = await server.ssrLoadModule('/src/api/chat/streame.ts'))
+  ;({ useEmbedChatSession } = await server.ssrLoadModule('/src/composables/useEmbedChatSession.ts'))
   transport = await server.ssrLoadModule('\0mock:@microsoft/fetch-event-source') as typeof transport
 })
+
+for (const agentId of ['agent-1', 'builtin-quick-answer']) {
+  test(`embed ${agentId} sends the suggested question separately from host context`, async () => {
+    let session!: ReturnType<typeof useEmbedChatSession>
+    const hostContext = ref<Record<string, unknown>>({ userId: 123, page: '/refunds' })
+    await renderToString(createSSRApp({ setup() {
+      session = useEmbedChatSession({
+        sessionId: ref('session-1'), sessionSig: ref('sig'), visitorId: ref('visitor'),
+        channelId: 'channel-1', token: 'embed-token', agentId, kbIds: [], hostContext,
+      })
+      return () => null
+    } }))
+    try {
+      session.setSuggestionAttribution('set-1', 'question-1')
+      await session.sendMsg('What is the refund policy?')
+      const body = JSON.parse(transport.requests.at(-1)!.options.body)
+      assert.equal(body.query, 'What is the refund policy?')
+      assert.deepEqual(body.host_context, { userId: 123, page: '/refunds' })
+      assert.deepEqual(body.suggestion_attribution, { suggestion_set_id: 'set-1', question_id: 'question-1' })
+      assert.equal(body.channel, 'embed')
+
+      hostContext.value = { page: '/orders' }
+      await session.sendMsg('An ordinary question')
+      const nextBody = JSON.parse(transport.requests.at(-1)!.options.body)
+      assert.equal(nextBody.query, 'An ordinary question')
+      assert.deepEqual(nextBody.host_context, { page: '/orders' })
+      assert.equal(Object.hasOwn(nextBody, 'suggestion_attribution'), false)
+    } finally { session.handleStopGeneration() }
+  })
+}
 after(async () => {
   await server?.close()
   if (originalStorage) Object.defineProperty(globalThis, 'localStorage', originalStorage)
