@@ -14,3 +14,10 @@ test('shouldRejectKnowledgeFileType preserves dynamic whitelist behavior', () =>
   assert.equal(shouldRejectKnowledgeFileType('page.html', ['pdf']), true)
   assert.equal(shouldRejectKnowledgeFileType('page.html', []), false)
 })
+
+test('shouldRejectKnowledgeFileType accepts SQL before parser metadata loads', () => {
+  assert.equal(shouldRejectKnowledgeFileType('schema.sql'), false)
+  assert.equal(shouldRejectKnowledgeFileType('SCHEMA.SQL', []), false)
+  assert.equal(shouldRejectKnowledgeFileType('schema.sql', new Set()), false)
+  assert.equal(shouldRejectKnowledgeFileType('schema.sql', ['pdf']), true)
+})

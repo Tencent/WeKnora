@@ -13,6 +13,8 @@ func TestIsValidFileTypeHTML(t *testing.T) {
 		{name: "htm", filename: "legacy.htm", want: true},
 		{name: "xmind", filename: "architecture.xmind", want: true},
 		{name: "uppercase xmind", filename: "ARCHITECTURE.XMIND", want: true},
+		{name: "sql", filename: "schema.sql", want: true},
+		{name: "uppercase sql", filename: "SCHEMA.SQL", want: true},
 		{name: "unsupported", filename: "payload.exe", want: false},
 	}
 
@@ -34,6 +36,8 @@ func TestIsSupportedImportExtension(t *testing.T) {
 		{name: "xlsx", ext: "xlsx", want: true},
 		{name: "xls", ext: "xls", want: true},
 		{name: "csv", ext: "csv", want: true},
+		{name: "sql", ext: "sql", want: true},
+		{name: "uppercase sql with dot", ext: ".SQL", want: true},
 		{name: "dot prefix", ext: ".xlsx", want: true},
 		{name: "uppercase", ext: "XLSX", want: true},
 		{name: "surrounding space", ext: " xlsx ", want: true},
@@ -74,7 +78,7 @@ func TestIsDataTableFileType(t *testing.T) {
 			t.Errorf("isDataTableFileType(%q) = false, want true", ext)
 		}
 	}
-	for _, ext := range []string{"pdf", "png", "", unknownFileType} {
+	for _, ext := range []string{"pdf", "png", "sql", "", unknownFileType} {
 		if isDataTableFileType(ext) {
 			t.Errorf("isDataTableFileType(%q) = true, want false", ext)
 		}

@@ -1,6 +1,7 @@
 const DEFAULT_VALID_TYPES = new Set([
   "pdf",
   "txt",
+  "sql",
   "md",
   "docx",
   "doc",
