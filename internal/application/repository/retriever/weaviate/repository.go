@@ -749,8 +749,20 @@ func (w *weaviateRepository) CopyIndices(ctx context.Context,
 			log.Errorf("[Weaviate] Failed to query source points: %v", err)
 			return err
 		}
+		// A query Weaviate could not run comes back as HTTP 200 carrying an
+		// errors array and no data, so it reaches this point as a successful
+		// call. Reading it as "the source is exhausted" would report a failed
+		// query as a finished copy.
+		if len(result.Errors) > 0 {
+			log.Errorf("[Weaviate] Failed to query source points: %v", result.Errors)
+			return fmt.Errorf("weaviate: copy indices query failed: %s", result.Errors[0].Message)
+		}
 
-		objects, ok := result.Data["Get"].(map[string]interface{})[collectionName].([]interface{})
+		get, ok := result.Data["Get"].(map[string]interface{})
+		if !ok {
+			return fmt.Errorf("weaviate: copy indices invalid response")
+		}
+		objects, ok := get[collectionName].([]interface{})
 		if !ok || len(objects) == 0 {
 			break
 		}
