@@ -274,7 +274,9 @@ func gitlabFilePathEscape(file string) string {
 	return b.String()
 }
 func (c *client) compare(ctx context.Context, id, from, to string) (*comparison, error) {
-	q := url.Values{"from": {from}, "to": {to}}
+	// Sync compares snapshots, not changes since their merge base. The default
+	// comparison misses reverted files when a branch is reset or force-pushed.
+	q := url.Values{"from": {from}, "to": {to}, "straight": {"true"}}
 	var v comparison
 	err := c.get(ctx, "/projects/"+projectPath(id)+"/repository/compare?"+q.Encode(), &v)
 	return &v, err
