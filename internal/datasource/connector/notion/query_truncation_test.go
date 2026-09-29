@@ -3,10 +3,6 @@ package notion
 import (
 	"context"
 	"encoding/json"
-	"net/http"
-	"net/http/httptest"
-	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -15,9 +11,10 @@ import (
 )
 
 // A Notion data source query stops at 10,000 results and reports has_more=false
-// together with request_status.type="incomplete". The tests below pin down that a
-// capped result set stays distinguishable from a complete one and that rows it no
-// longer reports are not mistaken for source-side deletions.
+// together with request_status.type="incomplete". A capped query is no longer the
+// end of the read: the client continues in created_time windows (see
+// query_windows_test.go). These tests pin down what a window that cannot advance
+// does instead — stop, stay visible, and never drive deletions.
 // See https://developers.notion.com/guides/data-apis/query-large-data-sources
 
 const truncationReason = "query_result_limit_reached"
@@ -53,66 +50,6 @@ func truncationDataSourceRow() map[string]interface{} {
 		"parent":           map[string]interface{}{"type": "workspace", "workspace": true},
 		"title":            []interface{}{map[string]interface{}{"plain_text": "Large Database"}},
 	}
-}
-
-type truncationQueryPage struct {
-	rows          []interface{}
-	hasMore       bool
-	nextCursor    string
-	requestStatus map[string]interface{}
-}
-
-type truncationFake struct {
-	searchResults []interface{}
-	queryPages    []truncationQueryPage
-	blocks        map[string][]interface{}
-}
-
-// newTruncationServer emulates a workspace whose data source query answers with
-// the given pages. It returns the server and the number of query requests served.
-func newTruncationServer(t *testing.T, fake truncationFake) (*httptest.Server, *int32) {
-	t.Helper()
-	var queryCalls int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		switch {
-		case r.URL.Path == "/v1/search":
-			_ = json.NewEncoder(w).Encode(map[string]interface{}{
-				"object": "list", "results": fake.searchResults, "has_more": false, "next_cursor": nil,
-			})
-		case r.URL.Path == "/v1/data_sources/ds-1" && r.Method == http.MethodGet:
-			_ = json.NewEncoder(w).Encode(map[string]interface{}{
-				"id": "ds-1", "object": "data_source",
-				"title": []interface{}{map[string]interface{}{"plain_text": "Large Database"}},
-			})
-		case r.URL.Path == "/v1/data_sources/ds-1/query":
-			call := int(atomic.AddInt32(&queryCalls, 1)) - 1
-			if call >= len(fake.queryPages) {
-				http.Error(w, "unexpected extra query request", http.StatusInternalServerError)
-				return
-			}
-			page := fake.queryPages[call]
-			resp := map[string]interface{}{
-				"object": "list", "results": page.rows, "has_more": page.hasMore, "next_cursor": nil,
-			}
-			if page.nextCursor != "" {
-				resp["next_cursor"] = page.nextCursor
-			}
-			if page.requestStatus != nil {
-				resp["request_status"] = page.requestStatus
-			}
-			_ = json.NewEncoder(w).Encode(resp)
-		case strings.HasPrefix(r.URL.Path, "/v1/blocks/"):
-			id := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/v1/blocks/"), "/children")
-			_ = json.NewEncoder(w).Encode(map[string]interface{}{
-				"object": "list", "results": fake.blocks[id], "has_more": false, "next_cursor": nil,
-			})
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	t.Cleanup(server.Close)
-	return server, &queryCalls
 }
 
 func truncationPrevCursor() *types.SyncCursor {
@@ -151,69 +88,67 @@ func TestPaginatedResponseParsesRequestStatus(t *testing.T) {
 	})
 }
 
-func TestQueryDatabaseAllReportsTruncatedResult(t *testing.T) {
-	server, queryCalls := newTruncationServer(t, truncationFake{
-		queryPages: []truncationQueryPage{{
-			rows:          []interface{}{truncationRecord("r1"), truncationRecord("r2")},
-			requestStatus: truncationIncomplete(),
-		}},
+func TestQueryDatabaseAllStopsWhenWindowCannotAdvance(t *testing.T) {
+	logs := captureNotionLogs(t)
+	// More rows than one query returns share a single created_time, so the second
+	// window starts where the first one did and would return the same rows again.
+	server := newWindowQueryServer(t, windowQueryFake{
+		rows: []windowTestRow{
+			{id: "r1", createdTime: "2026-01-01T10:00:00Z"},
+			{id: "r2", createdTime: "2026-01-01T10:00:00Z"},
+		},
+		queryLimit: 1,
 	})
 	client := mustTestClient(t, "test-token", server.URL)
 
 	records, err := client.QueryDatabaseAll(context.Background(), "ds-1")
-	require.ErrorIs(t, err, errQueryResultTruncated, "a capped query must not look like a complete read")
+	require.ErrorIs(t, err, errQueryResultTruncated, "an unwalkable window must still surface the truncation")
+	require.ErrorIs(t, err, errWindowNotAdvancing)
 	require.Contains(t, err.Error(), truncationReason)
-	require.Len(t, records, 2, "rows the capped page did return stay available to the caller")
-	require.Equal(t, int32(1), atomic.LoadInt32(queryCalls), "a capped query must not be retried")
+	require.Equal(t, []string{"r1"}, recordIDs(records), "rows already read stay available to the caller")
+	require.Equal(t, int32(2), server.queryCalls(),
+		"the walk must stop as soon as the window stops advancing instead of repeating the same query")
+	require.Contains(t, logs.String(), "does not advance", "the stop must be explained in a warning")
 }
 
-func TestQueryDatabaseAllChecksRequestStatusOnEveryPage(t *testing.T) {
-	server, queryCalls := newTruncationServer(t, truncationFake{
-		queryPages: []truncationQueryPage{
-			{rows: []interface{}{truncationRecord("r1")}, hasMore: true, nextCursor: "page-2"},
-			{rows: []interface{}{truncationRecord("r2")}, requestStatus: truncationIncomplete()},
-		},
+func TestQueryDatabaseAllStopsWhenRowsCarryNoCreatedTime(t *testing.T) {
+	logs := captureNotionLogs(t)
+	server := newWindowQueryServer(t, windowQueryFake{
+		rows:       []windowTestRow{{id: "r1"}, {id: "r2"}},
+		queryLimit: 1,
 	})
 	client := mustTestClient(t, "test-token", server.URL)
 
 	records, err := client.QueryDatabaseAll(context.Background(), "ds-1")
-	require.ErrorIs(t, err, errQueryResultTruncated, "the marker can appear before the last page")
-	require.Len(t, records, 2)
-	require.Equal(t, int32(2), atomic.LoadInt32(queryCalls), "pagination must stop at the incomplete page")
+	require.ErrorIs(t, err, errQueryResultTruncated)
+	require.ErrorIs(t, err, errWindowNotAdvancing)
+	require.Equal(t, []string{"r1"}, recordIDs(records))
+	require.Equal(t, int32(1), server.queryCalls(),
+		"a window without any created_time cannot start another one")
+	require.Contains(t, logs.String(), "no row carrying created_time")
 }
 
-func TestQueryDatabaseAllCompleteResultUnchanged(t *testing.T) {
-	cases := map[string]*truncationQueryPage{
-		"no request_status": {
-			rows: []interface{}{truncationRecord("r1"), truncationRecord("r2")},
-		},
-		"explicit complete": {
-			rows:          []interface{}{truncationRecord("r1"), truncationRecord("r2")},
-			requestStatus: map[string]interface{}{"type": "complete"},
-		},
-	}
-	for name, page := range cases {
-		t.Run(name, func(t *testing.T) {
-			server, queryCalls := newTruncationServer(t, truncationFake{
-				queryPages: []truncationQueryPage{*page},
-			})
-			client := mustTestClient(t, "test-token", server.URL)
+func TestQueryDatabaseAllStopsOnEmptyIncompleteWindow(t *testing.T) {
+	logs := captureNotionLogs(t)
+	server := newWindowQueryServer(t, windowQueryFake{alwaysIncomplete: true})
+	client := mustTestClient(t, "test-token", server.URL)
 
-			records, err := client.QueryDatabaseAll(context.Background(), "ds-1")
-			require.NoError(t, err, "a complete result set must not raise a truncation error")
-			require.Len(t, records, 2)
-			require.Equal(t, int32(1), atomic.LoadInt32(queryCalls))
-		})
-	}
+	records, err := client.QueryDatabaseAll(context.Background(), "ds-1")
+	require.ErrorIs(t, err, errQueryResultTruncated)
+	require.ErrorIs(t, err, errWindowNotAdvancing)
+	require.Empty(t, recordIDs(records))
+	require.Equal(t, int32(1), server.queryCalls(), "an empty incomplete window must not be re-queried")
+	require.Contains(t, logs.String(), "no row carrying created_time")
 }
 
 func TestFetchIncrementalTruncatedQuerySkipsDeletions(t *testing.T) {
-	server, _ := newTruncationServer(t, truncationFake{
+	server := newWindowQueryServer(t, windowQueryFake{
 		searchResults: []interface{}{truncationDataSourceRow()},
-		queryPages: []truncationQueryPage{{
-			rows:          []interface{}{truncationRecord("r1"), truncationRecord("r2")},
-			requestStatus: truncationIncomplete(),
-		}},
+		rows: []windowTestRow{
+			{id: "r1", createdTime: "2026-01-01T10:00:00Z"},
+			{id: "r2", createdTime: "2026-01-01T10:00:00Z"},
+		},
+		queryLimit: 1,
 	})
 	config := makeNotionConfig(&Config{APIKey: "test-token"}, server.URL, []string{"ds-1"})
 
@@ -230,11 +165,9 @@ func TestFetchIncrementalTruncatedQuerySkipsDeletions(t *testing.T) {
 }
 
 func TestFetchIncrementalCompleteQueryStillDetectsDeletions(t *testing.T) {
-	server, _ := newTruncationServer(t, truncationFake{
+	server := newWindowQueryServer(t, windowQueryFake{
 		searchResults: []interface{}{truncationDataSourceRow()},
-		queryPages: []truncationQueryPage{{
-			rows: []interface{}{truncationRecord("r1"), truncationRecord("r2")},
-		}},
+		rows:          createdTimeRows("r1", "r2"),
 	})
 	config := makeNotionConfig(&Config{APIKey: "test-token"}, server.URL, []string{"ds-1"})
 
@@ -252,12 +185,40 @@ func TestFetchIncrementalCompleteQueryStillDetectsDeletions(t *testing.T) {
 		"a complete result set must keep reporting genuinely absent rows as deleted")
 }
 
+func TestFetchIncrementalWindowedQueryKeepsDeletionDetection(t *testing.T) {
+	// The data source holds more rows than one query returns, but every window
+	// advances, so the round ends complete: r4 is genuinely gone and must still be
+	// reported as deleted. This guards against "never delete anything as soon as
+	// windowing is involved".
+	server := newWindowQueryServer(t, windowQueryFake{
+		searchResults: []interface{}{truncationDataSourceRow()},
+		rows:          createdTimeRows("r1", "r2", "r3"),
+		queryLimit:    2,
+		pageSize:      2,
+	})
+	config := makeNotionConfig(&Config{APIKey: "test-token"}, server.URL, []string{"ds-1"})
+
+	items, next, err := NewConnector().FetchIncremental(context.Background(), config, truncationPrevCursor())
+	require.NoError(t, err)
+	require.NotNil(t, next)
+
+	deleted := map[string]bool{}
+	for _, item := range items {
+		if item.IsDeleted {
+			deleted[item.ExternalID] = true
+		}
+	}
+	require.Equal(t, map[string]bool{"r4": true}, deleted,
+		"rows read across windows prove the rows that are absent at source are deleted")
+}
+
 func TestFetchPagePropagatesTruncationFromChildDatabase(t *testing.T) {
-	server, _ := newTruncationServer(t, truncationFake{
-		queryPages: []truncationQueryPage{{
-			rows:          []interface{}{truncationRecord("r1")},
-			requestStatus: truncationIncomplete(),
-		}},
+	server := newWindowQueryServer(t, windowQueryFake{
+		rows: []windowTestRow{
+			{id: "r1", createdTime: "2026-01-01T10:00:00Z"},
+			{id: "r2", createdTime: "2026-01-01T10:00:00Z"},
+		},
+		queryLimit: 1,
 		blocks: map[string][]interface{}{
 			"page-1": {map[string]interface{}{
 				"id": "ds-1", "type": "child_database", "has_children": true,

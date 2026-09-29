@@ -558,10 +558,14 @@ func (c *Connector) fetchDatabaseIncremental(
 }
 
 // queryDatabaseRecords resolves the database ID and queries all records.
+// Records are read through created_time windows, so a data source holding more
+// rows than one vendor query can return is still read in full.
 // Returns the records, the database title, the canonical data_source_id used for the
-// query, whether the vendor truncated the result set, and an error. A truncated result
+// query, whether the result set is incomplete, and an error. An incomplete result
 // still returns the rows fetched so far, with truncated set and a nil error, because
 // the partial data remains usable as long as callers do not read absence as deletion.
+// Truncation is only reported when windowed reading cannot complete (see
+// notionClient.queryDataSourceAll).
 func (c *Connector) queryDatabaseRecords(
 	ctx context.Context, client *notionClient, id string,
 ) ([]notionPage, string, string, bool, error) {
@@ -583,8 +587,8 @@ func (c *Connector) queryDatabaseRecords(
 	}
 
 	if truncated {
-		logger.Warnf(ctx, "[Notion] database %s (%s): %d records, truncated at the vendor query limit: "+
-			"result set incomplete", id, dbInfo.Page.Title, len(records))
+		logger.Warnf(ctx, "[Notion] database %s (%s): %d records, the vendor query limit was hit and the "+
+			"created_time window could not advance: result set incomplete", id, dbInfo.Page.Title, len(records))
 	} else {
 		logger.Infof(ctx, "[Notion] database %s (%s): %d records", id, dbInfo.Page.Title, len(records))
 	}

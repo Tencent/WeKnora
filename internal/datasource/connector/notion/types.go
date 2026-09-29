@@ -68,6 +68,11 @@ type notionPage struct {
 	// Only present on data_source objects (API 2025-09-03+). For example, if a database
 	// is inside a page, this will be {type: "page_id", page_id: "..."}.
 	DatabaseParent *notionParent `json:"database_parent,omitempty"`
+
+	// CreatedTime is the vendor's immutable creation timestamp for a row
+	// (created_time). Data source queries sort and window by it, so unlike
+	// LastEditedTime it never moves when the row is edited.
+	CreatedTime time.Time `json:"created_time"`
 }
 
 // Parent type constants for notionParent.Type
