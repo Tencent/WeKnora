@@ -155,20 +155,20 @@ func (h *ModelHandler) CopyModel(c *gin.Context) {
 	id := secutils.SanitizeForLog(c.Param("id"))
 	if id == "" {
 		logger.Error(ctx, "Model ID is empty")
-		c.Error(errors.NewBadRequestError("Model ID cannot be empty"))
+		_ = c.Error(errors.NewBadRequestError("Model ID cannot be empty"))
 		return
 	}
 
 	var req CopyModelRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		logger.Error(ctx, "Failed to parse request parameters", err)
-		c.Error(errors.NewBadRequestError(err.Error()))
+		_ = c.Error(errors.NewBadRequestError(err.Error()))
 		return
 	}
 	tenantID := c.GetUint64(types.TenantIDContextKey.String())
 	if tenantID == 0 {
 		logger.Error(ctx, "Tenant ID is empty")
-		c.Error(errors.NewBadRequestError("Workspace ID cannot be empty"))
+		_ = c.Error(errors.NewBadRequestError("Workspace ID cannot be empty"))
 		return
 	}
 
@@ -176,15 +176,15 @@ func (h *ModelHandler) CopyModel(c *gin.Context) {
 	if err != nil {
 		if err == service.ErrModelNotFound {
 			logger.Warnf(ctx, "Model not found, ID: %s", id)
-			c.Error(errors.NewNotFoundError("Model not found"))
+			_ = c.Error(errors.NewNotFoundError("Model not found"))
 			return
 		}
 		if appErr, ok := errors.IsAppError(err); ok {
-			c.Error(appErr)
+			_ = c.Error(appErr)
 			return
 		}
 		logger.ErrorWithFields(ctx, err, nil)
-		c.Error(errors.NewInternalServerError(err.Error()))
+		_ = c.Error(errors.NewInternalServerError(err.Error()))
 		return
 	}
 

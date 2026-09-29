@@ -50,7 +50,8 @@ func TestCopyModelResponseOmitsCredentials(t *testing.T) {
 		h.CopyModel(c)
 	})
 
-	req := httptest.NewRequest(http.MethodPost, "/models/src/copy", bytes.NewBufferString(`{"display_name":"生产 GPT 副本"}`))
+	payload := bytes.NewBufferString(`{"display_name":"生产 GPT 副本"}`)
+	req := httptest.NewRequest(http.MethodPost, "/models/src/copy", payload)
 	req.Header.Set("Content-Type", "application/json")
 	req = req.WithContext(context.WithValue(req.Context(), types.TenantIDContextKey, uint64(7)))
 	rec := httptest.NewRecorder()
