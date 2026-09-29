@@ -28,7 +28,8 @@
 // Known limitations (v1):
 //   - At most 30 images per document are inlined (ImageResolver.maxRemoteImages);
 //     the rest keep their original URL and will not render.
-//   - Images larger than 9MB are left as URLs rather than downscaled.
+//   - Images larger than 9MB are left as URLs rather than downscaled, as are
+//     images past a 50MB per-document inline budget.
 //   - Templates and documents in the trash are not synced.
 package outline
 

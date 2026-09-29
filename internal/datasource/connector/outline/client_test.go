@@ -236,6 +236,23 @@ func TestClient_DownloadAttachment_FollowsRedirect(t *testing.T) {
 	}
 }
 
+func TestClient_DownloadAttachment_StopsReadingPastInlineLimit(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/pdf")
+		_, _ = w.Write(make([]byte, maxImageBytes+4096))
+	}))
+	defer srv.Close()
+
+	data, _, err := newClient(&Config{APIToken: "tok", BaseURL: srv.URL}).
+		DownloadAttachment(context.Background(), "big")
+	if err != nil {
+		t.Fatalf("DownloadAttachment: %v", err)
+	}
+	if len(data) != maxImageBytes+1 {
+		t.Errorf("read %d bytes, want %d: enough to reject as oversize, no more", len(data), maxImageBytes+1)
+	}
+}
+
 func TestClient_DownloadAttachment_NotFound(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(404)

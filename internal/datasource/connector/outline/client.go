@@ -251,7 +251,9 @@ func (c *client) DownloadAttachment(ctx context.Context, attachmentID string) ([
 		return nil, "", fmt.Errorf("download attachment %s: status=%d", attachmentID, resp.StatusCode)
 	}
 
-	data, err := io.ReadAll(resp.Body)
+	// Read one byte past the inline limit: enough for the caller to see the
+	// attachment is oversize, without buffering a large file just to reject it.
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxImageBytes+1))
 	if err != nil {
 		return nil, "", fmt.Errorf("read attachment %s: %w", attachmentID, err)
 	}

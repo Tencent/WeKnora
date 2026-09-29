@@ -20,6 +20,11 @@ const (
 	// is applied to the decoded bytes. Anything larger is left as a URL rather
 	// than being downscaled — see the package doc's known limitations.
 	maxImageBytes = 9 * 1024 * 1024
+
+	// maxDocInlineBytes caps the data URIs one document may carry, matching the
+	// Confluence connector's per-page budget. Without it maxInlineImages images
+	// at maxImageBytes would put ~360MB of base64 into a single upload.
+	maxDocInlineBytes = 50 << 20
 )
 
 // attachmentDownloader is the slice of the API client that image inlining needs.
@@ -53,8 +58,13 @@ var linkTitleRe = regexp.MustCompile(`"([^"]*)"`)
 // resource://<handle> while staying inside the parent document.
 //
 // An image that cannot be inlined (download failure, oversize, non-image, past
-// the cap) keeps its original link: the text around it is still worth ingesting,
-// and a broken image is easier to diagnose than a silently deleted one.
+// the cap or the byte budget) keeps its original link: the text around it is
+// still worth ingesting, and a broken image is easier to diagnose than a
+// silently deleted one.
+//
+// Each attachment is downloaded once per document; a repeated image reuses the
+// result but still counts against both limits per occurrence, because ingestion
+// keeps every data URI occurrence.
 func embedAttachmentImages(ctx context.Context, cli attachmentDownloader, md string) (string, int) {
 	matches := attachmentImageRe.FindAllStringSubmatchIndex(md, -1)
 	if len(matches) == 0 {
@@ -63,7 +73,11 @@ func embedAttachmentImages(ctx context.Context, cli attachmentDownloader, md str
 
 	var out strings.Builder
 	inlined := 0
+	inlineBytes := 0
 	last := 0
+	// dataURIs caches each attachment's data URI; "" records one that cannot be
+	// inlined, so a failed download is not retried for every occurrence.
+	dataURIs := make(map[string]string)
 
 	for _, m := range matches {
 		whole := md[m[0]:m[1]]
@@ -81,25 +95,18 @@ func embedAttachmentImages(ctx context.Context, cli attachmentDownloader, md str
 			continue
 		}
 
-		data, contentType, err := cli.DownloadAttachment(ctx, attachmentID)
-		if err != nil {
-			logger.Warnf(ctx, "[Outline] attachment %s download failed, keeping original link: %v",
-				attachmentID, err)
+		dataURI, seen := dataURIs[attachmentID]
+		if !seen {
+			dataURI = attachmentDataURI(ctx, cli, attachmentID)
+			dataURIs[attachmentID] = dataURI
+		}
+		if dataURI == "" {
 			out.WriteString(whole)
 			continue
 		}
-		if len(data) > maxImageBytes {
-			logger.Warnf(ctx,
-				"[Outline] attachment %s is %d bytes, over the %d byte inline limit; keeping original link",
-				attachmentID, len(data), maxImageBytes)
-			out.WriteString(whole)
-			continue
-		}
-
-		mime := imageMIME(contentType, data)
-		if mime == "" {
-			logger.Infof(ctx, "[Outline] attachment %s is not an image (content-type %q); keeping original link",
-				attachmentID, contentType)
+		if inlineBytes+len(dataURI) > maxDocInlineBytes {
+			logger.Warnf(ctx, "[Outline] attachment %s not inlined: document already carries %d bytes of images",
+				attachmentID, inlineBytes)
 			out.WriteString(whole)
 			continue
 		}
@@ -120,16 +127,40 @@ func embedAttachmentImages(ctx context.Context, cli attachmentDownloader, md str
 		// payload and the image would be dropped on decode.
 		out.WriteString("![")
 		out.WriteString(altText)
-		out.WriteString("](data:")
-		out.WriteString(mime)
-		out.WriteString(";base64,")
-		out.WriteString(base64.StdEncoding.EncodeToString(data))
+		out.WriteString("](")
+		out.WriteString(dataURI)
 		out.WriteString(")")
 		inlined++
+		inlineBytes += len(dataURI)
 	}
 
 	out.WriteString(md[last:])
 	return out.String(), inlined
+}
+
+// attachmentDataURI downloads one attachment and returns it as
+// "data:<mime>;base64,<payload>", or "" when it cannot be inlined (download
+// failure, oversize, not an image). The reason is logged here.
+func attachmentDataURI(ctx context.Context, cli attachmentDownloader, attachmentID string) string {
+	data, contentType, err := cli.DownloadAttachment(ctx, attachmentID)
+	if err != nil {
+		logger.Warnf(ctx, "[Outline] attachment %s download failed, keeping original link: %v",
+			attachmentID, err)
+		return ""
+	}
+	if len(data) > maxImageBytes {
+		logger.Warnf(ctx,
+			"[Outline] attachment %s is over the %d byte inline limit; keeping original link",
+			attachmentID, maxImageBytes)
+		return ""
+	}
+	mime := imageMIME(contentType, data)
+	if mime == "" {
+		logger.Infof(ctx, "[Outline] attachment %s is not an image (content-type %q); keeping original link",
+			attachmentID, contentType)
+		return ""
+	}
+	return "data:" + mime + ";base64," + base64.StdEncoding.EncodeToString(data)
 }
 
 // imageMIME decides the data URI media type, preferring the server's

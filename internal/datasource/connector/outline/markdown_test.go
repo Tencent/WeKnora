@@ -2,6 +2,7 @@ package outline
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"regexp"
@@ -174,6 +175,49 @@ func TestEmbedAttachmentImages_CapsAtMaxInlineImages(t *testing.T) {
 	if d.calls > maxInlineImages {
 		t.Errorf("downloaded %d attachments, want at most %d (no wasted downloads past the cap)",
 			d.calls, maxInlineImages)
+	}
+}
+
+func TestEmbedAttachmentImages_RepeatedAttachmentDownloadsOnce(t *testing.T) {
+	md := "![a](/api/attachments.redirect?id=att-1)\n![b](/api/attachments.redirect?id=att-1)\n" +
+		"![](/api/attachments.redirect?id=missing)\n![](/api/attachments.redirect?id=missing)\n"
+	d := &stubDownloader{data: map[string][]byte{"att-1": pngBytes(256)}}
+
+	out, n := embedAttachmentImages(context.Background(), d, md)
+	if n != 2 {
+		t.Errorf("inlined = %d, want 2: ingestion keeps each occurrence", n)
+	}
+	if d.calls != 2 {
+		t.Errorf("downloads = %d, want 2 (one per distinct attachment, failures included)", d.calls)
+	}
+	if !strings.Contains(out, "![a](data:") || !strings.Contains(out, "![b](data:") {
+		t.Error("each occurrence must keep its own alt text")
+	}
+	if got := strings.Count(out, "id=missing"); got != 2 {
+		t.Errorf("failed attachment links kept = %d, want 2", got)
+	}
+}
+
+func TestEmbedAttachmentImages_StopsAtDocumentByteBudget(t *testing.T) {
+	// Each image is at the per-image limit, so its data URI is ~12MB and only
+	// four fit in maxDocInlineBytes. The stub shares one slice across ids.
+	img := pngBytes(maxImageBytes)
+	data := map[string][]byte{}
+	var sb strings.Builder
+	for i := 0; i < 6; i++ {
+		id := fmt.Sprintf("att-%d", i)
+		data[id] = img
+		sb.WriteString("![](/api/attachments.redirect?id=" + id + ")\n")
+	}
+	d := &stubDownloader{data: data}
+
+	out, n := embedAttachmentImages(context.Background(), d, sb.String())
+	uriLen := len("data:image/png;base64,") + base64.StdEncoding.EncodedLen(maxImageBytes)
+	if want := maxDocInlineBytes / uriLen; n != want {
+		t.Fatalf("inlined = %d, want %d", n, want)
+	}
+	if got := strings.Count(out, "attachments.redirect"); got != 6-n {
+		t.Errorf("leftover links = %d, want %d", got, 6-n)
 	}
 }
 
