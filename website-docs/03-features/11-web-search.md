@@ -23,6 +23,7 @@ registry.Register("metaso", infra_web_search.NewMetasoProvider)
 registry.Register("bocha", infra_web_search.NewBochaProvider)
 registry.Register("brave", infra_web_search.NewBraveProvider)
 registry.Register("serply", infra_web_search.NewSerplyProvider)
+registry.Register("firecrawl", infra_web_search.NewFirecrawlProvider)
 ```
 
 | 引擎 | 源码文件 | 是否需要 API Key | 端点 | 备注 |
@@ -41,17 +42,20 @@ registry.Register("serply", infra_web_search.NewSerplyProvider)
 | 博查 Bocha | `bocha.go` | 是 | `https://api.bochaai.com/v1/web-search` | extra_config.freshness、summary |
 | Brave Search | `brave.go` | 是 | `https://api.search.brave.com/res/v1/web/search` | 支持按次传 country/freshness |
 | Serply | `serply.go` | 是 | `https://api.serply.io/v1/search` | Google 结果；支持按次传 country/freshness（仅 pd/pw/pm/py） |
+| [Firecrawl](https://www.firecrawl.dev/search?utm_source=weknora&utm_medium=integration) | `firecrawl.go` | 是 | `https://api.firecrawl.dev/v2/search` | 支持按次传 country/freshness（仅 pd/pw/pm/py）；extra_config.include_content 可返回 Markdown 正文 |
 
-当前共注册 14 个引擎。
+当前共注册 15 个引擎。
 
 | 提供商附加配置 | 值 |
 | --- | --- |
 | Metaso scope | webpage（默认）、document、scholar、podcast、video、image |
 | Exa include_text | 字符串布尔值，例如 `"true"`；默认不取正文 |
+| Firecrawl include_content | 字符串布尔值，例如 `"true"`；默认只返回摘要，开启后每条结果额外消耗抓取额度 |
 | Bocha freshness | noLimit（默认）、oneDay、oneWeek、oneMonth、oneYear |
 | Bocha summary | 默认请求摘要；设为 `"false"` 时关闭 |
 | Brave 按次过滤 | country/freshness 是 web_search 工具参数，见下文；与 Bocha 固定配置的字段取值不同 |
 | Serply 按次过滤 | 同 Brave；country 映射为 Google 的 gl，freshness 只接受 pd/pw/pm/py，不支持日期区间 |
+| Firecrawl 按次过滤 | 同 Brave；country 映射为 Firecrawl 的 country，freshness 映射为 tbs（qdr:d/w/m/y），不支持日期区间 |
 
 除 SearXNG 外，所有引擎端点均硬编码、租户不可配置——这是防 SSRF 的第一道措施（源码注释：`Not configurable by tenants — prevents SSRF`）。
 
@@ -103,7 +107,7 @@ flowchart TD
 ```
 
 - `count` 指定结果数量，范围是 1 到当前 Agent 配置的最大结果数（最多 20）；省略时沿用现有 Agent 默认值。
-- `country` / `freshness` 通过 Brave 与 Serply 提供商生效。地区接受两字母代码或 `ALL`，时效接受 `pd` / `pw` / `pm` / `py` 或 `YYYY-MM-DDtoYYYY-MM-DD`。省略 `country` 时不向 Brave 传该参数（Brave 自身默认 US）；显式 `ALL` 表示全球结果。Serply 的 `country` 映射为 Google 的 `gl`（省略或 `ALL` 时不传 `gl`，由 Google 决定地区），`freshness` 只接受 `pd` / `pw` / `pm` / `py`。其它提供商暂不支持这些过滤，显式传入时返回错误，不会静默忽略。参数取值参见 [Brave 官方 API 文档](https://api-dashboard.search.brave.com/api-reference/web/search/get)。
+- `country` / `freshness` 通过 Brave、Serply 与 Firecrawl 提供商生效。地区接受两字母代码或 `ALL`，时效接受 `pd` / `pw` / `pm` / `py` 或 `YYYY-MM-DDtoYYYY-MM-DD`。省略 `country` 时不向 Brave 传该参数（Brave 自身默认 US）；显式 `ALL` 表示全球结果。Serply 的 `country` 映射为 Google 的 `gl`（省略或 `ALL` 时不传 `gl`，由 Google 决定地区），`freshness` 只接受 `pd` / `pw` / `pm` / `py`。Firecrawl 的 `country` 以大写两字母代码传入（省略或 `ALL` 时不传，Firecrawl 默认 US），`freshness` 映射为 `tbs`（`qdr:d` / `qdr:w` / `qdr:m` / `qdr:y`），同样不支持日期区间。其它提供商暂不支持这些过滤，显式传入时返回错误，不会静默忽略。参数取值参见 [Brave 官方 API 文档](https://api-dashboard.search.brave.com/api-reference/web/search/get)。
 - `content` 默认关闭。设为 `true` 时，并行抓取前 3 条结果的正文（整批 15 秒预算，每页最多 5,000 字符摘录）；其余结果保留搜索摘要，需用 `web_fetch` 继续读页。抓取失败仍保留摘要；完整正文地址通过 `full_output_path` 返回。搜索和独立 `web_fetch` 共用本轮快照，短超时不会取消正在进行的共享抓取。
 - Brave 的相对 `age` 原样保留，避免把“2 days ago”伪造为精确发布日期。
 - 去除空查询、无效 URL、重复结果；最大结果数来自 Agent 配置，上限 20。
