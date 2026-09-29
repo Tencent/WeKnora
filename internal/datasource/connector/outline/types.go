@@ -169,9 +169,11 @@ type apiErrorBody struct {
 
 // outlineCursor stores incremental sync state.
 // CollectionDocRevisions: collectionID -> documentID -> revision.
+// CollectionDocFolders:   collectionID -> documentID -> folder path it was filed under.
 type outlineCursor struct {
-	LastSyncTime           time.Time                 `json:"last_sync_time"`
-	CollectionDocRevisions map[string]map[string]int `json:"collection_doc_revisions,omitempty"`
+	LastSyncTime           time.Time                    `json:"last_sync_time"`
+	CollectionDocRevisions map[string]map[string]int    `json:"collection_doc_revisions,omitempty"`
+	CollectionDocFolders   map[string]map[string]string `json:"collection_doc_folders,omitempty"`
 }
 
 // parseOutlineTime parses an Outline timestamp, returning the zero time on

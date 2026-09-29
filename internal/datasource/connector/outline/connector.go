@@ -186,9 +186,20 @@ func (c *Connector) walk(
 	cli := newClient(cfg)
 	base := cfg.GetBaseURL()
 
+	// Collection names head every document's folder path.
+	cols, err := cli.ListCollections(ctx)
+	if err != nil {
+		return nil, nil, fmt.Errorf("list collections: %w", err)
+	}
+	collectionNames := make(map[string]string, len(cols))
+	for _, col := range cols {
+		collectionNames[col.ID] = col.Name
+	}
+
 	newCursor := &outlineCursor{
 		LastSyncTime:           time.Now(),
 		CollectionDocRevisions: make(map[string]map[string]int),
+		CollectionDocFolders:   make(map[string]map[string]string),
 	}
 	var out []types.FetchedItem
 	// current spans every selected collection, not just one: see the deletion
@@ -202,6 +213,11 @@ func (c *Connector) walk(
 		}
 
 		newCursor.CollectionDocRevisions[collectionID] = make(map[string]int, len(docs))
+		newCursor.CollectionDocFolders[collectionID] = make(map[string]string, len(docs))
+		byID := make(map[string]document, len(docs))
+		for _, d := range docs {
+			byID[d.ID] = d
+		}
 
 		var skippedGone, skippedTemplate, skippedUnchanged, kept int
 		for _, d := range docs {
@@ -216,11 +232,17 @@ func (c *Connector) walk(
 				continue
 			}
 
+			folder := docFolder(collectionNames[collectionID], d, byID)
 			current[d.ID] = true
 			newCursor.CollectionDocRevisions[collectionID][d.ID] = d.Revision
+			newCursor.CollectionDocFolders[collectionID][d.ID] = folder
 
+			// Moving a document or renaming an ancestor leaves its revision alone,
+			// so the folder is compared too: otherwise it would stay filed under
+			// the old path until its next edit.
 			if skipUnchanged && prev != nil {
-				if r, seen := prev.CollectionDocRevisions[collectionID][d.ID]; seen && r == d.Revision {
+				r, seen := prev.CollectionDocRevisions[collectionID][d.ID]
+				if seen && r == d.Revision && prev.CollectionDocFolders[collectionID][d.ID] == folder {
 					skippedUnchanged++
 					continue
 				}
@@ -248,9 +270,10 @@ func (c *Connector) walk(
 				meta["parent_document_id"] = pid
 			}
 
-			title := strings.TrimSpace(d.Title)
-			if title == "" {
-				title = "Untitled"
+			title := docTitle(d)
+			fileName := datasource.SanitizeFileName(title) + ".md"
+			if folder != "" {
+				fileName = folder + "/" + fileName
 			}
 
 			out = append(out, types.FetchedItem{
@@ -258,7 +281,7 @@ func (c *Connector) walk(
 				Title:            title,
 				Content:          []byte(body),
 				ContentType:      "text/markdown",
-				FileName:         datasource.SanitizeFileName(title) + ".md",
+				FileName:         fileName,
 				URL:              absoluteURL(base, d.URL),
 				UpdatedAt:        parseOutlineTime(d.UpdatedAt),
 				CreatedAt:        parseOutlineTime(d.CreatedAt),
@@ -292,6 +315,40 @@ func (c *Connector) walk(
 	}
 
 	return out, newCursor, nil
+}
+
+func docTitle(d document) string {
+	if title := strings.TrimSpace(d.Title); title != "" {
+		return title
+	}
+	return "Untitled"
+}
+
+// docFolder returns the knowledge-base folder a document is filed under: its
+// collection, then each ancestor document's title, root first. The service
+// splits the folder off FileName and caps its depth and length.
+//
+// The walk stops at a parent missing from byID (an archived or trashed parent
+// is not listed) and on a cycle, so malformed data cannot loop.
+func docFolder(collectionName string, d document, byID map[string]document) string {
+	var segs []string
+	seen := map[string]bool{d.ID: true}
+	for pid := strings.TrimSpace(d.ParentDocumentID); pid != "" && !seen[pid]; {
+		p, ok := byID[pid]
+		if !ok {
+			break
+		}
+		seen[pid] = true
+		segs = append(segs, datasource.SanitizeFileName(docTitle(p)))
+		pid = strings.TrimSpace(p.ParentDocumentID)
+	}
+	if name := strings.TrimSpace(collectionName); name != "" {
+		segs = append(segs, datasource.SanitizeFileName(name))
+	}
+	for i, j := 0, len(segs)-1; i < j; i, j = i+1, j-1 {
+		segs[i], segs[j] = segs[j], segs[i]
+	}
+	return strings.Join(segs, "/")
 }
 
 // absoluteURL turns the path Outline returns ("/doc/title-abc123") into a URL a

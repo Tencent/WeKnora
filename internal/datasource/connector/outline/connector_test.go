@@ -254,9 +254,10 @@ func TestConnector_FetchAll_StripsEscapeArtifacts(t *testing.T) {
 // assembles the name rather than against the shared helper.
 func TestConnector_FetchAll_FileNamePolicy(t *testing.T) {
 	for _, tt := range []struct{ name, title, want string }{
-		{"punctuation", "a/b:c*d?e", "a_b_c_d_e.md"},
-		{"blank title", "   ", "Untitled.md"},
-		{"truncated on a rune boundary", strings.Repeat("测", 100), strings.Repeat("测", 66) + ".md"},
+		// "Handbook/" is the collection folder; a "/" in the title must not add another.
+		{"punctuation", "a/b:c*d?e", "Handbook/a_b_c_d_e.md"},
+		{"blank title", "   ", "Handbook/Untitled.md"},
+		{"truncated on a rune boundary", strings.Repeat("测", 100), "Handbook/" + strings.Repeat("测", 66) + ".md"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			f := newFakeOutline([]document{
@@ -298,6 +299,9 @@ func TestConnector_FetchIncremental_SkipsUnchangedAndReportsDeletions(t *testing
 		ConnectorCursor: map[string]interface{}{
 			"collection_doc_revisions": map[string]interface{}{
 				"col-1": map[string]interface{}{"d1": 5, "d2": 4, "d3": 1},
+			},
+			"collection_doc_folders": map[string]interface{}{
+				"col-1": map[string]interface{}{"d1": "Handbook", "d2": "Handbook", "d3": "Handbook"},
 			},
 		},
 	}
@@ -456,6 +460,61 @@ func TestConnector_FetchAllFromCursor_RefetchesEverythingAndReportsDeletions(t *
 	col, _ := revs["col-1"].(map[string]interface{})
 	if _, ok := col["d-gone"]; ok || col["d1"] == nil {
 		t.Errorf("cursor = %v, want d1 only", col)
+	}
+}
+
+func TestDocFolder(t *testing.T) {
+	byID := map[string]document{
+		"root":  {ID: "root", Title: "Hướng dẫn"},
+		"mid":   {ID: "mid", Title: "Cài đặt/Linux", ParentDocumentID: "root"},
+		"leaf":  {ID: "leaf", Title: "Leaf", ParentDocumentID: "mid"},
+		"orph":  {ID: "orph", Title: "Orphan", ParentDocumentID: "archived-parent"},
+		"cyc-a": {ID: "cyc-a", Title: "A", ParentDocumentID: "cyc-b"},
+		"cyc-b": {ID: "cyc-b", Title: "B", ParentDocumentID: "cyc-a"},
+	}
+	for _, tt := range []struct{ name, collection, id, want string }{
+		{"top-level document", "Handbook", "root", "Handbook"},
+		// A "/" inside a title stays inside its own segment.
+		{"nested, root first", "Handbook", "leaf", "Handbook/Hướng dẫn/Cài đặt_Linux"},
+		{"parent not listed stops the walk", "Handbook", "orph", "Handbook"},
+		// A sits under B, whose parent is A again: the walk stops on revisiting A.
+		{"cycle terminates", "Handbook", "cyc-a", "Handbook/B"},
+		{"no collection name", "", "leaf", "Hướng dẫn/Cài đặt_Linux"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := docFolder(tt.collection, byID[tt.id], byID); got != tt.want {
+				t.Errorf("docFolder = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// Moving a document under a new parent does not bump its revision, so an
+// incremental sync must still re-emit it under the new folder.
+func TestConnector_FetchIncremental_ReemitsDocumentWhoseFolderChanged(t *testing.T) {
+	f := newFakeOutline([]document{
+		{ID: "p", Title: "Parent", Text: "p", CollectionID: "col-1", Revision: 3},
+		{ID: "c", Title: "Child", Text: "c", CollectionID: "col-1", Revision: 7, ParentDocumentID: "p"},
+	})
+	defer f.Close()
+
+	prior := &types.SyncCursor{ConnectorCursor: map[string]interface{}{
+		"collection_doc_revisions": map[string]interface{}{"col-1": map[string]interface{}{"p": 3, "c": 7}},
+		"collection_doc_folders": map[string]interface{}{
+			"col-1": map[string]interface{}{"p": "Handbook", "c": "Handbook"},
+		},
+	}}
+
+	items, _, err := NewConnector().FetchIncremental(
+		context.Background(), makeDSConfig(f, []string{"col-1"}), prior)
+	if err != nil {
+		t.Fatalf("FetchIncremental: %v", err)
+	}
+	if len(items) != 1 || items[0].ExternalID != "c" {
+		t.Fatalf("items = %+v, want only the moved child", items)
+	}
+	if items[0].FileName != "Handbook/Parent/Child.md" {
+		t.Errorf("FileName = %q, want Handbook/Parent/Child.md", items[0].FileName)
 	}
 }
 
