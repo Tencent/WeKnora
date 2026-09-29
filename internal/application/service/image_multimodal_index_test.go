@@ -29,7 +29,9 @@ const idxEngineType = types.RetrieverEngineType("idx-vector-store")
 type idxEngineRepo struct {
 	interfaces.RetrieveEngineRepository
 	batchSaveErr error
+	deleteErr    error
 	saved        []*types.IndexInfo
+	deleted      []string
 }
 
 func (r *idxEngineRepo) EngineType() types.RetrieverEngineType { return idxEngineType }
@@ -41,6 +43,13 @@ func (r *idxEngineRepo) Support() []types.RetrieverType {
 func (r *idxEngineRepo) BatchSave(_ context.Context, infos []*types.IndexInfo, _ map[string]any) error {
 	r.saved = append(r.saved, infos...)
 	return r.batchSaveErr
+}
+
+func (r *idxEngineRepo) DeleteBySourceIDList(
+	_ context.Context, sourceIDList []string, _ int, _ string,
+) error {
+	r.deleted = append(r.deleted, sourceIDList...)
+	return r.deleteErr
 }
 
 // idxRegistry resolves the tenant's engine type to the backend above, or fails
@@ -131,6 +140,7 @@ type idxChunkRepo struct {
 	interfaces.ChunkRepository
 	created []*types.Chunk
 	byID    map[string]*types.Chunk
+	deleted []string
 	updates int
 }
 
@@ -142,6 +152,34 @@ func (r *idxChunkRepo) CreateChunks(_ context.Context, chunks []*types.Chunk) er
 	r.created = append(r.created, chunks...)
 	for _, c := range chunks {
 		r.byID[c.ID] = c
+	}
+	return nil
+}
+
+// ListChunksByKnowledgeIDAndTypes behaves like the SQL it stands in for: only
+// this tenant's and knowledge's chunks of the requested types come back.
+func (r *idxChunkRepo) ListChunksByKnowledgeIDAndTypes(
+	_ context.Context, tenantID uint64, knowledgeID string, chunkTypes []types.ChunkType,
+) ([]*types.Chunk, error) {
+	wanted := make(map[types.ChunkType]bool, len(chunkTypes))
+	for _, chunkType := range chunkTypes {
+		wanted[chunkType] = true
+	}
+	var out []*types.Chunk
+	for _, chunk := range r.byID {
+		if chunk.TenantID == tenantID && chunk.KnowledgeID == knowledgeID && wanted[chunk.ChunkType] {
+			out = append(out, chunk)
+		}
+	}
+	return out, nil
+}
+
+func (r *idxChunkRepo) DeleteChunks(_ context.Context, tenantID uint64, ids []string) error {
+	for _, id := range ids {
+		if chunk, ok := r.byID[id]; ok && chunk.TenantID == tenantID {
+			delete(r.byID, id)
+			r.deleted = append(r.deleted, id)
+		}
 	}
 	return nil
 }
