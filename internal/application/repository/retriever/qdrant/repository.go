@@ -852,29 +852,52 @@ func (q *qdrantRepository) KeywordsRetrieve(ctx context.Context,
 		allResults = allResults[:params.TopK]
 	}
 
+	// Some matched collections answered and others did not: these results are
+	// real but incomplete. Carry the failure on the result set
+	// (RetrieveResult.Error) instead of returning it as the call's error, which
+	// would discard the partial evidence. CompositeRetrieveEngine turns it into
+	// an error alongside the results so the gap stays visible upstream.
+	var partialErr error
+	if failedCollections > 0 && failedCollections < matchedCollections {
+		partialErr = fmt.Errorf(
+			"qdrant keyword search failed in %d of %d matched collections: %w",
+			failedCollections, matchedCollections, lastFailedErr,
+		)
+	}
+
 	switch {
-	case len(allResults) > 0:
-		log.Infof("[Qdrant] Keywords retrieval found %d results", len(allResults))
-		if failedCollections > 0 {
-			log.Warnf(
-				"[Qdrant] Keywords search failed in %d of %d matched collections; results are incomplete",
-				failedCollections, matchedCollections,
-			)
+	case matchedCollections == 0:
+		// No collection carries this base name, so nothing was searched. This
+		// must not read as a search that ran and legitimately hit nothing.
+		log.Warnf(
+			"[Qdrant] No collection matched base name %s among %d listed; keyword search did not run",
+			q.collectionBaseName, len(collections),
+		)
+	case partialErr != nil:
+		log.Warnf(
+			"[Qdrant] Keywords search failed in %d of %d matched collections; results are incomplete: %v",
+			failedCollections, matchedCollections, lastFailedErr,
+		)
+		if len(allResults) > 0 {
+			log.Infof("[Qdrant] Keywords retrieval found %d results", len(allResults))
+			break
 		}
-	case failedCollections > 0:
 		// Partial failure with zero hits: the remaining collections did answer,
 		// so this is a real zero-hit outcome, but it must not read as if the
 		// search had succeeded everywhere.
 		log.Warnf(
-			"[Qdrant] Keywords search returned no matches in the %d collections that answered, "+
-				"but failed in %d of %d matched collections",
-			matchedCollections-failedCollections, failedCollections, matchedCollections,
+			"[Qdrant] Keywords search returned no matches in the %d collections that answered",
+			matchedCollections-failedCollections,
 		)
+	case len(allResults) > 0:
+		log.Infof("[Qdrant] Keywords retrieval found %d results", len(allResults))
 	default:
 		log.Warnf("[Qdrant] No keyword matches found for query: %s", params.Query)
 	}
 
-	return buildRetrieveResult(allResults, types.KeywordsRetrieverType), nil
+	retrieved := buildRetrieveResult(allResults, types.KeywordsRetrieverType)
+	retrieved[0].Error = partialErr
+	return retrieved, nil
 }
 
 // CopyIndices copies index data from source knowledge base to target knowledge base

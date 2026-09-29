@@ -36,10 +36,10 @@ const (
 	fieldContentSparse    = "content_sparse"
 )
 
-var (
-	allFields = []string{fieldID, fieldContent, fieldLanguage, fieldSourceID, fieldSourceType, fieldChunkID,
-		fieldKnowledgeID, fieldKnowledgeBaseID, fieldTagID, fieldIsEnabled, fieldEmbedding}
-)
+var allFields = []string{
+	fieldID, fieldContent, fieldLanguage, fieldSourceID, fieldSourceType, fieldChunkID,
+	fieldKnowledgeID, fieldKnowledgeBaseID, fieldTagID, fieldIsEnabled, fieldEmbedding,
+}
 
 // NewMilvusRetrieveEngineRepository creates and initializes a new Milvus repository.
 // indexCfg is optional — pass nil to use env var / default values (env path).
@@ -935,30 +935,52 @@ func (m *milvusRepository) KeywordsRetrieve(ctx context.Context,
 		allResults = allResults[:params.TopK]
 	}
 
-	if len(allResults) == 0 {
-		if failedCollections > 0 {
-			// Partial failure with zero hits: the remaining collections did
-			// answer, so this is a real zero-hit outcome, but it must not read
-			// as if the search had succeeded everywhere.
-			log.Warnf(
-				"[Milvus] Keywords search returned no matches in the %d collections that answered, "+
-					"but failed in %d of %d matched collections",
-				matchedCollections-failedCollections, failedCollections, matchedCollections,
-			)
-		} else {
-			log.Warnf("[Milvus] No keyword matches found for query: %s", params.Query)
-		}
-	} else {
-		log.Infof("[Milvus] Keywords retrieval found %d results", len(allResults))
-		if failedCollections > 0 {
-			log.Warnf(
-				"[Milvus] Keywords search failed in %d of %d matched collections; results are incomplete",
-				failedCollections, matchedCollections,
-			)
-		}
+	// Some matched collections answered and others did not: these results are
+	// real but incomplete. Carry the failure on the result set
+	// (RetrieveResult.Error) instead of returning it as the call's error, which
+	// would discard the partial evidence. CompositeRetrieveEngine turns it into
+	// an error alongside the results so the gap stays visible upstream.
+	var partialErr error
+	if failedCollections > 0 && failedCollections < matchedCollections {
+		partialErr = fmt.Errorf(
+			"milvus keyword search failed in %d of %d matched collections: %w",
+			failedCollections, matchedCollections, lastFailedErr,
+		)
 	}
 
-	return buildRetrieveResult(allResults, types.KeywordsRetrieverType), nil
+	switch {
+	case matchedCollections == 0:
+		// No collection carries this base name, so nothing was searched. This
+		// must not read as a search that ran and legitimately hit nothing.
+		log.Warnf(
+			"[Milvus] No collection matched base name %s among %d listed; keyword search did not run",
+			m.collectionBaseName, len(collections),
+		)
+	case partialErr != nil:
+		log.Warnf(
+			"[Milvus] Keywords search failed in %d of %d matched collections; results are incomplete: %v",
+			failedCollections, matchedCollections, lastFailedErr,
+		)
+		if len(allResults) > 0 {
+			log.Infof("[Milvus] Keywords retrieval found %d results", len(allResults))
+			break
+		}
+		// Partial failure with zero hits: the remaining collections did answer,
+		// so this is a real zero-hit outcome, but it must not read as if the
+		// search had succeeded everywhere.
+		log.Warnf(
+			"[Milvus] Keywords search returned no matches in the %d collections that answered",
+			matchedCollections-failedCollections,
+		)
+	case len(allResults) > 0:
+		log.Infof("[Milvus] Keywords retrieval found %d results", len(allResults))
+	default:
+		log.Warnf("[Milvus] No keyword matches found for query: %s", params.Query)
+	}
+
+	retrieved := buildRetrieveResult(allResults, types.KeywordsRetrieverType)
+	retrieved[0].Error = partialErr
+	return retrieved, nil
 }
 
 // CopyIndices copies index data from source knowledge base to target knowledge base

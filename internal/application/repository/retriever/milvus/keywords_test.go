@@ -184,7 +184,9 @@ func TestMilvusKeywordsRetrieveFailsWhenEveryMatchedCollectionFails(t *testing.T
 }
 
 // One failing collection must not fail the batch as long as another one
-// answered: partial results are still results.
+// answered: partial results are still results. The failure must travel with
+// them though (RetrieveResult.Error) — otherwise callers treat the incomplete
+// answer as a complete one (#3835).
 func TestMilvusKeywordsRetrieveKeepsResultsWhenOnlySomeCollectionsFail(t *testing.T) {
 	logs := captureMilvusLogs(t)
 	harness := newKeywordsMilvusHarness(t,
@@ -201,7 +203,10 @@ func TestMilvusKeywordsRetrieveKeepsResultsWhenOnlySomeCollectionsFail(t *testin
 
 	require.NoError(t, err, "a partially failed batch must not fail the caller")
 	require.Len(t, results, 1)
-	require.NoError(t, results[0].Error)
+	require.Error(t, results[0].Error,
+		"a partially failed batch must mark its result set with the failure")
+	require.Contains(t, results[0].Error.Error(), "1 of 2 matched collections")
+	require.Contains(t, results[0].Error.Error(), "milvus keyword search unavailable")
 	require.Len(t, results[0].Results, 1)
 	require.Equal(t, "chunk-1", results[0].Results[0].ChunkID)
 	require.Equal(t, "invoice total 42", results[0].Results[0].Content)
@@ -225,6 +230,53 @@ func TestMilvusKeywordsRetrieveReportsNoMatchesWhenNothingFailed(t *testing.T) {
 	require.NoError(t, err, "a successful search without matches must not error")
 	require.Len(t, results, 1)
 	require.Empty(t, results[0].Results)
+	require.NoError(t, results[0].Error, "a complete zero-hit search must not mark an error")
 	require.Contains(t, logs.String(), "No keyword matches found",
 		"a successful zero-hit search must still be logged as such")
+}
+
+// A partial failure with zero hits is still a partial failure: the result set
+// stays empty but must carry the error, and the conclusion log must stay off.
+func TestMilvusKeywordsRetrieveMarksPartialFailureWhenNothingHit(t *testing.T) {
+	logs := captureMilvusLogs(t)
+	harness := newKeywordsMilvusHarness(t,
+		[]string{"weknora_embeddings_1024", "weknora_embeddings_1536"},
+		func(name string) (*milvuspb.SearchResults, error) {
+			if name == "weknora_embeddings_1024" {
+				return failedMilvusSearch(), nil
+			}
+			return emptyMilvusSearch(), nil
+		},
+	)
+
+	results, err := harness.repo.KeywordsRetrieve(context.Background(), keywordsMilvusParams())
+
+	require.NoError(t, err, "a partially failed batch must not fail the caller")
+	require.Len(t, results, 1)
+	require.Empty(t, results[0].Results)
+	require.Error(t, results[0].Error,
+		"partial failure with zero hits must still be marked")
+	require.NotContains(t, logs.String(), "No keyword matches found",
+		"a partially failed batch must not be logged as a search that found no matches")
+}
+
+// No collection carries the repository's base name: nothing was searched at
+// all, which must be distinguishable from a search that ran and hit nothing.
+func TestMilvusKeywordsRetrieveWarnsWhenNoCollectionMatchesBaseName(t *testing.T) {
+	logs := captureMilvusLogs(t)
+	harness := newKeywordsMilvusHarness(t, []string{"other_collection"},
+		func(string) (*milvuspb.SearchResults, error) { return emptyMilvusSearch(), nil },
+	)
+
+	results, err := harness.repo.KeywordsRetrieve(context.Background(), keywordsMilvusParams())
+
+	require.NoError(t, err, "an empty collection list must not error")
+	require.Len(t, results, 1)
+	require.Empty(t, results[0].Results)
+	require.NoError(t, results[0].Error, "no matching collection is not a partial failure")
+	require.Empty(t, harness.fake.searches, "no Search may be issued without a matching collection")
+	require.Contains(t, logs.String(), "No collection matched base name",
+		"a search that never ran must be logged as such")
+	require.NotContains(t, logs.String(), "No keyword matches found",
+		"a search that never ran must not be logged as a search that found no matches")
 }
