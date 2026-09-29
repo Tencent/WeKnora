@@ -34,6 +34,8 @@ type copyPageServer struct {
 	unexpected []string
 	// queryError, when set, is the GraphQL error every Get is answered with.
 	queryError string
+	// omitData answers every Get with an empty data object instead of a page.
+	omitData bool
 }
 
 // failQueriesWith makes every Get answer the way Weaviate reports a query it
@@ -42,6 +44,14 @@ func (s *copyPageServer) failQueriesWith(message string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.queryError = message
+}
+
+// dropQueryData makes every Get answer with a data object that carries no Get
+// key at all.
+func (s *copyPageServer) dropQueryData() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.omitData = true
 }
 
 func (s *copyPageServer) summary() string {
@@ -86,11 +96,16 @@ func newCopyPageServer(t *testing.T, page func(query string, call int) []any) (*
 			}
 			s.cursors[cursor]++
 			queryError := s.queryError
+			omitData := s.omitData
 			s.mu.Unlock()
 			if queryError != "" {
 				_ = json.NewEncoder(w).Encode(map[string]any{
 					"errors": []any{map[string]any{"message": queryError}},
 				})
+				return
+			}
+			if omitData {
+				_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{}})
 				return
 			}
 			rows := page(body.Query, call)
@@ -220,4 +235,27 @@ func TestCopyIndicesReportsAQueryError(t *testing.T) {
 	queries, objects := server.counts()
 	assert.Equal(t, 1, queries, "the walk must stop on the failed query")
 	assert.Zero(t, objects, "a failed query must not be reported as a finished copy")
+}
+
+// A response the walk cannot read must be reported, not turned into a panic by
+// an unchecked assertion on the response shape.
+func TestCopyIndicesRejectsAResponseWithoutData(t *testing.T) {
+	server, repo := newCopyPageServer(t, func(string, int) []any { return nil })
+	server.dropQueryData()
+	defer func() { t.Log("copy walk: " + server.summary()) }()
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("CopyIndices panicked on a response without data: %v", r)
+		}
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	err := repo.CopyIndices(ctx, "kb-src", map[string]string{"know-1": "know-2"},
+		copyTestChunkMap(1), "kb-dst", 64, "doc")
+
+	require.ErrorContains(t, err, "invalid response")
+	queries, objects := server.counts()
+	assert.Equal(t, 1, queries, "the walk must stop on the unreadable response")
+	assert.Zero(t, objects, "nothing may be reported as copied")
 }
