@@ -377,6 +377,88 @@ func TestConnector_FetchIncremental_NoCursorFetchesEverything(t *testing.T) {
 	}
 }
 
+// A document moved between two selected collections is still present. The
+// service applies items in order and deletes by external_id alone, so emitting
+// a deletion for the collection it left would delete the copy just re-ingested
+// from the collection it joined.
+func TestConnector_FetchIncremental_MoveBetweenSelectedCollectionsIsNotADeletion(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			CollectionID string `json:"collectionId"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		var docs []document
+		if body.CollectionID == "col-2" {
+			docs = []document{{ID: "d1", Title: "Đã chuyển", Text: "x", CollectionID: "col-2", Revision: 5}}
+		}
+		writeJSON(w, 200, documentsListResponse{Data: docs, Pagination: pagination{Total: len(docs)}})
+	}))
+	defer srv.Close()
+
+	config := &types.DataSourceConfig{
+		Type:        types.ConnectorTypeOutline,
+		Credentials: map[string]interface{}{"api_token": "ol_api_test_token", "base_url": srv.URL},
+		// The collection d1 joined is walked before the one it left: the order
+		// in which a per-collection deletion would undo the re-ingest.
+		ResourceIDs: []string{"col-2", "col-1"},
+	}
+	prior := &types.SyncCursor{ConnectorCursor: map[string]interface{}{
+		"collection_doc_revisions": map[string]interface{}{
+			"col-1": map[string]interface{}{"d1": 5},
+		},
+	}}
+
+	items, _, err := NewConnector().FetchIncremental(context.Background(), config, prior)
+	if err != nil {
+		t.Fatalf("FetchIncremental: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("items = %+v, want only the re-ingested d1", items)
+	}
+	if items[0].IsDeleted || items[0].SourceResourceID != "col-2" {
+		t.Errorf("item = %+v, want d1 live under col-2", items[0])
+	}
+}
+
+func TestConnector_FetchAllFromCursor_RefetchesEverythingAndReportsDeletions(t *testing.T) {
+	f := newFakeOutline([]document{
+		{ID: "d1", Title: "Không đổi", Text: "a", CollectionID: "col-1", Revision: 5},
+	})
+	defer f.Close()
+
+	prior := &types.SyncCursor{ConnectorCursor: map[string]interface{}{
+		"collection_doc_revisions": map[string]interface{}{
+			"col-1": map[string]interface{}{"d1": 5, "d-gone": 2},
+		},
+	}}
+
+	var full datasource.FullSyncWithCursor = NewConnector()
+	items, next, err := full.FetchAllFromCursor(
+		context.Background(), makeDSConfig(f, []string{"col-1"}), []string{"col-1"}, prior)
+	if err != nil {
+		t.Fatalf("FetchAllFromCursor: %v", err)
+	}
+
+	byID := map[string]types.FetchedItem{}
+	for _, it := range items {
+		byID[it.ExternalID] = it
+	}
+	if it, ok := byID["d1"]; !ok || it.IsDeleted {
+		t.Error("a full sync must re-emit d1 even though its revision is unchanged")
+	}
+	if it, ok := byID["d-gone"]; !ok || !it.IsDeleted {
+		t.Error("a full sync from a cursor must report d-gone as deleted")
+	}
+	if next == nil {
+		t.Fatal("FetchAllFromCursor returned a nil cursor")
+	}
+	revs, _ := next.ConnectorCursor["collection_doc_revisions"].(map[string]interface{})
+	col, _ := revs["col-1"].(map[string]interface{})
+	if _, ok := col["d-gone"]; ok || col["d1"] == nil {
+		t.Errorf("cursor = %v, want d1 only", col)
+	}
+}
+
 func TestConnector_FetchIncremental_NoResourcesIsAnError(t *testing.T) {
 	f := newFakeOutline(nil)
 	defer f.Close()

@@ -16,7 +16,10 @@ import (
 
 // Compile-time proof that *Connector satisfies the datasource.Connector
 // interface, so signature drift fails the build rather than container wiring.
-var _ datasource.Connector = (*Connector)(nil)
+var (
+	_ datasource.Connector          = (*Connector)(nil)
+	_ datasource.FullSyncWithCursor = (*Connector)(nil)
+)
 
 // Connector implements datasource.Connector for Outline.
 type Connector struct{}
@@ -94,39 +97,59 @@ func (c *Connector) FetchAll(
 	return items, err
 }
 
+// FetchAllFromCursor re-fetches every document and reconciles deletions against
+// the previous cursor, so a full sync (ForceFull or sync_mode=full) still honours
+// deletion_sync and leaves a fresh cursor for the next incremental run.
+func (c *Connector) FetchAllFromCursor(
+	ctx context.Context, config *types.DataSourceConfig, resourceIDs []string, cursor *types.SyncCursor,
+) ([]types.FetchedItem, *types.SyncCursor, error) {
+	return c.walkAndEncode(ctx, config, resourceIDs, decodeCursor(ctx, cursor), false)
+}
+
 // FetchIncremental returns documents changed (or deleted) since the prior cursor.
 //
 // Change detection compares Outline's per-document `revision`, which increments
 // only on a content or title edit — a tighter signal than updatedAt, which also
 // moves on activity that leaves the document unchanged.
 //
-// Deletion detection: a document listed in the prior cursor but absent from the
-// current listing is emitted as an IsDeleted placeholder. Outline omits trashed
-// and archived documents from documents.list, so this covers both.
+// Deletion detection: a document listed in the prior cursor but absent from
+// every selected collection is emitted as an IsDeleted placeholder. Outline
+// omits trashed and archived documents from documents.list, so this covers both.
 func (c *Connector) FetchIncremental(
 	ctx context.Context, config *types.DataSourceConfig, cursor *types.SyncCursor,
 ) ([]types.FetchedItem, *types.SyncCursor, error) {
-	resourceIDs := config.ResourceIDs
-	if len(resourceIDs) == 0 {
+	if len(config.ResourceIDs) == 0 {
 		return nil, nil, fmt.Errorf("no resource IDs (collection IDs) configured")
 	}
+	return c.walkAndEncode(ctx, config, config.ResourceIDs, decodeCursor(ctx, cursor), true)
+}
 
-	var prev *outlineCursor
-	if cursor != nil && cursor.ConnectorCursor != nil {
-		var p outlineCursor
-		if b, err := json.Marshal(cursor.ConnectorCursor); err == nil {
-			if err := json.Unmarshal(b, &p); err == nil {
-				prev = &p
-			}
-		}
-		if prev == nil {
-			// An undecodable cursor means one full pass, which is correct but
-			// expensive — say so rather than failing the sync silently.
-			logger.Warnf(ctx, "[Outline] prior cursor could not be decoded; falling back to a full pass")
+// decodeCursor reads the prior Outline cursor, or nil when there is none.
+func decodeCursor(ctx context.Context, cursor *types.SyncCursor) *outlineCursor {
+	if cursor == nil || cursor.ConnectorCursor == nil {
+		return nil
+	}
+	var p outlineCursor
+	if b, err := json.Marshal(cursor.ConnectorCursor); err == nil {
+		if err := json.Unmarshal(b, &p); err == nil {
+			return &p
 		}
 	}
+	// An undecodable cursor means one full pass, which is correct but
+	// expensive — say so rather than failing the sync silently.
+	logger.Warnf(ctx, "[Outline] prior cursor could not be decoded; falling back to a full pass")
+	return nil
+}
 
-	items, newCursor, err := c.walk(ctx, config, resourceIDs, prev, true)
+// walkAndEncode runs walk and wraps its cursor in the framework's SyncCursor.
+func (c *Connector) walkAndEncode(
+	ctx context.Context,
+	config *types.DataSourceConfig,
+	resourceIDs []string,
+	prev *outlineCursor,
+	skipUnchanged bool,
+) ([]types.FetchedItem, *types.SyncCursor, error) {
+	items, newCursor, err := c.walk(ctx, config, resourceIDs, prev, skipUnchanged)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -146,14 +169,15 @@ func (c *Connector) FetchIncremental(
 	}, nil
 }
 
-// walk is the shared implementation behind FetchAll and FetchIncremental.
-// When incremental is false, prev is ignored and the returned cursor is nil.
+// walk is the shared implementation behind every fetch. skipUnchanged drops
+// documents whose revision matches prev; deletions are reconciled whenever prev
+// is non-nil, so a full re-fetch from a cursor reports them too.
 func (c *Connector) walk(
 	ctx context.Context,
 	config *types.DataSourceConfig,
 	resourceIDs []string,
 	prev *outlineCursor,
-	incremental bool,
+	skipUnchanged bool,
 ) ([]types.FetchedItem, *outlineCursor, error) {
 	cfg, err := parseOutlineConfig(config)
 	if err != nil {
@@ -167,6 +191,9 @@ func (c *Connector) walk(
 		CollectionDocRevisions: make(map[string]map[string]int),
 	}
 	var out []types.FetchedItem
+	// current spans every selected collection, not just one: see the deletion
+	// pass after the loop.
+	current := make(map[string]bool)
 
 	for _, collectionID := range resourceIDs {
 		docs, err := cli.ListCollectionDocuments(ctx, collectionID)
@@ -174,7 +201,6 @@ func (c *Connector) walk(
 			return nil, nil, fmt.Errorf("list documents for collection %s: %w", collectionID, err)
 		}
 
-		current := make(map[string]bool, len(docs))
 		newCursor.CollectionDocRevisions[collectionID] = make(map[string]int, len(docs))
 
 		var skippedGone, skippedTemplate, skippedUnchanged, kept int
@@ -193,12 +219,10 @@ func (c *Connector) walk(
 			current[d.ID] = true
 			newCursor.CollectionDocRevisions[collectionID][d.ID] = d.Revision
 
-			if incremental && prev != nil && prev.CollectionDocRevisions != nil {
-				if prevRevs, ok := prev.CollectionDocRevisions[collectionID]; ok {
-					if r, seen := prevRevs[d.ID]; seen && r == d.Revision {
-						skippedUnchanged++
-						continue
-					}
+			if skipUnchanged && prev != nil {
+				if r, seen := prev.CollectionDocRevisions[collectionID][d.ID]; seen && r == d.Revision {
+					skippedUnchanged++
+					continue
 				}
 			}
 			kept++
@@ -246,25 +270,27 @@ func (c *Connector) walk(
 		logger.Infof(ctx,
 			"[Outline] collection %s: total=%d kept=%d skipped_unchanged=%d skipped_removed=%d skipped_template=%d",
 			collectionID, len(docs), kept, skippedUnchanged, skippedGone, skippedTemplate)
+	}
 
-		if incremental && prev != nil && prev.CollectionDocRevisions != nil {
-			if prevRevs, ok := prev.CollectionDocRevisions[collectionID]; ok {
-				for prevDocID := range prevRevs {
-					if !current[prevDocID] {
-						out = append(out, types.FetchedItem{
-							ExternalID:       prevDocID,
-							IsDeleted:        true,
-							SourceResourceID: collectionID,
-						})
-					}
+	// A document is deleted only when no selected collection lists it any more.
+	// One moved between two selected collections is still present, and the
+	// service deletes by external_id alone, so a per-collection check would
+	// delete the copy the other collection had just re-ingested — and the cursor
+	// would then keep it skipped as unchanged.
+	if prev != nil {
+		for _, collectionID := range resourceIDs {
+			for prevDocID := range prev.CollectionDocRevisions[collectionID] {
+				if !current[prevDocID] {
+					out = append(out, types.FetchedItem{
+						ExternalID:       prevDocID,
+						IsDeleted:        true,
+						SourceResourceID: collectionID,
+					})
 				}
 			}
 		}
 	}
 
-	if !incremental {
-		return out, nil, nil
-	}
 	return out, newCursor, nil
 }
 
