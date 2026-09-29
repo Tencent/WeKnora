@@ -505,3 +505,35 @@ func TestSummaryQuestionPayload_AttemptRoundTrip(t *testing.T) {
 	require.NoError(t, json.Unmarshal(qBytes, &qOut))
 	assert.Equal(t, 5, qOut.Attempt)
 }
+
+// A reparse must not inherit the previous attempt's open spans. A failure path
+// that marks a row terminal without finalizing its attempt leaves a "running"
+// root behind, and a terminal row is outside housekeeping's stall sweep, so the
+// new attempt has to close it.
+func TestSpanTracker_OpenAttemptCancelsSupersededOpenSpans(t *testing.T) {
+	tracker, db := setupSpanTrackerTest(t)
+	ctx := context.Background()
+
+	_, attempt1, err := tracker.OpenAttempt(ctx, "kid-reparse", "")
+	require.NoError(t, err)
+	require.Equal(t, 1, attempt1)
+
+	_, attempt2, err := tracker.OpenAttempt(ctx, "kid-reparse", "")
+	require.NoError(t, err)
+	require.Equal(t, 2, attempt2)
+
+	var status, code string
+	require.NoError(t, db.Raw(
+		`SELECT status, error_code FROM knowledge_processing_spans
+		  WHERE knowledge_id = ? AND attempt = 1 AND kind = 'root'`,
+		"kid-reparse").Row().Scan(&status, &code))
+	assert.Equal(t, types.SpanStatusCancelled, status)
+	assert.Equal(t, "ATTEMPT_SUPERSEDED", code)
+
+	var newStatus string
+	require.NoError(t, db.Raw(
+		`SELECT status FROM knowledge_processing_spans
+		  WHERE knowledge_id = ? AND attempt = 2 AND kind = 'root'`,
+		"kid-reparse").Row().Scan(&newStatus))
+	assert.Equal(t, types.SpanStatusRunning, newStatus)
+}
