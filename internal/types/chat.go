@@ -230,11 +230,11 @@ type ChatResponse struct {
 	// one event to the client (thought, answer, or tool-call) when it ended.
 	// A retry streams the round over from the start and the client appends
 	// what it receives, so a re-send after this is true renders the same
-	// output twice; the retry loop uses it to keep a damaged round from being
-	// re-sent over text the user can already see. Meaningful on a failed
-	// attempt too — the agent sets it on the partial result that comes back
-	// alongside the error — and every other field is zero there. Transient,
-	// never persisted.
+	// output twice; the retry loop uses it to keep a failed round from being
+	// re-sent over output the user can already see, whatever the transient
+	// failure was. Meaningful on a failed attempt too — the agent sets it on
+	// the partial result that comes back alongside the error — and every other
+	// field is zero there. Transient, never persisted.
 	EmittedAnything bool `json:"-"`
 }
 

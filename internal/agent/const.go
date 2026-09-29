@@ -166,22 +166,6 @@ func isTransientError(err error) bool {
 	return false
 }
 
-// isCorruptStreamChunkError reports whether err is the mangled-frame failure
-// api.ErrCorruptStreamChunk names. isTransientError classifies it too, but the
-// retry loop has to pick it out by name: it is the one transient failure the
-// agent refuses to re-send once the failed attempt has already emitted
-// something, because a second attempt would stream the answer over again (see
-// callLLMWithRetry). Both forms are checked for the same reason as above: the
-// typed error survives on the paths that keep it, the marker on the paths that
-// flatten it into text.
-func isCorruptStreamChunkError(err error) bool {
-	if err == nil {
-		return false
-	}
-	return errors.Is(err, api.ErrCorruptStreamChunk) ||
-		strings.Contains(strings.ToLower(err.Error()), corruptStreamChunkMarker)
-}
-
 // maxLLMRetryAfter caps how long a vendor's Retry-After may hold a turn
 // between two attempts. A longer wait is not worth keeping the user on a
 // silent turn for; the retry then goes out at the cap and, if the vendor is

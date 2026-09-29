@@ -578,19 +578,23 @@ func (e *AgentEngine) callLLMWithRetry(
 	}
 
 	if err != nil && isTransientError(err) {
-		// Retry transient errors (timeout, rate limit, server errors) up to maxLLMRetries times
+		// Retry transient errors (timeout, rate limit, server errors) up to
+		// maxLLMRetries times. The retry is only worth it while the failed
+		// attempt stayed invisible: a re-send streams the round from the start
+		// again, and the client appends whatever arrives, so retrying after
+		// part of it already reached the user renders the answer twice — the
+		// partial one, then the whole one ("Hel" followed by "Hello world"
+		// reads as "HelHello world"). EmittedAnything is derived from the
+		// events the attempt actually pushed (thought, answer, tool call), so
+		// it is exactly "the user has seen something", and every transient
+		// failure is gated on it: mangled frame, stream ended early, stall,
+		// timeout, 429, 5xx alike. Once it is true the round ends the ordinary
+		// way — degrade with whatever tool results are at hand, or fail.
 		for retry := 1; retry <= maxLLMRetries; retry++ {
-			// A re-send streams the round from the start again and the client
-			// appends whatever arrives, so retrying a damaged stream after
-			// part of it already reached the user renders the answer twice:
-			// the partial one, then the whole one. The mangled-frame failure
-			// is the one this agent raises for a stream it knows has a hole,
-			// so it is only re-sent while nothing has been emitted; once text
-			// is on screen, ending the round (degrade or fail) is the lesser
-			// evil. Every other transient error keeps its upstream behaviour.
-			if isCorruptStreamChunkError(err) && response != nil && response.EmittedAnything {
-				logger.Warnf(ctx, "[Agent][Round-%d] Not retrying the damaged stream: "+
-					"the attempt already emitted content and a re-send would duplicate it: %v", round, err)
+			if response != nil && response.EmittedAnything {
+				logger.Warnf(ctx, "[Agent][Round-%d] Not retrying the transient LLM failure: "+
+					"this attempt already streamed content to the client, and a re-send would "+
+					"show the same answer twice; ending the round instead: %v", round, err)
 				break
 			}
 			retryDelay := llmRetryDelay(err, retry)
