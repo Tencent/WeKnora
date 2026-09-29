@@ -237,8 +237,9 @@ func (c *notionClient) GetDataSourceInfo(ctx context.Context, dsID string) (*not
 func (c *notionClient) GetBlockChildrenFlat(ctx context.Context, blockID string) ([]notionBlock, error) {
 	var allBlocks []notionBlock
 	var startCursor string
+	seenCursors := make(map[string]struct{})
 
-	for {
+	for page := 1; ; page++ {
 		path := fmt.Sprintf("/v1/blocks/%s/children", blockID)
 		if startCursor != "" {
 			path += "?start_cursor=" + startCursor
@@ -264,7 +265,11 @@ func (c *notionClient) GetBlockChildrenFlat(ctx context.Context, blockID string)
 		if !resp.HasMore || resp.NextCursor == "" {
 			break
 		}
-		startCursor = resp.NextCursor
+		next, err := advancePaginationCursor(ctx, seenCursors, resp.NextCursor, page)
+		if err != nil {
+			return nil, fmt.Errorf("get block children for %s: %w", blockID, err)
+		}
+		startCursor = next
 	}
 
 	return allBlocks, nil
@@ -429,12 +434,39 @@ func (c *notionClient) DownloadFile(ctx context.Context, fileURL string) ([]byte
 
 // --- Shared pagination helper ---
 
+// maxPaginationHops bounds every cursor-paginated loop in this file. A vendor
+// (or gateway) that keeps answering has_more=true would otherwise keep the
+// client paging until the sync task hits its deadline; the value mirrors the
+// guard Confluence and DingTalk already carry.
+const maxPaginationHops = 10000
+
+// advancePaginationCursor validates the progress of a cursor-paginated loop
+// after page `page` (1-based) has been fetched: a cursor handed back twice
+// means the vendor is repeating a page, and page >= maxPaginationHops means
+// the listing is unbounded. Both are reported instead of being followed
+// forever, and the hop cap is also logged because it is the one failure that
+// looks like a healthy, still-running sync from the outside.
+func advancePaginationCursor(
+	ctx context.Context, seen map[string]struct{}, cursor string, page int,
+) (string, error) {
+	if page >= maxPaginationHops {
+		logger.Warnf(ctx, "[Notion] pagination exceeded %d pages; aborting", maxPaginationHops)
+		return "", fmt.Errorf("pagination exceeded %d pages", maxPaginationHops)
+	}
+	if _, exists := seen[cursor]; exists {
+		return "", fmt.Errorf("pagination repeated next_cursor %q", cursor)
+	}
+	seen[cursor] = struct{}{}
+	return cursor, nil
+}
+
 // paginatePages fetches all pages from a paginated Notion API endpoint.
 func (c *notionClient) paginatePages(ctx context.Context, method, path string) ([]notionPage, error) {
 	var allPages []notionPage
 	var startCursor string
+	seenCursors := make(map[string]struct{})
 
-	for {
+	for page := 1; ; page++ {
 		body := map[string]interface{}{
 			"page_size": 100,
 		}
@@ -476,7 +508,11 @@ func (c *notionClient) paginatePages(ctx context.Context, method, path string) (
 		if !resp.HasMore || resp.NextCursor == "" {
 			break
 		}
-		startCursor = resp.NextCursor
+		next, err := advancePaginationCursor(ctx, seenCursors, resp.NextCursor, page)
+		if err != nil {
+			return nil, fmt.Errorf("paginate %s: %w", path, err)
+		}
+		startCursor = next
 	}
 
 	return allPages, nil
