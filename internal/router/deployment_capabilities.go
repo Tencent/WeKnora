@@ -26,5 +26,6 @@ func deploymentCapabilitiesFromRouter(params RouterParams) handler.DeploymentCap
 		Sandbox:       params.SandboxConfigHandler != nil,
 		SandboxDocker: sandbox.DockerBackendEnabled(),
 		SandboxHost:   params.HostSandbox.Manager != nil,
+		SandboxRemote: params.SandboxConfigHandler != nil && !params.HostSandbox.Desktop,
 	})
 }

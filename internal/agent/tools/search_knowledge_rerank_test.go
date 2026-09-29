@@ -9,6 +9,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/models/rerank"
+	"github.com/Tencent/WeKnora/internal/reranking"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -58,75 +59,6 @@ func newRerankTestResults() []*searchResultWithMeta {
 	}
 }
 
-func TestFilterRerankRankResults_thresholdAndFallback(t *testing.T) {
-	t.Parallel()
-	rankResults := []rerank.RankResult{
-		{Index: 0, RelevanceScore: 0.05},
-		{Index: 1, RelevanceScore: 0.02},
-	}
-	filtered := filterRerankRankResults(rankResults, 0.3, false)
-	if len(filtered) != 0 {
-		t.Fatalf("expected empty filter, got %#v", filtered)
-	}
-
-	rankResults = []rerank.RankResult{
-		{Index: 0, RelevanceScore: 0.05},
-		{Index: 1, RelevanceScore: 0.20},
-	}
-	filtered = filterRerankRankResults(rankResults, 0.3, false)
-	if len(filtered) != 1 || filtered[0].Index != 1 {
-		t.Fatalf("expected fallback top score, got %#v", filtered)
-	}
-
-	rankResults = []rerank.RankResult{
-		{Index: 0, RelevanceScore: 0.05},
-		{Index: 1, RelevanceScore: 0.02},
-	}
-	filtered = filterRerankRankResults(rankResults, 0.3, true)
-	if len(filtered) != 1 || filtered[0].Index != 0 {
-		t.Fatalf("expected explicit scope to preserve top result, got %#v", filtered)
-	}
-
-	rankResults = []rerank.RankResult{
-		{Index: 0, RelevanceScore: 0.8},
-		{Index: 1, RelevanceScore: 0.4},
-		{Index: 2, RelevanceScore: 0.1},
-	}
-	filtered = filterRerankRankResults(rankResults, 0.3, false)
-	if len(filtered) != 2 {
-		t.Fatalf("expected 2 passing scores, got %#v", filtered)
-	}
-}
-
-func TestApplyModelRerankScores_faqUsesCompositeScale(t *testing.T) {
-	t.Parallel()
-	tool := &SearchKnowledgeTool{
-		config: &config.Config{
-			Conversation: &config.ConversationConfig{RerankThreshold: 0.3},
-		},
-	}
-	originals := []*searchResultWithMeta{
-		{
-			SearchResult:      &types.SearchResult{ID: "faq-1", Content: "Q: WeKnora", Score: 0.011},
-			KnowledgeBaseType: types.KnowledgeBaseTypeFAQ,
-		},
-		{
-			SearchResult: &types.SearchResult{ID: "doc-1", Content: "swimming club", Score: 0.02},
-		},
-	}
-	rankResults := []rerank.RankResult{
-		{Index: 0, RelevanceScore: 0.05},
-		{Index: 1, RelevanceScore: 0.9},
-	}
-	out := tool.applyModelRerankScores(originals, rankResults, 0.3, false)
-	if len(out) != 1 || out[0].ID != "doc-1" {
-		t.Fatalf("weak FAQ should be filtered out, got %#v", out)
-	}
-	if out[0].Score <= 0.011 {
-		t.Fatalf("composite score should exceed raw retrieval score, got %.4f", out[0].Score)
-	}
-}
-
 // A rerank API failure must degrade to the raw retrieval order rather than
 // dropping the recall set or re-scoring it with a chat model.
 func TestRerankResults_modelErrorKeepsRawResults(t *testing.T) {
@@ -135,7 +67,7 @@ func TestRerankResults_modelErrorKeepsRawResults(t *testing.T) {
 	tool := newRerankTestTool(model)
 	results := newRerankTestResults()
 
-	out, err := tool.rerankResults(context.Background(), "query", results)
+	out, err := tool.rerankResults(context.Background(), "query", results, false)
 	if err != nil {
 		t.Fatalf("rerankResults returned error: %v", err)
 	}
@@ -158,7 +90,7 @@ func TestRerankResults_allBelowFallbackFloorReturnsEmpty(t *testing.T) {
 	t.Parallel()
 	tool := newRerankTestTool(&stubReranker{scores: []float64{0.10, 0.04}})
 
-	out, err := tool.rerankResults(context.Background(), "query", newRerankTestResults())
+	out, err := tool.rerankResults(context.Background(), "query", newRerankTestResults(), false)
 	if err != nil {
 		t.Fatalf("rerankResults returned error: %v", err)
 	}
@@ -171,7 +103,7 @@ func TestRerankResults_keepsCandidatesAboveThreshold(t *testing.T) {
 	t.Parallel()
 	tool := newRerankTestTool(&stubReranker{scores: []float64{0.9, 0.05}})
 
-	out, err := tool.rerankResults(context.Background(), "query", newRerankTestResults())
+	out, err := tool.rerankResults(context.Background(), "query", newRerankTestResults(), false)
 	if err != nil {
 		t.Fatalf("rerankResults returned error: %v", err)
 	}
@@ -185,57 +117,12 @@ func TestRerankResults_withoutModelIsPassthrough(t *testing.T) {
 	tool := newRerankTestTool(nil)
 	results := newRerankTestResults()
 
-	out, err := tool.rerankResults(context.Background(), "query", results)
+	out, err := tool.rerankResults(context.Background(), "query", results, false)
 	if err != nil {
 		t.Fatalf("rerankResults returned error: %v", err)
 	}
 	if len(out) != len(results) {
 		t.Fatalf("expected passthrough, got %d results", len(out))
-	}
-}
-
-// A chunk rarely names its document's subject, so the rerank model must see
-// the document title; FAQ entries are scored on their own question.
-func TestRerankScores_prefixDocumentTitle(t *testing.T) {
-	t.Parallel()
-	model := &stubReranker{scores: []float64{0.5, 0.5, 0.5}}
-	tool := newRerankTestTool(model)
-	results := []*searchResultWithMeta{
-		{SearchResult: &types.SearchResult{
-			ID: "c1", Content: "allocate inference across open-weight models",
-			KnowledgeTitle: " Show HN: Echo ", ChunkType: string(types.ChunkTypeText),
-		}},
-		{SearchResult: &types.SearchResult{
-			ID: "c2", Content: "What is Echo?", KnowledgeTitle: "FAQ set", ChunkType: string(types.ChunkTypeFAQ),
-		}},
-		{SearchResult: &types.SearchResult{ID: "c3", Content: "untitled"}},
-	}
-
-	if _, err := tool.rerankScores(context.Background(), "query", results); err != nil {
-		t.Fatalf("rerankScores returned error: %v", err)
-	}
-	want := []string{"Show HN: Echo\n\nallocate inference across open-weight models", "What is Echo?", "untitled"}
-	for i, w := range want {
-		if model.documents[i] != w {
-			t.Fatalf("passage %d = %q, want %q", i, model.documents[i], w)
-		}
-	}
-}
-
-// Title is shared by every chunk of a document, so a passage whose body never
-// names the query subject still goes to the reranker as title + chunk.
-func TestRerankPassage_prefixesTitleWhenChunkOmitsSubject(t *testing.T) {
-	t.Parallel()
-	got := (&SearchKnowledgeTool{}).rerankPassage(context.Background(), &types.SearchResult{
-		Content:        "installation prerequisites and docker compose flags",
-		KnowledgeTitle: "Show HN: Echo – Fable-level results at 1/3 the cost using open-weight models",
-		ChunkType:      string(types.ChunkTypeText),
-	})
-	if !strings.HasPrefix(got, "Show HN: Echo") {
-		t.Fatalf("expected document title prefix, got %q", got)
-	}
-	if !strings.Contains(got, "installation prerequisites") {
-		t.Fatalf("chunk body must still be present: %q", got)
 	}
 }
 
@@ -286,7 +173,60 @@ func TestExecuteReportsRerankRejection(t *testing.T) {
 func TestRerankThreshold_default(t *testing.T) {
 	t.Parallel()
 	tool := &SearchKnowledgeTool{}
-	if got := tool.rerankThreshold(); got != 0.3 {
-		t.Fatalf("default threshold = %v, want 0.3", got)
+	if got := tool.rerankThreshold(); got != reranking.DefaultThreshold {
+		t.Fatalf("default threshold = %v, want %v", got, reranking.DefaultThreshold)
+	}
+}
+
+type failingSearchKBService struct {
+	stubKnowledgeBaseService
+	err error
+}
+
+func (s *failingSearchKBService) HybridSearch(
+	context.Context, string, types.SearchParams,
+) ([]*types.SearchResult, error) {
+	return nil, s.err
+}
+
+// A search that failed is not an empty search: the model must not read a
+// vector-store outage as "the knowledge base has no answer".
+func TestExecuteReportsSearchFailure(t *testing.T) {
+	t.Parallel()
+	tool := NewSearchKnowledgeTool(
+		&failingSearchKBService{err: errors.New("vector store unavailable")}, nil, nil,
+		types.SearchTargets{{Type: types.SearchTargetTypeKnowledgeBase, KnowledgeBaseID: "kb-1", TenantID: 1}},
+		nil, &config.Config{Conversation: &config.ConversationConfig{}},
+	)
+	res, err := tool.Execute(context.Background(), json.RawMessage(`{"query":"refund policy"}`))
+	if err != nil || res == nil {
+		t.Fatalf("Execute: res=%+v err=%v", res, err)
+	}
+	if res.Success || !strings.Contains(res.Error, "vector store unavailable") ||
+		!strings.Contains(res.Error, "not evidence") {
+		t.Fatalf("failure not reported: %+v", res)
+	}
+}
+
+// In keyword mode the rerank model orders exact-term hits but does not reject
+// them: identifiers score low with rerank models.
+func TestRerankResults_keywordModeOrdersWithoutFiltering(t *testing.T) {
+	t.Parallel()
+	tool := newRerankTestTool(&stubReranker{scores: []float64{0.01, 0.05}})
+
+	out, err := tool.rerankResults(context.Background(), "ERR_4012", newRerankTestResults(), true)
+	if err != nil {
+		t.Fatalf("rerankResults returned error: %v", err)
+	}
+	if len(out) != 2 || out[0].ID != "c2" {
+		t.Fatalf("expected both hits ordered by model score, got %#v", out)
+	}
+}
+
+func TestEmptySearchStatementDoesNotSendKeywordModeBackToKeyword(t *testing.T) {
+	t.Parallel()
+	msg := emptySearchStatement("ERR_4012", map[string]interface{}{"mode": SearchModeKeyword}, 1)
+	if strings.Contains(msg, "retry with mode=keyword") {
+		t.Fatalf("keyword-mode statement suggests keyword mode: %q", msg)
 	}
 }

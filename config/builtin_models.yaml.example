@@ -98,7 +98,8 @@ builtin_models: []
 #       context_window: 200000     # optional; omit to use the 200K default
 #       # Optional catalog overrides for chat models. `api` forces the wire
 #       # protocol; `compat` is the flat protocol object documented in
-#       # internal/models/catalog/compat.go; `thinking_levels` maps the
+#       # website-docs/03-features/06-models.md (协议兼容覆盖 compat JSON);
+#       # `thinking_levels` maps the
 #       # off/auto/minimal/low/medium/high/xhigh/max ladder to vendor values.
 #       # spec:
 #       #   api: openai-completions

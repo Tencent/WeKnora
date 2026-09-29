@@ -10,7 +10,7 @@
 | 把知识库共享给另一个团队 | 建组织 → 把两个空间都加进去 → 在知识库上「共享到组织」 |
 | 接入 API | 空间设置 → API Key，按需勾选能力（检索 / 问答 / 入库 / 管理），必要时限定可访问的知识库 |
 | 管理整个部署（全局设置、任务队列、跨空间审计） | 需要**系统管理员**身份，与空间 Owner 独立授予，见[平台管理与系统管理员](20-platform-admin.md) |
-| 删除整个空间 | 空间设置里由 **Owner** 触发（`DELETE /tenants/:id`）；会一并删除该空间的知识库、Agent、会话与成员关系，不可撤销 |
+| 删除整个空间 | 空间设置里由 **Owner** 触发（`DELETE /tenants/:id`）；空间与全部成员关系被软删除，成员立即失去访问，界面上无法恢复 |
 
 <Screenshot
   src="/screenshots/settings-members.png"
@@ -37,7 +37,7 @@ Viewer 可浏览和提问，Contributor 可创建知识库与上传文档，Admi
 
 ## 管理空间与平台权限
 
-删除空间由 Owner 执行，会删除该空间的知识库、智能体、会话和成员关系。全局设置、平台任务队列及跨空间审计由系统管理员管理，详见[平台管理与系统管理员](20-platform-admin.md)。
+删除空间由 Owner 执行。空间记录与成员关系会被软删除，所有成员随即失去访问；空间内的知识库、模型等数据不会被立即物理清除，但自 v0.8.2 起，已删除空间排队中的 Wiki 任务不再调用模型。全局设置、平台任务队列及跨空间审计由系统管理员管理，详见[平台管理与系统管理员](20-platform-admin.md)。
 
 ## 概念总览
 
@@ -120,7 +120,7 @@ type registerByInviteRequest struct {
     Token    string `binding:"required"`
     Email    string `binding:"required,email"` // 注册者自填，与 token 不绑定
     Username string `binding:"required"`
-    Password string `binding:"required,min=6"`
+    Password string `binding:"required"`       // 另经统一密码策略校验（8–32 位，含字母和数字）
 }
 ```
 
@@ -159,7 +159,7 @@ Handler：`internal/handler/tenant_member.go`、`tenant_invitation.go`。`/tenan
 `internal/handler/tenant_invite_link.go`。与定向邀请同表存储：`InviteeUserID` 为空即共享链接（多人可用，`AcceptedCount` 计数），非空即定向邀请。
 
 - `POST /tenants/:id/invite-links`（Owner）：`{role, message}` → 返回 `invite_url`（`{FrontendBaseURL}/register?token=...`，`FrontendBaseURL` 取 YAML `frontend_base_url` → 环境变量 `FRONTEND_BASE_URL` → 相对路径兜底）；
-- `GET /tenants/:id/invite-links`（Viewer）列出；`DELETE /tenants/:id/invite-links/:inv_id`（Owner）撤销。
+- 邀请链接与定向邀请同表，列出用 `GET /tenants/:id/invitations`（Viewer），撤销用 `DELETE /tenants/:id/invitations/:inv_id`（Owner）。
 
 链接持续有效直到过期或撤销，配合 [邀请注册（register-by-invite）](#_2-3-邀请注册-register-by-invite) 的 `register-by-invite` 打通 invite-only 模式下的开户闭环。
 
@@ -174,21 +174,13 @@ Handler：`internal/handler/tenant_member.go`、`tenant_invitation.go`。`/tenan
 - `Searchable=true` 的组织可被 `SearchSearchableOrganizations` 发现；
 - 邀请码与待审批数仅对"组织 admin 或 owner 租户"可见（`internal/handler/organization.go` 中 `isAdmin || isOwner` 判定）。
 
-#### 邀请搜索：按空间（租户）而非按用户 {#_8-2-邀请搜索-按空间-租户-而非按用户}
+#### 邀请候选：按空间 ID 精确解析 {#_8-2-邀请搜索-按空间-租户-而非按用户}
 
-组织邀请以工作空间为目标。`GET /organizations/:id/search-tenants` 按空间名称匹配，仅组织 admin 可调用。一个用户可能属于多个空间，搜索结果因此返回空间候选项：
+组织邀请以工作空间为目标。`GET /organizations/:id/search-tenants?q=<空间 ID>` 仅组织 admin 可调用，自 v0.8.2 起只按**精确的空间 ID** 解析候选，不再跨空间按名称搜索（避免借此枚举其他空间的名称）：`q` 不是有效 ID、空间已在组织内或不存在时返回空列表，否则返回唯一的 `{tenant_id, tenant_name}`。被邀请方可在自己的空间设置中查到空间 ID 并告知组织管理员；也可以继续使用组织邀请码或邀请链接加入。
 
-```go
-// SearchTenantsForInvite：
-// 1. 校验调用者租户是组织 admin
-// 2. 排除已在组织内的租户 (existingTenantIDs)
-// 3. tenantService.SearchTenants 按名称搜索（pageSize = limit*2，limit 上限 50）
-// 4. 插入序去重，丢弃解析不到名称的 defunct 租户，截断到 limit
-```
+旧端点 `GET /organizations/:id/search-users` 保留为兼容别名，行为与 `search-tenants` 相同。
 
-旧端点 `GET /organizations/:id/search-users` 保留为兼容 shim，直接委托给 `SearchTenantsForInvite`（响应已是新的 tenant-candidate 形状，标记 `@Deprecated`）。
-
-`POST /organizations/:id/invite`（仅组织 admin）直接添加成员：优先走 `tenant_id`（可选 `representative_user_id`，若代表用户不属于目标租户则告警并丢弃该字段，不硬失败）；兼容旧 SDK 的 `user_id` 路径（反查该用户租户）。
+`POST /organizations/:id/invite`（仅组织 admin）直接添加成员：优先走 `tenant_id`，兼容旧 SDK 的 `user_id` 路径（反查该用户的默认空间）。直接添加不再附带代表用户（`representative_user_id` 被忽略）；组织成员列表只向调用者自己的空间返回代表用户的邮箱。
 
 #### KB 共享模型与权限计算 {#_8-3-kb-共享模型与权限计算}
 
@@ -216,6 +208,8 @@ type KnowledgeBaseShare struct {
 
 路由上的 `share_id` 必须属于路径中的 KB / Agent，否则返回 404。
 
+**接收方对共享 KB 配置的限制**：只有 KB 所在空间可以调用 `POST /initialization/initialize/:kbId`；其他空间修改 KB 配置（`PUT /initialization/config/:kbId`）需要 admin 级共享，且不能改动存储绑定；接收方读取配置时只看到凭据是否已配置，看不到模型 Base URL、存储桶位置等细节，KB 详情也不再返回旧版内联的存储/VLM 凭据。
+
 **共享何时失效**：共享只在组织未删除、且来源租户仍是组织成员时生效。来源租户退出或被移除时，它共享进该组织的 KB 与 Agent 会被一并撤销；查询侧也会按来源租户的成员关系过滤，旧版本遗留的共享同样不再生效。
 
 **有效权限 = 多层交集（取最小）**：
@@ -238,7 +232,8 @@ func applyTenantRoleCap(p types.OrgMemberRole, callerTenantRole types.TenantRole
 
 - 内置智能体不能共享：每个空间都有同 ID 的内置智能体，共享后接收方无法区分。未指定来源空间的对话请求总是先使用自己空间的智能体。
 - 共享 Agent 会把它的 KB 范围以只读方式开放给组织成员，因此共享人必须有权直接共享这些 KB，即 KB 创建者或租户 Admin+。`kb_selection_mode: all` 会自动包含之后新建的 KB，只有 Admin+ 可以共享。已共享的 Agent 被编辑时，新加入范围的 KB 适用同一规则。
-- 共享运行时，Agent 未设置 MCP 选择模式按「不使用」处理，与共享范围里的展示一致。
+- 共享运行时，Agent 未设置 MCP 选择模式按「不使用」处理，与共享范围里的展示一致；快速问答模式下联网搜索需 Agent 本身开启，请求中的 `summary_model_id` 被忽略。
+- 接收方看到的共享 Agent 不含系统提示词与创建者用户 ID，能力与知识库范围仍可见。
 - 启用了技能的 Agent 共享后，技能在来源空间的沙箱中运行，并带上管理员为技能配置的环境变量（如 API Key）；成员可以让智能体读出这些值。共享设置页会对此给出提示。
 
 ```mermaid
@@ -327,7 +322,7 @@ flowchart LR
 
 #### KB 访问守卫（跨租户共享通道） {#_6-5-kb-访问守卫-跨租户共享通道}
 
-`middleware/kb_access.go`（由 `rbac.go` 的 `KBAccess*` 系列包装）统一了三条访问路径：
+`middleware/kb_access.go`（由 `rbac.go` 的 `KBAccess*` 系列包装，判定规则位于 `internal/application/access`）统一了三条访问路径：
 
 ```text
 1. 自有 KB                    → 等效 Admin 级完全访问
@@ -425,7 +420,7 @@ requireTenantAPIKeyKnowledgeBases(ctx, "kb-1", "kb-2") // → forbidden
 
 授权/Token 端点可显式配置；即使二者已填写，只要 issuer 或 jwks_uri 不完整，仍需通过 discovery 补齐验证信息。缺少可靠的验证配置时不能仅解析 id_token 的载荷就登录。
 
-路由（`internal/router/router.go`）：
+路由（`internal/router/routes_auth_tenant.go`）：
 
 ```go
 r.GET("/auth/oidc/config",   handler.GetOIDCConfig)           // 前端探测是否启用

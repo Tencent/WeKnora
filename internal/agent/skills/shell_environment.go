@@ -24,7 +24,7 @@ func (m *Manager) PrepareShellEnvironment(ctx context.Context, sessionID, skillN
 		if err != nil {
 			return "", nil, err
 		}
-	} else if _, valid := sandbox.ValidatedImageSkillDir(dir); !valid {
+	} else if _, valid := sandbox.ValidatedSkillDirUnder(m.installedSkillsRoot(), dir); !valid {
 		return "", nil, fmt.Errorf("invalid installed directory for skill %q", skillName)
 	}
 	runtimeEnv := make(map[string]string, len(env)+6)
@@ -33,13 +33,34 @@ func (m *Manager) PrepareShellEnvironment(ctx context.Context, sessionID, skillN
 	}
 	applySkillNodePath(runtimeEnv, dir)
 	runtimeEnv[skillDirEnvVar] = dir
-	runtimeEnv[artifactOutputEnvVar] = ArtifactOutputDir()
-	runtimeEnv[artifactHistoryEnvVar] = ArtifactOutputDir()
-	runtimeEnv[sessionInputEnvVar] = sandbox.SessionInputRoot
+	outputDir, inputDir := ArtifactOutputDir(), sandbox.SessionInputRoot
+	if root, ok := m.hostWorkspaceRoot(ctx, sessionID); ok {
+		// Host has no collected output tree or attachment directory yet: point
+		// deliverables at the workspace and leave the input variable unset
+		// rather than naming a /workspace path that does not exist.
+		outputDir, inputDir = root, ""
+	}
+	runtimeEnv[artifactOutputEnvVar] = outputDir
+	runtimeEnv[artifactHistoryEnvVar] = outputDir
+	if inputDir != "" {
+		runtimeEnv[sessionInputEnvVar] = inputDir
+	}
 	// Set PATH after the provider's login shell has loaded its profiles. Use a
 	// child non-login shell so leading assignments and arbitrary shell grammar
 	// keep their original meaning and cannot consume the setup prefix.
 	prefix := sandbox.SkillCommandPath(dir)
 	wrapped := "export PATH=" + sandbox.ShellQuote(prefix) + ":\"$PATH\"; exec /bin/bash --noprofile --norc -c " + sandbox.ShellQuote(command)
 	return wrapped, runtimeEnv, nil
+}
+
+func (m *Manager) hostWorkspaceRoot(ctx context.Context, sessionID string) (string, bool) {
+	provider, ok := m.sandboxMgr.(sandbox.SessionWorkspaceLayoutProvider)
+	if !ok || provider == nil {
+		return "", false
+	}
+	layout, err := provider.SessionWorkspaceLayout(ctx, sessionID)
+	if err != nil || !layout.IsHost() || !layout.HasRoot() {
+		return "", false
+	}
+	return layout.Root, true
 }

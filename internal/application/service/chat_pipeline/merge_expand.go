@@ -7,10 +7,15 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
-// expandShortContextWithNeighbors expands the short context with neighbors
+// expandShortContextWithNeighbors expands the short context with neighbors.
+//
+// Lookups are not tenant scoped: hits from an org-shared KB belong to the
+// sharing workspace, and a caller-tenant filter silently skipped their
+// expansion. The base IDs come from retrieval results and neighbors are only
+// accepted from the same knowledge, the same rule parent resolution uses
+// (#3342).
 func (p *PluginMerge) expandShortContextWithNeighbors(
 	ctx context.Context,
-	chatManage *types.ChatManage,
 	results []*types.SearchResult,
 ) []*types.SearchResult {
 	const (
@@ -19,17 +24,6 @@ func (p *PluginMerge) expandShortContextWithNeighbors(
 	)
 
 	if len(results) == 0 || p.chunkRepo == nil {
-		return results
-	}
-
-	tenantID, _ := types.TenantIDFromContext(ctx)
-	if tenantID == 0 && chatManage != nil {
-		tenantID = chatManage.TenantID
-	}
-	if tenantID == 0 {
-		pipelineWarn(ctx, "Merge", "expand_skip", map[string]interface{}{
-			"reason": "missing_tenant",
-		})
 		return results
 	}
 
@@ -70,7 +64,7 @@ func (p *PluginMerge) expandShortContextWithNeighbors(
 	}
 
 	chunkMap := make(map[string]*types.Chunk, len(baseIDs))
-	chunks, err := p.chunkRepo.ListChunksByID(ctx, tenantID, baseIDs)
+	chunks, err := p.chunkRepo.ListChunksByIDOnly(ctx, baseIDs)
 	if err != nil {
 		pipelineWarn(ctx, "Merge", "expand_list_base_failed", map[string]interface{}{
 			"error": err.Error(),
@@ -103,7 +97,7 @@ func (p *PluginMerge) expandShortContextWithNeighbors(
 		for id := range neighborIDsSet {
 			neighborIDs = append(neighborIDs, id)
 		}
-		neighbors, err := p.chunkRepo.ListChunksByID(ctx, tenantID, neighborIDs)
+		neighbors, err := p.chunkRepo.ListChunksByIDOnly(ctx, neighborIDs)
 		if err != nil {
 			pipelineWarn(ctx, "Merge", "expand_list_neighbor_failed", map[string]interface{}{
 				"error": err.Error(),
@@ -123,7 +117,7 @@ func (p *PluginMerge) expandShortContextWithNeighbors(
 
 	for _, target := range targets {
 		res := target.result
-		p.fetchChunksIfMissing(ctx, tenantID, chunkMap, res.ID)
+		p.fetchChunksIfMissing(ctx, chunkMap, res.ID)
 		baseChunk := chunkMap[res.ID]
 		if baseChunk == nil || baseChunk.Content == "" || baseChunk.ChunkType != types.ChunkTypeText {
 			continue
@@ -137,7 +131,7 @@ func (p *PluginMerge) expandShortContextWithNeighbors(
 		prevCursor := baseChunk.PreChunkID
 		nextCursor := baseChunk.NextChunkID
 
-		p.fetchChunksIfMissing(ctx, tenantID, chunkMap, prevCursor, nextCursor)
+		p.fetchChunksIfMissing(ctx, chunkMap, prevCursor, nextCursor)
 
 		if prevCursor != "" {
 			if prevChunk := chunkMap[prevCursor]; prevChunk != nil && prevChunk.KnowledgeID == baseChunk.KnowledgeID {
@@ -174,7 +168,7 @@ func (p *PluginMerge) expandShortContextWithNeighbors(
 
 			expanded := false
 			if prevCursor != "" {
-				p.fetchChunksIfMissing(ctx, tenantID, chunkMap, prevCursor)
+				p.fetchChunksIfMissing(ctx, chunkMap, prevCursor)
 				if prevChunk := chunkMap[prevCursor]; prevChunk != nil &&
 					prevChunk.KnowledgeID == baseChunk.KnowledgeID {
 					prevContent = searchutil.JoinChunkContent(prevChunk.Content, prevContent, "\n\n")
@@ -192,7 +186,7 @@ func (p *PluginMerge) expandShortContextWithNeighbors(
 			}
 
 			if nextCursor != "" {
-				p.fetchChunksIfMissing(ctx, tenantID, chunkMap, nextCursor)
+				p.fetchChunksIfMissing(ctx, chunkMap, nextCursor)
 				if nextChunk := chunkMap[nextCursor]; nextChunk != nil &&
 					nextChunk.KnowledgeID == baseChunk.KnowledgeID {
 					nextContent = searchutil.JoinChunkContent(nextContent, nextChunk.Content, "\n\n")
@@ -250,18 +244,25 @@ func runeLen(s string) int {
 	return len([]rune(s))
 }
 
-// mergeOrderedContent merges ordered content
+// mergeOrderedContent joins prev, base and next in document order within
+// roughly maxLen runes. base is the retrieval hit and is never cut; the budget
+// left after it goes to the end of prev and the start of next, the text
+// adjacent to the hit, with any share one side cannot use passed to the other.
+// Truncating the joined string instead let a long previous neighbor push the
+// hit out of the context entirely.
 func mergeOrderedContent(prev, base, next string, maxLen int) string {
+	prevRunes, nextRunes := []rune(prev), []rune(next)
+	budget := max(maxLen-runeLen(base), 0)
+	prevKeep := min(len(prevRunes), budget/2)
+	nextKeep := min(len(nextRunes), budget-prevKeep)
+	prevKeep = min(len(prevRunes), budget-nextKeep)
+
 	content := base
-	if prev != "" {
-		content = searchutil.JoinChunkContent(prev, content, "\n\n")
+	if prevKeep > 0 {
+		content = searchutil.JoinChunkContent(string(prevRunes[len(prevRunes)-prevKeep:]), content, "\n\n")
 	}
-	if next != "" {
-		content = searchutil.JoinChunkContent(content, next, "\n\n")
-	}
-	runes := []rune(content)
-	if len(runes) > maxLen {
-		return string(runes[:maxLen])
+	if nextKeep > 0 {
+		content = searchutil.JoinChunkContent(content, string(nextRunes[:nextKeep]), "\n\n")
 	}
 	return content
 }
@@ -277,7 +278,6 @@ func containsID(ids []string, target string) bool {
 
 func (p *PluginMerge) fetchChunksIfMissing(
 	ctx context.Context,
-	tenantID uint64,
 	chunkMap map[string]*types.Chunk,
 	chunkIDs ...string,
 ) {
@@ -294,7 +294,7 @@ func (p *PluginMerge) fetchChunksIfMissing(
 		return
 	}
 
-	chunks, err := p.chunkRepo.ListChunksByID(ctx, tenantID, missing)
+	chunks, err := p.chunkRepo.ListChunksByIDOnly(ctx, missing)
 	if err != nil {
 		pipelineWarn(ctx, "Merge", "expand_fetch_missing_failed", map[string]interface{}{
 			"missing_cnt": len(missing),

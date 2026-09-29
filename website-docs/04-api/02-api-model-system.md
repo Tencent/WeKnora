@@ -10,7 +10,7 @@ API key：`manage_models` 或 full-access。
 
 ### GET /api/v1/models/providers
 
-用途：厂商目录（前端据此动态渲染厂商下拉、图标、额外字段与模型选择）。权限：Viewer+。查询参数：`model_type`（可选：`chat/embedding/rerank/vllm/asr`）。Handler: `internal/handler/model_catalog.go`
+用途：厂商目录（前端据此动态渲染厂商下拉、图标、额外字段与模型选择）。权限：Viewer+。查询参数：`model_type`（可选：`chat/embedding/rerank/vllm/asr`，也接受 `KnowledgeQA` 等后端取值；未知取值返回 400），指定后只返回支持该类型的厂商及该类型的模型。Handler: `internal/handler/model_catalog.go`
 
 响应：200 `{"success":true,"data":[ModelProviderDTO]}`，每项：
 
@@ -19,20 +19,28 @@ API key：`manage_models` 或 full-access。
 | `value` / `label` / `labels` / `description` / `descriptions` / `website` | 厂商 id、品牌名、按语言的名称与描述 |
 | `icon` | `data:image/svg+xml;base64,...`，可直接用于 `<img src>` |
 | `api` / `auth` / `requiresAuth` | 默认协议（`openai-completions` 等）、鉴权方式、是否需要密钥 |
-| `defaultUrls` / `modelTypes` | 按模型类型的默认地址与支持的类型 |
-| `extraFields` | 厂商额外配置字段定义（`key,label,type,required,default,options,model_types,secret`），值存入 `parameters.extra_config` |
-| `models` | 内置模型目录（`id,name,type,api,reasoning,input,context_window,max_output_tokens,dimension,thinking_levels,cost`） |
+| `defaultUrls` / `modelTypes` | 按模型类型的默认地址与支持的类型。`defaultUrls` 仅对 Admin+（或 full-access / `manage_tenant_settings` API key）返回，其他调用方为空 |
+| `extraFields` | 厂商额外配置字段定义（`key,label,labels,type,required,default,placeholder,options,model_types,secret`），值存入 `parameters.extra_config` |
+| `credentialLabels` | 部分模型类型下凭证输入框的名称与提示（如火山引擎、LKEAP 重排的 API Key 一栏实为 Access Key ID / SecretId） |
+| `models` | 内置模型目录（`id,name,type,api,reasoning,input,context_window,max_output_tokens,dimension,thinking_levels,cost,source`），`source` 为该模型参数所依据的厂商文档链接 |
 | `thinking` | 厂商级思考编码摘要（`format`、`levels`） |
+| `order` | 列表排序值 |
 
 ```bash
 curl "$BASE/api/v1/models/providers?model_type=chat" -H "Authorization: Bearer $TOKEN"
 ```
 
-### GET /api/v1/models/catalog/resolve
+### GET|POST /api/v1/models/catalog/resolve
 
-用途：按厂商、模型名、`base_url` 与 `extra_config` 解析有效接入配置（协议、思考等级、上下文），供模型编辑器实时展示。权限：Viewer+。查询参数：`provider`（必填）、`model`、`base_url`、`model_type`、`api`、`thinking_control`、`remote_model_name`。
+用途：按厂商、模型名、`base_url` 与 `extra_config` 解析有效接入配置（协议、思考等级、上下文），供模型编辑器实时展示。权限：Viewer+。
 
-响应：200 `{"success":true,"data":{provider,api,base_url,remote_model,cataloged,model,capabilities}}`，其中 `capabilities` 为 `{provider,api,cataloged,reasoning,thinking_levels,thinking_format,input,context_window,max_output_tokens,max_tokens_field}`。同一结构也随对话/视觉模型的 `ModelResponse.capabilities` 返回。
+参数（GET 用查询参数，POST 用 JSON 请求体，字段相同）：`provider`（厂商 ID）、`model`、`base_url`、`model_type`（默认 `chat`）、`api`、`thinking_control`、`remote_model_name`，以及该厂商声明的非密钥额外字段（如 Azure 的 `api_version`）。POST 请求体还可带 `spec` 对象（与模型 `parameters.spec` 相同），用于预览单行目录覆盖。密钥类字段一律不接受。
+
+响应：200 `{"success":true,"data":{provider,api,remote_model,cataloged,model,capabilities,base_url,url}}`，其中 `capabilities` 为 `{provider,api,cataloged,reasoning,thinking_levels,thinking_format,input,context_window,max_output_tokens,max_tokens_field}`。`base_url` 与 `url`（实际请求地址，仅自行计算地址的厂商返回，如 Azure）只对 Admin+（或 full-access / `manage_tenant_settings` API key）返回。无法解析时返回 400。同一 `capabilities` 结构也随远程对话/视觉模型的 `ModelResponse.capabilities` 返回。
+
+```bash
+curl "$BASE/api/v1/models/catalog/resolve?provider=deepseek&model=deepseek-v4-pro" -H "Authorization: Bearer $TOKEN"
+```
 
 ### POST /api/v1/models
 
@@ -42,16 +50,18 @@ curl "$BASE/api/v1/models/providers?model_type=chat" -H "Authorization: Bearer $
 | --- | --- | --- | --- |
 | `name` | string | 是（`binding:"required"`） | 模型名 |
 | `display_name` | string | 否 | 显示名 |
-| `type` | string | 是（`binding:"required"`） | 模型类型 |
-| `source` | string | 是（`binding:"required"`） | 来源（local/remote…） |
+| `type` | string | 是（`binding:"required"`） | 模型类型：`KnowledgeQA` / `Embedding` / `Rerank` / `VLLM` / `ASR`（按原样保存，不接受 `chat` 等前端写法） |
+| `source` | string | 是（`binding:"required"`） | 来源（`local` / `remote`） |
 | `description` | string | 否 | 描述 |
-| `parameters` | object | 是（`binding:"required"`） | 连接参数（base_url 等；密钥经 credentials 子资源管理） |
+| `parameters` | object | 是（`binding:"required"`） | 连接参数（`base_url`、`provider`、`extra_config`、`spec`、`context_window` 等，字段见[模型管理](../03-features/06-models.md#模型配置字段)）。创建时可直接带 `api_key` / `app_secret`，之后经 credentials 子资源修改 |
 
-响应：201 `{"success":true,"data":{ModelResponse}}`（`id,name,type,source,parameters,is_default,is_builtin,status,credentials,...`）
+`parameters` 会按模型目录校验（未知协议、错误的 compat 键、非法思考等级返回 400），`base_url` 经过 SSRF 校验。
+
+响应：201 `{"success":true,"data":{ModelResponse}}`（`id,name,type,source,parameters,is_default,is_builtin,status,credentials,capabilities,...`；响应不含密钥）
 
 ```bash
 curl -X POST $BASE/api/v1/models -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
-  -d '{"name":"gpt-4o-mini","type":"chat","source":"remote","parameters":{"base_url":"https://api.openai.com/v1"}}'
+  -d '{"name":"gpt-5.5","type":"KnowledgeQA","source":"remote","parameters":{"provider":"openai","base_url":"https://api.openai.com/v1","api_key":"sk-..."}}'
 ```
 
 ### GET /api/v1/models
@@ -76,7 +86,7 @@ curl $BASE/api/v1/models/m-1 -H "Authorization: Bearer $TOKEN"
 
 ### POST /api/v1/models/:id/debug
 
-用途：调试已保存模型（发起真实上游调用，产生费用）。权限：Admin+。form-data 字段：`input`（≤64KB）、`options`（JSON 编码调试选项）、`documents`（JSON 数组，≤100 条）、`file`（可选）。
+用途：调试已保存模型（发起真实上游调用，产生费用）。权限：Admin+。form-data 字段：`input`（≤64KB）、`options`（JSON 编码调试选项：`system_prompt`、`temperature`（0~2）、`top_p`、`max_tokens`（1~8192）、`thinking`、`reasoning_effort`（`off/auto/minimal/low/medium/high/xhigh/max`，设置后覆盖 `thinking`））、`documents`（JSON 数组，≤100 条）、`file`（可选）。
 
 响应：200 `{"success":true,"data":{"ok",elapsed_ms,request,raw_response,observations,error}}`
 
@@ -310,9 +320,10 @@ curl $BASE/api/v1/initialization/ollama/download/tasks -H "Authorization: Bearer
 | `modelName` | string | 是 | 模型名 |
 | `baseUrl` / `apiKey` / `appSecret` | string | 否 | 连接参数 |
 | `provider` / `interfaceType` | string | 否 | 厂商/接口类型 |
-| `dimension` | int | 否 | embedding 维度 |
+| `dimension` / `supportsDimensionOverride` | int / bool | 否 | embedding 维度；是否在请求中指定维度 |
 | `customHeaders` / `extraConfig` | map | 否 | 扩展 |
-| `modelId` | string | 否 | 从已存模型取密钥 |
+| `spec` | object | 否 | 单行目录覆盖，与模型 `parameters.spec` 相同 |
+| `modelId` | string | 否 | 已存模型 ID：请求中缺失的密钥、`extraConfig` 与 `spec` 从该模型补齐 |
 
 | 端点 | 用途 | 响应 data |
 | --- | --- | --- |
@@ -403,4 +414,4 @@ curl "$BASE/api/v1/evaluation?task_id=task-1" -H "Authorization: Bearer $TOKEN"
 
 ## 实现参考
 
-路由注册：`internal/router/router.go` 的 `RegisterModelRoutes`、`RegisterInitializationRoutes`、`RegisterEvaluationRoutes`、`RegisterWeKnoraCloudRoutes`。Handler：`internal/handler/model.go`、`internal/handler/model_credentials.go`、`internal/handler/initialization.go`、`internal/handler/evaluation.go`、`internal/handler/weknoracloud.go`。
+路由注册：`internal/router/router.go` 调用 `RegisterModelRoutes`、`RegisterInitializationRoutes`、`RegisterEvaluationRoutes`、`RegisterWeKnoraCloudRoutes`（定义在 `internal/router/routes_infra.go`）。Handler：`internal/handler/model.go`、`internal/handler/model_catalog.go`、`internal/handler/model_credentials.go`、`internal/handler/initialization.go`、`internal/handler/evaluation.go`、`internal/handler/weknoracloud.go`。

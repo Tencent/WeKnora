@@ -33,8 +33,8 @@ export interface ModelCapabilities {
 }
 
 // Per-row override of a catalog entry. Mirrors internal/types.ModelSpecOverride.
-// compat is the flat, protocol-specific object documented in
-// internal/models/catalog/compat.go (free-form JSON).
+// compat is the flat, protocol-specific object defined in
+// internal/models/api/*_settings.go (free-form JSON).
 export interface ModelSpecOverride {
   api?: string;
   reasoning?: boolean;

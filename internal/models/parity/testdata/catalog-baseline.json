@@ -52,7 +52,7 @@
   "aliyun/KnowledgeQA/qwq-32b": "b05df754c2d09e0fe937e85c6bda28b71ef3e694c0e06c17dccdbd9217fecb28",
   "aliyun/KnowledgeQA/qwq-plus": "7139911fda2d14b002889abbd06c185e550bec0984cea85116510b17ba4063ea",
   "aliyun/Rerank/gte-rerank-v2": "27219a2ffc212a35e9eeacf87da136410342e1915dd1141dc3357d7b40f9595b",
-  "aliyun/Rerank/qwen3-rerank": "error: catalog: aliyun does not serve \"qwen3-rerank\" through a protocol this build implements: qwen3-rerank speaks a different protocol (/compatible-api/v1/reranks, flat request, results at the top level) that no protocol package implements yet",
+  "aliyun/Rerank/qwen3-rerank": "2b0b10a4c768fb157901e45586d0092e4ebe5ee5e92064a592aa726d8d133df2",
   "anthropic/KnowledgeQA/claude-fable-5": "8cb0c332960f271acac66df25e0b8a1259c863994b6d4ef3c9be3df47f85b5bc",
   "anthropic/KnowledgeQA/claude-fable-5-1": "fe4ee19f613745815e5caa1f258e67f9f9a901f5fc45c1d4cce030bfa6287b72",
   "anthropic/KnowledgeQA/claude-haiku-4-5": "5eb4abef41f957d98c0a15c83de48c0e6b46be48d59f761ba6006c29010487f9",

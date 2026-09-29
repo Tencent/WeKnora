@@ -116,6 +116,17 @@ func TestRerankOutboundShapePerProtocol(t *testing.T) {
 			},
 		},
 		{
+			name: "dashscope shape for qwen3-rerank", provider: "aliyun", model: "qwen3-rerank",
+			reply: `{"output":{"results":[{"index":0,"relevance_score":0.5,"document":{"text":"d0"}}]}}`,
+			assert: func(t *testing.T, path string, body map[string]any) {
+				assert.Equal(t, "/api/v1/services/rerank/text-rerank/text-rerank", path)
+				assert.Equal(t, "qwen3-rerank", body["model"])
+				input, ok := body["input"].(map[string]any)
+				require.True(t, ok, "qwen3-rerank goes out in the native input wrapper")
+				assert.Equal(t, "q", input["query"])
+			},
+		},
+		{
 			name: "nim shape", provider: "nvidia", model: "nvidia/nv-rerankqa-mistral-4b-v3",
 			reply: `{"rankings":[{"index":0,"logit":0.0}]}`,
 			assert: func(t *testing.T, _ string, body map[string]any) {
@@ -365,12 +376,12 @@ func TestRerankScoreScalesMatchTheVendorDocs(t *testing.T) {
 	}
 }
 
-// TestUnimplementedRerankDialectsAreRefused covers a model that names a
-// protocol no package implements. Hiding it from the picker stops new rows;
-// a row that already names it has to fail somewhere, and failing at
-// construction with the reason beats sending a request shaped for the wrong
-// protocol and reporting whatever the decoder makes of the reply.
-func TestUnimplementedRerankDialectsAreRefused(t *testing.T) {
+// TestQwen3RerankUsesNativeDashScopeProtocol keeps qwen3-rerank on the
+// native text-rerank endpoint. Alibaba also documents a flat
+// /compatible-api/v1/reranks shape for it, but the native endpoint serves the
+// same model with identical scores (#3558), and v0.8.0 deployments already
+// have rows that name it — refusing it would break them on upgrade.
+func TestQwen3RerankUsesNativeDashScopeProtocol(t *testing.T) {
 	v, ok := modelruntime.Get("aliyun")
 	require.True(t, ok)
 
@@ -378,21 +389,16 @@ func TestUnimplementedRerankDialectsAreRefused(t *testing.T) {
 	for _, m := range v.ModelsByType(types.ModelTypeRerank) {
 		offered = append(offered, m.ID)
 	}
-	assert.NotContains(t, offered, "qwen3-rerank", "the picker must not offer an unimplemented dialect")
+	assert.Contains(t, offered, "qwen3-rerank")
 	assert.Contains(t, offered, "gte-rerank-v2")
 
-	_, err := modelruntime.Resolve(modelruntime.Ref{
-		Provider: "aliyun", Model: "qwen3-rerank", ModelType: types.ModelTypeRerank,
-	})
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "/compatible-api/v1/reranks",
-		"the error should name the protocol the model actually speaks")
-
-	// The vendor's other rerank model is unaffected.
-	_, err = modelruntime.Resolve(modelruntime.Ref{
-		Provider: "aliyun", Model: "gte-rerank-v2", ModelType: types.ModelTypeRerank,
-	})
-	require.NoError(t, err)
+	for _, model := range []string{"qwen3-rerank", "gte-rerank-v2"} {
+		resolved, err := modelruntime.Resolve(modelruntime.Ref{
+			Provider: "aliyun", Model: model, ModelType: types.ModelTypeRerank,
+		})
+		require.NoError(t, err, model)
+		assert.Equal(t, api.RerankDashScope, resolved.RerankAPI, model)
+	}
 }
 
 // TestGatewayRerankEndpoints pins the URL each gateway's rerank rows reach.

@@ -4,7 +4,7 @@
       <aside
         class="chat-sandbox-panel"
         :class="{ 'is-shifted': shifted, 'is-resizing': resizing }"
-        :style="{ width: `${panel?.width.value ?? 420}px` }"
+        :style="{ width: `${panel?.width.value ?? 420}px`, '--references-shift': `${shiftWidth}px` }"
         role="complementary"
         :aria-label="t('chat.sandbox.panelTitle')"
       >
@@ -107,6 +107,7 @@ import SandboxDesktop from '@/views/chat/components/SandboxDesktop.vue'
 import ChatArtifactsPanel from '@/views/chat/components/ChatArtifactsPanel.vue'
 import PanelResizeHandle from '@/components/PanelResizeHandle.vue'
 import { useChatResourcesStore } from '@/stores/chatResources'
+import { useDeploymentCapabilitiesStore } from '@/stores/deploymentCapabilities'
 import type { SessionArtifactItem } from '@/utils/sessionArtifacts'
 
 const props = withDefaults(
@@ -118,12 +119,15 @@ const props = withDefaults(
     agentSourceTenantId?: string | number | null
     /** 参考来源面板同开时整体左移，避免两块 fixed 面板重叠。 */
     shifted?: boolean
+    /** 参考来源面板当前宽度（查看原文时会变宽），左移的距离。 */
+    shiftWidth?: number
     artifacts?: SessionArtifactItem[]
     artifactsCollecting?: boolean
   }>(),
   {
     artifacts: () => [],
     artifactsCollecting: false,
+    shiftWidth: 420,
   },
 )
 
@@ -134,12 +138,14 @@ const emit = defineEmits<{ (e: 'artifactDeleted', payload: { messageId: string; 
 const { t } = useI18n()
 const panel = useChatSandboxPanel()
 const chatResources = useChatResourcesStore()
+const deploymentCapabilities = useDeploymentCapabilitiesStore()
 const sandboxConfigsReady = ref(false)
 
 // Hide the desktop tab for CLI / Docker configs. Shared agents whose
 // sandbox row is not in this workspace still show the tab and let the
 // backend return DESKTOP_UNSUPPORTED.
 const desktopTabVisible = computed(() => {
+  if (!deploymentCapabilities.isSupported('settings.sandbox.remote')) return false
   const agentId = props.agentId?.trim()
   if (!agentId) return false
   const agent = chatResources.agents.find((item) => item.id === agentId)
@@ -263,7 +269,7 @@ function resizePanel(delta: number) {
 
   &.is-shifted {
     @media (min-width: 1400px) {
-      right: 420px;
+      right: var(--references-shift, 420px);
     }
   }
 

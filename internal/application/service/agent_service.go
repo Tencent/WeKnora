@@ -93,31 +93,36 @@ func knowledgeBaseScopesForPrompt(config *types.AgentConfig) ([]string, map[stri
 
 // agentService implements agent-related business logic
 type agentService struct {
-	browserSkill         *browserskill.Manager
-	userRepo             interfaces.UserRepository
-	cfg                  *config.Config
-	modelService         interfaces.ModelService
-	mcpServiceService    interfaces.MCPServiceService
-	mcpManager           *mcp.MCPManager
-	eventBus             *event.EventBus
-	db                   *gorm.DB
-	webSearchService     interfaces.WebSearchService
-	knowledgeBaseService interfaces.KnowledgeBaseService
-	knowledgeService     interfaces.KnowledgeService
-	fileService          interfaces.FileService
-	chunkService         interfaces.ChunkService
-	duckdb               *sql.DB
-	wikiPageService      interfaces.WikiPageService
-	tenantService        interfaces.TenantService
-	messageService       interfaces.MessageService
-	memoryService        interfaces.MemoryService
-	storageResolver      interfaces.StorageBackendResolver
-	toolApprovalGate     approval.MCPApproval
-	sandboxMgr           sandbox.Manager
-	sandboxResolver      sandbox.TenantSandboxResolver
-	sandboxPinner        *SessionSandboxPinner
-	sandboxPolicy        WorkspaceSandboxPolicy
-	hostSandbox          sandbox.Manager
+	browserSkill          *browserskill.Manager
+	userRepo              interfaces.UserRepository
+	graphRepo             interfaces.RetrieveGraphRepository
+	cfg                   *config.Config
+	modelService          interfaces.ModelService
+	mcpServiceService     interfaces.MCPServiceService
+	mcpManager            *mcp.MCPManager
+	eventBus              *event.EventBus
+	db                    *gorm.DB
+	webSearchService      interfaces.WebSearchService
+	knowledgeBaseService  interfaces.KnowledgeBaseService
+	knowledgeService      interfaces.KnowledgeService
+	fileService           interfaces.FileService
+	chunkService          interfaces.ChunkService
+	duckdb                *sql.DB
+	wikiPageService       interfaces.WikiPageService
+	tenantService         interfaces.TenantService
+	messageService        interfaces.MessageService
+	memoryService         interfaces.MemoryService
+	storageResolver       interfaces.StorageBackendResolver
+	toolApprovalGate      approval.MCPApproval
+	sandboxMgr            sandbox.Manager
+	sandboxResolver       sandbox.TenantSandboxResolver
+	sandboxPinner         *SessionSandboxPinner
+	sandboxPolicy         WorkspaceSandboxPolicy
+	hostSandbox           sandbox.Manager
+	hostDesktop           bool
+	hostSkillInstaller    sandbox.Manager
+	hostSkillsRoot        string
+	hostSkillVersionsRoot string
 }
 
 // NewAgentService creates a new agent service
@@ -147,10 +152,12 @@ func NewAgentService(
 	hostSandbox HostSandboxManager,
 	browserSkill *browserskill.Manager,
 	userRepo interfaces.UserRepository,
+	graphRepo interfaces.RetrieveGraphRepository,
 ) interfaces.AgentService {
-	return &agentService{
+	svc := &agentService{
 		browserSkill:         browserSkill,
 		userRepo:             userRepo,
+		graphRepo:            graphRepo,
 		cfg:                  cfg,
 		modelService:         modelService,
 		knowledgeBaseService: knowledgeBaseService,
@@ -174,7 +181,14 @@ func NewAgentService(
 		sandboxPinner:        sandboxPinner,
 		sandboxPolicy:        sandboxPolicy,
 		hostSandbox:          hostSandbox.Manager,
+		hostDesktop:          hostSandbox.Desktop,
 	}
+	if hostSandbox.SkillsAvailable() {
+		svc.hostSkillInstaller = hostSandbox.SkillInstaller
+		svc.hostSkillsRoot = hostSandbox.SkillTree.Root()
+		svc.hostSkillVersionsRoot = hostSandbox.SkillTree.VersionsRoot()
+	}
+	return svc
 }
 
 // CreateAgentEngine creates an agent engine with the given configuration and EventBus.
@@ -285,9 +299,7 @@ func (s *agentService) CreateAgentEngine(
 
 	// Browser operations are native BrowserSkill RPCs, independent of shell and sandbox setup.
 	if config.LocalBrowserEnabled && s.browserSkill.Enabled() && !config.SkillInstallMode() {
-		tenant, _ := types.TenantIDFromContext(ctx)
-		user, _ := types.UserIDFromContext(ctx)
-		scope := browserskill.Scope{Tenant: tenant, User: user}
+		scope := tools.BrowserSkillScope(ctx)
 		instructions, err := s.browserSearchInstructions(ctx)
 		if err != nil {
 			return nil, err
@@ -469,9 +481,9 @@ func (s *agentService) registerSandboxFileTools(
 // Two conditions gate registration, and both are checked here rather than
 // trusted from the caller. SkillInstallMode is settable only through
 // EnableSkillInstallMode, which refuses every agent but the built-in
-// installer. The skill directory is re-validated against the image path rules,
-// so a run that somehow carried a bad scope gets no writer at all instead of
-// one pointed somewhere unintended.
+// installer. The skill directory is re-validated against the install path
+// rules (host versions root or image root), so a run that somehow carried a
+// bad scope gets no writer at all instead of one pointed somewhere unintended.
 func (s *agentService) registerSkillFileTools(
 	ctx context.Context,
 	toolRegistry *tools.ToolRegistry,
@@ -481,7 +493,7 @@ func (s *agentService) registerSkillFileTools(
 	if config == nil || !config.SkillInstallMode() {
 		return
 	}
-	skillDir, ok := sandbox.ValidatedImageSkillDir(config.SkillInstallDir())
+	skillDir, ok := s.validInstallDir(config)
 	if !ok {
 		logger.Warnf(ctx, "Install mode carries no valid skill directory (%q); "+
 			"write_skill_file/edit_skill_file not registered", config.SkillInstallDir())
@@ -504,6 +516,21 @@ func (s *agentService) registerSkillFileTools(
 	toolRegistry.RegisterTool(tools.NewWriteSkillFileTool(store, skillDir))
 	toolRegistry.RegisterTool(tools.NewEditSkillFileTool(store, skillDir))
 	logger.Infof(ctx, "Registered write_skill_file and edit_skill_file scoped to %s", skillDir)
+}
+
+// validInstallDir is the skill directory the installer may write. Host
+// installs live under the local versions root, remote ones under the image.
+func (s *agentService) validInstallDir(config *types.AgentConfig) (string, bool) {
+	if config == nil || !config.SkillInstallMode() {
+		return "", false
+	}
+	if sandbox.IsHostSkillTarget(config.SandboxConfigID) {
+		if s.hostSkillVersionsRoot == "" {
+			return "", false
+		}
+		return sandbox.ValidatedSkillDirUnder(s.hostSkillVersionsRoot, config.SkillInstallDir())
+	}
+	return sandbox.ValidatedImageSkillDir(config.SkillInstallDir())
 }
 
 // registerSandboxShellIfAllowed registers shell_exec when this run is
@@ -537,6 +564,16 @@ func (s *agentService) registerSandboxShellIfAllowed(
 	s.registerSandboxShellTool(ctx, toolRegistry, sandboxMgr, config)
 }
 
+// resolveOpts is every resolve option this run is entitled to. Only the
+// built-in installer may reach the install sandbox.
+func (s *agentService) resolveOpts(config *types.AgentConfig) []resolveOption {
+	opts := []resolveOption{withLiteHostSandbox(s.hostSandbox), withLiteDesktop(s.hostDesktop)}
+	if config != nil && config.SkillInstallMode() && s.hostSkillInstaller != nil {
+		opts = append(opts, withHostSkillInstaller(s.hostSkillInstaller))
+	}
+	return opts
+}
+
 // resolveWorkspaceSandbox returns the session's remote sandbox manager, or
 // nil when the workspace is disabled / unresolved. Callers that only need
 // a capability (file store, shell) use this so they do not have to stand
@@ -557,7 +594,7 @@ func (s *agentService) resolveWorkspaceSandbox(
 	sandboxMgr, _, err := resolveSandboxForExecution(
 		ctx, s.sandboxResolver, s.sandboxMgr, s.sandboxPinner,
 		tenantID, sessionID, configID, s.sandboxPolicy,
-		withLiteHostSandbox(s.hostSandbox),
+		s.resolveOpts(config)...,
 	)
 	if err != nil {
 		return nil, err
@@ -633,7 +670,7 @@ func (s *agentService) initializeSkillsManager(
 	sandboxMgr, pin, err := resolveSandboxForExecution(
 		ctx, s.sandboxResolver, s.sandboxMgr, s.sandboxPinner,
 		tenantID, sessionID, config.SandboxConfigID, s.sandboxPolicy,
-		withLiteHostSandbox(s.hostSandbox),
+		s.resolveOpts(config)...,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("resolve sandbox config for session %s: %w", sessionID, err)
@@ -653,6 +690,9 @@ func (s *agentService) initializeSkillsManager(
 	}
 
 	skillsManager := skills.NewManager(skillsConfig, sandboxMgr)
+	if s.hostDesktop && s.hostSkillsRoot != "" {
+		skillsManager.WithSkillsRoot(s.hostSkillsRoot)
+	}
 	if source := s.tenantSkillSource(ctx, config); source != nil {
 		skillsManager.WithTenantSource(source)
 	}
@@ -713,7 +753,11 @@ func (s *agentService) tenantSkillSource(
 	// a caller ever creates the engine under a shorter-lived context, bundle
 	// downloads start failing for installed skills only, and loadBundle needs
 	// a ctx parameter.
-	return skills.NewTenantSkillSource(rows, func(row *types.TenantSkillEntity) ([]byte, error) {
+	root := sandbox.SkillsImageRoot
+	if s.hostDesktop && s.hostSkillsRoot != "" {
+		root = s.hostSkillsRoot
+	}
+	return skills.NewTenantSkillSourceAt(root, rows, func(row *types.TenantSkillEntity) ([]byte, error) {
 		return s.loadInstalledSkillBundle(ctx, ownerTenantID, row)
 	})
 }
@@ -773,6 +817,9 @@ func (s *agentService) userEnvResolver(
 	ctx context.Context, config *types.AgentConfig,
 ) skills.SkillEnvResolver {
 	configID := config.SandboxConfigID
+	if s.hostDesktop {
+		configID = sandbox.HostSkillTargetID
+	}
 	if configID == "" {
 		return nil
 	}
@@ -797,10 +844,14 @@ func (s *agentService) userEnvResolver(
 	if tenantID == 0 {
 		return nil
 	}
+	var createTime map[string]string
+	if !sandbox.IsHostSkillTarget(configID) {
+		createTime = sandboxCreateTimeEnvVars(ctx, s.db, tenantID, configID)
+	}
 	return NewUserEnvResolver(
 		rows,
 		repository.NewTenantSkillRepository(s.db),
-		sandboxCreateTimeEnvVars(ctx, s.db, tenantID, configID),
+		createTime,
 		tenantID, configID,
 	)
 }
@@ -837,14 +888,23 @@ func sandboxCreateTimeEnvVars(
 // against. Errors stay inside the callback so a failed persist cannot change
 // the tool result the model already received.
 func (s *agentService) skillEnvCapture(config *types.AgentConfig) tools.SkillEnvCapture {
-	if s.db == nil || config == nil || config.SandboxConfigID == "" {
+	if s.db == nil || config == nil {
 		return nil
 	}
 	configID := config.SandboxConfigID
+	if s.hostDesktop {
+		// Lite agents store no config; values live under the host target,
+		// which is where userEnvResolver reads them.
+		configID = sandbox.HostSkillTargetID
+	}
+	if configID == "" {
+		return nil
+	}
 	return func(ctx context.Context, skillName string, pairs map[string]string) {
 		svc := NewUserEnvService(
 			repository.NewTenantSkillRepository(s.db),
 			repository.NewTenantSandboxConfigRepository(s.db),
+			HostSandboxManager{Desktop: s.hostDesktop},
 		)
 		if err := svc.CaptureSkillEnv(ctx, configID, skillName, pairs); err != nil {
 			logger.Warnf(ctx, "[skill] capture env for %s failed: %v", skillName, err)
@@ -910,14 +970,23 @@ func (s *agentService) registerSandboxShellTool(
 	config *types.AgentConfig,
 ) {
 	if config.SkillInstallMode() {
-		if executor := sessionSandboxInstallShellExecutor(sandboxMgr); executor != nil {
-			skillDir := config.SkillInstallDir()
-			toolRegistry.RegisterTool(tools.NewInstallShellExecTool(executor, skillDir))
-			logger.Infof(ctx, "Registered install-mode shell_exec tool (work_dir defaults to %s)",
-				skillDir)
-		} else {
+		executor := sessionSandboxInstallShellExecutor(sandboxMgr)
+		if executor == nil {
 			logger.Warnf(ctx, "Sandbox backend does not advertise install-mode shell; skill install cannot run")
+			return
 		}
+		skillDir, ok := s.validInstallDir(config)
+		if !ok {
+			logger.Warnf(ctx, "Install mode carries no valid skill directory (%q); shell_exec not registered",
+				config.SkillInstallDir())
+			return
+		}
+		if sandbox.IsHostSkillTarget(config.SandboxConfigID) {
+			toolRegistry.RegisterTool(tools.NewHostInstallShellExecTool(executor, skillDir))
+		} else {
+			toolRegistry.RegisterTool(tools.NewInstallShellExecTool(executor, skillDir))
+		}
+		logger.Infof(ctx, "Registered install-mode shell_exec tool (work_dir defaults to %s)", skillDir)
 		return
 	}
 	if executor := sessionSandboxShellExecutor(sandboxMgr); executor != nil {
@@ -1169,8 +1238,13 @@ func (s *agentService) registerTools(
 		case tools.ToolListDocuments:
 			toolToRegister = tools.NewListDocumentsTool(s.knowledgeService, config.SearchTargets)
 		case tools.ToolQueryKnowledgeGraph:
+			var chunkRepo interfaces.ChunkRepository
+			if s.chunkService != nil {
+				chunkRepo = s.chunkService.GetRepository()
+			}
 			toolToRegister = tools.NewQueryKnowledgeGraphTool(s.knowledgeBaseService, config.SearchTargets).
-				WithKnowledgeScope(s.knowledgeService)
+				WithKnowledgeScope(s.knowledgeService).
+				WithGraph(s.graphRepo, chunkRepo)
 		case tools.ToolSearchConversations:
 			// The owner is captured from the caller's identity here, not read
 			// from the model's arguments, so no prompt can redirect the search

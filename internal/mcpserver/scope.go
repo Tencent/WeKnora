@@ -71,7 +71,7 @@ func (s *Server) resolveKB(
 func (s *Server) scopedKBContext(
 	ctx context.Context, kb *types.KnowledgeBase, required types.OrgMemberRole,
 ) (context.Context, error) {
-	grant, err := s.resolveKB(ctx, kb, required)
+	_, scoped, err := s.authorizeKB(ctx, kb, required)
 	if err != nil {
 		if errors.Is(err, access.ErrForbidden) || errors.Is(err, access.ErrUnauthorized) {
 			if required == types.OrgRoleViewer {
@@ -81,16 +81,28 @@ func (s *Server) scopedKBContext(
 		}
 		return ctx, err
 	}
+	return scoped, nil
+}
+
+// authorizeKB resolves the caller's grant on kb and returns it together with
+// the owner-scoped context described on scopedKBContext.
+func (s *Server) authorizeKB(
+	ctx context.Context, kb *types.KnowledgeBase, required types.OrgMemberRole,
+) (*access.KBAccess, context.Context, error) {
+	grant, err := s.resolveKB(ctx, kb, required)
+	if err != nil {
+		return nil, ctx, err
+	}
 	scoped := grant.Context(ctx)
 	caller := types.CallerFromContext(ctx)
 	if kb.TenantID != caller.TenantID && s.tenantService != nil {
 		owner, err := s.tenantService.GetTenantByID(ctx, kb.TenantID)
 		if err != nil || owner == nil {
-			return ctx, fmt.Errorf("the workspace owning knowledge base %q is unavailable", kb.ID)
+			return nil, ctx, fmt.Errorf("the workspace owning knowledge base %q is unavailable", kb.ID)
 		}
 		scoped = context.WithValue(scoped, types.TenantInfoContextKey, owner)
 	}
-	return scoped, nil
+	return grant, scoped, nil
 }
 
 // selectKnowledgeBases narrows the allowed set to the ones a caller named,

@@ -111,6 +111,22 @@ func (r *protocolReranker) Rerank(
 	return results, nil
 }
 
+// MaxPassageRunes implements PassageLimiter from the documented per-document
+// and per-request ceilings; the query is charged against the latter because
+// every request repeats it.
+func (r *protocolReranker) MaxPassageRunes(query string) int {
+	limit := r.settings.MaxDocumentChars
+	if total := r.settings.MaxRequestChars; total > 0 {
+		// A query that leaves no room fails in Rerank with its own error;
+		// 1 keeps the limit meaningful rather than reading as "no limit".
+		room := max(total-utf8.RuneCountInString(query), 1)
+		if limit <= 0 || room < limit {
+			limit = room
+		}
+	}
+	return max(limit, 0)
+}
+
 func (r *protocolReranker) concurrency() int {
 	if r.settings.MaxConcurrency > 0 {
 		return r.settings.MaxConcurrency

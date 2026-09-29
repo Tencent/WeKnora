@@ -49,9 +49,8 @@ type RerankSettings struct {
 	// MaxConcurrency bounds in-flight batches when the input is split. 0
 	// means the caller's default.
 	MaxConcurrency int
-	// RequestTimeout caps one request, in seconds. 0 leaves the HTTP client
-	// without its own deadline and lets the caller's context govern, which is
-	// what every vendor but WeKnora Cloud has always done here.
+	// RequestTimeout caps one request, in seconds. 0 uses the rerank
+	// client's default (see rerank.newRerankHTTPClient).
 	RequestTimeout int
 	// AcceptsTruncatePromptTokens reports that this vendor is a vLLM-class
 	// runtime, which is the only kind that implements the

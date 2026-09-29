@@ -619,9 +619,8 @@
       },
       {
         "id": "qwen3-rerank",
-        "name": "Qwen3 Rerank (separate endpoint, not implemented)",
+        "name": "Qwen3 Rerank",
         "type": "Rerank",
-        "deprecated": true,
         "source": "https://help.aliyun.com/zh/model-studio/text-rerank-api"
       },
       {

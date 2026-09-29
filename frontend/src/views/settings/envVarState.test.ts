@@ -279,3 +279,11 @@ test('skillSecretCards lifts declared skills out of config groups and skips empt
   assert.equal(cards[0].skill.skill_id, 'weknora')
   assert.equal(cards[0].sandbox_config_name, 'Docker-Test')
 })
+
+test('skillSecretCards labels the host sandbox like the sandbox cards do', () => {
+  const hostSkill = skill('weknora', 'weknora', [envVar({ name: 'WEKNORA_API_KEY' })])
+  const groups = [config('host', '本机', [], [hostSkill])]
+
+  assert.equal(skillSecretCards(groups, 'This computer')[0].sandbox_config_name, 'This computer')
+  assert.equal(skillSecretCards(groups)[0].sandbox_config_name, '本机')
+})

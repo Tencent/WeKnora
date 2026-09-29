@@ -310,6 +310,11 @@ const (
 // completed turn.
 const FinishReasonIncomplete = "incomplete"
 
+// StreamEndedEarlyError is what a consumer reports for an answer that arrived
+// with FinishReasonIncomplete: the stream stopped before the provider said the
+// message was finished, most often because a proxy cut the connection.
+const StreamEndedEarlyError = "the model's response ended before it finished (connection interrupted)"
+
 type StreamResponse struct {
 	ID                  string                 `json:"id"`
 	ResponseType        ResponseType           `json:"response_type"`

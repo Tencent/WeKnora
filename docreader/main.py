@@ -26,6 +26,7 @@ from docreader.proto.docreader_pb2 import (
     ListEnginesResponse,
     ParserEngineInfo,
 )
+from docreader.source_wire import source_blocks_to_proto
 from docreader.utils.request import init_logging_request_id, request_id_context
 
 _SURROGATE_RE = re.compile(r"[\ud800-\udfff]")
@@ -209,6 +210,7 @@ class DocReaderServicer(docreader_pb2_grpc.DocReaderServicer):
                     metadata={k: _c(str(v)) for k, v in result.metadata.items()}
                     if result.metadata
                     else {},
+                    source_blocks=source_blocks_to_proto(result),
                 )
                 logger.info(
                     "Read response: content_len=%d, images=%d",
@@ -258,6 +260,7 @@ class DocReaderServicer(docreader_pb2_grpc.DocReaderServicer):
                     if result.metadata
                     else {},
                     image_count=image_count,
+                    source_blocks=source_blocks_to_proto(result),
                 )
             )
 

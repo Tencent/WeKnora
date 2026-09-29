@@ -128,3 +128,46 @@ func TestResolveSandboxForExecutionKillSwitchBeatsLiteHost(t *testing.T) {
 	require.Equal(t, sandbox.SandboxTypeDisabled, got.GetType())
 	require.True(t, pin.IsZero())
 }
+
+func TestResolveOnLiteDesktopIgnoresNamedConfig(t *testing.T) {
+	mgr, pin, err := resolveSandboxForExecution(
+		context.Background(), nil, nil, nil, 7, "s1", "cfg-remote", nil,
+		withLiteHostSandbox(stubHostManager{}), withLiteDesktop(true),
+	)
+	require.NoError(t, err)
+	require.Equal(t, sandbox.SandboxTypeHost, mgr.GetType())
+	require.True(t, pin.IsZero())
+}
+
+func TestResolveOnLiteDesktopWithoutHostIsDisabled(t *testing.T) {
+	mgr, _, err := resolveSandboxForExecution(
+		context.Background(), nil, nil, nil, 7, "s1", "cfg-remote", nil,
+		withLiteDesktop(true),
+	)
+	require.NoError(t, err)
+	require.Equal(t, sandbox.SandboxTypeDisabled, mgr.GetType())
+}
+
+func TestResolveOnLiteDesktopSendsInstallerToInstallSandbox(t *testing.T) {
+	installer := &capableManager{typ: sandbox.SandboxTypeHost}
+	mgr, _, err := resolveSandboxForExecution(
+		context.Background(), nil, nil, nil, 7, "install-1", sandbox.HostSkillTargetID, nil,
+		withLiteHostSandbox(stubHostManager{}), withLiteDesktop(true), withHostSkillInstaller(installer),
+	)
+	require.NoError(t, err)
+	require.Same(t, installer, mgr)
+}
+
+func TestResolveHostTargetWithoutInstallerIsTheChatHost(t *testing.T) {
+	mgr, _, err := resolveSandboxForExecution(
+		context.Background(), nil, nil, nil, 7, "s1", sandbox.HostSkillTargetID, nil,
+		withLiteHostSandbox(stubHostManager{}), withLiteDesktop(true),
+	)
+	require.NoError(t, err)
+	require.Equal(t, stubHostManager{}, mgr)
+}
+
+func TestHasNamedSandboxConfigExcludesHostTarget(t *testing.T) {
+	require.False(t, hasNamedSandboxConfig(sandbox.HostSkillTargetID))
+	require.True(t, hasNamedSandboxConfig("cfg-1"))
+}

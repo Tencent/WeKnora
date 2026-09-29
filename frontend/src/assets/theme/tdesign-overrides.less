@@ -31,6 +31,19 @@
   overscroll-behavior: contain;
 }
 
+// The skin's padding:0 suits menus, whose items bring their own spacing. A popup
+// that holds a form (invite, create user, change password) has no such inner
+// padding, so add `wk-popover--form` next to `wk-popover` to give it the frame
+// back, and let a tall form scroll instead of being clipped.
+.wk-popover.wk-popover--form .t-popup__content {
+  padding: 14px 16px;
+  min-width: 300px;
+  max-width: min(392px, calc(100vw - 24px));
+  max-height: min(480px, calc(100vh - 96px));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
 // A quiet option surface, with the brand accent reserved for the small check.
 .t-select-option.t-is-selected:not(.t-is-disabled),
 .t-select-option.t-is-selected:not(.t-is-disabled):hover {

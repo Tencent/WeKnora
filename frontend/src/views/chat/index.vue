@@ -3,7 +3,10 @@
         'is-embedded': embeddedMode,
         'has-references-panel': referencesDrawerVisible,
         'has-sandbox-panel': sandboxPanel.visible.value,
-    }" :style="{ '--sandbox-panel-width': `${sandboxPanel.width.value}px` }">
+    }" :style="{
+        '--sandbox-panel-width': `${sandboxPanel.width.value}px`,
+        '--references-panel-width': `${referencesPanelWidth}px`,
+    }">
         <div v-if="!embeddedMode" class="chat-topbar">
             <ChatHeader :session="currentSession" />
             <div v-if="!sandboxPanel.visible.value" class="sandbox-header-toggle">
@@ -105,8 +108,7 @@
                                 :value="session.created_at" />
 
                             <div v-if="session.role == 'user'" class="message-row"
-                                :data-message-id="session.id || undefined"
-                                :class="{ 'is-minimap-target': session.id && session.id === minimapTargetId }">
+                                :data-message-id="session.id || undefined">
                                 <usermsg :content="session.content" :mentioned_items="session.mentioned_items"
                                     :images="session.images" :attachments="session.attachments" :embeddedMode="embeddedMode"
                                     :session-id="session_id"
@@ -187,6 +189,7 @@
         :agent-id="useSettingsStoreInstance.selectedAgentId"
         :agent-source-tenant-id="useSettingsStoreInstance.selectedAgentSourceTenantId"
         :shifted="referencesDrawerVisible"
+        :shift-width="referencesPanelWidth"
         :artifacts="sessionArtifacts" :artifacts-collecting="sessionArtifactsCollecting"
         @artifact-deleted="handleArtifactDeleted" />
 </template>
@@ -246,7 +249,7 @@ import { isCollectingSkillArtifacts } from '@/utils/skillArtifacts';
 const referencesDrawer = provideChatReferencesDrawer();
 provideChatAttachmentPreviewDrawer();
 const sandboxPanel = provideChatSandboxPanel();
-const { visible: referencesDrawerVisible } = referencesDrawer;
+const { visible: referencesDrawerVisible, panelWidth: referencesPanelWidth } = referencesDrawer;
 
 const props = defineProps({
     session_id: { type: String, default: '' },
@@ -1776,7 +1779,7 @@ onBeforeRouteUpdate((to, from, next) => {
 
     &.has-references-panel:not(.is-embedded) {
         @media (min-width: 960px) {
-            padding-right: 420px;
+            padding-right: var(--references-panel-width, 420px);
             box-sizing: border-box;
 
             .chat_scroll_box {
@@ -1796,7 +1799,7 @@ onBeforeRouteUpdate((to, from, next) => {
 
     &.has-sandbox-panel.has-references-panel:not(.is-embedded) {
         @media (min-width: 1400px) {
-            padding-right: calc(420px + var(--sandbox-panel-width, 420px));
+            padding-right: calc(var(--references-panel-width, 420px) + var(--sandbox-panel-width, 420px));
         }
 
         @media (max-width: 1399.98px) and (min-width: 960px) {

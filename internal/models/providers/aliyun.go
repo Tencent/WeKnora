@@ -58,17 +58,13 @@
 //   - rerank is a separate DashScope-native endpoint
 //     (/api/v1/services/rerank/text-rerank/text-rerank).
 //
-// qwen3-rerank is a second, incompatible rerank protocol on the same vendor.
-// The text-rerank page puts it on /compatible-api/v1/reranks and states
-// outright that "两种接口的请求体结构和响应格式不同": its request is flat
-// (query / documents at the top level, no input/parameters wrapper) and its
-// response carries `results` at the top level with no `output` object. This
-// package implements only the native shape that gte-rerank-v2 and
-// qwen3.7-text-rerank use, so the entry is marked deprecated: it stays
-// resolvable for a row that already names it, but the picker no longer offers
-// a model that would be sent to the wrong path and decoded with the wrong
-// shape. Serving it needs a fourth rerank protocol package
-// (https://help.aliyun.com/zh/model-studio/text-rerank-api).
+// qwen3-rerank is also documented on a second, flat endpoint
+// (/compatible-api/v1/reranks: query / documents at the top level, results
+// with no `output` object), but the native text-rerank endpoint serves it too
+// and returns the same scores (verified against the live API in #3558), so it
+// stays on the native protocol like gte-rerank-v2 and qwen3.7-text-rerank.
+// A dedicated package for the flat shape is only needed if a model ever ships
+// on that endpoint alone (https://help.aliyun.com/zh/model-studio/text-rerank-api).
 //
 // unverified: no page states whether `prompt_cache_key` is accepted, so the
 // protocol default (not sent) is kept.
