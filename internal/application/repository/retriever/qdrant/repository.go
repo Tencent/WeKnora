@@ -29,6 +29,10 @@ const (
 	fieldTagID            = "tag_id"
 	fieldEmbedding        = "embedding"
 	fieldIsEnabled        = "is_enabled"
+
+	// maxCopyPaginationHops caps how many scroll pages CopyIndices walks, so a
+	// source that never ends cannot pin the copy until its context deadline.
+	maxCopyPaginationHops = 10000
 )
 
 // NewQdrantRetrieveEngineRepository creates and initializes a new Qdrant repository.
@@ -870,9 +874,15 @@ func (q *qdrantRepository) CopyIndices(ctx context.Context,
 	batchSize := uint32(64)
 	var offset *qdrant.PointId = nil
 	totalCopied := 0
+	seenCursors := make(map[string]struct{})
 
-	for {
-		scrollResult, err := q.client.Scroll(ctx, &qdrant.ScrollPoints{
+	for hops := 0; ; hops++ {
+		if hops >= maxCopyPaginationHops {
+			log.Warnf("[Qdrant] Index copy exceeded %d pages for %s; stopping",
+				maxCopyPaginationHops, sourceKnowledgeBaseID)
+			return fmt.Errorf("qdrant: copy indices exceeded %d pages", maxCopyPaginationHops)
+		}
+		scrollResult, nextOffset, err := q.client.ScrollAndOffset(ctx, &qdrant.ScrollPoints{
 			CollectionName: collectionName,
 			Filter: &qdrant.Filter{
 				Must: []*qdrant.Condition{
@@ -892,6 +902,19 @@ func (q *qdrantRepository) CopyIndices(ctx context.Context,
 		pointsCount := len(scrollResult)
 		if pointsCount == 0 {
 			break
+		}
+
+		// The cursor for the next request is the one the server hands back.
+		// Qdrant's offset is inclusive, so deriving it from the last point of
+		// the page makes the next page start at that point again and copy it
+		// into the target a second time. A cursor that comes back a second time
+		// means the walk can never finish, which is a failure, not an end.
+		if nextOffset != nil {
+			cursor := nextOffset.String()
+			if _, repeated := seenCursors[cursor]; repeated {
+				return fmt.Errorf("qdrant: copy indices made no progress at cursor %s", nextOffset)
+			}
+			seenCursors[cursor] = struct{}{}
 		}
 
 		log.Infof("[Qdrant] Found %d source points in batch", pointsCount)
@@ -983,13 +1006,10 @@ func (q *qdrantRepository) CopyIndices(ctx context.Context,
 				len(targetPoints), totalCopied)
 		}
 
-		if pointsCount > 0 {
-			offset = scrollResult[pointsCount-1].Id
-		}
-
-		if pointsCount < int(batchSize) {
+		if nextOffset == nil {
 			break
 		}
+		offset = nextOffset
 	}
 
 	log.Infof("[Qdrant] Index copy completed, total copied: %d", totalCopied)
