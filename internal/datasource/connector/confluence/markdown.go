@@ -1,6 +1,7 @@
 package confluence
 
 import (
+	"bytes"
 	"strings"
 
 	"github.com/JohannesKaufmann/html-to-markdown/v2/converter"
@@ -11,20 +12,30 @@ import (
 	"golang.org/x/net/html"
 )
 
-// newMarkdownConverter builds an HTML -> Markdown converter tuned for the HTML
-// that Confluence returns in `body.view`.
+// convertConfluenceHTML converts Confluence page HTML (the rendered `view`
+// representation) into Markdown while preserving content that the default
+// html-to-markdown converter would otherwise drop:
+//   - tables and strikethrough (commonmark + table/strikethrough plugins)
+//   - inline diagrams: <svg> (drawio / rendered mermaid) are kept verbatim
+//   - mermaid source blocks
+//   - fenced code blocks with their language
+//   - info/warning/note/tip/error panels as labeled blockquotes
+//   - status lozenges, user mentions and change-diff markup
 //
-// The previous implementation used the bare htmltomd.ConvertString helper, which
-// only enables the base + commonmark plugins. As a result the following content
-// was silently lost during import:
-//   - tables (no table plugin) -> cells were flattened into one line
-//   - strikethrough / rich text decorations (no strikethrough plugin)
-//   - inline SVG (drawio diagrams, and mermaid diagrams that Confluence renders
-//     as SVG) -> the <svg> element was dropped, only its text leaked through
-//   - mermaid source code blocks
-//
-// See internal/datasource/connector/confluence/connector.go (markdownItem).
-func newMarkdownConverter() *converter.Converter {
+// domain is used to turn relative links/images into absolute URLs. Pass the
+// Confluence base URL (including scheme, e.g. https://host/wiki) so links on
+// HTTPS Cloud instances are not wrongly rewritten to http://.
+func convertConfluenceHTML(domain, html string) (string, error) {
+	conv := newConfluenceConverter()
+
+	markdown, err := conv.ConvertString(html, converter.WithDomain(domain))
+	if err != nil {
+		return "", err
+	}
+	return markdown, nil
+}
+
+func newConfluenceConverter() *converter.Converter {
 	conv := converter.NewConverter(
 		converter.WithPlugins(
 			base.NewBasePlugin(),
@@ -34,67 +45,192 @@ func newMarkdownConverter() *converter.Converter {
 		),
 	)
 
-	// Keep inline SVG blocks (drawio diagrams and mermaid diagrams that are
-	// rendered as SVG by the Confluence macro) verbatim, so the visual content
-	// is not dropped during the HTML -> Markdown conversion.
+	// Keep inline diagrams (drawio / rendered mermaid) verbatim so they survive
+	// the round-trip instead of being stripped as unknown elements.
 	conv.Register.RendererFor("svg", converter.TagTypeBlock, func(ctx converter.Context, w converter.Writer, node *html.Node) converter.RenderStatus {
-		var sb strings.Builder
-		if err := html.Render(&sb, node); err != nil {
-			return converter.RenderTryNext
-		}
-		_, _ = w.WriteString("\n\n" + sb.String() + "\n\n")
+		var buf bytes.Buffer
+		_ = html.Render(&buf, node)
+		_, _ = w.WriteString("\n\n" + buf.String() + "\n\n")
 		return converter.RenderSuccess
 	}, 100)
 
-	// Preserve mermaid diagram source as a ```mermaid fenced code block so it
-	// can be re-rendered by the markdown viewer. Confluence mermaid macros
-	// usually wrap the source in <pre class="mermaid"> or <div class="mermaid">.
-	// Non-mermaid elements fall through to the default (commonmark) handler.
-	for _, tag := range []string{"pre", "div"} {
-		conv.Register.RendererFor(tag, converter.TagTypeBlock, func(ctx converter.Context, w converter.Writer, node *html.Node) converter.RenderStatus {
-			if !hasClass(node, "mermaid") && !hasClass(node, "language-mermaid") {
-				return converter.RenderTryNext
-			}
-			_, _ = w.WriteString("\n\n```mermaid\n" + textContent(node) + "\n```\n\n")
+	// <pre>: a mermaid block keeps its source; everything else becomes a fenced
+	// code block with the language detected from Confluence's class attribute.
+	conv.Register.RendererFor("pre", converter.TagTypeBlock, func(ctx converter.Context, w converter.Writer, node *html.Node) converter.RenderStatus {
+		if hasClass(node, "mermaid") || hasClass(node, "language-mermaid") {
+			_, _ = w.WriteString("\n\n```mermaid\n" + strings.TrimRight(textContent(node), "\n") + "\n```\n\n")
 			return converter.RenderSuccess
-		}, 200)
-	}
+		}
+		lang := codeLanguage(node)
+		_, _ = w.WriteString("\n\n```" + lang + "\n" + strings.TrimRight(textContent(node), "\n") + "\n```\n\n")
+		return converter.RenderSuccess
+	}, 200)
+
+	// <div>: mermaid wrappers and Confluence info/warning/note/tip panels.
+	conv.Register.RendererFor("div", converter.TagTypeBlock, func(ctx converter.Context, w converter.Writer, node *html.Node) converter.RenderStatus {
+		if hasClass(node, "mermaid") {
+			_, _ = w.WriteString("\n\n```mermaid\n" + strings.TrimRight(textContent(node), "\n") + "\n```\n\n")
+			return converter.RenderSuccess
+		}
+		if isConfluencePanel(node) {
+			return renderPanel(ctx, w, node)
+		}
+		return converter.RenderTryNext
+	}, 200)
+
+	// <span>: status lozenges and page change-diff markup.
+	conv.Register.RendererFor("span", converter.TagTypeInline, func(ctx converter.Context, w converter.Writer, node *html.Node) converter.RenderStatus {
+		cls := attr(node, "class")
+		switch {
+		case strings.Contains(cls, "status-macro"):
+			_, _ = w.WriteString("[" + strings.TrimSpace(textContent(node)) + "]")
+			return converter.RenderSuccess
+		case strings.Contains(cls, "diff-html-added"):
+			_, _ = w.WriteString("**" + textContent(node) + "**")
+			return converter.RenderSuccess
+		case strings.Contains(cls, "diff-html-removed"):
+			_, _ = w.WriteString("~~" + textContent(node) + "~~")
+			return converter.RenderSuccess
+		}
+		return converter.RenderTryNext
+	}, 200)
+
+	// <a>: Confluence user mentions become a friendly @Name instead of a bare
+	// profile link. Any other anchor falls back to the default link handling.
+	conv.Register.RendererFor("a", converter.TagTypeInline, func(ctx converter.Context, w converter.Writer, node *html.Node) converter.RenderStatus {
+		if strings.Contains(attr(node, "class"), "user-mention") {
+			name := strings.TrimSpace(textContent(node))
+			if name != "" {
+				_, _ = w.WriteString("@" + name)
+				return converter.RenderSuccess
+			}
+		}
+		return converter.RenderTryNext
+	}, 200)
 
 	return conv
 }
 
-// convertConfluenceHTML converts a Confluence page body (HTML) to Markdown.
-//
-// host is the Confluence base host; it is used to absolutize relative links and
-// image references so they don't become dead links inside WeKnora (for example a
-// parent page whose body is mostly links to its child pages).
-func convertConfluenceHTML(host, html string) (string, error) {
-	return newMarkdownConverter().ConvertString(html, converter.WithDomain(host))
-}
-
-// hasClass reports whether node carries the given CSS class.
-func hasClass(node *html.Node, name string) bool {
-	for _, attr := range node.Attr {
-		if attr.Key != "class" {
-			continue
-		}
-		for _, c := range strings.Fields(attr.Val) {
-			if c == name {
-				return true
-			}
+// isConfluencePanel reports whether a <div> is a Confluence info/warning/note/
+// tip/error panel. We match the specific panel-type classes (and panelMacro)
+// rather than the bare "panel" token, because code macros render as
+// class="code panel" and must not be mistaken for panels.
+func isConfluencePanel(node *html.Node) bool {
+	if hasClass(node, "panelMacro") {
+		return true
+	}
+	for _, kind := range []string{"panelNote", "panelInfo", "panelWarning", "panelTip", "panelError"} {
+		if hasClass(node, kind) {
+			return true
 		}
 	}
 	return false
 }
 
-// textContent recursively collects the text of node (without any markup).
+// renderPanel converts a Confluence panel (info/warning/note/tip/error) into a
+// labeled Markdown blockquote. The inner content is rendered recursively so any
+// nested formatting (lists, tables, links) is preserved.
+func renderPanel(ctx converter.Context, w converter.Writer, node *html.Node) converter.RenderStatus {
+	label := ""
+	for _, kind := range []string{"panelNote", "panelInfo", "panelWarning", "panelTip", "panelError"} {
+		if hasClass(node, kind) {
+			label = strings.TrimPrefix(kind, "panel")
+			break
+		}
+	}
+
+	var inner bytes.Buffer
+	ctx.RenderChildNodes(ctx, &inner, node)
+	innerStr := strings.Trim(inner.String(), "\n")
+	if innerStr == "" {
+		return converter.RenderSuccess
+	}
+
+	_, _ = w.WriteString("\n\n")
+	if label != "" {
+		_, _ = w.WriteString("> **" + label + "**\n")
+	}
+	for _, line := range strings.Split(innerStr, "\n") {
+		if line == "" {
+			_, _ = w.WriteString(">\n")
+		} else {
+			_, _ = w.WriteString("> " + line + "\n")
+		}
+	}
+	_, _ = w.WriteString("\n")
+	return converter.RenderSuccess
+}
+
+func attr(node *html.Node, name string) string {
+	for _, a := range node.Attr {
+		if a.Key == name {
+			return a.Val
+		}
+	}
+	return ""
+}
+
+func hasClass(node *html.Node, cls string) bool {
+	return strings.Contains(" "+attr(node, "class")+" ", " "+cls+" ")
+}
+
+// textContent returns the concatenated text of a node, skipping <script>/<style>
+// and turning <br> into newlines so code/mermaid blocks stay readable.
 func textContent(node *html.Node) string {
-	if node.Type == html.TextNode {
-		return node.Data
-	}
 	var sb strings.Builder
-	for child := node.FirstChild; child != nil; child = child.NextSibling {
-		sb.WriteString(textContent(child))
+	var walk func(*html.Node)
+	walk = func(n *html.Node) {
+		switch n.Type {
+		case html.TextNode:
+			sb.WriteString(n.Data)
+		case html.ElementNode:
+			if n.Data == "script" || n.Data == "style" {
+				return
+			}
+			if n.Data == "br" {
+				sb.WriteString("\n")
+			}
+		}
+		for c := n.FirstChild; c != nil; c = c.NextSibling {
+			walk(c)
+		}
 	}
+	walk(node)
 	return sb.String()
+}
+
+// codeLanguage detects the language of a Confluence code block from either the
+// <pre> class (e.g. "brush:java; gutter:false") or a nested <code> element
+// (e.g. class="language-java").
+func codeLanguage(node *html.Node) string {
+	for _, c := range strings.Fields(attr(node, "class")) {
+		if strings.HasPrefix(c, "brush:") {
+			v := strings.TrimPrefix(c, "brush:")
+			if i := strings.IndexByte(v, ';'); i >= 0 {
+				v = v[:i]
+			}
+			if v != "" {
+				return v
+			}
+		}
+		if strings.HasPrefix(c, "language-") {
+			return strings.TrimPrefix(c, "language-")
+		}
+		if strings.HasPrefix(c, "lang-") {
+			return strings.TrimPrefix(c, "lang-")
+		}
+	}
+	for c := node.FirstChild; c != nil; c = c.NextSibling {
+		if c.Type == html.ElementNode && c.Data == "code" {
+			for _, cc := range strings.Fields(attr(c, "class")) {
+				if strings.HasPrefix(cc, "language-") {
+					return strings.TrimPrefix(cc, "language-")
+				}
+				if strings.HasPrefix(cc, "lang-") {
+					return strings.TrimPrefix(cc, "lang-")
+				}
+			}
+		}
+	}
+	return ""
 }
