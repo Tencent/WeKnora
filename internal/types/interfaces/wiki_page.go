@@ -88,6 +88,8 @@ type WikiPageService interface {
 	GetStats(ctx context.Context, kbID string) (*types.WikiStats, error)
 
 	// RebuildLinks re-parses all pages and rebuilds bidirectional link references.
+	// It is best-effort: pages that could not be written are skipped, and any
+	// such failure is returned as a joined error counting the failed pages.
 	RebuildLinks(ctx context.Context, kbID string) error
 
 	// InjectCrossLinks scans specified pages and injects [[wiki-links]] for mentions
