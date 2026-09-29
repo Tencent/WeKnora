@@ -71,6 +71,18 @@ type SplitterConfig struct {
 	TokenLimit int
 	// Languages hints multilingual heuristic patterns. Empty = auto-detect.
 	Languages []string
+
+	// CustomSeparator marks a pre-chunked document: chunks were already
+	// decided upstream (AI pipeline / engineering tooling) and are joined by
+	// this literal marker, e.g. "======" or "<|chunk|>". When set it takes
+	// precedence over every strategy tier and over Separators, and the
+	// marker is stripped from chunk content. See custom_separator.go.
+	CustomSeparator string
+	// CustomSeparatorOnly restricts splitting to the custom separator
+	// alone: each marker-delimited segment becomes exactly one chunk and
+	// no other splitting logic (or ChunkSize cap) applies. Ignored when
+	// CustomSeparator is empty.
+	CustomSeparatorOnly bool
 }
 
 // Default chunk sizing constants. Single source of truth for the entire

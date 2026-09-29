@@ -305,6 +305,13 @@ func mergeChunkingConfig(base types.ChunkingConfig, override *types.ChunkingConf
 	if override.TableMetadataInstructions != "" {
 		result.TableMetadataInstructions = override.TableMetadataInstructions
 	}
+	// Pre-chunked document marker: set + exclusive-mode flag travel together so
+	// an override enabling the marker can also relax the size cap. An empty
+	// marker keeps the KB-level setting (omitempty on the wire).
+	if override.CustomSeparator != "" {
+		result.CustomSeparator = override.CustomSeparator
+		result.CustomSeparatorOnly = override.CustomSeparatorOnly
+	}
 	return result
 }
 
