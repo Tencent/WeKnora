@@ -71,5 +71,7 @@ export interface PreviewChunkingRequest {
     strategy?: string
     token_limit?: number
     languages?: string[]
+    custom_separator?: string
+    custom_separator_only?: boolean
   }
 }
