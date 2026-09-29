@@ -34,6 +34,41 @@ export function deriveManualTitle(question: string, fallback: string): string {
   return cut.replace(TRAILING_PUNCTUATION_RE, '').trim() || head.trim()
 }
 
+/** A retrieved chunk reference, as persisted on an assistant message. */
+export interface ManualDraftReference {
+  knowledge_base_id?: string
+}
+
+/**
+ * Pick the knowledge base a chat answer belongs to, for the manual editor.
+ *
+ * The "add answer to knowledge base" action in chat opens the editor without
+ * naming a knowledge base. The editor then defaults the field to `list[0]` —
+ * the first knowledge base the user happens to own, which is usually unrelated
+ * to the conversation. A user with no writable knowledge base has nothing to
+ * fall back to and cannot publish at all. Either way the answer lands somewhere
+ * the user did not intend, and there is no cue in the UI that a choice was made
+ * for them (#2081).
+ *
+ * An answer that cites sources was retrieved from a specific knowledge base, so
+ * preselect that and let the user override it. Returns null when the answer has
+ * no retrievable provenance — a plain chat turn, or a reply whose references
+ * never arrived — which leaves the existing first-option fallback untouched.
+ *
+ * The first reference wins so the choice is stable across renders; a mixed-KB
+ * answer lands in the base of its first citation.
+ */
+export function resolveManualDraftKnowledgeBaseId(
+  references?: ManualDraftReference[] | null,
+): string | null {
+  if (!Array.isArray(references)) return null
+  for (const reference of references) {
+    const kbId = reference?.knowledge_base_id
+    if (typeof kbId === 'string' && kbId.trim()) return kbId.trim()
+  }
+  return null
+}
+
 /**
  * Build the Markdown body seeded into the manual editor from a chat answer.
  *

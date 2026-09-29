@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { buildManualDraft, deriveManualTitle } from './manualKnowledgeDraft'
+import {
+  buildManualDraft,
+  deriveManualTitle,
+  resolveManualDraftKnowledgeBaseId,
+} from './manualKnowledgeDraft'
 
 const labels = { emptyAnswer: '（无内容）', sourcesHeading: '参考来源' }
 
@@ -64,4 +68,45 @@ test('a long question with no boundary is cut at the limit', () => {
 test('an English question is cut on a word boundary', () => {
   const title = deriveManualTitle('How does a binary view of technology hurt diversity?', '对话摘录')
   assert.equal(title, 'How does a binary view of')
+})
+
+// #2081: the chat "add to knowledge base" action opened the manual editor
+// without naming a knowledge base, so the editor silently defaulted to
+// whichever KB happened to be first in the user's list.
+
+test('a cited answer resolves to the knowledge base it was retrieved from', () => {
+  const id = resolveManualDraftKnowledgeBaseId([
+    { knowledge_base_id: '441ee604-a04d-4c9a-a4bd-1c4e198e6226' },
+  ])
+  assert.equal(id, '441ee604-a04d-4c9a-a4bd-1c4e198e6226')
+})
+
+test('a mixed-knowledge-base answer lands in the first cited base, deterministically', () => {
+  const refs = [
+    { knowledge_base_id: 'kb-first' },
+    { knowledge_base_id: 'kb-second' },
+  ]
+  assert.equal(resolveManualDraftKnowledgeBaseId(refs), 'kb-first')
+  assert.equal(resolveManualDraftKnowledgeBaseId([...refs].reverse()), 'kb-second')
+})
+
+test('an answer with no retrievable provenance leaves the choice to the user', () => {
+  // A plain chat turn, a restored conversation whose references never arrived,
+  // and an empty list all keep the existing kbOptions[0] fallback.
+  assert.equal(resolveManualDraftKnowledgeBaseId([]), null)
+  assert.equal(resolveManualDraftKnowledgeBaseId(undefined), null)
+  assert.equal(resolveManualDraftKnowledgeBaseId(null), null)
+  assert.equal(resolveManualDraftKnowledgeBaseId([{}]), null)
+  assert.equal(resolveManualDraftKnowledgeBaseId([{ knowledge_base_id: '' }]), null)
+  assert.equal(resolveManualDraftKnowledgeBaseId([{ knowledge_base_id: '   ' }]), null)
+  // A web-only reference carries no knowledge base.
+  assert.equal(resolveManualDraftKnowledgeBaseId([{ knowledge_source: 'https://x' }]), null)
+})
+
+test('a blank reference does not mask a later usable one', () => {
+  const id = resolveManualDraftKnowledgeBaseId([
+    { knowledge_base_id: '' },
+    { knowledge_base_id: 'kb-real' },
+  ])
+  assert.equal(id, 'kb-real')
 })
