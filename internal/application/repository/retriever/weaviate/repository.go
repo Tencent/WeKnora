@@ -34,6 +34,10 @@ const (
 	fieldEmbedding        = "embedding"
 	fieldIsEnabled        = "is_enabled"
 	fieldID               = "id"
+
+	// maxCopyPaginationHops caps how many cursor pages CopyIndices walks, so a
+	// source that never ends cannot pin the copy until its context deadline.
+	maxCopyPaginationHops = 10000
 )
 
 // NewWeaviateRetrieveEngineRepository creates and initializes a new Weaviate repository.
@@ -723,8 +727,14 @@ func (w *weaviateRepository) CopyIndices(ctx context.Context,
 	var lastID string
 	totalCopied := 0
 	fields := getVectorFields()
+	seenCursors := make(map[string]struct{})
 
-	for {
+	for hops := 0; ; hops++ {
+		if hops >= maxCopyPaginationHops {
+			log.Warnf("[Weaviate] Index copy exceeded %d pages for %s; stopping",
+				maxCopyPaginationHops, sourceKnowledgeBaseID)
+			return fmt.Errorf("weaviate: copy indices exceeded %d pages", maxCopyPaginationHops)
+		}
 		result, err := w.client.GraphQL().Get().
 			WithClassName(collectionName).
 			WithWhere(filters.Where().
@@ -760,7 +770,11 @@ func (w *weaviateRepository) CopyIndices(ctx context.Context,
 				continue
 			}
 
-			lastID = additional["id"].(string)
+			id, ok := additional["id"].(string)
+			if !ok || id == "" {
+				return fmt.Errorf("weaviate: copy indices source object has no id")
+			}
+			lastID = id
 
 			sourceChunkID, ok := data[fieldChunkID].(string)
 			if !ok {
@@ -825,6 +839,15 @@ func (w *weaviateRepository) CopyIndices(ctx context.Context,
 			targetObjects = append(targetObjects, newObj)
 			currentBatchCount++
 		}
+
+		// The cursor is the last id of the page. A cursor that does not advance
+		// means the source answered with a page that was already read, so the
+		// walk can never end; that is a failure, not the end of the source.
+		if _, repeated := seenCursors[lastID]; repeated {
+			return fmt.Errorf("weaviate: copy indices made no progress at cursor %q", lastID)
+		}
+		seenCursors[lastID] = struct{}{}
+
 		if len(targetObjects) > 0 {
 			resp, err := batcher.WithObjects(targetObjects...).Do(ctx)
 			if err != nil {
