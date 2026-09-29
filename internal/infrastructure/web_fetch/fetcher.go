@@ -234,15 +234,17 @@ func (f *Fetcher) fetchHTTP(ctx context.Context, rawURL string, parsedURL *url.U
 	if !success {
 		return nil, classifyHTTPStatus(resp.StatusCode, resp.Status)
 	}
-	readLimit := f.maxBodySize
-	if f.markdown {
-		readLimit++
-	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, readLimit))
+	// Read one byte past the limit and compare afterwards. Reading exactly the
+	// limit and accepting the result would cut an oversize body down to
+	// maxBodySize and report success, silently dropping the tail of the page.
+	// Both the chat pipeline and the agent markdown branch fail loudly here,
+	// matching the +1 sentinel used by the RSS/dingtalk/confluence readBody
+	// helpers.
+	body, err := io.ReadAll(io.LimitReader(resp.Body, f.maxBodySize+1))
 	if err != nil {
 		return nil, newFetchError(ErrorRead, true, "read failed: %v", err)
 	}
-	if f.markdown && int64(len(body)) > f.maxBodySize {
+	if int64(len(body)) > f.maxBodySize {
 		return nil, newFetchError(ErrorBodyTooLarge, false, "page exceeds the %d byte download limit", f.maxBodySize)
 	}
 	contentType, _, _ := mime.ParseMediaType(resp.Header.Get("Content-Type"))
