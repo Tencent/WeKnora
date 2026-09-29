@@ -163,6 +163,80 @@ func TestCopyIndicesReportsVectorCopyFailure(t *testing.T) {
 	assert.Contains(t, err.Error(), "vec_embeddings_2")
 }
 
+// A rejected row used to be logged and skipped, so a clone could report success
+// while one chunk never became retrievable. The error must fail the copy and
+// name the lost row, without quoting content.
+func TestCopyIndicesReportsRejectedRowWithChunkIDs(t *testing.T) {
+	repository := newSQLiteRetrieverTestRepository(t)
+	chunk := sqliteTestIndex("src-chunk", "kb-src", "knowledge-src", "", true)
+	chunk.SourceID = "src-chunk"
+	chunk.Content = "secret chunk body"
+	question := sqliteTestIndex("src-chunk", "kb-src", "knowledge-src", "", false)
+	question.SourceID = "src-chunk-q1"
+	question.Content = "secret question body"
+	require.NoError(t, repository.BatchSave(context.Background(), []*types.IndexInfo{chunk, question}, map[string]any{
+		"embedding": map[string][]float32{
+			chunk.SourceID:    {1, 0},
+			question.SourceID: {0, 1},
+		},
+	}))
+
+	// Only the chunk row is rejected; the question row of the same chunk still
+	// has to be copied, so the error can be shown to point at one row.
+	require.NoError(t, repository.db.Exec(`CREATE TRIGGER reject_copied_chunk BEFORE INSERT ON lite_embeddings
+		WHEN NEW.chunk_id = 'dst-chunk' AND NEW.source_id = 'dst-chunk'
+		BEGIN SELECT RAISE(ABORT, 'rejected copy'); END`).Error)
+
+	err := repository.CopyIndices(context.Background(), "kb-src",
+		map[string]string{"knowledge-src": "knowledge-dst"},
+		map[string]string{"src-chunk": "dst-chunk"},
+		"kb-dst", 2, string(types.KnowledgeTypeManual),
+	)
+
+	require.Error(t, err, "a rejected row must not be reported as a successful copy")
+	assert.Contains(t, err.Error(), "src-chunk", "the error must name the source chunk")
+	assert.Contains(t, err.Error(), "dst-chunk", "the error must name the target chunk")
+	assert.NotContains(t, err.Error(), "secret", "the error must locate the row without leaking its content")
+	assert.NotContains(t, err.Error(), "src-chunk-q1", "only the rejected row may be reported")
+	assert.EqualValues(t, 1, countSQLiteRows(t, repository,
+		"SELECT count(*) FROM lite_embeddings WHERE source_id = ?", "dst-chunk-q1"),
+		"the sibling row of the same chunk must still be copied")
+	assert.EqualValues(t, 0, countSQLiteRows(t, repository,
+		"SELECT count(*) FROM lite_embeddings WHERE source_id = ?", "dst-chunk"))
+}
+
+// A failing keyword index write is accumulated instead of ending the copy: the
+// caller sees the row that lost its index row, and the copy keeps going so one
+// broken row cannot hide the remaining failures.
+func TestCopyIndicesReportsKeywordCopyFailureWithoutLosingTheRow(t *testing.T) {
+	repository := newSQLiteRetrieverTestRepository(t)
+	if !repository.db.Migrator().HasTable("lite_embeddings_fts") {
+		t.Skip("FTS5 unavailable (build without sqlite_fts5)")
+	}
+
+	source := sqliteTestIndex("src-chunk", "kb-src", "knowledge-src", "", true)
+	source.SourceID = "src-chunk"
+	saveSQLiteTestVector(t, repository, source, []float32{1, 0})
+	require.NoError(t, repository.db.Exec("DROP TABLE lite_embeddings_fts").Error)
+
+	err := repository.CopyIndices(context.Background(), "kb-src",
+		map[string]string{"knowledge-src": "knowledge-dst"},
+		map[string]string{"src-chunk": "dst-chunk"},
+		"kb-dst", 2, string(types.KnowledgeTypeManual),
+	)
+
+	require.Error(t, err, "a copy whose keyword index row was lost must not report success")
+	assert.Contains(t, err.Error(), "src-chunk")
+	assert.Contains(t, err.Error(), "dst-chunk")
+	assert.Contains(t, err.Error(), "lite_embeddings_fts")
+	assert.EqualValues(t, 1, countSQLiteRows(t, repository,
+		"SELECT count(*) FROM lite_embeddings WHERE source_id = ?", "dst-chunk"))
+	assert.EqualValues(t, 1, countSQLiteRows(t, repository,
+		`SELECT count(*) FROM vec_embeddings_2 WHERE rowid IN
+			(SELECT id FROM lite_embeddings WHERE source_id = ?)`, "dst-chunk"),
+		"the vector row must still be copied after the keyword index write failed")
+}
+
 func TestSaveStillWritesEveryIndexRowOnHealthyTables(t *testing.T) {
 	repository := newSQLiteRetrieverTestRepository(t)
 	info := sqliteTestIndex("chunk", "kb", "knowledge", "", true)

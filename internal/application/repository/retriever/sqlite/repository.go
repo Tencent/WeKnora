@@ -421,6 +421,12 @@ func (r *sqliteRepository) CopyIndices(ctx context.Context,
 		sourceChunkIDs = append(sourceChunkIDs, sourceChunkID)
 	}
 	const batchSize = 500
+	// A copied chunk is only usable when its row, keyword index row and vector
+	// row all land: retrieval joins both index tables on lite_embeddings.id, so
+	// a dropped write leaves a chunk neither path can find while the copy still
+	// reports success. Every failing row is collected and the loop keeps going,
+	// so the caller learns all the rows that were lost, not just the first.
+	var copyErrs []error
 	for start := 0; start < len(sourceChunkIDs); start += batchSize {
 		end := min(start+batchSize, len(sourceChunkIDs))
 		// Every row of a chunk is copied: besides the chunk itself, generated
@@ -445,21 +451,29 @@ func (r *sqliteRepository) CopyIndices(ctx context.Context,
 				Dimension:       src.Dimension,
 				IsEnabled:       src.IsEnabled,
 			}
+			// The source and target chunk IDs locate the lost row without
+			// quoting its content into the error.
 			if err := r.db.WithContext(ctx).Create(&newRow).Error; err != nil {
-				logger.GetLogger(ctx).Warnf("[SQLite] CopyIndices: failed to copy source %s: %v", src.SourceID, err)
+				copyErrs = append(copyErrs, fmt.Errorf(
+					"[SQLite] CopyIndices: failed to copy source %s (chunk %s -> %s): %w",
+					src.SourceID, src.ChunkID, targetChunkID, err))
 				continue
 			}
 			if err := r.syncFTS5Insert(r.db.WithContext(ctx), &newRow); err != nil {
-				return fmt.Errorf("[SQLite] CopyIndices: failed to copy keyword index of %s: %w", src.SourceID, err)
+				copyErrs = append(copyErrs, fmt.Errorf(
+					"[SQLite] CopyIndices: failed to copy keyword index of source %s (chunk %s -> %s): %w",
+					src.SourceID, src.ChunkID, targetChunkID, err))
 			}
 			if src.Dimension > 0 {
 				if err := r.copyVec(ctx, src.ID, newRow.ID, src.Dimension); err != nil {
-					return fmt.Errorf("[SQLite] CopyIndices: failed to copy vector of %s: %w", src.SourceID, err)
+					copyErrs = append(copyErrs, fmt.Errorf(
+						"[SQLite] CopyIndices: failed to copy vector of source %s (chunk %s -> %s): %w",
+						src.SourceID, src.ChunkID, targetChunkID, err))
 				}
 			}
 		}
 	}
-	return nil
+	return errors.Join(copyErrs...)
 }
 
 // copiedSourceID maps a source row's SourceID onto the target chunk the way
