@@ -32,6 +32,16 @@ type copyPageServer struct {
 	objects    int
 	cursors    map[string]int
 	unexpected []string
+	// queryError, when set, is the GraphQL error every Get is answered with.
+	queryError string
+}
+
+// failQueriesWith makes every Get answer the way Weaviate reports a query it
+// could not run: HTTP 200 carrying an errors array and no data.
+func (s *copyPageServer) failQueriesWith(message string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.queryError = message
 }
 
 func (s *copyPageServer) summary() string {
@@ -75,7 +85,14 @@ func newCopyPageServer(t *testing.T, page func(query string, call int) []any) (*
 				cursor = match[1]
 			}
 			s.cursors[cursor]++
+			queryError := s.queryError
 			s.mu.Unlock()
+			if queryError != "" {
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"errors": []any{map[string]any{"message": queryError}},
+				})
+				return
+			}
 			rows := page(body.Query, call)
 			if rows == nil {
 				rows = []any{}
@@ -177,4 +194,30 @@ func TestCopyIndicesStopsAtThePageCap(t *testing.T) {
 	queries, objects := server.counts()
 	assert.Equal(t, maxCopyPaginationHops, queries, "the walk must stop at the page cap")
 	assert.Zero(t, objects, "rows outside the chunk map are never written")
+}
+
+// A query Weaviate could not run comes back as HTTP 200 with an errors array and
+// no data, so the SDK reports no Go error. Reading that as "the source has no
+// more objects" turns a failed query into a successful, silently truncated copy
+// - and the response type check used to panic before it could even get there.
+func TestCopyIndicesReportsAQueryError(t *testing.T) {
+	const failure = "class Weknora_embeddings_64 does not exist"
+	server, repo := newCopyPageServer(t, func(string, int) []any { return nil })
+	server.failQueriesWith(failure)
+	defer func() { t.Log("copy walk: " + server.summary()) }()
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("CopyIndices panicked on a query that could not run: %v", r)
+		}
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	err := repo.CopyIndices(ctx, "kb-src", map[string]string{"know-1": "know-2"},
+		copyTestChunkMap(1), "kb-dst", 64, "doc")
+
+	require.ErrorContains(t, err, failure)
+	queries, objects := server.counts()
+	assert.Equal(t, 1, queries, "the walk must stop on the failed query")
+	assert.Zero(t, objects, "a failed query must not be reported as a finished copy")
 }
