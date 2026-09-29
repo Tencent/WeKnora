@@ -82,6 +82,40 @@ func (r *attrsChunkRepo) CreateChunks(_ context.Context, chunks []*types.Chunk) 
 	return nil
 }
 
+// ListChunksByKnowledgeIDAndTypes mirrors the repository query the retry repair
+// runs: this knowledge's chunks restricted to the requested types.
+func (r *attrsChunkRepo) ListChunksByKnowledgeIDAndTypes(
+	_ context.Context, tenantID uint64, knowledgeID string, chunkTypes []types.ChunkType,
+) ([]*types.Chunk, error) {
+	wanted := make(map[types.ChunkType]bool, len(chunkTypes))
+	for _, chunkType := range chunkTypes {
+		wanted[chunkType] = true
+	}
+	var out []*types.Chunk
+	for _, chunk := range r.created {
+		if chunk.TenantID == tenantID && chunk.KnowledgeID == knowledgeID && wanted[chunk.ChunkType] {
+			out = append(out, chunk)
+		}
+	}
+	return out, nil
+}
+
+func (r *attrsChunkRepo) DeleteChunks(_ context.Context, tenantID uint64, ids []string) error {
+	doomed := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		doomed[id] = true
+	}
+	kept := r.created[:0]
+	for _, chunk := range r.created {
+		if doomed[chunk.ID] && chunk.TenantID == tenantID {
+			continue
+		}
+		kept = append(kept, chunk)
+	}
+	r.created = kept
+	return nil
+}
+
 func (r *attrsChunkRepo) UpdateChunk(_ context.Context, chunk *types.Chunk) error {
 	for i, c := range r.created {
 		if c.ID == chunk.ID {
