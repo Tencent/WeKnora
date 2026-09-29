@@ -249,6 +249,7 @@ func TestSteerFollowUpHandoffKeepsSessionLiveAcrossPreviousClear(t *testing.T) {
 	require.True(t, ok)
 	require.NotNil(t, followUp)
 	assert.Equal(t, "do this next", followUp.query)
+	assert.Equal(t, "do this next", msgs.byID[followUp.userMessageID].Content)
 	require.NotEmpty(t, followUp.assistantMessage.ID)
 	assert.NotEqual(t, "assist-A", followUp.assistantMessage.ID)
 	assert.Empty(t, followUp.steerCarryOver, "carry-over must already sit on the new run's list")
