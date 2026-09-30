@@ -23,6 +23,14 @@ func TestApplyAuthAndTenantDefaults_DisableRegistrationDrivesRegistrationMode(t 
 		{"false leaves YAML untouched", "false", AuthRegistrationModeSelfServe, AuthRegistrationModeSelfServe},
 		{"unset falls back to default self_serve", "", "", AuthRegistrationModeSelfServe},
 		{"unset keeps explicit invite_only YAML", "", AuthRegistrationModeInviteOnly, AuthRegistrationModeInviteOnly},
+		{
+			"unset keeps invitation registration", "",
+			AuthRegistrationModeInviteRegister, AuthRegistrationModeInviteRegister,
+		},
+		{
+			"legacy disable overrides invitation registration", "true",
+			AuthRegistrationModeInviteRegister, AuthRegistrationModeInviteOnly,
+		},
 	}
 
 	for _, tc := range cases {
@@ -180,4 +188,11 @@ func TestApplyAuthAndTenantDefaults_ComplexPasswordEnabledEnv(t *testing.T) {
 			t.Fatal("empty env should leave YAML complex-password flag untouched")
 		}
 	})
+}
+
+func TestValidateInvitationRegistrationMode(t *testing.T) {
+	cfg := &Config{Auth: &AuthConfig{RegistrationMode: AuthRegistrationModeInviteRegister}}
+	if err := ValidateConfig(cfg); err != nil {
+		t.Fatalf("invitation registration mode rejected: %v", err)
+	}
 }
