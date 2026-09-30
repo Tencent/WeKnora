@@ -1,3 +1,4 @@
+// Package neo4j implements Bolt/Cypher graph storage for Neo4j and Memgraph.
 package neo4j
 
 import (
@@ -23,7 +24,14 @@ func TestMemgraphGraphRepository(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close(context.Background())
+	// Cleanups run in reverse registration order, so close the driver last.
+	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cleanupCancel()
+		if err := db.Close(cleanupCtx); err != nil {
+			t.Errorf("close test driver: %v", err)
+		}
+	})
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	if err := db.VerifyConnectivity(ctx); err != nil {
@@ -36,7 +44,9 @@ func TestMemgraphGraphRepository(t *testing.T) {
 	}
 	repo := NewNeo4jRepository(db).(*Neo4jRepository)
 	t.Cleanup(func() {
-		if err := repo.DelGraph(context.Background(), []types.NameSpace{namespace}); err != nil {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cleanupCancel()
+		if err := repo.DelGraph(cleanupCtx, []types.NameSpace{namespace}); err != nil {
 			t.Errorf("clean up test graph: %v", err)
 		}
 	})
