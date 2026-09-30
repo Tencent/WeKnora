@@ -44,13 +44,16 @@ class StdMarkitdownParser(BaseParser):
         ext = self.file_type
         ft = (ext or "").lstrip(".").lower()
         pptx_bytes: bytes | None = None
-        if ft in ("ppt", "pptx"):
+        if ft in ("ppt", "pptx", "pptm"):
             content, ext = normalize_ppt_bytes(content, ft)
             pptx_bytes = content
             ft = "pptx"
-        elif ft == "docx":
+        elif ft in ("docx", "docm"):
             content = fill_vertical_merged_cells_docx(content)
         elif ft in ("xlsx", "xlsm"):
+            # XLSM uses the same worksheet model; select the OOXML converter
+            # explicitly without changing the package or executing VBA.
+            ext = ".xlsx"
             # MarkItDown reads spreadsheets through pandas/openpyxl, so the
             # ranges openpyxl cannot parse (#3599) and the non-conforming
             # styles.xml fills (#3637) that break the builtin ExcelParser break

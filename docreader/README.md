@@ -2,6 +2,11 @@
 
 DocReader 是 WeKnora 项目中负责文档解析和处理的 gRPC 服务。它支持多种文档格式的读取、OCR 识别、多模态处理等功能。
 
+## 含宏的 Office 文档
+
+`builtin` 和 `markitdown` 支持 `.docm`、`.pptm`、`.xlsm`，仅提取已保存内容，不执行 VBA 宏。
+XLSM 公式读取缓存值，不重新计算；缓存缺失或过期可能导致结果为空或陈旧。
+
 ## Docker Compose 环境变量配置
 
 在 `docker-compose.yml` 文件中，docreader 服务配置了以下环境变量：

@@ -28,6 +28,7 @@ BUILTIN_ENGINE = "builtin"
 _DEFAULT_ENGINE_BY_TYPE = {
     "ppt": "markitdown",
     "pptx": "markitdown",
+    "pptm": "markitdown",
     "csv": "markitdown",
 }
 
@@ -160,13 +161,16 @@ def _build_default_registry() -> ParserEngineRegistry:
         BUILTIN_ENGINE,
         {
             "docx": Docx2Parser,
+            "docm": Docx2Parser,
             "doc": DocParser,
             "pdf": PDFParser,
             "md": MarkdownParser,
             "markdown": MarkdownParser,
             "xlsx": ExcelParser,
+            "xlsm": ExcelParser,
             "xls": ExcelParser,
             "pptx": MarkitdownParser,
+            "pptm": MarkitdownParser,
             "ppt": MarkitdownParser,
             "epub": EPUBParser,
             "html": HTMLParser,
@@ -185,10 +189,13 @@ def _build_default_registry() -> ParserEngineRegistry:
             "markdown": MarkitdownParser,
             "pdf": MarkitdownParser,
             "docx": MarkitdownParser,
+            "docm": MarkitdownParser,
             "doc": MarkitdownParser,
             "pptx": MarkitdownParser,
+            "pptm": MarkitdownParser,
             "ppt": MarkitdownParser,
             "xlsx": MarkitdownParser,
+            "xlsm": MarkitdownParser,
             "xls": MarkitdownParser,
             "csv": MarkitdownParser,
         },

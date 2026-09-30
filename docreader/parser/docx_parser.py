@@ -45,6 +45,7 @@ from PIL import Image
 from docreader.config import CONFIG
 from docreader.models.document import Document as DocumentModel
 from docreader.parser.base_parser import BaseParser
+from docreader.parser.docm import normalize_docm_content_type
 from docreader.utils import endecode
 
 logger = logging.getLogger(__name__)
@@ -150,6 +151,7 @@ class DocxParser(BaseParser):
         logger.info(f"Setting max_workers to {max_workers} for document processing")
 
         try:
+            content = normalize_docm_content_type(content)
             inline_images: Dict[str, str] = {}
 
             def _inline_upload(local_path: str) -> str:

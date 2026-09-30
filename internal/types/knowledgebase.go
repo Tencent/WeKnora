@@ -305,6 +305,7 @@ type ChunkingConfig struct {
 var defaultParserEngineByType = map[string]string{
 	"ppt":  "markitdown",
 	"pptx": "markitdown",
+	"pptm": "markitdown",
 }
 
 // preferParserEngine, if set, may override DefaultParserEngine. The
