@@ -2,14 +2,211 @@ package service
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/mcp"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/utils"
+	sdkmcp "github.com/mark3labs/mcp-go/mcp"
+	sdkserver "github.com/mark3labs/mcp-go/server"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestTestMCPServiceToolDiscovery(t *testing.T) {
+	utils.SetSSRFWhitelistFromRaw("127.0.0.1")
+	t.Cleanup(utils.ResetSSRFWhitelistForTest)
+	const oneTool = `{"tools":[{"name":"lookup","inputSchema":{"type":"object"}}]}`
+	for _, tt := range []struct {
+		name       string
+		noTools    bool
+		tools      string
+		code       int
+		secondPage bool
+		cancel     bool
+		initError  bool
+		wantOK     bool
+		wantTools  int
+		wantCalls  int32
+	}{
+		{name: "tools available", tools: oneTool, wantOK: true, wantTools: 1, wantCalls: 1},
+		{name: "empty directory", tools: `{"tools":[]}`, wantOK: true, wantCalls: 1},
+		{name: "no tools capability", noTools: true, code: -32601, wantOK: true},
+		{name: "tools RPC error", code: -32603, wantCalls: 1},
+		{name: "advertised tools method missing", code: -32601, wantCalls: 1},
+		{name: "second page fails", code: -32603, secondPage: true, wantCalls: 2},
+		{name: "canceled during discovery", cancel: true, wantCalls: 1},
+		{name: "initialization fails", initError: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			defer cancel()
+			var calls atomic.Int32
+			var resources atomic.Int32
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodPost {
+					w.WriteHeader(http.StatusMethodNotAllowed)
+					return
+				}
+				var request struct {
+					ID     json.RawMessage `json:"id"`
+					Method string          `json:"method"`
+					Params struct {
+						Cursor string `json:"cursor"`
+					} `json:"params"`
+				}
+				if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+					http.Error(w, err.Error(), http.StatusBadRequest)
+					return
+				}
+				if len(request.ID) == 0 {
+					w.WriteHeader(http.StatusAccepted)
+					return
+				}
+				response := map[string]any{"jsonrpc": "2.0", "id": request.ID}
+				switch request.Method {
+				case "initialize":
+					if tt.initError {
+						response["error"] = map[string]any{"code": -32603, "message": "initialization unavailable"}
+						break
+					}
+					capabilities := map[string]any{}
+					if !tt.noTools {
+						capabilities["tools"] = map[string]any{}
+					}
+					response["result"] = map[string]any{
+						"protocolVersion": sdkmcp.LATEST_PROTOCOL_VERSION,
+						"capabilities":    capabilities,
+						"serverInfo": map[string]string{
+							"name": "probe", "version": "1", "description": "Probe server",
+						},
+					}
+				case "tools/list":
+					calls.Add(1)
+					if tt.cancel {
+						cancel()
+						return
+					}
+					if tt.secondPage && request.Params.Cursor == "" {
+						response["result"] = json.RawMessage(
+							`{"tools":[{"name":"partial","inputSchema":{"type":"object"}}],"nextCursor":"second"}`,
+						)
+					} else if tt.code != 0 {
+						response["error"] = map[string]any{"code": tt.code, "message": "directory unavailable"}
+					} else {
+						response["result"] = json.RawMessage(tt.tools)
+					}
+				case "resources/list":
+					resources.Add(1)
+					response["error"] = map[string]any{"code": -32601, "message": "resources not supported"}
+				default:
+					t.Errorf("unexpected request: %s", request.Method)
+				}
+				w.Header().Set("Content-Type", "application/json")
+				if err := json.NewEncoder(w).Encode(response); err != nil {
+					t.Errorf("encode MCP response: %v", err)
+				}
+			}))
+			defer upstream.Close()
+			svc, repo := newTestService()
+			t.Cleanup(svc.mcpManager.Shutdown)
+			require.NoError(t, repo.Create(ctx, &types.MCPService{
+				ID: "probe", TenantID: 1, URL: &upstream.URL, TransportType: types.MCPTransportHTTPStreamable,
+			}))
+			result, err := svc.TestMCPService(ctx, 1, "probe")
+			require.NoError(t, err)
+			require.NotNil(t, result)
+			assert.Equal(t, tt.wantCalls, calls.Load(), "must reach the intended protocol phase")
+			assert.Equal(t, tt.wantOK, result.Success, result.Message)
+			assert.Len(t, result.Tools, tt.wantTools, "never return a partial directory")
+			if tt.wantOK {
+				assert.Contains(t, result.Message, "Connected successfully to probe v1")
+				assert.Equal(t, "Probe server", result.Description)
+				assert.Equal(t, int32(1), resources.Load(), "unsupported resources remain non-fatal")
+				if tt.wantTools > 0 {
+					require.Len(t, result.Tools, 1)
+					assert.Equal(t, "lookup", result.Tools[0].Name)
+					assert.JSONEq(t, `{"type":"object"}`, string(result.Tools[0].InputSchema))
+				}
+			} else {
+				assert.NotContains(t, result.Message, "Connected successfully")
+				assert.Zero(t, resources.Load(), "failed discovery must return immediately")
+				if tt.initError {
+					assert.Contains(t, result.Message, "Initialization failed")
+				} else {
+					assert.Contains(t, result.Message, "Tool discovery failed")
+					if tt.code != 0 {
+						assert.Contains(t, result.Message, "directory unavailable")
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestTestMCPServiceSSEToolDiscovery(t *testing.T) {
+	utils.SetSSRFWhitelistFromRaw("127.0.0.1")
+	t.Cleanup(utils.ResetSSRFWhitelistForTest)
+	for _, fail := range []bool{false, true} {
+		t.Run(fmt.Sprintf("failure=%v", fail), func(t *testing.T) {
+			var calls atomic.Int32
+			hooks := &sdkserver.Hooks{}
+			hooks.AddOnRequestInitialization(func(_ context.Context, _ any, request any) error {
+				var message struct {
+					Method string `json:"method"`
+				}
+				if err := json.Unmarshal(request.(json.RawMessage), &message); err != nil {
+					return err
+				}
+				if message.Method == "tools/list" {
+					calls.Add(1)
+					if fail {
+						return errors.New("directory unavailable")
+					}
+				}
+				return nil
+			})
+			server := sdkserver.NewMCPServer(
+				"probe", "1", sdkserver.WithToolCapabilities(false), sdkserver.WithHooks(hooks),
+			)
+			upstream := httptest.NewServer(sdkserver.NewSSEServer(server))
+			defer upstream.Close()
+			url := upstream.URL + "/sse"
+			svc, repo := newTestService()
+			t.Cleanup(svc.mcpManager.Shutdown)
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			defer cancel()
+			require.NoError(t, repo.Create(ctx, &types.MCPService{
+				ID: "probe", TenantID: 1, URL: &url, TransportType: types.MCPTransportSSE,
+			}))
+			result, err := svc.TestMCPService(ctx, 1, "probe")
+			require.NoError(t, err)
+			require.NotNil(t, result)
+			assert.Equal(t, int32(1), calls.Load())
+			assert.Equal(t, !fail, result.Success, result.Message)
+			if fail {
+				assert.Contains(t, result.Message, "Tool discovery failed")
+				assert.Contains(t, result.Message, "directory unavailable")
+			}
+		})
+	}
+}
+
+func TestMCPTestFailurePreservesOAuthRequired(t *testing.T) {
+	err := fmt.Errorf("failed to list tools: %w", &mcp.OAuthRequiredError{MetadataURL: "https://example.com/metadata"})
+	result := mcpTestFailure(err, "Tool discovery failed")
+	assert.False(t, result.Success)
+	assert.True(t, result.OAuthRequired)
+	assert.Contains(t, result.Message, "OAuth")
+}
 
 // fakeMCPRepo is a minimal in-memory implementation of
 // interfaces.MCPServiceRepository for testing the service-layer logic

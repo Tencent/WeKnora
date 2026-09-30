@@ -1,13 +1,59 @@
 package mcp
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/utils"
 	"github.com/mark3labs/mcp-go/client/transport"
+	sdkserver "github.com/mark3labs/mcp-go/server"
+	"github.com/stretchr/testify/require"
 )
+
+func TestInitializePreservesToolsCapability(t *testing.T) {
+	utils.SetSSRFWhitelistFromRaw("127.0.0.1")
+	t.Cleanup(utils.ResetSSRFWhitelistForTest)
+	for _, tc := range []struct {
+		name        string
+		tools       bool
+		listChanged bool
+	}{
+		{name: "absent"},
+		{name: "tools without notifications", tools: true},
+		{name: "tools with notifications", tools: true, listChanged: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var options []sdkserver.ServerOption
+			if tc.tools {
+				options = append(options, sdkserver.WithToolCapabilities(tc.listChanged))
+			}
+			server := sdkserver.NewMCPServer("probe", "1", options...)
+			upstream := httptest.NewServer(sdkserver.NewStreamableHTTPServer(server, sdkserver.WithStateLess(true)))
+			defer upstream.Close()
+			client, err := NewMCPClient(&ClientConfig{Service: &types.MCPService{
+				Name: "probe", URL: &upstream.URL, TransportType: types.MCPTransportHTTPStreamable,
+			}})
+			require.NoError(t, err)
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			require.NoError(t, client.Connect(ctx))
+			defer func() { require.NoError(t, client.Disconnect()) }()
+			result, err := client.Initialize(ctx)
+			require.NoError(t, err)
+			if tc.tools {
+				require.NotNil(t, result.Capabilities.Tools)
+				require.Equal(t, tc.listChanged, result.Capabilities.Tools.ListChanged)
+			} else {
+				require.Nil(t, result.Capabilities.Tools)
+			}
+		})
+	}
+}
 
 func TestAsOAuthRequired(t *testing.T) {
 	t.Run("nil error", func(t *testing.T) {

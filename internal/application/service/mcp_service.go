@@ -352,7 +352,6 @@ func (s *mcpServiceService) DeleteMCPService(ctx context.Context, tenantID uint6
 	return nil
 }
 
-// TestMCPService tests the connection to an MCP service and returns available tools/resources
 // mcpTestFailure builds a failed MCPTestResult, upgrading a generic connection
 // error into an explicit "OAuth required" signal when the server answered with
 // an RFC 9728 OAuth challenge. This lets the UI guide the user to switch the
@@ -373,6 +372,7 @@ func mcpTestFailure(err error, prefix string) *types.MCPTestResult {
 	}
 }
 
+// TestMCPService tests the connection and discovers tools when the server advertises them.
 func (s *mcpServiceService) TestMCPService(
 	ctx context.Context,
 	tenantID uint64,
@@ -423,11 +423,13 @@ func (s *mcpServiceService) TestMCPService(
 		return mcpTestFailure(err, "Initialization failed"), nil
 	}
 
-	// List tools
-	tools, err := client.ListTools(testCtx)
-	if err != nil {
-		logger.GetLogger(ctx).Warnf("Failed to list tools: %v", err)
-		tools = []*types.MCPTool{}
+	// A server without tools is valid, but an advertised directory must be readable.
+	var tools []*types.MCPTool
+	if initResult.Capabilities.Tools != nil {
+		tools, err = client.ListTools(testCtx)
+		if err != nil {
+			return mcpTestFailure(err, "Tool discovery failed"), nil
+		}
 	}
 
 	// List resources
