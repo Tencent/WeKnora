@@ -742,6 +742,7 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 				changed        bool
 				affectedType   string
 				additionFailed bool
+				updateDeferred bool
 				reduceErr      error
 			)
 			// Serialize same-slug read-modify-write across concurrent batches
@@ -755,7 +756,7 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 						reduceErr = fmt.Errorf("wiki reduce panicked for slug %s: %v", slug, r)
 					}
 				}()
-				changed, affectedType, additionFailed, reduceErr = s.reduceSlugUpdates(
+				changed, affectedType, additionFailed, updateDeferred, reduceErr = s.reduceSlugUpdates(
 					reduceCtx, chatModel, payload.KnowledgeBaseID, slug, updates, payload.TenantID, batchCtx, kidToWikiSpan)
 				return reduceErr
 			})
@@ -773,6 +774,18 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 				logger.Warnf(reduceCtx, "wiki ingest: slug %s busy > %s, deferring update", slug, wikiSlugLockWait)
 				collectUnapplied(updates)
 				return nil
+			}
+			if updateDeferred {
+				// The page kept its previous body because the rewrite dropped
+				// table rows that are still on it. Not an error and the page is
+				// not damaged, but this slug's contribution never landed, so the
+				// documents behind it must survive the trim phase and come back
+				// in a later batch — trimming them here would delete their
+				// pending row and lose the addition for good.
+				logger.Warnf(reduceCtx,
+					"wiki ingest: slug %s kept its previous content (rewrite dropped rows), deferring update",
+					slug)
+				collectUnapplied(updates)
 			}
 			if reduceErr != nil {
 				// The page's read-modify-write failed, so this slug's update
@@ -1861,7 +1874,7 @@ func (s *wikiIngestService) reduceSlugUpdates(
 	tenantID uint64,
 	batchCtx *WikiBatchContext,
 	kidToWikiSpan map[string]*Span,
-) (changed bool, affectedType string, additionFailed bool, err error) {
+) (changed bool, affectedType string, additionFailed bool, updateDeferred bool, err error) {
 	// Final safety net for the ingest/delete race: between Map (which already
 	// checks isKnowledgeGone) and Reduce there is a long LLM call where the
 	// source document may be deleted. Drop any addition/summary updates whose
@@ -1870,7 +1883,7 @@ func (s *wikiIngestService) reduceSlugUpdates(
 	// want when the doc is gone.
 	updates = s.filterLiveUpdates(ctx, kbID, updates)
 	if len(updates) == 0 {
-		return false, "", false, nil
+		return false, "", false, false, nil
 	}
 
 	// Per-slug page span attribution: a single slug can receive
@@ -1954,7 +1967,7 @@ func (s *wikiIngestService) reduceSlugUpdates(
 			}
 		}
 		if !hasAdditions {
-			return false, "", false, nil
+			return false, "", false, false, nil
 		}
 
 		page = &types.WikiPage{
@@ -2009,7 +2022,7 @@ func (s *wikiIngestService) reduceSlugUpdates(
 		} else {
 			_, err = s.wikiService.CreatePage(ctx, page)
 		}
-		return changed, affectedType, false, err
+		return changed, affectedType, false, updateDeferred, err
 	}
 
 	var remainingSourcesContent strings.Builder
@@ -2260,14 +2273,35 @@ func (s *wikiIngestService) reduceSlugUpdates(
 		// on top of what was already there, deduplicated.
 		page.ChunkRefs = mergeChunkRefs(page.ChunkRefs, additions)
 		if exists {
-			_, err = s.wikiService.UpdatePage(ctx, page)
+			// A retraction removes a deleted document's contribution on
+			// purpose, so this write is allowed to drop the table rows that
+			// contribution owned. Saying so explicitly is what lets the choke
+			// point in UpdatePage refuse an accidental truncation everywhere
+			// else; without it a retract round would be refused and the stale
+			// content would stay on the page for good.
+			writeCtx := ctx
+			if len(retracts) > 0 {
+				writeCtx = types.WithWikiShrinkAllowed(ctx)
+			}
+			// UpdatePage refuses a machine rewrite that drops table rows still
+			// on the page. That refusal is deliberately not an error — the page
+			// is intact and this caller did nothing wrong — but it does mean
+			// this slug's contribution never landed, and the caller has to say
+			// so: a refused write returns the stored page untouched, so an
+			// unchanged version is how the caller tells.
+			versionBefore := page.Version
+			kept, updateErr := s.wikiService.UpdatePage(writeCtx, page)
+			err = updateErr
+			if err == nil && (kept == nil || kept.Version == versionBefore) {
+				updateDeferred = true
+			}
 		} else {
 			_, err = s.wikiService.CreatePage(ctx, page)
 		}
-		return true, affectedType, additionFailed, err
+		return true, affectedType, additionFailed, updateDeferred, err
 	}
 
-	return false, "", additionFailed, nil
+	return false, "", additionFailed, false, nil
 }
 
 // mergeChunkRefs unions the chunk IDs currently on the page with the ones
