@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"time"
@@ -14,11 +15,21 @@ import (
 // of whatever envelope the protocol uses (OpenAI delta.tool_calls, Anthropic
 // input_json_delta, Gemini functionCall parts, Responses function_call_arguments.delta).
 type ToolCallDelta struct {
-	Index     int
-	ID        string
-	Type      string
-	Name      string
-	Arguments string
+	Index int
+	// IndexMissing marks a delta whose wire envelope carried no index at all.
+	// It is the only case where Index is not authoritative and the assembler
+	// has to infer the slot from the delta's own id and name. Protocols that
+	// always synthesize an index leave this false.
+	IndexMissing bool
+	ID           string
+	Type         string
+	Name         string
+	Arguments    string
+	// Metadata is the provider-specific state extracted from this same wire
+	// entry. Carrying it on the delta lets the assembler file it under the slot
+	// it resolves for that delta, instead of a caller re-deriving the index
+	// positionally (which is wrong exactly when the index is missing).
+	Metadata types.ToolCallMetadata
 }
 
 // Delta is one protocol-neutral streaming event. A single wire chunk may
@@ -60,6 +71,18 @@ type StreamAssembler struct {
 	firstReasoningSeen   bool
 	startedAt            time.Time
 	aborted              bool
+
+	// toolCallNextIndex is the first slot not handed out yet. It follows the
+	// largest explicit index seen so far, so a slot the assembler invents for
+	// an index-less delta can never collide with a vendor index already used.
+	toolCallNextIndex int
+	// currentToolCallIndex is the slot of the last entry processed, whichever
+	// branch resolved it. A stream that omits the index on only some chunks
+	// keeps appending its index-less fragments here instead of opening a new
+	// call per fragment. hasCurrentToolCall distinguishes "slot 0" from
+	// "nothing seen yet".
+	currentToolCallIndex int
+	hasCurrentToolCall   bool
 }
 
 // emit hands one chunk to the consumer, giving up as soon as the call context
@@ -306,6 +329,108 @@ func (a *StreamAssembler) Fail(ch chan<- types.StreamResponse, err error) {
 	})
 }
 
+// resolveToolCallIndex picks the toolCallMap slot for one delta entry.
+//
+// A vendor index is authoritative and is never second-guessed: the existing
+// per-vendor behaviours (non-contiguous numbering, the vLLM Ascend full-name
+// repeat) all hang off it, and a provider that sends an index must keep the
+// behaviour it has today.
+//
+// Only when the envelope omitted the index does the assembler fall back to the
+// call's identity: the id, or the name when the gateway dropped the ids too.
+// The entry's position inside the chunk is never used — it is chunk-local, so
+// with one entry per chunk every fragment numbers 0 and parallel calls merge
+// into the first slot (names concatenate, arguments become invalid JSON), and a
+// gateway that batches two fragments of one call into a chunk reads as two
+// calls. That was the reported failure.
+//
+// Known boundary of this rule: a gateway that omits the index and the id *and*
+// splits a single tool name across fragments ("get_" + "weather") is read as two
+// calls — the second fragment is indistinguishable from the first fragment of
+// another call. That shape is not observed in the captured vendor streams
+// (names arrive whole and on the call's first fragment only), while the
+// opposite guard ("a repeated name is always a fragment of the current call")
+// merges two parallel calls of the same tool as soon as the ids are missing.
+func (a *StreamAssembler) resolveToolCallIndex(tc ToolCallDelta) int {
+	if !tc.IndexMissing {
+		if tc.Index >= a.toolCallNextIndex {
+			a.toolCallNextIndex = tc.Index + 1
+		}
+		a.setCurrentToolCall(tc.Index)
+		return tc.Index
+	}
+	if !a.hasCurrentToolCall || a.startsNewToolCall(tc) {
+		index := a.toolCallNextIndex
+		a.toolCallNextIndex++
+		a.setCurrentToolCall(index)
+		return index
+	}
+	return a.currentToolCallIndex
+}
+
+// startsNewToolCall reports whether an index-less delta opens a call rather
+// than continuing the one being assembled.
+//
+// Identity comes first: a different non-empty id is a different call. With the
+// ids gone the name is the boundary — a different name is a different call. The
+// remaining case is the *same* name again, which has two readings that are
+// identical on the wire:
+//
+//   - a gateway that resends the full name on every fragment of one call (the
+//     vLLM Ascend shape; with an index present the assembler already treats the
+//     repeat as a suffix guard rather than a boundary);
+//   - the first fragment of a second call to the same tool.
+//
+// The accumulated arguments decide it. A call's arguments are exactly one JSON
+// value, so a call whose arguments already parse cannot take another fragment:
+// an identical name after that point opens the next call. While the arguments
+// are empty or still incomplete, the fragment continues the call being
+// assembled. The captured streams agree with both halves — the second call to
+// the same tool opens with a fresh "{" (or an empty fragment that the next
+// chunk fills), never with the tail of the previous call's arguments.
+func (a *StreamAssembler) startsNewToolCall(tc ToolCallDelta) bool {
+	current := a.toolCallMap[a.currentToolCallIndex]
+	if current == nil {
+		return true
+	}
+	if tc.ID != "" && tc.ID != current.ID {
+		return true
+	}
+	if tc.Name == "" {
+		return false
+	}
+	if current.Function.Name == "" {
+		// The call being assembled has not named itself yet: this fragment names
+		// it instead of opening a second call.
+		return false
+	}
+	if tc.Name != current.Function.Name {
+		return true
+	}
+	if tc.ID != "" {
+		// The gateway repeated the current call's id, so the fragment belongs to
+		// this call whatever its arguments look like.
+		return false
+	}
+	return completeToolArguments(current.Function.Arguments)
+}
+
+// completeToolArguments reports whether the assembled arguments already form one
+// complete JSON value. Empty or still-open arguments are not complete, so a
+// repeated name keeps appending to the call; a finished value cannot take
+// another fragment.
+func completeToolArguments(arguments string) bool {
+	if arguments == "" {
+		return false
+	}
+	return json.Valid([]byte(arguments))
+}
+
+func (a *StreamAssembler) setCurrentToolCall(index int) {
+	a.currentToolCallIndex = index
+	a.hasCurrentToolCall = true
+}
+
 func (a *StreamAssembler) processToolCalls(ch chan<- types.StreamResponse, deltas []ToolCallDelta) {
 	if !a.firstToolCallSeen && len(deltas) > 0 {
 		a.firstToolCallSeen = true
@@ -327,7 +452,12 @@ func (a *StreamAssembler) processToolCalls(ch chan<- types.StreamResponse, delta
 	}
 
 	for _, tc := range deltas {
-		index := tc.Index
+		index := a.resolveToolCallIndex(tc)
+		if len(tc.Metadata) > 0 {
+			// Same wire entry, resolved slot: provider state can no longer land
+			// on a sibling call when the vendor omitted the index.
+			a.SetToolCallMetadata(index, tc.Metadata)
+		}
 		entry, exists := a.toolCallMap[index]
 		if !exists || entry == nil {
 			entry = &types.LLMToolCall{Type: tc.Type}
@@ -344,7 +474,11 @@ func (a *StreamAssembler) processToolCalls(ch chan<- types.StreamResponse, delta
 		}
 		if tc.Name != "" {
 			// Some runtimes (vLLM Ascend) resend the full name on every chunk;
-			// treat an identical name as a repeat rather than a suffix.
+			// treat an identical name as a repeat rather than a suffix. With an
+			// index present this is the authoritative branch; without one the
+			// same repeat must not open a call per fragment, which is why
+			// startsNewToolCall only splits on a name change (or on a repeated
+			// name once the assembled arguments are already complete).
 			if entry.Function.Name != tc.Name {
 				entry.Function.Name += tc.Name
 			}
