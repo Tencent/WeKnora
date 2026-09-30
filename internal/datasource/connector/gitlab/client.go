@@ -17,10 +17,15 @@ import (
 )
 
 const (
-	// maxJSONResponseBytes bounds a GitLab JSON response. Project, tree and
-	// compare listings are small; a larger body means a broken or hostile
-	// server, and buffering it would grow without bound.
+	// maxJSONResponseBytes bounds project, user, commit and paginated tree JSON.
+	// Those listings are small; a larger body means a broken or hostile server.
 	maxJSONResponseBytes int64 = 16 << 20
+	// maxCompareResponseBytes bounds GET /repository/compare. That body carries
+	// the full commit list and patch text. A straight compare across a long
+	// unsynced range or a force-push routinely exceeds the metadata cap, and
+	// failing it aborts the project sync before the cursor advances. Sync only
+	// keeps paths and compare_timeout, but the response still has to be buffered.
+	maxCompareResponseBytes int64 = 128 << 20
 	// maxRawFileBytes bounds a single repository blob. GitLab's tree and
 	// compare endpoints do not report blob sizes, so the download itself is the
 	// only place a limit can be enforced. 512 MiB matches the Feishu connector,
@@ -37,11 +42,12 @@ func base64FileBytes(rawLimit int64) int64 {
 type client struct {
 	baseURL, token string
 	http           *http.Client
-	// jsonLimit and rawLimit are fields rather than direct uses of the
-	// constants above so tests can lower them without materialising hundreds of
-	// megabytes. newClient always sets the production values.
-	jsonLimit int64
-	rawLimit  int64
+	// jsonLimit, compareLimit and rawLimit are fields rather than direct uses of
+	// the constants above so tests can lower them without materialising hundreds
+	// of megabytes. newClient always sets the production values.
+	jsonLimit    int64
+	compareLimit int64
+	rawLimit     int64
 }
 
 // readCapped reads a response body, refusing anything larger than limit instead
@@ -110,11 +116,12 @@ func newClient(baseURL, token string) (*client, error) {
 		baseURL += "/api/v4"
 	}
 	return &client{
-		baseURL:   baseURL,
-		token:     token,
-		http:      datasource.NewConnectorHTTPClient(30 * time.Second),
-		jsonLimit: maxJSONResponseBytes,
-		rawLimit:  maxRawFileBytes,
+		baseURL:      baseURL,
+		token:        token,
+		http:         datasource.NewConnectorHTTPClient(30 * time.Second),
+		jsonLimit:    maxJSONResponseBytes,
+		compareLimit: maxCompareResponseBytes,
+		rawLimit:     maxRawFileBytes,
 	}, nil
 }
 
@@ -122,8 +129,8 @@ func (c *client) get(ctx context.Context, endpoint string, out interface{}) erro
 	return c.getCapped(ctx, endpoint, out, c.jsonLimit)
 }
 
-// getCapped is get with an explicit response cap, used by the base64 file
-// fallback whose body is larger than an ordinary metadata response.
+// getCapped is get with an explicit response cap. Compare and the base64 file
+// fallback pass their own limits because those bodies are larger than metadata.
 func (c *client) getCapped(ctx context.Context, endpoint string, out interface{}, limit int64) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+endpoint, nil)
 	if err != nil {
@@ -292,7 +299,7 @@ func (c *client) raw(ctx context.Context, id, ref, file string) ([]byte, error) 
 	}
 	var apiErr *apiError
 	if !errors.As(err, &apiErr) || apiErr.status != http.StatusNotFound {
-		return nil, fmt.Errorf("gitlab raw file: %w", err)
+		return nil, fmt.Errorf("gitlab file %s: %w", file, err)
 	}
 
 	// Some GitLab deployments expose the file detail endpoint but return 404
@@ -304,14 +311,14 @@ func (c *client) raw(ctx context.Context, id, ref, file string) ([]byte, error) 
 	}
 	detailEndpoint := "/projects/" + projectPath(id) + "/repository/files/" + encodedFile + "?" + q.Encode()
 	if err := c.getCapped(ctx, detailEndpoint, &detail, base64FileBytes(c.rawLimit)); err != nil {
-		return nil, fmt.Errorf("gitlab file content: %w", err)
+		return nil, fmt.Errorf("gitlab file %s: %w", file, err)
 	}
 	if detail.Encoding != "base64" {
-		return nil, fmt.Errorf("gitlab file content: unsupported encoding %q", detail.Encoding)
+		return nil, fmt.Errorf("gitlab file %s: unsupported encoding %q", file, detail.Encoding)
 	}
 	content, err = base64.StdEncoding.DecodeString(detail.Content)
 	if err != nil {
-		return nil, fmt.Errorf("gitlab file content: decode base64: %w", err)
+		return nil, fmt.Errorf("gitlab file %s: decode base64: %w", file, err)
 	}
 	return content, nil
 }
@@ -340,6 +347,6 @@ func (c *client) compare(ctx context.Context, id, from, to string) (*comparison,
 	// comparison misses reverted files when a branch is reset or force-pushed.
 	q := url.Values{"from": {from}, "to": {to}, "straight": {"true"}}
 	var v comparison
-	err := c.get(ctx, "/projects/"+projectPath(id)+"/repository/compare?"+q.Encode(), &v)
+	err := c.getCapped(ctx, "/projects/"+projectPath(id)+"/repository/compare?"+q.Encode(), &v, c.compareLimit)
 	return &v, err
 }
