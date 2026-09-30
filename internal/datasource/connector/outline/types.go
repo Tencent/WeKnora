@@ -122,7 +122,13 @@ type document struct {
 	URL              string `json:"url"` // path only, e.g. "/doc/title-abc123"
 	CollectionID     string `json:"collectionId"`
 	ParentDocumentID string `json:"parentDocumentId"`
-	TemplateID       string `json:"templateId"`
+	// TemplateID is the template the document was created from, not a marker
+	// that it is one: such documents are ordinary content.
+	TemplateID string `json:"templateId"`
+	// Template marks a template itself. Current Outline keeps templates in
+	// their own model and never lists them here; older releases stored them as
+	// documents with this flag set.
+	Template bool `json:"template"`
 	// Revision increments only when the document's content or title changes,
 	// making it a tighter change signal than updatedAt.
 	Revision   int    `json:"revision"`

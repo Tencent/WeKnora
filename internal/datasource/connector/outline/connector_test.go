@@ -194,8 +194,10 @@ func TestConnector_FetchAll(t *testing.T) {
 	}
 }
 
-// A document that Outline marks deleted or archived must not be ingested as
-// content, even if a future API revision starts returning it in the list.
+// A document that Outline marks deleted or archived, or a template itself, must
+// not be ingested as content, even if an API revision returns it in the list.
+// A document merely created from a template carries templateId and is ordinary
+// content.
 func TestConnector_FetchAll_SkipsGoneAndTemplates(t *testing.T) {
 	f := newFakeOutline([]document{
 		{ID: "d1", Title: "Bình thường", Text: "ok", CollectionID: "col-1", Revision: 1},
@@ -207,7 +209,8 @@ func TestConnector_FetchAll_SkipsGoneAndTemplates(t *testing.T) {
 			ID: "d3", Title: "Đã lưu trữ", Text: "x", CollectionID: "col-1", Revision: 1,
 			ArchivedAt: "2026-09-01T00:00:00.000Z",
 		},
-		{ID: "d4", Title: "Mẫu", Text: "x", CollectionID: "col-1", Revision: 1, TemplateID: "tpl-1"},
+		{ID: "d4", Title: "Mẫu", Text: "x", CollectionID: "col-1", Revision: 1, Template: true},
+		{ID: "d5", Title: "Họp 30/9", Text: "ok", CollectionID: "col-1", Revision: 1, TemplateID: "tpl-1"},
 	})
 	defer f.Close()
 
@@ -216,11 +219,12 @@ func TestConnector_FetchAll_SkipsGoneAndTemplates(t *testing.T) {
 	if err != nil {
 		t.Fatalf("FetchAll: %v", err)
 	}
-	if len(items) != 1 {
-		t.Fatalf("len = %d, want 1 (only the normal document)", len(items))
+	var got []string
+	for _, it := range items {
+		got = append(got, it.ExternalID)
 	}
-	if items[0].ExternalID != "d1" {
-		t.Errorf("kept the wrong document: %q", items[0].ExternalID)
+	if strings.Join(got, ",") != "d1,d5" {
+		t.Errorf("kept %v, want [d1 d5]", got)
 	}
 }
 

@@ -227,7 +227,7 @@ func (c *Connector) walk(
 				skippedGone++
 				continue
 			}
-			if strings.TrimSpace(d.TemplateID) != "" {
+			if d.Template {
 				skippedTemplate++
 				continue
 			}
