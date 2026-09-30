@@ -1012,7 +1012,14 @@ func (t *SearchKnowledgeTool) formatOutput(
 	data["results"] = formattedResults
 	data["count"] = len(formattedResults)
 	data["kb_counts"] = kbCounts
-	return &types.ToolResult{Success: true, Output: ob.String(), Data: data}
+
+	// The rows above are flattened for the model and the result card; the
+	// citation path needs the results themselves, so carry them typed.
+	refs := make([]*types.SearchResult, 0, len(results))
+	for _, result := range results {
+		refs = append(refs, result.SearchResult)
+	}
+	return &types.ToolResult{Success: true, Output: ob.String(), Data: data, KnowledgeRefs: refs}
 }
 
 // getEnrichedPassage merges the raw chunk content with image captions / OCR
