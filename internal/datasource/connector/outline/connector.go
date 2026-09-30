@@ -219,7 +219,7 @@ func (c *Connector) walk(
 			byID[d.ID] = d
 		}
 
-		var skippedGone, skippedTemplate, skippedUnchanged, kept int
+		var skippedGone, skippedTemplate, skippedUnchanged, moved, kept int
 		for _, d := range docs {
 			// Defensive: documents.list normally omits these, but a document that
 			// Outline considers removed must never be ingested as content.
@@ -237,13 +237,33 @@ func (c *Connector) walk(
 			newCursor.CollectionDocRevisions[collectionID][d.ID] = d.Revision
 			newCursor.CollectionDocFolders[collectionID][d.ID] = folder
 
+			title := docTitle(d)
+			fileName := datasource.SanitizeFileName(title) + ".md"
+			if folder != "" {
+				fileName = folder + "/" + fileName
+			}
+
 			// Moving a document or renaming an ancestor leaves its revision alone,
 			// so the folder is compared too: otherwise it would stay filed under
-			// the old path until its next edit.
+			// the old path until its next edit. Such a document is re-filed, not
+			// re-ingested — renaming a parent would otherwise re-embed its whole
+			// subtree. A move across collections is re-ingested, since the prior
+			// revision is keyed by the old collection.
 			if skipUnchanged && prev != nil {
 				r, seen := prev.CollectionDocRevisions[collectionID][d.ID]
-				if seen && r == d.Revision && prev.CollectionDocFolders[collectionID][d.ID] == folder {
-					skippedUnchanged++
+				if seen && r == d.Revision {
+					if prev.CollectionDocFolders[collectionID][d.ID] == folder {
+						skippedUnchanged++
+						continue
+					}
+					moved++
+					out = append(out, types.FetchedItem{
+						ExternalID:       d.ID,
+						Title:            title,
+						FileName:         fileName,
+						SourceResourceID: collectionID,
+						MoveOnly:         true,
+					})
 					continue
 				}
 			}
@@ -266,15 +286,6 @@ func (c *Connector) walk(
 				"revision":       strconv.Itoa(d.Revision),
 				"images_inlined": strconv.Itoa(inlined),
 			}
-			if pid := strings.TrimSpace(d.ParentDocumentID); pid != "" {
-				meta["parent_document_id"] = pid
-			}
-
-			title := docTitle(d)
-			fileName := datasource.SanitizeFileName(title) + ".md"
-			if folder != "" {
-				fileName = folder + "/" + fileName
-			}
 
 			out = append(out, types.FetchedItem{
 				ExternalID:       d.ID,
@@ -291,8 +302,9 @@ func (c *Connector) walk(
 		}
 
 		logger.Infof(ctx,
-			"[Outline] collection %s: total=%d kept=%d skipped_unchanged=%d skipped_removed=%d skipped_template=%d",
-			collectionID, len(docs), kept, skippedUnchanged, skippedGone, skippedTemplate)
+			"[Outline] collection %s: total=%d kept=%d moved=%d skipped_unchanged=%d "+
+				"skipped_removed=%d skipped_template=%d",
+			collectionID, len(docs), kept, moved, skippedUnchanged, skippedGone, skippedTemplate)
 	}
 
 	// A document is deleted only when no selected collection lists it any more.

@@ -490,18 +490,21 @@ func TestDocFolder(t *testing.T) {
 }
 
 // Moving a document under a new parent does not bump its revision, so an
-// incremental sync must still re-emit it under the new folder.
+// incremental sync must still re-emit it under the new folder — as a move, so
+// the service re-files it instead of re-embedding unchanged content. A document
+// that was both moved and edited still needs a full ingest.
 func TestConnector_FetchIncremental_ReemitsDocumentWhoseFolderChanged(t *testing.T) {
 	f := newFakeOutline([]document{
 		{ID: "p", Title: "Parent", Text: "p", CollectionID: "col-1", Revision: 3},
 		{ID: "c", Title: "Child", Text: "c", CollectionID: "col-1", Revision: 7, ParentDocumentID: "p"},
+		{ID: "e", Title: "Edited", Text: "e2", CollectionID: "col-1", Revision: 2, ParentDocumentID: "p"},
 	})
 	defer f.Close()
 
 	prior := &types.SyncCursor{ConnectorCursor: map[string]interface{}{
-		"collection_doc_revisions": map[string]interface{}{"col-1": map[string]interface{}{"p": 3, "c": 7}},
+		"collection_doc_revisions": map[string]interface{}{"col-1": map[string]interface{}{"p": 3, "c": 7, "e": 1}},
 		"collection_doc_folders": map[string]interface{}{
-			"col-1": map[string]interface{}{"p": "Handbook", "c": "Handbook"},
+			"col-1": map[string]interface{}{"p": "Handbook", "c": "Handbook", "e": "Handbook"},
 		},
 	}}
 
@@ -510,11 +513,26 @@ func TestConnector_FetchIncremental_ReemitsDocumentWhoseFolderChanged(t *testing
 	if err != nil {
 		t.Fatalf("FetchIncremental: %v", err)
 	}
-	if len(items) != 1 || items[0].ExternalID != "c" {
-		t.Fatalf("items = %+v, want only the moved child", items)
+	byID := make(map[string]types.FetchedItem, len(items))
+	for _, it := range items {
+		byID[it.ExternalID] = it
 	}
-	if items[0].FileName != "Handbook/Parent/Child.md" {
-		t.Errorf("FileName = %q, want Handbook/Parent/Child.md", items[0].FileName)
+	if len(items) != 2 {
+		t.Fatalf("items = %+v, want the moved child and the edited one", items)
+	}
+
+	moved := byID["c"]
+	if !moved.MoveOnly || len(moved.Content) != 0 {
+		t.Errorf("moved child: MoveOnly=%v, %d content bytes; want a content-free move",
+			moved.MoveOnly, len(moved.Content))
+	}
+	if moved.FileName != "Handbook/Parent/Child.md" {
+		t.Errorf("FileName = %q, want Handbook/Parent/Child.md", moved.FileName)
+	}
+
+	edited := byID["e"]
+	if edited.MoveOnly || string(edited.Content) != "e2" {
+		t.Errorf("edited child: MoveOnly=%v, content %q; want a full ingest of e2", edited.MoveOnly, edited.Content)
 	}
 }
 

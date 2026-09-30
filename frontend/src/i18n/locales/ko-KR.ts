@@ -1222,7 +1222,8 @@ export default {
       dingtalk_resource_failed: 'DingTalk 리소스를 사용할 수 없습니다. 접근 권한과 선택한 리소스를 확인한 후 다시 시도하세요.',
       deletion_lookup_failed: '삭제 전 항목 조회에 실패했습니다. 서버 로그를 확인하세요',
       deletion_failed: '삭제에 실패했습니다. 서버 로그를 확인하세요',
-      ingest_failed: '가져오기에 실패했습니다. 서버 로그를 확인하세요'
+      ingest_failed: '가져오기에 실패했습니다. 서버 로그를 확인하세요',
+      move_failed: '새 폴더로 이동하지 못했습니다. 서버 로그를 확인하세요'
     },
   },
   ollama: {
