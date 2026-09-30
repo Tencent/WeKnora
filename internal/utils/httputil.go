@@ -15,6 +15,7 @@ var defaultHTTPClient = NewSSRFSafeHTTPClient(SSRFSafeHTTPClientConfig{
 
 // DownloadBytes fetches the content at the given HTTP(S) URL and returns the
 // raw bytes. It reuses a package-level http.Client with a 60-second timeout.
+// Responses exceeding the configured MAX_FILE_SIZE_MB limit are rejected.
 func DownloadBytes(url string) ([]byte, error) {
 	if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
 		return nil, fmt.Errorf("unsupported URL scheme: %s", url)
@@ -30,9 +31,16 @@ func DownloadBytes(url string) ([]byte, error) {
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("HTTP %d for %s", resp.StatusCode, url)
 	}
-	data, err := io.ReadAll(resp.Body)
+	maxBytes := GetMaxFileSize()
+	if resp.ContentLength > maxBytes {
+		return nil, fmt.Errorf("download size exceeds limit of %d bytes (MAX_FILE_SIZE_MB)", maxBytes)
+	}
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxBytes+1))
 	if err != nil {
 		return nil, fmt.Errorf("read body: %w", err)
+	}
+	if int64(len(data)) > maxBytes {
+		return nil, fmt.Errorf("download size exceeds limit of %d bytes (MAX_FILE_SIZE_MB)", maxBytes)
 	}
 	return data, nil
 }
