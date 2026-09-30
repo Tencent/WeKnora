@@ -426,12 +426,22 @@ var allScriptExtensions = []string{".py", ".js", ".mjs", ".cjs", ".sh"}
 
 // sortedScriptPaths returns the bundle's files with any of the given suffixes,
 // in a stable order so the emitted command is deterministic.
+//
+// Vendored dependency trees (.venv/, node_modules/) are skipped: they are
+// installed dependencies, not scripts the model can name. A scientific stack
+// vendors thousands of .py files, and enumerating them overflows the exec
+// single-argument limit ("argument list too long") in every pass that builds
+// one command from this list; the trees' health is covered by the dependency
+// verification passes instead.
 func sortedScriptPaths(bundle *SkillBundle, suffixes ...string) []string {
 	if bundle == nil {
 		return nil
 	}
 	var matches []string
 	for rel := range bundle.Files {
+		if strings.HasPrefix(rel, ".venv/") || strings.HasPrefix(rel, "node_modules/") {
+			continue
+		}
 		for _, suffix := range suffixes {
 			if strings.HasSuffix(rel, suffix) {
 				matches = append(matches, rel)
