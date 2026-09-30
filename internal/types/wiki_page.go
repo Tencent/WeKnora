@@ -682,6 +682,25 @@ type WikiGraphRequest struct {
 	// from. Pages whose source_refs intersect the set are marked Familiar so
 	// the existing Wiki graph can light them up without cloning a second graph.
 	FamiliarKnowledgeIDs []string
+	// MasteryEnabled requests the guidance overlay: when true, the service
+	// computes per-node water levels and populates Mastery / BoundarySlugs.
+	MasteryEnabled bool
+	// Mastery maps slug → water level (0..100) for the guidance overlay. The
+	// handler fills it from the mastery service; empty means guidance off or no
+	// data.
+	Mastery map[string]int
+	// BoundarySlugs marks nodes on the PPR knowledge boundary, so the frontend
+	// can render the boundary ripple distinct from plain relation highlight.
+	BoundarySlugs map[string]bool
+	// BoundaryScores maps boundary slugs to their PPR score, so the frontend
+	// can rank one-hop neighbors when producing the "next step" recommendations.
+	BoundaryScores map[string]float64
+	// LastActive maps slug → most recent interaction time (citation / view /
+	// like). Used for profile explanation and debugging.
+	LastActive map[string]time.Time
+	// RecentlyActive marks slugs whose last interaction is within the freshness
+	// window, so the frontend can decide whether to animate the water ripple.
+	RecentlyActive map[string]bool
 }
 
 // WikiGraphData represents the link graph structure for visualization.
@@ -703,6 +722,10 @@ type WikiGraphMeta struct {
 	Depth     int    `json:"depth,omitempty"`  // populated in ego mode
 	// FamiliarCount is how many returned nodes are lit up for this person.
 	FamiliarCount int `json:"familiar_count,omitempty"`
+	// MasteryEnabled reports whether the guidance overlay is on for this
+	// request, so the frontend knows to render mastery water levels instead of
+	// the default type coloring.
+	MasteryEnabled bool `json:"mastery_enabled,omitempty"`
 }
 
 // WikiGraphNode represents a node in the wiki link graph
@@ -716,6 +739,23 @@ type WikiGraphNode struct {
 	// keeps citing in answers. It is a personal overlay, not a property of
 	// the page: two people looking at the same wiki see different highlights.
 	Familiar bool `json:"familiar,omitempty"`
+	// Mastery is the personal knowledge-state water level for this person, as
+	// a 0..100 percentage (ten tiers). Omitted when the guidance view has no
+	// data for this node.
+	Mastery int `json:"mastery,omitempty"`
+	// Boundary marks a node that is on the PPR knowledge boundary (low evidence
+	// but adjacent to the person's high-evidence region), so the frontend can
+	// render the boundary ripple.
+	Boundary bool `json:"boundary,omitempty"`
+	// BoundaryScore is the PPR score of a boundary node, used by the frontend
+	// to rank one-hop neighbors for the "next step" recommendations.
+	BoundaryScore float64 `json:"boundary_score,omitempty"`
+	// LastActive is the most recent interaction time for this person, used for
+	// profile explanation and debugging. Omitted when there is no evidence.
+	LastActive *time.Time `json:"last_active,omitempty"`
+	// RecentlyActive is true when the last interaction is within the freshness
+	// window, telling the frontend whether to animate the water ripple.
+	RecentlyActive bool `json:"recently_active,omitempty"`
 }
 
 // WikiGraphEdge represents a directed edge in the wiki link graph

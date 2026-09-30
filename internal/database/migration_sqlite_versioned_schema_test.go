@@ -35,6 +35,13 @@ var versionedSQLiteTables = []string{
 	"tenant_skill_snapshots",
 	"tenant_skill_catalog",
 	"tenant_user_env_vars",
+	"memory_citation_events",
+	"memory_citations",
+	"memory_page_views",
+	"memory_answer_likes",
+	"memory_guide_exposures",
+	"memory_mastery_daily",
+	"memory_spread_views",
 }
 
 // versionedSQLiteColumns maps each existing table to the columns that the
@@ -67,9 +74,10 @@ var versionedSQLiteColumns = map[string][]string{
 	"tenant_user_env_vars": {
 		"principal_type", "principal_id", "sandbox_config_id", "skill_id", "name", "value",
 	}, // 000028
+	"memory_guide_exposures": {"knowledge_base_id"}, // 000033
 }
 
-const expectedSQLiteMigrationVersion = 33
+const expectedSQLiteMigrationVersion = 39
 
 func TestSQLiteMigrationsCreateVersionedSchema(t *testing.T) {
 	repoRoot := sqliteRepoRoot(t)
@@ -108,6 +116,11 @@ func TestSQLiteMigrationsCreateVersionedSchema(t *testing.T) {
 	require.NoError(t, catalogRow.Scan(&catalogVersion, &catalogOverlay))
 	require.Zero(t, catalogVersion)
 	require.JSONEq(t, `{"providers":{}}`, catalogOverlay)
+
+	// 引导曝光按候选查询的索引（000114 / Lite 000034）：每次有效浏览都会按
+	// (kb, candidate_slug) 回填 qualified_view_at，缺索引会退化成扫描。
+	require.True(t, sqliteIndexExists(t, db, "idx_mastery_exposure_candidate"),
+		"SQLite migrations must create idx_mastery_exposure_candidate")
 
 	assertSQLiteShareLinkInvitationsWork(t, db)
 	assertSQLiteMCPOAuthPrincipalUpsertWorks(t, db)
