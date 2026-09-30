@@ -34,6 +34,10 @@ const (
 	fieldEmbedding        = "embedding"
 	fieldIsEnabled        = "is_enabled"
 	fieldID               = "id"
+
+	// maxCopyPaginationHops caps how many cursor pages CopyIndices walks, so a
+	// source that never ends cannot pin the copy until its context deadline.
+	maxCopyPaginationHops = 10000
 )
 
 // NewWeaviateRetrieveEngineRepository creates and initializes a new Weaviate repository.
@@ -723,8 +727,14 @@ func (w *weaviateRepository) CopyIndices(ctx context.Context,
 	var lastID string
 	totalCopied := 0
 	fields := getVectorFields()
+	seenCursors := make(map[string]struct{})
 
-	for {
+	for hops := 0; ; hops++ {
+		if hops >= maxCopyPaginationHops {
+			log.Warnf("[Weaviate] Index copy exceeded %d pages for %s; stopping",
+				maxCopyPaginationHops, sourceKnowledgeBaseID)
+			return fmt.Errorf("weaviate: copy indices exceeded %d pages", maxCopyPaginationHops)
+		}
 		result, err := w.client.GraphQL().Get().
 			WithClassName(collectionName).
 			WithWhere(filters.Where().
@@ -739,8 +749,20 @@ func (w *weaviateRepository) CopyIndices(ctx context.Context,
 			log.Errorf("[Weaviate] Failed to query source points: %v", err)
 			return err
 		}
+		// A query Weaviate could not run comes back as HTTP 200 carrying an
+		// errors array and no data, so it reaches this point as a successful
+		// call. Reading it as "the source is exhausted" would report a failed
+		// query as a finished copy.
+		if len(result.Errors) > 0 {
+			log.Errorf("[Weaviate] Failed to query source points: %v", result.Errors)
+			return fmt.Errorf("weaviate: copy indices query failed: %s", result.Errors[0].Message)
+		}
 
-		objects, ok := result.Data["Get"].(map[string]interface{})[collectionName].([]interface{})
+		get, ok := result.Data["Get"].(map[string]interface{})
+		if !ok {
+			return fmt.Errorf("weaviate: copy indices invalid response")
+		}
+		objects, ok := get[collectionName].([]interface{})
 		if !ok || len(objects) == 0 {
 			break
 		}
@@ -760,7 +782,11 @@ func (w *weaviateRepository) CopyIndices(ctx context.Context,
 				continue
 			}
 
-			lastID = additional["id"].(string)
+			id, ok := additional["id"].(string)
+			if !ok || id == "" {
+				return fmt.Errorf("weaviate: copy indices source object has no id")
+			}
+			lastID = id
 
 			sourceChunkID, ok := data[fieldChunkID].(string)
 			if !ok {
@@ -825,6 +851,15 @@ func (w *weaviateRepository) CopyIndices(ctx context.Context,
 			targetObjects = append(targetObjects, newObj)
 			currentBatchCount++
 		}
+
+		// The cursor is the last id of the page. A cursor that does not advance
+		// means the source answered with a page that was already read, so the
+		// walk can never end; that is a failure, not the end of the source.
+		if _, repeated := seenCursors[lastID]; repeated {
+			return fmt.Errorf("weaviate: copy indices made no progress at cursor %q", lastID)
+		}
+		seenCursors[lastID] = struct{}{}
+
 		if len(targetObjects) > 0 {
 			resp, err := batcher.WithObjects(targetObjects...).Do(ctx)
 			if err != nil {
