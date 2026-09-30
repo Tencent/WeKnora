@@ -54,7 +54,12 @@ func (s *knowledgeBaseService) retrieveFromStores(
 		return nil, nil
 	}
 	if len(groups) == 1 {
-		return groups[0].Engine.Retrieve(ctx, paramsWithTopK(groups[0]))
+		res, err := groups[0].Engine.Retrieve(ctx, paramsWithTopK(groups[0]))
+		if err != nil {
+			return nil, err
+		}
+		filterImageHits(res, groups[0])
+		return res, nil
 	}
 
 	timeout := multiStoreRetrieveTimeout()
@@ -80,6 +85,7 @@ func (s *knowledgeBaseService) retrieveFromStores(
 				}, fmt.Sprintf("multi-store retrieve failed: %v", err))
 				return fmt.Errorf("store group retrieve: %w", err)
 			}
+			filterImageHits(res, grp)
 			mu.Lock()
 			all = append(all, res...)
 			mu.Unlock()
@@ -149,6 +155,9 @@ func paramsWithTopK(g *storeGroup) []types.RetrieveParams {
 	out := make([]types.RetrieveParams, len(g.BaseParams))
 	for i, p := range g.BaseParams {
 		p.TopK = g.TopK
+		if g.ImageRecall {
+			p = withImageRecall(p)
+		}
 		out[i] = p
 	}
 	return out

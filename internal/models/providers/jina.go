@@ -72,6 +72,11 @@ func newJinaProvider() *Definition {
 				DimensionsField: api.Ptr("dimensions"),
 				TruncateField:   api.Ptr("truncate"),
 				TruncateValue:   api.Ptr("true"),
+				// The multimodal models take {"image": URL or data URI} in
+				// input; "Maximum file sizes are 5 MB for images". The page
+				// gives no image count per request, so each image goes alone.
+				ImageField:    api.Ptr("image"),
+				MaxImageBytes: api.Ptr(5_000_000),
 			},
 			Rerank: api.RerankCompat{
 				// return_documents echoes the text back. Results are matched

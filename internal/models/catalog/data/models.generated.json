@@ -802,65 +802,107 @@
         "id": "tongyi-embedding-vision-plus",
         "name": "Tongyi Embedding Vision Plus",
         "type": "Embedding",
+        "input": [
+          "text",
+          "image",
+          "video"
+        ],
         "dimension": 1152,
         "source": "https://help.aliyun.com/zh/model-studio/multimodal-embedding-api-reference",
         "compat": {
           "api": "dashscope-embeddings",
-          "dimensions_field": ""
+          "dimensions_field": "",
+          "max_image_batch_size": 8,
+          "max_image_bytes": 3000000
         }
       },
       {
         "name": "tongyi-embedding-vision-flash (fixed 768 dimensions)",
         "match": "tongyi-embedding-vision-flash",
         "type": "Embedding",
+        "input": [
+          "text",
+          "image",
+          "video"
+        ],
         "source": "https://help.aliyun.com/zh/model-studio/multimodal-embedding-api-reference",
         "compat": {
           "api": "dashscope-embeddings",
-          "dimensions_field": ""
+          "dimensions_field": "",
+          "max_image_batch_size": 8,
+          "max_image_bytes": 3000000
         }
       },
       {
         "name": "tongyi-embedding-vision snapshots",
         "match": "tongyi-embedding-vision*",
         "type": "Embedding",
+        "input": [
+          "text",
+          "image",
+          "video"
+        ],
         "source": "https://help.aliyun.com/zh/model-studio/multimodal-embedding-api-reference",
         "compat": {
           "api": "dashscope-embeddings",
           "dimensions_field": "dimension",
-          "max_batch_size": 20
+          "max_batch_size": 20,
+          "max_image_batch_size": 8,
+          "max_image_bytes": 3000000
         }
       },
       {
         "name": "qwen3-vl-embedding (independent vectors by default)",
         "match": "qwen3-vl-embedding*",
         "type": "Embedding",
+        "input": [
+          "text",
+          "image",
+          "video"
+        ],
         "source": "https://help.aliyun.com/zh/model-studio/multimodal-embedding-api-reference",
         "compat": {
           "api": "dashscope-embeddings",
           "dimensions_field": "dimension",
-          "max_batch_size": 20
+          "max_batch_size": 20,
+          "max_image_batch_size": 10,
+          "max_image_bytes": 10000000
         }
       },
       {
         "name": "qwen2.5-vl-embedding (fused vectors only)",
         "match": "qwen2.5-vl-embedding*",
         "type": "Embedding",
+        "input": [
+          "text",
+          "image",
+          "video"
+        ],
         "source": "https://help.aliyun.com/zh/model-studio/multimodal-embedding-api-reference",
         "compat": {
           "api": "dashscope-embeddings",
           "dimensions_field": "dimension",
-          "max_batch_size": 1
+          "max_batch_size": 1,
+          "max_image_batch_size": 1,
+          "max_image_bytes": 5000000
         }
       },
       {
         "name": "multimodal-embedding-v1",
         "match": "multimodal-embedding*",
         "type": "Embedding",
+        "input": [
+          "text",
+          "image",
+          "video"
+        ],
         "source": "https://help.aliyun.com/zh/model-studio/multimodal-embedding-api-reference",
         "compat": {
           "api": "dashscope-embeddings",
           "dimensions_field": "",
-          "max_batch_size": 20
+          "max_batch_size": 20,
+          "max_image_batch_size": 1,
+          "max_image_bytes": 3000000
         }
       },
       {
@@ -1865,7 +1907,14 @@
           "input": 0.2,
           "output": 0
         },
-        "source": "https://ai.google.dev/gemini-api/docs/embeddings"
+        "source": "https://ai.google.dev/gemini-api/docs/embeddings",
+        "compat": {
+          "max_image_batch_size": 6,
+          "image_mime_types": [
+            "image/png",
+            "image/jpeg"
+          ]
+        }
       }
     ],
     "generic": [
@@ -2123,6 +2172,10 @@
         "id": "jina-embeddings-v4",
         "name": "Jina Embeddings v4",
         "type": "Embedding",
+        "input": [
+          "text",
+          "image"
+        ],
         "dimension": 2048,
         "context_window": 32768,
         "source": "https://jina.ai/models/jina-embeddings-v4/"
@@ -5502,6 +5555,11 @@
         "id": "doubao-embedding-vision-251215",
         "name": "Doubao Embedding Vision (251215)",
         "type": "Embedding",
+        "input": [
+          "text",
+          "image",
+          "video"
+        ],
         "dimension": 2048,
         "source": "https://docs.volcengine.com/docs/ark/multimodal-vectorization-api?lang=zh"
       },
@@ -5509,6 +5567,11 @@
         "id": "doubao-embedding-vision-250615",
         "name": "Doubao Embedding Vision",
         "type": "Embedding",
+        "input": [
+          "text",
+          "image",
+          "video"
+        ],
         "dimension": 2048,
         "source": "https://docs.volcengine.com/docs/ark/multimodal-vectorization-api?lang=zh"
       },

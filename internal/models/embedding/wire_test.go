@@ -2,6 +2,7 @@ package embedding
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -64,6 +65,37 @@ func newUpstream(t *testing.T) *upstream {
 
 func runeLen(v any) int { return utf8.RuneCountInString(v.(string)) }
 
+// itemLen is the length of one input item whatever its shape: the runes of
+// a text, or the decoded bytes of an inline image. Images in these tests
+// differ in size, so the vector still tells which input it answers.
+func itemLen(v any) int {
+	item, ok := v.(map[string]any)
+	if !ok {
+		return runeLen(v)
+	}
+	switch {
+	case item["text"] != nil:
+		return runeLen(item["text"])
+	case item["image"] != nil:
+		return dataURILen(item["image"].(string))
+	case item["image_url"] != nil:
+		return dataURILen(item["image_url"].(map[string]any)["url"].(string))
+	case item["inlineData"] != nil:
+		data, _ := base64.StdEncoding.DecodeString(item["inlineData"].(map[string]any)["data"].(string))
+		return len(data)
+	}
+	panic(fmt.Sprintf("unrecognised input item %v", item))
+}
+
+func dataURILen(uri string) int {
+	_, encoded, ok := strings.Cut(uri, ";base64,")
+	if !ok {
+		panic("not a base64 data URI: " + uri)
+	}
+	data, _ := base64.StdEncoding.DecodeString(encoded)
+	return len(data)
+}
+
 // answer replies in the protocol the path belongs to. The OpenAI and
 // DashScope shapes are answered in reverse order so that placement by index
 // is exercised on every request.
@@ -72,24 +104,24 @@ func answer(path string, body map[string]any) string {
 	switch {
 	case strings.HasSuffix(path, ":batchEmbedContents"):
 		for _, req := range body["requests"].([]any) {
-			text := req.(map[string]any)["content"].(map[string]any)["parts"].([]any)[0].(map[string]any)["text"]
-			parts = append(parts, fmt.Sprintf(`{"values":[%d]}`, runeLen(text)))
+			part := req.(map[string]any)["content"].(map[string]any)["parts"].([]any)[0]
+			parts = append(parts, fmt.Sprintf(`{"values":[%d]}`, itemLen(part)))
 		}
 		return `{"embeddings":[` + strings.Join(parts, ",") + `]}`
 	case strings.HasSuffix(path, "/multimodal-embedding"):
 		contents := body["input"].(map[string]any)["contents"].([]any)
 		for i := len(contents) - 1; i >= 0; i-- {
-			n := runeLen(contents[i].(map[string]any)["text"])
+			n := itemLen(contents[i])
 			parts = append(parts, fmt.Sprintf(`{"index":%d,"embedding":[%d],"type":"text"}`, i, n))
 		}
 		return `{"output":{"embeddings":[` + strings.Join(parts, ",") + `]}}`
 	case strings.HasSuffix(path, "/embeddings/multimodal"):
-		n := runeLen(body["input"].([]any)[0].(map[string]any)["text"])
+		n := itemLen(body["input"].([]any)[0])
 		return fmt.Sprintf(`{"data":{"embedding":[%d],"object":"embedding"}}`, n)
 	default:
 		input := body["input"].([]any)
 		for i := len(input) - 1; i >= 0; i-- {
-			parts = append(parts, fmt.Sprintf(`{"index":%d,"embedding":[%d]}`, i, runeLen(input[i])))
+			parts = append(parts, fmt.Sprintf(`{"index":%d,"embedding":[%d]}`, i, itemLen(input[i])))
 		}
 		return `{"data":[` + strings.Join(parts, ",") + `]}`
 	}

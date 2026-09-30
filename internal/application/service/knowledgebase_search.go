@@ -257,6 +257,16 @@ func (s *knowledgeBaseService) hybridSearchCandidates(ctx context.Context,
 		return nil, nil
 	}
 
+	// Image vectors only exist where the embedding model embeds images; ask
+	// once for the search, since every KB in it shares the primary's model.
+	if !params.DisableVectorMatch && kb.IsVectorEnabled() && kb.EmbeddingModelID != "" &&
+		s.embeddingTakesImages(ctx, kb) {
+		for _, g := range groups {
+			g.ImageRecall = true
+			g.VectorThreshold = params.VectorThreshold
+		}
+	}
+
 	// Execute retrieval with fan-out + score normalization (multi-store
 	// only) and a langfuse span around the entire retrieve step.
 	logger.Infof(ctx, "Starting multi-store retrieval, group count: %d", len(groups))

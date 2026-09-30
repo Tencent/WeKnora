@@ -430,6 +430,49 @@ test('picking a catalog model fills blank capability fields only', async () => {
   } finally { f.close() }
 })
 
+const embeddingProviders = [{
+  value: 'volcengine', label: 'Volcengine', description: '', order: 1, icon: '',
+  defaultUrls: { embedding: 'https://ark.cn-beijing.volces.com/api/v3' },
+  modelTypes: ['embedding'],
+  models: [
+    { id: 'doubao-embedding-vision-251215', name: 'Doubao Embedding Vision', type: 'embedding', input: ['text', 'image', 'video'], dimension: 2048 },
+    { id: 'doubao-embedding-text', name: 'Doubao Embedding Text', type: 'embedding', dimension: 2048 },
+  ],
+}]
+
+test('embedding image input follows the catalog and stores only a differing declaration', async () => {
+  const f = await fixture({ type: 'embedding', providers: embeddingProviders })
+  try {
+    f.vm.formData.provider = 'volcengine'
+    f.vm.formData.modelName = 'doubao-embedding-vision-251215'
+    f.vm.handleCatalogModelChange('doubao-embedding-vision-251215')
+    await nextTick()
+    assert.equal(f.vm.embeddingAcceptsImages, true, 'catalogued multimodal model')
+    assert.equal(f.vm.formData.spec, null, 'the catalog answer is not copied into the row')
+
+    f.vm.embeddingAcceptsImages = false
+    assert.deepEqual(plain(f.vm.formData.spec), { input: ['text'] }, 'narrowing the catalog is a declaration')
+    f.vm.embeddingAcceptsImages = true
+    assert.equal(f.vm.formData.spec, null, 'back to the catalog answer drops it again')
+
+    // A custom model has nothing in the catalog; declaring image input sticks
+    // next to whatever else spec already carries.
+    f.vm.formData.spec = { compat: { encoding_format: 'float' } }
+    f.vm.handleCatalogModelCreate('my-clip')
+    await nextTick()
+    assert.equal(f.vm.embeddingAcceptsImages, false)
+    f.vm.embeddingAcceptsImages = true
+    assert.deepEqual(plain(f.vm.formData.spec), { compat: { encoding_format: 'float' }, input: ['text', 'image'] })
+
+    // Picking a catalogued model discards a declaration made for another one.
+    f.vm.formData.modelName = 'doubao-embedding-text'
+    f.vm.handleCatalogModelChange('doubao-embedding-text')
+    await nextTick()
+    assert.equal(f.vm.embeddingAcceptsImages, false)
+    assert.deepEqual(plain(f.vm.formData.spec), { compat: { encoding_format: 'float' } })
+  } finally { f.close() }
+})
+
 test('resolve panel is refreshed once per 400ms burst of edits and ignored while hidden', async () => {
   const f = await fixture({ type: 'chat', providers: catalogProviders })
   try {

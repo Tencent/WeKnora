@@ -3,6 +3,7 @@ package embedding
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -91,8 +92,16 @@ func newRemoteEmbedder(config Config, pooler EmbedderPooler) (Embedder, error) {
 		return nil, fmt.Errorf("unsupported embedding api %q for provider %s", resolved.EmbeddingAPI, vendor.ID)
 	}
 
+	// Images need both halves: the catalog saying the model maps them into
+	// its text space, and a protocol that can carry one to this vendor.
+	var images api.ImageEmbedder
+	if ie, ok := client.(api.ImageEmbedder); ok && ie.AcceptsImages() && resolved.Spec.AcceptsImages() {
+		images = ie
+	}
+
 	return &protocolEmbedder{
 		inner:          client,
+		images:         images,
 		settings:       settings,
 		modelName:      config.ModelName,
 		modelID:        config.ModelID,
@@ -106,7 +115,9 @@ func newRemoteEmbedder(config Config, pooler EmbedderPooler) (Embedder, error) {
 // itself: splitting a batch that exceeds the documented per-request ceiling,
 // and telling the vendor which side of a search a text is on.
 type protocolEmbedder struct {
-	inner      api.Embedder
+	inner api.Embedder
+	// images is nil unless the model and the endpoint both take images.
+	images     api.ImageEmbedder
 	settings   api.EmbeddingsSettings
 	modelName  string
 	modelID    string
@@ -154,6 +165,51 @@ func (e *protocolEmbedder) BatchEmbed(ctx context.Context, texts []string) ([][]
 			)
 		}
 		copy(out[batch.Start:], vectors)
+	}
+	return out, nil
+}
+
+func (e *protocolEmbedder) AcceptsImages() bool { return e.images != nil }
+
+func (e *protocolEmbedder) ImageLimits() ImageLimits {
+	return ImageLimits{MaxBytes: e.settings.MaxImageBytes, MIMETypes: slices.Clone(e.settings.ImageMIMETypes)}
+}
+
+// BatchEmbedImages checks every image against the documented limits before
+// sending any, so a batch never half-succeeds on an image the vendor was
+// always going to refuse, then splits it at the documented images per
+// request.
+func (e *protocolEmbedder) BatchEmbedImages(ctx context.Context, images []Image) ([][]float32, error) {
+	if e.images == nil {
+		return nil, fmt.Errorf("%s: %w", e.modelName, ErrImagesUnsupported)
+	}
+	if len(images) == 0 {
+		return nil, nil
+	}
+	for i, img := range images {
+		if err := e.settings.CheckImage(img); err != nil {
+			return nil, fmt.Errorf("%s embedding: image %d: %w", e.modelName, i, err)
+		}
+	}
+	kind := api.EmbedDocument
+	if types.IsEmbedQuery(ctx) {
+		kind = api.EmbedQuery
+	}
+	limit := e.settings.ImageBatchLimit()
+	out := make([][]float32, len(images))
+	// Serial for the same reason as BatchEmbed.
+	for start := 0; start < len(images); start += limit {
+		batch := images[start:min(start+limit, len(images))]
+		vectors, err := e.images.EmbedImages(ctx, batch, kind)
+		if err != nil {
+			return nil, err
+		}
+		if len(vectors) != len(batch) {
+			return nil, fmt.Errorf(
+				"%s embedding: %d vectors for %d images", e.modelName, len(vectors), len(batch),
+			)
+		}
+		copy(out[start:], vectors)
 	}
 	return out, nil
 }

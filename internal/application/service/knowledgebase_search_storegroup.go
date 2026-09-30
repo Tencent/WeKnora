@@ -62,6 +62,12 @@ type storeGroup struct {
 	// (knowledgebase_search_faq.go) updates this between calls to
 	// retrieveFromStores. Single-shot HybridSearch sets it once.
 	TopK int
+
+	// ImageRecall is set when the group's embedding model embeds images, so
+	// its document vector search also finds image rows; VectorThreshold is
+	// then the text threshold, which filterImageHits restores on text hits.
+	ImageRecall     bool
+	VectorThreshold float64
 }
 
 // resolveStoreGroups partitions kbs by (VectorStoreID, KB.TenantID),
