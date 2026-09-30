@@ -92,6 +92,15 @@ type weKnoraCloudVLMResponse struct {
 
 // Predict sends images with a text prompt to the WeKnoraCloud API.
 func (v *WeKnoraCloudVLM) Predict(ctx context.Context, imgBytesList [][]byte, prompt string) (string, error) {
+	return v.PredictWithOptions(ctx, imgBytesList, prompt, nil)
+}
+
+// PredictWithOptions satisfies the interface. The hosted endpoint exposes no
+// thinking switch, so the options are accepted and used for nothing — the same
+// call goes out as Predict sends.
+func (v *WeKnoraCloudVLM) PredictWithOptions(
+	ctx context.Context, imgBytesList [][]byte, prompt string, _ *PredictOptions,
+) (string, error) {
 	var parts []weKnoraCloudVLMContentPart
 
 	parts = append(parts, weKnoraCloudVLMContentPart{
