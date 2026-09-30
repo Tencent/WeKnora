@@ -67,6 +67,24 @@ func TestIMChannelNormalizesAndValidatesLocale(t *testing.T) {
 	}
 }
 
+func TestIMChannelLanguageMode(t *testing.T) {
+	for _, tt := range []struct {
+		input, want string
+		wantErr     bool
+	}{
+		{"", "fixed", false},
+		{"fixed", "fixed", false},
+		{"follow_user", "follow_user", false},
+		{"invalid", "invalid", true},
+	} {
+		ch := &IMChannel{LanguageMode: tt.input}
+		err := ch.validateLanguageMode()
+		if (err != nil) != tt.wantErr || ch.LanguageMode != tt.want {
+			t.Errorf("mode %q: got %q, err %v", tt.input, ch.LanguageMode, err)
+		}
+	}
+}
+
 func TestIMChannelBeforeCreate_SessionModeDefault(t *testing.T) {
 	tests := []struct {
 		name         string

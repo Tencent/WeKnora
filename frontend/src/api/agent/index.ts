@@ -317,6 +317,7 @@ export interface IMChannel {
   mode: 'webhook' | 'websocket' | 'longpoll';
   output_mode: 'stream' | 'full';
   locale?: '' | 'zh-CN' | 'en-US' | 'ko-KR' | 'ja-JP' | 'ru-RU';
+  language_mode?: 'fixed' | 'follow_user';
   session_mode?: 'user' | 'thread';
   knowledge_base_id?: string;
   credentials: Record<string, any>;
@@ -341,6 +342,7 @@ export interface IMChannelOverview {
   mode: IMChannel['mode'];
   output_mode: IMChannel['output_mode'];
   locale?: IMChannel['locale'];
+  language_mode?: IMChannel['language_mode'];
   session_mode?: IMChannel['session_mode'];
   bot_identity: string;
   created_at: string;
