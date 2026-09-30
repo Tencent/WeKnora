@@ -100,6 +100,7 @@ docker compose up -d
 | `searxng`（含 `full`） | `searxng-init` + `searxng` | `127.0.0.1:8888`（`SEARXNG_BIND`/`SEARXNG_PORT`） | 自建 Web 搜索；默认仅绑定回环，公开前必须轮换 `SEARXNG_SECRET` |
 | `minio`（含 `full`） | `minio` | 9000（S3）/ 9001（控制台） | S3 兼容对象存储（`STORAGE_TYPE=minio`），默认账号 `minioadmin/minioadmin` |
 | `neo4j`（含 `full`） | `neo4j` | 7474 / 7687 | 知识图谱（`NEO4J_ENABLE=true`），默认 `neo4j/password` |
+| `memgraph` | `memgraph` | 7687 / 7444 | Neo4j Bolt/Cypher 兼容图谱后端（设置 `GRAPH_DATABASE_ENGINE=memgraph` 和 `NEO4J_ENABLE=true`） |
 | `qdrant`（含 `full`） | `qdrant` | 6333（REST）/ 6334（gRPC） | 向量库（`RETRIEVE_DRIVER=qdrant`） |
 | `milvus` | `milvus` | 19530 / 9091 | 向量库（standalone，内嵌 etcd） |
 | `weaviate` | `weaviate` | 9035（HTTP）/ 50052（gRPC） | 向量库 |
