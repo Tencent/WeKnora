@@ -388,8 +388,8 @@ func extractContentAndImages(content []mcp.ContentItem) (text string, images []s
 			} else if item.Data != "" {
 				skippedImages++
 			}
-		case "resource":
-			textParts = append(textParts, fmt.Sprintf("[Resource: %s]", item.MimeType))
+		case "resource", "resource_link":
+			textParts = append(textParts, resourceText(item))
 		default:
 			if item.Text != "" {
 				textParts = append(textParts, item.Text)
@@ -406,14 +406,37 @@ func extractContentAndImages(content []mcp.ContentItem) (text string, images []s
 	return text, images, skippedImages
 }
 
-// redactImageData returns a copy of content items with image Data fields replaced
-// by a size indicator. This prevents large base64 strings from being stored in the
-// Data map (which may be serialized to logs or SSE events).
+// resourceText renders a resource item for the model: a reference to the
+// resource, followed by its text when the tool embedded a text resource, so
+// the content itself reaches the model.
+func resourceText(item mcp.ContentItem) string {
+	label := "Resource"
+	if item.Type == "resource_link" {
+		label = "Resource link"
+	}
+	ref := item.MimeType
+	switch {
+	case item.URI != "" && item.MimeType != "":
+		ref = fmt.Sprintf("%s (%s)", item.URI, item.MimeType)
+	case item.URI != "":
+		ref = item.URI
+	}
+	placeholder := fmt.Sprintf("[%s: %s]", label, ref)
+	if item.Type == "resource" && item.Text != "" {
+		return placeholder + "\n" + item.Text
+	}
+	return placeholder
+}
+
+// redactImageData returns a copy of content items with base64 Data fields, of
+// images, audio and blob resources, replaced by a size indicator. This prevents
+// large base64 strings from being stored in the Data map (which may be
+// serialized to logs or SSE events).
 func redactImageData(content []mcp.ContentItem) []mcp.ContentItem {
 	redacted := make([]mcp.ContentItem, len(content))
 	for i, item := range content {
 		redacted[i] = item
-		if item.Type == "image" && item.Data != "" {
+		if item.Data != "" {
 			redacted[i].Data = fmt.Sprintf("[redacted, base64_len=%d]", len(item.Data))
 		}
 	}
@@ -438,9 +461,8 @@ func extractContentText(content []mcp.ContentItem) string {
 				mimeType = "image"
 			}
 			textParts = append(textParts, fmt.Sprintf("[Image: %s]", mimeType))
-		case "resource":
-			// For resources, include a reference
-			textParts = append(textParts, fmt.Sprintf("[Resource: %s]", item.MimeType))
+		case "resource", "resource_link":
+			textParts = append(textParts, resourceText(item))
 		default:
 			// For other types, try to include any text or data
 			if item.Text != "" {

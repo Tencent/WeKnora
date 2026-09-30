@@ -599,9 +599,18 @@ func (c *mcpGoClient) CallTool(ctx context.Context, name string, args map[string
 		return nil, fmt.Errorf("failed to call tool: %w", err)
 	}
 
-	// Convert to our types
-	content := make([]ContentItem, 0, len(result.Content))
-	for _, item := range result.Content {
+	return &CallToolResult{
+		IsError: result.IsError,
+		Content: toolContentItems(result.Content),
+	}, nil
+}
+
+// toolContentItems converts the content of a tool result. Besides text and
+// images, a tool can return audio, a resource embedded in the result (GitHub's
+// get_file_contents returns the file that way) or a link to one.
+func toolContentItems(items []mcp.Content) []ContentItem {
+	content := make([]ContentItem, 0, len(items))
+	for _, item := range items {
 		if textContent, ok := mcp.AsTextContent(item); ok {
 			content = append(content, ContentItem{
 				Type: "text",
@@ -613,13 +622,30 @@ func (c *mcpGoClient) CallTool(ctx context.Context, name string, args map[string
 				Data:     imageContent.Data,
 				MimeType: imageContent.MIMEType,
 			})
+		} else if audioContent, ok := mcp.AsAudioContent(item); ok {
+			content = append(content, ContentItem{
+				Type:     "audio",
+				Data:     audioContent.Data,
+				MimeType: audioContent.MIMEType,
+			})
+		} else if resource, ok := mcp.AsEmbeddedResource(item); ok {
+			resourceItem := ContentItem{Type: "resource"}
+			if text, ok := mcp.AsTextResourceContents(resource.Resource); ok {
+				resourceItem.URI, resourceItem.MimeType, resourceItem.Text = text.URI, text.MIMEType, text.Text
+			} else if blob, ok := mcp.AsBlobResourceContents(resource.Resource); ok {
+				resourceItem.URI, resourceItem.MimeType, resourceItem.Data = blob.URI, blob.MIMEType, blob.Blob
+			}
+			content = append(content, resourceItem)
+		} else if link, ok := item.(mcp.ResourceLink); ok {
+			content = append(content, ContentItem{
+				Type:     "resource_link",
+				Text:     link.Name,
+				MimeType: link.MIMEType,
+				URI:      link.URI,
+			})
 		}
 	}
-
-	return &CallToolResult{
-		IsError: result.IsError,
-		Content: content,
-	}, nil
+	return content
 }
 
 // ReadResource reads a resource from the MCP service
