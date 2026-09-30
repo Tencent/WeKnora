@@ -1,6 +1,6 @@
 import i18n from '@/i18n';
 import { buildMermaidBlockHtml, buildMermaidLoadingHtml } from '@/utils/markdownEnhancements';
-import { buildManualDraft, deriveManualTitle } from './manualKnowledgeDraft';
+import { buildManualDraft, deriveManualTitle, resolveManualDraftKnowledgeBaseId } from './manualKnowledgeDraft';
 import {
   injectCachedMermaidSvg as injectCachedMermaidSvgHtml,
   maskMermaidBlocksForStreaming as maskMermaidBlocks,
@@ -77,3 +77,12 @@ export const buildManualMarkdown = (_question: string, answer: string): string =
     sourcesHeading: i18n.global.t('chat.manualSourcesHeading'),
   });
 };
+
+/**
+ * Knowledge base to preselect in the manual editor for a chat answer, or null
+ * when the answer carries no retrievable provenance. See
+ * `resolveManualDraftKnowledgeBaseId` for why chat should name one (#2081).
+ */
+export const resolveManualKnowledgeBaseId = (
+  references?: { knowledge_base_id?: string }[] | null,
+): string | null => resolveManualDraftKnowledgeBaseId(references);
