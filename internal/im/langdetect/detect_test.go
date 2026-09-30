@@ -1,6 +1,10 @@
 package langdetect
 
-import "testing"
+import (
+	"testing"
+
+	"golang.org/x/text/unicode/norm"
+)
 
 func TestDetect(t *testing.T) {
 	for _, tt := range []struct {
@@ -15,11 +19,39 @@ func TestDetect(t *testing.T) {
 		{"non linguistic", "12345 😀 ?", ""},
 		{"mixed Vietnamese and English", "This is a mixed Vietnamese English sentence " +
 			"nhưng tôi cần giúp đỡ về đơn hàng của mình.", ""},
+		{"short mixed", "ok thanks bạn", ""},
+		{"mixed first turn with Vietnamese cues", "How do I reset my password? Mình quên mật khẩu rồi", "Vietnamese"},
+		{"French", "Je voudrais acheter un nouveau produit", ""},
+		{"Portuguese", "Gostaria de comprar um novo produto", ""},
+		{"Romanian", "Vreau să cumpăr ceva nou", ""},
+		{"Croatian", "Đakovo je lijep grad", ""},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := Detect(tt.text); got != tt.want {
 				t.Fatalf("Detect() = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestDetectShortVietnameseFirstTurn(t *testing.T) {
+	for _, tt := range []struct {
+		name, text string
+	}{
+		{"price", "Giá bao nhiêu vậy?"},
+		{"stock", "Shop ơi còn hàng không?"},
+		{"thanks", "Cảm ơn bạn nhiều nha"},
+		{"password", "Em muốn đổi mật khẩu thì làm sao ạ"},
+		{"upload timeout", "Mình bị lỗi timeout khi gọi endpoint upload file, check giúp mình với"},
+	} {
+		for _, form := range []struct {
+			name, text string
+		}{{"NFC", norm.NFC.String(tt.text)}, {"NFD", norm.NFD.String(tt.text)}} {
+			t.Run(tt.name+"/"+form.name, func(t *testing.T) {
+				if got := Detect(form.text); got != "Vietnamese" {
+					t.Fatalf("Detect() = %q, want Vietnamese", got)
+				}
+			})
+		}
 	}
 }
