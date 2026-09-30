@@ -306,3 +306,151 @@ func TestDocumentBlocksReadsMultiplePagesAndAcceptsEmptyDocument(t *testing.T) {
 		t.Fatalf("empty document: %#v, %v", blocks, err)
 	}
 }
+
+// A node is readable by its own id. That endpoint is what makes a personal-space
+// selection possible: such a workspace never appears in the workspace list, so
+// the node cannot be found by walking a tree.
+func TestClientReadsNodeByItsOwnID(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.EscapedPath() == "/v2.0/wiki/nodes/personal%2Fbook":
+			if r.Method != http.MethodGet {
+				t.Errorf("node request method = %s", r.Method)
+			}
+			if r.URL.Query().Get("operatorId") != "union/user" ||
+				r.Header.Get("x-acs-dingtalk-access-token") != "token" {
+				t.Errorf("node request query = %#v, headers = %#v", r.URL.Query(), r.Header)
+			}
+			_, _ = w.Write([]byte(`{"node":{
+				"nodeId":"personal/book","workspaceId":"personal-space","name":"Weekly.axls",
+				"type":"FILE","category":"ALIDOC","extension":"axls",
+				"modifiedTime":"2026-01-04T14:27Z","modifiedTimestamp":1767508041000,
+				"url":"https://alidocs.dingtalk.com/i/nodes/personal/book?utm_scene=person_space"
+			}}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"code":"nodeNotExist","message":"Data not found"}`))
+		}
+	}))
+	defer server.Close()
+
+	c := testClient(server)
+	c.token = "token"
+	c.tokenExpiry = time.Now().Add(time.Hour)
+
+	item, err := c.getNode(context.Background(), "personal/book")
+	if err != nil {
+		t.Fatalf("getNode() error = %v", err)
+	}
+	if item.ID != "personal/book" || item.WorkspaceID != "personal-space" ||
+		item.Extension != "axls" || !item.modifiedAt().Equal(time.UnixMilli(1767508041000)) {
+		t.Fatalf("getNode() = %#v", item)
+	}
+
+	if _, err := c.getNode(context.Background(), "missing"); err == nil ||
+		!strings.Contains(err.Error(), "nodeNotExist") {
+		t.Fatalf("getNode(missing) error = %v, want the provider refusal", err)
+	}
+}
+
+// A Base is read through the notable API. Two facts that cost real time are
+// pinned here: records/list is POST-only and takes maxResults in the body, and
+// every call carries the operator's unionId. A transient failure on the same
+// endpoint must be retried, not surfaced as a broken Base.
+func TestClientReadsNotableBaseThroughOfficialEndpoints(t *testing.T) {
+	var (
+		mu             sync.Mutex
+		requests       []string
+		recordBodies   []string
+		recordAttempts int
+	)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Query().Get("operatorId") != "union/user" {
+			t.Errorf("notable request query = %#v", r.URL.Query())
+		}
+		mu.Lock()
+		requests = append(requests, r.Method+" "+r.URL.Path)
+		mu.Unlock()
+
+		switch r.URL.Path {
+		case "/v1.0/notable/bases/base-1/sheets":
+			_, _ = w.Write([]byte(`{"value":[{"name":"清单","id":"tbl-1"}]}`))
+		case "/v1.0/notable/bases/base-1/sheets/tbl-1/fields":
+			_, _ = w.Write([]byte(`{"value":[
+				{"name":"名称","id":"f1","type":"text"},
+				{"name":"开始日期","id":"f2","type":"date"}
+			]}`))
+		case "/v1.0/notable/bases/base-1/sheets/tbl-1/records/list":
+			recordAttempts++
+			body, _ := io.ReadAll(r.Body)
+			mu.Lock()
+			recordBodies = append(recordBodies, string(body))
+			mu.Unlock()
+			if r.Method != http.MethodPost {
+				t.Errorf("records/list method = %s, want POST", r.Method)
+			}
+			// Both pagination values belong to the body; the endpoint ignores
+			// them in the query string.
+			if r.URL.Query().Get("maxResults") != "" || r.URL.Query().Get("nextToken") != "" {
+				t.Errorf("pagination leaked into the query: %#v", r.URL.Query())
+			}
+			if recordAttempts == 1 {
+				w.WriteHeader(http.StatusServiceUnavailable)
+				_, _ = w.Write([]byte(`{"code":"ServiceUnavailable","message":"try later"}`))
+				return
+			}
+			_, _ = w.Write([]byte(`{"records":[{"id":"r1","fields":{"名称":"第一条"}}],
+				"hasMore":false,"nextToken":""}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	c := testClient(server)
+	c.token = "cached"
+	c.tokenExpiry = time.Now().Add(time.Hour)
+
+	tables, err := c.listNotableTables(context.Background(), "base-1")
+	if err != nil || len(tables) != 1 || tables[0].ID != "tbl-1" || tables[0].Name != "清单" {
+		t.Fatalf("listNotableTables() = %#v, %v", tables, err)
+	}
+	fields, err := c.listNotableFields(context.Background(), "base-1", "tbl-1")
+	if err != nil || len(fields) != 2 || fields[0].Name != "名称" || fields[1].Type != "date" {
+		t.Fatalf("listNotableFields() = %#v, %v", fields, err)
+	}
+
+	page, err := c.listNotableRecords(context.Background(), "base-1", "tbl-1", "")
+	if err != nil {
+		t.Fatalf("listNotableRecords() error = %v", err)
+	}
+	if recordAttempts != 2 {
+		t.Fatalf("records/list attempts = %d, want a retry after the transient failure", recordAttempts)
+	}
+	if len(page.Records) != 1 || page.Records[0].Fields["名称"] != "第一条" || page.HasMore {
+		t.Fatalf("listNotableRecords() = %#v", page)
+	}
+	if !strings.Contains(recordBodies[1], `"maxResults":100`) {
+		t.Fatalf("records/list body = %s, want maxResults in the body", recordBodies[1])
+	}
+
+	if _, err := c.listNotableRecords(context.Background(), "base-1", "tbl-1", "next-token"); err != nil {
+		t.Fatalf("listNotableRecords(next) error = %v", err)
+	}
+	if !strings.Contains(recordBodies[2], `"nextToken":"next-token"`) {
+		t.Fatalf("paged records/list body = %s, want the token in the body", recordBodies[2])
+	}
+
+	wantRequests := []string{
+		"GET /v1.0/notable/bases/base-1/sheets",
+		"GET /v1.0/notable/bases/base-1/sheets/tbl-1/fields",
+		"POST /v1.0/notable/bases/base-1/sheets/tbl-1/records/list",
+		"POST /v1.0/notable/bases/base-1/sheets/tbl-1/records/list",
+		"POST /v1.0/notable/bases/base-1/sheets/tbl-1/records/list",
+	}
+	if strings.Join(requests, " ") != strings.Join(wantRequests, " ") {
+		t.Fatalf("notable endpoints called with %#v, want %#v", requests, wantRequests)
+	}
+}
