@@ -54,8 +54,12 @@ func TestConvertMixedMessage(t *testing.T) {
 			wantAESKey:  "key1",
 		},
 		{
-			name:        "multiple images with text: first image kept",
-			msg:         mixedMsg(textItem("这两张图有什么区别？"), imageItem("https://img.example/1", "key1"), imageItem("https://img.example/2", "key2")),
+			name: "multiple images with text: first image kept",
+			msg: mixedMsg(
+				textItem("这两张图有什么区别？"),
+				imageItem("https://img.example/1", "key1"),
+				imageItem("https://img.example/2", "key2"),
+			),
 			chatType:    im.ChatTypeDirect,
 			wantType:    im.MessageTypeImage,
 			wantContent: "这两张图有什么区别？",
