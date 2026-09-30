@@ -423,18 +423,20 @@ func (s *mcpServiceService) TestMCPService(
 		return mcpTestFailure(err, "Initialization failed"), nil
 	}
 
-	// List tools
-	tools, err := client.ListTools(testCtx)
-	if err != nil {
-		logger.GetLogger(ctx).Warnf("Failed to list tools: %v", err)
-		tools = []*types.MCPTool{}
+	var tools []*types.MCPTool
+	if initResult.Capabilities.Tools != nil {
+		tools, err = client.ListTools(testCtx)
+		if err != nil {
+			return mcpTestFailure(err, "Failed to list tools"), nil
+		}
 	}
 
-	// List resources
-	resources, err := client.ListResources(testCtx)
-	if err != nil {
-		logger.GetLogger(ctx).Warnf("Failed to list resources: %v", err)
-		resources = []*types.MCPResource{}
+	var resources []*types.MCPResource
+	if initResult.Capabilities.Resources != nil {
+		resources, err = client.ListResources(testCtx)
+		if err != nil {
+			return mcpTestFailure(err, "Failed to list resources"), nil
+		}
 	}
 
 	return &types.MCPTestResult{
