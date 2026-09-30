@@ -1228,6 +1228,19 @@ func (s *knowledgeService) moveOneKnowledge(
 	if err := validateMoveItem(ctx, knowledge, sourceKB, targetKB, mode); err != nil {
 		return err
 	}
+	if mode == "reuse_vectors" {
+		compatible, err := s.envelopesCompatible(ctx, sourceKB, targetKB)
+		if err != nil {
+			return fmt.Errorf("failed to compare embedding envelopes (source KB %s, target KB %s): %w",
+				sourceKB.ID, targetKB.ID, err)
+		}
+		if !compatible {
+			return fmt.Errorf(
+				"reuse_vectors move between knowledge bases with different embedding envelopes is not supported "+
+					"(source KB %s, target KB %s); use reparse mode", sourceKB.ID, targetKB.ID)
+		}
+	}
+
 	copyOfKnowledge := *knowledge
 	knowledge = &copyOfKnowledge
 	state, err := transferState(knowledge)

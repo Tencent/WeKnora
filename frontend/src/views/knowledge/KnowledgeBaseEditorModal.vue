@@ -74,9 +74,31 @@
                   </t-checkbox>
                   <p class="indexing-check-desc">{{ $t('knowledgeEditor.indexing.wikiDesc') }}</p>
                 </div>
+                <div
+                  class="indexing-check-item"
+                  :class="{ 'is-checked': formData.indexingStrategy.imageVectorEnabled, 'is-disabled': isImageVectorDisabled }"
+                  @click="toggleImageVectorIndexing"
+                >
+                  <t-checkbox
+                    :checked="formData.indexingStrategy.imageVectorEnabled"
+                    :disabled="isImageVectorDisabled"
+                    class="indexing-check-box"
+                  >
+                    <span class="indexing-check-title">
+                      {{ $t('knowledgeEditor.indexing.imageVectorTitle') }}
+                      <span class="indexing-new-badge">NEW</span>
+                    </span>
+                  </t-checkbox>
+                  <p class="indexing-check-desc">{{ $t('knowledgeEditor.indexing.imageVectorDesc') }}</p>
+                </div>
               </div>
               <p v-if="isIndexingLocked" class="form-tip locked-tip">
                 {{ $t('knowledgeEditor.indexing.lockedTip') }}
+              </p>
+              <!-- Shown when the reason is the model, not existing content: without
+                   it the checkbox is just greyed out with no visible reason. -->
+              <p v-else-if="!isFAQ && !embeddingSupportsImage" class="form-tip locked-tip">
+                {{ $t('knowledgeEditor.indexing.imageVectorUnsupported') }}
               </p>
             </div>
 
@@ -959,6 +981,9 @@ const initFormData = (type: 'document' | 'faq' = 'document') => {
       keywordEnabled: true,
       wikiEnabled: false,
       graphEnabled: false,
+      // Off by default: it changes what gets written at ingestion time and
+      // costs a vision-encoder call per image.
+      imageVectorEnabled: false,
     },
     // Vector-store binding. Empty string means "use the env-configured
     // store"; create mode defaults to that, edit mode loads the
@@ -1118,6 +1143,7 @@ const loadKBData = async (
         keywordEnabled: kb.indexing_strategy?.keyword_enabled ?? true,
         wikiEnabled: kb.indexing_strategy?.wiki_enabled ?? false,
         graphEnabled: kb.indexing_strategy?.graph_enabled ?? false,
+        imageVectorEnabled: kb.indexing_strategy?.image_vector_enabled ?? false,
       },
       // Vector-store binding. vectorStoreId is editor-only state; it
       // is only included in the create request, never the update
@@ -1192,6 +1218,19 @@ const handleGranularityChange = (value: string | number | boolean) => {
 
 const isIndexingLocked = computed(() => editorMode.value === 'edit' && hasFiles.value)
 
+// A text-only embedding model cannot honour the switch and the backend would
+// skip image embedding silently, so the switch is disabled up front rather
+// than allowed to fail quietly.
+const selectedEmbeddingModel = computed(() =>
+  allModels.value.find((m: any) => m.id === formData.value?.modelConfig?.embeddingModelId)
+)
+
+const embeddingSupportsImage = computed(
+  () => selectedEmbeddingModel.value?.supports_image_embedding === true
+)
+
+const isImageVectorDisabled = computed(() => isIndexingLocked.value || !embeddingSupportsImage.value)
+
 const toggleVectorIndexing = () => {
   if (!formData.value) return
   if (isIndexingLocked.value) return
@@ -1204,6 +1243,32 @@ const toggleWikiIndexing = () => {
   if (!formData.value) return
   if (isIndexingLocked.value) return
   formData.value.indexingStrategy.wikiEnabled = !formData.value.indexingStrategy.wikiEnabled
+}
+
+// The flag that actually goes on the wire. Image vectors need vector retrieval
+// to hold them and an image-capable model to produce them, so a stale "on"
+// from a previous model selection is dropped rather than persisted as a
+// setting that will never do anything. When the model cannot be resolved at
+// all the flag passes through untouched — better to store an unvalidated value
+// than to silently clear one the user set.
+const imageVectorEnabledForPayload = (): boolean => {
+  if (formData.value?.indexingStrategy?.imageVectorEnabled !== true) return false
+  if (formData.value?.indexingStrategy?.vectorEnabled !== true) return false
+  if (!selectedEmbeddingModel.value) return true
+  return embeddingSupportsImage.value
+}
+
+const toggleImageVectorIndexing = () => {
+  if (!formData.value) return
+  if (isImageVectorDisabled.value) return
+  // Image vectors live in the same vector collection as text chunks, so there
+  // is nowhere to put them when vector retrieval is off.
+  if (!formData.value.indexingStrategy.vectorEnabled) {
+    formData.value.indexingStrategy.vectorEnabled = true
+    formData.value.indexingStrategy.keywordEnabled = true
+  }
+  formData.value.indexingStrategy.imageVectorEnabled =
+    !formData.value.indexingStrategy.imageVectorEnabled
 }
 
 const handleChunkingConfigUpdate = (config: any) => {
@@ -1543,6 +1608,7 @@ const buildSubmitData = () => {
       keyword_enabled: formData.value.indexingStrategy?.keywordEnabled ?? true,
       wiki_enabled: formData.value.indexingStrategy?.wikiEnabled ?? false,
       graph_enabled: formData.value.indexingStrategy?.graphEnabled ?? false,
+      image_vector_enabled: imageVectorEnabledForPayload(),
     }
   }
 
@@ -1648,6 +1714,7 @@ const doSubmit = async () => {
           keyword_enabled: formData.value.indexingStrategy?.keywordEnabled ?? true,
           wiki_enabled: formData.value.indexingStrategy?.wikiEnabled ?? false,
           graph_enabled: formData.value.indexingStrategy?.graphEnabled ?? false,
+          image_vector_enabled: imageVectorEnabledForPayload(),
         }
       }
       // 图片分类配置：buildSubmitData 只在与快照有差异时才产出该字段，带上即

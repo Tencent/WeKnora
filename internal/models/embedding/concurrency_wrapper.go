@@ -51,6 +51,18 @@ func (w *concurrencyEmbedder) BatchEmbedWithPool(
 	return w.inner.BatchEmbedWithPool(ctx, w, texts)
 }
 
+func (w *concurrencyEmbedder) BatchEmbedMultimodal(
+	ctx context.Context, inputs []Input,
+) ([][]float32, error) {
+	release := limiter.GateNamedN(ctx, w.inner.GetModelID(), w.inner.GetModelName(), w.limit)
+	defer release()
+	return BatchEmbedMultimodalWith(ctx, w.inner, inputs)
+}
+
+func (w *concurrencyEmbedder) Capabilities() Capabilities {
+	return CapabilitiesOf(w.inner)
+}
+
 func (w *concurrencyEmbedder) GetModelName() string { return w.inner.GetModelName() }
 func (w *concurrencyEmbedder) GetDimensions() int   { return w.inner.GetDimensions() }
 func (w *concurrencyEmbedder) GetModelID() string   { return w.inner.GetModelID() }

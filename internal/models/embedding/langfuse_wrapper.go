@@ -78,6 +78,54 @@ func (l *langfuseEmbedder) BatchEmbedWithPool(ctx context.Context, model Embedde
 	return l.inner.BatchEmbedWithPool(ctx, l, texts)
 }
 
+// BatchEmbedMultimodal reports the multimodal call as a Langfuse generation.
+// Input previews carry image counts only — never the base64 payloads.
+func (l *langfuseEmbedder) BatchEmbedMultimodal(
+	ctx context.Context, inputs []Input,
+) ([][]float32, error) {
+	mgr := langfuse.GetManager()
+	if !mgr.Enabled() {
+		return BatchEmbedMultimodalWith(ctx, l.inner, inputs)
+	}
+	genCtx, gen := mgr.StartGeneration(ctx, langfuse.GenerationOptions{
+		Name:  "embedding.batch_embed_multimodal",
+		Model: l.inner.GetModelName(),
+		Input: map[string]interface{}{
+			"count":  len(inputs),
+			"images": countImages(inputs),
+		},
+		Metadata: map[string]interface{}{
+			"model_id":   l.inner.GetModelID(),
+			"dimensions": l.inner.GetDimensions(),
+			"batch_size": len(inputs),
+			"modality":   "image",
+		},
+	})
+	result, err := BatchEmbedMultimodalWith(genCtx, l.inner, inputs)
+	var out interface{}
+	if len(result) > 0 {
+		out = map[string]interface{}{
+			"count":      len(result),
+			"dimensions": len(result[0]),
+		}
+	}
+	gen.Finish(out, nil, err)
+	return result, err
+}
+
+func (l *langfuseEmbedder) Capabilities() Capabilities {
+	return CapabilitiesOf(l.inner)
+}
+
+// countImages sums the image parts across a multimodal batch.
+func countImages(inputs []Input) int {
+	total := 0
+	for _, in := range inputs {
+		total += len(in.Images)
+	}
+	return total
+}
+
 func (l *langfuseEmbedder) GetModelName() string { return l.inner.GetModelName() }
 func (l *langfuseEmbedder) GetDimensions() int   { return l.inner.GetDimensions() }
 func (l *langfuseEmbedder) GetModelID() string   { return l.inner.GetModelID() }

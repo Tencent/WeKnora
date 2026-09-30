@@ -505,7 +505,10 @@ func (s *DataTableSummaryService) Handle(ctx context.Context, t *asynq.Task) err
 	}
 
 	// 4. 索引到向量数据库
-	if err := s.indexToVectorDB(ctx, chunks, resources.retrieveEngine, resources.embeddingModel); err != nil {
+	if err := s.indexToVectorDB(
+		ctx, resources.knowledgeBase, chunks,
+		resources.retrieveEngine, resources.embeddingModel,
+	); err != nil {
 		s.cleanupOnFailure(ctx, resources, chunks, err)
 		return err
 	}
@@ -746,6 +749,7 @@ func (s *DataTableSummaryService) buildChunks(resources *extractionResources, ta
 // 思路：批量构建索引信息，统一索引，更新状态
 func (s *DataTableSummaryService) indexToVectorDB(
 	ctx context.Context,
+	kb *types.KnowledgeBase,
 	chunks []*types.Chunk,
 	engine *retriever.CompositeRetrieveEngine,
 	embedder embedding.Embedder,
@@ -772,7 +776,7 @@ func (s *DataTableSummaryService) indexToVectorDB(
 	logger.Infof(ctx, "Created %d chunks for data table", len(chunks))
 
 	// 批量索引
-	if err := engine.BatchIndex(ctx, embedder, indexInfoList); err != nil {
+	if err := indexChunksWithEnvelope(ctx, engine, kb, embedder, indexInfoList); err != nil {
 		logger.Errorf(ctx, "failed to index chunks: %v", err)
 		return err
 	}

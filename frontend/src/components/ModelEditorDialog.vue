@@ -501,6 +501,15 @@
           </div>
         </div>
 
+
+        <div v-if="activeModelType === 'embedding'" class="form-item">
+          <label class="form-label">{{ $t('model.editor.supportsImageEmbeddingLabel') }}</label>
+          <div class="vision-toggle">
+            <t-switch v-model="formData.supportsImageEmbedding" />
+            <span class="form-desc form-desc--inline">{{ $t('model.editor.supportsImageEmbeddingDesc') }}</span>
+          </div>
+        </div>
+
         <!-- Chat / VLM: context window. Agent compaction sizes itself from this. -->
         <div v-if="activeModelType === 'chat' || activeModelType === 'vllm'" class="form-item">
           <label class="form-label">{{ $t('model.editor.contextWindowLabel') }}</label>
@@ -667,6 +676,12 @@ interface ModelFormData {
   interfaceType?: 'ollama' | 'openai'
   isDefault: boolean
   supportsVision?: boolean
+  /**
+   * Embedding 专用：该模型能否编码图像（写入 extra_config.supports_image_embedding）。
+   * 打开后知识库的「图像向量」开关才可用。未显式声明时后端按模型名推断，
+   * 所以这个值在编辑态由服务端计算好的 supports_image_embedding 回填。
+   */
+  supportsImageEmbedding?: boolean
   /** 对话/VLM 上下文窗口（token）。空/0 表示使用默认 200000。 */
   contextWindow?: number
   /** 后台任务对该模型的并发上限；0/undefined 表示沿用全局默认。仅 chat/embedding/vllm 生效。 */
@@ -1279,6 +1294,7 @@ const formData = ref<ModelFormData>({
   interfaceType: 'ollama',
   isDefault: false,
   supportsVision: false,
+  supportsImageEmbedding: false,
   contextWindow: undefined,
   maxConcurrency: undefined,
   maxOutputTokens: undefined,
@@ -1435,6 +1451,9 @@ const selectModelType = async (type: EditorModelType) => {
   if (type !== 'chat') {
     formData.value.supportsVision = false
   }
+  if (type !== 'embedding') {
+    formData.value.supportsImageEmbedding = false
+  }
   remoteChecked.value = false
   remoteAvailable.value = false
   remoteMessage.value = ''
@@ -1569,6 +1588,7 @@ const resetForm = () => {
     interfaceType: undefined,
     isDefault: false,
     supportsVision: false,
+    supportsImageEmbedding: false,
     contextWindow: undefined,
     maxConcurrency: undefined,
     maxOutputTokens: undefined,

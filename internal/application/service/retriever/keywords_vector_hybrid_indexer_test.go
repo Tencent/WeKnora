@@ -16,7 +16,7 @@ type capturingEmbedder struct {
 	batchTexts []string
 }
 
-func (e *capturingEmbedder) Embed(ctx context.Context, text string) ([]float32, error) {
+func (e *capturingEmbedder) Embed(_ context.Context, text string) ([]float32, error) {
 	e.text = text
 	return []float32{1}, nil
 }
@@ -44,8 +44,8 @@ func (r *saveOnlyRepository) Save(ctx context.Context, indexInfo *types.IndexInf
 
 func (r *saveOnlyRepository) BatchSave(
 	ctx context.Context,
-	indexInfoList []*types.IndexInfo,
-	params map[string]any,
+	_ []*types.IndexInfo,
+	_ map[string]any,
 ) error {
 	return nil
 }
@@ -87,7 +87,7 @@ func TestBatchIndexRemovesInlineImagePayloadBeforeEmbedding(t *testing.T) {
 	assertImagePayloadRemoved(t, embedder.batchTexts[0], payload)
 }
 
-func TestBatchIndexTruncatesOversizedEmbeddingInput(t *testing.T) {
+func TestBatchIndexTruncatesOversizedInput(t *testing.T) {
 	ctx := context.Background()
 	embedder := &capturingEmbedder{}
 	service := &KeywordsVectorHybridRetrieveEngineService{indexRepository: &saveOnlyRepository{}}

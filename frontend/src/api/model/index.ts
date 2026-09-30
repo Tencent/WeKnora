@@ -91,6 +91,12 @@ export interface ModelConfig {
   is_default?: boolean;
   is_builtin?: boolean;
   status?: string;
+  // Server-computed: whether this embedding model can encode images.
+  // Gates the "image vector" indexing switch in the KB editor. Deliberately
+  // NOT derived client-side from parameters.extra_config — the server strips
+  // extra_config for callers without integration-secret access, so a local
+  // derivation would disagree with what ingestion actually does.
+  supports_image_embedding?: boolean;
   // Per-field configured? metadata from the main response. For builtin
   // models it is returned only to system administrators.
   credentials?: Record<ModelCredentialField, { configured: boolean }>;

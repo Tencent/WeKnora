@@ -21,6 +21,11 @@ const (
 	ChunkTypeImageOCR ChunkType = "image_ocr"
 	// ChunkTypeImageCaption 表示图片描述的 Chunk
 	ChunkTypeImageCaption ChunkType = "image_caption"
+	// ChunkTypeImageVector 表示由「图像本身」经多模态 Embedding 得到的 Chunk。
+	// 与 image_ocr / image_caption 的区别：后者向量化的是图片的**文字描述**，
+	// 本类型向量化的是**像素**，因此文本 query 可以直接召回图片，不依赖
+	// OCR 成功或 VLM 描述准确。
+	ChunkTypeImageVector ChunkType = "image_vector"
 	// ChunkTypeSummary 表示摘要类型的 Chunk
 	ChunkTypeSummary = "summary"
 	// ChunkTypeEntity 表示实体类型的 Chunk

@@ -26,6 +26,27 @@ func TestBuildVLMCaptionPrompt(t *testing.T) {
 			t.Fatalf("unexpected prompt: %s", got)
 		}
 	})
+
+	// A stored bare locale code is not a language name, and at least one VLM
+	// answers "in zh." with an empty completion. The template must never ship a
+	// raw code; display names written by the UI must survive unchanged.
+	t.Run("normalizes bare locale codes, keeps display names", func(t *testing.T) {
+		for _, tc := range []struct{ in, want string }{
+			{"zh", "Chinese (Simplified)"},
+			{"zh-CN", "Chinese (Simplified)"},
+			{"en", "English"},
+			{"en-US", "English"},
+			{"ko-KR", "Korean"},
+			{"Chinese", "Chinese"},
+			{"English", "English"},
+		} {
+			got := buildVLMCaptionPrompt(context.Background(),
+				types.VLMConfig{DescriptionLanguage: tc.in})
+			if !strings.Contains(got, "in "+tc.want+".") {
+				t.Fatalf("DescriptionLanguage %q: prompt should name %q, got: %s", tc.in, tc.want, got)
+			}
+		}
+	})
 }
 
 // TestVLMOCRPromptExcludesCustomInstructions pins the OCR-side half of the

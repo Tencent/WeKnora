@@ -40,9 +40,19 @@ var HTMLImageSrcRegex = regexp.MustCompile(`(?i)<img\b([^>]*?)\ssrc\s*=\s*['"]([
 // HTMLImageSrcRegex.
 const HTMLImageSrcURLGroup = 2
 
+// isImageChildType reports whether a chunk was created from an image and
+// therefore carries image_info worth merging into its parent's result.
+func isImageChildType(chunkType types.ChunkType) bool {
+	switch chunkType {
+	case types.ChunkTypeImageOCR, types.ChunkTypeImageCaption, types.ChunkTypeImageVector:
+		return true
+	}
+	return false
+}
+
 // CollectImageInfoByChunkIDs collects merged image_info JSON for each given
-// chunk ID by querying child chunks (image_ocr / image_caption). It supports
-// two-level resolution:
+// chunk ID by querying child chunks (image_ocr / image_caption /
+// image_vector). It supports two-level resolution:
 //   - If chunkIDs are text chunks, their direct children are image chunks → one query.
 //   - If chunkIDs are parent_text chunks, their children are text chunks
 //     whose children are image chunks → two queries.
@@ -173,7 +183,7 @@ func collectChildEvidence(
 			continue
 		}
 		switch child.ChunkType {
-		case types.ChunkTypeImageOCR, types.ChunkTypeImageCaption:
+		case types.ChunkTypeImageOCR, types.ChunkTypeImageCaption, types.ChunkTypeImageVector:
 			addInfo(child.ParentChunkID, child)
 			addPageQuote(child.ParentChunkID, child)
 		case types.ChunkTypeText:
@@ -189,7 +199,7 @@ func collectChildEvidence(
 				if !gc.IsEnabled {
 					continue
 				}
-				if gc.ChunkType != types.ChunkTypeImageOCR && gc.ChunkType != types.ChunkTypeImageCaption {
+				if !isImageChildType(gc.ChunkType) {
 					continue
 				}
 				if parentTextID, ok := textToParent[gc.ParentChunkID]; ok {

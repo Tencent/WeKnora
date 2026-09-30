@@ -114,7 +114,14 @@ func newEmbedder(config Config, pooler EmbedderPooler, ollamaService *ollama.Oll
 		return NewOllamaEmbedder(config.BaseURL,
 			config.ModelName, config.TruncatePromptTokens, config.Dimensions, config.ModelID, pooler, ollamaService)
 	case string(types.ModelSourceRemote):
-		return newRemoteEmbedder(config, pooler)
+		inner, err := newRemoteEmbedder(config, pooler)
+		if err != nil {
+			return nil, err
+		}
+		if ResolveMultimodal(config.ModelName, config.ExtraConfig) {
+			return newMultimodalEmbedder(inner, config)
+		}
+		return inner, nil
 	default:
 		return nil, fmt.Errorf("unsupported embedder source: %s", config.Source)
 	}

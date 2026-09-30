@@ -32,6 +32,43 @@ func (d *debugEmbedder) BatchEmbedWithPool(ctx context.Context, model Embedder, 
 	return d.inner.BatchEmbedWithPool(ctx, d, texts)
 }
 
+// BatchEmbedMultimodal forwards the call and records it in the LLM debug log.
+// Like the text paths it is unconditional, so the capability survives wrapping
+// while Capabilities stays truthful about the inner model.
+func (d *debugEmbedder) BatchEmbedMultimodal(
+	ctx context.Context, inputs []Input,
+) ([][]float32, error) {
+	start := time.Now()
+	result, err := BatchEmbedMultimodalWith(ctx, d.inner, inputs)
+	logEmbeddingDebug(ctx, d.inner.GetModelName(), debugInputPreview(inputs), result, err, time.Since(start))
+	return result, err
+}
+
+func (d *debugEmbedder) Capabilities() Capabilities {
+	return CapabilitiesOf(d.inner)
+}
+
+// debugInputPreview renders multimodal inputs as short text lines. Image
+// payloads are never printed in full — a single page image is megabytes of
+// base64 and would swamp the debug log.
+func debugInputPreview(inputs []Input) []string {
+	out := make([]string, 0, len(inputs))
+	for _, in := range inputs {
+		var sb strings.Builder
+		if text := strings.TrimSpace(in.Text); text != "" {
+			sb.WriteString(logger.TruncateRunes(strings.ReplaceAll(text, "\n", "\\n"), 120))
+		}
+		if len(in.Images) > 0 {
+			if sb.Len() > 0 {
+				sb.WriteString(" ")
+			}
+			fmt.Fprintf(&sb, "[%d image(s)]", len(in.Images))
+		}
+		out = append(out, sb.String())
+	}
+	return out
+}
+
 func (d *debugEmbedder) GetModelName() string { return d.inner.GetModelName() }
 func (d *debugEmbedder) GetDimensions() int   { return d.inner.GetDimensions() }
 func (d *debugEmbedder) GetModelID() string   { return d.inner.GetModelID() }

@@ -139,6 +139,14 @@
                   <t-icon name="image" size="12px" />
                 </span>
               </template>
+              <!-- Embedding：能编码图像时打标，呼应知识库里的「图像向量」开关 -->
+              <template v-if="model._modelType === 'embedding' && model.supportsImageEmbedding">
+                <span class="model-card__sep">·</span>
+                <span class="model-card__vision" :title="$t('model.editor.supportsImageEmbeddingLabel')"
+                  :aria-label="$t('model.editor.supportsImageEmbeddingLabel')">
+                  <t-icon name="image" size="12px" />
+                </span>
+              </template>
             </p>
           </div>
         </div>
@@ -403,6 +411,10 @@ function convertToLegacyFormat(model: ModelConfig) {
     thinkingControl: model.parameters.extra_config?.thinking_control || '',
     spec: model.parameters.spec || null,
     capabilities: model.capabilities,
+    // Server-computed: the editor seeds its image-support switch from this, so
+    // the switch shows the effective value instead of a client-side
+    // re-derivation that could disagree with ingestion.
+    supportsImageEmbedding: model.supports_image_embedding || false,
     _modelType: backendTypeToModelType[model.type] || 'chat' as ModelType,
     // Preserve the credential metadata map so the editor dialog can render
     // the "Configured" state without an extra round-trip.
@@ -644,6 +656,17 @@ const handleModelSave = async (modelData: any) => {
         extraConfig.thinking_control = legacyThinking
       } else {
         delete extraConfig.thinking_control
+      }
+      // Embedding: declare image input support. Only written when it says
+      // something: on -> "true"; off -> "false" but only to override a
+      // server-detected true. A create-time "false" would silently disable
+      // image vectors for models the name heuristic already accepts.
+      if (saveType === 'embedding') {
+        if (modelData.supportsImageEmbedding === true) {
+          extraConfig.supports_image_embedding = 'true'
+        } else if (editingModel.value?.supportsImageEmbedding === true) {
+          extraConfig.supports_image_embedding = 'false'
+        }
       }
     }
     // Always send extra_config for remote models, even when it ends up empty:

@@ -221,6 +221,11 @@ type KnowledgeService interface {
 	ProcessKnowledgeListDelete(ctx context.Context, t *asynq.Task) error
 	// ProcessKnowledgeListReparse handles Asynq knowledge list reparse tasks
 	ProcessKnowledgeListReparse(ctx context.Context, t *asynq.Task) error
+	// ProcessKBReindexVectors handles Asynq knowledge base vector re-index tasks.
+	// It recomputes the stored embeddings of every chunk in a knowledge base after
+	// the embedding envelope changed (e.g. the image-vector toggle was flipped),
+	// without touching the original parsing output.
+	ProcessKBReindexVectors(ctx context.Context, t *asynq.Task) error
 	// GetKBCloneProgress retrieves the progress of a knowledge base clone task
 	GetKBCloneProgress(ctx context.Context, taskID string) (*types.KBCloneProgress, error)
 	// SaveKBCloneProgress saves the progress of a knowledge base clone task
