@@ -939,6 +939,11 @@ func (s *DataSourceService) applyFetchedItem(
 		return
 	}
 
+	if item.MoveOnly {
+		s.refileItem(ctx, ds, item, result)
+		return
+	}
+
 	if len(item.Content) == 0 && item.URL == "" {
 		// Check if this is an error item from the connector (failed to fetch content)
 		if errMsg, hasErr := item.Metadata["error"]; hasErr {
@@ -984,6 +989,36 @@ func (s *DataSourceService) applyFetchedItem(
 	} else {
 		result.Created++
 	}
+}
+
+// refileItem applies a MoveOnly item: only folder_path follows the source, so
+// the knowledge keeps its chunks and embeddings. It uses the same folder split
+// as CreateKnowledgeFromFile, so a moved item lands where a fresh ingest would.
+func (s *DataSourceService) refileItem(
+	ctx context.Context, ds *types.DataSource, item *types.FetchedItem, result *types.SyncResult,
+) {
+	repo := s.knowledgeService.GetRepository()
+	existing, err := repo.FindByDataSourceExternalID(ctx, ds.TenantID, ds.KnowledgeBaseID, ds.ID, item.ExternalID)
+	if err == nil && existing == nil {
+		// Never ingested, or removed from the KB by hand: nothing to move.
+		result.Skipped++
+		return
+	}
+	if err == nil {
+		folder, _ := types.SplitKnowledgeRelativePath(item.FileName)
+		_, err = repo.UpdateKnowledgeFolderPath(ctx, ds.TenantID, ds.KnowledgeBaseID, []string{existing.ID}, folder)
+	}
+	if err != nil {
+		logger.Warnf(ctx, "failed to move item %q (external_id=%s): %v", item.Title, item.ExternalID, err)
+		result.Failed++
+		recordSyncError(result, types.SyncItemError{
+			Title:   item.Title,
+			Code:    "move_failed",
+			Message: "Moving the item to its new folder failed; see server logs",
+		})
+		return
+	}
+	result.Updated++
 }
 
 // streamStartCursor decides which cursor a streaming fetch should resume from.
