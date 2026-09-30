@@ -540,7 +540,11 @@ func (c *Client) processStream(
 		}
 		var ev streamEvent
 		if err := json.Unmarshal(event.Data, &ev); err != nil {
-			assembler.Fail(ch, fmt.Errorf("decode SSE response: %w", err))
+			// The bytes arrived but this frame is unreadable: fail the round
+			// rather than skip a hole into the answer, and tag it so the caller
+			// can retry transport damage instead of ending the turn.
+			assembler.Fail(ch, fmt.Errorf("decode SSE response: %w: %w",
+				api.ErrCorruptStreamChunk, err))
 			return
 		}
 		if ev.Error != nil && ev.Error.Message != "" {
