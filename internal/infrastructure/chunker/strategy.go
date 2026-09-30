@@ -36,6 +36,11 @@ func Split(text string, cfg SplitterConfig) []Chunk {
 		return nil
 	}
 	cfg = ensureDefaults(cfg)
+	// A declared custom separator marks a pre-chunked document and takes
+	// precedence over every strategy tier (see custom_separator.go).
+	if hasCustomSeparator(cfg) {
+		return SplitByCustomSeparator(text, cfg)
+	}
 	chain, profile := resolveChainWithProfile(text, cfg)
 	totalChars := len([]rune(text))
 
@@ -93,6 +98,11 @@ func SplitWithDiagnostics(text string, cfg SplitterConfig) ([]Chunk, *Diagnostic
 		return nil, diag
 	}
 	cfg = ensureDefaults(cfg)
+	if hasCustomSeparator(cfg) {
+		diag.SelectedTier = TierCustom
+		diag.TierChain = []StrategyTier{TierCustom}
+		return SplitByCustomSeparator(text, cfg), diag
+	}
 	chain, profile := resolveChainWithProfile(text, cfg)
 	diag.TierChain = chain
 	diag.Profile = profile
@@ -148,6 +158,30 @@ func SplitParentChildWithDiagnostics(text string, parentCfg, childCfg SplitterCo
 func splitParentChild(text string, parentCfg, childCfg SplitterConfig, withDiagnostics bool) (ParentChildResult, *Diagnostics) {
 	parentCfg = ensureDefaults(parentCfg)
 	childCfg = ensureDefaults(childCfg)
+
+	// Pre-chunked documents (custom separator) define authoritative chunk
+	// boundaries; parent-child refinement would fight them, so the custom
+	// separator wins and the result is a flat chunk list.
+	if hasCustomSeparator(parentCfg) || hasCustomSeparator(childCfg) {
+		cfg := parentCfg
+		if !hasCustomSeparator(cfg) {
+			cfg = childCfg
+		}
+		var diag *Diagnostics
+		if withDiagnostics {
+			_, diag = SplitWithDiagnostics(text, cfg)
+		}
+		// Flat result: each marker segment is both its own parent and its own
+		// child, so any parent-child consumer still gets an embeddable child
+		// per boundary. The ingestion pipeline normally skips parent-child
+		// entirely for pre-chunked documents (see knowledge_process.go).
+		flat := SplitByCustomSeparator(text, cfg)
+		children := make([]ChildChunk, len(flat))
+		for i, c := range flat {
+			children[i] = ChildChunk{Chunk: c, ParentIndex: i}
+		}
+		return ParentChildResult{Parents: flat, Children: children}, diag
+	}
 
 	var (
 		parents []Chunk
@@ -225,19 +259,23 @@ func DeriveParentChildConfigs(base SplitterConfig, parentSize, childSize int) (p
 		childSize = 384
 	}
 	parent = SplitterConfig{
-		ChunkSize:    parentSize,
-		ChunkOverlap: base.ChunkOverlap,
-		Separators:   base.Separators,
-		Strategy:     base.Strategy,
-		Languages:    base.Languages,
+		ChunkSize:           parentSize,
+		ChunkOverlap:        base.ChunkOverlap,
+		Separators:          base.Separators,
+		Strategy:            base.Strategy,
+		Languages:           base.Languages,
+		CustomSeparator:     base.CustomSeparator,
+		CustomSeparatorOnly: base.CustomSeparatorOnly,
 	}
 	child = SplitterConfig{
-		ChunkSize:    childSize,
-		ChunkOverlap: childSize / 5,
-		Separators:   base.Separators,
-		Strategy:     base.Strategy,
-		TokenLimit:   base.TokenLimit,
-		Languages:    base.Languages,
+		ChunkSize:           childSize,
+		ChunkOverlap:        childSize / 5,
+		Separators:          base.Separators,
+		Strategy:            base.Strategy,
+		TokenLimit:          base.TokenLimit,
+		Languages:           base.Languages,
+		CustomSeparator:     base.CustomSeparator,
+		CustomSeparatorOnly: base.CustomSeparatorOnly,
 	}
 	return
 }

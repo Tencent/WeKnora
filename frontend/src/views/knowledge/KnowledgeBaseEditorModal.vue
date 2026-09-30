@@ -894,6 +894,8 @@ const initFormData = (type: 'document' | 'faq' = 'document') => {
       strategy: 'auto' as string,
       tokenLimit: 0,
       languages: [] as string[],
+      customSeparator: '',
+      customSeparatorOnly: false,
       tableMetadataInstructions: ''
     },
     storageBackendId: '' as string,
@@ -1042,7 +1044,6 @@ const loadKBData = async (
         chunkOverlap: kb.chunking_config?.chunk_overlap || 80,
         separators: kb.chunking_config?.separators || ['\n\n', '\n', '。', '！', '？', ';', '；'],
         parserEngineRules: kb.chunking_config?.parser_engine_rules || undefined,
-        enableParentChild: kb.chunking_config?.enable_parent_child || false,
         parentChunkSize: kb.chunking_config?.parent_chunk_size || 4096,
         childChunkSize: kb.chunking_config?.child_chunk_size || 384,
         // Existing KBs without strategy field render as empty (= legacy behavior).
@@ -1050,6 +1051,12 @@ const loadKBData = async (
         strategy: kb.chunking_config?.strategy || '',
         tokenLimit: kb.chunking_config?.token_limit || 0,
         languages: kb.chunking_config?.languages || [],
+        customSeparator: kb.chunking_config?.custom_separator || '',
+        customSeparatorOnly: !!kb.chunking_config?.custom_separator_only,
+        // Pre-chunked mode flattens parent-child chunking.
+        enableParentChild: kb.chunking_config?.custom_separator
+          ? false
+          : (kb.chunking_config?.enable_parent_child ?? true),
         tableMetadataInstructions: kb.chunking_config?.table_metadata_instructions || ''
       },
       storageBackendId: (kb.storage_backend_id || '') as string,
@@ -1422,6 +1429,8 @@ const buildSubmitData = () => {
       strategy: formData.value.chunkingConfig.strategy ?? '',
       token_limit: formData.value.chunkingConfig.tokenLimit ?? 0,
       languages: formData.value.chunkingConfig.languages ?? [],
+      custom_separator: formData.value.chunkingConfig.customSeparator?.trim() ?? '',
+      custom_separator_only: !!formData.value.chunkingConfig.customSeparator?.trim() && !!formData.value.chunkingConfig.customSeparatorOnly,
       table_metadata_instructions: formData.value.chunkingConfig.tableMetadataInstructions || '',
       ...(formData.value.chunkingConfig.parserEngineRules?.length
         ? { parser_engine_rules: formData.value.chunkingConfig.parserEngineRules }

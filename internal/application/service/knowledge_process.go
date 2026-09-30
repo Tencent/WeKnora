@@ -319,12 +319,14 @@ func (s *knowledgeService) failKnowledgeAtEmbedding(
 // the shared chunker defaults.
 func buildSplitterConfigFromChunking(cc types.ChunkingConfig) chunker.SplitterConfig {
 	return chunker.NormalizeSplitterConfig(chunker.SplitterConfig{
-		ChunkSize:    cc.ChunkSize,
-		ChunkOverlap: cc.ChunkOverlap,
-		Separators:   cc.Separators,
-		Strategy:     cc.Strategy,
-		TokenLimit:   cc.TokenLimit,
-		Languages:    cc.Languages,
+		ChunkSize:           cc.ChunkSize,
+		ChunkOverlap:        cc.ChunkOverlap,
+		Separators:          cc.Separators,
+		Strategy:            cc.Strategy,
+		TokenLimit:          cc.TokenLimit,
+		Languages:           cc.Languages,
+		CustomSeparator:     cc.CustomSeparator,
+		CustomSeparatorOnly: cc.CustomSeparatorOnly,
 	})
 }
 
@@ -3939,7 +3941,10 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 		processOpts.Metadata = convertResult.Metadata
 	}
 
-	if eff.ChunkingConfig.EnableParentChild {
+	// Pre-chunked (custom separator) mode bypasses parent-child chunking:
+	// the marker decides every boundary, and flattening mid-pipeline would
+	// store parent chunks with no children, leaving nothing retrievable.
+	if eff.ChunkingConfig.EnableParentChild && eff.ChunkingConfig.CustomSeparator == "" {
 		parentCfg, childCfg := buildParentChildConfigs(eff.ChunkingConfig, chunkCfg)
 		pcResult := chunker.SplitParentChild(convertResult.MarkdownContent, parentCfg, childCfg)
 		chunks = make([]types.ParsedChunk, len(pcResult.Children))

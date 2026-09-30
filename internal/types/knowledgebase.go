@@ -265,6 +265,17 @@ type ChunkingConfig struct {
 	ChunkOverlap int `yaml:"chunk_overlap" json:"chunk_overlap"`
 	// Separators
 	Separators []string `yaml:"separators"    json:"separators"`
+	// CustomSeparator marks a pre-chunked document: chunk boundaries were
+	// decided upstream (AI pipeline / engineering tooling) and segments are
+	// joined by this literal marker (e.g. "======" or "<|chunk|>").
+	// When set it takes precedence over every strategy and separator, and
+	// the marker is removed from chunk content so it never reaches
+	// embeddings or RAG output.
+	CustomSeparator string `yaml:"custom_separator,omitempty" json:"custom_separator,omitempty"`
+	// CustomSeparatorOnly restricts splitting to CustomSeparator alone:
+	// one marker-delimited segment = one chunk, no other splitting logic
+	// or chunk-size cap applies. Requires CustomSeparator to be set.
+	CustomSeparatorOnly bool `yaml:"custom_separator_only,omitempty" json:"custom_separator_only,omitempty"`
 	// ParserEngineRules configures which parser engine to use for each file type.
 	// When empty, DefaultParserEngine is used (builtin/simple routing, except
 	// types that only a specific engine can parse: ppt/pptx fall back to
