@@ -8,7 +8,23 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/docreader/proto"
+	"google.golang.org/grpc/resolver"
 )
+
+func TestNewClientDoesNotChangeGlobalGRPCResolver(t *testing.T) {
+	previous := resolver.GetDefaultScheme()
+	resolver.SetDefaultScheme("passthrough")
+	t.Cleanup(func() { resolver.SetDefaultScheme(previous) })
+
+	client, err := NewClientWithAuth("127.0.0.1:1", &AuthConfig{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+	if got := resolver.GetDefaultScheme(); got != "passthrough" {
+		t.Fatalf("DocReader changed global gRPC resolver to %q", got)
+	}
+}
 
 func init() {
 	log.SetOutput(os.Stdout)
