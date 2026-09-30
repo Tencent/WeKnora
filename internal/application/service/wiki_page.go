@@ -915,12 +915,22 @@ func (s *wikiPageService) RebuildLinks(ctx context.Context, kbID string) error {
 		}
 	}
 
-	// Save all pages (link rebuild is metadata-only, no version bump)
+	// Save all pages (link rebuild is metadata-only, no version bump).
+	// The rebuild stays best-effort — one unwritable page must not discard the
+	// pages that can be written — but the failures are accumulated and
+	// reported, so callers never see a successful rebuild for a half-written
+	// link graph.
+	var failures []error
 	for _, p := range pages {
 		p.UpdatedAt = time.Now()
 		if err := s.repo.UpdateMeta(ctx, p); err != nil {
 			logger.Warnf(ctx, "wiki: failed to update links for page %s: %v", p.Slug, err)
+			failures = append(failures, fmt.Errorf("%s: %w", p.Slug, err))
 		}
+	}
+	if len(failures) > 0 {
+		return fmt.Errorf("rebuild wiki links: %d of %d pages failed: %w",
+			len(failures), len(pages), errors.Join(failures...))
 	}
 
 	return nil
