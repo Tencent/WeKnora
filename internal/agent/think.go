@@ -227,7 +227,10 @@ func watchStreamStall(
 	stalled := &atomic.Bool{}
 	done := make(chan struct{})
 
-	go func() {
+	// This goroutine cancels a stream in flight: a panic here (a non-positive
+	// stall timeout reaches time.NewTicker) must not end the process, and no
+	// unit of work needs a failure recorded.
+	agenttools.GoRecovered(ctx, func() {
 		// Poll well inside the window so the detected gap stays close to the
 		// configured timeout instead of rounding up to twice it.
 		ticker := time.NewTicker(stallTimeout / 4)
@@ -249,7 +252,7 @@ func watchStreamStall(
 				return
 			}
 		}
-	}()
+	})
 
 	var once sync.Once
 	return stalled, func() { once.Do(func() { close(done) }) }
