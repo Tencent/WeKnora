@@ -118,11 +118,14 @@ func (m *OAuthManager) StartAuthorization(
 		if clientID == "" {
 			return "", "", fmt.Errorf("dynamic client registration returned an empty client_id")
 		}
+		// The code exchange and later refreshes run with a handler rebuilt
+		// from this row, so a secret issued with the client has to be kept.
 		if err := m.repo.SaveClient(ctx, &types.MCPOAuthClient{
-			TenantID:    tenantID,
-			ServiceID:   service.ID,
-			ClientID:    clientID,
-			RedirectURI: redirectURI,
+			TenantID:     tenantID,
+			ServiceID:    service.ID,
+			ClientID:     clientID,
+			ClientSecret: h.GetClientSecret(),
+			RedirectURI:  redirectURI,
 		}); err != nil {
 			logger.GetLogger(ctx).Warnf("failed to persist MCP oauth client: %v", err)
 		}
