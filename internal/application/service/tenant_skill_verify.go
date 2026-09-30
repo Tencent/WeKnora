@@ -2,8 +2,10 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
 	_ "embed"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -21,10 +23,10 @@ import (
 //go:embed tenant_skill_verify.py
 var skillPythonVerifier string
 
-// skillVerifyRepairableExit is the exit code a verification pass uses when
-// every problem it found is a dependency missing from this image. It separates
-// "another installer round can fix this" from "the bundle has to change", which
-// is the only distinction that decides what the install flow does next.
+// skillVerifyRepairableExit is the checker's code when every problem is a
+// missing declared dependency. The install path no longer branches on it:
+// any non-zero exit refuses the snapshot. Sessions can still recover a
+// missing package at chat time.
 const skillVerifyRepairableExit = 2
 
 // skillTreeVerifyDirExit is the exit code the tree check uses when the skill
@@ -37,15 +39,12 @@ const skillTreeVerifyDirExit = 3
 // install. Notes travel on stdout so a non-zero exit stays unambiguous.
 const skillVerifyNotePrefix = "note: "
 
-// skillVerificationError is what the gate said, kept structured because it is
-// also the brief for a repair round. The gate is the only authority on what has
-// to resolve in this image, so handing back its own lines is what keeps the
-// installer from deriving "what this skill needs" a second time.
+// skillVerificationError is what the gate said. Findings stay structured so
+// the install failure names each one rather than collapsing them into a
+// generic "verification failed".
 type skillVerificationError struct {
 	// Language names the pass that failed, as the operator sees it.
 	Language string
-	// Repairable is true when installing a package would satisfy every line.
-	Repairable bool
 	// Problems are the checker's own lines, one per finding.
 	Problems []string
 	// Summary describes the command result itself, and is the only thing worth
@@ -67,7 +66,8 @@ func (e *skillVerificationError) Error() string {
 // pass here is deterministic: the files the bundle named are present, the
 // isolated dependency trees the installer was told to create exist, every
 // source parses with the interpreter that would run it, and every distribution
-// the manifests name is installed.
+// the manifests name is installed at a compatible declared version. Original
+// dependency manifests must also remain unchanged.
 //
 // Import resolution is deliberately absent. Whether `import helper` resolves
 // depends on what a script does to sys.path before the import runs, which no
@@ -203,10 +203,10 @@ func (s *TenantSkillService) verifyScriptsParse(
 	ctx context.Context, mgr sandbox.Manager, sessionID, skillDir string, bundle *SkillBundle,
 ) ([]string, error) {
 	var notes []string
-	if scripts := sortedScriptPaths(bundle, ".py"); len(scripts) > 0 {
+	if scripts := sortedScriptPaths(bundle, ".py"); len(scripts) > 0 || bundleHasPythonDeps(bundle) {
 		entry, auxiliary := splitAuxiliaryScripts(scripts)
 		found, err := s.execVerify(ctx, mgr, sessionID, skillDir, "python",
-			skillPythonVerifyCommand(skillDir, entry, auxiliary))
+			skillPythonVerifyCommand(skillDir, entry, auxiliary, bundle))
 		notes = append(notes, found...)
 		if err != nil {
 			return notes, err
@@ -259,10 +259,9 @@ func (s *TenantSkillService) execVerify(
 	notes := verificationNotes(res.Stdout)
 	if res.ExitCode != 0 {
 		return notes, &skillVerificationError{
-			Language:   label,
-			Repairable: res.ExitCode == skillVerifyRepairableExit,
-			Problems:   verificationProblems(res.Stderr),
-			Summary:    describeExecFailure(res),
+			Language: label,
+			Problems: verificationProblems(res.Stderr),
+			Summary:  describeExecFailure(res),
 		}
 	}
 	return notes, nil
@@ -281,8 +280,7 @@ func verificationNotes(stdout string) []string {
 }
 
 // verificationProblems splits a failed pass's stderr into its findings. Blank
-// lines are dropped; everything else is the checker's own wording, which is
-// what a repair round is given.
+// lines are dropped; everything else is the checker's own wording.
 func verificationProblems(stderr string) []string {
 	var problems []string
 	for _, line := range strings.Split(stderr, "\n") {
@@ -302,10 +300,23 @@ func verificationProblems(stderr string) []string {
 // Auxiliary files are named after --optional. They are checked the same way,
 // and what is found in them is reported rather than allowed to refuse the
 // install.
-func skillPythonVerifyCommand(skillDir string, entry, auxiliary []string) string {
+func skillPythonVerifyCommand(skillDir string, entry, auxiliary []string, bundles ...*SkillBundle) string {
 	venv := path.Join(skillDir, ".venv", "bin", "python")
 	quotedVenv := sandbox.ShellQuote(venv)
 	args := []string{sandbox.ShellQuote(skillDir)}
+	if len(bundles) > 0 && bundles[0] != nil {
+		hashes := map[string]string{}
+		for _, name := range []string{"requirements.txt", "requirements.lock", "pyproject.toml"} {
+			if content, ok := bundles[0].Files[name]; ok {
+				sum := sha256.Sum256(content)
+				hashes[name] = hex.EncodeToString(sum[:])
+			}
+		}
+		if len(hashes) > 0 {
+			encoded, _ := json.Marshal(hashes)
+			args = append(args, "--manifest-hashes", sandbox.ShellQuote(base64.StdEncoding.EncodeToString(encoded)))
+		}
+	}
 	for _, rel := range entry {
 		args = append(args, sandbox.ShellQuote(rel))
 	}
@@ -330,8 +341,9 @@ func skillPythonVerifyCommand(skillDir string, entry, auxiliary []string) string
 // declares runtime dependencies, checks each one resolves. `node --check` is
 // parse-only: it never runs the module body.
 //
-// A declared dependency that is missing exits with the repairable code: it is
-// the one thing here another installer round can still put in place.
+// A declared dependency that is missing exits with the missing-dependency
+// code so the failure is distinguishable from a syntax error. Either way the
+// snapshot is refused.
 func skillNodeVerifyCommand(skillDir string, scripts, deps []string) string {
 	parts := make([]string, 0, 2)
 	if len(deps) > 0 {
@@ -479,7 +491,8 @@ func bundleHasPythonDeps(bundle *SkillBundle) bool {
 	}
 	_, req := bundle.Files["requirements.txt"]
 	_, pyproject := bundle.Files["pyproject.toml"]
-	return req || pyproject
+	_, lock := bundle.Files["requirements.lock"]
+	return req || pyproject || lock
 }
 
 func bundleHasNodeDeps(bundle *SkillBundle) bool {

@@ -110,33 +110,6 @@ func TestInstallGuidanceArrivingAtNaturalStopContinuesBeforeSnapshot(t *testing.
 	require.Equal(t, "injected", state.Messages[0].Status)
 }
 
-func TestInstallGuidanceSurvivesRepairRound(t *testing.T) {
-	fx := newInstallFixture(t)
-	fx.svc.streams = stream.NewMemoryStreamManager()
-	fx.loadCheckExitCodes = []int{skillVerifyRepairableExit, 0}
-	first := true
-	fx.beforeExecute = func() {
-		if first {
-			first = false
-			require.NoError(
-				t,
-				fx.svc.SteerInstall(
-					context.Background(),
-					7,
-					"cfg-1",
-					"sk-1",
-					fx.currentInstallMessageID(),
-					uuid.NewString(),
-					"Use our package mirror",
-				),
-			)
-		}
-	}
-	require.NoError(t, fx.svc.runInstall(context.Background(), 7, "cfg-1", "sk-1", fx.bundle))
-	require.Len(t, fx.agentPrompts, 2)
-	require.Contains(t, fx.agentPrompts[1], "Use our package mirror")
-}
-
 func TestInstallGuidanceCloseAndSendAcrossReplicas(t *testing.T) {
 	fx, sink := newGuidanceFixture(t)
 	mini := miniredis.RunT(t)
@@ -194,14 +167,11 @@ func TestInstallGuidanceQueueLimit(t *testing.T) {
 	)
 }
 
-func TestReinstallInstructionsAreInInitialAndRepairPrompts(t *testing.T) {
+func TestReinstallInstructionsAreInTheInstallPrompt(t *testing.T) {
 	fx := newInstallFixture(t)
-	fx.loadCheckExitCodes = []int{skillVerifyRepairableExit, 0}
 	require.NoError(t, fx.svc.runInstall(context.Background(), 7, "cfg-1", "sk-1", fx.bundle, "Use our package mirror"))
-	require.Len(t, fx.agentPrompts, 2)
-	for _, prompt := range fx.agentPrompts {
-		require.Contains(t, prompt, "Use our package mirror")
-	}
+	require.Len(t, fx.agentPrompts, 1)
+	require.Contains(t, fx.agentPrompts[0], "Use our package mirror")
 }
 
 type failingGuidanceConsumption struct{ interfaces.StreamManager }
