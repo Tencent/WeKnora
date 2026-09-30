@@ -338,6 +338,27 @@ func buildParentChildConfigs(cc types.ChunkingConfig, base chunker.SplitterConfi
 	return chunker.DeriveParentChildConfigs(base, cc.ParentChunkSize, cc.ChildChunkSize)
 }
 
+// resolveKBEmbeddingModel resolves a knowledge base's embedding model under the
+// tenant that owns it.
+//
+// A knowledge base shared into another tenant is written by the owner's tenant
+// but processed with the viewer's tenant in ctx, so the plain ctx-tenant lookup
+// searches a tenant that never had the model row and fails with
+// "Model not found" — aborting document processing for every document in the
+// shared knowledge base. Resolving under kb.TenantID mirrors what the search
+// path already does (see knowledgeBaseService.GetQueryEmbedding), so a shared
+// knowledge base embeds and queries with the same provider and vector space.
+//
+// A ctx with no tenant falls through to the plain lookup rather than panicking
+// here: the missing tenant is the model service's error to report, and it did
+// so before this branch existed.
+func (s *knowledgeService) resolveKBEmbeddingModel(ctx context.Context, kb *types.KnowledgeBase) (embedding.Embedder, error) {
+	if currentTenantID, ok := types.TenantIDFromContext(ctx); ok && kb.TenantID != currentTenantID {
+		return s.modelService.GetEmbeddingModelForTenant(ctx, kb.EmbeddingModelID, kb.TenantID)
+	}
+	return s.modelService.GetEmbeddingModel(ctx, kb.EmbeddingModelID)
+}
+
 // processChunks processes chunks and creates embeddings for knowledge content
 func (s *knowledgeService) processChunks(ctx context.Context,
 	kb *types.KnowledgeBase, knowledge *types.Knowledge, chunks []types.ParsedChunk,
@@ -388,7 +409,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 	var embeddingModel embedding.Embedder
 	if kb.NeedsEmbeddingModel() {
 		var err error
-		embeddingModel, err = s.modelService.GetEmbeddingModel(ctx, kb.EmbeddingModelID)
+		embeddingModel, err = s.resolveKBEmbeddingModel(ctx, kb)
 		if err != nil {
 			// Terminal for this attempt, and it has to be recorded as such.
 			// A KB that indexes vectors cannot proceed without an embedder;
@@ -1586,7 +1607,7 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 			return fmt.Errorf("failed to init retrieve engine: %w", err)
 		}
 
-		embeddingModel, err := s.modelService.GetEmbeddingModel(ctx, kb.EmbeddingModelID)
+		embeddingModel, err := s.resolveKBEmbeddingModel(ctx, kb)
 		if err != nil {
 			logger.Errorf(ctx, "Failed to get embedding model: %v", err)
 			summaryErr = err
@@ -1856,7 +1877,7 @@ func (s *knowledgeService) processQuestionGenerationForKnowledge(ctx context.Con
 	resolvedModelID = kb.SummaryModelID
 
 	// Initialize embedding model and retrieval engine
-	embeddingModel, err := s.modelService.GetEmbeddingModel(ctx, kb.EmbeddingModelID)
+	embeddingModel, err := s.resolveKBEmbeddingModel(ctx, kb)
 	if err != nil {
 		exitStatus = "get_embedding_model_failed"
 		logger.Errorf(ctx, "Failed to get embedding model: %v", err)
@@ -2166,7 +2187,7 @@ func (s *knowledgeService) processQuestionGenerationForChunks(ctx context.Contex
 	}
 	resolvedModelID = kb.SummaryModelID
 
-	embeddingModel, err := s.modelService.GetEmbeddingModel(ctx, kb.EmbeddingModelID)
+	embeddingModel, err := s.resolveKBEmbeddingModel(ctx, kb)
 	if err != nil {
 		exitStatus = "get_embedding_model_failed"
 		logger.Errorf(ctx, "Failed to get embedding model: %v", err)
@@ -3113,7 +3134,7 @@ func (s *knowledgeService) updateChunkVector(ctx context.Context, kbID string, c
 	if !sourceKB.NeedsEmbeddingModel() {
 		return nil
 	}
-	embeddingModel, err := s.modelService.GetEmbeddingModel(ctx, sourceKB.EmbeddingModelID)
+	embeddingModel, err := s.resolveKBEmbeddingModel(ctx, sourceKB)
 	if err != nil {
 		return err
 	}
