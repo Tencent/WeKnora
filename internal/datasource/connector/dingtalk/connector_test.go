@@ -20,6 +20,31 @@ type fakeAPI struct {
 	nodeErrors  map[string]error
 	blockErrors map[string]error
 	blockCalls  map[string]int
+
+	// Native DingTalk spreadsheets (axls). Sheets are listed per workbook,
+	// their extents are read per sheet, and cells are served per ranges window
+	// so a test can assert the exact windows the connector asked for.
+	sheets           map[string][]sheet
+	sheetInfos       map[string]sheet
+	sheetValues      map[string][][]string
+	sheetListErrors  map[string]error
+	sheetInfoErrors  map[string]error
+	sheetRangeErrors map[string]error
+	sheetListCalls   map[string]int
+	sheetRangeCalls  []string
+	// sheetRangeFunc, when set, synthesises a window's cells instead of reading
+	// sheetValues: chunking and cap tests need rows that depend on the range.
+	sheetRangeFunc func(workbookID, sheetID, ranges string) ([][]string, error)
+}
+
+// sheetKey addresses one sheet's metadata in the fake.
+func sheetKey(workbookID, sheetID string) string {
+	return workbookID + "/" + sheetID
+}
+
+// sheetRangeKey addresses one ranges request in the fake.
+func sheetRangeKey(workbookID, sheetID, ranges string) string {
+	return sheetKey(workbookID, sheetID) + "/" + ranges
 }
 
 func (f *fakeAPI) listWorkspaces(context.Context) ([]workspace, error) {
@@ -42,6 +67,39 @@ func (f *fakeAPI) documentBlocks(_ context.Context, documentID string) ([]json.R
 		return nil, err
 	}
 	return f.blocks[documentID], nil
+}
+
+func (f *fakeAPI) listSheets(_ context.Context, workbookID string) ([]sheet, error) {
+	if f.sheetListCalls == nil {
+		f.sheetListCalls = make(map[string]int)
+	}
+	f.sheetListCalls[workbookID]++
+	if err := f.sheetListErrors[workbookID]; err != nil {
+		return nil, err
+	}
+	return f.sheets[workbookID], nil
+}
+
+func (f *fakeAPI) sheetInfo(_ context.Context, workbookID, sheetID string) (sheet, error) {
+	if err := f.sheetInfoErrors[sheetKey(workbookID, sheetID)]; err != nil {
+		return sheet{}, err
+	}
+	return f.sheetInfos[sheetKey(workbookID, sheetID)], nil
+}
+
+func (f *fakeAPI) sheetRange(
+	_ context.Context,
+	workbookID, sheetID, ranges string,
+) ([][]string, error) {
+	key := sheetRangeKey(workbookID, sheetID, ranges)
+	f.sheetRangeCalls = append(f.sheetRangeCalls, key)
+	if f.sheetRangeFunc != nil {
+		return f.sheetRangeFunc(workbookID, sheetID, ranges)
+	}
+	if err := f.sheetRangeErrors[key]; err != nil {
+		return nil, err
+	}
+	return f.sheetValues[key], nil
 }
 
 func testConnector(api dingTalkAPI) *Connector {
@@ -739,10 +797,21 @@ func TestSkipReasonDistinguishesMediaFromUnimplementedTypes(t *testing.T) {
 		{
 			// Only the types with a name worth printing are in the map; every
 			// other unsupported node gets the generic reason. Kept as a
-			// regression guard on the map.
+			// regression guard on the map. The sample carries no extension:
+			// naming a concrete type here would duplicate that type's own
+			// entry, and naming an ingestible type would make the guard assert
+			// the opposite of what the connector does.
 			"type without a dedicated label",
-			node{Type: "FILE", Category: "ALIDOC", Extension: "axls"},
+			node{Type: "FILE", Category: "ALIDOC"},
 			"no ingest path for this DingTalk node type in this connector yet",
+		},
+		{
+			// A spreadsheet does have an ingest path, so an axls node that is
+			// still skipped must not be told otherwise: the skip names the type
+			// and the node shape it is read from.
+			"spreadsheet outside its file node shape",
+			node{Type: "FOLDER", Category: "ALIDOC", Extension: "axls"},
+			"DingTalk spreadsheet is ingested only from a FILE node in the ALIDOC category",
 		},
 		{
 			"multidimensional table",
