@@ -203,6 +203,12 @@ type AgentFinalAnswerData struct {
 	// complete. Carried on both the content event and the Done marker,
 	// because a live-streamed answer only learns of the cap at the close.
 	Truncated bool `json:"truncated,omitempty"`
+	// Usage carries the turn's token usage on the Done marker. Providers
+	// report usage on the stream's closing chunk — after finish_reason —
+	// which is why the KnowledgeQA stream holds the Done marker until the
+	// channel closes. interface{} (like AgentCompleteData.Usage) so this
+	// package stays free of a types import.
+	Usage interface{} `json:"usage,omitempty"` // *types.TokenUsage
 }
 
 // ContextCompactedData reports that older conversation was replaced by a
