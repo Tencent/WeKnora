@@ -64,13 +64,56 @@ func TestBatchingSplitsAndRestoresGlobalIndices(t *testing.T) {
 	assert.ElementsMatch(t, []int{0, 1, 2, 3, 4}, indices)
 }
 
-func TestBatchingIsSkippedWhenTheVendorDeclaresNoLimit(t *testing.T) {
+// No ceiling is documented here either, but four documents fit the default
+// bound, so nothing is split. The bound itself is pinned in the tests below.
+func TestBatchingIsSkippedWhenEverythingFitsOneRequest(t *testing.T) {
 	fake := &fakeProtocol{}
 	r := newWrapped(fake, api.RerankSettings{})
 
 	_, err := r.Rerank(context.Background(), "q", []string{"a", "b", "c", "d"})
 	require.NoError(t, err)
 	assert.Len(t, fake.batches, 1)
+}
+
+// A request budget in characters cannot bound a document count, so a vendor
+// that documents only that budget leaves the count undocumented: 120
+// one-character documents fit the budget many times over and used to travel in
+// one request (#3559). The default item bound splits them.
+func TestARequestBudgetDoesNotLiftTheDefaultDocumentBound(t *testing.T) {
+	fake := &fakeProtocol{}
+	r := newWrapped(fake, api.RerankSettings{MaxRequestChars: 2000})
+
+	docs := make([]string, api.DefaultRerankMaxDocuments*2)
+	for i := range docs {
+		docs[i] = "d"
+	}
+	got, err := r.Rerank(context.Background(), "q", docs)
+	require.NoError(t, err)
+
+	require.Len(t, fake.batches, 2)
+	for _, batch := range fake.batches {
+		assert.Len(t, batch, api.DefaultRerankMaxDocuments)
+	}
+	assert.Len(t, got, len(docs))
+}
+
+// The default bounds the count; it does not replace the vendor's own budget.
+// When the characters run out first, the batches stay inside that budget.
+func TestTheDeclaredRequestBudgetStillBinds(t *testing.T) {
+	fake := &fakeProtocol{}
+	r := newWrapped(fake, api.RerankSettings{MaxRequestChars: 250})
+
+	docs := make([]string, 6)
+	for i := range docs {
+		docs[i] = strings.Repeat("x", 100)
+	}
+	_, err := r.Rerank(context.Background(), "q", docs)
+	require.NoError(t, err)
+
+	require.Len(t, fake.batches, 3, "a 1-character query leaves room for two 100-character documents")
+	for _, batch := range fake.batches {
+		assert.Len(t, batch, 2)
+	}
 }
 
 // A document over the vendor's per-document ceiling cannot be scored. Saying

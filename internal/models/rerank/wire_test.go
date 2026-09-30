@@ -14,6 +14,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/models"
+	"github.com/Tencent/WeKnora/internal/models/api"
 	modelruntime "github.com/Tencent/WeKnora/internal/models/runtime"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/assert"
@@ -185,6 +186,16 @@ func TestRerankWireFormatPerVendor(t *testing.T) {
 			name: "jina echoes documents", provider: "jina", model: "jina-reranker-v3", base: "/v1",
 			wantPath: "/v1/rerank", wantAuth: [2]string{"Authorization", "Bearer k"},
 			wantBody: cohere("jina-reranker-v3", three, map[string]any{"return_documents": true}),
+		},
+		{
+			// jina documents no per-request ceiling, so the request is bounded
+			// by the default instead of carrying every candidate at once
+			// (#3559).
+			name: "jina splits at the default bound", provider: "jina", model: "jina-reranker-v3", base: "/v1",
+			docs: documents(api.DefaultRerankMaxDocuments + 1), wantRequests: 2,
+			wantPath: "/v1/rerank", wantAuth: [2]string{"Authorization", "Bearer k"},
+			wantBody: cohere("jina-reranker-v3", documents(api.DefaultRerankMaxDocuments),
+				map[string]any{"return_documents": true}),
 		},
 		{
 			name: "zhipu on its full rerank URL", provider: "zhipu", model: "rerank", base: "/api/paas/v4/rerank",

@@ -57,6 +57,16 @@ func (r *protocolReranker) Rerank(
 	if err != nil {
 		return nil, fmt.Errorf("%s rerank: %w", r.modelName, err)
 	}
+	if len(batches) > 1 && r.settings.MaxDocuments <= 0 {
+		// The vendor documents no document-count ceiling, so the default bound
+		// caps each of these requests. A request budget in characters does not
+		// lift it — it cannot cap a count. Debug rather than Warn: it is the
+		// normal path for every vendor in that state, and a retrieval with a
+		// large candidate set would otherwise warn on every query.
+		logger.Debugf(ctx,
+			"%s rerank: vendor declares no ceiling on document count; sent %d documents as %d requests of at most %d",
+			r.modelName, len(documents), len(batches), api.DefaultRerankMaxDocuments)
+	}
 
 	// Each batch is scored against the same query independently, so the
 	// per-batch results are comparable and are merged and re-ranked below.
