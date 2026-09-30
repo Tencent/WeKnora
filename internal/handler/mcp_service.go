@@ -111,6 +111,11 @@ func (h *MCPServiceHandler) CreateMCPService(c *gin.Context) {
 	}
 
 	if err := h.mcpServiceService.CreateMCPService(ctx, &service); err != nil {
+		var headerErr *mcpsecurity.HeaderTemplateError
+		if stderrors.As(err, &headerErr) {
+			_ = c.Error(errors.NewBadRequestError(headerErr.Error()))
+			return
+		}
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{"service_name": secutils.SanitizeForLog(service.Name)})
 		c.Error(errors.NewInternalServerError("Failed to create MCP service: " + err.Error()))
 		return
@@ -447,6 +452,11 @@ func (h *MCPServiceHandler) UpdateMCPService(c *gin.Context) {
 	}
 
 	if err := h.mcpServiceService.UpdateMCPService(ctx, &service, updateFields); err != nil {
+		var headerErr *mcpsecurity.HeaderTemplateError
+		if stderrors.As(err, &headerErr) {
+			_ = c.Error(errors.NewBadRequestError(headerErr.Error()))
+			return
+		}
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{"service_id": secutils.SanitizeForLog(serviceID)})
 		c.Error(errors.NewInternalServerError("Failed to update MCP service: " + err.Error()))
 		return

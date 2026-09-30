@@ -16,7 +16,9 @@ const (
 	MCPTransportStdio          MCPTransportType = "stdio"
 )
 
-// MCPService represents an MCP service configuration
+// MCPService represents an MCP service configuration. WeKnora resolves
+// request-scoped header templates such as `{{request.headers.X-Department}}`
+// for each authenticated request and omits dynamic headers without a value.
 type MCPService struct {
 	ID                string             `json:"id"`
 	TenantID          uint64             `json:"tenant_id"`
@@ -50,7 +52,8 @@ type MCPCatalogSummary struct {
 // by the server. To mutate credentials on an existing service, use the
 // dedicated /credentials subresource — see the MCP credentials API for the
 // PUT / DELETE shape. Sending secret fields in a main PUT body is silently
-// ignored server-side.
+// ignored server-side. CustomHeaders supports the same request-scoped templates
+// as MCPService.Headers.
 type MCPAuthConfig struct {
 	APIKey        string            `json:"api_key,omitempty"`
 	Token         string            `json:"token,omitempty"`

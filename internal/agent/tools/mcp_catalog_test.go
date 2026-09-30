@@ -5,15 +5,48 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/agent/approval"
+	"github.com/Tencent/WeKnora/internal/mcp/headertemplate"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/require"
 )
+
+func TestDynamicBusinessHeadersReuseTheSameToolDirectory(t *testing.T) {
+	base := catalogTestContext()
+	service := &types.MCPService{ID: "svc", Name: "orders", Enabled: true,
+		Headers: types.MCPHeaders{"AAA": "{{request.headers.X-AAA}}"}}
+	loads := 0
+	catalog := newMCPCatalog(base, []*types.MCPService{service}, nil,
+		func(_ context.Context, selected *types.MCPService, _ bool) ([]*MCPTool, error) {
+			loads++
+			return []*MCPTool{catalogTestTool(selected, "list_orders", "List orders", nil)}, nil
+		}, nil)
+	for _, value := range []string{"A", "B"} {
+		ctx := types.WithMCPHeaderContext(base, headertemplate.NewContext(nil, http.Header{"X-Aaa": {value}}))
+		tools, status, err := catalog.snapshot(ctx, service.ID, false)
+		require.NoError(t, err)
+		require.Equal(t, "ready", status)
+		require.Len(t, tools, 1)
+	}
+	require.Equal(t, 1, loads)
+	bad := types.WithMCPHeaderContext(base, headertemplate.NewContext(nil,
+		http.Header{"X-Aaa": {"one", "two"}}))
+	_, _, err := catalog.snapshot(bad, service.ID, false)
+	require.Error(t, err, "a cached directory must not hide an unsafe business header")
+	good := types.WithMCPHeaderContext(base, headertemplate.NewContext(nil,
+		http.Header{"X-Aaa": {"A"}}))
+	tools, status, err := catalog.snapshot(good, service.ID, false)
+	require.NoError(t, err)
+	require.Equal(t, "ready", status)
+	require.Len(t, tools, 1)
+	require.Equal(t, 1, loads, "an invalid request must not evict the shared directory")
+}
 
 type catalogPolicy struct {
 	disabled map[string]bool

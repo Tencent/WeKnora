@@ -17,6 +17,7 @@
         </t-button>
       </div>
       <p class="form-desc">{{ t('mcpMetadata.cacheHint') }}</p>
+      <p v-if="contextHint" class="form-desc form-desc--warn">{{ contextHint }}</p>
       <p v-if="snapshot" class="snapshot-meta">
         <span>{{ t('mcpMetadata.toolCount', { count: snapshot.tools.length }) }}</span>
         <span v-if="snapshot.server_name">{{ snapshot.server_name }} {{ snapshot.server_version }}</span>
@@ -81,7 +82,7 @@ import { useI18n } from 'vue-i18n'
 import { getMCPMetadata, refreshMCPMetadata, type MCPMetadata } from '@/api/mcp-service'
 import McpToolsList from './McpToolsList.vue'
 
-const props = defineProps<{ serviceId: string; disabled?: boolean }>()
+const props = defineProps<{ serviceId: string; disabled?: boolean; contextHint?: string }>()
 const emit = defineEmits<{ (e: 'busy', value: boolean): void; (e: 'synced', value: boolean): void }>()
 const { t } = useI18n()
 const snapshot = ref<MCPMetadata | null>(null)

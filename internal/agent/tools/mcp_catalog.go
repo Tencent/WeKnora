@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -13,6 +14,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/agent/approval"
+	"github.com/Tencent/WeKnora/internal/mcp"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -144,11 +146,11 @@ type MCPCatalog struct {
 }
 
 type mcpCatalogServer struct {
-	loadLock chan struct{} // Context-aware serialization of slow discovery.
-	mu       sync.Mutex
-	service  *types.MCPService
-	tools    []*MCPTool
-	status   string
+	loadLock    chan struct{} // Context-aware serialization of slow discovery.
+	mu          sync.Mutex
+	service     *types.MCPService
+	tools       []*MCPTool
+	status      string
 }
 
 type mcpServerSummary struct {
@@ -287,6 +289,11 @@ func (c *MCPCatalog) snapshot(ctx context.Context, id string, live bool) ([]*MCP
 		}
 		service = current
 	}
+	if mcp.HasDynamicHeaders(service) {
+		if _, err := mcp.PrepareClientConfig(ctx, service, nil); err != nil {
+			return nil, "error", err
+		}
+	}
 	if reload {
 		entry.store(service, nil, "loading")
 		var err error
@@ -299,6 +306,10 @@ func (c *MCPCatalog) snapshot(ctx context.Context, id string, live bool) ([]*MCP
 			entry.store(service, nil, status)
 			if ctx.Err() != nil {
 				return nil, status, ctx.Err()
+			}
+			var headerErr *mcp.HeaderTemplateError
+			if errors.As(err, &headerErr) {
+				return nil, status, headerErr
 			}
 			return nil, status, fmt.Errorf(
 				"MCP server %q is %s; retry discovery after resolving its connection or authentication",

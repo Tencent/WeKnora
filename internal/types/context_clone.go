@@ -34,6 +34,7 @@ var contextCloneAcrossDetach = map[ContextKey]bool{
 	UserContextKey:             true,
 	UserIDContextKey:           true,
 	PrincipalContextKey:        true,
+	MCPHeaderContextKey:        true,
 	SystemAdminContextKey:      true,
 	// TenantRoleContextKey: the caller's resolved role in the active tenant
 	// (PR 2 #1303). Must survive for the same reason as TenantIDContextKey —
