@@ -48,7 +48,7 @@ fn rewrite_blocks(blocks: &mut [Block], urls: &[Option<String>]) {
                 }
             }
             Block::BlockQuote(inner) => rewrite_blocks(inner, urls),
-            Block::CodeBlock { .. } | Block::Rule => {}
+            Block::CodeBlock { .. } | Block::Rule | Block::Math(_) => {}
         }
     }
 }
