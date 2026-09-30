@@ -101,6 +101,12 @@ func (c *Connector) Type() string {
 
 // Validate checks the application credentials and operator access, including
 // node listing and a sample document read when one is visible at the workspace root.
+//
+// The operator is not expected to reach every workspace in the tenant: app
+// credentials are valid as long as one reachable workspace yields one readable
+// document. Reading the first document of the first workspace and failing on it
+// rejects a working configuration whenever an unrelated workspace — one the
+// operator was never granted — happens to be listed first.
 func (c *Connector) Validate(ctx context.Context, dataSourceConfig *types.DataSourceConfig) error {
 	cfg, err := parseConfig(dataSourceConfig)
 	if err != nil {
@@ -111,6 +117,12 @@ func (c *Connector) Validate(ctx context.Context, dataSourceConfig *types.DataSo
 	if err != nil {
 		return fmt.Errorf("validate DingTalk data source: %w", err)
 	}
+
+	var (
+		lastErr       error
+		sawDocument   bool
+		workspaceFail int
+	)
 	for _, item := range workspaces {
 		rootNodeID := strings.TrimSpace(item.RootNodeID)
 		if rootNodeID == "" {
@@ -118,20 +130,46 @@ func (c *Connector) Validate(ctx context.Context, dataSourceConfig *types.DataSo
 		}
 		children, err := api.listNodes(ctx, rootNodeID)
 		if err != nil {
-			return fmt.Errorf("validate DingTalk data source: %w", err)
+			lastErr = fmt.Errorf("workspace %q: %w", item.Name, err)
+			workspaceFail++
+			continue
 		}
 		for _, child := range children {
 			if !child.isDocument() {
 				continue
 			}
-			if _, err := api.documentBlocks(ctx, child.ID); err != nil {
-				return fmt.Errorf("validate DingTalk data source: %w", err)
+			sawDocument = true
+			if err := verifyDocument(ctx, api, child); err != nil {
+				lastErr = fmt.Errorf("workspace %q document %q: %w", item.Name, child.Name, err)
+				continue
 			}
 			return nil
 		}
+	}
+
+	// Nothing readable anywhere. Only a tenant that exposed no document at all
+	// is accepted: there was nothing to read, so credentials could not be
+	// disproved. A document that exists but cannot be read means the data
+	// source would sync nothing, which is worth reporting.
+	if !sawDocument && workspaceFail == 0 {
 		return nil
 	}
-	return nil
+	if lastErr == nil {
+		return nil
+	}
+	return fmt.Errorf("validate DingTalk data source: %w", lastErr)
+}
+
+// verifyDocument proves one visible document is readable by calling the read
+// API that backs its ingest path — the blocks API for adoc today. The caller
+// only reaches this function for nodes isDocument accepts, and a native type
+// becomes a document, gains a sync read path and gains its probe here in the
+// same change. Types that are not ingestible yet are therefore not documents
+// yet: uploaded files and native spreadsheets join all three together when
+// their ingest paths land, instead of being probed here in advance.
+func verifyDocument(ctx context.Context, api dingTalkAPI, document node) error {
+	_, err := api.documentBlocks(ctx, document.ID)
+	return err
 }
 
 // ListResources lazily lists selectable workspaces, folders and documents.
