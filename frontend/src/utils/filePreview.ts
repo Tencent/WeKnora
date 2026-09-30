@@ -234,6 +234,34 @@ const DEFAULT_EXT_BY_KIND: Record<FilePreviewKind, string> = {
 
 const SNIFF_BYTES = 16384
 
+// Rendering a spreadsheet creates an HTML table in the browser. Keep the
+// client-side preview bounded so large workbooks can still be downloaded
+// without blocking the main thread or exhausting the renderer.
+export const EXCEL_PREVIEW_MAX_BYTES = 8 * 1024 * 1024
+
+export const EXCEL_PREVIEW_MAX_ROWS = 5000
+// Parse one extra row so a sheet truncated by SheetJS is rejected instead of
+// being rendered as if it were complete.
+export const EXCEL_PREVIEW_PARSE_ROWS = EXCEL_PREVIEW_MAX_ROWS + 1
+export const EXCEL_PREVIEW_MAX_CELLS = 50000
+
+export type ExcelPreviewSheetMetrics = {
+  rows: number
+  columns: number
+}
+
+export function isExcelPreviewTooLarge(size: number, sheets: ExcelPreviewSheetMetrics[] = []): boolean {
+  if (Number.isFinite(size) && size > EXCEL_PREVIEW_MAX_BYTES) return true
+
+  let cells = 0
+  for (const sheet of sheets) {
+    if (sheet.rows > EXCEL_PREVIEW_MAX_ROWS || sheet.columns < 0 || sheet.rows < 0) return true
+    cells += sheet.rows * sheet.columns
+    if (!Number.isSafeInteger(cells) || cells > EXCEL_PREVIEW_MAX_CELLS) return true
+  }
+  return false
+}
+
 /** Strip a leading dot and lowercase. Prefers an explicit type over the filename suffix. */
 export function resolveFilePreviewExt(fileName?: string, fileType?: string): string {
   const normalizedType = String(fileType || '')

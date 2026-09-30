@@ -2019,6 +2019,8 @@ export default {
     retry: '重试',
     unsupported: '该文件类型暂不支持在线预览',
     unsupportedHint: '请下载文件后使用本地应用查看',
+    tooLarge: '此表格文件过大，无法安全预览',
+    tooLargeHint: '请使用下载按钮后通过本地表格应用打开',
     zoomIn: '放大',
     zoomOut: '缩小',
     fullscreen: '全屏预览',
