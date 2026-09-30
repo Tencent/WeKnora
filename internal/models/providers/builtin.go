@@ -13,6 +13,7 @@ func Builtins() []*Definition {
 		newGenericProvider(),
 		newGpustackProvider(),
 		newHunyuanProvider(),
+		newIflytekProvider(),
 		newJinaProvider(),
 		newLitellmProvider(),
 		newLkeapProvider(),
