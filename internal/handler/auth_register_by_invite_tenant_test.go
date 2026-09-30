@@ -189,7 +189,8 @@ func TestRegisterByInviteRegistrationModes(t *testing.T) {
 			}
 			if tc.want == http.StatusCreated {
 				if users.registeredMode != types.TenantProvisioningTenantless || users.updatedTenant != 42 {
-					t.Fatalf("expected account in invited tenant only: mode=%q tenant=%d", users.registeredMode, users.updatedTenant)
+					t.Fatalf("expected account in invited tenant only: mode=%q tenant=%d",
+						users.registeredMode, users.updatedTenant)
 				}
 			} else if users.registeredMode != "" {
 				t.Fatal("rejected registration must not create an account")

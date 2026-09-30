@@ -185,7 +185,7 @@ func (h *AuthHandler) Register(c *gin.Context) {
 	// each request so system-settings changes take effect immediately.
 	if h.resolveRegistrationMode(ctx) != config.AuthRegistrationModeSelfServe {
 		logger.Warn(ctx, "Public registration rejected by auth.registration_mode")
-		c.Error(errors.NewForbiddenError("Public registration is disabled"))
+		_ = c.Error(errors.NewForbiddenError("Public registration is disabled"))
 		return
 	}
 

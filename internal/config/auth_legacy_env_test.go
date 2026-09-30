@@ -23,8 +23,14 @@ func TestApplyAuthAndTenantDefaults_DisableRegistrationDrivesRegistrationMode(t 
 		{"false leaves YAML untouched", "false", AuthRegistrationModeSelfServe, AuthRegistrationModeSelfServe},
 		{"unset falls back to default self_serve", "", "", AuthRegistrationModeSelfServe},
 		{"unset keeps explicit invite_only YAML", "", AuthRegistrationModeInviteOnly, AuthRegistrationModeInviteOnly},
-		{"unset keeps invitation registration", "", AuthRegistrationModeInviteRegister, AuthRegistrationModeInviteRegister},
-		{"legacy disable overrides invitation registration", "true", AuthRegistrationModeInviteRegister, AuthRegistrationModeInviteOnly},
+		{
+			"unset keeps invitation registration", "",
+			AuthRegistrationModeInviteRegister, AuthRegistrationModeInviteRegister,
+		},
+		{
+			"legacy disable overrides invitation registration", "true",
+			AuthRegistrationModeInviteRegister, AuthRegistrationModeInviteOnly,
+		},
 	}
 
 	for _, tc := range cases {

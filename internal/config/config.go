@@ -638,9 +638,11 @@ func ValidateConfig(cfg *Config) error {
 
 	if cfg.Auth != nil {
 		mode := strings.TrimSpace(cfg.Auth.RegistrationMode)
-		if mode != "" && mode != AuthRegistrationModeSelfServe && mode != AuthRegistrationModeInviteOnly && mode != AuthRegistrationModeInviteRegister {
+		if mode != "" && mode != AuthRegistrationModeSelfServe &&
+			mode != AuthRegistrationModeInviteOnly && mode != AuthRegistrationModeInviteRegister {
 			errs = append(errs, fmt.Sprintf("auth.registration_mode must be %q, %q or %q, got %q",
-				AuthRegistrationModeSelfServe, AuthRegistrationModeInviteOnly, AuthRegistrationModeInviteRegister, mode))
+				AuthRegistrationModeSelfServe, AuthRegistrationModeInviteOnly,
+				AuthRegistrationModeInviteRegister, mode))
 		}
 
 		tenantMode := strings.TrimSpace(cfg.Auth.DefaultTenantMode)

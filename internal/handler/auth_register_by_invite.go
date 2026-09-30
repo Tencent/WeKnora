@@ -127,7 +127,7 @@ func (h *AuthHandler) RegisterByInvite(c *gin.Context) {
 
 	mode := h.resolveRegistrationMode(ctx)
 	if mode != config.AuthRegistrationModeSelfServe && mode != config.AuthRegistrationModeInviteRegister {
-		c.Error(apperrors.NewForbiddenError("Registration is disabled"))
+		_ = c.Error(apperrors.NewForbiddenError("Registration is disabled"))
 		return
 	}
 

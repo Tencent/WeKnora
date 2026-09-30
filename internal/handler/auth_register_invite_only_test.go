@@ -244,7 +244,9 @@ func (s *registrationModeSettings) GetBool(_ context.Context, _, _ string, fallb
 func TestRegistrationModeChangesApplyImmediately(t *testing.T) {
 	settings := &registrationModeSettings{}
 	h := &AuthHandler{
-		configInfo:       &config.Config{Auth: &config.AuthConfig{RegistrationMode: config.AuthRegistrationModeInviteOnly}},
+		configInfo: &config.Config{
+			Auth: &config.AuthConfig{RegistrationMode: config.AuthRegistrationModeInviteOnly},
+		},
 		systemSettingSvc: settings,
 		userService:      &invitedRegistrationUserService{},
 		tenantService:    &invitedRegistrationTenantService{},
@@ -253,7 +255,11 @@ func TestRegistrationModeChangesApplyImmediately(t *testing.T) {
 	r := newRegisterTestRouter(h)
 	r.POST("/auth/register-by-invite", h.RegisterByInvite)
 	r.GET("/auth/config", h.GetAuthConfig)
-	for _, mode := range []string{config.AuthRegistrationModeInviteRegister, config.AuthRegistrationModeSelfServe, config.AuthRegistrationModeInviteOnly} {
+	for _, mode := range []string{
+		config.AuthRegistrationModeInviteRegister,
+		config.AuthRegistrationModeSelfServe,
+		config.AuthRegistrationModeInviteOnly,
+	} {
 		settings.mode = mode
 		w := httptest.NewRecorder()
 		r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/auth/config", nil))
@@ -272,7 +278,8 @@ func TestRegistrationModeChangesApplyImmediately(t *testing.T) {
 			w := httptest.NewRecorder()
 			r.ServeHTTP(w, req)
 			want := http.StatusForbidden
-			if mode == config.AuthRegistrationModeSelfServe || (mode == config.AuthRegistrationModeInviteRegister && path == "/auth/register-by-invite") {
+			if mode == config.AuthRegistrationModeSelfServe ||
+				(mode == config.AuthRegistrationModeInviteRegister && path == "/auth/register-by-invite") {
 				want = http.StatusCreated
 			}
 			if w.Code != want {
