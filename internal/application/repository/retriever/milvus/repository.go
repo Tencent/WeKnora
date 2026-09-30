@@ -944,21 +944,31 @@ func (m *milvusRepository) CopyIndices(ctx context.Context,
 		return err
 	}
 
-	batchSize := 64
+	// Read the rows the mapping names, in batches of source chunk IDs. The
+	// mapping is the set of chunks this copy has to move, so a predicate over it
+	// makes every read self-contained.
+	//
+	// The offset window this replaces was a cursor into a result order Milvus
+	// never promised to keep between requests: results are merged segment by
+	// segment, and this copy writes into the collection it reads from, so a
+	// window that moves on skips the rows left behind it and re-copies the ones
+	// it slides back over. Every request still succeeds, which is why the copy
+	// reported success on an incomplete target. A mapping predicate has no
+	// cursor that can drift.
+	sourceChunkIDs := slices.Sorted(maps.Keys(sourceToTargetChunkIDMap))
+	const chunkBatchSize = 64
 	totalCopied := 0
-	var offset *int
-	for {
-		sourceEmbeddings, count, err := m.searchByFilter(ctx, collectionName, &universalFilterCondition{
-			Field:    fieldKnowledgeBaseID,
-			Operator: operatorEqual,
-			Value:    sourceKnowledgeBaseID,
-		}, &batchSize, offset)
+	for chunkBatch := range slices.Chunk(sourceChunkIDs, chunkBatchSize) {
+		sourceEmbeddings, _, err := m.searchByFilter(ctx, collectionName, &universalFilterCondition{
+			Operator: operatorAnd,
+			Value: []*universalFilterCondition{
+				{Field: fieldKnowledgeBaseID, Operator: operatorEqual, Value: sourceKnowledgeBaseID},
+				{Field: fieldChunkID, Operator: operatorIn, Value: chunkBatch},
+			},
+		}, nil, nil)
 		if err != nil {
 			log.Errorf("[Milvus] Failed to query source points: %v", err)
 			return err
-		}
-		if len(sourceEmbeddings) == 0 {
-			break
 		}
 		targetEmbeddings := make([]*MilvusVectorEmbedding, 0, len(sourceEmbeddings))
 		for _, sourceEmbedding := range sourceEmbeddings {
@@ -1011,14 +1021,6 @@ func (m *milvusRepository) CopyIndices(ctx context.Context,
 			log.Infof("[Milvus] Successfully copied batch, batch size: %d, total copied: %d",
 				len(targetEmbeddings), totalCopied)
 		}
-
-		if count < batchSize {
-			break
-		}
-		if offset == nil {
-			offset = new(int)
-		}
-		*offset += count
 	}
 
 	log.Infof("[Milvus] Index copy completed, total copied: %d", totalCopied)
