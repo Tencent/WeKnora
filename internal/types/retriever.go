@@ -108,5 +108,12 @@ type RetrieveResult struct {
 	Results             []*IndexWithScore   // Retrieval results
 	RetrieverEngineType RetrieverEngineType // Retrieval source type
 	RetrieverType       RetrieverType       // Retrieval type
-	Error               error               // Retrieval error
+	// Error reports a partial failure of this result set: Results holds what
+	// answered, Error says what did not. It is nil for a complete retrieval,
+	// including a genuine zero-hit search. A store-level failure is still
+	// returned as the call's error with no result set at all.
+	// CompositeRetrieveEngine surfaces a non-nil Error as an error alongside the
+	// results, so a caller that reads the results must not ignore the error
+	// without at least logging that the answer is incomplete.
+	Error error // Retrieval error
 }
