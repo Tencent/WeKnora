@@ -17,6 +17,11 @@ type IndexingStrategy struct {
 	WikiEnabled bool `yaml:"wiki_enabled" json:"wiki_enabled"`
 	// GraphEnabled enables knowledge graph entity/relation extraction
 	GraphEnabled bool `yaml:"graph_enabled" json:"graph_enabled"`
+	// ImageVectorEnabled embeds images themselves, so a text query can recall
+	// an image without relying on its OCR text or VLM caption. It only takes
+	// effect when the embedding model reports image support. Stored in the
+	// existing JSON column, so rows written before it existed read back false.
+	ImageVectorEnabled bool `yaml:"image_vector_enabled" json:"image_vector_enabled"`
 }
 
 // DefaultIndexingStrategy returns the default strategy matching the legacy behavior:
@@ -32,21 +37,36 @@ func DefaultIndexingStrategy() IndexingStrategy {
 
 // NeedsEmbedding returns true if any pipeline that requires an embedding model is enabled.
 func (s IndexingStrategy) NeedsEmbedding() bool {
-	return s.VectorEnabled || s.KeywordEnabled
+	return s.VectorEnabled || s.KeywordEnabled || s.ImageVectorEnabled
 }
 
 // NeedsChunks returns true if any pipeline that requires document chunks is enabled.
 // Chunks are needed for vector indexing, keyword indexing, wiki generation, and graph extraction.
 func (s IndexingStrategy) NeedsChunks() bool {
-	return s.VectorEnabled || s.KeywordEnabled || s.WikiEnabled || s.GraphEnabled
+	return s.VectorEnabled || s.KeywordEnabled || s.WikiEnabled || s.GraphEnabled || s.ImageVectorEnabled
+}
+
+// NeedsImageVector reports whether images should be embedded from their pixels.
+// Deliberately also requires VectorEnabled: image vectors live in the vector
+// collection, so with it off there is nowhere to put them. Checking here rather
+// than only at write time means a row predating the validation degrades to
+// text-only instead of querying in a space no stored chunk shares.
+func (s IndexingStrategy) NeedsImageVector() bool {
+	return s.ImageVectorEnabled && s.VectorEnabled
 }
 
 // HasAnyIndexing returns true if at least one indexing pipeline is enabled.
+// ImageVectorEnabled does not count: it modifies the vector pipeline rather
+// than being one, and counting it would let a KB pass this check while being
+// unable to retrieve anything.
 func (s IndexingStrategy) HasAnyIndexing() bool {
 	return s.VectorEnabled || s.KeywordEnabled || s.WikiEnabled || s.GraphEnabled
 }
 
 // IsZero returns true if the strategy has no pipelines enabled (zero value).
+// ImageVectorEnabled is excluded for the same reason as in HasAnyIndexing:
+// EnsureDefaults uses this to detect an unconfigured strategy, and a flag that
+// only tunes the vector pipeline does not mean the strategy was configured.
 func (s IndexingStrategy) IsZero() bool {
 	return !s.VectorEnabled && !s.KeywordEnabled && !s.WikiEnabled && !s.GraphEnabled
 }

@@ -15,6 +15,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/datasource"
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/models/embedding"
 	"github.com/Tencent/WeKnora/internal/storageallowlist"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -139,7 +140,18 @@ func (s *knowledgeBaseService) CreateKnowledgeBase(ctx context.Context,
 	if uid, ok := types.UserIDFromContext(ctx); ok && !types.IsSyntheticUserID(uid) {
 		kb.CreatorID = uid
 	}
+	// Validate before EnsureDefaults: EnsureDefaults treats an all-off
+	// strategy as unconfigured and replaces it with the defaults, which would
+	// quietly swallow an invalid combination instead of reporting it.
+	if err := validateIndexingStrategy(kb.IndexingStrategy); err != nil {
+		return nil, err
+	}
 	kb.EnsureDefaults()
+	// After EnsureDefaults: it can turn VectorEnabled on, which is exactly the
+	// precondition NeedsImageVector() depends on.
+	if err := s.validateImageVectorModel(ctx, kb); err != nil {
+		return nil, err
+	}
 	applyTenantDefaultStorageProvider(ctx, kb)
 	if err := s.applyAndValidateStorageBackend(ctx, kb); err != nil {
 		return nil, err
@@ -477,6 +489,51 @@ func (s *knowledgeBaseService) FillKnowledgeBaseCounts(ctx context.Context, kb *
 
 // UpdateKnowledgeBase updates a knowledge base's mutable properties.
 //
+// validateIndexingStrategy rejects combinations that JSON decoding accepts but
+// that cannot work at runtime. Image vectors share the vector collection with
+// text chunks, so enabling them without the vector pipeline leaves nowhere to
+// put the result — silently creating chunks that are never retrievable.
+func validateIndexingStrategy(s types.IndexingStrategy) error {
+	if s.ImageVectorEnabled && !s.VectorEnabled {
+		return errors.New("image vector indexing requires vector indexing to be enabled")
+	}
+	return nil
+}
+
+// validateImageVectorModel rejects enabling image vectors on a KB whose
+// embedding model cannot embed images. The failure it prevents is silent:
+// ingestion drops the images with only a warning, query encoding falls back to
+// the text path, and the KB looks configured and never returns an image. It
+// mirrors the gate in the ingestion and query paths so the three agree; the
+// frontend disables the toggle for the same reason, and this is the backstop
+// for API callers and stale client metadata. Asymmetric with
+// ModelResponse.SupportsImageEmbedding, which is computed from the model row
+// alone — where they disagree, the resolved embedder wins. Skipped when no
+// model service is wired.
+func (s *knowledgeBaseService) validateImageVectorModel(ctx context.Context, kb *types.KnowledgeBase) error {
+	if s.modelService == nil || kb == nil || !kb.IndexingStrategy.NeedsImageVector() {
+		return nil
+	}
+	if kb.EmbeddingModelID == "" {
+		return errors.New("image vector indexing requires an embedding model")
+	}
+
+	embedder, err := s.modelService.GetEmbeddingModel(ctx, kb.EmbeddingModelID)
+	if err != nil {
+		logger.Errorf(ctx,
+			"image vector validation: failed to resolve embedding model %s for KB %s: %v",
+			kb.EmbeddingModelID, kb.ID, err)
+		return fmt.Errorf("resolve embedding model %s: %w", kb.EmbeddingModelID, err)
+	}
+	if !embedding.SupportsImage(embedder) {
+		return fmt.Errorf(
+			"image vector indexing requires an embedding model that supports images; model %s does not. "+
+				"Declare support via extra parameter supports_image_embedding=true or pick a multimodal model",
+			embedder.GetModelName())
+	}
+	return nil
+}
+
 // IMPORTANT — vector_store_id immutability contract:
 // The vector_store_id binding is deliberately not accepted by this method.
 // Two layers enforce immutability:
@@ -513,6 +570,12 @@ func (s *knowledgeBaseService) UpdateKnowledgeBase(ctx context.Context,
 		})
 		return nil, err
 	}
+
+	// Snapshot the encoding envelope before anything mutates the strategy.
+	// Flipping the image vector switch is the one setting change that silently
+	// invalidates every vector already stored in this knowledge base, so it
+	// needs a re-index to follow it.
+	envelopeBefore := s.currentEnvelope(ctx, kb)
 
 	changedFields := make([]string, 0, 3)
 	profileWasEnabled := kb.ProfileConfig.IsEnabled()
@@ -555,7 +618,15 @@ func (s *knowledgeBaseService) UpdateKnowledgeBase(ctx context.Context,
 			if !config.IndexingStrategy.HasAnyIndexing() {
 				return nil, errors.New("at least one indexing strategy must be enabled")
 			}
+			if err := validateIndexingStrategy(*config.IndexingStrategy); err != nil {
+				return nil, err
+			}
 			kb.IndexingStrategy = *config.IndexingStrategy
+			// Validated after assignment so NeedsImageVector() sees the newly
+			// submitted strategy, not the one being replaced.
+			if err := s.validateImageVectorModel(ctx, kb); err != nil {
+				return nil, err
+			}
 			// Ensure WikiConfig exists when wiki indexing is enabled so that
 			// wiki-specific tunables (synthesis model, granularity, …) have a home.
 			if kb.WikiConfig == nil && config.IndexingStrategy.WikiEnabled {
@@ -589,8 +660,70 @@ func (s *knowledgeBaseService) UpdateKnowledgeBase(ctx context.Context,
 		_ = requestKnowledgeBaseProfileRefresh(ctx, s.asynqClient, kb, false)
 	}
 
+	s.enqueueVectorReindexIfEnvelopeChanged(ctx, kb, envelopeBefore)
+
 	logger.Infof(ctx, "Knowledge base updated successfully, ID: %s, name: %s", kb.ID, kb.Name)
 	return kb, nil
+}
+
+// currentEnvelope reports which request envelope this knowledge base encodes
+// with. It is the same predicate the indexing and query paths use; resolving it
+// here means the update path cannot disagree with them about what changed.
+func (s *knowledgeBaseService) currentEnvelope(ctx context.Context, kb *types.KnowledgeBase) bool {
+	if s.modelService == nil || kb == nil || kb.EmbeddingModelID == "" {
+		return false
+	}
+	embedder, err := s.modelService.GetEmbeddingModel(ctx, kb.EmbeddingModelID)
+	if err != nil {
+		// Resolution failures are reported by validateImageVectorModel when it
+		// matters. Here they only mean "assume nothing changed" — a spurious
+		// re-index is cheaper than a missing one, but enqueuing one on a broken
+		// model would just fail the task.
+		logger.Warnf(ctx, "envelope check: could not resolve embedding model %s: %v", kb.EmbeddingModelID, err)
+		return false
+	}
+	return usesMultimodalEnvelope(kb, embedder)
+}
+
+// enqueueVectorReindexIfEnvelopeChanged queues a recompute of every stored
+// vector when the KB moved between encoding envelopes. Without it, flipping
+// the image vector switch strands every vector written before it — queries are
+// encoded in the new space, stored vectors stay in the old one — and retrieval
+// keeps returning k results that are noise without erroring. A failure to
+// enqueue is logged rather than returned: the setting is saved either way.
+func (s *knowledgeBaseService) enqueueVectorReindexIfEnvelopeChanged(
+	ctx context.Context, kb *types.KnowledgeBase, envelopeBefore bool,
+) {
+	if envelopeBefore == s.currentEnvelope(ctx, kb) {
+		return
+	}
+	if s.asynqClient == nil {
+		logger.Warnf(ctx,
+			"envelope changed for KB %s but no task enqueuer is wired; stored vectors are now in the wrong space "+
+				"and must be re-indexed manually", kb.ID)
+		return
+	}
+
+	payload := types.KBReindexVectorsPayload{
+		TenantID:        kb.TenantID,
+		KnowledgeBaseID: kb.ID,
+		Initiator:       types.TaskInitiatorFromContext(ctx),
+	}
+	langfuse.InjectTracing(ctx, &payload)
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		logger.Warnf(ctx, "Failed to marshal KB reindex vectors payload for KB %s: %v", kb.ID, err)
+		return
+	}
+
+	task := asynq.NewTask(types.TypeKBReindexVectors, payloadBytes,
+		asynq.Queue(types.QueueMaintenance), asynq.MaxRetry(3), asynq.Timeout(4*time.Hour))
+	info, err := s.asynqClient.Enqueue(task)
+	if err != nil {
+		logger.Warnf(ctx, "Failed to enqueue KB reindex vectors task for KB %s: %v", kb.ID, err)
+		return
+	}
+	logger.Infof(ctx, "Envelope changed for KB %s; queued vector re-index task %s", kb.ID, info.ID)
 }
 
 // TogglePinKnowledgeBase toggles whether the calling user has pinned

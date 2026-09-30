@@ -721,7 +721,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 			return abortRetryErr(ctx, knowledge.ID, status)
 		}
 
-		err = retrieveEngine.BatchIndex(ctx, embeddingModel, indexInfoList)
+		err = indexChunksWithEnvelope(ctx, retrieveEngine, kb, embeddingModel, indexInfoList)
 		if err != nil {
 			knowledge.ParseStatus = types.ParseStatusFailed
 			knowledge.ErrorMessage = err.Error()
@@ -779,6 +779,14 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 		logger.Infof(ctx, "Vector/keyword indexing disabled for KB %s, skipping BatchIndex", kb.ID)
 		s.skipStage(ctx, knowledge.ID, types.StageEmbedding, "skipped")
 	}
+
+	// Image vectors are an independent opt-in from the VLM, so they must not be
+	// conditional on the multimodal fan-out: a KB that enabled them without a
+	// VLM would otherwise get none, silently, for every document uploaded from
+	// then on. When the fan-out is going to run it owns them (see the comment on
+	// maybeIndexImageVectorsOnIngest), so nothing is indexed twice.
+	s.maybeIndexImageVectorsOnIngest(ctx, kb, knowledge, embeddingModel, retrieveEngine,
+		options, chunks)
 
 	// Check if this document has extracted images that will be processed asynchronously
 	isImage := IsImageType(knowledge.FileType)
@@ -1603,7 +1611,7 @@ func (s *knowledgeService) ProcessSummaryGeneration(ctx context.Context, t *asyn
 			IsEnabled:       true,
 		}}
 
-		if err := retrieveEngine.BatchIndex(ctx, embeddingModel, indexInfo); err != nil {
+		if err := indexChunksWithEnvelope(ctx, retrieveEngine, kb, embeddingModel, indexInfo); err != nil {
 			logger.Errorf(ctx, "Failed to index summary chunk: %v", err)
 			summaryErr = err
 			return fmt.Errorf("failed to index summary chunk: %w", err)
@@ -1996,7 +2004,7 @@ func (s *knowledgeService) processQuestionGenerationForKnowledge(ctx context.Con
 	// Index generated questions
 	if len(indexInfoList) > 0 {
 		indexBatchAttempted = true
-		if err := retrieveEngine.BatchIndex(ctx, embeddingModel, indexInfoList); err != nil {
+		if err := indexChunksWithEnvelope(ctx, retrieveEngine, kb, embeddingModel, indexInfoList); err != nil {
 			exitStatus = "index_questions_failed"
 			logger.Errorf(ctx, "Failed to index generated questions: %v", err)
 			return fmt.Errorf("failed to index questions: %w", err)
@@ -2322,7 +2330,7 @@ func (s *knowledgeService) processQuestionGenerationForChunks(ctx context.Contex
 
 	indexEntriesPrepared = len(indexInfoList)
 	if len(indexInfoList) > 0 {
-		if err := retrieveEngine.BatchIndex(ctx, embeddingModel, indexInfoList); err != nil {
+		if err := indexChunksWithEnvelope(ctx, retrieveEngine, kb, embeddingModel, indexInfoList); err != nil {
 			exitStatus = "index_questions_failed"
 			qErr = err
 			logger.Errorf(ctx, "Failed to index generated questions for batch %d: %v", payload.BatchIndex, err)
@@ -3127,6 +3135,15 @@ func (s *knowledgeService) updateChunkVector(ctx context.Context, kbID string, c
 			logger.Warnf(ctx, "Knowledge base ID mismatch: %s != %s", chunk.KnowledgeBaseID, kbID)
 			continue
 		}
+		// An image vector chunk is skipped entirely — before its id reaches the
+		// delete list. Its content is a markdown link rather than the picture,
+		// so re-embedding it would replace a real image embedding with the
+		// embedding of `![image](url)`; and deleting it would discard a vector
+		// that is still valid, because editing the surrounding text does not
+		// change the image. See the same guard in syncChunkIndex.
+		if chunk.ChunkType == types.ChunkTypeImageVector {
+			continue
+		}
 		ids = append(ids, chunk.ID)
 		if !chunk.IsEnabled || chunk.ChunkType == types.ChunkTypeParentText {
 			continue
@@ -3180,9 +3197,175 @@ func (s *knowledgeService) updateChunkVector(ctx context.Context, kbID string, c
 	}
 
 	// Index updated chunk content with new vector representation
-	err = retrieveEngine.BatchIndex(ctx, embeddingModel, indexInfo)
+	err = indexChunksWithEnvelope(ctx, retrieveEngine, sourceKB, embeddingModel, indexInfo)
 	if err != nil {
 		return err
+	}
+	return nil
+}
+
+// reindexableChunkTypes are the chunk types whose vector derives from their
+// text content, so it can be recomputed from the stored chunk alone. Two types
+// are deliberately absent: parent_text exists only to group children, and
+// image_vector's content is a markdown link, not the picture — rebuilding it
+// here would overwrite a real image embedding with the embedding of
+// `![image](url)`. It is handled separately, by toggling visibility.
+var reindexableChunkTypes = []types.ChunkType{
+	types.ChunkTypeText,
+	types.ChunkTypeImageOCR,
+	types.ChunkTypeImageCaption,
+	types.ChunkTypeSummary,
+	types.ChunkTypeFAQ,
+	types.ChunkTypeTableSummary,
+	types.ChunkTypeTableColumn,
+	types.ChunkTypeWikiPage,
+}
+
+// ProcessKBReindexVectors recomputes every text-derived vector in a knowledge
+// base from the chunk content already in the database. Flipping the image
+// vector switch moves the KB's queries into or out of the chat-template space,
+// stranding every vector written before it; retrieval keeps returning k noise
+// results without erroring, so without this the switch silently degrades
+// search. Cheaper than a reparse: nothing is re-read, no VLM is called.
+func (s *knowledgeService) ProcessKBReindexVectors(ctx context.Context, t *asynq.Task) error {
+	var payload types.KBReindexVectorsPayload
+	if err := json.Unmarshal(t.Payload(), &payload); err != nil {
+		logger.Errorf(ctx, "Failed to unmarshal kb reindex vectors payload: %v", err)
+		return err
+	}
+	ctx = payload.Initiator.Apply(ctx)
+	taskID, _ := asynq.GetTaskID(ctx)
+	ctx = withKBActivityTask(ctx, taskID, kbActivityTrigger(ctx))
+
+	tenant, err := s.tenantRepo.GetTenantByID(ctx, payload.TenantID)
+	if err != nil {
+		logger.Errorf(ctx, "Failed to get tenant %d: %v", payload.TenantID, err)
+		return err
+	}
+	ctx = context.WithValue(ctx, types.TenantIDContextKey, payload.TenantID)
+	ctx = context.WithValue(ctx, types.TenantInfoContextKey, tenant)
+
+	kb, err := s.kbService.GetKnowledgeBaseByID(ctx, payload.KnowledgeBaseID)
+	if err != nil {
+		logger.Errorf(ctx, "Failed to get knowledge base %s: %v", payload.KnowledgeBaseID, err)
+		return err
+	}
+
+	// Chunk writes go through the KB write guard, which HTTP entry points grant
+	// in middleware. An async task has no such middleware, so without this the
+	// image vector backfill below is rejected with "无权修改该知识库" and the
+	// switch appears to have been flipped while nothing was written.
+	if ctx, err = access.WithKBTaskWrite(ctx, kb, payload.TenantID); err != nil {
+		logger.Errorf(ctx, "KB reindex vectors: KB %s is not writable for tenant %d: %v",
+			payload.KnowledgeBaseID, payload.TenantID, err)
+		return err
+	}
+
+	knowledges, err := s.repo.ListKnowledgeByKnowledgeBaseID(ctx, payload.TenantID, payload.KnowledgeBaseID)
+	if err != nil {
+		logger.Errorf(ctx, "Failed to list knowledge for KB %s: %v", payload.KnowledgeBaseID, err)
+		return err
+	}
+
+	var reindexed, failed int
+	for _, knowledge := range knowledges {
+		// A document still being parsed will be indexed with the current
+		// envelope when it finishes; touching it here would race the pipeline.
+		if knowledge.ParseStatus != types.ParseStatusCompleted {
+			continue
+		}
+		if err := s.reindexKnowledgeVectors(ctx, kb, knowledge); err != nil {
+			failed++
+			logger.Errorf(ctx, "KB reindex vectors: knowledge %s failed: %v", knowledge.ID, err)
+			continue
+		}
+		reindexed++
+	}
+	logger.Infof(ctx, "KB reindex vectors finished for KB %s: %d reindexed, %d failed, %d skipped (not completed)",
+		payload.KnowledgeBaseID, reindexed, failed, len(knowledges)-reindexed-failed)
+
+	// Deliberately not retried: one broken document should not re-run the whole
+	// knowledge base, and a retry would not fix that document anyway.
+	return nil
+}
+
+// reindexKnowledgeVectors recomputes one document's text vectors in batches,
+// realigns the visibility of its image vectors with the current envelope, and
+// backfills image vectors for images that never got one. Image vectors live
+// only in the chat-template space, so existing ones are toggled rather than
+// recomputed — the vector is still a faithful embedding of an unchanged image,
+// but leaving it visible in the wrong space costs a result slot on every
+// query. Images with no vector at all are handled by backfillImageVectors.
+func (s *knowledgeService) reindexKnowledgeVectors(
+	ctx context.Context, kb *types.KnowledgeBase, knowledge *types.Knowledge,
+) error {
+	// One pass, both kinds: image vectors are separated out rather than listed
+	// again.
+	all := append([]types.ChunkType{types.ChunkTypeImageVector}, reindexableChunkTypes...)
+	chunks, err := s.chunkRepo.ListChunksByKnowledgeIDAndTypes(ctx, knowledge.TenantID, knowledge.ID, all)
+	if err != nil {
+		return err
+	}
+
+	var textChunks []*types.Chunk
+	var imageIDs []string
+	for _, chunk := range chunks {
+		if chunk.ChunkType == types.ChunkTypeImageVector {
+			imageIDs = append(imageIDs, chunk.ID)
+			continue
+		}
+		textChunks = append(textChunks, chunk)
+	}
+
+	const batchSize = 100
+	for start := 0; start < len(textChunks); start += batchSize {
+		end := min(start+batchSize, len(textChunks))
+		if err := s.updateChunkVector(ctx, knowledge.KnowledgeBaseID, textChunks[start:end]); err != nil {
+			return fmt.Errorf("reindex chunks %d-%d of knowledge %s: %w", start, end, knowledge.ID, err)
+		}
+	}
+
+	// Backfill is only meaningful in the space image vectors live in; outside
+	// it there is nothing to create, and doing so would only strand new
+	// vectors in a space no query reaches.
+	targets := collectImageBackfillTargets(chunks)
+	if len(imageIDs) == 0 && len(targets) == 0 {
+		return nil
+	}
+
+	model, err := s.modelService.GetEmbeddingModel(ctx, kb.EmbeddingModelID)
+	if err != nil {
+		return err
+	}
+	visible := usesMultimodalEnvelope(kb, model)
+	if len(imageIDs) == 0 && !visible {
+		return nil
+	}
+
+	engine, err := retriever.CreateRetrieveEngineForKB(
+		ctx, s.retrieveEngine, s.ownership, knowledge.TenantID, kb.VectorStoreID)
+	if err != nil {
+		return err
+	}
+
+	if len(imageIDs) > 0 {
+		status := make(map[string]bool, len(imageIDs))
+		for _, id := range imageIDs {
+			status[id] = visible
+		}
+		if err := engine.BatchUpdateChunkEnabledStatus(ctx, status); err != nil {
+			return err
+		}
+	}
+
+	if !visible || len(targets) == 0 {
+		return nil
+	}
+	created, failed := s.backfillImageVectors(
+		ctx, s.imageByteReader(), kb, knowledge, model, engine, targets)
+	if created > 0 || failed > 0 {
+		logger.Infof(ctx, "Image vector backfill for knowledge %s: %d created, %d failed",
+			knowledge.ID, created, failed)
 	}
 	return nil
 }

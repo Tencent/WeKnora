@@ -293,6 +293,10 @@ func RunAsynqServer(params AsynqTaskParams) *asynq.ServeMux {
 	// Register knowledge list reparse handler
 	mux.HandleFunc(types.TypeKnowledgeListReparse, params.KnowledgeService.ProcessKnowledgeListReparse)
 
+	// Register knowledge base vector recompute handler — queued when the image
+	// vector switch changes the envelope the knowledge base encodes with.
+	mux.HandleFunc(types.TypeKBReindexVectors, params.KnowledgeService.ProcessKBReindexVectors)
+
 	// Register index delete handler
 	mux.HandleFunc(types.TypeIndexDelete, params.TagService.ProcessIndexDelete)
 

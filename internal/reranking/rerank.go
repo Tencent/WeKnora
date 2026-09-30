@@ -113,8 +113,22 @@ func Rerank(
 
 	keep := topByScore(results, opts.MaxCandidates)
 	candidateIdx := make([]int, 0, len(results))
+	var exempt []*types.SearchResult
+	exemptIdx := make([]int, 0)
 	for i, r := range results {
 		if r == nil || (keep != nil && !keep[i]) {
+			continue
+		}
+		// An image_vector chunk's content is a bare ![image](url), so passage
+		// cleaning empties it and the empty-passage filter below would drop it
+		// — a picture that is the best vector match for the query would never
+		// reach the answer. Scoring it is also a category error: its relevance
+		// is the cosine score from the joint text/image space, while the
+		// description of the picture lives in the sibling caption/OCR chunk and
+		// gets reranked on its own merits.
+		if types.ChunkType(r.ChunkType) == types.ChunkTypeImageVector {
+			exempt = append(exempt, exemptCopy(r))
+			exemptIdx = append(exemptIdx, i)
 			continue
 		}
 		passage := ModelPassage(ctx, r)
@@ -128,6 +142,9 @@ func Rerank(
 	res.Diagnostics.CandidateCount = len(res.Candidates)
 	if len(res.Candidates) == 0 {
 		res.Diagnostics.Outcome = types.RerankOutcomeNoCandidates
+		res.Results = exempt
+		res.Indices = exemptIdx
+		res.Diagnostics.ResultCount = len(res.Results)
 		return res
 	}
 	fitPassages(ctx, res.Passages, rerank.MaxPassageRunes(model, query))
@@ -195,12 +212,17 @@ func Rerank(
 	if opts.TopK > 0 {
 		picks = SelectMMR(ctx, res.Scored, min(opts.TopK, len(res.Scored)), DefaultMMRLambda)
 	}
-	res.Results = make([]*types.SearchResult, 0, len(picks))
-	res.Indices = make([]int, 0, len(picks))
+	res.Results = make([]*types.SearchResult, 0, len(picks)+len(exempt))
+	res.Indices = make([]int, 0, len(picks)+len(exempt))
 	for _, p := range picks {
 		res.Results = append(res.Results, res.Scored[p])
 		res.Indices = append(res.Indices, sortedIdx[p])
 	}
+	// Exempt rows rejoin carrying the retrieval score, deliberately not a
+	// synthesised model score: MMR's redundancy term still keeps a cluster of
+	// near-identical images from crowding out text passages.
+	res.Results = append(res.Results, exempt...)
+	res.Indices = append(res.Indices, exemptIdx...)
 	res.Diagnostics.ResultCount = len(res.Results)
 
 	logger.Infof(ctx, "[Rerank] %d candidates -> %d results, outcome=%s threshold=%.3f effective=%.3f top=%.4f",
@@ -315,6 +337,20 @@ const CompositeScoreKey = "composite_score"
 
 // scoredCopy returns a copy of r whose Score is the composite of the model
 // score and its retrieval score, recording both in Metadata.
+// exemptCopy carries a row past the model stage untouched: it keeps the
+// retrieval score it was given and is marked so tracing can tell why it has
+// no model_score.
+func exemptCopy(r *types.SearchResult) *types.SearchResult {
+	c := *r
+	c.Metadata = maps.Clone(r.Metadata)
+	if c.Metadata == nil {
+		c.Metadata = make(map[string]string, 2)
+	}
+	c.Metadata["base_score"] = strconv.FormatFloat(r.Score, 'f', 4, 64)
+	c.Metadata["rerank_exempt"] = "true"
+	return &c
+}
+
 func scoredCopy(r *types.SearchResult, modelScore, faqBoost float64) *types.SearchResult {
 	c := *r
 	c.Metadata = maps.Clone(r.Metadata)

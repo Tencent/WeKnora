@@ -2,6 +2,7 @@ package retriever
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"regexp"
 	"slices"
@@ -70,17 +71,47 @@ func (v *KeywordsVectorHybridRetrieveEngineService) Retrieve(ctx context.Context
 func (v *KeywordsVectorHybridRetrieveEngineService) Index(ctx context.Context,
 	embedder embedding.Embedder, indexInfo *types.IndexInfo, retrieverTypes []types.RetrieverType,
 ) error {
+	if indexInfo.IsImage() && !slices.Contains(retrieverTypes, types.VectorRetrieverType) {
+		return nil
+	}
+
 	params := make(map[string]any)
 	embeddingMap := make(map[string][]float32)
 	if slices.Contains(retrieverTypes, types.VectorRetrieverType) {
-		embedding, err := embedder.Embed(ctx, sanitizeForEmbedding(ctx, indexInfo.Content))
+		var (
+			vector []float32
+			err    error
+		)
+		switch {
+		case indexInfo.IsImage():
+			vector, err = embedImageIndexInfo(ctx, embedder, indexInfo)
+		case indexInfo.MultimodalEnvelope:
+			vector, err = embedding.EmbedMultimodal(ctx, embedder, embedding.Input{
+				Text: sanitizeForEmbedding(ctx, indexInfo.Content),
+			})
+		default:
+			vector, err = embedder.Embed(ctx, sanitizeForEmbedding(ctx, indexInfo.Content))
+		}
 		if err != nil {
 			return err
 		}
-		embeddingMap[indexInfo.SourceID] = embedding
+		embeddingMap[indexInfo.SourceID] = vector
 	}
 	params["embedding"] = embeddingMap
 	return v.indexRepository.Save(ctx, indexInfo, params)
+}
+
+// embedImageIndexInfo embeds one image entry with the model's multimodal path.
+func embedImageIndexInfo(
+	ctx context.Context, embedder embedding.Embedder, indexInfo *types.IndexInfo,
+) ([]float32, error) {
+	vector, err := embedding.EmbedMultimodal(ctx, embedder, embedding.Input{
+		Images: []embedding.ImagePart{{Data: indexInfo.ImageBytes, MIME: indexInfo.ImageMIME}},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("embed image %s: %w", indexInfo.SourceID, err)
+	}
+	return vector, nil
 }
 
 // BatchIndex creates embeddings for multiple content items and saves them to the repository
@@ -93,13 +124,14 @@ func (v *KeywordsVectorHybridRetrieveEngineService) BatchIndex(ctx context.Conte
 	}
 
 	if slices.Contains(retrieverTypes, types.VectorRetrieverType) {
-		var contentList []string
-		for _, indexInfo := range indexInfoList {
-			contentList = append(contentList, sanitizeForEmbedding(ctx, indexInfo.Content))
-		}
-		embeddings, err := batchEmbedWithBackoff(ctx, embedder, contentList)
+		var embeddings [][]float32
+		var err error
+		indexInfoList, embeddings, err = embedIndexInfos(ctx, embedder, indexInfoList)
 		if err != nil {
 			return err
+		}
+		if len(indexInfoList) == 0 {
+			return nil
 		}
 
 		batchSize := 40
@@ -117,7 +149,12 @@ func (v *KeywordsVectorHybridRetrieveEngineService) BatchIndex(ctx context.Conte
 		return v.boundedConcurrentBatchSave(ctx, chunks, embeddings, batchSize, maxConcurrency)
 	}
 
-	// For non-vector retrieval, use concurrent batch saving as well
+	// For non-vector retrieval, use concurrent batch saving as well.
+	// Image entries are dropped first: there is no text to keyword-index.
+	indexInfoList = dropImageIndexInfos(ctx, indexInfoList)
+	if len(indexInfoList) == 0 {
+		return nil
+	}
 	chunks := utils.ChunkSlice(indexInfoList, 10)
 	const maxConcurrency = 5
 	if len(chunks) <= maxConcurrency {
@@ -151,6 +188,190 @@ func batchEmbedWithBackoff(ctx context.Context, embedder embedding.Embedder, con
 		}
 	}
 	return embeddings, err
+}
+
+// embedIndexInfos produces one embedding per entry, routing image entries to
+// the multimodal path and everything else to the text path. Entries carrying
+// MultimodalEnvelope always go through the multimodal path, even plain text
+// ones: a KB that stores image vectors lives entirely in the chat-template
+// space, so its text chunks must be encoded there too.
+//
+// The returned list may be SHORTER than the input: a failed image embedding is
+// dropped, while a text failure aborts the batch, because losing an image
+// vector degrades to OCR/caption behavior whereas losing text loses the
+// document.
+func embedIndexInfos(
+	ctx context.Context, embedder embedding.Embedder, list []*types.IndexInfo,
+) ([]*types.IndexInfo, [][]float32, error) {
+	var textPositions, imagePositions, unifiedTextPositions []int
+	var stamped, unstamped int
+	for i, info := range list {
+		if info.MultimodalEnvelope {
+			stamped++
+		} else {
+			unstamped++
+		}
+		switch {
+		case info.IsImage():
+			imagePositions = append(imagePositions, i)
+		case info.MultimodalEnvelope:
+			unifiedTextPositions = append(unifiedTextPositions, i)
+		default:
+			textPositions = append(textPositions, i)
+		}
+	}
+	if stamped > 0 && unstamped > 0 {
+		logger.Warnf(ctx,
+			"mixed embedding envelopes in one batch: %d entry/entries via the "+
+				"multimodal envelope, %d via the plain text envelope; "+
+				"their vectors will not be comparable",
+			stamped, unstamped)
+	}
+
+	embeddings := make([][]float32, len(list))
+	drop := make(map[int]bool)
+
+	if len(textPositions) > 0 {
+		contentList := make([]string, 0, len(textPositions))
+		for _, i := range textPositions {
+			contentList = append(contentList, sanitizeForEmbedding(ctx, list[i].Content))
+		}
+		vectors, err := batchEmbedWithBackoff(ctx, embedder, contentList)
+		if err != nil {
+			return nil, nil, err
+		}
+		if len(vectors) != len(textPositions) {
+			return nil, nil, fmt.Errorf("text embedding count mismatch: got %d, want %d",
+				len(vectors), len(textPositions))
+		}
+		for k, i := range textPositions {
+			embeddings[i] = vectors[k]
+		}
+	}
+
+	if len(unifiedTextPositions) > 0 {
+		inputs := make([]embedding.Input, 0, len(unifiedTextPositions))
+		for _, i := range unifiedTextPositions {
+			inputs = append(inputs, embedding.Input{
+				Text: sanitizeForEmbedding(ctx, list[i].Content),
+			})
+		}
+		vectors, err := batchEmbedMultimodalWithBackoff(ctx, embedder, inputs)
+		if err != nil {
+			return nil, nil, fmt.Errorf("multimodal text embedding failed: %w", err)
+		}
+		if len(vectors) != len(unifiedTextPositions) {
+			return nil, nil, fmt.Errorf("multimodal text embedding count mismatch: got %d, want %d",
+				len(vectors), len(unifiedTextPositions))
+		}
+		for k, i := range unifiedTextPositions {
+			embeddings[i] = vectors[k]
+		}
+	}
+
+	var imageErr error
+	if len(imagePositions) > 0 {
+		inputs := make([]embedding.Input, 0, len(imagePositions))
+		for _, i := range imagePositions {
+			// Text is deliberately left empty: the point of an image entry is
+			// the pixels. Folding the chunk's markdown placeholder into the
+			// request would tilt the vector toward a meaningless token string.
+			inputs = append(inputs, embedding.Input{
+				Images: []embedding.ImagePart{{Data: list[i].ImageBytes, MIME: list[i].ImageMIME}},
+			})
+		}
+		vectors, err := batchEmbedMultimodalWithBackoff(ctx, embedder, inputs)
+		if err != nil {
+			imageErr = err
+		} else if len(vectors) != len(imagePositions) {
+			imageErr = fmt.Errorf("image embedding count mismatch: got %d, want %d",
+				len(vectors), len(imagePositions))
+		}
+
+		if imageErr != nil {
+			if len(imagePositions) < len(list) {
+				// Mixed batch: text entries can still be stored, so degrade to
+				// text-only rather than throwing the whole document away.
+				logger.Errorf(ctx, "image embedding failed for %d input(s); skipping image vectors: %v",
+					len(imagePositions), imageErr)
+			}
+			for _, i := range imagePositions {
+				drop[i] = true
+			}
+		} else {
+			for k, i := range imagePositions {
+				embeddings[i] = vectors[k]
+			}
+		}
+	}
+
+	if len(drop) == 0 {
+		return list, embeddings, nil
+	}
+	// An all-image batch that failed has nothing left to save. Returning an
+	// empty list here would look like success to the caller and leave the chunk
+	// marked indexed with no vector behind it.
+	if len(drop) == len(list) && imageErr != nil {
+		return nil, nil, imageErr
+	}
+	kept := make([]*types.IndexInfo, 0, len(list)-len(drop))
+	keptEmbeddings := make([][]float32, 0, len(list)-len(drop))
+	for i, info := range list {
+		if drop[i] {
+			continue
+		}
+		kept = append(kept, info)
+		keptEmbeddings = append(keptEmbeddings, embeddings[i])
+	}
+	return kept, keptEmbeddings, nil
+}
+
+// batchEmbedMultimodalWithBackoff mirrors batchEmbedWithBackoff for image
+// inputs, except that ErrMultimodalUnsupported short-circuits: retrying cannot
+// teach a text-only model to accept pixels.
+func batchEmbedMultimodalWithBackoff(
+	ctx context.Context, embedder embedding.Embedder, inputs []embedding.Input,
+) ([][]float32, error) {
+	delay := embedRetryBaseDelay
+	var (
+		embeddings [][]float32
+		err        error
+	)
+	for attempt := 0; attempt < embedRetryAttempts; attempt++ {
+		embeddings, err = embedding.BatchEmbedMultimodalWith(ctx, embedder, inputs)
+		if err == nil {
+			return embeddings, nil
+		}
+		if errors.Is(err, embedding.ErrMultimodalUnsupported) {
+			return nil, err
+		}
+		logger.Errorf(ctx, "BatchEmbedMultimodal attempt %d/%d failed: %v", attempt+1, embedRetryAttempts, err)
+		if attempt+1 < embedRetryAttempts {
+			select {
+			case <-time.After(delay):
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+			delay *= 2
+		}
+	}
+	return embeddings, err
+}
+
+// dropImageIndexInfos removes image entries, used when the caller did not ask
+// for vector indexing and therefore has nowhere to put an image vector.
+func dropImageIndexInfos(ctx context.Context, list []*types.IndexInfo) []*types.IndexInfo {
+	kept := make([]*types.IndexInfo, 0, len(list))
+	for _, info := range list {
+		if info.IsImage() {
+			continue
+		}
+		kept = append(kept, info)
+	}
+	if len(kept) != len(list) {
+		logger.Warnf(ctx, "dropped %d image index entries: no vector retriever configured", len(list)-len(kept))
+	}
+	return kept
 }
 
 // sanitizeForEmbedding caps content length at safetyMaxChars characters so

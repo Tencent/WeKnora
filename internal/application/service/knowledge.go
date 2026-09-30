@@ -72,6 +72,11 @@ type knowledgeService struct {
 	imageResolver   *docparser.ImageResolver
 	taskPendingRepo interfaces.TaskPendingOpsRepository
 
+	// imageReader overrides how the vector re-index loads image bytes when it
+	// backfills missing image vectors. Production leaves it nil and resolves
+	// the owning storage backend per image; only tests substitute it.
+	imageReader imageByteReader
+
 	// In-memory fallbacks for Lite mode (no Redis)
 	memFAQProgress      sync.Map // taskID -> *types.FAQImportProgress
 	memFAQRunningImport sync.Map // kbID -> *runningFAQImportInfo

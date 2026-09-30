@@ -6,14 +6,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"os"
 	"strings"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/application/access"
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/models/embedding"
 	"github.com/Tencent/WeKnora/internal/models/utils/ollama"
 	"github.com/Tencent/WeKnora/internal/models/vlm"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
@@ -55,6 +55,14 @@ func buildVLMCaptionPrompt(ctx context.Context, cfg types.VLMConfig) string {
 	language := strings.TrimSpace(cfg.DescriptionLanguage)
 	if language == "" {
 		language = types.LanguageNameFromContext(ctx)
+	} else {
+		// Stored values predate the language-name contract: older UI builds and
+		// direct API callers persisted bare locale codes ("zh", "en"). The
+		// template below reads "in <language>." — a bare code is not a language,
+		// and some VLMs answer that with an empty completion instead of prose.
+		// LanguageLocaleName is idempotent over display names, so names written
+		// by the current UI ("Chinese", "English") pass through untouched.
+		language = types.LanguageLocaleName(language)
 	}
 	prompt := fmt.Sprintf("Provide a brief and concise description of the main content of the image in %s.", language)
 	return types.AppendCustomPromptInstructions(prompt, cfg.CustomInstructions, "image_description")
@@ -105,6 +113,9 @@ type ImageMultimodalService struct {
 	spanTracker SpanTracker
 }
 
+// NewImageMultimodalService wires the image multimodal pipeline: VLM captioning
+// and OCR fan-out plus the image-vector embedding fan-out share one service so
+// reads and writes never use divergent storage backends.
 func NewImageMultimodalService(
 	chunkService interfaces.ChunkService,
 	modelService interfaces.ModelService,
@@ -195,6 +206,12 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) (
 		// of dropped orphans cannot strand multimodal:pending forever.
 		return s.checkAndFinalizeAllImages(ctx, payload)
 	}
+
+	// Grant the KB write guard before any chunk is created: the image_vector
+	// child is written through the guarded path, and an async worker has no
+	// HTTP middleware to supply the grant. Granting later (inside indexChunks)
+	// is too late — the earlier write is already rejected by then.
+	ctx = s.grantKBWrite(ctx, &payload)
 
 	tracker := s.tracker()
 	// The trace map is shared with the per-image stage below: fields Handle
@@ -403,26 +420,28 @@ func (s *ImageMultimodalService) processImage(
 	}
 	out["chunks_created"] = len(newChunks)
 
+	if len(newChunks) > 0 {
+		if err := s.chunkService.GetRepository().CreateChunks(ctx, newChunks); err != nil {
+			handleErr = fmt.Errorf("create multimodal chunks: %w", err)
+			return handleErr
+		}
+		for _, c := range newChunks {
+			logger.Infof(ctx, "[ImageMultimodal] Created %s chunk %s for image %s, len=%d",
+				c.ChunkType, c.ID, payload.ImageURL, len(c.Content))
+		}
+	}
+
+	// Index even when OCR and caption produced nothing: the image itself may
+	// still be embeddable, which is the case this pipeline exists for
+	// (drawings, scans). The image vector chunk is written here, not above,
+	// because it needs the resolved embedding model.
+	s.indexChunks(ctx, *payload, newChunks, imageInfo, imgBytes)
+	out["indexed"] = true
+
 	if len(newChunks) == 0 {
 		// Deferred finalize will count this image on success.
 		out["skipped"] = "no_extracted_content"
-		return nil
 	}
-
-	// Persist chunks
-	if err := s.chunkService.GetRepository().CreateChunks(ctx, newChunks); err != nil {
-		handleErr = fmt.Errorf("create multimodal chunks: %w", err)
-		return handleErr
-	}
-	for _, c := range newChunks {
-		logger.Infof(ctx, "[ImageMultimodal] Created %s chunk %s for image %s, len=%d",
-			c.ChunkType, c.ID, payload.ImageURL, len(c.Content))
-	}
-
-	// Index chunks so they can be retrieved
-	s.indexChunks(ctx, *payload, newChunks)
-	out["indexed"] = true
-
 	return nil
 }
 
@@ -584,12 +603,58 @@ func isFinalAsynqAttempt(ctx context.Context) bool {
 	return ok && retried >= maxRetry
 }
 
+// grantKBWrite equips an async task ctx with the KB write grant that chunk
+// writes require — an async worker has no HTTP middleware to supply it.
+// Idempotent: a ctx that already carries the grant is returned untouched, and
+// one whose KB cannot be loaded keeps its original ctx so the write fails
+// loudly instead of silently dropping VLM output.
+func (s *ImageMultimodalService) grantKBWrite(
+	ctx context.Context, payload *types.ImageMultimodalPayload,
+) context.Context {
+	if s.kbService == nil {
+		return ctx
+	}
+	kb, err := s.kbService.GetKnowledgeBaseByIDOnly(ctx, payload.KnowledgeBaseID)
+	if err != nil || kb == nil {
+		return ctx
+	}
+	if access.HasKBGrant(ctx, kb.ID, kb.TenantID, types.OrgRoleEditor) {
+		return ctx
+	}
+	granted, err := access.WithKBTaskWrite(ctx, kb, payload.TenantID)
+	if err != nil {
+		logger.Warnf(ctx, "[ImageMultimodal] KB %s not writable for tenant %d: %v",
+			payload.KnowledgeBaseID, payload.TenantID, err)
+		return ctx
+	}
+	return granted
+}
+
 // indexChunks indexes the newly created multimodal chunks into the retrieval engine
 // so they can participate in semantic search.
-func (s *ImageMultimodalService) indexChunks(ctx context.Context, payload types.ImageMultimodalPayload, chunks []*types.Chunk) {
+//
+// imageInfo / imgBytes describe the source image and are used to additionally
+// build an image_vector chunk when the KB opted into image embedding.
+func (s *ImageMultimodalService) indexChunks(
+	ctx context.Context,
+	payload types.ImageMultimodalPayload,
+	chunks []*types.Chunk,
+	imageInfo types.ImageInfo,
+	imgBytes []byte,
+) {
 	kb, err := s.kbService.GetKnowledgeBaseByIDOnly(ctx, payload.KnowledgeBaseID)
 	if err != nil || kb == nil {
 		logger.Warnf(ctx, "[ImageMultimodal] Failed to get KB for indexing: %v", err)
+		return
+	}
+
+	// Chunk writes (including the image_vector child written by
+	// indexImageVector) go through the KB write guard, which HTTP entry points
+	// grant in middleware. An async task has no such middleware, so the guard
+	// would reject every chunk this stage creates.
+	if ctx, err = access.WithKBTaskWrite(ctx, kb, payload.TenantID); err != nil {
+		logger.Warnf(ctx, "[ImageMultimodal] KB %s is not writable for tenant %d: %v",
+			payload.KnowledgeBaseID, payload.TenantID, err)
 		return
 	}
 
@@ -654,28 +719,84 @@ func (s *ImageMultimodalService) indexChunks(ctx context.Context, payload types.
 		})
 	}
 
-	if err := engine.BatchIndex(ctx, embeddingModel, indexInfoList); err != nil {
-		logger.Errorf(ctx, "[ImageMultimodal] Failed to index multimodal chunks: %v", err)
+	if len(indexInfoList) > 0 {
+		if err := indexChunksWithEnvelope(ctx, engine, kb, embeddingModel, indexInfoList); err != nil {
+			logger.Errorf(ctx, "[ImageMultimodal] Failed to index multimodal chunks: %v", err)
+			return
+		}
+
+		// Mark chunks as indexed.
+		// Must re-fetch from DB because the in-memory objects lack auto-generated fields
+		// (e.g. seq_id), and GORM Save would overwrite them with zero values.
+		for _, chunk := range chunks {
+			dbChunk, err := s.chunkService.GetChunkByIDOnly(ctx, chunk.ID)
+			if err != nil {
+				logger.Warnf(ctx, "[ImageMultimodal] Failed to fetch chunk %s for status update: %v", chunk.ID, err)
+				continue
+			}
+			dbChunk.Status = int(types.ChunkStatusIndexed)
+			if err := s.chunkService.UpdateChunk(ctx, dbChunk); err != nil {
+				logger.Warnf(ctx, "[ImageMultimodal] Failed to update chunk %s status to indexed: %v", chunk.ID, err)
+			}
+		}
+
+		logger.Infof(ctx, "[ImageMultimodal] Indexed %d multimodal chunks for image %s", len(chunks), payload.ImageURL)
+	}
+
+	// Embed the pixels themselves so a text query can recall this image even
+	// when OCR found nothing and the caption is vague.
+	s.indexImageVector(ctx, payload, imageInfo, imgBytes, kb, embeddingModel, engine)
+}
+
+// imageVectorIndexer is the narrow slice of the retrieval engine that
+// indexImageVector needs. Depending on this rather than the concrete
+// CompositeRetrieveEngine is what lets the gating rules below be tested
+// without standing up an engine registry.
+type imageVectorIndexer interface {
+	BatchIndex(ctx context.Context, embedder embedding.Embedder, indexInfoList []*types.IndexInfo) error
+}
+
+// indexImageVector embeds the image itself and stores it as an image_vector
+// child chunk. Two gates, both required: the KB must opt in via
+// IndexingStrategy.ImageVectorEnabled, and the embedding model must actually
+// report image support, so enabling the flag on a text-only model degrades to
+// a warning instead of failing every upload. A failure here never fails the
+// task — the OCR / caption chunks still cover the image.
+func (s *ImageMultimodalService) indexImageVector(
+	ctx context.Context,
+	payload types.ImageMultimodalPayload,
+	imageInfo types.ImageInfo,
+	imgBytes []byte,
+	kb *types.KnowledgeBase,
+	embedder embedding.Embedder,
+	engine imageVectorIndexer,
+) {
+	// Same predicate the indexing and query paths use, so an image chunk is
+	// only ever written into the space the rest of the knowledge base lives in.
+	if !usesMultimodalEnvelope(kb, embedder) {
+		if len(imgBytes) > 0 && kb.IndexingStrategy.NeedsImageVector() {
+			logger.Warnf(ctx,
+				"[ImageMultimodal] image vector enabled for KB %s but model %s reports no image support; skipping",
+				kb.ID, embedder.GetModelName())
+		}
+		return
+	}
+	if len(imgBytes) == 0 {
 		return
 	}
 
-	// Mark chunks as indexed.
-	// Must re-fetch from DB because the in-memory objects lack auto-generated fields
-	// (e.g. seq_id), and GORM Save would overwrite them with zero values.
-	for _, chunk := range chunks {
-		dbChunk, err := s.chunkService.GetChunkByIDOnly(ctx, chunk.ID)
-		if err != nil {
-			logger.Warnf(ctx, "[ImageMultimodal] Failed to fetch chunk %s for status update: %v", chunk.ID, err)
-			continue
-		}
-		dbChunk.Status = int(types.ChunkStatusIndexed)
-		if err := s.chunkService.GetRepository().UpdateChunk(ctx, dbChunk); err != nil {
-			logger.Warnf(ctx, "[ImageMultimodal] Failed to update chunk %s status to indexed: %v", chunk.ID, err)
-		}
+	if err := writeImageVectorChunk(ctx, s.chunkService, engine, kb, embedder,
+		imageVectorLocation{
+			TenantID:        payload.TenantID,
+			KnowledgeID:     payload.KnowledgeID,
+			KnowledgeBaseID: payload.KnowledgeBaseID,
+			ParentChunkID:   payload.ChunkID,
+		}, imageInfo, imgBytes); err != nil {
+		// A failure here never fails the task: the OCR / caption chunks already
+		// cover the image, and leaving one un-indexed chunk behind is
+		// recoverable by re-indexing the knowledge.
+		logger.Errorf(ctx, "[ImageMultimodal] Image vector failed for %s: %v", payload.ImageURL, err)
 	}
-
-	logger.Infof(ctx, "[ImageMultimodal] Indexed %d multimodal chunks for knowledge %s",
-		len(chunks), payload.KnowledgeID)
 }
 
 // resolveVLM creates a vlm.VLM instance for the given knowledge base,
@@ -712,105 +833,23 @@ func (s *ImageMultimodalService) resolveVLM(ctx context.Context, kbID, knowledge
 	return model, vlmCfg, err
 }
 
-// resolveFileServiceForPayload resolves tenant/KB scoped file service for reading provider:// URLs.
-// Falls back to the globally configured default FileService when the tenant's
-// StorageEngineConfig does not carry a usable configuration for the URL's provider.
-// This mirrors the write-side fallback in knowledgeService.resolveFileService
-// and is required because images can be saved using global STORAGE_TYPE/MINIO_*
-// env vars while tenant.StorageEngineConfig.MinIO is left empty (issue #1282).
-func (s *ImageMultimodalService) resolveFileServiceForPayload(ctx context.Context, payload types.ImageMultimodalPayload) interfaces.FileService {
-	tenant, err := s.tenantRepo.GetTenantByID(ctx, payload.TenantID)
-	if err != nil || tenant == nil {
-		logger.Warnf(ctx, "[ImageMultimodal] GetTenantByID failed: tenant=%d err=%v", payload.TenantID, err)
-		return s.fileSvc
+// fileResolver builds the reader this service shares with the knowledge-base
+// re-index path. Keeping one implementation is what stops the backfill from
+// silently using a different storage backend than ingestion did.
+func (s *ImageMultimodalService) fileResolver() imageFileResolver {
+	return imageFileResolver{
+		tenantRepo:      s.tenantRepo,
+		kbService:       s.kbService,
+		resourceCatalog: s.resourceCatalog,
+		storageResolver: s.storageResolver,
+		fileSvc:         s.fileSvc,
 	}
-
-	backendID, _, _ := types.ParseStorageBackendPath(payload.ImageURL)
-	provider := types.ParseProviderScheme(payload.ImageURL)
-	// A resource:// reference carries no provider/backend in the URL itself; the
-	// authoritative backend lives on the stored resource record. Using the KB's
-	// currently configured backend here would break reads when the resource was
-	// stored on a different backend (multi-backend / post-migration).
-	if _, isResourceRef := types.ParseResourcePath(payload.ImageURL); isResourceRef && s.resourceCatalog != nil {
-		if resource, resErr := s.resourceCatalog.Resolve(ctx, payload.ImageURL); resErr != nil {
-			logger.Warnf(ctx, "[ImageMultimodal] resolve resource reference failed: url=%s err=%v", payload.ImageURL, resErr)
-		} else if resource != nil {
-			backendID = resource.StorageBackendID
-			provider = strings.ToLower(strings.TrimSpace(resource.Provider))
-		}
-	}
-	if provider == "" {
-		kb, kbErr := s.kbService.GetKnowledgeBaseByIDOnly(ctx, payload.KnowledgeBaseID)
-		if kbErr != nil {
-			logger.Warnf(ctx, "[ImageMultimodal] GetKnowledgeBaseByIDOnly failed: kb=%s err=%v", payload.KnowledgeBaseID, kbErr)
-		} else if kb != nil {
-			provider = strings.ToLower(strings.TrimSpace(kb.GetStorageProvider()))
-			if backendID == "" && kb.StorageBackendID != nil {
-				backendID = *kb.StorageBackendID
-			}
-		}
-	}
-
-	if s.storageResolver == nil {
-		return s.fileSvc
-	}
-
-	baseDir := strings.TrimSpace(os.Getenv("LOCAL_STORAGE_BASE_DIR"))
-	logger.Infof(ctx, "[ImageMultimodal] resolving file service: tenant=%d provider=%q LOCAL_STORAGE_BASE_DIR=%q imageURL=%s",
-		payload.TenantID, provider, baseDir, payload.ImageURL)
-	fileSvc, _, svcErr := s.storageResolver.ResolveFileService(ctx, tenant, backendID, provider, baseDir)
-	if svcErr != nil {
-		logger.Warnf(ctx, "[ImageMultimodal] resolve file service failed (falling back to default): tenant=%d provider=%s err=%v",
-			payload.TenantID, provider, svcErr)
-		return s.fileSvc
-	}
-	return fileSvc
 }
 
-// readImageBytes loads the image bytes for one image of a multimodal payload.
-//   - For provider:// URLs (local://, minio://, s3://, cos://, ...) it reads via
-//     the resolved FileService and NEVER falls back to HTTP — handing a
-//     provider:// URL to the HTTP downloader is what caused issue #1282.
-//   - For legacy in-flight payloads with ImageLocalPath set, it tries the local
-//     file before falling back to the URL.
-//   - For plain http(s):// URLs it uses the SSRF-safe downloader.
-//
-// imageURL is passed explicitly (instead of read from payload.ImageURL) because
-// a batched payload carries several images and only the first one is mirrored
-// onto the legacy single-image fields.
+// readImageBytes loads the image bytes for a multimodal payload. See
+// imageFileResolver.ReadImageBytes for the transport rules.
 func (s *ImageMultimodalService) readImageBytes(ctx context.Context, payload types.ImageMultimodalPayload) ([]byte, error) {
-	_, isResourceRef := types.ParseResourcePath(payload.ImageURL)
-	if isResourceRef || types.ParseProviderScheme(payload.ImageURL) != "" {
-		fileSvc := s.resolveFileServiceForPayload(ctx, payload)
-		if fileSvc == nil {
-			return nil, fmt.Errorf("no file service available for %s", payload.ImageURL)
-		}
-		reader, err := fileSvc.GetFile(ctx, payload.ImageURL)
-		if err != nil {
-			return nil, fmt.Errorf("file service get %s: %w", payload.ImageURL, err)
-		}
-		defer reader.Close()
-		data, err := io.ReadAll(reader)
-		if err != nil {
-			return nil, fmt.Errorf("read %s: %w", payload.ImageURL, err)
-		}
-		return data, nil
-	}
-
-	if payload.ImageLocalPath != "" {
-		if data, err := os.ReadFile(payload.ImageLocalPath); err == nil {
-			return data, nil
-		} else {
-			logger.Warnf(ctx, "[ImageMultimodal] Local file %s not available (%v), falling back to URL", payload.ImageLocalPath, err)
-		}
-	}
-
-	data, err := downloadImageFromURL(payload.ImageURL)
-	if err != nil {
-		return nil, fmt.Errorf("download %s: %w", payload.ImageURL, err)
-	}
-	logger.Infof(ctx, "[ImageMultimodal] Image downloaded from URL, len=%d", len(data))
-	return data, nil
+	return s.fileResolver().ReadImageBytes(ctx, payload)
 }
 
 // downloadImageFromURL downloads image bytes from an HTTP(S) URL.

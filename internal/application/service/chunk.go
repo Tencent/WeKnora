@@ -640,9 +640,21 @@ func imageChildMatchesContent(child *types.Chunk, contentURLs map[string]bool) b
 	return false
 }
 
-// syncEditedChunkImages removes image OCR/caption children from retrieval
-// when their Markdown image was deleted. Rows are disabled rather than hard
-// deleted so reverting to a historical chunk revision can re-enable them.
+// isImageDerivedChild reports whether a chunk exists solely because an image
+// appeared in its parent. Every such child must be enabled/disabled with the
+// image; a type left out here lets a deleted image stay retrievable.
+func isImageDerivedChild(chunkType types.ChunkType) bool {
+	switch chunkType {
+	case types.ChunkTypeImageOCR, types.ChunkTypeImageCaption, types.ChunkTypeImageVector:
+		return true
+	}
+	return false
+}
+
+// syncEditedChunkImages removes image OCR/caption/vector children from
+// retrieval when their Markdown image was deleted. Rows are disabled rather
+// than hard deleted so reverting to a historical chunk revision can re-enable
+// them.
 func (s *chunkService) syncEditedChunkImages(ctx context.Context, chunk *types.Chunk) error {
 	children, err := s.chunkRepository.ListChunkByParentID(ctx, chunk.TenantID, chunk.ID)
 	if err != nil {
@@ -650,7 +662,7 @@ func (s *chunkService) syncEditedChunkImages(ctx context.Context, chunk *types.C
 	}
 	contentURLs := searchutil.ImageURLsInContent(chunk.Content)
 	for _, child := range children {
-		if child.ChunkType != types.ChunkTypeImageOCR && child.ChunkType != types.ChunkTypeImageCaption {
+		if !isImageDerivedChild(child.ChunkType) {
 			continue
 		}
 		desiredEnabled := chunk.IsEnabled && imageChildMatchesContent(child, contentURLs)
@@ -776,6 +788,28 @@ func (s *chunkService) syncChunkIndex(ctx context.Context, chunk *types.Chunk) e
 	if err != nil {
 		return err
 	}
+
+	// An image vector chunk is the one chunk type whose stored vector cannot be
+	// rebuilt from its own text: its content is only `![image](url)`, so the
+	// delete-and-re-embed path below would replace a real image embedding with
+	// the embedding of a markdown link — silently, and without any error. The
+	// image stops being retrievable by a text query and instead clusters with
+	// every other `![image](...)` string in the collection.
+	//
+	// The image bytes do not change when someone edits the surrounding text, so
+	// the existing vector stays valid; the only thing that has to move is
+	// whether retrieval may see it. Retrieval already filters on is_enabled, so
+	// flipping the flag is enough — and it makes enable/disable round-trips
+	// lossless instead of one-way.
+	//
+	// Rebuilding a genuinely missing image vector is not possible here: the
+	// chunk carries an image URL, not the bytes, and this service has no file
+	// service to resolve it. Such a chunk stays vector-less until the document
+	// is re-parsed; its OCR/caption siblings still keep the image searchable.
+	if chunk.ChunkType == types.ChunkTypeImageVector {
+		return engine.BatchUpdateChunkEnabledStatus(ctx, map[string]bool{chunk.ID: chunk.IsEnabled})
+	}
+
 	if err := engine.DeleteByChunkIDList(ctx, []string{chunk.ID}, embedder.GetDimensions(), kb.Type); err != nil {
 		return err
 	}
@@ -809,7 +843,7 @@ func (s *chunkService) syncChunkIndex(ctx context.Context, chunk *types.Chunk) e
 			})
 		}
 	}
-	return engine.BatchIndex(ctx, embedder, items)
+	return indexChunksWithEnvelope(ctx, engine, kb, embedder, items)
 }
 
 func (s *chunkService) UpsertGeneratedQuestion(

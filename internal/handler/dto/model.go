@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/models/embedding"
 	modelruntime "github.com/Tencent/WeKnora/internal/models/runtime"
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -190,6 +191,15 @@ type ModelResponse struct {
 	Status      types.ModelStatus  `json:"status"`
 	CreatedAt   time.Time          `json:"created_at"`
 	UpdatedAt   time.Time          `json:"updated_at"`
+	// SupportsImageEmbedding reports whether this embedding model can encode
+	// images, which is what gates the "image vector" indexing switch.
+	//
+	// It is computed server-side rather than derived by the client from
+	// Parameters.ExtraConfig: ExtraConfig is stripped for callers without
+	// integration-secret access, so a client-side derivation would silently
+	// disagree with the server for most users. Always false for non-embedding
+	// models.
+	SupportsImageEmbedding bool `json:"supports_image_embedding"`
 	// Per-field "configured?" map. Omitted for builtin models unless the
 	// caller is a system administrator. See MCPServiceResponse.Credentials.
 	Credentials map[string]CredentialFieldMetadata `json:"credentials,omitempty"`
@@ -318,21 +328,22 @@ func NewModelResponse(ctx context.Context, m *types.Model) *ModelResponse {
 		}
 	}
 	return &ModelResponse{
-		ID:           m.ID,
-		TenantID:     m.TenantID,
-		Name:         m.Name,
-		DisplayName:  m.DisplayName,
-		Type:         m.Type,
-		Source:       m.Source,
-		Description:  m.Description,
-		Parameters:   params,
-		IsDefault:    m.IsDefault,
-		IsBuiltin:    m.IsBuiltin,
-		Status:       m.Status,
-		CreatedAt:    m.CreatedAt,
-		UpdatedAt:    m.UpdatedAt,
-		Credentials:  creds,
-		Capabilities: caps,
+		ID:                     m.ID,
+		TenantID:               m.TenantID,
+		Name:                   m.Name,
+		DisplayName:            m.DisplayName,
+		Type:                   m.Type,
+		Source:                 m.Source,
+		Description:            m.Description,
+		Parameters:             params,
+		IsDefault:              m.IsDefault,
+		IsBuiltin:              m.IsBuiltin,
+		Status:                 m.Status,
+		CreatedAt:              m.CreatedAt,
+		UpdatedAt:              m.UpdatedAt,
+		SupportsImageEmbedding: embedding.SupportsImageForModel(m),
+		Credentials:            creds,
+		Capabilities:           caps,
 	}
 }
 

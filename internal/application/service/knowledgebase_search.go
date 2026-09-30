@@ -42,9 +42,19 @@ func (s *knowledgeBaseService) GetQueryEmbedding(ctx context.Context, kbID strin
 		return nil, err
 	}
 
-	vector, err := embeddingModel.Embed(types.WithEmbedQuery(ctx), queryText)
-	if err != nil {
-		return nil, err
+	var vector []float32
+	if usesMultimodalEnvelope(kb, embeddingModel) {
+		vector, err = embedding.EmbedMultimodal(
+			types.WithEmbedQuery(ctx), embeddingModel, embedding.Input{Text: queryText})
+		if err != nil {
+			logger.Errorf(ctx, "GetQueryEmbedding: multimodal query encoding failed for KB %s: %v", kbID, err)
+			return nil, err
+		}
+	} else {
+		vector, err = embeddingModel.Embed(types.WithEmbedQuery(ctx), queryText)
+		if err != nil {
+			return nil, err
+		}
 	}
 	if err := validateQueryEmbeddingDimension(embeddingModel, len(vector)); err != nil {
 		logger.Errorf(ctx, "GetQueryEmbedding: %v", err)

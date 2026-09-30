@@ -83,6 +83,7 @@ var queueDefinitions = []QueueDefinition{
 	{Name: QueueMaintenance, Pool: WorkerPoolMaintenance, Weight: 1, TaskTypes: []string{
 		TypeFAQImport, TypeKBClone, TypeIndexDelete, TypeKBDelete,
 		TypeKnowledgeListDelete, TypeKnowledgeListReparse, TypeKnowledgeMove,
+		TypeKBReindexVectors,
 	}},
 	{Name: QueueWiki, Pool: WorkerPoolWiki, Weight: 1, TaskTypes: []string{TypeWikiIngest, TypeWikiFinalize}},
 }
@@ -231,18 +232,25 @@ type WorkerServerStat struct {
 	Queues      map[string]int
 }
 
+// Task type identifiers for the background job queue (Asynq). Each value is the
+// string key used to register and route an asynchronous task.
 const (
-	TypeChunkExtract             = "chunk:extract"
-	TypeDocumentProcess          = "document:process"           // 文档处理任务
-	TypeFAQImport                = "faq:import"                 // FAQ导入任务（包含dry run模式）
-	TypeQuestionGeneration       = "question:generation"        // 问题生成任务
-	TypeSummaryGeneration        = "summary:generation"         // 摘要生成任务
-	TypeKBClone                  = "kb:clone"                   // 知识库复制任务
-	TypeIndexDelete              = "index:delete"               // 索引删除任务
-	TypeKBDelete                 = "kb:delete"                  // 知识库删除任务
-	TypeKnowledgeListDelete      = "knowledge:list_delete"      // 批量删除知识任务
-	TypeKnowledgeListReparse     = "knowledge:list_reparse"     // 批量重解析知识任务
-	TypeKnowledgeMove            = "knowledge:move"             // 知识移动任务
+	TypeChunkExtract         = "chunk:extract"          // 文档分块提取任务
+	TypeDocumentProcess      = "document:process"       // 文档处理任务
+	TypeFAQImport            = "faq:import"             // FAQ导入任务（包含dry run模式）
+	TypeQuestionGeneration   = "question:generation"    // 问题生成任务
+	TypeSummaryGeneration    = "summary:generation"     // 摘要生成任务
+	TypeKBClone              = "kb:clone"               // 知识库复制任务
+	TypeIndexDelete          = "index:delete"           // 索引删除任务
+	TypeKBDelete             = "kb:delete"              // 知识库删除任务
+	TypeKnowledgeListDelete  = "knowledge:list_delete"  // 批量删除知识任务
+	TypeKnowledgeListReparse = "knowledge:list_reparse" // 批量重解析知识任务
+	TypeKnowledgeMove        = "knowledge:move"         // 知识移动任务
+	// TypeKBReindexVectors 重算整个知识库已存向量的任务。
+	// 切换图像向量开关会把查询侧移进/移出 chat-template 空间，开关之前写入的
+	// 文本向量就留在了对面 —— 检索照样返回 k 条，只是全是噪声。
+	// 与 TypeKnowledgeListReparse 的区别：它只重算向量，不重新解析文档。
+	TypeKBReindexVectors         = "kb:reindex_vectors"
 	TypeDataTableSummary         = "datatable:summary"          // 表格摘要任务
 	TypeImageMultimodal          = "image:multimodal"           // 图片多模态处理任务（OCR + VLM Caption）
 	TypeKnowledgePostProcess     = "knowledge:post_process"     // 知识后处理任务（统一调度）
@@ -459,6 +467,17 @@ type KnowledgeListReparsePayload struct {
 	KnowledgeIDs    []string                   `json:"knowledge_ids"`
 	ProcessConfig   *KnowledgeProcessOverrides `json:"process_config,omitempty"`
 	Initiator       TaskInitiator              `json:"initiator,omitempty"`
+}
+
+// KBReindexVectorsPayload represents the knowledge base vector recompute task.
+// Scoped to a whole knowledge base because the trigger is a KB setting:
+// flipping the image vector switch changes the envelope every query is encoded
+// with, so every stored vector in it becomes stale at once.
+type KBReindexVectorsPayload struct {
+	TracingContext
+	TenantID        uint64        `json:"tenant_id"`
+	KnowledgeBaseID string        `json:"knowledge_base_id"`
+	Initiator       TaskInitiator `json:"initiator,omitempty"`
 }
 
 // KnowledgeMovePayload represents the knowledge move task payload

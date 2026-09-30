@@ -972,3 +972,64 @@ test('opening the model editor refreshes its catalog candidates', async () => {
     assert.equal(f.catalogEvents[0], 'refresh')
   } finally { f.close() }
 })
+
+// The switch is the only way to declare image input for a self-hosted model
+// whose name carries no hint, so the value must reach the API as an explicit
+// extra_config entry — and must never be written as a create-time "false",
+// which would silently disable image support the name heuristic grants.
+test('embedding: image support is persisted as an explicit declaration, never as a create-time false', async () => {
+  const payloads: any[] = []
+  const editing = { value: null as any }
+  const save = runInNewContext(saveScript + '\nhandleModelSave', {
+    URL, console: { error() {} },
+    currentModelType: { value: 'embedding' },
+    editingModel: editing,
+    getModelType: (type: string) => ({ chat: 'KnowledgeQA', embedding: 'Embedding' })[type] ?? 'KnowledgeQA',
+    t: (key: string) => key,
+    createModel: async (data: any) => { payloads.push(data) },
+    updateModelAPI: async (_id: string, data: any) => { payloads.push(data) },
+    MessagePlugin: { success() {}, error() {}, warning() {} },
+    loadModels: async () => {},
+  })
+  const embedding = {
+    modelName: 'gme-Qwen2-VL-2B-Instruct', source: 'remote',
+    baseUrl: 'https://example.com/v1', dimension: 1536, modelType: 'embedding',
+  }
+  const declared = () => payloads.at(-1).parameters.extra_config?.supports_image_embedding
+
+  await save({ ...embedding, supportsImageEmbedding: true })
+  assert.equal(declared(), 'true')
+
+  // Untouched switch on a brand new model: stay silent and let the server's
+  // model-name heuristic decide.
+  await save({ ...embedding })
+  assert.equal(declared(), undefined)
+
+  // Turning it off on an existing multimodal model IS a deliberate override.
+  editing.value = { id: 'saved-model', supportsImageEmbedding: true }
+  await save({ ...embedding, supportsImageEmbedding: false })
+  assert.equal(declared(), 'false')
+  await save({ ...embedding, supportsImageEmbedding: true })
+  assert.equal(declared(), 'true')
+
+  // Leaving it off on a model the server already reports as image-capable only
+  // happens for non-embedding types, which must not carry the flag at all.
+  await save({
+    modelName: 'chat-model', source: 'remote', baseUrl: 'https://example.com/v1',
+    modelType: 'chat', supportsImageEmbedding: true,
+  })
+  assert.equal(declared(), undefined)
+
+  // Keys the editor does not expose survive an edit (e.g. multimodal_envelope).
+  await save({ ...embedding, extraConfig: { multimodal_envelope: 'sglang' } })
+  assert.equal(payloads.at(-1).parameters.extra_config.multimodal_envelope, 'sglang')
+})
+
+test('image support switch resets when the editor leaves the embedding type', async () => {
+  const f = await fixture({ type: 'embedding' })
+  try {
+    f.vm.formData.supportsImageEmbedding = true
+    await f.vm.selectModelType('chat')
+    assert.equal(f.vm.formData.supportsImageEmbedding, false)
+  } finally { f.close() }
+})
