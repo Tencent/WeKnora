@@ -84,6 +84,16 @@ func (a *dockerRPCTimeoutAPI) ContainerRemove(
 	return a.inner.ContainerRemove(rpcCtx, containerID, options)
 }
 
+func (a *dockerRPCTimeoutAPI) ContainerStats(
+	ctx context.Context, containerID string, options client.ContainerStatsOptions,
+) (client.ContainerStatsResult, error) {
+	// The response body remains tied to ctx. A deadline created and cancelled
+	// in this wrapper would close the body before its caller could decode it,
+	// so the limit watcher supplies a bounded context covering both the request
+	// and the body read.
+	return a.inner.ContainerStats(ctx, containerID, options)
+}
+
 func (a *dockerRPCTimeoutAPI) ExecCreate(
 	ctx context.Context, containerID string, options client.ExecCreateOptions,
 ) (client.ExecCreateResult, error) {
