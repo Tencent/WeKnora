@@ -539,6 +539,7 @@ const defaultLocaleOptions = computed(() => ([
   { label: t('embedPublish.defaultLocaleBrowser'), value: '' },
   { label: '简体中文', value: 'zh-CN' },
   { label: 'English', value: 'en-US' },
+  { label: 'Tiếng Việt', value: 'vi-VN' },
   { label: '한국어', value: 'ko-KR' },
   { label: '日本語', value: 'ja-JP' },
   { label: 'Русский', value: 'ru-RU' },

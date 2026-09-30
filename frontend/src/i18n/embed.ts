@@ -2062,7 +2062,7 @@ const ruEmbedPublish = {
   },
 } as const
 
-export const SUPPORTED_LOCALES = ['zh-CN', 'en-US', 'ko-KR', 'ja-JP', 'ru-RU'] as const
+export const SUPPORTED_LOCALES = ['zh-CN', 'en-US', 'ko-KR', 'ja-JP', 'ru-RU', 'vi-VN'] as const
 export type EmbedLocale = (typeof SUPPORTED_LOCALES)[number]
 
 /** Isolated from the main app `locale` key so embed preview never hijacks admin UI language. */
@@ -2076,6 +2076,7 @@ export function normalizeEmbedLocale(raw: string): EmbedLocale {
   if (s.startsWith('ja')) return 'ja-JP'
   if (s.startsWith('ru')) return 'ru-RU'
   if (s.startsWith('zh')) return 'zh-CN'
+  if (s.startsWith('vi')) return 'vi-VN'
   const exact = SUPPORTED_LOCALES.find((l) => l.toLowerCase() === s)
   return exact || 'zh-CN'
 }
@@ -2114,6 +2115,7 @@ export const EMBED_MESSAGES = {
   'ko-KR': deepMerge(messages['en-US'], koEmbedPublish),
   'ja-JP': messages['ja-JP'],
   'ru-RU': deepMerge(messages['en-US'], ruEmbedPublish),
+  'vi-VN': messages['en-US'],
 } as const
 
 const i18n = createI18n({

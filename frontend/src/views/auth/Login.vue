@@ -433,6 +433,7 @@ const inviteLookupLoading = ref(false)
 const languageOptions = [
   { value: 'zh-CN', label: '简体中文', shortLabel: '中文', flag: '🇨🇳' },
   { value: 'en-US', label: 'English', shortLabel: 'EN', flag: '🇺🇸' },
+  { value: 'vi-VN', label: 'Tiếng Việt', shortLabel: 'VI', flag: '🇻🇳' },
   { value: 'ru-RU', label: 'Русский', shortLabel: 'RU', flag: '🇷🇺' },
   { value: 'ko-KR', label: '한국어', shortLabel: '한국어', flag: '🇰🇷' },
   { value: 'ja-JP', label: '日本語', shortLabel: '日本語', flag: '🇯🇵' }

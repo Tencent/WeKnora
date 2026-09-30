@@ -205,6 +205,7 @@ test('prune rebuild restores registered audit keys from baked-in English default
   const emptyBundles = {
     'en-US': {},
     'zh-CN': {},
+    'vi-VN': {},
     'ko-KR': {},
     'ja-JP': {},
     'ru-RU': {},

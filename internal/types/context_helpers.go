@@ -408,6 +408,8 @@ func LanguageLocaleName(locale string) string {
 		return "Chinese (Traditional)"
 	case "en-US", "en", "en-GB":
 		return "English"
+	case "vi-VN", "vi":
+		return "Vietnamese"
 	case "ko-KR", "ko":
 		return "Korean"
 	case "ja-JP", "ja":
