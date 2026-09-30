@@ -1,0 +1,52 @@
+{
+  "format_version": 1,
+  "project_id": "example-retention-study",
+  "task_id": "compare-policy-drafts",
+  "revision": 1,
+  "parent_revision": null,
+  "goal": "Compare the retention periods in two fictional policy drafts.",
+  "constraints": ["Read only the user-selected policy sources; do not publish conclusions."],
+  "source_scope": "The user-selected Policy drafts knowledge base; access must be rechecked on resume.",
+  "status": "blocked",
+  "findings": [
+    {
+      "id": "finding-1",
+      "kind": "source_excerpt",
+      "text": "The proposed retention period is 30 days.",
+      "evidence_ids": ["evidence-1"]
+    },
+    {
+      "id": "finding-2",
+      "kind": "hypothesis",
+      "text": "The second draft may use a different retention period; it has not been read.",
+      "evidence_ids": []
+    }
+  ],
+  "evidence": [
+    {
+      "id": "evidence-1",
+      "title": "Fictional policy draft A",
+      "source_location": null,
+      "observed_ids": {},
+      "search_phrase": "proposed retention period",
+      "excerpt": "The proposed retention period is 30 days.",
+      "coverage": "Synthetic search_knowledge passage only; no full-document read or continuation offset was returned.",
+      "verification": "Synthetic fixture only; requires rediscovery and verification against real authorized sources on resume."
+    }
+  ],
+  "operations": [
+    {
+      "id": "operation-1",
+      "description": "A previously authorized upload of draft B timed out before a result was received.",
+      "state": "unknown",
+      "receipt": null,
+      "reconcile_before_retry": "Check the authorized destination for the uploaded document and its identity. If the outcome is ambiguous, ask the user before retrying."
+    }
+  ],
+  "open_questions": ["What retention period does draft B actually specify?"],
+  "next_steps": [
+    "Re-locate and verify draft A in the current authorized source scope.",
+    "Establish the outcome of the previous draft B upload before considering a retry.",
+    "Read draft B if available, then compare the supported passages."
+  ]
+}
