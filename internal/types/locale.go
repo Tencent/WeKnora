@@ -5,6 +5,7 @@ import "strings"
 var supportedLocales = map[string]struct{}{
 	"zh-CN": {},
 	"en-US": {},
+	"vi-VN": {},
 	"ko-KR": {},
 	"ja-JP": {},
 	"ru-RU": {},

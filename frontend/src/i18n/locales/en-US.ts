@@ -5121,6 +5121,7 @@ export default {
   language: {
     zhCN: '简体中文',
     enUS: 'English',
+    viVN: 'Tiếng Việt',
     ruRU: 'Русский',
     koKR: '한국어',
     jaJP: '日本語',
