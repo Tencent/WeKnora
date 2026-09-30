@@ -142,7 +142,8 @@ func isValidProviderType(provider types.WebSearchProviderType) bool {
 		types.WebSearchProviderTypeZhipu,
 		types.WebSearchProviderTypeExa,
 		types.WebSearchProviderTypeBocha,
-		types.WebSearchProviderTypeSerply:
+		types.WebSearchProviderTypeSerply,
+		types.WebSearchProviderTypeYoucom:
 		return true
 	default:
 		return false
@@ -201,6 +202,10 @@ func validateProviderParameters(provider types.WebSearchProviderType, params typ
 		}
 	case types.WebSearchProviderTypeDuckDuckGo:
 		// No API key required
+	case types.WebSearchProviderTypeYoucom:
+		if params.APIKey == "" {
+			return fmt.Errorf("API key is required for You.com provider")
+		}
 	case types.WebSearchProviderTypeKeenable:
 		// No API key required (keyless by default; an optional key lifts the rate limit)
 	case types.WebSearchProviderTypeSearxng:
