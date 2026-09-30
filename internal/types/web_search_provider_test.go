@@ -117,3 +117,25 @@ func TestGetWebSearchProviderTypesIncludesSerply(t *testing.T) {
 		t.Fatalf("unexpected Serply metadata: %+v", serply)
 	}
 }
+
+func TestGetWebSearchProviderTypesIncludesFirecrawl(t *testing.T) {
+	var firecrawl *WebSearchProviderTypeInfo
+	providerTypes := GetWebSearchProviderTypes()
+	for i := range providerTypes {
+		if providerTypes[i].ID == string(WebSearchProviderTypeFirecrawl) {
+			firecrawl = &providerTypes[i]
+			break
+		}
+	}
+	if firecrawl == nil {
+		t.Fatal("Firecrawl provider type not found")
+	}
+	if !firecrawl.RequiresAPIKey || !firecrawl.SupportsProxy ||
+		firecrawl.RequiresEngineID || firecrawl.RequiresBaseURL {
+		t.Fatalf("unexpected Firecrawl metadata: %+v", firecrawl)
+	}
+	if len(firecrawl.ConfigFields) != 1 || firecrawl.ConfigFields[0].Key != "include_content" ||
+		firecrawl.ConfigFields[0].Default != "false" {
+		t.Fatalf("unexpected Firecrawl config fields: %+v", firecrawl.ConfigFields)
+	}
+}
