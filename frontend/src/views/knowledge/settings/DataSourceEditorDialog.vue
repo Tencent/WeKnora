@@ -253,6 +253,7 @@ const driveFolderTokenError = ref('')
 const driveRootLoaded = ref(false)
 const isDriveConnector = (type: string) => type === 'feishu_drive' || type === 'lark_drive'
 const isGitLabConnector = (type: string) => type === 'gitlab'
+const isLocalFolderConnector = (type: string) => type === 'local_folder'
 
 interface GitLabProjectInput { project_id: string; ref: string; pathsText: string }
 const gitlabProjects = ref<GitLabProjectInput[]>([])
@@ -728,6 +729,11 @@ const connectorDefs = computed<ConnectorDef[]>(() => [
       { key: 'access_token', labelKey: 'datasource.gitlab.accessToken', placeholder: '', secret: true },
     ],
   },
+  {
+    // No credentials: the folder and patterns are settings (see the step-1 local folder section).
+    type: 'local_folder', available: true, docUrl: '', permissionDocUrl: '', permissionPageUrl: '', requiredPermissions: [],
+    fields: [],
+  },
 ])
 
 
@@ -891,7 +897,7 @@ function selectType(def: ConnectorDef) {
 async function testConnection() {
   syncRssAuthHeadersToCredentials()
   syncConfluencePublicFieldsToSettings()
-  if (!validateRssFeedUrls()) return
+  if (!validateRssFeedUrls() || !validateLocalFolderRoot()) return
   if (!isEdit.value || !credentialsConfigured.value || replaceCredentialsMode.value) {
     const fields = displayedCredentialFields.value
     for (const f of fields) {
@@ -921,6 +927,11 @@ async function testConnection() {
       if (form.value.type === 'rss') {
         // validate-credentials is credentials-only; feed URLs live in settings.
         creds.feed_urls = form.value.config.settings.feed_urls
+      }
+      if (isLocalFolderConnector(form.value.type)) {
+        // Same for the local folder settings.
+        const { root_path, include, exclude } = form.value.config.settings
+        Object.assign(creds, { root_path, include, exclude })
       }
       await validateCredentials(form.value.type, creds)
     }
@@ -1086,9 +1097,18 @@ function validateRssFeedUrls(): boolean {
   return true
 }
 
+function validateLocalFolderRoot(): boolean {
+  if (!isLocalFolderConnector(form.value.type)) return true
+  if (!String(form.value.config.settings.root_path || '').trim()) {
+    MessagePlugin.warning(`${t('datasource.localFolder.rootPath')} ${t('datasource.isRequired')}`)
+    return false
+  }
+  return true
+}
+
 function validateStep1Fields(): boolean {
   syncRssAuthHeadersToCredentials()
-  if (!validateRssFeedUrls()) return false
+  if (!validateRssFeedUrls() || !validateLocalFolderRoot()) return false
   if (isEdit.value && credentialsConfigured.value && !replaceCredentialsMode.value) {
     return true
   }
@@ -1140,6 +1160,10 @@ async function nextStep() {
       }
       return
     }
+    if (isLocalFolderConnector(form.value.type)) {
+      step.value++ // no resource tree to pick from; go straight to the strategy step
+      return
+    }
     if (isGitLabConnector(form.value.type)) return
     loadResources()
   }
@@ -1147,6 +1171,7 @@ async function nextStep() {
 
 function prevStep() {
   step.value--
+  if (step.value === 2 && isLocalFolderConnector(form.value.type)) step.value--
 }
 
 // Build the config payload for Create / Update requests.
@@ -1539,7 +1564,42 @@ const drawerConfirmText = computed(() => {
         </div>
       </section>
 
-      <section class="setting-drawer__section">
+      <section v-if="isLocalFolderConnector(form.type)" class="setting-drawer__section">
+        <h4 class="setting-drawer__section-title">{{ t('datasource.localFolder.title') }}</h4>
+        <div class="form-item">
+          <label class="form-label required">{{ t('datasource.localFolder.rootPath') }}</label>
+          <t-input
+            v-model="form.config.settings.root_path"
+            placeholder="/data/local-folders/vault"
+            autocomplete="off"
+            spellcheck="false"
+          />
+          <p class="form-desc">{{ t('datasource.localFolder.rootPathHint') }}</p>
+        </div>
+        <div class="form-item">
+          <label class="form-label">{{ t('datasource.localFolder.include') }}</label>
+          <t-textarea
+            v-model="form.config.settings.include"
+            placeholder="**/*.{md,markdown,txt,pdf,docx,doc,pptx,ppt,xlsx,xls,csv,html,htm,epub}"
+            :autosize="{ minRows: 2, maxRows: 6 }"
+            autocomplete="off"
+            spellcheck="false"
+          />
+        </div>
+        <div class="form-item">
+          <label class="form-label">{{ t('datasource.localFolder.exclude') }}</label>
+          <t-textarea
+            v-model="form.config.settings.exclude"
+            :placeholder="'.obsidian/**\n.git/**\n.trash/**'"
+            :autosize="{ minRows: 2, maxRows: 6 }"
+            autocomplete="off"
+            spellcheck="false"
+          />
+          <p class="form-desc">{{ t('datasource.localFolder.patternsHint') }}</p>
+        </div>
+      </section>
+
+      <section v-if="!isLocalFolderConnector(form.type)" class="setting-drawer__section">
         <h4 class="setting-drawer__section-title">{{ t('datasource.credentialsLabel') }}</h4>
 
         <div v-if="isEdit && credentialsConfigured && !replaceCredentialsMode" class="form-item">
