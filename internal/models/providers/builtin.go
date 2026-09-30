@@ -14,6 +14,7 @@ func Builtins() []*Definition {
 		newGpustackProvider(),
 		newHuggingFaceTEIProvider(),
 		newHunyuanProvider(),
+		newIflytekProvider(),
 		newJinaProvider(),
 		newLitellmProvider(),
 		newLkeapProvider(),

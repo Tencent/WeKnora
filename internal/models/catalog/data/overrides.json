@@ -949,6 +949,108 @@
         }
       }
     ],
+    "iflytek": [
+      {
+        "id": "spark-x2.5",
+        "compat": {
+          "tool_choice_modes": [
+            "none",
+            "auto"
+          ]
+        }
+      },
+      {
+        "id": "xsparkx2flash",
+        "compat": {
+          "tool_choice_modes": [
+            "none",
+            "auto"
+          ]
+        }
+      },
+      {
+        "id": "xopglm52",
+        "compat": {
+          "supports_reasoning_effort": true,
+          "tool_choice_modes": [
+            "none",
+            "auto"
+          ]
+        },
+        "thinking_levels": {
+          "minimal": "high",
+          "low": "high",
+          "medium": "high",
+          "high": "high",
+          "xhigh": "max",
+          "max": "max"
+        }
+      },
+      {
+        "id": "xopglm51",
+        "compat": {
+          "tool_choice_modes": [
+            "none",
+            "auto"
+          ]
+        }
+      },
+      {
+        "id": "xopglm5",
+        "compat": {
+          "tool_choice_modes": [
+            "none",
+            "auto"
+          ]
+        }
+      },
+      {
+        "id": "xopdeepseekv4pro",
+        "compat": {
+          "supports_reasoning_effort": true
+        },
+        "thinking_levels": {
+          "minimal": "high",
+          "low": "high",
+          "medium": "high",
+          "high": "high",
+          "xhigh": "max",
+          "max": "max"
+        }
+      },
+      {
+        "id": "xopdeepseekv4flash",
+        "compat": {
+          "supports_reasoning_effort": true
+        },
+        "thinking_levels": {
+          "minimal": "high",
+          "low": "high",
+          "medium": "high",
+          "high": "high",
+          "xhigh": "max",
+          "max": "max"
+        }
+      },
+      {
+        "id": "xopkimik26",
+        "compat": {
+          "tool_choice_modes": [
+            "none",
+            "auto"
+          ]
+        }
+      },
+      {
+        "id": "xopkimik25",
+        "compat": {
+          "tool_choice_modes": [
+            "none",
+            "auto"
+          ]
+        }
+      }
+    ],
     "lkeap": [
       {
         "match": "*deepseek-r1*",
