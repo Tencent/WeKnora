@@ -20,6 +20,46 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// The data-table path reads response.Content directly and never applies the
+// document-summary JSON contract. A table or column description cut off at its
+// own budget (512 / 2048 tokens) is still worth indexing, so these callers must
+// keep returning it instead of failing the whole table summary task.
+func TestTableDescriptionCallersKeepTruncatedReplies(t *testing.T) {
+	truncated := &types.ChatResponse{
+		Content:      "| country | capital |\n| --- | --- |\n| Alpha Republic | North",
+		FinishReason: "length",
+	}
+	service := &DataTableSummaryService{}
+
+	t.Run("table description", func(t *testing.T) {
+		got, err := service.generateTableDescription(
+			context.Background(),
+			&fixedResponseSummaryChat{response: truncated},
+			"data_analysis_table", "country TEXT, capital TEXT", "alpha / north city", "",
+		)
+		if err != nil {
+			t.Fatalf("generateTableDescription() error = %v", err)
+		}
+		if !strings.Contains(got, truncated.Content) {
+			t.Fatalf("truncated table description was dropped:\n%s", got)
+		}
+	})
+
+	t.Run("column descriptions", func(t *testing.T) {
+		got, err := service.generateColumnDescriptions(
+			context.Background(),
+			&fixedResponseSummaryChat{response: truncated},
+			"data_analysis_table", "country TEXT, capital TEXT", "alpha / north city", "",
+		)
+		if err != nil {
+			t.Fatalf("generateColumnDescriptions() error = %v", err)
+		}
+		if !strings.Contains(got, truncated.Content) {
+			t.Fatalf("truncated column descriptions were dropped:\n%s", got)
+		}
+	})
+}
+
 func TestBuildSampleDataDescriptionIncludesDataAnalysisRows(t *testing.T) {
 	service := &DataTableSummaryService{}
 	result := &types.ToolResult{Data: map[string]interface{}{
