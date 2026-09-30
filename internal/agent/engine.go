@@ -623,7 +623,13 @@ loop:
 		// Check for context cancellation (request timeout, user cancel, etc.)
 		select {
 		case <-ctx.Done():
-			logger.Warnf(ctx, "[Agent] Context cancelled at round %d: %v",
+			// State only what this branch guarantees: no further tool call runs.
+			// The salvage attempt below reuses the already-cancelled ctx, so it
+			// usually produces no final answer at all (see the ctx.Err() guard
+			// after the loop), and streamFinalAnswerToEventBus logs its own
+			// "tools disabled" line whenever it does start. Do not claim here
+			// that a toolless final answer is synthesized below.
+			logger.Warnf(ctx, "[Agent] Context cancelled at round %d: %v — remaining tool calls will not run",
 				state.CurrentRound+1, ctx.Err())
 			// Try to salvage existing results
 			if totalTC := countTotalToolCalls(state.RoundSteps); totalTC > 0 {
