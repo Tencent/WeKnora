@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -32,7 +33,7 @@ var dataAnalysisTool = BaseTool{
 	description: "Use this tool when the knowledge is CSV or Excel files. It loads the document into DuckDB " +
 		"and executes a read-only SQL query for data analysis. The selected document is always exposed as " +
 		"the single table \"" + DataAnalysisTableName + "\"; write SQL against that table name and never put " +
-		"the document ID inside the SQL. For Excel files with multiple sheets, every sheet is loaded into " +
+		"the document ID inside the SQL. For Excel files with multiple sheets, non-empty sheets are loaded into " +
 		"the same table and the source sheet name is exposed as a '__sheet_name' column so you can " +
 		"filter/aggregate per sheet. If the user's question requires data statistics, convert the " +
 		"question into SQL and execute it.",
@@ -504,8 +505,8 @@ func (t *DataAnalysisTool) LoadFromCSV(ctx context.Context, filename string, tab
 
 // LoadFromExcel loads data from an Excel file into a DuckDB table and returns the table schema.
 //
-// Multi-sheet workbooks are fully supported: every sheet in the workbook is
-// loaded and the rows from all sheets are unioned (UNION ALL BY NAME) into a
+// Multi-sheet workbooks are supported: XLSX sheets containing only formatting
+// are skipped; rows from the remaining sheets are unioned (UNION ALL BY NAME) into a
 // single table. A synthetic '__sheet_name' column is added so downstream SQL
 // can filter / aggregate per sheet. If sheet enumeration fails for any
 // reason, we fall back to reading just the first sheet (original behavior).
@@ -532,6 +533,16 @@ func (t *DataAnalysisTool) LoadFromExcel(ctx context.Context, filename string, t
 				"[Tool][DataAnalysis] Could not enumerate sheets for '%s' (session=%s): %v. Falling back to first sheet only.",
 				filename, t.sessionID, enumErr,
 			)
+		}
+		if enumErr == nil && len(sheetNames) > 0 && strings.EqualFold(filepath.Ext(filename), ".xlsx") {
+			var err error
+			sheetNames, err = filterEmptyExcelSheets(ctx, filename, sheetNames)
+			if err != nil {
+				return nil, fmt.Errorf("inspect Excel worksheets: %w", err)
+			}
+			if len(sheetNames) == 0 {
+				return nil, fmt.Errorf("excel workbook contains no non-empty worksheets")
+			}
 		}
 
 		createTableSQL := buildExcelCreateTableSQL(tableName, filename, sheetNames)
