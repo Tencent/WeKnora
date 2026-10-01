@@ -1391,6 +1391,21 @@ func (s *knowledgeService) triggerManualProcessing(ctx context.Context,
 		}
 	}
 
+	// Same per-document chunk budget as the file pipeline (#3539): manual
+	// content honors the same process overrides, so the same amplification
+	// applies. Checking before the sync/async fork keeps both callers from
+	// enqueueing the embedding work for a document that will be rejected.
+	if budgetErr := enforceChunkBudget(len(parsed) + len(opts.ParentChunks)); budgetErr != nil {
+		logger.Warnf(ctx, "Rejecting knowledge %s: %v", knowledge.ID, budgetErr)
+		knowledge.ParseStatus = types.ParseStatusFailed
+		knowledge.ErrorMessage = budgetErr.Error()
+		knowledge.UpdatedAt = time.Now()
+		if updateErr := s.updateKnowledgeUnlessSourceReplaced(ctx, knowledge); updateErr != nil {
+			logger.Errorf(ctx, "failed to record chunk-budget rejection for knowledge %s: %v", knowledge.ID, updateErr)
+		}
+		return nil
+	}
+
 	if doSync {
 		return s.processChunks(ctx, kb, knowledge, parsed, opts)
 	}
