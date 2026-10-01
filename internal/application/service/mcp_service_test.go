@@ -1,12 +1,20 @@
 package service
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/mcp"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/utils"
+	sdkserver "github.com/mark3labs/mcp-go/server"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -115,6 +123,103 @@ func newTestService() (*mcpServiceService, *fakeMCPRepo) {
 		oauthRepo:      nil,
 	}
 	return svc, repo
+}
+
+func TestTestMCPService_ListingCapabilityCompatibility(t *testing.T) {
+	tests := []struct {
+		name        string
+		tools       bool
+		resources   bool
+		failMethod  string
+		listMethod  string
+		wantSuccess bool
+	}{
+		{name: "tool list fails", tools: true, failMethod: "tools/list"},
+		{name: "resource list fails", resources: true, failMethod: "resources/list"},
+		{name: "resource-only server", resources: true, failMethod: "tools/list", wantSuccess: true},
+		{name: "tool-only server", tools: true, failMethod: "resources/list", wantSuccess: true},
+		{name: "tools without advertised capability", listMethod: "tools/list", wantSuccess: true},
+		{name: "resources without advertised capability", listMethod: "resources/list", wantSuccess: true},
+		{name: "advertised empty lists", tools: true, resources: true, wantSuccess: true},
+		{name: "no advertised capabilities", failMethod: "tools/list", wantSuccess: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			utils.SetSSRFWhitelistFromRaw("127.0.0.1")
+			t.Cleanup(utils.ResetSSRFWhitelistForTest)
+
+			var options []sdkserver.ServerOption
+			if tt.tools {
+				options = append(options, sdkserver.WithToolCapabilities(false))
+			}
+			if tt.resources {
+				options = append(options, sdkserver.WithResourceCapabilities(false, false))
+			}
+			mcpServer := sdkserver.NewMCPServer("test", "1", options...)
+			upstream := sdkserver.NewStreamableHTTPServer(mcpServer, sdkserver.WithStateLess(true))
+			requests := map[string]bool{}
+			var requestsMu sync.Mutex
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				body, err := io.ReadAll(r.Body)
+				require.NoError(t, err)
+				var request struct {
+					ID     json.RawMessage `json:"id"`
+					Method string          `json:"method"`
+				}
+				require.NoError(t, json.Unmarshal(body, &request))
+				requestsMu.Lock()
+				requests[request.Method] = true
+				requestsMu.Unlock()
+				if request.Method == tt.failMethod {
+					w.Header().Set("Content-Type", "application/json")
+					_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":` + string(request.ID) + `,"error":{"code":-32603,"message":"directory unavailable"}}`))
+					return
+				}
+				if request.Method == tt.listMethod {
+					w.Header().Set("Content-Type", "application/json")
+					result := `{"tools":[{"name":"test_tool","inputSchema":{"type":"object"}}]}`
+					if request.Method == "resources/list" {
+						result = `{"resources":[{"uri":"test://resource","name":"test_resource"}]}`
+					}
+					_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":` + string(request.ID) + `,"result":` + result + `}`))
+					return
+				}
+				r.Body = io.NopCloser(bytes.NewReader(body))
+				upstream.ServeHTTP(w, r)
+			}))
+			t.Cleanup(server.Close)
+
+			svc, repo := newTestService()
+			url := server.URL
+			repo.store["svc"] = &types.MCPService{
+				ID: "svc", TenantID: 1, Name: "test", URL: &url,
+				TransportType: types.MCPTransportHTTPStreamable,
+			}
+			result, err := svc.TestMCPService(context.Background(), 1, "svc")
+			require.NoError(t, err)
+			require.NotNil(t, result)
+			assert.Equal(t, tt.wantSuccess, result.Success)
+			if !tt.wantSuccess {
+				assert.Contains(t, result.Message, "directory unavailable")
+			}
+			if tt.listMethod == "tools/list" {
+				require.Len(t, result.Tools, 1)
+				assert.Equal(t, "test_tool", result.Tools[0].Name)
+			} else {
+				assert.Empty(t, result.Tools)
+			}
+			if tt.listMethod == "resources/list" {
+				require.Len(t, result.Resources, 1)
+				assert.Equal(t, "test://resource", result.Resources[0].URI)
+			} else {
+				assert.Empty(t, result.Resources)
+			}
+			requestsMu.Lock()
+			defer requestsMu.Unlock()
+			assert.True(t, requests["tools/list"])
+			assert.Equal(t, !(tt.tools && tt.failMethod == "tools/list"), requests["resources/list"])
+		})
+	}
 }
 
 func TestUpdateMCPService_RespectsScalarFieldPresence(t *testing.T) {
