@@ -24,11 +24,12 @@ BUILTIN_ENGINE = "builtin"
 
 # File types that builtin does not implement natively. When the requested
 # engine (including empty / builtin) cannot parse them, route to this engine
-# instead of raising ValueError — PPT/PPTX/CSV are markitdown-only.
+# instead of raising ValueError — PPT/PPTX/CSV/SQL are markitdown-only.
 _DEFAULT_ENGINE_BY_TYPE = {
     "ppt": "markitdown",
     "pptx": "markitdown",
     "csv": "markitdown",
+    "sql": "markitdown",
 }
 
 
@@ -191,6 +192,7 @@ def _build_default_registry() -> ParserEngineRegistry:
             "xlsx": MarkitdownParser,
             "xls": MarkitdownParser,
             "csv": MarkitdownParser,
+            "sql": MarkitdownParser,
         },
         description="MarkItDown 解析引擎（微软 MarkItDown 库）",
     )
