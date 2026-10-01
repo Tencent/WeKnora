@@ -18,6 +18,16 @@ func applyParserRuleOverrides(
 	fileType string,
 ) {
 	fileType = normalizeParserFileType(fileType)
+	if fileType == "docx" {
+		rule := config.ResolveParserEngineRule(fileType)
+		if rule != nil && rule.DOCXIncludeHeaders != nil {
+			engine := strings.TrimSpace(rule.Engine)
+			if engine == "" || engine == "builtin" || engine == "markitdown" {
+				overrides["docx_include_headers"] = strconv.FormatBool(*rule.DOCXIncludeHeaders)
+			}
+		}
+		return
+	}
 	if fileType != "xlsx" && fileType != "xls" {
 		return
 	}

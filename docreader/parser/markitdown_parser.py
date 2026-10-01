@@ -9,6 +9,7 @@ from docreader.parser.base_parser import BaseParser
 from docreader.parser.chain_parser import PipelineParser
 from docreader.parser.concurrency import parser_worker_limit
 from docreader.parser.docx_merge import fill_vertical_merged_cells_docx
+from docreader.parser.docx_parser import extract_docx_headers
 from docreader.parser.markdown_parser import MarkdownParser
 from docreader.parser.ppt_convert import normalize_ppt_bytes
 from docreader.parser.pptx_media import (
@@ -34,6 +35,9 @@ class StdMarkitdownParser(BaseParser):
     def __init__(self, *args, **kwargs):
         # 这里的 super() 会调用 BaseParser 的初始化，确保 self.file_type 被正确赋值
         super().__init__(*args, **kwargs)
+        self.docx_include_headers = str(
+            kwargs.get("docx_include_headers", False)
+        ).strip().lower() in {"true", "1", "yes", "on"}
         self.markitdown = MarkItDown()
 
     def parse_into_text(self, content: bytes) -> Document:
@@ -76,6 +80,9 @@ class StdMarkitdownParser(BaseParser):
                 result = self._convert_markitdown(content, ext, keep_data_uris=False)
 
         text = result.text_content
+        if ft == "docx" and self.docx_include_headers:
+            headers = extract_docx_headers(content)
+            text = "\n\n".join(part for part in (headers, text) if part)
         images: dict[str, str] = {}
         if pptx_bytes is not None and markdown_needs_pptx_media_attach(text):
             text, images = attach_pptx_media_to_markdown(text, pptx_bytes)

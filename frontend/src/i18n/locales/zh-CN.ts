@@ -1872,6 +1872,7 @@ export default {
       fileTypePpt: '演示文稿',
       fileTypeExcel: 'Excel 表格',
       xlsxFirstRowAsHeader: '将首行作为列标题，并保留在每行上下文中',
+      docxIncludeHeaders: '解析 DOCX 页眉文字',
       fileTypeEbook: '电子书',
       fileTypeWebArchive: '网页归档',
       fileTypeCsv: 'CSV 文件',

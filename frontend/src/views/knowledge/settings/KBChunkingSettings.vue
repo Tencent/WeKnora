@@ -221,6 +221,7 @@ interface ParserEngineRule {
   file_types: string[]
   engine: string
   xlsx_first_row_as_header?: boolean
+  docx_include_headers?: boolean
 }
 
 // Slider ranges defined in this file (min/max props on t-slider) mirror

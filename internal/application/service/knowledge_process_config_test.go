@@ -181,6 +181,35 @@ func TestEffectiveChunkingConfig_ResolveParserEngineFromOverrides(t *testing.T) 
 	require.Equal(t, &xlsxFirstRowAsHeader, xlsxRule.XLSXFirstRowAsHeader)
 }
 
+func TestApplyParserRuleOverrides_DOCXHeaders(t *testing.T) {
+	t.Parallel()
+	for _, engine := range []string{"", "builtin", "markitdown", "anydoc"} {
+		for _, enabled := range []bool{true, false} {
+			t.Run(engine+"/"+strconv.FormatBool(enabled), func(t *testing.T) {
+				config := types.ChunkingConfig{ParserEngineRules: []types.ParserEngineRule{{
+					FileTypes: []string{"docx", "doc"}, Engine: engine, DOCXIncludeHeaders: &enabled,
+				}}}
+				overrides := map[string]string{"tenant_option": "preserved"}
+				applyParserRuleOverrides(overrides, config, ".DOCX")
+				if engine == "anydoc" {
+					require.NotContains(t, overrides, "docx_include_headers")
+				} else {
+					require.Equal(t, strconv.FormatBool(enabled), overrides["docx_include_headers"])
+				}
+				require.Equal(t, "preserved", overrides["tenant_option"])
+				applyParserRuleOverrides(overrides, config, "xlsx")
+				require.NotContains(t, overrides, xlsxFirstRowAsHeaderOverride)
+			})
+		}
+	}
+	config := types.ChunkingConfig{ParserEngineRules: []types.ParserEngineRule{{
+		FileTypes: []string{"docx"}, Engine: "builtin",
+	}}}
+	overrides := map[string]string{}
+	applyParserRuleOverrides(overrides, config, "docx")
+	require.Empty(t, overrides)
+}
+
 func TestApplyParserRuleOverrides_XLSXFirstRowAsHeader(t *testing.T) {
 	t.Parallel()
 

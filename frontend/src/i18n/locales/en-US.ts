@@ -6138,6 +6138,7 @@ export default {
       fileTypePpt: 'Presentations',
       fileTypeExcel: 'Excel Spreadsheets',
       xlsxFirstRowAsHeader: 'Use the first row as column context for every row',
+      docxIncludeHeaders: 'Include DOCX header text',
       fileTypeEbook: 'E-books',
       fileTypeWebArchive: 'Web Archives',
       fileTypeCsv: 'CSV Files',

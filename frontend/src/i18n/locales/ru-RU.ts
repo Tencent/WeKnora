@@ -1870,6 +1870,7 @@ export default {
       fileTypePpt: 'Презентации',
       fileTypeExcel: 'Таблицы Excel',
       xlsxFirstRowAsHeader: 'Использовать первую строку как контекст столбцов',
+      docxIncludeHeaders: 'Включать текст колонтитулов DOCX',
       fileTypeEbook: 'Электронные книги',
       fileTypeWebArchive: 'Веб-архивы',
       fileTypeCsv: 'Файлы CSV',
