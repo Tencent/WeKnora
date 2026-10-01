@@ -107,6 +107,12 @@ func (r *assetResolver) Resolve(ctx context.Context, content string) string {
 		}
 		dataURI := cache[abs]
 		if dataURI == "" {
+			// Could not be inlined (download failed or per-page budget exhausted).
+			// Rewrite the original (often relative) src to the absolute Confluence
+			// URL so the image reference is not lost as a dead link inside WeKnora.
+			if !strings.HasPrefix(strings.ToLower(src), "http") {
+				return replaceImageSrc(tag, abs)
+			}
 			return tag
 		}
 		if inlinedBytes+len(dataURI) > maxPageInlineBytes {
