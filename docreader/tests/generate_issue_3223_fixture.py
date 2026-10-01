@@ -1,0 +1,60 @@
+"""Regenerate the issue #3223 acceptance fixture.
+
+The synthetic two-page PDF (3,303 bytes) is the one embedded in the issue
+report; compressing it keeps the generator small. SHA-256 is pinned so any
+drift fails loudly. Run from ``docreader/``:
+
+    python tests/generate_issue_3223_fixture.py
+"""
+import base64
+import hashlib
+import pathlib
+import zlib
+
+BLOB = """
+
+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
+TzLF9Z8JwhkaDcVizaEQ+g/9wLKi
+"""
+
+EXPECTED_SHA256 = "363b41b90351914dfa2f7f1ef74870f7be604ef3bf1cdf57a540254a07fce973"
+
+def build_pdf() -> bytes:
+    data = zlib.decompress(base64.b64decode(BLOB))
+    digest = hashlib.sha256(data).hexdigest()
+    if digest != EXPECTED_SHA256:
+        raise SystemExit(f"fixture drift: sha256={digest}")
+    return data
+
+if __name__ == "__main__":
+    out = pathlib.Path(__file__).parent / "fixtures" / "issue_3223_table_quantities.pdf"
+    out.parent.mkdir(exist_ok=True)
+    out.write_bytes(build_pdf())
+    print(f"wrote {out} ({len(build_pdf())} bytes)")
