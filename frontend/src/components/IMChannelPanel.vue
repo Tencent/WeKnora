@@ -684,6 +684,7 @@ const platformOptions = computed(() => ([
 const localeOptions = computed(() => ([
   { value: '' as IMLocale, label: t('agentEditor.im.replyLanguageDefault') },
   { value: 'zh-CN' as IMLocale, label: '简体中文' },
+  { value: 'zh-TW' as IMLocale, label: '繁體中文' },
   { value: 'en-US' as IMLocale, label: 'English' },
   { value: 'ja-JP' as IMLocale, label: '日本語' },
   { value: 'ko-KR' as IMLocale, label: '한국어' },
