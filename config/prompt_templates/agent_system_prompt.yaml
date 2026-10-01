@@ -17,6 +17,9 @@ templates:
       ja-JP:
         name: "ピュアエージェント"
         description: "ピュアエージェントモード用のシステムプロンプト（ナレッジベース不使用）"
+      pl-PL:
+        name: "Czysty agent"
+        description: "Prompt systemowy trybu czystego agenta (bez baz wiedzy)"
     mode: "pure"
     content: |
       You are WeKnora, an assistant developed by Tencent. Help the user understand information and complete requested work using the capabilities available in this turn.
@@ -39,6 +42,9 @@ templates:
       ja-JP:
         name: "プログレッシブRAGエージェント"
         description: "ナレッジベースを使用するプログレッシブエージェンティックRAGモード用のシステムプロンプト"
+      pl-PL:
+        name: "Progresywny agent RAG"
+        description: "Prompt systemowy trybu progresywnego agentowego RAG z bazami wiedzy"
     default: true
     mode: "rag"
     content: |
@@ -66,6 +72,9 @@ templates:
       ja-JP:
         name: "データアナリスト"
         description: "DuckDB SQLを用いた分析を行うデータ分析エージェント用のシステムプロンプト"
+      pl-PL:
+        name: "Analityk danych"
+        description: "Prompt systemowy agenta analityka danych z analizą SQL w DuckDB"
     mode: "data_analyst"
     content: |
       You are WeKnora Data Analyst, specializing in analysis of the user's CSV and Excel data with DuckDB.
@@ -93,6 +102,9 @@ templates:
       ja-JP:
         name: "Wikiリサーチャー"
         description: "ナレッジグラフ探索を行うWikiリサーチャーエージェント用のシステムプロンプト"
+      pl-PL:
+        name: "Badacz wiki"
+        description: "Prompt systemowy agenta badacza wiki z przechodzeniem po grafie wiedzy"
     mode: "wiki_researcher"
     content: |
       You are WeKnora Wiki Researcher. The Wiki contains generated, linked summaries, entities, and concepts derived from source documents.
@@ -117,6 +129,9 @@ templates:
       ja-JP:
         name: "Wiki修復システムプロンプト"
         description: "リンターの指摘に基づいてWikiページを修復・最適化するためのシステムプロンプト"
+      pl-PL:
+        name: "Prompt systemowy korektora wiki"
+        description: "Prompt systemowy do naprawy i optymalizacji stron wiki na podstawie problemów wykrytych przez linter"
     mode: "smart-reasoning"
     content: |
       You are WeKnora Wiki Fixer. Investigate reported Wiki problems and carry out the repairs requested by the user.
@@ -147,6 +162,9 @@ templates:
       ja-JP:
         name: "ハイブリッドRAG + Wikiエージェント"
         description: "Wikiとチャンク単位の検索を同時に有効化したナレッジベース用のシステムプロンプト"
+      pl-PL:
+        name: "Agent hybrydowy RAG + wiki"
+        description: "Prompt systemowy dla baz wiedzy z włączoną wiki ORAZ wyszukiwaniem na poziomie fragmentów"
     mode: "smart-reasoning"
     content: |
       You are WeKnora, an assistant that uses Wiki pages and original document chunks to answer questions and complete knowledge-based work.
@@ -173,6 +191,9 @@ templates:
       ja-JP:
         name: "スキルインストール用システムプロンプト"
         description: "アップロードされたスキルとその依存関係をサンドボックスイメージにインストールするためのシステムプロンプト"
+      pl-PL:
+        name: "Prompt systemowy instalatora umiejętności"
+        description: "Prompt systemowy do instalacji przesłanej umiejętności i jej zależności w obrazie piaskownicy"
     mode: "smart-reasoning"
     content: |
       <role>

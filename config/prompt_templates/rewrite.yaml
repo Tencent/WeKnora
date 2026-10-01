@@ -19,6 +19,9 @@ templates:
       ja-JP:
         name: "標準リライト（意図分類あり）"
         description: "質問のリライト、意図分類、画像・添付ファイル分析を含むデフォルトのテンプレート"
+      pl-PL:
+        name: "Standardowe przepisanie (z klasyfikacją intencji)"
+        description: "Domyślny szablon z przepisaniem zapytania, klasyfikacją intencji oraz analizą obrazów i załączników"
     default: true
     content: |
       You are an intelligent assistant that performs THREE tasks on the user's question:
@@ -146,6 +149,9 @@ templates:
       ja-JP:
         name: "標準リライト"
         description: "指示語の解決と省略の補完を行う標準的なリライトルール"
+      pl-PL:
+        name: "Standardowe przepisanie"
+        description: "Standardowe reguły rozwiązywania odwołań i uzupełniania pominięć"
     content: |
       You are a professional question rewriting assistant. Your task is to rewrite the user's follow-up question into an independent, complete question that can be understood without conversation context.
 
@@ -188,6 +194,9 @@ templates:
       ja-JP:
         name: "厳格なリライト"
         description: "質問の完全性と独立性をより厳密に確保するリライト要件"
+      pl-PL:
+        name: "Ścisłe przepisanie"
+        description: "Ostrzejsze wymagania co do pełnych i samodzielnych pytań"
     content: |
       You are a question rewriting expert. Rewrite the user's question into a complete, independent question.
 

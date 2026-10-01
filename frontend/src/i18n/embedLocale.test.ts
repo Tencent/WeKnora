@@ -26,8 +26,8 @@ const EXPECTED_REFERENCES_DRAWER_KEYS = [
   'referencesDrawerEmpty',
 ] as const
 
-test('supported embed locales include zh-CN, en-US, ko-KR, ja-JP, ru-RU', () => {
-  assert.deepEqual([...SUPPORTED_LOCALES].sort(), ['en-US', 'ja-JP', 'ko-KR', 'ru-RU', 'zh-CN'].sort())
+test('supported embed locales include zh-CN, en-US, ko-KR, ja-JP, ru-RU, pl-PL', () => {
+  assert.deepEqual([...SUPPORTED_LOCALES].sort(), ['en-US', 'ja-JP', 'ko-KR', 'pl-PL', 'ru-RU', 'zh-CN'].sort())
 })
 
 test('every supported locale defines conversationTime and referencesDrawer in chat', () => {
@@ -143,6 +143,17 @@ test('locale-specific translations match expected strings for missing keys', () 
   assert.equal(ruChat.referencesDrawerTitleDocs, 'Документы')
   assert.equal(ruChat.referencesDrawerEmpty, 'Источники отсутствуют')
   assert.equal(ruCommon.close, 'Закрыть')
+
+  // pl-PL
+  const plChat = EMBED_MESSAGES['pl-PL'].chat as Record<string, any>
+  const plCommon = EMBED_MESSAGES['pl-PL'].common as Record<string, any>
+  assert.equal(plChat.conversationTime.today, 'Dziś {time}')
+  assert.equal(plChat.conversationTime.yesterday, 'Wczoraj {time}')
+  assert.equal(plChat.conversationTime.thisYear, '{day}.{month} {time}')
+  assert.equal(plChat.conversationTime.otherYear, '{day}.{month}.{year} {time}')
+  assert.equal(plChat.referencesDrawerTitleDocs, 'Dokumenty źródłowe')
+  assert.equal(plChat.referencesDrawerEmpty, 'Brak dostępnych źródeł')
+  assert.equal(plCommon.close, 'Zamknij')
 })
 
 test('normalizeEmbedLocale maps tags accurately with fallback to zh-CN', () => {
@@ -158,6 +169,8 @@ test('normalizeEmbedLocale maps tags accurately with fallback to zh-CN', () => {
   assert.equal(normalizeEmbedLocale('ko'), 'ko-KR')
   assert.equal(normalizeEmbedLocale('ru-RU'), 'ru-RU')
   assert.equal(normalizeEmbedLocale('ru'), 'ru-RU')
+  assert.equal(normalizeEmbedLocale('pl-PL'), 'pl-PL')
+  assert.equal(normalizeEmbedLocale('pl'), 'pl-PL')
   assert.equal(normalizeEmbedLocale('unknown-locale'), 'zh-CN')
   assert.equal(normalizeEmbedLocale('   '), 'zh-CN')
 })

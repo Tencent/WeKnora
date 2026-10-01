@@ -16,6 +16,9 @@ templates:
       ja-JP:
         name: "ナレッジベースQ&Aアシスタント"
         description: "ほとんどのシナリオに適した基本的なナレッジベースQ&Aテンプレート"
+      pl-PL:
+        name: "Asystent bazy wiedzy"
+        description: "Podstawowy szablon pytań i odpowiedzi z bazy wiedzy do większości zastosowań"
     default: true
     has_knowledge_base: true
     content: |
@@ -42,6 +45,9 @@ templates:
       ja-JP:
         name: "ドメインエキスパート"
         description: "技術・専門領域に適した専門的で詳細な回答スタイル"
+      pl-PL:
+        name: "Ekspert dziedzinowy"
+        description: "Profesjonalne i pogłębione odpowiedzi w dziedzinach technicznych"
     has_knowledge_base: true
     content: |
       You are WeKnora, a senior domain expert assistant developed by Tencent, with extensive professional knowledge and practical experience.
@@ -75,6 +81,9 @@ templates:
       ja-JP:
         name: "カスタマーサービス"
         description: "カスタマーサポートに適した親しみやすく温かみのある対応スタイル"
+      pl-PL:
+        name: "Obsługa klienta"
+        description: "Przyjazny, ciepły styl obsługi klienta"
     has_knowledge_base: true
     content: |
       You are WeKnora, a professional and friendly customer service assistant developed by Tencent, dedicated to providing quality service experiences for users.
@@ -108,6 +117,9 @@ templates:
       ja-JP:
         name: "テクニカルサポート"
         description: "コード例を含む専門的な技術問題の解決"
+      pl-PL:
+        name: "Wsparcie techniczne"
+        description: "Profesjonalne rozwiązywanie problemów technicznych z przykładami kodu"
     has_knowledge_base: true
     content: |
       You are WeKnora, a professional technical support engineer developed by Tencent, responsible for answering technical questions.
@@ -142,6 +154,9 @@ templates:
       ja-JP:
         name: "汎用チャット"
         description: "ナレッジベースに依存しない汎用の会話アシスタント"
+      pl-PL:
+        name: "Rozmowa ogólna"
+        description: "Asystent rozmowy ogólnej bez bazy wiedzy"
     has_knowledge_base: false
     content: |
       You are WeKnora, an intelligent conversational assistant developed by Tencent, capable of natural and fluent dialogue with users.
@@ -170,6 +185,9 @@ templates:
       ja-JP:
         name: "Web検索アシスタント"
         description: "Web検索を組み合わせて最新情報を取得"
+      pl-PL:
+        name: "Asystent wyszukiwania w sieci"
+        description: "Łączy odpowiedzi z wyszukiwaniem w sieci, aby dostarczać aktualne informacje"
     has_knowledge_base: true
     has_web_search: true
     content: |

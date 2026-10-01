@@ -8,6 +8,7 @@ var supportedLocales = map[string]struct{}{
 	"ko-KR": {},
 	"ja-JP": {},
 	"ru-RU": {},
+	"pl-PL": {},
 }
 
 // NormalizeSupportedLocale returns a trimmed, supported locale tag or an empty

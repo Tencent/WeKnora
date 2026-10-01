@@ -16,6 +16,9 @@ templates:
       ja-JP:
         name: "標準テンプレート"
         description: "参考資料と質問を明確に提示する基本的なコンテキストテンプレート"
+      pl-PL:
+        name: "Szablon standardowy"
+        description: "Podstawowy szablon kontekstu z czytelnymi źródłami i pytaniem"
     default: true
     has_knowledge_base: true
     content: |
@@ -44,6 +47,9 @@ templates:
       ja-JP:
         name: "詳細テンプレート"
         description: "詳細な説明と回答要件を含む完全なテンプレート"
+      pl-PL:
+        name: "Szablon szczegółowy"
+        description: "Pełny szablon ze szczegółowymi instrukcjami i wymaganiami"
     has_knowledge_base: true
     content: |
       ## Reference materials (source data)
@@ -72,6 +78,9 @@ templates:
       ja-JP:
         name: "シンプルテンプレート"
         description: "簡単なQ&Aシナリオに適した最小限のテンプレート形式"
+      pl-PL:
+        name: "Szablon prosty"
+        description: "Minimalny szablon do prostych pytań i odpowiedzi"
     has_knowledge_base: true
     content: |
       Reference materials (source data):
@@ -95,6 +104,9 @@ templates:
       ja-JP:
         name: "Q&Aテンプレート"
         description: "Q&Aシナリオ向けに最適化されたテンプレート"
+      pl-PL:
+        name: "Szablon pytań i odpowiedzi"
+        description: "Szablon zoptymalizowany pod pytania i odpowiedzi"
     has_knowledge_base: true
     content: |
       Potentially relevant reference materials (source data):

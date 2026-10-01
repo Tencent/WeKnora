@@ -19,6 +19,9 @@ builtin_agents:
       ja-JP:
         name: "クイック回答"
         description: "ナレッジベース RAG Q&A による迅速で正確な回答"
+      pl-PL:
+        name: "Szybka odpowiedź"
+        description: "Pytania i odpowiedzi RAG na podstawie bazy wiedzy – szybko i trafnie"
       ko-KR:
         name: "빠른 답변"
         description: "지식 베이스 RAG Q&A를 통한 빠르고 정확한 답변"
@@ -62,6 +65,9 @@ builtin_agents:
       ja-JP:
         name: "スマート推論"
         description: "ReAct 推論フレームワーク、マルチステップ思考とツール呼び出し対応"
+      pl-PL:
+        name: "Inteligentne rozumowanie"
+        description: "Rozumowanie ReAct: wieloetapowe myślenie i wywoływanie narzędzi"
       ko-KR:
         name: "스마트 추론"
         description: "ReAct 추론 프레임워크, 다단계 사고 및 도구 호출 지원"
@@ -108,6 +114,9 @@ builtin_agents:
       ja-JP:
         name: "データアナリスト"
         description: "CSV/Excel ファイルの SQL クエリと統計分析に対応するプロフェッショナルなデータ分析エージェント"
+      pl-PL:
+        name: "Analityk danych"
+        description: "Agent analizy danych: zapytania SQL i analiza statystyczna plików CSV/Excel"
       ko-KR:
         name: "데이터 분석가"
         description: "CSV/Excel 파일에 대한 SQL 쿼리 및 통계 분석을 지원하는 전문 데이터 분석 에이전트"
@@ -152,6 +161,9 @@ builtin_agents:
       ja-JP:
         name: "Wiki 問答"
         description: "Wikiナレッジベースでの回答問題に特化したエージェント"
+      pl-PL:
+        name: "Pytania do wiki"
+        description: "Agent odpowiadający na pytania na podstawie baz wiedzy wiki"
       ko-KR:
         name: "위키 질문"
         description: "위키 지식 베이스에서 답변하는 데 특화된 에이전트"
@@ -195,6 +207,9 @@ builtin_agents:
       ja-JP:
         name: "Wiki 修訂"
         description: "検査の問題に基づいてWikiページを修復および最適化するための専用エージェント"
+      pl-PL:
+        name: "Korektor wiki"
+        description: "Agent poprawiający strony wiki na podstawie wykrytych problemów"
       ko-KR:
         name: "위키 수정"
         description: "검사 문제를 기반으로 Wiki 페이지를 修復하고 最適化하는 전용 에이전트"
@@ -244,6 +259,9 @@ builtin_agents:
       ja-JP:
         name: "スキルインストーラー"
         description: "アップロードされたスキルとその依存関係をサンドボックスイメージにインストールする内部エージェント"
+      pl-PL:
+        name: "Instalator umiejętności"
+        description: "Agent wewnętrzny, który instaluje przesłaną umiejętność i jej zależności w obrazie piaskownicy"
       ko-KR:
         name: "스킬 설치 도구"
         description: "업로드된 스킬과 의존성을 샌드박스 이미지에 설치하는 내부 에이전트"

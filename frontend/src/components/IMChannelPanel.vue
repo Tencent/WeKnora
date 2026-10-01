@@ -688,6 +688,7 @@ const localeOptions = computed(() => ([
   { value: 'ja-JP' as IMLocale, label: '日本語' },
   { value: 'ko-KR' as IMLocale, label: '한국어' },
   { value: 'ru-RU' as IMLocale, label: 'Русский' },
+  { value: 'pl-PL' as IMLocale, label: 'Polski' },
 ]));
 
 // Feishu and Lark are the same product on separate clouds, so each has its own
