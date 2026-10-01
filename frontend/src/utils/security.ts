@@ -12,6 +12,7 @@ import {
   markdownDomPurifySecurityHooks,
 } from './markdownDomPurify.ts';
 import {
+  buildProtectedFileFallbackRequest,
   buildProtectedFileRequest,
   isProtectedFileProxyPath,
   isProviderFileURL,
@@ -675,6 +676,30 @@ export async function hydrateProtectedFileImages(
             if (!resp.ok) {
               if (attempt === 0 && generation !== protectedFileCacheState.retryGeneration) continue;
               if (resp.status === 404) {
+                const fallback = buildProtectedFileFallbackRequest(sourceURL, resolvedAccess);
+                if (fallback) {
+                  try {
+                    const fallbackResp = await fetch(fallback.url, {
+                      method: 'GET',
+                      headers: fallback.headers,
+                      credentials: 'include',
+                    });
+                    if (fallbackResp.ok) {
+                      const blob = await fallbackResp.blob();
+                      const blobURL = URL.createObjectURL(blob);
+                      const file: LoadedProtectedFile = {
+                        blob,
+                        blobURL,
+                        fileName: responseFileName(fallbackResp.headers.get('Content-Disposition'), sourceURL),
+                      };
+                      protectedFileBlobCache.set(requestKey, file);
+                      protectedFileFailureCache.delete(requestKey);
+                      return { status: 'loaded', ...file };
+                    }
+                  } catch {
+                    // fallback fetch 自身錯誤＝相容性重試耗盡，落回 missing
+                  }
+                }
                 protectedFileFailureCache.set(requestKey, Date.now());
                 return { status: 'missing' };
               }
