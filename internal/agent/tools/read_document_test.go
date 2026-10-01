@@ -525,3 +525,39 @@ func TestReadDocumentFAQChunkExposesQuestion(t *testing.T) {
 		t.Fatalf("output = %s", res.Output)
 	}
 }
+
+// A truncated query result says where to continue, and offset resumes the
+// scan there; matches past the cap used to be reachable only by paging the
+// whole document.
+func TestReadDocumentQueryContinuesFromNextOffset(t *testing.T) {
+	tool, repo := newReadDocumentFixture(12)
+	for _, c := range repo.ordered {
+		c.Content = "needle " + strings.Repeat("x", 400)
+	}
+	ctx := WithOutputBudget(context.Background(), 1500)
+	first, err := tool.Execute(ctx, json.RawMessage(`{"id":"doc-1","query":"needle"}`))
+	if err != nil || !first.Success || first.Data["truncated"] != true {
+		t.Fatalf("first=%+v err=%v", first, err)
+	}
+	next, ok := first.Data["next_offset"].(int)
+	if !ok || next <= 0 || next >= 12 {
+		t.Fatalf("next_offset = %v", first.Data["next_offset"])
+	}
+	firstIDs := chunkIDsFromData(t, first.Data)
+
+	second, err := tool.Execute(ctx, json.RawMessage(fmt.Sprintf(`{"id":"doc-1","query":"needle","offset":%d}`, next)))
+	if err != nil || !second.Success {
+		t.Fatalf("second=%+v err=%v", second, err)
+	}
+	secondIDs := chunkIDsFromData(t, second.Data)
+	if len(secondIDs) == 0 {
+		t.Fatal("continuation returned nothing")
+	}
+	for _, id := range secondIDs {
+		for _, seen := range firstIDs {
+			if id == seen && id != secondIDs[0] {
+				t.Fatalf("continuation repeated %s: first=%v second=%v", id, firstIDs, secondIDs)
+			}
+		}
+	}
+}

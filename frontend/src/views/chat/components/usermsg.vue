@@ -45,7 +45,7 @@
         </div>
         <div v-if="timestamp || content || canFork || canRewind" class="user_msg_meta">
             <time v-if="timestamp" class="user_msg_time" :datetime="timestamp.datetime" :title="fullTimestamp">
-                {{ timestamp.time }}
+                {{ timestamp.kind === 'today' ? timestamp.time : fullTimestamp }}
             </time>
             <div v-if="content || canFork || canRewind" class="user_msg_actions">
                 <t-tooltip v-if="content" :content="t('agent.copy')">

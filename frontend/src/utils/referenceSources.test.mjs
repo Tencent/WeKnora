@@ -54,6 +54,15 @@ test('buildReferenceList aggregates chunks from the same document', () => {
   assert.match(items[0].content || '', /shipping rules/)
 })
 
+test('buildReferenceList opens a document at its first chunk with positions', () => {
+  const [item] = buildReferenceList([
+    { id: 'summary', knowledge_id: 'k1', knowledge_title: 'Scan', chunk_type: 'summary', content: 'Summary' },
+    { id: 'ocr-1', knowledge_id: 'k1', knowledge_title: 'Scan', chunk_type: 'image_ocr', content: 'Page 1', source_locators: [{ type: 'pdf', page: 1 }] },
+  ])
+  assert.equal(item.chunkId, 'summary')
+  assert.equal(item.sourceChunkId, 'ocr-1')
+})
+
 test('buildReferenceSections keeps tool results in their own section', () => {
   const sections = buildReferenceSections([
     {

@@ -10,8 +10,6 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/gin-gonic/gin"
-
-	_ "github.com/Tencent/WeKnora/internal/models/vendors"
 )
 
 // listProvidersAs drives the real handler with one tenant role.

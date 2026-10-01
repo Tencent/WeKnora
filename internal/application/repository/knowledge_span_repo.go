@@ -44,6 +44,9 @@ type KnowledgeSpanRepository interface {
 	// after asynq retry or server restart so the trace tree does not
 	// accumulate duplicate postprocess.summary / question rows.
 	CancelOpenSpansByName(ctx context.Context, knowledgeID string, attempt int, name, errorCode, reason string) (int64, error)
+	// LastActivity returns each knowledge's most recent span write, across
+	// attempts. Knowledge without spans is absent from the map.
+	LastActivity(ctx context.Context, knowledgeIDs []string) (map[string]time.Time, error)
 }
 
 type knowledgeSpanRepository struct {
@@ -268,4 +271,53 @@ func (r *knowledgeSpanRepository) CancelOpenSpansByName(
 		return 0, res.Error
 	}
 	return res.RowsAffected, nil
+}
+
+func (r *knowledgeSpanRepository) LastActivity(
+	ctx context.Context, knowledgeIDs []string,
+) (map[string]time.Time, error) {
+	out := make(map[string]time.Time, len(knowledgeIDs))
+	if len(knowledgeIDs) == 0 {
+		return out, nil
+	}
+	// MAX() comes back as a string on SQLite, so scan text and parse.
+	var rows []struct {
+		KnowledgeID string `gorm:"column:knowledge_id"`
+		LastSeen    string `gorm:"column:last_seen"`
+	}
+	if err := r.db.WithContext(ctx).
+		Model(&types.KnowledgeProcessingSpan{}).
+		Select("knowledge_id, MAX(updated_at) AS last_seen").
+		Where("knowledge_id IN ?", knowledgeIDs).
+		Group("knowledge_id").
+		Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	for _, row := range rows {
+		if t, ok := ParseAggregateTime(row.LastSeen); ok {
+			out[row.KnowledgeID] = t
+		}
+	}
+	return out, nil
+}
+
+// ParseAggregateTime parses a timestamp read back through an SQL aggregate,
+// in the formats Postgres and SQLite emit.
+func ParseAggregateTime(s string) (time.Time, bool) {
+	if s == "" {
+		return time.Time{}, false
+	}
+	for _, layout := range []string{
+		time.RFC3339Nano,
+		time.RFC3339,
+		"2006-01-02 15:04:05.999999999-07:00",
+		"2006-01-02 15:04:05.999999999",
+		"2006-01-02 15:04:05.999999",
+		"2006-01-02 15:04:05",
+	} {
+		if t, err := time.Parse(layout, s); err == nil {
+			return t, true
+		}
+	}
+	return time.Time{}, false
 }

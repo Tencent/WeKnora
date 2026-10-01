@@ -178,6 +178,7 @@ func (m *Manager) Account(ctx context.Context, s Scope) (AccountStatus, error) {
 			return result, e
 		}
 		result.Connected = status.Connected
+		result.ExtensionVersion = status.ExtensionVersion
 	}
 	return result, nil
 }
@@ -201,6 +202,7 @@ func (m *Manager) GetStatus(ctx context.Context, s Scope, session string) (Statu
 			time.Now().After(record.LeaseUntil) ||
 			record.Owner != m.nodeID {
 			status.Connected = false
+			status.ExtensionVersion = ""
 			status.SessionID = ""
 			status.Paused = status.Selected
 		}
@@ -242,5 +244,6 @@ func (m *Manager) DownloadExtension(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/zip")
 	w.Header().Set("Content-Disposition", `attachment; filename="browser-skill-weknora.zip"`)
+	w.Header().Set("Cache-Control", "no-store")
 	http.ServeFile(w, r, p)
 }

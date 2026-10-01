@@ -56,6 +56,10 @@ const (
 	// timeout (whole task), not the docreader-call-level timeout.
 	ErrCodeTaskTimeout = "TASK_TIMEOUT"
 
+	// ErrCodeTaskStalled — housekeeping found no progress for longer than
+	// the stale threshold with nothing left queued, and failed the row.
+	ErrCodeTaskStalled = "TASK_STALLED"
+
 	// ErrCodeUnknown — fallback when a wrapped error doesn't classify.
 	// The full message is still recorded in error_detail so operators
 	// can debug; the UI shows a generic "see admin" hint.

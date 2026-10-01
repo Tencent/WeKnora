@@ -154,6 +154,7 @@ import { useArtifactArriveMotion } from '@/composables/useArtifactArriveMotion';
 import { useChatSandboxPanel } from '@/composables/useChatSandboxPanel';
 import { persistedAssistantId } from '@/utils/steerStreamFork';
 import { sanitizeMarkdownHTML, safeMarkdownToHTML, createSafeImage, isValidImageURL, hydrateProtectedFileImages } from '@/utils/security';
+import { useProtectedImageRecovery } from '@/composables/useProtectedImageRecovery';
 import {
     artifactIndexFromEventTarget,
     hydrateArtifactImages,
@@ -202,10 +203,6 @@ const emit = defineEmits(['scroll-bottom', 'render-complete-change', 'fork', 're
 const { t } = useI18n()
 const uiStore = useUIStore();
 let parentMd = ref()
-const { float: citationFloat, rebind: rebindCitations, cancelClose: cancelCitationClose, scheduleClose: scheduleCitationClose } = useChatCitationPopover(parentMd, {
-    getKnowledgeReferences: () => props.session?.knowledge_references,
-    sessionId: () => props.sessionId,
-});
 let reviewUrl = ref('')
 let reviewImg = ref(false)
 let isImgLoading = ref(false);
@@ -248,6 +245,11 @@ const props = defineProps({
         type: Boolean,
         default: false
     }
+});
+// The popover evaluates sessionId during setup, so it must follow defineProps.
+const { float: citationFloat, rebind: rebindCitations, cancelClose: cancelCitationClose, scheduleClose: scheduleCitationClose } = useChatCitationPopover(parentMd, {
+    getKnowledgeReferences: () => props.session?.knowledge_references,
+    sessionId: () => props.sessionId,
 });
 
 const canFork = computed(() => props.canFork === true && !props.embeddedMode)
@@ -327,6 +329,14 @@ const artifactRefContext = computed(() => {
     return { sessionId: props.sessionId, messageId };
 });
 
+// Shared replies must authorize files through the persisted message, just as
+// AgentStreamDisplay does. The default embed plane still takes precedence.
+const protectedFileAccess = computed(() => {
+    const messageId = persistedAssistantId(props.session);
+    if (!props.sessionId || !messageId) return undefined;
+    return { mode: 'message', sessionId: props.sessionId, messageId };
+});
+
 const artifactRefLabels = computed(() => ({
     previewHint: t('agent.artifactDrawer.inlinePreviewHint'),
     missingHint: t('agent.artifactDrawer.inlineMissing'),
@@ -389,6 +399,8 @@ const { displayed: typedAnswer } = useTypewriter(
 const answerFullyRendered = computed(() =>
     Boolean(props.session?.is_completed) && typedAnswer.value.length >= answerText.value.length
 );
+useProtectedImageRecovery(() => parentMd.value, () => protectedFileAccess.value,
+    () => !props.session?.isAgentMode && !props.session?.persistence_error && answerFullyRendered.value);
 
 watch(
     answerFullyRendered,
@@ -484,7 +496,7 @@ watch(renderedHTML, () => {
 // 渲染 Mermaid 图表的函数
 onUpdated(() => {
     nextTick(async () => {
-        await hydrateProtectedFileImages(parentMd.value);
+        await hydrateProtectedFileImages(parentMd.value, protectedFileAccess.value);
         await hydrateArtifactImages(parentMd.value, artifactRefContext.value);
         refreshMarkdownEnhancements(parentMd.value);
         if (props.session?.is_completed) {
@@ -500,7 +512,7 @@ onMounted(async () => {
             parentMd.value.addEventListener('click', handleMarkdownImageClick, true);
         }
         rebindCitations();
-        await hydrateProtectedFileImages(parentMd.value);
+        await hydrateProtectedFileImages(parentMd.value, protectedFileAccess.value);
         await hydrateArtifactImages(parentMd.value, artifactRefContext.value);
         await enhanceMarkdownContainer(parentMd.value);
     });

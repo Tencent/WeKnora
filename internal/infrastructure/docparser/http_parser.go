@@ -53,6 +53,7 @@ type httpReadResponse struct {
 	ImageDirPath    string            `json:"image_dir_path,omitempty"`
 	Metadata        map[string]string `json:"metadata,omitempty"`
 	Error           string            `json:"error,omitempty"`
+	SourceBlocks    []wireSourceBlock `json:"source_blocks,omitempty"`
 }
 
 // HTTPDocumentReader implements DocumentReader over HTTP/JSON.
@@ -180,6 +181,7 @@ func fromHTTPReadResponse(resp *httpReadResponse) *types.ReadResult {
 		ImageDirPath:    resp.ImageDirPath,
 		Metadata:        resp.Metadata,
 		Error:           resp.Error,
+		SourceBlocks:    sourceBlocksFromWire(resp.SourceBlocks),
 	}
 	for _, ref := range resp.ImageRefs {
 		result.ImageRefs = append(result.ImageRefs, types.ImageRef{

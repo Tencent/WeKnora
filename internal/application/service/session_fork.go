@@ -109,6 +109,21 @@ type SessionForkSandboxPort interface {
 	DeleteForkSnapshot(ctx context.Context, sessionID, snapshotID string) error
 }
 
+// WorkspaceVersioning is implemented by backends that keep a git history of
+// the sandbox workspace. Host backends must return false: the workspace is a
+// real directory, often shared across sessions, and must not be reset or
+// auto-committed.
+type WorkspaceVersioning interface {
+	VersionsWorkspace(ctx context.Context, sessionID string) bool
+}
+
+func versionsWorkspace(ctx context.Context, port SessionForkSandboxPort, sessionID string) bool {
+	if v, ok := port.(WorkspaceVersioning); ok {
+		return v.VersionsWorkspace(ctx, sessionID)
+	}
+	return true
+}
+
 type forkSessionStore interface {
 	GetByID(ctx context.Context, tenantID uint64, id string) (*types.Session, error)
 	// CreateForked persists the new session and the copied messages in one
@@ -240,16 +255,20 @@ func (s *SessionForkService) Fork(
 	}
 
 	newSession := &types.Session{
-		ID:                  uuid.New().String(),
-		TenantID:            source.TenantID,
-		UserID:              source.UserID,
-		Title:               forkTitle(title, source.Title),
-		Description:         source.Description,
-		LastRequestState:    source.LastRequestState,
-		SandboxConfigID:     source.SandboxConfigID,
-		ParentSessionID:     source.ID,
-		ForkedFromMessageID: forkPoint.ID,
-		ForkBootstrap:       bootstrap,
+		ID:               uuid.New().String(),
+		TenantID:         source.TenantID,
+		UserID:           source.UserID,
+		Title:            forkTitle(title, source.Title),
+		Description:      source.Description,
+		LastRequestState: source.LastRequestState,
+		SandboxConfigID:  source.SandboxConfigID,
+		// The owner travels with the config id, or the branch would inherit a
+		// pin that resolves nowhere the moment the source ran a shared agent.
+		SandboxConfigTenantID: source.SandboxConfigTenantID,
+		HostWorkspaceDir:      source.HostWorkspaceDir,
+		ParentSessionID:       source.ID,
+		ForkedFromMessageID:   forkPoint.ID,
+		ForkBootstrap:         bootstrap,
 	}
 
 	copied := copyMessagesInto(newSession.ID, history)
@@ -274,8 +293,8 @@ func (s *SessionForkService) Fork(
 	}, nil
 }
 
-// prepareBootstrap runs the decision chain from the design doc §4.2 and, when
-// every condition holds, takes the snapshot.
+// prepareBootstrap decides whether the fork can carry the source sandbox's
+// workspace state. When every condition holds, it takes a snapshot.
 //
 // A nil bootstrap with an empty reason means "no sandbox state was needed":
 // forking at the very first user message has no prior output to carry, so a
@@ -283,6 +302,11 @@ func (s *SessionForkService) Fork(
 func (s *SessionForkService) prepareBootstrap(
 	ctx context.Context, source *types.Session, history []*types.Message,
 ) (*types.ForkBootstrap, ForkDegradeReason, bool, error) {
+	// Host workspaces are real directories, often shared across sessions.
+	// Copying messages is the success path; snapshot + git reset is not.
+	if s.sandbox != nil && !versionsWorkspace(ctx, s.sandbox, source.ID) {
+		return nil, "", false, nil
+	}
 	checkpoint := latestCheckpoint(history)
 	if checkpoint == nil {
 		if !hasAssistantMessage(history) {
@@ -352,8 +376,11 @@ func (s *SessionForkService) recordSnapshotLease(
 		return nil
 	}
 	lease := &types.ForkSnapshotLease{
-		SnapshotID:      bootstrap.SnapshotID,
-		TenantID:        source.TenantID,
+		SnapshotID: bootstrap.SnapshotID,
+		// The reaper resolves (TenantID, SandboxConfigID) as a pair, so this
+		// must be the workspace that owns the config — the lending one when
+		// the snapshot was taken on a shared agent's sandbox.
+		TenantID:        source.SandboxConfigOwner(),
 		SandboxConfigID: source.SandboxConfigID,
 		CreatedAt:       time.Now().UTC(),
 	}

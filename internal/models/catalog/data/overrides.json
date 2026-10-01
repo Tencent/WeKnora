@@ -1,0 +1,1924 @@
+{
+  "version": 1,
+  "providers": {
+    "aliyun": [
+      {
+        "match": "qwen3*",
+        "compat": {
+          "thinking_always_send": true,
+          "thinking_disable_on_non_stream": true
+        }
+      },
+      {
+        "match": "qwen3.5*",
+        "compat": {
+          "thinking_always_send": true,
+          "thinking_disable_on_non_stream": true
+        }
+      },
+      {
+        "match": "qwen3.6*",
+        "compat": {
+          "thinking_always_send": true,
+          "thinking_disable_on_non_stream": true
+        }
+      },
+      {
+        "match": "qwen3.7*",
+        "compat": {
+          "thinking_always_send": true,
+          "thinking_disable_on_non_stream": true
+        }
+      },
+      {
+        "match": "qwen3.8*",
+        "compat": {
+          "thinking_always_send": true,
+          "thinking_disable_on_non_stream": true,
+          "supports_reasoning_effort": true,
+          "thinking_budget_excludes_effort": true
+        },
+        "thinking_levels": {
+          "minimal": "low",
+          "low": "low",
+          "medium": "medium",
+          "high": "medium",
+          "xhigh": "xhigh",
+          "max": "xhigh"
+        }
+      },
+      {
+        "match": "qwen-plus*",
+        "compat": {
+          "thinking_always_send": true,
+          "thinking_disable_on_non_stream": true
+        }
+      },
+      {
+        "match": "qwen-max*",
+        "compat": {
+          "thinking_always_send": true,
+          "thinking_disable_on_non_stream": true
+        }
+      },
+      {
+        "match": "qwen-turbo*",
+        "compat": {
+          "thinking_always_send": true,
+          "thinking_disable_on_non_stream": true
+        }
+      },
+      {
+        "match": "qwen-flash*",
+        "compat": {
+          "thinking_always_send": true,
+          "thinking_disable_on_non_stream": true
+        }
+      },
+      {
+        "match": "deepseek-v3*",
+        "compat": {
+          "thinking_always_send": true,
+          "thinking_disable_on_non_stream": true
+        }
+      },
+      {
+        "match": "deepseek-v4*",
+        "compat": {
+          "thinking_always_send": true,
+          "thinking_disable_on_non_stream": true
+        }
+      },
+      {
+        "match": "kimi-k2*",
+        "compat": {
+          "thinking_always_send": true,
+          "thinking_disable_on_non_stream": true
+        }
+      },
+      {
+        "match": "glm-5*",
+        "compat": {
+          "thinking_always_send": true,
+          "thinking_disable_on_non_stream": true
+        }
+      },
+      {
+        "id": "qwen3.8-max",
+        "compat": {
+          "thinking_always_send": true,
+          "thinking_disable_on_non_stream": true,
+          "supports_reasoning_effort": true,
+          "thinking_budget_excludes_effort": true
+        },
+        "thinking_levels": {
+          "minimal": "low",
+          "low": "low",
+          "medium": "medium",
+          "high": "medium",
+          "xhigh": "xhigh",
+          "max": "xhigh"
+        }
+      },
+      {
+        "id": "qwen3.8-flash",
+        "compat": {
+          "thinking_always_send": true,
+          "thinking_disable_on_non_stream": true,
+          "supports_reasoning_effort": true,
+          "thinking_budget_excludes_effort": true
+        },
+        "thinking_levels": {
+          "minimal": "low",
+          "low": "low",
+          "medium": "medium",
+          "high": "medium",
+          "xhigh": "xhigh",
+          "max": "xhigh"
+        }
+      },
+      {
+        "id": "qwen3.7-max",
+        "compat": {
+          "thinking_always_send": true,
+          "thinking_disable_on_non_stream": true
+        }
+      },
+      {
+        "id": "qwen3.7-plus",
+        "compat": {
+          "thinking_always_send": true,
+          "thinking_disable_on_non_stream": true
+        }
+      },
+      {
+        "id": "qwen3.7-flash",
+        "compat": {
+          "thinking_always_send": true,
+          "thinking_disable_on_non_stream": true
+        }
+      },
+      {
+        "id": "qwen3.6-plus",
+        "compat": {
+          "thinking_always_send": true,
+          "thinking_disable_on_non_stream": true
+        }
+      },
+      {
+        "id": "qwen3.6-flash",
+        "compat": {
+          "thinking_always_send": true,
+          "thinking_disable_on_non_stream": true
+        }
+      },
+      {
+        "id": "qwen3.5-plus",
+        "compat": {
+          "thinking_always_send": true,
+          "thinking_disable_on_non_stream": true
+        }
+      },
+      {
+        "id": "qwen3.5-flash",
+        "compat": {
+          "thinking_always_send": true,
+          "thinking_disable_on_non_stream": true
+        }
+      },
+      {
+        "id": "qwen3-max",
+        "compat": {
+          "thinking_always_send": true,
+          "thinking_disable_on_non_stream": true
+        }
+      },
+      {
+        "id": "qwen3-vl-plus",
+        "compat": {
+          "thinking_always_send": true,
+          "thinking_disable_on_non_stream": true
+        }
+      },
+      {
+        "id": "qwen-plus",
+        "compat": {
+          "thinking_always_send": true,
+          "thinking_disable_on_non_stream": true
+        }
+      },
+      {
+        "id": "qwen-max",
+        "compat": {
+          "thinking_always_send": true,
+          "thinking_disable_on_non_stream": true
+        }
+      },
+      {
+        "id": "qwen-turbo",
+        "compat": {
+          "thinking_always_send": true,
+          "thinking_disable_on_non_stream": true
+        }
+      },
+      {
+        "id": "qwen-flash",
+        "compat": {
+          "thinking_always_send": true,
+          "thinking_disable_on_non_stream": true
+        }
+      },
+      {
+        "id": "qwq-plus",
+        "thinking_levels": {
+          "off": null
+        }
+      },
+      {
+        "id": "qwq-32b",
+        "thinking_levels": {
+          "off": null
+        }
+      },
+      {
+        "id": "deepseek-v4-pro",
+        "compat": {
+          "thinking_always_send": true,
+          "thinking_disable_on_non_stream": true,
+          "supports_reasoning_effort": true
+        },
+        "thinking_levels": {
+          "minimal": "high",
+          "low": "high",
+          "medium": "high",
+          "high": "high",
+          "xhigh": "max",
+          "max": "max"
+        }
+      },
+      {
+        "id": "deepseek-v4-flash",
+        "compat": {
+          "thinking_always_send": true,
+          "thinking_disable_on_non_stream": true,
+          "supports_reasoning_effort": true
+        },
+        "thinking_levels": {
+          "minimal": "high",
+          "low": "high",
+          "medium": "high",
+          "high": "high",
+          "xhigh": "max",
+          "max": "max"
+        }
+      },
+      {
+        "id": "deepseek-r1",
+        "thinking_levels": {
+          "off": null
+        }
+      },
+      {
+        "id": "kimi-k3",
+        "thinking_levels": {
+          "off": null
+        }
+      },
+      {
+        "id": "kimi-k2.6",
+        "compat": {
+          "thinking_always_send": true,
+          "thinking_disable_on_non_stream": true
+        }
+      },
+      {
+        "id": "glm-5.3",
+        "compat": {
+          "thinking_always_send": true,
+          "thinking_disable_on_non_stream": true,
+          "supports_reasoning_effort": true
+        },
+        "thinking_levels": {
+          "off": null,
+          "minimal": "low",
+          "low": "low",
+          "medium": "high",
+          "high": "high",
+          "xhigh": "max",
+          "max": "max"
+        }
+      },
+      {
+        "id": "qwen3.7-text-embedding",
+        "type": "Embedding",
+        "compat": {
+          "max_batch_size": 20
+        }
+      },
+      {
+        "id": "qwen3.7-text-embedding-flash",
+        "type": "Embedding",
+        "compat": {
+          "max_batch_size": 20
+        }
+      },
+      {
+        "id": "text-embedding-v4",
+        "type": "Embedding",
+        "compat": {
+          "max_batch_size": 10
+        }
+      },
+      {
+        "id": "text-embedding-v3",
+        "type": "Embedding",
+        "compat": {
+          "max_batch_size": 10
+        }
+      },
+      {
+        "match": "text-embedding-v2",
+        "type": "Embedding",
+        "compat": {
+          "dimensions_field": "",
+          "max_batch_size": 25
+        }
+      },
+      {
+        "match": "text-embedding-v1",
+        "type": "Embedding",
+        "compat": {
+          "dimensions_field": "",
+          "max_batch_size": 25
+        }
+      },
+      {
+        "id": "tongyi-embedding-vision-plus",
+        "type": "Embedding",
+        "compat": {
+          "api": "dashscope-embeddings",
+          "dimensions_field": ""
+        }
+      },
+      {
+        "match": "tongyi-embedding-vision-flash",
+        "type": "Embedding",
+        "compat": {
+          "api": "dashscope-embeddings",
+          "dimensions_field": ""
+        }
+      },
+      {
+        "match": "tongyi-embedding-vision*",
+        "type": "Embedding",
+        "compat": {
+          "api": "dashscope-embeddings",
+          "dimensions_field": "dimension",
+          "max_batch_size": 20
+        }
+      },
+      {
+        "match": "qwen3-vl-embedding*",
+        "type": "Embedding",
+        "compat": {
+          "api": "dashscope-embeddings",
+          "dimensions_field": "dimension",
+          "max_batch_size": 20
+        }
+      },
+      {
+        "match": "qwen2.5-vl-embedding*",
+        "type": "Embedding",
+        "compat": {
+          "api": "dashscope-embeddings",
+          "dimensions_field": "dimension",
+          "max_batch_size": 1
+        }
+      },
+      {
+        "match": "multimodal-embedding*",
+        "type": "Embedding",
+        "compat": {
+          "api": "dashscope-embeddings",
+          "dimensions_field": "",
+          "max_batch_size": 20
+        }
+      },
+      {
+        "id": "qwen3-asr-flash",
+        "type": "ASR",
+        "compat": {
+          "api": "openai-chat-audio",
+          "max_encoded_bytes": 10485760,
+          "language_param": "asr_options"
+        }
+      },
+      {
+        "match": "*",
+        "type": "ASR",
+        "compat": {
+          "unsupported_reason": "Alibaba's other recognition models take a public file URL or run as asynchronous tasks; only qwen3-asr-flash accepts the audio in the request"
+        }
+      }
+    ],
+    "anthropic": [
+      {
+        "id": "claude-fable-5-1",
+        "api": "anthropic-messages",
+        "compat": {
+          "thinking_mode": "adaptive",
+          "supports_effort": true
+        },
+        "thinking_levels": {
+          "off": null,
+          "minimal": "low",
+          "low": "low",
+          "medium": "medium",
+          "high": "high",
+          "xhigh": "xhigh",
+          "max": "max"
+        }
+      },
+      {
+        "id": "claude-opus-5",
+        "api": "anthropic-messages",
+        "compat": {
+          "thinking_mode": "adaptive",
+          "supports_effort": true
+        },
+        "thinking_levels": {
+          "minimal": "low",
+          "low": "low",
+          "medium": "medium",
+          "high": "high",
+          "xhigh": "xhigh",
+          "max": "max"
+        }
+      },
+      {
+        "id": "claude-sonnet-5",
+        "api": "anthropic-messages",
+        "compat": {
+          "thinking_mode": "adaptive",
+          "supports_effort": true
+        },
+        "thinking_levels": {
+          "minimal": "low",
+          "low": "low",
+          "medium": "medium",
+          "high": "high",
+          "xhigh": "xhigh",
+          "max": "max"
+        }
+      },
+      {
+        "id": "claude-fable-5",
+        "api": "anthropic-messages",
+        "compat": {
+          "thinking_mode": "adaptive",
+          "supports_effort": true
+        },
+        "thinking_levels": {
+          "off": null,
+          "minimal": "low",
+          "low": "low",
+          "medium": "medium",
+          "high": "high",
+          "xhigh": "xhigh",
+          "max": "max"
+        }
+      },
+      {
+        "id": "claude-opus-4-8",
+        "api": "anthropic-messages",
+        "compat": {
+          "thinking_mode": "adaptive",
+          "supports_effort": true
+        },
+        "thinking_levels": {
+          "minimal": "low",
+          "low": "low",
+          "medium": "medium",
+          "high": "high",
+          "xhigh": "xhigh",
+          "max": "max"
+        }
+      },
+      {
+        "id": "claude-opus-4-7",
+        "api": "anthropic-messages",
+        "compat": {
+          "thinking_mode": "adaptive",
+          "supports_effort": true
+        },
+        "thinking_levels": {
+          "minimal": "low",
+          "low": "low",
+          "medium": "medium",
+          "high": "high",
+          "xhigh": "xhigh",
+          "max": "max"
+        }
+      },
+      {
+        "id": "claude-sonnet-4-6",
+        "api": "anthropic-messages",
+        "compat": {
+          "thinking_mode": "adaptive",
+          "supports_effort": true
+        },
+        "thinking_levels": {
+          "minimal": "low",
+          "low": "low",
+          "medium": "medium",
+          "high": "high",
+          "xhigh": "max",
+          "max": "max"
+        }
+      },
+      {
+        "id": "claude-opus-4-6",
+        "api": "anthropic-messages",
+        "compat": {
+          "thinking_mode": "adaptive",
+          "supports_effort": true
+        },
+        "thinking_levels": {
+          "minimal": "low",
+          "low": "low",
+          "medium": "medium",
+          "high": "high",
+          "xhigh": "max",
+          "max": "max"
+        }
+      },
+      {
+        "id": "claude-opus-4-5",
+        "api": "anthropic-messages",
+        "compat": {
+          "supports_effort": true
+        }
+      },
+      {
+        "id": "claude-sonnet-4-5",
+        "api": "anthropic-messages"
+      },
+      {
+        "id": "claude-haiku-4-5",
+        "api": "anthropic-messages"
+      }
+    ],
+    "azure_openai": [
+      {
+        "match": "gpt-6*",
+        "compat": {
+          "supports_temperature": false
+        },
+        "thinking_levels": {
+          "off": null,
+          "minimal": "low",
+          "xhigh": "xhigh",
+          "max": "xhigh"
+        }
+      },
+      {
+        "match": "gpt-5*",
+        "compat": {
+          "supports_temperature": false
+        },
+        "thinking_levels": {
+          "off": "none",
+          "minimal": "low"
+        }
+      },
+      {
+        "id": "gpt-5",
+        "compat": {
+          "supports_temperature": false
+        },
+        "thinking_levels": {
+          "off": null,
+          "xhigh": "high",
+          "max": "high"
+        }
+      },
+      {
+        "id": "gpt-5-mini",
+        "compat": {
+          "supports_temperature": false
+        },
+        "thinking_levels": {
+          "off": null,
+          "xhigh": "high",
+          "max": "high"
+        }
+      },
+      {
+        "id": "gpt-5-nano",
+        "compat": {
+          "supports_temperature": false
+        },
+        "thinking_levels": {
+          "off": null,
+          "xhigh": "high",
+          "max": "high"
+        }
+      },
+      {
+        "match": "o1*",
+        "compat": {
+          "supports_temperature": false
+        },
+        "thinking_levels": {
+          "off": null,
+          "minimal": "low",
+          "xhigh": "high",
+          "max": "high"
+        }
+      },
+      {
+        "match": "o3*",
+        "compat": {
+          "supports_temperature": false
+        },
+        "thinking_levels": {
+          "off": null,
+          "minimal": "low",
+          "xhigh": "high",
+          "max": "high"
+        }
+      },
+      {
+        "match": "o4*",
+        "compat": {
+          "supports_temperature": false
+        },
+        "thinking_levels": {
+          "off": null,
+          "minimal": "low",
+          "xhigh": "high",
+          "max": "high"
+        }
+      }
+    ],
+    "deepseek": [
+      {
+        "id": "deepseek-v4-pro",
+        "thinking_levels": {
+          "minimal": "high",
+          "low": "high",
+          "medium": "high",
+          "high": "high",
+          "xhigh": "max",
+          "max": "max"
+        }
+      },
+      {
+        "id": "deepseek-reasoner",
+        "thinking_levels": {
+          "off": null
+        }
+      }
+    ],
+    "gemini": [
+      {
+        "match": "gemini-3*",
+        "api": "google-generative-ai",
+        "compat": {
+          "thinking_mode": "level"
+        },
+        "thinking_levels": {
+          "off": null,
+          "minimal": "low",
+          "low": "low",
+          "medium": "high",
+          "high": "high",
+          "xhigh": "high",
+          "max": "high"
+        }
+      },
+      {
+        "id": "gemini-3.8-flash",
+        "api": "google-generative-ai",
+        "compat": {
+          "thinking_mode": "level"
+        },
+        "thinking_levels": {
+          "off": null,
+          "minimal": "low",
+          "low": "low",
+          "medium": "medium",
+          "high": "high",
+          "xhigh": "high",
+          "max": "high"
+        }
+      },
+      {
+        "id": "gemini-3.7-flash",
+        "api": "google-generative-ai",
+        "compat": {
+          "thinking_mode": "level"
+        },
+        "thinking_levels": {
+          "off": null,
+          "minimal": "low",
+          "low": "low",
+          "medium": "medium",
+          "high": "high",
+          "xhigh": "high",
+          "max": "high"
+        }
+      },
+      {
+        "id": "gemini-3.6-flash",
+        "api": "google-generative-ai",
+        "compat": {
+          "thinking_mode": "level"
+        },
+        "thinking_levels": {
+          "off": null,
+          "minimal": "minimal",
+          "low": "low",
+          "medium": "medium",
+          "high": "high",
+          "xhigh": "high",
+          "max": "high"
+        }
+      },
+      {
+        "id": "gemini-3.5-flash",
+        "api": "google-generative-ai",
+        "compat": {
+          "thinking_mode": "level"
+        },
+        "thinking_levels": {
+          "off": null,
+          "minimal": "minimal",
+          "low": "low",
+          "medium": "medium",
+          "high": "high",
+          "xhigh": "high",
+          "max": "high"
+        }
+      },
+      {
+        "id": "gemini-3.5-flash-lite",
+        "api": "google-generative-ai",
+        "compat": {
+          "thinking_mode": "level"
+        },
+        "thinking_levels": {
+          "off": null,
+          "minimal": "minimal",
+          "low": "low",
+          "medium": "medium",
+          "high": "high",
+          "xhigh": "high",
+          "max": "high"
+        }
+      },
+      {
+        "id": "gemini-3.1-pro-preview",
+        "api": "google-generative-ai",
+        "compat": {
+          "thinking_mode": "level"
+        },
+        "thinking_levels": {
+          "off": null,
+          "minimal": "low",
+          "low": "low",
+          "medium": "medium",
+          "high": "high",
+          "xhigh": "high",
+          "max": "high"
+        }
+      },
+      {
+        "id": "gemini-3.1-flash-lite",
+        "api": "google-generative-ai",
+        "compat": {
+          "thinking_mode": "level"
+        },
+        "thinking_levels": {
+          "off": null,
+          "minimal": "minimal",
+          "low": "low",
+          "medium": "medium",
+          "high": "high",
+          "xhigh": "high",
+          "max": "high"
+        }
+      },
+      {
+        "id": "gemini-3-flash-preview",
+        "api": "google-generative-ai",
+        "compat": {
+          "thinking_mode": "level"
+        },
+        "thinking_levels": {
+          "off": null,
+          "minimal": "minimal",
+          "low": "low",
+          "medium": "medium",
+          "high": "high",
+          "xhigh": "high",
+          "max": "high"
+        }
+      },
+      {
+        "id": "gemini-2.5-pro",
+        "api": "google-generative-ai",
+        "compat": {
+          "thinking_mode": "budget"
+        },
+        "thinking_levels": {
+          "off": null
+        }
+      },
+      {
+        "id": "gemini-2.5-flash",
+        "api": "google-generative-ai",
+        "compat": {
+          "thinking_mode": "budget"
+        }
+      },
+      {
+        "id": "gemini-2.5-flash-lite",
+        "api": "google-generative-ai",
+        "compat": {
+          "thinking_mode": "budget"
+        }
+      }
+    ],
+    "generic": [
+      {
+        "match": "gpt-5*",
+        "compat": {
+          "max_tokens_field": "max_completion_tokens",
+          "supports_temperature": false,
+          "thinking_format": "openai",
+          "supports_reasoning_effort": true
+        }
+      },
+      {
+        "match": "o1*",
+        "compat": {
+          "max_tokens_field": "max_completion_tokens",
+          "supports_temperature": false,
+          "thinking_format": "openai",
+          "supports_reasoning_effort": true
+        },
+        "thinking_levels": {
+          "off": null,
+          "minimal": "low",
+          "xhigh": "high",
+          "max": "high"
+        }
+      },
+      {
+        "match": "o3*",
+        "compat": {
+          "max_tokens_field": "max_completion_tokens",
+          "supports_temperature": false,
+          "thinking_format": "openai",
+          "supports_reasoning_effort": true
+        },
+        "thinking_levels": {
+          "off": null,
+          "minimal": "low",
+          "xhigh": "high",
+          "max": "high"
+        }
+      },
+      {
+        "match": "o4*",
+        "compat": {
+          "max_tokens_field": "max_completion_tokens",
+          "supports_temperature": false,
+          "thinking_format": "openai",
+          "supports_reasoning_effort": true
+        },
+        "thinking_levels": {
+          "off": null,
+          "minimal": "low",
+          "xhigh": "high",
+          "max": "high"
+        }
+      }
+    ],
+    "hunyuan": [
+      {
+        "match": "hunyuan-t1*",
+        "thinking_levels": {
+          "off": null
+        }
+      },
+      {
+        "id": "hunyuan-t1-latest",
+        "thinking_levels": {
+          "off": null
+        }
+      },
+      {
+        "id": "hunyuan-t1-vision-20250916",
+        "thinking_levels": {
+          "off": null
+        }
+      }
+    ],
+    "lkeap": [
+      {
+        "match": "*deepseek-r1*",
+        "thinking_levels": {
+          "off": null
+        }
+      },
+      {
+        "id": "deepseek-r1-0528",
+        "thinking_levels": {
+          "off": null
+        }
+      },
+      {
+        "id": "deepseek-r1",
+        "thinking_levels": {
+          "off": null
+        }
+      }
+    ],
+    "longcat": [
+      {
+        "id": "LongCat-Flash-Thinking",
+        "thinking_levels": {
+          "off": null
+        }
+      }
+    ],
+    "minimax": [
+      {
+        "id": "MiniMax-M2.7",
+        "thinking_levels": {
+          "off": null
+        }
+      },
+      {
+        "id": "MiniMax-M2.7-highspeed",
+        "thinking_levels": {
+          "off": null
+        }
+      },
+      {
+        "id": "MiniMax-M2.5",
+        "thinking_levels": {
+          "off": null
+        }
+      },
+      {
+        "id": "MiniMax-M2.5-highspeed",
+        "thinking_levels": {
+          "off": null
+        }
+      },
+      {
+        "id": "MiniMax-M2.1",
+        "thinking_levels": {
+          "off": null
+        }
+      },
+      {
+        "id": "MiniMax-M2.1-highspeed",
+        "thinking_levels": {
+          "off": null
+        }
+      },
+      {
+        "id": "MiniMax-M2",
+        "thinking_levels": {
+          "off": null
+        }
+      }
+    ],
+    "modelscope": [
+      {
+        "id": "Qwen/Qwen3-235B-A22B-Thinking-2507",
+        "thinking_levels": {
+          "off": null
+        }
+      },
+      {
+        "id": "Qwen/Qwen3-30B-A3B-Thinking-2507",
+        "thinking_levels": {
+          "off": null
+        }
+      }
+    ],
+    "moonshot": [
+      {
+        "id": "kimi-k3",
+        "compat": {
+          "thinking_format": "openai",
+          "supports_reasoning_effort": true,
+          "supports_temperature": false,
+          "tool_choice_modes": [
+            "none",
+            "auto",
+            "required"
+          ]
+        },
+        "thinking_levels": {
+          "off": null,
+          "minimal": "low",
+          "low": "low",
+          "medium": "high",
+          "high": "high",
+          "xhigh": "max",
+          "max": "max"
+        }
+      },
+      {
+        "id": "kimi-k2.7-code",
+        "compat": {
+          "supports_temperature": false
+        },
+        "thinking_levels": {
+          "off": null
+        }
+      },
+      {
+        "id": "kimi-k2.7-code-highspeed",
+        "compat": {
+          "supports_temperature": false
+        },
+        "thinking_levels": {
+          "off": null
+        }
+      },
+      {
+        "id": "kimi-k2.6",
+        "compat": {
+          "supports_temperature": false
+        }
+      },
+      {
+        "match": "moonshot-v1*",
+        "compat": {
+          "fixed_temperature": 1
+        }
+      },
+      {
+        "id": "kimi-k2.5",
+        "compat": {
+          "supports_temperature": false
+        }
+      },
+      {
+        "id": "kimi-k2-thinking",
+        "thinking_levels": {
+          "off": null
+        }
+      },
+      {
+        "id": "moonshot-v1-8k",
+        "compat": {
+          "fixed_temperature": 1
+        }
+      },
+      {
+        "id": "moonshot-v1-32k",
+        "compat": {
+          "fixed_temperature": 1
+        }
+      },
+      {
+        "id": "moonshot-v1-128k",
+        "compat": {
+          "fixed_temperature": 1
+        }
+      },
+      {
+        "id": "moonshot-v1-8k-vision-preview",
+        "compat": {
+          "fixed_temperature": 1
+        }
+      }
+    ],
+    "novita": [
+      {
+        "id": "minimax/minimax-m2.7",
+        "thinking_levels": {
+          "off": null
+        }
+      },
+      {
+        "id": "xiaomimimo/mimo-v2.5-pro",
+        "thinking_levels": {
+          "off": null
+        }
+      }
+    ],
+    "nvidia": [
+      {
+        "id": "z-ai/glm-5.3",
+        "compat": {
+          "thinking_format": "openai",
+          "supports_reasoning_effort": true
+        },
+        "thinking_levels": {
+          "off": null,
+          "minimal": "low",
+          "medium": "high",
+          "xhigh": "max",
+          "max": "max"
+        }
+      },
+      {
+        "id": "moonshotai/kimi-k3",
+        "compat": {
+          "max_tokens_field": "max_completion_tokens",
+          "thinking_format": "openai",
+          "supports_reasoning_effort": true
+        },
+        "thinking_levels": {
+          "off": null,
+          "minimal": "low",
+          "medium": "high",
+          "xhigh": "max",
+          "max": "max"
+        }
+      },
+      {
+        "id": "google/gemma-4-31b-it",
+        "compat": {
+          "max_tokens_field": "max_completion_tokens",
+          "thinking_format": "none"
+        }
+      }
+    ],
+    "openai": [
+      {
+        "match": "gpt-6*",
+        "compat": {
+          "supports_temperature": false
+        },
+        "thinking_levels": {
+          "off": null,
+          "minimal": "low",
+          "xhigh": "xhigh",
+          "max": "max"
+        }
+      },
+      {
+        "match": "gpt-5*",
+        "compat": {
+          "supports_temperature": false
+        },
+        "thinking_levels": {
+          "off": "none",
+          "minimal": "low"
+        }
+      },
+      {
+        "match": "o1*",
+        "compat": {
+          "supports_temperature": false
+        },
+        "thinking_levels": {
+          "off": null,
+          "minimal": "low",
+          "xhigh": "high",
+          "max": "high"
+        }
+      },
+      {
+        "match": "o3*",
+        "compat": {
+          "supports_temperature": false
+        },
+        "thinking_levels": {
+          "off": null,
+          "minimal": "low",
+          "xhigh": "high",
+          "max": "high"
+        }
+      },
+      {
+        "match": "o4*",
+        "compat": {
+          "supports_temperature": false
+        },
+        "thinking_levels": {
+          "off": null,
+          "minimal": "low",
+          "xhigh": "high",
+          "max": "high"
+        }
+      },
+      {
+        "id": "gpt-6-astra",
+        "compat": {
+          "supports_temperature": false
+        },
+        "thinking_levels": {
+          "off": null,
+          "minimal": "low",
+          "xhigh": "xhigh",
+          "max": "max"
+        }
+      },
+      {
+        "id": "gpt-5.6-terra",
+        "compat": {
+          "supports_temperature": false
+        },
+        "thinking_levels": {
+          "off": "none",
+          "minimal": "low",
+          "xhigh": "xhigh",
+          "max": "max"
+        }
+      },
+      {
+        "id": "gpt-5.6-sol",
+        "compat": {
+          "supports_temperature": false
+        },
+        "thinking_levels": {
+          "off": "none",
+          "minimal": "low",
+          "xhigh": "xhigh",
+          "max": "max"
+        }
+      },
+      {
+        "id": "gpt-5.6-luna",
+        "compat": {
+          "supports_temperature": false
+        },
+        "thinking_levels": {
+          "off": "none",
+          "minimal": "low",
+          "xhigh": "xhigh",
+          "max": "max"
+        }
+      },
+      {
+        "id": "gpt-5.5",
+        "compat": {
+          "supports_temperature": false
+        },
+        "thinking_levels": {
+          "off": "none",
+          "minimal": "low",
+          "xhigh": "xhigh",
+          "max": "xhigh"
+        }
+      },
+      {
+        "id": "gpt-5.4",
+        "compat": {
+          "supports_temperature": false
+        },
+        "thinking_levels": {
+          "off": "none",
+          "minimal": "low",
+          "xhigh": "xhigh",
+          "max": "xhigh"
+        }
+      },
+      {
+        "id": "gpt-5.4-mini",
+        "compat": {
+          "supports_temperature": false
+        },
+        "thinking_levels": {
+          "off": "none",
+          "minimal": "low",
+          "xhigh": "xhigh",
+          "max": "xhigh"
+        }
+      },
+      {
+        "id": "gpt-5.4-nano",
+        "compat": {
+          "supports_temperature": false
+        },
+        "thinking_levels": {
+          "off": "none",
+          "minimal": "low",
+          "xhigh": "xhigh",
+          "max": "xhigh"
+        }
+      },
+      {
+        "id": "gpt-5.2",
+        "compat": {
+          "supports_temperature": false
+        },
+        "thinking_levels": {
+          "off": "none",
+          "minimal": "low",
+          "xhigh": "xhigh",
+          "max": "xhigh"
+        }
+      },
+      {
+        "id": "gpt-5.1",
+        "compat": {
+          "supports_temperature": false
+        },
+        "thinking_levels": {
+          "off": "none",
+          "minimal": "low",
+          "xhigh": "high",
+          "max": "high"
+        }
+      },
+      {
+        "id": "gpt-5",
+        "compat": {
+          "supports_temperature": false
+        },
+        "thinking_levels": {
+          "off": null,
+          "xhigh": "high",
+          "max": "high"
+        }
+      },
+      {
+        "id": "gpt-5-mini",
+        "compat": {
+          "supports_temperature": false
+        },
+        "thinking_levels": {
+          "off": null,
+          "xhigh": "high",
+          "max": "high"
+        }
+      },
+      {
+        "id": "gpt-5-nano",
+        "compat": {
+          "supports_temperature": false
+        },
+        "thinking_levels": {
+          "off": null,
+          "xhigh": "high",
+          "max": "high"
+        }
+      },
+      {
+        "id": "o3",
+        "compat": {
+          "supports_temperature": false
+        },
+        "thinking_levels": {
+          "off": null,
+          "minimal": "low",
+          "xhigh": "high",
+          "max": "high"
+        }
+      },
+      {
+        "id": "whisper-1",
+        "type": "ASR",
+        "compat": {
+          "response_format": "verbose_json"
+        }
+      },
+      {
+        "id": "text-embedding-ada-002",
+        "type": "Embedding",
+        "compat": {
+          "dimensions_field": ""
+        }
+      }
+    ],
+    "openrouter": [
+      {
+        "match": "anthropic/*",
+        "compat": {
+          "cache_control_format": "anthropic"
+        },
+        "thinking_levels": {
+          "off": null,
+          "minimal": "low",
+          "xhigh": "xhigh",
+          "max": "max"
+        }
+      },
+      {
+        "id": "openai/gpt-5.5",
+        "compat": {
+          "supports_temperature": false
+        },
+        "thinking_levels": {
+          "off": "none",
+          "minimal": "low",
+          "xhigh": "xhigh",
+          "max": "xhigh"
+        }
+      },
+      {
+        "id": "openai/gpt-5.4",
+        "compat": {
+          "supports_temperature": false
+        },
+        "thinking_levels": {
+          "off": "none",
+          "minimal": "low",
+          "xhigh": "xhigh",
+          "max": "xhigh"
+        }
+      },
+      {
+        "id": "anthropic/claude-opus-5",
+        "compat": {
+          "cache_control_format": "anthropic"
+        },
+        "thinking_levels": {
+          "off": null,
+          "minimal": "low",
+          "xhigh": "xhigh",
+          "max": "max"
+        }
+      },
+      {
+        "id": "anthropic/claude-sonnet-5",
+        "compat": {
+          "cache_control_format": "anthropic"
+        },
+        "thinking_levels": {
+          "off": null,
+          "minimal": "low",
+          "xhigh": "xhigh",
+          "max": "max"
+        }
+      },
+      {
+        "id": "anthropic/claude-sonnet-4.6",
+        "compat": {
+          "cache_control_format": "anthropic"
+        },
+        "thinking_levels": {
+          "off": null,
+          "minimal": "low",
+          "xhigh": "max",
+          "max": "max"
+        }
+      },
+      {
+        "id": "google/gemini-3.8-flash",
+        "thinking_levels": {
+          "off": null,
+          "minimal": "low",
+          "xhigh": "high",
+          "max": "high"
+        }
+      },
+      {
+        "id": "google/gemini-3.1-pro-preview",
+        "thinking_levels": {
+          "off": null,
+          "minimal": "low",
+          "xhigh": "high",
+          "max": "high"
+        }
+      },
+      {
+        "id": "deepseek/deepseek-v4-pro",
+        "thinking_levels": {
+          "minimal": "high",
+          "low": "high",
+          "medium": "high",
+          "high": "high",
+          "xhigh": "xhigh",
+          "max": "xhigh"
+        }
+      },
+      {
+        "id": "deepseek/deepseek-v4-flash",
+        "thinking_levels": {
+          "minimal": "high",
+          "low": "high",
+          "medium": "high",
+          "high": "high",
+          "xhigh": "xhigh",
+          "max": "xhigh"
+        }
+      },
+      {
+        "id": "z-ai/glm-5.3",
+        "thinking_levels": {
+          "off": null,
+          "minimal": "low",
+          "medium": "high",
+          "xhigh": "max",
+          "max": "max"
+        }
+      },
+      {
+        "id": "moonshotai/kimi-k3",
+        "thinking_levels": {
+          "minimal": "low",
+          "medium": "high",
+          "xhigh": "max",
+          "max": "max"
+        }
+      },
+      {
+        "id": "x-ai/grok-4.6",
+        "thinking_levels": {
+          "off": null,
+          "minimal": "low",
+          "xhigh": "xhigh",
+          "max": "xhigh"
+        }
+      }
+    ],
+    "qianfan": [
+      {
+        "id": "ernie-x1-turbo-32k",
+        "thinking_levels": {
+          "off": null
+        }
+      },
+      {
+        "id": "deepseek-v3.2",
+        "compat": {
+          "thinking_format": "thinking-type"
+        }
+      },
+      {
+        "id": "tao-8k",
+        "type": "Embedding",
+        "compat": {
+          "max_batch_size": 1
+        }
+      }
+    ],
+    "qiniu": [
+      {
+        "id": "deepseek-r1",
+        "thinking_levels": {
+          "off": null
+        }
+      }
+    ],
+    "requesty": [
+      {
+        "id": "openai/gpt-6-astra",
+        "compat": {
+          "supports_temperature": false
+        },
+        "thinking_levels": {
+          "off": null,
+          "minimal": "min",
+          "xhigh": "xhigh",
+          "max": "xhigh"
+        }
+      },
+      {
+        "id": "openai/gpt-5.5",
+        "compat": {
+          "supports_temperature": false
+        },
+        "thinking_levels": {
+          "off": "none",
+          "minimal": "min",
+          "xhigh": "xhigh",
+          "max": "xhigh"
+        }
+      },
+      {
+        "id": "openai/gpt-5.4",
+        "compat": {
+          "supports_temperature": false
+        },
+        "thinking_levels": {
+          "off": "none",
+          "minimal": "min",
+          "xhigh": "xhigh",
+          "max": "xhigh"
+        }
+      },
+      {
+        "id": "anthropic/claude-opus-5",
+        "thinking_levels": {
+          "off": null,
+          "minimal": "low",
+          "xhigh": "xhigh",
+          "max": "max"
+        }
+      },
+      {
+        "id": "anthropic/claude-sonnet-5",
+        "thinking_levels": {
+          "off": null,
+          "minimal": "low",
+          "xhigh": "xhigh",
+          "max": "max"
+        }
+      },
+      {
+        "id": "vertex/gemini-3.8-flash",
+        "thinking_levels": {
+          "off": null,
+          "minimal": "min",
+          "xhigh": "high",
+          "max": "high"
+        }
+      },
+      {
+        "id": "google/gemini-3.1-pro-preview",
+        "thinking_levels": {
+          "off": null,
+          "minimal": "min",
+          "xhigh": "high",
+          "max": "high"
+        }
+      },
+      {
+        "id": "google/gemini-3.6-flash",
+        "thinking_levels": {
+          "off": null,
+          "minimal": "min",
+          "xhigh": "high",
+          "max": "high"
+        }
+      },
+      {
+        "id": "openai/whisper-1",
+        "type": "ASR",
+        "compat": {
+          "response_format": "verbose_json"
+        }
+      }
+    ],
+    "siliconflow": [
+      {
+        "match": "deepseek-ai/DeepSeek-V4*",
+        "thinking_levels": {
+          "minimal": "high",
+          "low": "high",
+          "medium": "high",
+          "high": "high",
+          "xhigh": "max",
+          "max": "max"
+        }
+      },
+      {
+        "match": "Pro/deepseek-ai/DeepSeek-V4*",
+        "thinking_levels": {
+          "minimal": "high",
+          "low": "high",
+          "medium": "high",
+          "high": "high",
+          "xhigh": "max",
+          "max": "max"
+        }
+      },
+      {
+        "id": "deepseek-ai/DeepSeek-V4-Pro",
+        "thinking_levels": {
+          "minimal": "high",
+          "low": "high",
+          "medium": "high",
+          "high": "high",
+          "xhigh": "max",
+          "max": "max"
+        }
+      },
+      {
+        "id": "deepseek-ai/DeepSeek-V4-Flash",
+        "thinking_levels": {
+          "minimal": "high",
+          "low": "high",
+          "medium": "high",
+          "high": "high",
+          "xhigh": "max",
+          "max": "max"
+        }
+      },
+      {
+        "id": "zai-org/GLM-5.2",
+        "thinking_levels": {
+          "minimal": "high",
+          "low": "high",
+          "medium": "high",
+          "high": "high",
+          "xhigh": "max",
+          "max": "max"
+        }
+      },
+      {
+        "id": "Pro/zai-org/GLM-5.1",
+        "compat": {
+          "supports_reasoning_effort": false
+        }
+      },
+      {
+        "id": "Pro/zai-org/GLM-5",
+        "compat": {
+          "supports_reasoning_effort": false
+        }
+      },
+      {
+        "id": "Pro/moonshotai/Kimi-K2.6",
+        "compat": {
+          "supports_reasoning_effort": false
+        }
+      },
+      {
+        "id": "Pro/moonshotai/Kimi-K2.5",
+        "compat": {
+          "supports_reasoning_effort": false
+        }
+      },
+      {
+        "id": "Qwen/Qwen3.5-397B-A17B",
+        "compat": {
+          "supports_reasoning_effort": false
+        }
+      },
+      {
+        "id": "Qwen/Qwen3.5-122B-A10B",
+        "compat": {
+          "supports_reasoning_effort": false
+        }
+      },
+      {
+        "id": "Qwen/Qwen3.5-35B-A3B",
+        "compat": {
+          "supports_reasoning_effort": false
+        }
+      },
+      {
+        "id": "deepseek-ai/DeepSeek-V3.2",
+        "compat": {
+          "supports_reasoning_effort": false
+        }
+      },
+      {
+        "id": "Pro/MiniMaxAI/MiniMax-M2.5",
+        "compat": {
+          "supports_reasoning_effort": false
+        }
+      },
+      {
+        "id": "BAAI/bge-m3",
+        "type": "Embedding",
+        "compat": {
+          "dimensions_field": ""
+        }
+      }
+    ],
+    "volcengine": [
+      {
+        "id": "doubao-seed-2-0-pro-260215",
+        "compat": {
+          "fixed_temperature": 1
+        }
+      },
+      {
+        "id": "doubao-seed-1-6-flash-250828",
+        "compat": {
+          "supports_reasoning_effort": false
+        }
+      },
+      {
+        "id": "doubao-seed-1-6-vision-250815",
+        "compat": {
+          "supports_reasoning_effort": false
+        }
+      },
+      {
+        "id": "glm-5-3-flash-260828",
+        "thinking_levels": {
+          "off": null,
+          "minimal": "low",
+          "low": "low",
+          "medium": "high",
+          "high": "high",
+          "xhigh": "max",
+          "max": "max"
+        }
+      },
+      {
+        "match": "doubao-embedding-text*",
+        "type": "Embedding",
+        "compat": {
+          "api": "openai-embeddings",
+          "dimensions_field": "",
+          "max_batch_size": 4
+        }
+      },
+      {
+        "match": "doubao-embedding-large-text*",
+        "type": "Embedding",
+        "compat": {
+          "api": "openai-embeddings",
+          "dimensions_field": "",
+          "max_batch_size": 4
+        }
+      }
+    ],
+    "zhipu": [
+      {
+        "id": "glm-5.3",
+        "thinking_levels": {
+          "off": null,
+          "minimal": "low",
+          "low": "low",
+          "medium": "high",
+          "high": "high",
+          "xhigh": "max",
+          "max": "max"
+        }
+      },
+      {
+        "id": "glm-5.3-flash",
+        "thinking_levels": {
+          "off": null,
+          "minimal": "low",
+          "low": "low",
+          "medium": "high",
+          "high": "high",
+          "xhigh": "max",
+          "max": "max"
+        }
+      },
+      {
+        "id": "glm-5.2",
+        "thinking_levels": {
+          "low": "low",
+          "medium": "high",
+          "high": "high",
+          "xhigh": "max",
+          "max": "max"
+        }
+      },
+      {
+        "id": "glm-5.1",
+        "compat": {
+          "supports_reasoning_effort": false
+        }
+      },
+      {
+        "id": "glm-5",
+        "compat": {
+          "supports_reasoning_effort": false
+        }
+      },
+      {
+        "id": "glm-5v-turbo",
+        "compat": {
+          "supports_reasoning_effort": false
+        }
+      },
+      {
+        "id": "glm-4.7",
+        "compat": {
+          "supports_reasoning_effort": false
+        }
+      },
+      {
+        "id": "glm-4.7-flash",
+        "compat": {
+          "supports_reasoning_effort": false
+        }
+      },
+      {
+        "id": "glm-4.6v",
+        "compat": {
+          "supports_reasoning_effort": false
+        }
+      },
+      {
+        "id": "glm-4.6",
+        "compat": {
+          "supports_reasoning_effort": false
+        }
+      },
+      {
+        "id": "glm-4.5-air",
+        "compat": {
+          "supports_reasoning_effort": false
+        }
+      },
+      {
+        "id": "embedding-3",
+        "type": "Embedding",
+        "compat": {
+          "max_batch_size": 64
+        }
+      },
+      {
+        "id": "embedding-2",
+        "type": "Embedding",
+        "compat": {
+          "dimensions_field": ""
+        }
+      }
+    ]
+  }
+}

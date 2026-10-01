@@ -68,6 +68,10 @@ type Handler struct {
 	// rewindService truncates the current session at a chosen message. May
 	// be nil in deployments where rewind is not wired; RewindSession checks.
 	rewindService sessionRewinder
+	// approvedProjectDirs is the user-approved ProjectDirs list used to
+	// validate CreateSession's optional project_dir. Nil means none are
+	// approved, so a non-empty project_dir is rejected.
+	approvedProjectDirs HostProjectDirsLoader
 }
 
 // NewHandler creates a new instance of Handler with all necessary dependencies
@@ -103,6 +107,7 @@ func NewHandler(
 	rdb *redis.Client,
 	forkService *service.SessionForkService,
 	rewindService *service.SessionRewindService,
+	approvedProjectDirs HostProjectDirsLoader,
 ) *Handler {
 	h := &Handler{
 		browserSkill:          browserSkill,
@@ -132,6 +137,7 @@ func NewHandler(
 		desktopTickets:        desktopTickets,
 		desktopLast:           desktopLast,
 		redis:                 rdb,
+		approvedProjectDirs:   approvedProjectDirs,
 		attachmentProcessor: NewAttachmentProcessor(
 			fileService,
 			documentReader,
@@ -187,11 +193,18 @@ func (h *Handler) CreateSession(c *gin.Context) {
 		tenantID,
 	)
 
+	hostDir, ok := bindHostWorkspaceDir(request.ProjectDir, h.approvedDirs())
+	if !ok {
+		_ = c.Error(errors.NewBadRequestError("project_dir is not an approved project directory"))
+		return
+	}
+
 	// Create session object with base properties
 	createdSession := &types.Session{
-		TenantID:    tenantID.(uint64),
-		Title:       request.Title,
-		Description: types.SanitizeClientSessionDescription(request.Description, ""),
+		TenantID:         tenantID.(uint64),
+		Title:            request.Title,
+		Description:      types.SanitizeClientSessionDescription(request.Description, ""),
+		HostWorkspaceDir: hostDir,
 	}
 	// Attach the calling user as the session owner when available.
 	// API-key callers scope sessions per external user when configured;

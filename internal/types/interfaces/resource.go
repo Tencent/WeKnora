@@ -12,6 +12,9 @@ import (
 type ResourceCleaner interface {
 	Register(cleanup types.CleanupFunc)
 	RegisterWithName(name string, cleanup types.CleanupFunc)
+	// Promote moves callbacks registered under name so Cleanup runs them
+	// first. Cleanup's order is reverse registration order.
+	Promote(name string)
 	Cleanup(ctx context.Context) []error
 }
 

@@ -6,7 +6,8 @@ import (
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/logger"
-	"github.com/Tencent/WeKnora/internal/models/provider"
+	"github.com/Tencent/WeKnora/internal/models/providers"
+	modelruntime "github.com/Tencent/WeKnora/internal/models/runtime"
 	"github.com/Tencent/WeKnora/internal/models/utils/ollama"
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -110,11 +111,11 @@ func newVLM(config *Config, ollamaService *ollama.OllamaService) (VLM, error) {
 		return NewOllamaVLM(config, ollamaService)
 	}
 
-	providerName := provider.ProviderName(config.Provider)
-	if providerName == "" {
-		providerName = provider.DetectProvider(config.BaseURL)
+	providerID := config.Provider
+	if providerID == "" {
+		providerID = modelruntime.DetectByURL(config.BaseURL)
 	}
-	if providerName == provider.ProviderWeKnoraCloud {
+	if providerID == providers.WeKnoraCloudID {
 		return NewWeKnoraCloudVLM(config)
 	}
 

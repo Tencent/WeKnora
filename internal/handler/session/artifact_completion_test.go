@@ -49,6 +49,7 @@ func TestCompletionPublishesReconciledArtifactContent(t *testing.T) {
 	)
 	err := handler.handleComplete(context.Background(), event.Event{Data: event.AgentCompleteData{MessageID: "m"}})
 	require.NoError(t, err)
+	require.NoError(t, handler.publishCompletion(context.Background()))
 	last := stream.events[len(stream.events)-1]
 	require.Equal(t, types.ResponseTypeComplete, last.Type)
 	require.Equal(t, message.Content, last.Data["final_content"])
@@ -81,6 +82,7 @@ func TestCompletionResolvesReferencesWhenNothingWasPersisted(t *testing.T) {
 
 	err := handler.handleComplete(context.Background(), event.Event{Data: event.AgentCompleteData{MessageID: "m"}})
 	require.NoError(t, err)
+	require.NoError(t, handler.publishCompletion(context.Background()))
 
 	require.Len(t, message.Artifacts, 1, "the referenced file must be attached to this message")
 	require.Equal(t, existing.URL, message.Artifacts[0].URL)

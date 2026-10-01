@@ -98,6 +98,11 @@ func (s *knowledgeService) ReplaceKnowledgeFile(ctx context.Context,
 		return nil, err
 	}
 
+	if err := ValidateJSONUploadContent(safeFileName, file); err != nil {
+		logger.Errorf(ctx, "Invalid JSON replacement content for knowledge %s: %v", existing.ID, err)
+		return nil, err
+	}
+
 	hash, err := calculateFileHash(file)
 	if err != nil {
 		return nil, err
@@ -170,7 +175,7 @@ func (s *knowledgeService) ReplaceKnowledgeFile(ctx context.Context,
 			existing.ID, err)
 	}
 
-	reparsed, err := s.ReparseKnowledge(ctx, existing.ID, nil)
+	reparsed, err := s.reparseKnowledge(ctx, existing.ID, nil, true)
 	if err != nil {
 		logger.Errorf(ctx, "Reparse after replacing the file of knowledge %s failed, restoring source: %v",
 			existing.ID, err)

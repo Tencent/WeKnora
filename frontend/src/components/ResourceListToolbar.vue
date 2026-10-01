@@ -86,7 +86,7 @@ onMounted(() => { if (!props.hideScopes) orgStore.fetchOrganizations() })
   min-width: 0;
 }
 .category-tabs { .artifact-filter-tabs(); }
-.scope-count { margin-left: 5px; font-size: var(--app-text-xs); opacity: 0.65; font-variant-numeric: tabular-nums; }
+.scope-count { margin-left: 5px; font-size: var(--app-text-xs); font-variant-numeric: tabular-nums; }
 .space-filter { width: 180px; }
 .space-filter-icon-active { color: var(--td-brand-color); }
 .search-input { width: 260px; max-width: 100%; margin-left: auto; }

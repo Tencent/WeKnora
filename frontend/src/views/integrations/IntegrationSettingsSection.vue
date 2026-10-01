@@ -7,7 +7,7 @@
           <p class="section-description">
             {{ $t('agentEditor.im.description') }}
             <a
-              href="https://github.com/Tencent/WeKnora/blob/main/docs/IM%E9%9B%86%E6%88%90%E5%BC%80%E5%8F%91%E6%96%87%E6%A1%A3.md"
+              :href="docsUrl('imIntegration')"
               target="_blank"
               rel="noopener noreferrer"
               class="doc-link"
@@ -62,6 +62,7 @@ import ChromeExtensionLanding from '@/views/integrations/ChromeExtensionLanding.
 import ClawSkillLanding from '@/views/integrations/ClawSkillLanding.vue'
 import CliIntegrationLanding from '@/views/integrations/CliIntegrationLanding.vue'
 import type { IntegrationTab } from '@/config/integrations'
+import { docsUrl } from '@/utils/docsUrl'
 
 const filterAgentId = ref('')
 

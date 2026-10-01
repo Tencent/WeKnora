@@ -4,38 +4,43 @@ import (
 	"context"
 	"log"
 	"sync"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
 
+// cleanupStepTimeout bounds one shutdown hook that waits on in-flight work
+// (cron jobs, retention sweeps). Several of those hooks run before child
+// processes are reaped; an unbounded wait used to hold SIGTERM until the
+// supervisor killed the process and skipped the rest.
+const cleanupStepTimeout = 5 * time.Second
+
+type cleanupEntry struct {
+	name string
+	fn   types.CleanupFunc
+}
+
 // ResourceCleaner is a resource cleaner that can be used to clean up resources
 type ResourceCleaner struct {
 	mu       sync.Mutex
-	cleanups []types.CleanupFunc
+	cleanups []cleanupEntry
 }
 
 // NewResourceCleaner creates a new resource cleaner
 func NewResourceCleaner() interfaces.ResourceCleaner {
 	return &ResourceCleaner{
-		cleanups: make([]types.CleanupFunc, 0),
+		cleanups: make([]cleanupEntry, 0),
 	}
 }
 
-// Register registers a cleanup function
-// Note: the cleanup function will be executed in reverse order (the last registered will be executed first)
+// Register registers a cleanup function.
+// The cleanup function runs in reverse order (the last registered runs first).
 func (c *ResourceCleaner) Register(cleanup types.CleanupFunc) {
-	if cleanup == nil {
-		return
-	}
-
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	c.cleanups = append(c.cleanups, cleanup)
+	c.register("", cleanup)
 }
 
-// RegisterWithName registers a cleanup function with a name, for logging tracking
+// RegisterWithName registers a cleanup function with a name, for logging tracking.
 func (c *ResourceCleaner) RegisterWithName(name string, cleanup types.CleanupFunc) {
 	if cleanup == nil {
 		return
@@ -52,28 +57,64 @@ func (c *ResourceCleaner) RegisterWithName(name string, cleanup types.CleanupFun
 		return err
 	}
 
-	c.Register(wrappedCleanup)
+	c.register(name, wrappedCleanup)
 }
 
-// Cleanup executes all cleanup functions
-// Even if a cleanup function fails, other cleanup functions will still be executed
+func (c *ResourceCleaner) register(name string, cleanup types.CleanupFunc) {
+	if cleanup == nil {
+		return
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.cleanups = append(c.cleanups, cleanupEntry{name: name, fn: cleanup})
+}
+
+// Promote moves every callback registered under name to the end of the list.
+// Cleanup runs in reverse, so the promoted callbacks run first. BrowserSkill
+// is registered during early container wiring and would otherwise run last,
+// after hooks that wait on in-flight jobs.
+func (c *ResourceCleaner) Promote(name string) {
+	if name == "" {
+		return
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	matched := make([]cleanupEntry, 0, 1)
+	rest := make([]cleanupEntry, 0, len(c.cleanups))
+	for _, entry := range c.cleanups {
+		if entry.name == name {
+			matched = append(matched, entry)
+			continue
+		}
+		rest = append(rest, entry)
+	}
+	c.cleanups = append(rest, matched...)
+}
+
+// Cleanup executes all cleanup functions.
+// A cancelled or expired context does not skip remaining functions: the
+// deadline used to return on the first select and drop every later hook,
+// including ones registered earliest (BrowserSkill). Context errors are not
+// reported as hook failures when the hooks themselves still ran.
 func (c *ResourceCleaner) Cleanup(ctx context.Context) (errs []error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	// Execute cleanup functions in reverse order (the last registered will be executed first)
-	for i := len(c.cleanups) - 1; i >= 0; i-- {
-		select {
-		case <-ctx.Done():
-			errs = append(errs, ctx.Err())
-			return errs
-		default:
-			if err := c.cleanups[i](); err != nil {
-				errs = append(errs, err)
-			}
-		}
+	if ctx == nil {
+		ctx = context.Background()
 	}
 
+	for i := len(c.cleanups) - 1; i >= 0; i-- {
+		if err := c.cleanups[i].fn(); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		log.Printf("Resource cleanup continued past its deadline: %v", err)
+	}
 	return errs
 }
 
@@ -82,5 +123,5 @@ func (c *ResourceCleaner) Reset() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	c.cleanups = make([]types.CleanupFunc, 0)
+	c.cleanups = make([]cleanupEntry, 0)
 }

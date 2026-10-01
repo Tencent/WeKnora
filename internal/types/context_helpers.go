@@ -69,6 +69,20 @@ func WikiEditSourceFromContext(ctx context.Context) string {
 	return NormalizeWikiEditSource(v)
 }
 
+// WithEmbedQuery marks ctx as embedding a search query rather than content
+// being indexed. Asymmetric retrieval models encode the two sides differently
+// and lose accuracy when a query is embedded as a passage; the embedding
+// layer turns the mark into the vendor's own parameter where it has one.
+func WithEmbedQuery(ctx context.Context) context.Context {
+	return context.WithValue(ctx, EmbedQueryContextKey, true)
+}
+
+// IsEmbedQuery reports whether ctx was marked with WithEmbedQuery.
+func IsEmbedQuery(ctx context.Context) bool {
+	v, _ := ctx.Value(EmbedQueryContextKey).(bool)
+	return v
+}
+
 // TaskInitiator is the authenticated caller that submitted an asynchronous
 // task. Workers restore it into their context so audit entries describe who
 // initiated the operation, while tasks created by schedulers remain

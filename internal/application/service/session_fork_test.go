@@ -474,7 +474,7 @@ func checkpointedTurn(userID, assistantID, sandboxID, sha string, offset time.Du
 	}
 }
 
-func newForkFixture(t *testing.T, port *fakeForkSandboxPort, messages []*types.Message) (
+func newForkFixture(t *testing.T, port SessionForkSandboxPort, messages []*types.Message) (
 	*SessionForkService, *fakeSessionStore, *fakeMessageStore,
 ) {
 	t.Helper()
@@ -484,6 +484,17 @@ func newForkFixture(t *testing.T, port *fakeForkSandboxPort, messages []*types.M
 	msgs := newFakeMessageStore(messages)
 	sessions.origIDsFrom = msgs
 	return NewSessionForkService(sessions, msgs, port), sessions, msgs
+}
+
+// hostForkSandboxPort is a fork sandbox that does not version the workspace.
+// Host backends share the user's real directory across sessions, so fork must
+// copy messages only — never snapshot or roll the tree back.
+type hostForkSandboxPort struct {
+	fakeForkSandboxPort
+}
+
+func (h *hostForkSandboxPort) VersionsWorkspace(context.Context, string) bool {
+	return false
 }
 
 // --- tests -----------------------------------------------------------------
@@ -1013,4 +1024,58 @@ func TestForkClearsLeaseAfterPersistSucceeds(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, port.deleted)
 	require.Empty(t, sessions.leases, "session.fork_bootstrap now owns the snapshot")
+}
+
+func TestForkOnHostCopiesMessagesWithoutWorkspaceRollback(t *testing.T) {
+	turn := checkpointedTurn("u-msg-1", "a-msg-1", "host-1", "sha1", 0)
+	forkPoint := &types.Message{
+		ID: "u-msg-2", SessionID: "src", Role: "user", CreatedAt: forkBase.Add(10 * time.Second),
+	}
+	port := &hostForkSandboxPort{fakeForkSandboxPort: fakeForkSandboxPort{
+		boundID: "host-1", bound: true, snapshotID: "snap-should-not-fire",
+	}}
+	svc, sessions, _ := newForkFixture(t, port, append(turn, forkPoint))
+
+	got, err := svc.Fork(context.Background(), 1, "u1", "src", "u-msg-2", "")
+
+	require.NoError(t, err)
+	require.False(t, got.Degraded, "host fork is message-only by design, not a degraded remote fork")
+	require.Empty(t, got.Reason)
+	require.Zero(t, port.snapshotCalls)
+	require.Nil(t, sessions.created.ForkBootstrap)
+	require.Equal(t, []string{"u-msg-1", "a-msg-1"}, sessions.copiedFromIDs())
+}
+
+func TestForkOnHostDoesNotDegradeWhenPrecedingTurnHasNoCheckpoint(t *testing.T) {
+	messages := []*types.Message{
+		{ID: "u-msg-1", SessionID: "src", Role: "user", CreatedAt: forkBase},
+		{ID: "a-msg-1", SessionID: "src", Role: "assistant", CreatedAt: forkBase.Add(time.Second)},
+		{ID: "u-msg-2", SessionID: "src", Role: "user", CreatedAt: forkBase.Add(10 * time.Second)},
+	}
+	port := &hostForkSandboxPort{}
+	svc, sessions, _ := newForkFixture(t, port, messages)
+
+	got, err := svc.Fork(context.Background(), 1, "u1", "src", "u-msg-2", "")
+
+	require.NoError(t, err)
+	require.False(t, got.Degraded)
+	require.Empty(t, got.Reason)
+	require.Equal(t, []string{"u-msg-1", "a-msg-1"}, sessions.copiedFromIDs())
+}
+
+// A branch of a project session keeps operating on the same project.
+func TestForkInheritsHostWorkspaceDir(t *testing.T) {
+	turn := checkpointedTurn("u-msg-1", "a-msg-1", "sbx-1", "sha1", 0)
+	forkPoint := &types.Message{
+		ID: "u-msg-2", SessionID: "src", Role: "user", CreatedAt: forkBase.Add(10 * time.Second),
+	}
+	port := &fakeForkSandboxPort{boundID: "sbx-1", bound: true, snapshotID: "snap-1"}
+	svc, sessions, _ := newForkFixture(t, port, append(turn, forkPoint))
+	sessions.source.HostWorkspaceDir = "/Users/dev/My Project"
+
+	_, err := svc.Fork(context.Background(), 1, "u1", "src", "u-msg-2", "")
+
+	require.NoError(t, err)
+	require.NotNil(t, sessions.created)
+	require.Equal(t, "/Users/dev/My Project", sessions.created.HostWorkspaceDir)
 }

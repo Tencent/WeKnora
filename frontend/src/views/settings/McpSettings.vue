@@ -123,6 +123,7 @@ import McpServiceDialog from './components/McpServiceDialog.vue'
 import { useConfirmDelete } from '@/components/settings/useConfirmDelete'
 import { useAuthStore } from '@/stores/auth'
 
+const emit = defineEmits<{ count: [value: number] }>()
 const { t } = useI18n()
 const authStore = useAuthStore()
 const confirmDelete = useConfirmDelete()
@@ -141,6 +142,7 @@ const loadServices = async () => {
   loading.value = true
   try {
     services.value = await listMCPServices()
+    emit('count', services.value.length)
   } catch (error) {
     MessagePlugin.error(t('mcpSettings.toasts.loadFailed'))
     console.error('Failed to load MCP services:', error)
@@ -237,6 +239,8 @@ const getTransportTypeLabel = (transportType: string) => {
 onMounted(() => {
   loadServices()
 })
+
+defineExpose({ openAdd: handleAdd })
 </script>
 
 <style scoped lang="less">

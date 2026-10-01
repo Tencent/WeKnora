@@ -2,13 +2,126 @@ package session
 
 import (
 	"context"
+	"net"
 	"net/http"
+	"net/url"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/browserskill"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/gin-gonic/gin"
 )
+
+// pairingOrigin chooses the WebSocket host the extension will dial.
+// A loopback API listener always wins, so a Lite page cannot point the
+// extension at another host. A public page origin is kept only when its
+// hostname is the request host; the port still comes from that page so a
+// reverse proxy can preserve the external port.
+func pairingOrigin(r *http.Request, page string) string {
+	host := ""
+	if r != nil {
+		host = r.Host
+	}
+	if isLoopbackHostname(requestHostname(host)) {
+		if origin, ok := loopbackPairingOrigin(host); ok {
+			return origin
+		}
+		return ""
+	}
+	if origin, ok := pageOriginMatchingHost(page, host); ok {
+		return origin
+	}
+	if isHTTPOrigin(page) {
+		if origin := requestHTTPOrigin(r); origin != "" {
+			return origin
+		}
+	}
+	return page
+}
+
+func requestHostname(host string) string {
+	if parsed, _, err := net.SplitHostPort(host); err == nil {
+		return parsed
+	}
+	return host
+}
+
+func isLoopbackHostname(hostname string) bool {
+	switch strings.ToLower(hostname) {
+	case "localhost", "127.0.0.1", "::1":
+		return true
+	default:
+		return false
+	}
+}
+
+func loopbackPairingOrigin(host string) (string, bool) {
+	host = strings.TrimSpace(host)
+	if host == "" || strings.ContainsAny(host, " \t\r\n/@\\") {
+		return "", false
+	}
+	hostname, port := host, ""
+	if parsed, parsedPort, err := net.SplitHostPort(host); err == nil {
+		hostname, port = parsed, parsedPort
+	}
+	if port != "" {
+		n, err := strconv.Atoi(port)
+		if err != nil || n < 1 || n > 65535 || strconv.Itoa(n) != port {
+			return "", false
+		}
+	}
+	switch strings.ToLower(hostname) {
+	case "localhost", "127.0.0.1":
+		if port == "" {
+			return "http://" + hostname, true
+		}
+		return "http://" + hostname + ":" + port, true
+	case "::1":
+		if port == "" {
+			return "http://[::1]", true
+		}
+		return "http://[::1]:" + port, true
+	default:
+		return "", false
+	}
+}
+
+func pageOriginMatchingHost(page, requestHost string) (string, bool) {
+	u, err := url.Parse(page)
+	if err != nil || u.User != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
+		return "", false
+	}
+	reqName := requestHostname(requestHost)
+	if reqName == "" || !strings.EqualFold(u.Hostname(), reqName) {
+		return "", false
+	}
+	return u.Scheme + "://" + u.Host, true
+}
+
+func isHTTPOrigin(page string) bool {
+	u, err := url.Parse(page)
+	return err == nil && u.Host != "" && (u.Scheme == "http" || u.Scheme == "https")
+}
+
+func requestHTTPOrigin(r *http.Request) string {
+	if r == nil {
+		return ""
+	}
+	host := strings.TrimSpace(r.Host)
+	if host == "" || strings.ContainsAny(host, " \t\r\n/@\\") {
+		return ""
+	}
+	if _, err := url.ParseRequestURI("http://" + host + "/"); err != nil {
+		return ""
+	}
+	scheme := "http"
+	if r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
+		scheme = "https"
+	}
+	return scheme + "://" + host
+}
 
 func browserSkillScope(ctx context.Context) browserskill.Scope {
 	tenant, _ := types.TenantIDFromContext(ctx)
@@ -120,7 +233,7 @@ func (h *Handler) BrowserSkillAccount(c *gin.Context) {
 	}
 	switch input.Action {
 	case "pair":
-		link, err := h.browserSkill.Pair(ctx, scope, input.Origin)
+		link, err := h.browserSkill.Pair(ctx, scope, pairingOrigin(c.Request, input.Origin))
 		if err != nil {
 			c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
 			return

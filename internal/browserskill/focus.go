@@ -12,9 +12,12 @@ type uiReply struct {
 	err  error
 }
 
+// Extensions without the optional UI channel (BrowserSkill main after PR #296)
+// route ui.* requests to the native dispatcher, which answers unknown_method.
 var errGatewayUIUnsupported = &RPCError{
-	Code:    "gateway_ui_unsupported",
-	Message: "BrowserSkill extension lacks WeKnora task controls; install the companion extension",
+	Code: "gateway_ui_unsupported",
+	Message: "BrowserSkill extension lacks the ui.task_preview/ui.task_focus channel; " +
+		"install the extension built from the pinned baseline",
 }
 
 // Focus is user initiated. Only the server-owned task ID is sent to Chrome.
@@ -22,7 +25,7 @@ func (m *Manager) Focus(ctx context.Context, s Scope, session string) error {
 	if _, remote, err := m.route(ctx, s, session, "focus", "", nil); remote || err != nil {
 		return err
 	}
-	data, err := m.callUI(ctx, s, session, "gateway.task_focus")
+	data, err := m.callUI(ctx, s, session, "ui.task_focus")
 	if err != nil {
 		return err
 	}

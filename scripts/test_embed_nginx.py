@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exercise the production embed Nginx locations with a policy backend fixture.
+"""Exercise production embed and MCP Nginx locations with backend fixtures.
 
 Requires Docker. Run: python3 scripts/test_embed_nginx.py [nginx-or-ui-image]
 """
@@ -52,6 +52,16 @@ def check():
                 return 204;
             }
             location /api/ { return 200 "$http_host"; }
+            location /mcp/ {
+                default_type application/json;
+                if ($http_authorization != "Bearer test-token") { return 401; }
+                add_header Mcp-Session-Id "test-session";
+                return 200 '{"method":"$request_method","path":"$request_uri","host":"$http_host","session":"$http_mcp_session_id","protocol":"$http_mcp_protocol_version"}';
+            }
+            location = /mcp/stream {
+                default_type text/event-stream;
+                return 200 "event: message\\ndata: test-event\\n\\n";
+            }
         }
         """
         (work / "nginx.conf").write_text(
@@ -68,8 +78,8 @@ def check():
             port = info["NetworkSettings"]["Ports"]["80/tcp"][0]["HostPort"]
             base = f"http://127.0.0.1:{port}"
 
-            def request(path, method="GET"):
-                req = urllib.request.Request(base + path, method=method)
+            def request(path, method="GET", headers=None):
+                req = urllib.request.Request(base + path, method=method, headers=headers or {})
                 try:
                     return urllib.request.urlopen(req, timeout=3)
                 except urllib.error.HTTPError as error:
@@ -100,7 +110,25 @@ def check():
                     assert b"embed entry" not in response.read()
             with request("/api/probe") as response:
                 assert response.read().decode() == f"127.0.0.1:{port}", "proxy lost public port"
-            print("Embed Nginx integration checks passed")
+            for method in ("POST", "GET", "DELETE"):
+                with request("/mcp/test-endpoint?probe=1", method, {
+                    "Authorization": "Bearer test-token",
+                    "Mcp-Session-Id": "test-session",
+                    "MCP-Protocol-Version": "2025-03-26",
+                }) as response:
+                    assert response.status == 200, (method, response.status)
+                    assert response.headers["Mcp-Session-Id"] == "test-session"
+                    assert json.load(response) == {
+                        "method": method, "path": "/mcp/test-endpoint?probe=1",
+                        "host": f"127.0.0.1:{port}", "session": "test-session",
+                        "protocol": "2025-03-26",
+                    }
+            with request("/mcp/test-endpoint") as response:
+                assert response.status == 401, response.status
+            with request("/mcp/stream") as response:
+                assert response.headers["Content-Type"] == "text/event-stream"
+                assert response.read() == b"event: message\ndata: test-event\n\n"
+            print("Embed and MCP Nginx integration checks passed")
         except Exception:
             print(docker("logs", cid), file=sys.stderr)
             raise

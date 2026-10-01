@@ -21,3 +21,13 @@ test('shouldRejectKnowledgeFileType accepts SQL before parser metadata loads', (
   assert.equal(shouldRejectKnowledgeFileType('schema.sql', new Set()), false)
   assert.equal(shouldRejectKnowledgeFileType('schema.sql', ['pdf']), true)
 })
+
+test('XMind uploads work before engine discovery and respect discovered capabilities', () => {
+  for (const filename of ['architecture.xmind', 'ARCHITECTURE.XMIND']) {
+    assert.equal(shouldRejectKnowledgeFileType(filename), false)
+    assert.equal(shouldRejectKnowledgeFileType(filename, []), false)
+    assert.equal(shouldRejectKnowledgeFileType(filename, new Set()), false)
+    assert.equal(shouldRejectKnowledgeFileType(filename, ['pdf', 'xmind']), false)
+    assert.equal(shouldRejectKnowledgeFileType(filename, ['pdf']), true)
+  }
+})

@@ -23,7 +23,7 @@
 | Elasticsearch v7 | `elasticsearch_v7` | 不支持（Support 仅 keywords） | match（BM25） | BM25 | ES analyzer | — | — | 中 | 存量 ES 7，仅作关键词引擎，需与其他向量引擎组合 |
 | OpenSearch | `opensearch` | k-NN 插件 knn（HNSW） | match（BM25） | BM25 | OS analyzer | knn_vector 声明式 mapping + 指纹校验 | k-NN 原生 | 中 | 需审计/别名/reindex 的生产 ES 系方案；版本 2.11+/3.x |
 | Qdrant | `qdrant` | 原生 HNSW Cosine | 全文索引 MatchText（token OR） | 无打分（Scroll 命中即回，靠 RRF rank） | 多语言 tokenizer | 每维一个 collection | score_threshold 原生 | 中 | 纯向量为主、需 payload 过滤的场景 |
-| Milvus | `milvus` | HNSW（IP/COSINE/） | BM25 Function 稀疏向量 | BM25 | Milvus analyzer | 每维一个 collection | 应用侧 | 中高 | 大规模向量、需要原生 BM25 混检 |
+| Milvus | `milvus` | HNSW（IP/COSINE/L2） | BM25 Function 稀疏向量 | BM25 | Milvus analyzer | 每维一个 collection | 应用侧 | 中高 | 大规模向量、需要原生 BM25 混检 |
 | Weaviate | `weaviate` | nearVector（certainty） | 原生 BM25 | BM25 | Weaviate tokenizer | 动态 Class | certainty 原生 | 中 | GraphQL 生态、需副本/分片配置 |
 | Doris | `doris` | ANN HNSW inner_product/cosine | 倒排索引 MATCH_ANY | 倒排命中 | 建表声明 chinese parser | 每维一张表 | SQL 内 | 高 | 已有 Doris 数仓，检索与分析一体 |
 | 腾讯云 VectorDB | `tencent_vectordb` | HNSW COSINE | 稀疏向量 BM25（SPARSE_INVERTED） | BM25 | SDK SparseEncoder | 每维一个 collection | 应用侧 | 低（云托管） | 腾讯云托管、免运维 |
@@ -118,7 +118,7 @@ flowchart TD
 
 `internal/application/repository/retriever/postgres/repository.go`。数据与业务库同库（`embeddings` 表，GORM 管理）。
 
-- **向量检索**：pgvector `halfvec`（半精度，2 字节/维）。`embedding` 列不定维，HNSW 索引建在表达式 `(embedding::halfvec(dim)) halfvec_cosine_ops` 上——**ORDER BY 表达式必须与索引表达式完全一致**（两侧显式 cast），否则退化为顺序扫描（源码注释引 pgvector issue #702/#835）。查询用子查询先取 `expandedTopK`（TopK*2，夹在 [100,200]，避免大 LIMIT 拖垮 HNSW）个候选算 `distance = embedding <=> query`，再按 `distance <= 1-threshold` 过滤，`score = 1 - distance`。事务内 `SET LOCAL hnsw.ef_search`（≥40）与 `SET LOCAL hnsw.iterative_scan = strict_order`（pgvector ≥ 0.8，选择性过滤下持续补召回），老版本 GUC 不存在时自动降级重试。
+- **向量检索**：pgvector `halfvec`（半精度，2 字节/维）。`embedding` 列不定维，HNSW 索引建在表达式 `(embedding::halfvec(dim)) halfvec_cosine_ops` 上——**ORDER BY 表达式必须与索引表达式完全一致**（两侧显式 cast），否则退化为顺序扫描（源码注释引 pgvector issue [#702](https://github.com/pgvector/pgvector/issues/702)/[#835](https://github.com/pgvector/pgvector/issues/835)）。查询用子查询先取 `expandedTopK`（TopK*2，夹在 [100,200]，避免大 LIMIT 拖垮 HNSW）个候选算 `distance = embedding <=> query`，再按 `distance <= 1-threshold` 过滤，`score = 1 - distance`。事务内 `SET LOCAL hnsw.ef_search`（≥40）与 `SET LOCAL hnsw.iterative_scan = strict_order`（pgvector ≥ 0.8，选择性过滤下持续补召回），老版本 GUC 不存在时自动降级重试。
 - **关键词检索**：ParadeDB `pg_search` BM25——`content ||| query`（任意 token 匹配）+ `paradedb.score(id) as score`。
 - **过滤**：`knowledge_base_id` / `knowledge_id` / `tag_id` IN 过滤（AND 语义），`is_enabled` 为 NULL 或 true。
 - **建索引**：`BatchSave` + `ON CONFLICT DO NOTHING`；删除按 chunk/source/knowledge ID 物理删除。
@@ -138,7 +138,7 @@ flowchart TD
 
 `internal/application/repository/retriever/elasticsearch/v8/repository.go`。typed client，单索引（`ELASTICSEARCH_INDEX`，默认 `WeKnora`），文档含 `dense_vector` embedding 字段。
 
-- **向量检索**：`script_score` 查询，脚本 `cosineSimilarity(params.query_vector, 'embedding')`（Lucene 禁止负最终分，实际值域 [0,1]），threshold 过滤在应用侧。
+- **向量检索**：`script_score` 查询，脚本 `Math.max(cosineSimilarity(params.query_vector, 'embedding'), 0.0)`，threshold 过滤在应用侧。Lucene 拒绝负的最终分数，未截断时只要有一个向量与查询方向相反，整个检索请求就会返回 400；截断到 0 后值域为 [0,1]，这类文档排在最后，也会被任何正阈值过滤掉。
 - **关键词检索**：`match` 查询 content 字段（BM25）。
 - **过滤**：bool filter（KB/knowledge/tag ID terms；`is_enabled` 用 must_not 反向匹配，历史无该字段的数据视为启用）；启动时探测 mapping 决定 ID 字段是否需要 `.keyword` 后缀。
 - **建索引**：Bulk API 批量写入，空向量拒绝。
@@ -149,10 +149,10 @@ flowchart TD
 
 #### OpenSearch {#_2-5-opensearch}
 
-`internal/application/repository/retriever/opensearch/`（多文件拆分：`repository.go`、`retrieve.go`、`query.go`、`mapping.go`、`crud.go` 等）。工程化最完整的驱动。
+`internal/application/repository/retriever/opensearch/`（多文件拆分：`repository.go`、`retrieve.go`、`query.go`、`mapping.go`、`crud.go` 等）。
 
 - **版本门禁** `probeVersion`：拒绝 ES 发行版与 OS 1.x / 2.0-2.3（Lucene HNSW 预览版）；2.4-2.10 警告接受；2.11+ / 3.x 干净接受（主测 3.3.2）。`probeKNNPlugin` 要求所有节点装有 `opensearch-knn` 插件。
-- **向量检索**：k-NN 插件 `knn` 查询（`query.go buildKNNQuery`）；k-NN 的 `COSINESIMIL` space type 返回 `(1+cosine)/2`，天然 [0,1]。
+- **向量检索**：k-NN 插件 `knn` 查询（`query.go buildKNNQuery`）；k-NN 的 `COSINESIMIL` space type 返回 `(1+cosine)/2`。驱动把阈值换算成 `min_score = (1+threshold)/2` 下推，返回时再换回 cosine 相似度（`2*score-1`），与其他引擎同一尺度。
 - **关键词检索**：`match` content（BM25）。混合不走 OS 原生 hybrid pipeline，统一交给上层 RRF 融合（`query.go` 注释明示）。
 - **建索引**：`mapping.go` 声明式 mapping（`knn_vector` 字段带 method/engine 参数），启动时校验 mapping 指纹，漂移报 `ErrConfigInvalid`；别名管理 + `copy.go` 支持 reindex；索引创建/重建事件经 AuditSink 写审计日志。
 - 配置含 `OPENSEARCH_INSECURE_SKIP_VERIFY` 与 SSRF 安全传输层（`transport.go`）。
@@ -165,6 +165,7 @@ flowchart TD
 - **向量检索**：`Query` API，score 为归一化向量点积（≈cosine，IR embedding 下 [0,1]），threshold 由 score_threshold 下推。
 - **关键词检索**：`tokenizeQuery` 本地分词后对每个 token 构造 `MatchText(content, token)` 的 **should（OR）过滤**，用 `Scroll` 遍历所有匹配维度的 collection 取回；无 BM25 打分（命中即回，分数由上层 RRF 的 rank 决定）。
 - **过滤**：`getBaseFilter` 用 `MatchKeywords` 精确过滤 KB/knowledge/tag/is_enabled。
+- **写入与删除**：字符串 payload 中的非法 UTF-8 与 NUL 字符在写入前清理；删除时对应维度的 collection 尚不存在（首次写入前先删旧向量，或 Qdrant 被清空后）按"无可删"处理，不再阻断随后的写入；启停与标签批量更新逐 collection 执行，任一失败都会返回错误，而不是只记日志。
 - 配置：`QDRANT_HOST` / `QDRANT_PORT` / `QDRANT_API_KEY` / `QDRANT_USE_TLS`。
 
 #### Milvus {#_2-7-milvus}
@@ -172,8 +173,8 @@ flowchart TD
 `internal/application/repository/retriever/milvus/repository.go`。
 
 - **集合管理**：每维度一个 collection（`{MILVUS_COLLECTION|weknora_embeddings}_{dim}`）。schema 含稠密向量 `embedding`（HNSW 索引，M=16 efConstruction=128，metric 由 `MILVUS_METRIC_TYPE` 决定：IP 默认 / COSINE / L2）与稀疏向量 `content_sparse` —— 通过 **内建 BM25 Function**（`entity.FunctionTypeBM25`）由 content 自动生成，配 `AutoIndex(BM25)`。新建 Collection 的 `content` 使用 Milvus 多语言分析器：英文 `english`、中文 `chinese`（内置 Jieba）、未知语言 `default`（ICU），并以 `language` 字段选择分析器。
-- **向量检索**：`Search` + `WithANNSField(embedding)`，COSINE 模式原始值域 [-1,1]，是唯一需要 `(score+1)/2` 归一化的引擎。
-- **关键词检索**：对 `content_sparse` 做 BM25 稀疏向量检索（Milvus 2.5+ 原生全文检索），查询时根据问题文本的语言传入 `analyzer_name`。
+- **向量检索**：`Search` + `WithANNSField(embedding)`。IP / COSINE 直接返回 cosine 相似度；L2 返回平方欧氏距离，驱动换算成 `1 - d/2`，阈值换算成搜索半径 `2(1 - threshold)`。
+- **关键词检索**：对 `content_sparse` 做 BM25 稀疏向量检索（Milvus 2.5+ 原生全文检索），查询时根据问题文本的语言传入 `analyzer_name`。返回 Milvus 给出的真实 BM25 分数；跨多个维度 collection 检索时先按分数合并排序，再截取 TopK。
 - **过滤**：`filter.go` 构造布尔表达式（kb/knowledge/tag/is_enabled）。
 - **启停同步**：`BatchUpdateChunkEnabledStatus` 逐 collection 更新，失败用 `errors.Join` 聚合后**返回错误**而不是只打 warn——主库里已停用的分块绝不能因为索引更新静默失败而继续可被检索到。
 - 配置：`MILVUS_ADDRESS` / `MILVUS_USERNAME` / `MILVUS_PASSWORD` / `MILVUS_DB_NAME` / `MILVUS_METRIC_TYPE`（改后需重建 collection）。旧 Collection 的 schema 不能直接改成多语言分析器；可运行 `go run ./cmd/milvus-migrate --source <旧前缀> --target <新前缀>` 复用已有稠密向量并沿用源 Collection 的 metric，确认检索正常后把 `MILVUS_COLLECTION` 改为新前缀。
@@ -183,7 +184,7 @@ flowchart TD
 `internal/application/repository/retriever/weaviate/repository.go`。HTTP + gRPC 双通道。
 
 - **类管理**：动态创建 Class（`WEAVIATE_COLLECTION` 解析），支持 ReplicationConfig / ShardingConfig。
-- **向量检索**：GraphQL `nearVector` + `WithCertainty(threshold)`；certainty = `(2-distance)/2`，天然 [0,1]，阈值原生下推。
+- **向量检索**：GraphQL `nearVector` + certainty 阈值下推；certainty = `(2-distance)/2 = (1+cos)/2`。驱动下推 `(1+threshold)/2`，返回时换回 cosine 相似度（`2*certainty-1`），与其他引擎同一尺度。
 - **关键词检索**：GraphQL **BM25** 查询（`Bm25ArgBuilder`）。
 - **过滤**：GraphQL where 过滤 KB/knowledge/tag/is_enabled。
 - 配置：`WEAVIATE_HOST` / `WEAVIATE_GRPC_ADDRESS` / `WEAVIATE_SCHEME` / `WEAVIATE_AUTH_ENABLED` + `WEAVIATE_API_KEY`。
@@ -210,7 +211,7 @@ flowchart TD
 
 #### Neo4j — 图谱检索（不在 Registry 体系内） {#_2-11-neo4j-—-图谱检索-不在-registry-体系内}
 
-`internal/application/repository/retriever/neo4j/repository.go` 实现的是 `RetrieveGraphRepository`（`SearchNode(ctx, NameSpace, entities)`），不是向量/关键词引擎：按 `NameSpace{KnowledgeBase, Knowledge}` 检索实体节点与关系，服务于 chat pipeline 的 `ENTITY_SEARCH` 阶段（GraphRAG）。由 `NEO4J_ENABLE=true` + `NEO4J_URI`/`NEO4J_USERNAME`/`NEO4J_PASSWORD` 启用。
+`internal/application/repository/retriever/neo4j/repository.go` 实现的是 `RetrieveGraphRepository`（`SearchNode(ctx, NameSpace, entities)`），不是向量/关键词引擎：按 `NameSpace{KnowledgeBase, Knowledge}` 检索实体节点与关系，服务于 chat pipeline 的 `ENTITY_SEARCH` 阶段（GraphRAG）。由 `NEO4J_ENABLE=true` + `NEO4J_URI`/`NEO4J_USERNAME`/`NEO4J_PASSWORD` 启用。单次查询最多从 200 个种子实体展开、最多返回 2000 行，详见[知识图谱](09-knowledge-graph.md)。
 
 ### Embedding 维度管理 {#_4-embedding-维度管理}
 
@@ -222,7 +223,10 @@ WeKnora 允许不同 KB 使用不同 embedding 模型（维度各异），各引
 | SQLite | 每维度一张 `vec0` 虚表（启动时按存量数据维度自动补建） |
 | Qdrant / Milvus / TencentVectorDB | 每维度一个 collection：`{base}_{dim}`，首写时 `ensureCollection` 惰性创建（sync.Map 记忆已建维度） |
 | Doris | 每维度一张表：`{prefix}_{dim}`，`schema.go` 生成 DDL 并轮询 ANN 索引就绪 |
-| Elasticsearch / OpenSearch | 单索引 `dense_vector`/`knn_vector` mapping（`ELASTICSEARCH_INDEX` / `OPENSEARCH_INDEX`），维度在 mapping 中固定 |
+| Elasticsearch | 单索引 `dense_vector` mapping（`ELASTICSEARCH_INDEX`），维度在 mapping 中固定 |
+| OpenSearch | 按维度创建 `{OPENSEARCH_INDEX}_{dim}` 别名及物理索引；另有无维度的关键词索引 |
+
+查询向量生成后会与模型配置的维度比对。不一致时（如模型服务更换了输出维度）直接返回错误码 2201，详情包含模型名、期望维度与实际维度，提示检查 Embedding 模型配置并重建索引；不会继续发往向量库后得到含糊的失败或空结果。
 
 检索侧的一致性由 `validateSameEmbeddingModel`（`knowledgebase_search_shared.go`）保证：一次多库检索中的所有 KB 必须共享同一 embedding 模型身份（`model.Name + BaseURL`，跨租户可等价），否则拒绝——避免跨向量空间的分数不可比。查询向量按模型身份分组只计算一次（`ResolveEmbeddingModelKeys` + `GetQueryEmbedding`），随 `params.QueryEmbedding` 传播到所有 store 组，杜绝重复 embedding API 调用。
 
@@ -230,18 +234,21 @@ WeKnora 允许不同 KB 使用不同 embedding 模型（维度各异），各引
 
 #### 跨引擎向量分归一化（EngineAwareNormalizer） {#_5-1-跨引擎向量分归一化-engineawarenormalizer}
 
-`internal/application/service/retriever/normalizer.go`。多 store fan-out 且结果跨引擎类型时（`hasMixedEngineTypes`），把各引擎的向量分映射到统一 [0,1]：
+所有驱动返回的向量分都是 **cosine 相似度**，向量阈值也按 cosine 相似度解释；引擎原生尺度不同时由驱动自己换算：
 
-| 引擎 | 原始值域 | 归一化 |
+| 引擎 | 引擎原生分数 | 驱动换算 |
 |------|---------|--------|
-| Milvus（COSINE） | [-1, 1] 原始 cosine | `(score + 1) / 2` 再 clamp01 |
-| Elasticsearch v8 | [0, 1]（Lucene script_score 非负不变量） | 直通 clamp01 |
-| OpenSearch | [0, 1]（k-NN COSINESIMIL 已做 `(1+cos)/2`） | 直通 clamp01 |
-| Weaviate | [0, 1]（certainty 定义即 `(2-distance)/2`） | 直通 clamp01 |
-| Postgres / SQLite / Qdrant / TencentVectorDB / Doris | 理论 [-1,1]，IR 归一化 embedding 实际 [0,1] | 直通 clamp01 |
-| 未知引擎 | — | clamp01 兜底 + 每请求一次 WARN |
+| Postgres / SQLite | cosine 距离 | `1 - distance` |
+| Qdrant / TencentVectorDB / Doris | cosine（或归一化向量的内积） | 直通 |
+| Milvus（IP / COSINE） | 内积 / cosine | 直通 |
+| Milvus（L2） | 平方欧氏距离，单位向量下 = `2 - 2cos` | 分数 `1 - d/2`，阈值换成半径 `2(1 - threshold)` |
+| Elasticsearch v8 | `cosineSimilarity` script_score（Lucene 要求非负） | 直通 |
+| OpenSearch | k-NN COSINESIMIL：`(1+cos)/2` | 分数 `2*score-1`，阈值 `(1+threshold)/2` |
+| Weaviate | certainty：`(1+cos)/2` | 分数 `2*certainty-1`，阈值 `(1+threshold)/2` |
 
-**关键词（BM25）分数不归一化**——其值域无上界，压缩会坍缩长尾；下游 RRF 基于 rank，天然免疫尺度差异。`clamp01` 同时消化 NaN/Inf，保护下游排序的严格弱序不变量。同一引擎内部的结果保持原生尺度（直接可比，不做无谓变换）。
+`internal/application/service/retriever/normalizer.go` 在多 store fan-out 且结果跨引擎类型时（`hasMixedEngineTypes`）再对向量分做一次 clamp01，兜住理论上的负 cosine 与 NaN/Inf；未知引擎同样 clamp01，并每请求打一次 WARN。
+
+**关键词（BM25）分数在这一步不归一化**——其值域无上界，压缩会坍缩长尾；融合阶段再按各自列表处理（见下）。`clamp01` 同时消化 NaN/Inf，保护下游排序的严格弱序不变量。
 
 #### RRF 加权融合 {#_5-2-rrf-加权融合}
 
@@ -249,12 +256,16 @@ WeKnora 允许不同 KB 使用不同 embedding 模型（维度各异），各引
 
 ```go
 // fuseWithRRF
-rrfScore = vectorWeight/(rrfK + vectorRank) + keywordWeight/(rrfK + keywordRank)
+rrf   = vectorWeight/(rrfK + vectorRank) + keywordWeight/(rrfK + keywordRank)
+score = rrf / ((vectorWeight + keywordWeight) / (rrfK + 1))   // 归一化到 [0,1]
 ```
 
-- rank 为各路结果的 1-indexed 排名（各引擎已按分排序返回）；
+- 每个 `RetrieveResult`（不同引擎、store 组、文档/FAQ 参数各是一个列表）**单独**按分数排名，chunk 取它在各列表中的最好名次。各列表按 goroutine 完成顺序拼接，拼接后的下标没有意义——否则后到列表的第 1 名会被当成第 N+1 名；
+- 分数除以理论最大值，两路都排第一的 chunk 得 1，只在一路排第一的得该路权重占比（缺省 0.7 / 0.3）。未归一化的 RRF 最高约 0.016，与单路检索的 cosine（约 0.5–0.9）混排时会被整体压到后面，复合打分的基础分项和 MMR 的相关性项也失去作用；
 - `rrfK`、`vectorWeight`、`keywordWeight` 来自租户 `RetrievalConfig`（`GetEffectiveRRFK` / `GetEffectiveRRFWeights` 提供缺省）；
-- 单路结果时不走 RRF，`deduplicateByScore` 保留每 chunk 最高原始分（对 FAQ 的 embedding 相似度语义很重要，如 `FAQDirectAnswerThreshold` 直接比对该分数）。
+- 单路结果时不走 RRF，`deduplicateByScore` 保留每 chunk 最高分。只有向量结果时保持 cosine 相似度；只有关键词结果时，每个列表按自己的最高分折算到 [0,1]（不同引擎的 BM25 不可比），保持相对顺序，避免无上界的 BM25 分数让后续复合打分饱和。检索 trace 中仍记录原始 BM25 分数。
+
+三条路径的输出都在 [0,1]，所以不同检索调用（按文档/标签的 target、不同 embedding 模型分组、FAQ 与文档调用）的结果可以放在一起排序。
 
 融合之后的复合打分（rerank 模型分 0.6 + 检索基础分 0.3 + 来源权重 0.1、MMR、FAQ/Wiki 加权）发生在 chat pipeline 的 `CHUNK_RERANK` 阶段，见[检索问答流程的重排阶段](../02-architecture/04-rag-pipeline.md#_3-4-chunk-rerank-—-重排、复合打分、mmr、wiki-加权)。
 
@@ -288,7 +299,7 @@ sequenceDiagram
     C-->>H: RetrieveResult (带 RetrieverEngineType)
     H->>H: 跨引擎类型时 EngineAwareNormalizer 归一化向量分
     H->>F: classifyRetrievalResults 分路
-    F->>F: 双路则 RRF: w_v/(k+rank_v) + w_k/(k+rank_k)
+    F->>F: 双路则 RRF（各列表单独排名，除以最大值归一化到 [0,1]）
     F-->>H: 融合去重排序结果
     H->>H: FAQ 库: 迭代扩召回 / 负例问题过滤
     H-->>P: SearchResult (截断至 matchCount)
@@ -305,3 +316,41 @@ sequenceDiagram
 | 引擎类型常量 | `internal/types/retriever.go` |
 | 租户默认引擎 | `internal/types/tenant.go`（`GetDefaultRetrieverEngines`） |
 | 环境变量清单 | `.env.example`（C1 节）、`docker-compose.yml` |
+
+## 本地验证与升级
+
+- [ParadeDB 存量库升级](../01-getting-started/06-paradedb-upgrade.md)：保留数据卷、扩展 SQL 升级与恢复。
+
+### OpenSearch 本地联调 {#opensearch-local-testing}
+
+在仓库根目录启动开发集群：
+
+```bash
+docker compose -f docker-compose.dev.yml --profile opensearch up -d opensearch
+curl -fsS 'http://localhost:9200/'
+curl -fsS 'http://localhost:9200/_cat/plugins?format=json'
+```
+
+确认版本和 `opensearch-knn` 插件。默认端口为 9200，修改过 `OPENSEARCH_PORT` 时同步调整地址。此 profile 关闭安全插件，仅用于隔离的本地测试；可选 Dashboards 使用 `--profile opensearch-ui up -d opensearch-dashboards` 启动。
+
+宿主机后端在 `.env` 中设置并重新启动：
+
+```dotenv
+RETRIEVE_DRIVER=opensearch
+OPENSEARCH_ADDR=http://localhost:9200
+SSRF_WHITELIST=localhost
+```
+
+也可通过管理界面/API 注册 `engine_type: opensearch` 的存储，`connection_config.addr` 使用该地址。容器内后端要使用可达的服务地址；生产连接另需 TLS、认证和按实际目标配置的 SSRF 规则。配置方式见[基础设施 API](../04-api/02-api-infra.md)。
+
+**单节点副本限制**：当前驱动默认 1 个副本，`index_config.number_of_replicas: 0` 也会回退为 1（`opensearch/config.go` 的零值处理）。因此不能用填写 0 来保证集群变为 Green。主分片正常、副本无法分配时可呈 Yellow；结合 `/_cluster/health` 和 `/_cat/shards?v` 检查具体原因，再验证实际读写。
+
+创建测试知识库并绑定该存储，上传少量文档，等待解析完成后验证向量与关键词检索。检查 `/_cat/indices?v` 与 `/_cat/aliases?v`，再验证修改、停用、重新启用和删除条目的检索结果；若测试知识库复制，还应检查目标库内容。索引按需创建，不应要求保存存储配置时就出现全部索引。
+
+结束后仅停止本次使用的服务，保留开发数据：
+
+```bash
+docker compose -f docker-compose.dev.yml --profile opensearch stop opensearch
+# 若启动过 Dashboards
+docker compose -f docker-compose.dev.yml --profile opensearch-ui stop opensearch-dashboards
+```

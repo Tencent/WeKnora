@@ -6,7 +6,7 @@
 
 ## 支持的搜索引擎
 
-引擎在 `internal/container/container.go` 中注册：
+引擎在 `internal/container/container.go` 的 `registerWebSearchProviders` 中注册：
 
 ```go
 registry.Register("duckduckgo", infra_web_search.NewDuckDuckGoProvider)
@@ -18,10 +18,11 @@ registry.Register("baidu", infra_web_search.NewBaiduProvider)
 registry.Register("searxng", infra_web_search.NewSearxngProvider)
 registry.Register("keenable", infra_web_search.NewKeenableProvider)
 registry.Register("zhipu", infra_web_search.NewZhipuProvider)
-registry.Register("metaso", infra_web_search.NewMetasoProvider)
 registry.Register("exa", infra_web_search.NewExaProvider)
+registry.Register("metaso", infra_web_search.NewMetasoProvider)
 registry.Register("bocha", infra_web_search.NewBochaProvider)
 registry.Register("brave", infra_web_search.NewBraveProvider)
+registry.Register("serply", infra_web_search.NewSerplyProvider)
 ```
 
 | 引擎 | 源码文件 | 是否需要 API Key | 端点 | 备注 |
@@ -41,14 +42,14 @@ registry.Register("brave", infra_web_search.NewBraveProvider)
 | Brave Search | `brave.go` | 是 | `https://api.search.brave.com/res/v1/web/search` | 支持按次传 country/freshness |
 | Serply | `serply.go` | 是 | `https://api.serply.io/v1/search` | Google 结果；支持按次传 country/freshness（仅 pd/pw/pm/py） |
 
-在「设置 → 网络搜索」选择提供商、填写 API Key 并测试，然后在智能体中选择该配置。当前注册 14 个引擎；实际结果数仍受智能体最大结果数约束。
+当前共注册 14 个引擎。
 
 | 提供商附加配置 | 值 |
 | --- | --- |
 | Metaso scope | webpage（默认）、document、scholar、podcast、video、image |
 | Exa include_text | 字符串布尔值，例如 `"true"`；默认不取正文 |
 | Bocha freshness | noLimit（默认）、oneDay、oneWeek、oneMonth、oneYear |
-| Bocha summary | 字符串布尔值，决定是否请求摘要 |
+| Bocha summary | 默认请求摘要；设为 `"false"` 时关闭 |
 | Brave 按次过滤 | country/freshness 是 web_search 工具参数，见下文；与 Bocha 固定配置的字段取值不同 |
 | Serply 按次过滤 | 同 Brave；country 映射为 Google 的 gl，freshness 只接受 pd/pw/pm/py，不支持日期区间 |
 
@@ -66,7 +67,7 @@ registry.Register("brave", infra_web_search.NewBraveProvider)
 | `proxy_url` | string | 空 | 可选出站 HTTP/HTTPS 代理（仅隧道流量，不替换 API 端点），同样过 SSRF 校验 |
 | `extra_config` | map[string]string | nil | 提供商特定参数，如 Metaso scope、Exa include_text、Bocha freshness/summary |
 
-CRUD 路由（`RegisterWebSearchProviderRoutes`，`internal/router/router.go`）：`/web-search-providers` 下的增删改查、`POST /test`（用存量凭证探测外部服务，Admin 权限）、`POST /:id/test`、`PUT /:id/credentials`；另有 `GET /web-search/providers` 返回可用引擎类型目录。
+CRUD 路由（`RegisterWebSearchProviderRoutes`，`internal/router/routes_infra.go`）：`/web-search-providers` 下的增删改查、`POST /test`（用未保存的参数试连）、`POST /:id/test`（测试已保存配置）、`PUT /:id/credentials` 与 `DELETE /:id/credentials/:field`，测试与写操作均需 Admin；另有 `GET /web-search/providers` 返回可用引擎类型目录。完整接口见[基础设施 API](../04-api/02-api-infra.md)。
 
 ## Agent 搜索与读页
 
@@ -103,11 +104,8 @@ flowchart TD
 
 - `count` 指定结果数量，范围是 1 到当前 Agent 配置的最大结果数（最多 20）；省略时沿用现有 Agent 默认值。
 - `country` / `freshness` 通过 Brave 与 Serply 提供商生效。地区接受两字母代码或 `ALL`，时效接受 `pd` / `pw` / `pm` / `py` 或 `YYYY-MM-DDtoYYYY-MM-DD`。省略 `country` 时不向 Brave 传该参数（Brave 自身默认 US）；显式 `ALL` 表示全球结果。Serply 的 `country` 映射为 Google 的 `gl`（省略或 `ALL` 时不传 `gl`，由 Google 决定地区），`freshness` 只接受 `pd` / `pw` / `pm` / `py`。其它提供商暂不支持这些过滤，显式传入时返回错误，不会静默忽略。参数取值参见 [Brave 官方 API 文档](https://api-dashboard.search.brave.com/api-reference/web/search/get)。
-- 在联网搜索设置中新建 Brave Search 配置并填写 API Key，可使用现有代理配置；API Key 沿用加密存储和独立凭据接口。
 - `content` 默认关闭。设为 `true` 时，并行抓取前 3 条结果的正文（整批 15 秒预算，每页最多 5,000 字符摘录）；其余结果保留搜索摘要，需用 `web_fetch` 继续读页。抓取失败仍保留摘要；完整正文地址通过 `full_output_path` 返回。搜索和独立 `web_fetch` 共用本轮快照，短超时不会取消正在进行的共享抓取。
 - Brave 的相对 `age` 原样保留，避免把“2 days ago”伪造为精确发布日期。
-
-- 保留现有多搜索引擎、租户配置、代理、黑名单与日期能力，provider 仍由 Agent 运行配置解析。
 - 去除空查询、无效 URL、重复结果；最大结果数来自 Agent 配置，上限 20。
 - Agent 搜索不再调用 `CompressWithRAG`，不创建临时知识库，不依赖嵌入/重排模型或 Redis 临时状态。聊天快速回答管线的 RAG 压缩配置仍由原管线处理。
 - 模型输出包含标题、域名、可用日期与 wN 页面 ID。摘要与 provider content 标为未经页面验证的搜索证据；每段最多 1,500 字符，整批证据预算 16,000 字符。
@@ -137,27 +135,13 @@ flowchart TD
 
 共享抓取器的快速回答路径继续使用 `NewPipelineFetcher`：15 秒超时、100 KiB 下载上限、HTTP-only 与原纯文本抽取。
 
-### 行为调整与回归验证
-
-| 行为 | 调整前 WeKnora Agent | 调整后 |
-| --- | --- | --- |
-| 搜索前置 | 强制两个 KB 工具，即使未注册 | 根据任务与可用来源选择 |
-| 搜索附带处理 | 可自动入临时 KB 做 RAG | 直接返回搜索证据，按需读页 |
-| 读页参数 | 强制 url + prompt | url，按需 offset/limit |
-| 正文分析 | 每页再调用模型摘要 | 主 Agent 直接读 Markdown |
-| 截断 | 每页/整批限额，后续页面可能空白，无续读 | 每页保留份额、完整正文存储、跨轮按行续读 |
-| 失败 | 整批失败强制停止搜索 | 保留已有证据，合理重试或换源 |
-
-保留多搜索引擎、wN 引用、批量调用、租户开关与 SSRF 防护；通过 Brave 适配器支持 country/freshness，不支持过滤的提供商返回明确错误。显式 `content=true` 与独立 `web_fetch` 都可读页。
-
-正文提取使用 Go Readability / Markdown 库。本地 HTML 回归样例覆盖完整文章的相邻段落、结构化内容、链接目录及代码缩进，检查正文结构和链接保留情况，避免二次裁剪丢失段落。运行 `go test ./internal/infrastructure/web_fetch -run TestMarkdownExtractionFixtures` 可验证。
-
 ## docker/searxng 的角色
 
 SearXNG 是自托管的元搜索引擎（聚合上游多个引擎），WeKnora 把它作为**免 API Key 的默认可选搜索后端**打包在 `docker-compose.yml` 的 `searxng` / `full` profile 中：
 
 - `docker/searxng/settings.yml`：关键定制包括 `search.formats` 开启 `json`（WeKnora 后端走 `/search?format=json`）、`server.limiter: false`（关闭 IP 限流，否则后端会被节流；若公开部署需重新开启并配置放行名单）、`secret_key` 由入口脚本以 `SEARXNG_SECRET` 环境变量替换。
 - `searxng-init` 辅助容器先把模板复制进独立 volume，避免 SearXNG 入口脚本原地 sed 修改把解析后的密钥写回仓库工作区。
+- 宿主机端口由 `SEARXNG_PORT`（默认 8888）和 `SEARXNG_BIND`（默认 `127.0.0.1`）控制。不要把 `SEARXNG_PORT` 设成与 `APP_PORT`（默认 8080）相同：Linux 上两者同时发布同一端口时，访问 `localhost:8080` 可能先命中 SearXNG，登录接口会返回 SearXNG 的 HTML 404。
 - 应用容器默认把 `searxng` 主机名并入 SSRF 白名单：`SSRF_WHITELIST_EXTRA=searxng,qdrant,...`，因此租户配置 `base_url: http://searxng:8080` 开箱即用。
 - 客户端超时 12s（`defaultSearxngTimeout`），略高于 SearXNG 的 `outgoing.max_request_timeout: 10.0`，让上游慢引擎表现为 SearXNG 侧错误而非客户端取消。`ValidateSearxngBaseURL` 在"保存"与"使用"两处共享，保证配置校验一致。
 
@@ -170,6 +154,8 @@ SearXNG 是自托管的元搜索引擎（聚合上游多个引擎），WeKnora �
 - `DialContext` 使用 `utils.SSRFSafeDialContext`（拨号时校验目标 IP，防 DNS rebinding）；
 - 重定向逐跳经 `ssrfSafeRedirect` 复验 `ValidateURLForSSRF`，超过最大跳数直接失败；
 - 显式 `proxy_url` 需通过 SSRF 校验，未配置时回落 `ProxyFromEnvironment`。
+
+开启 `SSRF_DNS_WHITELIST_ONLY` 后，搜索服务域名、SearXNG 主机名，以及 `web_fetch` 要读取的网页域名都必须写入 `SSRF_WHITELIST`，否则在 DNS 查询前即被拒绝，详见[配置参考](../01-getting-started/04-configuration.md)。
 
 ### 接口抽象
 

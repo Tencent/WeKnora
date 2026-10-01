@@ -1,24 +1,22 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import { defineComponent } from 'vue'
 import type { RouteLocationNormalized } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useDeploymentCapabilitiesStore } from '@/stores/deploymentCapabilities'
-import { autoSetup, getCurrentUser, userInfoFromApi } from '@/api/auth'
+import { autoSetup, userInfoFromApi } from '@/api/auth'
 import type { DeploymentCapabilityKey } from '@/config/deploymentCapabilities'
 import { MessagePlugin } from 'tdesign-vue-next'
 import i18n from '@/i18n'
 import { normalizeSettingsSection } from '@/config/settingsRoute'
+import { isToolboxSection, toolboxLocation } from '@/config/toolbox'
 
 /** Lite /桌面 WebView 硬刷新时可能只打开 `/`，用 session 记住上次页面以便恢复 */
 const LITE_LAST_PATH_KEY = 'weknora_lite_last_path'
-const AUTO_SETUP_FAILED_KEY = 'weknora_auto_setup_failed'
 
-function shouldTryAutoSetup() {
-  return localStorage.getItem(AUTO_SETUP_FAILED_KEY) !== 'true'
-}
-
-function markAutoSetupFailed() {
-  localStorage.setItem(AUTO_SETUP_FAILED_KEY, 'true')
-}
+// views/platform/index.vue always mounts the settings modal and opens it when
+// the path is /platform/settings, so this route only has to own the URL.
+// Rendering Settings.vue here would mount a second, independent copy.
+const SettingsRouteOutlet = defineComponent({ name: 'SettingsRouteOutlet', render: () => null })
 
 function isLiteEdition(authStore: ReturnType<typeof useAuthStore>) {
   return authStore.isLiteMode || localStorage.getItem('weknora_lite_mode') === 'true'
@@ -107,7 +105,7 @@ const router = createRouter({
         {
           path: "settings",
           name: "settings",
-          component: () => import("../views/settings/Settings.vue"),
+          component: SettingsRouteOutlet,
           meta: { requiresInit: true, requiresAuth: true }
         },
         {
@@ -138,6 +136,12 @@ const router = createRouter({
           name: "artifactLibrary",
           component: () => import("../views/artifacts/ArtifactLibrary.vue"),
           meta: { requiresInit: true, requiresAuth: true, requiredCapability: 'settings.sandbox' }
+        },
+        {
+          path: "toolbox/:section?",
+          name: "toolbox",
+          component: () => import("../views/toolbox/Toolbox.vue"),
+          meta: { requiresInit: true, requiresAuth: true }
         },
         {
           path: "agents",
@@ -227,19 +231,28 @@ const router = createRouter({
 
 // 持久化 auto-setup / login 返回的认证信息到 store
 function persistLoginResponse(authStore: ReturnType<typeof useAuthStore>, response: any) {
-  if (response.user && response.tenant && response.token) {
-    authStore.setUser(userInfoFromApi(response.user, response.tenant.id))
+  const activeTenant = response.active_tenant || response.tenant
+  if (response.user && response.token) {
+    const homeTenantId = response.user.tenant_id ?? activeTenant?.id ?? ''
+    authStore.setUser(userInfoFromApi(response.user, homeTenantId))
     authStore.setToken(response.token)
     if (response.refresh_token) {
       authStore.setRefreshToken(response.refresh_token)
     }
-    authStore.setTenant({
-      id: String(response.tenant.id) || '',
-      name: response.tenant.name || '',
-      owner_id: response.user.id || '',
-      created_at: response.tenant.created_at || new Date().toISOString(),
-      updated_at: response.tenant.updated_at || new Date().toISOString()
-    })
+    if (activeTenant) {
+      authStore.setTenant({
+        id: String(activeTenant.id) || '',
+        name: activeTenant.name || '',
+        owner_id: response.user.id || '',
+        created_at: activeTenant.created_at || new Date().toISOString(),
+        updated_at: activeTenant.updated_at || new Date().toISOString()
+      })
+    } else {
+      authStore.setTenant(null)
+    }
+    if (Array.isArray(response.memberships)) {
+      authStore.setMemberships(response.memberships)
+    }
   }
 }
 
@@ -256,56 +269,9 @@ async function hydrateSessionFromToken(authStore: ReturnType<typeof useAuthStore
     authStore.setRefreshToken(storedRefreshToken)
   }
 
-  try {
-    const response = await getCurrentUser()
-    const user = response.data?.user
-    if (!response.success || !user) {
-      return false
-    }
-
-    authStore.setUser(userInfoFromApi(user, response.data?.tenant?.id))
-
-    const tenant = response.data?.tenant
-    if (tenant) {
-      authStore.setTenant({
-        id: String(tenant.id) || '',
-        name: tenant.name || '',
-        owner_id: tenant.owner_id || user.id || '',
-        description: tenant.description,
-        status: tenant.status,
-        business: tenant.business,
-        storage_quota: tenant.storage_quota,
-        storage_used: tenant.storage_used,
-        created_at: tenant.created_at || new Date().toISOString(),
-        updated_at: tenant.updated_at || new Date().toISOString(),
-      })
-    } else {
-      authStore.setTenant(null)
-    }
-
-    // Refresh memberships on every page load — same reason as
-    // App.vue's syncOIDCUserContext: without this the auth store
-    // would only ever see the snapshot from the original /auth/login
-    // call, so role changes (and tenant-switch role lookups) would
-    // be silently stale until the user logged out and back in.
-    const memberships = response.data?.memberships
-    if (Array.isArray(memberships)) {
-      authStore.setMemberships(memberships)
-    }
-
-    const canCreateTenant = response.data?.capabilities?.can_create_tenant
-    if (typeof canCreateTenant === 'boolean') {
-      authStore.setCanCreateTenant(canCreateTenant)
-    }
-
-    authStore.setAutoAcceptInvitation(
-      response.data?.capabilities?.auto_accept_invitation === true,
-    )
-
-    return true
-  } catch {
-    return false
-  }
+  // /auth/me 的落库逻辑只在 auth store 里维护一份（user / tenant / memberships /
+  // capabilities），这里只负责先把 token 放进 store。请求本身与启动、侧栏共用去重。
+  return authStore.refreshFromAuthMe()
 }
 
 let autoSetupAttempted = false
@@ -319,6 +285,13 @@ router.beforeEach(async (to, from, next) => {
   // 如果这里先按“未登录”拦截到 /login，会导致回调结果没有机会落盘。
   if (hasPendingOIDCCallback()) {
     next()
+    return
+  }
+
+  // Preserve bookmarks for tools that have moved out of Settings.
+  if (to.path === '/platform/settings' && isToolboxSection(to.query.section)) {
+    next({ ...toolboxLocation(to.query.section,
+      typeof to.query.sandboxId === 'string' ? to.query.sandboxId : undefined), replace: true })
     return
   }
 
@@ -378,8 +351,9 @@ router.beforeEach(async (to, from, next) => {
         return
       }
 
-      if (!autoSetupAttempted && shouldTryAutoSetup()) {
+      if (!autoSetupAttempted) {
         autoSetupAttempted = true
+        localStorage.removeItem('weknora_auto_setup_failed')
         try {
           const response = await autoSetup()
           if (response.success) {
@@ -387,11 +361,9 @@ router.beforeEach(async (to, from, next) => {
             authStore.setLiteMode(true)
             next(to.fullPath)
             return
-          } else {
-            markAutoSetupFailed()
           }
         } catch {
-          markAutoSetupFailed()
+          // Auto-setup may be unavailable outside the native Lite shell.
         }
       }
       next('/login')

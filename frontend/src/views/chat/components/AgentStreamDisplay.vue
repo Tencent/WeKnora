@@ -652,8 +652,9 @@ import { getKnowledgeChunksSummaryHtml } from '@/utils/knowledgeChunksDisplay';
 import { getAttachmentParsingSummaryHtml } from '@/utils/attachmentParsingDisplay';
 import { useChatCitationPopover } from '@/composables/useChatCitationPopover';
 import { useChatReferencesDrawer } from '@/composables/useChatReferencesDrawer';
-import type { KnowledgeReferenceLike, ReferenceHighlightTarget } from '@/utils/referenceSources';
+import { mergeDocumentReferences, type KnowledgeReferenceLike, type ReferenceHighlightTarget } from '@/utils/referenceSources';
 import { resolveCitationChunkId } from '@/utils/citationMarkdown';
+import { citationAnchorText } from '@/utils/citationAnchor';
 import { getWikiPage, type WikiPage } from '@/api/wiki';
 import { MessagePlugin } from 'tdesign-vue-next';
 import { useUIStore } from '@/stores/ui';
@@ -661,7 +662,8 @@ import { useSettingsStore } from '@/stores/settings';
 import { useAuthStore } from '@/stores/auth';
 import { useI18n } from 'vue-i18n';
 import i18n from '@/i18n';
-import { hydrateProtectedFileImages, clearProtectedFileFailureCache, sanitizeMarkdownHTML } from '@/utils/security';
+import { hydrateProtectedFileImages, sanitizeMarkdownHTML } from '@/utils/security';
+import { useProtectedImageRecovery } from '@/composables/useProtectedImageRecovery';
 import {
   artifactIndexFromEventTarget,
   hydrateArtifactImages,
@@ -1053,25 +1055,6 @@ const protectedFileAccess = computed<ProtectedFileAccessContext | undefined>(() 
   return undefined;
 });
 
-// Re-hydrate when the message authorization anchor becomes available or is
-// corrected (e.g. request_id → persisted assistant_message_id after agent_query).
-watch(
-  () => {
-    const access = protectedFileAccess.value;
-    if (access?.mode === 'message') {
-      return `${access.sessionId}\0${access.messageId}`;
-    }
-    return '';
-  },
-  (scopeKey, previousScopeKey) => {
-    if (!scopeKey || scopeKey === previousScopeKey) return;
-    clearProtectedFileFailureCache();
-    nextTick(async () => {
-      await hydrateProtectedFileImages(rootElement.value, protectedFileAccess.value);
-    });
-  },
-);
-
 // -----------------------------------------------------------------------------
 // Skill artifact download drawer (Agent path)
 // -----------------------------------------------------------------------------
@@ -1176,35 +1159,6 @@ const openReferencesDrawer = (
   })
   return true
 }
-
-const mergeDocumentReferences = (refs: KnowledgeReferenceLike[]): KnowledgeReferenceLike[] => {
-  const merged = new Map<string, KnowledgeReferenceLike & { contentParts?: string[] }>();
-
-  for (const ref of refs) {
-    if (ref.chunk_type === 'web_search') continue;
-    const key = ref.knowledge_id || ref.knowledge_title || ref.id;
-    if (!key) continue;
-
-    const existing = merged.get(key);
-    const content = String(ref.content || '').trim();
-    if (!existing) {
-      merged.set(key, {
-        ...ref,
-        id: ref.knowledge_id || ref.id || key,
-        content,
-        contentParts: content ? [content] : [],
-      });
-      continue;
-    }
-
-    if (content && !existing.contentParts?.includes(content)) {
-      existing.contentParts = [...(existing.contentParts || []), content];
-      existing.content = existing.contentParts.slice(0, 3).join('\n\n');
-    }
-  }
-
-  return Array.from(merged.values()).map(({ contentParts, ...ref }) => ref);
-};
 
 const cleanToolOutputContent = (output: unknown): string => {
   const raw = typeof output === 'string' ? output : '';
@@ -1710,15 +1664,12 @@ const answerFullyRendered = computed(
     isSegmentDone.value &&
     typedAnswer.value.length >= activeAnswerMarkdown.value.length,
 );
+useProtectedImageRecovery(() => rootElement.value, () => protectedFileAccess.value,
+  () => !props.session?.persistence_error && answerFullyRendered.value);
 watch(answerFullyRendered, (ready) => {
   emit('render-complete-change', ready);
   if (!ready) return;
-  // Clear before this reactive update renders, so a source that returned 404
-  // mid-stream gets one real final-attempt <img> node instead of remaining
-  // suppressed by the missing-source cache.
-  clearProtectedFileFailureCache();
   nextTick(async () => {
-    await hydrateProtectedFileImages(rootElement.value, protectedFileAccess.value);
     await enhanceMarkdownContainer(rootElement.value);
   });
 }, { immediate: true });
@@ -2424,6 +2375,8 @@ const onRootClick = (e: Event) => {
       chunkId,
       documentTitle: title,
       knowledgeBaseId: kbId,
+      anchorText: citationAnchorText(kbEl),
+      openSource: !props.embeddedMode,
     })) {
       return;
     }
@@ -2509,6 +2462,8 @@ const onRootKeydown = (e: KeyboardEvent) => {
         chunkId,
         documentTitle: title,
         knowledgeBaseId: kbId,
+        anchorText: citationAnchorText(kbEl),
+        openSource: !props.embeddedMode,
       })) {
         return;
       }
@@ -4031,4 +3986,10 @@ const handleAddToKnowledge = (answerEvent: any) => {
 }
 </style>
 
-<style lang="less" src="@/components/css/wiki-graph-drawer.less"></style>
+<!-- Inlined @import instead of <style src>: plugin-vue 6.0.6 keys unscoped
+     src-style descriptors by the imported file path, so two SFCs sharing the
+     same src style (this file and WikiBrowser.vue) overwrite each other's
+     descriptor during the build and crash with "reading 'scoped'". -->
+<style lang="less">
+@import "@/components/css/wiki-graph-drawer.less";
+</style>

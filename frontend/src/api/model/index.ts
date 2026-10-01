@@ -33,8 +33,8 @@ export interface ModelCapabilities {
 }
 
 // Per-row override of a catalog entry. Mirrors internal/types.ModelSpecOverride.
-// compat is the flat, protocol-specific object documented in
-// internal/models/catalog/compat.go (free-form JSON).
+// compat is the flat, protocol-specific object defined in
+// internal/models/api/*_settings.go (free-form JSON).
 export interface ModelSpecOverride {
   api?: string;
   reasoning?: boolean;
@@ -97,6 +97,24 @@ export interface ModelConfig {
   created_at?: string;
   updated_at?: string;
   deleted_at?: string | null;
+}
+
+// 复制模型。只提交展示名；name 与凭证由服务端从源模型复制。
+export function copyModelConfig(id: string, displayName: string): Promise<ModelConfig> {
+  return new Promise((resolve, reject) => {
+    post(`/api/v1/models/${id}/copy`, { display_name: displayName })
+      .then((response: any) => {
+        if (response.success && response.data) {
+          resolve(response.data);
+        } else {
+          reject(new Error(response.message || ''));
+        }
+      })
+      .catch((error: any) => {
+        console.error('Failed to copy model:', error);
+        reject(error);
+      });
+  });
 }
 
 // 创建模型

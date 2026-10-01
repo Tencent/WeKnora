@@ -5,17 +5,37 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+
+	"github.com/Tencent/WeKnora/internal/localsandbox"
 )
 
 const desktopPrefsFileName = "desktop-prefs.json"
 
 type desktopPrefs struct {
-	HTTPPort       int  `json:"http_port"`
-	HTTPBindPublic bool `json:"http_bind_public"`
+	HTTPPort       int      `json:"http_port"`
+	HTTPBindPublic bool     `json:"http_bind_public"`
+	ProjectDirs    []string `json:"project_dirs,omitempty"`
+	ApprovalMode   string   `json:"approval_mode,omitempty"`
+	SessionRoot    string   `json:"session_root,omitempty"`
+}
+
+// Which stances exist, and which of them this build can serve, are decided by
+// the sandbox itself (localsandbox.ApprovalMode). Keeping a second list here
+// is how the two drift.
+
+func desktopConfigDir() (string, error) {
+	// Tests (and some Unix setups) isolate via XDG_CONFIG_HOME. Darwin's
+	// UserConfigDir ignores that variable, so honor it first or prefs tests
+	// write into the real Application Support directory.
+	if xdg := strings.TrimSpace(os.Getenv("XDG_CONFIG_HOME")); xdg != "" {
+		return xdg, nil
+	}
+	return os.UserConfigDir()
 }
 
 func desktopPrefsDir() (string, error) {
-	cfg, err := os.UserConfigDir()
+	cfg, err := desktopConfigDir()
 	if err != nil {
 		return "", err
 	}
@@ -90,4 +110,84 @@ func SaveDesktopHTTPBindPublicPreference(v bool) error {
 	cur := loadDesktopPrefs()
 	cur.HTTPBindPublic = v
 	return saveDesktopPrefs(cur)
+}
+
+// LoadApprovalMode returns the stored mode. Unknown values become "auto".
+// Known-but-unshipped modes are returned unchanged so the sandbox can refuse
+// them instead of silently widening access.
+func LoadApprovalMode() string {
+	return string(localsandbox.ParseApprovalMode(loadDesktopPrefs().ApprovalMode))
+}
+
+// SaveApprovalMode refuses what it cannot deliver. Storing "ask" would promise
+// an approval card that does not exist yet, and "full" would promise an
+// unsandboxed run that the sandbox has no policy for; both look like a working
+// setting and behave like a broken one.
+func SaveApprovalMode(mode string) error {
+	requested := localsandbox.ApprovalMode(mode)
+	if !requested.Known() {
+		return fmt.Errorf("invalid approval mode %q", mode)
+	}
+	if !requested.Shipped() {
+		return fmt.Errorf("approval mode %q is not available yet", mode)
+	}
+	cur := loadDesktopPrefs()
+	cur.ApprovalMode = mode
+	return saveDesktopPrefs(cur)
+}
+
+// LoadProjectDirs returns the project directories the user picked. Only the UI
+// writes this list: the agent must never widen its own reach.
+func LoadProjectDirs() []string {
+	return loadDesktopPrefs().ProjectDirs
+}
+
+func SaveProjectDirs(dirs []string) error {
+	cleaned := make([]string, 0, len(dirs))
+	for _, dir := range dirs {
+		if !filepath.IsAbs(dir) {
+			return fmt.Errorf("project directory must be absolute: %q", dir)
+		}
+		cleaned = append(cleaned, filepath.Clean(dir))
+	}
+	cur := loadDesktopPrefs()
+	cur.ProjectDirs = cleaned
+	return saveDesktopPrefs(cur)
+}
+
+// appendApprovedProjectDir adds an absolute directory the user just picked.
+// Duplicate paths are ignored so opening the same folder twice does not
+// grow the recent list.
+func appendApprovedProjectDir(dir string) (string, error) {
+	dir = filepath.Clean(strings.TrimSpace(dir))
+	if dir == "" || dir == "." {
+		return "", nil
+	}
+	existing := LoadProjectDirs()
+	for _, item := range existing {
+		if item == dir {
+			return dir, nil
+		}
+	}
+	if err := SaveProjectDirs(append(append([]string{}, existing...), dir)); err != nil {
+		return "", err
+	}
+	return dir, nil
+}
+
+// removeApprovedProjectDir drops one previously picked directory. Missing
+// paths are a no-op so clearing the same folder twice does not error.
+func removeApprovedProjectDir(dir string) error {
+	dir = filepath.Clean(strings.TrimSpace(dir))
+	if dir == "" || dir == "." {
+		return nil
+	}
+	existing := LoadProjectDirs()
+	kept := make([]string, 0, len(existing))
+	for _, item := range existing {
+		if item != dir {
+			kept = append(kept, item)
+		}
+	}
+	return SaveProjectDirs(kept)
 }

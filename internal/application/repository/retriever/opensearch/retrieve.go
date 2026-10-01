@@ -179,6 +179,10 @@ func wrapResults(ctx context.Context, hits []hit, rt types.RetrieverType, mt typ
 	log := logger.GetLogger(ctx)
 	out := make([]*types.IndexWithScore, 0, len(hits))
 	for _, h := range hits {
+		score := h.Score
+		if rt == types.VectorRetrieverType {
+			score = knnScoreToCosine(score)
+		}
 		if h.ID != h.Source.ChunkID {
 			log.Warnf("[OpenSearch] hit._id=%q != _source.chunk_id=%q (D12 invariant violation)",
 				h.ID, h.Source.ChunkID)
@@ -192,7 +196,7 @@ func wrapResults(ctx context.Context, hits []hit, rt types.RetrieverType, mt typ
 			SourceType:      types.SourceType(h.Source.SourceType),
 			TagID:           h.Source.TagID,
 			Content:         h.Source.Content,
-			Score:           h.Score,
+			Score:           score,
 			MatchType:       mt,
 			IsEnabled:       h.Source.IsEnabled,
 		})

@@ -17,6 +17,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/modelcontext"
 	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/sandbox"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -78,6 +79,7 @@ type AgentEngine struct {
 	steerSink         types.SteerSink
 	allowSteerOverrun bool // one extra ReAct round after a loop-end inject past MaxIterations
 	steerOverruns     int  // how many times this turn has already used the extra round
+	workspaceLayout   sandbox.WorkspaceLayout
 }
 
 // maxSteerOverruns caps loop-end injects past MaxIterations. One extra round
@@ -148,6 +150,16 @@ func (e *AgentEngine) SetPinnedMentions(mcpServices []*PinnedMCPServiceInfo, ski
 	e.pinnedSkills = skills
 }
 
+// SetWorkspaceLayout injects the session's real workspace into the system
+// prompt. Host sessions must pass the user directory so the model does not
+// keep listing /workspace.
+func (e *AgentEngine) SetWorkspaceLayout(layout sandbox.WorkspaceLayout) {
+	if e == nil {
+		return
+	}
+	e.workspaceLayout = layout
+}
+
 func (e *AgentEngine) systemPromptOptions(ctx context.Context) *BuildSystemPromptOptions {
 	opts := &BuildSystemPromptOptions{
 		Language:         types.LanguageNameFromContext(ctx),
@@ -155,6 +167,7 @@ func (e *AgentEngine) systemPromptOptions(ctx context.Context) *BuildSystemPromp
 		SkillInstallMode: e.config.SkillInstallMode(),
 		MemoryPrompt:     e.memoryPrompt,
 		ProtocolPrompt:   e.modelContext.ProtocolPrompt(),
+		WorkspaceLayout:  e.workspaceLayout,
 	}
 	if e.skillsManager != nil && e.skillsManager.IsEnabled() {
 		opts.SkillsMetadata = e.skillsManager.GetAllMetadata()

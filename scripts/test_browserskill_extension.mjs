@@ -6,7 +6,7 @@ import { pathToFileURL } from 'node:url';
 
 const lines = createInterface({ input: process.stdin });
 const first = await new Promise(resolve => lines.once('line', resolve));
-const { pairing, extension, chromium: executablePath, playwright } = JSON.parse(first);
+const { pairing, extension, chromium: executablePath, playwright, fixture } = JSON.parse(first);
 const { chromium } = await import(pathToFileURL(playwright).href);
 const profile = await mkdtemp('/tmp/wkb-chrome-');
 let browser;
@@ -28,18 +28,25 @@ try {
   const popup = await browser.newPage();
   await popup.goto(new URL('popup.html', worker.url()).href);
   await popup.locator('details summary').click();
-  // Official 0.3.0 unifies local/remote connection settings.
+  // The extension popup unifies local/remote connection settings.
   await popup.locator('[role="group"] button').nth(1).click();
   await popup.locator('#remote-pairing').fill(pairing);
   await popup.locator('form button[type="submit"]').click();
   await popup.waitForFunction(() => document.querySelector('#remote-pairing')?.value === '' || document.querySelector('form [role=alert]'));
   if (await popup.locator('form [role=alert]').count()) throw new Error('Extension authorization failed before browser tests');
+  // Official borrow confirmation needs an injectable page in a normal user
+  // window. Extension settings and an isolated popup cannot host that prompt.
+  const confirmationPage = await browser.newPage();
+  await confirmationPage.goto(fixture);
+  await confirmationPage.locator('browser-skill-overlay').waitFor({state:'attached'});
   const initial = await worker.evaluate(async () => {
     const window = await chrome.windows.getLastFocused();
     const tabs = await chrome.tabs.query({windowId:window.id,active:true});
     return {windowId:window.id,tabId:tabs[0].id,tabIds:(await chrome.tabs.query({})).map(t=>t.id)};
   });
   const originalWindow = { windowId: initial.windowId, tabId: initial.tabId };
+  const preservedTabs = new Set();
+  let beforeReturn;
   process.stdout.write('ready\n');
   for await (const command of lines) {
     if (command === 'close') break;
@@ -86,7 +93,7 @@ try {
             await chrome.debugger.sendCommand({tabId:tab.id}, 'Runtime.evaluate', {expression:'0', returnByValue:true});
             used.push(tab.id);
           } catch (error) {
-            if (!/not attached|No tab|No target/i.test(String(error))) throw error;
+            if (!/not attached|No tab|No target|Cannot access a chrome:\/\/ URL/i.test(String(error))) throw error;
           }
         }
         return used;
@@ -95,7 +102,37 @@ try {
     }
     if (command === 'check-cleanup') {
       const state = await worker.evaluate(async () => ({ids:(await chrome.tabs.query({})).map(t=>t.id)}));
-      process.stdout.write(JSON.stringify({cleaned:state.ids.length===initial.tabIds.length && state.ids.every(id=>initial.tabIds.includes(id))})+'\n');
+      const expected = new Set([...initial.tabIds, ...preservedTabs]);
+      const missing = [...expected].filter(id => !state.ids.includes(id));
+      const unexpected = state.ids.filter(id => !expected.has(id));
+      const cleaned = missing.length === 0 && unexpected.length === 0;
+      process.stdout.write(JSON.stringify(cleaned ? {cleaned} : {cleaned, missing, unexpected})+'\n');
+    }
+    if (command.startsWith('before-tab-return ')) {
+      const id = Number(command.split(' ')[1]);
+      beforeReturn = await worker.evaluate(async (tabId) => ({
+        tabId, tabs: await chrome.tabs.query({}), windows: await chrome.windows.getAll({}),
+      }), id);
+      process.stdout.write('return-recorded\n');
+    }
+    if (command.startsWith('expect-returned-tab ')) {
+      // Admit only the returned page and the official fallback window's new-tab
+      // placeholder. Never allow arbitrary extra tabs to hide task cleanup leaks.
+      const returned = JSON.parse(command.slice('expect-returned-tab '.length));
+      if (!beforeReturn || beforeReturn.tabId !== returned.tab_id) throw new Error('Missing return snapshot');
+      const tabs = await worker.evaluate(async () => chrome.tabs.query({}));
+      const target = tabs.find(tab => tab.id === returned.tab_id);
+      if (!target || target.windowId !== returned.returned_to_window_id) throw new Error('Returned tab missing or misplaced');
+      const added = tabs.filter(tab => !beforeReturn.tabs.some(previous => previous.id === tab.id));
+      const newWindow = !beforeReturn.windows.some(window => window.id === target.windowId);
+      if (added.length > 1 || added.some(tab => !returned.fallback || !newWindow ||
+          tab.windowId !== target.windowId || (tab.pendingUrl ?? tab.url) !== 'chrome://newtab/')) {
+        throw new Error('Unexpected tabs created during tab_return');
+      }
+      preservedTabs.add(target.id);
+      for (const tab of added) preservedTabs.add(tab.id);
+      beforeReturn = undefined;
+      process.stdout.write('returned-tab-preserved\n');
     }
     if (command === 'remember-foreground') {
       const foreground = await worker.evaluate(async () => {
@@ -114,7 +151,7 @@ try {
         // Extension API creation simulates a user-created tab: no navigation
         // source event, even though it is inside the Agent Window.
         return chrome.tabs.create({windowId:source.windowId,url:source.url+'?user-tab=1',active:true});
-      }, initial.tabIds);
+      }, [...initial.tabIds, ...preservedTabs]);
       const page = await createdPage;
       await page.waitForURL('**/*?user-tab=1');
       await page.locator('browser-skill-overlay').waitFor({state:'attached'});
@@ -128,9 +165,19 @@ try {
       }, id);
       process.stdout.write('fixture-window-closed\n');
     }
+    if (command.startsWith('move-fixture-tab-out ')) {
+      // Upstream refuses to borrow an unowned tab that already lives in the
+      // Agent Window; the user must move it to a regular window first.
+      const id = Number(command.split(' ')[1]);
+      await worker.evaluate(async ({tabId, windowId}) => {
+        await chrome.tabs.move(tabId, {windowId, index:-1});
+      }, {tabId:id, windowId:originalWindow.windowId});
+      process.stdout.write('fixture-tab-moved\n');
+    }
     if (command.startsWith('remove-fixture-tab ')) {
       const id = Number(command.split(' ')[1]);
       await worker.evaluate(async (tabId) => chrome.tabs.remove(tabId), id);
+      preservedTabs.delete(id);
       process.stdout.write('fixture-tab-removed\n');
     }
     if (command === 'check-background') {

@@ -144,22 +144,20 @@ func (d *WebsocketDialer) Dial(
 		}
 	}
 
-	netDialer := &net.Dialer{
-		Timeout:   10 * time.Second,
-		KeepAlive: 30 * time.Second,
-		Control:   SafeDialControlForPolicy(d.policy),
-	}
+	guardedDial := GuardedDialContext(d.policy)
 	dialer := &websocket.Dialer{
 		HandshakeTimeout: 15 * time.Second,
 		// Only "binary" — see the doc comment.
 		Subprotocols: []string{"binary"},
 		NetDialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
 			// Ignore addr and dial the gateway, exactly as
-			// newGatewayDataTransportWithPolicy does for HTTP.
+			// newGatewayDataTransportWithPolicy does for HTTP — both go
+			// through GuardedDialContext, so the two data planes judge the
+			// same name at the same point.
 			if d.target != "" {
 				addr = d.target
 			}
-			return netDialer.DialContext(ctx, network, addr)
+			return guardedDial(ctx, network, addr)
 		},
 	}
 	dialer.NetDialTLSContext = nil // let the TLS handshake use NetDialContext

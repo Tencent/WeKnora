@@ -152,7 +152,7 @@ func TestArtifactCollectorUsesOneConnectionForAllFiles(t *testing.T) {
 
 func TestPinnedCheckpointSkipsWorkspacePreparation(t *testing.T) {
 	ctx, mgr, client := newOperationRequestManager(t)
-	pinned := NewPinnedSessionSandbox(stubPinReader{configID: "cfg1"}, &stubTenantSandboxResolver{mgr: mgr}, nil)
+	pinned := NewPinnedSessionSandbox(stubPinReader{configID: "cfg1"}, &stubTenantSandboxResolver{mgr: mgr}, nil, nil)
 	checkpoint := NewWorkspaceCheckpointer(pinned).Checkpoint(ctx, "s1", "sb1", "m1")
 	require.NotNil(t, checkpoint)
 	require.Equal(t, "sb1", checkpoint.SandboxID)
@@ -170,7 +170,7 @@ func TestPinnedCheckpointSkipsWorkspacePreparation(t *testing.T) {
 
 func TestPinnedRewindResetSkipsWorkspacePreparation(t *testing.T) {
 	ctx, mgr, client := newOperationRequestManager(t)
-	pinned := NewPinnedSessionSandbox(stubPinReader{configID: "cfg1"}, &stubTenantSandboxResolver{mgr: mgr}, nil)
+	pinned := NewPinnedSessionSandbox(stubPinReader{configID: "cfg1"}, &stubTenantSandboxResolver{mgr: mgr}, nil, nil)
 	sha := strings.Repeat("a", 40)
 	require.NoError(t, resetWorkspaceToCommit(ctx, pinned, "s1", sha, "sb1"))
 	require.Equal(t, []string{"connect", "exec"}, client.ops,
@@ -183,7 +183,7 @@ func TestPinnedRewindResetSkipsWorkspacePreparation(t *testing.T) {
 
 func TestPinnedEmptyResetSkipsWorkspacePreparation(t *testing.T) {
 	ctx, mgr, client := newOperationRequestManager(t)
-	pinned := NewPinnedSessionSandbox(stubPinReader{configID: "cfg1"}, &stubTenantSandboxResolver{mgr: mgr}, nil)
+	pinned := NewPinnedSessionSandbox(stubPinReader{configID: "cfg1"}, &stubTenantSandboxResolver{mgr: mgr}, nil, nil)
 	require.NoError(t, resetWorkspaceToEmpty(ctx, pinned, "s1", "sb1"))
 	require.Equal(t, []string{"connect", "exec"}, client.ops,
 		"SkipWorkspacePrep must omit the extra prepareSessionDirs exec")

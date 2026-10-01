@@ -103,16 +103,50 @@ type EditSandboxFileInput struct {
 // EditSandboxFileTool applies an exact string replacement to a sandbox file.
 type EditSandboxFileTool struct {
 	BaseTool
+	sessionBound
 	editor SandboxFileEditor
 }
 
 // NewEditSandboxFileTool constructs the tool. `editor` MUST NOT be nil.
 func NewEditSandboxFileTool(editor SandboxFileEditor) *EditSandboxFileTool {
 	return &EditSandboxFileTool{
-		BaseTool: editSandboxFileTool,
-		editor:   editor,
+		BaseTool: BaseTool{
+			name:   editSandboxFileTool.name,
+			schema: editSandboxFileTool.schema,
+		},
+		editor: editor,
 	}
 }
+
+// Description is built from the session sandbox layout so host paths never
+// hard-code /workspace.
+func (t *EditSandboxFileTool) Description() string {
+	layout := t.boundLayout()
+	if layout.IsHost() {
+		return fmt.Sprintf(hostEditSandboxFileDescription, layoutRootOrGeneric(layout))
+	}
+	return rewriteRemoteWorkspaceCopy(editSandboxFileTool.description, layout)
+}
+
+// Parameters rewrites workspace paths in the schema to match the session layout.
+func (t *EditSandboxFileTool) Parameters() json.RawMessage {
+	return schemaForLayout(editSandboxFileTool.schema, t.boundLayout())
+}
+
+func (t *EditSandboxFileTool) boundLayout() sandbox.WorkspaceLayout {
+	if t == nil {
+		return sandbox.RemoteWorkspaceLayout()
+	}
+	return t.describeLayout(t.editor)
+}
+
+const hostEditSandboxFileDescription = "Apply exact text replacements to an existing text file in %s.\n" +
+	"Read the relevant content first. Send edits as an array, even for one replacement. \n" +
+	"Every old_string matches the original file, must be unique unless replace_all=true, " +
+	"and must not overlap another edit. \n" +
+	"Include enough surrounding text to identify the intended occurrence.\n" +
+	"All replacements are validated before writing; a failed match leaves the file unchanged. " +
+	"The result includes a diff. Use write_sandbox_file for new files."
 
 // Execute reads the file, applies the replacement, and writes it back.
 func (t *EditSandboxFileTool) Execute(ctx context.Context, args json.RawMessage) (*types.ToolResult, error) {
@@ -133,14 +167,6 @@ func (t *EditSandboxFileTool) Execute(ctx context.Context, args json.RawMessage)
 		}, nil
 	}
 
-	trimmed := strings.TrimSpace(input.Path)
-	if trimmed == "" {
-		return &types.ToolResult{
-			Success: false,
-			Error:   "path is required; edit a file inside the session sandbox (not /workspace/input)",
-		}, nil
-	}
-
 	sessionID := resolveSessionID(ctx)
 	if sessionID == "" {
 		return &types.ToolResult{
@@ -149,12 +175,28 @@ func (t *EditSandboxFileTool) Execute(ctx context.Context, args json.RawMessage)
 		}, nil
 	}
 
-	clean := sandbox.ResolveWorkspacePath(trimmed)
-	rootDir, ok := matchingWritableRoot(clean)
+	layout, layoutErr := executeWorkspaceLayout(ctx, sessionID, t.editor)
+	if layoutErr != nil {
+		return layoutErr, nil
+	}
+
+	trimmed := strings.TrimSpace(input.Path)
+	if trimmed == "" {
+		return &types.ToolResult{
+			Success: false,
+			Error: fmt.Sprintf(
+				"path is required; edit a file inside the session sandbox (not %s)",
+				modelSafeLayoutPath(layout.InputDir, "the attachment directory"),
+			),
+		}, nil
+	}
+
+	clean := resolveIn(layout, trimmed)
+	rootDir, ok := writableRootIn(layout, clean)
 	if !ok {
 		return &types.ToolResult{
 			Success: false,
-			Error:   workspaceWriteScopeError(input.Path),
+			Error:   writeScopeErrorIn(layout, input.Path),
 		}, nil
 	}
 
@@ -204,7 +246,8 @@ func (t *EditSandboxFileTool) Execute(ctx context.Context, args json.RawMessage)
 	if isBinaryShellOutput(string(raw)) {
 		return &types.ToolResult{
 			Success: false,
-			Error:   "binary files cannot be edited; write a text script and have it produce binary artifacts under /workspace/output",
+			Error: "binary files cannot be edited; write a text script and have it produce binary artifacts under " +
+				modelSafeLayoutPath(layout.OutputDir, "the artifact output directory"),
 		}, nil
 	}
 
@@ -288,7 +331,7 @@ func (t *EditSandboxFileTool) Execute(ctx context.Context, args json.RawMessage)
 	return &types.ToolResult{
 		Success:     true,
 		Output:      output,
-		OutputFiles: sandboxOutputLinks(clean),
+		OutputFiles: sandboxOutputLinksIn(layoutOutputDir(layout), clean),
 		Data:        data,
 	}, nil
 }

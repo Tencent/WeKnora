@@ -9,33 +9,46 @@
 #   cube             - the same environment plus Cube's envd daemon. Cube
 #                      builds templates straight from the image and probes
 #                      :49983/health, so an image without envd can only ever
-#                      fail. See docs/sandbox-cluster.md.
+#                      fail. See website-docs/06-development/04-sandbox-deployment.md.
 #   desktop-runtime  - runtime plus XFCE / x11vnc / websockify. Not a published
 #                      tag; the desktop and desktop-cube targets sit on it.
 #   desktop          - desktop-runtime, tagged for E2B (and a future Docker
 #                      desktop path). The Docker backend does not use this yet.
-#   desktop-cube     - desktop-runtime plus Cube envd. amd64 only, same reason
-#                      as cube.
+#   desktop-cube     - desktop-runtime plus Cube envd.
 #
-# Pin every FROM to TARGETPLATFORM. `docker build --platform` alone is not
-# enough: the legacy builder (DOCKER_BUILDKIT=0) on Apple Silicon still
-# pulls the host's arm64 python/node, then COPY's amd64 envd — Cube probes
-# that mixed image as READY and Exec fails with "exec format error".
-# Default amd64 matches cube/desktop-cube; BuildKit overrides this when
-# --platform is linux/arm64 (sandbox / desktop).
-ARG TARGETPLATFORM=linux/amd64
+# Pin every FROM to TARGETPLATFORM. BuildKit already honours --platform; the
+# pin is for the legacy builder (DOCKER_BUILDKIT=0), which ignores --platform
+# whenever the host's arm64 python/node is already cached. The cube target
+# can then COPY envd of one architecture onto a runtime of the other — Cube
+# probes the mixed image as READY and Exec fails with "exec format error".
+#
+# Do not give this ARG a default. A declared default beats the value BuildKit
+# injects per platform, so a multi-platform build would run every platform on
+# the amd64 rootfs and only relabel the config. The legacy builder injects
+# nothing and rejects an empty --platform, hence the amd64 fallback in FROM:
+# under that builder an arm64 image needs --build-arg TARGETPLATFORM.
+ARG TARGETPLATFORM
 
 # Stage 1: Get Node.js binaries
-FROM --platform=$TARGETPLATFORM node:20-slim AS node-base
+FROM --platform=${TARGETPLATFORM:-linux/amd64} node:20-slim AS node-base
 
-FROM --platform=$TARGETPLATFORM ghcr.io/astral-sh/uv:0.12.4 AS uv-base
+FROM --platform=${TARGETPLATFORM:-linux/amd64} ghcr.io/astral-sh/uv:0.12.4 AS uv-base
 
 # Stage 2: Runtime image
 #
 # 3.12 is the floor because skill sources commonly use PEP 701 nested quotes
 # in f-strings (f"x={d["k"]}"). Install-time ast.parse runs this interpreter;
 # 3.11 rejects that syntax and the whole skill install fails.
-FROM --platform=$TARGETPLATFORM python:3.12-slim AS runtime
+FROM --platform=${TARGETPLATFORM:-linux/amd64} python:3.12-slim AS runtime
+
+# Fail the build when the rootfs is not the platform being built. No default:
+# BuildKit sets TARGETARCH per platform; the legacy builder leaves it empty.
+ARG TARGETARCH
+RUN arch="$(dpkg --print-architecture)"; \
+    if [ -n "$TARGETARCH" ] && [ "$arch" != "$TARGETARCH" ]; then \
+        echo "runtime rootfs is $arch but TARGETARCH=$TARGETARCH" >&2; \
+        exit 1; \
+    fi
 
 # Copy Node.js from node image (avoids NodeSource install overhead)
 COPY --from=node-base /usr/local/bin/node /usr/local/bin/
@@ -109,21 +122,25 @@ USER root
 # runs as root and selects the account named in each request. WeKnora names
 # root by default, matching the runtime stage.
 #
-# This target is linux/amd64 only: cubesandbox-base publishes no arm64 image,
-# which matches Cube itself (PVM is x86_64-only). Hard-pin the FROM so a
-# forgotten --platform cannot copy an amd64 envd onto an arm64 runtime.
-FROM --platform=linux/amd64 ghcr.io/tencentcloud/cubesandbox-base:2026.16 AS cube-base
+# Built for amd64 and arm64: cubesandbox-base ships both, and Cube runs on
+# x86_64 (PVM or bare-metal KVM) and on arm64 bare-metal KVM. PVM itself is
+# x86_64-only, so an arm64 Cube host needs native KVM.
+FROM --platform=${TARGETPLATFORM:-linux/amd64} ghcr.io/tencentcloud/cubesandbox-base:2026.16 AS cube-base
 
 FROM runtime AS cube
 
-ARG TARGETARCH=amd64
 USER root
-RUN if [ "$TARGETARCH" != "amd64" ]; then \
-        echo "cube is linux/amd64 only (cubesandbox-base has no arm64), got TARGETARCH=$TARGETARCH" >&2; \
-        exit 1; \
-    fi
 COPY --from=cube-base /usr/bin/envd /usr/bin/envd
 COPY --from=cube-base /usr/local/bin/cube-entrypoint.sh /usr/local/bin/cube-entrypoint.sh
+# Compare envd with the rootfs rather than trusting TARGETARCH: the legacy
+# builder leaves TARGETARCH empty, and a mixed image is exactly what this
+# guard exists to stop.
+RUN arch="$(dpkg --print-architecture)"; \
+    case "$arch" in amd64) elf=x86-64 ;; arm64) elf=aarch64 ;; *) elf="$arch" ;; esac; \
+    if ! file -bL /usr/bin/envd | grep -q "$elf"; then \
+        echo "envd is$(file -bL /usr/bin/envd | cut -d, -f2) but rootfs is $arch" >&2; \
+        exit 1; \
+    fi
 
 EXPOSE 49983
 # The entrypoint backgrounds envd and then waits on it, since this image
@@ -186,17 +203,18 @@ RUN chmod 0755 /usr/local/bin/start-desktop.sh \
 FROM desktop-runtime AS desktop
 EXPOSE 6080
 
-# Stage 6: desktop + Cube envd. linux/amd64 only, same constraint as cube.
+# Stage 6: desktop + Cube envd. Same platforms and envd check as cube.
 FROM desktop-runtime AS desktop-cube
 
-ARG TARGETARCH=amd64
 USER root
-RUN if [ "$TARGETARCH" != "amd64" ]; then \
-        echo "desktop-cube is linux/amd64 only (cubesandbox-base has no arm64), got TARGETARCH=$TARGETARCH" >&2; \
-        exit 1; \
-    fi
 COPY --from=cube-base /usr/bin/envd /usr/bin/envd
 COPY --from=cube-base /usr/local/bin/cube-entrypoint.sh /usr/local/bin/cube-entrypoint.sh
+RUN arch="$(dpkg --print-architecture)"; \
+    case "$arch" in amd64) elf=x86-64 ;; arm64) elf=aarch64 ;; *) elf="$arch" ;; esac; \
+    if ! file -bL /usr/bin/envd | grep -q "$elf"; then \
+        echo "envd is$(file -bL /usr/bin/envd | cut -d, -f2) but rootfs is $arch" >&2; \
+        exit 1; \
+    fi
 
 # cube-entrypoint.sh redirects envd to /var/log/envd.log. Cube packs this
 # ~1.5GiB image into a 1.5GiB ext4 with no spare blocks; mkdir/write of that

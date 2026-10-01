@@ -66,6 +66,11 @@ func (runtimeTestInspector) HasQueuedDeleteTasksForKnowledge(context.Context, st
 func (runtimeTestInspector) HasQueuedTasksForKnowledge(context.Context, string) (bool, error) {
 	return false, nil
 }
+
+func (runtimeTestInspector) QueuedKnowledgeIDs(context.Context) (map[string]struct{}, error) {
+	return map[string]struct{}{}, nil
+}
+
 func (runtimeTestInspector) QueueStats(context.Context) ([]types.QueueStat, bool, error) {
 	return []types.QueueStat{}, true, nil
 }

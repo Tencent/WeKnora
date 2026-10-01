@@ -11,7 +11,8 @@ import (
 	"github.com/santhosh-tekuri/jsonschema/v6"
 )
 
-// Flat argument fields use the paired CLI/extension 0.3.0 source baseline.
+// The model sees one text budget, max_text_chars. browserCallParams maps page
+// reads onto the extension's max_tokens (about 4 characters per token).
 // Session identity is server-owned.
 // Method-specific requirements are also described to the model on each field.
 const browserToolParameters = `{
@@ -63,11 +64,6 @@ const browserToolParameters = `{
     "max_depth": {
       "type": "integer",
       "minimum": 0.0
-    },
-    "max_tokens": {
-      "type": "integer",
-      "minimum": 0.0,
-      "description": "For observe/snapshot: limit the rendered page content."
     },
     "probe_hover": {
       "type": "boolean",
@@ -218,7 +214,9 @@ const browserToolParameters = `{
     },
     "max_text_chars": {
       "type": "integer",
-      "minimum": 1.0
+      "minimum": 1.0,
+      "description": "Maximum characters of text to return. For observe and snapshot this bounds ` +
+	`the rendered page; for console and network it bounds each entry."
     },
     "since": {
       "type": "integer",
@@ -354,11 +352,11 @@ type browserArgumentRule struct{ fields, required []string }
 var browserArgumentRules = map[string]browserArgumentRule{
 	"screenshot": {fields: []string{"ref", "tab_id"}},
 	"observe": {
-		fields:   []string{"debug_surfaces", "max_depth", "max_tokens", "probe_hover", "tab_id"},
+		fields:   []string{"debug_surfaces", "max_depth", "max_text_chars", "probe_hover", "tab_id"},
 		required: []string{},
 	},
 	"snapshot": {
-		fields:   []string{"max_depth", "max_tokens", "tab_id"},
+		fields:   []string{"max_depth", "max_text_chars", "tab_id"},
 		required: []string{},
 	},
 	"navigate": {
@@ -555,4 +553,39 @@ func (t *BrowserSkillTool) ValidateArguments(args json.RawMessage) error {
 		}
 	}
 	return nil
+}
+
+// browserCallParams copies model arguments into the official tool.* parameter
+// names. Page observations budget rendered tokens, so a character cap becomes
+// max_tokens at the extension's 4-characters-per-token heuristic. Console and
+// network already speak max_text_chars and are passed through.
+func browserCallParams(method string, input map[string]any) map[string]any {
+	out := make(map[string]any, len(input))
+	for name, value := range input {
+		if name == "method" || name == "keep_open" {
+			continue
+		}
+		out[name] = value
+	}
+	switch method {
+	case "observe", "snapshot":
+		chars, ok := out["max_text_chars"]
+		if !ok {
+			break
+		}
+		delete(out, "max_text_chars")
+		out["max_tokens"] = observationTokensFromTextChars(chars)
+	}
+	return out
+}
+
+// observationTokensFromTextChars matches the extension heuristic of about four
+// characters per rendered token, rounding up so the page cap is not shorter
+// than the character budget the model asked for.
+func observationTokensFromTextChars(value any) int {
+	chars := int(toFloat64(value))
+	if chars < 1 {
+		return 1
+	}
+	return (chars + 3) / 4
 }

@@ -24,6 +24,15 @@ func (r *failingSharedKnowledgeRepo) GetKnowledgeByIDOnly(context.Context, strin
 	return nil, r.err
 }
 
+// GetKnowledgeBatchByIDOnly mirrors a batch query: a missing row is simply
+// absent, while a storage failure is an error.
+func (r *failingSharedKnowledgeRepo) GetKnowledgeBatchByIDOnly(context.Context, []string) ([]*types.Knowledge, error) {
+	if errors.Is(r.err, repository.ErrKnowledgeNotFound) {
+		return nil, nil
+	}
+	return nil, r.err
+}
+
 func TestSharedDocumentReadsPropagateStorageFailure(t *testing.T) {
 	for _, failure := range []error{errors.New("database unavailable"), repository.ErrKnowledgeNotFound} {
 		repo := &failingSharedKnowledgeRepo{err: failure}

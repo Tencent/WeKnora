@@ -2,7 +2,7 @@
 
 IM 集成将智能体接入企业微信、飞书、钉钉、Slack、Telegram 等聊天平台。用户可在平台中向机器人提问，由 WeKnora 根据绑定的智能体配置执行检索和回答。
 
-在「设置 → IM 集成」新建渠道，选择平台、填写应用凭据并绑定智能体后启用。Webhook 模式需要在平台后台填写回调地址；长连接模式无需为接收消息配置公网回调地址。
+在「设置 → IM 集成」新建渠道，选择平台、填写应用凭据并绑定智能体后启用。Webhook 模式需要在平台后台填写回调地址；长连接模式无需为接收消息配置公网回调地址。每个渠道可单独设置「回复语言」，固定智能体在该渠道的回复语言；留空时使用部署默认语言。
 
 <Screenshot
   src="/screenshots/im-channels.png"
@@ -22,7 +22,7 @@ IM 集成将智能体接入企业微信、飞书、钉钉、Slack、Telegram 等
 | Lark `lark` | 同飞书（同一适配器，`RegionLark` 指向 open.larksuite.com） | 是 | 是 | 是 | 同飞书 |
 | Slack `slack` | **websocket**（Socket Mode）/ webhook（Events API） | 是 | 是 | 是（`thread_ts`） | websocket：`app_token` + `bot_token`；webhook：`bot_token` + `signing_secret` |
 | Telegram `telegram` | **websocket**（长轮询 getUpdates）/ webhook | 是（消息编辑） | 是 | 是（Forum Topics 的 `message_thread_id`） | `bot_token`；webhook 另有 `secret_token` |
-| 钉钉 `dingtalk` | **websocket**（Stream 模式）/ webhook | 是（AI 卡片） | 是 | 否 | `client_id`、`client_secret`、`card_template_id` |
+| 钉钉 `dingtalk` | **websocket**（Stream 模式，v0.8.2 起仅支持此模式；升级迁移 000096 会把 webhook 渠道改为 websocket，需在钉钉开发者后台开启 Stream） | 是（AI 卡片） | 是 | 否 | `client_id`、`client_secret`、`card_template_id` |
 | Mattermost `mattermost` | **webhook**（仅支持 Outgoing Webhook + REST API） | 是 | 是 | 是（`root_id`） | `site_url`、`bot_token`、`outgoing_token`（必填）、`bot_user_id`、`post_to_main` |
 | 微信 `wechat`（iLink 机器人） | **longpoll**（强制；创建时后端强制 `mode=longpoll`、`output_mode=full`） | 否（仅整段输出） | 是 | 否 | `bot_token`、`ilink_bot_id`（均必填） |
 | QQ 机器人 `qqbot` | **websocket**（仅支持） | 否 | 否 | 否 | `app_id`、`client_secret`、`api_base_url`、`gateway_url` |
@@ -103,6 +103,7 @@ flowchart LR
 | `AgentID` | 绑定的自定义智能体；回答走该 Agent 的配置（模型、知识库、Skills、MCP、联网搜索） |
 | `Platform` / `Mode` | 平台与接入模式。默认值：mattermost/yunzhijia → `webhook`，wechat → `longpoll`（且强制 `output_mode=full`），其余 → `websocket` |
 | `OutputMode` | `stream`（默认，流式）或 `full`（等完整答案后一次性回复） |
+| `Locale` | 回复语言：`zh-CN` / `en-US` / `ja-JP` / `ko-KR` / `ru-RU`，其他值返回 400。留空（默认）使用 `WEKNORA_LANGUAGE`，未设置时为 `zh-CN`。IM 回调请求头里的 `Accept-Language` 来自平台而非提问者，因此不参与决定回复语言 |
 | `KnowledgeBaseID` | 可选"文件知识库"。无论是否配置，文件/图片都会下载后供 QA 理解；配置后会额外在后台入库（见下文） |
 | `SessionMode` | `user`（默认，按 平台+用户+群 维度映射会话）或 `thread`（按 平台+线程+群 维度，每个顶层消息开新会话） |
 | `BotIdentity` | 由平台+模式+凭据推导的机器人唯一标识（`computeBotIdentity`，如 `feishu:<app_id>`、`telegram:<botID>`、`wecom:ws:<bot_id>`），数据库唯一索引防止同一个机器人被配置到两个渠道（`checkDuplicateBot` 返回 `duplicate_bot:` 前缀错误 → HTTP 409） |
@@ -110,16 +111,17 @@ flowchart LR
 
 `ChannelSession`（表 `im_channel_sessions`）把 `(platform, user_id, chat_id, thread_id, tenant_id)` 映射到 WeKnora `session_id`，实现 IM 侧的对话连续性。若底层 Session 被从 Web UI 删除，`HandleMessage` 会检测 `ErrSessionNotFound`，软删陈旧映射并自动重建（修复 #1046、#1499 中"机器人永久失联"的问题）。
 
-#### 渠道管理 API（internal/handler/im.go + router.go）
+#### 渠道管理 API（internal/handler/im.go + routes_agent.go）
 
 | 方法与路径 | 说明 |
 | --- | --- |
 | `POST /api/v1/agents/:id/im-channels` | 为 Agent 创建渠道（校验 platform 合法性、填充默认 mode/output_mode） |
 | `GET /api/v1/agents/:id/im-channels` | 列出 Agent 的渠道（不含凭据） |
 | `GET /api/v1/im-channels` | 租户内跨 Agent 渠道总览 |
-| `PUT /api/v1/im-channels/:id` | 更新（name/mode/output_mode/knowledge_base_id/credentials/enabled/agent_id） |
+| `PUT /api/v1/im-channels/:id` | 局部更新（name/mode/output_mode/locale/session_mode/knowledge_base_id/credentials/enabled/agent_id）；`knowledge_base_id` 传空字符串即解除文件知识库 |
 | `DELETE /api/v1/im-channels/:id` | 删除 |
 | `POST /api/v1/im-channels/:id/toggle` | 启用/停用 |
+| `POST /api/v1/wechat/qrcode`、`POST /api/v1/wechat/qrcode/status` | 微信（iLink）扫码绑定：生成二维码并轮询状态 |
 | `GET / POST /api/v1/im/callback/:channel_id` | **平台回调地址**（webhook 模式下配置到各平台后台；走平台自身签名校验，不需要 WeKnora API Key） |
 
 Webhook 模式的接入方式就是把 `https://<你的域名>/api/v1/im/callback/<channel_id>` 填到平台的事件订阅/回调地址处；WeKnora 会先响应平台的 URL 验证挑战（`HandleURLVerification`，如飞书的 challenge 回显、企微的 echostr 解密），之后每个回调都过 `VerifyCallback` 签名校验。WebSocket/长连接模式则无需公网回调地址，由 WeKnora 主动连接平台网关。
@@ -138,6 +140,7 @@ credentials.api_base_url 可覆盖 API origin，并同时用作长连接 SDK 的
 
 - **多实例 leader 选举**（`service.go`）：websocket/longpoll 渠道在多实例部署（有 Redis）时，通过 `SETNX im:ws:leader:<channelID>`（TTL 15s，每 5s 续期）保证**只有一个实例**维持长连接；非 leader 实例每 10s 重试抢锁，leader 宕机后自动接管。longpoll 渠道停止后保留锁至过期，等 TTL 自然过期，避免新旧实例短暂双写。续期失败（丢失 leader 身份）时走 `handleWSLeadershipLoss`：先停掉本实例的适配器，再把渠道放回抢锁重试循环——重试前会重新读一次数据库中的渠道行，因此期间被删除、禁用或改配置的渠道不会被旧运行时复活。
 - **连接保活**（`supervisor.go` 的 `RunSupervised`）：部分 SDK（钉钉、飞书）的内部重连可能出现连接对象存在但无法接收消息的状态，Supervisor 每 6 小时（`defaultRecycleInterval`）主动重建连接，连接失败按 5s 退避重试，把最坏停摆时间限制在回收间隔内。
+- **云之家长连接**（`yunzhijia/websocket.go`）：每 15s 发送心跳，45s 内收不到任何数据即判定连接失效并重连；单条连接最长保持 6 小时后主动重建。重连按 1s、2s、5s、10s、30s、60s 退避。
 
 ### 多实例部署要点
 
@@ -191,7 +194,7 @@ sequenceDiagram
             S->>A: UpdateStreamContent(思考块 + 工具状态行 + 已生成答案)
             A->>P: 更新流式卡片 / 编辑消息
         end
-        QA-->>S: EventAgentComplete (最终答案 + 引用)
+        QA-->>S: EventAgentComplete (最终答案 + 引用)，或 AgentQA 返回
         S->>A: FinalizeStream(仅保留答案, 剥离 think/工具过程) → EndStream
         S->>DB: 回填 assistant message (内容/引用/AgentSteps)
     end
@@ -205,6 +208,7 @@ sequenceDiagram
 - **会话解析**：`user` 模式按用户维度共享会话，标题形如"张三 · 群聊 1a2b3c4d"；`thread` 模式每个顶层消息/话题一个会话（Slack thread、飞书话题群、Telegram Forum Topic、Mattermost root_id）。首条消息会异步生成会话标题（`GenerateTitleAsync`）。
 - **身份注入**（`withIMIdentity`）：IM 回调走平台签名而非 WeKnora 登录态，因此注入合成身份 `system-<tenantID>` + `PrincipalIMUser`（`tenantID:channelID:platform:userID`）+ Viewer 角色，使组织共享知识库等依赖 UserID 的逻辑正常工作；同时标记 `MCPOAuthNonInteractive`（见[MCP OAuth 授权通知](#mcp-oauth-授权通知-身份绑定)）。
 - **流式渲染**（`handleMessageStream` + `think.go` + `tool_display.go`）：订阅 EventBus 的 `EventAgentThought`（思考）、`EventAgentToolCall`/`EventAgentToolResult`（工具状态行，内部工具经 `isToolVisibleToUser` 过滤；快速问答只显示 `query_understand`/`knowledge_search` 两个 RAG 流水线工具）、`EventAgentFinalAnswer`（答案分片）、`EventAgentReferences`（引用）、`EventAgentComplete`。Agent 模式下"乐观答案"在后续又发起工具调用时会被**撤回**进思考块（`retractAgentLiveAnswer`，与 Web 端 superseded preamble 一致）。每 300ms 把缓冲内容整段推送（`UpdateStreamContent` 为替换语义）；`holdbackCutoff` 会扣住跨分片边界的不完整 `provider://` URL、Markdown 图片、XML 标签，避免闪烁半截内容。最终 `FinalizeStream` 只保留答案文本（`StripThinkBlocks`），并把 `<kb/>`、`<web/>` 引用标签与 `<image>` XML 清洗掉、`provider://` 存储 URL 重写为可访问链接（`cleanIMContent` / `rewriteStorageURLs`）。
+- **流式收尾**：Agent 模式下，收到 `EventAgentComplete` 或 AgentQA 调用返回（以先到者为准）都会结束流式回复，避免卡片停在「生成中」；完成事件之后产生的错误仍会收集并附在最终回复中。快速问答（KnowledgeQA）的答案流是异步的，以流结束为准。飞书流式卡片在长时间问答期间保持活跃，不会被过期清理提前回收。
 - **非流式路径**：渠道 `output_mode=full`、适配器不支持 `StreamSender`、或 `StartStream` 失败时，走 `runQA` 聚合完整答案后 `SendReply` 一次性发送。
 - **引用消息**（`Quote`，目前由 WeCom 长连接适配器等填充）：文本引用以 `<quoted_message>` 包裹注入 LLM 上下文（上限 500 rune，区分"引用了机器人自己的回复"）；引用图片/文件/视频等非文本消息时，注入的是"明确告知用户无法查看该内容"的指令，避免模型猜测无法读取的内容。
 
@@ -265,4 +269,4 @@ imService.RegisterAdapterFactory("yunzhijia", yunzhijia.NewFactory())
 - 核心框架与编排：`internal/im/`（`adapter.go`、`service.go`、`supervisor.go`、`command*.go`、`qaqueue.go`、`session/stream/think/tool_display` 等）
 - 各平台适配器：`internal/im/{wecom,feishu,dingtalk,slack,telegram,mattermost,wechat,qqbot,yunzhijia}/`
 - HTTP 接口层：`internal/handler/im.go`
-- 路由：`internal/router/router.go` 的 `RegisterIMRoutes` / `RegisterIMChannelRoutes`
+- 路由：`internal/router/routes_agent.go` 的 `RegisterIMRoutes` / `RegisterIMChannelRoutes`

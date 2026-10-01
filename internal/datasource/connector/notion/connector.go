@@ -220,7 +220,10 @@ func (c *Connector) FetchIncremental(ctx context.Context, config *types.DataSour
 
 	// Subsequent syncs: discover all pages, diff against cursor, fetch only changes
 	logger.Infof(ctx, "[Notion] incremental sync, discovering pages")
-	pages, fetchVisited := c.discoverAllResources(ctx, client, resourceIDs)
+	pages, fetchVisited, err := c.discoverAllResources(ctx, client, resourceIDs)
+	if err != nil {
+		return nil, nil, err
+	}
 	logger.Infof(ctx, "[Notion] discovered %d pages", len(pages))
 
 	newEditTimes := make(map[string]time.Time)
@@ -344,10 +347,19 @@ func (c *Connector) fetchPage(ctx context.Context, client *notionClient, page *n
 	resolveFileUploads(ctx, client, blocks)
 
 	markdown, attachmentList := BlocksToMarkdown(blocks)
+	// A successfully cleared page still exists. Keep its title as content so
+	// ingestion replaces stale text instead of silently acknowledging the edit.
+	if len(blocks) == 0 {
+		title := strings.TrimSpace(page.Title)
+		if title == "" {
+			title = defaultUntitledName
+		}
+		markdown = "# " + title + "\n"
+	}
 
 	var items []types.FetchedItem
 
-	// Only skip truly empty pages (no content at all)
+	// Do not replace unreadable blocks or attachment-only pages with a title.
 	if strings.TrimSpace(markdown) != "" {
 		fileName := page.Title + ".md"
 		if page.Title == "" {
@@ -672,11 +684,12 @@ func (c *Connector) buildDatabaseItem(ctx context.Context, client *notionClient,
 // Returns the included pages plus the excluded set (visible pages NOT under any
 // selected root) so callers can seed `visited` for child-block recursion without
 // a second SearchPages round-trip.
-func (c *Connector) discoverAllResources(ctx context.Context, client *notionClient, resourceIDs []string) (included []notionPage, excluded map[string]bool) {
+func (c *Connector) discoverAllResources(
+	ctx context.Context, client *notionClient, resourceIDs []string,
+) (included []notionPage, excluded map[string]bool, err error) {
 	allPages, err := client.SearchPages(ctx)
 	if err != nil {
-		logger.Warnf(ctx, "[Notion] failed to search pages for discovery: %v", err)
-		return nil, nil
+		return nil, nil, fmt.Errorf("discover notion resources: %w", err)
 	}
 
 	// data_source objects use database_parent for workspace hierarchy.
@@ -728,7 +741,7 @@ func (c *Connector) discoverAllResources(ctx context.Context, client *notionClie
 			excluded[id] = true
 		}
 	}
-	return included, excluded
+	return included, excluded, nil
 }
 
 // --- File upload resolution ---

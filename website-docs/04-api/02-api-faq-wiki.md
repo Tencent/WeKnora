@@ -2,7 +2,7 @@
 
 管理知识库中的 FAQ 条目与 Wiki 页面，支持导入、检索、编辑和版本恢复。
 
-两组均为 KB 内容子资源：读为 Viewer+ 且 KB read（API key `retrieve`/full）；写为“KB 创建者 OR Admin+”且 KB write（API key `ingest`/full），并受 KB 白名单约束。
+两组均为 KB 内容子资源：读为 Viewer+ 且 KB read（API key `retrieve`/full）；写为“KB 创建者 OR Admin+”且 KB write（API key `ingest`/full），并受 KB 白名单约束。跨库 Wiki 搜索 `POST /wiki-search` 无路径 KB，Viewer+ 且 API key `retrieve`/full，handler 内校验每个目标库的 allow-list 与共享库 Viewer 权限。
 
 ## FAQ（/api/v1/knowledge-bases/:id/faq）
 
@@ -18,11 +18,12 @@
 | `keyword` | string | 否 | 关键字 |
 | `search_field` | string | 否 | `standard_question`/`similar_questions`/`answers`（默认全字段） |
 | `sort_order` | string | 否 | `asc`（默认按更新时间倒序） |
+| `is_enabled` | bool | 否 | 按启用状态筛选：`true` 仅启用、`false` 仅停用，不传返回全部；其他取值返回 400 |
 
 响应：200 `{"success":true,"data":{分页 FAQEntry 列表}}`
 
 ```bash
-curl "$BASE/api/v1/knowledge-bases/kb-1/faq/entries?page=1" -H "Authorization: Bearer $TOKEN"
+curl "$BASE/api/v1/knowledge-bases/kb-1/faq/entries?page=1&is_enabled=false" -H "Authorization: Bearer $TOKEN"
 ```
 
 ### GET /api/v1/knowledge-bases/:id/faq/entries/export
@@ -54,7 +55,7 @@ curl $BASE/api/v1/knowledge-bases/kb-1/faq/entries/12 -H "Authorization: Bearer 
 | `entries` | []FAQEntryPayload | 是（`binding:"required"`） | 批量条目 |
 | `mode` | string | 是（`binding:"oneof=append replace"`） | 追加或替换 |
 | `knowledge_id` | string | 否 | FAQ 知识实体 ID |
-| `task_id` | string | 否 | 自定义任务 ID |
+| `task_id` | string | 否 | 自定义任务 ID，仅允许字母、数字、`_`、`-`，最长 128 字符，否则返回 400 |
 | `dry_run` | bool | 否 | 仅校验不落库 |
 
 响应：200 `{"success":true,"data":{"task_id"}}`
@@ -156,8 +157,8 @@ curl -X DELETE $BASE/api/v1/knowledge-bases/kb-1/faq/entries -H "Authorization: 
 | 字段 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
 | `query_text` | string | 是（`binding:"required"`） | 查询 |
-| `vector_threshold` | float64 | 否 | 向量阈值 |
-| `match_count` | int | 否 | 默认 10，上限 200 |
+| `vector_threshold` | float64 | 否 | 向量阈值，默认 0.7 |
+| `match_count` | int | 否 | 默认 10，上限 50 |
 | `first_priority_tag_ids` / `second_priority_tag_ids` | []int64 | 否 | 标签优先级过滤 |
 | `only_recommended` | bool | 否 | 仅推荐条目 |
 
@@ -206,7 +207,7 @@ curl $BASE/api/v1/faq/import/progress/task-1 -H "X-API-Key: $API_KEY"
 | `folder_id` | string | 否 | 精确目录过滤（空串=根） |
 | `category_depth` | int | 否 | 目录深度 |
 | `page` / `page_size` | int | 否 | 分页（默认 1/20） |
-| `sort_by` / `sort_order` | string | 否 | 排序（默认 `updated_at` desc） |
+| `sort_by` / `sort_order` | string | 否 | 排序字段：`title`、`created_at`、`updated_at`、`page_type`、`wiki_path`、`sort_order`、`depth`，其他值按 `updated_at`；默认 `updated_at` desc |
 
 响应：200 `WikiPageListResponse`
 
@@ -263,7 +264,7 @@ curl -X PUT $BASE/api/v1/knowledgebase/kb-1/wiki/pages/overview -H "Authorizatio
 
 | 查询参数 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
-| `version` | int | 否 | 传入时返回**该版本全文**（用于 diff），无效或 < 1 返回 400，找不到返回 404 |
+| `version` | int | 否 | 传入时返回**该版本全文**（用于 diff），无效或 < 1 返回 400，找不到返回 404（升级前写入的版本或已被保留策略清理的快照都没有全文，属正常情况） |
 | `limit` | int | 否 | 默认 50，上限 200；仅列表模式生效 |
 | `offset` | int | 否 | 分页偏移 |
 
@@ -399,10 +400,49 @@ curl $BASE/api/v1/knowledgebase/kb-1/wiki/stats -H "Authorization: Bearer $TOKEN
 
 用途：页面搜索。查询参数：`q`（必填）、`limit`（默认 10）。
 
+匹配语义随存储方言变化：
+
+- Postgres：`q` 按 POSIX 正则（`~*`，大小写不敏感）匹配。
+- SQLite / Lite：按 `LIKE` 字面子串匹配；`%` / `_` 会转义，不当通配符。
+
 响应：200 `{"pages":[WikiPage]}`
 
 ```bash
 curl "$BASE/api/v1/knowledgebase/kb-1/wiki/search?q=部署" -H "Authorization: Bearer $TOKEN"
+```
+
+### POST /api/v1/wiki-search
+
+用途：跨知识库 Wiki 页面搜索（无会话、非混合检索）。Handler: `internal/handler/wiki_page.go` 的 `SearchPagesAcross`。算法与单库 `GET .../wiki/search` 相同（标题 > slug > summary > 正文），对多个库做一次查询后按 `match_rank` 全局截断。API key：`retrieve`/full。
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `query` | string | 是（`binding:"required"`） | 与单库 `q` 相同：Postgres 为 POSIX 正则（大小写不敏感）；SQLite / Lite 为字面 `LIKE` 子串 |
+| `knowledge_base_ids` | []string | 条件必填 | 多库；与 `knowledge_base_id` 至少提供一个，最多 32 个 |
+| `knowledge_base_id` | string | 否 | 单库兼容字段，合并进 ids |
+| `limit` | int | 否 | 全局 top-N，默认 10，最大 50 |
+
+任一目标库未开启 wiki → 400。库不存在或无读权限 → 404。API Key 白名单越权 → 403。非法正则（Postgres）→ 400。
+
+响应：200 `{"success":true,"data":[WikiSearchHit]}`。命中只含导航字段 + `match_snippet`，不含正文；全文用 `GET /knowledgebase/:kb_id/wiki/pages/{slug}`。
+
+| 响应字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `id` | string | 页面 ID |
+| `knowledge_base_id` | string | 来源库，跨库时用来拼读页 URL |
+| `slug` | string | 页面 slug |
+| `title` | string | 标题 |
+| `page_type` | string | 页面类型 |
+| `aliases` | []string | 别名 |
+| `summary` | string | 摘要 |
+| `match_snippet` | string | 正文中首次命中附近约 60+命中+60 字；无正文命中时省略。snippet 仍用 Go 正则编译 `query`；SQLite 下 `query` 含正则元字符时库内可命中、snippet 可能为空 |
+
+`content`、树/链接/元数据、时间戳不在搜索结果里。单库 `GET .../wiki/search` 仍返回完整 `WikiPage`。
+
+```bash
+curl -X POST $BASE/api/v1/wiki-search -H "X-API-Key: $API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"query":"部署|发布","knowledge_base_ids":["kb-1","kb-2"],"limit":10}'
 ```
 
 ### POST /api/v1/knowledgebase/:kb_id/wiki/rebuild-links
@@ -458,4 +498,4 @@ curl -X PUT $BASE/api/v1/knowledgebase/kb-1/wiki/issues/i-1/status -H "Authoriza
 
 ## 实现参考
 
-路由注册：`internal/router/router.go` 的 `RegisterFAQRoutes` 与 `RegisterWikiPageRoutes`。Handler：`internal/handler/faq.go`、`internal/handler/wiki_page.go`。
+路由注册：`internal/router/routes_knowledge.go` 的 `RegisterFAQRoutes` 与 `RegisterWikiPageRoutes`。Handler：`internal/handler/faq.go`、`internal/handler/wiki_page.go`。

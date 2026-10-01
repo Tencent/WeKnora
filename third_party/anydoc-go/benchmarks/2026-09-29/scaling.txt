@@ -1,0 +1,17 @@
+goos: darwin
+goarch: arm64
+pkg: github.com/Tencent/WeKnora/internal/infrastructure/docparser/anydoc
+cpu: Apple M4 Pro
+BenchmarkConvertScaling/csv_100_rows         	    1497	    397701 ns/op	   9.12 MB/s	  129360 B/op	    1930 allocs/op
+BenchmarkConvertScaling/csv_100_rows         	    1510	    398194 ns/op	   9.11 MB/s	  129360 B/op	    1930 allocs/op
+BenchmarkConvertScaling/csv_100_rows         	    1504	    395770 ns/op	   9.16 MB/s	  129360 B/op	    1930 allocs/op
+BenchmarkConvertScaling/csv_10000_rows       	      18	  31730509 ns/op	  11.35 MB/s	12581816 B/op	  190030 allocs/op
+BenchmarkConvertScaling/csv_10000_rows       	      16	  32328646 ns/op	  11.14 MB/s	12581816 B/op	  190030 allocs/op
+BenchmarkConvertScaling/csv_10000_rows       	      16	  32133409 ns/op	  11.20 MB/s	12581816 B/op	  190030 allocs/op
+BenchmarkConvertScaling/pdf_40000_operators  	     547	   1076646 ns/op	 186.32 MB/s	     152 B/op	       7 allocs/op
+BenchmarkConvertScaling/pdf_40000_operators  	     559	   1074017 ns/op	 186.77 MB/s	     152 B/op	       7 allocs/op
+BenchmarkConvertScaling/pdf_40000_operators  	     558	   1064584 ns/op	 188.43 MB/s	     152 B/op	       7 allocs/op
+BenchmarkConvertScaling/pdf_200000_operators 	     138	   4345923 ns/op	 230.24 MB/s	     152 B/op	       7 allocs/op
+BenchmarkConvertScaling/pdf_200000_operators 	     136	   4356177 ns/op	 229.70 MB/s	     152 B/op	       7 allocs/op
+BenchmarkConvertScaling/pdf_200000_operators 	     138	   4319291 ns/op	 231.66 MB/s	     152 B/op	       7 allocs/op
+PASS

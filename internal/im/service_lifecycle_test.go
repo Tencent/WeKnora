@@ -81,6 +81,7 @@ func newLifecycleTestDB(t *testing.T) *gorm.DB {
 		enabled NUMERIC NOT NULL DEFAULT 1,
 		mode TEXT NOT NULL DEFAULT 'websocket',
 		output_mode TEXT NOT NULL DEFAULT 'stream',
+		locale TEXT NOT NULL DEFAULT '',
 		knowledge_base_id TEXT DEFAULT '',
 		bot_identity TEXT NOT NULL DEFAULT '',
 		session_mode TEXT NOT NULL DEFAULT 'user',
@@ -173,6 +174,7 @@ func createLifecycleChannel(t *testing.T, db *gorm.DB, id, agentID string) *IMCh
 		Enabled:     true,
 		Mode:        "webhook",
 		OutputMode:  "full",
+		Locale:      "en-US",
 		SessionMode: string(SessionModeUser),
 		Credentials: types.JSON(`{"token":"v1"}`),
 	}
@@ -411,6 +413,7 @@ func TestSameChannelRuntimeConfigUsesSemanticCredentials(t *testing.T) {
 		Enabled:     true,
 		Mode:        "webhook",
 		OutputMode:  "full",
+		Locale:      "en-US",
 		SessionMode: string(SessionModeUser),
 		Credentials: types.JSON(`{"token":"secret","timeout":10}`),
 		UpdatedAt:   now,
@@ -425,6 +428,11 @@ func TestSameChannelRuntimeConfigUsesSemanticCredentials(t *testing.T) {
 	fresh.Credentials = types.JSON(`{"timeout":10,"token":"changed"}`)
 	if sameChannelRuntimeConfig(cached, &fresh) {
 		t.Fatal("changed credentials did not trigger a rebuild")
+	}
+	fresh = *cached
+	fresh.Locale = "ja-JP"
+	if sameChannelRuntimeConfig(cached, &fresh) {
+		t.Fatal("changed locale did not trigger a rebuild")
 	}
 }
 

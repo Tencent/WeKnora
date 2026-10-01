@@ -4,7 +4,7 @@
     <p class="description">{{ t('localBrowser.searchInstructionsDescription') }}</p>
     <t-skeleton v-if="loading" animation="gradient" :row-col="[{ width: '100%', height: '64px' }]" />
     <template v-else-if="loaded">
-      <t-textarea v-model="draft" :autosize="{ minRows: 2, maxRows: 8 }" :maxlength="4000"
+      <t-textarea v-model="draft" :autosize="{ minRows: 3, maxRows: 8 }" :maxlength="4000"
         :tips="t('localBrowser.searchInstructionsHint')"
         :disabled="saving" :aria-label="t('localBrowser.searchInstructionsTitle')" />
       <div class="actions">
@@ -75,13 +75,16 @@ onBeforeUnmount(() => { alive = false })
 
 <style scoped lang="less">
 .browser-search-preferences {
-  margin-top: 20px;
-  h3 { margin: 0 0 6px; font-size: var(--app-text-xl); color: var(--td-text-color-primary); }
-  .description { margin: 0 0 8px; color: var(--td-text-color-secondary); font-size: var(--app-text-md); line-height: 1.5; }
-  .actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin-top: 8px; }
+  margin-top: 32px;
+  h3 { margin: 0 0 6px; font-size: var(--app-text-lg); font-weight: 600; color: var(--td-text-color-primary); }
+  .description { margin: 0 0 16px; color: var(--td-text-color-secondary); font-size: var(--app-text-md); line-height: 1.5; }
+  .actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin-top: 16px; }
   .actions span { color: var(--td-success-color); font-size: var(--app-text-sm); }
-  :deep(.t-textarea__inner) { font-size: var(--app-text-md); line-height: 20px; }
-  :deep(.t-textarea__info_wrapper) { font-size: var(--app-text-sm); }
+  :deep(.t-textarea__inner) { padding: 14px 16px; border-radius: 10px; border-color: var(--td-component-stroke); font-size: var(--app-text-md); line-height: 1.7; transition: border-color .18s, box-shadow .18s; }
+  :deep(.t-textarea__inner:hover) { border-color: var(--td-component-border); }
+  :deep(.t-textarea__inner:focus) { border-color: var(--td-brand-color); }
+  :deep(.t-textarea__info_wrapper) { margin-top: 8px; font-size: var(--app-text-xs); line-height: 1.5; }
+  :deep(.t-textarea__limit) { font-variant-numeric: tabular-nums; }
   .error { color: var(--td-error-color); font-size: var(--app-text-md); }
 }
 </style>

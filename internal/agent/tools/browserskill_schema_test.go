@@ -2,6 +2,7 @@ package tools
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/browserskill"
@@ -87,4 +88,74 @@ func TestBrowserFlatArgumentsRejectBeforeDispatch(t *testing.T) {
 	require.NoError(t, tool.ValidateArguments(
 		json.RawMessage(`{"method":"navigate","url":"https://example.com","wait_until":"load"}`),
 	))
+	require.NoError(t, tool.ValidateArguments(
+		json.RawMessage(`{"method":"observe","max_text_chars":3000}`),
+	))
+	require.Error(t, tool.ValidateArguments(
+		json.RawMessage(`{"method":"observe","max_tokens":750}`),
+	))
+}
+
+func TestBrowserDescriptionSignaturesMatchRules(t *testing.T) {
+	seen := map[string]bool{}
+	for _, line := range strings.Split(browserToolDescription, "\n") {
+		line = strings.TrimSpace(line)
+		name, params, ok := parseBrowserSignature(line)
+		if !ok {
+			continue
+		}
+		rule, exists := browserArgumentRules[name]
+		require.True(t, exists, line)
+		require.False(t, seen[name], "duplicate signature %s", name)
+		seen[name] = true
+		require.ElementsMatch(t, rule.fields, params.names)
+		for _, required := range rule.required {
+			require.False(t, params.optional[required], "%s required argument %s is marked optional", name, required)
+		}
+	}
+	require.Len(t, seen, len(browserArgumentRules))
+}
+
+type browserSignatureParams struct {
+	names    []string
+	optional map[string]bool
+}
+
+func parseBrowserSignature(line string) (string, browserSignatureParams, bool) {
+	open := strings.IndexByte(line, '(')
+	space := strings.IndexByte(line, ' ')
+	if open <= 0 || !strings.HasSuffix(line, ")") || (space >= 0 && space < open) {
+		return "", browserSignatureParams{}, false
+	}
+	name := line[:open]
+	if _, ok := browserArgumentRules[name]; !ok {
+		return "", browserSignatureParams{}, false
+	}
+	params := browserSignatureParams{optional: map[string]bool{}}
+	inner := strings.TrimSpace(line[open+1 : len(line)-1])
+	if inner == "" {
+		return name, params, true
+	}
+	for _, part := range strings.Split(inner, ",") {
+		part = strings.TrimSpace(part)
+		optional := strings.HasSuffix(part, "?")
+		part = strings.TrimSuffix(part, "?")
+		for _, field := range strings.Split(part, "|") {
+			field = strings.TrimSpace(field)
+			params.names = append(params.names, field)
+			params.optional[field] = optional
+		}
+	}
+	return name, params, true
+}
+
+func TestBrowserTextCapMapsOntoProtocol(t *testing.T) {
+	page := browserCallParams("observe", map[string]any{
+		"method": "observe", "keep_open": true, "max_text_chars": float64(3000), "tab_id": float64(2),
+	})
+	require.Equal(t, map[string]any{"max_tokens": 750, "tab_id": float64(2)}, page)
+	require.Equal(t, 1, browserCallParams("snapshot", map[string]any{"max_text_chars": float64(1)})["max_tokens"])
+	require.Equal(t, 2, browserCallParams("snapshot", map[string]any{"max_text_chars": float64(5)})["max_tokens"])
+	logs := browserCallParams("console", map[string]any{"max_text_chars": float64(3000), "limit": float64(20)})
+	require.Equal(t, map[string]any{"max_text_chars": float64(3000), "limit": float64(20)}, logs)
 }

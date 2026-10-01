@@ -1,6 +1,6 @@
 # Docker 沙箱后端可行性 PoC
 
-配套文档：[Docker 沙箱后端重做调研](../../sandbox-docker-backend.md)。
+当前实现与部署要求见[沙箱部署与排障](../../../website-docs/06-development/04-sandbox-deployment.md)。本 PoC 仅保留历史可行性实验，不代表当前适配器行为。
 
 这个程序直接打 Docker Engine API，逐项验证「Docker 能不能承载 WeKnora
 `RemoteSandboxClient` 契约 + E2B 那套 Snapshot 工作流」。它不是产品代码，也不参与主模块构建

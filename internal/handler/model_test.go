@@ -4,7 +4,8 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/Tencent/WeKnora/internal/models/catalog"
+	"github.com/Tencent/WeKnora/internal/models/providers"
+	modelruntime "github.com/Tencent/WeKnora/internal/models/runtime"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -52,11 +53,11 @@ func TestRedactedDebugConfig(t *testing.T) {
 // credential field is called something the name heuristic cannot guess is
 // still redacted, because the vendor declared it Secret.
 func TestRedactedDebugConfigUsesVendorDeclaration(t *testing.T) {
-	catalog.Register(&catalog.Vendor{
+	modelruntime.Register(&providers.Definition{
 		ID:         "handler-debug-redaction-vendor",
 		Name:       "Debug Redaction Vendor",
 		ModelTypes: []types.ModelType{types.ModelTypeRerank},
-		ExtraFields: []catalog.ExtraField{
+		ExtraFields: []providers.ExtraField{
 			{Key: "signing_material", Label: "Signing Material", Secret: true},
 		},
 	})

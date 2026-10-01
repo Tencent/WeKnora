@@ -13,10 +13,12 @@ import (
 
 type stubKBService struct {
 	interfaces.KnowledgeBaseService
-	kbs map[string]*types.KnowledgeBase
+	kbs     map[string]*types.KnowledgeBase
+	lookups int
 }
 
 func (s *stubKBService) GetKnowledgeBaseByIDOnly(_ context.Context, id string) (*types.KnowledgeBase, error) {
+	s.lookups++
 	kb, ok := s.kbs[id]
 	if !ok {
 		return nil, errors.New("not found")
