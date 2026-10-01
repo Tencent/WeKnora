@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/mcp"
@@ -124,18 +125,23 @@ func newTestService() (*mcpServiceService, *fakeMCPRepo) {
 	return svc, repo
 }
 
-func TestTestMCPService_ListsOnlyAdvertisedCapabilities(t *testing.T) {
+func TestTestMCPService_ListingCapabilityCompatibility(t *testing.T) {
 	tests := []struct {
 		name        string
 		tools       bool
 		resources   bool
 		failMethod  string
+		listMethod  string
 		wantSuccess bool
 	}{
 		{name: "tool list fails", tools: true, failMethod: "tools/list"},
 		{name: "resource list fails", resources: true, failMethod: "resources/list"},
-		{name: "resource-only server", resources: true, wantSuccess: true},
-		{name: "tool-only server", tools: true, wantSuccess: true},
+		{name: "resource-only server", resources: true, failMethod: "tools/list", wantSuccess: true},
+		{name: "tool-only server", tools: true, failMethod: "resources/list", wantSuccess: true},
+		{name: "tools without advertised capability", listMethod: "tools/list", wantSuccess: true},
+		{name: "resources without advertised capability", listMethod: "resources/list", wantSuccess: true},
+		{name: "advertised empty lists", tools: true, resources: true, wantSuccess: true},
+		{name: "no advertised capabilities", failMethod: "tools/list", wantSuccess: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -152,6 +158,7 @@ func TestTestMCPService_ListsOnlyAdvertisedCapabilities(t *testing.T) {
 			mcpServer := sdkserver.NewMCPServer("test", "1", options...)
 			upstream := sdkserver.NewStreamableHTTPServer(mcpServer, sdkserver.WithStateLess(true))
 			requests := map[string]bool{}
+			var requestsMu sync.Mutex
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				body, err := io.ReadAll(r.Body)
 				require.NoError(t, err)
@@ -160,10 +167,21 @@ func TestTestMCPService_ListsOnlyAdvertisedCapabilities(t *testing.T) {
 					Method string          `json:"method"`
 				}
 				require.NoError(t, json.Unmarshal(body, &request))
+				requestsMu.Lock()
 				requests[request.Method] = true
+				requestsMu.Unlock()
 				if request.Method == tt.failMethod {
 					w.Header().Set("Content-Type", "application/json")
 					_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":` + string(request.ID) + `,"error":{"code":-32603,"message":"directory unavailable"}}`))
+					return
+				}
+				if request.Method == tt.listMethod {
+					w.Header().Set("Content-Type", "application/json")
+					result := `{"tools":[{"name":"test_tool","inputSchema":{"type":"object"}}]}`
+					if request.Method == "resources/list" {
+						result = `{"resources":[{"uri":"test://resource","name":"test_resource"}]}`
+					}
+					_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":` + string(request.ID) + `,"result":` + result + `}`))
 					return
 				}
 				r.Body = io.NopCloser(bytes.NewReader(body))
@@ -181,11 +199,25 @@ func TestTestMCPService_ListsOnlyAdvertisedCapabilities(t *testing.T) {
 			require.NoError(t, err)
 			require.NotNil(t, result)
 			assert.Equal(t, tt.wantSuccess, result.Success)
-			if tt.failMethod != "" {
+			if !tt.wantSuccess {
 				assert.Contains(t, result.Message, "directory unavailable")
 			}
-			assert.Equal(t, tt.tools, requests["tools/list"])
-			assert.Equal(t, tt.resources && tt.failMethod != "tools/list", requests["resources/list"])
+			if tt.listMethod == "tools/list" {
+				require.Len(t, result.Tools, 1)
+				assert.Equal(t, "test_tool", result.Tools[0].Name)
+			} else {
+				assert.Empty(t, result.Tools)
+			}
+			if tt.listMethod == "resources/list" {
+				require.Len(t, result.Resources, 1)
+				assert.Equal(t, "test://resource", result.Resources[0].URI)
+			} else {
+				assert.Empty(t, result.Resources)
+			}
+			requestsMu.Lock()
+			defer requestsMu.Unlock()
+			assert.True(t, requests["tools/list"])
+			assert.Equal(t, !(tt.tools && tt.failMethod == "tools/list"), requests["resources/list"])
 		})
 	}
 }
