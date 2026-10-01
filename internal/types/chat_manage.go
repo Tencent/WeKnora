@@ -106,9 +106,10 @@ const (
 // The zero value (empty string) is treated as needing retrieval for safety.
 // Note: IntentWebSearch is NOT included — use ChatManage.NeedsRetrieval()
 // which also considers the WebSearchEnabled flag.
+// Conversation-only intents such as summarize do not require KB retrieval.
 func (i QueryIntent) NeedsKBRetrieval() bool {
 	switch i {
-	case IntentKBSearch, IntentClarification, IntentSummarize, "":
+	case IntentKBSearch, IntentClarification, "":
 		return true
 	default:
 		return false
