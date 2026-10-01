@@ -4,6 +4,7 @@ import "strings"
 
 var supportedLocales = map[string]struct{}{
 	"zh-CN": {},
+	"zh-TW": {},
 	"en-US": {},
 	"ko-KR": {},
 	"ja-JP": {},
