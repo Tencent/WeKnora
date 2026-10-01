@@ -603,3 +603,45 @@ func TestStageSessionAttachmentsKeepsRemoteInputRoot(t *testing.T) {
 	require.Equal(t, sandbox.SessionInputRoot, store.listedDir)
 	require.True(t, strings.HasPrefix(staged[0].Path, sandbox.SessionInputRoot))
 }
+
+// retryTestStore fails WriteSessionInputFile per the hook so the one-retry
+// policy on killed filesystem ops (issue #3910) can be driven without a
+// sandbox. Only WriteSessionInputFile is reachable in these tests.
+type retryTestStore struct {
+	sandbox.SessionFileStore
+	onWrite func() error
+}
+
+func (s *retryTestStore) WriteSessionInputFile(context.Context, string, string, []byte) error {
+	return s.onWrite()
+}
+
+func TestWriteSessionInputWithRetryRetriesKilledOpOnce(t *testing.T) {
+	calls := 0
+	store := &retryTestStore{onWrite: func() error {
+		calls++
+		if calls == 1 {
+			return sandbox.NewRemoteError(
+				sandbox.SandboxTypeDocker, "MakeDir", sandbox.RemoteErrorKindTimeout,
+				"killed after 30s (filesystem-op timeout 30s), exit=137, no output", nil)
+		}
+		return nil
+	}}
+	require.NoError(t, writeSessionInputWithRetry(
+		context.Background(), store, "session-1", "/workspace/input/abc/faq.txt", []byte("hi")))
+	require.Equal(t, 2, calls, "a killed op must be retried exactly once")
+}
+
+func TestWriteSessionInputWithRetrySurfacesOtherFailuresImmediately(t *testing.T) {
+	calls := 0
+	store := &retryTestStore{onWrite: func() error {
+		calls++
+		return sandbox.NewRemoteError(
+			sandbox.SandboxTypeDocker, "MakeDir", sandbox.RemoteErrorKindInvalidRequest,
+			"MakeDir /workspace/input: Permission denied", nil)
+	}}
+	err := writeSessionInputWithRetry(
+		context.Background(), store, "session-1", "/workspace/input/abc/faq.txt", []byte("hi"))
+	require.Error(t, err)
+	require.Equal(t, 1, calls, "a non-timeout failure must not be retried")
+}

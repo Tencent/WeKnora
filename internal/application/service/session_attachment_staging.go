@@ -8,6 +8,7 @@ import (
 	"path"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/sandbox"
@@ -167,7 +168,7 @@ func (s *agentService) stageSessionAttachments(
 			if int64(len(content)) > maxBytes {
 				return nil, fmt.Errorf("attachment %q exceeds sandbox staging limit of %d bytes", attachment.FileName, maxBytes)
 			}
-			if writeErr := store.WriteSessionInputFile(ctx, sessionID, remotePath, content); writeErr != nil {
+			if writeErr := writeSessionInputWithRetry(ctx, store, sessionID, remotePath, content); writeErr != nil {
 				return nil, fmt.Errorf("stage attachment %q: %w", attachment.FileName, writeErr)
 			}
 			attachment.FileSize = int64(len(content))
@@ -197,6 +198,37 @@ func (s *agentService) stageSessionAttachments(
 
 	sort.SliceStable(staged, func(i, j int) bool { return staged[i].Path < staged[j].Path })
 	return staged, nil
+}
+
+// sandboxStagingRetryDelay separates the two attempts a transient sandbox
+// filesystem stall gets before staging fails the turn.
+const sandboxStagingRetryDelay = 2 * time.Second
+
+// writeSessionInputWithRetry retries once when the sandbox killed the write
+// past its filesystem-op timeout (issue #3910): a killed op means the
+// container filesystem stalled — the request itself was valid, and such
+// stalls are usually transient. Any other failure surfaces immediately. When
+// the retry also times out, both failures stay attached to the returned error
+// so the log shows it was not a one-off.
+func writeSessionInputWithRetry(
+	ctx context.Context,
+	store sandbox.SessionFileStore,
+	sessionID, remotePath string,
+	content []byte,
+) error {
+	err := store.WriteSessionInputFile(ctx, sessionID, remotePath, content)
+	if !sandbox.IsRemoteTimeout(err) {
+		return err
+	}
+	select {
+	case <-ctx.Done():
+		return err
+	case <-time.After(sandboxStagingRetryDelay):
+	}
+	if retryErr := store.WriteSessionInputFile(ctx, sessionID, remotePath, content); retryErr != nil {
+		return fmt.Errorf("%w (retry after filesystem-op timeout failed: %v)", err, retryErr)
+	}
+	return nil
 }
 
 // resolveSessionAttachmentURLs fills in the storage handle for attachments
