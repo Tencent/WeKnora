@@ -200,6 +200,17 @@ curl -X DELETE $BASE/api/v1/mcp-services/mcp-1 -H "Authorization: Bearer $TOKEN"
 
 用途：连接测试（探测外部服务）。权限：Admin+。响应：200 `{"success":true,"data":{"success","message","oauth_required","tools":[...],"resources":[...]}}`
 
+外层 `success` 表示请求成功返回测试结果，测试是否通过以 `data.success` 为准。
+连接和初始化成功后，若服务声明支持 `tools`，还需要完整读取工具目录才能通过测试。
+合法空目录仍算成功；未声明 `tools` 能力的服务跳过工具查询。
+工具枚举失败（包括分页中途失败或请求取消）返回 `data.success=false`，例如：
+
+```json
+{"success":true,"data":{"success":false,"message":"Tool discovery failed: failed to list tools: internal error: directory unavailable"}}
+```
+
+资源枚举仍为尽力获取，其失败不影响本接口的测试结果。
+
 ```bash
 curl -X POST $BASE/api/v1/mcp-services/mcp-1/test -H "Authorization: Bearer $TOKEN"
 ```
