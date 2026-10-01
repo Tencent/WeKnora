@@ -40,6 +40,7 @@ from docx.image.exceptions import (
     UnrecognizedImageError,
 )
 from docx.oxml.ns import qn
+from docx.text.paragraph import Paragraph
 from PIL import Image
 
 from docreader.config import CONFIG
@@ -85,6 +86,32 @@ def table_to_gfm_markdown(table: Any) -> str:
     return "\n".join(lines)
 
 
+def extract_docx_headers(content: bytes) -> str:
+    """Extract active header text once per part, including header tables."""
+    document = Document(BytesIO(content))
+    seen = set()
+    parts = []
+    for section in document.sections:
+        headers = [section.header]
+        if section.different_first_page_header_footer:
+            headers.append(section.first_page_header)
+        if document.settings.odd_and_even_pages_header_footer:
+            headers.append(section.even_page_header)
+        for header in headers:
+            part_name = header.part.partname
+            if part_name in seen:
+                continue
+            seen.add(part_name)
+            for block in header.iter_inner_content():
+                text = (
+                    block.text if isinstance(block, Paragraph)
+                    else table_to_gfm_markdown(block)
+                )
+                if text.strip():
+                    parts.append(text.strip())
+    return "\n\n".join(parts)
+
+
 class ImageData:
     """Represents a processed image of document content"""
 
@@ -114,6 +141,7 @@ class DocxParser(BaseParser):
     def __init__(
         self,
         max_pages: Optional[int] = None,  # Maximum number of pages to process
+        docx_include_headers: Any = False,
         **kwargs,
     ):
         """Initialize DOCX document parser
@@ -132,12 +160,24 @@ class DocxParser(BaseParser):
             max_pages: Maximum number of pages to process
         """
         super().__init__(**kwargs)
+        self.docx_include_headers = str(docx_include_headers).strip().lower() in {
+            "true", "1", "yes", "on"
+        }
         self.max_pages = CONFIG.docx_max_pages if max_pages is None else max_pages
         if self.max_pages <= 0:
             self.max_pages = 100000  # no limit (matches Docx.__call__ default)
         logger.info(f"DocxParser initialized with max_pages={self.max_pages}")
 
     def parse_into_text(self, content: bytes) -> DocumentModel:
+        document = self._parse_body(content)
+        if self.docx_include_headers:
+            headers = extract_docx_headers(content)
+            document.content = "\n\n".join(
+                part for part in (headers, document.content) if part
+            )
+        return document
+
+    def _parse_body(self, content: bytes) -> DocumentModel:
         """Parse DOCX document, extract text content and image Markdown links"""
         logger.info(f"Parsing DOCX document, content size: {len(content)} bytes")
         logger.info(f"Max pages limit set to: {self.max_pages}")

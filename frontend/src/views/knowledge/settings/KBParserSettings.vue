@@ -55,6 +55,14 @@
             >
               {{ $t('kbSettings.parser.xlsxFirstRowAsHeader') }}
             </t-checkbox>
+            <t-checkbox
+              v-if="group.extensions.includes('docx') && ['builtin', 'markitdown'].includes(getEngineForGroup(group.extensions))"
+              class="xlsx-header-option"
+              :checked="getRuleForGroup(group.extensions)?.docx_include_headers === true"
+              @change="(checked: boolean) => handleDOCXIncludeHeadersChange(group.extensions, checked)"
+            >
+              {{ $t('kbSettings.parser.docxIncludeHeaders') }}
+            </t-checkbox>
             <div v-if="!hasAvailableEngine(group.extensions)" class="no-engine-warning">
               <a class="go-settings" @click.prevent="goToParserSettings">{{ $t('kbSettings.parser.goConfig') }}</a>
             </div>
@@ -86,6 +94,7 @@ export interface ParserEngineRule {
   file_types: string[]
   engine: string
   xlsx_first_row_as_header?: boolean
+  docx_include_headers?: boolean
 }
 
 interface EngineOption {
@@ -250,6 +259,9 @@ function handleEngineChange(extensions: string[], engine: string) {
     otherRules.push({
       file_types: [...extensions],
       engine,
+      ...(currentRule?.docx_include_headers !== undefined
+        ? { docx_include_headers: currentRule.docx_include_headers }
+        : {}),
       ...(currentRule?.xlsx_first_row_as_header !== undefined
         ? { xlsx_first_row_as_header: currentRule.xlsx_first_row_as_header }
         : {}),
@@ -279,6 +291,16 @@ function handleXLSXFirstRowAsHeaderChange(extensions: string[], checked: boolean
   emit('update:parserEngineRules', rules)
 }
 
+function handleDOCXIncludeHeadersChange(extensions: string[], checked: boolean) {
+  const rules = buildCompleteRules()
+  const rule = rules.find(item => item.file_types.some(fileType => extensions.includes(fileType)))
+  if (!rule) return
+
+  rule.docx_include_headers = checked
+  localEngineRules.value = rules
+  emit('update:parserEngineRules', rules)
+}
+
 function buildCompleteRules(): ParserEngineRule[] {
   const rules: ParserEngineRule[] = []
   for (const group of fileTypeGroups.value) {
@@ -288,6 +310,9 @@ function buildCompleteRules(): ParserEngineRule[] {
       rules.push({
         file_types: [...group.extensions],
         engine,
+        ...(currentRule?.docx_include_headers !== undefined
+          ? { docx_include_headers: currentRule.docx_include_headers }
+          : {}),
         ...(currentRule?.xlsx_first_row_as_header !== undefined
           ? { xlsx_first_row_as_header: currentRule.xlsx_first_row_as_header }
           : {}),

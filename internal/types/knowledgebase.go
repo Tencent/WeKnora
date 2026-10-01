@@ -255,6 +255,8 @@ type ParserEngineRule struct {
 	// XLSXFirstRowAsHeader restores row-1 column context for flat XLSX tables.
 	// nil preserves the parser default; an explicit false disables the mode.
 	XLSXFirstRowAsHeader *bool `yaml:"xlsx_first_row_as_header,omitempty" json:"xlsx_first_row_as_header,omitempty"`
+	// DOCXIncludeHeaders includes header text for builtin and markitdown DOCX parsing.
+	DOCXIncludeHeaders *bool `yaml:"docx_include_headers,omitempty" json:"docx_include_headers,omitempty"`
 }
 
 // ChunkingConfig represents the document splitting configuration

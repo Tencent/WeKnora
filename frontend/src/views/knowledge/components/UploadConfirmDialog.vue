@@ -690,6 +690,7 @@ interface ChunkingUIConfig {
     file_types: string[]
     engine: string
     xlsx_first_row_as_header?: boolean
+    docx_include_headers?: boolean
   }>
   enableParentChild: boolean
   parentChunkSize: number
@@ -859,7 +860,7 @@ function hasParserCustomization(): boolean {
   const rules = uiState.value.chunkingConfig.parserEngineRules
   if (!rules?.length) return false
   return rules.some(rule => rule.engine && rule.engine !== 'builtin')
-    || rules.some(rule => rule.xlsx_first_row_as_header)
+    || rules.some(rule => rule.xlsx_first_row_as_header || rule.docx_include_headers)
 }
 
 function getFileExt(file: File): string {
@@ -1503,6 +1504,7 @@ const handleParserEngineRulesUpdate = (rules: Array<{
   file_types: string[]
   engine: string
   xlsx_first_row_as_header?: boolean
+  docx_include_headers?: boolean
 }>) => {
   uiState.value.chunkingConfig.parserEngineRules = rules
 }

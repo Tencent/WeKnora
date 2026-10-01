@@ -6138,6 +6138,7 @@ export default {
       fileTypePpt: 'プレゼンテーション',
       fileTypeExcel: 'Excelスプレッドシート',
       xlsxFirstRowAsHeader: '先頭行を列見出しとして扱い、各行のコンテキストに保持する',
+      docxIncludeHeaders: 'DOCX のヘッダーのテキストを含める',
       fileTypeEbook: '電子書籍',
       fileTypeWebArchive: 'Webアーカイブ',
       fileTypeCsv: 'CSVファイル',

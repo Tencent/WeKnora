@@ -126,6 +126,7 @@ export interface KBModelConfigRequest {
             file_types: string[]
             engine: string
             xlsx_first_row_as_header?: boolean
+            docx_include_headers?: boolean
         }[]
         enableParentChild?: boolean
         parentChunkSize?: number

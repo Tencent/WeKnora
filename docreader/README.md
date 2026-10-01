@@ -2,6 +2,18 @@
 
 DocReader 是 WeKnora 项目中负责文档解析和处理的 gRPC 服务。它支持多种文档格式的读取、OCR 识别、多模态处理等功能。
 
+## DOCX 页眉解析
+
+知识库的解析器设置和上传确认框提供“解析 DOCX 页眉文字”选项，适用于内置和
+MarkItDown 引擎，默认关闭。启用后，普通页眉、已启用的首页和偶数页页眉中的文字
+及表格会加入解析结果；多个 section 继承的同一个页眉只提取一次。
+
+![DOCX 页眉解析选项](../docs/images/docx-header-option.png)
+
+API 可在 DOCX 的 `parser_engine_rules` 项中设置 `docx_include_headers: true`。
+DocReader 的直接调用可通过 `parser_engine_overrides.docx_include_headers = "true"`
+启用该选项。页眉图片不在此选项的提取范围内。
+
 ## Docker Compose 环境变量配置
 
 在 `docker-compose.yml` 文件中，docreader 服务配置了以下环境变量：
