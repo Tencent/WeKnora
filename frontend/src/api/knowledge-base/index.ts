@@ -1,4 +1,5 @@
 import { get, post, put, del, postUpload, getDown } from "../../utils/request";
+import { buildKnowledgeChunksPath } from "./chunkPath";
 import type { KnowledgeProcessOverrides } from '@/types/knowledgeProcess';
 import type { AuditLog, AuditOutcome, ListAuditLogResponse } from '@/api/tenant/audit-log';
 import { buildListKnowledgeFilesQuery } from './knowledgeFileListQuery';
@@ -588,8 +589,8 @@ export function batchQueryKnowledge(idsQueryString: string, kbId?: string, agent
 
 export const KNOWLEDGE_CHUNK_PAGE_SIZE = 25;
 
-export function getKnowledgeDetailsCon(id: string, page: number) {
-  return get(`/api/v1/chunks/${id}?page=${page}&page_size=${KNOWLEDGE_CHUNK_PAGE_SIZE}`);
+export function getKnowledgeDetailsCon(id: string, page: number, chunkType?: string) {
+  return get(buildKnowledgeChunksPath(id, page, KNOWLEDGE_CHUNK_PAGE_SIZE, chunkType));
 }
 
 export interface ChunkEditPayload {
