@@ -93,7 +93,7 @@ func TestUploadRecursive_WalksAllFiles(t *testing.T) {
 func TestUploadRecursive_PreservesFolderStructure(t *testing.T) {
 	_, _ = iostreams.SetForTest(t)
 	dir := t.TempDir()
-	mkTree(t, dir, "root.pdf", "sub/nested.pdf", "sub/deeper/leaf.pdf")
+	mkTree(t, dir, "root.pdf", "sub/nested.pdf", "sub/deeper/leaf.pdf", "..drafts/report.pdf")
 
 	svc := &scriptedUploadSvc{}
 	opts := &UploadOptions{Recursive: true, Glob: "*"}
@@ -102,6 +102,9 @@ func TestUploadRecursive_PreservesFolderStructure(t *testing.T) {
 	assert.Equal(t, "", svc.customFileName["root.pdf"])
 	assert.Equal(t, "sub/nested.pdf", svc.customFileName["nested.pdf"])
 	assert.Equal(t, "sub/deeper/leaf.pdf", svc.customFileName["leaf.pdf"])
+	// A child directory whose name starts with ".." is still inside the walked
+	// root and must keep its prefix.
+	assert.Equal(t, "..drafts/report.pdf", svc.customFileName["report.pdf"])
 }
 
 // The prefix must be relative to the walked directory, not the process CWD or

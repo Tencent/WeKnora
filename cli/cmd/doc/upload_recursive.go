@@ -164,10 +164,17 @@ func runUploadRecursive(ctx context.Context, opts *UploadOptions, fopts *cmdutil
 // root (defensive: walkMatches only ever yields paths under root).
 func knowledgeRelativePath(root, file string) string {
 	rel, err := filepath.Rel(root, file)
-	if err != nil || rel == "." || strings.HasPrefix(rel, "..") {
+	if err != nil || rel == "." || escapesRoot(rel) || filepath.Dir(rel) == "." {
 		return ""
 	}
 	return filepath.ToSlash(rel)
+}
+
+// escapesRoot reports whether rel is the parent directory or a path under it.
+// The check is component-wise, not a ".." prefix match: a legitimate child
+// like "..drafts/report.pdf" starts with ".." but is still inside root.
+func escapesRoot(rel string) bool {
+	return rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 // walkMatches returns every regular file under root whose base name matches
