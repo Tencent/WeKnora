@@ -1,7 +1,7 @@
 /**
- * The answer sentence a citation marker supports: the text of the marker's
+ * The answer passage a citation marker supports: the text of the marker's
  * block (paragraph, list item, table cell) up to the marker, without other
- * citation markers, trimmed to its last sentence. A marker on a line of its
+ * citation markers, starting after the preceding marker. A marker on a line of its
  * own ("依据：[1]") borrows the blocks just before it.
  */
 
@@ -73,10 +73,23 @@ export function citationAnchorText(marker: Element): string {
     if (!block) return ''
     const range = marker.ownerDocument.createRange()
     range.setStart(block, 0)
+    // A citation covers the preceding passage since the previous citation,
+    // which can contain multiple sentences within the same paragraph.
     range.setEndBefore(marker)
+    const preceding = [...block.querySelectorAll(CITATION_SELECTOR)]
+      .filter(previous => previous.compareDocumentPosition(marker) & Node.DOCUMENT_POSITION_FOLLOWING)
+    for (const previous of preceding.reverse()) {
+      const candidate = range.cloneRange()
+      candidate.setStartAfter(previous)
+      // Adjacent citations support the same passage; skip citation-only gaps.
+      if (letterCount(textWithoutCitations(candidate.cloneContents())) > 0) {
+        range.setStartAfter(previous)
+        break
+      }
+    }
     const own = textWithoutCitations(range.cloneContents())
     const enough = letterCount(lastSentence(own)) >= MIN_SENTENCE
-    return anchorWithContext(own, enough ? [] : previousBlockTexts(block))
+    return enough ? own.replace(/\s+/g, ' ').trim().slice(-300) : anchorWithContext(own, previousBlockTexts(block))
   } catch {
     // Alignment only narrows the highlight; without a sentence the whole chunk is shown.
     return ''

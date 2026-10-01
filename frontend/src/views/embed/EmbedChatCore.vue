@@ -364,11 +364,10 @@ const recordFollowUpEvent = (
 
 const handleFollowUpSelect = (message: Record<string, unknown>, item: MessageSuggestionItem) => {
   const set = message.suggestionSet as MessageSuggestionSet | undefined
-  if (set) {
-    recordFollowUpEvent(set, 'click', item.id)
-    setSuggestionAttribution(set.id, item.id)
-  }
-  if (!isReplying.value) void sendMsg(item.text, { webSearchEnabled: webSearchEnabled.value })
+  if (set) recordFollowUpEvent(set, 'click', item.id)
+  if (isReplying.value) return
+  if (set) setSuggestionAttribution(set.id, item.id)
+  void sendMsg(item.text, { webSearchEnabled: webSearchEnabled.value })
 }
 
 const dismissFollowUps = (message: Record<string, unknown>, set: MessageSuggestionSet) => {

@@ -63,7 +63,7 @@ class PageBlocksTest(unittest.TestCase):
 
     def test_page_without_lines_gets_page_block(self):
         blocks = page_blocks("文字", 5, 2, [], None)
-        self.assertEqual(blocks, [{"start": 5, "end": 7, "locator": {"type": "pdf", "page": 2}}])
+        self.assertEqual(blocks, [{"start": 5, "end": 7, "locator": {"type": "pdf", "page": 2, "mapping": "exact"}}])
 
 
 class WireTest(unittest.TestCase):
@@ -138,6 +138,42 @@ class SplitLineAtGapsTest(unittest.TestCase):
         chars += [(ch, 60 + 5 * k, 5 + k) for k, ch in enumerate("space")]
         self.assertEqual(len(_split_line_at_gaps(self._line(chars))), 1)
 
+
+
+class PrecisionRegressionTest(unittest.TestCase):
+    def test_common_prefix_cannot_place_a_different_conclusion(self):
+        prefix = "Common opening repeated before the important conclusion "
+        self.assertEqual(locate_lines(prefix + "failed", [prefix + "passed"]), [None])
+
+    def test_numeric_meaning_is_preserved(self):
+        for source, quote in [("limit 15 mm", "limit 1.5 mm"), ("temperature 5 C", "temperature -5 C"), ("rate 5", "rate 5%")]:
+            self.assertEqual(locate_lines(source, [quote]), [None])
+
+    def test_unaccounted_duplicate_does_not_take_first_region(self):
+        quote = "A repeated paragraph with enough text"
+        self.assertEqual(locate_lines(quote + "\n" + quote, [quote]), [None])
+
+    def test_unmatched_text_never_inherits_previous_geometry(self):
+        page = "First matched line.\nUnmatched evidence in between.\nLast matched line."
+        lines = [_ln("First matched line.", 50, 700, 300, 712), _ln("Last matched line.", 50, 668, 300, 680)]
+        blocks = page_blocks(page, 0, 2, lines, PageGeometry((0, 0, 600, 800)))
+        at = page.index("Unmatched")
+        covering = [b for b in blocks if b["start"] <= at < b["end"]]
+        self.assertEqual(len(covering), 1)
+        self.assertNotIn("bbox", covering[0]["locator"])
+        self.assertEqual(covering[0]["locator"]["page"], 2)
+
+    def test_trailing_unmatched_text_has_only_page_provenance(self):
+        page = "Matched paragraph.\nUnrecognized trailing evidence."
+        blocks = page_blocks(page, 0, 7, [_ln("Matched paragraph.", 50, 700, 300, 712)], PageGeometry((0, 0, 600, 800)))
+        self.assertEqual(blocks[0]["end"], page.index("Unrecognized"))
+        self.assertNotIn("bbox", blocks[-1]["locator"])
+
+    def test_wire_preserves_verified_geometry_and_identity(self):
+        from docreader.source_wire import source_blocks_to_proto
+        locator = {"type": "pdf", "page": 501, "mapping": "exact", "source_id": "pdf:501:0:3", "bbox": [.1, .2, .8, .4]}
+        wire = source_blocks_to_proto(Document(content="abc", source_blocks=[{"start": 0, "end": 3, "locator": locator}]))
+        self.assertEqual(json.loads(wire[0].locator_json), locator)
 
 if __name__ == "__main__":
     unittest.main()

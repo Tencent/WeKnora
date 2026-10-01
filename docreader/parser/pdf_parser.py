@@ -17,6 +17,7 @@ self-sufficient using pypdfium2 + the Go-side OCR that already exists.
 """
 
 import base64
+from collections import Counter
 import io
 import logging
 import os
@@ -279,7 +280,7 @@ def _strip_chart_text_debris(text: str) -> str:
                 for k in range(context_start, context_end)
             )
             table_context = _tail_looks_like_numeric_table(
-                lines[max(0, i - 2) : min(len(lines), j + 2)]
+                lines[max(0, i - 2) : j]
             )
             if j - i >= 3 and has_chart_context and not table_context:
                 i = j
@@ -359,9 +360,9 @@ def _strip_lines_above_figure_captions(text: str) -> str:
 
 def _tail_looks_like_numeric_table(lines: list) -> bool:
     """Detect labelled or alternating label/value rows at the text tail."""
-    tail = lines[-10:]
+    tail = [line for line in lines[-10:] if line.strip()]
     rows = _structured_numeric_rows("\n".join(tail))
-    if rows and rows[-1][0] >= len(tail) - 2:
+    if rows and rows[-1][0] == len(tail) - 1:
         return True
 
     numeric = re.compile(
@@ -371,14 +372,14 @@ def _tail_looks_like_numeric_table(lines: list) -> bool:
         if (
             header.strip()
             and any(char.isalpha() for char in header)
-            and numeric.fullmatch(tail[index + 1].strip())
-            and numeric.fullmatch(tail[index + 2].strip())
+            and all(numeric.fullmatch(value.strip()) for value in tail[index + 1 :])
         ):
             return True
     pairs = 0
-    for label, value in zip(tail, tail[1:]):
-        label = label.strip()
-        value = value.strip()
+    index = len(tail) - 1
+    while index >= 1:
+        label = tail[index - 1].strip()
+        value = tail[index].strip()
         if (
             label
             and any(char.isalpha() for char in label)
@@ -386,6 +387,9 @@ def _tail_looks_like_numeric_table(lines: list) -> bool:
             and numeric.fullmatch(value)
         ):
             pairs += 1
+            index -= 2
+        else:
+            break
     return pairs >= 2
 
 
@@ -744,14 +748,21 @@ def _page_chars(
     font's ascent to descent, so every glyph of a line shares one height.
 
     When ``return_filter_info`` is true, a third value reports whether any
-    non-newline source glyph was discarded.  Callers can then avoid falling
-    back to the unfiltered plain text when a PDF contains hidden or off-page
-    text.
+    source glyph was intentionally filtered as hidden or off-page. Callers
+    can then avoid falling back to the unfiltered plain text when a PDF
+    contains hidden or off-page text.
     """
     n = textpage.count_chars()
     if n <= 0:
         return ([], 0.0, False) if return_filter_info else ([], 0.0)
-    width, height = page.get_size()
+    # Glyph coordinates are unrotated PDF user space. get_size() reports
+    # rotated dimensions and would discard valid text on cropped/rotated pages.
+    try:
+        crop_left, crop_bottom, crop_right, crop_top = page.get_cropbox()
+    except Exception:
+        width, height = page.get_size()
+        crop_left, crop_bottom, crop_right, crop_top = 0, 0, width, height
+    width = crop_right - crop_left
     invisible = _collect_invisible_boxes(page, raw) if FILTER_HIDDEN_TEXT else []
 
     chars: list = []
@@ -775,7 +786,7 @@ def _page_chars(
         x0, x1 = (left, right) if left <= right else (right, left)
         y0, y1 = (bottom, top) if bottom <= top else (top, bottom)
         if FILTER_HIDDEN_TEXT:
-            if x1 < 0 or x0 > width or y1 < 0 or y0 > height:
+            if x1 < crop_left or x0 > crop_right or y1 < crop_bottom or y0 > crop_top:
                 filtered_count += 1
                 continue  # off-page glyph
             if invisible and _point_in_boxes((x0 + x1) / 2, (y0 + y1) / 2, invisible):
@@ -1269,6 +1280,12 @@ def _should_prefer_plain(
     if not plain:
         return False
 
+    # Geometry must never change numeric evidence (1.5 -> 1 5, -5 -> 5).
+    # Compare a multiset so legitimate column reordering is still allowed.
+    numbers = re.compile(r"[+−-]?\d+(?:[.,:/]\d+)*(?:[%‰])?")
+    if Counter(numbers.findall(plain)) != Counter(numbers.findall(layout)):
+        return True
+
     # A geometric split is useful for glued prose, but it can turn a simple
     # table into one column of labels and another column of values.  When the
     # plain extractor exposes adjacent labelled numeric rows and the layout
@@ -1277,8 +1294,6 @@ def _should_prefer_plain(
     plain_rows = _structured_numeric_rows(plain) if allow_structured_rows else []
     if plain_rows:
         layout_rows = _structured_numeric_rows(layout)
-        from collections import Counter
-
         plain_values = Counter(_normalized_numeric_value(row[2]) for row in plain_rows)
         layout_values = Counter(_normalized_numeric_value(row[2]) for row in layout_rows)
         missing_values = sum((plain_values - layout_values).values())
@@ -1843,7 +1858,7 @@ class PDFScannedParser(BaseParser):
                     {
                         "start": offset,
                         "end": offset + len(line),
-                        "locator": {"type": "pdf", "page": i + 1},
+                        "locator": {"type": "pdf", "page": i + 1, "mapping": "exact"},
                     }
                 )
                 offset += len(line)
@@ -2061,7 +2076,7 @@ class PDFParser(BaseParser):
             return start
 
         for i in range(page_count):
-            page_only = {"type": "pdf", "page": i + 1}
+            page_only = {"type": "pdf", "page": i + 1, "mapping": "exact"}
             if classes[i] == "scanned":
                 page_filename = f"{base_name}_page_{i+1}.jpg"
                 part = f"![{page_filename}](images/{page_filename})"

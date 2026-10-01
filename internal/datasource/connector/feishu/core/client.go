@@ -787,14 +787,19 @@ func (c *Client) downloadRawBytes(ctx context.Context, path string) ([]byte, err
 
 // listDriveFiles lists files in a Drive folder (non-recursive), one page at a
 // time. Pass pageToken="" for the first page; the returned nextPageToken is ""
-// when there are no more pages.
+// when there are no more pages. hasMore mirrors the API's has_more field and
+// is the authoritative stop signal: nextPageToken can be non-empty even when
+// has_more is false.
 //
 // folderToken == "" is rejected: the root folder is not paginated and does
 // not return shortcuts (Feishu API limitation), which would silently drop
 // content and risk an unbounded single response. See ADR-0004.
-func (c *Client) listDriveFiles(ctx context.Context, folderToken, pageToken string) ([]DriveFile, string, error) {
+func (c *Client) listDriveFiles(
+	ctx context.Context, folderToken, pageToken string,
+) ([]DriveFile, string, bool, error) {
 	if folderToken == "" {
-		return nil, "", fmt.Errorf("root folder not supported; specify a concrete folder_token (root folder is not paginated and does not return shortcuts)")
+		return nil, "", false, fmt.Errorf("root folder not supported; specify a concrete folder_token " +
+			"(root folder is not paginated and does not return shortcuts)")
 	}
 
 	path := "/open-apis/drive/v1/files?folder_token=" + url.QueryEscape(folderToken)
@@ -806,15 +811,15 @@ func (c *Client) listDriveFiles(ctx context.Context, folderToken, pageToken stri
 
 	var resp DriveFileListResponse
 	if err := c.DoRequest(ctx, http.MethodGet, path, nil, &resp); err != nil {
-		return nil, "", fmt.Errorf("list drive files: %w", err)
+		return nil, "", false, fmt.Errorf("list drive files: %w", err)
 	}
 	if resp.Code != 0 {
-		return nil, "", fmt.Errorf("list drive files error: code=%d msg=%s", resp.Code, resp.Msg)
+		return nil, "", false, fmt.Errorf("list drive files error: code=%d msg=%s", resp.Code, resp.Msg)
 	}
 
 	logger.Infof(ctx, "[FeishuDrive] listDriveFiles: folder=%s got %d files, has_more=%v",
 		folderToken, len(resp.Data.Files), resp.Data.HasMore)
-	return resp.Data.Files, resp.Data.NextPageToken, nil
+	return resp.Data.Files, resp.Data.NextPageToken, resp.Data.HasMore, nil
 }
 
 // GetDriveFolderMeta returns the metadata (name, owner, etc.) of a single Drive
@@ -841,15 +846,20 @@ func (c *Client) GetDriveFolderMeta(ctx context.Context, folderToken string) (dr
 func (c *Client) ListDriveFilesAllPages(ctx context.Context, folderToken string) ([]DriveFile, error) {
 	var all []DriveFile
 	pageToken := ""
+	seenPageTokens := make(map[string]struct{})
 	for {
-		files, next, err := c.listDriveFiles(ctx, folderToken, pageToken)
+		files, next, hasMore, err := c.listDriveFiles(ctx, folderToken, pageToken)
 		if err != nil {
 			return nil, err
 		}
 		all = append(all, files...)
-		if next == "" {
+		if !hasMore || next == "" {
 			break
 		}
+		if _, exists := seenPageTokens[next]; exists {
+			return nil, fmt.Errorf("feishu drive file pagination repeated page token %q", next)
+		}
+		seenPageTokens[next] = struct{}{}
 		pageToken = next
 	}
 	return all, nil

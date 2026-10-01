@@ -597,5 +597,3 @@ case "$CMD" in
         exit 1
         ;;
 esac
-
-exit 0

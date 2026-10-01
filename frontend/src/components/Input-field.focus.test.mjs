@@ -21,7 +21,7 @@ for (const mode of ['normal', 'embedded', 'after', 'inject']) {
       uploadedAttachments: { value: [] }, uploadedImages: { value: [] },
       allSelectedItems: { value: [] }, selectedModelId: { value: 'model' },
       selectedAgent: { value: { config: {} } },
-      settingsStore: {}, chatResources: { isFresh: () => true },
+      settingsStore: {}, chatResources: { isLoaded: () => true },
       collectAgentNotReadyReasons: () => ({ keys: [], labels: [] }),
       attachmentUploadRef: { value: null },
       emit: name => effects.push([name]),

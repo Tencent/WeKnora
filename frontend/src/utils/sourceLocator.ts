@@ -8,6 +8,10 @@ export type SourceLocatorType = 'pdf' | 'docx' | 'slide' | 'sheet' | 'text' | 't
 
 export type SourceLocator = {
   type: SourceLocatorType | string
+  mapping?: string
+  partial?: boolean
+  source_id?: string
+  source_hash?: string
   page?: number
   bbox?: [number, number, number, number] | number[]
   block?: number
@@ -36,10 +40,16 @@ export type SourceLocateRequest = {
   sentence?: string
   /** The cited chunk's text, bounding where a narrowed match may come from. */
   scope?: string
+  /** Original Markdown, before stripping markup; code may contain literal tags. */
+  sourceMarkdown?: string
+  unavailable?: boolean
+  /** Neighboring source paragraphs bracketing one embedded OCR image. */
+  imageContext?: { before: string; after: string }
+  imageDigest?: string
 }
 
 // ---------------------------------------------------------------------------
-// Normalization: letters and digits only, lower-cased, full-width folded. The
+// Normalization keeps letters, digits and numeric symbols, and folds case/width. The
 // same projection the backend aligner uses, so Markdown syntax, whitespace and
 // punctuation differences between parsed text and the rendered original do not
 // break matching.
@@ -51,200 +61,133 @@ export function foldChar(ch: string): string {
   return ch.normalize('NFKC').toLowerCase()
 }
 
+/** Normalize layout differences while preserving numbers and comparisons. */
 export function normalizeForMatch(text: string): string {
-  let out = ''
-  for (const ch of String(text || '')) out += foldChar(ch)
-  return out
+  return normalizeWithPositions(text).norm
 }
 
-/**
- * Normalized projection of `text` with, for each normalized character, the
- * UTF-16 offset in `text` of the character it came from.
- */
 export function normalizeWithPositions(text: string): { norm: string; pos: number[] } {
+  const chars = Array.from(String(text || ''))
   let norm = ''
   const pos: number[] = []
-  let i = 0
-  for (const ch of String(text || '')) {
-    const folded = foldChar(ch)
-    for (const f of folded) {
-      norm += f
-      pos.push(i)
+  let offset = 0
+  for (let i = 0; i < chars.length; i++) {
+    const ch = chars[i]!
+    const value = ch.normalize('NFKC')
+    const digit = (v: string | undefined) => !!v && /^\p{N}$/u.test(v.normalize('NFKC'))
+    let folded = foldChar(ch)
+    if (/^[.,/:+−%‰<>=≤≥≠-]$/u.test(value)) {
+      let before = i - 1, after = i + 1
+      while (before >= 0 && /^[ \t]$/.test(chars[before]!)) before--
+      while (after < chars.length && /^[ \t]$/.test(chars[after]!)) after++
+      const prev = digit(chars[before]), next = digit(chars[after])
+      const symbol = (/[.,/:]/.test(value) && prev && next) ||
+        (/^[+−-]$/.test(value) && next) || (/^[%‰]$/.test(value) && prev) || /^[<>=≤≥≠]$/.test(value)
+      if (symbol) folded = value.replace('−', '-')
     }
-    i += ch.length
+    norm += folded
+    // Offsets throughout this module are UTF-16, including supplementary letters.
+    for (let j = 0; j < folded.length; j++) pos.push(offset)
+    offset += ch.length
   }
   return { norm, pos }
 }
 
-// ---------------------------------------------------------------------------
-// Fuzzy location of a quote inside a normalized haystack.
-
-const KEY_LEN = 24
-
 export type NormalizedMatch = { start: number; end: number; score: number }
+export type TextMatch = { start: number; end: number }
 
-/**
- * Find `quote` (raw text) inside `haystack` (already normalized). Tries the
- * whole quote, then anchors from its head, middle and tail, and extends the
- * match to the quote's length. Returns normalized offsets or null.
- */
-export function findNormalized(haystack: string, quote: string): NormalizedMatch | null {
-  const needle = normalizeForMatch(quote)
-  if (needle.length < 2 || !haystack) return null
-  const whole = haystack.indexOf(needle)
-  if (whole >= 0) return { start: whole, end: whole + needle.length, score: 1 }
-  if (needle.length <= KEY_LEN) return null
-
-  const anchors: Array<{ offset: number; key: string }> = [
-    { offset: 0, key: needle.slice(0, KEY_LEN) },
-    { offset: Math.floor(needle.length / 2), key: needle.slice(Math.floor(needle.length / 2), Math.floor(needle.length / 2) + KEY_LEN) },
-    { offset: needle.length - KEY_LEN, key: needle.slice(-KEY_LEN) },
-  ]
-  let best: NormalizedMatch | null = null
-  for (const anchor of anchors) {
-    let from = 0
-    // Every occurrence of the anchor is a candidate; score by how much of
-    // the quote agrees around it.
-    for (let guard = 0; guard < 50; guard++) {
-      const at = haystack.indexOf(anchor.key, from)
+/** All exact candidates; callers must disambiguate before selecting one. */
+export function findNormalizedMatches(haystack: string, quote: string): NormalizedMatch[] {
+  let needle = normalizeForMatch(quote)
+  if (needle.length < 2 || !haystack) return []
+  const search = (key: string) => {
+    const matches: NormalizedMatch[] = []
+    const first = Array.from(key)[0]!, last = Array.from(key).at(-1)!
+    for (let from = 0; from <= haystack.length - key.length;) {
+      const at = haystack.indexOf(key, from)
       if (at < 0) break
+      const end = at + key.length
+      // A quoted number must not be a prefix/suffix of a different number.
+      const before = haystack.slice(Math.max(0, at - 2), at), after = haystack.slice(end, end + 2)
+      const startsInsideNumber = /\p{N}/u.test(first) && /[\p{N}.,:/+−-]$/u.test(before)
+      const endsInsideNumber = /\p{N}/u.test(last) && /^[\p{N}.,:/%‰]/u.test(after)
+      if (!startsInsideNumber && !endsInsideNumber) matches.push({ start: at, end, score: 1 })
       from = at + 1
-      const start = Math.max(0, at - anchor.offset)
-      const end = Math.min(haystack.length, start + needle.length)
-      const score = ngramOverlap(needle, haystack.slice(start, end))
-      if (!best || score > best.score) best = { start, end, score }
     }
+    return matches
   }
-  return best && best.score >= 0.5 ? best : null
+  const exact = search(needle)
+  if (exact.length) return exact
+  // A source list label may have been omitted by a renderer. This is the
+  // only tolerated prefix difference; never extend a short fuzzy anchor.
+  const withoutLabel = quote.replace(/^\s*[（(][一二三四五六七八九十百\d]+[)）]\s*/u, '')
+  if (withoutLabel === quote) return []
+  needle = normalizeForMatch(withoutLabel)
+  return needle.length >= 8 ? search(needle) : []
 }
 
-/** Share of the character bigrams of `a` that also occur in `b`. */
-export function ngramOverlap(a: string, b: string): number {
-  if (a.length < 2 || b.length < 2) return a && b && a === b ? 1 : 0
-  const counts = new Map<string, number>()
-  for (let i = 0; i + 1 < b.length; i++) {
-    const g = b.slice(i, i + 2)
-    counts.set(g, (counts.get(g) || 0) + 1)
-  }
-  let hit = 0
-  for (let i = 0; i + 1 < a.length; i++) {
-    const g = a.slice(i, i + 2)
-    const n = counts.get(g) || 0
-    if (n > 0) {
-      hit++
-      counts.set(g, n - 1)
-    }
-  }
-  return hit / (a.length - 1)
+export function findNormalized(haystack: string, quote: string): NormalizedMatch | null {
+  const matches = findNormalizedMatches(haystack, quote)
+  return matches.length === 1 ? matches[0]! : null
+}
+
+export function findTextMatches(text: string, quote: string): TextMatch[] {
+  const { norm, pos } = normalizeWithPositions(text)
+  return findNormalizedMatches(norm, quote).map((m) => {
+    const start = pos[m.start]!, last = pos[m.end - 1]!
+    return { start, end: last + (text.codePointAt(last)! > 0xffff ? 2 : 1) }
+  })
 }
 
 /** Locate a quote in raw text; returns UTF-16 offsets into `text`. */
 export function findInText(text: string, quote: string): { start: number; end: number } | null {
-  const { norm, pos } = normalizeWithPositions(text)
-  const m = findNormalized(norm, quote)
-  if (!m || !pos.length) return null
-  const start = pos[m.start]
-  const lastIdx = Math.min(m.end, pos.length) - 1
-  const last = pos[lastIdx]
-  // Extend to cover the whole last character (surrogate pairs included).
-  const end = last + (text.codePointAt(last)! > 0xffff ? 2 : 1)
-  return { start, end }
+  const hits = findTextMatches(text, quote)
+  return hits.length === 1 ? hits[0]! : null
 }
 
 // ---------------------------------------------------------------------------
 // Picking what to reveal for a citation.
 
-/** Split text into sentence-sized pieces for alignment. */
-export function splitSentences(text: string): string[] {
-  return String(text || '')
-    .split(/(?<=[。！？!?；;])\s*|\n+/u)
-    .map((s) => s.trim())
-    .filter((s) => normalizeForMatch(s).length >= 4)
+/** Explicit quotations can survive a paraphrased sentence without fuzzy matching. */
+export function quotedSourceExcerpt(content: string, sentence: string): string | undefined {
+  const source = sourceQuoteText(content)
+  const candidates = [...sentence.matchAll(/[“「『"]([^”」』"\n]{8,})[”」』"]/gu)]
+    .map(m => m[1]!).filter(q => normalizeForMatch(q).length >= 8 && findInText(source, q))
+  return candidates.length === 1 ? candidates[0] : undefined
 }
 
-const ALIGN_THRESHOLD = 0.35
-
-/**
- * Narrow a chunk's locators to the ones that support the cited sentence. The
- * answer paraphrases the source, so each locator's quote is scored by how
- * many of the sentence's character bigrams it contains; locators well below
- * the best are dropped. When nothing scores, every locator is kept.
- */
+/** Narrow only when the answer contains an exact excerpt of the source. */
 export function selectLocatorsForSentence(locators: SourceLocator[], sentence: string): SourceLocator[] {
   const list = Array.isArray(locators) ? locators.filter(Boolean) : []
+  sentence = quotedSourceExcerpt(list.map(l => l.quote || '').join('\n'), sentence) || sentence
   const needle = normalizeForMatch(sentence)
   if (list.length <= 1 || needle.length < 4) return list
-  const scored = list.map((loc) => ({ loc, score: ngramOverlap(needle, normalizeForMatch(loc.quote || '')) }))
-  const best = Math.max(...scored.map((s) => s.score))
-  if (best < ALIGN_THRESHOLD) return list
-  return scored.filter((s) => s.score >= best * 0.8).map((s) => s.loc)
+  const exact = list.filter((loc) => findTextMatches(loc.quote || '', sentence).length > 0)
+  return exact.length ? exact : list
 }
 
-/**
- * Indices of the texts that best support `sentence`: every text within 80% of
- * the best once it clears the alignment threshold, or else the single best
- * when it clearly stands out (table rows share few bigrams with prose).
- * Empty when nothing aligns, so the caller keeps the whole region.
- */
-export function pickBestTexts(texts: string[], sentence: string): number[] {
-  const needle = normalizeForMatch(sentence || '')
-  if (needle.length < 4 || texts.length < 2) return []
-  const scores = texts.map((t) => ngramOverlap(needle, normalizeForMatch(t)))
-  const best = Math.max(...scores)
-  if (best >= ALIGN_THRESHOLD) return scores.flatMap((s, i) => (s >= best * 0.8 ? [i] : []))
-  const top = scores.indexOf(best)
-  const second = Math.max(0, ...scores.filter((_, i) => i !== top))
-  return best >= 0.2 && second <= best * 0.5 ? [top] : []
-}
-
-/**
- * Code point ranges of the lines within `spans` of `text` that best support
- * `sentence`, or empty when none aligns. Offsets are code points, the unit
- * text locators use.
- */
-export function narrowTextLines(text: string, spans: Array<[number, number]>, sentence: string): Array<[number, number]> {
-  const chars = Array.from(text || '')
-  const lines: Array<{ text: string; start: number; end: number }> = []
-  for (const [from, to] of spans) {
-    const stop = Math.min(to, chars.length)
-    let lineStart = Math.max(0, from)
-    for (let i = lineStart; i <= stop; i++) {
-      if (i < stop && chars[i] !== '\n') continue
-      const line = chars.slice(lineStart, i).join('')
-      if (line.trim()) lines.push({ text: line, start: lineStart, end: i })
-      lineStart = i + 1
-    }
-  }
-  return pickBestTexts(
-    lines.map((l) => l.text),
-    sentence,
-  ).map((i) => [lines[i].start, lines[i].end])
-}
-
-/**
- * The piece of a chunk's text that best supports the cited sentence, used as
- * the quote to search when there are no locators. Falls back to the chunk's
- * opening when the sentence matches nothing.
- */
+/** Use an exact excerpt, or retain the complete cited source as context. */
 export function selectQuoteForSentence(content: string, sentence: string): string[] {
-  const pieces = splitSentences(content)
-  if (!pieces.length) return content ? [content.slice(0, 200)] : []
-  const needle = normalizeForMatch(sentence)
-  if (needle.length >= 4) {
-    let best = { piece: '', score: 0 }
-    for (const piece of pieces) {
-      const score = ngramOverlap(needle, normalizeForMatch(piece))
-      if (score > best.score) best = { piece, score }
-    }
-    if (best.score >= ALIGN_THRESHOLD) return [best.piece, pieces[0]]
-  }
-  return [pieces[0], pieces.slice(0, 3).join('')]
+  const source = sourceQuoteText(content)
+  if (!source) return []
+  // Refine only using text that actually occurs in this source. A paraphrase
+  // still opens its cited chunk; it must not select an unrelated first line.
+  sentence = quotedSourceExcerpt(content, sentence) || sentence
+  const hit = sentence ? findInText(source, sentence) : null
+  return hit ? [source.slice(hit.start, hit.end)] : [source]
 }
 
 /** Normalize locator payloads from the API, dropping malformed entries. */
 export function parseSourceLocators(raw: unknown): SourceLocator[] {
   if (!Array.isArray(raw)) return []
-  return raw.filter((item): item is SourceLocator => !!item && typeof item === 'object' && typeof (item as SourceLocator).type === 'string')
+  return raw.filter((item): item is SourceLocator => {
+    if (!item || typeof item !== 'object' || typeof item.type !== 'string') return false
+    if (item.type === 'pdf' && (!Number.isSafeInteger(item.page) || item.page < 1)) return false
+    return true
+  }).map((loc) => {
+    if (loc.bbox && !validSourceBox(loc.bbox)) { const { bbox, ...rest } = loc; return rest }
+    return loc
+  })
 }
 
 /** 1-based pages targeted by PDF locators, in first-seen order. */
@@ -278,4 +221,37 @@ export function textFragmentUrl(url: string, quote: string): string {
 
 function encodeTextFragment(text: string): string {
   return encodeURIComponent(text).replace(/-/g, '%2D').replace(/,/g, '%2C').replace(/&/g, '%26')
+}
+
+export function validSourceBox(box: unknown): box is [number, number, number, number] {
+  return Array.isArray(box) && box.length === 4 && box.every((n) => typeof n === 'number' && Number.isFinite(n) && n >= 0 && n <= 1) && box[0] < box[2] && box[1] < box[3]
+}
+
+/** Source text, excluding Markdown destinations and HTML presentation tags. */
+export function sourceQuoteText(content: string): string {
+  return String(content || '').replace(/!\[[^\]\n]*\]\([^\n)]*\)/g, ' ')
+    .replace(/\[([^\]\n]+)\]\([^\n)]*\)/g, '$1')
+    .replace(/<\/?[a-zA-Z][^>\n]*>/g, ' ')
+    .replace(/&(#x[\da-f]+|#\d+|nbsp|amp|lt|gt|quot|apos);/gi, (raw, entity: string) => {
+      const named: Record<string, string> = { nbsp: ' ', amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" }
+      if (!entity.startsWith('#')) return named[entity.toLowerCase()] || raw
+      const hex = entity[1]?.toLowerCase() === 'x'
+      const point = Number.parseInt(entity.slice(hex ? 2 : 1), hex ? 16 : 10)
+      return Number.isFinite(point) && point > 0 && point <= 0x10ffff ? String.fromCodePoint(point) : raw
+    })
+    .trim()
+}
+
+/** Locate an embedded image by its exact resource identity in the parent chunk. */
+export function sourceImageContext(markdown: string, urls: string[]): SourceLocateRequest['imageContext'] {
+  const images = [...markdown.matchAll(/!\[[^\]\n]*\]\(([^\n)]*)\)/g)]
+  const selected = images.filter(m => urls.includes(m[1]!))
+  if (selected.length !== 1) return undefined
+  const match = selected[0]!, index = images.indexOf(match)
+  const previous = images[index - 1], next = images[index + 1]
+  const prefix = markdown.slice(previous ? previous.index! + previous[0].length : 0, match.index)
+  const suffix = markdown.slice(match.index! + match[0].length, next?.index ?? markdown.length)
+  const before = sourceQuoteText(prefix).trim().split(/\n\s*\n/).at(-1)?.trim() || ''
+  const after = sourceQuoteText(suffix).trim().split(/\n\s*\n/)[0]?.trim() || ''
+  return before || after ? { before, after } : undefined
 }

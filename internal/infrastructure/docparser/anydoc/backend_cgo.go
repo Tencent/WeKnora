@@ -35,8 +35,9 @@ func backendConvert(data []byte, opts Options) (*Result, error) {
 	}
 
 	// Official GFM serializer after rewriting Asset images to External URLs
-	// (`images/image-N.ext`). ToDocument still supplies the image bytes.
-	document, err := upstream.ToDocument(data, format)
+	// (`images/image-N.ext`). One Rust parse supplies both the original model
+	// (for image bytes and placements) and the rendered Markdown.
+	document, markdown, err := upstream.ToDocumentWithAssetLinks(data, format)
 	if err != nil {
 		markdown, mdErr := upstream.ToMarkdownBytes(data, format)
 		if mdErr != nil {
@@ -46,10 +47,6 @@ func backendConvert(data []byte, opts Options) (*Result, error) {
 			Markdown:    markdown,
 			AssetsError: fmt.Errorf("anydoc: image extraction failed: %w", err),
 		}, nil
-	}
-	markdown, err := upstream.ToMarkdownWithAssetLinks(data, format)
-	if err != nil {
-		return nil, fmt.Errorf("anydoc: markdown conversion failed: %w", err)
 	}
 	return &Result{Markdown: markdown, Assets: collectAssets(document)}, nil
 }
@@ -169,9 +166,15 @@ func inlineText(inlines []upstream.Inline) string {
 	var text strings.Builder
 	for _, inline := range inlines {
 		switch inline.Kind {
-		case "text":
+		case "text", "math":
 			if inline.Text != nil {
 				text.WriteString(*inline.Text)
+			}
+		case "checkbox":
+			if inline.Checked != nil && *inline.Checked {
+				text.WriteString("[x]")
+			} else {
+				text.WriteString("[ ]")
 			}
 		case "link":
 			text.WriteString(inlineText(inline.Content))

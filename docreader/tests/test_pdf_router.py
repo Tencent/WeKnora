@@ -194,6 +194,27 @@ class HiddenTextFilterTest(unittest.TestCase):
         self.assertTrue(_point_in_boxes(5.0, 5.0, boxes))
         self.assertFalse(_point_in_boxes(20.0, 5.0, boxes))
 
+    def test_unreadable_box_does_not_claim_hidden_text_was_filtered(self):
+        from types import SimpleNamespace
+
+        def charbox(index, **kwargs):
+            if index == 0:
+                raise ValueError("unreadable glyph box")
+            return 10.0, 10.0, 20.0, 20.0
+
+        textpage = SimpleNamespace(
+            count_chars=lambda: 2,
+            get_charbox=charbox,
+            get_text_range=lambda index, length: "a",
+        )
+        page = SimpleNamespace(get_size=lambda: (100.0, 100.0), get_objects=lambda: [])
+        raw = SimpleNamespace(FPDF_PAGEOBJ_TEXT=1)
+        chars, _, filtered = _page_chars(textpage, page, raw, return_filter_info=True)
+        self.assertEqual(len(chars), 1)
+        self.assertFalse(filtered)
+        textpage.count_chars = lambda: 0
+        self.assertEqual(_page_chars(textpage, page, raw, return_filter_info=True), ([], 0.0, False))
+
     def test_page_chars_reports_filtered_off_page_glyphs(self):
         class FakeTextPage:
             chars = [
@@ -401,6 +422,19 @@ class PdfTextSanitizeTest(unittest.TestCase):
     def test_numeric_header_and_rows_are_a_table_tail(self):
         self.assertTrue(_tail_looks_like_numeric_table(["Body", "Quantity", "124", "237"]))
 
+    def test_table_signal_must_reach_the_current_nonempty_tail(self):
+        for rows in (
+            ["Aster 1", "Willow 2"],
+            ["Quantity", "124", "237"],
+            ["Aster", "124", "Willow", "237"],
+        ):
+            with self.subTest(rows=rows):
+                self.assertTrue(_tail_looks_like_numeric_table(rows + [""]))
+                self.assertFalse(_tail_looks_like_numeric_table(rows + ["identity"]))
+                out = _postprocess_pdf_text("\n".join(rows + ["identity", "Figure 1. Diagram", "After"]))
+                self.assertNotIn("identity", out)
+                self.assertIn("\n".join(rows), out)
+
     def test_preserves_repeated_single_digit_values(self):
         from docreader.parser.pdf_parser import _postprocess_pdf_text
 
@@ -586,6 +620,38 @@ class ScanEnglishDictLayoutTest(unittest.TestCase):
 
 
 class PDFRouterIntegrationTest(unittest.TestCase):
+    def test_well_formed_plain_text_does_not_restore_outside_cropbox_text(self):
+        import pypdfium2 as pdfium
+
+        from docreader.parser.pdf_parser import _extract_page_text, _plain_is_well_formed
+        from docreader.tests.test_source_locator_pdf import pdf_fixture
+
+        visible = "Visible source evidence remains inside crop boundary"
+        outside = "Outside-note"
+        content = pdf_fixture(
+            [
+                {
+                    "crop": "/CropBox [100 100 500 700]",
+                    "lines": [(visible, 150, y) for y in (600, 560, 520, 480, 440)]
+                    + [(outside, 10, 300)],
+                }
+            ]
+        )
+        with pdfium.PdfDocument(content) as pdf:
+            page = pdf[0]
+            try:
+                plain = _extract_page_text(page)
+            finally:
+                page.close()
+        self.assertIn(outside, plain)
+        self.assertTrue(_plain_is_well_formed(plain))
+
+        doc = PDFParser(
+            file_name="cropped-text.pdf", file_type="pdf", pdf_force_scanned=False
+        ).parse_into_text(content)
+        self.assertIn(visible, doc.content)
+        self.assertNotIn(outside, doc.content)
+
     def test_image_only_pdf_routes_to_scanned(self):
         pdf_bytes = _make_image_only_pdf(2)
         doc = PDFParser(file_name="imgonly.pdf", file_type="pdf").parse_into_text(

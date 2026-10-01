@@ -614,7 +614,7 @@ services:
       - full
 
   minio:
-    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
+    image: pgsty/minio:RELEASE.2026-08-04T00-00-00Z
     container_name: WeKnora-minio
     ports:
       - "${MINIO_PORT:-9000}:9000"
@@ -868,7 +868,7 @@ services:
       - full
 
   langfuse-minio:
-    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
+    image: pgsty/minio:RELEASE.2026-08-04T00-00-00Z
     container_name: WeKnora-langfuse-minio
     restart: unless-stopped
     entrypoint: sh

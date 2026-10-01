@@ -12,6 +12,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/application/repository"
+	"github.com/Tencent/WeKnora/internal/searchutil"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
@@ -955,7 +956,7 @@ func (t *wikiSearchTool) Execute(ctx context.Context, args json.RawMessage) (*ty
 			t.seenSlugs[key] = true
 			t.mu.Unlock()
 
-			snippet := extractSnippet(p.Content, pattern)
+			snippet := searchutil.ExtractSnippet(p.Content, pattern)
 			snippetTag := ""
 			if snippet != "" {
 				snippetTag = fmt.Sprintf("\n<match_snippet>%s</match_snippet>", snippet)
@@ -1048,47 +1049,6 @@ func parseStringOrArray(val any) []string {
 		return res
 	}
 	return nil
-}
-
-func extractSnippet(content string, query string) string {
-	if content == "" || query == "" {
-		return ""
-	}
-	re, err := regexp.Compile("(?i)" + query)
-	if err != nil {
-		return ""
-	}
-	loc := re.FindStringIndex(content)
-	if loc == nil {
-		return ""
-	}
-
-	matchStr := content[loc[0]:loc[1]]
-	before := content[:loc[0]]
-	after := content[loc[1]:]
-
-	beforeRunes := []rune(before)
-	if len(beforeRunes) > 60 {
-		beforeRunes = beforeRunes[len(beforeRunes)-60:]
-	}
-
-	afterRunes := []rune(after)
-	if len(afterRunes) > 60 {
-		afterRunes = afterRunes[:60]
-	}
-
-	matchRunes := []rune(matchStr)
-	if len(matchRunes) > 100 {
-		matchRunes = append(matchRunes[:100], []rune("...")...)
-	}
-
-	snippet := string(beforeRunes) + string(matchRunes) + string(afterRunes)
-	snippet = strings.ReplaceAll(snippet, "\n", " ")
-	for strings.Contains(snippet, "  ") {
-		snippet = strings.ReplaceAll(snippet, "  ", " ")
-	}
-
-	return "... " + strings.TrimSpace(snippet) + " ..."
 }
 
 func truncateRunes(s string, maxRunes int) string {

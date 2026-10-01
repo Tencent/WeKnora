@@ -128,6 +128,76 @@ func (h *ModelHandler) CreateModel(c *gin.Context) {
 	})
 }
 
+// CopyModelRequest is the body of POST /models/:id/copy. Only the display
+// name is client-supplied. The model name and credentials come from the
+// stored source row.
+type CopyModelRequest struct {
+	DisplayName string `json:"display_name" binding:"required"`
+}
+
+// CopyModel godoc
+// @Summary      复制模型
+// @Description  复制模型配置。name 与源模型一致，凭证从已存记录复制，不接受客户端重传。
+// @Tags         模型管理
+// @Accept       json
+// @Produce      json
+// @Param        id       path      string           true  "源模型ID"
+// @Param        request  body      CopyModelRequest true  "副本展示名"
+// @Success      201      {object}  map[string]interface{}  "复制的模型"
+// @Failure      400      {object}  errors.AppError         "请求参数错误"
+// @Failure      404      {object}  errors.AppError         "模型不存在"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /models/{id}/copy [post]
+func (h *ModelHandler) CopyModel(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	id := secutils.SanitizeForLog(c.Param("id"))
+	if id == "" {
+		logger.Error(ctx, "Model ID is empty")
+		_ = c.Error(errors.NewBadRequestError("Model ID cannot be empty"))
+		return
+	}
+
+	var req CopyModelRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		logger.Error(ctx, "Failed to parse request parameters", err)
+		_ = c.Error(errors.NewBadRequestError(err.Error()))
+		return
+	}
+	tenantID := c.GetUint64(types.TenantIDContextKey.String())
+	if tenantID == 0 {
+		logger.Error(ctx, "Tenant ID is empty")
+		_ = c.Error(errors.NewBadRequestError("Workspace ID cannot be empty"))
+		return
+	}
+
+	model, err := h.service.CopyModel(ctx, id, req.DisplayName)
+	if err != nil {
+		if err == service.ErrModelNotFound {
+			logger.Warnf(ctx, "Model not found, ID: %s", id)
+			_ = c.Error(errors.NewNotFoundError("Model not found"))
+			return
+		}
+		if appErr, ok := errors.IsAppError(err); ok {
+			_ = c.Error(appErr)
+			return
+		}
+		logger.ErrorWithFields(ctx, err, nil)
+		_ = c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+
+	logger.Infof(ctx, "Model copied successfully, ID: %s, Name: %s",
+		secutils.SanitizeForLog(model.ID),
+		secutils.SanitizeForLog(model.Name),
+	)
+	c.JSON(http.StatusCreated, gin.H{
+		"success": true,
+		"data":    dto.NewModelResponse(ctx, model),
+	})
+}
+
 // GetModel godoc
 // @Summary      获取模型详情
 // @Description  根据ID获取模型详情
