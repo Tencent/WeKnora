@@ -123,6 +123,36 @@ func TestResourceCatalogReleaseUnknownReference(t *testing.T) {
 	require.Error(t, err, "an owner is required to release a claim")
 }
 
+func TestResourceCatalogListReferencesByOwner(t *testing.T) {
+	catalog, _ := newResourceCatalogForTest(t)
+	ctx := context.Background()
+	first, err := catalog.Register(ctx, 7, "local://7/exports/a.png", interfaces.ResourceRegistration{})
+	require.NoError(t, err)
+	second, err := catalog.Register(ctx, 7, "local://7/exports/b.png", interfaces.ResourceRegistration{})
+	require.NoError(t, err)
+	require.NoError(t, catalog.Bind(ctx, first, types.ResourceOwnerKnowledge, "kn-1", types.ResourceRelationAttachment))
+	require.NoError(t, catalog.Bind(
+		ctx, second, types.ResourceOwnerKnowledge, "kn-1", types.ResourceRelationExtractedImage))
+	require.NoError(t, catalog.Bind(ctx, first, types.ResourceOwnerKnowledge, "kn-2", types.ResourceRelationAttachment))
+
+	source, err := catalog.Register(ctx, 7, "local://7/docs/source.pdf", interfaces.ResourceRegistration{})
+	require.NoError(t, err)
+	require.NoError(t, catalog.Bind(
+		ctx, source, types.ResourceOwnerKnowledge, "kn-1", types.ResourceRelationSourceFile))
+
+	refs, err := catalog.ListReferencesByOwner(ctx, types.ResourceOwnerKnowledge, "kn-1")
+	require.NoError(t, err)
+	require.ElementsMatch(t, []string{first, second}, refs)
+
+	refs, err = catalog.ListReferencesByOwner(ctx, types.ResourceOwnerKnowledge, "kn-1", "kn-2")
+	require.NoError(t, err)
+	require.ElementsMatch(t, []string{first, second}, refs)
+
+	refs, err = catalog.ListReferencesByOwner(ctx, types.ResourceOwnerKnowledge)
+	require.NoError(t, err)
+	require.Empty(t, refs)
+}
+
 // Rendering one answer resolves the same image many times, and re-reading a
 // message history resolves it again on every call. Each resolution used to
 // insert a capability row; a live one must be reused instead.

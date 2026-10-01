@@ -97,7 +97,9 @@ func (s *knowledgeService) cloneKnowledge(
 		}
 		srcSvc := s.resolveFileServiceForPath(ctx, srcKB, src.FilePath)
 		dstSvc := s.resolveFileService(ctx, targetKB)
-		newPath, copyErr := copyOwnedObject(ctx, srcSvc, dstSvc, src.FilePath, targetKB.TenantID, dst.ID)
+		newPath, copyErr := copyOwnedObject(
+			ctx, srcSvc, dstSvc, src.FilePath, targetKB.TenantID, dst.ID,
+			s.resourceCatalog, types.ResourceRelationSourceFile)
 		if copyErr != nil {
 			return fmt.Errorf("clone knowledge file copy failed: %w", copyErr)
 		}
