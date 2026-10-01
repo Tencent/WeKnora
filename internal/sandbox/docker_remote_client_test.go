@@ -1216,3 +1216,47 @@ func TestDockerExecObservesBothOutputStreamsWithoutChangingResult(t *testing.T) 
 	require.Equal(t, result.Stdout, observed["stdout"])
 	require.Equal(t, result.Stderr, observed["stderr"])
 }
+
+// A filesystem op killed by the in-container `timeout -s KILL` wrapper (issue
+// #3910) leaves no stderr: it must classify as Timeout with the evidence in
+// the message, not as invalid_request with a dangling colon.
+func TestDockerFileOpKilledByTimeoutClassifiesAsTimeout(t *testing.T) {
+	engine := newFakeDockerEngine()
+	engine.execExit = 137
+	engine.execStderr = ""
+	docker := newTestDockerClient(t, engine)
+
+	err := docker.MakeDir(context.Background(), testHandle("c"), "/workspace/input/94088e061da2")
+	require.Error(t, err)
+	require.True(t, IsRemoteTimeout(err), "killed op must be Timeout: %q", err.Error())
+	require.False(t, IsRemoteInvalidRequest(err), "killed op is not the caller's fault")
+	require.Contains(t, err.Error(), "killed after")
+	require.Contains(t, err.Error(), "exit=137")
+	require.Contains(t, err.Error(), "no output")
+	require.NotRegexp(t, `: $`, err.Error(), "no dangling colon: %q", err.Error())
+}
+
+// A genuine tool failure keeps its stderr complaint, and a failure with no
+// stderr at least carries the exit code instead of ending in a bare colon.
+func TestDockerFileOpExitErrorsCarryEvidence(t *testing.T) {
+	denied := newFakeDockerEngine()
+	denied.execExit = 1
+	denied.execStderr = "mkdir: /workspace/input: Permission denied"
+	docker := newTestDockerClient(t, denied)
+
+	err := docker.MakeDir(context.Background(), testHandle("c"), "/workspace/input/x")
+	require.Error(t, err)
+	require.True(t, IsRemoteInvalidRequest(err))
+	require.Contains(t, err.Error(), "Permission denied")
+
+	silent := newFakeDockerEngine()
+	silent.execExit = 1
+	silent.execStderr = ""
+	docker = newTestDockerClient(t, silent)
+
+	err = docker.MakeDir(context.Background(), testHandle("c"), "/workspace/input/x")
+	require.Error(t, err)
+	require.True(t, IsRemoteInvalidRequest(err))
+	require.Contains(t, err.Error(), "(exit=1, no stderr)",
+		"silent failure must say so instead of a dangling colon: %q", err.Error())
+}

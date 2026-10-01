@@ -892,7 +892,7 @@ func (c *DockerRemoteClient) WriteFile(
 		return dockerError("WriteFile", err)
 	}
 	if result.ExitCode != 0 {
-		return dockerFileOpError("WriteFile", clean, result.Stderr)
+		return dockerExecFailure("WriteFile", clean, result)
 	}
 	return nil
 }
@@ -927,7 +927,7 @@ func (c *DockerRemoteClient) ReadFile(
 		return nil, dockerError("ReadFile", err)
 	}
 	if result.ExitCode != 0 {
-		return nil, dockerFileOpError("ReadFile", clean, result.Stderr)
+		return nil, dockerExecFailure("ReadFile", clean, result)
 	}
 	return []byte(result.Stdout), nil
 }
@@ -971,7 +971,7 @@ func (c *DockerRemoteClient) Stat(
 		return nil, dockerError("Stat", err)
 	}
 	if result.ExitCode != 0 {
-		return nil, dockerFileOpError("Stat", clean, result.Stderr)
+		return nil, dockerExecFailure("Stat", clean, result)
 	}
 	entries := parseDockerFindOutput(result.Stdout)
 	if len(entries) == 0 {
@@ -1011,6 +1011,48 @@ func dockerFileOpError(op, clean, stderr string) error {
 	}
 }
 
+// dockerExecFailure classifies a filesystem helper whose exec ran but exited
+// non-zero.
+//
+// A SIGKILLed op — the in-container `timeout -s KILL` wrapper fires at
+// dockerFilesystemOpTimeout, or the process is OOM-killed — means the sandbox
+// filesystem stalled, not that the caller asked for something invalid: it maps
+// to Timeout (retryable, binding preserved) instead of invalid_request, and
+// the message carries the evidence a killed process leaves behind — usually an
+// empty stderr, hence the exit code and elapsed time. This is what turned
+// issue #3910's hung `mkdir -p /workspace/input/<hash>` into
+// "invalid_request: mkdir -p ...: " with no explanation. Genuine tool failures
+// keep the tool's own complaint via dockerFileOpError.
+func dockerExecFailure(op, describe string, result *RemoteExecResult) error {
+	if result.Killed {
+		detail := fmt.Sprintf(
+			"%s: killed after %s (filesystem-op timeout %s), exit=%d",
+			describe, result.Duration.Round(time.Millisecond), dockerFilesystemOpTimeout, result.ExitCode,
+		)
+		if line := firstNonEmptyLine(result.Stderr); line != "" {
+			detail += ", stderr: " + line
+		} else if line := firstNonEmptyLine(result.Stdout); line != "" {
+			detail += ", stdout: " + line
+		} else {
+			detail += ", no output"
+		}
+		return &RemoteError{
+			Kind:     RemoteErrorKindTimeout,
+			Provider: SandboxTypeDocker,
+			Op:       op,
+			Message:  detail,
+		}
+	}
+	err := dockerFileOpError(op, describe, result.Stderr)
+	// When the tool died without writing to stderr the message above would end
+	// in a dangling colon; carry the exit code so the failure is attributable.
+	var re *RemoteError
+	if errors.As(err, &re) && strings.HasSuffix(re.Message, ": ") {
+		re.Message = strings.TrimSuffix(re.Message, ": ") + fmt.Sprintf(" (exit=%d, no stderr)", result.ExitCode)
+	}
+	return err
+}
+
 // MakeDir creates a directory (and its parents) inside the sandbox.
 func (c *DockerRemoteClient) MakeDir(
 	ctx context.Context,
@@ -1039,12 +1081,7 @@ func (c *DockerRemoteClient) makeDir(ctx context.Context, id, dir, op string) er
 		return dockerError(op, err)
 	}
 	if result.ExitCode != 0 {
-		return &RemoteError{
-			Kind:     RemoteErrorKindInvalidRequest,
-			Provider: SandboxTypeDocker,
-			Op:       op,
-			Message:  fmt.Sprintf("mkdir -p %s: %s", dir, firstNonEmptyLine(result.Stderr)),
-		}
+		return dockerExecFailure(op, dir, result)
 	}
 	return nil
 }
@@ -1076,12 +1113,7 @@ func (c *DockerRemoteClient) Remove(
 		return dockerError("Remove", err)
 	}
 	if result.ExitCode != 0 {
-		return &RemoteError{
-			Kind:     RemoteErrorKindInvalidRequest,
-			Provider: SandboxTypeDocker,
-			Op:       "Remove",
-			Message:  fmt.Sprintf("rm -rf %s: %s", clean, firstNonEmptyLine(result.Stderr)),
-		}
+		return dockerExecFailure("Remove", clean, result)
 	}
 	return nil
 }
@@ -1117,6 +1149,9 @@ func (c *DockerRemoteClient) ListDir(
 		return nil, dockerError("ListDir", err)
 	}
 	if result.ExitCode != 0 {
+		if result.Killed {
+			return nil, dockerExecFailure("ListDir", clean, result)
+		}
 		if strings.Contains(result.Stderr, "No such file or directory") {
 			return nil, &RemoteError{
 				Kind:     RemoteErrorKindNotFound,
