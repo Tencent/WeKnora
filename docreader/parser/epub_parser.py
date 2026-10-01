@@ -293,11 +293,12 @@ class EPUBParser(BaseParser):
             normalized,
             unquote(original_path),
             unquote(normalized),
-            posixpath.basename(normalized),
         }
         for alias in aliases:
             if alias:
                 image_aliases[alias] = image_path
+        # A basename fallback must not overwrite a real archive-root path.
+        image_aliases.setdefault(posixpath.basename(normalized), image_path)
 
     @staticmethod
     def _rewrite_image_sources(
@@ -315,11 +316,12 @@ class EPUBParser(BaseParser):
                 normalized_src,
                 unquote(src),
                 unquote(normalized_src),
-                posixpath.basename(normalized_src),
             ]
             if base_path:
                 joined = EPUBParser._normalize_epub_path(posixpath.join(base_path, src))
-                candidates.extend([joined, unquote(joined)])
+                # Resolve relative to the chapter before trying ambiguous aliases.
+                candidates = [joined, unquote(joined)] + candidates
+            candidates.append(posixpath.basename(normalized_src))
             for candidate in candidates:
                 if candidate in image_aliases:
                     img["src"] = image_aliases[candidate]
