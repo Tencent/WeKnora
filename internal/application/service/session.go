@@ -23,6 +23,17 @@ func sessionUserIDFromContext(ctx context.Context) string {
 	return types.SessionOwnerIDFromContext(ctx)
 }
 
+// sessionManagementUserIDFromContext allows Web console admins to manage
+// tenant sessions while preserving owner isolation for runtime principals.
+func sessionManagementUserIDFromContext(ctx context.Context) string {
+	principal, ok := types.PrincipalFromContext(ctx)
+	if ok && principal.Type == types.PrincipalWebUser &&
+		types.TenantRoleFromContext(ctx).HasPermission(types.TenantRoleAdmin) {
+		return ""
+	}
+	return sessionUserIDFromContext(ctx)
+}
+
 // runtimeMayBypassAdminConsoleRead reports whether a non-admin caller on the
 // owner-scoped read path may open a channel-managed session. Admin console reads
 // use the GetByID fallback in loadSessionForRead and never call this helper.
@@ -58,7 +69,7 @@ func runtimeMayBypassAdminConsoleRead(
 // an Admin+ fallback that additionally permits reading tenant channel sessions
 // (API-key, IM, and embed) from the Web console. Non-admin callers must not
 // open channel-managed rows even when legacy empty user_id scope would match.
-// Write paths keep the strict scope and must not use this helper.
+// Chat runtime writes keep the strict owner scope and must not use this helper.
 func loadSessionForRead(
 	ctx context.Context,
 	repo interfaces.SessionRepository,
@@ -432,7 +443,7 @@ func (s *sessionService) UpdateSession(ctx context.Context, session *types.Sessi
 	}
 
 	// Update session in repository
-	userID := sessionUserIDFromContext(ctx)
+	userID := sessionManagementUserIDFromContext(ctx)
 	existing, err := s.sessionRepo.Get(ctx, session.TenantID, userID, session.ID)
 	if err != nil {
 		return err
@@ -492,7 +503,7 @@ func (s *sessionService) DeleteSession(ctx context.Context, id string) error {
 
 	// Get tenant ID from context
 	tenantID := types.MustTenantIDFromContext(ctx)
-	userID := sessionUserIDFromContext(ctx)
+	userID := sessionManagementUserIDFromContext(ctx)
 
 	session, err := s.sessionRepo.Get(ctx, tenantID, userID, id)
 	if err != nil {
@@ -562,7 +573,7 @@ func (s *sessionService) BatchDeleteSessions(ctx context.Context, ids []string) 
 
 	// Get tenant ID from context
 	tenantID := types.MustTenantIDFromContext(ctx)
-	userID := sessionUserIDFromContext(ctx)
+	userID := sessionManagementUserIDFromContext(ctx)
 
 	visible := make([]*types.Session, 0, len(ids))
 	visibleIDs := make([]string, 0, len(ids))
