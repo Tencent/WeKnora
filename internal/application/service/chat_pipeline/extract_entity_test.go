@@ -25,6 +25,7 @@ func TestFormater_ParseGraph_FenceVariants(t *testing.T) {
 		wantRels    int
 		wantErr     bool
 		errContains string
+		wantSkipped bool
 	}{
 		{
 			name:      "wrapped in ```json fence",
@@ -85,26 +86,53 @@ func TestFormater_ParseGraph_FenceVariants(t *testing.T) {
 			wantRels:  0,
 		},
 		{
+			// Issue #3600: an empty response is treated as a decline/skip —
+			// retrying the same chunk cannot produce a different answer.
 			name:        "empty input",
 			input:       "",
-			wantErr:     true,
-			errContains: "empty",
+			wantNodes:   0,
+			wantRels:    0,
+			wantSkipped: true,
 		},
 		{
 			name:        "whitespace only",
 			input:       "   \n\t  ",
-			wantErr:     true,
-			errContains: "empty",
+			wantNodes:   0,
+			wantRels:    0,
+			wantSkipped: true,
 		},
 		{
-			name:        "fenced but body is invalid JSON",
+			// Fenced body with no JSON structure at all ({ or [) is a prose
+			// refusal dressed in a fence — skip, not a retriable error (#3600).
+			name:        "fenced but body has no JSON structure",
 			input:       "```json\nnot json at all\n```",
-			wantErr:     true,
-			errContains: "parse",
+			wantNodes:   0,
+			wantRels:    0,
+			wantSkipped: true,
 		},
 		{
-			name:        "no recoverable JSON, only prose",
+			// Issue #3600: a prose refusal carries no JSON structure at all.
+			// It must complete as an empty graph (a skip), not an error —
+			// retrying the same chunk can never succeed.
+			name:        "prose refusal with no JSON structure is a skip, not an error",
 			input:       "Sorry, I cannot extract a graph from this text.",
+			wantNodes:   0,
+			wantRels:    0,
+			wantSkipped: true,
+		},
+		{
+			// Issue #3600: Chinese refusal ("抱歉…") — its UTF-8 bytes show up
+			// in json errors as `invalid character 'æ'`.
+			name:        "Chinese prose refusal is a skip, not an error",
+			input:       "抱歉，该文本为目录页，没有可抽取的实体和关系。",
+			wantNodes:   0,
+			wantRels:    0,
+			wantSkipped: true,
+		},
+		{
+			// Truncated JSON (braces present) remains a real, retriable failure.
+			name:        "truncated JSON with structure still fails",
+			input:       "[{\"entity\": \"Alice\", \"entity_attrib",
 			wantErr:     true,
 			errContains: "parse",
 		},
@@ -130,6 +158,13 @@ func TestFormater_ParseGraph_FenceVariants(t *testing.T) {
 			}
 			if graph == nil {
 				t.Fatalf("expected non-nil graph")
+			}
+			if tc.wantSkipped {
+				// Skip path: a declined extraction completes as an empty
+				// graph, and the error must match errModelDeclined upstream.
+				if len(graph.Node) != 0 || len(graph.Relation) != 0 {
+					t.Fatalf("expected empty graph on skip, got %+v", graph)
+				}
 			}
 			if got := len(graph.Node); got != tc.wantNodes {
 				t.Errorf("nodes: got %d, want %d (graph=%+v)", got, tc.wantNodes, graph)
