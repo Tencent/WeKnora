@@ -10,6 +10,8 @@ export interface SearchResult {
   chunk_index?: number
   knowledge_title?: string
   knowledge_filename?: string
+  /** JSON-encoded image metadata returned with a retrieved chunk. */
+  image_info?: string
   score?: number
   match_type?: number | string
   [key: string]: unknown
@@ -29,6 +31,8 @@ export interface ChunkRecord {
   content?: string
   chunk_index?: number
   knowledge_id?: string
+  /** JSON-encoded image metadata returned with a stored chunk. */
+  image_info?: string
   [key: string]: unknown
 }
 
