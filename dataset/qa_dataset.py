@@ -15,6 +15,8 @@ python dataset/qa_dataset.py sample \
   --output_dir ./dataset/samples
 
 # 生成答案(基于采样结果)
+# 可选：追加 --model <model-name> 指定 OpenAI 兼容服务中的模型
+# 切换模型时使用新的 --output_dir；断点续跑仍会复用已有答案
 python dataset/qa_dataset.py generate \
   --input_dir ./dataset/samples \
   --output_dir ./dataset/samples
@@ -31,6 +33,9 @@ import argparse
 
 import pandas as pd
 import openai
+
+
+DEFAULT_QA_MODEL = "gpt-4o-2024-05-13"
 
 
 def read_parquet(path):
@@ -145,7 +150,7 @@ class QAAnsweringSystem:
 
         return "\n\n".join(context_parts)
 
-    def answer_question(self, qid: str, model: str = "gpt-4o-2024-05-13") -> str:
+    def answer_question(self, qid: str, model: str = DEFAULT_QA_MODEL) -> str:
         """
         Use OpenAI API to answer question based on qid context
 
@@ -216,14 +221,24 @@ def sample_command(args):
     print("\nSampling completed successfully!")
 
 
-def generate_answers(input_dir: str, output_dir: str, max_retries: int = 3):
+def generate_answers(
+    input_dir: str,
+    output_dir: str,
+    max_retries: int = 3,
+    *,
+    model: str = DEFAULT_QA_MODEL,
+):
     """
     Generate answers for sampled queries with resume support
+
+    Saved answers are reused even when the model changes. Use a new output
+    directory to regenerate all answers with a different model.
 
     Args:
         input_dir: Directory containing sampled queries/corpus/qrels
         output_dir: Directory to save answer files
         max_retries: Maximum retry attempts for failed queries
+        model: OpenAI-compatible model to use for answer generation
     """
     print("\nLoading sampled data...")
     queries = read_parquet(f"{input_dir}/queries.parquet")
@@ -258,7 +273,7 @@ def generate_answers(input_dir: str, output_dir: str, max_retries: int = 3):
         retry_count = 0
         while retry_count <= max_retries:
             try:
-                answer_text = qa_system.answer_question(qid)
+                answer_text = qa_system.answer_question(qid, model=model)
                 aid = answer_id_counter
                 answers.append({"id": aid, "text": answer_text})
                 qa_pairs.append({"qid": qid, "aid": aid})
@@ -329,6 +344,12 @@ def show_results(input_dir: str, n: int = 5):
         print("=" * 50 + "\n")
 
 
+def _model_argument(value: str) -> str:
+    if not value.strip():
+        raise argparse.ArgumentTypeError("model must not be empty or whitespace-only")
+    return value
+
+
 def main():
     # Set up command line arguments
     parser = argparse.ArgumentParser(description="QA Dataset Tool")
@@ -361,8 +382,19 @@ def main():
     generate_parser.add_argument(
         "--output_dir", type=str, default="./save", help="Output directory"
     )
+    generate_parser.add_argument(
+        "--model",
+        type=_model_argument,
+        default=DEFAULT_QA_MODEL,
+        help=(
+            f"Model for answer generation (default: {DEFAULT_QA_MODEL}). "
+            "Resume reuses saved answers; use a new --output_dir when changing models."
+        ),
+    )
     generate_parser.set_defaults(
-        func=lambda args: generate_answers(args.input_dir, args.output_dir)
+        func=lambda args: generate_answers(
+            args.input_dir, args.output_dir, model=args.model
+        )
     )
 
     # Show command
