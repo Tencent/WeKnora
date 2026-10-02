@@ -1,6 +1,10 @@
 package service
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/Tencent/WeKnora/internal/types"
+)
 
 func TestIsValidFileTypeHTML(t *testing.T) {
 	tests := []struct {
@@ -57,8 +61,9 @@ func TestIsSupportedImportExtension(t *testing.T) {
 
 // Direct upload and URL import must agree on the accepted extension set,
 // otherwise #2447 (xlsx accepted on upload, rejected on URL import) regresses.
+// The set itself is canonical in internal/types so connectors share it too.
 func TestImportExtensionSetIsSharedAcrossPaths(t *testing.T) {
-	for ext := range supportedImportFileExtensions {
+	for ext := range types.SupportedImportFileExtensions {
 		if !isValidFileType("file." + ext) {
 			t.Errorf("isValidFileType rejects supported extension %q", ext)
 		}

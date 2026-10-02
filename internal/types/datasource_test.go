@@ -142,6 +142,55 @@ func TestDataSourceConfig_HasConfiguredCredentials_RSS(t *testing.T) {
 	})
 }
 
+// TestDataSourceConfig_HasConfiguredCredentials_OPDS mirrors the RSS case:
+// catalog URLs are non-secret configuration, so only Basic credentials or
+// custom headers count as "configured credentials".
+func TestDataSourceConfig_HasConfiguredCredentials_OPDS(t *testing.T) {
+	urlsOnly := DataSourceConfig{
+		Credentials: map[string]interface{}{
+			"catalog_urls": "https://catalog.example.com/opds",
+		},
+	}
+	assert.False(t, urlsOnly.HasConfiguredCredentials(ConnectorTypeOPDS))
+	assert.True(t, urlsOnly.HasCredentials())
+
+	withBasic := DataSourceConfig{
+		Credentials: map[string]interface{}{
+			"catalog_urls": "https://catalog.example.com/opds",
+			"username":     "alice",
+			"password":     "s3cret",
+		},
+	}
+	assert.True(t, withBasic.HasConfiguredCredentials(ConnectorTypeOPDS))
+
+	withHeaders := DataSourceConfig{
+		Credentials: map[string]interface{}{
+			"auth_headers": "Authorization: Bearer x",
+		},
+	}
+	assert.True(t, withHeaders.HasConfiguredCredentials(ConnectorTypeOPDS))
+
+	// A blank value must not read as configured.
+	blank := DataSourceConfig{
+		Credentials: map[string]interface{}{"username": "   ", "password": ""},
+	}
+	assert.False(t, blank.HasConfiguredCredentials(ConnectorTypeOPDS))
+
+	t.Run("strip catalog_urls", func(t *testing.T) {
+		cfg := urlsOnly
+		cfg.StripNonSecretCredentials(ConnectorTypeOPDS)
+		assert.Nil(t, cfg.Credentials)
+		assert.False(t, cfg.HasCredentials())
+	})
+
+	t.Run("strip keeps real credentials", func(t *testing.T) {
+		cfg := withBasic
+		cfg.StripNonSecretCredentials(ConnectorTypeOPDS)
+		assert.NotContains(t, cfg.Credentials, "catalog_urls")
+		assert.Equal(t, "alice", cfg.Credentials["username"])
+	})
+}
+
 // TestSubtreeChildID_MatchesPrefix locks the producer/consumer contract: a child
 // ID built by SubtreeChildID must start with the parent's SubtreeChildPrefix
 // (what the sweep queries), and the prefix must not match a sibling node whose

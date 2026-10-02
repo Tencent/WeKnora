@@ -23,20 +23,7 @@ import (
 )
 
 // unknownFileType is returned by getFileType when a name carries no extension.
-const unknownFileType = "unknown"
-
-// supportedImportFileExtensions is the single source of truth for extensions
-// accepted by every knowledge import path: direct upload, file-URL download,
-// and the worker's post-download re-check. Keeping one set avoids the drift
-// that let direct upload accept xlsx while URL import rejected it (#2447).
-var supportedImportFileExtensions = map[string]struct{}{
-	"pdf": {}, "txt": {}, "docx": {}, "doc": {}, "epub": {},
-	"html": {}, "htm": {}, "mhtml": {}, "md": {}, "markdown": {},
-	"xmind": {},
-	"png":   {}, "jpg": {}, "jpeg": {}, "gif": {},
-	"csv": {}, "xlsx": {}, "xls": {}, "pptx": {}, "ppt": {}, "json": {},
-	"mp3": {}, "wav": {}, "m4a": {}, "flac": {}, "ogg": {},
-}
+const unknownFileType = types.UnknownFileType
 
 // dataTableFileExtensions are the spreadsheet formats that get an extra
 // table-summary task after their document-process task.
@@ -47,17 +34,14 @@ var dataTableFileExtensions = map[string]struct{}{
 // normalizeFileExtension lowercases an extension and strips a leading dot so
 // callers can pass either "xlsx", ".XLSX", or a raw user-supplied file_type.
 func normalizeFileExtension(ext string) string {
-	return strings.ToLower(strings.TrimPrefix(strings.TrimSpace(ext), "."))
+	return types.NormalizeFileExtension(ext)
 }
 
 // isSupportedImportExtension reports whether a bare extension can be imported.
+// The set itself lives in internal/types so data-source connectors apply the
+// same rule without importing this package (see types.SupportedImportFileExtensions).
 func isSupportedImportExtension(ext string) bool {
-	ext = normalizeFileExtension(ext)
-	if ext == "" || ext == unknownFileType {
-		return false
-	}
-	_, ok := supportedImportFileExtensions[ext]
-	return ok
+	return types.IsSupportedImportExtension(ext)
 }
 
 // isValidFileType checks if a filename's extension is supported for import.
