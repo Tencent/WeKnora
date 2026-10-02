@@ -258,10 +258,11 @@ func appendOversizeBlock(out []Chunk, runes []rune, start, end int, cfg Splitter
 	subs := SplitText(subText, cfg)
 	for _, s := range subs {
 		out = append(out, Chunk{
-			Content: s.Content,
-			Seq:     *seq,
-			Start:   start + s.Start,
-			End:     start + s.End,
+			Content:       s.Content,
+			ContextHeader: s.ContextHeader,
+			Seq:           *seq,
+			Start:         start + s.Start,
+			End:           start + s.End,
 		})
 		*seq++
 	}

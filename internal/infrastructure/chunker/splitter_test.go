@@ -1336,3 +1336,172 @@ func TestSplitTextParentChild_WithTableHeaders(t *testing.T) {
 		}
 	}
 }
+
+func TestMergeUnitsCapsProtectedContentWithOverlapAndRestoration(t *testing.T) {
+	for _, size := range []int{4096, 4097, 7000} {
+		t.Run(fmt.Sprintf("size=%d", size), func(t *testing.T) {
+			text := strings.Repeat("数", size)
+			chunks := mergeUnits([]splitUnit{{text: text, start: 0, end: size}}, 512, 50)
+			for index, chunk := range chunks {
+				if chunkSize := len([]rune(chunk.Content)); chunkSize > 4096 {
+					t.Fatalf("chunk %d has %d runes, exceeds protected-content cap", index, chunkSize)
+				}
+			}
+			if size == 4096 && len(chunks) != 1 {
+				t.Fatalf("expected exact-limit content to stay in one chunk, got %d", len(chunks))
+			}
+			if size > 4096 {
+				if len(chunks) < 2 {
+					t.Fatalf("expected oversized content to split, got %d chunk", len(chunks))
+				}
+				if overlap := chunks[0].End - chunks[1].Start; overlap <= 0 || overlap > 50 {
+					t.Fatalf("expected overlap in (0, 50], got %d", overlap)
+				}
+			}
+			if restored := restoreTextFromChunks(chunks); restored != text {
+				t.Fatalf("restoration mismatch: got %d runes, want %d", len([]rune(restored)), size)
+			}
+		})
+	}
+}
+
+func TestMergeUnitsOversizedTableRowRetainsActiveHeader(t *testing.T) {
+	header := "| A | B |\n| --- | --- |\n"
+	row := "| " + strings.Repeat("数据", 2200) + " | value |\n"
+	headerLen := runeLen(header)
+	text := header + row
+	chunks := mergeUnits([]splitUnit{
+		{text: header, start: 0, end: headerLen},
+		{text: row, start: headerLen, end: runeLen(text)},
+	}, 512, 50)
+
+	if len(chunks) < 3 {
+		t.Fatalf("expected header plus multiple row chunks, got %d", len(chunks))
+	}
+	for index, chunk := range chunks[1:] {
+		if chunk.ContextHeader != header {
+			t.Fatalf("row chunk %d lost active table header", index)
+		}
+		if size := runeLen(chunk.EmbeddingContent()); size > 4096 {
+			t.Fatalf("row chunk %d has %d embedding runes, exceeds protected-content cap", index, size)
+		}
+		if got, want := chunk.Content, string([]rune(text)[chunk.Start:chunk.End]); got != want {
+			t.Fatalf("row chunk %d source span mismatch", index)
+		}
+	}
+	if restored := restoreTextFromChunks(chunks); restored != text {
+		t.Fatal("oversized table restoration mismatch")
+	}
+}
+
+func TestMergeUnitsCapsEmergencyOverlapAmplification(t *testing.T) {
+	text := strings.Repeat("数", 7000)
+	chunks := mergeUnits([]splitUnit{{text: text, start: 0, end: 7000}}, 10000, 5000)
+	if len(chunks) > 4 {
+		t.Fatalf("high overlap amplified one protected unit into %d chunks", len(chunks))
+	}
+	for index := 1; index < len(chunks); index++ {
+		overlap := chunks[index-1].End - chunks[index].Start
+		if overlap <= 0 || overlap > 2048 {
+			t.Fatalf("chunk pair %d overlap = %d, want in (0, 2048]", index, overlap)
+		}
+	}
+	if restored := restoreTextFromChunks(chunks); restored != text {
+		t.Fatal("high-overlap emergency split restoration mismatch")
+	}
+}
+
+func TestOversizedProtectedTableParentChildKeepsOffsetsAndHeader(t *testing.T) {
+	header := "| A | B |\n| --- | --- |\n"
+	row := "| " + strings.Repeat("数据", 2200) + " | value |\n"
+	text := header + row
+	headerLen := runeLen(header)
+	parentCfg := SplitterConfig{
+		ChunkSize: 10000, ChunkOverlap: 50, Separators: []string{"\n\n", "\n"}, Strategy: StrategyLegacy,
+	}
+	childCfg := SplitterConfig{
+		ChunkSize: 512, ChunkOverlap: 50, Separators: []string{"\n\n", "\n"}, Strategy: StrategyLegacy,
+	}
+
+	results := map[string]ParentChildResult{
+		"legacy":   SplitTextParentChild(text, parentCfg, childCfg),
+		"strategy": SplitParentChild(text, parentCfg, childCfg),
+	}
+	textRunes := []rune(text)
+	for name, result := range results {
+		t.Run(name, func(t *testing.T) {
+			foundRowChild := false
+			for index, child := range result.Children {
+				if child.Start < 0 || child.End > len(textRunes) || child.Start >= child.End {
+					t.Fatalf("child %d has invalid source span [%d, %d)", index, child.Start, child.End)
+				}
+				if got, want := child.Content, string(textRunes[child.Start:child.End]); got != want {
+					t.Fatalf("child %d source span mismatch", index)
+				}
+				if child.Start >= headerLen {
+					foundRowChild = true
+					if child.ContextHeader != header {
+						t.Fatalf("row child %d lost table header context", index)
+					}
+				}
+			}
+			if !foundRowChild {
+				t.Fatal("expected at least one child from the oversized table row")
+			}
+		})
+	}
+}
+
+func TestOversizedProtectedTableKeepsHeaderAcrossAdaptiveTiers(t *testing.T) {
+	header := "| A | B |\n| --- | --- |\n"
+	row := "| " + strings.Repeat("数据", 2200) + " | value |\n"
+	cfg := SplitterConfig{ChunkSize: 512, ChunkOverlap: 50, Separators: []string{"\n\n", "\n"}}
+
+	headingPrefix := "# Table Section\n\n" + header
+	headingText := headingPrefix + row + "plain tail\n\n# Next Section\n\nnext body"
+	heuristicText := "intro\f" + header + row
+	cases := map[string]struct {
+		text     string
+		rowStart int
+		rowEnd   int
+		chunks   []Chunk
+	}{
+		"heading": {
+			text:     headingText,
+			rowStart: runeLen(headingPrefix),
+			rowEnd:   runeLen(headingPrefix + row),
+			chunks:   splitByHeadingsImpl(headingText, cfg, nil),
+		},
+		"heuristic": {
+			text:     heuristicText,
+			rowStart: runeLen("intro\f" + header),
+			rowEnd:   runeLen(heuristicText),
+			chunks:   splitByHeuristicsImpl(heuristicText, cfg, nil),
+		},
+	}
+
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			foundRowChunk := false
+			textRunes := []rune(tc.text)
+			for index, chunk := range tc.chunks {
+				if chunk.Start < 0 || chunk.End > len(textRunes) || chunk.Start >= chunk.End {
+					t.Fatalf("chunk %d has invalid span [%d, %d)", index, chunk.Start, chunk.End)
+				}
+				if chunk.End <= tc.rowStart || chunk.Start >= tc.rowEnd {
+					continue
+				}
+				foundRowChunk = true
+				if !strings.Contains(chunk.ContextHeader, header) {
+					t.Fatalf("row chunk %d lost table header context: %q", index, chunk.ContextHeader)
+				}
+				if got, want := chunk.Content, string(textRunes[chunk.Start:chunk.End]); got != want {
+					t.Fatalf("row chunk %d source span mismatch", index)
+				}
+			}
+			if !foundRowChunk {
+				t.Fatal("expected at least one oversized table row chunk")
+			}
+		})
+	}
+}
