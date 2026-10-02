@@ -215,6 +215,21 @@ curl $BASE/api/v1/faq/import/progress/task-1 -H "X-API-Key: $API_KEY"
 curl "$BASE/api/v1/knowledgebase/kb-1/wiki/pages?page=1" -H "Authorization: Bearer $TOKEN"
 ```
 
+### GET /api/v1/knowledgebase/:kb_id/wiki/page-titles
+
+用途：批量解析 Wiki slug 对应的展示标题。仅返回标题，不加载页面正文；适合渲染反向链接等懒加载内容。
+
+| 查询参数 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `slug` | string[] | 否 | 重复传入多个 slug；最多 1000 个，重复值会自动去重 |
+
+响应：200 `{"titles":{"concept/example":"示例标题"}}`。找不到的 slug 不会出现在结果中。
+
+```bash
+curl "$BASE/api/v1/knowledgebase/kb-1/wiki/page-titles?slug=concept%2Fexample&slug=entity%2Fperson" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
 ### POST /api/v1/knowledgebase/:kb_id/wiki/pages
 
 用途：创建页面。请求体（`types.WikiPage`）：`slug`、`title`、`content`、`folder_id`、`page_type` 等（均可选，slug 缺省自动生成）。
