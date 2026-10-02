@@ -160,7 +160,7 @@ function needsConnectionTest(): boolean {
 }
 
 function hydrateConfluenceCredentialsFromSettings() {
-  if (form.value.type !== 'confluence') return
+  if (form.value.type !== 'confluence' && form.value.type !== 'jira') return
   const settings = form.value.config.settings || {}
   const creds = form.value.config.credentials || {}
   form.value.config.credentials = {
@@ -168,17 +168,25 @@ function hydrateConfluenceCredentialsFromSettings() {
     edition: creds.edition || settings.edition || 'server',
     base_url: creds.base_url || settings.base_url || '',
     username: creds.username || settings.username || '',
+    ...(form.value.type === 'jira' ? {
+      jql: creds.jql !== undefined ? creds.jql : (settings.jql || ''),
+      include_comments: creds.include_comments !== undefined ? creds.include_comments : (settings.include_comments !== undefined ? settings.include_comments : true),
+    } : {}),
   }
 }
 
 function syncConfluencePublicFieldsToSettings() {
-  if (form.value.type !== 'confluence') return
+  if (form.value.type !== 'confluence' && form.value.type !== 'jira') return
   const creds = form.value.config.credentials || {}
   form.value.config.settings = {
     ...(form.value.config.settings || {}),
     ...(creds.edition ? { edition: creds.edition } : {}),
     ...(creds.base_url ? { base_url: creds.base_url } : {}),
     ...(creds.username ? { username: creds.username } : {}),
+    ...(form.value.type === 'jira' ? {
+      ...(creds.jql !== undefined ? { jql: creds.jql } : {}),
+      ...(creds.include_comments !== undefined ? { include_comments: creds.include_comments } : {}),
+    } : {}),
   }
 }
 
@@ -664,6 +672,21 @@ const connectorDefs = computed<ConnectorDef[]>(() => [
     ],
   },
   {
+    type: 'jira',
+    available: true,
+    docUrl: 'https://developer.atlassian.com/cloud/jira/platform/rest/v2/intro/',
+    permissionDocUrl: 'https://developer.atlassian.com/cloud/jira/platform/rest/v2/intro/',
+    permissionPageUrl: 'https://id.atlassian.com/manage-profile/security/api-tokens',
+    requiredPermissions: [],
+    fields: [
+      { key: 'base_url', labelKey: 'datasource.field.jiraBaseUrl', placeholder: 'https://jira.example.com or https://team.atlassian.net' },
+      { key: 'username', labelKey: 'datasource.field.jiraUsername', placeholder: 'name or email' },
+      { key: 'password', labelKey: 'datasource.field.jiraPassword', placeholder: 'Server/DC password or PAT', secret: true },
+      { key: 'api_token', labelKey: 'datasource.field.jiraApiToken', placeholder: 'Cloud API token', secret: true },
+      { key: 'jql', labelKey: 'datasource.field.jiraJql', placeholder: 'status in (Resolved, Closed)', optional: true, hintKey: 'datasource.field.jiraJqlHint' },
+    ],
+  },
+  {
     type: 'yuque',
     available: true,
     docUrl: 'https://www.yuque.com/yuque/developer/api',
@@ -735,7 +758,7 @@ const currentDef = computed(() => connectorDefs.value.find(d => d.type === form.
 
 const displayedCredentialFields = computed(() => {
   const fields = currentDef.value?.fields || []
-  if (form.value.type !== "confluence") return fields
+  if (form.value.type !== "confluence" && form.value.type !== "jira") return fields
 
   return fields.filter((field) => {
     if (field.key === "password") return form.value.config.credentials.edition !== "cloud"
@@ -872,9 +895,9 @@ function selectType(def: ConnectorDef) {
   if (!def.available) return
   form.value.type = def.type
   form.value.name = t(`datasource.connector.${def.type}`)
-  form.value.config.credentials = def.type === "confluence" ? { edition: "server" } : {}
-  if (def.type === 'confluence') {
-    form.value.config.settings = { ...form.value.config.settings, edition: 'server' }
+  form.value.config.credentials = (def.type === "confluence" || def.type === "jira") ? { edition: "server", ...(def.type === 'jira' ? { include_comments: true } : {}) } : {}
+  if (def.type === 'confluence' || def.type === 'jira') {
+    form.value.config.settings = { ...form.value.config.settings, edition: 'server', ...(def.type === 'jira' ? { include_comments: true } : {}) }
   }
   // A new Yuque source opts into the book's folder hierarchy. Only on create:
   // an existing source keeps what it was built with, so the "folder layout is
@@ -1602,12 +1625,21 @@ const drawerConfirmText = computed(() => {
         </div>
 
         <template v-else-if="credentialsInputVisible">
-          <div v-if="form.type === 'confluence'" class="form-item">
-            <label class="form-label">{{ t('datasource.field.confluenceEdition') }}</label>
+          <div v-if="form.type === 'confluence' || form.type === 'jira'" class="form-item">
+            <label class="form-label">{{ form.type === 'jira' ? t('datasource.field.jiraEdition') : t('datasource.field.confluenceEdition') }}</label>
             <t-select v-model="form.config.credentials.edition">
-              <t-option value="server" :label="t('datasource.field.confluenceEditionServer')" />
-              <t-option value="cloud" :label="t('datasource.field.confluenceEditionCloud')" />
+              <t-option value="server" :label="form.type === 'jira' ? t('datasource.field.jiraEditionServer') : t('datasource.field.confluenceEditionServer')" />
+              <t-option value="cloud" :label="form.type === 'jira' ? t('datasource.field.jiraEditionCloud') : t('datasource.field.confluenceEditionCloud')" />
             </t-select>
+          </div>
+          <div v-if="form.type === 'jira'" class="form-item">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <div>
+                <label class="form-label" style="margin-bottom: 2px;">{{ t('datasource.field.jiraIncludeComments') }}</label>
+                <p class="form-desc" style="margin-top: 0;">{{ t('datasource.field.jiraIncludeCommentsHint') }}</p>
+              </div>
+              <t-switch v-model="form.config.credentials.include_comments" />
+            </div>
           </div>
           <div
             v-for="field in displayedCredentialFields"
