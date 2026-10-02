@@ -26,13 +26,15 @@ func CastParams(args json.RawMessage, schema json.RawMessage) json.RawMessage {
 		return args
 	}
 
-	var argsMap map[string]interface{}
+	// Keep untouched arguments as raw JSON. Decoding the entire payload into
+	// float64 values would round numbers even when only another field is cast.
+	var argsMap map[string]json.RawMessage
 	if err := json.Unmarshal(args, &argsMap); err != nil {
 		return args
 	}
 
 	changed := false
-	for key, val := range argsMap {
+	for key, rawVal := range argsMap {
 		propDef, exists := properties[key]
 		if !exists {
 			continue
@@ -46,9 +48,17 @@ func CastParams(args json.RawMessage, schema json.RawMessage) json.RawMessage {
 			continue
 		}
 
+		var val interface{}
+		if err := json.Unmarshal(rawVal, &val); err != nil {
+			continue
+		}
 		newVal, didCast := castValue(val, targetType)
 		if didCast {
-			argsMap[key] = newVal
+			converted, err := json.Marshal(newVal)
+			if err != nil {
+				return args
+			}
+			argsMap[key] = converted
 			changed = true
 		}
 	}
