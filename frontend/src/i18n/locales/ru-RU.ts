@@ -1145,7 +1145,8 @@ export default {
       dingtalk: 'Синхронизация онлайн-документов из баз знаний DingTalk',
       ima: 'Синхронизация документов, заметок и файлов из баз знаний Tencent IMA (ИИ-сессии и разбор видео не поддерживаются)',
       rss: 'Синхронизация статей из лент RSS / Atom',
-      gitlab: 'Синхронизация файлов из проектов GitLab'
+      gitlab: 'Синхронизация файлов из проектов GitLab',
+      paperless: 'Синхронизация OCR-документов из Paperless-ngx'
     },
     connector: {
       feishu: 'Feishu (Фэйшу)',
@@ -1158,7 +1159,26 @@ export default {
       dingtalk: 'Документы DingTalk',
       ima: 'Tencent IMA',
       rss: 'RSS / Atom лента',
-      gitlab: 'GitLab'
+      gitlab: 'GitLab',
+      paperless: 'Paperless-ngx'
+    },
+    paperless: {
+      baseUrl: 'URL Paperless',
+      apiToken: 'API-токен',
+      filtersTitle: 'Фильтры документов',
+      filtersHint: 'Оставьте фильтры пустыми, чтобы синхронизировать все документы, доступные этому токену. Несколько вариантов в одном списке объединяются через OR, разные группы фильтров — через AND.',
+      correspondents: 'Корреспонденты',
+      correspondentsPlaceholder: 'Выберите корреспондентов',
+      documentTypes: 'Типы документов',
+      documentTypesPlaceholder: 'Выберите типы документов',
+      customFields: 'Пользовательские поля',
+      customFieldsHint: 'Добавьте точные фильтры для пользовательских полей Paperless.',
+      addCustomFieldFilter: 'Добавить фильтр',
+      customFieldPlaceholder: 'Выберите пользовательское поле',
+      customFieldValuePlaceholder: 'Искомое значение',
+      noCustomFields: 'В этом экземпляре Paperless не настроены пользовательские поля.',
+      metadataSelectionHint: 'Выберите одного или нескольких корреспондентов и типов документов. Если оставить пустым, будут включены все.',
+      filterValue: 'Значение'
     },
     logDetail: {
       startTime: 'Время начала',

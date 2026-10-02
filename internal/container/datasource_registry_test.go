@@ -19,3 +19,17 @@ func TestConnectorRegistryIncludesDingTalk(t *testing.T) {
 		t.Fatalf("connector.Type() = %q", connector.Type())
 	}
 }
+
+func TestConnectorRegistryIncludesPaperless(t *testing.T) {
+	registry, err := initConnectorRegistry()
+	if err != nil {
+		t.Fatalf("initConnectorRegistry() error = %v", err)
+	}
+	connector, err := registry.Get(types.ConnectorTypePaperless)
+	if err != nil {
+		t.Fatalf("Paperless connector is not registered: %v", err)
+	}
+	if connector.Type() != types.ConnectorTypePaperless {
+		t.Fatalf("connector.Type() = %q", connector.Type())
+	}
+}

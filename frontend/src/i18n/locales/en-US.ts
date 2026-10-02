@@ -6940,7 +6940,8 @@ export default {
       dingtalk: 'DingTalk Docs',
       rss: 'RSS / Atom Feed',
       ima: 'Tencent IMA',
-      gitlab: 'GitLab'
+      gitlab: 'GitLab',
+      paperless: 'Paperless-ngx'
     },
     connectorDesc: {
       feishu: 'Sync documents, spreadsheets and files from Feishu Wiki',
@@ -6953,7 +6954,26 @@ export default {
       dingtalk: 'Sync online documents from DingTalk knowledge bases',
       rss: 'Sync articles from RSS / Atom feeds',
       ima: 'Sync documents, notes and files from Tencent IMA knowledge bases (AI sessions and video parses are not supported)',
-      gitlab: 'Sync files from GitLab projects'
+      gitlab: 'Sync files from GitLab projects',
+      paperless: 'Sync OCR documents from a Paperless-ngx instance'
+    },
+    paperless: {
+      baseUrl: 'Paperless URL',
+      apiToken: 'API token',
+      filtersTitle: 'Document filters',
+      filtersHint: 'Leave filters empty to sync all documents visible to this token. Multiple choices within a list are combined with OR; different filter groups are combined with AND.',
+      correspondents: 'Correspondents',
+      correspondentsPlaceholder: 'Select correspondents',
+      documentTypes: 'Document types',
+      documentTypesPlaceholder: 'Select document types',
+      customFields: 'Custom fields',
+      customFieldsHint: 'Add exact-match filters for Paperless custom fields.',
+      addCustomFieldFilter: 'Add filter',
+      customFieldPlaceholder: 'Select a custom field',
+      customFieldValuePlaceholder: 'Value to match',
+      noCustomFields: 'No custom fields are configured in this Paperless instance.',
+      metadataSelectionHint: 'Choose one or more Correspondents and document types. Leave them empty to include all values.',
+      filterValue: 'Value'
     },
     drive: {
       folderTokenLabel: 'Drive folder token',

@@ -6940,7 +6940,8 @@ export default {
       dingtalk: 'DingTalkドキュメント',
       rss: 'RSS / Atomフィード',
       ima: 'Tencent IMA',
-      gitlab: 'GitLab'
+      gitlab: 'GitLab',
+      paperless: 'Paperless-ngx'
     },
     connectorDesc: {
       feishu: 'Feishu Wikiからドキュメント、スプレッドシート、ファイルを同期します',
@@ -6953,7 +6954,26 @@ export default {
       dingtalk: 'DingTalkナレッジベースのオンラインドキュメントを同期',
       rss: 'RSS / Atomフィードから記事を同期します',
       ima: 'Tencent IMAのナレッジベースからドキュメント、ノート、ファイルを同期します（AIセッションと動画の解析は非対応）',
-      gitlab: 'GitLabプロジェクトからファイルを同期します'
+      gitlab: 'GitLabプロジェクトからファイルを同期します',
+      paperless: 'Paperless-ngxインスタンスのOCRドキュメントを同期します'
+    },
+    paperless: {
+      baseUrl: 'Paperless URL',
+      apiToken: 'API token',
+      filtersTitle: 'ドキュメントフィルター',
+      filtersHint: '空欄の場合、このトークンで閲覧可能なすべてのドキュメントを同期します。同じリストの複数選択は OR、異なるフィルターグループは AND で結合されます。',
+      correspondents: '取引先',
+      correspondentsPlaceholder: '取引先を選択',
+      documentTypes: 'ドキュメント種別',
+      documentTypesPlaceholder: 'ドキュメント種別を選択',
+      customFields: 'カスタムフィールド',
+      customFieldsHint: 'Paperless のカスタムフィールドに完全一致する条件を追加します。',
+      addCustomFieldFilter: '条件を追加',
+      customFieldPlaceholder: 'カスタムフィールドを選択',
+      customFieldValuePlaceholder: '一致する値',
+      noCustomFields: 'この Paperless インスタンスにはカスタムフィールドがありません。',
+      metadataSelectionHint: '取引先とドキュメント種別を1つ以上選択できます。空欄の場合はすべてを対象にします。',
+      filterValue: '値'
     },
     drive: {
       folderTokenLabel: 'Driveフォルダトークン',

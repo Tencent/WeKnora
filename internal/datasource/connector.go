@@ -310,6 +310,14 @@ var ConnectorMetadataRegistry = map[string]ConnectorMetadata{
 		AuthType:     "token",
 		Capabilities: []string{"incremental", "hierarchical"},
 	},
+	types.ConnectorTypePaperless: {
+		Type:         types.ConnectorTypePaperless,
+		Name:         "Paperless-ngx",
+		Description:  "Sync documents from a Paperless-ngx instance",
+		Priority:     13,
+		AuthType:     "api_key",
+		Capabilities: []string{"incremental"},
+	},
 }
 
 // ListAvailableConnectors returns all available connector metadata

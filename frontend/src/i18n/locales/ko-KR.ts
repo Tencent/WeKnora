@@ -1145,7 +1145,8 @@ export default {
       dingtalk: 'DingTalk 지식베이스의 온라인 문서 동기화',
       ima: 'Tencent IMA 지식베이스에서 문서, 노트 및 파일 동기화 (AI 세션과 동영상 분석은 지원되지 않음)',
       rss: 'RSS / Atom 피드에서 글 동기화',
-      gitlab: 'GitLab 프로젝트의 파일 동기화'
+      gitlab: 'GitLab 프로젝트의 파일 동기화',
+      paperless: 'Paperless-ngx 인스턴스의 OCR 문서 동기화'
     },
     connector: {
       feishu: '페이슈 (Feishu)',
@@ -1158,7 +1159,26 @@ export default {
       dingtalk: 'DingTalk 문서',
       ima: 'Tencent IMA',
       rss: 'RSS / Atom 피드',
-      gitlab: 'GitLab'
+      gitlab: 'GitLab',
+      paperless: 'Paperless-ngx'
+    },
+    paperless: {
+      baseUrl: 'Paperless URL',
+      apiToken: 'API token',
+      filtersTitle: '문서 필터',
+      filtersHint: '필터를 비워 두면 이 토큰으로 볼 수 있는 모든 문서를 동기화합니다. 같은 목록의 여러 선택은 OR, 서로 다른 필터 그룹은 AND로 결합됩니다.',
+      correspondents: '거래처',
+      correspondentsPlaceholder: '거래처 선택',
+      documentTypes: '문서 유형',
+      documentTypesPlaceholder: '문서 유형 선택',
+      customFields: '사용자 지정 필드',
+      customFieldsHint: 'Paperless 사용자 지정 필드의 정확히 일치하는 필터를 추가합니다.',
+      addCustomFieldFilter: '필터 추가',
+      customFieldPlaceholder: '사용자 지정 필드 선택',
+      customFieldValuePlaceholder: '일치 값',
+      noCustomFields: '이 Paperless 인스턴스에는 사용자 지정 필드가 없습니다.',
+      metadataSelectionHint: '거래처와 문서 유형을 하나 이상 선택할 수 있습니다. 비워 두면 전체를 포함합니다.',
+      filterValue: '값'
     },
     logDetail: {
       startTime: '시작 시간',
