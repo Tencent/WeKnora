@@ -22,6 +22,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/handler/dto"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/middleware"
+	modelapi "github.com/Tencent/WeKnora/internal/models/api"
 	"github.com/Tencent/WeKnora/internal/models/asr"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/models/embedding"
@@ -2089,12 +2090,16 @@ func (h *InitializationHandler) checkChatModelConnection(
 
 	_, err = chatInstance.Chat(ctx, testMessages, testOptions)
 	if err != nil {
-		errMsg := err.Error()
 		// 400 = endpoint reachable + auth ok, just a parameter mismatch
-		// (e.g. max_tokens vs max_completion_tokens). Treat as success.
-		if strings.Contains(errMsg, "status code: 400") {
+		// (e.g. max_tokens vs max_completion_tokens, or a reasoning model
+		// that cannot finish within the 1-token probe). Treat as success.
+		// Match the status code, not the message: the wording belongs to
+		// whichever HTTP client built the error and has changed before.
+		var httpErr *modelapi.HTTPError
+		if stderrors.As(err, &httpErr) && httpErr.StatusCode == http.StatusBadRequest {
 			return true, "连接正常，模型可用"
 		}
+		errMsg := err.Error()
 		// For every other failure mode we surface a human-readable hint
 		// AND the upstream error verbatim. Swallowing the underlying
 		// message used to hide things like the actual URL the SDK
