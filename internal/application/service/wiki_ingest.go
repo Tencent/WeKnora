@@ -91,14 +91,58 @@ redis.call('SET', KEYS[1], proposed, 'EX', ttl)
 return proposed
 `
 	// wikiSlugLockTTL bounds the per-slug lock so a crashed reducer can't
-	// wedge a hot page forever. Comfortably longer than a single reduce
-	// (one LLM modify call).
+	// wedge a hot page forever. A LIVE holder renews it for as long as it is
+	// actually working (see wikiSlugLockRenew), so this is an abandonment
+	// deadline, not a work deadline.
 	wikiSlugLockTTL = 5 * time.Minute
+	// wikiSlugLockRenew is how often a live holder pushes the lock's TTL back
+	// out. A single reduce is one LLM page-modify call; measured on an
+	// 87-document KB it runs p50 5.3m / p90 17.2m / max well past 20m, i.e.
+	// comfortably PAST wikiSlugLockTTL. Without renewal the lock therefore
+	// expires while its owner is still writing, and a second batch starts its
+	// own read-modify-write on the same page: that is how concurrent writers
+	// on one slug (and the slug duplicate-key failures the caller turns into a
+	// full document re-ingest) were produced. Keep this well under TTL so one
+	// missed tick is harmless.
+	wikiSlugLockRenew = wikiSlugLockTTL / 3
+	// wikiSlugLockRenewMax caps total renewal. A genuinely wedged holder must
+	// eventually lose the lock instead of squatting on a hot page forever.
+	wikiSlugLockRenewMax = 30 * time.Minute
 	// wikiSlugLockWait / Poll bound how long a reduce goroutine blocks
 	// waiting for a contended slug before falling back to a best-effort
 	// skip (matching the pre-existing reduce-failure semantics).
-	wikiSlugLockWait = 2 * time.Minute
+	//
+	// This MUST exceed the worst-case single reduce. It previously sat at 2m,
+	// two-and-a-half times SHORTER than the mean page write, so a contended
+	// slug was abandoned while the holder was still working — and the failure
+	// path re-queues every contributing DOCUMENT, re-running extract +
+	// classify + summary + all of its pages. Measured: one blocked page
+	// amplified into a full re-ingest of ~111 minutes, and 36% of all page
+	// writes in one 20h run were such re-does.
+	wikiSlugLockWait = 20 * time.Minute
 	wikiSlugLockPoll = 50 * time.Millisecond
+
+	// wikiSlugLockRenewScript pushes the lock's TTL back out, but only while
+	// the caller still owns it (value match). KEYS[1]=lock key;
+	// ARGV = owner token, TTL seconds. Returns 1 renewed / 0 not owner.
+	wikiSlugLockRenewScript = `
+if redis.call('GET', KEYS[1]) == ARGV[1] then
+  return redis.call('EXPIRE', KEYS[1], ARGV[2])
+end
+return 0
+`
+	// wikiSlugLockReleaseScript deletes the lock only if the caller still
+	// owns it. An unconditional DEL is unsafe here: if the holder overran its
+	// TTL (or its renewal failed), the key now belongs to a DIFFERENT batch,
+	// and deleting it would hand the page to a third writer while the second
+	// is mid-write — reintroducing exactly the lost-update race the lock
+	// exists to prevent. KEYS[1]=lock key; ARGV[1]=owner token.
+	wikiSlugLockReleaseScript = `
+if redis.call('GET', KEYS[1]) == ARGV[1] then
+  return redis.call('DEL', KEYS[1])
+end
+return 0
+`
 
 	// --- Phase 4: per-KB in-flight cap (standard/Redis mode) --------------
 	//
@@ -1006,14 +1050,25 @@ func (s *wikiIngestService) claimPendingList(ctx context.Context, kbID string, l
 // error we fail OPEN (run fn unlocked): a rare lost-update on a shared page
 // is tolerated by the finalize/dead-link passes, whereas silently dropping
 // the update is strictly worse.
+//
+// The lock is held with a HEARTBEAT and released compare-and-delete:
+//
+//   - A single reduce regularly outruns wikiSlugLockTTL, so a plain
+//     SetNX+DEL pair let the lock expire mid-write and admitted a second
+//     writer. Renewal keeps a live holder's lock valid; the renewal cap stops
+//     a wedged holder from squatting forever.
+//   - Release must not use a bare DEL: after an overrun the key belongs to
+//     somebody else, and deleting it would hand the page to a third writer.
 func (s *wikiIngestService) withSlugLock(ctx context.Context, kbID, slug string, fn func() error) (bool, error) {
 	if s.redisClient == nil {
 		return true, fn()
 	}
 	key := wikiSlugLockPrefix + kbID + ":" + slug
+	// A unique owner token lets renewal and release act only on OUR lock.
+	token := uuid.NewString()
 	deadline := time.Now().Add(wikiSlugLockWait)
 	for {
-		ok, rerr := s.redisClient.SetNX(ctx, key, "1", wikiSlugLockTTL).Result()
+		ok, rerr := s.redisClient.SetNX(ctx, key, token, wikiSlugLockTTL).Result()
 		if rerr != nil {
 			logger.Warnf(ctx, "wiki reduce: slug lock SetNX failed for %s: %v (running unlocked)", slug, rerr)
 			return true, fn()
@@ -1030,8 +1085,46 @@ func (s *wikiIngestService) withSlugLock(ctx context.Context, kbID, slug string,
 		case <-time.After(wikiSlugLockPoll):
 		}
 	}
-	defer s.redisClient.Del(context.Background(), key)
-	return true, fn()
+
+	renewStop := make(chan struct{})
+	renewDone := make(chan struct{})
+	go func() {
+		defer close(renewDone)
+		ticker := time.NewTicker(wikiSlugLockRenew)
+		defer ticker.Stop()
+		var held time.Duration
+		for {
+			select {
+			case <-renewStop:
+				return
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				held += wikiSlugLockRenew
+				if held > wikiSlugLockRenewMax {
+					logger.Warnf(ctx, "wiki reduce: slug lock %s held > %s, stopping renewal",
+						slug, wikiSlugLockRenewMax)
+					return
+				}
+				// Detached context: a renewal must not be dropped merely
+				// because the batch ctx is winding down.
+				if rerr := s.redisClient.Eval(context.Background(), wikiSlugLockRenewScript,
+					[]string{key}, token, int(wikiSlugLockTTL.Seconds())).Err(); rerr != nil {
+					logger.Warnf(ctx, "wiki reduce: slug lock renew failed for %s: %v", slug, rerr)
+				}
+			}
+		}
+	}()
+
+	runErr := fn()
+
+	close(renewStop)
+	<-renewDone
+	if rerr := s.redisClient.Eval(context.Background(), wikiSlugLockReleaseScript,
+		[]string{key}, token).Err(); rerr != nil {
+		logger.Warnf(ctx, "wiki reduce: slug lock release failed for %s: %v", slug, rerr)
+	}
+	return true, runErr
 }
 
 // wikiInflightReserveScript atomically enforces the per-KB in-flight cap.
