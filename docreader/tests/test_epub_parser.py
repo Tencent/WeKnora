@@ -1,8 +1,15 @@
+import base64
+from html import escape
+from io import BytesIO
 import os
 import tempfile
 import unittest
+from unittest.mock import patch
+from urllib.parse import quote
+import zipfile
 
 from ebooklib import epub
+from PIL import Image
 
 from docreader.parser.epub_parser import EPUBParser
 from docreader.parser.registry import registry
@@ -52,7 +59,209 @@ def _minimal_epub_bytes() -> bytes:
             os.unlink(path)
 
 
+def _epub_with_colliding_image_names(
+    image_src: str, *, root_image_first: bool = False
+) -> tuple[bytes, dict[str, bytes]]:
+    book = epub.EpubBook()
+    book.set_identifier("colliding-images")
+    book.set_title("Images in separate directories")
+    book.set_language("en")
+
+    image_data = {}
+    chapters = []
+    directories = (
+        ("root", "first", "second")
+        if root_image_first
+        else ("first", "second", "root")
+    )
+    for directory in directories:
+        index = ("first", "second", "root").index(directory)
+        image = BytesIO()
+        Image.new("RGB", (1, 1), (index * 100, 0, 0)).save(image, format="PNG")
+        image_data[directory] = image.getvalue()
+        book.add_item(
+            epub.EpubItem(
+                uid=f"{directory}-image",
+                file_name="pic.png" if directory == "root" else f"{directory}/pic.png",
+                media_type="image/png",
+                content=image_data[directory],
+            )
+        )
+        chapter_path = (
+            "root.xhtml" if directory == "root" else f"{directory}/chapter.xhtml"
+        )
+        chapter = epub.EpubHtml(
+            title=directory, file_name=chapter_path, lang="en"
+        )
+        src = (
+            "pic.png" if directory == "root" else image_src.format(directory=directory)
+        )
+        chapter.content = (
+            f'<html><body><h1>{directory}</h1>'
+            f'<img alt="{directory}" src="{src}">'
+            "</body></html>"
+        )
+        book.add_item(chapter)
+        chapters.append(chapter)
+    # The root-level pic.png also collides with chapter-relative references.
+    book.toc = tuple(chapters)
+    book.spine = chapters
+    book.add_item(epub.EpubNcx())
+    book.add_item(epub.EpubNav())
+    output = BytesIO()
+    epub.write_epub(output, book)
+    return output.getvalue(), image_data
+
+
+def _epub_with_literal_path_characters(
+    chapter_path: str, image_src: str, image_path: str, decoy_path: str
+) -> tuple[bytes, bytes]:
+    """URI-encode manifest hrefs while preserving literal ZIP entry names."""
+    container = (
+        '<container xmlns="urn:oasis:names:tc:opendocument:xmlns:container"'
+        ' version="1.0"><rootfiles><rootfile full-path="EPUB/package.opf"'
+        ' media-type="application/oebps-package+xml"/></rootfiles></container>'
+    )
+    package = (
+        '<package xmlns="http://www.idpf.org/2007/opf" version="3.0"'
+        ' unique-identifier="id"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/">'
+        '<dc:identifier id="id">literal-paths</dc:identifier>'
+        '<dc:title>Literal paths</dc:title><dc:language>en</dc:language>'
+        '<meta property="dcterms:modified">2026-01-01T00:00:00Z</meta>'
+        '</metadata><manifest>'
+        f'<item id="chapter" href="{quote(chapter_path)}"'
+        ' media-type="application/xhtml+xml"/>'
+        f'<item id="expected" href="{quote(image_path)}" media-type="image/png"/>'
+        f'<item id="decoy" href="{quote(decoy_path)}" media-type="image/png"/>'
+        '<item id="nav" href="nav.xhtml" media-type="application/xhtml+xml"'
+        ' properties="nav"/></manifest><spine><itemref idref="chapter"/>'
+        '</spine></package>'
+    )
+    chapter = (
+        '<html xmlns="http://www.w3.org/1999/xhtml"><head><title>Chapter</title>'
+        '</head><body><h1>Chapter</h1>'
+        f'<img alt="expected" src="{escape(image_src, quote=True)}"/>'
+        '</body></html>'
+    )
+    nav = (
+        '<html xmlns="http://www.w3.org/1999/xhtml"'
+        ' xmlns:epub="http://www.idpf.org/2007/ops"><head><title>Contents</title>'
+        '</head><body><nav epub:type="toc"><ol><li>'
+        f'<a href="{quote(chapter_path)}">Chapter</a>'
+        '</li></ol></nav></body></html>'
+    )
+    expected = BytesIO()
+    decoy = BytesIO()
+    Image.new("RGB", (1, 1), "red").save(expected, format="PNG")
+    Image.new("RGB", (1, 1), "blue").save(decoy, format="PNG")
+    output = BytesIO()
+    with zipfile.ZipFile(output, "w") as archive:
+        archive.writestr("mimetype", "application/epub+zip")
+        archive.writestr("META-INF/container.xml", container)
+        archive.writestr("EPUB/package.opf", package)
+        archive.writestr(f"EPUB/{chapter_path}", chapter)
+        archive.writestr(f"EPUB/{image_path}", expected.getvalue())
+        archive.writestr(f"EPUB/{decoy_path}", decoy.getvalue())
+        archive.writestr("EPUB/nav.xhtml", nav)
+    return output.getvalue(), expected.getvalue()
+
+
 class EPUBParserTest(unittest.TestCase):
+    def assert_literal_path_image_bytes(self, *, use_fallback: bool):
+        cases = (
+            ("Text#1/chapter.xhtml", "../images/pic.png",
+             "images/pic.png", "Text#1/cover.png"),
+            ("Text?1/chapter.xhtml", "../images/pic.png",
+             "images/pic.png", "Text?1/cover.png"),
+            ("Text%231/chapter.xhtml", "pic.png",
+             "Text%231/pic.png", "Text#1/pic.png"),
+            ("Text/chapter.xhtml", "../images/pic%231.png?version=1#image",
+             "images/pic#1.png", "images/pic#2.png"),
+            ("Text/chapter.xhtml", "../images/pic%3F1.png?version=1#image",
+             "images/pic?1.png", "images/pic?2.png"),
+            ("Text/chapter.xhtml", "../images/pic%25231.png",
+             "images/pic%231.png", "images/pic#1.png"),
+            ("Text/chapter.xhtml", "../images/pic%231.png",
+             "images/pic#1.png", "images/pic%231.png"),
+        )
+        for chapter_path, image_src, image_path, decoy_path in cases:
+            with self.subTest(chapter_path=chapter_path, image_src=image_src):
+                content, expected = _epub_with_literal_path_characters(
+                    chapter_path, image_src, image_path, decoy_path
+                )
+                parser = EPUBParser(file_name="literal-paths.epub", file_type="epub")
+                if use_fallback:
+                    with patch(
+                        "docreader.parser.epub_parser.epub.read_epub",
+                        side_effect=ValueError("exercise ZIP fallback"),
+                    ):
+                        document = parser.parse(content)
+                else:
+                    with patch.object(parser, "_parse_epub_fallback") as fallback:
+                        document = parser.parse(content)
+                    fallback.assert_not_called()
+                self.assertEqual(len(document.images), 2)
+                image_ref = next(
+                    ref for ref, encoded in document.images.items()
+                    if base64.b64decode(encoded) == expected
+                )
+                self.assertIn(f"![expected]({image_ref})", document.content)
+
+    def test_literal_path_characters_are_preserved(self):
+        self.assert_literal_path_image_bytes(use_fallback=False)
+
+    def test_zip_fallback_preserves_literal_path_characters(self):
+        self.assert_literal_path_image_bytes(use_fallback=True)
+
+    def assert_chapter_image_bytes(self, document, image_data):
+        self.assertEqual(len(document.images), 3)
+        for directory, expected_data in image_data.items():
+            image_ref = next(
+                ref
+                for ref, encoded in document.images.items()
+                if base64.b64decode(encoded) == expected_data
+            )
+            self.assertIn(f"![{directory}]({image_ref})", document.content)
+
+    def test_chapter_relative_images_win_over_colliding_aliases(self):
+        for image_src in (
+            "pic.png",
+            "../{directory}/pic.png",
+            "./pic%2Epng?version=1#image",
+        ):
+            with self.subTest(image_src=image_src):
+                content, image_data = _epub_with_colliding_image_names(image_src)
+                parser = EPUBParser(file_name="colliding.epub", file_type="epub")
+                with patch.object(parser, "_parse_epub_fallback") as fallback:
+                    document = parser.parse(content)
+                fallback.assert_not_called()
+                self.assert_chapter_image_bytes(document, image_data)
+
+    def test_zip_fallback_resolves_colliding_chapter_relative_images(self):
+        for root_image_first in (False, True):
+            with self.subTest(root_image_first=root_image_first):
+                content, image_data = _epub_with_colliding_image_names(
+                    "pic.png", root_image_first=root_image_first
+                )
+                with patch(
+                    "docreader.parser.epub_parser.epub.read_epub",
+                    side_effect=ValueError("exercise ZIP fallback"),
+                ):
+                    document = EPUBParser(
+                        file_name="colliding.epub", file_type="epub"
+                    ).parse(content)
+                self.assert_chapter_image_bytes(document, image_data)
+
+    def test_root_image_alias_is_not_overwritten_by_nested_image_basenames(self):
+        content, image_data = _epub_with_colliding_image_names(
+            "pic.png", root_image_first=True
+        )
+        parser = EPUBParser(file_name="colliding.epub", file_type="epub")
+        with patch.object(parser, "_parse_epub_fallback") as fallback:
+            document = parser.parse(content)
+        fallback.assert_not_called()
+        self.assert_chapter_image_bytes(document, image_data)
+
     def test_parse_minimal_epub(self):
         document = EPUBParser(
             file_name="tiny.epub", file_type="epub"
