@@ -808,6 +808,7 @@ import {
   expandedWikiDirectoryPaths,
   expandWikiDirectoryPath,
 } from './wikiDirectoryState'
+import { resolveWikiBacklinkTitle } from './wikiBacklinkTitles'
 import { getKnowledgeDetails } from '@/api/knowledge-base'
 import { createSessions } from '@/api/chat'
 import ChatView from '@/views/chat/index.vue'
@@ -822,6 +823,7 @@ import {
   updateWikiPage,
   deleteWikiPage,
   getWikiPage,
+  listWikiPageTitles,
   getWikiIndex,
   getWikiGraph,
   getWikiStats,
@@ -868,6 +870,8 @@ const kbFileAccess = computed<ProtectedFileAccessContext>(() => ({
 }))
 const pages = ref<WikiPage[]>([])
 const selectedPage = ref<WikiPage | null>(null)
+const backlinkTitles = ref<Record<string, string>>({})
+let backlinkTitlesRequest = 0
 
 // Per-type pagination state for the sidebar. 4万-page wikis used to load
 // the entire page list into `pages.value` at startup (50 pages of 500 =
@@ -2910,9 +2914,21 @@ const createPageSlugTouched = ref(false)
 
 // Navigating to another page (or view) silently drops an in-progress edit;
 // the editor is inline, so a route-level guard would be overkill here.
-watch(() => selectedPage.value?.slug, () => {
+watch(() => selectedPage.value?.slug, async () => {
   editingPage.value = false
   editConflictVersion.value = null
+  const page = selectedPage.value
+  const request = ++backlinkTitlesRequest
+  backlinkTitles.value = {}
+  if (!page?.in_links?.length) return
+  try {
+    const res = await listWikiPageTitles(props.knowledgeBaseId, page.in_links)
+    if (request !== backlinkTitlesRequest) return
+    const body: any = (res as any).data || res
+    backlinkTitles.value = body?.titles || {}
+  } catch (e) {
+    console.error('Failed to load wiki backlink titles:', e)
+  }
 })
 
 function startEditPage() {
@@ -3696,12 +3712,7 @@ function formatDate(dateStr: string) {
 
 // Convert slug like "entity/acme-corp" to a readable label "acme-corp"
 function slugDisplayName(slug: string): string {
-  // Find the page title if loaded
-  const page = pages.value.find(p => p.slug === slug)
-  if (page) return page.title
-  // Fallback: strip type prefix, replace hyphens
-  const parts = slug.split('/')
-  return parts.length > 1 ? parts.slice(1).join('/') : slug
+  return resolveWikiBacklinkTitle(slug, backlinkTitles.value, pages.value)
 }
 
 // ─── Graph Rendering (interactive SVG force-directed graph) ───
