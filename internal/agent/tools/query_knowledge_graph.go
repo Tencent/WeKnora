@@ -61,8 +61,10 @@ func (t *QueryKnowledgeGraphTool) WithGraph(
 const (
 	// graphQueryMaxTerms bounds the entity-name terms sent to the graph store.
 	graphQueryMaxTerms = 8
-	// graphQueryMaxChunks bounds the evidence chunks loaded per knowledge base.
+	// graphQueryMaxChunks bounds the evidence chunks displayed per knowledge base.
 	graphQueryMaxChunks = 10
+	// graphQueryChunkBatchSize bounds each evidence lookup, independently of the output cap.
+	graphQueryChunkBatchSize = 128
 	// graphQueryMaxRelations bounds the relations returned to the model.
 	graphQueryMaxRelations = 30
 )
@@ -74,7 +76,7 @@ const (
 type graphTruncation struct {
 	relationsShown int
 	relationsTotal int
-	chunksFetched  int
+	chunksShown    int
 	chunksTotal    int
 	termsMatched   int
 	termsTotal     int
@@ -82,7 +84,7 @@ type graphTruncation struct {
 
 // truncated reports whether any cap fired.
 func (tr graphTruncation) truncated() bool {
-	return tr.relationsTotal > tr.relationsShown || tr.chunksTotal > tr.chunksFetched ||
+	return tr.relationsTotal > tr.relationsShown || tr.chunksTotal > tr.chunksShown ||
 		tr.termsTotal > tr.termsMatched
 }
 
@@ -99,10 +101,10 @@ func (tr graphTruncation) statement() string {
 			"than the ones listed below; query a single entity by name to see its neighbourhood.\n",
 			tr.relationsShown, tr.relationsTotal, graphQueryMaxRelations)
 	}
-	if tr.chunksTotal > tr.chunksFetched {
-		fmt.Fprintf(&b, "  - Graph evidence chunks: %d of %d fetched (cap %d per knowledge base). Some of these "+
+	if tr.chunksTotal > tr.chunksShown {
+		fmt.Fprintf(&b, "  - Graph evidence chunks: %d of %d shown (cap %d per knowledge base). Some of these "+
 			"entities' source chunks are not part of this result.\n",
-			tr.chunksFetched, tr.chunksTotal, graphQueryMaxChunks)
+			tr.chunksShown, tr.chunksTotal, graphQueryMaxChunks)
 	}
 	if tr.termsTotal > tr.termsMatched {
 		fmt.Fprintf(&b, "  - Entity terms: %d of %d query words were matched against entity names (cap %d). A word "+
@@ -121,9 +123,9 @@ func (tr graphTruncation) addToData(data map[string]interface{}) {
 		data["relations_total"] = tr.relationsTotal
 		data["relations_omitted"] = tr.relationsTotal - tr.relationsShown
 	}
-	if tr.chunksTotal > tr.chunksFetched {
+	if tr.chunksTotal > tr.chunksShown {
 		data["graph_chunks_total"] = tr.chunksTotal
-		data["graph_chunks_omitted"] = tr.chunksTotal - tr.chunksFetched
+		data["graph_chunks_omitted"] = tr.chunksTotal - tr.chunksShown
 	}
 	if tr.termsTotal > tr.termsMatched {
 		data["query_terms_total"] = tr.termsTotal
@@ -171,9 +173,9 @@ func graphSearchTerms(query string) (terms []string, dropped int) {
 	return terms, dropped
 }
 
-// WithKnowledgeScope enables document/tag-level result filtering for Agent
-// calls. The graph backend queries by KB, so the tool must enforce narrower
-// SearchTargets before returning any result to the model.
+// WithKnowledgeScope supplies document existence/access checks for graph
+// evidence, as well as document/tag-level filtering for Agent calls. The graph
+// backend queries by KB, so narrower SearchTargets must be enforced here.
 func (t *QueryKnowledgeGraphTool) WithKnowledgeScope(
 	knowledgeService interfaces.KnowledgeService,
 ) *QueryKnowledgeGraphTool {
@@ -241,15 +243,15 @@ func (t *QueryKnowledgeGraphTool) Execute(ctx context.Context, args json.RawMess
 
 	// Concurrently query all knowledge bases
 	type graphQueryResult struct {
-		kbID          string
-		kb            *types.KnowledgeBase
-		graphResults  []*types.SearchResult // chunks the matched entities come from
-		textResults   []*types.SearchResult
-		relations     []*types.GraphRelation
-		chunksFetched int      // evidence chunks fetched, before scope filtering
-		chunksTotal   int      // evidence chunks the matched entities reference
-		warnings      []string // failures of one source while the other returned results
-		err           error
+		kbID         string
+		kb           *types.KnowledgeBase
+		graphResults []*types.SearchResult // chunks the matched entities come from
+		textResults  []*types.SearchResult
+		relations    []*types.GraphRelation
+		chunksShown  int      // valid evidence chunks selected for display
+		chunksTotal  int      // valid in-scope evidence before the display cap
+		warnings     []string // failures of one source while the other returned results
+		err          error
 	}
 
 	var wg sync.WaitGroup
@@ -294,7 +296,7 @@ func (t *QueryKnowledgeGraphTool) Execute(ctx context.Context, args json.RawMess
 				errs = append(errs, fmt.Sprintf("graph query failed: %v", err))
 			}
 			graphResults, graph := lookup.chunks, lookup.graph
-			res.chunksFetched, res.chunksTotal = lookup.chunksFetched, lookup.chunksTotal
+			res.chunksShown, res.chunksTotal = lookup.chunksShown, lookup.chunksTotal
 			var relations []*types.GraphRelation
 			if graph != nil {
 				relations = graph.Relation
@@ -307,23 +309,11 @@ func (t *QueryKnowledgeGraphTool) Execute(ctx context.Context, args json.RawMess
 				errs = append(errs, fmt.Sprintf("text search failed: %v", err))
 			}
 			if t.scopeEnforced {
-				if graphResults, err = filterSearchResultsInSearchTargets(
-					ctx, t.searchTargets, id, graphResults, t.scopeKnowledgeService,
-				); err != nil {
-					res.err = err
-					return
-				}
 				if textResults, err = filterSearchResultsInSearchTargets(
 					ctx, t.searchTargets, id, textResults, t.scopeKnowledgeService,
 				); err != nil {
 					res.err = err
 					return
-				}
-				// The graph namespace is the whole knowledge base, so under a
-				// document or tag scope only relations between entities backed
-				// by an in-scope chunk may reach the model.
-				if !searchTargetsCoverWholeKB(t.searchTargets, id) {
-					relations = relationsBackedBy(graph, graphResults)
 				}
 			}
 			res.graphResults, res.textResults, res.relations = graphResults, textResults, relations
@@ -347,7 +337,7 @@ func (t *QueryKnowledgeGraphTool) Execute(ctx context.Context, args json.RawMess
 	var relations []*types.GraphRelation
 	seenRelations := make(map[string]bool)
 	relationsTotal := 0
-	chunksFetched, chunksTotal := 0, 0
+	chunksShown, chunksTotal := 0, 0
 
 	for _, kbID := range input.KnowledgeBaseIDs {
 		result := kbResults[kbID]
@@ -364,7 +354,7 @@ func (t *QueryKnowledgeGraphTool) Execute(ctx context.Context, args json.RawMess
 		}
 
 		kbCounts[kbID] = len(result.graphResults) + len(result.textResults)
-		chunksFetched += result.chunksFetched
+		chunksShown += result.chunksShown
 		chunksTotal += result.chunksTotal
 		for _, r := range result.graphResults {
 			if !seenChunks[r.ID] {
@@ -397,7 +387,7 @@ func (t *QueryKnowledgeGraphTool) Execute(ctx context.Context, args json.RawMess
 	truncation := graphTruncation{
 		relationsShown: len(relations),
 		relationsTotal: relationsTotal,
-		chunksFetched:  chunksFetched,
+		chunksShown:    chunksShown,
 		chunksTotal:    chunksTotal,
 		termsMatched:   len(terms),
 		termsTotal:     len(terms) + termsDropped,
@@ -573,21 +563,20 @@ func (t *QueryKnowledgeGraphTool) Execute(ctx context.Context, args json.RawMess
 	}, nil
 }
 
-// graphLookup is one knowledge base's graph lookup: the matched graph, the
-// evidence chunks fetched for it, and how many distinct chunks the matched
-// entities reference in total. The two counts travel back with the chunks so a
-// fetch that stopped at graphQueryMaxChunks can be reported as such.
+// graphLookup contains a validated graph and the evidence selected for display.
+// The counts describe valid in-scope evidence before and after the display cap;
+// rejected evidence is not reported as truncation.
 type graphLookup struct {
-	graph         *types.GraphData
-	chunks        []*types.SearchResult
-	chunksFetched int
-	chunksTotal   int
+	graph       *types.GraphData
+	chunks      []*types.SearchResult
+	chunksShown int
+	chunksTotal int
 }
 
 // queryGraph looks the query's entity terms up in kbID's graph and returns
-// the chunks the matched entities were extracted from, plus the matched graph
-// (entities and relations). With no graph store wired, or none configured
-// (the store answers nil), it returns nothing.
+// up to ten valid evidence chunks and relations backed by validated evidence.
+// With no graph store wired, or none configured (the store answers nil), it
+// returns nothing.
 func (t *QueryKnowledgeGraphTool) queryGraph(
 	ctx context.Context, kbID string, terms []string,
 ) (graphLookup, error) {
@@ -601,39 +590,61 @@ func (t *QueryKnowledgeGraphTool) queryGraph(
 	if graph == nil {
 		return graphLookup{}, nil
 	}
-	// Without a chunk store nothing is fetched at all, and none of it was
-	// dropped by the cap: leaving the counts at zero keeps that apart from a
-	// capped fetch, which must be reported.
-	lookup := graphLookup{graph: graph}
-	if t.chunkRepo == nil {
-		return lookup, nil
-	}
-	chunkIDs := make([]string, 0, graphQueryMaxChunks)
-	referenced := make(map[string]bool)
+	var chunkIDs []string
+	seen := make(map[string]bool)
 	for _, node := range graph.Node {
+		if node == nil {
+			continue
+		}
 		for _, id := range node.Chunks {
-			if id == "" || referenced[id] {
-				continue
-			}
-			referenced[id] = true
-			// Past the cap a chunk is counted, not fetched: the counts are
-			// what tells the caller the evidence is a subset.
-			if len(chunkIDs) < graphQueryMaxChunks {
+			if id != "" && !seen[id] {
+				seen[id] = true
 				chunkIDs = append(chunkIDs, id)
 			}
 		}
 	}
-	lookup.chunksFetched, lookup.chunksTotal = len(chunkIDs), len(referenced)
 	if len(chunkIDs) == 0 {
-		return lookup, nil
+		return graphLookup{graph: &types.GraphData{Node: graph.Node}}, nil
 	}
+	if t.chunkRepo == nil {
+		return graphLookup{}, fmt.Errorf("chunk repository is unavailable for graph evidence validation")
+	}
+	// Validate every candidate before limiting displayed text. In particular, a
+	// target whose only evidence is the eleventh chunk can still support an edge.
+	// Retain only IDs for relation validation and at most ten full search results.
+	var evidence []*types.SearchResult
+	results := make([]*types.SearchResult, 0, graphQueryMaxChunks)
+	for start := 0; start < len(chunkIDs); start += graphQueryChunkBatchSize {
+		end := min(start+graphQueryChunkBatchSize, len(chunkIDs))
+		batch, err := t.graphEvidenceBatch(ctx, kbID, chunkIDs[start:end])
+		if err != nil {
+			// Never return an unchecked graph, including after a later batch fails.
+			return graphLookup{}, err
+		}
+		for _, result := range batch {
+			evidence = append(evidence, &types.SearchResult{ID: result.ID})
+			if len(results) < graphQueryMaxChunks {
+				results = append(results, result)
+			}
+		}
+	}
+	validated := *graph
+	validated.Relation = relationsBackedBy(graph, evidence)
+	return graphLookup{
+		graph: &validated, chunks: results, chunksShown: len(results), chunksTotal: len(evidence),
+	}, nil
+}
+
+// graphEvidenceBatch resolves live, enabled, accessible evidence in candidate
+// order. Scope filtering happens before the caller applies its presentation cap.
+func (t *QueryKnowledgeGraphTool) graphEvidenceBatch(
+	ctx context.Context, kbID string, chunkIDs []string,
+) ([]*types.SearchResult, error) {
 	// The graph namespace is the knowledge base, which the caller already
 	// authorized; a chunk ID is only trusted when its row belongs to it.
 	chunks, err := t.chunkRepo.ListChunksByIDOnly(ctx, chunkIDs)
 	if err != nil {
-		// A failed fetch is an error, not a capped fetch: dropping the counts
-		// keeps it from being reported as truncation.
-		return graphLookup{graph: graph}, err
+		return nil, fmt.Errorf("failed to load graph evidence chunks: %w", err)
 	}
 	byID := make(map[string]*types.Chunk, len(chunks))
 	knowledgeIDs := make([]string, 0, len(chunks))
@@ -645,7 +656,7 @@ func (t *QueryKnowledgeGraphTool) queryGraph(
 	}
 	titles, err := t.knowledgeTitles(ctx, knowledgeIDs)
 	if err != nil {
-		return graphLookup{graph: graph}, err
+		return nil, err
 	}
 	results := make([]*types.SearchResult, 0, len(byID))
 	for _, id := range chunkIDs {
@@ -653,9 +664,9 @@ func (t *QueryKnowledgeGraphTool) queryGraph(
 		if c == nil {
 			continue
 		}
-		// A chunk can outlive its soft-deleted document; titles holds only
-		// documents that still exist (nil when there is no way to check).
-		if _, exists := titles[c.KnowledgeID]; titles != nil && !exists {
+		// A chunk can outlive its soft-deleted document. Only documents returned
+		// by the shared-access lookup can establish valid evidence.
+		if _, exists := titles[c.KnowledgeID]; !exists {
 			continue
 		}
 		results = append(results, &types.SearchResult{
@@ -670,19 +681,22 @@ func (t *QueryKnowledgeGraphTool) queryGraph(
 			MatchType:       types.MatchTypeGraph,
 		})
 	}
-	lookup.chunks = results
-	return lookup, nil
+	if t.scopeEnforced {
+		return filterSearchResultsInSearchTargets(ctx, t.searchTargets, kbID, results, t.scopeKnowledgeService)
+	}
+	return results, nil
 }
 
 // knowledgeTitles returns the titles of the knowledge IDs that still exist.
-// It returns nil when no knowledge service is wired to look them up.
+// Missing document services fail closed rather than accepting unchecked chunks.
 func (t *QueryKnowledgeGraphTool) knowledgeTitles(ctx context.Context, ids []string) (map[string]string, error) {
-	if t.scopeKnowledgeService == nil {
-		return nil, nil
-	}
 	titles := make(map[string]string, len(ids))
+	ids = dedupNonEmptyStrings(ids)
 	if len(ids) == 0 {
 		return titles, nil
+	}
+	if t.scopeKnowledgeService == nil {
+		return nil, fmt.Errorf("knowledge service is unavailable for graph evidence validation")
 	}
 	tenantID, _ := types.TenantIDFromContext(ctx)
 	knowledges, err := t.scopeKnowledgeService.GetKnowledgeBatchWithSharedAccess(ctx, tenantID, ids)
@@ -695,17 +709,6 @@ func (t *QueryKnowledgeGraphTool) knowledgeTitles(ctx context.Context, ids []str
 		}
 	}
 	return titles, nil
-}
-
-// searchTargetsCoverWholeKB reports whether targets grant the whole of kbID
-// rather than some of its documents or tags.
-func searchTargetsCoverWholeKB(targets types.SearchTargets, kbID string) bool {
-	for _, target := range targets {
-		if target != nil && target.KnowledgeBaseID == kbID && searchTargetIsWholeKB(target) {
-			return true
-		}
-	}
-	return false
 }
 
 // relationsBackedBy checks the actual endpoint instances against scoped evidence.
