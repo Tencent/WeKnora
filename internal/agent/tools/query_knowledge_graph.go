@@ -572,29 +572,33 @@ func searchTargetsCoverWholeKB(targets types.SearchTargets, kbID string) bool {
 	return false
 }
 
-// relationsBackedBy keeps the graph's relations whose two entities were both
-// extracted from one of the evidence chunks. Entities whose chunks are not
-// among them cannot be shown to be in scope, so their relations are dropped.
+// relationsBackedBy checks the actual endpoint instances against scoped evidence.
+// A same-named entity in another document cannot establish a relation's scope.
 func relationsBackedBy(graph *types.GraphData, evidence []*types.SearchResult) []*types.GraphRelation {
 	if graph == nil || len(evidence) == 0 {
 		return nil
 	}
 	allowedChunks := make(map[string]bool, len(evidence))
 	for _, r := range evidence {
-		allowedChunks[r.ID] = true
+		if r != nil {
+			allowedChunks[r.ID] = true
+		}
 	}
 	allowedNodes := make(map[string]bool)
 	for _, node := range graph.Node {
+		if node == nil || node.ID == "" {
+			continue
+		}
 		for _, id := range node.Chunks {
 			if allowedChunks[id] {
-				allowedNodes[node.Name] = true
+				allowedNodes[node.ID] = true
 				break
 			}
 		}
 	}
 	var relations []*types.GraphRelation
 	for _, rel := range graph.Relation {
-		if allowedNodes[rel.Node1] && allowedNodes[rel.Node2] {
+		if rel != nil && allowedNodes[rel.SourceID] && allowedNodes[rel.TargetID] {
 			relations = append(relations, rel)
 		}
 	}

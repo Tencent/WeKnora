@@ -19,6 +19,9 @@ type GraphNode struct {
 	Name       string   `json:"name,omitempty"`
 	Chunks     []string `json:"chunks,omitempty"`
 	Attributes []string `json:"attributes,omitempty"`
+	// Retrieval identities are local to the graph query, not extraction configuration.
+	ID          string `json:"-" yaml:"-"`
+	KnowledgeID string `json:"-" yaml:"-"`
 }
 
 // GraphRelation represents the relation of the graph
@@ -26,6 +29,10 @@ type GraphRelation struct {
 	Node1 string `json:"node1,omitempty"`
 	Node2 string `json:"node2,omitempty"`
 	Type  string `json:"type,omitempty"`
+	// Names are for display; these identities link to the actual document instances.
+	ID       string `json:"-" yaml:"-"`
+	SourceID string `json:"-" yaml:"-"`
+	TargetID string `json:"-" yaml:"-"`
 }
 
 type GraphData struct {
