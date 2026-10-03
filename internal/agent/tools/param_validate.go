@@ -3,6 +3,7 @@ package tools
 import (
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strings"
 )
 
@@ -181,7 +182,7 @@ func checkType(val any, targetType string) bool {
 // isInEnum checks if val matches any value in the enum list.
 func isInEnum(val any, enumList []any) bool {
 	for _, e := range enumList {
-		if fmt.Sprintf("%v", val) == fmt.Sprintf("%v", e) {
+		if reflect.DeepEqual(val, e) {
 			return true
 		}
 	}
