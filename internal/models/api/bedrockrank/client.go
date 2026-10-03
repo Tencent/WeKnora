@@ -94,15 +94,15 @@ func (c *Client) Rerank(ctx context.Context, query string, documents []string) (
 		return nil, nil
 	}
 	if len(documents) > 1000 {
-		return nil, fmt.Errorf("Bedrock rerank accepts at most 1000 sources per request")
+		return nil, fmt.Errorf("bedrock rerank accepts at most 1000 sources per request")
 	}
 	if query == "" {
-		return nil, fmt.Errorf("Bedrock rerank query must not be empty")
+		return nil, fmt.Errorf("bedrock rerank query must not be empty")
 	}
 	sources := make([]types.RerankSource, len(documents))
 	for i, text := range documents {
 		if text == "" {
-			return nil, fmt.Errorf("Bedrock rerank source %d must not be empty", i)
+			return nil, fmt.Errorf("bedrock rerank source %d must not be empty", i)
 		}
 		sources[i] = types.RerankSource{
 			Type: types.RerankSourceTypeInline,
@@ -133,21 +133,21 @@ func (c *Client) Rerank(ctx context.Context, query string, documents []string) (
 	for {
 		page, err := c.client.Rerank(ctx, input)
 		if err != nil {
-			return nil, fmt.Errorf("Bedrock Rerank: %w", err)
+			return nil, fmt.Errorf("bedrock rerank: %w", err)
 		}
 		if page == nil {
-			return nil, fmt.Errorf("Bedrock rerank returned an empty response")
+			return nil, fmt.Errorf("bedrock rerank returned an empty response")
 		}
 		for _, result := range page.Results {
 			if result.Index == nil || result.RelevanceScore == nil {
-				return nil, fmt.Errorf("Bedrock rerank result is missing index or relevanceScore")
+				return nil, fmt.Errorf("bedrock rerank result is missing index or relevanceScore")
 			}
 			index := int(*result.Index)
 			if index < 0 || index >= len(documents) {
-				return nil, fmt.Errorf("Bedrock rerank index %d out of range for %d documents", index, len(documents))
+				return nil, fmt.Errorf("bedrock rerank index %d out of range for %d documents", index, len(documents))
 			}
 			if seenIndexes[index] {
-				return nil, fmt.Errorf("Bedrock rerank returned duplicate index %d", index)
+				return nil, fmt.Errorf("bedrock rerank returned duplicate index %d", index)
 			}
 			seenIndexes[index] = true
 			results = append(results, api.RerankResult{
@@ -158,13 +158,13 @@ func (c *Client) Rerank(ctx context.Context, query string, documents []string) (
 			break
 		}
 		if seenTokens[*page.NextToken] {
-			return nil, fmt.Errorf("Bedrock rerank returned a repeated pagination token")
+			return nil, fmt.Errorf("bedrock rerank returned a repeated pagination token")
 		}
 		seenTokens[*page.NextToken] = true
 		input.NextToken = page.NextToken
 	}
 	if len(results) != len(documents) {
-		return nil, fmt.Errorf("Bedrock rerank returned %d scores for %d documents", len(results), len(documents))
+		return nil, fmt.Errorf("bedrock rerank returned %d scores for %d documents", len(results), len(documents))
 	}
 	return results, nil
 }

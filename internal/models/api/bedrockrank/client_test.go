@@ -108,7 +108,9 @@ func TestRejectsBadConfiguration(t *testing.T) {
 	}{
 		{"missing access key", Config{SecretKey: "s", Model: "m"}, "Access Key ID"},
 		{"missing secret", Config{AccessKey: "k", Model: "m"}, "Secret Access Key"},
-		{"invalid region", Config{AccessKey: "k", SecretKey: "s", Region: "evil.example", Model: "m"}, "invalid AWS region"},
+		{"invalid region", Config{
+			AccessKey: "k", SecretKey: "s", Region: "evil.example", Model: "m",
+		}, "invalid AWS region"},
 		{"missing model", Config{AccessKey: "k", SecretKey: "s"}, "model is required"},
 		{"ARN region mismatch", Config{
 			AccessKey: "k", SecretKey: "s", Region: "us-west-2",
