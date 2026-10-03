@@ -23,6 +23,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/middleware"
 	"github.com/Tencent/WeKnora/internal/models/asr"
+	modelapi "github.com/Tencent/WeKnora/internal/models/api"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/models/embedding"
 	"github.com/Tencent/WeKnora/internal/models/providers"
@@ -2070,6 +2071,26 @@ func classifyConnectionError(errMsg string) string {
 	}
 }
 
+// isReachableBadRequest reports whether err is an HTTP 400 from the model
+// endpoint: the endpoint was reached and auth passed, only the request
+// parameters were rejected (e.g. max_tokens vs max_completion_tokens, or a
+// reasoning model that cannot finish a message within max_tokens=1).
+//
+// Since #3470 dropped go-openai, 400s surface as *api.HTTPError
+// ("API request failed with status 400: ..."), so the status code is matched
+// structurally; the legacy go-openai wording ("status code: 400") is kept as
+// a fallback for compatibility.
+func isReachableBadRequest(err error) bool {
+	if err == nil {
+		return false
+	}
+	var httpErr *modelapi.HTTPError
+	if stderrors.As(err, &httpErr) && httpErr != nil {
+		return httpErr.StatusCode == http.StatusBadRequest
+	}
+	return strings.Contains(err.Error(), "status code: 400")
+}
+
 // checkChatModelConnection 使用 chat 模块做一次最小化调用来测试连通性与鉴权。
 // 与生产路径走完全相同的 ConfigFromModel → NewChat 流程，因此 CustomHeaders、
 // ExtraConfig、Provider 等字段都会被正确透传。
@@ -2091,8 +2112,9 @@ func (h *InitializationHandler) checkChatModelConnection(
 	if err != nil {
 		errMsg := err.Error()
 		// 400 = endpoint reachable + auth ok, just a parameter mismatch
-		// (e.g. max_tokens vs max_completion_tokens). Treat as success.
-		if strings.Contains(errMsg, "status code: 400") {
+		// (e.g. max_tokens vs max_completion_tokens, or a reasoning model
+		// that cannot finish a message within max_tokens=1). Treat as success.
+		if isReachableBadRequest(err) {
 			return true, "连接正常，模型可用"
 		}
 		// For every other failure mode we surface a human-readable hint
