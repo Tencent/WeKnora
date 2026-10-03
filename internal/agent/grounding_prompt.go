@@ -33,9 +33,8 @@ func formatGroundingGuidance(names []string) string {
 	}
 	var kbTools []string
 	for _, name := range []string{
-		tools.ToolKnowledgeSearch, tools.ToolGrepChunks, tools.ToolListKnowledgeChunks,
-		tools.ToolGetDocumentInfo, tools.ToolWikiSearch, tools.ToolWikiReadPage,
-		tools.ToolWikiReadSourceDoc, tools.ToolQueryKnowledgeGraph,
+		tools.ToolSearchKnowledge, tools.ToolReadDocument, tools.ToolListDocuments,
+		tools.ToolWikiSearch, tools.ToolWikiReadPage, tools.ToolQueryKnowledgeGraph,
 		tools.ToolDataSchema, tools.ToolDataAnalysis, tools.ToolDatabaseQuery,
 	} {
 		if slices.Contains(names, name) {
@@ -44,11 +43,13 @@ func formatGroundingGuidance(names []string) string {
 	}
 	if len(kbTools) > 0 {
 		b.WriteString("- Available knowledge tools: " + strings.Join(kbTools, ", ") +
-			". Consult the current runtime_context scope and capabilities. When no source was " +
-			"explicitly selected, use relevant bound knowledge bases for factual tasks. With an " +
-			"explicit source selection, KB retrieval is complementary, not a prerequisite. Directory " +
-			"entries are routing hints, not retrieved evidence; do not exhaust unrelated bases. " +
-			"Choose an available search or reader appropriate to the scope.\n")
+			". Consult the current runtime_context scope and capabilities. When knowledge bases are " +
+			"bound, search them before answering a question about a topic, even one that reads like " +
+			"general knowledge: the user may mean what their documents say, and directory profiles " +
+			"and recent titles show only a sample, so they cannot prove a base lacks the answer. " +
+			"With an explicit source selection, KB retrieval is complementary, not a prerequisite. " +
+			"Directory entries are routing hints, not retrieved evidence; do not exhaust unrelated " +
+			"bases. Choose an available search or reader appropriate to the scope.\n")
 	}
 	if slices.Contains(names, tools.ToolWebSearch) {
 		b.WriteString("- web_search is available: use it when relevant local evidence is missing, " +
@@ -69,13 +70,14 @@ func formatGroundingGuidance(names []string) string {
 	b.WriteString("- Use only resources accessible through this turn's tools and supplied context. " +
 		"If relevant sources are unavailable or searches leave gaps, state a limitation only when it " +
 		"affects the answer and distinguish unverified background knowledge from supported claims. Do " +
-		"not invent sources, claim a search you did not perform, or treat a failed/empty lookup as " +
-		"verification. Ask for missing material only when needed to complete the task accurately.\n")
+		"not invent sources or treat a failed/empty lookup as verification, and say you searched or " +
+		"found nothing only when a search tool actually ran for this task. Ask for missing material " +
+		"only when needed to complete the task accurately.\n")
 	b.WriteString("- Direct conversation, creative writing, and translation or formatting of supplied " +
-		"content do not require research unless you add factual claims. Stable general explanations " +
-		"need no lookup unless the task depends on specific source content or uncertain details. If " +
-		"the user explicitly limits sources or requests no research, respect that and identify " +
-		"material uncertainty. Stop searching once evidence is sufficient.\n")
+		"content do not require research unless you add factual claims. Without bound knowledge bases, " +
+		"stable general explanations need no lookup unless the task depends on specific source " +
+		"content or uncertain details. If the user explicitly limits sources or requests no research, " +
+		"respect that and identify material uncertainty. Stop searching once evidence is sufficient.\n")
 	b.WriteString("- Check both content support and artifact execution before reporting completion. " +
 		"Preserve source titles/URLs and relevant limitations in factual deliverables where " +
 		"appropriate; a generated file's existence only verifies generation, not its accuracy. Treat " +

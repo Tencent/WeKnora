@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -39,13 +40,26 @@ func (m *capableManager) SessionFileStore() sandbox.SessionFileStore {
 
 // stubShellExecutor records ExecShellCommand calls so a test can assert the
 // registered tool actually dispatches through it.
-type stubShellExecutor struct{ called bool }
+type stubShellExecutor struct {
+	called bool
+	layout sandbox.WorkspaceLayout
+}
 
 func (s *stubShellExecutor) ExecShellCommand(
 	context.Context, string, string, string, time.Duration, map[string]string,
 ) (*sandbox.ExecuteResult, error) {
 	s.called = true
 	return &sandbox.ExecuteResult{}, nil
+}
+
+func (s *stubShellExecutor) SessionWorkspaceLayout(context.Context, string) (sandbox.WorkspaceLayout, error) {
+	if strings.TrimSpace(s.layout.Root) == "" {
+		// Ordinary remote stubs do not set a layout. Advertising the
+		// provider interface with an empty root would fail-close every
+		// /workspace command; keep the remote contract instead.
+		return sandbox.RemoteWorkspaceLayout(), nil
+	}
+	return s.layout, nil
 }
 
 func TestSessionSandboxShellExecutorReturnsNilWithoutCapability(t *testing.T) {

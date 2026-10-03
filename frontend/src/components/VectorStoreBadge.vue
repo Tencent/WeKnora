@@ -72,40 +72,40 @@ const displayName = computed(() => {
   align-items: center;
   gap: 4px;
   padding: 2px 8px;
-  border-radius: 4px;
-  font-size: 12px;
+  border-radius: var(--app-radius-xs);
+  font-size: var(--app-text-sm);
   line-height: 1.4;
-  background: var(--td-bg-color-component, #f5f7fa);
-  color: var(--td-text-color-primary, #1d2129);
+  background: var(--td-bg-color-component);
+  color: var(--td-text-color-primary);
 }
 
 .vs-badge-env {
-  background: var(--td-brand-color-1, #ecf2fe);
-  color: var(--td-brand-color-7, #0052d9);
+  background: var(--td-brand-color-1);
+  color: var(--td-brand-color-7);
 }
 
 .vs-badge-user {
-  background: var(--td-success-color-1, #e8f8f2);
-  color: var(--td-success-color-7, #00754a);
+  background: var(--td-success-color-1);
+  color: var(--td-success-color-7);
 }
 
 .vs-badge-shared {
-  background: var(--td-warning-color-1, #fff1e9);
-  color: var(--td-warning-color-7, #b85b00);
+  background: var(--td-warning-color-1);
+  color: var(--td-warning-color-7);
 }
 
 .vs-badge-warn {
-  background: var(--td-error-color-1, #fde9e6);
-  color: var(--td-error-color-7, #b32700);
+  background: var(--td-error-color-1);
+  color: var(--td-error-color-7);
 }
 
 .vs-badge-icon {
-  font-size: 14px;
+  font-size: var(--app-text-base);
 }
 
 .vs-badge-engine {
   opacity: 0.7;
-  font-size: 11px;
+  font-size: var(--app-text-xs);
 }
 
 .vs-badge-warn-tag {

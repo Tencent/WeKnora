@@ -6,8 +6,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -36,6 +38,23 @@ type sharedFixture struct {
 	ws    *websocket.Conn
 	mu    sync.Mutex
 	calls chan map[string]any
+}
+
+func TestAccountReportsConnectedExtensionVersion(t *testing.T) {
+	m, ctx := sharedTestManager(t)
+	scope := Scope{1, "extension-version"}
+	fixture := connectSharedFixture(ctx, t, m, scope, "", "chrome")
+	account, err := m.Account(ctx, scope)
+	require.NoError(t, err)
+	require.True(t, account.Connected)
+	require.Equal(t, "0.3.0", account.ExtensionVersion)
+
+	require.NoError(t, fixture.ws.Close())
+	require.Eventually(t, func() bool { return !m.Status(scope, "").Connected }, time.Second, 10*time.Millisecond)
+	account, err = m.Account(ctx, scope)
+	require.NoError(t, err)
+	require.NotNil(t, account.Device, "authorization survives a transient disconnection")
+	require.Empty(t, account.ExtensionVersion, "do not display a stale version as the connected extension")
 }
 
 func TestConcurrentCommandsShareAutomaticSessionCreation(t *testing.T) {
@@ -91,8 +110,8 @@ func connectSharedFixture(
 	require.NoError(
 		t,
 		ws.WriteJSON(map[string]any{"id": "handshake", "method": "system.handshake", "params": map[string]any{
-			"client": "browser-skill-extension", "version": "0.2.1",
-			"protocol_version": "1.1", "min_compatible_protocol": "1.0",
+			"client": "browser-skill-extension", "version": "0.3.0",
+			"protocol_version": "1.3", "min_compatible_protocol": "1.0",
 			"instance_id": claimedID, "label": scope.User,
 			"browser": map[string]string{"name": "chrome", "version": "125"},
 		}}),
@@ -160,11 +179,9 @@ func connectSharedFixture(
 					return
 				}
 				result = map[string]any{"cancelled": true}
-			case "gateway.task_preview":
+			case "ui.task_preview":
 				result = map[string]any{"image_base64": "dGVzdA==", "format": "jpeg"}
-			case "gateway.task_idle":
-				result = map[string]any{"released": true}
-			case "gateway.task_focus":
+			case "ui.task_focus":
 				result = map[string]any{"focused": true}
 			case "system.ping":
 				result = map[string]any{"pong": true}
@@ -226,7 +243,9 @@ func TestScreenshotUsesNativeTaskAndPreservesCrop(t *testing.T) {
 func TestProgressReportsNavigationFailureAndFreezesElapsedTime(t *testing.T) {
 	m, ctx := sharedTestManager(t)
 	s := Scope{1, "progress"}
-	connectSharedFixture(ctx, t, m, s, "", "browser", func(f *sharedFixture, id, method string, _ map[string]any) bool {
+	connectSharedFixture(ctx, t, m, s, "", "browser", func(
+		f *sharedFixture, id, method string, _ map[string]any,
+	) bool {
 		if method != "tool.navigate" {
 			return false
 		}
@@ -372,7 +391,8 @@ func TestConcurrentPairingSharesOneDaemon(t *testing.T) {
 	const count = 12
 	results := make(chan error, count)
 	for i := 0; i < count; i++ {
-		go func(i int) { _, err := m.ensureDevice(ctx, Scope{1, fmt.Sprint(i)}); results <- err }(i)
+		// Reserved as in-progress extension handshakes, so none is idle.
+		go func(i int) { _, err := m.acquireDevice(ctx, Scope{1, fmt.Sprint(i)}, true); results <- err }(i)
 	}
 	for i := 0; i < count; i++ {
 		require.NoError(t, <-results)
@@ -383,12 +403,70 @@ func TestConcurrentPairingSharesOneDaemon(t *testing.T) {
 	}
 	m.maxConnections = count
 	_, err := m.ensureDevice(ctx, Scope{1, "over-limit"})
-	require.ErrorContains(t, err, "capacity")
+	require.ErrorIs(t, err, errCapacity)
 	if err := m.Revoke(ctx, Scope{1, "0"}); err != nil {
 		t.Fatal(err)
 	}
 	_, err = m.ensureDevice(ctx, Scope{1, "replacement"})
 	require.NoError(t, err)
+}
+
+// Capacity counts live members, not every member this node has ever served.
+func TestDisconnectedMembersReleaseCapacity(t *testing.T) {
+	m, ctx := sharedTestManager(t)
+	m.maxConnections = 2
+	alice, bob, carol := Scope{1, "alice"}, Scope{1, "bob"}, Scope{1, "carol"}
+	fixture := connectSharedFixture(ctx, t, m, alice, "", "alice-browser")
+	require.NoError(t, m.Control(ctx, alice, "chat", "start"))
+	d := m.get(alice)
+	require.NoError(t, fixture.ws.Close())
+	require.Eventually(t, func() bool {
+		d.mu.Lock()
+		defer d.mu.Unlock()
+		return d.idleLocked()
+	}, 5*time.Second, 20*time.Millisecond)
+
+	// An unpaired selection is idle as well and must not pin a slot.
+	require.NoError(t, m.Control(ctx, carol, "chat", "select"))
+	connectSharedFixture(ctx, t, m, bob, "", "bob-browser")
+	require.Nil(t, m.get(alice))
+	require.Nil(t, m.get(carol))
+
+	// Alice's interrupted task is durable and reloads paused on reconnection.
+	status, err := m.GetStatus(ctx, alice, "chat")
+	require.NoError(t, err)
+	require.True(t, status.Selected)
+	require.True(t, status.Paused)
+	require.NoError(t, m.Control(ctx, alice, "chat", "pause"))
+	connectSharedFixture(ctx, t, m, alice, "", "alice-browser")
+	status = m.Status(alice, "chat")
+	require.True(t, status.Connected)
+	require.True(t, status.Selected)
+	require.True(t, status.Paused)
+}
+
+// A handshake reserves its device; a failed lease claim must not leak it.
+func TestFailedLeaseClaimDoesNotPinCapacity(t *testing.T) {
+	m, ctx := sharedTestManager(t)
+	m.maxConnections = 1
+	alice := Scope{1, "alice"}
+	link, err := m.Pair(ctx, alice, "")
+	require.NoError(t, err)
+	parts := strings.Split(redeemTestPair(ctx, t, m, link), "#")
+	record, err := m.store.account(ctx, alice)
+	require.NoError(t, err)
+	require.NoError(t, m.store.claim(ctx, record, "other-node", "http://other:8080", randomID()))
+
+	header := http.Header{"Origin": []string{"chrome-extension://" + strings.Repeat("a", 32)}}
+	dialer := websocket.Dialer{Subprotocols: []string{AuthProtocol + parts[1]}}
+	_, response, err := dialer.DialContext(ctx, parts[0], header)
+	require.Error(t, err)
+	require.Equal(t, http.StatusConflict, response.StatusCode)
+	_ = response.Body.Close()
+
+	_, err = m.ensureDevice(ctx, Scope{1, "bob"})
+	require.NoError(t, err, "the refused handshake must leave an evictable device")
+	require.Nil(t, m.get(alice))
 }
 
 func TestSharedDaemonCrashKeepsAuthorizationAndPausesTasks(t *testing.T) {
@@ -429,7 +507,8 @@ exec "$WEKNORA_BSK_NATIVE" "$@"
 	m.binary = wrapper
 	t.Cleanup(func() { _ = os.WriteFile(gate+"/release", nil, 0o600) })
 	pending := make(chan error, 1)
-	go func() { _, err := m.ensureDevice(ctx, Scope{1, "alice"}); pending <- err }()
+	// Reserved like a pending extension handshake so Bob cannot evict it.
+	go func() { _, err := m.acquireDevice(ctx, Scope{1, "alice"}, true); pending <- err }()
 	require.Eventually(
 		t,
 		func() bool {
@@ -571,7 +650,7 @@ func TestHumanHelpOutcomeControlsPause(t *testing.T) {
 	}
 }
 
-func TestIdleRetainsTaskAndCachedPreviewUntilNextCall(t *testing.T) {
+func TestFinishTurnRetainsTaskAndCachedPreviewUntilNextCall(t *testing.T) {
 	m, ctx := sharedTestManager(t)
 	s := Scope{1, "idle-user"}
 	f := connectSharedFixture(ctx, t, m, s, "", "browser")
@@ -580,7 +659,7 @@ func TestIdleRetainsTaskAndCachedPreviewUntilNextCall(t *testing.T) {
 	before := m.Status(s, "chat")
 	frame, err := m.Preview(ctx, s, "chat")
 	require.NoError(t, err)
-	require.NoError(t, m.Idle(ctx, s, "chat"))
+	require.NoError(t, m.FinishTurn(ctx, s, "chat", true))
 	after := m.Status(s, "chat")
 	require.True(t, after.Idle)
 	require.Equal(t, before.SessionID, after.SessionID)
@@ -597,7 +676,7 @@ func TestIdleRetainsTaskAndCachedPreviewUntilNextCall(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, m.Status(s, "chat").Idle)
 	require.NoError(t, m.Control(ctx, s, "chat", "stop"))
-	require.NoError(t, m.Idle(ctx, s, "chat"))
+	require.NoError(t, m.FinishTurn(ctx, s, "chat", true))
 }
 
 func TestNavigationDefaultsToDocumentReadyAndPreservesExplicitWait(t *testing.T) {
@@ -653,4 +732,228 @@ func TestFinishTurnClosesResearchButRetainsHandoffsAndPausedTasks(t *testing.T) 
 			}
 		})
 	}
+}
+
+func TestFinishTurnUsesOfficialLifecycleWithoutGatewayCalls(t *testing.T) {
+	for _, remote := range []bool{false, true} {
+		t.Run(fmt.Sprintf("remote=%t", remote), func(t *testing.T) {
+			owner, ctx := sharedTestManager(t)
+			caller := owner
+			if remote {
+				owner.clusterSecret = strings.Repeat("cluster-secret-", 3)
+				server := httptest.NewServer(http.HandlerFunc(owner.InternalHTTP))
+				defer server.Close()
+				owner.internalURL = server.URL
+				caller = NewManager(owner.store)
+				caller.binary = owner.binary
+				caller.clusterSecret = owner.clusterSecret
+				t.Cleanup(caller.Close)
+			}
+			scope := Scope{1, "official-extension"}
+			var gatewayCalls atomic.Int32
+			connectSharedFixture(ctx, t, owner, scope, "", "browser", func(
+				f *sharedFixture, id, method string, _ map[string]any,
+			) bool {
+				if !strings.HasPrefix(method, "ui.") {
+					return false
+				}
+				gatewayCalls.Add(1)
+				_ = f.send(map[string]any{"id": id, "error": map[string]string{"code": "unknown_method"}})
+				return true
+			})
+			require.NoError(t, caller.Control(ctx, scope, "research", "start"))
+			require.NoError(t, caller.FinishTurn(ctx, scope, "research", false))
+			require.Empty(t, owner.Status(scope, "research").SessionID)
+			for _, keep := range []bool{false, true} {
+				session := fmt.Sprintf("retained-%t", keep)
+				require.NoError(t, caller.Control(ctx, scope, session, "start"))
+				if !keep {
+					require.NoError(t, caller.Control(ctx, scope, session, "pause"))
+				}
+				id := owner.Status(scope, session).SessionID
+				require.NoError(t, caller.FinishTurn(ctx, scope, session, keep))
+				require.Equal(t, id, owner.Status(scope, session).SessionID)
+				if keep {
+					_, err := caller.Call(ctx, scope, session, "snapshot", nil)
+					require.NoError(t, err)
+					require.Equal(t, id, owner.Status(scope, session).SessionID)
+				}
+			}
+			require.Zero(t, gatewayCalls.Load(), "turn cleanup must not send custom gateway RPC")
+		})
+	}
+}
+
+// Inspect the actual parameters forwarded by the native daemon, not just a
+// timeout helper: tab_borrow ignores request_help's timeout_ms field.
+func TestBorrowConfirmationBudgetReachesExtension(t *testing.T) {
+	m, ctx := sharedTestManager(t)
+	s := Scope{1, "borrow-budget"}
+	type pendingBorrow struct {
+		fixture *sharedFixture
+		id      string
+		params  map[string]any
+	}
+	pending := make(chan pendingBorrow, 1)
+	connectSharedFixture(ctx, t, m, s, "", "browser", func(
+		f *sharedFixture, id, method string, params map[string]any,
+	) bool {
+		if method != "tool.tab_borrow" {
+			return false
+		}
+		pending <- pendingBorrow{f, id, params}
+		return true
+	})
+	require.NoError(t, m.Control(ctx, s, "chat", "start"))
+	for _, tc := range []struct {
+		name  string
+		value any
+		want  float64
+	}{
+		{"default", nil, 300000},
+		{"explicit", 10000, 10000},
+		{"bounded", 600000, 300000},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			params := map[string]any{"tab_id": 7}
+			if tc.value != nil {
+				params["confirmation_timeout_ms"] = tc.value
+			}
+			done := make(chan error, 1)
+			go func() {
+				_, err := m.Call(ctx, s, "chat", "tab_borrow", params)
+				done <- err
+			}()
+			var request pendingBorrow
+			select {
+			case request = <-pending:
+			case err := <-done:
+				t.Fatalf("borrow returned before extension confirmation: %v", err)
+			case <-ctx.Done():
+				t.Fatal(ctx.Err())
+			}
+			require.Equal(t, tc.want, request.params["confirmation_timeout_ms"])
+			require.NotContains(t, request.params, "timeout_ms")
+			require.True(t, m.Status(s, "chat").NeedsHelp)
+			require.Equal(t, "tab_borrow", m.Status(s, "chat").Action)
+			require.NoError(t, request.fixture.send(map[string]any{"id": request.id, "result": map[string]any{
+				"tab_id": 7, "original_window_id": 200, "agent_window_id": 100,
+			}}))
+			select {
+			case err := <-done:
+				require.NoError(t, err)
+			case <-ctx.Done():
+				t.Fatal(ctx.Err())
+			}
+			require.False(t, m.Status(s, "chat").NeedsHelp)
+		})
+	}
+}
+
+func TestAgentClosingLastTabKeepsAgentWindow(t *testing.T) {
+	m, ctx := sharedTestManager(t)
+	s := Scope{1, "last-tab"}
+	var mu sync.Mutex
+	var methods []string
+	var created []map[string]any
+	var closeError string // error code the fixture returns when closing tab 9
+	var closeDrops bool   // the extension closed the tab before failing the reply
+	tabs := []map[string]any{{"tab_id": 7, "window_id": 100, "scope": "agent"}}
+	removeTab := func(id any) {
+		want, _ := numericID(id)
+		tabs = slices.DeleteFunc(tabs, func(tab map[string]any) bool {
+			got, _ := numericID(tab["tab_id"])
+			return got == want
+		})
+	}
+	connectSharedFixture(ctx, t, m, s, "", "browser", func(
+		f *sharedFixture, id, method string, params map[string]any,
+	) bool {
+		mu.Lock()
+		defer mu.Unlock()
+		var result any
+		switch method {
+		case "tool.tab_list":
+			if params["scope"] != "agent" {
+				_ = f.send(map[string]any{"id": id, "error": map[string]string{
+					"code": "invalid_params", "message": "fixture expects the agent scope",
+				}})
+				return true
+			}
+			result = map[string]any{"tabs": append([]map[string]any(nil), tabs...)}
+		case "tool.tab_create":
+			created = append(created, params)
+			tabs = append(tabs, map[string]any{"tab_id": 8, "window_id": 100, "scope": "agent"})
+			result = map[string]any{"tab_id": 8, "window_id": 100, "url": "about:blank"}
+		case "tool.tab_close":
+			methods = append(methods, fmt.Sprintf("tool.tab_close:%v", params["tab_id"]))
+			if target, _ := numericID(params["tab_id"]); closeError != "" && target == 9 {
+				if closeDrops {
+					removeTab(params["tab_id"])
+				}
+				_ = f.send(map[string]any{"id": id, "error": map[string]string{
+					"code": closeError, "message": "fixture refused",
+				}})
+				return true
+			}
+			removeTab(params["tab_id"])
+			_ = f.send(map[string]any{"id": id, "result": map[string]any{"tab_id": params["tab_id"]}})
+			return true
+		default:
+			return false
+		}
+		methods = append(methods, method)
+		_ = f.send(map[string]any{"id": id, "result": result})
+		return true
+	})
+	require.NoError(t, m.Control(ctx, s, "chat", "select"))
+	// The final agent tab gets a blank replacement so Chrome keeps the window.
+	_, err := m.Call(ctx, s, "chat", "tab_close", map[string]any{"tab_id": float64(7)})
+	require.NoError(t, err)
+	mu.Lock()
+	require.Equal(t, []string{"tool.tab_list", "tool.tab_create", "tool.tab_close:7"}, methods)
+	require.Len(t, created, 1)
+	require.Equal(t, "about:blank", created[0]["url"])
+	require.Equal(t, false, created[0]["active"])
+	require.NotEmpty(t, created[0]["session_id"])
+	methods = nil
+	tabs = []map[string]any{
+		{"tab_id": 8, "window_id": 100, "scope": "agent"},
+		{"tab_id": 9, "window_id": 100, "scope": "user"},
+	}
+	mu.Unlock()
+	// Any other tab in the Agent Window, even a user's, keeps it open.
+	_, err = m.Call(ctx, s, "chat", "tab_close", map[string]any{"tab_id": 8})
+	require.NoError(t, err)
+	mu.Lock()
+	require.Equal(t, []string{"tool.tab_list", "tool.tab_close:8"}, methods)
+	// A refused close (unauthorized or borrowed tab) must not leave the
+	// placeholder behind: the target is still there, so the blank tab goes.
+	methods, created = nil, nil
+	tabs = []map[string]any{{"tab_id": 9, "window_id": 100, "scope": "agent"}}
+	closeError = "permission_denied"
+	mu.Unlock()
+	_, err = m.Call(ctx, s, "chat", "tab_close", map[string]any{"tab_id": 9})
+	require.ErrorContains(t, err, "permission_denied")
+	mu.Lock()
+	require.Equal(t, []string{
+		"tool.tab_list", "tool.tab_create", "tool.tab_close:9", "tool.tab_list", "tool.tab_close:8",
+	}, methods)
+	require.Len(t, tabs, 1)
+	require.Equal(t, 9, tabs[0]["tab_id"])
+	require.False(t, m.Status(s, "chat").Paused)
+	// When the extension already removed the target before the reply failed,
+	// the placeholder is what keeps the window open and must stay.
+	methods, created = nil, nil
+	closeError, closeDrops = "cdp_failed", true
+	mu.Unlock()
+	_, err = m.Call(ctx, s, "chat", "tab_close", map[string]any{"tab_id": 9})
+	require.ErrorContains(t, err, "cdp_failed")
+	mu.Lock()
+	require.Equal(t, []string{
+		"tool.tab_list", "tool.tab_create", "tool.tab_close:9", "tool.tab_list",
+	}, methods)
+	require.Len(t, tabs, 1)
+	require.Equal(t, 8, tabs[0]["tab_id"])
+	mu.Unlock()
 }

@@ -2,6 +2,7 @@ package token
 
 import (
 	"fmt"
+	"math"
 	"strings"
 	"testing"
 
@@ -139,4 +140,39 @@ func TestEstimateTools(t *testing.T) {
 		},
 	}}
 	assert.Greater(t, e.EstimateTools(tools), 100)
+}
+
+// Text counts carry the provider's scale; per-message overhead and the fixed
+// image cost do not, since they are not text the provider tokenizes.
+func TestEstimatorScalesTextOnly(t *testing.T) {
+	e, err := NewEstimator()
+	assert.NoError(t, err)
+	text := strings.Repeat("知识库文档检索结果，", 100)
+	raw := e.EstimateString(text)
+
+	e.SetScale(0.6)
+	assert.InDelta(t, float64(raw)*0.6, float64(e.EstimateString(text)), 1)
+	assert.Equal(t, raw, e.Unscaled().EstimateString(text), "Unscaled measures the raw count")
+
+	msg := chat.Message{Role: "user", Content: text}
+	withoutText := chat.Message{Role: "user"}
+	assert.InDelta(t, float64(raw)*0.6,
+		float64(e.EstimateMessage(&msg)-e.EstimateMessage(&withoutText)), 1)
+}
+
+// The scale is clamped: outside the bounds it says more about a provider's
+// usage report than about its tokenizer. Unset or invalid means uncalibrated.
+func TestEstimatorScaleIsClamped(t *testing.T) {
+	e, err := NewEstimator()
+	assert.NoError(t, err)
+	assert.Equal(t, 1.0, e.Scale())
+
+	e.SetScale(0.1)
+	assert.Equal(t, MinScale, e.Scale())
+	e.SetScale(9)
+	assert.Equal(t, MaxScale, e.Scale())
+	e.SetScale(0)
+	assert.Equal(t, 1.0, e.Scale())
+	e.SetScale(math.NaN())
+	assert.Equal(t, 1.0, e.Scale())
 }

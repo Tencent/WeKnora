@@ -26,40 +26,28 @@ func TestEngineAwareNormalizer_KeywordPassthrough(t *testing.T) {
 	}
 }
 
-func TestEngineAwareNormalizer_CosineRange(t *testing.T) {
+// Milvus reports cosine similarity like every other engine (IP / COSINE over
+// normalized embeddings, L2 converted in the driver). It used to be mapped
+// through (score + 1) / 2, which put a multi-store Milvus hit at 0.75 for a
+// cosine of 0.5 while every other engine reported 0.5.
+func TestEngineAwareNormalizer_MilvusIsCosine(t *testing.T) {
 	t.Parallel()
 	n := EngineAwareNormalizer{}
-	// Only Milvus surfaces the raw cosine signed range [-1, 1] to the
-	// normalizer in this codebase. Elasticsearch v8 used to be in this
-	// group, but the driver issues a script_score cosineSimilarity script
-	// and Lucene rejects negative final scores ("Final relevance scores
-	// from the script_score query cannot be negative" — ES docs), so the
-	// score observed by the normalizer is already in [0, 1]; ES is now
-	// part of the passthrough group below. ElasticFaiss is a dead enum
-	// (no driver) and follows ES.
 	cases := []struct {
 		score float64
 		want  float64
 	}{
-		{-1.0, 0},
-		{-0.5, 0.25},
-		{0, 0.5},
-		{0.5, 0.75},
+		{-0.5, 0},
+		{0, 0},
+		{0.5, 0.5},
 		{1.0, 1.0},
-		// Drift beyond [-1, 1] is clamped.
-		{-1.5, 0},
 		{1.5, 1.0},
 	}
-	for _, engine := range []types.RetrieverEngineType{
-		types.MilvusRetrieverEngineType,
-	} {
-		for _, tc := range cases {
-			got := n.Normalize(context.Background(), tc.score,
-				types.VectorRetrieverType, engine)
-			if math.Abs(got-tc.want) > 1e-9 {
-				t.Fatalf("cosine[%s] score=%v: want %v, got %v",
-					engine, tc.score, tc.want, got)
-			}
+	for _, tc := range cases {
+		got := n.Normalize(context.Background(), tc.score,
+			types.VectorRetrieverType, types.MilvusRetrieverEngineType)
+		if math.Abs(got-tc.want) > 1e-9 {
+			t.Fatalf("milvus score=%v: want %v, got %v", tc.score, tc.want, got)
 		}
 	}
 }

@@ -17,7 +17,14 @@ export function clampInstallPercent(percent: unknown): number | null {
   return Math.max(0, Math.min(100, Math.round(percent)))
 }
 
-// A stream without Redis closes immediately with done=true and percent=0.
+// A stream without Redis, or one that hits the follow cap, can send done=true
+// while the skill is still installing. Only a finished stage means the run
+// itself ended; anything else must not make the panel reload and resubscribe.
+export function installRunFinished(event: { done?: boolean; stage?: string } | undefined): boolean {
+  return !!event?.done && (event.stage === 'done' || event.stage === 'failed')
+}
+
+// A stream without Redis used to close immediately with done=true and percent=0.
 // That is not a real progress reading, so the catalog row keeps "安装中".
 export function liveInstallPercent(
   event: InstallProgressEvent | undefined,

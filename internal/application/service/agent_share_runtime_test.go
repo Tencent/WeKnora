@@ -72,7 +72,7 @@ func TestSharedAgentWebSearchReadyUsesSourceDefault(t *testing.T) {
 }
 
 func TestFilterSharedAgentWriteTools(t *testing.T) {
-	got := filterSharedAgentWriteTools([]string{
+	got := withoutWikiWriteTools([]string{
 		tools.ToolWikiReadPage,
 		tools.ToolWikiFlagIssue,
 		tools.ToolWikiWritePage,
@@ -93,17 +93,17 @@ func TestFilterSharedAgentWriteTools(t *testing.T) {
 
 func TestFilterSharedAgentWriteToolsCoversAllWikiMutations(t *testing.T) {
 	readOnlyWikiTools := map[string]bool{
-		tools.ToolWikiReadPage:      true,
-		tools.ToolWikiSearch:        true,
-		tools.ToolWikiReadSourceDoc: true,
-		tools.ToolWikiReadIssue:     true,
+		tools.ToolWikiReadPage:  true,
+		tools.ToolWikiSearch:    true,
+		tools.ToolReadDocument:  true,
+		tools.ToolWikiReadIssue: true,
 	}
 
 	for _, definition := range tools.AvailableToolDefinitions() {
 		if !strings.HasPrefix(definition.Name, "wiki_") {
 			continue
 		}
-		filtered := filterSharedAgentWriteTools([]string{definition.Name})
+		filtered := withoutWikiWriteTools([]string{definition.Name})
 		if readOnlyWikiTools[definition.Name] {
 			require.Equal(t, []string{definition.Name}, filtered, "read-only wiki tool %q should remain available", definition.Name)
 			continue

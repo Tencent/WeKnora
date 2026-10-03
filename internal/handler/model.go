@@ -8,12 +8,14 @@ import (
 	"strings"
 	"time"
 
+	modelruntime "github.com/Tencent/WeKnora/internal/models/runtime"
+
 	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/handler/dto"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/models/api"
 	"github.com/Tencent/WeKnora/internal/models/chat"
-	"github.com/Tencent/WeKnora/internal/models/provider"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
@@ -92,6 +94,10 @@ func (h *ModelHandler) CreateModel(c *gin.Context) {
 			return
 		}
 	}
+	if err := validateCatalogParameters(req.Name, req.Type, &req.Parameters); err != nil {
+		_ = c.Error(errors.NewBadRequestError(err.Error()))
+		return
+	}
 
 	model := &types.Model{
 		TenantID:    tenantID,
@@ -116,6 +122,76 @@ func (h *ModelHandler) CreateModel(c *gin.Context) {
 		secutils.SanitizeForLog(model.Name),
 	)
 
+	c.JSON(http.StatusCreated, gin.H{
+		"success": true,
+		"data":    dto.NewModelResponse(ctx, model),
+	})
+}
+
+// CopyModelRequest is the body of POST /models/:id/copy. Only the display
+// name is client-supplied. The model name and credentials come from the
+// stored source row.
+type CopyModelRequest struct {
+	DisplayName string `json:"display_name" binding:"required"`
+}
+
+// CopyModel godoc
+// @Summary      复制模型
+// @Description  复制模型配置。name 与源模型一致，凭证从已存记录复制，不接受客户端重传。
+// @Tags         模型管理
+// @Accept       json
+// @Produce      json
+// @Param        id       path      string           true  "源模型ID"
+// @Param        request  body      CopyModelRequest true  "副本展示名"
+// @Success      201      {object}  map[string]interface{}  "复制的模型"
+// @Failure      400      {object}  errors.AppError         "请求参数错误"
+// @Failure      404      {object}  errors.AppError         "模型不存在"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /models/{id}/copy [post]
+func (h *ModelHandler) CopyModel(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	id := secutils.SanitizeForLog(c.Param("id"))
+	if id == "" {
+		logger.Error(ctx, "Model ID is empty")
+		_ = c.Error(errors.NewBadRequestError("Model ID cannot be empty"))
+		return
+	}
+
+	var req CopyModelRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		logger.Error(ctx, "Failed to parse request parameters", err)
+		_ = c.Error(errors.NewBadRequestError(err.Error()))
+		return
+	}
+	tenantID := c.GetUint64(types.TenantIDContextKey.String())
+	if tenantID == 0 {
+		logger.Error(ctx, "Tenant ID is empty")
+		_ = c.Error(errors.NewBadRequestError("Workspace ID cannot be empty"))
+		return
+	}
+
+	model, err := h.service.CopyModel(ctx, id, req.DisplayName)
+	if err != nil {
+		if err == service.ErrModelNotFound {
+			logger.Warnf(ctx, "Model not found, ID: %s", id)
+			_ = c.Error(errors.NewNotFoundError("Model not found"))
+			return
+		}
+		if appErr, ok := errors.IsAppError(err); ok {
+			_ = c.Error(appErr)
+			return
+		}
+		logger.ErrorWithFields(ctx, err, nil)
+		_ = c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+
+	logger.Infof(ctx, "Model copied successfully, ID: %s, Name: %s",
+		secutils.SanitizeForLog(model.ID),
+		secutils.SanitizeForLog(model.Name),
+	)
 	c.JSON(http.StatusCreated, gin.H{
 		"success": true,
 		"data":    dto.NewModelResponse(ctx, model),
@@ -215,6 +291,8 @@ type ModelDebugOptions struct {
 	TopP         *float64 `json:"top_p,omitempty"`
 	MaxTokens    *int     `json:"max_tokens,omitempty"`
 	Thinking     *bool    `json:"thinking,omitempty"`
+	// ReasoningEffort is the graded level; when set it overrides Thinking.
+	ReasoningEffort string `json:"reasoning_effort,omitempty"`
 }
 
 func parseModelDebugOptions(raw string) (ModelDebugOptions, error) {
@@ -234,15 +312,29 @@ func parseModelDebugOptions(raw string) (ModelDebugOptions, error) {
 	if opts.TopP != nil && (*opts.TopP <= 0 || *opts.TopP > 1) {
 		return opts, fmt.Errorf("top_p must be greater than 0 and at most 1")
 	}
+	if _, ok := api.ParseReasoningEffort(opts.ReasoningEffort); !ok {
+		return opts, fmt.Errorf("reasoning_effort must be one of %v", api.AllReasoningEfforts)
+	}
 	return opts, nil
 }
 
+// redactedDebugConfig masks the credentials inside an extra_config before it
+// is echoed in the debug preview. The catalog's own Secret declaration is the
+// source of truth — the same one the read path uses — so a new vendor field
+// is covered by declaring it, whatever it is called. The name heuristic stays
+// as a net under it, for keys no vendor declares (deployment overlays,
+// hand-written rows).
 func redactedDebugConfig(config map[string]string) map[string]string {
 	if len(config) == 0 {
 		return nil
 	}
+	declared := dto.AllSecretExtraConfigKeys()
 	out := make(map[string]string, len(config))
 	for key, value := range config {
+		if declared[key] {
+			out[key] = "[REDACTED]"
+			continue
+		}
 		lower := strings.ToLower(key)
 		if strings.Contains(lower, "secret") ||
 			strings.Contains(lower, "token") ||
@@ -454,12 +546,21 @@ func (h *ModelHandler) DebugModel(c *gin.Context) {
 			chatOpts.MaxTokens = *opts.MaxTokens
 		}
 		chatOpts.Thinking = opts.Thinking
+		if level, _ := api.ParseReasoningEffort(opts.ReasoningEffort); level != "" {
+			chatOpts.ReasoningEffort = level
+		}
 		chatConfig := chat.ConfigFromModel(model, "", "")
 		thinkingControl := chat.EffectiveThinkingControl(chatConfig)
+		requestedLevel, requested := chatOpts.Reasoning()
 		observations["stream"] = true
-		observations["requested_thinking"] = opts.Thinking != nil && *opts.Thinking
+		observations["requested_thinking"] = requested && requestedLevel.Enabled()
+		observations["requested_reasoning_effort"] = string(requestedLevel)
 		observations["thinking_control"] = thinkingControl
-		observations["thinking_parameter_sent"] = opts.Thinking != nil && thinkingControl != "none"
+		observations["thinking_parameter_sent"] = requested && thinkingControl != "none"
+		if resolved, err := chat.Resolve(chatConfig); err == nil {
+			observations["api"] = string(resolved.API)
+			observations["capabilities"] = resolved.Capabilities()
+		}
 
 		stream, callErr := instance.ChatStream(ctx, messages, chatOpts)
 		if callErr != nil {
@@ -606,6 +707,17 @@ func (h *ModelHandler) UpdateModel(c *gin.Context) {
 			return
 		}
 	}
+	effectiveName, effectiveType := req.Name, req.Type
+	if effectiveName == "" {
+		effectiveName = model.Name
+	}
+	if effectiveType == "" {
+		effectiveType = model.Type
+	}
+	if err := validateCatalogParameters(effectiveName, effectiveType, &req.Parameters); err != nil {
+		_ = c.Error(errors.NewBadRequestError(err.Error()))
+		return
+	}
 	// Credentials (api_key, app_secret) NEVER flow through this endpoint —
 	// they live behind the /credentials subresource. Force-preserve them by
 	// snapshotting the stored values before copying request fields in, so
@@ -632,9 +744,17 @@ func (h *ModelHandler) UpdateModel(c *gin.Context) {
 	if newParams.AppID == "" {
 		newParams.AppID = model.Parameters.AppID
 	}
-	if newParams.ExtraConfig == nil {
-		newParams.ExtraConfig = model.Parameters.ExtraConfig
-	}
+	// extra_config is replaced wholesale here, but GET redacts the vendor's
+	// secret extra fields (dto.NewModelResponse), so a UI round-trip carries
+	// no value for them — keep the stored secret unless the caller sent a new
+	// one. This also covers the request that omits extra_config entirely.
+	// Both vendor identities are passed: moving the row to another vendor
+	// must drop the old credential, not merge it back in.
+	newParams.ExtraConfig = dto.PreserveStoredSecretExtras(
+		model.Parameters.ExtraConfig, newParams.ExtraConfig,
+		dto.VendorRef{Provider: model.Parameters.Provider, BaseURL: model.Parameters.BaseURL},
+		dto.VendorRef{Provider: newParams.Provider, BaseURL: newParams.BaseURL},
+	)
 	model.Parameters = newParams
 
 	model.Source = req.Source
@@ -707,108 +827,10 @@ func (h *ModelHandler) DeleteModel(c *gin.Context) {
 	})
 }
 
-// ModelProviderDTO 模型厂商信息 DTO
-type ModelProviderDTO struct {
-	Value       string            `json:"value"`       // provider 标识符
-	Label       string            `json:"label"`       // 显示名称
-	Description string            `json:"description"` // 描述
-	DefaultURLs map[string]string `json:"defaultUrls"` // 按模型类型区分的默认 URL
-	ModelTypes  []string          `json:"modelTypes"`  // 支持的模型类型
-}
-
-// modelTypeToFrontend 将后端 ModelType 转换为前端兼容的字符串
-// KnowledgeQA -> chat, Embedding -> embedding, Rerank -> rerank, VLLM -> vllm
-func modelTypeToFrontend(mt types.ModelType) string {
-	switch mt {
-	case types.ModelTypeKnowledgeQA:
-		return "chat"
-	case types.ModelTypeEmbedding:
-		return "embedding"
-	case types.ModelTypeRerank:
-		return "rerank"
-	case types.ModelTypeVLLM:
-		return "vllm"
-	case types.ModelTypeASR:
-		return "asr"
-	default:
-		return string(mt)
-	}
-}
-
-// ListModelProviders godoc
-// @Summary      获取模型厂商列表
-// @Description  根据模型类型获取支持的厂商列表及配置信息
-// @Tags         模型管理
-// @Accept       json
-// @Produce      json
-// @Param        model_type  query     string  false  "模型类型 (chat, embedding, rerank, vllm)"
-// @Success      200         {object}  map[string]interface{}  "厂商列表"
-// @Security     Bearer
-// @Security     ApiKeyAuth
-// @Router       /models/providers [get]
-func (h *ModelHandler) ListModelProviders(c *gin.Context) {
-	ctx := c.Request.Context()
-
-	modelType := c.Query("model_type")
-	logger.Infof(ctx, "Listing model providers for type: %s", secutils.SanitizeForLog(modelType))
-
-	// 将前端类型映射到后端类型
-	// 前端: chat, embedding, rerank, vllm
-	// 后端: KnowledgeQA, Embedding, Rerank, VLLM
-	var backendModelType types.ModelType
-	switch modelType {
-	case "chat":
-		backendModelType = types.ModelTypeKnowledgeQA
-	case "embedding":
-		backendModelType = types.ModelTypeEmbedding
-	case "rerank":
-		backendModelType = types.ModelTypeRerank
-	case "vllm":
-		backendModelType = types.ModelTypeVLLM
-	case "asr":
-		backendModelType = types.ModelTypeASR
-	default:
-		backendModelType = types.ModelType(modelType)
-	}
-
-	var providers []provider.ProviderInfo
-	if modelType != "" {
-		// 按模型类型过滤
-		providers = provider.ListByModelType(backendModelType)
-	} else {
-		// 返回所有 provider
-		providers = provider.List()
-	}
-
-	// 转换为 DTO
-	result := make([]ModelProviderDTO, 0, len(providers))
-	for _, p := range providers {
-		// 转换 DefaultURLs map[types.ModelType]string -> map[string]string
-		// 使用前端兼容的 key (chat 而不是 KnowledgeQA)
-		defaultURLs := make(map[string]string)
-		for mt, url := range p.DefaultURLs {
-			frontendType := modelTypeToFrontend(mt)
-			defaultURLs[frontendType] = url
-		}
-
-		// 转换 ModelTypes 为前端兼容格式
-		modelTypes := make([]string, 0, len(p.ModelTypes))
-		for _, mt := range p.ModelTypes {
-			modelTypes = append(modelTypes, modelTypeToFrontend(mt))
-		}
-
-		result = append(result, ModelProviderDTO{
-			Value:       string(p.Name),
-			Label:       p.DisplayName,
-			Description: p.Description,
-			DefaultURLs: defaultURLs,
-			ModelTypes:  modelTypes,
-		})
-	}
-
-	logger.Infof(ctx, "Retrieved %d providers", len(result))
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"data":    result,
-	})
+// validateCatalogParameters rejects protocol / compat overrides the catalog
+// cannot interpret (unknown extra_config.api, unknown compat keys, bad
+// reasoning levels) so a typo fails at save time instead of at the first
+// call. Every model type is checked; see modelruntime.ValidateRow.
+func validateCatalogParameters(name string, modelType types.ModelType, params *types.ModelParameters) error {
+	return modelruntime.ValidateRow(name, modelType, params)
 }

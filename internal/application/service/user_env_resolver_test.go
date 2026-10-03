@@ -81,7 +81,7 @@ func searchSkillRow() *types.TenantSkillEntity {
 }
 
 func newTestResolver(reader userEnvReader, rows ...*types.TenantSkillEntity) *userEnvResolver {
-	return NewUserEnvResolver(rows, reader, testEnvTenantID, testEnvConfigID)
+	return NewUserEnvResolver(rows, reader, nil, testEnvTenantID, testEnvConfigID)
 }
 
 func TestResolverUserValueOverridesWorkspaceValue(t *testing.T) {
@@ -295,11 +295,50 @@ func TestResolverWorksWithNoInstalledSkills(t *testing.T) {
 	reader := &fakeUserEnvReader{tenantID: testEnvTenantID}
 	reader.put(webPrincipal("u1"), testEnvConfigID, "",
 		map[string]string{"HTTP_PROXY": "http://proxy:8080"})
-	resolver := NewUserEnvResolver(nil, reader, testEnvTenantID, testEnvConfigID)
+	resolver := NewUserEnvResolver(nil, reader, nil, testEnvTenantID, testEnvConfigID)
 	ctx := types.WithPrincipal(context.Background(), webPrincipal("u1"))
 
 	env, _, err := resolver.ResolveEnv(ctx, "")
 
 	require.NoError(t, err)
 	require.Equal(t, "http://proxy:8080", env["HTTP_PROXY"])
+}
+
+// A required skill key filled in on the sandbox config is already in the
+// container from creation. The gate must not refuse that run, and must not
+// copy the value into the per-exec map — that would change create-time
+// injection into a live overlay.
+func TestResolverSandboxConfigSatisfiesRequiredWithoutInjecting(t *testing.T) {
+	row := searchSkillRow()
+	row.Envs = types.SkillEnvVars{{Name: "TAVILY_API_KEY", Required: true}}
+	resolver := NewUserEnvResolver(
+		[]*types.TenantSkillEntity{row},
+		&fakeUserEnvReader{tenantID: testEnvTenantID},
+		map[string]string{"TAVILY_API_KEY": "sandbox-key"},
+		testEnvTenantID, testEnvConfigID,
+	)
+	ctx := types.WithPrincipal(context.Background(), webPrincipal("u1"))
+
+	env, missing, err := resolver.ResolveEnv(ctx, "web-search")
+
+	require.NoError(t, err)
+	require.Empty(t, missing)
+	require.NotContains(t, env, "TAVILY_API_KEY")
+}
+
+func TestResolverEmptySandboxConfigValueDoesNotSatisfyRequired(t *testing.T) {
+	row := searchSkillRow()
+	row.Envs = types.SkillEnvVars{{Name: "TAVILY_API_KEY", Required: true}}
+	resolver := NewUserEnvResolver(
+		[]*types.TenantSkillEntity{row},
+		&fakeUserEnvReader{tenantID: testEnvTenantID},
+		map[string]string{"TAVILY_API_KEY": ""},
+		testEnvTenantID, testEnvConfigID,
+	)
+	ctx := types.WithPrincipal(context.Background(), webPrincipal("u1"))
+
+	_, missing, err := resolver.ResolveEnv(ctx, "web-search")
+
+	require.NoError(t, err)
+	require.Equal(t, []string{"TAVILY_API_KEY"}, missing)
 }

@@ -17,6 +17,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -44,19 +45,20 @@ func (s Scope) valid() bool { return s.Tenant != 0 && s.User != "" }
 
 // Status describes the connection and current conversation task.
 type Status struct {
-	Action          string `json:"action,omitempty"`
-	ActionElapsedMS int64  `json:"action_elapsed_ms"`
-	PageURL         string `json:"page_url,omitempty"`
-	LastError       string `json:"last_error,omitempty"`
-	Stopping        bool   `json:"stopping"`
-	HelpPrompt      string `json:"help_prompt,omitempty"`
-	Idle            bool   `json:"idle"`
-	NeedsHelp       bool   `json:"needs_help"`
-	Enabled         bool   `json:"enabled"`
-	Selected        bool   `json:"selected"`
-	Connected       bool   `json:"connected"`
-	Paused          bool   `json:"paused"`
-	SessionID       string `json:"task_id,omitempty"`
+	Action           string `json:"action,omitempty"`
+	ActionElapsedMS  int64  `json:"action_elapsed_ms"`
+	PageURL          string `json:"page_url,omitempty"`
+	LastError        string `json:"last_error,omitempty"`
+	Stopping         bool   `json:"stopping"`
+	HelpPrompt       string `json:"help_prompt,omitempty"`
+	Idle             bool   `json:"idle"` // Between turns; does not imply debugger release.
+	NeedsHelp        bool   `json:"needs_help"`
+	Enabled          bool   `json:"enabled"`
+	Selected         bool   `json:"selected"`
+	Connected        bool   `json:"connected"`
+	ExtensionVersion string `json:"extension_version,omitempty"`
+	Paused           bool   `json:"paused"`
+	SessionID        string `json:"task_id,omitempty"`
 }
 type task struct {
 	action                        string
@@ -80,19 +82,30 @@ type task struct {
 	nextCall                      uint64
 }
 type device struct {
-	writeMu    sync.Mutex
-	uiCalls    map[string]chan uiReply
-	mu         sync.Mutex
-	runtime    *daemon
-	browserID  string
-	upstream   *websocket.Conn
-	conn       *websocket.Conn
-	ready      bool
-	generation uint64
-	tasks      map[string]*task
-	expires    time.Time
-	recordID   string
+	writeMu          sync.Mutex
+	uiCalls          map[string]chan uiReply
+	mu               sync.Mutex
+	runtime          *daemon
+	browserID        string
+	extensionVersion string
+	upstream         *websocket.Conn
+	conn             *websocket.Conn
+	ready            bool
+	generation       uint64
+	tasks            map[string]*task
+	expires          time.Time
+	recordID         string
+	// connecting counts extension handshakes holding this device against
+	// eviction; attaching excludes a second handshake while dialing unlocked.
+	connecting int
+	attaching  bool
 }
+
+// idleLocked reports whether the device only caches reloadable state.
+// Interrupted tasks are durable and reload as paused on the next connection.
+func (d *device) idleLocked() bool { return d.conn == nil && d.connecting == 0 && !d.attaching }
+
+var errCapacity = errors.New("local browser connection capacity reached")
 
 // Manager owns transient browser connections; authorization and interruption
 // markers are durable. Other replicas route commands to the lease owner.
@@ -152,6 +165,9 @@ func (m *Manager) Status(s Scope, session string) Status {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	result.Connected = d.conn != nil && d.ready && time.Now().Before(d.expires)
+	if result.Connected {
+		result.ExtensionVersion = d.extensionVersion
+	}
 	if t := d.tasks[session]; t != nil {
 		result.Selected = t.selected
 		result.Paused = t.paused
@@ -244,6 +260,13 @@ func (m *Manager) Pair(ctx context.Context, s Scope, origin string) (string, err
 
 // ensureDevice shares the daemon, but never shares authorization or task maps.
 func (m *Manager) ensureDevice(ctx context.Context, s Scope) (*device, error) {
+	return m.acquireDevice(ctx, s, false)
+}
+
+// acquireDevice optionally reserves the device for an extension handshake;
+// the caller must release a reservation by decrementing d.connecting.
+// Capacity counts live members only: other members' idle devices are evicted.
+func (m *Manager) acquireDevice(ctx context.Context, s Scope, reserve bool) (*device, error) {
 	runtime, err := m.ensureDaemon(ctx)
 	if err != nil {
 		return nil, err
@@ -253,19 +276,21 @@ func (m *Manager) ensureDevice(ctx context.Context, s Scope) (*device, error) {
 	if m.closed || runtime.exited() {
 		return nil, errors.New("BrowserSkill daemon unavailable")
 	}
+	self := s.key()
 	for key, old := range m.devices {
 		old.mu.Lock()
-		if old.runtime != runtime || (!old.expires.IsZero() && time.Now().After(old.expires)) {
+		if old.runtime != runtime || (!old.expires.IsZero() && time.Now().After(old.expires)) ||
+			(key != self && old.idleLocked()) {
 			delete(m.devices, key)
 			disconnectDeviceLocked(old)
 			old.expires = time.Time{}
 		}
 		old.mu.Unlock()
 	}
-	d := m.devices[s.key()]
+	d := m.devices[self]
 	if d == nil {
 		if len(m.devices) >= m.maxConnections {
-			return nil, errors.New("local browser connection capacity reached")
+			return nil, errCapacity
 		}
 		rows, err := m.store.tasks(ctx, s)
 		if err != nil {
@@ -276,7 +301,12 @@ func (m *Manager) ensureDevice(ctx context.Context, s Scope) (*device, error) {
 			d.tasks[row.Session] = &task{selected: true, paused: true}
 		}
 
-		m.devices[s.key()] = d
+		m.devices[self] = d
+	}
+	if reserve {
+		d.mu.Lock()
+		d.connecting++
+		d.mu.Unlock()
 	}
 	return d, nil
 }
@@ -292,6 +322,7 @@ func disconnectDeviceLocked(d *device) {
 	d.conn, d.upstream = nil, nil
 	d.ready = false
 	d.browserID = ""
+	d.extensionVersion = ""
 	d.generation++
 	for _, t := range d.tasks {
 		t.id = ""
@@ -366,11 +397,17 @@ func (m *Manager) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "device authorization invalid; pair again", http.StatusUnauthorized)
 		return
 	}
-	d, err := m.ensureDevice(authCtx, record.scope())
+	d, err := m.acquireDevice(authCtx, record.scope(), true)
+	if errors.Is(err, errCapacity) {
+		http.Error(w, err.Error(), http.StatusServiceUnavailable)
+		return
+	}
 	if err != nil {
 		http.Error(w, "browser runtime unavailable", http.StatusServiceUnavailable)
 		return
 	}
+	// Idle once this handler returns, so the next member's connection can evict it.
+	defer func() { d.mu.Lock(); d.connecting--; d.mu.Unlock() }()
 	leaseKey := randomID()
 	if err = m.store.claim(authCtx, record, m.nodeID, m.internalURL, leaseKey); err != nil {
 		http.Error(w, "browser connection owned elsewhere; retry shortly", http.StatusConflict)
@@ -382,34 +419,37 @@ func (m *Manager) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		_ = m.store.release(ctx, record.ID, leaseKey)
 	}()
 	d.mu.Lock()
-	if d.conn != nil {
+	if d.conn != nil || d.attaching {
 		d.mu.Unlock()
 		http.Error(w, "browser already connected", http.StatusConflict)
 		return
 	}
-	d.recordID = record.ID
-	d.expires = record.ExpiresAt
-	// Hold the device lock across the bounded connect/upgrade to exclude a second connector.
-	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
-	defer cancel()
-	target := fmt.Sprintf("ws://127.0.0.1:%d", d.runtime.port)
-	up, _, err := websocket.DefaultDialer.DialContext(ctx, target, http.Header{"Origin": []string{origin}})
+	// Dial and upgrade unlocked: a slow peer must not stall other members'
+	// lookups, which lock every device while holding the manager lock.
+	d.attaching = true
+	attachGeneration := d.generation
+	d.mu.Unlock()
+	up, conn, err := m.attach(w, r, d, origin, protocols)
+	d.mu.Lock()
+	d.attaching = false
 	if err != nil {
 		d.mu.Unlock()
-		http.Error(w, "daemon unavailable", http.StatusServiceUnavailable)
 		return
 	}
-	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }, Subprotocols: protocols}
-	conn, err := upgrader.Upgrade(w, r, nil)
-	if err != nil {
+	if d.generation != attachGeneration {
+		// Revoked, re-paired or evicted after a daemon restart while dialing.
 		d.mu.Unlock()
+		_ = conn.Close()
 		_ = up.Close()
 		return
 	}
+	d.recordID = record.ID
+	d.expires = record.ExpiresAt
 	d.conn = conn
 	d.upstream = up
 	d.ready = false
 	// The lease identity is assigned by the authenticated gateway, never the extension.
+	d.extensionVersion = ""
 	d.browserID = leaseKey
 	browserID := d.browserID
 	d.generation++
@@ -431,7 +471,7 @@ func (m *Manager) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	up.SetReadLimit(maxFrame)
 	// Complete and verify the first handshake before publishing readiness.
 	// This keeps identity assignment out of the generic frame forwarding path.
-	reply, err := relayHandshake(conn, up, browserID)
+	reply, extensionVersion, err := relayHandshake(conn, up, browserID)
 	if err != nil {
 		return
 	}
@@ -441,6 +481,7 @@ func (m *Manager) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	d.ready = true
+	d.extensionVersion = extensionVersion
 	d.mu.Unlock()
 	_ = conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
 	if conn.WriteMessage(websocket.TextMessage, reply) != nil {
@@ -486,7 +527,37 @@ func (m *Manager) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	<-done
 }
 
-func relayHandshake(conn, up *websocket.Conn, browserID string) ([]byte, error) {
+// attach dials the shared daemon, then upgrades the extension connection.
+// On failure the extension has already received an HTTP error response.
+func (m *Manager) attach(
+	w http.ResponseWriter,
+	r *http.Request,
+	d *device,
+	origin string,
+	protocols []string,
+) (up, conn *websocket.Conn, err error) {
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+	target := fmt.Sprintf("ws://127.0.0.1:%d", d.runtime.port)
+	up, _, err = websocket.DefaultDialer.DialContext(ctx, target, http.Header{"Origin": []string{origin}})
+	if err != nil {
+		http.Error(w, "daemon unavailable", http.StatusServiceUnavailable)
+		return nil, nil, err
+	}
+	upgrader := websocket.Upgrader{
+		CheckOrigin:      func(*http.Request) bool { return true },
+		Subprotocols:     protocols,
+		HandshakeTimeout: 5 * time.Second,
+	}
+	conn, err = upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		_ = up.Close()
+		return nil, nil, err
+	}
+	return up, conn, nil
+}
+
+func relayHandshake(conn, up *websocket.Conn, browserID string) ([]byte, string, error) {
 	deadline := time.Now().Add(5 * time.Second)
 	_ = conn.SetReadDeadline(deadline)
 	_ = up.SetReadDeadline(deadline)
@@ -497,27 +568,27 @@ func relayHandshake(conn, up *websocket.Conn, browserID string) ([]byte, error) 
 	}()
 	typ, data, err := conn.ReadMessage()
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	var frame map[string]json.RawMessage
 	if typ != websocket.TextMessage || json.Unmarshal(data, &frame) != nil {
-		return nil, errors.New("invalid browser handshake")
+		return nil, "", errors.New("invalid browser handshake")
 	}
 	var method, id string
 	var params map[string]json.RawMessage
 	if json.Unmarshal(frame["method"], &method) != nil || method != "system.handshake" ||
 		json.Unmarshal(frame["id"], &id) != nil || id == "" ||
 		json.Unmarshal(frame["params"], &params) != nil || params == nil {
-		return nil, errors.New("expected browser handshake")
+		return nil, "", errors.New("expected browser handshake")
 	}
 	params["instance_id"], _ = json.Marshal(browserID)
 	frame["params"], _ = json.Marshal(params)
 	if err := up.WriteJSON(frame); err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	typ, reply, err := up.ReadMessage()
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	var response struct {
 		ID     string `json:"id"`
@@ -529,9 +600,14 @@ func relayHandshake(conn, up *websocket.Conn, browserID string) ([]byte, error) 
 	if typ != websocket.TextMessage || json.Unmarshal(reply, &response) != nil ||
 		response.ID != id || response.Result.Protocol == "" ||
 		(len(response.Error) != 0 && string(response.Error) != "null") {
-		return nil, errors.New("BrowserSkill handshake failed")
+		return nil, "", errors.New("BrowserSkill handshake failed")
 	}
-	return reply, nil
+	// This is the extension's version, not browser.version or protocol_version.
+	var version string
+	if json.Unmarshal(params["version"], &version) != nil || len(version) > 64 {
+		version = ""
+	}
+	return reply, strings.TrimSpace(version), nil
 }
 
 func validExtensionOrigin(origin string) bool {
@@ -625,14 +701,116 @@ func rpc(ctx context.Context, d *device, method string, params any) (json.RawMes
 		return nil, errors.New("browser command interrupted or timed out; do not replay actions automatically")
 	}
 	var reply rpcReply
-	if json.Unmarshal(line, &reply) != nil || reply.ID != id {
+	if json.Unmarshal(line, &reply) != nil {
 		return nil, errors.New("invalid BrowserSkill response")
+	}
+	if reply.ID != id {
+		// The daemon answers unrecognized request methods with an uncorrelated
+		// protocol error. This socket carries only one request; preserve the
+		// actionable version mismatch without accepting other mismatched replies.
+		if reply.ID == "0" && reply.Error != nil && reply.Error.Code == "protocol_error" {
+			return nil, &RPCError{
+				Code: "daemon_incompatible",
+				Message: "BrowserSkill daemon rejected the request protocol; " +
+					"rebuild bsk and the extension from the same pinned source baseline",
+			}
+		}
+		return nil, errors.New("invalid BrowserSkill response ID")
 	}
 	if reply.Error != nil {
 		reply.Error.BoundDetails()
 		return nil, reply.Error
 	}
 	return reply.Result, nil
+}
+
+// agentWindowTabs lists every tab in the task's Agent Window, including tabs
+// the browser user opened there; any of them keeps the window alive.
+func agentWindowTabs(ctx context.Context, d *device, session string) ([]float64, error) {
+	list, err := rpc(ctx, d, "tool.tab_list", map[string]any{"session_id": session, "scope": "agent"})
+	if err != nil {
+		return nil, err
+	}
+	var listed struct {
+		Tabs []struct {
+			ID float64 `json:"tab_id"`
+		} `json:"tabs"`
+	}
+	if json.Unmarshal(list, &listed) != nil {
+		return nil, errors.New("invalid BrowserSkill tab list")
+	}
+	ids := make([]float64, 0, len(listed.Tabs))
+	for _, tab := range listed.Tabs {
+		ids = append(ids, tab.ID)
+	}
+	return ids, nil
+}
+
+// preserveAgentWindow keeps a retained task's Agent Window open when the agent
+// closes its last tab there. Chrome removes a window together with its final
+// tab, and the extension reports that removal as a user-closed window, which
+// would pause the task and drop its session. A blank tab created through the
+// native tab_create RPC is agent-owned, so session stop closes it with the
+// other agent tabs. Only official RPCs are used; the extension needs no patch.
+// It returns the placeholder's tab ID, or 0 when none was needed.
+func preserveAgentWindow(ctx context.Context, d *device, session string, tabID any) (float64, error) {
+	target, ok := numericID(tabID)
+	if !ok {
+		return 0, nil // The extension reports the invalid parameter itself.
+	}
+	tabs, err := agentWindowTabs(ctx, d, session)
+	if err != nil {
+		return 0, err
+	}
+	if len(tabs) != 1 || tabs[0] != target {
+		return 0, nil
+	}
+	created, err := rpc(ctx, d, "tool.tab_create", map[string]any{
+		"session_id": session, "url": "about:blank", "active": false,
+	})
+	if err != nil {
+		return 0, err
+	}
+	var placeholder struct {
+		ID float64 `json:"tab_id"`
+	}
+	if json.Unmarshal(created, &placeholder) != nil || placeholder.ID == 0 {
+		return 0, errors.New("invalid BrowserSkill tab_create result")
+	}
+	return placeholder.ID, nil
+}
+
+// releasePlaceholder undoes preserveAgentWindow after tab_close failed or was
+// interrupted, so a refused close (unauthorized or borrowed tab) does not leave
+// an extra agent-owned blank tab behind. The extension may have closed the
+// target before the reply was lost, in which case the placeholder is the tab
+// keeping the Agent Window open: it is removed only while the target still
+// exists. Best effort with its own deadline, since the failed call's context
+// may already be cancelled.
+func releasePlaceholder(d *device, session string, tabID any, placeholder float64) {
+	target, _ := numericID(tabID)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	tabs, err := agentWindowTabs(ctx, d, session)
+	if err != nil || !slices.Contains(tabs, target) {
+		return
+	}
+	_, _ = rpc(ctx, d, "tool.tab_close", map[string]any{"session_id": session, "tab_id": placeholder})
+}
+
+func numericID(v any) (float64, bool) {
+	switch n := v.(type) {
+	case float64:
+		return n, true
+	case int:
+		return float64(n), true
+	case int64:
+		return float64(n), true
+	case json.Number:
+		f, err := n.Float64()
+		return f, err == nil
+	}
+	return 0, false
 }
 
 var methods = map[string]bool{
@@ -735,6 +913,10 @@ func (m *Manager) Call(
 	}
 	t.idle = false
 	t.action, t.actionStarted, t.actionFinished, t.lastError = method, time.Now(), time.Time{}, ""
+	if method == "navigate" {
+		requestedURL, _ := params["url"].(string)
+		t.pageURL = statusPageURL(requestedURL)
+	}
 	if method == "tab_select" || method == "tab_close" || method == "tab_return" {
 		t.pageURL = ""
 	}
@@ -776,12 +958,36 @@ func (m *Manager) Call(
 			clean["wait_until"] = "domcontentloaded"
 		}
 	}
+	if method == "request_help" {
+		// A model-proposed page predicate is not evidence that the human step
+		// finished (e.g. login pages can already contain "History"). Require
+		// the user's explicit Continue action, including for legacy callers.
+		delete(clean, "completion_criteria")
+	}
 	clean["session_id"] = id
 	if helping {
 		// Keep all transports inside the same bounded human-wait budget.
-		clean["timeout_ms"] = humanTimeoutMS(clean["timeout_ms"])
+		if method == "tab_borrow" {
+			// Borrow confirmation uses a distinct protocol field. timeout_ms is
+			// ignored by this method, leaving the extension's shorter default.
+			clean["confirmation_timeout_ms"] = humanTimeoutMS(clean["confirmation_timeout_ms"])
+			delete(clean, "timeout_ms")
+		} else {
+			clean["timeout_ms"] = humanTimeoutMS(clean["timeout_ms"])
+		}
 	}
-	result, err := rpc(callCtx, d, "tool."+method, clean)
+	var result json.RawMessage
+	var err error
+	var placeholder float64
+	if method == "tab_close" {
+		placeholder, err = preserveAgentWindow(callCtx, d, id, clean["tab_id"])
+	}
+	if err == nil {
+		result, err = rpc(callCtx, d, "tool."+method, clean)
+		if err != nil && placeholder != 0 {
+			releasePlaceholder(d, id, clean["tab_id"], placeholder)
+		}
+	}
 	if method == "request_help" && err == nil {
 		var help struct {
 			Outcome string `json:"outcome"`
@@ -882,11 +1088,12 @@ func (m *Manager) Control(ctx context.Context, s Scope, session, action string) 
 			return err
 		}
 	}
-	if d == nil && action == "finish" {
-		return nil
-	}
 	if d == nil && action == "stop" && m.store != nil {
 		return m.store.clearTask(ctx, s, session)
+	}
+	if d == nil && action == "pause" {
+		// Idle devices are evicted; nothing runs and durable tasks reload paused.
+		return nil
 	}
 	if d == nil {
 		return errors.New("pair a browser first")
@@ -896,16 +1103,6 @@ func (m *Manager) Control(ctx context.Context, s Scope, session, action string) 
 	}
 	d.mu.Lock()
 	t := d.tasks[session]
-	if action == "finish" {
-		// Automatic cleanup must not resume or discard interrupted work, nor
-		// interrupt a new command/start that raced with turn completion.
-		if t == nil || t.paused || t.starting || t.stopping || len(t.calls) > 0 || !t.idle {
-			d.mu.Unlock()
-			return nil
-		}
-		d.mu.Unlock()
-		return m.stopTask(ctx, s, session, d, true)
-	}
 	if action == "auto_start" && (t == nil || !t.selected || t.paused || t.forgotten) {
 		d.mu.Unlock()
 		return errors.New("local browser is not selected or is paused; ask the user to resume")
@@ -1063,7 +1260,7 @@ func (m *Manager) Preview(ctx context.Context, s Scope, session string) (json.Ra
 	id := t.id
 	d.mu.Unlock()
 	defer func() { d.mu.Lock(); t.previewBusy = false; d.mu.Unlock() }()
-	frame, err := m.callUI(ctx, s, session, "gateway.task_preview")
+	frame, err := m.callUI(ctx, s, session, "ui.task_preview")
 	if err != nil {
 		return nil, err
 	}

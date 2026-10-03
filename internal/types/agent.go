@@ -120,7 +120,6 @@ type AgentConfig struct {
 	WebSearchMaxResults     int           `json:"web_search_max_results"`               // Maximum number of web search results (default: 5)
 	WebSearchProviderID     string        `json:"web_search_provider_id,omitempty"`     // WebSearchProviderEntity ID (resolved from agent config)
 	MultiTurnEnabled        bool          `json:"multi_turn_enabled"`                   // Whether multi-turn conversation is enabled
-	HistoryTurns            int           `json:"history_turns"`                        // Number of history turns to keep in context
 	MemoryEnabled           *bool         `json:"memory_enabled,omitempty"`             // nil inherits workspace
 	SearchTargets           SearchTargets `json:"-"`                                    // Pre-computed unified search targets (runtime only)
 	// MCP service selection
@@ -132,6 +131,8 @@ type AgentConfig struct {
 	MCPAuthWaitTimeout int `json:"mcp_auth_wait_timeout,omitempty"`
 	// Whether to enable thinking mode (for models that support extended thinking)
 	Thinking *bool `json:"thinking"`
+	// ReasoningEffort is the graded thinking level; empty falls back to Thinking.
+	ReasoningEffort string `json:"reasoning_effort,omitempty"`
 	// Whether final answers include knowledge/web source citations. Nil defaults to true.
 	CitationEnabled *bool `json:"citation_enabled"`
 	// Whether to retrieve knowledge base only when explicitly mentioned with @ (default: false)
@@ -157,10 +158,19 @@ type AgentConfig struct {
 	// Per-request @mention pins (runtime only; injected as <must_use> in the user message).
 	PinnedMCPServiceIDs []string `json:"-"`
 	PinnedSkillNames    []string `json:"-"`
+	// QuestionOrigin is the knowledge source of a suggested question the user
+	// picked, already checked to be inside KnowledgeBases (runtime only;
+	// rendered into runtime_context as a retrieval hint).
+	QuestionOrigin *QuestionOrigin `json:"-"`
 	// SharedAgentReadOnly prevents a shared agent from mutating resources in
 	// its source workspace. It is set from the verified share relation, never
 	// inferred from a client-provided tenant ID.
 	SharedAgentReadOnly bool `json:"-"`
+	// WritableKBIDs are the SearchTargets KBs this caller may modify (its own
+	// workspace's, or shared to it as editor+). Search targets only need read
+	// access, so tools that write (wiki pages and issues) are limited to this
+	// set; empty means read-only. Runtime only, derived per turn.
+	WritableKBIDs []string `json:"-"`
 	// LLM call timeout in seconds (default: 120). Controls the maximum time for a single LLM call.
 	LLMCallTimeout int `json:"llm_call_timeout,omitempty"`
 
@@ -176,6 +186,12 @@ type AgentConfig struct {
 	// Maximum context window tokens for the agent. Zero means "use the
 	// model's context_window, or DefaultMaxContextTokens (200000)".
 	MaxContextTokens int `json:"max_context_tokens,omitempty"`
+
+	// ContextTokenScale is the provider's tokens per estimated token that the
+	// session's last calibrated turn measured (TokenUsage.ContextTokenScale).
+	// The engine starts its estimator at this scale. Zero means uncalibrated.
+	// Runtime only.
+	ContextTokenScale float64 `json:"-"`
 
 	// How much recent conversation a compaction keeps verbatim. Zero means
 	// compaction.DefaultKeepRecentTokens, scaled down on small windows. This
@@ -351,6 +367,8 @@ type Cleanable interface {
 type ToolResult struct {
 	// OutputFiles holds sandbox references for this live result only. History
 	// uses the final answer's persistent resource references instead.
+	// A non-nil empty slice means output inspection found no eligible changes;
+	// nil means no output inspection result is available.
 	OutputFiles []string               `json:"-"`
 	Success     bool                   `json:"success"`          // Whether the tool executed successfully
 	Output      string                 `json:"output"`           // Human-readable output
@@ -425,9 +443,20 @@ type AgentStep struct {
 	// model in this round. Persisted on AgentStep so cross-turn replay can put it
 	// back on the assistant message — required by MiMo / DeepSeek V3.2+ thinking
 	// mode, ignored by providers that don't recognize the field.
-	ReasoningContent string     `json:"reasoning_content,omitempty"`
-	ToolCalls        []ToolCall `json:"tool_calls"` // Tools called in this step (Act phase)
-	Timestamp        time.Time  `json:"timestamp"`  // When this step occurred
+	ReasoningContent string `json:"reasoning_content,omitempty"`
+	// ReasoningSignature / ReasoningMetadata are the provider artifacts that
+	// must accompany ReasoningContent on replay (Anthropic signatures,
+	// OpenAI Responses encrypted reasoning items).
+	ReasoningSignature string           `json:"reasoning_signature,omitempty"`
+	ReasoningMetadata  ProviderMetadata `json:"reasoning_metadata,omitempty"`
+	ToolCalls          []ToolCall       `json:"tool_calls"` // Tools called in this step (Act phase)
+	Timestamp          time.Time        `json:"timestamp"`  // When this step occurred
+	// Truncated marks the round the completion-token cap cut off. It rides in
+	// the agent_steps JSON so a reloaded, shared or re-opened conversation can
+	// still show that the answer stops mid-sentence by design, rather than
+	// looking finished. Live streaming carries the same fact on the answer
+	// event; this is what survives the round trip.
+	Truncated bool `json:"truncated,omitempty"`
 }
 
 // GetObservations returns observations from all tool calls in this step

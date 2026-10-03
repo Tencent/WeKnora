@@ -22,7 +22,8 @@ func TestGetShareByAgentIDAndSourceForTenantDisambiguatesSource(t *testing.T) {
 		`CREATE TABLE organizations (id TEXT PRIMARY KEY, deleted_at DATETIME)`,
 		`CREATE TABLE custom_agents (id TEXT, tenant_id INTEGER, deleted_at DATETIME)`,
 		`INSERT INTO organizations(id) VALUES ('org')`,
-		`INSERT INTO organization_tenant_members(organization_id, tenant_id) VALUES ('org', 7)`,
+		`INSERT INTO organization_tenant_members(organization_id, tenant_id)
+			VALUES ('org', 7), ('org', 42), ('org', 84)`,
 		`INSERT INTO custom_agents(id, tenant_id) VALUES ('builtin-smart-reasoning', 42), ('builtin-smart-reasoning', 84)`,
 		`INSERT INTO agent_shares(id, agent_id, organization_id, source_tenant_id) VALUES
 			('share-42', 'builtin-smart-reasoning', 'org', 42),
@@ -44,4 +45,19 @@ func TestGetShareByAgentIDAndSourceForTenantDisambiguatesSource(t *testing.T) {
 		context.Background(), 8, "builtin-smart-reasoning", 84,
 	)
 	require.ErrorIs(t, err, ErrAgentShareNotFound)
+
+	// A share lapses once its source tenant leaves the organization, even if
+	// the row itself was left behind.
+	require.NoError(t, db.Exec(
+		`DELETE FROM organization_tenant_members WHERE organization_id = 'org' AND tenant_id = 84`).Error)
+	_, err = repo.GetShareByAgentIDAndSourceForTenant(
+		context.Background(), 7, "builtin-smart-reasoning", 84,
+	)
+	require.ErrorIs(t, err, ErrAgentShareNotFound)
+	_, err = repo.GetShareByAgentIDForTenant(context.Background(), 7, "builtin-smart-reasoning", 7)
+	require.NoError(t, err, "the share of the remaining member still resolves")
+	shares, err := repo.ListSharedAgentsForTenant(context.Background(), 7)
+	require.NoError(t, err)
+	require.Len(t, shares, 1)
+	require.Equal(t, uint64(42), shares[0].SourceTenantID)
 }

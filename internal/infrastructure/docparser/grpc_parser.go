@@ -105,7 +105,7 @@ func (p *GRPCDocumentReader) Close() error {
 	return nil
 }
 
-var errNotConnected = fmt.Errorf("docreader service not connected")
+var errNotConnected = status.Error(codes.Unavailable, "docreader service not connected")
 
 func (p *GRPCDocumentReader) Read(ctx context.Context, req *types.ReadRequest) (*types.ReadResult, error) {
 	p.mu.RLock()
@@ -174,6 +174,7 @@ func (p *GRPCDocumentReader) readStream(
 			result.ImageDirPath = meta.GetImageDirPath()
 			result.Metadata = meta.GetMetadata()
 			result.Error = meta.GetError()
+			result.SourceBlocks = sourceBlocksFromProto(meta.GetSourceBlocks())
 			if n := meta.GetImageCount(); n > 0 {
 				result.ImageRefs = make([]types.ImageRef, 0, n)
 			}
@@ -212,6 +213,7 @@ func (p *GRPCDocumentReader) readUnary(
 		ImageDirPath:    resp.GetImageDirPath(),
 		Metadata:        resp.GetMetadata(),
 		Error:           resp.GetError(),
+		SourceBlocks:    sourceBlocksFromProto(resp.GetSourceBlocks()),
 	}
 	if refs := resp.GetImageRefs(); len(refs) > 0 {
 		result.ImageRefs = make([]types.ImageRef, 0, len(refs))

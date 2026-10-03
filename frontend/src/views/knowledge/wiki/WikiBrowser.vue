@@ -4084,8 +4084,8 @@ function renderGraph(opts: RenderGraphOpts = {}) {
       btnBg.setAttribute('cx', String(btnX))
       btnBg.setAttribute('cy', String(btnY))
       btnBg.setAttribute('r', '8')
-      btnBg.setAttribute('fill', 'var(--td-bg-color-container, #fff)')
-      btnBg.setAttribute('stroke', 'var(--td-brand-color, #0052d9)')
+      btnBg.setAttribute('fill', 'var(--td-bg-color-container)')
+      btnBg.setAttribute('stroke', 'var(--td-brand-color)')
       btnBg.setAttribute('stroke-width', '1.5')
       bloomBtn.appendChild(btnBg)
 
@@ -4095,7 +4095,7 @@ function renderGraph(opts: RenderGraphOpts = {}) {
       btnCrossV.setAttribute('x2', String(btnX))
       btnCrossV.setAttribute('y1', String(btnY - 4))
       btnCrossV.setAttribute('y2', String(btnY + 4))
-      btnCrossV.setAttribute('stroke', 'var(--td-brand-color, #0052d9)')
+      btnCrossV.setAttribute('stroke', 'var(--td-brand-color)')
       btnCrossV.setAttribute('stroke-width', '1.8')
       btnCrossV.setAttribute('stroke-linecap', 'round')
       bloomBtn.appendChild(btnCrossV)
@@ -4105,7 +4105,7 @@ function renderGraph(opts: RenderGraphOpts = {}) {
       btnCrossH.setAttribute('x2', String(btnX + 4))
       btnCrossH.setAttribute('y1', String(btnY))
       btnCrossH.setAttribute('y2', String(btnY))
-      btnCrossH.setAttribute('stroke', 'var(--td-brand-color, #0052d9)')
+      btnCrossH.setAttribute('stroke', 'var(--td-brand-color)')
       btnCrossH.setAttribute('stroke-width', '1.8')
       btnCrossH.setAttribute('stroke-linecap', 'round')
       bloomBtn.appendChild(btnCrossH)
@@ -4914,9 +4914,9 @@ onUnmounted(() => {
   gap: 8px;
   padding: 8px 12px;
   background: var(--td-bg-color-secondarycontainer);
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   color: var(--td-text-color-secondary);
-  font-size: 13px;
+  font-size: var(--app-text-md);
 
   .queue-text {
     line-height: 1.2;
@@ -4929,11 +4929,11 @@ onUnmounted(() => {
   gap: 8px;
   padding: 8px 12px;
   background: var(--td-warning-color-light);
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   color: var(--td-warning-color-8);
-  font-size: 13px;
+  font-size: var(--app-text-md);
   cursor: pointer;
-  transition: filter 0.2s;
+  transition: filter var(--app-motion-base);
 
   &:hover {
     filter: brightness(0.95);
@@ -4999,7 +4999,7 @@ onUnmounted(() => {
   display: inline-flex;
   align-items: center;
   padding: 2px;
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   background: var(--td-bg-color-container);
   border: 1px solid var(--td-component-stroke);
 }
@@ -5009,14 +5009,14 @@ onUnmounted(() => {
   height: 22px;
   padding: 0;
   border: 0;
-  border-radius: 4px;
+  border-radius: var(--app-radius-xs);
   background: transparent;
   color: var(--td-text-color-secondary);
   display: inline-flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: background-color 0.12s ease, color 0.12s ease;
+  transition: background-color var(--app-motion-instant) ease, color var(--app-motion-instant) ease;
 
   &:hover {
     color: var(--td-text-color-primary);
@@ -5029,7 +5029,7 @@ onUnmounted(() => {
   }
 
   .t-icon {
-    font-size: 15px;
+    font-size: var(--app-text-lg);
   }
 }
 
@@ -5038,7 +5038,7 @@ onUnmounted(() => {
   height: 26px;
   padding: 0;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   background: transparent;
   color: var(--td-text-color-secondary);
   display: inline-flex;
@@ -5046,10 +5046,10 @@ onUnmounted(() => {
   justify-content: center;
   flex-shrink: 0;
   cursor: pointer;
-  transition: background-color 0.15s ease, color 0.15s ease;
+  transition: background-color var(--app-motion-fast) ease, color var(--app-motion-fast) ease;
 
   .t-icon {
-    font-size: 15px;
+    font-size: var(--app-text-lg);
   }
 
   &:hover {
@@ -5096,7 +5096,7 @@ onUnmounted(() => {
   border-radius: var(--wiki-list-row-radius);
   cursor: pointer;
   margin-bottom: 0;
-  transition: background 0.15s ease, color 0.15s ease;
+  transition: background var(--app-motion-fast) ease, color var(--app-motion-fast) ease;
 
   &:hover {
     background: var(--td-bg-color-container-hover);
@@ -5116,12 +5116,12 @@ onUnmounted(() => {
   }
 
   .wiki-nav-icon {
-    font-size: 16px;
+    font-size: var(--app-text-xl);
     color: var(--td-text-color-secondary);
   }
 
   .wiki-nav-text {
-    font-size: 14px;
+    font-size: var(--app-text-base);
     font-weight: 400;
     line-height: 20px;
     color: var(--td-text-color-primary);
@@ -5140,13 +5140,13 @@ onUnmounted(() => {
   gap: 5px;
   padding: 7px 2px 8px;
   border-radius: 0;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   color: var(--td-text-color-secondary);
   cursor: pointer;
   white-space: nowrap;
   flex-shrink: 0;
   position: relative;
-  transition: background 0.15s, color 0.15s;
+  transition: background var(--app-motion-fast), color var(--app-motion-fast);
 
   &:hover {
     color: var(--td-text-color-primary);
@@ -5169,7 +5169,7 @@ onUnmounted(() => {
   }
 
   .wiki-tab-count {
-    font-size: 11px;
+    font-size: var(--app-text-xs);
     padding: 0;
     line-height: 1;
     color: var(--td-text-color-placeholder);
@@ -5190,7 +5190,7 @@ onUnmounted(() => {
   cursor: pointer;
   margin-bottom: 0;
   user-select: none;
-  transition: background 0.15s ease, color 0.15s ease;
+  transition: background var(--app-motion-fast) ease, color var(--app-motion-fast) ease;
 
   &:hover {
     background: var(--td-bg-color-container-hover);
@@ -5217,16 +5217,16 @@ onUnmounted(() => {
 
 .wiki-page-item--list .wiki-page-item-title {
   display: block;
-  font-size: 14px;
+  font-size: var(--app-text-base);
   font-weight: 400;
   line-height: 20px;
   margin-bottom: 4px;
   color: var(--td-text-color-primary);
-  transition: color 0.15s ease;
+  transition: color var(--app-motion-fast) ease;
 }
 
 .wiki-page-item-summary {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.5;
   color: var(--td-text-color-secondary);
   display: -webkit-box;
@@ -5240,7 +5240,7 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   color: var(--td-text-color-placeholder);
 }
 
@@ -5258,7 +5258,7 @@ onUnmounted(() => {
   color: var(--td-text-color-secondary);
   background: transparent;
   user-select: none;
-  transition: background 0.15s ease, color 0.15s ease;
+  transition: background var(--app-motion-fast) ease, color var(--app-motion-fast) ease;
 
   &:hover {
     background: var(--td-bg-color-container-hover);
@@ -5275,9 +5275,9 @@ onUnmounted(() => {
   min-width: 0;
   height: 24px;
   border: 1px solid var(--td-brand-color);
-  border-radius: 4px;
+  border-radius: var(--app-radius-xs);
   padding: 0 6px;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   color: var(--td-text-color-primary);
   background: var(--td-bg-color-container);
   outline: none;
@@ -5308,11 +5308,11 @@ onUnmounted(() => {
   }
 
   :deep(.wiki-folder-action-btn) {
-    border-radius: 4px;
-    transition: all 0.2s ease;
+    border-radius: var(--app-radius-xs);
+    transition: all var(--app-motion-base) ease;
 
     .t-icon {
-      font-size: 14px;
+      font-size: var(--app-text-base);
     }
   }
 
@@ -5340,7 +5340,7 @@ onUnmounted(() => {
 // While dragging, the whole list is the "move to root" target; a subtle inset
 // ring signals it without inserting any element that would shift the layout.
 .wiki-tree-list--root-drop {
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   box-shadow: inset 0 0 0 1px var(--td-brand-color);
 }
 
@@ -5362,14 +5362,14 @@ onUnmounted(() => {
 .wiki-page-file-icon {
   flex: 0 0 auto;
   color: var(--td-text-color-placeholder);
-  font-size: 15px;
+  font-size: var(--app-text-lg);
 }
 
 .wiki-directory-title,
 .wiki-page-item-title {
   min-width: 0;
   flex: 1;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   color: var(--td-text-color-primary);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -5384,7 +5384,7 @@ onUnmounted(() => {
   flex: 0 0 auto;
   min-width: 16px;
   text-align: right;
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   line-height: 18px;
   color: var(--td-text-color-placeholder);
   font-variant-numeric: tabular-nums;
@@ -5397,11 +5397,11 @@ onUnmounted(() => {
   align-items: center;
   gap: 6px;
   padding-left: calc(var(--wiki-tree-depth, 0) * var(--wiki-tree-depth-indent, 14px));
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   cursor: pointer;
   margin: 1px 0;
   color: var(--td-brand-color);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
 
   &:hover {
     background: var(--td-brand-color-light);
@@ -5426,11 +5426,11 @@ onUnmounted(() => {
 }
 
 .wiki-page-item--tree .wiki-page-item-title {
-  font-size: 14px;
+  font-size: var(--app-text-base);
   font-weight: 400;
   line-height: 20px;
   color: var(--td-text-color-primary);
-  transition: color 0.15s ease;
+  transition: color var(--app-motion-fast) ease;
 }
 
 // ── Right Content ──
@@ -5458,7 +5458,7 @@ onUnmounted(() => {
 
 .wiki-reader-lead {
   margin: 10px 0 0;
-  font-size: 15px;
+  font-size: var(--app-text-lg);
   line-height: 1.65;
   color: var(--td-text-color-secondary);
 }
@@ -5488,7 +5488,7 @@ onUnmounted(() => {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.4;
   color: var(--td-text-color-placeholder);
   white-space: nowrap;
@@ -5501,20 +5501,20 @@ onUnmounted(() => {
   align-items: center;
   gap: 4px;
   padding: 2px 8px;
-  border-radius: 4px;
-  font-size: 12px;
+  border-radius: var(--app-radius-xs);
+  font-size: var(--app-text-sm);
   line-height: 1.4;
   color: var(--td-text-color-secondary);
   background: var(--td-bg-color-secondarycontainer);
 
   .t-icon {
-    font-size: 13px;
+    font-size: var(--app-text-md);
     flex-shrink: 0;
   }
 }
 
 .wiki-badge--ver {
-  font-family: var(--td-font-family-mono, monospace);
+  font-family: var(--td-font-family-mono);
   font-variant-numeric: tabular-nums;
 }
 
@@ -5542,13 +5542,13 @@ onUnmounted(() => {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   color: var(--td-text-color-secondary);
   text-decoration: none;
   padding: 4px 8px;
   margin-left: -8px;
-  border-radius: 4px;
-  transition: all 0.15s;
+  border-radius: var(--app-radius-xs);
+  transition: all var(--app-motion-fast);
 
   &:hover {
     color: var(--td-brand-color);
@@ -5596,15 +5596,15 @@ onUnmounted(() => {
 
   :deep(.t-input),
   :deep(.t-textarea) {
-    border-radius: 8px;
+    border-radius: var(--app-radius-md);
     background: var(--td-bg-color-container);
-    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+    transition: border-color var(--app-motion-fast) ease, box-shadow var(--app-motion-fast) ease;
   }
 
   :deep(.t-input:focus-within),
   :deep(.t-textarea:focus-within) {
     border-color: var(--td-brand-color);
-    box-shadow: 0 0 0 2px rgba(7, 192, 95, 0.1);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--td-brand-color) 10%, transparent);
   }
 }
 
@@ -5625,7 +5625,7 @@ onUnmounted(() => {
   margin: 10px 0 0;
 
   :deep(.t-textarea__inner) {
-    font-size: 14px;
+    font-size: var(--app-text-base);
     line-height: 1.6;
     padding: 10px 12px;
     resize: vertical;
@@ -5634,8 +5634,8 @@ onUnmounted(() => {
 
 .wiki-edit-field--content {
   :deep(.t-textarea__inner) {
-    font-family: var(--td-font-family-mono, monospace);
-    font-size: 14px;
+    font-family: var(--td-font-family-mono);
+    font-size: var(--app-text-base);
     line-height: 1.7;
     padding: 12px 14px;
     resize: vertical;
@@ -5654,7 +5654,7 @@ onUnmounted(() => {
   height: 32px;
   padding: 0;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   background: transparent;
   color: var(--td-text-color-placeholder);
   display: inline-flex;
@@ -5662,10 +5662,10 @@ onUnmounted(() => {
   justify-content: center;
   flex-shrink: 0;
   cursor: pointer;
-  transition: color 0.15s ease;
+  transition: color var(--app-motion-fast) ease;
 
   .t-icon {
-    font-size: 16px;
+    font-size: var(--app-text-xl);
   }
 
   &:hover {
@@ -5683,13 +5683,13 @@ onUnmounted(() => {
   flex-wrap: wrap;
   gap: 6px 8px;
   margin: 0 0 8px;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   line-height: 1.4;
 }
 
 .wiki-alias-label {
   color: var(--td-text-color-placeholder);
-  font-size: 13px;
+  font-size: var(--app-text-md);
   line-height: 1.4;
 }
 
@@ -5707,7 +5707,7 @@ onUnmounted(() => {
 }
 
 .wiki-reader-meta-text {
-  font-size: 13px;
+  font-size: var(--app-text-md);
   color: var(--td-text-color-placeholder);
 }
 
@@ -5739,13 +5739,13 @@ onUnmounted(() => {
     gap: 6px;
 
     label {
-      font-size: 13px;
+      font-size: var(--app-text-md);
       color: var(--td-text-color-secondary);
     }
   }
 
   .wiki-create-page-hint {
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     color: var(--td-text-color-placeholder);
   }
 }
@@ -5753,7 +5753,7 @@ onUnmounted(() => {
 .wiki-reader-links {
   padding: 12px 16px;
   background: var(--td-bg-color-secondarycontainer);
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   margin-bottom: 20px;
   display: flex;
   flex-direction: column;
@@ -5765,7 +5765,7 @@ onUnmounted(() => {
   align-items: center;
   flex-wrap: wrap;
   gap: 6px;
-  font-size: 13px;
+  font-size: var(--app-text-md);
 }
 
 .wiki-link-label {
@@ -5778,14 +5778,14 @@ onUnmounted(() => {
   color: var(--td-brand-color);
   text-decoration: none;
   font-family: var(--app-font-family-mono);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   padding: 2px 8px;
-  background: rgba(7, 192, 95, 0.06);
-  border-radius: 4px;
-  transition: background 0.15s;
+  background: color-mix(in srgb, var(--td-brand-color) 6%, transparent);
+  border-radius: var(--app-radius-xs);
+  transition: background var(--app-motion-fast);
 
   &:hover {
-    background: rgba(7, 192, 95, 0.12);
+    background: color-mix(in srgb, var(--td-brand-color) 12%, transparent);
   }
 }
 
@@ -5793,25 +5793,25 @@ onUnmounted(() => {
 // Chat answer Markdown styles are centralized in components/css/chat-markdown.less.
 .wiki-reader-body {
   line-height: 1.6;
-  font-size: 14px;
+  font-size: var(--app-text-base);
   color: var(--td-text-color-primary);
 
   :deep(h1) {
-    font-size: 24px;
+    font-size: var(--app-text-4xl);
     margin: 28px 0 16px;
     font-weight: 600;
     line-height: 1.4;
   }
 
   :deep(h2) {
-    font-size: 18px;
+    font-size: var(--app-text-2xl);
     margin: 24px 0 12px;
     font-weight: 600;
     line-height: 1.4;
   }
 
   :deep(h3) {
-    font-size: 16px;
+    font-size: var(--app-text-xl);
     margin: 20px 0 10px;
     font-weight: 600;
     line-height: 1.5;
@@ -5820,7 +5820,7 @@ onUnmounted(() => {
   :deep(h4),
   :deep(h5),
   :deep(h6) {
-    font-size: 14px;
+    font-size: var(--app-text-base);
     margin: 16px 0 8px;
     font-weight: 600;
     line-height: 1.5;
@@ -5856,10 +5856,10 @@ onUnmounted(() => {
 
   :deep(code) {
     font-family: var(--app-font-family-mono);
-    font-size: 13px;
+    font-size: var(--app-text-md);
     padding: 2px 4px;
     background: var(--td-bg-color-secondarycontainer);
-    border-radius: 4px;
+    border-radius: var(--app-radius-xs);
     color: var(--td-brand-color);
   }
 
@@ -5867,7 +5867,7 @@ onUnmounted(() => {
     margin: 0 0 14px;
     padding: 12px 16px;
     background: var(--td-bg-color-secondarycontainer);
-    border-radius: 6px;
+    border-radius: var(--app-radius-sm);
     overflow-x: auto;
 
     code {
@@ -5880,7 +5880,7 @@ onUnmounted(() => {
   :deep(p:has(img)) {
     text-align: center;
     color: var(--td-text-color-secondary);
-    font-size: 13px;
+    font-size: var(--app-text-md);
     margin-top: 16px;
     margin-bottom: 24px;
 
@@ -5888,11 +5888,11 @@ onUnmounted(() => {
       max-width: 100%;
       max-height: 400px;
       object-fit: contain;
-      border-radius: 6px;
+      border-radius: var(--app-radius-sm);
       display: block;
       margin: 0 auto 8px;
       cursor: zoom-in;
-      transition: opacity 0.2s;
+      transition: opacity var(--app-motion-base);
 
       &:hover {
         opacity: 0.9;
@@ -5924,11 +5924,11 @@ onUnmounted(() => {
     overflow-x: auto;
     margin: 0 0 16px;
     border-collapse: collapse;
-    font-size: 13px;
+    font-size: var(--app-text-md);
     line-height: 1.55;
     background: var(--td-bg-color-container);
     border: 1px solid var(--td-component-stroke);
-    border-radius: 6px;
+    border-radius: var(--app-radius-sm);
     -webkit-overflow-scrolling: touch;
   }
 
@@ -5966,7 +5966,7 @@ onUnmounted(() => {
   }
 
   :deep(table code) {
-    font-size: 12px;
+    font-size: var(--app-text-sm);
   }
 }
 
@@ -5983,13 +5983,13 @@ onUnmounted(() => {
   display: flex;
   align-items: baseline;
   gap: 16px;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   line-height: 1.65;
 }
 
 .wiki-reader-footer-label {
   flex: 0 0 64px;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-placeholder);
 }
 
@@ -6038,7 +6038,7 @@ onUnmounted(() => {
   min-height: 32px;
   padding: 16px 0 24px;
   color: var(--td-text-color-placeholder);
-  font-size: 13px;
+  font-size: var(--app-text-md);
 }
 
 .wiki-index-loading {
@@ -6058,14 +6058,14 @@ onUnmounted(() => {
 }
 
 .wiki-empty-title {
-  font-size: 14px;
+  font-size: var(--app-text-base);
   font-weight: 500;
   color: var(--td-text-color-secondary);
   margin: 0 0 4px;
 }
 
 .wiki-empty-desc {
-  font-size: 13px;
+  font-size: var(--app-text-md);
   color: var(--td-text-color-placeholder);
   margin: 0;
 }
@@ -6090,7 +6090,7 @@ onUnmounted(() => {
 }
 
 .help-glyph-icon {
-  font-size: 14px !important;
+  font-size: var(--app-text-base) !important;
   font-weight: 600;
   line-height: 14px !important;
   text-align: center;
@@ -6103,7 +6103,7 @@ onUnmounted(() => {
   max-width: 320px;
 
   .help-section-title {
-    font-size: 11px;
+    font-size: var(--app-text-xs);
     line-height: 14px;
     color: var(--td-text-color-placeholder);
     text-transform: uppercase;
@@ -6122,7 +6122,7 @@ onUnmounted(() => {
     display: grid;
     grid-template-columns: 110px 1fr;
     gap: 12px;
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     line-height: 16px;
   }
 
@@ -6151,7 +6151,7 @@ onUnmounted(() => {
 .wiki-graph-search {
   width: 100%;
   box-shadow: var(--td-shadow-1);
-  border-radius: 4px;
+  border-radius: var(--app-radius-xs);
 }
 
 .graph-issues-badge {
@@ -6200,10 +6200,10 @@ onUnmounted(() => {
   background: transparent;
   border: none;
   color: var(--td-text-color-placeholder);
-  font-size: 18px;
+  font-size: var(--app-text-2xl);
   cursor: pointer;
   user-select: none;
-  transition: color 0.15s ease;
+  transition: color var(--app-motion-fast) ease;
 }
 
 .wiki-graph-help-trigger:hover {
@@ -6216,7 +6216,7 @@ onUnmounted(() => {
   right: 16px;
   background: var(--td-bg-color-container);
   border: 1px solid var(--td-component-stroke);
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   padding: 10px 12px;
   box-shadow: var(--td-shadow-1);
   display: flex;
@@ -6224,7 +6224,7 @@ onUnmounted(() => {
   gap: 12px;
   z-index: 10;
   opacity: 0.95;
-  transition: right 0.3s cubic-bezier(0.645, 0.045, 0.355, 1);
+  transition: right var(--app-motion-slow) cubic-bezier(0.645, 0.045, 0.355, 1);
 }
 
 .wiki-graph-legend.legend-shifted {
@@ -6241,12 +6241,12 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   color: var(--td-text-color-secondary);
 
   &.clickable {
     cursor: pointer;
-    transition: all 0.15s;
+    transition: all var(--app-motion-fast);
 
     &:hover {
       color: var(--td-text-color-primary);
@@ -6295,12 +6295,12 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   line-height: 14px;
   color: var(--td-text-color-secondary);
   cursor: pointer;
   user-select: none;
-  transition: all 0.15s;
+  transition: all var(--app-motion-fast);
 
   &:hover {
     color: var(--td-brand-color);
@@ -6320,7 +6320,7 @@ onUnmounted(() => {
 }
 
 .wiki-graph-truncation-hint {
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   line-height: 14px;
   color: var(--td-text-color-placeholder);
   user-select: none;
@@ -6340,12 +6340,12 @@ onUnmounted(() => {
     display: flex;
     align-items: center;
     gap: 4px;
-    font-size: 11px;
+    font-size: var(--app-text-xs);
     line-height: 14px;
     color: var(--td-text-color-placeholder);
 
     .t-icon {
-      font-size: 12px;
+      font-size: var(--app-text-sm);
     }
   }
 
@@ -6354,7 +6354,7 @@ onUnmounted(() => {
   }
 
   .status-card-primary {
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     line-height: 16px;
     color: var(--td-text-color-primary);
     overflow: hidden;
@@ -6363,14 +6363,14 @@ onUnmounted(() => {
   }
 
   .status-card-secondary {
-    font-size: 11px;
+    font-size: var(--app-text-xs);
     line-height: 14px;
     color: var(--td-text-color-secondary);
   }
 }
 
 .wiki-drawer-neighbor-hint {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 16px;
   color: var(--td-text-color-secondary);
   user-select: none;
@@ -6383,13 +6383,13 @@ onUnmounted(() => {
   width: 14px;
   height: 14px;
   flex-shrink: 0;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   line-height: 1;
   color: var(--td-text-color-placeholder);
-  transition: color 0.15s;
+  transition: color var(--app-motion-fast);
 
   .t-icon {
-    font-size: 13px;
+    font-size: var(--app-text-md);
     line-height: 1;
   }
 }
@@ -6418,8 +6418,8 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 20px;
-  transition: opacity 0.2s ease;
+  font-size: var(--app-text-3xl);
+  transition: opacity var(--app-motion-base) ease;
 
   &:hover {
     opacity: 0.8;
@@ -6430,7 +6430,7 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   background: var(--td-bg-color-container);
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   overflow: hidden;
 }
 
@@ -6447,13 +6447,13 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   font-weight: 500;
-  font-size: 14px;
+  font-size: var(--app-text-base);
   color: var(--td-text-color-primary);
 
   .wiki-issue-popup-icon {
     color: var(--td-brand-color);
     margin-right: 8px;
-    font-size: 16px;
+    font-size: var(--app-text-xl);
   }
 }
 
@@ -6471,8 +6471,8 @@ onUnmounted(() => {
   padding: 16px;
   gap: 12px;
   border: 1px solid var(--td-component-border);
-  border-radius: 6px;
-  transition: box-shadow 0.2s ease, border-color 0.2s ease;
+  border-radius: var(--app-radius-sm);
+  transition: box-shadow var(--app-motion-base) ease, border-color var(--app-motion-base) ease;
   background: var(--td-bg-color-container);
 
   &:hover {
@@ -6494,7 +6494,7 @@ onUnmounted(() => {
 }
 
 .wiki-issue-popup-desc {
-  font-size: 13px;
+  font-size: var(--app-text-md);
   color: var(--td-text-color-primary);
   line-height: 1.6;
   white-space: pre-wrap;
@@ -6511,7 +6511,7 @@ onUnmounted(() => {
 
 .wiki-issue-popup-desc::-webkit-scrollbar-thumb {
   background: var(--td-scrollbar-color);
-  border-radius: 4px;
+  border-radius: var(--app-radius-xs);
 }
 
 .wiki-issue-popup-desc::-webkit-scrollbar-track {
@@ -6528,7 +6528,7 @@ onUnmounted(() => {
 }
 
 .wiki-issue-popup-reporter {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-placeholder);
   flex: 1;
 }
@@ -6539,10 +6539,10 @@ onUnmounted(() => {
 }
 
 .wiki-issue-popup-action {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-brand-color);
   cursor: pointer;
-  transition: opacity 0.2s ease;
+  transition: opacity var(--app-motion-base) ease;
 
   &:hover {
     opacity: 0.8;
@@ -6590,3 +6590,4 @@ onUnmounted(() => {
   }
 }
 </style>
+<style lang="less" src="@/components/css/wiki-graph-drawer.less"></style>

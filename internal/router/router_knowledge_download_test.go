@@ -1,6 +1,7 @@
 package router
 
 import (
+	"bytes"
 	"context"
 	"net/http"
 	"net/http/httptest"
@@ -104,6 +105,48 @@ func TestKnowledgeDownloadRejectsReadOnlySharedKB(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/knowledge/knowledge-shared/download", nil)
+	engine.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusForbidden, rec.Code, "body=%s", rec.Body.String())
+}
+
+func TestBatchKnowledgeDownloadRejectsTenantViewer(t *testing.T) {
+	engine := newKnowledgeDownloadRouteTestEngine(
+		t,
+		types.TenantRoleViewer,
+		&types.Knowledge{ID: "knowledge-own", KnowledgeBaseID: "kb-own", TenantID: 1},
+		&types.KnowledgeBase{ID: "kb-own", TenantID: 1},
+		nil,
+	)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/knowledge-bases/kb-own/knowledge/batch-download",
+		bytes.NewBufferString(`{"ids":["knowledge-own"]}`),
+	)
+	req.Header.Set("Content-Type", "application/json")
+	engine.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusForbidden, rec.Code, "body=%s", rec.Body.String())
+}
+
+func TestBatchKnowledgeDownloadRejectsReadOnlySharedKB(t *testing.T) {
+	engine := newKnowledgeDownloadRouteTestEngine(
+		t,
+		types.TenantRoleContributor,
+		&types.Knowledge{ID: "knowledge-shared", KnowledgeBaseID: "kb-shared", TenantID: 2},
+		&types.KnowledgeBase{ID: "kb-shared", TenantID: 2},
+		&downloadKBShareStub{permission: types.OrgRoleViewer, source: 2},
+	)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/knowledge-bases/kb-shared/knowledge/batch-download",
+		bytes.NewBufferString(`{"ids":["knowledge-shared"]}`),
+	)
+	req.Header.Set("Content-Type", "application/json")
 	engine.ServeHTTP(rec, req)
 
 	require.Equal(t, http.StatusForbidden, rec.Code, "body=%s", rec.Body.String())

@@ -16,10 +16,54 @@ import (
 	"github.com/Tencent/WeKnora/internal/datasource"
 )
 
+const (
+	// maxJSONResponseBytes bounds project, user, commit and paginated tree JSON.
+	// Those listings are small; a larger body means a broken or hostile server.
+	maxJSONResponseBytes int64 = 16 << 20
+	// maxCompareResponseBytes bounds GET /repository/compare. That body carries
+	// the full commit list and patch text. A straight compare across a long
+	// unsynced range or a force-push routinely exceeds the metadata cap, and
+	// failing it aborts the project sync before the cursor advances. Sync only
+	// keeps paths and compare_timeout, but the response still has to be buffered.
+	maxCompareResponseBytes int64 = 128 << 20
+	// maxRawFileBytes bounds a single repository blob. GitLab's tree and
+	// compare endpoints do not report blob sizes, so the download itself is the
+	// only place a limit can be enforced. 512 MiB matches the Feishu connector,
+	// the other connector that pulls arbitrary binary files.
+	maxRawFileBytes int64 = 512 << 20
+)
+
+// base64FileBytes is the JSON cap for the file-detail fallback, whose body
+// carries the raw blob base64-encoded (4/3 of its size) plus an envelope.
+func base64FileBytes(rawLimit int64) int64 {
+	return rawLimit/3*4 + (1 << 20)
+}
+
 type client struct {
 	baseURL, token string
 	http           *http.Client
+	// jsonLimit, compareLimit and rawLimit are fields rather than direct uses of
+	// the constants above so tests can lower them without materialising hundreds
+	// of megabytes. newClient always sets the production values.
+	jsonLimit    int64
+	compareLimit int64
+	rawLimit     int64
 }
+
+// readCapped reads a response body, refusing anything larger than limit instead
+// of buffering it. Oversized payloads are reported as an error: a truncated
+// body would be indexed as if it were the whole document.
+func readCapped(body io.Reader, limit int64) ([]byte, error) {
+	data, err := io.ReadAll(io.LimitReader(body, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > limit {
+		return nil, fmt.Errorf("response exceeds maximum size (%d bytes)", limit)
+	}
+	return data, nil
+}
+
 type apiError struct {
 	endpoint string
 	status   int
@@ -71,9 +115,23 @@ func newClient(baseURL, token string) (*client, error) {
 	if !strings.HasSuffix(baseURL, "/api/v4") {
 		baseURL += "/api/v4"
 	}
-	return &client{baseURL: baseURL, token: token, http: datasource.NewConnectorHTTPClient(30 * time.Second)}, nil
+	return &client{
+		baseURL:      baseURL,
+		token:        token,
+		http:         datasource.NewConnectorHTTPClient(30 * time.Second),
+		jsonLimit:    maxJSONResponseBytes,
+		compareLimit: maxCompareResponseBytes,
+		rawLimit:     maxRawFileBytes,
+	}, nil
 }
+
 func (c *client) get(ctx context.Context, endpoint string, out interface{}) error {
+	return c.getCapped(ctx, endpoint, out, c.jsonLimit)
+}
+
+// getCapped is get with an explicit response cap. Compare and the base64 file
+// fallback pass their own limits because those bodies are larger than metadata.
+func (c *client) getCapped(ctx context.Context, endpoint string, out interface{}, limit int64) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+endpoint, nil)
 	if err != nil {
 		return err
@@ -84,15 +142,16 @@ func (c *client) get(ctx context.Context, endpoint string, out interface{}) erro
 		return err
 	}
 	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return err
-	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return &apiError{endpoint: endpoint, status: resp.StatusCode}
 	}
+	body, err := readCapped(resp.Body, limit)
+	if err != nil {
+		return fmt.Errorf("gitlab API %s: %w", endpoint, err)
+	}
 	return json.Unmarshal(body, out)
 }
+
 func (c *client) getRaw(ctx context.Context, endpoint string) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+endpoint, nil)
 	if err != nil {
@@ -107,7 +166,11 @@ func (c *client) getRaw(ctx context.Context, endpoint string) ([]byte, error) {
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, &apiError{endpoint: endpoint, status: resp.StatusCode}
 	}
-	return io.ReadAll(resp.Body)
+	body, err := readCapped(resp.Body, c.rawLimit)
+	if err != nil {
+		return nil, fmt.Errorf("gitlab raw file %s: %w", endpoint, err)
+	}
+	return body, nil
 }
 
 // projectPath encodes a GitLab project identifier for URL path segments.
@@ -136,43 +199,22 @@ func projectPath(id string) string {
 	}
 	return url.PathEscape(decoded)
 }
+
 func (c *client) project(ctx context.Context, id string) (*project, error) {
 	var p project
 	err := c.get(ctx, "/projects/"+projectPath(id), &p)
 	return &p, err
 }
-func (c *client) projects(ctx context.Context) ([]project, error) {
-	var p []project
-	err := c.get(ctx, "/projects?membership=true&per_page=100&order_by=path_with_namespace&sort=asc", &p)
-	return p, err
-}
 
-// ping verifies that the supplied private token is accepted by this GitLab
-// instance. It avoids project-list ordering parameters that older GitLab
-// deployments may reject even when the token is valid.
-func (c *client) ping(ctx context.Context) error {
-	var user struct {
-		ID int64 `json:"id"`
+func (c *client) projects(ctx context.Context) ([]project, error) {
+	q := url.Values{
+		"membership": {"true"}, "per_page": {"100"}, "page": {"1"},
+		"order_by": {"path_with_namespace"}, "sort": {"asc"},
 	}
-	return c.get(ctx, "/user", &user)
-}
-func (c *client) commitSHA(ctx context.Context, id, ref string) (string, error) {
-	var v struct {
-		ID string `json:"id"`
-	}
-	err := c.get(ctx, "/projects/"+projectPath(id)+"/repository/commits/"+url.PathEscape(ref), &v)
-	return v.ID, err
-}
-func (c *client) tree(ctx context.Context, id, ref, dir string) ([]treeEntry, error) {
-	q := url.Values{"ref": {ref}, "per_page": {"100"}, "page": {"1"}}
-	if dir != "" {
-		q.Set("path", dir)
-	}
-	endpoint := "/projects/" + projectPath(id) + "/repository/tree"
-	var all []treeEntry
+	var all []project
 	for {
-		var page []treeEntry
-		nextPage, err := c.getTreePage(ctx, endpoint, q, &page)
+		var page []project
+		nextPage, err := c.getPage(ctx, "/projects", q, &page)
 		if err != nil {
 			return nil, err
 		}
@@ -184,7 +226,46 @@ func (c *client) tree(ctx context.Context, id, ref, dir string) ([]treeEntry, er
 	}
 }
 
-func (c *client) getTreePage(ctx context.Context, endpoint string, query url.Values, out interface{}) (string, error) {
+// ping verifies that the supplied private token is accepted by this GitLab
+// instance. It avoids project-list ordering parameters that older GitLab
+// deployments may reject even when the token is valid.
+func (c *client) ping(ctx context.Context) error {
+	var user struct {
+		ID int64 `json:"id"`
+	}
+	return c.get(ctx, "/user", &user)
+}
+
+func (c *client) commitSHA(ctx context.Context, id, ref string) (string, error) {
+	var v struct {
+		ID string `json:"id"`
+	}
+	err := c.get(ctx, "/projects/"+projectPath(id)+"/repository/commits/"+url.PathEscape(ref), &v)
+	return v.ID, err
+}
+
+func (c *client) tree(ctx context.Context, id, ref, dir string) ([]treeEntry, error) {
+	q := url.Values{"ref": {ref}, "per_page": {"100"}, "page": {"1"}}
+	if dir != "" {
+		q.Set("path", dir)
+	}
+	endpoint := "/projects/" + projectPath(id) + "/repository/tree"
+	var all []treeEntry
+	for {
+		var page []treeEntry
+		nextPage, err := c.getPage(ctx, endpoint, q, &page)
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, page...)
+		if nextPage == "" {
+			return all, nil
+		}
+		q.Set("page", nextPage)
+	}
+}
+
+func (c *client) getPage(ctx context.Context, endpoint string, query url.Values, out interface{}) (string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+endpoint+"?"+query.Encode(), nil)
 	if err != nil {
 		return "", err
@@ -195,18 +276,19 @@ func (c *client) getTreePage(ctx context.Context, endpoint string, query url.Val
 		return "", err
 	}
 	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", err
-	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return "", &apiError{endpoint: endpoint, status: resp.StatusCode}
+	}
+	body, err := readCapped(resp.Body, c.jsonLimit)
+	if err != nil {
+		return "", fmt.Errorf("gitlab API %s: %w", endpoint, err)
 	}
 	if err := json.Unmarshal(body, out); err != nil {
 		return "", err
 	}
 	return resp.Header.Get("X-Next-Page"), nil
 }
+
 func (c *client) raw(ctx context.Context, id, ref, file string) ([]byte, error) {
 	q := url.Values{"ref": {ref}}
 	encodedFile := gitlabFilePathEscape(file)
@@ -217,7 +299,7 @@ func (c *client) raw(ctx context.Context, id, ref, file string) ([]byte, error) 
 	}
 	var apiErr *apiError
 	if !errors.As(err, &apiErr) || apiErr.status != http.StatusNotFound {
-		return nil, fmt.Errorf("gitlab raw file: %w", err)
+		return nil, fmt.Errorf("gitlab file %s: %w", file, err)
 	}
 
 	// Some GitLab deployments expose the file detail endpoint but return 404
@@ -228,15 +310,15 @@ func (c *client) raw(ctx context.Context, id, ref, file string) ([]byte, error) 
 		Content  string `json:"content"`
 	}
 	detailEndpoint := "/projects/" + projectPath(id) + "/repository/files/" + encodedFile + "?" + q.Encode()
-	if err := c.get(ctx, detailEndpoint, &detail); err != nil {
-		return nil, fmt.Errorf("gitlab file content: %w", err)
+	if err := c.getCapped(ctx, detailEndpoint, &detail, base64FileBytes(c.rawLimit)); err != nil {
+		return nil, fmt.Errorf("gitlab file %s: %w", file, err)
 	}
 	if detail.Encoding != "base64" {
-		return nil, fmt.Errorf("gitlab file content: unsupported encoding %q", detail.Encoding)
+		return nil, fmt.Errorf("gitlab file %s: unsupported encoding %q", file, detail.Encoding)
 	}
 	content, err = base64.StdEncoding.DecodeString(detail.Content)
 	if err != nil {
-		return nil, fmt.Errorf("gitlab file content: decode base64: %w", err)
+		return nil, fmt.Errorf("gitlab file %s: decode base64: %w", file, err)
 	}
 	return content, nil
 }
@@ -259,9 +341,12 @@ func gitlabFilePathEscape(file string) string {
 	}
 	return b.String()
 }
+
 func (c *client) compare(ctx context.Context, id, from, to string) (*comparison, error) {
-	q := url.Values{"from": {from}, "to": {to}}
+	// Sync compares snapshots, not changes since their merge base. The default
+	// comparison misses reverted files when a branch is reset or force-pushed.
+	q := url.Values{"from": {from}, "to": {to}, "straight": {"true"}}
 	var v comparison
-	err := c.get(ctx, "/projects/"+projectPath(id)+"/repository/compare?"+q.Encode(), &v)
+	err := c.getCapped(ctx, "/projects/"+projectPath(id)+"/repository/compare?"+q.Encode(), &v, c.compareLimit)
 	return &v, err
 }

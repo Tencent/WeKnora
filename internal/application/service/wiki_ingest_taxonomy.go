@@ -192,12 +192,17 @@ func (s *wikiIngestService) selectRelevantFolders(
 		itemTexts[i] = strings.TrimSpace(it.title + " " + previewText(it.about, 120))
 	}
 
-	folderVecs, err := embedder.BatchEmbed(ctx, folderTexts)
+	// Through the pool, not straight at the provider: BatchEmbedWithPool is
+	// what splits the inputs by BATCH_EMBED_SIZE. Calling BatchEmbed directly
+	// put every folder (or item) into one request, which a provider with a
+	// per-request input-count limit rejects however low that setting is
+	// (#3390).
+	folderVecs, err := embedder.BatchEmbedWithPool(ctx, embedder, folderTexts)
 	if err != nil {
 		logger.Warnf(ctx, "wiki ingest: taxonomy plan folder embed failed, feeding all folders: %v", err)
 		return capFolders(pool, wikiTaxonomyPromptMaxPaths)
 	}
-	itemVecs, err := embedder.BatchEmbed(ctx, itemTexts)
+	itemVecs, err := embedder.BatchEmbedWithPool(ctx, embedder, itemTexts)
 	if err != nil {
 		logger.Warnf(ctx, "wiki ingest: taxonomy plan item embed failed, feeding all folders: %v", err)
 		return capFolders(pool, wikiTaxonomyPromptMaxPaths)

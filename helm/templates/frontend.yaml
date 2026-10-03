@@ -46,6 +46,8 @@ spec:
               value: {{ .Values.frontend.appHost | default "app" | quote }}
             - name: APP_PORT
               value: {{ .Values.frontend.appPort | default .Values.app.service.port | quote }}
+            - name: MAX_FILE_SIZE_MB
+              value: {{ .Values.global.maxFileSizeMB | quote }}
           ports:
             - containerPort: 80
               name: http

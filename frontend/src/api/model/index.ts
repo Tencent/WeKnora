@@ -6,6 +6,45 @@ export * from './modelUsage'
 
 const t = (key: string) => i18n.global.t(key)
 
+// Protocol-neutral thinking level. Mirrors internal/models/api.ReasoningEffort.
+export type ReasoningEffortLevel =
+  | 'off'
+  | 'auto'
+  | 'minimal'
+  | 'low'
+  | 'medium'
+  | 'high'
+  | 'xhigh'
+  | 'max'
+
+// Catalog view of a saved chat/VLM model. Mirrors internal/models/catalog.Capabilities.
+// thinking_levels: empty array = the model cannot be asked to think.
+export interface ModelCapabilities {
+  provider: string;
+  api: string;
+  cataloged: boolean;
+  reasoning: boolean;
+  thinking_levels: ReasoningEffortLevel[];
+  thinking_format: string;
+  input?: string[];
+  context_window?: number;
+  max_output_tokens?: number;
+  max_tokens_field?: string;
+}
+
+// Per-row override of a catalog entry. Mirrors internal/types.ModelSpecOverride.
+// compat is the flat, protocol-specific object defined in
+// internal/models/api/*_settings.go (free-form JSON).
+export interface ModelSpecOverride {
+  api?: string;
+  reasoning?: boolean;
+  input?: string[];
+  context_window?: number;
+  max_output_tokens?: number;
+  thinking_levels?: Record<string, string | null>;
+  compat?: Record<string, unknown>;
+}
+
 // 模型类型定义
 export interface ModelConfig {
   id?: string;
@@ -43,7 +82,12 @@ export interface ModelConfig {
     // kept on the type so create-mode payloads can still carry them in the
     // initial POST body.
     app_secret?: string;
+    // Per-model catalog override (protocol, limits, protocol compat knobs).
+    spec?: ModelSpecOverride;
   };
+  // Catalog view (chat / VLM remote models only): protocol, thinking levels,
+  // context window. Computed by the backend from provider + name + overrides.
+  capabilities?: ModelCapabilities;
   is_default?: boolean;
   is_builtin?: boolean;
   status?: string;
@@ -53,6 +97,24 @@ export interface ModelConfig {
   created_at?: string;
   updated_at?: string;
   deleted_at?: string | null;
+}
+
+// 复制模型。只提交展示名；name 与凭证由服务端从源模型复制。
+export function copyModelConfig(id: string, displayName: string): Promise<ModelConfig> {
+  return new Promise((resolve, reject) => {
+    post(`/api/v1/models/${id}/copy`, { display_name: displayName })
+      .then((response: any) => {
+        if (response.success && response.data) {
+          resolve(response.data);
+        } else {
+          reject(new Error(response.message || ''));
+        }
+      })
+      .catch((error: any) => {
+        console.error('Failed to copy model:', error);
+        reject(error);
+      });
+  });
 }
 
 // 创建模型
@@ -171,6 +233,8 @@ export interface ModelDebugOptions {
   top_p?: number
   max_tokens?: number
   thinking?: boolean
+  // Graded thinking level; takes precedence over the boolean when set.
+  reasoning_effort?: ReasoningEffortLevel | string
 }
 
 export interface ModelDebugResult {

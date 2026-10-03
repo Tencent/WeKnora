@@ -1,0 +1,97 @@
+// 设置区（views/settings、views/system、views/integrations）各页面共用的版式 mixin：
+// 页面标题块、设置行、行内说明 / 控件列、行内保存状态。
+// 页面保留自己的 class 名，只把重复声明换成 mixin 调用，需要偏离时在调用后覆盖。
+//
+//   @import (reference) '@/components/css/settings-section.less';
+//   .section-header { .settings-section-header(); }
+//   .setting-row { .setting-row(); }
+//   .setting-info { .setting-info(); }
+//   .setting-control { .setting-control(); }
+
+.settings-section-header() {
+  margin-bottom: 28px;
+
+  h2 {
+    margin: 0 0 8px;
+    color: var(--td-text-color-primary);
+    font-size: var(--app-text-3xl);
+    font-weight: 600;
+    line-height: 28px;
+  }
+
+  .section-description {
+    margin: 0;
+    color: var(--td-text-color-secondary);
+    font-size: var(--app-text-base);
+    line-height: 1.5;
+  }
+
+  // 标题左、操作按钮右
+  &__top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 20px;
+  }
+}
+
+.setting-row() {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 20px 0;
+  border-bottom: 1px solid var(--td-component-stroke);
+
+  &:last-child {
+    border-bottom: none;
+  }
+}
+
+.setting-info() {
+  flex: 1;
+  min-width: 0;
+  max-width: 65%;
+
+  label,
+  .setting-label {
+    display: block;
+    margin-bottom: 4px;
+    color: var(--td-text-color-primary);
+    font-size: var(--app-text-lg);
+    font-weight: 500;
+    line-height: 1.4;
+  }
+
+  .desc,
+  .setting-desc {
+    margin: 0;
+    color: var(--td-text-color-secondary);
+    font-size: var(--app-text-md);
+    line-height: 1.5;
+  }
+}
+
+.setting-control() {
+  flex-shrink: 0;
+  min-width: 280px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+// 改即存设置项的行内反馈（替代 toast）
+.setting-save-state() {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+  min-width: 52px;
+  font-size: var(--app-text-sm);
+  color: var(--td-text-color-secondary);
+
+  &--success {
+    color: var(--td-success-color);
+  }
+}

@@ -31,7 +31,7 @@
 
     .results-summary-text {
       color: var(--td-text-color-placeholder);
-      transition: color 0.15s ease;
+      transition: color var(--app-motion-fast) ease;
     }
 
     &:hover .results-summary-text {
@@ -62,7 +62,7 @@
   }
 
   .action-timer {
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     line-height: 1.55;
     font-variant-numeric: tabular-nums;
     color: var(--td-text-color-placeholder);
@@ -81,7 +81,7 @@
 
 .inline-dot {
   color: var(--td-text-color-placeholder);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1;
   user-select: none;
 }
@@ -96,7 +96,7 @@
   line-height: 1.55;
   color: var(--td-text-color-placeholder);
   cursor: pointer;
-  transition: color 0.15s ease;
+  transition: color var(--app-motion-fast) ease;
 
   &:hover:not(:disabled) {
     color: var(--td-text-color-secondary);
@@ -153,7 +153,7 @@
   }
 
   .action-timer {
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     line-height: 1.55;
     font-variant-numeric: tabular-nums;
     color: var(--td-text-color-placeholder);
@@ -251,6 +251,6 @@
 
 .args-toggle-icon {
   flex-shrink: 0;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-placeholder);
 }

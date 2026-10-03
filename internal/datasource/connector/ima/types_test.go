@@ -131,25 +131,6 @@ func TestExtensionForContentType(t *testing.T) {
 	}
 }
 
-func TestSanitizeFileName(t *testing.T) {
-	if got := sanitizeFileName(""); got != "untitled" {
-		t.Errorf("empty name = %q, want untitled", got)
-	}
-	if got := sanitizeFileName(`a/b\c:d*e?f"g<h>i|j`); strings.ContainsAny(got, `/\:*?"<>|`) {
-		t.Errorf("filesystem-hostile characters survived: %q", got)
-	}
-
-	// A long CJK title must be truncated on a rune boundary, not mid-sequence.
-	long := strings.Repeat("知识", 200)
-	got := sanitizeFileName(long)
-	if len(got) > 200 {
-		t.Errorf("len = %d bytes, want <= 200", len(got))
-	}
-	if !strings.HasPrefix(long, got) {
-		t.Errorf("truncation corrupted the prefix: %q", got)
-	}
-}
-
 func TestIsSkippableMediaType(t *testing.T) {
 	for _, mt := range []int32{mediaTypeAISession, mediaTypeVideo} {
 		if !isSkippableMediaType(mt) {

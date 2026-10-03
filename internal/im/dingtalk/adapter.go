@@ -3,9 +3,6 @@ package dingtalk
 import (
 	"bytes"
 	"context"
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -89,37 +86,10 @@ func (a *Adapter) HandleURLVerification(c *gin.Context) bool {
 	return false
 }
 
-// VerifyCallback verifies the DingTalk webhook signature (HmacSHA256).
+// VerifyCallback refuses the legacy HTTP protocol because its timestamp-only
+// signature cannot authenticate the message body. Stream events use the SDK.
 func (a *Adapter) VerifyCallback(c *gin.Context) error {
-	if a.clientSecret == "" {
-		return nil
-	}
-
-	timestamp := c.GetHeader("Timestamp")
-	sign := c.GetHeader("Sign")
-	if timestamp == "" || sign == "" {
-		return fmt.Errorf("missing timestamp or sign header")
-	}
-
-	ts, err := strconv.ParseInt(timestamp, 10, 64)
-	if err != nil {
-		return fmt.Errorf("invalid timestamp: %w", err)
-	}
-	diff := time.Now().UnixMilli() - ts
-	if diff > 3600*1000 || diff < -3600*1000 {
-		return fmt.Errorf("timestamp expired")
-	}
-
-	stringToSign := timestamp + "\n" + a.clientSecret
-	h := hmac.New(sha256.New, []byte(a.clientSecret))
-	h.Write([]byte(stringToSign))
-	expectedSign := base64.StdEncoding.EncodeToString(h.Sum(nil))
-
-	if !hmac.Equal([]byte(sign), []byte(expectedSign)) {
-		return fmt.Errorf("invalid signature")
-	}
-
-	return nil
+	return fmt.Errorf("DingTalk HTTP callbacks are disabled; use Stream mode")
 }
 
 // DingTalk callback message structure.
@@ -551,6 +521,11 @@ func (a *Adapter) SendReply(ctx context.Context, incoming *im.IncomingMessage, r
 }
 
 func (a *Adapter) replyViaSessionWebhook(ctx context.Context, webhookURL, content string) error {
+	u, err := url.Parse(webhookURL)
+	if err != nil || u.Scheme != "https" || u.Host != "oapi.dingtalk.com" ||
+		u.User != nil || u.Path != "/robot/sendBySession" {
+		return fmt.Errorf("untrusted dingtalk session webhook")
+	}
 	if err := secutils.ValidateURLForSSRF(webhookURL); err != nil {
 		return fmt.Errorf("dingtalk sessionWebhook rejected by SSRF policy: %w", err)
 	}

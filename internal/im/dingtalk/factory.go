@@ -8,7 +8,7 @@ import (
 )
 
 // NewFactory returns an im.AdapterFactory for DingTalk channels.
-// Supports "webhook" and "websocket" (stream mode, default).
+// Supports "websocket" (Stream) only.
 func NewFactory() im.AdapterFactory {
 	return func(factoryCtx context.Context, channel *im.IMChannel, msgHandler func(context.Context, *im.IncomingMessage) error) (im.Adapter, context.CancelFunc, error) {
 		creds, err := im.ParseCredentials(channel.Credentials)
@@ -24,8 +24,7 @@ func NewFactory() im.AdapterFactory {
 
 		switch mode {
 		case "webhook":
-			adapter := NewWebhookAdapter(clientID, clientSecret, cardTemplateID)
-			return adapter, nil, nil
+			return nil, nil, fmt.Errorf("DingTalk HTTP callbacks are disabled; use Stream mode")
 
 		case "websocket":
 			wsCtx, wsCancel := context.WithCancel(context.Background())

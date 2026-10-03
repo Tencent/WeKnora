@@ -49,18 +49,18 @@ func shellExecTestContext() context.Context {
 	return WithToolExecContext(context.Background(), &ToolExecContext{SessionID: "session-1"})
 }
 
-func TestShellExecRejectsWorkDirOutsideWorkspace(t *testing.T) {
+func TestShellExecAllowsWorkDirOutsideWorkspace(t *testing.T) {
 	executor := &fakeShellExecutor{}
 	tool := NewShellExecTool(executor, nil)
 
 	result, err := tool.Execute(shellExecTestContext(), json.RawMessage(
-		`{"command":"pwd","work_dir":"/etc"}`,
+		`{"command":"pwd","work_dir":"../tmp/task"}`,
 	))
 
 	require.NoError(t, err)
-	require.False(t, result.Success)
-	require.Contains(t, result.Error, `work_dir "/etc" is outside the allowed sandbox roots /workspace`)
-	assert.Equal(t, time.Duration(0), executor.timeout)
+	require.True(t, result.Success, result.Error)
+	require.Equal(t, "/tmp/task", executor.workDir)
+	require.Equal(t, 1, executor.calls)
 }
 
 func TestShellExecTimeoutHonorsAndCapsRequestedValue(t *testing.T) {
@@ -620,4 +620,37 @@ func TestShellExecVenvAccessFailuresPrecedeGenericPermissionHints(t *testing.T) 
 			require.NotContains(t, unrelated, skillPythonPackageInstallCommand)
 		}
 	}
+}
+
+func TestShellExecRejectsBackgroundCommands(t *testing.T) {
+	for _, command := range []string{
+		"python3 -m http.server 8080 &",
+		"nohup python3 app.py >/tmp/app.log 2>&1 &",
+		"sleep 30 &",
+	} {
+		executor := &fakeShellExecutor{}
+		args, err := json.Marshal(ShellExecInput{Command: command})
+		require.NoError(t, err)
+		result, err := NewShellExecTool(executor, nil).Execute(shellExecTestContext(), args)
+		require.NoError(t, err)
+		require.False(t, result.Success, "%s", command)
+		require.Contains(t, result.Error, "safety guard")
+		require.Zero(t, executor.calls, command)
+	}
+}
+
+func TestShellExecDescriptionForbidsBackgrounding(t *testing.T) {
+	description := NewShellExecTool(&fakeShellExecutor{}, nil).Description()
+	require.Contains(t, description, "Execution is synchronous")
+	require.Contains(t, description, "no nohup")
+	require.Contains(t, description, "trailing &")
+}
+
+func TestHostInstallShellExecToolIsScopedToVersionDir(t *testing.T) {
+	dir := "/Users/dev/.weknora/skills/.versions/pdf-2"
+	tool := NewHostInstallShellExecTool(&fakeInstallShellExecutor{}, dir)
+	require.Equal(t, []string{dir}, tool.allowedWorkDirRoots())
+	require.Equal(t, dir, tool.effectiveDefaultWorkDir())
+	require.NotContains(t, tool.Description(), "as root")
+	require.Contains(t, tool.Description(), dir)
 }

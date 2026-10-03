@@ -10,12 +10,12 @@
 
 ## 运行一次评估
 
-1. 准备符合下方格式的 Parquet 数据集，或使用内置 `default` 数据集。
+1. 使用内置样例数据集，或按下方格式准备 Parquet 文件并替换服务工作目录下 `dataset/samples/` 中的同名文件（容器内为 `/app/dataset/samples/`）。
 2. 选择参考知识库、对话模型和重排模型，通过 `POST /api/v1/evaluation` 创建任务。参考知识库用于复制配置，评估会使用单独的知识库。
 3. 记录返回的任务 ID，通过 `GET /api/v1/evaluation?task_id=...` 查询状态和进度。
 4. 任务成功后比较检索与生成指标；失败时先检查任务错误，再调整配置并重新运行。
 
-创建任务需要 Admin 权限，查询结果需要 Viewer 权限；API Key 还需评估能力或 full-access。
+创建任务需要 Admin 权限，查询结果需要 Viewer 权限；API Key 还需 `run_evaluations` 能力或 full-access。
 
 ## 数据集格式
 
@@ -59,18 +59,18 @@ type QAPair struct {
 }
 ```
 
-自定义数据集只需按上述 Schema 生成同名 Parquet 文件。加载时服务会打印统计信息（问题数、语料数、平均相关段落数、答案覆盖率等）。
+服务始终从 `./dataset/samples/` 读取这 5 个文件，`dataset_id` 目前只用于组成任务 ID，不会切换到其他目录。使用自定义数据集时，按上述 Schema 生成同名 Parquet 文件替换该目录内容（Docker 部署可挂载到 `/app/dataset/samples/`）。加载时服务会打印统计信息（问题数、语料数、平均相关段落数、答案覆盖率等）。
 
 ## 结果查询
 
-`GET /api/v1/evaluation?task_id=evaluation-{tenant}-{dataset}`，返回 `EvaluationDetail`：
+`GET /api/v1/evaluation?task_id=<创建时返回的任务 ID>`，返回 `EvaluationDetail`：
 
 ```json
 {
   "success": true,
   "data": {
     "task": {
-      "id": "evaluation-1-default",
+      "id": "evaluation_1_1758600000000_1a2b3c4d_default",
       "dataset_id": "default",
       "status": 2,
       "total": 100,
@@ -147,7 +147,7 @@ BLEU 核心（`metric/bleu.go`）：修正 n-gram 精度的加权几何平均乘
 
 ### API
 
-`internal/router/router.go`：
+`internal/router/routes_infra.go`：
 
 ```go
 evaluationRoutes := g.apiKeyGroup(r.Group("/evaluation"), apiKeyRunEvaluations(apiKeyFullAccess()))
@@ -159,7 +159,7 @@ evaluationRoutes := g.apiKeyGroup(r.Group("/evaluation"), apiKeyRunEvaluations(a
 
 | 方法 | 路径 | 权限 | 说明 |
 | --- | --- | --- | --- |
-| POST | `/api/v1/evaluation` | Admin（API Key 需 `RunEvaluations` 能力） | 创建评估任务，立即返回任务信息 |
+| POST | `/api/v1/evaluation` | Admin（API Key 需 `run_evaluations` 能力或 full-access） | 创建评估任务，立即返回任务信息 |
 | GET | `/api/v1/evaluation?task_id=...` | Viewer | 查询任务状态、进度与指标结果 |
 
 #### 创建评估任务
@@ -177,12 +177,12 @@ type EvaluationRequest struct {
 
 | 参数 | 必填 | 默认行为 |
 | --- | --- | --- |
-| `dataset_id` | 否 | 缺省使用内置 `default` 数据集（`dataset/samples/`） |
+| `dataset_id` | 否 | 缺省为 `default`；仅用于任务 ID，数据始终读取 `dataset/samples/` |
 | `knowledge_base_id` | 否 | 未提供则新建评估专用知识库；提供则复制其配置创建评估 KB |
 | `chat_id` | 否 | 缺省自动选择默认 Chat 模型 |
 | `rerank_id` | 否 | 缺省自动选择默认 Rerank 模型 |
 
-任务 ID 格式为 `evaluation-{tenantID}-{datasetID}`。任务对象（`internal/types/evaluation.go`）：
+任务 ID 由 `utils.GenerateTaskID` 生成，格式为 `evaluation_{tenantID}_{毫秒时间戳}_{8 位随机串}_{datasetID}`，每次创建都不同，应以创建响应中的 ID 查询。任务对象（`internal/types/evaluation.go`）：
 
 ```go
 type EvaluationTask struct {
@@ -259,7 +259,7 @@ type MetricInput struct {
 flowchart TD
     A["POST /api/v1/evaluation<br/>(dataset_id, knowledge_base_id, chat_id, rerank_id)"] --> B["创建评估专用知识库<br/>(新建或克隆参考 KB 配置)"]
     B --> C["装配 ChatManage 评估参数<br/>(阈值 / TopK / Summary 配置)"]
-    C --> D["注册任务到内存存储<br/>ID = evaluation-{tenant}-{dataset}, 状态 Pending"]
+    C --> D["注册任务到内存存储<br/>ID = evaluation_{tenant}_{时间戳}_{随机串}_{dataset}, 状态 Pending"]
     D --> E["立即返回任务信息"]
     D --> F["goroutine 后台执行, 状态 Running"]
     F --> G["加载 Parquet 数据集<br/>queries / corpus / qrels / answers / qas"]
@@ -282,7 +282,7 @@ flowchart TD
 | 评估服务 | `internal/application/service/evaluation.go` |
 | 指标注册与汇聚 | `internal/application/service/metric_hook.go` |
 | 指标实现 | `internal/application/service/metric/`（`precision.go`、`recall.go`、`ndcg.go`、`mrr.go`、`map.go`、`bleu.go`、`rouge.go`、`rouge_score.go`、`common.go`） |
-| 数据集加载 | `internal/application/service/dataset.go`、`internal/handler/dataset.go` |
+| 数据集加载 | `internal/application/service/dataset.go` |
 | 类型定义 | `internal/types/evaluation.go`、`internal/types/dataset.go` |
 | 内置样例数据集 | `dataset/samples/`（Parquet 文件） |
-| 路由注册 | `internal/router/router.go` 的 `RegisterEvaluationRoutes` |
+| 路由注册 | `internal/router/routes_infra.go` 的 `RegisterEvaluationRoutes` |

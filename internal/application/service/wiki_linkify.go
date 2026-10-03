@@ -47,6 +47,14 @@ func linkifyContent(content string, refs []linkRef, selfSlug string) (string, bo
 		if r.slug == selfSlug {
 			continue
 		}
+		// A single Han character has no reliable token boundary in unsegmented
+		// Chinese prose. Substring-linking it would turn words such as 风沙、
+		// 栏目 and 核心 into broken links. Keep one-character Wiki pages and
+		// any explicit [[...]] links authored by the generator, but never
+		// inject a new cross-link for such a surface form.
+		if isSingleHanRune(r.matchText) {
+			continue
+		}
 		sorted = append(sorted, r)
 	}
 	sort.SliceStable(sorted, func(i, j int) bool {
@@ -123,6 +131,15 @@ func hasASCIILetterEdge(s string) bool {
 	first, _ := utf8.DecodeRuneInString(s)
 	last, _ := utf8.DecodeLastRuneInString(s)
 	return isASCIIWordRune(first) || isASCIIWordRune(last)
+}
+
+// isSingleHanRune reports whether s consists of exactly one Han character.
+func isSingleHanRune(s string) bool {
+	if s == "" {
+		return false
+	}
+	r, size := utf8.DecodeRuneInString(s)
+	return size == len(s) && unicode.Is(unicode.Han, r)
 }
 
 func isASCIIWordRune(r rune) bool {

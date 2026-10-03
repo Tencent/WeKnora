@@ -84,7 +84,10 @@ func (s *knowledgeBaseService) processSearchResults(ctx context.Context,
 	// Build final search results
 	searchResults := s.assembleSearchResults(ctx, chunks, chunkMap, knowledgeMap, index, skipEnrichment)
 
-	searchutil.EnrichSearchResultsImageInfo(ctx, s.chunkRepo, tenantID, searchResults)
+	// Results can come from org-shared KBs owned by another workspace; the
+	// chunks above were already permission checked, so look up their image
+	// children without the caller-tenant filter (#3342).
+	searchutil.EnrichSearchResultsImageInfoOnly(ctx, s.chunkRepo, searchResults)
 
 	logger.Infof(ctx, "Search results processed, total: %d", len(searchResults))
 	return searchResults, nil
@@ -279,7 +282,32 @@ func (s *knowledgeBaseService) assembleSearchResults(
 		}
 	}
 
+	logSearchResultChunkTypes(ctx, searchResults)
 	return searchResults
+}
+
+// logSearchResultChunkTypes records how many returned hits came from each
+// chunk type. It exists to answer one question with data: how often does the
+// document-level summary chunk actually surface, compared with text chunks?
+// If "summary" stays near zero in production, indexing it can be dropped.
+func logSearchResultChunkTypes(ctx context.Context, results []*types.SearchResult) {
+	if len(results) == 0 {
+		return
+	}
+	counts := make(map[string]int, 4)
+	for _, r := range results {
+		if r == nil {
+			continue
+		}
+		key := r.ChunkType
+		if key == "" {
+			key = string(types.ChunkTypeText)
+		}
+		counts[key]++
+	}
+	logger.GetLogger(ctx).WithField("chunk_type_counts", counts).
+		WithField("total", len(results)).
+		Infof("search results by chunk type")
 }
 
 // collectRelatedChunkIDs extracts related chunk IDs from a chunk.
@@ -328,8 +356,10 @@ func (s *knowledgeBaseService) buildSearchResult(chunk *types.Chunk,
 		KnowledgeDescription:    knowledge.Description,
 		KnowledgeCustomMetadata: knowledge.CustomMetadataText(),
 		ChunkMetadata:           chunk.Metadata,
+		ContextHeader:           chunk.ContextHeader,
 		MatchedContent:          matchedContent,
 		KnowledgeBaseID:         knowledge.KnowledgeBaseID,
+		SourceLocators:          chunk.SourceLocators,
 	}
 }
 

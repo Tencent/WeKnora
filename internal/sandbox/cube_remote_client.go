@@ -781,6 +781,25 @@ func (c *CubeRemoteClient) Connect(
 	return &cubeRemoteHandle{sb: sb}, nil
 }
 
+// ConnectSession reuses the connected SDK handle for the lifecycle probe.
+func (c *CubeRemoteClient) ConnectSession(ctx context.Context, req RemoteConnectRequest) (RemoteSandboxHandle, error) {
+	handle, err := c.Connect(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	info, err := handle.(*cubeRemoteHandle).sb.GetInfo(ctx)
+	if err != nil {
+		return nil, normalizeCubeError("ConnectSession", err)
+	}
+	if info == nil {
+		return nil, NewRemoteError(SandboxTypeCube, "ConnectSession", RemoteErrorKindNotFound, "sandbox not found", nil)
+	}
+	if err := validateSessionSummary(c.Provider(), req.SandboxID, cubeRemoteSummary(*info)); err != nil {
+		return nil, err
+	}
+	return handle, nil
+}
+
 func (c *CubeRemoteClient) Get(
 	ctx context.Context,
 	sandboxID string,

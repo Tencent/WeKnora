@@ -68,29 +68,33 @@ func newDorisStreamLoadHTTPClient() *http.Client {
 	cfg.Timeout = 0
 
 	client := secutils.NewSSRFSafeHTTPClient(cfg)
-	ssrfCheckRedirect := client.CheckRedirect
 	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
-		// Keep the shared client's redirect limit, scheme/target validation and
-		// sensitive-header stripping as the authoritative SSRF behaviour.
-		if err := ssrfCheckRedirect(req, via); err != nil {
-			return err
+		if len(via) >= cfg.MaxRedirects {
+			return fmt.Errorf("stopped after %d redirects", cfg.MaxRedirects)
 		}
 		if len(via) == 0 {
 			return nil
 		}
 
-		sourceHost := via[len(via)-1].URL.Hostname()
-		targetHost := req.URL.Hostname()
-		if !strings.EqualFold(sourceHost, targetHost) && !secutils.IsSSRFWhitelisted(targetHost) {
-			return fmt.Errorf(
-				"stream load redirect blocked: target host %q is not trusted to receive credentials",
-				targetHost,
-			)
+		// Stream Load deliberately replays PUT bodies to a BE. Keep this
+		// exception local to Doris; generic clients must not replay requests
+		// across origins. Every cross-origin destination must be trusted.
+		source := via[0].URL
+		sameOrigin := strings.EqualFold(source.Scheme, req.URL.Scheme) &&
+			strings.EqualFold(source.Host, req.URL.Host)
+		if !sameOrigin && !secutils.IsSSRFWhitelisted(req.URL.Hostname()) {
+			return fmt.Errorf("%w: stream load target host %q is not trusted to receive credentials",
+				secutils.ErrSSRFRedirectBlocked, req.URL.Hostname())
+		}
+		if strings.EqualFold(source.Scheme, "https") && !strings.EqualFold(req.URL.Scheme, "https") {
+			return fmt.Errorf("%w: stream load HTTPS downgrade is forbidden", secutils.ErrSSRFRedirectBlocked)
+		}
+		if err := secutils.ValidateURLForSSRF(req.URL.String()); err != nil {
+			return fmt.Errorf("%w: %w", secutils.ErrSSRFRedirectBlocked, err)
 		}
 
-		// The shared client deliberately strips Authorization on cross-host
-		// redirects. Doris is the exceptional case where an explicitly trusted
-		// BE needs the same Basic credentials after the FE's 307 response.
+		// The shared transport still validates each URL and connection. Preserve
+		// load options and restore Basic auth only after checking the destination.
 		req.Header.Set(headerAuthorization, via[0].Header.Get(headerAuthorization))
 		return nil
 	}

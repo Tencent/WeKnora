@@ -160,6 +160,23 @@ func (r *messageSuggestionRepository) DeleteByMessageID(
 		Delete(&types.MessageSuggestionSet{}).Error
 }
 
+// DeleteByMessageIDs is the batch form of DeleteByMessageID. Rewind drops a
+// whole tail of the conversation at once and would otherwise issue one round
+// trip per deleted message while holding the rewind lock.
+func (r *messageSuggestionRepository) DeleteByMessageIDs(
+	ctx context.Context,
+	tenantID uint64,
+	sessionID string,
+	messageIDs []string,
+) error {
+	if len(messageIDs) == 0 {
+		return nil
+	}
+	return r.db.WithContext(ctx).
+		Where("tenant_id = ? AND session_id = ? AND assistant_message_id IN ?", tenantID, sessionID, messageIDs).
+		Delete(&types.MessageSuggestionSet{}).Error
+}
+
 func (r *messageSuggestionRepository) DeleteBySessionID(
 	ctx context.Context,
 	tenantID uint64,

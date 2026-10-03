@@ -24,6 +24,7 @@ type fakeWikiPageService struct {
 	searchErrors  map[string]error
 	getCalls      []string
 	searchCalls   []string
+	searchQueries map[string][]string
 }
 
 func wikiPageKey(kbID, slug string) string {
@@ -40,10 +41,13 @@ func (f *fakeWikiPageService) GetPageBySlug(_ context.Context, kbID, slug string
 	return f.pages[wikiPageKey(kbID, slug)], nil
 }
 
-func (f *fakeWikiPageService) SearchPages(_ context.Context, kbID, _ string, _ int) ([]*types.WikiPage, error) {
+func (f *fakeWikiPageService) SearchPages(_ context.Context, kbID, query string, _ int) ([]*types.WikiPage, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.searchCalls = append(f.searchCalls, kbID)
+	if f.searchQueries != nil {
+		f.searchQueries[kbID] = append(f.searchQueries[kbID], query)
+	}
 	if err := f.searchErrors[kbID]; err != nil {
 		return nil, err
 	}
@@ -262,7 +266,7 @@ func TestWikiSearchSharesRoutesWithWikiReadPage(t *testing.T) {
 	searchTool := NewWikiSearchTool(service, nil, scopes, routes)
 	readTool := NewWikiReadPageTool(service, nil, scopes, routes)
 
-	searchResult, err := searchTool.Execute(context.Background(), json.RawMessage(`{"queries":["target"]}`))
+	searchResult, err := searchTool.Execute(context.Background(), json.RawMessage(`{"query":"target"}`))
 	if err != nil || searchResult == nil || !searchResult.Success {
 		t.Fatalf("wiki_search failed: result=%+v err=%v", searchResult, err)
 	}
@@ -331,7 +335,9 @@ func TestWikiSearchRejectsKnowledgeBaseOutsideScope(t *testing.T) {
 		service, nil, NewWikiScopesFromKBIDs([]string{"kb-1"}), NewWikiRouteResolver(),
 	)
 
-	result, err := tool.Execute(context.Background(), json.RawMessage(`{"queries":["target"],"knowledge_base_id":"kb-outside"}`))
+	result, err := tool.Execute(
+		context.Background(), json.RawMessage(`{"query":"target","knowledge_base_ids":["kb-outside"]}`),
+	)
 	if err != nil {
 		t.Fatalf("wiki_search returned unexpected error: %v", err)
 	}
@@ -366,7 +372,7 @@ func TestWikiSearchFailsWhenEveryAllowedBackendLookupFails(t *testing.T) {
 	tool := NewWikiSearchTool(
 		service, nil, NewWikiScopesFromKBIDs([]string{"kb-1"}), NewWikiRouteResolver(),
 	)
-	result, err := tool.Execute(context.Background(), json.RawMessage(`{"queries":["target"]}`))
+	result, err := tool.Execute(context.Background(), json.RawMessage(`{"query":"target"}`))
 	if err != nil || result == nil || result.Success || !strings.Contains(result.Error, "search backend unavailable") {
 		t.Fatalf("search backend failure must be preserved: result=%+v err=%v", result, err)
 	}
@@ -447,5 +453,54 @@ func TestResolveWikiCreateKBRequiresUnambiguousServerContext(t *testing.T) {
 	kbID, err := resolveWikiCreateKB("concept/new", []string{"kb-1", "kb-2"}, routes)
 	if err != nil || kbID != "kb-2" {
 		t.Fatalf("cached provenance should choose kb-2: kb=%s err=%v", kbID, err)
+	}
+}
+
+// wiki_search keeps its historical regular-expression semantics by default;
+// only text that does not compile falls back to a literal match.
+func TestWikiSearchKeepsRegexDefaultWithLiteralFallback(t *testing.T) {
+	page := newTestWikiPage("kb-1", "concept/cpp")
+	service := &fakeWikiPageService{
+		searchResults: map[string][]*types.WikiPage{"kb-1": {page}},
+	}
+	service.searchQueries = map[string][]string{}
+	tool := NewWikiSearchTool(service, nil, NewWikiScopesFromKBIDs([]string{"kb-1"}), NewWikiRouteResolver())
+
+	for _, raw := range []string{
+		`{"query":"stardust|skyvault"}`,       // default: regex kept as-is
+		`{"query":"C++ v1.2"}`,                // default: invalid regex, matched literally
+		`{"query":"a.b","regex":false}`,       // explicit literal
+		`{"query":"^entity/.*","regex":true}`, // explicit regex
+	} {
+		if res, err := tool.Execute(context.Background(), json.RawMessage(raw)); err != nil || !res.Success {
+			t.Fatalf("%s: res=%+v err=%v", raw, res, err)
+		}
+	}
+	got := service.searchQueries["kb-1"]
+	want := []string{`stardust|skyvault`, `C\+\+ v1\.2`, `a\.b`, `^entity/.*`}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("backend patterns = %v, want %v", got, want)
+	}
+
+	res, err := tool.Execute(context.Background(), json.RawMessage(`{"query":"C++","regex":true}`))
+	if err != nil || res.Success || !strings.Contains(res.Error, "invalid regular expression") {
+		t.Fatalf("regex=true must reject an invalid pattern: res=%+v err=%v", res, err)
+	}
+}
+
+func TestWikiSearchAcceptsLegacyArrayAndSingleKBArguments(t *testing.T) {
+	page := newTestWikiPage("kb-2", "concept/legacy")
+	service := &fakeWikiPageService{searchResults: map[string][]*types.WikiPage{"kb-2": {page}}}
+	tool := NewWikiSearchTool(service, nil, NewWikiScopesFromKBIDs([]string{"kb-1", "kb-2"}), NewWikiRouteResolver())
+
+	res, err := tool.Execute(context.Background(), json.RawMessage(`{"queries":["legacy"],"knowledge_base_id":"kb-2"}`))
+	if err != nil || res == nil || !res.Success {
+		t.Fatalf("legacy arguments: res=%+v err=%v", res, err)
+	}
+	if !reflect.DeepEqual(service.searchCalls, []string{"kb-2"}) {
+		t.Fatalf("legacy knowledge_base_id must narrow the scope, calls=%v", service.searchCalls)
+	}
+	if !strings.Contains(res.Output, "[[concept/legacy|concept/legacy]]") {
+		t.Fatalf("output = %s", res.Output)
 	}
 }

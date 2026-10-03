@@ -121,17 +121,17 @@ func (t *wikiWritePageTool) Execute(ctx context.Context, args json.RawMessage) (
 	// Resolve and authorize provenance before choosing a creation target. In a
 	// multi-Wiki Agent, source documents provide a server-owned KB hint and
 	// remove the need for a model-visible knowledge_base_id argument.
+	var sourceDocs []wikiSourceDocument
 	var resolvedRefs []string
 	var err error
 	if params.SourceRefs != nil {
-		if t.scopeEnforced {
-			resolvedRefs, err = resolveAuthorizedSourceRefs(ctx, t.searchTargets, *params.SourceRefs, t.knowledgeService)
-			if err != nil {
-				return &types.ToolResult{Success: false, Error: "Invalid source_refs: " + err.Error()}, nil
-			}
-		} else {
-			resolvedRefs = resolveSourceRefs(ctx, t.knowledgeService, *params.SourceRefs)
+		sourceDocs, err = resolveWikiSourceDocuments(
+			ctx, *params.SourceRefs, t.knowledgeService, t.searchTargets, t.scopeEnforced,
+		)
+		if err != nil {
+			return &types.ToolResult{Success: false, Error: "Invalid source_refs: " + err.Error()}, nil
 		}
+		resolvedRefs = wikiSourceRefs(sourceDocs)
 	}
 	// Resolve existing pages across every legal Wiki KB. Cached provenance only
 	// influences lookup order; ambiguous slugs are never silently written to
@@ -139,9 +139,7 @@ func (t *wikiWritePageTool) Execute(ctx context.Context, args json.RawMessage) (
 	existingPage, kbID, err := resolveUniqueWikiPage(ctx, t.wikiPageService, params.Slug, t.kbIDs, t.routes)
 	if errors.Is(err, errWikiPageNotFoundInScope) {
 		existingPage = nil
-		sourceKBHints, sourceErr := wikiKnowledgeBasesForSourceRefs(
-			ctx, resolvedRefs, t.knowledgeService, t.kbIDs,
-		)
+		sourceKBHints, sourceErr := wikiKnowledgeBasesForSourceDocuments(sourceDocs, t.kbIDs)
 		if sourceErr != nil {
 			return &types.ToolResult{Success: false, Error: "Failed to resolve source_refs routing: " + sourceErr.Error()}, nil
 		}

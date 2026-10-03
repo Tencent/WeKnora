@@ -29,6 +29,7 @@ const (
 	WebSearchProviderTypeExa        WebSearchProviderType = "exa"
 	WebSearchProviderTypeMetaso     WebSearchProviderType = "metaso"
 	WebSearchProviderTypeBocha      WebSearchProviderType = "bocha"
+	WebSearchProviderTypeSerply     WebSearchProviderType = "serply"
 )
 
 // WebSearchProviderEntity represents a configured web search provider instance for a workspace.
@@ -179,6 +180,11 @@ func GetWebSearchProviderTypes() []WebSearchProviderTypeInfo {
 			ID: "brave", Name: "Brave Search", RequiresAPIKey: true, SupportsProxy: true,
 			Description: "Brave Search API (supports country and freshness filters)",
 			DocsURL:     "https://api-dashboard.search.brave.com/app/keys",
+		},
+		{
+			ID: "serply", Name: "Serply", RequiresAPIKey: true, SupportsProxy: true,
+			Description: "Serply Google search API (supports country and freshness filters)",
+			DocsURL:     "https://serply.io/docs",
 		},
 		{
 			ID:             "duckduckgo",

@@ -37,12 +37,12 @@ test('keeps a trailing steer bubble at the live edge before each streaming frame
   const originalRequest = globalThis.requestAnimationFrame
   const originalCancel = globalThis.cancelAnimationFrame
   let onResize!: ResizeObserverCallback
-  let observed: Element | undefined
+  const observed: Element[] = []
   let disconnected = false
   let deferredFrames = 0
   globalThis.ResizeObserver = class {
     constructor(callback: ResizeObserverCallback) { onResize = callback }
-    observe(target: Element) { observed = target }
+    observe(target: Element) { observed.push(target) }
     unobserve() {}
     disconnect() { disconnected = true }
   } as typeof ResizeObserver
@@ -51,7 +51,7 @@ test('keeps a trailing steer bubble at the live edge before each streaming frame
   const chat = mountChat()
   const resize = () => onResize([], {} as ResizeObserver)
   try {
-    assert.equal(observed, chat.messageList)
+    assert.deepEqual(observed, [chat.element, chat.messageList])
     // ResizeObserver runs after layout and before paint. An rAF requested here
     // runs in the NEXT frame, exposing the pushed-down bubble in this frame.
     for (let frame = 0; frame < 120; frame++) {
@@ -63,10 +63,24 @@ test('keeps a trailing steer bubble at the live edge before each streaming frame
     }
     assert.equal(deferredFrames, 0, 'resize follow must finish before the current paint')
 
+    // A taller composer (e.g. after opening the drawer) reduces the viewport
+    // without necessarily changing the message list's dimensions.
+    const contentHeight = chat.element.scrollHeight
+    chat.element.clientHeight -= 120
+    resize()
+    assert.equal(chat.element.scrollHeight, contentHeight)
+    assert.equal(chat.element.scrollHeight - chat.element.scrollTop, chat.element.clientHeight,
+      'viewport shrink must keep the last message reachable above the composer')
+    chat.element.clientHeight += 80
+    resize()
+    assert.equal(chat.element.scrollHeight - chat.element.scrollTop, chat.element.clientHeight,
+      'viewport expansion must keep following the bottom')
+
     chat.detached.value = true
     chat.element.scrollTop -= 200
     const readingPosition = chat.element.scrollTop
     chat.element.scrollHeight += 100
+    chat.element.clientHeight -= 60
     resize()
     assert.equal(chat.element.scrollTop, readingPosition, 'preserve intentional upward scrolling')
 

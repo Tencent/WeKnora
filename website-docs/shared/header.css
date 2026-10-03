@@ -1,0 +1,39 @@
+/* Keep the masthead identical across the product site and documentation. */
+.wk-header { position: sticky; top: 0; z-index: 30; width: 100%; border-bottom: 1px solid var(--wk-rule); background: var(--wk-header); backdrop-filter: blur(16px); color: var(--wk-ink); font-family: var(--wk-font-sans); font-feature-settings: normal; line-height: 1.75; }
+.wk-header *, .wk-header *::before, .wk-header *::after { box-sizing: border-box; }
+.wk-header a { text-decoration: none; }
+.wk-header button { font: inherit; cursor: pointer; padding: 0; }
+.wk-header-inner { width: 100%; padding-inline: 32px; margin-inline: auto; height: 63px; display: flex; align-items: center; gap: 28px; }
+.wk-brand { display: inline-flex; align-items: center; gap: 12px; color: var(--wk-ink); flex-shrink: 0; }
+.wk-navigation { display: flex; align-items: center; justify-content: center; gap: clamp(20px, 2.2vw, 40px); flex: 1; }
+.wk-navigation a { min-height: 44px; display: inline-flex; align-items: center; gap: 6px; font-size: 14px; font-weight: 400; color: var(--wk-ink-soft); transition: color .2s; }
+.wk-navigation a:hover, .wk-navigation a[aria-current="page"] { color: var(--wk-gold); }
+.wk-header svg { width: 24px; height: 24px; flex-shrink: 0; }
+.wk-navigation svg { width: 14px; height: 14px; }
+.wk-new-label { font-size: 12px; font-weight: 650; color: var(--wk-accent-text); letter-spacing: .03em; border: 1px solid var(--wk-accent-border); padding: 0 4px; line-height: 1.6; }
+.wk-header-github { font-size: 14px; display: flex; align-items: center; gap: 9px; color: var(--wk-ink); padding-left: 28px; border-left: 1px solid var(--wk-rule); min-height: 30px; }
+.wk-header-github svg { width: 20px; height: 20px; }
+.wk-header .wk-menu-toggle { display: none; border: 0; background: none; width: 44px; height: 44px; color: var(--wk-ink); align-items: center; justify-content: center; }
+.wk-header .wk-theme-toggle { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; width: 40px; height: 40px; border: 1px solid var(--wk-rule); border-radius: 20px; background: var(--wk-paper-2); color: var(--wk-ink-soft); }
+.wk-theme-toggle:hover { color: var(--wk-gold); border-color: var(--wk-gold); }
+.wk-theme-toggle svg { width: 19px; height: 19px; }
+.wk-navigation .wk-mobile-github { display: none; }
+.wk-header :focus-visible { outline: 2px solid var(--wk-gold); outline-offset: 5px; }
+@media (max-width: 1100px) {
+ .wk-header-inner { padding-inline: 24px; gap: 14px; }
+ .wk-navigation { gap: 14px; }
+ .wk-navigation a { font-size: 13px; }
+ .wk-header-github { padding-left: 18px; }
+ .wk-header-github span { display: none; }
+}
+@media (max-width: 800px) {
+ .wk-header-inner { gap: 12px; }
+ .wk-header-github { display: none; }
+ .wk-header .wk-menu-toggle { display: flex; }
+ .wk-theme-toggle { margin-left: auto; }
+ .wk-navigation { display: none; }
+ .wk-navigation.is-open { display: flex; position: absolute; left: 0; top: 63px; max-height: calc(100dvh - 64px); overflow-y: auto; right: 0; padding: 20px 32px 26px; background: var(--wk-paper); border-bottom: 1px solid var(--wk-rule); flex-direction: column; align-items: stretch; gap: 4px; box-shadow: 0 15px 20px #101f380a; }
+ .wk-navigation a { font-size: 16px; }
+ .wk-navigation .wk-mobile-github { display: inline-flex; }
+}
+@media (max-width: 480px) { .wk-header-inner { padding-inline: 20px; } }

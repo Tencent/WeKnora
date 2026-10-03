@@ -1,15 +1,13 @@
 import { ref, reactive } from "vue";
 import { storeToRefs } from "pinia";
-import { formatStringDate, kbFileTypeVerification } from "../utils/index";
-import { MessagePlugin } from "tdesign-vue-next";
+import { formatStringDate } from "../utils/index";
 import {
-  uploadKnowledgeFile,
   listKnowledgeFiles,
   getKnowledgeDetails,
   getKnowledgeDetailsCon,
+  type ListKnowledgeFilesParams,
 } from "@/api/knowledge-base/index";
 import { knowledgeStore } from "@/stores/knowledge";
-import { useUIStore } from "@/stores/ui";
 import { useRoute } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 
@@ -42,19 +40,7 @@ export default function (knowledgeBaseId?: string) {
   let chunkRequestGeneration = 0;
   let activeKnowledgeId = '';
   const getKnowled = (
-    query: {
-      page: number;
-      page_size: number;
-      tag_ids?: string;
-      keyword?: string;
-      file_type?: string;
-      parse_status?: string;
-      source?: string;
-      start_time?: string;
-      end_time?: string;
-      folder_path?: string;
-      folder_recursive?: boolean;
-    } = { page: 1, page_size: 35 },
+    query: ListKnowledgeFilesParams = { page: 1, page_size: 35 },
     kbId?: string,
   ): Promise<void> => {
     const targetKbId = kbId || knowledgeBaseId;
@@ -102,51 +88,6 @@ export default function (knowledgeBaseId?: string) {
     if (!visible) {
       moreIndex.value = -1;
     }
-  };
-  const requestMethod = (file: any, uploadInput: any) => {
-    if (!(file instanceof File) || !uploadInput) {
-      MessagePlugin.error(t('error.invalidFileType'));
-      return;
-    }
-    
-    if (kbFileTypeVerification(file)) {
-      return;
-    }
-    
-    // 获取当前知识库ID
-    let currentKbId: string | undefined = (route.params as any)?.kbId as string;
-    if (!currentKbId && typeof window !== 'undefined') {
-      const match = window.location.pathname.match(/knowledge-bases\/([^/]+)/);
-      if (match?.[1]) currentKbId = match[1];
-    }
-    if (!currentKbId) {
-      currentKbId = knowledgeBaseId;
-    }
-    if (!currentKbId) {
-      MessagePlugin.error(t('error.missingKbId'));
-      return;
-    }
-    
-    // 获取当前选中的标签 ID
-    const uiStore = useUIStore();
-    const tagIdsToUpload = uiStore.selectedTagIds.length > 0 ? [...uiStore.selectedTagIds] : undefined;
-
-    uploadKnowledgeFile(currentKbId, { file, tag_ids: tagIdsToUpload })
-      .then((result: any) => {
-        if (result.success) {
-          MessagePlugin.info(t('knowledgeBase.uploadSuccess'));
-          getKnowled({ page: 1, page_size: 35 }, currentKbId);
-        } else {
-          const errorMessage = result.error?.message || result.message || t('knowledgeBase.uploadFailed');
-          MessagePlugin.error(result.code === 'duplicate_file' ? t('knowledgeBase.fileExists') : errorMessage);
-        }
-        uploadInput.value.value = "";
-      })
-      .catch((err: any) => {
-        const errorMessage = err.error?.message || err.message || t('knowledgeBase.uploadFailed');
-        MessagePlugin.error(err.code === 'duplicate_file' ? t('knowledgeBase.fileExists') : errorMessage);
-        uploadInput.value.value = "";
-      });
   };
   const getCardDetails = (item: any) => {
     activeKnowledgeId = item.id;
@@ -230,7 +171,6 @@ export default function (knowledgeBaseId?: string) {
     details,
     openMore,
     onVisibleChange,
-    requestMethod,
     getCardDetails,
     total,
     getfDetails,

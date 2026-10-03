@@ -251,6 +251,7 @@ func newE2BIntegrationLifecycle(
 		createRequest,
 		time.Minute,
 		"",
+		nil,
 	)
 	if err != nil {
 		t.Fatalf("newRemoteSessionLifecycle: %v", err)

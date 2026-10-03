@@ -155,15 +155,12 @@ defineExpose({ start })
 
 .sandbox-desktop__overlay-text {
   margin: 0;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   line-height: 1.6;
 }
 
 .sandbox-desktop__spinner {
-  animation: sandbox-desktop-spin 1s linear infinite;
+  animation: wk-spin 1s linear infinite;
 }
 
-@keyframes sandbox-desktop-spin {
-  to { transform: rotate(360deg); }
-}
 </style>

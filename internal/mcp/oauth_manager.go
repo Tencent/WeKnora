@@ -3,6 +3,9 @@ package mcp
 import (
 	"context"
 	"fmt"
+	"net/url"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -57,6 +60,7 @@ func (m *OAuthManager) newHandler(
 		return nil, err
 	}
 	httpCfg := secutils.DefaultSSRFSafeHTTPClientConfig()
+	httpCfg.SameOriginRedirectsOnly = true
 	httpCfg.Timeout = 30 * time.Second
 	cfg := transport.OAuthConfig{
 		RedirectURI:           redirectURI,
@@ -92,6 +96,11 @@ func (m *OAuthManager) StartAuthorization(
 	principal = principal.Normalize()
 	if !principal.Valid() {
 		return "", "", fmt.Errorf("principal context is required to authorize OAuth MCP service %s", service.ID)
+	}
+
+	frontendRedirect, err = validateFrontendRedirect(frontendRedirect)
+	if err != nil {
+		return "", "", err
 	}
 
 	h, err := m.newHandler(ctx, service, tenantID, principal, redirectURI)
@@ -186,7 +195,10 @@ func (m *OAuthManager) CompleteAuthorization(
 	if err != nil {
 		return "", "", err
 	}
-	frontendRedirect = st.FrontendRedirect
+	frontendRedirect, err = validateFrontendRedirect(st.FrontendRedirect)
+	if err != nil {
+		return "/", "", err
+	}
 	serviceID = st.ServiceID
 	principal := st.Principal.Normalize()
 	if !principal.Valid() && st.UserID != "" {
@@ -277,4 +289,27 @@ func (m *OAuthManager) Revoke(
 	ctx context.Context, tenantID uint64, principal types.Principal, serviceID string,
 ) error {
 	return m.repo.DeleteTokenForPrincipal(ctx, tenantID, principal, serviceID)
+}
+
+// validateFrontendRedirect accepts application-relative paths or the explicitly
+// configured frontend origin. Request Host/Origin headers are not trusted.
+func validateFrontendRedirect(raw string) (string, error) {
+	if raw == "" {
+		return "/", nil
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.User != nil || u.Fragment != "" ||
+		strings.ContainsAny(raw, "\\\r\n\t") || strings.ContainsAny(u.Path, "\\\r\n\t") {
+		return "", fmt.Errorf("invalid frontend_redirect")
+	}
+	if u.IsAbs() || u.Host != "" {
+		trusted, err := url.Parse(strings.TrimSpace(os.Getenv("APP_EXTERNAL_URL")))
+		if err != nil || (u.Scheme != "https" && u.Scheme != "http") || trusted.Host == "" ||
+			!strings.EqualFold(u.Scheme, trusted.Scheme) || !strings.EqualFold(u.Host, trusted.Host) {
+			return "", fmt.Errorf("frontend_redirect origin is not configured")
+		}
+	} else if !strings.HasPrefix(u.Path, "/") || strings.HasPrefix(u.Path, "//") {
+		return "", fmt.Errorf("frontend_redirect must be an application-relative path")
+	}
+	return u.String(), nil
 }

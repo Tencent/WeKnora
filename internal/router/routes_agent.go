@@ -115,14 +115,14 @@ func RegisterOrganizationRoutes(r *gin.RouterGroup, orgHandler *handler.Organiza
 		orgs.POST("/join-by-id", g.Admin(), orgHandler.JoinByOrganizationID)
 		// Get organization by ID — Viewer+
 		orgs.GET("/:id", g.Viewer(), orgHandler.GetOrganization)
-		// Update organization — Admin+ in caller's tenant.
-		// Service still gates on "caller's tenant is the org owner";
-		// the route guard adds a defence-in-depth layer that stops a
-		// tenant Viewer/Contributor from ever reaching the service.
+		// Update organization — Admin+ in caller's tenant. The service
+		// requires the caller's tenant to be an org admin (not only the
+		// owner), matching the settings UI; the route guard stops a tenant
+		// Viewer/Contributor from ever reaching the service.
 		orgs.PUT("/:id", g.Admin(), orgHandler.UpdateOrganization)
-		// Delete organization — Admin+ in caller's tenant. Same
-		// rationale as PUT above; deletion is irreversible so the
-		// route-layer floor is at least as strict.
+		// Delete organization — Admin+ in caller's tenant; the service
+		// further requires the org's owner tenant, since deletion is
+		// irreversible.
 		orgs.DELETE("/:id", g.Admin(), orgHandler.DeleteOrganization)
 		// Leave organization (Admin+ in caller's tenant only)
 		orgs.POST("/:id/leave", g.Admin(), orgHandler.LeaveOrganization)

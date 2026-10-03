@@ -111,26 +111,26 @@ const getRelevanceLabel = (level: RelevanceLevel): string => {
 }
 
 .results-header {
-  font-size: 13px;
+  font-size: var(--app-text-md);
   font-weight: 600;
   color: var(--td-text-color-primary);
   padding: 4px 0;
 }
 
 .result-index {
-  font-size: 13px;
+  font-size: var(--app-text-md);
   color: var(--td-text-color-placeholder);
   font-weight: 600;
 }
 
 .knowledge-title {
-  font-size: 13px;
+  font-size: var(--app-text-md);
   color: var(--td-text-color-primary);
   flex: 1;
 }
 
 .score {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-placeholder);
   font-weight: 500;
 }

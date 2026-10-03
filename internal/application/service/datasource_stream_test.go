@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/Tencent/WeKnora/internal/datasource"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -121,4 +122,84 @@ func TestStreamHandler_CheckpointPersistsCursor(t *testing.T) {
 
 	require.Len(t, dsRepo.updated, 1)
 	assert.NotEmpty(t, dsRepo.updated[0].LastSyncCursor, "checkpoint must persist the cursor JSON")
+}
+
+type recordingStreamConnector struct {
+	streamCalled bool
+	fullCalled   bool
+	fullCursor   *types.SyncCursor
+}
+
+func (recordingStreamConnector) Type() string { return "recording" }
+
+func (recordingStreamConnector) Validate(context.Context, *types.DataSourceConfig) error {
+	return nil
+}
+
+func (recordingStreamConnector) ListResources(
+	context.Context, *types.DataSourceConfig, string,
+) ([]types.Resource, error) {
+	return nil, nil
+}
+
+func (recordingStreamConnector) ResolveResourceAncestors(
+	context.Context, *types.DataSourceConfig, []string,
+) ([]string, error) {
+	return nil, nil
+}
+
+func (recordingStreamConnector) FetchAll(
+	context.Context, *types.DataSourceConfig, []string,
+) ([]types.FetchedItem, error) {
+	return nil, nil
+}
+
+func (recordingStreamConnector) FetchIncremental(
+	context.Context, *types.DataSourceConfig, *types.SyncCursor,
+) ([]types.FetchedItem, *types.SyncCursor, error) {
+	return nil, nil, nil
+}
+
+func (r *recordingStreamConnector) FetchStream(
+	context.Context, *types.DataSourceConfig, *types.SyncCursor, datasource.StreamHandler,
+) (*types.SyncCursor, error) {
+	r.streamCalled = true
+	return nil, nil
+}
+
+type recordingFullStreamConnector struct {
+	recordingStreamConnector
+}
+
+func (r *recordingFullStreamConnector) FetchFullStream(
+	_ context.Context, _ *types.DataSourceConfig, cursor *types.SyncCursor, _ datasource.StreamHandler,
+) (*types.SyncCursor, error) {
+	r.fullCalled = true
+	r.fullCursor = cursor
+	return cursor, nil
+}
+
+var (
+	_ datasource.StreamingConnector     = (*recordingStreamConnector)(nil)
+	_ datasource.FullStreamingConnector = (*recordingFullStreamConnector)(nil)
+)
+
+func TestStreamingFetchUsesFullStreamBaseline(t *testing.T) {
+	start := &types.SyncCursor{ConnectorCursor: map[string]interface{}{"phase": "dropped"}}
+	baseline := &types.SyncCursor{ConnectorCursor: map[string]interface{}{"phase": "stored"}}
+	cfg := &types.DataSourceConfig{}
+
+	full := &recordingFullStreamConnector{}
+	_, err := streamingFetch(context.Background(), full, cfg, true, start, baseline, nil)
+	require.NoError(t, err)
+	if !full.fullCalled || full.streamCalled || full.fullCursor != baseline {
+		t.Fatalf("full connector full=%v stream=%v cursor=%#v", full.fullCalled, full.streamCalled, full.fullCursor)
+	}
+
+	plain := &recordingStreamConnector{}
+	_, err = streamingFetch(context.Background(), plain, cfg, true, start, baseline, nil)
+	require.NoError(t, err)
+	if !plain.streamCalled {
+		t.Fatal("plain streaming connector must keep FetchStream on force-full")
+	}
 }

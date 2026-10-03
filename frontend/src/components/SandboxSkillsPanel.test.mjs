@@ -36,3 +36,27 @@ test('focused skill management expands env vars and transcript without a mid-pag
   assert.doesNotMatch(manageBlock, /skill-manage__footer/)
   assert.doesNotMatch(manageBlock, /settings\.sandbox\.skillEnv\.save/)
 })
+
+test('the focused skill offers an upgrade when the catalog has moved on', () => {
+  assert.match(source, /catalogItem\?: SkillCatalogItem \| null/)
+  assert.match(source, /installUpgradable\(catalog, skill\)/)
+  assert.match(manageBlock, /v-if="managedUpgradeHint"/)
+  assert.match(manageBlock, /upgradeSkill\(managedSkill\)/)
+  assert.match(manageBlock, /settings\.skills\.upgradeRowTitle/)
+  // The upgrade is the catalog install; the retry replays this sandbox's own archive.
+  const upgrade = source.slice(source.indexOf('async function upgradeSkill('), source.indexOf('async function stopSkill('))
+  assert.match(upgrade, /installSkillCatalog\(catalog\.id, \[configId\]\)/)
+  assert.doesNotMatch(upgrade, /reinstallConfigSkill/)
+})
+
+test('a skill mid-upgrade or after a failed upgrade says the previous version still runs', () => {
+  assert.match(source, /servedPreviousText\(t, managedSkill\.value\)/)
+  assert.match(manageBlock, /v-if="managedServedNote"/)
+  assert.match(source, /\.skill-manage__served \{/)
+})
+
+test('an install the catalog has moved past is offered the upgrade, not the retries', () => {
+  assert.match(source, /v-if="managedSkill\.status === 'failed' && !managedUpgradable"/)
+  assert.match(manageBlock, /:can-retry="\(managedSkill\.status === 'ready' \|\| managedSkill\.status === 'failed'\) && !managedUpgradable"/)
+  assert.match(source, /settings\.skills\.upgradeRowHintFailedVersions/)
+})

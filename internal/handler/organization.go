@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -422,8 +423,12 @@ func (h *OrganizationHandler) ListMembers(c *gin.Context) {
 		}
 		if m.RepresentativeUser != nil {
 			resp.Username = m.RepresentativeUser.Username
-			resp.Email = m.RepresentativeUser.Email
 			resp.Avatar = m.RepresentativeUser.Avatar
+			// The roster reaches every member of every workspace; other
+			// workspaces' users' emails are not part of it.
+			if m.TenantID == tenantID {
+				resp.Email = m.RepresentativeUser.Email
+			}
 		}
 		response = append(response, resp)
 	}
@@ -1170,6 +1175,9 @@ func (h *OrganizationHandler) UpdateSharePermission(c *gin.Context) {
 		c.Error(apperrors.NewValidationError("Invalid request parameters").WithDetails(err.Error()))
 		return
 	}
+	if !h.kbShareOnPath(c, shareID) {
+		return
+	}
 
 	if err := h.shareService.UpdateSharePermission(ctx, shareID, req.Permission, userID, tenantID); err != nil {
 		logger.Errorf(ctx, "Failed to update share permission: %v", err)
@@ -1181,6 +1189,44 @@ func (h *OrganizationHandler) UpdateSharePermission(c *gin.Context) {
 		"success": true,
 		"message": "Share permission updated successfully",
 	})
+}
+
+// apiKeyMaySeeKB keeps a KB-restricted API key's listings inside its
+// allow-list; organization views would otherwise name every shared KB.
+func apiKeyMaySeeKB(ctx context.Context, kbID string) bool {
+	return types.AuthorizeTenantAPIKeyKnowledgeBases(ctx, kbID) == nil
+}
+
+// kbShareOnPath binds share_id to the route's :id. The route's ownership guard
+// is evaluated against :id, so a share of another KB must not be reachable
+// through an unrelated (or nonexistent) KB path.
+func (h *OrganizationHandler) kbShareOnPath(c *gin.Context, shareID string) bool {
+	share, err := h.shareService.GetShare(c.Request.Context(), shareID)
+	if err != nil && !errors.Is(err, service.ErrShareNotFound) {
+		logger.Errorf(c.Request.Context(), "Failed to load share: %v", err)
+		_ = c.Error(apperrors.NewInternalServerError("Failed to load share"))
+		return false
+	}
+	if share == nil || share.KnowledgeBaseID != c.Param("id") {
+		_ = c.Error(apperrors.NewNotFoundError("Share not found"))
+		return false
+	}
+	return true
+}
+
+// agentShareOnPath is kbShareOnPath for /agents/:id/shares/:share_id.
+func (h *OrganizationHandler) agentShareOnPath(c *gin.Context, shareID string) bool {
+	share, err := h.agentShareService.GetShare(c.Request.Context(), shareID)
+	if err != nil && !errors.Is(err, service.ErrAgentShareNotFound) {
+		logger.Errorf(c.Request.Context(), "Failed to load agent share: %v", err)
+		_ = c.Error(apperrors.NewInternalServerError("Failed to load share"))
+		return false
+	}
+	if share == nil || share.AgentID != c.Param("id") {
+		_ = c.Error(apperrors.NewNotFoundError("Share not found"))
+		return false
+	}
+	return true
 }
 
 // RemoveShare removes a share
@@ -1199,6 +1245,9 @@ func (h *OrganizationHandler) RemoveShare(c *gin.Context) {
 	shareID := c.Param("share_id")
 	userID := c.GetString(types.UserIDContextKey.String())
 	tenantID := c.GetUint64(types.TenantIDContextKey.String())
+	if !h.kbShareOnPath(c, shareID) {
+		return
+	}
 
 	if err := h.shareService.RemoveShare(ctx, shareID, userID, tenantID); err != nil {
 		logger.Errorf(ctx, "Failed to remove share: %v", err)
@@ -1244,6 +1293,9 @@ func (h *OrganizationHandler) ListOrgShares(c *gin.Context) {
 
 	response := make([]types.KnowledgeBaseShareResponse, 0, len(shares))
 	for _, s := range shares {
+		if !apiKeyMaySeeKB(ctx, s.KnowledgeBaseID) {
+			continue
+		}
 		// Effective permission for current user = min(share permission, my role in org)
 		effectivePerm := s.Permission
 		if !myRoleInOrg.HasPermission(s.Permission) {
@@ -1317,6 +1369,9 @@ func (h *OrganizationHandler) ListSharedKnowledgeBases(c *gin.Context) {
 	// metadata (share_id, organization_id, etc.) is preserved as-is.
 	rows := make([]map[string]interface{}, 0, len(sharedKBs))
 	for _, info := range sharedKBs {
+		if info.KnowledgeBase != nil && !apiKeyMaySeeKB(ctx, info.KnowledgeBase.ID) {
+			continue
+		}
 		rows = append(rows, sharedKBRow(info, nil))
 	}
 
@@ -1349,6 +1404,14 @@ func (h *OrganizationHandler) ShareAgent(c *gin.Context) {
 		}
 		if errors.Is(err, service.ErrAgentNotConfigured) {
 			c.Error(apperrors.NewValidationError("Agent is not fully configured. Please set the chat model, and set the rerank model if the knowledge_search tool is enabled in agent settings."))
+			return
+		}
+		if errors.Is(err, service.ErrBuiltinAgentNotShareable) {
+			_ = c.Error(apperrors.NewValidationError("Built-in agents cannot be shared"))
+			return
+		}
+		if errors.Is(err, service.ErrAgentKBScopeNotShareable) {
+			_ = c.Error(apperrors.NewForbiddenError(err.Error()))
 			return
 		}
 		c.Error(apperrors.NewForbiddenError("Permission denied or invalid operation"))
@@ -1414,6 +1477,9 @@ func (h *OrganizationHandler) RemoveAgentShare(c *gin.Context) {
 	shareID := c.Param("share_id")
 	userID := c.GetString(types.UserIDContextKey.String())
 	tenantID := c.GetUint64(types.TenantIDContextKey.String())
+	if !h.agentShareOnPath(c, shareID) {
+		return
+	}
 	if err := h.agentShareService.RemoveShare(ctx, shareID, userID, tenantID); err != nil {
 		logger.Errorf(ctx, "Failed to remove agent share: %v", err)
 		c.Error(apperrors.NewForbiddenError("Permission denied"))
@@ -1683,6 +1749,9 @@ func (h *OrganizationHandler) ListOrganizationSharedKnowledgeBases(c *gin.Contex
 	// ("share endpoints never leak vector-store metadata").
 	rows := make([]map[string]interface{}, 0, len(list))
 	for _, item := range list {
+		if item.KnowledgeBase != nil && !apiKeyMaySeeKB(ctx, item.KnowledgeBase.ID) {
+			continue
+		}
 		extras := map[string]interface{}{"is_mine": item.IsMine}
 		if item.SourceFromAgent != nil {
 			extras["source_from_agent"] = item.SourceFromAgent
@@ -1833,25 +1902,16 @@ func (h *OrganizationHandler) toOrgResponse(ctx context.Context, org *types.Orga
 	return resp
 }
 
-// SearchTenantsForInvite searches candidate tenants for inviting to organization.
-//
-// Plan 3 (#1303) makes the tenant the unit of membership. Because a single user
-// may belong to multiple workspaces, matching by username/email is ambiguous
-// (which workspace did the admin mean?), so this endpoint matches strictly by
-// tenant (workspace) name: it resolves matching tenants, filters out tenants
-// already in the org, and returns one row per candidate tenant.
-//
-// @Summary      搜索可邀请的空间
-// @Description  按空间名搜索可邀请的空间（排除已加入的空间）用于邀请加入组织；按空间去重
-// @Tags         组织管理
-// @Produce      json
-// @Param        id     path   string  true   "组织ID"
-// @Param        q      query  string  true   "搜索关键词（空间名）"
-// @Param        limit  query  int     false  "返回数量限制" default(10)
-// @Success      200    {object}  map[string]interface{}
-// @Failure      403    {object}  apperrors.AppError
-// @Security     Bearer
-// @Router       /organizations/{id}/search-tenants [get]
+// SearchTenantsForInvite resolves one exact workspace ID for an organization
+// administrator. Workspace names are never searched across tenants.
+// @Summary Resolve a workspace ID for invitation
+// @Tags 组织管理
+// @Produce json
+// @Param id path string true "组织ID"
+// @Param q query string true "Exact workspace ID"
+// @Success 200 {object} map[string]interface{}
+// @Security Bearer
+// @Router /organizations/{id}/search-tenants [get]
 func (h *OrganizationHandler) SearchTenantsForInvite(c *gin.Context) {
 	ctx := c.Request.Context()
 
@@ -1874,93 +1934,32 @@ func (h *OrganizationHandler) SearchTenantsForInvite(c *gin.Context) {
 		return
 	}
 
-	limit := 10
-	if l := c.Query("limit"); l != "" {
-		if n, errConv := strconv.Atoi(l); errConv == nil && n > 0 && n <= 50 {
-			limit = n
-		}
-	}
-
-	// Exclude tenants already in the org.
-	existingMembers, _ := h.orgService.ListTenantMembers(ctx, orgID)
-	existingTenantIDs := make(map[uint64]bool, len(existingMembers))
-	for _, m := range existingMembers {
-		existingTenantIDs[m.TenantID] = true
-	}
-
-	// Match tenants by name only. A single user may belong to multiple
-	// workspaces, so resolving a query to "the user's tenant" is ambiguous;
-	// the membership unit is the tenant, so we invite by workspace name.
-	// SearchTenants uses page/pageSize; pageSize=limit*2 is a safe ceiling
-	// given the soft cap of 50 above.
-	tenantsByName, _, err := h.tenantService.SearchTenants(ctx, query, 0, 1, limit*2)
-	if err != nil {
-		logger.Errorf(ctx, "Failed to search tenants: %v", err)
-		c.Error(apperrors.NewInternalServerError("Failed to search candidates"))
+	candidates := []types.TenantInviteCandidate{}
+	targetID, parseErr := strconv.ParseUint(strings.TrimSpace(query), 10, 64)
+	if parseErr != nil || targetID == 0 {
+		c.JSON(http.StatusOK, gin.H{"success": true, "data": candidates})
 		return
 	}
-
-	// Insertion-ordered map: first match wins, preserving search ordering.
-	type entry struct {
-		idx       int // preserve search ordering
-		candidate types.TenantInviteCandidate
+	existingMembers, err := h.orgService.ListTenantMembers(ctx, orgID)
+	if err != nil {
+		_ = c.Error(apperrors.NewInternalServerError("Failed to load organization members"))
+		return
 	}
-	seen := make(map[uint64]*entry)
-	addTenantByID := func(tid uint64) {
-		if tid == 0 || existingTenantIDs[tid] {
+	for _, member := range existingMembers {
+		if member.TenantID == targetID {
+			c.JSON(http.StatusOK, gin.H{"success": true, "data": candidates})
 			return
 		}
-		if _, ok := seen[tid]; ok {
-			return
-		}
-		seen[tid] = &entry{
-			idx: len(seen),
-			candidate: types.TenantInviteCandidate{
-				TenantID: tid,
-			},
-		}
 	}
-	for _, t := range tenantsByName {
-		if t == nil {
-			continue
-		}
-		addTenantByID(t.ID)
+	tenants, err := h.tenantService.GetTenantsByIDs(ctx, []uint64{targetID})
+	if err != nil {
+		_ = c.Error(apperrors.NewInternalServerError("Failed to resolve workspace"))
+		return
 	}
-
-	// Resolve tenant names for all candidates in one round-trip.
-	ids := make([]uint64, 0, len(seen))
-	for tid := range seen {
-		ids = append(ids, tid)
+	if tenant := tenants[targetID]; tenant != nil {
+		candidates = append(candidates, types.TenantInviteCandidate{TenantID: tenant.ID, TenantName: tenant.Name})
 	}
-	tenantByID, _ := h.tenantService.GetTenantsByIDs(ctx, ids)
-	for tid, e := range seen {
-		if t, ok := tenantByID[tid]; ok && t != nil {
-			e.candidate.TenantName = t.Name
-		}
-	}
-
-	// Restore insertion order (idx is unique in [0, len(seen))).
-	byIdx := make([]types.TenantInviteCandidate, len(seen))
-	for _, e := range seen {
-		byIdx[e.idx] = e.candidate
-	}
-	// Drop tenants we couldn't resolve a name for (defunct rows or
-	// deleted tenants) and cap at `limit`.
-	sorted := make([]types.TenantInviteCandidate, 0, limit)
-	for _, c := range byIdx {
-		if c.TenantName == "" {
-			continue
-		}
-		sorted = append(sorted, c)
-		if len(sorted) >= limit {
-			break
-		}
-	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"data":    sorted,
-	})
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": candidates})
 }
 
 // SearchUsersForInvite is retained as a thin compatibility shim that
@@ -2015,40 +2014,20 @@ func (h *OrganizationHandler) InviteMember(c *gin.Context) {
 		return
 	}
 
-	// Plan 3: resolve the (target tenant, representative user) pair.
+	// Plan 3: resolve the target tenant — preferably from tenant_id, or (the
+	// pre-Plan-3 SDK contract) from the tenant of user_id.
 	//
-	//  - Preferred: caller supplies tenant_id directly (and optionally
-	//    representative_user_id) — this matches the tenant-centric mental
-	//    model and lets admins invite any user as the rep.
-	//  - Legacy:   caller supplies only user_id — handler looks up that
-	//    user's tenant and uses the same user as the rep, preserving the
-	//    pre-Plan-3 SDK contract.
+	// A direct add enrols a workspace without anyone in it taking part, so no
+	// user of that workspace is attached as its representative: the roster
+	// shows a representative's username (and email to their own workspace)
+	// to members, and the inviter must not pick whose. representative_user_id
+	// is accepted for compatibility and ignored.
 	targetTenantID := req.TenantID
-	representativeUserID := req.RepresentativeUserID
 	switch {
 	case targetTenantID != 0:
-		// Tenant-id path: validate the tenant exists; pick a sensible
-		// representative when the caller didn't pin one.
 		if _, err := h.tenantService.GetTenantByID(ctx, targetTenantID); err != nil {
 			c.Error(apperrors.NewNotFoundError("Workspace not found"))
 			return
-		}
-		if representativeUserID == "" {
-			// Fall back to the legacy user_id field if it was sent, so
-			// existing clients that learned to send both keep working.
-			representativeUserID = req.UserID
-		}
-		if representativeUserID != "" {
-			// If a representative is named, sanity-check it belongs to
-			// the target tenant. We don't hard-fail when it doesn't —
-			// the membership row is keyed by tenant_id, the rep field
-			// is informational — but we strip the inconsistent value
-			// so the audit log doesn't lie.
-			if u, err := h.userService.GetUserByID(ctx, representativeUserID); err != nil || u == nil || u.TenantID != targetTenantID {
-				logger.Warnf(ctx, "representative_user_id %s does not belong to tenant %d; dropping",
-					secutils.SanitizeForLog(representativeUserID), targetTenantID)
-				representativeUserID = ""
-			}
 		}
 	case req.UserID != "":
 		// Legacy path: resolve target tenant from the user.
@@ -2058,9 +2037,6 @@ func (h *OrganizationHandler) InviteMember(c *gin.Context) {
 			return
 		}
 		targetTenantID = invitedUser.TenantID
-		if representativeUserID == "" {
-			representativeUserID = req.UserID
-		}
 	default:
 		c.Error(apperrors.NewValidationError("Either tenant_id or user_id is required"))
 		return
@@ -2072,8 +2048,8 @@ func (h *OrganizationHandler) InviteMember(c *gin.Context) {
 		return
 	}
 
-	// Add tenant member with the chosen representative.
-	if err := h.orgService.AddTenantMember(ctx, orgID, targetTenantID, representativeUserID, req.Role); err != nil {
+	// Add the tenant without a representative (see above).
+	if err := h.orgService.AddTenantMember(ctx, orgID, targetTenantID, "", req.Role); err != nil {
 		logger.Errorf(ctx, "Failed to add member: %v", err)
 		if errors.Is(err, service.ErrOrgMemberLimitReached) {
 			c.Error(apperrors.NewValidationError("该空间成员已满，无法添加新成员"))
@@ -2083,10 +2059,9 @@ func (h *OrganizationHandler) InviteMember(c *gin.Context) {
 		return
 	}
 
-	logger.Infof(ctx, "User %s invited tenant %d (rep user %s) to organization %s with role %s",
+	logger.Infof(ctx, "User %s invited tenant %d to organization %s with role %s",
 		secutils.SanitizeForLog(userID),
 		targetTenantID,
-		secutils.SanitizeForLog(representativeUserID),
 		orgID,
 		req.Role)
 

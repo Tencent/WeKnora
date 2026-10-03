@@ -134,13 +134,13 @@ const statusLabel = (status: string) => {
 </script>
 
 <style lang="less" scoped>
-.mcp-result { min-width: 0; font-size: 12px; color: var(--td-text-color-primary); }
+.mcp-result { min-width: 0; font-size: var(--app-text-sm); color: var(--td-text-color-primary); }
 .mcp-summary { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin-bottom: 8px; color: var(--td-text-color-secondary); }
 .mcp-server { font-weight: 600; color: var(--td-text-color-primary); }
 .mcp-empty { margin: 0; color: var(--td-text-color-placeholder); }
 .mcp-list {
   border: 1px solid var(--td-component-stroke);
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   overflow: hidden;
   background: var(--td-bg-color-container);
 }
@@ -164,7 +164,7 @@ const statusLabel = (status: string) => {
 .mcp-item__index {
   flex-shrink: 0;
   min-width: 22px;
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   font-weight: 600;
   color: var(--td-text-color-placeholder);
 }
@@ -180,7 +180,7 @@ const statusLabel = (status: string) => {
 }
 .mcp-item__meta {
   flex-shrink: 0;
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   color: var(--td-text-color-placeholder);
 }
 .mcp-item__chevron {
@@ -189,7 +189,7 @@ const statusLabel = (status: string) => {
 }
 .mcp-item__desc {
   margin: 4px 10px 10px 40px;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.55;
   color: var(--td-text-color-secondary);
   overflow-wrap: anywhere;
@@ -235,14 +235,14 @@ const statusLabel = (status: string) => {
   border: 0;
   background: transparent;
   font: inherit;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-brand-color);
   cursor: pointer;
 }
-.mcp-parameters { margin-top: 10px; border: 1px solid var(--td-component-stroke); border-radius: 8px; overflow: hidden; }
+.mcp-parameters { margin-top: 10px; border: 1px solid var(--td-component-stroke); border-radius: var(--app-radius-md); overflow: hidden; }
 .mcp-parameters__label {
   padding: 6px 12px;
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   font-weight: 600;
   color: var(--td-text-color-placeholder);
   background: var(--td-bg-color-secondarycontainer);
@@ -256,7 +256,7 @@ const statusLabel = (status: string) => {
 .mcp-parameter p { margin: 4px 0 0; color: var(--td-text-color-secondary); white-space: pre-wrap; overflow-wrap: anywhere; }
 .mcp-definition { margin-top: 10px; }
 .mcp-definition summary { cursor: pointer; color: var(--td-text-color-secondary); }
-pre { margin: 8px 0 0; padding: 10px 12px; background: var(--td-bg-color-secondarycontainer); border-radius: 6px; font: 12px/1.6 var(--app-font-family-mono); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 320px; overflow: auto; }
+pre { margin: 8px 0 0; padding: 10px 12px; background: var(--td-bg-color-secondarycontainer); border-radius: var(--app-radius-sm); font: 12px/1.6 var(--app-font-family-mono); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 320px; overflow: auto; }
 .mcp-error { display: flex; align-items: flex-start; gap: 8px; color: var(--td-error-color); }
 .mcp-error pre { margin: 0; flex: 1; min-width: 0; }
 </style>

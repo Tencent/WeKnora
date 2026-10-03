@@ -1,4 +1,5 @@
 import { defineStore } from 'pinia'
+import { clampSidebarWidth, SIDEBAR_COLLAPSED_WIDTH, SIDEBAR_COLLAPSE_THRESHOLD } from '../utils/sidebarWidth'
 
 export const useUIStore = defineStore('ui', {
   state: () => ({
@@ -20,8 +21,15 @@ export const useUIStore = defineStore('ui', {
     manualEditorInitialContent: '',
     manualEditorInitialStatus: 'draft' as 'draft' | 'publish',
     manualEditorOnSuccess: null as null | ((payload: { kbId: string; knowledgeId: string; status: 'draft' | 'publish' }) => void),
-    sidebarCollapsed: localStorage.getItem('sidebar_collapsed') === 'true'
+    sidebarCollapsed: localStorage.getItem('sidebar_collapsed') === 'true',
+    sidebarWidth: clampSidebarWidth(Number(localStorage.getItem('sidebar_width'))),
+    sidebarResizing: false,
+    sidebarBrowserStatus: localStorage.getItem('sidebar_browser_status') !== 'false',
   }),
+
+  getters: {
+    sidebarDisplayWidth: (state) => state.sidebarCollapsed ? SIDEBAR_COLLAPSED_WIDTH : state.sidebarWidth,
+  },
 
   actions: {
     openSettings(section?: string, subSection?: string) {
@@ -120,9 +128,25 @@ export const useUIStore = defineStore('ui', {
       this.selectedTagIds = []
     },
 
+    setSidebarBrowserStatus(visible: boolean) {
+      this.sidebarBrowserStatus = visible
+      localStorage.setItem('sidebar_browser_status', String(visible))
+    },
+
     toggleSidebar() {
       this.sidebarCollapsed = !this.sidebarCollapsed
       localStorage.setItem('sidebar_collapsed', String(this.sidebarCollapsed))
+    },
+
+    resizeSidebar(width: number) {
+      if (!Number.isFinite(width)) return
+      if (width < SIDEBAR_COLLAPSE_THRESHOLD) {
+        this.collapseSidebar()
+        return
+      }
+      this.sidebarWidth = clampSidebarWidth(width)
+      localStorage.setItem('sidebar_width', String(this.sidebarWidth))
+      this.expandSidebar()
     },
 
     collapseSidebar() {
@@ -136,4 +160,3 @@ export const useUIStore = defineStore('ui', {
     }
   }
 })
-

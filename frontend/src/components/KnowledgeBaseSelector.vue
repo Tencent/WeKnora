@@ -65,7 +65,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, nextTick } from 'vue'
 import { useSettingsStore } from '@/stores/settings'
-import { listKnowledgeBases } from '@/api/knowledge-base'
+import { useChatResourcesStore } from '@/stores/chatResources'
 import { useI18n } from 'vue-i18n'
 import { getRootZoom, rectToCssPx, cssViewportSize } from '@/utils/zoom'
 
@@ -95,6 +95,7 @@ const settingsStore = useSettingsStore()
 // 本地状态
 const searchQuery = ref('')
 const highlightedIndex = ref(0)
+const chatResources = useChatResourcesStore()
 const knowledgeBases = ref<KnowledgeBase[]>([])
 const searchInput = ref<HTMLInputElement | null>(null)
 const kbList = ref<HTMLElement | null>(null)
@@ -164,8 +165,8 @@ const close = () => {
 
 const loadKnowledgeBases = async () => {
   try {
-    const res: any = await listKnowledgeBases()
-    if (res?.data && Array.isArray(res.data)) knowledgeBases.value = res.data
+    await chatResources.ensureKnowledgeBases()
+    knowledgeBases.value = chatResources.rawKnowledgeBases as KnowledgeBase[]
   } catch (e) {
     console.error(t('knowledgeBase.loadingFailed'), e)
   }
@@ -369,7 +370,7 @@ watch(() => props.visible, async (v) => {
   position: fixed !important;
   background: var(--td-bg-color-container);
   border: .5px solid var(--td-component-border);
-  border-radius: 10px;
+  border-radius: var(--app-radius-lg);
   box-shadow: var(--td-shadow-2);
   overflow: hidden;
   animation: fadeIn 0.15s ease-out;
@@ -389,12 +390,12 @@ watch(() => props.visible, async (v) => {
 .kb-search-input {
   width: 100%;
   padding: 6px 10px;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   border: .5px solid var(--td-component-stroke);
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   background: var(--td-bg-color-secondarycontainer);
   outline: none;
-  transition: border 0.12s;
+  transition: border var(--app-motion-instant);
 }
 .kb-search-input:focus {
   border-color: var(--td-success-color);
@@ -416,9 +417,9 @@ watch(() => props.visible, async (v) => {
   display: flex;
   align-items: center;
   padding: 6px 8px;
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   cursor: pointer;
-  transition: background 0.12s;
+  transition: background var(--app-motion-instant);
   margin-bottom: 4px;
 }
 .kb-item:last-child { margin-bottom: 0; }
@@ -466,10 +467,10 @@ watch(() => props.visible, async (v) => {
   }
 }
 .kb-name-wrap { display:flex; flex-direction: row; align-items: center; gap: 4px; min-width: 0; }
-.kb-name { font-size: 12px; color: var(--td-text-color-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.4; }
-.kb-docs { font-size: 11px; color: var(--td-text-color-placeholder); flex-shrink: 0; }
+.kb-name { font-size: var(--app-text-sm); color: var(--td-text-color-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.4; }
+.kb-docs { font-size: var(--app-text-xs); color: var(--td-text-color-placeholder); flex-shrink: 0; }
 
-.kb-empty { padding: 20px 8px; text-align: center; color: var(--td-text-color-placeholder); font-size: 12px; }
+.kb-empty { padding: 20px 8px; text-align: center; color: var(--td-text-color-placeholder); font-size: var(--app-text-sm); }
 
 .kb-actions {
   display: flex;
@@ -481,13 +482,13 @@ watch(() => props.visible, async (v) => {
 .kb-btn {
   flex: 1;
   padding: 6px 10px;
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   border: 1px solid var(--td-component-stroke);
   background: var(--td-bg-color-container);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-secondary);
   cursor: pointer;
-  transition: all 0.12s;
+  transition: all var(--app-motion-instant);
 }
 .kb-btn:hover {
   border-color: var(--td-success-color);

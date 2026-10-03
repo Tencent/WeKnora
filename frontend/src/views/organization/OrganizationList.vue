@@ -1,17 +1,20 @@
 <template>
   <div class="org-list-container">
-    <ListSpaceSidebar mode="organization" v-model="spaceSelection" :count-all="organizations.length"
-      :count-created="createdCount" :count-joined="joinedCount" />
     <div class="org-list-content">
       <div class="header" style="--wails-draggable: drag">
         <div class="header-title" style="--wails-draggable: drag">
           <div class="title-row" style="--wails-draggable: drag">
-            <h2 style="--wails-draggable: drag">{{ $t('organization.title') }}</h2>
+            <h2 style="--wails-draggable: drag">
+              <ResourceIcon type="organization" :size="24" />
+              {{ $t('organization.title') }}
+            </h2>
             <div class="header-actions" style="--wails-draggable: no-drag">
+              <ResourceSortControl v-model="selectedResourceSort" />
               <t-tooltip :content="canManageOrg ? $t('organization.joinOrg') : noPermissionTip" placement="bottom">
                 <t-button variant="text" theme="default" size="small" class="header-action-btn"
                   style="--wails-draggable: no-drag" :disabled="!canManageOrg" @click="handleJoinOrganization">
                   <template #icon><t-icon name="enter" size="16px" /></template>
+                {{ $t('organization.joinOrg') }}
                 </t-button>
               </t-tooltip>
               <t-tooltip :content="canManageOrg ? $t('organization.createOrg') : noPermissionTip" placement="bottom">
@@ -19,6 +22,7 @@
                   style="--wails-draggable: no-drag" :disabled="!canManageOrg" @click="handleCreateOrganization">
                   <template #icon><img src="@/assets/img/organization-green.svg" class="org-create-icon" alt=""
                       aria-hidden="true" /></template>
+                {{ $t('organization.createOrg') }}
                 </t-button>
               </t-tooltip>
             </div>
@@ -26,10 +30,16 @@
           <p class="header-subtitle" style="--wails-draggable: drag">{{ $t('organization.subtitle') }}</p>
         </div>
       </div>
+      <ResourceListToolbar mode="organization" :model-value="spaceSelection" @update:model-value="value => spaceSelection = value === 'created' || value === 'joined' ? value : 'all'" v-model:query="keyword" :count-all="organizations.length"
+      :count-created="createdCount" :count-joined="joinedCount" />
       <div class="org-list-main">
+        <EmptyState v-if="keyword.trim() && !loading && filteredOrganizations.length === 0" icon="search"
+          :title="$t('common.noResult')">
+          <t-button variant="outline" @click="keyword = ''">{{ $t('common.clear') }}</t-button>
+        </EmptyState>
         <!-- 骨架屏占位 -->
         <div v-if="loading && filteredOrganizations.length === 0" class="org-card-wrap">
-          <div v-for="n in 4" :key="'skel-' + n" class="org-card org-card-skeleton">
+          <div v-for="n in 4" :key="'skel-' + n" class="org-card org-card-skeleton is-skeleton">
             <div class="card-header">
               <t-skeleton animation="gradient"
                 :row-col="[[{ width: '36px', height: '36px', type: 'circle' }, { width: '50%', height: '20px' }]]" />
@@ -51,7 +61,7 @@
             <!-- 我创建的：仅在 all 视图下出现；created/joined 子视图自身已经
                  隐含了语义，再加标题反而冗余。-->
             <div v-if="spaceSelection === 'all' && org.is_owner && index === 0" class="org-section-header"
-              role="button" tabindex="0" @click="toggleOrgSection('created')"
+              role="button" tabindex="0" :aria-expanded="!isOrgSectionCollapsed('created')" @click="toggleOrgSection('created')"
               @keydown.enter.prevent="toggleOrgSection('created')"
               @keydown.space.prevent="toggleOrgSection('created')">
               <t-icon name="user" size="14px" />
@@ -63,7 +73,7 @@
             <!-- 我加入的：第一张非 owner 卡片前打标题（all 视图下） -->
             <div v-if="spaceSelection === 'all' && !org.is_owner
               && (index === 0 || filteredOrganizations[index - 1].is_owner)" class="org-section-header" role="button"
-              tabindex="0" @click="toggleOrgSection('joined')"
+              tabindex="0" :aria-expanded="!isOrgSectionCollapsed('joined')" @click="toggleOrgSection('joined')"
               @keydown.enter.prevent="toggleOrgSection('joined')"
               @keydown.space.prevent="toggleOrgSection('joined')">
               <t-icon name="usergroup" size="14px" />
@@ -73,21 +83,7 @@
                 :name="isOrgSectionCollapsed('joined') ? 'chevron-right' : 'chevron-down'" size="14px" />
             </div>
             <div v-show="!isOrgRowHidden(org)" class="org-card"
-            :class="{ 'joined-org': !org.is_owner }" @click="handleCardClick(org)">
-            <!-- 装饰：协作网络感图形 -->
-            <div class="card-decoration">
-              <svg class="card-deco-svg" width="56" height="40" viewBox="0 0 56 40" fill="none"
-                xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-                <circle cx="10" cy="12" r="4" stroke="currentColor" stroke-width="1.5" fill="none" opacity="0.5" />
-                <circle cx="28" cy="8" r="5" stroke="currentColor" stroke-width="1.8" fill="none" opacity="0.7" />
-                <circle cx="46" cy="14" r="4" stroke="currentColor" stroke-width="1.5" fill="none" opacity="0.5" />
-                <path d="M14 13 L24 10 M32 10 L42 13" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"
-                  opacity="0.4" />
-                <circle cx="28" cy="28" r="6" stroke="currentColor" stroke-width="1.2" fill="none" opacity="0.35" />
-                <path d="M28 14 L28 22 M20 18 L26 24 M36 18 L30 24" stroke="currentColor" stroke-width="1"
-                  stroke-linecap="round" opacity="0.3" />
-              </svg>
-            </div>
+            :class="{ 'joined-org': !org.is_owner }" role="link" tabindex="0" @keydown.enter.self.prevent="handleCardClick(org)" @keydown.space.self.prevent="handleCardClick(org)" @click="handleCardClick(org)">
 
             <!-- 卡片头部 -->
             <div class="card-header">
@@ -102,9 +98,9 @@
               <t-popup v-model="organizationMenuVisibility[org.id]" overlayClassName="card-more-popup"
                 :on-visible-change="(visible: boolean) => onVisibleChange(visible, org)" trigger="click"
                 destroy-on-close placement="bottom-right">
-                <div class="more-wrap" @click.stop :class="{ 'active-more': organizationMenuVisibility[org.id] }">
+                <button type="button" :aria-label="$t('common.expand')" class="more-wrap" @click.stop :class="{ 'active-more': organizationMenuVisibility[org.id] }">
                   <img class="more-icon" src="@/assets/img/more.png" alt="" />
-                </div>
+                </button>
                 <template #content>
                   <div class="popup-menu" @click.stop>
                     <div class="popup-menu-item" @click.stop="handleSettings(org)">
@@ -127,8 +123,8 @@
 
             <!-- 卡片内容 -->
             <div class="card-content">
-              <div class="card-description">
-                {{ org.description || $t('organization.noDescription') }}
+              <div class="card-description" :title="org.description || $t('organization.noDescription')">
+                  {{ org.description || $t('organization.noDescription') }}
               </div>
             </div>
 
@@ -175,69 +171,30 @@
         </div>
 
         <!-- 空状态（按筛选显示不同文案） -->
-        <div v-else-if="!loading" class="empty-state">
-          <img class="empty-img" src="@/assets/img/upload.svg" alt="">
-          <span class="empty-txt">{{ emptyStateTitle }}</span>
-          <span class="empty-desc">{{ emptyStateDesc }}</span>
-          <div class="empty-state-actions">
-            <t-tooltip :content="noPermissionTip" placement="top" :disabled="canManageOrg">
-              <t-button theme="default" variant="outline" class="org-join-btn" :disabled="!canManageOrg"
-                @click="handleJoinOrganization">
-                <template #icon><t-icon name="enter" /></template>
-                {{ $t('organization.joinOrg') }}
-              </t-button>
-            </t-tooltip>
-            <t-tooltip :content="noPermissionTip" placement="top" :disabled="canManageOrg">
-              <t-button class="org-create-btn" :disabled="!canManageOrg" @click="handleCreateOrganization">
-                <template #icon><img src="@/assets/img/organization-green.svg" class="org-create-icon" alt=""
-                    aria-hidden="true" /></template>
-                {{ $t('organization.createOrg') }}
-              </t-button>
-            </t-tooltip>
-          </div>
-        </div>
+        <EmptyState v-if="!keyword.trim() && !loading && filteredOrganizations.length === 0" :title="emptyStateTitle"
+          :description="emptyStateDesc">
+          <template #icon><ResourceIcon type="organization" :size="32" /></template>
+          <t-tooltip :content="noPermissionTip" placement="top" :disabled="canManageOrg">
+            <t-button theme="default" variant="outline" class="org-join-btn" :disabled="!canManageOrg"
+              @click="handleJoinOrganization">
+              <template #icon><t-icon name="enter" /></template>
+              {{ $t('organization.joinOrg') }}
+            </t-button>
+          </t-tooltip>
+          <t-tooltip :content="noPermissionTip" placement="top" :disabled="canManageOrg">
+            <t-button theme="primary" class="org-create-btn" :disabled="!canManageOrg" @click="handleCreateOrganization">
+              <template #icon><img src="@/assets/img/organization-green.svg" class="org-create-icon" alt=""
+                  aria-hidden="true" /></template>
+              {{ $t('organization.createOrg') }}
+            </t-button>
+          </t-tooltip>
+        </EmptyState>
       </div>
     </div>
 
     <!-- Organization Settings Modal (用于创建和编辑组织) -->
     <OrganizationSettingsModal :visible="showSettingsModal" :org-id="settingsOrgId" :mode="settingsMode"
       @update:visible="showSettingsModal = $event" />
-
-    <!-- Delete Confirm Dialog -->
-    <t-dialog v-model:visible="deleteVisible" dialogClassName="del-org-dialog" :closeBtn="false" :cancelBtn="null"
-      :confirmBtn="null">
-      <div class="circle-wrap">
-        <div class="dialog-header">
-          <img class="circle-img" src="@/assets/img/circle.png" alt="">
-          <span class="circle-title">{{ $t('organization.deleteConfirmTitle') }}</span>
-        </div>
-        <span class="del-circle-txt">
-          {{ $t('organization.deleteConfirmMessage', { name: deletingOrg?.name ?? '' }) }}
-        </span>
-        <div class="circle-btn">
-          <span class="circle-btn-txt" @click="deleteVisible = false">{{ $t('common.cancel') }}</span>
-          <span class="circle-btn-txt confirm" @click="confirmDelete">{{ $t('common.delete') }}</span>
-        </div>
-      </div>
-    </t-dialog>
-
-    <!-- Leave Confirm Dialog -->
-    <t-dialog v-model:visible="leaveVisible" dialogClassName="del-org-dialog" :closeBtn="false" :cancelBtn="null"
-      :confirmBtn="null">
-      <div class="circle-wrap">
-        <div class="dialog-header">
-          <img class="circle-img" src="@/assets/img/circle.png" alt="">
-          <span class="circle-title">{{ $t('organization.leaveConfirmTitle') }}</span>
-        </div>
-        <span class="del-circle-txt">
-          {{ $t('organization.leaveConfirmMessage', { name: leavingOrg?.name ?? '' }) }}
-        </span>
-        <div class="circle-btn">
-          <span class="circle-btn-txt" @click="leaveVisible = false">{{ $t('common.cancel') }}</span>
-          <span class="circle-btn-txt confirm" @click="confirmLeave">{{ $t('organization.leave') }}</span>
-        </div>
-      </div>
-    </t-dialog>
 
     <!-- 加入组织 / 邀请预览弹框（菜单与邀请链接共用同一弹框） -->
     <Teleport to="body">
@@ -477,6 +434,9 @@
 import { ref, reactive, onMounted, onUnmounted, computed, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { MessagePlugin } from 'tdesign-vue-next'
+import EmptyState from '@/components/EmptyState.vue'
+import ResourceIcon from '@/components/icons/ResourceIcon.vue'
+import { useConfirmDelete } from '@/components/settings/useConfirmDelete'
 import { useOrganizationStore } from '@/stores/organization'
 import { useAuthStore } from '@/stores/auth'
 import type { Organization, OrganizationPreview, SearchableOrganizationItem } from '@/api/organization'
@@ -485,8 +445,16 @@ import { useI18n } from 'vue-i18n'
 import { copyWithToast } from '@/utils/clipboard'
 import OrganizationSettingsModal from './OrganizationSettingsModal.vue'
 import SpaceAvatar from '@/components/SpaceAvatar.vue'
-import ListSpaceSidebar from '@/components/ListSpaceSidebar.vue'
+import ResourceListToolbar from '@/components/ResourceListToolbar.vue'
+import { matchesResourceQuery } from '@/utils/resourceListSearch'
+import ResourceSortControl from '@/components/ResourceSortControl.vue'
 import { shouldShowOrgRelationTag } from '@/utils/card-list-badge'
+import {
+  DEFAULT_RESOURCE_SORT,
+  sortResourcesWithinGroups,
+  type ResourceSortAccessors,
+  type ResourceSortValue,
+} from '@/utils/resourceSorting'
 
 type OrgWithUI = Organization
 
@@ -495,6 +463,13 @@ const route = useRoute()
 const router = useRouter()
 const orgStore = useOrganizationStore()
 const authStore = useAuthStore()
+const selectedResourceSort = ref<ResourceSortValue>(DEFAULT_RESOURCE_SORT)
+
+const organizationSortAccessors: ResourceSortAccessors<OrgWithUI> = {
+  getName: organization => organization.name,
+  getUpdatedAt: organization => organization.updated_at,
+  getCreatedAt: organization => organization.created_at,
+}
 
 // 后端 /api/v1/organizations 下的写操作（创建、加入、申请加入、邀请、审批、改设置等）
 // 在路由层都要求当前空间角色 ≥ admin。前端只用于 UI 渲染，安全边界仍在服务端。
@@ -516,10 +491,7 @@ const inviteRequestMessage = ref('')
 const showSettingsModal = ref(false)
 const settingsOrgId = ref('')
 const settingsMode = ref<'create' | 'edit'>('edit')
-const deleteVisible = ref(false)
-const leaveVisible = ref(false)
-const deletingOrg = ref<Organization | null>(null)
-const leavingOrg = ref<Organization | null>(null)
+const confirmDelete = useConfirmDelete()
 
 // 邀请预览相关状态（与邀请链接共用同一弹框）
 const showInvitePreview = ref(false)
@@ -697,8 +669,9 @@ const handleOrganizationDialogEvent = ((event: CustomEvent<{ type: 'create' | 'j
   }
 }) as EventListener
 
-// 左侧筛选：'all' | 'created' | 'joined'
+// 分类筛选：'all' | 'created' | 'joined'
 const spaceSelection = ref<'all' | 'created' | 'joined'>('all')
+const keyword = ref('')
 
 // Computed
 const loading = computed(() => orgStore.loading)
@@ -707,16 +680,23 @@ const organizations = computed<OrgWithUI[]>(() => orgStore.organizations)
 const createdCount = computed(() => organizations.value.filter(o => o.is_owner).length)
 const joinedCount = computed(() => organizations.value.filter(o => !o.is_owner).length)
 
-const filteredOrganizations = computed(() => {
-  if (spaceSelection.value === 'created') return organizations.value.filter(o => o.is_owner)
-  if (spaceSelection.value === 'joined') return organizations.value.filter(o => !o.is_owner)
-  // 「全部」视图下把我创建的 owner 排在前面、我加入的排在后面，方便上面的
-  // 分组标题在过渡处一次性打出来——和 KB / Agent 列表口径一致。
-  return [...organizations.value].sort((a, b) => {
-    if (a.is_owner === b.is_owner) return 0
-    return a.is_owner ? -1 : 1
-  })
+const unsearchedFilteredOrganizations = computed(() => {
+  const visibleOrganizations = spaceSelection.value === 'created'
+    ? organizations.value.filter(organization => organization.is_owner)
+    : spaceSelection.value === 'joined'
+      ? organizations.value.filter(organization => !organization.is_owner)
+      : organizations.value
+
+  // 「全部」仍保持“我创建的 → 我加入的”两段，只在各段内部应用用户选择的顺序。
+  return sortResourcesWithinGroups(
+    visibleOrganizations,
+    selectedResourceSort.value,
+    organization => organization.is_owner ? 'created' : 'joined',
+    ['created', 'joined'],
+    organizationSortAccessors,
+  )
 })
+const filteredOrganizations = computed(() => unsearchedFilteredOrganizations.value.filter(item => matchesResourceQuery(item, keyword.value)))
 
 type OrgSectionKey = 'created' | 'joined'
 const collapsedOrgSections = ref<Set<OrgSectionKey>>(new Set())
@@ -757,14 +737,6 @@ const emptyStateDesc = computed(() => {
 })
 
 // Methods
-function getRoleTheme(role: string) {
-  switch (role) {
-    case 'admin': return 'primary'
-    case 'editor': return 'warning'
-    default: return 'default'
-  }
-}
-
 const onVisibleChange = (visible: boolean, org: OrgWithUI) => {
   if (!visible) {
     organizationMenuVisibility[org.id] = false
@@ -818,42 +790,39 @@ function handleSettings(org: OrgWithUI) {
 
 function handleLeave(org: OrgWithUI) {
   organizationMenuVisibility[org.id] = false
-  leavingOrg.value = org
-  leaveVisible.value = true
-}
-
-async function confirmLeave() {
-  if (!leavingOrg.value) return
-  const success = await orgStore.leave(leavingOrg.value.id)
-  if (success) {
-    MessagePlugin.success(t('organization.leaveSuccess'))
-    leaveVisible.value = false
-    leavingOrg.value = null
-  } else {
-    MessagePlugin.error(orgStore.error || t('organization.leaveFailed'))
-  }
+  confirmDelete({
+    title: t('organization.leaveConfirmTitle'),
+    body: t('organization.leaveConfirmMessage', { name: org.name }),
+    confirmText: t('organization.leave'),
+    onConfirm: async () => {
+      const success = await orgStore.leave(org.id)
+      if (success) {
+        MessagePlugin.success(t('organization.leaveSuccess'))
+      } else {
+        MessagePlugin.error(orgStore.error || t('organization.leaveFailed'))
+      }
+    },
+  })
 }
 
 function handleDelete(org: OrgWithUI) {
   organizationMenuVisibility[org.id] = false
-  deletingOrg.value = org
-  deleteVisible.value = true
-}
-
-async function confirmDelete() {
-  if (!deletingOrg.value) return
   if (!canManageOrg.value) {
     MessagePlugin.warning(t('organization.rbac.cannotManage'))
     return
   }
-  const success = await orgStore.remove(deletingOrg.value.id)
-  if (success) {
-    MessagePlugin.success(t('organization.deleteSuccess'))
-    deleteVisible.value = false
-    deletingOrg.value = null
-  } else {
-    MessagePlugin.error(orgStore.error || t('organization.deleteFailed'))
-  }
+  confirmDelete({
+    title: t('organization.deleteConfirmTitle'),
+    body: t('organization.deleteConfirmMessage', { name: org.name }),
+    onConfirm: async () => {
+      const success = await orgStore.remove(org.id)
+      if (success) {
+        MessagePlugin.success(t('organization.deleteSuccess'))
+      } else {
+        MessagePlugin.error(orgStore.error || t('organization.deleteFailed'))
+      }
+    },
+  })
 }
 
 // 处理邀请链接预览
@@ -1025,13 +994,6 @@ function previewSearchableOrg(org: SearchableOrganizationItem) {
   inviteCode.value = ''
 }
 
-// 查看搜索到的空间（已是成员时，打开空间设置；不关闭加入弹窗，关闭设置后仍回到搜索）
-function viewSearchableOrg(org: SearchableOrganizationItem) {
-  settingsOrgId.value = org.id
-  settingsMode.value = 'edit'
-  showSettingsModal.value = true
-}
-
 // 从预览弹框中查看空间（已是成员时；不关闭加入弹窗，关闭设置后仍回到搜索）
 function viewOrganizationFromPreview() {
   if (!invitePreviewData.value) return
@@ -1115,34 +1077,24 @@ onUnmounted(() => {
   window.removeEventListener('openOrganizationDialog', handleOrganizationDialogEvent)
   teardownInviteBodyResizeObserver()
 })
+// A new search reveals matching rows even if their group was previously collapsed.
+watch(keyword, () => { collapsedOrgSections.value = new Set() })
 </script>
 
 <style scoped lang="less">
+@import (reference) '@/components/css/resource-card.less';
+
 .org-list-container {
-  margin: 0 16px 0 0;
-  height: 100%;
-  box-sizing: border-box;
   flex: 1;
-  display: flex;
-  position: relative;
+  min-width: 0;
   min-height: 0;
-}
-
-.org-list-content {
-  flex: 1;
+  height: 100%;
   display: flex;
-  flex-direction: column;
-  min-width: 0;
-  padding: 20px 28px 0 28px;
 }
 
-.org-list-main {
-  flex: 1;
-  min-width: 0;
-  overflow-y: auto;
-  overflow-x: hidden;
-  padding: 8px 0;
-}
+.org-list-content { .resource-list-content(); }
+
+.org-list-main { .resource-list-main(); }
 
 .header {
   display: flex;
@@ -1164,10 +1116,13 @@ onUnmounted(() => {
   }
 
   h2 {
+    display: flex;
+    align-items: center;
+    gap: 8px;
     margin: 0;
     color: var(--td-text-color-primary);
     font-family: var(--app-font-family);
-    font-size: 24px;
+    font-size: var(--app-text-4xl);
     font-weight: 600;
     line-height: 32px;
   }
@@ -1181,17 +1136,17 @@ onUnmounted(() => {
 }
 
 .org-join-btn {
-  border-color: rgba(7, 192, 95, 0.5);
+  border-color: color-mix(in srgb, var(--td-brand-color) 50%, transparent);
   color: var(--td-brand-color);
   font-weight: 500;
-  transition: all 0.2s ease;
+  transition: all var(--app-motion-base) ease;
 
   .t-icon {
     color: var(--td-brand-color);
   }
 
   &:hover {
-    background: rgba(7, 192, 95, 0.08);
+    background: color-mix(in srgb, var(--td-brand-color) 8%, transparent);
     border-color: var(--td-brand-color);
     color: var(--td-brand-color);
 
@@ -1201,54 +1156,40 @@ onUnmounted(() => {
   }
 }
 
-.org-create-btn {
-  background: var(--td-brand-color);
-  border: none;
-  color: var(--td-text-color-anti);
-  font-weight: 500;
-  box-shadow: 0 2px 8px rgba(7, 192, 95, 0.25);
-  transition: all 0.25s ease;
-
-  &:hover {
-    background: var(--td-brand-color);
-    box-shadow: 0 4px 14px rgba(7, 192, 95, 0.35);
-  }
-
-  .org-create-icon {
-    width: 16px;
-    height: 16px;
-    filter: brightness(0) invert(1);
-  }
+.org-create-btn .org-create-icon {
+  width: 16px;
+  height: 16px;
+  filter: brightness(0) invert(1);
 }
 
 .header-subtitle {
   margin: 0;
   color: var(--td-text-color-secondary);
   font-family: var(--app-font-family);
-  font-size: 14px;
+  font-size: var(--app-text-base);
   font-weight: 400;
   line-height: 20px;
 }
 
 .header-action-btn {
-  padding: 0 !important;
-  min-width: 28px !important;
-  width: 28px !important;
-  height: 28px !important;
-  display: inline-flex !important;
-  align-items: center !important;
-  justify-content: center !important;
-  background: var(--td-bg-color-secondarycontainer) !important;
-  border: 1px solid var(--td-component-stroke) !important;
-  border-radius: 6px !important;
+  padding: 0;
+  min-width: 28px;
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--td-bg-color-secondarycontainer);
+  border: 1px solid var(--td-component-stroke);
+  border-radius: var(--app-radius-sm);
   color: var(--td-text-color-secondary);
   cursor: pointer;
   box-shadow: inset 0 1px 0 color-mix(in srgb, var(--td-bg-color-container) 72%, transparent);
-  transition: background 0.2s, border-color 0.2s, color 0.2s;
+  transition: background var(--app-motion-base), border-color var(--app-motion-base), color var(--app-motion-base);
 
   &:hover {
-    background: var(--td-bg-color-secondarycontainer) !important;
-    border-color: var(--td-component-stroke) !important;
+    background: var(--td-bg-color-secondarycontainer);
+    border-color: var(--td-component-stroke);
     color: var(--td-text-color-primary);
   }
 
@@ -1264,259 +1205,18 @@ onUnmounted(() => {
   }
 }
 
-// Tab 切换样式（下划线式，与整体协作感一致）
-.org-tabs {
-  display: flex;
-  align-items: center;
-  gap: 28px;
-  border-bottom: 1px solid var(--td-component-stroke);
-  margin-bottom: 24px;
-
-  .tab-item {
-    padding: 12px 0;
-    cursor: pointer;
-    color: var(--td-text-color-secondary);
-    font-family: var(--app-font-family);
-    font-size: 14px;
-    font-weight: 400;
-    user-select: none;
-    position: relative;
-    transition: color 0.2s ease;
-
-    &:hover {
-      color: var(--td-text-color-secondary);
-    }
-
-    &.active {
-      color: var(--td-brand-color);
-      font-weight: 500;
-
-      &::after {
-        content: '';
-        position: absolute;
-        bottom: -1px;
-        left: 0;
-        right: 0;
-        height: 2px;
-        background: var(--td-brand-color);
-        border-radius: 1px;
-      }
-    }
-  }
-}
-
-@keyframes contentFadeIn {
-  from {
-    opacity: 0;
-    transform: translateY(6px);
-  }
-
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
 .org-card-wrap {
-  display: grid;
-  gap: 12px;
-  grid-template-columns: 1fr;
-  animation: contentFadeIn 0.32s ease-out;
+  .resource-card-grid();
 }
 
 // 共享空间分组标题——与 KB / Agent 列表口径完全一致（图标 + 名称 + 数量 + 折叠 chevron）。
 .org-section-header {
-  grid-column: 1 / -1;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  // 整行只用来铺背景；点击靠子元素冒泡，避免点到标题右侧空白误折叠。
-  pointer-events: none;
-
-  & > * {
-    pointer-events: auto;
-  }
-  position: sticky;
-  top: 0;
-  z-index: 5;
-  background: var(--td-bg-color-container);
-  box-shadow: 0 -8px 0 0 var(--td-bg-color-container),
-    0 4px 0 0 var(--td-bg-color-container);
-  padding: 6px 4px 6px 0;
-  color: var(--td-text-color-secondary);
-  font-family: var(--app-font-family);
-  font-size: 13px;
-  font-weight: 600;
-  line-height: 20px;
-  cursor: pointer;
-  user-select: none;
-  outline: none;
-
-  &:hover {
-    color: var(--td-text-color-primary);
-  }
-
-  &:focus-visible {
-    box-shadow: 0 0 0 2px var(--td-brand-color-focus, rgba(0, 82, 217, 0.2));
-  }
-
-  .t-icon {
-    color: inherit;
-  }
-
-  .org-section-toggle {
-    margin-left: 4px;
-    opacity: 0.7;
-    transition: opacity 0.15s ease;
-  }
-
-  .org-section-count {
-    margin-left: 2px;
-    padding: 0 6px;
-    border-radius: 8px;
-    background: var(--td-bg-color-secondarycontainer);
-    color: var(--td-text-color-secondary);
-    font-size: 11px;
-    line-height: 16px;
-    font-weight: 500;
-  }
-
-  &:hover .org-section-toggle {
-    opacity: 1;
-  }
-}
-
-.org-card-skeleton {
-  cursor: default;
-  display: flex;
-  flex-direction: column;
-  height: 136px;
-  min-height: 136px;
+  .resource-section-header();
 }
 
 /* 与知识库 / 智能体列表统一：紧凑 + 1px 描边 */
 .org-card {
-  border: 1px solid var(--td-component-stroke);
-  border-radius: 8px;
-  overflow: hidden;
-  box-sizing: border-box;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
-  background: var(--td-bg-color-container);
-  position: relative;
-  cursor: pointer;
-  transition: border-color 0.25s ease, box-shadow 0.25s ease, transform 0.2s ease;
-  padding: 12px 14px;
-  display: flex;
-  flex-direction: column;
-  height: 136px;
-  min-height: 136px;
-
-  &::before {
-    content: '';
-    position: absolute;
-    top: 0;
-    right: 0;
-    width: 120px;
-    height: 80px;
-    background: radial-gradient(ellipse 60% 50% at 100% 0%, rgba(7, 192, 95, 0.06) 0%, transparent 70%);
-    pointer-events: none;
-    z-index: 0;
-  }
-
-  &.joined-org {
-    &:hover {
-      border-color: rgba(7, 192, 95, 0.4);
-      box-shadow: 0 4px 16px rgba(7, 192, 95, 0.08);
-    }
-  }
-
-  &:hover {
-    border-color: rgba(7, 192, 95, 0.5);
-    box-shadow: 0 6px 20px rgba(7, 192, 95, 0.12);
-  }
-
-  .card-decoration {
-    color: rgba(7, 192, 95, 0.35);
-  }
-
-  &:hover .card-decoration {
-    color: rgba(7, 192, 95, 0.55);
-  }
-
-  .card-header {
-    position: relative;
-    z-index: 2;
-    margin-bottom: 6px;
-  }
-
-  .card-title {
-    font-size: 15px;
-    line-height: 22px;
-  }
-
-  .card-content {
-    position: relative;
-    z-index: 1;
-    margin-bottom: 6px;
-  }
-
-  .card-bottom {
-    position: relative;
-    z-index: 1;
-    padding-top: 6px;
-  }
-
-  .card-description {
-    font-size: 12px;
-    line-height: 17px;
-  }
-
-  .more-wrap {
-    width: 28px;
-    height: 28px;
-    border-radius: 8px;
-
-    .more-icon {
-      width: 16px;
-      height: 16px;
-    }
-  }
-}
-
-// 卡片装饰：协作网络图形
-.card-decoration {
-  position: absolute;
-  top: 8px;
-  right: 14px;
-  display: flex;
-  align-items: flex-start;
-  justify-content: flex-end;
-  pointer-events: none;
-  z-index: 0;
-  transition: color 0.3s ease;
-
-  .card-deco-svg {
-    display: block;
-    width: 56px;
-    height: 40px;
-  }
-}
-
-.card-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 8px;
-  position: relative;
-  z-index: 2;
-}
-
-.card-header-left {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex: 1;
-  min-width: 0;
+  .resource-card();
 }
 
 // 空间头像容器（SpaceAvatar 自带样式）
@@ -1527,92 +1227,8 @@ onUnmounted(() => {
   flex-shrink: 0;
 }
 
-.card-title-block {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  flex: 1;
-  min-width: 0;
-}
-
-.card-title {
-  color: var(--td-text-color-primary);
-  font-family: var(--app-font-family);
-  font-size: 15px;
-  font-weight: 600;
-  line-height: 22px;
-  letter-spacing: 0.01em;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.more-wrap {
-  display: flex;
-  width: 28px;
-  height: 28px;
-  justify-content: center;
-  align-items: center;
-  border-radius: 8px;
-  cursor: pointer;
-  flex-shrink: 0;
-  transition: all 0.2s ease;
-  opacity: 0;
-
-  .org-card:hover & {
-    opacity: 0.6;
-  }
-
-  &:hover {
-    background: var(--td-bg-color-container-hover);
-    opacity: 1 !important;
-  }
-
-  &.active-more {
-    background: var(--td-bg-color-container-hover);
-    opacity: 1 !important;
-  }
-
-  .more-icon {
-    width: 16px;
-    height: 16px;
-  }
-}
-
 /* 与知识库卡片内容区一致 */
-.card-content {
-  flex: 1;
-  min-height: 0;
-  margin-bottom: 8px;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
 /* 三个列表卡片统一：描述字体 */
-.card-description {
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  line-clamp: 2;
-  overflow: hidden;
-  color: var(--td-text-color-secondary);
-  font-family: var(--app-font-family);
-  font-size: 12px;
-  font-weight: 400;
-  line-height: 18px;
-}
-
-.card-bottom {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-top: auto;
-  padding-top: 8px;
-  border-top: .5px solid var(--td-component-stroke);
-}
-
 .bottom-left {
   display: flex;
   align-items: center;
@@ -1622,25 +1238,8 @@ onUnmounted(() => {
 }
 
 // 与知识库卡片统一的底部标签：小尺寸、统一圆角
-.feature-badges {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
 .feature-badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 3px;
-  height: 20px;
-  padding: 0 5px;
-  border-radius: 5px;
-  font-size: 11px;
-  font-weight: 500;
-  font-family: var(--app-font-family);
-  cursor: default;
-  transition: background 0.2s ease;
+  .resource-feature-badge();
 
   .t-icon {
     flex-shrink: 0;
@@ -1651,7 +1250,7 @@ onUnmounted(() => {
   }
 
   &.stat-member {
-    background: rgba(100, 116, 139, 0.08);
+    background: color-mix(in srgb, var(--td-text-color-secondary) 8%, transparent);
     color: var(--td-text-color-secondary);
 
     .t-icon {
@@ -1659,25 +1258,25 @@ onUnmounted(() => {
     }
 
     &:hover {
-      background: rgba(100, 116, 139, 0.12);
+      background: color-mix(in srgb, var(--td-text-color-secondary) 12%, transparent);
     }
   }
 
   &.stat-kb {
-    background: rgba(7, 192, 95, 0.08);
-    color: var(--td-brand-color);
+    background: var(--td-bg-color-secondarycontainer);
+    color: var(--td-text-color-secondary);
 
     .t-icon {
-      color: var(--td-brand-color);
+      color: var(--td-text-color-secondary);
     }
 
     &:hover {
-      background: rgba(7, 192, 95, 0.12);
+      background: var(--td-bg-color-container-hover);
     }
   }
 
   &.stat-agent {
-    background: rgba(124, 77, 255, 0.08);
+    background: color-mix(in srgb, var(--app-accent-purple) 8%, transparent);
     color: var(--td-brand-color);
 
     .stat-agent-icon {
@@ -1689,7 +1288,7 @@ onUnmounted(() => {
     }
 
     &:hover {
-      background: rgba(124, 77, 255, 0.12);
+      background: color-mix(in srgb, var(--app-accent-purple) 12%, transparent);
     }
   }
 }
@@ -1700,8 +1299,8 @@ onUnmounted(() => {
   align-items: center;
   height: 22px;
   padding: 0 6px;
-  border-radius: 6px;
-  font-size: 12px;
+  border-radius: var(--app-radius-sm);
+  font-size: var(--app-text-sm);
   font-weight: 500;
   background: rgba(250, 173, 20, 0.12);
   color: var(--td-warning-color);
@@ -1721,11 +1320,11 @@ onUnmounted(() => {
   gap: 4px;
   height: 22px;
   padding: 0 6px;
-  border-radius: 6px;
-  font-size: 12px;
+  border-radius: var(--app-radius-sm);
+  font-size: var(--app-text-sm);
   font-weight: 500;
   font-family: var(--app-font-family);
-  background: rgba(107, 114, 128, 0.08);
+  background: color-mix(in srgb, var(--td-text-color-secondary) 8%, transparent);
   color: var(--td-text-color-secondary);
 
   .t-icon {
@@ -1734,7 +1333,7 @@ onUnmounted(() => {
   }
 
   &.owner {
-    background: rgba(124, 77, 255, 0.1);
+    background: color-mix(in srgb, var(--app-accent-purple) 10%, transparent);
     color: var(--td-brand-color);
 
     .t-icon {
@@ -1743,7 +1342,7 @@ onUnmounted(() => {
   }
 
   &.admin {
-    background: rgba(7, 192, 95, 0.12);
+    background: color-mix(in srgb, var(--td-brand-color) 12%, transparent);
     color: var(--td-brand-color);
 
     .t-icon {
@@ -1752,7 +1351,7 @@ onUnmounted(() => {
   }
 
   &.editor {
-    background: rgba(7, 192, 95, 0.08);
+    background: color-mix(in srgb, var(--td-brand-color) 8%, transparent);
     color: var(--td-brand-color);
 
     .t-icon {
@@ -1761,7 +1360,7 @@ onUnmounted(() => {
   }
 
   &.viewer {
-    background: rgba(107, 114, 128, 0.08);
+    background: color-mix(in srgb, var(--td-text-color-secondary) 8%, transparent);
     color: var(--td-text-color-secondary);
 
     .t-icon {
@@ -1770,181 +1369,17 @@ onUnmounted(() => {
   }
 }
 
-.empty-state {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  align-items: center;
-  padding: 60px 20px;
-
-  .empty-img {
-    width: 162px;
-    height: 162px;
-    margin-bottom: 20px;
-  }
-
-  .empty-txt {
-    color: var(--td-text-color-placeholder);
-    font-family: var(--app-font-family);
-    font-size: 16px;
-    font-weight: 600;
-    line-height: 26px;
-    margin-bottom: 8px;
-  }
-
-  .empty-desc {
-    color: var(--td-text-color-disabled);
-    font-family: var(--app-font-family);
-    font-size: 14px;
-    font-weight: 400;
-    line-height: 22px;
-    margin-bottom: 0;
-  }
-
-  .empty-state-actions {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    margin-top: 20px;
-  }
-}
-
-// 响应式布局
-@media (min-width: 900px) {
-  .org-card-wrap {
-    grid-template-columns: repeat(2, 1fr);
-  }
-}
-
-@media (min-width: 1250px) {
-  .org-card-wrap {
-    grid-template-columns: repeat(3, 1fr);
-  }
-}
-
-@media (min-width: 1600px) {
-  .org-card-wrap {
-    grid-template-columns: repeat(4, 1fr);
-  }
-}
-
-@media (min-width: 1900px) {
-  .org-card-wrap {
-    grid-template-columns: repeat(5, 1fr);
-  }
-}
-
-@media (min-width: 2200px) {
-  .org-card-wrap {
-    grid-template-columns: repeat(6, 1fr);
-  }
-}
-
 // 删除/离开确认对话框样式
-:deep(.del-org-dialog) {
-  padding: 0px !important;
-  border-radius: 6px !important;
-
-  .t-dialog__header {
-    display: none;
-  }
-
-  .t-dialog__body {
-    padding: 16px;
-  }
-
-  .t-dialog__footer {
-    padding: 0;
-  }
-}
-
 :deep(.t-dialog__position.t-dialog--top) {
   padding-top: 40vh !important;
 }
 
-.circle-wrap {
-  .dialog-header {
-    display: flex;
-    align-items: center;
-    margin-bottom: 8px;
-  }
+.resource-list-header();
 
-  .circle-img {
-    width: 20px;
-    height: 20px;
-    margin-right: 8px;
-  }
-
-  .circle-title {
-    color: var(--td-text-color-primary);
-    font-family: var(--app-font-family);
-    font-size: 16px;
-    font-weight: 600;
-    line-height: 24px;
-  }
-
-  .del-circle-txt {
-    color: var(--td-text-color-placeholder);
-    font-family: var(--app-font-family);
-    font-size: 14px;
-    font-weight: 400;
-    line-height: 22px;
-    display: inline-block;
-    margin-left: 29px;
-    margin-bottom: 21px;
-  }
-
-  .circle-btn {
-    height: 22px;
-    width: 100%;
-    display: flex;
-    justify-content: flex-end;
-  }
-
-  .circle-btn-txt {
-    color: var(--td-text-color-primary);
-    font-family: var(--app-font-family);
-    font-size: 14px;
-    font-weight: 400;
-    line-height: 22px;
-    cursor: pointer;
-
-    &:hover {
-      opacity: 0.8;
-    }
-  }
-
-  .confirm {
-    color: var(--td-error-color);
-    margin-left: 40px;
-
-    &:hover {
-      opacity: 0.8;
-    }
-  }
-}
 </style>
 
 <style lang="less">
 /* 下拉菜单样式已统一至 @/assets/dropdown-menu.less */
-
-// 创建对话框样式优化
-.create-org-dialog,
-.join-org-dialog {
-  .t-form-item__label {
-    font-family: var(--app-font-family);
-    font-size: 14px;
-    font-weight: 500;
-    color: var(--td-text-color-primary);
-  }
-
-  .t-input,
-  .t-textarea {
-    font-family: var(--app-font-family);
-  }
-
-}
 
 // 邀请预览弹框 - 参考 FAQ 导入弹窗风格，更紧凑
 .invite-preview-overlay {
@@ -1965,7 +1400,7 @@ onUnmounted(() => {
   max-width: 480px;
   max-height: 90vh;
   background: var(--td-bg-color-container);
-  border-radius: 12px;
+  border-radius: var(--app-radius-xl);
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12);
   overflow: hidden;
   display: flex;
@@ -1993,13 +1428,13 @@ onUnmounted(() => {
   height: 32px;
   border: none;
   background: transparent;
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
   color: var(--td-text-color-secondary);
-  transition: background 0.2s ease, color 0.2s ease;
+  transition: background var(--app-motion-base) ease, color var(--app-motion-base) ease;
 
   &:hover {
     background: var(--td-bg-color-secondarycontainer);
@@ -2009,7 +1444,7 @@ onUnmounted(() => {
 
 .invite-preview-title {
   margin: 0;
-  font-size: 16px;
+  font-size: var(--app-text-xl);
   font-weight: 600;
   color: var(--td-text-color-primary);
   flex: 1;
@@ -2024,13 +1459,13 @@ onUnmounted(() => {
   height: 32px;
   border: none;
   background: transparent;
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
   color: var(--td-text-color-secondary);
-  transition: background 0.2s ease, color 0.2s ease;
+  transition: background var(--app-motion-base) ease, color var(--app-motion-base) ease;
   z-index: 10;
 
   &:hover {
@@ -2077,7 +1512,7 @@ onUnmounted(() => {
   &::-webkit-scrollbar-thumb {
     background: var(--td-bg-color-component-disabled);
     border-radius: 3px;
-    transition: background 0.2s;
+    transition: background var(--app-motion-base);
 
     &:hover {
       background: var(--td-brand-color);
@@ -2097,14 +1532,14 @@ onUnmounted(() => {
   align-items: center;
   padding: 6px 14px;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   background: var(--td-bg-color-secondarycontainer);
   font: inherit;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   line-height: 1.4;
   color: var(--td-text-color-secondary);
   cursor: pointer;
-  transition: color 0.15s ease, background 0.15s ease;
+  transition: color var(--app-motion-fast) ease, background var(--app-motion-fast) ease;
 
   &:hover,
   &:focus-visible {
@@ -2130,21 +1565,21 @@ onUnmounted(() => {
   .join-form-label {
     display: block;
     margin-bottom: 4px;
-    font-size: 14px;
+    font-size: var(--app-text-base);
     font-weight: 500;
     color: var(--td-text-color-primary);
   }
 
   .join-form-desc {
     margin: 0 0 10px;
-    font-size: 13px;
+    font-size: var(--app-text-md);
     color: var(--td-text-color-secondary);
     line-height: 1.5;
   }
 
   .join-form-tip {
     margin: 8px 0 0;
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     color: var(--td-text-color-placeholder);
     line-height: 1.45;
   }
@@ -2158,16 +1593,12 @@ onUnmounted(() => {
 
 // Tab 内容容器 - 平滑高度过渡
 .join-tab-content-wrapper {
-  transition: height 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: height var(--app-motion-slow) cubic-bezier(0.4, 0, 0.2, 1);
   overflow: hidden;
 }
 
 .join-tab-content {
   width: 100%;
-}
-
-.search-input-wrap {
-  margin-bottom: 16px;
 }
 
 // 搜索空间列表容器（与主列表一致：无外框，卡片间距）
@@ -2177,7 +1608,7 @@ onUnmounted(() => {
   overflow-y: auto;
   margin-bottom: 16px;
   border: 1px solid var(--td-component-stroke);
-  border-radius: 10px;
+  border-radius: var(--app-radius-lg);
   background: var(--td-bg-color-container);
 
   &::-webkit-scrollbar {
@@ -2192,7 +1623,7 @@ onUnmounted(() => {
   &::-webkit-scrollbar-thumb {
     background: var(--td-bg-color-component-disabled);
     border-radius: 3px;
-    transition: background 0.2s;
+    transition: background var(--app-motion-base);
 
     &:hover {
       background: var(--td-brand-color);
@@ -2217,7 +1648,7 @@ onUnmounted(() => {
   padding: 12px 14px;
   border-bottom: 1px solid var(--td-component-stroke);
   cursor: pointer;
-  transition: background 0.15s ease;
+  transition: background var(--app-motion-fast) ease;
 
   &:last-child {
     border-bottom: none;
@@ -2249,7 +1680,7 @@ onUnmounted(() => {
 }
 
 .searchable-row-title {
-  font-size: 14px;
+  font-size: var(--app-text-base);
   font-weight: 500;
   color: var(--td-text-color-primary);
   overflow: hidden;
@@ -2258,7 +1689,7 @@ onUnmounted(() => {
 }
 
 .searchable-row-desc {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-secondary);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2276,7 +1707,7 @@ onUnmounted(() => {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-secondary);
 }
 
@@ -2287,10 +1718,10 @@ onUnmounted(() => {
     gap: 8px;
     margin-bottom: 12px;
     padding: 10px 12px;
-    border-radius: 8px;
+    border-radius: var(--app-radius-md);
     background: var(--td-error-color-light);
     color: var(--td-error-color);
-    font-size: 13px;
+    font-size: var(--app-text-md);
   }
 
   .invite-preview-footer-single {
@@ -2309,7 +1740,7 @@ onUnmounted(() => {
   gap: 20px;
 
   .invite-preview-loading-text {
-    font-size: 14px;
+    font-size: var(--app-text-base);
     color: var(--td-text-color-secondary);
     font-family: var(--app-font-family);
   }
@@ -2328,7 +1759,7 @@ onUnmounted(() => {
   }
 
   .invite-preview-error-title {
-    font-size: 18px;
+    font-size: var(--app-text-2xl);
     font-weight: 600;
     color: var(--td-text-color-primary);
     margin: 0 0 8px;
@@ -2336,7 +1767,7 @@ onUnmounted(() => {
   }
 
   .invite-preview-error-desc {
-    font-size: 14px;
+    font-size: var(--app-text-base);
     color: var(--td-text-color-secondary);
     margin: 0 0 24px;
     line-height: 1.5;
@@ -2366,7 +1797,7 @@ onUnmounted(() => {
 
 .preview-space-name {
   margin: 0 0 6px;
-  font-size: 18px;
+  font-size: var(--app-text-2xl);
   font-weight: 600;
   line-height: 1.35;
   color: var(--td-text-color-primary);
@@ -2379,7 +1810,7 @@ onUnmounted(() => {
 .preview-space-desc {
   margin: 0 0 14px;
   max-width: 360px;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   line-height: 1.5;
   color: var(--td-text-color-secondary);
   display: -webkit-box;
@@ -2401,17 +1832,17 @@ onUnmounted(() => {
   max-width: 100%;
   padding: 4px 10px;
   border: none;
-  border-radius: 999px;
+  border-radius: var(--app-radius-pill);
   background: var(--td-bg-color-secondarycontainer);
   font: inherit;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-placeholder);
   cursor: pointer;
-  transition: background 0.15s ease, color 0.15s ease;
+  transition: background var(--app-motion-fast) ease, color var(--app-motion-fast) ease;
 
   code {
     font-family: var(--app-font-family-mono);
-    font-size: 11px;
+    font-size: var(--app-text-xs);
     color: var(--td-text-color-secondary);
     background: transparent;
     border: none;
@@ -2440,7 +1871,7 @@ onUnmounted(() => {
   justify-content: center;
   gap: 8px;
   padding: 12px 0 4px;
-  font-size: 14px;
+  font-size: var(--app-text-base);
   font-weight: 500;
   color: var(--td-brand-color);
 }
@@ -2459,14 +1890,14 @@ onUnmounted(() => {
 }
 
 .preview-info-label {
-  font-size: 14px;
+  font-size: var(--app-text-base);
   font-weight: 500;
   color: var(--td-text-color-primary);
 }
 
 .preview-info-desc {
   margin: 8px 0 0;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   line-height: 1.5;
   color: var(--td-text-color-secondary);
 
@@ -2505,7 +1936,7 @@ onUnmounted(() => {
 
 .modal-enter-active,
 .modal-leave-active {
-  transition: all 0.3s ease;
+  transition: all var(--app-motion-slow) ease;
 }
 
 .modal-enter-from,

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	stderrors "errors"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/types"
@@ -37,10 +38,16 @@ func TestHistoricalVersionClarificationAcrossPagination(t *testing.T) {
 	require.Equal(t, 1, repo.calls, "matching current references need no session-wide lookup")
 }
 
-func TestReferencedArtifactHistoryDoesNotGuessByName(t *testing.T) {
+func TestSessionArtifactsReadsEveryRecordedArtifact(t *testing.T) {
 	old := types.MessageArtifact{URL: "resource://dHZ_fFslfs0GgJGaJZGjGA", FileName: "deck.pptx"}
-	c := &ArtifactCollector{store: &fakeStore{prev: []types.MessageArtifact{old, old}}}
-	got := c.ReferencedHistory(context.Background(), "session", "message", "![deck]("+old.URL+")")
-	require.Equal(t, types.MessageArtifacts{old}, got)
-	require.Empty(t, c.ReferencedHistory(context.Background(), "session", "message", "![deck](resource://4N1nAo-FZZoDEExDQz2yoA)"))
+	c := &ArtifactCollector{store: &fakeStore{prev: []types.MessageArtifact{old}}}
+	require.Equal(t, types.MessageArtifacts{old}, c.SessionArtifacts(context.Background(), "session"))
+
+	// A missing store, an empty session, and a lookup failure all degrade to
+	// "nothing to resolve" rather than failing the turn.
+	require.Nil(t, (&ArtifactCollector{}).SessionArtifacts(context.Background(), "session"))
+	require.Nil(t, c.SessionArtifacts(context.Background(), ""))
+	require.Nil(t, (&ArtifactCollector{
+		store: &fakeStore{err: stderrors.New("boom")},
+	}).SessionArtifacts(context.Background(), "session"))
 }

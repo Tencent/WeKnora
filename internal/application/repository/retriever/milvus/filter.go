@@ -6,7 +6,6 @@ import (
 	"maps"
 	"reflect"
 	"strings"
-	"time"
 )
 
 const (
@@ -202,33 +201,6 @@ func (c *filter) convertBetweenCondition(
 			paramName2: value.Index(1).Interface(),
 		},
 	}, nil
-}
-
-func formatValue(value any) string {
-	switch v := value.(type) {
-	case string:
-		return fmt.Sprintf("\"%s\"", escapeDoubleQuotes(v))
-	case int, int8, int16, int32, int64:
-		return fmt.Sprintf("%d", v)
-	case uint, uint8, uint16, uint32, uint64:
-		return fmt.Sprintf("%d", v)
-	case float32, float64:
-		return fmt.Sprintf("%v", v)
-	case bool:
-		if v {
-			return "true"
-		}
-		return "false"
-	case time.Time:
-		return fmt.Sprintf("%d", v.Unix())
-	default:
-		return fmt.Sprintf("\"%v\"", value)
-	}
-}
-
-// escapeDoubleQuotes escapes double quotes in a string for use in Milvus expressions.
-func escapeDoubleQuotes(s string) string {
-	return strings.ReplaceAll(s, "\"", "\\\"")
 }
 
 // convertParamName converts field name to a valid Milvus template parameter name.

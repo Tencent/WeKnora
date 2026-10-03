@@ -280,6 +280,23 @@ func TestCloneRetryReplacesIncompleteCopyWithoutDuplicatingEmptyHashes(t *testin
 	require.EqualValues(t, 10, tenant.StorageUsed)
 }
 
+func TestCloneCopiesDocumentProfile(t *testing.T) {
+	f := transferFixture(t, access.KBTransferClone)
+	profile := types.KnowledgeProfile{
+		Gist: "Cluster setup guide", Topics: []string{"Kubernetes", "Networking"},
+		DocType: "user manual", TypicalQuestion: "How do I set up a cluster?",
+	}
+	require.NoError(t, f.db.Model(&types.Knowledge{}).Where("id = ?", "doc").Update("profile", profile).Error)
+
+	require.NoError(t, f.svc.executeKnowledgeClone(f.ctx, f.kbs.values["kb"], f.kbs.values["other"], nil))
+	rows, err := f.repo.ListKnowledgeByKnowledgeBaseID(f.ctx, 7, "other")
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	require.NotNil(t, rows[0].Profile,
+		"the clone must carry the document profile so the target's description can be derived")
+	require.Equal(t, profile, *rows[0].Profile)
+}
+
 func TestClonePreflightDoesNotDeleteTargetForUnreadySource(t *testing.T) {
 	f := transferFixture(t, access.KBTransferClone)
 	require.NoError(

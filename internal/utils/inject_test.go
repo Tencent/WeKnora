@@ -424,13 +424,14 @@ func TestInjectAndConditions(t *testing.T) {
 			name:   "existing WHERE with ORDER BY",
 			sql:    "SELECT id, title FROM knowledges WHERE parse_status = 'completed' ORDER BY created_at DESC LIMIT 10",
 			filter: "knowledges.tenant_id = 123",
-			want:   "SELECT id, title FROM knowledges WHERE knowledges.tenant_id = 123 AND (parse_status = 'completed') ORDER BY created_at DESC LIMIT 10",
+			want: "SELECT id, title FROM knowledges WHERE knowledges.tenant_id = 123 " +
+				"AND parse_status = 'completed' ORDER BY created_at DESC LIMIT 10",
 		},
 		{
 			name:   "existing WHERE without tail clauses",
 			sql:    "SELECT id FROM knowledges WHERE enable_status = 'enabled'",
 			filter: "knowledges.deleted_at IS NULL",
-			want:   "SELECT id FROM knowledges WHERE knowledges.deleted_at IS NULL AND (enable_status = 'enabled')",
+			want:   "SELECT id FROM knowledges WHERE knowledges.deleted_at IS NULL AND enable_status = 'enabled'",
 		},
 		{
 			name:   "no WHERE with ORDER BY",

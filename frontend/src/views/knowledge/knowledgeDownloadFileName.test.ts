@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { resolveKnowledgeDownloadFileName } from './knowledgeDownloadFileName.ts';
+import { isBatchDownloadableKnowledge, resolveKnowledgeDownloadFileName } from './knowledgeDownloadFileName.ts';
 
 test('prefers the original filename over the extensionless display name', () => {
   assert.equal(resolveKnowledgeDownloadFileName({
@@ -18,6 +18,14 @@ test('falls back to the backend filename when no original filename is present', 
     file_name: 'notes.txt',
     type: 'file',
   }), 'notes.txt');
+});
+
+test('batch download skips web pages without an original file', () => {
+  assert.equal(isBatchDownloadableKnowledge({ type: 'manual' }), true);
+  assert.equal(isBatchDownloadableKnowledge({ type: 'file', file_path: 'stored' }), true);
+  assert.equal(isBatchDownloadableKnowledge({ type: 'url' }), false);
+  assert.equal(isBatchDownloadableKnowledge({ type: 'url', file_path: 'snapshot.html' }), true);
+  assert.equal(isBatchDownloadableKnowledge(undefined), false);
 });
 
 test('adds the markdown extension to manual documents exactly once', () => {

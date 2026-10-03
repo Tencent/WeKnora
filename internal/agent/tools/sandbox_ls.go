@@ -9,11 +9,10 @@
 //   - Session-scoped: the sandbox path is resolved from the tool exec
 //     context (`ToolExecContext.SessionID`). The LLM cannot pass an
 //     arbitrary session ID.
-//   - Directory guardrail: `path` must resolve underneath `/workspace`,
-//     the session's own tree — the same scope write_sandbox_file may
-//     create in. Omitting `path` lists the artifact output dir
-//     (`$WEKNORA_SKILL_OUTPUT_DIR`, default `/workspace/output`) so a
-//     listing does not dump every attachment and scratch file into context.
+//   - Paths are inside the current session's sandbox. Relative paths resolve
+//     from the workspace root. Omitting `path` lists the layout default
+//     (remote: `$WEKNORA_SKILL_OUTPUT_DIR` / `/workspace/output`; host: the
+//     workspace root).
 //   - Read-only: this tool never creates, modifies or deletes anything
 //     inside the sandbox. Model-authored files go through write_sandbox_file.
 //   - Graceful "no sandbox": if the session has never spawned a sandbox
@@ -26,12 +25,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"path"
 	"sort"
 	"strings"
 	"time"
 
-	"github.com/Tencent/WeKnora/internal/agent/skills"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/sandbox"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -62,17 +59,20 @@ const (
 // Tool schema
 
 var listSandboxFilesTool = BaseTool{
-	name:        ToolListSandboxFiles,
-	description: `List files under /workspace when no shell executor is available. Omitted path lists the artifact output directory. Use known paths directly with read_file; list only to discover unknown files. Results are bounded by max_entries. An unprovisioned session returns an empty listing.`,
-	schema:      utils.GenerateSchema[ListSandboxFilesInput](),
+	name: ToolListSandboxFiles,
+	description: `List files inside the current session's sandbox when no shell executor is available.
+Relative paths resolve from /workspace; omitted path lists /workspace/output.
+Use known paths directly with read_file; list only to discover unknown files.
+Results are bounded by max_entries. An unprovisioned session returns an empty listing.`,
+	schema: utils.GenerateSchema[ListSandboxFilesInput](),
 }
 
 // ListSandboxFilesInput defines the input parameters for list_sandbox_files.
 type ListSandboxFilesInput struct {
 	// Path is the absolute path inside the sandbox to list. When empty
-	// the tool falls back to skills.ArtifactOutputDir(). Must sit under
-	// /workspace.
-	Path string `json:"path,omitempty" jsonschema:"Optional absolute sandbox path to list, under /workspace. Defaults to the session's artifact output directory."` //nolint:lll // one-line struct tag
+	// the tool falls back to layoutDefaultListDir. Relative paths resolve
+	// from the workspace root.
+	Path string `json:"path,omitempty" jsonschema:"Optional absolute or /workspace-relative sandbox path to list. Defaults to /workspace/output on remote sandboxes, or the working directory on host."` //nolint:lll // one-line struct tag
 	// MaxEntries caps the listing size to protect the LLM context.
 	// Zero uses defaultListSandboxMaxEntries.
 	MaxEntries int `json:"max_entries,omitempty" jsonschema:"Optional cap on the number of entries returned. Defaults to 200, hard-capped at 500. Use a smaller value when you only need to check whether a specific file exists."`
@@ -82,6 +82,7 @@ type ListSandboxFilesInput struct {
 // agent as a read-only enumeration primitive.
 type ListSandboxFilesTool struct {
 	BaseTool
+	sessionBound
 	source SandboxFileSource
 }
 
@@ -90,10 +91,40 @@ type ListSandboxFilesTool struct {
 // the sandbox backend does not support per-session file inspection.
 func NewListSandboxFilesTool(source SandboxFileSource) *ListSandboxFilesTool {
 	return &ListSandboxFilesTool{
-		BaseTool: listSandboxFilesTool,
-		source:   source,
+		BaseTool: BaseTool{
+			name:   listSandboxFilesTool.name,
+			schema: listSandboxFilesTool.schema,
+		},
+		source: source,
 	}
 }
+
+// Description is built from the session sandbox layout so host paths never
+// hard-code /workspace.
+func (t *ListSandboxFilesTool) Description() string {
+	layout := t.boundLayout()
+	if layout.IsHost() {
+		return fmt.Sprintf(hostListSandboxFilesDescription, layoutRootOrGeneric(layout))
+	}
+	return rewriteRemoteWorkspaceCopy(listSandboxFilesTool.description, layout)
+}
+
+// Parameters rewrites workspace paths in the schema to match the session layout.
+func (t *ListSandboxFilesTool) Parameters() json.RawMessage {
+	return schemaForLayout(listSandboxFilesTool.schema, t.boundLayout())
+}
+
+func (t *ListSandboxFilesTool) boundLayout() sandbox.WorkspaceLayout {
+	if t == nil {
+		return sandbox.RemoteWorkspaceLayout()
+	}
+	return t.describeLayout(t.source)
+}
+
+const hostListSandboxFilesDescription = "List files in %s. Relative paths resolve from that folder; " +
+	"omitted path lists it.\n" +
+	"Use known paths directly with read_file; list only to discover unknown files.\n" +
+	"Results are bounded by max_entries."
 
 // Execute enumerates files under the requested path inside the current
 // session's sandbox.
@@ -125,20 +156,26 @@ func (t *ListSandboxFilesTool) Execute(ctx context.Context, args json.RawMessage
 		}, nil
 	}
 
+	layout, layoutErr := executeWorkspaceLayout(ctx, sessionID, t.source)
+	if layoutErr != nil {
+		return layoutErr, nil
+	}
+
 	// Resolve target directory. When the caller omits path we scan the
-	// same directory ArtifactCollector drains. An explicit path may also
-	// sit under /workspace/input so staged chat attachments are listable.
+	// layout's default listing (remote: artifact output; host: workspace).
 	targetDir := strings.TrimSpace(input.Path)
 	if targetDir == "" {
-		targetDir = skills.ArtifactOutputDir()
+		targetDir = layoutDefaultListDir(layout)
 	} else {
-		targetDir = sandbox.ResolveWorkspacePath(targetDir)
+		targetDir = resolveIn(layout, targetDir)
 	}
-	rootDir, ok := matchingInspectableRoot(targetDir)
+	rootDir, ok := inspectRoot(layout, targetDir)
 	if !ok {
+		// Report the resolved directory, not input.Path: an omitted path
+		// would otherwise be refused as `path ""`.
 		return &types.ToolResult{
 			Success: false,
-			Error:   inspectablePathError(input.Path),
+			Error:   inspectScopeErrorIn(layout, targetDir),
 		}, nil
 	}
 
@@ -247,67 +284,12 @@ func resolveSessionID(ctx context.Context) string {
 	return ""
 }
 
-// sandboxInspectableRoots is the allowlist for list_sandbox_files and
-// read_file: the session workspace, and nothing outside it.
-//
-// It matches what write_sandbox_file may create. Narrowing the readers to
-// artifacts and attachments used to leave the agent unable to read back the
-// scratch script it had just written to /workspace, which bought no safety —
-// shell_exec reaches the same files — and only forced a detour through `cat`.
-//
-// The list is ordered most specific first so the reported root still names the
-// artifact or attachment tree when the path is inside one.
-func sandboxInspectableRoots() []string {
-	return []string{
-		skills.ArtifactOutputDir(),
-		sandbox.SessionInputRoot,
-		sandbox.SessionWorkspaceRoot,
-	}
-}
-
-func inspectableRootsDescription() string {
-	return sandbox.SessionWorkspaceRoot
-}
-
-// inspectablePathError explains a refused list/read path. Skill image
-// paths are the common miss: the model sees /opt/weknora/tenant/skills/<name>
-// in read_file's environment section and retries with this tool or ls.
-func inspectablePathError(requested string) string {
-	base := fmt.Sprintf("this tool only lists/reads /workspace. path %q is outside that scope", requested)
-	name, inImage := sandbox.SkillNameFromImagePath(path.Clean(requested))
-	if inImage && name != "" {
-		return base + fmt.Sprintf(". Use read_file(path=%q) for package instructions and file discovery. Do not ls the whole installed dependency tree.", "skill://"+name+"/SKILL.md")
-	}
-	return base + ". Use read_file with a listed skill:// resource for skill packages."
-}
-
-func relativeSkillFileFromImagePath(clean, skillName string) string {
-	dir, err := sandbox.SkillDirFor(skillName)
-	if err != nil || clean == dir {
-		return ""
-	}
-	prefix := dir + "/"
-	if strings.HasPrefix(clean, prefix) {
-		return strings.TrimPrefix(clean, prefix)
-	}
-	return ""
-}
-
-// matchingInspectableRoot returns the allowlisted root that contains
-// clean, or ("", false) when the path sits outside every root.
-func matchingInspectableRoot(clean string) (string, bool) {
-	for _, root := range sandboxInspectableRoots() {
-		if isUnderRoot(clean, root) {
-			return root, true
-		}
-	}
-	return "", false
-}
-
 // isUnderRoot reports whether clean sits at or underneath root. Both
-// arguments must already be cleaned. The list/read tools use this as a
-// scope check so they stay on artifacts and attachments; it is not a
-// privilege boundary (shell_exec can already reach the same files).
+// arguments must already be cleaned. On a remote sandbox this labels roots
+// and protects the attachment tree; shell_exec can still reach the same
+// files. On a host layout, write scope and work_dir clamping use this as
+// the tool-layer boundary — the OS sandbox PathGuard remains the real
+// privilege check, including symlink follow.
 func isUnderRoot(clean, root string) bool {
 	if clean == root {
 		return true

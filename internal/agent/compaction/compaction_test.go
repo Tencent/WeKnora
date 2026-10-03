@@ -36,10 +36,23 @@ func (s *stubChat) Chat(
 	return &types.ChatResponse{Content: s.response, FinishReason: s.finishReason}, nil
 }
 
+// ChatStream answers like Chat, as a stream: compaction summarizes through it.
 func (s *stubChat) ChatStream(
-	context.Context, []chat.Message, *chat.ChatOptions,
+	ctx context.Context, messages []chat.Message, opts *chat.ChatOptions,
 ) (<-chan types.StreamResponse, error) {
-	return nil, nil
+	resp, err := s.Chat(ctx, messages, opts)
+	if err != nil {
+		return nil, err
+	}
+	return streamOf(resp), nil
+}
+
+func streamOf(resp *types.ChatResponse) <-chan types.StreamResponse {
+	ch := make(chan types.StreamResponse, 2)
+	ch <- types.StreamResponse{ResponseType: types.ResponseTypeAnswer, Content: resp.Content}
+	ch <- types.StreamResponse{ResponseType: types.ResponseTypeAnswer, Done: true, FinishReason: resp.FinishReason}
+	close(ch)
+	return ch
 }
 
 func (s *stubChat) GetModelName() string { return "stub" }

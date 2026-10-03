@@ -557,6 +557,52 @@ func (c *Client) OpenKnowledgeFile(ctx context.Context, knowledgeID string) (str
 	return filename, resp.Body, nil
 }
 
+// BatchDownloadKnowledgeRequest selects documents in one knowledge base for ZIP download.
+type BatchDownloadKnowledgeRequest struct {
+	IDs []string `json:"ids"`
+}
+
+// DownloadKnowledgeFiles downloads a ZIP of original files for the given
+// knowledge IDs to destPath. On any error after the file is opened, the
+// partial file is removed.
+func (c *Client) DownloadKnowledgeFiles(ctx context.Context, knowledgeBaseID string, ids []string, destPath string) error {
+	_, body, err := c.OpenKnowledgeFilesArchive(ctx, knowledgeBaseID, ids)
+	if err != nil {
+		return err
+	}
+	defer body.Close()
+
+	out, err := os.Create(destPath)
+	if err != nil {
+		return fmt.Errorf("failed to create file: %w", err)
+	}
+	if _, err := io.Copy(out, body); err != nil {
+		_ = out.Close()
+		_ = os.Remove(destPath)
+		return fmt.Errorf("failed to copy response body: %w", err)
+	}
+	return out.Close()
+}
+
+// OpenKnowledgeFilesArchive starts a batch download and returns the
+// server-suggested ZIP filename and a streaming reader. Callers MUST Close
+// the returned reader. The request uses the streaming HTTP client so the
+// default 30s timeout does not cut off large archives.
+func (c *Client) OpenKnowledgeFilesArchive(ctx context.Context, knowledgeBaseID string, ids []string) (string, io.ReadCloser, error) {
+	path := fmt.Sprintf("/api/v1/knowledge-bases/%s/knowledge/batch-download", knowledgeBaseID)
+	resp, err := c.doRequestStream(ctx, http.MethodPost, path, BatchDownloadKnowledgeRequest{IDs: ids}, nil)
+	if err != nil {
+		return "", nil, err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		return "", nil, newAPIError(resp.StatusCode, body)
+	}
+	filename := filenameFromContentDisposition(resp.Header.Get("Content-Disposition"))
+	return filename, resp.Body, nil
+}
+
 // filenameFromContentDisposition extracts the filename parameter from a
 // Content-Disposition header. Returns "" on any parse failure or missing
 // parameter — callers fall back to their own default in that case.

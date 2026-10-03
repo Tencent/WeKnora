@@ -101,13 +101,19 @@ func (e *AgentEngine) runCompaction(
 		logger.Warnf(ctx, "[Agent][Round-%d] Compaction freed too little (%d → %d tokens); "+
 			"not attempting again at this size", round, result.TokensBefore, result.TokensAfter)
 		e.compactionExhaustedAt = len(messages)
+		// This context keeps its messages, but the stored history was still
+		// summarized, and that summary is as good a checkpoint as any. The
+		// usual case is a large live turn next to a short stored history:
+		// discarding it would have the next turn summarize the same history
+		// again.
+		e.saveContextCheckpoint(ctx, result.Checkpoint, round)
 		return messages, false
 	}
 
 	logger.Infof(ctx, "[Agent][Round-%d] Compacted (%s): %d → %d tokens, %d → %d messages "+
-		"(split_turn=%v, degraded=%v)",
+		"(split_turn=%v, degraded=%v, omitted=%d)",
 		round, result.Reason, result.TokensBefore, result.TokensAfter,
-		result.MessagesBefore, result.MessagesAfter, result.SplitTurn, result.Degraded)
+		result.MessagesBefore, result.MessagesAfter, result.SplitTurn, result.Degraded, result.Omitted)
 	// Where the surviving tokens went. If the retained tail is far larger than
 	// keep_recent, the cut point could not reach past one oversized message.
 	logger.Debugf(ctx, "[Agent][Round-%d][ctx] post-compaction: summary=%d tail=%d "+
@@ -124,6 +130,8 @@ func (e *AgentEngine) runCompaction(
 		"degraded":      result.Degraded,
 	})
 	e.emitContextCompacted(ctx, result, round)
+	e.saveContextCheckpoint(ctx, result.Checkpoint, round)
+	e.contextRewrites++
 
 	// The usage baseline described the pre-compaction context; keeping it
 	// would have the next round estimate against history that no longer
@@ -192,6 +200,7 @@ func (e *AgentEngine) trimToolResults(
 		return messages, false
 	}
 	logger.Infof(ctx, "[Agent][Round-%d] Trimmed tool results to the token budget", round)
+	e.contextRewrites++
 	return trimmed, true
 }
 
@@ -321,7 +330,11 @@ type responseVerdict struct {
 	isDone       bool
 	finalAnswer  string
 	emptyContent bool // LLM returned stop with no tool calls and empty content
-	step         types.AgentStep
+	// truncated marks a finalAnswer the completion-token cap cut off. The turn
+	// ends with it rather than looping, so the client has to be told the text
+	// is partial.
+	truncated bool
+	step      types.AgentStep
 	// answerID is the EventAgentFinalAnswer id to close with Done:true if
 	// this round actually finishes. Natural-stop must not close the stream
 	// before the loop-end steer drain: a pending inject continues the turn,
@@ -477,9 +490,77 @@ func (e *AgentEngine) analyzeResponse(
 		}
 	}
 
+	// Case 2: the completion cap cut this message off and the model asked for
+	// no tool work.
+	//
+	// Looping here is what produced the "answer restarts from the top" spiral
+	// (#3446). `length` is not a natural stop, so the round used to fall
+	// through as non-terminal; with no tool calls to run, appendToolResults
+	// pushed the half-written answer back as a plain assistant message with
+	// nothing instructing the model to continue. The next round rewrote the
+	// answer from the beginning, hit the same cap, and repeated until the
+	// round budget ran out or the user cancelled.
+	//
+	// Deliver what the model produced and end the turn. This matches what the
+	// truncated-tool-call path already does one level down (act.go refuses the
+	// calls rather than running half-serialized arguments) and what other
+	// agent loops do with a text truncation. A continuation nudge is
+	// deliberately not sent: it only grows the prompt with the discarded
+	// fragment, and the reliable form of continuation (assistant prefill) is
+	// not available on most OpenAI-compatible endpoints.
+	if isLengthFinishReason(response.FinishReason) && len(response.ToolCalls) == 0 {
+		response.Content = agenttools.StripThinkBlocks(response.Content)
+		round := iteration + 1
+		// Nothing was produced but reasoning: there is no partial answer to
+		// hand over, so use the existing empty-content path, which nudges and
+		// retries a bounded number of times before falling back.
+		if strings.TrimSpace(response.Content) == "" {
+			logger.Warnf(ctx, "[Agent][Round-%d] Completion cap reached with no answer text (finish=%s); "+
+				"deferring to the empty-content retry", round, response.FinishReason)
+			return responseVerdict{isDone: true, finalAnswer: "", emptyContent: true, step: step}
+		}
+
+		logger.Warnf(ctx, "[Agent][Round-%d] Answer truncated at the completion cap (finish=%s, answer=%d chars); "+
+			"ending the turn instead of re-answering", round, response.FinishReason, len(response.Content))
+		common.PipelineWarn(ctx, "Agent", "round_truncated_answer", map[string]interface{}{
+			"iteration":     iteration,
+			"round":         round,
+			"answer_len":    len(response.Content),
+			"finish_reason": response.FinishReason,
+		})
+
+		// Same two delivery paths as Case 1: reuse the live stream when the
+		// text already went out, otherwise emit it once here. Done is left to
+		// the caller so a loop-end steer inject can still continue the turn.
+		answerID := response.AnswerEventID
+		if !response.AnswerStreamed || answerID == "" {
+			answerID = generateEventID("answer")
+			_ = e.eventBus.Emit(ctx, event.Event{
+				ID:        answerID,
+				Type:      event.EventAgentFinalAnswer,
+				SessionID: sessionID,
+				Data: event.AgentFinalAnswerData{
+					Content:   response.Content,
+					Done:      false,
+					Truncated: true,
+				},
+			})
+		}
+
+		step.Truncated = true
+		return responseVerdict{
+			isDone:      true,
+			finalAnswer: response.Content,
+			truncated:   true,
+			step:        step,
+			answerID:    answerID,
+		}
+	}
+
 	// Any round that still requests tool calls is non-terminal: the caller
-	// executes the tools and loops again. The agent only ends by stopping
-	// naturally (Case 1) with its answer as plain assistant text.
+	// executes the tools and loops again. Apart from the cases above, the
+	// agent only ends by stopping naturally (Case 1) with its answer as plain
+	// assistant text.
 	return responseVerdict{isDone: false, step: step}
 }
 
@@ -522,6 +603,7 @@ func buildRuntimeContextBlock(
 	sessionID string,
 	kbs []*KnowledgeBaseInfo,
 	docs []*SelectedDocumentInfo,
+	origin *QuestionOriginInfo,
 ) string {
 	var sb strings.Builder
 	sb.WriteString("<runtime_context scope=\"this_turn\">\n")
@@ -564,8 +646,38 @@ func buildRuntimeContextBlock(
 		sb.WriteString("  </pinned_documents>\n")
 	}
 
+	writeQuestionOrigin(&sb, origin)
+
 	sb.WriteString("</runtime_context>")
 	return sb.String()
+}
+
+// writeQuestionOrigin tells the model which source a picked suggested
+// question came from. Such a question is phrased from one document's
+// content, so it can read like general knowledge ("why be careful comparing
+// graphs?") while meaning something specific to that document; without the
+// hint the model may answer from memory without searching at all.
+func writeQuestionOrigin(sb *strings.Builder, origin *QuestionOriginInfo) {
+	if origin == nil || origin.KnowledgeBaseID == "" {
+		return
+	}
+	fmt.Fprintf(sb, "  <question_origin knowledge_base_id=\"%s\"", escapeXMLAttr(origin.KnowledgeBaseID))
+	if origin.KnowledgeBaseName != "" {
+		fmt.Fprintf(sb, " name=\"%s\"", escapeXMLAttr(origin.KnowledgeBaseName))
+	}
+	sb.WriteString(">\n")
+	if d := origin.Document; d != nil && d.KnowledgeID != "" {
+		title := d.Title
+		if title == "" {
+			title = d.FileName
+		}
+		fmt.Fprintf(sb, "    <document knowledge_id=\"%s\" title=\"%s\" />\n",
+			escapeXMLAttr(d.KnowledgeID), escapeXMLAttr(title))
+	}
+	sb.WriteString("    <note>The user picked this question from suggestions generated from this source. " +
+		"Search it before answering: the question refers to that content even when it reads like " +
+		"general knowledge.</note>\n")
+	sb.WriteString("  </question_origin>\n")
 }
 
 // buildMustUseBlock emits a short per-turn hint when the user @mentioned MCP/Skill.
@@ -690,7 +802,7 @@ func commonStringPrefix(a, b string) string {
 // not written to rendered_content / history.
 func (e *AgentEngine) RenderUserTurnContent(sessionID, query string) string {
 	e.registerRuntimeReferences()
-	runtimeCtx := buildRuntimeContextBlock(sessionID, e.knowledgeBasesInfo, e.selectedDocs)
+	runtimeCtx := buildRuntimeContextBlock(sessionID, e.knowledgeBasesInfo, e.selectedDocs, e.questionOrigin)
 	runtimeCtx = e.modelContext.CompactKnownText(runtimeCtx)
 	mustUse := buildMustUseBlock(e.pinnedMCPServices, e.pinnedSkills)
 	return composeUserTurnContent(runtimeCtx, mustUse, query)
@@ -730,6 +842,12 @@ func (e *AgentEngine) registerRuntimeReferences() {
 		}
 		e.modelContext.RegisterDocument(doc.KnowledgeID)
 		e.modelContext.RegisterKnowledgeBase(doc.KnowledgeBaseID)
+	}
+	if origin := e.questionOrigin; origin != nil {
+		e.modelContext.RegisterKnowledgeBase(origin.KnowledgeBaseID)
+		if origin.Document != nil {
+			e.modelContext.RegisterDocument(origin.Document.KnowledgeID)
+		}
 	}
 }
 
@@ -796,12 +914,18 @@ func (e *AgentEngine) appendToolResults(
 	messages []chat.Message,
 	step types.AgentStep,
 ) []chat.Message {
-	// Add assistant message with tool calls (if any)
-	if step.Thought != "" || len(step.ToolCalls) > 0 || step.ReasoningContent != "" {
+	// Add assistant message with tool calls (if any). The reasoning artifacts
+	// count as content of their own: an Anthropic round can consist purely of
+	// a redacted_thinking block, and dropping the turn loses state the next
+	// request has to replay.
+	if step.Thought != "" || len(step.ToolCalls) > 0 || step.ReasoningContent != "" ||
+		step.ReasoningSignature != "" || len(step.ReasoningMetadata) > 0 {
 		assistantMsg := chat.Message{
-			Role:             "assistant",
-			Content:          step.Thought,
-			ReasoningContent: step.ReasoningContent,
+			Role:               "assistant",
+			Content:            step.Thought,
+			ReasoningContent:   step.ReasoningContent,
+			ReasoningSignature: step.ReasoningSignature,
+			ReasoningMetadata:  step.ReasoningMetadata,
 		}
 
 		// Add tool calls to assistant message (following OpenAI format)
@@ -856,14 +980,18 @@ func countTotalToolCalls(steps []types.AgentStep) int {
 // may become stale across turns (KB can be switched, updated, or deleted).
 // Historical results from these tools are redacted to force fresh retrieval.
 var kbToolNames = map[string]bool{
-	agenttools.ToolKnowledgeSearch:     true,
-	agenttools.ToolGrepChunks:          true,
-	agenttools.ToolListKnowledgeChunks: true,
+	agenttools.ToolSearchKnowledge:     true,
+	agenttools.ToolReadDocument:        true,
+	agenttools.ToolListDocuments:       true,
 	agenttools.ToolQueryKnowledgeGraph: true,
-	agenttools.ToolGetDocumentInfo:     true,
 	agenttools.ToolWikiSearch:          true,
 	agenttools.ToolWikiReadPage:        true,
-	agenttools.ToolWikiReadSourceDoc:   true,
+	// Retired names still appear in stored histories.
+	agenttools.LegacyToolKnowledgeSearch:     true,
+	agenttools.LegacyToolGrepChunks:          true,
+	agenttools.LegacyToolListKnowledgeChunks: true,
+	agenttools.LegacyToolGetDocumentInfo:     true,
+	agenttools.LegacyToolWikiReadSourceDoc:   true,
 }
 
 // redactHistoryKBResults replaces full KB tool results in historical context
@@ -878,12 +1006,26 @@ func redactHistoryKBResults(llmContext []chat.Message) []chat.Message {
 				Content:    "[Previous retrieval result omitted — knowledge base may have changed. Please perform a fresh search.]",
 				ToolCallID: msg.ToolCallID,
 				Name:       msg.Name,
+				TurnID:     msg.TurnID,
 			})
 		} else {
 			redacted = append(redacted, msg)
 		}
 	}
 	return redacted
+}
+
+// HistoryAsSent is stored history as the engine sends it. Unless the agent
+// retains retrieval history, KB and Wiki tool results from earlier turns are
+// redacted, so the model does not reuse retrieval data the knowledge base may
+// have outgrown. The history loader prices turns with it too, so its token
+// budget is spent on what reaches the model, not on a wiki page that goes out
+// as one line.
+func HistoryAsSent(history []chat.Message, retainRetrievalHistory bool) []chat.Message {
+	if retainRetrievalHistory {
+		return history
+	}
+	return redactHistoryKBResults(history)
 }
 
 // buildMessagesWithLLMContext builds the message array with LLM context
@@ -897,14 +1039,10 @@ func (e *AgentEngine) buildMessagesWithLLMContext(
 	}
 
 	if len(llmContext) > 0 {
-		var sanitized []chat.Message
+		sanitized := HistoryAsSent(llmContext, e.config.RetainRetrievalHistory)
 		if e.config.RetainRetrievalHistory {
-			sanitized = llmContext
 			logger.Infof(context.Background(), "Retaining full retrieval history in context (RetainRetrievalHistory=true)")
 		} else {
-			// Redact KB tool results from previous turns to prevent the LLM
-			// from reusing stale retrieval data when the KB has been modified.
-			sanitized = redactHistoryKBResults(llmContext)
 			logger.Infof(context.Background(), "Added %d history messages to context (KB tool results redacted)", len(llmContext))
 		}
 

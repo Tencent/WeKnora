@@ -1,0 +1,13 @@
+@import "tailwindcss";
+@import "../../shared/brand.css";
+@import "../../shared/header.css";
+:root { background: var(--wk-paper); color: var(--wk-ink); }
+* { box-sizing: border-box; }
+body { margin: 0; font-family: var(--wk-font-sans); -webkit-font-smoothing: antialiased; }
+html { scroll-behavior: smooth; }
+button, a { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
+button { font: inherit; cursor: pointer; }
+a { text-decoration: none; }
+::selection { background: var(--wk-accent-border); color: var(--wk-ink); }
+:focus-visible { outline: 2px solid #b8863b; outline-offset: 5px; }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } *, *::before, *::after { transition: none !important; animation: none !important; } }

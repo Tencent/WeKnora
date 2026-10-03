@@ -43,6 +43,7 @@ func prepareChatModel(ctx context.Context, modelService interfaces.ModelService,
 		return nil, nil, err
 	}
 
+	effort := chat.SanitizeReasoningEffort(ctx, chatManage.SummaryConfig.ReasoningEffort, "session summary config")
 	opt := &chat.ChatOptions{
 		Temperature:         chatManage.SummaryConfig.Temperature,
 		TopP:                chatManage.SummaryConfig.TopP,
@@ -52,11 +53,13 @@ func prepareChatModel(ctx context.Context, modelService interfaces.ModelService,
 		FrequencyPenalty:    chatManage.SummaryConfig.FrequencyPenalty,
 		PresencePenalty:     chatManage.SummaryConfig.PresencePenalty,
 		Thinking:            chatManage.SummaryConfig.Thinking,
+		ReasoningEffort:     effort,
 		PromptCacheKey:      chatManage.SessionID,
 	}
-	if opt.Thinking != nil {
+	if level, requested := opt.Reasoning(); requested {
 		pipelineInfo(ctx, "Stream", "thinking_option", map[string]interface{}{
-			"enabled": *opt.Thinking,
+			"enabled": level.Enabled(),
+			"level":   string(level),
 		})
 	}
 
@@ -149,6 +152,9 @@ func loadAndProcessHistory(
 			// Historical references are carried separately in KnowledgeReferences
 			// and can be re-merged into this turn's freshly rendered context.
 			h.Query = message.Content
+			if strings.TrimSpace(h.Query) == "" && (len(message.Images) > 0 || len(message.Attachments) > 0) {
+				h.Query = types.UploadOnlyQuestion(types.LanguageFromContextOrDefault(ctx))
+			}
 			h.CreateAt = message.CreatedAt
 			if desc := extractImageCaptions(message.Images); desc != "" {
 				h.Query += "\n\n[用户上传图片内容]\n" + desc

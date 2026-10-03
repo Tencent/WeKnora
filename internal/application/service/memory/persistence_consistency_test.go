@@ -16,7 +16,7 @@ import (
 func TestMemoryConsistencyRealMessagePaging(t *testing.T) {
 	s, db, tr := newMemoryHarness(t)
 	ctx := enabledCtx(t, tr, 1, "alice")
-	require.NoError(t, db.AutoMigrate(&types.Message{}))
+	require.NoError(t, db.AutoMigrate(&types.Message{}, &types.MessageArtifactRecord{}))
 	at := time.Now().UTC().Truncate(time.Second)
 	for i := 0; i < 85; i++ {
 		require.NoError(t, db.Exec("INSERT INTO messages (id, session_id, role, content, created_at) VALUES (?, ?, ?, ?, ?)", fmt.Sprintf("m%03d", i), "s", "user", "hello", at).Error)

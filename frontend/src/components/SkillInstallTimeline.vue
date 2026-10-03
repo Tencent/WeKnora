@@ -356,8 +356,8 @@ onUnmounted(stop)
   flex-shrink: 0;
   margin-top: 12px;
   padding-top: 12px;
-  background: var(--td-bg-color-container, #fff);
-  border-top: 1px solid var(--td-component-stroke, #e7e7e7);
+  background: var(--td-bg-color-container);
+  border-top: 1px solid var(--td-component-stroke);
 
   // Cover the timeline's padding too, so scrolling text cannot peek around
   // the sticky composer. Its z-index keeps this backdrop above the transcript.
@@ -374,8 +374,8 @@ onUnmounted(stop)
   margin: 8px 0;
   padding: 8px;
   background: var(--td-bg-color-container);
-  border-radius: 6px;
-  span { font-size: 12px; color: var(--td-text-color-secondary); }
+  border-radius: var(--app-radius-sm);
+  span { font-size: var(--app-text-sm); color: var(--td-text-color-secondary); }
   p { margin: 4px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 }
 .skill-timeline__guidance-actions {
@@ -384,17 +384,17 @@ onUnmounted(stop)
   justify-content: flex-end;
   gap: 12px;
   margin-top: 8px;
-  span { flex: 1; font-size: 12px; color: var(--td-text-color-secondary); }
+  span { flex: 1; font-size: var(--app-text-sm); color: var(--td-text-color-secondary); }
 }
-.skill-timeline__guidance-error { color: var(--td-error-color); font-size: 12px; }
+.skill-timeline__guidance-error { color: var(--td-error-color); font-size: var(--app-text-sm); }
 
 .skill-timeline {
   display: flex;
   flex-direction: column;
   padding: 12px;
-  background: var(--td-bg-color-secondarycontainer, #f7f7f7);
-  border: 1px solid var(--td-component-stroke, #e7e7e7);
-  border-radius: 8px;
+  background: var(--td-bg-color-secondarycontainer);
+  border: 1px solid var(--td-component-stroke);
+  border-radius: var(--app-radius-md);
 }
 
 .skill-timeline__turn + .skill-timeline__turn {
@@ -406,19 +406,19 @@ onUnmounted(stop)
   margin: 0;
   padding: 8px 10px;
   overflow-y: auto;
-  color: var(--td-text-color-secondary, #666);
-  font-size: 12px;
+  color: var(--td-text-color-secondary);
+  font-size: var(--app-text-sm);
   line-height: 1.6;
-  background: var(--td-bg-color-container, #fff);
-  border-radius: 6px;
+  background: var(--td-bg-color-container);
+  border-radius: var(--app-radius-sm);
   white-space: pre-wrap;
   word-break: break-word;
 }
 
 .skill-timeline__empty {
   margin: 8px 0;
-  color: var(--td-text-color-placeholder, #999);
-  font-size: 13px;
+  color: var(--td-text-color-placeholder);
+  font-size: var(--app-text-md);
 }
 
 .skill-timeline--compact {
@@ -431,40 +431,40 @@ onUnmounted(stop)
 .skill-timeline--compact .skill-timeline__prompt {
   max-height: 72px;
   padding: 6px 8px;
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   line-height: 1.5;
 }
 
 .skill-timeline--compact .skill-timeline__empty {
   margin: 4px 0;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
 }
 
 .skill-timeline--compact :deep(.agent-stream-display.is-embedded) {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   --agent-step-text-size: 12px;
   --agent-step-summary-size: 12px;
 }
 
 .skill-timeline--compact :deep(.agent-stream-display.is-embedded .tree-root .action-name) {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
 }
 
 // Chat answer Markdown is 16px. That is the right size in a conversation and
 // too loud in this 420px popup, where the prompt and step summary are 11–13px.
 .skill-timeline--compact :deep(.agent-stream-display .answer-content.markdown-content) {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.55;
 }
 
 .skill-timeline--compact :deep(.agent-stream-display .answer-content.markdown-content h1) {
-  font-size: 13px;
+  font-size: var(--app-text-md);
   margin-bottom: 0.35em;
 }
 
 .skill-timeline--compact :deep(.agent-stream-display .answer-content.markdown-content h2),
 .skill-timeline--compact :deep(.agent-stream-display .answer-content.markdown-content h3) {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
 }
 .skill-timeline__turn--command {
   // AgentStreamDisplay also renders an empty inline image-viewer trigger.

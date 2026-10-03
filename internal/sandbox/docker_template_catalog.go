@@ -11,8 +11,9 @@
 //     nothing to do with sandboxes. Listing all of them would bury the one the
 //     admin needs, so the catalog only reports images that are recognisably
 //     sandbox templates.
-//   - Skill snapshots live in the same image store (weknora-skill/…), so they
-//     are subtracted the way Cube hides snap- IDs from GET /templates.
+//   - Skill and fork snapshots live in the same image store (weknora-skill/…
+//     and weknora-fork/…), so they are subtracted the way Cube hides snap- IDs
+//     from GET /templates.
 //   - Making the standard template exist means pulling, which can take minutes
 //     on a cold host. The pull therefore runs in the background and the
 //     template reports "building" until it lands, mirroring how the other
@@ -58,14 +59,15 @@ func (c *DockerRemoteClient) ListTemplates(ctx context.Context) ([]RemoteTemplat
 	configured := strings.TrimSpace(c.settings.Image)
 	configuredPresent := false
 	for _, image := range listed.Items {
-		snapshot := dockerImageIsSkillSnapshot(image)
+		snapshot := dockerImageIsSkillSnapshot(image) || dockerImageIsForkSnapshot(image)
 		for _, tag := range image.RepoTags {
 			if tag == "" || tag == "<none>:<none>" {
 				continue
 			}
-			// Skill snapshots are images, so they would otherwise appear in
-			// the "pick a base template" list the way Cube's snap- IDs used
-			// to. Hide them unless this config's stored image is that tag.
+			// Skill and fork snapshots are images, so they would otherwise
+			// appear in the "pick a base template" list the way Cube's snap-
+			// IDs used to. Hide them unless this config's stored image is
+			// that tag.
 			if snapshot && tag != configured {
 				continue
 			}

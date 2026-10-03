@@ -38,6 +38,11 @@ type AgentEngine interface {
 	// messages at every round boundary and persists accepted ones through
 	// the sink. Must be called before Execute.
 	SetSteerSink(sink types.SteerSink)
+
+	// SetContextCheckpointSink enables persisting compaction summaries that
+	// end on a stored turn, so later turns start from them. Nil (default)
+	// keeps compaction local to the turn. Must be called before Execute.
+	SetContextCheckpointSink(sink types.ContextCheckpointSink)
 }
 
 // AgentService defines the interface for agent-related operations

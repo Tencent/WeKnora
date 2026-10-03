@@ -176,7 +176,7 @@ watch(headerTitle, (title) => {
   height: 100vh;
   display: flex;
   flex-direction: column;
-  background: var(--td-bg-color-container, #fff);
+  background: var(--td-bg-color-container);
   overflow: hidden;
   /* 子组件（含 AgentStreamDisplay）内凡用 --td-brand-color 的 loading / 强调色均跟随渠道主题 */
   --td-brand-color: var(--embed-primary, var(--td-brand-color));
@@ -213,14 +213,14 @@ watch(headerTitle, (title) => {
     justify-content: center;
     width: 36px;
     height: 36px;
-    border-radius: 10px;
+    border-radius: var(--app-radius-lg);
     flex-shrink: 0;
     background: color-mix(in srgb, var(--td-brand-color) 10%, transparent);
     color: var(--td-brand-color);
   }
 
   &__avatar {
-    font-size: 20px;
+    font-size: var(--app-text-3xl);
     line-height: 1;
   }
 
@@ -240,7 +240,7 @@ watch(headerTitle, (title) => {
 
   &__title {
     margin: 0;
-    font-size: 15px;
+    font-size: var(--app-text-lg);
     font-weight: 600;
     line-height: 1.35;
     color: var(--td-text-color-primary);
@@ -251,7 +251,7 @@ watch(headerTitle, (title) => {
 
   &__subtitle {
     margin: 2px 0 0;
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     line-height: 1.4;
     color: var(--td-text-color-secondary);
     overflow: hidden;

@@ -129,6 +129,41 @@ func TestDockerDeleteSnapshotSweepsUntaggedSkillImages(t *testing.T) {
 		"the sweep must take the untagged snapshot and nothing that is still named")
 }
 
+func TestDockerDeleteSnapshotSweepsUntaggedForkImages(t *testing.T) {
+	engine := newFakeDockerEngine()
+	engine.images = []image.Summary{
+		{
+			ID:       "sha256:retired-fork",
+			RepoTags: []string{DockerForkSnapshotRepo + "/fork-a:latest"},
+			Labels:   map[string]string{dockerForkSnapshotLabel: "true"},
+		},
+		{
+			ID:       "sha256:orphan-fork",
+			RepoTags: []string{"<none>:<none>"},
+			Labels:   map[string]string{dockerForkSnapshotLabel: "true"},
+		},
+		{
+			ID:       "sha256:orphan-skill",
+			RepoTags: []string{"<none>:<none>"},
+			Labels:   map[string]string{dockerSkillSnapshotLabel: "true"},
+		},
+		{
+			ID:       "sha256:live-fork",
+			RepoTags: []string{DockerForkSnapshotRepo + "/fork-b:latest"},
+			Labels:   map[string]string{dockerForkSnapshotLabel: "true"},
+		},
+	}
+	docker := newTestDockerClient(t, engine)
+
+	require.NoError(t, docker.DeleteSnapshot(
+		context.Background(), DockerForkSnapshotRepo+"/fork-a"))
+
+	require.Equal(t,
+		[]string{DockerForkSnapshotRepo + "/fork-a", "sha256:orphan-fork"},
+		engine.removedImages,
+		"a fork delete must not sweep skill images")
+}
+
 func TestDockerDeleteSnapshotSweepFailureIsNotAnError(t *testing.T) {
 	engine := newFakeDockerEngine()
 	engine.images = []image.Summary{
@@ -179,6 +214,77 @@ func TestDockerCreateDoesNotPullAMissingSkillSnapshot(t *testing.T) {
 	require.True(t, IsRemoteInvalidRequest(err), err)
 	require.Empty(t, engine.pulled,
 		"a local commit must not be fetched from a registry")
+}
+
+func TestDockerCreateForkSnapshotTagsAForkImage(t *testing.T) {
+	engine := newFakeDockerEngine()
+	docker := newTestDockerClient(t, engine)
+
+	ref, err := docker.CreateForkSnapshot(context.Background(), "container-1", "fork-session-a-1")
+	require.NoError(t, err)
+	require.Equal(t, DockerForkSnapshotRepo+"/fork-session-a-1", ref.ID)
+	require.Len(t, engine.committed, 1)
+	require.Equal(t, DockerForkSnapshotRepo+"/fork-session-a-1", engine.committed[0].Reference)
+	require.Equal(t, "weknora fork snapshot", engine.committed[0].Comment)
+	require.False(t, engine.committed[0].NoPause,
+		"the Engine must pause the container for the duration of the commit")
+	require.Contains(t, engine.committed[0].Changes, "LABEL "+dockerForkSnapshotLabel+"=true")
+	require.Contains(t, engine.committed[0].Changes,
+		"LABEL "+dockerForkSnapshotSourceLabel+"=container-1")
+}
+
+func TestDockerListTemplatesHidesForkSnapshots(t *testing.T) {
+	engine := newFakeDockerEngine()
+	engine.images = []image.Summary{
+		{
+			ID:       "sha256:base",
+			RepoTags: []string{"weknora/sandbox:test"},
+			Labels:   map[string]string{dockerTemplateLabel: "true"},
+		},
+		{
+			ID:       "sha256:fork",
+			RepoTags: []string{DockerForkSnapshotRepo + "/fork-session-a-1:latest"},
+			Labels:   map[string]string{dockerForkSnapshotLabel: "true"},
+		},
+		{
+			ID:       "sha256:fork-tag-only",
+			RepoTags: []string{DockerForkSnapshotRepo + "/untagged-label:latest"},
+		},
+	}
+	docker := newTestDockerClient(t, engine)
+
+	templates, err := docker.ListTemplates(context.Background())
+	require.NoError(t, err)
+	require.Len(t, templates, 1)
+	require.Equal(t, "weknora/sandbox:test", templates[0].ID)
+}
+
+func TestDockerListSnapshotsExcludesForkImages(t *testing.T) {
+	engine := newFakeDockerEngine()
+	docker := newTestDockerClient(t, engine)
+	ctx := context.Background()
+
+	_, err := docker.CreateSnapshot(ctx, "container-1", "weknora-sk-cfg1-g1")
+	require.NoError(t, err)
+	_, err = docker.CreateForkSnapshot(ctx, "container-1", "fork-session-a-1")
+	require.NoError(t, err)
+
+	listed, err := docker.ListSnapshots(ctx, "")
+	require.NoError(t, err)
+	require.Len(t, listed, 1)
+	require.Equal(t, "weknora-skill/weknora-sk-cfg1-g1", listed[0].ID)
+}
+
+func TestDockerCreateDoesNotPullAMissingForkSnapshot(t *testing.T) {
+	engine := newFakeDockerEngine()
+	docker := newTestDockerClient(t, engine)
+
+	_, err := docker.Create(context.Background(), RemoteCreateRequest{
+		TemplateID: DockerForkSnapshotRepo + "/fork-session-a-1",
+	})
+	require.True(t, IsRemoteInvalidRequest(err), err)
+	require.Empty(t, engine.pulled,
+		"a local fork commit must not be fetched from a registry")
 }
 
 func TestDockerSanitizeImageName(t *testing.T) {

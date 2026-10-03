@@ -31,7 +31,7 @@ not in the current conversation:
 - The user assumes shared context that this session does not contain
 
 Do not use when:
-- The answer is in documents (use knowledge_search — that is the knowledge base)
+- The answer is in documents (use search_knowledge — that is the knowledge base)
 - The information is in the current conversation already
 - The user is asking a general question with no reference to the past
 

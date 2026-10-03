@@ -75,7 +75,10 @@
           </div>
 
           <div v-else-if="viewMode !== 'raw'" class="wiki-rev-diff">
-            <div v-if="diffSections.length === 0" class="wiki-rev-empty-diff">
+            <div v-if="snapshotMissing" class="wiki-rev-empty-diff">
+              {{ t('knowledgeEditor.wikiBrowser.revisionNotRetained') }}
+            </div>
+            <div v-else-if="diffSections.length === 0" class="wiki-rev-empty-diff">
               {{ t('knowledgeEditor.wikiBrowser.revisionDiffEmpty') }}
             </div>
             <template v-for="section in diffSections" :key="section.field">
@@ -121,6 +124,11 @@ interface DiffPair {
   toVersion: number
   from: WikiRevisionSnapshot
   to: WikiRevisionSnapshot
+  // True when the previous version's snapshot is not retained (version
+  // superseded before the revision feature existed, or pruned by retention):
+  // `from` fell back to empty, so the range label and hint must not claim a
+  // real v(from) → v(to) diff.
+  fromMissing?: boolean
 }
 
 const props = defineProps<{
@@ -161,8 +169,13 @@ const viewMode = ref<ViewMode>('incremental')
 const reverting = ref(false)
 const diffLoading = ref(false)
 const diffPair = ref<DiffPair | null>(null)
+// True when the selected version's own snapshot is gone (e.g. pruned between
+// list load and click) — the diff pane shows a hint instead of a diff.
+const snapshotMissing = ref(false)
 
-const snapshotCache = new Map<number, WikiRevisionSnapshot>()
+// A null value caches "known not retained" so the 404 is not re-fetched on
+// every diff reload.
+const snapshotCache = new Map<number, WikiRevisionSnapshot | null>()
 
 const currentVersion = computed(() => props.currentPage?.version ?? null)
 
@@ -198,6 +211,9 @@ const versionRangeLabel = computed(() => {
     return selectedRevision.value ? `v${selectedRevision.value.version}` : ''
   }
   if (!diffPair.value) return ''
+  if (diffPair.value.fromMissing) {
+    return t('knowledgeEditor.wikiBrowser.revisionNotRetainedRange', { ver: diffPair.value.toVersion })
+  }
   if (diffPair.value.fromVersion < 1) {
     return t('knowledgeEditor.wikiBrowser.revisionInitialRange', { ver: diffPair.value.toVersion })
   }
@@ -212,6 +228,12 @@ const contextHint = computed(() => {
     ].filter(Boolean).join(' · ')
   }
   if (viewMode.value === 'incremental') {
+    if (diffPair.value?.fromMissing) {
+      return t('knowledgeEditor.wikiBrowser.revisionNotRetainedHint', {
+        prev: diffPair.value.fromVersion,
+        ver: diffPair.value.toVersion,
+      })
+    }
     if ((isCurrentSelected.value && (currentVersion.value ?? 0) <= 1)
       || selectedVersion.value === 1) {
       return t('knowledgeEditor.wikiBrowser.revisionInitialCreationHint')
@@ -291,7 +313,11 @@ function snapshotFromRevisionData(data: WikiPageRevision, content: string): Wiki
   }
 }
 
-async function loadVersionSnapshot(version: number): Promise<WikiRevisionSnapshot> {
+// Returns null when the version has no retained snapshot — versions
+// superseded before the revision feature existed were never snapshotted, and
+// old machine-authored snapshots get pruned. Both are expected states, not
+// errors, so callers degrade instead of surfacing a failure.
+async function loadVersionSnapshot(version: number): Promise<WikiRevisionSnapshot | null> {
   if (!props.currentPage) {
     return { title: '', summary: '', content: '' }
   }
@@ -299,18 +325,27 @@ async function loadVersionSnapshot(version: number): Promise<WikiRevisionSnapsho
     return snapshotFromPage(props.currentPage)
   }
   const cached = snapshotCache.get(version)
-  if (cached) return cached
-  const res = await getWikiRevision(props.kbId, props.slug, version)
-  const data = (res as any).data || (res as any)
-  const snap = snapshotFromRevisionData(data, data.content || '')
-  snapshotCache.set(version, snap)
-  return snap
+  if (cached !== undefined) return cached
+  try {
+    const res = await getWikiRevision(props.kbId, props.slug, version)
+    const data = (res as any).data || (res as any)
+    const snap = snapshotFromRevisionData(data, data.content || '')
+    snapshotCache.set(version, snap)
+    return snap
+  } catch (e: any) {
+    if (e?.status === 404) {
+      snapshotCache.set(version, null)
+      return null
+    }
+    throw e
+  }
 }
 
 let diffRequestSeq = 0
 
 async function loadDiffPair() {
   const seq = ++diffRequestSeq
+  snapshotMissing.value = false
   if (!props.currentPage || selectedVersion.value === null || !canShowDiff.value) {
     diffPair.value = null
     diffLoading.value = false
@@ -337,13 +372,34 @@ async function loadDiffPair() {
 
   diffLoading.value = true
   try {
-    const from = fromVer < 1
-      ? { title: '', summary: '', content: '' }
-      : await loadVersionSnapshot(fromVer)
-    if (seq !== diffRequestSeq) return
+    let from: WikiRevisionSnapshot
+    let fromMissing = false
+    if (fromVer < 1) {
+      from = { title: '', summary: '', content: '' }
+    } else {
+      const prev = await loadVersionSnapshot(fromVer)
+      if (seq !== diffRequestSeq) return
+      if (prev) {
+        from = prev
+      } else {
+        // The previous version's snapshot is not retained (pre-revision
+        // history or pruned). Diff from empty so the pane still shows this
+        // version's full content instead of an error toast.
+        from = { title: '', summary: '', content: '' }
+        fromMissing = true
+      }
+    }
     const to = await loadVersionSnapshot(toVer)
     if (seq !== diffRequestSeq) return
-    diffPair.value = { fromVersion: fromVer, toVersion: toVer, from, to }
+    if (!to) {
+      // The selected version's own snapshot vanished (e.g. pruned while the
+      // drawer was open) — nothing to diff, show the hint pane instead of a
+      // misleading "no differences" empty state.
+      snapshotMissing.value = true
+      diffPair.value = null
+      return
+    }
+    diffPair.value = { fromVersion: fromVer, toVersion: toVer, from, to, fromMissing }
   } catch (e: any) {
     if (seq !== diffRequestSeq) return
     diffPair.value = null
@@ -365,6 +421,7 @@ function resetAndLoad() {
   loadingDetail.value = false
   diffPair.value = null
   diffLoading.value = false
+  snapshotMissing.value = false
   viewMode.value = 'incremental'
   loadList(0)
   void loadDiffPair()
@@ -428,7 +485,11 @@ async function selectRevision(rev: WikiPageRevision) {
     snapshotCache.set(rev.version, snapshotFromRevisionData(data, data.content || ''))
   } catch (e: any) {
     if (seq !== detailRequestSeq) return
-    MessagePlugin.error(e?.message || t('knowledgeEditor.wikiBrowser.revisionLoadFailed'))
+    // 404 = snapshot not retained (pre-revision history or pruned); the raw
+    // server message is English and gives the user nothing actionable.
+    MessagePlugin.error(e?.status === 404
+      ? t('knowledgeEditor.wikiBrowser.revisionNotRetained')
+      : (e?.message || t('knowledgeEditor.wikiBrowser.revisionLoadFailed')))
   } finally {
     if (seq === detailRequestSeq) loadingDetail.value = false
   }
@@ -528,10 +589,10 @@ function formatShortTime(iso?: string): string {
 
 .wiki-rev-item {
   border: none;
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   padding: 6px 10px 6px 14px;
   cursor: pointer;
-  transition: background 0.15s ease, color 0.15s ease;
+  transition: background var(--app-motion-fast) ease, color var(--app-motion-fast) ease;
 }
 
 .wiki-rev-item:hover,
@@ -553,18 +614,18 @@ function formatShortTime(iso?: string): string {
 
 .wiki-rev-version {
   font-weight: 400;
-  font-size: 14px;
+  font-size: var(--app-text-base);
   line-height: 20px;
-  font-family: var(--td-font-family-mono, monospace);
+  font-family: var(--td-font-family-mono);
   color: var(--td-text-color-primary);
-  transition: color 0.15s ease;
+  transition: color var(--app-motion-fast) ease;
 }
 
 .wiki-rev-current-label {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 16px;
   color: var(--td-text-color-placeholder);
-  transition: color 0.15s ease;
+  transition: color var(--app-motion-fast) ease;
 }
 
 .wiki-rev-item-secondary {
@@ -574,13 +635,13 @@ function formatShortTime(iso?: string): string {
   gap: 8px;
   margin-top: 2px;
   min-width: 0;
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   line-height: 16px;
   color: var(--td-text-color-placeholder);
 }
 
 .wiki-rev-time {
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   color: var(--td-text-color-placeholder);
   white-space: nowrap;
   flex-shrink: 0;
@@ -598,7 +659,7 @@ function formatShortTime(iso?: string): string {
   justify-content: center;
   padding: 16px 14px;
   text-align: center;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.5;
   color: var(--td-text-color-placeholder);
 }
@@ -629,8 +690,8 @@ function formatShortTime(iso?: string): string {
 }
 
 .wiki-rev-detail-range {
-  font-family: var(--td-font-family-mono, monospace);
-  font-size: 15px;
+  font-family: var(--td-font-family-mono);
+  font-size: var(--app-text-lg);
   font-weight: 600;
   line-height: 1.4;
   color: var(--td-text-color-primary);
@@ -638,7 +699,7 @@ function formatShortTime(iso?: string): string {
 
 .wiki-rev-detail-sub {
   margin-top: 4px;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.5;
   color: var(--td-text-color-placeholder);
 }
@@ -655,21 +716,21 @@ function formatShortTime(iso?: string): string {
   align-items: center;
   gap: 2px;
   padding: 2px;
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   background: var(--td-bg-color-secondarycontainer);
 }
 
 .wiki-rev-view-switch-btn {
   padding: 5px 10px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   background: transparent;
   color: var(--td-text-color-secondary);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.4;
   white-space: nowrap;
   cursor: pointer;
-  transition: background 0.15s ease, color 0.15s ease;
+  transition: background var(--app-motion-fast) ease, color var(--app-motion-fast) ease;
 }
 
 .wiki-rev-view-switch-btn:hover {
@@ -690,7 +751,7 @@ function formatShortTime(iso?: string): string {
   color: var(--td-text-color-placeholder);
   padding: 24px;
   text-align: center;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   line-height: 1.5;
 }
 
@@ -701,7 +762,7 @@ function formatShortTime(iso?: string): string {
   justify-content: center;
   gap: 8px;
   color: var(--td-text-color-placeholder);
-  font-size: 13px;
+  font-size: var(--app-text-md);
 }
 
 .wiki-rev-diff {
@@ -716,7 +777,7 @@ function formatShortTime(iso?: string): string {
 .wiki-rev-empty-diff {
   padding: 24px 0;
   text-align: center;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   color: var(--td-text-color-placeholder);
 }
 
@@ -727,7 +788,7 @@ function formatShortTime(iso?: string): string {
 }
 
 .wiki-rev-diff-block-label {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   font-weight: 500;
   color: var(--td-text-color-placeholder);
 }
@@ -737,10 +798,10 @@ function formatShortTime(iso?: string): string {
   margin: 0;
   padding: 10px 12px;
   background: var(--td-bg-color-secondarycontainer);
-  border-radius: 8px;
-  font-size: 12px;
+  border-radius: var(--app-radius-md);
+  font-size: var(--app-text-sm);
   line-height: 1.7;
-  font-family: var(--td-font-family-mono, monospace);
+  font-family: var(--td-font-family-mono);
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -755,10 +816,10 @@ function formatShortTime(iso?: string): string {
   margin: 0;
   padding: 12px 14px;
   background: var(--td-bg-color-secondarycontainer);
-  border-radius: 8px;
-  font-size: 13px;
+  border-radius: var(--app-radius-md);
+  font-size: var(--app-text-md);
   line-height: 1.7;
-  font-family: var(--td-font-family-mono, monospace);
+  font-family: var(--td-font-family-mono);
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -768,7 +829,7 @@ function formatShortTime(iso?: string): string {
 }
 
 .wiki-rev-diff-line--add {
-  background: rgba(7, 192, 95, 0.08);
+  background: color-mix(in srgb, var(--td-brand-color) 8%, transparent);
   color: var(--td-text-color-primary);
 }
 

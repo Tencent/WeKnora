@@ -155,5 +155,8 @@ RUN mkdir -p /tmp/docreader
 # 暴露 gRPC 端口
 EXPOSE 50051
 
-# 直接运行 Python 服务（日志输出到 stdout/stderr）
-CMD ["uv", "run", "-m", "docreader.main"]
+# Probe ARM crypto instructions before importing native dependencies. The
+# entrypoint only enables portable OpenSSL implementations after a SIGILL.
+ENTRYPOINT ["/app/.venv/bin/python", "-m", "docreader.container_entrypoint"]
+# Dependencies are installed from uv.lock at build time; do not mutate them at boot.
+CMD ["/app/.venv/bin/python", "-m", "docreader.main"]

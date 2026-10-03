@@ -45,6 +45,7 @@ func TestClassify(t *testing.T) {
 		// The encodings that a guard looking only at the outer address family
 		// would wave through. Each of these spells 169.254.169.254.
 		{"6to4 metadata", "2002:a9fe:a9fe::1", Translated},
+		{"NAT64 local-use /48", "64:ff9b:1::a9fe:a9fe", Translated},
 		{"NAT64 metadata", "64:ff9b::a9fe:a9fe", Translated},
 		{"IPv4-compatible metadata", "::169.254.169.254", Translated},
 		{"6to4 private payload", "2002:c0a8:0101::1", Translated},

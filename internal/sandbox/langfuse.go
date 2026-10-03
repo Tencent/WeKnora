@@ -17,7 +17,8 @@ const sandboxSpanPreviewRunes = 256
 // the caller has no parent trace.
 //
 // Snapshot capability is forwarded: wrapping must not hide RemoteSnapshotManager
-// from SnapshotManagerFrom.
+// from SnapshotManagerFrom, and CreateForkSnapshot must still reach Docker's
+// fork namespace.
 func wrapLangfuseRemoteClient(inner RemoteSandboxClient) RemoteSandboxClient {
 	if inner == nil {
 		return nil
@@ -67,6 +68,18 @@ func (c *langfuseRemoteClient) Connect(
 		"sandbox_id": req.SandboxID,
 	}, nil)
 	handle, err := c.inner.Connect(ctx, req)
+	span.Finish(sandboxHandleOut(handle), nil, err)
+	return handle, err
+}
+
+func (c *langfuseRemoteClient) ConnectSession(
+	ctx context.Context, req RemoteConnectRequest,
+) (RemoteSandboxHandle, error) {
+	ctx, span := startSandboxSpan(ctx, "sandbox.connect", map[string]interface{}{
+		"sandbox_id":  req.SandboxID,
+		"check_state": true,
+	}, nil)
+	handle, err := connectRemoteSession(ctx, c.inner, req)
 	span.Finish(sandboxHandleOut(handle), nil, err)
 	return handle, err
 }
@@ -208,6 +221,29 @@ func (c *langfuseSnapshotClient) CreateSnapshot(
 	return ref, err
 }
 
+func (c *langfuseSnapshotClient) CreateForkSnapshot(
+	ctx context.Context, sandboxID string, name string,
+) (RemoteSnapshotRef, error) {
+	if creator, ok := c.inner.(forkSnapshotCreator); ok {
+		ctx, span := startSandboxSpan(ctx, "sandbox.create_fork_snapshot", map[string]interface{}{
+			"sandbox_id": sandboxID,
+			"name":       name,
+		}, nil)
+		ref, err := creator.CreateForkSnapshot(ctx, sandboxID, name)
+		span.Finish(map[string]interface{}{"snapshot_id": ref.ID}, nil, err)
+		return ref, err
+	}
+	inner, ok := c.inner.(RemoteSnapshotManager)
+	if !ok {
+		return RemoteSnapshotRef{}, &RemoteError{
+			Kind:    RemoteErrorKindUnsupported,
+			Op:      "CreateForkSnapshot",
+			Message: "inner client has no snapshot manager",
+		}
+	}
+	return inner.CreateSnapshot(ctx, sandboxID, name)
+}
+
 func (c *langfuseSnapshotClient) DeleteSnapshot(ctx context.Context, snapshotID string) error {
 	inner, ok := c.inner.(RemoteSnapshotManager)
 	if !ok {
@@ -347,6 +383,7 @@ func (c *langfuseRemoteClient) StartDesktopTTLRefresh(ctx context.Context, handl
 var (
 	_ RemoteSandboxClient       = (*langfuseRemoteClient)(nil)
 	_ RemoteSnapshotManager     = (*langfuseSnapshotClient)(nil)
+	_ forkSnapshotCreator       = (*langfuseSnapshotClient)(nil)
 	_ RemoteTerminalManager     = (*langfuseRemoteClient)(nil)
 	_ RemoteDesktopManager      = (*langfuseRemoteClient)(nil)
 	_ RemoteDesktopTTLRefresher = (*langfuseRemoteClient)(nil)

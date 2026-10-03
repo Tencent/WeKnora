@@ -36,7 +36,7 @@ const summaryHtml = computed(() => getKnowledgeChunksSummaryHtml(t, props.data))
   }
 
   .empty-state {
-    font-size: 13px;
+    font-size: var(--app-text-md);
     color: var(--td-text-color-placeholder);
   }
 }

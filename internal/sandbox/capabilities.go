@@ -62,10 +62,9 @@ type SessionFileStore interface {
 	// session's remote sandbox, provisioning the sandbox on first call.
 	WriteSessionInputFile(ctx context.Context, sessionID, filePath string, content []byte) error
 
-	// WriteSessionWorkspaceFile writes a model-authored file under
-	// /workspace. /workspace/input stays read-only (attachments); everything
-	// else under /workspace is accepted so generated scripts do not have to
-	// travel through shell_exec heredocs.
+	// WriteSessionWorkspaceFile writes a model-authored file inside the
+	// current session sandbox. Relative paths resolve from /workspace;
+	// /workspace/input stays read-only (attachments).
 	WriteSessionWorkspaceFile(ctx context.Context, sessionID, filePath string, content []byte) error
 
 	// WriteSessionWorkspaceFiles writes many workspace files after preparing
@@ -93,11 +92,17 @@ type SessionCapabilityProvider interface {
 	SessionFileStore() SessionFileStore
 }
 
-// SessionInstallShellExecutor runs install/maintenance shell commands, which
-// need the skills image root. It is a separate interface from
-// SessionShellExecutor so reaching outside /workspace is something a caller
-// must ask for by name: ordinary chat sessions keep the /workspace-only
-// contract even though they already run as root.
+// SessionWorkspaceLayoutProvider is implemented by managers that can describe
+// their session workspace. Tools resolve it once per Execute from the
+// session sandbox, not from a tool-instance field.
+type SessionWorkspaceLayoutProvider interface {
+	SessionWorkspaceLayout(ctx context.Context, sessionID string) (WorkspaceLayout, error)
+}
+
+// SessionInstallShellExecutor runs install/maintenance shell commands with
+// their own bootstrap and working-directory scope. Ordinary shell execution
+// stays inside its session sandbox: anywhere in a remote container, and the
+// layout's writable roots on a host workspace.
 type SessionInstallShellExecutor interface {
 	ExecShellCommandWithOptions(
 		ctx context.Context,

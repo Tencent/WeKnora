@@ -4,6 +4,7 @@ import { generateRandomString, MAX_FILE_SIZE_MB, MAX_SKILL_BUNDLE_SIZE_MB } from
 import i18n from '@/i18n'
 import { getApiBaseUrl } from './api-base';
 import { isSkillBundleUploadUrl } from './uploadLimit';
+import { isTimeoutError, uploadTimeoutMs } from './requestTimeouts';
 import {
   forceReloginRedirect,
   isEmbedPage,
@@ -135,7 +136,25 @@ instance.interceptors.response.use(
     const originalRequest = error.config;
     
     if (!error.response) {
-      return Promise.reject({ message: t('error.networkError') });
+      // A timeout and an unreachable server both arrive without a response, but
+      // telling someone whose upload timed out to "check your connection" sends
+      // them after the wrong problem.
+      return Promise.reject({
+        message: t(isTimeoutError(error) ? 'error.requestTimeout' : 'error.networkError'),
+      });
+    }
+
+    // 文件下载失败时服务端仍返回 JSON；先还原错误信息，避免被 Blob 隐藏。
+    // 不依赖 Content-Type：网关可能把错误改成 text/plain 或空类型。
+    if (typeof Blob !== 'undefined' && error.response.data instanceof Blob) {
+      try {
+        const text = (await error.response.data.text()).trim();
+        if (text.startsWith('{') || text.startsWith('[') || error.response.data.type.includes('json')) {
+          error.response.data = JSON.parse(text);
+        }
+      } catch {
+        // 非法 JSON 继续使用原有错误处理。
+      }
     }
     
     // 公开接口（auto-setup / login / register / oidc）的 401 不走 refresh 逻辑，直接返回错误
@@ -229,6 +248,11 @@ export function postUpload(
   config: any = {},
 ): Promise<WithStatus<any>> {
   return instance.post(url, data, {
+    // Uploads are bounded by transfer time, not by the 30s default that suits
+    // JSON calls. Derive the budget from the payload so a deployment raising
+    // MAX_FILE_SIZE_MB doesn't silently abort its own uploads; an explicit
+    // `config.timeout` still wins.
+    timeout: uploadTimeoutMs(data),
     ...config,
     headers: {
       "Content-Type": "multipart/form-data",

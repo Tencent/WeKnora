@@ -2,7 +2,7 @@
 
 .ds-surface-card() {
   border: 1px solid var(--td-component-stroke);
-  border-radius: 10px;
+  border-radius: var(--app-radius-lg);
   background: var(--td-bg-color-container);
   transition: border-color 0.18s ease, box-shadow 0.18s ease;
 }
@@ -12,7 +12,7 @@
 
   &:hover:not(.disabled):not(:disabled),
   &:focus-visible {
-    border-color: var(--td-brand-color-3, var(--td-brand-color));
+    border-color: var(--td-brand-color-3);
     box-shadow: 0 4px 14px rgba(15, 23, 42, 0.06);
     outline: none;
   }
@@ -25,7 +25,7 @@
 
 // Light inset panel for grouped lists — no outer stroke.
 .ds-inset-panel() {
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   background: var(--td-bg-color-secondarycontainer);
   overflow: hidden;
 }

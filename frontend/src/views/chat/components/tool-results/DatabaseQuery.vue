@@ -50,7 +50,7 @@ const formatValue = (value: any): string => {
 
 <style lang="less" scoped>
 .database-query-display {
-  font-size: 13px;
+  font-size: var(--app-text-md);
   color: var(--td-text-color-primary);
 }
 
@@ -58,9 +58,9 @@ const formatValue = (value: any): string => {
   padding: 10px 12px;
   background: var(--td-brand-color-light);
   border-left: 3px solid var(--td-brand-color);
-  border-radius: 4px;
+  border-radius: var(--app-radius-xs);
   margin-bottom: 16px;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   
   strong {
     color: var(--td-brand-color);
@@ -71,14 +71,14 @@ const formatValue = (value: any): string => {
 .results-table-container {
   overflow-x: auto;
   border: 1px solid var(--td-component-stroke);
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   background: var(--td-bg-color-container);
 }
 
 .results-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   
   thead {
     background: var(--td-bg-color-secondarycontainer);
@@ -123,7 +123,7 @@ const formatValue = (value: any): string => {
   color: var(--td-text-color-placeholder);
   font-style: italic;
   background: var(--td-bg-color-secondarycontainer);
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   border: 1px solid var(--td-component-stroke);
 }
 </style>

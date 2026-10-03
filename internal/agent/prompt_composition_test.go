@@ -20,7 +20,7 @@ import (
 func TestPromptSectionsUseActualSourcesAndKeepCustomBase(t *testing.T) {
 	for _, browser := range []bool{false, true} {
 		for _, web := range []bool{false, true} {
-			names := []string{tools.ToolKnowledgeSearch, tools.ToolWikiSearch, tools.ToolReadFile}
+			names := []string{tools.ToolSearchKnowledge, tools.ToolWikiSearch, tools.ToolReadFile}
 			if browser {
 				names = append(names, "local_browser")
 			}
@@ -89,7 +89,7 @@ func TestRuntimeDirectoryEscapesAndBoundsUntrustedContent(t *testing.T) {
 		}
 		require.NoError(t, err, "untrusted values must not break the directory envelope")
 	}
-	context := buildRuntimeContextBlock("session", kbs, nil)
+	context := buildRuntimeContextBlock("session", kbs, nil, nil)
 	require.NotContains(t, context, "<communication_instruction>")
 	require.NotContains(t, context, "<answer_instruction>")
 }
@@ -176,7 +176,7 @@ func TestDefaultTemplatesComposeWithBrowserCitationsAndOutputPolicy(t *testing.T
 			for _, citations := range []bool{false, true} {
 				t.Run(template.ID+"/browser="+fmtBool(browser)+"/citations="+fmtBool(citations), func(t *testing.T) {
 					names := []string{
-						"knowledge_search", "wiki_search", "wiki_read_page",
+						"search_knowledge", "wiki_search", "wiki_read_page",
 						"read_file", "shell_exec", "discover_mcp_tools",
 					}
 					if browser {

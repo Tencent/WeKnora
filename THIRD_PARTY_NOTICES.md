@@ -3,7 +3,9 @@
 This file supplements the third-party notices in `LICENSE`. The MIT license
 for WeKnora's own code does not replace the licenses of third-party components.
 Keep this file, `LICENSE`, and the `licenses/` directory with redistributed
-backend and desktop packages. Container distributions include them in `/app`;
+backend and desktop packages. `scripts/copy-licenses.sh` adds checksum-verified
+source archives at packaging time; they are not stored in this Git repository.
+Container distributions include the complete bundle in `/app`;
 macOS applications include them in `Contents/Resources`.
 Windows installers place them next to the installed executable.
 
@@ -16,9 +18,8 @@ Windows installers place them next to the installed executable.
 - Copyright: The Go-MySQL-Driver Authors; the original per-file notices and
   `AUTHORS` are preserved in the accompanying source archive.
 - Modifications by WeKnora: none. Dialer configuration is in separate WeKnora files.
-- Corresponding source, available under MPL-2.0:
-  [`licenses/sources/mysql-v1.10.0.zip`](licenses/sources/mysql-v1.10.0.zip).
-  The same version is available from the
+- Corresponding source, available under MPL-2.0, is included in binary releases
+  as `licenses/sources/mysql-v1.10.0.zip`. Source repository users can obtain it from the
   [Go module proxy](https://proxy.golang.org/github.com/go-sql-driver/mysql/@v/v1.10.0.zip)
   and [upstream repository](https://github.com/go-sql-driver/mysql/tree/v1.10.0).
 
@@ -33,9 +34,8 @@ Windows installers place them next to the installed executable.
 - Attribution: the go-m1cpu project and its contributors. The complete original
   source and notices are preserved in the accompanying archive.
 - Modifications by WeKnora: none.
-- Corresponding source, available under MPL-2.0:
-  [`licenses/sources/go-m1cpu-v0.1.6.zip`](licenses/sources/go-m1cpu-v0.1.6.zip).
-  The same version is available from the
+- Corresponding source, available under MPL-2.0, is included in binary releases
+  as `licenses/sources/go-m1cpu-v0.1.6.zip`. Source repository users can obtain it from the
   [Go module proxy](https://proxy.golang.org/github.com/shoenig/go-m1cpu/@v/v0.1.6.zip)
   and [upstream repository](https://github.com/shoenig/go-m1cpu/tree/v0.1.6).
 
@@ -67,8 +67,13 @@ the tool itself, retain its license and provide its corresponding source too.
 
 ## Maintaining this bundle
 
-When upgrading either MPL module, update the version, license, and matching
-source archive together. Archives are unmodified Go module proxy ZIPs, including
-their original copyright notices. Verify them with `go mod download -json` and
-the module's `go.sum` entry before updating. `scripts/check-license-bundle.sh`
-checks the pins and packaging inputs without downloading dependencies.
+When upgrading either MPL module, update the version, license, and SHA-256 pin in
+`licenses/sources/modules.tsv` together. Archives are unmodified Go module proxy
+ZIPs, including their original copyright notices. Verify them with
+`go mod download -json` and the module's `go.sum` entry before updating.
+`scripts/check-license-bundle.sh` checks the pins and notices without downloading
+dependencies. `scripts/copy-licenses.sh DESTINATION` obtains the pinned archives
+through Go's configured `GOPROXY` and module cache, verifies their SHA-256 hashes,
+and includes them in the destination bundle. Offline packaging requires those
+module archives to be present in the Go module cache beforehand. To verify a
+packaged source directory, run `scripts/check-license-bundle.sh PATH/TO/licenses/sources`.

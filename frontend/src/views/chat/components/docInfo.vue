@@ -219,9 +219,9 @@ const getWebSearchDisplayText = (item) => {
 
     display: flex;
     flex-direction: column;
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     width: 100%;
-    border-radius: 8px;
+    border-radius: var(--app-radius-md);
     background-color: var(--td-bg-color-container);
     border: .5px solid var(--td-component-stroke);
     box-shadow: 0 2px 4px var(--refer-brand-8);
@@ -244,7 +244,7 @@ const getWebSearchDisplayText = (item) => {
         border: 0;
         box-shadow: none;
         margin-bottom: 0;
-        font-size: 13px;
+        font-size: var(--app-text-md);
 
         .refer_header {
             padding: 0;
@@ -252,7 +252,7 @@ const getWebSearchDisplayText = (item) => {
             color: var(--td-text-color-secondary);
 
             .refer_title span {
-                font-size: 14px;
+                font-size: var(--app-text-base);
                 white-space: normal;
             }
         }
@@ -281,14 +281,14 @@ const getWebSearchDisplayText = (item) => {
         .doc-group-title {
             color: var(--td-text-color-secondary);
             font-weight: 400;
-            font-size: 13px;
+            font-size: var(--app-text-md);
             max-width: min(520px, 100%);
         }
 
         .doc-group-count,
         .doc-chunk-text,
         .doc-chunk-index {
-            font-size: 12px;
+            font-size: var(--app-text-sm);
         }
 
         .doc-group-icon {
@@ -325,12 +325,12 @@ const getWebSearchDisplayText = (item) => {
 
             span {
                 white-space: nowrap;
-                font-size: 12px;
+                font-size: var(--app-text-sm);
             }
         }
 
         .refer_show_icon {
-            font-size: 14px;
+            font-size: var(--app-text-base);
             padding: 0 2px 1px 2px;
             color: var(--td-brand-color);
             flex-shrink: 0;
@@ -368,7 +368,7 @@ const getWebSearchDisplayText = (item) => {
     text-overflow: ellipsis;
     line-height: 20px;
     padding: 2px 0;
-    transition: all 0.2s ease;
+    transition: all var(--app-motion-base) ease;
     border-bottom: 1px dashed var(--td-brand-color);
 
     &:hover {
@@ -391,9 +391,9 @@ const getWebSearchDisplayText = (item) => {
         align-items: center;
         justify-content: space-between;
         padding: 4px 4px;
-        border-radius: 4px;
+        border-radius: var(--app-radius-xs);
         cursor: pointer;
-        transition: background-color 0.15s ease;
+        transition: background-color var(--app-motion-fast) ease;
 
         &:hover {
             background-color: var(--refer-brand-4);
@@ -429,7 +429,7 @@ const getWebSearchDisplayText = (item) => {
 
         .doc-group-count {
             color: var(--td-text-color-placeholder);
-            font-size: 11px;
+            font-size: var(--app-text-xs);
             margin-left: 6px;
             white-space: nowrap;
             flex-shrink: 0;
@@ -446,11 +446,11 @@ const getWebSearchDisplayText = (item) => {
             justify-content: center;
             width: 22px;
             height: 22px;
-            border-radius: 4px;
+            border-radius: var(--app-radius-xs);
             color: var(--td-brand-color);
             cursor: pointer;
             text-decoration: none;
-            transition: all 0.15s ease;
+            transition: all var(--app-motion-fast) ease;
 
             &:hover {
                 background-color: var(--refer-brand-12);
@@ -467,12 +467,12 @@ const getWebSearchDisplayText = (item) => {
     .doc-chunk-text {
         display: block;
         color: var(--td-text-color-secondary);
-        font-size: 12px;
+        font-size: var(--app-text-sm);
         line-height: 18px;
         padding: 3px 6px;
-        border-radius: 4px;
+        border-radius: var(--app-radius-xs);
         cursor: pointer;
-        transition: background-color 0.15s ease;
+        transition: background-color var(--app-motion-fast) ease;
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
@@ -484,7 +484,7 @@ const getWebSearchDisplayText = (item) => {
 
         .doc-chunk-index {
             color: var(--td-text-color-placeholder);
-            font-size: 11px;
+            font-size: var(--app-text-xs);
             margin-right: 4px;
         }
     }

@@ -667,18 +667,28 @@ func (c *E2BRemoteClient) Connect(
 	return &e2bRemoteHandle{sandbox: sandbox}, nil
 }
 
-// Get returns a single sandbox summary by ID. E2B's control plane exposes no
-// read-only "fetch sandbox by ID" endpoint, so Get reattaches to the sandbox
-// via Connect and reads its full metadata through the per-sandbox info
-// endpoint (GET /sandboxes/{id}). This mirrors the Cube adapter's
-// Connect+GetInfo shape and yields a strongly-consistent, O(1) lookup with a
-// clean NotFound, instead of scanning the whole account-wide sandbox list
-// (which is O(N) and can return a stale NotFound for a just-created sandbox).
-//
-// Get's only caller is the lifecycle coordinator's connectBinding pre-check,
-// which Connects — and therefore wakes — the sandbox immediately afterwards.
-// Resuming a paused sandbox here is thus the intended behaviour, not a side
-// effect to avoid.
+// ConnectSession reuses the connected SDK handle for the lifecycle probe.
+func (c *E2BRemoteClient) ConnectSession(ctx context.Context, req RemoteConnectRequest) (RemoteSandboxHandle, error) {
+	handle, err := c.Connect(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	info, err := handle.(*e2bRemoteHandle).sandbox.InfoWithContext(ctx)
+	if err != nil {
+		return nil, normalizeE2BError("ConnectSession", err)
+	}
+	if info == nil {
+		return nil, NewRemoteError(SandboxTypeE2B, "ConnectSession", RemoteErrorKindNotFound, "sandbox not found", nil)
+	}
+	summary := e2bRemoteSummary(*info)
+	if err := validateSessionSummary(c.Provider(), req.SandboxID, &summary); err != nil {
+		return nil, err
+	}
+	return handle, nil
+}
+
+// Get returns a single sandbox summary through Connect and the info endpoint.
+// Session execution uses ConnectSession to retain that handle after probing.
 func (c *E2BRemoteClient) Get(
 	ctx context.Context,
 	sandboxID string,

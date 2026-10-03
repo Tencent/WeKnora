@@ -1,19 +1,17 @@
 <template>
-  <Transition name="sandbox-panel">
-    <aside
-      v-if="panel?.visible.value"
-      class="chat-sandbox-panel"
-      :class="{ 'is-shifted': shifted, 'is-resizing': resizing }"
-      :style="{ width: `${panel?.width.value ?? 420}px` }"
-      role="complementary"
-      :aria-label="t('chat.sandbox.panelTitle')"
-    >
+  <Transition name="sandbox-panel" :duration="{ enter: 240, leave: 300 }">
+    <div v-if="panel?.visible.value" class="chat-sandbox-panel-clip">
+      <aside
+        class="chat-sandbox-panel"
+        :class="{ 'is-shifted': shifted, 'is-resizing': resizing }"
+        :style="{ width: `${panel?.width.value ?? 420}px`, '--references-shift': `${shiftWidth}px` }"
+        role="complementary"
+        :aria-label="t('chat.sandbox.panelTitle')"
+      >
       <!-- 左缘拖拽把手：按住向左/右拖动调整面板宽度。 -->
-      <div
-        class="chat-sandbox-panel__resize-handle"
-        :aria-hidden="true"
-        @mousedown.prevent="startResize"
-      />
+      <PanelResizeHandle edge="left" :label="t('knowledgeStages.resizeDrawer')"
+        :value="panel.width.value" :min="SANDBOX_PANEL_MIN_WIDTH" :max="SANDBOX_PANEL_MAX_WIDTH"
+        @start="startResize" @resize="resizePanel" @end="resizing = false" />
       <div class="chat-sandbox-panel__tabs">
         <div class="chat-sandbox-panel__tablist" role="tablist">
           <button
@@ -41,7 +39,7 @@
           :aria-label="t('common.close')"
           @click="panel?.close()"
         >
-          <t-icon name="close" size="20px" />
+          <t-icon name="close" size="16px" />
         </button>
       </div>
 
@@ -56,6 +54,7 @@
           :items="artifacts"
           :collecting="artifactsCollecting"
           :active="panel?.activeTab.value === 'artifacts'"
+          @deleted="emit('artifactDeleted', $event)"
         />
 
         <!-- 终端：首次激活时惰性挂载；切 tab 用 v-show 保留实例（不丢 PTY）。 -->
@@ -90,6 +89,7 @@
         </div>
       </div>
     </aside>
+    </div>
   </Transition>
 </template>
 
@@ -105,7 +105,9 @@ import {
 import SandboxTerminal from '@/views/chat/components/SandboxTerminal.vue'
 import SandboxDesktop from '@/views/chat/components/SandboxDesktop.vue'
 import ChatArtifactsPanel from '@/views/chat/components/ChatArtifactsPanel.vue'
+import PanelResizeHandle from '@/components/PanelResizeHandle.vue'
 import { useChatResourcesStore } from '@/stores/chatResources'
+import { useDeploymentCapabilitiesStore } from '@/stores/deploymentCapabilities'
 import type { SessionArtifactItem } from '@/utils/sessionArtifacts'
 
 const props = withDefaults(
@@ -117,24 +119,33 @@ const props = withDefaults(
     agentSourceTenantId?: string | number | null
     /** 参考来源面板同开时整体左移，避免两块 fixed 面板重叠。 */
     shifted?: boolean
+    /** 参考来源面板当前宽度（查看原文时会变宽），左移的距离。 */
+    shiftWidth?: number
     artifacts?: SessionArtifactItem[]
     artifactsCollecting?: boolean
   }>(),
   {
     artifacts: () => [],
     artifactsCollecting: false,
+    shiftWidth: 420,
   },
 )
+
+// The artifact list is owned by the chat view (a computed over the loaded
+// history), so a delete inside the panel has to travel back up to it.
+const emit = defineEmits<{ (e: 'artifactDeleted', payload: { messageId: string; index: number }): void }>()
 
 const { t } = useI18n()
 const panel = useChatSandboxPanel()
 const chatResources = useChatResourcesStore()
+const deploymentCapabilities = useDeploymentCapabilitiesStore()
 const sandboxConfigsReady = ref(false)
 
 // Hide the desktop tab for CLI / Docker configs. Shared agents whose
 // sandbox row is not in this workspace still show the tab and let the
 // backend return DESKTOP_UNSUPPORTED.
 const desktopTabVisible = computed(() => {
+  if (!deploymentCapabilities.isSupported('settings.sandbox.remote')) return false
   const agentId = props.agentId?.trim()
   if (!agentId) return false
   const agent = chatResources.agents.find((item) => item.id === agentId)
@@ -221,42 +232,35 @@ watch(
 
 // --- 左缘拖拽调宽 -------------------------------------------------------
 const resizing = ref(false)
-// 与面板样式一致：仅宽视口（≥1400px）且参考面板同开时才整体左移 420px。
-const dragBaseOffset = () =>
-  props.shifted && typeof window !== 'undefined' && window.innerWidth >= 1400 ? 420 : 0
-
-function startResize(event: MouseEvent) {
+let resizeStartWidth = 0
+function startResize() {
   if (!panel) return
+  resizeStartWidth = panel.width.value
   resizing.value = true
-  // 拖拽期间禁用全局文本选择，避免 mousemove 命中 iframe / 文本。
-  document.body.style.userSelect = 'none'
-  document.body.style.cursor = 'col-resize'
-
-  const onMove = (moveEvent: MouseEvent) => {
-    const next = window.innerWidth - moveEvent.clientX - dragBaseOffset()
-    panel.setWidth(Math.min(SANDBOX_PANEL_MAX_WIDTH, Math.max(SANDBOX_PANEL_MIN_WIDTH, next)))
-  }
-  const cleanup = () => {
-    document.removeEventListener('mousemove', onMove)
-    document.removeEventListener('mouseup', cleanup)
-    document.body.style.userSelect = ''
-    document.body.style.cursor = ''
-    resizing.value = false
-  }
-  document.addEventListener('mousemove', onMove)
-  document.addEventListener('mouseup', cleanup)
 }
+function resizePanel(delta: number) {
+  panel?.setWidth(resizeStartWidth - delta)
+}
+
 </script>
 
 <style scoped lang="less">
-.chat-sandbox-panel {
+.chat-sandbox-panel-clip {
   position: fixed;
+  inset: 0;
+  z-index: 1201;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.chat-sandbox-panel {
+  pointer-events: auto;
+  position: absolute;
   top: 0;
   right: 0;
   bottom: 0;
   width: min(420px, 100vw);
   max-width: 100vw;
-  z-index: 1201;
   display: flex;
   flex-direction: column;
   background: var(--td-bg-color-container);
@@ -265,7 +269,7 @@ function startResize(event: MouseEvent) {
 
   &.is-shifted {
     @media (min-width: 1400px) {
-      right: 420px;
+      right: var(--references-shift, 420px);
     }
   }
 
@@ -281,46 +285,19 @@ function startResize(event: MouseEvent) {
   }
 }
 
-// 左缘拖拽把手：一条贴边的窄热区，hover 时显示视觉提示。
-.chat-sandbox-panel__resize-handle {
-  position: absolute;
-  top: 0;
-  left: -3px;
-  bottom: 0;
-  width: 7px;
-  z-index: 3;
-  cursor: col-resize;
-
-  &::after {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: 3px;
-    bottom: 0;
-    width: 1px;
-    background: transparent;
-    transition: background-color 0.15s ease;
-  }
-
-  &:hover::after,
-  .is-resizing &::after {
-    background: var(--td-brand-color);
-  }
-}
-
 .chat-sandbox-panel__close {
   border: 0;
   background: var(--td-bg-color-secondarycontainer);
   color: var(--td-text-color-secondary);
-  width: 32px;
-  height: 32px;
-  border-radius: 8px;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--app-radius-md);
   cursor: pointer;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  transition: background 0.15s ease, color 0.15s ease;
+  transition: background var(--app-motion-fast) ease, color var(--app-motion-fast) ease;
 
   &:hover {
     background: color-mix(in srgb, var(--td-text-color-primary) 8%, var(--td-bg-color-secondarycontainer));
@@ -332,7 +309,9 @@ function startResize(event: MouseEvent) {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 12px;
+  height: var(--app-chat-header-height);
+  box-sizing: border-box;
+  padding: 0 12px;
   border-bottom: 1px solid var(--td-component-stroke);
   flex-shrink: 0;
 }
@@ -349,15 +328,17 @@ function startResize(event: MouseEvent) {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 6px 10px;
+  height: 28px;
+  padding: 0 8px;
+  line-height: 20px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   background: transparent;
   color: var(--td-text-color-secondary);
-  font-size: 13px;
+  font-size: var(--app-text-md);
   cursor: pointer;
   white-space: nowrap;
-  transition: background-color 0.15s ease, color 0.15s ease;
+  transition: background-color var(--app-motion-fast) ease, color var(--app-motion-fast) ease;
 
   &:hover {
     color: var(--td-text-color-primary);
@@ -380,10 +361,10 @@ function startResize(event: MouseEvent) {
   min-width: 16px;
   height: 16px;
   padding: 0 5px;
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   background: color-mix(in srgb, var(--td-text-color-primary) 8%, transparent);
   color: var(--td-text-color-secondary);
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   line-height: 16px;
   text-align: center;
   font-variant-numeric: tabular-nums;
@@ -417,27 +398,27 @@ function startResize(event: MouseEvent) {
   justify-content: center;
   gap: 10px;
   color: var(--td-text-color-placeholder);
-  font-size: 13px;
+  font-size: var(--app-text-md);
 
   p {
     margin: 0;
   }
 }
 
-.sandbox-panel-enter-active {
+.sandbox-panel-enter-active .chat-sandbox-panel {
   transition:
     transform 0.24s cubic-bezier(0.22, 0.61, 0.36, 1),
     opacity 0.24s cubic-bezier(0.22, 0.61, 0.36, 1);
 }
 
-.sandbox-panel-leave-active {
+.sandbox-panel-leave-active .chat-sandbox-panel {
   transition:
     transform 0.3s cubic-bezier(0.22, 0.61, 0.36, 1),
     opacity 0.3s cubic-bezier(0.22, 0.61, 0.36, 1);
 }
 
-.sandbox-panel-enter-from,
-.sandbox-panel-leave-to {
+.sandbox-panel-enter-from .chat-sandbox-panel,
+.sandbox-panel-leave-to .chat-sandbox-panel {
   transform: translateX(100%);
   opacity: 0.6;
 }

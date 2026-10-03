@@ -18,6 +18,15 @@ Respect their configured permissions and the user's explicit source selections.
 Do not enumerate MCP services or load a browser Skill just to open a website that
 local_browser can access. Generic retrieval-first guidance must not skip the user's
 explicit browser request.
+When the requested work requires signing in, scanning a login QR code, an SMS code,
+CAPTCHA, or account authorization, open the relevant page and call local_browser
+with method="request_help", the observed tab_id, and a clear prompt for the manual
+step. Do this before ending the turn or asking the user to report back after login.
+The call displays the handoff UI and retains the task page while waiting; a chat
+message alone does neither. Keep credentials in the user's browser. After a
+continued/completed result, observe the page and continue the original task.
+If help is disabled, cancelled, or times out, explain that outcome and the required
+resume action; do not claim that a handoff is active. Respect an existing pause.
 If the browser is unpaired, offline, paused, or fails, explain the specific issue and
 how to restore access. Do not silently skip the requested browser step or claim to
 have read a page without a successful browser observation. Distinguish any information

@@ -340,7 +340,7 @@ onBeforeUnmount(() => {
 }
 
 .credential-row-label {
-  font-size: 13px;
+  font-size: var(--app-text-md);
   font-weight: 500;
   color: var(--td-text-color-primary);
   margin-bottom: 4px;
@@ -364,9 +364,9 @@ onBeforeUnmount(() => {
   padding: 0 4px 0 12px;
   background: var(--td-bg-color-container);
   border: 1px solid var(--td-component-border);
-  border-radius: 6px;
-  font-size: 13px;
-  transition: border-color 0.15s ease, background-color 0.15s ease;
+  border-radius: var(--app-radius-sm);
+  font-size: var(--app-text-md);
+  transition: border-color var(--app-motion-fast) ease, background-color var(--app-motion-fast) ease;
 
   &:hover {
     border-color: var(--td-brand-color-hover);
@@ -458,7 +458,7 @@ onBeforeUnmount(() => {
 
 .status-icon {
   flex-shrink: 0;
-  font-size: 16px;
+  font-size: var(--app-text-xl);
 
   &.success {
     color: var(--td-success-color);
@@ -488,8 +488,8 @@ onBeforeUnmount(() => {
   :deep(.t-button--variant-text) {
     height: 24px;
     padding: 0 8px;
-    font-size: 12px;
-    border-radius: 4px;
+    font-size: var(--app-text-sm);
+    border-radius: var(--app-radius-xs);
   }
 }
 
@@ -519,7 +519,7 @@ onBeforeUnmount(() => {
   :deep(.t-button) {
     height: 28px;
     padding: 0 12px;
-    font-size: 12px;
+    font-size: var(--app-text-sm);
   }
 }
 </style>

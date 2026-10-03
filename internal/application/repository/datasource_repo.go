@@ -90,10 +90,13 @@ func (r *DataSourceRepository) Update(ctx context.Context, ds *types.DataSource)
 			return err
 		}
 		// GORM Updates(struct) deliberately skips zero values, which would make
-		// a user-selected sync_deletions=false impossible to persist.
+		// a user-selected sync_deletions=false or manual-only schedule impossible to persist.
 		return tx.Model(&types.DataSource{}).
 			Where("id = ?", ds.ID).
-			UpdateColumn("sync_deletions", ds.SyncDeletions).Error
+			UpdateColumns(map[string]interface{}{
+				"sync_deletions": ds.SyncDeletions,
+				"sync_schedule":  ds.SyncSchedule,
+			}).Error
 	})
 }
 

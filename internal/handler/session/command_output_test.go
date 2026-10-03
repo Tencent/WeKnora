@@ -15,7 +15,9 @@ func TestCommandOutputReachesChatStreamWithoutCompletingTool(t *testing.T) {
 	bus := event.NewEventBus()
 	streams := &completionEventRecorder{}
 	message := &types.Message{ID: "message"}
-	h := NewAgentStreamHandler(ctx, "session", "message", "request", 1, time.Now(), message, streams, bus, nil)
+	h := NewAgentStreamHandler(
+		ctx, "session", "message", "request", 1, time.Now(), message, streams, bus, nil, nil, nil,
+	)
 	h.Subscribe()
 	for _, done := range []bool{false, true} {
 		require.NoError(t, bus.Emit(ctx, event.Event{

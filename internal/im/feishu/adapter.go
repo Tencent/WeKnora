@@ -29,6 +29,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/im"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -37,9 +38,11 @@ import (
 )
 
 // Compile-time checks for the optional IM capabilities implemented by Adapter.
-var _ im.StreamSender = (*Adapter)(nil)
-var _ im.FullOutputProgressSender = (*Adapter)(nil)
-var _ im.FileDownloader = (*Adapter)(nil)
+var (
+	_ im.StreamSender             = (*Adapter)(nil)
+	_ im.FullOutputProgressSender = (*Adapter)(nil)
+	_ im.FileDownloader           = (*Adapter)(nil)
+)
 
 var httpClient = utils.NewSSRFSafeHTTPClient(utils.SSRFSafeHTTPClientConfig{
 	Timeout:      10 * time.Second,
@@ -124,21 +127,45 @@ func startStreamReaper() {
 			defer ticker.Stop()
 			for {
 				select {
-				case <-ticker.C:
-					cutoff := time.Now().Add(-streamOrphanTTL)
-					feishuStreamsMu.Lock()
-					for id, state := range feishuStreams {
-						if state.createdAt.Before(cutoff) {
-							delete(feishuStreams, id)
-						}
-					}
-					feishuStreamsMu.Unlock()
+				case now := <-ticker.C:
+					reapOrphanStreams(now)
 				case <-reaperStopCh:
 					return
 				}
 			}
 		}()
 	})
+}
+
+func reapOrphanStreams(now time.Time) {
+	feishuStreamsMu.Lock()
+	defer feishuStreamsMu.Unlock()
+	for id, state := range feishuStreams {
+		if state.ownerDone != nil {
+			select {
+			case <-state.ownerDone:
+			default:
+				// Full-output QA can be silent for longer than the orphan TTL.
+				// Keep a grace period after cancellation for final delivery too.
+				state.lastActivityAt = now
+				continue
+			}
+		}
+		if state.lastActivityAt.Before(now.Add(-streamOrphanTTL)) {
+			delete(feishuStreams, id)
+		}
+	}
+}
+
+func lookupStream(streamID string) (*feishuStreamState, bool) {
+	feishuStreamsMu.Lock()
+	defer feishuStreamsMu.Unlock()
+	state, ok := feishuStreams[streamID]
+	if ok {
+		// Attempts count as activity even when the remote API rejects an update.
+		state.lastActivityAt = time.Now()
+	}
+	return state, ok
 }
 
 // StopStreamReaper stops the background stream reaper goroutine.
@@ -167,7 +194,7 @@ func (a *Adapter) SupportsFullOutputProgress() bool {
 // If no verification token is configured (e.g., WebSocket mode), skip verification.
 func (a *Adapter) VerifyCallback(c *gin.Context) error {
 	if a.verificationToken == "" {
-		return nil
+		return fmt.Errorf("webhook verification secret is required")
 	}
 
 	bodyBytes, err := io.ReadAll(c.Request.Body)
@@ -505,13 +532,42 @@ func (a *Adapter) ParseCallback(c *gin.Context) (*im.IncomingMessage, error) {
 // type), we retry once via the plain "send message" API so the reply still
 // reaches the user.
 func (a *Adapter) SendReply(ctx context.Context, incoming *im.IncomingMessage, reply *im.ReplyMessage) error {
+	for _, text := range splitTextReply(reply.Content) {
+		if err := a.sendTextReply(ctx, incoming, text); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// Keep even worst-case JSON escaping below 20 KiB, including the surrounding
+// payload, so a long final answer can use the plain-message fallback safely.
+const textReplyChunkBytes = 2 * 1024
+
+func splitTextReply(text string) []string {
+	var parts []string
+	for len(text) > textReplyChunkBytes {
+		cut := textReplyChunkBytes
+		for !utf8.RuneStart(text[cut]) {
+			cut--
+		}
+		if newline := strings.LastIndexByte(text[:cut], '\n'); newline >= cut/2 {
+			cut = newline + 1
+		}
+		parts = append(parts, text[:cut])
+		text = text[cut:]
+	}
+	return append(parts, text)
+}
+
+func (a *Adapter) sendTextReply(ctx context.Context, incoming *im.IncomingMessage, text string) error {
 	accessToken, err := a.getTenantAccessToken(ctx)
 	if err != nil {
 		return fmt.Errorf("get access token: %w", err)
 	}
 
 	// Build text message content
-	content, _ := json.Marshal(map[string]string{"text": reply.Content})
+	content, _ := json.Marshal(map[string]string{"text": text})
 
 	// Reply payload (no receive_id — the path message_id locates the chat)
 	replyPayload := map[string]interface{}{
@@ -734,14 +790,16 @@ const (
 type feishuStreamState struct {
 	mu         sync.Mutex
 	content    strings.Builder
-	contentSeq int64     // sequence of the last successfully sent content
-	seq        int64     // strictly incrementing sequence for CardKit API
-	createdAt  time.Time // for orphan stream detection
+	contentSeq int64 // sequence of the last successfully sent content
+	seq        int64 // strictly incrementing sequence for CardKit API
+	// Protected by feishuStreamsMu, independently of content/sequence updates.
+	lastActivityAt time.Time
+	ownerDone      <-chan struct{}
 }
 
 const (
-	// streamOrphanTTL is the maximum lifetime of a stream entry before it's
-	// considered orphaned (e.g., EndStream was never called due to an error).
+	// streamOrphanTTL bounds idle state after its request ends, or when the
+	// caller supplies a context without cancellation. It is not a QA deadline.
 	streamOrphanTTL = 5 * time.Minute
 	// streamReaperInterval is how often the reaper scans for orphaned streams.
 	streamReaperInterval = 1 * time.Minute
@@ -820,7 +878,7 @@ func (a *Adapter) StartStream(ctx context.Context, incoming *im.IncomingMessage)
 
 	// 3. Track stream state
 	feishuStreamsMu.Lock()
-	feishuStreams[cardID] = &feishuStreamState{createdAt: time.Now()}
+	feishuStreams[cardID] = &feishuStreamState{lastActivityAt: time.Now(), ownerDone: ctx.Done()}
 	feishuStreamsMu.Unlock()
 
 	logger.Infof(ctx, "[%s] Streaming started: card_id=%s", a.region.Label, cardID)
@@ -833,9 +891,7 @@ func (a *Adapter) UpdateStreamContent(ctx context.Context, incoming *im.Incoming
 		return nil
 	}
 
-	feishuStreamsMu.Lock()
-	state, ok := feishuStreams[streamID]
-	feishuStreamsMu.Unlock()
+	state, ok := lookupStream(streamID)
 	if !ok {
 		return fmt.Errorf("unknown stream ID: %s", streamID)
 	}
@@ -880,35 +936,37 @@ func (a *Adapter) SendStreamChunk(ctx context.Context, incoming *im.IncomingMess
 
 // EndStream disables streaming_mode, replaces the temporary summary, and cleans up state.
 func (a *Adapter) EndStream(ctx context.Context, incoming *im.IncomingMessage, streamID string) error {
-	feishuStreamsMu.Lock()
-	state, ok := feishuStreams[streamID]
-	delete(feishuStreams, streamID)
-	feishuStreamsMu.Unlock()
+	state, ok := lookupStream(streamID)
+	if !ok {
+		return fmt.Errorf("unknown stream ID: %s", streamID)
+	}
 
 	accessToken, err := a.getTenantAccessToken(ctx)
 	if err != nil {
 		return fmt.Errorf("get access token: %w", err)
 	}
 
-	var seq int
 	var finalSummary *string
-	if ok {
-		state.mu.Lock()
-		seq = state.nextSeq()
-		preview := cardSummaryPreview(state.content.String())
-		if preview != "" {
-			finalSummary = &preview
-		}
-		state.mu.Unlock()
+	state.mu.Lock()
+	seq := state.nextSeq()
+	preview := cardSummaryPreview(state.content.String())
+	if preview != "" {
+		finalSummary = &preview
 	}
+	state.mu.Unlock()
 
 	// Always close streaming_mode under config (CardKit rejects a top-level
 	// streaming_mode field). Attach a summary only when we have delivered text;
 	// an empty summary would leave the create-time "thinking" preview in place
 	// or blank the chat list unexpectedly.
 	if err := a.cardkitSetStreaming(ctx, accessToken, streamID, false, finalSummary, seq); err != nil {
-		logger.Warnf(ctx, "[%s] Failed to disable streaming_mode: %v", a.region.Label, err)
+		return fmt.Errorf("disable streaming_mode: %w", err)
 	}
+	feishuStreamsMu.Lock()
+	if feishuStreams[streamID] == state {
+		delete(feishuStreams, streamID)
+	}
+	feishuStreamsMu.Unlock()
 
 	logger.Infof(ctx, "[%s] Streaming ended: card_id=%s", a.region.Label, streamID)
 	return nil
@@ -1039,8 +1097,11 @@ func (a *Adapter) cardkitUpdateElement(ctx context.Context, accessToken, cardID,
 // reaches the card we must download each referenced image and re-upload it to
 // Feishu to obtain a usable image_key.
 
-// feishuMarkdownImageRe matches a markdown image whose target is an http(s) URL.
-var feishuMarkdownImageRe = regexp.MustCompile(`!\[([^\]]*)\]\((https?://[^)\s]+)\)`)
+// feishuMarkdownImageRe matches every markdown image. Only http(s) targets can
+// be uploaded to an image_key; unresolved internal handles (resource://,
+// local://, minio://, …) are not valid Feishu image keys, so
+// resolveMarkdownImages degrades them instead of leaving ![]() in the card.
+var feishuMarkdownImageRe = regexp.MustCompile(`!\[([^\]]*)\]\(([^)\s]+)\)`)
 
 // feishuMarkdownLinkRe matches a markdown link whose target is an http(s) URL.
 // Applied after image stripping so signed image URLs are not left as links.
@@ -1070,26 +1131,47 @@ func imageCacheKey(rawURL string) string {
 }
 
 // resolveMarkdownImages replaces the URL inside every ![alt](httpURL) with a
-// Feishu image_key. On failure it degrades the image to a plain text link so the
-// rest of the card still renders instead of failing the whole update.
+// Feishu image_key. On failure, or when the storage resolver left an internal
+// handle unresolved, it degrades the image so the rest of the card still
+// renders instead of failing the whole update. HTTP(S) targets become a
+// markdown link (Feishu accepts only http/https hrefs); other schemes become
+// plain text, because [text](resource://…) is also rejected as an illegal link.
 func (a *Adapter) resolveMarkdownImages(ctx context.Context, accessToken, content string) string {
 	if !strings.Contains(content, "![") {
 		return content
 	}
+	fallback := func(alt, rawURL string) string {
+		if alt == "" {
+			alt = a.region.ImageFallbackLabel
+		}
+		if isHTTPImageURL(rawURL) {
+			return fmt.Sprintf("[%s](%s)", alt, rawURL)
+		}
+		return alt
+	}
 	return feishuMarkdownImageRe.ReplaceAllStringFunc(content, func(match string) string {
 		sub := feishuMarkdownImageRe.FindStringSubmatch(match)
+		if len(sub) < 3 {
+			return match
+		}
 		alt, rawURL := sub[1], sub[2]
+		if !isHTTPImageURL(rawURL) {
+			return fallback(alt, rawURL)
+		}
 		imgKey, err := a.imageKeyForURL(ctx, accessToken, rawURL)
 		if err != nil || imgKey == "" {
 			logger.Warnf(ctx, "[%s] image upload failed, degrading to link: url=%s err=%v", a.region.Label, rawURL, err)
-			label := alt
-			if label == "" {
-				label = a.region.ImageFallbackLabel
-			}
-			return fmt.Sprintf("[%s](%s)", label, rawURL)
+			return fallback(alt, rawURL)
 		}
 		return fmt.Sprintf("![%s](%s)", alt, imgKey)
 	})
+}
+
+// isHTTPImageURL reports whether rawURL is an http(s) URL. Scheme match is
+// case-insensitive: IM rewrite may emit HTTPS:// from a configured proxy domain.
+func isHTTPImageURL(rawURL string) bool {
+	lower := strings.ToLower(rawURL)
+	return strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://")
 }
 
 // imageKeyForURL returns a Feishu image_key for the given URL, uploading it if

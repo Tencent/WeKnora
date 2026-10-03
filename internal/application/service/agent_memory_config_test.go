@@ -67,3 +67,26 @@ func TestAgentConfigCarriesMaxCompletionTokens(t *testing.T) {
 }
 
 func boolPtr(v bool) *bool { return &v }
+
+// An unset MCP mode runs as "all" for the owner, but the share scope shows it
+// as none; a shared run must not expose the owner's MCP services.
+func TestAgentConfigUnsetMCPModeIsNoneForSharedRuns(t *testing.T) {
+	svc := &sessionService{
+		cfg:                   &config.Config{},
+		webSearchProviderRepo: &sharedAgentWebSearchRepo{},
+	}
+	for _, shared := range []bool{false, true} {
+		req := &types.QARequest{
+			Session:             &types.Session{ID: "session-1", TenantID: 1},
+			CustomAgent:         &types.CustomAgent{TenantID: 1, Config: types.CustomAgentConfig{MaxIterations: 5}},
+			SharedAgentReadOnly: shared,
+		}
+		agentConfig, err := svc.buildAgentConfig(t.Context(), req, &types.Tenant{ID: 1}, 1)
+		require.NoError(t, err)
+		if shared {
+			require.Equal(t, "none", agentConfig.MCPSelectionMode)
+		} else {
+			require.Empty(t, agentConfig.MCPSelectionMode, "the owner's own runs keep the default")
+		}
+	}
+}

@@ -191,13 +191,13 @@ h1 {
   min-height: 52px;
   margin-bottom: 18px;
   color: var(--td-text-color-secondary);
-  font-size: 14px;
+  font-size: var(--app-text-base);
 }
 
 .policy-error {
   flex-wrap: wrap;
   padding: 12px 16px;
-  border-radius: 10px;
+  border-radius: var(--app-radius-lg);
   color: var(--td-error-color);
   background: var(--td-error-color-light);
 }
@@ -205,7 +205,7 @@ h1 {
 .invite-only-notice {
   padding: 12px 16px;
   border: 1px solid var(--td-component-stroke);
-  border-radius: 10px;
+  border-radius: var(--app-radius-lg);
   color: var(--td-text-color-primary);
   background: var(--td-bg-color-secondarycontainer);
   line-height: 1.5;
@@ -218,7 +218,7 @@ h1 {
 
 .workspace-help {
   margin: 24px 0 8px;
-  font-size: 13px;
+  font-size: var(--app-text-md);
 }
 
 .logout-link {

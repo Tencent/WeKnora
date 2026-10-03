@@ -45,13 +45,10 @@
     padding: 4px !important;
     margin-top: 4px !important;
     min-width: 148px;
-    border-radius: 10px !important;
+    border-radius: var(--app-radius-lg) !important;
     background: var(--td-bg-color-container) !important;
     border: 0.5px solid var(--td-component-stroke) !important;
-    box-shadow:
-      0 0 0 0.5px rgba(0, 0, 0, 0.03),
-      0 2px 4px rgba(0, 0, 0, 0.04),
-      0 8px 24px rgba(0, 0, 0, 0.1) !important;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.04), 0 6px 20px rgba(0, 0, 0, 0.08) !important;
     backdrop-filter: blur(20px) saturate(180%) !important;
     -webkit-backdrop-filter: blur(20px) saturate(180%) !important;
     animation: dropdownSlideIn 0.18s cubic-bezier(0.2, 0, 0, 1) both;
@@ -71,22 +68,23 @@
 .popup-menu-item {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 8px 12px;
+  gap: 8px;
+  padding: 6px 10px;
   cursor: pointer;
-  transition: all 0.15s cubic-bezier(0.2, 0, 0, 1);
+  transition: background-color var(--app-motion-fast) ease, color var(--app-motion-fast) ease;
   color: var(--td-text-color-primary);
-  font-size: 14px;
+  font-family: var(--app-font-family);
+  font-size: var(--app-text-base);
   font-weight: 400;
   line-height: 20px;
-  border-radius: 6px;
+  border-radius: var(--app-radius-xs);
   position: relative;
 
   .menu-icon {
-    font-size: 16px;
+    font-size: var(--app-text-2xl);
     flex-shrink: 0;
     color: var(--td-text-color-secondary);
-    transition: all 0.15s cubic-bezier(0.2, 0, 0, 1);
+    transition: background-color var(--app-motion-fast) ease, color var(--app-motion-fast) ease;
   }
 
   &:hover {
@@ -100,7 +98,6 @@
 
   &:active {
     background: var(--td-bg-color-container-active);
-    transform: scale(0.98);
   }
 
   &.delete,
@@ -149,13 +146,10 @@
     margin-top: 4px !important;
     min-width: 148px;
     width: auto;
-    border-radius: 10px !important;
+    border-radius: var(--app-radius-lg) !important;
     background: var(--td-bg-color-container) !important;
     border: 0.5px solid var(--td-component-stroke) !important;
-    box-shadow:
-      0 0 0 0.5px rgba(0, 0, 0, 0.03),
-      0 2px 4px rgba(0, 0, 0, 0.04),
-      0 8px 24px rgba(0, 0, 0, 0.1) !important;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.04), 0 6px 20px rgba(0, 0, 0, 0.08) !important;
     backdrop-filter: blur(20px) saturate(180%) !important;
     -webkit-backdrop-filter: blur(20px) saturate(180%) !important;
     color: var(--td-text-color-primary);
@@ -179,16 +173,27 @@
     }
   }
 
+  button.card-menu-item {
+    width: 100%;
+    border: 0;
+    background: transparent;
+    text-align: left;
+    white-space: nowrap;
+    box-sizing: border-box;
+  }
+
   .card-menu-item {
     display: flex;
     align-items: center;
-    gap: 10px;
-    padding: 8px 12px;
+    gap: 8px;
+    padding: 6px 10px;
     cursor: pointer;
     color: var(--td-text-color-primary);
-    transition: all 0.15s cubic-bezier(0.2, 0, 0, 1);
-    border-radius: 6px;
-    font-size: 14px;
+    transition: background-color var(--app-motion-fast) ease, color var(--app-motion-fast) ease;
+    border-radius: var(--app-radius-xs);
+    font-family: var(--app-font-family);
+    font-size: var(--app-text-base);
+    font-weight: 400;
     line-height: 20px;
 
     &:hover {
@@ -197,13 +202,12 @@
 
     &:active {
       background: var(--td-bg-color-container-active);
-      transform: scale(0.98);
     }
 
     .icon {
-      font-size: 16px;
+      font-size: var(--app-text-2xl);
       color: var(--td-text-color-secondary);
-      transition: all 0.15s cubic-bezier(0.2, 0, 0, 1);
+      transition: background-color var(--app-motion-fast) ease, color var(--app-motion-fast) ease;
     }
 
     &:hover .icon {
@@ -249,7 +253,7 @@
     align-items: center;
     gap: 6px;
     padding: 8px 12px;
-    font-size: 13px;
+    font-size: var(--app-text-md);
     font-weight: 500;
     color: var(--td-text-color-primary);
     border-bottom: 1px solid var(--td-component-stroke);
@@ -269,7 +273,7 @@
 
   .move-menu-empty {
     padding: 12px 16px;
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     color: var(--td-text-color-placeholder);
     text-align: center;
     line-height: 1.5;
@@ -283,7 +287,7 @@
   }
 
   .move-target-count {
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     color: var(--td-text-color-placeholder);
   }
 
@@ -296,8 +300,8 @@
       gap: 6px;
       padding: 6px 8px;
       background: var(--td-bg-color-container-hover);
-      border-radius: 6px;
-      font-size: 13px;
+      border-radius: var(--app-radius-sm);
+      font-size: var(--app-text-md);
       color: var(--td-text-color-secondary);
       margin-bottom: 8px;
     }
@@ -307,7 +311,7 @@
       align-items: flex-start;
       gap: 6px;
       padding: 6px 8px;
-      border-radius: 6px;
+      border-radius: var(--app-radius-sm);
       cursor: pointer;
       margin-bottom: 4px;
 
@@ -325,13 +329,13 @@
         gap: 2px;
 
         .move-mode-label {
-          font-size: 13px;
+          font-size: var(--app-text-md);
           font-weight: 500;
           color: var(--td-text-color-primary);
         }
 
         .move-mode-desc {
-          font-size: 11px;
+          font-size: var(--app-text-xs);
           color: var(--td-text-color-placeholder);
           line-height: 1.4;
         }
@@ -351,16 +355,18 @@
    四、TDesign Dropdown 统一样式
    适用于 <t-dropdown> 组件（挂载到 body 上）
    ============================================ */
+.t-popup__content.t-dropdown {
+  border: 1px solid var(--td-component-stroke);
+  border-radius: var(--app-radius-md);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.04), 0 6px 20px rgba(0, 0, 0, 0.08);
+}
+
 .t-popup__content {
   .t-dropdown__menu {
     background: var(--td-bg-color-container);
-    border: 0.5px solid var(--td-component-stroke);
-    box-shadow:
-      0 0 0 0.5px rgba(0, 0, 0, 0.03),
-      0 2px 4px rgba(0, 0, 0, 0.04),
-      0 8px 24px rgba(0, 0, 0, 0.1);
-    backdrop-filter: blur(20px) saturate(180%);
-    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    border: 0;
+    box-shadow: none;
+    gap: 2px;
     padding: 4px;
     min-width: 148px;
     animation: dropdownSlideIn 0.18s cubic-bezier(0.2, 0, 0, 1) both;
@@ -368,7 +374,7 @@
     overflow-y: auto;
     scrollbar-width: thin;
     scrollbar-color: transparent transparent;
-    transition: scrollbar-color 0.2s ease;
+    transition: scrollbar-color var(--app-motion-base) ease;
 
     &::-webkit-scrollbar {
       width: 6px;
@@ -381,29 +387,32 @@
     &::-webkit-scrollbar-thumb {
       background-color: transparent;
       border: none;
-      border-radius: 6px;
-      transition: background-color 0.2s ease;
+      border-radius: var(--app-radius-sm);
+      transition: background-color var(--app-motion-base) ease;
     }
 
     &:hover {
-      scrollbar-color: var(--td-scrollbar-color, rgba(0, 0, 0, 0.18)) transparent;
+      scrollbar-color: var(--td-scrollbar-color) transparent;
 
       &::-webkit-scrollbar-thumb {
-        background-color: var(--td-scrollbar-color, rgba(0, 0, 0, 0.18));
+        background-color: var(--td-scrollbar-color);
       }
     }
 
     &::-webkit-scrollbar-thumb:hover {
-      background-color: var(--td-scrollbar-hover-color, rgba(0, 0, 0, 0.32));
+      background-color: var(--td-scrollbar-hover-color);
     }
   }
 
   .t-dropdown__item {
-    padding: 8px 12px;
-    border-radius: 6px;
-    margin: 1px 0;
-    transition: all 0.15s cubic-bezier(0.2, 0, 0, 1);
-    font-size: 14px;
+    padding: 6px 10px;
+    border-radius: var(--app-radius-xs);
+    margin: 0;
+    transition: background-color var(--app-motion-fast) ease, color var(--app-motion-fast) ease;
+    font-family: var(--app-font-family);
+    font-size: var(--app-text-base);
+    font-weight: 400;
+    line-height: 20px;
     color: var(--td-text-color-primary);
     cursor: pointer;
     min-width: auto !important;
@@ -420,7 +429,6 @@
 
     &:active {
       background: var(--td-bg-color-container-active);
-      transform: scale(0.98);
     }
 
     .t-dropdown__item-icon {
@@ -429,10 +437,12 @@
       color: var(--td-text-color-secondary);
       display: flex;
       align-items: center;
-      transition: all 0.15s cubic-bezier(0.2, 0, 0, 1);
+      transition: background-color var(--app-motion-fast) ease, color var(--app-motion-fast) ease;
 
       .t-icon {
-        font-size: 16px;
+        font-size: var(--app-text-2xl);
+        width: var(--app-text-2xl);
+        height: var(--app-text-2xl);
       }
     }
 
@@ -442,7 +452,7 @@
 
     .t-dropdown__item-text {
       color: inherit !important;
-      font-size: 14px !important;
+      font-size: var(--app-text-base) !important;
       line-height: 20px !important;
       white-space: nowrap !important;
       overflow: hidden !important;
@@ -450,6 +460,12 @@
       flex: 1;
       min-width: 0;
       display: block;
+    }
+
+    // Match sidebar text: normal/hover stays primary, current selection is branded.
+    &.t-dropdown__item--theme-default:not(.t-dropdown__item--disabled) {
+      &:hover { color: var(--td-text-color-primary); }
+      &.t-dropdown__item--active { color: var(--td-brand-color); }
     }
 
     /* TDesign error 主题项（删除操作） */
@@ -488,126 +504,9 @@
   }
 }
 
-/* tag 更多弹窗 */
-.tag-more-popup {
-  z-index: 99 !important;
 
-  .t-popup__content {
-    padding: 4px !important;
-    margin-top: 4px !important;
-    min-width: 120px;
-    border-radius: 10px !important;
-    background: var(--td-bg-color-container) !important;
-    border: 0.5px solid var(--td-component-stroke) !important;
-    box-shadow:
-      0 0 0 0.5px rgba(0, 0, 0, 0.03),
-      0 2px 4px rgba(0, 0, 0, 0.04),
-      0 8px 24px rgba(0, 0, 0, 0.1) !important;
-    backdrop-filter: blur(20px) saturate(180%) !important;
-    -webkit-backdrop-filter: blur(20px) saturate(180%) !important;
-    animation: dropdownSlideIn 0.18s cubic-bezier(0.2, 0, 0, 1) both;
-    overflow: hidden;
-  }
-}
 
-/* 文档卡片标签选择弹窗 */
-.card-tag-popup {
-  z-index: 99 !important;
 
-  .t-popup__content {
-    padding: 4px !important;
-    margin-top: 4px !important;
-    border-radius: 10px !important;
-    background: var(--td-bg-color-container) !important;
-    border: 0.5px solid var(--td-component-stroke) !important;
-    box-shadow:
-      0 0 0 0.5px rgba(0, 0, 0, 0.03),
-      0 2px 4px rgba(0, 0, 0, 0.04),
-      0 8px 24px rgba(0, 0, 0, 0.1) !important;
-    backdrop-filter: blur(20px) saturate(180%) !important;
-    -webkit-backdrop-filter: blur(20px) saturate(180%) !important;
-    animation: dropdownSlideIn 0.18s cubic-bezier(0.2, 0, 0, 1) both;
-    overflow: hidden;
-  }
-
-  .tag-popup-list {
-    min-width: 160px;
-    max-width: 240px;
-    max-height: 280px;
-    overflow-y: auto;
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-  }
-
-  .tag-popup-item {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 6px 8px;
-    border-radius: 6px;
-    font-size: 13px;
-    color: var(--td-text-color-primary);
-    cursor: pointer;
-    line-height: 1.2;
-    transition: background-color 0.15s ease;
-
-    &:hover {
-      background: var(--td-bg-color-container-hover);
-    }
-
-    &.is-selected {
-      color: var(--td-brand-color);
-      background: var(--td-bg-color-secondarycontainer);
-    }
-  }
-
-  .tag-popup-check {
-    font-size: 14px;
-    color: var(--td-brand-color);
-    visibility: hidden;
-    flex-shrink: 0;
-
-    &.visible {
-      visibility: visible;
-    }
-  }
-
-  .tag-popup-name {
-    flex: 1;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-
-    &.muted {
-      color: var(--td-text-color-secondary);
-    }
-  }
-
-  .tag-popup-item.is-action {
-    color: var(--td-text-color-secondary);
-
-    .tag-popup-check {
-      visibility: visible;
-      color: var(--td-text-color-secondary);
-    }
-
-    &:hover {
-      color: var(--td-error-color);
-      background: var(--td-error-color-1);
-
-      .tag-popup-check {
-        color: var(--td-error-color);
-      }
-    }
-  }
-
-  .tag-popup-divider {
-    height: 1px;
-    margin: 4px 4px;
-    background: var(--td-component-stroke);
-  }
-}
 
 /* ============================================
    五、锚定表单/确认弹层（成员邀请、Wiki 移动/删除等）
@@ -619,7 +518,7 @@
     padding: 14px 16px !important;
     min-width: 300px;
     max-width: min(392px, calc(100vw - 24px));
-    border-radius: 12px !important;
+    border-radius: var(--app-radius-xl) !important;
     background: var(--td-bg-color-container) !important;
     border: 0.5px solid var(--td-component-stroke) !important;
     box-shadow:
@@ -636,7 +535,7 @@
 }
 
 .anchored-form-popup-title {
-  font-size: 15px;
+  font-size: var(--app-text-lg);
   font-weight: 600;
   color: var(--td-text-color-primary);
   margin: 0 0 12px;
@@ -646,7 +545,7 @@
 .anchored-form-popup-body {
   padding: 0 0 4px;
   color: var(--td-text-color-primary);
-  font-size: 14px;
+  font-size: var(--app-text-base);
   line-height: 1.6;
   word-break: break-word;
 }
@@ -663,7 +562,7 @@
   padding: 14px 16px;
   min-width: 300px;
   max-width: min(392px, calc(100vw - 24px));
-  border-radius: 12px;
+  border-radius: var(--app-radius-xl);
   background: var(--td-bg-color-container);
   border: 0.5px solid var(--td-component-stroke);
   box-shadow:
@@ -680,8 +579,6 @@
 :root[theme-mode="dark"] {
   .card-more-popup .t-popup__content,
   .card-more .t-popup__content,
-  .tag-more-popup .t-popup__content,
-  .card-tag-popup .t-popup__content,
   .anchored-form-popup-overlay .t-popup__content {
     background: rgba(36, 36, 36, 0.92) !important;
     border-color: rgba(255, 255, 255, 0.08) !important;
@@ -700,13 +597,14 @@
       0 8px 32px rgba(0, 0, 0, 0.28);
   }
 
+  .t-popup__content.t-dropdown {
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.12), 0 6px 20px rgba(0, 0, 0, 0.24);
+  }
+
   .t-popup__content .t-dropdown__menu {
-    background: rgba(36, 36, 36, 0.85);
-    border-color: rgba(255, 255, 255, 0.08);
-    box-shadow:
-      0 0 0 0.5px rgba(255, 255, 255, 0.05),
-      0 2px 4px rgba(0, 0, 0, 0.12),
-      0 8px 32px rgba(0, 0, 0, 0.28);
+    background: var(--td-bg-color-container);
+    border: 0;
+    box-shadow: none;
 
     &:hover {
       scrollbar-color: rgba(255, 255, 255, 0.22) transparent;

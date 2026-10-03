@@ -82,7 +82,7 @@ function metaFor(item: SkillFileListItem): string {
 }
 
 .empty-state {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.5;
   color: var(--td-text-color-placeholder);
 }

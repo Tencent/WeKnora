@@ -9,6 +9,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/agent/approval"
+	"github.com/Tencent/WeKnora/internal/application/access"
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/handler/dto"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -25,6 +26,9 @@ type MCPServiceHandler struct {
 	mcpToolApprovalService interfaces.MCPToolApprovalService
 	toolApprovalGate       *approval.Gate
 	modelService           interfaces.ModelService
+	// agents resolves a shared agent so the @MCP picker can list the services
+	// that agent can actually reach, which live in ITS OWNER's workspace.
+	agents access.SharedAgentLookup
 }
 
 // NewMCPServiceHandler creates a new MCP service handler
@@ -33,12 +37,14 @@ func NewMCPServiceHandler(
 	mcpToolApprovalService interfaces.MCPToolApprovalService,
 	toolApprovalGate *approval.Gate,
 	modelService interfaces.ModelService,
+	agents access.SharedAgentLookup,
 ) *MCPServiceHandler {
 	return &MCPServiceHandler{
 		mcpServiceService:      mcpServiceService,
 		mcpToolApprovalService: mcpToolApprovalService,
 		toolApprovalGate:       toolApprovalGate,
 		modelService:           modelService,
+		agents:                 agents,
 	}
 }
 
@@ -124,8 +130,11 @@ func (h *MCPServiceHandler) CreateMCPService(c *gin.Context) {
 // @Tags         MCP服务
 // @Accept       json
 // @Produce      json
+// @Param        agent_id               query  string  false  "Agent ID; needs agent_source_tenant_id"
+// @Param        agent_source_tenant_id query  int     false  "Shared agent source workspace"
 // @Success      200  {object}  map[string]interface{}  "MCP服务列表"
 // @Failure      400  {object}  errors.AppError         "请求参数错误"
+// @Failure      403  {object}  errors.AppError         "无权使用该共享智能体"
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /mcp-services [get]
@@ -136,6 +145,20 @@ func (h *MCPServiceHandler) ListMCPServices(c *gin.Context) {
 	if tenantID == 0 {
 		logger.Error(ctx, "Tenant ID is empty")
 		c.Error(errors.NewBadRequestError("Workspace ID cannot be empty"))
+		return
+	}
+
+	// A shared agent reaches its OWNER's MCP services, so the picker has to
+	// list them there. Without this the picker showed the caller's own
+	// services, whose ids can never match the agent's preset — the backend
+	// dropped every such @mention with only a warning in the log.
+	agent, err := sharedAgentPickerScope(c, h.agents)
+	if err != nil {
+		_ = c.Error(err)
+		return
+	}
+	if agent != nil {
+		h.listSharedAgentMCPServices(c, agent)
 		return
 	}
 
@@ -150,6 +173,48 @@ func (h *MCPServiceHandler) ListMCPServices(c *gin.Context) {
 		"success": true,
 		"data":    h.mcpServiceResponses(ctx, tenantID, services),
 	})
+}
+
+// listSharedAgentMCPServices serves the @MCP picker for a borrowed agent.
+//
+// The set is the agent's explicit preset resolved in its owner's workspace —
+// see sharedAgentMCPScope for why it is the preset and not the owner's whole
+// inventory. The response uses the narrowed cross-workspace shape, and the
+// tool-count summaries are read under the owner too, since that is where the
+// services and their saved directories live.
+func (h *MCPServiceHandler) listSharedAgentMCPServices(c *gin.Context, agent *types.CustomAgent) {
+	ctx := c.Request.Context()
+	ids := sharedAgentMCPScope(agent)
+	if len(ids) == 0 {
+		c.JSON(http.StatusOK, gin.H{"success": true, "data": []*dto.MCPServiceResponse{}})
+		return
+	}
+
+	services, err := h.mcpServiceService.ListMCPServicesByIDs(ctx, agent.TenantID, ids)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{"tenant_id": agent.TenantID})
+		_ = c.Error(errors.NewInternalServerError("Failed to list MCP services: " + err.Error()))
+		return
+	}
+	enabled := make([]*types.MCPService, 0, len(services))
+	for _, svc := range services {
+		// Mirror registerMCPTools: a disabled service is not registered, so it
+		// must not be offered either.
+		if svc != nil && svc.Enabled {
+			enabled = append(enabled, svc)
+		}
+	}
+
+	resp := dto.NewSharedAgentMCPServiceResponses(enabled)
+	if summaries, err := h.mcpServiceService.ListMCPMetadataSummaries(
+		ctx, agent.TenantID, enabled,
+	); err != nil {
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{"tenant_id": agent.TenantID})
+	} else {
+		dto.AttachMCPCatalogs(resp, enabled, summaries)
+	}
+
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": resp})
 }
 
 // GetMCPService godoc

@@ -3,7 +3,7 @@ import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { MessagePlugin } from 'tdesign-vue-next';
 import { useI18n } from 'vue-i18n';
 import { MAX_FILE_SIZE_MB } from '@/utils';
-import { getParserEngines } from '@/api/system';
+import { useEditorResourcesStore } from '@/stores/editorResources';
 import {
   deleteTemporaryAttachment,
   getTemporaryAttachment,
@@ -12,6 +12,7 @@ import {
 } from '@/api/chat/temporary-attachments';
 
 const { t } = useI18n();
+const editorResources = useEditorResourcesStore();
 
 export interface AttachmentFile {
   file: File;
@@ -48,7 +49,7 @@ let disposed = false;
 // Supported file types (matching backend)
 const supportedTypes = ref([
   // Documents
-  '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.epub', '.mhtml',
+  '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.epub', '.mhtml', '.xmind',
   // Text
   '.txt', '.md', '.csv', '.json', '.xml', '.html',
 	'.markdown', '.yaml', '.yml', '.log',
@@ -61,8 +62,8 @@ const supportedTypes = ref([
 
 onMounted(async () => {
   try {
-    const response = await getParserEngines();
-    const discovered = (response.data || [])
+    await editorResources.ensureParserEngines();
+    const discovered = editorResources.parserEngines
       .filter(engine => engine.Available !== false)
       .flatMap(engine => engine.FileTypes || [])
       .filter(type => type && type.toLowerCase() !== 'url')
@@ -323,9 +324,9 @@ defineExpose({
   align-items: center;
   gap: 10px;
   padding: 8px 32px 8px 10px;
-  border-radius: 8px;
-  border: 1px solid var(--td-border-level-1-color, #e7e7e7);
-  background: var(--td-bg-color-container, #fff);
+  border-radius: var(--app-radius-md);
+  border: 1px solid var(--td-border-level-1-color);
+  background: var(--td-bg-color-container);
   max-width: 240px;
   min-width: 140px;
   cursor: default;
@@ -346,17 +347,17 @@ defineExpose({
   }
 
   .attachment-preview-name {
-    font-size: 13px;
+    font-size: var(--app-text-md);
     font-weight: 500;
-    color: var(--td-text-color-primary, #333);
+    color: var(--td-text-color-primary);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
 
   .attachment-preview-meta {
-    font-size: 11px;
-    color: var(--td-text-color-secondary, #999);
+    font-size: var(--app-text-xs);
+    color: var(--td-text-color-secondary);
     white-space: nowrap;
   }
 
@@ -365,11 +366,11 @@ defineExpose({
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font-size: 11px;
-    color: var(--td-text-color-secondary, #999);
+    font-size: var(--app-text-xs);
+    color: var(--td-text-color-secondary);
 
-    &.is-ready { color: var(--td-success-color, #2ba471); }
-    &.is-failed { color: var(--td-error-color, #d54941); }
+    &.is-ready { color: var(--td-success-color); }
+    &.is-failed { color: var(--td-error-color); }
   }
 
   .attachment-status-spinner {
@@ -380,7 +381,7 @@ defineExpose({
     border: 1px solid currentColor;
     border-right-color: transparent;
     border-radius: 50%;
-    animation: attachment-spin .8s linear infinite;
+    animation: wk-spin .8s linear infinite;
   }
 
   .attachment-preview-remove {
@@ -395,7 +396,7 @@ defineExpose({
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 13px;
+    font-size: var(--app-text-md);
     cursor: pointer;
     line-height: 1;
 
@@ -405,7 +406,4 @@ defineExpose({
   }
 }
 
-@keyframes attachment-spin {
-  to { transform: rotate(360deg); }
-}
 </style>

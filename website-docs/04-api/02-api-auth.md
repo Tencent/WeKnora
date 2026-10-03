@@ -12,10 +12,11 @@
 
 | 字段 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
-| `username` | string | 是（`binding:"required"`） | 用户名 |
-| `email` | string | 是（`binding:"required"`） | 邮箱 |
-| `password` | string | 是（`binding:"required"`） | 密码 |
-| `tenant_provisioning` | string | 否 | 空间开通策略 |
+| `username` | string | 是 | 用户名，2–50 字符 |
+| `email` | string | 是 | 邮箱 |
+| `password` | string | 是 | 密码（8–32 位，字母+数字；复杂模式另需大小写和特殊字符） |
+
+是否自动创建个人空间由服务端的 `auth.default_tenant_mode` 决定，请求体不能指定。`invite_register`（仅限邀请注册）和 `invite_only`（禁止注册）模式下返回 403。
 
 响应：201 `{"success":true,"message":"...","user":{User}}`
 
@@ -25,6 +26,8 @@ curl -X POST $BASE/api/v1/auth/register -H 'Content-Type: application/json' \
 ```
 
 ### POST /api/v1/auth/register-by-invite
+
+仅 `self_serve` 和 `invite_register` 模式允许凭有效邀请链接注册；`invite_only` 模式返回 403。
 
 用途：通过邀请/分享链接 token 注册并加入空间。免认证，IP 限流 30 次/分钟。Handler: `internal/handler/auth_register_by_invite.go`
 
@@ -73,19 +76,15 @@ curl -X POST $BASE/api/v1/auth/login -H 'Content-Type: application/json' -d '{"e
 
 ### POST /api/v1/auth/auto-setup
 
-用途：一键初始化（本地/Lite 场景自动建号建空间）。免认证，无请求体。Handler: `internal/handler/auth.go`
+用途：原生桌面 Lite 自动建号、建空间及登录。必须携带桌面原生桥接提供的每进程随机 `X-WeKnora-Desktop-Token`，不接受匿名 HTTP 请求。普通浏览器使用注册/登录接口。Handler: `internal/handler/auth.go`
 
-响应：200，同 Login。
-
-```bash
-curl -X POST $BASE/api/v1/auth/auto-setup
-```
+响应：200，同 Login；缺少或错误的桌面凭据返回 401。
 
 ### GET /api/v1/auth/config
 
 用途：查询注册模式等认证配置。免认证。Handler: `internal/handler/auth.go`
 
-响应：200 `{"success":true,"registration_mode":"self_serve|invite_only","complex_password_enabled":false}`
+响应：200 `{"success":true,"registration_mode":"self_serve|invite_register|invite_only","complex_password_enabled":false}`
 
 ```bash
 curl $BASE/api/v1/auth/config
@@ -292,4 +291,4 @@ curl -X POST $BASE/api/v1/me/invitations/12/decline -H "Authorization: Bearer $T
 
 ## 实现参考
 
-路由注册：`internal/router/router.go` 的 `RegisterAuthRoutes` 与 `RegisterMyInvitationRoutes`。Handler：`internal/handler/auth.go`、`internal/handler/auth_register_by_invite.go`、`internal/handler/tenant_invitation.go`。
+路由注册：`internal/router/routes_auth_tenant.go` 的 `RegisterAuthRoutes` 与 `RegisterMyInvitationRoutes`。Handler：`internal/handler/auth.go`、`internal/handler/auth_register_by_invite.go`、`internal/handler/tenant_invitation.go`。

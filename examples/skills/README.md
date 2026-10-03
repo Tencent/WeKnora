@@ -53,7 +53,7 @@ mkdir my-new-skill/scripts
 
 ## 详细文档
 
-完整文档请参阅：[Agent Skills 文档](../../docs/agent-skills.md)
+完整文档请参阅：[Agent Skills 文档](../../website-docs/03-features/22-skills-sandbox.md)
 
 ## 示例：pdf-processing
 

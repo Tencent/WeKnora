@@ -11,6 +11,7 @@ import {
   activeQuestionId,
   answerPreviewText,
   collectOutlineMessages,
+  groupOutlineBounds,
   isChatOverflowing,
   mapQuestionTicks,
   nearestTickId,
@@ -42,14 +43,17 @@ test('questionMinimapTrackHeight still caps a long cluster to the centered rail'
   assert.equal(questionMinimapTrackHeight(100, 400), 200)
 })
 
-test('shouldShowQuestionMinimap requires overflow and at least two questions', () => {
-  assert.equal(shouldShowQuestionMinimap(true, 1), false)
-  assert.equal(shouldShowQuestionMinimap(true, 2), true)
-  assert.equal(shouldShowQuestionMinimap(true, 0), false)
-  assert.equal(shouldShowQuestionMinimap(false, 4), false)
+test('shouldShowQuestionMinimap requires overflow, a turn, and room beside the messages', () => {
+  assert.equal(shouldShowQuestionMinimap(true, 1, 60), true)
+  assert.equal(shouldShowQuestionMinimap(true, 2, 44), true)
+  assert.equal(shouldShowQuestionMinimap(true, 0, 60), false)
+  assert.equal(shouldShowQuestionMinimap(false, 4, 60), false)
+  assert.equal(shouldShowQuestionMinimap(true, 4, 43), false)
+  assert.equal(shouldShowQuestionMinimap(true, 4, 0), false)
+  assert.equal(shouldShowQuestionMinimap(true, 4, -20), false)
 })
 
-test('collectOutlineMessages includes both user and assistant messages in order', () => {
+test('collectOutlineMessages groups each query and its answers into one turn', () => {
   const questions = collectOutlineMessages([
     { role: 'assistant', id: 'a1', content: 'hi' },
     { role: 'user', content: 'no id yet' },
@@ -62,11 +66,11 @@ test('collectOutlineMessages includes both user and assistant messages in order'
     [
       { id: 'a1', hasAttachments: false, answerContent: '' },
       { id: 'u1', hasAttachments: true, answerContent: 'answer one' },
-      { id: 'a2', hasAttachments: false, answerContent: '' },
       { id: 'u2', hasAttachments: true, answerContent: '' },
     ],
   )
-  assert.deepEqual(questions.map(q => q.role), ['assistant', 'user', 'assistant', 'user'])
+  assert.deepEqual(questions.map(q => q.role), ['assistant', 'user', 'user'])
+  assert.deepEqual(questions.map(q => q.messageIds), [['a1'], ['u1', 'a2'], ['u2']])
 })
 
 test('all messages intersecting the viewport are highlighted, including partial and long answers', () => {
@@ -83,6 +87,20 @@ test('all messages intersecting the viewport are highlighted, including partial 
     { id: 'long-answer', offsetTop: 0, offsetBottom: 2000 },
   ], 500, 200)], ['long-answer'])
   assert.equal(visibleMessageIds(items, 100, 0).size, 0)
+})
+
+test('messages hidden under the sticky composer are not highlighted', () => {
+  const items = [
+    { id: 'query-above', offsetTop: 0, offsetBottom: 80 },
+    { id: 'long-answer', offsetTop: 80, offsetBottom: 340 },
+    { id: 'query-under-composer', offsetTop: 400, offsetBottom: 440 },
+    { id: 'answer-under-composer', offsetTop: 450, offsetBottom: 800 },
+  ]
+  assert.deepEqual([...visibleMessageIds(items, 100, 500, 200)], ['long-answer'])
+  assert.deepEqual([...visibleMessageIds(items, 300, 500, 200)],
+    ['long-answer', 'query-under-composer', 'answer-under-composer'])
+  assert.deepEqual([...visibleMessageIds(items, 450, 500, 200)], ['answer-under-composer'])
+  assert.equal(visibleMessageIds(items, 100, 200, 250).size, 0)
 })
 
 test('answerPreviewText strips markdown and stays empty when there is no answer yet', () => {
@@ -193,4 +211,33 @@ test('activeQuestionId picks the last question at or above the top offset', () =
   assert.equal(activeQuestionId(items, 400 - ACTIVE_QUESTION_TOP_OFFSET_PX), 'u2')
   assert.equal(activeQuestionId(items, 900), 'u3')
   assert.equal(activeQuestionId([], 0), null)
+})
+
+
+test('one turn tick stays highlighted for either query or any assistant segment', () => {
+  const turns = collectOutlineMessages([
+    { role: 'user', id: 'u1', content: 'question' },
+    { role: 'assistant', id: 'a1', content: 'first segment' },
+    { role: 'tool', id: 'tool' },
+    { role: 'assistant', id: 'a2', content: 'continued answer' },
+    { role: 'user', id: 'u2', content: 'next question' },
+    { role: 'assistant', id: 'a3', content: 'next answer' },
+  ])
+  assert.deepEqual(turns.map(turn => turn.id), ['u1', 'u2'])
+  assert.equal(turns[0].answerContent, 'first segment\n\ncontinued answer')
+  const bounds = groupOutlineBounds(turns, [
+    { id: 'u1', offsetTop: 0, offsetBottom: 60 },
+    { id: 'a1', offsetTop: 80, offsetBottom: 500 },
+    { id: 'a2', offsetTop: 520, offsetBottom: 1000 },
+    { id: 'u2', offsetTop: 1020, offsetBottom: 1080 },
+    { id: 'a3', offsetTop: 1100, offsetBottom: 1800 },
+  ])
+  assert.equal(mapQuestionTicks(bounds, 100).length, 2)
+  for (const top of [0, 100, 600]) {
+    assert.deepEqual([...visibleMessageIds(bounds, top, 100)], ['u1'])
+  }
+  assert.deepEqual([...visibleMessageIds(bounds, 900, 200)], ['u1', 'u2'])
+  assert.deepEqual([...visibleMessageIds(bounds, 1300, 200)], ['u2'])
+  assert.equal(visibleMessageIds(bounds, 60, 20).size, 0, 'the gap alone is not visible content')
+  assert.equal(groupOutlineBounds(turns, []).length, 0, 'unrendered messages do not create ticks')
 })

@@ -172,6 +172,27 @@ func (r *knowledgeBaseRepository) UpdateKnowledgeBase(ctx context.Context, kb *t
 	return r.db.WithContext(ctx).Save(kb).Error
 }
 
+// UpdateKnowledgeBaseGeneratedProfile writes the generated_profile column
+// only. The rest of the row is left untouched so a settings save that lands
+// while a profile is being generated is not overwritten by the worker.
+func (r *knowledgeBaseRepository) UpdateKnowledgeBaseGeneratedProfile(
+	ctx context.Context, id string, profile *types.KnowledgeBaseProfile,
+) error {
+	if id == "" {
+		return errors.New("knowledge base ID cannot be empty")
+	}
+	var value interface{}
+	if profile != nil {
+		value = *profile
+	}
+	return r.db.WithContext(ctx).Model(&types.KnowledgeBase{}).
+		Where("id = ?", id).
+		Updates(map[string]interface{}{
+			"generated_profile": value,
+			"updated_at":        time.Now(),
+		}).Error
+}
+
 // DeleteKnowledgeBase deletes a knowledge base
 func (r *knowledgeBaseRepository) DeleteKnowledgeBase(ctx context.Context, id string) error {
 	return r.db.WithContext(ctx).Where("id = ?", id).Delete(&types.KnowledgeBase{}).Error

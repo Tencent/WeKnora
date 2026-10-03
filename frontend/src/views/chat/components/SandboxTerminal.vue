@@ -368,7 +368,7 @@ defineExpose({
     display: flex;
     flex-direction: column;
     background: var(--td-bg-color-container);
-    border-radius: 8px;
+    border-radius: var(--app-radius-md);
     overflow: hidden;
     cursor: text;
 }
@@ -418,22 +418,13 @@ defineExpose({
 
 .sandbox-terminal__overlay-text {
     margin: 0;
-    font-size: 13px;
+    font-size: var(--app-text-md);
     line-height: 1.6;
     white-space: pre-line;
 }
 
 .sandbox-terminal__spinner {
-    animation: sandbox-terminal-spin 0.9s linear infinite;
+    animation: wk-spin 0.9s linear infinite;
 }
 
-@keyframes sandbox-terminal-spin {
-    from {
-        transform: rotate(0deg);
-    }
-
-    to {
-        transform: rotate(360deg);
-    }
-}
 </style>

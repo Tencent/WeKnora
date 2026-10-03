@@ -10,6 +10,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/im"
 	"github.com/Tencent/WeKnora/internal/logger"
+	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
 
 // MessageHandler is called when an IM message is received via long connection.
@@ -30,6 +31,7 @@ func NewLongConnClient(appToken, botToken string, handler MessageHandler) *LongC
 	api := slack.New(
 		botToken,
 		slack.OptionAppLevelToken(appToken),
+		slack.OptionHTTPClient(secutils.NewSSRFSafeHTTPClient(secutils.DefaultSSRFSafeHTTPClientConfig())),
 	)
 
 	client := socketmode.New(

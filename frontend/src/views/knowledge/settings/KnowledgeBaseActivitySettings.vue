@@ -161,8 +161,11 @@
                 </div>
               </template>
               <template #actor="{ row }">
-                <div class="audit-actor">
-                  <span class="audit-actor-name">{{ actorLabel(row) }}</span>
+                <div class="audit-actor" :title="actorLabel(row)">
+                  <span class="audit-actor-name">{{ actorPersonLabel(row) }}</span>
+                  <span v-if="activityAPIKeyName(row)" class="audit-actor-key">
+                    {{ actorAPIKeyLabel(row) }}
+                  </span>
                 </div>
               </template>
               <template #outcome="{ row }">
@@ -332,7 +335,7 @@ const columns = computed(() => [
     width: 132,
   },
   { colKey: 'target', title: t('knowledgeEditor.activity.columns.target'), minWidth: 180 },
-  { colKey: 'actor', title: t('knowledgeEditor.activity.columns.actor'), width: 120 },
+  { colKey: 'actor', title: t('knowledgeEditor.activity.columns.actor'), width: 132 },
   {
     colKey: 'outcome',
     title: 'outcome-title',
@@ -503,13 +506,38 @@ function targetDiff(entry: KnowledgeBaseActivity): string {
   return ''
 }
 
-function actorLabel(entry: KnowledgeBaseActivity): string {
+function actorPersonLabel(entry: KnowledgeBaseActivity): string {
   if (!entry.actor_user_id) return t('knowledgeEditor.activity.systemActor')
   const me = authStore.user
   if (me?.id === entry.actor_user_id) {
     return me.username?.trim() || me.email?.trim() || entry.actor_user_id.slice(0, 8)
   }
   return entry.actor_user_id.slice(0, 8)
+}
+
+function actorAPIKeyLabel(entry: KnowledgeBaseActivity): string {
+  const name = activityAPIKeyName(entry)
+  return name ? t('knowledgeEditor.activity.actorAPIKey', { name }) : ''
+}
+
+function actorLabel(entry: KnowledgeBaseActivity): string {
+  const person = actorPersonLabel(entry)
+  const keyName = activityAPIKeyName(entry)
+  if (keyName) {
+    return t('knowledgeEditor.activity.actorWithAPIKey', { actor: person, name: keyName })
+  }
+  return person
+}
+
+function activityAPIKeyName(entry: KnowledgeBaseActivity): string {
+  const value = details(entry).api_key_name
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+function activityAPIKeyId(entry: KnowledgeBaseActivity): string {
+  const value = details(entry).api_key_id
+  if (value === undefined || value === null || value === '') return ''
+  return String(value)
 }
 
 function formatDatePart(value: string): string {
@@ -611,6 +639,22 @@ function identifierFields(entry: KnowledgeBaseActivity): DetailField[] {
       key: 'actorId',
       label: t('knowledgeEditor.activity.expanded.actorId'),
       value: entry.actor_user_id,
+    })
+  }
+  const keyName = activityAPIKeyName(entry)
+  if (keyName) {
+    fields.push({
+      key: 'apiKeyName',
+      label: t('knowledgeEditor.activity.expanded.apiKeyName'),
+      value: keyName,
+    })
+  }
+  const keyId = activityAPIKeyId(entry)
+  if (keyId) {
+    fields.push({
+      key: 'apiKeyId',
+      label: t('knowledgeEditor.activity.expanded.apiKeyId'),
+      value: keyId,
     })
   }
   return fields
@@ -737,7 +781,7 @@ onUnmounted(() => detachInfiniteScroll())
   .section-title {
     margin: 0;
     font-family: var(--app-font-family);
-    font-size: 20px;
+    font-size: var(--app-text-3xl);
     font-weight: 600;
     color: var(--td-text-color-primary);
   }
@@ -745,7 +789,7 @@ onUnmounted(() => detachInfiniteScroll())
   .section-desc {
     margin: 0;
     font-family: var(--app-font-family);
-    font-size: 14px;
+    font-size: var(--app-text-base);
     color: var(--td-text-color-placeholder);
     line-height: 22px;
   }
@@ -756,7 +800,7 @@ onUnmounted(() => detachInfiniteScroll())
     flex-wrap: wrap;
     gap: 8px;
     margin: 6px 0 0;
-    font-size: 13px;
+    font-size: var(--app-text-md);
     color: var(--td-text-color-secondary);
     line-height: 20px;
   }
@@ -779,7 +823,7 @@ onUnmounted(() => detachInfiniteScroll())
   border: none;
   background: none;
   color: var(--td-brand-color);
-  font-size: 13px;
+  font-size: var(--app-text-md);
   line-height: 20px;
   cursor: pointer;
 
@@ -808,11 +852,11 @@ onUnmounted(() => detachInfiniteScroll())
   height: 22px;
   padding: 0;
   border: none;
-  border-radius: 4px;
+  border-radius: var(--app-radius-xs);
   background: transparent;
   color: var(--td-text-color-placeholder);
   cursor: pointer;
-  transition: background 0.15s ease, color 0.15s ease;
+  transition: background var(--app-motion-fast) ease, color var(--app-motion-fast) ease;
 
   &:hover {
     background: var(--td-bg-color-container-hover);
@@ -821,7 +865,7 @@ onUnmounted(() => detachInfiniteScroll())
 
   &.active {
     color: var(--td-brand-color);
-    background: var(--td-brand-color-light, rgba(0, 82, 217, 0.08));
+    background: var(--app-selection-bg);
   }
 }
 
@@ -851,23 +895,24 @@ onUnmounted(() => detachInfiniteScroll())
   gap: 8px;
   padding: 6px 10px;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--app-radius-xs);
   background: transparent;
   color: var(--td-text-color-primary);
-  font-size: 13px;
-  line-height: 1.4;
+  font-family: var(--app-font-family);
+  font-size: var(--app-text-base);
+  font-weight: 400;
+  line-height: 20px;
   cursor: pointer;
   text-align: left;
-  transition: background 0.15s ease, color 0.15s ease;
+  transition: background var(--app-motion-fast) ease, color var(--app-motion-fast) ease;
 
   &:hover {
-    background: var(--td-bg-color-secondarycontainer);
+    background: var(--td-bg-color-container-hover);
   }
 
   &.active {
-    background: var(--td-brand-color-light, rgba(0, 82, 217, 0.08));
+    background: var(--app-selection-bg);
     color: var(--td-brand-color);
-    font-weight: 500;
   }
 }
 
@@ -913,13 +958,13 @@ onUnmounted(() => detachInfiniteScroll())
   justify-content: center;
   gap: 10px;
   padding: 12px;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-secondary);
 }
 
 .audit-end-hint {
   text-align: center;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-disabled);
   padding: 8px 0 14px;
   margin: 0;
@@ -932,12 +977,12 @@ onUnmounted(() => detachInfiniteScroll())
   line-height: 1.3;
 
   .audit-time-date {
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     color: var(--td-text-color-secondary);
   }
 
   .audit-time-clock {
-    font-size: 13px;
+    font-size: var(--app-text-md);
     font-weight: 500;
     color: var(--td-text-color-primary);
     font-variant-numeric: tabular-nums;
@@ -945,15 +990,28 @@ onUnmounted(() => detachInfiniteScroll())
 }
 
 .audit-actor {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
   min-width: 0;
+  line-height: 1.3;
 
-  .audit-actor-name {
-    font-size: 13px;
-    font-weight: 500;
-    color: var(--td-text-color-primary);
+  .audit-actor-name,
+  .audit-actor-key {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  .audit-actor-name {
+    font-size: var(--app-text-md);
+    font-weight: 500;
+    color: var(--td-text-color-primary);
+  }
+
+  .audit-actor-key {
+    font-size: var(--app-text-sm, 12px);
+    color: var(--td-text-color-secondary);
   }
 }
 
@@ -966,15 +1024,15 @@ onUnmounted(() => detachInfiniteScroll())
   padding: 2px 0;
 
   .audit-target-key {
-    font-size: 13px;
+    font-size: var(--app-text-md);
     color: var(--td-text-color-primary);
     word-break: break-word;
   }
 
   .audit-target-diff {
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     color: var(--td-text-color-secondary);
-    font-family: var(--td-font-family-mono, monospace);
+    font-family: var(--td-font-family-mono);
     word-break: break-all;
     line-height: 1.4;
   }
@@ -986,13 +1044,13 @@ onUnmounted(() => detachInfiniteScroll())
 
 .data-table-shell {
   overflow-x: auto;
-  border-radius: 10px;
+  border-radius: var(--app-radius-lg);
   border: 1px solid var(--td-component-stroke);
   background-color: var(--td-bg-color-container);
 
   &:deep(thead th) {
     font-weight: 600;
-    font-size: 13px;
+    font-size: var(--app-text-md);
   }
 
   &:deep(.t-table td),
@@ -1044,7 +1102,7 @@ onUnmounted(() => detachInfiniteScroll())
   dt {
     margin: 0;
     color: var(--td-text-color-placeholder);
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     line-height: 1.45;
     white-space: nowrap;
   }
@@ -1052,7 +1110,7 @@ onUnmounted(() => detachInfiniteScroll())
   dd {
     margin: 0;
     color: var(--td-text-color-primary);
-    font-size: 13px;
+    font-size: var(--app-text-md);
     line-height: 1.55;
     word-break: break-all;
   }
@@ -1061,12 +1119,12 @@ onUnmounted(() => detachInfiniteScroll())
 .audit-detail-json {
   margin: 0;
   padding: 12px 14px;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.55;
   color: var(--td-text-color-primary);
   background: var(--td-bg-color-container);
   border: 1px solid var(--td-component-stroke);
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   white-space: pre-wrap;
   word-break: break-all;
   max-height: min(420px, 50vh);
@@ -1074,7 +1132,7 @@ onUnmounted(() => detachInfiniteScroll())
 }
 
 .mono {
-  font-family: var(--td-font-family-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+  font-family: var(--td-font-family-mono);
 }
 
 .narrow-scrollbar {

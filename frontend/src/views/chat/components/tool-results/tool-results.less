@@ -15,7 +15,7 @@
 @card-hover-border: var(--td-brand-color);
 @card-radius: 6px;
 @card-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
-@card-shadow-hover: 0 2px 6px rgba(7, 192, 95, 0.08);
+@card-shadow-hover: 0 2px 6px color-mix(in srgb, var(--td-brand-color) 8%, transparent);
 
 // Animation timing
 @transition-time: 0.2s;
@@ -31,7 +31,7 @@
   align-items: center;
   padding: 2px 6px;
   border-radius: 3px;
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   font-weight: 600;
   gap: 3px;
   line-height: 1.4;
@@ -63,7 +63,7 @@
   align-items: center;
   padding: 2px 6px;
   border-radius: 3px;
-  font-size: 10px;
+  font-size: var(--app-text-2xs);
   background-color: var(--td-bg-color-secondarycontainer);
   color: var(--td-text-color-secondary);
   gap: 2px;
@@ -96,10 +96,10 @@
   gap: 8px;
   position: relative;
   z-index: 1;
-  transition: background-color 0.15s ease;
+  transition: background-color var(--app-motion-fast) ease;
 
   &:hover {
-    background: rgba(7, 192, 95, 0.04);
+    background: color-mix(in srgb, var(--td-brand-color) 4%, transparent);
   }
   
   * {
@@ -112,7 +112,7 @@
   align-items: center;
   gap: 6px;
   flex: 1;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   font-weight: 500;
   line-height: 1.4;
 }
@@ -121,7 +121,7 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   color: var(--td-text-color-secondary);
   flex-shrink: 0;
 }
@@ -143,9 +143,9 @@
 }
 
 .expand-icon {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-placeholder);
-  transition: transform 0.15s ease, color 0.15s ease;
+  transition: transform var(--app-motion-fast) ease, color var(--app-motion-fast) ease;
 
   &.expanded {
     transform: rotate(180deg);
@@ -162,7 +162,7 @@
 }
 
 .info-section-title {
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   font-weight: 600;
   color: var(--td-text-color-secondary);
   text-transform: uppercase;
@@ -174,7 +174,7 @@
   display: flex;
   gap: 8px;
   margin-bottom: 6px;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.5;
 
   .field-label {
@@ -193,15 +193,15 @@
 
 // Statistics card (for KB counts, etc.)
 .stats-card {
-  background: rgba(7, 192, 95, 0.04);
-  border: 1px solid rgba(7, 192, 95, 0.15);
+  background: color-mix(in srgb, var(--td-brand-color) 4%, transparent);
+  border: 1px solid color-mix(in srgb, var(--td-brand-color) 15%, transparent);
   border-radius: @card-radius;
   padding: 10px 12px;
   margin-bottom: 10px;
 }
 
 .stats-title {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   font-weight: 600;
   color: var(--td-text-color-primary);
   margin-bottom: 6px;
@@ -214,7 +214,7 @@
 }
 
 .stats-item {
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   color: var(--td-text-color-secondary);
   display: flex;
   justify-content: space-between;
@@ -244,7 +244,7 @@
 
 // Content preview (truncated)
 .content-preview {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-primary);
   line-height: 1.6;
   max-height: 60px;
@@ -257,33 +257,33 @@
 
 // Full content
 .full-content {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-primary);
   line-height: 1.6;
   white-space: pre-wrap;
   word-break: break-word;
   padding: 10px;
   background: var(--td-bg-color-secondarycontainer);
-  border-radius: 4px;
+  border-radius: var(--app-radius-xs);
   border: 1px solid @card-border;
 }
 
 // Action buttons
 .action-button {
   padding: 4px 10px;
-  font-size: 11px;
-  border-radius: 4px;
+  font-size: var(--app-text-xs);
+  border-radius: var(--app-radius-xs);
   border: 1px solid @card-border;
   background: var(--td-bg-color-container);
   color: var(--td-text-color-secondary);
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: all var(--app-motion-fast) ease;
   font-weight: 500;
 
   &:hover {
     border-color: @card-hover-border;
     color: @card-hover-border;
-    background: rgba(7, 192, 95, 0.04);
+    background: color-mix(in srgb, var(--td-brand-color) 4%, transparent);
   }
 }
 
@@ -292,7 +292,7 @@
   padding: 20px;
   text-align: center;
   color: var(--td-text-color-placeholder);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   font-style: italic;
   background: var(--td-bg-color-secondarycontainer);
   border-radius: @card-radius;
@@ -302,10 +302,10 @@
 // Code block
 .code-block {
   font-family: var(--app-font-family-mono);
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   background: var(--td-bg-color-secondarycontainer);
   padding: 8px;
-  border-radius: 4px;
+  border-radius: var(--app-radius-xs);
   border: 1px solid @card-border;
   overflow-x: auto;
   line-height: 1.5;

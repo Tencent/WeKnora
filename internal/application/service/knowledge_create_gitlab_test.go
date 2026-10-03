@@ -77,3 +77,35 @@ func TestCreateKnowledgeFromFileGitLabPreservesSourcePaths(t *testing.T) {
 	_, err = create(types.ConnectorTypeGitLab, "", "missing-identity/README.md")
 	require.ErrorAs(t, err, &dupErr, "incomplete source identity retains content deduplication")
 }
+
+func TestCreateKnowledgeFromFileConfluencePreservesCopiedPages(t *testing.T) {
+	db := setupKnowledgeSharedAccessDB(t)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = sqlDB.Close() })
+	repo := &gitLabKnowledgeRepo{KnowledgeRepository: repository.NewKnowledgeRepository(db)}
+	svc := &knowledgeService{
+		repo:      repo,
+		kbService: &createKnowledgeFileKBServiceStub{kb: &types.KnowledgeBase{ID: "kb-1"}},
+		fileSvc:   &createKnowledgeFileServiceStub{},
+		task:      &createKnowledgeTaskEnqueuerStub{},
+	}
+	ctx := newCreateKnowledgeFileContext()
+	create := func(source, pageID string) (*types.Knowledge, error) {
+		t.Helper()
+		return svc.CreateKnowledgeFromFile(ctx, "kb-1", newMultipartFileHeader(t, "Overview.md", "# same body"),
+			map[string]string{"datasource_id": source, "external_id": pageID},
+			nil, "Overview-"+pageID+".md", nil, types.ChannelConfluence, nil)
+	}
+
+	first, err := create("ds-1", "p1")
+	require.NoError(t, err)
+	second, err := create("ds-1", "p2")
+	require.NoError(t, err, "copied Confluence pages with identical bodies must still be imported")
+	require.NotEqual(t, first.ID, second.ID)
+
+	duplicate, err := create("ds-1", "p2")
+	var dupErr *types.DuplicateKnowledgeError
+	require.ErrorAs(t, err, &dupErr)
+	require.Equal(t, second.ID, duplicate.ID)
+}

@@ -61,12 +61,14 @@ type fakeRemoteClient struct {
 	nextID       int
 	sandboxes    map[string]*fakeRemoteRecord
 
-	createCount int
-	connectIDs  []string
-	connects    []RemoteConnectRequest
-	getIDs      []string
-	deleteIDs   []string
-	listCount   int
+	createCount       int
+	connectIDs        []string
+	connects          []RemoteConnectRequest
+	getIDs            []string
+	deleteIDs         []string
+	listCount         int
+	lastCreateRequest RemoteCreateRequest
+	lastCreatedID     string
 
 	trafficAccessToken string
 
@@ -181,6 +183,8 @@ func (c *fakeRemoteClient) Create(
 	c.mu.Lock()
 	c.nextID++
 	id := fmt.Sprintf("%s-%d", c.provider, c.nextID)
+	c.lastCreateRequest = req
+	c.lastCreatedID = id
 	record := &fakeRemoteRecord{
 		id:         id,
 		templateID: req.TemplateID,

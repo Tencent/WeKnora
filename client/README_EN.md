@@ -91,6 +91,12 @@ knowledge, err := apiClient.CreateKnowledgeFromFile(context.Background(), kb.ID,
 if err != nil {
     // Handle error
 }
+
+// Download original files from one knowledge base as a ZIP (max 200 IDs, 512 MiB)
+err = apiClient.DownloadKnowledgeFiles(context.Background(), kb.ID, []string{knowledge.ID}, "knowledge-files.zip")
+if err != nil {
+    // Handle error
+}
 ```
 
 ### Example: Create Session and Chat

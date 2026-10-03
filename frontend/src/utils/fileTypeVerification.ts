@@ -7,6 +7,7 @@ const DEFAULT_VALID_TYPES = new Set([
   "pptx",
   "ppt",
   "epub",
+  "xmind",
   "html",
   "htm",
   "mhtml",

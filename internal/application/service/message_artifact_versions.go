@@ -17,7 +17,7 @@ func (s *messageService) clarifyReadArtifactVersions(ctx context.Context, sessio
 			continue
 		}
 		owned := make(map[string]bool)
-		for _, artifact := range message.Artifacts {
+		for _, artifact := range message.Artifacts.Live() {
 			owned[artifact.URL] = true
 		}
 		for _, ref := range types.ScanResourceReferences(message.Content) {
@@ -29,11 +29,14 @@ func (s *messageService) clarifyReadArtifactVersions(ctx context.Context, sessio
 	if !needsHistory {
 		return messages
 	}
-	previous, err := s.messageRepo.GetSessionArtifacts(ctx, sessionID)
+	stored, err := s.messageRepo.GetSessionArtifacts(ctx, sessionID)
 	if err != nil {
 		logger.Warnf(ctx, "Read artifact versions failed: %v", err)
 		return messages
 	}
+	// Tombstones carry the URL a past answer referenced, but the file is gone;
+	// clarifying "this is version 2 of 3" about it would be a lie.
+	previous := stored.Live()
 	result := append([]*types.Message(nil), messages...)
 	for i, message := range messages {
 		if message == nil {
@@ -50,7 +53,12 @@ func (s *messageService) clarifyReadArtifactVersions(ctx context.Context, sessio
 			}
 		}
 		copy := *message
-		copy.Content = types.ClarifyArtifactVersions(message.Content, message.Artifacts, referenced, types.LanguageFromContextOrDefault(ctx))
+		copy.Content = types.ClarifyArtifactVersions(
+			message.Content,
+			message.Artifacts.Live(),
+			referenced,
+			types.LanguageFromContextOrDefault(ctx),
+		)
 		result[i] = &copy
 	}
 	return result

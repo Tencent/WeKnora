@@ -134,7 +134,7 @@ func (s *organizationService) CreateOrganization(ctx context.Context, userID str
 		UpdatedAt:            now,
 	}
 
-	if err := s.orgRepo.AddTenantMember(ctx, member); err != nil {
+	if err := s.orgRepo.AddTenantMember(ctx, member, 0); err != nil {
 		logger.Errorf(ctx, "Failed to add creator tenant as member: %v", err)
 		// Rollback organization creation
 		_ = s.orgRepo.Delete(ctx, org.ID)
@@ -362,16 +362,6 @@ func (s *organizationService) AddTenantMember(ctx context.Context, orgID string,
 	if err != nil {
 		return err
 	}
-	if org.MemberLimit > 0 {
-		count, errCount := s.orgRepo.CountTenantMembers(ctx, orgID)
-		if errCount != nil {
-			return errCount
-		}
-		if count >= int64(org.MemberLimit) {
-			return ErrOrgMemberLimitReached
-		}
-	}
-
 	now := time.Now()
 	member := &types.OrganizationTenantMember{
 		ID:                   uuid.New().String(),
@@ -384,7 +374,20 @@ func (s *organizationService) AddTenantMember(ctx context.Context, orgID string,
 		UpdatedAt:            now,
 	}
 
-	return s.orgRepo.AddTenantMember(ctx, member)
+	return s.addTenantMemberWithinLimit(ctx, member, org.MemberLimit)
+}
+
+// addTenantMemberWithinLimit inserts a membership with the org's member limit
+// enforced atomically by the repository (counting first and inserting later
+// let concurrent joins exceed it).
+func (s *organizationService) addTenantMemberWithinLimit(
+	ctx context.Context, member *types.OrganizationTenantMember, memberLimit int,
+) error {
+	err := s.orgRepo.AddTenantMember(ctx, member, memberLimit)
+	if errors.Is(err, repository.ErrOrgMemberLimitReached) {
+		return ErrOrgMemberLimitReached
+	}
+	return err
 }
 
 // RemoveTenantMember removes a tenant from an organization.
@@ -402,21 +405,37 @@ func (s *organizationService) RemoveTenantMember(ctx context.Context, orgID stri
 		return ErrCannotRemoveOwner
 	}
 
-	if operatorTenantID == memberTenantID {
-		// Self-removal: any tenant can leave on their own behalf.
-		return s.orgRepo.RemoveTenantMember(ctx, orgID, memberTenantID)
-	}
-
-	isAdmin, err := s.IsTenantOrgAdmin(ctx, orgID, operatorTenantID)
-	if err != nil {
-		return err
-	}
-	if !isAdmin {
-		return ErrOrgPermissionDenied
+	if operatorTenantID != memberTenantID {
+		// Removing another tenant requires org admin; any tenant may leave on
+		// its own behalf.
+		isAdmin, err := s.IsTenantOrgAdmin(ctx, orgID, operatorTenantID)
+		if err != nil {
+			return err
+		}
+		if !isAdmin {
+			return ErrOrgPermissionDenied
+		}
 	}
 	_ = operatorUserID
 
-	return s.orgRepo.RemoveTenantMember(ctx, orgID, memberTenantID)
+	if err := s.orgRepo.RemoveTenantMember(ctx, orgID, memberTenantID); err != nil {
+		return err
+	}
+	s.revokeTenantShares(ctx, orgID, memberTenantID)
+	return nil
+}
+
+// revokeTenantShares withdraws what a departing tenant shared into the org:
+// otherwise the remaining members keep reading (or editing) its KBs and
+// running its agents on its models. Share reads also require the source
+// tenant's membership, so a failure here cannot leave the shares effective.
+func (s *organizationService) revokeTenantShares(ctx context.Context, orgID string, tenantID uint64) {
+	if err := s.shareRepo.DeleteByOrganizationAndSourceTenant(ctx, orgID, tenantID); err != nil {
+		logger.Warnf(ctx, "Failed to revoke KB shares of tenant %d in organization %s: %v", tenantID, orgID, err)
+	}
+	if err := s.agentShareRepo.DeleteByOrganizationAndSourceTenant(ctx, orgID, tenantID); err != nil {
+		logger.Warnf(ctx, "Failed to revoke agent shares of tenant %d in organization %s: %v", tenantID, orgID, err)
+	}
 }
 
 // UpdateTenantMemberRole updates the role for a (org, tenant) membership.
@@ -506,16 +525,6 @@ func (s *organizationService) joinAsViewerWithChecks(ctx context.Context, org *t
 		return err
 	}
 
-	if org.MemberLimit > 0 {
-		count, errCount := s.orgRepo.CountTenantMembers(ctx, org.ID)
-		if errCount != nil {
-			return errCount
-		}
-		if count >= int64(org.MemberLimit) {
-			return ErrOrgMemberLimitReached
-		}
-	}
-
 	now := time.Now()
 	member := &types.OrganizationTenantMember{
 		ID:                   uuid.New().String(),
@@ -528,7 +537,7 @@ func (s *organizationService) joinAsViewerWithChecks(ctx context.Context, org *t
 		UpdatedAt:            now,
 	}
 
-	return s.orgRepo.AddTenantMember(ctx, member)
+	return s.addTenantMemberWithinLimit(ctx, member, org.MemberLimit)
 }
 
 // JoinByInviteCode allows a tenant to join via invite code.
@@ -725,15 +734,6 @@ func (s *organizationService) ReviewJoinRequest(ctx context.Context, orgID strin
 			if errOrg != nil {
 				return errOrg
 			}
-			if org.MemberLimit > 0 {
-				count, errCount := s.orgRepo.CountTenantMembers(ctx, request.OrganizationID)
-				if errCount != nil {
-					return errCount
-				}
-				if count >= int64(org.MemberLimit) {
-					return ErrOrgMemberLimitReached
-				}
-			}
 			now := time.Now()
 			member := &types.OrganizationTenantMember{
 				ID:                   uuid.New().String(),
@@ -745,7 +745,7 @@ func (s *organizationService) ReviewJoinRequest(ctx context.Context, orgID strin
 				CreatedAt:            now,
 				UpdatedAt:            now,
 			}
-			if err := s.orgRepo.AddTenantMember(ctx, member); err != nil {
+			if err := s.addTenantMemberWithinLimit(ctx, member, org.MemberLimit); err != nil {
 				return err
 			}
 			logger.Infof(ctx, "Join request %s approved, tenant %d added to organization %s with role %s", requestID, request.TenantID, request.OrganizationID, role)

@@ -4,7 +4,15 @@ import assert from 'node:assert/strict'
 import {
   parseStatusToTimelineStatus,
   resolveTimelineHeaderStatus,
+  shouldShowProcessingError,
 } from './knowledgeProcessingStatus.ts'
+
+test('failed attempts expose their cause while awaiting an automatic retry', () => {
+  assert.equal(shouldShowProcessingError(true, 'processing', 'failed'), true)
+  assert.equal(shouldShowProcessingError(true, 'failed', 'done'), true)
+  assert.equal(shouldShowProcessingError(true, 'processing', 'running'), false)
+  assert.equal(shouldShowProcessingError(false, 'failed', 'failed'), false)
+})
 
 test('latest attempt uses failed knowledge status even when root span is done', () => {
   assert.equal(resolveTimelineHeaderStatus({

@@ -770,7 +770,7 @@ func (m *milvusRepository) VectorRetrieve(ctx context.Context,
 	var sp *index.CustomAnnParam
 	if params.Threshold > 0 {
 		ann := index.NewCustomAnnParam()
-		ann.WithRadius(params.Threshold)
+		ann.WithRadius(m.similarityToMetric(params.Threshold))
 		sp = &ann
 	}
 	searchOption := client.NewSearchOption(collectionName, params.TopK, []entity.Vector{entity.FloatVector(params.Embedding)})
@@ -795,10 +795,13 @@ func (m *milvusRepository) VectorRetrieve(ctx context.Context,
 		log.Errorf("[Milvus] Failed to convert result set: %v", err)
 		return nil, fmt.Errorf("failed to convert result set: %w", err)
 	}
-	var results []*types.IndexWithScore
-	for i, set := range sets {
-		set.Score = scores[i]
-		results = append(results, fromMilvusVectorEmbedding(set.ID, set, types.MatchTypeEmbedding))
+	for i := range scores {
+		scores[i] = m.metricToSimilarity(scores[i])
+	}
+	results, err := buildMilvusIndexResults(sets, scores, types.MatchTypeEmbedding)
+	if err != nil {
+		log.Errorf("[Milvus] Failed to attach vector scores: %v", err)
+		return nil, fmt.Errorf("failed to attach vector scores: %w", err)
 	}
 	if len(results) == 0 {
 		log.Warnf("[Milvus] No vector matches found that meet threshold %.4f", params.Threshold)
@@ -864,19 +867,41 @@ func (m *milvusRepository) KeywordsRetrieve(ctx context.Context,
 			log.Errorf("[Milvus] Keywords search failed: %v", err)
 			continue
 		}
-		sets, _, err := convertResultSet(resultSet)
+		sets, scores, err := convertResultSet(resultSet)
 		if err != nil {
 			log.Errorf("[Milvus] Failed to convert result set: %v", err)
 			continue
 		}
-		for _, set := range sets {
-			set.Score = 1.0
-			allResults = append(allResults, fromMilvusVectorEmbedding(set.ID, set, types.MatchTypeKeywords))
+		results, scoreErr := buildMilvusIndexResults(sets, scores, types.MatchTypeKeywords)
+		if scoreErr != nil {
+			log.Errorf("[Milvus] Failed to attach keyword scores: %v", scoreErr)
+			continue
 		}
+		allResults = append(allResults, results...)
 	}
 
-	// Limit results to topK
-	if len(allResults) > params.TopK {
+	// Searches across multiple collections return one score-sorted page per
+	// collection. Re-sort the combined list before applying the global TopK;
+	// otherwise the first collection can crowd out better matches from later
+	// collections.
+	slices.SortStableFunc(allResults, func(a, b *types.IndexWithScore) int {
+		if a.Score > b.Score {
+			return -1
+		}
+		if a.Score < b.Score {
+			return 1
+		}
+		if a.ChunkID < b.ChunkID {
+			return -1
+		}
+		if a.ChunkID > b.ChunkID {
+			return 1
+		}
+		return 0
+	})
+
+	// Limit results to topK after sorting the merged collection results.
+	if params.TopK > 0 && len(allResults) > params.TopK {
 		allResults = allResults[:params.TopK]
 	}
 
@@ -1009,6 +1034,35 @@ func buildRetrieveResult(results []*types.IndexWithScore, retrieverType types.Re
 			Error:               nil,
 		},
 	}
+}
+
+// buildMilvusIndexResults attaches the score returned by Milvus to the
+// corresponding document. Search scores are meaningful for both vector and
+// BM25 searches; replacing keyword scores with a constant destroys the
+// ordering and makes retrieval observability misleading.
+func buildMilvusIndexResults(
+	documents []*MilvusVectorEmbeddingWithScore,
+	scores []float64,
+	matchType types.MatchType,
+) ([]*types.IndexWithScore, error) {
+	if len(documents) != len(scores) {
+		return nil, fmt.Errorf(
+			"result and score count mismatch: documents=%d scores=%d",
+			len(documents), len(scores),
+		)
+	}
+
+	results := make([]*types.IndexWithScore, 0, len(documents))
+	for i, document := range documents {
+		if document == nil {
+			return nil, fmt.Errorf("nil result at index %d", i)
+		}
+		document.Score = scores[i]
+		results = append(results,
+			fromMilvusVectorEmbedding(document.ID, document, matchType),
+		)
+	}
+	return results, nil
 }
 
 func (m *milvusRepository) calculateStorageSize(embedding *MilvusVectorEmbedding) int64 {
@@ -1278,4 +1332,26 @@ func convertResultSet(resultSet []client.ResultSet) ([]*MilvusVectorEmbeddingWit
 		}
 	}
 	return docs, scores, nil
+}
+
+// metricToSimilarity converts a raw vector-search score into cosine
+// similarity, the scale callers rank and threshold on. IP and COSINE already
+// are for the L2-normalized embeddings WeKnora indexes. Milvus L2 returns
+// the squared Euclidean distance (smaller is better), which for unit vectors
+// is 2 - 2cos; passing it through ranked the farthest hits first.
+func (m *milvusRepository) metricToSimilarity(score float64) float64 {
+	if m.metricType == entity.L2 {
+		return 1 - score/2
+	}
+	return score
+}
+
+// similarityToMetric converts a cosine-similarity threshold into the range
+// search radius of the configured metric: a lower bound on IP / COSINE, an
+// upper bound on the squared L2 distance.
+func (m *milvusRepository) similarityToMetric(similarity float64) float64 {
+	if m.metricType == entity.L2 {
+		return 2 * (1 - similarity)
+	}
+	return similarity
 }

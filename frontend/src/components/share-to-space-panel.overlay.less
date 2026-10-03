@@ -4,7 +4,7 @@
 
   .t-popup__content {
     padding: 16px;
-    border-radius: 10px;
+    border-radius: var(--app-radius-lg);
     border: 1px solid var(--td-component-stroke);
     box-shadow: var(--td-shadow-2), 0 8px 24px rgba(15, 23, 42, 0.08);
   }
@@ -17,7 +17,7 @@
 
   .member-invite-popup-title {
     margin: 0 0 10px;
-    font-size: 15px;
+    font-size: var(--app-text-lg);
     font-weight: 600;
     line-height: 1.35;
     color: var(--td-text-color-primary);
@@ -26,10 +26,10 @@
   .add-member-tip {
     margin: 0 0 12px;
     padding: 10px 12px;
-    border-radius: 8px;
+    border-radius: var(--app-radius-md);
     background: var(--td-bg-color-secondarycontainer);
     border: 1px solid var(--td-component-stroke);
-    font-size: 13px;
+    font-size: var(--app-text-md);
     color: var(--td-text-color-secondary);
     line-height: 1.5;
   }
@@ -55,7 +55,7 @@
   .org-upgrade-field-label {
     display: block;
     margin: 0;
-    font-size: 14px;
+    font-size: var(--app-text-base);
     font-weight: 500;
     line-height: 1.4;
     color: var(--td-text-color-primary);
@@ -69,7 +69,7 @@
 
   .member-form-hint {
     margin: 0;
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     color: var(--td-text-color-placeholder);
     line-height: 1.45;
   }
@@ -90,7 +90,7 @@
 
   .t-popup__content {
     padding: 4px !important;
-    border-radius: 8px !important;
+    border-radius: var(--app-radius-md) !important;
     border: 1px solid var(--td-component-stroke) !important;
     background: var(--td-bg-color-container) !important;
     box-shadow: 0 4px 16px rgba(15, 23, 42, 0.1) !important;
@@ -105,8 +105,8 @@
     align-items: center;
     padding: 0 !important;
     margin: 0 !important;
-    border-radius: 6px !important;
-    transition: background-color 0.15s ease;
+    border-radius: var(--app-radius-sm) !important;
+    transition: background-color var(--app-motion-fast) ease;
 
     &:hover,
     &.t-is-hover {
@@ -141,7 +141,7 @@
   .share-org-option-name {
     flex: 1;
     min-width: 0;
-    font-size: 13px;
+    font-size: var(--app-text-md);
     color: var(--td-text-color-primary);
     overflow: hidden;
     text-overflow: ellipsis;
@@ -150,7 +150,7 @@
 
   .share-org-option-role {
     flex-shrink: 0;
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     color: var(--td-text-color-placeholder);
   }
 }
@@ -159,26 +159,12 @@
 .share-hint-popup-overlay {
   z-index: 3050 !important;
 
-  .t-popup__content {
-    padding: 0 !important;
-    border-radius: 12px !important;
-    background: var(--td-bg-color-container) !important;
-    border: 0.5px solid var(--td-component-stroke) !important;
-    box-shadow:
-      0 0 0 0.5px rgba(0, 0, 0, 0.03),
-      0 2px 4px rgba(0, 0, 0, 0.04),
-      0 8px 24px rgba(0, 0, 0, 0.1) !important;
-    backdrop-filter: blur(20px) saturate(180%) !important;
-    -webkit-backdrop-filter: blur(20px) saturate(180%) !important;
-    overflow: hidden;
-  }
-
   .share-hint-popover {
     padding: 14px 16px;
 
     .share-hint-title {
       margin: 0 0 6px;
-      font-size: 14px;
+      font-size: var(--app-text-base);
       font-weight: 600;
       color: var(--td-text-color-primary);
       line-height: 1.35;
@@ -186,7 +172,7 @@
 
     .share-hint-desc {
       margin: 0 0 8px;
-      font-size: 13px;
+      font-size: var(--app-text-md);
       line-height: 1.55;
       color: var(--td-text-color-secondary);
 

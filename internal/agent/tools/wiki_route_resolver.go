@@ -207,46 +207,6 @@ func resolveWikiCreateKB(
 	return "", fmt.Errorf("cannot choose a knowledge base for new wiki page %s from %d allowed scopes", slug, len(scopes))
 }
 
-func wikiKnowledgeBasesForSourceRefs(
-	ctx context.Context,
-	refs []string,
-	knowledgeService interfaces.KnowledgeService,
-	allowedKBIDs []string,
-) ([]string, error) {
-	if len(refs) == 0 {
-		return nil, nil
-	}
-	if knowledgeService == nil {
-		return nil, fmt.Errorf("knowledge service is unavailable")
-	}
-	allowed := make(map[string]struct{}, len(allowedKBIDs))
-	for _, kbID := range dedupNonEmptyStrings(allowedKBIDs) {
-		allowed[kbID] = struct{}{}
-	}
-	var kbIDs []string
-	for _, ref := range refs {
-		knowledgeID := strings.TrimSpace(strings.SplitN(ref, "|", 2)[0])
-		if knowledgeID == "" {
-			continue
-		}
-		knowledge, err := knowledgeService.GetKnowledgeByIDOnly(ctx, knowledgeID)
-		if err != nil || knowledge == nil {
-			if err == nil {
-				err = fmt.Errorf("empty result")
-			}
-			return nil, fmt.Errorf("failed to resolve source document %s: %w", knowledgeID, err)
-		}
-		if _, ok := allowed[knowledge.KnowledgeBaseID]; !ok {
-			return nil, fmt.Errorf(
-				"source document %s belongs to non-Wiki or unauthorized knowledge base %s",
-				knowledgeID, knowledge.KnowledgeBaseID,
-			)
-		}
-		kbIDs = append(kbIDs, knowledge.KnowledgeBaseID)
-	}
-	return dedupNonEmptyStrings(kbIDs), nil
-}
-
 func firstWikiRoute(routes []*WikiRouteResolver) *WikiRouteResolver {
 	if len(routes) > 0 && routes[0] != nil {
 		return routes[0]

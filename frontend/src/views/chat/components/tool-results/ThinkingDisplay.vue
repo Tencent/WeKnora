@@ -30,18 +30,18 @@ useI18n(); // ensure component reacts to locale changes if needed
   gap: 10px;
   padding: 12px 14px;
   background: var(--td-bg-color-secondarycontainer);
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   border-left: 3px solid var(--td-text-color-placeholder);
 }
 
 .thinking-icon {
-  font-size: 16px;
+  font-size: var(--app-text-xl);
   flex-shrink: 0;
   line-height: 1.5;
 }
 
 .thinking-text {
-  font-size: 15px;
+  font-size: var(--app-text-lg);
   color: var(--td-text-color-primary);
   line-height: 1.65;
   white-space: pre-wrap;

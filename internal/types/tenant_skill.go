@@ -1,6 +1,8 @@
 package types
 
 import (
+	"database/sql/driver"
+	"encoding/json"
 	"time"
 
 	"gorm.io/gorm"
@@ -89,6 +91,15 @@ type TenantSkillEntity struct {
 	// this skill needs, each optionally carrying a workspace-wide admin value.
 	Envs SkillEnvVars `json:"envs,omitempty" gorm:"type:jsonb"`
 
+	// Served is the version the live image still carries while a newer install
+	// of this skill is in flight or has failed. The fields above describe the
+	// latest install attempt from the moment it starts, but the image pointer
+	// only moves when that attempt succeeds, so without this the agent would
+	// lose a skill whose previous version is sitting in the image. Nil when
+	// the row is ready (the fields above are what is served) or when nothing
+	// of this skill ever reached the image.
+	Served *SkillServedVersion `json:"served,omitempty" gorm:"type:jsonb"`
+
 	Status string `gorm:"type:varchar(32);not null"`
 	Error  string `gorm:"type:text"`
 	// InstallingSince drives the stuck-run reaper for both install and remove.
@@ -101,6 +112,81 @@ type TenantSkillEntity struct {
 
 // TableName pins the table so GORM's pluralizer cannot drift.
 func (e *TenantSkillEntity) TableName() string { return "tenant_skills" }
+
+// ServedView is the row as the agent should see it: the row itself when it is
+// ready, the version the image still carries while a newer install is in
+// flight or has failed, and nil when the image serves nothing of this skill.
+//
+// The view is a copy marked ready, so every reader downstream of the usable
+// set - discovery, instructions, resource files - answers from the served
+// version without knowing an upgrade exists. Enabled and Envs stay the row's
+// own: an administrator's switch and stored values apply to whichever version
+// is running.
+func (e *TenantSkillEntity) ServedView() *TenantSkillEntity {
+	if e == nil {
+		return nil
+	}
+	if e.Status == SkillStatusReady {
+		return e
+	}
+	if e.Served == nil ||
+		(e.Status != SkillStatusInstalling && e.Status != SkillStatusFailed) {
+		return nil
+	}
+	view := *e
+	view.Served = nil
+	view.Version = e.Served.Version
+	view.Description = e.Served.Description
+	view.Instructions = e.Served.Instructions
+	view.BundleSHA256 = e.Served.BundleSHA256
+	view.BundleRef = e.Served.BundleRef
+	view.InstalledSnapshotID = e.Served.SnapshotID
+	view.Status = SkillStatusReady
+	view.Error = ""
+	return &view
+}
+
+// SkillServedVersion is what a row described when it was last ready, kept
+// while a newer install of the same skill has not replaced it in the image.
+type SkillServedVersion struct {
+	Version      string `json:"version,omitempty"`
+	Description  string `json:"description,omitempty"`
+	Instructions string `json:"instructions,omitempty"`
+	BundleSHA256 string `json:"bundle_sha256,omitempty"`
+	// BundleRef names the archive the served files came from. It is resolved
+	// when the version is recorded, including for a row that was following the
+	// catalog, because the catalog may be re-registered while the upgrade
+	// runs and the served files must stay readable after it is.
+	BundleRef string `json:"bundle_ref,omitempty"`
+	// SnapshotID is the image generation that put this version in. The reaper
+	// compares it with the live chain to tell an upgrade that never moved the
+	// pointer from one whose terminal write was lost.
+	SnapshotID string `json:"snapshot_id,omitempty"`
+}
+
+// Value stores the served version as one JSON column.
+func (v SkillServedVersion) Value() (driver.Value, error) {
+	return json.Marshal(v)
+}
+
+// Scan reads the served version back.
+func (v *SkillServedVersion) Scan(value interface{}) error {
+	var b []byte
+	switch raw := value.(type) {
+	case nil:
+		return nil
+	case []byte:
+		b = raw
+	case string:
+		b = []byte(raw)
+	default:
+		return nil
+	}
+	if len(b) == 0 {
+		return nil
+	}
+	return json.Unmarshal(b, v)
+}
 
 // TenantSkillSnapshotEntity is the image-chain ledger. It exists because
 // snapshots are billable provider resources whose IDs we hand out: we must be

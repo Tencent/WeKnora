@@ -370,21 +370,18 @@ type RequestRoleUpgradeRequest struct {
 // InviteMemberRequest represents a request to directly invite a workspace to an organization.
 //
 // Plan 3 (#1303) moved membership to the workspace level: an invitation enrols a whole
-// workspace into the organization, with one user attached purely as the representative
-// (display/audit). Callers SHOULD set TenantID and optionally
-// RepresentativeUserID. For backward compatibility with older SDK callers that
-// still send UserID alone, the handler resolves that user's TenantID and uses
-// the user as the representative.
+// workspace into the organization. Callers SHOULD set TenantID. For backward
+// compatibility with older SDK callers that still send UserID alone, the
+// handler resolves that user's TenantID. No representative user is attached.
 type InviteMemberRequest struct {
 	// TenantID is the workspace to enrol as an org member. Preferred field.
 	TenantID uint64 `json:"tenant_id"`
-	// RepresentativeUserID identifies the user attached to the OTM row for
-	// display/audit. Optional: when unset, the handler picks a stable default
-	// (the user from the legacy UserID field, or the workspace's owner).
+	// RepresentativeUserID is accepted for compatibility and ignored: a
+	// direct add attaches no user of the enrolled workspace, since the
+	// inviter must not choose whose details the roster shows.
 	RepresentativeUserID string `json:"representative_user_id"`
 	// UserID is retained for backward compatibility. When set without
-	// TenantID, the handler resolves the user's TenantID and uses this
-	// user as the representative.
+	// TenantID, the handler resolves the user's TenantID.
 	UserID string        `json:"user_id"`
 	Role   OrgMemberRole `json:"role" binding:"required"` // Role to assign: admin/editor/viewer
 }

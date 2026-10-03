@@ -16,19 +16,19 @@ func withRerankSSRFWhitelist(t *testing.T, raw string) {
 	t.Cleanup(secutils.ResetSSRFWhitelistForTest)
 }
 
-func TestOpenAIRerankerRejectsInternalBaseURL(t *testing.T) {
+func TestRerankerRejectsInternalBaseURL(t *testing.T) {
 	withRerankSSRFWhitelist(t, "")
 
-	_, err := NewOpenAIReranker(&RerankerConfig{
+	_, err := NewReranker(&RerankerConfig{
 		BaseURL:   "http://169.254.169.254/latest/meta-data/",
 		ModelName: "rerank-test",
 	})
 	if err == nil {
-		t.Fatalf("NewOpenAIReranker returned nil error for blocked internal BaseURL")
+		t.Fatalf("NewReranker returned nil error for blocked internal BaseURL")
 	}
 }
 
-func TestOpenAIRerankerBlocksRedirectToInternalURL(t *testing.T) {
+func TestRerankerBlocksRedirectToInternalURL(t *testing.T) {
 	withRerankSSRFWhitelist(t, "127.0.0.1")
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -36,13 +36,13 @@ func TestOpenAIRerankerBlocksRedirectToInternalURL(t *testing.T) {
 	}))
 	defer server.Close()
 
-	reranker, err := NewOpenAIReranker(&RerankerConfig{
+	reranker, err := NewReranker(&RerankerConfig{
 		BaseURL:   server.URL,
 		ModelName: "rerank-test",
 		APIKey:    "sk-test",
 	})
 	if err != nil {
-		t.Fatalf("NewOpenAIReranker: %v", err)
+		t.Fatalf("NewReranker: %v", err)
 	}
 
 	_, err = reranker.Rerank(t.Context(), "query", []string{"doc"})

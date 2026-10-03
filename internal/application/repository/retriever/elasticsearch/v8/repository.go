@@ -557,6 +557,14 @@ func (e *elasticsearchRepository) KeywordsRetrieve(ctx context.Context,
 	}, nil
 }
 
+// copySourceDoc decodes a source row for CopyIndices. IsEnabled shadows the
+// embedded field so a row written before is_enabled existed, which retrieval
+// treats as enabled, can be told apart from an explicit false.
+type copySourceDoc struct {
+	elasticsearchRetriever.VectorEmbedding
+	IsEnabled *bool `json:"is_enabled"`
+}
+
 // CopyIndices 复制索引数据
 func (e *elasticsearchRepository) CopyIndices(ctx context.Context,
 	sourceKnowledgeBaseID string,
@@ -577,13 +585,13 @@ func (e *elasticsearchRepository) CopyIndices(ctx context.Context,
 		return nil
 	}
 
-	// Build query parameters
-	params := typesLocal.RetrieveParams{
-		KnowledgeBaseIDs: []string{sourceKnowledgeBaseID},
-	}
-
-	// Build base query conditions
-	filter := e.getBaseConds(params)
+	// Scan every row of the source knowledge base. getBaseConds is not used
+	// here because it drops disabled rows, which must be copied as disabled.
+	filter := []types.Query{{Terms: &types.TermsQuery{
+		TermsQuery: map[string]types.TermsQueryField{
+			e.idField("knowledge_base_id"): []string{sourceKnowledgeBaseID},
+		},
+	}}}
 
 	// Set batch processing parameters
 	batchSize := 500
@@ -617,7 +625,7 @@ func (e *elasticsearchRepository) CopyIndices(ctx context.Context,
 
 		for _, hit := range searchResponse.Hits.Hits {
 			// Parse source document
-			var sourceDoc elasticsearchRetriever.VectorEmbedding
+			var sourceDoc copySourceDoc
 			if err := json.Unmarshal(hit.Source_, &sourceDoc); err != nil {
 				log.Errorf("[Elasticsearch] Failed to parse source index data: %v", err)
 				continue
@@ -639,11 +647,6 @@ func (e *elasticsearchRepository) CopyIndices(ctx context.Context,
 				continue
 			}
 
-			// Save embedding vector to embeddingMap
-			if len(sourceDoc.Embedding) > 0 {
-				embeddingMap[targetChunkID] = sourceDoc.Embedding
-			}
-
 			// Handle SourceID transformation for generated questions
 			// Generated questions have SourceID format: {chunkID}-{questionID}
 			// Regular chunks have SourceID == ChunkID
@@ -660,6 +663,12 @@ func (e *elasticsearchRepository) CopyIndices(ctx context.Context,
 				targetSourceID = uuid.New().String()
 			}
 
+			// BatchSave looks embeddings up by SourceID, so key by the target
+			// SourceID; rows of one chunk would collide on the chunk ID.
+			if len(sourceDoc.Embedding) > 0 {
+				embeddingMap[targetSourceID] = sourceDoc.Embedding
+			}
+
 			// Create new index information
 			indexInfo := &typesLocal.IndexInfo{
 				Content:         sourceDoc.Content,
@@ -668,6 +677,7 @@ func (e *elasticsearchRepository) CopyIndices(ctx context.Context,
 				ChunkID:         targetChunkID,
 				KnowledgeID:     targetKnowledgeID,
 				KnowledgeBaseID: targetKnowledgeBaseID,
+				IsEnabled:       sourceDoc.IsEnabled == nil || *sourceDoc.IsEnabled,
 			}
 
 			indexInfoList = append(indexInfoList, indexInfo)

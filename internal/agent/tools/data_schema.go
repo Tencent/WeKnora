@@ -11,9 +11,11 @@ import (
 )
 
 var dataSchemaTool = BaseTool{
-	name:        ToolDataSchema,
-	description: "Use this tool to get the schema information of a CSV or Excel file loaded into DuckDB. It returns the table name, columns, and row count.",
-	schema:      utils.GenerateSchema[DataSchemaInput](),
+	name: ToolDataSchema,
+	description: "Use this tool to get the schema information of a CSV or Excel file loaded into DuckDB. " +
+		"It returns the columns and row count. When querying the document with data_analysis, " +
+		"reference it as the table \"" + DataAnalysisTableName + "\".",
+	schema: utils.GenerateSchema[DataSchemaInput](),
 }
 
 type DataSchemaInput struct {
@@ -123,7 +125,10 @@ func (t *DataSchemaTool) Execute(ctx context.Context, args json.RawMessage) (*ty
 		}, fmt.Errorf("no schema info found")
 	}
 
-	output := fmt.Sprintf("%s\n\n%s", summaryContent, columnContent)
+	output := fmt.Sprintf(
+		"%s\n\n%s\n\nQuery this document with data_analysis as the table %q.",
+		summaryContent, columnContent, DataAnalysisTableName,
+	)
 
 	return &types.ToolResult{
 		Success: true,

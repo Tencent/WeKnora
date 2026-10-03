@@ -216,6 +216,10 @@ type WikiPageService interface {
 	// SearchPages performs full-text search over wiki pages.
 	SearchPages(ctx context.Context, kbID string, query string, limit int) ([]*types.WikiPage, error)
 
+	// SearchPagesAcross searches wiki pages across multiple knowledge bases
+	// with the same ranking as SearchPages, then returns a global top-N.
+	SearchPagesAcross(ctx context.Context, kbIDs []string, query string, limit int) ([]*types.WikiPage, error)
+
 	// ListRevisions returns the stored historical snapshots for a page
 	// (newest first, content omitted) plus the total snapshot count and the
 	// page's current version. The current version itself has no revision
@@ -237,8 +241,8 @@ type WikiPageService interface {
 	// ListIssues retrieves issues for a knowledge base, optionally filtered by slug and status.
 	ListIssues(ctx context.Context, kbID string, slug string, status string) ([]*types.WikiPageIssue, error)
 
-	// UpdateIssueStatus updates the status of an issue (e.g. pending -> resolved/ignored).
-	UpdateIssueStatus(ctx context.Context, issueID string, status string) error
+	// UpdateIssueStatus updates the status of an issue of kbID (e.g. pending -> resolved/ignored).
+	UpdateIssueStatus(ctx context.Context, kbID string, issueID string, status string) error
 }
 
 // WikiPageRepository defines the wiki page data persistence interface.
@@ -392,6 +396,10 @@ type WikiPageRepository interface {
 	// Search performs full-text search on wiki pages within a knowledge base.
 	Search(ctx context.Context, kbID string, query string, limit int) ([]*types.WikiPage, error)
 
+	// SearchAcross performs the same full-text search across multiple
+	// knowledge bases, then returns a global top-N by match_rank.
+	SearchAcross(ctx context.Context, kbIDs []string, query string, limit int) ([]*types.WikiPage, error)
+
 	// CountByType returns page counts grouped by type for a knowledge base.
 	CountByType(ctx context.Context, kbID string) (map[string]int64, error)
 
@@ -449,6 +457,7 @@ type WikiPageRepository interface {
 	// ListIssues retrieves issues with optional filtering by slug and status.
 	ListIssues(ctx context.Context, kbID string, slug string, status string) ([]*types.WikiPageIssue, error)
 
-	// UpdateIssueStatus updates an issue's status.
-	UpdateIssueStatus(ctx context.Context, issueID string, status string) error
+	// UpdateIssueStatus updates the status of an issue of kbID; ErrWikiIssueNotFound
+	// when no such issue belongs to it.
+	UpdateIssueStatus(ctx context.Context, kbID string, issueID string, status string) error
 }

@@ -37,15 +37,15 @@ onUnmounted(() => clearInterval(timer))
   min-width: 0;
   margin: 8px 0;
   padding: 8px 10px;
-  border-radius: 4px;
-  background: var(--td-bg-color-secondarycontainer, #f7f7f7);
-  color: var(--td-text-color-secondary, #666);
-  font-size: 12px;
+  border-radius: var(--app-radius-xs);
+  background: var(--td-bg-color-secondarycontainer);
+  color: var(--td-text-color-secondary);
+  font-size: var(--app-text-sm);
   line-height: 1.5;
 
   code, pre {
     font-family: var(--td-font-family-code, monospace);
-    font-size: 11px;
+    font-size: var(--app-text-xs);
     line-height: 1.6;
   }
 
@@ -64,7 +64,7 @@ onUnmounted(() => clearInterval(timer))
     padding-top: 8px;
     overflow: auto;
     overscroll-behavior: contain;
-    border-top: 1px solid var(--td-component-stroke, #e7e7e7);
+    border-top: 1px solid var(--td-component-stroke);
     white-space: pre-wrap;
     overflow-wrap: anywhere;
   }
@@ -78,8 +78,8 @@ onUnmounted(() => clearInterval(timer))
 }
 .sandbox-command-elapsed {
   flex-shrink: 0;
-  color: var(--td-text-color-placeholder, #999);
-  font-size: 11px;
+  color: var(--td-text-color-placeholder);
+  font-size: var(--app-text-xs);
   font-variant-numeric: tabular-nums;
 }
 </style>

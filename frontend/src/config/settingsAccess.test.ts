@@ -17,7 +17,8 @@ test('management shortcuts are stricter than read-only settings pages', () => {
 test('the skill catalog is admin-only like the sandbox it installs into', () => {
   assert.equal(SETTINGS_SECTION_MIN_ROLE.skills, 'admin')
   assert.equal(SETTINGS_SECTION_MIN_ROLE.skills, SETTINGS_SECTION_MIN_ROLE.sandbox)
-  assert.equal(SETTINGS_MANAGEMENT_SHORTCUT_MIN_ROLE.skills, 'admin')
+  // Skills live in the sidebar toolbox, so the avatar menu has no shortcut.
+  assert.equal(Object.prototype.hasOwnProperty.call(SETTINGS_MANAGEMENT_SHORTCUT_MIN_ROLE, 'skills'), false)
 })
 
 test('personal skill environment variables are visible to every member', () => {
@@ -33,6 +34,6 @@ test('personal skill environment variables are visible to every member', () => {
 test('system administration settings stay explicitly system-admin-only', () => {
   assert.deepEqual(
     [...SYSTEM_ADMIN_SETTINGS_SECTIONS],
-    ['system-global', 'runtime-queues', 'platform-api-keys', 'system-audit-log'],
+    ['system-global', 'model-catalog', 'runtime-queues', 'platform-api-keys', 'system-audit-log'],
   )
 })

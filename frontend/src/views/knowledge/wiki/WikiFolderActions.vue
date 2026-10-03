@@ -143,10 +143,10 @@ function submitDelete() {
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
-  font-size: 15px;
+  font-size: var(--app-text-lg);
   color: var(--td-text-color-placeholder);
   cursor: pointer;
-  transition: color 0.15s, opacity 0.15s;
+  transition: color var(--app-motion-fast), opacity var(--app-motion-fast);
 
   &:hover {
     color: var(--td-brand-color);

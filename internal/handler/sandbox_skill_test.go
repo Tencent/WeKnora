@@ -843,24 +843,39 @@ func TestSandboxSkillInstallEventsSynthesizesTerminalWhenRowDisappears(t *testin
 	require.Equal(t, "removed", final["status"])
 }
 
-// Without Redis there is no live progress at all. One event describing the
-// durable state is honest; holding the connection open is not.
-func TestSandboxSkillInstallEventsWithoutRedisSendsStateAndCloses(t *testing.T) {
+// Without Redis nothing publishes live percentages. Closing immediately with
+// done=true makes the client treat an in-progress install as finished and
+// reconnect in a tight loop. The stream stays up and ends once the row does.
+func TestSandboxSkillInstallEventsWithoutRedisPollsUntilFinished(t *testing.T) {
 	svc := &fakeSandboxSkillService{
 		skills: map[string]*types.TenantSkillEntity{
 			"skill-1": {ID: "skill-1", SandboxConfigID: "cfg-a", Status: types.SkillStatusInstalling},
 		},
 	}
-	router := newSkillTestRouter(NewSandboxSkillHandler(svc, nil))
+	svc.onGet = func(calls int) {
+		if calls < 2 {
+			return
+		}
+		svc.skills["skill-1"].Status = types.SkillStatusReady
+	}
+	h := NewSandboxSkillHandler(svc, nil)
+	h.pollInterval = 10 * time.Millisecond
+	h.maxDuration = 2 * time.Second
+	router := newSkillTestRouter(h)
 
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, httptest.NewRequest(http.MethodGet,
 		"/sandbox-configs/cfg-a/skills/skill-1/install-events", nil))
 
 	events := decodeSSEEvents(t, w.Body.String())
-	require.Len(t, events, 1)
-	require.Equal(t, true, events[0]["done"])
-	require.Equal(t, types.SkillStatusInstalling, events[0]["status"])
+	require.NotEmpty(t, events)
+	for _, event := range events[:len(events)-1] {
+		require.NotEqual(t, true, event["done"])
+	}
+	final := events[len(events)-1]
+	require.Equal(t, true, final["done"])
+	require.Equal(t, types.SkillStatusReady, final["status"])
+	require.NotEqual(t, types.SkillStatusInstalling, final["stage"])
 	require.True(t, svc.subscriptionClosed())
 }
 

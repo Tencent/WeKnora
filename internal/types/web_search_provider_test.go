@@ -100,3 +100,20 @@ func TestGetWebSearchProviderTypesIncludesBocha(t *testing.T) {
 		t.Fatalf("unexpected Bocha summary metadata: %+v", summary)
 	}
 }
+
+func TestGetWebSearchProviderTypesIncludesSerply(t *testing.T) {
+	var serply *WebSearchProviderTypeInfo
+	providerTypes := GetWebSearchProviderTypes()
+	for i := range providerTypes {
+		if providerTypes[i].ID == string(WebSearchProviderTypeSerply) {
+			serply = &providerTypes[i]
+			break
+		}
+	}
+	if serply == nil {
+		t.Fatal("Serply provider type not found")
+	}
+	if !serply.RequiresAPIKey || !serply.SupportsProxy || serply.RequiresEngineID || serply.RequiresBaseURL {
+		t.Fatalf("unexpected Serply metadata: %+v", serply)
+	}
+}

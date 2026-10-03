@@ -27,16 +27,16 @@ const { t } = useI18n()
 const content = computed(() => browserToolContent(props.event))
 </script>
 <style scoped>
-.browser-tool-details { min-width: 0; max-width: 100%; box-sizing: border-box; margin: 8px 0; padding: 12px 14px; border: 1px solid var(--td-component-border); border-radius: 8px; background: var(--td-bg-color-container); font-size: 13px; color: var(--td-text-color-secondary); overflow: hidden; }
+.browser-tool-details { min-width: 0; max-width: 100%; box-sizing: border-box; margin: 8px 0; padding: 12px 14px; border: 1px solid var(--td-component-border); border-radius: var(--app-radius-md); background: var(--td-bg-color-container); font-size: var(--app-text-md); color: var(--td-text-color-secondary); overflow: hidden; }
 .browser-tool-details p { margin: 0 0 8px; line-height: 1.6; overflow-wrap: anywhere; }
 .browser-tool-details p:last-child { margin-bottom: 0; }
 .browser-result-error, .browser-result-status.failed { color: var(--td-error-color); }
 .browser-page-title { color: var(--td-text-color-primary); font-weight: 500; }
-.browser-page-address, .browser-content-note { font-size: 12px; }
-.browser-result-image { display: block; max-width: 100%; max-height: 360px; object-fit: contain; margin: 8px 0; border-radius: 6px; }
+.browser-page-address, .browser-content-note { font-size: var(--app-text-sm); }
+.browser-result-image { display: block; max-width: 100%; max-height: 360px; object-fit: contain; margin: 8px 0; border-radius: var(--app-radius-sm); }
 .browser-result-tabs { margin: 8px 0; padding: 0; list-style: none; max-height: 300px; overflow: auto; }
 .browser-result-tabs li { display: grid; gap: 4px; padding: 8px 0; overflow-wrap: anywhere; }
 .browser-result-tabs strong { color: var(--td-text-color-primary); font-weight: 500; }
-.browser-result-tabs span { font-size: 12px; }
-.browser-page-content { margin: 8px 0 0; max-height: 300px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; line-height: 1.6; padding: 10px; border-radius: 6px; background: var(--td-bg-color-secondarycontainer); }
+.browser-result-tabs span { font-size: var(--app-text-sm); }
+.browser-page-content { margin: 8px 0 0; max-height: 300px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: var(--app-text-sm); line-height: 1.6; padding: 10px; border-radius: var(--app-radius-sm); background: var(--td-bg-color-secondarycontainer); }
 </style>

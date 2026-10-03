@@ -50,7 +50,7 @@ const openDialog = () => {
   height: 32px;
   padding: 0;
   border: 1px solid var(--td-component-stroke);
-  border-radius: 10px;
+  border-radius: var(--app-radius-lg);
   /* 用 container 背景而非透明，铃铛悬在内容区上方时和不同颜色的页面背景都能看清。 */
   background: var(--td-bg-color-container);
   color: var(--td-text-color-secondary);

@@ -18,6 +18,16 @@ const (
 
 	dockerSkillSnapshotLabel       = "com.weknora.sandbox.skill-snapshot"
 	dockerSkillSnapshotSourceLabel = "com.weknora.sandbox.skill-snapshot-source"
+
+	// DockerForkSnapshotRepo is the local image namespace for session-fork
+	// snapshots. It is deliberately separate from dockerSkillSnapshotRepo: the
+	// skill reaper prunes by the skill namespace and labels, and letting fork
+	// snapshots share them would have each reaper collecting the other's
+	// images.
+	DockerForkSnapshotRepo = "weknora-fork"
+
+	dockerForkSnapshotLabel       = "com.weknora.sandbox.fork-snapshot"
+	dockerForkSnapshotSourceLabel = "com.weknora.sandbox.fork-snapshot-source"
 )
 
 // CreateSnapshot commits the container's filesystem into a tagged local image.
@@ -34,25 +44,58 @@ func (c *DockerRemoteClient) CreateSnapshot(
 	if id == "" {
 		return RemoteSnapshotRef{}, dockerInvalidRequest("CreateSnapshot", "sandbox ID is required")
 	}
-	reference, err := dockerSkillSnapshotReference(name, id)
+	return c.commitSnapshot(
+		ctx, id, name,
+		dockerSkillSnapshotRepo,
+		"weknora skill snapshot",
+		dockerSkillSnapshotLabel,
+		dockerSkillSnapshotSourceLabel,
+		"CreateSnapshot",
+	)
+}
+
+// CreateForkSnapshot commits the container into the fork image namespace.
+// Same shape as CreateSnapshot; a different repo and labels keep the skill
+// reaper from collecting (or being collected by) session-fork images.
+func (c *DockerRemoteClient) CreateForkSnapshot(
+	ctx context.Context, sandboxID string, name string,
+) (RemoteSnapshotRef, error) {
+	id := strings.TrimSpace(sandboxID)
+	if id == "" {
+		return RemoteSnapshotRef{}, dockerInvalidRequest("CreateForkSnapshot", "sandbox ID is required")
+	}
+	return c.commitSnapshot(
+		ctx, id, name,
+		DockerForkSnapshotRepo,
+		"weknora fork snapshot",
+		dockerForkSnapshotLabel,
+		dockerForkSnapshotSourceLabel,
+		"CreateForkSnapshot",
+	)
+}
+
+func (c *DockerRemoteClient) commitSnapshot(
+	ctx context.Context,
+	sandboxID, name, repo, comment, label, sourceLabel, op string,
+) (RemoteSnapshotRef, error) {
+	reference, err := dockerSnapshotReference(repo, name, sandboxID, op)
 	if err != nil {
 		return RemoteSnapshotRef{}, err
 	}
 
-	committed, err := c.api.ContainerCommit(ctx, id, client.ContainerCommitOptions{
+	committed, err := c.api.ContainerCommit(ctx, sandboxID, client.ContainerCommitOptions{
 		Reference: reference,
-		Comment:   "weknora skill snapshot",
+		Comment:   comment,
 		Changes: []string{
-			"LABEL " + dockerSkillSnapshotLabel + "=true",
-			"LABEL " + dockerSkillSnapshotSourceLabel + "=" + id,
+			"LABEL " + label + "=true",
+			"LABEL " + sourceLabel + "=" + sandboxID,
 		},
 	})
 	if err != nil {
-		return RemoteSnapshotRef{}, dockerError("CreateSnapshot", err)
+		return RemoteSnapshotRef{}, dockerError(op, err)
 	}
 	if strings.TrimSpace(committed.ID) == "" {
-		return RemoteSnapshotRef{}, dockerInvalidRequest(
-			"CreateSnapshot", "provider returned an empty snapshot ID")
+		return RemoteSnapshotRef{}, dockerInvalidRequest(op, "provider returned an empty snapshot ID")
 	}
 	return RemoteSnapshotRef{
 		ID:    dockerCanonicalSnapshotID(reference),
@@ -86,7 +129,11 @@ func (c *DockerRemoteClient) DeleteSnapshot(ctx context.Context, snapshotID stri
 		}
 		return normalized
 	}
-	c.pruneDanglingSkillImages(ctx)
+	if dockerIsForkSnapshotRef(id) {
+		c.pruneDanglingForkImages(ctx)
+	} else {
+		c.pruneDanglingSkillImages(ctx)
+	}
 	return nil
 }
 
@@ -109,6 +156,29 @@ func (c *DockerRemoteClient) pruneDanglingSkillImages(ctx context.Context) {
 	}
 	for _, item := range listed.Items {
 		if !dockerImageIsSkillSnapshot(item) || dockerImageHasTag(item) {
+			continue
+		}
+		id := strings.TrimSpace(item.ID)
+		if id == "" {
+			continue
+		}
+		_, _ = c.api.ImageRemove(ctx, id, client.ImageRemoveOptions{PruneChildren: true})
+	}
+}
+
+// pruneDanglingForkImages drops untagged fork-snapshot images. Same rationale
+// as pruneDanglingSkillImages; the filter is the fork label so a skill delete
+// cannot sweep a live fork image and vice versa.
+func (c *DockerRemoteClient) pruneDanglingForkImages(ctx context.Context) {
+	listed, err := c.api.ImageList(ctx, client.ImageListOptions{
+		All:     true,
+		Filters: client.Filters{}.Add("label", dockerForkSnapshotLabel+"=true"),
+	})
+	if err != nil {
+		return
+	}
+	for _, item := range listed.Items {
+		if !dockerImageIsForkSnapshot(item) || dockerImageHasTag(item) {
 			continue
 		}
 		id := strings.TrimSpace(item.ID)
@@ -169,9 +239,33 @@ func dockerImageIsSkillSnapshot(item image.Summary) bool {
 	return false
 }
 
+func dockerImageIsForkSnapshot(item image.Summary) bool {
+	if item.Labels[dockerForkSnapshotLabel] == "true" {
+		return true
+	}
+	for _, tag := range item.RepoTags {
+		if dockerIsForkSnapshotRef(tag) {
+			return true
+		}
+	}
+	return false
+}
+
 func dockerIsSkillSnapshotRef(ref string) bool {
+	return dockerIsRepoSnapshotRef(ref, dockerSkillSnapshotRepo)
+}
+
+func dockerIsForkSnapshotRef(ref string) bool {
+	return dockerIsRepoSnapshotRef(ref, DockerForkSnapshotRepo)
+}
+
+func dockerIsLocalSnapshotRef(ref string) bool {
+	return dockerIsSkillSnapshotRef(ref) || dockerIsForkSnapshotRef(ref)
+}
+
+func dockerIsRepoSnapshotRef(ref, repo string) bool {
 	trimmed := strings.TrimSpace(ref)
-	prefix := dockerSkillSnapshotRepo + "/"
+	prefix := repo + "/"
 	if strings.HasPrefix(trimmed, prefix) {
 		return true
 	}
@@ -204,15 +298,15 @@ func dockerCanonicalSnapshotID(ref string) string {
 	return strings.TrimSuffix(trimmed, ":latest")
 }
 
-func dockerSkillSnapshotReference(name, sandboxID string) (string, error) {
+func dockerSnapshotReference(repo, name, sandboxID, op string) (string, error) {
 	base := dockerSanitizeImageName(name)
 	if base == "" {
 		base = dockerSanitizeImageName(sandboxID)
 	}
 	if base == "" {
-		return "", dockerInvalidRequest("CreateSnapshot", "snapshot name is required")
+		return "", dockerInvalidRequest(op, "snapshot name is required")
 	}
-	return dockerSkillSnapshotRepo + "/" + base, nil
+	return repo + "/" + base, nil
 }
 
 // dockerSanitizeImageName maps an install-generated snapshot name onto a
@@ -240,3 +334,5 @@ func dockerSanitizeImageName(raw string) string {
 	}
 	return out
 }
+
+var _ forkSnapshotCreator = (*DockerRemoteClient)(nil)

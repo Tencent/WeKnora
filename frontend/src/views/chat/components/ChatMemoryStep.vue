@@ -116,7 +116,7 @@ const memoryKindLabel = (kind: string) => {
 
 .memory-chevron {
   flex-shrink: 0;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   color: var(--agent-step-icon-color, var(--td-text-color-placeholder));
 }
 
@@ -134,7 +134,7 @@ const memoryKindLabel = (kind: string) => {
   }
 
   .memory-chevron {
-    font-size: 14px;
+    font-size: var(--app-text-base);
     color: currentColor;
   }
 }
@@ -163,7 +163,7 @@ const memoryKindLabel = (kind: string) => {
   border-radius: 3px;
   background: var(--td-bg-color-secondarycontainer);
   color: var(--td-text-color-placeholder);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 18px;
 }
 
@@ -181,11 +181,11 @@ const memoryKindLabel = (kind: string) => {
   outline: none;
   background: transparent;
   color: var(--td-text-color-placeholder);
-  font-size: 13px;
+  font-size: var(--app-text-md);
   line-height: 1;
   cursor: pointer;
   opacity: 0;
-  transition: opacity 0.15s ease, color 0.15s ease;
+  transition: opacity var(--app-motion-fast) ease, color var(--app-motion-fast) ease;
 
   &:focus-visible {
     opacity: 1;
