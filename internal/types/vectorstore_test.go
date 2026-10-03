@@ -85,8 +85,17 @@ func TestQdrantEnvTLSCompatibility(t *testing.T) {
 		value string
 		want  bool
 	}{
-		{"", false}, {"false", false}, {" FaLsE ", false}, {"0", false}, {" 0 ", false},
-		{"true", true}, {" TRUE ", true}, {"1", true}, {"yes", true}, {"off", true}, {" ", true},
+		{"", false},
+		{"false", false},
+		{" FaLsE ", false},
+		{"0", false},
+		{" 0 ", false},
+		{"true", true},
+		{" TRUE ", true},
+		{"1", true},
+		{"yes", true},
+		{"off", true},
+		{" ", true},
 	} {
 		t.Run(tt.value, func(t *testing.T) {
 			store := FindEnvVectorStore("qdrant", mockEnvLookup(map[string]string{

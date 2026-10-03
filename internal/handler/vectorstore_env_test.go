@@ -19,7 +19,9 @@ type envConnectionTestService struct {
 	called bool
 }
 
-func (s *envConnectionTestService) TestConnection(_ context.Context, engine types.RetrieverEngineType, config types.ConnectionConfig) (string, error) {
+func (s *envConnectionTestService) TestConnection(
+	_ context.Context, engine types.RetrieverEngineType, config types.ConnectionConfig,
+) (string, error) {
 	s.called, s.engine, s.config = true, engine, config
 	return "test-version", nil
 }
