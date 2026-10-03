@@ -214,8 +214,10 @@ func TestRerankWireFormatPerVendor(t *testing.T) {
 			wantPath: "/rerank", wantAuth: [2]string{"Api-Key", "k"}, wantVersion: "2026-07",
 			wantBody: map[string]any{
 				"model": "bge-reranker-v2-m3", "query": query,
-				"documents": []any{map[string]any{"text": "a"}, map[string]any{"text": "bbb"}, map[string]any{"text": "cc"}},
-				"top_n":     float64(3), "rank_fields": []any{"text"}, "return_documents": false,
+				"documents": []any{
+					map[string]any{"text": "a"}, map[string]any{"text": "bbb"}, map[string]any{"text": "cc"},
+				},
+				"top_n": float64(3), "rank_fields": []any{"text"}, "return_documents": false,
 				"parameters": map[string]any{"truncate": "END"},
 			},
 		},

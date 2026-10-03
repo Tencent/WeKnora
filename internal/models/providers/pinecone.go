@@ -12,7 +12,10 @@ import (
 //go:embed assets/pinecone.svg
 var pineconeIcon []byte
 
+// PineconeID identifies the Pinecone provider in the model catalog.
 const PineconeID = "pinecone"
+
+// PineconeRerankBaseURL is the default Pinecone Inference API endpoint.
 const PineconeRerankBaseURL = "https://api.pinecone.io"
 
 func newPineconeProvider() *Definition {

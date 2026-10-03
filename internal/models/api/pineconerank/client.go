@@ -11,13 +11,16 @@ import (
 	"github.com/Tencent/WeKnora/internal/models/api"
 )
 
+// Config holds the Pinecone endpoint and rerank request settings.
 type Config struct {
 	Endpoint api.Endpoint
 	Settings api.RerankSettings
 }
 
+// Client calls Pinecone's standalone rerank API.
 type Client struct{ cfg Config }
 
+// New creates a Pinecone rerank client.
 func New(cfg Config) *Client { return &Client{cfg: cfg} }
 
 func (c *Client) url() string {
@@ -88,7 +91,10 @@ type result struct {
 	Score *float64 `json:"score"`
 }
 
-func (c *Client) Rerank(ctx context.Context, query string, documents []string) ([]api.RerankResult, error) {
+// Rerank returns scores for the supplied documents in Pinecone's ranked order.
+func (c *Client) Rerank(
+	ctx context.Context, query string, documents []string,
+) ([]api.RerankResult, error) {
 	body, err := c.BuildRequestBody(query, documents)
 	if err != nil {
 		return nil, err
@@ -101,7 +107,9 @@ func (c *Client) Rerank(ctx context.Context, query string, documents []string) (
 		return nil, fmt.Errorf("pinecone rerank response has no data array")
 	}
 	if len(*decoded.Data) != len(documents) {
-		return nil, fmt.Errorf("pinecone rerank returned %d scores for %d documents", len(*decoded.Data), len(documents))
+		return nil, fmt.Errorf(
+			"pinecone rerank returned %d scores for %d documents", len(*decoded.Data), len(documents),
+		)
 	}
 	out := make([]api.RerankResult, 0, len(*decoded.Data))
 	seen := make([]bool, len(documents))
