@@ -17,10 +17,12 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/bedrockagentruntime/types"
 )
 
+// DefaultRegion is the default AWS region for Bedrock reranking.
 const DefaultRegion = "us-west-2"
 
 var regionPattern = regexp.MustCompile(`^[a-z]{2}(-[a-z]+)+-[0-9]+$`)
 
+// Config holds the Bedrock credentials, region, model, and optional SDK overrides.
 type Config struct {
 	AccessKey, SecretKey, Region, Model string
 	// BaseURL is only for an explicit custom endpoint. Empty lets the SDK
@@ -31,15 +33,17 @@ type Config struct {
 	Client bedrockagentruntime.RerankAPIClient
 }
 
+// Client calls the Bedrock Agent Runtime Rerank action.
 type Client struct {
 	modelARN string
 	client   bedrockagentruntime.RerankAPIClient
 }
 
+// New creates a Bedrock rerank client with the supplied AWS credentials.
 func New(cfg Config) (*Client, error) {
 	accessKey, secretKey := strings.TrimSpace(cfg.AccessKey), strings.TrimSpace(cfg.SecretKey)
 	if accessKey == "" || secretKey == "" {
-		return nil, fmt.Errorf("Bedrock rerank requires AWS Access Key ID and Secret Access Key")
+		return nil, fmt.Errorf("bedrock rerank requires AWS Access Key ID and Secret Access Key")
 	}
 	region := strings.TrimSpace(cfg.Region)
 	if region == "" {
@@ -71,7 +75,7 @@ func New(cfg Config) (*Client, error) {
 
 func modelARN(model, region string) (string, error) {
 	if model == "" {
-		return "", fmt.Errorf("Bedrock rerank model is required")
+		return "", fmt.Errorf("bedrock rerank model is required")
 	}
 	if !strings.HasPrefix(model, "arn:") {
 		return "arn:aws:bedrock:" + region + "::foundation-model/" + model, nil
@@ -79,11 +83,12 @@ func modelARN(model, region string) (string, error) {
 	parts := strings.SplitN(model, ":", 6)
 	if len(parts) != 6 || parts[1] != "aws" || parts[2] != "bedrock" || parts[3] != region || parts[4] != "" ||
 		!strings.HasPrefix(parts[5], "foundation-model/") || strings.TrimPrefix(parts[5], "foundation-model/") == "" {
-		return "", fmt.Errorf("Bedrock rerank model ARN must name a foundation model in region %s", region)
+		return "", fmt.Errorf("bedrock rerank model ARN must name a foundation model in region %s", region)
 	}
 	return model, nil
 }
 
+// Rerank scores the documents using Bedrock and returns results in ranked order.
 func (c *Client) Rerank(ctx context.Context, query string, documents []string) ([]api.RerankResult, error) {
 	if len(documents) == 0 {
 		return nil, nil

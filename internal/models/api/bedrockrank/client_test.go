@@ -24,9 +24,11 @@ type stub struct {
 	err   error
 }
 
-func (s *stub) Rerank(_ context.Context, input *bedrockagentruntime.RerankInput, _ ...func(*bedrockagentruntime.Options)) (*bedrockagentruntime.RerankOutput, error) {
-	copy := *input
-	s.calls = append(s.calls, &copy)
+func (s *stub) Rerank(
+	_ context.Context, input *bedrockagentruntime.RerankInput, _ ...func(*bedrockagentruntime.Options),
+) (*bedrockagentruntime.RerankOutput, error) {
+	inputCopy := *input
+	s.calls = append(s.calls, &inputCopy)
 	if s.err != nil {
 		return nil, s.err
 	}
@@ -73,7 +75,9 @@ func TestBuildsBedrockRequestAndMapsOriginalIndexes(t *testing.T) {
 	for i, source := range in.Sources {
 		assert.Equal(t, types.RerankSourceTypeInline, source.Type)
 		assert.Equal(t, types.RerankDocumentTypeText, source.InlineDocumentSource.Type)
-		assert.Equal(t, []string{"same", "other", "same"}[i], aws.ToString(source.InlineDocumentSource.TextDocument.Text))
+		assert.Equal(t,
+			[]string{"same", "other", "same"}[i], aws.ToString(source.InlineDocumentSource.TextDocument.Text),
+		)
 	}
 	config := in.RerankingConfiguration
 	assert.Equal(t, types.RerankingConfigurationTypeBedrockRerankingModel, config.Type)
@@ -106,8 +110,14 @@ func TestRejectsBadConfiguration(t *testing.T) {
 		{"missing secret", Config{AccessKey: "k", Model: "m"}, "Secret Access Key"},
 		{"invalid region", Config{AccessKey: "k", SecretKey: "s", Region: "evil.example", Model: "m"}, "invalid AWS region"},
 		{"missing model", Config{AccessKey: "k", SecretKey: "s"}, "model is required"},
-		{"ARN region mismatch", Config{AccessKey: "k", SecretKey: "s", Region: "us-west-2", Model: "arn:aws:bedrock:us-east-1::foundation-model/amazon.rerank-v1:0"}, "region us-west-2"},
-		{"ARN has account", Config{AccessKey: "k", SecretKey: "s", Region: "us-west-2", Model: "arn:aws:bedrock:us-west-2:123456789012:foundation-model/amazon.rerank-v1:0"}, "foundation model"},
+		{"ARN region mismatch", Config{
+			AccessKey: "k", SecretKey: "s", Region: "us-west-2",
+			Model: "arn:aws:bedrock:us-east-1::foundation-model/amazon.rerank-v1:0",
+		}, "region us-west-2"},
+		{"ARN has account", Config{
+			AccessKey: "k", SecretKey: "s", Region: "us-west-2",
+			Model: "arn:aws:bedrock:us-west-2:123456789012:foundation-model/amazon.rerank-v1:0",
+		}, "foundation model"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := New(tc.cfg)
@@ -124,10 +134,18 @@ func TestRejectsMalformedAndIncompleteResponses(t *testing.T) {
 		docs          []string
 	}{
 		{"nil response", "empty response", []*bedrockagentruntime.RerankOutput{nil}, []string{"a"}},
-		{"missing score", "missing index or relevanceScore", []*bedrockagentruntime.RerankOutput{{Results: []types.RerankResult{{Index: aws.Int32(0)}}}}, []string{"a"}},
-		{"out of range", "out of range", []*bedrockagentruntime.RerankOutput{{Results: []types.RerankResult{scored(9, 0.5)}}}, []string{"a"}},
-		{"duplicate index", "duplicate index", []*bedrockagentruntime.RerankOutput{{Results: []types.RerankResult{scored(0, 0.5), scored(0, 0.4)}}}, []string{"a", "b"}},
-		{"incomplete", "returned 1 scores", []*bedrockagentruntime.RerankOutput{{Results: []types.RerankResult{scored(0, 0.5)}}}, []string{"a", "b"}},
+		{"missing score", "missing index or relevanceScore", []*bedrockagentruntime.RerankOutput{{
+			Results: []types.RerankResult{{Index: aws.Int32(0)}},
+		}}, []string{"a"}},
+		{"out of range", "out of range", []*bedrockagentruntime.RerankOutput{{
+			Results: []types.RerankResult{scored(9, 0.5)},
+		}}, []string{"a"}},
+		{"duplicate index", "duplicate index", []*bedrockagentruntime.RerankOutput{{
+			Results: []types.RerankResult{scored(0, 0.5), scored(0, 0.4)},
+		}}, []string{"a", "b"}},
+		{"incomplete", "returned 1 scores", []*bedrockagentruntime.RerankOutput{{
+			Results: []types.RerankResult{scored(0, 0.5)},
+		}}, []string{"a", "b"}},
 		{"repeated token", "repeated pagination token", []*bedrockagentruntime.RerankOutput{
 			{Results: []types.RerankResult{scored(0, 0.5)}, NextToken: aws.String("same")},
 			{NextToken: aws.String("same")},
@@ -173,7 +191,9 @@ func TestSDKSignsTheAgentRuntimeWireFormat(t *testing.T) {
 	assert.NotContains(t, authorization, "secret")
 	assert.Equal(t, "q", body["queries"].([]any)[0].(map[string]any)["textQuery"].(map[string]any)["text"])
 	assert.Equal(t, "INLINE", body["sources"].([]any)[0].(map[string]any)["type"])
-	assert.Equal(t, float64(2), body["rerankingConfiguration"].(map[string]any)["bedrockRerankingConfiguration"].(map[string]any)["numberOfResults"])
+	config := body["rerankingConfiguration"].(map[string]any)
+	bedrockConfig := config["bedrockRerankingConfiguration"].(map[string]any)
+	assert.Equal(t, float64(2), bedrockConfig["numberOfResults"])
 }
 
 type roundTripFunc func(*http.Request) (*http.Response, error)

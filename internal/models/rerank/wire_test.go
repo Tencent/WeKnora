@@ -115,7 +115,8 @@ func answer(r *http.Request, body map[string]any) string {
 	case strings.HasPrefix(r.Header.Get("Authorization"), "AWS4-HMAC-SHA256"): // Bedrock
 		sources := body["sources"].([]any)
 		for i := len(sources) - 1; i >= 0; i-- {
-			text := sources[i].(map[string]any)["inlineDocumentSource"].(map[string]any)["textDocument"].(map[string]any)["text"].(string)
+			source := sources[i].(map[string]any)["inlineDocumentSource"].(map[string]any)
+			text := source["textDocument"].(map[string]any)["text"].(string)
 			parts = append(parts, fmt.Sprintf(`{"index":%d,"relevanceScore":%v}`, i, probability(text)))
 		}
 		return `{"results":[` + strings.Join(parts, ",") + `]}`
@@ -280,15 +281,32 @@ func TestRerankWireFormatPerVendor(t *testing.T) {
 			wantBody: map[string]any{
 				"queries": []any{map[string]any{"type": "TEXT", "textQuery": map[string]any{"text": query}}},
 				"sources": []any{
-					map[string]any{"type": "INLINE", "inlineDocumentSource": map[string]any{"type": "TEXT", "textDocument": map[string]any{"text": "a"}}},
-					map[string]any{"type": "INLINE", "inlineDocumentSource": map[string]any{"type": "TEXT", "textDocument": map[string]any{"text": "bbb"}}},
-					map[string]any{"type": "INLINE", "inlineDocumentSource": map[string]any{"type": "TEXT", "textDocument": map[string]any{"text": "cc"}}},
+					map[string]any{
+						"type": "INLINE",
+						"inlineDocumentSource": map[string]any{
+							"type": "TEXT", "textDocument": map[string]any{"text": "a"},
+						},
+					},
+					map[string]any{
+						"type": "INLINE",
+						"inlineDocumentSource": map[string]any{
+							"type": "TEXT", "textDocument": map[string]any{"text": "bbb"},
+						},
+					},
+					map[string]any{
+						"type": "INLINE",
+						"inlineDocumentSource": map[string]any{
+							"type": "TEXT", "textDocument": map[string]any{"text": "cc"},
+						},
+					},
 				},
 				"rerankingConfiguration": map[string]any{
 					"type": "BEDROCK_RERANKING_MODEL",
 					"bedrockRerankingConfiguration": map[string]any{
-						"modelConfiguration": map[string]any{"modelArn": "arn:aws:bedrock:us-west-2::foundation-model/amazon.rerank-v1:0"},
-						"numberOfResults":    float64(3),
+						"modelConfiguration": map[string]any{
+							"modelArn": "arn:aws:bedrock:us-west-2::foundation-model/amazon.rerank-v1:0",
+						},
+						"numberOfResults": float64(3),
 					},
 				},
 			},
