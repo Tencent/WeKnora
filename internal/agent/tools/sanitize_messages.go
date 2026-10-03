@@ -22,7 +22,7 @@ func SanitizeMessages(messages []chat.Message) []chat.Message {
 	for i, msg := range messages {
 		// Skip empty non-system messages (some providers reject these)
 		if msg.Content == "" && msg.Role != "system" &&
-			msg.Role != "tool" && len(msg.ToolCalls) == 0 {
+			msg.Role != "tool" && len(msg.ToolCalls) == 0 && len(msg.Images) == 0 && len(msg.MultiContent) == 0 {
 			continue
 		}
 
@@ -41,6 +41,16 @@ func SanitizeMessages(messages []chat.Message) []chat.Message {
 				// write the call it wanted to make as text.
 				merged := prev
 				merged.Content += "\n\n" + msg.Content
+				if len(prev.Images)+len(msg.Images)+len(prev.MultiContent)+len(msg.MultiContent) > 0 {
+					// Preserve each message's image/text order in one representation.
+					// Providers prefer MultiContent over Content; retaining only the
+					// latter would lose the appended text and images on the wire.
+					parts := appendSanitizedContent(nil, prev)
+					parts = append(parts, chat.MessageContentPart{Type: "text", Text: "\n\n"})
+					merged.MultiContent = appendSanitizedContent(parts, msg)
+					merged.Content = ""
+					merged.Images = nil
+				}
 				if len(msg.ToolCalls) > 0 {
 					// Copy instead of appending in place: prev may share its
 					// backing array with the caller's slice.
@@ -70,6 +80,24 @@ func SanitizeMessages(messages []chat.Message) []chat.Message {
 	}
 
 	return result
+}
+
+// appendSanitizedContent follows the providers' preference for MultiContent,
+// expanding the legacy Content/Images representation only when needed.
+// The destination is separate from the input messages' backing arrays.
+func appendSanitizedContent(parts []chat.MessageContentPart, msg chat.Message) []chat.MessageContentPart {
+	if len(msg.MultiContent) > 0 {
+		return append(parts, msg.MultiContent...)
+	}
+	for _, url := range msg.Images {
+		parts = append(parts, chat.MessageContentPart{
+			Type: "image_url", ImageURL: &chat.ImageURL{URL: url, Detail: "auto"},
+		})
+	}
+	if msg.Content != "" {
+		parts = append(parts, chat.MessageContentPart{Type: "text", Text: msg.Content})
+	}
+	return parts
 }
 
 // hasMatchingToolCall checks if any preceding assistant message has a tool call with the given ID.
