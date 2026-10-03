@@ -1392,6 +1392,20 @@
         "source": "https://learn.microsoft.com/azure/ai-foundry/openai/how-to/reasoning"
       }
     ],
+    "bedrock": [
+      {
+        "id": "amazon.rerank-v1:0",
+        "name": "Amazon Rerank 1.0",
+        "type": "Rerank",
+        "source": "https://docs.aws.amazon.com/bedrock/latest/userguide/rerank-supported.html"
+      },
+      {
+        "id": "cohere.rerank-v3-5:0",
+        "name": "Cohere Rerank 3.5 (Bedrock)",
+        "type": "Rerank",
+        "source": "https://docs.aws.amazon.com/bedrock/latest/userguide/rerank-supported.html"
+      }
+    ],
     "deepseek": [
       {
         "id": "deepseek-v4-pro",

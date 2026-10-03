@@ -112,6 +112,14 @@ func answer(r *http.Request, body map[string]any) string {
 			parts = append(parts, fmt.Sprintf(`{"index":%d,"relevance_score":%v}`, i, probability(docs[i])))
 		}
 		return `{"output":{"results":[` + strings.Join(parts, ",") + `]}}`
+	case strings.HasPrefix(r.Header.Get("Authorization"), "AWS4-HMAC-SHA256"): // Bedrock
+		sources := body["sources"].([]any)
+		for i := len(sources) - 1; i >= 0; i-- {
+			source := sources[i].(map[string]any)["inlineDocumentSource"].(map[string]any)
+			text := source["textDocument"].(map[string]any)["text"].(string)
+			parts = append(parts, fmt.Sprintf(`{"index":%d,"relevanceScore":%v}`, i, probability(text)))
+		}
+		return `{"results":[` + strings.Join(parts, ",") + `]}`
 	default: // Cohere
 		docs := texts(body["documents"])
 		score := probability
@@ -264,6 +272,43 @@ func TestRerankWireFormatPerVendor(t *testing.T) {
 					map[string]any{"text": "a"}, map[string]any{"text": "bbb"}, map[string]any{"text": "cc"},
 				},
 				"truncate": "END",
+			},
+		},
+		{
+			name: "bedrock uses Agent Runtime SigV4 and inline text sources", provider: "bedrock",
+			model: "amazon.rerank-v1:0", appSecret: "secret-test",
+			wantPath: "/rerank", wantAuth: [2]string{"Authorization", "AWS4-HMAC-SHA256 Credential=k/"},
+			wantBody: map[string]any{
+				"queries": []any{map[string]any{"type": "TEXT", "textQuery": map[string]any{"text": query}}},
+				"sources": []any{
+					map[string]any{
+						"type": "INLINE",
+						"inlineDocumentSource": map[string]any{
+							"type": "TEXT", "textDocument": map[string]any{"text": "a"},
+						},
+					},
+					map[string]any{
+						"type": "INLINE",
+						"inlineDocumentSource": map[string]any{
+							"type": "TEXT", "textDocument": map[string]any{"text": "bbb"},
+						},
+					},
+					map[string]any{
+						"type": "INLINE",
+						"inlineDocumentSource": map[string]any{
+							"type": "TEXT", "textDocument": map[string]any{"text": "cc"},
+						},
+					},
+				},
+				"rerankingConfiguration": map[string]any{
+					"type": "BEDROCK_RERANKING_MODEL",
+					"bedrockRerankingConfiguration": map[string]any{
+						"modelConfiguration": map[string]any{
+							"modelArn": "arn:aws:bedrock:us-west-2::foundation-model/amazon.rerank-v1:0",
+						},
+						"numberOfResults": float64(3),
+					},
+				},
 			},
 		},
 		{
