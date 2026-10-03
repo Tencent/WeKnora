@@ -2172,12 +2172,7 @@ func (h *InitializationHandler) CheckRerankModel(c *gin.Context) {
 	}
 
 	model := h.buildTestModel(&req, types.ModelTypeRerank, types.ModelSourceRemote)
-	// LKEAP and Volcengine rerank sign with a key pair stored on the row
-	// itself, not with the tenant's WeKnora Cloud credentials.
-	if p := model.Parameters.Provider; p == providers.LkeapID || p == providers.VolcengineID {
-		appID = ""
-		appSecret = decryptModelAppSecret(model.Parameters.AppSecret)
-	}
+	appID, appSecret = rerankTestCredentials(model, appID, appSecret)
 	available, message := h.checkRerankModelConnection(ctx, model, appID, appSecret)
 
 	logger.Infof(ctx, "Rerank model check completed, available: %v, message: %s", available, message)
@@ -2189,6 +2184,21 @@ func (h *InitializationHandler) CheckRerankModel(c *gin.Context) {
 			"message":   message,
 		},
 	})
+}
+
+// Signed rerank vendors use the model row's own signing key, never the
+// tenant-level WeKnora Cloud secret. Keep this shared with the test-connection
+// path so a successful production call does not disagree with its test button.
+func rerankTestCredentials(model *types.Model, tenantAppID, tenantAppSecret string) (string, string) {
+	if model == nil {
+		return tenantAppID, tenantAppSecret
+	}
+	switch model.Parameters.Provider {
+	case providers.LkeapID, providers.VolcengineID, providers.BedrockID:
+		return "", decryptModelAppSecret(model.Parameters.AppSecret)
+	default:
+		return tenantAppID, tenantAppSecret
+	}
 }
 
 // CheckASRModel godoc

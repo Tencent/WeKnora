@@ -201,6 +201,8 @@ func newReranker(config *RerankerConfig) (Reranker, error) {
 		client = dashscoperank.New(dashscoperank.Config{Endpoint: endpoint, Settings: resolved.Rerank})
 	case api.RerankNIM:
 		client = nimrerank.New(nimrerank.Config{Endpoint: endpoint, Settings: resolved.Rerank})
+	case api.RerankBedrock:
+		client, err = newBedrockClient(config, resolved)
 	case api.RerankTencentLKEAP:
 		client, err = newLKEAPClient(config, resolved)
 	case api.RerankVolcengineKnowledge:

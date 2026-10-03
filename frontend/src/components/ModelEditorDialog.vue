@@ -834,7 +834,7 @@ const visibleExtraFields = computed<ModelProviderExtraField[]>(() =>
  */
 const isSecretExtraField = (field: ModelProviderExtraField) => field.secret === true || field.type === 'password'
 // Only one credential slot (app_secret) exists per model, so the first such
-// field wins; vendors today declare at most one (LKEAP / Volcengine rerank).
+// field wins; vendors today declare at most one (LKEAP / Volcengine / Bedrock rerank).
 const secretExtraField = computed<ModelProviderExtraField | undefined>(() =>
   visibleExtraFields.value.find(isSecretExtraField),
 )
