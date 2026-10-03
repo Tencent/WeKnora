@@ -106,6 +106,19 @@ func answer(r *http.Request, body map[string]any) string {
 			parts = append(parts, fmt.Sprintf(`{"index":%d,"logit":%v}`, i, logit(docs[i])))
 		}
 		return `{"rankings":[` + strings.Join(parts, ",") + `]}`
+	case body["texts"] != nil: // Text Embeddings Inference
+		docs := texts(body["texts"])
+		indices := make([]int, len(docs))
+		for i := range indices {
+			indices[i] = i
+		}
+		sort.SliceStable(indices, func(i, j int) bool {
+			return utf8.RuneCountInString(docs[indices[i]]) > utf8.RuneCountInString(docs[indices[j]])
+		})
+		for _, i := range indices {
+			parts = append(parts, fmt.Sprintf(`{"index":%d,"score":%v}`, i, probability(docs[i])))
+		}
+		return `[` + strings.Join(parts, ",") + `]`
 	case strings.Contains(r.URL.Path, "/text-rerank"): // DashScope
 		docs := texts(body["input"].(map[string]any)["documents"])
 		for i := len(docs) - 1; i >= 0; i-- {
@@ -220,6 +233,11 @@ func TestRerankWireFormatPerVendor(t *testing.T) {
 			name: "generic", provider: "generic", model: "bge-reranker-v2-m3", base: "/v1",
 			wantPath: "/v1/rerank", wantAuth: [2]string{"Authorization", "Bearer k"},
 			wantBody: cohere("bge-reranker-v2-m3", three, nil),
+		},
+		{
+			name: "Hugging Face TEI", provider: "huggingface_tei", model: "BAAI/bge-reranker-large",
+			wantPath: "/rerank", wantAuth: [2]string{"Authorization", "Bearer k"},
+			wantBody: map[string]any{"query": query, "texts": anyStrings(three), "raw_scores": false},
 		},
 		{
 			name: "novita", provider: "novita", model: "baai/bge-reranker-v2-m3", base: "/openai/v1",
