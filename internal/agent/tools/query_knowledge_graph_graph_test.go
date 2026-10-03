@@ -65,7 +65,7 @@ func TestQueryKnowledgeGraph_QueriesTheGraph(t *testing.T) {
 			Enabled: true, Nodes: []*types.GraphNode{{Name: "技术"}},
 		}},
 		results: []*types.SearchResult{{ID: "c-text", KnowledgeID: "doc", Content: "text hit", Score: 0.9}},
-	}).WithGraph(graphRepo, chunkRepo)
+	}).WithGraph(graphRepo, chunkRepo).WithKnowledgeScope(liveGraphEvidenceDocuments())
 
 	args, err := json.Marshal(QueryKnowledgeGraphInput{KnowledgeBaseIDs: []string{"kb-1"}, Query: "Docker Kubernetes"})
 	require.NoError(t, err)
@@ -115,7 +115,12 @@ func TestQueryKnowledgeGraph_ScopesRelationsToDocuments(t *testing.T) {
 		err: assert.AnError,
 	}, types.SearchTargets{{
 		Type: types.SearchTargetTypeKnowledge, KnowledgeBaseID: "kb-1", KnowledgeIDs: []string{"doc-a"},
-	}}).WithGraph(graphRepo, chunkRepo)
+	}}).WithGraph(graphRepo, chunkRepo).WithKnowledgeScope(&graphEvidenceKnowledgeService{
+		documents: map[string]*types.Knowledge{
+			"doc-a": {ID: "doc-a", Title: "doc-a", KnowledgeBaseID: "kb-1"},
+			"doc-b": {ID: "doc-b", Title: "doc-b", KnowledgeBaseID: "kb-1"},
+		},
+	})
 
 	args, err := json.Marshal(QueryKnowledgeGraphInput{KnowledgeBaseIDs: []string{"kb-1"}, Query: "Docker"})
 	require.NoError(t, err)
