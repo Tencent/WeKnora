@@ -18,13 +18,13 @@ var expectedIDs = []string{
 	"aliyun", "zhipu", "volcengine", "hunyuan", "siliconflow", "deepseek",
 	"minimax", "moonshot", "mimo", "modelscope", "qianfan", "qiniu", "longcat", "lkeap",
 	"openai", "azure_openai", "anthropic", "gemini",
-	"openrouter", "litellm", "requesty",
+	"openrouter", "litellm", "requesty", "pinecone",
 	"jina", "nvidia", "novita", "gpustack",
 }
 
 func TestAllVendorsRegistered(t *testing.T) {
-	if len(expectedIDs) != 27 {
-		t.Fatalf("expected 27 vendor ids in the spec, got %d", len(expectedIDs))
+	if len(expectedIDs) != 28 {
+		t.Fatalf("expected 28 vendor ids in the spec, got %d", len(expectedIDs))
 	}
 	for _, id := range expectedIDs {
 		v, ok := modelruntime.Get(id)

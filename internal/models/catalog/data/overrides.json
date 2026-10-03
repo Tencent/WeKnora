@@ -1535,6 +1535,24 @@
         }
       }
     ],
+    "pinecone": [
+      {
+        "id": "bge-reranker-v2-m3",
+        "type": "Rerank",
+        "compat": {
+          "max_documents": 100,
+          "truncate": "END"
+        }
+      },
+      {
+        "id": "pinecone-rerank-v0",
+        "type": "Rerank",
+        "compat": {
+          "max_documents": 100,
+          "truncate": "END"
+        }
+      }
+    ],
     "qianfan": [
       {
         "id": "ernie-x1-turbo-32k",

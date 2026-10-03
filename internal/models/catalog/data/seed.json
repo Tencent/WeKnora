@@ -3351,6 +3351,22 @@
         "source": "https://openrouter.ai/docs/api/api-reference/stt/create-transcription"
       }
     ],
+    "pinecone": [
+      {
+        "id": "bge-reranker-v2-m3",
+        "name": "BGE Reranker v2 M3 (Pinecone)",
+        "type": "Rerank",
+        "context_window": 1024,
+        "source": "https://docs.pinecone.io/reference/api/2025-10/inference/list_models"
+      },
+      {
+        "id": "pinecone-rerank-v0",
+        "name": "Pinecone Rerank v0",
+        "type": "Rerank",
+        "context_window": 512,
+        "source": "https://docs.pinecone.io/reference/api/2025-10/inference/list_models"
+      }
+    ],
     "qianfan": [
       {
         "id": "ernie-5.0-thinking-preview",
