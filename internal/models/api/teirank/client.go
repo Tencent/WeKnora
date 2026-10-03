@@ -12,13 +12,16 @@ import (
 	"github.com/Tencent/WeKnora/internal/models/api"
 )
 
+// Config supplies the endpoint and wire-level settings for a TEI reranker.
 type Config struct {
 	Endpoint api.Endpoint
 	Settings api.RerankSettings
 }
 
+// Client sends rerank requests to a Text Embeddings Inference server.
 type Client struct{ cfg Config }
 
+// New creates a TEI rerank client for the supplied endpoint.
 func New(cfg Config) *Client { return &Client{cfg: cfg} }
 
 func (c *Client) url() string {
@@ -52,6 +55,7 @@ func (c *Client) BuildRequestBody(query string, documents []string) map[string]a
 	}
 }
 
+// Rerank scores documents with TEI and preserves their original indexes.
 func (c *Client) Rerank(ctx context.Context, query string, documents []string) ([]api.RerankResult, error) {
 	var decoded []rank
 	if err := c.cfg.Endpoint.PostJSON(ctx, c.url(), c.BuildRequestBody(query, documents), &decoded); err != nil {

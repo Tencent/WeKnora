@@ -29,7 +29,9 @@ func TestOpenAPIRankExampleAndNativeRequest(t *testing.T) {
 	}))
 	defer server.Close()
 
-	c := New(Config{Endpoint: api.Endpoint{BaseURL: server.URL, Model: "BAAI/bge-reranker-large", Auth: api.BearerAuth("")}})
+	c := New(Config{Endpoint: api.Endpoint{
+		BaseURL: server.URL, Model: "BAAI/bge-reranker-large", Auth: api.BearerAuth(""),
+	}})
 	got, err := c.Rerank(context.Background(), "What is Deep Learning?", []string{"Deep Learning is ..."})
 	require.NoError(t, err)
 	assert.Equal(t, "/rerank", path)

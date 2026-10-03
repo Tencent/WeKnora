@@ -1,4 +1,5 @@
-// Hugging Face Text Embeddings Inference serves a model chosen at startup.
+// Package providers includes Hugging Face Text Embeddings Inference, which
+// serves a model chosen at startup.
 // Its native rerank route is POST /rerank with query/texts and a bare array
 // response; it does not accept a model field or use the OpenAI /v1 prefix.
 // https://huggingface.co/docs/text-embeddings-inference/quick_tour#re-rankers
@@ -13,6 +14,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
+// HuggingFaceTEIID is the provider ID for self-hosted TEI rerank models.
 const HuggingFaceTEIID = "huggingface_tei"
 
 func newHuggingFaceTEIProvider() *Definition {
