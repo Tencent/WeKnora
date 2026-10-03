@@ -46,11 +46,23 @@ func TestSearchNodeIntegration(t *testing.T) {
 		       (b1)-[:RELATED_TO]->(a1), (a1)-[:SELF]->(a1)
 	`, nil, neo4j.EagerResultTransformer)
 	require.NoError(t, err)
+	t.Run("deduplicate before the row cap", func(t *testing.T) {
+		query, params := graphSearchCypher(label, []string{"Acme", "Shanghai"})
+		params["maxRows"] = 5 // Four stored edges; duplicate endpoint matches must not fill this fifth slot.
+		result, queryErr := neo4j.ExecuteQuery(ctx, driver, query, params, neo4j.EagerResultTransformer)
+		require.NoError(t, queryErr)
+		require.Len(t, result.Records, 4)
+		params["maxRows"] = 1
+		result, queryErr = neo4j.ExecuteQuery(ctx, driver, query, params, neo4j.EagerResultTransformer)
+		require.NoError(t, queryErr)
+		require.Len(t, result.Records, 1)
+	})
 	for _, seeds := range [][]string{{"Shanghai"}, {"Acme"}, {"Acme", "Shanghai"}} {
 		t.Run(fmt.Sprint(seeds), func(t *testing.T) {
 			graph, searchErr := repo.SearchNode(ctx, namespace, seeds)
 			require.NoError(t, searchErr)
 			require.Len(t, graph.Node, 4)
+			assert.Equal(t, seeds[0], graph.Node[0].Name, "the best seed still supplies evidence first")
 			var sources, attributes []string
 			for _, node := range graph.Node {
 				if node.Name == "Acme" {
