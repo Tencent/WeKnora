@@ -22,6 +22,10 @@ func TestGraphSearchCypherBoundsAndOrders(t *testing.T) {
 		"EXISTS { (n)--() }",
 		"CASE WHEN n.name IN $nodes THEN 0 ELSE 1 END AS seed_rank",
 		"ORDER BY seed_rank, name_len, name",
+		"WITH collect(n) AS seeds",
+		"UNWIND range(0, size(seeds) - 1) AS seed_index",
+		"WHERE NOT m IN earlier_seeds",
+		"ORDER BY seed_index, elementId(r)",
 		"LIMIT $maxSeedNodes",
 		"LIMIT $maxRows",
 	} {
@@ -30,16 +34,16 @@ func TestGraphSearchCypherBoundsAndOrders(t *testing.T) {
 		}
 	}
 
-	// Both caps and the choice of the best seed per relationship use the same key.
-	if got := strings.Count(query, "ORDER BY seed_rank, name_len, name"); got != 3 {
-		t.Errorf("ORDER BY applied %d time(s), want 3 (caps and relationship grouping):\n%s", got, query)
+	// Collect only the capped seeds, never the unbounded relationship candidates.
+	collectAt := strings.Index(query, "WITH collect(n) AS seeds")
+	if collectAt < strings.Index(query, "LIMIT $maxSeedNodes") || strings.Count(query, "collect(") != 1 {
+		t.Errorf("only the bounded seed list may be collected:\n%s", query)
 	}
-	groupAt := strings.Index(query, "WITH r, head(collect(")
-	if groupAt < 0 || groupAt > strings.Index(query, "LIMIT $maxRows") {
-		t.Errorf("physical relationships must be deduplicated before the row cap:\n%s", query)
-	}
-	if strings.Count(query, "name, n.kg, elementId(n)") != 3 {
+	if !strings.Contains(query, "name, n.kg, elementId(n)") {
 		t.Errorf("same-named document instances need stable tie breakers:\n%s", query)
+	}
+	if strings.Index(query, "WHERE NOT m IN earlier_seeds") > strings.Index(query, "LIMIT $maxRows") {
+		t.Errorf("duplicate endpoint matches must be removed before the row cap:\n%s", query)
 	}
 	if strings.Index(query, "LIMIT $maxSeedNodes") > strings.Index(query, "LIMIT $maxRows") {
 		t.Errorf("the seed cap must be applied before the row cap:\n%s", query)
@@ -116,12 +120,24 @@ func TestDecodeGraphSearchDirectionAndIdentity(t *testing.T) {
 	}{
 		{"outgoing", []*neo4j.Record{graphTestRecord(a, b, r)}, 2, "a", [][3]string{{"r", "a", "b"}}},
 		{"incoming", []*neo4j.Record{graphTestRecord(b, a, r)}, 2, "b", [][3]string{{"r", "a", "b"}}},
-		{"both seeds", []*neo4j.Record{graphTestRecord(b, a, r), graphTestRecord(a, b, r)},
-			2, "b", [][3]string{{"r", "a", "b"}}},
-		{"bidirectional", []*neo4j.Record{graphTestRecord(a, b, r), graphTestRecord(a, b, reverse)},
-			2, "a", [][3]string{{"r", "a", "b"}, {"reverse", "b", "a"}}},
-		{"self loop", []*neo4j.Record{graphTestRecord(a, a, self), graphTestRecord(a, a, self)},
-			1, "a", [][3]string{{"self", "a", "a"}}},
+		{
+			"both seeds",
+			[]*neo4j.Record{graphTestRecord(b, a, r), graphTestRecord(a, b, r)},
+			2, "b",
+			[][3]string{{"r", "a", "b"}},
+		},
+		{
+			"bidirectional",
+			[]*neo4j.Record{graphTestRecord(a, b, r), graphTestRecord(a, b, reverse)},
+			2, "a",
+			[][3]string{{"r", "a", "b"}, {"reverse", "b", "a"}},
+		},
+		{
+			"self loop",
+			[]*neo4j.Record{graphTestRecord(a, a, self), graphTestRecord(a, a, self)},
+			1, "a",
+			[][3]string{{"self", "a", "a"}},
+		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			graph, err := decodeGraphSearchResult(context.Background(), &graphRecordResult{records: tt.records})
@@ -192,7 +208,8 @@ func TestDecodeGraphSearchReportsInvalidRecordsAndStreamErrors(t *testing.T) {
 		graphTestRecord(a, b, wrongEndpoint),
 		graphTestRecord(a, b, missingRelationID),
 	} {
-		graph, err := decodeGraphSearchResult(context.Background(), &graphRecordResult{records: []*neo4j.Record{record}})
+		result := &graphRecordResult{records: []*neo4j.Record{record}}
+		graph, err := decodeGraphSearchResult(context.Background(), result)
 		assert.Error(t, err)
 		assert.Nil(t, graph)
 	}

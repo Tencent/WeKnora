@@ -315,13 +315,13 @@ func decodeGraphNode(node neo4j.Node) (*types.GraphNode, error) {
 //   - Exact name matches rank first, then the shortest names, then alphabetical
 //     order. Ordering by name alone lets an entity whose name *is* the query
 //     fall outside the cap once the substring matches exceed it.
-//   - The same key is carried into both LIMITs, so a truncated result keeps the
+//   - The seed order is carried into the row LIMIT, so a truncated result keeps the
 //     neighbourhoods of the highest-ranked seeds rather than an arbitrary
 //     subset of the rows.
 //
-// Order each relationship's matches before grouping so its best-ranked seed
-// supplies the evidence order. Deduplicate before the row cap, and break name
-// ties by document and element identity without changing match priority.
+// Each edge is expanded only from its earliest seed, so duplicate endpoint
+// matches cannot consume the row cap. Only the bounded seed list is collected;
+// grouping every candidate relationship would require unbounded working memory.
 func graphSearchCypher(labelExpr string, nodes []string) (string, map[string]interface{}) {
 	query := `
 		MATCH (n:` + labelExpr + `)
@@ -333,13 +333,13 @@ func graphSearchCypher(labelExpr string, nodes []string) (string, map[string]int
 		     n.name AS name
 		ORDER BY seed_rank, name_len, name, n.kg, elementId(n)
 		LIMIT $maxSeedNodes
+		WITH collect(n) AS seeds
+		UNWIND range(0, size(seeds) - 1) AS seed_index
+		WITH seeds[seed_index] AS n, seeds[0..seed_index] AS earlier_seeds, seed_index
 		MATCH (n)-[r]-(m:` + labelExpr + `)
-		WITH n, r, m, seed_rank, name_len, name
-		ORDER BY seed_rank, name_len, name, n.kg, elementId(n), elementId(r)
-		WITH r, head(collect({n: n, m: m, seed_rank: seed_rank, name_len: name_len, name: name})) AS seed
-		WITH seed.n AS n, r, seed.m AS m,
-		     seed.seed_rank AS seed_rank, seed.name_len AS name_len, seed.name AS name
-		ORDER BY seed_rank, name_len, name, n.kg, elementId(n), elementId(r)
+		WHERE NOT m IN earlier_seeds
+		WITH n, r, m, seed_index
+		ORDER BY seed_index, elementId(r)
 		LIMIT $maxRows
 		RETURN n, r, m
 	`

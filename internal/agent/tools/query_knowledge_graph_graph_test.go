@@ -175,14 +175,23 @@ func TestQueryKnowledgeGraph_SameNamedDocumentInstances(t *testing.T) {
 		chunks    []string
 		relations []string
 	}{
-		{"whole KB", &types.SearchTarget{Type: types.SearchTargetTypeKnowledgeBase, KnowledgeBaseID: "kb-1"},
-			[]string{"c-a", "c-b"}, []string{"HEADQUARTERED_IN", "HAS_BRANCH_IN"}},
-		{"first document", &types.SearchTarget{Type: types.SearchTargetTypeKnowledge, KnowledgeBaseID: "kb-1",
-			KnowledgeIDs: []string{"doc-a"}}, []string{"c-a"}, []string{"HEADQUARTERED_IN"}},
-		{"second document", &types.SearchTarget{Type: types.SearchTargetTypeKnowledge, KnowledgeBaseID: "kb-1",
-			KnowledgeIDs: []string{"doc-b"}}, []string{"c-b"}, []string{"HAS_BRANCH_IN"}},
-		{"tag scope", &types.SearchTarget{Type: types.SearchTargetTypeKnowledgeBase, KnowledgeBaseID: "kb-1",
-			TagIDs: []string{"tag-b"}}, []string{"c-b"}, []string{"HAS_BRANCH_IN"}},
+		{
+			"whole KB", &types.SearchTarget{Type: types.SearchTargetTypeKnowledgeBase, KnowledgeBaseID: "kb-1"},
+			[]string{"c-a", "c-b"},
+			[]string{"HEADQUARTERED_IN", "HAS_BRANCH_IN"},
+		},
+		{"first document", &types.SearchTarget{
+			Type: types.SearchTargetTypeKnowledge, KnowledgeBaseID: "kb-1",
+			KnowledgeIDs: []string{"doc-a"},
+		}, []string{"c-a"}, []string{"HEADQUARTERED_IN"}},
+		{"second document", &types.SearchTarget{
+			Type: types.SearchTargetTypeKnowledge, KnowledgeBaseID: "kb-1",
+			KnowledgeIDs: []string{"doc-b"},
+		}, []string{"c-b"}, []string{"HAS_BRANCH_IN"}},
+		{"tag scope", &types.SearchTarget{
+			Type: types.SearchTargetTypeKnowledgeBase, KnowledgeBaseID: "kb-1",
+			TagIDs: []string{"tag-b"},
+		}, []string{"c-b"}, []string{"HAS_BRANCH_IN"}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			tool := NewQueryKnowledgeGraphTool(&stubKnowledgeBaseService{
