@@ -12,6 +12,7 @@ func Builtins() []*Definition {
 		newGeminiProvider(),
 		newGenericProvider(),
 		newGpustackProvider(),
+		newHuggingFaceTEIProvider(),
 		newHunyuanProvider(),
 		newJinaProvider(),
 		newLitellmProvider(),
