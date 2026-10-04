@@ -514,6 +514,18 @@ marked.use({
   gfm: true,         // 启用 GitHub Flavored Markdown
 });
 marked.use(markedKatex({ throwOnError: false, nonStandard: true }));
+// marked's GFM `del` tokenizer matches a lone `~` (e.g. the range
+// `2020~2035`), turning it into strikethrough. Override it so a `~~`-prefixed
+// run returns `false` and falls back to the built-in rule, while anything
+// else returns `undefined` and renders the `~` as literal text.
+marked.use({
+  tokenizer: {
+    del(src: string) {
+      if (src.startsWith('~~')) return false
+      return undefined
+    },
+  },
+});
 
 const preprocessMathDelimiters = (rawText: string): string => {
   if (!rawText || typeof rawText !== 'string') {
