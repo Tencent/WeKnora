@@ -156,3 +156,77 @@ func describeMessages(messages []chat.Message) string {
 	}
 	return b.String()
 }
+
+// Regression test for Tencent/WeKnora#3947: SanitizeMessages used to treat a
+// message as empty using only Content and ToolCalls, so an image-only or
+// MultiContent-only user message was dropped outright; and when consecutive
+// user messages were merged, only Content carried over — the later message's
+// Images and MultiContent were silently lost. Two Agent paths can produce
+// adjacent user messages: appendToolImages emits one user message per
+// image-producing tool result, and compaction injects a user-role summary that
+// can sit immediately before the retained multimodal user message.
+func TestSanitizeMessages_PreservesMultimodalContent(t *testing.T) {
+	t.Run("merge keeps images of both messages", func(t *testing.T) {
+		messages := []chat.Message{
+			{Role: "user", Content: "first screenshot", Images: []string{"https://example.com/first.png"}},
+			{Role: "user", Content: "second screenshot", Images: []string{"https://example.com/second.png"}},
+		}
+		result := SanitizeMessages(messages)
+		require.Len(t, result, 1)
+		assert.Contains(t, result[0].Content, "first screenshot")
+		assert.Contains(t, result[0].Content, "second screenshot")
+		assert.Equal(t,
+			[]string{"https://example.com/first.png", "https://example.com/second.png"},
+			result[0].Images)
+	})
+
+	t.Run("image-only message is not dropped as empty", func(t *testing.T) {
+		messages := []chat.Message{
+			{Role: "user", Images: []string{"https://example.com/only.png"}},
+		}
+		result := SanitizeMessages(messages)
+		require.Len(t, result, 1)
+		assert.Equal(t, []string{"https://example.com/only.png"}, result[0].Images)
+	})
+
+	t.Run("multicontent-only message is not dropped as empty", func(t *testing.T) {
+		messages := []chat.Message{
+			{Role: "user", MultiContent: []chat.MessageContentPart{{Type: "text", Text: "question"}}},
+		}
+		result := SanitizeMessages(messages)
+		require.Len(t, result, 1)
+		require.Len(t, result[0].MultiContent, 1)
+		assert.Equal(t, "question", result[0].MultiContent[0].Text)
+	})
+
+	t.Run("merge keeps multicontent parts of both messages", func(t *testing.T) {
+		messages := []chat.Message{
+			{Role: "user", Content: "summary", MultiContent: []chat.MessageContentPart{{Type: "text", Text: "summary text"}}},
+			{Role: "user", Content: "question", MultiContent: []chat.MessageContentPart{
+				{Type: "text", Text: "question"},
+				{Type: "image_url", ImageURL: &chat.ImageURL{URL: "https://example.com/pic.png"}},
+			}},
+		}
+		result := SanitizeMessages(messages)
+		require.Len(t, result, 1)
+		require.Len(t, result[0].MultiContent, 3)
+		assert.Equal(t, "summary text", result[0].MultiContent[0].Text)
+		assert.Equal(t, "question", result[0].MultiContent[1].Text)
+		require.NotNil(t, result[0].MultiContent[2].ImageURL)
+		assert.Equal(t, "https://example.com/pic.png", result[0].MultiContent[2].ImageURL.URL)
+	})
+
+	t.Run("merge does not alias caller slices", func(t *testing.T) {
+		prevImages := []string{"https://example.com/first.png"}
+		nextImages := []string{"https://example.com/second.png"}
+		messages := []chat.Message{
+			{Role: "user", Content: "first", Images: prevImages},
+			{Role: "user", Content: "second", Images: nextImages},
+		}
+		result := SanitizeMessages(messages)
+		require.Len(t, result, 1)
+		result[0].Images[0] = "mutated"
+		assert.Equal(t, "https://example.com/first.png", prevImages[0])
+		assert.Equal(t, "https://example.com/second.png", nextImages[0])
+	})
+}

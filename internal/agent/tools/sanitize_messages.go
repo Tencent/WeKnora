@@ -20,9 +20,13 @@ func SanitizeMessages(messages []chat.Message) []chat.Message {
 
 	result := make([]chat.Message, 0, len(messages))
 	for i, msg := range messages {
-		// Skip empty non-system messages (some providers reject these)
+		// Skip empty non-system messages (some providers reject these).
+		// A message carrying images or multimodal content parts counts as
+		// non-empty even when it has no text content: dropping an
+		// image-only user message here would silently discard user input.
 		if msg.Content == "" && msg.Role != "system" &&
-			msg.Role != "tool" && len(msg.ToolCalls) == 0 {
+			msg.Role != "tool" && len(msg.ToolCalls) == 0 &&
+			len(msg.Images) == 0 && len(msg.MultiContent) == 0 {
 			continue
 		}
 
@@ -48,6 +52,25 @@ func SanitizeMessages(messages []chat.Message) []chat.Message {
 					calls = append(calls, prev.ToolCalls...)
 					calls = append(calls, msg.ToolCalls...)
 					merged.ToolCalls = calls
+				}
+				// Merge the multimodal payloads as well: when two user
+				// messages are joined, keeping only the text would silently
+				// drop the later message's images (e.g. one user message per
+				// image-producing tool result from appendToolImages) or its
+				// content parts (e.g. a compaction summary followed by the
+				// retained multimodal user message). Same copy-instead-of-
+				// append-in-place reasoning as for ToolCalls above.
+				if len(msg.Images) > 0 {
+					images := make([]string, 0, len(prev.Images)+len(msg.Images))
+					images = append(images, prev.Images...)
+					images = append(images, msg.Images...)
+					merged.Images = images
+				}
+				if len(msg.MultiContent) > 0 {
+					parts := make([]chat.MessageContentPart, 0, len(prev.MultiContent)+len(msg.MultiContent))
+					parts = append(parts, prev.MultiContent...)
+					parts = append(parts, msg.MultiContent...)
+					merged.MultiContent = parts
 				}
 				result[len(result)-1] = merged
 				continue
