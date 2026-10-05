@@ -609,20 +609,26 @@ services:
       - searxng
       - full
 
+  # S3-compatible object storage for the "minio" storage provider (service
+  # name and MINIO_* app variables are the WeKnora storage contract and stay;
+  # the backend container is RustFS since MinIO community images withdrew).
   minio:
-    image: quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z
+    image: rustfs/rustfs:1.0.0
     container_name: WeKnora-minio
     ports:
       - "${MINIO_PORT:-9000}:9000"
       - "${MINIO_CONSOLE_PORT:-9001}:9001"
     environment:
-      - MINIO_ROOT_USER=${MINIO_ACCESS_KEY_ID:-minioadmin}
-      - MINIO_ROOT_PASSWORD=${MINIO_SECRET_ACCESS_KEY:-minioadmin}
-    command: server --console-address ":9001" /data
+      - RUSTFS_ACCESS_KEY=${MINIO_ACCESS_KEY_ID:-minioadmin}
+      - RUSTFS_SECRET_KEY=${MINIO_SECRET_ACCESS_KEY:-minioadmin}
+      - RUSTFS_VOLUMES=/data
+      - RUSTFS_ADDRESS=0.0.0.0:9000
+      - RUSTFS_CONSOLE_ADDRESS=0.0.0.0:9001
+      - RUSTFS_CONSOLE_ENABLE=true
     volumes:
       - minio_data:/data
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      test: ["CMD", "curl", "-f", "http://localhost:9000/health"]
       interval: 30s
       timeout: 20s
       retries: 3

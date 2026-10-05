@@ -427,14 +427,14 @@ secrets:
 # Optional Components (Profiles from docker-compose)
 # -----------------------------------------------------------------------------
 
-# -- MinIO configuration (S3-compatible storage)
+# -- S3-compatible object storage configuration (RustFS backend)
 # Equivalent to: docker compose --profile minio
 minio:
-  # -- Enable MinIO
+  # -- Enable the bundled S3-compatible storage (RustFS)
   enabled: false
   image:
-    repository: quay.io/minio/minio
-    tag: latest
+    repository: rustfs/rustfs
+    tag: "1.0.0"
   # -- Root user
   rootUser: minioadmin
   # -- Root password (REQUIRED if enabled)

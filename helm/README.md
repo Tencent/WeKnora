@@ -228,7 +228,7 @@ These map to docker-compose profiles:
 
 | Parameter | Description | Default |
 |-----------|-------------|---------|
-| `minio.enabled` | Enable MinIO storage | `false` |
+| `minio.enabled` | Enable S3-compatible storage (RustFS backend) | `false` |
 | `neo4j.enabled` | Enable Neo4j (GraphRAG) | `false` |
 | `qdrant.enabled` | Enable Qdrant vector DB | `false` |
 
