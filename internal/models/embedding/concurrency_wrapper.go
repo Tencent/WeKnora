@@ -2,6 +2,10 @@ package embedding
 
 import (
 	"context"
+	"fmt"
+
+	"github.com/Tencent/WeKnora/internal/infrastructure/checkpoint"
+	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 
 	"github.com/Tencent/WeKnora/internal/models/limiter"
@@ -27,8 +31,9 @@ type concurrencyEmbedder struct {
 	inner Embedder
 	// limit is this model's configured per-model background cap; 0 falls back
 	// to the process-wide default (see limiter.GateN).
-	limit  int
-	budget *tokenBudget
+	limit      int
+	budget     *tokenBudget
+	cacheScope string
 }
 
 func (w *concurrencyEmbedder) Embed(ctx context.Context, text string) ([]float32, error) {
@@ -51,6 +56,44 @@ func (w *concurrencyEmbedder) Embed(ctx context.Context, text string) ([]float32
 }
 
 func (w *concurrencyEmbedder) BatchEmbed(ctx context.Context, texts []string) ([][]float32, error) {
+	if !types.IsBackgroundTask(ctx) || w.cacheScope == "" {
+		return w.batchUncached(ctx, texts)
+	}
+	result := make([][]float32, len(texts))
+	var missing []string
+	var positions []int
+	for i, t := range texts {
+		key := checkpoint.Key([]string{w.cacheScope, t})
+		if !checkpoint.Load("embedding", key, &result[i]) || len(result[i]) != w.GetDimensions() {
+			missing = append(missing, t)
+			positions = append(positions, i)
+		}
+	}
+	if len(missing) == 0 {
+		return result, nil
+	}
+	vectors, err := w.batchUncached(ctx, missing)
+	if err != nil {
+		return nil, err
+	}
+	if len(vectors) != len(missing) {
+		return nil, fmt.Errorf("embedding returned %d vectors for %d texts", len(vectors), len(missing))
+	}
+	for j, i := range positions {
+		if len(vectors[j]) != w.GetDimensions() {
+			return nil, fmt.Errorf("embedding dimension mismatch: got %d expected %d",
+				len(vectors[j]), w.GetDimensions())
+		}
+		result[i] = vectors[j]
+		key := checkpoint.Key([]string{w.cacheScope, texts[i]})
+		if err := checkpoint.Save("embedding", key, vectors[j]); err != nil {
+			logger.Warnf(ctx, "Embedding checkpoint save failed: %v", err)
+		}
+	}
+	return result, nil
+}
+
+func (w *concurrencyEmbedder) batchUncached(ctx context.Context, texts []string) ([][]float32, error) {
 	release := limiter.GateNamedN(ctx, w.inner.GetModelID(), w.inner.GetModelName(), w.limit)
 	defer release()
 	if w.budget == nil || !types.IsBackgroundTask(ctx) {
@@ -81,4 +124,17 @@ func wrapEmbeddingConcurrency(e Embedder, limit int) Embedder {
 		return e
 	}
 	return &concurrencyEmbedder{inner: e, limit: limit}
+}
+
+// embeddingCheckpointScope keeps vectors when only credentials or concurrency
+// change, but invalidates them when model input handling or routing changes.
+func embeddingCheckpointScope(config Config) string {
+	if checkpoint.Path("embedding", "") == "" {
+		return ""
+	}
+	config.MaxConcurrency = 0
+	config.APIKey = ""
+	config.AppID = ""
+	config.AppSecret = ""
+	return checkpoint.Key(config)
 }

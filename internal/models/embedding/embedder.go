@@ -100,6 +100,7 @@ func NewEmbedder(config Config, pooler EmbedderPooler, ollamaService *ollama.Oll
 	// concurrencyEmbedder for why this sits below the observability decorators.
 	e = &concurrencyEmbedder{
 		inner: e, limit: config.MaxConcurrency, budget: embeddingTokenBudget(config),
+		cacheScope: embeddingCheckpointScope(config),
 	}
 	if logger.LLMDebugEnabled() {
 		e = &debugEmbedder{inner: e}

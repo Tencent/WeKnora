@@ -1,0 +1,9 @@
+# Document processing checkpoints
+
+Set `WEKNORA_PROCESSING_CHECKPOINT_DIR` to a persistent writable directory to retain successful parser results and background embedding vectors. A Docker deployment can use `/data/files/.processing-checkpoints` to include checkpoints in its files-volume backup. An empty setting disables persistence.
+
+Retries use exact file content, parser options, and embedding model/text inputs to reuse expensive work. Input digests identify reusable results; they are not an integrity-checking mechanism. URL sources are not cached because their content can change. Parser outputs that depend on a temporary image directory are not cached. Checkpoints contain document text/images/vectors and should remain in the private data volume. Completed checkpoints are retained; deleting the checkpoint directory only removes the ability to reuse work, not database content.
+
+This resumes OCR/parsing and successful embedding calls. Chunk/database writes and subsequent Wiki/graph work still follow the existing retry pipeline; checkpoints are not a promise to resume every downstream stage. Existing tasks processed before checkpoints were enabled cannot retroactively gain saved progress. Use the existing Reparse action after a failure; it now reuses matching saved results. Changing parsing/chunking/model inputs causes affected work to run again.
+
+Remote embedding pacing is opt-in: set `WEKNORA_EMBEDDING_TPM` to the provider token/min budget, for example 60000. The budget is shared by endpoint and model across documents and duplicate model rows; quota rejections apply shared cooldown and reduce the working budget. Interactive query embeddings bypass background pacing. Set `BATCH_EMBED_SIZE` conservatively (for example 2) and keep individual chunks within provider input limits. Leaving TPM unset preserves current throughput.
