@@ -1,6 +1,6 @@
 <template>
   <teleport to="body">
-    <div v-if="drawerVisible && resizable && !maximized" class="setting-drawer-resize-handle"
+    <div v-if="drawerVisible && resizable && !maximized && !isMobile" class="setting-drawer-resize-handle"
       :class="{ 'setting-drawer-resize-handle--active': drawerResizing }"
       :style="{ right: `${drawerWidthPx}px`, '--setting-drawer-travel': `${drawerWidthPx}px` }"
       role="separator" aria-orientation="vertical" @mousedown.prevent="onResizeStart">
@@ -33,7 +33,7 @@
           </div>
           <div class="setting-drawer__header-tools">
             <div :id="headerActionsId" class="setting-drawer__header-actions"><slot name="header-actions" /></div>
-            <t-tooltip v-if="maximizable" :content="maximized ? t('common.exitFullscreen') : t('common.fullscreen')" placement="bottom">
+            <t-tooltip v-if="maximizable && !isMobile" :content="maximized ? t('common.exitFullscreen') : t('common.fullscreen')" placement="bottom">
               <button
                 type="button"
                 class="setting-drawer__maximize"
@@ -87,8 +87,10 @@ export const SETTING_DRAWER_HEADER_ACTIONS_ID: InjectionKey<string> = Symbol('se
 </script>
 
 <script setup lang="ts">
+import { useResponsive } from '@/composables/useResponsive'
 import { ref, computed, provide, useAttrs, useId, onMounted, onUnmounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+const { isMobile } = useResponsive()
 
 interface Props {
   visible: boolean
@@ -225,7 +227,7 @@ watch(drawerVisible, (val) => {
 })
 
 const effectiveWidth = computed(() =>
-  maximized.value ? `${viewportWidth.value}px` : `${drawerWidthPx.value}px`,
+  isMobile.value ? '100%' : maximized.value ? `${viewportWidth.value}px` : `${drawerWidthPx.value}px`,
 )
 
 const persistWidth = (width: number) => {

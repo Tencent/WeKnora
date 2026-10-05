@@ -85,7 +85,7 @@
               creatable
               filterable
               @change="handleTagsChange"
-              style="flex: 1; min-width: 400px;"
+              style="flex: 1; min-width: 0;"
             />
           </div>
           <div v-if="!modelStatus.llm.available" class="control-tip">
