@@ -18,13 +18,13 @@ var expectedIDs = []string{
 	"aliyun", "zhipu", "volcengine", "hunyuan", "siliconflow", "deepseek",
 	"minimax", "moonshot", "mimo", "modelscope", "qianfan", "qiniu", "longcat", "lkeap",
 	"openai", "azure_openai", "anthropic", "gemini",
-	"openrouter", "litellm", "requesty",
+	"openrouter", "litellm", "requesty", "opper",
 	"jina", "nvidia", "novita", "gpustack",
 }
 
 func TestAllVendorsRegistered(t *testing.T) {
-	if len(expectedIDs) != 27 {
-		t.Fatalf("expected 27 vendor ids in the spec, got %d", len(expectedIDs))
+	if len(expectedIDs) != 28 {
+		t.Fatalf("expected 28 vendor ids in the spec, got %d", len(expectedIDs))
 	}
 	for _, id := range expectedIDs {
 		v, ok := modelruntime.Get(id)
@@ -297,6 +297,14 @@ func TestFamilyExpectations(t *testing.T) {
 	if r := resolve(t, "openrouter", "anthropic/claude-haiku-4.5"); r.OpenAICompletions.CacheControlFormat !=
 		"anthropic" {
 		t.Error("openrouter anthropic/* family should use anthropic cache_control")
+	}
+	// Opper documents max_tokens and a reasoning_effort of low, medium or
+	// high, so the weakest rung has to go out as low.
+	if r := resolve(t, "opper", "claude-sonnet-4-6"); r.OpenAICompletions.MaxTokensField != "max_tokens" ||
+		r.OpenAICompletions.ThinkingFormat != api.ThinkingFormatOpenAI ||
+		!r.OpenAICompletions.SupportsReasoningEffort ||
+		r.ThinkingLevels.Value(api.ReasoningMinimal) != "low" {
+		t.Error("opper should send max_tokens and a top-level reasoning_effort, with minimal sent as low")
 	}
 	if r := resolve(t, "siliconflow", "deepseek-ai/DeepSeek-V4-Pro"); !r.OpenAICompletions.SupportsReasoningEffort ||
 		r.ThinkingLevels.Value(api.ReasoningMax) != "max" {

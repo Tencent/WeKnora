@@ -4378,6 +4378,7 @@
         "source": "https://openrouter.ai/docs/api/api-reference/stt/create-transcription"
       }
     ],
+    "opper": [],
     "qianfan": [
       {
         "id": "ernie-5.0-thinking-preview",
