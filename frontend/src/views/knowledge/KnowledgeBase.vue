@@ -1,4 +1,8 @@
 <script setup lang="ts">
+import { useResponsive } from '@/composables/useResponsive'
+const { isMobile } = useResponsive()
+const mobileFolderOpen = ref(false)
+
 import { ref, onMounted, onUnmounted, watch, reactive, computed, nextTick } from "vue";
 import { MessagePlugin } from "tdesign-vue-next";
 import DocContent from "@/components/doc-content.vue";
@@ -898,6 +902,7 @@ const loadFolderTree = async (kbIdValue: string) => {
 };
 
 const handleFolderSelect = (path: string) => {
+  mobileFolderOpen.value = false;
   if (selectedFolderPath.value === path) return;
   selectedFolderPath.value = path;
 };
@@ -964,6 +969,7 @@ const handleFolderRename = async ({ from, to }: { from: string; to: string }) =>
 };
 
 const handleFolderTreeCollapsedChange = (value: boolean) => {
+  if (isMobile.value) { mobileFolderOpen.value = !value; return; }
   folderTreeCollapsed.value = value;
   writeStoredFlag(FOLDER_TREE_COLLAPSED_KEY, value);
 };
@@ -2275,7 +2281,7 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
                     <t-skeleton animation="gradient" :row-col="[{ width: '120px', height: '20px' }]" />
                   </template>
                   <template v-else>
-                    <span>{{ kbInfo.name }}</span>
+                    <span :title="kbInfo.name">{{ kbInfo.name }}</span>
                     <t-icon name="chevron-down" />
                   </template>
                 </button>
@@ -2289,7 +2295,7 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
                 </template>
               </button>
               <t-icon name="chevron-right" class="breadcrumb-separator" />
-              <div class="kb-view-tabs" role="tablist" :aria-label="$t('knowledgeEditor.wikiBrowser.viewTabs')">
+              <div class="kb-view-tabs document-tabs" role="tablist" :aria-label="$t('knowledgeEditor.wikiBrowser.viewTabs')">
                 <t-tooltip v-for="tab in kbViewTabs" :key="tab.key" :content="tab.tip" placement="bottom">
                   <button type="button" role="tab" class="kb-view-tab"
                     :class="{ active: shownKbTab === tab.key, indexing: tab.indexing }"
@@ -2342,8 +2348,8 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
       <!-- wiki/graph tabs only exist on wiki KBs; a stale tab (?tab= or one
            carried over from a previous KB) falls back to documents. -->
       <template v-if="activeKbTab === 'documents' || (!isWiki && activeKbTab !== 'gallery')">
-        <div class="knowledge-main">
-          <KbFolderTree v-if="showFolderTree && !folderTreeCollapsed" :tree="folderTree" :selected-path="selectedFolderPath"
+        <div class="knowledge-main" :class="{ 'mobile-folder-open': isMobile && mobileFolderOpen }">
+          <KbFolderTree v-if="showFolderTree && (isMobile ? mobileFolderOpen : !folderTreeCollapsed)" :tree="folderTree" :selected-path="selectedFolderPath"
             :loading="folderTreeLoading" :can-edit="canEdit" :root-label="kbInfo?.name"
             @select="handleFolderSelect" @update:collapsed="handleFolderTreeCollapsedChange"
             @rename="handleFolderRename" />
@@ -2351,7 +2357,7 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
             <div class="doc-card-area">
               <div class="doc-filter-bar">
                 <nav class="doc-folder-path" :aria-label="$t('knowledgeBase.folderTree.title')">
-                  <button v-if="showFolderTree && folderTreeCollapsed" type="button" class="doc-folder-path__tree-toggle"
+                  <button v-if="showFolderTree && (isMobile ? !mobileFolderOpen : folderTreeCollapsed)" type="button" class="doc-folder-path__tree-toggle"
                     :aria-expanded="false" :title="$t('knowledgeBase.folderTree.expand')"
                     :aria-label="$t('knowledgeBase.folderTree.expand')"
                     @click="handleFolderTreeCollapsedChange(false)">
