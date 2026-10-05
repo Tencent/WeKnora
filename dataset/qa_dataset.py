@@ -33,6 +33,9 @@ import pandas as pd
 import openai
 
 
+DEFAULT_QA_MODEL = "gpt-5.6-sol"
+
+
 def read_parquet(path):
     return pd.read_parquet(path)
 
@@ -145,7 +148,7 @@ class QAAnsweringSystem:
 
         return "\n\n".join(context_parts)
 
-    def answer_question(self, qid: str, model: str = "gpt-4o-2024-05-13") -> str:
+    def answer_question(self, qid: str, model: str = DEFAULT_QA_MODEL) -> str:
         """
         Use OpenAI API to answer question based on qid context
 
