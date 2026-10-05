@@ -241,3 +241,6 @@ button:focus-visible { outline: 2px solid var(--td-brand-color); outline-offset:
   :root body .dialogue-answers:has(.composer-focused) .dialogue-title,
   :root body .dialogue-answers:has(.composer-focused) .suggested-questions-container { display: none; }
 }
+@media (max-width: 767px) {
+  :root body .dialogue-answers:has(.create-chat-composer) { box-sizing: border-box; max-width: 100%; }
+}

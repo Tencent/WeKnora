@@ -66,6 +66,9 @@ for (const width of [360, 390, 430]) {
     const input = composer.locator('textarea')
     const idle = (await composer.boundingBox())!.height
     expect(idle).toBeLessThan(130)
+    const bounds = (await composer.boundingBox())!
+    expect(bounds.x).toBeGreaterThanOrEqual(10)
+    expect(bounds.x + bounds.width).toBeLessThanOrEqual(width - 10)
     await input.focus()
     await expect(composer).toHaveClass(/composer-focused/)
     await page.waitForTimeout(220)
