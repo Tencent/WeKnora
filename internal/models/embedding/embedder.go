@@ -98,7 +98,9 @@ func NewEmbedder(config Config, pooler EmbedderPooler, ollamaService *ollama.Oll
 	// Innermost: gate the real provider round-trips (including the per-sub-batch
 	// pool callbacks) before debug/langfuse wrap for logging/tracing. See
 	// concurrencyEmbedder for why this sits below the observability decorators.
-	e = wrapEmbeddingConcurrency(e, config.MaxConcurrency)
+	e = &concurrencyEmbedder{
+		inner: e, limit: config.MaxConcurrency, budget: embeddingTokenBudget(config),
+	}
 	if logger.LLMDebugEnabled() {
 		e = &debugEmbedder{inner: e}
 	}

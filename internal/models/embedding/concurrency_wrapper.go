@@ -2,6 +2,7 @@ package embedding
 
 import (
 	"context"
+	"github.com/Tencent/WeKnora/internal/types"
 
 	"github.com/Tencent/WeKnora/internal/models/limiter"
 )
@@ -26,19 +27,36 @@ type concurrencyEmbedder struct {
 	inner Embedder
 	// limit is this model's configured per-model background cap; 0 falls back
 	// to the process-wide default (see limiter.GateN).
-	limit int
+	limit  int
+	budget *tokenBudget
 }
 
 func (w *concurrencyEmbedder) Embed(ctx context.Context, text string) ([]float32, error) {
 	release := limiter.GateNamedN(ctx, w.inner.GetModelID(), w.inner.GetModelName(), w.limit)
 	defer release()
-	return w.inner.Embed(ctx, text)
+	if w.budget == nil || !types.IsBackgroundTask(ctx) {
+		return w.inner.Embed(ctx, text)
+	}
+	result, err := w.budget.call(ctx, []string{text}, func() ([][]float32, error) {
+		v, e := w.inner.Embed(ctx, text)
+		if e != nil {
+			return nil, e
+		}
+		return [][]float32{v}, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return result[0], nil
 }
 
 func (w *concurrencyEmbedder) BatchEmbed(ctx context.Context, texts []string) ([][]float32, error) {
 	release := limiter.GateNamedN(ctx, w.inner.GetModelID(), w.inner.GetModelName(), w.limit)
 	defer release()
-	return w.inner.BatchEmbed(ctx, texts)
+	if w.budget == nil || !types.IsBackgroundTask(ctx) {
+		return w.inner.BatchEmbed(ctx, texts)
+	}
+	return w.budget.call(ctx, texts, func() ([][]float32, error) { return w.inner.BatchEmbed(ctx, texts) })
 }
 
 // BatchEmbedWithPool threads THIS wrapper down as the model so the pooler's
