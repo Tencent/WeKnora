@@ -3,7 +3,7 @@ import { useResponsive } from '@/composables/useResponsive'
 const { isMobile } = useResponsive()
 const mobileFolderOpen = ref(false)
 
-import { ref, onMounted, onUnmounted, watch, reactive, computed, nextTick } from "vue";
+import { ref, onMounted, onUnmounted, watch, reactive, computed, nextTick, defineAsyncComponent } from "vue";
 import { MessagePlugin } from "tdesign-vue-next";
 import DocContent from "@/components/doc-content.vue";
 import useKnowledgeBase from '@/hooks/useKnowledgeBase';
@@ -57,8 +57,8 @@ import BatchTagDialog from './components/BatchTagDialog.vue';
 import type { KnowledgeProcessOverrides } from '@/types/knowledgeProcess';
 import { useUploadConfirmStore, type UploadConfirmResult } from '@/stores/uploadConfirm';
 import { useUploadTasksStore } from '@/stores/uploadTasks';
-import WikiBrowser from './wiki/WikiBrowser.vue';
 import ImageGallery from './gallery/ImageGallery.vue';
+const WikiBrowser = defineAsyncComponent(() => import('./wiki/WikiBrowser.vue'));
 import { getWikiStats } from '@/api/wiki';
 import {
   isKnowledgeParseInFlight,
