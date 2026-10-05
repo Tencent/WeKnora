@@ -184,3 +184,23 @@ test('a delayed chat navigation shows the sent question in the conversation and 
   await expect(page.locator('.bot_msg')).toContainText('恢复后的回答')
   expect(creations).toBe(1)
 })
+
+test('sending from an interactive page does not need another chat module download', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await mockApp(page)
+  await page.route('**/api/v1/agents**', route => route.fulfill({ json: { success: true, data: [{ id: 'builtin-quick-answer', name: '快速问答', is_builtin: true, config: { agent_mode: 'quick-answer', model_id: 'chat-model', kb_selection_mode: 'none' } }] } }))
+  await page.route('**/api/v1/sessions', route => route.fulfill({ json: { success: true, data: { id: 'offline-module-session' } } }))
+  await page.route('**/api/v1/sessions/offline-module-session', route => route.fulfill({ json: { success: true, data: { id: 'offline-module-session', title: '已准备好的对话', tenant_id: 1 } } }))
+  await page.route('**/api/v1/*-chat/offline-module-session', route => route.fulfill({ contentType: 'text/event-stream', body: 'data: '+JSON.stringify({ response_type: 'answer', content: '对话正常显示', id: 'module-answer', done: true })+'\n\ndata: '+JSON.stringify({ response_type: 'complete', id: 'module-answer', done: true })+'\n\n' }))
+  await page.goto('/platform/creatChat')
+  const input = page.locator('[data-guide="chat-input"] textarea')
+  await expect(input).toBeVisible()
+  // A phone can keep its API connection while a later lazy asset load stalls.
+  // Once the composer is usable, sending must no longer depend on that load.
+  await page.route(/\/(?:assets|src)\/.*\.(?:js|css|vue|ts)(?:\?|$)/, route => route.abort())
+  await input.fill('介绍一下郭象')
+  await page.locator('[data-guide="chat-send"]').tap()
+  await expect(page).toHaveURL(/chat\/offline-module-session/)
+  await expect(page.locator('.msg_list')).toContainText('介绍一下郭象')
+  await expect(page.locator('.bot_msg')).toContainText('对话正常显示')
+})
