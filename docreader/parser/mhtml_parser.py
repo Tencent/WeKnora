@@ -31,6 +31,23 @@ _AD_DOMAINS = (
 
 _UNKNOWN_8BIT = frozenset({"unknown-8bit", "unknown"})
 
+# Inline elements that markdownify renders as "" when their text is only
+# whitespace, taking that whitespace with them.
+_WHITESPACE_DROPPING_INLINE_TAGS = (
+    "a",
+    "b",
+    "code",
+    "del",
+    "em",
+    "i",
+    "kbd",
+    "s",
+    "samp",
+    "strong",
+    "sub",
+    "sup",
+)
+
 
 def _header_str(value) -> str:
     """Normalize a MIME header to str, recovering 8-bit UTF-8 bytes.
@@ -270,6 +287,7 @@ class MHTMLParser(BaseParser):
                 self._strip_internal_links(soup)
             if image_aliases:
                 self._rewrite_image_sources(soup, image_aliases, base_location)
+            self._unwrap_whitespace_only_inline(soup)
             text_fallback = soup.get_text(separator="\n", strip=True)
             markdown_text = md(str(soup), heading_style="ATX")
             result = self._normalize_markdown(markdown_text)
@@ -294,6 +312,19 @@ class MHTMLParser(BaseParser):
     ) -> str:
         """Backward-compatible wrapper for existing internal callers and tests."""
         return self.html_to_markdown(html_content, image_aliases, base_location)
+
+    @staticmethod
+    def _unwrap_whitespace_only_inline(soup: BeautifulSoup) -> None:
+        """Keep the whitespace held by an otherwise empty inline element.
+
+        markdownify drops such an element together with its whitespace, so
+        ``further<strong> </strong>reference`` became ``furtherreference``.
+        Unwrapping leaves the whitespace as plain text. Innermost elements go
+        first, so ``<b><i> </i></b>`` is unwrapped completely.
+        """
+        for tag in reversed(soup.find_all(_WHITESPACE_DROPPING_INLINE_TAGS)):
+            if tag.find(True) is None and not tag.get_text().strip():
+                tag.unwrap()
 
     @staticmethod
     def _normalize_markdown(markdown_text: str) -> str:

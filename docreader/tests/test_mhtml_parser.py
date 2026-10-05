@@ -242,6 +242,38 @@ class MHTMLParserTest(unittest.TestCase):
 
         self.assertEqual(markdown, "alpha  \nbeta")
 
+    def test_html_to_markdown_keeps_whitespace_of_whitespace_only_inline_elements(self):
+        parser = MHTMLParser(file_name="article.mhtml", file_type="mhtml")
+        cases = {
+            "<p>further<strong> </strong>reference</p>": "further reference",
+            "<p><b>First</b><b> </b><b>Last</b></p>": "**First** **Last**",
+            "<p>Hello<code> </code>world</p>": "Hello world",
+            "<p>one<em>&#160;</em>two</p>": "one\xa0two",
+            '<p>see<a href="https://example.com"> </a>here</p>': "see here",
+            "<p>a<b><i> </i></b>b</p>": "a b",
+            "<p>x<sub> </sub>y<sup> </sup>z<kbd> </kbd>w</p>": "x y z w",
+            "<p>v<del> </del>w<s> </s>x<samp> </samp>y</p>": "v w x y",
+        }
+        for html_content, expected in cases.items():
+            with self.subTest(html=html_content):
+                self.assertEqual(parser._html_to_markdown(html_content), expected)
+
+    def test_html_to_markdown_still_converts_inline_elements_with_content(self):
+        markdown = MHTMLParser(
+            file_name="article.mhtml", file_type="mhtml"
+        )._html_to_markdown(
+            "<p><strong>bold</strong> <code>code</code> <em>em</em> "
+            '<del>gone</del> <a href="https://example.com">link</a> '
+            "keep<b></b>empty "
+            '<a href="https://example.com"><img alt="pic" src="https://example.com/a.png"></a></p>'
+        )
+
+        self.assertEqual(
+            markdown,
+            "**bold** `code` *em* ~~gone~~ [link](https://example.com) keepempty "
+            "[![pic](https://example.com/a.png)](https://example.com)",
+        )
+
     def test_normalize_markdown_preserves_two_space_hard_break(self):
         markdown = MHTMLParser._normalize_markdown("alpha  \nbeta")
 

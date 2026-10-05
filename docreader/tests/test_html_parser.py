@@ -58,6 +58,13 @@ class HTMLParserTest(unittest.TestCase):
         self.assertIn("[Guide](./guide.html)", document.content)
         self.assertIn("[Section](#section)", document.content)
 
+    def test_parse_keeps_space_held_by_whitespace_only_inline_element(self):
+        html = b"<p>further<strong> </strong>reference</p>"
+
+        document = HTMLParser(file_name="space.html", file_type="html").parse(html)
+
+        self.assertEqual("further reference", document.content)
+
     def test_registry_routes_html_extensions_to_html_parser(self):
         self.assertIs(registry.get_parser_class("", "html"), HTMLParser)
         self.assertIs(registry.get_parser_class("", "htm"), HTMLParser)
