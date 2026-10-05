@@ -59,6 +59,8 @@ import { supportedLevels, levelLabelKey, levelFromLegacy, clampLevel, type Reaso
 
 const mobileToolsOpen = ref(false);
 const composerFocused = ref(false);
+const draftOptions = ref<SendMessageOptions>({});
+const submissionIssue = ref('');
 const route = useRoute();
 const router = useRouter();
 const settingsStore = useSettingsStore();
@@ -2017,6 +2019,8 @@ const createSession = async (
   delivery: 'inject' | 'after' = 'after',
   options: SendMessageOptions = {},
 ) => {
+  submissionIssue.value = '';
+  options = { ...draftOptions.value, ...options };
   if (props.composerLocked) {
     return;
   }
@@ -2117,6 +2121,7 @@ const createSession = async (
     settingsStore.selectedAgentSourceTenantId ?? undefined,
   );
   if (notReadyReasons.length > 0) {
+    submissionIssue.value = t('input.agentNotReadyDetail', { agentName: actualAgent.name, reasons: formatLocalizedList(notReadyReasons, locale.value) });
     showAgentNotReadyMessage(
       actualAgent,
       notReadyReasons,
@@ -2361,6 +2366,7 @@ const clearvalue = () => {
   // otherwise TDesign's autosize will call getComputedStyle on a non-Element.
   if (!getTextareaEl()) return;
   query.value = "";
+  draftOptions.value = {};
 }
 
 // Drop any pending images/attachments and stop their status polling. Used when
@@ -2681,7 +2687,8 @@ defineExpose({
    * the user lands on the branch with the original question ready to edit —
    * the whole point of branching at a user message.
    */
-  prefill(text: string) {
+  prefill(text: string, options: SendMessageOptions = {}) {
+    draftOptions.value = options;
     query.value = text;
   }
 });
@@ -2754,6 +2761,7 @@ defineExpose({
         </span>
       </div>
 
+      <p v-if="submissionIssue" class="composer-submission-error" role="alert">{{ submissionIssue }}</p>
       <!-- 实际输入框 -->
       <t-textarea ref="textareaRef" v-model="query" :placeholder="t('input.placeholder')" name="description" :autosize="true"
         @keydown="onKeydown" @input="onInput" @compositionstart="onCompositionStart" @compositionend="onCompositionEnd"
@@ -3008,7 +3016,7 @@ defineExpose({
             </button>
           </t-tooltip>
           <t-tooltip v-else :content="`${isReplying && canSteer ? $t('input.steerAfter') : $t('input.send')} · Enter`">
-            <button type="button" @click="createSession(query)" class="control-btn send-btn" data-guide="chat-send"
+            <button type="button" @mousedown.prevent @click="createSession(query)" class="control-btn send-btn" data-guide="chat-send"
               :disabled="!query.trim() || composerLocked" :class="{ 'disabled': !query.trim() || composerLocked }"
               :aria-label="isReplying && canSteer ? $t('input.steerAfter') : $t('input.send')">
               <t-icon name="arrow-up" />

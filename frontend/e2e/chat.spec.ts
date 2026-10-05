@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test'
 import { mockApp, fitsViewport } from './fixtures'
+test.use({ hasTouch: true })
 
 test('mobile composer expands tools and keeps draft after viewport change', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
@@ -101,4 +102,47 @@ test('mobile attachment picker is reachable without expanding settings', async (
   const chooser = await picker
   expect(chooser.isMultiple()).toBe(true)
   await expect(page.locator('.control-left')).toBeHidden()
+})
+
+test('mobile recommendation fills an editable draft and send opens a visible conversation', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await mockApp(page)
+  await page.route('**/api/v1/agents**', async route => {
+    if (route.request().url().includes('suggested-questions')) return route.fulfill({ json: { success: true, data: { questions: [
+      { question: '庄子的逍遥是什么意思？', source: 'knowledge', knowledge_base_id: 'mobile-kb' },
+      { question: '比较不同注家的解释。', source: 'knowledge' },
+      { question: '阅读齐物论。', source: 'knowledge' },
+    ] } } })
+    await route.fulfill({ json: { success: true, data: [{ id: 'builtin-smart-reasoning', name: '智能推理', is_builtin: true, config: { agent_mode: 'smart-reasoning', model_id: 'chat-model', kb_selection_mode: 'none', allowed_tools: ['thinking'] } }, { id: 'builtin-quick-answer', name: '快速问答', is_builtin: true, config: { agent_mode: 'quick-answer', model_id: 'chat-model', kb_selection_mode: 'none' } }] } })
+  })
+  await page.route('**/api/v1/sessions', route => route.fulfill({ json: { success: true, data: { id: 'mobile-new' } } }))
+  await page.route('**/api/v1/sessions/mobile-new', route => route.fulfill({ json: { success: true, data: { id: 'mobile-new', title: '手机测试', tenant_id: 1 } } }))
+  await page.route('**/api/v1/*-chat/mobile-new', route => route.fulfill({ contentType: 'text/event-stream', body: 'data: '+JSON.stringify({ response_type: 'answer', content: '逍遥是自由自在。', id: 'answer-test', done: true })+'\n\ndata: '+JSON.stringify({ response_type: 'complete', id: 'answer-test', done: true })+'\n\n' }))
+  const renderErrors: string[] = []
+  page.on('console', message => { if (message.type() === 'error' && message.text().includes('Unhandled Vue error')) renderErrors.push(message.text()) })
+  await page.goto('/platform/creatChat')
+  const first = page.getByRole('button', { name: '庄子的逍遥是什么意思？', exact: true })
+  const third = page.getByRole('button', { name: '阅读齐物论。', exact: true })
+  await expect(third).toBeVisible()
+  expect((await third.boundingBox())!.y).toBeGreaterThan((await first.boundingBox())!.y)
+  await page.getByRole('button', { name: '庄子的逍遥是什么意思？', exact: true }).click()
+  const input = page.locator('[data-guide="chat-input"] textarea')
+  await expect(input).toHaveValue('庄子的逍遥是什么意思？')
+  await expect(page).toHaveURL(/creatChat/)
+  await page.locator('[data-guide="chat-send"]').tap()
+  await expect(page).toHaveURL(/chat\/mobile-new/)
+  await expect(page.locator('.msg_list')).toContainText('庄子的逍遥是什么意思？')
+  await expect(page.locator('.msg_list')).toContainText('逍遥是自由自在。')
+  await expect(page.locator('.msg_list')).toBeInViewport()
+  await input.fill('进一步解释自由。')
+  await page.locator('[data-guide="chat-send"]').tap()
+  await expect(page.locator('.msg_list')).toContainText('进一步解释自由。')
+  expect(renderErrors).toEqual([])
+  await page.goto('/platform/creatChat')
+  await page.route('**/api/v1/sessions', route => route.fulfill({ status: 500, json: { message: 'Session creation failed' } }))
+  const restored = page.locator('[data-guide="chat-input"] textarea')
+  await restored.fill('失败时保留这条草稿。')
+  await page.locator('[data-guide="chat-send"]').tap()
+  await expect(page.locator('.create-chat-composer [role="alert"]')).toBeVisible()
+  await expect(restored).toHaveValue('失败时保留这条草稿。')
 })

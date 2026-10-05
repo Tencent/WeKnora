@@ -244,3 +244,20 @@ button:focus-visible { outline: 2px solid var(--td-brand-color); outline-offset:
 @media (max-width: 767px) {
   :root body .dialogue-answers:has(.create-chat-composer) { box-sizing: border-box; max-width: 100%; }
 }
+
+@media (max-width: 767px) {
+  :root body .suggested-questions-container { max-height: none; overflow: visible; flex-shrink: 0; }
+  :root body .suggested-questions-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; overflow: visible; }
+  :root body .suggested-questions-grid > * { min-width: 0; max-width: 100%; }
+  :root body .suggested-question-card { white-space: normal; min-height: 44px; text-align: left; font: inherit; color: var(--td-text-color-primary); }
+  :root body .suggested-question-text { white-space: normal; overflow-wrap: anywhere; }
+}
+
+.composer-submission-error { margin: 8px 14px; color: var(--td-error-color); font-size: var(--app-text-base); }
+.new-chat-pending { display: flex; align-items: center; gap: 8px; margin: 0; overflow-wrap: anywhere; color: var(--td-text-color-secondary); }
+@media (max-width: 767px) {
+  :root body .suggested-question-card:active { transform: translateY(1px); border-color: var(--td-brand-color); }
+  :root body .chat .msg-item-wrapper { animation: chat-message-arrive var(--app-motion-base) cubic-bezier(0.16, 1, 0.3, 1); }
+}
+@keyframes chat-message-arrive { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+@media (prefers-reduced-motion: reduce) { :root body .chat .msg-item-wrapper { animation: none; } }

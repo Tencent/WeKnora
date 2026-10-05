@@ -32,13 +32,13 @@
                             </p>
                         </div>
                         <div class="suggested-questions-grid">
-                            <div v-for="(item, index) in suggestedQuestions" :key="item.question"
+                            <button type="button" v-for="(item, index) in suggestedQuestions" :key="item.question"
                                 class="suggested-question-card" :class="{ 'sq-card-visible': sqCardsRevealed }"
                                 :style="{ transitionDelay: sqCardsRevealed ? `${index * 50}ms` : '0ms' }"
                                 @click="handleSuggestedQuestionClick(item)">
                                 <span class="suggested-question-text">{{ item.question }}</span>
                                 <span v-if="item.source === 'faq'" class="suggested-question-badge faq">FAQ</span>
-                            </div>
+                            </button>
                         </div>
                     </div>
                 </transition>
@@ -57,7 +57,9 @@
                     <button v-if="selectedProjectDir" type="button" class="project-dir-bar__clear"
                         :aria-label="$t('createChat.clearProject')" @click="clearProjectDir">×</button>
                 </div>
-                <InputField ref="inputFieldRef" @send-msg="sendMsg"></InputField>
+                <p v-if="creationError" class="composer-submission-error" role="alert">{{ $t('createChat.messages.createError') }}</p>
+                <p v-if="creatingSession" class="new-chat-pending" role="status"><t-loading size="small" /> {{ pendingQuestion }}</p>
+                <InputField ref="inputFieldRef" :composer-locked="creatingSession" @send-msg="sendMsg"></InputField>
             </div>
         </div>
     </div>
@@ -215,11 +217,15 @@ onMounted(() => {
 });
 
 const inputFieldRef = ref();
+const creatingSession = ref(false);
+const pendingQuestion = ref('');
+const creationError = ref(false);
 
 // The suggestion's source rides with this send to the new session's first
 // request, so the agent searches it before answering.
 const handleSuggestedQuestionClick = (item: SuggestedQuestion) => {
-    inputFieldRef.value?.triggerSend(item.question, { questionOrigin: questionOriginFromSuggestion(item) });
+    inputFieldRef.value?.prefill(item.question, { questionOrigin: questionOriginFromSuggestion(item) });
+    void inputFieldRef.value?.focusInput();
 };
 
 const sendMsg = (value: string, modelId: string, mentionedItems: any[], imageFiles: any[] = [], attachmentFiles: any[] = [], options: SendMessageOptions = {}) => {
@@ -227,6 +233,11 @@ const sendMsg = (value: string, modelId: string, mentionedItems: any[], imageFil
 }
 
 async function createNewSession(value: string, modelId: string, mentionedItems: any[] = [], imageFiles: any[] = [], attachmentFiles: any[] = [], options: SendMessageOptions = {}) {
+    if (creatingSession.value) return;
+    creatingSession.value = true;
+    creationError.value = false;
+    pendingQuestion.value = value;
+    const restoreDraft = () => inputFieldRef.value?.prefill(value, options);
     const selectedKbs = settingsStore.settings.selectedKnowledgeBases || [];
     const selectedFiles = settingsStore.settings.selectedFiles || [];
 
@@ -248,12 +259,18 @@ async function createNewSession(value: string, modelId: string, mentionedItems: 
         if (res.data && res.data.id) {
             await navigateToSession(res.data.id, value, modelId, mentionedItems, imageFiles, attachmentFiles, options);
         } else {
+            creationError.value = true;
+            restoreDraft();
             console.error('[createChat] Failed to create session');
             MessagePlugin.error(t('createChat.messages.createFailed'));
         }
     } catch (error) {
+        creationError.value = true;
+        restoreDraft();
         console.error('[createChat] Create session error:', error);
         MessagePlugin.error(t('createChat.messages.createError'));
+    } finally {
+        creatingSession.value = false;
     }
 }
 
@@ -271,7 +288,7 @@ const navigateToSession = async (sessionId: string, value: string, modelId: stri
     usemenuStore.updataMenuChildren(obj);
     usemenuStore.changeIsFirstSession(true);
     usemenuStore.changeFirstQuery(value, mentionedItems, modelId, imageFiles, attachmentFiles, options.questionOrigin ?? null);
-    router.push(`/platform/chat/${sessionId}`);
+    await router.push(`/platform/chat/${sessionId}`);
 }
 
 const handleKBEditorSuccess = (kbId: string) => {
