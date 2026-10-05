@@ -53,6 +53,8 @@
 </template>
 
 <script setup lang="ts">
+import { useAppViewport } from '@/composables/useAppViewport'
+useAppViewport()
 import { computed, onUnmounted, ref, watch, watchEffect } from 'vue'
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
@@ -173,7 +175,7 @@ watch(headerTitle, (title) => {
 
 <style scoped lang="less">
 .embed-page {
-  height: 100vh;
+  height: var(--app-viewport-height, 100dvh);
   display: flex;
   flex-direction: column;
   background: var(--td-bg-color-container);

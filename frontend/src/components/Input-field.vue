@@ -57,6 +57,7 @@ import { SKILL_ICON, type MentionItem, type MentionItemType, type MentionRequest
 import { toolboxLocation } from '@/config/toolbox';
 import { supportedLevels, levelLabelKey, levelFromLegacy, clampLevel, type ReasoningLevel } from '@/utils/reasoningEffort';
 
+const mobileToolsOpen = ref(false);
 const route = useRoute();
 const router = useRouter();
 const settingsStore = useSettingsStore();
@@ -2758,8 +2759,12 @@ defineExpose({
         @paste="onPaste" />
 
       <!-- 控制栏按文档流排列，换行时自动撑开容器 -->
-      <div class="control-bar" :class="{ 'is-embedded': embeddedMode }">
+      <div class="control-bar" :class="{ 'is-embedded': embeddedMode, 'mobile-tools-open': mobileToolsOpen }">
         <!-- 左侧控制按钮 -->
+        <button v-if="!embeddedMode" type="button" class="mobile-composer-more mobile-icon-button"
+          :aria-label="$t('common.more')" :aria-expanded="mobileToolsOpen" @click="mobileToolsOpen = !mobileToolsOpen">
+          <t-icon :name="mobileToolsOpen ? 'chevron-down' : 'ellipsis'" />
+        </button>
         <div class="control-left" v-if="!embeddedMode">
           <!-- Agent 模式切换按钮 -->
           <div ref="agentModeButtonRef" class="control-btn agent-mode-btn" :class="{

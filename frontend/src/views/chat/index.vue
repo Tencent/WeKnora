@@ -1762,7 +1762,7 @@ onBeforeRouteUpdate((to, from, next) => {
     flex-direction: column;
     align-items: center;
     max-width: 100%;
-    min-width: 400px;
+    min-width: 0;
 
     &.is-embedded {
         max-width: 100%;
