@@ -1,5 +1,4 @@
 import { createRouter, createWebHistory } from 'vue-router'
-import ChatView from '../views/chat/index.vue'
 import { defineComponent } from 'vue'
 import type { RouteLocationNormalized } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
@@ -182,7 +181,7 @@ const router = createRouter({
         {
           path: "chat/:chatid",
           name: "chat",
-          component: ChatView,
+          component: () => import("../views/chat/index.vue"),
           meta: { requiresInit: true, requiresAuth: true }
         },
         {
