@@ -1,0 +1,167 @@
+/* One set of viewport rules shared by the application surfaces. */
+.mobile-app-header, .mobile-composer-more, .mobile-settings-back, .mobile-wiki-directory { display: none; }
+.mobile-icon-button { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; flex-shrink: 0; border: 0; border-radius: 8px; color: var(--td-text-color-primary); background: transparent; cursor: pointer; }
+.mobile-composer-more { display: none; }
+button:focus-visible { outline: 2px solid var(--td-brand-color); outline-offset: 2px; }
+@media (min-width: 768px) and (max-width: 1023px) {
+  :root body .settings-modal-shell .settings-sidebar { width: 184px; }
+  :root body .settings-modal-shell .content-wrapper { padding: 24px; }
+  :root body .wiki-sidebar { width: 220px; min-width: 200px; }
+}
+@media (max-width: 767px) {
+  :root body .main { flex-direction: column; min-width: 0; height: var(--app-viewport-height, 100dvh); }
+  :root body .mobile-app-header { display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; min-height: 52px; padding: env(safe-area-inset-top) 8px 0; border-bottom: 1px solid var(--td-component-stroke); background: var(--td-bg-color-container); }
+  :root body .platform-route-outlet { width: 100%; flex: 1; min-width: 0; }
+  :root body .platform-navigation { display: none; position: fixed; inset: 0 auto 0 0; z-index: 1050; width: min(320px, calc(100% - 44px)); height: 100%; background: var(--td-bg-color-sidebar); box-shadow: 4px 0 24px rgb(0 0 0 / 18%); }
+  :root body .platform-navigation.is-open { display: flex; }
+  :root body .platform-navigation .aside_box { width: 100%; padding-top: max(52px, env(safe-area-inset-top)); padding-bottom: env(safe-area-inset-bottom); }
+  .mobile-nav-close { position: absolute; top: env(safe-area-inset-top); right: 4px; z-index: 1; }
+  .mobile-nav-backdrop { position: fixed; inset: 0; z-index: 1049; background: rgb(0 0 0 / 40%); }
+  :root body .aside_box .menu_item, :root body .settings-modal-shell .nav-item { min-height: 44px; }
+  :root body .menu-more-wrap { opacity: 1; }
+  :root body .submenu_item .menu-more { width: 44px; height: 44px; }
+  :root body .settings-modal-shell.settings-overlay { padding: 0; }
+  :root body .settings-modal-shell .settings-modal { width: 100%; max-width: none; height: 100dvh; max-height: var(--app-viewport-height, 100dvh); border-radius: 0; }
+  :root body .settings-modal-shell .settings-sidebar { width: 100%; border: 0; }
+  :root body .settings-modal-shell .sidebar-header { padding-right: 60px; padding-top: max(16px, env(safe-area-inset-top)); }
+  :root body .settings-modal-shell .settings-content { display: none; }
+  :root body .settings-modal-shell.mobile-settings-detail .settings-sidebar { display: none; }
+  :root body .settings-modal-shell.mobile-settings-detail .settings-content { display: flex; padding-top: calc(52px + env(safe-area-inset-top)); }
+  :root body .settings-modal-shell .mobile-settings-back { display: flex; align-items: center; gap: 4px; position: absolute; top: env(safe-area-inset-top); left: 8px; min-height: 44px; z-index: 11; border: 0; background: transparent; color: var(--td-text-color-primary); }
+  :root body .settings-modal-shell .close-btn { top: env(safe-area-inset-top); right: 8px; width: 44px; height: 44px; }
+  :root body .settings-modal-shell .content-wrapper { padding: 16px; width: 100%; box-sizing: border-box; }
+  :root body .settings-modal-shell .settings-footer { padding: 12px 16px max(12px, env(safe-area-inset-bottom)); flex-wrap: wrap; gap: 8px; }
+  :root body .settings-modal-shell .settings-footer-actions { flex-wrap: wrap; }
+  :root body .settings-modal-shell .t-form__item { flex-wrap: wrap; }
+  :root body .settings-modal-shell .t-form__label { width: 100% !important; text-align: left; padding: 0 0 6px; }
+  :root body .settings-modal-shell .t-form__controls { margin-left: 0 !important; width: 100%; min-width: 0; }
+  :root body .settings-modal-shell .t-input, :root body .settings-modal-shell .t-select { max-width: 100%; }
+  :root body .settings-modal-shell .t-table { max-width: 100%; overflow-x: auto; }
+  :root body .settings-modal-shell .nav-item { width: 100%; text-align: left; border: 0; font: inherit; }
+  :root body .dialogue-wrap { min-width: 0; width: 100%; }
+  :root body .dialogue-title { font-size: 24px; padding: 16px; }
+  :root body .dialogue-answers { padding-left: 12px; padding-right: 12px; }
+  :root body .suggested-questions-grid { grid-template-columns: 1fr; }
+  :root body .input-field, :root body .input-container { max-width: 100%; min-width: 0; }
+  :root body .control-bar { flex-wrap: wrap; gap: 4px; }
+  :root body .control-bar .mobile-composer-more { display: inline-flex; }
+  :root body .control-bar .control-left { display: none; }
+  :root body .control-bar.mobile-tools-open .control-left { display: flex; order: -1; width: 100%; flex-wrap: wrap; padding-bottom: 8px; border-bottom: 1px solid var(--td-component-stroke); }
+  :root body .control-bar .control-btn { min-width: 44px; min-height: 44px; }
+  :root body .control-bar .model-selector-trigger { min-height: 44px; max-width: 100%; }
+  :root body .control-bar .control-right { margin-left: auto; }
+  :root body .control-bar .model-selector-name { max-width: 120px; }
+  :root body .control-bar .model-selector-ctx { display: none; }
+  :root body .markdown-content pre, :root body .wiki-reader-body pre { max-width: 100%; overflow-x: auto; }
+  :root body .markdown-content table { display: block; max-width: 100%; overflow-x: auto; }
+  :root body textarea, :root body input:not([type=checkbox]):not([type=radio]) { font-size: 16px; }
+  :root body .knowledge-layout { padding: 12px 12px 0; margin: 0; gap: 12px; }
+  :root body .kb-list-content, :root body .agent-list-content, :root body .organization-list-content { padding: 16px 12px; }
+  :root body .kb-list-container, :root body .agent-list-container, :root body .artifact-library, :root body .organization-list-container { min-width: 0; max-width: 100%; }
+  :root body .header .title-row, :root body .header-actions, :root body .artifact-library .toolbar { flex-wrap: wrap; gap: 8px; }
+  :root body .header-title { min-width: 0; }
+  :root body .header h2 { overflow-wrap: anywhere; }
+  :root body .doc-filter-bar, :root body .doc-filter-bar__trailing { flex-wrap: wrap; }
+  :root body .doc-filter-bar__trailing { width: 100%; }
+  :root body .doc-filter-bar .doc-search-input { width: 100%; flex: 1; }
+  :root body .artifact-library .category-tabs { max-width: 100%; overflow-x: auto; }
+  :root body .artifact-library .search-input { width: 100%; }
+  :root body .artifact-row { flex-wrap: wrap; }
+  :root body .wiki-browser { position: relative; flex-direction: column; }
+  :root body .mobile-wiki-directory { display: flex; flex-shrink: 0; align-items: center; gap: 8px; padding: 8px 12px; min-height: 44px; border: 0; background: var(--td-bg-color-container); color: var(--td-text-color-primary); }
+  :root body .wiki-browser .wiki-sidebar { display: none; }
+  :root body .wiki-browser.mobile-directory-open .wiki-sidebar { display: flex; width: 100%; min-width: 0; flex: 1; overflow-y: auto; }
+  :root body .wiki-browser.mobile-directory-open .wiki-reader { display: none; }
+  :root body .wiki-reader { min-width: 0; width: 100%; }
+  :root body .wiki-reader-header, :root body .wiki-reader-body { padding: 16px; }
+  :root body .wiki-reader-header { flex-wrap: wrap; }
+  :root body .wiki-reader-title { overflow-wrap: anywhere; }
+  :root body .wiki-page-item, :root body .wiki-tree-row { min-height: 44px; }
+  :root body .wiki-graph-search-container { left: 8px; right: 8px; width: auto; }
+  :root body .wiki-graph-legend { left: 8px; bottom: 8px; max-width: calc(100% - 16px); max-height: 32%; overflow-y: auto; }
+  :root body .wiki-graph-legend.legend-shifted { right: auto; }
+  :root body .wiki-graph-legend .legend-action { min-height: 44px; }
+  :root body .wiki-graph-search-input { width: 100%; }
+  :root body .t-dialog { max-width: calc(100vw - 24px); box-sizing: border-box; }
+  :root body .t-dialog__body { overflow-wrap: anywhere; max-height: 70dvh; overflow-y: auto; }
+  :root body .t-drawer__content-wrapper { max-width: 100vw; }
+  :root body .t-drawer__body { min-width: 0; padding: 16px; }
+  :root body .t-drawer__footer { padding-bottom: max(12px, env(safe-area-inset-bottom)); }
+  :root body .t-popup, :root body .t-popup__content { max-width: calc(100vw - 16px); box-sizing: border-box; overflow-wrap: anywhere; }
+  :root body .t-message { max-width: calc(100vw - 24px); overflow-wrap: anywhere; }
+  :root body .shared-detail-drawer, :root body .chat-references-drawer { width: 100%; max-width: 100%; }
+  :root body .kp-head-toolbar, :root body .kp-head-meta { flex-wrap: wrap; }
+  :root body .kp-head { padding: 12px; }
+  :root body .kp-head-doc-title { white-space: normal; overflow-wrap: anywhere; }
+  :root body .kp-row { display: flex; flex-direction: column; align-items: stretch; height: auto; min-height: 64px; padding: 8px 0; }
+  :root body .kp-cell-name { width: 100%; min-width: 0; }
+  :root body .kp-cell-bar { min-height: 24px; width: 100%; }
+  :root body .kp-ruler { display: none; }
+  :root body .kp-error-head { flex-wrap: wrap; }
+  :root body .kp-error-msg { overflow-wrap: anywhere; white-space: pre-wrap; }
+}
+@media (hover: none) and (pointer: coarse) {
+  :root body .menu-more-wrap, :root body .card-more, :root body .row-actions { opacity: 1; visibility: visible; }
+  :root body .t-button:not(.t-button--size-small), :root body .t-dropdown__item { min-height: 44px; }
+}
+.mobile-graph-zoom { position: absolute; top: 72px; right: 12px; z-index: 2; display: flex; flex-direction: column; border: 1px solid var(--td-component-stroke); border-radius: 8px; background: var(--td-bg-color-container); }
+@media (max-width: 767px) {
+  :root body .kp-cell-dur { padding-left: 12px; }
+  :root body .session-row-menu-wrap .menu-more-wrap { opacity: 1; }
+  :root body .settings-modal-shell .nav-item { cursor: pointer; }
+}
+@media (max-width: 767px) {
+  :root body .settings-modal-shell .setting-row { flex-direction: column; align-items: stretch; gap: 12px; }
+  :root body .settings-modal-shell .setting-info, :root body .settings-modal-shell .setting-control { max-width: 100%; width: 100%; }
+  :root body .settings-modal-shell .text-control-group, :root body .settings-modal-shell .relation-item, :root body .model-select-row { flex-wrap: wrap; }
+  :root body .settings-modal-shell .text-control-group > * { max-width: 100%; }
+  :root body .rich-input-container textarea { font-size: 16px; }
+  :root body .session-row-menu-wrap { flex-basis: 44px; width: 44px; height: 44px; opacity: 1; pointer-events: auto; }
+  :root body .session-fork-indicator { display: none; }
+}
+@media (max-width: 767px) {
+  :root body .wiki-browser.mobile-directory-open .wiki-content { display: none; }
+  :root body .wiki-reader { padding: 0 0 16px; }
+  :root body .knowledge-main.mobile-folder-open .kb-folder-tree { width: 100%; max-height: none; flex: 1; }
+  :root body .knowledge-main.mobile-folder-open .tag-content { display: none; }
+  :root body .kb-folder-tree__icon-btn, :root body .doc-folder-path__tree-toggle { min-width: 44px; min-height: 44px; }
+}
+.document-tabs { display: inline-flex; align-items: center; gap: 4px; }
+@media (max-width: 767px) {
+  :root body .document-header .document-breadcrumb { flex-wrap: wrap; font-size: 18px; gap: 4px; }
+  :root body .document-header .document-title-row { align-items: flex-start; }
+  :root body .document-header .breadcrumb-link { white-space: nowrap; min-width: 0; }
+  :root body .document-header .breadcrumb-link.dropdown { max-width: 220px; }
+  :root body .breadcrumb-link.dropdown > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  :root body .document-header .breadcrumb-separator { flex-shrink: 0; }
+  :root body .document-tabs { flex-basis: 100%; font-size: 16px; }
+  :root body .document-tabs .breadcrumb-tab { min-height: 44px; white-space: nowrap; }
+  :root body .wiki-graph-legend { top: auto; right: auto; }
+  :root body .mobile-graph-zoom { z-index: 4; }
+  :root body .wiki-rev-layout { flex-direction: column; }
+  :root body .wiki-rev-list { width: 100%; max-height: 28dvh; flex-shrink: 0; border-right: 0; }
+  :root body .wiki-rev-detail { min-width: 0; }
+  :root body .setting-drawer__footer { flex-wrap: wrap; gap: 8px; }
+  :root body .setting-drawer__footer-right { flex-wrap: wrap; }
+  :root body .setting-drawer__header-text { min-width: 0; }
+  :root body .setting-drawer__title { overflow-wrap: anywhere; }
+  :root body .model-type-options { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 767px) {
+  :root body .upload-confirm-modal { width: 100%; height: 100dvh; max-height: var(--app-viewport-height, 100dvh); border-radius: 0; }
+  :root body .upload-confirm-modal .close-btn { width: 44px; height: 44px; top: 4px; right: 4px; }
+  :root body .upload-confirm-modal .sidebar-header { padding-right: 52px; }
+  :root body .upload-confirm-modal .files-panel { max-height: 25dvh; }
+  :root body .upload-confirm-modal .setting-control { min-width: 0; }
+  :root body .upload-confirm-modal .modal-footer { padding-bottom: max(12px, env(safe-area-inset-bottom)); }
+  :root body .upload-tasks-panel { right: 8px; bottom: max(8px, env(safe-area-inset-bottom)); max-width: calc(100% - 16px); max-height: 60dvh; }
+  :root body .upload-tasks-panel .t-button { min-width: 44px; min-height: 44px; }
+  :root body .settings-modal-shell .section-content { min-width: 0; }
+}
+@media (max-width: 767px) {
+  :root body .chat-references-panel__close, :root body .chat-attachment-preview__close { width: 44px; height: 44px; }
+  :root body .wiki-graph-help-trigger { width: 44px; height: 44px; }
+  :root body .wiki-reader-title-row, :root body .wiki-reader-toolbar { flex-wrap: wrap; }
+  :root body .custom-header-row { flex-wrap: wrap; }
+  :root body .custom-header-row > * { min-width: 0; }
+}
