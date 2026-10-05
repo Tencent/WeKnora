@@ -44,7 +44,7 @@
                 :kb-info="kbInfo"
               />
               <t-tooltip v-if="canManage" :content="$t('knowledgeBase.settings')" placement="top">
-                <button type="button" class="kb-settings-button" @click="handleOpenKBSettings">
+                <button type="button" class="kb-settings-button" :aria-label="$t('knowledgeBase.settings')" @click="handleOpenKBSettings">
                   <t-icon name="setting" size="16px" />
                 </button>
               </t-tooltip>
@@ -119,18 +119,19 @@
                 <t-tooltip :content="$t('knowledgeEditor.faq.createGroup')" placement="top">
                   <t-dropdown :options="faqCreateOptions" trigger="click" placement="bottom-right"
                     @click="handleFaqAction">
-                    <t-button variant="text" theme="default" class="content-bar-icon-btn" size="small">
+                    <t-button variant="text" theme="default" class="content-bar-icon-btn" size="small" :aria-label="$t('knowledgeEditor.faq.createGroup')">
                       <template #icon><t-icon name="add" size="16px" /></template>
                     </t-button>
                   </t-dropdown>
                 </t-tooltip>
               </template>
+              <ResponsiveToolbarGroup>
               <!-- 导出 -->
               <t-dropdown :options="faqExportOptions" trigger="click" placement="bottom-right"
                 @click="handleFaqAction">
                 <t-tooltip :content="$t('knowledgeEditor.faqExport.exportButton')" placement="top">
                   <t-button variant="text" theme="default" class="content-bar-icon-btn" size="small"
-                    :loading="exportLoading">
+                    :loading="exportLoading" :aria-label="$t('knowledgeEditor.faqExport.exportButton')">
                     <template #icon><t-icon name="download" size="16px" /></template>
                   </t-button>
                 </t-tooltip>
@@ -138,10 +139,11 @@
               <!-- 检索 -->
               <t-tooltip :content="$t('knowledgeEditor.faq.searchTest')" placement="top">
                 <t-button variant="text" theme="default" class="content-bar-icon-btn" size="small"
-                  @click="handleFaqAction({ value: 'search' })">
+                  :aria-label="$t('knowledgeEditor.faq.searchTest')" @click="handleFaqAction({ value: 'search' })">
                   <template #icon><t-icon name="search" size="16px" /></template>
                 </t-button>
               </t-tooltip>
+              </ResponsiveToolbarGroup>
             </div>
           </div>
           <!-- Card List Container with Scroll -->
@@ -757,6 +759,7 @@
 </template>
 
 <script setup lang="ts">
+import ResponsiveToolbarGroup from '@/components/ResponsiveToolbarGroup.vue'
 import { ref, reactive, watch, onMounted, computed, nextTick, onUnmounted, h } from 'vue'
 import KnowledgeTagFilter from './KnowledgeTagFilter.vue'
 import { MessagePlugin, Icon as TIcon } from 'tdesign-vue-next'

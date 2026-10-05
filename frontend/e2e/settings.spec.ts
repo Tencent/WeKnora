@@ -20,7 +20,7 @@ test('knowledge settings preserve edits across directory navigation and save', a
   await page.setViewportSize({ width: 390, height: 844 })
   await mockApp(page)
   await page.goto('/platform/knowledge-bases/mobile-kb')
-  await page.locator('.kb-settings-button').click()
+  await page.getByRole('button', { name: '设置', exact: true }).click()
   const shell = page.locator('.settings-modal-shell')
   await shell.locator('.nav-item').first().click()
   const name = shell.locator('[data-guide="kb-create-name"] input')
