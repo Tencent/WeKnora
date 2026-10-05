@@ -26,6 +26,7 @@ export async function mockApp(page: Page) {
     let data: unknown = []
     if (path.endsWith('/auth/me')) data = { user, tenant, memberships: [{ tenant_id: 1, role: 'owner' }], capabilities: { can_create_tenant: true } }
     else if (path.endsWith('/knowledge/file')) data = { id: 'uploaded-mobile-file', parse_status: 'processing' }
+    else if (path.endsWith('/image-attrs/schema')) data = { version: 'attrs/2', attributes: [], default_actions: { ocr: { on: [], on_unobserved: false } } }
     else if (path.endsWith('/organizations')) data = { organizations: [], resource_counts: {} }
     else if (path.endsWith('/knowledge-bases')) data = [kb]
     else if (path.endsWith('/knowledge-bases/mobile-kb')) data = kb
@@ -46,4 +47,3 @@ export async function fitsViewport(page: Page) {
   const sizes = await page.evaluate(() => ({ viewport: document.documentElement.clientWidth, width: document.documentElement.scrollWidth }))
   expect(sizes.width).toBeLessThanOrEqual(sizes.viewport + 1)
 }
-

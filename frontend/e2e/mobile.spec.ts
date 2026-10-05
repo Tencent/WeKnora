@@ -31,4 +31,3 @@ for (const route of ['agents', 'organizations', 'artifacts', 'toolbox']) {
     await fitsViewport(page)
   })
 }
-

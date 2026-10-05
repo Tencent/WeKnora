@@ -1,6 +1,6 @@
 /* One set of viewport rules shared by the application surfaces. */
 .mobile-app-header, .mobile-composer-more, .mobile-settings-back, .mobile-wiki-directory { display: none; }
-.mobile-icon-button { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; flex-shrink: 0; border: 0; border-radius: 8px; color: var(--td-text-color-primary); background: transparent; cursor: pointer; }
+.mobile-icon-button { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; flex-shrink: 0; border: 0; border-radius: var(--app-radius-md); color: var(--td-text-color-primary); background: transparent; cursor: pointer; }
 .mobile-composer-more { display: none; }
 button:focus-visible { outline: 2px solid var(--td-brand-color); outline-offset: 2px; }
 @media (min-width: 768px) and (max-width: 1023px) {
@@ -39,7 +39,7 @@ button:focus-visible { outline: 2px solid var(--td-brand-color); outline-offset:
   :root body .settings-modal-shell .t-table { max-width: 100%; overflow-x: auto; }
   :root body .settings-modal-shell .nav-item { width: 100%; text-align: left; border: 0; font: inherit; }
   :root body .dialogue-wrap { min-width: 0; width: 100%; }
-  :root body .dialogue-title { font-size: 24px; padding: 16px; }
+  :root body .dialogue-title { font-size: var(--app-text-4xl); padding: 16px; }
   :root body .dialogue-answers { padding-left: 12px; padding-right: 12px; }
   :root body .suggested-questions-grid { grid-template-columns: 1fr; }
   :root body .input-field, :root body .input-container { max-width: 100%; min-width: 0; }
@@ -54,7 +54,7 @@ button:focus-visible { outline: 2px solid var(--td-brand-color); outline-offset:
   :root body .control-bar .model-selector-ctx { display: none; }
   :root body .markdown-content pre, :root body .wiki-reader-body pre { max-width: 100%; overflow-x: auto; }
   :root body .markdown-content table { display: block; max-width: 100%; overflow-x: auto; }
-  :root body textarea, :root body input:not([type=checkbox]):not([type=radio]) { font-size: 16px; }
+  :root body textarea, :root body input:not([type=checkbox]):not([type=radio]) { font-size: var(--app-text-xl); }
   :root body .knowledge-layout { padding: 12px 12px 0; margin: 0; gap: 12px; }
   :root body .kb-list-content, :root body .agent-list-content, :root body .organization-list-content { padding: 16px 12px; }
   :root body .kb-list-container, :root body .agent-list-container, :root body .artifact-library, :root body .organization-list-container { min-width: 0; max-width: 100%; }
@@ -104,7 +104,7 @@ button:focus-visible { outline: 2px solid var(--td-brand-color); outline-offset:
   :root body .menu-more-wrap, :root body .card-more, :root body .row-actions { opacity: 1; visibility: visible; }
   :root body .t-button:not(.t-button--size-small), :root body .t-dropdown__item { min-height: 44px; }
 }
-.mobile-graph-zoom { position: absolute; top: 72px; right: 12px; z-index: 2; display: flex; flex-direction: column; border: 1px solid var(--td-component-stroke); border-radius: 8px; background: var(--td-bg-color-container); }
+.mobile-graph-zoom { position: absolute; bottom: 16px; left: 16px; z-index: 2; display: flex; flex-direction: column; border: 1px solid var(--td-component-stroke); border-radius: var(--app-radius-md); background: var(--td-bg-color-container); }
 @media (max-width: 767px) {
   :root body .kp-cell-dur { padding-left: 12px; }
   :root body .session-row-menu-wrap .menu-more-wrap { opacity: 1; }
@@ -115,7 +115,7 @@ button:focus-visible { outline: 2px solid var(--td-brand-color); outline-offset:
   :root body .settings-modal-shell .setting-info, :root body .settings-modal-shell .setting-control { max-width: 100%; width: 100%; }
   :root body .settings-modal-shell .text-control-group, :root body .settings-modal-shell .relation-item, :root body .model-select-row { flex-wrap: wrap; }
   :root body .settings-modal-shell .text-control-group > * { max-width: 100%; }
-  :root body .rich-input-container textarea { font-size: 16px; }
+  :root body .rich-input-container textarea { font-size: var(--app-text-xl); }
   :root body .session-row-menu-wrap { flex-basis: 44px; width: 44px; height: 44px; opacity: 1; pointer-events: auto; }
   :root body .session-fork-indicator { display: none; }
 }
@@ -128,16 +128,16 @@ button:focus-visible { outline: 2px solid var(--td-brand-color); outline-offset:
 }
 .document-tabs { display: inline-flex; align-items: center; gap: 4px; }
 @media (max-width: 767px) {
-  :root body .document-header .document-breadcrumb { flex-wrap: wrap; font-size: 18px; gap: 4px; }
+  :root body .document-header .document-breadcrumb { flex-wrap: wrap; font-size: var(--app-text-2xl); gap: 4px; }
   :root body .document-header .document-title-row { align-items: flex-start; }
   :root body .document-header .breadcrumb-link { white-space: nowrap; min-width: 0; }
   :root body .document-header .breadcrumb-link.dropdown { max-width: 220px; }
   :root body .breadcrumb-link.dropdown > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   :root body .document-header .breadcrumb-separator { flex-shrink: 0; }
-  :root body .document-tabs { flex-basis: 100%; font-size: 16px; }
+  :root body .document-tabs { flex-basis: 100%; font-size: var(--app-text-xl); }
   :root body .document-tabs .breadcrumb-tab { min-height: 44px; white-space: nowrap; }
   :root body .wiki-graph-legend { top: auto; right: auto; }
-  :root body .mobile-graph-zoom { z-index: 4; }
+  :root body .mobile-graph-zoom { top: 72px; right: 12px; bottom: auto; left: auto; z-index: 4; }
   :root body .wiki-rev-layout { flex-direction: column; }
   :root body .wiki-rev-list { width: 100%; max-height: 28dvh; flex-shrink: 0; border-right: 0; }
   :root body .wiki-rev-detail { min-width: 0; }

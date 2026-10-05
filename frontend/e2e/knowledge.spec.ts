@@ -68,3 +68,14 @@ test('file selection, confirmation and upload panel survive navigation', async (
   await expect(page.locator('.upload-tasks-panel')).toBeVisible()
   await fitsViewport(page)
 })
+
+ test('desktop graph zoom controls do not overlap the legend', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await mockApp(page)
+  await page.goto('/platform/knowledge-bases/mobile-kb?tab=graph')
+  await expect(page.locator('.wiki-graph-legend')).toBeVisible()
+  const graph = page.locator('.wiki-graph-canvas svg .graph-root')
+  const before = await graph.getAttribute('transform')
+  await page.getByRole('button', { name: '放大', exact: true }).click()
+  await expect(graph).not.toHaveAttribute('transform', before || '')
+})
