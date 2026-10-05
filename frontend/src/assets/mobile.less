@@ -254,7 +254,12 @@ button:focus-visible { outline: 2px solid var(--td-brand-color); outline-offset:
 }
 
 .composer-submission-error { margin: 8px 14px; color: var(--td-error-color); font-size: var(--app-text-base); }
-.new-chat-pending { display: flex; align-items: center; gap: 8px; margin: 0; overflow-wrap: anywhere; color: var(--td-text-color-secondary); }
+
+.dialogue-answers.is-submitting { align-self: stretch; justify-content: flex-start; height: 100%; min-height: 0; }
+.new-chat-conversation { flex: 1; min-height: 0; overflow-y: auto; width: 100%; padding: 16px; box-sizing: border-box; }
+.new-chat-question { margin-left: auto; width: fit-content; max-width: 85%; padding: 12px 16px; border-radius: var(--app-radius-lg); background: var(--td-bg-color-secondarycontainer); color: var(--td-text-color-primary); white-space: pre-wrap; overflow-wrap: anywhere; }
+.new-chat-progress { display: flex; align-items: center; gap: 8px; margin-top: 24px; color: var(--td-text-color-secondary); }
+
 @media (max-width: 767px) {
   :root body .suggested-question-card:active { transform: translateY(1px); border-color: var(--td-brand-color); }
   :root body .chat .msg-item-wrapper { animation: chat-message-arrive var(--app-motion-base) cubic-bezier(0.16, 1, 0.3, 1); }

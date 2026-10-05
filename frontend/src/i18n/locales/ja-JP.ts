@@ -2981,6 +2981,7 @@ export default {
     pickFailed: '選択したパスを開けませんでした',
     messages: {
       createFailed: 'セッションの作成に失敗しました',
+      navigationError: '会話は作成されましたが、ページを開けませんでした。再試行してください。',
       createError: 'セッションの作成に失敗しました。しばらくしてから再試行してください'
     }
   },
