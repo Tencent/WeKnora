@@ -56,3 +56,46 @@ test('history renders long code and references without widening the phone', asyn
   await fitsViewport(page)
   await expect(page.locator('[data-guide="chat-send"]')).toBeInViewport()
 })
+
+for (const width of [360, 390, 430]) {
+  test(`composer grows for typing and contracts when empty at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 844 })
+    await mockApp(page)
+    await page.goto('/platform/creatChat')
+    const composer = page.locator('[data-guide="chat-input"]')
+    const input = composer.locator('textarea')
+    const idle = (await composer.boundingBox())!.height
+    expect(idle).toBeLessThan(130)
+    await input.focus()
+    await expect(composer).toHaveClass(/composer-focused/)
+    await page.waitForTimeout(220)
+    expect((await composer.boundingBox())!.height).toBeGreaterThan(idle)
+    await input.fill('北冥有鱼，其名为鲲。\n鲲之大，不知其几千里也。\n庄子如何理解逍遥？\n请比较几位注家的解释。\n并引用原文。')
+    await page.waitForTimeout(220)
+    const expanded = (await composer.boundingBox())!.height
+    expect(expanded).toBeGreaterThan(idle + 35)
+    await page.locator('.mobile-composer-more').click()
+    await expect(page.locator('.control-left')).toBeVisible()
+    expect((await composer.boundingBox())!.height).toBeLessThan(400)
+    await expect(page.locator('[data-guide="chat-send"]')).toBeInViewport()
+    await input.focus()
+    await expect(page.locator('.control-left')).toBeHidden()
+    await input.fill('')
+    await input.blur()
+    await page.waitForTimeout(220)
+    expect((await composer.boundingBox())!.height).toBeLessThanOrEqual(idle + 2)
+    await fitsViewport(page)
+  })
+}
+
+test('mobile attachment picker is reachable without expanding settings', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await mockApp(page)
+  await page.goto('/platform/creatChat')
+  await expect(page.locator('.control-left')).toBeHidden()
+  const picker = page.waitForEvent('filechooser')
+  await page.locator('.mobile-composer-quick').first().click()
+  const chooser = await picker
+  expect(chooser.isMultiple()).toBe(true)
+  await expect(page.locator('.control-left')).toBeHidden()
+})
