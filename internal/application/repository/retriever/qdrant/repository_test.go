@@ -763,6 +763,74 @@ func TestKeywordsRetrieveWarnsWhenNoCollectionMatchesBaseName(t *testing.T) {
 	}
 }
 
+func TestBatchSaveRejectsMissingEmbeddings(t *testing.T) {
+	indices := []*types.IndexInfo{
+		{SourceID: "source-1", ChunkID: "chunk-1"},
+		{SourceID: "source-2", ChunkID: "chunk-2"},
+	}
+	for _, tt := range []struct {
+		name       string
+		indices    []*types.IndexInfo
+		params     map[string]any
+		wantError  string
+		wantPoints int
+	}{
+		{name: "empty input"},
+		{name: "missing parameters", indices: indices, wantError: "chunk-1"},
+		{name: "missing embedding map", indices: indices, params: map[string]any{}, wantError: "chunk-1"},
+		{
+			name: "wrong embedding map type", indices: indices,
+			params: map[string]any{fieldEmbedding: "invalid"}, wantError: "chunk-1",
+		},
+		{
+			name: "empty vectors", indices: indices,
+			params:    map[string]any{fieldEmbedding: map[string][]float32{"source-1": {}, "source-2": nil}},
+			wantError: "chunk-1",
+		},
+		{
+			name: "missing later vector", indices: indices,
+			params:    map[string]any{fieldEmbedding: map[string][]float32{"source-1": {1, 2}}},
+			wantError: "chunk-2",
+		},
+		{
+			name: "valid batch", indices: indices,
+			params:     map[string]any{fieldEmbedding: map[string][]float32{"source-1": {1, 2}, "source-2": {3, 4}}},
+			wantPoints: 2,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			var saved int
+			client := newInterceptedQdrantClient(t, func(
+				_ context.Context, method string, req, _ any, _ *grpc.ClientConn,
+				_ grpc.UnaryInvoker, _ ...grpc.CallOption,
+			) error {
+				if tt.wantPoints == 0 {
+					t.Errorf("unexpected RPC %s", method)
+				}
+				request, ok := req.(*qdrant.UpsertPoints)
+				if !ok {
+					return fmt.Errorf("unexpected RPC %s", method)
+				}
+				saved += len(request.GetPoints())
+				return nil
+			})
+			repo := &qdrantRepository{client: client, collectionBaseName: "vectors"}
+			repo.initializedCollections.Store(2, true)
+			err := repo.BatchSave(context.Background(), tt.indices, tt.params)
+			if tt.wantError != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantError) {
+					t.Errorf("expected error identifying %s, got %v", tt.wantError, err)
+				}
+			} else if err != nil {
+				t.Errorf("BatchSave: %v", err)
+			}
+			if saved != tt.wantPoints {
+				t.Errorf("saved %d points, want %d", saved, tt.wantPoints)
+			}
+		})
+	}
+}
+
 func TestPointWritesWaitForApplication(t *testing.T) {
 	indices := make([]*types.IndexInfo, 101)
 	embeddings := make(map[string][]float32, len(indices))
