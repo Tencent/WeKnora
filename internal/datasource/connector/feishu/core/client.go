@@ -27,11 +27,32 @@ type Client struct {
 	location *time.Location
 
 	httpClient *http.Client
+	// jsonLimit caps each API response body; a field so tests can lower it
+	// without materialising the production limit.
+	jsonLimit int64
 
 	// Token cache (thread-safe)
 	tokenMu    sync.Mutex
 	tokenCache string
 	tokenExpAt time.Time
+}
+
+// maxJSONResponseBytes bounds every API response body. Document and wiki
+// payloads are small; a larger body means a broken or hostile server.
+const maxJSONResponseBytes = 16 << 20
+
+// readCapped reads a response body, refusing anything larger than limit instead
+// of buffering it. Oversized payloads are reported as an error: a truncated
+// body would be indexed as if it were the whole document.
+func readCapped(body io.Reader, limit int64) ([]byte, error) {
+	data, err := io.ReadAll(io.LimitReader(body, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > limit {
+		return nil, fmt.Errorf("response exceeds maximum size (%d bytes)", limit)
+	}
+	return data, nil
 }
 
 type WikiNodeListFailure struct {
@@ -71,6 +92,7 @@ func NewClient(config *Config) *Client {
 		appSecret:  config.AppSecret,
 		location:   resolveLocation(config.Timezone),
 		httpClient: datasource.NewConnectorHTTPClient(30 * time.Second),
+		jsonLimit:  maxJSONResponseBytes,
 	}
 }
 
@@ -205,7 +227,7 @@ func (c *Client) DoRequest(ctx context.Context, method, path string, body interf
 			return lastErr
 		}
 
-		respBody, readErr := io.ReadAll(resp.Body)
+		respBody, readErr := readCapped(resp.Body, c.jsonLimit)
 		resp.Body.Close()
 		if readErr != nil {
 			lastErr = fmt.Errorf("read response body: %w", readErr)

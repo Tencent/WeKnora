@@ -31,6 +31,10 @@ const (
 
 	// Max body we accept from get_media_info-URLs. 200MB matches IMA's largest
 	maxDownloadBytes = 200 * 1024 * 1024
+
+	// maxJSONResponseBytes bounds every API response body. Listings and document
+	// payloads are small; a larger body means a broken or hostile server.
+	maxJSONResponseBytes = 16 << 20
 )
 
 // client wraps the IMA OpenAPI. It is safe for concurrent use.
@@ -39,6 +43,9 @@ type client struct {
 	clientID   string
 	apiKey     string
 	httpClient *http.Client
+	// jsonLimit caps each API response body; a field so tests can lower it
+	// without materialising the production limit.
+	jsonLimit int64
 	// downloadClient is a separate client with a longer timeout for pulling
 	// media bodies from COS/CDN URLs returned by get_media_info.
 	downloadClient    *http.Client
@@ -53,7 +60,22 @@ func newClient(cfg *Config) *client {
 		apiKey:         cfg.APIKey,
 		httpClient:     datasource.NewConnectorHTTPClient(defaultTimeout),
 		downloadClient: datasource.NewConnectorHTTPClient(downloadTimeout),
+		jsonLimit:      maxJSONResponseBytes,
 	}
+}
+
+// readCapped reads a response body, refusing anything larger than limit instead
+// of buffering it. Oversized payloads are reported as an error: a truncated
+// body would be indexed as if it were the whole document.
+func readCapped(body io.Reader, limit int64) ([]byte, error) {
+	data, err := io.ReadAll(io.LimitReader(body, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > limit {
+		return nil, fmt.Errorf("response exceeds maximum size (%d bytes)", limit)
+	}
+	return data, nil
 }
 
 // callAPI executes an authenticated POST to /openapi/wiki/v1/<action>.
@@ -128,7 +150,7 @@ func (c *client) callAPIAt(
 			return lastErr
 		}
 
-		respBody, readErr := io.ReadAll(resp.Body)
+		respBody, readErr := readCapped(resp.Body, c.jsonLimit)
 		_ = resp.Body.Close()
 		if readErr != nil {
 			lastErr = fmt.Errorf("read response: %w", readErr)

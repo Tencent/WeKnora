@@ -420,3 +420,24 @@ func TestClient_GetDocDetail(t *testing.T) {
 		t.Errorf("Body = %q", d.Body)
 	}
 }
+
+func TestClient_DoRequest_RejectsOversizedResponse(t *testing.T) {
+	f := newFakeYuque()
+	defer f.Close()
+
+	f.mux = http.NewServeMux()
+	f.mux.HandleFunc("/api/v2/user", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write(bytes.Repeat([]byte("a"), 1<<20+1))
+	})
+	f.server.Config.Handler = f.mux
+
+	c := newClient(f.cfg())
+	c.jsonLimit = 1 << 20
+	err := c.Ping(context.Background())
+	if err == nil {
+		t.Fatal("Ping accepted a response larger than the cap, want error")
+	}
+	if !strings.Contains(err.Error(), "exceeds maximum size") {
+		t.Fatalf("error = %v, want an explicit over-limit error", err)
+	}
+}

@@ -18,6 +18,10 @@ const (
 	defaultTimeout  = 30 * time.Second
 	defaultPageSize = 100
 	userAgent       = "WeKnora-Yuque-Connector/1.0"
+
+	// maxJSONResponseBytes bounds every API response body. Listings and document
+	// payloads are small; a larger body means a broken or hostile server.
+	maxJSONResponseBytes = 16 << 20
 )
 
 // client wraps the Yuque Open API.
@@ -25,6 +29,9 @@ type client struct {
 	baseURL    string
 	token      string
 	httpClient *http.Client
+	// jsonLimit caps each API response body; a field so tests can lower it
+	// without materialising the production limit.
+	jsonLimit int64
 
 	// logTokenOnce ensures the redacted token identity is logged at most once
 	// per client lifetime (first real request), rather than on every call.
@@ -37,7 +44,22 @@ func newClient(cfg *Config) *client {
 		baseURL:    cfg.GetBaseURL(),
 		token:      cfg.APIToken,
 		httpClient: datasource.NewConnectorHTTPClient(defaultTimeout),
+		jsonLimit:  maxJSONResponseBytes,
 	}
+}
+
+// readCapped reads a response body, refusing anything larger than limit instead
+// of buffering it. Oversized payloads are reported as an error: a truncated
+// body would be indexed as if it were the whole document.
+func readCapped(body io.Reader, limit int64) ([]byte, error) {
+	data, err := io.ReadAll(io.LimitReader(body, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > limit {
+		return nil, fmt.Errorf("response exceeds maximum size (%d bytes)", limit)
+	}
+	return data, nil
 }
 
 // doRequest executes an authenticated request and decodes JSON, with retry logic
@@ -85,7 +107,7 @@ func (c *client) doRequest(ctx context.Context, method, path string, result inte
 			return lastErr
 		}
 
-		body, readErr := io.ReadAll(resp.Body)
+		body, readErr := readCapped(resp.Body, c.jsonLimit)
 		resp.Body.Close()
 		if readErr != nil {
 			lastErr = fmt.Errorf("read response body: %w", readErr)

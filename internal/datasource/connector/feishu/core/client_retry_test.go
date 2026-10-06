@@ -1,10 +1,12 @@
 package core
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -169,5 +171,22 @@ func TestParseRetryAfter(t *testing.T) {
 		if got := parseRetryAfter(tt.header, fallback); got != tt.want {
 			t.Errorf("parseRetryAfter(%q) = %v, want %v", tt.header, got, tt.want)
 		}
+	}
+}
+
+func TestDoRequest_RejectsOversizedResponse(t *testing.T) {
+	ts, cfg := retryTestServer("/open-apis/docx/v1/documents", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write(bytes.Repeat([]byte("a"), 1<<20+1))
+	})
+	defer ts.Close()
+
+	c := NewClient(cfg)
+	c.jsonLimit = 1 << 20
+	err := c.DoRequest(context.Background(), http.MethodGet, "/open-apis/docx/v1/documents", nil, &map[string]any{})
+	if err == nil {
+		t.Fatal("DoRequest accepted a response larger than the cap, want error")
+	}
+	if !strings.Contains(err.Error(), "exceeds maximum size") {
+		t.Fatalf("error = %v, want an explicit over-limit error", err)
 	}
 }
