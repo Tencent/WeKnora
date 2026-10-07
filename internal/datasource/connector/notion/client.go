@@ -238,8 +238,9 @@ func (c *notionClient) GetDataSourceInfo(ctx context.Context, dsID string) (*not
 func (c *notionClient) GetBlockChildrenFlat(ctx context.Context, blockID string) ([]notionBlock, error) {
 	var allBlocks []notionBlock
 	var startCursor string
+	seenCursors := make(map[string]struct{})
 
-	for {
+	for page := 1; ; page++ {
 		path := fmt.Sprintf("/v1/blocks/%s/children", blockID)
 		if startCursor != "" {
 			path += "?start_cursor=" + startCursor
@@ -265,7 +266,11 @@ func (c *notionClient) GetBlockChildrenFlat(ctx context.Context, blockID string)
 		if !resp.HasMore || resp.NextCursor == "" {
 			break
 		}
-		startCursor = resp.NextCursor
+		next, err := advancePaginationCursor(ctx, seenCursors, resp.NextCursor, page)
+		if err != nil {
+			return nil, fmt.Errorf("get block children for %s: %w", blockID, err)
+		}
+		startCursor = next
 	}
 
 	return allBlocks, nil
@@ -469,6 +474,32 @@ func (c *notionClient) DownloadFile(ctx context.Context, fileURL string) ([]byte
 
 // --- Shared pagination helper ---
 
+// maxPaginationHops bounds every cursor-paginated loop in this file. A vendor
+// (or gateway) that keeps answering has_more=true would otherwise keep the
+// client paging until the sync task hits its deadline; the value mirrors the
+// guard Confluence and DingTalk already carry.
+const maxPaginationHops = 10000
+
+// advancePaginationCursor validates the progress of a cursor-paginated loop
+// after page `page` (1-based) has been fetched: a cursor handed back twice
+// means the vendor is repeating a page, and page >= maxPaginationHops means
+// the listing is unbounded. Both are reported instead of being followed
+// forever, and the hop cap is also logged because it is the one failure that
+// looks like a healthy, still-running sync from the outside.
+func advancePaginationCursor(
+	ctx context.Context, seen map[string]struct{}, cursor string, page int,
+) (string, error) {
+	if page >= maxPaginationHops {
+		logger.Warnf(ctx, "[Notion] pagination exceeded %d pages; aborting", maxPaginationHops)
+		return "", fmt.Errorf("pagination exceeded %d pages", maxPaginationHops)
+	}
+	if _, exists := seen[cursor]; exists {
+		return "", fmt.Errorf("pagination repeated next_cursor %q", cursor)
+	}
+	seen[cursor] = struct{}{}
+	return cursor, nil
+}
+
 // errQueryResultTruncated reports that a paginated response was cut short by a
 // vendor-side limit, so the rows collected so far are a prefix of the result set
 // rather than all of it. Notion signals this with has_more=false plus
@@ -485,8 +516,9 @@ var errQueryResultTruncated = errors.New("notion paginated response incomplete: 
 func (c *notionClient) paginatePages(ctx context.Context, method, path string) ([]notionPage, error) {
 	var allPages []notionPage
 	var startCursor string
+	seenCursors := make(map[string]struct{})
 
-	for {
+	for page := 1; ; page++ {
 		body := map[string]interface{}{
 			"page_size": 100,
 		}
@@ -538,7 +570,11 @@ func (c *notionClient) paginatePages(ctx context.Context, method, path string) (
 		if !resp.HasMore || resp.NextCursor == "" {
 			break
 		}
-		startCursor = resp.NextCursor
+		next, err := advancePaginationCursor(ctx, seenCursors, resp.NextCursor, page)
+		if err != nil {
+			return nil, fmt.Errorf("paginate %s: %w", path, err)
+		}
+		startCursor = next
 	}
 
 	return allPages, nil
@@ -639,8 +675,9 @@ func (c *notionClient) queryDataSourceWindow(
 	ctx context.Context, path string, windowStart *time.Time,
 ) (rows []notionPage, lastCreatedTime time.Time, incompleteReason string, err error) {
 	var startCursor string
+	seenCursors := make(map[string]struct{})
 
-	for {
+	for page := 1; ; page++ {
 		body := map[string]interface{}{
 			"page_size": dataSourceQueryPageSize,
 			"sorts": []map[string]string{
@@ -695,7 +732,11 @@ func (c *notionClient) queryDataSourceWindow(
 		if !resp.HasMore || resp.NextCursor == "" {
 			return rows, lastCreatedTime, incompleteReason, nil
 		}
-		startCursor = resp.NextCursor
+		next, cursorErr := advancePaginationCursor(ctx, seenCursors, resp.NextCursor, page)
+		if cursorErr != nil {
+			return nil, time.Time{}, "", fmt.Errorf("paginate %s: %w", path, cursorErr)
+		}
+		startCursor = next
 	}
 }
 
