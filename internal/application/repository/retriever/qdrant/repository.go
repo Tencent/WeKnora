@@ -932,7 +932,9 @@ func (q *qdrantRepository) CopyIndices(ctx context.Context,
 	totalCopied := 0
 
 	for {
-		scrollResult, err := q.client.Scroll(ctx, &qdrant.ScrollPoints{
+		// Qdrant's scroll offset is inclusive, so the next page must start at
+		// the returned next_page_offset rather than at this page's last point.
+		scrollResult, nextOffset, err := q.client.ScrollAndOffset(ctx, &qdrant.ScrollPoints{
 			CollectionName: collectionName,
 			Filter: &qdrant.Filter{
 				Must: []*qdrant.Condition{
@@ -1043,13 +1045,10 @@ func (q *qdrantRepository) CopyIndices(ctx context.Context,
 				len(targetPoints), totalCopied)
 		}
 
-		if pointsCount > 0 {
-			offset = scrollResult[pointsCount-1].Id
-		}
-
-		if pointsCount < int(batchSize) {
+		if nextOffset == nil {
 			break
 		}
+		offset = nextOffset
 	}
 
 	log.Infof("[Qdrant] Index copy completed, total copied: %d", totalCopied)

@@ -762,3 +762,77 @@ func TestKeywordsRetrieveWarnsWhenNoCollectionMatchesBaseName(t *testing.T) {
 		t.Fatal("a search that never ran must not be logged as a search that found no matches")
 	}
 }
+
+// Qdrant's scroll offset is inclusive: the page that starts at an offset
+// returns that point first. CopyIndices must page with next_page_offset, or the
+// last point of every full page is copied twice.
+func TestCopyIndicesPagesWithoutDuplicates(t *testing.T) {
+	for _, total := range []int{10, 64, 65, 130, 200} {
+		t.Run(fmt.Sprintf("%d points", total), func(t *testing.T) {
+			chunkMap := make(map[string]string, total)
+			for i := range total {
+				chunkMap[fmt.Sprintf("chunk-%d", i)] = fmt.Sprintf("target-chunk-%d", i)
+			}
+
+			var copied []string
+			client := newInterceptedQdrantClient(t, func(
+				_ context.Context, method string, req, reply any, _ *grpc.ClientConn,
+				_ grpc.UnaryInvoker, _ ...grpc.CallOption,
+			) error {
+				switch request := req.(type) {
+				case *qdrant.ScrollPoints:
+					start := 0
+					if offset := request.GetOffset(); offset != nil {
+						start = int(offset.GetNum())
+					}
+					end := min(start+int(request.GetLimit()), total)
+					response := reply.(*qdrant.ScrollResponse)
+					for i := start; i < end; i++ {
+						chunkID := fmt.Sprintf("chunk-%d", i)
+						response.Result = append(response.Result, &qdrant.RetrievedPoint{
+							Id: qdrant.NewIDNum(uint64(i)),
+							Payload: newQdrantValueMap(map[string]any{
+								fieldChunkID:     chunkID,
+								fieldSourceID:    chunkID,
+								fieldKnowledgeID: "knowledge-src",
+							}),
+							Vectors: &qdrant.VectorsOutput{VectorsOptions: &qdrant.VectorsOutput_Vector{
+								Vector: &qdrant.VectorOutput{Vector: &qdrant.VectorOutput_Dense{
+									Dense: &qdrant.DenseVector{Data: []float32{1, 2}},
+								}},
+							}},
+						})
+					}
+					if end < total {
+						response.NextPageOffset = qdrant.NewIDNum(uint64(end))
+					}
+					return nil
+				case *qdrant.UpsertPoints:
+					for _, point := range request.GetPoints() {
+						copied = append(copied, point.GetPayload()[fieldChunkID].GetStringValue())
+					}
+					return nil
+				default:
+					return fmt.Errorf("unexpected RPC %s", method)
+				}
+			})
+			repo := &qdrantRepository{client: client, collectionBaseName: "vectors"}
+			repo.initializedCollections.Store(2, true)
+
+			err := repo.CopyIndices(context.Background(), "kb-src",
+				map[string]string{"knowledge-src": "knowledge-dst"}, chunkMap,
+				"kb-dst", 2, types.KnowledgeBaseTypeDocument)
+			if err != nil {
+				t.Fatalf("CopyIndices: %v", err)
+			}
+
+			if len(copied) != total {
+				t.Fatalf("copied %d points, want %d", len(copied), total)
+			}
+			slices.Sort(copied)
+			if dup := len(copied) - len(slices.Compact(copied)); dup != 0 {
+				t.Fatalf("copied %d duplicate points", dup)
+			}
+		})
+	}
+}
