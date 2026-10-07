@@ -3,6 +3,7 @@ import markedKatex from 'marked-katex-extension'
 import type { Tokens } from 'marked'
 
 import type { CachedMermaidSvgHtml } from './mermaidStreaming.ts'
+import { ensureLiteralSingleTildeOnGlobalMarked } from './markedLiteralTilde.ts'
 import { normalizeSandboxArtifactRefs } from './sandboxArtifactRefs.ts'
 import {
   collapseStandaloneCitationParagraphs,
@@ -49,18 +50,7 @@ export type RenderChatMarkdownOptions = {
 export function configureMarkedForChatMarkdown(): void {
   if (markedConfigured) return
   marked.use({ breaks: true, gfm: true })
-  // marked's GFM `del` tokenizer matches a lone `~` (e.g. the range
-  // `2020~2035`), turning it into strikethrough. Override it so a `~~`-prefixed
-  // run returns `false` and falls back to the built-in rule, while anything
-  // else returns `undefined` and renders the `~` as literal text.
-  marked.use({
-    tokenizer: {
-      del(src: string) {
-        if (src.startsWith('~~')) return false
-        return undefined
-      },
-    },
-  })
+  ensureLiteralSingleTildeOnGlobalMarked()
   marked.use(markedKatex({ throwOnError: false, nonStandard: true }))
   markedConfigured = true
 }

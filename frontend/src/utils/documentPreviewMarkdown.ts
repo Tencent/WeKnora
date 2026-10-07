@@ -3,6 +3,7 @@ import { Marked, Renderer } from 'marked'
 import markedKatex from 'marked-katex-extension'
 
 import { domPurifyAllowedUriRegexp } from './markdownDomPurify.ts'
+import { literalSingleTildeExtension } from './markedLiteralTilde.ts'
 import { escapeHTML, safeMarkdownToHTML, sanitizeDocumentPreviewHTML } from './security.ts'
 
 const PREVIEW_IMAGE_ATTRIBUTES = 'loading="lazy" decoding="async" fetchpriority="low"'
@@ -50,18 +51,7 @@ const previewMarked = new Marked({
   renderer: createPreviewMarkdownRenderer(),
 })
 previewMarked.use(markedKatex({ throwOnError: false, nonStandard: true }))
-// marked's GFM `del` tokenizer matches a lone `~` (e.g. the range
-// `2020~2035`), turning it into strikethrough. Override it so a `~~`-prefixed
-// run returns `false` and falls back to the built-in rule, while anything
-// else returns `undefined` and renders the `~` as literal text.
-previewMarked.use({
-  tokenizer: {
-    del(src: string) {
-      if (src.startsWith('~~')) return false
-      return undefined
-    },
-  },
-})
+previewMarked.use(literalSingleTildeExtension)
 
 function preprocessMathDelimiters(rawText: string): string {
   if (!rawText || typeof rawText !== 'string') return ''

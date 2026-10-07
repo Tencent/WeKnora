@@ -17,6 +17,7 @@ import {
 import { MessagePlugin } from "tdesign-vue-next";
 import { sanitizeHTML, safeMarkdownToHTML, createSafeImage, isValidImageURL, hydrateProtectedFileImages, isValidURL } from '@/utils/security';
 import { normalizeSpuriousTablePrefixes } from '@/utils/markdownTableNormalize';
+import { ensureLiteralSingleTildeOnGlobalMarked } from '@/utils/markedLiteralTilde';
 import { openMermaidFullscreen } from '@/utils/mermaidViewer';
 import { diffWikiLines, type WikiDiffLine } from '@/utils/wikiLineDiff';
 import { useI18n } from 'vue-i18n';
@@ -514,18 +515,7 @@ marked.use({
   gfm: true,         // 启用 GitHub Flavored Markdown
 });
 marked.use(markedKatex({ throwOnError: false, nonStandard: true }));
-// marked's GFM `del` tokenizer matches a lone `~` (e.g. the range
-// `2020~2035`), turning it into strikethrough. Override it so a `~~`-prefixed
-// run returns `false` and falls back to the built-in rule, while anything
-// else returns `undefined` and renders the `~` as literal text.
-marked.use({
-  tokenizer: {
-    del(src: string) {
-      if (src.startsWith('~~')) return false
-      return undefined
-    },
-  },
-});
+ensureLiteralSingleTildeOnGlobalMarked();
 
 const preprocessMathDelimiters = (rawText: string): string => {
   if (!rawText || typeof rawText !== 'string') {

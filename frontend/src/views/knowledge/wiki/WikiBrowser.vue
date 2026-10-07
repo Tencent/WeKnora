@@ -797,6 +797,7 @@ import { useMenuStore } from '@/stores/menu'
 import { useSettingsStore } from '@/stores/settings'
 import { useI18n } from 'vue-i18n'
 import { marked } from 'marked'
+import { ensureLiteralSingleTildeOnGlobalMarked } from '@/utils/markedLiteralTilde'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { RecycleScroller } from 'vue-virtual-scroller'
 import { hydrateProtectedFileImages, sanitizeMarkdownHTML } from '@/utils/security'
@@ -842,18 +843,7 @@ const route = useRoute()
 const menuStore = useMenuStore()
 const settingsStore = useSettingsStore()
 
-// marked's GFM `del` tokenizer matches a lone `~` (e.g. the range
-// `2020~2035`), turning it into strikethrough. Override it so a `~~`-prefixed
-// run returns `false` and falls back to the built-in rule, while anything
-// else returns `undefined` and renders the `~` as literal text.
-marked.use({
-  tokenizer: {
-    del(src: string) {
-      if (src.startsWith('~~')) return false
-      return undefined
-    },
-  },
-})
+ensureLiteralSingleTildeOnGlobalMarked()
 
 const { t } = useI18n()
 
