@@ -438,8 +438,11 @@ func runAPIPaginated(ctx context.Context, opts *Options, fopts *cmdutil.FormatOp
 		if err != nil {
 			return cmdutil.WrapHTTP(err, "GET %s", curPath)
 		}
-		body, _ := io.ReadAll(resp.Body)
+		body, err := io.ReadAll(resp.Body)
 		resp.Body.Close()
+		if err != nil {
+			return cmdutil.Wrapf(cmdutil.CodeNetworkError, err, "read response body")
+		}
 
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 			code := cmdutil.ClassifyHTTPStatus(resp.StatusCode)
