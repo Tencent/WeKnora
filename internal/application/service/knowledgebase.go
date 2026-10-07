@@ -475,6 +475,40 @@ func (s *knowledgeBaseService) FillKnowledgeBaseCounts(ctx context.Context, kb *
 	return nil
 }
 
+// resolveUpdatedVLMConfig builds the VLM config an update request asks for.
+// Only the model-managed fields are taken from the request: the legacy
+// ModelName/BaseURL/APIKey/InterfaceType fields make the VLM client call
+// BaseURL directly, bypassing model management and its SSRF checks, so they
+// keep whatever is stored. A referenced model must exist and be a VLM model.
+func (s *knowledgeBaseService) resolveUpdatedVLMConfig(
+	ctx context.Context, current, requested types.VLMConfig,
+) (types.VLMConfig, error) {
+	next := current
+	next.Enabled = requested.Enabled
+	next.ModelID = strings.TrimSpace(requested.ModelID)
+	next.DescriptionLanguage = strings.TrimSpace(requested.DescriptionLanguage)
+	next.CustomInstructions = strings.TrimSpace(requested.CustomInstructions)
+	if !next.Enabled {
+		next.ModelID = ""
+		return next, nil
+	}
+	if next.ModelID == "" {
+		return next, nil
+	}
+	model, err := s.modelService.GetModelByID(ctx, next.ModelID)
+	if errors.Is(err, ErrModelNotFound) {
+		return types.VLMConfig{}, apperrors.NewBadRequestError("vlm_config.model_id: model not found")
+	}
+	if err != nil {
+		return types.VLMConfig{}, fmt.Errorf("get vlm model %s: %w", next.ModelID, err)
+	}
+	if model.Type != types.ModelTypeVLLM {
+		return types.VLMConfig{}, apperrors.NewBadRequestError(
+			fmt.Sprintf("vlm_config.model_id: model type is %s, want %s", model.Type, types.ModelTypeVLLM))
+	}
+	return next, nil
+}
+
 // UpdateKnowledgeBase updates a knowledge base's mutable properties.
 //
 // IMPORTANT — vector_store_id immutability contract:
@@ -573,10 +607,14 @@ func (s *knowledgeBaseService) UpdateKnowledgeBase(ctx context.Context,
 	// Apply multimodal (vision) config only when the caller provided it,
 	// mirroring the nil-means-no-change semantics used above.
 	if vlmConfig != nil {
-		if kb.VLMConfig != *vlmConfig {
+		next, err := s.resolveUpdatedVLMConfig(ctx, kb.VLMConfig, *vlmConfig)
+		if err != nil {
+			return nil, err
+		}
+		if kb.VLMConfig != next {
 			changedFields = append(changedFields, "vlm_config")
 		}
-		kb.VLMConfig = *vlmConfig
+		kb.VLMConfig = next
 	}
 	kb.UpdatedAt = time.Now()
 	kb.EnsureDefaults()
