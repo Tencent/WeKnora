@@ -85,9 +85,9 @@ func fakeChildrenPagesShape(t *testing.T, blockID string, total, pageSize int,
 	return ts, &requests
 }
 
-// captureNotionLogs redirects the project logger into a buffer for the duration
+// captureBlockCapLogs redirects the project logger into a buffer for the duration
 // of the test. ConfigureFromEnv in cleanup restores output and level.
-func captureNotionLogs(t *testing.T) *bytes.Buffer {
+func captureBlockCapLogs(t *testing.T) *bytes.Buffer {
 	t.Helper()
 
 	var buf bytes.Buffer
@@ -103,7 +103,7 @@ func captureNotionLogs(t *testing.T) *bytes.Buffer {
 // truncation must be reported instead of happening silently.
 func TestBlockCapWarnsOnTruncation(t *testing.T) {
 	ts, requests := fakeChildrenPages(t, "big-page", 1001, 100)
-	buf := captureNotionLogs(t)
+	buf := captureBlockCapLogs(t)
 
 	client := mustTestClient(t, "test-token", ts.URL)
 	blocks, err := client.GetBlockChildrenAll(context.Background(), "big-page")
@@ -148,7 +148,7 @@ func TestBlockCapWarnsWhenHasMoreHasNoCursor(t *testing.T) {
 		}
 		return false, nil
 	})
-	buf := captureNotionLogs(t)
+	buf := captureBlockCapLogs(t)
 
 	client := mustTestClient(t, "test-token", ts.URL)
 	blocks, err := client.GetBlockChildrenAll(context.Background(), "odd-page")
@@ -191,7 +191,7 @@ func TestHasMoreWithoutCursorWarnsBelowTheCap(t *testing.T) {
 		}
 		return false, nil
 	})
-	buf := captureNotionLogs(t)
+	buf := captureBlockCapLogs(t)
 
 	client := mustTestClient(t, "test-token", ts.URL)
 	blocks, err := client.GetBlockChildrenAll(context.Background(), "odd-small-page")
@@ -227,7 +227,7 @@ func TestHasMoreWithoutCursorWarnsBelowTheCap(t *testing.T) {
 // nothing, so no truncation warning may be emitted.
 func TestBlockCapExactlyAtLimitDoesNotWarn(t *testing.T) {
 	ts, _ := fakeChildrenPages(t, "exact-page", maxBlocksPerPage, 100)
-	buf := captureNotionLogs(t)
+	buf := captureBlockCapLogs(t)
 
 	client := mustTestClient(t, "test-token", ts.URL)
 	blocks, err := client.GetBlockChildrenAll(context.Background(), "exact-page")
