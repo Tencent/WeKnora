@@ -97,7 +97,8 @@ func TestUploadRecursive_PreservesFolderStructure(t *testing.T) {
 
 	svc := &scriptedUploadSvc{}
 	opts := &UploadOptions{Recursive: true, Glob: "*"}
-	require.NoError(t, runUploadRecursive(context.Background(), opts, &cmdutil.FormatOptions{Mode: cmdutil.FormatText}, svc, "kb_xxx", dir))
+	fopts := &cmdutil.FormatOptions{Mode: cmdutil.FormatText}
+	require.NoError(t, runUploadRecursive(context.Background(), opts, fopts, svc, "kb_xxx", dir))
 
 	assert.Equal(t, "", svc.customFileName["root.pdf"])
 	assert.Equal(t, "sub/nested.pdf", svc.customFileName["nested.pdf"])
@@ -112,7 +113,8 @@ func TestUploadRecursive_PreservesFolderStructure(t *testing.T) {
 // layout into the knowledge base folder tree.
 func TestKnowledgeRelativePath(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "docs")
-	assert.Equal(t, "a.pdf", knowledgeRelativePath(root, filepath.Join(root, "a.pdf")))
+	// Files directly under root keep an empty name (server uses the base name).
+	assert.Equal(t, "", knowledgeRelativePath(root, filepath.Join(root, "a.pdf")))
 	assert.Equal(t, "sub/c.pdf", knowledgeRelativePath(root, filepath.Join(root, "sub", "c.pdf")))
 	// Defensive: a path outside root yields no prefix rather than a "../" chain.
 	assert.Equal(t, "", knowledgeRelativePath(root, filepath.Join(root, "..", "outside.pdf")))
