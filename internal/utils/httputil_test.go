@@ -67,10 +67,19 @@ func TestDownloadBytesSizeLimit(t *testing.T) {
 		{name: "exact limit", contentLength: limit, size: limit, wantRead: limit},
 		{name: "exact limit without length", contentLength: -1, size: limit, wantRead: limit},
 		{name: "oversized content length", contentLength: limit + 1, size: limit + 1, wantErr: "exceeds"},
-		{name: "oversized stream without length", contentLength: -1, size: 2 * limit, wantErr: "exceeds", wantRead: limit + 1},
-		{name: "understated content length", contentLength: 1, size: 2 * limit, wantErr: "exceeds", wantRead: limit + 1},
+		{
+			name: "oversized stream without length", contentLength: -1, size: 2 * limit,
+			wantErr: "exceeds", wantRead: limit + 1,
+		},
+		{
+			name: "understated content length", contentLength: 1, size: 2 * limit,
+			wantErr: "exceeds", wantRead: limit + 1,
+		},
 		{name: "HTTP failure", status: http.StatusNotFound, contentLength: 4, size: 4, wantErr: "HTTP 404"},
-		{name: "read failure", contentLength: -1, readErr: errors.New("broken stream"), wantErr: "read body: broken stream"},
+		{
+			name: "read failure", contentLength: -1, readErr: errors.New("broken stream"),
+			wantErr: "read body: broken stream",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -79,7 +88,7 @@ func TestDownloadBytesSizeLimit(t *testing.T) {
 			if status == 0 {
 				status = http.StatusOK
 			}
-			defaultHTTPClient = &http.Client{Transport: downloadTestTransport(func(req *http.Request) (*http.Response, error) {
+			transport := downloadTestTransport(func(req *http.Request) (*http.Response, error) {
 				return &http.Response{
 					StatusCode:    status,
 					ContentLength: tt.contentLength,
@@ -87,7 +96,8 @@ func TestDownloadBytesSizeLimit(t *testing.T) {
 					Header:        make(http.Header),
 					Request:       req,
 				}, nil
-			})}
+			})
+			defaultHTTPClient = &http.Client{Transport: transport}
 
 			data, err := DownloadBytes("https://download.example/image.png")
 			if tt.wantErr != "" {
