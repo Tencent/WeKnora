@@ -31,9 +31,6 @@ type copyTestServer struct {
 	// stuck answers every scroll with the same page and the same cursor, which
 	// is what a server that never moves the cursor on looks like.
 	stuck bool
-	// endless hands back one fresh point per page and never runs out.
-	endless   bool
-	generated int
 }
 
 func copyTestUUID(i int) string {
@@ -79,11 +76,6 @@ func (s *copyTestServer) page(req *qdrant.ScrollPoints) ([]*qdrant.RetrievedPoin
 			limit = len(s.source)
 		}
 		return s.source[:limit], s.source[0].Id
-	}
-	if s.endless {
-		s.generated++
-		return []*qdrant.RetrievedPoint{copyTestSourcePoint(s.generated)},
-			qdrant.NewID(copyTestUUID(s.generated + 1))
 	}
 
 	start := 0
@@ -235,22 +227,5 @@ func TestCopyIndicesRejectsANonAdvancingCursor(t *testing.T) {
 	}
 	if upserts != 1 || written != sourceCount {
 		t.Errorf("upserts = %d writing %d points, want 1 writing %d", upserts, written, sourceCount)
-	}
-}
-
-// A source that always advances but never ends must not pin the copy task
-// until its deadline either: the walk stops at the page cap and reports it.
-func TestCopyIndicesStopsAtThePageCap(t *testing.T) {
-	server := &copyTestServer{endless: true}
-	repo, _ := server.repository(t, 0)
-	defer func() { t.Log("copy run: " + server.summary()) }()
-
-	err := runCopyTest(repo, map[string]string{"chunk-absent": "target-absent"}, 10*time.Second)
-
-	if err == nil || !strings.Contains(err.Error(), "copy indices exceeded") {
-		t.Fatalf("CopyIndices error = %v, want one about the page cap", err)
-	}
-	if scrolls, _, _ := server.counts(); scrolls != maxCopyPaginationHops {
-		t.Errorf("scrolls = %d, want %d", scrolls, maxCopyPaginationHops)
 	}
 }

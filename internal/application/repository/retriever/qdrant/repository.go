@@ -29,10 +29,6 @@ const (
 	fieldTagID            = "tag_id"
 	fieldEmbedding        = "embedding"
 	fieldIsEnabled        = "is_enabled"
-
-	// maxCopyPaginationHops caps how many scroll pages CopyIndices walks, so a
-	// source that never ends cannot pin the copy until its context deadline.
-	maxCopyPaginationHops = 10000
 )
 
 // NewQdrantRetrieveEngineRepository creates and initializes a new Qdrant repository.
@@ -876,12 +872,7 @@ func (q *qdrantRepository) CopyIndices(ctx context.Context,
 	totalCopied := 0
 	seenCursors := make(map[string]struct{})
 
-	for hops := 0; ; hops++ {
-		if hops >= maxCopyPaginationHops {
-			log.Warnf("[Qdrant] Index copy exceeded %d pages for %s; stopping",
-				maxCopyPaginationHops, sourceKnowledgeBaseID)
-			return fmt.Errorf("qdrant: copy indices exceeded %d pages", maxCopyPaginationHops)
-		}
+	for {
 		scrollResult, nextOffset, err := q.client.ScrollAndOffset(ctx, &qdrant.ScrollPoints{
 			CollectionName: collectionName,
 			Filter: &qdrant.Filter{
