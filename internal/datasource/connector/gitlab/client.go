@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/datasource"
+	"github.com/Tencent/WeKnora/internal/logger"
 )
 
 const (
@@ -38,6 +39,11 @@ const (
 func base64FileBytes(rawLimit int64) int64 {
 	return rawLimit/3*4 + (1 << 20)
 }
+
+// maxPaginationHops bounds a single paginated walk. GitLab reports the next
+// page through the X-Next-Page header, so a broken instance or reverse proxy
+// could keep advertising pages indefinitely.
+const maxPaginationHops = 10000
 
 type client struct {
 	baseURL, token string
@@ -206,13 +212,33 @@ func (c *client) project(ctx context.Context, id string) (*project, error) {
 	return &p, err
 }
 
+// trackPage records the page a paginated walk is about to request. A page that
+// was already requested means X-Next-Page is not advancing, so the walk stops
+// with an error instead of re-reading the same page; the hop cap bounds a
+// server that keeps advertising fresh page numbers.
+func trackPage(ctx context.Context, scope string, seen map[string]struct{}, page string) error {
+	if _, dup := seen[page]; dup {
+		return fmt.Errorf("gitlab %s pagination repeated page %q", scope, page)
+	}
+	if len(seen) >= maxPaginationHops {
+		logger.Warnf(ctx, "[GitLab] %s pagination exceeded %d pages; aborting", scope, maxPaginationHops)
+		return fmt.Errorf("gitlab %s pagination exceeded %d pages", scope, maxPaginationHops)
+	}
+	seen[page] = struct{}{}
+	return nil
+}
+
 func (c *client) projects(ctx context.Context) ([]project, error) {
 	q := url.Values{
 		"membership": {"true"}, "per_page": {"100"}, "page": {"1"},
 		"order_by": {"path_with_namespace"}, "sort": {"asc"},
 	}
 	var all []project
+	seen := make(map[string]struct{})
 	for {
+		if err := trackPage(ctx, "project", seen, q.Get("page")); err != nil {
+			return nil, err
+		}
 		var page []project
 		nextPage, err := c.getPage(ctx, "/projects", q, &page)
 		if err != nil {
@@ -251,7 +277,11 @@ func (c *client) tree(ctx context.Context, id, ref, dir string) ([]treeEntry, er
 	}
 	endpoint := "/projects/" + projectPath(id) + "/repository/tree"
 	var all []treeEntry
+	seen := make(map[string]struct{})
 	for {
+		if err := trackPage(ctx, "tree", seen, q.Get("page")); err != nil {
+			return nil, err
+		}
 		var page []treeEntry
 		nextPage, err := c.getPage(ctx, endpoint, q, &page)
 		if err != nil {
