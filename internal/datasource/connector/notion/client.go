@@ -274,6 +274,19 @@ func (c *notionClient) GetBlockChildrenFlat(ctx context.Context, blockID string)
 const maxBlockDepth = 5       // Limit recursion depth — deeper content has diminishing value for knowledge bases
 const maxBlocksPerPage = 1000 // Limit total blocks fetched per page to prevent runaway API calls
 
+// blocksTruncated reports whether the maxBlocksPerPage cap stopped pagination
+// while the API still offered another page — i.e. whether content was actually
+// dropped. Hitting the cap on the last page of a document is not truncation,
+// so the caller can warn without a false positive.
+//
+// hasMore alone decides that: the Notion contract only clears it together with
+// next_cursor, so requiring a non-empty cursor here would let the anomalous
+// "has_more=true, next_cursor empty" response drop content in silence. That
+// anomaly is reported separately by the caller.
+func blocksTruncated(currentCount int, hasMore bool) bool {
+	return currentCount >= maxBlocksPerPage && hasMore
+}
+
 // GetBlockChildrenAll recursively fetches all blocks under a given block ID,
 // building a tree structure with Children populated for blocks with has_children=true.
 // child_page and child_database blocks are NOT recursed into (handled by connector layer).
@@ -308,6 +321,22 @@ func (c *notionClient) getBlockChildrenRecursive(ctx context.Context, blockID st
 		}
 
 		allBlocks = append(allBlocks, blocks...)
+
+		// The cap below stops pagination unconditionally; without this warning
+		// the dropped blocks (and any child_page/child_database they contain,
+		// which the connector layer never visits) vanish silently.
+		if blocksTruncated(len(allBlocks), resp.HasMore) {
+			logger.Warnf(ctx, "[Notion] block %s exceeded %d blocks; truncating, remaining blocks are not synced",
+				blockID, maxBlocksPerPage)
+		}
+
+		// has_more promises another page, but an empty next_cursor means there is
+		// no way to ask for it: pagination stops right here even below the cap,
+		// so everything after this page would be dropped without a trace.
+		if resp.HasMore && resp.NextCursor == "" {
+			logger.Warnf(ctx, "[Notion] block %s returned has_more=true without a next_cursor after %d blocks; "+
+				"cannot fetch further pages, remaining blocks are not synced", blockID, len(allBlocks))
+		}
 
 		if len(allBlocks) >= maxBlocksPerPage || !resp.HasMore || resp.NextCursor == "" {
 			break
