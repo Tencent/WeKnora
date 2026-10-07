@@ -86,20 +86,18 @@ func TestFormater_ParseGraph_FenceVariants(t *testing.T) {
 			wantRels:  0,
 		},
 		{
-			// Issue #3600: an empty response is treated as a decline/skip —
-			// retrying the same chunk cannot produce a different answer.
+			// An empty response is usually transient (gateway hiccup, all
+			// tokens spent on reasoning), so it stays a retriable error.
 			name:        "empty input",
 			input:       "",
-			wantNodes:   0,
-			wantRels:    0,
-			wantSkipped: true,
+			wantErr:     true,
+			errContains: "empty",
 		},
 		{
 			name:        "whitespace only",
 			input:       "   \n\t  ",
-			wantNodes:   0,
-			wantRels:    0,
-			wantSkipped: true,
+			wantErr:     true,
+			errContains: "empty",
 		},
 		{
 			// Fenced body with no JSON structure at all ({ or [) is a prose

@@ -154,8 +154,8 @@ func (p *PluginExtractEntity) OnEvent(ctx context.Context,
 // Graph extraction can return many nodes and relations; 4096 tokens can truncate the JSON payload.
 const entityExtractionMaxTokens = 8192
 
-// errModelDeclined marks an LLM response that is prose (or empty) rather than
-// the requested structured output — typically a refusal for chunks that carry
+// errModelDeclined marks an LLM response that is prose rather than the
+// requested structured output — typically a refusal for chunks that carry
 // no extractable entities (table-of-contents pages, prompts with no content).
 // Retrying the same input cannot change the outcome (issue #3600).
 var errModelDeclined = errors.New("model output is prose, not extractable structured content")
@@ -395,12 +395,12 @@ func (f *Formater) formatExtraction(nodes []*types.GraphNode, relations []*types
 
 func (f *Formater) parseOutput(ctx context.Context, text string) ([]map[string]interface{}, error) {
 	if text == "" {
-		return nil, fmt.Errorf("%w: empty response", errModelDeclined)
+		return nil, errors.New("empty or invalid input string")
 	}
 	content := f.extractContent(ctx, text)
 	// logger.Debugf(ctx, "Extracted content: %s", content)
 	if content == "" {
-		return nil, fmt.Errorf("%w: empty response", errModelDeclined)
+		return nil, errors.New("empty or invalid input string")
 	}
 
 	var parsed interface{}
@@ -447,9 +447,9 @@ func (f *Formater) parseOutput(ctx context.Context, text string) ([]map[string]i
 func (f *Formater) ParseGraph(ctx context.Context, text string) (*types.GraphData, error) {
 	matchData, err := f.parseOutput(ctx, text)
 	if err != nil {
-		// A prose refusal (or empty response) means the chunk carries
-		// nothing extractable — e.g. a table-of-contents page. Return an
-		// empty graph instead of an error so the per-chunk task completes
+		// A prose refusal means the chunk carries nothing extractable —
+		// e.g. a table-of-contents page. Return an empty graph instead of
+		// an error so the per-chunk task completes
 		// successfully and asynq does not replay a doomed LLM call
 		// (issue #3600). Malformed/truncated JSON still fails normally.
 		if errors.Is(err, errModelDeclined) {
