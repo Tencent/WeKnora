@@ -183,6 +183,20 @@ class EPUBParserTest(unittest.TestCase):
              "images/pic%231.png", "images/pic#1.png"),
             ("Text/chapter.xhtml", "../images/pic%231.png",
              "images/pic#1.png", "images/pic%231.png"),
+            # Verbatim percent-looking names must beat decoded basename aliases.
+            ("chapter.xhtml", "images/my%20pic.png",
+             "images/my%20pic.png", "my pic.png"),
+            ("Text/chapter.xhtml", "../images/my%20pic.png?version=1#image",
+             "images/my%20pic.png", "my pic.png"),
+            # A literal chapter-relative path also beats a decoded root path.
+            ("Text/chapter.xhtml", "images/my%20pic.png",
+             "Text/images/my%20pic.png", "images/my pic.png"),
+            # When both exact paths exist, URI decoding still takes precedence.
+            ("Text/chapter.xhtml", "../images/my%20pic.png",
+             "images/my pic.png", "images/my%20pic.png"),
+            # Normalize encoded separators before joining to the chapter path.
+            ("Text/chapter.xhtml", "%5Cimages/pic.png",
+             "images/pic.png", "Text/images/pic.png"),
         )
         for chapter_path, image_src, image_path, decoy_path in cases:
             with self.subTest(chapter_path=chapter_path, image_src=image_src):
