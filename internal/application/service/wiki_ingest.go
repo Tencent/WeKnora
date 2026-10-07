@@ -1112,6 +1112,34 @@ func (s *wikiIngestService) reserveInflightSlot(ctx context.Context, kbID string
 	}, true
 }
 
+// wikiInflightCountScript purges expired slots exactly like the reserve
+// script does, then returns the live count. Read-mostly companion to
+// wikiInflightReserveScript so a fan-out decision sees the same view of the
+// cap a reserver would.
+const wikiInflightCountScript = `
+redis.call('ZREMRANGEBYSCORE', KEYS[1], 0, tonumber(ARGV[1]))
+return redis.call('ZCARD', KEYS[1])
+`
+
+// activeInflightSlots reports how many batches currently hold one of KB's
+// in-flight slots (standard/Redis mode). Returns -1 when the count is
+// unavailable (no Redis client, or a Redis error); callers must treat that as
+// "unknown" and stay conservative instead of scaling on a stale number.
+func (s *wikiIngestService) activeInflightSlots(ctx context.Context, kbID string) int {
+	if s.redisClient == nil {
+		return -1
+	}
+	res, err := s.redisClient.Eval(ctx, wikiInflightCountScript,
+		[]string{wikiInflightPrefix + kbID},
+		time.Now().UnixMilli(),
+	).Int()
+	if err != nil {
+		logger.Warnf(ctx, "wiki ingest: inflight count failed for KB %s: %v", kbID, err)
+		return -1
+	}
+	return res
+}
+
 // scheduleCappedRetry enqueues a single coalesced follow-up trigger after a
 // batch was turned away by the in-flight cap. asynq.TaskID collapses all
 // turned-away triggers for one KB into a single pending retry (no thundering

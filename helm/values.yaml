@@ -429,7 +429,7 @@ minio:
   # -- Enable MinIO
   enabled: false
   image:
-    repository: quay.io/minio/minio
+    repository: pgsty/minio
     tag: latest
   # -- Root user
   rootUser: minioadmin

@@ -408,6 +408,21 @@ func (h *KnowledgeHandler) CreateKnowledgeFromFile(c *gin.Context) {
 
 	channel := c.PostForm("channel")
 
+	// Reject malformed .json at the HTTP boundary so users get 400 immediately.
+	// Kept out of CreateKnowledgeFromFile so datasource sync / IM keep creating
+	// a knowledge row that fails in async parse instead of vanishing.
+	jsonCheckName := file.Filename
+	if customFileName != "" {
+		if _, base := types.SplitKnowledgeRelativePath(customFileName); base != "" {
+			jsonCheckName = base
+		}
+	}
+	if err := service.ValidateJSONUploadContent(jsonCheckName, file); err != nil {
+		logger.Errorf(ctx, "Invalid JSON upload content for %s: %v", jsonCheckName, err)
+		_ = c.Error(err)
+		return
+	}
+
 	// Create knowledge entry from the file
 	knowledge, err := h.kgService.CreateKnowledgeFromFile(ctx, kbID, file, metadata, enableMultimodel, customFileName, tagIDs, channel, processOverrides)
 	// Check for duplicate knowledge error

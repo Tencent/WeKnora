@@ -202,7 +202,7 @@ import { useRouter } from 'vue-router'
 import { useUIStore } from '@/stores/ui'
 import { useAuthStore } from '@/stores/auth'
 import { MessagePlugin } from 'tdesign-vue-next'
-import { getCurrentUser, logout as logoutApi, userInfoFromApi } from '@/api/auth'
+import { logout as logoutApi } from '@/api/auth'
 import { useI18n } from 'vue-i18n'
 import CreateTenantDialog from '@/components/CreateTenantDialog.vue'
 import {
@@ -263,12 +263,13 @@ const tenantSubmenuOpen = ref(false)
 const tenantSubmenuStyle = ref<Record<string, string>>({})
 let tenantSubmenuHideTimer: ReturnType<typeof setTimeout> | null = null
 
-// 用户信息
-const userInfo = ref({
-  username: t('common.defaultUser'),
-  email: 'user@example.com',
-  avatar: ''
-})
+// 用户信息直接读 auth store：启动时 main.ts 已用 /auth/me 校准过，
+// 这里不再各自拉一份，避免首屏两次 /auth/me。
+const userInfo = computed(() => ({
+  username: authStore.user?.username || t('common.defaultUser'),
+  email: authStore.user?.email || 'user@example.com',
+  avatar: authStore.user?.avatar || '',
+}))
 
 const userName = computed(() => userInfo.value.username)
 const userEmail = computed(() => userInfo.value.email)
@@ -524,47 +525,13 @@ const handleLogout = async () => {
   router.push('/login')
 }
 
-// 加载用户信息
+// 校准用户信息：本次会话已经用 /auth/me 校准过（main.ts 启动、登录流程）
+// 就直接复用 store；只有自动初始化等没走过 /auth/me 的路径才会真的发请求。
+// 落库逻辑（user / tenant / memberships / capabilities）统一在 auth store 里，
+// 这里不再手写一份字段拷贝。
 const loadUserInfo = async () => {
   try {
-    const response = await getCurrentUser()
-    if (response.success && response.data && response.data.user) {
-      const user = response.data.user
-      userInfo.value = {
-        username: user.username || t('common.info'),
-        email: user.email || 'user@example.com',
-        avatar: user.avatar || ''
-      }
-      // 同时更新 authStore 中的用户信息，确保包含 can_access_all_tenants /
-      // is_system_admin 等所有字段。MUST 走 userInfoFromApi 工厂——历史
-      // 上这里手写字段白名单，每加一个 user 字段都要在 5 个 setUser 调用
-      // 点同步，is_system_admin 就因为漏了这一处导致进入 platform 后
-      // user.value 的字段被 mount 时的 loadUserInfo 静默覆盖回 undefined
-      // （同时污染 localStorage），系统管理入口在 hover 工作空间触发
-      // refreshFromAuthMe 后才出现。新增字段请只改 userInfoFromApi。
-      authStore.setUser(userInfoFromApi(user))
-      // 如果返回了空间信息，也更新空间信息；tenantless 用户（/auth/me
-      // 无 tenant）必须显式清空，否则会残留上一账号/上一会话的空间快照。
-      if (response.data.tenant) {
-        authStore.setTenant({
-          id: String(response.data.tenant.id),
-          name: response.data.tenant.name,
-          owner_id: user.id,
-          created_at: response.data.tenant.created_at,
-          updated_at: response.data.tenant.updated_at
-        })
-      } else {
-        authStore.setTenant(null)
-      }
-      const membershipsSync = response.data.memberships
-      if (Array.isArray(membershipsSync)) {
-        authStore.setMemberships(membershipsSync)
-      }
-      const canCreateTenant = response.data.capabilities?.can_create_tenant
-      if (typeof canCreateTenant === 'boolean') {
-        authStore.setCanCreateTenant(canCreateTenant)
-      }
-    }
+    await authStore.ensureAuthMe()
   } catch (error) {
     console.error('Failed to load user info:', error)
   }

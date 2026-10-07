@@ -234,13 +234,11 @@ build_sandbox_image() {
 
     # Cube 从镜像直接构建模板，并以 :49983/health 探活，缺 envd 必然失败，
     # 因此 Cube 用的是注入了 envd 的变体镜像。详见 website-docs/06-development/04-sandbox-deployment.md。
-    # 固定 linux/amd64：envd 的来源镜像 cubesandbox-base 不发布 arm64。
     log_info "构建沙箱镜像 Cube 变体 (weknora-sandbox:main-cube)..."
 
     docker build \
-        --platform linux/amd64 \
-        --build-arg TARGETPLATFORM=linux/amd64 \
-        --build-arg TARGETARCH=amd64 \
+        --platform $PLATFORM \
+        --build-arg TARGETPLATFORM=$PLATFORM \
         -f docker/Dockerfile.sandbox \
         --target cube \
         -t wechatopenai/weknora-sandbox:latest-cube \
@@ -273,9 +271,8 @@ build_sandbox_image() {
     log_info "构建沙箱镜像桌面 Cube 变体 (weknora-sandbox:main-desktop-cube)..."
 
     docker build \
-        --platform linux/amd64 \
-        --build-arg TARGETPLATFORM=linux/amd64 \
-        --build-arg TARGETARCH=amd64 \
+        --platform $PLATFORM \
+        --build-arg TARGETPLATFORM=$PLATFORM \
         -f docker/Dockerfile.sandbox \
         --target desktop-cube \
         -t wechatopenai/weknora-sandbox:latest-desktop-cube \

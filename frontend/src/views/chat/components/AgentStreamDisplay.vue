@@ -652,7 +652,7 @@ import { getKnowledgeChunksSummaryHtml } from '@/utils/knowledgeChunksDisplay';
 import { getAttachmentParsingSummaryHtml } from '@/utils/attachmentParsingDisplay';
 import { useChatCitationPopover } from '@/composables/useChatCitationPopover';
 import { useChatReferencesDrawer } from '@/composables/useChatReferencesDrawer';
-import type { KnowledgeReferenceLike, ReferenceHighlightTarget } from '@/utils/referenceSources';
+import { mergeDocumentReferences, type KnowledgeReferenceLike, type ReferenceHighlightTarget } from '@/utils/referenceSources';
 import { resolveCitationChunkId } from '@/utils/citationMarkdown';
 import { citationAnchorText } from '@/utils/citationAnchor';
 import { getWikiPage, type WikiPage } from '@/api/wiki';
@@ -1159,35 +1159,6 @@ const openReferencesDrawer = (
   })
   return true
 }
-
-const mergeDocumentReferences = (refs: KnowledgeReferenceLike[]): KnowledgeReferenceLike[] => {
-  const merged = new Map<string, KnowledgeReferenceLike & { contentParts?: string[] }>();
-
-  for (const ref of refs) {
-    if (ref.chunk_type === 'web_search') continue;
-    const key = ref.knowledge_id || ref.knowledge_title || ref.id;
-    if (!key) continue;
-
-    const existing = merged.get(key);
-    const content = String(ref.content || '').trim();
-    if (!existing) {
-      merged.set(key, {
-        ...ref,
-        id: ref.knowledge_id || ref.id || key,
-        content,
-        contentParts: content ? [content] : [],
-      });
-      continue;
-    }
-
-    if (content && !existing.contentParts?.includes(content)) {
-      existing.contentParts = [...(existing.contentParts || []), content];
-      existing.content = existing.contentParts.slice(0, 3).join('\n\n');
-    }
-  }
-
-  return Array.from(merged.values()).map(({ contentParts, ...ref }) => ref);
-};
 
 const cleanToolOutputContent = (output: unknown): string => {
   const raw = typeof output === 'string' ? output : '';

@@ -105,7 +105,7 @@ func (p *GRPCDocumentReader) Close() error {
 	return nil
 }
 
-var errNotConnected = fmt.Errorf("docreader service not connected")
+var errNotConnected = status.Error(codes.Unavailable, "docreader service not connected")
 
 func (p *GRPCDocumentReader) Read(ctx context.Context, req *types.ReadRequest) (*types.ReadResult, error) {
 	p.mu.RLock()

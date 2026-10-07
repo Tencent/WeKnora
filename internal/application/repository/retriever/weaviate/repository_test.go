@@ -23,7 +23,7 @@ func weaviateErrorBody(message string) string {
 }
 
 // schemaTestServer stands in for Weaviate's schema API. A class exists once a
-// create has been answered with 200; probe runs after each existence snapshot.
+// create has been answered with 200; probe runs before every existence check.
 type schemaTestServer struct {
 	mu      sync.Mutex
 	exists  bool
@@ -39,12 +39,15 @@ func (s *schemaTestServer) repository(t *testing.T) *weaviateRepository {
 		w.Header().Set("Content-Type", "application/json")
 		switch {
 		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/v1/schema/"):
+			// Answer from the state the worker found on arrival, before the
+			// barrier releases the race. Sampling after it instead lets the
+			// winner's create turn into an "already exists" answer for whoever
+			// the scheduler runs last, so that worker skips the create
+			// entirely and fewer than `workers` creates ever reach the server.
 			s.mu.Lock()
 			s.probes++
 			exists := s.exists
 			s.mu.Unlock()
-			// Snapshot before the barrier: every initial probe must observe
-			// the missing class before any worker can create it.
 			if s.probe != nil {
 				s.probe()
 			}
