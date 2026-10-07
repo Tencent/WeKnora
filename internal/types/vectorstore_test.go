@@ -41,6 +41,72 @@ func TestIsEnvStoreID(t *testing.T) {
 	}
 }
 
+func TestQdrantEnvSettings(t *testing.T) {
+	for _, tt := range []struct {
+		name       string
+		env        map[string]string
+		connection ConnectionConfig
+		collection string
+	}{
+		{
+			name:       "defaults",
+			connection: ConnectionConfig{Host: "localhost", Port: 6334},
+			collection: "weknora_embeddings",
+		},
+		{
+			name: "custom settings",
+			env: map[string]string{
+				"QDRANT_HOST": "vectors.example", "QDRANT_PORT": "7443",
+				"QDRANT_API_KEY": "secret", "QDRANT_USE_TLS": "true",
+				"QDRANT_COLLECTION": "custom_vectors",
+			},
+			connection: ConnectionConfig{Host: "vectors.example", Port: 7443, APIKey: "secret", UseTLS: true},
+			collection: "custom_vectors",
+		},
+		{
+			name:       "invalid port uses default",
+			env:        map[string]string{"QDRANT_PORT": "invalid"},
+			connection: ConnectionConfig{Host: "localhost", Port: 6334},
+			collection: "weknora_embeddings",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			store := FindEnvVectorStore("qdrant", mockEnvLookup(tt.env), "__env_qdrant__")
+			require.NotNil(t, store)
+			assert.Equal(t, tt.connection, store.ConnectionConfig)
+			assert.Equal(t, tt.connection.GetEndpoint(), store.ConnectionConfig.GetEndpoint())
+			assert.Equal(t, tt.collection, store.IndexConfig.GetIndexNameOrDefault(QdrantRetrieverEngineType))
+		})
+	}
+}
+
+func TestQdrantEnvTLSCompatibility(t *testing.T) {
+	for _, tt := range []struct {
+		value string
+		want  bool
+	}{
+		{"", false},
+		{"false", false},
+		{" FaLsE ", false},
+		{"0", false},
+		{" 0 ", false},
+		{"true", true},
+		{" TRUE ", true},
+		{"1", true},
+		{"yes", true},
+		{"off", true},
+		{" ", true},
+	} {
+		t.Run(tt.value, func(t *testing.T) {
+			store := FindEnvVectorStore("qdrant", mockEnvLookup(map[string]string{
+				"QDRANT_USE_TLS": tt.value,
+			}), "__env_qdrant__")
+			require.NotNil(t, store)
+			assert.Equal(t, tt.want, store.ConnectionConfig.UseTLS)
+		})
+	}
+}
+
 func TestBuildEnvVectorStores(t *testing.T) {
 	envMap := map[string]string{
 		"ELASTICSEARCH_ADDR":          "http://es:9200",

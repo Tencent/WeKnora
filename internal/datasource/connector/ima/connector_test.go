@@ -276,7 +276,10 @@ func TestFetchIncremental_NoteReadFailureIsRetried(t *testing.T) {
 	}
 }
 
-func TestFetchAll_EmptyNoteIsSkipped(t *testing.T) {
+// TestFetchAll_EmptyNoteSyncsTitleOnly covers a note whose body was cleared in
+// IMA. The note still exists, so it must be emitted with its title as content:
+// skipping it would leave whatever was indexed before the edit in place.
+func TestFetchAll_EmptyNoteSyncsTitleOnly(t *testing.T) {
 	f := newFakeIMA(t)
 	f.setKB("kb1", []fakeFile{{
 		MediaID: "note_1", Title: "Blank", MediaType: mediaTypeNote,
@@ -287,8 +290,59 @@ func TestFetchAll_EmptyNoteIsSkipped(t *testing.T) {
 	if err != nil {
 		t.Fatalf("FetchAll: %v", err)
 	}
-	if len(items) != 0 {
-		t.Fatalf("an empty note must be skipped, got %s", describeItems(items))
+	note := mustFindItem(t, items, logicalKey("kb1", "", "Blank"))
+	if string(note.Content) != "# Blank\n" {
+		t.Errorf("content = %q, want the title as markdown", note.Content)
+	}
+	if note.ContentType != "text/markdown" {
+		t.Errorf("ContentType = %q, want text/markdown", note.ContentType)
+	}
+	if !strings.HasSuffix(note.FileName, ".md") {
+		t.Errorf("FileName = %q, want an .md suffix", note.FileName)
+	}
+}
+
+// TestFetchAll_ClearedNoteReplacesStaleContent is the regression test for stale
+// note bodies: after a note that was already ingested is cleared in IMA, the
+// next sync that re-reads it must emit an item with the same external id so
+// ingestion overwrites the old text instead of keeping it indexed forever.
+func TestFetchAll_ClearedNoteReplacesStaleContent(t *testing.T) {
+	f := newFakeIMA(t)
+	note := fakeFile{
+		MediaID: "note_1", Title: "Runbook", MediaType: mediaTypeNote,
+		NotebookID: "777", NoteBody: "# Runbook\nold body",
+	}
+	f.setKB("kb1", []fakeFile{note})
+
+	c := NewConnector()
+	cfg := f.config("kb1")
+	key := logicalKey("kb1", "", "Runbook")
+
+	items, err := c.FetchAll(context.Background(), cfg, []string{"kb1"})
+	if err != nil {
+		t.Fatalf("first FetchAll: %v", err)
+	}
+	first := mustFindItem(t, items, key)
+	if string(first.Content) != "# Runbook\nold body" {
+		t.Fatalf("first content = %q, want the note body", first.Content)
+	}
+
+	// The user clears the note body. The note itself still exists and keeps the
+	// same media_id, so only a sync that re-reads it can notice.
+	note.NoteBody = ""
+	f.setKB("kb1", []fakeFile{note})
+
+	items2, err := c.FetchAll(context.Background(), cfg, []string{"kb1"})
+	if err != nil {
+		t.Fatalf("second FetchAll: %v", err)
+	}
+	replacement := mustFindItem(t, items2, key)
+	if replacement.ExternalID != first.ExternalID {
+		t.Errorf("external id = %q, want the original %q so ingestion updates in place",
+			replacement.ExternalID, first.ExternalID)
+	}
+	if string(replacement.Content) != "# Runbook\n" {
+		t.Errorf("content after clearing = %q, want the title only", replacement.Content)
 	}
 }
 

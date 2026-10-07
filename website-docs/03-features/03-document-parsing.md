@@ -55,7 +55,7 @@ service DocReader {
 
 `ReadRequest` 是统一请求：设置 `file_content`/`file_name`/`file_type` 为文件模式，设置 `url`/`title` 为 URL 模式；`config.parser_engine` 指定引擎（`builtin` / `markitdown` / `opendataloader`），`config.parser_engine_overrides` 传递引擎级覆盖参数（如 `pdf_force_scanned`、`odl_hybrid`）。
 
-`ReadResponse` 返回 `markdown_content` + `repeated ImageRef image_refs`（图片以 **inline bytes** 内联返回，`image_dir_path` 恒为空字符串——图片持久化完全由 Go App 负责，proto 中原来的 `image_storage` 字段 3 已 `reserved`）。
+`ReadResponse` 返回 `markdown_content` + `repeated ImageRef image_refs`（图片以 **inline bytes** 内联返回，`image_dir_path` 恒为空字符串——图片持久化完全由 Go App 负责，proto 中原来的 `image_storage` 字段 3 已 `reserved`），以及可选的 `repeated SourceBlock source_blocks`：把 `markdown_content` 的一段（Unicode 码点偏移 `start`/`end`）映射回原文件中的位置（`locator_json`），用于引用定位，见[原文位置](#source-locators)。`ReadStreamMeta` 带同样的字段。
 
 `ReadStream` 的价值（见 `main.py::ReadStream` 与 `_iter_image_refs`）：每帧独立、体积小；服务端边解码 base64 边 `images.pop(ref_path)` 释放源数据，双方都不必同时持有全部图片，解决大扫描件 PDF 的峰值内存和消息尺寸问题。Go 侧 `internal/infrastructure/docparser/grpc_parser.go` 优先调用 `ReadStream`，遇到旧版本 docreader 返回 `Unimplemented` 时自动回退 unary `Read`。
 
@@ -313,6 +313,22 @@ Go 侧接手后（`internal/infrastructure/docparser/image_resolver.go`）：将
 
 ---
 
+### 原文位置（source locators） {#source-locators}
+
+每个分块入库时带一组 `source_locators`，记录它在原始文件中的位置，对话里点击引用就能打开原文并高亮（见[会话与对话体验](18-chat-experience.md#查看回答与来源)）。位置信息按解析引擎分别产生，统一先表达为 Markdown 区间到原文位置的映射（source block），分块后再按区间求交得到每个分块的 locator：
+
+| 来源 | 产生方式 | locator |
+| --- | --- | --- |
+| builtin PDF（`pdf_parser.py`） | 文字页用 pdfium 字形坐标分栏成行，再按行距、列表编号、句末短行分段，每段一个框；扫描页和嵌入图只记页码 | `pdf`：`page` + `bbox` |
+| MinerU（自建 / 云端 / V1） | 读取返回的 `content_list`（`page_idx` + 0–1000 归一化 `bbox`），与 Markdown 按文本对齐；仅 PDF 与图片 | `pdf`：`page` + `bbox` |
+| PaddleOCR-VL（自建 / 云端） | 逐页结果的版面块（`prunedResult.parsing_res_list`），无版面块时按页 | `pdf`：`page`（+ `bbox`） |
+| Word / PPT / Excel / CSV / EPUB（任意引擎） | Go 侧读取原文件结构（docx 正文段落与表格、pptx 幻灯片文本、工作表行、EPUB 书脊章节），与解析器输出的 Markdown 按文本对齐，不依赖具体引擎 | `docx`：`block`；`slide`：`slide`；`sheet`：`sheet` + `row_start`/`row_end`；`section`：`section` |
+| builtin Excel（`excel_parser.py`） | 直接记录每行的工作表名与行号 | `sheet` |
+| Markdown / TXT（原样透传） | 按段落记录原文字符区间 | `text`：`start`/`end` |
+| 音频 | 语音识别返回分段时间时，转写按分段逐行输出并记录时间 | `time`：`start_ms`/`end_ms` |
+
+对齐只比较字母和数字，与 Markdown 语法、空白、标点无关；解析结果在 Go 侧还会经过换行规范化、HTML 表格转换、图片地址重写，块的区间会按行比对重新映射到最终文本。每个 locator 带 `quote`（被引用文字，最多 300 字），前端据此在渲染出的原文中精确查找，并挑出与回答句子最相符的段落。旧版本 doc/ppt/xls 与网页没有结构位置，前端回退为文本查找或打开原网页。
+
 ### splitter/ 分块器与 Go 侧 chunker 的关系 {#_5-splitter-分块器与-go-侧-chunker-的关系}
 
 `docreader/splitter/splitter.py` 的 `TextSplitter` 是一个带保护模式的递归分块器：
@@ -364,6 +380,7 @@ gRPC 响应中不再返回 chunks（`ReadResponse` 没有 chunk 字段）；`Exc
 | `DOCREADER_PDF_FILTER_HIDDEN_TEXT` | true | 过滤不可见/页外文本（防 prompt injection） |
 | `DOCREADER_PDF_SANITIZE_TEXT` / `_STRIP_CHART_DEBRIS` | true | 清理占位字符 / 图表碎屑行 |
 | `DOCREADER_PDF_RENDER_VECTOR_FIGURES` | true | 将矢量图表区域渲染为 JPEG |
+| `DOCREADER_PDF_SOURCE_BOXES` | true | 记录文字页每段在页面上的框（引用高亮用）；关闭后只记页码，省去一次逐字坐标读取 |
 | `DOCREADER_PDF_WORD_GAP_WIDTH_RATIO` / `_MARGIN_COL_WIDTH_RATIO` / `_MIN_HEADING_LINE_CHARS` 等 | 0.4 / 0.12 / 8 | 版面重建微调参数（详见源码常量区） |
 
 #### Go 侧解析超时
@@ -375,8 +392,10 @@ gRPC 响应中不再返回 chunks（`ReadResponse` 没有 chunk 字段）；`Exc
 | `WEKNORA_DOCUMENT_PROCESS_TIMEOUT` | Go duration | `2h` | 单个文档处理任务的总超时 |
 | `WEKNORA_DOCREADER_CALL_TIMEOUT` | Go duration | `30m` | 单次 docreader 调用超时，须小于文档处理超时 |
 | `WEKNORA_PADDLEOCR_VL_TIMEOUT` | Go duration | `1000s` | 自建 PaddleOCR-VL 引擎的 HTTP 请求超时；空值、无效值或非正数使用默认值 |
+| `WEKNORA_MINERU_TIMEOUT` | Go duration | `1000s` | 自建 MinerU 引擎的单次解析超时（V1 API 覆盖上传到下载的整个任务，旧版覆盖 `/file_parse` 请求）；空值、无效值或非正数使用默认值 |
+| `WEKNORA_MINERU_CLOUD_TIMEOUT` | Go duration | `600s` | MinerU 云端（mineru.net）轮询解析结果的最长时间；空值、无效值或非正数使用默认值 |
 
-处理大文件时从内到外逐级留出余量，例如 PaddleOCR-VL `90m`、docreader `100m`、文档处理 `2h`。
+处理大文件时从内到外逐级留出余量，例如 PaddleOCR-VL 或 MinerU `90m`、docreader `100m`、文档处理 `2h`。
 
 #### 安全与其他 {#_6-3-安全与其他}
 
@@ -395,7 +414,7 @@ gRPC 响应中不再返回 chunks（`ReadResponse` 没有 chunk 字段）；`Exc
 
 #### 镜像与系统依赖（docker/Dockerfile.docreader） {#_7-1-镜像与系统依赖-docker-dockerfile-docreader}
 
-基础镜像 `python:3.10.18-bookworm`，双阶段构建（builder 用 `uv sync --locked` 装依赖 + `scripts/generate_proto.sh` 生成 pb 代码；runner 拷贝 venv），`EXPOSE 50051`，`CMD ["uv", "run", "-m", "docreader.main"]`。运行阶段系统依赖：
+基础镜像 `python:3.10.18-bookworm`，双阶段构建（builder 用 `uv sync --locked` 装依赖 + `docreader/scripts/generate_proto.sh` 生成 pb 代码；runner 拷贝 venv），`EXPOSE 50051`，`CMD ["uv", "run", "-m", "docreader.main"]`。运行阶段系统依赖：
 
 - **LibreOffice**（doc→docx、ppt→pptx、异常表格→xlsx 转换）+ 一串 X/字体库（libxinerama1、libfontconfig1、libcairo2、libcups2 等）；
 - **antiword**（.doc 纯文本兜底）；
@@ -484,7 +503,7 @@ V1 流程的几个细节：
 
 - 上传时附带 `sha256sum`，服务端已有相同文件时直接复用，不再传字节。
 - 只有 `upload_url` 与 `mineru_endpoint` 同源（scheme、host、端口都相同）时才附带 API Key；跨源地址（如官方 API 下发的预签名对象存储 URL）不带 Key，并照常经过 SSRF 校验。
-- 轮询从 2 秒开始指数退避，最长 30 秒一次；总时长与旧版一样是 1000 秒。超时或调用方取消时，会发 `DELETE /v1/parse/jobs/{id}` 取消服务端任务。
+- 轮询从 2 秒开始指数退避，最长 30 秒一次；总时长与旧版一样默认 1000 秒，可用 `WEKNORA_MINERU_TIMEOUT` 调整。超时或调用方取消时，会发 `DELETE /v1/parse/jobs/{id}` 取消服务端任务。
 - MinerU V1 服务的上传、任务状态都存在进程内存里，服务重启后正在轮询的任务会返回 404，本次解析直接失败。
 - 「测试连接」在 V1 服务上额外请求一次需要鉴权的 `GET /v1/parse/jobs?limit=1`，用来发现 API Key 缺失或错误（`/v1/health` 本身不校验 Key）。
 

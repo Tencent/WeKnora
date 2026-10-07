@@ -18,9 +18,11 @@ not exist yet. So the binding source lives here and `go.mod` points at it:
 replace github.com/firecrawl/anydoc/go => ./third_party/anydoc-go
 ```
 
-When the upstream module is published, delete this directory, drop the
-`replace`, and require the published version. Nothing else in WeKnora changes:
-only `internal/infrastructure/docparser/anydoc/backend_cgo.go` imports it.
+When an upstream module is published, first verify that it includes the local
+safety fixes, the 0.2.x model/error additions, and the asset-link rendering API
+listed below. Only then replace this directory and the `replace` directive.
+WeKnora's backend calls our additional `ToDocumentWithAssetLinks` API, so the
+original PR cannot replace this fork unchanged.
 
 ## Provenance
 
@@ -29,7 +31,9 @@ only `internal/infrastructure/docparser/anydoc/backend_cgo.go` imports it.
 | Upstream PR | firecrawl/anydoc#30 ("feat: add Go bindings") |
 | PR head | `1a7a6c0` |
 | Rebased onto | `4e3089b` (`chore: release v0.1.8`) |
-| anydoc crate | `0.1.9` (from crates.io, pinned with `=`) |
+| anydoc crate | `0.2.4` (from crates.io, pinned with `=`) |
+| Upstream release commit | `42bf1c5ecdde9eb0d96d6bd75a9e6698cf93b14c` |
+| Last upstream check | 2026-09-29: PR #30 is open, unmerged, and conflicting; head unchanged |
 | License | MIT (see LICENSE) |
 
 The PR branched before anydoc 0.1.7, so it was rebased onto v0.1.8 before
@@ -48,7 +52,27 @@ unchanged, and none of the local modifications below had to be re-applied. What
 1.14.2 (the jump in the number is that project unifying its Rust, Python, and
 Node versions, not fourteen major releases). See "Why 0.1.9 matters here" below.
 
-## Why 0.1.9 matters here
+## Current upgrade: 0.2.4
+
+The [0.1.9 to 0.2.4 source diff](https://github.com/firecrawl/anydoc/compare/v0.1.9...v0.2.4)
+changes the document model and parsing behavior:
+
+- 0.2.0 replaces calamine with native XLS/XLSX/XLSB readers and improves number
+  formatting, merged cells, DOCX whitespace, EPUB repeated spine parts, and
+  Markdown escaping.
+- 0.2.1/0.2.2 preserve equations as inline/block LaTeX and refine dollar escaping.
+- 0.2.3 adds inline checkboxes and spreadsheet form controls. Task-list state
+  moves from `ListItem.checked` to `Inline::Checkbox`.
+- 0.2.4 returns `NeedsOcr` for PDFs containing scanned pages, including mixed
+  PDFs that previously returned incomplete text. The Go ABI now has a distinct
+  `needs_ocr` error; page numbers remain in `ConvertError.Detail`. `NeedsOCR()`
+  lets WeKnora recognize wrapped errors without matching English messages.
+
+Node/Python/CLI hosted OCR is outside the Rust crate. WeKnora continues using
+its existing builtin docreader fallback and does not send documents to Firecrawl.
+The PDF default engine remains builtin. See [upgrade verification and benchmarks](UPGRADE-0.2.4.md).
+
+## Previous upgrade: why 0.1.9 matters here
 
 anydoc's changelog lists 0.1.9 as a single dependency bump, which reads like
 housekeeping. It is nine `pdf-inspector` fixes, and seven of them are
@@ -106,7 +130,7 @@ required" and still fall back to the docreader.
 Keep this list current: it is the diff a future upgrade has to re-apply. Items
 2–4 are bugs in the upstream PR and are worth sending back to it.
 
-1. `Cargo.toml` — depends on the published `anydoc = "=0.1.9"` crate instead of
+1. `Cargo.toml` — depends on the published `anydoc = "=0.2.4"` crate instead of
    the workspace path dependency, declares its own empty `[workspace]`, and
    repeats the upstream release profile (`lto`, `strip`), which it would
    otherwise inherit from the anydoc workspace.
@@ -124,7 +148,7 @@ Keep this list current: it is the diff a future upgrade has to re-apply. Items
    straight from the buffer is only trustworthy while the Rust encoder and this
    decoder agree; on a skew, `make([]Block, 0, n)` would exhaust memory before
    the first bounds check, turning a version mismatch into a dead process.
-4. `src/lib.rs` — the three conversion entry points run inside `guarded()`,
+4. `src/lib.rs` — conversion entry points run inside `guarded()`,
    which catches a panic and reports it as a malformed document. A panic
    escaping an `extern "C"` function aborts the process, and WeKnora parses
    untrusted uploads in the same process that serves the API. Note the limit:
@@ -136,11 +160,26 @@ Keep this list current: it is the diff a future upgrade has to re-apply. Items
 6. `scripts/build-anydoc-lib.sh` copies the pinned anydoc release to
    `patched-anydoc/` (gitignored) and re-exports `document_to_markdown`, which
    is crate-private in the published crate. It reads the version from the
-   `anydoc = "=X.Y.Z"` pin above and checks it against `version.go`, so a bump
-   is one line and cannot half-land.
+   `anydoc = "=X.Y.Z"` pin above and checks it against `version.go`, so a
+   dependency bump cannot silently leave the reported version behind.
    `src/asset_links.rs` then rewrites `ImageSource::Asset`
    to `External("images/image-N.ext")` so the official serializer emits in-place
    image links. `anydoc_to_markdown_with_asset_links` is the ABI for that path.
+7. `src/model.rs`, `model.go`, and the generated header carry block/inline math
+   and inline checkbox nodes. Existing wire tags are unchanged. The legacy
+   `ListItem.Checked` slot is retained as nil for compatibility; callers read
+   `Inline.Checked`. Asset traversal accepts math blocks. Heading text retains
+   math and checkbox content when assigning image sections.
+8. `src/lib.rs` and `errors.go` add `ERR_NEEDS_OCR` / `needs_ocr` and `NeedsOCR()`.
+   Page numbers are preserved in the detail string; structured `pages` and
+   `page_count` fields are not exposed by this Go ABI.
+9. `anydoc_to_document_with_asset_links` / `ToDocumentWithAssetLinks` parse once,
+   encode the original document (preserving asset IDs), then rewrite image
+   sources and append the official Markdown to the same owned buffer. The
+   backend uses this combined API to avoid parsing each uploaded document twice.
+   The standalone APIs remain available. Corpus tests compare both paths for
+   identical document trees and Markdown; all allocations use the existing
+   `anydoc_buffer_free` ownership contract.
 
 ## Dependency pinning and audit
 
@@ -158,10 +197,17 @@ and the same input comes back as an ordinary error;
 
 Moving the pin to 0.1.9 added no crate and removed none: `lopdf` stays at 0.42
 and the whole tree below `pdf-inspector` is unchanged, so the lockfile diff is
-three version lines and one checksum. The audit result is therefore the same
-one described below.
+three version lines and one checksum. That was the 0.1.9 dependency-only update;
+the 0.2.4 changes are described below.
 
-`cargo audit` currently reports one allowed warning: `ttf-parser` 0.25.1 is
+The 0.2.4 lockfile removes calamine and five exclusive dependencies, retains
+`pdf-inspector` 1.14.2 and `lopdf` 0.42.0, and updates `chacha20` from the yanked
+0.10.1 to 0.10.2. The latter fixes an SSE4.1 intrinsic used by the SSE2 backend
+([upstream fix](https://github.com/RustCrypto/stream-ciphers/pull/580)); other
+transitive versions are retained.
+
+`cargo audit` on 2026-09-29 reports no vulnerabilities and one allowed warning:
+`ttf-parser` 0.25.1 is
 unmaintained (`RUSTSEC-2026-0192`), pulled in transitively by the PDF stack. It
 is not a vulnerability and nothing here can fix it, so warnings report without
 failing the job.
@@ -174,8 +220,8 @@ renderer (`document_to_markdown`) is also crate-private. WeKnora keeps that
 serializer: `scripts/build-anydoc-lib.sh` re-exports the one function, then
 `anydoc_to_markdown_with_asset_links` rewrites `Asset` images to
 `ImageSource::External("images/image-N.ext")` so the official GFM output
-places them in reading order. PDF has no document model; scanned pages fall
-back to the builtin docreader so they can be rasterized for OCR.
+places them in reading order. PDF has no document model; PDFs containing scanned
+pages fall back to the builtin docreader so they can be rasterized for OCR.
 
 ## Building the archive
 

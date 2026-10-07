@@ -149,6 +149,8 @@ func (st SearchTargets) ContainsKB(kbID string) bool {
 
 // SearchResult represents the search result
 type SearchResult struct {
+	// CitationSources retains independently citeable bodies after context expansion.
+	CitationSources []*SearchResult `json:"-" gorm:"-"`
 	// ID
 	ID string `gorm:"column:id"              json:"id"`
 	// Content
@@ -210,6 +212,10 @@ type SearchResult struct {
 
 	// KnowledgeBaseID is the ID of the knowledge base this result belongs to
 	KnowledgeBaseID string `json:"knowledge_base_id,omitempty"`
+
+	// SourceLocators point back into the original file for citation
+	// navigation. Merged results carry the union of their chunks' locators.
+	SourceLocators SourceLocators `json:"source_locators,omitempty"`
 
 	// ContentRevision is the chunk edit revision at retrieval time.
 	// Internal only: used by the merge pipeline to decide whether source

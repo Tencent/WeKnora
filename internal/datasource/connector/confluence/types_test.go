@@ -75,6 +75,34 @@ func TestPageFileNameIncludesID(t *testing.T) {
 	}
 }
 
+func TestPageVersionUnknown(t *testing.T) {
+	withNumber := page{}
+	withNumber.Version.Number = 7
+	withWhen := page{}
+	withWhen.Version.When = "2026-01-02T03:04:05Z"
+	withCreatedAt := page{}
+	withCreatedAt.Version.CreatedAt = "2026-01-02T03:04:05Z"
+
+	for _, tc := range []struct {
+		name      string
+		in        page
+		want      string
+		wantKnown bool
+	}{
+		{"number", withNumber, "v:7", true},
+		{"when", withWhen, "t:2026-01-02T03:04:05Z", true},
+		{"createdAt", withCreatedAt, "t:2026-01-02T03:04:05Z", true},
+		{"unknown", page{}, "", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, known := pageVersion(tc.in)
+			if got != tc.want || known != tc.wantKnown {
+				t.Fatalf("pageVersion() = (%q, %v); want (%q, %v)", got, known, tc.want, tc.wantKnown)
+			}
+		})
+	}
+}
+
 func TestPrepareSyncCursorsPreservesFullSyncBaseline(t *testing.T) {
 	old := streamCursor(map[string]string{"p1": "v:1", "p2": "v:1"})
 	baseline, next := prepareSyncCursors(old, true)

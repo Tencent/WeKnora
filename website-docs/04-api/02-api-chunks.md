@@ -28,7 +28,7 @@ curl "$BASE/api/v1/chunks/k-1?page=1" -H "Authorization: Bearer $TOKEN"
 
 用途：按 chunk ID 获取单个分块（无需 knowledge_id）。
 
-响应：200 `{"success":true,"data":{Chunk}}`
+响应：200 `{"success":true,"data":{Chunk}}`。`Chunk.source_locators` 是分块在原始文件中的位置，结构见 [API 概览](01-api-overview.md)中的 `source_locators` 说明。
 
 ```bash
 curl $BASE/api/v1/chunks/by-id/c-1 -H "Authorization: Bearer $TOKEN"

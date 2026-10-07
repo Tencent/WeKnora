@@ -277,9 +277,10 @@ import { MessagePlugin, DialogPlugin, Icon as TIcon } from "tdesign-vue-next";
 import UserMenu from '@/components/UserMenu.vue';
 import TenantSelector from '@/components/TenantSelector.vue';
 import { useI18n } from 'vue-i18n';
-import { getSystemInfo } from '@/api/system';
+import { useEditorResourcesStore } from '@/stores/editorResources';
 
 const chatResources = useChatResourcesStore();
+const editorResources = useEditorResourcesStore();
 // Platform logos reused from IMChannelsOverviewPanel — keeps the session list
 // visually consistent with the channels admin view.
 import wecomLogo from '@/assets/img/im/wecom.svg';
@@ -1059,8 +1060,8 @@ onMounted(async () => {
     window.addEventListener(SESSION_MUTATION_EVENT, handleSessionMutation);
 
     isLiteEdition.value = authStore.isLiteMode
-    getSystemInfo().then(res => {
-        if (res.data?.edition === 'lite') {
+    editorResources.ensureSystemInfo().then(() => {
+        if (editorResources.systemInfo?.edition === 'lite') {
             isLiteEdition.value = true
             authStore.setLiteMode(true)
         }

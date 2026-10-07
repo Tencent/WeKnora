@@ -199,6 +199,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	// MCP manager for managing MCP client connections
 	logger.Debugf(ctx, "[Container] Registering MCP manager...")
 	must(container.Provide(mcp.NewMCPManager))
+	must(container.Invoke(registerMCPCleanup))
 	must(container.Provide(mcp.NewOAuthManager))
 
 	// Sandbox manager fallback is disabled; executable backends are resolved
@@ -613,6 +614,14 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	// persistence succeeded immediately before trigger enqueue failed). Re-arm
 	// them only after the matching handlers are ready.
 	must(container.Invoke(recoverPendingWikiTasks))
+
+	// BrowserSkill is registered when its manager is constructed, which is
+	// early, so reverse-order cleanup would run it last. Force the manager
+	// to exist, then run that hook first so a slow cron stop cannot leave
+	// the daemon alive until the process is killed.
+	must(container.Invoke(func(cleaner interfaces.ResourceCleaner, _ *browserskill.Manager) {
+		cleaner.Promote("BrowserSkill")
+	}))
 
 	logger.Infof(ctx, "[Container] Container initialization completed successfully")
 	return container
@@ -1398,36 +1407,16 @@ func initRetrieveEngineRegistry(
 	}
 
 	if slices.Contains(retrieveDriver, "qdrant") {
-		qdrantHost := os.Getenv("QDRANT_HOST")
-		if qdrantHost == "" {
-			qdrantHost = "localhost"
-		}
+		store := types.FindEnvVectorStore("qdrant", os.Getenv, "__env_qdrant__")
+		cc := store.ConnectionConfig
 
-		qdrantPort := 6334 // Default port
-		if portStr := os.Getenv("QDRANT_PORT"); portStr != "" {
-			if port, err := strconv.Atoi(portStr); err == nil {
-				qdrantPort = port
-			}
-		}
+		log.Infof("Connecting to Qdrant at %s:%d (TLS: %v)", cc.Host, cc.Port, cc.UseTLS)
 
-		// API key for authentication (optional)
-		qdrantAPIKey := os.Getenv("QDRANT_API_KEY")
-
-		// TLS configuration (optional, defaults to false)
-		// Enable TLS unless explicitly set to "false" or "0" (case insensitive)
-		qdrantUseTLS := false
-		if useTLSStr := os.Getenv("QDRANT_USE_TLS"); useTLSStr != "" {
-			useTLSLower := strings.ToLower(strings.TrimSpace(useTLSStr))
-			qdrantUseTLS = useTLSLower != "false" && useTLSLower != "0"
-		}
-
-		log.Infof("Connecting to Qdrant at %s:%d (TLS: %v)", qdrantHost, qdrantPort, qdrantUseTLS)
-
-		client, err := newEnvQdrantClient(qdrantHost, qdrantPort, qdrantAPIKey, qdrantUseTLS)
+		client, err := newEnvQdrantClient(cc.Host, cc.Port, cc.APIKey, cc.UseTLS)
 		if err != nil {
 			log.Errorf("Create qdrant client failed: %v", err)
 		} else {
-			qdrantRepository := qdrantRepo.NewQdrantRetrieveEngineRepository(client, nil)
+			qdrantRepository := qdrantRepo.NewQdrantRetrieveEngineRepository(client, &store.IndexConfig)
 			if err := registry.Register(
 				retriever.NewKVHybridRetrieveEngine(
 					qdrantRepository, types.QdrantRetrieverEngineType,
@@ -1684,6 +1673,15 @@ func registerLangfuseCleanup(mgr *langfuse.Manager, cleaner interfaces.ResourceC
 	})
 }
 
+// registerMCPCleanup closes MCP connections on shutdown, so remote servers see
+// their sessions end instead of waiting for them to time out.
+func registerMCPCleanup(mgr *mcp.MCPManager, cleaner interfaces.ResourceCleaner) {
+	cleaner.RegisterWithName("MCPManager", func() error {
+		mgr.Shutdown()
+		return nil
+	})
+}
+
 // initDocReaderClient initializes the DocumentReader client (lightweight API).
 func initDocReaderClient(cfg *config.Config) (interfaces.DocumentReader, error) {
 	addr := strings.TrimSpace(os.Getenv("DOCREADER_ADDR"))
@@ -1901,7 +1899,7 @@ func startDataSourceScheduler(scheduler *datasource.Scheduler, cleaner interface
 	}
 
 	cleaner.RegisterWithName("DataSourceScheduler", func() error {
-		scheduler.Stop()
+		scheduler.StopWithin(cleanupStepTimeout)
 		return nil
 	})
 }
@@ -1919,7 +1917,7 @@ func startHousekeepingService(svc *service.HousekeepingService, cleaner interfac
 		logger.Warnf(context.Background(), "[Container] housekeeping start failed: %v", err)
 	}
 	cleaner.RegisterWithName("KnowledgeHousekeeping", func() error {
-		svc.Stop()
+		svc.StopWithin(cleanupStepTimeout)
 		return nil
 	})
 }
@@ -1935,7 +1933,7 @@ func startTenantSkillReaper(svc *service.TenantSkillService, cleaner interfaces.
 		logger.Warnf(context.Background(), "[Container] tenant skill reaper start failed: %v", err)
 	}
 	cleaner.RegisterWithName("TenantSkillReaper", func() error {
-		svc.Stop()
+		svc.StopWithin(cleanupStepTimeout)
 		return nil
 	})
 }
@@ -2011,7 +2009,7 @@ func startAuditLogRetention(
 ) {
 	runner.Start(context.Background())
 	cleaner.RegisterWithName("AuditLogRetentionRunner", func() error {
-		runner.Stop()
+		runner.StopWithin(cleanupStepTimeout)
 		return nil
 	})
 }

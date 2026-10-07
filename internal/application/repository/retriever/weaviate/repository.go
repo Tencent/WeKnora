@@ -2,8 +2,10 @@ package weaviate
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
+	"net/http"
 	"slices"
 	"strings"
 
@@ -13,6 +15,7 @@ import (
 	"github.com/go-openapi/strfmt"
 	"github.com/google/uuid"
 	"github.com/weaviate/weaviate-go-client/v5/weaviate"
+	"github.com/weaviate/weaviate-go-client/v5/weaviate/fault"
 	"github.com/weaviate/weaviate-go-client/v5/weaviate/filters"
 	"github.com/weaviate/weaviate-go-client/v5/weaviate/graphql"
 	"github.com/weaviate/weaviate/entities/models"
@@ -149,13 +152,33 @@ func (w *weaviateRepository) ensureCollection(ctx context.Context, dimension int
 		}
 		//创建collection
 		if err = w.client.Schema().ClassCreator().WithClass(&classObj).Do(ctx); err != nil {
-			log.Errorf("[Weaviate] Failed to create collection: %v", err)
-			return fmt.Errorf("failed to create collection: %w", err)
+			// The first batches written at a new dimension are saved by several
+			// workers at once, so another one (or another replica) may have
+			// created the class since our check. Weaviate refuses the losing
+			// create with 422, worded differently depending on where it lost,
+			// so look again rather than parse the message. The class is
+			// created whole, so if it exists there is nothing left to do.
+			if isUnprocessableEntity(err) {
+				exists, _ = w.client.Schema().ClassExistenceChecker().WithClassName(collectionName).Do(ctx)
+			}
+			if !exists {
+				log.Errorf("[Weaviate] Failed to create collection: %v", err)
+				return fmt.Errorf("failed to create collection: %w", err)
+			}
+			log.Infof("[Weaviate] Collection %s was created concurrently", collectionName)
+		} else {
+			log.Infof("[Weaviate] Successfully created collection %s", collectionName)
 		}
-		log.Infof("[Weaviate] Successfully created collection %s", collectionName)
 	}
 	w.initializedCollections.Store(dimension, true)
 	return nil
+}
+
+// isUnprocessableEntity reports whether err is Weaviate answering 422, which is
+// how it refuses a schema change it cannot apply.
+func isUnprocessableEntity(err error) bool {
+	var clientErr *fault.WeaviateClientError
+	return errors.As(err, &clientErr) && clientErr.StatusCode == http.StatusUnprocessableEntity
 }
 
 func (w *weaviateRepository) EngineType() types.RetrieverEngineType {

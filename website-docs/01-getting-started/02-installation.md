@@ -211,7 +211,7 @@ secrets:                            # 必填项，或用 existingSecret 引用�
   systemAesKey: ""                  # 32 字节 AES-256 主密钥
 ```
 
-`global.maxFileSizeMB` 与 Compose 的 `MAX_FILE_SIZE_MB` 含义相同，chart 会把它写入 frontend（Nginx 请求体上限）、app（上传限制）与 docreader（gRPC 消息上限）三处。可选的 MinIO 镜像为 `quay.io/minio/minio`。
+`global.maxFileSizeMB` 与 Compose 的 `MAX_FILE_SIZE_MB` 含义相同，chart 会把它写入 frontend（Nginx 请求体上限）、app（上传限制）与 docreader（gRPC 消息上限）三处。可选的 MinIO 镜像为社区构建的 `pgsty/minio`。
 
 ```bash
 helm install weknora ./helm -n weknora --create-namespace \

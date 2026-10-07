@@ -353,6 +353,10 @@ type WikiPendingOp struct {
 	KnowledgeID string `json:"knowledge_id"`
 	// Ingest fields
 	Language string `json:"language,omitempty"`
+	// Attempt is the parse attempt whose finalizing counter owns this op's
+	// slot. An op that outlived a reparse must not release a slot of the
+	// newer attempt. Zero on ops queued before this field existed.
+	Attempt int `json:"attempt,omitempty"`
 	// Retract fields
 	DocTitle   string   `json:"doc_title,omitempty"`
 	DocSummary string   `json:"doc_summary,omitempty"`
@@ -587,6 +591,7 @@ func newWikiIngestPendingOp(
 		Op:          WikiOpIngest,
 		KnowledgeID: knowledgeID,
 		Language:    lang,
+		Attempt:     attemptFromCtx(ctx),
 	}
 	payloadBytes, err := json.Marshal(op)
 	if err != nil {
@@ -1107,6 +1112,34 @@ func (s *wikiIngestService) reserveInflightSlot(ctx context.Context, kbID string
 	}, true
 }
 
+// wikiInflightCountScript purges expired slots exactly like the reserve
+// script does, then returns the live count. Read-mostly companion to
+// wikiInflightReserveScript so a fan-out decision sees the same view of the
+// cap a reserver would.
+const wikiInflightCountScript = `
+redis.call('ZREMRANGEBYSCORE', KEYS[1], 0, tonumber(ARGV[1]))
+return redis.call('ZCARD', KEYS[1])
+`
+
+// activeInflightSlots reports how many batches currently hold one of KB's
+// in-flight slots (standard/Redis mode). Returns -1 when the count is
+// unavailable (no Redis client, or a Redis error); callers must treat that as
+// "unknown" and stay conservative instead of scaling on a stale number.
+func (s *wikiIngestService) activeInflightSlots(ctx context.Context, kbID string) int {
+	if s.redisClient == nil {
+		return -1
+	}
+	res, err := s.redisClient.Eval(ctx, wikiInflightCountScript,
+		[]string{wikiInflightPrefix + kbID},
+		time.Now().UnixMilli(),
+	).Int()
+	if err != nil {
+		logger.Warnf(ctx, "wiki ingest: inflight count failed for KB %s: %v", kbID, err)
+		return -1
+	}
+	return res
+}
+
 // scheduleCappedRetry enqueues a single coalesced follow-up trigger after a
 // batch was turned away by the in-flight cap. asynq.TaskID collapses all
 // turned-away triggers for one KB into a single pending retry (no thundering
@@ -1262,12 +1295,17 @@ func (s *wikiIngestService) trimPendingList(ctx context.Context, ids []int64) er
 // already zero: FinalizeSubtask guards both the decrement (count > 0) and
 // the promote (parse_status = finalizing AND count = 0), so an op enqueued
 // before this accounting shipped is a harmless no-op.
-func (s *wikiIngestService) finalizeWikiSubtask(ctx context.Context, knowledgeID string) {
+func (s *wikiIngestService) finalizeWikiSubtask(ctx context.Context, knowledgeID string, attempt int) {
 	// Wiki is only finalized when its op reaches a terminal state, so this is
 	// always an intended drain (retErr=nil, final=true). Detached context: the
 	// wiki batch worker may be mid-shutdown or have a cancelled ctx when this
 	// runs; a swallowed failure would strand the parent in "finalizing".
-	finalizeSubtaskDetached(ctx, s.knowledgeRepo, knowledgeID, "wiki", nil, false, true)
+	//
+	// An op from a superseded attempt skips the drain: reparse zeroed that
+	// attempt's counter, and draining now would release a slot of the new
+	// run, promoting it to completed before its own enrichment finished.
+	superseded := attemptSuperseded(ctx, s.tracker(), knowledgeID, attempt)
+	finalizeSubtaskDetached(ctx, s.knowledgeRepo, knowledgeID, "wiki", nil, superseded, true)
 }
 
 // requeueFailedOps records in-batch failures.
@@ -1326,7 +1364,7 @@ func (s *wikiIngestService) requeueFailedOps(ctx context.Context, payload WikiIn
 		// for deleted knowledge that has no counter to drain). The
 		// matching +1 was seeded by KnowledgePostProcess.SetFinalizing.
 		if op.Op == WikiOpIngest {
-			s.finalizeWikiSubtask(ctx, op.KnowledgeID)
+			s.finalizeWikiSubtask(ctx, op.KnowledgeID, op.Attempt)
 		}
 		logger.Warnf(ctx, "wiki ingest: dropping op %s (%s) after %d failures (limit %d)", op.KnowledgeID, op.DocTitle, count, wikiMaxFailRetries)
 		if s.deadLetterRepo != nil {

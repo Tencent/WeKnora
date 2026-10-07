@@ -4,7 +4,7 @@
       <aside
         class="chat-sandbox-panel"
         :class="{ 'is-shifted': shifted, 'is-resizing': resizing }"
-        :style="{ width: `${panel?.width.value ?? 420}px` }"
+        :style="{ width: `${panel?.width.value ?? 420}px`, '--references-shift': `${shiftWidth}px` }"
         role="complementary"
         :aria-label="t('chat.sandbox.panelTitle')"
       >
@@ -119,12 +119,15 @@ const props = withDefaults(
     agentSourceTenantId?: string | number | null
     /** 参考来源面板同开时整体左移，避免两块 fixed 面板重叠。 */
     shifted?: boolean
+    /** 参考来源面板当前宽度（查看原文时会变宽），左移的距离。 */
+    shiftWidth?: number
     artifacts?: SessionArtifactItem[]
     artifactsCollecting?: boolean
   }>(),
   {
     artifacts: () => [],
     artifactsCollecting: false,
+    shiftWidth: 420,
   },
 )
 
@@ -266,7 +269,7 @@ function resizePanel(delta: number) {
 
   &.is-shifted {
     @media (min-width: 1400px) {
-      right: 420px;
+      right: var(--references-shift, 420px);
     }
   }
 

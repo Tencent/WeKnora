@@ -1,0 +1,8 @@
+Kind,Value,Note
+Percent,15.5%,fifteen and a half
+Currency,1234.5,dollars
+Thousands,9876543,grouped
+Date,2026-03-15,ides of March
+Duration,26:30:15,over a day
+Tiny,0.0000004,four ten-millionths
+Boolean,TRUE,yes

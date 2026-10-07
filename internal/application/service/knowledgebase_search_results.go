@@ -359,6 +359,7 @@ func (s *knowledgeBaseService) buildSearchResult(chunk *types.Chunk,
 		ContextHeader:           chunk.ContextHeader,
 		MatchedContent:          matchedContent,
 		KnowledgeBaseID:         knowledge.KnowledgeBaseID,
+		SourceLocators:          chunk.SourceLocators,
 	}
 }
 

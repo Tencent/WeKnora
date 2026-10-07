@@ -238,7 +238,7 @@ func TestConnectorSuccessfulCompareStillEmitsOnlyChangedFiles(t *testing.T) {
 				require.Len(t, handler.checkpoints, 1)
 			}
 
-			require.Equal(t, "from=previous&to=head", compareQuery)
+			require.Equal(t, "from=previous&straight=true&to=head", compareQuery)
 			require.Zero(t, treeRequests)
 			require.Len(t, items, 4)
 			require.True(t, items[0].IsDeleted)

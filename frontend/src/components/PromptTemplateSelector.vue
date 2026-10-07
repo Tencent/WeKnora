@@ -74,7 +74,8 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { getPromptTemplates, type PromptTemplate, type PromptTemplatesConfig } from '@/api/system';
+import type { PromptTemplate, PromptTemplatesConfig } from '@/api/system';
+import { useEditorResourcesStore } from '@/stores/editorResources';
 
 const { t } = useI18n();
 
@@ -100,7 +101,9 @@ const emit = defineEmits<{
 const popupVisible = ref(false);
 const loading = ref(false);
 const resettingDefault = ref(false);
-const templatesConfig = ref<PromptTemplatesConfig | null>(null);
+// 模板配置走 editorResources 共享快照：智能体编辑器打开时已预取，这里直接复用。
+const editorResources = useEditorResourcesStore();
+const templatesConfig = computed<PromptTemplatesConfig | null>(() => editorResources.promptTemplates);
 
 const handleVisibleChange = async (visible: boolean) => {
   popupVisible.value = visible;
@@ -114,8 +117,7 @@ const loadTemplates = async () => {
   if (loading.value) return;
   loading.value = true;
   try {
-    const response = await getPromptTemplates();
-    templatesConfig.value = response.data;
+    await editorResources.ensurePromptTemplates();
   } catch (error) {
     console.error('Failed to load prompt templates:', error);
   } finally {
@@ -185,8 +187,7 @@ const handleResetToDefault = async () => {
   if (!templatesConfig.value) {
     resettingDefault.value = true;
     try {
-      const response = await getPromptTemplates();
-      templatesConfig.value = response.data;
+      await editorResources.ensurePromptTemplates();
     } catch (error) {
       console.error('Failed to load prompt templates:', error);
       return;

@@ -95,10 +95,11 @@ func isAtlassianCloudHost(host string) bool {
 }
 
 type space struct {
-	ID    string `json:"id"`
-	Key   string `json:"key"`
-	Name  string `json:"name"`
-	Links struct {
+	ID         string `json:"id"`
+	Key        string `json:"key"`
+	Name       string `json:"name"`
+	HomepageID string `json:"homepageId"`
+	Links      struct {
 		WebUI string `json:"webui"`
 	} `json:"_links"`
 }
@@ -125,10 +126,13 @@ type serverSpaceList struct {
 }
 
 type page struct {
-	ID     string `json:"id"`
-	Title  string `json:"title"`
-	Status string `json:"status"`
-	Space  struct {
+	ID        string `json:"id"`
+	Title     string `json:"title"`
+	Status    string `json:"status"`
+	Kind      string `json:"-"`
+	SpaceID   string `json:"spaceId"`
+	Ancestors []page `json:"ancestors"`
+	Space     struct {
 		Key  string `json:"key"`
 		Name string `json:"name"`
 	} `json:"space"`
@@ -186,6 +190,27 @@ type cloudPage struct {
 	} `json:"version"`
 	Links struct {
 		WebUI string `json:"webui"`
+	} `json:"_links"`
+}
+
+// cloudHierarchyItem is shared by Cloud direct-children, descendants, and
+// ancestors. Non-page items are intentionally retained by the API model so we
+// can filter them explicitly at the navigation/import boundary.
+type cloudHierarchyItem struct {
+	ID      string `json:"id"`
+	Type    string `json:"type"`
+	Title   string `json:"title"`
+	SpaceID string `json:"spaceId"`
+	Status  string `json:"status"`
+	Links   struct {
+		WebUI string `json:"webui"`
+	} `json:"_links"`
+}
+
+type cloudHierarchyList struct {
+	Results []cloudHierarchyItem `json:"results"`
+	Links   struct {
+		Next string `json:"next"`
 	} `json:"_links"`
 }
 
@@ -278,14 +303,37 @@ func prepareSyncCursors(old *types.SyncCursor, forceFull bool) (baseline, next c
 	return baseline, next
 }
 
-func pageVersion(p page) string {
+// removePageOwnership drops a page from every root ownership in the cursor.
+// It runs after each tombstone emit so the checkpoint mirrors the deletion;
+// otherwise the page would linger as a ghost, be re-tombstoned on every later
+// run, and eventually trip the mass-deletion guard. During a full sync the
+// deletion baseline lives in FullSyncBaseline, not SpacePages (which is being
+// rebuilt from scratch), so both maps must record the completed tombstone for
+// a retry to resume with the remaining candidates only.
+func removePageOwnership(c *cursor, pageID string) {
+	removeFromPageMap(c.SpacePages, pageID)
+	if c.FullSync {
+		removeFromPageMap(c.FullSyncBaseline, pageID)
+	}
+}
+
+func removeFromPageMap(m map[string]map[string]string, pageID string) {
+	for _, pages := range m {
+		delete(pages, pageID)
+	}
+}
+
+func pageVersion(p page) (string, bool) {
 	if p.Version.Number > 0 {
-		return fmt.Sprintf("v:%d", p.Version.Number)
+		return fmt.Sprintf("v:%d", p.Version.Number), true
 	}
 	if p.Version.When != "" {
-		return "t:" + p.Version.When
+		return "t:" + p.Version.When, true
 	}
-	return "t:" + p.Version.CreatedAt
+	if p.Version.CreatedAt != "" {
+		return "t:" + p.Version.CreatedAt, true
+	}
+	return "", false
 }
 
 func pageUpdatedAt(p page) time.Time {

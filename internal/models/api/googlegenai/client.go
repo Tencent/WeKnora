@@ -347,7 +347,7 @@ func (c *Client) processStream(
 		event, err := reader.ReadEvent()
 		if err != nil {
 			if err == io.EOF {
-				assembler.End(ch)
+				assembler.EndAtEOF(ch)
 			} else {
 				assembler.Fail(ch, err)
 			}

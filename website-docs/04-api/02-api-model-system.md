@@ -84,6 +84,25 @@ curl $BASE/api/v1/models -H "Authorization: Bearer $TOKEN"
 curl $BASE/api/v1/models/m-1 -H "Authorization: Bearer $TOKEN"
 ```
 
+### POST /api/v1/models/:id/copy
+
+用途：复制当前空间中的非内置模型配置。权限：Admin+。
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `display_name` | string | 是（`binding:"required"`） | 副本显示名；去除首尾空白后不能为空，最长 255 个字符 |
+
+服务端按路径中的源模型 ID 读取完整配置：副本的 `name` 保持与源模型一致，`type`、`source`、`description`、`parameters` 及已存凭证一并复制，不接受客户端重传。副本不会继承内置或默认状态；已激活的本地模型不会重复下载，其他未激活的本地模型会重新进入下载流程。
+
+响应：201 `{"success":true,"data":{ModelResponse}}`（响应不含密钥）
+
+源模型不存在时返回 404；源模型为内置模型、ID 或 `display_name` 无效时返回 400。
+
+```bash
+curl -X POST $BASE/api/v1/models/m-1/copy -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' -d '{"display_name":"GPT-4o 副本"}'
+```
+
 ### POST /api/v1/models/:id/debug
 
 用途：调试已保存模型（发起真实上游调用，产生费用）。权限：Admin+。form-data 字段：`input`（≤64KB）、`options`（JSON 编码调试选项：`system_prompt`、`temperature`（0~2）、`top_p`、`max_tokens`（1~8192）、`thinking`、`reasoning_effort`（`off/auto/minimal/low/medium/high/xhigh/max`，设置后覆盖 `thinking`））、`documents`（JSON 数组，≤100 条）、`file`（可选）。

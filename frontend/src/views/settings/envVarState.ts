@@ -193,14 +193,14 @@ export interface SkillSecretCard {
   skill: SkillEnvGroup
 }
 
-export function skillSecretCards(groups: ConfigEnvGroup[]): SkillSecretCard[] {
+export function skillSecretCards(groups: ConfigEnvGroup[], hostLabel = ''): SkillSecretCard[] {
   const cards: SkillSecretCard[] = []
   for (const group of groups) {
     for (const skill of group.skills || []) {
       if (!skill.vars?.length) continue
       cards.push({
         sandbox_config_id: group.sandbox_config_id,
-        sandbox_config_name: configLabel(group),
+        sandbox_config_name: configLabel(group, hostLabel),
         skill,
       })
     }

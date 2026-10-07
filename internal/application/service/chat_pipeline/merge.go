@@ -92,6 +92,7 @@ func (p *PluginMerge) OnEvent(ctx context.Context,
 	mergedChunks = p.dedup(ctx, "final_dedup", mergedChunks)
 	mergedChunks = removePartialOverlaps(ctx, mergedChunks)
 
+	p.attachCitationSources(ctx, mergedChunks)
 	chatManage.MergeResult = mergedChunks
 	return next()
 }

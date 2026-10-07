@@ -1128,8 +1128,16 @@ func (s *userService) generateTokensForTenant(
 		UpdatedAt: time.Now(),
 	}
 
-	_ = s.tokenRepo.CreateToken(ctx, accessTokenRecord)
-	_ = s.tokenRepo.CreateToken(ctx, refreshTokenRecord)
+	// Persist before returning the pair: a signed token the database has no row
+	// for is rejected by ValidateToken / RefreshToken on the very next request,
+	// so swallowing a write error turns a transient database failure into a
+	// login that looks successful and then loses the session immediately.
+	if err := s.tokenRepo.CreateToken(ctx, accessTokenRecord); err != nil {
+		return "", "", fmt.Errorf("persist access token: %w", err)
+	}
+	if err := s.tokenRepo.CreateToken(ctx, refreshTokenRecord); err != nil {
+		return "", "", fmt.Errorf("persist refresh token: %w", err)
+	}
 
 	return accessToken, refreshToken, nil
 }
@@ -1273,9 +1281,14 @@ func (s *userService) ValidateToken(ctx context.Context, tokenString string) (*t
 		return nil, 0, errors.New("terminal ticket cannot be used as access token")
 	}
 
-	// Check if token is revoked
+	// Check if token is revoked. A failed lookup is an infrastructure error and
+	// is reported as such: collapsing it into "token is revoked" claims a
+	// revocation that never happened and sends operators down the wrong path.
 	tokenRecord, err := s.tokenRepo.GetTokenByValue(ctx, tokenString)
-	if err != nil || tokenRecord == nil || tokenRecord.IsRevoked {
+	if err != nil {
+		return nil, 0, fmt.Errorf("look up token: %w", err)
+	}
+	if tokenRecord == nil || tokenRecord.IsRevoked {
 		return nil, 0, errors.New("token is revoked")
 	}
 	if tokenRecord.TokenType == "refresh_token" {
@@ -1425,9 +1438,13 @@ func (s *userService) RefreshToken(
 		return "", "", errors.New("invalid user ID in token")
 	}
 
-	// Check if token is revoked
+	// Check if token is revoked. See ValidateToken: a lookup failure must not be
+	// reported as a revocation.
 	tokenRecord, err := s.tokenRepo.GetTokenByValue(ctx, refreshTokenString)
-	if err != nil || tokenRecord == nil || tokenRecord.IsRevoked {
+	if err != nil {
+		return "", "", fmt.Errorf("look up refresh token: %w", err)
+	}
+	if tokenRecord == nil || tokenRecord.IsRevoked {
 		return "", "", errors.New("refresh token is revoked")
 	}
 	if tokenRecord.TokenType != "refresh_token" {
