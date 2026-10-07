@@ -66,16 +66,18 @@ func (p *PluginRerank) OnEvent(ctx context.Context,
 		return next()
 	}
 
-	// Get rerank model from service
+	// Get rerank model from service. A model that cannot be loaded (deleted,
+	// misconfigured) degrades to retrieval order like a failed rerank call,
+	// as the search APIs do, rather than failing every turn of the session.
 	rerankModel, err := p.modelService.GetRerankModel(ctx, chatManage.RerankModelID)
 	if err != nil {
 		diag.Outcome = types.RerankOutcomeModelUnavailable
 		diag.Error = err.Error()
-		pipelineError(ctx, "Rerank", "get_model", map[string]interface{}{
+		pipelineWarn(ctx, "Rerank", "get_model_fallback", map[string]interface{}{
 			"model_id": chatManage.RerankModelID,
 			"error":    err.Error(),
 		})
-		return ErrGetRerankModel.WithError(err)
+		return next()
 	}
 
 	rerankCtx, rerankSpan := langfuse.GetManager().StartSpan(ctx, langfuse.SpanOptions{
@@ -100,6 +102,7 @@ func (p *PluginRerank) OnEvent(ctx context.Context,
 	opts := reranking.Options{
 		Threshold:        chatManage.RerankThreshold,
 		TopK:             max(1, chatManage.RerankTopK),
+		MaxCandidates:    max(reranking.DefaultMaxCandidates, chatManage.RerankTopK),
 		FallbackMinScore: reranking.FallbackMinScore(chatManage.SearchTargets.HasRecallThresholdOverride()),
 	}
 	if chatManage.FAQPriorityEnabled {

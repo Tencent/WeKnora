@@ -178,3 +178,14 @@ func TestCleanPassageForRerank(t *testing.T) {
 		})
 	}
 }
+
+func TestModelPassage_includesHeadingBreadcrumb(t *testing.T) {
+	t.Parallel()
+	got := ModelPassage(context.Background(), &types.SearchResult{
+		Content: "7 天内可申请", KnowledgeTitle: "售后手册", ContextHeader: "退款政策 > 申请条件",
+		ChunkType: string(types.ChunkTypeText),
+	})
+	if got != "售后手册\n\n退款政策 > 申请条件\n\n7 天内可申请" {
+		t.Fatalf("passage = %q", got)
+	}
+}

@@ -118,6 +118,9 @@ func (s *knowledgeBaseService) HybridSearchWithRerank(ctx context.Context,
 	}
 	out := &types.RetrievalResult{Meta: types.RetrievalMeta{Rerank: diag}}
 
+	// Recall at least as deep as the rerank asks for: with match_count=5 and
+	// rerank.top_k=200 the pool used to stop at the 50-hit floor.
+	params.MatchCount = max(params.MatchCount, topK)
 	chunks, err := s.hybridSearchCandidates(ctx, id, params)
 	if err != nil {
 		return nil, err

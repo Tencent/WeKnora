@@ -54,6 +54,7 @@ import type { KnowledgeProcessOverrides } from '@/types/knowledgeProcess';
 import { useUploadConfirmStore, type UploadConfirmResult } from '@/stores/uploadConfirm';
 import { useUploadTasksStore } from '@/stores/uploadTasks';
 import WikiBrowser from './wiki/WikiBrowser.vue';
+import ImageGallery from './gallery/ImageGallery.vue';
 import { getWikiStats } from '@/api/wiki';
 import {
   isKnowledgeParseInFlight,
@@ -91,7 +92,7 @@ const kbLoading = ref(false);
 const docListLoading = ref(true);
 const isFAQ = computed(() => (kbInfo.value?.type || '') === 'faq');
 const isWiki = computed(() => !!kbInfo.value?.indexing_strategy?.wiki_enabled);
-const validTabs = ['documents', 'wiki', 'graph'] as const
+const validTabs = ['documents', 'wiki', 'graph', 'gallery'] as const
 type KbTab = typeof validTabs[number]
 const initTab = validTabs.includes(route.query.tab as any) ? (route.query.tab as KbTab) : 'documents'
 const activeKbTab = ref<KbTab>(initTab);
@@ -108,6 +109,27 @@ const wikiIndexingTip = computed(() => {
   if (!wikiIsIndexing.value) return ''
   return t('knowledgeEditor.wikiBrowser.queueStatus', { count: wikiStatus.value.pendingTasks || 0 })
 })
+// The views of this knowledge base, in header order. Wiki and graph only
+// exist on wiki KBs; a stale wiki/graph tab on another KB renders documents,
+// so the header marks documents active then too.
+const kbViewTabs = computed(() => {
+  const w = 'knowledgeEditor.wikiBrowser'
+  const tabs: Array<{ key: KbTab; icon: string; label: string; tip: string; indexing?: boolean }> = [
+    { key: 'documents', icon: 'file', label: t(`${w}.tabDocuments`), tip: t(`${w}.tabDocumentsTip`) },
+  ]
+  if (isWiki.value) {
+    const indexing = wikiIsIndexing.value
+    tabs.push(
+      { key: 'wiki', icon: 'book-open', label: 'Wiki', tip: indexing ? wikiIndexingTip.value : t(`${w}.tabWikiTip`), indexing },
+      { key: 'graph', icon: 'relation', label: t(`${w}.tabGraph`), tip: indexing ? wikiIndexingTip.value : t(`${w}.tabGraphTip`), indexing },
+    )
+  }
+  tabs.push({ key: 'gallery', icon: 'image', label: t(`${w}.tabGallery`), tip: t(`${w}.tabGalleryTip`) })
+  return tabs
+})
+const shownKbTab = computed<KbTab>(() =>
+  kbViewTabs.value.some((tab) => tab.key === activeKbTab.value) ? activeKbTab.value : 'documents',
+)
 const onWikiStatusChange = (payload: { pendingTasks: number; isActive: boolean; pendingIssues: number }) => {
   wikiStatus.value = payload
 }
@@ -1430,6 +1452,16 @@ const updateStatus = (analyzeList: KnowledgeCard[], delay = 1500) => {
             delete traceAvailableById[item.id];
             }
         });
+        // A requested row the batch no longer returns is gone (deleted
+        // elsewhere, replaced by a data-source sync). Left in the list it
+        // kept its in-flight status, so its spinner and this poll never ended.
+        const returnedIds = new Set((result.data as KnowledgeCard[]).map(item => item.id));
+        const goneIds = new Set(analyzeList.map(item => item.id).filter(id => !returnedIds.has(id)));
+        if (goneIds.size > 0) {
+          const before = cardList.value.length;
+          cardList.value = cardList.value.filter(card => !goneIds.has(card.id));
+          total.value = Math.max(0, total.value - (before - cardList.value.length));
+        }
       }
       if (shouldRefreshWikiStatus) {
         void fetchWikiStatusOnce();
@@ -2257,29 +2289,17 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
                 </template>
               </button>
               <t-icon name="chevron-right" class="breadcrumb-separator" />
-              <template v-if="isWiki">
-                <span :class="['breadcrumb-tab', { active: activeKbTab === 'documents' }]"
-                  @click="activeKbTab = 'documents'">{{ $t('knowledgeEditor.wikiBrowser.tabDocuments') }}</span>
-                <span class="breadcrumb-tab-sep">/</span>
-                <span :class="['breadcrumb-tab', { active: activeKbTab === 'wiki', indexing: wikiIsIndexing }]"
-                  @click="activeKbTab = 'wiki'">
-                  Wiki
-                  <t-tooltip v-if="wikiIsIndexing" :content="wikiIndexingTip" placement="bottom">
-                    <t-loading size="small" class="breadcrumb-tab-indicator" />
-                  </t-tooltip>
-                </span>
-                <span class="breadcrumb-tab-sep">/</span>
-                <t-tooltip :content="$t('knowledgeEditor.wikiBrowser.tabGraphTip')" placement="bottom">
-                  <span :class="['breadcrumb-tab', { active: activeKbTab === 'graph', indexing: wikiIsIndexing }]"
-                    @click="activeKbTab = 'graph'">
-                    {{ $t('knowledgeEditor.wikiBrowser.tabGraph') }}
-                    <t-tooltip v-if="wikiIsIndexing" :content="wikiIndexingTip" placement="bottom">
-                      <t-loading size="small" class="breadcrumb-tab-indicator" />
-                    </t-tooltip>
-                  </span>
+              <div class="kb-view-tabs" role="tablist" :aria-label="$t('knowledgeEditor.wikiBrowser.viewTabs')">
+                <t-tooltip v-for="tab in kbViewTabs" :key="tab.key" :content="tab.tip" placement="bottom">
+                  <button type="button" role="tab" class="kb-view-tab"
+                    :class="{ active: shownKbTab === tab.key, indexing: tab.indexing }"
+                    :aria-selected="shownKbTab === tab.key" @click="activeKbTab = tab.key">
+                    <t-loading v-if="tab.indexing" size="small" class="kb-view-tab__indicator" />
+                    <t-icon v-else :name="tab.icon" size="16px" />
+                    <span>{{ tab.label }}</span>
+                  </button>
                 </t-tooltip>
-              </template>
-              <span v-else class="breadcrumb-current">{{ $t('knowledgeEditor.document.title') }}</span>
+              </div>
             </h2>
             <!-- 标题行右侧的动作锚点：聚拢"信息"和"设置"两个圆形按钮。 -->
             <div class="kb-title-actions">
@@ -2316,7 +2336,12 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
           @view-graph="onViewWikiInGraph" />
       </div>
 
-      <template v-if="activeKbTab === 'documents' || !isWiki">
+      <!-- Image Gallery (4th tab) -->
+      <ImageGallery v-if="activeKbTab === 'gallery' && kbId" :knowledge-base-id="kbId" @open-source-doc="openSourceDoc" />
+
+      <!-- wiki/graph tabs only exist on wiki KBs; a stale tab (?tab= or one
+           carried over from a previous KB) falls back to documents. -->
+      <template v-if="activeKbTab === 'documents' || (!isWiki && activeKbTab !== 'gallery')">
         <div class="knowledge-main">
           <KbFolderTree v-if="showFolderTree && !folderTreeCollapsed" :tree="folderTree" :selected-path="selectedFolderPath"
             :loading="folderTreeLoading" :can-edit="canEdit" :root-label="kbInfo?.name"
@@ -2633,42 +2658,57 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
   box-sizing: border-box;
 }
 
-// Breadcrumb tab switch (文档/Wiki in breadcrumb)
-.breadcrumb-tab {
-  cursor: pointer;
-  color: var(--td-text-color-placeholder);
-  font-weight: 400;
-  transition: color var(--app-motion-fast);
+// View switch (文档 / Wiki / 图谱 / 画廊): a segmented control after the
+// breadcrumb, drawn like the documents tab's view toggle so the four views
+// read as siblings rather than as another breadcrumb level.
+.kb-view-tabs {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 2px;
+  margin-left: 2px;
+  padding: 3px;
+  border-radius: var(--app-radius-lg);
+  background: var(--td-bg-color-secondarycontainer);
+}
+
+.kb-view-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: var(--app-radius-md);
+  background: transparent;
+  color: var(--td-text-color-secondary);
+  font-family: var(--app-font-family);
+  font-size: var(--app-text-base);
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color var(--app-motion-fast) ease, background-color var(--app-motion-fast) ease;
 
   &:hover {
     color: var(--td-text-color-primary);
   }
 
   &.active {
+    background: var(--td-bg-color-container);
     color: var(--td-brand-color);
     font-weight: 600;
+    box-shadow: 0 1px 3px rgb(0 0 0 / 8%);
   }
 
-  &.indexing {
+  &:focus-visible {
+    outline: 2px solid var(--app-focus-border);
+    outline-offset: 1px;
+  }
+
+  &__indicator {
+    display: inline-flex;
     color: var(--td-brand-color);
   }
-}
-
-.breadcrumb-tab-indicator {
-  display: inline-flex;
-  align-items: center;
-  color: var(--td-brand-color);
-  font-size: var(--app-text-sm);
-  line-height: 1;
-}
-
-.breadcrumb-tab-sep {
-  margin: 0 6px;
-  color: var(--td-text-color-disabled);
-  font-weight: 400;
 }
 
 .wiki-main-area {
@@ -3092,7 +3132,9 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
   .document-breadcrumb {
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
     gap: 6px;
+    row-gap: 8px;
     margin: 0;
     font-size: var(--app-text-3xl);
     font-weight: 600;
@@ -3110,6 +3152,7 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
     display: inline-flex;
     align-items: center;
     gap: 4px;
+    white-space: nowrap;
     border-radius: var(--app-radius-sm);
     transition: all var(--app-motion-instant) ease;
 

@@ -31,7 +31,8 @@ func TestNormalizedMatchCount(t *testing.T) {
 		{name: "omitted arrives as zero", requested: 0, want: types.DefaultRetrievalTopK},
 		{name: "negative cannot index a slice", requested: -1, want: types.DefaultRetrievalTopK},
 		{name: "explicit value is honored", requested: 3, want: 3},
-		{name: "large explicit value is not clamped here", requested: 10000, want: 10000},
+		{name: "large explicit value is clamped to the pool", requested: 10000, want: maxRetrievalPoolSize},
+		{name: "overflow-sized value is clamped", requested: 1 << 62, want: maxRetrievalPoolSize},
 	}
 
 	for _, tt := range tests {
@@ -65,7 +66,7 @@ func TestIterativeRetrieve_CapsSeedTopK(t *testing.T) {
 	s := &knowledgeBaseService{}
 	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(1))
 
-	results, err := s.iterativeRetrieveWithDeduplication(ctx, groups, 100000, "q")
+	results, err := s.iterativeRetrieveWithDeduplication(ctx, groups, 100000, "q", 50)
 	require.NoError(t, err)
 	assert.Empty(t, results)
 	assert.Equal(t, maxRetrievalPoolSize, groups[0].TopK,

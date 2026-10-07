@@ -2,6 +2,7 @@ package chatpipeline
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 
@@ -180,5 +181,46 @@ func TestSearchHonorsRecallPathSwitches(t *testing.T) {
 				t.Fatalf("embedding calls = %d, want %d", svc.embedCalls, tt.wantEmbed)
 			}
 		})
+	}
+}
+
+type failingRerankModelService struct {
+	interfaces.ModelService
+}
+
+func (failingRerankModelService) GetRerankModel(context.Context, string) (rerank.Reranker, error) {
+	return nil, errors.New("model deleted")
+}
+
+// A rerank model that cannot be loaded degrades to retrieval order instead of
+// failing the turn, like a failed rerank call.
+func TestPluginRerankDegradesWhenModelUnavailable(t *testing.T) {
+	plugin := &PluginRerank{modelService: failingRerankModelService{}}
+	cm := rerankChatManage(0.3)
+
+	nextCalled := false
+	err := plugin.OnEvent(context.Background(), types.CHUNK_RERANK, cm, func() *PluginError {
+		nextCalled = true
+		return nil
+	})
+	if err != nil || !nextCalled {
+		t.Fatalf("err=%v nextCalled=%v", err, nextCalled)
+	}
+	if cm.RerankDiagnostics.Outcome != types.RerankOutcomeModelUnavailable || len(cm.SearchResult) != 2 {
+		t.Fatalf("diagnostics=%+v search=%d", cm.RerankDiagnostics, len(cm.SearchResult))
+	}
+}
+
+// Without rerank results the merge input is cut to RerankTopK, best first.
+func TestMergeFallbackKeepsRerankTopK(t *testing.T) {
+	cm := &types.ChatManage{
+		PipelineRequest: types.PipelineRequest{RerankTopK: 2},
+		PipelineState: types.PipelineState{SearchResult: []*types.SearchResult{
+			{ID: "low", Score: 0.1}, {ID: "high", Score: 0.9}, {ID: "mid", Score: 0.5},
+		}},
+	}
+	got := (&PluginMerge{}).selectInputResults(context.Background(), cm)
+	if len(got) != 2 || got[0].ID != "high" || got[1].ID != "mid" {
+		t.Fatalf("fallback input = %+v", got)
 	}
 }

@@ -19,16 +19,18 @@
 <text x="582.6666666666666" y="152" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="33" font-weight="600" fill="#101f38">用知识和工具完成任务</text>
 <text x="582.6666666666666" y="200" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="24" fill="#40536f">智能体根据任务检索知识库、搜索网页、</text>
 <text x="582.6666666666666" y="240" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="24" fill="#40536f">调用 MCP 工具与技能，在沙箱中处理文</text>
-<text x="582.6666666666666" y="280" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="24" fill="#40536f">件、运行脚本，并可跨会话记住你确认过</text>
-<text x="582.6666666666666" y="320" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="24" fill="#40536f">的偏好。</text>
+<text x="582.6666666666666" y="280" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="24" fill="#40536f">件、运行脚本，还能操作你电脑上的浏览</text>
+<text x="582.6666666666666" y="320" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="24" fill="#40536f">器，并跨会话记住你确认过的偏好。</text>
 <rect x="582.6666666666666" y="386" width="112.0" height="38" rx="7" fill="#faf6ee" stroke="#dfd1b9" stroke-width="1.5"/>
 <text x="598.6666666666666" y="412" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="20" fill="#886025">多步推理</text>
-<rect x="704.6666666666666" y="386" width="112.0" height="38" rx="7" fill="#faf6ee" stroke="#dfd1b9" stroke-width="1.5"/>
-<text x="720.6666666666666" y="412" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="20" fill="#886025">工具调用</text>
-<rect x="826.6666666666666" y="386" width="112.0" height="38" rx="7" fill="#faf6ee" stroke="#dfd1b9" stroke-width="1.5"/>
-<text x="842.6666666666666" y="412" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="20" fill="#886025">技能执行</text>
-<rect x="582.6666666666666" y="436" width="112.0" height="38" rx="7" fill="#faf6ee" stroke="#dfd1b9" stroke-width="1.5"/>
-<text x="598.6666666666666" y="462" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="20" fill="#886025">长期记忆</text>
+<rect x="704.6666666666666" y="386" width="132.0" height="38" rx="7" fill="#faf6ee" stroke="#dfd1b9" stroke-width="1.5"/>
+<text x="720.6666666666666" y="412" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="20" fill="#886025">技能与沙箱</text>
+<rect x="846.6666666666666" y="386" width="132.0" height="38" rx="7" fill="#faf6ee" stroke="#dfd1b9" stroke-width="1.5"/>
+<text x="862.6666666666666" y="412" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="20" fill="#886025">本机浏览器</text>
+<rect x="582.6666666666666" y="436" width="122.0" height="38" rx="7" fill="#faf6ee" stroke="#dfd1b9" stroke-width="1.5"/>
+<text x="598.6666666666666" y="462" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="20" fill="#886025">MCP 工具</text>
+<rect x="714.6666666666666" y="436" width="112.0" height="38" rx="7" fill="#faf6ee" stroke="#dfd1b9" stroke-width="1.5"/>
+<text x="730.6666666666666" y="462" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="20" fill="#886025">长期记忆</text>
 <rect x="1086.3333333333333" y="1" width="512.6666666666666" height="518" rx="18" fill="#ffffff" stroke="rgba(16,31,56,.12)" stroke-width="2"/>
 <rect x="1125.3333333333333" y="40" width="56" height="56" rx="12" fill="#f6f1e7"/>
 <g transform="translate(1137.3333333333333 52) scale(1.3333333333333333)" fill="none" stroke="#b8863b" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 6C9 3 5 3 2 4v15c4-1 7 0 10 2 3-2 6-3 10-2V4c-3-1-7-1-10 2v15"/><path d="M5 8h3m-3 4h3m8-4h3m-3 4h3"/></g>

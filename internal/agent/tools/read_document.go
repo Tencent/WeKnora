@@ -30,7 +30,8 @@ var readDocumentTool = BaseTool{
 		"chunk; set context to include neighbouring chunks on each side).\n" +
 		"query finds passages inside the document: matching chunks come back with one chunk of context on each " +
 		"side. By default query is case-insensitive and split on whitespace: a chunk matches when it contains " +
-		"every word, in any order. Set regex=true to match query as one POSIX regular expression instead.\n" +
+		"every word, in any order. Set regex=true to match query as one POSIX regular expression instead. " +
+		"When a query result is truncated, repeat it with offset=next_offset to get the following matches.\n" +
 		"Page through long documents with offset and limit: offset counts chunks in reading order from 0 and is " +
 		"not a chunk index, so continue with the returned next_offset, and use id=cN with context to read around " +
 		"a specific chunk. A page holds fewer than limit chunks when they would exceed the output size budget; " +
@@ -179,7 +180,7 @@ func (t *ReadDocumentTool) Execute(ctx context.Context, args json.RawMessage) (*
 	// chunk: silently returning the single chunk would read as "no match".
 	switch {
 	case len(matchers) > 0:
-		return t.readByQuery(ctx, knowledge, query, matchers)
+		return t.readByQuery(ctx, knowledge, query, matchers, offset)
 	case chunk != nil:
 		return t.readAroundChunk(ctx, knowledge, chunk, contextChunks)
 	default:
@@ -395,11 +396,14 @@ func (t *ReadDocumentTool) readAroundChunk(
 	}, nil
 }
 
-// readByQuery scans the document in order and returns chunks matched by
-// every matcher, with one chunk of context on each side, capped at
-// readDocumentMaxMatches.
+// readByQuery scans the document in order from offset and returns chunks
+// matched by every matcher, with one chunk of context on each side, capped at
+// readDocumentMaxMatches and the output budget. A truncated result carries
+// next_offset, the reading-order position of the first match it left out;
+// without it matches past the cap could only be reached by paging the whole
+// document.
 func (t *ReadDocumentTool) readByQuery(
-	ctx context.Context, knowledge *types.Knowledge, query string, matchers []*regexp.Regexp,
+	ctx context.Context, knowledge *types.Knowledge, query string, matchers []*regexp.Regexp, offset int,
 ) (*types.ToolResult, error) {
 	var rows []readChunkRow
 	emitted := make(map[string]bool)
@@ -408,7 +412,10 @@ func (t *ReadDocumentTool) readByQuery(
 	var total int64
 	var prev *types.Chunk
 	forceNext := false
-	page := 1
+	// Start one chunk before offset so a match at offset still gets its
+	// preceding context, also when offset is the first chunk of a page.
+	page := max(offset-1, 0)/readDocumentScanPageSize + 1
+	nextOffset := -1
 	tenantID := t.tenantFor(knowledge)
 	// Stop collecting before the registry's head/tail truncation would cut
 	// rows in the middle; the header and tags take the remaining share.
@@ -426,14 +433,18 @@ scan:
 		if err != nil {
 			return &types.ToolResult{Success: false, Error: err.Error()}, err
 		}
-		if page == 1 {
-			total = pageTotal
-		}
+		total = pageTotal
 		if len(chunks) == 0 {
 			break
 		}
 		enrichChunkImageInfo(ctx, t.chunkService.GetRepository(), tenantID, chunks)
-		for _, c := range chunks {
+		for i, c := range chunks {
+			position := (page-1)*readDocumentScanPageSize + i
+			if position < offset {
+				// Before the requested start: only its text as context.
+				prev = c
+				continue
+			}
 			haystack := enrichChunkContent(c)
 			if q := faqStandardQuestion(c); q != "" {
 				haystack += "\n" + q
@@ -441,6 +452,7 @@ scan:
 			if matchesAll(matchers, haystack) {
 				if matchCount >= readDocumentMaxMatches || used >= budget {
 					truncated = true
+					nextOffset = position
 					break scan
 				}
 				matchCount++
@@ -469,6 +481,9 @@ scan:
 	data["query"] = query
 	data["match_count"] = matchCount
 	data["truncated"] = truncated
+	if nextOffset >= 0 {
+		data["next_offset"] = nextOffset
+	}
 	return &types.ToolResult{
 		Success: true,
 		Output:  t.buildOutput(knowledge, total, rows, query),

@@ -1,6 +1,9 @@
 package types
 
-import "errors"
+import (
+	"errors"
+	"fmt"
+)
 
 // RerankOptions is the per-request rerank control shared by the retrieval
 // APIs (knowledge-search and hybrid-search).
@@ -31,6 +34,9 @@ func (o *RerankOptions) IsEnabled() bool {
 func (o *RerankOptions) Validate() error {
 	if o != nil && o.TopK < 0 {
 		return errors.New("rerank.top_k must not be negative")
+	}
+	if o != nil && o.TopK > MaxRequestedResults {
+		return fmt.Errorf("rerank.top_k must not exceed %d", MaxRequestedResults)
 	}
 	return nil
 }

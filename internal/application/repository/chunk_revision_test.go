@@ -23,9 +23,20 @@ func TestSaveChunkRevisionIsAtomicAndOptimistic(t *testing.T) {
 	chunk := &types.Chunk{
 		ID: uuid.NewString(), TenantID: 1, KnowledgeBaseID: "kb", KnowledgeID: "knowledge",
 		Content: "before", SourceContent: "before", ChunkType: types.ChunkTypeText,
+		SourceLocators: types.SourceLocators{{
+			Type:       "pdf",
+			Page:       1,
+			Mapping:    "exact",
+			SourceID:   "block:1",
+			SourceHash: "revision-one",
+			Partial:    true,
+		}},
 		IsEnabled: true, IndexStatus: "ready", CreatedAt: now, UpdatedAt: now,
 	}
 	require.NoError(t, repo.CreateChunks(ctx, []*types.Chunk{chunk}))
+	initial, err := repo.GetChunkByID(ctx, 1, chunk.ID)
+	require.NoError(t, err)
+	require.Equal(t, chunk.SourceLocators, initial.SourceLocators)
 
 	snapshot := &types.ChunkRevision{
 		ID: uuid.NewString(), TenantID: 1, KnowledgeBaseID: "kb", KnowledgeID: "knowledge",
@@ -33,12 +44,14 @@ func TestSaveChunkRevisionIsAtomicAndOptimistic(t *testing.T) {
 		EditSource: "user", EditedAt: now, CreatedAt: now,
 	}
 	chunk.Content = "after"
+	chunk.SourceLocators = nil
 	chunk.ContentRevision = 1
 	require.NoError(t, repo.SaveChunkRevision(ctx, chunk, snapshot, 0))
 
 	stored, err := repo.GetChunkByID(ctx, 1, chunk.ID)
 	require.NoError(t, err)
 	require.Equal(t, "after", stored.Content)
+	require.Empty(t, stored.SourceLocators)
 	require.Equal(t, 1, stored.ContentRevision)
 	revisions, err := repo.ListChunkRevisions(ctx, 1, chunk.ID)
 	require.NoError(t, err)
@@ -55,6 +68,7 @@ func TestSaveChunkRevisionIsAtomicAndOptimistic(t *testing.T) {
 	stored, err = repo.GetChunkByID(ctx, 1, chunk.ID)
 	require.NoError(t, err)
 	require.Equal(t, "after", stored.Content)
+	require.Empty(t, stored.SourceLocators)
 	count := int64(0)
 	require.NoError(t, db.Model(&types.ChunkRevision{}).Count(&count).Error)
 	require.Equal(t, int64(1), count)

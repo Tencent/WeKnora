@@ -50,6 +50,22 @@ func (p *pacedChat) ChatStream(
 	return ch, nil
 }
 
+// closedStreamChat hands back a stream that is already closed: a provider that
+// gives up the instant the call is cancelled. Closing before ChatStream returns
+// makes the closed-stream arm and the ctx.Done() arm of the select ready at the
+// same moment, so the outcome cannot depend on which one select happens to pick.
+type closedStreamChat struct {
+	stubChat
+}
+
+func (c *closedStreamChat) ChatStream(
+	context.Context, []chat.Message, *chat.ChatOptions,
+) (<-chan types.StreamResponse, error) {
+	ch := make(chan types.StreamResponse)
+	close(ch)
+	return ch, nil
+}
+
 func pacedSettings() Settings {
 	s := testSettings()
 	s.StallTimeout = 80 * time.Millisecond
@@ -95,6 +111,19 @@ func TestSummarizationIsCancelledWhenItStalls(t *testing.T) {
 	assert.Contains(t, result.Summary, "Raw conversation archive")
 	assert.EqualValues(t, maxSummarizationAttempts, chatModel.opened.Load(),
 		"a single live turn has only its prefix to summarize, attempted twice")
+}
+
+// A stream that closes because the call was cancelled is a cancelled call, not
+// an empty successful summary. Both the ctx.Done() arm and the closed-stream arm
+// are ready at once here, so this pins down the answer instead of letting select
+// choose it at random.
+func TestSummarizationIsCancelledWhenTheStreamCloses(t *testing.T) {
+	c := New(&closedStreamChat{}, newEstimator(t), pacedSettings())
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, _, err := c.streamSummary(ctx, nil, &chat.ChatOptions{})
+	require.True(t, errors.Is(err, context.Canceled), "got %v", err)
 }
 
 // An error reported inside the stream is a failed attempt, not a summary.

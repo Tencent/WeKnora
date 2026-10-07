@@ -149,3 +149,51 @@ func TestParseOutput_ValidJSONStillAppliesRewrite(t *testing.T) {
 		t.Errorf("Intent = %q, want summarize", cm.Intent)
 	}
 }
+
+// A reply cut off by the token cap still yields the fields written before
+// the cut, including the partial image description.
+func TestParseOutputSalvagesTruncatedReply(t *testing.T) {
+	p := &PluginQueryUnderstand{}
+	cm := &types.ChatManage{PipelineRequest: types.PipelineRequest{Query: ""}}
+	p.parseOutput(cm, `{"rewrite_query":"如何处理 ERR_4012 错误","intent":"kb_search",`+
+		`"image_description":"截图显示了错误信息 \"ERR_4012\" 以及重试按`)
+	if cm.RewriteQuery != "如何处理 ERR_4012 错误" || cm.Intent != types.IntentKBSearch {
+		t.Fatalf("rewrite=%q intent=%q", cm.RewriteQuery, cm.Intent)
+	}
+	if cm.ImageDescription != `截图显示了错误信息 "ERR_4012" 以及重试按` {
+		t.Fatalf("image description = %q", cm.ImageDescription)
+	}
+}
+
+// A rewrite cut off by the token cap must not replace the user's query.
+func TestParseOutputDropsTruncatedRewrite(t *testing.T) {
+	p := &PluginQueryUnderstand{}
+	cm := &types.ChatManage{}
+	p.parseOutput(cm, `{"intent":"kb_search","rewrite_query":"How do I configure the retention policy for arch`)
+	if cm.RewriteQuery != "" {
+		t.Fatalf("truncated rewrite adopted: %q", cm.RewriteQuery)
+	}
+	if cm.Intent != types.IntentKBSearch {
+		t.Fatalf("intent = %q", cm.Intent)
+	}
+}
+
+// An unexpected intent label no longer turns retrieval off.
+func TestParseOutputNormalizesIntent(t *testing.T) {
+	p := &PluginQueryUnderstand{}
+	for raw, want := range map[string]types.QueryIntent{
+		"KB_SEARCH": types.IntentKBSearch,
+		"kb-search": types.IntentKBSearch,
+		"search":    "",
+		"Greeting":  types.IntentGreeting,
+	} {
+		cm := &types.ChatManage{}
+		p.parseOutput(cm, `{"rewrite_query":"q","intent":"`+raw+`"}`)
+		if cm.Intent != want {
+			t.Fatalf("intent %q -> %q, want %q", raw, cm.Intent, want)
+		}
+	}
+	if !(&types.ChatManage{PipelineState: types.PipelineState{Intent: ""}}).NeedsRetrieval() {
+		t.Fatal("an unknown intent must still retrieve")
+	}
+}

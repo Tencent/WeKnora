@@ -7,24 +7,17 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
-// populateFAQAnswers populates FAQ answers for the search results
+// populateFAQAnswers populates FAQ answers for the search results.
+//
+// The chunk lookup is not tenant scoped: FAQ hits from an org-shared KB
+// belong to the sharing workspace, and in question-only index mode their
+// answers exist only in chunk metadata, so a caller-tenant filter left the
+// model with bare questions. The IDs come from retrieval results (#3342).
 func (p *PluginMerge) populateFAQAnswers(
 	ctx context.Context,
-	chatManage *types.ChatManage,
 	results []*types.SearchResult,
 ) []*types.SearchResult {
 	if len(results) == 0 || p.chunkRepo == nil {
-		return results
-	}
-
-	tenantID, _ := types.TenantIDFromContext(ctx)
-	if tenantID == 0 && chatManage != nil {
-		tenantID = chatManage.TenantID
-	}
-	if tenantID == 0 {
-		pipelineWarn(ctx, "Merge", "faq_enrich_skip", map[string]interface{}{
-			"reason": "missing_tenant",
-		})
 		return results
 	}
 
@@ -52,7 +45,7 @@ func (p *PluginMerge) populateFAQAnswers(
 		chunkIDs = append(chunkIDs, id)
 	}
 
-	chunks, err := p.chunkRepo.ListChunksByID(ctx, tenantID, chunkIDs)
+	chunks, err := p.chunkRepo.ListChunksByIDOnly(ctx, chunkIDs)
 	if err != nil {
 		pipelineWarn(ctx, "Merge", "faq_chunk_fetch_failed", map[string]interface{}{
 			"error": err.Error(),

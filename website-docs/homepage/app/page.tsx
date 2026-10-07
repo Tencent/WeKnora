@@ -14,7 +14,7 @@ const docs = "/docs/";
 const guide = (path: string) => `${docs}${path}.html`;
 const modes = [
   { number: "01", icon: "search", label: "RAG", title: "回答有据可查", description: "结合语义与关键词检索查找相关资料，回答附带来源引用，可打开原文核对。", tags: ["混合检索", "多模态解析", "原文引用"], link: "03-features/05-retrieval-engines" },
-  { number: "02", icon: "agent", label: "Agent", title: "用知识和工具完成任务", description: "智能体根据任务检索知识库、搜索网页、调用 MCP 工具与技能，在沙箱中处理文件、运行脚本，并可跨会话记住你确认过的偏好。", tags: ["多步推理", "工具调用", "技能执行", "长期记忆"], link: "03-features/07-agent" },
+  { number: "02", icon: "agent", label: "Agent", title: "用知识和工具完成任务", description: "智能体根据任务检索知识库、搜索网页、调用 MCP 工具与技能，在沙箱中处理文件、运行脚本，还能操作你电脑上的浏览器，并跨会话记住你确认过的偏好。", tags: ["多步推理", "技能与沙箱", "本机浏览器", "MCP 工具", "长期记忆"], link: "03-features/07-agent" },
   { number: "03", icon: "wiki", label: "Wiki", title: "把文档整理成 Wiki", description: "从原始文档生成相互链接的 Wiki 页面与知识图谱，支持浏览、编辑和版本回滚。", tags: ["自动组织", "知识图谱", "版本回滚"], link: "03-features/14-wiki" },
 ];
 const releaseExtras = ["Confluence / 钉钉文档数据源", "27 家模型厂商目录", "博查 / Serply 联网搜索", "日语界面", "仅白名单出站"];

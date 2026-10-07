@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"runtime/debug"
 	"sort"
 	"strings"
 	"unicode/utf8"
@@ -247,7 +248,7 @@ func (r *ToolRegistry) execute(ctx context.Context, tool types.Tool, args json.R
 			maxOutput = toolLimit
 		}
 	}
-	result, execErr := tool.Execute(WithOutputBudget(ctx, maxOutput), args)
+	result, execErr := executeRecovered(WithOutputBudget(ctx, maxOutput), tool, args)
 	if result == nil {
 		result = &types.ToolResult{Success: false, Error: "tool returned no result"}
 	}
@@ -288,6 +289,25 @@ func (r *ToolRegistry) execute(ctx context.Context, tool types.Tool, args json.R
 	}
 
 	return result, execErr
+}
+
+// executeRecovered runs one tool and turns a panic into a failed result. Tools
+// run on errgroup goroutines when a round executes in parallel, and errgroup
+// does not carry a panic back to Wait: an unrecovered one from any tool (MCP
+// clients, sandboxes, third-party SDKs) would take down the whole server.
+func executeRecovered(
+	ctx context.Context, tool types.Tool, args json.RawMessage,
+) (result *types.ToolResult, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			logger.Errorf(ctx, "[ToolRegistry] Tool %s panicked: %v\n%s", tool.Name(), r, debug.Stack())
+			// The panic value can carry internals (paths, addresses); the
+			// model and the user only need to know the call did not complete.
+			err = fmt.Errorf("tool %s failed with an internal error", tool.Name())
+			result = &types.ToolResult{Success: false, Error: err.Error()}
+		}
+	}()
+	return tool.Execute(ctx, args)
 }
 
 // Cleanup cleans up all registered tools that implement the types.Cleanable interface.

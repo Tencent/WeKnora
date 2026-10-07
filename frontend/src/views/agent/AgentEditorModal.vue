@@ -1637,8 +1637,9 @@
         </div>
       </div>
 
-      <!-- 检索策略（仅在有知识库能力时显示） -->
-      <div v-show="currentSection === 'retrieval' && hasKnowledgeBase" class="section">
+      <!-- 检索策略（仅普通模式且有知识库能力时显示；Agent 模式的 search_knowledge
+           使用全局检索配置，这里的设置对它不生效） -->
+      <div v-show="currentSection === 'retrieval' && hasKnowledgeBase && !isAgentMode" class="section">
         <div class="section-header">
           <h2>{{ $t('agent.editor.retrievalStrategy') }}</h2>
           <p class="section-description">{{ $t('agentEditor.desc.retrievalSection') }}</p>
@@ -2741,7 +2742,9 @@ const navItems = computed(() => {
   items.push({ key: 'conversation', icon: 'chat', label: t('agent.editor.conversationSettings') });
   // 知识库与检索
   items.push({ key: 'knowledge', icon: 'folder', label: t('agent.editor.knowledgeConfig') });
-  if (hasKnowledgeBase.value) {
+  // 检索策略只作用于普通模式的问答流程；Agent 模式的检索工具不读这些设置，
+  // 显示出来只会让用户调了参数却没有任何效果。
+  if (hasKnowledgeBase.value && !isAgentMode.value) {
     items.push({ key: 'retrieval', icon: 'search', label: t('agent.editor.retrievalStrategy') });
   }
   items.push({ key: 'websearch', icon: 'internet', label: t('agent.editor.webSearchConfig') });
@@ -3914,8 +3917,8 @@ watch(hasKnowledgeBase, (hasKB, oldHasKB) => {
 
 // 监听运行模式变化，自动切换页面
 watch(isAgentMode, (isAgent) => {
-  // 如果当前在高级设置页面但切换到了Agent模式，切换到基础设置
-  if (isAgent && currentSection.value === 'advanced') {
+  // 如果当前在高级设置或检索策略页面但切换到了Agent模式，切换到基础设置
+  if (isAgent && (currentSection.value === 'advanced' || currentSection.value === 'retrieval')) {
     currentSection.value = 'basic';
   }
   if (!isAgent && (currentSection.value === 'skills' || currentSection.value === 'sandbox')) {

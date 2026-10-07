@@ -120,6 +120,14 @@ func CleanPassage(text string) string {
 func EnrichedPassage(ctx context.Context, result *types.SearchResult) string {
 	combinedText := CleanPassage(result.Content)
 	var enrichments []string
+	// An image OCR or caption chunk's body is that same text, and its
+	// image_info repeats it; appending it again doubled the passage.
+	body := strings.TrimSpace(result.Content)
+	addImageText := func(text string) {
+		if text != "" && strings.TrimSpace(text) != body {
+			enrichments = append(enrichments, text)
+		}
+	}
 
 	if result.ImageInfo != "" {
 		var imageInfos []types.ImageInfo
@@ -127,12 +135,8 @@ func EnrichedPassage(ctx context.Context, result *types.SearchResult) string {
 			logger.Warnf(ctx, "[Rerank] Failed to parse image info of chunk %s: %v", result.ID, err)
 		} else {
 			for _, img := range imageInfos {
-				if img.Caption != "" {
-					enrichments = append(enrichments, img.Caption)
-				}
-				if img.OCRText != "" {
-					enrichments = append(enrichments, img.OCRText)
-				}
+				addImageText(img.Caption)
+				addImageText(img.OCRText)
 			}
 		}
 	}
@@ -163,11 +167,21 @@ func EnrichedPassage(ctx context.Context, result *types.SearchResult) string {
 //
 // An empty enriched body stays empty: a title alone is not evidence that
 // the chunk answers anything.
+//
+// The chunk's heading breadcrumb (ContextHeader) goes between the two for the
+// same reason: it was embedded with the chunk, so vector search can find
+// "7 天内可申请" under "## 退款政策" while a model scoring the bare body
+// rejects it.
 func ModelPassage(ctx context.Context, result *types.SearchResult) string {
 	passage := EnrichedPassage(ctx, result)
-	title := strings.TrimSpace(result.KnowledgeTitle)
-	if strings.TrimSpace(passage) == "" || title == "" || result.ChunkType == string(types.ChunkTypeFAQ) {
+	if strings.TrimSpace(passage) == "" || result.ChunkType == string(types.ChunkTypeFAQ) {
 		return passage
 	}
-	return title + "\n\n" + passage
+	if header := strings.TrimSpace(result.ContextHeader); header != "" {
+		passage = header + "\n\n" + passage
+	}
+	if title := strings.TrimSpace(result.KnowledgeTitle); title != "" {
+		passage = title + "\n\n" + passage
+	}
+	return passage
 }

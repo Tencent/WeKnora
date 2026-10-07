@@ -343,6 +343,12 @@ func (s *sessionService) buildAgentConfig(
 		MaxCompletionTokens:         customAgent.Config.MaxCompletionTokens,
 		RetainRetrievalHistory:      customAgent.Config.RetainRetrievalHistory,
 		SharedAgentReadOnly:         req.SharedAgentReadOnly,
+		// The model is always told it may call tools in parallel; without
+		// this the engine still ran them one by one, so three searches in
+		// one reply cost three sequential embed/retrieve/rerank rounds.
+		// Only read-only tools overlap (agenttools.CanRunConcurrently);
+		// anything else is a barrier that runs alone, in model order.
+		ParallelToolCalls: true,
 	}
 	applyRequestReasoningEffort(req.ReasoningEffort, &agentConfig.Thinking, &agentConfig.ReasoningEffort)
 	// An unset MCP mode means "all" at runtime, but the share scope and the

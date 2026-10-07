@@ -6,7 +6,7 @@ WeKnora HTTP API 使用 `/api/v1` 前缀，支持 JWT、API Key 和 Embed token 
 
 - 所有业务 API 挂载在 `/api/v1` 前缀下（`router.go` 中 `r.Group("/api/v1")`）。
 - 健康检查：`GET /health`（无需认证），返回 `{"status":"ok"}`。
-- Swagger UI：`GET /swagger/*any`，仅在非 `release` 模式（`GIN_MODE != release`）下注册。
+- Swagger UI：后端的 `/swagger/index.html`，仅在非 `release` 模式（`GIN_MODE != release`）下注册。Docker Compose 默认使用 `release`；启用步骤、后端端口和空白页排查见[开发指南](../06-development/01-dev-guide.md#_6-2-gin-mode-与-swagger)。
 - 认证之外的特殊路径：`GET|HEAD /r/:token`（短时效资源授权 URL）、`GET /files`（认证后文件代理）、`GET|HEAD /api/v1/files/presigned`（HMAC 签名 URL，无需认证）、`GET /api/v1/files/presigned-preview`（Admin 诊断）。
 
 ```
@@ -186,6 +186,22 @@ X-Accel-Buffering: no
 | `usage` | TokenUsage | `prompt_tokens/completion_tokens/total_tokens/cache_*` |
 | `finish_reason` | string | 结束原因 |
 
+`SearchResult`（`knowledge_references`、检索接口的结果）中的 `source_locators` 是该分块在原始文件中的位置，可据此在原文里定位引用（该功能上线前入库的文档为空）：
+
+| 字段 | 适用 `type` | 说明 |
+| --- | --- | --- |
+| `type` | — | `pdf` / `docx` / `slide` / `sheet` / `text` / `time` / `section` |
+| `page`、`bbox` | `pdf` | 页码（从 1 起）；`bbox` 为 `[x0,y0,x1,y1]`，相对页面宽高的比例，原点在页面左上角，可缺省 |
+| `block` | `docx` | 正文中第几个段落或表格（从 1 起） |
+| `slide` | `slide` | 第几张幻灯片（从 1 起） |
+| `sheet`、`row_start`、`row_end` | `sheet` | 工作表名（CSV 为空）与行号（从 1 起，同 Excel 行号） |
+| `start`、`end` | `text` | 原文件文本的字符区间（Unicode 码点） |
+| `start_ms`、`end_ms` | `time` | 音频时间区间（毫秒） |
+| `section`、`title` | `section` | EPUB 书脊中的第几项（从 1 起）及章节标题 |
+| `quote` | 全部 | 被引用的文字，最多 300 字 |
+
+取值为 0 的数值字段会省略。合并后的检索结果携带所合并分块位置的并集。
+
 流以 `response_type:"complete"`（`done:true`）终止；出错时以 `response_type:"error"`（`done:true`）终止。工具执行失败以 `tool_result`（`data.success=false`）返回，`error` 只表示整轮失败；回答因输出上限被截断时，`answer` 事件带 `data.truncated=true`。`continue-stream` 采用重放 + 100ms 轮询追增量的续传语义（`?message_id=` 必填）。
 
 ## 文件引用形式（resource_urls）
@@ -254,19 +270,19 @@ X-Accel-Buffering: no
 | --- | --- | --- | --- |
 | `enabled` | bool | `true` | 设为 `false` 关闭 rerank，结果保持召回顺序 |
 | `model_id` | string | 见下文 | rerank 模型 ID（`GET /models` 里 `type` 为 `Rerank` 的模型）。ID 不存在、未激活或不是 rerank 模型时返回 400，不会悄悄换成别的模型 |
-| `top_k` | int | 接口的返回条数 | rerank 后最多保留几条；负数返回 400 |
+| `top_k` | int | 接口的返回条数 | rerank 后最多保留几条；负数或超过 200 返回 400 |
 | `threshold` | float | 空间检索配置里的 `rerank_threshold`（未配置时 0.2） | 模型分数下限；`0` 和负数都是合法值 |
 
 不传 `model_id` 时依次使用：空间检索配置里的 `rerank_model_id` → 空间里第一个 rerank 模型。都没有时不做 rerank，按召回顺序返回，`meta.rerank.outcome` 为 `no_model`。
 
 rerank 的过程和问答链路、智能推理的 `search_knowledge` 工具共用同一套实现（`internal/reranking`）：
 
-1. 送给模型打分的文本 = 文档标题 + 去掉 Markdown 标记的分块正文 + 图片描述与 OCR 文本 + 生成的问题。FAQ 条目不加标题。
+1. 送给模型打分的文本 = 文档标题 + 去掉 Markdown 标记的分块正文 + 图片描述与 OCR 文本 + 生成的问题。FAQ 条目不加标题。模型配置了单篇或单次请求长度上限（`max_document_chars` / `max_request_chars`）时，超长的文本从尾部截到上限再送出，先截掉的是附加的图片文本和生成问题；不会因为一条超长文本让整批打分失败。
 2. 保留分数不低于 `threshold` 的结果。如果一条都没有、而 `threshold` 高于 0.3，就把阈值降到 `max(threshold×0.7, 0.3)` 再筛一次。还是没有的话，最高分不低于 0.15 时只保留这一条，否则返回空列表。
 3. 排序分 = `0.6×模型分 + 0.3×召回分 + 0.1×来源权重`；结果的 `metadata` 里带 `model_score` 和 `base_score`。
 4. 用 MMR（λ=0.7）从中挑出 `top_k` 条，降低内容重复。
 
-`hybrid-search` 开启 rerank 时，候选池是融合后排名前 `max(top_k, 50)` 的分块，所以 `match_count` 很小也有足够的候选给模型挑。
+`hybrid-search` 开启 rerank 时，召回深度至少与 `top_k` 相同，候选池是融合后排名前 `max(top_k, 50)` 的分块，所以 `match_count` 很小也有足够的候选给模型挑。
 
 rerank 模型加载失败或调用出错时，请求不会失败，而是按召回顺序返回，并在 `meta.rerank` 里写明原因。
 
@@ -335,7 +351,7 @@ rerank 模型加载失败或调用出错时，请求不会失败，而是按召�
 | 组织与共享 | [02-api-org.md](./02-api-org.md) | `/organizations`、`/shared-*`、`/knowledge-bases/:id/shares`、`/agents/:id/shares` |
 | 知识库与知识 | [02-api-knowledge.md](./02-api-knowledge.md) | `/knowledge-bases`、`/knowledge`、知识库文件夹 |
 | 分块与标签 | [02-api-chunks.md](./02-api-chunks.md) | `/chunks`、`/knowledge-bases/:id/tags`、`/chunker/preview` |
-| FAQ 与 Wiki | [02-api-faq-wiki.md](./02-api-faq-wiki.md) | `/knowledge-bases/:id/faq`、`/faq`、`/knowledgebase/:kb_id/wiki` |
+| FAQ 与 Wiki | [02-api-faq-wiki.md](./02-api-faq-wiki.md) | `/knowledge-bases/:id/faq`、`/faq`、`/knowledgebase/:kb_id/wiki`、`/wiki-search` |
 | 会话、消息与聊天 | [02-api-chat.md](./02-api-chat.md) | `/sessions`、`/messages`、`/knowledge-chat`、`/agent-chat`、`/knowledge-search` |
 | 模型与初始化 | [02-api-model-system.md](./02-api-model-system.md) | `/models`、`/initialization`、`/evaluation`、`/weknoracloud` |
 | 系统与平台管理 | [02-api-system.md](./02-api-system.md) | `/system`、`/system/admin` |

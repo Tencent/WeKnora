@@ -88,3 +88,28 @@ func TestParallelReadsRespectMutationBarriers(t *testing.T) {
 		require.Equal(t, names[i], call.Name, "result events retain original order")
 	}
 }
+
+func TestParallelToolPanicFailsOnlyThatCall(t *testing.T) {
+	engine := newTestEngine(t, &mockChat{})
+	engine.toolRegistry = tools.NewToolRegistry()
+	engine.toolRegistry.RegisterTool(&orderedTestTool{
+		BaseTool: tools.NewBaseTool(tools.ToolSearchKnowledge, "", json.RawMessage(`{"type":"object"}`)),
+		run:      func(context.Context) *types.ToolResult { panic("tool bug") },
+	})
+	engine.toolRegistry.RegisterTool(&orderedTestTool{
+		BaseTool: tools.NewBaseTool(tools.ToolReadDocument, "", json.RawMessage(`{"type":"object"}`)),
+		run:      func(context.Context) *types.ToolResult { return &types.ToolResult{Success: true, Output: "ok"} },
+	})
+	response := &types.ChatResponse{ToolCalls: []types.LLMToolCall{
+		{ID: "a", Function: types.FunctionCall{Name: tools.ToolSearchKnowledge, Arguments: `{}`}},
+		{ID: "b", Function: types.FunctionCall{Name: tools.ToolReadDocument, Arguments: `{}`}},
+	}}
+	step := &types.AgentStep{}
+
+	engine.executeToolCallsParallel(context.Background(), response, step, 0, "session", "message")
+
+	require.Len(t, step.ToolCalls, 2)
+	require.False(t, step.ToolCalls[0].Result.Success)
+	require.Contains(t, step.ToolCalls[0].Result.Error, "internal error")
+	require.True(t, step.ToolCalls[1].Result.Success)
+}

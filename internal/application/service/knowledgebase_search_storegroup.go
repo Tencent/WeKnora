@@ -184,59 +184,13 @@ func classifyFactoryError(
 	}
 }
 
-// authorizeKBAccess rejects multi-KB searches whose scope includes a KB
-// that the original caller is not entitled to read. Exact upstream grants
-// support shared KB/agent execution; other foreign KBs need an organization
-// permission check for the caller via access.KBPermissions,
-// applying the 3-D cap (share role + caller's tenant-org role + tenant
-// Viewer cap) introduced in Plan 3 of #1303.
-//
-// Returning NotFound rather than Forbidden avoids leaking the existence
-// of unauthorized KB IDs that the caller could not otherwise observe.
-// Structured logs record the rejection with the offending kb_id (always
-// safe — KB IDs are UUIDs without sensitive content) and the requesting
-// tenant for audit.
+// authorizeKBAccess is a service wrapper around access.AuthorizeKBAccess
+// so HybridSearch and its tests keep calling through knowledgeBaseService.
 func (s *knowledgeBaseService) authorizeKBAccess(
 	ctx context.Context,
 	kbs []*types.KnowledgeBase,
 ) error {
-	if len(kbs) == 0 {
-		return nil
-	}
-
-	kbIDs := make([]string, 0, len(kbs))
-	for _, kb := range kbs {
-		kbIDs = append(kbIDs, kb.ID)
-	}
-	if err := types.AuthorizeTenantAPIKeyKnowledgeBases(ctx, kbIDs...); err != nil {
-		return err
-	}
-
-	requestTenantID := types.CallerFromContext(ctx).TenantID
-	permissions := access.NewKBPermissions(ctx, s.kbShareService)
-
-	for _, kb := range kbs {
-		hasPermission, permErr := permissions.Check(kb.ID, kb.TenantID, types.OrgRoleViewer)
-		if permErr != nil {
-			logger.ErrorWithFields(ctx, permErr, map[string]interface{}{
-				"caller_tenant_id": requestTenantID,
-				"kb_tenant_id":     kb.TenantID,
-				"kb_id":            kb.ID,
-				"reason":           "shared-KB permission lookup failed",
-			})
-			return apperrors.NewInternalServerError("failed to verify knowledge base access")
-		}
-		if !hasPermission {
-			logger.WarnWithFields(ctx, logger.Fields{
-				"caller_tenant_id": requestTenantID,
-				"kb_tenant_id":     kb.TenantID,
-				"kb_id":            kb.ID,
-				"reason":           "tenant lacks viewer permission for foreign-tenant KB",
-			}, "search scope rejected: unauthorized foreign-tenant KB")
-			return apperrors.NewNotFoundError("knowledge base not found")
-		}
-	}
-	return nil
+	return access.AuthorizeKBAccess(ctx, s.kbShareService, kbs)
 }
 
 // validateSameEmbeddingModel rejects multi-KB searches that span more than

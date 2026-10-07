@@ -216,6 +216,10 @@ type WikiPageService interface {
 	// SearchPages performs full-text search over wiki pages.
 	SearchPages(ctx context.Context, kbID string, query string, limit int) ([]*types.WikiPage, error)
 
+	// SearchPagesAcross searches wiki pages across multiple knowledge bases
+	// with the same ranking as SearchPages, then returns a global top-N.
+	SearchPagesAcross(ctx context.Context, kbIDs []string, query string, limit int) ([]*types.WikiPage, error)
+
 	// ListRevisions returns the stored historical snapshots for a page
 	// (newest first, content omitted) plus the total snapshot count and the
 	// page's current version. The current version itself has no revision
@@ -391,6 +395,10 @@ type WikiPageRepository interface {
 
 	// Search performs full-text search on wiki pages within a knowledge base.
 	Search(ctx context.Context, kbID string, query string, limit int) ([]*types.WikiPage, error)
+
+	// SearchAcross performs the same full-text search across multiple
+	// knowledge bases, then returns a global top-N by match_rank.
+	SearchAcross(ctx context.Context, kbIDs []string, query string, limit int) ([]*types.WikiPage, error)
 
 	// CountByType returns page counts grouped by type for a knowledge base.
 	CountByType(ctx context.Context, kbID string) (map[string]int64, error)

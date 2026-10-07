@@ -268,6 +268,7 @@ func main() {
 
 	// Run backend in a separate goroutine
 	go func() {
+		defer close(app.shutdownDone)
 		err := c.Invoke(func(
 			cfg *config.Config,
 			router *gin.Engine,
@@ -297,23 +298,28 @@ func main() {
 				}
 			}
 
-			// Handle graceful shutdown from Wails OnShutdown hook
+			// Wails OnShutdown returns only after this goroutine closes
+			// serverStopped. Closing the listener by hand makes Serve return
+			// "use of closed network connection" instead of ErrServerClosed,
+			// and the error path calls logger.Fatalf → os.Exit(1) before cleanup.
+			serverStopped := make(chan struct{})
 			go func() {
+				defer close(serverStopped)
 				<-app.shutdownCh
 				logger.Infof(context.Background(), "Wails shutting down, stopping Go backend...")
 
-				listener.Close()
-				shutdownTimeout := cfg.Server.ShutdownTimeout
-				if shutdownTimeout == 0 {
-					shutdownTimeout = 30 * time.Second
-				}
-				shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+				drainBudget, cleanupBudget := runtime.ShutdownBudgets(cfg.Server.ShutdownTimeout)
+				shutdownCtx, cancel := context.WithTimeout(context.Background(), drainBudget)
 				defer cancel()
 
 				if err := server.Shutdown(shutdownCtx); err != nil {
 					server.Close()
 				}
-				resourceCleaner.Cleanup(shutdownCtx)
+				cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), cleanupBudget)
+				defer cleanupCancel()
+				if errs := resourceCleaner.Cleanup(cleanupCtx); len(errs) > 0 {
+					logger.Errorf(context.Background(), "Errors occurred during resource cleanup: %v", errs)
+				}
 			}()
 
 			// Also listen for OS signals just in case
@@ -321,13 +327,17 @@ func main() {
 			signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM)
 			go func() {
 				<-signals
-				app.shutdownCh <- struct{}{} // trigger shutdown
+				select {
+				case app.shutdownCh <- struct{}{}:
+				default:
+				}
 			}()
 
 			logger.Infof(context.Background(), "Server is running at %s (proxy -> %s)", tcpAddr.String(), app.backendURL)
 			if err := server.Serve(listener); err != nil && err != http.ErrServerClosed {
 				return fmt.Errorf("server error: %v", err)
 			}
+			<-serverStopped
 			return nil
 		})
 		if err != nil {

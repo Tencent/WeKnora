@@ -214,17 +214,29 @@ func (c *minerUV1Client) Parse(
 	fileName string,
 	opts minerUV1ParseOptions,
 ) (string, []types.ImageRef, error) {
+	md, refs, _, err := c.ParseWithLayout(ctx, content, fileName, opts)
+	return md, refs, err
+}
+
+// ParseWithLayout is Parse plus the package's content_list, the per-block
+// page and box layout (nil when the package carried none).
+func (c *minerUV1Client) ParseWithLayout(
+	ctx context.Context,
+	content []byte,
+	fileName string,
+	opts minerUV1ParseOptions,
+) (string, []types.ImageRef, []byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, c.jobTimeout)
 	defer cancel()
 
 	fileID, err := c.upload(ctx, content, fileName)
 	if err != nil {
-		return "", nil, fmt.Errorf("upload: %w", err)
+		return "", nil, nil, fmt.Errorf("upload: %w", err)
 	}
 
 	jobID, err := c.createJob(ctx, fileID, opts)
 	if err != nil {
-		return "", nil, fmt.Errorf("create parse job: %w", err)
+		return "", nil, nil, fmt.Errorf("create parse job: %w", err)
 	}
 	logger.Infof(ctx, "[%s] parse job created: job_id=%s file_id=%s tier=%q ocr_mode=%s",
 		c.logLabel, jobID, fileID, opts.Tier, opts.OCRMode)
@@ -232,24 +244,24 @@ func (c *minerUV1Client) Parse(
 	job, err := c.waitJob(ctx, jobID)
 	if err != nil {
 		c.cancelJob(jobID)
-		return "", nil, err
+		return "", nil, nil, err
 	}
 
 	zipRef, err := minerUV1ZipOutput(job)
 	if err != nil {
-		return "", nil, err
+		return "", nil, nil, err
 	}
 
 	zipData, err := c.downloadFile(ctx, zipRef.FileID)
 	if err != nil {
-		return "", nil, fmt.Errorf("download zip artifact: %w", err)
+		return "", nil, nil, fmt.Errorf("download zip artifact: %w", err)
 	}
 
 	md, imageRefs, err := extractMarkdownZip(zipData, c.logLabel)
 	if err != nil {
-		return "", nil, fmt.Errorf("extract zip artifact: %w", err)
+		return "", nil, nil, fmt.Errorf("extract zip artifact: %w", err)
 	}
-	return md, imageRefs, nil
+	return md, imageRefs, minerUContentListFromZip(zipData), nil
 }
 
 func (c *minerUV1Client) upload(ctx context.Context, content []byte, fileName string) (string, error) {

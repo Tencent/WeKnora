@@ -594,7 +594,7 @@ import { copyWithToast } from '@/utils/clipboard';
 import { normalizeOptionalString } from '@/utils/optionalString';
 import {
   listIMChannels, createIMChannel, updateIMChannel, deleteIMChannel, toggleIMChannel,
-  getWeChatQRCode, pollWeChatQRCodeStatus, listAllIMChannels, listAgents,
+  getWeChatQRCode, pollWeChatQRCodeStatus, listAllIMChannels,
   type IMChannelOverview, type CustomAgent,
 } from '@/api/agent';
 import { useChatResourcesStore } from '@/stores/chatResources';
@@ -940,13 +940,13 @@ async function loadChannels() {
   loading.value = true;
   try {
     const chatResources = useChatResourcesStore();
-    const [channelRes, agentRes] = await Promise.all([
+    const [channelRes] = await Promise.all([
       listAllIMChannels(),
-      listAgents(),
+      chatResources.ensureAgents(),
       chatResources.ensureKnowledgeBases(),
     ]);
     allChannels.value = channelRes.data || [];
-    agents.value = agentRes?.data || [];
+    agents.value = chatResources.agents as CustomAgent[];
     knowledgeBases.value = chatResources.rawKnowledgeBases.map((kb: any) => ({ id: kb.id, name: kb.name }));
   } catch {
     allChannels.value = [];

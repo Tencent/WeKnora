@@ -13,11 +13,23 @@ import (
 
 // runQueryExpansion performs query expansion when initial recall is low.
 // It generates query variants and runs concurrent retrieval across search targets.
+//
+// The variants are local rewrites of the query (stopwords dropped, words
+// reordered), so they only add recall on the keyword side: their embeddings
+// sit next to the original query's, and the vector half of each search
+// re-embedded the variant and repeated the main search. Expansion therefore
+// searches keywords only, and does nothing when keyword matching is off.
 func (p *PluginSearch) runQueryExpansion(ctx context.Context, chatManage *types.ChatManage) []*types.SearchResult {
 	pipelineInfo(ctx, "Search", "recall_low", map[string]interface{}{
 		"current":   len(chatManage.SearchResult),
 		"threshold": chatManage.EmbeddingTopK,
 	})
+	if chatManage.DisableKeywordsMatch {
+		pipelineInfo(ctx, "Search", "expansion_skip", map[string]interface{}{
+			"reason": "keyword_match_disabled",
+		})
+		return nil
+	}
 	expansions := p.expandQueries(ctx, chatManage)
 	if len(expansions) == 0 {
 		return nil
@@ -67,8 +79,7 @@ func (p *PluginSearch) runQueryExpansion(ctx context.Context, chatManage *types.
 					MatchCount:            expTopK,
 					TagIDs:                t.TagIDs,
 					ScopeTagIDs:           t.ScopeTagIDs,
-					DisableVectorMatch:    chatManage.DisableVectorMatch,
-					DisableKeywordsMatch:  chatManage.DisableKeywordsMatch,
+					DisableVectorMatch:    true,
 					SkipContextEnrichment: true, // Pipeline handles context assembly in merge stage
 				}
 				// Apply knowledge ID filter if this is a partial KB search

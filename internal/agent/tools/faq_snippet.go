@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/Tencent/WeKnora/internal/searchutil"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -208,20 +209,46 @@ func faqMatchedQuestionFromRegex(meta *types.FAQChunkMetadata, compiled []*regex
 	return meta.StandardQuestion
 }
 
+// faqMatchedQuestionFromQueries picks the question the queries match best:
+// one containing a whole query beats term matches, and more matched terms
+// beat fewer. Ties go to similar questions in order, then the standard one.
+// With word-level terms (Chinese queries are segmented) "the first question
+// sharing any term" picked a loosely related similar question.
 func faqMatchedQuestionFromQueries(meta *types.FAQChunkMetadata, queries []string) string {
 	if meta == nil {
 		return ""
 	}
 	tokens := searchQueryTokens(queries)
-	for _, sq := range meta.SimilarQuestions {
-		if textMatchesSearchQueries(sq, queries, tokens) {
-			return sq
+	best, bestScore := meta.StandardQuestion, 0
+	candidates := append(append([]string(nil), meta.SimilarQuestions...), meta.StandardQuestion)
+	for _, q := range candidates {
+		if score := searchQueryMatchScore(q, queries, tokens); score > bestScore {
+			best, bestScore = q, score
 		}
 	}
-	if textMatchesSearchQueries(meta.StandardQuestion, queries, tokens) {
-		return meta.StandardQuestion
+	return best
+}
+
+// searchQueryMatchScore rates how well text matches the queries: a whole
+// query contained in text counts more than any number of single terms.
+func searchQueryMatchScore(text string, queries []string, tokens []string) int {
+	if text == "" {
+		return 0
 	}
-	return meta.StandardQuestion
+	lowered := strings.ToLower(text)
+	score := 0
+	for _, q := range queries {
+		q = strings.ToLower(strings.TrimSpace(q))
+		if q != "" && strings.Contains(lowered, q) {
+			score += 1000
+		}
+	}
+	for _, tok := range tokens {
+		if strings.Contains(lowered, tok) {
+			score++
+		}
+	}
+	return score
 }
 
 func faqAnswersForSnippet(answers []string) string {
@@ -241,41 +268,12 @@ func faqAnswersForSnippet(answers []string) string {
 	return truncateRunes(strings.Join(parts, " | "), snippetMaxAnswerRunes)
 }
 
-func textMatchesSearchQueries(text string, queries []string, tokens []string) bool {
-	if text == "" {
-		return false
-	}
-	lowered := strings.ToLower(text)
-	for _, q := range queries {
-		q = strings.ToLower(strings.TrimSpace(q))
-		if q != "" && strings.Contains(lowered, q) {
-			return true
-		}
-	}
-	for _, tok := range tokens {
-		if strings.Contains(lowered, tok) {
-			return true
-		}
-	}
-	return false
-}
-
 func searchQueryTokens(queries []string) []string {
 	tokens := make([]string, 0, 8)
 	seen := make(map[string]struct{})
 	for _, q := range queries {
-		for _, tok := range strings.FieldsFunc(q, func(r rune) bool {
-			switch r {
-			case ' ', '\t', '\n', '\r', ',', '.', ';', ':', '?', '!',
-				'(', ')', '[', ']', '{', '}', '"', '\'':
-				return true
-			}
-			return false
-		}) {
-			tok = strings.ToLower(strings.TrimSpace(tok))
-			if len([]rune(tok)) < 2 {
-				continue
-			}
+		for _, tok := range queryTerms(q) {
+			tok = strings.ToLower(tok)
 			if _, ok := seen[tok]; ok {
 				continue
 			}
@@ -284,4 +282,56 @@ func searchQueryTokens(queries []string) []string {
 		}
 	}
 	return tokens
+}
+
+// queryTerms splits a query into candidate terms, keeping their case: words
+// split on whitespace and punctuation, Chinese fields segmented into words,
+// dropping single characters and stopwords. Terms may repeat.
+func queryTerms(query string) []string {
+	var terms []string
+	add := func(word string) {
+		word = strings.TrimSpace(word)
+		if len([]rune(word)) < 2 {
+			return
+		}
+		if _, stop := snippetStopwords[strings.ToLower(word)]; stop {
+			return
+		}
+		terms = append(terms, word)
+	}
+	for _, field := range strings.FieldsFunc(query, isSnippetSeparator) {
+		// A Chinese question has no spaces, so the whole question was one
+		// token that never occurred in any chunk and every snippet fell
+		// back to the chunk's opening. Segment it into words instead.
+		if searchutil.ContainsChinese(field) {
+			for _, word := range types.Jieba.CutForSearch(field, true) {
+				add(word)
+			}
+			continue
+		}
+		add(field)
+	}
+	return terms
+}
+
+// isSnippetSeparator splits a query into candidate terms on whitespace and
+// ASCII or full-width punctuation.
+func isSnippetSeparator(r rune) bool {
+	switch r {
+	case ' ', '\t', '\n', '\r', ',', '.', ';', ':', '?', '!',
+		'(', ')', '[', ']', '{', '}', '"', '\'',
+		'，', '。', '；', '：', '？', '！', '、', '（', '）', '【', '】', '“', '”', '‘', '’':
+		return true
+	}
+	return false
+}
+
+// snippetStopwords are function words that occur in almost every chunk; as
+// the earliest match they placed the snippet at an arbitrary position.
+var snippetStopwords = map[string]struct{}{
+	"the": {}, "and": {}, "or": {}, "of": {}, "to": {}, "in": {}, "on": {}, "for": {}, "with": {},
+	"is": {}, "are": {}, "was": {}, "be": {}, "do": {}, "does": {}, "did": {}, "an": {}, "at": {},
+	"by": {}, "it": {}, "its": {}, "as": {}, "from": {}, "that": {}, "this": {}, "what": {}, "how": {},
+	"why": {}, "when": {}, "which": {}, "who": {}, "can": {}, "if": {},
+	"什么": {}, "怎么": {}, "如何": {}, "哪些": {}, "是否": {}, "可以": {}, "一个": {}, "我们": {}, "你们": {},
 }

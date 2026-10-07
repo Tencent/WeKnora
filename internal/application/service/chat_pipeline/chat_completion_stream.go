@@ -193,6 +193,14 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 					return
 				}
 
+				// A stream that stopped without a finish reason is a broken
+				// one, not a short answer: report it the way a read error is
+				// reported instead of closing the answer as complete.
+				if response.ResponseType == types.ResponseTypeAnswer && response.Done &&
+					response.FinishReason == types.FinishReasonIncomplete {
+					response.ResponseType = types.ResponseTypeError
+					response.Content = types.StreamEndedEarlyError
+				}
 				if response.ResponseType == types.ResponseTypeError {
 					pipelineError(ctx, "Stream", "stream_error", map[string]interface{}{
 						"session_id": chatManage.SessionID,

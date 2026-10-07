@@ -204,6 +204,8 @@ CREATE TABLE IF NOT EXISTS embeddings (
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS embeddings_unique_source ON embeddings(source_id, source_type);
+CREATE INDEX IF NOT EXISTS idx_embeddings_knowledge_id ON embeddings(knowledge_id);
+CREATE INDEX IF NOT EXISTS idx_embeddings_chunk_id ON embeddings(chunk_id);
 CREATE INDEX IF NOT EXISTS embeddings_search_idx ON embeddings
 USING bm25 (id, knowledge_base_id, content, knowledge_id, chunk_id)
 WITH (

@@ -1980,18 +1980,12 @@ watch(() => route.params.kbId, (newKbId) => {
   }
 });
 
+// 模型 / 联网搜索列表由设置页在写操作后直接写回 chatResources
+// （replaceModels / ensureWebSearchProviders(true)），这里读的是同一份快照，
+// 不再靠「设置弹窗关闭」「离开设置路由」两个信号各强刷一次。
 watch(() => uiStore.showSettingsModal, (visible, prevVisible) => {
-  if (prevVisible && !visible) {
-    loadWebSearchConfig(true);
-    loadChatModels(true);
-    if (!props.embeddedMode) void browserConnection.refresh();
-  }
-});
-
-watch(() => route.path, (path, prev) => {
-  if (prev === '/platform/settings' && path !== '/platform/settings') {
-    loadWebSearchConfig(true);
-    loadChatModels(true);
+  if (prevVisible && !visible && !props.embeddedMode) {
+    void browserConnection.refresh();
   }
 });
 
@@ -2099,7 +2093,7 @@ const createSession = async (
     return;
   }
 
-  if (!chatResources.isFresh('models')) {
+  if (!chatResources.isLoaded('models')) {
     await loadChatModels()
   }
 
@@ -2248,7 +2242,7 @@ const toggleAgentModeSelector = () => {
 
   showAgentModeSelector.value = !showAgentModeSelector.value;
   if (showAgentModeSelector.value) {
-    if (!chatResources.isFresh('agents')) {
+    if (!chatResources.isLoaded('agents')) {
       void loadAgents(true);
     }
     // 多次更新位置确保准确
@@ -2265,7 +2259,7 @@ const toggleAgentModeSelector = () => {
 }
 
 const selectAgentMode = async (mode: 'quick-answer' | 'smart-reasoning') => {
-  if (!chatResources.isFresh('models')) {
+  if (!chatResources.isLoaded('models')) {
     await loadChatModels()
   }
 
@@ -2305,7 +2299,7 @@ const handleAgentNotReady = (
 };
 
 const handleSelectAgent = async (agent: CustomAgent, sourceTenantId?: string) => {
-  if (!chatResources.isFresh('models')) {
+  if (!chatResources.isLoaded('models')) {
     await loadChatModels()
   }
 

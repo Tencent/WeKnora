@@ -29,11 +29,16 @@ const (
 // collected results span >1 engine type, the normalizer rescales vector
 // scores into [0, 1] before fusion.
 //
-// Failure policy: all-or-nothing. The first group error fails the whole
-// search and cancels siblings via errgroup, matching the existing single-
-// store behavior — chat/agent callers already treat "search failed" as
-// abort. A future PR can extract a MergePolicy interface (open/closed)
-// to add partial-result support without changing this function's callers.
+// Failure policy: all-or-nothing for store-level failures. The first group
+// error fails the whole search and cancels siblings via errgroup, matching the
+// existing single-store behavior — chat/agent callers already treat "search
+// failed" as abort. A retrieve call that returns results *and* an error is a
+// different case: CompositeRetrieveEngine only does that when individual result
+// sets carry a partial failure (RetrieveResult.Error), i.e. some collections
+// answered and some did not. Those results are kept and the failure is logged
+// at WARN by retainPartialResults; failing the whole search would throw away
+// evidence that was retrieved successfully. A future PR can extract a
+// MergePolicy interface (open/closed) to push partial results further up.
 //
 // Fast path: len(groups) == 1 → returns the single engine's Retrieve
 // directly with zero fan-out overhead. This is the dominant case today
@@ -54,7 +59,8 @@ func (s *knowledgeBaseService) retrieveFromStores(
 		return nil, nil
 	}
 	if len(groups) == 1 {
-		return groups[0].Engine.Retrieve(ctx, paramsWithTopK(groups[0]))
+		res, err := groups[0].Engine.Retrieve(ctx, paramsWithTopK(groups[0]))
+		return retainPartialResults(ctx, groups[0], res, err)
 	}
 
 	timeout := multiStoreRetrieveTimeout()
@@ -72,6 +78,7 @@ func (s *knowledgeBaseService) retrieveFromStores(
 			gcCtx, cancel := context.WithTimeout(gctx, timeout)
 			defer cancel()
 			res, err := grp.Engine.Retrieve(gcCtx, paramsWithTopK(grp))
+			res, err = retainPartialResults(gcCtx, grp, res, err)
 			if err != nil {
 				logger.WarnWithFields(gctx, logger.Fields{
 					"tenant_id":  grp.OwnerTenantID,
@@ -128,6 +135,32 @@ func (s *knowledgeBaseService) retrieveFromStores(
 		}
 	}
 	return all, nil
+}
+
+// retainPartialResults keeps results that arrive together with an error.
+//
+// CompositeRetrieveEngine returns a non-nil error alongside results only when
+// individual result sets carry a partial failure (RetrieveResult.Error): some
+// collections of the store answered, others did not. Dropping the results would
+// turn a degraded store into a total search failure and lose the evidence that
+// was retrieved; returning them without a trace would let callers treat an
+// incomplete answer as complete. So the failure is logged at WARN — this is the
+// closest consumer that still knows the store group — and the results are
+// returned with a nil error, leaving the all-or-nothing policy for store-level
+// failures untouched (those come back with no results, so err stays fatal).
+func retainPartialResults(
+	ctx context.Context, g *storeGroup, res []*types.RetrieveResult, err error,
+) ([]*types.RetrieveResult, error) {
+	if err == nil || len(res) == 0 {
+		return res, err
+	}
+	logger.WarnWithFields(ctx, logger.Fields{
+		"tenant_id":   g.OwnerTenantID,
+		"kb_count":    len(g.KBIDs),
+		"store_kind":  storeKindLabel(g.StoreID),
+		"result_sets": len(res),
+	}, fmt.Sprintf("retrieve returned partial results: %v", err))
+	return res, nil
 }
 
 // paramsWithTopK builds a fresh []RetrieveParams for a group. BaseParams

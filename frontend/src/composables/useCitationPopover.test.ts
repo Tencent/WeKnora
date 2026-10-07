@@ -78,6 +78,7 @@ function fixture(mode: 'chat' | 'embed', options: { drawer?: boolean; refs?: cit
         if (path === 'vue-i18n') return { useI18n: () => ({ t: (key: string) => key }) }
         if (path === '@/utils/citationMarkdown') return citationMarkdown
         if (path === '@/utils/citationChunkCache') return load('../utils/citationChunkCache')
+        if (path === '@/utils/citationAnchor') return { citationAnchorText: () => '' }
         if (path === '@/composables/useChatReferencesDrawer') return { useChatReferencesDrawer: () => options.drawer ? { open: (args: any) => drawerCalls.push(args) } : null }
         if (path === './useCitationPopover') return load('useCitationPopover')
         if (path === '@/api/knowledge-base') return { getChunkByIdOnly: (...args: string[]) => request('chat', ...args) }

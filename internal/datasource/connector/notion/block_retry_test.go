@@ -160,6 +160,9 @@ func TestNotionEmptyPageStillSucceeds(t *testing.T) {
 	previous := buildCursor(map[string]time.Time{"page": {}})
 	items, next, err := NewConnector().FetchIncremental(context.Background(), config, previous)
 	require.NoError(t, err)
-	require.Empty(t, items)
+	require.Len(t, items, 1)
+	require.Equal(t, "page", items[0].ExternalID)
+	require.False(t, items[0].IsDeleted)
+	require.Equal(t, "# "+defaultUntitledName+"\n", string(items[0].Content))
 	require.NotNil(t, next)
 }
