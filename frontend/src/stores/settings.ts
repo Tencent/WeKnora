@@ -526,7 +526,7 @@ export const useSettingsStore = defineStore("settings", {
 
     // 根据 session.last_request_state 覆盖输入栏相关字段。
     // 只触碰本次记录的字段，**不**清空 store 中其它无关字段（如模型列表）。
-    // 一般字段缺失时做"尽力恢复"；知识库范围例外，缺失代表本会话未选中知识库。
+    // 按字段语义恢复，不将会话选择写入用户默认设置。
     applyLastRequestState(state: SessionLastRequestStatePayload | null | undefined) {
       if (!state) return;
       this._isApplyingSessionState = true;
@@ -550,14 +550,18 @@ export const useSettingsStore = defineStore("settings", {
         this.settings.selectedKnowledgeBases = Array.isArray(state.knowledge_base_ids)
           ? [...state.knowledge_base_ids]
           : [];
-        if (Array.isArray(state.knowledge_ids)) {
-          this.settings.selectedFiles = [...state.knowledge_ids];
-          // selectedFileKbMap 此时无法重建（state 里没存 KB 归属），交给前端按
-          // 需要 lazy 拉取。保留 store 现值，避免误删用户刚加进来的文件映射。
-        }
+        // 服务端省略空的选择项列表；保留现值会把其它会话或全局默认的
+        // 文件、标签和工具选择带入本会话。
+        this.settings.selectedFiles = Array.isArray(state.knowledge_ids) ? [...state.knowledge_ids] : [];
+        // 保留仍选中文件的已知 KB 归属（共享文件需要它）；其它文件的缓存不跨会话带入。
+        this.settings.selectedFileKbMap = Object.fromEntries(
+          Object.entries(this.settings.selectedFileKbMap || {})
+            .filter(([id]) => this.settings.selectedFiles.includes(id))
+        );
         if (Array.isArray(state.mentioned_items)) {
           const fromMentions = state.mentioned_items
             .filter(item => item.type === "tag" && item.id && item.kb_id)
+            .filter(item => !Array.isArray(state.tag_ids) || state.tag_ids.includes(item.id))
             .map(item => ({ id: item.id, name: item.name || item.id, kbId: item.kb_id!, kbName: item.kb_name }));
           const covered = new Set(fromMentions.map(t => t.id));
           const orphanTagIds = (state.tag_ids || []).filter(id => id && !covered.has(id));
@@ -571,6 +575,8 @@ export const useSettingsStore = defineStore("settings", {
         } else if (Array.isArray(state.tag_ids)) {
           const existing = this.settings.selectedTags || [];
           this.settings.selectedTags = existing.filter(tag => state.tag_ids?.includes(tag.id));
+        } else {
+          this.settings.selectedTags = [];
         }
         if (Array.isArray(state.mcp_service_ids)) {
           this.settings.selectedMCPServices = [...state.mcp_service_ids];
@@ -578,6 +584,8 @@ export const useSettingsStore = defineStore("settings", {
           this.settings.selectedMCPServices = state.mentioned_items
             .filter(item => item.type === "mcp" && item.id)
             .map(item => item.id);
+        } else {
+          this.settings.selectedMCPServices = [];
         }
         if (Array.isArray(state.skill_names)) {
           this.settings.selectedSkills = [...state.skill_names];
@@ -585,6 +593,8 @@ export const useSettingsStore = defineStore("settings", {
           this.settings.selectedSkills = state.mentioned_items
             .filter(item => item.type === "skill" && item.id)
             .map(item => item.skill_name || item.id);
+        } else {
+          this.settings.selectedSkills = [];
         }
         this.settings.localBrowserEnabled = state.local_browser_enabled === true;
         if (typeof state.web_search_enabled === "boolean") {

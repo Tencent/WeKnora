@@ -892,7 +892,7 @@ func (c *DockerRemoteClient) WriteFile(
 		return dockerError("WriteFile", err)
 	}
 	if result.ExitCode != 0 {
-		return dockerExecFailure("WriteFile", clean, result)
+		return c.dockerFileOpFailed(ctx, id, "WriteFile", clean, result.Stderr, result.ExitCode)
 	}
 	return nil
 }
@@ -927,7 +927,7 @@ func (c *DockerRemoteClient) ReadFile(
 		return nil, dockerError("ReadFile", err)
 	}
 	if result.ExitCode != 0 {
-		return nil, dockerExecFailure("ReadFile", clean, result)
+		return nil, c.dockerFileOpFailed(ctx, id, "ReadFile", clean, result.Stderr, result.ExitCode)
 	}
 	return []byte(result.Stdout), nil
 }
@@ -971,7 +971,7 @@ func (c *DockerRemoteClient) Stat(
 		return nil, dockerError("Stat", err)
 	}
 	if result.ExitCode != 0 {
-		return nil, dockerExecFailure("Stat", clean, result)
+		return nil, c.dockerFileOpFailed(ctx, id, "Stat", clean, result.Stderr, result.ExitCode)
 	}
 	entries := parseDockerFindOutput(result.Stdout)
 	if len(entries) == 0 {
@@ -994,7 +994,18 @@ func (c *DockerRemoteClient) Stat(
 // NotFound so callers can treat it as "nothing there"; everything else,
 // permission denials included, is an invalid request carrying the tool's own
 // complaint rather than a synthesised one.
-func dockerFileOpError(op, clean, stderr string) error {
+// dockerFileOpFailed classifies a filesystem op's non-zero exec exit. The
+// message carries the exit code — with an empty stderr it used to be the
+// only missing clue (issue #3942). When the exec raced the idle sweeper's
+// delete (ensureRunning's inspect passes, the sweep removes the container,
+// the exec dies mid-flight), the failure surfaces as exit != 0 with an
+// empty stderr; the re-inspect reclassifies it as NotFound so
+// CanReplaceRemoteBinding lets the rebinding self-heal take over — making
+// the sweeper's "deleting needs no coordination with the binding store"
+// premise hold for this window too (issue #3942, mechanism A).
+func (c *DockerRemoteClient) dockerFileOpFailed(
+	ctx context.Context, id, op, clean, stderr string, exitCode int,
+) error {
 	if strings.Contains(stderr, "No such file or directory") {
 		return &RemoteError{
 			Kind:     RemoteErrorKindNotFound,
@@ -1003,11 +1014,20 @@ func dockerFileOpError(op, clean, stderr string) error {
 			Message:  clean + " does not exist",
 		}
 	}
+	if c.containerVanished(ctx, id, op) {
+		return &RemoteError{
+			Kind:     RemoteErrorKindNotFound,
+			Provider: SandboxTypeDocker,
+			Op:       op,
+			Message: fmt.Sprintf("%s %s: exit=%d: container vanished mid-op (likely idle sweep)",
+				op, clean, exitCode),
+		}
+	}
 	return &RemoteError{
 		Kind:     RemoteErrorKindInvalidRequest,
 		Provider: SandboxTypeDocker,
 		Op:       op,
-		Message:  fmt.Sprintf("%s %s: %s", op, clean, firstNonEmptyLine(stderr)),
+		Message:  fmt.Sprintf("%s %s: exit=%d: %s", op, clean, exitCode, firstNonEmptyLine(stderr)),
 	}
 }
 
@@ -1081,7 +1101,7 @@ func (c *DockerRemoteClient) makeDir(ctx context.Context, id, dir, op string) er
 		return dockerError(op, err)
 	}
 	if result.ExitCode != 0 {
-		return dockerExecFailure(op, dir, result)
+		return c.dockerFileOpFailed(ctx, id, op, dir, result.Stderr, result.ExitCode)
 	}
 	return nil
 }
@@ -1113,7 +1133,7 @@ func (c *DockerRemoteClient) Remove(
 		return dockerError("Remove", err)
 	}
 	if result.ExitCode != 0 {
-		return dockerExecFailure("Remove", clean, result)
+		return c.dockerFileOpFailed(ctx, id, "Remove", clean, result.Stderr, result.ExitCode)
 	}
 	return nil
 }
@@ -1158,6 +1178,15 @@ func (c *DockerRemoteClient) ListDir(
 				Provider: SandboxTypeDocker,
 				Op:       "ListDir",
 				Message:  clean + " does not exist",
+			}
+		}
+		if c.containerVanished(ctx, id, "ListDir") {
+			return nil, &RemoteError{
+				Kind:     RemoteErrorKindNotFound,
+				Provider: SandboxTypeDocker,
+				Op:       "ListDir",
+				Message: fmt.Sprintf("ListDir %s: exit=%d: container vanished mid-op (likely idle sweep)",
+					clean, result.ExitCode),
 			}
 		}
 		return nil, &RemoteError{

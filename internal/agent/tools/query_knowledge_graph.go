@@ -67,15 +67,80 @@ const (
 	graphQueryMaxRelations = 30
 )
 
-// graphSearchTerms turns the query into entity-name terms. The graph store
-// matches node names by case-sensitive substring, so the whole query only
-// matches when it is itself an entity name; its words catch the entities a
-// question mentions ("Docker 和 Kubernetes 的关系" → Docker, Kubernetes).
-// Words keep their case: lowercased terms never matched "Docker".
-func graphSearchTerms(query string) []string {
+// graphTruncation records what the caps above left out, per source. The zero
+// value means nothing was dropped. A capped result must say so: a relation
+// list read without a marker is the entity's whole neighbourhood to the model,
+// and it then answers "X is not related to Y" from a list that never held Y.
+type graphTruncation struct {
+	relationsShown int
+	relationsTotal int
+	chunksFetched  int
+	chunksTotal    int
+	termsMatched   int
+	termsTotal     int
+}
+
+// truncated reports whether any cap fired.
+func (tr graphTruncation) truncated() bool {
+	return tr.relationsTotal > tr.relationsShown || tr.chunksTotal > tr.chunksFetched ||
+		tr.termsTotal > tr.termsMatched
+}
+
+// statement renders the block the model reads when a cap fired, and nothing
+// otherwise: silence has to mean "nothing was dropped".
+func (tr graphTruncation) statement() string {
+	if !tr.truncated() {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("=== ⚠️ Truncated ===\n")
+	if tr.relationsTotal > tr.relationsShown {
+		fmt.Fprintf(&b, "  - Relations: %d of %d shown (cap %d per query). These entities have more relations "+
+			"than the ones listed below; query a single entity by name to see its neighbourhood.\n",
+			tr.relationsShown, tr.relationsTotal, graphQueryMaxRelations)
+	}
+	if tr.chunksTotal > tr.chunksFetched {
+		fmt.Fprintf(&b, "  - Graph evidence chunks: %d of %d fetched (cap %d per knowledge base). Some of these "+
+			"entities' source chunks are not part of this result.\n",
+			tr.chunksFetched, tr.chunksTotal, graphQueryMaxChunks)
+	}
+	if tr.termsTotal > tr.termsMatched {
+		fmt.Fprintf(&b, "  - Entity terms: %d of %d query words were matched against entity names (cap %d). A word "+
+			"left out can hide an entity, so name the entity you mean in query.\n",
+			tr.termsMatched, tr.termsTotal, graphQueryMaxTerms)
+	}
+	b.WriteString("\n")
+	return b.String()
+}
+
+// addToData records the cap counts under the tool's Data, and only when a cap
+// fired: an absent key means nothing was dropped. The model reads a view
+// rebuilt from these keys, so the marker has to travel here too.
+func (tr graphTruncation) addToData(data map[string]interface{}) {
+	if tr.relationsTotal > tr.relationsShown {
+		data["relations_total"] = tr.relationsTotal
+		data["relations_omitted"] = tr.relationsTotal - tr.relationsShown
+	}
+	if tr.chunksTotal > tr.chunksFetched {
+		data["graph_chunks_total"] = tr.chunksTotal
+		data["graph_chunks_omitted"] = tr.chunksTotal - tr.chunksFetched
+	}
+	if tr.termsTotal > tr.termsMatched {
+		data["query_terms_total"] = tr.termsTotal
+		data["query_terms_omitted"] = tr.termsTotal - tr.termsMatched
+	}
+}
+
+// graphSearchTerms turns the query into entity-name terms, and reports how many
+// candidate words the cap dropped. The graph store matches node names by
+// case-sensitive substring, so the whole query only matches when it is itself
+// an entity name; its words catch the entities a question mentions ("Docker 和
+// Kubernetes 的关系" → Docker, Kubernetes). Words keep their case: lowercased
+// terms never matched "Docker".
+func graphSearchTerms(query string) (terms []string, dropped int) {
 	query = strings.TrimSpace(query)
 	if query == "" {
-		return nil
+		return nil, 0
 	}
 	seen := map[string]bool{query: true}
 	var tokens []string
@@ -93,14 +158,17 @@ func graphSearchTerms(query string) []string {
 		}
 		return tokens[i] < tokens[j]
 	})
-	terms := []string{query}
+	terms = []string{query}
 	for _, token := range tokens {
 		if len(terms) >= graphQueryMaxTerms {
-			break
+			// Dropped, not merely deferred: an entity named by one of these
+			// words is never looked up, so the count travels with the result.
+			dropped++
+			continue
 		}
 		terms = append(terms, token)
 	}
-	return terms
+	return terms, dropped
 }
 
 // WithKnowledgeScope enables document/tag-level result filtering for Agent
@@ -173,19 +241,21 @@ func (t *QueryKnowledgeGraphTool) Execute(ctx context.Context, args json.RawMess
 
 	// Concurrently query all knowledge bases
 	type graphQueryResult struct {
-		kbID         string
-		kb           *types.KnowledgeBase
-		graphResults []*types.SearchResult // chunks the matched entities come from
-		textResults  []*types.SearchResult
-		relations    []*types.GraphRelation
-		warnings     []string // failures of one source while the other returned results
-		err          error
+		kbID          string
+		kb            *types.KnowledgeBase
+		graphResults  []*types.SearchResult // chunks the matched entities come from
+		textResults   []*types.SearchResult
+		relations     []*types.GraphRelation
+		chunksFetched int      // evidence chunks fetched, before scope filtering
+		chunksTotal   int      // evidence chunks the matched entities reference
+		warnings      []string // failures of one source while the other returned results
+		err           error
 	}
 
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	kbResults := make(map[string]*graphQueryResult)
-	terms := graphSearchTerms(query)
+	terms, termsDropped := graphSearchTerms(query)
 
 	searchParams := types.SearchParams{
 		QueryText:             query,
@@ -219,10 +289,12 @@ func (t *QueryKnowledgeGraphTool) Execute(ctx context.Context, args json.RawMess
 			}
 
 			var errs []string
-			graphResults, graph, err := t.queryGraph(ctx, id, terms)
+			lookup, err := t.queryGraph(ctx, id, terms)
 			if err != nil {
 				errs = append(errs, fmt.Sprintf("graph query failed: %v", err))
 			}
+			graphResults, graph := lookup.chunks, lookup.graph
+			res.chunksFetched, res.chunksTotal = lookup.chunksFetched, lookup.chunksTotal
 			var relations []*types.GraphRelation
 			if graph != nil {
 				relations = graph.Relation
@@ -274,6 +346,8 @@ func (t *QueryKnowledgeGraphTool) Execute(ctx context.Context, args json.RawMess
 	var graphHits, textHits []*types.SearchResult
 	var relations []*types.GraphRelation
 	seenRelations := make(map[string]bool)
+	relationsTotal := 0
+	chunksFetched, chunksTotal := 0, 0
 
 	for _, kbID := range input.KnowledgeBaseIDs {
 		result := kbResults[kbID]
@@ -290,6 +364,8 @@ func (t *QueryKnowledgeGraphTool) Execute(ctx context.Context, args json.RawMess
 		}
 
 		kbCounts[kbID] = len(result.graphResults) + len(result.textResults)
+		chunksFetched += result.chunksFetched
+		chunksTotal += result.chunksTotal
 		for _, r := range result.graphResults {
 			if !seenChunks[r.ID] {
 				seenChunks[r.ID] = true
@@ -304,11 +380,27 @@ func (t *QueryKnowledgeGraphTool) Execute(ctx context.Context, args json.RawMess
 		}
 		for _, rel := range result.relations {
 			key := rel.Node1 + "\x00" + rel.Type + "\x00" + rel.Node2
-			if !seenRelations[key] && len(relations) < graphQueryMaxRelations {
-				seenRelations[key] = true
-				relations = append(relations, rel)
+			if seenRelations[key] {
+				continue
 			}
+			seenRelations[key] = true
+			relationsTotal++
+			if len(relations) >= graphQueryMaxRelations {
+				// Counted but not returned: the cap stays visible through
+				// graphTruncation, or this subgraph reads as the whole
+				// neighbourhood of every entity it mentions.
+				continue
+			}
+			relations = append(relations, rel)
 		}
+	}
+	truncation := graphTruncation{
+		relationsShown: len(relations),
+		relationsTotal: relationsTotal,
+		chunksFetched:  chunksFetched,
+		chunksTotal:    chunksTotal,
+		termsMatched:   len(terms),
+		termsTotal:     len(terms) + termsDropped,
 	}
 
 	sort.SliceStable(textHits, func(i, j int) bool {
@@ -329,19 +421,26 @@ func (t *QueryKnowledgeGraphTool) Execute(ctx context.Context, args json.RawMess
 		if len(errs) > 0 {
 			output += " Some knowledge bases could not be queried: " + strings.Join(errs, "; ") + "."
 		}
+		// "Found nothing" is also what a dropped entity term looks like, so a
+		// cap that fired has to be stated on this path too.
+		if truncation.truncated() {
+			output += "\n\n" + truncation.statement()
+		}
+		data := map[string]interface{}{
+			"knowledge_base_ids": input.KnowledgeBaseIDs,
+			"query":              query,
+			"results":            []interface{}{},
+			"relations":          relationData,
+			"graph_configs":      graphConfigsToData(graphConfigs),
+			"graph_config":       aggregateGraphConfig(graphConfigs),
+			"errors":             errs,
+			"display_type":       "graph_query_results",
+		}
+		truncation.addToData(data)
 		return &types.ToolResult{
 			Success: true,
 			Output:  output,
-			Data: map[string]interface{}{
-				"knowledge_base_ids": input.KnowledgeBaseIDs,
-				"query":              query,
-				"results":            []interface{}{},
-				"relations":          relationData,
-				"graph_configs":      graphConfigsToData(graphConfigs),
-				"graph_config":       aggregateGraphConfig(graphConfigs),
-				"errors":             errs,
-				"display_type":       "graph_query_results",
-			},
+			Data:    data,
 		}, nil
 	}
 
@@ -349,8 +448,13 @@ func (t *QueryKnowledgeGraphTool) Execute(ctx context.Context, args json.RawMess
 	output := "=== Knowledge Graph Query ===\n\n"
 	output += fmt.Sprintf("📊 Query: %s\n", query)
 	output += fmt.Sprintf("🎯 Target Knowledge Bases: %v\n", input.KnowledgeBaseIDs)
-	output += fmt.Sprintf("✓ Found %d relations and %d relevant chunks (deduplicated)\n\n",
-		len(relations), len(allResults))
+	if truncation.relationsTotal > truncation.relationsShown {
+		output += fmt.Sprintf("✓ Found %d of %d relations and %d relevant chunks (deduplicated)\n\n",
+			len(relations), truncation.relationsTotal, len(allResults))
+	} else {
+		output += fmt.Sprintf("✓ Found %d relations and %d relevant chunks (deduplicated)\n\n",
+			len(relations), len(allResults))
+	}
 
 	if len(errs) > 0 {
 		output += "=== ⚠️ Partial Failures ===\n"
@@ -359,6 +463,8 @@ func (t *QueryKnowledgeGraphTool) Execute(ctx context.Context, args json.RawMess
 		}
 		output += "\n"
 	}
+
+	output += truncation.statement()
 
 	if len(relations) > 0 {
 		output += "=== 🔗 Relations ===\n"
@@ -444,24 +550,38 @@ func (t *QueryKnowledgeGraphTool) Execute(ctx context.Context, args json.RawMess
 	// Build structured graph data for frontend visualization
 	graphData := buildGraphVisualizationData(allResults, relations)
 
+	data := map[string]interface{}{
+		"knowledge_base_ids": input.KnowledgeBaseIDs,
+		"query":              query,
+		"results":            formattedResults,
+		"relations":          relationData,
+		"count":              len(allResults),
+		"kb_counts":          kbCounts,
+		"graph_configs":      graphConfigsToData(graphConfigs),
+		"graph_config":       aggregateGraphConfig(graphConfigs),
+		"graph_data":         graphData,
+		"has_graph_config":   hasGraphConfig,
+		"errors":             errs,
+		"display_type":       "graph_query_results",
+	}
+	truncation.addToData(data)
+
 	return &types.ToolResult{
 		Success: true,
 		Output:  output,
-		Data: map[string]interface{}{
-			"knowledge_base_ids": input.KnowledgeBaseIDs,
-			"query":              query,
-			"results":            formattedResults,
-			"relations":          relationData,
-			"count":              len(allResults),
-			"kb_counts":          kbCounts,
-			"graph_configs":      graphConfigsToData(graphConfigs),
-			"graph_config":       aggregateGraphConfig(graphConfigs),
-			"graph_data":         graphData,
-			"has_graph_config":   hasGraphConfig,
-			"errors":             errs,
-			"display_type":       "graph_query_results",
-		},
+		Data:    data,
 	}, nil
+}
+
+// graphLookup is one knowledge base's graph lookup: the matched graph, the
+// evidence chunks fetched for it, and how many distinct chunks the matched
+// entities reference in total. The two counts travel back with the chunks so a
+// fetch that stopped at graphQueryMaxChunks can be reported as such.
+type graphLookup struct {
+	graph         *types.GraphData
+	chunks        []*types.SearchResult
+	chunksFetched int
+	chunksTotal   int
 }
 
 // queryGraph looks the query's entity terms up in kbID's graph and returns
@@ -470,35 +590,50 @@ func (t *QueryKnowledgeGraphTool) Execute(ctx context.Context, args json.RawMess
 // (the store answers nil), it returns nothing.
 func (t *QueryKnowledgeGraphTool) queryGraph(
 	ctx context.Context, kbID string, terms []string,
-) ([]*types.SearchResult, *types.GraphData, error) {
+) (graphLookup, error) {
 	if t.graphRepo == nil || len(terms) == 0 {
-		return nil, nil, nil
+		return graphLookup{}, nil
 	}
 	graph, err := t.graphRepo.SearchNode(ctx, types.NameSpace{KnowledgeBase: kbID}, terms)
-	if err != nil || graph == nil {
-		return nil, nil, err
+	if err != nil {
+		return graphLookup{}, err
+	}
+	if graph == nil {
+		return graphLookup{}, nil
+	}
+	// Without a chunk store nothing is fetched at all, and none of it was
+	// dropped by the cap: leaving the counts at zero keeps that apart from a
+	// capped fetch, which must be reported.
+	lookup := graphLookup{graph: graph}
+	if t.chunkRepo == nil {
+		return lookup, nil
 	}
 	chunkIDs := make([]string, 0, graphQueryMaxChunks)
-	seen := make(map[string]bool)
+	referenced := make(map[string]bool)
 	for _, node := range graph.Node {
 		for _, id := range node.Chunks {
-			if len(chunkIDs) >= graphQueryMaxChunks {
-				break
+			if id == "" || referenced[id] {
+				continue
 			}
-			if id != "" && !seen[id] {
-				seen[id] = true
+			referenced[id] = true
+			// Past the cap a chunk is counted, not fetched: the counts are
+			// what tells the caller the evidence is a subset.
+			if len(chunkIDs) < graphQueryMaxChunks {
 				chunkIDs = append(chunkIDs, id)
 			}
 		}
 	}
-	if len(chunkIDs) == 0 || t.chunkRepo == nil {
-		return nil, graph, nil
+	lookup.chunksFetched, lookup.chunksTotal = len(chunkIDs), len(referenced)
+	if len(chunkIDs) == 0 {
+		return lookup, nil
 	}
 	// The graph namespace is the knowledge base, which the caller already
 	// authorized; a chunk ID is only trusted when its row belongs to it.
 	chunks, err := t.chunkRepo.ListChunksByIDOnly(ctx, chunkIDs)
 	if err != nil {
-		return nil, graph, err
+		// A failed fetch is an error, not a capped fetch: dropping the counts
+		// keeps it from being reported as truncation.
+		return graphLookup{graph: graph}, err
 	}
 	byID := make(map[string]*types.Chunk, len(chunks))
 	knowledgeIDs := make([]string, 0, len(chunks))
@@ -510,7 +645,7 @@ func (t *QueryKnowledgeGraphTool) queryGraph(
 	}
 	titles, err := t.knowledgeTitles(ctx, knowledgeIDs)
 	if err != nil {
-		return nil, graph, err
+		return graphLookup{graph: graph}, err
 	}
 	results := make([]*types.SearchResult, 0, len(byID))
 	for _, id := range chunkIDs {
@@ -535,7 +670,8 @@ func (t *QueryKnowledgeGraphTool) queryGraph(
 			MatchType:       types.MatchTypeGraph,
 		})
 	}
-	return results, graph, nil
+	lookup.chunks = results
+	return lookup, nil
 }
 
 // knowledgeTitles returns the titles of the knowledge IDs that still exist.
@@ -572,29 +708,33 @@ func searchTargetsCoverWholeKB(targets types.SearchTargets, kbID string) bool {
 	return false
 }
 
-// relationsBackedBy keeps the graph's relations whose two entities were both
-// extracted from one of the evidence chunks. Entities whose chunks are not
-// among them cannot be shown to be in scope, so their relations are dropped.
+// relationsBackedBy checks the actual endpoint instances against scoped evidence.
+// A same-named entity in another document cannot establish a relation's scope.
 func relationsBackedBy(graph *types.GraphData, evidence []*types.SearchResult) []*types.GraphRelation {
 	if graph == nil || len(evidence) == 0 {
 		return nil
 	}
 	allowedChunks := make(map[string]bool, len(evidence))
 	for _, r := range evidence {
-		allowedChunks[r.ID] = true
+		if r != nil {
+			allowedChunks[r.ID] = true
+		}
 	}
 	allowedNodes := make(map[string]bool)
 	for _, node := range graph.Node {
+		if node == nil || node.ID == "" {
+			continue
+		}
 		for _, id := range node.Chunks {
 			if allowedChunks[id] {
-				allowedNodes[node.Name] = true
+				allowedNodes[node.ID] = true
 				break
 			}
 		}
 	}
 	var relations []*types.GraphRelation
 	for _, rel := range graph.Relation {
-		if allowedNodes[rel.Node1] && allowedNodes[rel.Node2] {
+		if rel != nil && allowedNodes[rel.SourceID] && allowedNodes[rel.TargetID] {
 			relations = append(relations, rel)
 		}
 	}

@@ -935,6 +935,12 @@ func TestDockerClientReadFileMapsFailures(t *testing.T) {
 			engine := newFakeDockerEngine()
 			engine.execExit = 1
 			engine.execStderr = tt.stderr
+			// The container is alive: these are genuine command failures,
+			// not the mid-op disappearance the vanish recheck covers.
+			engine.inspect["c"] = container.InspectResponse{
+				ID:    "c",
+				State: &container.State{Status: "running"},
+			}
 			docker := newTestDockerClient(t, engine)
 
 			_, err := docker.ReadFile(context.Background(), testHandle("c"),

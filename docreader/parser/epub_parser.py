@@ -161,17 +161,6 @@ class EPUBParser(BaseParser):
         images: Dict[str, str] = {}
         image_aliases: Dict[str, str] = {}
 
-        try:
-            toc = book.get_table_of_contents()
-        except Exception as e:
-            logger.debug("Failed to get TOC: %s, processing all HTML items", e)
-            toc = []
-
-        html_items = {}
-        for item in book.get_items():
-            if item.get_type() == ebooklib.ITEM_DOCUMENT:
-                html_items[item.get_name()] = item
-
         if self.extract_images:
             for item in book.get_items():
                 if item.get_type() == ebooklib.ITEM_IMAGE:
@@ -181,30 +170,38 @@ class EPUBParser(BaseParser):
                     images[img_path] = base64.b64encode(img_data).decode("utf-8")
                     self._add_image_aliases(image_aliases, item.get_name(), img_path)
 
-        if toc:
-            for item in toc:
-                entries = item if isinstance(item, tuple) else (item,)
-                for sub in entries:
-                    if hasattr(sub, "get_name") and sub.get_name() in html_items:
-                        markdown_parts.append(
-                            self._process_chapter(
-                                html_items[sub.get_name()],
-                                toc_index=len(markdown_parts),
-                                image_aliases=image_aliases,
-                            )
-                        )
-
-        if not markdown_parts:
-            for _name, item in html_items.items():
-                markdown_parts.append(
-                    self._process_chapter(
-                        item,
-                        toc_index=len(markdown_parts),
-                        image_aliases=image_aliases,
-                    )
+        for item in self._documents_in_reading_order(book):
+            markdown_parts.append(
+                self._process_chapter(
+                    item,
+                    toc_index=len(markdown_parts),
+                    image_aliases=image_aliases,
                 )
+            )
 
         return "\n\n".join(part for part in markdown_parts if part.strip()), images
+
+    @staticmethod
+    def _documents_in_reading_order(book) -> list:
+        """Return the book's documents in spine order.
+
+        The spine is the reading order. ``get_items()`` follows the manifest,
+        which can list files in any order: Standard Ebooks puts the title page
+        after the last chapter there. Documents the spine leaves out follow, in
+        manifest order.
+        """
+        documents = [
+            item
+            for item in book.get_items()
+            if item.get_type() == ebooklib.ITEM_DOCUMENT
+        ]
+        ordered = []
+        for idref, _linear in book.spine:
+            item = book.get_item_with_id(idref)
+            if item in documents and item not in ordered:
+                ordered.append(item)
+        ordered.extend(item for item in documents if item not in ordered)
+        return ordered
 
     def _process_chapter(
         self,
