@@ -99,6 +99,11 @@ func (c *Connector) Type() string {
 	return types.ConnectorTypeDingTalk
 }
 
+// maxValidateProbes caps how many documents Validate reads before giving up.
+// An app missing the document read permission fails every probe, so without a
+// cap a large tenant would turn one Validate into hundreds of serial calls.
+const maxValidateProbes = 5
+
 // Validate checks the application credentials and operator access, including
 // node listing and a sample document read when one is visible at the workspace root.
 //
@@ -122,6 +127,7 @@ func (c *Connector) Validate(ctx context.Context, dataSourceConfig *types.DataSo
 		lastErr       error
 		sawDocument   bool
 		workspaceFail int
+		probes        int
 	)
 	for _, item := range workspaces {
 		rootNodeID := strings.TrimSpace(item.RootNodeID)
@@ -139,11 +145,17 @@ func (c *Connector) Validate(ctx context.Context, dataSourceConfig *types.DataSo
 				continue
 			}
 			sawDocument = true
+			probes++
 			if err := verifyDocument(ctx, api, child); err != nil {
 				lastErr = fmt.Errorf("workspace %q document %q: %w", item.Name, child.Name, err)
-				continue
+				// One probe per workspace: another document in the same
+				// workspace almost always fails for the same reason.
+				break
 			}
 			return nil
+		}
+		if probes >= maxValidateProbes {
+			break
 		}
 	}
 

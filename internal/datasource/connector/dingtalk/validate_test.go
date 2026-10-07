@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -186,5 +187,44 @@ func TestValidateSurvivesWorkspaceListingFailure(t *testing.T) {
 	c := testConnector(api)
 	if err := c.Validate(context.Background(), testConfig()); err != nil {
 		t.Fatalf("Validate must survive one unlistable workspace, got: %v", err)
+	}
+}
+
+// An app without the document read permission fails every probe. Validate must
+// probe at most one document per workspace and stop after maxValidateProbes,
+// instead of firing one call per document across the whole tenant.
+func TestValidateCapsProbesWhenEveryDocumentIsUnreadable(t *testing.T) {
+	api := &fakeAPI{
+		nodes:       map[string][]node{},
+		blockErrors: map[string]error{},
+	}
+	denied := errors.New("forbidden.accessDenied: the operator has no permission")
+	workspaces := 3 * maxValidateProbes
+	for w := 0; w < workspaces; w++ {
+		root := fmt.Sprintf("root-%d", w)
+		api.workspaces = append(api.workspaces, workspace{ID: root, RootNodeID: root, Name: root})
+		for d := 0; d < 4; d++ {
+			id := fmt.Sprintf("doc-%d-%d", w, d)
+			api.nodes[root] = append(api.nodes[root],
+				node{ID: id, Name: id, Type: "FILE", Category: "ALIDOC", Extension: "adoc"})
+			api.blockErrors[id] = denied
+		}
+	}
+
+	c := testConnector(api)
+	if err := c.Validate(context.Background(), testConfig()); err == nil {
+		t.Fatal("Validate must fail when no visible document can be read")
+	}
+	total := 0
+	for _, n := range api.blockCalls {
+		total += n
+	}
+	if total > maxValidateProbes {
+		t.Fatalf("Validate made %d document probes, want at most %d", total, maxValidateProbes)
+	}
+	for w := 0; w < workspaces; w++ {
+		if api.blockCalls[fmt.Sprintf("doc-%d-1", w)] != 0 {
+			t.Fatalf("workspace root-%d was probed past its first document", w)
+		}
 	}
 }
