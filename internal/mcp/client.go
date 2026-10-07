@@ -306,9 +306,13 @@ func (c *mcpGoClient) checkErrorAndDisconnectIfNeeded(err error) {
 	}
 	errMsg := transportErr.Err.Error()
 	// Known session invalidation errors from MCP servers:
+	//   - a 404, reported as transport.ErrSessionTerminated — the spec's signal
+	//     that the server no longer knows the session (it restarted or expired
+	//     it) and the client has to initialize a new one
 	//   - "Invalid session ID"  — server recognises the header but rejects the value
 	//   - "No active connection" — server has no record of the session at all
-	if strings.Contains(errMsg, "Invalid session ID") ||
+	if errors.Is(transportErr.Err, transport.ErrSessionTerminated) ||
+		strings.Contains(errMsg, "Invalid session ID") ||
 		strings.Contains(errMsg, "No active connection") {
 		_ = c.Disconnect()
 	}
