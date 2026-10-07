@@ -337,7 +337,6 @@ func buildParentChildConfigs(cc types.ChunkingConfig, base chunker.SplitterConfi
 	return chunker.DeriveParentChildConfigs(base, cc.ParentChunkSize, cc.ChildChunkSize)
 }
 
-// processChunks processes chunks and creates embeddings for knowledge content
 // deleteUnindexedChunks drops the chunks processChunks wrote for a knowledge
 // that failed before BatchIndex ran. Nothing reached the vector store yet, so
 // only the chunk rows need removing; left alone they would stay active under a
@@ -348,6 +347,7 @@ func (s *knowledgeService) deleteUnindexedChunks(ctx context.Context, knowledge 
 	}
 }
 
+// processChunks processes chunks and creates embeddings for knowledge content
 func (s *knowledgeService) processChunks(ctx context.Context,
 	kb *types.KnowledgeBase, knowledge *types.Knowledge, chunks []types.ParsedChunk,
 	opts ...ProcessChunksOptions,
