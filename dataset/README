@@ -62,6 +62,8 @@ python dataset/qa_dataset.py generate \
   --output_dir ./dataset/samples
 ```
 
+The script uses `gpt-5.6-sol` by default.
+
 ### 3. View Results
 
 Display the generated QA pairs with their context:
