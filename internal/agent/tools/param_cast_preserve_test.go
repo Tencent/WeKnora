@@ -18,7 +18,8 @@ func TestCastParamsPreservesUntouchedNumbers(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			schema := json.RawMessage(`{"type":"object","properties":{"enabled":{"type":"boolean"}` + tc.property + `}}`)
+			schema := json.RawMessage(`{"type":"object","properties":{"enabled":{"type":"boolean"}` +
+				tc.property + `}}`)
 			args := json.RawMessage(fmt.Sprintf(`{"enabled":"true","payload":%s}`, tc.value))
 			result := CastParams(args, schema)
 			var parsed map[string]json.RawMessage
