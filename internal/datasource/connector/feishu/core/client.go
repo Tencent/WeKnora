@@ -43,8 +43,12 @@ const maxJSONResponseBytes = 16 << 20
 
 // readCapped reads a response body, refusing anything larger than limit instead
 // of buffering it. Oversized payloads are reported as an error: a truncated
-// body would be indexed as if it were the whole document.
+// body would be indexed as if it were the whole document. A non-positive limit
+// (e.g. a zero-value client built in tests) falls back to maxJSONResponseBytes.
 func readCapped(body io.Reader, limit int64) ([]byte, error) {
+	if limit <= 0 {
+		limit = maxJSONResponseBytes
+	}
 	data, err := io.ReadAll(io.LimitReader(body, limit+1))
 	if err != nil {
 		return nil, err
