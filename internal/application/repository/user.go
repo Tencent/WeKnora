@@ -259,10 +259,22 @@ func (r *userRepository) RevokeSystemAdmin(ctx context.Context, userID, actorID 
 // SearchUsers searches users by username or email
 func (r *userRepository) SearchUsers(ctx context.Context, query string, limit int) ([]*types.User, error) {
 	var users []*types.User
-	searchPattern := "%" + query + "%"
+	// Dialect-aware bits so the same query works on Postgres and SQLite (Lite
+	// build), which has no ILIKE. The keyword is escaped either way: % and _
+	// are LIKE wildcards, so an unescaped search for "a_b" also matches "axb"
+	// and "%" returns every user.
+	isPostgres := r.db.Dialector.Name() == "postgres"
+	userLike := "LOWER(username) LIKE LOWER(?) ESCAPE ?"
+	mailLike := "LOWER(email) LIKE LOWER(?) ESCAPE ?"
+	if isPostgres {
+		userLike = "username ILIKE ? ESCAPE ?"
+		mailLike = "email ILIKE ? ESCAPE ?"
+	}
+	escaped := escapeLikeKeyword(query)
+	searchPattern := "%" + escaped + "%"
 
 	dbQuery := r.db.WithContext(ctx).
-		Where("username ILIKE ? OR email ILIKE ?", searchPattern, searchPattern).
+		Where(userLike+" OR "+mailLike, searchPattern, likeEscapeChar, searchPattern, likeEscapeChar).
 		Where("is_active = ?", true).
 		Order("username ASC")
 
