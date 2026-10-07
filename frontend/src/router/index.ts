@@ -9,6 +9,7 @@ import { MessagePlugin } from 'tdesign-vue-next'
 import i18n from '@/i18n'
 import { normalizeSettingsSection } from '@/config/settingsRoute'
 import { isToolboxSection, toolboxLocation } from '@/config/toolbox'
+import { ONEHUB_GATEWAY_MODE } from '@/config/onehubGateway'
 
 /** Lite /桌面 WebView 硬刷新时可能只打开 `/`，用 session 记住上次页面以便恢复 */
 const LITE_LAST_PATH_KEY = 'weknora_lite_last_path'
@@ -257,6 +258,11 @@ function persistLoginResponse(authStore: ReturnType<typeof useAuthStore>, respon
 }
 
 async function hydrateSessionFromToken(authStore: ReturnType<typeof useAuthStore>) {
+  if (ONEHUB_GATEWAY_MODE) {
+    const ok = await authStore.refreshFromAuthMe()
+    if (ok) authStore.setGatewaySessionActive(true)
+    return ok
+  }
   const token = localStorage.getItem('weknora_token')
   if (!token) return false
 

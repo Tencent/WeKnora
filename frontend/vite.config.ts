@@ -51,6 +51,10 @@ const DEV_PROXY_TARGET =
   process.env.VITE_DEV_PROXY_TARGET ||
   process.env.FRONTEND_BACKEND_URL ||
   'http://localhost:8080'
+// The native Vue app can be mounted below an OneHub same-origin path.
+// Keep `/` as the standalone default while allowing the gateway deployment
+// to build asset URLs and history links under `/weknora/`.
+const PUBLIC_BASE = process.env.VITE_PUBLIC_BASE || '/'
 
 function resolveVueOfficePptxEntry(): string {
   try {
@@ -68,6 +72,7 @@ function resolveVueOfficePptxEntry(): string {
 }
 
 export default defineConfig({
+  base: PUBLIC_BASE,
   define: {
     __FRONTEND_VERSION__: JSON.stringify(FRONTEND_VERSION),
     __FRONTEND_COMMIT__: JSON.stringify(FRONTEND_COMMIT),

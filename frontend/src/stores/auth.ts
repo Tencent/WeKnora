@@ -12,6 +12,7 @@ import { useChatResourcesStore } from '@/stores/chatResources'
 import { useEditorResourcesStore } from '@/stores/editorResources'
 import { useOrganizationStore } from '@/stores/organization'
 import { createSequencedRefresh } from '@/stores/sequencedRefresh'
+import { ONEHUB_GATEWAY_MODE } from '@/config/onehubGateway'
 
 /** 登出时丢弃 Pinia 内的空间级资源缓存，避免 SPA 重登复用上一账号数据。 */
 function clearSessionResourceCaches() {
@@ -34,6 +35,7 @@ export const useAuthStore = defineStore('auth', () => {
   const user = ref<UserInfo | null>(null)
   const tenant = ref<TenantInfo | null>(null)
   const token = ref<string>('')
+  const gatewaySessionActive = ref(false)
   const refreshToken = ref<string>('')
   const knowledgeBases = ref<KnowledgeBaseInfo[]>([])
   const currentKnowledgeBase = ref<KnowledgeBaseInfo | null>(null)
@@ -64,7 +66,7 @@ export const useAuthStore = defineStore('auth', () => {
 
   // 计算属性
   const isLoggedIn = computed(() => {
-    return !!token.value && !!user.value
+    return (ONEHUB_GATEWAY_MODE ? gatewaySessionActive.value : !!token.value) && !!user.value
   })
 
   const hasValidTenant = computed(() => {
@@ -457,6 +459,7 @@ export const useAuthStore = defineStore('auth', () => {
     pendingInvitationCount.value = 0
     canCreateTenant.value = false
     autoAcceptInvitation.value = false
+    gatewaySessionActive.value = false
     authMeSynced = false
     // 飞行中的 /auth/me 作废：登出之后才返回的响应不能再 setUser / setTenant。
     authMeRequest.invalidate()
@@ -564,6 +567,13 @@ export const useAuthStore = defineStore('auth', () => {
     }
 
     isLiteMode.value = localStorage.getItem('weknora_lite_mode') === 'true'
+    if (ONEHUB_GATEWAY_MODE) {
+      token.value = ''
+      refreshToken.value = ''
+      user.value = null
+      tenant.value = null
+      gatewaySessionActive.value = false
+    }
   }
 
   // 初始化时从localStorage恢复状态
@@ -574,6 +584,7 @@ export const useAuthStore = defineStore('auth', () => {
     user,
     tenant,
     token,
+    gatewaySessionActive,
     refreshToken,
     knowledgeBases,
     currentKnowledgeBase,
@@ -602,6 +613,7 @@ export const useAuthStore = defineStore('auth', () => {
     setUser,
     setTenant,
     setToken,
+    setGatewaySessionActive: (value: boolean) => { gatewaySessionActive.value = value },
     setRefreshToken,
     setKnowledgeBases,
     setCurrentKnowledgeBase,
