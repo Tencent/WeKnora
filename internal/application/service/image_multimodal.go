@@ -440,10 +440,14 @@ func (s *ImageMultimodalService) processImage(
 	// first — otherwise every retry appends another copy of the image's OCR and
 	// caption chunks to the knowledge. The removal happens only now, once the
 	// replacement content exists, so a VLM failure never leaves the image without
-	// its previously indexed chunks.
-	if err := s.dropStaleImageChunks(ctx, *payload); err != nil {
-		handleErr = err
-		return handleErr
+	// its previously indexed chunks. A first attempt has nothing to replace, and
+	// the scan reads every multimodal chunk of the knowledge, so it is skipped
+	// there: running it for every image would cost O(N²) reads per document.
+	if isTaskRetryAttempt(ctx) {
+		if err := s.dropStaleImageChunks(ctx, *payload); err != nil {
+			handleErr = err
+			return handleErr
+		}
 	}
 
 	// Persist chunks
@@ -782,6 +786,19 @@ func (s *ImageMultimodalService) shouldDropOrphanedMultimodal(
 		}
 	}
 	return false, nil
+}
+
+// isTaskRetryAttempt reports whether the current task context is a retry, i.e.
+// a previous attempt of the same task already ran. Asynq also bumps the retry
+// count when it re-delivers a task after a timeout or a crashed worker, so
+// every attempt that may have left chunks behind is covered. Returns false
+// outside a task worker.
+func isTaskRetryAttempt(ctx context.Context) bool {
+	if retried, ok := asynq.GetRetryCount(ctx); ok {
+		return retried > 0
+	}
+	retried, _, ok := types.TaskRetryMetadataFromContext(ctx)
+	return ok && retried > 0
 }
 
 // isFinalAsynqAttempt reports whether the current task context belongs to the

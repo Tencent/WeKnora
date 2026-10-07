@@ -275,9 +275,19 @@ func newIdxHarness(t *testing.T, backend *idxEngineRepo, kb *types.KnowledgeBase
 
 func (h *idxHarness) run(t *testing.T) (types.JSONMap, error) {
 	t.Helper()
+	return h.runWithContext(context.Background())
+}
+
+// runRetry runs processImage as a retry attempt of the task, the only attempt
+// that cleans up chunks a previous attempt left behind.
+func (h *idxHarness) runRetry(t *testing.T) (types.JSONMap, error) {
+	t.Helper()
+	return h.runWithContext(types.WithTaskRetryMetadata(context.Background(), 1, 3))
+}
+
+func (h *idxHarness) runWithContext(ctx context.Context) (types.JSONMap, error) {
 	out := types.JSONMap{}
-	err := h.svc.processImage(
-		context.Background(), h.payload, idxVLM{}, types.VLMConfig{}, noopSpanTracker{}, out)
+	err := h.svc.processImage(ctx, h.payload, idxVLM{}, types.VLMConfig{}, noopSpanTracker{}, out)
 	return out, err
 }
 

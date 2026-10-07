@@ -57,7 +57,7 @@ func TestProcessImageRetryReplacesChunksInsteadOfAppending(t *testing.T) {
 
 	// asynq hands the very same payload back on retry; the index write works now.
 	backend.batchSaveErr = nil
-	out, err := h.run(t)
+	out, err := h.runRetry(t)
 	if err != nil {
 		t.Fatalf("retry: %v", err)
 	}
@@ -122,7 +122,7 @@ func TestProcessImageRepairKeepsOtherImagesAndDocuments(t *testing.T) {
 		h.repo.byID[chunk.ID] = chunk
 	}
 
-	if _, err := h.run(t); err != nil {
+	if _, err := h.runRetry(t); err != nil {
 		t.Fatalf("processImage: %v", err)
 	}
 
@@ -156,7 +156,7 @@ func TestProcessImageRepairPurgesIndexEntriesOfReplacedChunks(t *testing.T) {
 		"stale-a-caption", h.payload.ImageURL, types.ChunkTypeImageCaption, int(types.ChunkStatusIndexed))
 	h.repo.byID[indexedStale.ID] = indexedStale
 
-	if _, err := h.run(t); err != nil {
+	if _, err := h.runRetry(t); err != nil {
 		t.Fatalf("processImage: %v", err)
 	}
 
@@ -179,5 +179,31 @@ func TestProcessImageRepairPurgesIndexEntriesOfReplacedChunks(t *testing.T) {
 		if chunk.Status != int(types.ChunkStatusIndexed) {
 			t.Errorf("chunk %s status = %d, want indexed", id, chunk.Status)
 		}
+	}
+}
+
+// TestProcessImageFirstAttemptSkipsRepairScan pins the cost bound: the repair
+// scan reads every multimodal chunk of the knowledge, so it only runs on a
+// retry. A first attempt has no previous attempt to clean up after and must
+// leave existing chunks alone instead of paying that scan once per image.
+func TestProcessImageFirstAttemptSkipsRepairScan(t *testing.T) {
+	t.Parallel()
+
+	backend := &idxEngineRepo{}
+	h := newIdxHarness(t, backend, defaultIndexKB())
+
+	existing := idxImageChunk(
+		"existing-ocr", h.payload.ImageURL, types.ChunkTypeImageOCR, int(types.ChunkStatusIndexed))
+	h.repo.byID[existing.ID] = existing
+
+	if _, err := h.run(t); err != nil {
+		t.Fatalf("processImage: %v", err)
+	}
+
+	if _, present := h.repo.byID[existing.ID]; !present {
+		t.Errorf("chunk %s was removed by a first attempt", existing.ID)
+	}
+	if len(h.repo.deleted) != 0 || len(backend.deleted) != 0 {
+		t.Errorf("deletions = rows %v, index %v; want none on a first attempt", h.repo.deleted, backend.deleted)
 	}
 }
