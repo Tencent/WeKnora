@@ -724,10 +724,19 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 
 		err = retrieveEngine.BatchIndex(ctx, embeddingModel, indexInfoList)
 		if err != nil {
-			knowledge.ParseStatus = types.ParseStatusFailed
-			knowledge.ErrorMessage = err.Error()
-			knowledge.UpdatedAt = time.Now()
-			s.repo.UpdateKnowledge(ctx, knowledge)
+			// Embedding and vector-store errors are often transient. While the
+			// task has attempts left, leave the row processing and hand the
+			// error to the queue so the idempotent parse runs again; only the
+			// final attempt (or a caller without a retry loop) records failure.
+			willRetry := summaryTaskWillRetry(ctx)
+			if !willRetry {
+				knowledge.ParseStatus = types.ParseStatusFailed
+				knowledge.ErrorMessage = err.Error()
+				knowledge.UpdatedAt = time.Now()
+				if updateErr := s.repo.UpdateKnowledge(ctx, knowledge); updateErr != nil {
+					logger.Errorf(ctx, "Update knowledge status failed after batch index error: %v", updateErr)
+				}
+			}
 
 			// delete failed chunks
 			if err := s.chunkRepo.DeleteChunksByKnowledgeID(ctx, knowledge.TenantID, knowledge.ID); err != nil {
@@ -748,6 +757,9 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 			}
 			s.failStage(ctx, knowledge.ID, types.StageEmbedding,
 				code, "batch index failed", err)
+			if willRetry {
+				return fmt.Errorf("batch index: %w", err)
+			}
 			return nil
 		}
 		logger.GetLogger(ctx).Infof("processChunks batch index successfully, with %d index", len(indexInfoList))
@@ -1094,6 +1106,7 @@ func (s *knowledgeService) saveSummaryState(ctx context.Context, knowledge *type
 
 // summaryTaskWillRetry reports whether the current Asynq delivery has another
 // configured attempt remaining. Calls outside an Asynq worker are terminal.
+// Despite the name it is not summary-specific; processChunks uses it too.
 func summaryTaskWillRetry(ctx context.Context) bool {
 	retried, retryOK := asynq.GetRetryCount(ctx)
 	maxRetry, maxRetryOK := asynq.GetMaxRetry(ctx)
