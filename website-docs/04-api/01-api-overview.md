@@ -6,7 +6,7 @@ WeKnora HTTP API 使用 `/api/v1` 前缀，支持 JWT、API Key 和 Embed token 
 
 - 所有业务 API 挂载在 `/api/v1` 前缀下（`router.go` 中 `r.Group("/api/v1")`）。
 - 健康检查：`GET /health`（无需认证），返回 `{"status":"ok"}`。
-- Swagger UI：`GET /swagger/*any`，仅在非 `release` 模式（`GIN_MODE != release`）下注册。
+- Swagger UI：后端的 `/swagger/index.html`，仅在非 `release` 模式（`GIN_MODE != release`）下注册。Docker Compose 默认使用 `release`；启用步骤、后端端口和空白页排查见[开发指南](../06-development/01-dev-guide.md#_6-2-gin-mode-与-swagger)。
 - 认证之外的特殊路径：`GET|HEAD /r/:token`（短时效资源授权 URL）、`GET /files`（认证后文件代理）、`GET|HEAD /api/v1/files/presigned`（HMAC 签名 URL，无需认证）、`GET /api/v1/files/presigned-preview`（Admin 诊断）。
 
 ```
@@ -186,6 +186,22 @@ X-Accel-Buffering: no
 | `usage` | TokenUsage | `prompt_tokens/completion_tokens/total_tokens/cache_*` |
 | `finish_reason` | string | 结束原因 |
 
+`SearchResult`（`knowledge_references`、检索接口的结果）中的 `source_locators` 是该分块在原始文件中的位置，可据此在原文里定位引用（该功能上线前入库的文档为空）：
+
+| 字段 | 适用 `type` | 说明 |
+| --- | --- | --- |
+| `type` | — | `pdf` / `docx` / `slide` / `sheet` / `text` / `time` / `section` |
+| `page`、`bbox` | `pdf` | 页码（从 1 起）；`bbox` 为 `[x0,y0,x1,y1]`，相对页面宽高的比例，原点在页面左上角，可缺省 |
+| `block` | `docx` | 正文中第几个段落或表格（从 1 起） |
+| `slide` | `slide` | 第几张幻灯片（从 1 起） |
+| `sheet`、`row_start`、`row_end` | `sheet` | 工作表名（CSV 为空）与行号（从 1 起，同 Excel 行号） |
+| `start`、`end` | `text` | 原文件文本的字符区间（Unicode 码点） |
+| `start_ms`、`end_ms` | `time` | 音频时间区间（毫秒） |
+| `section`、`title` | `section` | EPUB 书脊中的第几项（从 1 起）及章节标题 |
+| `quote` | 全部 | 被引用的文字，最多 300 字 |
+
+取值为 0 的数值字段会省略。合并后的检索结果携带所合并分块位置的并集。
+
 流以 `response_type:"complete"`（`done:true`）终止；出错时以 `response_type:"error"`（`done:true`）终止。工具执行失败以 `tool_result`（`data.success=false`）返回，`error` 只表示整轮失败；回答因输出上限被截断时，`answer` 事件带 `data.truncated=true`。`continue-stream` 采用重放 + 100ms 轮询追增量的续传语义（`?message_id=` 必填）。
 
 ## 文件引用形式（resource_urls）
@@ -335,7 +351,7 @@ rerank 模型加载失败或调用出错时，请求不会失败，而是按召�
 | 组织与共享 | [02-api-org.md](./02-api-org.md) | `/organizations`、`/shared-*`、`/knowledge-bases/:id/shares`、`/agents/:id/shares` |
 | 知识库与知识 | [02-api-knowledge.md](./02-api-knowledge.md) | `/knowledge-bases`、`/knowledge`、知识库文件夹 |
 | 分块与标签 | [02-api-chunks.md](./02-api-chunks.md) | `/chunks`、`/knowledge-bases/:id/tags`、`/chunker/preview` |
-| FAQ 与 Wiki | [02-api-faq-wiki.md](./02-api-faq-wiki.md) | `/knowledge-bases/:id/faq`、`/faq`、`/knowledgebase/:kb_id/wiki` |
+| FAQ 与 Wiki | [02-api-faq-wiki.md](./02-api-faq-wiki.md) | `/knowledge-bases/:id/faq`、`/faq`、`/knowledgebase/:kb_id/wiki`、`/wiki-search` |
 | 会话、消息与聊天 | [02-api-chat.md](./02-api-chat.md) | `/sessions`、`/messages`、`/knowledge-chat`、`/agent-chat`、`/knowledge-search` |
 | 模型与初始化 | [02-api-model-system.md](./02-api-model-system.md) | `/models`、`/initialization`、`/evaluation`、`/weknoracloud` |
 | 系统与平台管理 | [02-api-system.md](./02-api-system.md) | `/system`、`/system/admin` |

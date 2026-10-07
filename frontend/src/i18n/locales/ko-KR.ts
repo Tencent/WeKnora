@@ -845,7 +845,7 @@ export default {
       empty: '아직 MCP 엔드포인트가 없습니다',
       disabled: '비활성',
       cardSummary: '도구 {tools}개 · {scope}',
-      scopeAll: '모든 지식 베이스',
+              scopeAll: '모든 지식 베이스',
       scopeCount: '지식 베이스 {count}개',
       create: '새 엔드포인트',
       editTitle: 'MCP 엔드포인트 편집',
@@ -1053,6 +1053,12 @@ export default {
     prereqStep3Brief_lark_drive: "앱 권한 구성",
     prereqStep3Desc_lark_drive: "drive:drive:readonly, drive:export:readonly, docx:document:readonly 권한 활성화",
     prereqOpenConsole_yuque: 'Yuque Token 설정으로 이동',
+    yuqueFolderModeLabel: '폴더 구조',
+    yuqueFolderModeToc: 'Yuque 목차대로 계층 구성',
+    yuqueFolderModeNone: '루트에 평면 배치',
+    yuqueFolderModeHint: 'Yuque 목차 계층에 따라 문서를 배치합니다. 참고: 이후 지식베이스에서 직접 옮긴 폴더는 해당 문서가 다음에 동기화될 때 Yuque 구조로 덮어써집니다.',
+    yuqueTOCOnly: 'Yuque 목차에 표시되는 문서만 동기화',
+    yuqueTOCOnlyHint: '"Yuque 목차대로 계층 구성"을 선택해야 동작합니다. 이미 지식베이스에 있는 문서는 그대로 유지되며, Yuque 목차에 없는 문서는 새로 추가되지 않을 뿐 삭제되지 않습니다.',
     prereqBarText_dingtalk: '처음 사용하시나요? 클릭하여 DingTalk 앱 설정 가이드를 확인하세요',
     prereqStep1Brief_dingtalk: '기업 내부 앱 생성',
     prereqStep1Desc_dingtalk: 'DingTalk Open Platform에서 기업 내부 앱을 생성하고 Client ID와 Client Secret을 복사하세요.',
@@ -1124,6 +1130,9 @@ export default {
       feedUrlsHint: '한 줄에 하나씩 RSS / Atom 피드 주소를 입력하세요. 여러 개를 함께 입력할 수 있습니다.',
       authHeaders: '사용자 지정 헤더 (선택)',
       authHeadersHint: '비공개 피드 접근용. 한 줄에 하나씩 「이름: 값」 형식으로 입력하세요. 예: Authorization: Bearer xxxx'
+    },
+    confluence: {
+      cloudFolderLimitation: 'Confluence Cloud는 아직 스페이스 최상위 폴더 등 컨테이너 아래의 페이지를 여기에 나열할 수 없습니다. 스페이스 전체를 선택하면 함께 동기화됩니다.'
     },
     connectorDesc: {
       feishu: '페이슈 위키에서 문서, 스프레드시트, 파일 동기화',
@@ -2008,6 +2017,8 @@ export default {
     retry: '재시도',
     unsupported: '이 파일 유형은 온라인 미리보기를 지원하지 않습니다',
     unsupportedHint: '파일을 다운로드하여 로컬 앱으로 열어주세요',
+    zoomIn: '확대',
+    zoomOut: '축소',
     fullscreen: '전체 화면',
     exitFullscreen: '전체 화면 종료',
     htmlRendered: '렌더링 미리보기',
@@ -3398,7 +3409,8 @@ export default {
           },
           registration_mode: {
             self_serve: '셀프 가입 (누구나 가입 가능)',
-            invite_only: '초대 전용 (공개 가입 비활성)'
+            invite_register: '초대 가입 (유효한 링크 필요)',
+            invite_only: '가입 금지 (기존 계정은 초대 수락 가능)'
           }
         }
       },
@@ -3428,7 +3440,7 @@ export default {
           docker_enabled: 'Docker 샌드박스 백엔드를 허용할지 설정합니다. 로컬 docker.sock은 호스트 root와 같으므로 기본값은 꺼짐입니다. 시스템 관리자만 켤 수 있으며 저장 즉시 적용됩니다. 데몬 소켓을 마운트했거나 TLS가 있는 원격 tcp:// 를 쓰는 프라이빗 단일 노드에서만 켜세요.'
         },
         auth: {
-          registration_mode: '셀프 가입 모드입니다. self_serve = 누구나 계정을 만들 수 있음; invite_only = 공개 가입을 끄고 Owner/Admin만 초대 가능. 저장 즉시 적용되며, self_serve는 스팸 가입이 들어올 수 있으니 신중히 사용하세요.',
+          registration_mode: '가입 모드입니다. 공개 가입은 누구나 계정을 만들 수 있고, 초대 가입은 유효한 초대 링크가 필요합니다. 가입 금지 상태에서도 기존 계정은 초대를 수락할 수 있습니다. 저장 즉시 적용됩니다.',
           default_tenant_mode: '공개 가입 후 공간 초기화 정책입니다. create_personal은 개인 공간을 만들고 Owner를 부여하며, tenantless는 초대 수락 또는 직접 공간 생성 전까지 계정만 만듭니다.',
           complex_password_enabled: '복잡한 비밀번호를 사용할지 여부입니다. 활성화하면 비밀번호에 대문자, 소문자, 숫자 및 특수 문자가 포함되어야 합니다. 변경 사항은 즉시 적용되며, 새로 가입하는 사용자 또는 비밀번호를 새로 변경하거나 재설정하는 경우에만 적용됩니다. 특수 문자는 다음을 포함합니다: {specialChars}'
         }
@@ -3459,7 +3471,7 @@ export default {
           docker_enabled: 'Docker 샌드박스 사용'
         },
         auth: {
-          registration_mode: '셀프 가입 모드',
+          registration_mode: '가입 모드',
           default_tenant_mode: '기본 공간 프로비저닝',
           complex_password_enabled: '복잡한 비밀번호 사용'
         }
@@ -3948,6 +3960,20 @@ export default {
     channelIm: 'IM',
     chunkLabel: '청크 {index}:',
     navigateToDocument: '문서 상세 보기',
+    referenceSourceBack: '전체 출처',
+    referenceSourceView: '원문 보기',
+    referenceSourceRelocate: '다시 찾기',
+    referenceSourceLocating: '인용 위치를 찾는 중…',
+    referenceSourceExact: "원문 구절을 정확히 찾았습니다",
+    referenceSourcePartial: "확인된 원문을 강조했습니다. 인용 일부는 아직 일치하지 않습니다",
+    referenceSourceBlock: "원문 영역을 찾았습니다. 정확한 텍스트 일치는 확인되지 않았습니다",
+    referenceSourceAmbiguous: "일치하는 구절이 여러 개여서 위치를 특정할 수 없습니다",
+    referenceSourceStale: "원문 또는 내용이 변경되어 정확히 찾을 수 없습니다",
+    referenceSourcePrevious: "이전 인용 위치",
+    referenceSourceNext: "다음 인용 위치",
+    referenceSourceFoundPage: '{page}페이지에서 찾았습니다',
+    referenceSourceNotFound: '인용 위치를 정확히 찾지 못해 원문을 열었습니다',
+    referenceSourceOpenWeb: '원본 웹페이지에서 해당 위치 열기',
     chunkIdLabel: '청크 ID:',
     documentIdLabel: '문서 ID:',
     faqIdLabel: 'FAQ ID:',
@@ -4067,7 +4093,16 @@ export default {
         descriptionLanguageAuto: '문서 언어 자동 사용',
         customInstructionsLabel: '이미지 처리 지침',
         customInstructionsDescription: 'OCR 및 Markdown 형식은 유지하면서 시각적 우선순위를 추가합니다',
-        customInstructionsPlaceholder: '예: 명판, 모델 번호, 경고 코드 및 표 단위를 중점적으로 인식…'
+        customInstructionsPlaceholder: '예: 명판, 모델 번호, 경고 코드 및 표 단위를 중점적으로 인식…',
+        imageAttrsLabel: '이미지 속성 관찰',
+        imageAttrsDescription: '켜면 각 이미지를 먼저 속성 관찰+설명한 뒤, 속성에 따라 이미지 내 텍스트에 OCR을 실행할지 결정합니다. 끄면 기본 모드: 모든 이미지를 하나씩 설명하고 모두 OCR합니다',
+        imageAttrsSchemaLabel: '관찰 가능한 이미지 속성',
+        imageAttrsSchemaDescription: '모델은 아래 속성(백엔드 레지스트리 정의)을 관찰해 OCR 정책을 결정합니다',
+        imageAttrsOcrConditions: '관찰된 속성 조건에 따라 OCR 실행',
+        imageAttrsOcrConditionsDesc: '관찰된 속성이 아래 조건을 충족하면 해당 이미지에 OCR을 실행합니다',
+        imageAttrsOcrOnUnobserved: '이미지 속성 관찰에 실패해도 OCR 실행',
+        imageAttrsOcrOnUnobservedDesc: '모델이 이미지 속성을 올바르게 관찰하지 못하면 본문 텍스트 손실을 막기 위해 기본적으로 OCR을 실행합니다. 끄면 건너뜁니다. (4B 등 소형 비전 모델을 쓰거나, 사용자 지정 이미지 지시문이 시스템 프롬프트와 충돌할 때 관찰에 실패할 수 있습니다. 8B 이상은 실패 가능성이 낮아 끄지 않는 것을 권장합니다)',
+        imagePipelineKbNote: '기본값은 지식베이스 설정을 따르며 이번 작업에 맞게 조정할 수 있습니다'
       },
       tableMetadataInstructions: {
         label: '테이블 메타데이터 지침',
@@ -4433,6 +4468,77 @@ export default {
       editingBadge: '편집 중',
       pageActions: '페이지 작업',
       tabDocuments: '문서',
+      tabGallery: '갤러리',
+      tabDocumentsTip: '원본 문서를 업로드하고 관리합니다',
+      tabWikiTip: '문서에서 자동으로 정리된 Wiki 페이지',
+      tabGalleryTip: '문서에서 추출한 모든 이미지를 둘러봅니다',
+      viewTabs: '지식베이스 보기',
+      gallery: {
+        title: '갤러리',
+        allImages: '모든 이미지',
+        count: '{count}장',
+        countFiltered: '{count}장 일치',
+        searchPlaceholder: '설명 또는 이미지 속 텍스트 검색',
+        filters: '필터',
+        clearFilters: '필터 지우기',
+        searchIn: '검색 범위',
+        searchInHint: '키워드는 체크한 내용에서만 일치 여부를 확인합니다',
+        attrSection: '이미지 속성',
+        attrHint: '"숨기기"는 해당 값을 가진 이미지를 제외하고, "항상 표시"는 다른 조건으로 숨겨져도 유지합니다',
+        verdictDefault: '전체',
+        verdictOff: '숨기기',
+        verdictOn: '항상 표시',
+        keywordsPlaceholder: '키워드는 쉼표로 구분',
+        noAttrs: '필터링할 속성이 없습니다',
+        sort: '정렬',
+        sortField: '정렬 기준',
+        sortOrder: '순서',
+        orderAsc: '오름차순',
+        orderDesc: '내림차순',
+        empty: '아직 볼 수 있는 이미지가 없습니다',
+        emptyHint: '문서 속 이미지는 파싱이 끝나면 여기에 표시됩니다',
+        emptyFiltered: '조건에 맞는 이미지가 없습니다',
+        imageLoadError: '이미지를 불러오지 못했습니다',
+        noCaption: '설명 없음',
+        noOcr: '인식된 텍스트 없음',
+        caption: '설명',
+        ocr: '이미지 속 텍스트(OCR)',
+        attributes: '속성',
+        source: '원본 문서',
+        details: '상세 정보',
+        dimensions: '크기',
+        status: '상태',
+        openSource: '원본 문서 열기',
+        copy: '복사',
+        zoomIn: '확대 (+)',
+        zoomOut: '축소 (-)',
+        zoomReset: '창에 맞추기 (0)',
+        actualSize: '원본 크기',
+        rotate: '회전 (R)',
+        download: '다운로드',
+        openOriginal: '새 탭에서 열기',
+        toggleInfo: '이미지 정보 (I)',
+        viewerClose: '닫기 (Esc)',
+        prev: '이전 (←)',
+        next: '다음 (→)',
+        // Display names for the builtin attributes the gallery itself
+        // declares. Attributes contributed by other sources fall back to the
+        // pipeline's own wording (see the imageAttr namespace).
+        attr: {
+          builtin_caption: '설명',
+          builtin_caption_description: '모델이 생성한 이미지 설명',
+          builtin_ocr_text: 'OCR 텍스트',
+          builtin_ocr_text_description: 'OCR 로 이미지에서 추출한 텍스트',
+          builtin_created_at: '생성 시간',
+          builtin_created_at_description: '소유 문서 조각이 생성된 시각',
+          builtin_updated_at: '수정 시간',
+          builtin_updated_at_description: '소유 문서 조각이 마지막으로 수정된 시각',
+          builtin_is_enabled: '활성 상태',
+          builtin_is_enabled_description: '소유 문서 조각이 검색에 참여하는지 여부',
+          builtin_is_enabled_value_true: '활성화',
+          builtin_is_enabled_value_false: '비활성화',
+        },
+      },
       tabGraph: '그래프',
       tabGraphTip: 'Wiki 페이지 간의 링크 관계 그래프(페이지 링크 그래프)입니다. \'지식 베이스 설정 → 지식 그래프\'에서 구성하는 LLM 기반 엔티티-관계 지식 그래프와는 다른 개념입니다.',
       searchPlaceholder: 'Wiki 페이지 검색...',
@@ -4933,8 +5039,8 @@ export default {
       sharedReadonly: '공유받음 · 읽기 전용'
     },
     pin: {
-      pin: '상단 고정',
-      unpin: '고정 해제',
+              pin: '상단 고정',
+              unpin: '고정 해제',
       pinSuccess: '상단에 고정됨',
       unpinSuccess: '고정 해제됨',
       failed: '작업 실패'
@@ -6794,6 +6900,12 @@ export default {
     noActivity: '파싱 활동 없음',
     totalDuration: '총 소요시간: {d}',
     errorCode: {
+      DOCREADER_UNAVAILABLE: "문서 분석 서비스를 사용할 수 없습니다",
+      DOCREADER_UNAVAILABLE_SUGGESTION: "DocReader에 연결할 수 없거나 연결이 끊겼습니다. 서비스 상태, 반복 재시작, 네트워크를 확인한 후 다시 시도하세요. 파일을 다시 업로드할 필요는 없습니다.",
+      DOCREADER_TIMEOUT: "문서 분석 시간 초과",
+      DOCREADER_TIMEOUT_SUGGESTION: "DocReader 상태와 부하를 확인한 후 다시 시도하세요. 필요한 경우 큰 파일을 나누세요.",
+      DOCREADER_PARSE_FAILED: "문서 분석 실패",
+      DOCREADER_PARSE_FAILED_SUGGESTION: "파일 형식을 확인하고 관리자에게 이번 DocReader 로그 확인을 요청하세요.",
       TASK_STALLED: '진행이 없어 자동 중단됨',
       TASK_STALLED_SUGGESTION: '임계 시간을 넘도록 진행이 없고 대기열에도 해당 작업이 없어 실패로 표시되었습니다. 「다시 시도」를 누르세요. 반복되면 이 단계가 의존하는 서비스(문서 파싱, 모델, 벡터 저장소)를 확인하세요.',
       UNKNOWN_SUGGESTION: '자세한 내용은 애플리케이션 로그를 확인하세요.'
@@ -7657,5 +7769,28 @@ export default {
     myChats: '내 대화',
     apiChats: 'API 세션',
     noSessions: '대화가 없습니다'
+  },
+  // 관찰 속성의 표시 문구. 속성 이름으로 색인하며 여기서는 번역만 담당합니다.
+  // 속성 이름의 점은 밑줄로 이스케이프합니다(contain.text → contain_text) —— vue-i18n 은
+  // 키를 점 단위로 순회하므로 리터럴 'contain.text' 키는 해석되지 않습니다.
+  // 번역이 없는 속성은 백엔드 등록표의 설명으로 대체됩니다.
+  imageAttr: {
+    contain_text: {
+      label: '이미지 내 텍스트 양',
+      description: '이미지 자체가 담고 있는 본문 텍스트의 양입니다. 텍스트를 읽기 위해 별도 OCR을 돌릴 가치가 있는지 판단합니다.',
+      values: {
+        none: { label: '텍스트 없음', description: '텍스트가 전혀 없습니다' },
+        sparse: { label: '약간의 글자', description: '약간의 글자만 —— 로고, 도로 표지판, 단일 라벨' },
+        block: { label: '문단 단위 본문', description: '문단 단위 본문 —— 스크린샷, 표, 문서 페이지' }
+      }
+    },
+    contain_data_visual: {
+      label: '데이터 시각화',
+      description: '이미지가 차트, 그래프, 도표, 인포그래픽으로 데이터를 전달하는지 여부입니다. 글자가 적어 보여도 OCR 대상으로 유지합니다.',
+      values: {
+        'true': { label: '예', description: '예 —— 차트, 그래프, 도표' },
+        'false': { label: '아니오', description: '아니오 —— 사진, 삽화, 아이콘, 장식' }
+      }
+    }
   }
 }

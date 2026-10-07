@@ -30,7 +30,7 @@ func prepareMessagesWithModelContext(
 		return messages, registry
 	}
 
-	ordered := orderedPipelineReferences(chatManage)
+	ordered := expandCitationSources(orderedPipelineReferences(chatManage))
 	knowledgeResults := make([]*types.SearchResult, 0, len(ordered))
 	knowledgeRows := make([]map[string]interface{}, 0, len(ordered))
 	webRows := make([]map[string]interface{}, 0)
@@ -80,7 +80,8 @@ func prepareMessagesWithModelContext(
 	}
 	modelContexts := strings.Join(contextParts, "\n")
 	if strings.TrimSpace(modelContexts) == "" {
-		return messages, registry
+		modelContexts = "Retrieved source bodies could not be verified. Do not cite or infer facts from " +
+			"unavailable retrieval evidence."
 	}
 
 	last := len(messages) - 1

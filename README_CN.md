@@ -42,9 +42,9 @@
 
 **[WeKnora（维娜拉）](https://weknora.weixin.qq.com)** 是一款开源的、基于大语言模型（LLM）的知识管理框架，面向企业级文档理解、语义检索与智能推理场景。它把团队分散的文档汇集起来，用于检索、推理，并随资料更新持续维护。
 
-https://github.com/user-attachments/assets/2819598d-3140-4623-814a-8162a22b653c
+https://github.com/user-attachments/assets/5722b10d-d04d-49ed-a6cc-635a8c77d91f
 
-<p align="center"><sub>2 分 25 秒 · 1080p · 英文旁白，中英字幕</sub></p>
+<p align="center"><sub>1 分 52 秒 · 1080p · 无旁白，英文画面文字</sub></p>
 
 查询资料用 RAG，处理多步任务用 Agent，整理知识用 Wiki。三种能力共享同一知识库。
 

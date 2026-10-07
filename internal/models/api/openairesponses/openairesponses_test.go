@@ -674,3 +674,29 @@ func TestChatStreamMalformedOutputItemFailsTheStream(t *testing.T) {
 		t.Errorf("answer = %q, decoding must stop at the bad item", answer)
 	}
 }
+
+// response.completed is the only clean end of a Responses stream; a body that
+// runs out before it was cut mid-answer and must not read as a stop.
+func TestChatStreamEOFBeforeCompletedIsIncomplete(t *testing.T) {
+	t.Setenv("SSRF_WHITELIST", "127.0.0.1")
+	body := sseBody(`{"type":"response.output_text.delta","item_id":"msg_1","output_index":0,"delta":"Hel"}`)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(body))
+	}))
+	defer server.Close()
+
+	c := newTestClient(t, server, false)
+	ch, err := c.ChatStream(context.Background(), []api.Message{{Role: "user", Content: "hi"}}, nil)
+	if err != nil {
+		t.Fatalf("ChatStream: %v", err)
+	}
+	var last types.StreamResponse
+	for ev := range ch {
+		last = ev
+	}
+	if last.ResponseType != types.ResponseTypeAnswer || !last.Done ||
+		last.FinishReason != types.FinishReasonIncomplete {
+		t.Fatalf("last event = %+v", last)
+	}
+}

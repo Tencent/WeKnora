@@ -80,7 +80,7 @@ graph TB
 
 ```go
 type AuthConfig struct {
-    RegistrationMode  string // "self_serve"（默认，公开注册） | "invite_only"（仅邀请）
+    RegistrationMode  string // "self_serve"（默认，公开注册） | "invite_register"（仅限邀请注册） | "invite_only"（禁止注册，保留旧配置值）
     DefaultTenantMode string // "create_personal"（默认，自动建个人租户） | "tenantless"（无租户等待邀请）
 }
 
@@ -97,10 +97,17 @@ func (c *AuthConfig) IsInviteOnly() bool {
 
 后果是：系统管理员在界面上把 `auth.registration_mode` 设成 `self_serve` 后，即使部署里仍写着 `DISABLE_REGISTRATION=true`，公开注册也是开着的。要彻底关掉，得把数据库里那一行重置（`DELETE /system/admin/settings/auth.registration_mode`）。
 
-`invite_only` 模式下 `POST /auth/register` 返回 403，但它只挡住**密码自助注册**这一条路，以下两条不受影响：
+注册模式有三个档位，可在全局设置中即时切换：
 
-- **邀请注册端点** `POST /auth/register-by-invite`（设计如此，见 [邀请注册（register-by-invite）](#_2-3-邀请注册-register-by-invite)）；
-- **OIDC 首次登录**：`LoginWithOIDC()` 查不到邮箱时直接 `provisionOIDCUser()` 建号，全程不读注册模式。也就是说开了 OIDC 之后，`invite_only` 挡不住 IdP 里的任何人——要限制范围得在 IdP 侧做（应用可见性 / 用户组），或干脆关掉 OIDC。
+| 模式 | 公开注册 | 有效邀请链接注册 | 已有账号接受邀请 |
+| --- | --- | --- | --- |
+| `self_serve`（开放注册） | 允许 | 允许 | 允许 |
+| `invite_register`（仅限邀请注册） | 禁止 | 允许 | 允许 |
+| `invite_only`（禁止注册，保留旧配置值） | 禁止 | 禁止 | 允许 |
+
+`DISABLE_REGISTRATION=true` 仍映射到原有的 `invite_only`。需要让受邀的新用户注册时，将全局设置改为 `invite_register`。禁止注册时，`POST /auth/register-by-invite` 也返回 403，与登录页行为一致。
+
+这些档位控制密码注册。**OIDC 首次登录**仍由 IdP 的应用可见性、用户组等策略控制；管理员创建账号也不受此设置影响。
 
 #### 密码注册 / 登录 {#_2-2-密码注册-登录}
 
@@ -112,7 +119,7 @@ func (c *AuthConfig) IsInviteOnly() bool {
 
 #### 邀请注册（register-by-invite） {#_2-3-邀请注册-register-by-invite}
 
-`internal/handler/auth_register_by_invite.go`。租户 Owner 生成的**共享邀请链接**（share link，见 [共享邀请链接（invite link）](#_7-2-共享邀请链接-invite-link)）持有 token，注册页凭 token 完成注册，即使系统处于 `invite_only` 模式：
+`internal/handler/auth_register_by_invite.go`。租户 Owner 生成的**共享邀请链接**（share link，见 [共享邀请链接（invite link）](#_7-2-共享邀请链接-invite-link)）持有 token，注册页凭 token 完成注册，支持 `self_serve` 和 `invite_register` 模式：
 
 ```go
 // POST /auth/register-by-invite
@@ -130,7 +137,7 @@ type registerByInviteRequest struct {
 
 #### 已注册用户通过邀请链接加入
 
-invite_only 部署中，邀请页面引导用户先登录，再向 `POST /me/invitations/accept-by-token` 提交 token 加入空间；不需要为已注册邮箱再创建账号。没有默认空间的用户首次加入后，以该空间作为默认空间。`register-by-invite` 仍是凭有效邀请创建新账号的 API。
+invite_only 部署中，邀请页面引导用户先登录，再向 `POST /me/invitations/accept-by-token` 提交 token 加入空间；不需要为已注册邮箱再创建账号。没有默认空间的用户首次加入后，以该空间作为默认空间。`invite_register` 模式下，新用户可凭有效邀请注册；已有账号可切换到登录表单加入，且可以切回注册表单。
 
 邮箱邀请已注册用户还受 `tenant.auto_accept_invitation` 控制：默认 false，创建 pending 邀请并等收件箱确认；true 时直接加入，返回 active 成员并处理已有 pending 邀请。前端从 `GET /auth/me` 的 `capabilities.auto_accept_invitation` 感知该开关。它不把任意共享链接变成免登录入口。
 
@@ -474,7 +481,7 @@ sequenceDiagram
 
 | 配置项 | 取值 | 默认 | 作用 |
 | --- | --- | --- | --- |
-| `auth.registration_mode` | `self_serve` / `invite_only` | `self_serve` | 公开注册开关（DB system_settings 可热改） |
+| `auth.registration_mode` | `self_serve` / `invite_register` / `invite_only` | `self_serve` | 密码注册模式（DB system_settings 可热改） |
 | `auth.default_tenant_mode` | `create_personal` / `tenantless` | `create_personal` | 新用户是否自动建个人租户 |
 | `tenant.enable_rbac` | `true` / `false` | `true` | RBAC 强制执行 / 仅日志模式 |
 | `JWT_SECRET`（环境变量） | 任意字符串 | 随机 32 字节 | JWT HMAC 密钥 |

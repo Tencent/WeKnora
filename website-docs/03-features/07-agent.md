@@ -347,7 +347,7 @@ if !state.IsComplete && ctx.Err() == nil {
 - 单个工具执行超时 `defaultToolExecTimeout = 60s`；`shell_exec` 为 `shellExecToolTimeout = 10m5s`（略长于命令自身 600s 上限，以便返回结构化超时结果），`local_browser` 的人工接管步骤使用单独的等待时长；`ToolExecContext` 中额外携带不带该超时的 `ApprovalCtx`，供 MCP 人工审批/OAuth 等合法长等待使用；
 - 发射 `EventAgentToolCall`（含中文 display name 的 hint，如 `搜索网页("...")`）、`EventAgentToolResult`、`EventAgentTool` 事件。工具执行失败同样以 `tool_result` 发给客户端（`success: false` 与 `error`），不再作为 `error` 事件，智能体会根据错误继续处理。
 
-**④ Observe（观察）**：`appendToolResults`（`internal/agent/observe.go`）按 OpenAI 协议把本轮追加进消息数组：一条带 `tool_calls` 的 assistant 消息 + 每个结果一条 `role:"tool"` 消息（内容经 `modelContext.ModelToolResultForTool` 别名化）。若本轮任一成功的工具结果里含 Markdown 图片，还会向 system 消息追加一次 `## Retrieved Image Output Requirement` 要求（`internal/agent/image_requirement.go`），强制最终答案原样携带相关图片。随后 `state.CurrentRound++` 进入下一轮。
+**④ Observe（观察）**：`appendToolResults`（`internal/agent/observe.go`）按 OpenAI 协议把本轮追加进消息数组：一条带 `tool_calls` 的 assistant 消息 + 每个结果一条 `role:"tool"` 消息（内容经 `modelContext.ModelToolResultForTool` 别名化）。随后 `state.CurrentRound++` 进入下一轮。
 
 #### 终止条件汇总与最大迭代 {#_2-3-终止条件汇总与最大迭代}
 

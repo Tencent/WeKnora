@@ -418,6 +418,14 @@ func newDeadLetterKnowledgeFailer(ks interfaces.KnowledgeService, tracker servic
 		default:
 			return
 		}
+		// The row belongs to a newer run (a reparse cancelled this task or
+		// raced it): failing it would kill a run that is still healthy.
+		if tracker != nil && probe.Attempt > 0 &&
+			tracker.LatestAttempt(ctx, probe.KnowledgeID) > probe.Attempt {
+			logger.Infof(ctx, "dead-letter callback: attempt %d of knowledge %s superseded, leaving row alone",
+				probe.Attempt, probe.KnowledgeID)
+			return
+		}
 		errMsg := "task " + t.Type() + " exhausted retries: " + taskErr.Error()
 		// 8KB is the same cap the dead-letter row uses for last_error.
 		if len(errMsg) > 8192 {

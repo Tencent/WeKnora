@@ -60,6 +60,9 @@ type StoredImage struct {
 	OriginalRef string // reference in the original markdown
 	ServingURL  string // provider:// URL (e.g. local://images/xxx.png, minio://bucket/key)
 	MimeType    string
+	// SourceLocators place the image in the original file (e.g. the scanned
+	// page it was rendered from). Filled by ingestion after resolution.
+	SourceLocators types.SourceLocators
 }
 
 // ImageResolver reads images from a DocReader ReadResult (inline bytes only)

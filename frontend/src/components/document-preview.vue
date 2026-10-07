@@ -1,5 +1,6 @@
 // @ts-nocheck
 <script setup lang="ts">
+import { indexEmbeddedSourceImages } from '@/utils/sourceImage';
 import { ref, shallowRef, watch, onMounted, onUnmounted, nextTick, defineAsyncComponent } from 'vue';
 import { previewKnowledgeFile } from '@/api/knowledge-base/index';
 import { previewTemporaryAttachment } from '@/api/chat/temporary-attachments';
@@ -10,6 +11,7 @@ import 'katex/dist/katex.min.css';
 import { useI18n } from 'vue-i18n';
 import { sanitizeHTML, sanitizeMarkdownHTML } from '@/utils/security';
 import { preparePptxPreview, isCompletePptxRender } from '@/utils/pptxPreview';
+import { findMarkdownSourceRange } from '@/utils/markdownSourceLocate';
 import { renderDocumentPreviewMarkdown } from '@/utils/documentPreviewMarkdown';
 import { buildHtmlPreview } from '@/utils/htmlPreview';
 import { openMermaidFullscreen } from '@/utils/mermaidViewer';
@@ -26,9 +28,24 @@ import {
   isValidUTF8,
   type FilePreviewKind,
 } from '@/utils/filePreview';
+import {
+  findInText,
+  sourceQuoteText,
+  type SourceLocateRequest,
+} from '@/utils/sourceLocator';
+import {
+  buildTextIndex,
+  findTextRange,
+  highlightElements,
+  highlightRanges,
+  rangeForOffsets,
+  scrollRectIntoContainer,
+} from '@/utils/sourceLocatorDom';
+import { renderEpubPreview } from '@/utils/epubPreview';
 
 
 const VueOfficePptx = defineAsyncComponent(() => import('@vue-office/pptx'));
+const PdfSourceViewer = defineAsyncComponent(() => import('@/components/source-preview/PdfSourceViewer.vue'));
 
 const { t } = useI18n();
 
@@ -45,6 +62,19 @@ const props = defineProps<{
   fillHeight?: boolean;
   /** Place preview actions beside the host header's download button. */
   toolbarTarget?: HTMLElement | null;
+  /**
+   * Source mode renders PDFs with pdf.js instead of the browser viewer so a
+   * citation can be scrolled to and highlighted.
+   */
+  sourceMode?: boolean;
+  /** Where to scroll and what to highlight once the file is rendered. */
+  locate?: SourceLocateRequest | null;
+}>();
+
+export type SourceLocateResult = { found: boolean; precise: boolean; granularity?: string; reason?: string };
+
+const emit = defineEmits<{
+  located: [result: SourceLocateResult];
 }>();
 
 const loading = ref(false);
@@ -58,9 +88,18 @@ const excelHtml = ref('');
 const mermaidSvg = ref('');
 const htmlViewMode = ref<'render' | 'source'>('render');
 const pptxData = shallowRef<ArrayBuffer | null>(null);
+const pdfData = shallowRef<ArrayBuffer | null>(null);
+const epubHtml = ref('');
+let epubObjectUrls: string[] = [];
+let excelSheetNames: string[] = [];
+let previewExt = '';
 let pptxSlideCount = 0;
 function onPptxRendered(result: unknown) {
-  if (!isCompletePptxRender(result, pptxSlideCount)) error.value = t('preview.loadFailed');
+  if (!isCompletePptxRender(result, pptxSlideCount)) {
+    error.value = t('preview.loadFailed');
+    return;
+  }
+  scheduleLocate();
 }
 const docxContainer = ref<HTMLElement | null>(null);
 const imageNaturalWidth = ref(0);
@@ -224,6 +263,7 @@ async function renderDocx(blob: Blob) {
       trimXmlDeclaration: true,
       useBase64URL: true,
     });
+    if (docxContainer.value) await indexEmbeddedSourceImages(docxContainer.value);
   }
 }
 
@@ -254,6 +294,7 @@ async function renderExcel(blob: Blob, fileType?: string) {
     workbook = XLSX.read(arrayBuffer, { type: 'array' });
   }
 
+  excelSheetNames = [...workbook.SheetNames];
   let html = '';
   workbook.SheetNames.forEach((name, sheetIdx) => {
     const sheet = workbook.Sheets[name];
@@ -401,12 +442,26 @@ async function loadPreview() {
     loading.value = false;
     await nextTick();
 
+    previewExt = ft;
     switch (kind) {
-      case 'pdf':
+      case 'pdf': {
+        if (props.sourceMode) {
+          pdfData.value = await blob.arrayBuffer();
+        } else {
+          blobUrl.value = URL.createObjectURL(blob);
+        }
+        break;
+      }
       case 'image':
       case 'audio':
       case 'video': {
         blobUrl.value = URL.createObjectURL(blob);
+        break;
+      }
+      case 'epub': {
+        const rendered = await renderEpubPreview(await blob.arrayBuffer());
+        epubObjectUrls = rendered.objectUrls;
+        epubHtml.value = sanitizeHTML(rendered.html);
         break;
       }
       case 'html': {
@@ -445,6 +500,8 @@ async function loadPreview() {
         break;
       }
     }
+    // PPTX renders asynchronously and locates from its rendered event.
+    if (kind !== 'pptx') scheduleLocate();
   } catch (err: any) {
     console.error('Document preview failed:', err);
     error.value = err?.message || t('preview.loadFailed');
@@ -465,6 +522,12 @@ function cleanup() {
   mermaidSvg.value = '';
   htmlViewMode.value = 'render';
   pptxData.value = null;
+  pdfData.value = null;
+  for (const url of epubObjectUrls) URL.revokeObjectURL(url);
+  epubObjectUrls = [];
+  epubHtml.value = '';
+  excelSheetNames = [];
+  clearLocateMarks();
   pptxSlideCount = 0;
   imageNaturalWidth.value = 0;
   imageNaturalHeight.value = 0;
@@ -472,6 +535,311 @@ function cleanup() {
   if (docxContainer.value) {
     docxContainer.value.innerHTML = '';
   }
+}
+
+// ── Citation locating ──
+// Each preview kind reveals a SourceLocateRequest its own way: structural
+// locators first (page, block, slide, rows, section, time), then the quoted
+// text inside whatever they narrowed down, then the quotes anywhere.
+
+type ImageMark = { left: number; top: number; width: number; height: number };
+const imageMarks = ref<ImageMark[]>([]);
+const audioQuote = ref('');
+const audioRange = ref('');
+let clearLocate: Array<() => void> = [];
+
+function clearLocateMarks() {
+  for (const clear of clearLocate) clear();
+  clearLocate = [];
+  imageMarks.value = [];
+  audioQuote.value = '';
+  audioRange.value = '';
+}
+
+let locateScheduled = false;
+function scheduleLocate() {
+  if (!props.locate || locateScheduled) return;
+  locateScheduled = true;
+  void nextTick(() => {
+    locateScheduled = false;
+    applyLocate();
+  });
+}
+
+watch(
+  () => props.locate?.token,
+  () => {
+    if (loadedForId && !loading.value) scheduleLocate();
+  },
+);
+
+const NOT_FOUND: SourceLocateResult = { found: false, precise: false };
+
+function findQuoteRange(root: Node | null | undefined, quotes: string[]): Range | null {
+  if (!root) return null;
+  const index = buildTextIndex(root);
+  for (const quote of quotes) {
+    const range = findTextRange(root, quote, index);
+    if (range) return range;
+  }
+  return null;
+}
+
+function reveal(container: Element | null | undefined, target: Range | Element | null | undefined) {
+  if (!container || !target) return;
+  scrollRectIntoContainer(container, target.getBoundingClientRect());
+}
+
+function commitMarks(ranges: Range[], elements: Element[]) {
+  if (ranges.length) clearLocate.push(highlightRanges(ranges));
+  if (elements.length) clearLocate.push(highlightElements(elements));
+}
+
+/** Reveal the first quote found under `root`, scrolling `container`. */
+function locateQuote(root: Element | null | undefined, container: Element | null | undefined, quotes: string[]): SourceLocateResult {
+  const range = findQuoteRange(root, quotes);
+  if (!range) return NOT_FOUND;
+  commitMarks([range], []);
+  reveal(container, range);
+  return { found: true, precise: true };
+}
+
+/** Only exact evidence may narrow a structural source region. */
+function evidenceQuotes(request: SourceLocateRequest): string[] {
+  return request.scope ? [request.scope] : request.quotes;
+}
+
+function locateDocx(request: SourceLocateRequest): SourceLocateResult {
+  const root = docxContainer.value;
+  if (!root) return NOT_FOUND;
+  const blocks = Array.from(root.querySelectorAll('section > article')).flatMap((article) =>
+    Array.from(article.children).filter((c) => c.tagName === 'P' || c.tagName === 'TABLE'),
+  );
+  if (request.imageDigest) {
+    const images = [...root.querySelectorAll('img')].filter(image => image.dataset.sourceImageDigest === request.imageDigest);
+    if (images.length !== 1) return { ...NOT_FOUND, ...(images.length > 1 ? { reason: 'ambiguous' } : {}) };
+    commitMarks([], images); reveal(root, images[0]);
+    return { found: true, precise: false, granularity: 'block' };
+  }
+  if (request.imageContext) {
+    const { before: beforeQuote, after: afterQuote } = request.imageContext;
+    const before = beforeQuote ? findQuoteRange(root, [beforeQuote]) : null;
+    const after = afterQuote ? findQuoteRange(root, [afterQuote]) : null;
+    if ((beforeQuote && !before) || (afterQuote && !after) || (!before && !after)) return NOT_FOUND;
+    const from = before?.cloneRange() || document.createRange();
+    const to = after?.cloneRange() || document.createRange();
+    if (before) from.collapse(false);
+    else { from.selectNodeContents(root); from.collapse(true); }
+    if (after) to.collapse(true);
+    else { to.selectNodeContents(root); to.collapse(false); }
+    // A chunk can end immediately after its image. In that case bound the
+    // search by the next nonempty original paragraph, not the document end.
+    for (const block of blocks) {
+      if (!block.textContent?.trim()) continue;
+      const range = document.createRange(); range.selectNodeContents(block);
+      if (!after && range.compareBoundaryPoints(Range.START_TO_START, from) >= 0) { to.setStartBefore(block); to.collapse(true); break; }
+      if (!before && range.compareBoundaryPoints(Range.END_TO_END, to) <= 0) { from.setStartAfter(block); from.collapse(true); }
+    }
+    const images = [...root.querySelectorAll('img')].filter(image => {
+      const range = document.createRange(); range.selectNode(image);
+      return range.compareBoundaryPoints(Range.START_TO_START, from) >= 0 &&
+        range.compareBoundaryPoints(Range.END_TO_END, to) <= 0;
+    });
+    if (images.length !== 1) return NOT_FOUND;
+    commitMarks([], images); reveal(root, images[0]);
+    return { found: true, precise: false, granularity: 'block' };
+  }
+  const excerpt = request.quotes.length === 1 ? request.quotes[0] : '';
+  if (excerpt && request.scope && excerpt !== request.scope && findInText(request.scope, excerpt)) {
+    const range = findQuoteRange(root, [excerpt]);
+    if (range) { commitMarks([range], []); reveal(root, range); return { found: true, precise: true }; }
+  }
+  const ranges: Range[] = [];
+  let missed = false, partial = false, narrowed = false;
+  for (const loc of request.locators.filter((l) => l.type === 'docx' && l.mapping === 'exact' && l.block)) {
+    const el = blocks[(loc.block as number) - 1];
+    const quote = sourceQuoteText(loc.quote || '');
+    const sentence = request.sentence && findInText(quote, request.sentence) ? request.sentence : '';
+    // Pagination may split Word paragraphs. Revalidate the complete quote
+    // globally before accepting a shifted block, and reject duplicate matches.
+    const region = quote ? findQuoteRange(el, [quote]) || findQuoteRange(root, [quote]) : null;
+    if (!region) { missed = true; continue; }
+    const range = sentence ? findQuoteRange(region.commonAncestorContainer.nodeType === Node.TEXT_NODE ? region.commonAncestorContainer.parentElement : region.commonAncestorContainer, [sentence]) : region;
+    ranges.push(range || region);
+    narrowed ||= !!sentence && !!range;
+    partial ||= !!loc.partial;
+  }
+  if (!ranges.length) return locateQuote(root, root, evidenceQuotes(request));
+  const complete = !missed && (!partial || narrowed || !!findQuoteRange(root, evidenceQuotes(request)));
+  commitMarks(ranges, []);
+  reveal(root, ranges[0]);
+  return { found: true, precise: complete, ...(!complete ? { reason: 'partial' } : {}) };
+}
+
+function locatePptx(request: SourceLocateRequest): SourceLocateResult {
+  const box = previewContent.value;
+  if (!box) return NOT_FOUND;
+  const slides = Array.from(box.querySelectorAll('.pptx-preview-slide-wrapper'));
+  const locators = request.locators.filter((l) => l.type === 'slide' && l.mapping === 'exact' && !l.partial && l.slide);
+  if (!locators.length) return locateQuote(box, box, evidenceQuotes(request));
+  const ranges: Range[] = [], regions: Element[] = [];
+  for (const loc of locators) {
+    const slide = slides[(loc.slide as number) - 1];
+    if (!slide) return NOT_FOUND;
+    const own = slide.querySelector('.slide-wrapper') || slide;
+    const range = loc.quote ? findQuoteRange(own, [loc.quote]) : null;
+    if (range) ranges.push(range); else regions.push(slide);
+  }
+  commitMarks(ranges, regions);
+  reveal(box, ranges[0] || regions[0]);
+  return { found: true, precise: !regions.length, granularity: regions.length ? 'block' : 'text' };
+}
+
+/** Map sheet row numbers to table rows using the cell ids SheetJS emits. */
+function sheetRows(table: Element): Map<number, Element> {
+  const rows = new Map<number, Element>();
+  for (const cell of Array.from(table.querySelectorAll('td[id]'))) {
+    const match = /-[A-Z]+(\d+)$/.exec(cell.id);
+    const tr = cell.closest('tr');
+    if (match && tr && !rows.has(Number(match[1]))) rows.set(Number(match[1]), tr);
+  }
+  return rows;
+}
+
+function locateExcel(request: SourceLocateRequest): SourceLocateResult {
+  const box = previewContent.value;
+  if (!box) return NOT_FOUND;
+  const locators = request.locators.filter((l) => l.type === 'sheet' && l.mapping === 'exact' && !l.partial && l.row_start);
+  const targets: Element[] = [];
+  for (const loc of locators) {
+    const byName = loc.sheet ? excelSheetNames.indexOf(loc.sheet) : -1;
+    if (byName < 0) continue;
+    const sheetIdx = byName;
+    const table = box.querySelector(`#user-content-sheet-${sheetIdx}`) || box.querySelector(`#sheet-${sheetIdx}`);
+    if (!table) continue;
+    const rows = sheetRows(table);
+    const last = Math.min(loc.row_end || loc.row_start || 0, (loc.row_start || 0) + 200);
+    for (let r = loc.row_start as number; r <= last; r++) {
+      const tr = rows.get(r);
+      if (tr && !targets.includes(tr)) targets.push(tr);
+    }
+  }
+  if (targets.length) {
+    commitMarks([], targets);
+    reveal(box, targets[0]);
+    return { found: true, precise: false, granularity: 'block' };
+  }
+  return locateQuote(box, box, evidenceQuotes(request));
+}
+
+function locateEpub(request: SourceLocateRequest): SourceLocateResult {
+  const box = previewContent.value;
+  if (!box) return NOT_FOUND;
+  const locators = request.locators.filter((l) => l.type === 'section' && l.mapping === 'exact' && !l.partial && l.section);
+  if (!locators.length) return locateQuote(box, box, evidenceQuotes(request));
+  const ranges: Range[] = [], regions: Element[] = [];
+  for (const loc of locators) {
+    const section = box.querySelector(`[data-epub-section="${loc.section}"]`);
+    if (!section) return NOT_FOUND;
+    const range = loc.quote ? findQuoteRange(section, [loc.quote]) : null;
+    if (range) ranges.push(range); else regions.push(section);
+  }
+  commitMarks(ranges, regions);
+  reveal(box, ranges[0] || regions[0]);
+  return { found: true, precise: !regions.length, granularity: regions.length ? 'block' : 'text' };
+}
+
+function locateText(request: SourceLocateRequest): SourceLocateResult {
+  const box = previewContent.value;
+  const code = box?.querySelector('code') || box;
+  if (!box || !code) return NOT_FOUND;
+  // Validate stored offsets against their full quote. A manual edit or a
+  // pretty-printed JSON document must not reuse offsets from another version.
+  const locators = request.locators.filter((l) => l.type === 'text' && !l.partial && (l.end || 0) > (l.start || 0));
+  if (locators.length && previewType.value === 'text' && !shouldPrettyPrintJson(previewExt)) {
+    const ranges = locators.map((l) => rangeForOffsets(code, l.start || 0, l.end || 0));
+    if (ranges.every((r, i) => r && locators[i].quote && findInText(r.toString(), locators[i].quote!))) {
+      commitMarks(ranges as Range[], []);
+      reveal(box, ranges[0]);
+      return { found: true, precise: true };
+    }
+  }
+  return locateQuote(code, box, evidenceQuotes(request));
+}
+
+function locateMarkdown(request: SourceLocateRequest): SourceLocateResult {
+  const box = previewContent.value;
+  if (!box) return NOT_FOUND;
+  const markdown = request.sourceMarkdown ?? request.scope ?? request.quotes[0] ?? '';
+  const match = findMarkdownSourceRange(box, markdown, request.sentence);
+  if (!match) return NOT_FOUND;
+  commitMarks(match.ranges || [match.range], []);
+  reveal(box, match.range);
+  return { found: true, precise: match.exact, ...(!match.exact ? { granularity: 'block' } : {}) };
+}
+
+function locateImage(request: SourceLocateRequest): SourceLocateResult {
+  const boxes = request.locators
+    .filter((l) => l.type === 'pdf' && l.mapping === 'exact' && !l.partial && (l.page || 1) === 1 && l.bbox?.length === 4)
+    .map((l) => {
+      const [x0, y0, x1, y1] = l.bbox as number[];
+      return { left: x0, top: y0, width: x1 - x0, height: y1 - y0 };
+    });
+  imageMarks.value = boxes;
+  // Without regions the whole image is the cited source.
+  return { found: true, precise: false, granularity: 'block' };
+}
+
+function formatClock(ms: number): string {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+}
+
+function locateAudio(request: SourceLocateRequest): SourceLocateResult {
+  const audio = previewContent.value as HTMLAudioElement | null;
+  const loc = request.locators.find((l) => l.type === 'time' && (l.end_ms || 0) > (l.start_ms || 0));
+  if (!audio || !loc) return NOT_FOUND;
+  // Seek only; playback stays the reader's choice.
+  const seek = () => {
+    audio.currentTime = (loc.start_ms || 0) / 1000;
+  };
+  if (audio.readyState >= 1) {
+    seek();
+  } else {
+    // A newer locate clears this, so an older citation cannot win the seek.
+    audio.addEventListener('loadedmetadata', seek, { once: true });
+    clearLocate.push(() => audio.removeEventListener('loadedmetadata', seek));
+  }
+  audioRange.value = `${formatClock(loc.start_ms || 0)} – ${formatClock(loc.end_ms || 0)}`;
+  audioQuote.value = loc.quote || '';
+  return { found: true, precise: true };
+}
+
+function applyLocate() {
+  const request = props.locate;
+  clearLocateMarks();
+  // The pdf.js viewer locates on its own and reports through @located.
+  if (!request || previewType.value === 'pdf') return;
+  if (request.unavailable) { emit('located', { ...NOT_FOUND, reason: 'unavailable' }); return; }
+  let result = NOT_FOUND;
+  try {
+    switch (previewType.value) {
+      case 'docx': result = locateDocx(request); break;
+      case 'pptx': result = locatePptx(request); break;
+      case 'excel': result = locateExcel(request); break;
+      case 'epub': result = locateEpub(request); break;
+      case 'text':
+      case 'html': result = locateText(request); break;
+      case 'markdown': result = locateMarkdown(request); break;
+      case 'image': result = locateImage(request); break;
+      case 'audio': result = locateAudio(request); break;
+    }
+  } catch (err) {
+    console.warn('Locating the citation failed:', err);
+  }
+  emit('located', result);
 }
 
 watch(
@@ -538,6 +906,9 @@ onUnmounted(() => {
     </div>
 
     <!-- PDF -->
+    <div v-else-if="previewType === 'pdf' && pdfData" class="preview-pdf preview-pdf--source">
+      <PdfSourceViewer :data="pdfData" :file-name="fileName" :locate="locate" @located="(r) => emit('located', r)" />
+    </div>
     <div v-else-if="previewType === 'pdf' && blobUrl" class="preview-pdf">
       <iframe ref="previewContent" tabindex="0" :title="fileName" :src="blobUrl" class="pdf-iframe" @load="onPreviewFrameLoad" />
     </div>
@@ -561,7 +932,16 @@ onUnmounted(() => {
     <!-- Image -->
     <div v-else-if="previewType === 'image' && blobUrl" ref="previewContent" tabindex="0" :aria-label="fileName" class="preview-image">
       <div class="image-wrapper">
-        <img :src="blobUrl" :alt="fileName" @load="onImageLoad" />
+        <div class="image-frame">
+          <img :src="blobUrl" :alt="fileName" @load="onImageLoad" />
+          <div
+            v-for="(mark, i) in imageMarks"
+            :key="i"
+            class="image-locate-mark"
+            aria-hidden="true"
+            :style="{ left: `${mark.left * 100}%`, top: `${mark.top * 100}%`, width: `${mark.width * 100}%`, height: `${mark.height * 100}%` }"
+          />
+        </div>
         <div v-if="imageNaturalWidth" class="image-info">
           {{ imageNaturalWidth }} × {{ imageNaturalHeight }} px
         </div>
@@ -581,6 +961,11 @@ onUnmounted(() => {
     <!-- Excel -->
     <div v-else-if="previewType === 'excel' && excelHtml" class="preview-excel">
       <div ref="previewContent" tabindex="0" :aria-label="fileName" class="excel-container" v-html="excelHtml" />
+    </div>
+
+    <!-- EPUB -->
+    <div v-else-if="previewType === 'epub' && epubHtml" ref="previewContent" tabindex="0" :aria-label="fileName" class="preview-markdown preview-epub">
+      <div class="markdown-body" v-html="epubHtml" />
     </div>
 
     <!-- Markdown -->
@@ -606,6 +991,10 @@ onUnmounted(() => {
         <audio ref="previewContent" controls :src="blobUrl" class="audio-element">
           {{ $t('preview.audioNotSupported') }}
         </audio>
+        <div v-if="audioRange" class="audio-locate">
+          <span class="audio-locate__time">{{ audioRange }}</span>
+          <p v-if="audioQuote" class="audio-locate__quote">{{ audioQuote }}</p>
+        </div>
       </div>
     </div>
 
@@ -913,7 +1302,29 @@ onUnmounted(() => {
   }
 }
 
+// ── PDF (pdf.js, source mode) ──
+.preview-pdf--source {
+  height: @preview-max-h;
+  border: 1px solid @border-color;
+  border-radius: @border-radius;
+  overflow: hidden;
+}
+
 // ── Image ──
+.image-frame {
+  position: relative;
+  display: inline-block;
+  line-height: 0;
+}
+
+.image-locate-mark {
+  position: absolute;
+  pointer-events: none;
+  border-radius: var(--app-radius-xs);
+  background: color-mix(in srgb, var(--td-success-color) 22%, transparent);
+  outline: 1px solid color-mix(in srgb, var(--td-success-color) 50%, transparent);
+}
+
 .preview-image {
   overflow: auto;
   display: flex;
@@ -997,6 +1408,24 @@ onUnmounted(() => {
     color: @text-secondary;
     .audio-filename { font-size: var(--app-text-base); color: @text-primary; margin: 0; }
     .audio-element { width: 100%; max-width: 480px; }
+  }
+  .audio-locate {
+    width: 100%;
+    max-width: 480px;
+    padding: 10px 12px;
+    border-radius: @border-radius;
+    background: color-mix(in srgb, var(--td-success-color) 10%, transparent);
+    color: @text-primary;
+    &__time {
+      font-size: var(--app-text-sm);
+      font-variant-numeric: tabular-nums;
+      color: @text-secondary;
+    }
+    &__quote {
+      margin: 4px 0 0;
+      font-size: var(--app-text-md);
+      line-height: 1.6;
+    }
   }
 }
 
@@ -1243,5 +1672,29 @@ html[theme-mode="dark"] {
     color: #ffdcd7;
     background-color: #67060c;
   }
+}
+</style>
+
+<style lang="less">
+/* Citation highlights live outside the scoped block: they apply to DOM that
+   third-party renderers (docx-preview, pptx-preview, SheetJS) create. */
+::highlight(source-locate) {
+  background-color: color-mix(in srgb, var(--app-source-highlight) 60%, transparent);
+}
+
+mark.source-locate-mark {
+  background-color: color-mix(in srgb, var(--app-source-highlight) 60%, transparent);
+  color: inherit;
+}
+
+.source-locate-block {
+  background-color: color-mix(in srgb, var(--app-source-highlight) 22%, transparent) !important;
+  outline: 1px solid var(--app-source-highlight);
+  outline-offset: 2px;
+  border-radius: var(--app-radius-xs);
+}
+
+tr.source-locate-block > td {
+  background-color: color-mix(in srgb, var(--app-source-highlight) 45%, transparent) !important;
 }
 </style>

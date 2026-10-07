@@ -480,6 +480,25 @@ func (r *taskPendingOpsRepository) PendingCount(
 	return n, nil
 }
 
+// ClaimableCount uses ClaimBatch's eligibility and grouping rules so running
+// documents and multiple queued operations for one document do not inflate
+// the number of batches a scheduler needs to dispatch.
+func (r *taskPendingOpsRepository) ClaimableCount(
+	ctx context.Context, taskType, scope, scopeID string, staleBefore time.Time,
+) (int64, error) {
+	freshKeys := r.db.WithContext(ctx).Model(&types.TaskPendingOp{}).
+		Select("dedup_key").
+		Where("task_type = ? AND scope = ? AND scope_id = ?", taskType, scope, scopeID).
+		Where("claimed_at IS NOT NULL AND claimed_at >= ?", staleBefore)
+	var n int64
+	err := r.db.WithContext(ctx).Model(&types.TaskPendingOp{}).
+		Where("task_type = ? AND scope = ? AND scope_id = ?", taskType, scope, scopeID).
+		Where("claimed_at IS NULL OR claimed_at < ?", staleBefore).
+		Where("dedup_key NOT IN (?)", freshKeys).
+		Distinct("dedup_key").Count(&n).Error
+	return n, err
+}
+
 // DeleteByDedupKey drops rows in the tuple whose dedup_key matches.
 // If `op` is non-empty, only rows with the matching op are dropped;
 // otherwise every matching row is removed. Empty dedup_key is rejected

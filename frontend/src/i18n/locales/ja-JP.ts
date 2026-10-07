@@ -1168,6 +1168,12 @@ export default {
       cancelled: 'キャンセル済み'
     },
     errorCode: {
+      DOCREADER_UNAVAILABLE: "文書解析サービスを利用できません",
+      DOCREADER_UNAVAILABLE_SUGGESTION: "DocReader に接続できないか、接続が切断されました。サービスの稼働状態、再起動の繰り返し、ネットワークを確認し、復旧後に再試行してください。再アップロードは不要です。",
+      DOCREADER_TIMEOUT: "文書解析がタイムアウトしました",
+      DOCREADER_TIMEOUT_SUGGESTION: "DocReader の稼働状態と負荷を確認してから再試行してください。必要に応じて大きなファイルを分割してください。",
+      DOCREADER_PARSE_FAILED: "文書解析に失敗しました",
+      DOCREADER_PARSE_FAILED_SUGGESTION: "ファイル形式を確認し、管理者に今回の DocReader ログの確認を依頼してください。",
       TASK_STALLED: '進捗がないため自動停止しました',
       TASK_STALLED_SUGGESTION: 'しきい値を超えても進捗がなく、キューにも対応するタスクがないため失敗としてマークされました。「再試行」を押してください。繰り返し発生する場合は、この段階が依存するサービス（文書解析、モデル、ベクトルストア）を確認してください。',
       UNKNOWN_SUGGESTION: '詳細はアプリケーションログを確認してください。'
@@ -2999,8 +3005,8 @@ export default {
       duplicate: '複製'
     },
     pin: {
-      pin: '先頭に固定',
-      unpin: '固定を解除',
+              pin: '先頭に固定',
+              unpin: '固定を解除',
       pinSuccess: '固定しました',
       unpinSuccess: '固定を解除しました',
       failed: '操作に失敗しました'
@@ -3462,6 +3468,77 @@ export default {
       editingBadge: '編集中',
       pageActions: 'ページ操作',
       tabDocuments: 'ドキュメント',
+      tabGallery: 'ギャラリー',
+      tabDocumentsTip: '元のドキュメントをアップロード・管理',
+      tabWikiTip: 'ドキュメントから自動で整理された Wiki ページ',
+      tabGalleryTip: 'ドキュメントから抽出されたすべての画像を閲覧',
+      viewTabs: 'ナレッジベースのビュー',
+      gallery: {
+        title: 'ギャラリー',
+        allImages: 'すべての画像',
+        count: '{count} 枚',
+        countFiltered: '{count} 枚が該当',
+        searchPlaceholder: '説明や画像内の文字を検索',
+        filters: 'フィルター',
+        clearFilters: 'フィルターをクリア',
+        searchIn: '検索対象',
+        searchInHint: 'キーワードはチェックした内容だけで照合します',
+        attrSection: '画像属性',
+        attrHint: '「非表示」はその値を持つ画像を除外し、「常に表示」は他の条件で非表示になっても残します',
+        verdictDefault: '指定なし',
+        verdictOff: '非表示',
+        verdictOn: '常に表示',
+        keywordsPlaceholder: 'キーワードはカンマで区切る',
+        noAttrs: '絞り込める属性はありません',
+        sort: '並べ替え',
+        sortField: '並べ替え基準',
+        sortOrder: '順序',
+        orderAsc: '昇順',
+        orderDesc: '降順',
+        empty: '閲覧できる画像はまだありません',
+        emptyHint: 'ドキュメント内の画像は解析完了後にここに表示されます',
+        emptyFiltered: '条件に一致する画像はありません',
+        imageLoadError: '画像の読み込みに失敗しました',
+        noCaption: '説明なし',
+        noOcr: '文字は認識されませんでした',
+        caption: '説明',
+        ocr: '画像内の文字（OCR）',
+        attributes: '属性',
+        source: '元のドキュメント',
+        details: '詳細',
+        dimensions: 'サイズ',
+        status: '状態',
+        openSource: '元のドキュメントを開く',
+        copy: 'コピー',
+        zoomIn: '拡大 (+)',
+        zoomOut: '縮小 (-)',
+        zoomReset: 'ウィンドウに合わせる (0)',
+        actualSize: '実寸',
+        rotate: '回転 (R)',
+        download: 'ダウンロード',
+        openOriginal: '新しいタブで開く',
+        toggleInfo: '画像情報 (I)',
+        viewerClose: '閉じる (Esc)',
+        prev: '前へ (←)',
+        next: '次へ (→)',
+        // Display names for the builtin attributes the gallery itself
+        // declares. Attributes contributed by other sources fall back to the
+        // pipeline's own wording (see the imageAttr namespace).
+        attr: {
+          builtin_caption: '説明',
+          builtin_caption_description: 'モデルが生成した画像の説明',
+          builtin_ocr_text: 'OCR テキスト',
+          builtin_ocr_text_description: 'OCR で画像から抽出した文字',
+          builtin_created_at: '作成日時',
+          builtin_created_at_description: '所属ドキュメントチャンクの作成日時',
+          builtin_updated_at: '更新日時',
+          builtin_updated_at_description: '所属ドキュメントチャンクの最終更新日時',
+          builtin_is_enabled: '有効状態',
+          builtin_is_enabled_description: '所属ドキュメントチャンクが検索対象かどうか',
+          builtin_is_enabled_value_true: '有効',
+          builtin_is_enabled_value_false: '無効',
+        },
+      },
       tabGraph: 'グラフ',
       tabGraphTip: 'Wikiページ間のリンクを表したグラフ（ページリンクグラフ）です。「ナレッジベース設定 → ナレッジグラフ」で設定する、LLMが抽出するエンティティ・リレーションのナレッジグラフとは異なります。',
       searchPlaceholder: 'Wikiページを検索...',
@@ -3879,7 +3956,16 @@ export default {
         descriptionLanguageAuto: 'ドキュメントの言語に従う',
         customInstructionsLabel: '画像処理の指示',
         customInstructionsDescription: 'OCRとMarkdown出力の仕様は固定したまま、視覚的に優先する対象を追加できます',
-        customInstructionsPlaceholder: '例: 銘板、型番、アラームコード、表の単位を優先する…'
+        customInstructionsPlaceholder: '例: 銘板、型番、アラームコード、表の単位を優先する…',
+        imageAttrsLabel: '画像属性の観察',
+        imageAttrsDescription: 'オンにすると各画像を先に「属性観察＋説明」し、その属性で画像内テキストへの OCR 実行可否を決定します。オフは基本モード：全画像を1枚ずつ説明し全て OCR します',
+        imageAttrsSchemaLabel: '観察可能な画像属性',
+        imageAttrsSchemaDescription: 'モデルは以下の属性（バックエンドのレジストリで定義）を観察して OCR ポリシーを決めます',
+        imageAttrsOcrConditions: '観察した属性条件に基づいて OCR を実行',
+        imageAttrsOcrConditionsDesc: '観察した属性が以下の条件を満たす場合、その画像に OCR を実行します',
+        imageAttrsOcrOnUnobserved: '画像属性の観察に失敗した場合も OCR を実行',
+        imageAttrsOcrOnUnobservedDesc: 'モデルが画像属性を正しく観察できなかった場合、本文テキストを逃さないようデフォルトで OCR を実行します。オフにするとスキップします。（4B など小規模な視覚モデルを使う場合や、カスタムの画像指示がシステムプロンプトと衝突する場合に観察が失敗することがあります。8B 以上は失敗の可能性が低く、オフは推奨しません）',
+        imagePipelineKbNote: 'デフォルトはナレッジベースの設定に従い、今回のタスク向けに調整できます'
       }
     }
   },
@@ -3991,6 +4077,20 @@ export default {
     channelIm: 'IM',
     chunkLabel: 'チャンク{index}:',
     navigateToDocument: 'ドキュメント詳細を表示',
+    referenceSourceBack: 'すべての出典',
+    referenceSourceView: '原文を表示',
+    referenceSourceRelocate: '再度位置を特定',
+    referenceSourceLocating: '引用箇所を特定しています…',
+    referenceSourceExact: "原文の該当箇所を特定しました",
+    referenceSourcePartial: "確認できた原文を強調表示しています。引用の一部は未照合です",
+    referenceSourceBlock: "原文の領域を表示しています。文字の完全一致は未確認です",
+    referenceSourceAmbiguous: "一致する箇所が複数あり、特定できません",
+    referenceSourceStale: "原文または内容が更新され、引用箇所を特定できません",
+    referenceSourcePrevious: "前の引用箇所",
+    referenceSourceNext: "次の引用箇所",
+    referenceSourceFoundPage: '{page} ページで見つかりました',
+    referenceSourceNotFound: '引用箇所を特定できなかったため、原文を開きました',
+    referenceSourceOpenWeb: '元の Web ページで該当箇所を開く',
     chunkIdLabel: 'チャンクID:',
     documentIdLabel: 'ドキュメントID:',
     faqIdLabel: 'FAQ ID:',
@@ -4520,7 +4620,7 @@ export default {
       },
       keyLabels: {
         auth: {
-          registration_mode: 'セルフサービス登録モード',
+          registration_mode: '登録モード',
           default_tenant_mode: 'デフォルトのワークスペース作成方式',
           complex_password_enabled: '複雑なパスワードを必須にする'
         },
@@ -4551,7 +4651,7 @@ export default {
       },
       keyDescriptions: {
         auth: {
-          registration_mode: 'セルフサービス登録のモードです。self_serveは誰でもアカウントを登録でき、invite_onlyは公開登録を無効にし、オーナー/管理者による招待のみを許可します。保存後すぐに反映されますが、self_serveはインターネットからのスパム登録を招くため慎重に利用してください。',
+          registration_mode: '登録モード。公開登録では誰でもアカウントを作成できます。招待登録には有効な招待リンクが必要です。登録禁止でも既存アカウントは招待を承諾できます。保存後すぐに反映されます。',
           default_tenant_mode: '公開登録後のワークスペース作成方式です。create_personalはオーナー権限のワークスペースを作成し、tenantlessはアカウントのみを作成して、ユーザが招待を承諾するかワークスペースを作成するまで待ちます。新規ユーザにのみ適用されます。',
           complex_password_enabled: '複雑なパスワードを必須にするかどうかです。有効にすると、パスワードに大文字・小文字・数字・特殊文字を含める必要があります。変更はすぐに反映され、新規登録ユーザおよび新たなパスワード変更・リセットにのみ適用されます。特殊文字は{specialChars}です'
         },
@@ -4584,7 +4684,8 @@ export default {
         auth: {
           registration_mode: {
             self_serve: 'セルフサービス（誰でも登録可能）',
-            invite_only: '招待のみ（公開登録は無効）'
+            invite_register: '招待リンクでのみ登録可能',
+            invite_only: '登録禁止（既存アカウントは招待を承諾可能）'
           },
           default_tenant_mode: {
             create_personal: '個人ワークスペースを作成',
@@ -5924,6 +6025,8 @@ export default {
     retry: '再試行',
     unsupported: 'このファイル形式はオンラインプレビューに対応していません',
     unsupportedHint: 'ダウンロードして、ローカルのアプリケーションで開いてください',
+    zoomIn: '拡大',
+    zoomOut: '縮小',
     fullscreen: '全画面表示',
     exitFullscreen: '全画面表示を終了',
     htmlRendered: 'レンダリング表示',
@@ -6890,6 +6993,9 @@ export default {
       authHeaders: 'カスタムヘッダー（任意）',
       authHeadersHint: '非公開フィード用です。1行に1つ「名前: 値」の形式で入力します（例: Authorization: Bearer xxxx）'
     },
+    confluence: {
+      cloudFolderLimitation: 'Confluence Cloud では、スペース直下のフォルダーなどコンテナ配下のページをここに一覧できません。スペース全体を選択すれば同期されます。'
+    },
     comingSoon: '近日対応予定',
     docHint: '認証情報の取得先:',
     openDoc: 'ドキュメントを開く',
@@ -6926,6 +7032,12 @@ export default {
     prereqStep3Brief_lark_drive: 'アプリの権限を設定',
     prereqStep3Desc_lark_drive: 'drive:drive:readonly、drive:export:readonly、docx:document:readonlyの権限を有効にします',
     prereqOpenConsole_yuque: 'Yuqueのトークン設定を開く',
+    yuqueFolderModeLabel: 'フォルダ構成',
+    yuqueFolderModeToc: 'Yuqueの目次どおりに階層化',
+    yuqueFolderModeNone: 'ルートに平置き',
+    yuqueFolderModeHint: 'Yuqueの目次階層に従って文書を配置します。なお、その後ナレッジベース上で手動で移動したフォルダは、次回その文書を同期したときにYuqueの構成へ上書きされます。',
+    yuqueTOCOnly: 'Yuqueの目次に表示される文書だけ同期',
+    yuqueTOCOnlyHint: '「Yuqueの目次どおりに階層化」を選ぶと有効になります。すでにナレッジベースにある文書はそのまま残り、Yuqueの目次にない文書は新たに追加されなくなるだけで、削除はされません。',
     prereqBarText_dingtalk: '初めての利用ですか？DingTalkアプリの設定ガイドを確認',
     prereqStep1Brief_dingtalk: '企業内部アプリを作成',
     prereqStep1Desc_dingtalk: 'DingTalk開発者プラットフォームで企業内部アプリを作成し、Client IDとClient Secretを取得します。',
@@ -7009,7 +7121,7 @@ export default {
       empty: 'MCP エンドポイントはまだありません',
       disabled: '停止中',
       cardSummary: '{tools} 個のツール · {scope}',
-      scopeAll: 'すべてのナレッジベース',
+              scopeAll: 'すべてのナレッジベース',
       scopeCount: '{count} 個のナレッジベース',
       create: 'エンドポイントを作成',
       editTitle: 'MCP エンドポイントを編集',
@@ -7657,5 +7769,28 @@ export default {
     capabilityRequired: '権限を1つ以上選択してください',
     loadFailed: 'プラットフォームAPIキーの読み込みに失敗しました',
     createFailed: 'プラットフォームAPIキーの作成に失敗しました'
+  },
+  // 観察属性の表示文言。属性名で索引し、ここでは翻訳のみを担当します。
+  // 属性名のドットはアンダースコアにエスケープします（contain.text → contain_text）——
+  // vue-i18n はキーをドットで辿るため、リテラルの 'contain.text' は解決できません。
+  // 未翻訳の属性はバックエンド登録表の説明にフォールバックします。
+  imageAttr: {
+    contain_text: {
+      label: '画像内のテキスト量',
+      description: '画像自体がどれだけ本文テキストを含むか。テキスト読み取りのために別途 OCR を行う価値があるかを判断します。',
+      values: {
+        none: { label: 'テキストなし', description: 'テキストは一切含まれていません' },
+        sparse: { label: 'わずかな文字', description: 'わずかな文字のみ —— ロゴ、道路標識、単一のラベル' },
+        block: { label: 'まとまった本文', description: 'まとまった本文 —— スクリーンショット、表、文書ページ' }
+      }
+    },
+    contain_data_visual: {
+      label: 'データ可視化',
+      description: '画像がグラフ・図表・ダイアグラム・インフォグラフィックとしてデータを伝えているか。文字が少なく見えても OCR の対象に残します。',
+      values: {
+        'true': { label: 'はい', description: 'はい —— グラフ・図表・ダイアグラム' },
+        'false': { label: 'いいえ', description: 'いいえ —— 写真・イラスト・アイコン・装飾' }
+      }
+    }
   }
 }

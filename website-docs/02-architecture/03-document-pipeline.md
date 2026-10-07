@@ -232,7 +232,8 @@ info, err := s.task.Enqueue(task)
 - `TypeDocumentProcess`：`MaxRetry(3)` → 初始 + 3 次重试共 4 次尝试；每次尝试受 `DocumentProcessTimeout`（默认 2 小时，环境变量 `WEKNORA_DOCUMENT_PROCESS_TIMEOUT`）约束，其中单次 docreader 调用另受 `WEKNORA_DOCREADER_CALL_TIMEOUT`（默认 30 分钟）约束。
 - 处理函数内的 panic 会被转换为错误交给重试与死信流程，最后一次失败时文档标为 `failed`；Lite 模式的执行器同样捕获 panic，不会导致进程退出。
 - Payload 携带 `Attempt`（重新解析时取历史最大 attempt+1）；Span Tracker 用 attempt 隔离每轮处理的进度树，新 attempt 会"取代"（supersede）旧任务的收尾动作。
-- 处理函数区分"是否最后一次 asynq 尝试"（`isLastRetry`）：非最后一次的失败直接返回错误让 asynq 重试，最后一次才把 `ParseStatus` 落为 `failed` 并写 `ErrorMessage`。
+- 处理函数区分"是否最后一次 asynq 尝试"（`isLastRetry`）：非最后一次的失败直接返回错误让 asynq 重试，最后一次才把 `ParseStatus` 落为 `failed` 并写 `ErrorMessage`。读租户、读知识行或写 `processing` 状态时遇到数据库瞬时错误也返回错误重试，不再直接确认任务；只有知识行确实不存在时才静默结束。
+- 重新解析：只有覆盖配置校验、旧资源清理都通过后才分配新 attempt，被拒绝的重新解析不会影响正在进行的上一轮。上一轮仍在进行（`pending` / `processing` / `finalizing`）时，先取消它排队中的任务并通知运行中的任务停止。属于旧 attempt 的任务一律跳过：`ProcessDocument`、分块写库、后处理、图片多模态任务不再写行、删 chunk 或扣计数；Wiki 操作带着入队时的 attempt，过期后不再释放新一轮的计数；死信回调也不会把新一轮标为 `failed`。
 
 ## 处理配置：KB 默认值 + 单次上传覆盖 {#_5-处理配置-kb-默认值-单次上传覆盖}
 
@@ -394,7 +395,7 @@ promoted, err := s.knowledgeRepo.SetFinalizing(ctx, payload.KnowledgeID, expecte
 2. 生成 Caption（VLM，prompt 由 `buildVLMCaptionPrompt` 按 `DescriptionLanguage/CustomInstructions` 组装）与 OCR 文本；
 3. 结果写回所属文本 Chunk 的 `ImageInfo`（JSON），并创建/更新两个**子 Chunk**：`ChunkTypeImageCaption` 与 `ChunkTypeImageOCR`，`ParentChunkID` 指向文本块，随后单独 `indexChunks` 入向量索引 —— 使"搜图片描述也能召回原文块"；
 4. `shouldDropOrphanedMultimodal` 检查父块是否已被删除/取代，孤儿任务直接丢弃；
-5. `checkAndFinalizeAllImages`：全部图片处理完毕后，`enqueueKnowledgePostProcessTask` 触发 [后处理编排（knowledge_post_process.go，Stage: postprocess）](#_6-6-后处理编排-knowledge-post-process-go-stage-postprocess) 的后处理编排。
+5. `checkAndFinalizeAllImages`：全部图片处理完毕后，`enqueueKnowledgePostProcessTask` 触发 [后处理编排（knowledge_post_process.go，Stage: postprocess）](#_6-6-后处理编排-knowledge-post-process-go-stage-postprocess) 的后处理编排。后处理任务入队会就地重试 3 次，仍失败时本次任务返回错误交给重试，不会确认任务后让文档停在 `processing`。最后一次尝试时即使读取知识行失败，这张图片也会计入完成数。Lite 模式没有 Redis，计数器保存在进程内存中，所有图片都完成后才进入后处理。
 
 ## 状态机 {#_7-状态机}
 
@@ -467,11 +468,11 @@ task stuck in processing at docreader stage: no progress since 2026-09-22T09:37:
 
 阈值 `staleThreshold() = max(1h, DocumentProcessTimeout) + 10min`。
 
-**Sweep B —— 摘要卡死恢复**：`summary_status = 'processing' AND updated_at < 1 小时前` → 置 `failed`。
+**Sweep B —— 摘要卡死恢复**：`summary_status = 'processing' AND updated_at < 1 小时前` → 置 `failed`。`summary_status = 'pending'` 而解析已结束（`completed` / `failed` / `cancelled`）、超过 1 小时且队列中没有它的任务时，同样置为 `failed`，避免摘要任务提前放弃后前端一直显示"生成摘要中"。Sweep A 回收卡死文档、用户取消解析时，也会一并结束未完成的摘要状态（前者置 `failed`，后者置 `none`）。
 
 **Sweep C —— 删除卡死恢复**：`parse_status = 'deleting'` 且超过阈值、队列中也没有覆盖它的 `knowledge:list_delete` 任务时，置为 `failed` 并写明原因，文档重新出现在列表中，用户可以再次删除。探测队列失败时顺延到下一轮，Lite 模式没有排队任务，按实际情况直接恢复。
 
-**Wiki 队列兜底**：只因 Wiki 持久队列未消费而停在 `finalizing` 的文档，巡检会为对应知识库重新触发一次 Wiki 生成（同一知识库每个阈值周期最多一次）。Wiki 任务触发时若发现知识库已关闭 Wiki、没有合成模型或模型已删除，会清空尚未认领的 Wiki 操作并释放对应文档，使其正常结束 `finalizing`。
+**Wiki 队列兜底**：只因 Wiki 持久队列未消费而停在 `finalizing` 的文档，巡检会为对应知识库重新触发一次 Wiki 生成（同一知识库每个阈值周期最多一次）。Wiki 任务触发时若发现知识库已关闭 Wiki、没有合成模型或模型已删除，会清空尚未认领的 Wiki 操作并释放对应文档，使其正常结束 `finalizing`。合成模型存在但无法构建（例如地址被 SSRF 校验拒绝）时，Wiki 任务在最后一次重试也按同样方式释放文档。Wiki 操作最多保护文档 48 小时：超过 48 小时没有任何进展的文档按 Sweep A 回收为 `failed`，它的 Wiki 操作随之删除。
 
 ## 删除清理链路（knowledge_delete.go） {#_9-删除清理链路-knowledge-delete-go}
 

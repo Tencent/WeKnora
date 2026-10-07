@@ -324,10 +324,12 @@ func (c *Client) KnowledgeQAStream(
 
 		// Empty line indicates the end of an event
 		if line == "" {
-			if dataBuffer != "" {
-				debugLogger.Debug("sse_data_processing", "data", dataBuffer, "event_type", eventType)
+			// A bare `data:` frame carries no payload; skip it rather than
+			// failing the stream on an empty JSON document.
+			if data := completeSSEData(dataBuffer); data != "" {
+				debugLogger.Debug("sse_data_processing", "data", data, "event_type", eventType)
 				var streamResponse StreamResponse
-				if err := json.Unmarshal([]byte(dataBuffer), &streamResponse); err != nil {
+				if err := json.Unmarshal([]byte(data), &streamResponse); err != nil {
 					debugLogger.Debug("sse_parse_failed", "error", err)
 					return fmt.Errorf("failed to parse SSE data: %w", err)
 				}
@@ -342,9 +344,9 @@ func (c *Client) KnowledgeQAStream(
 				if streamResponse.ResponseType == ResponseTypeError && streamResponse.Done {
 					return NewSSEStreamError(streamResponse.Content)
 				}
-				dataBuffer = ""
-				eventType = ""
 			}
+			dataBuffer = ""
+			eventType = ""
 			continue
 		}
 
@@ -356,7 +358,7 @@ func (c *Client) KnowledgeQAStream(
 
 		// Process lines with data: prefix
 		if strings.HasPrefix(line, "data:") {
-			dataBuffer = line[5:] // Remove "data:" prefix
+			dataBuffer = appendSSEDataLine(dataBuffer, line)
 		}
 	}
 
@@ -410,9 +412,9 @@ func (c *Client) ContinueStream(
 
 		// Empty line indicates the end of an event
 		if line == "" {
-			if dataBuffer != "" && eventType == "message" {
+			if data := completeSSEData(dataBuffer); data != "" && eventType == "message" {
 				var streamResponse StreamResponse
-				if err := json.Unmarshal([]byte(dataBuffer), &streamResponse); err != nil {
+				if err := json.Unmarshal([]byte(data), &streamResponse); err != nil {
 					return fmt.Errorf("failed to parse SSE data: %w", err)
 				}
 
@@ -422,9 +424,9 @@ func (c *Client) ContinueStream(
 				if streamResponse.ResponseType == ResponseTypeError && streamResponse.Done {
 					return NewSSEStreamError(streamResponse.Content)
 				}
-				dataBuffer = ""
-				eventType = ""
 			}
+			dataBuffer = ""
+			eventType = ""
 			continue
 		}
 
@@ -435,7 +437,7 @@ func (c *Client) ContinueStream(
 
 		// Process lines with data: prefix
 		if strings.HasPrefix(line, "data:") {
-			dataBuffer = line[5:] // Remove "data:" prefix
+			dataBuffer = appendSSEDataLine(dataBuffer, line)
 		}
 	}
 

@@ -42,9 +42,9 @@
 
 **[WeKnora（ウィーノラ）](https://weknora.weixin.qq.com)** は、大規模言語モデル（LLM）をベースとしたオープンソースのナレッジフレームワークで、エンタープライズ向けの文書理解、セマンティック検索、推論に対応します。チームに散在する文書を集約し、検索・推論に使えるようにし、資料の更新に合わせて維持します。
 
-https://github.com/user-attachments/assets/19b28ce2-a62f-4f54-b289-c983576259bc
+https://github.com/user-attachments/assets/5722b10d-d04d-49ed-a6cc-635a8c77d91f
 
-<p align="center"><sub>2 分 25 秒 · 1080p · 英語ナレーション・英語字幕</sub></p>
+<p align="center"><sub>1 分 52 秒 · 1080p · ナレーションなし・英語の画面テキスト</sub></p>
 
 資料の検索には RAG、マルチステップのタスクには Agent、ナレッジの整理には Wiki。3 つの機能は同じナレッジベースを共有します。
 
