@@ -4620,7 +4620,7 @@ export default {
       },
       keyLabels: {
         auth: {
-          registration_mode: 'Self-service registration mode',
+          registration_mode: 'Registration mode',
           default_tenant_mode: 'Default workspace provisioning',
           complex_password_enabled: 'Require complex password'
         },
@@ -4651,7 +4651,7 @@ export default {
       },
       keyDescriptions: {
         auth: {
-          registration_mode: 'Self-service registration mode. self_serve = anyone can register an account; invite_only = public registration is disabled and only Owners/Admins can invite. Takes effect immediately after saving, but use self_serve with care (the public internet will send spam sign-ups).',
+          registration_mode: 'Registration mode. Open registration allows anyone to create an account; invitation registration requires a valid invitation link; disabled registration prevents account creation while existing accounts can still accept invitations. Changes take effect immediately.',
           default_tenant_mode: 'Workspace provisioning after public registration. create_personal creates an Owner workspace; tenantless creates only the account until the user accepts an invitation or creates a workspace. Applies to new users only.',
           complex_password_enabled: 'Whether to require complex passwords. When enabled, passwords must contain uppercase and lowercase letters, numbers, and special characters. Changes take effect immediately and only apply to newly registered users or new password changes/resets. Special characters include {specialChars}'
         },
@@ -4684,7 +4684,8 @@ export default {
         auth: {
           registration_mode: {
             self_serve: 'Self-service (anyone can register)',
-            invite_only: 'Invite only (public registration disabled)'
+            invite_register: 'Invitation registration (valid link required)',
+            invite_only: 'Registration disabled (existing accounts can accept invitations)'
           },
           default_tenant_mode: {
             create_personal: 'Create personal workspace',

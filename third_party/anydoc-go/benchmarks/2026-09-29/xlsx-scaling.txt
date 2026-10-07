@@ -1,0 +1,12 @@
+goos: darwin
+goarch: arm64
+pkg: github.com/Tencent/WeKnora/internal/infrastructure/docparser/anydoc
+cpu: Apple M4 Pro
+BenchmarkConvertScaling/xlsx_100_rows         	     982	    606582 ns/op	  11.68 MB/s	   82624 B/op	    1353 allocs/op
+BenchmarkConvertScaling/xlsx_100_rows         	    1010	    591741 ns/op	  11.97 MB/s	   82624 B/op	    1353 allocs/op
+BenchmarkConvertScaling/xlsx_100_rows         	    1010	    590599 ns/op	  11.99 MB/s	   82624 B/op	    1353 allocs/op
+BenchmarkConvertScaling/xlsx_10000_rows       	      12	  46185531 ns/op	   2.51 MB/s	 7946440 B/op	  130053 allocs/op
+BenchmarkConvertScaling/xlsx_10000_rows       	      12	  46568236 ns/op	   2.49 MB/s	 7946442 B/op	  130053 allocs/op
+BenchmarkConvertScaling/xlsx_10000_rows       	      13	  45783734 ns/op	   2.53 MB/s	 7946442 B/op	  130053 allocs/op
+PASS
+ok  	github.com/Tencent/WeKnora/internal/infrastructure/docparser/anydoc	4.609s
