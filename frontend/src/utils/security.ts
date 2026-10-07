@@ -133,9 +133,10 @@ export function applyDocumentPreviewImageAttributes(currentNode: Node): void {
   element.setAttribute('fetchpriority', 'low');
 }
 
-const documentPreviewDomPurifyConfig = {
+export const documentPreviewDomPurifyConfig = {
   ...DOMPurifyConfig,
-  ADD_ATTR: [...DOCUMENT_PREVIEW_IMAGE_ATTRS],
+  // 在基础 ADD_ATTR 上追加，而不是覆盖，否则链接的 target="_blank" 又会被剥掉。
+  ADD_ATTR: [...DOMPurifyConfig.ADD_ATTR, ...DOCUMENT_PREVIEW_IMAGE_ATTRS],
 };
 
 const documentPreviewSecurityHooks: SecurityHooks = {

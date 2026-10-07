@@ -17,6 +17,11 @@ test('ALLOWED_URI_REGEXP allows s3:// and rejects javascript:', () => {
   assert.doesNotMatch('javascript:alert(1)', re);
 });
 
+test('markdownDomPurifyConfig keeps hook-added target attribute', () => {
+  // USE_PROFILES replaces ALLOWED_ATTR, so target must come from ADD_ATTR.
+  assert.ok(markdownDomPurifyConfig.ADD_ATTR.includes('target'));
+});
+
 test('chat markdown links always open in a new tab', () => {
   const attributes = new Map([['href', '/platform/knowledge-bases/kb-1']]);
   const anchor = {
