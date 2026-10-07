@@ -147,3 +147,26 @@ func TestGetBlockChildrenFlatRejectsRepeatedCursor(t *testing.T) {
 		"the guard must reject the repeated cursor on the second page; err=%v", err)
 	require.Contains(t, err.Error(), `repeated next_cursor "same-cursor"`)
 }
+
+// Data source queries page through queryDataSourceWindow since #3845, so the
+// repeated-cursor guard has to cover that loop too.
+func TestQueryDataSourceAllRejectsRepeatedCursor(t *testing.T) {
+	var requests atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if requests.Add(1) > fakeLoopBudget {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		writeListPage(w, `[]`, true, "same-cursor")
+	}))
+	defer server.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	_, err := paginationTestClient(t, server).queryDataSourceAll(ctx, "/v1/data_sources/ds-1/query")
+	require.Error(t, err)
+	require.Equal(t, int64(2), requests.Load(),
+		"the guard must reject the repeated cursor on the second page; err=%v", err)
+	require.Contains(t, err.Error(), `repeated next_cursor "same-cursor"`)
+}
