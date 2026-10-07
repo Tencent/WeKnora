@@ -59,6 +59,11 @@
 #define ERR_UNKNOWN_FORMAT 9
 
 /**
+ * `ConvertError::NeedsOcr`; page numbers are retained in the error detail.
+ */
+#define ERR_NEEDS_OCR 10
+
+/**
  * C-side format tag. Stable; mirrors the Node/Python lowercase string names
  * via `format_name`. `ANYDOC_FORMAT_NONE` is the `Option::None` sentinel.
  */
@@ -106,6 +111,8 @@
 
 #define BLOCK_RULE 6
 
+#define BLOCK_MATH 7
+
 #define INLINE_TEXT 0
 
 #define INLINE_LINK 1
@@ -117,6 +124,10 @@
 #define INLINE_NOTEREF 4
 
 #define INLINE_LINEBREAK 5
+
+#define INLINE_MATH 6
+
+#define INLINE_CHECKBOX 7
 
 #define LINK_EXTERNAL 0
 
@@ -228,6 +239,17 @@ int anydoc_to_document(const uint8_t *bytes,
                        int format_tag,
                        uint8_t **out_buf,
                        uintptr_t *out_len);
+
+/**
+ * Parse once and return the original document model followed by asset-linked
+ * Markdown in a single flat buffer. Free it with `anydoc_buffer_free`.
+ * PDF has no document model and returns `ERR_PDF_NO_MODEL`.
+ */
+int anydoc_to_document_with_asset_links(const uint8_t *bytes,
+                                        uintptr_t len,
+                                        int format_tag,
+                                        uint8_t **out_buf,
+                                        uintptr_t *out_len);
 
 /**
  * Free a string returned by `anydoc_to_markdown*` or `anydoc_last_error`.

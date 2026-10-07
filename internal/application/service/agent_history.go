@@ -104,6 +104,7 @@ func LoadAgentHistory(
 		used         int
 		replay       = newHistoryReplay(estimator, 0, retainRetrievalHistory)
 	)
+	replay.locale = types.LanguageFromContextOrDefault(ctx)
 	for len(rows) < agentHistoryMaxRows {
 		page, err := messageRepo.ListMessagesBySessionBeforeCursor(
 			ctx, sessionID, before, beforeID, agentHistoryPageSize,
@@ -259,6 +260,7 @@ type historyReplay struct {
 	estimator              *agenttoken.Estimator
 	budget                 int
 	retainRetrievalHistory bool
+	locale                 string
 	built                  map[string][]chat.Message
 	tokens                 map[string]int
 	// full holds stored rows by ID until their turn is replayed.
@@ -305,7 +307,7 @@ func (r *historyReplay) messages(t *agentHistoryTurn) []chat.Message {
 	for i, u := range t.users {
 		users[i] = r.stored(u)
 	}
-	msgs := append([]chat.Message{buildUserHistoryMessage(users[0])},
+	msgs := append([]chat.Message{r.openingUserMessage(users[0])},
 		buildTurnBodyMessages(r.stored(t.assistant), users[1:])...)
 	for i := range msgs {
 		msgs[i].TurnID = id
@@ -462,6 +464,18 @@ func buildTurnBodyMessages(assistant *types.Message, midRunUsers []*types.Messag
 		out = append(out, *final)
 	}
 	return out
+}
+
+// openingUserMessage replays the message that started a turn. One sent as only
+// an image or file has no stored text; replayed empty, the sanitizer would drop
+// it and merge the answers on either side.
+func (r *historyReplay) openingUserMessage(m *types.Message) chat.Message {
+	if strings.TrimSpace(m.Content) == "" && (len(m.Images) > 0 || len(m.Attachments) > 0) {
+		asked := *m
+		asked.Content = types.UploadOnlyQuestion(r.locale)
+		return buildUserHistoryMessage(&asked)
+	}
+	return buildUserHistoryMessage(m)
 }
 
 // buildUserHistoryMessage converts a stored user message into the chat.Message

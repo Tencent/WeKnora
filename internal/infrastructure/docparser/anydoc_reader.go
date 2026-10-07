@@ -89,7 +89,8 @@ func (r *AnydocReader) readScannedPDF(ctx context.Context, req *types.ReadReques
 		return nil, fmt.Errorf("anydoc conversion failed for %q: PDF has no extractable text; OCR is required", req.FileName)
 	}
 
-	logger.Infof(ctx, "[anydoc] %q has no text layer, falling back to builtin for scanned-PDF OCR", req.FileName)
+	logger.Infof(ctx, "[anydoc] %q contains pages requiring OCR, falling back to builtin for scanned-PDF OCR",
+		req.FileName)
 	fallbackReq := *req
 	fallbackReq.ParserEngine = BuiltinEngineName
 	result, err := r.fallback.Read(ctx, &fallbackReq)

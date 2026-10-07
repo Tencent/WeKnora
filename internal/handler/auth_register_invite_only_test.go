@@ -223,3 +223,68 @@ func TestRegister_PreservesPasswordBytes(t *testing.T) {
 			gotPassword, originalPassword)
 	}
 }
+
+// Settings are resolved on every request, for the UI and both registration APIs.
+type registrationModeSettings struct {
+	interfaces.SystemSettingService
+	mode string
+}
+
+func (s *registrationModeSettings) GetString(_ context.Context, key, _, fallback string) string {
+	if key == "auth.registration_mode" {
+		return s.mode
+	}
+	return fallback
+}
+
+func (s *registrationModeSettings) GetBool(_ context.Context, _, _ string, fallback bool) bool {
+	return fallback
+}
+
+func TestRegistrationModeChangesApplyImmediately(t *testing.T) {
+	settings := &registrationModeSettings{}
+	h := &AuthHandler{
+		configInfo: &config.Config{
+			Auth: &config.AuthConfig{RegistrationMode: config.AuthRegistrationModeInviteOnly},
+		},
+		systemSettingSvc: settings,
+		userService:      &invitedRegistrationUserService{},
+		tenantService:    &invitedRegistrationTenantService{},
+		invitationSvc:    &invitedRegistrationInvitationService{},
+	}
+	r := newRegisterTestRouter(h)
+	r.POST("/auth/register-by-invite", h.RegisterByInvite)
+	r.GET("/auth/config", h.GetAuthConfig)
+	for _, mode := range []string{
+		config.AuthRegistrationModeInviteRegister,
+		config.AuthRegistrationModeSelfServe,
+		config.AuthRegistrationModeInviteOnly,
+	} {
+		settings.mode = mode
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/auth/config", nil))
+		var cfg struct {
+			RegistrationMode string `json:"registration_mode"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &cfg); err != nil || cfg.RegistrationMode != mode {
+			t.Fatalf("config must expose live mode %q: %s", mode, w.Body.String())
+		}
+		for _, path := range []string{"/auth/register", "/auth/register-by-invite"} {
+			body := validRegisterBody()
+			body["token"] = "valid-token"
+			data, _ := json.Marshal(body)
+			req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(data))
+			req.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, req)
+			want := http.StatusForbidden
+			if mode == config.AuthRegistrationModeSelfServe ||
+				(mode == config.AuthRegistrationModeInviteRegister && path == "/auth/register-by-invite") {
+				want = http.StatusCreated
+			}
+			if w.Code != want {
+				t.Fatalf("mode=%s path=%s status=%d want=%d body=%s", mode, path, w.Code, want, w.Body.String())
+			}
+		}
+	}
+}
