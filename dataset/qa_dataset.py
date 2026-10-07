@@ -35,7 +35,7 @@ import pandas as pd
 import openai
 
 
-DEFAULT_QA_MODEL = "gpt-4o-2024-05-13"
+DEFAULT_QA_MODEL = "gpt-5.6-sol"
 
 
 def read_parquet(path):
