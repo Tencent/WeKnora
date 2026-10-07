@@ -535,13 +535,20 @@ func (t *DataAnalysisTool) LoadFromExcel(ctx context.Context, filename string, t
 			)
 		}
 		if enumErr == nil && len(sheetNames) > 0 && strings.EqualFold(filepath.Ext(filename), ".xlsx") {
-			var err error
-			sheetNames, err = filterEmptyExcelSheets(ctx, filename, sheetNames)
-			if err != nil {
+			filtered, err := filterEmptyExcelSheets(ctx, filename, sheetNames)
+			switch {
+			case err != nil && ctx.Err() != nil:
 				return nil, fmt.Errorf("inspect Excel worksheets: %w", err)
-			}
-			if len(sheetNames) == 0 {
+			case err != nil:
+				// The preflight is best-effort: keep loading every sheet as before.
+				logger.Warnf(ctx,
+					"[Tool][DataAnalysis] Could not inspect worksheets of '%s' (session=%s): %v. Keeping all sheets.",
+					filename, t.sessionID, err,
+				)
+			case len(filtered) == 0:
 				return nil, fmt.Errorf("excel workbook contains no non-empty worksheets")
+			default:
+				sheetNames = filtered
 			}
 		}
 
