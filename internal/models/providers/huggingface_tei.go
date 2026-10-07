@@ -32,6 +32,11 @@ func newHuggingFaceTEIProvider() *Definition {
 		RequiresAuth: false,
 		Auth:         AuthBearer, // Only TEI servers started with --api-key need this.
 		ModelTypes:   []types.ModelType{types.ModelTypeRerank},
+		Compat: VendorCompat{Rerank: api.RerankCompat{
+			// TEI rejects requests above --max-client-batch-size, which
+			// defaults to 32.
+			MaxDocuments: api.Ptr(32),
+		}},
 		Validate: func(cfg *Config) error {
 			if cfg == nil {
 				return fmt.Errorf("config is nil")

@@ -286,6 +286,8 @@ func TestRerankCeilingsAreTheDocumentedOnes(t *testing.T) {
 		// help.aliyun.com text-rerank: 500 documents per request. Its length
 		// limits are stated in tokens, which runes cannot express.
 		"aliyun": {MaxDocuments: 500},
+		// TEI router: --max-client-batch-size defaults to 32.
+		"huggingface_tei": {MaxDocuments: 32},
 	} {
 		t.Run(id, func(t *testing.T) {
 			resolved, err := modelruntime.Resolve(modelruntime.Ref{

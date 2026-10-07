@@ -240,6 +240,12 @@ func TestRerankWireFormatPerVendor(t *testing.T) {
 			wantBody: map[string]any{"query": query, "texts": anyStrings(three), "raw_scores": false},
 		},
 		{
+			name: "Hugging Face TEI splits at 32 documents", provider: "huggingface_tei",
+			model: "BAAI/bge-reranker-large", docs: documents(33), wantRequests: 2,
+			wantPath: "/rerank", wantAuth: [2]string{"Authorization", "Bearer k"},
+			wantBody: map[string]any{"query": query, "texts": anyStrings(documents(32)), "raw_scores": false},
+		},
+		{
 			name: "novita", provider: "novita", model: "baai/bge-reranker-v2-m3", base: "/openai/v1",
 			wantPath: "/openai/v1/rerank", wantAuth: [2]string{"Authorization", "Bearer k"},
 			wantBody: cohere("baai/bge-reranker-v2-m3", three, nil),
