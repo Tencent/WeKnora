@@ -1,0 +1,104 @@
+{
+  "workflows": [
+    {
+      "name": "Anydoc",
+      "path": ".github/workflows/anydoc.yml",
+      "paths": [
+        "third_party/anydoc-go/**",
+        "scripts/build-anydoc-lib.sh",
+        "internal/infrastructure/docparser/**",
+        ".github/workflows/anydoc.yml"
+      ]
+    },
+    {
+      "name": "App",
+      "path": ".github/workflows/app.yml",
+      "paths": [
+        "**/*.go",
+        "!cli/**",
+        "!client/**",
+        "!docreader/**",
+        "!third_party/anydoc-go/**",
+        "go.mod",
+        "go.sum",
+        "Makefile",
+        "config/**",
+        "migrations/**",
+        "skills/preloaded/**",
+        "testdata/**",
+        "docker/Dockerfile.app",
+        "LICENSE",
+        "THIRD_PARTY_NOTICES.md",
+        "licenses/**",
+        "internal/textconv/data/**",
+        "internal/models/catalog/data/**",
+        "internal/models/parity/testdata/**",
+        "internal/models/providers/assets/**",
+        "scripts/model-catalog/**",
+        "scripts/*license*.sh",
+        "scripts/git-hooks/**",
+        "scripts/test-git-hooks.sh",
+        "cmd/desktop/build/windows/installer/project.nsi",
+        ".github/workflows/app.yml"
+      ]
+    },
+    {
+      "name": "CLI",
+      "path": ".github/workflows/cli.yml",
+      "paths": [
+        "cli/**",
+        ".github/workflows/cli.yml"
+      ]
+    },
+    {
+      "name": "DocReader",
+      "path": ".github/workflows/docreader.yml",
+      "paths": [
+        "docreader/**",
+        "go.mod",
+        "go.sum",
+        "testdata/**",
+        "docker/Dockerfile.docreader",
+        "docker/Dockerfile.odl-hybrid",
+        ".github/workflows/docreader.yml"
+      ]
+    },
+    {
+      "name": "Build & Publish (dsh-weknora)",
+      "path": ".github/workflows/dsh-plugin.yml",
+      "paths": [
+        "packages/dsh-weknora/**",
+        ".github/workflows/dsh-plugin.yml"
+      ]
+    },
+    {
+      "name": "Frontend",
+      "path": ".github/workflows/frontend.yml",
+      "paths": [
+        "frontend/**",
+        "scripts/build_frontend_dist.sh",
+        "scripts/test_embed_nginx.py",
+        ".github/workflows/frontend.yml"
+      ]
+    },
+    {
+      "name": "Go Lint",
+      "path": ".github/workflows/go-lint.yml",
+      "paths": [
+        "**/*.go",
+        "**/go.mod",
+        "**/go.sum",
+        ".golangci.yml",
+        ".github/workflows/go-lint.yml"
+      ]
+    },
+    {
+      "name": "Build & Publish (mcp-server)",
+      "path": ".github/workflows/mcp-server.yml",
+      "paths": [
+        "mcp-server/**",
+        ".github/workflows/mcp-server.yml"
+      ]
+    }
+  ]
+}

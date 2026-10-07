@@ -1,42 +1,18 @@
-<!-- Title should follow Conventional Commits, e.g. `feat: ...`, `fix: ...`, `docs: ...` -->
+<!-- title: type(scope): summary，例如 fix(portal): preserve omitted fields -->
+<!-- 遵守根目录 DEVOPS.md；删除不适用的提示，不保留空占位符。 -->
 
-## Description
-<!-- Briefly describe the purpose and changes of this PR -->
+# PR 说明
 
-## Type of Change
-<!-- Check applicable items -->
-- [ ] 🐛 Bug fix
-- [ ] ✨ New feature
-- [ ] 💥 Breaking change
-- [ ] 📚 Documentation update
-- [ ] 🎨 Refactor
-- [ ] ⚡ Performance improvement
-- [ ] 🧪 Test
-- [ ] 🔧 Configuration / Build / CI
+## 改动
 
-## Related Issue
-<!-- If this PR resolves an issue, use "Fixes #123" or "Closes #123" -->
-Fixes #
+<!-- 哪个场景的行为发生变化，影响谁。 -->
 
-## Testing
-<!-- Describe how these changes were tested. Include reproduction or verification steps. -->
-<!--
-For a focused change, run checks scoped to the files/packages you changed.
-See the Contributing section in README.md for examples. If a full-repository
-check is blocked by unrelated baseline or environment failures, record the
-exact command and failure here.
--->
+## 原因
 
-## Checklist
-- [ ] `git diff --check origin/main...HEAD` passes
-- [ ] Changed source files are formatted
-- [ ] Targeted tests for the changed packages/components pass
-- [ ] Diff-scoped lint passes where applicable (for Go: `golangci-lint run --new-from-rev=origin/main ./...`)
-- [ ] Full-repository checks were run, or any unrelated/environment-dependent failures are documented above
-- [ ] Self-reviewed the code
-- [ ] Added/updated tests covering the change
-- [ ] Updated related documentation (README, `website-docs/`, Swagger annotations, etc.)
-- [ ] Breaking changes are clearly called out in the description above
+<!-- bug fix：触发条件、修复前行为、原因、修复后行为。已有 issue 才写 Fixes #123。 -->
 
-## Screenshots / Recordings
-<!-- Required for user-visible UI changes -->
+## 验证
+
+<!-- 实际命令/手工步骤与结果；回归测试或无法自动化的原因；未运行/阻塞项。 -->
+<!-- UI：按本仓设计规范附截图/录屏。协议/数据/发布：必要时说明兼容、迁移与回滚。 -->
+<!-- 合并前需一次正式 GitHub approval；独立 AI 可辅助 review，作者自审不替代 approval。 -->

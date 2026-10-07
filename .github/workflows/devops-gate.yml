@@ -1,0 +1,33 @@
+name: DevOps gate
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: read
+  actions: read
+
+concurrency:
+  group: devops-gate-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  ci-gate:
+    name: ci-gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - name: Test gate decisions
+        run: node --test .github/devops-gate.test.cjs
+      - name: Validate metadata and wait for applicable existing CI
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+        with:
+          script: |
+            const gate = require(`${process.env.GITHUB_WORKSPACE}/.github/devops-gate.cjs`);
+            const config = require(`${process.env.GITHUB_WORKSPACE}/.github/devops-ci.json`);
+            await gate.run({ github, context, core, config });
