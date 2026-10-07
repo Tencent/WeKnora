@@ -18,7 +18,7 @@ import pandas as pd
 
 
 SOURCE = Path(__file__).resolve().parents[1] / "qa_dataset.py"
-LEGACY_DEFAULT = "gpt-4o-2024-05-13"
+DEFAULT_MODEL = "gpt-5.6-sol"
 EXPLICIT_MODEL = "synthetic-compatible-model"
 
 
@@ -86,7 +86,7 @@ class QADatasetModelTests(unittest.TestCase):
     def test_direct_answer_default_is_unchanged(self):
         system = self.module.QAAnsweringSystem(self.queries, self.corpus, self.qrels)
         self.assertEqual(system.answer_question("q1"), "synthetic answer")
-        self.assertEqual(self.generated_models(), [LEGACY_DEFAULT])
+        self.assertEqual(self.generated_models(), [DEFAULT_MODEL])
 
     def test_existing_direct_answer_override_remains_supported(self):
         system = self.module.QAAnsweringSystem(self.queries, self.corpus, self.qrels)
@@ -95,7 +95,7 @@ class QADatasetModelTests(unittest.TestCase):
 
     def test_generate_default_retains_legacy_model(self):
         self.module.generate_answers(str(self.input_dir), str(self.output_dir))
-        self.assertEqual(self.generated_models(), [LEGACY_DEFAULT, LEGACY_DEFAULT])
+        self.assertEqual(self.generated_models(), [DEFAULT_MODEL, DEFAULT_MODEL])
         self.assert_real_output()
 
     def test_generate_explicit_model_reaches_actual_client(self):
@@ -109,7 +109,7 @@ class QADatasetModelTests(unittest.TestCase):
 
     def test_cli_without_model_retains_default(self):
         self.run_cli()
-        self.assertEqual(self.generated_models(), [LEGACY_DEFAULT, LEGACY_DEFAULT])
+        self.assertEqual(self.generated_models(), [DEFAULT_MODEL, DEFAULT_MODEL])
         self.assert_real_output()
 
     def test_cli_model_reaches_real_generation_chain(self):
@@ -154,7 +154,7 @@ class QADatasetModelTests(unittest.TestCase):
 
     def test_existing_third_positional_retry_argument_remains_valid(self):
         self.module.generate_answers(str(self.input_dir), str(self.output_dir), 0)
-        self.assertEqual(self.generated_models(), [LEGACY_DEFAULT, LEGACY_DEFAULT])
+        self.assertEqual(self.generated_models(), [DEFAULT_MODEL, DEFAULT_MODEL])
         self.assert_real_output()
 
     def test_explicit_model_does_not_change_resume_behavior(self):
