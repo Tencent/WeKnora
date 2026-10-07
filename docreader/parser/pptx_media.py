@@ -135,7 +135,15 @@ def _picture_sources(pptx_bytes: bytes) -> dict[str, deque[tuple[str, bytes] | N
     sources: dict[str, deque[tuple[str, bytes] | None]] = {}
 
     def visit(shapes) -> None:
-        for shape in shapes:
+        # Match MarkItDown, which emits shapes (and group members) sorted by
+        # position rather than in z-order.
+        for shape in sorted(
+            shapes,
+            key=lambda x: (
+                float("-inf") if not x.top else x.top,
+                float("-inf") if not x.left else x.left,
+            ),
+        ):
             if shape.shape_type == MSO_SHAPE_TYPE.GROUP:
                 visit(shape.shapes)
                 continue

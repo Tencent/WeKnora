@@ -133,6 +133,25 @@ class TestPptxMediaAssociation(unittest.TestCase):
         markdown, images = fallback(deck([RED, BLUE], reverse_slides=True))
         self.assertEqual(image_colors(markdown, images), [BLUE, RED])
 
+    def test_same_slide_duplicate_names_follow_position_order(self):
+        # MarkItDown orders shapes by (top, left), not z-order.
+        for grouped in (False, True):
+            with self.subTest(grouped=grouped):
+                presentation = Presentation()
+                slide = presentation.slides.add_slide(presentation.slide_layouts[6])
+                shapes = (
+                    slide.shapes.add_group_shape().shapes if grouped else slide.shapes
+                )
+                for color, top in ((RED, 4), (BLUE, 1)):
+                    picture = shapes.add_picture(
+                        io.BytesIO(png(color)), Inches(1), Inches(top)
+                    )
+                    picture.name = "Picture 1"
+                output = io.BytesIO()
+                presentation.save(output)
+                markdown, images = fallback(output.getvalue())
+                self.assertEqual(image_colors(markdown, images), [BLUE, RED])
+
     def test_grouped_pictures_keep_their_source(self):
         data = rewrite_archive(deck([RED, BLUE], grouped=True), reverse_media=True)
         markdown, images = fallback(data)
