@@ -33,5 +33,3 @@ test('chat sends and survives reload when the remote desktop decoder probe never
   await expect(page.locator('[data-guide="chat-input"] textarea')).toBeVisible()
   expect(await page.evaluate(() => (window as any).__decoderChecks)).toBe(0)
 })
-
-
