@@ -2730,6 +2730,9 @@ export default {
     }
   },
   common: {
+    zoomIn: '拡大',
+    zoomOut: '縮小',
+    contents: '目次',
     add: '追加',
     me: '自分',
     confirm: '確認',

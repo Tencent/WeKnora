@@ -2730,6 +2730,9 @@ export default {
     }
   },
   common: {
+    zoomIn: 'Zoom in',
+    zoomOut: 'Zoom out',
+    contents: 'Contents',
     add: 'Add',
     me: 'Me',
     confirm: 'Confirm',

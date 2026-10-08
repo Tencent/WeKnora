@@ -5295,6 +5295,9 @@ export default {
     noCompatibleKbForAgent: '현재 에이전트의 도구와 범위 내 지식베이스의 기능이 일치하지 않아 참조할 수 있는 지식베이스가 없습니다.'
   },
   common: {
+    zoomIn: '확대',
+    zoomOut: '축소',
+    contents: '목차',
     add: '추가',
     me: '나',
     confirm: '확인',

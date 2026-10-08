@@ -5297,6 +5297,9 @@ export default {
     noCompatibleKbForAgent: '当前智能体的工具与作用域内知识库的能力不匹配，暂无可引用的知识库。'
   },
   common: {
+    zoomIn: '放大',
+    zoomOut: '缩小',
+    contents: '目录',
     add: '添加',
     me: '我',
     confirm: '确认',
