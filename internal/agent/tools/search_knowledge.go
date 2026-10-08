@@ -751,11 +751,17 @@ func (t *SearchKnowledgeTool) rerankResults(
 	if orderOnly {
 		threshold = math.Inf(-1)
 	}
-	res := reranking.Rerank(ctx, t.rerankModel, query, rows, reranking.Options{
+	_, vectorThreshold, _ := t.retrievalParams(0)
+	opts := reranking.Options{
 		Threshold:        threshold,
 		FallbackMinScore: reranking.FallbackMinScore(t.searchTargets.HasRecallThresholdOverride()),
 		MaxCandidates:    reranking.DefaultMaxCandidates,
-	})
+		ImageKeepScore:   reranking.ImageKeepScoreFor(vectorThreshold),
+	}
+	if t.knowledgeBaseService != nil {
+		opts.LoadImage = t.knowledgeBaseService.ReadChunkImage
+	}
+	res := reranking.Rerank(ctx, t.rerankModel, query, rows, opts)
 	if res.Diagnostics.Outcome == types.RerankOutcomeModelError {
 		logger.Warnf(ctx, "[Tool][SearchKnowledge] Rerank model failed, using raw retrieval results: %s",
 			res.Diagnostics.Error)

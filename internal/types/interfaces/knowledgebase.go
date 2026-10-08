@@ -142,6 +142,10 @@ type KnowledgeBaseService interface {
 	// Returns:
 	//   - Possible errors during deletion
 	ProcessKBDelete(ctx context.Context, t *asynq.Task) error
+	// ReadChunkImage reads the image a search result shows (the first image
+	// of its image_info) from the storage of its knowledge base. The result
+	// must come from a search the caller was authorized to run.
+	ReadChunkImage(ctx context.Context, result *types.SearchResult) ([]byte, error)
 }
 
 // KnowledgeBaseRepository defines the knowledge base repository interface

@@ -29,7 +29,20 @@ const (
 	maxKeptImages = 2
 	// imageLoadConcurrency bounds image reads from storage.
 	imageLoadConcurrency = 4
+	// MinImageKeepScore is the least vector similarity that keeps a pictorial
+	// image hit over a text reranker. It sits above the 0.1 image recall
+	// threshold: recall only lets an image compete, keeping it needs more.
+	// Empirical, on the cosine scale most engines report.
+	MinImageKeepScore = 0.25
 )
+
+// ImageKeepScoreFor is Options.ImageKeepScore for a search whose text hits
+// needed vectorThreshold: an image is kept over a text reranker only when its
+// vector was at least as close as a text hit had to be, and never below
+// MinImageKeepScore.
+func ImageKeepScoreFor(vectorThreshold float64) float64 {
+	return max(vectorThreshold, MinImageKeepScore)
+}
 
 // KeptByMetadataKey marks a result kept for a reason other than its rerank
 // score; KeptByImageVector is the reason for a pictorial image hit a text
