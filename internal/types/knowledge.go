@@ -34,6 +34,7 @@ const (
 	ChannelIM               = "im"                // Generic IM channel
 	ChannelNotion           = "notion"            // Notion
 	ChannelConfluence       = "confluence"        // Atlassian Confluence
+	ChannelJira             = "jira"              // Atlassian Jira
 	ChannelYuque            = "yuque"             // Yuque (语雀)
 	ChannelRSS              = "rss"               // RSS / Atom feed
 	ChannelIMA              = "ima"               // Tencent IMA (ima.qq.com)

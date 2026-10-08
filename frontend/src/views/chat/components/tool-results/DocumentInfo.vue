@@ -110,6 +110,7 @@ const channelLabelMap: Record<string, string> = {
   feishu: 'knowledgeBase.channelFeishu',
   gitlab: 'knowledgeBase.channelGitLab',
   confluence: 'knowledgeBase.channelConfluence',
+  jira: 'knowledgeBase.channelJira',
   dingtalk: 'knowledgeBase.channelDingtalk',
   slack: 'knowledgeBase.channelSlack',
   im: 'knowledgeBase.channelIm',
