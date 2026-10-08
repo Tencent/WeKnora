@@ -259,6 +259,9 @@ func refillSearch(ctx context.Context, g *storeGroup, p types.RetrieveParams) (*
 	if err == nil && len(more) == 1 && more[0] != nil && more[0].Error != nil {
 		err = more[0].Error
 	}
+	if err == nil && (len(more) != 1 || more[0] == nil) {
+		err = fmt.Errorf("expected one result set, got %d", len(more))
+	}
 	if err != nil {
 		logger.WarnWithFields(ctx, logger.Fields{
 			"tenant_id":  g.OwnerTenantID,
@@ -267,9 +270,6 @@ func refillSearch(ctx context.Context, g *storeGroup, p types.RetrieveParams) (*
 			"retriever":  p.RetrieverType,
 			"top_k":      p.TopK,
 		}, fmt.Sprintf("image row refill incomplete, keeping the smaller pool: %v", err))
-		return nil, false
-	}
-	if len(more) != 1 || more[0] == nil {
 		return nil, false
 	}
 	return more[0], true
