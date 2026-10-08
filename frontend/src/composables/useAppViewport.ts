@@ -2,6 +2,8 @@ import { nextTick, onMounted, onUnmounted, watch } from 'vue'
 import { useFont } from './useFont'
 import { getRootZoom } from '@/utils/zoom'
 
+let viewportUsers = 0
+
 /** Keep the composer above the software keyboard without overriding pinch zoom. */
 export function useAppViewport() {
   const { currentSize } = useFont()
@@ -12,6 +14,7 @@ export function useAppViewport() {
   }
   watch(currentSize, () => nextTick(update))
   onMounted(() => {
+    viewportUsers++
     update()
     window.visualViewport?.addEventListener('resize', update)
     window.addEventListener('resize', update)
@@ -19,6 +22,6 @@ export function useAppViewport() {
   onUnmounted(() => {
     window.visualViewport?.removeEventListener('resize', update)
     window.removeEventListener('resize', update)
-    document.documentElement.style.removeProperty('--app-viewport-height')
+    if (--viewportUsers === 0) document.documentElement.style.removeProperty('--app-viewport-height')
   })
 }
