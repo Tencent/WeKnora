@@ -165,7 +165,7 @@ export default {
     "contentTruncated": "僅顯示部分網頁內容。",
     "controlScope": "僅控制本對話的瀏覽器操作",
     "pauseHint": "中斷當前瀏覽器操作並保留頁面，可繼續操作；不會停止整段對話。",
-    "stopHint": "關閉本任務新建的分頁，歸還借用的分頁；不會關閉瀏覽器或復原配對。",
+    "stopHint": "關閉本任務新建的分頁，歸還借用的分頁；不會關閉瀏覽器或撤銷配對。",
     "openPage": "打開網頁",
     "switchPage": "切換網頁",
     "readPage": "查看網頁",
@@ -218,8 +218,8 @@ export default {
     "preview": "本機瀏覽器任務預覽",
     "waiting": "等待任務頁面",
     "startHint": "發起瀏覽器請求後，會建立獨立的任務視窗。",
-    "revoke": "復原裝置授權",
-    "revokeConfirm": "復原後需要重新配對，才能繼續使用本機瀏覽器。",
+    "revoke": "撤銷裝置授權",
+    "revokeConfirm": "撤銷後需要重新配對，才能繼續使用本機瀏覽器。",
     "failed": "操作失敗，請重試",
     "productDescription": "開源的 Chrome / Edge 擴展，讓智慧代理在你的瀏覽器裡打開網頁、讀取內容並完成操作。",
     "offline": "離線",
@@ -343,7 +343,7 @@ export default {
       alreadyMember: '該使用者已是當前空間的成員。',
       notPending: '邀請已不在待處理狀態。',
       forbidden: '只有被邀請人本人可以接受或拒絕該邀請。',
-      notFound: '邀請不存在或已被復原。',
+      notFound: '邀請不存在或已被撤銷。',
       generic: '操作失敗，請稍後重試。'
     },
     myInbox: {
@@ -364,7 +364,7 @@ export default {
       shareLinkActive: '生效中',
       accepted: '已接受',
       declined: '已拒絕',
-      revoked: '已復原',
+      revoked: '已撤銷',
       expired: '已過期'
     },
     columns: {
@@ -376,10 +376,10 @@ export default {
       operations: '操作'
     },
     revoke: {
-      button: '復原',
-      confirmBody: '復原後，{email} 將無法再接受此邀請；如需再邀請請重新發出。',
-      confirm: '復原',
-      success: '邀請已復原。'
+      button: '撤銷',
+      confirmBody: '撤銷後，{email} 將無法再接受此邀請；如需再邀請請重新發出。',
+      confirm: '撤銷',
+      success: '邀請已撤銷。'
     },
     shareLink: {
       button: '生成共享連結',
@@ -387,11 +387,11 @@ export default {
       cellAccepted: '已加入 {count} 人',
       cellEmpty: '尚無成員加入',
       dialogTitle: '生成共享邀請連結',
-      description: '生成一條多人可用的註冊連結，發到群裡就行；誰打開都能用自己的電子信箱註冊並加入當前空間。連結 {days} 天後過期，或隨時可在清單中復原。',
+      description: '生成一條多人可用的註冊連結，發到群裡就行；誰打開都能用自己的電子信箱註冊並加入當前空間。連結 {days} 天後過期，或隨時可在清單中撤銷。',
       generate: '生成連結',
       resultTitle: '邀請連結已生成',
-      resultBody: '複製下方連結，透過任意私密通路發給被邀請人。連結也會儲存在下方清單中，隨時可以重新複製或復原。',
-      revokeConfirm: '復原後，所有還未註冊的人都無法再使用此連結；如需重發請生成新連結。'
+      resultBody: '複製下方連結，透過任意私密通路發給被邀請人。連結也會儲存在下方清單中，隨時可以重新複製或撤銷。',
+      revokeConfirm: '撤銷後，所有還未註冊的人都無法再使用此連結；如需重發請生成新連結。'
     }
   },
   tenantMember: {
@@ -433,7 +433,7 @@ export default {
         'rbac.invitation_sent': '發出邀請',
         'rbac.invitation_accepted': '接受邀請',
         'rbac.invitation_declined': '拒絕邀請',
-        'rbac.invitation_revoked': '復原邀請',
+        'rbac.invitation_revoked': '撤銷邀請',
         'rbac.invitation_expired': '邀請過期'
       },
       columns: {
@@ -2425,7 +2425,7 @@ export default {
     oauthUnauthorized: '未授權',
     oauthAuthorize: '去授權',
     oauthReauthorize: '重新授權',
-    oauthRevoke: '復原授權',
+    oauthRevoke: '撤銷授權',
     oauthAuthorizeHint: '點擊「去授權」會先自動儲存當前設定，再發起授權（每個使用者獨立授權）。',
     apiKeyHeader: '請求頭名稱',
     apiKeyHeaderDesc: '留空預設 X-API-Key。Bearer 方式請填 Authorization，並在下方金鑰值中寫 「Bearer <token>」；需要裸 token 時填 Authorization 並直接填入 token。',
@@ -2467,8 +2467,8 @@ export default {
       oauthRequired: '該服務需要 OAuth 授權，已自動切換為 OAuth 2.0，請儲存後點擊「去授權」。',
       authorized: '授權成功',
       authorizeFailed: '發起授權失敗',
-      revoked: '已復原授權',
-      revokeFailed: '復原失敗'
+      revoked: '已撤銷授權',
+      revokeFailed: '撤銷失敗'
     },
     rules: {
       nameRequired: '請輸入服務名稱',
@@ -3350,16 +3350,16 @@ export default {
       },
       admins: {
         label: '系統管理員',
-        description: '擁有平台級權限的使用者。在右側輸入電子信箱並Enter即可提升使用者為管理員；點擊 × 即為復原其權限。當前你（自己）已是管理員，不在清單中顯示，也無法被自己復原。',
+        description: '擁有平台級權限的使用者。在右側輸入電子信箱並Enter即可提升使用者為管理員；點擊 × 即為撤銷其權限。當前你（自己）已是管理員，不在清單中顯示，也無法被自己撤銷。',
         placeholder: '輸入使用者電子信箱並Enter',
         loadFailed: '載入系統管理員失敗',
         saveSuccess: '已更新系統管理員',
         saveFailed: '更新系統管理員失敗',
         confirm: {
           revoke: {
-            header: '復原系統管理員',
-            body: '確認復原 {email} 的系統管理員權限？復原後該使用者將無法再存取任何系統級功能。',
-            confirmBtn: '復原'
+            header: '撤銷系統管理員',
+            body: '確認撤銷 {email} 的系統管理員權限？撤銷後該使用者將無法再存取任何系統級功能。',
+            confirmBtn: '撤銷'
           },
           promote: {
             header: '提升為系統管理員',
@@ -5402,7 +5402,7 @@ export default {
     bannerHint: '填寫下方資訊完成註冊，註冊成功後將自動加入該團隊。',
     bannerHintLogin: '登入後將自動加入該團隊。',
     loading: '正在驗證邀請連結…',
-    invalidTitle: '邀請連結無效或已復原',
+    invalidTitle: '邀請連結無效或已撤銷',
     invalidBody: '請聯絡邀請人重新傳送連結，或前往登入使用現有帳號。',
     backToLogin: '返回登入',
     title: '完成註冊',
