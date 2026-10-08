@@ -339,3 +339,19 @@ func NewPageResult(total int64, page *Pagination, data interface{}) *PageResult 
 		Data:     data,
 	}
 }
+
+// SearchResult metadata for results that rest on an image matched by its own
+// vector (an image_vector hit).
+const (
+	// MetadataKeptBy names why a result was kept other than by its rerank
+	// score. A kept result rides outside the ranked top-k: truncating to
+	// top-k must not drop it.
+	MetadataKeptBy = "kept_by"
+	// KeptByImageVector: a pictorial image hit a text reranker rejected and
+	// its vector still vouched for.
+	KeptByImageVector = "image_vector"
+	// MetadataImageVectorMatch marks a result that stands in for an
+	// image_vector hit de-duplication dropped as a copy of it, so the image
+	// still reaches a model that can see it.
+	MetadataImageVectorMatch = "image_vector_match"
+)

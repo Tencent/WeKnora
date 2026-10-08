@@ -160,9 +160,9 @@ func TestRerankKeepsPictorialImagesATextRerankerRejects(t *testing.T) {
 	assert.Equal(t, "t1,photo-strong,photo-mid", ids(res.Results),
 		"ranked results first, then at most two pictorial images, strongest vector first")
 	for _, r := range res.Results[1:] {
-		assert.Equal(t, KeptByImageVector, r.Metadata[KeptByMetadataKey])
+		assert.Equal(t, types.KeptByImageVector, r.Metadata[types.MetadataKeptBy])
 	}
-	assert.Empty(t, res.Results[0].Metadata[KeptByMetadataKey])
+	assert.Empty(t, res.Results[0].Metadata[types.MetadataKeptBy])
 	assert.Equal(t, 2, res.Diagnostics.ImagesKept)
 	assert.Equal(t, 3, len(res.Indices))
 	assert.Equal(t, 2, res.Indices[1], "indices still point into the input")

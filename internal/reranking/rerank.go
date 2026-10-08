@@ -77,8 +77,9 @@ type Options struct {
 	// ImageKeepScore, when positive, keeps a pictorial image_vector hit a
 	// text reranker rejected if its VectorScore reaches this, at most
 	// maxKeptImages of them, after the ranked results and marked with
-	// KeptByMetadataKey. A text reranker cannot judge what a caption leaves
+	// types.MetadataKeptBy. A text reranker cannot judge what a caption leaves
 	// out; the vector can. Callers pass the text vector threshold or more.
+	// Kept results ride outside TopK; see types.MetadataKeptBy.
 	ImageKeepScore float64
 }
 
@@ -215,7 +216,7 @@ func Rerank(
 	}
 	for _, k := range keptImages(ctx, res.Candidates, valid, passing, scoredAsImage, opts) {
 		kept := scoredCopy(res.Candidates[k.Index], k.RelevanceScore, opts.FAQScoreBoost)
-		kept.Metadata[KeptByMetadataKey] = KeptByImageVector
+		kept.Metadata[types.MetadataKeptBy] = types.KeptByImageVector
 		res.Results = append(res.Results, kept)
 		res.Indices = append(res.Indices, candidateIdx[k.Index])
 		res.Diagnostics.ImagesKept++

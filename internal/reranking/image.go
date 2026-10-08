@@ -44,14 +44,6 @@ func ImageKeepScoreFor(vectorThreshold float64) float64 {
 	return max(vectorThreshold, MinImageKeepScore)
 }
 
-// KeptByMetadataKey marks a result kept for a reason other than its rerank
-// score; KeptByImageVector is the reason for a pictorial image hit a text
-// reranker could not judge.
-const (
-	KeptByMetadataKey = "kept_by"
-	KeptByImageVector = "image_vector"
-)
-
 func isImageVectorHit(r *types.SearchResult) bool {
 	return r != nil && r.ChunkType == string(types.ChunkTypeImageVector)
 }
