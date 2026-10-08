@@ -102,4 +102,3 @@ test('file selection, confirmation and upload panel survive navigation', async (
   await page.evaluate(() => (document.querySelector('#app') as any).__vue_app__.config.globalProperties.$router.push('/platform/creatChat'))
   await expect(page.locator('.upload-tasks-panel')).toBeVisible()
 })
-
