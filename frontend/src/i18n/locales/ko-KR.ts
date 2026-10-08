@@ -5373,7 +5373,7 @@ export default {
     usernameRequired: '사용자명을 입력해주세요',
     usernameMinLength: '사용자명은 최소 2자여야 합니다',
     usernameMaxLength: '사용자명은 20자를 초과할 수 없습니다',
-    usernameInvalid: '사용자명은 문자, 숫자, 밑줄, 한글만 포함할 수 있습니다',
+    usernameInvalid: '사용자명은 영문자, 숫자, 밑줄(_), 한자만 포함할 수 있습니다',
     confirmPasswordRequired: '비밀번호를 확인해주세요',
     passwordMismatch: '두 비밀번호가 일치하지 않습니다',
     loginError: '로그인 오류, 이메일 또는 비밀번호를 확인해주세요',
