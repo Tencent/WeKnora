@@ -37,6 +37,18 @@ func (s *stubGraphChunkRepo) ListChunksByIDOnly(_ context.Context, ids []string)
 	return out, nil
 }
 
+func (s *stubGraphChunkRepo) ListChunkEvidenceByIDOnly(_ context.Context, ids []string) ([]*types.Chunk, error) {
+	var out []*types.Chunk
+	for _, id := range ids {
+		if c := s.chunks[id]; c != nil {
+			out = append(out, &types.Chunk{
+				ID: c.ID, KnowledgeBaseID: c.KnowledgeBaseID, KnowledgeID: c.KnowledgeID, IsEnabled: c.IsEnabled,
+			})
+		}
+	}
+	return out, nil
+}
+
 // The tool used to run plain text search only. It now looks the entities up
 // in the graph, returns their relations, and puts the chunks they came from
 // first — only chunks of the queried, authorized knowledge base.

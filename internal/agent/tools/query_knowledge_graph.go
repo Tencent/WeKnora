@@ -65,6 +65,9 @@ const (
 	graphQueryMaxChunks = 10
 	// graphQueryChunkBatchSize bounds each evidence lookup, independently of the output cap.
 	graphQueryChunkBatchSize = 128
+	// graphQueryMaxEvidenceCandidates bounds validation work per knowledge base,
+	// including candidates that are missing, disabled or outside the query scope.
+	graphQueryMaxEvidenceCandidates = 512
 	// graphQueryMaxRelations bounds the relations returned to the model.
 	graphQueryMaxRelations = 30
 )
@@ -74,17 +77,19 @@ const (
 // list read without a marker is the entity's whole neighbourhood to the model,
 // and it then answers "X is not related to Y" from a list that never held Y.
 type graphTruncation struct {
-	relationsShown int
-	relationsTotal int
-	chunksShown    int
-	chunksTotal    int
-	termsMatched   int
-	termsTotal     int
+	relationsShown           int
+	relationsTotal           int
+	chunksShown              int
+	chunksTotal              int
+	termsMatched             int
+	termsTotal               int
+	validationLimited        bool
+	candidatesValidatedTotal int
 }
 
 // truncated reports whether any cap fired.
 func (tr graphTruncation) truncated() bool {
-	return tr.relationsTotal > tr.relationsShown || tr.chunksTotal > tr.chunksShown ||
+	return tr.validationLimited || tr.relationsTotal > tr.relationsShown || tr.chunksTotal > tr.chunksShown ||
 		tr.termsTotal > tr.termsMatched
 }
 
@@ -96,15 +101,25 @@ func (tr graphTruncation) statement() string {
 	}
 	var b strings.Builder
 	b.WriteString("=== ⚠️ Truncated ===\n")
+	qualifier := ""
+	if tr.validationLimited {
+		qualifier = "at least "
+		fmt.Fprintf(&b, "  - Graph evidence validation stopped with unchecked candidates remaining "+
+			"(cap %d per knowledge base). %d candidates were validated in total. "+
+			"Some candidate evidence was not checked. "+
+			"Found at least %d valid in-scope evidence chunks and at least %d supported relations. "+
+			"Narrow the query before concluding that a relation does not exist.\n",
+			graphQueryMaxEvidenceCandidates, tr.candidatesValidatedTotal, tr.chunksTotal, tr.relationsTotal)
+	}
 	if tr.relationsTotal > tr.relationsShown {
-		fmt.Fprintf(&b, "  - Relations: %d of %d shown (cap %d per query). These entities have more relations "+
+		fmt.Fprintf(&b, "  - Relations: %d of %s%d shown (cap %d per query). These entities have more relations "+
 			"than the ones listed below; query a single entity by name to see its neighbourhood.\n",
-			tr.relationsShown, tr.relationsTotal, graphQueryMaxRelations)
+			tr.relationsShown, qualifier, tr.relationsTotal, graphQueryMaxRelations)
 	}
 	if tr.chunksTotal > tr.chunksShown {
-		fmt.Fprintf(&b, "  - Graph evidence chunks: %d of %d shown (cap %d per knowledge base). Some of these "+
+		fmt.Fprintf(&b, "  - Graph evidence chunks: %d of %s%d shown (cap %d per knowledge base). Some of these "+
 			"entities' source chunks are not part of this result.\n",
-			tr.chunksShown, tr.chunksTotal, graphQueryMaxChunks)
+			tr.chunksShown, qualifier, tr.chunksTotal, graphQueryMaxChunks)
 	}
 	if tr.termsTotal > tr.termsMatched {
 		fmt.Fprintf(&b, "  - Entity terms: %d of %d query words were matched against entity names (cap %d). A word "+
@@ -119,13 +134,20 @@ func (tr graphTruncation) statement() string {
 // fired: an absent key means nothing was dropped. The model reads a view
 // rebuilt from these keys, so the marker has to travel here too.
 func (tr graphTruncation) addToData(data map[string]interface{}) {
-	if tr.relationsTotal > tr.relationsShown {
+	if tr.relationsTotal > tr.relationsShown || tr.validationLimited {
 		data["relations_total"] = tr.relationsTotal
 		data["relations_omitted"] = tr.relationsTotal - tr.relationsShown
 	}
-	if tr.chunksTotal > tr.chunksShown {
+	if tr.chunksTotal > tr.chunksShown || tr.validationLimited {
 		data["graph_chunks_total"] = tr.chunksTotal
 		data["graph_chunks_omitted"] = tr.chunksTotal - tr.chunksShown
+	}
+	if tr.validationLimited {
+		data["graph_validation_truncated"] = true
+		data["graph_candidates_validated_total"] = tr.candidatesValidatedTotal
+		data["graph_validation_limit_per_kb"] = graphQueryMaxEvidenceCandidates
+		data["graph_chunks_total_is_lower_bound"] = true
+		data["relations_total_is_lower_bound"] = true
 	}
 	if tr.termsTotal > tr.termsMatched {
 		data["query_terms_total"] = tr.termsTotal
@@ -243,15 +265,17 @@ func (t *QueryKnowledgeGraphTool) Execute(ctx context.Context, args json.RawMess
 
 	// Concurrently query all knowledge bases
 	type graphQueryResult struct {
-		kbID         string
-		kb           *types.KnowledgeBase
-		graphResults []*types.SearchResult // chunks the matched entities come from
-		textResults  []*types.SearchResult
-		relations    []*types.GraphRelation
-		chunksShown  int      // valid evidence chunks selected for display
-		chunksTotal  int      // valid in-scope evidence before the display cap
-		warnings     []string // failures of one source while the other returned results
-		err          error
+		kbID                string
+		kb                  *types.KnowledgeBase
+		graphResults        []*types.SearchResult // chunks the matched entities come from
+		textResults         []*types.SearchResult
+		relations           []*types.GraphRelation
+		chunksShown         int // valid evidence chunks selected for display
+		chunksTotal         int // valid in-scope evidence before the display cap
+		validationLimited   bool
+		candidatesValidated int
+		warnings            []string // failures of one source while the other returned results
+		err                 error
 	}
 
 	var wg sync.WaitGroup
@@ -297,6 +321,7 @@ func (t *QueryKnowledgeGraphTool) Execute(ctx context.Context, args json.RawMess
 			}
 			graphResults, graph := lookup.chunks, lookup.graph
 			res.chunksShown, res.chunksTotal = lookup.chunksShown, lookup.chunksTotal
+			res.validationLimited, res.candidatesValidated = lookup.validationLimited, lookup.candidatesValidated
 			var relations []*types.GraphRelation
 			if graph != nil {
 				relations = graph.Relation
@@ -338,6 +363,7 @@ func (t *QueryKnowledgeGraphTool) Execute(ctx context.Context, args json.RawMess
 	seenRelations := make(map[string]bool)
 	relationsTotal := 0
 	chunksShown, chunksTotal := 0, 0
+	validationLimited, candidatesValidatedTotal := false, 0
 
 	for _, kbID := range input.KnowledgeBaseIDs {
 		result := kbResults[kbID]
@@ -356,6 +382,8 @@ func (t *QueryKnowledgeGraphTool) Execute(ctx context.Context, args json.RawMess
 		kbCounts[kbID] = len(result.graphResults) + len(result.textResults)
 		chunksShown += result.chunksShown
 		chunksTotal += result.chunksTotal
+		validationLimited = validationLimited || result.validationLimited
+		candidatesValidatedTotal += result.candidatesValidated
 		for _, r := range result.graphResults {
 			if !seenChunks[r.ID] {
 				seenChunks[r.ID] = true
@@ -385,12 +413,14 @@ func (t *QueryKnowledgeGraphTool) Execute(ctx context.Context, args json.RawMess
 		}
 	}
 	truncation := graphTruncation{
-		relationsShown: len(relations),
-		relationsTotal: relationsTotal,
-		chunksShown:    chunksShown,
-		chunksTotal:    chunksTotal,
-		termsMatched:   len(terms),
-		termsTotal:     len(terms) + termsDropped,
+		relationsShown:           len(relations),
+		relationsTotal:           relationsTotal,
+		chunksShown:              chunksShown,
+		chunksTotal:              chunksTotal,
+		termsMatched:             len(terms),
+		termsTotal:               len(terms) + termsDropped,
+		validationLimited:        validationLimited,
+		candidatesValidatedTotal: candidatesValidatedTotal,
 	}
 
 	sort.SliceStable(textHits, func(i, j int) bool {
@@ -438,7 +468,10 @@ func (t *QueryKnowledgeGraphTool) Execute(ctx context.Context, args json.RawMess
 	output := "=== Knowledge Graph Query ===\n\n"
 	output += fmt.Sprintf("📊 Query: %s\n", query)
 	output += fmt.Sprintf("🎯 Target Knowledge Bases: %v\n", input.KnowledgeBaseIDs)
-	if truncation.relationsTotal > truncation.relationsShown {
+	if truncation.validationLimited {
+		output += fmt.Sprintf("✓ Found at least %d supported relations; showing %d relations and %d relevant chunks "+
+			"(deduplicated)\n\n", truncation.relationsTotal, len(relations), len(allResults))
+	} else if truncation.relationsTotal > truncation.relationsShown {
 		output += fmt.Sprintf("✓ Found %d of %d relations and %d relevant chunks (deduplicated)\n\n",
 			len(relations), truncation.relationsTotal, len(allResults))
 	} else {
@@ -564,13 +597,15 @@ func (t *QueryKnowledgeGraphTool) Execute(ctx context.Context, args json.RawMess
 }
 
 // graphLookup contains a validated graph and the evidence selected for display.
-// The counts describe valid in-scope evidence before and after the display cap;
-// rejected evidence is not reported as truncation.
+// The counts describe valid in-scope evidence before and after the display cap.
+// They are lower bounds when the candidate validation limit stopped the scan.
 type graphLookup struct {
-	graph       *types.GraphData
-	chunks      []*types.SearchResult
-	chunksShown int
-	chunksTotal int
+	graph               *types.GraphData
+	chunks              []*types.SearchResult
+	chunksShown         int
+	chunksTotal         int
+	validationLimited   bool
+	candidatesValidated int
 }
 
 // queryGraph looks the query's entity terms up in kbID's graph and returns
@@ -590,14 +625,20 @@ func (t *QueryKnowledgeGraphTool) queryGraph(
 	if graph == nil {
 		return graphLookup{}, nil
 	}
-	var chunkIDs []string
+	chunkIDs := make([]string, 0, graphQueryMaxEvidenceCandidates)
 	seen := make(map[string]bool)
+	validationLimited := false
+candidateLoop:
 	for _, node := range graph.Node {
 		if node == nil {
 			continue
 		}
 		for _, id := range node.Chunks {
 			if id != "" && !seen[id] {
+				if len(chunkIDs) == graphQueryMaxEvidenceCandidates {
+					validationLimited = true
+					break candidateLoop
+				}
 				seen[id] = true
 				chunkIDs = append(chunkIDs, id)
 			}
@@ -609,11 +650,11 @@ func (t *QueryKnowledgeGraphTool) queryGraph(
 	if t.chunkRepo == nil {
 		return graphLookup{}, fmt.Errorf("chunk repository is unavailable for graph evidence validation")
 	}
-	// Validate every candidate before limiting displayed text. In particular, a
-	// target whose only evidence is the eleventh chunk can still support an edge.
-	// Retain only IDs for relation validation and at most ten full search results.
+	// Validate a bounded prefix before limiting displayed text. Evidence beyond
+	// the tenth candidate can support an edge, but unchecked evidence never can.
+	// These lookups load metadata only; content is fetched for display IDs below.
 	var evidence []*types.SearchResult
-	results := make([]*types.SearchResult, 0, graphQueryMaxChunks)
+	selected := make([]*types.SearchResult, 0, graphQueryMaxChunks)
 	for start := 0; start < len(chunkIDs); start += graphQueryChunkBatchSize {
 		end := min(start+graphQueryChunkBatchSize, len(chunkIDs))
 		batch, err := t.graphEvidenceBatch(ctx, kbID, chunkIDs[start:end])
@@ -623,15 +664,38 @@ func (t *QueryKnowledgeGraphTool) queryGraph(
 		}
 		for _, result := range batch {
 			evidence = append(evidence, &types.SearchResult{ID: result.ID})
-			if len(results) < graphQueryMaxChunks {
-				results = append(results, result)
+			if len(selected) < graphQueryMaxChunks {
+				selected = append(selected, result)
 			}
 		}
+	}
+	results, err := t.graphEvidenceResults(ctx, kbID, selected)
+	if err != nil {
+		return graphLookup{}, err
+	}
+	// A selected chunk can disappear or become disabled between metadata and
+	// content reads. Remove it from endpoint evidence as well as the display.
+	if len(results) < len(selected) {
+		missing := make(map[string]bool, len(selected))
+		for _, result := range selected {
+			missing[result.ID] = true
+		}
+		for _, result := range results {
+			delete(missing, result.ID)
+		}
+		kept := evidence[:0]
+		for _, result := range evidence {
+			if !missing[result.ID] {
+				kept = append(kept, result)
+			}
+		}
+		evidence = kept
 	}
 	validated := *graph
 	validated.Relation = relationsBackedBy(graph, evidence)
 	return graphLookup{
 		graph: &validated, chunks: results, chunksShown: len(results), chunksTotal: len(evidence),
+		validationLimited: validationLimited, candidatesValidated: len(chunkIDs),
 	}, nil
 }
 
@@ -642,7 +706,7 @@ func (t *QueryKnowledgeGraphTool) graphEvidenceBatch(
 ) ([]*types.SearchResult, error) {
 	// The graph namespace is the knowledge base, which the caller already
 	// authorized; a chunk ID is only trusted when its row belongs to it.
-	chunks, err := t.chunkRepo.ListChunksByIDOnly(ctx, chunkIDs)
+	chunks, err := t.chunkRepo.ListChunkEvidenceByIDOnly(ctx, chunkIDs)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load graph evidence chunks: %w", err)
 	}
@@ -671,18 +735,51 @@ func (t *QueryKnowledgeGraphTool) graphEvidenceBatch(
 		}
 		results = append(results, &types.SearchResult{
 			ID:              c.ID,
-			Content:         c.Content,
 			KnowledgeID:     c.KnowledgeID,
 			KnowledgeBaseID: c.KnowledgeBaseID,
 			KnowledgeTitle:  titles[c.KnowledgeID],
-			ChunkIndex:      c.ChunkIndex,
-			ChunkType:       string(c.ChunkType),
-			ParentChunkID:   c.ParentChunkID,
 			MatchType:       types.MatchTypeGraph,
 		})
 	}
 	if t.scopeEnforced {
 		return filterSearchResultsInSearchTargets(ctx, t.searchTargets, kbID, results, t.scopeKnowledgeService)
+	}
+	return results, nil
+}
+
+// graphEvidenceResults hydrates only the already validated display candidates.
+func (t *QueryKnowledgeGraphTool) graphEvidenceResults(
+	ctx context.Context, kbID string, selected []*types.SearchResult,
+) ([]*types.SearchResult, error) {
+	if len(selected) == 0 {
+		return nil, nil
+	}
+	ids := make([]string, 0, len(selected))
+	for _, result := range selected {
+		ids = append(ids, result.ID)
+	}
+	chunks, err := t.chunkRepo.ListChunksByIDOnly(ctx, ids)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load graph evidence content: %w", err)
+	}
+	byID := make(map[string]*types.Chunk, len(chunks))
+	for _, chunk := range chunks {
+		if chunk != nil && chunk.KnowledgeBaseID == kbID && chunk.IsEnabled {
+			byID[chunk.ID] = chunk
+		}
+	}
+	results := make([]*types.SearchResult, 0, len(selected))
+	for _, metadata := range selected {
+		chunk := byID[metadata.ID]
+		if chunk == nil || chunk.KnowledgeID != metadata.KnowledgeID {
+			continue
+		}
+		result := *metadata
+		result.Content = chunk.Content
+		result.ChunkIndex = chunk.ChunkIndex
+		result.ChunkType = string(chunk.ChunkType)
+		result.ParentChunkID = chunk.ParentChunkID
+		results = append(results, &result)
 	}
 	return results, nil
 }

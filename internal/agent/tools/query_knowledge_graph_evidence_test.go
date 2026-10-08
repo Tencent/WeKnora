@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/types"
@@ -14,29 +15,54 @@ import (
 
 type graphEvidenceChunkRepo struct {
 	stubGraphChunkRepo
-	batches [][]string
-	failAt  int
+	mu             sync.Mutex
+	batches        [][]string
+	contentBatches [][]string
+	failAt         int
+	contentErr     error
+	beforeContent  func()
 }
 
 func (s *graphEvidenceChunkRepo) ListChunksByIDOnly(ctx context.Context, ids []string) ([]*types.Chunk, error) {
-	s.batches = append(s.batches, append([]string(nil), ids...))
-	if len(s.batches) == s.failAt {
-		return nil, assert.AnError
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.contentBatches = append(s.contentBatches, append([]string(nil), ids...))
+	if s.contentErr != nil {
+		return nil, s.contentErr
+	}
+	if s.beforeContent != nil {
+		s.beforeContent()
 	}
 	return s.stubGraphChunkRepo.ListChunksByIDOnly(ctx, ids)
 }
 
+func (s *graphEvidenceChunkRepo) ListChunkEvidenceByIDOnly(ctx context.Context, ids []string) ([]*types.Chunk, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.batches = append(s.batches, append([]string(nil), ids...))
+	if len(s.batches) == s.failAt {
+		return nil, assert.AnError
+	}
+	return s.stubGraphChunkRepo.ListChunkEvidenceByIDOnly(ctx, ids)
+}
+
 type graphEvidenceKnowledgeService struct {
 	interfaces.KnowledgeService
-	documents map[string]*types.Knowledge
-	tags      map[string][]*types.KnowledgeTag
-	err       error
-	tagErr    error
+	mu              sync.Mutex
+	documents       map[string]*types.Knowledge
+	tags            map[string][]*types.KnowledgeTag
+	err             error
+	tagErr          error
+	documentBatches [][]string
+	tagBatches      [][]string
 }
 
 func (s *graphEvidenceKnowledgeService) GetKnowledgeBatchWithSharedAccess(
 	_ context.Context, _ uint64, ids []string,
 ) ([]*types.Knowledge, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.documentBatches = append(s.documentBatches, append([]string(nil), ids...))
 	if s.err != nil {
 		return nil, s.err
 	}
@@ -50,8 +76,11 @@ func (s *graphEvidenceKnowledgeService) GetKnowledgeBatchWithSharedAccess(
 }
 
 func (s *graphEvidenceKnowledgeService) GetKnowledgeTags(
-	_ context.Context, _ []string,
+	_ context.Context, ids []string,
 ) (map[string][]*types.KnowledgeTag, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.tagBatches = append(s.tagBatches, append([]string(nil), ids...))
 	if s.tagErr != nil {
 		return nil, s.tagErr
 	}
@@ -289,11 +318,133 @@ func TestQueryKnowledgeGraph_BatchesAndFiltersEvidenceBeforeBudget(t *testing.T)
 		requested = append(requested, batch...)
 	}
 	assert.Equal(t, ids, requested)
+	require.Len(t, chunks.contentBatches, 1)
+	assert.Equal(t, ids[candidates-12:candidates-2], chunks.contentBatches[0])
+}
+
+func TestQueryKnowledgeGraph_BoundsCandidateValidation(t *testing.T) {
+	for _, scope := range graphEvidenceScopes() {
+		for _, tt := range []struct {
+			name       string
+			candidates int
+			duplicates bool
+			invalid    bool
+			unresolved bool
+		}{
+			{name: "exact limit", candidates: graphQueryMaxEvidenceCandidates},
+			{name: "only duplicates after limit", candidates: graphQueryMaxEvidenceCandidates, duplicates: true},
+			{name: "one over limit", candidates: graphQueryMaxEvidenceCandidates + 1},
+			{name: "many over limit", candidates: graphQueryMaxEvidenceCandidates*3 + 1},
+			{name: "all invalid", candidates: graphQueryMaxEvidenceCandidates + 1, invalid: true},
+			{name: "unresolved endpoint", candidates: graphQueryMaxEvidenceCandidates + 1, unresolved: true},
+		} {
+			t.Run(scope.name+"/"+tt.name, func(t *testing.T) {
+				chunks := &graphEvidenceChunkRepo{
+					stubGraphChunkRepo: stubGraphChunkRepo{chunks: make(map[string]*types.Chunk)},
+				}
+				var ids []string
+				for i := 0; i < tt.candidates; i++ {
+					id := fmt.Sprintf("c-%04d", i)
+					ids = append(ids, id)
+					chunks.chunks[id] = &types.Chunk{
+						ID: id, KnowledgeID: "doc", KnowledgeBaseID: "kb-1",
+						IsEnabled: !tt.invalid, Content: id,
+					}
+				}
+				target := ids[10] // beyond display cap, within validation budget
+				if tt.unresolved {
+					target = ids[len(ids)-1]
+				}
+				source := append([]string{""}, ids...)
+				if tt.duplicates {
+					source = append(source, ids...)
+				}
+				documents := liveGraphEvidenceDocuments()
+				graph := graphEvidenceGraph(source, []string{target})
+				result := executeGraphEvidenceTool(t, graphEvidenceTool(graph, chunks, documents, scope.targets))
+
+				scanned := min(tt.candidates, graphQueryMaxEvidenceCandidates)
+				require.Len(t, chunks.batches, (scanned+graphQueryChunkBatchSize-1)/graphQueryChunkBatchSize)
+				var requested []string
+				for _, batch := range chunks.batches {
+					require.LessOrEqual(t, len(batch), graphQueryChunkBatchSize)
+					requested = append(requested, batch...)
+				}
+				require.Equal(t, ids[:scanned], requested, "never query IDs outside the validation budget")
+				if tt.invalid {
+					require.Empty(t, chunks.contentBatches)
+					require.Empty(t, documents.documentBatches)
+					require.Empty(t, documents.tagBatches)
+					require.Empty(t, result.Data["results"])
+				} else {
+					require.Len(t, chunks.contentBatches, 1)
+					require.Equal(t, ids[:graphQueryMaxChunks], chunks.contentBatches[0])
+					require.Len(t, documents.documentBatches, len(chunks.batches))
+					if scope.name == "tag" {
+						require.Len(t, documents.tagBatches, len(chunks.batches))
+					}
+				}
+				if tt.invalid || tt.unresolved {
+					require.Empty(t, result.Data["relations"], "unchecked evidence must not validate an endpoint")
+				} else {
+					require.Len(t, result.Data["relations"], 1)
+				}
+				limited := tt.candidates > graphQueryMaxEvidenceCandidates
+				require.Equal(t, limited, result.Data["graph_validation_truncated"] == true)
+				if limited {
+					require.Equal(t, scanned, result.Data["graph_candidates_validated_total"])
+					require.Equal(t, graphQueryMaxEvidenceCandidates, result.Data["graph_validation_limit_per_kb"])
+					require.Equal(t, true, result.Data["graph_chunks_total_is_lower_bound"])
+					require.Equal(t, true, result.Data["relations_total_is_lower_bound"])
+					require.Contains(t, result.Output, "Some candidate evidence was not checked")
+					valid := scanned
+					if tt.invalid {
+						valid = 0
+					}
+					require.Equal(t, valid, result.Data["graph_chunks_total"])
+					require.Equal(t, max(0, valid-graphQueryMaxChunks), result.Data["graph_chunks_omitted"])
+					require.Contains(t, result.Output, fmt.Sprintf("at least %d valid in-scope evidence chunks", valid))
+				} else {
+					require.NotContains(t, result.Output, "validation stopped")
+					require.NotContains(t, result.Data, "graph_chunks_total_is_lower_bound")
+				}
+			})
+		}
+	}
+}
+
+func TestQueryKnowledgeGraph_RemovesEvidenceChangedBeforeContentRead(t *testing.T) {
+	for _, change := range []string{"disabled", "deleted", "foreign KB", "different document"} {
+		t.Run(change, func(t *testing.T) {
+			chunk := &types.Chunk{ID: "c1", KnowledgeID: "doc", KnowledgeBaseID: "kb-1", IsEnabled: true}
+			chunks := &graphEvidenceChunkRepo{
+				stubGraphChunkRepo: stubGraphChunkRepo{chunks: map[string]*types.Chunk{"c1": chunk}},
+			}
+			chunks.beforeContent = func() {
+				switch change {
+				case "disabled":
+					chunk.IsEnabled = false
+				case "deleted":
+					delete(chunks.chunks, chunk.ID)
+				case "foreign KB":
+					chunk.KnowledgeBaseID = "kb-other"
+				case "different document":
+					chunk.KnowledgeID = "other"
+				}
+			}
+			result := executeGraphEvidenceTool(t, graphEvidenceTool(
+				graphEvidenceGraph([]string{"c1"}, []string{"c1"}), chunks, liveGraphEvidenceDocuments(), nil,
+			))
+			require.Empty(t, result.Data["results"])
+			require.Empty(t, result.Data["relations"])
+		})
+	}
 }
 
 func TestQueryKnowledgeGraph_ValidationFailuresExcludeGraphAndPreserveText(t *testing.T) {
 	for _, failure := range []string{
 		"chunk lookup", "document lookup", "missing chunk repository", "missing document service", "later batch",
+		"content lookup",
 	} {
 		t.Run(failure, func(t *testing.T) {
 			chunks := &graphEvidenceChunkRepo{stubGraphChunkRepo: stubGraphChunkRepo{chunks: map[string]*types.Chunk{
@@ -308,6 +459,8 @@ func TestQueryKnowledgeGraph_ValidationFailuresExcludeGraphAndPreserveText(t *te
 				chunks.failAt = 1
 			case "document lookup":
 				documents.err = assert.AnError
+			case "content lookup":
+				chunks.contentErr = assert.AnError
 			case "missing chunk repository":
 				chunkRepo = nil
 			case "missing document service":

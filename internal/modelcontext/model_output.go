@@ -337,29 +337,48 @@ func annotateGraphResult(output string, data map[string]interface{}) string {
 // graphTruncationNote states inside the model's view the caps the graph query
 // tool hit. shownRelations is how many relations that view carries; the tool
 // reports the totals under relations_total / graph_chunks_total /
-// query_terms_total. It returns "" when nothing was dropped, so a complete
-// result stays clean.
+// query_terms_total. A validation-limit marker also travels independently of
+// those counts, including when no valid evidence was found.
 func graphTruncationNote(data map[string]interface{}, shownRelations int) string {
 	totalRelations := intValue(data, "relations_total")
 	totalChunks := intValue(data, "graph_chunks_total")
 	fetchedChunks := totalChunks - intValue(data, "graph_chunks_omitted")
 	totalTerms := intValue(data, "query_terms_total")
-	if totalRelations <= shownRelations && totalChunks <= fetchedChunks && totalTerms <= 0 {
+	validationLimited := boolValue(data, "graph_validation_truncated")
+	if !validationLimited && totalRelations <= shownRelations && totalChunks <= fetchedChunks && totalTerms <= 0 {
 		return ""
 	}
 	var b strings.Builder
 	b.WriteString("  <graph_truncated")
-	if totalRelations > shownRelations {
-		fmt.Fprintf(&b, " relations_shown=\"%d\" relations_total=\"%d\"", shownRelations, totalRelations)
+	if validationLimited {
+		fmt.Fprintf(&b, " validation_stopped=\"true\" candidates_validated_total=\"%d\" validation_limit_per_kb=\"%d\"",
+			intValue(data, "graph_candidates_validated_total"), intValue(data, "graph_validation_limit_per_kb"))
 	}
-	if totalChunks > fetchedChunks {
-		fmt.Fprintf(&b, " chunks_fetched=\"%d\" chunks_total=\"%d\"", fetchedChunks, totalChunks)
+	if totalRelations > shownRelations || validationLimited {
+		totalAttribute := "relations_total"
+		if boolValue(data, "relations_total_is_lower_bound") {
+			totalAttribute = "relations_total_at_least"
+		}
+		fmt.Fprintf(&b, " relations_shown=\"%d\" %s=\"%d\"", shownRelations, totalAttribute, totalRelations)
+	}
+	if totalChunks > fetchedChunks || validationLimited {
+		totalAttribute := "chunks_total"
+		if boolValue(data, "graph_chunks_total_is_lower_bound") {
+			totalAttribute = "chunks_total_at_least"
+		}
+		fmt.Fprintf(&b, " chunks_fetched=\"%d\" %s=\"%d\"", fetchedChunks, totalAttribute, totalChunks)
 	}
 	if totalTerms > 0 {
 		fmt.Fprintf(&b, " terms_shown=\"%d\" terms_total=\"%d\"",
 			totalTerms-intValue(data, "query_terms_omitted"), totalTerms)
 	}
 	b.WriteString(">This graph query stopped at a result cap, so it is not the complete picture: ")
+	if validationLimited {
+		fmt.Fprintf(&b, "evidence validation stopped at %d candidates per knowledge base; "+
+			"some candidate evidence was not checked. Found at least %d valid in-scope evidence chunks "+
+			"and at least %d supported relations. ",
+			intValue(data, "graph_validation_limit_per_kb"), totalChunks, totalRelations)
+	}
 	if totalRelations > shownRelations {
 		b.WriteString("the relations listed are a subset of these entities' relations, ")
 	}
