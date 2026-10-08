@@ -13,7 +13,8 @@
     "test": "tsx --test",
     "check-i18n": "tsx --test src/i18n/localeKeyAudit.test.ts",
     "scan-i18n-gaps": "tsx src/i18n/localeGapScan.ts",
-    "regenerate-i18n-locales": "tsx src/i18n/regeneratePrunedLocales.ts"
+    "regenerate-i18n-locales": "tsx src/i18n/regeneratePrunedLocales.ts",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "@microsoft/fetch-event-source": "^2.0.1",
@@ -60,7 +61,8 @@
     "tsx": "^4.23.1",
     "typescript": "~6.0.3",
     "vite": "^7.3.5",
-    "vue-tsc": "^3.2.8"
+    "vue-tsc": "^3.2.8",
+    "@playwright/test": "^1.63.0"
   },
   "overrides": {
     "lightningcss": "none",

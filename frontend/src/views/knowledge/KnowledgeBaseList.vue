@@ -1,4 +1,5 @@
 <template>
+  <t-loading :loading="openingKnowledgeBase" fullscreen :text="$t('common.loading')" />
   <div class="kb-list-container">
     <div class="kb-list-content">
       <div class="header" style="--wails-draggable: drag">
@@ -1365,13 +1366,13 @@ const duplicateKB = async (id: string) => {
 const handleSharedKbClick = (sharedKb: SharedKnowledgeBase) => {
   pins.touchRecent('kb', sharedKb.knowledge_base.id)
   // 跳转到共享知识库详情页
-  router.push(`/platform/knowledge-bases/${sharedKb.knowledge_base.id}`)
+  goDetail(sharedKb.knowledge_base.id)
 }
 
 // 处理"全部"Tab 中的共享知识库卡片点击（直接进入知识库）
 const handleSharedKbClickFromAll = (kb: any) => {
   pins.touchRecent('kb', kb.id)
-  router.push(`/platform/knowledge-bases/${kb.id}`)
+  goDetail(kb.id)
 }
 
 // 右侧详情面板：共享知识库详情（含直接共享与来自智能体的）
@@ -1458,15 +1459,13 @@ const hasUninitializedKbs = computed(() => {
   return kbs.value.some(kb => !isInitialized(kb))
 })
 
+const openingKnowledgeBase = ref(false)
+
 const handleCardClick = (kb: KB) => {
   // Track this open in the per-user "recent" list before navigating —
   // matches the user mental model "this is what I last worked on".
   pins.touchRecent('kb', kb.id)
-  if (isInitialized(kb)) {
-    goDetail(kb.id)
-  } else {
-    goSettings(kb.id)
-  }
+  goDetail(kb.id)
 }
 
 // toggleFavoriteKb is the click handler for the star icon rendered on
@@ -1478,8 +1477,13 @@ const toggleFavoriteKb = (kbId: string, evt?: Event) => {
 }
 const isKbFavorited = (kbId: string) => pins.isFavorite('kb', kbId)
 
-const goDetail = (id: string) => {
-  router.push(`/platform/knowledge-bases/${id}`)
+const goDetail = async (id: string) => {
+  openingKnowledgeBase.value = true
+  try {
+    await router.push(`/platform/knowledge-bases/${id}`)
+  } finally {
+    openingKnowledgeBase.value = false
+  }
 }
 
 const goSettings = (id: string) => {
