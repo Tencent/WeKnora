@@ -37,7 +37,8 @@ func TestOpenAPIRankExampleAndNativeRequest(t *testing.T) {
 	assert.Equal(t, "/rerank", path)
 	assert.Empty(t, authorization, "TEI works without an API key by default")
 	assert.Equal(t, map[string]any{
-		"query": "What is Deep Learning?", "texts": []any{"Deep Learning is ..."}, "raw_scores": false,
+		"query": "What is Deep Learning?", "texts": []any{"Deep Learning is ..."},
+		"raw_scores": false, "truncate": true,
 	}, body)
 	assert.NotContains(t, body, "model", "TEI chooses the model at server startup")
 	assert.Equal(t, []api.RerankResult{{Index: 0, Score: 1.0, Text: "Deep Learning is ..."}}, got)
@@ -97,4 +98,20 @@ func TestSurfacesTEIError(t *testing.T) {
 	c := New(Config{Endpoint: api.Endpoint{BaseURL: server.URL}})
 	_, err := c.Rerank(context.Background(), "q", []string{"d"})
 	require.ErrorContains(t, err, "Tokenization error")
+}
+
+// compat.extra_body reaches TEI like every other HTTP rerank protocol, but it
+// cannot replace the fields the client owns. truncate is only a default.
+func TestExtraBodyMergesWithoutReplacingCoreFields(t *testing.T) {
+	c := New(Config{Settings: api.RerankSettings{ExtraBody: map[string]any{
+		"query":                "x",
+		"texts":                []string{"x"},
+		"raw_scores":           true,
+		"truncate":             false,
+		"truncation_direction": "Left",
+	}}})
+	assert.Equal(t, map[string]any{
+		"query": "q", "texts": []string{"d"}, "raw_scores": false,
+		"truncate": false, "truncation_direction": "Left",
+	}, c.BuildRequestBody("q", []string{"d"}))
 }

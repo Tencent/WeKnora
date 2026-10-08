@@ -47,12 +47,26 @@ type rank struct {
 // BuildRequestBody returns the native TEI request. raw_scores is explicit:
 // false makes a single-class reranker's logits comparable with WeKnora's
 // 0..1 relevance threshold. The model name is configured when TEI starts.
+//
+// Settings.ExtraBody is merged in but cannot replace query, texts or
+// raw_scores. truncate defaults to true and may be overridden there: TEI
+// before 1.9 starts with --auto-truncate=false and rejects the whole batch
+// when one passage exceeds the model's input length.
 func (c *Client) BuildRequestBody(query string, documents []string) map[string]any {
-	return map[string]any{
+	out := map[string]any{
 		"query":      query,
 		"texts":      documents,
 		"raw_scores": false,
 	}
+	for k, v := range c.cfg.Settings.ExtraBody {
+		if _, exists := out[k]; !exists {
+			out[k] = v
+		}
+	}
+	if _, set := out["truncate"]; !set {
+		out["truncate"] = true
+	}
+	return out
 }
 
 // Rerank scores documents with TEI and preserves their original indexes.
