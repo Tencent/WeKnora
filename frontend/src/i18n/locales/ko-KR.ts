@@ -5789,6 +5789,7 @@ export default {
     }
   },
   vectorStoreSettings: {
+    fields: { qdrant_keyword_search: '키워드 검색' },
     title: '벡터 데이터베이스 엔진',
     description: '지식 베이스 검색을 위한 벡터 데이터베이스 인스턴스를 등록하고 관리합니다.',
     basicSection: '기본',

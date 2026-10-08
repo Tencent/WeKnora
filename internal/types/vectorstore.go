@@ -242,6 +242,8 @@ func (c ConnectionConfig) MaskSensitiveFields() ConnectionConfig {
 // IndexConfig holds optional index/collection configuration for the vector store.
 // If empty, engine-specific defaults are used.
 type IndexConfig struct {
+	// Qdrant keyword retrieval: empty/text keeps payload filtering; bm25 uses ranked sparse vectors.
+	QdrantKeywordSearch string `yaml:"qdrant_keyword_search" json:"qdrant_keyword_search,omitempty"`
 	// --- Existing fields ---
 	IndexName        string `yaml:"index_name" json:"index_name,omitempty"`                 // ES, OpenSearch
 	NumberOfShards   int    `yaml:"number_of_shards" json:"number_of_shards,omitempty"`     // ES, OpenSearch
@@ -473,6 +475,9 @@ var validIndexNamePattern = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9_-]{0,127}$`)
 // ValidateIndexConfig checks IndexConfig fields for safe values.
 // Call this from the service layer before persisting a VectorStore.
 func ValidateIndexConfig(ic IndexConfig) error {
+	if ic.QdrantKeywordSearch != "" && ic.QdrantKeywordSearch != "text" && ic.QdrantKeywordSearch != "bm25" {
+		return errors.NewValidationError("qdrant_keyword_search must be text or bm25")
+	}
 	// Validate string fields (index/collection names)
 	if ic.IndexName != "" && !validIndexNamePattern.MatchString(ic.IndexName) {
 		return errors.NewValidationError(
@@ -695,6 +700,10 @@ func GetVectorStoreTypes() []VectorStoreTypeInfo {
 			},
 			IndexFields: []VectorStoreFieldInfo{
 				{Name: "collection_prefix", Type: "string", Required: false, Description: "Collection Prefix", Default: "weknora_embeddings"},
+				{
+					Name: "qdrant_keyword_search", Type: "string", Description: "Keyword Search",
+					Default: "text", Enum: []string{"text", "bm25"},
+				},
 				{Name: "shard_number", Type: "number", Required: false, Description: "Shard Number", Default: 1},
 				{Name: "replication_factor", Type: "number", Required: false, Description: "Replication Factor", Default: 1},
 			},
@@ -918,7 +927,8 @@ func buildEnvStoreForDriver(driver string, envLookup EnvLookupFunc) *VectorStore
 				UseTLS: useTLS,
 			},
 			IndexConfig: IndexConfig{
-				CollectionPrefix: envLookup("QDRANT_COLLECTION"),
+				CollectionPrefix:    envLookup("QDRANT_COLLECTION"),
+				QdrantKeywordSearch: envLookup("QDRANT_KEYWORD_SEARCH"),
 			},
 		}
 	case "milvus":
