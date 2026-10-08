@@ -314,8 +314,10 @@ func (c fixedChat) GetModelName() string { return "fixed" }
 func (c fixedChat) GetModelID() string   { return "fixed" }
 
 // A prose answer is only a refusal when the model stopped on its own. If the
-// output budget ran out before any JSON was written (finish_reason=length),
-// the same prose is truncation and must stay retriable.
+// output budget ran out before any JSON was written (finish_reason=length or
+// any other spelling of it), the stream broke ("incomplete"), or the adapter
+// reported no finish reason, the same prose may be truncation and must stay
+// retriable.
 func TestExtractor_Extract_TruncatedProseIsNotDeclined(t *testing.T) {
 	const prose = "## Step 1: Entity Extraction\n1. Romeo and Juliet is a play"
 	tmpl := &types.PromptTemplateStructured{Description: "extract"}
@@ -326,7 +328,13 @@ func TestExtractor_Extract_TruncatedProseIsNotDeclined(t *testing.T) {
 		wantDeclined bool
 	}{
 		{"model stopped: declined", "stop", true},
+		{"model stopped, upper case: declined", " STOP ", true},
 		{"output truncated: retriable", "length", false},
+		{"anthropic max_tokens: retriable", "max_tokens", false},
+		{"responses max_output_tokens: retriable", "max_output_tokens", false},
+		{"case and space variant: retriable", " Max_Tokens ", false},
+		{"stream broke before stop: retriable", types.FinishReasonIncomplete, false},
+		{"no finish reason reported: retriable", "", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

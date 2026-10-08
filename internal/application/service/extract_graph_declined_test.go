@@ -60,6 +60,9 @@ func TestChunkExtractHandle_ModelDeclinedIsSkipNotRetry(t *testing.T) {
 	}{
 		{"model stopped on its own: skip", "stop", false},
 		{"output truncated: retry", "length", true},
+		{"output truncated (max_tokens): retry", "max_tokens", true},
+		{"stream broke before stop: retry", types.FinishReasonIncomplete, true},
+		{"no finish reason reported: retry", "", true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

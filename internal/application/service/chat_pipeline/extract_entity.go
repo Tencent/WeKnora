@@ -184,6 +184,16 @@ func previewDeclinedText(s string) string {
 	return string(runes)
 }
 
+// modelStoppedOnItsOwn reports whether finish_reason proves the model ended
+// its answer by itself, which is the only case where a prose answer can be
+// read as a refusal. Budget exhaustion (every spelling IsLengthFinishReason
+// accepts), a stream that broke before the stop event ("incomplete"), and an
+// adapter that reports no reason at all are treated as possible truncation.
+func modelStoppedOnItsOwn(reason string) bool {
+	r := strings.ToLower(strings.TrimSpace(reason))
+	return r != "" && r != types.FinishReasonIncomplete && !IsLengthFinishReason(r)
+}
+
 // Extractor is a struct for extracting entities
 type Extractor struct {
 	chat     chat.Chat
@@ -226,12 +236,13 @@ func (e *Extractor) Extract(ctx context.Context, content string) (*types.GraphDa
 
 	graph, err := e.formater.ParseGraph(ctx, chatResponse.Content)
 	if err != nil {
-		if errors.Is(err, ErrModelDeclined) && chatResponse.FinishReason == "length" {
-			// The output budget ran out before any JSON was written (e.g. the
-			// model spent it on prose "Step 1/Step 2" reasoning). That is
-			// truncation, not a refusal: keep it retriable. %v drops the
-			// ErrModelDeclined wrap on purpose.
-			err = fmt.Errorf("graph extraction truncated before JSON (finish_reason=length): %v", err)
+		if errors.Is(err, ErrModelDeclined) && !modelStoppedOnItsOwn(chatResponse.FinishReason) {
+			// The output budget ran out (or the stream broke) before any JSON
+			// was written, e.g. the model spent it on prose "Step 1/Step 2"
+			// reasoning. That is truncation, not a refusal: keep it retriable.
+			// %v drops the ErrModelDeclined wrap on purpose.
+			err = fmt.Errorf("graph extraction stopped before JSON (finish_reason=%q): %v",
+				chatResponse.FinishReason, err)
 		}
 		logger.Errorf(ctx, "failed to parse graph: %v", err)
 		return nil, err
