@@ -1,7 +1,25 @@
 <template>
     <div class="main" ref="dropzone" :style="{ '--sidebar-width': `${uiStore.sidebarDisplayWidth}px` }">
-        <Menu></Menu>
-        <div v-if="isRouterAlive" class="platform-route-outlet">
+        <header v-if="isMobile" class="mobile-app-header">
+            <button ref="mobileMenuButton" type="button" class="mobile-icon-button" :aria-label="t('menu.expandSidebar')"
+                :aria-expanded="mobileMenuOpen" aria-controls="mobile-navigation" @click="mobileMenuOpen = true">
+                <t-icon name="menu" />
+            </button>
+            <span>WeKnora</span>
+            <button type="button" class="mobile-icon-button" :aria-label="t('menu.search')" @click="commandPaletteStore.openPalette()">
+                <t-icon name="search" />
+            </button>
+        </header>
+        <div v-if="isMobile && mobileMenuOpen" class="mobile-nav-backdrop" @click="closeMobileMenu" />
+        <div id="mobile-navigation" ref="mobileNavigation" class="platform-navigation"
+            :class="{ 'is-open': mobileMenuOpen }" :inert="isMobile && !mobileMenuOpen"
+            :role="isMobile ? 'dialog' : undefined" :aria-modal="isMobile && mobileMenuOpen ? true : undefined"
+            :aria-label="t('menu.expandSidebar')" @keydown="onNavigationKeydown">
+            <button v-if="isMobile" type="button" class="mobile-nav-close mobile-icon-button"
+                :aria-label="t('common.close')" @click="closeMobileMenu"><t-icon name="close" /></button>
+            <Menu @close-mobile="closeMobileMenu" />
+        </div>
+        <div v-if="isRouterAlive" class="platform-route-outlet" :inert="isMobile && mobileMenuOpen">
             <RouterView />
         </div>
         <div class="upload-mask" v-show="ismask">
@@ -21,7 +39,35 @@
     </div>
 </template>
 <script setup lang="ts">
+import '@/assets/mobile-shell.less'
 import Menu from '@/components/menu.vue'
+import { useResponsive } from '@/composables/useResponsive'
+import { useAppViewport } from '@/composables/useAppViewport'
+useAppViewport()
+const { isMobile } = useResponsive()
+const mobileMenuOpen = ref(false)
+const mobileMenuButton = ref<HTMLButtonElement>()
+const mobileNavigation = ref<HTMLElement>()
+function openMobileNavigation() { if (isMobile.value) mobileMenuOpen.value = true }
+function closeMobileMenu() {
+    mobileMenuOpen.value = false
+    nextTick(() => mobileMenuButton.value?.focus())
+}
+function onNavigationKeydown(event: KeyboardEvent) {
+    if (!isMobile.value || !mobileMenuOpen.value) return
+    if (event.key === 'Escape') { event.preventDefault(); closeMobileMenu(); return }
+    if (event.key !== 'Tab') return
+    const nodes = [...(mobileNavigation.value?.querySelectorAll<HTMLElement>('button, a[href], input, [tabindex="0"]') || [])]
+        .filter(node => node.getClientRects().length && !node.hasAttribute('disabled'))
+    const first = nodes[0], last = nodes[nodes.length - 1]
+    if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus() }
+    else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus() }
+}
+watch(mobileMenuOpen, open => { if (open) nextTick(() => mobileNavigation.value?.querySelector<HTMLButtonElement>('button')?.focus()) })
+watch(isMobile, () => { mobileMenuOpen.value = false })
+onMounted(() => window.addEventListener('weknora:open-mobile-navigation', openMobileNavigation))
+onUnmounted(() => window.removeEventListener('weknora:open-mobile-navigation', openMobileNavigation))
+
 import { ref, onMounted, onUnmounted, nextTick, provide, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router'
 import UploadMask from '@/components/upload-mask.vue'
@@ -39,6 +85,7 @@ import { useI18n } from 'vue-i18n'
 import { collectDroppedFiles } from './collectDroppedFiles'
 
 const route = useRoute();
+watch(() => route.fullPath, () => { if (mobileMenuOpen.value) closeMobileMenu() })
 const router = useRouter();
 const commandPaletteStore = useCommandPaletteStore();
 const uiStore = useUIStore();
@@ -247,6 +294,7 @@ onUnmounted(() => {
 });
 </script>
 <style lang="less">
+.platform-navigation { display: flex; flex-shrink: 0; min-height: 0; }
 .main {
     display: flex;
     align-items: stretch;
