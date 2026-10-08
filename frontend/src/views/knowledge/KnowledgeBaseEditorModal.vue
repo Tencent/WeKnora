@@ -364,6 +364,20 @@
               </div>
             </div>
 
+            <!-- 图片向量：默认关闭，显式开启才为图片单独编码、检索时召回 -->
+            <div v-if="formData.multimodalConfig.enabled" class="setting-row">
+              <div class="setting-info">
+                <label>{{ $t('knowledgeEditor.advanced.multimodal.imageVectorLabel') }}</label>
+                <p class="desc">{{ $t('knowledgeEditor.advanced.multimodal.imageVectorDescription') }}</p>
+                <p v-if="formData.imageVectorEnabled && !embeddingTakesImages" class="desc desc-warning">
+                  {{ $t('knowledgeEditor.advanced.multimodal.imageVectorModelUnsupported') }}
+                </p>
+              </div>
+              <div class="setting-control">
+                <t-switch v-model="formData.imageVectorEnabled" size="medium" />
+              </div>
+            </div>
+
             <div v-if="formData.multimodalConfig.enabled" class="setting-row">
               <div class="setting-info">
                 <label>{{ $t('knowledgeEditor.advanced.multimodal.imageAttrsLabel') }}</label>
@@ -828,6 +842,13 @@ const advancedSettingsRef = ref<InstanceType<typeof KBAdvancedSettings>>()
 
 // 表单数据
 const formData = ref<any>(null)
+// 图片向量只在向量模型能处理图片时生效；模型列表里查不到（未加载、跨租户共享）时
+// 不报警，后端会按实际模型判断。
+const embeddingTakesImages = computed(() => {
+  const id = formData.value?.modelConfig.embeddingModelId
+  const model = id ? allModels.value.find((m) => m.id === id) : undefined
+  return !model || !!model.capabilities?.input?.includes('image')
+})
 const isFAQ = computed(() => formData.value?.type === 'faq')
 
 const kbCreateNeedsEmbedding = computed(() => {
@@ -909,6 +930,8 @@ const initFormData = (type: 'document' | 'faq' = 'document') => {
     // 新建模式也必须用完整默认动作初始化——imageActions.ocr.on_unobserved
     // 直接被开关绑定，缺省会让打开开关的瞬间渲染崩溃。
     imageAttrsEnabled: false,
+    // 图片向量默认关闭：能处理图片的向量模型也常只用来编码文本。
+    imageVectorEnabled: false,
     imageActions: mergeImageActions(),
     imageProcessingConfigSnapshot: null as Record<string, unknown> | null,
     asrConfig: {
@@ -1062,6 +1085,8 @@ const loadKBData = async (
       },
       imageAttrsEnabled:
         !!(kb as Record<string, any>).image_processing_config?.image_attrs_enabled,
+      imageVectorEnabled:
+        !!(kb as Record<string, any>).image_processing_config?.image_vector_enabled,
       imageActions: mergeImageActions(
         (kb as Record<string, any>).image_processing_config?.image_actions,
       ),
@@ -1456,6 +1481,7 @@ const buildSubmitData = () => {
   {
     const built = buildImageProcessingConfig(formData.value.imageProcessingConfigSnapshot, {
       imageAttrsEnabled: formData.value.imageAttrsEnabled,
+      imageVectorEnabled: formData.value.imageVectorEnabled,
       onUnobserved: formData.value.imageActions.ocr.on_unobserved,
       defaultOn: displaySchema.value.default_actions.ocr.on,
     })
@@ -2241,6 +2267,11 @@ watch(() => chatResources.allModels, (list) => {
       color: var(--td-text-color-secondary);
       margin: 0;
       line-height: 1.5;
+    }
+
+    .desc-warning {
+      margin-top: 4px;
+      color: var(--td-warning-color);
     }
   }
 

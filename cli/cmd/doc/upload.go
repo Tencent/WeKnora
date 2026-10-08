@@ -83,7 +83,9 @@ has a generic name like "report.pdf" but you want to surface it as e.g.
 
 The two input modes (positional file / --recursive directory walk) are
 mutually exclusive - pass exactly one. Use --recursive --glob to upload a
-directory tree (see Examples). To ingest a remote URL use "weknora doc fetch";
+directory tree (see Examples); subdirectories are preserved as knowledge-base
+folders, so a nested file lands at its path relative to the walked directory.
+To ingest a remote URL use "weknora doc fetch";
 to create an entry from inline text use "weknora doc create".
 
 Server-side ingestion knobs:

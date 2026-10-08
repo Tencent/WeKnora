@@ -810,6 +810,7 @@ export default {
     channelConfluence: 'Confluence',
     channelYuque: 'Yuque',
     channelGitLab: 'GitLab',
+    channelSeafile: 'Seafile',
     channelIma: 'Tencent IMA',
     channelUpload: 'アップロード',
     channelManual: '手動作成',
@@ -3959,6 +3960,9 @@ export default {
         customInstructionsPlaceholder: '例: 銘板、型番、アラームコード、表の単位を優先する…',
         imageAttrsLabel: '画像属性の観察',
         imageAttrsDescription: 'オンにすると各画像を先に「属性観察＋説明」し、その属性で画像内テキストへの OCR 実行可否を決定します。オフは基本モード：全画像を1枚ずつ説明し全て OCR します',
+        imageVectorLabel: '画像ベクトル検索',
+        imageVectorDescription: 'オンにすると、画像の説明を生成した後に埋め込みモデルで画像そのものもエンコードし、説明に書かれていない内容でも画像を検索できるようにします。画像入力に対応した埋め込みモデルが必要で、画像ごとに埋め込み呼び出しが1回増え、ベクトル検索の候補範囲も広がります。以降に取り込み・再解析した文書にのみ適用され、スキャン PDF のページは対象外です',
+        imageVectorModelUnsupported: '現在の埋め込みモデルは画像入力を宣言していないため、画像ベクトルは生成も検索もされません',
         imageAttrsSchemaLabel: '観察可能な画像属性',
         imageAttrsSchemaDescription: 'モデルは以下の属性（バックエンドのレジストリで定義）を観察して OCR ポリシーを決めます',
         imageAttrsOcrConditions: '観察した属性条件に基づいて OCR を実行',
@@ -5075,6 +5079,8 @@ export default {
       dimensionOverrideDesc: 'プロバイダのドキュメントでこのモデルがdimensionsパラメータに対応していると記載されている場合にのみ有効にしてください。デフォルトでは検出された実際の次元数のみを使用します。',
       supportsVisionLabel: '視覚・マルチモーダルに対応',
       supportsVisionDesc: 'モデルが画像やマルチモーダル入力を受け付けるかどうか',
+      embeddingImageInputLabel: '画像入力',
+      embeddingImageInputDesc: 'モデルが画像をテキストと同じベクトル空間に埋め込めるかどうか。カタログ内のモデルは自動判定され、カスタムモデルは手動で宣言します',
       contextWindowLabel: 'コンテキストウィンドウ',
       contextWindowPlaceholder: 'デフォルト値{value}',
       contextWindowDesc: '1回のリクエストでこのモデルが受け付けられるトークン数です。エージェントの履歴圧縮はこの上限を基準にします。空欄の場合はデフォルト値の200000（200K）が使われます。プロバイダの実際のウィンドウサイズを指定してください。大きすぎる値を指定すると圧縮が働かず、プロバイダにリクエストを拒否されます。',
@@ -5120,6 +5126,7 @@ export default {
   },
   language: {
     zhCN: '简体中文',
+    zhTW: '繁体字中国語',
     enUS: 'English',
     ruRU: 'Русский',
     koKR: '한국어',
@@ -6869,6 +6876,12 @@ export default {
       paths: 'ディレクトリ', pathsPlaceholder: '1行に1つのディレクトリを入力します。空欄の場合はプロジェクト全体を同期します',
       addProject: 'プロジェクトを追加', projectRequired: 'GitLabプロジェクトを1つ以上追加してください',
     },
+    seafile: {
+      baseUrl: 'Seafile URL', apiToken: 'APIトークン',
+      apiTokenHint: 'Seafileの「設定 → Web APIトークン」で生成します。アカウントに選択したライブラリの読み取り権限があれば十分で、トークンはファイルのダウンロード要求には送信されません。',
+      singleLibraryOnly: '1つのデータソースは1つのライブラリのみ同期できます。別のライブラリを選ぶ前に現在の選択を解除してください。',
+      selectionRequired: 'ライブラリ、フォルダまたはファイルを1つ以上選択してください',
+    },
     resourceHint: '同期するスペースまたはフォルダを選択してください',
     untitled: '無題',
     resourceLoadFailed: 'リソースの読み込みに失敗しました',
@@ -6882,6 +6895,10 @@ export default {
     guideStep1_notion: '同期したいページまたはデータベースをNotionで開きます',
     guideStep2_notion: '右上の「···」メニューをクリックし、「Connect to」または「Add connections」を選択します',
     guideStep3_notion: '作成したIntegrationアプリを検索して選択し、戻って「再試行」をクリックします',
+    noResourcesDesc_seafile: 'このトークンでアクセスできるライブラリがないか、すべて暗号化ライブラリです（暗号化ライブラリは同期できません）',
+    guideStep1_seafile: 'Seafileにサインインし、アカウントが暗号化されていないライブラリを1つ以上読めることを確認します',
+    guideStep2_seafile: '「設定 → Web APIトークン」でトークンを生成または再生成します',
+    guideStep3_seafile: 'ここに戻って新しいトークンを入力し、「再試行」をクリックします',
     permissionDocLink: 'FeishuのWiki権限ドキュメントを見る',
     syncScheduleLabel: '同期スケジュール',
     conflictLabel: '競合時の処理',
@@ -6940,7 +6957,8 @@ export default {
       dingtalk: 'DingTalkドキュメント',
       rss: 'RSS / Atomフィード',
       ima: 'Tencent IMA',
-      gitlab: 'GitLab'
+      gitlab: 'GitLab',
+      seafile: 'Seafile'
     },
     connectorDesc: {
       feishu: 'Feishu Wikiからドキュメント、スプレッドシート、ファイルを同期します',
@@ -6953,7 +6971,8 @@ export default {
       dingtalk: 'DingTalkナレッジベースのオンラインドキュメントを同期',
       rss: 'RSS / Atomフィードから記事を同期します',
       ima: 'Tencent IMAのナレッジベースからドキュメント、ノート、ファイルを同期します（AIセッションと動画の解析は非対応）',
-      gitlab: 'GitLabプロジェクトからファイルを同期します'
+      gitlab: 'GitLabプロジェクトからファイルを同期します',
+      seafile: 'Seafileライブラリのフォルダとファイルを同期します'
     },
     drive: {
       folderTokenLabel: 'Driveフォルダトークン',
@@ -7078,7 +7097,8 @@ export default {
     resourceType: {
       wikiSpace: 'Wikiスペース',
       docCategory: 'ドキュメントタグ',
-      book: 'Yuqueナレッジベース'
+      book: 'Yuqueナレッジベース',
+      library: 'Seafileライブラリ'
     },
     neverSynced: '未同期',
     justNow: 'たった今',
@@ -7090,7 +7110,15 @@ export default {
       dingtalk_resource_failed: 'DingTalkリソースを利用できません。アクセス権限と選択したリソースを確認して再試行してください。',
       deletion_lookup_failed: '削除前の項目の照会に失敗しました。サーバログを確認してください',
       deletion_failed: '削除に失敗しました。サーバログを確認してください',
-      ingest_failed: '取り込みに失敗しました。サーバログを確認してください'
+      ingest_failed: '取り込みに失敗しました。サーバログを確認してください',
+      seafile_permission_denied: 'Seafileファイルへのアクセスが拒否されました。トークン所有者のライブラリ権限を確認してください。',
+      seafile_not_found: 'Seafileファイルが存在しないか移動されました。次回の同期で再試行します。',
+      seafile_file_too_large: 'Seafileファイルがサイズ上限を超えています。MAX_FILE_SIZE_MBを引き上げるかファイルを小さくしてください。',
+      seafile_empty_file: 'Seafileファイルが空のためスキップしました。',
+      seafile_source_changed: '取得中にSeafileファイルが変更されました。次回の同期で再試行します。',
+      seafile_invalid_response: 'Seafileから解析できない応答が返されました。サーバのバージョンとリバースプロキシを確認してください。',
+      seafile_ssrf_blocked: 'SeafileのダウンロードURLがSSRFポリシーでブロックされました。fileserverのホストをSSRF_WHITELISTに追加してください。',
+      seafile_fetch_failed: 'Seafileからファイルを取得できませんでした。次回の同期で再試行します。'
     }
   },
   integrations: {

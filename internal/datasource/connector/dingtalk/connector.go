@@ -99,8 +99,19 @@ func (c *Connector) Type() string {
 	return types.ConnectorTypeDingTalk
 }
 
+// maxValidateProbes caps how many documents Validate reads before giving up.
+// An app missing the document read permission fails every probe, so without a
+// cap a large tenant would turn one Validate into hundreds of serial calls.
+const maxValidateProbes = 5
+
 // Validate checks the application credentials and operator access, including
-// node listing and a sample document read when one is visible at the workspace root.
+// node listing and a sample document read when one is visible in a workspace.
+//
+// The operator is not expected to reach every workspace in the tenant: app
+// credentials are valid as long as one reachable workspace yields one readable
+// document. Reading the first document of the first workspace and failing on it
+// rejects a working configuration whenever an unrelated workspace — one the
+// operator was never granted — happens to be listed first.
 func (c *Connector) Validate(ctx context.Context, dataSourceConfig *types.DataSourceConfig) error {
 	cfg, err := parseConfig(dataSourceConfig)
 	if err != nil {
@@ -111,27 +122,157 @@ func (c *Connector) Validate(ctx context.Context, dataSourceConfig *types.DataSo
 	if err != nil {
 		return fmt.Errorf("validate DingTalk data source: %w", err)
 	}
+
+	var (
+		lastErr       error
+		sawDocument   bool
+		inconclusive  bool
+		workspaceFail int
+		probes        int
+		listings      int
+	)
 	for _, item := range workspaces {
 		rootNodeID := strings.TrimSpace(item.RootNodeID)
 		if rootNodeID == "" {
 			continue
 		}
-		children, err := api.listNodes(ctx, rootNodeID)
+		document, found, unexplored, err := firstValidateDocument(ctx, api, rootNodeID, &listings)
 		if err != nil {
-			return fmt.Errorf("validate DingTalk data source: %w", err)
+			lastErr = fmt.Errorf("workspace %q: %w", item.Name, err)
+			// A cancelled or timed-out request proves nothing about the
+			// credentials, so it must never fall through to acceptance.
+			if ctx.Err() != nil || isContextError(err) {
+				return fmt.Errorf("validate DingTalk data source: %w", lastErr)
+			}
+			workspaceFail++
+			continue
 		}
-		for _, child := range children {
-			if !child.isDocument() {
-				continue
+		if unexplored {
+			inconclusive = true
+		}
+		if !found {
+			continue
+		}
+		sawDocument = true
+		probes++
+		if err := verifyDocument(ctx, api, document); err != nil {
+			lastErr = fmt.Errorf("workspace %q document %q: %w", item.Name, document.Name, err)
+			if ctx.Err() != nil || isContextError(err) {
+				return fmt.Errorf("validate DingTalk data source: %w", lastErr)
 			}
-			if _, err := api.documentBlocks(ctx, child.ID); err != nil {
-				return fmt.Errorf("validate DingTalk data source: %w", err)
-			}
+		} else {
 			return nil
 		}
+		if probes >= maxValidateProbes {
+			break
+		}
+	}
+	// Folders were left unexplored, because the listing budget ran out or a
+	// folder could not be listed, so an unreadable document elsewhere does not
+	// prove the data source is unusable.
+	if inconclusive {
 		return nil
 	}
-	return nil
+
+	// Nothing readable anywhere. Only a tenant that exposed no document at all
+	// is accepted: there was nothing to read, so credentials could not be
+	// disproved. A document that exists but cannot be read means the data
+	// source would sync nothing, which is worth reporting.
+	if !sawDocument && workspaceFail == 0 {
+		return nil
+	}
+	if lastErr == nil {
+		return nil
+	}
+	return fmt.Errorf("validate DingTalk data source: %w", lastErr)
+}
+
+// maxValidateListings caps the node listing pages Validate requests while
+// looking for a document, shared by all workspaces. Each page is one HTTP
+// request of up to 50 nodes, and only the first page of each workspace root is
+// outside the budget, so the walk issues at most
+// len(workspaces) + maxValidateListings node listing requests (plus the
+// client's retries of each).
+const maxValidateListings = 20
+
+// firstValidateDocument walks a workspace breadth-first, the way scanWorkspace
+// does, and returns the first document it finds. It requests one page at a
+// time instead of listing whole folders, so the budget bounds real requests.
+// unexplored reports that some nodes were never seen, because the budget ran
+// out or a folder could not be listed, so the walk cannot prove the workspace
+// holds no readable document.
+func firstValidateDocument(
+	ctx context.Context, api dingTalkAPI, rootNodeID string, listings *int,
+) (document node, found, unexplored bool, err error) {
+	queue := []string{rootNodeID}
+	visited := map[string]struct{}{rootNodeID: {}}
+	for len(queue) > 0 {
+		parent := queue[0]
+		queue = queue[1:]
+		// Finish every page of a folder before descending, like listNodes
+		// does for scanWorkspace: a document on a later page of this folder
+		// must be found before the budget is spent on its subfolders.
+		var subfolders []string
+		pageToken := ""
+		seenTokens := map[string]struct{}{}
+		for {
+			rootPage := parent == rootNodeID && pageToken == ""
+			if !rootPage {
+				if *listings >= maxValidateListings {
+					return node{}, false, true, nil
+				}
+				*listings++
+			}
+			children, next, listErr := api.listNodesPage(ctx, parent, pageToken)
+			if listErr != nil {
+				if rootPage || ctx.Err() != nil || isContextError(listErr) {
+					return node{}, false, false, listErr
+				}
+				// The documents this operator can read may live in exactly
+				// this folder, so its failure leaves the walk inconclusive
+				// rather than treating the folder as empty.
+				unexplored = true
+				break
+			}
+			for _, child := range children {
+				if child.isDocument() {
+					return child, true, unexplored, nil
+				}
+				if child.isFolder() || child.HasChildren {
+					if _, seen := visited[child.ID]; seen {
+						continue
+					}
+					visited[child.ID] = struct{}{}
+					subfolders = append(subfolders, child.ID)
+				}
+			}
+			if next == "" {
+				break
+			}
+			if _, repeated := seenTokens[next]; repeated {
+				// listNodes rejects a repeated nextToken; here the rest of the
+				// folder is simply unknown.
+				unexplored = true
+				break
+			}
+			seenTokens[next] = struct{}{}
+			pageToken = next
+		}
+		queue = append(queue, subfolders...)
+	}
+	return node{}, false, unexplored, nil
+}
+
+// verifyDocument proves one visible document is readable by calling the read
+// API that backs its ingest path — the blocks API for adoc today. The caller
+// only reaches this function for nodes isDocument accepts, and a native type
+// becomes a document, gains a sync read path and gains its probe here in the
+// same change. Types that are not ingestible yet are therefore not documents
+// yet: uploaded files and native spreadsheets join all three together when
+// their ingest paths land, instead of being probed here in advance.
+func verifyDocument(ctx context.Context, api dingTalkAPI, document node) error {
+	_, err := api.documentBlocks(ctx, document.ID)
+	return err
 }
 
 // ListResources lazily lists selectable workspaces, folders and documents.

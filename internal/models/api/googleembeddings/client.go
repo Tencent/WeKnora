@@ -76,12 +76,33 @@ type response struct {
 
 // BuildRequestBody is the golden-test entry point.
 func (c *Client) BuildRequestBody(texts []string, kind api.EmbedInputType) map[string]any {
-	s := c.cfg.Settings
-	requests := make([]any, 0, len(texts))
+	parts := make([]any, 0, len(texts))
 	for _, text := range texts {
+		parts = append(parts, map[string]any{"text": text})
+	}
+	return c.body(parts, kind)
+}
+
+// BuildImageRequestBody is the golden-test entry point for images: an image
+// is an inlineData part carrying its MIME type and base64 bytes.
+func (c *Client) BuildImageRequestBody(images []api.EmbedImage, kind api.EmbedInputType) map[string]any {
+	parts := make([]any, 0, len(images))
+	for _, img := range images {
+		parts = append(parts, map[string]any{
+			"inlineData": map[string]any{"mimeType": img.MIMEType, "data": img.Base64()},
+		})
+	}
+	return c.body(parts, kind)
+}
+
+// body wraps every part in its own request, so each gets its own vector.
+func (c *Client) body(parts []any, kind api.EmbedInputType) map[string]any {
+	s := c.cfg.Settings
+	requests := make([]any, 0, len(parts))
+	for _, part := range parts {
 		req := map[string]any{
 			"model":   c.qualifiedModel(),
-			"content": map[string]any{"parts": []any{map[string]any{"text": text}}},
+			"content": map[string]any{"parts": []any{part}},
 		}
 		config := map[string]any{}
 		if field := s.InputTypeField; field != "" {
@@ -110,21 +131,33 @@ func (c *Client) BuildRequestBody(texts []string, kind api.EmbedInputType) map[s
 func (c *Client) Embed(
 	ctx context.Context, texts []string, kind api.EmbedInputType,
 ) ([][]float32, error) {
+	return c.post(ctx, c.BuildRequestBody(texts, kind), len(texts))
+}
+
+// AcceptsImages is always true: inlineData is part of the schema.
+func (c *Client) AcceptsImages() bool { return true }
+
+// EmbedImages vectorizes one batch of images, each its own vector.
+func (c *Client) EmbedImages(
+	ctx context.Context, images []api.EmbedImage, kind api.EmbedInputType,
+) ([][]float32, error) {
+	return c.post(ctx, c.BuildImageRequestBody(images, kind), len(images))
+}
+
+func (c *Client) post(ctx context.Context, body map[string]any, want int) ([][]float32, error) {
 	var decoded response
-	err := c.cfg.Endpoint.PostJSONWithRetry(
-		ctx, c.url(), c.BuildRequestBody(texts, kind), &decoded, c.cfg.Retry, "embedding",
-	)
+	err := c.cfg.Endpoint.PostJSONWithRetry(ctx, c.url(), body, &decoded, c.cfg.Retry, "embedding")
 	if err != nil {
 		return nil, err
 	}
 	if decoded.Error != nil && decoded.Error.Message != "" {
 		return nil, fmt.Errorf("gemini embedding error: %s", decoded.Error.Message)
 	}
-	if len(decoded.Embeddings) != len(texts) {
+	if len(decoded.Embeddings) != want {
 		return nil, fmt.Errorf(
-			"gemini returned %d embeddings for %d inputs", len(decoded.Embeddings), len(texts))
+			"gemini returned %d embeddings for %d inputs", len(decoded.Embeddings), want)
 	}
-	return api.PlaceEmbeddings(len(texts), len(decoded.Embeddings), func(i int) (int, []float32) {
+	return api.PlaceEmbeddings(want, len(decoded.Embeddings), func(i int) (int, []float32) {
 		return i, decoded.Embeddings[i].Values
 	})
 }

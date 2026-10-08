@@ -258,6 +258,14 @@ func (s *knowledgeService) CloneChunk(ctx context.Context, src, dst *types.Knowl
 	if err != nil {
 		return err
 	}
+	// Image vectors exist only in a knowledge base that opted in to them
+	// (indexImageVector). A copy into one that did not leaves them behind, the
+	// index rows with the chunks: CopyIndices copies only mapped chunks' rows.
+	if !targetKB.IsImageVectorEnabled() {
+		sourceChunks = slices.DeleteFunc(sourceChunks, func(c *types.Chunk) bool {
+			return c.ChunkType == types.ChunkTypeImageVector
+		})
+	}
 	chunkPageSize := 100
 	srcTodst := map[string]string{}
 	tagIDMapping := map[string]string{} // srcTagID -> dstTagID

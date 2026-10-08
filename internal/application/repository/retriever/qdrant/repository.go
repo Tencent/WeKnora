@@ -930,6 +930,7 @@ func (q *qdrantRepository) CopyIndices(ctx context.Context,
 	batchSize := uint32(64)
 	var offset *qdrant.PointId = nil
 	totalCopied := 0
+	seenCursors := make(map[string]struct{})
 
 	for {
 		// Qdrant's scroll offset is inclusive, so the next page must start at
@@ -954,6 +955,19 @@ func (q *qdrantRepository) CopyIndices(ctx context.Context,
 		pointsCount := len(scrollResult)
 		if pointsCount == 0 {
 			break
+		}
+
+		// The cursor for the next request is the one the server hands back.
+		// Qdrant's offset is inclusive, so deriving it from the last point of
+		// the page makes the next page start at that point again and copy it
+		// into the target a second time. A cursor that comes back a second time
+		// means the walk can never finish, which is a failure, not an end.
+		if nextOffset != nil {
+			cursor := nextOffset.String()
+			if _, repeated := seenCursors[cursor]; repeated {
+				return fmt.Errorf("qdrant: copy indices made no progress at cursor %s", nextOffset)
+			}
+			seenCursors[cursor] = struct{}{}
 		}
 
 		log.Infof("[Qdrant] Found %d source points in batch", pointsCount)

@@ -628,6 +628,7 @@
 </template>
 
 <script setup lang="ts">
+import { readDocumentReferences } from '@/utils/readDocumentReferences';
 import { isAssistantTurnComplete } from '@/utils/steerStreamFork';
 import { ref, computed, watch, onMounted, onBeforeUnmount, onUpdated, nextTick } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
@@ -1414,31 +1415,7 @@ function getToolReferenceItems(event: any): KnowledgeReferenceLike[] {
   }
 
   if (toolName === 'read_document' || toolName === 'list_knowledge_chunks' || toolName === 'wiki_read_source_doc') {
-    const chunks = Array.isArray(toolData.chunks) ? toolData.chunks : [];
-    if (chunks.length) {
-      return mergeDocumentReferences(chunks
-        .filter((item: any) => item?.content)
-        .map((item: any, index: number) => ({
-          id: item.chunk_id || item.id || `${toolData.knowledge_id || 'doc'}-${index + 1}`,
-          knowledge_id: item.knowledge_id || toolData.knowledge_id,
-          knowledge_title: toolData.faq_question || toolData.knowledge_title || toolData.knowledge_id,
-          knowledge_base_id: item.knowledge_base_id || toolData.knowledge_base_id,
-          chunk_index: item.chunk_index ?? item.index ?? index + 1,
-          chunk_type: item.chunk_type || (toolData.faq_question ? 'faq' : undefined),
-          content: item.content || '',
-        })));
-    }
-
-    const output = cleanToolOutputContent(event.output);
-    if (!output) return [];
-    return [{
-      id: toolData.faq_id || toolData.knowledge_id || event.tool_call_id,
-      knowledge_id: toolData.knowledge_id,
-      knowledge_title: toolData.faq_question || toolData.knowledge_title || toolData.knowledge_id || getToolDescription(event),
-      knowledge_base_id: toolData.knowledge_base_id,
-      chunk_type: toolData.faq_question ? 'faq' : undefined,
-      content: output,
-    }];
+    return readDocumentReferences(toolData, cleanToolOutputContent(event.output), getToolDescription(event));
   }
 
   return [];
