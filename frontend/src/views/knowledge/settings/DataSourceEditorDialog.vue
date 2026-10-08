@@ -227,6 +227,27 @@ const yuqueTOCOnly = computed({
   },
 })
 
+// DingTalk ingestion of uploaded Office/PDF files and native spreadsheets
+// (axls). The keys live in the raw settings bag and are read by the connector
+// as opt-in: a data source created before these controls existed carries no key
+// at all, so the getters report the connector default (off) instead of
+// rendering the checkboxes blank, and nothing is written back until the user
+// toggles one. Merely opening an existing source therefore never changes what
+// it syncs.
+const dingtalkIncludeUploadedFiles = computed({
+  get: () => form.value.config.settings?.include_uploaded_files === true,
+  set: (on: boolean) => {
+    form.value.config.settings = { ...form.value.config.settings, include_uploaded_files: on }
+  },
+})
+
+const dingtalkIncludeSheets = computed({
+  get: () => form.value.config.settings?.include_sheets === true,
+  set: (on: boolean) => {
+    form.value.config.settings = { ...form.value.config.settings, include_sheets: on }
+  },
+})
+
 // Step 2: Resources
 const resources = ref<Resource[]>([])
 const loadingResources = ref(false)
@@ -1989,6 +2010,24 @@ const drawerConfirmText = computed(() => {
         <div class="form-item form-item--flat">
           <t-checkbox v-model="form.sync_deletions">{{ t('datasource.syncDeletions') }}</t-checkbox>
         </div>
+      </section>
+
+      <!-- DingTalk only: which extra node types the connector may ingest. -->
+      <section v-if="form.type === 'dingtalk'" class="setting-drawer__section">
+        <h4 class="setting-drawer__section-title">{{ t('datasource.dingtalkIngestLabel') }}</h4>
+        <div class="form-item form-item--flat">
+          <t-checkbox v-model="dingtalkIncludeUploadedFiles">
+            {{ t('datasource.dingtalkIncludeUploadedFiles') }}
+          </t-checkbox>
+        </div>
+        <p class="form-desc">{{ t('datasource.dingtalkIncludeUploadedFilesHint') }}</p>
+
+        <div class="form-item form-item--flat">
+          <t-checkbox v-model="dingtalkIncludeSheets">
+            {{ t('datasource.dingtalkIncludeSheets') }}
+          </t-checkbox>
+        </div>
+        <p class="form-desc">{{ t('datasource.dingtalkIncludeSheetsHint') }}</p>
       </section>
 
       <!-- Yuque only: how synced documents are laid out, and what may be admitted. -->

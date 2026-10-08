@@ -124,6 +124,15 @@ func testConfig(resources ...string) *types.DataSourceConfig {
 	}
 }
 
+// testConfigWithSheets turns include_sheets on. Cases that exercise the
+// spreadsheet ingest path have to opt in, because the switch defaults to off
+// and testConfig deliberately leaves the settings bag empty.
+func testConfigWithSheets(resources ...string) *types.DataSourceConfig {
+	cfg := testConfig(resources...)
+	cfg.Settings = map[string]interface{}{"include_sheets": true}
+	return cfg
+}
+
 func rawJSON(value string) json.RawMessage {
 	return json.RawMessage(value)
 }
@@ -745,7 +754,7 @@ func TestScanScopeReportsSkippedNodesAndSingleDocumentScopeHasNone(t *testing.T)
 		ResourceID:  "resource",
 		Reference:   resourceReference{WorkspaceID: "space"},
 		StartNodeID: "root",
-	})
+	}, documentSettings{})
 	if err != nil {
 		t.Fatalf("scanScope() error = %v", err)
 	}
@@ -771,33 +780,39 @@ func TestScanScopeReportsSkippedNodesAndSingleDocumentScopeHasNone(t *testing.T)
 		ResourceID: "resource",
 		Reference:  resourceReference{WorkspaceID: "space"},
 		Document:   &document,
-	})
+	}, documentSettings{})
 	if err != nil || len(documents) != 1 || documents[0].ID != "doc" || len(skipped) != 0 {
 		t.Fatalf("single-document scanScope() = %#v, %#v, %v", documents, skipped, err)
 	}
 }
 
 // The reason has to say which kind of unsupported a node is: a video is skipped
-// on purpose, a native type has simply not been implemented.
+// on purpose, a native type has simply not been implemented, and a spreadsheet
+// the connector could read is skipped only because its switch is off.
 func TestSkipReasonDistinguishesMediaFromUnimplementedTypes(t *testing.T) {
+	sheetsOn := documentSettings{IncludeSheets: true}
 	for _, testCase := range []struct {
-		label string
-		node  node
-		want  string
+		label    string
+		node     node
+		settings documentSettings
+		want     string
 	}{
 		{
 			"video category",
 			node{Type: "FILE", Category: "VIDEO", Extension: "mp4"},
+			documentSettings{},
 			"video/media files are deliberately not downloaded by this connector",
 		},
 		{
 			"video extension without a category",
 			node{Type: "FILE", Category: "OTHER", Extension: "MOV"},
+			documentSettings{},
 			"video/media files are deliberately not downloaded by this connector",
 		},
 		{
 			"audio extension",
 			node{Type: "FILE", Category: "OTHER", Extension: "mp3"},
+			documentSettings{},
 			"video/media files are deliberately not downloaded by this connector",
 		},
 		{
@@ -809,6 +824,7 @@ func TestSkipReasonDistinguishesMediaFromUnimplementedTypes(t *testing.T) {
 			// the opposite of what the connector does.
 			"type without a dedicated label",
 			node{Type: "FILE", Category: "ALIDOC"},
+			documentSettings{},
 			"no ingest path for this DingTalk node type in this connector yet",
 		},
 		{
@@ -817,26 +833,53 @@ func TestSkipReasonDistinguishesMediaFromUnimplementedTypes(t *testing.T) {
 			// and the node shape it is read from.
 			"spreadsheet outside its file node shape",
 			node{Type: "FOLDER", Category: "ALIDOC", Extension: "axls"},
+			documentSettings{},
 			"DingTalk spreadsheet is ingested only from a FILE node in the ALIDOC category",
 		},
 		{
 			"multidimensional table",
 			node{Type: "FILE", Category: "ALIDOC", Extension: "able"},
+			documentSettings{},
 			"DingTalk multi-dimensional table has no ingest path in this connector yet",
 		},
 		{
 			"mind map",
 			node{Type: "FILE", Category: "ALIDOC", Extension: "amind"},
+			documentSettings{},
 			"DingTalk mind map has no ingest path in this connector yet",
 		},
 		{
 			"unknown type",
 			node{Type: "FILE", Category: "OTHER", Extension: "bin"},
+			documentSettings{},
 			"no ingest path for this DingTalk node type in this connector yet",
+		},
+		{
+			// The skip is not a missing feature: the workbook is readable, the
+			// data source simply never opted in, and the log has to say so.
+			"spreadsheet with the switch off",
+			node{Type: "FILE", Category: "ALIDOC", Extension: "axls"},
+			documentSettings{},
+			"spreadsheets are not ingested because include_sheets is not enabled for this data source",
+		},
+		{
+			// A node that is not a spreadsheet keeps its own reason even while
+			// the switch is on, so the switch never relabels a node it does not
+			// govern.
+			"unsupported type with the switch on",
+			node{Type: "FILE", Category: "ALIDOC", Extension: "amind"},
+			sheetsOn,
+			"DingTalk mind map has no ingest path in this connector yet",
+		},
+		{
+			"media with the switch on",
+			node{Type: "FILE", Category: "VIDEO", Extension: "mp4"},
+			sheetsOn,
+			"video/media files are deliberately not downloaded by this connector",
 		},
 	} {
 		t.Run(testCase.label, func(t *testing.T) {
-			if got := skipReason(testCase.node); got != testCase.want {
+			if got := skipReason(testCase.node, testCase.settings); got != testCase.want {
 				t.Fatalf("skipReason() = %q, want %q", got, testCase.want)
 			}
 		})

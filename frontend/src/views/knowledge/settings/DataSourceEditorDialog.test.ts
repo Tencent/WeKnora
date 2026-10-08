@@ -341,6 +341,51 @@ test('an existing Yuque data source on the TOC layout reports it', async () => {
   } finally { f.close() }
 })
 
+test('a DingTalk data source reports both ingestion switches, defaulting to off', async () => {
+  const off = await fixture({ type: 'dingtalk', settings: {} })
+  try {
+    // The connector treats a missing key as false, so an existing source that
+    // predates these controls must render as off — and stay untouched.
+    assert.equal(off.vm.dingtalkIncludeUploadedFiles, false)
+    assert.equal(off.vm.dingtalkIncludeSheets, false)
+    assert.equal(off.vm.form.config.settings.include_uploaded_files, undefined)
+    assert.equal(off.vm.form.config.settings.include_sheets, undefined)
+  } finally { off.close() }
+
+  const on = await fixture({
+    type: 'dingtalk',
+    settings: { include_uploaded_files: true, include_sheets: true },
+  })
+  try {
+    assert.equal(on.vm.dingtalkIncludeUploadedFiles, true)
+    assert.equal(on.vm.dingtalkIncludeSheets, true)
+  } finally { on.close() }
+
+  const sheetsOnly = await fixture({ type: 'dingtalk', settings: { include_sheets: true } })
+  try {
+    // The two switches are independent: one must never imply the other.
+    assert.equal(sheetsOnly.vm.dingtalkIncludeSheets, true)
+    assert.equal(sheetsOnly.vm.dingtalkIncludeUploadedFiles, false)
+  } finally { sheetsOnly.close() }
+})
+
+test('toggling one DingTalk switch leaves the other alone', async () => {
+  const f = await fixture({ type: 'dingtalk', settings: {} })
+  try {
+    f.vm.dingtalkIncludeSheets = true
+    assert.equal(f.vm.form.config.settings.include_sheets, true)
+    assert.equal(f.vm.form.config.settings.include_uploaded_files, undefined)
+
+    f.vm.dingtalkIncludeUploadedFiles = true
+    assert.equal(f.vm.form.config.settings.include_sheets, true)
+    assert.equal(f.vm.form.config.settings.include_uploaded_files, true)
+
+    f.vm.dingtalkIncludeSheets = false
+    assert.equal(f.vm.form.config.settings.include_sheets, false)
+    assert.equal(f.vm.form.config.settings.include_uploaded_files, true)
+  } finally { f.close() }
+})
+
 test('Cloud hierarchy limitation stays visible after an empty space expansion', async () => {
   const f = await fixture()
   try {

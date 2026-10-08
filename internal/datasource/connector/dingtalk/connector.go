@@ -56,11 +56,17 @@ var ingestableDocumentExtensions = map[string]string{
 // just listed will not be ingested. Both answers are deterministic: retrying
 // the sync can never turn such a node into a document, which is what separates
 // a skip from a failed read that must be retried.
-func skipReason(n node) string {
+func skipReason(n node, settings documentSettings) string {
 	extension := strings.ToLower(strings.TrimSpace(n.Extension))
 	_, knownMediaExtension := mediaExtensions[extension]
 	if strings.EqualFold(n.Category, "VIDEO") || knownMediaExtension {
 		return "video/media files are deliberately not downloaded by this connector"
+	}
+	// A spreadsheet this connector can read, but this data source was never
+	// told to. Naming the switch makes the skip actionable instead of looking
+	// like a missing feature.
+	if n.isSheet() && !settings.IncludeSheets {
+		return "spreadsheets are not ingested because include_sheets is not enabled for this data source"
 	}
 	if label := ingestableDocumentExtensions[extension]; label != "" {
 		return label + " is ingested only from a FILE node in the ALIDOC category"
@@ -132,6 +138,7 @@ func (c *Connector) Validate(ctx context.Context, dataSourceConfig *types.DataSo
 		return err
 	}
 	api := c.api(cfg)
+	settings := parseDocumentSettings(dataSourceConfig)
 	workspaces, err := api.listWorkspaces(ctx)
 	if err != nil {
 		return fmt.Errorf("validate DingTalk data source: %w", err)
@@ -150,7 +157,9 @@ func (c *Connector) Validate(ctx context.Context, dataSourceConfig *types.DataSo
 		if rootNodeID == "" {
 			continue
 		}
-		document, found, unexplored, err := firstValidateDocument(ctx, api, rootNodeID, &listings)
+		document, found, unexplored, err := firstValidateDocument(
+			ctx, api, rootNodeID, settings, &listings,
+		)
 		if err != nil {
 			lastErr = fmt.Errorf("workspace %q: %w", item.Name, err)
 			// A cancelled or timed-out request proves nothing about the
@@ -215,8 +224,15 @@ const maxValidateListings = 20
 // unexplored reports that some nodes were never seen, because the budget ran
 // out or a folder could not be listed, so the walk cannot prove the workspace
 // holds no readable document.
+//
+// The walk selects nodes with the same settings-aware predicate the picker and
+// the sync use, so a type the data source does not ingest is never probed.
 func firstValidateDocument(
-	ctx context.Context, api dingTalkAPI, rootNodeID string, listings *int,
+	ctx context.Context,
+	api dingTalkAPI,
+	rootNodeID string,
+	settings documentSettings,
+	listings *int,
 ) (document node, found, unexplored bool, err error) {
 	queue := []string{rootNodeID}
 	visited := map[string]struct{}{rootNodeID: {}}
@@ -249,7 +265,7 @@ func firstValidateDocument(
 				break
 			}
 			for _, child := range children {
-				if child.isDocument() {
+				if child.isIngestible(settings) {
 					return child, true, unexplored, nil
 				}
 				if child.isFolder() || child.HasChildren {
@@ -308,6 +324,7 @@ func (c *Connector) ListResources(
 		return nil, err
 	}
 	api := c.api(cfg)
+	settings := parseDocumentSettings(dataSourceConfig)
 	if strings.TrimSpace(parentID) == "" {
 		workspaces, err := api.listWorkspaces(ctx)
 		if err != nil {
@@ -367,7 +384,7 @@ func (c *Connector) ListResources(
 		if err != nil {
 			return nil, err
 		}
-		scopes, failures, err := resolveSyncScopes(ctx, api, workspaces, []string{parentID})
+		scopes, failures, err := resolveSyncScopes(ctx, api, workspaces, []string{parentID}, settings)
 		if err != nil {
 			return nil, err
 		}
@@ -405,7 +422,7 @@ func (c *Connector) ListResources(
 	}
 	resources := make([]types.Resource, 0, len(children))
 	for _, child := range children {
-		if !child.isFolder() && !child.isDocument() {
+		if !child.isFolder() && !child.isIngestible(settings) {
 			continue
 		}
 		if child.WorkspaceID != "" && child.WorkspaceID != parentRef.WorkspaceID {
@@ -621,11 +638,12 @@ func (c *Connector) sync(
 	}
 
 	api := c.api(cfg)
+	settings := parseDocumentSettings(dataSourceConfig)
 	workspaces, err := api.listWorkspaces(ctx)
 	if err != nil {
 		return nil, nil, err
 	}
-	scopes, failures, err := resolveSyncScopes(ctx, api, workspaces, selected)
+	scopes, failures, err := resolveSyncScopes(ctx, api, workspaces, selected, settings)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -661,7 +679,7 @@ func (c *Connector) sync(
 				oldRevisions = stored
 			}
 		}
-		documents, skipped, err := scanScope(ctx, api, scope)
+		documents, skipped, err := scanScope(ctx, api, scope, settings)
 		if err != nil {
 			if isContextError(err) {
 				return nil, nil, err
@@ -682,7 +700,7 @@ func (c *Connector) sync(
 		// unlike a failed read below, which must stay retryable.
 		for _, node := range skipped {
 			logger.Infof(ctx, "[DingTalk] skip node %s (name=%q type=%s category=%s extension=%s): %s",
-				node.ID, node.title(), node.Type, node.Category, node.Extension, skipReason(node))
+				node.ID, node.title(), node.Type, node.Category, node.Extension, skipReason(node, settings))
 		}
 
 		newRevisions := make(map[string]string, len(documents))
@@ -802,6 +820,7 @@ func resolveSyncScopes(
 	api dingTalkAPI,
 	workspaces []workspace,
 	resourceIDs []string,
+	settings documentSettings,
 ) ([]syncScope, map[string]error, error) {
 	byID := make(map[string]workspace, len(workspaces))
 	for _, item := range workspaces {
@@ -877,7 +896,7 @@ func resolveSyncScopes(
 			return syncScope{
 				ResourceID: canonicalID, Reference: ref, StartNodeID: selectedNode.ID,
 			}, nil
-		case selectedNode.isDocument():
+		case selectedNode.isIngestible(settings):
 			document := selectedNode
 			return syncScope{
 				ResourceID: canonicalID, Reference: ref, Document: &document,
@@ -944,11 +963,16 @@ func childByID(children []node, nodeID string) (node, bool) {
 // nodes it saw but cannot ingest. The skipped nodes are returned rather than
 // discarded so the caller can report them: a full sync must never look clean
 // while silently dropping part of the tree.
-func scanScope(ctx context.Context, api dingTalkAPI, scope syncScope) ([]node, []node, error) {
+func scanScope(
+	ctx context.Context,
+	api dingTalkAPI,
+	scope syncScope,
+	settings documentSettings,
+) ([]node, []node, error) {
 	if scope.Document != nil {
 		return []node{*scope.Document}, nil, nil
 	}
-	return scanWorkspace(ctx, api, scope.Reference.WorkspaceID, scope.StartNodeID)
+	return scanWorkspace(ctx, api, scope.Reference.WorkspaceID, scope.StartNodeID, settings)
 }
 
 // scanWorkspace walks a workspace subtree breadth-first. Folders are traversal
@@ -958,6 +982,7 @@ func scanWorkspace(
 	api dingTalkAPI,
 	workspaceID string,
 	rootNodeID string,
+	settings documentSettings,
 ) ([]node, []node, error) {
 	queue := []string{rootNodeID}
 	visitedParents := make(map[string]struct{})
@@ -995,7 +1020,7 @@ func scanWorkspace(
 				return nil, nil, fmt.Errorf("DingTalk workspace exceeds %d nodes", maxTraversalNodes)
 			}
 			switch {
-			case child.isDocument():
+			case child.isIngestible(settings):
 				documents = append(documents, child)
 			case child.isFolder():
 				// Containers hold no content of their own, so they are never

@@ -2,6 +2,7 @@ package dingtalk
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
@@ -33,11 +34,12 @@ func workbookFixture(document node) *fakeAPI {
 	}
 }
 
-// A spreadsheet has to be recognised as an ingestible document, not only as a
-// sheet: the workspace scan and the picker both select nodes by isDocument(), so
-// an unrecognised sheet would never be enumerated at all. The other native types
-// and media stay out.
+// A spreadsheet has to be recognised as a node with a read path, not only as a
+// sheet, and it has to be admitted by the settings-aware predicate the scan and
+// the picker share — but only once include_sheets is on. The other native types
+// and media stay out either way.
 func TestSheetNodeClassification(t *testing.T) {
+	sheetsOn := documentSettings{IncludeSheets: true}
 	for _, testCase := range []struct {
 		label    string
 		node     node
@@ -59,6 +61,16 @@ func TestSheetNodeClassification(t *testing.T) {
 			}
 			if got := testCase.node.isDocument(); got != testCase.document {
 				t.Fatalf("isDocument() = %v, want %v", got, testCase.document)
+			}
+			// Off by default: with every switch unset only the native adoc path
+			// is admitted. With include_sheets on, admission follows the read
+			// path exactly.
+			if got := testCase.node.isIngestible(documentSettings{}); got != testCase.node.isOnlineDocument() {
+				t.Fatalf("isIngestible(off) = %v, want %v",
+					got, testCase.node.isOnlineDocument())
+			}
+			if got := testCase.node.isIngestible(sheetsOn); got != testCase.document {
+				t.Fatalf("isIngestible(on) = %v, want %v", got, testCase.document)
 			}
 		})
 	}
@@ -92,7 +104,7 @@ func TestFetchAllRendersWorkbookAsOneDocument(t *testing.T) {
 	}
 
 	items, err := testConnector(api).FetchAll(
-		context.Background(), testConfig("space"), []string{"space"},
+		context.Background(), testConfigWithSheets("space"), []string{"space"},
 	)
 	if err != nil {
 		t.Fatalf("FetchAll() error = %v", err)
@@ -150,7 +162,7 @@ func TestWorkbookOmitsEmptySheets(t *testing.T) {
 	}
 
 	items, err := testConnector(api).FetchAll(
-		context.Background(), testConfig("space"), []string{"space"},
+		context.Background(), testConfigWithSheets("space"), []string{"space"},
 	)
 	if err != nil || len(items) != 1 {
 		t.Fatalf("FetchAll() = %#v, %v; want one workbook item", items, err)
@@ -219,7 +231,7 @@ func TestWorkbookReadsCellsInRowChunks(t *testing.T) {
 			api.sheetRangeFunc = syntheticSheetRows
 
 			items, err := testConnector(api).FetchAll(
-				context.Background(), testConfig("space"), []string{"space"},
+				context.Background(), testConfigWithSheets("space"), []string{"space"},
 			)
 			if err != nil || len(items) != 1 {
 				t.Fatalf("FetchAll() = %#v, %v", items, err)
@@ -265,7 +277,7 @@ func TestWorkbookCapsReportTheDroppedExtent(t *testing.T) {
 	api.sheetRangeFunc = syntheticSheetRows
 
 	items, err := testConnector(api).FetchAll(
-		context.Background(), testConfig("space"), []string{"space"},
+		context.Background(), testConfigWithSheets("space"), []string{"space"},
 	)
 	if err != nil || len(items) != 1 {
 		t.Fatalf("FetchAll() = %#v, %v; want the capped workbook to sync", items, err)
@@ -358,7 +370,7 @@ func TestWorkbookWarnsAboutTruncatedSheetWithABlankReadWindow(t *testing.T) {
 			}
 
 			items, err := testConnector(api).FetchAll(
-				context.Background(), testConfig("space"), []string{"space"},
+				context.Background(), testConfigWithSheets("space"), []string{"space"},
 			)
 			if err != nil || len(items) != 1 {
 				t.Fatalf("FetchAll() = %#v, %v; want the workbook item", items, err)
@@ -402,7 +414,7 @@ func TestWorkbookReadFailureIsReportedAndRetried(t *testing.T) {
 	}
 
 	items, next, syncErr := testConnector(api).FetchIncremental(
-		context.Background(), testConfig("space"), &types.SyncCursor{ConnectorCursor: cursorMap},
+		context.Background(), testConfigWithSheets("space"), &types.SyncCursor{ConnectorCursor: cursorMap},
 	)
 	var partial *datasource.PartialFetchError
 	if !errors.As(syncErr, &partial) {
@@ -425,7 +437,7 @@ func TestWorkbookReadFailureIsReportedAndRetried(t *testing.T) {
 	delete(api.sheetRangeErrors, failingRange)
 	api.sheetValues = map[string][][]string{failingRange: {{"name"}, {"alpha"}}}
 	items, _, err = testConnector(api).FetchIncremental(
-		context.Background(), testConfig("space"), &types.SyncCursor{ConnectorCursor: cursorMap},
+		context.Background(), testConfigWithSheets("space"), &types.SyncCursor{ConnectorCursor: cursorMap},
 	)
 	if err != nil || len(items) != 1 ||
 		!strings.Contains(string(items[0].Content), "| name |") {
@@ -439,7 +451,7 @@ func TestValidateProbesSheetNodesThroughTheSheetsAPI(t *testing.T) {
 	api := workbookFixture(sheetNode("book-1", "Book.axls"))
 	api.sheets = map[string][]sheet{"book-1": {{ID: "sheet-1", Name: "Data"}}}
 
-	if err := testConnector(api).Validate(context.Background(), testConfig()); err != nil {
+	if err := testConnector(api).Validate(context.Background(), testConfigWithSheets()); err != nil {
 		t.Fatalf("Validate() error = %v", err)
 	}
 	if api.sheetListCalls["book-1"] != 1 || len(api.blockCalls) != 0 {
@@ -447,9 +459,273 @@ func TestValidateProbesSheetNodesThroughTheSheetsAPI(t *testing.T) {
 	}
 
 	api.sheetListErrors = map[string]error{"book-1": errors.New("forbidden.operationIllegal")}
-	err := testConnector(api).Validate(context.Background(), testConfig())
+	err := testConnector(api).Validate(context.Background(), testConfigWithSheets())
 	if err == nil || !strings.Contains(err.Error(), "forbidden.operationIllegal") {
 		t.Fatalf("Validate() error = %v, want the provider refusal", err)
+	}
+}
+
+// switchStates are the three states every switch test has to cover: the key is
+// absent from a data source created before the switch existed, explicitly
+// false, and explicitly true.
+func switchStates(t *testing.T, key string) []struct {
+	label    string
+	settings map[string]interface{}
+	on       bool
+} {
+	t.Helper()
+	return []struct {
+		label    string
+		settings map[string]interface{}
+		on       bool
+	}{
+		{key + " unset", nil, false},
+		{key + " explicitly off", map[string]interface{}{key: false}, false},
+		{key + " explicitly on", map[string]interface{}{key: true}, true},
+	}
+}
+
+// The switch is read from the settings bag the way Yuque reads its own, and a
+// missing or malformed value keeps spreadsheets out.
+func TestParseDocumentSettingsReadsTheSheetsSwitch(t *testing.T) {
+	for _, testCase := range []struct {
+		label    string
+		settings map[string]interface{}
+		want     bool
+	}{
+		{"unset", nil, false},
+		{"empty bag", map[string]interface{}{}, false},
+		{"explicit true", map[string]interface{}{"include_sheets": true}, true},
+		{"explicit false", map[string]interface{}{"include_sheets": false}, false},
+		{"string true", map[string]interface{}{"include_sheets": "true"}, true},
+		{"string ON", map[string]interface{}{"include_sheets": " ON "}, true},
+		{"string 1", map[string]interface{}{"include_sheets": "1"}, true},
+		{"string yes", map[string]interface{}{"include_sheets": "yes"}, true},
+		{"string off", map[string]interface{}{"include_sheets": "off"}, false},
+		{"string False", map[string]interface{}{"include_sheets": "False"}, false},
+		{"string 0", map[string]interface{}{"include_sheets": "0"}, false},
+		{"string no", map[string]interface{}{"include_sheets": "no"}, false},
+		{"garbage string", map[string]interface{}{"include_sheets": "maybe"}, false},
+		{"wrong type", map[string]interface{}{"include_sheets": 1}, false},
+		// A switch for another type must never turn this one on.
+		{"unrelated key", map[string]interface{}{"include_uploaded_files": true}, false},
+	} {
+		t.Run(testCase.label, func(t *testing.T) {
+			cfg := testConfig()
+			cfg.Settings = testCase.settings
+			if got := parseDocumentSettings(cfg).IncludeSheets; got != testCase.want {
+				t.Fatalf("IncludeSheets = %v, want %v", got, testCase.want)
+			}
+		})
+	}
+	// A nil config cannot be parsed by the connector, but reading its settings
+	// must not panic either.
+	if got := parseDocumentSettings(nil).IncludeSheets; got {
+		t.Fatalf("parseDocumentSettings(nil).IncludeSheets = true, want false")
+	}
+}
+
+// Validate must honour the switch: with it off a workbook is not a document, so
+// the sheets API is never probed. With it on the workbook is probed through
+// listSheets — the API the sync reads it with — and not through the blocks API.
+func TestValidateHonoursTheSheetsSwitch(t *testing.T) {
+	for _, testCase := range switchStates(t, "include_sheets") {
+		t.Run(testCase.label, func(t *testing.T) {
+			api := workbookFixture(sheetNode("book-1", "Book.axls"))
+			api.sheets = map[string][]sheet{"book-1": {{ID: "sheet-1", Name: "Data"}}}
+			cfg := testConfig()
+			cfg.Settings = testCase.settings
+
+			if err := testConnector(api).Validate(context.Background(), cfg); err != nil {
+				t.Fatalf("Validate() error = %v", err)
+			}
+			if testCase.on {
+				if api.sheetListCalls["book-1"] != 1 {
+					t.Fatalf("sheet list calls = %#v, want exactly one probe", api.sheetListCalls)
+				}
+			} else if len(api.sheetListCalls) != 0 {
+				t.Fatalf("sheet list calls = %#v, want no probe while the switch is off",
+					api.sheetListCalls)
+			}
+			// A workbook is never probed through the blocks API: that would
+			// report a readable selection as broken.
+			if len(api.blockCalls) != 0 {
+				t.Fatalf("block calls = %#v, want none for a workbook", api.blockCalls)
+			}
+		})
+	}
+}
+
+// The picker follows the same switch, so a node the sync would skip is never
+// offered for selection.
+func TestListResourcesHonoursTheSheetsSwitch(t *testing.T) {
+	for _, testCase := range switchStates(t, "include_sheets") {
+		t.Run(testCase.label, func(t *testing.T) {
+			api := workbookFixture(node{})
+			api.nodes["root"] = []node{
+				{
+					ID: "adoc", WorkspaceID: "space", Name: "Runbook.adoc",
+					Type: "FILE", Category: "ALIDOC", Extension: "adoc",
+				},
+				sheetNode("book-1", "Checklist.axls"),
+				{
+					ID: "able", WorkspaceID: "space", Name: "Table.able",
+					Type: "FILE", Category: "ALIDOC", Extension: "able",
+				},
+			}
+			rootID, err := encodeResourceReference(resourceReference{WorkspaceID: "space"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			cfg := testConfig()
+			cfg.Settings = testCase.settings
+
+			resources, err := testConnector(api).ListResources(context.Background(), cfg, rootID)
+			if err != nil {
+				t.Fatalf("ListResources() error = %v", err)
+			}
+			names := make(map[string]bool, len(resources))
+			for _, resource := range resources {
+				names[resource.Name] = true
+			}
+			if !names["Runbook.adoc"] {
+				t.Fatalf("the adoc document is missing from %#v", names)
+			}
+			if names["Checklist.axls"] != testCase.on {
+				t.Fatalf("workbook listed = %v, want %v (%#v)",
+					names["Checklist.axls"], testCase.on, names)
+			}
+			// A node with no ingest path is hidden either way.
+			if names["Table.able"] {
+				t.Fatalf("unsupported node was listed: %#v", names)
+			}
+		})
+	}
+}
+
+// Full sync and incremental sync share one scan, so the switch has to hold in
+// both. With it off, the pre-#3788 behaviour stands: the workbook is reported as
+// skipped with an actionable reason and its sheets are never read.
+func TestSyncHonoursTheSheetsSwitch(t *testing.T) {
+	for _, testCase := range switchStates(t, "include_sheets") {
+		t.Run(testCase.label, func(t *testing.T) {
+			api := workbookFixture(node{})
+			api.nodes["root"] = []node{
+				{
+					ID: "adoc", WorkspaceID: "space", Name: "Runbook.adoc",
+					Type: "FILE", Category: "ALIDOC", Extension: "adoc", ModifiedTime: "r1",
+				},
+				sheetNode("book-1", "Checklist.axls"),
+			}
+			api.blocks = map[string][]json.RawMessage{
+				"adoc": {rawJSON(`{"blockType":"paragraph","paragraph":{"text":"run"}}`)},
+			}
+			api.sheets = map[string][]sheet{"book-1": {{ID: "sheet-1", Name: "Data"}}}
+			api.sheetInfos = map[string]sheet{
+				sheetKey("book-1", "sheet-1"): {ID: "sheet-1", Name: "Data", LastNonEmptyRow: 1, LastNonEmptyColumn: 1},
+			}
+			api.sheetValues = map[string][][]string{
+				sheetRangeKey("book-1", "sheet-1", "A1:A1"): {{"value"}},
+			}
+			cfg := testConfig("space")
+			cfg.Settings = testCase.settings
+			logs := captureLogs(t)
+
+			items, err := testConnector(api).FetchAll(context.Background(), cfg, []string{"space"})
+			if err != nil {
+				t.Fatalf("FetchAll() error = %v", err)
+			}
+			gotWorkbook := false
+			gotAdoc := false
+			for _, item := range items {
+				switch item.ExternalID {
+				case "book-1":
+					gotWorkbook = true
+				case "adoc":
+					gotAdoc = true
+				}
+			}
+			if !gotAdoc {
+				t.Fatalf("adoc document disappeared from %#v", items)
+			}
+			if gotWorkbook != testCase.on {
+				t.Fatalf("FetchAll() synced the workbook = %v, want %v: %#v",
+					gotWorkbook, testCase.on, items)
+			}
+			if testCase.on {
+				if len(api.sheetListCalls) == 0 || len(api.sheetRangeCalls) == 0 {
+					t.Fatalf("workbook was not read: sheets = %#v, ranges = %#v",
+						api.sheetListCalls, api.sheetRangeCalls)
+				}
+			} else {
+				if len(api.sheetListCalls) != 0 || len(api.sheetRangeCalls) != 0 {
+					t.Fatalf("workbook was read while the switch is off: sheets = %#v, ranges = %#v",
+						api.sheetListCalls, api.sheetRangeCalls)
+				}
+				wantLog := "spreadsheets are not ingested because include_sheets " +
+					"is not enabled for this data source"
+				if !strings.Contains(logs.String(), wantLog) {
+					t.Fatalf("skip log is missing %q:\n%s", wantLog, logs.String())
+				}
+			}
+
+			// The incremental path walks the same scan, so it must agree.
+			api.sheetListCalls = nil
+			api.sheetRangeCalls = nil
+			cursorMap, err := encodeCursor(&cursorState{
+				Version:   cursorVersion,
+				Resources: map[string]map[string]string{"space": {}},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			items, _, err = testConnector(api).FetchIncremental(
+				context.Background(), cfg, &types.SyncCursor{ConnectorCursor: cursorMap},
+			)
+			if err != nil {
+				t.Fatalf("FetchIncremental() error = %v", err)
+			}
+			wantItems := 1
+			if testCase.on {
+				wantItems = 2
+			}
+			if len(items) != wantItems {
+				t.Fatalf("FetchIncremental() returned %d items, want %d: %#v",
+					len(items), wantItems, items)
+			}
+			if testCase.on && len(api.sheetListCalls) == 0 {
+				t.Fatalf("incremental sync did not read the workbook: %#v", api.sheetListCalls)
+			}
+			if !testCase.on && (len(api.sheetListCalls) != 0 || len(api.sheetRangeCalls) != 0) {
+				t.Fatalf("incremental sync read the workbook while the switch is off: %#v, %#v",
+					api.sheetListCalls, api.sheetRangeCalls)
+			}
+		})
+	}
+}
+
+// Selecting a spreadsheet directly is a scope the sync cannot resolve while the
+// switch is off, exactly as it could not before the workbooks path existed.
+func TestSelectingASheetNeedsTheSwitch(t *testing.T) {
+	api := workbookFixture(sheetNode("book-1", "Checklist.axls"))
+	api.sheets = map[string][]sheet{"book-1": {{ID: "sheet-1", Name: "Data"}}}
+	resourceID, err := encodeResourceReference(resourceReference{WorkspaceID: "space", NodeID: "book-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := testConfig(resourceID)
+	cfg.Settings = map[string]interface{}{"include_sheets": false}
+
+	items, err := testConnector(api).FetchAll(context.Background(), cfg, []string{resourceID})
+	var partial *datasource.PartialFetchError
+	if !errors.As(err, &partial) {
+		t.Fatalf("FetchAll() error = %v, want PartialFetchError", err)
+	}
+	if len(api.sheetListCalls) != 0 {
+		t.Fatalf("sheet list calls = %#v, want none while the switch is off", api.sheetListCalls)
+	}
+	if len(items) != 1 || items[0].Metadata["error_reason_code"] != "dingtalk_resource_failed" {
+		t.Fatalf("FetchAll() = %#v, want one failed resource", items)
 	}
 }
 

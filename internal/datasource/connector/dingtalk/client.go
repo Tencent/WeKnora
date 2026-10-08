@@ -109,17 +109,32 @@ func (n node) isSheet() bool {
 		strings.EqualFold(n.Extension, "axls")
 }
 
-// isDocument reports whether the connector can ingest the node: a native adoc
-// document through the blocks API or a native spreadsheet through the workbooks
-// API. A sheet has to answer true here rather than only in the sync path,
-// because both the workspace scan and the picker select nodes by this predicate
-// — a sheet left out of it is never enumerated at all, not merely rendered as
-// unsupported. Uploaded files join this predicate together with the download
-// path that makes them ingestible, in their own change.
-func (n node) isDocument() bool {
-	return (strings.EqualFold(n.Type, "FILE") &&
+// isOnlineDocument reports whether the node is a native DingTalk document whose
+// blocks can be read through the doc suites API.
+func (n node) isOnlineDocument() bool {
+	return strings.EqualFold(n.Type, "FILE") &&
 		strings.EqualFold(n.Category, "ALIDOC") &&
-		strings.EqualFold(n.Extension, "adoc")) || n.isSheet()
+		strings.EqualFold(n.Extension, "adoc")
+}
+
+// isDocument reports whether the connector has a read path for the node at all:
+// a native adoc document through the blocks API or a native spreadsheet through
+// the workbooks API. Whether a given data source takes it is isIngestible's
+// answer, because a sheet is guarded by its own switch.
+func (n node) isDocument() bool {
+	return n.isOnlineDocument() || n.isSheet()
+}
+
+// isIngestible reports whether this data source ingests the node: a read path
+// must exist and the switch guarding it must be on. A sheet has to be admitted
+// here rather than only in the sync path, because both the workspace scan and
+// the picker select nodes by this predicate — a sheet left out of it is never
+// enumerated at all, not merely rendered as unsupported.
+func (n node) isIngestible(settings documentSettings) bool {
+	if n.isOnlineDocument() {
+		return true
+	}
+	return settings.IncludeSheets && n.isSheet()
 }
 
 func (n node) title() string {
