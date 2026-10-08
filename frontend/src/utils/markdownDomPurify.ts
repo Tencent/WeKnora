@@ -32,6 +32,12 @@ export const domPurifySecurityHooks = {
         element.removeAttribute(attr);
       }
     });
+    // target is allowed only so the afterSanitizeElements hook can add
+    // target="_blank" together with rel="noopener noreferrer"; never keep an
+    // author-supplied value (SVG <a>, <area>, non-http hrefs skip the hook).
+    if (element.hasAttribute('target')) {
+      element.removeAttribute('target');
+    }
   },
   afterSanitizeElements: (currentNode: Node) => {
     if (!('tagName' in currentNode) || !('getAttribute' in currentNode)) return;
