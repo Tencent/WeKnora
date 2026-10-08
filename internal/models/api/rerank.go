@@ -23,6 +23,9 @@ const (
 	// array, and rankings carrying an unbounded logit instead of a
 	// probability.
 	RerankNIM RerankAPI = "nim-rerank"
+	// RerankPinecone is Pinecone Inference's standalone /rerank endpoint:
+	// documents are objects and results live under data with a score field.
+	RerankPinecone RerankAPI = "pinecone-rerank"
 	// RerankTEI is the native Text Embeddings Inference shape: POST /rerank
 	// with {query, texts}, answering a bare array of {index, score}.
 	RerankTEI RerankAPI = "tei-rerank"
@@ -37,7 +40,7 @@ const (
 // Known reports whether the value names a protocol this build implements.
 func (a RerankAPI) Known() bool {
 	switch a {
-	case RerankCohere, RerankDashScope, RerankNIM, RerankTEI,
+	case RerankCohere, RerankDashScope, RerankNIM, RerankPinecone, RerankTEI,
 		RerankTencentLKEAP, RerankVolcengineKnowledge:
 		return true
 	}
@@ -49,7 +52,7 @@ func (a RerankAPI) Known() bool {
 // vendor SDKs are imported.
 func (a RerankAPI) HTTPServed() bool {
 	switch a {
-	case RerankCohere, RerankDashScope, RerankNIM, RerankTEI:
+	case RerankCohere, RerankDashScope, RerankNIM, RerankPinecone, RerankTEI:
 		return true
 	}
 	return false

@@ -61,6 +61,7 @@ func TestRerankProtocolAssignment(t *testing.T) {
 	for id, want := range map[string]api.RerankAPI{
 		"aliyun":          api.RerankDashScope,
 		"nvidia":          api.RerankNIM,
+		"pinecone":        api.RerankPinecone,
 		"huggingface_tei": api.RerankTEI,
 		"lkeap":           api.RerankTencentLKEAP,
 		"volcengine":      api.RerankVolcengineKnowledge,
