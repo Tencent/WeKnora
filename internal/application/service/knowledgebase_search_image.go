@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"slices"
 
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -183,7 +184,7 @@ func countDroppedImages(hits []*types.IndexWithScore, retriever types.RetrieverT
 	return n
 }
 
-// refillPastDroppedImages gives back the room dropped image rows took in a
+// refillPastDroppedImages gives back, in res, the room dropped image rows took in a
 // group's document pools: stale image rows in the vector pool, and every
 // image row in the keyword pool. An image row's Content is its caption, so
 // it matches a keyword query wherever the caption's own chunk does.
@@ -199,24 +200,27 @@ func countDroppedImages(hits []*types.IndexWithScore, retriever types.RetrieverT
 // such rows, which is what excluding the rows in the engine would return,
 // unless more than maxRetrievalPoolSize-TopK of them rank above the text.
 //
+// A refill is best effort: a search that fails, or answers only in part
+// (RetrieveResult.Error, as when some collections of the store did not
+// answer), stops the refill and leaves the pool it would have replaced. A
+// partial answer to the larger search can hold fewer kept rows than the
+// complete smaller one, or none, so taking it would lose hits the search
+// already had.
+//
 // The FAQ search never needs this, since its index holds no images.
 func refillPastDroppedImages(ctx context.Context, g *storeGroup,
 	params []types.RetrieveParams, res []*types.RetrieveResult,
-) ([]*types.RetrieveResult, error) {
+) {
 	for _, retriever := range []types.RetrieverType{types.VectorRetrieverType, types.KeywordsRetrieverType} {
-		var err error
-		if res, err = refillPool(ctx, g, retriever, params, res); err != nil {
-			return nil, err
-		}
+		refillPool(ctx, g, retriever, params, res)
 	}
-	return res, nil
 }
 
-// refillPool refills the document pool of one retriever type, as
+// refillPool refills, in res, the document pool of one retriever type, as
 // refillPastDroppedImages describes.
 func refillPool(ctx context.Context, g *storeGroup, retriever types.RetrieverType,
 	params []types.RetrieveParams, res []*types.RetrieveResult,
-) ([]*types.RetrieveResult, error) {
+) {
 	set := slices.IndexFunc(res, func(rr *types.RetrieveResult) bool {
 		return rr != nil && rr.RetrieverType == retriever && countDroppedImages(rr.Results, retriever, g) > 0
 	})
@@ -224,30 +228,51 @@ func refillPool(ctx context.Context, g *storeGroup, retriever types.RetrieverTyp
 		return p.RetrieverType == retriever && p.KnowledgeType == ""
 	})
 	if set < 0 || param < 0 {
-		return res, nil
+		return
 	}
 	p := params[param]
 	want := p.TopK
-	for refilled := false; ; refilled = true {
+	refilled := false
+	for {
 		hits := res[set].Results
 		dropped := countDroppedImages(hits, retriever, g)
 		if len(hits) < p.TopK || len(hits)-dropped >= want || p.TopK >= maxRetrievalPoolSize {
-			if refilled {
-				res[set].Results = keepFirstKept(hits, want, retriever, g)
-			}
-			return res, nil
+			break
 		}
 		p.TopK = min(2*p.TopK, maxRetrievalPoolSize)
-		more, err := g.Engine.Retrieve(ctx, []types.RetrieveParams{p})
-		more, err = retainPartialResults(ctx, g, more, err)
-		if err != nil {
-			return nil, err
+		more, ok := refillSearch(ctx, g, p)
+		if !ok {
+			break
 		}
-		if len(more) != 1 || more[0] == nil {
-			return res, nil
-		}
-		res[set] = more[0]
+		res[set] = more
+		refilled = true
 	}
+	if refilled {
+		res[set].Results = keepFirstKept(res[set].Results, want, retriever, g)
+	}
+}
+
+// refillSearch runs one refill search and reports whether its answer is
+// complete; refillPool keeps the pool it has otherwise.
+func refillSearch(ctx context.Context, g *storeGroup, p types.RetrieveParams) (*types.RetrieveResult, bool) {
+	more, err := g.Engine.Retrieve(ctx, []types.RetrieveParams{p})
+	if err == nil && len(more) == 1 && more[0] != nil && more[0].Error != nil {
+		err = more[0].Error
+	}
+	if err != nil {
+		logger.WarnWithFields(ctx, logger.Fields{
+			"tenant_id":  g.OwnerTenantID,
+			"kb_count":   len(g.KBIDs),
+			"store_kind": storeKindLabel(g.StoreID),
+			"retriever":  p.RetrieverType,
+			"top_k":      p.TopK,
+		}, fmt.Sprintf("image row refill incomplete, keeping the smaller pool: %v", err))
+		return nil, false
+	}
+	if len(more) != 1 || more[0] == nil {
+		return nil, false
+	}
+	return more[0], true
 }
 
 // keepFirstKept cuts hits after the n-th one that is not a dropped image row.

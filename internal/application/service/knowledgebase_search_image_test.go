@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"sync"
@@ -401,6 +402,97 @@ func TestRetrieveFromStoresRefillsPastKeywordImageRows(t *testing.T) {
 			assert.Equal(t, tc.wantTopKs, engine.topKs[types.KeywordsRetrieverType])
 			assert.Len(t, engine.topKs[types.VectorRetrieverType], 1,
 				"a vector pool without dropped rows is not searched again")
+		})
+	}
+}
+
+// flakyRefillEngine answers the first search of each retriever type in full
+// and every later one, a refill, as refill says.
+type flakyRefillEngine struct {
+	rankedEngine
+	refill func(rows []*types.IndexWithScore) ([]*types.RetrieveResult, error)
+}
+
+func (e *flakyRefillEngine) Retrieve(ctx context.Context, p types.RetrieveParams) ([]*types.RetrieveResult, error) {
+	res, err := e.rankedEngine.Retrieve(ctx, p)
+	e.mu.Lock()
+	calls := len(e.topKs[p.RetrieverType])
+	e.mu.Unlock()
+	if calls == 1 || err != nil {
+		return res, err
+	}
+	return e.refill(res[0].Results)
+}
+
+func TestRetrieveFromStoresKeepsThePoolWhenARefillIsIncomplete(t *testing.T) {
+	cases := []struct {
+		name   string
+		refill func(rows []*types.IndexWithScore) ([]*types.RetrieveResult, error)
+	}{
+		{
+			// The collection holding the text did not answer the larger
+			// search: what came back is the image rows alone.
+			name: "the refill answers in part",
+			refill: func(rows []*types.IndexWithScore) ([]*types.RetrieveResult, error) {
+				var images []*types.IndexWithScore
+				for _, h := range rows {
+					if h.SourceType == types.ImageSourceType {
+						images = append(images, h)
+					}
+				}
+				return []*types.RetrieveResult{{
+					Results:             images,
+					RetrieverEngineType: types.PostgresRetrieverEngineType,
+					RetrieverType:       types.VectorRetrieverType,
+					Error:               errors.New("collection text: unavailable"),
+				}}, nil
+			},
+		},
+		{
+			name: "the refill fails",
+			refill: func([]*types.IndexWithScore) ([]*types.RetrieveResult, error) {
+				return nil, errors.New("store unavailable")
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			engine := &flakyRefillEngine{
+				rankedEngine: rankedEngine{
+					fakeRetrieveEngineService: fakeRetrieveEngineService{
+						engineType: types.PostgresRetrieverEngineType,
+						support:    []types.RetrieverType{types.VectorRetrieverType, types.KeywordsRetrieverType},
+					},
+					ranked: map[types.RetrieverType][]*types.IndexWithScore{
+						// A full first pool: 40 stale image rows above 10 text.
+						types.VectorRetrieverType: append(
+							rankedHits("kb", "image", 40, 0.9, types.ImageSourceType),
+							rankedHits("kb", "text", 10, 0.5, types.ChunkSourceType)...),
+						types.KeywordsRetrieverType: rankedHits("kb", "kw", 3, 0.9, types.ChunkSourceType),
+					},
+				},
+				refill: tc.refill,
+			}
+			g := &storeGroup{
+				KBIDs: []string{"kb"}, Engine: buildBoundComposite(t, engine), TopK: 50,
+				BaseParams: []types.RetrieveParams{
+					{RetrieverType: types.VectorRetrieverType},
+					{RetrieverType: types.KeywordsRetrieverType},
+				},
+			}
+			res, err := (&knowledgeBaseService{}).retrieveFromStores(
+				context.Background(), []*storeGroup{g}, nil)
+			require.NoError(t, err)
+
+			var vector []*types.IndexWithScore
+			for _, rr := range res {
+				if rr.RetrieverType == types.VectorRetrieverType {
+					vector = append(vector, rr.Results...)
+				}
+			}
+			assert.Equal(t, ids(rankedHits("kb", "text", 10, 0.5, types.ChunkSourceType)), ids(vector),
+				"the text hits of the complete first pool survive an incomplete refill")
+			assert.Equal(t, []int{50, 100}, engine.topKs[types.VectorRetrieverType])
 		})
 	}
 }

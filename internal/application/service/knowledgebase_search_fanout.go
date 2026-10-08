@@ -146,10 +146,7 @@ func retrieveGroup(ctx context.Context, g *storeGroup) ([]*types.RetrieveResult,
 	if err != nil {
 		return nil, err
 	}
-	res, err = refillPastDroppedImages(ctx, g, params, res)
-	if err != nil {
-		return nil, err
-	}
+	refillPastDroppedImages(ctx, g, params, res)
 	filterImageHits(res, g)
 	return res, nil
 }
