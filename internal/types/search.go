@@ -169,6 +169,10 @@ type SearchResult struct {
 	Seq int `gorm:"column:seq"             json:"seq"`
 	// Score
 	Score float64 `                              json:"score"`
+	// VectorScore is the engine's own similarity of a vector hit, before
+	// fusion replaced Score with a rank-based one; 0 for other hits. See
+	// IndexWithScore.VectorScore.
+	VectorScore float64 `json:"-"`
 	// Match type
 	MatchType MatchType `                              json:"match_type"`
 	// SubChunkIndex

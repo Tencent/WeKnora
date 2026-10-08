@@ -91,6 +91,10 @@ func keepHit(hit *types.IndexWithScore, retriever types.RetrieverType, g *storeG
 	if hit == nil {
 		return false
 	}
+	if retriever == types.VectorRetrieverType {
+		// Recorded here, before normalization and fusion rewrite Score.
+		hit.VectorScore = hit.Score
+	}
 	image := hit.SourceType == types.ImageSourceType
 	switch retriever {
 	case types.KeywordsRetrieverType:
