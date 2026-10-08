@@ -123,6 +123,10 @@
             <div v-if="isImgLoading" class="img_loading"><t-loading size="small"></t-loading><span>{{
                 $t('common.loading') }}</span></div>
         </div>
+        <p v-if="session.truncated" class="answer-truncated-notice" role="status">
+            <t-icon name="info-circle" aria-hidden="true" />
+            <span>{{ $t('chat.truncatedHint') }}</span>
+        </p>
         <picturePreview :reviewImg="reviewImg" :reviewUrl="reviewUrl" @closePreImg="closePreImg"></picturePreview>
         <Teleport to="body">
             <ChatCitationFloat :float="citationFloat" :on-enter="cancelCitationClose"
@@ -525,6 +529,17 @@ onBeforeUnmount(() => {
 });
 </script>
 <style lang="less" scoped>
+.answer-truncated-notice {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    margin: 12px 0;
+    color: var(--td-warning-color);
+    font-size: var(--td-font-size-body-medium);
+    line-height: 1.6;
+    .t-icon { flex-shrink: 0; margin-top: 4px; }
+}
+
 @import '../../../components/css/chat-markdown.less';
 @import '../../../components/css/chat-message-shared.less';
 @import '../../../components/css/chat-citations.less';
