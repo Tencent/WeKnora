@@ -23,8 +23,8 @@ var expectedIDs = []string{
 }
 
 func TestAllVendorsRegistered(t *testing.T) {
-	if len(expectedIDs) != 28 {
-		t.Fatalf("expected 28 vendor ids in the spec, got %d", len(expectedIDs))
+	if len(expectedIDs) != 29 {
+		t.Fatalf("expected 29 vendor ids in the spec, got %d", len(expectedIDs))
 	}
 	for _, id := range expectedIDs {
 		v, ok := modelruntime.Get(id)
