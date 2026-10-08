@@ -102,4 +102,3 @@ test('mobile attachment picker is reachable without expanding settings', async (
   expect(chooser.isMultiple()).toBe(true)
   await expect(page.locator('.control-left')).toBeHidden()
 })
-
