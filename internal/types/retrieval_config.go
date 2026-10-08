@@ -44,7 +44,7 @@ type RetrievalConfig struct {
 const DefaultRetrievalTopK = 50
 
 // MaxRequestedResults caps the result counts a retrieval API caller may ask
-// for (knowledge-search match_count, rerank.top_k). knowledge-search runs one
+// for (knowledge-search embedding_top_k, match_count, rerank.top_k). knowledge-search runs one
 // search per scoped document or tag set and reranks every candidate, so an
 // unbounded count multiplied into tens of thousands of billed rerank passages.
 const MaxRequestedResults = 200

@@ -26336,6 +26336,12 @@ const docTemplate = `{
                 "query"
             ],
             "properties": {
+                "embedding_top_k": {
+                    "description": "Optional overrides of the tenant retrieval config. Omitted fields keep it.\nRecall depth; 0 uses 50, raised to at least the result count.",
+                    "type": "integer",
+                    "maximum": 200,
+                    "minimum": 0
+                },
                 "knowledge_base_id": {
                     "description": "Single knowledge base ID (for backward compatibility)",
                     "type": "string"

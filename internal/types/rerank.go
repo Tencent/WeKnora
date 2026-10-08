@@ -114,6 +114,9 @@ type RetrievalResult struct {
 // KnowledgeSearchOptions are the caller overrides accepted by the
 // knowledge-search API. Zero values keep the tenant RetrievalConfig.
 type KnowledgeSearchOptions struct {
+	// EmbeddingTopK overrides recall depth independently of the result count.
+	// Nil keeps the tenant config; zero uses DefaultRetrievalTopK.
+	EmbeddingTopK *int
 	// VectorThreshold and KeywordThreshold override the recall thresholds.
 	VectorThreshold  *float64
 	KeywordThreshold *float64

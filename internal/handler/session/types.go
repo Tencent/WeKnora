@@ -107,6 +107,8 @@ type SearchKnowledgeRequest struct {
 	MentionedItems   []MentionedItemRequest `json:"mentioned_items"`                       // Optional scoped tag mentions
 
 	// Optional overrides of the tenant retrieval config. Omitted fields keep it.
+	// Recall depth; 0 uses 50, raised to at least the result count.
+	EmbeddingTopK        *int                 `json:"embedding_top_k,omitempty" minimum:"0" maximum:"200"`
 	VectorThreshold      *float64             `json:"vector_threshold,omitempty"`       // Minimum vector similarity
 	KeywordThreshold     *float64             `json:"keyword_threshold,omitempty"`      // Minimum keyword score
 	MatchCount           int                  `json:"match_count,omitempty"`            // Number of results to return

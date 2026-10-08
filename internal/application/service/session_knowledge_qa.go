@@ -958,6 +958,12 @@ func (s *sessionService) SearchKnowledge(ctx context.Context,
 // applyKnowledgeSearchOverrides applies the caller's knowledge-search
 // overrides on top of the tenant RetrievalConfig defaults in chatManage.
 func applyKnowledgeSearchOverrides(chatManage *types.ChatManage, opts *types.KnowledgeSearchOptions) {
+	if opts.EmbeddingTopK != nil {
+		chatManage.EmbeddingTopK = *opts.EmbeddingTopK
+		if chatManage.EmbeddingTopK == 0 {
+			chatManage.EmbeddingTopK = types.DefaultRetrievalTopK
+		}
+	}
 	if opts.VectorThreshold != nil {
 		chatManage.VectorThreshold = *opts.VectorThreshold
 	}

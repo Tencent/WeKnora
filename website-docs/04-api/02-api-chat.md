@@ -428,17 +428,25 @@ curl -N -X POST $BASE/api/v1/agent-chat/s-1 -H "Authorization: Bearer $TOKEN" \
 | `tag_ids` | []string | 否 | 标签过滤 |
 | `mentioned_items` | []object | 否 | 带 KB 范围的标签提及 |
 | `vector_threshold` / `keyword_threshold` | float | 否 | 召回阈值；省略时用空间检索配置（默认 0.15 / 0.3） |
+| `embedding_top_k` | int | 否 | 单次请求的召回深度，范围 0–200；省略或 `null` 时用空间配置（默认 50），显式传 `0` 时用 50。实际召回深度至少等于最终返回条数上限 |
 | `match_count` | int | 否 | 返回条数，上限 200；省略时用空间配置的 `rerank_top_k`（默认 10）。召回深度会自动加大到不小于它 |
 | `disable_keywords_match` / `disable_vector_match` | bool | 否 | 关闭某一路召回；两个都为 `true` 返回 400 |
 | `rerank` | object | 否 | 覆盖 rerank 设置；`{"enabled":false}` 关闭 rerank。字段见 [rerank 对象](./01-api-overview.md#retrieval-api)。`rerank.top_k` 同时给出时优先于 `match_count` |
 
 省略的字段都沿用空间的检索配置（`GET /tenants/kv/retrieval-config`），不传任何新字段时行为和以前一样。
 
+`embedding_top_k` 与返回条数独立：传 `"embedding_top_k":100,"match_count":10` 可将召回深度设为 100，最终最多返回 10 条。返回条数仍按 `rerank.top_k` > `match_count` > 空间 `rerank_top_k` 的顺序确定（前两项须大于 0）；实际召回深度取上述返回条数与有效 `embedding_top_k` 的较大值。覆盖仅作用于本次请求，不写回空间配置。`embedding_top_k` 越界或类型错误时返回 400。
+
 响应：200 `{"success":true,"data":[SearchResult],"meta":{"rerank":{...}}}`。`SearchResult` 含 `id,content,knowledge_id,knowledge_title,score,chunk_type,knowledge_base_id,...`；经过 rerank 的结果 `metadata` 带 `model_score` 和 `base_score`。`data` 为空时看 `meta.rerank.outcome` 判断原因，见 [meta.rerank 诊断](./01-api-overview.md#retrieval-api)。
 
 ```bash
 curl -X POST $BASE/api/v1/knowledge-search -H "X-API-Key: $API_KEY" \
   -H 'Content-Type: application/json' -d '{"query":"部署要求","knowledge_base_ids":["kb-1"]}'
+
+# 扩大跨库召回深度，最终最多返回 10 条
+curl -X POST $BASE/api/v1/knowledge-search -H "X-API-Key: $API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"query":"部署要求","knowledge_base_ids":["kb-1","kb-2"],"embedding_top_k":100,"match_count":10}'
 
 # 只用向量召回、取 5 条，并关闭 rerank
 curl -X POST $BASE/api/v1/knowledge-search -H "X-API-Key: $API_KEY" \

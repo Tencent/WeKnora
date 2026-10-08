@@ -91,7 +91,15 @@ func readSwaggerFile(t *testing.T, name string) []byte {
 func assertKnowledgeSearchRouteContract(t *testing.T, data []byte, parse func([]byte, any) error) {
 	t.Helper()
 	var spec struct {
-		Paths map[string]map[string]any `json:"paths" yaml:"paths"`
+		Paths       map[string]map[string]any `json:"paths" yaml:"paths"`
+		Definitions map[string]struct {
+			Required   []string `json:"required" yaml:"required"`
+			Properties map[string]struct {
+				Type    string `json:"type" yaml:"type"`
+				Minimum *int   `json:"minimum" yaml:"minimum"`
+				Maximum *int   `json:"maximum" yaml:"maximum"`
+			} `json:"properties" yaml:"properties"`
+		} `json:"definitions" yaml:"definitions"`
 	}
 	if err := parse(data, &spec); err != nil {
 		t.Fatalf("parse generated Swagger document: %v", err)
@@ -103,6 +111,17 @@ func assertKnowledgeSearchRouteContract(t *testing.T, data []byte, parse func([]
 	}
 	if _, ok := knowledgeSearch["post"]; !ok {
 		t.Fatal("generated Swagger document does not expose POST /knowledge-search")
+	}
+	request := spec.Definitions["internal_handler_session.SearchKnowledgeRequest"]
+	depth := request.Properties["embedding_top_k"]
+	if depth.Type != "integer" || depth.Minimum == nil || *depth.Minimum != 0 ||
+		depth.Maximum == nil || *depth.Maximum != 200 {
+		t.Fatalf("embedding_top_k must be an integer in [0, 200], got %+v", depth)
+	}
+	for _, field := range request.Required {
+		if field == "embedding_top_k" {
+			t.Fatal("embedding_top_k must remain optional")
+		}
 	}
 
 	if staleRoute, ok := spec.Paths["/sessions/search"]; ok {

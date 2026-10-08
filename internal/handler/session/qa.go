@@ -954,6 +954,9 @@ func (h *Handler) SearchKnowledge(c *gin.Context) {
 // knowledgeSearchOptions validates the retrieval overrides of a
 // knowledge-search request.
 func knowledgeSearchOptions(request *SearchKnowledgeRequest) (*types.KnowledgeSearchOptions, error) {
+	if depth := request.EmbeddingTopK; depth != nil && (*depth < 0 || *depth > types.MaxRequestedResults) {
+		return nil, fmt.Errorf("embedding_top_k must be between 0 and %d", types.MaxRequestedResults)
+	}
 	if request.MatchCount < 0 {
 		return nil, fmt.Errorf("match_count must not be negative")
 	}
@@ -967,6 +970,7 @@ func knowledgeSearchOptions(request *SearchKnowledgeRequest) (*types.KnowledgeSe
 		return nil, err
 	}
 	return &types.KnowledgeSearchOptions{
+		EmbeddingTopK:        request.EmbeddingTopK,
 		VectorThreshold:      request.VectorThreshold,
 		KeywordThreshold:     request.KeywordThreshold,
 		MatchCount:           request.MatchCount,
