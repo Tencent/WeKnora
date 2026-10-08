@@ -551,3 +551,92 @@ func TestValidateBudgetCountsNodeListingPages(t *testing.T) {
 		})
 	}
 }
+
+// A folder's later pages must be read before its subfolders: otherwise a root
+// whose first page is all folders spends the budget below them and never sees
+// the document on the root's second page.
+func TestValidateReadsFolderPagesBeforeDescending(t *testing.T) {
+	var mu sync.Mutex
+	probed := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/v1.0/oauth2/accessToken":
+			_, _ = w.Write([]byte(`{"accessToken":"token","expireIn":7200}`))
+		case r.URL.Path == "/v2.0/wiki/workspaces":
+			_, _ = w.Write([]byte(`{"workspaces":[{"workspaceId":"a","rootNodeId":"root-a","name":"A"}]}`))
+		case r.URL.Path == "/v2.0/wiki/nodes":
+			parent := r.URL.Query().Get("parentNodeId")
+			switch {
+			case parent == "root-a" && r.URL.Query().Get("nextToken") == "":
+				folders := make([]string, 0, maxValidateListings)
+				for i := 0; i < maxValidateListings; i++ {
+					folders = append(folders, fmt.Sprintf(`{"nodeId":"folder-%d","type":"FOLDER"}`, i))
+				}
+				_, _ = fmt.Fprintf(w, `{"nodes":[%s],"nextToken":"p2"}`, strings.Join(folders, ","))
+			case parent == "root-a":
+				_, _ = w.Write([]byte(
+					`{"nodes":[{"nodeId":"doc","name":"Doc","type":"FILE","category":"ALIDOC","extension":"adoc"}]}`))
+			default:
+				_, _ = w.Write([]byte(`{"nodes":[{"nodeId":"pdf","type":"FILE","category":"FILE","extension":"pdf"}]}`))
+			}
+		case strings.HasPrefix(r.URL.Path, "/v1.0/doc/suites/documents/"):
+			mu.Lock()
+			probed = true
+			mu.Unlock()
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte(`{"code":"forbidden.accessDenied","message":"no permission"}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	err := testConnector(testClient(server)).Validate(context.Background(), testConfig())
+	mu.Lock()
+	defer mu.Unlock()
+	if !probed {
+		t.Fatalf("the document on the root's second page was never probed (err=%v)", err)
+	}
+	if err == nil {
+		t.Fatal("Validate must report the unreadable document instead of accepting")
+	}
+}
+
+// A folder that keeps returning the same nextToken must not be paged again
+// until the budget runs out; the rest of it is unknown, so Validate accepts.
+func TestValidateStopsOnRepeatedPageToken(t *testing.T) {
+	var mu sync.Mutex
+	folderRequests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/v1.0/oauth2/accessToken":
+			_, _ = w.Write([]byte(`{"accessToken":"token","expireIn":7200}`))
+		case "/v2.0/wiki/workspaces":
+			_, _ = w.Write([]byte(`{"workspaces":[{"workspaceId":"a","rootNodeId":"root-a","name":"A"}]}`))
+		case "/v2.0/wiki/nodes":
+			if r.URL.Query().Get("parentNodeId") == "root-a" {
+				_, _ = w.Write([]byte(`{"nodes":[{"nodeId":"folder","type":"FOLDER"}]}`))
+				return
+			}
+			mu.Lock()
+			folderRequests++
+			mu.Unlock()
+			_, _ = w.Write([]byte(
+				`{"nodes":[{"nodeId":"pdf","type":"FILE","category":"FILE","extension":"pdf"}],"nextToken":"same"}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	if err := testConnector(testClient(server)).Validate(context.Background(), testConfig()); err != nil {
+		t.Fatalf("Validate must accept an inconclusive walk, got: %v", err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if folderRequests != 2 {
+		t.Fatalf("folder was listed %d times, want 2 (first page + the repeated token once)", folderRequests)
+	}
+}

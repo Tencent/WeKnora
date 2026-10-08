@@ -195,12 +195,6 @@ func (c *Connector) Validate(ctx context.Context, dataSourceConfig *types.DataSo
 // client's retries of each).
 const maxValidateListings = 20
 
-// validateListing is one node listing page still to be requested.
-type validateListing struct {
-	parent    string
-	pageToken string
-}
-
 // firstValidateDocument walks a workspace breadth-first, the way scanWorkspace
 // does, and returns the first document it finds. It requests one page at a
 // time instead of listing whole folders, so the budget bounds real requests.
@@ -210,44 +204,61 @@ type validateListing struct {
 func firstValidateDocument(
 	ctx context.Context, api dingTalkAPI, rootNodeID string, listings *int,
 ) (document node, found, unexplored bool, err error) {
-	queue := []validateListing{{parent: rootNodeID}}
+	queue := []string{rootNodeID}
 	visited := map[string]struct{}{rootNodeID: {}}
 	for len(queue) > 0 {
-		listing := queue[0]
+		parent := queue[0]
 		queue = queue[1:]
-		rootPage := listing.parent == rootNodeID && listing.pageToken == ""
-		if !rootPage {
-			if *listings >= maxValidateListings {
-				return node{}, false, true, nil
-			}
-			*listings++
-		}
-		children, next, listErr := api.listNodesPage(ctx, listing.parent, listing.pageToken)
-		if listErr != nil {
-			if rootPage || ctx.Err() != nil || isContextError(listErr) {
-				return node{}, false, false, listErr
-			}
-			// The documents this operator can read may live in exactly this
-			// folder, so its failure leaves the walk inconclusive rather than
-			// treating the folder as empty.
-			unexplored = true
-			continue
-		}
-		for _, child := range children {
-			if child.isDocument() {
-				return child, true, unexplored, nil
-			}
-			if child.isFolder() || child.HasChildren {
-				if _, seen := visited[child.ID]; seen {
-					continue
+		// Finish every page of a folder before descending, like listNodes
+		// does for scanWorkspace: a document on a later page of this folder
+		// must be found before the budget is spent on its subfolders.
+		var subfolders []string
+		pageToken := ""
+		seenTokens := map[string]struct{}{}
+		for {
+			rootPage := parent == rootNodeID && pageToken == ""
+			if !rootPage {
+				if *listings >= maxValidateListings {
+					return node{}, false, true, nil
 				}
-				visited[child.ID] = struct{}{}
-				queue = append(queue, validateListing{parent: child.ID})
+				*listings++
 			}
+			children, next, listErr := api.listNodesPage(ctx, parent, pageToken)
+			if listErr != nil {
+				if rootPage || ctx.Err() != nil || isContextError(listErr) {
+					return node{}, false, false, listErr
+				}
+				// The documents this operator can read may live in exactly
+				// this folder, so its failure leaves the walk inconclusive
+				// rather than treating the folder as empty.
+				unexplored = true
+				break
+			}
+			for _, child := range children {
+				if child.isDocument() {
+					return child, true, unexplored, nil
+				}
+				if child.isFolder() || child.HasChildren {
+					if _, seen := visited[child.ID]; seen {
+						continue
+					}
+					visited[child.ID] = struct{}{}
+					subfolders = append(subfolders, child.ID)
+				}
+			}
+			if next == "" {
+				break
+			}
+			if _, repeated := seenTokens[next]; repeated {
+				// listNodes rejects a repeated nextToken; here the rest of the
+				// folder is simply unknown.
+				unexplored = true
+				break
+			}
+			seenTokens[next] = struct{}{}
+			pageToken = next
 		}
-		if next != "" {
-			queue = append(queue, validateListing{parent: listing.parent, pageToken: next})
-		}
+		queue = append(queue, subfolders...)
 	}
 	return node{}, false, unexplored, nil
 }
