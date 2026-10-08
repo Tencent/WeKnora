@@ -1,11 +1,11 @@
-@media (max-width: 767px) { :root body .main:has(.knowledge-layout), :root body .main:has(.faq-content) { min-width: 0; } }
+@media (max-width: 767px) { :root body .main:has(.kb-list-container), :root body .main:has(.knowledge-layout), :root body .main:has(.faq-content) { min-width: 0; } }
 @media (max-width: 767px) {
 :root body .knowledge-layout { padding: 12px 12px 0; margin: 0; gap: 12px; }
 :root body .kb-list-content { padding: 16px 12px; }
 :root body .kb-list-container { min-width: 0; max-width: 100%; }
-:root body .header .title-row { flex-wrap: wrap; gap: 8px; }
-:root body .header-title { min-width: 0; }
-:root body .header h2 { overflow-wrap: anywhere; }
+:root body .kb-list-container .header .title-row { flex-wrap: wrap; gap: 8px; }
+:root body .kb-list-container .header-title { min-width: 0; }
+:root body .kb-list-container .header h2 { overflow-wrap: anywhere; }
 :root body .doc-filter-bar, :root body .doc-filter-bar__trailing { flex-wrap: wrap; }
 :root body .doc-filter-bar__trailing { width: 100%; }
 :root body .doc-filter-bar .doc-search-input { width: 100%; flex: 1; }
@@ -67,8 +67,10 @@
   :root body .doc-folder-path { min-width: 0; flex-wrap: nowrap; }
   :root body .doc-folder-path__name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
   :root body .doc-folder-path__count { white-space: nowrap; flex-shrink: 0; }
-  :root body .header-subtitle, :root body .faq-subtitle { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  :root body .resource-sort-trigger { width: 44px; min-height: 44px; padding: 0; justify-content: center; }
-  :root body .resource-sort-trigger__label, :root body .resource-sort-trigger__caret { display: none; }
+  :root body .kb-list-container .header-subtitle, :root body .faq-subtitle { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  :root body .kb-list-container .resource-sort-trigger { width: 44px; min-height: 44px; padding: 0; justify-content: center; }
+  :root body .kb-list-container .resource-sort-trigger__label, :root body .kb-list-container .resource-sort-trigger__caret { display: none; }
   :root body .faq-filter-bar__trailing { flex-wrap: wrap; }
 }
+
+@media (max-width: 767px) { :root body .kb-list-container .header-actions { flex-wrap: wrap; gap: 8px; } }

@@ -76,3 +76,30 @@ test('FAQ secondary actions expand and collapse on phones', async ({ page }) => 
   await expect(page.locator('.responsive-toolbar-panel')).toBeHidden()
   await fitsViewport(page)
 })
+
+for (const width of [360, 430, 1440]) {
+ test(`knowledge home cards remain visible and fit ${width}px`, async ({ page }) => {
+  await mockApp(page); await page.setViewportSize({ width, height: 844 })
+  await page.goto('/platform/knowledge-bases')
+  await expect(page.locator('.kb-card').first()).toBeVisible()
+  await fitsViewport(page)
+ })
+}
+test('file selection, confirmation and upload panel survive navigation', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await mockApp(page)
+  await page.goto('/platform/knowledge-bases/mobile-kb')
+  await expect(page.locator('.kb-upload-source-dropdown').first()).toBeVisible()
+  await page.locator('.kb-upload-source-dropdown input[type=file]:not([webkitdirectory])').first().setInputFiles({
+    name: '庄子研究测试文档.txt', mimeType: 'text/plain', buffer: Buffer.from('北冥有鱼，其名为鲲。'),
+  })
+  const dialog = page.locator('.upload-confirm-modal')
+  await expect(dialog).toBeVisible()
+  await expect(dialog.locator('.modal-footer button').last()).toBeInViewport()
+  await dialog.locator('.modal-footer button').last().click()
+  await expect(page.locator('.upload-tasks-panel')).toBeVisible()
+  await fitsViewport(page)
+  await page.evaluate(() => (document.querySelector('#app') as any).__vue_app__.config.globalProperties.$router.push('/platform/creatChat'))
+  await expect(page.locator('.upload-tasks-panel')).toBeVisible()
+})
+
