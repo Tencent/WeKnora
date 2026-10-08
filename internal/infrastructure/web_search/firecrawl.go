@@ -91,7 +91,7 @@ func (p *FirecrawlProvider) SearchWithFilters(
 	}
 	maxResults = min(maxResults, maxFirecrawlResults)
 	payload := map[string]any{
-		"query": query, "limit": maxResults, "sources": []string{"web"}, "origin": "weknora",
+		"query": query, "limit": maxResults, "sources": []string{"web"},
 	}
 	// Without country Firecrawl uses its default region (US), so ALL simply omits it.
 	if country := strings.ToUpper(filters.Country); country != "" && country != "ALL" {
