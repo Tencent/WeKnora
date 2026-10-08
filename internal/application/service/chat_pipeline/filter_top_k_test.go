@@ -61,7 +61,8 @@ func TestPluginFilterTopKUsesDeterministicTieBreakers(t *testing.T) {
 }
 
 // Truncation is the evidence that the prompt context is a subset: it must be
-// recorded exactly when results were dropped.
+// recorded exactly when results were dropped, naming the stage and the pool it
+// cut.
 func TestPluginFilterTopKRecordsTruncation(t *testing.T) {
 	chatManage := &types.ChatManage{
 		PipelineRequest: types.PipelineRequest{RerankTopK: 2},
@@ -86,7 +87,46 @@ func TestPluginFilterTopKRecordsTruncation(t *testing.T) {
 	require.Nil(t, err)
 	require.Len(t, chatManage.MergeResult, 2)
 	require.NotNil(t, chatManage.Truncation)
-	assert.Equal(t, types.RetrievalTruncation{Shown: 2, Candidates: 4}, *chatManage.Truncation)
+	assert.Equal(t, types.RetrievalTruncation{
+		Stage:      types.RetrievalStageFilterTopK,
+		Candidates: 4,
+	}, *chatManage.Truncation)
+}
+
+// An earlier, wider cut is the one the prompt must report: a later
+// FILTER_TOP_K cut only removes passages from the pool the model was already
+// told about, and restating the pool as the narrower number would understate
+// what retrieval produced.
+func TestPluginFilterTopKKeepsEarlierTruncationPool(t *testing.T) {
+	chatManage := &types.ChatManage{
+		PipelineRequest: types.PipelineRequest{RerankTopK: 2},
+		PipelineState: types.PipelineState{
+			Truncation: &types.RetrievalTruncation{
+				Stage:      types.RetrievalStageRerank,
+				Candidates: 40,
+			},
+			MergeResult: []*types.SearchResult{
+				{ID: "first", KnowledgeID: "doc-a", Score: 0.9},
+				{ID: "second", KnowledgeID: "doc-b", Score: 0.8},
+				{ID: "third", KnowledgeID: "doc-c", Score: 0.7},
+			},
+		},
+	}
+
+	plugin := &PluginFilterTopK{}
+	err := plugin.OnEvent(
+		context.Background(),
+		types.FILTER_TOP_K,
+		chatManage,
+		func() *PluginError { return nil },
+	)
+
+	require.Nil(t, err)
+	require.Len(t, chatManage.MergeResult, 2)
+	assert.Equal(t, types.RetrievalTruncation{
+		Stage:      types.RetrievalStageRerank,
+		Candidates: 40,
+	}, *chatManage.Truncation)
 }
 
 // A prompt that saw every candidate must not carry the subset caveat, so the

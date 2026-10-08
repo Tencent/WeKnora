@@ -22,6 +22,10 @@ func TestAnnotateSearchNotes(t *testing.T) {
 	}
 }
 
+// The subset note is conditional: only a counting or exhaustive-list question
+// has to report the scope of the view. It must also carry the counts it was
+// given, so the model reads the real shown / candidate numbers rather than a
+// placeholder or a knowledge-base total.
 func TestAnnotateSearchNotesReportsTruncatedRetrieval(t *testing.T) {
 	t.Parallel()
 	base := "<retrieval mode=\"hybrid\">\n</retrieval>"
@@ -29,16 +33,28 @@ func TestAnnotateSearchNotesReportsTruncatedRetrieval(t *testing.T) {
 		"retrieval_shown":      5,
 		"retrieval_candidates": 146,
 	})
-	if !strings.Contains(got, `<subset shown="5" candidates="146">`) ||
-		!strings.Contains(got, "a complete list cannot be derived from this view") ||
-		!strings.HasSuffix(got, "</retrieval>") {
-		t.Fatalf("annotated = %q", got)
+	want := `  <subset shown="5" candidates="146">If the question asks for a count or an exhaustive list, ` +
+		`state that the provided context contains only the top 5 of 146 candidate passages at this ` +
+		`filtering stage, and do not treat these passage counts as the requested total; otherwise ` +
+		`answer normally without adding a disclaimer solely because of this truncation.</subset>`
+	if !strings.Contains(got, want) {
+		t.Fatalf("annotated = %q\nwant subset %q", got, want)
 	}
+	if strings.Contains(got, "say the answer may be incomplete") {
+		t.Fatalf("the unconditional disclaimer must be gone: %q", got)
+	}
+	if !strings.HasSuffix(got, "</retrieval>") {
+		t.Fatalf("subset note must stay inside the retrieval block: %q", got)
+	}
+	// A prompt that saw every candidate, or was given no usable counts,
+	// carries no caveat at all.
 	for name, data := range map[string]map[string]interface{}{
-		"complete":        {"retrieval_shown": 5, "retrieval_candidates": 5},
-		"no counts":       {},
-		"shown only":      {"retrieval_shown": 5},
-		"candidates only": {"retrieval_candidates": 146},
+		"complete":         {"retrieval_shown": 5, "retrieval_candidates": 5},
+		"no counts":        {},
+		"shown only":       {"retrieval_shown": 5},
+		"candidates only":  {"retrieval_candidates": 146},
+		"more than pool":   {"retrieval_shown": 7, "retrieval_candidates": 5},
+		"no shown passage": {"retrieval_shown": 0, "retrieval_candidates": 146},
 	} {
 		if annotateSearchNotes(base, data) != base {
 			t.Fatalf("%s: a non-truncated retrieval must leave the output unchanged", name)

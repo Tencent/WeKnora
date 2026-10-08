@@ -65,10 +65,13 @@ func prepareMessagesWithModelContext(
 			"display_type": "search_results",
 			"results":      knowledgeRows,
 		}
-		// The FILTER_TOP_K stage may have cut the ranked list; carry the counts
-		// so the model context view can say the passages are a subset.
+		// The ranked filter chain (rerank → merge → FILTER_TOP_K) may have
+		// dropped candidates before this view was built. Carry the recorded
+		// pool and the number of knowledge passages actually rendered, so the
+		// model context can say the passages are a subset without restating
+		// the pool as a knowledge-base match count.
 		if truncation := chatManage.Truncation; truncation != nil {
-			data["retrieval_shown"] = truncation.Shown
+			data["retrieval_shown"] = len(knowledgeRows)
 			data["retrieval_candidates"] = truncation.Candidates
 		}
 		contextParts = append(contextParts, registry.ModelToolResult(&types.ToolResult{
