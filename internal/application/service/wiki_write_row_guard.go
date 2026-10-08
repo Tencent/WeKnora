@@ -6,13 +6,32 @@ import (
 	"strings"
 )
 
-// ErrWikiWriteDroppedTableRows is returned when a machine write is refused
-// because the incoming body no longer carries table rows the stored page still
-// has. The stored page is left untouched. See wikiWriteMissingRowIdentities.
+// ErrWikiWriteDroppedTableRows is the explicit refusal signal a machine write
+// gets when the incoming body no longer carries table rows the stored page
+// still has. The stored page is left untouched.
+//
+// It is returned for both guarded policies — see UpdatePage — and it exists
+// because an unchanged `version` cannot stand in for it: UpdatePage leaves the
+// version alone for a successful write that changes nothing user-visible, so
+// callers that must retry a refused contribution (wiki ingest's reduce) need a
+// signal of its own. See wikiWriteMissingRowIdentities.
 var ErrWikiWriteDroppedTableRows = errors.New("wiki page write dropped table rows the stored page still has")
 
 // wikiWriteGuardLogLimit caps how many example row identities a refusal names.
 const wikiWriteGuardLogLimit = 5
+
+// wikiWriteIngestRowIdentityLossLimit is the largest share of a stored page's
+// distinct row identities that an ingest rewrite may stop carrying and still be
+// written: it refuses only when the loss is strictly GREATER than this, so a
+// rewrite that loses exactly one identity in five (0.20) goes through.
+//
+// Ingest needs the tolerance because its editor prompt explicitly allows
+// de-duplicating rows, and a refused write keeps the contributing documents
+// queued for another full Map — a legitimate de-duplication that tripped the
+// guard on every batch would spend the documents' retry budget and end in the
+// dead-letter lane with their additions never stored. The agent's whole-page
+// writer has no such allowance; see UpdatePage.
+const wikiWriteIngestRowIdentityLossLimit = 0.20
 
 // wikiWriteEmphasisMarkers are the inline markers that change how a cell
 // renders but not which entity it names, so they are ignored when comparing
@@ -83,34 +102,73 @@ func wikiWriteTableRowIdentities(content string) []string {
 	return identities
 }
 
+// wikiWriteUniqueRowIdentityCount counts the DISTINCT data-row identities in
+// content — the denominator of the loss ratio. Rows that name the same entity
+// in their first non-empty cell count once, however many times the page lists
+// them, so a page that repeats a holder does not dilute the ratio.
+func wikiWriteUniqueRowIdentityCount(content string) int {
+	identities := wikiWriteTableRowIdentities(content)
+	if len(identities) == 0 {
+		return 0
+	}
+	unique := make(map[string]struct{}, len(identities))
+	for _, identity := range identities {
+		unique[identity] = struct{}{}
+	}
+	return len(unique)
+}
+
+// wikiWriteRowIdentityLossRatio is the share of the stored page's distinct row
+// identities a rewrite no longer carries: missing / stored. A page with no
+// identifiable rows has no ratio (0).
+func wikiWriteRowIdentityLossRatio(missing, stored int) float64 {
+	if stored <= 0 {
+		return 0
+	}
+	return float64(missing) / float64(stored)
+}
+
 // wikiWriteMissingRowIdentities reports which data rows of existing are no
 // longer present in rewritten, as a sorted, de-duplicated list of identities.
 //
 // Rows are matched by identity rather than by whole line, so re-flowing
 // whitespace, bolding a name or updating a date/amount cell keeps the row
 // counted as present; only a row whose subject disappeared counts as lost.
-// Duplicates are matched as a multiset, so dropping one of two rows that name
-// the same entity is still a loss.
+//
+// Identities are compared as a SET, not as a multiset: an identity is present
+// as soon as the rewrite carries it once, so merging two rows that share a
+// first non-empty cell into one is not a loss, however many times the stored
+// page listed them.
+//
+// The scope of that identity is deliberately narrow — it is only the row's
+// first non-empty cell — so this reports rows that vanished, not rows that
+// lost information: a rewrite that keeps the holder name but blanks, truncates
+// or rewrites the other columns is NOT reported. Merging same-identity rows is
+// therefore allowed without any guarantee that their remaining columns stay
+// complete; the guard catches truncation, not cell-level data loss.
 func wikiWriteMissingRowIdentities(existing, rewritten string) []string {
 	oldIdentities := wikiWriteTableRowIdentities(existing)
 	if len(oldIdentities) == 0 {
 		return nil
 	}
-	remaining := make(map[string]int, len(oldIdentities))
+	// Set membership, not occurrence count: presence anywhere in the rewrite
+	// keeps an identity alive.
+	present := make(map[string]struct{}, len(oldIdentities))
 	for _, identity := range wikiWriteTableRowIdentities(rewritten) {
-		remaining[identity]++
+		present[identity] = struct{}{}
 	}
 	missing := make([]string, 0, 4)
-	reported := make(map[string]bool, 4)
+	reported := make(map[string]struct{}, 4)
 	for _, identity := range oldIdentities {
-		if remaining[identity] > 0 {
-			remaining[identity]--
+		if _, ok := present[identity]; ok {
 			continue
 		}
-		if reported[identity] {
+		// The same identity can appear on several stored rows; an identity
+		// that is gone is one lost identity, not one per row.
+		if _, ok := reported[identity]; ok {
 			continue
 		}
-		reported[identity] = true
+		reported[identity] = struct{}{}
 		missing = append(missing, identity)
 	}
 	if len(missing) == 0 {

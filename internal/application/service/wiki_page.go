@@ -133,7 +133,7 @@ func (s *wikiPageService) UpdatePage(ctx context.Context, page *types.WikiPage) 
 	}
 	stripWikiPageInlineChunkCitations(page)
 
-	// ── Truncation choke point ─────────────────────────────────────────────
+	// ── Truncation choke point ────────────────
 	//
 	// Machine edits hand the *whole* page to a model and persist whatever comes
 	// back, and markdown tables are the shape it gets wrong most often: a
@@ -149,6 +149,19 @@ func (s *wikiPageService) UpdatePage(ctx context.Context, page *types.WikiPage) 
 	// guard in the ingest caller only covers the ingest caller: the agent's
 	// whole-page writer hands its own model output to this same method.
 	//
+	// The two machine callers get different allowances:
+	//
+	//   - The agent's whole-page writer can be told to try again, so it is held
+	//     to "no stored row identity may vanish": its loss limit is zero and any
+	//     loss refuses the write, which the tool returns to the model so it can
+	//     re-emit the page (or switch to exact-text replacement).
+	//   - Ingest cannot retry cheaply — a refusal keeps the contributing
+	//     documents queued for another full Map and spends their retry budget —
+	//     and its editor prompt explicitly allows de-duplicating rows, so only a
+	//     loss STRICTLY above wikiWriteIngestRowIdentityLossLimit counts as
+	//     truncation. The ratio is computed over distinct identities (see
+	//     wikiWriteUniqueRowIdentityCount), never over row counts.
+	//
 	// Deliberate shrinkages are exempt: a human deleting rows through the wiki
 	// UI, a revert to an older (possibly shorter) revision, and any caller that
 	// knows it is removing content and says so with types.WithWikiShrinkAllowed
@@ -157,28 +170,52 @@ func (s *wikiPageService) UpdatePage(ctx context.Context, page *types.WikiPage) 
 	if source != types.WikiEditSourceUser && source != types.WikiEditSourceRevert &&
 		!types.WikiShrinkAllowedFromContext(ctx) {
 		if missing := wikiWriteMissingRowIdentities(existing.Content, page.Content); len(missing) > 0 {
-			examples := strings.Join(wikiWriteDroppedRowExamples(missing), ", ")
-			logger.Warnf(ctx,
-				"wiki page write refused (rewrite dropped %d table row(s) still on the page): "+
-					"slug=%s source=%s rows %d -> %d, content %d -> %d chars; keeping the stored version (e.g. %s)",
-				len(missing), page.Slug, source,
-				len(wikiWriteTableRowIdentities(existing.Content)), len(wikiWriteTableRowIdentities(page.Content)),
-				len(existing.Content), len(page.Content), examples)
-			common.PipelineWarn(ctx, "WikiWrite", "page_write_dropped_table_rows", map[string]interface{}{
-				"slug":         page.Slug,
-				"source":       source,
-				"dropped_rows": len(missing),
-				"examples":     examples,
-			})
+			storedIdentities := wikiWriteUniqueRowIdentityCount(existing.Content)
+			lossRatio := wikiWriteRowIdentityLossRatio(len(missing), storedIdentities)
+			lossLimit := wikiWriteIngestRowIdentityLossLimit
 			if source == types.WikiEditSourceAgent {
-				// A silent refusal would tell the agent it edited a page it did
-				// not touch, so the agent path reports the refusal instead: the
-				// model can re-emit the page with the rows, or use the
-				// exact-text replacement tool when the removal is intentional.
-				return nil, fmt.Errorf("%w: slug %s lost %d row(s) (e.g. %s); the stored page is unchanged",
-					ErrWikiWriteDroppedTableRows, page.Slug, len(missing), examples)
+				lossLimit = 0
 			}
-			return existing, nil
+			if lossRatio > lossLimit {
+				examples := strings.Join(wikiWriteDroppedRowExamples(missing), ", ")
+				// Identities, not rows: several rows of the stored page may
+				// share one identity, and mixing the two counts would make the
+				// ratio unreadable.
+				logger.Warnf(ctx,
+					"wiki page write refused (rewrite dropped %d of %d distinct table row identities, "+
+						"ratio %.2f > limit %.2f): slug=%s source=%s content %d -> %d chars; "+
+						"keeping the stored version (e.g. %s)",
+					len(missing), storedIdentities, lossRatio, lossLimit, page.Slug, source,
+					len(existing.Content), len(page.Content), examples)
+				common.PipelineWarn(ctx, "WikiWrite", "page_write_dropped_table_rows", map[string]interface{}{
+					"slug":               page.Slug,
+					"source":             source,
+					"stored_identities":  storedIdentities,
+					"missing_identities": len(missing),
+					"loss_ratio":         lossRatio,
+					"loss_limit":         lossLimit,
+					"examples":           examples,
+				})
+				// The refusal is an explicit error, not "the stored page came
+				// back unchanged": a successful write that changes nothing
+				// user-visible leaves `version` alone too (see the version-bump
+				// policy above), so the version cannot tell a caller whether
+				// its write landed. Ingest maps this sentinel to a deferred
+				// update — the documents behind it are kept for a later batch
+				// instead of being trimmed — while the agent surfaces it to the
+				// model, which can re-emit the rows.
+				return nil, fmt.Errorf(
+					"%w: slug %s lost %d of %d table row identities (e.g. %s); the stored page is unchanged",
+					ErrWikiWriteDroppedTableRows, page.Slug, len(missing), storedIdentities, examples)
+			}
+			// Inside the ingest tolerance: the rewrite is written, and the loss
+			// is recorded for anyone tuning the limit. The identity is only the
+			// row's first non-empty cell, so a tolerated loss may be a merge of
+			// same-identity rows and says nothing about their other columns.
+			logger.Debugf(ctx,
+				"wiki page write kept a rewrite that dropped %d of %d distinct table row identities "+
+					"(ratio %.2f <= limit %.2f): slug=%s source=%s",
+				len(missing), storedIdentities, lossRatio, lossLimit, page.Slug, source)
 		}
 	}
 
