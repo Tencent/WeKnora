@@ -46,7 +46,10 @@ func (e *batchEmbedder) BatchEmbedWithPool(ctx context.Context, model Embedder, 
 		return func() {
 			defer wg.Done()
 			// If an error has already occurred, don't continue processing
-			if firstErr != nil {
+			mu.Lock()
+			failed := firstErr != nil
+			mu.Unlock()
+			if failed {
 				return
 			}
 			// Embed text
