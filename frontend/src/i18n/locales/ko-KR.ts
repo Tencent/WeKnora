@@ -2939,6 +2939,7 @@ export default {
   },
   language: {
     zhCN: '简体中文',
+    zhTW: '번체 중국어',
     enUS: 'English',
     ruRU: 'Русский',
     koKR: '한국어',
