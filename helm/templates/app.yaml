@@ -51,6 +51,8 @@ spec:
               value: {{ .Values.app.env.GIN_MODE | quote }}
             - name: TZ
               value: {{ .Values.app.env.TZ | quote }}
+            - name: MAX_FILE_SIZE_MB
+              value: {{ .Values.global.maxFileSizeMB | quote }}
             # Database configuration
             - name: DB_DRIVER
               value: "postgres"

@@ -3,6 +3,7 @@ import { markRaw, nextTick, type Ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ensureRagPipelineHistoryStream } from '@/utils/rag-pipeline-history'
 import { applyMessageCreatedAt, bindServerTurnTimestamps, ensureMessageCreatedAt } from '@/utils/messageTimestamp'
+import { expandSteerForksInHistory, forkAfterInjectedUser, steerStepEvents, resetSteerTurnForReplay } from '@/utils/steerStreamFork'
 
 export type ChatMessage = Record<string, unknown>
 
@@ -31,6 +32,9 @@ export interface UseChatStreamHandlerOptions {
   onMessageUpdated?: (message: ChatMessage, payload?: ChatMessage) => void
   onAgentAnswerDone?: (message: ChatMessage) => void
   onAgentChunkBound?: (message: ChatMessage, created: boolean) => void
+  onUserMessageInjected?: (steerId: string) => void
+  /** Remote or local stop: the composer overlay must drop server-discarded items. */
+  onGenerationStopped?: () => void
   debug?: boolean
 }
 
@@ -68,6 +72,8 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
     onMessageUpdated,
     onAgentAnswerDone,
     onAgentChunkBound,
+    onUserMessageInjected,
+    onGenerationStopped,
     debug = false,
   } = options
 
@@ -93,10 +99,12 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
     return undefined
   }
 
-  /** Incomplete assistant row for the current turn (must be the list tail). */
+  /** Incomplete assistant for the current turn, even if a later user row is the tail. */
   const getTrailingIncompleteAssistant = () => {
-    const last = messagesList[messagesList.length - 1]
-    if (last?.role === 'assistant' && !last.is_completed) return last
+    for (let i = messagesList.length - 1; i >= 0; i--) {
+      const item = messagesList[i]
+      if (item?.role === 'assistant' && !item.is_completed) return item
+    }
     return undefined
   }
 
@@ -132,7 +140,12 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
     let target: ChatMessage | undefined
     if (messageId) {
       target = messagesList.find(
-        (m) => m.id === messageId || m.request_id === messageId,
+        (m) =>
+          m.role === 'assistant' &&
+          !m.is_completed &&
+          (m.id === messageId ||
+            m.assistant_message_id === messageId ||
+            m.request_id === messageId),
       )
     }
     if (!target) target = getTrailingIncompleteAssistant()
@@ -150,6 +163,8 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
     return Array.isArray(refs) ? refs : []
   }
 
+  const replaySegments = new Map<string, ChatMessage>()
+
   /** Match the in-flight assistant row by request id or assistant message id. */
   const resolveActiveAssistantMessage = (data: ChatMessage) => {
     const dataId = data.id as string | undefined
@@ -157,6 +172,8 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
       (data.assistant_message_id as string | undefined) ||
       currentAssistantMessageId.value ||
       undefined
+
+    if (dataId && replaySegments.has(dataId)) return replaySegments.get(dataId)
 
     const matched = findLastMessage((item) => {
       if (item.role !== 'assistant') return false
@@ -224,6 +241,7 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
   }
 
   const ensureAgentMessageShell = (message: ChatMessage, requestId?: string) => {
+    if (message.role === 'user') return
     message.isAgentMode = true
     if (!isAgentStreamSession()) {
       message.isRagMode = true
@@ -245,6 +263,11 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
     if (Array.isArray(session.knowledge_references) && session.knowledge_references.length > 0) {
       return true
     }
+    // A turn can carry its answer as plain content with no timeline events —
+    // most visibly after a steer fork, where the events are split across
+    // segments and one segment can end up holding only the answer text.
+    // Hiding that row loses the reply entirely on reload.
+    if (typeof session.content === 'string' && session.content.trim()) return true
     return false
   }
 
@@ -254,8 +277,7 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
     isRecovering = false,
   ) => {
     if (!isLoading && !isRecovering) return false
-    const last = messages[messages.length - 1]
-    if (last?.role === 'assistant' && last?.isAgentMode && !last?.is_completed) {
+    if (messages.some((m) => m.role === 'assistant' && m.isAgentMode && !m.is_completed)) {
       return false
     }
     return true
@@ -295,6 +317,10 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
     return out
   }
 
+  const agentStepsAreTruncated = (agentSteps: unknown[] | undefined) =>
+    Array.isArray(agentSteps) &&
+    agentSteps.some((step) => (step as ChatMessage | undefined)?.truncated === true)
+
   const reconstructEventStreamFromSteps = (
     agentSteps: unknown[],
     messageContent: string,
@@ -308,6 +334,7 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
     if (agentSteps && Array.isArray(agentSteps) && agentSteps.length > 0) {
       agentSteps.forEach((rawStep) => {
         const step = rawStep as ChatMessage
+        events.push(...steerStepEvents(step))
         const stepTimestamp = step.timestamp ? new Date(String(step.timestamp)).getTime() : 0
         const toolCalls = step.tool_calls
         const hasToolCalls = toolCalls && Array.isArray(toolCalls) && toolCalls.length > 0
@@ -328,6 +355,10 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
           })
         }
         const preambleText = step.thought && String(step.thought).trim() ? String(step.thought) : ''
+        if (preambleText && step.intermediate_answer) {
+          events.push({ type: 'answer', event_id: `step-${step.iteration}-answer`,
+            content: preambleText, done: true, intermediate_answer: true, timestamp: stepTimestamp || undefined })
+        }
         if (preambleText && hasToolCalls) {
           events.push({
             type: 'answer',
@@ -380,6 +411,11 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
         done: true,
       }
       if (isFallback) answerEvent.is_fallback = true
+      // A round the completion cap cut off marks its step. Live streaming
+      // carries the same fact on the answer event, but history is rebuilt from
+      // agent_steps and never sees those events, so without this a reloaded
+      // half-written answer looks finished.
+      if (agentStepsAreTruncated(agentSteps)) answerEvent.truncated = true
       events.push(answerEvent)
     } else if (isCompleted) {
       events.push({
@@ -432,6 +468,7 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
           ),
         )
         item.hideContent = true
+        if (agentStepsAreTruncated(item.agent_steps as unknown[])) item.truncated = true
       }
 
       restoreQuickAnswerFlags(item)
@@ -465,8 +502,10 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
         for (let i = processed.length - 1; i >= 0; i--) {
           messagesList.unshift(processed[i])
         }
+        const expanded = expandSteerForksInHistory([...messagesList])
+        messagesList.splice(0, messagesList.length, ...expanded)
       } else {
-        messagesList.push(...processed)
+        messagesList.push(...expandSteerForksInHistory(processed))
       }
     }
 
@@ -487,6 +526,7 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
 
   const updateAssistantSession = (payload: ChatMessage) => {
     const message = findLastMessage((item) => {
+      if (item.role !== 'assistant') return false
       if (item.request_id === payload.id) return true
       return item.id === payload.id
     })
@@ -520,10 +560,12 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
 
   const handleAgentChunk = (data: ChatMessage) => {
     const dataId = data.id as string | undefined
-    let message = findLastMessage(
-      (item) => item.request_id === dataId || item.id === dataId,
-    )
+    let message = resolveActiveAssistantMessage(data)
     let created = false
+
+    if (message?.role === 'user') {
+      message = undefined
+    }
 
     if (!message) {
       const newMsg: ChatMessage = {
@@ -777,6 +819,19 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
         }
         break
       }
+      case 'command_output': {
+        const toolCallId = dataPayload?.tool_call_id as string | undefined
+        if (!toolCallId) break
+        const tool = (message.agentEventStream as ChatMessage[] | undefined)?.find(
+          event => event.type === 'tool_call' && event.tool_call_id === toolCallId,
+        )
+        // Late progress must not resurrect a completed command or attach to
+        // another concurrent call just because it uses the same tool name.
+        if (tool?.pending && tool.tool_name === 'shell_exec' && !(tool.command_output as ChatMessage | undefined)?.done) {
+          tool.command_output = dataPayload
+        }
+        break
+      }
       case 'tool_result':
       case 'error': {
         if (dataPayload) {
@@ -864,7 +919,21 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
           if (eventId) eventMap.set(eventId, answerEvent)
         }
         if (!answerEvent.content && message.content && String(message.content).trim()) {
-          answerEvent.content = message.content
+          // Seeding exists for resume paths where message.content holds text no
+          // stream event carries. When a live prior answer event exists, its
+          // text is already counted by recomposeAgentAnswer, so seeding the new
+          // event would duplicate every prior round on the next recompose.
+          const hasLivePriorAnswer = stream.some(
+            (e) =>
+              e !== answerEvent &&
+              e.type === 'answer' &&
+              !e.superseded &&
+              e.content &&
+              String(e.content).trim(),
+          )
+          if (!hasLivePriorAnswer) {
+            answerEvent.content = message.content
+          }
         }
         if (data.content) {
           answerEvent.content = String(answerEvent.content || '') + String(data.content)
@@ -875,13 +944,19 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
           answerEvent.is_fallback = true
           message.is_fallback = true
         }
+        // The completion cap cut this answer off. The backend sends it on the
+        // content chunks and again on the Done marker, because an answer that
+        // streamed live only learns of the cap at the close.
+        if (dataPayload?.truncated) {
+          answerEvent.truncated = true
+          message.truncated = true
+        }
         if (data.done && !answerEvent.done) {
           answerEvent.done = true
           onAgentAnswerDone?.(message)
-          loading.value = false
-          isReplying.value = false
-          fullContent.value = ''
-          currentAssistantMessageId.value = ''
+          // This closes only the answer segment. Both Agent and quick-answer
+          // turns still have to collect artifacts/checkpoint/persist before
+          // `complete` makes their files readable and marks the session idle.
         }
         break
       }
@@ -893,7 +968,60 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
         }
         break
       }
+      case 'user_message_injected': {
+        // A message the user queued mid-run was accepted into the running
+        // turn. Place it under the work so far, then fork a continuation
+        // assistant so later thinking/tools/answer render below it.
+        const steerId = dataPayload?.steer_id as string | undefined
+        log('[Agent] User message injected, steer_id:', steerId)
+        let injectedUser: ChatMessage | undefined
+        let alreadyInList = false
+        if (steerId) {
+          const injectedId = dataPayload?.user_message_id as string | undefined
+          // Resuming a turn replays this event from the start of the log, by
+          // which point history has already loaded the persisted row. Reuse
+          // it — synthesizing here would show the same message twice.
+          injectedUser = messagesList.find(
+            (item) =>
+              item.role === 'user' &&
+              ((!!injectedId && item.id === injectedId) || item.steer_id === steerId),
+          )
+          alreadyInList = Boolean(injectedUser)
+          if (!injectedUser) {
+            // A restored event or promoted follow-up may arrive before its preview.
+            injectedUser = {
+              id: injectedId || steerId,
+              role: 'user',
+              content: String(dataPayload?.content || ''),
+              steer_id: steerId,
+              channel: 'web',
+              is_completed: true,
+            }
+            if (data.created_at) applyMessageCreatedAt(injectedUser, data.created_at)
+          }
+          if (injectedId) injectedUser.id = injectedId
+          if (data.created_at) applyMessageCreatedAt(injectedUser, data.created_at)
+        }
+        if (injectedUser) {
+          if (dataId && !injectedUser.request_id) injectedUser.request_id = dataId
+          const continuation = forkAfterInjectedUser(
+            messagesList,
+            message,
+            injectedUser,
+            steerId,
+          )
+          if (dataId && replaySegments.has(dataId)) replaySegments.set(dataId, continuation)
+          if (!alreadyInList) emitMessageCreated(injectedUser)
+          if (continuation !== message) {
+            emitMessageCreated(continuation)
+            onAgentChunkBound?.(continuation, true)
+          }
+          if (steerId) onUserMessageInjected?.(steerId)
+        }
+        break
+      }
       case 'complete': {
+        if (dataId) replaySegments.delete(dataId)
         log('[Agent] Complete event received')
         applyFinalArtifactContent(message, (dataPayload as any)?.final_content)
         loading.value = false
@@ -961,7 +1089,32 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
       assistant_message_id: data.assistant_message_id,
     })
 
+    // Persistence can fail after the entire answer has streamed. Surface the
+    // failure separately; the generic error path replaces the answer content.
+    if (data.response_type === 'error' && (data.data as ChatMessage | undefined)?.stage === 'message_persistence') {
+      const message = resolveActiveAssistantMessage(data)
+      const errorMsg = String(data.content || t('chat.processError'))
+      if (message) {
+        message.persistence_error = errorMsg
+        message.is_completed = true
+        message.thinking = false
+        message.artifactsCollecting = false
+        emitMessageUpdated(message)
+      }
+      loading.value = false
+      isReplying.value = false
+      fullContent.value = ''
+      currentAssistantMessageId.value = ''
+      if (data.id) replaySegments.delete(String(data.id))
+      reportError(errorMsg)
+      scrollToBottom()
+      return
+    }
+
     if (data.response_type === 'agent_query') {
+      if (data.id) replaySegments.delete(String(data.id))
+      const replay = resetSteerTurnForReplay(messagesList, String(data.id || ''))
+      if (replay) replaySegments.set(String(data.id), replay)
       if (data.id) {
         const earlyMsg = getTrailingIncompleteAssistant()
         if (earlyMsg) earlyMsg.request_id = data.id
@@ -977,8 +1130,10 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
         request_id: (data.data as ChatMessage | undefined)?.request_id,
       })
 
-      let existingMessage = findLastMessage(
-        (item) => item.id === data.id || item.request_id === data.id,
+      let existingMessage = replay || findLastMessage(
+        (item) =>
+          item.role === 'assistant' &&
+          (item.id === data.id || item.request_id === data.id),
       )
       const created = !existingMessage
       if (!existingMessage) {
@@ -1023,18 +1178,20 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
       data.response_type === 'thinking' ||
       data.response_type === 'tool_call' ||
       data.response_type === 'tool_result' ||
+      data.response_type === 'command_output' ||
       data.response_type === 'reflection' ||
       data.response_type === 'artifacts_pending' ||
-      data.response_type === 'context_compacted'
+      data.response_type === 'context_compacted' ||
+      data.response_type === 'user_message_injected'
 
-    const lastMessage = messagesList[messagesList.length - 1]
-    const isCurrentlyAgentMode = lastMessage?.isAgentMode === true
+    const activeAssistant = getTrailingIncompleteAssistant()
+    const isCurrentlyAgentMode = activeAssistant?.isAgentMode === true
     const targetsActiveAgentRequest =
       isAgentStreamSession() &&
       !!data.id &&
       (data.id === currentAssistantMessageId.value ||
-        lastMessage?.request_id === data.id ||
-        lastMessage?.id === data.id)
+        activeAssistant?.request_id === data.id ||
+        activeAssistant?.id === data.id)
     const isAgentAnswerChunk =
       data.response_type === 'answer' && (isAgentStreamSession() || targetsActiveAgentRequest)
     const isAgentCompleteChunk =
@@ -1063,9 +1220,11 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
         log('[Stop Event] Generation stopped')
         const stoppedMessage = resolveActiveAssistantMessage(data)
         if (stoppedMessage) markAssistantStopped(stoppedMessage)
+        if (data.id) replaySegments.delete(String(data.id))
         loading.value = false
         isReplying.value = false
         currentAssistantMessageId.value = ''
+        onGenerationStopped?.()
       }
       return
     }
@@ -1073,6 +1232,7 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
     if (data.response_type === 'stop') {
       log('[Stop Event] Non-agent generation stopped')
       const stoppedMessage = findLastMessage((item) => {
+        if (item.role !== 'assistant') return false
         if (item.request_id === data.id) return true
         return item.id === data.id
       })
@@ -1081,13 +1241,35 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
       isReplying.value = false
       fullContent.value = ''
       currentAssistantMessageId.value = ''
+      onGenerationStopped?.()
       return
     }
 
     const existingMessage = findLastMessage((item) => {
+      if (item.role !== 'assistant') return false
       if (item.request_id === data.id) return true
       return item.id === data.id
     })
+    if (data.response_type === 'complete' && existingMessage) {
+      if (existingMessage.is_completed) return
+      const metadata = data.data as ChatMessage | undefined
+      applyFinalArtifactContent(existingMessage, metadata?.final_content)
+      if (Array.isArray(metadata?.artifacts)) existingMessage.artifacts = metadata.artifacts
+      const usage = metadata?.usage || data.usage
+      if (usage) existingMessage.usage = usage
+      existingMessage.artifactsCollecting = false
+      existingMessage.thinking = false
+      existingMessage.is_completed = true
+      loading.value = false
+      isReplying.value = false
+      fullContent.value = ''
+      currentAssistantMessageId.value = ''
+      emitMessageUpdated(existingMessage, { ...data, is_completed: true })
+      onReplyComplete?.(String(existingMessage.content || ''))
+      onTurnComplete?.(existingMessage)
+      scrollToBottom()
+      return
+    }
     if (existingMessage?.is_completed && data.done && !data.content) {
       log('[Non-Agent] Ignoring duplicate completion event for completed message')
       return
@@ -1122,7 +1304,11 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
 
     if (!existingMessage) loading.value = false
 
-    if (data.done) {
+    // answer.done closes the token stream, not the persisted turn. In
+    // particular the final image retry must wait for the subsequent complete.
+    // Untyped legacy streams retain their original done behavior.
+    const turnDone = data.done && data.response_type !== 'answer'
+    if (turnDone) {
       obj.is_completed = true
       onReplyComplete?.(String(obj.content || ''))
       isReplying.value = false
@@ -1130,7 +1316,7 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
       currentAssistantMessageId.value = ''
     }
     updateAssistantSession(obj)
-    if (data.done) {
+    if (turnDone) {
       const completed = resolveActiveAssistantMessage(data) || obj
       onTurnComplete?.(completed)
     }

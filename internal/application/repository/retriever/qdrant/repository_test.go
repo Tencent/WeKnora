@@ -1,8 +1,23 @@
 package qdrant
 
 import (
+	"bytes"
+	"context"
+	"errors"
+	"fmt"
+	"os"
+	"slices"
+	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
+
+	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/qdrant/go-client/qdrant"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 func TestNewQdrantValueMapSanitizesInvalidUTF8AndNUL(t *testing.T) {
@@ -76,5 +91,674 @@ func TestCreatePayloadSanitizesAllStringFields(t *testing.T) {
 	}
 	if got := payload[fieldIsEnabled].GetBoolValue(); !got {
 		t.Error("is_enabled changed during payload creation")
+	}
+}
+
+// newInterceptedQdrantClient builds a client whose unary RPCs are answered by
+// the given interceptor, so repository behaviour can be pinned without a live
+// Qdrant server.
+func newInterceptedQdrantClient(t *testing.T, intercept grpc.UnaryClientInterceptor) *qdrant.Client {
+	t.Helper()
+	client, err := qdrant.NewClient(&qdrant.Config{
+		Host:                   "localhost",
+		PoolSize:               1,
+		SkipCompatibilityCheck: true,
+		GrpcOptions:            []grpc.DialOption{grpc.WithUnaryInterceptor(intercept)},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := client.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	return client
+}
+
+// Intercept the SDK's RPCs so failures and cancellation need no live server.
+func newPayloadUpdateTestRepository(t *testing.T, collections []string, listErr error,
+	setPayload func(context.Context, *qdrant.SetPayloadPoints) error,
+) *qdrantRepository {
+	t.Helper()
+	client := newInterceptedQdrantClient(t, func(
+		ctx context.Context, method string, req, reply any, _ *grpc.ClientConn,
+		_ grpc.UnaryInvoker, _ ...grpc.CallOption,
+	) error {
+		switch request := req.(type) {
+		case *qdrant.ListCollectionsRequest:
+			if listErr != nil {
+				return listErr
+			}
+			response := reply.(*qdrant.ListCollectionsResponse)
+			for _, name := range collections {
+				response.Collections = append(response.Collections, &qdrant.CollectionDescription{Name: name})
+			}
+			return nil
+		case *qdrant.SetPayloadPoints:
+			return setPayload(ctx, request)
+		default:
+			return fmt.Errorf("unexpected RPC %s", method)
+		}
+	})
+	return &qdrantRepository{client: client, collectionBaseName: "vectors"}
+}
+
+func TestBatchPayloadUpdates(t *testing.T) {
+	operations := []struct {
+		name   string
+		groups int
+		run    func(context.Context, *qdrantRepository) error
+	}{
+		{"enable", 1, func(ctx context.Context, repo *qdrantRepository) error {
+			return repo.BatchUpdateChunkEnabledStatus(ctx, map[string]bool{"chunk": true})
+		}},
+		{"disable", 1, func(ctx context.Context, repo *qdrantRepository) error {
+			return repo.BatchUpdateChunkEnabledStatus(ctx, map[string]bool{"chunk": false})
+		}},
+		{"mixed status", 2, func(ctx context.Context, repo *qdrantRepository) error {
+			return repo.BatchUpdateChunkEnabledStatus(ctx, map[string]bool{"on": true, "off": false})
+		}},
+		{"tags", 2, func(ctx context.Context, repo *qdrantRepository) error {
+			return repo.BatchUpdateChunkTagID(ctx, map[string]string{"one": "tag-a", "two": "tag-b"})
+		}},
+	}
+	for _, operation := range operations {
+		t.Run(operation.name, func(t *testing.T) {
+			modes := []string{"success", "partial failure", "all failures", "list failure", "no collections"}
+			for _, mode := range modes {
+				t.Run(mode, func(t *testing.T) {
+					collections := []string{"vectors_768", "unrelated_768", "vectors_1536"}
+					if mode == "no collections" {
+						collections = []string{"unrelated_768"}
+					}
+					var listErr error
+					if mode == "list failure" {
+						listErr = errors.New("list unavailable")
+					}
+					calls := 0
+					var failures []error
+					var descriptions []string
+					repo := newPayloadUpdateTestRepository(t, collections, listErr,
+						func(_ context.Context, request *qdrant.SetPayloadPoints) error {
+							calls++
+							if request.CollectionName == "unrelated_768" {
+								t.Error("updated an unrelated collection")
+							}
+							fail := mode == "all failures" ||
+								(mode == "partial failure" && request.CollectionName == "vectors_768")
+							if !fail {
+								return nil
+							}
+							failure := fmt.Errorf("failure %d", calls)
+							failures = append(failures, failure)
+							description := fmt.Sprintf("set chunk tag_id %q",
+								request.Payload[fieldTagID].GetStringValue())
+							if enabled, ok := request.Payload[fieldIsEnabled]; ok {
+								description = "disable chunks"
+								if enabled.GetBoolValue() {
+									description = "enable chunks"
+								}
+							}
+							descriptions = append(descriptions, description+" in collection "+request.CollectionName)
+							return failure
+						})
+					err := operation.run(context.Background(), repo)
+					wantCalls := 2 * operation.groups
+					if mode == "list failure" || mode == "no collections" {
+						wantCalls = 0
+					}
+					if calls != wantCalls {
+						t.Fatalf("got %d updates, want %d", calls, wantCalls)
+					}
+					if listErr != nil && !errors.Is(err, listErr) {
+						t.Fatalf("lost list failure: %v", err)
+					}
+					if listErr == nil && len(failures) == 0 && err != nil {
+						t.Fatalf("unexpected error: %v", err)
+					}
+					for i, failure := range failures {
+						if !errors.Is(err, failure) {
+							t.Errorf("lost failure %v in %v", failure, err)
+						}
+						if err == nil || !strings.Contains(err.Error(), descriptions[i]) {
+							t.Errorf("missing operation/collection %q in %v", descriptions[i], err)
+						}
+					}
+				})
+			}
+
+			t.Run("cancellation retains earlier failures", func(t *testing.T) {
+				ctx, cancel := context.WithCancel(context.Background())
+				defer cancel()
+				failure := errors.New("first update failed")
+				calls := 0
+				repo := newPayloadUpdateTestRepository(t, []string{"vectors_768", "vectors_1536", "vectors_384"}, nil,
+					func(context.Context, *qdrant.SetPayloadPoints) error {
+						calls++
+						if calls == 1 {
+							return failure
+						}
+						cancel()
+						return ctx.Err()
+					})
+				err := operation.run(ctx, repo)
+				if calls != 2 || !errors.Is(err, failure) || !errors.Is(err, context.Canceled) {
+					t.Fatalf("calls=%d, err=%v; want 2 calls and both errors", calls, err)
+				}
+			})
+
+			t.Run("canceled before starting", func(t *testing.T) {
+				ctx, cancel := context.WithCancel(context.Background())
+				cancel()
+				if err := operation.run(ctx, &qdrantRepository{}); !errors.Is(err, context.Canceled) {
+					t.Fatalf("expected cancellation before any RPC, got %v", err)
+				}
+			})
+			t.Run("canceled during final update", func(t *testing.T) {
+				ctx, cancel := context.WithCancel(context.Background())
+				defer cancel()
+				calls := 0
+				repo := newPayloadUpdateTestRepository(t, []string{"vectors_768"}, nil,
+					func(context.Context, *qdrant.SetPayloadPoints) error {
+						calls++
+						if calls == operation.groups {
+							cancel()
+						}
+						return nil
+					})
+				if err := operation.run(ctx, repo); !errors.Is(err, context.Canceled) {
+					t.Fatalf("expected cancellation instead of success, got %v", err)
+				}
+			})
+			t.Run("expired deadline", func(t *testing.T) {
+				ctx, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+				defer cancel()
+				if err := operation.run(ctx, &qdrantRepository{}); !errors.Is(err, context.DeadlineExceeded) {
+					t.Fatalf("expected deadline error before any RPC, got %v", err)
+				}
+			})
+		})
+	}
+}
+
+func TestBatchPayloadUpdatesEmptyInput(t *testing.T) {
+	repo := &qdrantRepository{}
+	if err := repo.BatchUpdateChunkEnabledStatus(context.Background(), nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.BatchUpdateChunkTagID(context.Background(), nil); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// deleteTestRepository is a stand-in Qdrant that only holds `collections` and
+// answers like the real server: a delete against a collection it does not have
+// fails with the same "Collection ... doesn't exist!" error the issue reports.
+// `probe` optionally overrides the CollectionExists answer, e.g. to inject an
+// infrastructure failure; a nil probe answers from the inventory.
+const qdrantMissingCollectionErr = "Collection %s doesn't exist!"
+
+type deleteTestRepository struct {
+	repo        *qdrantRepository
+	collections map[string]bool
+	probe       func(collectionName string) (bool, error)
+	probed      []string
+	deletes     []string
+}
+
+func newDeleteTestRepository(t *testing.T, collections []string,
+	probe func(collectionName string) (bool, error),
+) *deleteTestRepository {
+	t.Helper()
+	harness := &deleteTestRepository{
+		collections: make(map[string]bool, len(collections)),
+		probe:       probe,
+	}
+	for _, name := range collections {
+		harness.collections[name] = true
+	}
+	client := newInterceptedQdrantClient(t, func(
+		_ context.Context, method string, req, reply any, _ *grpc.ClientConn,
+		_ grpc.UnaryInvoker, _ ...grpc.CallOption,
+	) error {
+		switch request := req.(type) {
+		case *qdrant.CollectionExistsRequest:
+			name := request.GetCollectionName()
+			harness.probed = append(harness.probed, name)
+			if harness.probe == nil {
+				response := reply.(*qdrant.CollectionExistsResponse)
+				response.Result = &qdrant.CollectionExists{Exists: harness.collections[name]}
+				return nil
+			}
+			found, err := harness.probe(name)
+			if err != nil {
+				return err
+			}
+			reply.(*qdrant.CollectionExistsResponse).Result = &qdrant.CollectionExists{Exists: found}
+			return nil
+		case *qdrant.DeletePoints:
+			name := request.GetCollectionName()
+			harness.deletes = append(harness.deletes, name)
+			if !harness.collections[name] {
+				// Same gRPC status and wording the real server uses, so the
+				// NotFound no-op path is exercised rather than a paraphrase.
+				return status.Error(codes.NotFound, fmt.Sprintf(qdrantMissingCollectionErr, name))
+			}
+			return nil
+		default:
+			return fmt.Errorf("unexpected RPC %s", method)
+		}
+	})
+	harness.repo = &qdrantRepository{client: client, collectionBaseName: "vectors"}
+	return harness
+}
+
+// deleteOperations covers every repository method that deletes by a dimension,
+// so the missing-collection rule is pinned for all three of them.
+func deleteOperations() []struct {
+	name string
+	run  func(context.Context, *qdrantRepository) error
+} {
+	return []struct {
+		name string
+		run  func(context.Context, *qdrantRepository) error
+	}{
+		{"chunk ids", func(ctx context.Context, repo *qdrantRepository) error {
+			return repo.DeleteByChunkIDList(ctx, []string{"chunk-1"}, 1024, types.KnowledgeBaseTypeDocument)
+		}},
+		{"knowledge ids", func(ctx context.Context, repo *qdrantRepository) error {
+			return repo.DeleteByKnowledgeIDList(ctx, []string{"knowledge-1"}, 1024, types.KnowledgeBaseTypeDocument)
+		}},
+		{"source ids", func(ctx context.Context, repo *qdrantRepository) error {
+			return repo.DeleteBySourceIDList(ctx, []string{"source-1"}, 1024, types.KnowledgeBaseTypeDocument)
+		}},
+	}
+}
+
+// A dimension collection is created lazily on the first write, so deleting from
+// one that was never created must be a no-op rather than an error: ingest and
+// re-index run "delete then write", and failing here aborts the write that would
+// have created the collection (#3337).
+func TestDeletesSkipMissingCollection(t *testing.T) {
+	for _, operation := range deleteOperations() {
+		t.Run(operation.name, func(t *testing.T) {
+			// The store holds no dimension collection yet: the delete must not
+			// reach Qdrant, otherwise it reports the collection as missing.
+			harness := newDeleteTestRepository(t, nil, nil)
+
+			if err := operation.run(context.Background(), harness.repo); err != nil {
+				t.Fatalf("delete against a missing collection must be a no-op, got %v", err)
+			}
+			if len(harness.probed) != 1 || harness.probed[0] != "vectors_1024" {
+				t.Fatalf("expected one existence probe for vectors_1024, got %v", harness.probed)
+			}
+			if len(harness.deletes) != 0 {
+				t.Fatalf("expected no delete RPC for a missing collection, got %v", harness.deletes)
+			}
+		})
+	}
+}
+
+func TestDeletesIssueWhenCollectionExists(t *testing.T) {
+	for _, operation := range deleteOperations() {
+		t.Run(operation.name, func(t *testing.T) {
+			harness := newDeleteTestRepository(t, []string{"vectors_1024"}, nil)
+
+			if err := operation.run(context.Background(), harness.repo); err != nil {
+				t.Fatal(err)
+			}
+			if len(harness.deletes) != 1 || harness.deletes[0] != "vectors_1024" {
+				t.Fatalf("expected one delete against vectors_1024, got %v", harness.deletes)
+			}
+		})
+	}
+}
+
+// Infrastructure failures must not be mistaken for an absent collection: a
+// store that cannot answer must fail the delete loudly.
+func TestDeletePropagatesCollectionCheckFailure(t *testing.T) {
+	for _, operation := range deleteOperations() {
+		t.Run(operation.name, func(t *testing.T) {
+			harness := newDeleteTestRepository(t, []string{"vectors_1024"}, func(string) (bool, error) {
+				return false, errors.New("qdrant unavailable")
+			})
+
+			err := operation.run(context.Background(), harness.repo)
+			if err == nil || !strings.Contains(err.Error(), "failed to check collection existence") {
+				t.Fatalf("expected the existence probe failure to surface, got %v", err)
+			}
+			if len(harness.deletes) != 0 {
+				t.Fatalf("expected no delete RPC after a failed probe, got %v", harness.deletes)
+			}
+		})
+	}
+}
+
+// A dimension this process already created needs no probe, which keeps the
+// steady-state delete at one round-trip.
+func TestDeleteSkipsProbeForInitializedDimension(t *testing.T) {
+	harness := newDeleteTestRepository(t, []string{"vectors_1024"}, func(string) (bool, error) {
+		t.Error("initialized dimensions must not be probed")
+		return false, nil
+	})
+	harness.repo.initializedCollections.Store(1024, true)
+
+	if err := harness.repo.DeleteByKnowledgeIDList(
+		context.Background(), []string{"knowledge-1"}, 1024, types.KnowledgeBaseTypeDocument,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if len(harness.deletes) != 1 || harness.deletes[0] != "vectors_1024" {
+		t.Fatalf("expected one delete against vectors_1024, got %v", harness.deletes)
+	}
+}
+
+// An empty ID list short-circuits before any RPC, including the new probe.
+func TestDeleteWithEmptyIDListSkipsAllRPCs(t *testing.T) {
+	harness := newDeleteTestRepository(t, []string{"vectors_1024"}, func(string) (bool, error) {
+		t.Error("empty deletes must not probe the collection")
+		return false, nil
+	})
+
+	ctx := context.Background()
+	if err := harness.repo.DeleteByChunkIDList(ctx, nil, 1024, types.KnowledgeBaseTypeDocument); err != nil {
+		t.Fatal(err)
+	}
+	if err := harness.repo.DeleteByKnowledgeIDList(ctx, nil, 1024, types.KnowledgeBaseTypeDocument); err != nil {
+		t.Fatal(err)
+	}
+	if err := harness.repo.DeleteBySourceIDList(ctx, nil, 1024, types.KnowledgeBaseTypeDocument); err != nil {
+		t.Fatal(err)
+	}
+	if len(harness.deletes) != 0 {
+		t.Fatalf("expected no delete RPC for an empty ID list, got %v", harness.deletes)
+	}
+}
+
+func TestIsMissingCollectionErr(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil", nil, false},
+		{"generic", errors.New("qdrant unavailable"), false},
+		{"issue wording", fmt.Errorf(qdrantMissingCollectionErr, "vectors_1024"), true},
+		{"grpc not found", status.Error(codes.NotFound, "Not found: Collection vectors_1024 doesn't exist!"), true},
+		{"wrapped not found", fmt.Errorf("Delete() failed: vectors_1024: %w", status.Error(codes.NotFound, "Not found")), true},
+		{"other grpc", status.Error(codes.Unavailable, "qdrant down"), false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isMissingCollectionErr(tc.err); got != tc.want {
+				t.Fatalf("isMissingCollectionErr(%v) = %v, want %v", tc.err, got, tc.want)
+			}
+		})
+	}
+}
+
+// A dimension this process already created is not probed, so a Qdrant wipe
+// that leaves the cache stale still reaches DeletePoints. That RPC's missing
+// collection must be a no-op and must drop the cache so the following write
+// can recreate the collection (#3337).
+func TestDeleteTreatsStaleCacheMissingCollectionAsNoOp(t *testing.T) {
+	for _, operation := range deleteOperations() {
+		t.Run(operation.name, func(t *testing.T) {
+			harness := newDeleteTestRepository(t, nil, func(string) (bool, error) {
+				t.Error("stale cache must skip the existence probe")
+				return false, nil
+			})
+			harness.repo.initializedCollections.Store(1024, true)
+
+			if err := operation.run(context.Background(), harness.repo); err != nil {
+				t.Fatalf("stale cache + missing collection must be a no-op, got %v", err)
+			}
+			if len(harness.deletes) != 1 || harness.deletes[0] != "vectors_1024" {
+				t.Fatalf("expected one delete against vectors_1024, got %v", harness.deletes)
+			}
+			if _, ok := harness.repo.initializedCollections.Load(1024); ok {
+				t.Fatal("missing collection must drop the initialized cache so the following write can recreate it")
+			}
+		})
+	}
+}
+
+// errKeywordScroll makes every Scroll RPC fail the way an unreachable or
+// overloaded Qdrant does.
+var errKeywordScroll = errors.New("qdrant scroll unavailable")
+
+type keywordsTestHarness struct {
+	repo    *qdrantRepository
+	scrolls []string
+}
+
+// newKeywordsTestHarness wires KeywordsRetrieve to a fake Qdrant server. The
+// collection list and the per-collection Scroll outcome are the only inputs the
+// search loop has, so both are controlled here instead of stubbing the
+// repository.
+func newKeywordsTestHarness(t *testing.T, collections []string,
+	scroll func(collectionName string) ([]*qdrant.RetrievedPoint, error),
+) *keywordsTestHarness {
+	t.Helper()
+	harness := &keywordsTestHarness{}
+	client := newInterceptedQdrantClient(t, func(
+		_ context.Context, method string, req, reply any, _ *grpc.ClientConn,
+		_ grpc.UnaryInvoker, _ ...grpc.CallOption,
+	) error {
+		switch request := req.(type) {
+		case *qdrant.ListCollectionsRequest:
+			response := reply.(*qdrant.ListCollectionsResponse)
+			for _, name := range collections {
+				response.Collections = append(response.Collections, &qdrant.CollectionDescription{Name: name})
+			}
+			return nil
+		case *qdrant.ScrollPoints:
+			name := request.GetCollectionName()
+			harness.scrolls = append(harness.scrolls, name)
+			points, err := scroll(name)
+			if err != nil {
+				return err
+			}
+			reply.(*qdrant.ScrollResponse).Result = points
+			return nil
+		default:
+			return fmt.Errorf("unexpected RPC %s", method)
+		}
+	})
+	harness.repo = &qdrantRepository{client: client, collectionBaseName: "vectors"}
+	return harness
+}
+
+func keywordsRetrieveParams() types.RetrieveParams {
+	return types.RetrieveParams{
+		Query:            "invoice total",
+		TopK:             10,
+		KnowledgeBaseIDs: []string{"kb-1"},
+	}
+}
+
+func keywordHitPoint(id, content string) *qdrant.RetrievedPoint {
+	return &qdrant.RetrievedPoint{
+		Id: &qdrant.PointId{PointIdOptions: &qdrant.PointId_Uuid{Uuid: id}},
+		Payload: map[string]*qdrant.Value{
+			fieldContent:    qdrant.NewValueString(content),
+			fieldChunkID:    qdrant.NewValueString(id),
+			fieldSourceID:   qdrant.NewValueString("source-1"),
+			fieldSourceType: qdrant.NewValueInt(2),
+		},
+	}
+}
+
+// captureLogs redirects the package logger for one test. The conclusion
+// "No keyword matches found" is only legitimate when nothing failed, so the
+// tests assert on the rendered log rather than on the counters alone.
+func captureLogs(t *testing.T) *bytes.Buffer {
+	t.Helper()
+	var buf bytes.Buffer
+	logger.SetOutput(&buf)
+	t.Cleanup(func() { logger.SetOutput(os.Stdout) })
+	return &buf
+}
+
+// A batch in which every matching collection fails must reach the caller as an
+// error. Returning an empty result set with a nil error is indistinguishable
+// from a genuine zero-hit search, and the QA pipeline answers "no relevant
+// content" on top of it (#3835).
+func TestKeywordsRetrieveFailsWhenEveryMatchedCollectionFails(t *testing.T) {
+	logs := captureLogs(t)
+	harness := newKeywordsTestHarness(t,
+		[]string{"vectors_1024", "vectors_1536", "other_2048"},
+		func(string) ([]*qdrant.RetrievedPoint, error) {
+			return nil, errKeywordScroll
+		},
+	)
+
+	results, err := harness.repo.KeywordsRetrieve(context.Background(), keywordsRetrieveParams())
+
+	if !errors.Is(err, errKeywordScroll) {
+		t.Fatalf("all-collections failure must surface as an error, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "all 2 matched collections") {
+		t.Fatalf("error must state how many collections failed, got %q", err)
+	}
+	if results != nil {
+		t.Fatalf("no result set may accompany the error, got %d sets", len(results))
+	}
+	if want := []string{"vectors_1024", "vectors_1536"}; !slices.Equal(harness.scrolls, want) {
+		t.Fatalf("scroll attempts = %v, want %v: only base-name collections are searched", harness.scrolls, want)
+	}
+	if strings.Contains(logs.String(), "No keyword matches found") {
+		t.Fatal("a failed batch must not be logged as a search that found no matches")
+	}
+}
+
+// One failing collection must not fail the batch as long as another one
+// answered: partial results are still results. The failure must travel with
+// them though (RetrieveResult.Error) — otherwise callers treat the incomplete
+// answer as a complete one (#3835).
+func TestKeywordsRetrieveKeepsResultsWhenOnlySomeCollectionsFail(t *testing.T) {
+	logs := captureLogs(t)
+	harness := newKeywordsTestHarness(t, []string{"vectors_1024", "vectors_1536"},
+		func(name string) ([]*qdrant.RetrievedPoint, error) {
+			if name == "vectors_1024" {
+				return nil, errKeywordScroll
+			}
+			return []*qdrant.RetrievedPoint{keywordHitPoint("chunk-1", "invoice total 42")}, nil
+		},
+	)
+
+	results, err := harness.repo.KeywordsRetrieve(context.Background(), keywordsRetrieveParams())
+	if err != nil {
+		t.Fatalf("a partially failed batch must not fail the caller, got %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected one result set, got %d", len(results))
+	}
+	if results[0].Error == nil {
+		t.Fatal("a partially failed batch must mark its result set with the failure")
+	}
+	if !errors.Is(results[0].Error, errKeywordScroll) {
+		t.Fatalf("partial error must keep the underlying cause, got %v", results[0].Error)
+	}
+	if !strings.Contains(results[0].Error.Error(), "1 of 2 matched collections") {
+		t.Fatalf("partial error must state what failed, got %q", results[0].Error)
+	}
+	if len(results[0].Results) != 1 {
+		t.Fatalf("expected the surviving collection's hit, got %d results", len(results[0].Results))
+	}
+	if got := results[0].Results[0].ChunkID; got != "chunk-1" {
+		t.Fatalf("unexpected chunk id %q", got)
+	}
+	if results[0].RetrieverType != types.KeywordsRetrieverType {
+		t.Fatalf("expected keywords retriever type, got %v", results[0].RetrieverType)
+	}
+	if strings.Contains(logs.String(), "No keyword matches found") {
+		t.Fatal("a partially failed batch must not be logged as a search that found no matches")
+	}
+}
+
+// The genuine zero-hit outcome keeps its old shape: every collection answered,
+// no token matched, so an empty result with a nil error is correct and the
+// conclusion log still fires.
+func TestKeywordsRetrieveReportsNoMatchesWhenNothingFailed(t *testing.T) {
+	logs := captureLogs(t)
+	harness := newKeywordsTestHarness(t, []string{"vectors_1024"},
+		func(string) ([]*qdrant.RetrievedPoint, error) {
+			return nil, nil
+		},
+	)
+
+	results, err := harness.repo.KeywordsRetrieve(context.Background(), keywordsRetrieveParams())
+	if err != nil {
+		t.Fatalf("a successful search without matches must not error, got %v", err)
+	}
+	if len(results) != 1 || len(results[0].Results) != 0 {
+		t.Fatalf("expected one empty result set, got %#v", results)
+	}
+	if results[0].Error != nil {
+		t.Fatalf("a complete zero-hit search must not mark an error, got %v", results[0].Error)
+	}
+	if !strings.Contains(logs.String(), "No keyword matches found") {
+		t.Fatal("a successful zero-hit search must still be logged as such")
+	}
+}
+
+// A partial failure with zero hits is still a partial failure: the result set
+// stays empty but must carry the error, and the conclusion log must stay off.
+func TestKeywordsRetrieveMarksPartialFailureWhenNothingHit(t *testing.T) {
+	logs := captureLogs(t)
+	harness := newKeywordsTestHarness(t, []string{"vectors_1024", "vectors_1536"},
+		func(name string) ([]*qdrant.RetrievedPoint, error) {
+			if name == "vectors_1024" {
+				return nil, errKeywordScroll
+			}
+			return nil, nil
+		},
+	)
+
+	results, err := harness.repo.KeywordsRetrieve(context.Background(), keywordsRetrieveParams())
+	if err != nil {
+		t.Fatalf("a partially failed batch must not fail the caller, got %v", err)
+	}
+	if len(results) != 1 || len(results[0].Results) != 0 {
+		t.Fatalf("expected one empty result set, got %#v", results)
+	}
+	if !errors.Is(results[0].Error, errKeywordScroll) {
+		t.Fatalf("partial failure with zero hits must still be marked, got %v", results[0].Error)
+	}
+	if strings.Contains(logs.String(), "No keyword matches found") {
+		t.Fatal("a partially failed batch must not be logged as a search that found no matches")
+	}
+}
+
+// No collection carries the repository's base name: nothing was searched at
+// all, which must be distinguishable from a search that ran and hit nothing.
+func TestKeywordsRetrieveWarnsWhenNoCollectionMatchesBaseName(t *testing.T) {
+	logs := captureLogs(t)
+	harness := newKeywordsTestHarness(t, []string{"other_1024"},
+		func(string) ([]*qdrant.RetrievedPoint, error) {
+			return nil, nil
+		},
+	)
+
+	results, err := harness.repo.KeywordsRetrieve(context.Background(), keywordsRetrieveParams())
+	if err != nil {
+		t.Fatalf("an empty collection list must not error, got %v", err)
+	}
+	if len(results) != 1 || len(results[0].Results) != 0 {
+		t.Fatalf("expected one empty result set, got %#v", results)
+	}
+	if results[0].Error != nil {
+		t.Fatalf("no matching collection is not a partial failure, got %v", results[0].Error)
+	}
+	if len(harness.scrolls) != 0 {
+		t.Fatalf("no Scroll may be issued without a matching collection, got %v", harness.scrolls)
+	}
+	if !strings.Contains(logs.String(), "No collection matched base name") {
+		t.Fatal("a search that never ran must be logged as such")
+	}
+	if strings.Contains(logs.String(), "No keyword matches found") {
+		t.Fatal("a search that never ran must not be logged as a search that found no matches")
 	}
 }

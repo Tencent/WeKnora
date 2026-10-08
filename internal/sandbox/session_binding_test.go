@@ -336,6 +336,57 @@ func testSessionTurnLeaseStore(t *testing.T, store sessionTurnLeaseStore) {
 	require.Error(t, store.BeginTurn(cancelled, key))
 }
 
+func TestMemorySessionSandboxBindingStoreRewindLock(t *testing.T) {
+	t.Parallel()
+	store := NewMemorySessionSandboxBindingStore()
+	ctx := context.Background()
+	key := SessionSandboxKey{TenantID: 42, SessionID: "session-rewind"}
+
+	unlock, err := store.TryLockRewind(ctx, key)
+	require.NoError(t, err)
+	_, err = store.TryLockRewind(ctx, key)
+	require.ErrorIs(t, err, ErrSessionRewindLocked)
+	unlock()
+
+	unlock, err = store.TryLockRewind(ctx, key)
+	require.NoError(t, err)
+	unlock()
+}
+
+func TestMemorySessionSandboxBindingStoreBeginTurnFailsWhenRewindLocked(t *testing.T) {
+	t.Parallel()
+	store := NewMemorySessionSandboxBindingStore()
+	ctx := context.Background()
+	key := SessionSandboxKey{TenantID: 42, SessionID: "session-rewind-turn"}
+
+	unlock, err := store.TryLockRewind(ctx, key)
+	require.NoError(t, err)
+	held, err := store.HasRewindLock(ctx, key)
+	require.NoError(t, err)
+	require.True(t, held)
+	require.ErrorIs(t, store.BeginTurn(ctx, key), ErrSessionRewindLocked)
+	unlock()
+
+	require.NoError(t, store.BeginTurn(ctx, key))
+	require.NoError(t, store.EndTurn(ctx, key))
+}
+
+func TestMemorySessionSandboxBindingStoreTryLockRewindFailsWhenTurnActive(t *testing.T) {
+	t.Parallel()
+	store := NewMemorySessionSandboxBindingStore()
+	ctx := context.Background()
+	key := SessionSandboxKey{TenantID: 42, SessionID: "session-turn-rewind"}
+
+	require.NoError(t, store.BeginTurn(ctx, key))
+	_, err := store.TryLockRewind(ctx, key)
+	require.ErrorIs(t, err, ErrSessionTurnActive)
+	require.NoError(t, store.EndTurn(ctx, key))
+
+	unlock, err := store.TryLockRewind(ctx, key)
+	require.NoError(t, err)
+	unlock()
+}
+
 func TestMemorySessionSandboxBindingStoreSeparatesTenants(t *testing.T) {
 	t.Parallel()
 	testSessionSandboxBindingTenantIsolation(t, NewMemorySessionSandboxBindingStore())

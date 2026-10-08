@@ -29,7 +29,6 @@ import (
 	"maps"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/datasource"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -218,32 +217,8 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
-// sanitizeFileName removes characters invalid in filenames and truncates to a
-// safe length at a UTF-8 rune boundary (mirrors the Yuque connector).
+// sanitizeFileName keeps feed titles on one line before applying shared limits.
 func sanitizeFileName(name string) string {
-	name = strings.TrimSpace(name)
-	if name == "" {
-		return "untitled"
-	}
-	replacer := strings.NewReplacer(
-		"/", "_", "\\", "_", ":", "_", "*", "_",
-		"?", "_", "\"", "_", "<", "_", ">", "_", "|", "_",
-		"\n", " ", "\r", " ", "\t", " ",
-	)
-	result := strings.TrimSpace(replacer.Replace(name))
-	if result == "" {
-		return "untitled"
-	}
-	const maxBytes = 200
-	if len(result) > maxBytes {
-		result = result[:maxBytes]
-		for len(result) > 0 {
-			r, size := utf8.DecodeLastRuneInString(result)
-			if r != utf8.RuneError || size != 1 {
-				break
-			}
-			result = result[:len(result)-1]
-		}
-	}
-	return result
+	name = strings.NewReplacer("\n", " ", "\r", " ", "\t", " ").Replace(name)
+	return datasource.SanitizeFileName(strings.TrimSpace(name))
 }

@@ -66,19 +66,7 @@ while read -r _local_ref local_sha remote_ref remote_sha; do
 
     run_golangci_if_available "$lint_from_rev"
 
-    pkgs=()
-    while IFS= read -r line; do
-      [[ -n "$line" ]] && pkgs+=("$line")
-    done < <(collect_go_packages_from_files "${pr_changed_go[@]}")
-
-    filtered=()
-    for pkg in "${pkgs[@]}"; do
-      [[ "$pkg" == *"/docreader/"* ]] && continue
-      filtered+=("$pkg")
-    done
-
-    run_full_app_vet
-    run_go_test_packages "${filtered[@]}"
+    run_app_vet_test
 
     log_step "go build ./cmd/server"
     go build ./cmd/server

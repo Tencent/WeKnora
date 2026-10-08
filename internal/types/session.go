@@ -46,6 +46,8 @@ type SummaryConfig struct {
 	MaxCompletionTokens int `json:"max_completion_tokens"`
 	// Thinking - whether to enable thinking mode
 	Thinking *bool `json:"thinking"`
+	// ReasoningEffort is the graded thinking level; empty falls back to Thinking.
+	ReasoningEffort string `json:"reasoning_effort,omitempty"`
 }
 
 // ContextCompressionStrategy represents the strategy for context compression
@@ -107,6 +109,43 @@ type Session struct {
 	// permanent would make "no session references this config" never true.
 	SandboxConfigID string `json:"sandbox_config_id,omitempty" gorm:"type:varchar(36)"`
 
+	// SandboxConfigTenantID names the workspace that owns SandboxConfigID.
+	// Sandbox configs are keyed by (tenant, id), so the id above is not an
+	// address on its own: a shared agent's sandbox lives on ITS OWNER's config
+	// while this session belongs to the borrower, and resolving that config
+	// under the borrower finds nothing.
+	//
+	// Zero means "this session's own tenant", which covers every sandbox
+	// created by an agent the session's workspace owns, plus pins written
+	// before the column existed.
+	SandboxConfigTenantID uint64 `json:"-" gorm:"column:sandbox_config_tenant_id;type:bigint;default:0"`
+
+	// HostWorkspaceDir is the user-selected project directory this session
+	// operates in, for the WeKnora Lite host sandbox only. Empty means the session
+	// gets an auto-allocated workspace instead.
+	//
+	// Written once at creation and never updated: re-pointing a live session
+	// at a different directory would leave its transcript describing files
+	// that are no longer there. Standard edition never writes it.
+	HostWorkspaceDir string `json:"host_workspace_dir,omitempty" gorm:"type:varchar(1024)"`
+
+	// ParentSessionID names the session this one was forked from. Empty for
+	// ordinary sessions. Deliberately not a foreign key: the parent may be
+	// deleted while the branch lives on, and a branch must not cascade away
+	// with it. A dangling value simply renders as an ordinary session.
+	ParentSessionID string `json:"parent_session_id,omitempty" gorm:"type:varchar(36);index"`
+
+	// ForkedFromMessageID is the user or assistant message, IN THE PARENT
+	// SESSION, that the fork branched at. For a user point, messages strictly
+	// before it were copied here. For an assistant point, that answer is
+	// included so the branch continues after it.
+	ForkedFromMessageID string `json:"forked_from_message_id,omitempty" gorm:"type:varchar(36)"`
+
+	// ForkBootstrap holds the one-shot sandbox provisioning instructions for a
+	// forked session. Nil for ordinary sessions and for forks that have
+	// already provisioned. See types.ForkBootstrap.
+	ForkBootstrap *ForkBootstrap `json:"-" gorm:"type:jsonb;column:fork_bootstrap"`
+
 	// // Strategy configuration
 	// KnowledgeBaseID   string              `json:"knowledge_base_id"`                    // 关联的知识库ID
 	// MaxRounds         int                 `json:"max_rounds"`                           // 多轮保持轮数
@@ -141,6 +180,22 @@ type Session struct {
 func (s *Session) BeforeCreate(tx *gorm.DB) (err error) {
 	s.ID = uuid.New().String()
 	return nil
+}
+
+// SandboxConfigOwner returns the workspace SandboxConfigID must be looked up
+// in. Sandbox configs are keyed by (tenant, id), so the two always travel
+// together; a shared agent's sandbox lives on the LENDING workspace's config
+// while the session belongs to the borrower. Zero falls back to the session's
+// own tenant, which is right for every sandbox an own agent created and for
+// pins written before the owner was recorded.
+func (s *Session) SandboxConfigOwner() uint64 {
+	if s == nil {
+		return 0
+	}
+	if s.SandboxConfigTenantID != 0 {
+		return s.SandboxConfigTenantID
+	}
+	return s.TenantID
 }
 
 // SessionSourceAPI is the source filter that lists every session created via a
@@ -277,16 +332,18 @@ func (c *SummaryConfig) Scan(value interface{}) error {
 // to the frontend by GetSession so the chat input can restore the same agent,
 // model, KB scope, etc. the user had selected last time.
 type SessionLastRequestState struct {
-	AgentID          string         `json:"agent_id,omitempty"`
-	AgentEnabled     bool           `json:"agent_enabled"`
-	ModelID          string         `json:"model_id,omitempty"`
-	KnowledgeBaseIDs []string       `json:"knowledge_base_ids,omitempty"`
-	KnowledgeIDs     []string       `json:"knowledge_ids,omitempty"`
-	TagIDs           []string       `json:"tag_ids,omitempty"`
-	MCPServiceIDs    []string       `json:"mcp_service_ids,omitempty"`
-	SkillNames       []string       `json:"skill_names,omitempty"`
-	MentionedItems   MentionedItems `json:"mentioned_items,omitempty"`
-	WebSearchEnabled bool           `json:"web_search_enabled"`
+	AgentID             string         `json:"agent_id,omitempty"`
+	AgentEnabled        bool           `json:"agent_enabled"`
+	ModelID             string         `json:"model_id,omitempty"`
+	ReasoningEffort     string         `json:"reasoning_effort,omitempty"`
+	KnowledgeBaseIDs    []string       `json:"knowledge_base_ids,omitempty"`
+	KnowledgeIDs        []string       `json:"knowledge_ids,omitempty"`
+	TagIDs              []string       `json:"tag_ids,omitempty"`
+	MCPServiceIDs       []string       `json:"mcp_service_ids,omitempty"`
+	SkillNames          []string       `json:"skill_names,omitempty"`
+	MentionedItems      MentionedItems `json:"mentioned_items,omitempty"`
+	LocalBrowserEnabled bool           `json:"local_browser_enabled"`
+	WebSearchEnabled    bool           `json:"web_search_enabled"`
 }
 
 // Value implements driver.Valuer for SessionLastRequestState (JSONB).

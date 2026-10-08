@@ -42,6 +42,7 @@ WeKnora-lite
 /server
 /dist/
 /build/
+/artifacts/browserskill/
 cmd/desktop/build/bin/
 
 # 本地数据 / 模型文件

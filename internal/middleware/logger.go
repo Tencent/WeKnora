@@ -18,7 +18,16 @@ import (
 
 const (
 	maxBodySize = 1024 * 10 // 最大记录10KB的body内容
+	// bodyTruncatedMarker 是日志里跟在被截断的 body 后面的标记。
+	bodyTruncatedMarker = "... [内容过长，已截断]"
 )
+
+// replayedBody 把日志窥探消费掉的字节还给 handler，让它读到的 body 与没有这层
+// 中间件时完全一致；Close 仍然关闭原始 body，连接得以释放。
+type replayedBody struct {
+	io.Reader
+	io.Closer
+}
 
 // loggerResponseBodyWriter 自定义ResponseWriter用于捕获响应内容（用于logger中间件）
 type loggerResponseBodyWriter struct {
@@ -44,7 +53,8 @@ func (r loggerResponseBodyWriter) Write(b []byte) (int, error) {
 // $1 捕获原始字段名（包括两侧引号），保持日志中的字段名不变，仅将值替换为 "***"。
 var sensitiveFieldRegex = regexp.MustCompile(
 	`(?i)("(?:new[_-]?password|old[_-]?password|password|passwd|ticket|token|access[_-]?token|` +
-		`refresh[_-]?token|id[_-]?token|authorization|auth[_-]?token|api[_-]?key|` +
+		`refresh[_-]?token|next[_-]?token|device[_-]?token|pending[_-]?token|pairing[_-]?link|` +
+		`id[_-]?token|authorization|auth[_-]?token|api[_-]?key|` +
 		`api[_-]?secret|secret[_-]?key|client[_-]?secret|private[_-]?key|secret|` +
 		`authorization[_-]?url|authorization[_-]?attempt)")\s*:\s*"[^"]*"`,
 )
@@ -86,7 +96,7 @@ func sanitizeQuery(raw string) string {
 	return values.Encode()
 }
 
-// readRequestBody 读取请求体（限制大小用于日志，但完整读取用于重置）
+// readRequestBody 读取请求体（限制大小用于日志，但把剩余字节原样交还后续handler）
 func readRequestBody(c *gin.Context) string {
 	if c.Request.Body == nil {
 		return ""
@@ -100,26 +110,34 @@ func readRequestBody(c *gin.Context) string {
 		return "[非文本类型，已跳过]"
 	}
 
-	// 完整读取body内容（不限制大小），因为需要完整重置给后续handler使用
-	bodyBytes, err := io.ReadAll(c.Request.Body)
+	// 重置request body：把已窥探的前缀接回未读取的剩余部分，handler 仍能读到完整
+	// 数据，但中间件自身只驻留日志需要的那点字节。
+	//
+	// 这里原本是无上限的 io.ReadAll(c.Request.Body)。Logger 注册在 Auth 之前
+	// （router.go NewRouter），因此对所有请求执行，而任何路由的
+	// http.MaxBytesReader（limitJSONBody / limitUploadBody / browserskill 的 4 KiB
+	// 授权接口）都是在 handler 里才装上的：body 早已被整体读进内存，那些 cap 只剩
+	// 报错的意义，没有限住内存的作用。没有 cap 的路由（对话、检索、IM webhook、
+	// MCP 端点）则连上限都不存在。
+	bodyBytes, err := io.ReadAll(io.LimitReader(c.Request.Body, maxBodySize+1))
+	originalBody := c.Request.Body
+	c.Request.Body = &replayedBody{
+		Reader: io.MultiReader(bytes.NewReader(bodyBytes), originalBody),
+		Closer: originalBody,
+	}
 	if err != nil {
 		return "[读取请求体失败]"
 	}
 
-	// 重置request body，使用完整内容，确保后续handler能读取到完整数据
-	c.Request.Body = io.NopCloser(bytes.NewBuffer(bodyBytes))
-
 	// 用于日志的body（限制大小）
-	var logBodyBytes []byte
-	if len(bodyBytes) > maxBodySize {
-		logBodyBytes = bodyBytes[:maxBodySize]
-	} else {
-		logBodyBytes = bodyBytes
+	truncated := len(bodyBytes) > maxBodySize
+	if truncated {
+		bodyBytes = bodyBytes[:maxBodySize]
 	}
 
-	bodyStr := string(logBodyBytes)
-	if len(bodyBytes) > maxBodySize {
-		bodyStr += "... [内容过长，已截断]"
+	bodyStr := string(bodyBytes)
+	if truncated {
+		bodyStr += bodyTruncatedMarker
 	}
 
 	return sanitizeBody(bodyStr)
@@ -170,9 +188,13 @@ func Logger() gin.HandlerFunc {
 			return
 		}
 
+		// Browser traffic contains credentials, page content and screenshots.
+		// Keep access metadata, but never read or buffer these request/response bodies.
+		browserTraffic := strings.HasPrefix(path, "/api/v1/local-browser/") ||
+			path == "/api/v1/me/browser" || strings.HasSuffix(path, "/local-browser")
 		// 读取请求体（在Next之前读取，因为Next会消费body）
 		var requestBody string
-		if c.Request.Method == "POST" || c.Request.Method == "PUT" || c.Request.Method == "PATCH" {
+		if !browserTraffic && (c.Request.Method == "POST" || c.Request.Method == "PUT" || c.Request.Method == "PATCH") {
 			requestBody = readRequestBody(c)
 		}
 
@@ -182,7 +204,9 @@ func Logger() gin.HandlerFunc {
 			ResponseWriter: c.Writer,
 			body:           responseBody,
 		}
-		c.Writer = responseWriter
+		if !browserTraffic {
+			c.Writer = responseWriter
+		}
 
 		// Process request
 		c.Next()

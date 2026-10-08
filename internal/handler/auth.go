@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/base64"
 	"encoding/json"
 	stderrors "errors"
@@ -22,8 +23,16 @@ import (
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
 
-const oidcNonceCookieName = "weknora_oidc_nonce"
-const oidcNonceCookieMaxAge = 600
+var liteSetupToken string
+
+// SetLiteSetupToken is called by the native desktop host before serving requests.
+// Web deployments leave it empty and cannot issue anonymous administrator tokens.
+func SetLiteSetupToken(token string) { liteSetupToken = token }
+
+const (
+	oidcNonceCookieName   = "weknora_oidc_nonce"
+	oidcNonceCookieMaxAge = 600
+)
 
 // AuthHandler implements HTTP request handlers for user authentication
 // Provides functionality for user registration, login, logout, and token management
@@ -172,16 +181,11 @@ func (h *AuthHandler) Register(c *gin.Context) {
 
 	logger.Info(ctx, "Start user registration")
 
-	// 当 auth.registration_mode=invite_only 时，public 注册被关闭。
-	// 优先级：DB system_settings > cfg.Auth.RegistrationMode > "self_serve"。
-	// SystemAdmin 通过「全局设置」UI 实时切换 self_serve / invite_only，立即
-	// 生效，不需要重启服务。历史变量 DISABLE_REGISTRATION=true 仍在 config
-	// 启动阶段被等价提升为 invite_only（applyAuthAndTenantDefaults），
-	// 作为 cfg-default 进入 resolveRegistrationMode。
-	if h.resolveRegistrationMode(ctx) == config.AuthRegistrationModeInviteOnly {
-		logger.Warn(ctx, "Registration rejected: auth.registration_mode=invite_only")
-		appErr := errors.NewForbiddenError("Registration is invite-only")
-		c.Error(appErr)
+	// Only self_serve permits registration without an invitation. Resolve
+	// each request so system-settings changes take effect immediately.
+	if h.resolveRegistrationMode(ctx) != config.AuthRegistrationModeSelfServe {
+		logger.Warn(ctx, "Public registration rejected by auth.registration_mode")
+		_ = c.Error(errors.NewForbiddenError("Public registration is disabled"))
 		return
 	}
 
@@ -655,10 +659,11 @@ func (h *AuthHandler) GetCurrentUser(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data": gin.H{
-			"user":            userInfo,
-			"tenant":          dto.NewTenantResponse(ctx, tenant),
-			"memberships":     memberships,
-			"tenant_required": tenant == nil,
+			"user":                userInfo,
+			"preference_defaults": gin.H{"browser_search_instructions": types.DefaultBrowserSearchInstructions},
+			"tenant":              dto.NewTenantResponse(ctx, tenant),
+			"memberships":         memberships,
+			"tenant_required":     tenant == nil,
 			"capabilities": gin.H{
 				"can_create_tenant":      canCreateTenant,
 				"auto_accept_invitation": autoAcceptInvitation,
@@ -672,6 +677,7 @@ func (h *AuthHandler) GetCurrentUser(c *gin.Context) {
 // (preserve existing value) from "explicit false". See
 // types.UserPreferences for the persistence-layer counterpart.
 type updateMyPreferencesRequest struct {
+	BrowserSearchInstructions *string `json:"browser_search_instructions" binding:"omitempty,max=4000"`
 	// LastActiveTenantID lets clients persist "after a fresh login,
 	// drop me back into this workspace" across devices. The SPA sends
 	// this after every tenant switch; POST /auth/switch-tenant records
@@ -713,7 +719,8 @@ func (h *AuthHandler) UpdateMyPreferences(c *gin.Context) {
 	}
 
 	patch := types.UserPreferences{
-		LastActiveTenantID: req.LastActiveTenantID,
+		LastActiveTenantID:        req.LastActiveTenantID,
+		BrowserSearchInstructions: req.BrowserSearchInstructions,
 	}
 	prefs, err := h.userService.UpdateUserPreferences(ctx, user.ID, patch)
 	if err != nil {
@@ -882,7 +889,7 @@ func (h *AuthHandler) SwitchTenant(c *gin.Context) {
 }
 
 // @Summary      自动初始化（Lite 桌面版）
-// @Description  Lite 版专用：首次启动时自动创建默认用户和空间并返回令牌，后续启动直接签发令牌，免除手动注册/登录流程
+// @Description  Lite 版专用：首次启动时自动创建默认用户和空间并返回令牌，首次及后续启动均须通过桌面原生凭据认证，免除手动注册/登录流程
 // @Tags         认证
 // @Accept       json
 // @Produce      json
@@ -895,6 +902,12 @@ func (h *AuthHandler) AutoSetup(c *gin.Context) {
 	if Edition != "lite" {
 		appErr := errors.NewForbiddenError("auto-setup is only available in lite edition")
 		c.Error(appErr)
+		return
+	}
+
+	if liteSetupToken == "" ||
+		subtle.ConstantTimeCompare([]byte(c.GetHeader("X-WeKnora-Desktop-Token")), []byte(liteSetupToken)) != 1 {
+		_ = c.Error(errors.NewUnauthorizedError("desktop authentication is required"))
 		return
 	}
 

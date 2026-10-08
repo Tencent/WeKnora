@@ -276,7 +276,10 @@ func TestFetchIncremental_NoteReadFailureIsRetried(t *testing.T) {
 	}
 }
 
-func TestFetchAll_EmptyNoteIsSkipped(t *testing.T) {
+// TestFetchAll_EmptyNoteSyncsTitleOnly covers a note whose body was cleared in
+// IMA. The note still exists, so it must be emitted with its title as content:
+// skipping it would leave whatever was indexed before the edit in place.
+func TestFetchAll_EmptyNoteSyncsTitleOnly(t *testing.T) {
 	f := newFakeIMA(t)
 	f.setKB("kb1", []fakeFile{{
 		MediaID: "note_1", Title: "Blank", MediaType: mediaTypeNote,
@@ -287,8 +290,59 @@ func TestFetchAll_EmptyNoteIsSkipped(t *testing.T) {
 	if err != nil {
 		t.Fatalf("FetchAll: %v", err)
 	}
-	if len(items) != 0 {
-		t.Fatalf("an empty note must be skipped, got %s", describeItems(items))
+	note := mustFindItem(t, items, logicalKey("kb1", "", "Blank"))
+	if string(note.Content) != "# Blank\n" {
+		t.Errorf("content = %q, want the title as markdown", note.Content)
+	}
+	if note.ContentType != "text/markdown" {
+		t.Errorf("ContentType = %q, want text/markdown", note.ContentType)
+	}
+	if !strings.HasSuffix(note.FileName, ".md") {
+		t.Errorf("FileName = %q, want an .md suffix", note.FileName)
+	}
+}
+
+// TestFetchAll_ClearedNoteReplacesStaleContent is the regression test for stale
+// note bodies: after a note that was already ingested is cleared in IMA, the
+// next sync that re-reads it must emit an item with the same external id so
+// ingestion overwrites the old text instead of keeping it indexed forever.
+func TestFetchAll_ClearedNoteReplacesStaleContent(t *testing.T) {
+	f := newFakeIMA(t)
+	note := fakeFile{
+		MediaID: "note_1", Title: "Runbook", MediaType: mediaTypeNote,
+		NotebookID: "777", NoteBody: "# Runbook\nold body",
+	}
+	f.setKB("kb1", []fakeFile{note})
+
+	c := NewConnector()
+	cfg := f.config("kb1")
+	key := logicalKey("kb1", "", "Runbook")
+
+	items, err := c.FetchAll(context.Background(), cfg, []string{"kb1"})
+	if err != nil {
+		t.Fatalf("first FetchAll: %v", err)
+	}
+	first := mustFindItem(t, items, key)
+	if string(first.Content) != "# Runbook\nold body" {
+		t.Fatalf("first content = %q, want the note body", first.Content)
+	}
+
+	// The user clears the note body. The note itself still exists and keeps the
+	// same media_id, so only a sync that re-reads it can notice.
+	note.NoteBody = ""
+	f.setKB("kb1", []fakeFile{note})
+
+	items2, err := c.FetchAll(context.Background(), cfg, []string{"kb1"})
+	if err != nil {
+		t.Fatalf("second FetchAll: %v", err)
+	}
+	replacement := mustFindItem(t, items2, key)
+	if replacement.ExternalID != first.ExternalID {
+		t.Errorf("external id = %q, want the original %q so ingestion updates in place",
+			replacement.ExternalID, first.ExternalID)
+	}
+	if string(replacement.Content) != "# Runbook\n" {
+		t.Errorf("content after clearing = %q, want the title only", replacement.Content)
 	}
 }
 
@@ -407,10 +461,11 @@ func TestFetchAll_ResolvesFolderPath(t *testing.T) {
 	f.setKB("kb1",
 		[]fakeFile{
 			{MediaID: "m-root", Title: "Root", MediaType: mediaTypeMarkdown, Body: "root"},
-			{MediaID: "m-deep", Title: "Deep", ParentFolderID: "f2", MediaType: mediaTypeMarkdown, Body: "deep"},
+			{MediaID: "m-deep", Title: "Deep", ParentFolderID: "folder_f2", MediaType: mediaTypeMarkdown, Body: "deep"},
 		},
-		fakeFolder{FolderID: "f1", Name: "Outer"},
-		fakeFolder{FolderID: "f2", Name: "Inner", ParentFolderID: "f1"},
+		fakeFolder{FolderID: "folder_f1", Name: "Outer"},
+		fakeFolder{FolderID: "folder_f2", Name: "Inner", ParentFolderID: "folder_f1"},
+		fakeFolder{FolderID: "folder_empty", Name: "Empty"},
 	)
 
 	items, err := NewConnector().FetchAll(context.Background(), f.config("kb1"), []string{"kb1"})
@@ -418,13 +473,87 @@ func TestFetchAll_ResolvesFolderPath(t *testing.T) {
 		t.Fatalf("FetchAll: %v", err)
 	}
 
-	deep := mustFindItem(t, items, logicalKey("kb1", "f2", "Deep"))
+	if len(items) != 2 {
+		t.Fatalf("expected only the root and nested files, got %s", describeItems(items))
+	}
+	deep := mustFindItem(t, items, logicalKey("kb1", "folder_f2", "Deep"))
+	if string(deep.Content) != "deep" {
+		t.Errorf("nested content = %q, want deep", deep.Content)
+	}
 	if deep.Metadata["folder_path"] != "Outer/Inner" {
 		t.Errorf("folder_path = %q, want Outer/Inner", deep.Metadata["folder_path"])
 	}
 	root := mustFindItem(t, items, logicalKey("kb1", "", "Root"))
 	if root.Metadata["folder_path"] != "" {
 		t.Errorf("root folder_path = %q, want empty", root.Metadata["folder_path"])
+	}
+	for _, id := range []string{"folder_f1", "folder_f2", "folder_empty"} {
+		if got := f.callCount("get_knowledge_list:" + id); got != 1 {
+			t.Errorf("list folder %q calls = %d, want 1 (with the folder_ prefix preserved)", id, got)
+		}
+		if got := f.callCount("get_media_info:" + id); got != 0 {
+			t.Errorf("folder %q was fetched as a file %d times", id, got)
+		}
+	}
+}
+
+func TestFetchIncremental_NestedFolders(t *testing.T) {
+	f := newFakeIMA(t)
+	folders := []fakeFolder{
+		{FolderID: "folder_outer", Name: "Outer"},
+		{FolderID: "folder_inner", Name: "Inner", ParentFolderID: "folder_outer"},
+	}
+	file := fakeFile{
+		MediaID: "m-deep", Title: "Deep", ParentFolderID: "folder_inner",
+		MediaType: mediaTypeMarkdown, Body: "deep",
+	}
+	f.setKB("kb1", []fakeFile{file}, folders...)
+	c := NewConnector()
+	cfg := f.config("kb1")
+	key := logicalKey("kb1", "folder_inner", "Deep")
+
+	items, cursor, err := c.FetchIncremental(context.Background(), cfg, nil)
+	if err != nil {
+		t.Fatalf("first FetchIncremental: %v", err)
+	}
+	deep := mustFindItem(t, items, key)
+	if deep.Metadata["folder_path"] != "Outer/Inner" {
+		t.Errorf("folder_path = %q, want Outer/Inner", deep.Metadata["folder_path"])
+	}
+	state := decodeCursor(t, cursor).KBLogical["kb1"]
+	if len(state) != 1 || state[key] != file.MediaID {
+		t.Fatalf("cursor should contain only the nested file, got %#v", state)
+	}
+
+	items, cursor, err = c.FetchIncremental(context.Background(), cfg, cursor)
+	if err != nil {
+		t.Fatalf("unchanged FetchIncremental: %v", err)
+	}
+	if len(items) != 0 {
+		t.Fatalf("unchanged nested file must not be emitted or tombstoned, got %s", describeItems(items))
+	}
+	if got := f.callCount("get_media_info:" + file.MediaID); got != 1 {
+		t.Errorf("nested file fetched %d times, want 1", got)
+	}
+	if decodeCursor(t, cursor).KBLogical["kb1"][key] != file.MediaID {
+		t.Fatal("unchanged nested file must remain in the cursor")
+	}
+
+	f.setKB("kb1", nil, folders...)
+	items, cursor, err = c.FetchIncremental(context.Background(), cfg, cursor)
+	if err != nil {
+		t.Fatalf("deleted FetchIncremental: %v", err)
+	}
+	if len(items) != 1 || !mustFindItem(t, items, key).IsDeleted {
+		t.Fatalf("removed nested file must be tombstoned, got %s", describeItems(items))
+	}
+	if state := decodeCursor(t, cursor).KBLogical["kb1"]; len(state) != 0 {
+		t.Errorf("empty folders must not be recorded as files, got %#v", state)
+	}
+	for _, folder := range folders {
+		if got := f.callCount("get_media_info:" + folder.FolderID); got != 0 {
+			t.Errorf("folder %q was fetched as a file %d times", folder.FolderID, got)
+		}
 	}
 }
 
@@ -507,5 +636,37 @@ func TestConnectorIsRegisteredInMetadata(t *testing.T) {
 	}
 	if meta.Type != types.ConnectorTypeIMA {
 		t.Errorf("metadata type = %q, want %q", meta.Type, types.ConnectorTypeIMA)
+	}
+}
+
+func TestFetchAll_FileNamePolicy(t *testing.T) {
+	for _, media := range []struct {
+		name string
+		kind int32
+	}{{"media", mediaTypeMarkdown}, {"note", mediaTypeNote}} {
+		for _, tt := range []struct{ name, title, want string }{
+			{"punctuation", "A/B:C", "A_B_C.md"},
+			{"existing extension and whitespace", " \tA/B.MD", " \tA_B.MD"},
+			{"long title", strings.Repeat("测", 100) + ".MD", strings.Repeat("测", 66) + ".md"},
+		} {
+			t.Run(media.name+"/"+tt.name, func(t *testing.T) {
+				f := newFakeIMA(t)
+				f.setKB("kb1", []fakeFile{{
+					MediaID: "file", Title: tt.title, MediaType: media.kind,
+					Body: "# content", NotebookID: "123", NoteBody: "# content",
+				}})
+				items, err := NewConnector().FetchAll(context.Background(), f.config("kb1"), []string{"kb1"})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(items) != 1 {
+					t.Fatalf("got %d items, want 1", len(items))
+				}
+				if items[0].Title != tt.title || items[0].FileName != tt.want {
+					t.Fatalf("title = %q, filename = %q; want %q, %q",
+						items[0].Title, items[0].FileName, tt.title, tt.want)
+				}
+			})
+		}
 	}
 }

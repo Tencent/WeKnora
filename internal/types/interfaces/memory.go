@@ -20,6 +20,27 @@ func (s MemoryScope) Valid() bool {
 	return s.TenantID > 0 && s.SubjectID != ""
 }
 
+// MemoryVectorQuery is one semantic lookup over a subject's stored vectors.
+type MemoryVectorQuery struct {
+	// ModelID pins the vector space. Vectors from another model are skipped
+	// rather than scored, because the distance between them is meaningless.
+	ModelID string
+	// Vector is the embedded query.
+	Vector []float32
+	// Kinds restricts which memories may come back. Empty means every kind.
+	Kinds []string
+	// MinScore is the cosine floor below which a match is not a match.
+	MinScore float64
+	// Limit is how many hits to return, best first.
+	Limit int
+}
+
+// MemoryVectorHit is one semantic match and how close it was.
+type MemoryVectorHit struct {
+	Item  *types.MemoryItem
+	Score float64
+}
+
 // MemoryRepository is the storage contract for long-term memory. Every method
 // takes an explicit scope rather than reading it from ctx, so a background
 // worker cannot accidentally operate on whatever the ambient context happens
@@ -41,15 +62,25 @@ type MemoryRepository interface {
 	EnqueuePendingSession(
 		ctx context.Context, scope MemoryScope, sessionID string, inFlightTimeout time.Duration,
 	) (*types.MemorySubject, bool, error)
-	// ClaimPendingSessions takes the pending queue for processing, returning
-	// the sessions to drain and the cursor to walk forward from.
-	ClaimPendingSessions(ctx context.Context, scope MemoryScope) ([]string, time.Time, error)
-	// FinishExtraction advances the watermark and releases the in-flight slot.
-	// A zero cursor leaves the watermark untouched.
-	FinishExtraction(ctx context.Context, scope MemoryScope, cursor time.Time) error
-	// ReleaseExtractionSlot clears the in-flight marker without advancing the
-	// watermark, used when a run ends early.
-	ReleaseExtractionSlot(ctx context.Context, scope MemoryScope) error
+	// ClaimPendingSessions leases a snapshot without removing durable work.
+	// A nil batch means no work remains; RetryAt defers a busy lease.
+	ClaimPendingSessions(ctx context.Context, scope MemoryScope, fallbackSession, leaseID string, ttl time.Duration) (*types.MemoryExtractionBatch, error)
+	// CheckpointExtraction acknowledges a processed segment (or a recorded
+	// skip). A concurrent enqueue changes Revision and keeps the session pending.
+	CheckpointExtraction(ctx context.Context, scope MemoryScope, leaseID string, session types.MemoryExtractionSession, cursor types.MemoryMessageCursor, drained bool) error
+	HasPendingExtraction(ctx context.Context, scope MemoryScope) (bool, error)
+	// RecordExtractionFailure returns true after the bounded invalid-output
+	// retry budget. It preserves a failure range without storing transcript text.
+	RecordExtractionFailure(
+		ctx context.Context, scope MemoryScope, leaseID string, session MemoryExtractionFailure,
+	) (bool, error)
+	FinishExtraction(ctx context.Context, scope MemoryScope, leaseID string) error
+	// Empty leaseID only releases a queued task, never a running worker.
+	ReleaseExtractionSlot(ctx context.Context, scope MemoryScope, leaseID string) error
+	// SaveItem atomically inserts and resolves active/pending replacements.
+	SaveItem(ctx context.Context, scope MemoryScope, item *types.MemoryItem, replacesID string) error
+	// ConfirmPendingItem atomically activates a proposal and retires its target.
+	ConfirmPendingItem(ctx context.Context, scope MemoryScope, id string) error
 
 	// CreateItem inserts one memory item.
 	CreateItem(ctx context.Context, item *types.MemoryItem) error
@@ -110,15 +141,25 @@ type MemoryRepository interface {
 	// Only vectors produced by modelID are returned: vectors from a different
 	// model are not comparable, so mixing them would score nonsense.
 	ItemEmbeddings(ctx context.Context, scope MemoryScope, itemIDs []string, modelID string) (map[string][]float32, error)
+	// SearchItemsByVector returns this subject's semantically closest items,
+	// ranked by the database over every vector it holds.
+	//
+	// It replaces "list some items, then score the ones that happened to be
+	// listed". That order was the bug: candidates were chosen by importance,
+	// which says nothing about whether an item answers the question, so a
+	// well-matching memory outside the listed window could not be found at all.
+	SearchItemsByVector(ctx context.Context, scope MemoryScope, query MemoryVectorQuery) ([]MemoryVectorHit, error)
+	// SyncVectorColumn copies stored vectors into the database's own vector
+	// type for rows written before there was one. Returns how many it moved,
+	// and 0 on a deployment that scores in process. No model calls: the vector
+	// already exists, only its representation is behind.
+	SyncVectorColumn(ctx context.Context, scope MemoryScope, limit int) (int, error)
 	// ItemsMissingEmbeddings returns active items that have no vector yet, so a
 	// background pass can fill them in.
 	ItemsMissingEmbeddings(ctx context.Context, scope MemoryScope, modelID string, limit int) ([]*types.MemoryItem, error)
 	// ListLive returns items of one kind that the user can see: in use plus
 	// proposed and awaiting a decision.
 	ListLive(ctx context.Context, scope MemoryScope, kind string, limit int) ([]*types.MemoryItem, error)
-	// SetItemStatus moves an item between statuses, used to confirm or reject
-	// something the system inferred.
-	SetItemStatus(ctx context.Context, scope MemoryScope, id, status string) error
 
 	// BumpTopic records one more sighting of a topic and returns the running
 	// total, so a caller can decide whether it has recurred enough to promote.
@@ -172,6 +213,13 @@ type MemoryRepository interface {
 	ArchiveLowestRanked(ctx context.Context, scope MemoryScope, keep int) (int64, error)
 	// CountActive returns the number of active items in the scope.
 	CountActive(ctx context.Context, scope MemoryScope) (int64, error)
+}
+
+// MemoryExtractionFailure identifies an invalid-output range without retaining message text.
+type MemoryExtractionFailure struct {
+	Session types.MemoryExtractionSession
+	End     types.MemoryMessageCursor
+	Code    string
 }
 
 // MemoryRecall is what one turn pulls in: the resident block plus any

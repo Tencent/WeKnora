@@ -9,11 +9,23 @@ export function GetAPIBaseURL():Promise<string>;
 
 export function GetAPILanBaseURL():Promise<string>;
 
+export function GetApprovalMode():Promise<string>;
+
+export function GetAutoSetupToken():Promise<string>;
+
 export function GetDesktopHTTPBindPublicSetting():Promise<boolean>;
 
 export function GetDesktopHTTPPortSetting():Promise<number>;
 
 export function GetDesktopListenPublicActive():Promise<boolean>;
+
+export function GetProjectDirs():Promise<Array<string>>;
+
+export function PickProjectDir():Promise<string>;
+
+export function RemoveProjectDir(arg1:string):Promise<void>;
+
+export function SetApprovalMode(arg1:string):Promise<void>;
 
 export function SetDesktopHTTPBindPublicSetting(arg1:boolean):Promise<void>;
 

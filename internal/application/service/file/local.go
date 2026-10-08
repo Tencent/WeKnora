@@ -282,15 +282,51 @@ func (s *localFileService) GetFileURL(ctx context.Context, filePath string) (str
 	return normalized, nil
 }
 
+// storageScopePrefixes matches the storage://<backend-id>/ scope wrapper that
+// backend-scoped file services prepend to every persisted path
+// (types.BuildStorageBackendPath). On chains assembled without the scoped
+// wrapper (e.g. the process-wide default file service used by KB deletion),
+// these scoped paths reach the raw local provider, where they used to fall
+// through to the relative-path branch, get joined under baseDir, and produce a
+// nonexistent path — silently leaking the physical file on delete. Path
+// normalization (filepath.Clean) may also collapse "storage://" into
+// "storage:/", so both forms are accepted.
+const storageScheme = "storage:"
+
+// trimStorageScope strips a leading "storage://<backend-id>/" (or the cleaned
+// "storage:/<backend-id>/") scope wrapper and returns the inner provider path.
+// Paths without the wrapper are returned unchanged.
+func trimStorageScope(path string) string {
+	if !strings.HasPrefix(path, storageScheme) {
+		return path
+	}
+	rest := strings.TrimPrefix(path, storageScheme)
+	// Tolerate "storage://", "storage:/" and even a bare "storage:" prefix —
+	// filepath.Clean collapses "//" to "/", so cleaned paths arrive single-slashed.
+	rest = strings.TrimLeft(rest, "/")
+	// Skip the backend-id segment; the remainder is the provider path.
+	if i := strings.Index(rest, "/"); i >= 0 {
+		return rest[i+1:]
+	}
+	return ""
+}
+
 // normalizePathForBase keeps backward compatibility for legacy file paths:
+// - storage-backend scope: "storage://<backend-id>/local://tenant/.." → baseDir/tenant/..
 // - provider scheme: "local://tenant/.." → baseDir/tenant/..
 // - absolute path: "/data/files/tenant/.."
 // - path under base dir: "tenant/.."
 // - legacy relative with base prefix: "data/files/tenant/.."
 func (s *localFileService) normalizePathForBase(filePath string) string {
-	// Handle provider:// format: local://{relPath}
-	if strings.HasPrefix(filePath, localScheme) {
-		relPath := strings.TrimPrefix(filePath, localScheme)
+	// Strip a storage-backend scope wrapper first: some chains (KB deletion
+	// uses the process-wide default file service) hand scoped paths straight
+	// to this provider, and the scoped prefix is not a filesystem component.
+	filePath = trimStorageScope(strings.TrimSpace(filePath))
+
+	// Handle provider scheme: local://{relPath}. Also tolerate the cleaned
+	// "local:/" single-slash form for the same reason as trimStorageScope.
+	if strings.HasPrefix(filePath, "local:") {
+		relPath := strings.TrimLeft(strings.TrimPrefix(filePath, "local:"), "/")
 		return filepath.Join(s.baseDir, filepath.FromSlash(relPath))
 	}
 

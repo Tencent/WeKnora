@@ -120,6 +120,10 @@ func (r *ToolRegistry) prepareMCPToolsWithMode(ctx context.Context, grace time.D
 		c.preloadDone = make(chan struct{})
 		go func() {
 			defer close(c.preloadDone)
+			// prepareMCPToolsWithMode selects on preloadDone, so a panic in the
+			// fan-out below must not skip the close; the barrier also records
+			// every service this pass left unfinished.
+			defer RecoverGoroutine(ctx, "MCP catalog preload", func() { c.markPreloadFailed() })
 			loadCtx, cancel := context.WithTimeout(
 				context.WithValue(ctx, execCtxKey{}, (*ToolExecContext)(nil)),
 				mcpCatalogLoadTimeout,
@@ -137,9 +141,18 @@ func (r *ToolRegistry) prepareMCPToolsWithMode(ctx context.Context, grace time.D
 			for i := 0; i < min(8, len(ids)); i++ {
 				workers.Add(1)
 				go func() {
+					// Two barriers: this one keeps a panic in the loop itself
+					// (channel bookkeeping, Done) from escaping; the one inside
+					// knows which service the MCP client panicked on.
 					defer workers.Done()
+					defer RecoverGoroutine(loadCtx, "MCP catalog preload worker", nil)
 					for id := range jobs {
-						_, _, _ = c.snapshot(loadCtx, id, false)
+						func() {
+							defer RecoverGoroutine(loadCtx, "MCP catalog preload for service "+id, func() {
+								c.markPreloadFailed(id)
+							})
+							_, _, _ = c.snapshot(loadCtx, id, false)
+						}()
 					}
 				}()
 			}
@@ -163,6 +176,34 @@ func (r *ToolRegistry) prepareMCPToolsWithMode(ctx context.Context, grace time.D
 	case <-ctx.Done():
 	}
 	r.RefreshMCPTools(ctx)
+}
+
+// markPreloadFailed records a preload pass that a panic ended, reusing the
+// catalog's existing store/status mechanism and the same "error" status
+// snapshot() stores when a load returns an error. A service whose goroutine is
+// gone must not stay "loading", which would read as a preload still in flight.
+// With no id every service that never reached "ready" is marked; a ready
+// service loaded fine and keeps its snapshot.
+func (c *MCPCatalog) markPreloadFailed(ids ...string) {
+	if len(ids) == 0 {
+		ids = make([]string, 0, len(c.servers))
+		for id := range c.servers {
+			ids = append(ids, id)
+		}
+	}
+	for _, id := range ids {
+		entry := c.servers[id]
+		if entry == nil {
+			continue
+		}
+		entry.mu.Lock()
+		service, status := entry.service, entry.status
+		entry.mu.Unlock()
+		if status == "ready" {
+			continue
+		}
+		entry.store(service, nil, "error")
+	}
 }
 
 // RememberMCPHistory republishes tools this session already described or called
@@ -203,6 +244,9 @@ func (r *ToolRegistry) RefreshMCPTools(ctx context.Context) {
 	if c == nil {
 		return
 	}
+	// Keep the proxy executable for history, but do not offer an empty call
+	// surface to the model. Publish it only alongside a usable full definition.
+	r.deferred[ToolCallMCPTool] = true
 	for name, tool := range r.tools {
 		if _, ok := tool.(*MCPRegisteredTool); ok {
 			delete(r.tools, name)
@@ -245,6 +289,7 @@ func (r *ToolRegistry) RefreshMCPTools(ctx context.Context) {
 			bound.registeredName = mcpRegisteredName(tool)
 			bound.serverInstructions = tool.serverInstructions
 			r.RegisterTool(&MCPRegisteredTool{MCPTool: bound, catalog: c, ref: mcpToolRef(tool)})
+			r.deferred[ToolCallMCPTool] = false
 		}
 	}
 }

@@ -46,7 +46,10 @@ type CustomAgentService interface {
 	// Returns:
 	//   - Updated agent object
 	//   - Possible errors such as not existing, insufficient permissions, cannot modify built-in, etc.
-	UpdateAgent(ctx context.Context, agent *types.CustomAgent) (*types.CustomAgent, error)
+	// avatar carries field presence the agent struct cannot express: nil means
+	// the caller did not send an avatar and the stored one must survive, while
+	// a pointer to "" is an explicit clear.
+	UpdateAgent(ctx context.Context, agent *types.CustomAgent, avatar *string) (*types.CustomAgent, error)
 
 	// DeleteAgent deletes an agent
 	// Parameters:

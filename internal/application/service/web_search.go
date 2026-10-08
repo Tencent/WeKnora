@@ -79,7 +79,7 @@ func (s *WebSearchService) Search(
 		filtered, ok := searchProvider.(interfaces.FilteredWebSearchProvider)
 		if !ok {
 			return nil, fmt.Errorf("provider %s does not support country/freshness filters; "+
-				"omit them or select Brave", searchProvider.Name())
+				"omit them or select Brave or Serply", searchProvider.Name())
 		}
 		results, err = filtered.SearchWithFilters(ctx, query, config.MaxResults, config.IncludeDate, config.Filters)
 	} else {

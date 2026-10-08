@@ -62,7 +62,7 @@ const copyToClipboard = () => {
 
 code {
   font-family: var(--app-font-family-mono);
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   background: var(--td-bg-color-secondarycontainer);
   padding: 2px 4px;
   border-radius: 3px;

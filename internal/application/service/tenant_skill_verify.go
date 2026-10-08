@@ -90,7 +90,11 @@ func (s *TenantSkillService) verifySkill(
 	if err := s.verifyDeclaredDependencies(ctx, mgr, sessionID, skillDir, bundle); err != nil {
 		return nil, err
 	}
-	return s.verifyScriptsParse(ctx, mgr, sessionID, skillDir, bundle)
+	notes, err := s.verifyScriptsParse(ctx, mgr, sessionID, skillDir, bundle)
+	if err != nil {
+		return notes, err
+	}
+	return notes, s.verifyRuntimePrerequisites(ctx, mgr, sessionID, skillDir)
 }
 
 // verifySkillTree confirms the files the agent was given are still the files
@@ -422,12 +426,24 @@ var allScriptExtensions = []string{".py", ".js", ".mjs", ".cjs", ".sh"}
 
 // sortedScriptPaths returns the bundle's files with any of the given suffixes,
 // in a stable order so the emitted command is deterministic.
+//
+// Vendored dependency trees (.venv/, node_modules/) are skipped at any depth:
+// they are installed dependencies, not scripts the model can name. A scientific
+// stack vendors thousands of .py files, and enumerating them overflows the exec
+// single-argument limit ("argument list too long") in every pass that builds
+// one command from this list; the trees' health is covered by the dependency
+// verification passes instead. Bundles are author-zipped, so a vendored tree
+// can sit inside a subproject directory (tools/.venv/…) as easily as at the
+// root — both placements are filtered.
 func sortedScriptPaths(bundle *SkillBundle, suffixes ...string) []string {
 	if bundle == nil {
 		return nil
 	}
 	var matches []string
 	for rel := range bundle.Files {
+		if underVendoredTree(rel) {
+			continue
+		}
 		for _, suffix := range suffixes {
 			if strings.HasSuffix(rel, suffix) {
 				matches = append(matches, rel)
@@ -437,6 +453,17 @@ func sortedScriptPaths(bundle *SkillBundle, suffixes ...string) []string {
 	}
 	sort.Strings(matches)
 	return matches
+}
+
+// underVendoredTree reports whether a bundle-relative path sits inside a
+// .venv or node_modules tree, at the bundle root or nested under any prefix.
+func underVendoredTree(rel string) bool {
+	for _, tree := range []string{".venv/", "node_modules/"} {
+		if strings.HasPrefix(rel, tree) || strings.Contains(rel, "/"+tree) {
+			return true
+		}
+	}
+	return false
 }
 
 // nodeDependencyNames lists the runtime dependencies package.json declares.

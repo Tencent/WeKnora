@@ -290,6 +290,22 @@
               <p class="template-row__hint">{{ $t('settings.sandbox.createStandardTemplateHint') }}</p>
             </div>
           </div>
+          <div v-if="canCreateDesktop" class="template-row template-row--offer">
+            <div class="template-row__main">
+              <div class="template-row__head">
+                <span class="template-row__title">{{ $t('settings.sandbox.weknoraDesktopTemplate') }}</span>
+                <t-tag theme="warning" variant="outline" size="small">
+                  {{ $t('settings.sandbox.desktopTemplateTag') }}
+                </t-tag>
+                <span class="template-row__spacer" />
+                <t-button theme="primary" variant="outline" size="small" :loading="templatesLoading"
+                  @click="createDesktopTemplate">
+                  {{ $t('settings.sandbox.createDesktopTemplate') }}
+                </t-button>
+              </div>
+              <p class="template-row__hint">{{ $t('settings.sandbox.createDesktopTemplateHint') }}</p>
+            </div>
+          </div>
           <div
             v-for="item in templates"
             :key="item.id"
@@ -316,6 +332,9 @@
                 <t-tag v-if="item.standard" theme="primary" variant="outline" size="small">
                   {{ $t('settings.sandbox.recommendedTag') }}
                 </t-tag>
+                <t-tag v-else-if="item.desktop" theme="warning" variant="outline" size="small">
+                  {{ $t('settings.sandbox.desktopTemplateTag') }}
+                </t-tag>
                 <span class="template-row__spacer" />
                 <t-tag :theme="templateStatusTheme(item)" variant="outline" size="small">
                   {{ templateStatusLabel(item) }}
@@ -323,8 +342,10 @@
                 <span v-if="canRebuildTemplate(item)" class="template-row__rebuild" @click.stop>
                   <t-popconfirm
                     theme="warning"
-                    :content="$t('settings.sandbox.replaceStandardTemplateConfirm')"
-                    @confirm="replaceStandardTemplate"
+                    :content="item.desktop
+                      ? $t('settings.sandbox.replaceDesktopTemplateConfirm')
+                      : $t('settings.sandbox.replaceStandardTemplateConfirm')"
+                    @confirm="replaceFirstPartyTemplate(item)"
                   >
                     <t-button variant="text" size="small" :loading="templatesLoading">
                       {{ $t('settings.sandbox.replaceStandardTemplate') }}
@@ -344,7 +365,7 @@
               <p v-else-if="templateFailureReason(item)" class="template-row__hint template-row__hint--error">
                 {{ templateFailureReason(item) }}
               </p>
-              <p v-else-if="isTemplatePending(item) && item.standard" class="template-row__hint">
+              <p v-else-if="isTemplatePending(item) && (item.standard || item.desktop)" class="template-row__hint">
                 {{ $t('settings.sandbox.templateBuildingHint') }}
               </p>
             </div>
@@ -677,15 +698,13 @@
 
       <section v-if="currentStepKey === 'runtime'" class="setting-drawer__section">
         <div class="section-title-row">
-          <div>
-            <h4 class="setting-drawer__section-title">{{ $t('settings.sandbox.sectionEnvironment') }}</h4>
-            <p class="section-help section-help--under-title">{{ $t('settings.sandbox.envVarsHint') }}</p>
-          </div>
+          <h4 class="setting-drawer__section-title">{{ $t('settings.sandbox.sectionEnvironment') }}</h4>
           <t-button variant="text" size="small" @click="envRows.push({ key: '', value: '' })">
             <template #icon><t-icon name="add" /></template>
             {{ $t('settings.sandbox.addRow') }}
           </t-button>
         </div>
+        <p class="section-help section-help--under-title">{{ $t('settings.sandbox.envVarsHint') }}</p>
         <div v-if="envRows.length" class="env-rows">
           <div v-for="(row, index) in envRows" :key="index" class="env-row">
             <t-input v-model="row.key" :placeholder="$t('settings.sandbox.envKey')" class="env-key" />
@@ -746,6 +765,7 @@ import { useI18n } from 'vue-i18n'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import SandboxBackendBadge from '@/components/settings/SandboxBackendBadge.vue'
 import { useDeploymentCapabilitiesStore } from '@/stores/deploymentCapabilities'
+import { docsUrl } from '@/utils/docsUrl'
 import {
   checkSandboxConfig,
   createSandboxConfig,
@@ -797,7 +817,7 @@ const isMaskedSecret = (value?: string) => value === secretPlaceholder
 // the sandbox account cannot write.
 const defaultDockerImage = 'wechatopenai/weknora-sandbox:main'
 
-const clusterGuideUrl = 'https://github.com/Tencent/WeKnora/blob/main/docs/sandbox-cluster.md'
+const clusterGuideUrl = docsUrl('sandboxDeployment')
 const e2bApiKeysUrl = 'https://e2b.dev/dashboard?tab=keys'
 
 const backendOptions = computed(() => {
@@ -949,8 +969,12 @@ const currentTemplateId = computed(() => (
 )?.trim() || '')
 const selectedTemplate = computed(() => templates.value.find((item) => item.id === currentTemplateId.value))
 const clusterStandardTemplate = computed(() => templates.value.find((item) => item.standard && item.id))
+const clusterDesktopTemplate = computed(() => templates.value.find((item) => item.desktop && item.id))
 const canCreateStandard = computed(() => (
   isRemoteBackend.value && templatesLoaded.value && !clusterStandardTemplate.value && !retargetFrozen.value
+))
+const canCreateDesktop = computed(() => (
+  isRemoteBackend.value && templatesLoaded.value && !clusterDesktopTemplate.value && !retargetFrozen.value
 ))
 const wizardSteps = computed<Array<{ key: SandboxStepKey; title: string }>>(() => {
   const steps: Array<{ key: SandboxStepKey; title: string }> = [
@@ -1268,10 +1292,11 @@ function onTemplateCardClick(item: SandboxTemplate) {
 }
 
 function canRebuildTemplate(item: SandboxTemplate): boolean {
-  return Boolean(item.standard && item.id) && !isTemplatePending(item) && !retargetFrozen.value
+  return Boolean((item.standard || item.desktop) && item.id) && !isTemplatePending(item) && !retargetFrozen.value
 }
 
 function templateDisplayName(item: SandboxTemplate): string {
+  if (item.standard) return t('settings.sandbox.weknoraStandardTemplate')
   const name = item.name?.trim() || ''
   const id = item.id?.trim() || ''
   if (!name || name === id) return t('settings.sandbox.templateUnnamed')
@@ -1384,51 +1409,70 @@ function scheduleTemplatePolling() {
   stopTemplatePolling()
   if (!props.visible || currentStepKey.value !== 'template' || !hasPendingTemplates.value) return
   templatePollTimer = setTimeout(() => {
-    void loadTemplates(false, true)
+    void loadTemplates({ silent: true })
   }, 3000)
 }
 
-async function loadTemplates(ensureStandard = false, silent = false, replaceStandard = false): Promise<boolean> {
+async function loadTemplates(opts: {
+  ensureStandard?: boolean
+  ensureDesktop?: boolean
+  silent?: boolean
+  replaceStandard?: boolean
+  replaceDesktop?: boolean
+} = {}): Promise<boolean> {
   if (!hasImageCatalog.value) return true
   if (!connectionReady()) return false
-  if (!silent) templatesLoading.value = true
+  if (!opts.silent) templatesLoading.value = true
   templatesError.value = ''
   try {
+    // Cube/E2B: listing ensures the published CLI image when it is missing.
+    // Desktop is opt-in: XFCE images are much heavier, so they are created
+    // only when the admin clicks the desktop offer row.
+    const ensureFirstParty = isRemoteBackend.value
     const res = await querySandboxTemplates({
       config: collectPayload(),
       config_id: effectiveRecord.value?.id,
-      ensure_standard: ensureStandard,
-      replace_standard: replaceStandard,
+      ensure_standard: opts.ensureStandard || (ensureFirstParty && !opts.replaceStandard && !opts.replaceDesktop && !opts.ensureDesktop),
+      ensure_desktop: Boolean(opts.ensureDesktop),
+      replace_standard: opts.replaceStandard,
+      replace_desktop: opts.replaceDesktop,
     })
     templates.value = res.data?.templates || []
     templatesLoaded.value = true
     const standardID = res.data?.standard_template_id
+    const desktopID = res.data?.desktop_template_id
     const current = templates.value.find((item) => item.id === currentTemplateId.value)
-    if (replaceStandard && standardID) {
+    if (opts.replaceDesktop && desktopID) {
+      selectTemplate(desktopID)
+    } else if (opts.replaceStandard && standardID) {
       selectTemplate(standardID)
+    } else if (opts.ensureDesktop && desktopID) {
+      const next = templates.value.find((item) => item.id === desktopID)
+      if (next && (isTemplateSelectable(next) || isTemplatePending(next))) {
+        selectTemplate(desktopID)
+      }
+    } else if (opts.ensureStandard && standardID) {
+      const next = templates.value.find((item) => item.id === standardID)
+      if (next && (isTemplateSelectable(next) || isTemplatePending(next))) {
+        selectTemplate(standardID)
+      }
     } else if (
       currentTemplateId.value
       && (!current || (!isTemplateSelectable(current) && !isTemplatePending(current)))
       && !retargetFrozen.value
     ) {
-      if (standardID) {
-        const next = templates.value.find((item) => item.id === standardID)
-        if (next && (isTemplateSelectable(next) || isTemplatePending(next))) {
-          selectTemplate(standardID)
-        } else {
-          clearTemplateSelection()
-        }
-      } else {
-        clearTemplateSelection()
-      }
+      clearTemplateSelection()
     }
-    const readyStandard = templates.value.find((item) => item.id === standardID && isTemplateSelectable(item))
-      || templates.value.find((item) => item.standard && isTemplateSelectable(item))
-    if (!currentTemplateId.value && readyStandard) selectTemplate(readyStandard.id)
-    if (res.data?.provisioned && !silent) {
-      MessagePlugin.info(replaceStandard
-        ? t('settings.sandbox.standardTemplateReplaced')
-        : t('settings.sandbox.standardTemplateProvisioning'))
+    if (!currentTemplateId.value && !retargetFrozen.value) {
+      const firstPartyReady = templates.value.filter((item) => (
+        (item.standard || item.desktop) && isTemplateSelectable(item)
+      ))
+      if (firstPartyReady.length === 1) selectTemplate(firstPartyReady[0].id)
+    }
+    if (res.data?.provisioned && !opts.silent && (
+      opts.replaceDesktop || opts.replaceStandard || opts.ensureStandard || opts.ensureDesktop
+    )) {
+      MessagePlugin.info(provisionedTemplateMessage(opts))
     }
     scheduleTemplatePolling()
     return true
@@ -1436,17 +1480,34 @@ async function loadTemplates(ensureStandard = false, silent = false, replaceStan
     templatesError.value = e?.message || t('settings.sandbox.templateLoadFailed')
     return false
   } finally {
-    if (!silent) templatesLoading.value = false
+    if (!opts.silent) templatesLoading.value = false
   }
 }
 
-function createStandardTemplate() {
-  return loadTemplates(true)
+function provisionedTemplateMessage(opts: {
+  ensureStandard?: boolean
+  ensureDesktop?: boolean
+  replaceStandard?: boolean
+  replaceDesktop?: boolean
+}): string {
+  if (opts.replaceDesktop) return t('settings.sandbox.desktopTemplateReplaced')
+  if (opts.ensureDesktop) return t('settings.sandbox.desktopTemplateProvisioning')
+  if (opts.replaceStandard) return t('settings.sandbox.standardTemplateReplaced')
+  return t('settings.sandbox.standardTemplateProvisioning')
 }
 
-function replaceStandardTemplate() {
+function createStandardTemplate() {
+  return loadTemplates({ ensureStandard: true })
+}
+
+function createDesktopTemplate() {
+  return loadTemplates({ ensureDesktop: true })
+}
+
+function replaceFirstPartyTemplate(item: SandboxTemplate) {
   if (retargetFrozen.value) return
-  return loadTemplates(false, false, true)
+  if (item.desktop) return loadTemplates({ replaceDesktop: true })
+  return loadTemplates({ replaceStandard: true })
 }
 
 // Re-attaches the redaction placeholder to a secret the admin left untouched:
@@ -1454,6 +1515,22 @@ function replaceStandardTemplate() {
 function withStoredSecret<T extends { api_key?: string }>(block: T, stored: boolean): T {
   if (stored && !block.api_key?.trim()) block.api_key = secretPlaceholder
   return block
+}
+
+function collectedDesktopEnabled(): boolean | undefined {
+  if (selectedTemplate.value) {
+    // Persist false when the CLI card is selected; omitempty on the
+    // server would otherwise keep a stale true from a previous desktop save.
+    return Boolean(selectedTemplate.value.desktop)
+  }
+  // Skill snapshots replace template_id with a UUID that is not in the
+  // catalog. Keep the stored bit. If the catalog loaded and this ID is
+  // simply unmatched, do not keep a stale true that could disagree with
+  // template_id.
+  if (templatesLoaded.value && !retargetFrozen.value) {
+    return false
+  }
+  return effectiveRecord.value?.config?.desktop_enabled || undefined
 }
 
 function collectPayload(): SandboxConfig {
@@ -1468,6 +1545,7 @@ function collectPayload(): SandboxConfig {
     default_timeout_sec: defaultTimeoutSec.value || undefined,
     terminal_idle_disconnect_sec: terminalIdleDisconnectSec.value || undefined,
     allow_private_endpoints: allowPrivateEndpoints.value || undefined,
+    desktop_enabled: collectedDesktopEnabled(),
     env_vars: envVars,
     skill_rollout: skillRollout.value,
     network: collectNetworkPolicy(),
@@ -1584,7 +1662,7 @@ async function handlePrimaryAction() {
     // Docker's template is the image typed on this step. Kick a background
     // pull so the first session does not block on a cold registry fetch.
     if (backend.value === 'docker') {
-      void loadTemplates(true)
+      void loadTemplates({ ensureStandard: true })
     }
     invalidateCheck()
     wizardStep.value += 1
@@ -1720,7 +1798,7 @@ onUnmounted(stopTemplatePolling)
   gap: 8px;
   min-width: 0;
   color: var(--td-text-color-placeholder);
-  transition: color 0.15s ease;
+  transition: color var(--app-motion-fast) ease;
 
   /* Only the steps that draw a connector need to absorb the leftover width. */
   &:not(:last-child) {
@@ -1755,7 +1833,7 @@ onUnmounted(stopTemplatePolling)
     &:focus-visible {
       outline: 2px solid var(--td-brand-color);
       outline-offset: 2px;
-      border-radius: 4px;
+      border-radius: var(--app-radius-xs);
     }
   }
 }
@@ -1769,7 +1847,7 @@ onUnmounted(stopTemplatePolling)
   flex-shrink: 0;
   border: 1px solid currentColor;
   border-radius: 50%;
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   font-weight: 600;
   line-height: 1;
 
@@ -1788,7 +1866,7 @@ onUnmounted(stopTemplatePolling)
 
 .sandbox-step__title {
   overflow: hidden;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   font-weight: 500;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1829,7 +1907,7 @@ onUnmounted(stopTemplatePolling)
 
   :deep(.t-form__label) {
     padding-bottom: 6px;
-    font-size: 13px;
+    font-size: var(--app-text-md);
     font-weight: 500;
     line-height: 1.4;
   }
@@ -1838,7 +1916,7 @@ onUnmounted(stopTemplatePolling)
   :deep(.t-input-number),
   :deep(.t-select) {
     width: 100%;
-    font-size: 13px;
+    font-size: var(--app-text-md);
   }
 }
 
@@ -1853,12 +1931,12 @@ onUnmounted(stopTemplatePolling)
   background: var(--td-bg-color-secondarycontainer);
 
   :deep(.t-alert__icon) {
-    font-size: 15px;
+    font-size: var(--app-text-lg);
   }
 
   :deep(.t-alert__message) {
     color: var(--td-text-color-secondary);
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     line-height: 1.5;
   }
 }
@@ -1870,14 +1948,14 @@ onUnmounted(stopTemplatePolling)
   gap: 16px;
   padding: 10px 12px;
   border: 1px solid var(--td-component-stroke);
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   background: var(--td-bg-color-secondarycontainer);
 }
 
 .private-endpoint-row__title {
   margin: 0 0 3px;
   color: var(--td-text-color-primary);
-  font-size: 13px;
+  font-size: var(--app-text-md);
   font-weight: 600;
 }
 
@@ -1907,14 +1985,14 @@ onUnmounted(stopTemplatePolling)
 
 .backend-choice__name {
   color: var(--td-text-color-primary);
-  font-size: 13px;
+  font-size: var(--app-text-md);
   font-weight: 500;
   line-height: 1.4;
 }
 
 .backend-choice__desc {
   color: var(--td-text-color-secondary);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.45;
   white-space: normal;
 }
@@ -1937,7 +2015,7 @@ onUnmounted(stopTemplatePolling)
   gap: 12px;
   padding: 12px;
   border: 1px solid var(--td-component-stroke);
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   background: var(--td-bg-color-secondarycontainer);
 
   &.is-active {
@@ -1953,7 +2031,7 @@ onUnmounted(stopTemplatePolling)
   p {
     margin: 4px 0 0;
     color: var(--td-text-color-secondary);
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     line-height: 1.5;
   }
 }
@@ -1965,7 +2043,7 @@ onUnmounted(stopTemplatePolling)
 }
 
 .weknora-template-card__title {
-  font-size: 13px;
+  font-size: var(--app-text-md);
   font-weight: 600;
 }
 
@@ -1977,9 +2055,9 @@ onUnmounted(stopTemplatePolling)
   width: 100%;
   min-height: 88px;
   border: 1px dashed var(--td-component-stroke);
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   color: var(--td-text-color-secondary);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
 }
 
 .template-list {
@@ -2003,15 +2081,15 @@ onUnmounted(stopTemplatePolling)
   padding: 10px 12px;
   overflow: hidden;
   border: 1px solid var(--td-component-stroke);
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   background: var(--td-bg-color-container);
   color: var(--td-text-color-primary);
   text-align: left;
   cursor: pointer;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  transition: border-color var(--app-motion-fast) ease, box-shadow var(--app-motion-fast) ease;
 
   &:hover:not(.is-disabled):not(.template-row--offer) {
-    border-color: var(--td-brand-color-3, var(--td-brand-color));
+    border-color: var(--td-brand-color-3);
   }
 
   &.is-active {
@@ -2039,7 +2117,7 @@ onUnmounted(stopTemplatePolling)
   height: 14px;
   margin-top: 3px;
   box-sizing: border-box;
-  border: 1.5px solid var(--td-border-level-2-color, var(--td-component-stroke));
+  border: 1.5px solid var(--td-border-level-2-color);
   border-radius: 50%;
   background: var(--td-bg-color-container);
 
@@ -2078,7 +2156,7 @@ onUnmounted(stopTemplatePolling)
   flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   font-weight: 600;
   line-height: 22px;
   text-overflow: ellipsis;
@@ -2121,7 +2199,7 @@ onUnmounted(stopTemplatePolling)
 
   dt {
     color: var(--td-text-color-placeholder);
-    font-size: 11px;
+    font-size: var(--app-text-xs);
     line-height: 18px;
     white-space: nowrap;
   }
@@ -2131,14 +2209,14 @@ onUnmounted(stopTemplatePolling)
     min-width: 0;
     overflow: hidden;
     color: var(--td-text-color-secondary);
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     line-height: 18px;
     text-overflow: ellipsis;
     white-space: nowrap;
 
     &.is-mono {
-      font-family: var(--td-font-family-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
-      font-size: 11px;
+      font-family: var(--td-font-family-mono);
+      font-size: var(--app-text-xs);
     }
   }
 }
@@ -2147,7 +2225,7 @@ onUnmounted(stopTemplatePolling)
   margin: 0;
   overflow-wrap: anywhere;
   color: var(--td-text-color-placeholder);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.5;
 
   &--error {
@@ -2174,7 +2252,7 @@ onUnmounted(stopTemplatePolling)
   gap: 5px;
   margin-top: -4px;
   color: var(--td-brand-color);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   text-decoration: none;
 
   &:hover {
@@ -2195,7 +2273,7 @@ onUnmounted(stopTemplatePolling)
 }
 
 .net-list__title {
-  font-size: 13px;
+  font-size: var(--app-text-md);
   font-weight: 600;
   color: var(--td-text-color-primary);
 }
@@ -2218,7 +2296,7 @@ onUnmounted(stopTemplatePolling)
 
 .net-rule {
   border: 1px solid var(--td-component-border);
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   padding: 12px;
   margin-bottom: 12px;
 }
@@ -2227,7 +2305,7 @@ onUnmounted(stopTemplatePolling)
   padding: 0;
   margin-bottom: 2px;
   border: 0;
-  border-radius: 4px;
+  border-radius: var(--app-radius-xs);
 }
 
 .net-rule--collapsible.is-open {
@@ -2259,7 +2337,7 @@ onUnmounted(stopTemplatePolling)
   background: transparent;
   color: var(--td-text-color-secondary);
   cursor: pointer;
-  border-radius: 4px;
+  border-radius: var(--app-radius-xs);
   text-align: left;
 }
 
@@ -2273,7 +2351,7 @@ onUnmounted(stopTemplatePolling)
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 18px;
   color: var(--td-text-color-primary);
 }
@@ -2294,7 +2372,7 @@ onUnmounted(stopTemplatePolling)
   background: transparent;
   color: var(--td-text-color-placeholder);
   cursor: pointer;
-  border-radius: 4px;
+  border-radius: var(--app-radius-xs);
 }
 
 .net-rule__move:hover:not(:disabled) {
@@ -2338,9 +2416,9 @@ onUnmounted(stopTemplatePolling)
 .env-empty {
   padding: 18px;
   border: 1px dashed var(--td-component-stroke);
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   color: var(--td-text-color-placeholder);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   text-align: center;
 }
 
@@ -2354,12 +2432,13 @@ onUnmounted(stopTemplatePolling)
 .section-help {
   margin: 0;
   color: var(--td-text-color-placeholder);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.5;
 
   &--under-title {
     margin-top: 5px;
     max-width: 540px;
+    white-space: pre-line;
   }
 
   /* Sits under an input inside the same form item. */
@@ -2383,7 +2462,7 @@ onUnmounted(stopTemplatePolling)
   gap: 6px;
   margin: 0;
   color: var(--td-text-color-primary);
-  font-size: 13px;
+  font-size: var(--app-text-md);
   font-weight: 600;
   line-height: 1.45;
 
@@ -2400,7 +2479,7 @@ onUnmounted(stopTemplatePolling)
 .check-result__hint {
   margin: 0;
   color: var(--td-text-color-secondary);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.55;
 }
 
@@ -2419,7 +2498,7 @@ onUnmounted(stopTemplatePolling)
   gap: 8px;
   flex-wrap: wrap;
   padding: 2px 0;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
 }
 
 .check-item .ok {
@@ -2472,7 +2551,7 @@ onUnmounted(stopTemplatePolling)
   }
 
   .sandbox-step__title {
-    font-size: 12px;
+    font-size: var(--app-text-sm);
   }
 
   .template-row__fields {

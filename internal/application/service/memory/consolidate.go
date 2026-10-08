@@ -163,6 +163,16 @@ func (s *Service) reviewStore(
 	// instead of stalling one maintenance pass.
 	s.backfillEmbeddings(ctx, scope, cfg)
 
+	// Vectors that exist but predate the database being able to rank them.
+	// Cheap — no model is called, the numbers are already stored — and until
+	// it runs, those memories are invisible to the SQL ranking.
+	if moved, err := s.repo.SyncVectorColumn(ctx, scope, vectorSyncPerRun); err != nil {
+		logger.Warnf(ctx, "memory: sync vector column failed: %v", err)
+	} else if moved > 0 {
+		logger.Infof(ctx, "memory: moved %d vectors into the search column for %s",
+			moved, scope.SubjectID)
+	}
+
 	if err := s.repo.MarkConsolidated(ctx, scope); err != nil {
 		logger.Warnf(ctx, "memory: mark consolidated failed: %v", err)
 	}

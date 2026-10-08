@@ -52,7 +52,8 @@ export function mcpDiscoveryRows(data: Record<string, unknown>) {
     if (typeof row.name !== 'string') return []
     return [{
       name: row.name,
-      description: typeof row.description === 'string' ? row.description : '',
+      description: typeof row.usage_instructions === 'string' && row.usage_instructions
+        ? row.usage_instructions : typeof row.description === 'string' ? row.description : '',
       status: typeof row.status === 'string' ? row.status : '',
       serverName: typeof row.server_name === 'string' ? row.server_name : '',
     }]

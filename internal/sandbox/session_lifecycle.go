@@ -44,6 +44,10 @@ type remoteSessionLifecycle struct {
 	cleanupTimeout  time.Duration
 	sandboxConfigID string
 	now             func() time.Time
+
+	// bootstrapper customises the first create of individual sessions
+	// (session fork). Optional; nil keeps the default behaviour.
+	bootstrapper SessionBootstrapper
 }
 
 func newRemoteSessionLifecycle(
@@ -53,6 +57,7 @@ func newRemoteSessionLifecycle(
 	createRequest RemoteCreateRequest,
 	cleanupTimeout time.Duration,
 	sandboxConfigID string,
+	bootstrapper SessionBootstrapper,
 ) (*remoteSessionLifecycle, error) {
 	if client == nil {
 		return nil, errors.New("remote sandbox client is required")
@@ -88,6 +93,7 @@ func newRemoteSessionLifecycle(
 		cleanupTimeout:  cleanupTimeout,
 		sandboxConfigID: sandboxConfigID,
 		now:             time.Now,
+		bootstrapper:    bootstrapper,
 	}, nil
 }
 
@@ -234,28 +240,7 @@ func (l *remoteSessionLifecycle) connectBinding(
 	key SessionSandboxKey,
 	binding SessionSandboxBinding,
 ) (RemoteSandboxHandle, bool, error) {
-	summary, err := l.client.Get(ctx, binding.SandboxID)
-	if err != nil {
-		if CanReplaceRemoteBinding(err) {
-			return nil, true, nil
-		}
-		return nil, false, fmt.Errorf("get bound remote sandbox: %w", err)
-	}
-	if summary == nil {
-		return nil, false, errors.New("remote sandbox Get returned nil summary")
-	}
-	if summary.ID != binding.SandboxID {
-		return nil, false, fmt.Errorf(
-			"remote sandbox Get returned ID %q for binding %q",
-			summary.ID,
-			binding.SandboxID,
-		)
-	}
-	if summary.State == RemoteStateTerminal {
-		return nil, true, nil
-	}
-
-	handle, err := l.client.Connect(ctx, RemoteConnectRequest{
+	handle, err := connectRemoteSession(ctx, l.client, RemoteConnectRequest{
 		SandboxID:          binding.SandboxID,
 		TrafficAccessToken: binding.TrafficAccessToken,
 	})
@@ -437,6 +422,11 @@ func (l *remoteSessionLifecycle) createAndBind(
 	ctx context.Context,
 	key SessionSandboxKey,
 ) (RemoteSandboxHandle, error) {
+	// request is a VALUE copy of l.createRequest, and every mutation below
+	// must stay on the copy. l.createRequest is shared by every session this
+	// config serves, so writing the override onto it would make unrelated
+	// sessions boot from another session's fork snapshot — a failure that
+	// reproduces only under specific interleavings and is brutal to diagnose.
 	request := l.createRequest
 	request.Metadata = nil
 	if l.client.Capabilities().SupportsMetadata {
@@ -450,8 +440,23 @@ func (l *remoteSessionLifecycle) createAndBind(
 	}
 	request.EnvVars = cloneMetadata(l.createRequest.EnvVars)
 
+	usedOverride := false
+	if l.bootstrapper != nil {
+		override, err := l.bootstrapper.TemplateOverride(ctx, key)
+		if err != nil {
+			return nil, fmt.Errorf("resolve session template override: %w", err)
+		}
+		if strings.TrimSpace(override) != "" {
+			request.TemplateID = override
+			usedOverride = true
+		}
+	}
+
 	handle, err := l.client.Create(ctx, request)
 	if err != nil {
+		if usedOverride {
+			l.notifyCreateFailed(ctx, key, err)
+		}
 		return nil, fmt.Errorf("create remote sandbox: %w", err)
 	}
 	if err := l.validateHandle(handle, ""); err != nil {
@@ -497,6 +502,9 @@ func (l *remoteSessionLifecycle) createAndBind(
 		)
 	}
 	if created {
+		if err := l.runBootstrap(ctx, key, handle); err != nil {
+			return nil, err
+		}
 		return handle, nil
 	}
 
@@ -518,6 +526,43 @@ func (l *remoteSessionLifecycle) createAndBind(
 		return nil, errors.New("sandbox binding create lost without a winner")
 	}
 	return l.connectKnownWinner(ctx, *winner)
+}
+
+// runBootstrap applies the session bootstrapper to a freshly bound sandbox.
+//
+// Failure is all-or-nothing: the sandbox is destroyed and the binding deleted
+// so the next resolve starts from a clean slate. Leaving a half-bootstrapped
+// sandbox in place would hand the user an environment that looks right and is
+// not.
+func (l *remoteSessionLifecycle) runBootstrap(
+	ctx context.Context, key SessionSandboxKey, handle RemoteSandboxHandle,
+) error {
+	if l.bootstrapper == nil {
+		return nil
+	}
+	bootstrapErr := l.bootstrapper.AfterCreate(ctx, key, handle)
+	if bootstrapErr == nil {
+		return nil
+	}
+	// Use a cancellation-immune context: the caller may already be gone, and
+	// abandoning the rollback would leak both a sandbox and a wrong binding.
+	cleanupCtx := context.WithoutCancel(ctx)
+	if _, delErr := l.bindings.DeleteIfMatch(
+		cleanupCtx, key, l.client.Provider(), handle.ID(),
+	); delErr != nil {
+		return errors.Join(bootstrapErr, fmt.Errorf("delete binding after failed bootstrap: %w", delErr))
+	}
+	return errors.Join(bootstrapErr, l.cleanupCreated(cleanupCtx, handle))
+}
+
+func (l *remoteSessionLifecycle) notifyCreateFailed(
+	ctx context.Context, key SessionSandboxKey, createErr error,
+) {
+	handler, ok := l.bootstrapper.(SessionCreateFailureHandler)
+	if !ok {
+		return
+	}
+	handler.OnCreateFailed(context.WithoutCancel(ctx), key, createErr)
 }
 
 func (l *remoteSessionLifecycle) connectWinner(

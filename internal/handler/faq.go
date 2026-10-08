@@ -72,6 +72,7 @@ type updateLastFAQImportResultDisplayStatusRequest struct {
 // @Param        keyword      query     string  false  "关键词搜索"
 // @Param        search_field query     string  false  "搜索字段: standard_question(标准问题), similar_questions(相似问法), answers(答案), 默认搜索全部"
 // @Param        sort_order   query     string  false  "排序方式: asc(按更新时间正序), 默认按更新时间倒序"
+// @Param        is_enabled   query     bool    false  "启用状态筛选；不传时返回全部"
 // @Success      200        {object}  map[string]interface{}  "FAQ列表"
 // @Failure      400        {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
@@ -102,8 +103,13 @@ func (h *FAQHandler) ListEntries(c *gin.Context) {
 	keyword := secutils.SanitizeForLog(c.Query("keyword"))
 	searchField := secutils.SanitizeForLog(c.Query("search_field"))
 	sortOrder := secutils.SanitizeForLog(c.Query("sort_order"))
+	isEnabled, err := parseOptionalFAQEnabled(c)
+	if err != nil {
+		c.Error(err)
+		return
+	}
 
-	result, err := h.knowledgeService.ListFAQEntries(ctx, kbID, &page, tagUUIDs, legacyTagSeqID, keyword, searchField, sortOrder)
+	result, err := h.knowledgeService.ListFAQEntries(ctx, kbID, &page, tagUUIDs, legacyTagSeqID, keyword, searchField, sortOrder, isEnabled)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, nil)
 		c.Error(err)
@@ -114,6 +120,26 @@ func (h *FAQHandler) ListEntries(c *gin.Context) {
 		"success": true,
 		"data":    result,
 	})
+}
+
+// parseOptionalFAQEnabled preserves the distinction between an omitted filter
+// and an explicit false value so the management endpoint remains backward compatible.
+func parseOptionalFAQEnabled(c *gin.Context) (*bool, error) {
+	raw, exists := c.GetQuery("is_enabled")
+	if !exists {
+		return nil, nil
+	}
+
+	var value bool
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "true":
+		value = true
+	case "false":
+		value = false
+	default:
+		return nil, errors.NewBadRequestError("is_enabled must be true or false")
+	}
+	return &value, nil
 }
 
 // UpsertEntries godoc

@@ -16,9 +16,9 @@ Claw Skill 为 OpenClaw 生态中的智能体提供 WeKnora 接入能力，通�
 
 ## 安装与连接 {#怎么配}
 
-在「设置 → 集成 → Claw Skill」查看安装指引，复制当前实例的 API 地址、环境变量示例和安装命令。
+在「设置 → 发布集成 → Claw Skill」查看安装指引，复制当前实例的 API 地址、环境变量示例和安装命令。
 
-1. **获取 API 凭证**：「设置 → API 信息」里复制 API Key 与 API 地址；
+1. **获取 API 凭证**：在「设置 → 发布集成 → API 集成」复制 API Key 与 API 地址（引导页的「打开 API 信息」按钮会直接跳转到这里）；
 2. **设置环境变量**：在终端或 `~/.zshrc` / `~/.bashrc` 里设置
 
    ```bash
@@ -26,22 +26,30 @@ Claw Skill 为 OpenClaw 生态中的智能体提供 WeKnora 接入能力，通�
    export WEKNORA_API_KEY=sk-xxxxx
    ```
 
-3. **安装 Skill**：在装好 OpenClaw CLI 的环境里执行引导页给出的安装命令，或到 ClawHub 页面按指引安装；
+   `WEKNORA_BASE_URL` 需要包含 `/api/v1`，引导页的示例已填入当前实例地址。
+
+3. **安装 Skill**：在装好 OpenClaw CLI 的环境里执行下面的命令，或到 ClawHub 页面按指引安装；
+
+   ```bash
+   openclaw skills install @lyingbug/weknora
+   ```
+
 4. **验证**：让 Agent 列一次知识库或跑一次检索，确认凭证与网络可达。
 
 ## 和 MCP 的关系
 
 Claw Skill 和 MCP Server 均可供外部智能体调用，选择取决于客户端支持的接入方式及所需功能：
 
-| | Claw Skill | MCP Server |
+| | Claw Skill | MCP Server（内置） |
 | --- | --- | --- |
-| 面向 | OpenClaw / ClawHub 生态的 Agent | 支持 MCP 协议的客户端（Claude Desktop、VS Code Copilot 等） |
-| 安装 | ClawHub 安装 Skill | `pip install tencent-weknora-mcp` 或 `uvx` 运行 |
-| 传输 | 直接调 REST | stdio / SSE / Streamable HTTP |
-| 能力范围 | 导入、检索、浏览（5 类） | 31 个工具，另含租户、模型、会话、Agent 问答、Wiki |
+| 面向 | OpenClaw / ClawHub 生态的 Agent | 支持 MCP 协议的客户端（Claude Desktop、Cursor、Claude Code、VS Code Copilot 等） |
+| 安装 | ClawHub 安装 Skill | 无需额外部署：在「设置 → 发布集成 → MCP Server」创建端点，客户端连接 `/mcp/<endpoint_id>` |
+| 认证 | 空间 API Key（`WEKNORA_API_KEY`） | 每个端点独立令牌，可轮换、停用 |
+| 传输 | 直接调 REST | Streamable HTTP；仅支持 stdio 的客户端通过 `mcp-remote` 桥接 |
+| 能力范围 | 导入、检索、浏览（5 类） | 按端点勾选：检索与阅读、问答（端点默认 Agent）、Wiki、写入；可限定知识库范围 |
 | 文档 | 本篇 | [MCP 集成](../03-features/08-mcp.md) |
 
-需要会话、模型管理或 Wiki 工具时，使用 MCP Server；导入、检索和浏览资料可使用 Claw Skill。
+需要问答、Wiki 工具，或希望按端点限定工具和知识库范围时，使用 MCP Server；在 OpenClaw 生态中导入、检索和浏览资料可使用 Claw Skill。仓库 `mcp-server/` 下的 Python MCP 服务已弃用，新接入请使用内置 MCP Server。
 
 ## 相关文档 {#相关}
 

@@ -131,27 +131,6 @@ check_gofmt_files() {
   log_ok "gofmt"
 }
 
-collect_go_packages_from_files() {
-  local -a files=("$@")
-  local f dir pkg module root_module
-  local -a pkgs=()
-  # Nested modules (docs/poc, cli, client) are not testable from the root
-  # module, so only keep packages that belong to it.
-  root_module="$(cd "$ROOT" && go list -m 2>/dev/null || true)"
-  for f in "${files[@]}"; do
-    [[ "$f" == *.go ]] || continue
-    dir="$(dirname "$f")"
-    module="$(cd "$ROOT/$dir" && go list -m 2>/dev/null)" || continue
-    [[ "$module" == "$root_module" ]] || continue
-    pkg="$(cd "$ROOT/$dir" && go list . 2>/dev/null)" || continue
-    pkgs+=("$pkg")
-  done
-  if [[ ${#pkgs[@]} -eq 0 ]]; then
-    return 0
-  fi
-  printf '%s\n' "${pkgs[@]}" | sort -u
-}
-
 run_golangci_if_available() {
   local from_rev="$1"
   if ! command -v golangci-lint >/dev/null 2>&1; then
@@ -166,41 +145,46 @@ run_golangci_if_available() {
   log_ok "golangci-lint"
 }
 
-run_full_app_vet() {
-  # Mirrors .github/workflows/app.yml: vet every app package (excl. docreader).
-  log_step "go vet (all app packages, like CI)"
+run_app_vet_test() {
+  # Use the same application package set as CI, including callers of changed
+  # packages. Testing only directly changed packages misses contract regressions.
   (
     cd "$ROOT"
+    local package_list
+    package_list="$(go list ./...)"
     local -a pkgs=()
     while IFS= read -r line; do
-      [[ -n "$line" ]] && pkgs+=("$line")
-    done < <(go list ./... | grep -v '/docreader/' || true)
+      [[ -z "$line" || "$line" == *"/docreader/"* ]] && continue
+      pkgs+=("$line")
+    done <<< "$package_list"
+    if [[ ${#pkgs[@]} -eq 0 ]]; then
+      log_fail "no application packages found"
+      exit 1
+    fi
+    log_step "go vet (all app packages, like CI)"
     go vet "${pkgs[@]}"
+    log_ok "go vet"
+    run_go_test_packages "${pkgs[@]}"
   )
-  log_ok "go vet"
 }
 
 run_go_test_packages() {
   local -a pkgs=("$@")
   if [[ ${#pkgs[@]} -eq 0 ]]; then
-    log_step "no changed Go packages; skip go test"
+    log_step "no Go packages; skip go test"
     return 0
   fi
   if [[ "${HOOK_SKIP_TEST:-}" == "1" ]]; then
     log_step "HOOK_SKIP_TEST=1; skip go test"
     return 0
   fi
-  log_step "go test (${#pkgs[@]} changed package(s))"
+  log_step "go test (${#pkgs[@]} app package(s), like CI)"
   (
     cd "$ROOT"
-    go test -count=1 "${pkgs[@]}"
+    # Match app.yml: a developer's custom log template must not alter assertions.
+    LOG_FORMAT="" go test -count=1 "${pkgs[@]}"
   )
   log_ok "go test"
-}
-
-run_app_vet_test() {
-  run_full_app_vet
-  run_go_test_packages "$@"
 }
 
 run_cli_checks() {

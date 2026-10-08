@@ -75,16 +75,14 @@ builtin_agents:
       kb_selection_mode: "all"
       retrieve_kb_only_when_mentioned: false
       allowed_tools:
-        - "knowledge_search"
-        - "grep_chunks"
-        - "list_knowledge_chunks"
+        - "search_knowledge"
+        - "read_document"
+        - "list_documents"
         - "query_knowledge_graph"
-        - "get_document_info"
       web_search_enabled: true
       web_search_max_results: 5
       reflection_enabled: false
       multi_turn_enabled: true
-      history_turns: 5
       faq_priority_enabled: true
       faq_direct_answer_threshold: 0.9
       faq_score_boost: 1.2
@@ -132,7 +130,6 @@ builtin_agents:
       web_search_max_results: 0
       reflection_enabled: true
       multi_turn_enabled: true
-      history_turns: 10
       embedding_top_k: 5
       keyword_threshold: 0.3
       vector_threshold: 0.5
@@ -170,13 +167,12 @@ builtin_agents:
       allowed_tools:
         - "wiki_search"
         - "wiki_read_page"
-        - "wiki_read_source_doc"
+        - "read_document"
         - "wiki_flag_issue"
       web_search_enabled: false
       web_search_max_results: 0
       reflection_enabled: false
       multi_turn_enabled: true
-      history_turns: 10
       embedding_top_k: 10
       keyword_threshold: 0.3
       vector_threshold: 0.5
@@ -215,7 +211,7 @@ builtin_agents:
       allowed_tools:
         - "wiki_search"
         - "wiki_read_page"
-        - "wiki_read_source_doc"
+        - "read_document"
         - "wiki_write_page"
         - "wiki_replace_text"
         - "wiki_rename_page"
@@ -226,7 +222,6 @@ builtin_agents:
       web_search_max_results: 0
       reflection_enabled: false
       multi_turn_enabled: true
-      history_turns: 10
       embedding_top_k: 10
       keyword_threshold: 0.3
       vector_threshold: 0.5
@@ -274,5 +269,4 @@ builtin_agents:
       web_search_max_results: 0
       reflection_enabled: false
       multi_turn_enabled: true
-      history_turns: 10
 

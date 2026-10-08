@@ -38,7 +38,7 @@ const label = computed(() => {
   width: 100%;
   padding: 4px 0 8px;
   color: var(--td-text-color-placeholder);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   font-variant-numeric: tabular-nums;
   line-height: 20px;
   text-align: center;

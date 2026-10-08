@@ -42,6 +42,12 @@ type ToolRequirement struct {
 	AnyOf         []KBCapability
 	AllOf         []KBCapability
 	ConsumesFiles bool
+	// Auxiliary tools work on any KB listed in AnyOf/AllOf but do not by
+	// themselves make a KB worth selecting: a document reader can open a
+	// wiki-only KB's sources, yet it should not pull wiki-only KBs into a
+	// RAG agent's "all knowledge bases" scope. They contribute to the derived
+	// filter only when no primary tool has a requirement.
+	Auxiliary bool
 }
 
 // ToolCapabilityRequirements maps tool names to their capability needs.
@@ -56,17 +62,22 @@ var ToolCapabilityRequirements = map[string]ToolRequirement{
 	"todo_write": {},
 
 	// ---- RAG / chunk retrieval (need at least one chunk-indexed KB) ----
+	"search_knowledge":      {AnyOf: []KBCapability{CapVector, CapKeyword}, ConsumesFiles: true},
+	"read_document":         documentReaderRequirement,
+	"list_documents":        documentReaderRequirement,
+	"query_knowledge_graph": {AllOf: []KBCapability{CapGraph}, ConsumesFiles: true},
+	"database_query":        {AnyOf: []KBCapability{CapVector, CapKeyword}, ConsumesFiles: true},
+	// Retired names keep their requirement so a stored allowlist that has not
+	// been normalized yet still derives the same KB filter.
 	"knowledge_search":      {AnyOf: []KBCapability{CapVector, CapKeyword}, ConsumesFiles: true},
 	"grep_chunks":           {AnyOf: []KBCapability{CapVector, CapKeyword}, ConsumesFiles: true},
 	"list_knowledge_chunks": {AnyOf: []KBCapability{CapVector, CapKeyword}, ConsumesFiles: true},
-	"query_knowledge_graph": {AnyOf: []KBCapability{CapVector, CapKeyword}, ConsumesFiles: true},
 	"get_document_info":     {AnyOf: []KBCapability{CapVector, CapKeyword}, ConsumesFiles: true},
-	"database_query":        {AnyOf: []KBCapability{CapVector, CapKeyword}, ConsumesFiles: true},
 
 	// ---- Wiki (operates on wiki pages; doesn't consume arbitrary file IDs) ----
 	"wiki_search":          {AllOf: []KBCapability{CapWiki}},
 	"wiki_read_page":       {AllOf: []KBCapability{CapWiki}},
-	"wiki_read_source_doc": {AllOf: []KBCapability{CapWiki}},
+	"wiki_read_source_doc": documentReaderRequirement,
 	"wiki_flag_issue":      {AllOf: []KBCapability{CapWiki}},
 	"wiki_write_page":      {AllOf: []KBCapability{CapWiki}},
 	"wiki_replace_text":    {AllOf: []KBCapability{CapWiki}},
@@ -78,6 +89,14 @@ var ToolCapabilityRequirements = map[string]ToolRequirement{
 	// ---- Data analysis (reads table summary/column chunks from RAG ingest) ----
 	"data_analysis": {AnyOf: []KBCapability{CapVector, CapKeyword}, ConsumesFiles: true},
 	"data_schema":   {AnyOf: []KBCapability{CapVector, CapKeyword}, ConsumesFiles: true},
+}
+
+// documentReaderRequirement: document readers work on stored chunks, which
+// every KB writes, wiki-only ones included.
+var documentReaderRequirement = ToolRequirement{
+	AnyOf:         []KBCapability{CapVector, CapKeyword, CapWiki},
+	ConsumesFiles: true,
+	Auxiliary:     true,
 }
 
 func hasCap(caps types.KBCapabilities, c KBCapability) bool {
@@ -112,17 +131,25 @@ func (f KBFilter) IsEmpty() bool { return len(f.AnyOf) == 0 }
 // list contains only such tools, the returned filter is empty (accept all).
 func DeriveKBFilterFromTools(allowedTools []string) KBFilter {
 	seen := make(map[KBCapability]struct{})
+	auxiliary := make(map[KBCapability]struct{})
 	for _, t := range allowedTools {
 		req, ok := ToolCapabilityRequirements[t]
 		if !ok {
 			continue
 		}
+		target := seen
+		if req.Auxiliary {
+			target = auxiliary
+		}
 		for _, c := range req.AnyOf {
-			seen[c] = struct{}{}
+			target[c] = struct{}{}
 		}
 		for _, c := range req.AllOf {
-			seen[c] = struct{}{}
+			target[c] = struct{}{}
 		}
+	}
+	if len(seen) == 0 {
+		seen = auxiliary
 	}
 	if len(seen) == 0 {
 		return KBFilter{}

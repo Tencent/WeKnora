@@ -37,6 +37,34 @@ func TestLinkifyContent_LongerNameWinsOverSubstring(t *testing.T) {
 	}
 }
 
+func TestLinkifyContent_SkipsSingleHanRuneAutoLink(t *testing.T) {
+	refs := []linkRef{
+		{slug: "entity/feng", matchText: "风"},
+	}
+	in := "穿越河西走廊体验大漠风沙。"
+	got, changed := linkifyContent(in, refs, "")
+	if changed {
+		t.Fatalf("single Han rune must not be auto-linked: %q", got)
+	}
+	if got != in {
+		t.Fatalf("content changed: got %q, want %q", got, in)
+	}
+}
+
+func TestLinkifyContent_PreservesExplicitSingleHanRuneLink(t *testing.T) {
+	refs := []linkRef{
+		{slug: "entity/feng", matchText: "风"},
+	}
+	in := "寓言中，[[entity/feng|风]]羡慕目。"
+	got, changed := linkifyContent(in, refs, "")
+	if changed {
+		t.Fatalf("explicit single-character link must be preserved without reinjection: %q", got)
+	}
+	if got != in {
+		t.Fatalf("content changed: got %q, want %q", got, in)
+	}
+}
+
 func TestLinkifyContent_ASCIIWordBoundary(t *testing.T) {
 	refs := []linkRef{
 		{slug: "ai", matchText: "AI"},

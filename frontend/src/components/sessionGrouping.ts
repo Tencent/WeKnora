@@ -23,6 +23,7 @@ export interface SessionForGrouping {
   im_platform?: string
   description?: string
   user_id?: string
+  parent_session_id?: string
   originalIndex?: number
 }
 

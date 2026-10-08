@@ -127,6 +127,10 @@ func SanitizeAgentStepsForStorage(steps []types.AgentStep) []types.AgentStep {
 				continue
 			}
 			result := *tc.Result
+			if tc.Name == "local_browser" {
+				// Screenshot bytes already live in Data for the result card.
+				result.Images = nil
+			}
 			if isSandboxContentTool(tc.Name) {
 				// display_type is for the live card; history still needs the
 				// command, exit, and a head+tail of the streams. Replacing
@@ -323,7 +327,7 @@ func compactToolSummary(success bool, errMsg string, data map[string]interface{}
 			count = intField(data, "count")
 		}
 		if count > 0 {
-			return fmt.Sprintf("Semantic search returned %d result(s) (details omitted from history)", count)
+			return fmt.Sprintf("Knowledge search returned %d result(s) (details omitted from history)", count)
 		}
 	case "shell_exec":
 		if rebuilt := rebuildShellExecHistory(data); rebuilt != "" {

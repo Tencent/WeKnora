@@ -6,13 +6,11 @@
 //
 // Design notes:
 //   - Session-scoped: the sandbox is resolved from ToolExecContext.SessionID.
-//   - Path guardrail: writes sit under /workspace and never under
-//     /workspace/input (staged attachments are the user's, not ours).
-//     /workspace/output is what gets collected for download, so the
-//     description reserves it for finished deliverables and sends scratch
-//     work elsewhere under /workspace. Only the /workspace/input half is
-//     enforced here; the rest is guidance, because "finished" is a judgement
-//     the tool cannot make.
+//   - Path guardrail: writes stay under the session layout's WriteRoots and
+//     never under InputDir (staged attachments are the user's, not ours).
+//     Remote sessions collect OutputDir for download; host sessions with an
+//     empty OutputDir edit in place. Only the InputDir half is enforced here;
+//     "finished deliverable" is guidance the tool cannot judge.
 //   - Content stays out of ToolResult.Data/Output: the model already has the
 //     bytes it just sent. The result is path + size so the next call can
 //     shell_exec the file.
@@ -96,7 +94,8 @@ type SandboxFileSink interface {
 
 // writeSandboxFileDescription carries one %s, filled with the size guidance
 // derived from the round's completion-token budget.
-const writeSandboxFileDescription = `Create, overwrite, or append a text file under /workspace, excluding /workspace/input.
+const writeSandboxFileDescription = `Create, overwrite, or append a text file inside the session sandbox,
+excluding /workspace/input.
 /workspace/output is collected for download, so it holds finished deliverables only; put drafts, scratch and
 intermediate files in any other directory under /workspace. Send both path and content (path first).
 Use edit_sandbox_file for small changes to an existing file. File content does not pass through shell quoting.
@@ -110,15 +109,17 @@ Binary content is not accepted. The result reports the absolute path and total s
 // depends on the agent's per-round token budget and is stated in the tool
 // description, which is built per session.
 type WriteSandboxFileInput struct {
-	Path    string `json:"path" jsonschema:"Absolute or /workspace-relative sandbox path to write. Must sit under /workspace and must not sit under /workspace/input. Use /workspace/output for finished deliverables only; intermediate files belong elsewhere under /workspace."` //nolint:lll // JSON schema tags must remain on one line.
-	Content string `json:"content" jsonschema:"Text to write. In overwrite mode this is the full file; in append mode it is only the next chunk. Keep near the per-call size stated in the tool description so the response is not cut off. Do not send binary bytes."`             //nolint:lll // one-line struct tag
-	Mode    string `json:"mode,omitempty" jsonschema:"How to apply content: 'overwrite' (default) replaces the file, 'append' adds to the end of an existing file. Use append to build a large file across several calls."`                                                         //nolint:lll // one-line struct tag
+	Path    string `json:"path" jsonschema:"Absolute or /workspace-relative sandbox path to write, excluding /workspace/input. Use the artifact output directory for finished deliverables only; intermediate files belong elsewhere."`                                 //nolint:lll // JSON schema tags must remain on one line.
+	Content string `json:"content" jsonschema:"Text to write. In overwrite mode this is the full file; in append mode it is only the next chunk. Keep near the per-call size stated in the tool description so the response is not cut off. Do not send binary bytes."` //nolint:lll // one-line struct tag
+	Mode    string `json:"mode,omitempty" jsonschema:"How to apply content: 'overwrite' (default) replaces the file, 'append' adds to the end of an existing file. Use append to build a large file across several calls."`                                             //nolint:lll // one-line struct tag
 }
 
 // WriteSandboxFileTool writes a text file into the session sandbox.
 type WriteSandboxFileTool struct {
 	BaseTool
-	sink SandboxFileSink
+	sessionBound
+	sink         SandboxFileSink
+	sizeGuidance string
 }
 
 // NewWriteSandboxFileTool constructs the tool. `sink` MUST NOT be nil.
@@ -130,16 +131,55 @@ type WriteSandboxFileTool struct {
 func NewWriteSandboxFileTool(sink SandboxFileSink, completionTokens int) *WriteSandboxFileTool {
 	return &WriteSandboxFileTool{
 		BaseTool: BaseTool{
-			name: ToolWriteSandboxFile,
-			description: fmt.Sprintf(
-				writeSandboxFileDescription,
-				writeSizeGuidance(writeBudgetBytes(completionTokens)),
-			),
+			name:   ToolWriteSandboxFile,
 			schema: utils.GenerateSchema[WriteSandboxFileInput](),
 		},
-		sink: sink,
+		sink:         sink,
+		sizeGuidance: writeSizeGuidance(writeBudgetBytes(completionTokens)),
 	}
 }
+
+// Description is built from the session sandbox layout so host paths never
+// hard-code /workspace.
+func (t *WriteSandboxFileTool) Description() string {
+	if t == nil {
+		return ""
+	}
+	return writeSandboxDescription(t.boundLayout(), t.sizeGuidance)
+}
+
+// Parameters rewrites workspace paths in the schema to match the session layout.
+func (t *WriteSandboxFileTool) Parameters() json.RawMessage {
+	if t == nil {
+		return nil
+	}
+	return schemaForLayout(t.schema, t.boundLayout())
+}
+
+func (t *WriteSandboxFileTool) boundLayout() sandbox.WorkspaceLayout {
+	if t == nil {
+		return sandbox.RemoteWorkspaceLayout()
+	}
+	return t.describeLayout(t.sink)
+}
+
+func writeSandboxDescription(l sandbox.WorkspaceLayout, sizeGuidance string) string {
+	if l.IsHost() {
+		return fmt.Sprintf(hostWriteSandboxFileDescription, layoutRootOrGeneric(l), sizeGuidance)
+	}
+	return fmt.Sprintf(rewriteRemoteWorkspaceCopy(writeSandboxFileDescription, l), sizeGuidance)
+}
+
+const hostWriteSandboxFileDescription = "Create, overwrite, or append a text file in %s.\n" +
+	"Send both path and content (path first). Use edit_sandbox_file for small changes to an existing file. " +
+	"File content does not pass through shell quoting.\n" +
+	"Large files: first call uses mode=overwrite (default), " +
+	"subsequent calls use mode=append with only the next chunk. " +
+	"Keep calls in order and inspect the reported running byte count. " +
+	"A refused/truncated call wrote nothing; retry that chunk with complete JSON, " +
+	"never duplicate successful chunks.\n" +
+	"%s\n" +
+	"Binary content is not accepted. The result reports the absolute path and total size without echoing content."
 
 // writeSizeGuidance states how much content one call should carry and why.
 //
@@ -184,14 +224,6 @@ func (t *WriteSandboxFileTool) Execute(ctx context.Context, args json.RawMessage
 		}, nil
 	}
 
-	trimmed := strings.TrimSpace(input.Path)
-	if trimmed == "" {
-		return &types.ToolResult{
-			Success: false,
-			Error:   "path is required; write under /workspace/output for artifacts or /workspace for scratch scripts",
-		}, nil
-	}
-
 	sessionID := resolveSessionID(ctx)
 	if sessionID == "" {
 		return &types.ToolResult{
@@ -200,12 +232,28 @@ func (t *WriteSandboxFileTool) Execute(ctx context.Context, args json.RawMessage
 		}, nil
 	}
 
-	clean := sandbox.ResolveWorkspacePath(trimmed)
-	rootDir, ok := matchingWritableRoot(clean)
+	layout, layoutErr := executeWorkspaceLayout(ctx, sessionID, t.sink)
+	if layoutErr != nil {
+		return layoutErr, nil
+	}
+
+	trimmed := strings.TrimSpace(input.Path)
+	if trimmed == "" {
+		return &types.ToolResult{
+			Success: false,
+			Error: fmt.Sprintf(
+				"path is required; write under %s",
+				layoutScopeName(layout),
+			),
+		}, nil
+	}
+
+	clean := resolveIn(layout, trimmed)
+	rootDir, ok := writableRootIn(layout, clean)
 	if !ok {
 		return &types.ToolResult{
 			Success: false,
-			Error:   workspaceWriteScopeError(input.Path),
+			Error:   writeScopeErrorIn(layout, input.Path),
 		}, nil
 	}
 
@@ -236,7 +284,8 @@ func (t *WriteSandboxFileTool) Execute(ctx context.Context, args json.RawMessage
 	if isBinaryShellOutput(string(chunk)) {
 		return &types.ToolResult{
 			Success: false,
-			Error:   "binary content is not accepted; write a text script and have it produce binary files under /workspace/output",
+			Error: "binary content is not accepted; write a text script and have it produce binary files under " +
+				modelSafeLayoutPath(layout.OutputDir, "the artifact output directory"),
 		}, nil
 	}
 
@@ -327,7 +376,7 @@ func (t *WriteSandboxFileTool) Execute(ctx context.Context, args json.RawMessage
 	return &types.ToolResult{
 		Success:     true,
 		Output:      output,
-		OutputFiles: sandboxOutputLinks(clean),
+		OutputFiles: sandboxOutputLinksIn(layoutOutputDir(layout), clean),
 		Data:        data,
 	}, nil
 }
@@ -373,31 +422,4 @@ func (t *WriteSandboxFileTool) readForAppend(
 // Cleanup releases any resources.
 func (t *WriteSandboxFileTool) Cleanup(ctx context.Context) error {
 	return nil
-}
-
-// workspaceWriteScopeError explains a refused write/edit path. This is a
-// tool-scope convention (attachments stay out of these tools; scripts go
-// under /workspace), not a privilege check — shell_exec can already write
-// the same session sandbox.
-func workspaceWriteScopeError(requested string) string {
-	return fmt.Sprintf(
-		"this tool only writes files under %s (not under %s, and not the directory roots themselves). path %q is outside that scope; use shell_exec for other locations",
-		sandbox.SessionWorkspaceRoot, sandbox.SessionInputRoot, requested,
-	)
-}
-
-// matchingWritableRoot returns the workspace root that contains clean, or
-// ("", false) when the path is outside /workspace, is /workspace itself, or
-// sits under the read-only attachment tree.
-func matchingWritableRoot(clean string) (string, bool) {
-	if !isUnderRoot(clean, sandbox.SessionWorkspaceRoot) ||
-		clean == sandbox.SessionWorkspaceRoot ||
-		clean == sandbox.SessionOutputRoot ||
-		isUnderRoot(clean, sandbox.SessionInputRoot) {
-		return "", false
-	}
-	if isUnderRoot(clean, sandbox.SessionOutputRoot) {
-		return sandbox.SessionOutputRoot, true
-	}
-	return sandbox.SessionWorkspaceRoot, true
 }

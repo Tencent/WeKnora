@@ -25,6 +25,8 @@ type cubeMockServer struct {
 	server                  *httptest.Server
 	mu                      sync.Mutex
 	createBody              map[string]any
+	connectCount            atomic.Int32
+	infoCount               atomic.Int32
 	createCount             atomic.Int32
 	killCount               atomic.Int32
 	nextID                  atomic.Int64
@@ -101,6 +103,7 @@ func (m *cubeMockServer) handle(w http.ResponseWriter, r *http.Request) {
 	case strings.HasPrefix(r.URL.Path, "/sandboxes/") && strings.HasSuffix(r.URL.Path, "/timeout") && r.Method == http.MethodPost:
 		m.handleSetTimeout(w, r)
 	case strings.HasPrefix(r.URL.Path, "/sandboxes/") && strings.HasSuffix(r.URL.Path, "/connect") && r.Method == http.MethodPost:
+		m.connectCount.Add(1)
 		m.handleConnect(w, r)
 	case strings.HasPrefix(r.URL.Path, "/sandboxes/") && strings.HasSuffix(r.URL.Path, "/snapshots") && r.Method == http.MethodPost:
 		m.handleCreateSnapshot(w, r)
@@ -109,6 +112,7 @@ func (m *cubeMockServer) handle(w http.ResponseWriter, r *http.Request) {
 	case strings.HasPrefix(r.URL.Path, "/templates/") && r.Method == http.MethodDelete:
 		m.handleDeleteSnapshot(w, r)
 	case strings.HasPrefix(r.URL.Path, "/sandboxes/") && r.Method == http.MethodGet:
+		m.infoCount.Add(1)
 		m.handleGetInfo(w, r)
 	case strings.HasPrefix(r.URL.Path, "/sandboxes/") && r.Method == http.MethodDelete:
 		m.handleDelete(w, r)

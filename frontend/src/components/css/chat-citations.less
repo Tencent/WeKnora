@@ -5,7 +5,7 @@
     gap: 2px;
     vertical-align: baseline;
     box-sizing: border-box;
-    border-radius: 999px;
+    border-radius: var(--app-radius-pill);
     padding: 0 5px;
     font-size: 0.72em;
     line-height: 1.45;
@@ -55,7 +55,7 @@
     cursor: pointer;
     white-space: nowrap;
     position: relative;
-    transition: background 0.15s ease, box-shadow 0.15s ease, color 0.15s ease;
+    transition: background var(--app-motion-fast) ease, box-shadow var(--app-motion-fast) ease, color var(--app-motion-fast) ease;
   }
 
   :deep(.citation-kb:hover) {
@@ -73,7 +73,7 @@
     white-space: nowrap;
     position: relative;
     text-decoration: none;
-    transition: background 0.15s ease, box-shadow 0.15s ease, color 0.15s ease;
+    transition: background var(--app-motion-fast) ease, box-shadow var(--app-motion-fast) ease, color var(--app-motion-fast) ease;
   }
 
   :deep(.citation-web:hover) {
@@ -97,7 +97,7 @@
     border-bottom: 1px dashed var(--td-brand-color);
     text-decoration: none;
     font-weight: 500;
-    transition: border-bottom-style 0.15s ease;
+    transition: border-bottom-style var(--app-motion-fast) ease;
 
     &:hover {
       border-bottom-style: solid;
@@ -117,10 +117,10 @@
   z-index: 10000;
   max-width: 320px;
   padding: 10px 12px;
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   background: var(--td-bg-color-container);
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.5;
   color: var(--td-text-color-primary);
 
@@ -148,5 +148,40 @@
 
   &__error {
     color: var(--td-error-color);
+  }
+
+  &--kb {
+    box-sizing: border-box;
+    width: 264px;
+    max-width: calc(100vw - 32px);
+    padding: 12px 14px;
+    border: 0.5px solid var(--td-component-stroke);
+    border-radius: var(--app-radius-lg);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.04), 0 6px 20px rgba(0, 0, 0, 0.08);
+    font-family: var(--app-font-family);
+    font-size: var(--app-text-md);
+    line-height: 1.6;
+    overflow-wrap: anywhere;
+    transition: background-color var(--app-motion-fast) ease;
+
+    &:hover {
+      background: var(--td-bg-color-container-hover);
+    }
+
+    .chat-citation-float__title {
+      margin-bottom: 6px;
+      font-weight: 500;
+      color: var(--td-text-color-primary);
+    }
+
+    .chat-citation-float__body {
+      color: var(--td-text-color-secondary);
+    }
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-citation-float--kb {
+    transition: none;
   }
 }

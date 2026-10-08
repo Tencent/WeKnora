@@ -64,6 +64,6 @@ onMounted(load)
 </script>
 
 <style scoped lang="less">
-.section-header{margin-bottom:20px}.section-header h2{font-size:20px;margin:0 0 6px}.section-description,.desc,.option-hint{color:var(--td-text-color-secondary)}
-.setting-row{display:flex;justify-content:space-between;gap:28px}.setting-info{flex:1}.setting-control{width:45%;min-width:300px}.select-option{display:flex;align-items:center;gap:8px}.option-hint{font-size:12px;margin:8px 0}.change-warning{color:var(--td-warning-color)}.go-settings{font-size:13px;color:var(--td-brand-color)}.loading-inline{display:flex;gap:8px}
+.section-header{margin-bottom:20px}.section-header h2{font-size:var(--app-text-3xl);margin:0 0 6px}.section-description,.desc,.option-hint{color:var(--td-text-color-secondary)}
+.setting-row{display:flex;justify-content:space-between;gap:28px}.setting-info{flex:1}.setting-control{width:45%;min-width:300px}.select-option{display:flex;align-items:center;gap:8px}.option-hint{font-size:var(--app-text-sm);margin:8px 0}.change-warning{color:var(--td-warning-color)}.go-settings{font-size:var(--app-text-md);color:var(--td-brand-color)}.loading-inline{display:flex;gap:8px}
 </style>

@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
-import { formatFileSize, getFileIcon } from '@/utils/files';
-import { useTagChipsOverflow } from '@/composables/useTagChipsOverflow';
+import { formatFileSize } from '@/utils/files';
+import KnowledgeTagPopover from './KnowledgeTagPopover.vue';
+import DocumentFileIcon from './DocumentFileIcon.vue';
 import DocumentActionMenu from './DocumentActionMenu.vue';
 import FolderPickerMenu, { type FolderOption } from './FolderPickerMenu.vue';
+import { shownStall } from '@/utils/knowledgeProcessingStall';
 
 interface Tag {
   id: string;
@@ -15,6 +17,7 @@ interface Tag {
 interface KnowledgeItem {
   id: string;
   file_name: string;
+  original_file_name?: string;
   folder_path?: string;
   file_type?: string;
   file_size?: number | string;
@@ -27,19 +30,19 @@ interface KnowledgeItem {
   description?: string;
   channel?: string;
   isMore?: boolean;
+  stalled_minutes?: number;
+  stall_state?: string;
 }
 
 const props = defineProps<{
   items: KnowledgeItem[];
+  kbId: string;
   selectedIds: Set<string>;
   canEdit: boolean;
   canDownload: boolean;
   canMutateKnowledge: boolean;
   traceVisibleIds: Record<string, boolean>;
-  tagList: Tag[];
   loading?: boolean;
-  /** Sub-folders of the folder currently being browsed. */
-  folders?: Array<{ path: string; name: string; total_count: number }>;
   /** Every folder of the knowledge base, for the "move to folder" picker. */
   folderOptions?: FolderOption[];
   /**
@@ -63,7 +66,7 @@ const emit = defineEmits<{
   (e: 'toggle-all', checked: boolean): void;
   (e: 'action', action: 'download' | 'edit' | 'reparse' | 'cancel-parse' | 'move' | 'move-folder' | 'delete' | 'view-trace' | 'batch-manage', item: KnowledgeItem): void;
   (e: 'probe-trace', item: KnowledgeItem): void;
-  (e: 'tag-edit', item: KnowledgeItem): void;
+  (e: 'tags-changed', payload?: { deletedTagId?: string }): void;
   (e: 'open-folder', path: string): void;
   (e: 'move-to-folder', item: KnowledgeItem, folderPath: string): void;
   // Move sub-flow emits
@@ -75,23 +78,7 @@ const emit = defineEmits<{
 }>();
 
 const { t } = useI18n();
-
-const {
-  setupTagChipsObserver,
-  getTagLimit,
-  hasTagOverflow,
-  getOverflowCount,
-} = useTagChipsOverflow('listTagItemId');
-
-const tagMap = computed(() => {
-  const map: Record<string, Tag> = {};
-  for (const tag of props.tagList) map[String(tag.id)] = tag;
-  return map;
-});
-const getTagName = (tagId?: string | number) => {
-  if (!tagId && tagId !== 0) return '';
-  return tagMap.value[String(tagId)]?.name || '';
-};
+const tagEditorId = ref<string | null>(null);
 
 const formatTime = (time?: string) => {
   if (!time) return '--';
@@ -114,6 +101,7 @@ const getSourceInfo = (item: KnowledgeItem): { icon: string; label: string } => 
   if (ch === 'lark_drive') return { icon: 'cloud-download', label: t('knowledgeBase.channelLarkDrive') };
   if (ch === 'notion') return { icon: 'cloud-download', label: t('knowledgeBase.channelNotion') };
   if (ch === 'yuque') return { icon: 'cloud-download', label: t('knowledgeBase.channelYuque') };
+  if (ch === 'confluence') return { icon: 'cloud-download', label: t('knowledgeBase.channelConfluence') };
   if (ch === 'gitlab') return { icon: 'cloud-download', label: t('knowledgeBase.channelGitLab') };
   if (ch === 'ima') return { icon: 'cloud-download', label: t('knowledgeBase.channelIma') };
   if (ch === 'wechat') return { icon: 'cloud-download', label: t('knowledgeBase.channelWechat') };
@@ -131,8 +119,26 @@ interface StatusInfo {
   theme: 'success' | 'warning' | 'danger' | 'primary' | 'default';
   icon?: string;
   spin?: boolean;
+  hint?: string;
 }
 const computeStatus = (item: KnowledgeItem): StatusInfo => {
+  const stall = shownStall(item.stall_state, item.stalled_minutes);
+  if (stall === 'queued') {
+    return {
+      label: t('knowledgeBase.statusQueued'),
+      theme: 'default',
+      icon: 'time',
+      hint: t('knowledgeBase.queuedHint', { minutes: item.stalled_minutes }),
+    };
+  }
+  if (stall === 'stalled') {
+    return {
+      label: t('knowledgeBase.statusStalled'),
+      theme: 'warning',
+      icon: 'time',
+      hint: t('knowledgeBase.stalledHint', { minutes: item.stalled_minutes }),
+    };
+  }
   if (item.parse_status === 'pending' || item.parse_status === 'processing') {
     return { label: t('knowledgeBase.statusProcessing'), theme: 'primary', icon: 'loading', spin: true };
   }
@@ -152,7 +158,7 @@ const computeStatus = (item: KnowledgeItem): StatusInfo => {
     return { label: t('knowledgeBase.statusFailed'), theme: 'danger', icon: 'close-circle' };
   }
   if (item.parse_status === 'cancelled') {
-    return { label: t('knowledgeBase.statusCancelled'), theme: 'warning', icon: 'close-circle' };
+    return { label: t('knowledgeBase.statusCancelled'), theme: 'default', icon: 'stop-circle' };
   }
   if (item.parse_status === 'draft') {
     return { label: t('knowledgeBase.statusDraft'), theme: 'warning' };
@@ -196,6 +202,8 @@ const onRowCheckboxChange = (item: KnowledgeItem, checked: boolean, ctx?: { e?: 
 
 const moreOpen = ref<string | null>(null);
 const onMoreVisible = (id: string, visible: boolean) => {
+  if (!visible && moreOpen.value !== id) return;
+  if (visible && moreOpen.value !== id) folderPickerItemId.value = null;
   moreOpen.value = visible ? id : null;
   if (visible) {
     const it = props.items.find(i => i.id === id);
@@ -255,115 +263,78 @@ const handleAction = (action: 'download' | 'edit' | 'reparse' | 'cancel-parse' |
 </script>
 
 <template>
-  <div class="doc-list-view" :class="{ 'is-loading': loading }">
+  <div class="doc-list-view" :class="{ 'is-loading': loading }" role="table" :aria-label="t('knowledgeEditor.document.title')">
     <div ref="stickySentinel" class="doc-list-sticky-sentinel" aria-hidden="true"></div>
     <div class="doc-list-header" :class="{ 'is-stuck': headerStuck }" role="row">
       <div class="cell cell-check" role="columnheader" @click.stop>
-        <t-checkbox class="doc-list-check" size="small" :checked="allSelected" :indeterminate="someSelected"
+        <t-checkbox v-if="canEdit || canDownload" class="doc-list-check" size="small" :checked="allSelected" :indeterminate="someSelected"
           :disabled="!items.length" :title="t('knowledgeBase.selectAll')" @change="onHeaderCheckboxChange" />
       </div>
       <div class="cell cell-name" role="columnheader">{{ t('knowledgeBase.columnName') }}</div>
-      <div class="cell cell-tag" role="columnheader">{{ t('knowledgeBase.columnTag') }}</div>
-      <div class="cell cell-source" role="columnheader">{{ t('knowledgeBase.columnSource') }}</div>
-      <div class="cell cell-size" role="columnheader">{{ t('knowledgeBase.columnSize') }}</div>
+      <div class="cell cell-tags" role="columnheader">{{ t('knowledgeBase.columnTag') }}</div>
       <div class="cell cell-status" role="columnheader">{{ t('knowledgeBase.columnStatus') }}</div>
-      <div class="cell cell-time" role="columnheader">{{ t('knowledgeBase.columnUpdatedAt') }}</div>
       <div class="cell cell-actions" role="columnheader" v-if="canEdit"></div>
     </div>
 
-    <div class="doc-list-body">
-      <div
-        v-for="folder in folders"
-        :key="'folder-' + folder.path"
-        class="doc-list-row doc-list-row--folder"
-        :title="folder.path"
-        role="row"
-        @click="emit('open-folder', folder.path)"
-      >
-        <div class="cell cell-check" aria-hidden="true"></div>
-        <div class="cell cell-name">
-          <span class="row-file-icon-wrap">
-            <t-icon name="folder" class="row-folder-icon" />
-          </span>
-          <div class="row-file-text">
-            <span class="row-file-name">{{ folder.name }}</span>
-          </div>
-        </div>
-        <div class="cell cell-tag"></div>
-        <div class="cell cell-source">
-          <span class="row-folder-meta">
-            {{ t('knowledgeBase.folderTree.folderCardCount', { count: folder.total_count }) }}
-          </span>
-        </div>
-        <div class="cell cell-size"></div>
-        <div class="cell cell-status"></div>
-        <div class="cell cell-time"></div>
-        <div v-if="canEdit" class="cell cell-actions" aria-hidden="true"></div>
-      </div>
-
+    <div class="doc-list-body" role="rowgroup">
       <div v-for="item in items" :key="item.id" class="doc-list-row"
         :class="{ selected: selectedIds.has(item.id), 'menu-open': moreOpen === item.id }" :data-select-id="item.id"
         role="row" @click="emit('open', item)">
-        <div class="cell cell-check" @click.stop>
-          <t-checkbox class="doc-list-check" size="small" :checked="selectedIds.has(item.id)" :title="item.file_name"
+        <div class="cell cell-check" role="cell" @click.stop>
+          <t-checkbox v-if="canEdit || canDownload" class="doc-list-check" size="small" :checked="selectedIds.has(item.id)" :title="item.file_name"
             @change="(c: boolean, ctx?: { e?: Event }) => onRowCheckboxChange(item, c, ctx)" />
         </div>
 
-        <div class="cell cell-name">
-          <span class="row-file-icon-wrap">
-            <t-icon :name="getFileIcon(item)" />
-          </span>
+        <div class="cell cell-name" role="cell">
+          <DocumentFileIcon :source-type="item.type"
+            :file-name="item.file_type ? `document.${item.file_type.toLowerCase()}` : (item.original_file_name || item.file_name)" />
           <div class="row-file-text">
-            <span class="row-file-name" :title="item.file_name">{{ item.file_name }}</span>
+            <div class="row-title-line">
+              <button type="button" class="row-file-name" :title="item.description ? `${item.file_name}\n${item.description}` : item.file_name"
+                @click.stop="emit('open', item)">{{ item.file_name }}</button>
+            </div>
+            <span class="row-file-meta">
+              <span class="row-source"><t-icon :name="getSourceInfo(item).icon" />{{ getSourceInfo(item).label }}</span>
+              <template v-if="formatFileSize(item.file_size)">
+                <span class="meta-sep" aria-hidden="true">·</span>
+                <span>{{ formatFileSize(item.file_size) }}</span>
+              </template>
+              <span class="meta-sep" aria-hidden="true">·</span>
+              <span :title="t('knowledgeBase.columnUpdatedAt')">{{ formatTime(item.updated_at) }}</span>
+            </span>
             <button v-if="showFolderPath && item.folder_path" type="button" class="row-file-folder"
               :title="item.folder_path" @click.stop="emit('open-folder', item.folder_path)">
               <t-icon name="folder" />
               <span>{{ item.folder_path }}</span>
             </button>
-            <span v-if="item.description" class="row-file-desc" :title="item.description">{{ item.description }}</span>
           </div>
         </div>
 
-
-        <div class="cell cell-tag">
-          <template v-if="item.tags && item.tags.length > 0">
-            <t-tooltip v-if="hasTagOverflow(item.id, (item.tags || []).length)"
-              :content="(item.tags || []).map((t: any) => t.name).join(', ')" placement="top">
-              <div class="row-tag-chips" :ref="(el: any) => setupTagChipsObserver(el, item.id, (item.tags || []).length)"
-                :class="{ 'is-clickable': canEdit }" @click.stop="canEdit && emit('tag-edit', item)">
-                <t-tag v-for="tag in (item.tags || []).slice(0, getTagLimit(item.id))" :key="tag.id" size="small"
-                  variant="light-outline" class="row-tag">
-                  {{ tag.name }}
-                </t-tag>
-                <span class="row-tag-overflow">+{{ getOverflowCount(item.id, (item.tags || []).length) }}</span>
+        <div class="cell cell-tags" role="cell">
+          <KnowledgeTagPopover :kb-id="kbId" :knowledge-id="item.id" :tags="item.tags || []" :disabled="!canEdit"
+            :visible="tagEditorId === item.id"
+            @update:visible="(visible: boolean) => { if (visible) tagEditorId = item.id; else if (tagEditorId === item.id) tagEditorId = null }"
+            @changed="emit('tags-changed', $event)">
+            <div class="row-tag-trigger">
+              <div v-if="item.tags?.length" class="row-tags">
+                <button v-for="tag in item.tags.slice(0, 5)" :key="tag.id" type="button" class="row-tag"
+                  :disabled="!canEdit" :title="tag.name">{{ tag.name }}</button>
+                <button v-if="item.tags.length > 5" type="button" class="row-tag row-tag--overflow"
+                  :disabled="!canEdit" :title="item.tags.slice(5).map(tag => tag.name).join(', ')">+{{ item.tags.length - 5 }}</button>
               </div>
-            </t-tooltip>
-            <div v-else class="row-tag-chips" :ref="(el: any) => setupTagChipsObserver(el, item.id, (item.tags || []).length)"
-              :class="{ 'is-clickable': canEdit }" @click.stop="canEdit && emit('tag-edit', item)">
-              <t-tag v-for="tag in (item.tags || []).slice(0, getTagLimit(item.id))" :key="tag.id" size="small"
-                variant="light-outline" class="row-tag">
-                {{ tag.name }}
-              </t-tag>
+              <button v-else-if="canEdit" type="button" class="row-tag-add">
+                <t-icon name="add" size="12px" />
+                {{ t('knowledgeBase.tagAddAction') }}
+              </button>
             </div>
-          </template>
-          <span v-else class="row-tag-chips is-clickable" @click.stop="canEdit && emit('tag-edit', item)">
-            <span class="row-tag-add">+ {{ t('knowledgeBase.tagLabel') }}</span>
-          </span>
+          </KnowledgeTagPopover>
         </div>
 
-        <div class="cell cell-source">
-          <t-icon class="row-source-icon" :name="getSourceInfo(item).icon" />
-          <span class="row-source-label">{{ getSourceInfo(item).label }}</span>
-        </div>
-
-        <div class="cell cell-size">
-          <span class="row-mono">{{ formatFileSize(item.file_size) || '--' }}</span>
-        </div>
-
-        <div class="cell cell-status">
+        <div class="cell cell-status" role="cell">
           <template v-if="statusByRow.get(item.id) as StatusInfo | undefined">
             <t-tag v-if="statusByRow.get(item.id)!.label !== '--'" size="small" :theme="statusByRow.get(item.id)!.theme"
-              variant="light-outline" class="row-status-tag">
+              variant="light" class="row-status-tag" :class="`status-${statusByRow.get(item.id)!.theme}`"
+              :title="statusByRow.get(item.id)!.hint">
               <template v-if="statusByRow.get(item.id)!.icon" #icon>
                 <t-icon :name="statusByRow.get(item.id)!.icon!"
                   :class="{ 'icon-spin': statusByRow.get(item.id)!.spin }" />
@@ -374,15 +345,11 @@ const handleAction = (action: 'download' | 'edit' | 'reparse' | 'cancel-parse' |
           </template>
         </div>
 
-        <div class="cell cell-time">
-          <span class="row-mono">{{ formatTime(item.updated_at) }}</span>
-        </div>
-
-        <div class="cell cell-actions" v-if="canEdit" @click.stop>
-          <t-popup placement="bottom-right" trigger="click" destroy-on-close overlay-class-name="card-more"
+        <div class="cell cell-actions" role="cell" v-if="canEdit" @click.stop>
+          <t-popup :visible="moreOpen === item.id" placement="bottom-right" trigger="click" destroy-on-close overlay-class-name="card-more"
             :on-visible-change="(v: boolean) => onMoreVisible(item.id, v)">
             <button class="row-more-btn" :class="{ active: moreOpen === item.id }" type="button"
-              :aria-label="t('knowledgeBase.columnActions')">
+              :aria-label="`${item.file_name} · ${t('knowledgeBase.columnActions')}`" :aria-expanded="moreOpen === item.id">
               <t-icon name="more" size="16px" />
             </button>
             <template #content>
@@ -399,6 +366,10 @@ const handleAction = (action: 'download' | 'edit' | 'reparse' | 'cancel-parse' |
 
               <!-- Normal menu -->
               <div v-else-if="moveMenuMode === 'normal'" class="card-menu">
+                <button type="button" class="card-menu-item row-tag-menu-action" @click.stop="moreOpen = null; tagEditorId = item.id">
+                  <t-icon name="discount" class="icon" />
+                  <span>{{ t('knowledgeBase.tagEditDialogHeading') }}</span>
+                </button>
                 <DocumentActionMenu
                   :item="item"
                   :can-download="canDownload"
@@ -499,30 +470,19 @@ const handleAction = (action: 'download' | 'edit' | 'reparse' | 'cancel-parse' |
   display: flex;
   flex-direction: column;
   width: 100%;
-  background: var(--td-bg-color-container);
-  border: 1px solid var(--td-component-stroke);
-  border-radius: 9px;
+  background: transparent;
   /* 不能用 overflow:hidden，否则表头 position:sticky 相对外层滚动区失效 */
   overflow: visible;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
   animation: doc-list-fade-in 0.32s ease-out;
 }
 
 .doc-list-header,
 .doc-list-row {
   display: grid;
-  grid-template-columns:
-    44px // checkbox
-    minmax(260px, 2.6fr) // name
-    minmax(100px, 0.9fr) // tag
-    minmax(96px, 0.8fr) // source
-    96px // size
-    minmax(96px, 0.7fr) // status
-    140px // updated_at
-    48px; // actions
+  grid-template-columns: 24px minmax(0, 1fr) minmax(180px, 24%) 100px 28px;
   align-items: center;
-  column-gap: 0;
-  padding: 0 16px;
+  column-gap: 12px;
+  padding: 0 8px;
 }
 
 .doc-list-sticky-sentinel {
@@ -538,15 +498,13 @@ const handleAction = (action: 'download' | 'edit' | 'reparse' | 'cancel-parse' |
   top: 0;
   z-index: 3;
   height: 40px;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   font-weight: 500;
   font-family: var(--app-font-family);
   color: var(--td-text-color-secondary);
-  background: var(--td-bg-color-secondarycontainer);
-  border-bottom: 1px solid var(--td-component-stroke);
-  border-radius: 8px 8px 0 0;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
-  transition: border-radius 0.15s ease, box-shadow 0.2s ease;
+  background: var(--td-bg-color-container);
+  border-bottom: 0;
+  transition: border-radius var(--app-motion-fast) ease, box-shadow var(--app-motion-base) ease;
 
   &.is-stuck {
     border-radius: 0;
@@ -557,28 +515,28 @@ const handleAction = (action: 'download' | 'edit' | 'reparse' | 'cancel-parse' |
 .doc-list-body {
   display: flex;
   flex-direction: column;
-  border-radius: 0 0 8px 8px;
-  overflow: hidden;
+  gap: 2px;
+  padding: 6px 0 72px;
 }
 
 .doc-list-row {
   position: relative;
-  min-height: 60px;
-  font-size: 13px;
+  min-height: 68px;
+  padding-top: 10px;
+  padding-bottom: 10px;
+  box-sizing: border-box;
+  border-radius: var(--app-radius-md);
+  font-size: var(--app-text-md);
   color: var(--td-text-color-primary);
-  border-bottom: 1px solid var(--td-component-stroke);
   cursor: pointer;
-  transition: background-color 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
-
-  &:last-child {
-    border-bottom: 0;
-  }
+  transition: background-color var(--app-motion-base) ease, box-shadow var(--app-motion-base) ease, border-color var(--app-motion-base) ease;
 
   &:hover:not(.selected),
   &.menu-open:not(.selected) {
     background: var(--td-bg-color-secondarycontainer);
   }
 
+  &:focus-within .row-more-btn,
   &:hover .row-more-btn,
   &.menu-open .row-more-btn,
   &.selected .row-more-btn {
@@ -590,7 +548,7 @@ const handleAction = (action: 'download' | 'edit' | 'reparse' | 'cancel-parse' |
   display: flex;
   align-items: center;
   min-width: 0;
-  padding: 0 8px;
+  padding: 0;
 
   &:first-child {
     padding-left: 0;
@@ -607,13 +565,8 @@ const handleAction = (action: 'download' | 'edit' | 'reparse' | 'cancel-parse' |
 }
 
 .cell-name {
-  gap: 10px;
+  gap: 12px;
   font-family: var(--app-font-family);
-}
-
-.cell-size,
-.cell-time {
-  justify-content: flex-end;
 }
 
 .cell-actions {
@@ -647,14 +600,14 @@ const handleAction = (action: 'download' | 'edit' | 'reparse' | 'cancel-parse' |
 
 .row-file-icon-wrap {
   flex-shrink: 0;
-  width: 28px;
-  height: 28px;
-  border-radius: 6px;
+  width: 32px;
+  height: 38px;
+  border-radius: var(--app-radius-sm);
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 16px;
-  background: var(--td-bg-color-secondarycontainer);
+  font-size: 26px;
+  background: transparent;
   color: var(--td-text-color-secondary);
 }
 
@@ -663,7 +616,7 @@ const handleAction = (action: 'download' | 'edit' | 'reparse' | 'cancel-parse' |
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 4px;
 }
 
 .row-file-name {
@@ -671,38 +624,29 @@ const handleAction = (action: 'download' | 'edit' | 'reparse' | 'cancel-parse' |
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  font-size: 14px;
-  font-weight: 600;
-  letter-spacing: 0.01em;
+  font-size: var(--app-text-base);
+  font-weight: 500;
+  line-height: 1.4;
+  text-align: left;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  font-family: inherit;
+  cursor: pointer;
   color: var(--td-text-color-primary);
 }
 
-.row-file-desc {
+.row-file-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-variant-numeric: tabular-nums;
   min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-placeholder);
-}
-
-.doc-list-row--folder {
-  cursor: pointer;
-
-  .row-file-name {
-    font-weight: 500;
-  }
-}
-
-.row-folder-icon {
-  color: var(--td-brand-color);
-}
-
-.row-folder-meta,
-.row-folder-chevron {
-  font-size: 12px;
-  color: var(--td-text-color-placeholder);
-  transition: color 0.15s ease;
 }
 
 .row-file-folder {
@@ -716,9 +660,9 @@ const handleAction = (action: 'download' | 'edit' | 'reparse' | 'cancel-parse' |
   background: transparent;
   color: var(--td-text-color-placeholder);
   font-family: var(--app-font-family);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   cursor: pointer;
-  transition: color 0.15s ease;
+  transition: color var(--app-motion-fast) ease;
 
   &:hover {
     color: var(--td-brand-color);
@@ -733,116 +677,79 @@ const handleAction = (action: 'download' | 'edit' | 'reparse' | 'cancel-parse' |
 
   .t-icon {
     flex: 0 0 auto;
-    font-size: 13px;
-  }
-}
-
-.cell-source {
-  gap: 6px;
-  min-width: 0;
-}
-
-.row-source-icon {
-  flex-shrink: 0;
-  font-size: 14px;
-  color: var(--td-text-color-secondary);
-}
-
-.row-source-label {
-  min-width: 0;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-size: 12px;
-  color: var(--td-text-color-secondary);
-}
-
-.row-tag {
-  max-width: 100%;
-
-  :deep(.t-tag__text) {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    max-width: 120px;
-    display: inline-block;
-  }
-}
-
-.row-tag-chips {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  flex-wrap: nowrap;
-
-  &.is-clickable {
-    cursor: pointer;
-  }
-}
-
-.row-tag-overflow {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  height: 20px;
-  min-width: 20px;
-  padding: 0 4px;
-  border-radius: 999px;
-  border: 1px solid var(--td-component-stroke);
-  color: var(--td-text-color-placeholder);
-  font-size: 10px;
-  line-height: 1;
-  cursor: pointer;
-  transition: all 0.2s ease;
-
-  &:hover {
-    border-color: var(--td-brand-color);
-    color: var(--td-brand-color);
-    background: var(--td-bg-color-secondarycontainer);
-  }
-}
-
-.row-tag-add {
-  font-size: 11px;
-  color: var(--td-text-color-placeholder);
-  border: 1px dashed var(--td-component-stroke);
-  border-radius: 999px;
-  padding: 0 6px;
-  height: 20px;
-  display: inline-flex;
-  align-items: center;
-  white-space: nowrap;
-
-  &:hover {
-    border-color: var(--td-brand-color);
-    color: var(--td-brand-color);
-    background: var(--td-bg-color-secondarycontainer);
-    border-style: solid;
+    font-size: var(--app-text-md);
   }
 }
 
 .row-muted {
-  color: var(--td-text-color-disabled, #bbb);
+  color: var(--td-text-color-disabled);
 }
 
-.row-mono {
-  font-variant-numeric: tabular-nums;
-  font-size: 12px;
-  font-family: var(--app-font-family);
+.row-status-tag {
+  background: transparent;
+  border: 0;
+  padding: 0;
   color: var(--td-text-color-secondary);
+  &.status-success::before { content: ''; width: 5px; height: 5px; margin-right: 6px; border-radius: 50%; background: var(--td-success-color); }
+  &.status-danger { color: var(--td-error-color); }
+  &.status-warning { color: var(--td-warning-color); }
+  &.status-primary { color: var(--td-brand-color); }
+  &.status-default { color: var(--td-text-color-placeholder); }
 }
+.row-title-line { display: flex; align-items: center; min-width: 0; }
+.row-tags { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; min-width: 0; width: 100%; }
+.row-tag {
+  flex: 0 0 auto;
+  max-width: min(180px, 100%);
+  box-sizing: border-box;
+  padding: 2px 7px;
+  border: 0;
+  border-radius: 5px;
+  background: var(--td-bg-color-secondarycontainer);
+  color: var(--td-text-color-secondary);
+  font: inherit;
+  font-size: var(--app-text-sm);
+  line-height: 18px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+  &:disabled { cursor: default; }
+  &:not(:disabled):hover { color: var(--td-brand-color); background: var(--td-brand-color-light); }
+  &--overflow { background: transparent; color: var(--td-text-color-placeholder); }
+}
+.row-tag-add {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  border: 1px dashed var(--td-component-stroke);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--td-text-color-placeholder);
+  font: inherit;
+  font-size: var(--app-text-sm);
+  line-height: 18px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color var(--app-motion-fast) ease, border-color var(--app-motion-fast) ease, background var(--app-motion-fast) ease;
 
+  &:hover {
+    color: var(--td-brand-color);
+    border-color: var(--td-brand-color);
+    background: var(--td-brand-color-light);
+  }
+}
+.row-tag-menu-action {
+  width: 100%; border: 0; background: transparent; text-align: left; font-family: inherit; cursor: pointer;
+  &:hover { background: var(--td-bg-color-container-hover); }
+}
 .row-status-tag :deep(.t-icon) {
   margin-right: 2px;
 }
 
 .icon-spin {
-  animation: doc-list-spin 0.9s linear infinite;
-}
-
-@keyframes doc-list-spin {
-  to {
-    transform: rotate(360deg);
-  }
+  animation: wk-spin 0.9s linear infinite;
 }
 
 .row-more-btn {
@@ -857,7 +764,7 @@ const handleAction = (action: 'download' | 'edit' | 'reparse' | 'cancel-parse' |
   color: var(--td-text-color-secondary);
   cursor: pointer;
   opacity: 0;
-  transition: opacity 0.15s ease, background-color 0.15s ease, color 0.15s ease;
+  transition: opacity var(--app-motion-fast) ease, background-color var(--app-motion-fast) ease, color var(--app-motion-fast) ease;
 
   &:hover {
     background: var(--td-component-stroke);
@@ -871,4 +778,39 @@ const handleAction = (action: 'download' | 'edit' | 'reparse' | 'cancel-parse' |
   }
 }
 
+.row-source {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.meta-sep { opacity: 0.6; }
+.doc-list-row.selected { background: var(--app-selection-bg); }
+.row-file-name:focus-visible,
+.row-file-folder:focus-visible,
+.row-more-btn:focus-visible,
+.row-tag:focus-visible,
+.row-tag-add:focus-visible {
+  outline: 2px solid var(--app-focus-border);
+  outline-offset: 3px;
+  border-radius: var(--app-radius-xs);
+}
+@container doc-card-area (max-width: 720px) {
+  .doc-list-header, .doc-list-row {
+    grid-template-columns: 24px minmax(0, 1fr) 100px 28px;
+    column-gap: 8px;
+  }
+  .doc-list-header .cell-tags { display: none; }
+  .doc-list-row .cell-tags { grid-column: 2; grid-row: 2; padding-left: 44px; }
+  .row-tags { padding-top: 6px; }
+  .row-tag-add { margin-top: 6px; }
+  .cell-status { grid-column: 3; grid-row: 1; }
+  .cell-actions { grid-column: 4; grid-row: 1; }
+  .row-file-meta { flex-wrap: wrap; gap: 2px 6px; }
+}
+@media (hover: none) {
+  .row-more-btn { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .doc-list-view, .icon-spin { animation: none; }
+}
 </style>

@@ -1,9 +1,9 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
-const versionFile = resolve(import.meta.dirname, '../../VERSION')
+const versionFile = resolve(import.meta.dirname, '../VERSION')
 
-/** 仓库根目录 VERSION 文件中的发布版本（与 scripts/get_version.sh 同源） */
+/** website-docs/VERSION 中的站点发布版本，独立构建时无需读取父目录 */
 export function getRepoVersion(): string {
   if (!existsSync(versionFile)) return 'unknown'
   return readFileSync(versionFile, 'utf-8').trim() || 'unknown'

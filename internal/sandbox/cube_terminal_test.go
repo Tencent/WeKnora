@@ -3,6 +3,7 @@ package sandbox
 import (
 	"bytes"
 	"context"
+	"net/http"
 	"sync"
 	"testing"
 	"time"
@@ -97,6 +98,62 @@ func TestCubeOpenTerminalRefreshesSandboxTTL(t *testing.T) {
 	require.Eventually(t, func() bool {
 		return mock.timeoutPOSTs.Load() >= 1
 	}, 2*time.Second, 20*time.Millisecond, "expected SetTimeout while the PTY is open")
+}
+
+func TestCubeDialDesktopRefreshesSandboxTTL(t *testing.T) {
+	// Desktop traffic is websockify on 6080, not envd, so CubeMaster never
+	// sees it. SetTimeout must follow the relay lifetime (WithoutCancel),
+	// not DialDesktop's request ctx — that ctx is cancelled on handshake
+	// abort and must not take the refresh loop with it.
+	prevMin := terminalTTLRefreshMin
+	terminalTTLRefreshMin = 40 * time.Millisecond
+	t.Cleanup(func() { terminalTTLRefreshMin = prevMin })
+
+	mock := newCubeMockServer(t)
+	var seen http.Request
+	proxy := desktopEchoServer(t, &seen)
+	t.Cleanup(proxy.Close)
+
+	cfg := testConfig(t, mock)
+	cfg.CubeProxyURL = proxy.URL
+	cfg.CubeSandboxTTL = 3 * time.Second
+	cfg.CubeHTTPTimeout = 5 * time.Second
+	policy := OutboundURLPolicy{AllowPrivate: true}
+	pool := NewSandboxGatewayTransportPoolWithPolicy(
+		NewGuardedTransportWithPolicy(policy),
+		policy,
+	)
+	client, err := NewCubeRemoteClientWithPool(cfg, pool)
+	require.NoError(t, err)
+
+	dialCtx, dialCancel := context.WithCancel(context.Background())
+	handle, err := client.Create(dialCtx, RemoteCreateRequest{
+		TemplateID: "template-a",
+		Timeout: RemoteTimeoutPolicy{
+			Mode:   RemoteTimeoutExplicit,
+			Value:  time.Minute,
+			Action: RemoteOnTimeoutKill,
+		},
+	})
+	require.NoError(t, err)
+
+	conn, err := client.DialDesktop(dialCtx, handle, RemoteDesktopOptions{})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close() })
+	dialCancel()
+
+	require.Never(t, func() bool {
+		return mock.timeoutPOSTs.Load() >= 1
+	}, 150*time.Millisecond, 20*time.Millisecond,
+		"DialDesktop must not bind SetTimeout to the request context")
+
+	ttlCtx, ttlCancel := context.WithCancel(context.Background())
+	t.Cleanup(ttlCancel)
+	client.StartDesktopTTLRefresh(ttlCtx, handle)
+
+	require.Eventually(t, func() bool {
+		return mock.timeoutPOSTs.Load() >= 1
+	}, 2*time.Second, 20*time.Millisecond, "expected SetTimeout on the relay lifetime ctx")
 }
 
 func TestCubeOpenTerminalReattachesByPID(t *testing.T) {

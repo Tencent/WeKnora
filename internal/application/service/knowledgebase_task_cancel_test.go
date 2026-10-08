@@ -35,8 +35,16 @@ func (r *recordingKBTaskInspector) CancelTasksForKnowledge(
 	return 0, 0, nil
 }
 
+func (r *recordingKBTaskInspector) HasQueuedDeleteTasksForKnowledge(context.Context, string) (bool, error) {
+	return false, nil
+}
+
 func (r *recordingKBTaskInspector) HasQueuedTasksForKnowledge(context.Context, string) (bool, error) {
 	return false, nil
+}
+
+func (r *recordingKBTaskInspector) QueuedKnowledgeIDs(context.Context) (map[string]struct{}, error) {
+	return map[string]struct{}{}, nil
 }
 
 func (r *recordingKBTaskInspector) QueueStats(context.Context) ([]types.QueueStat, bool, error) {

@@ -48,7 +48,7 @@ fn rewrite_blocks(blocks: &mut [Block], urls: &[Option<String>]) {
                 }
             }
             Block::BlockQuote(inner) => rewrite_blocks(inner, urls),
-            Block::CodeBlock { .. } | Block::Rule => {}
+            Block::CodeBlock { .. } | Block::Rule | Block::Math(_) => {}
         }
     }
 }
@@ -69,6 +69,15 @@ fn rewrite_inlines(inlines: &mut [Inline], urls: &[Option<String>]) {
     }
 }
 
+/// Markdown file extension for one asset media type.
+///
+/// This table is one half of a contract with the Go side. The Markdown link
+/// written here (`images/image-N<ext>`) is looked up by
+/// `internal/infrastructure/docparser/image_resolver.go` in a map keyed by the
+/// `ImageRef.OriginalRef` that `internal/infrastructure/docparser/anydoc/
+/// backend_cgo.go` builds from the same media type. The two must agree
+/// character for character or the image is dropped, so `extensionFor` there
+/// lists exactly the same media types with exactly the same extensions.
 fn extension_for(media_type: &str) -> &'static str {
     match media_type.to_ascii_lowercase().as_str() {
         "image/jpeg" | "image/jpg" => ".jpg",
@@ -78,6 +87,13 @@ fn extension_for(media_type: &str) -> &'static str {
         "image/bmp" => ".bmp",
         "image/tiff" => ".tiff",
         "image/svg+xml" => ".svg",
+        // Vector metafiles. `shared::assets::media_type_for` and the OfficeArt
+        // blip decoder both emit these for `.emf`/`.wmf` parts. They used to
+        // fall through to ".bin" here while the Go side asked the platform MIME
+        // registry and got ".emf"/".wmf", so the link never matched the ref and
+        // the image never reached storage.
+        "image/emf" => ".emf",
+        "image/wmf" => ".wmf",
         _ => ".bin",
     }
 }

@@ -423,8 +423,9 @@ func TestBuildKNNQuery_AppliesMinScoreWhenThreshold(t *testing.T) {
 	}
 	var parsed map[string]any
 	_ = json.Unmarshal(body, &parsed)
-	if ms, ok := parsed["min_score"]; !ok || ms.(float64) != 0.75 {
-		t.Errorf("min_score: want 0.75, got %v (present=%v)", ms, ok)
+	// A cosine threshold of 0.75 is (1 + 0.75) / 2 on the k-NN plugin's scale.
+	if ms, ok := parsed["min_score"]; !ok || ms.(float64) != 0.875 {
+		t.Errorf("min_score: want 0.875, got %v (present=%v)", ms, ok)
 	}
 }
 

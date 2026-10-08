@@ -24,19 +24,20 @@ func TruncateRunes(s string, maxRunes int) string {
 // SummarizeRetrieveOutput builds Langfuse output for the retrieve span.
 func SummarizeRetrieveOutput(results []*types.RetrieveResult) map[string]interface{} {
 	out := map[string]interface{}{
-		"total_hits":   0,
-		"vector_hits":  0,
-		"keyword_hits": 0,
-		"group_count":  len(results),
-		"by_retriever": []map[string]interface{}{},
-		"top_hits":     []map[string]interface{}{},
+		"total_hits":            0,
+		"vector_hits":           0,
+		"keyword_hits":          0,
+		"group_count":           len(results),
+		"by_retriever":          []map[string]interface{}{},
+		"top_hits":              []map[string]interface{}{},
+		"top_hits_by_retriever": []map[string]interface{}{},
+		"top_hits_strategy":     "round_robin_by_retriever",
 	}
 	if len(results) == 0 {
 		return out
 	}
 
 	byRetriever := make([]map[string]interface{}, 0, len(results))
-	var all []*types.IndexWithScore
 	for _, rr := range results {
 		if rr == nil {
 			continue
@@ -53,10 +54,11 @@ func SummarizeRetrieveOutput(results []*types.RetrieveResult) map[string]interfa
 			"retriever": string(rr.RetrieverType),
 			"count":     count,
 		})
-		all = append(all, rr.Results...)
 	}
 	out["by_retriever"] = byRetriever
-	out["top_hits"] = summarizeIndexHits(all, defaultHitPreviewLimit)
+	topHits, topHitsByRetriever := summarizeRetrieveHits(results, defaultHitPreviewLimit)
+	out["top_hits"] = topHits
+	out["top_hits_by_retriever"] = topHitsByRetriever
 	return out
 }
 
@@ -162,6 +164,101 @@ func summarizeIndexHits(hits []*types.IndexWithScore, limit int) []map[string]in
 		})
 	}
 	return out
+}
+
+type retrieveHitGroup struct {
+	engine    types.RetrieverEngineType
+	retriever types.RetrieverType
+	hits      []*types.IndexWithScore
+}
+
+type retrieveHitRef struct {
+	engine    types.RetrieverEngineType
+	retriever types.RetrieverType
+	hit       *types.IndexWithScore
+}
+
+// summarizeRetrieveHits keeps the raw retrieve trace useful when score
+// scales differ between retrievers. Vector similarity and BM25 scores are
+// not directly comparable, so a global score sort can hide one retriever
+// completely. The flat top_hits list is therefore selected round-robin from
+// each retriever group, while top_hits_by_retriever preserves each group's
+// own score ordering for detailed inspection.
+func summarizeRetrieveHits(
+	results []*types.RetrieveResult,
+	limit int,
+) ([]map[string]interface{}, []map[string]interface{}) {
+	if limit <= 0 {
+		limit = defaultHitPreviewLimit
+	}
+
+	groups := make([]retrieveHitGroup, 0, len(results))
+	for _, rr := range results {
+		if rr == nil || len(rr.Results) == 0 {
+			continue
+		}
+		hits := append([]*types.IndexWithScore(nil), rr.Results...)
+		sort.SliceStable(hits, func(i, j int) bool {
+			if hits[i].Score != hits[j].Score {
+				return hits[i].Score > hits[j].Score
+			}
+			return hits[i].ChunkID < hits[j].ChunkID
+		})
+		groups = append(groups, retrieveHitGroup{
+			engine:    rr.RetrieverEngineType,
+			retriever: rr.RetrieverType,
+			hits:      hits,
+		})
+	}
+
+	byRetriever := make([]map[string]interface{}, 0, len(groups))
+	refs := make([]retrieveHitRef, 0, minInt(limit, len(results)))
+	for _, group := range groups {
+		byRetriever = append(byRetriever, map[string]interface{}{
+			"engine":    string(group.engine),
+			"retriever": string(group.retriever),
+			"count":     len(group.hits),
+			"top_hits":  summarizeIndexHits(group.hits, limit),
+		})
+	}
+
+	for offset := 0; len(refs) < limit; offset++ {
+		added := false
+		for _, group := range groups {
+			if offset >= len(group.hits) {
+				continue
+			}
+			refs = append(refs, retrieveHitRef{
+				engine:    group.engine,
+				retriever: group.retriever,
+				hit:       group.hits[offset],
+			})
+			added = true
+			if len(refs) == limit {
+				break
+			}
+		}
+		if !added {
+			break
+		}
+	}
+
+	topHits := make([]map[string]interface{}, 0, len(refs))
+	for i, ref := range refs {
+		hit := ref.hit
+		topHits = append(topHits, map[string]interface{}{
+			"rank":              i + 1,
+			"chunk_id":          hit.ChunkID,
+			"knowledge_id":      hit.KnowledgeID,
+			"knowledge_base_id": hit.KnowledgeBaseID,
+			"score":             fmt.Sprintf("%.4f", hit.Score),
+			"match_type":        hit.MatchType,
+			"engine":            string(ref.engine),
+			"retriever":         string(ref.retriever),
+			"preview":           TruncateRunes(hit.Content, 160),
+		})
+	}
+	return topHits, byRetriever
 }
 
 // SummarizePassagePreviews builds rerank passage previews aligned with candidates.

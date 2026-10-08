@@ -411,6 +411,25 @@ func TestResolveEffectiveConfigTerminalIdleFallsBackToBuiltIn(t *testing.T) {
 	require.Equal(t, DefaultTerminalIdleDisconnect, got.TerminalIdleDisconnect)
 }
 
+func TestResolveEffectiveConfigCarriesDesktopEnabled(t *testing.T) {
+	tenantCfg := completeCubeTenantConfig()
+	tenantCfg.DesktopEnabled = true
+
+	effective, err := ResolveEffectiveConfig(tenantCfg, DefaultConfig())
+	require.NoError(t, err)
+	require.True(t, effective.DesktopEnabled,
+		"DesktopEnabled must reach the runtime Config; the desktop endpoint reads it")
+}
+
+func TestResolveEffectiveConfigDesktopDisabledByDefault(t *testing.T) {
+	tenantCfg := completeCubeTenantConfig()
+
+	effective, err := ResolveEffectiveConfig(tenantCfg, DefaultConfig())
+	require.NoError(t, err)
+	require.False(t, effective.DesktopEnabled,
+		"desktop must be explicit opt-in: the image costs +1.5GB per sandbox")
+}
+
 // Tuning fields fall back to the built-in constants, never to the deployment's:
 // "inherits nothing" would be a much weaker rule with an exception here.
 func TestResolveEffectiveConfigTuningFallsBackToBuiltIns(t *testing.T) {
@@ -895,4 +914,15 @@ func TestSkillImageFingerprintIsStableAndDiscriminating(t *testing.T) {
 	require.Equal(t, a, SkillImageFingerprint("cube", "key-1", "https://a.example.com"))
 	require.NotEqual(t, a, SkillImageFingerprint("cube", "key-2", "https://a.example.com"))
 	require.NotEqual(t, a, SkillImageFingerprint("e2b", "key-1", "https://a.example.com"))
+}
+
+func TestParseSandboxTypeAcceptsHost(t *testing.T) {
+	got, err := ParseSandboxType("host")
+	require.NoError(t, err)
+	require.Equal(t, SandboxTypeHost, got)
+}
+
+// host carries no endpoint or credential, so a bare config is complete.
+func TestHostConfigNeedsNoProviderFields(t *testing.T) {
+	require.Empty(t, MissingRequiredFields(&Config{Type: SandboxTypeHost}))
 }

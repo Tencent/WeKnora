@@ -88,6 +88,8 @@ type WikiPageService interface {
 	GetStats(ctx context.Context, kbID string) (*types.WikiStats, error)
 
 	// RebuildLinks re-parses all pages and rebuilds bidirectional link references.
+	// It is best-effort: pages that could not be written are skipped, and any
+	// such failure is returned as a joined error counting the failed pages.
 	RebuildLinks(ctx context.Context, kbID string) error
 
 	// InjectCrossLinks scans specified pages and injects [[wiki-links]] for mentions
@@ -216,6 +218,10 @@ type WikiPageService interface {
 	// SearchPages performs full-text search over wiki pages.
 	SearchPages(ctx context.Context, kbID string, query string, limit int) ([]*types.WikiPage, error)
 
+	// SearchPagesAcross searches wiki pages across multiple knowledge bases
+	// with the same ranking as SearchPages, then returns a global top-N.
+	SearchPagesAcross(ctx context.Context, kbIDs []string, query string, limit int) ([]*types.WikiPage, error)
+
 	// ListRevisions returns the stored historical snapshots for a page
 	// (newest first, content omitted) plus the total snapshot count and the
 	// page's current version. The current version itself has no revision
@@ -237,8 +243,8 @@ type WikiPageService interface {
 	// ListIssues retrieves issues for a knowledge base, optionally filtered by slug and status.
 	ListIssues(ctx context.Context, kbID string, slug string, status string) ([]*types.WikiPageIssue, error)
 
-	// UpdateIssueStatus updates the status of an issue (e.g. pending -> resolved/ignored).
-	UpdateIssueStatus(ctx context.Context, issueID string, status string) error
+	// UpdateIssueStatus updates the status of an issue of kbID (e.g. pending -> resolved/ignored).
+	UpdateIssueStatus(ctx context.Context, kbID string, issueID string, status string) error
 }
 
 // WikiPageRepository defines the wiki page data persistence interface.
@@ -392,6 +398,10 @@ type WikiPageRepository interface {
 	// Search performs full-text search on wiki pages within a knowledge base.
 	Search(ctx context.Context, kbID string, query string, limit int) ([]*types.WikiPage, error)
 
+	// SearchAcross performs the same full-text search across multiple
+	// knowledge bases, then returns a global top-N by match_rank.
+	SearchAcross(ctx context.Context, kbIDs []string, query string, limit int) ([]*types.WikiPage, error)
+
 	// CountByType returns page counts grouped by type for a knowledge base.
 	CountByType(ctx context.Context, kbID string) (map[string]int64, error)
 
@@ -418,12 +428,38 @@ type WikiPageRepository interface {
 	// DeleteRevisionsByPage hard-deletes a page's entire snapshot history.
 	DeleteRevisionsByPage(ctx context.Context, pageID string) error
 
+	// DeleteByKnowledgeBaseID soft-deletes all wiki pages for tenantID+kbID.
+	// Used by KB delete cleanup to batch-soft-delete every page without walking
+	// the folder tree. Bypasses the per-page chunk/link reconciliation that
+	// DeletePage does — the whole KB is going away, so cross-link cleanup is
+	// the KB delete flow's responsibility. tenantID is required so a tampered
+	// delete payload cannot wipe another tenant's wiki by kbID alone.
+	DeleteByKnowledgeBaseID(ctx context.Context, tenantID uint64, kbID string) error
+
+	// DeleteFoldersByKnowledgeBaseID soft-deletes all wiki folders for
+	// tenantID+kbID. Unlike DeleteFolder this does NOT enforce the emptiness
+	// guard — the KB is being deleted, so non-empty folders must go too.
+	DeleteFoldersByKnowledgeBaseID(ctx context.Context, tenantID uint64, kbID string) error
+
+	// DeleteRevisionsByKnowledgeBaseID hard-deletes all wiki page revisions
+	// for tenantID+kbID. Revisions have no deleted_at column (they are
+	// immutable snapshots, not soft-deletable rows), so this is a physical
+	// DELETE — same semantics as DeleteRevisionsByPage but scoped to the
+	// whole KB.
+	DeleteRevisionsByKnowledgeBaseID(ctx context.Context, tenantID uint64, kbID string) error
+
+	// DeleteIssuesByKnowledgeBaseID soft-deletes all wiki page issues for
+	// tenantID+kbID. Issues reference the KB and must be cleaned up
+	// alongside pages to avoid orphans.
+	DeleteIssuesByKnowledgeBaseID(ctx context.Context, tenantID uint64, kbID string) error
+
 	// CreateIssue inserts a new wiki page issue record.
 	CreateIssue(ctx context.Context, issue *types.WikiPageIssue) error
 
 	// ListIssues retrieves issues with optional filtering by slug and status.
 	ListIssues(ctx context.Context, kbID string, slug string, status string) ([]*types.WikiPageIssue, error)
 
-	// UpdateIssueStatus updates an issue's status.
-	UpdateIssueStatus(ctx context.Context, issueID string, status string) error
+	// UpdateIssueStatus updates the status of an issue of kbID; ErrWikiIssueNotFound
+	// when no such issue belongs to it.
+	UpdateIssueStatus(ctx context.Context, kbID string, issueID string, status string) error
 }

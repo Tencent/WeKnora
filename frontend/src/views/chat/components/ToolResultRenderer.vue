@@ -162,7 +162,7 @@ const toolArguments = computed(() => props.arguments || {});
     padding: 0 4px;
 
     .fallback-label {
-      font-size: 12px;
+      font-size: var(--app-text-sm);
       color: var(--td-text-color-secondary);
       font-weight: 500;
       line-height: 1.5;
@@ -173,14 +173,14 @@ const toolArguments = computed(() => props.arguments || {});
     position: relative;
     background: var(--td-bg-color-secondarycontainer);
     border: 1px solid var(--td-component-stroke);
-    border-radius: 6px;
+    border-radius: var(--app-radius-sm);
     overflow: hidden;
     margin: 0;
     padding: 0;
 
     .detail-output {
       font-family: var(--app-font-family-mono);
-      font-size: 12px;
+      font-size: var(--app-text-sm);
       color: var(--td-text-color-primary);
       padding: 16px;
       margin: 0;
@@ -201,12 +201,12 @@ const toolArguments = computed(() => props.arguments || {});
 
       &::-webkit-scrollbar-track {
         background: var(--td-bg-color-secondarycontainer);
-        border-radius: 4px;
+        border-radius: var(--app-radius-xs);
       }
 
       &::-webkit-scrollbar-thumb {
         background: var(--td-component-border);
-        border-radius: 4px;
+        border-radius: var(--app-radius-xs);
 
         &:hover {
           background: var(--td-text-color-placeholder);

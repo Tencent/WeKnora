@@ -92,10 +92,6 @@
           <t-icon name="control-platform" class="menu-icon" />
           <span>{{ $t('settings.modelManagement') }}</span>
         </div>
-        <div v-if="canManageSkills" class="menu-item" @click="handleQuickNav('skills')">
-          <t-icon :name="SKILL_ICON" class="menu-icon" />
-          <span>{{ $t('settings.skills.title') }}</span>
-        </div>
         <div class="menu-divider"></div>
         <div class="menu-item" @click="handleSettings">
           <t-icon name="setting" class="menu-icon" />
@@ -206,7 +202,7 @@ import { useRouter } from 'vue-router'
 import { useUIStore } from '@/stores/ui'
 import { useAuthStore } from '@/stores/auth'
 import { MessagePlugin } from 'tdesign-vue-next'
-import { getCurrentUser, logout as logoutApi, userInfoFromApi } from '@/api/auth'
+import { logout as logoutApi } from '@/api/auth'
 import { useI18n } from 'vue-i18n'
 import CreateTenantDialog from '@/components/CreateTenantDialog.vue'
 import {
@@ -219,8 +215,7 @@ import { useRoleLabel, useHomeTenant } from '@/composables/useRoleLabel'
 import { getRootZoom, rectToCssPx, cssViewportSize } from '@/utils/zoom'
 import { openNewUserGuide } from '@/config/contextualGuides'
 import { SETTINGS_MANAGEMENT_SHORTCUT_MIN_ROLE } from '@/config/settingsAccess'
-import { SKILL_ICON } from '@/types/mention'
-
+import { docsUrl } from '@/utils/docsUrl'
 const { t } = useI18n()
 
 const router = useRouter()
@@ -261,12 +256,6 @@ const canManageModels = computed(() =>
   authStore.isSystemAdmin ||
   authStore.hasRole(SETTINGS_MANAGEMENT_SHORTCUT_MIN_ROLE.models),
 )
-const canManageSkills = computed(() =>
-  authStore.canAccessAllTenants ||
-  authStore.isSystemAdmin ||
-  authStore.hasRole(SETTINGS_MANAGEMENT_SHORTCUT_MIN_ROLE.skills),
-)
-
 const menuRef = ref<HTMLElement>()
 const tenantMenuItemRef = ref<HTMLElement>()
 const menuVisible = ref(false)
@@ -274,12 +263,13 @@ const tenantSubmenuOpen = ref(false)
 const tenantSubmenuStyle = ref<Record<string, string>>({})
 let tenantSubmenuHideTimer: ReturnType<typeof setTimeout> | null = null
 
-// 用户信息
-const userInfo = ref({
-  username: t('common.defaultUser'),
-  email: 'user@example.com',
-  avatar: ''
-})
+// 用户信息直接读 auth store：启动时 main.ts 已用 /auth/me 校准过，
+// 这里不再各自拉一份，避免首屏两次 /auth/me。
+const userInfo = computed(() => ({
+  username: authStore.user?.username || t('common.defaultUser'),
+  email: authStore.user?.email || 'user@example.com',
+  avatar: authStore.user?.avatar || '',
+}))
 
 const userName = computed(() => userInfo.value.username)
 const userEmail = computed(() => userInfo.value.email)
@@ -505,7 +495,7 @@ const reopenGuide = () => {
 
 const openDocs = () => {
   menuVisible.value = false
-  window.open('https://github.com/Tencent/WeKnora/tree/main/docs', '_blank')
+  window.open(docsUrl('home'), '_blank')
 }
 
 // 打开 GitHub
@@ -535,47 +525,13 @@ const handleLogout = async () => {
   router.push('/login')
 }
 
-// 加载用户信息
+// 校准用户信息：本次会话已经用 /auth/me 校准过（main.ts 启动、登录流程）
+// 就直接复用 store；只有自动初始化等没走过 /auth/me 的路径才会真的发请求。
+// 落库逻辑（user / tenant / memberships / capabilities）统一在 auth store 里，
+// 这里不再手写一份字段拷贝。
 const loadUserInfo = async () => {
   try {
-    const response = await getCurrentUser()
-    if (response.success && response.data && response.data.user) {
-      const user = response.data.user
-      userInfo.value = {
-        username: user.username || t('common.info'),
-        email: user.email || 'user@example.com',
-        avatar: user.avatar || ''
-      }
-      // 同时更新 authStore 中的用户信息，确保包含 can_access_all_tenants /
-      // is_system_admin 等所有字段。MUST 走 userInfoFromApi 工厂——历史
-      // 上这里手写字段白名单，每加一个 user 字段都要在 5 个 setUser 调用
-      // 点同步，is_system_admin 就因为漏了这一处导致进入 platform 后
-      // user.value 的字段被 mount 时的 loadUserInfo 静默覆盖回 undefined
-      // （同时污染 localStorage），系统管理入口在 hover 工作空间触发
-      // refreshFromAuthMe 后才出现。新增字段请只改 userInfoFromApi。
-      authStore.setUser(userInfoFromApi(user))
-      // 如果返回了空间信息，也更新空间信息；tenantless 用户（/auth/me
-      // 无 tenant）必须显式清空，否则会残留上一账号/上一会话的空间快照。
-      if (response.data.tenant) {
-        authStore.setTenant({
-          id: String(response.data.tenant.id),
-          name: response.data.tenant.name,
-          owner_id: user.id,
-          created_at: response.data.tenant.created_at,
-          updated_at: response.data.tenant.updated_at
-        })
-      } else {
-        authStore.setTenant(null)
-      }
-      const membershipsSync = response.data.memberships
-      if (Array.isArray(membershipsSync)) {
-        authStore.setMemberships(membershipsSync)
-      }
-      const canCreateTenant = response.data.capabilities?.can_create_tenant
-      if (typeof canCreateTenant === 'boolean') {
-        authStore.setCanCreateTenant(canCreateTenant)
-      }
-    }
+    await authStore.ensureAuthMe()
   } catch (error) {
     console.error('Failed to load user info:', error)
   }
@@ -629,9 +585,9 @@ onUnmounted(() => {
   align-items: center;
   gap: 6px;
   padding: 8px 6px;
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   cursor: pointer;
-  transition: all 0.2s;
+  transition: all var(--app-motion-base);
   background: transparent;
 
   &:hover {
@@ -653,7 +609,7 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: width 0.2s ease, height 0.2s ease;
+  transition: width var(--app-motion-base) ease, height var(--app-motion-base) ease;
 
   img {
     width: 100%;
@@ -663,7 +619,7 @@ onUnmounted(() => {
 
   .avatar-placeholder {
     color: var(--td-text-color-anti);
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     font-weight: 600;
     line-height: 1;
   }
@@ -679,7 +635,7 @@ onUnmounted(() => {
   justify-content: center;
 
   .user-name {
-    font-size: 14px;
+    font-size: var(--app-text-base);
     font-weight: 500;
     color: var(--td-text-color-primary);
     white-space: nowrap;
@@ -688,7 +644,7 @@ onUnmounted(() => {
   }
 
   .user-email {
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     color: var(--td-text-color-secondary);
     white-space: nowrap;
     overflow: hidden;
@@ -696,7 +652,7 @@ onUnmounted(() => {
   }
 
   .user-tenant-name {
-    font-size: 14px;
+    font-size: var(--app-text-base);
     font-weight: 600;
     letter-spacing: -0.01em;
     color: var(--td-text-color-primary);
@@ -712,7 +668,7 @@ onUnmounted(() => {
     gap: 4px;
     margin-top: 0;
     min-width: 0;
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     line-height: 1.35;
     color: var(--td-text-color-secondary);
 
@@ -741,10 +697,10 @@ onUnmounted(() => {
 }
 
 .dropdown-icon {
-  font-size: 16px;
+  font-size: var(--app-text-xl);
   color: var(--td-text-color-secondary);
   flex-shrink: 0;
-  transition: transform 0.2s;
+  transition: transform var(--app-motion-base);
 }
 
 .user-dropdown {
@@ -755,7 +711,7 @@ onUnmounted(() => {
   right: -5px;
   margin-bottom: 6px;
   background: var(--td-bg-color-container);
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.12);
   border: 1px solid var(--td-component-stroke);
   overflow: hidden;
@@ -773,7 +729,7 @@ onUnmounted(() => {
 
   &.is-clickable {
     cursor: pointer;
-    transition: background-color 0.15s ease;
+    transition: background-color var(--app-motion-fast) ease;
 
     &:hover,
     &:focus-visible {
@@ -802,7 +758,7 @@ onUnmounted(() => {
 
     .dropdown-user-avatar-placeholder {
       color: var(--td-text-color-anti);
-      font-size: 12px;
+      font-size: var(--app-text-sm);
       font-weight: 600;
       line-height: 1;
     }
@@ -827,7 +783,7 @@ onUnmounted(() => {
   .dropdown-user-name {
     flex: 1;
     min-width: 0;
-    font-size: 14px;
+    font-size: var(--app-text-base);
     font-weight: 500;
     color: var(--td-text-color-primary);
     line-height: 1.35;
@@ -838,7 +794,7 @@ onUnmounted(() => {
 
   .dropdown-user-email {
     min-width: 0;
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     line-height: 1.35;
     color: var(--td-text-color-secondary);
     white-space: nowrap;
@@ -856,11 +812,11 @@ onUnmounted(() => {
     margin: 0;
     padding: 0;
     border: none;
-    border-radius: 4px;
+    border-radius: var(--app-radius-xs);
     background: transparent;
     color: var(--td-text-color-placeholder);
     cursor: pointer;
-    transition: background-color 0.2s ease, color 0.2s ease;
+    transition: background-color var(--app-motion-base) ease, color var(--app-motion-base) ease;
 
     &:hover {
       background: var(--td-bg-color-container-hover);
@@ -877,11 +833,11 @@ onUnmounted(() => {
   padding: 9px 12px;
   border-top: 1px solid var(--td-component-stroke);
   background: transparent;
-  transition: background 0.15s ease;
+  transition: background var(--app-motion-fast) ease;
   min-width: 0;
 
   >.menu-icon {
-    font-size: 16px;
+    font-size: var(--app-text-xl);
     color: var(--td-text-color-secondary);
     flex-shrink: 0;
   }
@@ -908,7 +864,7 @@ onUnmounted(() => {
   }
 
   .dropdown-tenant-panel-name {
-    font-size: 14px;
+    font-size: var(--app-text-base);
     font-weight: 500;
     color: var(--td-text-color-primary);
     line-height: 1.35;
@@ -919,16 +875,16 @@ onUnmounted(() => {
 
   .dropdown-tenant-panel-trail {
     flex-shrink: 0;
-    font-size: 16px;
+    font-size: var(--app-text-xl);
     color: var(--td-text-color-placeholder);
-    transition: color 0.15s ease;
+    transition: color var(--app-motion-fast) ease;
   }
 
   .dropdown-tenant-panel-role {
     display: flex;
     align-items: center;
     gap: 4px;
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     line-height: 1.35;
     color: var(--td-text-color-secondary);
     min-width: 0;
@@ -949,8 +905,8 @@ onUnmounted(() => {
   gap: 10px;
   padding: 9px 12px;
   cursor: pointer;
-  transition: all 0.2s;
-  font-size: 14px;
+  transition: all var(--app-motion-base);
+  font-size: var(--app-text-base);
   color: var(--td-text-color-primary);
 
   &:hover {
@@ -978,10 +934,10 @@ onUnmounted(() => {
     }
 
     .menu-chevron {
-      font-size: 16px;
+      font-size: var(--app-text-xl);
       color: var(--td-text-color-placeholder);
       flex-shrink: 0;
-      transition: transform 0.15s;
+      transition: transform var(--app-motion-fast);
     }
 
     &.is-open {
@@ -994,7 +950,7 @@ onUnmounted(() => {
   }
 
   .menu-icon {
-    font-size: 16px;
+    font-size: var(--app-text-xl);
     color: var(--td-text-color-secondary);
 
     &.svg-icon {
@@ -1009,7 +965,7 @@ onUnmounted(() => {
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      font-size: 15px;
+      font-size: var(--app-text-lg);
       line-height: 1;
       flex-shrink: 0;
       color: inherit;
@@ -1036,11 +992,11 @@ onUnmounted(() => {
 
   .menu-new-badge {
     flex-shrink: 0;
-    font-size: 10px;
+    font-size: var(--app-text-2xs);
     font-weight: 600;
     line-height: 1.2;
     padding: 2px 5px;
-    border-radius: 4px;
+    border-radius: var(--app-radius-xs);
     background: var(--td-brand-color-light);
     color: var(--td-brand-color);
     letter-spacing: 0.02em;
@@ -1056,7 +1012,7 @@ onUnmounted(() => {
     height: 16px;
     color: var(--td-text-color-disabled);
     flex-shrink: 0;
-    transition: color 0.2s ease;
+    transition: color var(--app-motion-base) ease;
     pointer-events: none;
   }
 
@@ -1080,7 +1036,7 @@ onUnmounted(() => {
 // 下拉动画
 .dropdown-enter-active,
 .dropdown-leave-active {
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: all var(--app-motion-base) cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .dropdown-enter-from,
@@ -1110,7 +1066,7 @@ onUnmounted(() => {
   flex-direction: column;
   background: var(--td-bg-color-container);
   border: 0.5px solid var(--td-component-stroke);
-  border-radius: 10px;
+  border-radius: var(--app-radius-lg);
   box-shadow: 0 6px 24px rgba(0, 0, 0, 0.12);
   // Pointer bridge so the user can slide off the menu item onto the panel
   // without hitting the gap and triggering mouseleave-hide.
@@ -1119,7 +1075,7 @@ onUnmounted(() => {
 
   .tenant-submenu-header {
     padding: 8px 12px 6px;
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     font-weight: 600;
     color: var(--td-text-color-secondary);
     border-bottom: 0.5px solid var(--td-component-stroke);
@@ -1135,9 +1091,9 @@ onUnmounted(() => {
     align-items: center;
     gap: 8px;
     padding: 7px 8px;
-    border-radius: 6px;
+    border-radius: var(--app-radius-sm);
     cursor: pointer;
-    transition: background 0.15s;
+    transition: background var(--app-motion-fast);
 
     &:hover {
       background: var(--td-bg-color-secondarycontainer);
@@ -1157,12 +1113,12 @@ onUnmounted(() => {
   .tenant-submenu-item-avatar {
     width: 28px;
     height: 28px;
-    border-radius: 6px;
+    border-radius: var(--app-radius-sm);
     background: var(--td-bg-color-secondarycontainer);
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 13px;
+    font-size: var(--app-text-md);
     font-weight: 600;
     color: var(--td-text-color-secondary);
     flex-shrink: 0;
@@ -1182,7 +1138,7 @@ onUnmounted(() => {
   }
 
   .tenant-submenu-item-name {
-    font-size: 13px;
+    font-size: var(--app-text-md);
     color: var(--td-text-color-primary);
     white-space: nowrap;
     overflow: hidden;
@@ -1203,7 +1159,7 @@ onUnmounted(() => {
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    font-size: 11px;
+    font-size: var(--app-text-xs);
     color: var(--td-text-color-placeholder);
 
     .tenant-submenu-item-role-icon {
@@ -1215,11 +1171,11 @@ onUnmounted(() => {
 
   .tenant-submenu-item-badge {
     flex-shrink: 0;
-    font-size: 10px;
+    font-size: var(--app-text-2xs);
     font-weight: 600;
     line-height: 1.2;
     padding: 2px 6px;
-    border-radius: 4px;
+    border-radius: var(--app-radius-xs);
     background: var(--td-bg-color-component);
     color: var(--td-text-color-secondary);
   }
@@ -1251,7 +1207,7 @@ onUnmounted(() => {
   .tenant-submenu-empty {
     padding: 12px 10px;
     text-align: center;
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     color: var(--td-text-color-placeholder);
   }
 
@@ -1262,19 +1218,19 @@ onUnmounted(() => {
     padding: 8px 10px;
     margin: 3px 4px 5px;
     border-top: .5px solid var(--td-component-stroke);
-    border-radius: 6px;
+    border-radius: var(--app-radius-sm);
     cursor: pointer;
     color: var(--td-brand-color);
-    font-size: 14px;
+    font-size: var(--app-text-base);
     font-weight: 500;
-    transition: background 0.15s;
+    transition: background var(--app-motion-fast);
 
     &:hover {
-      background: rgba(7, 192, 95, 0.08);
+      background: color-mix(in srgb, var(--td-brand-color) 8%, transparent);
     }
 
     .tenant-submenu-create-icon {
-      font-size: 16px;
+      font-size: var(--app-text-xl);
       flex-shrink: 0;
     }
 
@@ -1283,7 +1239,7 @@ onUnmounted(() => {
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
-      font-size: 12px;
+      font-size: var(--app-text-sm);
     }
   }
 }

@@ -13,3 +13,9 @@ export function resolveKnowledgeDownloadFileName(item: KnowledgeDownloadItem): s
   }
   return baseName;
 }
+
+export function isBatchDownloadableKnowledge(item?: { type?: string; file_path?: string } | null): boolean {
+  if (!item) return false;
+  if (item.type === 'manual') return true;
+  return Boolean(item.file_path);
+}

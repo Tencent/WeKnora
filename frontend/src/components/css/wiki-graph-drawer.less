@@ -1,0 +1,200 @@
+// Wiki 图谱/阅读抽屉的全局样式。抽屉通过 attach="body" 传送，无法用 scoped 覆盖。
+// 同时被 views/chat/components/AgentStreamDisplay.vue 与 views/knowledge/wiki/WikiBrowser.vue 引入，
+// 保证任一页面先加载时样式都存在。
+.wiki-graph-drawer {
+  box-shadow: -4px 0 16px rgba(0, 0, 0, 0.08);
+
+  .wiki-reader-meta {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .wiki-reader-meta-text {
+    font-size: var(--app-text-md);
+    color: var(--td-text-color-placeholder);
+  }
+
+  // Wiki drawer is a non-chat reader surface. Chat answer Markdown styles are
+  // centralized in chat-markdown.less; do not copy these rules into chat message components.
+  .wiki-reader-body {
+    line-height: 1.6;
+    font-size: var(--app-text-base);
+    color: var(--td-text-color-primary);
+
+    h1 {
+      font-size: var(--app-text-4xl);
+      margin: 28px 0 16px;
+      font-weight: 600;
+      line-height: 1.4;
+    }
+
+    h2 {
+      font-size: var(--app-text-2xl);
+      margin: 24px 0 12px;
+      font-weight: 600;
+      line-height: 1.4;
+    }
+
+    h3 {
+      font-size: var(--app-text-xl);
+      margin: 20px 0 10px;
+      font-weight: 600;
+      line-height: 1.5;
+    }
+
+    h4,
+    h5,
+    h6 {
+      font-size: var(--app-text-base);
+      margin: 16px 0 8px;
+      font-weight: 600;
+      line-height: 1.5;
+    }
+
+    p {
+      margin: 0 0 14px;
+    }
+
+    ul,
+    ol {
+      margin: 0 0 14px;
+      padding-left: 24px;
+    }
+
+    li {
+      margin-bottom: 6px;
+      line-height: 1.6;
+    }
+
+    li>p {
+      margin-bottom: 6px;
+    }
+
+    blockquote {
+      margin: 0 0 14px;
+      padding: 10px 16px;
+      background: var(--td-bg-color-secondarycontainer);
+      border-left: 4px solid var(--td-component-border);
+      border-radius: 0 4px 4px 0;
+      color: var(--td-text-color-secondary);
+    }
+
+    code {
+      font-family: var(--app-font-family-mono);
+      font-size: var(--app-text-md);
+      padding: 2px 4px;
+      background: var(--td-bg-color-secondarycontainer);
+      border-radius: var(--app-radius-xs);
+      color: var(--td-brand-color);
+    }
+
+    pre {
+      margin: 0 0 14px;
+      padding: 12px 16px;
+      background: var(--td-bg-color-secondarycontainer);
+      border-radius: var(--app-radius-sm);
+      overflow-x: auto;
+
+      code {
+        padding: 0;
+        background: transparent;
+        color: inherit;
+      }
+    }
+
+    p:has(img) {
+      text-align: center;
+      color: var(--td-text-color-secondary);
+      font-size: var(--app-text-md);
+      margin-top: 16px;
+      margin-bottom: 24px;
+
+      img {
+        max-width: 100%;
+        max-height: 400px;
+        object-fit: contain;
+        border-radius: var(--app-radius-sm);
+        display: block;
+        margin: 0 auto 8px;
+        cursor: zoom-in;
+        transition: opacity var(--app-motion-base);
+
+        &:hover {
+          opacity: 0.9;
+        }
+      }
+    }
+
+    a.wiki-content-link {
+      color: var(--td-brand-color);
+      text-decoration: none;
+      border-bottom: 1px dashed var(--td-brand-color);
+      cursor: pointer;
+      font-weight: 500;
+
+      &:hover {
+        border-bottom-style: solid;
+        text-decoration: none !important;
+      }
+    }
+
+    .chat-markdown-table {
+      width: fit-content;
+      max-width: 100%;
+      overflow-x: auto;
+      margin: 0 0 16px;
+      background: var(--td-bg-color-container);
+      border: 1px solid var(--td-component-stroke);
+      border-radius: var(--app-radius-sm);
+      -webkit-overflow-scrolling: touch;
+    }
+
+    table {
+      display: table;
+      width: max-content;
+      min-width: 0;
+      border-collapse: separate;
+      border-spacing: 0;
+      font-size: var(--app-text-md);
+      line-height: 1.55;
+    }
+
+    table thead {
+      background: var(--td-bg-color-secondarycontainer);
+    }
+
+    table th,
+    table td {
+      padding: 8px 12px;
+      border-bottom: 1px solid var(--td-component-stroke);
+      border-right: 1px solid var(--td-component-stroke);
+      text-align: left;
+      vertical-align: top;
+      word-break: break-word;
+    }
+
+    table th {
+      font-weight: 600;
+      color: var(--td-text-color-primary);
+      white-space: nowrap;
+    }
+
+    table th:last-child,
+    table td:last-child {
+      border-right: none;
+    }
+
+    table tbody tr:last-child td {
+      border-bottom: none;
+    }
+
+    table tbody tr:hover {
+      background: var(--td-bg-color-secondarycontainer);
+    }
+
+    table code {
+      font-size: var(--app-text-sm);
+    }
+  }
+}

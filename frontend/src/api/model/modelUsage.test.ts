@@ -118,6 +118,7 @@ test('maps knowledge-base bindings to the configuration section that owns them',
   assert.equal(modelUsageKnowledgeBaseSection(['embedding_model']), 'models')
   assert.equal(modelUsageKnowledgeBaseSection(['summary_model']), 'models')
   assert.equal(modelUsageKnowledgeBaseSection(['wiki_synthesis_model']), 'models')
+  assert.equal(modelUsageKnowledgeBaseSection(['auto_tag_model']), 'models')
   assert.equal(modelUsageKnowledgeBaseSection(['image_processing_model']), 'multimodal')
   assert.equal(modelUsageKnowledgeBaseSection(['vlm_model']), 'multimodal')
   assert.equal(modelUsageKnowledgeBaseSection(['asr_model']), 'asr')

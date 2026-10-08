@@ -345,9 +345,8 @@ func (s *knowledgeService) prepareWikiForReparse(ctx context.Context, knowledge 
 // Handles both old format ("knowledgeID") and new format ("knowledgeID|title").
 func removeSourceRef(refs types.StringArray, knowledgeID string) types.StringArray {
 	var result types.StringArray
-	prefix := knowledgeID + "|"
 	for _, ref := range refs {
-		if ref == knowledgeID || strings.HasPrefix(ref, prefix) {
+		if types.WikiSourceRefMatchesKnowledge(ref, knowledgeID) {
 			continue
 		}
 		result = append(result, ref)
@@ -597,6 +596,9 @@ func (s *knowledgeService) executeKnowledgeDelete(plan *knowledgeDeletePlan, sin
 		byKB[knowledge.KnowledgeBaseID] = append(byKB[knowledge.KnowledgeBaseID], knowledge)
 	}
 	for kbID, knowledges := range byKB {
+		// Deleted documents simply drop out of the description aggregation;
+		// the refresh recomputes counts and topics from what remains.
+		_ = requestKnowledgeBaseProfileRefresh(ctx, s.task, knowledgeBases[kbID], false)
 		knowledgeIDs := make([]string, 0, len(knowledges))
 		titles := make([]string, 0, len(knowledges))
 		for _, knowledge := range knowledges {

@@ -627,9 +627,18 @@ func presignedFileHandler(tenantService interfaces.TenantService, absDir string,
 // into a 4G/mobile browser to verify public reachability without having to
 // send a real message through an IM bot.
 //
+// The path must belong to the calling tenant, exactly as on /files: signing
+// is a read, and an unconfined signer would turn any known resource handle or
+// tenant path into an anonymous URL.
+//
 // Route:
 //   - GET /api/v1/files/presigned-preview?file_path=<provider://...>
-func servePresignedPreview(r *gin.Engine, cfg *config.Config, storageResolver interfaces.StorageBackendResolver) {
+func servePresignedPreview(
+	r getRouteRegistrar,
+	cfg *config.Config,
+	storageResolver interfaces.StorageBackendResolver,
+	resourceCatalog interfaces.ResourceCatalog,
+) {
 	absDir := localStorageAbsDir()
 
 	// This route is registered on the engine root, NOT the /api/v1 group,
@@ -650,6 +659,19 @@ func servePresignedPreview(r *gin.Engine, cfg *config.Config, storageResolver in
 			if tenant == nil {
 				c.JSON(http.StatusUnauthorized, gin.H{"error": "unauthorized: workspace context missing"})
 				return
+			}
+
+			// Sign the original reference so a resource keeps its /r/ grant
+			// form; the resolved physical path is only used for the check.
+			_, resourceResolved, ok := resolveCatalogResource(c, resourceCatalog, filePath, tenant.ID)
+			if !ok {
+				return
+			}
+			if !resourceResolved {
+				if err := secutils.ValidateStoragePathTenant(filePath, tenant.ID); err != nil {
+					c.JSON(http.StatusForbidden, gin.H{"error": "forbidden: file path not accessible"})
+					return
+				}
 			}
 
 			backendID, provider := parseStorageTarget(filePath)

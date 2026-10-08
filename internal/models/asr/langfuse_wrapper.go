@@ -8,7 +8,8 @@ import (
 
 // langfuseASR wraps an ASR implementation and reports each Transcribe call
 // as a Langfuse generation observation. Audio bytes are not uploaded — we
-// record file name, audio size and duration (derived from segment end times)
+// record file name, audio size and duration (as the vendor reports it, or
+// from segment end times)
 // so usage can be billed by second/minute, which is how most ASR providers
 // price their services.
 type langfuseASR struct {
@@ -44,8 +45,13 @@ func (l *langfuseASR) Transcribe(ctx context.Context, audioBytes []byte, fileNam
 	if result != nil {
 		output["text"] = result.Text
 		output["segment_count"] = len(result.Segments)
-		if n := len(result.Segments); n > 0 {
+		// The vendor's own figure when it gives one; otherwise the end of
+		// the last segment, which only verbose replies carry.
+		duration = result.Duration
+		if n := len(result.Segments); duration == 0 && n > 0 {
 			duration = result.Segments[n-1].End
+		}
+		if duration > 0 {
 			output["duration_seconds"] = duration
 		}
 	}

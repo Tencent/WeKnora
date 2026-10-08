@@ -1,6 +1,7 @@
 package langfuse
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/types"
@@ -34,6 +35,48 @@ func TestSummarizeRetrieveOutput_countsAndPreviews(t *testing.T) {
 	hits := out["top_hits"].([]map[string]interface{})
 	if len(hits) != 3 || hits[0]["chunk_id"] != "c1" {
 		t.Fatalf("unexpected top_hits: %#v", hits)
+	}
+	if hits[0]["retriever"] != string(types.VectorRetrieverType) ||
+		hits[1]["retriever"] != string(types.KeywordsRetrieverType) {
+		t.Fatalf("top_hits should retain both retriever groups: %#v", hits)
+	}
+	if out["top_hits_strategy"] != "round_robin_by_retriever" {
+		t.Fatalf("unexpected top_hits strategy: %v", out["top_hits_strategy"])
+	}
+}
+
+func TestSummarizeRetrieveOutput_doesNotLetOneScoreScaleHideAnotherRetriever(t *testing.T) {
+	vector := make([]*types.IndexWithScore, 0, 5)
+	keyword := make([]*types.IndexWithScore, 0, 5)
+	for i := 0; i < 5; i++ {
+		vector = append(vector, &types.IndexWithScore{
+			ChunkID:   fmt.Sprintf("vector-%d", i),
+			Score:     0.9 - float64(i)*0.1,
+			MatchType: types.MatchTypeEmbedding,
+		})
+		keyword = append(keyword, &types.IndexWithScore{
+			ChunkID:   fmt.Sprintf("keyword-%d", i),
+			Score:     1.0,
+			MatchType: types.MatchTypeKeywords,
+		})
+	}
+
+	out := SummarizeRetrieveOutput([]*types.RetrieveResult{
+		{RetrieverType: types.VectorRetrieverType, Results: vector},
+		{RetrieverType: types.KeywordsRetrieverType, Results: keyword},
+	})
+	hits := out["top_hits"].([]map[string]interface{})
+	seen := map[string]bool{}
+	for _, hit := range hits {
+		seen[hit["retriever"].(string)] = true
+	}
+	if !seen[string(types.VectorRetrieverType)] || !seen[string(types.KeywordsRetrieverType)] {
+		t.Fatalf("top_hits lost a retriever group: %#v", hits)
+	}
+
+	groups := out["top_hits_by_retriever"].([]map[string]interface{})
+	if len(groups) != 2 {
+		t.Fatalf("top_hits_by_retriever groups = %d, want 2", len(groups))
 	}
 }
 

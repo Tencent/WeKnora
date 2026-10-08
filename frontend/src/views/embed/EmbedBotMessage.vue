@@ -124,7 +124,12 @@ const parentMd = ref<HTMLElement | null>(null)
 const embedChannelIdRef = computed(() => props.embedChannelId)
 const embedTokenRef = computed(() => props.embedToken)
 
-const { float: citationFloat, rebind: rebindCitations } = useEmbedCitationPopover(
+const {
+  float: citationFloat,
+  rebind: rebindCitations,
+  cancelClose: cancelCitationClose,
+  scheduleClose: scheduleCitationClose,
+} = useEmbedCitationPopover(
   parentMd,
   embedChannelIdRef,
   embedTokenRef,
@@ -132,20 +137,6 @@ const { float: citationFloat, rebind: rebindCitations } = useEmbedCitationPopove
     getKnowledgeReferences: () => props.session?.knowledge_references,
   },
 )
-
-let citationCloseTimer: number | null = null
-const cancelCitationClose = () => {
-  if (citationCloseTimer) {
-    window.clearTimeout(citationCloseTimer)
-    citationCloseTimer = null
-  }
-}
-const scheduleCitationClose = () => {
-  cancelCitationClose()
-  citationCloseTimer = window.setTimeout(() => {
-    citationFloat.value.visible = false
-  }, 120)
-}
 
 // Smooth the streamed answer into a steady typewriter cadence (shared with the
 // Agent path). History reloads arrive complete and snap to full.
@@ -215,9 +206,9 @@ onMounted(() => {
 @import '../../components/css/chat-citations.less';
 
 .embed-bot-msg {
-  border-radius: 4px;
+  border-radius: var(--app-radius-xs);
   color: var(--td-text-color-primary);
-  font-size: 16px;
+  font-size: var(--app-text-xl);
   margin-right: auto;
   max-width: 100%;
   box-sizing: border-box;
@@ -253,10 +244,10 @@ onMounted(() => {
   z-index: 10000;
   max-width: 320px;
   padding: 10px 12px;
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   background: var(--td-bg-color-container);
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.5;
   color: var(--td-text-color-primary);
 

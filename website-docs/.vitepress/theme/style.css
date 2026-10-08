@@ -1,28 +1,13 @@
+@import '../../shared/brand.css';
+@import '../../shared/header.css';
+
 /* ==========================================================================
    WeKnora 文档站主题
    墨蓝（logo 主色）· 纸白 · 鎏金（帆浪点缀）
    ========================================================================== */
 
 :root {
-  --wk-ink: #101f38;
-  --wk-ink-deep: #0a1526;
-  --wk-ink-soft: #40536f;
-  --wk-ink-mute: #6d7d94;
-  --wk-gold: #b8863b;
-  --wk-gold-light: #d9a94f;
-  --wk-paper: #fdfcfa;
-  --wk-paper-2: #f5f3ee;
-  --wk-paper-3: #edeae2;
-  --wk-rule: rgba(16, 31, 56, 0.12);
-  --wk-rule-soft: rgba(16, 31, 56, 0.07);
 
-  --wk-font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI",
-    "PingFang SC", "HarmonyOS Sans SC", "Source Han Sans SC", "Noto Sans CJK SC",
-    "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
-  --wk-font-serif: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua",
-    Georgia, "Songti SC", "Source Han Serif SC", "Noto Serif CJK SC", "STSong", serif;
-  --wk-font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo,
-    Consolas, "Liberation Mono", monospace;
 
   /* —— 覆盖 VitePress 默认变量 —— */
   --vp-font-family-base: var(--wk-font-sans);
@@ -51,7 +36,7 @@
      大片空白；给一个大于视口的定值又会让左内边距被钳到 0、正文钻到侧栏底下。
      取 100vw 时右侧内边距为 0、左侧正好等于侧栏宽度。 */
   --vp-layout-max-width: 100vw;
-  --vp-nav-height: 68px;
+  --vp-nav-height: 64px;
   --vp-sidebar-width: 288px;
   --vp-code-block-bg: #fbf9f5;
 
@@ -60,16 +45,6 @@
 }
 
 .dark {
-  --wk-ink: #e6ecf5;
-  --wk-ink-soft: #a9b6c9;
-  --wk-ink-mute: #7d8ca2;
-  --wk-gold: #d9a94f;
-  --wk-gold-light: #e8c176;
-  --wk-paper: #0b1220;
-  --wk-paper-2: #101a2b;
-  --wk-paper-3: #16233a;
-  --wk-rule: rgba(190, 208, 232, 0.14);
-  --wk-rule-soft: rgba(190, 208, 232, 0.08);
 
   --vp-c-brand-1: #e6ecf5;
   --vp-c-brand-2: #c3d0e2;
@@ -90,91 +65,6 @@ body {
 
 ::selection {
   background: rgba(184, 134, 59, 0.22);
-}
-
-/* --------------------------------------------------------------------------
-   顶栏
-   -------------------------------------------------------------------------- */
-
-.VPNav {
-  backdrop-filter: saturate(140%) blur(14px);
-}
-
-.VPNavBar:not(.has-sidebar):not(.top) {
-  background-color: color-mix(in srgb, var(--wk-paper) 82%, transparent);
-}
-
-/* 导航栏与正文之间不要任何分隔线或渐变 */
-.VPNavBar .divider,
-.VPNavBar .curtain {
-  display: none;
-}
-
-/* 默认主题在有侧栏时把标题块撑到侧栏宽、搜索框推到正文列起点，
-   这里让它与首页（无侧栏）共用同一套居中容器，两种页面的 logo 与搜索位置才一致 */
-@media (min-width: 960px) {
-  .VPNavBar.has-sidebar .wrapper {
-    padding: 0 32px;
-  }
-
-  .VPNavBar.has-sidebar .container {
-    max-width: calc(var(--vp-layout-max-width) - 64px);
-  }
-
-  .VPNavBar.has-sidebar .title {
-    position: static;
-    width: auto;
-    padding: 0;
-  }
-
-  .VPNavBar.has-sidebar .content {
-    padding-left: 0;
-    padding-right: 0;
-  }
-}
-
-.VPNavBarTitle .title {
-  font-family: var(--wk-font-sans);
-  font-weight: 600;
-  letter-spacing: 0.14em;
-  font-size: 15px;
-  text-transform: uppercase;
-  border-bottom: none !important;
-}
-
-.VPNavBarTitle .logo {
-  height: 22px;
-  margin-right: 10px;
-}
-
-.VPNavBarMenuLink {
-  position: relative;
-  font-size: 13.5px !important;
-  font-weight: 500;
-  letter-spacing: 0.04em;
-  color: var(--wk-ink-soft) !important;
-}
-
-.VPNavBarMenuLink.active,
-.VPNavBarMenuLink:hover {
-  color: var(--wk-ink) !important;
-}
-
-.VPNavBarMenuLink.active::after {
-  content: "";
-  position: absolute;
-  left: 12px;
-  right: 12px;
-  bottom: 16px;
-  height: 1px;
-  background: var(--wk-gold);
-}
-
-.VPNavBarSearch .DocSearch-Button,
-.VPNavBarSearch button {
-  border-radius: 2px;
-  border: 1px solid var(--wk-rule);
-  background: transparent;
 }
 
 /* --------------------------------------------------------------------------
@@ -223,7 +113,7 @@ body {
 /* 默认主题的 curtain 用负 margin 铺满侧栏宽度，会盖住滚动条顶部 */
 @media (min-width: 960px) {
   .VPSidebar .curtain {
-    /* 默认写死 -64px，本站 nav-height 为 68px，对齐以免 sticky 错位 */
+    /* Keep the sidebar curtain aligned with the shared masthead. */
     top: calc(var(--vp-nav-height) * -1);
     margin-right: 0;
     width: calc(100% + 32px);
@@ -300,24 +190,31 @@ body {
   color: var(--wk-ink);
 }
 
+.VPSidebarItem.level-1 > .item {
+  margin-left: -10px;
+  padding: 0 10px;
+  width: calc(100% + 10px);
+  border-radius: 5px;
+}
+
 .VPSidebarItem.level-1.is-active .link .text {
-  color: var(--wk-ink) !important;
-  font-weight: 600;
+  color: var(--wk-accent-text) !important;
+  font-weight: 700;
 }
 
 .VPSidebarItem.level-1.is-active > .item {
   position: relative;
+  background: color-mix(in srgb, var(--wk-gold) 16%, var(--wk-paper));
 }
 
 .VPSidebarItem.level-1.is-active > .item::before {
   content: "";
   position: absolute;
-  left: -14px;
-  top: 50%;
-  transform: translateY(-50%);
+  left: 0;
+  top: 6px;
+  bottom: 6px;
   width: 3px;
-  height: 3px;
-  border-radius: 50%;
+  border-radius: 2px;
   background: var(--wk-gold);
 }
 
@@ -733,23 +630,6 @@ body {
   letter-spacing: 0.06em;
 }
 
-/* --------------------------------------------------------------------------
-   首页容器：去掉默认 page 布局的边距限制
-   -------------------------------------------------------------------------- */
-
-.landing-page .VPPage {
-  padding: 0;
-}
-
-.landing-page .VPContent.is-home,
-.landing-page .VPContent {
-  padding: 0 !important;
-}
-
-.landing-page .VPFooter {
-  display: none;
-}
-
 @media (max-width: 640px) {
   .vp-doc h1 {
     font-size: 32px;
@@ -759,3 +639,28 @@ body {
     margin-top: 52px;
   }
 }
+
+/* Reserve the same masthead space in the default documentation layout. */
+:root, .hide-nav, .hide-nav .VPSidebar { --vp-nav-height: 64px; }
+.wk-docs-header { position: fixed; left: 0; top: 0; }
+.VPLocalNav { top: var(--vp-nav-height); }
+ .wk-docs-label { margin: 0; padding: 24px 0 16px; color: var(--wk-ink-mute); font-size: 12px; letter-spacing: .08em; }
+.wk-header-search .VPNavBarSearch { padding: 0; }
+.wk-header-search .DocSearch-Button { width: 160px; height: 36px; padding: 0 10px; justify-content: space-between; border: 1px solid var(--wk-rule); border-radius: 4px; background: var(--wk-paper-2); }
+.wk-header-search .DocSearch-Button-Placeholder { display: inline-block; padding: 0 8px; font-size: 12px; }
+.wk-header-search .DocSearch-Button-Keys { display: flex; }
+@media (min-width: 801px) and (max-width: 1280px) {
+ .wk-header-search .DocSearch-Button { width: 36px; justify-content: center; }
+ .wk-header-search .DocSearch-Button-Placeholder, .wk-header-search .DocSearch-Button-Keys { display: none; }
+ .wk-header-search .DocSearch-Search-Icon { margin: 0; }
+}
+@media (max-width: 800px) {
+ .wk-header-search { order: -1; margin-bottom: 10px; }
+ .wk-header-search, .wk-header-search #local-search, .wk-header-search .DocSearch-Button { width: 100%; }
+}
+@media (max-width: 959px) {
+ .Layout { padding-top: var(--vp-nav-height); }
+ .VPSidebar { top: var(--vp-nav-height); }
+ .wk-docs-label { padding-top: 0; }
+}
+@media (max-width: 800px) { :root, .hide-nav, .hide-nav .VPSidebar { --vp-nav-height: 64px; } }

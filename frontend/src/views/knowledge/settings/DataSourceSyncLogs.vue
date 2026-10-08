@@ -330,7 +330,7 @@ const groupedLogs = computed(() => {
   justify-content: center;
   padding: 80px 0;
   color: var(--td-text-color-placeholder);
-  font-size: 13px;
+  font-size: var(--app-text-md);
   gap: 12px;
 }
 
@@ -347,7 +347,7 @@ const groupedLogs = computed(() => {
   flex: 1;
   text-align: center;
   padding: 16px 8px;
-  border-radius: 12px;
+  border-radius: var(--app-radius-xl);
   background: var(--td-bg-color-container);
   border: 1px solid var(--td-border-level-1-color);
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02);
@@ -357,7 +357,7 @@ const groupedLogs = computed(() => {
 }
 
 .stat-num {
-  font-size: 20px;
+  font-size: var(--app-text-3xl);
   font-weight: 700;
   color: var(--td-text-color-primary);
   line-height: 1.2;
@@ -368,7 +368,7 @@ const groupedLogs = computed(() => {
 .stat-num.error { color: var(--td-error-color); }
 
 .stat-label {
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   font-weight: 500;
   text-transform: uppercase;
   letter-spacing: 0.5px;
@@ -386,7 +386,7 @@ const groupedLogs = computed(() => {
 }
 
 .timeline-date {
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   font-weight: 600;
   color: var(--td-text-color-placeholder);
   padding: 12px 0 8px 24px;
@@ -411,7 +411,7 @@ const groupedLogs = computed(() => {
 }
 
 .logs-load-more-text {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-placeholder);
 }
 
@@ -465,8 +465,8 @@ const groupedLogs = computed(() => {
   flex: 1;
   min-width: 0;
   padding: 12px 14px;
-  border-radius: 10px;
-  transition: background 0.2s ease;
+  border-radius: var(--app-radius-lg);
+  transition: background var(--app-motion-base) ease;
 }
 
 .timeline-item:hover .tl-content {
@@ -480,25 +480,25 @@ const groupedLogs = computed(() => {
 }
 
 .tl-status {
-  font-size: 13px;
+  font-size: var(--app-text-md);
   font-weight: 500;
 }
 
 .tl-time {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-placeholder);
   font-variant-numeric: tabular-nums;
 }
 
 .tl-duration {
   margin-left: auto;
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   font-weight: 500;
   color: var(--td-text-color-placeholder);
   font-variant-numeric: tabular-nums;
   background: var(--td-bg-color-component);
   padding: 2px 6px;
-  border-radius: 4px;
+  border-radius: var(--app-radius-xs);
 }
 
 /* --- Pills --- */
@@ -510,9 +510,9 @@ const groupedLogs = computed(() => {
 }
 
 .pill {
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   padding: 1px 6px;
-  border-radius: 4px;
+  border-radius: var(--app-radius-xs);
   font-weight: 500;
   line-height: 18px;
   font-variant-numeric: tabular-nums;
@@ -537,7 +537,7 @@ const groupedLogs = computed(() => {
 .detail-row {
   display: flex;
   justify-content: space-between;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-primary);
   line-height: 20px;
 }
@@ -549,10 +549,10 @@ const groupedLogs = computed(() => {
 .tl-error {
   margin-top: 8px;
   padding: 8px 12px;
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   background: var(--td-error-color-1);
   color: var(--td-error-color);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.5;
   word-break: break-word;
 }
@@ -566,14 +566,14 @@ const groupedLogs = computed(() => {
 }
 
 .tl-failed-title {
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   font-weight: 600;
   color: var(--td-error-color);
   margin-bottom: 2px;
 }
 
 .tl-failed-item {
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   line-height: 1.5;
   color: var(--td-text-color-secondary);
   padding: 2px 8px;
@@ -585,7 +585,7 @@ const groupedLogs = computed(() => {
 }
 
 .tl-failed-more {
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   color: var(--td-text-color-placeholder);
   padding: 2px 8px;
 }
@@ -599,7 +599,7 @@ const groupedLogs = computed(() => {
 }
 
 .logs-drawer-title {
-  font-size: 16px;
+  font-size: var(--app-text-xl);
   font-weight: 600;
   color: var(--td-text-color-primary);
   overflow: hidden;

@@ -159,6 +159,11 @@ func IsPublic(ip net.IP) bool {
 }
 
 func classifyIPv6(ip net.IP) (Class, string) {
+	// RFC 8215 local-use translation prefix. Its embedded IPv4 layout is
+	// deployment-specific, so none of it is safe as a public destination.
+	if ip[0] == 0 && ip[1] == 0x64 && ip[2] == 0xff && ip[3] == 0x9b && ip[4] == 0 && ip[5] == 1 {
+		return Translated, "local-use NAT64 translation address"
+	}
 	// fec0::/10, deprecated site-local. IsPrivate stops at fc00::/7.
 	if ip[0] == 0xfe && ip[1]&0xc0 == 0xc0 {
 		return SiteLocalIPv6, "site-local IPv6 address"

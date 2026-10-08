@@ -61,17 +61,17 @@ const props = defineProps<{
     padding: 0;
     
     .info-field {
-      font-size: 11px;
+      font-size: var(--app-text-xs);
       margin-bottom: 4px;
       
       .field-label {
-        font-size: 11px;
+        font-size: var(--app-text-xs);
         color: var(--td-text-color-placeholder);
         min-width: 70px;
       }
       
       .field-value {
-        font-size: 11px;
+        font-size: var(--app-text-xs);
         color: var(--td-text-color-secondary);
       }
     }
@@ -112,18 +112,18 @@ const props = defineProps<{
   gap: 6px;
   flex: 1;
   min-width: 0;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
 }
 
 .chunk-index {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-primary);
   font-weight: 600;
   flex-shrink: 0;
 }
 
 .chunk-position {
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   color: var(--td-text-color-placeholder);
 }
 
@@ -136,7 +136,7 @@ const props = defineProps<{
     overflow-y: auto;
     overflow-x: hidden;
     padding: 0;
-    border-radius: 6px;
+    border-radius: var(--app-radius-sm);
     box-shadow: var(--td-shadow-3);
     word-wrap: break-word;
     word-break: break-word;
@@ -145,7 +145,7 @@ const props = defineProps<{
 
 code {
   font-family: var(--app-font-family-mono);
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   background: var(--td-bg-color-secondarycontainer);
   padding: 2px 4px;
   border-radius: 3px;

@@ -209,12 +209,6 @@ function buildProtectedImageTag(
   protectedSrc: string,
   after: string,
 ): string {
-  // A definitive 404 should not leave a skeleton behind. Streaming
-  // re-renders call this function repeatedly, so remember the missing
-  // source until the explicit end-of-stream retry clears the cache.
-  if (protectedFileMissingSources.has(protectedSrc)) {
-    return '';
-  }
   // Reuse the already-hydrated file if we have one, so repeated re-renders
   // (typewriter streaming) keep the same stable image or download card
   // instead of flashing back to the placeholder every frame.
@@ -436,12 +430,21 @@ type ProtectedFileLoadResult =
   | { status: 'missing' }
   | { status: 'failed' };
 
+type HiddenProtectedImage = {
+  display: string;
+  parent: HTMLElement | null;
+  parentDisplay: string;
+};
+
 type ProtectedFileCacheState = {
   blobByRequest: Map<string, LoadedProtectedFile>;
   fileBySource: Map<string, LoadedProtectedFile>;
-  missingSources: Set<string>;
+  missingRequests: Set<string>;
   failures: Map<string, number>;
   inflight: Map<string, Promise<ProtectedFileLoadResult>>;
+  retryGeneration: number;
+  imageRequests: WeakMap<HTMLImageElement, string>;
+  hiddenImages: WeakMap<HTMLImageElement, HiddenProtectedImage>;
 };
 
 // Keep object URLs alive across Vite hot updates. A hot update replaces this
@@ -451,16 +454,19 @@ const protectedFileCacheState = (() => {
   const fresh = (): ProtectedFileCacheState => ({
     blobByRequest: new Map(),
     fileBySource: new Map(),
-    missingSources: new Set(),
+    missingRequests: new Set(),
     failures: new Map(),
     inflight: new Map(),
+    retryGeneration: 0,
+    imageRequests: new WeakMap(),
+    hiddenImages: new WeakMap(),
   });
   if (typeof window === 'undefined') return fresh();
   const scope = window as typeof window & {
-    __weknoraProtectedFileCacheV3__?: ProtectedFileCacheState;
+    __weknoraProtectedFileCacheV4__?: ProtectedFileCacheState;
   };
-  scope.__weknoraProtectedFileCacheV3__ ||= fresh();
-  return scope.__weknoraProtectedFileCacheV3__;
+  scope.__weknoraProtectedFileCacheV4__ ||= fresh();
+  return scope.__weknoraProtectedFileCacheV4__;
 })();
 
 const protectedFileBlobCache = protectedFileCacheState.blobByRequest;
@@ -468,7 +474,9 @@ const protectedFileBlobCache = protectedFileCacheState.blobByRequest;
 // image or download card has been hydrated, re-renders of the same markdown
 // can emit the blob src / card HTML directly instead of the placeholder.
 const protectedFileBySource = protectedFileCacheState.fileBySource;
-const protectedFileMissingSources = protectedFileCacheState.missingSources;
+// A 404 may mean a temporary message ID was not found, not that the resource
+// is missing in every message/workspace. Cache it only under that request.
+const protectedFileMissingRequests = protectedFileCacheState.missingRequests;
 // Throttle retries of failed file fetches. During streaming the same markdown
 // is re-rendered on every chunk, producing brand-new <img> elements (so the
 // per-element `authHydrated` flag is reset each time). Without throttling a
@@ -478,6 +486,8 @@ const protectedFileMissingSources = protectedFileCacheState.missingSources;
 const protectedFileFailureCache = protectedFileCacheState.failures;
 const protectedFileInflight = protectedFileCacheState.inflight;
 const PROTECTED_FILE_RETRY_COOLDOWN_MS = 5000;
+const protectedImageRequests = protectedFileCacheState.imageRequests;
+const hiddenProtectedImages = protectedFileCacheState.hiddenImages;
 
 /**
  * 将 Markdown 里通过 /files 代理的图片，改为用带鉴权 Header 的 fetch 拉取后再显示。
@@ -488,8 +498,11 @@ const PROTECTED_FILE_RETRY_COOLDOWN_MS = 5000;
  * 的图片可以立即重新尝试加载，而无需等待冷却窗口结束。
  */
 export function clearProtectedFileFailureCache(): void {
+  // An earlier request can still be in flight when completion arrives. Its
+  // failure must get one fresh attempt against the newly persisted message.
+  protectedFileCacheState.retryGeneration++;
   protectedFileFailureCache.clear();
-  protectedFileMissingSources.clear();
+  protectedFileMissingRequests.clear();
 }
 
 function protectedImageSource(img: HTMLImageElement): string {
@@ -501,27 +514,50 @@ function protectedImageSource(img: HTMLImageElement): string {
 function forEachProtectedImageWithSource(
   root: ParentNode,
   sourceURL: string,
+  requestKey: string,
   callback: (img: HTMLImageElement) => void,
 ): void {
   root.querySelectorAll<HTMLImageElement>('img[data-protected-src]').forEach((candidate) => {
-    if (protectedImageSource(candidate) === sourceURL) callback(candidate);
+    if (protectedImageRequests.get(candidate) === requestKey && protectedImageSource(candidate) === sourceURL) callback(candidate);
   });
 }
 
-function removeMissingProtectedImages(root: ParentNode, sourceURL: string): void {
-  forEachProtectedImageWithSource(root, sourceURL, (img) => {
-    const parent = img.parentElement;
-    img.remove();
-    // Markdown emits a dedicated paragraph for a standalone image. Remove that
-    // wrapper too so a missing image leaves no vertical placeholder/gap.
-    if (parent?.tagName === 'P' && !parent.textContent?.trim() && parent.children.length === 0) {
-      parent.remove();
+function hideMissingProtectedImages(root: ParentNode, sourceURL: string, requestKey: string): void {
+  forEachProtectedImageWithSource(root, sourceURL, requestKey, (img) => {
+    // Keep the node addressable for completion/scope retries. v-stable-html
+    // skips unchanged HTML, so removing it would make a settled 404 permanent
+    // even after failure state is cleared and the resource becomes readable.
+    if (!hiddenProtectedImages.has(img)) {
+      const parent = img.parentElement;
+      const standalone = parent?.tagName === 'P' && !parent.textContent?.trim() && parent.children.length === 1
+        ? parent : null;
+      hiddenProtectedImages.set(img, {
+        display: img.style.display, parent: standalone, parentDisplay: standalone?.style.display || '',
+      });
     }
+    img.style.display = 'none';
+    img.setAttribute('data-protected-hidden', '1');
+    const parent = hiddenProtectedImages.get(img)?.parent;
+    if (parent) {
+      parent.style.display = 'none';
+      parent.setAttribute('data-protected-hidden', '1');
+    }
+    img.dataset.authHydrated = '0';
   });
 }
 
-function applyHydratedProtectedImage(root: ParentNode, sourceURL: string, file: LoadedProtectedFile): void {
-  forEachProtectedImageWithSource(root, sourceURL, (img) => {
+function applyHydratedProtectedImage(root: ParentNode, sourceURL: string, file: LoadedProtectedFile, requestKey: string): void {
+  forEachProtectedImageWithSource(root, sourceURL, requestKey, (img) => {
+    const hidden = hiddenProtectedImages.get(img);
+    if (hidden) {
+      img.style.display = hidden.display;
+      img.removeAttribute('data-protected-hidden');
+      if (hidden.parent) {
+        hidden.parent.style.display = hidden.parentDisplay;
+        hidden.parent.removeAttribute('data-protected-hidden');
+      }
+      hiddenProtectedImages.delete(img);
+    }
     if (!isRasterProtectedImage(file)) {
       applyProtectedFile(img, file, sourceURL);
       return;
@@ -589,15 +625,6 @@ export async function hydrateProtectedFileImages(
     if (!sourceURL) {
       return;
     }
-    if (img.dataset.authHydrated === '1') {
-      return;
-    }
-    if (protectedFileMissingSources.has(sourceURL)) {
-      removeMissingProtectedImages(root, sourceURL);
-      return;
-    }
-    img.dataset.authHydrated = '1';
-
     // A null request means this source cannot be fetched under the current
     // access context (not a storage path, or the embed token has not arrived
     // yet). Leave the placeholder so a later pass can retry.
@@ -608,10 +635,19 @@ export async function hydrateProtectedFileImages(
     }
     const { url: requestURL, headers } = request;
     const requestKey = JSON.stringify([requestURL, headers]);
+    if (img.dataset.authHydrated === '1' && src.startsWith('blob:') && protectedImageRequests.get(img) === requestKey) {
+      return;
+    }
+    protectedImageRequests.set(img, requestKey);
+    if (protectedFileMissingRequests.has(requestKey)) {
+      hideMissingProtectedImages(root, sourceURL, requestKey);
+      return;
+    }
+    img.dataset.authHydrated = '1';
 
     const cachedBlobURL = protectedFileBlobCache.get(requestKey);
     if (cachedBlobURL) {
-      applyHydratedProtectedImage(root, sourceURL, cachedBlobURL);
+      applyHydratedProtectedImage(root, sourceURL, cachedBlobURL, requestKey);
       return;
     }
 
@@ -628,46 +664,52 @@ export async function hydrateProtectedFileImages(
     let loadTask = protectedFileInflight.get(requestKey);
     if (!loadTask) {
       loadTask = (async (): Promise<ProtectedFileLoadResult> => {
-        try {
-          const resp = await fetch(requestURL, {
-            method: 'GET',
-            headers,
-            credentials: 'include',
-          });
-          if (!resp.ok) {
-            if (resp.status === 404) {
-              protectedFileFailureCache.set(requestKey, Date.now());
-              return { status: 'missing' };
+        for (let attempt = 0; ; attempt++) {
+          const generation = protectedFileCacheState.retryGeneration;
+          try {
+            const resp = await fetch(requestURL, {
+              method: 'GET',
+              headers,
+              credentials: 'include',
+            });
+            if (!resp.ok) {
+              if (attempt === 0 && generation !== protectedFileCacheState.retryGeneration) continue;
+              if (resp.status === 404) {
+                protectedFileFailureCache.set(requestKey, Date.now());
+                return { status: 'missing' };
+              }
+              throw new Error(`HTTP ${resp.status}`);
             }
-            throw new Error(`HTTP ${resp.status}`);
+            const blob = await resp.blob();
+            const blobURL = URL.createObjectURL(blob);
+            const file = { blobURL, blob, fileName: responseFileName(resp.headers.get("Content-Disposition"), sourceURL) };
+            protectedFileBlobCache.set(requestKey, file);
+            protectedFileFailureCache.delete(requestKey);
+            return { status: 'loaded', ...file };
+          } catch (error) {
+            if (attempt === 0 && generation !== protectedFileCacheState.retryGeneration) continue;
+            console.warn('[security] hydrateProtectedFileImages failed:', error);
+            protectedFileFailureCache.set(requestKey, Date.now());
+            return { status: 'failed' };
           }
-          const blob = await resp.blob();
-          const blobURL = URL.createObjectURL(blob);
-          const file = { blobURL, blob, fileName: responseFileName(resp.headers.get("Content-Disposition"), sourceURL) };
-          protectedFileBlobCache.set(requestKey, file);
-          protectedFileFailureCache.delete(requestKey);
-          return { status: 'loaded', ...file };
-        } catch (error) {
-          console.warn('[security] hydrateProtectedFileImages failed:', error);
-          protectedFileFailureCache.set(requestKey, Date.now());
-          return { status: 'failed' };
-        } finally {
-          protectedFileInflight.delete(requestKey);
         }
-      })();
+      })().finally(() => protectedFileInflight.delete(requestKey));
       protectedFileInflight.set(requestKey, loadTask);
     }
 
     const result = await loadTask;
+    // A late response for an old message ID must not remove or overwrite an
+    // image that has since been reauthorized under its persisted message ID.
+    if (protectedImageRequests.get(img) !== requestKey) return;
     if (result.status === 'loaded') {
       protectedFileBySource.set(sourceURL, result);
-      protectedFileMissingSources.delete(sourceURL);
-      applyHydratedProtectedImage(root, sourceURL, result);
+      protectedFileMissingRequests.delete(requestKey);
+      applyHydratedProtectedImage(root, sourceURL, result, requestKey);
       return;
     }
     if (result.status === 'missing') {
-      protectedFileMissingSources.add(sourceURL);
-      removeMissingProtectedImages(root, sourceURL);
+      protectedFileMissingRequests.add(requestKey);
+      hideMissingProtectedImages(root, sourceURL, requestKey);
       return;
     }
     if (result.status === 'failed') {

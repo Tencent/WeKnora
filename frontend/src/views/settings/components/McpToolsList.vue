@@ -172,14 +172,14 @@ onBeforeUnmount(() => { generation++; emit('busy', false) })
 .tool-row { padding: 14px 0; min-width: 0; border-bottom: 1px solid var(--td-component-stroke); }
 .tool-row:last-child { border-bottom: 0; padding-bottom: 0; }
 .tool-heading { display: flex; width: 100%; align-items: flex-start; justify-content: space-between; gap: 16px; }
-.tool-name { min-width: 0; font-size: 13px; font-weight: 600; line-height: 1.6; overflow-wrap: anywhere; }
+.tool-name { min-width: 0; font-size: var(--app-text-md); font-weight: 600; line-height: 1.6; overflow-wrap: anywhere; }
 .tool-details {
   flex-shrink: 0;
   padding: 0;
   border: 0;
   background: transparent;
   font: inherit;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.7;
   color: var(--td-text-color-placeholder);
   cursor: pointer;
@@ -189,7 +189,7 @@ onBeforeUnmount(() => { generation++; emit('busy', false) })
 .tool-details:focus-visible { color: var(--td-brand-color); }
 .tool-description {
   margin: 6px 0 0;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.65;
   color: var(--td-text-color-secondary);
   overflow-wrap: anywhere;
@@ -200,8 +200,8 @@ onBeforeUnmount(() => { generation++; emit('busy', false) })
   overflow: hidden;
 }
 .tool-controls { display: flex; align-items: center; gap: 24px; flex-wrap: wrap; margin-top: 10px; }
-.tool-control { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; line-height: 20px; color: var(--td-text-color-secondary); cursor: pointer; }
-.tools-pagination { display: flex; align-items: center; justify-content: flex-end; gap: 8px; font-size: 12px; color: var(--td-text-color-secondary); }
+.tool-control { display: inline-flex; align-items: center; gap: 8px; font-size: var(--app-text-sm); line-height: 20px; color: var(--td-text-color-secondary); cursor: pointer; }
+.tools-pagination { display: flex; align-items: center; justify-content: flex-end; gap: 8px; font-size: var(--app-text-sm); color: var(--td-text-color-secondary); }
 </style>
 
 <!-- t-popup attaches to body; z-index must sit above SettingDrawer (2500). -->
@@ -213,10 +213,10 @@ onBeforeUnmount(() => { generation++; emit('busy', false) })
     padding: 0 !important;
     width: 400px;
     max-width: calc(100vw - 24px);
-    border-radius: 8px !important;
+    border-radius: var(--app-radius-md) !important;
     background: var(--td-bg-color-container) !important;
     border: 1px solid var(--td-component-stroke) !important;
-    box-shadow: var(--td-shadow-2, 0 3px 14px 2px rgba(0, 0, 0, 0.05)) !important;
+    box-shadow: var(--td-shadow-2) !important;
   }
 }
 
@@ -234,7 +234,7 @@ onBeforeUnmount(() => { generation++; emit('busy', false) })
   border-bottom: 2px solid transparent;
   background: transparent;
   font: inherit;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   line-height: 1.2;
   color: var(--td-text-color-secondary);
   cursor: pointer;
@@ -258,7 +258,7 @@ onBeforeUnmount(() => { generation++; emit('busy', false) })
 
 .tool-detail__desc {
   margin: 0;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.65;
   color: var(--td-text-color-secondary);
   white-space: pre-wrap;
@@ -267,7 +267,7 @@ onBeforeUnmount(() => { generation++; emit('busy', false) })
 
 .tool-detail__empty {
   margin: 0;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-placeholder);
 }
 
@@ -293,7 +293,7 @@ onBeforeUnmount(() => { generation++; emit('busy', false) })
 }
 
 .tool-detail__param-title span {
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   color: var(--td-text-color-secondary);
 }
 
@@ -303,7 +303,7 @@ onBeforeUnmount(() => { generation++; emit('busy', false) })
 
 .tool-detail__param p {
   margin: 4px 0 0;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.5;
   color: var(--td-text-color-secondary);
   white-space: pre-wrap;

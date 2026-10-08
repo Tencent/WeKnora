@@ -44,6 +44,9 @@ var contextCloneAcrossDetach = map[ContextKey]bool{
 	// Per-API-key operation and KB scopes: a restriction, so dropping it would
 	// hand background work broader reach than the key it came from.
 	TenantAPIKeyScopeContextKey: true,
+	// Display identity for which API key initiated work. Not a grant; dropping
+	// it would only lose activity attribution on detached goroutines.
+	AuditAPIKeyContextKey: true,
 
 	// Session scope. SessionTenantID re-scopes session/message lookups, while
 	// SandboxTenantID keys the session→sandbox binding to the session owner
@@ -115,6 +118,9 @@ var contextCloneAcrossDetach = map[ContextKey]bool{
 	// request context inside the embed handler that authenticated it; nothing
 	// downstream of a detach reads it.
 	EmbedChannelContextKey: false,
+	// The authenticated MCP endpoint. Read only by the MCP tool handlers on
+	// the request context that authenticated it.
+	MCPEndpointContextKey: false,
 }
 
 // ContextKeysClonedAcrossDetach returns the keys logger.CloneContext carries

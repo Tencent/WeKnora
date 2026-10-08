@@ -10,7 +10,6 @@ package service
 import (
 	"context"
 	"errors"
-	"strings"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -34,6 +33,8 @@ type SandboxTerminalService struct {
 	resolver sandbox.TenantSandboxResolver
 	fallback sandbox.Manager
 	policy   WorkspaceSandboxPolicy
+	// desktop is Lite: remote pins and configs are never resolved there.
+	desktop bool
 }
 
 // NewSandboxTerminalService wires the terminal service. All dependencies
@@ -44,27 +45,33 @@ func NewSandboxTerminalService(
 	resolver sandbox.TenantSandboxResolver,
 	fallback sandbox.Manager,
 	policy WorkspaceSandboxPolicy,
+	host HostSandboxManager,
 ) *SandboxTerminalService {
 	return &SandboxTerminalService{
 		pinner:   pinner,
 		resolver: resolver,
 		fallback: fallback,
 		policy:   policy,
+		desktop:  host.Desktop,
 	}
 }
 
 // OpenSessionTerminal attaches to the session's currently bound sandbox
-// without ever creating or rebuilding one. This is the path a page load and
-// an automatic reconnect take: opening a panel must not conjure a microVM.
+// without ever creating or resuming one. This is the path a panel open and
+// an automatic reconnect take: a running sandbox is attached, a bound
+// sandbox that is not confirmed running reports ErrSandboxPaused, and a
+// missing one reports ErrNoLiveSessionSandbox. Opening a panel must not
+// conjure or wake a microVM.
 //
-// When the session has no live sandbox it reports
-// sandbox.ErrNoLiveSessionSandbox, which the WebSocket handler turns into
-// the SANDBOX_NOT_BOUND frame the UI answers with an explicit "create and
-// start" button. That confirmed click is what calls EnsureSessionTerminal.
+// The WebSocket handler turns those errors into SANDBOX_PAUSED /
+// SANDBOX_NOT_BOUND frames the UI answers with an explicit button. That
+// confirmed click is what calls EnsureSessionTerminal.
 //
 // Error contract (the WebSocket handler maps these onto protocol error
 // frames):
 //   - sandbox.ErrNoLiveSessionSandbox — the session has no bound sandbox.
+//   - sandbox.ErrSandboxPaused — the bound sandbox is paused; resume needs
+//     an explicit click (EnsureSessionTerminal with AllowResume).
 //   - ErrTerminalUnsupported — the resolved backend cannot stream PTYs
 //     (Docker, disabled manager).
 //   - any other error — resolution or provider failure.
@@ -73,6 +80,7 @@ func (s *SandboxTerminalService) OpenSessionTerminal(
 	sessionID string,
 	opts sandbox.RemoteTerminalOptions,
 ) (*SessionTerminal, error) {
+	opts.AllowResume = false
 	mgr, _, err := s.resolveSessionManager(ctx, sessionID)
 	if err != nil {
 		return nil, err
@@ -85,28 +93,31 @@ func (s *SandboxTerminalService) OpenSessionTerminal(
 func (s *SandboxTerminalService) resolveSessionManager(
 	ctx context.Context,
 	sessionID string,
-) (sandbox.Manager, string, error) {
-	if s.pinner == nil {
-		return nil, "", sandbox.ErrNoLiveSessionSandbox
+) (sandbox.Manager, SandboxPin, error) {
+	if s.pinner == nil || s.desktop {
+		return nil, SandboxPin{}, sandbox.ErrNoLiveSessionSandbox
 	}
-	configID, err := s.pinner.Read(ctx, sessionID)
+	pin, err := s.pinner.Read(ctx, sessionID)
 	if err != nil {
-		return nil, "", err
+		return nil, SandboxPin{}, err
 	}
-	if configID == "" {
-		return nil, "", sandbox.ErrNoLiveSessionSandbox
+	if pin.IsZero() {
+		return nil, SandboxPin{}, sandbox.ErrNoLiveSessionSandbox
 	}
-	tenantID, _ := types.TenantIDFromContext(ctx)
+	// The workspace comes from the pin, not from the request: a shared agent's
+	// sandbox lives on its owner's config, and this call runs from a panel
+	// open, where the request tenant is the session owner.
+	sessionTenantID, _ := types.TenantIDFromContext(ctx)
 	mgr, err := resolveTenantSandboxForConfig(
-		ctx, s.resolver, s.fallback, tenantID, configID, s.policy,
+		ctx, s.resolver, s.fallback, pin.TenantOr(sessionTenantID), pin.ConfigID, s.policy,
 	)
 	if err != nil {
-		return nil, configID, err
+		return nil, pin, err
 	}
 	if mgr == nil {
-		return nil, configID, sandbox.ErrNoLiveSessionSandbox
+		return nil, pin, sandbox.ErrNoLiveSessionSandbox
 	}
-	return mgr, configID, nil
+	return mgr, pin, nil
 }
 
 // EnsureSessionTerminal opens a PTY on the session's sandbox, provisioning
@@ -121,19 +132,22 @@ func (s *SandboxTerminalService) resolveSessionManager(
 // resolveSandboxForExecution — so a terminal-created sandbox is
 // indistinguishable from one created by a conversation turn. The WebSocket
 // handler must resolve the agent the same way a chat turn does (own agent
-// or shared agent from another workspace) and pass that config ID here.
+// or shared agent from another workspace) and pass that agent's config AND
+// the workspace that owns it here: a shared agent's config does not exist in
+// the caller's own workspace.
 // A no-op shell command drives the lazy creation, which also seeds the
 // workspace layout.
 //
-// With no sandboxConfigID the call stays lookup-only and reports
+// With a zero provision pin the call stays lookup-only and reports
 // sandbox.ErrNoLiveSessionSandbox, which the WebSocket handler maps onto
 // the SANDBOX_NOT_BOUND guidance frame.
 func (s *SandboxTerminalService) EnsureSessionTerminal(
 	ctx context.Context,
 	sessionID string,
-	sandboxConfigID string,
+	provision SandboxPin,
 	opts sandbox.RemoteTerminalOptions,
 ) (*SessionTerminal, error) {
+	opts.AllowResume = true
 	mgr, _, err := s.resolveSessionManager(ctx, sessionID)
 	if err == nil {
 		terminal, terr := s.openOnManager(ctx, mgr, sessionID, opts)
@@ -141,9 +155,9 @@ func (s *SandboxTerminalService) EnsureSessionTerminal(
 			return terminal, nil
 		}
 		// The pin names the config but the sandbox itself is gone
-		// (reclaimed or paused out of band). The config context is right
-		// here, so rebuild on it instead of treating the session as
-		// sandbox-less and asking the caller for an agent.
+		// (reclaimed out of band). Resume of a paused instance already
+		// happened above via AllowResume. Rebuild only when there is
+		// nothing left to connect to.
 		if errors.Is(terr, sandbox.ErrNoLiveSessionSandbox) {
 			if perr := s.provisionOnManager(ctx, mgr, sessionID); perr == nil {
 				if terminal, retryErr := s.openOnManager(ctx, mgr, sessionID, opts); retryErr == nil {
@@ -155,13 +169,19 @@ func (s *SandboxTerminalService) EnsureSessionTerminal(
 		}
 		return nil, terr
 	}
-	if !errors.Is(err, sandbox.ErrNoLiveSessionSandbox) || strings.TrimSpace(sandboxConfigID) == "" {
+	if !errors.Is(err, sandbox.ErrNoLiveSessionSandbox) || provision.IsZero() {
 		return nil, err
 	}
 
-	tenantID, _ := types.TenantIDFromContext(ctx)
+	// provision.TenantID owns provision.ConfigID; for a shared agent that is
+	// the lending workspace, which the WebSocket handler resolved alongside the
+	// config. Falling back to the request tenant keeps own-agent callers (and
+	// any caller that has no agent context) on their own workspace.
+	sessionTenantID, _ := types.TenantIDFromContext(ctx)
 	mgr, _, err = resolveSandboxForExecution(
-		ctx, s.resolver, s.fallback, s.pinner, tenantID, sessionID, strings.TrimSpace(sandboxConfigID), s.policy,
+		ctx, s.resolver, s.fallback, s.pinner,
+		provision.TenantOr(sessionTenantID), sessionID, provision.ConfigID, s.policy,
+		withLiteDesktop(s.desktop),
 	)
 	if err != nil {
 		return nil, err

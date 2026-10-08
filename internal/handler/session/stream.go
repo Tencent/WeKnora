@@ -146,9 +146,10 @@ func (h *Handler) ContinueStream(c *gin.Context) {
 		}
 	}
 
-	// Replay existing events
-	logger.Debugf(ctx, "Replaying %d existing events", len(events))
-	for _, evt := range events {
+	// Replay existing events, a segment's worth of chunks per frame
+	replay := coalesceReplayEvents(events)
+	logger.Debugf(ctx, "Replaying %d existing events as %d frames", len(events), len(replay))
+	for _, evt := range replay {
 		emitStreamEvent(ctx, c, evt, message.RequestID, resourceRewriter)
 	}
 

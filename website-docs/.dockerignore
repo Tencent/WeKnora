@@ -1,0 +1,12 @@
+**/node_modules
+**/.next
+**/out
+.vitepress/cache
+.vitepress/dist
+static-site
+releases
+**/.git
+**/.DS_Store
+**/.env*
+**/npm-debug.log*
+**/*.tsbuildinfo

@@ -35,6 +35,60 @@ type MentionedItem struct {
 	SkillName string `json:"skill_name"` // Preloaded agent skill name
 }
 
+// MapString reads a string from a JSON-decoded map.
+func MapString(m map[string]interface{}, key string) string {
+	if v, ok := m[key].(string); ok {
+		return v
+	}
+	return ""
+}
+
+// MentionedItemsFromRaw rebuilds typed mentions from the JSON-safe shape
+// stored on steer events and similar maps.
+func MentionedItemsFromRaw(raw interface{}) MentionedItems {
+	list, ok := raw.([]interface{})
+	if !ok {
+		return nil
+	}
+	out := make(MentionedItems, 0, len(list))
+	for _, item := range list {
+		m, ok := item.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		out = append(out, MentionedItem{
+			ID:        MapString(m, "id"),
+			Name:      MapString(m, "name"),
+			Type:      MapString(m, "type"),
+			KBType:    MapString(m, "kb_type"),
+			KBID:      MapString(m, "kb_id"),
+			KBName:    MapString(m, "kb_name"),
+			ServiceID: MapString(m, "service_id"),
+			SkillName: MapString(m, "skill_name"),
+		})
+	}
+	return out
+}
+
+// MentionedItemsToRaw converts typed mentions into plain values that survive
+// Redis JSON round-trips without a second unmarshal type on the read side.
+func MentionedItemsToRaw(items MentionedItems) []interface{} {
+	out := make([]interface{}, 0, len(items))
+	for _, item := range items {
+		out = append(out, map[string]interface{}{
+			"id":         item.ID,
+			"name":       item.Name,
+			"type":       item.Type,
+			"kb_type":    item.KBType,
+			"kb_id":      item.KBID,
+			"kb_name":    item.KBName,
+			"service_id": item.ServiceID,
+			"skill_name": item.SkillName,
+		})
+	}
+	return out
+}
+
 // MessageImage represents an image attached to a chat message
 type MessageImage struct {
 	URL     string `json:"url"`
@@ -174,22 +228,46 @@ func (m *MessageAttachments) Scan(value interface{}) error {
 // behalf and that WeKnora has persisted to its file service so the user can
 // download them after the sandbox is reaped.
 //
-// URL is the provider-scoped storage path (e.g. "local://tenant/..."), never
-// exposed directly to the client. SourcePath + ModTime form the sandbox-side
-// identity used by ArtifactCollector to de-duplicate files across multi-turn
-// runs (see docs/superpowers/specs/2026-07-10-skill-artifact-download-design.md).
+// SourcePath + ModTime is the cheap identity for an unchanged sandbox file.
+// When mtime moves, ArtifactCollector compares content hashes so a git
+// checkout cannot duplicate a blob and a same-size rewrite still attaches.
 type MessageArtifact struct {
-	URL        string    `json:"url"`         // Storage URL (provider://path); persisted, not sent to client
-	FileName   string    `json:"file_name"`   // Original filename inside the sandbox
-	FileType   string    `json:"file_type"`   // File extension (e.g., ".pptx", ".pdf")
-	FileSize   int64     `json:"file_size"`   // File size in bytes
-	SourcePath string    `json:"source_path"` // Absolute path inside the sandbox (used for diff)
-	ModTime    time.Time `json:"mod_time"`    // Sandbox-side modification time (used for diff)
-	CreatedAt  time.Time `json:"created_at"`  // When WeKnora persisted the blob
+	URL         string    `json:"url"`                    // Storage URL (provider://path); persisted, not sent to client
+	FileName    string    `json:"file_name"`              // Original filename inside the sandbox
+	FileType    string    `json:"file_type"`              // File extension (e.g., ".pptx", ".pdf")
+	FileSize    int64     `json:"file_size"`              // File size in bytes
+	ContentHash string    `json:"content_hash,omitempty"` // SHA-256 of the persisted bytes
+	SourcePath  string    `json:"source_path"`            // Absolute path inside the sandbox (used for diff)
+	ModTime     time.Time `json:"mod_time"`               // Sandbox-side modification time (used for diff)
+	CreatedAt   time.Time `json:"created_at"`             // When WeKnora persisted the blob
+	// DeletedAt marks a file the user deleted. The entry stays in the list
+	// rather than being removed because its position IS the download address
+	// (msg.Artifacts[index]); dropping it would shift every later file's index
+	// and hand an old link the wrong blob. Keeping it also keeps the entry in
+	// ArtifactCollector's de-duplication set, so the next collect does not
+	// re-attach the very file that was deleted — its sandbox mtime has not
+	// moved. Clients filter these out; the bytes are already reclaimed.
+	DeletedAt *time.Time `json:"deleted_at,omitempty"`
 }
+
+// Deleted reports whether the user deleted this artifact.
+func (a MessageArtifact) Deleted() bool { return a.DeletedAt != nil }
 
 // MessageArtifacts is a slice of MessageArtifact for database storage.
 type MessageArtifacts []MessageArtifact
+
+// Live returns the artifacts the user has not deleted, preserving order. The
+// caller loses the positional index, so use it for counting and display only —
+// anything that addresses an artifact for download must index the full slice.
+func (m MessageArtifacts) Live() MessageArtifacts {
+	out := make(MessageArtifacts, 0, len(m))
+	for _, a := range m {
+		if !a.Deleted() {
+			out = append(out, a)
+		}
+	}
+	return out
+}
 
 // Value implements the driver.Valuer interface for database serialization
 func (m MessageArtifacts) Value() (driver.Value, error) {
@@ -216,6 +294,37 @@ func (m *MessageArtifacts) Scan(value interface{}) error {
 		return nil
 	}
 	return json.Unmarshal(b, m)
+}
+
+// WithRestoredMtime stamps sandbox mtime onto the artifact at sourcePath
+// whose ContentHash already matches. Used after a fork checkout so later
+// collects can skip by path+mtime. Other versions at the same path —
+// including empty-hash legacy rows — are left alone. The returned slice is a
+// copy.
+func (m MessageArtifacts) WithRestoredMtime(sourcePath string, mod time.Time, hash string) (MessageArtifacts, bool) {
+	if len(m) == 0 || sourcePath == "" || hash == "" {
+		return m, false
+	}
+	out := make(MessageArtifacts, len(m))
+	copy(out, m)
+	changed := false
+	for i := range out {
+		if out[i].SourcePath != sourcePath {
+			continue
+		}
+		// Empty hashes are not a match: a restore must not stamp every
+		// historical version at this path. Only the row whose content
+		// already hashed to `hash` gets the new mtime.
+		if out[i].ContentHash != hash {
+			continue
+		}
+		if out[i].ModTime.Equal(mod) {
+			continue
+		}
+		out[i].ModTime = mod
+		changed = true
+	}
+	return out, changed
 }
 
 // MentionedItems is a slice of MentionedItem for database storage
@@ -278,7 +387,11 @@ type Message struct {
 	// Skill-generated files produced during this assistant turn (assistant messages only).
 	// Populated by ArtifactCollector after the sandbox finishes, referenced by the
 	// artifact download endpoint. Empty for user messages and turns without skills.
-	Artifacts MessageArtifacts `json:"artifacts,omitempty" gorm:"type:jsonb;column:artifacts"`
+	//
+	// Stored in the message_artifacts table, not on the message row: the message
+	// repository loads it with every message it returns and writes it whenever it
+	// is non-nil on create or update. A nil slice leaves the stored rows alone.
+	Artifacts MessageArtifacts `json:"artifacts,omitempty" gorm:"-"`
 	// Whether message generation is complete
 	IsCompleted bool `json:"is_completed"`
 	// Whether this response is a fallback (no knowledge base match found)
@@ -315,6 +428,17 @@ type Message struct {
 	// spot. Persisted rather than only streamed so reopening a conversation
 	// still explains what the answer saw.
 	UsedMemories UsedMemories `json:"used_memories,omitempty" gorm:"type:jsonb;column:used_memories"`
+	// SandboxCheckpoint is the git commit this assistant turn produced in the
+	// session sandbox's /workspace. Nil for user messages, for turns that ran
+	// without a sandbox, and for turns whose commit failed (best-effort — a
+	// failed checkpoint must never block the reply). A message without a
+	// checkpoint cannot serve as a fork point with sandbox state.
+	SandboxCheckpoint *SandboxCheckpoint `json:"sandbox_checkpoint,omitempty" gorm:"type:jsonb"`
+	// ContextCheckpoint is the agent compaction summary covering this turn
+	// and every turn before it (see ContextCheckpoint). Assistant messages
+	// only; nil unless a later turn's compaction ended exactly here. Internal
+	// to history loading, so it stays out of API responses.
+	ContextCheckpoint *ContextCheckpoint `json:"-" gorm:"type:jsonb;column:context_checkpoint"`
 	// Message creation timestamp
 	CreatedAt time.Time `json:"created_at"`
 	// Last update timestamp
@@ -334,6 +458,7 @@ type MessageExecutionContext struct {
 	TagScopes             []TagScope                `json:"tag_scopes,omitempty"`
 	MCPServiceIDs         []string                  `json:"mcp_service_ids,omitempty"`
 	SkillNames            []string                  `json:"skill_names,omitempty"`
+	LocalBrowserEnabled   bool                      `json:"local_browser_enabled,omitempty"`
 	WebSearchEnabled      bool                      `json:"web_search_enabled"`
 	Locale                string                    `json:"locale,omitempty"`
 	SuggestionAttribution *SuggestionAttribution    `json:"suggestion_attribution,omitempty"`

@@ -148,13 +148,11 @@ jobs:
           flavor: |
             suffix=-cube,onlatest=true
 
-      # amd64 only: cubesandbox-base, the source of the envd binary, publishes
-      # no arm64 image.
       - name: Build sandbox Cube Image
         uses: docker/build-push-action@v7
         with:
           push: true
-          platforms: linux/amd64
+          platforms: linux/amd64,linux/arm64
           file: docker/Dockerfile.sandbox
           target: cube
           context: .
@@ -162,6 +160,48 @@ jobs:
           tags: ${{ steps.meta-cube.outputs.tags }}
           cache-from: type=gha,scope=build-sandbox-cube
           cache-to: type=gha,scope=build-sandbox-cube,mode=max
+
+      - name: Docker meta (desktop variant)
+        id: meta-desktop
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ secrets.DOCKERHUB_USERNAME }}/weknora-sandbox
+          flavor: |
+            suffix=-desktop,onlatest=true
+
+      - name: Build sandbox desktop Image
+        uses: docker/build-push-action@v7
+        with:
+          push: true
+          platforms: linux/amd64,linux/arm64
+          file: docker/Dockerfile.sandbox
+          target: desktop
+          context: .
+          labels: ${{ steps.meta-desktop.outputs.labels }}
+          tags: ${{ steps.meta-desktop.outputs.tags }}
+          cache-from: type=gha,scope=build-sandbox-desktop
+          cache-to: type=gha,scope=build-sandbox-desktop,mode=max
+
+      - name: Docker meta (desktop Cube variant)
+        id: meta-desktop-cube
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ secrets.DOCKERHUB_USERNAME }}/weknora-sandbox
+          flavor: |
+            suffix=-desktop-cube,onlatest=true
+
+      - name: Build sandbox desktop Cube Image
+        uses: docker/build-push-action@v7
+        with:
+          push: true
+          platforms: linux/amd64,linux/arm64
+          file: docker/Dockerfile.sandbox
+          target: desktop-cube
+          context: .
+          labels: ${{ steps.meta-desktop-cube.outputs.labels }}
+          tags: ${{ steps.meta-desktop-cube.outputs.tags }}
+          cache-from: type=gha,scope=build-sandbox-desktop-cube
+          cache-to: type=gha,scope=build-sandbox-desktop-cube,mode=max
 
   build-app:
     strategy:

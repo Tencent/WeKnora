@@ -42,6 +42,15 @@ func serveFrontendStatic(r *gin.Engine) {
 			c.Next()
 			return
 		}
+		// Embed pages need the dedicated entry point and the channel CSP set by
+		// embedFrameAncestorsMiddleware. Keep the main SPA same-origin only.
+		if strings.HasPrefix(path, "/embed/") {
+			c.File(filepath.Join(absDir, "embed.html"))
+			c.Abort()
+			return
+		}
+		c.Header("X-Frame-Options", "SAMEORIGIN")
+		c.Header("Content-Security-Policy", "frame-ancestors 'self'")
 		fullPath := filepath.Join(absDir, path)
 		if info, err := os.Stat(fullPath); err == nil && !info.IsDir() {
 			setFrontendCacheHeaders(c.Writer, path)

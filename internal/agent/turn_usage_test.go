@@ -31,3 +31,12 @@ func TestTurnUsageCopiesTheAggregate(t *testing.T) {
 		t.Fatalf("emitted usage must be detached from state: %+v", usage)
 	}
 }
+
+// A token scale is worth persisting on its own: it calibrates the next turn's
+// history loading even when the provider reported no token counts.
+func TestTurnUsageKeepsAScaleWithoutTokenCounts(t *testing.T) {
+	usage := turnUsage(&types.AgentState{TurnUsage: types.TokenUsage{ContextTokenScale: 0.7}})
+	if usage == nil || usage.ContextTokenScale != 0.7 {
+		t.Fatalf("scale-only usage must be kept: %+v", usage)
+	}
+}

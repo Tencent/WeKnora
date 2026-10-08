@@ -627,10 +627,10 @@ onBeforeUnmount(() => {
     margin: 0;
     padding: 0;
     border: 0;
-    border-radius: 4px;
+    border-radius: var(--app-radius-xs);
     background: transparent;
     color: var(--td-text-color-secondary);
-    font-size: 14px;
+    font-size: var(--app-text-base);
     line-height: 22px;
     cursor: pointer;
     flex: 0 1 auto;
@@ -668,7 +668,7 @@ onBeforeUnmount(() => {
 
   .tree-root-expand__icon {
     flex-shrink: 0;
-    font-size: 14px;
+    font-size: var(--app-text-base);
     color: currentColor;
   }
 

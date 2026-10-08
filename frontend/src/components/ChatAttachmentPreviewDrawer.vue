@@ -163,15 +163,15 @@ onUnmounted(() => {
 
 .chat-attachment-drawer-header-icon {
   flex-shrink: 0;
-  width: 32px;
-  height: 32px;
-  border-radius: 9px;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--app-radius-sm);
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(7, 192, 95, 0.1);
+  background: color-mix(in srgb, var(--td-brand-color) 10%, transparent);
   color: var(--td-brand-color);
-  font-size: 16px;
+  font-size: var(--app-text-lg);
 }
 
 .chat-attachment-drawer-header-text {
@@ -180,9 +180,9 @@ onUnmounted(() => {
 }
 
 .chat-attachment-drawer-header-title {
-  font-size: 15px;
-  font-weight: 600;
-  line-height: 1.4;
+  font-size: var(--app-text-base);
+  font-weight: 500;
+  line-height: 20px;
   color: var(--td-text-color-primary);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -222,7 +222,7 @@ onUnmounted(() => {
   border-radius: 1px;
   background: var(--td-component-border);
   opacity: 0.55;
-  transition: opacity 0.15s ease, background 0.15s ease;
+  transition: opacity var(--app-motion-fast) ease, background var(--app-motion-fast) ease;
 }
 
 .chat-attachment-drawer-resize-handle:hover .chat-attachment-drawer-resize-line,
@@ -240,9 +240,17 @@ onUnmounted(() => {
   }
 
   .t-drawer__header {
-    padding: 14px 18px;
+    height: var(--app-chat-header-height);
+    min-height: var(--app-chat-header-height);
+    padding: 0 12px;
     border-bottom: 1px solid var(--td-component-stroke);
     flex-shrink: 0;
+  }
+
+  .t-drawer__close-btn {
+    top: calc((var(--app-chat-header-height) - 28px) / 2);
+    width: 28px;
+    height: 28px;
   }
 
   .t-drawer__body {

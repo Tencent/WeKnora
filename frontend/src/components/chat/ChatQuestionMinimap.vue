@@ -3,10 +3,11 @@
     v-if="visible"
     ref="rootRef"
     class="question-minimap"
-    :style="{ left: `${RAIL_INSET_PX}px`, height: `${trackHeight}px` }"
+    :style="{ height: `${trackHeight}px` }"
     :aria-label="t('chat.questionMinimapAriaLabel')"
     @mouseenter="handleMouseEnter"
     @mouseleave="handleMouseLeave"
+    @focusout="handleFocusOut"
   >
     <button
       class="question-minimap__rail"
@@ -23,10 +24,13 @@
         v-for="tick in ticks"
         :key="tick.id"
         class="question-minimap__tick"
-        :class="{ 'question-minimap__tick--active': tick.id === peakId }"
+        :class="{
+          'question-minimap__tick--active': visibleIds.has(tick.id),
+          'question-minimap__tick--previewed': panelOpen && peakId === tick.id,
+        }"
         :style="{
           top: `${tick.yPx}px`,
-          transform: `translateY(-50%) scaleX(${tickDisplayScale(tick.yPx, mountainPointerY, tick.id === peakId)})`,
+          transform: `translateY(-50%) scaleX(${tickDisplayScale(tick.yPx, mountainPointerY, visibleIds.has(tick.id))})`,
         }"
       />
     </button>
@@ -43,20 +47,23 @@
       role="dialog"
       :aria-label="t('chat.questionMinimapTitle')"
       :style="{ top: `${peakYPx}px` }"
-      @click="handleQuestionClick(peakTurn.id)"
+      @keydown.esc.stop.prevent="closePanel"
     >
-      <p class="question-minimap__question" :title="questionText(peakTurn)">
-        {{ questionText(peakTurn) }}
-      </p>
-      <p v-if="answerText(peakTurn)" class="question-minimap__answer">
-        {{ answerText(peakTurn) }}
-      </p>
+      <button type="button" class="question-minimap__preview" @click="handleQuestionClick(peakTurn.id)">
+        <span class="question-minimap__meta">
+          <t-icon name="chat" size="13px" aria-hidden="true" />
+          <span class="question-minimap__position">{{ t('chat.questionMinimapPosition', { current: peakIndex + 1, total: anchoredQuestions.length }) }}</span>
+          <t-icon name="arrow-up" size="14px" class="question-minimap__jump-icon" aria-hidden="true" />
+        </span>
+        <span class="question-minimap__question">{{ questionText(peakTurn) }}</span>
+        <span v-if="answerText(peakTurn)" class="question-minimap__answer">{{ answerText(peakTurn) }}</span>
+      </button>
     </section>
   </nav>
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, toRef } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, toRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useChatQuestionMinimap } from '@/composables/useChatQuestionMinimap'
 import {
@@ -65,11 +72,11 @@ import {
   questionDisplayText,
   tickDisplayScale,
   type ChatMessageLike,
-  type UserQuestion,
+  type OutlineMessage,
 } from '@/utils/chatQuestionMinimap'
 
-const CLOSE_DELAY_MS = 150
-const RAIL_INSET_PX = 0
+const OPEN_DELAY_MS = 120
+const CLOSE_DELAY_MS = 180
 
 const props = defineProps<{
   scrollContainer: HTMLElement | null
@@ -94,6 +101,7 @@ const {
   questions,
   ticks,
   activeId,
+  visibleIds,
   anchoredIds,
   trackHeight,
 } = useChatQuestionMinimap({
@@ -114,6 +122,7 @@ const peakId = computed(() => {
 const peakTurn = computed(() => (
   questions.value.find((question) => question.id === peakId.value) ?? null
 ))
+const peakIndex = computed(() => anchoredQuestions.value.findIndex(turn => turn.id === peakId.value))
 const peakYPx = computed(() => {
   const tick = ticks.value.find((item) => item.id === peakId.value)
   return tick?.yPx ?? 0
@@ -124,12 +133,15 @@ const mountainPointerY = computed(() => {
 })
 
 let closeTimer: number | null = null
+let openTimer: number | null = null
 
-const questionText = (question: UserQuestion) => (
-  questionDisplayText(question.content, t('chat.questionMinimapAttachmentPlaceholder'))
+const questionText = (question: OutlineMessage) => (
+  question.role === 'assistant'
+    ? answerPreviewText(question.content) || t('chat.thinking')
+    : questionDisplayText(question.content, t('chat.questionMinimapAttachmentPlaceholder'))
 )
 
-const answerText = (question: UserQuestion) => (
+const answerText = (question: OutlineMessage) => (
   answerPreviewText(question.answerContent)
 )
 
@@ -140,13 +152,20 @@ const clearCloseTimer = () => {
   closeTimer = null
 }
 
+const clearOpenTimer = () => {
+  if (openTimer !== null) window.clearTimeout(openTimer)
+  openTimer = null
+}
+
 const openPanel = () => {
+  clearOpenTimer()
   clearCloseTimer()
   hoverOpen.value = true
   keyboardIndex.value = -1
 }
 
 const closePanel = () => {
+  clearOpenTimer()
   clearCloseTimer()
   hoverOpen.value = false
   pinnedOpen.value = false
@@ -155,7 +174,12 @@ const closePanel = () => {
   keyboardIndex.value = -1
 }
 
+watch(visible, (isVisible) => {
+  if (!isVisible) closePanel()
+})
+
 const scheduleClose = () => {
+  clearOpenTimer()
   clearCloseTimer()
   closeTimer = window.setTimeout(() => {
     hoverOpen.value = false
@@ -172,7 +196,9 @@ const syncKeyboardIndexToActive = () => {
 
 const handleMouseEnter = () => {
   if (isCoarsePointer.value) return
-  openPanel()
+  clearCloseTimer()
+  if (panelOpen.value || openTimer !== null) return
+  openTimer = window.setTimeout(openPanel, OPEN_DELAY_MS)
 }
 
 const handleMouseLeave = () => {
@@ -184,23 +210,31 @@ const handleRailPointerMove = (event: PointerEvent) => {
   if (isCoarsePointer.value) return
 
   const target = event.currentTarget as HTMLElement
-  pointerY.value = event.clientY - target.getBoundingClientRect().top
+  const rect = target.getBoundingClientRect()
+  pointerY.value = (event.clientY - rect.top) * trackHeight.value / (rect.height || 1)
   hoveredId.value = nearestTickId(ticks.value, pointerY.value)
+  keyboardIndex.value = -1
 }
 
-const handleRailClick = () => {
+const handleRailClick = (event: MouseEvent) => {
+  const rect = (event.currentTarget as HTMLElement).getBoundingClientRect()
+  const id = event.detail === 0 ? peakId.value : nearestTickId(
+    ticks.value, (event.clientY - rect.top) * trackHeight.value / (rect.height || 1),
+  )
   if (!isCoarsePointer.value) {
-    const id = peakId.value
     if (id) handleQuestionClick(id)
     return
   }
 
+  clearOpenTimer()
   clearCloseTimer()
-  pinnedOpen.value = !pinnedOpen.value
+  pinnedOpen.value = !pinnedOpen.value || hoveredId.value !== id
   hoverOpen.value = false
-  if (pinnedOpen.value) {
-    hoveredId.value = activeId.value ?? questions.value[0]?.id ?? null
-  }
+  hoveredId.value = id
+}
+
+const handleFocusOut = (event: FocusEvent) => {
+  if (!rootRef.value?.contains(event.relatedTarget as Node | null)) closePanel()
 }
 
 const handleQuestionClick = (id: string) => {
@@ -215,7 +249,10 @@ const moveKeyboard = (direction: 1 | -1) => {
   if (anchored.length === 0) return
 
   const wasOpen = panelOpen.value
+  clearOpenTimer()
   clearCloseTimer()
+  pointerY.value = null
+  hoveredId.value = null
   hoverOpen.value = true
   if (!wasOpen) {
     syncKeyboardIndexToActive()
@@ -255,9 +292,17 @@ const handleRailKeydown = (event: KeyboardEvent) => {
     return
   }
 
-  if (event.key === 'Enter') {
+  if (event.key === 'Enter' || event.key === ' ') {
     event.preventDefault()
     jumpKeyboardQuestion()
+    return
+  }
+
+  if (event.key === 'Home' || event.key === 'End') {
+    event.preventDefault()
+    openPanel()
+    const target = event.key === 'Home' ? anchoredQuestions.value[0] : anchoredQuestions.value.at(-1)
+    keyboardIndex.value = questions.value.findIndex(question => question.id === target?.id)
     return
   }
 
@@ -268,7 +313,7 @@ const handleRailKeydown = (event: KeyboardEvent) => {
 }
 
 const handleDocumentPointerDown = (event: PointerEvent) => {
-  if (!isCoarsePointer.value || !panelOpen.value) return
+  if (!panelOpen.value && openTimer === null) return
   const target = event.target as Node | null
   if (target && rootRef.value?.contains(target)) return
 
@@ -281,6 +326,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  clearOpenTimer()
   clearCloseTimer()
   document.removeEventListener('pointerdown', handleDocumentPointerDown)
 })
@@ -290,13 +336,13 @@ onBeforeUnmount(() => {
 .question-minimap {
   position: absolute;
   top: 50%;
-  left: 0;
+  left: var(--chat-content-inset, 20px);
   z-index: 11;
   display: flex;
   align-items: stretch;
   transform: translateY(-50%);
   pointer-events: none;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   line-height: 1.45;
 }
 
@@ -308,7 +354,7 @@ onBeforeUnmount(() => {
 
 .question-minimap__rail {
   position: relative;
-  width: 24px;
+  width: 28px;
   height: 100%;
   padding: 0;
   overflow: visible;
@@ -317,7 +363,18 @@ onBeforeUnmount(() => {
   cursor: pointer;
 }
 
+.question-minimap__rail::before {
+  content: '';
+  position: absolute;
+  inset: -8px -4px;
+  border-radius: 6px;
+}
+
 .question-minimap__rail:focus-visible {
+  outline: none;
+}
+
+.question-minimap__rail:focus-visible::before {
   outline: 2px solid var(--td-brand-color);
   outline-offset: 2px;
 }
@@ -325,14 +382,19 @@ onBeforeUnmount(() => {
 .question-minimap__tick {
   position: absolute;
   left: 0;
-  width: 8px;
+  width: 9px;
   height: 2px;
   border-radius: 1px;
   background: var(--td-text-color-secondary);
   opacity: 0.4;
   transform: translateY(-50%);
   transform-origin: left center;
-  transition: transform 120ms ease-out, background 120ms ease-out, opacity 120ms ease-out;
+  transition: transform var(--app-motion-instant) ease-out, background var(--app-motion-instant) ease-out, opacity var(--app-motion-instant) ease-out;
+}
+
+.question-minimap__tick--previewed {
+  background: var(--td-text-color-primary);
+  opacity: 0.7;
 }
 
 .question-minimap__tick--active {
@@ -346,16 +408,18 @@ onBeforeUnmount(() => {
 
 .question-minimap__panel {
   position: absolute;
-  left: 20px;
-  width: 220px;
+  left: 28px;
+  width: 264px;
+  max-width: calc(100vw - 80px);
   max-height: min(280px, 40vh);
-  padding: 6px 8px;
+  padding: 0;
   overflow: hidden;
   scrollbar-width: none;
-  border: 1px solid var(--td-component-stroke);
-  border-radius: 6px;
+  border: 0.5px solid var(--td-component-stroke);
+  border-radius: var(--app-radius-lg);
   background: var(--td-bg-color-container);
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.04), 0 6px 20px rgba(0, 0, 0, 0.08);
+  transition: top var(--app-motion-fast) ease-out;
   transform: translateY(-50%);
   cursor: pointer;
 }
@@ -364,34 +428,67 @@ onBeforeUnmount(() => {
   display: none;
 }
 
+.question-minimap__preview {
+  display: block;
+  width: 100%;
+  padding: 12px 14px;
+  border: 0;
+  text-align: left;
+  font-family: var(--app-font-family);
+  background: transparent;
+  cursor: pointer;
+  transition: background-color var(--app-motion-fast) ease;
+
+  &:hover { background: var(--td-bg-color-container-hover); }
+  &:focus-visible { outline: 2px solid var(--td-brand-color); outline-offset: -3px; border-radius: var(--app-radius-lg); }
+}
+
+.question-minimap__meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-size: var(--app-text-xs);
+  color: var(--td-text-color-placeholder);
+}
+
+.question-minimap__position {
+  font-variant-numeric: tabular-nums;
+}
+
+.question-minimap__jump-icon { margin-left: auto; transform: rotate(-45deg); }
+
 .question-minimap__question,
 .question-minimap__answer {
   margin: 0;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   font-weight: 400;
-  line-height: 1.45;
+  line-height: 1.6;
 }
 
 .question-minimap__question {
+  display: -webkit-box;
   overflow: hidden;
   color: var(--td-text-color-primary);
   font-weight: 500;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow-wrap: anywhere;
 }
 
 .question-minimap__answer {
   display: -webkit-box;
-  margin-top: 4px;
+  margin-top: 6px;
   overflow: hidden;
   color: var(--td-text-color-secondary);
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 3;
-  opacity: 0.8;
+  overflow-wrap: anywhere;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .question-minimap__tick {
+  .question-minimap__tick,
+  .question-minimap__panel {
     transition: none;
   }
 }

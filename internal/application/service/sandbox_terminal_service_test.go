@@ -15,12 +15,12 @@ import (
 // reconnect take, so it must stop at "no live sandbox". A confirmed click
 // without a resolved sandbox config ID stays lookup-only as well.
 func TestOpenSessionTerminalNeverReachesProvisioning(t *testing.T) {
-	svc := NewSandboxTerminalService(nil, nil, nil, nil)
+	svc := NewSandboxTerminalService(nil, nil, nil, nil, HostSandboxManager{})
 	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(42))
 
 	_, err := svc.OpenSessionTerminal(ctx, "sess-1", sandbox.RemoteTerminalOptions{})
 	require.ErrorIs(t, err, sandbox.ErrNoLiveSessionSandbox)
 
-	_, err = svc.EnsureSessionTerminal(ctx, "sess-1", "", sandbox.RemoteTerminalOptions{})
+	_, err = svc.EnsureSessionTerminal(ctx, "sess-1", SandboxPin{}, sandbox.RemoteTerminalOptions{})
 	require.ErrorIs(t, err, sandbox.ErrNoLiveSessionSandbox)
 }

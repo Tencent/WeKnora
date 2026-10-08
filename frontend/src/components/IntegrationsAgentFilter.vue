@@ -59,11 +59,11 @@ function onSelect(data: { value?: string }) {
   max-width: 220px;
   padding: 2px 6px 2px 4px;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   background: transparent;
   color: var(--td-text-color-placeholder);
   cursor: pointer;
-  transition: background 0.2s ease, color 0.2s ease;
+  transition: background var(--app-motion-base) ease, color var(--app-motion-base) ease;
 
   &:hover {
     background: var(--td-bg-color-container-hover);
@@ -90,7 +90,7 @@ function onSelect(data: { value?: string }) {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     font-weight: 500;
     color: inherit;
   }

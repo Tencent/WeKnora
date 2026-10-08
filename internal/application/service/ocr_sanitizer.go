@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	htmltomd "github.com/JohannesKaufmann/html-to-markdown/v2"
+	"github.com/Tencent/WeKnora/internal/infrastructure/docparser"
 )
 
 var (
@@ -48,6 +49,13 @@ func sanitizeOCRText(raw string) string {
 			return ""
 		}
 	}
+
+	// Convert inline HTML <table> blocks to GFM tables. This is a safe no-op
+	// when no <table> is present, so it runs unconditionally: a markdown body
+	// with an embedded HTML table does not satisfy looksLikeHTML (it neither
+	// starts with a tag nor is dominated by tag characters), yet leaving the
+	// raw markup in place makes the chunker split inside table rows.
+	text = docparser.NormalizeHTMLTables(text)
 
 	if isKnownEmptyReply(text) {
 		return ""

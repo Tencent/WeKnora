@@ -310,7 +310,10 @@ type ParserEngineConfig struct {
 	MinerUEndpoint        string             `json:"mineru_endpoint"` // MinerU 自建服务端点
 	MinerUAPIKey          string             `json:"mineru_api_key"`  // MinerU 云 API Key
 
-	// MinerU 自建解析参数
+	// MinerU 自建解析参数。协议按服务端自动识别：4.0+ 走 V1 API，更早版本走 /file_parse。
+	MinerUServerAPIKey string `json:"mineru_server_api_key,omitempty"` // 4.0+：服务端 --api-key
+	MinerUTier         string `json:"mineru_tier,omitempty"`           // 4.0+：flash/basic/standard/advanced，空为服务端默认
+	// 以下 backend、vLLM、公式/表格、语言参数仅对 3.x 及更早版本生效。
 	MinerUModel         string `json:"mineru_model,omitempty"`          // backend: pipeline, vlm-*, hybrid-*
 	MinerUVLMServerURL  string `json:"mineru_vlm_server_url,omitempty"` // vLLM 服务器地址 (vlm-http-client / hybrid-http-client)
 	MinerUEnableFormula *bool  `json:"mineru_enable_formula,omitempty"`
@@ -399,6 +402,12 @@ func (c *ParserEngineConfig) ToOverridesMap() map[string]string {
 	}
 	if c.MinerUAPIKey != "" {
 		m["mineru_api_key"] = c.MinerUAPIKey
+	}
+	if c.MinerUServerAPIKey != "" {
+		m["mineru_server_api_key"] = c.MinerUServerAPIKey
+	}
+	if c.MinerUTier != "" {
+		m["mineru_tier"] = c.MinerUTier
 	}
 	if c.MinerUModel != "" {
 		m["mineru_model"] = c.MinerUModel
@@ -633,11 +642,19 @@ type TenantSandboxConfig struct {
 	// program's built-in default.
 	DefaultTimeoutSec int `json:"default_timeout_sec,omitempty"`
 
-	// TerminalIdleDisconnectSec is how long an interactive terminal may go
-	// without keystrokes or PTY output before WeKnora closes the connection
-	// so the sandbox can pause on its provider TTL. 0 uses the built-in
-	// default (15 minutes). Not an identity field.
+	// TerminalIdleDisconnectSec is how long an interactive terminal or
+	// desktop may go without user activity before WeKnora closes the
+	// connection so the sandbox can pause on its provider TTL. Terminal
+	// counts keystrokes and PTY output; desktop counts mouse and keyboard.
+	// 0 uses the built-in default (15 minutes). Not an identity field.
 	TerminalIdleDisconnectSec int `json:"terminal_idle_disconnect_sec,omitempty"`
+
+	// DesktopEnabled declares that this config's base template is a desktop
+	// image (XFCE + x11vnc + websockify). It is NOT a second template: a
+	// config has exactly one boot target, and skill snapshots stack on top of
+	// this base generation after generation. Flipping it changes the base, so
+	// any installed skills must be rebuilt from the new one.
+	DesktopEnabled bool `json:"desktop_enabled,omitempty"`
 
 	// AllowPrivateEndpoints permits this workspace config to reach RFC1918 or
 	// loopback cluster endpoints. Link-local/cloud-metadata addresses remain

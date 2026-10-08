@@ -22,8 +22,9 @@
  *   - empty  : tool has no KB requirement (always available).
  *
  * IMPORTANT: keep this list aligned with backend tool definitions
- * (`internal/agent/tools/`). A tool missing from this map defaults to
- * "always available" so new tools don't silently start disabled.
+ * (`internal/agent/tools/`; this map mirrors
+ * `internal/agent/tools/capabilities.go`). A tool missing from this map
+ * defaults to "always available" so new tools don't silently start disabled.
  */
 
 export type KBCapability = 'vector' | 'keyword' | 'wiki' | 'graph' | 'faq';
@@ -31,6 +32,14 @@ export type KBCapability = 'vector' | 'keyword' | 'wiki' | 'graph' | 'faq';
 export interface ToolRequirement {
   anyOf?: KBCapability[];
   allOf?: KBCapability[];
+  /**
+   * Auxiliary tools work on the listed KBs but do not by themselves make a KB
+   * worth selecting (a document reader can open a wiki-only KB's sources, yet
+   * must not pull wiki-only KBs into a RAG agent's scope). They only shape
+   * the derived KB filter when no primary tool has a requirement. Mirrors
+   * `ToolRequirement.Auxiliary` in `internal/agent/tools/capabilities.go`.
+   */
+  auxiliary?: boolean;
   /**
    * Whether this tool can use user-provided file references (via @ 提及) as
    * an additional retrieval scope. Tools with `consumesFiles: false` ignore
@@ -49,18 +58,27 @@ export const TOOL_CAPABILITY_REQUIREMENTS: Record<string, ToolRequirement> = {
   // We use vector|keyword as the canonical "has RAG chunks" signal. FAQ KBs
   // also expose chunks, but the current UX message bucket is "RAG KB"; once
   // we add a dedicated `requiresFaqKb` i18n key we can include `faq` here.
+  search_knowledge:      { anyOf: ['vector', 'keyword'], consumesFiles: true },
+  // Document readers work on stored chunks, which wiki-only KBs have too.
+  read_document:         { anyOf: ['vector', 'keyword', 'wiki'], consumesFiles: true, auxiliary: true },
+  list_documents:        { anyOf: ['vector', 'keyword', 'wiki'], consumesFiles: true, auxiliary: true },
+  database_query:        { anyOf: ['vector', 'keyword'], consumesFiles: true },
+  // Retired names kept so stale agent configs / stored history still resolve.
+  // The editor normalizes them to the new names on load (see
+  // `@/utils/legacy-tool-names`).
   knowledge_search:      { anyOf: ['vector', 'keyword'], consumesFiles: true },
   grep_chunks:           { anyOf: ['vector', 'keyword'], consumesFiles: true },
   list_knowledge_chunks: { anyOf: ['vector', 'keyword'], consumesFiles: true },
-  query_knowledge_graph: { anyOf: ['vector', 'keyword'], consumesFiles: true },
   get_document_info:     { anyOf: ['vector', 'keyword'], consumesFiles: true },
-  database_query:        { anyOf: ['vector', 'keyword'], consumesFiles: true },
+  wiki_read_source_doc:  { anyOf: ['vector', 'keyword', 'wiki'], consumesFiles: true, auxiliary: true },
+
+  // ---- Knowledge graph (needs a graph-indexed KB) ----
+  query_knowledge_graph: { allOf: ['graph'], consumesFiles: true },
 
   // ---- Wiki (operates on wiki pages referenced by the wiki machinery;
   //      arbitrary user-picked file IDs aren't meaningful here) ----
   wiki_search:          { allOf: ['wiki'] },
   wiki_read_page:       { allOf: ['wiki'] },
-  wiki_read_source_doc: { allOf: ['wiki'] },
   wiki_flag_issue:      { allOf: ['wiki'] },
   wiki_write_page:      { allOf: ['wiki'] },
   wiki_replace_text:    { allOf: ['wiki'] },
@@ -153,13 +171,16 @@ function primaryMissKind(c: KBCapability): RequirementMissKind {
 export function deriveKbFilterFromTools(
   tools: string[],
 ): { any_of: KBCapability[] } | null {
-  const caps = new Set<KBCapability>();
+  const primary = new Set<KBCapability>();
+  const auxiliary = new Set<KBCapability>();
   for (const t of tools) {
     const req = TOOL_CAPABILITY_REQUIREMENTS[t];
     if (!req) continue;
-    req.anyOf?.forEach(c => caps.add(c));
-    req.allOf?.forEach(c => caps.add(c));
+    const target = req.auxiliary ? auxiliary : primary;
+    req.anyOf?.forEach(c => target.add(c));
+    req.allOf?.forEach(c => target.add(c));
   }
+  const caps = primary.size > 0 ? primary : auxiliary;
   if (caps.size === 0) return null;
   return { any_of: Array.from(caps) };
 }

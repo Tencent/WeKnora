@@ -22,6 +22,7 @@ const (
 	webSocketMaxMessageSize    = 1 << 20
 	webSocketMaxInvalidFrames  = 3
 	webSocketMessageQueueSize  = 64
+	webSocketMaxConnectionAge  = 6 * time.Hour
 )
 
 var webSocketReconnectDelays = [...]time.Duration{
@@ -34,37 +35,55 @@ var webSocketReconnectDelays = [...]time.Duration{
 }
 
 type webSocketFrame struct {
-	message *callbackMessage
-	ack     []byte
-	control string
+	message  *callbackMessage
+	ack      []byte
+	cmd      string
+	typeName string
+	event    string
+	seq      int64
+	hasSeq   bool
+	needAck  bool
+	control  string
 }
 
 type LongConnClient struct {
-	url      string
-	handler  func(context.Context, *im.IncomingMessage) error
-	dialer   *ws.Dialer
-	messages chan *im.IncomingMessage
+	channelID        string
+	url              string
+	handler          func(context.Context, *im.IncomingMessage) error
+	dialer           *ws.Dialer
+	messages         chan *im.IncomingMessage
+	maxConnectionAge time.Duration
 
-	mu     sync.Mutex
-	conn   *ws.Conn
-	closed atomic.Bool
+	mu                    sync.Mutex
+	conn                  *ws.Conn
+	closed                atomic.Bool
+	connectedAt           atomic.Int64
+	lastFrameAt           atomic.Int64
+	lastPongAt            atomic.Int64
+	lastBusinessMessageAt atomic.Int64
+	reconnectCount        atomic.Int64
 }
 
-func NewLongConnClient(webSocketURL string, handler func(context.Context, *im.IncomingMessage) error) *LongConnClient {
+func NewLongConnClient(
+	channelID, webSocketURL string,
+	handler func(context.Context, *im.IncomingMessage) error,
+) *LongConnClient {
 	dialer := *ws.DefaultDialer
 	dialer.HandshakeTimeout = webSocketHandshakeTimeout
 	dialer.Proxy = nil
 	dialer.NetDialContext = safeDialContext
 	return &LongConnClient{
-		url:      webSocketURL,
-		handler:  handler,
-		dialer:   &dialer,
-		messages: make(chan *im.IncomingMessage, webSocketMessageQueueSize),
+		channelID:        channelID,
+		url:              webSocketURL,
+		handler:          handler,
+		dialer:           &dialer,
+		messages:         make(chan *im.IncomingMessage, webSocketMessageQueueSize),
+		maxConnectionAge: webSocketMaxConnectionAge,
 	}
 }
 
 func (c *LongConnClient) Start(ctx context.Context) error {
-	logger.Infof(ctx, "[IM] Yunzhijia WebSocket connecting")
+	logger.Infof(ctx, "[IM] Yunzhijia WebSocket connecting channel_id=%s", c.channelID)
 	go c.handleMessages(ctx)
 	attempt := 0
 	for {
@@ -72,18 +91,22 @@ func (c *LongConnClient) Start(ctx context.Context) error {
 			return nil
 		}
 
-		connectedAt := time.Now()
+		startedAt := time.Now()
 		err := c.connectAndRun(ctx)
 		if ctx.Err() != nil || c.closed.Load() {
 			return nil
 		}
-		if time.Since(connectedAt) >= webSocketReconnectDelays[len(webSocketReconnectDelays)-1] {
+		if time.Since(startedAt) >= webSocketReconnectDelays[len(webSocketReconnectDelays)-1] {
 			attempt = 0
 		}
 
 		delay := webSocketReconnectDelay(attempt)
 		attempt++
-		logger.Warnf(ctx, "[Yunzhijia] WebSocket connection lost: %v; reconnecting in %v", err, delay)
+		reconnectCount := c.reconnectCount.Add(1)
+		logger.Warnf(ctx,
+			"[Yunzhijia] WebSocket connection lost channel_id=%s reconnect_count=%d reason=%v; reconnecting in %v; %s",
+			c.channelID, reconnectCount, err, delay, c.healthStatus(),
+		)
 		select {
 		case <-ctx.Done():
 			return nil
@@ -118,21 +141,39 @@ func (c *LongConnClient) connectAndRun(ctx context.Context) error {
 	conn.SetReadLimit(webSocketMaxMessageSize)
 	_ = conn.SetReadDeadline(time.Now().Add(webSocketReadTimeout))
 	conn.SetPongHandler(func(string) error {
+		c.lastPongAt.Store(time.Now().UnixNano())
 		return conn.SetReadDeadline(time.Now().Add(webSocketReadTimeout))
 	})
 
-	heartbeatCtx, cancelHeartbeat := context.WithCancel(ctx)
-	defer cancelHeartbeat()
-	go c.heartbeatLoop(heartbeatCtx, conn)
+	now := time.Now()
+	c.connectedAt.Store(now.UnixNano())
+	c.lastFrameAt.Store(0)
+	c.lastPongAt.Store(0)
+	c.lastBusinessMessageAt.Store(0)
+	logger.Infof(ctx,
+		"[IM] Yunzhijia WebSocket connected channel_id=%s connected_at=%s",
+		c.channelID, now.Format(time.RFC3339Nano),
+	)
 
-	logger.Infof(ctx, "[IM] Yunzhijia WebSocket connected")
+	connectionCtx, cancelConnection := context.WithCancel(ctx)
+	defer cancelConnection()
+	maxAgeReached := make(chan struct{})
+	go c.heartbeatLoop(connectionCtx, conn)
+	go c.maxConnectionAgeLoop(connectionCtx, conn, maxAgeReached)
 	invalidFrames := 0
 	for {
 		messageType, data, err := conn.ReadMessage()
 		if err != nil {
+			select {
+			case <-maxAgeReached:
+				return fmt.Errorf("websocket maximum connection age %s exceeded", c.maxConnectionAge)
+			default:
+			}
 			return fmt.Errorf("read websocket message: %w", err)
 		}
-		_ = conn.SetReadDeadline(time.Now().Add(webSocketReadTimeout))
+		now := time.Now()
+		c.lastFrameAt.Store(now.UnixNano())
+		_ = conn.SetReadDeadline(now.Add(webSocketReadTimeout))
 
 		if messageType != ws.TextMessage {
 			invalidFrames++
@@ -145,13 +186,14 @@ func (c *LongConnClient) connectAndRun(ctx context.Context) error {
 		frame, err := parseWebSocketFrame(data)
 		if err != nil {
 			invalidFrames++
-			logger.Warnf(ctx, "[Yunzhijia] Invalid WebSocket frame: %v", err)
+			logger.Warnf(ctx, "[Yunzhijia] Invalid WebSocket frame channel_id=%s: %v", c.channelID, err)
 			if invalidFrames >= webSocketMaxInvalidFrames {
 				return fmt.Errorf("too many invalid websocket frames")
 			}
 			continue
 		}
 		invalidFrames = 0
+		c.logFrame(ctx, frame)
 
 		if len(frame.ack) > 0 {
 			if err := c.writeText(conn, frame.ack); err != nil {
@@ -161,6 +203,7 @@ func (c *LongConnClient) connectAndRun(ctx context.Context) error {
 		if frame.message == nil {
 			continue
 		}
+		c.lastBusinessMessageAt.Store(time.Now().UnixNano())
 
 		incoming := toIncomingMessage(ctx, frame.message)
 		if incoming == nil {
@@ -172,6 +215,46 @@ func (c *LongConnClient) connectAndRun(ctx context.Context) error {
 			return nil
 		}
 	}
+}
+
+func (c *LongConnClient) maxConnectionAgeLoop(ctx context.Context, conn *ws.Conn, maxAgeReached chan<- struct{}) {
+	timer := time.NewTimer(c.maxConnectionAge)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return
+	case <-timer.C:
+		close(maxAgeReached)
+		logger.Infof(ctx,
+			"[Yunzhijia] WebSocket rotating after maximum connection age channel_id=%s max_connection_age=%s %s",
+			c.channelID, c.maxConnectionAge, c.healthStatus(),
+		)
+		_ = conn.Close()
+	}
+}
+
+func (c *LongConnClient) logFrame(ctx context.Context, frame *webSocketFrame) {
+	logger.Debugf(ctx,
+		"[Yunzhijia] WebSocket frame channel_id=%s cmd=%s type=%s event=%s seq=%d has_seq=%t need_ack=%t has_message=%t",
+		c.channelID, frame.cmd, frame.typeName, frame.event, frame.seq, frame.hasSeq, frame.needAck, frame.message != nil,
+	)
+}
+
+func (c *LongConnClient) healthStatus() string {
+	return fmt.Sprintf(
+		"connected_at=%s last_frame_at=%s last_pong_at=%s last_business_message_at=%s",
+		c.healthTime(c.connectedAt.Load()),
+		c.healthTime(c.lastFrameAt.Load()),
+		c.healthTime(c.lastPongAt.Load()),
+		c.healthTime(c.lastBusinessMessageAt.Load()),
+	)
+}
+
+func (c *LongConnClient) healthTime(unixNano int64) string {
+	if unixNano == 0 {
+		return ""
+	}
+	return time.Unix(0, unixNano).UTC().Format(time.RFC3339Nano)
 }
 
 func (c *LongConnClient) handleMessages(ctx context.Context) {
@@ -196,7 +279,10 @@ func (c *LongConnClient) heartbeatLoop(ctx context.Context, conn *ws.Conn) {
 			return
 		case <-ticker.C:
 			if err := conn.WriteControl(ws.PingMessage, nil, time.Now().Add(5*time.Second)); err != nil {
-				logger.Warnf(ctx, "[Yunzhijia] WebSocket heartbeat failed: %v", err)
+				logger.Warnf(ctx,
+					"[Yunzhijia] WebSocket heartbeat failed channel_id=%s reason=%v; %s",
+					c.channelID, err, c.healthStatus(),
+				)
 				_ = conn.Close()
 				return
 			}
@@ -257,21 +343,27 @@ func parseWebSocketFrame(data []byte) (*webSocketFrame, error) {
 		return nil, fmt.Errorf("decode frame: %w", err)
 	}
 
+	typeName := rawString(fields["type"])
+	cmd := strings.ToLower(strings.TrimSpace(rawString(fields["cmd"])))
+	event := strings.ToLower(strings.TrimSpace(rawString(fields["event"])))
+	frame := &webSocketFrame{cmd: cmd, typeName: typeName, event: event}
+	_ = json.Unmarshal(fields["needAck"], &frame.needAck)
+	frame.hasSeq = json.Unmarshal(fields["seq"], &frame.seq) == nil
 	if msg := decodeBusinessMessage(trimmed); msg != nil {
-		return &webSocketFrame{message: msg}, nil
+		frame.message = msg
+		return frame, nil
 	}
 
-	typeName := rawString(fields["type"])
 	if strings.EqualFold(typeName, "robotMessage") {
 		if msg := decodeBusinessMessage(fields["msg"]); msg != nil {
-			return &webSocketFrame{message: msg}, nil
+			frame.message = msg
+			return frame, nil
 		}
 		return nil, fmt.Errorf("robotMessage envelope has invalid msg")
 	}
 
-	cmd := strings.ToLower(strings.TrimSpace(rawString(fields["cmd"])))
 	typeName = strings.ToLower(strings.TrimSpace(typeName))
-	event := strings.ToLower(strings.TrimSpace(rawString(fields["event"])))
+	frame.typeName = typeName
 	control := cmd
 	if control == "" {
 		control = typeName
@@ -280,16 +372,13 @@ func parseWebSocketFrame(data []byte) (*webSocketFrame, error) {
 		control = event
 	}
 
-	frame := &webSocketFrame{control: control}
+	frame.control = control
 	if cmd == "directpush" || typeName == "msgchg" {
-		var needAck bool
-		_ = json.Unmarshal(fields["needAck"], &needAck)
-		var seq int64
-		if needAck && json.Unmarshal(fields["seq"], &seq) == nil {
+		if frame.needAck && frame.hasSeq {
 			frame.ack, _ = json.Marshal(struct {
 				Cmd string `json:"cmd"`
 				Seq int64  `json:"seq"`
-			}{Cmd: "ack", Seq: seq})
+			}{Cmd: "ack", Seq: frame.seq})
 		}
 		return frame, nil
 	}

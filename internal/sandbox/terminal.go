@@ -35,6 +35,12 @@ type RemoteTerminalOptions struct {
 	// already-running PTY instead of creating a new shell. A failed
 	// reattach falls back to Create.
 	AttachPID uint32
+
+	// AllowResume lets OpenSessionTerminal Connect (and therefore wake) a
+	// paused sandbox. Lookup-only opens leave this false so opening a
+	// panel cannot resume a paused microVM; the confirmed-create path
+	// sets it.
+	AllowResume bool
 }
 
 // RemoteTerminalEvent is one event on a terminal's output stream. The

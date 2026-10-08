@@ -2,104 +2,12 @@ package vlm
 
 import (
 	"encoding/json"
-	"errors"
 	"math"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
-
-	openai "github.com/sashabaranov/go-openai"
 )
-
-// TestShapeReasoningVLMRequest 验证 GPT-5 / o-series 的请求参数改写。
-// 见 issue #2537：这些模型必须使用 max_completion_tokens 替代 max_tokens，
-// 且不接受非默认的采样参数。
-func TestShapeReasoningVLMRequest(t *testing.T) {
-	cases := []struct {
-		name                    string
-		model                   string
-		maxTokens               int
-		maxCompletionTokens     int
-		temperature             float32
-		wantMaxTokens           int
-		wantMaxCompletionTokens int
-		wantTemperature         float32
-	}{
-		{
-			name:  "gpt-5 migrates max_tokens and drops temperature",
-			model: "gpt-5", maxTokens: 5000, temperature: 0.1,
-			wantMaxTokens: 0, wantMaxCompletionTokens: 5000, wantTemperature: 0,
-		},
-		{
-			name:  "gpt-5-nano is shaped", // the model reported in issue #2537
-			model: "gpt-5-nano", maxTokens: 5000, temperature: 0.1,
-			wantMaxTokens: 0, wantMaxCompletionTokens: 5000, wantTemperature: 0,
-		},
-		{
-			name:  "gpt-5 mixed case is shaped",
-			model: "GPT-5.4-Mini", maxTokens: 5000, temperature: 0.1,
-			wantMaxTokens: 0, wantMaxCompletionTokens: 5000, wantTemperature: 0,
-		},
-		{
-			name:  "o1-mini is shaped",
-			model: "o1-mini", maxTokens: 5000, temperature: 0.1,
-			wantMaxTokens: 0, wantMaxCompletionTokens: 5000, wantTemperature: 0,
-		},
-		{
-			name:  "o3 is shaped",
-			model: "o3", maxTokens: 5000, temperature: 0.1,
-			wantMaxTokens: 0, wantMaxCompletionTokens: 5000, wantTemperature: 0,
-		},
-		{
-			name:  "o4-mini is shaped",
-			model: "o4-mini", maxTokens: 5000, temperature: 0.1,
-			wantMaxTokens: 0, wantMaxCompletionTokens: 5000, wantTemperature: 0,
-		},
-		{
-			name:  "explicit max_completion_tokens is preserved",
-			model: "gpt-5", maxTokens: 5000, maxCompletionTokens: 128, temperature: 0.1,
-			wantMaxTokens: 0, wantMaxCompletionTokens: 128, wantTemperature: 0,
-		},
-		{
-			name:  "gpt-4o is left untouched",
-			model: "gpt-4o", maxTokens: 5000, temperature: 0.1,
-			wantMaxTokens: 5000, wantMaxCompletionTokens: 0, wantTemperature: 0.1,
-		},
-		{
-			name:  "qwen-vl is left untouched",
-			model: "qwen2.5-vl-7b-instruct", maxTokens: 5000, temperature: 0.1,
-			wantMaxTokens: 5000, wantMaxCompletionTokens: 0, wantTemperature: 0.1,
-		},
-		{
-			name:  "empty model is left untouched",
-			model: "", maxTokens: 5000, temperature: 0.1,
-			wantMaxTokens: 5000, wantMaxCompletionTokens: 0, wantTemperature: 0.1,
-		},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			req := openai.ChatCompletionRequest{
-				Model:               tc.model,
-				MaxTokens:           tc.maxTokens,
-				MaxCompletionTokens: tc.maxCompletionTokens,
-				Temperature:         tc.temperature,
-			}
-			shapeReasoningVLMRequest(&req)
-
-			if req.MaxTokens != tc.wantMaxTokens {
-				t.Errorf("MaxTokens = %d, want %d", req.MaxTokens, tc.wantMaxTokens)
-			}
-			if req.MaxCompletionTokens != tc.wantMaxCompletionTokens {
-				t.Errorf("MaxCompletionTokens = %d, want %d", req.MaxCompletionTokens, tc.wantMaxCompletionTokens)
-			}
-			if req.Temperature != tc.wantTemperature {
-				t.Errorf("Temperature = %v, want %v", req.Temperature, tc.wantTemperature)
-			}
-		})
-	}
-}
 
 // newVLMChatTestServer emulates an OpenAI-compatible chat completions endpoint
 // and records the last decoded request body.
@@ -129,54 +37,54 @@ func newVLMChatTestServer(t *testing.T, lastRequest *map[string]interface{}) *ht
 var testPNG = []byte("\x89PNG\r\n\x1a\n" + strings.Repeat("\x00", 16))
 
 // TestRemoteAPIVLMSendsMaxCompletionTokensForReasoningModel is the regression
-// test for issue #2537: with a GPT-5 / o-series vision model, every OCR and
-// caption call failed with
-//
-//	"this model is not supported MaxTokens, please use MaxCompletionTokens"
-//
-// The request was rejected client-side by go-openai's reasoning validator, so
-// it never reached the server and no image chunk was ever created.
+// test for issue #2537: GPT-5 / o-series vision models reject max_tokens and
+// every non-default sampling parameter. The catalog marks those families on
+// the OpenAI vendor, and the generic vendor carries the same family entries
+// so relays that forward to OpenAI behave the same way.
 func TestRemoteAPIVLMSendsMaxCompletionTokensForReasoningModel(t *testing.T) {
 	withVLMSSRFWhitelist(t, "127.0.0.1")
 
-	var lastRequest map[string]interface{}
-	server := newVLMChatTestServer(t, &lastRequest)
-	defer server.Close()
+	for _, provider := range []string{"openai", ""} {
+		var lastRequest map[string]interface{}
+		server := newVLMChatTestServer(t, &lastRequest)
 
-	v, err := NewRemoteAPIVLM(&Config{
-		BaseURL:   server.URL,
-		ModelName: "gpt-5-nano",
-		APIKey:    "sk-test",
-	})
-	if err != nil {
-		t.Fatalf("NewRemoteAPIVLM: %v", err)
-	}
+		v, err := NewRemoteAPIVLM(&Config{
+			BaseURL:   server.URL,
+			ModelName: "gpt-5-nano",
+			APIKey:    "sk-test",
+			Provider:  provider,
+		})
+		if err != nil {
+			t.Fatalf("NewRemoteAPIVLM: %v", err)
+		}
 
-	content, err := v.Predict(t.Context(), [][]byte{testPNG}, "extract the text")
-	if err != nil {
-		t.Fatalf("Predict: %v", err)
-	}
-	if content != "extracted text" {
-		t.Errorf("content = %q, want %q", content, "extracted text")
-	}
-
-	if _, ok := lastRequest["max_tokens"]; ok {
-		t.Errorf("request carries max_tokens, which reasoning models reject: %v", lastRequest["max_tokens"])
-	}
-	if got, ok := lastRequest["max_completion_tokens"]; !ok {
-		t.Error("request is missing max_completion_tokens")
-	} else if got != float64(defaultMaxToks) {
-		t.Errorf("max_completion_tokens = %v, want %d", got, defaultMaxToks)
-	}
-	// Temperature 0.1 is itself rejected for these models, so migrating
-	// max_tokens alone would not have been enough.
-	if _, ok := lastRequest["temperature"]; ok {
-		t.Errorf("request carries temperature, which reasoning models reject: %v", lastRequest["temperature"])
+		content, err := v.Predict(t.Context(), [][]byte{testPNG}, "extract the text")
+		if err != nil {
+			t.Fatalf("Predict (provider=%q): %v", provider, err)
+		}
+		if content != "extracted text" {
+			t.Errorf("content = %q, want %q", content, "extracted text")
+		}
+		if _, ok := lastRequest["max_tokens"]; ok {
+			t.Errorf("provider=%q: request carries max_tokens, which reasoning models reject: %v",
+				provider, lastRequest["max_tokens"])
+		}
+		if got, ok := lastRequest["max_completion_tokens"]; !ok {
+			t.Errorf("provider=%q: request is missing max_completion_tokens", provider)
+		} else if got != float64(defaultMaxToks) {
+			t.Errorf("max_completion_tokens = %v, want %d", got, defaultMaxToks)
+		}
+		if _, ok := lastRequest["temperature"]; ok {
+			t.Errorf("provider=%q: request carries temperature, which reasoning models reject: %v",
+				provider, lastRequest["temperature"])
+		}
+		server.Close()
 	}
 }
 
 // TestRemoteAPIVLMKeepsMaxTokensForNonReasoningModel guards against the fix
-// regressing ordinary vision models, which still expect max_tokens.
+// regressing ordinary vision models on an unknown (generic) endpoint, which
+// still expect max_tokens.
 func TestRemoteAPIVLMKeepsMaxTokensForNonReasoningModel(t *testing.T) {
 	withVLMSSRFWhitelist(t, "127.0.0.1")
 
@@ -186,7 +94,7 @@ func TestRemoteAPIVLMKeepsMaxTokensForNonReasoningModel(t *testing.T) {
 
 	v, err := NewRemoteAPIVLM(&Config{
 		BaseURL:   server.URL,
-		ModelName: "gpt-4o",
+		ModelName: "qwen2.5-vl-7b-instruct",
 		APIKey:    "sk-test",
 	})
 	if err != nil {
@@ -210,14 +118,21 @@ func TestRemoteAPIVLMKeepsMaxTokensForNonReasoningModel(t *testing.T) {
 	} else if f, isFloat := got.(float64); !isFloat || math.Abs(f-float64(defaultTemp)) > 1e-6 {
 		t.Errorf("temperature = %v, want %v", got, defaultTemp)
 	}
+	messages := lastRequest["messages"].([]interface{})
+	parts := messages[0].(map[string]interface{})["content"].([]interface{})
+	if len(parts) != 2 {
+		t.Fatalf("user content parts = %d, want text + image", len(parts))
+	}
+	image := parts[1].(map[string]interface{})["image_url"].(map[string]interface{})
+	if !strings.HasPrefix(image["url"].(string), "data:image/png;base64,") {
+		t.Errorf("image url = %q, want a PNG data URI", image["url"])
+	}
 }
 
 // TestRemoteAPIVLMReportsTruncatedCompletion covers the other way a reasoning
-// model yields nothing: max_completion_tokens also covers reasoning tokens, so
+// model yields nothing: the completion budget also covers reasoning tokens, so
 // an exhausted budget returns an empty message with finish_reason=length
-// instead of an API error. Reporting that as an error keeps it out of the
-// "no_extracted_content" bucket, where issue #2537 notes the failure is
-// indistinguishable from an image that genuinely has no text.
+// instead of an API error.
 func TestRemoteAPIVLMReportsTruncatedCompletion(t *testing.T) {
 	withVLMSSRFWhitelist(t, "127.0.0.1")
 
@@ -237,6 +152,7 @@ func TestRemoteAPIVLMReportsTruncatedCompletion(t *testing.T) {
 		BaseURL:   server.URL,
 		ModelName: "gpt-5-nano",
 		APIKey:    "sk-test",
+		Provider:  "openai",
 	})
 	if err != nil {
 		t.Fatalf("NewRemoteAPIVLM: %v", err)
@@ -248,46 +164,5 @@ func TestRemoteAPIVLMReportsTruncatedCompletion(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "truncated") {
 		t.Errorf("error = %q, want it to mention truncation", err.Error())
-	}
-}
-
-// TestRemoteAPIVLMUnshapedReasoningRequestIsRejected pins the upstream
-// behavior this fix works around: without the shaping, go-openai rejects the
-// request before it leaves the process. It fails identically for max_tokens
-// and for a non-default temperature.
-func TestRemoteAPIVLMUnshapedReasoningRequestIsRejected(t *testing.T) {
-	withVLMSSRFWhitelist(t, "127.0.0.1")
-
-	var lastRequest map[string]interface{}
-	server := newVLMChatTestServer(t, &lastRequest)
-	defer server.Close()
-
-	v, err := NewRemoteAPIVLM(&Config{
-		BaseURL:   server.URL,
-		ModelName: "gpt-5-nano",
-		APIKey:    "sk-test",
-	})
-	if err != nil {
-		t.Fatalf("NewRemoteAPIVLM: %v", err)
-	}
-
-	unshaped := openai.ChatCompletionRequest{
-		Model:     "gpt-5-nano",
-		Messages:  []openai.ChatCompletionMessage{{Role: openai.ChatMessageRoleUser, Content: "hi"}},
-		MaxTokens: defaultMaxToks,
-	}
-	_, err = v.client.CreateChatCompletion(t.Context(), unshaped)
-	if !errors.Is(err, openai.ErrReasoningModelMaxTokensDeprecated) {
-		t.Errorf("max_tokens error = %v, want ErrReasoningModelMaxTokensDeprecated", err)
-	}
-
-	tempOnly := openai.ChatCompletionRequest{
-		Model:       "gpt-5-nano",
-		Messages:    []openai.ChatCompletionMessage{{Role: openai.ChatMessageRoleUser, Content: "hi"}},
-		Temperature: defaultTemp,
-	}
-	_, err = v.client.CreateChatCompletion(t.Context(), tempOnly)
-	if !errors.Is(err, openai.ErrReasoningModelLimitationsOther) {
-		t.Errorf("temperature error = %v, want ErrReasoningModelLimitationsOther", err)
 	}
 }

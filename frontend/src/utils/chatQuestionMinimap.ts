@@ -1,11 +1,13 @@
 export const QUESTION_TICK_INSET_PX = 8
 export const QUESTION_TICK_GAP_PX = 8
-export const QUESTION_TICK_MOUNTAIN_GAIN = 1.5
-export const CURRENT_TICK_SCALE = 1.7
+export const QUESTION_TICK_MOUNTAIN_GAIN = 0.8
+export const CURRENT_TICK_SCALE = 1.55
 export const ACTIVE_QUESTION_TOP_OFFSET_PX = 72
 export const VIEWPORT_BAND_MIN_HEIGHT_PX = 16
 export const QUESTION_MINIMAP_TRACK_MAX_PX = 360
 export const QUESTION_MINIMAP_TRACK_RATIO = 0.5
+// 28px rail + 4px hit-area extension + 12px clearance from message content.
+export const QUESTION_MINIMAP_MIN_GUTTER_PX = 44
 
 export function questionMinimapTrackHeight(
   questionCount: number,
@@ -30,11 +32,13 @@ export type ChatMessageLike = {
   attachments?: unknown[]
 }
 
-export type UserQuestion = {
+export type OutlineMessage = {
   id: string
+  role: 'user' | 'assistant'
   content: string
   hasAttachments: boolean
   answerContent: string
+  messageIds: string[]
 }
 
 export type QuestionTick = {
@@ -52,37 +56,77 @@ export function isChatOverflowing(scrollHeight: number, clientHeight: number): b
   return scrollHeight > clientHeight
 }
 
-export function shouldShowQuestionMinimap(overflowing: boolean, questionCount: number): boolean {
-  return overflowing && questionCount >= 2
+export function shouldShowQuestionMinimap(overflowing: boolean, questionCount: number, availableGutter: number): boolean {
+  return overflowing && questionCount >= 1 && availableGutter >= QUESTION_MINIMAP_MIN_GUTTER_PX
 }
 
-export function collectUserQuestions(messages: ChatMessageLike[]): UserQuestion[] {
-  const questions: UserQuestion[] = []
+export function collectOutlineMessages(messages: ChatMessageLike[]): OutlineMessage[] {
+  const questions: OutlineMessage[] = []
 
-  for (let index = 0; index < messages.length; index++) {
-    const message = messages[index]
-    if (message.role !== 'user' || !message.id) continue
+  let current: OutlineMessage | undefined
+  for (const message of messages) {
+    if (message.role === 'user') current = undefined
+    if ((message.role !== 'user' && message.role !== 'assistant') || !message.id) continue
 
-    let answerContent = ''
-    for (let next = index + 1; next < messages.length; next++) {
-      const following = messages[next]
-      if (following.role === 'user') break
-      if (following.role === 'assistant') {
-        answerContent = following.content ?? ''
-        break
+    if (message.role === 'assistant' && current) {
+      current.messageIds.push(message.id)
+      if (message.content) {
+        current.answerContent = [current.answerContent, message.content].filter(Boolean).join('\n\n')
       }
+      continue
     }
 
-    questions.push({
+    current = {
       id: message.id,
+      role: message.role,
       content: message.content ?? '',
       hasAttachments:
         (message.images?.length ?? 0) > 0 || (message.attachments?.length ?? 0) > 0,
-      answerContent,
-    })
+      answerContent: '',
+      messageIds: [message.id],
+    }
+    questions.push(current)
   }
 
   return questions
+}
+
+type MessageBounds = { id: string; offsetTop: number; offsetBottom: number }
+
+/** One rail tick per turn, retaining each message's bounds for visibility. */
+export function groupOutlineBounds(
+  turns: OutlineMessage[],
+  messages: MessageBounds[],
+): Array<MessageBounds & { ranges: MessageBounds[] }> {
+  const byId = new Map(messages.map(message => [message.id, message]))
+  return turns.flatMap(turn => {
+    const ranges = turn.messageIds.flatMap(id => {
+      const bounds = byId.get(id)
+      return bounds && bounds.offsetBottom > bounds.offsetTop ? [bounds] : []
+    })
+    if (!ranges.length) return []
+    return [{
+      id: turn.id,
+      offsetTop: Math.min(...ranges.map(range => range.offsetTop)),
+      offsetBottom: Math.max(...ranges.map(range => range.offsetBottom)),
+      ranges,
+    }]
+  })
+}
+
+/** Include partially visible messages and long answers spanning the viewport. */
+export function visibleMessageIds(
+  items: Array<MessageBounds & { ranges?: MessageBounds[] }>,
+  scrollTop: number,
+  clientHeight: number,
+  bottomInset: number = 0,
+): Set<string> {
+  const visibleHeight = Math.max(0, clientHeight - bottomInset)
+  if (visibleHeight <= 0) return new Set()
+  const bottom = scrollTop + visibleHeight
+  return new Set(items.filter(item => (item.ranges ?? [item]).some(range => (
+    range.offsetBottom > range.offsetTop && range.offsetBottom > scrollTop && range.offsetTop < bottom
+  ))).map(item => item.id))
 }
 
 export function questionDisplayText(

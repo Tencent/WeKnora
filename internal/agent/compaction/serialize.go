@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	agenttoken "github.com/Tencent/WeKnora/internal/agent/token"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 )
 
@@ -106,23 +107,52 @@ func truncate(s string, maxChars int) string {
 // rawArchive is the fallback when the summarizer is unavailable. It is lossy
 // and unstructured, but it keeps the tool names and paths that the next round
 // needs in order not to redo finished work.
-func rawArchive(messages []chat.Message) string {
-	var sb strings.Builder
-	sb.WriteString("Raw conversation archive (LLM summarization unavailable):\n\n")
+//
+// It stands in for a summary, so it is held to budget tokens like one, keeping
+// the newest messages. Unbounded, an archive of a history that filled the
+// window could be nearly as large as the history, and a compaction that frees
+// nothing leaves the request over the window.
+func rawArchive(messages []chat.Message, budget int, estimator *agenttoken.Estimator) string {
+	lines := make([]string, 0, len(messages))
 	for i := range messages {
-		msg := &messages[i]
-		switch msg.Role {
-		case "user":
-			fmt.Fprintf(&sb, "- User: %s\n", truncate(msg.Content, 500))
-		case "assistant":
-			if calls := serializeToolCalls(msg.ToolCalls); calls != "" {
-				fmt.Fprintf(&sb, "- Assistant [%s]: %s\n", calls, truncate(msg.Content, 500))
-				continue
-			}
-			fmt.Fprintf(&sb, "- Assistant: %s\n", truncate(msg.Content, 500))
-		case "tool":
-			fmt.Fprintf(&sb, "- Tool[%s]: %s\n", msg.Name, truncate(msg.Content, 500))
+		if line := archiveLine(&messages[i]); line != "" {
+			lines = append(lines, line)
 		}
 	}
+	kept := len(lines)
+	if budget > 0 && estimator != nil {
+		used := 0
+		for i := len(lines) - 1; i >= 0; i-- {
+			used += estimator.EstimateString(lines[i])
+			if used > budget && i < len(lines)-1 {
+				kept = len(lines) - 1 - i
+				break
+			}
+		}
+	}
+
+	var sb strings.Builder
+	sb.WriteString("Raw conversation archive (LLM summarization unavailable):\n\n")
+	if omitted := len(lines) - kept; omitted > 0 {
+		fmt.Fprintf(&sb, "[%d earlier messages omitted]\n", omitted)
+	}
+	for _, line := range lines[len(lines)-kept:] {
+		sb.WriteString(line)
+	}
 	return sb.String()
+}
+
+func archiveLine(msg *chat.Message) string {
+	switch msg.Role {
+	case "user":
+		return fmt.Sprintf("- User: %s\n", truncate(msg.Content, 500))
+	case "assistant":
+		if calls := serializeToolCalls(msg.ToolCalls); calls != "" {
+			return fmt.Sprintf("- Assistant [%s]: %s\n", calls, truncate(msg.Content, 500))
+		}
+		return fmt.Sprintf("- Assistant: %s\n", truncate(msg.Content, 500))
+	case "tool":
+		return fmt.Sprintf("- Tool[%s]: %s\n", msg.Name, truncate(msg.Content, 500))
+	}
+	return ""
 }

@@ -76,14 +76,14 @@ const bodyLabel = computed(() =>
 
 .read-skill-desc {
   margin: 0;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.55;
   color: var(--td-text-color-secondary);
 }
 
 .read-skill-heading {
   margin-bottom: 4px;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   font-weight: 500;
   line-height: 1.4;
   color: var(--td-text-color-secondary);
@@ -92,14 +92,14 @@ const bodyLabel = computed(() =>
 .read-skill-stream {
   min-width: 0;
   border: 1px solid var(--td-component-stroke);
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   overflow: hidden;
   background: var(--td-bg-color-container);
 }
 
 .read-skill-stream-label {
   padding: 6px 12px;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   font-weight: 500;
   line-height: 1.4;
   color: var(--td-text-color-secondary);
@@ -113,7 +113,7 @@ const bodyLabel = computed(() =>
   max-height: 280px;
   overflow: auto;
   font-family: var(--app-font-family-mono);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.55;
   color: var(--td-text-color-primary);
   white-space: pre-wrap;
@@ -126,7 +126,7 @@ const bodyLabel = computed(() =>
 
   &::-webkit-scrollbar-thumb {
     background: var(--td-component-border);
-    border-radius: 4px;
+    border-radius: var(--app-radius-xs);
   }
 }
 </style>

@@ -194,6 +194,7 @@ func (r *tenantSkillRepository) UpdateSkill(ctx context.Context, e *types.Tenant
 			"install_session_id":    e.InstallSessionID,
 			"install_message_id":    e.InstallMessageID,
 			"catalog_id":            e.CatalogID,
+			"served":                e.Served,
 			"status":                e.Status,
 			"error":                 e.Error,
 			"installing_since":      e.InstallingSince,

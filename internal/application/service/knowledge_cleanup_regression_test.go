@@ -131,3 +131,11 @@ func TestMoveReparseKBLookupFailurePreservesSourceCheckpoint(t *testing.T) {
 	require.Zero(t, f.chunkRepo.writes)
 	require.Zero(t, f.graph.calls)
 }
+
+func TestRemoveSourceRefHandlesTitledAndPaddedRefs(t *testing.T) {
+	refs := types.StringArray{"doc-1", "doc-1|Title", " doc-1 |padded", "doc-10|Other", "doc-2"}
+	got := removeSourceRef(refs, "doc-1")
+	require.Equal(t, types.StringArray{"doc-10|Other", "doc-2"}, got)
+	require.Nil(t, removeSourceRef(types.StringArray{"doc-1|T"}, "doc-1"))
+	require.Equal(t, types.StringArray{"doc-1|T"}, removeSourceRef(types.StringArray{"doc-1|T"}, ""))
+}

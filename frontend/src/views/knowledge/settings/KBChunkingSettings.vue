@@ -422,14 +422,14 @@ const emitUpdate = () => {
   }
 
   h2 {
-    font-size: 20px;
+    font-size: var(--app-text-3xl);
     font-weight: 600;
     color: var(--td-text-color-primary);
     margin: 0 0 6px 0;
   }
 
   .section-description {
-    font-size: 14px;
+    font-size: var(--app-text-base);
     color: var(--td-text-color-secondary);
     margin: 0;
     line-height: 1.5;
@@ -464,7 +464,7 @@ const emitUpdate = () => {
   background: var(--td-bg-color-container-hover);
   border-left: 3px solid var(--td-brand-color);
   border-radius: 0 4px 4px 0;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   color: var(--td-text-color-secondary);
   line-height: 1.5;
 
@@ -484,7 +484,7 @@ const emitUpdate = () => {
   padding-right: 24px;
 
   label {
-    font-size: 15px;
+    font-size: var(--app-text-lg);
     font-weight: 500;
     color: var(--td-text-color-primary);
     display: block;
@@ -492,14 +492,14 @@ const emitUpdate = () => {
   }
 
   .desc {
-    font-size: 13px;
+    font-size: var(--app-text-md);
     color: var(--td-text-color-secondary);
     margin: 0;
     line-height: 1.5;
   }
 
   .warn {
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     color: var(--td-warning-color);
     margin: 4px 0 0 0;
     line-height: 1.4;
@@ -532,7 +532,7 @@ const emitUpdate = () => {
 }
 
 .value-display {
-  font-size: 14px;
+  font-size: var(--app-text-base);
   color: var(--td-text-color-primary);
   font-weight: 500;
   min-width: 80px;
@@ -548,7 +548,7 @@ const emitUpdate = () => {
   background: transparent;
   border: none;
   cursor: pointer;
-  font-size: 14px;
+  font-size: var(--app-text-base);
   font-weight: 500;
   color: var(--td-text-color-secondary);
   user-select: none;
@@ -560,13 +560,13 @@ const emitUpdate = () => {
   &:focus-visible {
     outline: 2px solid var(--td-brand-color-focus);
     outline-offset: 2px;
-    border-radius: 4px;
+    border-radius: var(--app-radius-xs);
   }
 }
 
 .toggle-arrow {
-  font-size: 16px;
-  transition: transform 0.15s ease;
+  font-size: var(--app-text-xl);
+  transition: transform var(--app-motion-fast) ease;
 
   &.open {
     transform: rotate(90deg);
@@ -614,11 +614,11 @@ const emitUpdate = () => {
     padding-right: 0;
 
     label {
-      font-size: 14px;
+      font-size: var(--app-text-base);
     }
 
     .desc {
-      font-size: 12px;
+      font-size: var(--app-text-sm);
     }
   }
 
@@ -639,7 +639,7 @@ const emitUpdate = () => {
   .strategy-info-panel {
     margin: -4px 0 10px;
     padding: 8px 12px;
-    font-size: 12px;
+    font-size: var(--app-text-sm);
   }
 
   .slider-container {

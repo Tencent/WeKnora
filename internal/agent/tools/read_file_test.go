@@ -60,12 +60,21 @@ func TestReadFileCombinesSourcesWithoutGrantingHostAccess(t *testing.T) {
 	result = read("skill://allowed/guide.txt")
 	require.True(t, result.Success)
 	require.Contains(t, result.Output, "bundled guide")
-	for _, address := range []string{outside, "skill://other/SKILL.md", "skill://unknown/SKILL.md", "skill://allowed/../other/SKILL.md", "skill://allowed//guide.txt", "skill://allowed/link.txt"} {
+	result = read(outside)
+	require.True(t, result.Success)
+	require.Equal(t, outside, source.readPath)
+	require.Contains(t, result.Output, "workspace",
+		"absolute paths must read sandbox data, not the host file at that path")
+	require.NotContains(t, result.Output, "host secret")
+	for _, address := range []string{
+		"skill://other/SKILL.md", "skill://unknown/SKILL.md", "skill://allowed/../other/SKILL.md",
+		"skill://allowed//guide.txt", "skill://allowed/link.txt",
+	} {
 		result := read(address)
 		require.False(t, result.Success, address)
 		require.NotContains(t, result.Output, "host secret")
 	}
-	require.Equal(t, 1, source.readCalls, "skill and invalid paths must never touch workspace storage")
+	require.Equal(t, 2, source.readCalls, "skill and invalid skill paths must never touch sandbox storage")
 }
 
 func TestReadFileSkillPagesPreserveEveryLineAndSuppressBinary(t *testing.T) {

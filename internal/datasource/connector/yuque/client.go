@@ -294,3 +294,17 @@ func (c *client) GetDocDetail(ctx context.Context, docID int64) (v2DocDetail, er
 	}
 	return resp.Data, nil
 }
+
+// ListBookTOC fetches the table of contents of a book.
+//
+// The endpoint returns the whole tree in a single flat list (no pagination), so
+// this costs exactly one request per book per sync. Callers fold the result into
+// per-document folder paths with buildTOCPaths.
+func (c *client) ListBookTOC(ctx context.Context, bookID int64) ([]v2TOCNode, error) {
+	path := fmt.Sprintf("/api/v2/repos/%d/toc", bookID)
+	var resp v2TOCResponse
+	if err := c.doRequest(ctx, http.MethodGet, path, &resp); err != nil {
+		return nil, err
+	}
+	return resp.Data, nil
+}

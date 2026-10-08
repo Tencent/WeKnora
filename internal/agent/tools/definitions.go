@@ -7,15 +7,18 @@ const maxFunctionNameLength = 64
 // Tool names constants
 const (
 	// Capability-scoped MCP discovery and invocation; not tenant-selectable builtins.
-	ToolDiscoverMCPTools    = "discover_mcp_tools"
-	ToolCallMCPTool         = "call_mcp_tool"
-	ToolThinking            = "thinking"
-	ToolTodoWrite           = "todo_write"
-	ToolGrepChunks          = "grep_chunks"
-	ToolKnowledgeSearch     = "knowledge_search"
-	ToolListKnowledgeChunks = "list_knowledge_chunks"
+	ToolDiscoverMCPTools = "discover_mcp_tools"
+	ToolCallMCPTool      = "call_mcp_tool"
+	ToolThinking         = "thinking"
+	ToolTodoWrite        = "todo_write"
+	// Knowledge retrieval surface. search_knowledge covers semantic, keyword
+	// and hybrid retrieval over chunk-indexed knowledge bases; read_document
+	// reads a document's metadata and chunks (by page, by chunk handle, or by
+	// an in-document text search); list_documents browses one knowledge base.
+	ToolSearchKnowledge     = "search_knowledge"
+	ToolReadDocument        = "read_document"
+	ToolListDocuments       = "list_documents"
 	ToolQueryKnowledgeGraph = "query_knowledge_graph"
-	ToolGetDocumentInfo     = "get_document_info"
 	ToolSearchConversations = "search_conversations"
 	ToolSearchMemory        = "search_memory"
 	ToolDatabaseQuery       = "database_query"
@@ -61,16 +64,15 @@ const (
 	// skills switch and not a per-agent tool checkbox.
 	ToolShellExec = "shell_exec"
 	// Wiki-related tools (only available when wiki KBs are in scope)
-	ToolWikiReadPage      = "wiki_read_page"
-	ToolWikiWritePage     = "wiki_write_page"
-	ToolWikiReplaceText   = "wiki_replace_text"
-	ToolWikiRenamePage    = "wiki_rename_page"
-	ToolWikiDeletePage    = "wiki_delete_page"
-	ToolWikiSearch        = "wiki_search"
-	ToolWikiReadSourceDoc = "wiki_read_source_doc"
-	ToolWikiFlagIssue     = "wiki_flag_issue"
-	ToolWikiReadIssue     = "wiki_read_issue"
-	ToolWikiUpdateIssue   = "wiki_update_issue"
+	ToolWikiReadPage    = "wiki_read_page"
+	ToolWikiWritePage   = "wiki_write_page"
+	ToolWikiReplaceText = "wiki_replace_text"
+	ToolWikiRenamePage  = "wiki_rename_page"
+	ToolWikiDeletePage  = "wiki_delete_page"
+	ToolWikiSearch      = "wiki_search"
+	ToolWikiFlagIssue   = "wiki_flag_issue"
+	ToolWikiReadIssue   = "wiki_read_issue"
+	ToolWikiUpdateIssue = "wiki_update_issue"
 )
 
 // AvailableTool defines a simple tool metadata used by settings APIs.
@@ -86,11 +88,10 @@ func AvailableToolDefinitions() []AvailableTool {
 	return []AvailableTool{
 		{Name: ToolThinking, Label: "思考", Description: "动态和反思性的问题解决思考工具"},
 		{Name: ToolTodoWrite, Label: "制定计划", Description: "创建结构化的研究计划"},
-		{Name: ToolGrepChunks, Label: "关键词搜索", Description: "快速定位包含特定关键词的文档和分块"},
-		{Name: ToolKnowledgeSearch, Label: "语义搜索", Description: "理解问题并查找语义相关内容"},
-		{Name: ToolListKnowledgeChunks, Label: "查看文档分块", Description: "获取文档完整分块内容"},
+		{Name: ToolSearchKnowledge, Label: "检索知识库", Description: "语义、关键词或混合检索知识库分块"},
+		{Name: ToolReadDocument, Label: "阅读文档", Description: "读取文档元数据与分块内容，支持分页和文内查找"},
+		{Name: ToolListDocuments, Label: "浏览文档列表", Description: "分页列出知识库中的文档"},
 		{Name: ToolQueryKnowledgeGraph, Label: "查询知识图谱", Description: "从知识图谱中查询关系"},
-		{Name: ToolGetDocumentInfo, Label: "获取文档信息", Description: "查看文档元数据"},
 		{
 			Name:        ToolSearchConversations,
 			Label:       "回顾历史对话",
@@ -101,7 +102,6 @@ func AvailableToolDefinitions() []AvailableTool {
 		{Name: ToolDataSchema, Label: "查看数据元信息", Description: "获取表格文件的元信息"},
 		{Name: ToolWikiReadPage, Label: "读取Wiki页面", Description: "读取指定的Wiki页面内容"},
 		{Name: ToolWikiSearch, Label: "搜索Wiki", Description: "在Wiki中搜索页面"},
-		{Name: ToolWikiReadSourceDoc, Label: "精读源文档", Description: "使用知识点深入阅读特定原始文档"},
 		{Name: ToolWikiFlagIssue, Label: "标记Wiki问题", Description: "标记页面中存在的事实错误或合并冲突问题"},
 		{Name: ToolWikiWritePage, Label: "创建/覆盖Wiki", Description: "创建新页面或完全覆盖已有页面"},
 		{Name: ToolWikiReplaceText, Label: "局部替换Wiki", Description: "替换Wiki页面中的特定文本"},
@@ -115,10 +115,9 @@ func AvailableToolDefinitions() []AvailableTool {
 // DefaultAllowedTools returns the default allowed tools list.
 func DefaultAllowedTools() []string {
 	return []string{
-		ToolKnowledgeSearch,
-		ToolGrepChunks,
-		ToolListKnowledgeChunks,
-		ToolGetDocumentInfo,
+		ToolSearchKnowledge,
+		ToolReadDocument,
+		ToolListDocuments,
 		// Looking up what this user asked before is only ever a read of their
 		// own history, and it is what lets "上次你给我的那个配置" resolve at all
 		// without stuffing every past conversation into the context window.
@@ -141,7 +140,66 @@ const (
 	LegacyToolExecuteSkillScript = "execute_skill_script"
 	LegacyToolReadSkill          = "read_skill"
 	LegacyToolReadSandboxFile    = "read_sandbox_file"
+	// The pre-consolidation knowledge retrieval surface. knowledge_search and
+	// grep_chunks were folded into search_knowledge (mode=semantic|keyword|
+	// hybrid); list_knowledge_chunks, get_document_info and
+	// wiki_read_source_doc were folded into read_document.
+	LegacyToolKnowledgeSearch     = "knowledge_search"
+	LegacyToolGrepChunks          = "grep_chunks"
+	LegacyToolListKnowledgeChunks = "list_knowledge_chunks"
+	LegacyToolGetDocumentInfo     = "get_document_info"
+	LegacyToolWikiReadSourceDoc   = "wiki_read_source_doc"
 )
+
+// legacyToolSuccessors maps retired allowlist entries to the tool that now
+// provides the capability. Stored agent configurations, presets and API
+// callers keep working without a data migration: NormalizeAllowedTools maps
+// them at registration time.
+var legacyToolSuccessors = map[string]string{
+	LegacyToolKnowledgeSearch:     ToolSearchKnowledge,
+	LegacyToolGrepChunks:          ToolSearchKnowledge,
+	LegacyToolListKnowledgeChunks: ToolReadDocument,
+	LegacyToolGetDocumentInfo:     ToolReadDocument,
+	LegacyToolWikiReadSourceDoc:   ToolReadDocument,
+}
+
+// SuccessorToolName returns the current tool that replaces a retired
+// allowlist entry, or name itself when it is not retired.
+func SuccessorToolName(name string) string {
+	if successor, ok := legacyToolSuccessors[name]; ok {
+		return successor
+	}
+	return name
+}
+
+// IsLegacyRetrievalTool reports whether name is a retired knowledge retrieval
+// tool that NormalizeAllowedTools rewrites to its successor.
+func IsLegacyRetrievalTool(name string) bool {
+	_, ok := legacyToolSuccessors[name]
+	return ok
+}
+
+// NormalizeAllowedTools rewrites retired tool names in an allowlist to their
+// successors and drops duplicates while preserving first-seen order.
+func NormalizeAllowedTools(allowed []string) []string {
+	if len(allowed) == 0 {
+		return allowed
+	}
+	seen := make(map[string]struct{}, len(allowed))
+	out := make([]string, 0, len(allowed))
+	for _, name := range allowed {
+		name = SuccessorToolName(name)
+		if name == "" {
+			continue
+		}
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		seen[name] = struct{}{}
+		out = append(out, name)
+	}
+	return out
+}
 
 // RetiredToolReplacement tells the model how to replace a removed tool.
 // Empty when name was never a WeKnora tool.
@@ -153,6 +211,18 @@ func RetiredToolReplacement(name string) string {
 		return `read_skill is no longer available; use read_file(path="skill://<name>/<file_path or SKILL.md>")`
 	case LegacyToolReadSandboxFile:
 		return "read_sandbox_file is no longer available; use read_file(path=...)"
+	case LegacyToolKnowledgeSearch:
+		return "knowledge_search is no longer available; use search_knowledge(query=..., mode=\"semantic\"|\"hybrid\")"
+	case LegacyToolGrepChunks:
+		return "grep_chunks is no longer available; use search_knowledge(query=..., mode=\"keyword\") for exact " +
+			"terms, or read_document(id=dN, query=...) to search inside one document"
+	case LegacyToolListKnowledgeChunks:
+		return "list_knowledge_chunks is no longer available; use read_document(id=dN or cN, offset=..., limit=...)"
+	case LegacyToolGetDocumentInfo:
+		return "get_document_info is no longer available; read_document(id=dN) returns the document metadata " +
+			"with its first page"
+	case LegacyToolWikiReadSourceDoc:
+		return "wiki_read_source_doc is no longer available; use read_document(id=dN, query=... or offset=...)"
 	default:
 		return ""
 	}

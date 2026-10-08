@@ -4,6 +4,7 @@
   "outputfilename": "WeKnora Lite",
   "frontend:dir": "../../frontend",
   "wailsjsdir": "../../frontend/src",
+  "build:tags": "desktop",
   "author": {
     "name": "WeKnora Team",
     "email": ""

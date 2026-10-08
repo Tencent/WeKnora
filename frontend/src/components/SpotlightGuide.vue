@@ -443,7 +443,7 @@ defineExpose({ open, close })
   box-sizing: border-box;
   pointer-events: none;
   border: 2px solid var(--td-brand-color);
-  box-shadow: 0 0 0 4px rgba(7, 192, 95, 0.18);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--td-brand-color) 18%, transparent);
   transition:
     top 0.28s cubic-bezier(0.4, 0, 0.2, 1),
     left 0.28s cubic-bezier(0.4, 0, 0.2, 1),
@@ -486,7 +486,7 @@ defineExpose({ open, close })
   height: 28px;
   padding: 0;
   border: none;
-  border-radius: 8px;
+  border-radius: var(--app-radius-md);
   background: transparent;
   color: var(--td-text-color-secondary);
   cursor: pointer;
@@ -507,43 +507,43 @@ defineExpose({ open, close })
   height: 6px;
   border-radius: 50%;
   background: var(--td-bg-color-component);
-  transition: width 0.2s ease, background 0.2s ease;
+  transition: width var(--app-motion-base) ease, background var(--app-motion-base) ease;
 
   &.is-active {
     width: 16px;
-    border-radius: 999px;
+    border-radius: var(--app-radius-pill);
     background: var(--td-brand-color);
   }
 
   &.is-done {
-    background: rgba(7, 192, 95, 0.4);
+    background: color-mix(in srgb, var(--td-brand-color) 40%, transparent);
   }
 }
 
 .guide__step-label {
   margin: 6px 0 0;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-placeholder);
 }
 
 .guide__title {
   margin: 0;
   padding-right: 24px;
-  font-size: 18px;
+  font-size: var(--app-text-2xl);
   font-weight: 600;
   line-height: 26px;
 }
 
 .guide__desc {
   margin: 0;
-  font-size: 14px;
+  font-size: var(--app-text-base);
   line-height: 22px;
   color: var(--td-text-color-secondary);
 }
 
 .guide__interact-hint {
   margin: 0;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   line-height: 20px;
   color: var(--td-brand-color);
   font-weight: 500;
@@ -563,7 +563,7 @@ defineExpose({ open, close })
   border: none;
   background: transparent;
   padding: 0;
-  font-size: 13px;
+  font-size: var(--app-text-md);
   color: var(--td-text-color-placeholder);
   cursor: pointer;
 
@@ -579,7 +579,7 @@ defineExpose({ open, close })
 
 .guide-fade-enter-active,
 .guide-fade-leave-active {
-  transition: opacity 0.2s ease;
+  transition: opacity var(--app-motion-base) ease;
 }
 
 .guide-fade-enter-from,

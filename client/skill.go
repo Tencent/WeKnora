@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"io"
 	"mime/multipart"
 	"net/http"
 	"net/url"
@@ -101,14 +100,12 @@ func (c *Client) UploadSandboxSkill(
 	}
 
 	path := "/api/v1/sandbox-configs/" + url.PathEscape(configID) + "/skills"
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, bytes.NewReader(body.Bytes()))
 	if err != nil {
 		return "", err
 	}
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 	c.applyAuthHeaders(ctx, req)
-	req.Body = io.NopCloser(bytes.NewReader(body.Bytes()))
-	req.ContentLength = int64(body.Len())
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {

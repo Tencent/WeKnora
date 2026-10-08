@@ -64,6 +64,47 @@ func TestParseWebSocketFrameBuildsDirectPushACK(t *testing.T) {
 	}
 }
 
+func TestParseWebSocketFrameAcknowledgesControlFramesWithPayloadFields(t *testing.T) {
+	testCases := []struct {
+		name  string
+		input string
+		seq   int64
+	}{
+		{
+			name:  "directPush with msg",
+			input: `{"cmd":"directPush","needAck":true,"seq":43,"msg":{"content":"not logged"}}`,
+			seq:   43,
+		},
+		{
+			name:  "msgChg with data",
+			input: `{"type":"msgChg","needAck":true,"seq":44,"data":{"content":"not logged"}}`,
+			seq:   44,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			frame, err := parseWebSocketFrame([]byte(tc.input))
+			if err != nil {
+				t.Fatalf("parseWebSocketFrame() error = %v", err)
+			}
+			if frame.message != nil {
+				t.Fatalf("control frame unexpectedly produced message: %#v", frame.message)
+			}
+			var ack struct {
+				Cmd string `json:"cmd"`
+				Seq int64  `json:"seq"`
+			}
+			if err := json.Unmarshal(frame.ack, &ack); err != nil {
+				t.Fatalf("unmarshal ack: %v", err)
+			}
+			if ack.Cmd != "ack" || ack.Seq != tc.seq {
+				t.Fatalf("ack = %#v, want cmd=ack seq=%d", ack, tc.seq)
+			}
+		})
+	}
+}
+
 func TestParseWebSocketFrameControlAndInvalid(t *testing.T) {
 	frame, err := parseWebSocketFrame([]byte(`{"event":"pong"}`))
 	if err != nil || frame.control != "pong" {
@@ -104,13 +145,15 @@ func TestWebSocketReconnectDelayCaps(t *testing.T) {
 func TestLongConnClientProcessesMessagesInOrder(t *testing.T) {
 	started := make(chan string, 2)
 	releaseFirst := make(chan struct{})
-	client := NewLongConnClient("wss://example.com/ws", func(_ context.Context, msg *im.IncomingMessage) error {
-		started <- msg.MessageID
-		if msg.MessageID == "first" {
-			<-releaseFirst
-		}
-		return nil
-	})
+	client := NewLongConnClient(
+		"channel-1", "wss://example.com/ws", func(_ context.Context, msg *im.IncomingMessage) error {
+			started <- msg.MessageID
+			if msg.MessageID == "first" {
+				<-releaseFirst
+			}
+			return nil
+		},
+	)
 
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
@@ -163,9 +206,11 @@ func TestLongConnClientAcknowledgesFrameAndStops(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewLongConnClient("ws"+strings.TrimPrefix(server.URL, "http"), func(context.Context, *im.IncomingMessage) error {
-		return nil
-	})
+	client := NewLongConnClient(
+		"channel-1", "ws"+strings.TrimPrefix(server.URL, "http"), func(context.Context, *im.IncomingMessage) error {
+			return nil
+		},
+	)
 	dialer := &net.Dialer{}
 	client.dialer.NetDialContext = dialer.DialContext
 
@@ -179,6 +224,60 @@ func TestLongConnClientAcknowledgesFrameAndStops(t *testing.T) {
 		t.Fatal("websocket ACK was not received")
 	}
 	cancel()
+	client.Stop()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Start() error after stop = %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("websocket client did not stop promptly")
+	}
+}
+
+func TestLongConnClientReconnectsAfterMaxConnectionAge(t *testing.T) {
+	connections := make(chan struct{}, 2)
+	upgrader := ws.Upgrader{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		connections <- struct{}{}
+		for {
+			if _, _, err := conn.ReadMessage(); err != nil {
+				return
+			}
+		}
+	}))
+	defer server.Close()
+
+	client := NewLongConnClient(
+		"channel-1", "ws"+strings.TrimPrefix(server.URL, "http"), func(context.Context, *im.IncomingMessage) error {
+			return nil
+		},
+	)
+	client.maxConnectionAge = 25 * time.Millisecond
+	dialer := &net.Dialer{}
+	client.dialer.NetDialContext = dialer.DialContext
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- client.Start(ctx) }()
+
+	for i := 0; i < 2; i++ {
+		select {
+		case <-connections:
+		case <-time.After(2 * time.Second):
+			t.Fatalf("connection %d was not established", i+1)
+		}
+	}
+	if got := client.reconnectCount.Load(); got != 1 {
+		t.Fatalf("reconnect count = %d, want 1 after max-age rotation", got)
+	}
+
 	client.Stop()
 	select {
 	case err := <-done:

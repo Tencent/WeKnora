@@ -30,11 +30,15 @@ const textMessageType = 2
 const markdownFormatType = "markdown"
 
 // Compile-time check.
-var _ im.Adapter = (*Adapter)(nil)
-var _ im.FileDownloader = (*Adapter)(nil)
+var (
+	_ im.Adapter        = (*Adapter)(nil)
+	_ im.FileDownloader = (*Adapter)(nil)
+)
 
-var yunzhijiaAuthURL = "https://yunzhijia.com/api/oauth2_v12/auth/getAppAccessToken"
-var yunzhijiaDownloadFileBaseURL = "https://yunzhijia.com/gateway/docrest/doc/file/downloadfileOpen"
+var (
+	yunzhijiaAuthURL             = "https://yunzhijia.com/api/oauth2_v12/auth/getAppAccessToken"
+	yunzhijiaDownloadFileBaseURL = "https://yunzhijia.com/gateway/docrest/doc/file/downloadfileOpen"
+)
 
 var validateDownloadFileURL = func(rawURL string) error {
 	_, err := validateEndpointURL(rawURL, "https", "yunzhijia.com")
@@ -100,7 +104,7 @@ func (a *Adapter) HandleURLVerification(c *gin.Context) bool {
 // If secret is not configured, verification is skipped.
 func (a *Adapter) VerifyCallback(c *gin.Context) error {
 	if a.secret == "" {
-		return nil
+		return fmt.Errorf("webhook verification secret is required")
 	}
 
 	bodyBytes, err := io.ReadAll(c.Request.Body)

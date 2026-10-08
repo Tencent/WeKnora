@@ -28,10 +28,16 @@ import (
 func TestMCPExposureWithoutMentionReachesProviderAndExecutes(t *testing.T) {
 	utils.SetSSRFWhitelistFromRaw("127.0.0.1")
 	t.Cleanup(utils.ResetSSRFWhitelistForTest)
-	for _, variant := range []string{"openai", "anthropic", "openai-deferred", "anthropic-deferred"} {
+	for _, variant := range []string{
+		"openai", "anthropic", "openai-deferred", "anthropic-deferred",
+		"openai-proxy-deferred", "anthropic-proxy-deferred",
+		"openai-string-proxy-deferred", "anthropic-string-proxy-deferred",
+	} {
 		t.Run(variant, func(t *testing.T) {
 			provider := strings.Split(variant, "-")[0]
 			deferred := strings.HasSuffix(variant, "-deferred")
+			proxyCall := strings.Contains(variant, "-proxy-")
+			const serverID = "8f7a5b68-a7ab-4565-b6f3-1cae2578f040"
 			var executed atomic.Int32
 			const description = "Retrieve a customer order and its delivery status. Use the original " +
 				"external order ID."
@@ -88,7 +94,7 @@ func TestMCPExposureWithoutMentionReachesProviderAndExecutes(t *testing.T) {
 				registry,
 				[]*types.MCPService{
 					{
-						ID:            "orders",
+						ID:            serverID,
 						Name:          "Orders",
 						Description:   "Query orders and shipping",
 						Enabled:       true,
@@ -113,6 +119,7 @@ func TestMCPExposureWithoutMentionReachesProviderAndExecutes(t *testing.T) {
 			modelServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				body, _ := io.ReadAll(r.Body)
 				assert.NotContains(t, string(body), "NEVER-IN-MODEL-CONTEXT")
+				assert.NotContains(t, string(body), serverID, "the provider must only receive short routing IDs")
 				var payload map[string]json.RawMessage
 				if !assert.NoError(t, json.Unmarshal(body, &payload)) {
 					w.WriteHeader(500)
@@ -124,6 +131,7 @@ func TestMCPExposureWithoutMentionReachesProviderAndExecutes(t *testing.T) {
 					return
 				}
 				toolName := ""
+				proxyVisible := false
 				for _, definition := range definitions {
 					if provider == "openai" {
 						var function map[string]json.RawMessage
@@ -133,6 +141,14 @@ func TestMCPExposureWithoutMentionReachesProviderAndExecutes(t *testing.T) {
 					var name, desc string
 					_ = json.Unmarshal(definition["name"], &name)
 					_ = json.Unmarshal(definition["description"], &desc)
+					if name == agenttools.ToolCallMCPTool {
+						proxyVisible = true
+						assert.Contains(t, string(body), `"enum":["mt1"]`)
+					}
+					if name == agenttools.ToolDiscoverMCPTools {
+						assert.Contains(t, desc, `"server_id":"ms1"`)
+						assert.Contains(t, string(body), `"enum":["ms1"]`)
+					}
 					if strings.HasPrefix(name, "mcp_") {
 						toolName = name
 						assert.Contains(t, desc, description)
@@ -146,6 +162,7 @@ func TestMCPExposureWithoutMentionReachesProviderAndExecutes(t *testing.T) {
 				call := requests.Add(1)
 				w.Header().Set("Content-Type", "text/event-stream")
 				if deferred && call <= 2 {
+					assert.False(t, proxyVisible, "providers must not offer a proxy before successful describe")
 					assert.Zero(
 						t,
 						upstreamRequests.Load(),
@@ -154,10 +171,10 @@ func TestMCPExposureWithoutMentionReachesProviderAndExecutes(t *testing.T) {
 					assert.Empty(t, toolName, "full MCP functions must stay hidden until describe")
 					assert.NotContains(t, string(payload["tools"]), description)
 					assert.Contains(t, string(payload["tools"]), "Query orders and shipping")
-					args := `{"mode":"list_tools","server_id":"orders"}`
+					args := `{"mode":"list_tools","server_id":"ms1"}`
 					if call == 2 {
 						assert.Contains(t, string(payload["messages"]), "get_order")
-						args = `{"mode":"describe","server_id":"orders","tool_name":"get_order"}`
+						args = `{"mode":"describe","server_id":"ms1","tool_name":"get_order"}`
 					}
 					streamMCPTestCall(
 						w,
@@ -172,8 +189,18 @@ func TestMCPExposureWithoutMentionReachesProviderAndExecutes(t *testing.T) {
 					w.WriteHeader(500)
 					return
 				}
+				assert.True(t, proxyVisible, "a loaded definition enables the compatibility proxy")
 				assert.Contains(t, string(payload["tools"]), "Order IDs belong to the external customer system.")
 				if (!deferred && call == 1) || (deferred && call == 3) {
+					if proxyCall {
+						arguments := `{"tool_ref":"mt1","arguments":{"id":"42"}}`
+						if strings.Contains(variant, "-string-") {
+							arguments = `{"tool_ref":"mt1","arguments":"{\"id\":\"42\"}"}`
+						}
+						streamMCPTestCall(w, provider, agenttools.ToolCallMCPTool, "call_order",
+							arguments)
+						return
+					}
 					if provider == "openai" {
 						_, _ = fmt.Fprintf(
 							w,
@@ -226,6 +253,11 @@ func TestMCPExposureWithoutMentionReachesProviderAndExecutes(t *testing.T) {
 			toolRound := 0
 			if deferred {
 				toolRound = 2
+				require.Equal(t, serverID, state.RoundSteps[0].ToolCalls[0].Args["server_id"])
+				require.Equal(t, serverID, state.RoundSteps[1].ToolCalls[0].Args["server_id"])
+			}
+			if proxyCall {
+				require.Contains(t, state.RoundSteps[toolRound].ToolCalls[0].Args["tool_ref"], "mcpt_")
 			}
 			require.EqualValues(t, 2+toolRound, requests.Load())
 			require.Equal(t, "get_order", state.RoundSteps[toolRound].ToolCalls[0].Target.ToolName)

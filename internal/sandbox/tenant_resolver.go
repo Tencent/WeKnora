@@ -27,7 +27,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -85,6 +84,10 @@ type TenantSandboxResolverDeps struct {
 	Store   SessionSandboxBindingStore
 	Checker SessionExistenceChecker
 
+	// Bootstrapper customises the first sandbox create of individual sessions
+	// (session fork). Optional: nil is the ordinary path.
+	Bootstrapper SessionBootstrapper
+
 	// SharedTransport is reused by every tenant's HTTP client. Optional; a
 	// guarded transport is installed when nil.
 	SharedTransport *http.Transport
@@ -137,11 +140,7 @@ func NewGuardedTransport() *http.Transport {
 
 func NewGuardedTransportWithPolicy(policy OutboundURLPolicy) *http.Transport {
 	return &http.Transport{
-		DialContext: (&net.Dialer{
-			Timeout:   10 * time.Second,
-			KeepAlive: 30 * time.Second,
-			Control:   SafeDialControlForPolicy(policy),
-		}).DialContext,
+		DialContext:         GuardedDialContext(policy),
 		MaxIdleConns:        100,
 		MaxIdleConnsPerHost: 4,
 		IdleConnTimeout:     90 * time.Second,
@@ -194,6 +193,7 @@ func (r *tenantSandboxResolver) Resolve(
 			Checker:         r.deps.Checker,
 			SkipHealthProbe: true,
 			ConfigID:        configID,
+			Bootstrapper:    r.deps.Bootstrapper,
 		})
 	default:
 		return NewDisabledManager(), nil

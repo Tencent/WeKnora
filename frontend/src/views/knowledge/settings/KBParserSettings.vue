@@ -346,14 +346,14 @@ watch(() => props.parserEngineRules, (v) => {
   margin-bottom: 20px;
 
   h2 {
-    font-size: 20px;
+    font-size: var(--app-text-3xl);
     font-weight: 600;
     color: var(--td-text-color-primary);
     margin: 0 0 6px 0;
   }
 
   .section-description {
-    font-size: 14px;
+    font-size: var(--app-text-base);
     color: var(--td-text-color-secondary);
     margin: 0;
     line-height: 1.5;
@@ -402,13 +402,13 @@ watch(() => props.parserEngineRules, (v) => {
   }
 
   .group-icon {
-    font-size: 18px;
+    font-size: var(--app-text-2xl);
     color: var(--td-text-color-secondary);
     flex-shrink: 0;
   }
 
   label {
-    font-size: 15px;
+    font-size: var(--app-text-lg);
     font-weight: 500;
     color: var(--td-text-color-primary);
     display: block;
@@ -424,17 +424,17 @@ watch(() => props.parserEngineRules, (v) => {
 
   .ext-tag {
     display: inline-block;
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     line-height: 1;
     color: var(--td-text-color-secondary);
     background: var(--td-bg-color-secondarycontainer);
     padding: 3px 8px;
-    border-radius: 4px;
+    border-radius: var(--app-radius-xs);
     font-family: var(--app-font-family-mono);
   }
 
   .desc {
-    font-size: 13px;
+    font-size: var(--app-text-md);
     color: var(--td-text-color-secondary);
     margin: 0;
     line-height: 1.5;
@@ -465,7 +465,7 @@ watch(() => props.parserEngineRules, (v) => {
   }
 
   :deep(.t-checkbox__label) {
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     line-height: 1.5;
     text-align: left;
     white-space: normal;
@@ -477,7 +477,7 @@ watch(() => props.parserEngineRules, (v) => {
   align-items: center;
   gap: 4px;
   margin-top: 8px;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-warning-color);
   line-height: 1.4;
 
@@ -497,8 +497,8 @@ watch(() => props.parserEngineRules, (v) => {
 .kb-parser-settings--embedded {
   .settings-group {
     border: 1px solid var(--td-component-stroke);
-    border-radius: 8px;
-    background: var(--td-bg-color-secondarycontainer, #f8f9fb);
+    border-radius: var(--app-radius-md);
+    background: var(--td-bg-color-secondarycontainer);
     overflow: hidden;
   }
 
@@ -507,7 +507,7 @@ watch(() => props.parserEngineRules, (v) => {
     align-items: center;
     gap: 16px;
     padding: 10px 14px;
-    background: var(--td-bg-color-container, #fff);
+    background: var(--td-bg-color-container);
     border-bottom: 1px solid var(--td-component-stroke);
 
     &:last-child {
@@ -534,7 +534,7 @@ watch(() => props.parserEngineRules, (v) => {
   }
 
   .group-label {
-    font-size: 13px;
+    font-size: var(--app-text-md);
     font-weight: 500;
     margin-bottom: 4px;
   }
@@ -545,7 +545,7 @@ watch(() => props.parserEngineRules, (v) => {
   }
 
   .ext-tag {
-    font-size: 11px;
+    font-size: var(--app-text-xs);
     padding: 2px 6px;
   }
 

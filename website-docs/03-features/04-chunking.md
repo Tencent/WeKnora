@@ -206,13 +206,16 @@ flowchart TD
 
 ```go
 var protectedPatterns = []*regexp.Regexp{
-    regexp.MustCompile(`(?s)\$\$.*?\$\$`),        // LaTeX 块级公式
-    regexp.MustCompile(`!\[[^\]]*\]\([^)]+\)`),   // Markdown 图片
-    regexp.MustCompile(`\[[^\]]*\]\([^)]+\)`),    // Markdown 链接
-    /* 表头+分隔行 */ /* 表格数据行 */             // Markdown 表格
-    regexp.MustCompile("(?s)```(?:\\w+)?[\\r\\n].*?```"), // fenced 代码块
+    regexp.MustCompile(`(?s)\$\$.*?\$\$`),                        // LaTeX 块级公式
+    regexp.MustCompile(`!\[[^\]\n]{0,200}\]\([^)\n]{1,500}\)`),   // Markdown 图片（单行、限长）
+    regexp.MustCompile(`\[[^\]\n]{1,200}\]\([^)\n]{1,500}\)`),    // Markdown 链接（单行、限长）
+    /* 表头+分隔行 */ /* 表格数据行 */                             // Markdown 表格
+    regexp.MustCompile("(?s)```(?:\\w+)?[\\r\\n].*?```"),          // fenced 代码块
+    regexp.MustCompile("`[^`\\r\\n]+`"),                            // 行内代码
 }
 ```
+
+图片和链接的匹配限定在单行内，链接文字不超过 200 字符、地址不超过 500 字符（与 CommonMark 不允许跨空行的规则一致）。这样 OCR 残留的孤立 `[` 不会与远处的 `](` 配对，把整段正文误当作一个不可切分的保护区。
 
 超过 `maxProtectedSize = 7500` rune 的保护区（超大表格/代码块）会被强制在换行或空格处切开，避免超出 embedding API 限制。
 
@@ -228,8 +231,6 @@ var protectedPatterns = []*regexp.Regexp{
 - 受保护区间（代码块、行内代码 `` ` ` ``、公式、表格、图片/链接）内部的分隔符不作为边界；边界之后若只剩空白也不成立；
 - 窗口内找不到合法语义边界时不保留重叠，避免从词的中间截断。
 
-行内代码 `` `foo` `` 在这一版加入了受保护正则列表，防止在反引号内部切开。
-
 #### 表格处理：表头追踪（header_tracker.go） {#_3-4-表格处理-表头追踪-header-tracker-go}
 
 大 Markdown 表格被切成多块后，后续块会丢失列名上下文。`headerTracker`（移植自 `docreader/splitter/header_hook.py`）解决这一问题：
@@ -239,7 +240,7 @@ var protectedPatterns = []*regexp.Regexp{
 - 空表头（MarkItDown 常见的 `||` + `|---|---|`）用第一行数据行补全列名（`pendingExtend`）；
 - 表格边界感知：块尾 `\n\n` 后出现新表行、或新行列数与表头不一致时，结束旧表头并强制落块（`headerEndedThisUnit`），防止上一张表的表头污染下一张表。
 
-另外，OCR 引擎（PaddleOCR-VL 等）输出的内联 HTML 表格在解析阶段就被 `docparser/html_table_normalizer.go` 的 `normalizeHTMLTables` 转成 GFM Markdown 表格（含 rowspan/colspan 的只剥离表现属性），从而进入上述保护与表头追踪逻辑，不会被 chunker 切碎。
+另外，所有解析引擎（MinerU、PaddleOCR-VL、VLM OCR 等）以及手工 Markdown 中的内联 HTML 表格，都会在分块前由 `docparser/html_table_normalizer.go` 的 `NormalizeHTMLTables` 转成 GFM Markdown 表格，从而进入上述保护与表头追踪逻辑。含真实合并单元格（`rowspan`/`colspan` 大于 1）或其他无法转换的表格保留 HTML，但每个 `<tr>` 单独成行并在前后留空行，分块器可以在行边界切分，而不是在 7500 字符上限处硬切。
 
 #### 图片处理 {#_3-5-图片处理}
 
@@ -369,7 +370,7 @@ processDocument
 
 保护措施（常量）：输入上限 `previewMaxChars = 64k` rune（返回 413）、返回块数上限 `previewMaxChunks = 500`（统计仍按全量算）、超时 `previewTimeout = 5s`（splitter 不接受 context，超时后 handler 返回 504 但工作 goroutine 会自然跑完，64k 上限是主要防护）。诊断信息由 `chunker.SplitWithDiagnostics` 产出，其 JSON 形状是公开 API 的一部分。
 
-路由注册（`internal/router/router.go`）：
+路由注册（`internal/router/routes_knowledge.go`）：
 
 ```go
 g.apiKeyRoute(r, http.MethodPost, "/chunker/preview",

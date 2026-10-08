@@ -65,7 +65,7 @@ func TestE2BExecTimeoutBudgets(t *testing.T) {
 			client, err := newE2BRemoteClient(&Config{
 				E2BAPIKey: "test", E2BAPIURL: server.URL,
 				E2BHTTPTimeout: 100 * time.Millisecond,
-			}, e2bTimeoutTestTransport{target: target}, NewInboundTokenRegistry())
+			}, e2bTimeoutTestTransport{target: target}, NewInboundTokenRegistry(), nil)
 			require.NoError(t, err)
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 			defer cancel()

@@ -80,6 +80,16 @@ func TestApproxTextContentRunes(t *testing.T) {
 	}
 }
 
+func TestTemporaryDocumentSupportsXMindWithoutEngineDiscovery(t *testing.T) {
+	svc := &temporaryDocumentService{}
+	if !svc.supportsExtension(context.Background(), 1, ".xmind") {
+		t.Fatal("XMind must be accepted even when engine discovery is unavailable")
+	}
+	if svc.supportsExtension(context.Background(), 1, ".exe") {
+		t.Fatal("unsupported attachments must still be rejected")
+	}
+}
+
 func TestCollectImageBytes(t *testing.T) {
 	refs := []types.ImageRef{
 		{ImageData: []byte("a")},

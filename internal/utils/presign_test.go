@@ -10,6 +10,7 @@ import (
 )
 
 func TestSignFileURL_RoundTrip(t *testing.T) {
+	t.Setenv("SYSTEM_SIGNING_KEY", "")
 	t.Setenv("SYSTEM_AES_KEY", "weknora-test-aes-key-32bytes!!!")
 
 	baseURL := "https://weknora.example.com"
@@ -25,14 +26,16 @@ func TestSignFileURL_RoundTrip(t *testing.T) {
 }
 
 func TestSignFileURL_NoKey(t *testing.T) {
+	t.Setenv("SYSTEM_SIGNING_KEY", "")
 	t.Setenv("SYSTEM_AES_KEY", "")
 
 	_, err := SignFileURL("https://example.com", "local://1/img.png", 1, 0)
-	assert.Error(t, err)
+	require.Error(t, err)
 	assert.Contains(t, err.Error(), "SYSTEM_AES_KEY")
 }
 
 func TestVerifyFileURLSig_Valid(t *testing.T) {
+	t.Setenv("SYSTEM_SIGNING_KEY", "")
 	t.Setenv("SYSTEM_AES_KEY", "weknora-test-aes-key-32bytes!!!")
 
 	filePath := "local://42/knowledge/img.jpg"
@@ -47,6 +50,7 @@ func TestVerifyFileURLSig_Valid(t *testing.T) {
 }
 
 func TestVerifyFileURLSig_Expired(t *testing.T) {
+	t.Setenv("SYSTEM_SIGNING_KEY", "")
 	t.Setenv("SYSTEM_AES_KEY", "weknora-test-aes-key-32bytes!!!")
 
 	filePath := "local://1/img.png"
@@ -61,6 +65,7 @@ func TestVerifyFileURLSig_Expired(t *testing.T) {
 }
 
 func TestVerifyFileURLSig_Tampered(t *testing.T) {
+	t.Setenv("SYSTEM_SIGNING_KEY", "")
 	t.Setenv("SYSTEM_AES_KEY", "weknora-test-aes-key-32bytes!!!")
 
 	filePath := "local://1/img.png"
@@ -81,6 +86,7 @@ func TestVerifyFileURLSig_Tampered(t *testing.T) {
 }
 
 func TestVerifyFileURLSig_NoKey(t *testing.T) {
+	t.Setenv("SYSTEM_SIGNING_KEY", "")
 	t.Setenv("SYSTEM_AES_KEY", "")
 
 	assert.False(t, VerifyFileURLSig("local://1/img.png", 1, "99999999999", "abc"))
@@ -132,6 +138,26 @@ func TestParseTenantIDFromStoragePath(t *testing.T) {
 		t.Run(tt.path, func(t *testing.T) {
 			got := ParseTenantIDFromStoragePath(tt.path)
 			assert.Equal(t, tt.want, got, "ParseTenantIDFromStoragePath(%q)", tt.path)
+		})
+	}
+}
+
+func TestSystemHMACKeyConfiguration(t *testing.T) {
+	for _, tc := range []struct {
+		name, signingKey, aesKey, want string
+	}{
+		{
+			"signing key takes precedence", "test-signing-key-32-bytes-long!!!!", "legacy-aes-key-32-bytes-long!!!!!",
+			"test-signing-key-32-bytes-long!!!!",
+		},
+		{"legacy fallback", "", "legacy-aes-key-32-bytes-long!!!!!", "legacy-aes-key-32-bytes-long!!!!!"},
+		{"invalid explicit key fails closed", "short", "legacy-aes-key-32-bytes-long!!!!!", ""},
+		{"no keys", "", "", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("SYSTEM_SIGNING_KEY", tc.signingKey)
+			t.Setenv("SYSTEM_AES_KEY", tc.aesKey)
+			require.Equal(t, tc.want, string(SystemHMACKey()))
 		})
 	}
 }

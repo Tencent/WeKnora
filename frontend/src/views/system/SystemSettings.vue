@@ -1116,26 +1116,14 @@ onUnmounted(() => {
 </script>
 
 <style lang="less" scoped>
+@import (reference) '@/components/css/settings-section.less';
+
 .system-settings {
   width: 100%;
 }
 
 .section-header {
-  margin-bottom: 24px;
-
-  h2 {
-    font-size: 20px;
-    font-weight: 600;
-    color: var(--td-text-color-primary);
-    margin: 0;
-  }
-
-  .section-description {
-    font-size: 14px;
-    color: var(--td-text-color-secondary);
-    margin: 8px 0 0;
-    line-height: 1.5;
-  }
+  .settings-section-header();
 }
 
 .section-header__titlewrap {
@@ -1150,7 +1138,7 @@ onUnmounted(() => {
   justify-content: center;
   padding: 2px;
   border: none;
-  border-radius: 4px;
+  border-radius: var(--app-radius-xs);
   background: transparent;
   color: var(--td-text-color-placeholder);
   cursor: help;
@@ -1171,14 +1159,14 @@ onUnmounted(() => {
 .hint-popover__title {
   margin: 0;
   color: var(--td-text-color-primary);
-  font-size: 13px;
+  font-size: var(--app-text-md);
   font-weight: 600;
 }
 
 .hint-popover__list {
   margin: 0;
   padding: 0 0 0 18px;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.6;
   color: var(--td-text-color-secondary);
   list-style: disc;
@@ -1215,7 +1203,7 @@ onUnmounted(() => {
 
   p {
     margin: 0;
-    font-size: 13px;
+    font-size: var(--app-text-md);
     line-height: 1.5;
     color: var(--td-text-color-secondary);
   }
@@ -1230,7 +1218,7 @@ onUnmounted(() => {
   grid-template-columns: minmax(0, 1fr) 280px;
   gap: 24px;
   padding: 10px 16px;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   font-weight: 500;
   color: var(--td-text-color-secondary);
   background: var(--td-bg-color-secondarycontainer);
@@ -1261,12 +1249,12 @@ onUnmounted(() => {
   }
 
   .setting-label {
-    font-size: 14px;
+    font-size: var(--app-text-base);
   }
 
   .desc {
     max-width: 620px;
-    font-size: 12px;
+    font-size: var(--app-text-sm);
   }
 
   .setting-control {
@@ -1296,7 +1284,7 @@ onUnmounted(() => {
   gap: 5px;
   flex-shrink: 0;
   min-width: 52px;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-secondary);
 }
 
@@ -1327,7 +1315,7 @@ onUnmounted(() => {
   gap: 8px;
   padding: 60px 0;
   color: var(--td-text-color-placeholder);
-  font-size: 13px;
+  font-size: var(--app-text-md);
 }
 
 // Skeleton mirrors GeneralSettings.vue 1:1 so the two panes feel like
@@ -1344,21 +1332,11 @@ onUnmounted(() => {
 }
 
 .setting-row {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  padding: 20px 0;
-  border-bottom: 1px solid var(--td-component-stroke);
-
-  &:last-child {
-    border-bottom: none;
-  }
+  .setting-row();
 }
 
 .setting-info {
-  flex: 1;
-  max-width: 65%;
-  padding-right: 24px;
+  .setting-info();
 }
 
 .setting-label {
@@ -1366,7 +1344,7 @@ onUnmounted(() => {
   align-items: center;
   flex-wrap: wrap;
   gap: 6px;
-  font-size: 15px;
+  font-size: var(--app-text-lg);
   font-weight: 500;
   color: var(--td-text-color-primary);
   margin-bottom: 4px;
@@ -1378,7 +1356,7 @@ onUnmounted(() => {
 }
 
 .desc {
-  font-size: 13px;
+  font-size: var(--app-text-md);
   color: var(--td-text-color-secondary);
   margin: 0;
   line-height: 1.5;
@@ -1387,14 +1365,12 @@ onUnmounted(() => {
 
 .setting-meta {
   margin-top: 6px;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-placeholder);
 }
 
 .setting-control {
-  flex-shrink: 0;
-  min-width: 280px;
-  display: flex;
+  .setting-control();
   flex-direction: column;
   align-items: flex-end;
   gap: 6px;
@@ -1434,7 +1410,7 @@ onUnmounted(() => {
   height: 32px;
   padding: 0 12px;
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
 }
 
 .password-reset-trigger {
@@ -1464,7 +1440,7 @@ onUnmounted(() => {
   }
 
   .settings-group--runtime {
-    border-radius: 8px;
+    border-radius: var(--app-radius-md);
 
     .setting-row {
       display: flex;

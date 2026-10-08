@@ -3,6 +3,7 @@ package agentcmd
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -107,6 +108,11 @@ func TestCreate_From_CopiesThenUpdates(t *testing.T) {
 	require.True(t, svc.updateCalled, "must Update after Copy when overrides present")
 	assert.Equal(t, "ag_clone", svc.updateID)
 	assert.Equal(t, "Renamed", svc.updateReq.Name)
+	body, err := json.Marshal(svc.updateReq)
+	require.NoError(t, err)
+	var fields map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(body, &fields))
+	assert.NotContains(t, fields, "avatar", "overrides must preserve the copied avatar")
 	require.NotNil(t, svc.updateReq.Config)
 	assert.Equal(t, "model-x", svc.updateReq.Config.ModelID)
 }

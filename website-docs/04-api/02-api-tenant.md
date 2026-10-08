@@ -90,7 +90,7 @@ curl -X PUT $BASE/api/v1/tenants/1 -H "Authorization: Bearer $TOKEN" \
 
 ### DELETE /api/v1/tenants/:id
 
-用途：删除空间。权限：Owner；平台 key 需 `system_tenants_manage`。Handler: `internal/handler/tenant.go`
+用途：删除空间。权限：Owner；平台 key 需 `system_tenants_manage`。空间记录与全部成员关系被软删除，成员随即失去访问；空间内的知识库、模型等数据不会被立即物理清除，已删除空间排队中的 Wiki 任务不再调用模型。Handler: `internal/handler/tenant.go`
 
 响应：200 `{"success":true,"message":"Workspace deleted successfully"}`
 
@@ -374,7 +374,7 @@ curl "$BASE/api/v1/tenants/1/audit-log?limit=50" -H "Authorization: Bearer $TOKE
 
 用途：单个 KB 的活动流（只读审计）。权限：KB 创建者 OR Admin+，且对 KB 有 read 权限；仅 JWT。查询参数同上（`after_id/limit/action/outcome/actor`）。注册于 `RegisterKnowledgeBaseActivityRoutes`。
 
-响应：200 `{"success":true,"data":[AuditLog],"next_cursor":N}`
+响应：200 `{"success":true,"data":[AuditLog],"next_cursor":N}`。`details` 为动作负载；若该条由 API Key 触发，会包含 `api_key_id` 与 `api_key_name`（名称快照，不含明文 Key）。
 
 ```bash
 curl $BASE/api/v1/knowledge-bases/kb-1/activity -H "Authorization: Bearer $TOKEN"
@@ -382,4 +382,4 @@ curl $BASE/api/v1/knowledge-bases/kb-1/activity -H "Authorization: Bearer $TOKEN
 
 ## 实现参考
 
-路由注册：`internal/router/router.go` 的 `RegisterTenantRoutes`。Handler：`internal/handler/tenant.go`、`internal/handler/tenant_member.go`、`internal/handler/tenant_invitation.go`、`internal/handler/tenant_invite_link.go`、`internal/handler/audit_log.go`。
+路由注册：`internal/router/routes_auth_tenant.go` 的 `RegisterTenantRoutes`。Handler：`internal/handler/tenant.go`、`internal/handler/tenant_member.go`、`internal/handler/tenant_invitation.go`、`internal/handler/tenant_invite_link.go`、`internal/handler/audit_log.go`。

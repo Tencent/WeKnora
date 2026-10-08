@@ -169,13 +169,13 @@ const headerTitle = computed(() => {
 
 .wiki-header {
   .wiki-icon {
-    font-size: 14px;
+    font-size: var(--app-text-base);
     width: 20px;
     height: 20px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    border-radius: 4px;
+    border-radius: var(--app-radius-xs);
     flex-shrink: 0;
 
     &.created {
@@ -184,7 +184,7 @@ const headerTitle = computed(() => {
     }
     &.updated {
       color: var(--td-brand-color);
-      background: rgba(7, 192, 95, 0.1);
+      background: color-mix(in srgb, var(--td-brand-color) 10%, transparent);
     }
     &.renamed {
       color: var(--td-warning-color);
@@ -197,17 +197,17 @@ const headerTitle = computed(() => {
   }
 
   .wiki-title-text {
-    font-size: 13px;
+    font-size: var(--app-text-md);
     font-weight: 500;
     color: var(--td-text-color-primary);
   }
 }
 
 .action-badge {
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   font-weight: 600;
   padding: 2px 8px;
-  border-radius: 10px;
+  border-radius: var(--app-radius-lg);
   line-height: 1.5;
 
   &.created {
@@ -217,8 +217,8 @@ const headerTitle = computed(() => {
   }
   &.updated {
     color: var(--td-brand-color);
-    background: rgba(7, 192, 95, 0.1);
-    border: 1px solid rgba(7, 192, 95, 0.2);
+    background: color-mix(in srgb, var(--td-brand-color) 10%, transparent);
+    border: 1px solid color-mix(in srgb, var(--td-brand-color) 20%, transparent);
   }
   &.renamed {
     color: var(--td-warning-color);
@@ -235,10 +235,10 @@ const headerTitle = computed(() => {
 .diff-block {
   margin-top: 8px;
   border: 1px solid @card-border;
-  border-radius: 4px;
+  border-radius: var(--app-radius-xs);
   overflow: hidden;
   font-family: var(--app-font-family-mono);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
 }
 
 .diff-line {
@@ -286,7 +286,7 @@ const headerTitle = computed(() => {
     font-weight: 600;
   }
   .rename-arrow {
-    font-size: 16px;
+    font-size: var(--app-text-xl);
     color: var(--td-text-color-placeholder);
   }
 }
@@ -299,7 +299,7 @@ const headerTitle = computed(() => {
   padding-left: 90px;
 
   .affected-slug {
-    font-size: 11px;
+    font-size: var(--app-text-xs);
     padding: 2px 6px;
     border-radius: 3px;
     background: var(--td-bg-color-secondarycontainer);
@@ -309,7 +309,7 @@ const headerTitle = computed(() => {
 
 code {
   font-family: var(--app-font-family-mono);
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   background: var(--td-bg-color-secondarycontainer);
   padding: 2px 5px;
   border-radius: 3px;

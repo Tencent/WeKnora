@@ -3,10 +3,12 @@ package chatpipeline
 import (
 	"context"
 	"strings"
+	"sync"
 	"testing"
 	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -62,4 +64,50 @@ func containsToken(values []string, want string) bool {
 		}
 	}
 	return false
+}
+
+type recordingExpansionKBService struct {
+	interfaces.KnowledgeBaseService
+	mu     sync.Mutex
+	params []types.SearchParams
+}
+
+func (s *recordingExpansionKBService) HybridSearch(
+	_ context.Context, _ string, params types.SearchParams,
+) ([]*types.SearchResult, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.params = append(s.params, params)
+	return nil, nil
+}
+
+// Expansion variants only add keyword recall, so they must not re-embed and
+// repeat the vector search; with keyword matching off there is nothing to do.
+func TestRunQueryExpansionSearchesKeywordsOnly(t *testing.T) {
+	kbService := &recordingExpansionKBService{}
+	plugin := &PluginSearch{knowledgeBaseService: kbService}
+	cm := &types.ChatManage{
+		PipelineRequest: types.PipelineRequest{
+			EmbeddingTopK: 10,
+			SearchTargets: types.SearchTargets{{KnowledgeBaseID: "kb-1", Type: types.SearchTargetTypeKnowledgeBase}},
+		},
+		PipelineState: types.PipelineState{RewriteQuery: "如何配置向量数据库的索引参数"},
+	}
+
+	plugin.runQueryExpansion(context.Background(), cm)
+	if len(kbService.params) == 0 {
+		t.Fatal("expected expansion searches")
+	}
+	for _, p := range kbService.params {
+		if !p.DisableVectorMatch || p.DisableKeywordsMatch {
+			t.Fatalf("expansion search params = %+v, want keyword-only", p)
+		}
+	}
+
+	kbService.params = nil
+	cm.DisableKeywordsMatch = true
+	plugin.runQueryExpansion(context.Background(), cm)
+	if len(kbService.params) != 0 {
+		t.Fatalf("expansion ran %d searches with keyword matching off", len(kbService.params))
+	}
 }

@@ -23,6 +23,14 @@ func (r *sourceRegistry) ModelOutput(result *types.ToolResult) string {
 	if result == nil {
 		return ""
 	}
+	// Legacy-format output from a current source tool is evidence too. Replay
+	// registration alone must never grant this eligibility.
+	if result.Success {
+		r.registerLegacyToolReferences(result.Output, true)
+		copyResult := *result
+		copyResult.Output = r.CompactPublicCitations(result.Output, true)
+		result = &copyResult
+	}
 	displayType := stringValue(result.Data, "display_type")
 	if displayType == "web_fetch_results" {
 		return r.modelWebFetchOutput(mapsValue(result.Data["results"]), result.Output)
@@ -34,13 +42,21 @@ func (r *sourceRegistry) ModelOutput(result *types.ToolResult) string {
 	case "grep_results":
 		return r.modelKnowledgeOutput("keyword", mapsValue(result.Data["chunk_results"]), result.Output)
 	case "search_results":
-		return r.modelKnowledgeOutput("semantic", mapsValue(result.Data["results"]), result.Output)
+		// search_knowledge reports the mode it actually used; legacy
+		// knowledge_search payloads carry none and were always semantic.
+		mode := stringValue(result.Data, "mode")
+		if mode == "" {
+			mode = "semantic"
+		}
+		output := r.modelKnowledgeOutput(mode, mapsValue(result.Data["results"]), result.Output)
+		return annotateSearchNotes(r.annotateModeFallbacks(output, result.Data), result.Data)
 	case "knowledge_chunks_list":
 		return r.modelKnowledgeChunksOutput(result.Data, result.Output)
 	case "document_info":
-		return r.modelDocumentInfoOutput(mapsValue(result.Data["documents"]), result.Output)
+		return r.modelDocumentInfoOutput(result.Data, result.Output)
 	case "graph_query_results":
-		return r.modelKnowledgeOutput("graph", mapsValue(result.Data["results"]), result.Output)
+		return annotateGraphResult(
+			r.modelKnowledgeOutput("graph", mapsValue(result.Data["results"]), result.Output), result.Data)
 	case "web_search_results":
 		return r.modelWebSearchOutput(mapsValue(result.Data["results"]), result.Output)
 	case "database_query":
@@ -64,7 +80,7 @@ func (r *sourceRegistry) registerStructuredReferences(raw string) {
 	walk = func(key string, value interface{}) {
 		switch typed := value.(type) {
 		case string:
-			r.registerSourceIDByKey(key, typed)
+			r.registerSourceIDByKey(key, typed, true)
 		case []interface{}:
 			for _, item := range typed {
 				walk(key, item)
@@ -82,19 +98,33 @@ func (r *sourceRegistry) modelDatabaseQueryOutput(rows []map[string]interface{},
 	for _, row := range rows {
 		for key, raw := range row {
 			if value, ok := raw.(string); ok {
-				r.registerSourceIDByKey(key, value)
+				r.registerSourceIDByKey(key, value, true)
 			}
 		}
 	}
 	return r.CompactKnownText(fallback)
 }
 
-func (r *sourceRegistry) modelDocumentInfoOutput(rows []map[string]interface{}, fallback string) string {
+func (r *sourceRegistry) modelDocumentInfoOutput(data map[string]interface{}, fallback string) string {
+	rows := mapsValue(data["documents"])
 	if len(rows) == 0 {
 		return r.CompactKnownText(fallback)
 	}
 	var b strings.Builder
-	b.WriteString("<documents>\n")
+	b.WriteString("<documents")
+	if kbHandle := r.RegisterKnowledgeBase(stringValue(data, "knowledge_base_id")); kbHandle != "" {
+		fmt.Fprintf(&b, " kb=\"%s\"", escapeAttr(kbHandle))
+	}
+	if total := intValue(data, "total_docs"); total > 0 {
+		fmt.Fprintf(&b, " total=\"%d\"", total)
+	}
+	if page := intValue(data, "page"); page > 0 {
+		fmt.Fprintf(&b, " page=\"%d\"", page)
+	}
+	if next := intValue(data, "next_page"); next > 0 {
+		fmt.Fprintf(&b, " next_page=\"%d\"", next)
+	}
+	b.WriteString(">\n")
 	count := 0
 	for _, row := range rows {
 		knowledgeID := stringValue(row, "knowledge_id")
@@ -137,7 +167,16 @@ func (r *sourceRegistry) modelDocumentInfoOutput(rows []map[string]interface{}, 
 		if fileType := stringValue(row, "file_type"); fileType != "" {
 			fmt.Fprintf(&b, " file_type=\"%s\"", escapeAttr(fileType))
 		}
-		fmt.Fprintf(&b, " chunk_count=\"%d\">\n", intValue(row, "chunk_count"))
+		if chunkCount := intValue(row, "chunk_count"); chunkCount > 0 {
+			fmt.Fprintf(&b, " chunk_count=\"%d\"", chunkCount)
+		}
+		if status := stringValue(row, "parse_status"); status != "" {
+			fmt.Fprintf(&b, " parse_status=\"%s\"", escapeAttr(status))
+		}
+		if updated := stringValue(row, "updated_at"); len(updated) >= 10 {
+			fmt.Fprintf(&b, " updated_at=\"%s\"", escapeAttr(updated[:10]))
+		}
+		b.WriteString(">\n")
 		if description := stringValue(row, "description"); description != "" {
 			fmt.Fprintf(&b, "    <description>%s</description>\n", escapeText(description))
 		}
@@ -160,6 +199,7 @@ type modelChunk struct {
 	chunkType  string
 	index      int
 	view       string
+	role       string
 	match      string
 	content    string
 	question   string
@@ -172,6 +212,16 @@ type modelChunk struct {
 }
 
 func (r *sourceRegistry) modelKnowledgeOutput(mode string, rows []map[string]interface{}, fallback string) string {
+	chunks := r.modelChunksFromRows(mode, rows)
+	if len(chunks) == 0 {
+		return r.CompactKnownText(fallback)
+	}
+	return renderKnowledgeChunks(mode, chunks, nil)
+}
+
+// modelChunksFromRows registers every row's handles and converts it into the
+// renderer's chunk model.
+func (r *sourceRegistry) modelChunksFromRows(mode string, rows []map[string]interface{}) []modelChunk {
 	chunks := make([]modelChunk, 0, len(rows))
 	for idx, row := range rows {
 		chunkID := firstNonEmpty(stringValue(row, "chunk_id"), stringValue(row, "faq_id"), stringValue(row, "id"))
@@ -206,6 +256,7 @@ func (r *sourceRegistry) modelKnowledgeOutput(mode string, rows []map[string]int
 			chunkType:  chunkType,
 			index:      chunkIndex,
 			view:       viewForRow(row, mode),
+			role:       stringValue(row, "role"),
 			match:      firstNonEmpty(stringValue(row, "match_snippet"), stringValue(row, "matched_content")),
 			content:    stringValue(row, "content"),
 			question:   firstNonEmpty(stringValue(row, "faq_question"), stringValue(row, "faq_standard_question")),
@@ -217,10 +268,133 @@ func (r *sourceRegistry) modelKnowledgeOutput(mode string, rows []map[string]int
 			inputOrder: idx,
 		})
 	}
-	if len(chunks) == 0 {
-		return r.CompactKnownText(fallback)
+	return chunks
+}
+
+// annotateModeFallbacks adds the requested mode and one <mode_fallback> per
+// knowledge base that was searched with a different retrieval path.
+func (r *sourceRegistry) annotateModeFallbacks(output string, data map[string]interface{}) string {
+	fallbacks := mapsValue(data["mode_fallbacks"])
+	requested := stringValue(data, "requested_mode")
+	if len(fallbacks) == 0 || !strings.HasSuffix(output, "</retrieval>") {
+		return output
 	}
-	return renderKnowledgeChunks(mode, chunks)
+	if requested != "" {
+		output = strings.Replace(output, "<retrieval ",
+			fmt.Sprintf("<retrieval requested_mode=\"%s\" ", escapeAttr(requested)), 1)
+	}
+	var b strings.Builder
+	for _, fb := range fallbacks {
+		fmt.Fprintf(&b, "  <mode_fallback kb=\"%s\" mode=\"%s\" reason=\"%s\" />\n",
+			escapeAttr(r.RegisterKnowledgeBase(stringValue(fb, "knowledge_base_id"))),
+			escapeAttr(stringValue(fb, "mode")), escapeAttr(stringValue(fb, "reason")))
+	}
+	return strings.TrimSuffix(output, "</retrieval>") + b.String() + "</retrieval>"
+}
+
+// matchAddsToContent reports whether a match snippet tells the model
+// anything the chunk's content does not: it does when there is no content
+// (a snippet-only view), or when the snippet is not an excerpt of it.
+// Rendering an excerpt next to the full content repeated up to 800
+// characters per row.
+func matchAddsToContent(match, content string) bool {
+	if content == "" {
+		return true
+	}
+	excerpt := strings.TrimSpace(match)
+	for _, marker := range []string{"...", "…"} {
+		excerpt = strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(excerpt, marker), marker))
+	}
+	return excerpt != "" && !strings.Contains(content, excerpt)
+}
+
+// annotateGraphResult adds the graph relations, any per-knowledge-base
+// failures, and any cap the graph tool hit to a graph query's chunk view. The
+// first two lived only in Output, which the model never sees once there are
+// chunk rows to render; the same goes for a truncated relation list, which
+// without a marker reads as the entity's whole neighbourhood.
+func annotateGraphResult(output string, data map[string]interface{}) string {
+	relations := mapsValue(data["relations"])
+	failures := stringSliceValue(data["errors"])
+	truncation := graphTruncationNote(data, len(relations))
+	if (len(relations) == 0 && len(failures) == 0 && truncation == "") ||
+		!strings.HasSuffix(output, "</retrieval>") {
+		return output
+	}
+	var b strings.Builder
+	for _, rel := range relations {
+		fmt.Fprintf(&b, "  <relation source=\"%s\" type=\"%s\" target=\"%s\" />\n",
+			escapeAttr(stringValue(rel, "source")), escapeAttr(stringValue(rel, "type")),
+			escapeAttr(stringValue(rel, "target")))
+	}
+	for _, failure := range failures {
+		fmt.Fprintf(&b, "  <error>%s</error>\n", escapeText(failure))
+	}
+	b.WriteString(truncation)
+	return strings.TrimSuffix(output, "</retrieval>") + b.String() + "</retrieval>"
+}
+
+// graphTruncationNote states inside the model's view the caps the graph query
+// tool hit. shownRelations is how many relations that view carries; the tool
+// reports the totals under relations_total / graph_chunks_total /
+// query_terms_total. It returns "" when nothing was dropped, so a complete
+// result stays clean.
+func graphTruncationNote(data map[string]interface{}, shownRelations int) string {
+	totalRelations := intValue(data, "relations_total")
+	totalChunks := intValue(data, "graph_chunks_total")
+	fetchedChunks := totalChunks - intValue(data, "graph_chunks_omitted")
+	totalTerms := intValue(data, "query_terms_total")
+	if totalRelations <= shownRelations && totalChunks <= fetchedChunks && totalTerms <= 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("  <graph_truncated")
+	if totalRelations > shownRelations {
+		fmt.Fprintf(&b, " relations_shown=\"%d\" relations_total=\"%d\"", shownRelations, totalRelations)
+	}
+	if totalChunks > fetchedChunks {
+		fmt.Fprintf(&b, " chunks_fetched=\"%d\" chunks_total=\"%d\"", fetchedChunks, totalChunks)
+	}
+	if totalTerms > 0 {
+		fmt.Fprintf(&b, " terms_shown=\"%d\" terms_total=\"%d\"",
+			totalTerms-intValue(data, "query_terms_omitted"), totalTerms)
+	}
+	b.WriteString(">This graph query stopped at a result cap, so it is not the complete picture: ")
+	if totalRelations > shownRelations {
+		b.WriteString("the relations listed are a subset of these entities' relations, ")
+	}
+	if totalChunks > fetchedChunks {
+		b.WriteString("some of their source chunks are missing, ")
+	}
+	if totalTerms > 0 {
+		b.WriteString("and some words of the query were never matched against entity names, ")
+	}
+	b.WriteString("so a relation may be absent only because it was dropped. Narrow the query to a single entity " +
+		"name before concluding that a relation does not exist.</graph_truncated>\n")
+	return b.String()
+}
+
+// annotateSearchNotes tells the model what a search result does not show:
+// how many lower-ranked results were left out to fit the tool output budget
+// (so it narrows the query or lowers the limit instead of concluding nothing
+// else matched), and which knowledge bases could not be searched (so a
+// failure is not read as an absence of evidence).
+func annotateSearchNotes(output string, data map[string]interface{}) string {
+	omitted := intValue(data, "omitted_for_budget")
+	failures := stringSliceValue(data["partial_failures"])
+	if (omitted <= 0 && len(failures) == 0) || !strings.HasSuffix(output, "</retrieval>") {
+		return output
+	}
+	var b strings.Builder
+	if omitted > 0 {
+		fmt.Fprintf(&b, "  <omitted count=\"%d\" reason=\"output_budget\">Lower-ranked results were left out to "+
+			"fit the output size. Narrow the query or lower limit to see them.</omitted>\n", omitted)
+	}
+	for _, failure := range failures {
+		fmt.Fprintf(&b, "  <partial_failure>%s — these knowledge bases were not searched.</partial_failure>\n",
+			escapeText(failure))
+	}
+	return strings.TrimSuffix(output, "</retrieval>") + b.String() + "</retrieval>"
 }
 
 func viewForRow(row map[string]interface{}, mode string) string {
@@ -245,22 +419,116 @@ func (r *sourceRegistry) modelKnowledgeChunksOutput(data map[string]interface{},
 			row["knowledge_title"] = title
 		}
 	}
-	output := r.modelKnowledgeOutput("deep_read", rows, fallback)
+	var info map[string]interface{}
+	if raw, ok := data["document"].(map[string]interface{}); ok {
+		info = raw
+	}
 	if len(rows) == 0 {
+		// A document that has no chunks (or a query with no matches) still
+		// deserves its header so the model learns what it read.
+		if info == nil {
+			return r.CompactKnownText(fallback)
+		}
+		docHandle := r.RegisterDocument(knowledgeID)
+		var b strings.Builder
+		b.WriteString("<retrieval type=\"knowledge\" mode=\"deep_read\">\n")
+		fmt.Fprintf(&b, "  <document id=\"%s\" title=\"%s\">\n", escapeAttr(docHandle), escapeAttr(title))
+		writeDocumentInfo(&b, info)
+		if query := stringValue(data, "query"); query != "" {
+			fmt.Fprintf(&b, "    <matches query=\"%s\" count=\"0\" />\n", escapeAttr(query))
+			b.WriteString("    <hint>No chunk contains every word of the query. Retry with fewer or different " +
+				"words (the document's own language and terms), or read a chunk from search_knowledge " +
+				"results with id=cN and context.</hint>\n")
+		}
+		b.WriteString("  </document>\n</retrieval>")
+		return b.String()
+	}
+	chunks := r.modelChunksFromRows("deep_read", rows)
+	if len(chunks) == 0 {
+		return r.CompactKnownText(fallback)
+	}
+	output := renderKnowledgeChunks("deep_read", chunks, info)
+	if info == nil {
+		// Legacy list_knowledge_chunks payloads carry no document header.
+		remaining := intValue(data, "total_chunks") - intValue(data, "fetched_chunks")
+		if remaining > 0 {
+			output = strings.TrimSuffix(output, "</retrieval>")
+			output += fmt.Sprintf("  <pagination remaining=\"%d\" page=\"%d\" page_size=\"%d\" />\n</retrieval>",
+				remaining, intValue(data, "page"), intValue(data, "page_size"))
+		}
 		return output
 	}
-	remaining := intValue(data, "total_chunks") - intValue(data, "fetched_chunks")
-	if remaining > 0 {
-		output = strings.TrimSuffix(output, "</retrieval>")
-		output += fmt.Sprintf("  <pagination remaining=\"%d\" page=\"%d\" page_size=\"%d\" />\n</retrieval>",
-			remaining, intValue(data, "page"), intValue(data, "page_size"))
+	var footer strings.Builder
+	if query := stringValue(data, "query"); query != "" {
+		fmt.Fprintf(&footer, "  <matches query=\"%s\" count=\"%d\"", escapeAttr(query), intValue(data, "match_count"))
+		if boolValue(data, "truncated") {
+			footer.WriteString(" truncated=\"true\"")
+			if _, ok := data["next_offset"]; ok {
+				fmt.Fprintf(&footer, " next_offset=\"%d\"", intValue(data, "next_offset"))
+			}
+		}
+		footer.WriteString(" />\n")
+	} else if _, ok := data["next_offset"]; ok {
+		remaining := intValue(data, "total_chunks") - (intValue(data, "offset") + intValue(data, "fetched_chunks"))
+		if remaining < 0 {
+			remaining = 0
+		}
+		fmt.Fprintf(&footer, "  <pagination next_offset=\"%d\" remaining=\"%d\" />\n",
+			intValue(data, "next_offset"), remaining)
+	}
+	if footer.Len() > 0 {
+		output = strings.TrimSuffix(output, "</retrieval>") + footer.String() + "</retrieval>"
 	}
 	return output
 }
 
-func renderKnowledgeChunks(mode string, chunks []modelChunk) string {
+// writeDocumentInfo renders the read_document metadata header as one
+// <info> element under the document.
+func writeDocumentInfo(b *strings.Builder, info map[string]interface{}) {
+	if len(info) == 0 {
+		return
+	}
+	b.WriteString("    <info")
+	for _, key := range []string{"source", "file_name", "file_type", "file_size", "parse_status"} {
+		if value := stringValue(info, key); value != "" {
+			fmt.Fprintf(b, " %s=\"%s\"", key, escapeAttr(value))
+		}
+	}
+	if count := intValue(info, "chunk_count"); count > 0 {
+		fmt.Fprintf(b, " chunk_count=\"%d\"", count)
+	}
+	description := stringValue(info, "description")
+	metadata, _ := info["metadata"].(map[string]interface{})
+	if description == "" && len(metadata) == 0 {
+		b.WriteString(" />\n")
+		return
+	}
+	b.WriteString(">\n")
+	if description != "" {
+		fmt.Fprintf(b, "      <description>%s</description>\n", escapeText(description))
+	}
+	if len(metadata) > 0 {
+		keys := make([]string, 0, len(metadata))
+		for key := range metadata {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		b.WriteString("      <metadata>")
+		for i, key := range keys {
+			if i > 0 {
+				b.WriteString("; ")
+			}
+			fmt.Fprintf(b, "%s: %v", escapeText(key), metadata[key])
+		}
+		b.WriteString("</metadata>\n")
+	}
+	b.WriteString("    </info>\n")
+}
+
+func renderKnowledgeChunks(mode string, chunks []modelChunk, info map[string]interface{}) string {
 	type docGroup struct {
 		handle   string
+		realID   string
 		kbHandle string
 		title    string
 		metadata string
@@ -277,7 +545,7 @@ func renderKnowledgeChunks(mode string, chunks []modelChunk) string {
 		group := groupsByKey[key]
 		if group == nil {
 			group = &docGroup{
-				handle: chunk.docHandle, kbHandle: chunk.kbHandle, title: chunk.title,
+				handle: chunk.docHandle, realID: chunk.docRealID, kbHandle: chunk.kbHandle, title: chunk.title,
 				metadata: chunk.metadata, order: chunk.inputOrder,
 			}
 			groupsByKey[key] = group
@@ -306,16 +574,25 @@ func renderKnowledgeChunks(mode string, chunks []modelChunk) string {
 		if group.metadata != "" {
 			fmt.Fprintf(&b, "    <metadata>%s</metadata>\n", escapeText(group.metadata))
 		}
+		if info != nil && stringValue(info, "knowledge_id") == group.realID {
+			writeDocumentInfo(&b, info)
+		}
 		for _, chunk := range group.chunks {
 			fmt.Fprintf(&b, "    <chunk id=\"%s\" index=\"%d\" view=\"%s\"", chunk.handle, chunk.index, chunk.view)
 			if chunk.chunkType != "" {
 				fmt.Fprintf(&b, " type=\"%s\"", escapeAttr(chunk.chunkType))
 			}
+			if chunk.role != "" {
+				fmt.Fprintf(&b, " role=\"%s\"", escapeAttr(chunk.role))
+			}
 			b.WriteString(">\n")
 			if chunk.question != "" {
 				fmt.Fprintf(&b, "      <question>%s</question>\n", escapeText(chunk.question))
 			}
-			if chunk.match != "" {
+			// Deep reads keep the snippet: it locates the hit inside a long
+			// chunk. Search rows are chunk-sized, so an excerpt of the content
+			// shown beside it only repeats it.
+			if chunk.match != "" && (mode == "deep_read" || matchAddsToContent(chunk.match, chunk.content)) {
 				fmt.Fprintf(&b, "      <match>%s</match>\n", escapeText(chunk.match))
 			}
 			if chunk.content != "" {

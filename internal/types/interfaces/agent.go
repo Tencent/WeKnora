@@ -32,6 +32,17 @@ type AgentEngine interface {
 	// SetMemoryPrompt supplies the long-term memory envelope for this run.
 	// It must be called before Execute; an empty string is a no-op.
 	SetMemoryPrompt(prompt string)
+
+	// SetSteerSink enables mid-run message injection for this run. Nil
+	// (default) disables it; when set, the engine drains user-appended
+	// messages at every round boundary and persists accepted ones through
+	// the sink. Must be called before Execute.
+	SetSteerSink(sink types.SteerSink)
+
+	// SetContextCheckpointSink enables persisting compaction summaries that
+	// end on a stored turn, so later turns start from them. Nil (default)
+	// keeps compaction local to the turn. Must be called before Execute.
+	SetContextCheckpointSink(sink types.ContextCheckpointSink)
 }
 
 // AgentService defines the interface for agent-related operations

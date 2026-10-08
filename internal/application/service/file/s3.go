@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"mime/multipart"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"time"
@@ -27,6 +28,23 @@ type s3FileService struct {
 	client     *s3.Client
 	bucketName string
 	pathPrefix string
+}
+
+// s3UsePathStyle reports whether the S3 client should use path-style
+// addressing. S3-compatible services default to path-style; AWS and Tencent
+// COS use virtual-hosted style, since COS rejects path-style for buckets
+// created from 2024-01-01 (#3134). force_path_style always wins.
+func s3UsePathStyle(endpoint string, forcePathStyle bool) bool {
+	if forcePathStyle {
+		return true
+	}
+	if strings.Contains(endpoint, "amazonaws.com") {
+		return false
+	}
+	if u, err := url.Parse(endpoint); err == nil && strings.HasSuffix(strings.ToLower(u.Hostname()), ".myqcloud.com") {
+		return false
+	}
+	return true
 }
 
 // newS3Client creates a bare s3FileService with just the SDK client initialised.
@@ -56,15 +74,12 @@ func newS3Client(endpoint, accessKey, secretKey, bucketName, region, pathPrefix 
 	}
 
 	// Create S3 client with custom endpoint if provided.
-	// For S3-compatible services (non-AWS), use path-style addressing
-	// (endpoint/bucket/key) instead of virtual-hosted style (bucket.endpoint/key).
-	httpClient := utils.NewSSRFSafeHTTPClient(utils.DefaultSSRFSafeHTTPClientConfig())
+	httpClient := objectStorageHTTPClient()
 	var client *s3.Client
 	if endpoint != "" {
-		usePathStyle := forcePathStyle || !strings.Contains(endpoint, "amazonaws.com")
 		client = s3.NewFromConfig(cfg, func(o *s3.Options) {
 			o.BaseEndpoint = aws.String(endpoint)
-			o.UsePathStyle = usePathStyle
+			o.UsePathStyle = s3UsePathStyle(endpoint, forcePathStyle)
 			if !strings.Contains(endpoint, "amazonaws.com") {
 				// S3-compatible services commonly reject the SDK's default
 				// trailing checksum negotiation. Only relax this for explicit
@@ -101,19 +116,9 @@ func NewS3FileService(endpoint,
 	if err != nil {
 		return nil, err
 	}
-
-	// Check if bucket exists
-	exists, err := svc.bucketExists(context.Background())
-	if err != nil {
-		return nil, fmt.Errorf("failed to check bucket: %w", err)
+	if err := ensureS3Bucket(svc); err != nil {
+		return nil, err
 	}
-
-	if !exists {
-		if err = svc.createBucket(context.Background()); err != nil {
-			return nil, fmt.Errorf("failed to create bucket: %w", err)
-		}
-	}
-
 	return svc, nil
 }
 
@@ -124,16 +129,28 @@ func NewS3FileServiceWithOptions(endpoint, accessKey, secretKey, bucketName, reg
 	if err != nil {
 		return nil, err
 	}
-	exists, err := svc.bucketExists(context.Background())
-	if err != nil {
-		return nil, fmt.Errorf("failed to check bucket: %w", err)
-	}
-	if !exists {
-		if err = svc.createBucket(context.Background()); err != nil {
-			return nil, fmt.Errorf("failed to create bucket: %w", err)
-		}
+	if err := ensureS3Bucket(svc); err != nil {
+		return nil, err
 	}
 	return svc, nil
+}
+
+func ensureS3Bucket(svc *s3FileService) error {
+	headCtx, cancel := objectStorageSetupContext()
+	exists, err := svc.bucketExists(headCtx)
+	cancel()
+	if err != nil {
+		return fmt.Errorf("failed to check bucket: %w", err)
+	}
+	if exists {
+		return nil
+	}
+	createCtx, cancel := objectStorageSetupContext()
+	defer cancel()
+	if err := svc.createBucket(createCtx); err != nil {
+		return fmt.Errorf("failed to create bucket: %w", err)
+	}
+	return nil
 }
 
 // bucketExists checks if the bucket exists
@@ -197,9 +214,13 @@ func CheckS3ConnectivityWithOptions(ctx context.Context, endpoint, accessKey, se
 }
 
 // parseS3FilePath extracts the object name from a provider scheme: s3://{bucket}/{objectKey}
+// Canonical storage://<backend-id>/s3://{bucket}/{objectKey} paths are accepted
+// too: the wrapper is stripped so services reached bare (global env storage,
+// legacy tenants) can resolve catalog-produced paths (#3151).
 func (s *s3FileService) parseS3FilePath(filePath string) (string, error) {
 	// Provider scheme format: s3://{bucket}/{objectKey}
 	const prefix = "s3://"
+	filePath = storageBackendInnerPath(filePath)
 	if !strings.HasPrefix(filePath, prefix) {
 		return "", fmt.Errorf("invalid S3 file path: %s", filePath)
 	}
@@ -238,6 +259,9 @@ func (s *s3FileService) SaveFile(ctx context.Context,
 		contentType = utils.GetContentTypeByExt(ext)
 	}
 
+	ctx, cancel := objectStorageTransferContext(ctx)
+	defer cancel()
+
 	// Upload file to S3
 	_, err = s.client.PutObject(ctx, &s3.PutObjectInput{
 		Bucket:        aws.String(s.bucketName),
@@ -260,15 +284,17 @@ func (s *s3FileService) GetFile(ctx context.Context, filePath string) (io.ReadCl
 		return nil, err
 	}
 
+	ctx, cancel := objectStorageTransferContext(ctx)
 	resp, err := s.client.GetObject(ctx, &s3.GetObjectInput{
 		Bucket: aws.String(s.bucketName),
 		Key:    aws.String(objectName),
 	})
 	if err != nil {
+		cancel()
 		return nil, fmt.Errorf("failed to get file from S3: %w", err)
 	}
 
-	return resp.Body, nil
+	return objectStorageBoundReader(resp.Body, cancel), nil
 }
 
 // DeleteFile deletes a file
@@ -277,6 +303,9 @@ func (s *s3FileService) DeleteFile(ctx context.Context, filePath string) error {
 	if err != nil {
 		return err
 	}
+
+	ctx, cancel := objectStorageTransferContext(ctx)
+	defer cancel()
 
 	_, err = s.client.DeleteObject(ctx, &s3.DeleteObjectInput{
 		Bucket: aws.String(s.bucketName),
@@ -306,6 +335,9 @@ func (s *s3FileService) CopyFile(ctx context.Context,
 	// CopySource is "bucket/key"; the '/' separators must NOT be percent-encoded
 	// (url.PathEscape would turn them into %2F and break the bucket/key split).
 	// srcKey is already validated by parseS3FilePath -> SafeObjectKey.
+	ctx, cancel := objectStorageTransferContext(ctx)
+	defer cancel()
+
 	_, err = s.client.CopyObject(ctx, &s3.CopyObjectInput{
 		Bucket:     aws.String(s.bucketName),
 		CopySource: aws.String(s.bucketName + "/" + srcKey),
@@ -329,6 +361,9 @@ func (s *s3FileService) SaveBytes(ctx context.Context, data []byte, tenantID uin
 	}
 	ext := filepath.Ext(safeName)
 	objectName := fmt.Sprintf("%s%d/exports/%s%s", s.pathPrefix, tenantID, uuid.New().String(), ext)
+
+	ctx, cancel := objectStorageTransferContext(ctx)
+	defer cancel()
 
 	// Upload bytes to S3
 	reader := bytes.NewReader(data)

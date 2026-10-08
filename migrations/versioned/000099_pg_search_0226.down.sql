@@ -1,0 +1,2 @@
+-- No-op: pg_search SQL upgrades cannot be reversed by a schema rollback.
+-- Restore a pre-upgrade database backup together with the matching old image.

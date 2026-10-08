@@ -11,6 +11,7 @@ import (
 )
 
 func TestBackendScopedLocalURLRetainsBackendID(t *testing.T) {
+	t.Setenv("SYSTEM_SIGNING_KEY", "")
 	t.Setenv("SYSTEM_AES_KEY", "0123456789abcdef0123456789abcdef")
 	inner := NewLocalFileService(t.TempDir(), "https://weknora.example.com/base")
 	svc := NewBackendScopedFileService("backend-local-a", inner)

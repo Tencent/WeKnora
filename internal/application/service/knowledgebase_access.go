@@ -18,6 +18,49 @@ func kbReadPermissions(ctx context.Context, shares access.KBShareLookup) *access
 	return access.NewKBPermissions(ctx, shares)
 }
 
+// kbWritableIDs returns the target KBs the caller may modify: those of its own
+// workspace, and those shared to it with at least editor permission (capped by
+// the caller's tenant role). A read grant — a viewer share or a shared agent's
+// scope — never makes a KB writable.
+//
+// The caller must also be allowed to write KB content at all, as on the HTTP
+// write routes: Contributor+ (a tenant Viewer, and the IM, embed and MCP
+// endpoint principals that run as Viewer, stay read-only), or for a scoped API
+// key the ingest capability, as in access.RequireKBWrite. roleEnforced mirrors
+// the RBAC rollout switch, under which role checks only log.
+func kbWritableIDs(
+	ctx context.Context, shares access.KBShareLookup, targets types.SearchTargets, roleEnforced bool,
+) []string {
+	caller := types.CallerFromContext(ctx)
+	if scope, ok := types.TenantAPIKeyScopeFromContext(ctx); ok {
+		if !scope.FullAccess && !scope.HasCapability(types.APIKeyCapabilityIngest) {
+			return nil
+		}
+	} else if roleEnforced && !caller.Role.HasPermission(types.TenantRoleContributor) {
+		return nil
+	}
+	if caller.UserID == "" {
+		shares = nil
+	}
+	permissions := access.NewKBSharePermissions(ctx, shares, caller.TenantID, caller.Role)
+	seen := make(map[string]bool, len(targets))
+	var ids []string
+	for _, target := range targets {
+		if target == nil || target.KnowledgeBaseID == "" || seen[target.KnowledgeBaseID] {
+			continue
+		}
+		seen[target.KnowledgeBaseID] = true
+		writable := caller.TenantID != 0 && target.TenantID == caller.TenantID
+		if !writable {
+			writable, _ = permissions.Check(target.KnowledgeBaseID, types.OrgRoleEditor)
+		}
+		if writable {
+			ids = append(ids, target.KnowledgeBaseID)
+		}
+	}
+	return ids
+}
+
 func resolveKBReadTenant(ctx context.Context, kb *types.KnowledgeBase, shares access.KBShareLookup) (uint64, error) {
 	if kb != nil {
 		allowed, err := kbReadPermissions(ctx, shares).Check(kb.ID, kb.TenantID, types.OrgRoleViewer)

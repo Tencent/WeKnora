@@ -156,10 +156,9 @@ type getKnowledgeBaseResp struct {
 	Infos map[string]knowledgeBaseInfo `json:"infos"`
 }
 
-// knowledgeInfo mirrors IMA's KnowledgeInfo (files, notes, etc.).
-// IMPORTANT: IMA does not expose media_type in the list response, we must call
-// get_media_info to discover it. However, folders are distinguished by presence
-// of a non-empty folder_id — see folderInfo below.
+// knowledgeInfo mirrors entries in IMA's knowledge_list (files, notes, folders).
+// Folders have media_type=99 and use media_id as the folder ID for child listings.
+// File download details are resolved separately through get_media_info.
 type knowledgeInfo struct {
 	MediaID        string `json:"media_id"`
 	Title          string `json:"title"`
@@ -167,7 +166,7 @@ type knowledgeInfo struct {
 	MediaType      int32  `json:"media_type,omitempty"`
 }
 
-// folderInfo mirrors IMA's FolderInfo.
+// folderInfo mirrors IMA's FolderInfo in current_path, not knowledge_list.
 type folderInfo struct {
 	FolderID       string      `json:"folder_id"`
 	Name           string      `json:"name"`
@@ -202,9 +201,8 @@ func (f folderInfo) FolderCount() int64 {
 }
 
 // getKnowledgeListResp — get_knowledge_list response.
-// According to `references/api.md`, the response returns knowledge_list mixed
-// with folders; we decode a loose JSON view so entries without a folder_id are
-// treated as knowledge and those with folder_id are treated as folders.
+// The response returns files and folders together in knowledge_list;
+// media_type distinguishes folders from knowledge items.
 type getKnowledgeListResp struct {
 	// KnowledgeList is a loose slice of raw JSON objects because IMA returns
 	// files and folders in the same array. We iterate and inspect fields.
@@ -309,6 +307,7 @@ const (
 	mediaTypeVideo     int32 = 16
 	mediaTypeHTML      int32 = 20
 	mediaTypeEPUB      int32 = 21
+	mediaTypeFolder    int32 = 99
 )
 
 // extensionForMediaType maps IMA media types to a file extension.

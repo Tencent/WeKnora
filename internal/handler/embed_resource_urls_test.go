@@ -55,6 +55,8 @@ func newEmbedHandlerWithMessage(ch *types.EmbedChannel, content string) *EmbedCh
 // URLs is downgraded rather than rejected, so an embed client that forwards the
 // parameter keeps working.
 func TestEmbedLoadMessages_IgnoresPublicResourceURLRequest(t *testing.T) {
+	t.Setenv("SYSTEM_SIGNING_KEY", "")
+	t.Setenv("SYSTEM_AES_KEY", "test-embed-signing-key-32-bytes!!!")
 	ch := testEmbedChannel()
 	h := newEmbedHandlerWithMessage(ch, "see ![fig]("+testResourceHandle+")")
 
@@ -70,6 +72,8 @@ func TestEmbedLoadMessages_IgnoresPublicResourceURLRequest(t *testing.T) {
 // either: switching an integration over is a decision about authenticated API
 // callers, not about anonymous website visitors.
 func TestEmbedLoadMessages_IgnoresDeploymentPublicDefault(t *testing.T) {
+	t.Setenv("SYSTEM_SIGNING_KEY", "")
+	t.Setenv("SYSTEM_AES_KEY", "test-embed-signing-key-32-bytes!!!")
 	t.Setenv("RESOURCE_URL_MODE", "public")
 	ch := testEmbedChannel()
 	h := newEmbedHandlerWithMessage(ch, "see ![fig]("+testResourceHandle+")")

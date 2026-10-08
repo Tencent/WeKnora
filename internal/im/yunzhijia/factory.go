@@ -44,7 +44,7 @@ func NewFactory() im.AdapterFactory {
 			if err != nil {
 				return nil, nil, err
 			}
-			client := NewLongConnClient(webSocketURL, msgHandler)
+			client := NewLongConnClient(channel.ID, webSocketURL, msgHandler)
 			wsCtx, wsCancel := context.WithCancel(context.Background())
 			go func() {
 				if err := client.Start(wsCtx); err != nil && wsCtx.Err() == nil {

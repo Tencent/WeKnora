@@ -7,7 +7,6 @@ import (
 	"sort"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/datasource"
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -51,6 +50,32 @@ func (c *Connector) ResolveResourceAncestors(
 	return []string{}, nil
 }
 
+// maxPaginationHops bounds every cursor-paginated loop in this file. A vendor
+// that keeps handing back a fresh cursor would otherwise keep the connector
+// (and the sync task holding it) spinning until the task deadline; the value
+// mirrors the guard Confluence and DingTalk already carry.
+const maxPaginationHops = 10000
+
+// nextPageCursor validates the progress of a cursor-paginated loop after page
+// `page` (1-based) has been fetched: a cursor handed back twice means the
+// vendor is repeating a page, and page >= maxPaginationHops means the listing
+// is unbounded. Both are reported instead of being retried forever, and the
+// hop cap is also logged because it is the one failure that looks like a
+// healthy, still-running sync from the outside.
+func nextPageCursor(
+	ctx context.Context, seen map[string]struct{}, cursor string, page int,
+) (string, error) {
+	if page >= maxPaginationHops {
+		logger.Warnf(ctx, "[IMA] pagination exceeded %d pages; aborting", maxPaginationHops)
+		return "", fmt.Errorf("pagination exceeded %d pages", maxPaginationHops)
+	}
+	if _, exists := seen[cursor]; exists {
+		return "", fmt.Errorf("pagination repeated next_cursor %q", cursor)
+	}
+	seen[cursor] = struct{}{}
+	return cursor, nil
+}
+
 // ListResources returns the flat list of knowledge bases the token can read.
 // parentID is honoured only for the "no children" contract — see the note on
 // Connector.ListResources in internal/datasource/connector.go.
@@ -81,7 +106,8 @@ func (c *Connector) ListResources(
 	var bases []kbLite
 
 	cursor := ""
-	for {
+	seenCursors := make(map[string]struct{})
+	for page := 1; ; page++ {
 		resp, err := cli.GetAddableKnowledgeBaseList(ctx, cursor, defaultPageSize)
 		if err != nil {
 			return nil, fmt.Errorf("get_addable_knowledge_base_list: %w", err)
@@ -92,13 +118,18 @@ func (c *Connector) ListResources(
 		if resp.IsEnd || resp.NextCursor == "" {
 			break
 		}
-		cursor = resp.NextCursor
+		next, err := nextPageCursor(ctx, seenCursors, resp.NextCursor, page)
+		if err != nil {
+			return nil, fmt.Errorf("get_addable_knowledge_base_list: %w", err)
+		}
+		cursor = next
 	}
 	logger.Infof(ctx, "[IMA] get_addable_knowledge_base_list returned %d knowledge bases", len(bases))
 
 	if len(bases) == 0 {
 		cursor = ""
-		for {
+		seenCursors = make(map[string]struct{})
+		for page := 1; ; page++ {
 			resp, err := cli.SearchKnowledgeBase(ctx, "", cursor, searchPageSize)
 			if err != nil {
 				return nil, fmt.Errorf("search_knowledge_base fallback: %w", err)
@@ -109,7 +140,11 @@ func (c *Connector) ListResources(
 			if resp.IsEnd || resp.NextCursor == "" {
 				break
 			}
-			cursor = resp.NextCursor
+			next, err := nextPageCursor(ctx, seenCursors, resp.NextCursor, page)
+			if err != nil {
+				return nil, fmt.Errorf("search_knowledge_base fallback: %w", err)
+			}
+			cursor = next
 		}
 		logger.Infof(ctx, "[IMA] search_knowledge_base fallback returned %d knowledge bases", len(bases))
 	}
@@ -357,40 +392,28 @@ func listAllKBFiles(
 		stack = stack[:len(stack)-1]
 
 		cursor := ""
-		for {
+		seenCursors := make(map[string]struct{})
+		for page := 1; ; page++ {
 			resp, err := cli.GetKnowledgeList(ctx, kbID, cur.folderID, cursor, defaultPageSize)
 			if err != nil {
 				return nil, nil, err
 			}
 			for _, raw := range resp.KnowledgeList {
-				// Probe each entry: an entry with a non-empty folder_id is a
-				// folder; otherwise it's a knowledge item (file / note / etc.).
-				var probe struct {
-					FolderID string `json:"folder_id"`
-					MediaID  string `json:"media_id"`
-				}
-				_ = json.Unmarshal(raw, &probe)
-
-				if probe.FolderID != "" && probe.MediaID == "" {
-					var fi folderInfo
-					if err := json.Unmarshal(raw, &fi); err != nil {
-						continue
-					}
-					child := cur.path
-					if child == "" {
-						child = fi.Name
-					} else {
-						child = cur.path + "/" + fi.Name
-					}
-					folderPath[fi.FolderID] = child
-					stack = append(stack, todo{folderID: fi.FolderID, path: child})
-					continue
-				}
-				if probe.MediaID == "" {
+				var ki knowledgeInfo
+				if err := json.Unmarshal(raw, &ki); err != nil || ki.MediaID == "" {
 					continue // unrecognized shape, skip defensively
 				}
-				var ki knowledgeInfo
-				if err := json.Unmarshal(raw, &ki); err != nil {
+				if ki.MediaType == mediaTypeFolder {
+					// List entries identify folders by media_type. Their full
+					// media_id (including the folder_ prefix) is the recursion key.
+					child := cur.path
+					if child == "" {
+						child = ki.Title
+					} else {
+						child = cur.path + "/" + ki.Title
+					}
+					folderPath[ki.MediaID] = child
+					stack = append(stack, todo{folderID: ki.MediaID, path: child})
 					continue
 				}
 				out = append(out, walkedFile{
@@ -401,7 +424,11 @@ func listAllKBFiles(
 			if resp.IsEnd || resp.NextCursor == "" {
 				break
 			}
-			cursor = resp.NextCursor
+			next, err := nextPageCursor(ctx, seenCursors, resp.NextCursor, page)
+			if err != nil {
+				return nil, nil, fmt.Errorf("get_knowledge_list: %w", err)
+			}
+			cursor = next
 		}
 	}
 	return out, folderPath, nil
@@ -433,11 +460,14 @@ func fetchNote(
 		return types.FetchedItem{}, fetchFailed
 	}
 	if strings.TrimSpace(content) == "" {
-		logger.Infof(ctx, "[IMA] note %s (title=%q) is empty, skipping", noteID, f.Title)
-		return types.FetchedItem{}, fetchSkipped
+		// A cleared note still exists. Keep its title as content so ingestion
+		// replaces the stale body instead of silently acknowledging the edit:
+		// skipping here would leave the old text indexed forever.
+		logger.Infof(ctx, "[IMA] note %s (title=%q) is empty, syncing its title only", noteID, f.Title)
+		content = "# " + f.Title + "\n"
 	}
 
-	fileName := sanitizeFileName(f.Title)
+	fileName := datasource.SanitizeFileName(f.Title)
 	if !strings.HasSuffix(strings.ToLower(fileName), ".md") {
 		fileName += ".md"
 	}
@@ -540,7 +570,7 @@ func fetchOneMedia(
 		ct = mimeForExtension(ext)
 	}
 
-	fileName := sanitizeFileName(f.Title)
+	fileName := datasource.SanitizeFileName(f.Title)
 	if !strings.HasSuffix(strings.ToLower(fileName), "."+ext) {
 		fileName = fileName + "." + ext
 	}
@@ -584,29 +614,4 @@ func baseMetadata(
 		m["notebook_id"] = info.NotebookExtInfo.NotebookID
 	}
 	return m
-}
-
-// sanitizeFileName removes filesystem-hostile characters and truncates to a
-// safe UTF-8 boundary.
-func sanitizeFileName(name string) string {
-	if name == "" {
-		return "untitled"
-	}
-	replacer := strings.NewReplacer(
-		"/", "_", "\\", "_", ":", "_", "*", "_",
-		"?", "_", "\"", "_", "<", "_", ">", "_", "|", "_",
-	)
-	result := replacer.Replace(name)
-	const maxBytes = 200
-	if len(result) > maxBytes {
-		result = result[:maxBytes]
-		for len(result) > 0 {
-			r, size := utf8.DecodeLastRuneInString(result)
-			if r != utf8.RuneError || size != 1 {
-				break
-			}
-			result = result[:len(result)-1]
-		}
-	}
-	return result
 }

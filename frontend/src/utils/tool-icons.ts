@@ -9,15 +9,19 @@ const t = (key: string) => i18n.global.t(key)
 // Tool name to icon mapping
 export const toolIcons: Record<string, string> = {
     multi_kb_search: '🔍',
-    knowledge_search: '📚',
-    grep_chunks: '🔎',
+    search_knowledge: '📚',
+    read_document: '🧩',
+    list_documents: 'ℹ️',
     get_chunk_detail: '📄',
     list_knowledge_bases: '📂',
-    list_knowledge_chunks: '🧩',
-    get_document_info: 'ℹ️',
     query_knowledge_graph: '🕸️',
     think: '💭',
     todo_write: '📋',
+    // Retired names (still present in stored chat history)
+    knowledge_search: '📚',
+    grep_chunks: '🔎',
+    list_knowledge_chunks: '🧩',
+    get_document_info: 'ℹ️',
 };
 
 // Match type internal keys for icon mapping
@@ -55,15 +59,19 @@ export function getMatchTypeIcon(matchType: string): string {
 // Tool name to i18n key mapping
 const toolDisplayNameKeys: Record<string, string> = {
     multi_kb_search: 'tools.multiKbSearch',
-    knowledge_search: 'tools.knowledgeSearch',
-    grep_chunks: 'tools.grepChunks',
+    search_knowledge: 'tools.searchKnowledge',
+    read_document: 'tools.readDocument',
+    list_documents: 'tools.listDocuments',
     get_chunk_detail: 'tools.getChunkDetail',
-    list_knowledge_chunks: 'tools.listKnowledgeChunks',
     list_knowledge_bases: 'tools.listKnowledgeBases',
-    get_document_info: 'tools.getDocumentInfo',
     query_knowledge_graph: 'tools.queryKnowledgeGraph',
     think: 'tools.think',
     todo_write: 'tools.todoWrite',
+    // Retired names (still present in stored chat history)
+    knowledge_search: 'tools.knowledgeSearch',
+    grep_chunks: 'tools.grepChunks',
+    list_knowledge_chunks: 'tools.listKnowledgeChunks',
+    get_document_info: 'tools.getDocumentInfo',
 };
 
 // Get tool display name (user-friendly, localized)

@@ -935,6 +935,12 @@ func TestDockerClientReadFileMapsFailures(t *testing.T) {
 			engine := newFakeDockerEngine()
 			engine.execExit = 1
 			engine.execStderr = tt.stderr
+			// The container is alive: these are genuine command failures,
+			// not the mid-op disappearance the vanish recheck covers.
+			engine.inspect["c"] = container.InspectResponse{
+				ID:    "c",
+				State: &container.State{Status: "running"},
+			}
 			docker := newTestDockerClient(t, engine)
 
 			_, err := docker.ReadFile(context.Background(), testHandle("c"),
@@ -1200,4 +1206,56 @@ func TestDockerSessionCreateRequestDeletesIdleSandboxes(t *testing.T) {
 	require.Equal(t, DefaultDockerIdleTTL, request.Timeout.Value)
 	require.Equal(t, RemoteOnTimeoutKill, request.Timeout.Action,
 		"pausing a container keeps its memory on the host, so it reclaims nothing")
+}
+
+func TestDockerExecObservesBothOutputStreamsWithoutChangingResult(t *testing.T) {
+	engine := newFakeDockerEngine()
+	engine.execStdout = "download started\n"
+	engine.execStderr = "download progress\n"
+	docker := newTestDockerClient(t, engine)
+	observed := map[string]string{}
+	result, err := docker.Exec(context.Background(), testHandle("container-1"), RemoteExecRequest{
+		Command: "echo", Timeout: time.Second,
+		OnOutput: func(stream string, p []byte) { observed[stream] += string(p) },
+	})
+	require.NoError(t, err)
+	require.Equal(t, result.Stdout, observed["stdout"])
+	require.Equal(t, result.Stderr, observed["stderr"])
+}
+
+// The idle sweeper can delete a container between ensureRunning's inspect
+// gate and the exec's completion (#3942 mechanism A): the exec dies with a
+// non-zero exit and an empty stderr. The filesystem ops must reclassify
+// that collision as NotFound so CanReplaceRemoteBinding lets the rebinding
+// self-heal run instead of surfacing InvalidRequest to the user.
+func TestFileOpAgainstVanishedContainerRebinds(t *testing.T) {
+	engine := newFakeDockerEngine()
+	engine.execExit = 1
+	engine.execStderr = "" // the convicted signature: nothing on stderr
+	docker := newTestDockerClient(t, engine)
+	// The id never enters the inspect map: the fake's Engine 404s it,
+	// exactly like the daemon does after the sweeper's delete.
+	err := docker.MakeDir(context.Background(), testHandle("swept-away"), "/data/out")
+	require.True(t, IsRemoteNotFound(err), "got %+v", err)
+	require.True(t, CanReplaceRemoteBinding(err),
+		"a vanished container must be replaceable")
+	require.Contains(t, err.Error(), "exit=1",
+		"the exit code must survive in the message (#3942 diagnostic gap)")
+}
+
+// A genuine command failure with the container still alive keeps the
+// InvalidRequest classification — and with it the binding.
+func TestFileOpGenuineFailureKeepsBinding(t *testing.T) {
+	engine := newFakeDockerEngine()
+	engine.execExit = 1
+	engine.execStderr = "mkdir: cannot create directory '/data/out': File exists"
+	engine.inspect["container-1"] = container.InspectResponse{
+		ID:    "container-1",
+		State: &container.State{Status: "running"},
+	}
+	docker := newTestDockerClient(t, engine)
+
+	err := docker.MakeDir(context.Background(), testHandle("container-1"), "/data/out")
+	require.True(t, IsRemoteInvalidRequest(err), "got %+v", err)
+	require.False(t, CanReplaceRemoteBinding(err))
 }

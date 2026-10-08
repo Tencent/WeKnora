@@ -65,8 +65,8 @@ withDefaults(
   gap: 6px;
   min-width: 0;
   padding: 4px 8px;
-  border-radius: 4px;
-  font-size: 12px;
+  border-radius: var(--app-radius-xs);
+  font-size: var(--app-text-sm);
   line-height: 1.4;
   user-select: none;
 
@@ -86,12 +86,12 @@ withDefaults(
   justify-content: center;
   width: 20px;
   height: 20px;
-  border-radius: 4px;
-  font-size: 14px;
+  border-radius: var(--app-radius-xs);
+  font-size: var(--app-text-base);
   color: var(--td-text-color-placeholder);
   cursor: pointer;
   opacity: 0.5;
-  transition: opacity 0.15s ease, color 0.15s ease, background 0.15s ease;
+  transition: opacity var(--app-motion-fast) ease, color var(--app-motion-fast) ease, background var(--app-motion-fast) ease;
 
   &:hover {
     opacity: 1;
@@ -103,7 +103,7 @@ withDefaults(
 .result-row__index {
   flex-shrink: 0;
   min-width: 22px;
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   font-weight: 600;
   color: var(--td-text-color-placeholder);
 }
@@ -120,7 +120,7 @@ withDefaults(
 
 .result-row__meta {
   flex-shrink: 0;
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   font-weight: 400;
   color: var(--td-text-color-placeholder);
 }

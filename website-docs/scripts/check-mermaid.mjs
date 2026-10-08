@@ -23,7 +23,7 @@ mermaid.initialize({ startOnLoad: false, securityLevel: 'loose' })
 
 function walk(dir, out = []) {
   for (const name of readdirSync(dir)) {
-    if (name === 'node_modules' || name.startsWith('.')) continue
+    if (['node_modules', 'homepage', 'shared', 'scripts', 'deploy', 'static-site', 'releases'].includes(name) || name.startsWith('.')) continue
     const path = join(dir, name)
     if (statSync(path).isDirectory()) walk(path, out)
     else if (name.endsWith('.md')) out.push(path)

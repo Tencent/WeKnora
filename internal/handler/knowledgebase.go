@@ -31,6 +31,7 @@ import (
 type KnowledgeBaseHandler struct {
 	cfg                *config.Config
 	service            interfaces.KnowledgeBaseService
+	profileService     interfaces.KnowledgeBaseProfileService
 	knowledgeService   interfaces.KnowledgeService
 	kbShareService     interfaces.KBShareService
 	agentShareService  interfaces.AgentShareService
@@ -58,9 +59,11 @@ func NewKnowledgeBaseHandler(
 	userService interfaces.UserService,
 	fileService interfaces.FileService,
 	storageResolver interfaces.StorageBackendResolver,
+	profileService interfaces.KnowledgeBaseProfileService,
 ) *KnowledgeBaseHandler {
 	return &KnowledgeBaseHandler{
 		cfg:                cfg,
+		profileService:     profileService,
 		service:            service,
 		knowledgeService:   knowledgeService,
 		kbShareService:     kbShareService,
@@ -302,7 +305,7 @@ func (h *KnowledgeBaseHandler) resolveKBStoreView(
 
 // HybridSearch godoc
 // @Summary      混合搜索
-// @Description  在知识库中执行向量和关键词混合搜索。推荐使用 POST；GET 携带 JSON 请求体仍受支持（兼容旧客户端）。
+// @Description  底层召回：向量+关键词混合检索，默认不 rerank（可用 rerank 字段开启）；一般检索请用 /knowledge-search。推荐 POST，GET 带 JSON 体仅兼容旧客户端。
 // @Tags         知识库
 // @Accept       json
 // @Produce      json
@@ -339,6 +342,15 @@ func (h *KnowledgeBaseHandler) HybridSearch(c *gin.Context) {
 		_ = c.Error(apperrors.NewBadRequestError("query_text is required"))
 		return
 	}
+	if err := req.Rerank.Validate(); err != nil {
+		_ = c.Error(apperrors.NewBadRequestError(err.Error()))
+		return
+	}
+	if req.Rerank.IsEnabled() && strings.TrimSpace(req.QueryText) == "" {
+		// The rerank model scores passages against the query text.
+		_ = c.Error(apperrors.NewBadRequestError("query_text is required when rerank is enabled"))
+		return
+	}
 
 	logger.Infof(ctx, "Executing hybrid search, knowledge base ID: %s, query: %s, effectiveTenantID: %d",
 		secutils.SanitizeForLog(id), secutils.SanitizeForLog(req.QueryText), effectiveTenantID)
@@ -351,9 +363,17 @@ func (h *KnowledgeBaseHandler) HybridSearch(c *gin.Context) {
 		return
 	}
 
-	// Execute hybrid search with default search parameters
+	// Execute hybrid search. Without a rerank object this is the raw recall
+	// primitive it has always been; with one, the response carries meta.
 	// Note: For shared KBs, the service uses effectiveTenantID internally via context
-	results, err := h.service.HybridSearch(c.Request.Context(), id, req)
+	var retrieval *types.RetrievalResult
+	if req.Rerank != nil {
+		retrieval, err = h.service.HybridSearchWithRerank(c.Request.Context(), id, req)
+	} else {
+		var results []*types.SearchResult
+		results, err = h.service.HybridSearch(c.Request.Context(), id, req)
+		retrieval = &types.RetrievalResult{Results: results}
+	}
 	if err != nil {
 		// Service-layer typed AppErrors (e.g. ErrVectorStoreBindingInvalid,
 		// ErrVectorStoreUnavailable, BadRequest from multi-store fan-out)
@@ -370,11 +390,15 @@ func (h *KnowledgeBaseHandler) HybridSearch(c *gin.Context) {
 	}
 
 	logger.Infof(ctx, "Hybrid search completed, knowledge base ID: %s, result count: %d",
-		secutils.SanitizeForLog(id), len(results))
-	c.JSON(http.StatusOK, gin.H{
+		secutils.SanitizeForLog(id), len(retrieval.Results))
+	response := gin.H{
 		"success": true,
-		"data":    rewriter.CopyReferences(ctx, results),
-	})
+		"data":    rewriter.CopyReferences(ctx, retrieval.Results),
+	}
+	if retrieval.Meta.Rerank != nil {
+		response["meta"] = retrieval.Meta
+	}
+	c.JSON(http.StatusOK, response)
 }
 
 // CreateKnowledgeBase godoc
@@ -754,9 +778,12 @@ func (h *KnowledgeBaseHandler) UpdateKnowledgeBase(c *gin.Context) {
 	}
 	if req.Config != nil {
 		probe := &types.KnowledgeBase{
-			ChunkingConfig:        req.Config.ChunkingConfig,
-			ImageProcessingConfig: req.Config.ImageProcessingConfig,
-			WikiConfig:            req.Config.WikiConfig,
+			ChunkingConfig: req.Config.ChunkingConfig,
+			WikiConfig:     req.Config.WikiConfig,
+			ProfileConfig:  req.Config.ProfileConfig,
+		}
+		if req.Config.ImageProcessingConfig != nil {
+			probe.ImageProcessingConfig = *req.Config.ImageProcessingConfig
 		}
 		if err := validateKnowledgeBasePromptInstructions(probe); err != nil {
 			c.Error(err)
@@ -783,6 +810,54 @@ func (h *KnowledgeBaseHandler) UpdateKnowledgeBase(c *gin.Context) {
 		"data":    buildKBResponse(kb, h.resolveKBStoreView(ctx, kb, callerTenantID), nil),
 	})
 }
+
+// GenerateKnowledgeBaseProfile godoc
+// @Summary      生成知识库描述
+// @Description  基于文档画像聚合，立即重新生成知识库的 AI 描述（不覆盖手写描述）
+// @Tags         知识库
+// @Produce      json
+// @Param        id   path      string  true  "知识库ID"
+// @Success      200  {object}  map[string]interface{}  "生成的知识库画像"
+// @Failure      400  {object}  errors.AppError         "知识库类型不支持或未配置模型"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /knowledge-bases/{id}/profile/generate [post]
+func (h *KnowledgeBaseHandler) GenerateKnowledgeBaseProfile(c *gin.Context) {
+	ctx := c.Request.Context()
+	kb, id, _, permission, err := h.validateAndGetKnowledgeBase(c)
+	if err != nil {
+		_ = c.Error(err)
+		return
+	}
+	if permission != types.OrgRoleAdmin && permission != types.OrgRoleEditor {
+		_ = c.Error(apperrors.NewForbiddenError("No permission to update knowledge base"))
+		return
+	}
+	if h.profileService == nil {
+		_ = c.Error(apperrors.NewInternalServerError("knowledge base profile service unavailable"))
+		return
+	}
+	genCtx, cancel := context.WithTimeout(ctx, knowledgeBaseProfileRequestTimeout)
+	defer cancel()
+	profile, err := h.profileService.GenerateKnowledgeBaseProfile(genCtx, kb, true)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{"knowledge_base_id": id})
+		switch {
+		case stderrors.Is(err, types.ErrKnowledgeBaseProfileUnsupported),
+			stderrors.Is(err, types.ErrKnowledgeBaseProfileModelNotConfigured):
+			_ = c.Error(apperrors.NewBadRequestError(err.Error()))
+		default:
+			_ = c.Error(apperrors.NewInternalServerError(err.Error()))
+		}
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": profile})
+}
+
+// knowledgeBaseProfileRequestTimeout bounds the synchronous regeneration a
+// user triggers from the settings dialog: one aggregation plus one small
+// model call.
+const knowledgeBaseProfileRequestTimeout = 2 * time.Minute
 
 // DeleteKnowledgeBase godoc
 // @Summary      删除知识库
@@ -1256,5 +1331,24 @@ func (h *KnowledgeBaseHandler) ListMoveTargets(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data":    targets,
+	})
+}
+
+// GetImageAttrsSchema returns the canonical image-attribute registry for this
+// release. It is the single source of truth that drives the frontend attribute
+// panel — both the attributes and their display text (label, description, the
+// meaning of each value) — so adding an attribute later is a backend-only
+// change (one registry row) and the UI follows automatically. Read-only; the
+// registry is global, not per-KB, so it carries no KB id and only the Viewer
+// role is required.
+func (h *KnowledgeBaseHandler) GetImageAttrsSchema(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data": gin.H{
+			"version":         types.ImageAttrSchemaVersion,
+			"prompt":          types.ImageAttrPromptVersion,
+			"attributes":      types.ImageAttrRegistry,
+			"default_actions": types.DefaultImageActions(),
+		},
 	})
 }

@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/hibiken/asynq"
+	"github.com/stretchr/testify/require"
 )
 
 func TestIsAsynqQueueNotFound(t *testing.T) {
@@ -32,6 +34,29 @@ func TestIsAsynqQueueNotFound(t *testing.T) {
 			if got := isAsynqQueueNotFound(tt.err); got != tt.want {
 				t.Fatalf("isAsynqQueueNotFound(%v) = %v, want %v", tt.err, got, tt.want)
 			}
+		})
+	}
+}
+
+func TestMatchesKnowledgeListDelete(t *testing.T) {
+	const payload = `{"knowledge_base_id":"kb-1","tenant_id":7,"knowledge_ids":["kid-a","kid-b"]}`
+	cases := []struct {
+		name     string
+		taskType string
+		payload  string
+		kid      string
+		want     bool
+	}{
+		{"covered id", types.TypeKnowledgeListDelete, payload, "kid-a", true},
+		{"last id", types.TypeKnowledgeListDelete, payload, "kid-b", true},
+		{"uncovered id", types.TypeKnowledgeListDelete, payload, "kid-c", false},
+		{"other task type", types.TypeDocumentProcess, payload, "kid-a", false},
+		{"bad json", types.TypeKnowledgeListDelete, "{", "kid-a", false},
+		{"empty list", types.TypeKnowledgeListDelete, `{"knowledge_ids":[]}`, "kid-a", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, matchesKnowledgeListDelete(tc.taskType, []byte(tc.payload), tc.kid))
 		})
 	}
 }

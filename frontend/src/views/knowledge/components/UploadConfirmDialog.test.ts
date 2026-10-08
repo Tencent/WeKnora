@@ -17,7 +17,7 @@ test('selects multiple document tags and returns them with the confirmation resu
 
 test('uses confirmed tags for file and URL imports instead of reading the list filter at upload time', () => {
   assert.match(knowledgeBase, /const tagIds = result\.tagIds \|\| \[\]/)
-  assert.match(knowledgeBase, /executeUploadBatch\(files, \{[\s\S]*?\btagIds,[\s\S]*?\}\)/)
+  assert.match(knowledgeBase, /enqueueUploads\(files, \{[\s\S]*?\btagIds,[\s\S]*?\}\)/)
   assert.match(knowledgeBase, /executeUrlImport\(url, processConfig, tagIds\)/)
   assert.doesNotMatch(
     knowledgeBase,

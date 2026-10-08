@@ -74,10 +74,9 @@ type SplitterConfig struct {
 }
 
 // Default chunk sizing constants. Single source of truth for the entire
-// chunker package and (via knowledge.go::buildSplitterConfig) the
-// knowledge service. The frontend KnowledgeBaseEditorModal mirrors these
-// numbers in its initial form state — keep them in sync if you change
-// either value here.
+// chunker package and the knowledge service via NormalizeSplitterConfig.
+// The frontend KnowledgeBaseEditorModal mirrors these numbers in its initial
+// form state — keep them in sync if you change either value here.
 //
 // DefaultChunkSize = 512 chars: ~100–130 English tokens / ~300 Chinese
 // tokens. Validated as a strong baseline by the Vecta Feb-2026 benchmark
@@ -115,10 +114,18 @@ func DefaultConfig() SplitterConfig {
 }
 
 // protectedPatterns are regex patterns for content that must not be split.
+//
+// The Markdown link/image patterns deliberately exclude '\n' and bound the
+// link text / destination length: CommonMark forbids them from spanning a
+// blank line, and the previous unbounded [^\]]* / [^)]+ let a stray '[' left
+// behind by OCR swallow whole paragraphs as one "protected" atomic span,
+// defeating chunking entirely.
 var protectedPatterns = []*regexp.Regexp{
-	regexp.MustCompile(`(?s)\$\$.*?\$\$`),                                                               // LaTeX block math
-	regexp.MustCompile(`!\[[^\]]*\]\([^)]+\)`),                                                          // Markdown images
-	regexp.MustCompile(`\[[^\]]*\]\([^)]+\)`),                                                           // Markdown links
+	regexp.MustCompile(`(?s)\$\$.*?\$\$`), // LaTeX block math
+	// Markdown images / links: single line, bounded so a stray OCR '['
+	// cannot swallow a paragraph (CommonMark forbids blank-line spans).
+	regexp.MustCompile(`!\[[^\]\n]{0,200}\]\([^)\n]{1,500}\)`),
+	regexp.MustCompile(`\[[^\]\n]{1,200}\]\([^)\n]{1,500}\)`),
 	regexp.MustCompile("(?m)[ ]*(?:\\|[^|\\n]*)+\\|[\\r\\n]+\\s*(?:\\|\\s*:?-{3,}:?\\s*)+\\|[\\r\\n]+"), // Table header+separator
 	regexp.MustCompile("(?m)[ ]*(?:\\|[^|\\n]*)+\\|[\\r\\n]+"),                                          // Table rows
 	regexp.MustCompile("(?s)```(?:\\w+)?[\\r\\n].*?```"),                                                // Fenced code blocks
@@ -867,7 +874,7 @@ func SplitTextParentChild(text string, parentCfg, childCfg SplitterConfig) Paren
 	var children []ChildChunk
 	childSeq := 0
 	for _, parent := range parents {
-		subs := SplitText(parent.Content, childCfg)
+		subs := mapChildrenToSource(parent, SplitText(parent.Content, childCfg))
 
 		parentIndex := -1
 		if len(subs) > 1 || (len(subs) == 1 && subs[0].Content != parent.Content) {
@@ -876,13 +883,7 @@ func SplitTextParentChild(text string, parentCfg, childCfg SplitterConfig) Paren
 		}
 
 		for _, sub := range subs {
-			// Adjust offsets: sub positions are relative to parent content,
-			// shift to document-level offsets.
-			// Use additive shift (not Content-length based) so that chunks with
-			// prepended context headers keep correct positional tracking.
 			sub.Seq = childSeq
-			sub.Start += parent.Start
-			sub.End += parent.Start
 			children = append(children, ChildChunk{
 				Chunk:       sub,
 				ParentIndex: parentIndex,
@@ -891,6 +892,24 @@ func SplitTextParentChild(text string, parentCfg, childCfg SplitterConfig) Paren
 		}
 	}
 	return ParentChildResult{Parents: newParents, Children: children}
+}
+
+// mapChildrenToSource translates offsets in parent.Content to document offsets.
+// A parent may start with a synthetic table header that occupies no source
+// positions. Keep that context in Content, but exclude it from the mapped span
+// and discard children that contain only this synthetic prefix.
+func mapChildrenToSource(parent Chunk, children []Chunk) []Chunk {
+	offset := parent.End - runeLen(parent.Content)
+	out := children[:0]
+	for _, child := range children {
+		child.Start = max(parent.Start, offset+child.Start)
+		child.End += offset
+		if child.End <= child.Start {
+			continue
+		}
+		out = append(out, child)
+	}
+	return out
 }
 
 // ExtractImageRefs extracts markdown image references from text.

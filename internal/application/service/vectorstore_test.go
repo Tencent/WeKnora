@@ -393,6 +393,28 @@ func TestCreateStore_DuplicateCheck_EnvStore(t *testing.T) {
 	assert.Contains(t, appErr.Error(), "environment variables")
 }
 
+func TestCreateStore_DuplicateCheck_QdrantEnvStore(t *testing.T) {
+	withSSRFWhitelist(t, "qdrant")
+	t.Setenv("RETRIEVE_DRIVER", "qdrant")
+	t.Setenv("QDRANT_HOST", "qdrant")
+	t.Setenv("QDRANT_PORT", "7443")
+	t.Setenv("QDRANT_USE_TLS", "true")
+	t.Setenv("QDRANT_COLLECTION", "custom_vectors")
+
+	repo := &mockVectorStoreRepo{}
+	svc := NewVectorStoreService(repo, nil, nil, nil, nil)
+	err := svc.CreateStore(context.Background(), &types.VectorStore{
+		TenantID: 1, Name: "duplicate", EngineType: types.QdrantRetrieverEngineType,
+		ConnectionConfig: types.ConnectionConfig{Host: "qdrant", Port: 7443, UseTLS: true},
+		IndexConfig:      types.IndexConfig{CollectionPrefix: "custom_vectors"},
+	})
+	var appErr *errors.AppError
+	require.ErrorAs(t, err, &appErr)
+	assert.Equal(t, errors.ErrConflict, appErr.Code)
+	assert.Contains(t, appErr.Error(), "environment variables")
+	assert.Empty(t, repo.stores)
+}
+
 func TestCreateStore_DuplicateCheck_EnvStore_DifferentIndex_Allowed(t *testing.T) {
 	// Same endpoint as env store but different index — should be allowed.
 	// Use an httptest server so CreateStore's connection probe sees a real
@@ -822,6 +844,8 @@ CREATE TABLE IF NOT EXISTS vector_stores (
     deleted_at DATETIME NULL
 );
 CREATE TABLE IF NOT EXISTS knowledge_bases (
+    profile_config TEXT,
+    generated_profile TEXT,
     id VARCHAR(36) PRIMARY KEY,
     name VARCHAR(255) NOT NULL,
     description TEXT,
@@ -911,6 +935,17 @@ func (r *realStoreRepo) ExistsByEndpointAndIndex(_ context.Context, _ uint64, _ 
 // realKBRepo is the minimal KnowledgeBaseRepository slice required by the
 // vector-store service (only CountByVectorStoreID is exercised here).
 type realKBRepo struct{ db *gorm.DB }
+
+func (r *realKBRepo) UpdateKnowledgeBaseGeneratedProfile(
+	ctx context.Context, id string, profile *types.KnowledgeBaseProfile,
+) error {
+	var value interface{}
+	if profile != nil {
+		value = *profile
+	}
+	return r.db.WithContext(ctx).Model(&types.KnowledgeBase{}).Where("id = ?", id).
+		Update("generated_profile", value).Error
+}
 
 func (r *realKBRepo) CountByVectorStoreID(ctx context.Context, db *gorm.DB, tenantID uint64, storeID string) (int64, error) {
 	if db == nil {

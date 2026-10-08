@@ -155,6 +155,7 @@ func (tr *installTranscript) Subscribe() {
 	}
 	tr.bus.On(event.EventAgentThought, tr.onThought)
 	tr.bus.On(event.EventAgentToolCall, tr.onToolCall)
+	tr.bus.On(event.EventAgentCommandOutput, tr.onInstallOutput)
 	tr.bus.On(event.EventAgentToolResult, tr.onToolResult)
 	tr.bus.On(event.EventAgentFinalAnswer, tr.onAnswer)
 	tr.bus.On(event.EventError, tr.onError)
@@ -309,15 +310,13 @@ func (tr *installTranscript) onToolResult(_ context.Context, evt event.Event) er
 	}
 	tr.mu.Unlock()
 
-	// A failed command is surfaced as an error, matching the chat path, so the
-	// console highlights it instead of filing it as one more quiet step.
+	// A failed command is still a tool result: response_type=error is reserved
+	// for internal failures (onError), matching the chat path. Failure is
+	// carried by success=false in the metadata.
 	responseType := types.ResponseTypeToolResult
 	content := agenttools.StreamContentForToolResult(data.ToolName, data.Success, data.Error, data.Data)
-	if !data.Success {
-		responseType = types.ResponseTypeError
-		if content == "" && data.Error != "" {
-			content = data.Error
-		}
+	if !data.Success && content == "" && data.Error != "" {
+		content = data.Error
 	}
 
 	meta := map[string]interface{}{
@@ -559,4 +558,25 @@ func asymptoticInstallPercent(k int) int {
 		return 79
 	}
 	return p
+}
+
+func (tr *installTranscript) onInstallOutput(_ context.Context, evt event.Event) error {
+	data, ok := evt.Data.(event.CommandOutputData)
+	if !ok {
+		return nil
+	}
+	tr.mu.Lock()
+	closed := tr.closed
+	tr.mu.Unlock()
+	if closed {
+		return nil
+	}
+	tr.append(interfaces.StreamEvent{
+		ID: evt.ID, Type: types.ResponseTypeInstallOutput, Timestamp: time.Now(),
+		Data: map[string]interface{}{
+			"tool_call_id": data.ToolCallID, "command": data.Command,
+			"started_at": data.StartedAt, "output": data.Output, "done": data.Done,
+		},
+	})
+	return nil
 }

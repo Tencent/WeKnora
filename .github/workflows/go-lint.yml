@@ -1,10 +1,18 @@
 name: Go Lint
 
 # The repository carries a large backlog of pre-existing golangci-lint findings,
-# so pull requests are only judged on the code they introduce (`only-new-issues`).
-# That filter needs a pull request diff, which is why this workflow has no other
-# trigger; the companion go-lint-cache.yml keeps the caches this job restores
-# from warm on main.
+# so pull requests are only judged on the code they introduce. The filter needs
+# a pull request diff, which is why this workflow has no other trigger; the
+# companion go-lint-cache.yml keeps the caches this job restores from warm on
+# main.
+#
+# The filter is golangci-lint's own `--new-from-merge-base` rather than the
+# action's `only-new-issues`, because that option asks the GitHub API for the
+# pull request patch and the API refuses any diff over 20000 lines
+# ("code": "too_large"). On a large pull request the action silently falls back
+# to linting everything, which reports the entire backlog and can never pass.
+# Computing the merge base from git has no size limit, and `fetch-depth: 0`
+# below is what makes the base commit available to do it.
 
 on:
   pull_request:
@@ -101,4 +109,7 @@ jobs:
         with:
           version: ${{ env.GOLANGCI_LINT_VERSION }}
           working-directory: ${{ matrix.module }}
-          only-new-issues: true
+          # Deliberately off: see the note at the top of this file. The same
+          # filtering is done below, from git.
+          only-new-issues: false
+          args: --new-from-merge-base=${{ github.event.pull_request.base.sha }}

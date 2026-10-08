@@ -84,7 +84,7 @@ const durationLabel = computed(() => {
   gap: 8px;
   padding: 10px 12px;
   border: 1px solid var(--td-component-stroke);
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   background: var(--td-bg-color-secondarycontainer);
 }
 
@@ -92,7 +92,7 @@ const durationLabel = computed(() => {
   flex-shrink: 0;
   margin-top: 1px;
   font-family: var(--app-font-family-mono);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   font-weight: 600;
   line-height: 1.55;
   color: var(--td-text-color-placeholder);
@@ -103,7 +103,7 @@ const durationLabel = computed(() => {
   min-width: 0;
   margin: 0;
   font-family: var(--app-font-family-mono);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.55;
   color: var(--td-text-color-primary);
   white-space: pre-wrap;
@@ -114,7 +114,7 @@ const durationLabel = computed(() => {
   display: flex;
   flex-wrap: wrap;
   gap: 4px 12px;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.4;
   color: var(--td-text-color-placeholder);
 
@@ -125,7 +125,7 @@ const durationLabel = computed(() => {
 
 .shell-exec-note,
 .shell-exec-empty {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.4;
   color: var(--td-text-color-placeholder);
 }
@@ -133,7 +133,7 @@ const durationLabel = computed(() => {
 .shell-exec-stream {
   min-width: 0;
   border: 1px solid var(--td-component-stroke);
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   overflow: hidden;
   background: var(--td-bg-color-container);
 
@@ -144,7 +144,7 @@ const durationLabel = computed(() => {
 
 .shell-exec-stream-label {
   padding: 6px 12px;
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   font-weight: 500;
   line-height: 1.4;
   color: var(--td-text-color-secondary);
@@ -158,7 +158,7 @@ const durationLabel = computed(() => {
   max-height: 280px;
   overflow: auto;
   font-family: var(--app-font-family-mono);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 1.55;
   color: var(--td-text-color-primary);
   white-space: pre-wrap;
@@ -171,7 +171,7 @@ const durationLabel = computed(() => {
 
   &::-webkit-scrollbar-thumb {
     background: var(--td-component-border);
-    border-radius: 4px;
+    border-radius: var(--app-radius-xs);
   }
 }
 </style>

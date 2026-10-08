@@ -81,7 +81,7 @@ func TestAnalyzeResponse_ToolCall_DoesNotTerminate(t *testing.T) {
 				ID:   "call-1",
 				Type: "function",
 				Function: types.FunctionCall{
-					Name:      agenttools.ToolKnowledgeSearch,
+					Name:      agenttools.ToolSearchKnowledge,
 					Arguments: `{"query": "hi"}`,
 				},
 			},
@@ -217,45 +217,25 @@ func TestAppendToolResults_PreservesReasoningContent(t *testing.T) {
 	})
 }
 
-func TestAppendToolResults_AddsDynamicImageRequirementToCustomSystemPrompt(t *testing.T) {
-	engine := &AgentEngine{}
+func TestAppendToolResultsKeepsImageOutputPolicyInStableSystemPrefix(t *testing.T) {
+	engine := newTestEngine(t, &mockChat{})
+	engine.systemPromptTemplate = "Custom agent prompt."
 	prior := []chat.Message{
-		{Role: "system", Content: "Custom agent prompt."},
+		{Role: "system", Content: engine.buildSystemPrompt(t.Context())},
 		{Role: "user", Content: "解释流程"},
 	}
-	step := types.AgentStep{
-		ToolCalls: []types.ToolCall{{
-			ID:   "call-image",
-			Name: "knowledge_search",
-			Result: &types.ToolResult{
-				Success: true,
-				Output:  "结果\n![流程图](resource://AbCdEfGhIjKlMnOpQrStUv)",
-			},
-		}},
-	}
-
+	step := types.AgentStep{ToolCalls: []types.ToolCall{{
+		ID: "call-image", Name: "knowledge_search",
+		Result: &types.ToolResult{Success: true, Output: "结果\n![流程图](resource://AbCdEfGhIjKlMnOpQrStUv)"},
+	}}}
 	out := engine.appendToolResults(prior, step)
-	require.Len(t, out, 5)
-	assert.Equal(t, "Custom agent prompt.", out[0].Content)
-	assert.NotContains(t, out[0].Content, agentRetrievedImageRequirementMarker)
+	require.Len(t, out, 4)
+	assert.Equal(t, prior[0], out[0], "the system prefix stays stable after retrieval")
+	assert.Contains(t, out[0].Content, types.SourcedAnswerOutputPrompt)
 	assert.Equal(t, "tool", out[3].Role)
-	assert.Contains(t, out[3].Content, "![流程图](resource://AbCdEfGhIjKlMnOpQrStUv)")
-	assert.Equal(t, "user", out[4].Role)
-	assert.Contains(t, out[4].Content, agentRetrievedImageRequirementMarker)
-	assert.Contains(t, out[4].Content, "MUST include at least one relevant Markdown image")
-	assert.Contains(t, out[4].Content, "ASCII half-width parentheses")
-
-	// A later image-bearing step must not duplicate the requirement.
+	assert.Contains(t, out[3].Content, "![流程图](res://0001)")
 	out = engine.appendToolResults(out, step)
-	assert.Equal(t, 1, countImageRequirementMarkers(out))
-}
-
-func countImageRequirementMarkers(messages []chat.Message) int {
-	n := 0
-	for _, message := range messages {
-		n += strings.Count(message.Content, agentRetrievedImageRequirementMarker)
-	}
-	return n
+	require.Len(t, out, 6, "image results append no synthetic user instruction")
 }
 
 func TestBuildRuntimeContextBlock_PinnedDocuments(t *testing.T) {
@@ -267,14 +247,53 @@ func TestBuildRuntimeContextBlock_PinnedDocuments(t *testing.T) {
 			Title:       "Report.pdf",
 			FileType:    "pdf",
 		}},
+		nil,
 	)
 
 	assert.Contains(t, block, "<pinned_documents")
 	assert.Contains(t, block, `knowledge_id="kid-1"`)
 	assert.Contains(t, block, `title="Report.pdf"`)
 	assert.Contains(t, block, `file_type="pdf"`)
-	assert.Contains(t, block, "list_knowledge_chunks")
+	assert.NotContains(t, block, "<note>")
+	assert.Contains(t, runtimePromptContract, "Honor the current pinned-document scope")
 	assert.NotContains(t, block, "<must_use>")
+}
+
+func TestBuildRuntimeContextBlock_QuestionOrigin(t *testing.T) {
+	origin := &QuestionOriginInfo{
+		KnowledgeBaseID:   "kb-1",
+		KnowledgeBaseName: "TEST",
+		Document:          &SelectedDocumentInfo{KnowledgeID: "kid-1", Title: "Corners <SSAO>"},
+	}
+	block := buildRuntimeContextBlock("sess-1", nil, nil, origin)
+	assert.Contains(t, block, `<question_origin knowledge_base_id="kb-1" name="TEST">`)
+	assert.Contains(t, block, `<document knowledge_id="kid-1" title="Corners &lt;SSAO&gt;" />`)
+	assert.Contains(t, block, "Search it before answering")
+
+	baseOnly := buildRuntimeContextBlock("sess-1", nil, nil, &QuestionOriginInfo{KnowledgeBaseID: "kb-1"})
+	assert.Contains(t, baseOnly, `<question_origin knowledge_base_id="kb-1">`, "an unknown name is omitted, not empty")
+	assert.NotContains(t, baseOnly, "<document")
+
+	assert.NotContains(t, buildRuntimeContextBlock("sess-1", nil, nil, nil), "question_origin")
+}
+
+// The origin's raw IDs must reach the model as handles it can pass to
+// search_knowledge / read_document, never as durable IDs.
+func TestRenderUserTurnContent_QuestionOriginUsesHandles(t *testing.T) {
+	engine := &AgentEngine{
+		modelContext:       modelcontext.NewRegistry(true),
+		knowledgeBasesInfo: []*KnowledgeBaseInfo{{ID: "kb-real-id", Name: "TEST"}},
+		questionOrigin: &QuestionOriginInfo{
+			KnowledgeBaseID:   "kb-real-id",
+			KnowledgeBaseName: "TEST",
+			Document:          &SelectedDocumentInfo{KnowledgeID: "doc-real-id", Title: "Corners"},
+		},
+	}
+	out := engine.RenderUserTurnContent("sess-1", "为什么在比较图形时需要谨慎处理？")
+	assert.Contains(t, out, `<question_origin knowledge_base_id="b1" name="TEST">`)
+	assert.Contains(t, out, `<document knowledge_id="d1" title="Corners" />`)
+	assert.NotContains(t, out, "kb-real-id")
+	assert.NotContains(t, out, "doc-real-id")
 }
 
 func TestBuildMustUseBlock_MCPAndSkills(t *testing.T) {

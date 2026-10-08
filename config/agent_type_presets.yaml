@@ -55,14 +55,14 @@ agent_type_presets:
       # users don't need them for single-turn Q&A and they noticeably bloat
       # token usage. Enable them manually in the tool list when needed.
       allowed_tools:
-        - "knowledge_search"
-        - "grep_chunks"
-        - "list_knowledge_chunks"
-        - "get_document_info"
+        - "search_knowledge"
+        - "read_document"
+        - "list_documents"
       retain_retrieval_history: false
       faq_priority_enabled: true
       kb_selection_mode: "all"
     # kb_filter derived from allowed_tools: any_of = [vector, keyword]
+    # (read_document / list_documents are auxiliary and do not widen it)
 
   # --------------------------------------------------------------------------
   # Wiki Q&A — graph-navigated wiki answering.
@@ -92,7 +92,7 @@ agent_type_presets:
       allowed_tools:
         - "wiki_search"
         - "wiki_read_page"
-        - "wiki_read_source_doc"
+        - "read_document"
         - "wiki_flag_issue"
       retain_retrieval_history: false
       kb_selection_mode: "all"
@@ -126,10 +126,9 @@ agent_type_presets:
       allowed_tools:
         - "wiki_search"
         - "wiki_read_page"
-        - "knowledge_search"
-        - "grep_chunks"
-        - "list_knowledge_chunks"
-        - "get_document_info"
+        - "search_knowledge"
+        - "read_document"
+        - "list_documents"
         - "wiki_flag_issue"
       retain_retrieval_history: false
       faq_priority_enabled: true
@@ -139,7 +138,7 @@ agent_type_presets:
     #  - KB has wiki + chunks  → full "wiki-first, RAG-verify" workflow
     #  - KB has only chunks    → fallback to pure RAG (see prompt's "Fallback rules")
     #  - KB has only wiki      → fallback to wiki-only answering
-    #  - FAQ KB                → allowed; knowledge_search still works on FAQ chunks
+    #  - FAQ KB                → allowed; search_knowledge still works on FAQ chunks
     # kb_filter derived from allowed_tools: any_of = [vector, keyword, wiki].
     # We only require that the KB expose AT LEAST ONE retrievable surface so
     # the agent has SOMETHING to call. KBs with zero indexing (e.g. graph-only

@@ -13,7 +13,7 @@ export function parseAllowedOrigins(text: string): string[] {
 
 export function validateAllowedOrigins(
   origins: string[],
-  prod = import.meta.env.PROD,
+  prod = import.meta.env?.PROD ?? false,
 ): { ok: true; origins: string[] } | { ok: false; error: AllowedOriginsValidationError } {
   const cleaned = parseAllowedOrigins(origins.join('\n'))
   if (cleaned.length === 0) {
@@ -31,8 +31,13 @@ export function validateAllowedOrigins(
       host = `https://${origin.slice(2)}`
     }
     try {
+      if (!/^https?:\/\/[^/?#\\\s]+\/?$/i.test(host)) {
+        return { ok: false, error: { code: 'invalid', origin } }
+      }
       const url = new URL(host)
-      if ((url.protocol !== 'http:' && url.protocol !== 'https:') || !url.host) {
+      if ((url.protocol !== 'http:' && url.protocol !== 'https:') || !url.host ||
+        url.username || url.password || (url.pathname !== '' && url.pathname !== '/') ||
+        host.includes('?') || host.includes('#') || /[\s'";,*\\]/.test(url.host)) {
         return { ok: false, error: { code: 'invalid', origin } }
       }
     } catch {

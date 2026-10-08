@@ -37,6 +37,13 @@ function morphImage(current: HTMLImageElement, next: HTMLImageElement): void {
     && current.naturalWidth > 1
     && (sameProtectedSource || sameIdentity || sameProtectedAlt);
 
+  if (sameProtectedSource && current.hasAttribute('data-protected-hidden')) {
+    // The authenticated loader keeps missing images addressable for the final
+    // retry. Do not reveal their 1px placeholder between streaming patches.
+    syncAttributes(current, next, new Set(['style', 'data-protected-hidden']));
+    return;
+  }
+
   if (keepDecodedImage) {
     // Never write the placeholder src (or loading flags) over an image Chrome
     // has already decoded. More importantly, leave this exact DOM node attached
@@ -91,7 +98,18 @@ function morphNode(current: Node, next: Node): void {
     return;
   }
 
-  syncAttributes(currentElement, nextElement);
+  // Standalone missing images hide their empty paragraph as well. Preserve it
+  // only while the next paragraph still contains that exact image and no text.
+  const currentImage = currentElement.firstElementChild;
+  const nextImage = nextElement.firstElementChild;
+  const keepHiddenParagraph = currentElement.tagName === 'P'
+    && currentElement.hasAttribute('data-protected-hidden')
+    && nextElement.children.length === 1 && !nextElement.textContent?.trim()
+    && nextImage?.tagName === 'IMG'
+    && Boolean(currentImage?.getAttribute('data-protected-src'))
+    && currentImage?.getAttribute('data-protected-src') === nextImage?.getAttribute('data-protected-src');
+  syncAttributes(currentElement, nextElement,
+    keepHiddenParagraph ? new Set(['style', 'data-protected-hidden']) : undefined);
   morphChildren(currentElement, nextElement);
 }
 

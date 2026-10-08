@@ -16,6 +16,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
@@ -79,7 +80,8 @@ const (
 // getJwtSecret retrieves the JWT secret from the environment, falling back to a securely generated random secret.
 func getJwtSecret() string {
 	jwtSecretOnce.Do(func() {
-		if envSecret := strings.TrimSpace(os.Getenv("JWT_SECRET")); envSecret != "" {
+		envSecret := strings.TrimSpace(os.Getenv("JWT_SECRET"))
+		if envSecret != "" && envSecret != "weknora-jwt-secret" && envSecret != "CHANGE-ME-jwt-secret" {
 			jwtSecret = envSecret
 			return
 		}
@@ -626,6 +628,19 @@ func (s *userService) UpdateUserPreferences(
 	}
 
 	merged := user.Preferences
+	if patch.BrowserSearchInstructions != nil {
+		value := strings.TrimSpace(*patch.BrowserSearchInstructions)
+		if utf8.RuneCountInString(value) > types.MaxBrowserSearchInstructionsLength {
+			return types.UserPreferences{}, fmt.Errorf(
+				"browser search instructions must not exceed %d characters",
+				types.MaxBrowserSearchInstructionsLength,
+			)
+		}
+		merged.BrowserSearchInstructions = nil
+		if value != "" && value != types.DefaultBrowserSearchInstructions {
+			merged.BrowserSearchInstructions = &value
+		}
+	}
 	if patch.LastActiveTenantID != nil {
 		// *0 = "forget my preference, fall back to home on next login";
 		// any positive value = set/replace. We do not validate membership
@@ -637,6 +652,31 @@ func (s *userService) UpdateUserPreferences(
 			v := *patch.LastActiveTenantID
 			merged.LastActiveTenantID = &v
 		}
+	}
+	if patch.Gallery != nil {
+		// Whole-object replace per key: the gallery sends its complete
+		// current state (mode + full status map) on every change, so there
+		// is no meaningful partial-merge within the block. Values are
+		// clamped so a stray client cannot bloat the column or poison the
+		// mode.
+		g := merged.Gallery
+		if g == nil {
+			g = &types.GalleryUserPrefs{}
+		}
+		if patch.Gallery.Mode == types.GalleryModeAll || patch.Gallery.Mode == types.GalleryModeCustom {
+			g.Mode = patch.Gallery.Mode
+		}
+		if patch.Gallery.Status != nil {
+			status := make(map[string]string, len(patch.Gallery.Status))
+			for id, v := range patch.Gallery.Status {
+				if (v == types.GalleryStatusOn || v == types.GalleryStatusOff) &&
+					len(id) <= 128 && len(status) < 200 {
+					status[id] = v
+				}
+			}
+			g.Status = status
+		}
+		merged.Gallery = g
 	}
 
 	user.Preferences = merged
@@ -1088,8 +1128,16 @@ func (s *userService) generateTokensForTenant(
 		UpdatedAt: time.Now(),
 	}
 
-	_ = s.tokenRepo.CreateToken(ctx, accessTokenRecord)
-	_ = s.tokenRepo.CreateToken(ctx, refreshTokenRecord)
+	// Persist before returning the pair: a signed token the database has no row
+	// for is rejected by ValidateToken / RefreshToken on the very next request,
+	// so swallowing a write error turns a transient database failure into a
+	// login that looks successful and then loses the session immediately.
+	if err := s.tokenRepo.CreateToken(ctx, accessTokenRecord); err != nil {
+		return "", "", fmt.Errorf("persist access token: %w", err)
+	}
+	if err := s.tokenRepo.CreateToken(ctx, refreshTokenRecord); err != nil {
+		return "", "", fmt.Errorf("persist refresh token: %w", err)
+	}
 
 	return accessToken, refreshToken, nil
 }
@@ -1233,9 +1281,14 @@ func (s *userService) ValidateToken(ctx context.Context, tokenString string) (*t
 		return nil, 0, errors.New("terminal ticket cannot be used as access token")
 	}
 
-	// Check if token is revoked
+	// Check if token is revoked. A failed lookup is an infrastructure error and
+	// is reported as such: collapsing it into "token is revoked" claims a
+	// revocation that never happened and sends operators down the wrong path.
 	tokenRecord, err := s.tokenRepo.GetTokenByValue(ctx, tokenString)
-	if err != nil || tokenRecord == nil || tokenRecord.IsRevoked {
+	if err != nil {
+		return nil, 0, fmt.Errorf("look up token: %w", err)
+	}
+	if tokenRecord == nil || tokenRecord.IsRevoked {
 		return nil, 0, errors.New("token is revoked")
 	}
 	if tokenRecord.TokenType == "refresh_token" {
@@ -1385,9 +1438,13 @@ func (s *userService) RefreshToken(
 		return "", "", errors.New("invalid user ID in token")
 	}
 
-	// Check if token is revoked
+	// Check if token is revoked. See ValidateToken: a lookup failure must not be
+	// reported as a revocation.
 	tokenRecord, err := s.tokenRepo.GetTokenByValue(ctx, refreshTokenString)
-	if err != nil || tokenRecord == nil || tokenRecord.IsRevoked {
+	if err != nil {
+		return "", "", fmt.Errorf("look up refresh token: %w", err)
+	}
+	if tokenRecord == nil || tokenRecord.IsRevoked {
 		return "", "", errors.New("refresh token is revoked")
 	}
 	if tokenRecord.TokenType != "refresh_token" {

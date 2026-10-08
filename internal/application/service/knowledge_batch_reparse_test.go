@@ -138,3 +138,51 @@ func TestRunKnowledgeListReparseSubmissionsSucceeds(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, knowledgeListReparseOutcome{Submitted: 2}, outcome)
 }
+
+func TestReparseKnowledgePreservesOrChangesSummaryChoice(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		overrides *types.KnowledgeProcessOverrides
+		want      bool
+	}{
+		{name: "reuse upload choice"},
+		{
+			name:      "explicitly keep disabled",
+			overrides: &types.KnowledgeProcessOverrides{SummaryEnabled: processConfigBoolPtr(false)},
+		},
+		{
+			name:      "enable on reparse",
+			overrides: &types.KnowledgeProcessOverrides{SummaryEnabled: processConfigBoolPtr(true)},
+			want:      true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			knowledge := &types.Knowledge{
+				ID: "knowledge-1", TenantID: 7, KnowledgeBaseID: "kb-1",
+				Type: types.KnowledgeTypeManual, ParseStatus: types.ParseStatusCompleted,
+			}
+			metadata := types.NewManualKnowledgeMetadata("# content", types.ManualKnowledgeStatusPublish, 1)
+			require.NoError(t, knowledge.SetManualMetadata(metadata))
+			require.NoError(t, knowledge.SetProcessOverrides(&types.KnowledgeProcessOverrides{
+				SummaryEnabled: processConfigBoolPtr(false),
+			}))
+			kb := &types.KnowledgeBase{ID: "kb-1", TenantID: 7}
+			queue := &wikiEnqueueFailureTaskQueue{}
+			svc := &knowledgeService{
+				repo:      &reparseFailureKnowledgeRepo{knowledge: knowledge},
+				kbService: &reparseFailureKBService{kb: kb}, task: queue,
+			}
+			ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(7))
+			ctx, err := access.WithKBTaskWrite(ctx, kb, 7)
+			require.NoError(t, err)
+			got, err := svc.ReparseKnowledge(ctx, knowledge.ID, tc.overrides)
+			require.NoError(t, err)
+			require.Equal(t, []string{types.TypeManualProcess}, queue.taskTypes)
+			overrides, err := got.ProcessOverrides()
+			require.NoError(t, err)
+			require.NotNil(t, overrides.SummaryEnabled)
+			require.Equal(t, tc.want, *overrides.SummaryEnabled)
+			require.Equal(t, tc.want, ResolveProcessConfig(kb, overrides).SummaryEnabled)
+		})
+	}
+}

@@ -394,6 +394,7 @@ export function createChatMarkdownRenderer(options: ChatMarkdownRendererOptions 
   if (options.imageRenderer) {
     renderer.image = ({ href, title, text }: Tokens.Image) => {
       const imageHref = href || ''
+      if (!imageHref.trim()) return ''
       if (options.isValidImageUrl && !options.isValidImageUrl(imageHref)) {
         return options.invalidImageHtml?.(imageHref) ?? ''
       }

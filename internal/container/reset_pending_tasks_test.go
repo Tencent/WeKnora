@@ -17,6 +17,7 @@ import (
 
 const resetPendingKnowledgeDDL = `
 CREATE TABLE IF NOT EXISTS knowledges (
+    profile TEXT,
     id              VARCHAR(64) PRIMARY KEY,
     parse_status    VARCHAR(32) NOT NULL DEFAULT 'pending',
     summary_status  VARCHAR(32) NOT NULL DEFAULT 'none',
@@ -80,8 +81,17 @@ CREATE TABLE IF NOT EXISTS task_pending_ops (
 
 const resetPendingKnowledgeBasesDDL = `
 CREATE TABLE IF NOT EXISTS knowledge_bases (
+    profile_config TEXT,
+    generated_profile TEXT,
     id          VARCHAR(64) PRIMARY KEY,
     tenant_id   INTEGER NOT NULL DEFAULT 0,
+    deleted_at  DATETIME
+);
+`
+
+var resetPendingTenantsDDL = `
+CREATE TABLE IF NOT EXISTS tenants (
+    id          INTEGER PRIMARY KEY,
     deleted_at  DATETIME
 );
 `
@@ -95,6 +105,14 @@ func setupResetPendingDB(t *testing.T) *gorm.DB {
 	require.NoError(t, db.Exec(resetPendingSpansDDL).Error)
 	require.NoError(t, db.Exec(resetPendingOpsDDL).Error)
 	require.NoError(t, db.Exec(resetPendingKnowledgeBasesDDL).Error)
+	require.NoError(t, db.Exec(resetPendingTenantsDDL).Error)
+	// Tenants 7 and 8 are alive; tenant 9 is soft-deleted — its KB-scoped
+	// pending rows must be purged by recovery even though the KB row is
+	// still present (#3593).
+	require.NoError(t, db.Exec(
+		"INSERT INTO tenants (id, deleted_at) VALUES (?, NULL), (?, NULL), (?, ?)",
+		7, 8, 9, time.Now(),
+	).Error)
 	return db
 }
 
@@ -306,8 +324,8 @@ func TestRecoverPendingWikiTasks_RecreatesOneTriggerPerLaneAndKB(t *testing.T) {
 	db := setupResetPendingDB(t)
 	require.NoError(t, db.Exec(
 		`INSERT INTO knowledge_bases (id, tenant_id, deleted_at)
-		 VALUES (?, ?, NULL), (?, ?, NULL), (?, ?, ?)`,
-		"kb-a", 7, "kb-b", 8, "kb-deleted", 9, time.Now(),
+		 VALUES (?, ?, NULL), (?, ?, NULL), (?, ?, ?), (?, ?, NULL)`,
+		"kb-a", 7, "kb-b", 8, "kb-deleted", 9, time.Now(), "kb-t9", 9,
 	).Error)
 	rows := []struct {
 		tenantID uint64
@@ -320,6 +338,7 @@ func TestRecoverPendingWikiTasks_RecreatesOneTriggerPerLaneAndKB(t *testing.T) {
 		{7, types.TypeWikiFinalize, "kb-a", "slug-a"},
 		{8, types.TypeWikiIngest, "kb-b", "k-3"},
 		{9, types.TypeWikiIngest, "kb-deleted", "k-deleted"},
+		{9, types.TypeWikiIngest, "kb-t9", "k-t9"}, // live KB of a deleted tenant
 		{10, types.TypeWikiFinalize, "kb-missing", "k-missing"},
 	}
 	for _, row := range rows {
@@ -347,7 +366,14 @@ func TestRecoverPendingWikiTasks_RecreatesOneTriggerPerLaneAndKB(t *testing.T) {
 
 	var orphaned int64
 	require.NoError(t, db.Model(&types.TaskPendingOp{}).
-		Where("scope_id IN ?", []string{"kb-deleted", "kb-missing"}).
+		Where("scope_id IN ?", []string{"kb-deleted", "kb-missing", "kb-t9"}).
 		Count(&orphaned).Error)
 	assert.Zero(t, orphaned)
+
+	// The live KB of a soft-deleted tenant must be purged too: the KB row
+	// survives the tenant deletion, so the KB-only predicate would keep
+	// re-arming its triggers at every startup (#3593).
+	var remaining int64
+	require.NoError(t, db.Model(&types.TaskPendingOp{}).Count(&remaining).Error)
+	assert.Equal(t, int64(4), remaining)
 }

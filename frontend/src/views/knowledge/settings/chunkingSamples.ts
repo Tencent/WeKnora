@@ -104,10 +104,10 @@ Agent 引擎执行经典 ReAct 循环：
 
 ## 进一步阅读
 
-- API 文档：\`docs/api/README.md\`
+- API 文档：\`website-docs/04-api/01-api-overview.md\`
 - 配置项清单：\`config/config.yaml\` 与 \`.env.example\`
-- 故障排查：\`docs/QA.md\`
-- 路线图：\`docs/ROADMAP.md\``
+- 故障排查：\`website-docs/01-getting-started/05-troubleshooting.md\`
+- 产品介绍：\`website-docs/01-getting-started/01-introduction.md\``
 
 const FAQ_SAMPLE = `# WeKnora 部署与使用 FAQ
 

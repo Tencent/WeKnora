@@ -186,19 +186,19 @@ onMounted(() => {
   gap: 8px;
   
   .model-icon {
-    font-size: 14px;
+    font-size: var(--app-text-base);
     color: var(--td-brand-color);
   }
   
   .add-icon {
-    font-size: 14px;
+    font-size: var(--app-text-base);
     color: var(--td-brand-color);
   }
   
   .model-name {
     flex: 0 1 auto;
     min-width: 0;
-    font-size: 13px;
+    font-size: var(--app-text-md);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -207,7 +207,7 @@ onMounted(() => {
   .model-raw-name {
     flex: 1;
     min-width: 0;
-    font-size: 12px;
+    font-size: var(--app-text-sm);
     color: var(--td-text-color-placeholder);
     overflow: hidden;
     text-overflow: ellipsis;
@@ -228,12 +228,12 @@ onMounted(() => {
 
 .model-ctx {
   flex-shrink: 0;
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   font-variant-numeric: tabular-nums;
   color: var(--td-text-color-secondary);
   background: var(--td-bg-color-secondarycontainer);
   padding: 0 6px;
-  border-radius: 4px;
+  border-radius: var(--app-radius-xs);
   line-height: 18px;
 
   &--default {

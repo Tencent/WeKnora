@@ -234,6 +234,7 @@ func TestMCPDirectExposureRevalidatesIdentityPolicyAndSchema(t *testing.T) {
 	require.False(t, result.Success)
 	r.RefreshMCPTools(ctx)
 	require.Empty(t, MCPToolNamesByServiceID(r)[service.ID])
+	require.Len(t, r.GetModelFunctionDefinitions(), 1, "withdraw the proxy when no callable tools remain")
 	gate.disabled["s/get"] = false
 	current.UpdatedAt = current.UpdatedAt.Add(time.Second)
 	schema = json.RawMessage(`{"type":"object","properties":{"count":{"type":"number"}},"required":["count"]}`)
@@ -287,10 +288,25 @@ func TestMCPDeferredSourcesStaySmallAndOnlyDescribedToolsLoad(t *testing.T) {
 	r.PrepareMCPTools(ctx)
 	initial, err := json.Marshal(r.GetModelFunctionDefinitions())
 	require.NoError(t, err)
-	require.Len(t, r.GetModelFunctionDefinitions(), 2)
+	require.Len(t, r.GetModelFunctionDefinitions(), 1)
+	require.Equal(t, ToolDiscoverMCPTools, r.GetModelFunctionDefinitions()[0].Name)
 	require.Less(t, len(initial), 8192)
 	require.Contains(t, string(initial), "Orders and shipping")
 	require.NotContains(t, string(initial), "DO-NOT-SEND-ALL-DESCRIPTIONS")
+	discoverPage(ctx, t, r, map[string]any{"mode": "list_tools", "server_id": "many"})
+	r.RefreshMCPTools(ctx)
+	require.Len(t, r.GetModelFunctionDefinitions(), 1, "listing must not expose the call proxy")
+	failed, err := r.ExecuteTool(ctx, ToolDiscoverMCPTools,
+		json.RawMessage(`{"mode":"describe","server_id":"many","tool_name":"guessed_tool"}`))
+	require.NoError(t, err)
+	require.False(t, failed.Success)
+	r.RefreshMCPTools(ctx)
+	require.Len(t, r.GetModelFunctionDefinitions(), 1, "a failed describe must not expose the call proxy")
+	failed, err = r.ExecuteTool(ctx, ToolCallMCPTool,
+		json.RawMessage(`{"tool_ref":"amap-maps__amap_geo","arguments":{}}`))
+	require.NoError(t, err)
+	require.False(t, failed.Success, "the execution gate must still reject hallucinated calls")
+	require.Contains(t, failed.Error, "copy its tool_ref verbatim")
 	result, err := r.ExecuteTool(
 		ctx,
 		ToolDiscoverMCPTools,
@@ -298,7 +314,7 @@ func TestMCPDeferredSourcesStaySmallAndOnlyDescribedToolsLoad(t *testing.T) {
 	)
 	require.NoError(t, err)
 	require.True(t, result.Success)
-	require.Len(t, r.GetModelFunctionDefinitions(), 2, "a tool call must not mutate the registry")
+	require.Len(t, r.GetModelFunctionDefinitions(), 1, "a tool call must not mutate the registry")
 	r.RefreshMCPTools(ctx)
 	loaded := r.GetModelFunctionDefinitions()
 	require.Len(t, loaded, 3)

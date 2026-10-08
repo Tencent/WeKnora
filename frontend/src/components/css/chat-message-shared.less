@@ -6,23 +6,24 @@
   justify-content: flex-start;
   gap: 4px;
   margin-top: 6px;
-  margin-left: -7px;
-  min-height: 30px;
+  margin-left: -6px;
+  min-height: 28px;
   color: var(--td-text-color-primary);
 
+  // 与用户消息的操作键、输入框控制键同规格：28px、6px 圆角
   :deep(.t-button) {
     display: inline-flex;
     align-items: center;
     justify-content: center;
     min-width: auto;
-    width: 30px;
-    height: 30px;
+    width: 28px;
+    height: 28px;
     padding: 0;
     border: none;
-    border-radius: 8px;
+    border-radius: var(--app-radius-sm);
     background: transparent;
     color: var(--td-text-color-secondary);
-    transition: background-color 0.15s ease, color 0.15s ease;
+    transition: background-color var(--app-motion-fast) ease, color var(--app-motion-fast) ease;
 
     .t-button__content {
       display: inline-flex !important;
@@ -44,7 +45,7 @@
       opacity: 1;
       align-items: center;
       justify-content: center;
-      font-size: 16px;
+      font-size: var(--app-text-xl);
       width: 16px;
       height: 16px;
       flex-shrink: 0;
@@ -105,17 +106,7 @@
 }
 
 .answer-toolbar__artifact-spinner {
-  animation: answer-toolbar-artifact-spin 0.8s linear infinite;
-}
-
-@keyframes answer-toolbar-artifact-spin {
-  from {
-    transform: rotate(0deg);
-  }
-
-  to {
-    transform: rotate(360deg);
-  }
+  animation: wk-spin 0.8s linear infinite;
 }
 
 @keyframes artifact-toolbar-arrive {
@@ -147,7 +138,7 @@
   border-radius: 7px;
   background: var(--td-brand-color);
   color: var(--td-text-color-anti);
-  font-size: 10px;
+  font-size: var(--app-text-2xs);
   font-weight: 600;
   line-height: 1;
   font-variant-numeric: tabular-nums;
@@ -190,7 +181,7 @@
   padding-left: 9px;
   border-left: 1px solid var(--td-component-stroke);
   color: var(--td-text-color-placeholder);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   line-height: 18px;
   white-space: nowrap;
 
@@ -198,7 +189,7 @@
     flex: none;
     width: 14px;
     height: 14px;
-    font-size: 14px;
+    font-size: var(--app-text-base);
   }
 
   .answer-toolbar__follow-up-label {
@@ -256,7 +247,7 @@
   width: clamp(150px, 30vw, 260px);
   max-width: 100%;
   aspect-ratio: 4 / 3;
-  border-radius: 10px;
+  border-radius: var(--app-radius-lg);
   border: 1px solid rgba(175, 190, 210, 0.55);
   background: linear-gradient(
     145deg,

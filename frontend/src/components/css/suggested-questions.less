@@ -49,7 +49,7 @@
 }
 
 .suggested-questions-title {
-    font-size: 13px;
+    font-size: var(--app-text-md);
     color: var(--td-text-color-placeholder);
     font-weight: 400;
     letter-spacing: 0.01em;
@@ -64,14 +64,14 @@
     height: 20px;
     padding: 0;
     border: none;
-    border-radius: 6px;
+    border-radius: var(--app-radius-sm);
     background: transparent;
     color: var(--td-text-color-placeholder);
     cursor: pointer;
-    transition: color 0.2s @suggested-ease, background 0.2s @suggested-ease;
+    transition: color var(--app-motion-base) @suggested-ease, background var(--app-motion-base) @suggested-ease;
 
     :deep(.t-icon) {
-        font-size: 12px;
+        font-size: var(--app-text-sm);
     }
 
     &:hover:not(:disabled) {
@@ -90,17 +90,7 @@
 }
 
 .sq-refresh-spin {
-    animation: sq-refresh-rotate 0.8s linear infinite;
-}
-
-@keyframes sq-refresh-rotate {
-    from {
-        transform: rotate(0deg);
-    }
-
-    to {
-        transform: rotate(360deg);
-    }
+    animation: wk-spin 0.8s linear infinite;
 }
 
 .suggested-questions-grid {
@@ -121,13 +111,13 @@
     width: auto;
     box-sizing: border-box;
     padding: 8px 14px;
-    border-radius: 10px;
+    border-radius: var(--app-radius-lg);
     border: 1px solid var(--td-component-stroke);
     background: var(--td-bg-color-container);
     cursor: pointer;
     overflow: hidden;
     box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
-    transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+    transition: border-color var(--app-motion-base) ease, box-shadow var(--app-motion-base) ease, background var(--app-motion-base) ease;
 
     &:not(.sq-card-skeleton):hover {
         .suggestion-chip-hover();
@@ -179,7 +169,7 @@
     position: relative;
     flex: 0 1 auto;
     min-width: 0;
-    font-size: 13px;
+    font-size: var(--app-text-md);
     line-height: 1.5;
     color: var(--td-text-color-primary);
     overflow: hidden;
@@ -191,10 +181,10 @@
     position: relative;
     flex-shrink: 0;
     padding: 1px 6px;
-    border-radius: 6px;
+    border-radius: var(--app-radius-sm);
     border: none;
     background: var(--td-brand-color-light);
-    font-size: 10px;
+    font-size: var(--app-text-2xs);
     font-weight: 600;
     line-height: 1.6;
     letter-spacing: 0.04em;

@@ -112,6 +112,7 @@ func newTenantSandboxResolver(
 	loader sandbox.TenantSandboxConfigLoader,
 	redisClient *redis.Client,
 	sessionRepo interfaces.SessionRepository,
+	bootstrapper sandbox.SessionBootstrapper,
 ) sandbox.TenantSandboxResolver {
 	ctx := context.Background()
 
@@ -129,6 +130,7 @@ func newTenantSandboxResolver(
 		Loader:          loader,
 		Store:           store,
 		Checker:         sessionExistenceCheckerFor(sessionRepo),
+		Bootstrapper:    bootstrapper,
 		SharedTransport: sandbox.NewGuardedTransport(),
 	})
 	if err != nil {

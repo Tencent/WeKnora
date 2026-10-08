@@ -127,6 +127,7 @@ func TestResourceCatalogReleaseUnknownReference(t *testing.T) {
 // message history resolves it again on every call. Each resolution used to
 // insert a capability row; a live one must be reused instead.
 func TestResourceCatalogReusesLiveAccessGrant(t *testing.T) {
+	t.Setenv("SYSTEM_SIGNING_KEY", "")
 	t.Setenv("SYSTEM_AES_KEY", "weknora-test-aes-key-32bytes!!!")
 	catalog, db := newResourceCatalogForTest(t)
 	ctx := context.Background()
@@ -150,6 +151,7 @@ func TestResourceCatalogReusesLiveAccessGrant(t *testing.T) {
 
 // Two resources must never share a grant.
 func TestResourceCatalogGrantsArePerResource(t *testing.T) {
+	t.Setenv("SYSTEM_SIGNING_KEY", "")
 	t.Setenv("SYSTEM_AES_KEY", "weknora-test-aes-key-32bytes!!!")
 	catalog, _ := newResourceCatalogForTest(t)
 	ctx := context.Background()
@@ -168,6 +170,7 @@ func TestResourceCatalogGrantsArePerResource(t *testing.T) {
 // Revoking a grant must stick: the derived token would otherwise recompute to
 // the same value and a fresh insert would revive the access it just lost.
 func TestResourceCatalogDoesNotReviveRevokedGrant(t *testing.T) {
+	t.Setenv("SYSTEM_SIGNING_KEY", "")
 	t.Setenv("SYSTEM_AES_KEY", "weknora-test-aes-key-32bytes!!!")
 	catalog, db := newResourceCatalogForTest(t)
 	ctx := context.Background()
@@ -194,6 +197,7 @@ func TestResourceCatalogDoesNotReviveRevokedGrant(t *testing.T) {
 // Without a signing key the deployment cannot derive tokens, so grants stay
 // random and per-request — the behaviour before reuse existed.
 func TestResourceCatalogWithoutSigningKeyMintsFreshGrants(t *testing.T) {
+	t.Setenv("SYSTEM_SIGNING_KEY", "")
 	t.Setenv("SYSTEM_AES_KEY", "")
 	catalog, _ := newResourceCatalogForTest(t)
 	ctx := context.Background()

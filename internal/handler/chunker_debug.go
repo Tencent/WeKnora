@@ -13,6 +13,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/infrastructure/chunker"
+	"github.com/Tencent/WeKnora/internal/infrastructure/docparser"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/gin-gonic/gin"
 )
@@ -147,6 +148,7 @@ func PreviewChunking(c *gin.Context) {
 		return
 	}
 	text := chunker.NormalizeLineEndings(req.Text)
+	text = docparser.NormalizeHTMLTables(text)
 
 	cfg := chunker.NormalizeSplitterConfig(chunker.SplitterConfig{
 		ChunkSize:    req.ChunkingConfig.ChunkSize,

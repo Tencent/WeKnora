@@ -24,6 +24,7 @@ type IMChannel struct {
 	Enabled         bool           `json:"enabled"     gorm:"not null;default:true"`
 	Mode            string         `json:"mode"        gorm:"type:varchar(20);not null;default:'websocket'"`
 	OutputMode      string         `json:"output_mode"       gorm:"type:varchar(20);not null;default:'stream'"`
+	Locale          string         `json:"locale"            gorm:"type:varchar(16);not null;default:''"`
 	KnowledgeBaseID string         `json:"knowledge_base_id" gorm:"type:varchar(36);default:''"`
 	BotIdentity     string         `json:"bot_identity"      gorm:"type:varchar(255);not null;default:'';uniqueIndex:idx_im_channels_bot_identity,where:deleted_at IS NULL AND bot_identity != ''"`
 	SessionMode     string         `json:"session_mode"      gorm:"type:varchar(20);not null;default:'user'"`
@@ -49,6 +50,7 @@ type IMChannelSummary struct {
 	Enabled               bool      `json:"enabled"`
 	Mode                  string    `json:"mode"`
 	OutputMode            string    `json:"output_mode"`
+	Locale                string    `json:"locale"`
 	KnowledgeBaseID       string    `json:"knowledge_base_id"`
 	BotIdentity           string    `json:"bot_identity"`
 	SessionMode           string    `json:"session_mode"`
@@ -68,6 +70,7 @@ func SummarizeIMChannel(ch IMChannel) IMChannelSummary {
 		Enabled:               ch.Enabled,
 		Mode:                  ch.Mode,
 		OutputMode:            ch.OutputMode,
+		Locale:                ch.Locale,
 		KnowledgeBaseID:       ch.KnowledgeBaseID,
 		BotIdentity:           ch.BotIdentity,
 		SessionMode:           ch.SessionMode,
@@ -111,6 +114,9 @@ func (ch *IMChannel) BeforeCreate(tx *gorm.DB) error {
 	if err := ch.validateSessionMode(); err != nil {
 		return err
 	}
+	if err := ch.normalizeAndValidateLocale(); err != nil {
+		return err
+	}
 	ch.BotIdentity = ch.computeBotIdentity()
 	return nil
 }
@@ -124,8 +130,24 @@ func (ch *IMChannel) BeforeSave(tx *gorm.DB) error {
 	if err := ch.validateSessionMode(); err != nil {
 		return err
 	}
+	if err := ch.normalizeAndValidateLocale(); err != nil {
+		return err
+	}
 	ch.BotIdentity = ch.computeBotIdentity()
 	return nil
+}
+
+func (ch *IMChannel) normalizeAndValidateLocale() error {
+	locale := strings.TrimSpace(ch.Locale)
+	if locale == "" {
+		ch.Locale = ""
+		return nil
+	}
+	if normalized := types.NormalizeSupportedLocale(locale); normalized != "" {
+		ch.Locale = normalized
+		return nil
+	}
+	return fmt.Errorf("invalid locale: %s", locale)
 }
 
 // validateSessionMode checks that SessionMode holds a supported value.

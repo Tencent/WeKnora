@@ -64,6 +64,67 @@ func TestCubeRemoteClientListTemplatesRecognisesStandardByImage(t *testing.T) {
 	require.Equal(t, "tpl-other", templates[1].Name)
 }
 
+func TestCubeRemoteClientListTemplatesRecognisesDesktopByImage(t *testing.T) {
+	client := newCubeTemplateClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/snapshots" {
+			writeJSON(w, http.StatusOK, []map[string]any{})
+			return
+		}
+		require.Equal(t, "/templates", r.URL.Path)
+		writeJSON(w, http.StatusOK, []map[string]any{
+			{
+				"templateID": "tpl-cli",
+				"status":     "READY",
+				"imageInfo":  DefaultCubeTemplateImage,
+			},
+			{
+				"templateID": "tpl-desktop",
+				"status":     "READY",
+				"imageInfo":  DefaultCubeDesktopTemplateImage,
+			},
+		})
+	})
+
+	templates, err := client.ListTemplates(context.Background())
+	require.NoError(t, err)
+	require.Len(t, templates, 2)
+	require.True(t, templates[0].Standard)
+	require.False(t, templates[0].Desktop)
+	require.Equal(t, StandardTemplateName, templates[0].Name)
+	require.True(t, templates[1].Desktop)
+	require.False(t, templates[1].Standard)
+	require.Equal(t, DesktopTemplateName, templates[1].Name)
+}
+
+func TestCubeRemoteClientEnsureDesktopTemplateBuildsWhenAbsent(t *testing.T) {
+	var payload map[string]any
+	client := newCubeTemplateClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			writeJSON(w, http.StatusOK, []map[string]any{{
+				"templateID": "tpl-cli",
+				"status":     "READY",
+				"imageInfo":  DefaultCubeTemplateImage,
+				"name":       StandardTemplateName,
+			}})
+		case http.MethodPost:
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&payload))
+			writeJSON(w, http.StatusAccepted, map[string]any{
+				"templateID": "tpl-desk",
+				"status":     "PENDING",
+			})
+		}
+	})
+
+	template, err := client.EnsureDesktopTemplate(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, "tpl-desk", template.ID)
+	require.True(t, template.Desktop)
+	require.False(t, template.Standard)
+	require.Equal(t, DefaultCubeDesktopTemplateImage, payload["image"])
+	require.Equal(t, DesktopTemplateName, payload["name"])
+}
+
 func TestCubeRemoteClientListTemplatesMapsCatalogMetadata(t *testing.T) {
 	allowInternet := true
 	client := newCubeTemplateClient(t, cubeCatalogHandler(

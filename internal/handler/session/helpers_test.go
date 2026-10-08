@@ -79,6 +79,9 @@ func TestSearchResultFromMap_RoundTrip(t *testing.T) {
 		KnowledgeDescription: "desc",
 		KnowledgeBaseID:      "kb-1",
 		Metadata:             map[string]string{"page": "3"},
+		SourceLocators: types.SourceLocators{
+			{Type: types.SourceLocatorPDF, Page: 4, BBox: []float64{0.1, 0.2, 0.9, 0.3}, Quote: "q"},
+		},
 	}
 
 	raw, err := json.Marshal(original)
@@ -105,6 +108,7 @@ func TestSearchResultFromMap_RoundTrip(t *testing.T) {
 	assert.Equal(t, original.KnowledgeDescription, got.KnowledgeDescription)
 	assert.Equal(t, original.KnowledgeBaseID, got.KnowledgeBaseID)
 	assert.Equal(t, original.Metadata, got.Metadata)
+	assert.Equal(t, original.SourceLocators, got.SourceLocators)
 }
 
 func TestCreateAgentQueryEventIncludesPersistedTimestamps(t *testing.T) {

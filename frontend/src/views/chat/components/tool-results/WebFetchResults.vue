@@ -250,7 +250,7 @@ const indexKey = (index: number, item: WebFetchResultItem): string => {
 }
 
 .result-index {
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   font-weight: 600;
   color: var(--td-text-color-placeholder);
 }
@@ -260,10 +260,10 @@ const indexKey = (index: number, item: WebFetchResultItem): string => {
   align-items: center;
   gap: 4px;
   color: var(--td-text-color-primary);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   font-weight: 500;
   text-decoration: none;
-  transition: color 0.15s ease;
+  transition: color var(--app-motion-fast) ease;
 
   &:hover {
     color: var(--td-brand-color);
@@ -272,7 +272,7 @@ const indexKey = (index: number, item: WebFetchResultItem): string => {
 }
 
 .result-domain {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   font-weight: 500;
   color: var(--td-text-color-primary);
 }
@@ -281,13 +281,13 @@ const indexKey = (index: number, item: WebFetchResultItem): string => {
   display: inline-flex;
   align-items: center;
   padding: 2px 6px;
-  border-radius: 999px;
-  font-size: 10px;
+  border-radius: var(--app-radius-pill);
+  font-size: var(--app-text-2xs);
   font-weight: 600;
   line-height: 1.4;
 
   &.status-success {
-    background: rgba(7, 192, 95, 0.08);
+    background: color-mix(in srgb, var(--td-brand-color) 8%, transparent);
     color: var(--td-success-color);
   }
 
@@ -302,13 +302,13 @@ const indexKey = (index: number, item: WebFetchResultItem): string => {
   }
 
   &.method {
-    background: rgba(7, 192, 95, 0.08);
+    background: color-mix(in srgb, var(--td-brand-color) 8%, transparent);
     color: var(--td-success-color);
   }
 }
 
 .meta-text {
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   color: var(--td-text-color-secondary);
 }
 
@@ -326,7 +326,7 @@ const indexKey = (index: number, item: WebFetchResultItem): string => {
 }
 
 .raw-length {
-  font-size: 11px;
+  font-size: var(--app-text-xs);
   color: var(--td-text-color-placeholder);
   margin-left: 4px;
   font-weight: normal;

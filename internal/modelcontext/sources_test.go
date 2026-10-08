@@ -137,6 +137,10 @@ func TestEncodeMessagesCompactsCanonicalCitationsFromHistory(t *testing.T) {
 	require.Equal(t, `Knowledge <ref id="c1"/>; web <ref id="w1"/>`, encoded[0].Content)
 	require.NotContains(t, encoded[0].Content, "chunk-real")
 	require.NotContains(t, encoded[0].Content, "https://example.com")
+	require.Equal(t, " ", registry.ExpandText(`<ref id="c1"/> <ref id="w1"/>`), "history is not current evidence")
+	// A fresh retrieval promotes the same handles, retaining canonical metadata.
+	registry.RegisterChunk(ChunkReference{ChunkID: "chunk-real"})
+	registry.RegisterWeb("https://example.com/a?x=1&y=2", "")
 	require.Equal(t,
 		`<kb doc="A &amp; B.pdf" chunk_id="chunk-real" kb_id="kb-real" /> <web url="https://example.com/a?x=1&amp;y=2" title="Example &amp; More" />`,
 		registry.ExpandText(`<ref id="c1"/> <ref id="w1"/>`),
@@ -174,6 +178,8 @@ func TestEncodeMessagesMigratesLegacyToolHistoryAtReadTime(t *testing.T) {
 	require.Contains(t, encoded[1].Content, `knowledge_id="d1"`)
 	require.Contains(t, encoded[1].Content, `knowledge_base_id="b1"`)
 	require.Equal(t, `Legacy answer <ref id="c1"/>`, encoded[2].Content)
+	require.Empty(t, registry.ExpandText(`<ref id="c1"/>`), "legacy tool history does not authorize new citations")
+	registry.RegisterChunk(ChunkReference{ChunkID: "chunk-real"})
 	require.Equal(t,
 		`<kb doc="Legacy Doc" chunk_id="chunk-real" kb_id="kb-real" />`,
 		registry.ExpandText(`<ref id="c1"/>`),

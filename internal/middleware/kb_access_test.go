@@ -184,8 +184,8 @@ type guardOpts struct {
 
 // runGuard fires a single request through the guard and returns the
 // gin recorder + the kb access (if any) the guard stashed. Defaults
-// to EnableRBAC=true; the EnableRBAC=false fail-open path has its own
-// dedicated tests further below.
+// to EnableRBAC=true; the guard ignores the flag, which the EnableRBAC=false
+// tests further below pin down.
 func runGuard(
 	t *testing.T,
 	tenantID uint64,
@@ -504,9 +504,10 @@ func TestRequireKBAccess_AgentShare_SpecificAgent_TenantMismatch(t *testing.T) {
 
 // ---------- EnableRBAC=false rollout window ----------
 
-func TestRequireKBAccess_Forbidden_FailOpenWhenRBACDisabled(t *testing.T) {
-	// Same scenario as PermissionBelowMin (which aborts when enforcing),
-	// but with EnableRBAC=false the guard logs and passes through.
+func TestRequireKBAccess_Forbidden_EnforcedEvenWhenRBACDisabled(t *testing.T) {
+	// Same scenario as PermissionBelowMin. The EnableRBAC=false rollout
+	// window relaxes roles inside a workspace; it must not open another
+	// workspace's KB, since handlers behind this guard load by ID.
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -529,7 +530,7 @@ func TestRequireKBAccess_Forbidden_FailOpenWhenRBACDisabled(t *testing.T) {
 		cfgRBAC(false), // enforcement off
 	)
 	guard(c)
-	require.False(t, c.IsAborted(), "guard must pass through when EnableRBAC is off")
+	require.True(t, c.IsAborted(), "cross-workspace access stays denied when EnableRBAC is off")
 	_ = rec
 }
 

@@ -5,6 +5,9 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/Tencent/WeKnora/internal/application/service"
+	"github.com/Tencent/WeKnora/internal/sandbox"
 )
 
 func TestTerminalIdleExpired(t *testing.T) {
@@ -47,4 +50,17 @@ func TestTerminalAuthRecheckInterval(t *testing.T) {
 	require.GreaterOrEqual(t, terminalAuthRecheckInterval, time.Minute)
 	require.LessOrEqual(t, terminalAuthRecheckInterval, 2*time.Minute)
 	require.Equal(t, "AUTH_REVOKED", terminalErrAuth)
+}
+
+func TestTerminalErrorFrame(t *testing.T) {
+	t.Parallel()
+
+	code, _ := terminalErrorFrame(sandbox.ErrNoLiveSessionSandbox)
+	require.Equal(t, terminalErrNotBound, code)
+
+	code, _ = terminalErrorFrame(sandbox.ErrSandboxPaused)
+	require.Equal(t, terminalErrPaused, code)
+
+	code, _ = terminalErrorFrame(service.ErrTerminalUnsupported)
+	require.Equal(t, terminalErrUnsupported, code)
 }

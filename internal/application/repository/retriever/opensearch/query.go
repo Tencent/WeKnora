@@ -100,8 +100,9 @@ func (f *retrieveFilters) toBoolMust() []map[string]any {
 //
 // Applies `min_score` when threshold > 0. The OpenSearch k-NN plugin's
 // SpaceType.COSINESIMIL.scoreTranslation produces (1 + cos) / 2 ∈ [0, 1]
-// at the client, so the caller's Threshold value passes through to
-// min_score directly without further scaling.
+// at the client, while callers pass a cosine-similarity threshold (the
+// scale every other engine uses), so the threshold is mapped onto the
+// plugin's scale; wrapResults maps scores back.
 //
 // Signature returns ([]byte, error) so callers can propagate
 // json.Marshal failures (reachable for NaN / +/-Inf in embedding).
@@ -120,7 +121,7 @@ func buildKNNQuery(embedding []float32, topK int, threshold float64, f *retrieve
 		"query": map[string]any{"knn": knn},
 	}
 	if threshold > 0 {
-		body["min_score"] = threshold
+		body["min_score"] = cosineToKNNScore(threshold)
 	}
 	out, err := json.Marshal(body)
 	if err != nil {
@@ -151,4 +152,17 @@ func buildKeywordQuery(queryText string, topK int, threshold float64, f *retriev
 		return nil, fmt.Errorf("marshal keyword query: %w", err)
 	}
 	return out, nil
+}
+
+// cosineToKNNScore maps a cosine similarity onto the k-NN plugin's
+// cosinesimil score, (1 + cos) / 2.
+func cosineToKNNScore(cos float64) float64 {
+	return (1 + cos) / 2
+}
+
+// knnScoreToCosine inverts cosineToKNNScore. Vector scores leave the driver
+// as cosine similarity so they compare with the other engines' scores and
+// with thresholds; the raw (1 + cos) / 2 put a 0.5 threshold at cos >= 0.
+func knnScoreToCosine(score float64) float64 {
+	return 2*score - 1
 }

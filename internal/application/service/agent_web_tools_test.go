@@ -21,7 +21,7 @@ func TestAgentWebToolsFollowRuntimeSwitch(t *testing.T) {
 			_, err := registry.GetTool(name)
 			assert.Equal(t, enabled, err == nil, name)
 		}
-		assert.NotContains(t, registry.ListTools(), tools.ToolKnowledgeSearch)
-		assert.NotContains(t, registry.ListTools(), tools.ToolGrepChunks)
+		assert.NotContains(t, registry.ListTools(), tools.ToolSearchKnowledge)
+		assert.NotContains(t, registry.ListTools(), tools.ToolReadDocument)
 	}
 }

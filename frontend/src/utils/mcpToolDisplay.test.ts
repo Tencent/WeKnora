@@ -6,6 +6,15 @@ import { getAgentToolIconName } from './agent-tool-icons'
 
 const t = ((key: string, params?: Record<string, unknown>) => `${key}${params?.name ? ` ${params.name}` : ''}`) as ComposerTranslation
 
+test('server rows prefer usage instructions and retain legacy descriptions', () => {
+  const rows = mcpDiscoveryRows({ mode: 'list_servers', servers: [
+    { name: 'new', usage_instructions: 'Query logs', description: 'Old description' },
+    { name: 'legacy', description: 'Legacy instructions' },
+  ] })
+  assert.equal(rows[0]?.description, 'Query logs')
+  assert.equal(rows[1]?.description, 'Legacy instructions')
+})
+
 test('MCP proxies have dedicated renderers and icons', () => {
   assert.equal(getMcpToolDisplayType('discover_mcp_tools'), 'mcp_discovery')
   assert.equal(getMcpToolDisplayType('call_mcp_tool'), 'mcp_call')

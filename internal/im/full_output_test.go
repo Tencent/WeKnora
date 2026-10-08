@@ -95,6 +95,7 @@ type fullOutputAdapter struct {
 	plainContent string
 	startErr     error
 	finalizeErr  error
+	endErr       error
 	sendErr      error
 }
 
@@ -152,7 +153,7 @@ func (a *fullOutputAdapter) EndStream(ctx context.Context, _ *IncomingMessage, _
 		return err
 	}
 	a.order.add("end")
-	return nil
+	return a.endErr
 }
 
 type fullOutputNoProgressAdapter struct {

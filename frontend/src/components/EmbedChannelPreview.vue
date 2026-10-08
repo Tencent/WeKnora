@@ -116,8 +116,8 @@ watch(() => props.visible, async (open) => {
   flex-shrink: 0;
   margin: 0;
   padding: 10px 12px;
-  border-radius: 8px;
-  font-size: 13px;
+  border-radius: var(--app-radius-md);
+  font-size: var(--app-text-md);
   line-height: 1.55;
   color: var(--td-text-color-secondary);
   background: var(--td-bg-color-secondarycontainer);
@@ -130,7 +130,7 @@ watch(() => props.visible, async (open) => {
   display: flex;
   flex-direction: column;
   border: 1px solid var(--td-component-stroke);
-  border-radius: 12px;
+  border-radius: var(--app-radius-xl);
   overflow: hidden;
   background: var(--td-bg-color-container);
   box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
@@ -167,8 +167,8 @@ watch(() => props.visible, async (open) => {
     flex: 1;
     margin-left: 8px;
     padding: 4px 10px;
-    border-radius: 6px;
-    font-size: 12px;
+    border-radius: var(--app-radius-sm);
+    font-size: var(--app-text-sm);
     color: var(--td-text-color-placeholder);
     background: var(--td-bg-color-container);
     overflow: hidden;
@@ -199,7 +199,7 @@ watch(() => props.visible, async (open) => {
   flex: 1;
   min-height: 480px;
   border: 1px solid var(--td-component-stroke);
-  border-radius: 12px;
+  border-radius: var(--app-radius-xl);
   overflow: hidden;
   background: linear-gradient(180deg, #f8fafc 0%, #eef2f7 100%);
   box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
@@ -209,7 +209,7 @@ watch(() => props.visible, async (open) => {
   padding: 28px 32px;
 
   &__title {
-    font-size: 14px;
+    font-size: var(--app-text-base);
     font-weight: 600;
     color: var(--td-text-color-placeholder);
     margin-bottom: 16px;
@@ -238,11 +238,11 @@ watch(() => props.visible, async (open) => {
   border: none;
   border-radius: 50%;
   color: #fff;
-  font-size: 20px;
+  font-size: var(--app-text-3xl);
   cursor: pointer;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
   z-index: 3;
-  transition: transform 0.15s ease;
+  transition: transform var(--app-motion-fast) ease;
 
   &:hover {
     transform: scale(1.04);
@@ -255,7 +255,7 @@ watch(() => props.visible, async (open) => {
   max-width: calc(100% - 32px);
   height: 500px;
   max-height: calc(100% - 88px);
-  border-radius: 12px;
+  border-radius: var(--app-radius-xl);
   overflow: hidden;
   background: #fff;
   box-shadow: 0 12px 40px rgba(15, 23, 42, 0.18);

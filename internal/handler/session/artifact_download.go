@@ -9,11 +9,9 @@ import (
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/application/access"
-	filesvc "github.com/Tencent/WeKnora/internal/application/service/file"
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/filetransport"
 	"github.com/Tencent/WeKnora/internal/logger"
-	"github.com/Tencent/WeKnora/internal/storageurl"
 	"github.com/Tencent/WeKnora/internal/types"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/gin-gonic/gin"
@@ -46,6 +44,10 @@ func paramSessionID(c *gin.Context) string {
 // session; it does NOT return the storage URL (only names/sizes/mtimes), so
 // clients cannot reach around the download endpoint by reading a
 // provider:// path from the API response.
+//
+// Deleted artifacts are skipped but still consume their index: the index IS the
+// download address, so renumbering around a tombstone would point old links at
+// the wrong file.
 func (h *Handler) ListSessionArtifacts(c *gin.Context) {
 	ctx := c.Request.Context()
 	sessionID := secutils.SanitizeForLog(paramSessionID(c))
@@ -74,6 +76,9 @@ func (h *Handler) ListSessionArtifacts(c *gin.Context) {
 
 	items := make([]artifactListItem, 0, len(artifacts))
 	for i, a := range artifacts {
+		if a.Deleted() {
+			continue
+		}
 		items = append(items, artifactListItem{
 			Index:      i,
 			Handle:     artifactHandle(a),
@@ -126,6 +131,9 @@ func (h *Handler) ListMessageArtifacts(c *gin.Context) {
 
 	items := make([]artifactListItem, 0, len(msg.Artifacts))
 	for i, a := range msg.Artifacts {
+		if a.Deleted() {
+			continue
+		}
 		items = append(items, artifactListItem{
 			Index:      i,
 			Handle:     artifactHandle(a),
@@ -187,6 +195,10 @@ func (h *Handler) DownloadMessageArtifact(c *gin.Context) {
 		return
 	}
 	artifact := msg.Artifacts[index]
+	if artifact.Deleted() {
+		_ = c.Error(errors.NewNotFoundError("artifact deleted"))
+		return
+	}
 	if artifact.URL == "" {
 		_ = c.Error(errors.NewNotFoundError("artifact storage path missing"))
 		return
@@ -202,36 +214,12 @@ func (h *Handler) DownloadMessageArtifact(c *gin.Context) {
 		_ = c.Error(errors.NewNotFoundError("artifact not accessible"))
 		return
 	}
-	ctx = types.WithExecutionTenant(ctx, file.OwnerTenantID)
-	fileService := h.fileService
-	if h.tenantService != nil {
-		tenant, lookupErr := h.tenantService.GetTenantByID(ctx, file.OwnerTenantID)
-		if lookupErr != nil || tenant == nil {
-			_ = c.Error(errors.NewNotFoundError("artifact workspace unavailable"))
-			return
-		}
-		backendID, providerPath, scoped := types.ParseStorageBackendPath(file.Path)
-		if !scoped {
-			providerPath = file.Path
-		}
-		if file.StorageBackendID != "" {
-			backendID = file.StorageBackendID
-		}
-		var ok bool
-		fileService, _, ok = filesvc.ResolveTenantFileServiceWithFallback(
-			ctx,
-			"artifact download",
-			tenant,
-			backendID,
-			types.ParseProviderScheme(providerPath),
-			storageurl.LocalStorageBaseDir(),
-			h.storageResolver,
-			h.fileService,
-		)
-		if !ok {
-			_ = c.Error(errors.NewNotFoundError("artifact storage unavailable"))
-			return
-		}
+	fileService, ctx, ok := h.resolveArtifactFileService(
+		ctx, file.OwnerTenantID, file.Path, file.StorageBackendID, "artifact download",
+	)
+	if !ok {
+		_ = c.Error(errors.NewNotFoundError("artifact storage unavailable"))
+		return
 	}
 	reader, err := fileService.GetFile(ctx, file.Path)
 	if err != nil {

@@ -3,6 +3,7 @@ package service
 import (
 	"encoding/json"
 	"testing"
+	"time"
 
 	agenttools "github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/models/chat"
@@ -152,7 +153,7 @@ func TestBuildAssistantHistoryMessages_ToolCallsExpandIntoOpenAIShape(t *testing
 				ToolCalls: []types.ToolCall{
 					{
 						ID:   "call_1",
-						Name: agenttools.ToolKnowledgeSearch,
+						Name: agenttools.ToolSearchKnowledge,
 						Args: map[string]interface{}{"query": "foo"},
 						Result: &types.ToolResult{
 							Success: true,
@@ -186,7 +187,7 @@ func TestBuildAssistantHistoryMessages_ToolCallsExpandIntoOpenAIShape(t *testing
 	assert.Equal(t, "Let me search.", got[0].Content)
 	if assert.Len(t, got[0].ToolCalls, 1) {
 		assert.Equal(t, "call_1", got[0].ToolCalls[0].ID)
-		assert.Equal(t, agenttools.ToolKnowledgeSearch, got[0].ToolCalls[0].Function.Name)
+		assert.Equal(t, agenttools.ToolSearchKnowledge, got[0].ToolCalls[0].Function.Name)
 		assert.Contains(t, got[0].ToolCalls[0].Function.Arguments, "foo")
 	}
 	// 2. tool result paired with the call ID
@@ -213,7 +214,7 @@ func TestBuildAssistantHistoryMessages_SkipsPipelineTimelineToolCalls(t *testing
 				ToolCalls: []types.ToolCall{
 					{
 						ID:     types.PipelineToolCallIDPrefix + "abc",
-						Name:   agenttools.ToolKnowledgeSearch,
+						Name:   agenttools.ToolSearchKnowledge,
 						Args:   map[string]interface{}{"query": "你好"},
 						Result: &types.ToolResult{Success: true, Output: "未检索到相关内容"},
 					},
@@ -244,7 +245,7 @@ func TestBuildAssistantHistoryMessages_ToolFailureSurfacesAsError(t *testing.T) 
 				ToolCalls: []types.ToolCall{
 					{
 						ID:   "call_err",
-						Name: agenttools.ToolKnowledgeSearch,
+						Name: agenttools.ToolSearchKnowledge,
 						Args: map[string]interface{}{"query": "x"},
 						Result: &types.ToolResult{
 							Success: false,
@@ -263,7 +264,7 @@ func TestBuildAssistantHistoryMessages_ToolFailureSurfacesAsError(t *testing.T) 
 		Role:       "tool",
 		Content:    "Error: kb unreachable",
 		ToolCallID: "call_err",
-		Name:       agenttools.ToolKnowledgeSearch,
+		Name:       agenttools.ToolSearchKnowledge,
 	}, got[1])
 }
 
@@ -303,17 +304,107 @@ func TestBuildAssistantHistoryMessages_SkillScriptFailureKeepsStdout(t *testing.
 	assert.Contains(t, got[1].Content, "Error: Script exited with code 1")
 }
 
+// A steered turn has more than one user message: the original question plus
+// whatever the user injected while the agent was working, all sharing the
+// run's request ID. Replaying only one of them would hand the next turn a
+// conversation that never happened — typically losing the original question,
+// since the injected message is the newer row.
+func TestBuildTurnBodyMessages_KeepsMidRunUsersInPlace(t *testing.T) {
+	firstStep := time.Date(2026, 9, 4, 10, 0, 0, 0, time.UTC)
+	secondStep := firstStep.Add(2 * time.Minute)
+
+	assistant := &types.Message{
+		Role:    "assistant",
+		Content: "Both are covered in the guide.",
+		AgentSteps: types.AgentSteps{
+			{
+				Iteration: 0,
+				Thought:   "Search for A.",
+				Timestamp: firstStep,
+				ToolCalls: []types.ToolCall{{
+					ID:     "call_a",
+					Name:   agenttools.ToolSearchKnowledge,
+					Args:   map[string]interface{}{"query": "A"},
+					Result: &types.ToolResult{Success: true, Output: "found A"},
+				}},
+			},
+			{
+				Iteration: 1,
+				Thought:   "Now search for B.",
+				Timestamp: secondStep,
+				ToolCalls: []types.ToolCall{{
+					ID:     "call_b",
+					Name:   agenttools.ToolSearchKnowledge,
+					Args:   map[string]interface{}{"query": "B"},
+					Result: &types.ToolResult{Success: true, Output: "found B"},
+				}},
+			},
+		},
+	}
+	midRun := []*types.Message{{
+		Role:      "user",
+		Content:   "also check B",
+		CreatedAt: firstStep.Add(time.Minute),
+	}}
+
+	got := buildTurnBodyMessages(assistant, midRun)
+	require.Len(t, got, 6)
+
+	assert.Equal(t, "assistant", got[0].Role)
+	assert.Equal(t, "tool", got[1].Role)
+	assert.Equal(t, "found A", got[1].Content)
+
+	// The injected message belongs between the round it interrupted and the
+	// round it caused, not bolted onto either end.
+	assert.Equal(t, chat.Message{Role: "user", Content: types.SteerMessageContent("also check B")}, got[2])
+
+	assert.Equal(t, "assistant", got[3].Role)
+	assert.Equal(t, "tool", got[4].Role)
+	assert.Equal(t, "found B", got[4].Content)
+	assert.Equal(t, chat.Message{Role: "assistant", Content: "Both are covered in the guide."}, got[5])
+}
+
+// A message injected after the last tool round still has to appear before the
+// answer, or the turn reads as if the agent answered a question it was never
+// asked.
+func TestBuildTurnBodyMessages_LateMidRunUserPrecedesAnswer(t *testing.T) {
+	step := time.Date(2026, 9, 4, 10, 0, 0, 0, time.UTC)
+	assistant := &types.Message{
+		Role:    "assistant",
+		Content: "Here you go.",
+		AgentSteps: types.AgentSteps{{
+			Iteration: 0,
+			Timestamp: step,
+			ToolCalls: []types.ToolCall{{
+				ID:     "call_a",
+				Name:   agenttools.ToolSearchKnowledge,
+				Result: &types.ToolResult{Success: true, Output: "found"},
+			}},
+		}},
+	}
+	midRun := []*types.Message{{
+		Role:      "user",
+		Content:   "and keep it short",
+		CreatedAt: step.Add(time.Minute),
+	}}
+
+	got := buildTurnBodyMessages(assistant, midRun)
+	require.Len(t, got, 4)
+	assert.Equal(t, chat.Message{Role: "user", Content: types.SteerMessageContent("and keep it short")}, got[2])
+	assert.Equal(t, chat.Message{Role: "assistant", Content: "Here you go."}, got[3])
+}
+
 // TestFilterNonTerminalToolCalls confirms a legacy final_answer entry is
 // dropped — every other tool (KB search, web search, MCP tools…) must survive.
 func TestFilterNonTerminalToolCalls(t *testing.T) {
 	in := []types.ToolCall{
-		{Name: agenttools.ToolKnowledgeSearch},
+		{Name: agenttools.ToolSearchKnowledge},
 		{Name: "final_answer"},
 		{Name: agenttools.ToolWebSearch},
 	}
 	out := filterNonTerminalToolCalls(in)
 	if assert.Len(t, out, 2) {
-		assert.Equal(t, agenttools.ToolKnowledgeSearch, out[0].Name)
+		assert.Equal(t, agenttools.ToolSearchKnowledge, out[0].Name)
 		assert.Equal(t, agenttools.ToolWebSearch, out[1].Name)
 	}
 }
@@ -333,7 +424,7 @@ func TestBuildAssistantHistoryMessages_ReplaysReasoningContent(t *testing.T) {
 				ReasoningContent: "model's chain of thought",
 				ToolCalls: []types.ToolCall{{
 					ID:               "call_1",
-					Name:             agenttools.ToolKnowledgeSearch,
+					Name:             agenttools.ToolSearchKnowledge,
 					Args:             map[string]interface{}{"query": "foo"},
 					ProviderMetadata: types.ToolCallMetadata{"google": json.RawMessage(`{"thought_signature":"gemini-history-signature"}`)},
 					Result: &types.ToolResult{
@@ -359,6 +450,78 @@ func TestBuildAssistantHistoryMessages_ReplaysReasoningContent(t *testing.T) {
 	assert.Empty(t, got[2].ReasoningContent)
 }
 
+// TestBuildAssistantHistoryMessages_ReplaysFinalAnswerReasoning covers the
+// common shape the tool-round replay missed: a turn that ends with a plain
+// answer and no tool calls.
+//
+// The engine records that closing round as an ordinary step, artifacts and
+// all, but buildAgentStepMessages emits nothing for a step without tool calls,
+// so everything the provider needs back — the OpenAI Responses encrypted
+// reasoning items, a DeepSeek/MiMo reasoning_content, an Anthropic thinking
+// signature — used to end at the turn boundary.
+func TestBuildAssistantHistoryMessages_ReplaysFinalAnswerReasoning(t *testing.T) {
+	items := json.RawMessage(`[{"type":"reasoning","id":"rs_1","encrypted_content":"opaque"}]`)
+	msg := &types.Message{
+		Role:    "assistant",
+		Content: "<think>leaked</think>The answer is 42.",
+		AgentSteps: types.AgentSteps{
+			{
+				Iteration:          0,
+				Thought:            "The answer is 42.",
+				ReasoningContent:   "checking the arithmetic",
+				ReasoningSignature: "sig-1",
+				ReasoningMetadata:  types.ProviderMetadata{"openai_responses_reasoning": items},
+			},
+		},
+	}
+	got := buildAssistantHistoryMessages(msg)
+	require.Len(t, got, 1)
+	assert.Equal(t, "assistant", got[0].Role)
+	// The think tags stay out of the visible answer; the artifacts ride in
+	// their own fields, which is where the providers read them.
+	assert.Equal(t, "The answer is 42.", got[0].Content)
+	assert.Equal(t, "checking the arithmetic", got[0].ReasoningContent)
+	assert.Equal(t, "sig-1", got[0].ReasoningSignature)
+	assert.JSONEq(t, string(items), string(got[0].ReasoningMetadata["openai_responses_reasoning"]))
+}
+
+// TestBuildAssistantHistoryMessages_FinalAnswerDoesNotDuplicateReasoning pins
+// the other half: artifacts buildAgentStepMessages already replayed must not be
+// repeated on the final message. A round that issued tool calls, and a round
+// whose text was already emitted as an intermediate answer, both carry their
+// own assistant message.
+func TestBuildAssistantHistoryMessages_FinalAnswerDoesNotDuplicateReasoning(t *testing.T) {
+	toolRound := types.AgentStep{
+		Thought:          "Let me search.",
+		ReasoningContent: "tool round thinking",
+		ToolCalls: []types.ToolCall{{
+			ID:     "call_1",
+			Name:   agenttools.ToolSearchKnowledge,
+			Args:   map[string]interface{}{"query": "foo"},
+			Result: &types.ToolResult{Success: true, Output: "doc A"},
+		}},
+	}
+	withTools := buildAssistantHistoryMessages(&types.Message{
+		Role: "assistant", Content: "Found it.", AgentSteps: types.AgentSteps{toolRound},
+	})
+	require.Len(t, withTools, 3)
+	assert.Equal(t, "tool round thinking", withTools[0].ReasoningContent)
+	assert.Empty(t, withTools[2].ReasoningContent, "the tool round already replayed its own artifacts")
+
+	steered := buildAssistantHistoryMessages(&types.Message{
+		Role: "assistant", Content: "Shorter answer.",
+		AgentSteps: types.AgentSteps{{
+			Thought:            "Long answer.",
+			IntermediateAnswer: true,
+			ReasoningContent:   "intermediate round thinking",
+		}},
+	})
+	require.Len(t, steered, 2)
+	assert.Equal(t, "intermediate round thinking", steered[0].ReasoningContent)
+	assert.Empty(t, steered[1].ReasoningContent,
+		"the intermediate answer already carries this step's artifacts")
+}
+
 func TestMCPProxyHistoryRetainsProtocolCallAndTarget(t *testing.T) {
 	msg := &types.Message{Role: "assistant", AgentSteps: types.AgentSteps{{ToolCalls: []types.ToolCall{{
 		ID: "proxy-id", Name: "call_mcp_tool",
@@ -382,4 +545,28 @@ func TestMCPProxyHistoryRetainsProtocolCallAndTarget(t *testing.T) {
 	require.Equal(t, "call_mcp_tool", history[0].ToolCalls[0].Function.Name)
 	require.Contains(t, history[0].ToolCalls[0].Function.Arguments, "tool_ref")
 	require.Equal(t, "proxy-id", history[1].ToolCallID)
+}
+
+func TestBuildTurnBodyMessages_ReplaysExplicitBoundariesAndIntermediateAnswers(t *testing.T) {
+	// Identical (and deliberately misleading) timestamps must not move updates
+	// ahead of work the model already did. IDs, not text, distinguish repeats.
+	now := time.Now()
+	users := []*types.Message{
+		{ID: "u2", Content: "revise", CreatedAt: now},
+		{ID: "u1", Content: "revise", CreatedAt: now},
+	}
+	assistant := &types.Message{Content: "final", AgentSteps: types.AgentSteps{
+		{Thought: "first draft", IntermediateAnswer: true, Timestamp: now.Add(time.Second)},
+		{Thought: "second draft", IntermediateAnswer: true, UserMessagesBefore: []string{"u1"}},
+		{Thought: "final", UserMessagesBefore: []string{"u2"}},
+	}}
+	got := buildTurnBodyMessages(assistant, users)
+	require.Len(t, got, 5)
+	assert.Equal(t, []chat.Message{
+		{Role: "assistant", Content: "first draft"},
+		{Role: "user", Content: types.SteerMessageContent("revise")},
+		{Role: "assistant", Content: "second draft"},
+		{Role: "user", Content: types.SteerMessageContent("revise")},
+		{Role: "assistant", Content: "final"},
+	}, got)
 }

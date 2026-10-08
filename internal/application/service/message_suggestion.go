@@ -243,7 +243,7 @@ func (s *messageSuggestionService) ValidateAttribution(
 	}
 	found := false
 	for _, question := range set.Questions {
-		if question.ID == attribution.QuestionID && strings.TrimSpace(question.Text) == strings.TrimSpace(query) {
+		if question.ID == attribution.QuestionID && queryMatchesSuggestionText(query, question.Text) {
 			found = true
 			break
 		}
@@ -252,6 +252,35 @@ func (s *messageSuggestionService) ValidateAttribution(
 		return errors.New("invalid suggestion attribution")
 	}
 	return nil
+}
+
+const hostContextQueryMarker = "[Host context]\n"
+
+// queryMatchesSuggestionText reports whether query is the clicked suggestion.
+// Embed chat may prefix a host-context envelope. Context values may contain
+// newlines; the question after the envelope must still be the suggestion text.
+func queryMatchesSuggestionText(query, suggestion string) bool {
+	q := strings.TrimSpace(query)
+	s := strings.TrimSpace(suggestion)
+	if q == s {
+		return true
+	}
+	return s != "" && queryHasHostContextEnvelope(q, s)
+}
+
+// queryHasHostContextEnvelope matches the embed prefix from buildQueryWithHostContext.
+// Context values may contain newlines, so the suggestion text anchors the split:
+// the envelope must end immediately before that text.
+func queryHasHostContextEnvelope(query, suggestion string) bool {
+	rest, ok := strings.CutPrefix(query, hostContextQueryMarker)
+	if !ok || !strings.HasSuffix(rest, suggestion) {
+		return false
+	}
+	head := strings.TrimRight(strings.TrimSuffix(rest, suggestion), " \t")
+	if !strings.HasSuffix(head, "\n\n") {
+		return false
+	}
+	return strings.TrimSpace(strings.TrimSuffix(head, "\n\n")) != ""
 }
 
 func (s *messageSuggestionService) generate(
@@ -346,7 +375,7 @@ func (s *messageSuggestionService) generateWithModel(
 
 	modelCtx := ctx
 	if message.AgentTenantID != 0 {
-		modelCtx = context.WithValue(modelCtx, types.TenantIDContextKey, message.AgentTenantID)
+		modelCtx = types.WithExecutionTenant(modelCtx, message.AgentTenantID)
 	}
 	chatModel, err := s.modelService.GetChatModel(modelCtx, modelID)
 	if err != nil {
@@ -379,6 +408,11 @@ func (s *messageSuggestionService) generateWithModel(
 		return nil, types.TokenUsage{}, err
 	}
 	items, err := parseGeneratedSuggestions(response.Content, config.Categories, count)
+	if err == nil {
+		// The system prompt already asks the model not to repeat prior user
+		// questions, but that is guidance the model does not always honour.
+		items = filterSuggestionItemsAgainstQuery(items, generationContext.CurrentQuery)
+	}
 	return items, response.Usage, err
 }
 
@@ -413,7 +447,11 @@ func (s *messageSuggestionService) generateFromKnowledge(
 	}
 	knowledgeCtx := ctx
 	if message.AgentTenantID != 0 {
-		knowledgeCtx = context.WithValue(knowledgeCtx, types.TenantIDContextKey, message.AgentTenantID)
+		// WithExecutionTenant pins the caller before moving execution into the
+		// agent's workspace; a bare tenant rewrite would make a context without
+		// a captured caller read as that workspace, passing every permission
+		// check on its documents.
+		knowledgeCtx = types.WithExecutionTenant(knowledgeCtx, message.AgentTenantID)
 	}
 	poolSize := count * 5
 	if poolSize < 10 {
@@ -465,7 +503,18 @@ func (s *messageSuggestionService) generateFromKnowledge(
 	items := make(types.SuggestionItems, 0, len(candidates))
 	for _, candidate := range candidates {
 		text := strings.TrimSpace(candidate.Question)
-		if text == "" {
+		// The knowledge path never reaches the model, so the "do not repeat
+		// prior user questions" system-prompt rule cannot apply here. Worse,
+		// rankKnowledgeSuggestions ranks candidates against a context that
+		// starts with CurrentQuery and IsContentContained adds +1, so a
+		// candidate identical to the question just asked is actively promoted
+		// to the top of the knowledge pool.
+		// Typical trigger: the user asks "介绍一下X" while X has an
+		// entity/summary wiki page, which wikiSuggestionFromPage turns into
+		// the very same "介绍一下X".
+		// Skip via continue rather than filtering afterwards so that later
+		// candidates can backfill and the configured count is preserved.
+		if text == "" || suggestionMatchesQuery(text, generationContext.CurrentQuery) {
 			continue
 		}
 		item := types.SuggestionItem{
@@ -910,6 +959,36 @@ func mergeHybridSuggestionItems(model, knowledge types.SuggestionItems, limit in
 	appendFrom(model, -1)
 	appendFrom(knowledge, -1)
 	return result
+}
+
+// filterSuggestionItemsAgainstQuery drops suggestions that are, after
+// normalization, exactly the question the user just asked.
+// Only exact matches are removed, deliberately: a similarity threshold would
+// also kill legitimate follow-ups about the same entity, which is precisely
+// what the feature exists for.
+func filterSuggestionItemsAgainstQuery(
+	items types.SuggestionItems,
+	currentQuery string,
+) types.SuggestionItems {
+	if normalizeSuggestionText(currentQuery) == "" {
+		return items
+	}
+	filtered := make(types.SuggestionItems, 0, len(items))
+	for _, item := range items {
+		if suggestionMatchesQuery(item.Text, currentQuery) {
+			continue
+		}
+		filtered = append(filtered, item)
+	}
+	return filtered
+}
+
+// suggestionMatchesQuery reports whether a candidate is the current question.
+// It reuses normalizeSuggestionText so punctuation, whitespace and case
+// variants ("Tell me about Foo?" vs "tell me about foo") are caught too.
+func suggestionMatchesQuery(value, currentQuery string) bool {
+	queryKey := normalizeSuggestionText(currentQuery)
+	return queryKey != "" && normalizeSuggestionText(value) == queryKey
 }
 
 func normalizeSuggestionText(value string) string {

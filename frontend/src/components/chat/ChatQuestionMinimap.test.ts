@@ -15,8 +15,8 @@ test('opens a following preview card to the right of the left-side rail', () => 
   assert.match(component, /question-minimap__question/)
   assert.match(component, /question-minimap__answer/)
   assert.doesNotMatch(component, /question-minimap__kicker/)
-  assert.match(component, /CLOSE_DELAY_MS = 150/)
-  assert.match(component, /left: `\$\{RAIL_INSET_PX\}px`/)
+  assert.match(component, /CLOSE_DELAY_MS = 180/)
+  assert.match(component, /left: var\(--chat-content-inset, 20px\)/)
   assert.match(component, /top: `\$\{peakYPx\}px`/)
   assert.doesNotMatch(component, /flex-direction: row-reverse/)
   assert.doesNotMatch(component, /right: `\$\{scrollbarGutterPx \+ RAIL_INSET_PX\}px`/)
@@ -32,7 +32,6 @@ test('grows nearby ticks into a mountain under the pointer', () => {
 test('centers the rail in the thread instead of stretching top to bottom', () => {
   assert.match(component, /top: 50%/)
   assert.match(component, /transform: translateY\(-50%\)/)
-  assert.match(component, /RAIL_INSET_PX = 0/)
   assert.match(component, /height: `\$\{trackHeight\}px`/)
   assert.doesNotMatch(component, /inset-block: 0/)
   assert.doesNotMatch(component, /align-self: flex-start/)
@@ -66,7 +65,6 @@ test('keeps scroll-driven active question changes from clobbering keyboard navig
 
 test('does not draw a second scrollbar thumb next to the native scrollbar', () => {
   assert.doesNotMatch(component, /question-minimap__viewport/)
-  assert.match(component, /RAIL_INSET_PX = 0/)
   assert.match(component, /scrollbar-width: none/)
 })
 
@@ -76,13 +74,15 @@ test('does not paint the first question green on hover-open', () => {
   assert.doesNotMatch(component, /question-minimap__row:hover,\s*\.question-minimap__row--active/)
 })
 
-test('highlights the matching tick for the peaked question', () => {
+test('highlights visible messages without losing them when previewing another tick', () => {
   assert.match(component, /peakId/)
-  assert.match(component, /tick\.id === peakId/)
+  assert.match(component, /visibleIds\.has\(tick\.id\)/)
+  assert.doesNotMatch(component, /ids\.add\(peakId/)
+  assert.match(composable, /visibleMessageIds\(measured, el\.scrollTop, el\.clientHeight, bottomInset\)/)
 })
 
 test('keeps the preview card at 13px instead of inheriting the chat 20px type', () => {
-  assert.match(component, /font-size: 13px/)
+  assert.match(component, /font-size: (?:13px|var\(--app-text-md\))/)
   assert.doesNotMatch(component, /font: inherit/)
   assert.match(component, /--td-text-color-primary/)
 })

@@ -175,11 +175,12 @@ func isResourceNotFound(err error) bool {
 //   - OrgRoleAdmin  -> share-management routes (only the original
 //     sharer / KB owner / Org admin should pass)
 //
-// When cfg.Tenant.EnableRBAC is false the guard mirrors the sibling
-// role/ownership guards: it logs the would-be rejection and lets the
-// request through. The point is to keep the rollout window safe — the
-// guard runs full enforcement once the flag flips on, with no code
-// changes elsewhere.
+// The EnableRBAC rollout switch does not apply here. It relaxes the role
+// checks inside a workspace, while ResolveKB always grants a KB's own
+// workspace, so a denial from it means another workspace's KB without a
+// share. Handlers behind this guard load KBs, chunks and wiki pages by ID
+// without a tenant filter, so letting a denial through would lift
+// workspace isolation for the whole rollout window.
 func RequireKBAccess(
 	resolveKBID KBIDResolver,
 	requiredPermission types.OrgMemberRole,
@@ -204,38 +205,17 @@ func RequireKBAccess(
 			return
 		}
 
-		// Rollout window: enforcement off -> log the would-be check and
-		// pass through. We still resolve the KB (best-effort) so the
-		// effective-tenant context rewrite still happens for shared
-		// KBs; that way embedding queries hit the right tenant
-		// regardless of whether RBAC enforcement is active.
-		enforcing := rbacEnforcementEnabled(cfg)
-
 		grant, err := resolveKBAccess(ctx, c, kbID, requiredPermission, kbService, kbShareService, agentShareService)
 		switch {
 		case stderrors.Is(err, access.ErrUnauthorized):
-			if !enforcing {
-				logger.Warnf(ctx, "[rbac] kb-access would 401 (enforcement off): kb=%s", kbID)
-				c.Next()
-				return
-			}
 			_ = c.Error(apperrors.NewUnauthorizedError("Unauthorized"))
 			c.Abort()
 			return
 		case stderrors.Is(err, access.ErrNotFound):
-			// 404 still fires when enforcement is off — a missing KB is
-			// not an authorisation event, the client genuinely asked
-			// for nothing.
 			_ = c.Error(apperrors.NewNotFoundError("knowledge base not found"))
 			c.Abort()
 			return
 		case stderrors.Is(err, access.ErrForbidden):
-			if !enforcing {
-				logger.Warnf(ctx, "[rbac] kb-access would 403 (enforcement off): kb=%s required=%s",
-					kbID, requiredPermission)
-				c.Next()
-				return
-			}
 			_ = c.Error(apperrors.NewForbiddenError("Permission denied to access this knowledge base"))
 			c.Abort()
 			return

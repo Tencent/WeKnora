@@ -95,19 +95,55 @@ func ResolveKBFile(
 	return file, nil
 }
 
+// artifactRefState says whether a reference names one of this message's
+// artifacts, and if so whether the user has deleted it.
+type artifactRefState int
+
+const (
+	artifactRefNone artifactRefState = iota
+	artifactRefLive
+	artifactRefDeleted
+)
+
+// artifactReferenceState resolves a reference against the message's artifacts.
+// A live row anywhere in the list wins over a tombstone: the same file can be
+// attached twice at different positions, and one of them still being there
+// means the message really does still offer it.
+func artifactReferenceState(message *types.Message, reference string) artifactRefState {
+	state := artifactRefNone
+	for _, artifact := range message.Artifacts {
+		if artifact.URL != reference {
+			continue
+		}
+		if !artifact.Deleted() {
+			return artifactRefLive
+		}
+		state = artifactRefDeleted
+	}
+	return state
+}
+
 // MessageReferencesFile examines only persisted rendering/output fields. Tool
 // arguments and request metadata are not evidence of a returned file.
 func MessageReferencesFile(message *types.Message, reference string) bool {
 	if message == nil {
 		return false
 	}
-	if types.ContainsStorageReference(message.Content, reference) {
+	// Artifacts are checked before the answer text, and a deleted one is a hard
+	// no. Deleting a generated file does not rewrite the answer that produced
+	// it, so its `resource://` handle is still sitting in message.Content; if
+	// the text were consulted first, the message-scoped file proxy would keep
+	// serving a file the user deleted — including to a shared-agent visitor,
+	// and including the case where the bytes survived because a knowledge entry
+	// still holds them. Those other owners have their own access paths.
+	switch artifactReferenceState(message, reference) {
+	case artifactRefDeleted:
+		return false
+	case artifactRefLive:
 		return true
 	}
-	for _, artifact := range message.Artifacts {
-		if artifact.URL == reference {
-			return true
-		}
+	if types.ContainsStorageReference(message.Content, reference) {
+		return true
 	}
 	for _, value := range []interface{}{message.KnowledgeReferences, message.Images} {
 		data, _ := json.Marshal(value)
@@ -240,6 +276,11 @@ func ResolveMessageArtifact(ctx context.Context, message *types.Message, index i
 		return FileAccess{}, ErrNotFound
 	}
 	artifact := message.Artifacts[index]
+	// Tombstones keep their slot so the indices of later artifacts stay put;
+	// they are not downloadable through any path, shared or owned.
+	if artifact.Deleted() {
+		return FileAccess{}, ErrNotFound
+	}
 	file, resource, err := resolveFile(ctx, catalog, artifact.URL)
 	if err != nil {
 		return FileAccess{}, err
