@@ -93,7 +93,8 @@ func (r *ImageVectorRepository) Ensure(ctx context.Context, job *types.ImageVect
 		Where(`fingerprint <> ? OR reason IN ('configuration_changed','source_removed')
  OR NOT EXISTS (SELECT 1 FROM chunks s WHERE s.id = image_vector_jobs.source_chunk_id AND s.deleted_at IS NULL)
  OR (status = 'completed' AND NOT EXISTS (SELECT 1 FROM chunks c
- WHERE c.id = image_vector_jobs.chunk_id AND c.deleted_at IS NULL AND c.status = ?))`, job.Fingerprint,
+ WHERE c.id = image_vector_jobs.chunk_id AND c.deleted_at IS NULL
+ AND c.is_enabled = TRUE AND c.status = ?))`, job.Fingerprint,
 			types.ChunkStatusIndexed).
 		Updates(map[string]any{
 			"fingerprint": job.Fingerprint, "source_chunk_id": job.SourceChunkID,
@@ -157,7 +158,8 @@ func (r *ImageVectorRepository) Coverage(
 	err := r.db.WithContext(ctx).Table("(?) AS s", source).
 		Joins("LEFT JOIN image_vector_jobs j ON j.tenant_id = ? AND j.knowledge_base_id = ? "+
 			"AND j.knowledge_id = s.knowledge_id AND j.image_url = s.image_key", tenant, kb).
-		Joins("LEFT JOIN chunks c ON c.id = j.chunk_id AND c.deleted_at IS NULL AND c.status = ?",
+		Joins("LEFT JOIN chunks c ON c.id = j.chunk_id AND c.deleted_at IS NULL "+
+			"AND c.is_enabled = TRUE AND c.status = ?",
 			types.ChunkStatusIndexed).
 		Select(state+" AS state, COUNT(*) AS count", fingerprint, time.Now()).Group("state").Scan(&counts).Error
 	if err != nil {
@@ -195,7 +197,13 @@ func (r *ImageVectorRepository) SaveVectorChunk(
 		var old types.Chunk
 		err := tx.Unscoped().First(&old, "id = ?", chunk.ID).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return NewChunkRepository(tx).CreateChunks(ctx, []*types.Chunk{chunk})
+			enabled := chunk.IsEnabled
+			if err := NewChunkRepository(tx).CreateChunks(ctx, []*types.Chunk{chunk}); err != nil {
+				return err
+			}
+			// GORM applies default:true on insert even when a bool is false.
+			chunk.IsEnabled = enabled
+			return tx.Model(&types.Chunk{}).Where("id = ?", chunk.ID).Update("is_enabled", enabled).Error
 		}
 		if err != nil {
 			return err
@@ -212,9 +220,9 @@ func (r *ImageVectorRepository) SaveVectorChunk(
 func (r *ImageVectorRepository) RefreshMetadata(
 	ctx context.Context, tenant uint64, kb, knowledge string, info types.ImageInfo,
 ) error {
-	key := info.OriginalURL
+	key := info.URL
 	if key == "" {
-		key = info.URL
+		key = info.OriginalURL
 	}
 	raw, err := json.Marshal([]types.ImageInfo{info})
 	if err != nil {

@@ -66,18 +66,20 @@ func TestImageVectorJobsLeaseReplayAndSourceRemoval(t *testing.T) {
 		chunk := &types.Chunk{
 			ID: job.ChunkID, TenantID: 1, KnowledgeID: job.KnowledgeID, KnowledgeBaseID: fx.kbID,
 			ChunkType: types.ChunkTypeImageVector, ImageInfo: source.ImageInfo,
-			IsEnabled: true, Status: int(types.ChunkStatusIndexed),
+			IsEnabled: false, Status: int(types.ChunkStatusIndexed),
 			CreatedAt: time.Now(), UpdatedAt: time.Now(),
 		}
 		require.NoError(t, jobs.SaveVectorChunk(ctx, job, chunk))
 
 		require.NoError(t, jobs.RefreshMetadata(ctx, 1, fx.kbID, source.KnowledgeID, types.ImageInfo{
-			URL: "resource://original", OriginalURL: "resource://original", Caption: "late caption",
+			URL: "resource://original", OriginalURL: "resource://before-transform", Caption: "late caption",
 		}))
 		var refreshed types.Chunk
 		require.NoError(t, db.First(&refreshed, "id = ?", job.ChunkID).Error)
 		require.Equal(t, "late caption", refreshed.Content)
+		require.False(t, refreshed.IsEnabled, "unfinished vectors stay disabled until the store write completes")
 		require.Equal(t, chunk.SeqID, refreshed.SeqID)
+		require.NoError(t, db.Model(&types.Chunk{}).Where("id = ?", job.ChunkID).Update("is_enabled", true).Error)
 		require.NoError(t, jobs.Finish(ctx, job, "worker-c", "completed", ""))
 		queued, err = jobs.Ensure(ctx, job)
 		require.NoError(t, err)
