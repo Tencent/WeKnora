@@ -1,0 +1,45 @@
+.mobile-settings-back { display: none; }
+@media (max-width: 767px) {
+:root body .settings-modal-shell .nav-item { min-height: 44px; }
+:root body .settings-modal-shell.settings-overlay { padding: 0; }
+:root body .settings-modal-shell .settings-modal { width: 100%; max-width: none; height: 100dvh; max-height: var(--app-viewport-height, 100dvh); border-radius: 0; }
+:root body .settings-modal-shell .settings-sidebar { width: 100%; border: 0; }
+:root body .settings-modal-shell .sidebar-header { padding-right: 60px; padding-top: max(16px, env(safe-area-inset-top)); }
+:root body .settings-modal-shell .settings-content { display: none; }
+:root body .settings-modal-shell.mobile-settings-detail .settings-sidebar { display: none; }
+:root body .settings-modal-shell.mobile-settings-detail .settings-content { display: flex; padding-top: calc(52px + env(safe-area-inset-top)); }
+:root body .settings-modal-shell .mobile-settings-back { display: flex; align-items: center; gap: 4px; position: absolute; top: env(safe-area-inset-top); left: 8px; min-height: 44px; z-index: 11; border: 0; background: transparent; color: var(--td-text-color-primary); }
+:root body .settings-modal-shell .close-btn { top: env(safe-area-inset-top); right: 8px; width: 44px; height: 44px; }
+:root body .settings-modal-shell .content-wrapper { padding: 16px; width: 100%; box-sizing: border-box; }
+:root body .settings-modal-shell .settings-footer { padding: 12px 16px max(12px, env(safe-area-inset-bottom)); flex-wrap: wrap; gap: 8px; }
+:root body .settings-modal-shell .settings-footer-actions { flex-wrap: wrap; }
+:root body .settings-modal-shell .t-form__item { flex-wrap: wrap; }
+:root body .settings-modal-shell .t-form__label { width: 100% !important; text-align: left; padding: 0 0 6px; }
+:root body .settings-modal-shell .t-form__controls { margin-left: 0 !important; width: 100%; min-width: 0; }
+:root body .settings-modal-shell .t-input, :root body .settings-modal-shell .t-select { max-width: 100%; }
+:root body .settings-modal-shell .t-table { max-width: 100%; overflow-x: auto; }
+:root body .settings-modal-shell .nav-item { width: 100%; text-align: left; border: 0; font: inherit; }
+}
+@media (max-width: 767px) {
+:root body .settings-modal-shell .nav-item { cursor: pointer; }
+}
+@media (max-width: 767px) {
+:root body .settings-modal-shell .setting-row { flex-direction: column; align-items: stretch; gap: 12px; }
+:root body .settings-modal-shell .setting-info, :root body .settings-modal-shell .setting-control { max-width: 100%; width: 100%; }
+:root body .settings-modal-shell .text-control-group, :root body .settings-modal-shell .relation-item { flex-wrap: wrap; }
+:root body .settings-modal-shell .text-control-group > * { max-width: 100%; }
+}
+@media (max-width: 767px) {
+:root body .setting-drawer__footer { flex-wrap: wrap; gap: 8px; }
+:root body .setting-drawer__footer-right { flex-wrap: wrap; }
+:root body .setting-drawer__header-text { min-width: 0; }
+:root body .setting-drawer__title { overflow-wrap: anywhere; }
+:root body .model-type-options { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 767px) {
+:root body .settings-modal-shell .section-content { min-width: 0; }
+}
+@media (max-width: 767px) {
+:root body .custom-header-row { flex-wrap: wrap; }
+:root body .custom-header-row > * { min-width: 0; }
+}
