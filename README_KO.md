@@ -60,7 +60,7 @@ https://github.com/user-attachments/assets/5722b10d-d04d-49ed-a6cc-635a8c77d91f
 - **메모리와 지식 정리**: 크로스 세션 장기 메모리가 사용자가 확인한 프로필, 선호, 사실을 보관합니다. 폴더 업로드는 원래 디렉터리 구조를 유지하고, 검색 청크는 편집·비교·롤백할 수 있습니다.
 - **데이터 소스와 포맷**: Feishu 지식베이스 / Feishu 클라우드 드라이브 / Confluence / GitLab / Tencent IMA / Notion / Yuque / DingTalk Docs / Seafile / RSS 자동 동기화(지속 확장 중). PDF, Word, 이미지, Excel, XMind 등 10가지 이상의 포맷을 지원하며, Office 문서는 anydoc으로 프로세스 내 파싱합니다.
 - **채널과 연동**: WeChat Work, Feishu, Slack, Telegram 등 IM에서 바로 Q&A, 웹사이트 임베드 Widget으로 외부 사이트에 에이전트 게시, 내장 MCP Server로 Cursor·Claude 등 AI 도구와 연결, 범위 지정 API 키와 Principal 모델로 프로그램 연동.
-- **모델**: 27개 내장 벤더와 자동 생성 모델 카탈로그. OpenAI, DeepSeek, Qwen(Alibaba Cloud), Zhipu, Hunyuan, Gemini, MiniMax, NVIDIA, LiteLLM, Ollama 등을 지원합니다.
+- **모델**: 29개 내장 벤더와 자동 생성 모델 카탈로그. OpenAI, DeepSeek, Qwen(Alibaba Cloud), Zhipu, Hunyuan, Gemini, MiniMax, NVIDIA, LiteLLM, Ollama 등을 지원합니다.
 - **권한과 운영**: 멀티 워크스페이스 RBAC(4단계 역할, 리소스 소유권, 워크스페이스 감사 로그), 워크스페이스별 다중 스토리지 인스턴스, 런타임 작업 큐 대시보드와 Worker 풀 거버넌스, Langfuse를 통한 Agent 단계·토큰 사용량·파이프라인 추적.
 - **배포**: LLM, 벡터 데이터베이스, 스토리지 백엔드를 모두 교체할 수 있습니다. 로컬이나 프라이빗 클라우드에 배포해 데이터를 자체 환경에 둘 수 있습니다.
 
@@ -323,7 +323,7 @@ docker compose up -d    # 새 이미지로 컨테이너 재생성
 
 | 구성 요소 | 선택지 |
 |-----------|--------|
-| [LLM](https://weknora.weixin.qq.com/docs/03-features/06-models) | 27개 내장 벤더. OpenAI / Azure OpenAI / Anthropic / DeepSeek / Qwen (Alibaba Cloud) / Zhipu / Hunyuan / Doubao (Volcengine) / Gemini / MiniMax / NVIDIA / SiliconFlow / OpenRouter / LiteLLM / Ollama 등 |
+| [LLM](https://weknora.weixin.qq.com/docs/03-features/06-models) | 29개 내장 벤더. OpenAI / Azure OpenAI / Anthropic / DeepSeek / Qwen (Alibaba Cloud) / Zhipu / Hunyuan / Doubao (Volcengine) / Gemini / MiniMax / NVIDIA / SiliconFlow / OpenRouter / LiteLLM / Ollama 등 |
 | Embedding | Ollama / BGE / GTE / Zhipu / OpenAI 호환 API |
 | 벡터 DB | PostgreSQL (pgvector) / Elasticsearch / OpenSearch / Milvus / Weaviate / Qdrant / Apache Doris / Tencent VectorDB |
 | [오브젝트 스토리지](https://weknora.weixin.qq.com/docs/03-features/19-storage-backends) | 로컬 / Tencent Cloud COS / MinIO / AWS S3 / Volcengine TOS / Alibaba Cloud OSS / Kingsoft Cloud KS3 / Huawei Cloud OBS |
