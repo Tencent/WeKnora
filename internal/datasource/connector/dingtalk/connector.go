@@ -136,13 +136,18 @@ func (c *Connector) Validate(ctx context.Context, dataSourceConfig *types.DataSo
 		if rootNodeID == "" {
 			continue
 		}
-		document, found, exhausted, err := firstValidateDocument(ctx, api, rootNodeID, &listings)
+		document, found, unexplored, err := firstValidateDocument(ctx, api, rootNodeID, &listings)
 		if err != nil {
 			lastErr = fmt.Errorf("workspace %q: %w", item.Name, err)
+			// A cancelled or timed-out request proves nothing about the
+			// credentials, so it must never fall through to acceptance.
+			if ctx.Err() != nil || isContextError(err) {
+				return fmt.Errorf("validate DingTalk data source: %w", lastErr)
+			}
 			workspaceFail++
 			continue
 		}
-		if exhausted {
+		if unexplored {
 			inconclusive = true
 		}
 		if !found {
@@ -152,6 +157,9 @@ func (c *Connector) Validate(ctx context.Context, dataSourceConfig *types.DataSo
 		probes++
 		if err := verifyDocument(ctx, api, document); err != nil {
 			lastErr = fmt.Errorf("workspace %q document %q: %w", item.Name, document.Name, err)
+			if ctx.Err() != nil || isContextError(err) {
+				return fmt.Errorf("validate DingTalk data source: %w", lastErr)
+			}
 		} else {
 			return nil
 		}
@@ -159,8 +167,9 @@ func (c *Connector) Validate(ctx context.Context, dataSourceConfig *types.DataSo
 			break
 		}
 	}
-	// Folders were left unexplored when the listing budget ran out, so an
-	// unreadable document elsewhere does not prove the data source is unusable.
+	// Folders were left unexplored, because the listing budget ran out or a
+	// folder could not be listed, so an unreadable document elsewhere does not
+	// prove the data source is unusable.
 	if inconclusive {
 		return nil
 	}
@@ -178,43 +187,69 @@ func (c *Connector) Validate(ctx context.Context, dataSourceConfig *types.DataSo
 	return fmt.Errorf("validate DingTalk data source: %w", lastErr)
 }
 
-// maxValidateListings caps the folder listings Validate spends looking for a
-// document below workspace roots that hold only folders.
+// maxValidateListings caps the node listing pages Validate requests while
+// looking for a document, shared by all workspaces. Each page is one HTTP
+// request of up to 50 nodes, and only the first page of each workspace root is
+// outside the budget, so the walk issues at most
+// len(workspaces) + maxValidateListings node listing requests (plus the
+// client's retries of each).
 const maxValidateListings = 20
 
+// validateListing is one node listing page still to be requested.
+type validateListing struct {
+	parent    string
+	pageToken string
+}
+
 // firstValidateDocument walks a workspace breadth-first, the way scanWorkspace
-// does, and returns the first document it finds. exhausted reports that the
-// listing budget ran out with folders still unexplored.
+// does, and returns the first document it finds. It requests one page at a
+// time instead of listing whole folders, so the budget bounds real requests.
+// unexplored reports that some nodes were never seen, because the budget ran
+// out or a folder could not be listed, so the walk cannot prove the workspace
+// holds no readable document.
 func firstValidateDocument(
 	ctx context.Context, api dingTalkAPI, rootNodeID string, listings *int,
-) (node, bool, bool, error) {
-	queue := []string{rootNodeID}
+) (document node, found, unexplored bool, err error) {
+	queue := []validateListing{{parent: rootNodeID}}
+	visited := map[string]struct{}{rootNodeID: {}}
 	for len(queue) > 0 {
-		parent := queue[0]
+		listing := queue[0]
 		queue = queue[1:]
-		if parent != rootNodeID {
+		rootPage := listing.parent == rootNodeID && listing.pageToken == ""
+		if !rootPage {
 			if *listings >= maxValidateListings {
 				return node{}, false, true, nil
 			}
 			*listings++
 		}
-		children, err := api.listNodes(ctx, parent)
-		if err != nil {
-			if parent == rootNodeID {
-				return node{}, false, false, err
+		children, next, listErr := api.listNodesPage(ctx, listing.parent, listing.pageToken)
+		if listErr != nil {
+			if rootPage || ctx.Err() != nil || isContextError(listErr) {
+				return node{}, false, false, listErr
 			}
+			// The documents this operator can read may live in exactly this
+			// folder, so its failure leaves the walk inconclusive rather than
+			// treating the folder as empty.
+			unexplored = true
 			continue
 		}
 		for _, child := range children {
 			if child.isDocument() {
-				return child, true, false, nil
+				return child, true, unexplored, nil
 			}
 			if child.isFolder() || child.HasChildren {
-				queue = append(queue, child.ID)
+				if _, seen := visited[child.ID]; seen {
+					continue
+				}
+				visited[child.ID] = struct{}{}
+				queue = append(queue, validateListing{parent: child.ID})
 			}
 		}
+		if next != "" {
+			queue = append(queue, validateListing{parent: listing.parent, pageToken: next})
+		}
 	}
-	return node{}, false, false, nil
+	return node{}, false, unexplored, nil
 }
 
 // verifyDocument proves one visible document is readable by calling the read

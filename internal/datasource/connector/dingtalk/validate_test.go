@@ -5,7 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -229,15 +233,35 @@ func TestValidateCapsProbesWhenEveryDocumentIsUnreadable(t *testing.T) {
 	}
 }
 
-// listCountingAPI counts listNodes calls so tests can bound the folder walk.
+// listCountingAPI counts node listing calls so tests can bound the folder walk.
+// Past limit, when set, every listing fails, so a walk that never terminates
+// shows up as a failed assertion instead of a hung test.
 type listCountingAPI struct {
 	*fakeAPI
 	listCalls int
+	limit     int
+}
+
+func (a *listCountingAPI) count() error {
+	a.listCalls++
+	if a.limit > 0 && a.listCalls > a.limit {
+		return errors.New("listing limit exceeded")
+	}
+	return nil
 }
 
 func (a *listCountingAPI) listNodes(ctx context.Context, parentID string) ([]node, error) {
-	a.listCalls++
+	if err := a.count(); err != nil {
+		return nil, err
+	}
 	return a.fakeAPI.listNodes(ctx, parentID)
+}
+
+func (a *listCountingAPI) listNodesPage(ctx context.Context, parentID, pageToken string) ([]node, string, error) {
+	if err := a.count(); err != nil {
+		return nil, "", err
+	}
+	return a.fakeAPI.listNodesPage(ctx, parentID, pageToken)
 }
 
 // A workspace whose root holds only folders can still hold readable documents
@@ -327,5 +351,203 @@ func TestValidateCapsFolderListingsAndAcceptsWhenInconclusive(t *testing.T) {
 	// Each workspace root is listed once on top of the shared folder budget.
 	if limit := maxValidateListings + len(inner.workspaces); api.listCalls > limit {
 		t.Fatalf("Validate made %d listings, want at most %d", api.listCalls, limit)
+	}
+}
+
+// A folder that cannot be listed may be exactly where the operator's readable
+// documents live, so it must not be treated as empty: an unreadable document
+// in another workspace then proves nothing, whichever order they are listed in.
+func TestValidateTreatsUnlistableFolderAsInconclusive(t *testing.T) {
+	team := workspace{ID: "team", RootNodeID: "root-team", Name: "Team"}
+	other := workspace{ID: "other", RootNodeID: "root-other", Name: "Other"}
+	for _, order := range [][]workspace{{team, other}, {other, team}} {
+		api := &fakeAPI{
+			workspaces: order,
+			nodes: map[string][]node{
+				"root-team": {
+					{ID: "folder", Name: "Folder", Type: "FOLDER"},
+				},
+				"root-other": {
+					{ID: "doc-other", Name: "Secret", Type: "FILE", Category: "ALIDOC", Extension: "adoc"},
+				},
+			},
+			nodeErrors: map[string]error{"folder": errors.New("DingTalk API status=500")},
+			blockErrors: map[string]error{
+				"doc-other": errors.New("forbidden.accessDenied: the operator has no permission"),
+			},
+		}
+
+		c := testConnector(api)
+		if err := c.Validate(context.Background(), testConfig()); err != nil {
+			t.Fatalf("Validate with workspace %s first must accept when a folder could not be listed, got: %v",
+				order[0].Name, err)
+		}
+	}
+}
+
+// A cancelled or timed-out listing proves nothing about the credentials, so
+// Validate must report it instead of accepting the data source, including when
+// an earlier workspace already left the walk inconclusive.
+func TestValidateReturnsContextErrorsFromTheFolderWalk(t *testing.T) {
+	t.Run("subfolder listing times out", func(t *testing.T) {
+		api := &fakeAPI{
+			workspaces: []workspace{{ID: "team", RootNodeID: "root-team", Name: "Team"}},
+			nodes: map[string][]node{
+				"root-team": {{ID: "folder", Name: "Folder", Type: "FOLDER"}},
+			},
+			nodeErrors: map[string]error{"folder": context.DeadlineExceeded},
+		}
+		err := testConnector(api).Validate(context.Background(), testConfig())
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("Validate must return the timeout, got: %v", err)
+		}
+	})
+	t.Run("root listing cancelled after an inconclusive workspace", func(t *testing.T) {
+		api := &fakeAPI{
+			workspaces: []workspace{
+				{ID: "team", RootNodeID: "root-team", Name: "Team"},
+				{ID: "late", RootNodeID: "root-late", Name: "Late"},
+			},
+			nodes: map[string][]node{
+				"root-team": {{ID: "folder", Name: "Folder", Type: "FOLDER"}},
+			},
+			nodeErrors: map[string]error{
+				"folder":    errors.New("DingTalk API status=500"),
+				"root-late": context.Canceled,
+			},
+		}
+		err := testConnector(api).Validate(context.Background(), testConfig())
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("Validate must return the cancellation, got: %v", err)
+		}
+	})
+	t.Run("document probe times out after an inconclusive workspace", func(t *testing.T) {
+		api := &fakeAPI{
+			workspaces: []workspace{
+				{ID: "team", RootNodeID: "root-team", Name: "Team"},
+				{ID: "other", RootNodeID: "root-other", Name: "Other"},
+			},
+			nodes: map[string][]node{
+				"root-team": {{ID: "folder", Name: "Folder", Type: "FOLDER"}},
+				"root-other": {
+					{ID: "doc-other", Name: "Doc", Type: "FILE", Category: "ALIDOC", Extension: "adoc"},
+				},
+			},
+			nodeErrors:  map[string]error{"folder": errors.New("DingTalk API status=500")},
+			blockErrors: map[string]error{"doc-other": context.DeadlineExceeded},
+		}
+		err := testConnector(api).Validate(context.Background(), testConfig())
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("Validate must return the timeout, got: %v", err)
+		}
+	})
+}
+
+// DingTalk can list a folder, or the workspace root itself, among a node's
+// children. The walk must list each folder once instead of repeating the same
+// listings until the request is cancelled.
+func TestValidateFolderWalkSurvivesCycles(t *testing.T) {
+	inner := &fakeAPI{
+		workspaces: []workspace{
+			{ID: "loop", RootNodeID: "root-loop", Name: "Loop"},
+			{ID: "locked", RootNodeID: "root-locked", Name: "Locked"},
+		},
+		nodes: map[string][]node{
+			"root-loop": {
+				{ID: "root-loop", Name: "Self", Type: "FOLDER"},
+				{ID: "folder", Name: "Folder", Type: "FOLDER"},
+			},
+			"folder": {
+				{ID: "root-loop", Name: "Parent", Type: "FOLDER"},
+				{ID: "folder", Name: "Self", Type: "FOLDER"},
+			},
+			"root-locked": {
+				{ID: "doc-locked", Name: "Secret", Type: "FILE", Category: "ALIDOC", Extension: "adoc"},
+			},
+		},
+		blockErrors: map[string]error{
+			"doc-locked": errors.New("forbidden.accessDenied: the operator has no permission"),
+		},
+	}
+	api := &listCountingAPI{fakeAPI: inner, limit: 100}
+
+	err := testConnector(api).Validate(context.Background(), testConfig())
+	// root-loop, folder and root-locked are each listed exactly once.
+	if api.listCalls != 3 {
+		t.Fatalf("Validate made %d listings, want 3", api.listCalls)
+	}
+	// Every folder was explored, so the unreadable document is conclusive.
+	if err == nil || !strings.Contains(err.Error(), `document "Secret"`) {
+		t.Fatalf("Validate must report the unreadable document, got: %v", err)
+	}
+}
+
+// The listing budget must bound real HTTP requests: a folder can hold
+// thousands of nodes served 50 per page, and listing it whole would turn one
+// budget unit into hundreds of serial requests.
+func TestValidateBudgetCountsNodeListingPages(t *testing.T) {
+	const folderPages = 200
+	cases := []struct {
+		name         string
+		documentPage int // folder page holding a readable document; 0 for none
+		wantRequests int
+	}{
+		{name: "no document", wantRequests: 1 + maxValidateListings},
+		{name: "document on third page", documentPage: 3, wantRequests: 1 + 3},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var mu sync.Mutex
+			nodeRequests, blockRequests := 0, 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				switch {
+				case r.URL.Path == "/v1.0/oauth2/accessToken":
+					_, _ = w.Write([]byte(`{"accessToken":"token","expireIn":7200}`))
+				case r.URL.Path == "/v2.0/wiki/workspaces":
+					_, _ = w.Write([]byte(`{"workspaces":[{"workspaceId":"a","rootNodeId":"root-a","name":"A"}]}`))
+				case r.URL.Path == "/v2.0/wiki/nodes":
+					mu.Lock()
+					nodeRequests++
+					mu.Unlock()
+					if r.URL.Query().Get("parentNodeId") == "root-a" {
+						_, _ = w.Write([]byte(`{"nodes":[{"nodeId":"folder","type":"FOLDER"}]}`))
+						return
+					}
+					page, _ := strconv.Atoi(r.URL.Query().Get("nextToken"))
+					page++
+					item := fmt.Sprintf(`{"nodeId":"pdf-%d","type":"FILE","category":"FILE","extension":"pdf"}`, page)
+					if page == tc.documentPage {
+						item = `{"nodeId":"doc","name":"Doc","type":"FILE","category":"ALIDOC","extension":"adoc"}`
+					}
+					next := ""
+					if page < folderPages {
+						next = strconv.Itoa(page)
+					}
+					_, _ = fmt.Fprintf(w, `{"nodes":[%s],"nextToken":%q}`, item, next)
+				case strings.HasPrefix(r.URL.Path, "/v1.0/doc/suites/documents/"):
+					mu.Lock()
+					blockRequests++
+					mu.Unlock()
+					_, _ = w.Write([]byte(`{"success":true,"result":{"data":[{"blockType":"paragraph"}]}}`))
+				default:
+					http.NotFound(w, r)
+				}
+			}))
+			defer server.Close()
+
+			c := testConnector(testClient(server))
+			if err := c.Validate(context.Background(), testConfig()); err != nil {
+				t.Fatalf("Validate must accept, got: %v", err)
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			if nodeRequests != tc.wantRequests {
+				t.Fatalf("Validate made %d node listing requests, want %d", nodeRequests, tc.wantRequests)
+			}
+			if wantBlocks := min(tc.documentPage, 1); blockRequests != wantBlocks {
+				t.Fatalf("Validate made %d document probes, want %d", blockRequests, wantBlocks)
+			}
+		})
 	}
 }
