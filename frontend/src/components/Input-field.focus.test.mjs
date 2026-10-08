@@ -17,6 +17,7 @@ for (const mode of ['normal', 'embedded', 'after', 'inject']) {
       blur: () => { throw new Error('sending must not blur the textarea') },
     }
     const context = {
+      draftOptions: { value: {} },
       props: { isReplying: ['after', 'inject'].includes(mode), canSteer: true, embeddedMode: mode === 'embedded' },
       uploadedAttachments: { value: [] }, uploadedImages: { value: [] },
       allSelectedItems: { value: [] }, selectedModelId: { value: 'model' },

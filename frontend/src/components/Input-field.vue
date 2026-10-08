@@ -57,6 +57,7 @@ import { SKILL_ICON, type MentionItem, type MentionItemType, type MentionRequest
 import { toolboxLocation } from '@/config/toolbox';
 import { supportedLevels, levelLabelKey, levelFromLegacy, clampLevel, type ReasoningLevel } from '@/utils/reasoningEffort';
 
+const draftOptions = ref<SendMessageOptions>({});
 const route = useRoute();
 const router = useRouter();
 const settingsStore = useSettingsStore();
@@ -2015,6 +2016,7 @@ const createSession = async (
   delivery: 'inject' | 'after' = 'after',
   options: SendMessageOptions = {},
 ) => {
+  options = { ...draftOptions.value, ...options };
   if (props.composerLocked) {
     return;
   }
@@ -2359,6 +2361,7 @@ const clearvalue = () => {
   // otherwise TDesign's autosize will call getComputedStyle on a non-Element.
   if (!getTextareaEl()) return;
   query.value = "";
+  draftOptions.value = {};
 }
 
 // Drop any pending images/attachments and stop their status polling. Used when
@@ -2679,7 +2682,8 @@ defineExpose({
    * the user lands on the branch with the original question ready to edit —
    * the whole point of branching at a user message.
    */
-  prefill(text: string) {
+  prefill(text: string, options: SendMessageOptions = {}) {
+    draftOptions.value = options;
     query.value = text;
   }
 });

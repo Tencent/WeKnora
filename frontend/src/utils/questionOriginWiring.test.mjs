@@ -24,7 +24,7 @@ test('the composer forwards send options from triggerSend to send-msg', () => {
 test('pages pass the origin through the send instead of shared pending state', () => {
   for (const [name, source] of [['creatChat.vue', homePage], ['chat/index.vue', chatPage]]) {
     assert.doesNotMatch(source, /pendingQuestionOrigin/, `${name} must not keep a pending origin`)
-    assert.match(source, /triggerSend\(item\.question, \{ questionOrigin: questionOriginFromSuggestion\(item\) \}\)|triggerSend\(item\.question, options\)/, name)
+    assert.match(source, /(?:triggerSend|prefill)\(item\.question, \{ questionOrigin: questionOriginFromSuggestion\(item\) \}\)|triggerSend\(item\.question, options\)/, name)
   }
   assert.match(homePage, /changeFirstQuery\([^)]*options\.questionOrigin \?\? null\)/)
   assert.match(chatPage, /@send-msg="\([^"]*options\) => sendMsg\([^"]*options\)"/)

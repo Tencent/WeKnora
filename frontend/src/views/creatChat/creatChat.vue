@@ -32,13 +32,13 @@
                             </p>
                         </div>
                         <div class="suggested-questions-grid">
-                            <div v-for="(item, index) in suggestedQuestions" :key="item.question"
+                            <button type="button" v-for="(item, index) in suggestedQuestions" :key="item.question"
                                 class="suggested-question-card" :class="{ 'sq-card-visible': sqCardsRevealed }"
                                 :style="{ transitionDelay: sqCardsRevealed ? `${index * 50}ms` : '0ms' }"
                                 @click="handleSuggestedQuestionClick(item)">
                                 <span class="suggested-question-text">{{ item.question }}</span>
                                 <span v-if="item.source === 'faq'" class="suggested-question-badge faq">FAQ</span>
-                            </div>
+                            </button>
                         </div>
                     </div>
                 </transition>
@@ -219,7 +219,8 @@ const inputFieldRef = ref();
 // The suggestion's source rides with this send to the new session's first
 // request, so the agent searches it before answering.
 const handleSuggestedQuestionClick = (item: SuggestedQuestion) => {
-    inputFieldRef.value?.triggerSend(item.question, { questionOrigin: questionOriginFromSuggestion(item) });
+    inputFieldRef.value?.prefill(item.question, { questionOrigin: questionOriginFromSuggestion(item) });
+    void inputFieldRef.value?.focusInput();
 };
 
 const sendMsg = (value: string, modelId: string, mentionedItems: any[], imageFiles: any[] = [], attachmentFiles: any[] = [], options: SendMessageOptions = {}) => {
@@ -297,6 +298,7 @@ async function openProjectDir() {
 
 </script>
 <style lang="less" scoped>
+.suggested-question-card { font: inherit; color: inherit; text-align: inherit; }
 .dialogue-wrap {
     flex: 1;
     display: flex;
