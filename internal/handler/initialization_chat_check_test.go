@@ -62,3 +62,31 @@ func TestCheckChatModelConnectionReportsAuthFailure(t *testing.T) {
 	require.False(t, available)
 	require.Contains(t, message, "认证失败")
 }
+
+// Gemini's native API reports an invalid key as 400 INVALID_ARGUMENT /
+// API_KEY_INVALID. That 400 is an auth failure, not "reachable".
+func TestCheckChatModelConnectionReportsGeminiInvalidKey(t *testing.T) {
+	var gotPath string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":{"code":400,"message":"API key not valid. Please pass a valid API key.",` +
+			`"status":"INVALID_ARGUMENT","details":[{"@type":"type.googleapis.com/google.rpc.ErrorInfo",` +
+			`"reason":"API_KEY_INVALID","domain":"googleapis.com"}]}}`))
+	}))
+	t.Cleanup(srv.Close)
+	utils.SetSSRFWhitelistFromRaw("127.0.0.1")
+	t.Cleanup(func() { utils.SetSSRFWhitelistFromRaw("") })
+
+	model := remoteChatModel(srv.URL)
+	model.Name = "gemini-2.5-flash"
+	model.Parameters.Provider = "gemini"
+
+	h := &InitializationHandler{}
+	available, message := h.checkChatModelConnection(context.Background(), model, "", "")
+
+	require.Contains(t, gotPath, ":generateContent", "probe should use the native Gemini API")
+	require.False(t, available, "message: %s", message)
+	require.Contains(t, message, "认证失败")
+}
