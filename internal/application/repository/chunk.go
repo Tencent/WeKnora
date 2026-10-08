@@ -71,22 +71,26 @@ func (r *chunkRepository) CreateChunks(ctx context.Context, chunks []*types.Chun
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		released, err := releaseTakenChunkSeqIDs(tx, chunks)
 		if err != nil {
-			return fmt.Errorf("failed to release taken chunk seq_ids: %w", err)
+			return fmt.Errorf("failed to release chunk seq_ids: %w", err)
 		}
 		if released > 0 {
 			logger.Warnf(ctx,
-				"%d chunk(s) requested a seq_id that is already taken (soft-deleted rows "+
-					"included) and were assigned a new one", released)
+				"%d chunk(s) requested a seq_id that cannot be preserved (already taken, "+
+					"soft-deleted rows included, or inside the range the database sequence "+
+					"allocates from) and were reassigned", released)
 		}
 
-		// SQLite doesn't support autoIncrement on non-PK columns, so SeqIDs are
+		// SQLite has no autoIncrement default on non-PK columns, so SeqIDs are
 		// pre-assigned from MAX(seq_id). Doing it inside the write transaction
 		// keeps the read and the insert on the same connection.
-		// PostgreSQL uses a DB sequence — skip to avoid duplicate key races.
-		// The exception is a batch that had to release a taken seq_id: the
-		// released chunk needs an id, and letting the sequence hand one out can
-		// collide with an explicit id this same batch is about to insert.
-		if tx.Name() == "sqlite" || released > 0 {
+		//
+		// PostgreSQL must keep using the column DEFAULT
+		// nextval('chunks_seq_id_seq'): the sequence is the only authority for
+		// ids >= types.ChunkSeqIDSequenceStart, and a MAX(seq_id)+1 value is
+		// exactly what nextval hands out next, so writing it explicitly makes
+		// the following ordinary insert fail on idx_chunks_seq_id. Chunks
+		// released above (SeqID == 0) are therefore numbered by the sequence.
+		if tx.Name() == "sqlite" {
 			if err := types.AssignChunkSeqIDs(tx, chunks); err != nil {
 				return fmt.Errorf("failed to assign chunk seq_ids: %w", err)
 			}
@@ -100,17 +104,35 @@ func (r *chunkRepository) CreateChunks(ctx context.Context, chunks []*types.Chun
 }
 
 // releaseTakenChunkSeqIDs zeroes the SeqID of every chunk whose requested
-// seq_id is unavailable, so the insert allocates a fresh id instead of failing
-// the whole batch on the unique index. It returns how many ids were released.
+// seq_id cannot be preserved, so the insert allocates a fresh id instead of
+// failing the whole batch on the unique index. It returns how many ids were
+// released.
 //
-// chunks.seq_id is a global unique index and gorm soft deletes keep the row —
-// and the value it occupies — in the table. Callers that carry a seq_id are
-// migrating or round-tripping FAQ entries ("export → edit → import"), and both
-// routes collide as soon as the source rows still exist somewhere in the table:
-// appending to another knowledge base hits the live originals, replacing in the
-// same knowledge base hits its own soft-deleted rows. Reassigning keeps the
-// entries (a new id is observable on chunks[i].SeqID) instead of dropping the
-// whole batch.
+// A requested seq_id is released when any of these holds:
+//
+//   - it is already taken. chunks.seq_id is a global unique index and gorm soft
+//     deletes keep the row — and the value it occupies — in the table.
+//   - it appears twice inside the batch (the second occurrence cannot be
+//     inserted as-is).
+//   - the dialect is PostgreSQL and the id is >=
+//     types.ChunkSeqIDSequenceStart. Those ids belong to chunks_seq_id_seq; the
+//     sequence will hand the same value out again later, so keeping an
+//     imported one is a time bomb even when the value is currently free. This
+//     is the cross-instance import case ("export from A, import into an empty
+//     B"). SQLite has no such sequence and allocates from MAX(seq_id) instead,
+//     so it keeps high ids as-is.
+//
+// Low ids (< ChunkSeqIDSequenceStart) that are free are preserved on both
+// dialects: nextval never produces them, so they cannot collide with automatic
+// allocation. That is what keeps historical migration ids and ids exported
+// from SQLite stable across an import.
+//
+// Callers that carry a seq_id are migrating or round-tripping FAQ entries
+// ("export → edit → import"), and both routes collide as soon as the source
+// rows still exist somewhere in the table: appending to another knowledge base
+// hits the live originals, replacing in the same knowledge base hits its own
+// soft-deleted rows. Reassigning keeps the entries (a new id is observable on
+// chunks[i].SeqID) instead of dropping the whole batch.
 func releaseTakenChunkSeqIDs(tx *gorm.DB, chunks []*types.Chunk) (int, error) {
 	requested := make([]int64, 0, len(chunks))
 	seen := make(map[int64]struct{}, len(chunks))
@@ -128,16 +150,31 @@ func releaseTakenChunkSeqIDs(tx *gorm.DB, chunks []*types.Chunk) (int, error) {
 		return 0, nil
 	}
 
-	var taken []int64
-	// Unscoped: soft-deleted rows still occupy their seq_id.
-	if err := tx.Unscoped().Model(&types.Chunk{}).
-		Where("seq_id IN ?", requested).
-		Pluck("seq_id", &taken).Error; err != nil {
-		return 0, err
+	// PostgreSQL releases the sequence's own range unconditionally (below), so
+	// only the low-range ids need the "is it occupied" lookup.
+	releaseSequenceRange := tx.Name() == "postgres"
+	probe := requested
+	if releaseSequenceRange {
+		probe = make([]int64, 0, len(requested))
+		for _, seqID := range requested {
+			if seqID < types.ChunkSeqIDSequenceStart {
+				probe = append(probe, seqID)
+			}
+		}
 	}
-	takenSet := make(map[int64]struct{}, len(taken))
-	for _, seqID := range taken {
-		takenSet[seqID] = struct{}{}
+
+	takenSet := make(map[int64]struct{}, len(probe))
+	if len(probe) > 0 {
+		var taken []int64
+		// Unscoped: soft-deleted rows still occupy their seq_id.
+		if err := tx.Unscoped().Model(&types.Chunk{}).
+			Where("seq_id IN ?", probe).
+			Pluck("seq_id", &taken).Error; err != nil {
+			return 0, err
+		}
+		for _, seqID := range taken {
+			takenSet[seqID] = struct{}{}
+		}
 	}
 
 	kept := make(map[int64]struct{}, len(requested))
@@ -148,7 +185,8 @@ func releaseTakenChunkSeqIDs(tx *gorm.DB, chunks []*types.Chunk) (int, error) {
 		}
 		_, isTaken := takenSet[chunk.SeqID]
 		_, isDuplicate := kept[chunk.SeqID]
-		if isTaken || isDuplicate {
+		inSequenceRange := releaseSequenceRange && chunk.SeqID >= types.ChunkSeqIDSequenceStart
+		if isTaken || isDuplicate || inSequenceRange {
 			chunk.SeqID = 0
 			released++
 			continue

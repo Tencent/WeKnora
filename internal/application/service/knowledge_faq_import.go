@@ -1583,10 +1583,11 @@ func (s *knowledgeService) executeFAQImport(ctx context.Context, taskID string, 
 			createDuration,
 		)
 
-		// 请求的 seq_id 已被占用时（含被软删的行占用），CreateChunks 会给该条目
-		// 分配一个新的 seq_id：chunks.seq_id 是全局唯一索引，软删不释放索引值。
-		// 这里按批统计并回进度，并把前几条 old → new 打到 Warn，调用方不会以为
-		// id 还是导出里的那个。
+		// 请求的 seq_id 未被保留时，CreateChunks 会给该条目分配一个新的 seq_id：
+		// 该 id 已被占用（含被软删的行占用：chunks.seq_id 是全局唯一索引，软删不
+		// 释放索引值），或在 PG 上落在数据库序列的区间（≥ 100000000，保留会让后续
+		// nextval 撞号）。这里按批统计并回进度，并把前几条 old → new 打到 Warn，
+		// 调用方不会以为 id 还是导出里的那个。
 		remappedThisBatch := 0
 		remapExamples := make([]string, 0, 2)
 		for idx, chunk := range chunks {
@@ -1602,8 +1603,9 @@ func (s *knowledgeService) executeFAQImport(ctx context.Context, taskID string, 
 			progress.SeqIDRemappedCount += remappedThisBatch
 			logger.Warnf(
 				ctx,
-				"FAQ import task %s: %d entr(ies) requested an already-taken seq_id "+
-					"(soft-deleted rows included), reassigned new ids: %s",
+				"FAQ import task %s: %d entr(ies) requested a seq_id that cannot be preserved "+
+					"(already taken — soft-deleted rows included — or inside the database "+
+					"sequence's range), reassigned new ids: %s",
 				taskID,
 				remappedThisBatch,
 				strings.Join(remapExamples, ", "),

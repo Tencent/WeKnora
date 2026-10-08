@@ -222,7 +222,31 @@ func (c *Chunk) EmbeddingContent() string {
 	return c.ContextHeader + "\n\n" + body
 }
 
+// ChunkSeqIDSequenceStart is the first value the PostgreSQL sequence
+// chunks_seq_id_seq hands out. It mirrors the DDL in
+// migrations/versioned/000010_add_seq_id.up.sql
+// (CREATE SEQUENCE chunks_seq_id_seq START WITH 100000000).
+//
+// It splits chunks.seq_id into two disjoint ranges with different ownership:
+//
+//   - below it: the migration-only low range. nextval never produces these
+//     values, so an exported id from this range is safe to preserve on import
+//     (historical migration ids, ids exported from SQLite, which allocates
+//     from 1).
+//   - at or above it: the sequence's range. Those values must only ever come
+//     from nextval; writing one explicitly makes a later automatic allocation
+//     collide with it on idx_chunks_seq_id (see releaseTakenChunkSeqIDs in
+//     internal/application/repository/chunk.go).
+const ChunkSeqIDSequenceStart int64 = 100000000
+
 // AssignChunkSeqIDs assigns sequential SeqIDs to a batch of chunks that have SeqID == 0.
+//
+// It is the SQLite (and only SQLite) allocator: SQLite cannot put an
+// autoIncrement column default on a non-PK column, so the ids have to be
+// pre-assigned from MAX(seq_id). PostgreSQL must not use it — chunks_seq_id_seq
+// is the sole authority above ChunkSeqIDSequenceStart, and a MAX(seq_id)+1
+// value is exactly what the sequence is about to hand out next.
+//
 // Must be called before CreateInBatches for SQLite compatibility.
 func AssignChunkSeqIDs(tx *gorm.DB, chunks []*Chunk) error {
 	needAssign := false
