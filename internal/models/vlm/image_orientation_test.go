@@ -107,6 +107,9 @@ func brightestCorner(t *testing.T, data []byte) string {
 }
 
 func TestOrientImageBytesTurnsPixelsPerEXIFTag(t *testing.T) {
+	// Pin the switch on: these cases assert what the pass does, so they must
+	// not depend on whatever the ambient environment exports.
+	t.Setenv("VLM_IMAGE_ORIENTATION", "on")
 	for _, test := range []struct {
 		orientation int
 		width       int
@@ -140,6 +143,9 @@ func TestOrientImageBytesTurnsPixelsPerEXIFTag(t *testing.T) {
 }
 
 func TestOrientImageBytesReadsBothTIFFByteOrders(t *testing.T) {
+	// Pin the switch on: these cases assert what the pass does, so they must
+	// not depend on whatever the ambient environment exports.
+	t.Setenv("VLM_IMAGE_ORIENTATION", "on")
 	for name, order := range map[string]binary.ByteOrder{
 		"big-endian":    binary.BigEndian,
 		"little-endian": binary.LittleEndian,
@@ -156,6 +162,9 @@ func TestOrientImageBytesReadsBothTIFFByteOrders(t *testing.T) {
 }
 
 func TestOrientImageBytesLeavesUntouchedPayloadsAlone(t *testing.T) {
+	// Pin the switch on: these cases assert what the pass does, so they must
+	// not depend on whatever the ambient environment exports.
+	t.Setenv("VLM_IMAGE_ORIENTATION", "on")
 	var pngBuf bytes.Buffer
 	require.NoError(t, png.Encode(&pngBuf, image.NewRGBA(image.Rect(0, 0, 8, 4))))
 
@@ -185,6 +194,9 @@ func TestOrientImageBytesLeavesUntouchedPayloadsAlone(t *testing.T) {
 }
 
 func TestOrientImageBytesSkipsCanvasesOverThePixelBudget(t *testing.T) {
+	// Pin the switch on: these cases assert what the pass does, so they must
+	// not depend on whatever the ambient environment exports.
+	t.Setenv("VLM_IMAGE_ORIENTATION", "on")
 	previous := maxOrientationPixels
 	maxOrientationPixels = 16
 	t.Cleanup(func() { maxOrientationPixels = previous })
@@ -198,6 +210,9 @@ func TestOrientImageBytesSkipsCanvasesOverThePixelBudget(t *testing.T) {
 }
 
 func TestOrientationVLMPredictsWithUprightPixels(t *testing.T) {
+	// Pin the switch on: these cases assert what the pass does, so they must
+	// not depend on whatever the ambient environment exports.
+	t.Setenv("VLM_IMAGE_ORIENTATION", "on")
 	inner := &recordingVLM{}
 	model, err := wrapVLMImageOrientation(inner, nil)
 	require.NoError(t, err)
@@ -216,6 +231,9 @@ func TestOrientationVLMPredictsWithUprightPixels(t *testing.T) {
 }
 
 func TestOrientationVLMPassesPayloadsThroughUntouched(t *testing.T) {
+	// Pin the switch on: these cases assert what the pass does, so they must
+	// not depend on whatever the ambient environment exports.
+	t.Setenv("VLM_IMAGE_ORIENTATION", "on")
 	inner := &recordingVLM{}
 	model, err := wrapVLMImageOrientation(inner, nil)
 	require.NoError(t, err)
@@ -261,6 +279,9 @@ func markedJPEGAfterJFIFApp0(t *testing.T, orientation int, order binary.ByteOrd
 }
 
 func TestOrientImageBytesFindsEXIFBehindJFIFApp0(t *testing.T) {
+	// Pin the switch on: these cases assert what the pass does, so they must
+	// not depend on whatever the ambient environment exports.
+	t.Setenv("VLM_IMAGE_ORIENTATION", "on")
 	stored := markedJPEGAfterJFIFApp0(t, 6, binary.BigEndian)
 	require.Equal(t, byte(0xE0), stored[3], "APP0 must come first in this fixture")
 	require.Equal(t, byte(0xE1), stored[21], "EXIF must sit behind APP0")
@@ -274,6 +295,9 @@ func TestOrientImageBytesFindsEXIFBehindJFIFApp0(t *testing.T) {
 // Normalising twice must be a passthrough the second time: the first pass
 // removes the tag with the pixels, so a second decode would only burn CPU.
 func TestOrientImageBytesIsIdempotent(t *testing.T) {
+	// Pin the switch on: these cases assert what the pass does, so they must
+	// not depend on whatever the ambient environment exports.
+	t.Setenv("VLM_IMAGE_ORIENTATION", "on")
 	stored := markedJPEG(t, 6, binary.BigEndian)
 
 	once := orientImageBytes(context.Background(), stored)

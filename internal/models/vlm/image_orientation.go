@@ -6,6 +6,9 @@ import (
 	"encoding/binary"
 	"image"
 	"image/jpeg"
+	"os"
+	"strings"
+	"sync"
 
 	"github.com/Tencent/WeKnora/internal/logger"
 )
@@ -27,6 +30,87 @@ const (
 // absurd canvas is left untouched rather than risking the worker. A 600 DPI A3
 // scan (about 70 megapixels) still fits.
 var maxOrientationPixels = 80 << 20
+
+// imageOrientationEnabled turns the EXIF orientation pass ON.
+//
+// The pass is OFF by default, on the same rule the other image-pipeline
+// additions follow (see ImageProcessingConfig.ImageAttrsEnabled): upgrading a
+// deployment must not silently change what happens to documents it already
+// ingests. That rule does real work here, because the pass can go either way:
+//
+//   - It fixes what it was written for. A page stored sideways carries the
+//     rotation in its EXIF tag, and models read the pixel matrix while ignoring
+//     that tag, so the page reaches them rotated. Measured on a real API with
+//     the production OCR prompt, a 180-degree page read 9/9 rounds wrong while
+//     the rotated-back bytes read 9/9 rounds correct.
+//   - It can also break a page that was already fine. The tag is the only
+//     signal it has, and a camera can write it wrong at capture time: a
+//     landscape-held phone shot can store upright pixels under tag 6, and
+//     honouring that tag turns CORRECT pixels sideways. Those two inputs are
+//     indistinguishable from the bytes alone.
+//   - And it only covers part of the problem. It needs a JPEG that still
+//     carries a tag 2..8; pages that lost their metadata (re-encoded, PNG,
+//     re-saved) are left exactly as they were, which is where the worst
+//     measured failures live (a 0.35 MP upside-down page lost 22.6 percentage
+//     points of cell accuracy, and the pass never sees it).
+//
+// Asking the model to straighten the page instead is not a substitute: measured
+// under the same prompt, that recovers a 180-degree page's table structure but
+// misreads individual glyphs on a 90-degree one.
+//
+// So a deployment opts in with VLM_IMAGE_ORIENTATION=on when its sources are
+// known to keep trustworthy tags on JPEGs; everything else keeps the bytes
+// exactly as stored, byte for byte.
+func imageOrientationEnabled() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("VLM_IMAGE_ORIENTATION"))) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
+}
+
+// maxConcurrentOrientationConversions caps how many EXIF conversions this
+// process runs at the same time. It covers every VLM instance and both the
+// interactive and the background path.
+//
+// One conversion holds three full-size buffers at once: the decoded image
+// (about 1.5 bytes per pixel for a JPEG), the RGBA canvas it is turned onto
+// (4 bytes per pixel) and the re-encoded JPEG. At the pixel budget above that
+// is on the order of 0.5 GiB of transient memory, so a single slot is what
+// bounds the total: however many models, uploads or workers are in flight, the
+// process never holds more than one conversion's worth of it. The limit is the
+// only knob here; raise it if conversion throughput ever outweighs that.
+const maxConcurrentOrientationConversions = 1
+
+// orientationSlots is the process-wide conversion budget. It is deliberately
+// package-level rather than a field of orientationVLM: a process has one memory
+// budget, while VLM instances are created per model and re-created on every
+// configuration change, so a per-instance budget would multiply the bound by
+// the number of live instances — the exact stacking this gate exists to stop.
+var orientationSlots = make(chan struct{}, maxConcurrentOrientationConversions)
+
+// acquireOrientationSlot takes one conversion slot without waiting. ok is false
+// when the budget is exhausted, and the caller then sends the image as stored,
+// exactly as it does for a canvas above maxOrientationPixels. Waiting is
+// deliberately not an option: the gate also sits on the interactive chat path,
+// which must not queue behind someone else's scan when it can simply forward
+// the bytes it was given.
+func acquireOrientationSlot() (release func(), ok bool) {
+	select {
+	case orientationSlots <- struct{}{}:
+		var once sync.Once
+		return func() { once.Do(func() { <-orientationSlots }) }, true
+	default:
+		return nil, false
+	}
+}
+
+// decodeImage is image.Decode behind a variable so the concurrency tests can
+// keep a conversion inside the decoder — the only point where a slot stays held
+// long enough for another call to observe — and count how often the decoder was
+// reached.
+var decodeImage = image.Decode
 
 // orientationVLM applies the EXIF Orientation tag to the pixels before an image
 // reaches a model.
@@ -70,9 +154,16 @@ func wrapVLMImageOrientation(v VLM, err error) (VLM, error) {
 
 // orientImageBytes returns image bytes whose pixels match their EXIF
 // orientation. Images without a rotation tag, non-JPEG payloads, unreadable
-// files and canvases above maxOrientationPixels are returned unchanged — the
-// decorator never blocks a call it cannot improve.
+// files, canvases above maxOrientationPixels and calls that find every
+// conversion slot busy are returned unchanged — the decorator never blocks a
+// call it cannot improve.
+//
+// The whole pass is behind imageOrientationEnabled, which is off unless the
+// deployment opts in with VLM_IMAGE_ORIENTATION=on. See the rationale there.
 func orientImageBytes(ctx context.Context, data []byte) []byte {
+	if !imageOrientationEnabled() {
+		return data
+	}
 	orientation := jpegEXIFOrientation(data)
 	if orientation <= 1 || orientation > 8 {
 		return data
@@ -87,7 +178,18 @@ func orientImageBytes(ctx context.Context, data []byte) []byte {
 			cfg.Width, cfg.Height, maxOrientationPixels)
 		return data
 	}
-	img, _, err := image.Decode(bytes.NewReader(data))
+	// The header probe above allocates nothing; the slot is taken for the
+	// expensive window only (decode -> turn -> re-encode) and held until that
+	// window closes, on every return path below.
+	release, acquired := acquireOrientationSlot()
+	if !acquired {
+		logger.Warnf(ctx,
+			"[VLM] All %d rotation slots are busy; sending the %dx%d image in its stored orientation",
+			maxConcurrentOrientationConversions, cfg.Width, cfg.Height)
+		return data
+	}
+	defer release()
+	img, _, err := decodeImage(bytes.NewReader(data))
 	if err != nil {
 		return data
 	}
