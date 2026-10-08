@@ -125,6 +125,12 @@ func answer(r *http.Request, body map[string]any) string {
 			parts = append(parts, fmt.Sprintf(`{"index":%d,"relevance_score":%v}`, i, probability(docs[i])))
 		}
 		return `{"output":{"results":[` + strings.Join(parts, ",") + `]}}`
+	case r.Header.Get("X-Pinecone-Api-Version") != "": // Pinecone Inference
+		docs := texts(body["documents"])
+		for i := len(docs) - 1; i >= 0; i-- {
+			parts = append(parts, fmt.Sprintf(`{"index":%d,"score":%v}`, i, probability(docs[i])))
+		}
+		return `{"data":[` + strings.Join(parts, ",") + `]}`
 	default: // Cohere
 		docs := texts(body["documents"])
 		score := probability
@@ -188,6 +194,7 @@ func TestRerankWireFormatPerVendor(t *testing.T) {
 
 		wantPath     string
 		wantAuth     [2]string // header, a substring its value must contain
+		wantVersion  string
 		wantRequests int
 		// wantBody is one request's body, exactly. Batches go out
 		// concurrently, so it is matched against every request rather than
@@ -214,6 +221,18 @@ func TestRerankWireFormatPerVendor(t *testing.T) {
 			name: "siliconflow", provider: "siliconflow", model: "BAAI/bge-reranker-v2-m3", base: "/v1",
 			wantPath: "/v1/rerank", wantAuth: [2]string{"Authorization", "Bearer k"},
 			wantBody: cohere("BAAI/bge-reranker-v2-m3", three, nil),
+		},
+		{
+			name: "pinecone native objects and version", provider: "pinecone", model: "bge-reranker-v2-m3",
+			wantPath: "/rerank", wantAuth: [2]string{"Api-Key", "k"}, wantVersion: "2026-07",
+			wantBody: map[string]any{
+				"model": "bge-reranker-v2-m3", "query": query,
+				"documents": []any{
+					map[string]any{"text": "a"}, map[string]any{"text": "bbb"}, map[string]any{"text": "cc"},
+				},
+				"top_n": float64(3), "rank_fields": []any{"text"}, "return_documents": false,
+				"parameters": map[string]any{"truncate": "END"},
+			},
 		},
 		{
 			name: "qianfan splits at 64 documents", provider: "qianfan", model: "bce-reranker-base", base: "/v2",
@@ -344,6 +363,9 @@ func TestRerankWireFormatPerVendor(t *testing.T) {
 			for _, req := range up.requests {
 				assert.Equal(t, tc.wantPath, req.path)
 				assert.Contains(t, req.header.Get(tc.wantAuth[0]), tc.wantAuth[1])
+				if tc.wantVersion != "" {
+					assert.Equal(t, tc.wantVersion, req.header.Get("X-Pinecone-Api-Version"))
+				}
 				if tc.appSecret != "" {
 					assert.NotContains(t, req.header.Get("Authorization"), tc.appSecret,
 						"a secret key signs the request and must never travel")
@@ -381,4 +403,25 @@ func TestOpenAIDoesNotOfferRerank(t *testing.T) {
 	v, ok := modelruntime.Get("openai")
 	require.True(t, ok)
 	assert.False(t, v.SupportsType(types.ModelTypeRerank))
+}
+
+func TestPineconeCatalogLimitSplitsAt100Documents(t *testing.T) {
+	u := newUpstream(t)
+	docs := documents(101)
+	r, err := NewReranker(&RerankerConfig{
+		Source: types.ModelSourceRemote, Provider: "pinecone", ModelName: "bge-reranker-v2-m3",
+		BaseURL: u.url, APIKey: "k",
+	})
+	require.NoError(t, err)
+	got, err := r.Rerank(context.Background(), "q", docs)
+	require.NoError(t, err)
+	require.Len(t, got, len(docs))
+	require.Len(t, u.requests, 2)
+	counts := []int{len(u.requests[0].body["documents"].([]any)), len(u.requests[1].body["documents"].([]any))}
+	sort.Ints(counts)
+	assert.Equal(t, []int{1, 100}, counts)
+	for _, req := range u.requests {
+		assert.Equal(t, float64(len(req.body["documents"].([]any))), req.body["top_n"])
+		assert.Equal(t, "2026-07", req.header.Get("X-Pinecone-Api-Version"))
+	}
 }
