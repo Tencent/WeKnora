@@ -369,7 +369,11 @@ func applySandboxEdits(content string, edits []SandboxEdit) (string, int, error)
 		if err := validateSandboxEdit(e, i, multi); err != nil {
 			return "", 0, err
 		}
-		found := indexAllNonOverlapping(content, e.OldString)
+		step := 1 // Uniqueness includes occurrences that overlap each other.
+		if e.ReplaceAll {
+			step = len(e.OldString)
+		}
+		found := indexSandboxMatches(content, e.OldString, step)
 		if len(found) == 0 {
 			return "", 0, notFoundSandboxEditError(i, multi)
 		}
@@ -409,14 +413,21 @@ func applySandboxEdits(content string, edits []SandboxEdit) (string, int, error)
 // counting the same way strings.Count does: after a match, scanning resumes
 // past it rather than one byte in.
 func indexAllNonOverlapping(content, sub string) []int {
+	return indexSandboxMatches(content, sub, len(sub))
+}
+
+func indexSandboxMatches(content, sub string, step int) []int {
 	var found []int
+	if sub == "" {
+		return found
+	}
 	for offset := 0; ; {
 		i := strings.Index(content[offset:], sub)
 		if i < 0 {
 			return found
 		}
 		found = append(found, offset+i)
-		offset += i + len(sub)
+		offset += i + step
 	}
 }
 
