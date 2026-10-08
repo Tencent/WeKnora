@@ -11,4 +11,3 @@ test('knowledge cards open documents even when model setup is incomplete', async
   await expect(page).toHaveURL(/\/knowledge-bases\/mobile-kb/)
   await expect(page.locator('.document-header')).toBeVisible()
 })
-
