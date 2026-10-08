@@ -145,7 +145,8 @@ func (c *Config) parseHeaders() map[string]string {
 //
 // FeedItems maps feedURL → itemID → fingerprint, where fingerprint is a
 // "i:<sha256-prefix>" hash of the resolved title, link and Markdown body.
-// Legacy "h:" body-only fingerprints are refreshed once to repair stale metadata.
+// Legacy "h:" body-only fingerprints are upgraded in place when the body is
+// unchanged; only a changed body is re-ingested.
 // FeedSignals maps feedURL → itemID → feed-only signal used to skip full-text
 // article fetches when the feed entry itself has not changed.
 type rssCursor struct {
@@ -155,6 +156,19 @@ type rssCursor struct {
 }
 
 const itemFingerprintPrefix = "i:"
+
+// isLegacyFingerprint reports a body-only "h:" cursor entry written before
+// item fingerprints existed.
+func isLegacyFingerprint(fp string) bool {
+	return fp != "" && !strings.HasPrefix(fp, itemFingerprintPrefix)
+}
+
+// legacyContentFingerprint is the body-only fingerprint older cursors stored.
+// It is kept only to recognise unchanged bodies when upgrading those cursors.
+func legacyContentFingerprint(markdown string) string {
+	sum := sha256.Sum256([]byte(markdown))
+	return "h:" + hex.EncodeToString(sum[:])[:16]
+}
 
 // itemFingerprint includes the document identity without timestamps, so date-only
 // feed changes still resolve articles without needlessly re-ingesting them.

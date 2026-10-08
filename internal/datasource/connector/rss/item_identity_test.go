@@ -3,6 +3,7 @@ package rss
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -14,9 +15,11 @@ import (
 )
 
 type identityFeed struct {
-	server  *httptest.Server
-	xml     atomic.Value
-	fetches atomic.Int32
+	server        *httptest.Server
+	xml           atomic.Value
+	fetches       atomic.Int32
+	articleStatus atomic.Int32
+	articleBody   atomic.Value
 }
 
 func newIdentityFeed(t *testing.T) *identityFeed {
@@ -29,11 +32,17 @@ func newIdentityFeed(t *testing.T) *identityFeed {
 			return
 		}
 		f.fetches.Add(1)
+		if status := int(f.articleStatus.Load()); status != http.StatusOK {
+			w.WriteHeader(status)
+			return
+		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_, _ = fmt.Fprintf(w, "<html><head><title>Stable article</title></head>"+
-			"<body><article>%s</article></body></html>", longArticleBody)
+			"<body><article>%s</article></body></html>", f.articleBody.Load().(string))
 	}))
 	t.Cleanup(f.server.Close)
+	f.articleStatus.Store(http.StatusOK)
+	f.articleBody.Store(longArticleBody)
 	f.publish("Original title", "/original", "Mon, 02 Jan 2006 15:04:05 GMT")
 	return f
 }
@@ -111,21 +120,87 @@ func TestIncrementalItemTimestampOnly(t *testing.T) {
 	assertIdentityUnchanged(t, f, next)
 }
 
-func TestIncrementalItemLegacyCursor(t *testing.T) {
-	f := newIdentityFeed(t)
+// legacyIdentityCursor syncs once and rewrites the cursor the way a release
+// before item fingerprints stored it: a body-only "h:" hash.
+func legacyIdentityCursor(t *testing.T, f *identityFeed) (*types.SyncCursor, string) {
+	t.Helper()
 	items, cursor := f.sync(t, nil)
 	if len(items) != 1 {
 		t.Fatalf("expected 1 initial item, got %d", len(items))
 	}
-	// Old cursors cannot prove that the stored title/link matches this feed,
-	// even when the feed signal was acknowledged by an earlier sync.
 	sum := sha256.Sum256(items[0].Content)
+	legacy := fmt.Sprintf("h:%x", sum[:8])
 	cursor.ConnectorCursor["feed_items"] = map[string]map[string]string{
-		f.server.URL + "/feed.xml": {"stable-guid": fmt.Sprintf("h:%x", sum[:8])},
+		f.server.URL + "/feed.xml": {"stable-guid": legacy},
 	}
+	return cursor, legacy
+}
+
+func storedItemFingerprint(t *testing.T, f *identityFeed, cursor *types.SyncCursor) string {
+	t.Helper()
+	data, err := json.Marshal(cursor.ConnectorCursor)
+	if err != nil {
+		t.Fatalf("marshal cursor: %v", err)
+	}
+	var decoded rssCursor
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("unmarshal cursor: %v", err)
+	}
+	return decoded.FeedItems[f.server.URL+"/feed.xml"]["stable-guid"]
+}
+
+// Upgrading must not delete and rebuild every stored item: an unchanged body
+// only has its cursor upgraded to an item fingerprint.
+func TestIncrementalItemLegacyCursorUnchangedBodyUpgradesInPlace(t *testing.T) {
+	f := newIdentityFeed(t)
+	cursor, _ := legacyIdentityCursor(t, f)
 	updated, next := f.sync(t, cursor)
-	if len(updated) != 1 {
-		t.Fatalf("expected one-time refresh of legacy body-only cursor, got %d", len(updated))
+	if len(updated) != 0 {
+		t.Fatalf("unchanged legacy item must not be re-ingested, got %d", len(updated))
+	}
+	if fp := storedItemFingerprint(t, f, next); !strings.HasPrefix(fp, itemFingerprintPrefix) {
+		t.Fatalf("legacy cursor must be upgraded to an item fingerprint, got %q", fp)
+	}
+	assertIdentityUnchanged(t, f, next)
+}
+
+// A transient article failure during the upgrade must not replace the stored
+// full text with the feed summary. The legacy cursor is kept so the next sync
+// retries, and the upgrade completes once the article is reachable again.
+func TestIncrementalItemLegacyCursorArticleFailureKeepsCursor(t *testing.T) {
+	f := newIdentityFeed(t)
+	cursor, legacy := legacyIdentityCursor(t, f)
+	f.articleStatus.Store(http.StatusInternalServerError)
+	updated, next := f.sync(t, cursor)
+	if len(updated) != 0 {
+		t.Fatalf("article failure must not emit the feed summary, got %d", len(updated))
+	}
+	if fp := storedItemFingerprint(t, f, next); fp != legacy {
+		t.Fatalf("legacy cursor must be kept for retry, got %q want %q", fp, legacy)
+	}
+
+	f.articleStatus.Store(http.StatusOK)
+	before := f.fetches.Load()
+	updated, next = f.sync(t, next)
+	if len(updated) != 0 || f.fetches.Load() == before {
+		t.Fatalf("recovered article must be re-read and upgrade in place, emitted %d", len(updated))
+	}
+	if fp := storedItemFingerprint(t, f, next); !strings.HasPrefix(fp, itemFingerprintPrefix) {
+		t.Fatalf("legacy cursor must be upgraded after recovery, got %q", fp)
+	}
+}
+
+// A legacy item whose body really changed is still re-ingested.
+func TestIncrementalItemLegacyCursorChangedBodyEmits(t *testing.T) {
+	f := newIdentityFeed(t)
+	cursor, _ := legacyIdentityCursor(t, f)
+	f.articleBody.Store(longArticleBody + "<p>An appended paragraph that changes the stored body.</p>")
+	updated, next := f.sync(t, cursor)
+	if len(updated) != 1 || !strings.Contains(string(updated[0].Content), "appended paragraph") {
+		t.Fatalf("changed legacy item must be re-ingested with the new body, got %d items", len(updated))
+	}
+	if fp := storedItemFingerprint(t, f, next); !strings.HasPrefix(fp, itemFingerprintPrefix) {
+		t.Fatalf("re-ingested item must store an item fingerprint, got %q", fp)
 	}
 	assertIdentityUnchanged(t, f, next)
 }

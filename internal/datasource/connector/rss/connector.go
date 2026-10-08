@@ -250,8 +250,8 @@ func (c *Connector) walk(
 				if prevSignals != nil {
 					prevSig = prevSignals[itemID]
 				}
-				// Body-only legacy cursors cannot prove title/link consistency.
-				// Refresh them once before using the no-fetch fast path.
+				// Body-only legacy cursors must be upgraded (below) before the
+				// no-fetch fast path can trust them.
 				if strings.HasPrefix(prevFP, itemFingerprintPrefix) && feedSig == prevSig {
 					newCursor.FeedItems[feedURL][itemID] = prevFP
 					newCursor.FeedSignals[feedURL][itemID] = feedSig
@@ -261,6 +261,26 @@ func (c *Connector) walk(
 			}
 
 			resolved := c.resolveItem(ctx, cli, feed, item, feedURL, itemID, feedContent)
+			if incremental && prevItems != nil && isLegacyFingerprint(prevItems[itemID]) {
+				switch {
+				case legacyContentFingerprint(string(resolved.item.Content)) == prevItems[itemID]:
+					// The stored body is unchanged: upgrade the cursor in place
+					// instead of deleting and rebuilding the document.
+					newCursor.FeedItems[feedURL][itemID] = resolved.fingerprint
+					if !resolved.articleFailed {
+						newCursor.FeedSignals[feedURL][itemID] = feedSig
+					}
+					skipped++
+					continue
+				case resolved.articleFailed:
+					// A transient article failure must not replace the stored
+					// full text with the feed summary: keep the legacy cursor
+					// and retry on the next sync.
+					newCursor.FeedItems[feedURL][itemID] = prevItems[itemID]
+					skipped++
+					continue
+				}
+			}
 			newCursor.FeedItems[feedURL][itemID] = resolved.fingerprint
 			// Keep fallback deduplication, but retry failed full-text extraction on
 			// the next sync even when the feed entry itself has not changed.
