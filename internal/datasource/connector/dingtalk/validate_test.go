@@ -228,3 +228,104 @@ func TestValidateCapsProbesWhenEveryDocumentIsUnreadable(t *testing.T) {
 		}
 	}
 }
+
+// listCountingAPI counts listNodes calls so tests can bound the folder walk.
+type listCountingAPI struct {
+	*fakeAPI
+	listCalls int
+}
+
+func (a *listCountingAPI) listNodes(ctx context.Context, parentID string) ([]node, error) {
+	a.listCalls++
+	return a.fakeAPI.listNodes(ctx, parentID)
+}
+
+// A workspace whose root holds only folders can still hold readable documents
+// below them, and sync walks into folders to reach them. Validate must look
+// there too instead of letting an unrelated unreadable workspace fail the data
+// source, whichever order the workspaces are listed in.
+func TestValidateFindsReadableDocumentBelowRootFolders(t *testing.T) {
+	team := workspace{ID: "team", RootNodeID: "root-team", Name: "Team"}
+	other := workspace{ID: "other", RootNodeID: "root-other", Name: "Other"}
+	denied := errors.New("forbidden.accessDenied: the operator has no permission")
+	cases := []struct {
+		name       string
+		workspaces []workspace
+		nodeErrors map[string]error
+	}{
+		{name: "folder-only workspace first", workspaces: []workspace{team, other}},
+		{name: "folder-only workspace second", workspaces: []workspace{other, team}},
+		{
+			name:       "other workspace unlistable",
+			workspaces: []workspace{team, other},
+			nodeErrors: map[string]error{"root-other": errors.New("DingTalk API status=500")},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			api := &fakeAPI{
+				workspaces: tc.workspaces,
+				nodes: map[string][]node{
+					"root-team": {
+						{ID: "folder", Name: "Folder", Type: "FOLDER"},
+					},
+					"folder": {
+						{ID: "doc-team", Name: "Handbook", Type: "FILE", Category: "ALIDOC", Extension: "adoc"},
+					},
+					"root-other": {
+						{ID: "doc-other", Name: "Secret", Type: "FILE", Category: "ALIDOC", Extension: "adoc"},
+					},
+				},
+				nodeErrors: tc.nodeErrors,
+				blocks: map[string][]json.RawMessage{
+					"doc-team": {rawJSON(`{"paragraph":{"text":"hello"}}`)},
+				},
+				blockErrors: map[string]error{"doc-other": denied},
+			}
+
+			c := testConnector(api)
+			if err := c.Validate(context.Background(), testConfig()); err != nil {
+				t.Fatalf("Validate must find the readable document below the root folder, got: %v", err)
+			}
+			if api.blockCalls["doc-team"] != 1 {
+				t.Fatalf("Validate should probe the document inside the folder, calls=%v", api.blockCalls)
+			}
+		})
+	}
+}
+
+// A workspace with a deep folder tree must not turn Validate into an unbounded
+// walk. When the listing budget runs out with folders still unexplored, an
+// unreadable document elsewhere proves nothing, so Validate accepts.
+func TestValidateCapsFolderListingsAndAcceptsWhenInconclusive(t *testing.T) {
+	inner := &fakeAPI{
+		workspaces: []workspace{
+			{ID: "deep", RootNodeID: "root-deep", Name: "Deep"},
+			{ID: "locked", RootNodeID: "root-locked", Name: "Locked"},
+		},
+		nodes: map[string][]node{
+			"root-locked": {
+				{ID: "doc-locked", Name: "Secret", Type: "FILE", Category: "ALIDOC", Extension: "adoc"},
+			},
+		},
+		blockErrors: map[string]error{
+			"doc-locked": errors.New("forbidden.accessDenied: the operator has no permission"),
+		},
+	}
+	parent := "root-deep"
+	for i := 0; i < 3*maxValidateListings; i++ {
+		id := fmt.Sprintf("folder-%d", i)
+		inner.nodes[parent] = []node{{ID: id, Name: id, Type: "FOLDER"}}
+		parent = id
+	}
+	api := &listCountingAPI{fakeAPI: inner}
+
+	c := testConnector(api)
+	if err := c.Validate(context.Background(), testConfig()); err != nil {
+		t.Fatalf("Validate must accept when folders were left unexplored, got: %v", err)
+	}
+	// Each workspace root is listed once on top of the shared folder budget.
+	if limit := maxValidateListings + len(inner.workspaces); api.listCalls > limit {
+		t.Fatalf("Validate made %d listings, want at most %d", api.listCalls, limit)
+	}
+}

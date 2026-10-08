@@ -105,7 +105,7 @@ func (c *Connector) Type() string {
 const maxValidateProbes = 5
 
 // Validate checks the application credentials and operator access, including
-// node listing and a sample document read when one is visible at the workspace root.
+// node listing and a sample document read when one is visible in a workspace.
 //
 // The operator is not expected to reach every workspace in the tenant: app
 // credentials are valid as long as one reachable workspace yields one readable
@@ -126,37 +126,43 @@ func (c *Connector) Validate(ctx context.Context, dataSourceConfig *types.DataSo
 	var (
 		lastErr       error
 		sawDocument   bool
+		inconclusive  bool
 		workspaceFail int
 		probes        int
+		listings      int
 	)
 	for _, item := range workspaces {
 		rootNodeID := strings.TrimSpace(item.RootNodeID)
 		if rootNodeID == "" {
 			continue
 		}
-		children, err := api.listNodes(ctx, rootNodeID)
+		document, found, exhausted, err := firstValidateDocument(ctx, api, rootNodeID, &listings)
 		if err != nil {
 			lastErr = fmt.Errorf("workspace %q: %w", item.Name, err)
 			workspaceFail++
 			continue
 		}
-		for _, child := range children {
-			if !child.isDocument() {
-				continue
-			}
-			sawDocument = true
-			probes++
-			if err := verifyDocument(ctx, api, child); err != nil {
-				lastErr = fmt.Errorf("workspace %q document %q: %w", item.Name, child.Name, err)
-				// One probe per workspace: another document in the same
-				// workspace almost always fails for the same reason.
-				break
-			}
+		if exhausted {
+			inconclusive = true
+		}
+		if !found {
+			continue
+		}
+		sawDocument = true
+		probes++
+		if err := verifyDocument(ctx, api, document); err != nil {
+			lastErr = fmt.Errorf("workspace %q document %q: %w", item.Name, document.Name, err)
+		} else {
 			return nil
 		}
 		if probes >= maxValidateProbes {
 			break
 		}
+	}
+	// Folders were left unexplored when the listing budget ran out, so an
+	// unreadable document elsewhere does not prove the data source is unusable.
+	if inconclusive {
+		return nil
 	}
 
 	// Nothing readable anywhere. Only a tenant that exposed no document at all
@@ -170,6 +176,45 @@ func (c *Connector) Validate(ctx context.Context, dataSourceConfig *types.DataSo
 		return nil
 	}
 	return fmt.Errorf("validate DingTalk data source: %w", lastErr)
+}
+
+// maxValidateListings caps the folder listings Validate spends looking for a
+// document below workspace roots that hold only folders.
+const maxValidateListings = 20
+
+// firstValidateDocument walks a workspace breadth-first, the way scanWorkspace
+// does, and returns the first document it finds. exhausted reports that the
+// listing budget ran out with folders still unexplored.
+func firstValidateDocument(
+	ctx context.Context, api dingTalkAPI, rootNodeID string, listings *int,
+) (node, bool, bool, error) {
+	queue := []string{rootNodeID}
+	for len(queue) > 0 {
+		parent := queue[0]
+		queue = queue[1:]
+		if parent != rootNodeID {
+			if *listings >= maxValidateListings {
+				return node{}, false, true, nil
+			}
+			*listings++
+		}
+		children, err := api.listNodes(ctx, parent)
+		if err != nil {
+			if parent == rootNodeID {
+				return node{}, false, false, err
+			}
+			continue
+		}
+		for _, child := range children {
+			if child.isDocument() {
+				return child, true, false, nil
+			}
+			if child.isFolder() || child.HasChildren {
+				queue = append(queue, child.ID)
+			}
+		}
+	}
+	return node{}, false, false, nil
 }
 
 // verifyDocument proves one visible document is readable by calling the read
