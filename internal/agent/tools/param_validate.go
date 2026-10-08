@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 )
 
 // ValidationError describes a specific parameter validation failure.
@@ -132,14 +133,16 @@ func validateProperty(name string, val any, prop map[string]any) []ValidationErr
 	// String length bounds
 	if targetType == "string" {
 		if s, ok := val.(string); ok {
-			if minLen, ok := getFloat(prop, "minLength"); ok && float64(len(s)) < minLen {
+			// JSON Schema measures string length in Unicode code points, not bytes.
+			length := float64(utf8.RuneCountInString(s))
+			if minLen, ok := getFloat(prop, "minLength"); ok && length < minLen {
 				errs = append(errs, ValidationError{
 					Param: name,
 					Message: fmt.Sprintf("parameter '%s' must have at least %d characters",
 						name, int(minLen)),
 				})
 			}
-			if maxLen, ok := getFloat(prop, "maxLength"); ok && float64(len(s)) > maxLen {
+			if maxLen, ok := getFloat(prop, "maxLength"); ok && length > maxLen {
 				errs = append(errs, ValidationError{
 					Param: name,
 					Message: fmt.Sprintf("parameter '%s' must have at most %d characters",

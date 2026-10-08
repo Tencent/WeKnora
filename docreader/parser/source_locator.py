@@ -11,14 +11,13 @@ the origin at its top-left corner, so viewers can draw it at any zoom.
 from __future__ import annotations
 
 import re
+from collections import Counter
 import statistics
 import unicodedata
 from typing import Iterable, List, Optional, Sequence, Tuple
 
 # How far past the cursor a line is searched for, in normalized characters.
 _SEARCH_WINDOW = 6000
-# How much of a line's normalized text is searched for.
-_KEY_CHARS = 24
 # Lines shorter than this (normalized) are too ambiguous to place.
 _MIN_KEY_CHARS = 2
 # Lines shorter than this are placed only when their text is unique on the
@@ -54,7 +53,22 @@ def normalize_with_positions(text: str) -> Tuple[str, List[int]]:
     out: List[str] = []
     pos: List[int] = []
     for i, ch in enumerate(text):
+        value = unicodedata.normalize("NFKC", ch)
         folded = _fold(ch)
+        if value in ".,:/+−-%‰<>=≤≥≠":
+            before, after = i - 1, i + 1
+            while before >= 0 and text[before] in " \t":
+                before -= 1
+            while after < len(text) and text[after] in " \t":
+                after += 1
+            prev = before >= 0 and text[before].isdigit()
+            next_digit = after < len(text) and text[after].isdigit()
+            semantic = ((value in ".,/:" and prev and next_digit)
+                        or (value in "+-−" and next_digit)
+                        or (value in "%‰" and prev)
+                        or value in "<>=≤≥≠")
+            if semantic:
+                folded = value.replace("−", "-")
         for f in folded:
             out.append(f)
             pos.append(i)
@@ -62,7 +76,7 @@ def normalize_with_positions(text: str) -> Tuple[str, List[int]]:
 
 
 def normalize(text: str) -> str:
-    return "".join(_fold(ch) for ch in text)
+    return normalize_with_positions(text)[0]
 
 
 def _key_weight(key: str) -> int:
@@ -79,6 +93,23 @@ def _column_cursor(boxes, idx: int, ends: List[Optional[int]]) -> Optional[int]:
         if px0 < x1 and x0 < px1 and py0 > y0:
             return ends[j]
     return None
+
+
+def _numeric_safe_matches(text: str, key: str) -> List[int]:
+    out = []
+    if not key:
+        return out
+    start = 0
+    while (at := text.find(key, start)) >= 0:
+        before = text[at - 1] if at else ""
+        end = at + len(key)
+        after = text[end] if end < len(text) else ""
+        left = key[0].isdigit() and bool(before) and (before.isdigit() or before in ".,:/+−-")
+        right = key[-1].isdigit() and bool(after) and (after.isdigit() or after in ".,:/%‰")
+        if not left and not right:
+            out.append(at)
+        start = at + 1
+    return out
 
 
 def locate_lines(
@@ -100,10 +131,12 @@ def locate_lines(
     hits: List[Optional[int]] = []
     ends: List[Optional[int]] = []
     cursor = 0
+    counts = Counter(normalize(line) for line in line_texts)
+    occurrences = {key: _numeric_safe_matches(norm, key) for key in counts}
     for idx, line in enumerate(line_texts):
-        key = normalize(line)[:_KEY_CHARS]
-        if len(key) < _MIN_KEY_CHARS or (
-            _key_weight(key) < _SHORT_KEY_WEIGHT and norm.count(key) > 1
+        key = normalize(line)
+        if len(key) < _MIN_KEY_CHARS or len(occurrences[key]) != counts[key] or (
+            _key_weight(key) < _SHORT_KEY_WEIGHT and len(occurrences[key]) > 1
         ):
             hits.append(None)
             ends.append(None)
@@ -115,11 +148,11 @@ def locate_lines(
                 cursors.insert(0, column)
         at = -1
         for start_at in cursors:
-            at = norm.find(key, start_at, start_at + _SEARCH_WINDOW + len(key))
+            at = next((hit for hit in occurrences[key] if start_at <= hit <= start_at + _SEARCH_WINDOW), -1)
             if at >= 0:
                 break
         if at < 0:
-            at = norm.find(key)
+            at = occurrences[key][0] if len(occurrences[key]) == 1 else -1
             if at < 0:
                 hits.append(None)
                 ends.append(None)
@@ -232,13 +265,12 @@ def page_blocks(
 
     ``lines`` are visual lines ``{"text", "bbox"}`` (bbox in PDF points). Lines
     are placed in ``page_text``, grouped into paragraphs by geometry, and each
-    paragraph becomes a block spanning from its first line to the next
-    paragraph, boxed by the union of its lines. Text before the first placed
-    line, or a page with no placeable lines, gets a page-only block, so the
-    blocks always tile the page's text.
+    paragraph becomes a block spanning only its matched lines, boxed by their
+    union. Unmatched gaps keep page-only provenance and never inherit the
+    previous paragraph's geometry.
     """
     end = offset + len(page_text)
-    page_only = {"type": "pdf", "page": page_number}
+    page_only = {"type": "pdf", "page": page_number, "mapping": "exact"}
     if not page_text:
         return []
     placed = []
@@ -264,30 +296,49 @@ def page_blocks(
         for g in (_line_gap(a[1], b[1]) for a, b in zip(placed, placed[1:]))
         if g is not None and g >= 0
     ]
-    usual_gap = statistics.median(gaps) if gaps else line_h * 0.5
+    usual_gap = min(statistics.median(gaps), line_h * 1.5) if gaps else line_h * 0.5
+
+    norm, positions = normalize_with_positions(page_text)
+    def line_end(at, line):
+        key = normalize(line["text"])
+        norm_start = next((i for i, p in enumerate(positions) if p >= at), len(norm))
+        hit = norm.find(key, norm_start)
+        if hit < 0:
+            return at
+        end_at = positions[hit + len(key) - 1] + 1
+        while end_at < len(page_text) and not page_text[end_at].isalnum():
+            if page_text[end_at] == "\n":
+                return end_at + 1
+            end_at += 1
+        return end_at
 
     paragraphs: List[Tuple[int, List[dict]]] = []
     for at, ln in placed:
+        ln = {**ln, "_source_end": line_end(at, ln)}
         if paragraphs:
             prev = paragraphs[-1][1][-1]
             col_right = max(p["bbox"][2] for p in paragraphs[-1][1])
             col_right = max(col_right, ln["bbox"][2])
-            if not _starts_paragraph(prev, ln, line_h, usual_gap, col_right):
+            previous_end = prev["_source_end"]
+            gap_is_empty = not normalize(page_text[previous_end:at])
+            if gap_is_empty and not _starts_paragraph(prev, ln, line_h, usual_gap, col_right):
                 paragraphs[-1][1].append(ln)
                 continue
         paragraphs.append((at, [ln]))
 
     blocks: List[dict] = []
-    first_at = paragraphs[0][0]
-    if first_at > 0 and page_text[:first_at].strip():
-        blocks.append({"start": offset, "end": offset + first_at, "locator": dict(page_only)})
-    for i, (at, members) in enumerate(paragraphs):
-        stop = paragraphs[i + 1][0] if i + 1 < len(paragraphs) else len(page_text)
-        if i == 0:
-            at = 0 if not blocks else at
+    cursor = 0
+    for at, members in paragraphs:
+        stop = members[-1]["_source_end"]
         if stop <= at:
             continue
+        if at > cursor and page_text[cursor:at].strip():
+            blocks.append({"start": offset + cursor, "end": offset + at, "locator": dict(page_only)})
         locator = dict(page_only)
         locator["bbox"] = geometry.bbox(_union(m["bbox"] for m in members))
+        locator["source_id"] = f"pdf:{page_number}:{at}:{stop}"
         blocks.append({"start": offset + at, "end": offset + stop, "locator": locator})
+        cursor = stop
+    if cursor < len(page_text) and page_text[cursor:].strip():
+        blocks.append({"start": offset + cursor, "end": end, "locator": dict(page_only)})
     return blocks

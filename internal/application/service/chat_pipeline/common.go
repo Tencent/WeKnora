@@ -152,6 +152,9 @@ func loadAndProcessHistory(
 			// Historical references are carried separately in KnowledgeReferences
 			// and can be re-merged into this turn's freshly rendered context.
 			h.Query = message.Content
+			if strings.TrimSpace(h.Query) == "" && (len(message.Images) > 0 || len(message.Attachments) > 0) {
+				h.Query = types.UploadOnlyQuestion(types.LanguageFromContextOrDefault(ctx))
+			}
 			h.CreateAt = message.CreatedAt
 			if desc := extractImageCaptions(message.Images); desc != "" {
 				h.Query += "\n\n[用户上传图片内容]\n" + desc

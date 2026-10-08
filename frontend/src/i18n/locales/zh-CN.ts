@@ -994,6 +994,12 @@ export default {
       paths: '同步目录', pathsPlaceholder: '每行一个目录；留空同步整个项目',
       addProject: '添加项目', projectRequired: '请至少添加一个 GitLab 项目',
     },
+    seafile: {
+      baseUrl: 'Seafile 地址', apiToken: 'API 令牌',
+      apiTokenHint: '在 Seafile「设置 → Web API 令牌」中生成；账号对所选资料库有读权限即可，令牌不会随文件下载请求发送。',
+      singleLibraryOnly: '一个数据源只能同步一个资料库，请先取消已选资料库中的内容再改选。',
+      selectionRequired: '请至少勾选一个资料库、目录或文件',
+    },
     resourceHint: '选择要同步的内容空间/文件夹',
     untitled: '无标题',
     resourceLoadFailed: '加载资源列表失败',
@@ -1007,6 +1013,10 @@ export default {
     guideStep1_notion: '在 Notion 中打开你想要同步的页面或数据库',
     guideStep2_notion: '点击右上角的「···」菜单，选择「Connect to」或「Add connections」',
     guideStep3_notion: '搜索并选择你的集成应用（Integration），然后回到这里点重新加载',
+    noResourcesDesc_seafile: '该令牌能访问的资料库为空，或全部为加密资料库（不支持同步）',
+    guideStep1_seafile: '登录 Seafile，确认账号至少拥有一个未加密资料库的读取权限',
+    guideStep2_seafile: '在「设置 → Web API 令牌」中生成或重新生成令牌',
+    guideStep3_seafile: '回到这里填入新令牌并点重新加载',
     permissionDocLink: '查看飞书知识库权限配置文档',
     syncScheduleLabel: '同步频率',
     conflictLabel: '冲突策略',
@@ -1099,7 +1109,8 @@ export default {
     resourceType: {
       wikiSpace: '知识库空间',
       docCategory: '文档标签',
-      book: '语雀知识库'
+      book: '语雀知识库',
+      library: 'Seafile 资料库'
     },
     scheduleHuman: {
       '30min': '每 30 分钟',
@@ -1147,7 +1158,8 @@ export default {
       dingtalk: '同步钉钉知识库中的在线文档',
       ima: '同步腾讯 IMA 知识库中的文档、笔记与文件（暂不支持 AI 会话与视频解析）',
       rss: '同步 RSS / Atom 订阅源中的文章',
-      gitlab: '同步 GitLab 项目中的文件'
+      gitlab: '同步 GitLab 项目中的文件',
+      seafile: '同步 Seafile 资料库中的目录与文件'
     },
     connector: {
       feishu: '飞书',
@@ -1160,7 +1172,8 @@ export default {
       dingtalk: '钉钉文档',
       ima: '腾讯 IMA',
       rss: 'RSS / Atom 订阅',
-      gitlab: 'GitLab'
+      gitlab: 'GitLab',
+      seafile: 'Seafile'
     },
     logDetail: {
       startTime: '开始时间',
@@ -1224,7 +1237,15 @@ export default {
       dingtalk_resource_failed: '钉钉资源不可用，请检查访问权限和已选资源后重试。',
       deletion_lookup_failed: '删除前查找文档失败，请查看服务器日志',
       deletion_failed: '删除失败，请查看服务器日志',
-      ingest_failed: '导入失败，请查看服务器日志'
+      ingest_failed: '导入失败，请查看服务器日志',
+      seafile_permission_denied: '无权访问该 Seafile 文件，请检查令牌所属账号的资料库权限。',
+      seafile_not_found: 'Seafile 文件不存在或已被移动，下次同步将重试。',
+      seafile_file_too_large: 'Seafile 文件超过大小限制，请调大 MAX_FILE_SIZE_MB 或缩小该文件。',
+      seafile_empty_file: 'Seafile 文件内容为空，已跳过。',
+      seafile_source_changed: 'Seafile 文件在获取过程中发生变化，下次同步将重试。',
+      seafile_invalid_response: 'Seafile 返回了无法解析的响应，请检查服务器版本与反向代理配置。',
+      seafile_ssrf_blocked: 'Seafile 文件下载地址被 SSRF 策略拦截，请将 fileserver 域名加入 SSRF_WHITELIST。',
+      seafile_fetch_failed: '从 Seafile 获取文件失败，下次同步将重试。'
     },
   },
   ollama: {
@@ -2920,6 +2941,7 @@ export default {
   },
   language: {
     zhCN: '简体中文',
+    zhTW: '繁體中文',
     enUS: 'English',
     ruRU: 'Русский',
     koKR: '한국어',
@@ -3411,7 +3433,8 @@ export default {
           },
           registration_mode: {
             self_serve: '自助注册（任何人可注册）',
-            invite_only: '仅邀请（关闭公网注册）'
+            invite_register: '仅限邀请注册（需有效邀请链接）',
+            invite_only: '禁止注册（已有账号仍可接受邀请）'
           }
         }
       },
@@ -3441,7 +3464,7 @@ export default {
           docker_enabled: '是否允许 Docker 沙箱后端。本机 docker.sock 等同宿主机 root，默认关闭。仅系统管理员可打开；打开后立即生效，无需重启。私有化单机且已挂载 daemon socket，或配置了带 TLS 的远程 tcp:// 时再启用。'
         },
         auth: {
-          registration_mode: '自助注册模式。self_serve = 任何人可注册账号；invite_only = 关闭公网注册，仅 Owner/Admin 可邀请。修改后立即生效，但谨慎对待 self_serve（公网会接受 spam）。',
+          registration_mode: '注册模式。开放注册允许任何人创建账号；仅限邀请注册要求有效邀请链接；禁止注册不允许创建账号，但已有账号仍可接受邀请。保存后立即生效。',
           default_tenant_mode: '公开注册后的空间初始化策略。create_personal 会自动创建个人空间并授予 Owner；tenantless 仅创建账户，用户需要接受邀请或主动创建空间。只影响之后注册的用户。',
           complex_password_enabled: '是否启用复杂密码。开启后密码必须包含大小写字母、数字和特殊字符。修改后立即生效，只影响新注册用户或新密码修改/重置操作。特殊字符包含：{specialChars}'
         }
@@ -3472,7 +3495,7 @@ export default {
           docker_enabled: '启用 Docker 沙箱'
         },
         auth: {
-          registration_mode: '自助注册模式',
+          registration_mode: '注册模式',
           default_tenant_mode: '注册默认空间策略',
           complex_password_enabled: '启用复杂密码'
         }
@@ -3965,6 +3988,13 @@ export default {
     referenceSourceView: '查看原文',
     referenceSourceRelocate: '重新定位',
     referenceSourceLocating: '正在定位引用位置…',
+    referenceSourceExact: "已精确定位原文片段",
+    referenceSourcePartial: "已高亮核验通过的原文片段，部分引用内容尚未匹配",
+    referenceSourceBlock: "已定位到来源区域，尚未精确匹配文字",
+    referenceSourceAmbiguous: "原文有多处相同内容，无法唯一定位",
+    referenceSourceStale: "原文或内容已更新，当前引用无法精确定位",
+    referenceSourcePrevious: "上一处引用",
+    referenceSourceNext: "下一处引用",
     referenceSourceFoundPage: '已定位到第 {page} 页',
     referenceSourceNotFound: '未能精确定位引用内容，已为你打开原文',
     referenceSourceOpenWeb: '打开原网页并定位',
@@ -6901,6 +6931,12 @@ export default {
     noActivity: '暂无解析记录',
     totalDuration: '总耗时：{d}',
     errorCode: {
+      DOCREADER_UNAVAILABLE: "文档解析服务不可用",
+      DOCREADER_UNAVAILABLE_SUGGESTION: "无法连接 DocReader，或连接已中断。请检查解析服务是否启动、是否反复重启以及网络是否正常；服务恢复后再重试，无需重复上传文件。",
+      DOCREADER_TIMEOUT: "文档解析超时",
+      DOCREADER_TIMEOUT_SUGGESTION: "请检查 DocReader 的健康状态和负载；服务正常后再重试，必要时拆分大文件。",
+      DOCREADER_PARSE_FAILED: "文档解析失败",
+      DOCREADER_PARSE_FAILED_SUGGESTION: "请检查文件格式，并让管理员查看本次解析对应的 DocReader 日志。",
       TASK_STALLED: '长时间无进展，已自动终止',
       TASK_STALLED_SUGGESTION: '处理超过阈值仍没有任何进展，且队列中已无对应任务，已被系统标记为失败。请点击「重试」；如反复出现，请检查该阶段依赖的服务（文档解析、模型、向量库）是否正常。',
       UNKNOWN_SUGGESTION: '请查看应用日志获取详细信息。'
@@ -7159,6 +7195,7 @@ export default {
     channelConfluence: 'Confluence',
     channelYuque: '语雀',
     channelGitLab: 'GitLab',
+    channelSeafile: 'Seafile',
     channelIma: '腾讯 IMA',
     channelUpload: '上传',
     channelManual: '手动',

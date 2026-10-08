@@ -738,6 +738,10 @@ type UpdateKnowledgeBaseRequest struct {
 	Name        string                     `json:"name"        binding:"required"`
 	Description string                     `json:"description"`
 	Config      *types.KnowledgeBaseConfig `json:"config"`
+	// VLMConfig updates the knowledge base's multimodal (vision) config.
+	// Optional: nil means "no change", mirroring how CreateKnowledgeBase
+	// accepts a top-level vlm_config.
+	VLMConfig *types.VLMConfig `json:"vlm_config"`
 }
 
 // UpdateKnowledgeBase godoc
@@ -758,7 +762,7 @@ func (h *KnowledgeBaseHandler) UpdateKnowledgeBase(c *gin.Context) {
 	logger.Info(ctx, "Start updating knowledge base")
 
 	// Validate and get the knowledge base
-	_, id, _, permission, err := h.validateAndGetKnowledgeBase(c)
+	currentKB, id, _, permission, err := h.validateAndGetKnowledgeBase(c)
 	if err != nil {
 		c.Error(err)
 		return
@@ -776,6 +780,14 @@ func (h *KnowledgeBaseHandler) UpdateKnowledgeBase(c *gin.Context) {
 		logger.Error(ctx, "Failed to parse request parameters", err)
 		c.Error(apperrors.NewBadRequestError("Invalid request parameters").WithDetails(err.Error()))
 		return
+	}
+	// The VLM model is a KB setting: like PUT /initialization/config, only the
+	// owner workspace or an admin share may change it, not a share editor.
+	if req.VLMConfig != nil {
+		if _, err := kbSettingsAccess(c, currentKB); err != nil {
+			_ = c.Error(err)
+			return
+		}
 	}
 	if req.Config != nil {
 		probe := &types.KnowledgeBase{
@@ -796,8 +808,13 @@ func (h *KnowledgeBaseHandler) UpdateKnowledgeBase(c *gin.Context) {
 		secutils.SanitizeForLog(id), secutils.SanitizeForLog(req.Name))
 
 	// Update the knowledge base
-	kb, err := h.service.UpdateKnowledgeBase(ctx, id, req.Name, req.Description, req.Config)
+	kb, err := h.service.UpdateKnowledgeBase(ctx, id, req.Name, req.Description, req.Config, req.VLMConfig)
 	if err != nil {
+		// A rejected vlm_config is the caller's mistake, not a server failure.
+		if appErr, ok := apperrors.IsAppError(err); ok {
+			_ = c.Error(appErr)
+			return
+		}
 		logger.ErrorWithFields(ctx, err, nil)
 		c.Error(apperrors.NewInternalServerError(err.Error()))
 		return

@@ -992,6 +992,12 @@ export default {
       paths: '디렉터리', pathsPlaceholder: '한 줄에 하나씩 입력하세요. 비워 두면 전체 프로젝트를 동기화합니다',
       addProject: '프로젝트 추가', projectRequired: 'GitLab 프로젝트를 하나 이상 추가하세요',
     },
+    seafile: {
+      baseUrl: 'Seafile URL', apiToken: 'API 토큰',
+      apiTokenHint: 'Seafile의 \'설정 → Web API 토큰\'에서 생성하세요. 계정에 선택한 라이브러리의 읽기 권한만 있으면 되며 토큰은 파일 다운로드 요청에 전송되지 않습니다.',
+      singleLibraryOnly: '데이터 소스 하나는 라이브러리 하나만 동기화합니다. 다른 라이브러리를 선택하기 전에 현재 선택을 해제하세요.',
+      selectionRequired: '라이브러리, 폴더 또는 파일을 하나 이상 선택하세요',
+    },
     resourceHint: '동기화할 공간/폴더를 선택하세요',
     untitled: '제목 없음',
     resourceLoadFailed: '리소스 목록 로드 실패',
@@ -1005,6 +1011,10 @@ export default {
     guideStep1_notion: 'Notion에서 동기화하려는 페이지나 데이터베이스를 엽니다',
     guideStep2_notion: '오른쪽 상단의 \'···\' 메뉴를 클릭하고 \'Connect to\' 또는 \'Add connections\'를 선택합니다',
     guideStep3_notion: 'Integration 앱을 검색하여 선택한 후, 돌아와서 다시 시도를 클릭하세요',
+    noResourcesDesc_seafile: '이 토큰으로 접근할 수 있는 라이브러리가 없거나 모두 암호화 라이브러리입니다(암호화 라이브러리는 동기화할 수 없음)',
+    guideStep1_seafile: 'Seafile에 로그인하여 계정이 암호화되지 않은 라이브러리를 하나 이상 읽을 수 있는지 확인하세요',
+    guideStep2_seafile: '\'설정 → Web API 토큰\'에서 토큰을 생성하거나 다시 생성하세요',
+    guideStep3_seafile: '여기로 돌아와 새 토큰을 입력하고 다시 시도를 클릭하세요',
     permissionDocLink: '페이슈 위키 권한 설정 문서 보기',
     syncScheduleLabel: '동기화 주기',
     conflictLabel: '충돌 전략',
@@ -1097,7 +1107,8 @@ export default {
     resourceType: {
       wikiSpace: '위키 공간',
       docCategory: '문서 태그',
-      book: 'Yuque 지식베이스'
+      book: 'Yuque 지식베이스',
+      library: 'Seafile 라이브러리'
     },
     scheduleHuman: {
       '30min': '30분마다',
@@ -1145,7 +1156,8 @@ export default {
       dingtalk: 'DingTalk 지식베이스의 온라인 문서 동기화',
       ima: 'Tencent IMA 지식베이스에서 문서, 노트 및 파일 동기화 (AI 세션과 동영상 분석은 지원되지 않음)',
       rss: 'RSS / Atom 피드에서 글 동기화',
-      gitlab: 'GitLab 프로젝트의 파일 동기화'
+      gitlab: 'GitLab 프로젝트의 파일 동기화',
+      seafile: 'Seafile 라이브러리의 폴더와 파일 동기화'
     },
     connector: {
       feishu: '페이슈 (Feishu)',
@@ -1158,7 +1170,8 @@ export default {
       dingtalk: 'DingTalk 문서',
       ima: 'Tencent IMA',
       rss: 'RSS / Atom 피드',
-      gitlab: 'GitLab'
+      gitlab: 'GitLab',
+      seafile: 'Seafile'
     },
     logDetail: {
       startTime: '시작 시간',
@@ -1222,7 +1235,15 @@ export default {
       dingtalk_resource_failed: 'DingTalk 리소스를 사용할 수 없습니다. 접근 권한과 선택한 리소스를 확인한 후 다시 시도하세요.',
       deletion_lookup_failed: '삭제 전 항목 조회에 실패했습니다. 서버 로그를 확인하세요',
       deletion_failed: '삭제에 실패했습니다. 서버 로그를 확인하세요',
-      ingest_failed: '가져오기에 실패했습니다. 서버 로그를 확인하세요'
+      ingest_failed: '가져오기에 실패했습니다. 서버 로그를 확인하세요',
+      seafile_permission_denied: 'Seafile 파일에 접근할 수 없습니다. 토큰 소유자의 라이브러리 권한을 확인하세요.',
+      seafile_not_found: 'Seafile 파일이 존재하지 않거나 이동되었습니다. 다음 동기화에서 다시 시도합니다.',
+      seafile_file_too_large: 'Seafile 파일이 크기 제한을 초과합니다. MAX_FILE_SIZE_MB를 늘리거나 파일을 줄이세요.',
+      seafile_empty_file: 'Seafile 파일이 비어 있어 건너뛰었습니다.',
+      seafile_source_changed: '가져오는 동안 Seafile 파일이 변경되었습니다. 다음 동기화에서 다시 시도합니다.',
+      seafile_invalid_response: 'Seafile이 해석할 수 없는 응답을 반환했습니다. 서버 버전과 리버스 프록시 설정을 확인하세요.',
+      seafile_ssrf_blocked: 'Seafile 다운로드 URL이 SSRF 정책에 의해 차단되었습니다. fileserver 호스트를 SSRF_WHITELIST에 추가하세요.',
+      seafile_fetch_failed: 'Seafile에서 파일을 가져오지 못했습니다. 다음 동기화에서 다시 시도합니다.'
     },
   },
   ollama: {
@@ -2918,6 +2939,7 @@ export default {
   },
   language: {
     zhCN: '简体中文',
+    zhTW: '번체 중국어',
     enUS: 'English',
     ruRU: 'Русский',
     koKR: '한국어',
@@ -3409,7 +3431,8 @@ export default {
           },
           registration_mode: {
             self_serve: '셀프 가입 (누구나 가입 가능)',
-            invite_only: '초대 전용 (공개 가입 비활성)'
+            invite_register: '초대 가입 (유효한 링크 필요)',
+            invite_only: '가입 금지 (기존 계정은 초대 수락 가능)'
           }
         }
       },
@@ -3439,7 +3462,7 @@ export default {
           docker_enabled: 'Docker 샌드박스 백엔드를 허용할지 설정합니다. 로컬 docker.sock은 호스트 root와 같으므로 기본값은 꺼짐입니다. 시스템 관리자만 켤 수 있으며 저장 즉시 적용됩니다. 데몬 소켓을 마운트했거나 TLS가 있는 원격 tcp:// 를 쓰는 프라이빗 단일 노드에서만 켜세요.'
         },
         auth: {
-          registration_mode: '셀프 가입 모드입니다. self_serve = 누구나 계정을 만들 수 있음; invite_only = 공개 가입을 끄고 Owner/Admin만 초대 가능. 저장 즉시 적용되며, self_serve는 스팸 가입이 들어올 수 있으니 신중히 사용하세요.',
+          registration_mode: '가입 모드입니다. 공개 가입은 누구나 계정을 만들 수 있고, 초대 가입은 유효한 초대 링크가 필요합니다. 가입 금지 상태에서도 기존 계정은 초대를 수락할 수 있습니다. 저장 즉시 적용됩니다.',
           default_tenant_mode: '공개 가입 후 공간 초기화 정책입니다. create_personal은 개인 공간을 만들고 Owner를 부여하며, tenantless는 초대 수락 또는 직접 공간 생성 전까지 계정만 만듭니다.',
           complex_password_enabled: '복잡한 비밀번호를 사용할지 여부입니다. 활성화하면 비밀번호에 대문자, 소문자, 숫자 및 특수 문자가 포함되어야 합니다. 변경 사항은 즉시 적용되며, 새로 가입하는 사용자 또는 비밀번호를 새로 변경하거나 재설정하는 경우에만 적용됩니다. 특수 문자는 다음을 포함합니다: {specialChars}'
         }
@@ -3470,7 +3493,7 @@ export default {
           docker_enabled: 'Docker 샌드박스 사용'
         },
         auth: {
-          registration_mode: '셀프 가입 모드',
+          registration_mode: '가입 모드',
           default_tenant_mode: '기본 공간 프로비저닝',
           complex_password_enabled: '복잡한 비밀번호 사용'
         }
@@ -3963,6 +3986,13 @@ export default {
     referenceSourceView: '원문 보기',
     referenceSourceRelocate: '다시 찾기',
     referenceSourceLocating: '인용 위치를 찾는 중…',
+    referenceSourceExact: "원문 구절을 정확히 찾았습니다",
+    referenceSourcePartial: "확인된 원문을 강조했습니다. 인용 일부는 아직 일치하지 않습니다",
+    referenceSourceBlock: "원문 영역을 찾았습니다. 정확한 텍스트 일치는 확인되지 않았습니다",
+    referenceSourceAmbiguous: "일치하는 구절이 여러 개여서 위치를 특정할 수 없습니다",
+    referenceSourceStale: "원문 또는 내용이 변경되어 정확히 찾을 수 없습니다",
+    referenceSourcePrevious: "이전 인용 위치",
+    referenceSourceNext: "다음 인용 위치",
     referenceSourceFoundPage: '{page}페이지에서 찾았습니다',
     referenceSourceNotFound: '인용 위치를 정확히 찾지 못해 원문을 열었습니다',
     referenceSourceOpenWeb: '원본 웹페이지에서 해당 위치 열기',
@@ -6900,6 +6930,12 @@ export default {
     noActivity: '파싱 활동 없음',
     totalDuration: '총 소요시간: {d}',
     errorCode: {
+      DOCREADER_UNAVAILABLE: "문서 분석 서비스를 사용할 수 없습니다",
+      DOCREADER_UNAVAILABLE_SUGGESTION: "DocReader에 연결할 수 없거나 연결이 끊겼습니다. 서비스 상태, 반복 재시작, 네트워크를 확인한 후 다시 시도하세요. 파일을 다시 업로드할 필요는 없습니다.",
+      DOCREADER_TIMEOUT: "문서 분석 시간 초과",
+      DOCREADER_TIMEOUT_SUGGESTION: "DocReader 상태와 부하를 확인한 후 다시 시도하세요. 필요한 경우 큰 파일을 나누세요.",
+      DOCREADER_PARSE_FAILED: "문서 분석 실패",
+      DOCREADER_PARSE_FAILED_SUGGESTION: "파일 형식을 확인하고 관리자에게 이번 DocReader 로그 확인을 요청하세요.",
       TASK_STALLED: '진행이 없어 자동 중단됨',
       TASK_STALLED_SUGGESTION: '임계 시간을 넘도록 진행이 없고 대기열에도 해당 작업이 없어 실패로 표시되었습니다. 「다시 시도」를 누르세요. 반복되면 이 단계가 의존하는 서비스(문서 파싱, 모델, 벡터 저장소)를 확인하세요.',
       UNKNOWN_SUGGESTION: '자세한 내용은 애플리케이션 로그를 확인하세요.'
@@ -7158,6 +7194,7 @@ export default {
     channelConfluence: 'Confluence',
     channelYuque: 'Yuque',
     channelGitLab: 'GitLab',
+    channelSeafile: 'Seafile',
     channelIma: 'Tencent IMA',
     channelUpload: '업로드',
     channelManual: '수동',

@@ -1,6 +1,7 @@
 package sourceloc
 
 import (
+	"html"
 	"sort"
 	"strings"
 	"unicode"
@@ -16,67 +17,93 @@ type Unit struct {
 	Locator types.SourceLocator
 }
 
-const (
-	// alignKeyRunes is how much of a unit's normalized text is searched for.
-	alignKeyRunes = 32
-	// alignMinRunes skips units too short to place reliably.
-	alignMinRunes = 2
-	// alignWindowRunes bounds how far past the cursor a unit is searched, so
-	// a unit the parser dropped cannot drag the cursor across the document.
-	alignWindowRunes = 20000
-)
+// Skip units too short to place reliably.
+const alignMinRunes = 2
 
-// Align places units, which are in document order, into markdown and returns
-// one block per placed unit. A block runs from where its unit was found to
-// where the next placed unit starts, so the blocks tile the markdown from the
-// first placed unit on. Units are matched on letters and digits only, which
-// makes the match indifferent to Markdown syntax, whitespace and
-// punctuation the parser added or dropped.
+// Align maps complete source units, never extending a hit through unmatched
+// content. Unknown gaps must stay unknown: assigning them to the preceding
+// block can point a citation at an entirely different page.
 func Align(markdown string, units []Unit) []types.SourceBlock {
 	norm := normalizeMarkdown(markdown)
-	if norm.text == "" || len(units) == 0 {
-		return nil
+	runes := []rune(markdown)
+	var blocks []types.SourceBlock
+	cursor, floor := 0, 0
+	counts := make(map[string]int)
+	matches := make(map[string][]int)
+	for _, u := range units {
+		counts[normalizeKey(u.Text)]++
 	}
-	type hit struct {
-		pos  int // rune offset in markdown
-		unit int
-	}
-	var hits []hit
-	cursor := 0 // byte offset into norm.text
-	for i, u := range units {
+	for _, u := range units {
 		key := normalizeKey(u.Text)
 		if utf8.RuneCountInString(key) < alignMinRunes {
 			continue
 		}
-		at, width := norm.find(key, cursor)
-		if at < 0 {
+		// Repeated source text is safe only when every occurrence is accounted
+		// for by a source unit in reading order (not a TOC or an omitted block).
+		positions, known := matches[key]
+		if !known {
+			positions = normalizedMatches(norm.text, key)
+			matches[key] = positions
+		}
+		if len(positions) != counts[key] {
 			continue
 		}
-		hits = append(hits, hit{pos: norm.pos[at], unit: i})
-		cursor = at + width
-	}
-	if len(hits) == 0 {
-		return nil
-	}
-	runes := []rune(markdown)
-	prev := 0
-	for i := range hits {
-		hits[i].pos = lineLeadStart(runes, hits[i].pos, prev)
-		prev = hits[i].pos
-	}
-	total := len(runes)
-	blocks := make([]types.SourceBlock, 0, len(hits))
-	for i, h := range hits {
-		end := total
-		if i+1 < len(hits) {
-			end = hits[i+1].pos
-		}
-		if end <= h.pos {
+		matchIndex := sort.SearchInts(positions, cursor)
+		if matchIndex == len(positions) {
 			continue
 		}
-		blocks = append(blocks, types.SourceBlock{Start: h.pos, End: end, Locator: units[h.unit].Locator})
+		at := positions[matchIndex]
+		endByte := at + len(key)
+		start := lineLeadStart(runes, norm.pos[at], floor)
+		end := norm.end[endByte-1]
+		// Include trailing markup/URLs on the matched line and blank lines,
+		// but stop before the next visible text's line. This also preserves
+		// an image's destination without swallowing another paragraph.
+		if endByte == len(norm.text) {
+			end = len(runes)
+		} else {
+			next := norm.pos[endByte]
+			lead := next
+			for lead > 0 && runes[lead-1] != '\n' {
+				lead--
+			}
+			if lead >= end {
+				end = lead
+			}
+		}
+		loc := u.Locator
+		loc.Mapping = "exact"
+		blocks = append(blocks, types.SourceBlock{Start: start, End: end, Locator: loc})
+		cursor, floor = endByte, end
 	}
 	return blocks
+}
+
+// normalizedMatches rejects a number embedded in a different numeric value.
+func normalizedMatches(text, key string) []int {
+	var out []int
+	if key == "" {
+		return out
+	}
+	first, _ := utf8.DecodeRuneInString(key)
+	last, _ := utf8.DecodeLastRuneInString(key)
+	for from := 0; from <= len(text)-len(key); {
+		i := strings.Index(text[from:], key)
+		if i < 0 {
+			break
+		}
+		at := from + i
+		before, _ := utf8.DecodeLastRuneInString(text[:at])
+		after, _ := utf8.DecodeRuneInString(text[at+len(key):])
+		left := unicode.IsDigit(first) && (unicode.IsDigit(before) || strings.ContainsRune(".,:/+−-", before))
+		right := unicode.IsDigit(last) && (unicode.IsDigit(after) || strings.ContainsRune(".,:/%‰", after))
+		if !left && !right {
+			out = append(out, at)
+		}
+		_, size := utf8.DecodeRuneInString(text[at:])
+		from = at + size
+	}
+	return out
 }
 
 // lineLeadStart moves pos back to the start of its line when everything
@@ -95,45 +122,13 @@ func lineLeadStart(runes []rune, pos, floor int) int {
 	return start
 }
 
-// normalized is the letters-and-digits projection of a text: text holds the
+// normalized retains letters, digits and numeric symbols: text holds the
 // kept runes, pos[b] the rune offset in the source of the rune starting at
 // byte b of text.
 type normalized struct {
 	text string
 	pos  []int
-}
-
-// find searches key (already normalized) at or after byte offset from,
-// within the search window. It tries the key's head first and falls back to
-// a slice from its middle, so a unit whose opening differs (a list number
-// the parser rendered, a leading image) still lands. It returns the byte
-// offset of the match and how far the cursor should advance.
-func (n normalized) find(key string, from int) (int, int) {
-	limit := len(n.text)
-	if w := from + alignWindowRunes*3; w < limit {
-		limit = w
-	}
-	window := n.text[from:limit]
-	head := firstRunes(key, alignKeyRunes)
-	if idx := strings.Index(window, head); idx >= 0 {
-		return from + idx, len(head)
-	}
-	runes := []rune(key)
-	if len(runes) < alignKeyRunes*2 {
-		return -1, 0
-	}
-	mid := string(runes[len(runes)/2 : len(runes)/2+alignKeyRunes])
-	if idx := strings.Index(window, mid); idx >= 0 {
-		// Aim at where the unit should begin, not at its middle.
-		back := len(string(runes[:len(runes)/2]))
-		start := from + idx - back
-		start = max(start, from)
-		for start < from+idx && !utf8.RuneStart(n.text[start]) {
-			start++
-		}
-		return start, idx + len(mid) - (start - from)
-	}
-	return -1, 0
+	end  []int
 }
 
 // normalizeMarkdown projects markdown onto its letters and digits, skipping
@@ -143,6 +138,15 @@ func normalizeMarkdown(markdown string) normalized {
 	var b strings.Builder
 	b.Grow(len(markdown))
 	pos := make([]int, 0, len(markdown))
+	ends := make([]int, 0, len(markdown))
+	emit := func(r rune, start, end int) {
+		before := b.Len()
+		b.WriteRune(r)
+		for k := before; k < b.Len(); k++ {
+			pos = append(pos, start)
+			ends = append(ends, end)
+		}
+	}
 	runes := []rune(markdown)
 	for i := 0; i < len(runes); i++ {
 		r := runes[i]
@@ -158,27 +162,75 @@ func normalizeMarkdown(markdown string) normalized {
 				continue
 			}
 		}
-		if nr, ok := foldRune(r); ok {
-			start := b.Len()
-			b.WriteRune(nr)
-			for k := start; k < b.Len(); k++ {
-				pos = append(pos, i)
+		if r == '&' {
+			if end := indexRune(runes, ';', i+1, 32); end > 0 {
+				raw := string(runes[i : end+1])
+				if decoded := html.UnescapeString(raw); decoded != raw {
+					context := []rune{' '}
+					if i > 0 {
+						context[0] = runes[i-1]
+					}
+					context = append(context, []rune(decoded)...)
+					context = append(context, ' ')
+					if end+1 < len(runes) {
+						context[len(context)-1] = runes[end+1]
+					}
+					for j := 1; j+1 < len(context); j++ {
+						if nr, ok := matchRune(context, j); ok {
+							emit(nr, i, end+1)
+						}
+					}
+					i = end
+					continue
+				}
 			}
 		}
+		if nr, ok := matchRune(runes, i); ok {
+			emit(nr, i, i+1)
+		}
 	}
-	return normalized{text: b.String(), pos: pos}
+	return normalized{text: b.String(), pos: pos, end: ends}
 }
 
 // normalizeKey projects plain text onto its letters and digits.
 func normalizeKey(text string) string {
 	var b strings.Builder
-	b.Grow(len(text))
-	for _, r := range text {
-		if nr, ok := foldRune(r); ok {
-			b.WriteRune(nr)
+	runes := []rune(text)
+	for i := range runes {
+		if r, ok := matchRune(runes, i); ok {
+			b.WriteRune(r)
 		}
 	}
 	return b.String()
+}
+
+// Preserve distinctions such as 1.5/15, -5/5, 5%/5 and <5/>5.
+func matchRune(rs []rune, i int) (rune, bool) {
+	r := rs[i]
+	if r >= 0xFF01 && r <= 0xFF5E {
+		r -= 0xFEE0
+	}
+	if !strings.ContainsRune(".,:/+−-%‰<>=≤≥≠", r) {
+		return foldRune(r)
+	}
+	before, after := i-1, i+1
+	for before >= 0 && (rs[before] == ' ' || rs[before] == '\t') {
+		before--
+	}
+	for after < len(rs) && (rs[after] == ' ' || rs[after] == '\t') {
+		after++
+	}
+	prevDigit := before >= 0 && unicode.IsDigit(rs[before])
+	nextDigit := after < len(rs) && unicode.IsDigit(rs[after])
+	if ((r == '.' || r == ',' || r == '/' || r == ':') && prevDigit && nextDigit) ||
+		((r == '-' || r == '+' || r == '−') && nextDigit) ||
+		((r == '%' || r == '‰') && prevDigit) || strings.ContainsRune("<>=≤≥≠", r) {
+		if r == '−' {
+			r = '-'
+		}
+		return r, true
+	}
+	return foldRune(r)
 }
 
 // foldRune keeps letters and digits, lower-cased and with full-width ASCII
@@ -210,17 +262,6 @@ func indexRune(runes []rune, r rune, from, limit int) int {
 		}
 	}
 	return -1
-}
-
-func firstRunes(s string, n int) string {
-	i := 0
-	for idx := range s {
-		if i == n {
-			return s[:idx]
-		}
-		i++
-	}
-	return s
 }
 
 // SortBlocks orders blocks by start offset.

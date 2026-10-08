@@ -269,6 +269,14 @@ func (c *Compactor) streamSummary(
 				if streamErr != "" {
 					return "", finishReason, fmt.Errorf("summarization stream error: %s", streamErr)
 				}
+				// A stream that closes because the call was cancelled is a
+				// cancelled call, not an empty successful summary. Checking the
+				// context here, and not only in the ctx.Done() arm above, also
+				// settles the race where a cancellation closes the stream while
+				// both arms are ready and select picks between them at random.
+				if err := ctx.Err(); err != nil {
+					return "", finishReason, err
+				}
 				return sb.String(), finishReason, nil
 			}
 			stall.Reset(timeout)
@@ -298,6 +306,8 @@ func validateSummary(content, finishReason string) error {
 		return errors.New("empty response from LLM")
 	}
 	switch strings.ToLower(strings.TrimSpace(finishReason)) {
+	case types.FinishReasonIncomplete:
+		return errors.New(types.StreamEndedEarlyError)
 	case "length", "max_tokens", "max_output_tokens":
 		return errors.New("generation hit the token cap and the summary is incomplete")
 	}

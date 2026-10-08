@@ -1,4 +1,4 @@
-import { findInText } from './sourceLocator'
+import { findInText, findTextMatches } from './sourceLocator'
 
 /** Name of the CSS custom highlight used for cited text. */
 export const SOURCE_HIGHLIGHT_NAME = 'source-locate'
@@ -56,6 +56,15 @@ function pointAt(index: TextIndex, offset: number): { node: Text; offset: number
 export function findTextRange(root: Node, quote: string, index = buildTextIndex(root)): Range | null {
   const hit = findInText(index.text, quote)
   if (!hit) return null
+  return rangeAt(root, hit, index)
+}
+
+export function findTextRanges(root: Node, quote: string): Range[] {
+  const index = buildTextIndex(root)
+  return findTextMatches(index.text, quote).map((hit) => rangeAt(root, hit, index)).filter((r): r is Range => !!r)
+}
+
+function rangeAt(root: Node, hit: { start: number; end: number }, index: TextIndex): Range | null {
   const from = pointAt(index, hit.start)
   const to = pointAt(index, hit.end)
   if (!from || !to) return null

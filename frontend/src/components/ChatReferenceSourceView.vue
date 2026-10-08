@@ -58,6 +58,8 @@
 </template>
 
 <script setup lang="ts">
+import { sourceImageDigest } from '@/utils/sourceImage'
+import { buildProtectedFileRequest, resolveProtectedFileAccess } from '@/utils/protectedFileAccess'
 import { computed, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
@@ -71,6 +73,9 @@ import {
   parseSourceLocators,
   selectLocatorsForSentence,
   selectQuoteForSentence,
+  sourceQuoteText,
+  sourceImageContext,
+  quotedSourceExcerpt,
   textFragmentUrl,
   type SourceLocateRequest,
   type SourceLocator,
@@ -90,7 +95,7 @@ const { t } = useI18n()
 const router = useRouter()
 
 type Mode = 'loading' | 'file' | 'web' | 'none'
-type Status = 'idle' | 'locating' | 'found' | 'page' | 'missing'
+type Status = 'idle' | 'locating' | 'found' | 'page' | 'block' | 'ambiguous' | 'stale' | 'missing' | 'partial'
 
 const mode = ref<Mode>('loading')
 const toolbarSlot = ref<HTMLElement | null>(null)
@@ -100,6 +105,11 @@ const locate = ref<SourceLocateRequest | null>(null)
 const locators = ref<SourceLocator[]>([])
 const chunkContent = ref('')
 const chunkType = ref('')
+const sourceHash = ref('')
+const edited = ref(false)
+const imageDigest = ref<string>()
+const imageContext = ref<SourceLocateRequest['imageContext']>()
+let locateToken = 0
 const meta = reactive({ fileName: '', fileType: '', knowledgeSource: '', knowledgeType: '', title: '' })
 let loadVersion = 0
 /** The knowledge whose file the preview currently shows. */
@@ -121,7 +131,15 @@ const statusText = computed(() => {
     case 'locating':
       return t('chat.referenceSourceLocating')
     case 'found':
-      return locatedPage.value ? t('chat.referenceSourceFoundPage', { page: locatedPage.value }) : ''
+      return t('chat.referenceSourceExact')
+    case 'partial':
+      return t('chat.referenceSourcePartial')
+    case 'block':
+      return t('chat.referenceSourceBlock')
+    case 'ambiguous':
+      return t('chat.referenceSourceAmbiguous')
+    case 'stale':
+      return t('chat.referenceSourceStale')
     case 'page':
       return t('chat.referenceSourceFoundPage', { page: locatedPage.value })
     case 'missing':
@@ -146,11 +164,12 @@ async function loadMeta(version: number) {
   meta.knowledgeSource = props.target.knowledgeSource || ''
   meta.knowledgeType = ''
   meta.title = props.target.title || ''
-  if (meta.fileName && meta.knowledgeSource) return
+  sourceHash.value = ''
   try {
     const res: any = await getKnowledgeDetails(props.target.knowledgeId)
     if (version !== loadVersion) return
     const data = res?.data || {}
+    sourceHash.value = data.file_hash || ''
     meta.fileName = meta.fileName || data.file_name || ''
     meta.fileType = data.file_type || ''
     meta.knowledgeSource = meta.knowledgeSource || data.source || ''
@@ -163,19 +182,83 @@ async function loadMeta(version: number) {
 
 async function loadChunk(version: number) {
   locators.value = parseSourceLocators(props.target.locators)
-  chunkContent.value = ''
+  chunkContent.value = props.target.content || ''
+  edited.value = false
+  imageContext.value = undefined
+  imageDigest.value = undefined
   chunkType.value = props.target.chunkType || ''
-  if (locators.value.length) return
+
+  let loadedCurrent = false
   // Old conversations and agent tool results carry no locators; the chunk
   // itself has them (and its own, unexpanded text for matching).
   try {
     const res: any = await getChunkByIdOnly(props.target.chunkId)
     if (version !== loadVersion) return
-    locators.value = parseSourceLocators(res?.data?.source_locators)
-    chunkContent.value = String(res?.data?.content || '')
-    chunkType.value = chunkType.value || String(res?.data?.chunk_type || '')
+    // The current chunk overrides snapshots embedded in historical answers.
+    // In particular, an edit must invalidate even previously cached locators.
+    const current = res?.data
+    if (!current || current.knowledge_id !== props.target.knowledgeId) {
+      edited.value = true
+      locators.value = []
+      return
+    }
+    loadedCurrent = true
+    locators.value = parseSourceLocators(current.source_locators)
+    edited.value = (current.content_revision || 0) > 0 && !locators.value.length
+    chunkContent.value = String(current.content || '')
+    chunkType.value = String(current.chunk_type || '')
+    const chunk = res?.data
+    if (!edited.value && chunk?.chunk_type?.startsWith('image_')) {
+      let info = chunk.image_info
+      try { if (typeof info === 'string') info = JSON.parse(info) } catch { info = [] }
+      if (Array.isArray(info) && info.length === 1) {
+        const digest = info[0].sha256
+        if (typeof digest === 'string' && /^[a-f0-9]{64}$/.test(digest)) imageDigest.value = digest
+        else {
+          const request = buildProtectedFileRequest(info[0].url || '', resolveProtectedFileAccess({ mode: 'knowledgeBase', kbId: props.target.knowledgeBaseId || '' }))
+          if (request) {
+            try {
+              const response = await fetch(request.url, { headers: request.headers, credentials: 'include' })
+              if (response.ok) {
+                const hash = await sourceImageDigest(await response.arrayBuffer())
+                if (version !== loadVersion) return
+                imageDigest.value = hash
+              }
+            } catch { /* Existing structural locators may still locate the image. */ }
+          }
+        }
+      }
+    }
+    // Legacy expanded contexts were cited under a child ID. Only recover a
+    // verbatim quotation in its verified parent, never search the whole file
+    // for a merely similar answer or silently select a neighbouring chunk.
+    if (!edited.value && chunk?.chunk_type === 'text' && chunk.parent_chunk_id &&
+        !quotedSourceExcerpt(chunkContent.value, props.target.anchorText || '')) {
+      const parent: any = await getChunkByIdOnly(chunk.parent_chunk_id)
+      if (version !== loadVersion) return
+      const p = parent?.data
+      if (p?.knowledge_id === props.target.knowledgeId && p.chunk_type === 'parent_text' && !p.content_revision &&
+          quotedSourceExcerpt(p.content || '', props.target.anchorText || '')) {
+        const parentLocators = parseSourceLocators(p.source_locators)
+        if (parentLocators.length && parentLocators.every(l => l.mapping === 'exact' && l.source_hash)) {
+          chunkContent.value = p.content
+          locators.value = parentLocators
+        }
+      }
+    }
+    if (!edited.value && chunk?.chunk_type?.startsWith('image_') && chunk.parent_chunk_id) {
+      const parent: any = await getChunkByIdOnly(chunk.parent_chunk_id)
+      if (version !== loadVersion) return
+      if (parent?.data?.knowledge_id === props.target.knowledgeId && !parent.data.content_revision) {
+        let info = chunk.image_info
+        try { if (typeof info === 'string') info = JSON.parse(info) } catch { info = [] }
+        const urls = Array.isArray(info) ? info.flatMap(i => [i.url, i.original_url].filter(Boolean)) : []
+        imageContext.value = sourceImageContext(parent.data.content || '', urls)
+      }
+    }
   } catch {
-    chunkContent.value = props.target.content || ''
+    if (version !== loadVersion) return
+    if (!loadedCurrent) chunkContent.value = props.target.content || ''
   }
 }
 
@@ -191,8 +274,9 @@ function buildLocate(): SourceLocateRequest {
   const anchor = props.target.anchorText || ''
   const selected = selectLocatorsForSentence(locators.value, anchor)
   const quotes = chunkContent.value ? selectQuoteForSentence(chunkContent.value, anchor) : []
-  const scope = chunkContent.value || props.target.content || ''
-  return { locators: selected, quotes, token: Date.now(), sentence: anchor, scope }
+  const scope = sourceQuoteText(chunkContent.value || props.target.content || '')
+  const unavailable = edited.value || locators.value.some((loc) => loc.source_hash && sourceHash.value && loc.source_hash !== sourceHash.value)
+  return { locators: unavailable ? [] : selected, quotes: unavailable ? [] : quotes, token: ++locateToken, sentence: anchor, sourceMarkdown: unavailable ? undefined : chunkContent.value, imageDigest: unavailable ? undefined : imageDigest.value, imageContext: unavailable ? undefined : imageContext.value, scope: unavailable ? '' : scope, unavailable }
 }
 
 async function load() {
@@ -215,20 +299,25 @@ async function load() {
   }
   // A summary speaks for the whole document: open it without hunting for a passage.
   if (next === 'file' && chunkType.value !== 'summary') {
-    status.value = 'locating'
     locate.value = buildLocate()
+    status.value = locate.value.unavailable ? 'stale' : 'locating'
   }
 }
 
 function relocate() {
   if (!locate.value) return
   status.value = 'locating'
-  locate.value = { ...locate.value, token: Date.now() }
+  locate.value = { ...locate.value, token: ++locateToken }
 }
 
-function onLocated(result: { found: boolean; precise: boolean; page?: number }) {
+function onLocated(result: { found: boolean; precise: boolean; page?: number; granularity?: string; reason?: string }) {
+  if (locate.value?.unavailable) { status.value = 'stale'; return }
   locatedPage.value = result.page || locatorPages(locate.value?.locators || [])[0] || 0
-  if (!result.found) status.value = 'missing'
+  if (result.reason === 'ambiguous') status.value = 'ambiguous'
+  else if (result.reason === 'partial' && result.found) status.value = 'partial'
+  else if (result.reason) status.value = 'missing'
+  else if (!result.found) status.value = 'missing'
+  else if (result.granularity === 'block') status.value = 'block'
   else if (!result.precise && locatedPage.value) status.value = 'page'
   else status.value = 'found'
 }

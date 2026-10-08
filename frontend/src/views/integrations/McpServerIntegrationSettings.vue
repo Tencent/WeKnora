@@ -262,6 +262,7 @@ import { useApiBaseUrlDisplay } from '@/composables/useApiBaseUrlDisplay'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import type { CustomAgent } from '@/api/agent'
 import { useChatResourcesStore } from '@/stores/chatResources'
+import { useOrganizationStore } from '@/stores/organization'
 import {
   createMcpEndpoint,
   deleteMcpEndpoint,
@@ -284,6 +285,7 @@ import {
 const { t } = useI18n()
 const authStore = useAuthStore()
 const chatResources = useChatResourcesStore()
+const orgStore = useOrganizationStore()
 const { apiBaseUrlDisplay } = useApiBaseUrlDisplay()
 
 const isAdmin = computed(() => authStore.hasRole('admin'))
@@ -400,14 +402,23 @@ async function loadOptions() {
   agentsLoading.value = true
   try {
     // 刷新失败时给空列表，而不是把上一次的共享快照当成本次结果展示。
-    const [kbResult, agentResult] = await Promise.allSettled([
+    const [kbResult, sharedKbResult, agentResult] = await Promise.allSettled([
       chatResources.ensureKnowledgeBases(),
+      orgStore.fetchSharedKnowledgeBases(),
       chatResources.ensureAgents(),
     ])
     const kbRows = kbResult.status === 'fulfilled'
       ? (chatResources.rawKnowledgeBases as Array<{ id: string | number; name?: string }>)
       : []
-    knowledgeBases.value = kbRows.map((kb) => ({ id: String(kb.id), name: kb.name || String(kb.id) }))
+    const myKbs = kbRows.map((kb) => ({ id: String(kb.id), name: kb.name || String(kb.id) }))
+    const sharedKbs = sharedKbResult.status === 'fulfilled' && !orgStore.error
+      ? orgStore.sharedKnowledgeBases.flatMap((shared) => {
+        const kb = shared.knowledge_base
+        return kb ? [{ id: String(kb.id), name: kb.name || String(kb.id) }] : []
+      })
+      : []
+    const myKbIds = new Set(myKbs.map((kb) => kb.id))
+    knowledgeBases.value = [...myKbs, ...sharedKbs.filter((kb) => !myKbIds.has(kb.id))]
     agents.value = agentResult.status === 'fulfilled' ? (chatResources.agents as CustomAgent[]) : []
   } finally {
     kbLoading.value = false

@@ -177,6 +177,7 @@ func runList(ctx context.Context, opts *ListOptions, fopts *cmdutil.FormatOption
 	// non-walking path returns the first page only.
 	var items []sdk.Knowledge
 	var serverTotal int64
+	truncated := false
 	if opts.AllPages {
 		accum := make([]sdk.Knowledge, 0)
 		for page := 1; ; page++ {
@@ -187,7 +188,7 @@ func runList(ctx context.Context, opts *ListOptions, fopts *cmdutil.FormatOption
 			serverTotal = total
 			accum = append(accum, chunk...)
 			if opts.Limit > 0 && len(accum) >= opts.Limit {
-				accum = accum[:opts.Limit]
+				truncated = int64(len(accum)) < total
 				break
 			}
 			if int64(len(accum)) >= total || len(chunk) == 0 {
@@ -214,7 +215,6 @@ func runList(ctx context.Context, opts *ListOptions, fopts *cmdutil.FormatOption
 	})
 	// --limit applies after sort so users get the top-N most-recent items
 	// when combined with a single-page fetch where page_size > limit.
-	truncated := false
 	if opts.Limit > 0 && len(items) > opts.Limit {
 		items = items[:opts.Limit]
 		truncated = true

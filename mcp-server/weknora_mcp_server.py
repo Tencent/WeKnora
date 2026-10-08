@@ -520,7 +520,6 @@ class WeKnoraClient:
                 url, json=body, stream=True,
                 timeout=(10, WEKNORA_CHAT_TIMEOUT),
             )
-            response.raise_for_status()
 
             answer_chunks: list = []
             references: list = []
@@ -531,6 +530,7 @@ class WeKnoraClient:
             # Use context manager to ensure the connection is returned to the pool
             # even when breaking early on a 'complete' event.
             with response:
+                response.raise_for_status()
                 for raw_line in response.iter_lines():
                     if isinstance(raw_line, bytes):
                         raw_line = raw_line.decode("utf-8")

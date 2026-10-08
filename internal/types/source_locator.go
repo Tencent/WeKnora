@@ -26,13 +26,21 @@ const (
 	SourceLocatorSection = "section"
 )
 
-// SourceLocatorQuoteMax caps the quote stored per locator, in runes.
+// SourceLocatorQuoteMax caps display snippets, not stored source evidence.
 const SourceLocatorQuoteMax = 300
 
 // SourceLocator is one position in an original file. Only the fields of its
 // Type are set; zero values are omitted from JSON and read back as zero.
 type SourceLocator struct {
 	Type string `json:"type"`
+	// Mapping records verified text-to-source alignment. Empty means legacy.
+	Mapping string `json:"mapping,omitempty"`
+	// Partial means some of the chunk has no source mapping.
+	Partial bool `json:"partial,omitempty"`
+	// SourceID identifies a block within the parser result, not a rendered item.
+	SourceID string `json:"source_id,omitempty"`
+	// SourceHash binds the locator to the knowledge record’s source revision hash.
+	SourceHash string `json:"source_hash,omitempty"`
 	// Page is the 1-based PDF page.
 	Page int `json:"page,omitempty"`
 	// BBox is [x0, y0, x1, y1] as fractions of the page width and height,
@@ -57,8 +65,8 @@ type SourceLocator struct {
 	Section int `json:"section,omitempty"`
 	// Title names the section or slide when the source has one.
 	Title string `json:"title,omitempty"`
-	// Quote is the cited text as parsed, capped at SourceLocatorQuoteMax
-	// runes. Viewers match it inside the rendered original and against the
+	// Quote is the complete cited overlap as parsed. Viewers match it
+	// inside the rendered original and against the
 	// answer sentence that cites the chunk.
 	Quote string `json:"quote,omitempty"`
 }

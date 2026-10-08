@@ -4,6 +4,9 @@ import (
 	"archive/zip"
 	"bytes"
 	"encoding/json"
+	"fmt"
+	"html"
+	"math"
 	"regexp"
 	"sort"
 	"strings"
@@ -20,7 +23,7 @@ const minerUBBoxScale = 1000.0
 type minerUContentItem struct {
 	Type         string          `json:"type"`
 	Text         string          `json:"text"`
-	PageIdx      int             `json:"page_idx"`
+	PageIdx      *int            `json:"page_idx"`
 	BBox         []float64       `json:"bbox"`
 	TableBody    string          `json:"table_body"`
 	TableCaption json.RawMessage `json:"table_caption"`
@@ -82,8 +85,8 @@ func decodeMinerUContentList(raw []byte) []minerUContentItem {
 	return items
 }
 
-// minerUContentListFromZip returns the shallowest *content_list.json of a
-// MinerU result package, or nil.
+// minerUContentListFromZip prefers supported MiddleJson 2.0 geometry and
+// falls back to legacy content_list.json for older MinerU packages.
 func minerUContentListFromZip(zipData []byte) []byte {
 	zr, err := zip.NewReader(bytes.NewReader(zipData), int64(len(zipData)))
 	if err != nil {
@@ -92,7 +95,7 @@ func minerUContentListFromZip(zipData []byte) []byte {
 	var candidates []*zip.File
 	for _, f := range zr.File {
 		name := strings.ToLower(f.Name)
-		if strings.HasSuffix(name, "content_list.json") && !strings.Contains(name, "content_list_v2") {
+		if strings.HasSuffix(name, "middle_json.json") || strings.HasSuffix(name, "content_list.json") {
 			candidates = append(candidates, f)
 		}
 	}
@@ -100,13 +103,34 @@ func minerUContentListFromZip(zipData []byte) []byte {
 		return nil
 	}
 	sort.Slice(candidates, func(i, j int) bool {
-		return strings.Count(candidates[i].Name, "/") < strings.Count(candidates[j].Name, "/")
+		mi,
+			mj := strings.HasSuffix(strings.ToLower(candidates[i].Name),
+			"middle_json.json"),
+			strings.HasSuffix(strings.ToLower(candidates[j].Name),
+				"middle_json.json")
+		if mi != mj {
+			return mi
+		}
+		di, dj := strings.Count(candidates[i].Name, "/"), strings.Count(candidates[j].Name, "/")
+		if di != dj {
+			return di < dj
+		}
+		return candidates[i].Name < candidates[j].Name
 	})
-	data, err := readZipEntryBytes(candidates[0])
-	if err != nil {
-		return nil
+	for _, candidate := range candidates {
+		data, err := readZipEntryBytes(candidate)
+		if err != nil {
+			continue
+		}
+		if strings.HasSuffix(strings.ToLower(candidate.Name), "middle_json.json") {
+			var doc minerUMiddle
+			if json.Unmarshal(data, &doc) != nil || doc.Schema != "docvortex.middle" || doc.Version != "2.0" {
+				continue
+			}
+		}
+		return data
 	}
-	return data
+	return nil
 }
 
 // minerUSourceBlocks aligns MinerU's layout blocks against its markdown so
@@ -119,13 +143,26 @@ func minerUSourceBlocks(markdown string, contentList []byte, fileType string) []
 	if ft != "pdf" && !IsImageFormat(ft) {
 		return nil
 	}
+	raw := bytes.TrimSpace(contentList)
+	if len(raw) > 0 && raw[0] == '{' {
+		return minerUMiddleSourceBlocks(markdown, raw)
+	}
 	items := decodeMinerUContentList(contentList)
 	if len(items) == 0 {
 		return nil
 	}
 	units := make([]sourceloc.Unit, 0, len(items))
-	for _, it := range items {
-		loc := types.SourceLocator{Type: types.SourceLocatorPDF, Page: it.PageIdx + 1}
+	for i, it := range items {
+		if it.PageIdx == nil || *it.PageIdx < 0 {
+			continue
+		}
+		loc := types.SourceLocator{
+			Type: types.SourceLocatorPDF,
+			Page: *it.PageIdx + 1,
+			SourceID: fmt.Sprintf("mineru:legacy:%d:%d",
+				*it.PageIdx,
+				i),
+		}
 		if bbox, ok := minerUBBox(it.BBox); ok {
 			loc.BBox = bbox
 		}
@@ -142,7 +179,7 @@ func minerUBBox(b []float64) ([]float64, bool) {
 		return nil, false
 	}
 	for _, v := range b {
-		if v < 0 || v > minerUBBoxScale {
+		if math.IsNaN(v) || math.IsInf(v, 0) || v < 0 || v > minerUBBoxScale {
 			return nil, false
 		}
 	}
@@ -151,4 +188,111 @@ func minerUBBox(b []float64) ([]float64, bool) {
 		out[i] = v / minerUBBoxScale
 	}
 	return out, true
+}
+
+// MiddleJson 2.0 uses [0,1] normalized boxes (NOT legacy 0..1000).
+// Child annotations keep their own geometry. Inline spans have no geometry.
+type minerUMiddleBlock struct {
+	Type    string          `json:"type"`
+	Index   *int            `json:"index"`
+	BBox    []float64       `json:"bbox"`
+	Content json.RawMessage `json:"content"`
+}
+
+type minerUMiddle struct {
+	Schema  string `json:"schema"`
+	Version string `json:"schema_version"`
+	Pages   []struct {
+		PageIdx *int                `json:"page_idx"`
+		Blocks  []minerUMiddleBlock `json:"blocks"`
+	} `json:"pages"`
+}
+
+func minerUMiddleSourceBlocks(markdown string, raw []byte) []types.SourceBlock {
+	var doc minerUMiddle
+	if json.Unmarshal(raw, &doc) != nil || doc.Schema != "docvortex.middle" || doc.Version != "2.0" {
+		return nil
+	}
+	var units []sourceloc.Unit
+	previousPage := -1
+	for _, page := range doc.Pages {
+		if page.PageIdx == nil || *page.PageIdx <= previousPage {
+			return nil
+		}
+		previousPage = *page.PageIdx
+		previousBlock := -1
+		for _, block := range page.Blocks {
+			if block.Index == nil || *block.Index <= previousBlock {
+				return nil
+			}
+			previousBlock = *block.Index
+			ref := fmt.Sprintf("mineru:2:%d:%d", *page.PageIdx, *block.Index)
+			units = append(units, minerUMiddleUnits(block, *page.PageIdx+1, ref, nil)...)
+		}
+	}
+	return sourceloc.Align(markdown, units)
+}
+
+func minerUMiddleUnits(block minerUMiddleBlock, page int, ref string, parentBox []float64) []sourceloc.Unit {
+	box := block.BBox
+	if len(box) == 0 {
+		box = parentBox
+	}
+	loc := types.SourceLocator{Type: types.SourceLocatorPDF, Page: page, SourceID: ref}
+	if normalizedMinerUBox(box) {
+		loc.BBox = append([]float64(nil), box...)
+	}
+	// These containers contain blocks; text and hyperlinks contain inline spans.
+	switch block.Type {
+	case "list", "index", "table", "image", "chart", "code":
+		var children []minerUMiddleBlock
+		if json.Unmarshal(block.Content, &children) != nil {
+			return nil
+		}
+		var out []sourceloc.Unit
+		for i, child := range children {
+			out = append(out, minerUMiddleUnits(child, page, fmt.Sprintf("%s/%d", ref, i), box)...)
+		}
+		return out
+	default:
+		text := minerUMiddleText(block.Content)
+		if block.Type == "table_body" || block.Type == "chart_body" {
+			text = html.UnescapeString(minerUHTMLTagRe.ReplaceAllString(text, " "))
+		}
+		if strings.TrimSpace(text) == "" {
+			return nil
+		}
+		return []sourceloc.Unit{{Text: text, Locator: loc}}
+	}
+}
+
+func minerUMiddleText(raw json.RawMessage) string {
+	var text string
+	if json.Unmarshal(raw, &text) == nil {
+		return text
+	}
+	var spans []struct {
+		Type    string          `json:"type"`
+		Content json.RawMessage `json:"content"`
+	}
+	if json.Unmarshal(raw, &spans) != nil {
+		return ""
+	}
+	var out strings.Builder
+	for _, span := range spans {
+		out.WriteString(minerUMiddleText(span.Content))
+	}
+	return out.String()
+}
+
+func normalizedMinerUBox(box []float64) bool {
+	if len(box) != 4 || box[0] >= box[2] || box[1] >= box[3] {
+		return false
+	}
+	for _, v := range box {
+		if math.IsNaN(v) || math.IsInf(v, 0) || v < 0 || v > 1 {
+			return false
+		}
+	}
+	return true
 }

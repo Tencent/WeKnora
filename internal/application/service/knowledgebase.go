@@ -482,6 +482,74 @@ func (s *knowledgeBaseService) FillKnowledgeBaseCounts(ctx context.Context, kb *
 	return nil
 }
 
+// resolveUpdatedVLMConfig builds the VLM config an update request asks for.
+// Only the model-managed fields are taken from the request: the legacy
+// ModelName/BaseURL/APIKey/InterfaceType fields make the VLM client call
+// BaseURL directly, bypassing model management and its SSRF checks, so they
+// are never written from the request. A referenced model must exist and be a
+// VLM model.
+//
+// Stored legacy fields keep VLMConfig.IsEnabled() true on their own, so they
+// are cleared when the request enables a managed model, or when it disables
+// VLM without echoing back the stored model_name and base_url (the shape a
+// GET-then-PUT round trip sends). Request legacy fields are only compared.
+//
+// Only a pure legacy KB (no stored ModelID) keeps its legacy endpoint on an
+// echo or on enabled=true without a model_id. A config that carries a managed
+// ModelID next to legacy fields (CreateKnowledgeBase stores the request as
+// is) is treated as managed: clearing ModelID while keeping the legacy
+// fields would silently move image calls to the stored BaseURL.
+func (s *knowledgeBaseService) resolveUpdatedVLMConfig(
+	ctx context.Context, current, requested types.VLMConfig,
+) (types.VLMConfig, error) {
+	next := current
+	next.Enabled = requested.Enabled
+	next.ModelID = strings.TrimSpace(requested.ModelID)
+	next.DescriptionLanguage = strings.TrimSpace(requested.DescriptionLanguage)
+	next.CustomInstructions = strings.TrimSpace(requested.CustomInstructions)
+	if err := types.ValidateKnowledgeBasePromptInstructions(&types.KnowledgeBase{VLMConfig: next}); err != nil {
+		return types.VLMConfig{}, apperrors.NewBadRequestError("vlm_config: " + err.Error())
+	}
+	pureLegacy := current.ModelID == "" && current.ModelName != "" && current.BaseURL != ""
+	if !next.Enabled {
+		next.ModelID = ""
+		legacyEcho := pureLegacy &&
+			requested.ModelName == current.ModelName && requested.BaseURL == current.BaseURL
+		if !legacyEcho {
+			clearLegacyVLMFields(&next)
+		}
+		return next, nil
+	}
+	if next.ModelID == "" {
+		if !pureLegacy {
+			return types.VLMConfig{}, apperrors.NewBadRequestError(
+				"vlm_config.model_id is required when enabled")
+		}
+		return next, nil
+	}
+	model, err := s.modelService.GetModelByID(ctx, next.ModelID)
+	if errors.Is(err, ErrModelNotFound) {
+		return types.VLMConfig{}, apperrors.NewBadRequestError("vlm_config.model_id: model not found")
+	}
+	if err != nil {
+		return types.VLMConfig{}, fmt.Errorf("get vlm model %s: %w", next.ModelID, err)
+	}
+	if model.Type != types.ModelTypeVLLM {
+		return types.VLMConfig{}, apperrors.NewBadRequestError(
+			fmt.Sprintf("vlm_config.model_id: model type is %s, want %s", model.Type, types.ModelTypeVLLM))
+	}
+	clearLegacyVLMFields(&next)
+	return next, nil
+}
+
+// clearLegacyVLMFields drops the pre-model-management inline VLM endpoint.
+func clearLegacyVLMFields(cfg *types.VLMConfig) {
+	cfg.ModelName = ""
+	cfg.BaseURL = ""
+	cfg.APIKey = ""
+	cfg.InterfaceType = ""
+}
+
 // UpdateKnowledgeBase updates a knowledge base's mutable properties.
 //
 // IMPORTANT — vector_store_id immutability contract:
@@ -504,6 +572,7 @@ func (s *knowledgeBaseService) UpdateKnowledgeBase(ctx context.Context,
 	name string,
 	description string,
 	config *types.KnowledgeBaseConfig,
+	vlmConfig *types.VLMConfig,
 ) (*types.KnowledgeBase, error) {
 	if id == "" {
 		logger.Error(ctx, "Knowledge base ID is empty")
@@ -580,6 +649,18 @@ func (s *knowledgeBaseService) UpdateKnowledgeBase(ctx context.Context,
 				kb.ExtractConfig = &types.ExtractConfig{Enabled: true}
 			}
 		}
+	}
+	// Apply multimodal (vision) config only when the caller provided it,
+	// mirroring the nil-means-no-change semantics used above.
+	if vlmConfig != nil {
+		next, err := s.resolveUpdatedVLMConfig(ctx, kb.VLMConfig, *vlmConfig)
+		if err != nil {
+			return nil, err
+		}
+		if kb.VLMConfig != next {
+			changedFields = append(changedFields, "vlm_config")
+		}
+		kb.VLMConfig = next
 	}
 	kb.UpdatedAt = time.Now()
 	kb.EnsureDefaults()

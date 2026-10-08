@@ -121,6 +121,7 @@ func (n node) modifiedAt() time.Time {
 type dingTalkAPI interface {
 	listWorkspaces(context.Context) ([]workspace, error)
 	listNodes(context.Context, string) ([]node, error)
+	listNodesPage(ctx context.Context, parentNodeID, pageToken string) ([]node, string, error)
 	documentBlocks(context.Context, string) ([]json.RawMessage, error)
 }
 
@@ -333,25 +334,12 @@ func (c *client) listNodes(ctx context.Context, parentNodeID string) ([]node, er
 	seenTokens := make(map[string]struct{})
 
 	for page := 0; page < maxPages; page++ {
-		query := url.Values{
-			"maxResults":   {"50"},
-			"operatorId":   {c.operator},
-			"parentNodeId": {parentNodeID},
+		nodes, next, err := c.listNodesPage(ctx, parentNodeID, nextToken)
+		if err != nil {
+			return nil, err
 		}
-		if nextToken != "" {
-			query.Set("nextToken", nextToken)
-		}
-		var response struct {
-			Nodes     []node `json:"nodes"`
-			NextToken string `json:"nextToken"`
-		}
-		if err := c.doJSON(
-			ctx, http.MethodGet, "/v2.0/wiki/nodes?"+query.Encode(), nil, true, &response,
-		); err != nil {
-			return nil, fmt.Errorf("list DingTalk nodes: %w", err)
-		}
-		all = append(all, response.Nodes...)
-		nextToken = strings.TrimSpace(response.NextToken)
+		all = append(all, nodes...)
+		nextToken = next
 		if nextToken == "" {
 			return all, nil
 		}
@@ -361,6 +349,30 @@ func (c *client) listNodes(ctx context.Context, parentNodeID string) ([]node, er
 		seenTokens[nextToken] = struct{}{}
 	}
 	return nil, fmt.Errorf("DingTalk node pagination exceeded %d pages", maxPages)
+}
+
+// listNodesPage requests a single page of children, so one call is one HTTP
+// request plus the client's own retries. An empty next token marks the last
+// page.
+func (c *client) listNodesPage(ctx context.Context, parentNodeID, pageToken string) ([]node, string, error) {
+	query := url.Values{
+		"maxResults":   {"50"},
+		"operatorId":   {c.operator},
+		"parentNodeId": {parentNodeID},
+	}
+	if pageToken != "" {
+		query.Set("nextToken", pageToken)
+	}
+	var response struct {
+		Nodes     []node `json:"nodes"`
+		NextToken string `json:"nextToken"`
+	}
+	if err := c.doJSON(
+		ctx, http.MethodGet, "/v2.0/wiki/nodes?"+query.Encode(), nil, true, &response,
+	); err != nil {
+		return nil, "", fmt.Errorf("list DingTalk nodes: %w", err)
+	}
+	return response.Nodes, strings.TrimSpace(response.NextToken), nil
 }
 
 func (c *client) documentBlocks(ctx context.Context, documentID string) ([]json.RawMessage, error) {

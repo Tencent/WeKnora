@@ -216,7 +216,7 @@ function getDocumentGroupKey(item: KnowledgeReferenceLike, index: number): strin
   )
 }
 
-function mergeDocumentReferences(refs: KnowledgeReferenceLike[]): KnowledgeReferenceLike[] {
+export function mergeDocumentReferences(refs: KnowledgeReferenceLike[]): KnowledgeReferenceLike[] {
   const groups = new Map<string, KnowledgeReferenceLike & { content_parts?: string[] }>()
 
   refs.forEach((item, index) => {
@@ -431,10 +431,9 @@ export function resolveReferenceHighlightKey(
       (item) => item.kind === 'document' && item.title.trim().toLowerCase() === title,
     )
     const scoped = target.knowledgeBaseId
-      ? candidates.find((item) => item.knowledgeBaseId === target.knowledgeBaseId)
-      : undefined
-    if (scoped) return scoped.key
-    if (candidates.length === 1) return candidates[0].key
+      ? candidates.filter((item) => item.knowledgeBaseId === target.knowledgeBaseId)
+      : candidates
+    if (scoped.length === 1) return scoped[0]!.key
   }
 
   return null
