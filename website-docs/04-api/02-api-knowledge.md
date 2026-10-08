@@ -21,7 +21,7 @@
 | `type` | string | 否 | `document`（默认）/`faq`/`wiki` |
 | `embedding_model_id` | string | 否 | Embedding 模型 ID |
 | `chunking_config` | object | 否 | 分块配置（chunk_size/overlap/separators/strategy…） |
-| `image_processing_config` | object | 否 | 图片属性观察配置：`model_id` / `image_attrs_enabled` / `image_actions`（`{ ocr: { on: [...], on_unobserved: bool } }`） |
+| `image_processing_config` | object | 否 | 图片处理配置：`model_id` / `image_attrs_enabled` / `image_actions`（`{ ocr: { on: [...], on_unobserved: bool } }`）/ `image_vector_enabled`（图片向量索引与召回，默认 false，见[知识库功能](../03-features/02-knowledge-base.md)） |
 | `storage_provider_config` | object | 否 | 存储配置 |
 | `vector_store_id` | string | 否 | 向量库绑定（非法返回 code 2200/2201） |
 | `faq_config` / `wiki_config` / `extract_config` / `indexing_strategy` | object | 否 | 类型相关配置 |
@@ -100,7 +100,7 @@ curl $BASE/api/v1/knowledge-bases/kb-1 -H "Authorization: Bearer $TOKEN"
 | --- | --- | --- | --- |
 | `name` | string | 是（`binding:"required"`） | 名称 |
 | `description` | string | 否 | 描述 |
-| `config` | object | 否 | 局部配置更新：`chunking_config`、`image_processing_config`、`faq_config`、`wiki_config`、`auto_tag_config`、`profile_config`、`indexing_strategy` |
+| `config` | object | 否 | 局部配置更新：`chunking_config`、`image_processing_config`、`faq_config`、`wiki_config`、`auto_tag_config`、`profile_config`、`indexing_strategy`。`image_processing_config` 不传则保持不变，传了则整体替换（未带的 `image_vector_enabled` 等字段回到 false） |
 | `vlm_config` | object | 否 | 多模态配置，整体替换：只取 `enabled`、`model_id`（须为 VLLM 模型）、`description_language`、`custom_instructions`（≤4000 字），未传的字段按空值处理；不想改就不要传。共享库需所有者空间或共享 admin 权限（editor 返回 403）。旧版内联字段 `model_name`/`base_url`/`api_key`/`interface_type` 不会被写入：启用托管 `model_id` 或关闭时会清空已存的旧版配置，但纯旧版库（未存 `model_id`，只存了 `model_name`/`base_url`）原样回传 GET 结果（`enabled=false` 且 `model_name`/`base_url` 与存储一致）视为不改；其余库 `enabled=true` 却缺 `model_id` 返回 400 |
 
 响应：200 `{"success":true,"data":{KnowledgeBase}}`

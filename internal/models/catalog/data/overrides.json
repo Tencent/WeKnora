@@ -357,7 +357,9 @@
         "type": "Embedding",
         "compat": {
           "api": "dashscope-embeddings",
-          "dimensions_field": ""
+          "dimensions_field": "",
+          "max_image_batch_size": 8,
+          "max_image_bytes": 3000000
         }
       },
       {
@@ -365,7 +367,9 @@
         "type": "Embedding",
         "compat": {
           "api": "dashscope-embeddings",
-          "dimensions_field": ""
+          "dimensions_field": "",
+          "max_image_batch_size": 8,
+          "max_image_bytes": 3000000
         }
       },
       {
@@ -374,7 +378,9 @@
         "compat": {
           "api": "dashscope-embeddings",
           "dimensions_field": "dimension",
-          "max_batch_size": 20
+          "max_batch_size": 20,
+          "max_image_batch_size": 8,
+          "max_image_bytes": 3000000
         }
       },
       {
@@ -383,7 +389,9 @@
         "compat": {
           "api": "dashscope-embeddings",
           "dimensions_field": "dimension",
-          "max_batch_size": 20
+          "max_batch_size": 20,
+          "max_image_batch_size": 10,
+          "max_image_bytes": 10000000
         }
       },
       {
@@ -392,7 +400,9 @@
         "compat": {
           "api": "dashscope-embeddings",
           "dimensions_field": "dimension",
-          "max_batch_size": 1
+          "max_batch_size": 1,
+          "max_image_batch_size": 1,
+          "max_image_bytes": 5000000
         }
       },
       {
@@ -401,7 +411,9 @@
         "compat": {
           "api": "dashscope-embeddings",
           "dimensions_field": "",
-          "max_batch_size": 20
+          "max_batch_size": 20,
+          "max_image_batch_size": 1,
+          "max_image_bytes": 3000000
         }
       },
       {
@@ -847,6 +859,17 @@
         "api": "google-generative-ai",
         "compat": {
           "thinking_mode": "budget"
+        }
+      },
+      {
+        "id": "gemini-embedding-2",
+        "type": "Embedding",
+        "compat": {
+          "max_image_batch_size": 6,
+          "image_mime_types": [
+            "image/png",
+            "image/jpeg"
+          ]
         }
       }
     ],
