@@ -66,6 +66,7 @@ type RouterParams struct {
 	InitializationHandler        *handler.InitializationHandler
 	SystemHandler                *handler.SystemHandler
 	MCPServiceHandler            *handler.MCPServiceHandler
+	ToolboxCategoryHandler       *handler.ToolboxCategoryHandler
 	MCPCredentialsHandler        *handler.MCPCredentialsHandler
 	MCPOAuthHandler              *handler.MCPOAuthHandler
 	WebSearchHandler             *handler.WebSearchHandler
@@ -318,6 +319,7 @@ func NewRouter(params RouterParams) *gin.Engine {
 		RegisterCustomAgentRoutes(v1, params.CustomAgentHandler, rbacGuards)
 		RegisterUserFavoriteRoutes(v1, params.UserFavoriteHandler, rbacGuards)
 		RegisterSkillRoutes(v1, params.SkillHandler, rbacGuards)
+		RegisterToolboxCategoryRoutes(v1, params.ToolboxCategoryHandler, rbacGuards)
 		RegisterOrganizationRoutes(v1, params.OrganizationHandler, rbacGuards)
 		RegisterIMChannelRoutes(v1, params.IMHandler, rbacGuards)
 		RegisterEmbedChannelRoutes(v1, params.EmbedChannelHandler, rbacGuards)

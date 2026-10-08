@@ -177,6 +177,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(repository.NewModelCatalogRepository))
 	must(container.Provide(neo4jRepo.NewNeo4jRepository))
 	must(container.Provide(repository.NewMCPServiceRepository))
+	must(container.Provide(repository.NewToolboxCategoryRepository))
 	must(container.Provide(repository.NewMCPToolApprovalRepository))
 	must(container.Provide(repository.NewMCPOAuthRepository))
 	must(container.Provide(repository.NewTenantSandboxConfigRepository))
@@ -279,6 +280,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(service.NewMessageService))
 	must(container.Provide(service.NewMessageSuggestionService))
 	must(container.Provide(service.NewMCPServiceService))
+	must(container.Provide(service.NewToolboxCategoryService))
 	must(container.Provide(service.NewMCPToolApprovalService))
 	must(container.Provide(service.NewCustomAgentService))
 	must(container.Provide(service.NewUserResourceFavoriteService))
@@ -561,9 +563,11 @@ func BuildContainer(container *dig.Container) *dig.Container {
 		gate *approval.Gate,
 		models interfaces.ModelService,
 		agents interfaces.AgentShareService,
+		categories interfaces.ToolboxCategoryService,
 	) *handler.MCPServiceHandler {
-		return handler.NewMCPServiceHandler(mcpService, toolApprovals, gate, models, agents)
+		return handler.NewMCPServiceHandler(mcpService, toolApprovals, gate, models, agents, categories)
 	}))
+	must(container.Provide(handler.NewToolboxCategoryHandler))
 	must(container.Provide(handler.NewMCPCredentialsHandler))
 	must(container.Provide(handler.NewMCPOAuthHandler))
 	must(container.Provide(handler.NewModelCredentialsHandler))
@@ -576,9 +580,11 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(handler.NewCustomAgentHandler))
 	must(container.Provide(handler.NewUserResourceFavoriteHandler))
 	must(container.Provide(func(
-		s *service.TenantSkillService, agents interfaces.AgentShareService,
+		s *service.TenantSkillService,
+		agents interfaces.AgentShareService,
+		categories interfaces.ToolboxCategoryService,
 	) *handler.SkillHandler {
-		return handler.NewSkillHandler(s, s, agents)
+		return handler.NewSkillHandler(s, s, agents, categories)
 	}))
 	must(container.Provide(handler.NewOrganizationHandler))
 	must(container.Provide(handler.NewMemoryHandler))

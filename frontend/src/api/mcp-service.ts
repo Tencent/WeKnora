@@ -1,4 +1,5 @@
 import { get, post, put, del } from '@/utils/request'
+import type { ToolboxCategory } from '@/api/toolbox-category'
 
 export interface MCPService {
   id: string
@@ -52,6 +53,7 @@ export interface MCPService {
     stale: boolean
     synced_at: string
   }
+  categories?: ToolboxCategory[]
 }
 
 export interface MCPTool {

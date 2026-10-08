@@ -28,10 +28,27 @@ func (h *SkillHandler) ListCatalog(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"success": true, "data": []any{}})
 		return
 	}
-	rows, err := h.catalog.ListCatalog(c.Request.Context(), sandboxConfigTenantID(c))
+	tenantID := sandboxConfigTenantID(c)
+	rows, err := h.catalog.ListCatalog(c.Request.Context(), tenantID)
 	if err != nil {
 		_ = c.Error(err)
 		return
+	}
+	if h.categories != nil && len(rows) > 0 {
+		ids := make([]string, 0, len(rows))
+		for _, row := range rows {
+			ids = append(ids, row.ID)
+		}
+		byResource, err := h.categories.ListByResourceIDs(
+			c.Request.Context(), tenantID, types.ToolboxResourceSkill, ids,
+		)
+		if err != nil {
+			_ = c.Error(err)
+			return
+		}
+		for i := range rows {
+			rows[i].Categories = byResource[rows[i].ID]
+		}
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": rows})
 }

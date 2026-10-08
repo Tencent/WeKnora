@@ -37,11 +37,13 @@
         </button>
       </div>
 
-      <section v-if="selectedItem" class="toolbox-main" role="tabpanel">
+      <section v-if="selectedItem" :key="authStore.effectiveTenantId ?? undefined" class="toolbox-main" role="tabpanel">
         <div class="toolbox-panel">
           <SkillSettings v-if="selectedItem.key === 'skills'" ref="panel" :key="sandboxId"
-            :initial-sandbox-id="sandboxId" @count="counts.skills = $event" />
-          <McpSettings v-else-if="selectedItem.key === 'mcp'" ref="panel" @count="counts.mcp = $event" />
+            v-model:category-id="selectedCategoryId" :initial-sandbox-id="sandboxId"
+            @category-counts="updateCounts('skills', $event)" />
+          <McpSettings v-else-if="selectedItem.key === 'mcp'" ref="panel"
+            v-model:category-id="selectedCategoryId" @category-counts="updateCounts('mcp', $event)" />
           <BrowserConnectionSettings v-else-if="selectedItem.key === 'browserconnection'" />
         </div>
       </section>
@@ -55,11 +57,13 @@
 import { computed, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
+import { MessagePlugin } from 'tdesign-vue-next'
 import { useAuthStore } from '@/stores/auth'
 import { useBrowserConnectionStore } from '@/stores/browserConnection'
 import { useDeploymentCapabilitiesStore } from '@/stores/deploymentCapabilities'
 import { listSkillCatalog } from '@/api/skill'
 import { listMCPServices } from '@/api/mcp-service'
+import { countResourcesByCategory } from '@/utils/toolboxCategories'
 import {
   TOOLBOX_ITEMS,
   canAccessToolboxSection,
@@ -80,7 +84,24 @@ const authStore = useAuthStore()
 const browserConnection = useBrowserConnectionStore()
 const capabilities = useDeploymentCapabilitiesStore()
 const panel = ref<{ openAdd?: () => void } | null>(null)
-const counts = reactive<Partial<Record<ToolboxSection, number>>>({})
+const selectedCategoryId = ref('')
+watch(() => authStore.effectiveTenantId, () => { selectedCategoryId.value = '' })
+type ResourceSection = 'skills' | 'mcp'
+const categoryCounts = reactive<Partial<Record<ResourceSection, Record<string, number>>>>({})
+const summaryRevisions = { skills: 0, mcp: 0 }
+const counts = computed(() => {
+  const result: Partial<Record<ToolboxSection, number>> = {}
+  for (const key of ['skills', 'mcp'] as const) {
+    const summary = categoryCounts[key]
+    if (summary) result[key] = summary[selectedCategoryId.value] || 0
+  }
+  return result
+})
+
+function updateCounts(section: ResourceSection, summary: Record<string, number>) {
+  ++summaryRevisions[section]
+  categoryCounts[section] = summary
+}
 const requestedSection = computed(() => typeof route.params.section === 'string' ? route.params.section : '')
 const sandboxId = computed(() => typeof route.query.sandboxId === 'string' ? route.query.sandboxId : '')
 const visibleItems = computed(() => TOOLBOX_ITEMS.filter((item) => canAccessToolboxSection(item.key, {
@@ -109,17 +130,35 @@ watch([selectedItem, visibleItems], () => {
   if (!selectedItem.value && fallback) void router.replace(toolboxLocation(fallback.key))
 }, { immediate: true })
 
-// Tab badges for tools that are not open; the open panel keeps its own badge current.
-const summaries: Record<ToolboxSection, () => Promise<void>> = {
-  skills: async () => { counts.skills = (await listSkillCatalog())?.data?.length ?? 0 },
-  mcp: async () => { counts.mcp = (await listMCPServices()).length },
-  browserconnection: async () => { if (!browserConnection.loaded) await browserConnection.refresh() },
-}
-watch(() => visibleItems.value.map((item) => item.key), (keys, previous = []) => {
-  for (const key of keys) {
-    if (!previous.includes(key)) summaries[key]().catch(() => {})
+// The open panel publishes counts from its current resources; load only unopened panels.
+async function loadSummary(section: ResourceSection) {
+  const revision = ++summaryRevisions[section]
+  try {
+    const resources = section === 'skills' ? (await listSkillCatalog()).data : await listMCPServices()
+    if (revision !== summaryRevisions[section]) return
+    categoryCounts[section] = countResourcesByCategory(resources)
+  } catch (error) {
+    if (revision !== summaryRevisions[section]) return
+    MessagePlugin.error(t(section === 'skills' ? 'settings.skills.loadFailed' : 'mcpSettings.toasts.loadFailed'))
+    console.error('Failed to load toolbox counts:', error)
   }
-}, { immediate: true })
+}
+
+watch([() => authStore.effectiveTenantId, () => visibleItems.value.map(item => item.key)],
+  ([tenantId, keys], [previousTenant, previousKeys = []]) => {
+    for (const key of ['skills', 'mcp'] as const) {
+      const workspaceChanged = tenantId !== previousTenant
+      if (workspaceChanged || !keys.includes(key)) {
+        ++summaryRevisions[key]
+        delete categoryCounts[key]
+      }
+      if (keys.includes(key) && key !== selectedItem.value?.key &&
+        (workspaceChanged || !previousKeys.includes(key))) void loadSummary(key)
+    }
+    if (keys.includes('browserconnection') && !browserConnection.loaded) {
+      void browserConnection.refresh().catch(error => console.error('Failed to load browser status:', error))
+    }
+  }, { immediate: true })
 </script>
 
 <style scoped lang="less">
