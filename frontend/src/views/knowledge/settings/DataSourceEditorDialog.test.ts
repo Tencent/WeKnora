@@ -7,6 +7,8 @@ import test from 'node:test'
 import { compileScript, parse } from '@vue/compiler-sfc'
 import ts from 'typescript'
 import { createRenderer, h, nextTick, reactive, ref } from 'vue'
+import { DINGTALK_MANUAL_REFERENCE } from './dingtalk/dingtalkResources'
+import { resourceIconName, resourceTypeLabel, shouldShowResourceType } from './resourcePresentation'
 
 const require = createRequire(import.meta.url)
 const filename = fileURLToPath(new URL('./DataSourceEditorDialog.vue', import.meta.url))
@@ -91,6 +93,13 @@ async function fixture({
       if (name === 'vue-i18n') return { useI18n: () => ({ t: (key: string) => key }) }
       if (name === 'tdesign-vue-next') return { MessagePlugin: { warning(msg: string) { warnings.push(msg) }, success() {}, error() {} } }
       if (name === '@/api/datasource') return api
+      // The picker's row presentation lives in its own module: the dialog and
+      // the DingTalk selector both render through it.
+      if (name === './resourcePresentation') {
+        return { resourceIconName, resourceTypeLabel, shouldShowResourceType }
+      }
+      // The DingTalk reference grammar the dialog reads a selection through.
+      if (name === './dingtalk/dingtalkResources') return { DINGTALK_MANUAL_REFERENCE }
       return { default: {} }
     },
     URL, console,
