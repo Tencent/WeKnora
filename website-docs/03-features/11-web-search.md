@@ -53,6 +53,8 @@ registry.Register("serply", infra_web_search.NewSerplyProvider)
 | Brave 按次过滤 | country/freshness 是 web_search 工具参数，见下文；与 Bocha 固定配置的字段取值不同 |
 | Serply 按次过滤 | 同 Brave；country 映射为 Google 的 gl，freshness 只接受 pd/pw/pm/py，不支持日期区间 |
 
+Metaso 把结果放在与 scope 同名的键下（`webpage`→`webpages`、`scholar`→`scholars`、`image`→`images`…），选哪个 scope 就要读哪个数组；`image` 条目没有 `link`，只有 `imageUrl`。
+
 除 SearXNG 外，所有引擎端点均硬编码、租户不可配置——这是防 SSRF 的第一道措施（源码注释：`Not configurable by tenants — prevents SSRF`）。
 
 ## 搜索引擎配置（Provider 实体）
