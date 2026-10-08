@@ -541,3 +541,73 @@ func TestCloneCopiesImageVectorsOnlyIntoKBsThatTakeThem(t *testing.T) {
 		})
 	}
 }
+
+// moveIndexEngine records what a reuse_vectors move deletes from the index
+// and moves within it.
+type moveIndexEngine struct {
+	parentChildRetrieveEngine
+	deleted []string
+	moved   []string
+}
+
+func (e *moveIndexEngine) Support() []types.RetrieverType {
+	return []types.RetrieverType{types.VectorRetrieverType, types.KeywordsRetrieverType}
+}
+
+func (e *moveIndexEngine) DeleteByChunkIDList(_ context.Context, ids []string, _ int, _ string) error {
+	e.deleted = append(e.deleted, ids...)
+	return nil
+}
+
+func (e *moveIndexEngine) MoveKnowledgeIndices(
+	_ context.Context, _, _, _ string, chunkIDs []string, _ int, _ string,
+) error {
+	e.moved = chunkIDs
+	return nil
+}
+
+func TestMoveTakesImageVectorsOnlyIntoKBsThatTakeThem(t *testing.T) {
+	for _, targetOn := range []bool{false, true} {
+		t.Run(map[bool]string{false: "target off", true: "target on"}[targetOn], func(t *testing.T) {
+			t.Setenv("RETRIEVE_DRIVER", "postgres")
+			f := transferFixture(t, access.KBTransferMove)
+			require.NoError(t, f.db.Create(&types.Chunk{
+				ID: "image-vector", TenantID: 7, KnowledgeID: "doc", KnowledgeBaseID: "kb",
+				ChunkType: types.ChunkTypeImageVector, ParentChunkID: "chunk", Content: "caption",
+			}).Error)
+			require.NoError(t, f.db.Model(&types.Knowledge{}).Where("id = ?", "doc").
+				Update("embedding_model_id", "model").Error)
+			engine := &moveIndexEngine{}
+			f.svc.retrieveEngine = parentChildRetrieveRegistry{engine: engine}
+			f.svc.modelService = parentChildModelService{embedder: parentChildEmbedder{}}
+			for _, kb := range []*types.KnowledgeBase{f.kbs.values["kb"], f.kbs.values["other"]} {
+				kb.EmbeddingModelID = "model"
+				kb.IndexingStrategy.VectorEnabled = true
+			}
+			f.kbs.values["kb"].ImageProcessingConfig.ImageVectorEnabled = true
+			f.kbs.values["other"].ImageProcessingConfig.ImageVectorEnabled = targetOn
+
+			require.NoError(t, f.svc.ProcessKnowledgeMove(context.Background(),
+				moveTask(t, []string{"doc"}, "reuse_vectors")))
+
+			chunks, err := f.chunkRepo.ListAllChunksByKnowledgeID(f.ctx, 7, "doc")
+			require.NoError(t, err)
+			var kinds []types.ChunkType
+			for _, c := range chunks {
+				require.Equal(t, "other", c.KnowledgeBaseID)
+				kinds = append(kinds, c.ChunkType)
+			}
+			if targetOn {
+				require.ElementsMatch(t, []types.ChunkType{types.ChunkTypeText, types.ChunkTypeImageVector}, kinds)
+				require.ElementsMatch(t, []string{"chunk", "image-vector"}, engine.moved)
+				require.Empty(t, engine.deleted)
+				return
+			}
+			require.Equal(t, []types.ChunkType{types.ChunkTypeText}, kinds,
+				"a knowledge base that did not opt in gets no image vector chunk")
+			require.Equal(t, []string{"chunk"}, engine.moved)
+			require.Equal(t, []string{"image-vector"}, engine.deleted,
+				"nor its index row, which the move would carry along by document ID")
+		})
+	}
+}
