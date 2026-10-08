@@ -623,12 +623,14 @@ func TestWriteSessionInputWithRetryRetriesKilledOpOnce(t *testing.T) {
 		if calls == 1 {
 			return sandbox.NewRemoteError(
 				sandbox.SandboxTypeDocker, "MakeDir", sandbox.RemoteErrorKindTimeout,
-				"killed after 30s (filesystem-op timeout 30s), exit=137, no output", nil)
+				"killed after 30s (filesystem-op exec budget 30s), exit=137, no output", nil)
 		}
 		return nil
 	}}
-	require.NoError(t, writeSessionInputWithRetry(
-		context.Background(), store, "session-1", "/workspace/input/abc/faq.txt", []byte("hi")))
+	rebound, err := writeSessionInputWithRetry(
+		context.Background(), store, "session-1", "/workspace/input/abc/faq.txt", []byte("hi"))
+	require.NoError(t, err)
+	require.True(t, rebound, "a write that only landed on the retry must be reported as a possible rebind")
 	require.Equal(t, 2, calls, "a killed op must be retried exactly once")
 }
 
@@ -640,8 +642,176 @@ func TestWriteSessionInputWithRetrySurfacesOtherFailuresImmediately(t *testing.T
 			sandbox.SandboxTypeDocker, "MakeDir", sandbox.RemoteErrorKindInvalidRequest,
 			"MakeDir /workspace/input: Permission denied", nil)
 	}}
-	err := writeSessionInputWithRetry(
+	rebound, err := writeSessionInputWithRetry(
 		context.Background(), store, "session-1", "/workspace/input/abc/faq.txt", []byte("hi"))
 	require.Error(t, err)
+	require.False(t, rebound)
 	require.Equal(t, 1, calls, "a non-timeout failure must not be retried")
+}
+
+func TestWriteSessionInputWithRetryRetryFailureKeepsBothErrors(t *testing.T) {
+	calls := 0
+	store := &retryTestStore{onWrite: func() error {
+		calls++
+		return sandbox.NewRemoteError(
+			sandbox.SandboxTypeDocker, "MakeDir", sandbox.RemoteErrorKindTimeout,
+			"killed after 30s, exit=137, no output", nil)
+	}}
+	rebound, err := writeSessionInputWithRetry(
+		context.Background(), store, "session-1", "/workspace/input/abc/faq.txt", []byte("hi"))
+	require.Error(t, err)
+	require.False(t, rebound)
+	require.Equal(t, 2, calls)
+	require.Contains(t, err.Error(), "retry after filesystem-op timeout failed",
+		"both the original kill and the retry failure must stay in the log")
+}
+
+// rebindingInputStore simulates the sequence the one-file retry cannot heal
+// on its own: the path in slowPath gets its first WriteSessionInputFile
+// killed past the filesystem-op timeout, and the retry — which re-resolves
+// the session — lands in a fresh container whose input directory does not
+// hold anything staged before the kill.
+type rebindingInputStore struct {
+	stagingSandboxManager
+	slowPath    string
+	killedOnce  bool
+	reboundOnce bool
+}
+
+// SessionFileStore must return the outer type: the embedded copy would hand
+// staging the base WriteSessionInputFile and this test's rebind override
+// would never run.
+func (s *rebindingInputStore) SessionFileStore() sandbox.SessionFileStore {
+	return s
+}
+
+func (s *rebindingInputStore) WriteSessionInputFile(_ context.Context, _, filePath string, content []byte) error {
+	if filePath == s.slowPath && !s.killedOnce {
+		s.killedOnce = true
+		return sandbox.NewRemoteError(
+			sandbox.SandboxTypeDocker, "MakeDir", sandbox.RemoteErrorKindTimeout,
+			"MakeDir /workspace/input: killed after 30s, exit=137, no output", nil)
+	}
+	if filePath == s.slowPath && s.killedOnce && !s.reboundOnce {
+		// The retry re-resolved the session onto a fresh container: the
+		// inputs the old container held went away with it.
+		s.reboundOnce = true
+		s.files = make(map[string][]byte)
+	}
+	if s.files == nil {
+		s.files = make(map[string][]byte)
+	}
+	s.files[filePath] = append([]byte(nil), content...)
+	s.writes = append(s.writes, filePath)
+	return nil
+}
+
+// The first attachment is staged into container 1; the second attachment's
+// first write is killed, and its retry lands in a fresh container. Staging
+// must re-establish the first attachment there before reporting success —
+// without the recovery pass, the sandbox would end up holding only the
+// attachment whose retry happened to land.
+func TestStageSessionAttachmentsRestoresEarlierInputsAfterRebind(t *testing.T) {
+	first := types.MessageAttachment{
+		URL:      "local://tenant/attachment-1",
+		FileName: "report.pdf",
+		FileType: ".pdf",
+	}
+	second := types.MessageAttachment{
+		URL:      "local://tenant/attachment-2",
+		FileName: "notes.txt",
+		FileType: ".txt",
+	}
+	layout := sandbox.RemoteWorkspaceLayout()
+	remoteFirst, err := sandboxAttachmentPath(first, layout.InputDir)
+	require.NoError(t, err)
+	remoteSecond, err := sandboxAttachmentPath(second, layout.InputDir)
+	require.NoError(t, err)
+
+	store := &rebindingInputStore{slowPath: remoteSecond}
+	fileService := &stagingFileService{
+		files: map[string][]byte{
+			first.URL:  []byte("content-first"),
+			second.URL: []byte("content-second"),
+		},
+	}
+	service := &agentService{
+		sandboxMgr:      store,
+		fileService:     fileService,
+		sandboxResolver: stubSandboxResolver{mgr: store},
+	}
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(7))
+
+	staged, err := service.stageSessionAttachments(
+		ctx, "session-1", "cfg-remote", 7,
+		types.MessageAttachments{first, second}, layout,
+	)
+
+	require.NoError(t, err)
+	require.Len(t, staged, 2)
+	require.Equal(t, []byte("content-first"), store.files[remoteFirst],
+		"the attachment staged before the killed write must be re-established in the fresh container")
+	require.Equal(t, []byte("content-second"), store.files[remoteSecond])
+	require.Equal(t, []string{remoteFirst, remoteSecond, remoteFirst}, store.writes,
+		"write order: first attachment, killed attachment's retry, then the re-established first attachment")
+	// The re-established write reuses the content kept from this pass, so
+	// durable storage is only read once per attachment.
+	require.Equal(t, 1, fileService.getCalls[first.URL])
+	require.Equal(t, 1, fileService.getCalls[second.URL])
+}
+
+// Same sequence, but the earlier attachment was reused from a previous pass
+// (present with a matching size, so its content was never read). The
+// recovery must re-read it from durable storage and stage it into the fresh
+// container.
+func TestStageSessionAttachmentsRestoresReusedInputsAfterRebind(t *testing.T) {
+	first := types.MessageAttachment{
+		URL:      "local://tenant/attachment-1",
+		FileName: "report.pdf",
+		FileType: ".pdf",
+		FileSize: int64(len("content-first")),
+	}
+	second := types.MessageAttachment{
+		URL:      "local://tenant/attachment-2",
+		FileName: "notes.txt",
+		FileType: ".txt",
+	}
+	layout := sandbox.RemoteWorkspaceLayout()
+	remoteFirst, err := sandboxAttachmentPath(first, layout.InputDir)
+	require.NoError(t, err)
+	remoteSecond, err := sandboxAttachmentPath(second, layout.InputDir)
+	require.NoError(t, err)
+
+	store := &rebindingInputStore{
+		slowPath: remoteSecond,
+		stagingSandboxManager: stagingSandboxManager{
+			sandboxType: sandbox.SandboxTypeCube,
+			files:       map[string][]byte{remoteFirst: []byte("content-first")},
+		},
+	}
+	fileService := &stagingFileService{
+		files: map[string][]byte{
+			first.URL:  []byte("content-first"),
+			second.URL: []byte("content-second"),
+		},
+	}
+	service := &agentService{
+		sandboxMgr:      store,
+		fileService:     fileService,
+		sandboxResolver: stubSandboxResolver{mgr: store},
+	}
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(7))
+
+	staged, err := service.stageSessionAttachments(
+		ctx, "session-1", "cfg-remote", 7,
+		types.MessageAttachments{first, second}, layout,
+	)
+
+	require.NoError(t, err)
+	require.Len(t, staged, 2)
+	require.Equal(t, []byte("content-first"), store.files[remoteFirst],
+		"the reused attachment must be re-established after the rebind dropped it")
+	require.Equal(t, []byte("content-second"), store.files[remoteSecond])
+	require.Equal(t, 1, fileService.getCalls[first.URL],
+		"the reused attachment's content must be re-read from durable storage during the recovery")
 }
