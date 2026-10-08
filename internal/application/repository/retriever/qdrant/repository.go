@@ -163,7 +163,15 @@ func (q *qdrantRepository) ensureCollection(ctx context.Context, dimension int) 
 			ShardNumber:       types.OptionalUint32(q.shardNumber),
 			ReplicationFactor: types.OptionalUint32(q.replicationFactor),
 		})
-		if err != nil {
+		// The first batches written at a new dimension are saved by several
+		// workers at once, so another one (or another replica) may have
+		// created the collection since our check. Qdrant refuses the losing
+		// create with AlreadyExists; carry on, since the collection is there.
+		// Creating a payload index that already exists is a no-op, so the
+		// indexes below are still ensured in case the winner did not finish.
+		if status.Code(err) == codes.AlreadyExists {
+			log.Infof("[Qdrant] Collection %s was created concurrently", collectionName)
+		} else if err != nil {
 			log.Errorf("[Qdrant] Failed to create collection: %v", err)
 			return fmt.Errorf("failed to create collection: %w", err)
 		}
@@ -211,7 +219,7 @@ func (q *qdrantRepository) ensureCollection(ctx context.Context, dimension int) 
 			log.Warnf("[Qdrant] Failed to create text index for content: %v", err)
 		}
 
-		log.Infof("[Qdrant] Successfully created collection %s", collectionName)
+		log.Infof("[Qdrant] Collection %s is ready", collectionName)
 	}
 
 	// Mark as initialized
