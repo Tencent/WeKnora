@@ -275,7 +275,7 @@ pipeline = types.NewPipelineBuilder().
 - 普通路径按 `context id="N"` 顺序编号包裹每个增强后的 passage（`getEnrichedPassageForChat` 会把 ImageInfo 以 Markdown 图片+描述内联进内容）；
 - 头部 `buildDocumentHeader` 输出去重后的文档元信息（title/description）；
 - 渲染 `SummaryConfig.ContextTemplate`（来自 `config/prompt_templates/context_template.yaml`），占位符 `{query}` / `{contexts}` / `{language}`；追加图片描述（非视觉模型）、引用上下文 `QuotedContext`、附件 prompt；
-- **检索图片**：对话模型支持视觉时，读出依赖图片向量命中的 context 的图片（`image_vector` 或带 `image_vector_match`，按图片去重，最多 3 张，转成 PNG/JPEG/WebP/GIF 且 ≤ 5 MB），存入 `ContextImages`，生成时排在用户自己上传的图片之后一起发送；正文末尾注明这些图片依次对应哪几个 context。描述没写到、但画面里有的信息，模型由此能直接看到。智能体模式下 `search_knowledge` 工具在模型支持视觉时同样把这些图片放进工具结果（历史记录中不保存图片字节）；
+- **检索图片**：对话模型支持视觉时，读出依赖图片向量命中的 context 的图片（`image_vector` 或带 `image_vector_match`，按图片去重，最多 3 张，转成 PNG/JPEG/WebP/GIF 且 ≤ 5 MB），存入 `ContextImages`，生成时排在用户自己上传的图片之后一起发送；在父块展开及去重前保留原图身份（`matched_images`），合并后仍读取实际命中的图片；最终模型消息使用请求内的 chunk 别名逐张注明来源，并计入前置的用户图片。描述没写到、但画面里有的信息，模型由此能直接看到。智能体模式下 `search_knowledge` 在重排前保留独立图片候选，在模型支持视觉时同样把图片放进工具结果，并在携带图片的模型消息中注明来源别名（历史记录中只保存原图身份，不保存图片字节）；
 - 组装后的 `UserContent` **异步回写**到 user 消息的 `RenderedContent`（`persistRenderedContent`），供审计与调试；`RenderedContexts` 保存纯 contexts 串供引用替换用。
 
 ### CHAT_COMPLETION / CHAT_COMPLETION_STREAM — 生成 {#_3-10-chat-completion-chat-completion-stream-—-生成}

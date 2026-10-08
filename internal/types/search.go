@@ -147,6 +147,14 @@ func (st SearchTargets) ContainsKB(kbID string) bool {
 	return false
 }
 
+// MatchedImage retains an image vector hit's identity before context expansion
+// replaces ImageInfo with all images in a surrounding text chunk.
+type MatchedImage struct {
+	ChunkID         string `json:"chunk_id"`
+	KnowledgeBaseID string `json:"knowledge_base_id"`
+	URL             string `json:"url"`
+}
+
 // SearchResult represents the search result
 type SearchResult struct {
 	// CitationSources retains independently citeable bodies after context expansion.
@@ -186,6 +194,9 @@ type SearchResult struct {
 	ParentChunkID string `json:"parent_chunk_id"`
 	// 图片信息 (JSON 格式)
 	ImageInfo string `json:"image_info"`
+	// MatchedImages survives merging, deduplication and stored reference replay.
+	// It contains storage references, never image bytes.
+	MatchedImages []MatchedImage `json:"matched_images,omitempty" gorm:"-"`
 
 	// Knowledge file name
 	// Used for file type knowledge, contains the original file name

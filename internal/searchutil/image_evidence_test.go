@@ -85,3 +85,20 @@ func TestContextImagesReadsDistinctEvidenceImagesUpToTheCap(t *testing.T) {
 	images, _ = ContextImages(context.Background(), results, nil, 2)
 	assert.Empty(t, images)
 }
+
+func TestLegacyHistoryDoesNotGuessExpandedImageIdentity(t *testing.T) {
+	r := evidenceResult("v", string(types.ChunkTypeImageVector), "unrelated-parent-image")
+	r.MatchType = types.MatchTypeHistory
+	CaptureImageEvidence(r)
+	assert.Empty(t, r.MatchedImages)
+
+	r.MatchedImages = []types.MatchedImage{{ChunkID: "v", URL: "original-image"}}
+	images, positions := ContextImages(context.Background(), []*types.SearchResult{r},
+		func(_ context.Context, source *types.SearchResult) ([]byte, error) {
+			assert.Contains(t, source.ImageInfo, "original-image")
+			assert.NotContains(t, source.ImageInfo, "unrelated-parent-image")
+			return pngData(t), nil
+		}, 1)
+	require.Len(t, images, 1)
+	assert.Equal(t, []int{0}, positions)
+}

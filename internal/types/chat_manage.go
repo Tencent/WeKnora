@@ -137,7 +137,9 @@ type PipelineState struct {
 	RenderedContexts string            `json:"-"`
 	// ContextImages are retrieved images, as data URIs, shown to a vision
 	// chat model beside the contexts they belong to; see INTO_CHAT_MESSAGE.
-	ContextImages        []string      `json:"-"`
+	ContextImages []string `json:"-"`
+	// ContextImageChunkIDs identifies the source of each image for final model handle rendering.
+	ContextImageChunkIDs []string      `json:"-"`
 	ChatResponse         *ChatResponse `json:"-"`
 	ImageDescription     string        `json:"-"`
 	QuotedContext        string        `json:"-"` // Quoted message text, injected at LLM prompt stage
@@ -295,6 +297,7 @@ func (c *ChatManage) Clone() *ChatManage {
 			UsedMemories:         append(UsedMemories(nil), c.UsedMemories...),
 			RenderedContexts:     c.RenderedContexts,
 			ContextImages:        slices.Clone(c.ContextImages),
+			ContextImageChunkIDs: slices.Clone(c.ContextImageChunkIDs),
 			Entity:               entity,
 			EntityKBIDs:          entityKBIDs,
 			EntityKnowledge:      entityKnowledge,

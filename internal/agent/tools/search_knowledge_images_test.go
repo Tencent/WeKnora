@@ -4,10 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"image"
 	"image/png"
 	"testing"
 
+	"github.com/Tencent/WeKnora/internal/models/imageprep"
+	"github.com/Tencent/WeKnora/internal/models/rerank"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -71,4 +74,63 @@ func TestStoredSearchStepsDropRetrievedImages(t *testing.T) {
 		Result: &types.ToolResult{Success: true, Output: "o", Images: []string{"data:image/png;base64,AA=="}},
 	}}}})
 	assert.Empty(t, steps[0].ToolCalls[0].Result.Images, "read again from storage, never stored")
+}
+
+func TestImageCandidatesSurviveDedupBeforeRerank(t *testing.T) {
+	for _, vision := range []bool{false, true} {
+		t.Run(fmt.Sprint(vision), func(t *testing.T) {
+			text := &stubReranker{scores: []float64{0.01, 0.01}}
+			var model rerank.Reranker = text
+			imageModel := &imageScoringReranker{stubReranker: text}
+			if vision {
+				model = imageModel
+			}
+			tool := newRerankTestTool(model)
+			tool.knowledgeBaseService = &imageReadingKBService{}
+			caption := imageRow("caption", types.ChunkTypeImageCaption, "resource://chart")
+			vector := imageRow("vector", types.ChunkTypeImageVector, "resource://chart")
+			caption.Content, vector.Content = "a quarterly chart", "a quarterly chart"
+			caption.Score, vector.Score, vector.VectorScore = 0.8, 0.4, 0.8
+			candidates := tool.deduplicateResultsForRerank([]*searchResultWithMeta{caption, vector, vector})
+			require.Len(t, candidates, 2, "dedup only repeated image IDs before judging the pixels")
+			got, err := tool.rerankResults(t.Context(), "which quarter peaked", candidates, false)
+			require.NoError(t, err)
+			require.Len(t, got, 1)
+			assert.Equal(t, "vector", got[0].ID)
+			if vision {
+				assert.Equal(t, 1, imageModel.images)
+			} else {
+				assert.Equal(t, types.KeptByImageVector, got[0].Metadata[types.MetadataKeptBy])
+			}
+		})
+	}
+}
+
+type imageScoringReranker struct {
+	*stubReranker
+	images int
+}
+
+func (s *imageScoringReranker) AcceptsImages() bool           { return true }
+func (s *imageScoringReranker) ImageLimits() imageprep.Limits { return imageprep.Limits{} }
+func (s *imageScoringReranker) RerankImages(
+	_ context.Context, _ string, images []rerank.Image,
+) ([]rerank.RankResult, error) {
+	s.images += len(images)
+	out := make([]rerank.RankResult, len(images))
+	for i := range images {
+		out[i] = rerank.RankResult{Index: i, RelevanceScore: 0.9}
+	}
+	return out, nil
+}
+
+func TestDifferentImagesWithIdenticalCaptionsRemainSeparateCandidates(t *testing.T) {
+	a := imageRow("a", types.ChunkTypeImageVector, "resource://a")
+	b := imageRow("b", types.ChunkTypeImageVector, "resource://b")
+	a.Content, b.Content = "a chart", "a chart"
+	tool := &SearchKnowledgeTool{}
+	require.Len(t, tool.deduplicateResultsForRerank([]*searchResultWithMeta{a, b}), 2)
+	final := tool.deduplicateResults([]*searchResultWithMeta{a, b})
+	require.Len(t, final, 1)
+	require.Len(t, final[0].MatchedImages, 2, "merging text after rerank must retain both images")
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"maps"
+	"slices"
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/logger"
@@ -29,7 +30,7 @@ func IsImageEvidence(r *types.SearchResult) bool {
 	if r == nil {
 		return false
 	}
-	return r.ChunkType == string(types.ChunkTypeImageVector) ||
+	return len(r.MatchedImages) > 0 || r.ChunkType == string(types.ChunkTypeImageVector) ||
 		r.Metadata[types.MetadataImageVectorMatch] == "true" ||
 		r.Metadata[types.MetadataKeptBy] == types.KeptByImageVector
 }
@@ -39,8 +40,16 @@ func IsImageEvidence(r *types.SearchResult) bool {
 // its caption hit carry the same text once merged, so either can be the one
 // kept, and the image must not go with the dropped one.
 func InheritImageEvidence(kept, dropped *types.SearchResult) {
-	if kept == nil || !IsImageEvidence(dropped) || IsImageEvidence(kept) {
+	if kept == nil || !IsImageEvidence(dropped) {
 		return
+	}
+	CaptureImageEvidence(kept)
+	CaptureImageEvidence(dropped)
+	kept.MatchedImages = slices.Clone(kept.MatchedImages)
+	for _, image := range dropped.MatchedImages {
+		if !slices.Contains(kept.MatchedImages, image) {
+			kept.MatchedImages = append(kept.MatchedImages, image)
+		}
 	}
 	kept.Metadata = maps.Clone(kept.Metadata)
 	if kept.Metadata == nil {
@@ -72,17 +81,28 @@ func TopKKeepingKept(results []*types.SearchResult, k int) []*types.SearchResult
 	return append(ranked, kept...)
 }
 
-// firstImageURL is the address of a result's first image, which identifies
-// it across the copies of one image on several chunks.
-func firstImageURL(r *types.SearchResult) string {
+// CaptureImageEvidence freezes the original image address while ImageInfo still
+// belongs to the image hit. Call it before any merge rewrites ImageInfo.
+func CaptureImageEvidence(r *types.SearchResult) {
+	if r == nil || len(r.MatchedImages) > 0 || r.ChunkType != string(types.ChunkTypeImageVector) {
+		return
+	}
+	// Older stored references may already contain expanded parent images.
+	// Without a captured identity, guessing their first image is unsafe.
+	if r.MatchType == types.MatchTypeHistory {
+		return
+	}
 	var infos []types.ImageInfo
-	if err := json.Unmarshal([]byte(r.ImageInfo), &infos); err != nil || len(infos) == 0 {
-		return ""
+	if json.Unmarshal([]byte(r.ImageInfo), &infos) != nil || len(infos) == 0 {
+		return
 	}
-	if u := strings.TrimSpace(infos[0].URL); u != "" {
-		return u
+	url := strings.TrimSpace(infos[0].URL)
+	if url == "" {
+		url = strings.TrimSpace(infos[0].OriginalURL)
 	}
-	return strings.TrimSpace(infos[0].OriginalURL)
+	if url != "" {
+		r.MatchedImages = []types.MatchedImage{{ChunkID: r.ID, KnowledgeBaseID: r.KnowledgeBaseID, URL: url}}
+	}
 }
 
 // ContextImages reads the images of the image-evidence results for a vision
@@ -97,31 +117,40 @@ func ContextImages(
 	if read == nil || maxImages <= 0 {
 		return nil, nil
 	}
-	seen := make(map[string]bool)
+	seen := make(map[struct{ kb, url string }]bool)
 	for i, r := range results {
-		if len(images) >= maxImages {
-			break
-		}
 		if !IsImageEvidence(r) {
 			continue
 		}
-		url := firstImageURL(r)
-		if url == "" || seen[url] {
-			continue
+		CaptureImageEvidence(r)
+		for _, ref := range r.MatchedImages {
+			if len(images) >= maxImages {
+				return images, positions
+			}
+			key := struct{ kb, url string }{ref.KnowledgeBaseID, ref.URL}
+			if ref.URL == "" || seen[key] {
+				continue
+			}
+			seen[key] = true
+			// Use the matched image's own storage and chunk identity even if a
+			// duplicate from another document/KB now carries its evidence.
+			source := *r
+			source.ID, source.KnowledgeBaseID = ref.ChunkID, ref.KnowledgeBaseID
+			info, _ := json.Marshal([]types.ImageInfo{{URL: ref.URL}})
+			source.ImageInfo = string(info)
+			data, err := read(ctx, &source)
+			if err != nil {
+				logger.Warnf(ctx, "[ContextImages] Image of %s unreadable: %v", ref.ChunkID, err)
+				continue
+			}
+			img, err := imageprep.Prepare(data, VisionImageLimits)
+			if err != nil {
+				logger.Warnf(ctx, "[ContextImages] Image of %s does not fit a vision model: %v", ref.ChunkID, err)
+				continue
+			}
+			images = append(images, img.DataURI())
+			positions = append(positions, i)
 		}
-		seen[url] = true
-		data, err := read(ctx, r)
-		if err != nil {
-			logger.Warnf(ctx, "[ContextImages] Image of %s unreadable: %v", r.ID, err)
-			continue
-		}
-		img, err := imageprep.Prepare(data, VisionImageLimits)
-		if err != nil {
-			logger.Warnf(ctx, "[ContextImages] Image of %s does not fit a vision model: %v", r.ID, err)
-			continue
-		}
-		images = append(images, img.DataURI())
-		positions = append(positions, i)
 	}
 	return images, positions
 }

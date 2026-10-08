@@ -266,7 +266,7 @@ func (t *SearchKnowledgeTool) Execute(ctx context.Context, args json.RawMessage)
 		return &types.ToolResult{Success: false, Output: msg, Error: msg}, nil
 	}
 
-	deduplicated := t.deduplicateResults(allResults)
+	deduplicated := t.deduplicateResultsForRerank(allResults)
 
 	ranked := deduplicated
 	rerankRejected := 0
@@ -905,6 +905,18 @@ func (t *SearchKnowledgeTool) rerankThreshold() float64 {
 // image and FAQ chunks all carry chunk_index 0, so it collapsed every image
 // chunk of a document, and the document's first text chunk, into one row.
 func (t *SearchKnowledgeTool) deduplicateResults(results []*searchResultWithMeta) []*searchResultWithMeta {
+	return t.deduplicateResultsWithImageCandidates(results, false)
+}
+
+// Image vectors and captions can have identical text but must be judged
+// independently. Only collapse their text copies after reranking.
+func (t *SearchKnowledgeTool) deduplicateResultsForRerank(results []*searchResultWithMeta) []*searchResultWithMeta {
+	return t.deduplicateResultsWithImageCandidates(results, true)
+}
+
+func (t *SearchKnowledgeTool) deduplicateResultsWithImageCandidates(
+	results []*searchResultWithMeta, beforeRerank bool,
+) []*searchResultWithMeta {
 	seen := make(map[string]bool)
 	contentSig := make(map[string]*searchResultWithMeta)
 	uniqueResults := make([]*searchResultWithMeta, 0, len(results))
@@ -934,6 +946,11 @@ func (t *SearchKnowledgeTool) deduplicateResults(results []*searchResultWithMeta
 			continue
 		}
 		sig := searchutil.BuildContentSignature(r.Content)
+		if beforeRerank && searchutil.IsImageEvidence(r.SearchResult) {
+			// Exact chunk-ID dedup above still applies. Distinct image hits
+			// must not collapse even when their captions are identical.
+			sig = ""
+		}
 		if sig != "" {
 			if kept, ok := contentSig[sig]; ok {
 				// An image hit and its caption hit read the same once merged;

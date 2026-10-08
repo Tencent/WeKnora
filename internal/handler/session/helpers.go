@@ -497,6 +497,14 @@ func searchResultFromMap(refMap map[string]interface{}) *types.SearchResult {
 			}
 		}
 	}
+	if raw, ok := refMap["matched_images"]; ok && raw != nil {
+		if b, err := json.Marshal(raw); err == nil {
+			var images []types.MatchedImage
+			if json.Unmarshal(b, &images) == nil {
+				sr.MatchedImages = images
+			}
+		}
+	}
 	return sr
 }
 

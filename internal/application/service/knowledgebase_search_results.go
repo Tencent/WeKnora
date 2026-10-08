@@ -248,6 +248,7 @@ func (s *knowledgeBaseService) assembleSearchResults(
 			matchedContent := idx.matchedContents[chunk.ID]
 			result := s.buildSearchResult(chunk, knowledge, score, matchType, matchedContent)
 			result.VectorScore = idx.vectorScores[chunk.ID]
+			searchutil.CaptureImageEvidence(result)
 			searchResults = append(searchResults, result)
 			addedChunkIDs[chunk.ID] = true
 		} else {

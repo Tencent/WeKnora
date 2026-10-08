@@ -95,6 +95,11 @@ func prepareMessagesWithModelContext(
 	if !replaced {
 		messages[last].Content = modelContexts + "\n\n" + messages[last].Content
 	}
+	if chatManage.ChatModelSupportsVision && len(chatManage.ContextImages) > 0 {
+		count := min(len(chatManage.ContextImageChunkIDs), len(chatManage.ContextImages))
+		ids := chatManage.ContextImageChunkIDs[:count]
+		messages[last].Content += registry.ImageSourcesNote(ids, len(chatManage.Images))
+	}
 	return messages, registry
 }
 
