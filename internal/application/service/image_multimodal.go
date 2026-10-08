@@ -425,15 +425,6 @@ func (s *ImageMultimodalService) processImage(
 		}
 	}
 
-	if len(newChunks) == 0 {
-		// Deferred finalize will count this image on success.
-		out["skipped"] = "no_extracted_content"
-		if out["ocr_status"] == "failed" {
-			out["skipped"] = "ocr_failed"
-		}
-		return nil
-	}
-
 	// A retry re-runs this whole function: an index write or the parent finalize
 	// failed on the previous attempt, and asynq handed the same payload back. The
 	// chunks that attempt persisted are still there, so they are replaced here
@@ -443,31 +434,63 @@ func (s *ImageMultimodalService) processImage(
 	// its previously indexed chunks. A first attempt has nothing to replace, and
 	// the scan reads every multimodal chunk of the knowledge, so it is skipped
 	// there: running it for every image would cost O(N²) reads per document.
+	//
+	// The scan sits before the "nothing extracted" early return on purpose. A
+	// previous attempt may have persisted chunks and then failed to index them,
+	// while this attempt extracts nothing new (the VLM call that produced them
+	// timed out). Such a chunk is still this image's only content, so it has to be
+	// indexed here: returning early would leave it unsearchable while the task
+	// reports success — the silent index failure this PR exists to remove.
+	var retained []*types.Chunk
 	if isTaskRetryAttempt(ctx) {
-		if err := s.dropStaleImageChunks(ctx, *payload); err != nil {
+		var err error
+		retained, err = s.dropStaleImageChunks(ctx, *payload, newChunks)
+		if err != nil {
 			handleErr = err
 			return handleErr
 		}
 	}
 
-	// Persist chunks
-	if err := s.chunkService.GetRepository().CreateChunks(ctx, newChunks); err != nil {
-		handleErr = fmt.Errorf("create multimodal chunks: %w", err)
-		return handleErr
+	// Index this attempt's chunks plus every chunk of the image a previous
+	// attempt persisted without marking it indexed. Per-type replacement keeps a
+	// chunk whose type this attempt did not reproduce, and that is exactly the
+	// shape a failed index write leaves behind.
+	toIndex := make([]*types.Chunk, 0, len(newChunks)+len(retained))
+	toIndex = append(toIndex, newChunks...)
+	for _, chunk := range retained {
+		if chunk.Status != int(types.ChunkStatusIndexed) {
+			toIndex = append(toIndex, chunk)
+		}
 	}
-	for _, c := range newChunks {
-		logger.Infof(ctx, "[ImageMultimodal] Created %s chunk %s for image %s, len=%d",
-			c.ChunkType, c.ID, payload.ImageURL, len(c.Content))
+	if len(toIndex) == 0 {
+		// Deferred finalize will count this image on success.
+		out["skipped"] = "no_extracted_content"
+		if out["ocr_status"] == "failed" {
+			out["skipped"] = "ocr_failed"
+		}
+		return nil
+	}
+
+	// Persist chunks
+	if len(newChunks) > 0 {
+		if err := s.chunkService.GetRepository().CreateChunks(ctx, newChunks); err != nil {
+			handleErr = fmt.Errorf("create multimodal chunks: %w", err)
+			return handleErr
+		}
+		for _, c := range newChunks {
+			logger.Infof(ctx, "[ImageMultimodal] Created %s chunk %s for image %s, len=%d",
+				c.ChunkType, c.ID, payload.ImageURL, len(c.Content))
+		}
 	}
 
 	// Index chunks so they can be retrieved. The outcome is recorded only once
 	// the write succeeded: the trace used to report indexed: true
 	// unconditionally, so chunks whose index write failed still looked
 	// searchable and the task finished as a success.
-	outcome, indexErr := s.indexChunks(ctx, *payload, newChunks, imgBytes, out)
+	outcome, indexErr := s.indexChunks(ctx, *payload, toIndex, imgBytes, out)
 	if indexErr != nil {
 		logger.Errorf(ctx, "[ImageMultimodal] %d of %d multimodal chunks were not indexed: %v",
-			outcome.Failed, len(newChunks), indexErr)
+			outcome.Failed, len(toIndex), indexErr)
 		handleErr = fmt.Errorf("index multimodal chunks: %w", indexErr)
 		return handleErr
 	}
@@ -483,9 +506,20 @@ func imageMultimodalChunkTypes() []types.ChunkType {
 	return []types.ChunkType{types.ChunkTypeImageOCR, types.ChunkTypeImageCaption}
 }
 
-// dropStaleImageChunks removes the OCR/caption chunks a previous attempt of this
-// very image left behind, making "one image → one set of multimodal chunks"
-// hold across asynq retries.
+// producedImageChunkTypes is the set of multimodal chunk types this attempt
+// produced content for. It scopes the replacement below: a type the attempt did
+// not reproduce is left alone.
+func producedImageChunkTypes(chunks []*types.Chunk) map[types.ChunkType]bool {
+	produced := make(map[types.ChunkType]bool, len(chunks))
+	for _, chunk := range chunks {
+		produced[chunk.ChunkType] = true
+	}
+	return produced
+}
+
+// dropStaleImageChunks removes the chunks a previous attempt of this very image
+// left behind, making "one image → one set of multimodal chunks" hold across
+// asynq retries, and returns the previous attempt's chunks it did NOT remove.
 //
 // Scope: same tenant and knowledge, chunk type in imageMultimodalChunkTypes, and
 // an image_info entry pointing at this payload's ImageURL. The parent text chunk
@@ -494,39 +528,57 @@ func imageMultimodalChunkTypes() []types.ChunkType {
 // possibly already indexed — with it. Matching the image URL keeps the sibling
 // untouched, and it also covers legacy payloads whose owning chunk could not be
 // resolved (ChunkID == "").
+//
+// The replacement is per chunk type: only the types newChunks covers are dropped
+// and rewritten. A retry that reproduces one type but not the other (OCR times
+// out while the caption comes back, say) must keep the previous attempt's chunk
+// of the missing type — it is still the image's only content for it, and deleting
+// it would drop searchable text from the knowledge, which main keeps. The kept
+// chunks are returned so the caller can index the ones the previous attempt
+// persisted without indexing.
 func (s *ImageMultimodalService) dropStaleImageChunks(
-	ctx context.Context, payload types.ImageMultimodalPayload,
-) error {
+	ctx context.Context, payload types.ImageMultimodalPayload, newChunks []*types.Chunk,
+) ([]*types.Chunk, error) {
 	repo := s.chunkService.GetRepository()
 	existing, err := repo.ListChunksByKnowledgeIDAndTypes(
 		ctx, payload.TenantID, payload.KnowledgeID, imageMultimodalChunkTypes())
 	if err != nil {
-		return fmt.Errorf("list multimodal chunks of knowledge %s: %w", payload.KnowledgeID, err)
+		return nil, fmt.Errorf("list multimodal chunks of knowledge %s: %w", payload.KnowledgeID, err)
 	}
 
+	produced := producedImageChunkTypes(newChunks)
 	stale := make([]*types.Chunk, 0, len(existing))
+	retained := make([]*types.Chunk, 0, len(existing))
 	for _, chunk := range existing {
 		if !chunkBelongsToImage(chunk.ImageInfo, payload.ImageURL) {
 			continue
 		}
-		stale = append(stale, chunk)
+		if produced[chunk.ChunkType] {
+			stale = append(stale, chunk)
+			continue
+		}
+		retained = append(retained, chunk)
 	}
 	if len(stale) == 0 {
-		return nil
+		return retained, nil
 	}
 
-	s.purgeStaleIndexEntries(ctx, payload, stale)
+	// The rows go only after their retrieval entries are gone: if the purge fails,
+	// keeping the rows is what lets the next attempt find the IDs and retry it.
+	if err := s.purgeStaleIndexEntries(ctx, payload, stale); err != nil {
+		return nil, err
+	}
 
 	ids := make([]string, 0, len(stale))
 	for _, chunk := range stale {
 		ids = append(ids, chunk.ID)
 	}
 	if err := repo.DeleteChunks(ctx, payload.TenantID, ids); err != nil {
-		return fmt.Errorf("delete %d stale chunk(s) of image %s: %w", len(ids), payload.ImageURL, err)
+		return nil, fmt.Errorf("delete %d stale chunk(s) of image %s: %w", len(ids), payload.ImageURL, err)
 	}
 	logger.Infof(ctx, "[ImageMultimodal] Dropped %d stale chunk(s) from a previous attempt for image %s",
 		len(ids), payload.ImageURL)
-	return nil
+	return retained, nil
 }
 
 // chunkBelongsToImage reports whether a chunk was built from the image at
@@ -549,74 +601,78 @@ func chunkBelongsToImage(imageInfo, imageURL string) bool {
 	return false
 }
 
-// purgeStaleIndexEntries drops the retrieval-store entries of stale chunks the
-// previous attempt had already marked indexed. Those entries are keyed by chunk
-// ID, so deleting the rows without them would leave search hits pointing at
-// chunks that no longer exist.
+// purgeStaleIndexEntries drops the retrieval-store entries of the stale chunks
+// the previous attempt left behind, before their rows are deleted: the entries
+// are keyed by chunk ID, so one left behind would be an orphan that occupies a
+// top-k slot and is then dropped when the results are assembled.
 //
-// The purge is best-effort on purpose: the rows are still present when it runs,
-// so it is retried by the next attempt of this task, and failing the task here
-// would trade a stale search hit for an image whose chunks are never rewritten
-// (e.g. when the knowledge base's vector store binding was changed between
-// attempts). The common retry — the index write failed _before_ anything landed,
-// so nothing is marked indexed — skips it entirely.
+// Every stale ID is purged, not only the ones flagged indexed. That flag is
+// written after the store accepts the write, and it under-reports exactly in the
+// situations a retry cleans up after: CompositeRetrieveEngine.BatchIndex writes
+// to several engines concurrently, so one engine succeeding while another fails
+// returns an error with part of the batch already stored, and a BatchIndex that
+// succeeded followed by a failed UpdateChunk leaves the status unset. Deleting an
+// ID that has no entry is a no-op, so the unconditional purge cannot leave an
+// orphan behind.
+//
+// Unlike the row deletion it guards, the purge is not best-effort: if it failed
+// while the rows were deleted anyway, the IDs of the entries still to remove
+// would be gone with them and no later attempt could find them. A failure
+// therefore aborts the replacement — no rows deleted, no replacement chunks
+// written — and is returned so asynq retries the image with both sides still
+// consistent.
 func (s *ImageMultimodalService) purgeStaleIndexEntries(
 	ctx context.Context, payload types.ImageMultimodalPayload, stale []*types.Chunk,
-) {
-	indexed := make([]string, 0, len(stale))
+) error {
+	ids := make([]string, 0, len(stale))
 	for _, chunk := range stale {
-		if chunk.Status == int(types.ChunkStatusIndexed) {
-			indexed = append(indexed, chunk.ID)
-		}
+		ids = append(ids, chunk.ID)
 	}
-	if len(indexed) == 0 {
-		return
+	if len(ids) == 0 {
+		return nil
 	}
 
 	kb, err := s.kbService.GetKnowledgeBaseByIDOnly(ctx, payload.KnowledgeBaseID)
-	if err != nil || kb == nil {
-		logger.Warnf(ctx,
-			"[ImageMultimodal] Stale index cleanup skipped for image %s: knowledge base %s unavailable (%v)",
+	if err != nil {
+		return fmt.Errorf("purge stale index entries of image %s: get knowledge base %s: %w",
 			payload.ImageURL, payload.KnowledgeBaseID, err)
-		return
+	}
+	if kb == nil {
+		return fmt.Errorf("purge stale index entries of image %s: knowledge base %s not found",
+			payload.ImageURL, payload.KnowledgeBaseID)
 	}
 	if !kb.NeedsEmbeddingModel() {
 		// "Indexed" is only a status flag for such KBs — nothing was written to
 		// a retrieval store, so there is nothing to remove.
-		return
+		return nil
 	}
 
 	embeddingModel, err := s.modelService.GetEmbeddingModel(ctx, kb.EmbeddingModelID)
 	if err != nil {
-		logger.Warnf(ctx,
-			"[ImageMultimodal] Stale index cleanup skipped for image %s: embedding model %s unavailable: %v",
+		return fmt.Errorf("purge stale index entries of image %s: embedding model %s: %w",
 			payload.ImageURL, kb.EmbeddingModelID, err)
-		return
 	}
 	tenantInfo, err := s.tenantRepo.GetTenantByID(ctx, payload.TenantID)
 	if err != nil {
-		logger.Warnf(ctx, "[ImageMultimodal] Stale index cleanup skipped for image %s: tenant %d unavailable: %v",
+		return fmt.Errorf("purge stale index entries of image %s: tenant %d: %w",
 			payload.ImageURL, payload.TenantID, err)
-		return
 	}
 	ctx = context.WithValue(ctx, types.TenantInfoContextKey, tenantInfo)
 	engine, err := retriever.CreateRetrieveEngineForKB(
 		ctx, s.retrieveEngine, s.ownership, payload.TenantID, kb.VectorStoreID)
 	if err != nil {
-		logger.Warnf(ctx, "[ImageMultimodal] Stale index cleanup skipped for image %s: engine unavailable: %v",
+		return fmt.Errorf("purge stale index entries of image %s: create retrieve engine: %w",
 			payload.ImageURL, err)
-		return
 	}
 	if err := engine.DeleteBySourceIDList(
-		ctx, indexed, embeddingModel.GetDimensions(), types.KnowledgeBaseTypeDocument,
+		ctx, ids, embeddingModel.GetDimensions(), types.KnowledgeBaseTypeDocument,
 	); err != nil {
-		logger.Errorf(ctx,
-			"[ImageMultimodal] %d stale index entr(ies) of image %s were not removed: %v",
-			len(indexed), payload.ImageURL, err)
-		return
+		return fmt.Errorf("delete %d stale index entr(ies) of image %s: %w",
+			len(ids), payload.ImageURL, err)
 	}
 	logger.Infof(ctx, "[ImageMultimodal] Removed %d stale index entr(ies) for image %s",
-		len(indexed), payload.ImageURL)
+		len(ids), payload.ImageURL)
+	return nil
 }
 
 // buildImageAttrsPrompt asks the model to observe the registered image
