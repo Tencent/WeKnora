@@ -334,7 +334,7 @@ services:
       - WEKNORA_PADDLEOCR_VL_TIMEOUT=${WEKNORA_PADDLEOCR_VL_TIMEOUT:-}
       # 自建 MinerU 单次解析超时（Go duration，默认 1000s）
       - WEKNORA_MINERU_TIMEOUT=${WEKNORA_MINERU_TIMEOUT:-}
-      # MinerU 云端轮询解析结果的最长时间（Go duration，默认 600s）
+      # MinerU 云端每个批次/分片轮询解析结果的最长时间（Go duration，默认 30m）
       - WEKNORA_MINERU_CLOUD_TIMEOUT=${WEKNORA_MINERU_CLOUD_TIMEOUT:-}
       # PaddleOCR-VL 云端轮询解析结果的最长时间（Go duration，默认 600s）
       - WEKNORA_PADDLEOCR_VL_CLOUD_TIMEOUT=${WEKNORA_PADDLEOCR_VL_CLOUD_TIMEOUT:-}
