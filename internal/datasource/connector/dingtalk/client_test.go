@@ -434,15 +434,18 @@ func TestClientResignsDownloadURLAfterObjectStoreRefusal(t *testing.T) {
 
 func TestClientBoundsDocumentDownloads(t *testing.T) {
 	t.Run("declared length", func(t *testing.T) {
+		var downloadQueries, objectFetches int
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			switch {
 			case strings.HasSuffix(r.URL.Path, "/queryDentryId"):
 				_, _ = w.Write([]byte(`{"dentryId":"1","spaceId":"2"}`))
 			case strings.HasSuffix(r.URL.Path, "/downloadInfos/query"):
+				downloadQueries++
 				_, _ = w.Write([]byte(`{"protocol":"HEADER_SIGNATURE","headerSignatureInfo":{
 					"resourceUrls":["http://` + r.Host + `/oss/object"]}}`))
 			default:
+				objectFetches++
 				w.Header().Set("Content-Length", strconv.Itoa(4096))
 				w.WriteHeader(http.StatusOK)
 			}
@@ -454,21 +457,29 @@ func TestClientBoundsDocumentDownloads(t *testing.T) {
 		c.tokenExpiry = time.Now().Add(time.Hour)
 		c.downloadLimit = 1024
 		data, err := c.downloadDocument(context.Background(), "doc")
-		if err == nil || !strings.Contains(err.Error(), "exceeds the 1024 byte download limit") {
+		if err == nil || !errors.Is(err, errDocumentTooLarge) ||
+			!strings.Contains(err.Error(), "1024 bytes") {
 			t.Fatalf("downloadDocument() = %q, %v; want a size refusal", data, err)
+		}
+		if downloadQueries != 1 || objectFetches != 1 {
+			t.Fatalf("over-sized download retried: signature queries = %d, object fetches = %d",
+				downloadQueries, objectFetches)
 		}
 	})
 
 	t.Run("streamed length", func(t *testing.T) {
+		var downloadQueries, objectFetches int
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "application/json")
 			switch {
 			case strings.HasSuffix(r.URL.Path, "/queryDentryId"):
 				_, _ = w.Write([]byte(`{"dentryId":"1","spaceId":"2"}`))
 			case strings.HasSuffix(r.URL.Path, "/downloadInfos/query"):
+				downloadQueries++
 				_, _ = w.Write([]byte(`{"protocol":"HEADER_SIGNATURE","headerSignatureInfo":{
 					"resourceUrls":["http://` + r.Host + `/oss/object"]}}`))
 			default:
+				objectFetches++
 				// Flushing first drops Content-Length, so only the streaming
 				// guard can stop an over-sized body.
 				w.WriteHeader(http.StatusOK)
@@ -485,10 +496,85 @@ func TestClientBoundsDocumentDownloads(t *testing.T) {
 		c.tokenExpiry = time.Now().Add(time.Hour)
 		c.downloadLimit = 1024
 		if _, err := c.downloadDocument(context.Background(), "doc"); err == nil ||
-			!strings.Contains(err.Error(), "1024 byte download limit") {
+			!errors.Is(err, errDocumentTooLarge) ||
+			!strings.Contains(err.Error(), "1024 bytes") {
 			t.Fatalf("downloadDocument() error = %v, want a size refusal", err)
 		}
+		// A body with no Content-Length is only measurable while it is read, so
+		// before the sentinel existed every attempt paid for a fresh signature
+		// and another over-sized read before failing. The size is a property of
+		// the document, not a transient fault: one attempt, one signature, one
+		// transfer.
+		if downloadQueries != 1 || objectFetches != 1 {
+			t.Fatalf("over-sized download retried: signature queries = %d, object fetches = %d",
+				downloadQueries, objectFetches)
+		}
 	})
+}
+
+// A read failure that is not a size refusal stays retryable: the transfer is
+// re-signed and re-attempted, and the document is still returned.
+func TestClientRetriesTransientReadFailuresWithAFreshSignature(t *testing.T) {
+	var downloadQueries, objectFetches int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/queryDentryId"):
+			_, _ = w.Write([]byte(`{"dentryId":"1","spaceId":"2"}`))
+		case strings.HasSuffix(r.URL.Path, "/downloadInfos/query"):
+			downloadQueries++
+			_, _ = w.Write([]byte(`{"protocol":"HEADER_SIGNATURE","headerSignatureInfo":{
+				"headers":{"Authorization":"OSS key:sig` + strconv.Itoa(downloadQueries) + `"},
+				"resourceUrls":["http://` + r.Host + `/oss/object"]}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	c := testClient(server)
+	c.token = "cached"
+	c.tokenExpiry = time.Now().Add(time.Hour)
+	// The object store is served by a transport that truncates the first body
+	// mid-stream, which surfaces as a plain read error rather than a size
+	// refusal, and succeeds on the second attempt.
+	c.fileHTTP = &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		objectFetches++
+		body := io.NopCloser(strings.NewReader("bytes"))
+		if objectFetches == 1 {
+			body = io.NopCloser(&failingReader{data: "byt"})
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       body,
+			Header:     make(http.Header),
+			Request:    req,
+		}, nil
+	})}
+
+	data, err := c.downloadDocument(context.Background(), "doc")
+	if err != nil {
+		t.Fatalf("downloadDocument() error = %v", err)
+	}
+	if string(data) != "bytes" || downloadQueries != 2 || objectFetches != 2 {
+		t.Fatalf("data = %q, download=%d object=%d; want a re-signed retry",
+			data, downloadQueries, objectFetches)
+	}
+}
+
+// failingReader yields its data and then fails, standing in for a connection
+// dropped in the middle of a transfer.
+type failingReader struct {
+	data string
+	read bool
+}
+
+func (r *failingReader) Read(p []byte) (int, error) {
+	if r.read {
+		return 0, errors.New("connection reset by peer")
+	}
+	r.read = true
+	return copy(p, r.data), nil
 }
 
 func TestReadLimitedRejectsOverlongBody(t *testing.T) {
@@ -496,8 +582,9 @@ func TestReadLimitedRejectsOverlongBody(t *testing.T) {
 		t.Fatalf("readLimited() = %q, %v", data, err)
 	}
 	if _, err := readLimited(strings.NewReader("12345"), 4); err == nil ||
+		!errors.Is(err, errDocumentTooLarge) ||
 		!strings.Contains(err.Error(), "download limit") {
-		t.Fatalf("readLimited() error = %v", err)
+		t.Fatalf("readLimited() error = %v, want errDocumentTooLarge", err)
 	}
 }
 

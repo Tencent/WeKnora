@@ -134,11 +134,23 @@ func (n node) isBinaryDocument() bool {
 	return ok
 }
 
-// isDocument reports whether the connector can ingest the node: a native adoc
-// document through the blocks API, or an uploaded file through the storage
-// download API.
+// isDocument reports whether the connector has a read path for the node at all:
+// a native adoc document through the blocks API, or an uploaded file through
+// the storage download API. Whether a given data source takes it is
+// isIngestible's answer, because an upload is guarded by its own switch.
 func (n node) isDocument() bool {
 	return n.isOnlineDocument() || n.isBinaryDocument()
+}
+
+// isIngestible reports whether this data source ingests the node: a read path
+// must exist and the switch guarding it must be on. Validate, the resource
+// picker and both sync modes select nodes through this one predicate, so a
+// switch that is off is off in every one of them.
+func (n node) isIngestible(settings documentSettings) bool {
+	if n.isOnlineDocument() {
+		return true
+	}
+	return settings.IncludeUploadedFiles && n.isBinaryDocument()
 }
 
 func (n node) title() string {
@@ -638,25 +650,36 @@ func (c *client) fetchSigned(ctx context.Context, target downloadTarget) ([]byte
 	limit := c.maxDownloadBytes()
 	if resp.ContentLength > limit {
 		return nil, false, fmt.Errorf(
-			"DingTalk document is %d bytes, which exceeds the %d byte download limit",
-			resp.ContentLength, limit)
+			"%w: %d bytes announced, limit is %d bytes",
+			errDocumentTooLarge, resp.ContentLength, limit)
 	}
 	data, err := readLimited(resp.Body, limit)
 	if err != nil {
+		if errors.Is(err, errDocumentTooLarge) {
+			return nil, false, fmt.Errorf("download DingTalk document: %w", err)
+		}
 		return nil, true, fmt.Errorf("read DingTalk document: %w", err)
 	}
 	return data, false, nil
 }
 
+// errDocumentTooLarge marks a document whose transfer passed the configured
+// size cap. The size is a property of the stored object rather than a transient
+// failure — a freshly signed URL returns the very same bytes — so a caller must
+// not retry it.
+var errDocumentTooLarge = errors.New("document exceeds the download limit")
+
 // readLimited reads at most limit bytes and fails when the body is longer, so
-// an over-sized document is reported instead of silently truncated.
+// an over-sized document is reported instead of silently truncated. The failure
+// wraps errDocumentTooLarge so the streaming guard and the announced-length
+// guard report the same, recognisable error.
 func readLimited(body io.Reader, limit int64) ([]byte, error) {
 	data, err := io.ReadAll(io.LimitReader(body, limit+1))
 	if err != nil {
 		return nil, err
 	}
 	if int64(len(data)) > limit {
-		return nil, fmt.Errorf("document exceeds the %d byte download limit", limit)
+		return nil, fmt.Errorf("%w of %d bytes", errDocumentTooLarge, limit)
 	}
 	return data, nil
 }
