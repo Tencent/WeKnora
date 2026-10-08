@@ -64,6 +64,10 @@ func TestReadSheetRange_SplitsTokenAndReadsValues(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "tenant_access_token": "t", "expire": 7200})
 			return
 		}
+		if strings.Contains(r.URL.Path, "/sheets/v3/") {
+			_, _ = w.Write([]byte(`{"code":0,"data":{"sheet":{"grid_properties":{"row_count":3,"column_count":2}}}}`))
+			return
+		}
 		gotPath = r.URL.Path
 		_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": map[string]any{
 			"valueRange": map[string]any{"values": [][]any{{"名称", "数量"}, {"苹果", 3}, {"梨", nil}}},
@@ -76,7 +80,7 @@ func TestReadSheetRange_SplitsTokenAndReadsValues(t *testing.T) {
 	if err != nil {
 		t.Fatalf("readSheetRange: %v", err)
 	}
-	if gotPath != "/open-apis/sheets/v2/spreadsheets/sht_abc/values/0" {
+	if gotPath != "/open-apis/sheets/v2/spreadsheets/sht_abc/values/0!A1:B3" {
 		t.Errorf("path = %q", gotPath)
 	}
 	if truncated {
@@ -93,7 +97,14 @@ func TestReadSheetRange_TruncatesLargeTable(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "tenant_access_token": "t", "expire": 7200})
 			return
 		}
-		values := make([][]any, 600)
+		if strings.Contains(r.URL.Path, "/sheets/v3/") {
+			_, _ = w.Write([]byte(`{"code":0,"data":{"sheet":{"grid_properties":{"row_count":600,"column_count":1}}}}`))
+			return
+		}
+		if r.URL.Path != "/open-apis/sheets/v2/spreadsheets/sht_x/values/0!A1:A500" {
+			t.Errorf("unexpected range: %s", r.URL.Path)
+		}
+		values := make([][]any, maxTableRows)
 		for i := range values {
 			values[i] = []any{i}
 		}
@@ -430,8 +441,8 @@ func TestReadBitableRecords_Exactly500NotTruncated(t *testing.T) {
 }
 
 // TestReadBitableRecords_EmptyRecordPageTerminates guards the pagination
-// zero-progress break: a malformed page (empty items but has_more=true and a
-// non-empty page_token) must terminate instead of looping until the task
+// zero-progress error: a malformed page (empty items but has_more=true and a
+// non-empty page_token) must fail instead of looping until the task
 // deadline. A short context deadline is a safety net so a regression fails fast
 // rather than hanging the suite.
 func TestReadBitableRecords_EmptyRecordPageTerminates(t *testing.T) {
@@ -457,14 +468,14 @@ func TestReadBitableRecords_EmptyRecordPageTerminates(t *testing.T) {
 	defer cancel()
 	c := &Client{baseURL: srv.URL, appID: "a", appSecret: "s", httpClient: srv.Client()}
 	rows, _, err := c.readBitableRecords(ctx, "bascabc_tblxyz")
-	if err != nil {
-		t.Fatalf("empty-page pagination must terminate cleanly, got err: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "empty page") {
+		t.Fatalf("empty-page pagination must fail explicitly, got err: %v", err)
 	}
 	if recordCalls != 1 {
 		t.Errorf("records endpoint called %d times, want 1 (loop must break on the empty page)", recordCalls)
 	}
-	if len(rows) != 1 { // header only
-		t.Errorf("rows = %d, want 1 (header only, no records)", len(rows))
+	if rows != nil {
+		t.Errorf("invalid pagination returned partial rows: %v", rows)
 	}
 }
 

@@ -314,7 +314,13 @@ func inlineTable(ctx context.Context, client sheetReader, token, kind string) st
 		return ""
 	}
 	if truncated {
-		table += fmt.Sprintf("\n\n> 表格已截断（仅显示前 %d 行）", maxTableRows)
+		if kind == "sheet" {
+			// A sheet's allocated grid can extend beyond populated cells.
+			// Describe the read boundary without claiming content was omitted.
+			table += fmt.Sprintf("\n\n> 仅读取前 %d 行范围（含表头）", maxTableRows)
+		} else {
+			table += fmt.Sprintf("\n\n> 表格已截断（仅显示前 %d 行）", maxTableRows)
+		}
 	}
 	return table
 }

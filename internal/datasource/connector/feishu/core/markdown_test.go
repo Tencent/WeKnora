@@ -58,7 +58,7 @@ func TestBlocksToMarkdown_EmbeddedSheetAndFile(t *testing.T) {
 	}
 }
 
-func TestBlocksToMarkdown_SheetTruncatedNote(t *testing.T) {
+func TestBlocksToMarkdown_SheetReadBoundaryNote(t *testing.T) {
 	blocks := []DocxBlock{
 		{BlockID: "root", BlockType: BlockTypePage},
 		{BlockID: "s", BlockType: BlockTypeSheet, Sheet: &BlockTokenRef{Token: "sht_a_0"}},
@@ -68,8 +68,8 @@ func TestBlocksToMarkdown_SheetTruncatedNote(t *testing.T) {
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	if !strings.Contains(string(md), "表格已截断") {
-		t.Errorf("want truncation note, got:\n%s", md)
+	if !strings.Contains(string(md), "前 500 行范围") || strings.Contains(string(md), "已截断") {
+		t.Errorf("want a read boundary without claiming populated rows were omitted, got:\n%s", md)
 	}
 }
 
