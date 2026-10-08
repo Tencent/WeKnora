@@ -3456,7 +3456,7 @@ const reasoningEffortLevel = computed<ReasoningLevel>({
 // 只在模型真正解析出来之后才夹：模型列表异步加载期间 capabilities 还是 undefined，
 // 此时的通用梯度会把已保存的 max/xhigh 误降级成 auto。
 const clampReasoningEffortToModel = () => {
-  if (editorInitializing.value || !selectedChatModel.value) return;
+  if (!selectedChatModel.value) return;
   const clamped = clampLevel(reasoningEffortLevel.value, reasoningEffortOptions.value);
   if (clamped !== reasoningEffortLevel.value) reasoningEffortLevel.value = clamped;
 };
@@ -3466,7 +3466,9 @@ watch(
     formData.value.config.model_id,
     reasoningEffortOptions.value.join(','),
   ].join('|'),
-  () => clampReasoningEffortToModel(),
+  () => {
+    if (!editorInitializing.value) clampReasoningEffortToModel();
+  },
   { immediate: true },
 );
 
@@ -3670,8 +3672,13 @@ watch(() => props.visible, async (val) => {
       console.error('Failed to initialize agent editor', error);
     } finally {
       if (generation === editorInitializationGeneration && props.visible) {
-        editorInitializing.value = false;
+        // Model normalization and queued form watchers belong to initialization,
+        // so capture the baseline only after they have settled.
+        clampReasoningEffortToModel();
+        await nextTick();
+        if (generation !== editorInitializationGeneration || !props.visible) return;
         modalShell.markClean();
+        editorInitializing.value = false;
       }
     }
   } else {
@@ -4062,6 +4069,7 @@ const handleClose = () => {
 
 const modalShell = useModalShell({
   visible: () => props.visible,
+  loading: () => editorInitializing.value,
   close: handleClose,
   snapshot: () => formData.value,
   ignoreEscape: () =>

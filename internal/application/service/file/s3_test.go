@@ -2,11 +2,13 @@ package file
 
 import (
 	"context"
+	"net/http"
 	"strings"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/utils"
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 )
 
 func TestNewS3Client_Credentials(t *testing.T) {
@@ -48,11 +50,12 @@ func TestNewS3Client_Credentials(t *testing.T) {
 	})
 }
 
-func TestNewS3Client_PathStyleForCompatibleEndpoints(t *testing.T) {
+func TestS3UsePathStyle(t *testing.T) {
 	tests := []struct {
-		name          string
-		endpoint      string
-		wantPathStyle bool
+		name           string
+		endpoint       string
+		forcePathStyle bool
+		wantPathStyle  bool
 	}{
 		{
 			name:          "S3-compatible service uses path-style",
@@ -74,16 +77,62 @@ func TestNewS3Client_PathStyleForCompatibleEndpoints(t *testing.T) {
 			endpoint:      "https://s3.cn-north-1.amazonaws.com.cn",
 			wantPathStyle: false,
 		},
+		{
+			name:          "Tencent COS endpoint uses virtual-hosted",
+			endpoint:      "https://cos.ap-shanghai.myqcloud.com",
+			wantPathStyle: false,
+		},
+		{
+			name:           "Tencent COS endpoint honors force_path_style",
+			endpoint:       "https://cos.ap-shanghai.myqcloud.com",
+			forcePathStyle: true,
+			wantPathStyle:  true,
+		},
+		{
+			name:          "lookalike host is not treated as COS",
+			endpoint:      "https://cos.myqcloud.com.example.org",
+			wantPathStyle: true,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Verify the path-style detection logic matches our implementation
-			usePathStyle := !strings.Contains(tt.endpoint, "amazonaws.com")
-			if usePathStyle != tt.wantPathStyle {
-				t.Errorf("endpoint %q: usePathStyle = %v, want %v", tt.endpoint, usePathStyle, tt.wantPathStyle)
+			if got := s3UsePathStyle(tt.endpoint, tt.forcePathStyle); got != tt.wantPathStyle {
+				t.Errorf("s3UsePathStyle(%q, %v) = %v, want %v", tt.endpoint, tt.forcePathStyle, got, tt.wantPathStyle)
 			}
 		})
+	}
+}
+
+// Tencent COS rejects path-style requests for buckets created since
+// 2024-01-01, so the request must go to {bucket}.{host}/{key} (#3134).
+func TestNewS3Client_TencentCOSPutObjectUsesVirtualHostedURL(t *testing.T) {
+	t.Setenv("SSRF_WHITELIST", "cos.ap-shanghai.myqcloud.com")
+	utils.ResetSSRFWhitelistForTest()
+	t.Cleanup(utils.ResetSSRFWhitelistForTest)
+
+	const bucket = "examplebucket-1250000000"
+	svc, err := newS3Client("https://cos.ap-shanghai.myqcloud.com", "ak", "sk", bucket, "ap-shanghai", "", false)
+	if err != nil {
+		t.Fatalf("newS3Client() error = %v", err)
+	}
+	trip := &capturingRoundTripper{}
+	opts := svc.client.Options()
+	opts.HTTPClient = &http.Client{Transport: trip}
+	opts.Retryer = aws.NopRetryer{}
+	_, err = s3.New(opts).PutObject(context.Background(), &s3.PutObjectInput{
+		Bucket: aws.String(bucket),
+		Key:    aws.String("a/b.txt"),
+		Body:   strings.NewReader("hello"),
+	})
+	if err != nil {
+		t.Fatalf("PutObject: %v", err)
+	}
+	if want := bucket + ".cos.ap-shanghai.myqcloud.com"; trip.host != want {
+		t.Errorf("host = %q, want %q", trip.host, want)
+	}
+	if want := "/a/b.txt"; trip.path != want {
+		t.Errorf("path = %q, want %q", trip.path, want)
 	}
 }
 

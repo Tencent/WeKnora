@@ -200,6 +200,9 @@ func (o *ModelSpecOverride) CompatJSON() json.RawMessage {
 // "value too long for type" failure at INSERT time.
 const ModelIDMaxLen = 64
 
+// ModelDisplayNameMaxLen matches models.display_name VARCHAR(255).
+const ModelDisplayNameMaxLen = 255
+
 // DefaultBuiltinModelTenantID is the tenant id that built-in models are
 // assigned to when YAML does not specify one. Kept in sync with the seed
 // value of tenants_id_seq in migrations/versioned/000000_init.up.sql

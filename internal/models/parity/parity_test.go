@@ -316,6 +316,28 @@ func TestLegacyWireParity(t *testing.T) {
 			want: map[string]any{"chat_template_kwargs": map[string]any{"enable_thinking": true}},
 		},
 		{
+			name:     "openrouter legacy default keeps the native reasoning format",
+			provider: "openrouter", model: "qwen/qwen3.7-flash",
+			extra: map[string]string{models.ExtraThinkingControl: "none"},
+			opts:  &api.Options{Thinking: ptrBool(false)},
+			want: map[string]any{
+				"reasoning":            map[string]any{"enabled": false},
+				"chat_template_kwargs": nil,
+			},
+			divergence: "the pre-catalog editor persisted OpenRouter's default `none` on every remote row; " +
+				"that default must not suppress the provider's native reasoning switch.",
+		},
+		{
+			name:     "openrouter non-default legacy format remains an explicit override",
+			provider: "openrouter", model: "qwen/qwen3.7-flash",
+			extra: map[string]string{models.ExtraThinkingControl: "chat_template_kwargs"},
+			opts:  &api.Options{Thinking: ptrBool(false)},
+			want: map[string]any{
+				"reasoning":            nil,
+				"chat_template_kwargs": map[string]any{"enable_thinking": false},
+			},
+		},
+		{
 			name:     "moonshot v1 pins temperature to 1 and drops other sampling",
 			provider: "moonshot", model: "moonshot-v1-8k",
 			opts: &api.Options{Temperature: 0.2, TopP: 0.9},

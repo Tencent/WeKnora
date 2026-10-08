@@ -538,16 +538,17 @@ defineExpose({ relocate: () => applyLocate(props.locate) })
 .pdf-source-mark {
   position: absolute;
   border-radius: var(--app-radius-xs);
-  background: color-mix(in srgb, var(--app-source-highlight) 55%, transparent);
+  background: var(--app-source-highlight-bg);
   mix-blend-mode: multiply;
 
   &--box {
-    outline: 1px solid var(--app-source-highlight);
+    background: var(--app-source-highlight-soft-bg);
+    outline: 1px solid var(--app-source-highlight-border);
   }
 
   &--page {
     background: transparent;
-    outline: 2px solid var(--app-source-highlight);
+    outline: 1px solid var(--app-source-highlight-border);
     mix-blend-mode: normal;
   }
 }

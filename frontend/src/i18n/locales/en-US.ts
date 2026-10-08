@@ -810,6 +810,7 @@ export default {
     channelConfluence: 'Confluence',
     channelYuque: 'Yuque',
     channelGitLab: 'GitLab',
+    channelSeafile: 'Seafile',
     channelIma: 'Tencent IMA',
     channelUpload: 'Upload',
     channelManual: 'Manual',
@@ -3959,6 +3960,9 @@ export default {
         customInstructionsPlaceholder: 'For example: prioritize nameplates, model numbers, alarm codes, and table units…',
         imageAttrsLabel: 'Image attribute observation',
         imageAttrsDescription: 'When on, each image is first observed for attributes and described, then the attributes decide whether an OCR round runs for the text in the image. When off, the basic mode applies: every image is described and OCR runs for all of them',
+        imageVectorLabel: 'Image vector search',
+        imageVectorDescription: 'When on, each image is also encoded by the embedding model itself after its description is generated, so searches can find images by what they show even where the description leaves it out. Needs an embedding model that takes images; costs one extra embedding call per image and widens the vector search pool. Applies to documents ingested or re-parsed afterwards; scanned PDF pages are skipped',
+        imageVectorModelUnsupported: 'The current embedding model does not declare image input, so no image vectors will be indexed or recalled',
         imageAttrsSchemaLabel: 'Observable image attributes',
         imageAttrsSchemaDescription: 'The model observes the attributes below (defined by the backend registry) to drive the OCR policy',
         imageAttrsOcrConditions: 'Trigger OCR based on the observed attribute conditions',
@@ -4620,7 +4624,7 @@ export default {
       },
       keyLabels: {
         auth: {
-          registration_mode: 'Self-service registration mode',
+          registration_mode: 'Registration mode',
           default_tenant_mode: 'Default workspace provisioning',
           complex_password_enabled: 'Require complex password'
         },
@@ -4651,7 +4655,7 @@ export default {
       },
       keyDescriptions: {
         auth: {
-          registration_mode: 'Self-service registration mode. self_serve = anyone can register an account; invite_only = public registration is disabled and only Owners/Admins can invite. Takes effect immediately after saving, but use self_serve with care (the public internet will send spam sign-ups).',
+          registration_mode: 'Registration mode. Open registration allows anyone to create an account; invitation registration requires a valid invitation link; disabled registration prevents account creation while existing accounts can still accept invitations. Changes take effect immediately.',
           default_tenant_mode: 'Workspace provisioning after public registration. create_personal creates an Owner workspace; tenantless creates only the account until the user accepts an invitation or creates a workspace. Applies to new users only.',
           complex_password_enabled: 'Whether to require complex passwords. When enabled, passwords must contain uppercase and lowercase letters, numbers, and special characters. Changes take effect immediately and only apply to newly registered users or new password changes/resets. Special characters include {specialChars}'
         },
@@ -4684,7 +4688,8 @@ export default {
         auth: {
           registration_mode: {
             self_serve: 'Self-service (anyone can register)',
-            invite_only: 'Invite only (public registration disabled)'
+            invite_register: 'Invitation registration (valid link required)',
+            invite_only: 'Registration disabled (existing accounts can accept invitations)'
           },
           default_tenant_mode: {
             create_personal: 'Create personal workspace',
@@ -5074,6 +5079,8 @@ export default {
       dimensionOverrideDesc: 'Enable only if the provider documentation says this model accepts a dimensions parameter.',
       supportsVisionLabel: 'Supports Vision / Multimodal',
       supportsVisionDesc: 'Whether the model accepts image and multimodal input',
+      embeddingImageInputLabel: 'Image Input',
+      embeddingImageInputDesc: 'The model embeds images into the same vector space as text. Catalogued models are detected automatically; declare it for custom models',
       contextWindowLabel: 'Context Window',
       contextWindowPlaceholder: 'Default {value}',
       contextWindowDesc: 'How many tokens this model can take in one request. Agent history compaction uses this limit. Leave empty for the default 200000 (200K). Use the provider’s real window — a larger guess means compaction never fires and the provider rejects the request.',
@@ -5119,6 +5126,7 @@ export default {
   },
   language: {
     zhCN: '简体中文',
+    zhTW: 'Traditional Chinese',
     enUS: 'English',
     ruRU: 'Русский',
     koKR: '한국어',
@@ -6868,6 +6876,12 @@ export default {
       paths: 'Directories', pathsPlaceholder: 'One directory per line; leave empty to sync the whole project',
       addProject: 'Add project', projectRequired: 'Add at least one GitLab project',
     },
+    seafile: {
+      baseUrl: 'Seafile URL', apiToken: 'API token',
+      apiTokenHint: 'Generate it under "Settings → Web API token" in Seafile; the account only needs read access to the libraries you select, and the token is never sent with file downloads.',
+      singleLibraryOnly: 'A data source syncs one library; clear the current library before selecting another.',
+      selectionRequired: 'Select at least one library, folder or file',
+    },
     resourceHint: 'Select the spaces or folders to sync',
     untitled: 'Untitled',
     resourceLoadFailed: 'Failed to load resources',
@@ -6881,6 +6895,10 @@ export default {
     guideStep1_notion: 'Open the page or database you want to sync in Notion',
     guideStep2_notion: 'Click the "···" menu at the top right, select "Connect to" or "Add connections"',
     guideStep3_notion: 'Search and select your Integration app, then come back and click Retry',
+    noResourcesDesc_seafile: 'The token can reach no libraries, or every library is encrypted (encrypted libraries cannot be synced)',
+    guideStep1_seafile: 'Sign in to Seafile and confirm the account can read at least one unencrypted library',
+    guideStep2_seafile: 'Generate or regenerate the token under "Settings → Web API token"',
+    guideStep3_seafile: 'Come back, enter the new token and click Retry',
     permissionDocLink: 'View Feishu wiki permission docs',
     syncScheduleLabel: 'Sync schedule',
     conflictLabel: 'Conflict strategy',
@@ -6939,7 +6957,8 @@ export default {
       dingtalk: 'DingTalk Docs',
       rss: 'RSS / Atom Feed',
       ima: 'Tencent IMA',
-      gitlab: 'GitLab'
+      gitlab: 'GitLab',
+      seafile: 'Seafile'
     },
     connectorDesc: {
       feishu: 'Sync documents, spreadsheets and files from Feishu Wiki',
@@ -6952,7 +6971,8 @@ export default {
       dingtalk: 'Sync online documents from DingTalk knowledge bases',
       rss: 'Sync articles from RSS / Atom feeds',
       ima: 'Sync documents, notes and files from Tencent IMA knowledge bases (AI sessions and video parses are not supported)',
-      gitlab: 'Sync files from GitLab projects'
+      gitlab: 'Sync files from GitLab projects',
+      seafile: 'Sync folders and files from Seafile libraries'
     },
     drive: {
       folderTokenLabel: 'Drive folder token',
@@ -7077,7 +7097,8 @@ export default {
     resourceType: {
       wikiSpace: 'Wiki Space',
       docCategory: 'Document Tag',
-      book: 'Yuque Book'
+      book: 'Yuque Book',
+      library: 'Seafile Library'
     },
     neverSynced: 'Never synced',
     justNow: 'Just now',
@@ -7089,7 +7110,15 @@ export default {
       dingtalk_resource_failed: 'DingTalk resource is unavailable; check access and the saved selection, then retry.',
       deletion_lookup_failed: 'Failed to look up the item before deletion; see server logs',
       deletion_failed: 'Deletion failed; see server logs',
-      ingest_failed: 'Ingest failed; see server logs'
+      ingest_failed: 'Ingest failed; see server logs',
+      seafile_permission_denied: 'Access to the Seafile file was denied; check the library permissions of the token owner.',
+      seafile_not_found: 'The Seafile file no longer exists or was moved; the next sync retries it.',
+      seafile_file_too_large: 'The Seafile file exceeds the size limit; raise MAX_FILE_SIZE_MB or shrink the file.',
+      seafile_empty_file: 'The Seafile file is empty and was skipped.',
+      seafile_source_changed: 'The Seafile file changed while it was being fetched; the next sync retries it.',
+      seafile_invalid_response: 'Seafile returned a response that could not be parsed; check the server version and reverse proxy.',
+      seafile_ssrf_blocked: 'The Seafile download URL was blocked by the SSRF policy; add the fileserver host to SSRF_WHITELIST.',
+      seafile_fetch_failed: 'Failed to fetch the file from Seafile; the next sync retries it.'
     }
   },
   integrations: {
