@@ -48,6 +48,12 @@ func collectImageURLs(ctx context.Context, imageInfos []string) []string {
 // are the complete claim set. Source files stay out of this list: reparse
 // and manual cleanup must keep the original document, and knowledge delete
 // already removes FilePath separately.
+//
+// Only call this from a path that is removing the knowledge for good
+// (executeKnowledgeDelete, ProcessKBDelete). Cleanup that runs before a
+// re-index must keep collecting ImageInfo alone: the knowledge survives it,
+// and DeleteFile marks the object deleted, so the re-claim that follows could
+// not resolve the handles it dropped.
 func mergeKnowledgeReleaseURLs(
 	ctx context.Context,
 	catalog interfaces.ResourceCatalog,
@@ -715,8 +721,15 @@ func (s *knowledgeService) cleanupKnowledgeResources(ctx context.Context, knowle
 	for _, ci := range chunkImageInfos {
 		imageInfoStrs = append(imageInfoStrs, ci.ImageInfo)
 	}
-	imageURLs := mergeKnowledgeReleaseURLs(
-		ctx, s.resourceCatalog, []string{knowledge.ID}, collectImageURLs(ctx, imageInfoStrs))
+	// Release only what ImageInfo accounts for. This cleanup runs before the
+	// knowledge is re-indexed (manual update, reparse, move with reparse), not
+	// before it goes away, and the re-claim in triggerManualProcessing can only
+	// succeed while the object is alive: DeleteFile marks the resource deleted,
+	// and Bind resolves through a state=active lookup, so the handle could never
+	// be re-bound. Unioning in catalog bindings here would therefore delete
+	// markdown-only images that the new body still references. The paths that
+	// actually remove a knowledge entry do union -- see mergeKnowledgeReleaseURLs.
+	imageURLs := collectImageURLs(ctx, imageInfoStrs)
 
 	if err := s.chunkRepo.DeleteChunksByKnowledgeID(ctx, knowledge.TenantID, knowledge.ID); err != nil {
 		logger.GetLogger(ctx).WithField("error", err).Error("Failed to delete manual knowledge chunks")

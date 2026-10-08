@@ -75,9 +75,13 @@ type ResourceCatalog interface {
 	// ListReferencesByOwner returns derived resource:// handles still claimed
 	// by any of the given owners (extracted images and markdown attachments).
 	// Source files are omitted: reparse/cleanup must keep the original
-	// document, which knowledge delete removes through FilePath. Delete paths
-	// union this with ImageInfo URLs so markdown-only images are released even
-	// when multimodal never wrote ImageInfo.
+	// document, which knowledge delete removes through FilePath.
+	//
+	// Knowledge-delete paths union this with ImageInfo URLs so markdown-only
+	// images are released even when multimodal never wrote ImageInfo. Cleanup
+	// before a re-index must not: it leaves the knowledge in place, and the
+	// handles it released could not be re-bound once DeleteFile marked them
+	// deleted.
 	ListReferencesByOwner(ctx context.Context, ownerType string, ownerIDs ...string) ([]string, error)
 	MarkDeleted(ctx context.Context, reference string) error
 	CreateAccessGrant(ctx context.Context, reference string, ttl time.Duration) (string, error)

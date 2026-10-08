@@ -145,6 +145,93 @@ func TestMergeKnowledgeReleaseURLsReleasesMarkdownOnlyBindings(t *testing.T) {
 	}
 }
 
+// Cleanup runs before a re-index (manual update, reparse), not before the
+// knowledge goes away. A markdown-only attachment never appears in ImageInfo,
+// so unioning the catalog bindings in here released it, DeleteFile marked the
+// resource deleted, and the re-claim that follows could no longer resolve the
+// handle -- the republished body was left pointing at a deleted image. The
+// file and its binding must both outlive the cleanup.
+func TestCleanupKeepsMarkdownOnlyAttachment(t *testing.T) {
+	catalog, _ := newResourceCatalogForTest(t)
+	handle, err := catalog.Register(
+		context.Background(), 7, "local://7/exports/markdown-only.png",
+		interfaces.ResourceRegistration{Kind: "image"},
+	)
+	if err != nil {
+		t.Fatalf("register markdown-only image: %v", err)
+	}
+	if err := catalog.Bind(
+		context.Background(), handle, types.ResourceOwnerKnowledge, "doc",
+		types.ResourceRelationAttachment,
+	); err != nil {
+		t.Fatalf("bind markdown-only image: %v", err)
+	}
+
+	f := newDocumentWriteFixture(t)
+	f.svc.resourceCatalog = catalog
+	row, err := f.repo.GetKnowledgeByID(f.ctx, 7, "doc")
+	if err != nil {
+		t.Fatalf("load knowledge: %v", err)
+	}
+	// The fixture chunk carries no ImageInfo, which is what makes this case
+	// invisible to the pre-change release set.
+	if err := f.svc.cleanupKnowledgeResources(f.ctx, row); err != nil {
+		t.Fatalf("cleanup: %v", err)
+	}
+
+	if len(f.files.deleted) != 0 {
+		t.Fatalf("cleanup deleted %v, want the solely owned image kept", f.files.deleted)
+	}
+	refs, err := catalog.ListReferencesByOwner(f.ctx, types.ResourceOwnerKnowledge, "doc")
+	if err != nil {
+		t.Fatalf("list owner references: %v", err)
+	}
+	if len(refs) != 1 || refs[0] != handle {
+		t.Fatalf("owner references = %v, want the attachment %q still bound", refs, handle)
+	}
+	// Still resolvable, so the re-claim after cleanup can bind it again.
+	resource, err := catalog.Resolve(f.ctx, handle)
+	if err != nil || resource == nil {
+		t.Fatalf("resolve after cleanup = (%v, %v), want the live resource", resource, err)
+	}
+}
+
+// The delete paths keep the union: the knowledge is going away, so a
+// markdown-only attachment has no re-claim to survive for.
+func TestKnowledgeDeleteReleasesMarkdownOnlyAttachment(t *testing.T) {
+	catalog, _ := newResourceCatalogForTest(t)
+	handle, err := catalog.Register(
+		context.Background(), 7, "local://7/exports/markdown-only.png",
+		interfaces.ResourceRegistration{Kind: "image"},
+	)
+	if err != nil {
+		t.Fatalf("register markdown-only image: %v", err)
+	}
+	if err := catalog.Bind(
+		context.Background(), handle, types.ResourceOwnerKnowledge, "doc",
+		types.ResourceRelationAttachment,
+	); err != nil {
+		t.Fatalf("bind markdown-only image: %v", err)
+	}
+
+	f := newDocumentWriteFixture(t)
+	f.svc.resourceCatalog = catalog
+	if err := f.svc.DeleteKnowledge(f.ctx, "doc"); err != nil {
+		t.Fatalf("delete knowledge: %v", err)
+	}
+
+	if len(f.files.deleted) != 1 || f.files.deleted[0] != handle {
+		t.Fatalf("deleted %v, want the released markdown-only handle %q", f.files.deleted, handle)
+	}
+	refs, err := catalog.ListReferencesByOwner(f.ctx, types.ResourceOwnerKnowledge, "doc")
+	if err != nil {
+		t.Fatalf("list owner references: %v", err)
+	}
+	if len(refs) != 0 {
+		t.Fatalf("owner references = %v, want every claim released", refs)
+	}
+}
+
 func TestMergeKnowledgeReleaseURLsOmitsSourceFileBinding(t *testing.T) {
 	catalog, _ := newResourceCatalogForTest(t)
 	ctx := context.Background()
