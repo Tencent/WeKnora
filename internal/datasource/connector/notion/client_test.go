@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -365,7 +366,9 @@ func TestDownloadFile_RejectsLoopbackURL(t *testing.T) {
 }
 
 func TestDoRequest_RejectsOversizedResponse(t *testing.T) {
+	var hits atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits.Add(1)
 		_, _ = w.Write(bytes.Repeat([]byte("a"), 1<<20+1))
 	}))
 	defer server.Close()
@@ -378,5 +381,8 @@ func TestDoRequest_RejectsOversizedResponse(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "exceeds maximum size") {
 		t.Fatalf("error = %v, want an explicit over-limit error", err)
+	}
+	if got := hits.Load(); got != 1 {
+		t.Fatalf("server hit %d times, want 1 (oversized responses must not be retried)", got)
 	}
 }

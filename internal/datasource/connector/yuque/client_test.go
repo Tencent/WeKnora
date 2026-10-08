@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -425,8 +426,10 @@ func TestClient_DoRequest_RejectsOversizedResponse(t *testing.T) {
 	f := newFakeYuque()
 	defer f.Close()
 
+	var hits atomic.Int32
 	f.mux = http.NewServeMux()
 	f.mux.HandleFunc("/api/v2/user", func(w http.ResponseWriter, _ *http.Request) {
+		hits.Add(1)
 		_, _ = w.Write(bytes.Repeat([]byte("a"), 1<<20+1))
 	})
 	f.server.Config.Handler = f.mux
@@ -439,5 +442,10 @@ func TestClient_DoRequest_RejectsOversizedResponse(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "exceeds maximum size") {
 		t.Fatalf("error = %v, want an explicit over-limit error", err)
+	}
+	// The same document is just as large on every attempt; retrying only burns
+	// the rate-limit budget and re-reads the full cap each time.
+	if got := hits.Load(); got != 1 {
+		t.Fatalf("server hit %d times, want 1 (oversized responses must not be retried)", got)
 	}
 }

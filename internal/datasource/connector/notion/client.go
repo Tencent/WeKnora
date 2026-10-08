@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -33,6 +34,10 @@ type notionClient struct {
 // are small; a larger body means a broken or hostile server.
 const maxJSONResponseBytes = 16 << 20
 
+// errResponseTooLarge marks a body over the cap. It is deterministic: the same
+// request returns the same oversized body, so callers must not retry it.
+var errResponseTooLarge = errors.New("response exceeds maximum size")
+
 // readCapped reads a response body, refusing anything larger than limit instead
 // of buffering it. Oversized payloads are reported as an error: a truncated
 // body would be indexed as if it were the whole document. A non-positive limit
@@ -46,7 +51,7 @@ func readCapped(body io.Reader, limit int64) ([]byte, error) {
 		return nil, err
 	}
 	if int64(len(data)) > limit {
-		return nil, fmt.Errorf("response exceeds maximum size (%d bytes)", limit)
+		return nil, fmt.Errorf("%w (%d bytes)", errResponseTooLarge, limit)
 	}
 	return data, nil
 }

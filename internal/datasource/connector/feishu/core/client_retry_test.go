@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -175,7 +176,9 @@ func TestParseRetryAfter(t *testing.T) {
 }
 
 func TestDoRequest_RejectsOversizedResponse(t *testing.T) {
+	var hits atomic.Int32
 	ts, cfg := retryTestServer("/open-apis/docx/v1/documents", func(w http.ResponseWriter, _ *http.Request) {
+		hits.Add(1)
 		_, _ = w.Write(bytes.Repeat([]byte("a"), 1<<20+1))
 	})
 	defer ts.Close()
@@ -188,5 +191,99 @@ func TestDoRequest_RejectsOversizedResponse(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "exceeds maximum size") {
 		t.Fatalf("error = %v, want an explicit over-limit error", err)
+	}
+	// The same document is just as large on every attempt; retrying only burns
+	// the rate-limit budget and re-reads the full cap each time.
+	if got := hits.Load(); got != 1 {
+		t.Fatalf("server hit %d times, want 1 (oversized responses must not be retried)", got)
+	}
+}
+
+// The token response is decoded under tokenMu on every refresh and Ping, so it
+// must honour the same cap as every other API response.
+func TestGetTenantAccessToken_RejectsOversizedResponse(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/open-apis/auth/v3/tenant_access_token/internal", func(w http.ResponseWriter, _ *http.Request) {
+		// Valid JSON, so only the size cap can reject it.
+		_, _ = io.WriteString(w, `{"code":0,"tenant_access_token":"fake-token","expire":7200,"pad":"`)
+		_, _ = w.Write(bytes.Repeat([]byte("a"), 1<<20))
+		_, _ = io.WriteString(w, `"}`)
+	})
+	ts := httptest.NewServer(mux)
+	defer ts.Close()
+
+	c := NewClient(&Config{AppID: "a", AppSecret: "b", BaseURL: ts.URL})
+	c.jsonLimit = 1 << 20
+	_, err := c.GetTenantAccessToken(context.Background())
+	if err == nil {
+		t.Fatal("GetTenantAccessToken accepted a response larger than the cap, want error")
+	}
+	if !strings.Contains(err.Error(), "exceeds maximum size") {
+		t.Fatalf("error = %v, want an explicit over-limit error", err)
+	}
+}
+
+// countingBody records how much of a response body the client consumed.
+type countingBody struct {
+	io.ReadCloser
+	n *atomic.Int64
+}
+
+func (b countingBody) Read(p []byte) (int, error) {
+	n, err := b.ReadCloser.Read(p)
+	b.n.Add(int64(n))
+	return n, err
+}
+
+type countingTransport struct {
+	base http.RoundTripper
+	n    *atomic.Int64
+}
+
+func (t countingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	resp, err := t.base.RoundTrip(req)
+	if err == nil && strings.Contains(req.URL.Path, "/download") {
+		resp.Body = countingBody{ReadCloser: resp.Body, n: t.n}
+	}
+	return resp, err
+}
+
+// Download error bodies are only a diagnostic preview: they must be read with a
+// small bound and never copied whole into the returned error.
+func TestDownloadRawBytes_BoundsErrorBodies(t *testing.T) {
+	const bodySize = 1 << 20
+	for _, status := range []int{http.StatusTooManyRequests, http.StatusInternalServerError, http.StatusForbidden} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			handler := func(w http.ResponseWriter, _ *http.Request) {
+				if status == http.StatusTooManyRequests {
+					w.Header().Set("Retry-After", "0")
+				}
+				w.WriteHeader(status)
+				_, _ = w.Write(bytes.Repeat([]byte("a"), bodySize))
+			}
+			ts, cfg := retryTestServer("/open-apis/drive/v1/files/f/download", handler)
+			defer ts.Close()
+
+			c := NewClient(cfg)
+			var read atomic.Int64
+			hc := *c.httpClient
+			base := hc.Transport
+			if base == nil {
+				base = http.DefaultTransport
+			}
+			hc.Transport = countingTransport{base: base, n: &read}
+			c.httpClient = &hc
+
+			_, err := c.DownloadDriveFile(context.Background(), "f")
+			if err == nil {
+				t.Fatalf("status %d: want error", status)
+			}
+			if len(err.Error()) > 1024 {
+				t.Fatalf("error carries %d bytes of response body, want a short preview", len(err.Error()))
+			}
+			if got := read.Load(); got >= bodySize {
+				t.Fatalf("read %d bytes of error bodies, want a bounded preview per response", got)
+			}
+		})
 	}
 }
