@@ -48,7 +48,7 @@ var webSearchTool = BaseTool{
 // WebSearchInput defines the input parameters for web search tool
 type WebSearchInput struct {
 	Query     string `json:"query" jsonschema:"Search query string"`
-	Count     *int   `json:"count,omitempty" jsonschema:"1 to configured maximum (at most 20)"`
+	Count     *int   `json:"count,omitempty" jsonschema:"Number of results to return (1 to the configured maximum)"`
 	Country   string `json:"country,omitempty" jsonschema:"Two-letter code or ALL (Brave, Serply); omit for default"`
 	Freshness string `json:"freshness,omitempty" jsonschema:"pd/pw/pm/py; Brave also accepts YYYY-MM-DDtoYYYY-MM-DD"`
 	Content   bool   `json:"content,omitempty" jsonschema:"Fetch page excerpts; default false"`
@@ -75,6 +75,9 @@ func NewWebSearchTool(
 	}
 	maxResults = min(maxResults, 20)
 	tool.description = fmt.Sprintf(tool.description, maxResults)
+	// 静态 struct tag 无法表达"当前配置的上限"（不同 agent 可能是 7、20…），
+	// 这里按实际生效的 maxResults 重写 count 的描述，避免模型按写死的 20 填值被拒。
+	tool.schema = patchWebSearchCountSchema(tool.schema, maxResults)
 
 	return &WebSearchTool{
 		BaseTool:         tool,
@@ -83,6 +86,31 @@ func NewWebSearchTool(
 		maxResults:       maxResults,
 		providerID:       providerID,
 	}
+}
+
+// patchWebSearchCountSchema 把 count 字段的描述改写为实际生效的上限。
+// 解析失败时原样返回，不影响工具可用性。
+func patchWebSearchCountSchema(raw json.RawMessage, maxResults int) json.RawMessage {
+	var schema map[string]any
+	if err := json.Unmarshal(raw, &schema); err != nil {
+		return raw
+	}
+	props, ok := schema["properties"].(map[string]any)
+	if !ok {
+		return raw
+	}
+	count, ok := props["count"].(map[string]any)
+	if !ok {
+		return raw
+	}
+	count["description"] = fmt.Sprintf(
+		"Number of results to return, 1 to %d (the configured maximum). Omit to use the maximum.",
+		maxResults)
+	patched, err := json.Marshal(schema)
+	if err != nil {
+		return raw
+	}
+	return patched
 }
 
 // WithPageReader shares page snapshots and full-output storage with web_fetch.
@@ -106,13 +134,25 @@ func (t *WebSearchTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 	}
 
 	maxResults := t.maxResults
+	// count 只是"要几条"的基数提示，不是带身份的目标集合：超出上限就截断到上限，
+	// 而不是让整轮调用失败。同类的 search_knowledge.limit / search_memory.limit
+	// 走的也是截断。硬拒绝没有额外保护——两条路都受同一个上限约束——却会让模型
+	// 白丢一轮，并把"填错参数"混进真正的失败信号里。
+	countClamped := false
 	if input.Count != nil {
-		if *input.Count < 1 || *input.Count > maxResults {
-			return &types.ToolResult{
-				Success: false, Error: fmt.Sprintf("count must be between 1 and %d", maxResults),
-			}, nil
+		requested := *input.Count
+		switch {
+		case requested > maxResults:
+			countClamped = true
+			logger.Warnf(ctx, "[Tool][WebSearch] count %d exceeds the configured maximum %d; clamped",
+				requested, maxResults)
+		case requested >= 1:
+			maxResults = requested
+		default:
+			countClamped = true
+			logger.Warnf(ctx, "[Tool][WebSearch] count %d is not a positive number; using %d",
+				requested, maxResults)
 		}
-		maxResults = *input.Count
 	}
 	filters := types.WebSearchFilters{
 		Country: strings.ToUpper(strings.TrimSpace(input.Country)), Freshness: strings.TrimSpace(input.Freshness),
@@ -230,7 +270,13 @@ func (t *WebSearchTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 	// Build output text
 	output := "=== Web Search Results ===\n"
 	output += fmt.Sprintf("Query: %s\n", query)
-	output += fmt.Sprintf("Found %d result(s)\n\n", len(webResults))
+	output += fmt.Sprintf("Found %d result(s)\n", len(webResults))
+	if countClamped {
+		// 把纠正信号交给模型，而不是静默截断：它既拿到结果，也知道自己的取值被改过。
+		output += fmt.Sprintf("Note: requested count %d is outside 1-%d and was clamped to %d.\n",
+			*input.Count, t.maxResults, maxResults)
+	}
+	output += "\n"
 
 	// Format results
 	formattedResults := make([]map[string]interface{}, 0, len(webResults))

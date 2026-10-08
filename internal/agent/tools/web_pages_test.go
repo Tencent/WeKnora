@@ -139,8 +139,10 @@ func TestSearchOptionsAndExplicitPageContent(t *testing.T) {
 	require.Contains(t, model, `status="success" verified="true"`)
 	require.Contains(t, model, rows[0]["full_output_path"])
 	require.Contains(t, model, "still useful")
+	// 只留真正无法协商的非法取值：不支持的过滤值没有"最接近的合法值"可退。
+	// count 超范围不再是失败路径，改为截断到上限（见
+	// TestAgentWebSearchClampsCountToConfiguredMaximum）。
 	for _, args := range []string{
-		`{"query":"q","count":0}`, `{"query":"q","count":6}`,
 		`{"query":"q","country":"bad"}`, `{"query":"q","freshness":"tomorrow"}`,
 	} {
 		calls := svc.calls
