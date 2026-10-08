@@ -318,3 +318,89 @@ func TestRetrieveFromStoresRefillsPastStaleImageVectors(t *testing.T) {
 		})
 	}
 }
+
+// interleave alternates the hits of a and b, a first, then appends the rest.
+func interleave(a, b []*types.IndexWithScore) []*types.IndexWithScore {
+	out := make([]*types.IndexWithScore, 0, len(a)+len(b))
+	for i := 0; i < max(len(a), len(b)); i++ {
+		if i < len(a) {
+			out = append(out, a[i])
+		}
+		if i < len(b) {
+			out = append(out, b[i])
+		}
+	}
+	return out
+}
+
+func TestRetrieveFromStoresRefillsPastKeywordImageRows(t *testing.T) {
+	cases := []struct {
+		name      string
+		imageKBs  map[string]struct{}
+		ranked    []*types.IndexWithScore
+		wantText  int
+		wantTopKs []int
+	}{
+		{
+			// An engine that ranks every image row above the text, as a
+			// constant keyword score can, fills the whole pool with them.
+			name: "the whole pool is image rows",
+			ranked: append(rankedHits("kb", "image", 50, 0.9, types.ImageSourceType),
+				rankedHits("kb", "text", 10, 0.5, types.ChunkSourceType)...),
+			wantText: 10, wantTopKs: []int{50, 100},
+		},
+		{
+			// An image row's Content is its caption, so it ranks beside the
+			// caption's own chunk and takes half the pool.
+			name: "image rows beside their captions", imageKBs: recalls("kb"),
+			ranked: interleave(rankedHits("kb", "image", 100, 0.9, types.ImageSourceType),
+				rankedHits("kb", "text", 200, 0.9, types.ChunkSourceType)),
+			wantText: 50, wantTopKs: []int{50, 100},
+		},
+		{
+			name: "a pool that is not full is not searched again",
+			ranked: append(rankedHits("kb", "image", 5, 0.9, types.ImageSourceType),
+				rankedHits("kb", "text", 10, 0.5, types.ChunkSourceType)...),
+			wantText: 10, wantTopKs: []int{50},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			engine := &rankedEngine{
+				fakeRetrieveEngineService: fakeRetrieveEngineService{
+					engineType: types.PostgresRetrieverEngineType,
+					support:    []types.RetrieverType{types.VectorRetrieverType, types.KeywordsRetrieverType},
+				},
+				ranked: map[types.RetrieverType][]*types.IndexWithScore{
+					types.VectorRetrieverType:   rankedHits("kb", "vec", 3, 0.9, types.ChunkSourceType),
+					types.KeywordsRetrieverType: tc.ranked,
+				},
+			}
+			g := &storeGroup{
+				KBIDs: []string{"kb"}, Engine: buildBoundComposite(t, engine), TopK: 50,
+				ImageKBIDs: tc.imageKBs,
+				BaseParams: []types.RetrieveParams{
+					{RetrieverType: types.VectorRetrieverType},
+					{RetrieverType: types.KeywordsRetrieverType},
+				},
+			}
+			res, err := (&knowledgeBaseService{}).retrieveFromStores(
+				context.Background(), []*storeGroup{g}, nil)
+			require.NoError(t, err)
+
+			var keyword []*types.IndexWithScore
+			for _, rr := range res {
+				if rr.RetrieverType == types.KeywordsRetrieverType {
+					keyword = append(keyword, rr.Results...)
+				}
+			}
+			assert.Len(t, keyword, tc.wantText)
+			for _, h := range keyword {
+				assert.Equal(t, types.ChunkSourceType, h.SourceType)
+			}
+			assert.Equal(t, tc.wantTopKs, engine.topKs[types.KeywordsRetrieverType])
+			assert.Len(t, engine.topKs[types.VectorRetrieverType], 1,
+				"a vector pool without dropped rows is not searched again")
+		})
+	}
+}

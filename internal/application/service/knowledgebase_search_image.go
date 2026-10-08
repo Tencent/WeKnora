@@ -163,40 +163,65 @@ func staleImage(hit *types.IndexWithScore, g *storeGroup) bool {
 	return !recalled
 }
 
-func countStaleImages(hits []*types.IndexWithScore, g *storeGroup) int {
+// droppedImage reports whether filterImageHits drops a hit for being an
+// image row, whatever it scored: any keyword hit on one, and a vector hit on
+// a stale one.
+func droppedImage(hit *types.IndexWithScore, retriever types.RetrieverType, g *storeGroup) bool {
+	if retriever == types.KeywordsRetrieverType {
+		return hit != nil && hit.SourceType == types.ImageSourceType
+	}
+	return staleImage(hit, g)
+}
+
+func countDroppedImages(hits []*types.IndexWithScore, retriever types.RetrieverType, g *storeGroup) int {
 	n := 0
 	for _, hit := range hits {
-		if staleImage(hit, g) {
+		if droppedImage(hit, retriever, g) {
 			n++
 		}
 	}
 	return n
 }
 
-// refillPastStaleImages gives back the room stale image rows took in a
-// group's document vector pool.
+// refillPastDroppedImages gives back the room dropped image rows took in a
+// group's document pools: stale image rows in the vector pool, and every
+// image row in the keyword pool. An image row's Content is its caption, so
+// it matches a keyword query wherever the caption's own chunk does.
 //
-// No engine filters rows by source type, so filterImageHits drops stale
-// image rows only after the engine has cut its ranking at TopK; enough of
-// them ranked above the text would leave the search short of text hits, or
-// with none. When the pool came back full and held some, the document vector
-// search runs again on a pool twice as large, until it holds TopK
-// rows that are not stale, the index runs out of rows, or the pool reaches
-// maxRetrievalPoolSize: at most ceil(log2(maxRetrievalPoolSize/TopK)) extra
-// calls, four for the smallest pool of DefaultRetrievalTopK. The pool is then
-// cut back to TopK such rows, which is what excluding stale rows in the
-// engine would return, unless more than maxRetrievalPoolSize-TopK of them
-// rank above the text.
+// No engine filters rows by source type, so filterImageHits drops these rows
+// only after the engine has cut its ranking at TopK; enough of them ranked
+// above the text would leave the search short of text hits, or with none.
+// When a pool came back full and held some, its search runs again on a pool
+// twice as large, until it holds TopK rows that are kept, the index runs
+// out of rows, or the pool reaches maxRetrievalPoolSize: at most
+// ceil(log2(maxRetrievalPoolSize/TopK)) extra calls per pool, four for the
+// smallest pool of DefaultRetrievalTopK. The pool is then cut back to TopK
+// such rows, which is what excluding the rows in the engine would return,
+// unless more than maxRetrievalPoolSize-TopK of them rank above the text.
 //
 // The FAQ search never needs this, since its index holds no images.
-func refillPastStaleImages(ctx context.Context, g *storeGroup,
+func refillPastDroppedImages(ctx context.Context, g *storeGroup,
+	params []types.RetrieveParams, res []*types.RetrieveResult,
+) ([]*types.RetrieveResult, error) {
+	for _, retriever := range []types.RetrieverType{types.VectorRetrieverType, types.KeywordsRetrieverType} {
+		var err error
+		if res, err = refillPool(ctx, g, retriever, params, res); err != nil {
+			return nil, err
+		}
+	}
+	return res, nil
+}
+
+// refillPool refills the document pool of one retriever type, as
+// refillPastDroppedImages describes.
+func refillPool(ctx context.Context, g *storeGroup, retriever types.RetrieverType,
 	params []types.RetrieveParams, res []*types.RetrieveResult,
 ) ([]*types.RetrieveResult, error) {
 	set := slices.IndexFunc(res, func(rr *types.RetrieveResult) bool {
-		return rr != nil && rr.RetrieverType == types.VectorRetrieverType && countStaleImages(rr.Results, g) > 0
+		return rr != nil && rr.RetrieverType == retriever && countDroppedImages(rr.Results, retriever, g) > 0
 	})
 	param := slices.IndexFunc(params, func(p types.RetrieveParams) bool {
-		return p.RetrieverType == types.VectorRetrieverType && p.KnowledgeType == ""
+		return p.RetrieverType == retriever && p.KnowledgeType == ""
 	})
 	if set < 0 || param < 0 {
 		return res, nil
@@ -205,10 +230,10 @@ func refillPastStaleImages(ctx context.Context, g *storeGroup,
 	want := p.TopK
 	for refilled := false; ; refilled = true {
 		hits := res[set].Results
-		stale := countStaleImages(hits, g)
-		if len(hits) < p.TopK || len(hits)-stale >= want || p.TopK >= maxRetrievalPoolSize {
+		dropped := countDroppedImages(hits, retriever, g)
+		if len(hits) < p.TopK || len(hits)-dropped >= want || p.TopK >= maxRetrievalPoolSize {
 			if refilled {
-				res[set].Results = keepFirstFresh(hits, want, g)
+				res[set].Results = keepFirstKept(hits, want, retriever, g)
 			}
 			return res, nil
 		}
@@ -225,10 +250,12 @@ func refillPastStaleImages(ctx context.Context, g *storeGroup,
 	}
 }
 
-// keepFirstFresh cuts hits after the n-th one that is not a stale image row.
-func keepFirstFresh(hits []*types.IndexWithScore, n int, g *storeGroup) []*types.IndexWithScore {
+// keepFirstKept cuts hits after the n-th one that is not a dropped image row.
+func keepFirstKept(
+	hits []*types.IndexWithScore, n int, retriever types.RetrieverType, g *storeGroup,
+) []*types.IndexWithScore {
 	for i, hit := range hits {
-		if !staleImage(hit, g) {
+		if !droppedImage(hit, retriever, g) {
 			if n--; n == 0 {
 				return hits[:i+1]
 			}

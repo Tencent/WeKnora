@@ -136,8 +136,9 @@ func (s *knowledgeBaseService) retrieveFromStores(
 }
 
 // retrieveGroup runs one group's retrieval and holds its hits to the group's
-// image rules (filterImageHits), refilling the document vector pool first
-// when stale image rows took room in it (refillPastStaleImages).
+// image rules (filterImageHits), refilling the document vector and keyword
+// pools first when image rows it drops took room in them
+// (refillPastDroppedImages).
 func retrieveGroup(ctx context.Context, g *storeGroup) ([]*types.RetrieveResult, error) {
 	params := paramsWithTopK(g)
 	res, err := g.Engine.Retrieve(ctx, params)
@@ -145,7 +146,7 @@ func retrieveGroup(ctx context.Context, g *storeGroup) ([]*types.RetrieveResult,
 	if err != nil {
 		return nil, err
 	}
-	res, err = refillPastStaleImages(ctx, g, params, res)
+	res, err = refillPastDroppedImages(ctx, g, params, res)
 	if err != nil {
 		return nil, err
 	}
