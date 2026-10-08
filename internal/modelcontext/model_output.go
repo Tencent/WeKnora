@@ -308,13 +308,17 @@ func matchAddsToContent(match, content string) bool {
 	return excerpt != "" && !strings.Contains(content, excerpt)
 }
 
-// annotateGraphResult adds the graph relations and any per-knowledge-base
-// failures to a graph query's chunk view. Both lived only in Output, which
-// the model never sees once there are chunk rows to render.
+// annotateGraphResult adds the graph relations, any per-knowledge-base
+// failures, and any cap the graph tool hit to a graph query's chunk view. The
+// first two lived only in Output, which the model never sees once there are
+// chunk rows to render; the same goes for a truncated relation list, which
+// without a marker reads as the entity's whole neighbourhood.
 func annotateGraphResult(output string, data map[string]interface{}) string {
 	relations := mapsValue(data["relations"])
 	failures := stringSliceValue(data["errors"])
-	if (len(relations) == 0 && len(failures) == 0) || !strings.HasSuffix(output, "</retrieval>") {
+	truncation := graphTruncationNote(data, len(relations))
+	if (len(relations) == 0 && len(failures) == 0 && truncation == "") ||
+		!strings.HasSuffix(output, "</retrieval>") {
 		return output
 	}
 	var b strings.Builder
@@ -326,7 +330,48 @@ func annotateGraphResult(output string, data map[string]interface{}) string {
 	for _, failure := range failures {
 		fmt.Fprintf(&b, "  <error>%s</error>\n", escapeText(failure))
 	}
+	b.WriteString(truncation)
 	return strings.TrimSuffix(output, "</retrieval>") + b.String() + "</retrieval>"
+}
+
+// graphTruncationNote states inside the model's view the caps the graph query
+// tool hit. shownRelations is how many relations that view carries; the tool
+// reports the totals under relations_total / graph_chunks_total /
+// query_terms_total. It returns "" when nothing was dropped, so a complete
+// result stays clean.
+func graphTruncationNote(data map[string]interface{}, shownRelations int) string {
+	totalRelations := intValue(data, "relations_total")
+	totalChunks := intValue(data, "graph_chunks_total")
+	fetchedChunks := totalChunks - intValue(data, "graph_chunks_omitted")
+	totalTerms := intValue(data, "query_terms_total")
+	if totalRelations <= shownRelations && totalChunks <= fetchedChunks && totalTerms <= 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("  <graph_truncated")
+	if totalRelations > shownRelations {
+		fmt.Fprintf(&b, " relations_shown=\"%d\" relations_total=\"%d\"", shownRelations, totalRelations)
+	}
+	if totalChunks > fetchedChunks {
+		fmt.Fprintf(&b, " chunks_fetched=\"%d\" chunks_total=\"%d\"", fetchedChunks, totalChunks)
+	}
+	if totalTerms > 0 {
+		fmt.Fprintf(&b, " terms_shown=\"%d\" terms_total=\"%d\"",
+			totalTerms-intValue(data, "query_terms_omitted"), totalTerms)
+	}
+	b.WriteString(">This graph query stopped at a result cap, so it is not the complete picture: ")
+	if totalRelations > shownRelations {
+		b.WriteString("the relations listed are a subset of these entities' relations, ")
+	}
+	if totalChunks > fetchedChunks {
+		b.WriteString("some of their source chunks are missing, ")
+	}
+	if totalTerms > 0 {
+		b.WriteString("and some words of the query were never matched against entity names, ")
+	}
+	b.WriteString("so a relation may be absent only because it was dropped. Narrow the query to a single entity " +
+		"name before concluding that a relation does not exist.</graph_truncated>\n")
+	return b.String()
 }
 
 // annotateSearchNotes tells the model what a search result does not show:

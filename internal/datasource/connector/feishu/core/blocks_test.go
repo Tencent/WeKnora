@@ -1,14 +1,18 @@
 package core
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Tencent/WeKnora/internal/logger"
 )
 
 func TestListDocumentBlocks_Paginates(t *testing.T) {
@@ -464,8 +468,8 @@ func TestReadBitableRecords_EmptyRecordPageTerminates(t *testing.T) {
 	}
 }
 
-// TestReadBitableRecords_EmptyFieldsPageTerminates guards the fields loop, which
-// has no size cap of its own — an empty page with has_more=true must still break.
+// TestReadBitableRecords_EmptyFieldsPageTerminates guards the fields loop: an
+// empty page with has_more=true must still break.
 func TestReadBitableRecords_EmptyFieldsPageTerminates(t *testing.T) {
 	fieldCalls := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -524,5 +528,105 @@ func TestListDocumentBlocks_EmptyPageTerminates(t *testing.T) {
 	}
 	if len(blocks) != 0 {
 		t.Errorf("blocks = %d, want 0", len(blocks))
+	}
+}
+
+// TestReadBitableRecords_RejectsRepeatedFieldPageToken guards the list-fields
+// pagination against a vendor that answers every page with has_more=true and
+// the same non-empty page_token: the second occurrence must fail loudly instead
+// of re-reading (and re-appending) the same page until the task deadline.
+// Same guard shape as the wiki space/node and drive file pagination.
+func TestReadBitableRecords_RejectsRepeatedFieldPageToken(t *testing.T) {
+	fieldCalls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/open-apis/auth/v3/tenant_access_token/internal":
+			_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "tenant_access_token": "t", "expire": 7200})
+		case strings.HasSuffix(r.URL.Path, "/fields"):
+			fieldCalls++
+			if fieldCalls > 2 {
+				http.Error(w, "pagination should have stopped", http.StatusBadGateway)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": map[string]any{
+				"has_more":   true,
+				"page_token": "constant-token",
+				"items":      []map[string]any{{"field_name": "col-a"}},
+			}})
+		}
+	}))
+	defer srv.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	c := &Client{baseURL: srv.URL, appID: "a", appSecret: "s", httpClient: srv.Client()}
+	_, _, err := c.readBitableRecords(ctx, "bascabc_tblxyz")
+	if err == nil || !strings.Contains(err.Error(), "repeated page token") {
+		t.Fatalf("expected repeated-page-token error, got %v", err)
+	}
+	if fieldCalls != 2 {
+		t.Errorf("fields endpoint called %d times, want 2 (the repeated token must fail fast)", fieldCalls)
+	}
+}
+
+// TestReadBitableRecords_CapsFieldPages guards the size cap on the fields loop:
+// a vendor handing out a fresh page_token on every page must stop at
+// maxBitableFields with a warning, not grow the header without bound.
+func TestReadBitableRecords_CapsFieldPages(t *testing.T) {
+	const fieldsPerPage = 2
+	fieldCalls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/open-apis/auth/v3/tenant_access_token/internal":
+			_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "tenant_access_token": "t", "expire": 7200})
+		case strings.HasSuffix(r.URL.Path, "/fields"):
+			fieldCalls++
+			page := r.URL.Query().Get("page_token")
+			if page == "" {
+				page = "page-0"
+			}
+			n, err := strconv.Atoi(strings.TrimPrefix(page, "page-"))
+			if err != nil {
+				t.Errorf("unexpected page_token %q", page)
+			}
+			items := make([]map[string]any, 0, fieldsPerPage)
+			for i := 0; i < fieldsPerPage; i++ {
+				items = append(items, map[string]any{"field_name": fieldName(n*fieldsPerPage + i)})
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": map[string]any{
+				"has_more":   true,
+				"page_token": "page-" + strconv.Itoa(n+1),
+				"items":      items,
+			}})
+		case strings.HasSuffix(r.URL.Path, "/records/search"):
+			_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": map[string]any{
+				"has_more": false, "items": []map[string]any{},
+			}})
+		}
+	}))
+	defer srv.Close()
+
+	var buf bytes.Buffer
+	logger.SetOutput(&buf)
+	defer logger.SetOutput(os.Stdout)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	c := &Client{baseURL: srv.URL, appID: "a", appSecret: "s", httpClient: srv.Client()}
+	rows, _, err := c.readBitableRecords(ctx, "bascabc_tblxyz")
+	if err != nil {
+		t.Fatalf("capped pagination must stop cleanly, got err: %v", err)
+	}
+	if len(rows) == 0 {
+		t.Fatal("expected a header row")
+	}
+	if got := len(rows[0]); got != maxBitableFields {
+		t.Errorf("header has %d fields, want the %d-field cap", got, maxBitableFields)
+	}
+	if want := maxBitableFields / fieldsPerPage; fieldCalls != want {
+		t.Errorf("fields endpoint called %d times, want %d (the cap must stop the loop)", fieldCalls, want)
+	}
+	if log := buf.String(); !strings.Contains(log, "exceeded") || !strings.Contains(log, "truncating") {
+		t.Errorf("hitting the cap must log a warning, log tail: %s", log)
 	}
 }
