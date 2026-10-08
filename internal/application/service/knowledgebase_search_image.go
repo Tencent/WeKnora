@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"slices"
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/embedding"
@@ -142,8 +143,7 @@ func keepHit(hit *types.IndexWithScore, retriever types.RetrieverType, g *storeG
 		return !image
 	case types.VectorRetrieverType:
 		if image {
-			_, recalled := g.ImageKBIDs[hit.KnowledgeBaseID]
-			return recalled && hit.Score >= imageThreshold(g.VectorThreshold)
+			return !staleImage(hit, g) && hit.Score >= imageThreshold(g.VectorThreshold)
 		}
 		if !g.imageRecall() {
 			return true
@@ -151,4 +151,88 @@ func keepHit(hit *types.IndexWithScore, retriever types.RetrieverType, g *storeG
 		return hit.Score >= g.VectorThreshold
 	}
 	return true
+}
+
+// staleImage reports whether a vector hit is an image row of a KB that does
+// not recall images: indexed while it was opted in, kept after it opted out.
+func staleImage(hit *types.IndexWithScore, g *storeGroup) bool {
+	if hit == nil || hit.SourceType != types.ImageSourceType {
+		return false
+	}
+	_, recalled := g.ImageKBIDs[hit.KnowledgeBaseID]
+	return !recalled
+}
+
+func countStaleImages(hits []*types.IndexWithScore, g *storeGroup) int {
+	n := 0
+	for _, hit := range hits {
+		if staleImage(hit, g) {
+			n++
+		}
+	}
+	return n
+}
+
+// refillPastStaleImages gives back the room stale image rows took in a
+// group's document vector pool.
+//
+// No engine filters rows by source type, so filterImageHits drops stale
+// image rows only after the engine has cut its ranking at TopK; enough of
+// them ranked above the text would leave the search short of text hits, or
+// with none. When the pool came back full and held some, the document vector
+// search runs again on a pool twice as large, until it holds TopK
+// rows that are not stale, the index runs out of rows, or the pool reaches
+// maxRetrievalPoolSize: at most ceil(log2(maxRetrievalPoolSize/TopK)) extra
+// calls, four for the smallest pool of DefaultRetrievalTopK. The pool is then
+// cut back to TopK such rows, which is what excluding stale rows in the
+// engine would return, unless more than maxRetrievalPoolSize-TopK of them
+// rank above the text.
+//
+// The FAQ search never needs this, since its index holds no images.
+func refillPastStaleImages(ctx context.Context, g *storeGroup,
+	params []types.RetrieveParams, res []*types.RetrieveResult,
+) ([]*types.RetrieveResult, error) {
+	set := slices.IndexFunc(res, func(rr *types.RetrieveResult) bool {
+		return rr != nil && rr.RetrieverType == types.VectorRetrieverType && countStaleImages(rr.Results, g) > 0
+	})
+	param := slices.IndexFunc(params, func(p types.RetrieveParams) bool {
+		return p.RetrieverType == types.VectorRetrieverType && p.KnowledgeType == ""
+	})
+	if set < 0 || param < 0 {
+		return res, nil
+	}
+	p := params[param]
+	want := p.TopK
+	for refilled := false; ; refilled = true {
+		hits := res[set].Results
+		stale := countStaleImages(hits, g)
+		if len(hits) < p.TopK || len(hits)-stale >= want || p.TopK >= maxRetrievalPoolSize {
+			if refilled {
+				res[set].Results = keepFirstFresh(hits, want, g)
+			}
+			return res, nil
+		}
+		p.TopK = min(2*p.TopK, maxRetrievalPoolSize)
+		more, err := g.Engine.Retrieve(ctx, []types.RetrieveParams{p})
+		more, err = retainPartialResults(ctx, g, more, err)
+		if err != nil {
+			return nil, err
+		}
+		if len(more) != 1 || more[0] == nil {
+			return res, nil
+		}
+		res[set] = more[0]
+	}
+}
+
+// keepFirstFresh cuts hits after the n-th one that is not a stale image row.
+func keepFirstFresh(hits []*types.IndexWithScore, n int, g *storeGroup) []*types.IndexWithScore {
+	for i, hit := range hits {
+		if !staleImage(hit, g) {
+			if n--; n == 0 {
+				return hits[:i+1]
+			}
+		}
+	}
+	return hits
 }

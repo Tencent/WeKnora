@@ -2,6 +2,9 @@ package service
 
 import (
 	"context"
+	"fmt"
+	"slices"
+	"sync"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/models/embedding"
@@ -196,6 +199,122 @@ func TestApplyImageRecallNeedsTheKBSwitchAndAnImageModel(t *testing.T) {
 			got := paramsWithTopK(g)
 			assert.Equal(t, 150, got[0].TopK)
 			assert.Equal(t, imageVectorThreshold, got[0].Threshold)
+		})
+	}
+}
+
+// rankedEngine answers each search with the first TopK rows of its ranking,
+// cut as an engine cuts its own, and records the TopK each search asked for.
+type rankedEngine struct {
+	fakeRetrieveEngineService
+	ranked map[types.RetrieverType][]*types.IndexWithScore
+	mu     sync.Mutex
+	topKs  map[types.RetrieverType][]int
+}
+
+func (e *rankedEngine) Retrieve(_ context.Context, p types.RetrieveParams) ([]*types.RetrieveResult, error) {
+	e.mu.Lock()
+	if e.topKs == nil {
+		e.topKs = make(map[types.RetrieverType][]int)
+	}
+	e.topKs[p.RetrieverType] = append(e.topKs[p.RetrieverType], p.TopK)
+	e.mu.Unlock()
+	rows := e.ranked[p.RetrieverType]
+	return []*types.RetrieveResult{{
+		Results:             slices.Clone(rows[:min(p.TopK, len(rows))]),
+		RetrieverEngineType: types.PostgresRetrieverEngineType,
+		RetrieverType:       p.RetrieverType,
+	}}, nil
+}
+
+// rankedHits is n hits of one kind in knowledge base kbID, best first.
+func rankedHits(kbID, prefix string, n int, from float64, source types.SourceType) []*types.IndexWithScore {
+	out := make([]*types.IndexWithScore, n)
+	for i := range out {
+		out[i] = kbHit(kbID, fmt.Sprintf("%s%d", prefix, i), from-float64(i)*1e-4, source)
+	}
+	return out
+}
+
+func TestRetrieveFromStoresRefillsPastStaleImageVectors(t *testing.T) {
+	cases := []struct {
+		name       string
+		imageKBs   map[string]struct{}
+		stale      int // image rows of the KB, ranked above all its text
+		text       int
+		wantText   int
+		wantImages int
+		wantTopKs  []int
+	}{
+		{
+			// MatchCount 5 over-retrieves a pool of 50, all of it image rows
+			// of a KB that has since turned image vectors off.
+			name: "the whole pool is stale", stale: 50, text: 10,
+			wantText: 10, wantTopKs: []int{50, 100},
+		},
+		{
+			name: "stale rows push text out of the pool", stale: 120, text: 200,
+			wantText: 50, wantTopKs: []int{50, 100, 200},
+		},
+		{
+			// Past the cap the search stays short: the stated bound.
+			name: "more stale rows than the largest pool", stale: 600, text: 10,
+			wantTopKs: []int{50, 100, 200, 400, maxRetrievalPoolSize},
+		},
+		{
+			name: "a pool that is not full is not searched again", stale: 5, text: 10,
+			wantText: 10, wantTopKs: []int{50},
+		},
+		{
+			name: "images of a KB that recalls them are not stale", imageKBs: recalls("kb"),
+			stale: 50, text: 10, wantText: 10, wantImages: 50, wantTopKs: []int{75},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			engine := &rankedEngine{
+				fakeRetrieveEngineService: fakeRetrieveEngineService{
+					engineType: types.PostgresRetrieverEngineType,
+					support:    []types.RetrieverType{types.VectorRetrieverType, types.KeywordsRetrieverType},
+				},
+				ranked: map[types.RetrieverType][]*types.IndexWithScore{
+					types.VectorRetrieverType: append(
+						rankedHits("kb", "image", tc.stale, 0.9, types.ImageSourceType),
+						rankedHits("kb", "text", tc.text, 0.5, types.ChunkSourceType)...),
+					types.KeywordsRetrieverType: rankedHits("kb", "kw", 3, 0.9, types.ChunkSourceType),
+				},
+			}
+			g := &storeGroup{
+				KBIDs: []string{"kb"}, Engine: buildBoundComposite(t, engine), TopK: 50,
+				ImageKBIDs: tc.imageKBs,
+				BaseParams: []types.RetrieveParams{
+					{RetrieverType: types.VectorRetrieverType},
+					{RetrieverType: types.KeywordsRetrieverType},
+				},
+			}
+			res, err := (&knowledgeBaseService{}).retrieveFromStores(
+				context.Background(), []*storeGroup{g}, nil)
+			require.NoError(t, err)
+
+			var text, images, keyword int
+			for _, rr := range res {
+				for _, h := range rr.Results {
+					switch {
+					case rr.RetrieverType == types.KeywordsRetrieverType:
+						keyword++
+					case h.SourceType == types.ImageSourceType:
+						images++
+					default:
+						text++
+					}
+				}
+			}
+			assert.Equal(t, tc.wantText, text)
+			assert.Equal(t, tc.wantImages, images)
+			assert.Equal(t, 3, keyword, "the keyword search is left as it was")
+			assert.Equal(t, tc.wantTopKs, engine.topKs[types.VectorRetrieverType])
+			assert.Equal(t, []int{50}, engine.topKs[types.KeywordsRetrieverType],
+				"only the document vector search runs again")
 		})
 	}
 }
