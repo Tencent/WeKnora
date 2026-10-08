@@ -3,15 +3,13 @@
     type="button"
     class="ext-cta"
     :class="`ext-cta--${variant}`"
+    :title="hint"
     @click="emit('click')"
   >
     <span class="ext-cta__badge" aria-hidden="true">
       <slot name="icon" />
     </span>
-    <span class="ext-cta__body">
-      <span class="ext-cta__label">{{ label }}</span>
-      <span v-if="hint" class="ext-cta__hint">{{ hint }}</span>
-    </span>
+    <span class="ext-cta__label">{{ label }}</span>
     <span class="ext-cta__arrow-wrap" aria-hidden="true">
       <t-icon name="jump" class="ext-cta__arrow" />
     </span>
