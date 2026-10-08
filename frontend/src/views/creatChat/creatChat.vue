@@ -70,6 +70,8 @@
         @update:visible="(val) => val ? null : uiStore.closeKBEditor()" @success="handleKBEditorSuccess" />
 </template>
 <script setup lang="ts">
+import { useAppViewport } from '@/composables/useAppViewport'
+useAppViewport()
 import { ref, watch, onMounted, nextTick, computed } from 'vue';
 import ContextualGuide from '@/components/ContextualGuide.vue';
 import InputField from '@/components/Input-field.vue';

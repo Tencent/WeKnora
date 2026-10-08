@@ -53,6 +53,8 @@
 </template>
 
 <script setup lang="ts">
+import { useAppViewport } from '@/composables/useAppViewport'
+useAppViewport()
 import { computed, onUnmounted, ref, watch, watchEffect } from 'vue'
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
@@ -266,4 +268,5 @@ watch(headerTitle, (title) => {
   text-align: center;
   color: var(--td-text-color-placeholder);
 }
+@media (max-width: 767px) { .embed-page { height: var(--app-viewport-height, 100dvh); } }
 </style>

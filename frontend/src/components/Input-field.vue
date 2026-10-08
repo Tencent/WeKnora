@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import '@/assets/mobile-composer.less'
 import { ref, onMounted, onBeforeUnmount, onUnmounted, computed, watch, nextTick, h, type PropType } from "vue";
 import { storeToRefs } from 'pinia';
 import { useRoute, useRouter } from 'vue-router';
@@ -57,6 +58,8 @@ import { SKILL_ICON, type MentionItem, type MentionItemType, type MentionRequest
 import { toolboxLocation } from '@/config/toolbox';
 import { supportedLevels, levelLabelKey, levelFromLegacy, clampLevel, type ReasoningLevel } from '@/utils/reasoningEffort';
 
+const mobileToolsOpen = ref(false);
+const composerFocused = ref(false);
 const route = useRoute();
 const router = useRouter();
 const settingsStore = useSettingsStore();
@@ -2715,7 +2718,7 @@ defineExpose({
         </div>
       </div>
     </div>
-    <div class="rich-input-container" data-guide="chat-input">
+    <div class="rich-input-container" :class="{ 'composer-focused': composerFocused, 'composer-has-text': query.length > 0 }" data-guide="chat-input">
       <!-- 图片预览区域 -->
       <div v-if="uploadedImages.length > 0" class="image-preview-bar">
         <div v-for="(img, idx) in uploadedImages" :key="idx" class="image-preview-item">
@@ -2755,11 +2758,21 @@ defineExpose({
       <!-- 实际输入框 -->
       <t-textarea ref="textareaRef" v-model="query" :placeholder="t('input.placeholder')" name="description" :autosize="true"
         @keydown="onKeydown" @input="onInput" @compositionstart="onCompositionStart" @compositionend="onCompositionEnd"
-        @paste="onPaste" />
+        @paste="onPaste" @focus="composerFocused = true; mobileToolsOpen = false" @blur="composerFocused = false" />
 
       <!-- 控制栏按文档流排列，换行时自动撑开容器 -->
-      <div class="control-bar" :class="{ 'is-embedded': embeddedMode }">
-        <!-- 左侧控制按钮 -->
+      <div class="control-bar" :class="{ 'is-embedded': embeddedMode, 'mobile-tools-open': mobileToolsOpen }">
+        <!-- Mobile quick actions stay available without expanding the settings. -->
+        <button v-if="!embeddedMode" type="button" class="mobile-composer-quick mobile-icon-button"
+          :aria-label="$t('chat.attachmentUploadTooltip')" :disabled="composerLocked"
+          @click="attachmentUploadRef?.triggerFileSelect()"><t-icon name="add" /></button>
+        <button v-if="!embeddedMode" type="button" class="mobile-composer-quick mobile-icon-button"
+          :aria-label="$t('input.knowledgeBase')" :disabled="isMentionDisabled || composerLocked"
+          @mousedown.prevent @click.stop="triggerMention"><span aria-hidden="true">@</span></button>
+        <button v-if="!embeddedMode" type="button" class="mobile-composer-more mobile-icon-button"
+          :aria-label="$t('common.more')" :aria-expanded="mobileToolsOpen" @click="mobileToolsOpen = !mobileToolsOpen">
+          <t-icon :name="mobileToolsOpen ? 'chevron-down' : 'ellipsis'" />
+        </button>
         <div class="control-left" v-if="!embeddedMode">
           <!-- Agent 模式切换按钮 -->
           <div ref="agentModeButtonRef" class="control-btn agent-mode-btn" :class="{
