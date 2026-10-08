@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"testing"
-	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/assert"
@@ -18,33 +17,21 @@ func testProcessSyncSerializesCursorSnapshots(t *testing.T, replica func(*DataSo
 	t.Helper()
 	svc, connector, repo := newConcurrentSyncService(t)
 	secondService := replica(svc)
+	queue := &deferredSyncQueue{}
+	secondService.taskEnqueuer = queue
 	first, second := concurrentSyncTask(t, "first"), concurrentSyncTask(t, "second")
-	firstDone, secondDone := make(chan error, 1), make(chan error, 1)
+	firstDone := make(chan error, 1)
 	go func() { firstDone <- svc.ProcessSync(context.Background(), first) }()
 	require.Equal(t, int32(1), (<-connector.entered).revision)
-	secondStarted := make(chan struct{})
-	go func() {
-		close(secondStarted)
-		secondDone <- secondService.ProcessSync(context.Background(), second)
-	}()
-	<-secondStarted
-	var next syncFetchObservation
-	overlapped := false
-	select {
-	case next = <-connector.entered:
-		overlapped = true
-		// Ensure the newer cursor is committed before releasing the older fetch.
-		require.NoError(t, <-secondDone)
-	case <-time.After(100 * time.Millisecond):
-	}
+	ctx := types.WithTaskRetryMetadata(context.Background(), 0, 5)
+	require.NoError(t, secondService.ProcessSync(ctx, second))
+	require.NotNil(t, queue.task, "contender must release its worker and enqueue a delayed successor")
+	assert.Equal(t, int32(1), connector.calls.Load())
 	close(connector.release)
 	require.NoError(t, <-firstDone)
-	if !overlapped {
-		next = <-connector.entered
-		require.NoError(t, <-secondDone)
-	}
-	assert.False(t, overlapped, "the second sync must wait before reading the source cursor")
-	if assert.NotNil(t, next.cursor, "the waiting sync must reload the committed cursor") {
+	require.NoError(t, secondService.ProcessSync(ctx, queue.task))
+	next := <-connector.entered
+	if assert.NotNil(t, next.cursor, "the deferred sync must reload the committed cursor") {
 		assert.Equal(t, "1", next.cursor.ConnectorCursor["revision"])
 	}
 	stored, err := repo.source.ParseSyncCursor()

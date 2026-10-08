@@ -164,9 +164,9 @@ func (r *sessionRepository) QueryPaged(
 ) ([]*types.SessionListItem, int64, error) {
 	// Dialect-aware bits so the same query works on Postgres and SQLite (Lite build).
 	isPostgres := r.db.Dialector.Name() == "postgres"
-	titleLikeExpr := "LOWER(s.title) LIKE LOWER(?)"
+	titleLikeExpr := "LOWER(s.title) LIKE LOWER(?) ESCAPE ?"
 	if isPostgres {
-		titleLikeExpr = "s.title ILIKE ?"
+		titleLikeExpr = "s.title ILIKE ? ESCAPE ?"
 	}
 	// SQLite (the driver used by Lite) does not support NULLS LAST; its default
 	// nulls ordering puts NULLs first for DESC, which is actually what we want
@@ -193,7 +193,7 @@ func (r *sessionRepository) QueryPaged(
 			types.SkillMaintenanceSessionMarker+"%",
 		)
 		if kw := strings.TrimSpace(q.Keyword); kw != "" {
-			db = db.Where(titleLikeExpr, "%"+escapeLikeKeyword(kw)+"%")
+			db = db.Where(titleLikeExpr, "%"+escapeLikeKeyword(kw)+"%", likeEscapeChar)
 		}
 		return db
 	}

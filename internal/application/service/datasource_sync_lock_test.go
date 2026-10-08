@@ -44,7 +44,7 @@ func TestDataSourceSyncLockScopesAndCancellation(t *testing.T) {
 			defer cancel()
 			ran := false
 			err := second.run(ctx, "same-source", func(context.Context) error { ran = true; return nil })
-			assert.ErrorIs(t, err, context.DeadlineExceeded)
+			assert.ErrorIs(t, err, redislock.ErrLockBusy)
 			assert.False(t, ran)
 			err = second.run(context.Background(), "different-source", func(context.Context) error { return nil })
 			assert.NoError(t, err, "a different source must progress while the first is held")

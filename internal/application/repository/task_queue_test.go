@@ -1037,3 +1037,44 @@ func TestTaskPendingOps_DrainUnclaimedAndReleaseRollsBackOnReleaseFailure(t *tes
 	require.NoError(t, db.Model(&types.TaskPendingOp{}).Count(&count).Error)
 	assert.Equal(t, int64(1), count)
 }
+
+func TestTaskPendingOps_ClaimableCountMatchesClaimBatch(t *testing.T) {
+	db := setupTaskQueueTestDB(t)
+	repo := NewTaskPendingOpsRepository(db)
+	counter := repo.(interfaces.TaskPendingOpsClaimableCounter)
+	ctx := context.Background()
+	staleBefore := time.Now().Add(-time.Hour)
+	for _, key := range []string{"ready", "ready", "stale", "stale", "busy", "busy"} {
+		require.NoError(t, repo.Enqueue(ctx,
+			makePendingOp("wiki:ingest", "knowledge_base", "kb-1", "ingest", key, nil)))
+	}
+	require.NoError(t, db.Model(&types.TaskPendingOp{}).Where("dedup_key = ?", "stale").
+		Update("claimed_at", staleBefore.Add(-time.Second)).Error)
+	require.NoError(t, db.Model(&types.TaskPendingOp{}).Where("dedup_key = ?", "busy").
+		Update("claimed_at", time.Now()).Error)
+	// An unclaimed late sibling of a busy key is not eligible on its own.
+	require.NoError(t, repo.Enqueue(ctx,
+		makePendingOp("wiki:ingest", "knowledge_base", "kb-1", "retract", "busy", nil)))
+	// Identical keys in another tuple must not exclude the ready document.
+	other := makePendingOp("wiki:ingest", "knowledge_base", "other-kb", "ingest", "ready", nil)
+	require.NoError(t, repo.Enqueue(ctx, other))
+	require.NoError(t, db.Model(&types.TaskPendingOp{}).Where("scope_id = ?", "other-kb").
+		Update("claimed_at", time.Now()).Error)
+	n, err := counter.ClaimableCount(ctx, "wiki:ingest", "knowledge_base", "kb-1", staleBefore)
+	require.NoError(t, err)
+	require.Equal(t, int64(2), n)
+	rows, err := repo.ClaimBatch(ctx, "wiki:ingest", "knowledge_base", "kb-1", 2, staleBefore)
+	require.NoError(t, err)
+	require.Len(t, rows, 4)
+	keys := map[string]bool{}
+	for _, row := range rows {
+		keys[row.DedupKey] = true
+	}
+	require.Len(t, keys, int(n))
+	n, err = counter.ClaimableCount(ctx, "wiki:ingest", "knowledge_base", "kb-1", staleBefore)
+	require.NoError(t, err)
+	require.Zero(t, n)
+	pending, err := repo.PendingCount(ctx, "wiki:ingest", "knowledge_base", "kb-1")
+	require.NoError(t, err)
+	require.Equal(t, int64(7), pending, "crash recovery must still see claimed rows")
+}

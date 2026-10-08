@@ -34,7 +34,7 @@ func TestDataSourceSyncRedisLeaseRenewsWhileRunning(t *testing.T) {
 	defer cancel()
 	contender := &dataSourceSyncCoordinator{redis: client}
 	err := contender.run(ctx, "source", func(context.Context) error { return nil })
-	assert.ErrorIs(t, err, context.DeadlineExceeded)
+	assert.ErrorIs(t, err, redislock.ErrLockBusy)
 	close(release)
 	require.NoError(t, <-done)
 	assert.False(t, server.Exists(key))
@@ -91,6 +91,6 @@ func TestProcessSyncStreamingOwnershipLossPreservesLastCheckpoint(t *testing.T) 
 	assert.Equal(t, "checkpoint", cursor.ConnectorCursor["revision"])
 	log, err := svc.syncLogRepo.FindByID(context.Background(), "first")
 	require.NoError(t, err)
-	assert.Equal(t, types.SyncLogStatusRunning, log.Status)
-	assert.Nil(t, log.FinishedAt)
+	assert.Equal(t, types.SyncLogStatusFailed, log.Status)
+	assert.NotNil(t, log.FinishedAt)
 }

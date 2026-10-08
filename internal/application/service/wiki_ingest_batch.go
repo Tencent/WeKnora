@@ -18,28 +18,41 @@ import (
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
 	"golang.org/x/sync/errgroup"
 )
 
-// scheduleFollowUp enqueues another asynq trigger task if there are
-// still pending ops in task_pending_ops for this KB. Returns true when
-// a follow-up was scheduled.
-//
-// Post-Phase-3 this only backstops the case where a batch drained its
-// claimed window but more rows remain and no other trigger is pending
-// (e.g. steady trickle of uploads). Standard mode already fans a KB's
-// backlog across concurrent claiming batches, so the short delay is
-// normally just a light debounce rather than a lock-release wait.
-//
-// `delay` is the ProcessIn before the follow-up fires. Callers pass
-// wikiFollowUpDelay for the normal case and wikiRateLimitBackoff when the
-// batch tripped an upstream rate limit — the released failed rows are
-// eligible immediately, but nothing claims them until a trigger fires, so
-// stretching the follow-up interval is what actually paces retries down
-// during a 429 storm.
-func (s *wikiIngestService) scheduleFollowUp(ctx context.Context, payload WikiIngestPayload, delay time.Duration) bool {
+// followUpTriggerCount estimates useful new work from claimable documents and
+// running slots. reserveFollowUpTasks additionally bounds all outstanding
+// follow-ups (scheduled, queued, running and retrying) across batch completions.
+// The +1 allows the completing batch to replace itself before releasing its slot.
+func followUpTriggerCount(pending, batchSize, activeSlots, maxInflight int) int {
+	if pending <= 0 || batchSize <= 0 {
+		return 0
+	}
+	batchesNeeded := (pending + batchSize - 1) / batchSize
+	if activeSlots < 0 || maxInflight <= 1 {
+		return 1
+	}
+	freeSlots := maxInflight - activeSlots + 1 // caller's slot releases on return
+	if freeSlots < 1 {
+		freeSlots = 1
+	}
+	return min(batchesNeeded, freeSlots)
+}
+
+// scheduleFollowUp replenishes the KB's bounded supply of follow-up tasks.
+// Lite mode and rate-limited completions request only one successor. A 429
+// delays this batch's successor; it does not pause other batches in the KB.
+func (s *wikiIngestService) scheduleFollowUp(
+	ctx context.Context,
+	payload WikiIngestPayload,
+	delay time.Duration,
+	batchSize, maxInflight int,
+	rateLimited bool,
+) bool {
 	if s.pendingRepo == nil {
 		return false
 	}
@@ -48,21 +61,75 @@ func (s *wikiIngestService) scheduleFollowUp(ctx context.Context, payload WikiIn
 		return false
 	}
 
-	logger.Infof(ctx, "wiki ingest: %d more documents pending for KB %s, scheduling follow-up in %s", count, payload.KnowledgeBaseID, delay)
+	if s.redisClient != nil {
+		if counter, ok := s.pendingRepo.(interfaces.TaskPendingOpsClaimableCounter); ok {
+			count, err = counter.ClaimableCount(ctx, wikiTaskType, wikiTaskScope,
+				payload.KnowledgeBaseID, time.Now().Add(-wikiClaimStaleAfter))
+			if err != nil {
+				logger.Warnf(ctx, "wiki ingest: claimable count failed: %v", err)
+				return s.scheduleFollowUpRecheck(ctx, payload)
+			}
+			if count == 0 {
+				return s.scheduleStaleClaimRecheck(ctx, payload)
+			}
+		}
+		// ClaimBatch caps the number of distinct keys at 1000.
+		batchSize = min(batchSize, 1000)
+	}
+
+	// activeSlots stays -1 (unknown → single follow-up) in Lite mode and on
+	// a rate-limited exit.
+	activeSlots := -1
+	if !rateLimited {
+		activeSlots = s.activeInflightSlots(ctx, payload.KnowledgeBaseID)
+	}
+	n := followUpTriggerCount(int(count), batchSize, activeSlots, maxInflight)
+
+	var taskIDs []string
+	if s.redisClient != nil {
+		taskIDs, err = s.reserveFollowUpTasks(ctx, payload.KnowledgeBaseID, n, maxInflight)
+		if err != nil {
+			logger.Warnf(ctx, "wiki ingest: follow-up reservation failed: %v", err)
+			// Keep the pre-fan-out behavior while Redis is unavailable.
+			n = 1
+		} else {
+			n = len(taskIDs)
+			if n == 0 {
+				return s.scheduleFollowUpRecheck(ctx, payload)
+			}
+		}
+	}
+	logger.Infof(ctx, "wiki ingest: %d claimable documents for KB %s, scheduling %d follow-up(s) in %s",
+		count, payload.KnowledgeBaseID, n, delay)
 
 	langfuse.InjectTracing(ctx, &payload)
 	payloadBytes, _ := json.Marshal(payload)
-	t := asynq.NewTask(types.TypeWikiIngest, payloadBytes,
-		asynq.Queue(types.QueueWiki),
-		asynq.MaxRetry(wikiIngestMaxRetry),
-		asynq.Timeout(60*time.Minute),
-		asynq.ProcessIn(delay), // debounce (or rate-limit backoff) before draining the remainder
-	)
-	if _, err := s.task.Enqueue(t); err != nil {
-		logger.Warnf(ctx, "wiki ingest: follow-up enqueue failed: %v", err)
-		return false
+	scheduled := false
+	needsRecheck := false
+	for i := 0; i < n; i++ {
+		opts := []asynq.Option{
+			asynq.Queue(types.QueueWiki),
+			asynq.MaxRetry(wikiIngestMaxRetry),
+			asynq.Timeout(60 * time.Minute),
+			asynq.ProcessIn(delay),
+		}
+		if len(taskIDs) > 0 {
+			opts = append(opts, asynq.TaskID(taskIDs[i]))
+		}
+		t := asynq.NewTask(types.TypeWikiIngest, payloadBytes, opts...)
+		if _, err := s.task.Enqueue(t); err != nil {
+			logger.Warnf(ctx, "wiki ingest: follow-up enqueue %d/%d failed: %v", i+1, n, err)
+			// A timeout may mean the enqueue succeeded. Keep its reservation
+			// until reconciliation can establish the actual queue state.
+			needsRecheck = true
+			continue
+		}
+		scheduled = true
 	}
-	return true
+	if needsRecheck {
+		scheduled = s.scheduleFollowUpRecheck(ctx, payload) || scheduled
+	}
+	return scheduled
 }
 
 // newWikiBatchContext builds the per-run lazy fetchers used by both the ingest
@@ -190,7 +257,7 @@ func (s *wikiIngestService) newWikiBatchContext(
 	}
 }
 
-func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task) error {
+func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task) (retErr error) {
 	taskStartedAt := time.Now()
 	retryCount, _ := asynq.GetRetryCount(ctx)
 	maxRetry, _ := asynq.GetMaxRetry(ctx)
@@ -248,6 +315,16 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 		exitStatus = "invalid_payload"
 		return fmt.Errorf("wiki ingest: unmarshal payload: %w", err)
 	}
+
+	defer func() {
+		if p := recover(); p != nil {
+			// Asynq retries panics too: retain the outstanding reservation.
+			panic(p)
+		}
+		if retErr == nil {
+			s.releaseFollowUpTask(ctx, payload.KnowledgeBaseID)
+		}
+	}()
 
 	// Inject context
 	ctx = context.WithValue(ctx, types.TenantIDContextKey, payload.TenantID)
@@ -946,7 +1023,7 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 		logger.Warnf(ctx, "wiki ingest: KB %s hit upstream rate limiting, backing off follow-up to %s", payload.KnowledgeBaseID, followUpDelay)
 	}
 	followCtx, followCancel := wikiIngestCleanupContext(ctx)
-	followUpScheduled = s.scheduleFollowUp(followCtx, payload, followUpDelay)
+	followUpScheduled = s.scheduleFollowUp(followCtx, payload, followUpDelay, batchSize, maxInflight, rateLimited)
 	followCancel()
 	return nil
 }
@@ -1255,7 +1332,14 @@ func (s *wikiIngestService) mapOneDocument(
 	// was in flight, we must NOT proceed to LLM extraction — doing so would
 	// create wiki pages whose source_refs point at a ghost knowledge ID,
 	// permanently unreachable via wiki_read_source_doc.
-	if s.isKnowledgeGone(ctx, payload.KnowledgeBaseID, knowledgeID) {
+	gone, err := s.isKnowledgeGone(ctx, payload.KnowledgeBaseID, knowledgeID)
+	if err != nil {
+		failCtx, cancel := wikiIngestCleanupContext(ctx)
+		defer cancel()
+		s.tracker().FailSpan(failCtx, wikiSpan, "KNOWLEDGE_LOOKUP_FAILED", err.Error(), err)
+		return nil, nil, err
+	}
+	if gone {
 		logger.Infof(ctx, "wiki ingest: knowledge %s has been deleted, skip map", knowledgeID)
 		s.tracker().SkipSpan(ctx, wikiSpan, "knowledge_deleted")
 		return nil, nil, nil
@@ -1791,7 +1875,10 @@ func (s *wikiIngestService) reduceSlugUpdates(
 	// knowledge no longer exists so we don't resurrect a ghost source_ref.
 	// Retract updates are kept — they actively remove refs, which is what we
 	// want when the doc is gone.
-	updates = s.filterLiveUpdates(ctx, kbID, updates)
+	updates, err = s.filterLiveUpdates(ctx, kbID, updates)
+	if err != nil {
+		return false, "", false, err
+	}
 	if len(updates) == 0 {
 		return false, "", false, nil
 	}

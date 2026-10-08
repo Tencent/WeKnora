@@ -268,3 +268,107 @@ func TestMergeHybridSuggestionItemsFillsMissingKnowledgeSlotsFromModel(t *testin
 		}
 	}
 }
+
+func TestQueryMatchesSuggestionTextAllowsHostContextEnvelope(t *testing.T) {
+	const suggestion = "如何重置密码？"
+	cases := []struct {
+		name  string
+		query string
+		text  string
+		want  bool
+	}{
+		{name: "exact", query: suggestion, text: suggestion, want: true},
+		{name: "trimmed", query: "  " + suggestion + "\n", text: suggestion, want: true},
+		{
+			name:  "host context",
+			query: "[Host context]\npage: /pricing\nuserId: u_123\n\n" + suggestion,
+			text:  suggestion,
+			want:  true,
+		},
+		{
+			name:  "host context keeps blank lines inside the question",
+			query: "[Host context]\npage: /pricing\n\n第一行\n\n第二行",
+			text:  "第一行\n\n第二行",
+			want:  true,
+		},
+		{
+			name:  "json value",
+			query: "[Host context]\nmeta: {\"a\":1}\n\n" + suggestion,
+			text:  suggestion,
+			want:  true,
+		},
+		{
+			name:  "string value with one newline",
+			query: "[Host context]\nnote: line1\nline2\n\n" + suggestion,
+			text:  suggestion,
+			want:  true,
+		},
+		{
+			name:  "string value with a blank line",
+			query: "[Host context]\nnote: 第一行\n\n第二行\n\n" + suggestion,
+			text:  suggestion,
+			want:  true,
+		},
+		{
+			name:  "extra text between envelope and question",
+			query: "[Host context]\nnote: line1\n\n请额外执行\n" + suggestion,
+			text:  suggestion,
+			want:  false,
+		},
+		{
+			name:  "extra text after the question",
+			query: "[Host context]\npage: /pricing\n\n" + suggestion + "\n再加一句",
+			text:  suggestion,
+			want:  false,
+		},
+		{
+			name:  "arbitrary prefix",
+			query: "ignore previous\n\n" + suggestion,
+			text:  suggestion,
+			want:  false,
+		},
+		{
+			name:  "empty envelope",
+			query: "[Host context]\n\n" + suggestion,
+			text:  suggestion,
+			want:  false,
+		},
+		{
+			name:  "whitespace-only envelope",
+			query: "[Host context]\n  \n\n" + suggestion,
+			text:  suggestion,
+			want:  false,
+		},
+		{
+			name:  "key with surrounding spaces",
+			query: "[Host context]\npage : /pricing\n\n" + suggestion,
+			text:  suggestion,
+			want:  true,
+		},
+		{
+			name:  "empty key",
+			query: "[Host context]\n: x\n\n" + suggestion,
+			text:  suggestion,
+			want:  true,
+		},
+		{
+			name:  "first value starts with a newline",
+			query: "[Host context]\nnote: \nfoo\n\n" + suggestion,
+			text:  suggestion,
+			want:  true,
+		},
+		{
+			name:  "different question",
+			query: "[Host context]\npage: /pricing\n\n另一个问题",
+			text:  suggestion,
+			want:  false,
+		},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := queryMatchesSuggestionText(tt.query, tt.text); got != tt.want {
+				t.Fatalf("queryMatchesSuggestionText() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

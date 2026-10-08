@@ -257,6 +257,9 @@ func (s *knowledgeBaseService) hybridSearchCandidates(ctx context.Context,
 		return nil, nil
 	}
 
+	// Image vectors are recalled only for KBs that opted in to them.
+	s.applyImageRecall(ctx, kbs, groups, params)
+
 	// Execute retrieval with fan-out + score normalization (multi-store
 	// only) and a langfuse span around the entire retrieve step.
 	logger.Infof(ctx, "Starting multi-store retrieval, group count: %d", len(groups))

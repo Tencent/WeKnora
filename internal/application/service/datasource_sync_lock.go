@@ -34,7 +34,7 @@ func (c *dataSourceSyncCoordinator) run(ctx context.Context, sourceID string, fn
 		return err
 	}
 	if c.redis != nil {
-		return redislock.WithRenewableLock(ctx, c.redis, dataSourceSyncLockKey(sourceID),
+		return redislock.TryWithRenewableLock(ctx, c.redis, dataSourceSyncLockKey(sourceID),
 			dataSourceSyncLockLease, dataSourceSyncLockRenew, fn)
 	}
 	return c.runLocal(ctx, sourceID, fn)
@@ -54,8 +54,8 @@ func (c *dataSourceSyncCoordinator) runLocal(
 	select {
 	case entry.token <- struct{}{}:
 		defer func() { <-entry.token }()
-	case <-ctx.Done():
-		return ctx.Err()
+	default:
+		return redislock.ErrLockBusy
 	}
 	// Acquisition and cancellation may become ready together.
 	if err := ctx.Err(); err != nil {

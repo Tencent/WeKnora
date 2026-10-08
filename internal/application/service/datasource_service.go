@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/application/access"
+	"github.com/Tencent/WeKnora/internal/common/redislock"
 	"github.com/Tencent/WeKnora/internal/datasource"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
@@ -600,17 +601,29 @@ func (s *DataSourceService) GetSyncLog(ctx context.Context, syncLogID string) (*
 }
 
 // ProcessSync handles the actual sync operation (called by asynq task)
-func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) error {
+func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) (resultErr error) {
 	var payload types.DataSourceSyncPayload
 	if err := json.Unmarshal(task.Payload(), &payload); err != nil {
 		logger.Errorf(ctx, "failed to unmarshal sync payload: %v", err)
 		return err
 	}
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			s.finishTerminalSyncLog(ctx, payload, fmt.Errorf("sync task panicked: %v", recovered))
+			panic(recovered)
+		}
+		s.finishTerminalSyncLog(ctx, payload, resultErr)
+	}()
+	ctx = withDataSourceSyncAttempt(ctx, task)
 	// Lock before loading the source: a queued/retried run must fetch from
 	// the cursor committed by its predecessor, not an earlier snapshot.
-	return s.syncCoordinator.run(ctx, payload.DataSourceID, func(lockCtx context.Context) error {
+	resultErr = s.syncCoordinator.run(ctx, payload.DataSourceID, func(lockCtx context.Context) error {
 		return s.processSync(lockCtx, payload)
 	})
+	if errors.Is(resultErr, redislock.ErrLockBusy) {
+		return s.deferContendedSync(ctx, task)
+	}
+	return resultErr
 }
 
 func (s *DataSourceService) processSync(ctx context.Context, payload types.DataSourceSyncPayload) error {
@@ -1123,7 +1136,7 @@ func (s *DataSourceService) processSyncStreaming(
 	autoTagIDs := s.resolveAutoTagIDs(ctx, ds)
 
 	forceFull := payload.ForceFull || ds.SyncMode == types.SyncModeFull
-	attempt, _ := asynq.GetRetryCount(ctx)
+	attempt := dataSourceSyncAttempt(ctx)
 	startCursor, err := streamStartCursor(ds, forceFull, attempt)
 	if err != nil {
 		logger.Errorf(ctx, "failed to parse sync cursor: %v", err)

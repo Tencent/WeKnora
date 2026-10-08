@@ -46,8 +46,9 @@ func TestProcessSyncStreamingCancellationDoesNotPublishResult(t *testing.T) {
 			assert.Zero(t, repo.writes)
 			log, err := svc.syncLogRepo.FindByID(context.Background(), "first")
 			require.NoError(t, err)
-			assert.Equal(t, types.SyncLogStatusRunning, log.Status)
-			// A later attempt can resume this log; no stale-running-log admission gate.
+			assert.Equal(t, types.SyncLogStatusFailed, log.Status)
+			assert.NotNil(t, log.FinishedAt)
+			// An explicit retry can still resume without a stale-running-log gate.
 			registry = datasource.NewConnectorRegistry()
 			require.NoError(t, registry.Register(connector))
 			svc.connectorRegistry = registry
