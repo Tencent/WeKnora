@@ -105,7 +105,10 @@ func (m *e2bMockServer) handle(w http.ResponseWriter, r *http.Request) {
 			if _, ok := m.createBody["envVars"]; ok {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusBadRequest)
-				_, _ = w.Write([]byte(`{"code":400,"message":"creating from a snapshot does not allow envVars or function config overrides"}`))
+				_, _ = w.Write([]byte(
+					`{"code":400,"message":"creating from a snapshot ` +
+						`does not allow envVars or function config overrides"}`,
+				))
 				return
 			}
 		}
