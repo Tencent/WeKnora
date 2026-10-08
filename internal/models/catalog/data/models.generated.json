@@ -1933,6 +1933,7 @@
       }
     ],
     "gpustack": [],
+    "huggingface_tei": [],
     "hunyuan": [
       {
         "name": "Hunyuan T1 family (always-on reasoning)",

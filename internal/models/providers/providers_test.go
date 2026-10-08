@@ -14,7 +14,7 @@ import (
 
 // expectedIDs is every built-in vendor this package links.
 var expectedIDs = []string{
-	"generic", "weknoracloud",
+	"generic", "weknoracloud", "huggingface_tei",
 	"aliyun", "zhipu", "volcengine", "hunyuan", "siliconflow", "deepseek",
 	"minimax", "moonshot", "mimo", "modelscope", "qianfan", "qiniu", "longcat", "lkeap",
 	"openai", "azure_openai", "anthropic", "gemini",
@@ -68,6 +68,21 @@ func TestAllVendorsRegistered(t *testing.T) {
 		if !found {
 			t.Errorf("unexpected vendor %q registered", v.ID)
 		}
+	}
+}
+
+func TestHuggingFaceTEIRequiresURLButNotAPIKey(t *testing.T) {
+	v, ok := modelruntime.Get(providers.HuggingFaceTEIID)
+	if !ok {
+		t.Fatal("Hugging Face TEI provider not registered")
+	}
+	if err := v.ValidateConfig(&providers.Config{
+		BaseURL: "http://tei.internal:8080", ModelName: "BAAI/bge-reranker-large",
+	}); err != nil {
+		t.Fatalf("a self-hosted TEI server should not require an API key: %v", err)
+	}
+	if err := v.ValidateConfig(&providers.Config{ModelName: "BAAI/bge-reranker-large"}); err == nil {
+		t.Fatal("TEI provider accepted a missing base URL")
 	}
 }
 

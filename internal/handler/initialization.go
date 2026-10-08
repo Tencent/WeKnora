@@ -22,6 +22,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/handler/dto"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/middleware"
+	modelapi "github.com/Tencent/WeKnora/internal/models/api"
 	"github.com/Tencent/WeKnora/internal/models/asr"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/models/embedding"
@@ -2047,6 +2048,27 @@ func (h *InitializationHandler) TestEmbeddingModel(c *gin.Context) {
 	})
 }
 
+// authFailureMarkers are lower-cased fragments that mark an upstream error
+// body as a credential problem, whatever status code carried it.
+var authFailureMarkers = []string{
+	"api_key_invalid", "api key not valid", "invalid api key", "invalid_api_key",
+	"unauthorized", "authentication",
+}
+
+// isAuthFailureBody reports whether an upstream error body describes a bad
+// or missing credential. Gemini's native API answers an invalid key with
+// 400 INVALID_ARGUMENT / API_KEY_INVALID, so a 400 alone does not prove the
+// key was accepted.
+func isAuthFailureBody(body string) bool {
+	b := strings.ToLower(body)
+	for _, m := range authFailureMarkers {
+		if strings.Contains(b, m) {
+			return true
+		}
+	}
+	return false
+}
+
 // classifyConnectionError maps an upstream error string to a short
 // human-readable hint in Chinese. Callers should always combine the hint
 // with the raw error message (e.g. fmt.Sprintf("%s：%v", hint, err)) so
@@ -2055,7 +2077,7 @@ func (h *InitializationHandler) TestEmbeddingModel(c *gin.Context) {
 // "what actually happened".
 func classifyConnectionError(errMsg string) string {
 	switch {
-	case strings.Contains(errMsg, "401") || strings.Contains(errMsg, "unauthorized"):
+	case strings.Contains(errMsg, "401") || isAuthFailureBody(errMsg):
 		return "认证失败，请检查API Key"
 	case strings.Contains(errMsg, "403") || strings.Contains(errMsg, "forbidden"):
 		return "权限不足，请检查API Key权限"
@@ -2089,12 +2111,19 @@ func (h *InitializationHandler) checkChatModelConnection(
 
 	_, err = chatInstance.Chat(ctx, testMessages, testOptions)
 	if err != nil {
-		errMsg := err.Error()
 		// 400 = endpoint reachable + auth ok, just a parameter mismatch
-		// (e.g. max_tokens vs max_completion_tokens). Treat as success.
-		if strings.Contains(errMsg, "status code: 400") {
+		// (e.g. max_tokens vs max_completion_tokens, or a reasoning model
+		// that cannot finish within the 1-token probe). Treat as success.
+		// Match the status code, not the message: the wording belongs to
+		// whichever HTTP client built the error and has changed before.
+		// Exception: some vendors (Gemini native) report an invalid key as
+		// 400, which must still fail the check.
+		var httpErr *modelapi.HTTPError
+		if stderrors.As(err, &httpErr) && httpErr.StatusCode == http.StatusBadRequest &&
+			!isAuthFailureBody(httpErr.Body) {
 			return true, "连接正常，模型可用"
 		}
+		errMsg := err.Error()
 		// For every other failure mode we surface a human-readable hint
 		// AND the upstream error verbatim. Swallowing the underlying
 		// message used to hide things like the actual URL the SDK

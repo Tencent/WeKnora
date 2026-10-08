@@ -36,9 +36,9 @@ func TestEveryRerankVendorResolvesToAKnownProtocol(t *testing.T) {
 			require.NoError(t, err)
 			assert.True(t, resolved.RerankAPI.Known(),
 				"unknown rerank protocol %q", resolved.RerankAPI)
-			// The catch-all vendor has no endpoint of its own: the operator
-			// supplies one, and Validate requires it.
-			if v.ID != providers.GenericID {
+			// Generic and self-hosted TEI have no endpoint of their own:
+			// the operator supplies one, and Validate requires it.
+			if v.ID != providers.GenericID && v.ID != providers.HuggingFaceTEIID {
 				assert.NotEmpty(t, resolved.BaseURL, "rerank vendors need a default endpoint")
 			}
 
@@ -59,21 +59,22 @@ func TestEveryRerankVendorResolvesToAKnownProtocol(t *testing.T) {
 // every rerank call for that vendor.
 func TestRerankProtocolAssignment(t *testing.T) {
 	for id, want := range map[string]api.RerankAPI{
-		"aliyun":       api.RerankDashScope,
-		"nvidia":       api.RerankNIM,
-		"pinecone":     api.RerankPinecone,
-		"lkeap":        api.RerankTencentLKEAP,
-		"volcengine":   api.RerankVolcengineKnowledge,
-		"zhipu":        api.RerankCohere,
-		"jina":         api.RerankCohere,
-		"siliconflow":  api.RerankCohere,
-		"qianfan":      api.RerankCohere,
-		"gpustack":     api.RerankCohere,
-		"generic":      api.RerankCohere,
-		"weknoracloud": api.RerankCohere,
-		"novita":       api.RerankCohere,
-		"openrouter":   api.RerankCohere,
-		"litellm":      api.RerankCohere,
+		"aliyun":          api.RerankDashScope,
+		"nvidia":          api.RerankNIM,
+		"pinecone":        api.RerankPinecone,
+		"huggingface_tei": api.RerankTEI,
+		"lkeap":           api.RerankTencentLKEAP,
+		"volcengine":      api.RerankVolcengineKnowledge,
+		"zhipu":           api.RerankCohere,
+		"jina":            api.RerankCohere,
+		"siliconflow":     api.RerankCohere,
+		"qianfan":         api.RerankCohere,
+		"gpustack":        api.RerankCohere,
+		"generic":         api.RerankCohere,
+		"weknoracloud":    api.RerankCohere,
+		"novita":          api.RerankCohere,
+		"openrouter":      api.RerankCohere,
+		"litellm":         api.RerankCohere,
 	} {
 		t.Run(id, func(t *testing.T) {
 			resolved, err := modelruntime.Resolve(modelruntime.Ref{
@@ -286,6 +287,8 @@ func TestRerankCeilingsAreTheDocumentedOnes(t *testing.T) {
 		// help.aliyun.com text-rerank: 500 documents per request. Its length
 		// limits are stated in tokens, which runes cannot express.
 		"aliyun": {MaxDocuments: 500},
+		// TEI router: --max-client-batch-size defaults to 32.
+		"huggingface_tei": {MaxDocuments: 32},
 	} {
 		t.Run(id, func(t *testing.T) {
 			resolved, err := modelruntime.Resolve(modelruntime.Ref{
