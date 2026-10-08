@@ -316,7 +316,6 @@ func TestKnowledgeReadRoutesDeclareRetrieveCapability(t *testing.T) {
 		{http.MethodPost, "/api/v1/wiki-search"},
 		{http.MethodGet, "/api/v1/initialization/config/:kbId"},
 		{http.MethodGet, "/api/v1/knowledgebase/:kb_id/wiki/pages"},
-		{http.MethodGet, "/api/v1/knowledgebase/:kb_id/wiki/page-titles"},
 	}
 
 	for _, tc := range cases {

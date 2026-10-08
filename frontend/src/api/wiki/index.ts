@@ -27,6 +27,8 @@ export interface WikiPage {
   sort_order?: number;
   source_refs: string[];
   in_links: string[];
+  // Present on page detail responses; list and mutation responses omit it.
+  in_link_titles?: Record<string, string>;
   out_links: string[];
   page_metadata: Record<string, any>;
   version: number;
@@ -180,16 +182,6 @@ export function createWikiPage(kbId: string, data: Partial<WikiPage>) {
 
 export function getWikiPage(kbId: string, slug: string) {
   return get(`/api/v1/knowledgebase/${kbId}/wiki/pages/${encodeSlugPath(slug)}`);
-}
-
-// Resolve a batch of wiki slugs to their display titles without loading page
-// content. The reader uses this for backlinks that are outside the paginated
-// sidebar window.
-export function listWikiPageTitles(kbId: string, slugs: string[]) {
-  const query = new URLSearchParams();
-  for (const slug of slugs) query.append('slug', slug);
-  const qs = query.toString();
-  return get(`/api/v1/knowledgebase/${kbId}/wiki/page-titles${qs ? '?' + qs : ''}`);
 }
 
 // WikiPageUpdatePayload is a partial update: absent fields keep their stored

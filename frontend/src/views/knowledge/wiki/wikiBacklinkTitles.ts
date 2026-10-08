@@ -3,15 +3,17 @@ export interface WikiBacklinkPage {
   title: string
 }
 
-// Resolve a backlink using the server's batch title lookup first, then pages
+// Resolve a backlink using the page detail's title map first, then pages
 // already loaded in the sidebar, and finally the historical slug fallback.
 export function resolveWikiBacklinkTitle(
   slug: string,
   titles: Record<string, string>,
   pages: WikiBacklinkPage[],
 ): string {
-  const fetchedTitle = titles[slug]?.trim()
-  if (fetchedTitle) return fetchedTitle
+  if (Object.prototype.hasOwnProperty.call(titles, slug)) {
+    const value = titles[slug]
+    if (typeof value === 'string' && value.trim()) return value.trim()
+  }
 
   const loadedPage = pages.find(page => page.slug === slug)
   if (loadedPage?.title) return loadedPage.title

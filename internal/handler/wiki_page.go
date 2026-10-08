@@ -140,58 +140,6 @@ func (h *WikiPageHandler) ListPages(c *gin.Context) {
 	c.JSON(http.StatusOK, resp)
 }
 
-// ListPageTitles godoc
-// @Summary      Resolve wiki page titles
-// @Description  Resolve a batch of wiki slugs to display titles
-// @Tags         Wiki
-// @Produce      json
-// @Param        kb_id path string true "Knowledge base ID"
-// @Param        slug query []string false "Wiki slug (repeat for multiple slugs)"
-// @Success      200 {object} map[string]map[string]string
-// @Failure      400 {object} errors.AppError
-// @Security     Bearer
-// @Router       /knowledgebase/{kb_id}/wiki/page-titles [get]
-func (h *WikiPageHandler) ListPageTitles(c *gin.Context) {
-	kbID, _, err := h.validateWikiKB(c)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-		return
-	}
-
-	const maxSlugs = 1000
-	seen := make(map[string]struct{})
-	slugs := make([]string, 0, len(c.QueryArray("slug")))
-	for _, raw := range c.QueryArray("slug") {
-		slug := strings.TrimSpace(raw)
-		if slug == "" {
-			continue
-		}
-		if _, ok := seen[slug]; ok {
-			continue
-		}
-		seen[slug] = struct{}{}
-		slugs = append(slugs, slug)
-	}
-	if len(slugs) > maxSlugs {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "too many wiki slugs"})
-		return
-	}
-
-	pages, err := h.wikiService.ListBySlugs(c.Request.Context(), kbID, slugs)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	titles := make(map[string]string, len(pages))
-	for slug, page := range pages {
-		if page != nil {
-			titles[slug] = page.Title
-		}
-	}
-	c.JSON(http.StatusOK, gin.H{"titles": titles})
-}
-
 // ListFolders godoc
 // @Summary      List wiki folders
 // @Description  Retrieve the direct child folders of a parent folder (parent_id empty = root level), each with its page count and a has-children flag for the directory tree.
@@ -457,12 +405,12 @@ func (h *WikiPageHandler) recordManualWikiActivity(
 
 // GetPage godoc
 // @Summary      Get a wiki page by slug
-// @Description  Retrieve a wiki page by its slug
+// @Description  Retrieve a wiki page by its slug, including titles of existing backlinks
 // @Tags         Wiki
 // @Produce      json
 // @Param        kb_id  path  string  true  "Knowledge base ID"
 // @Param        slug   path  string  true  "Page slug"
-// @Success      200  {object}  types.WikiPage
+// @Success      200  {object}  types.WikiPageDetail
 // @Failure      404  {object}  errors.AppError
 // @Security     Bearer
 // @Router       /knowledgebase/{kb_id}/wiki/pages/{slug} [get]
@@ -489,7 +437,24 @@ func (h *WikiPageHandler) GetPage(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, page)
+	titles := make(map[string]string, len(page.InLinks))
+	// Bound SQL parameters while resolving every backlink, including pages
+	// outside the sidebar's paginated window.
+	const batchSize = 1000
+	for start := 0; start < len(page.InLinks); start += batchSize {
+		end := min(start+batchSize, len(page.InLinks))
+		pages, err := h.wikiService.ListBySlugs(c.Request.Context(), kbID, page.InLinks[start:end])
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		for slug, backlink := range pages {
+			if backlink != nil {
+				titles[slug] = backlink.Title
+			}
+		}
+	}
+	c.JSON(http.StatusOK, types.WikiPageDetail{WikiPage: page, InLinkTitles: titles})
 }
 
 // UpdatePage godoc
