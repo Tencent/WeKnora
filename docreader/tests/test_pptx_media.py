@@ -227,6 +227,11 @@ def remove_blip(slide, picture):
     blip.getparent().remove(blip)
 
 
+def remove_blip_fill(slide, picture):
+    blip_fill = picture._element.blipFill
+    blip_fill.getparent().remove(blip_fill)
+
+
 def dangling_embed(slide, picture):
     picture._element.blipFill.blip.set(qn("r:embed"), "rId999")
 
@@ -247,7 +252,13 @@ def missing_media_part(slide, picture):
 
 class TestPptxMediaBrokenPictureRelationships(unittest.TestCase):
     def test_broken_picture_keeps_the_document_and_other_pictures(self):
-        for mutate in (remove_blip, dangling_embed, external_embed, missing_media_part):
+        for mutate in (
+            remove_blip,
+            remove_blip_fill,
+            dangling_embed,
+            external_embed,
+            missing_media_part,
+        ):
             with self.subTest(mutate.__name__):
                 data = deck_with_broken_picture(mutate)
                 document = StdMarkitdownParser(

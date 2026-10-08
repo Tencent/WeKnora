@@ -131,6 +131,7 @@ def _picture_sources(pptx_bytes: bytes) -> dict[str, deque[tuple[str, bytes] | N
     """Resolve MarkItDown picture placeholders in slide/shape order."""
     from pptx import Presentation
     from pptx.enum.shapes import MSO_SHAPE_TYPE
+    from pptx.exc import PythonPptxError
 
     sources: dict[str, deque[tuple[str, bytes] | None]] = {}
 
@@ -167,10 +168,11 @@ def _picture_sources(pptx_bytes: bytes) -> dict[str, deque[tuple[str, bytes] | N
                     # require a decoder for the same vector format that
                     # triggered fallback.
                     source = (str(part.partname), part.blob)
-            except (AttributeError, KeyError, ValueError) as exc:
-                # A missing blip, a dangling or external r:embed, or a media
-                # part dropped at load time must only lose this picture, not
-                # the whole document. None keeps the queue position.
+            except (AttributeError, KeyError, ValueError, PythonPptxError) as exc:
+                # A missing blipFill or blip, a dangling or external r:embed,
+                # or a media part dropped at load time must only lose this
+                # picture, not the whole document. None keeps the queue
+                # position.
                 logger.warning(
                     "Skipping unresolvable pptx picture %s: %s", shape.name, exc
                 )
