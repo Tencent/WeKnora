@@ -447,8 +447,10 @@ func (f *Formater) parseOutput(ctx context.Context, text string) ([]map[string]i
 		// from "the model produced JSON that is malformed/truncated". A
 		// refusal contains no JSON structure at all; retrying the exact
 		// same input can never succeed, so callers treat it as a terminal
-		// skip instead of a retriable failure (issue #3600).
-		if !strings.ContainsAny(content, "{[") {
+		// skip instead of a retriable failure (issue #3600). Check the whole
+		// response, not just the extracted fence: a prose fence followed by a
+		// JSON one is a parse problem, not a refusal.
+		if !strings.ContainsAny(text, "{[") {
 			return nil, fmt.Errorf("%w: %s", ErrModelDeclined, previewDeclinedText(content))
 		}
 		return nil, fmt.Errorf("failed to parse %s content: %s", strings.ToUpper(string(f.formatType)), err.Error())

@@ -130,6 +130,14 @@ func TestFormater_ParseGraph_FenceVariants(t *testing.T) {
 			wantDeclined: true,
 		},
 		{
+			// A prose fence (e.g. "Step 1" notes) followed by the JSON fence is
+			// not a refusal: the response does contain JSON, so it must stay a
+			// retriable parse failure rather than a terminal skip.
+			name:    "prose fence before a JSON fence is not declined",
+			input:   "```\nStep 1: list the entities.\n```\n```json\n" + validJSON + "\n```",
+			wantErr: true,
+		},
+		{
 			// Truncated JSON (braces present) remains a real, retriable failure.
 			name:        "truncated JSON with structure still fails",
 			input:       "[{\"entity\": \"Alice\", \"entity_attrib",
