@@ -37,6 +37,7 @@ const (
 	ChannelYuque            = "yuque"             // Yuque (语雀)
 	ChannelRSS              = "rss"               // RSS / Atom feed
 	ChannelIMA              = "ima"               // Tencent IMA (ima.qq.com)
+	ChannelOPDS             = "opds"              // OPDS catalog (e-book library)
 )
 
 // Knowledge parse status constants

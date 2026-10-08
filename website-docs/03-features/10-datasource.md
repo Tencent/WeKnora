@@ -35,12 +35,13 @@
 | 腾讯 IMA | `ima` | 知识库中的文件与笔记 |
 | GitLab | `gitlab` | 仓库指定分支/标签下的目录 |
 | RSS / Atom | `rss` | 订阅源文章 |
+| OPDS 目录 | `opds` | 电子书目录（Calibre-Web、Kavita、Komga 等） |
 
 各连接器支持的格式、认证与删除检测见参考部分。
 
 ## 检查变更与失败
 
-首次同步获取选定范围的内容，后续按连接器游标和修改信息更新。删除检测受连接器与同步配置约束；RSS 的自然淘汰不作为源文档删除。同步失败时先查看日志中的凭据、资源可见性或解析错误，再测试连接并重试。
+首次同步获取选定范围的内容，后续按连接器游标和修改信息更新。删除检测受连接器与同步配置约束；RSS 的自然淘汰不作为源文档删除，OPDS 目录中移除的书籍同样不视为删除。同步失败时先查看日志中的凭据、资源可见性或解析错误，再测试连接并重试。
 
 ## 连接器与接口参考
 
@@ -171,6 +172,22 @@
 - **抓取**：`gofeed` 解析 RSS/Atom/JSON feed；条目有链接时抓原文页过 readability 抽取器，成功则以全文为准，失败回退 feed 自带内容（`content:encoded`/`description`）；HTML 经 `html-to-markdown/v2` 转 Markdown。条目 ID 取 `GUID > Link > Title` 第一个非空值。
 - **增量逻辑**：双层指纹——先比 feed 侧信号指纹（`feedSignalFingerprint`，未变则连原文页都不抓）；再比抓取后内容的 SHA-256 指纹。**不支持删除同步**（feed 会自然淘汰旧条目）。
 - **部分失败**：单个 feed 抓取/解析失败时沿用旧游标（`copyFeedCursor`）并继续其余 feed，最终以 `datasource.PartialFetchError` 上报（SyncLog 记 `partial`）；全部 feed 都失败才整体报错。
+
+#### OPDS 目录（`connector/opds/`）
+
+OPDS（Open Publication Distribution System）是电子书库通用的 Atom 目录格式，Calibre-Web、Kavita、Komga、COPS、Standard Ebooks 等均提供。目录由两类 feed 组成：**导航 feed** 列出分区、条目指向下级 feed；**获取 feed** 列出书籍、每条带一个「获取链接」指向可下载文件（EPUB、PDF 等）。
+
+- **配置**：`catalog_urls`（换行/逗号分隔，多条去重）存放在 **Settings**（非机密）；`username` + `password`（HTTP Basic）与 `auth_headers`（`Name: Value` 每行一条）存放在 **Credentials** 并加密。三者都可选——公开目录无需任何凭据。`HasConfiguredCredentials` 对 OPDS 特判：只有 Basic 凭据或 `auth_headers` 才算已配置凭据；`StripNonSecretCredentials` 会把误放入 credentials 的 `catalog_urls` 清出去。
+- **解析**：直接用标准库 `encoding/xml` 解析 Atom，**未使用 RSS 连接器的 `gofeed`**。原因是 `gofeed` 的 Atom 转换器会把 entry 链接压平成 `[]string`，只保留 `""`/`alternate`/`self` 三个 rel，从而丢弃 OPDS 的获取 rel 与链接的 MIME 类型——而这两者正是识别「哪条链接是书、是什么格式」的依据。非 Atom 响应体（如 OPDS 2.0 的 JSON）会明确报错，而不是静默同步 0 条。
+- **链接选择**：按 `open-access` → 通用 `acquisition` → `borrow` 的优先级取获取链接；`buy`/`subscribe`（付费墙）与 `sample`/`preview`（节选）被明确排除。MIME 类型经 `mimeToExtension` 映射为扩展名，回退取 URL 路径扩展名。相对 href 经 `url.ResolveReference` 基于 feed URL 解析。
+- **格式支持**：OPDS 是通用分发协议而非 EPUB 格式——目录也分发有声书、漫画、办公文档。连接器不维护自己的格式白名单，而是复用 `internal/types` 中的**唯一权威列表** `SupportedImportFileExtensions`（`isSupportedAcquisitionExtension` 直接委托 `types.IsSupportedImportExtension`）。这样「解析管线能处理的格式」与「连接器接受的格式」永远是同一个集合，不会出现上传能收、导入却拒收的漂移（即 #2447 修的那类问题）。管线确实无法解析的格式（cbz、cbr、djvu、azw3、fb2）会被跳过而非报错，且**跳过发生在下载之前**，不会白白下载几十 MB 再被管线拒绝。
+- **权威列表位置**：`SupportedImportFileExtensions` 定义在 `internal/types/import_file_extensions.go`，因为摄入服务与各连接器包都需要它，而两者不能互相 import。`internal/application/service` 的同名判断已改为委托该列表（保留 `isSupportedImportExtension` 等本地包装以兼容既有调用点）。
+- **遍历深度**：**根 + 一层**。配置的 URL 是导航 feed 时，其直接子分区会被同步（`maxNavigationDepth = 1`），但不做任意深度递归；更深内容通过在资源选择器中勾选具体分区获取。同一次运行内访问过的 feed 会被跳过，避免分区互相链接导致死循环。`rel="next"` 分页会跟随，上限 20 页并去重。
+- **认证作用域（安全要点）**：Basic 凭据与自定义头**只附加到配置的目录主机**（按 hostname + 生效端口精确比对，`credentialedHosts`），绝不发给托管书籍文件的第三方 CDN。这是 RSS「认证头只发给 feed、不发第三方文章页」规则的 OPDS 版本。SSRF 客户端还会在跨域重定向时剥离敏感头，作为第二层防护。
+- **增量逻辑**：双层指纹——先比条目信号指纹（`entrySignalFingerprint`，条目未变则**连文件都不下载**）；再比下载内容的 SHA-256 指纹（`contentFingerprint`），元数据变了但文件字节没变时不重复入库。**不支持删除同步**（目录中移除书籍不视为删除）。
+- **流式可恢复同步**：实现 `StreamingConnector`。书籍文件通常有数 MB 到数十 MB，批量 `FetchAll` 会把所有条目字节同时留在内存里；`FetchStream` 逐本 `Emit` 并 checkpoint，把内存限制在单本文件，也让超时的同步可以续传。
+- **部分失败**：单个 feed 抓取/解析失败时沿用旧游标并继续其余 feed；单本书下载失败（含超限）只记日志与 `SyncItemError`，不中断同步。全部选中 feed 都不可读才整体报错，否则以 `PartialFetchError` 上报。注意：知识入库（`Emit`）失败与目录不可读被区分对待——前者会中断同步并抛出真实错误，不会被误报成「目录不可达」。
+- **大小限制**：单本书上限取 `utils.GetMaxFileSize()`（默认 50MB，`MAX_FILE_SIZE_MB` 可配），与普通文件上传一致；下载前检查 `Content-Length`，读取时再用 `io.LimitReader` 兜底。
 
 ### 数据源生命周期与 REST API
 
@@ -391,10 +408,11 @@ registry.Register(yuqueConnector.NewConnector())                    // yuque
 registry.Register(dingtalkConnector.NewConnector())                 // dingtalk
 registry.Register(imaConnector.NewConnector())                      // ima
 registry.Register(rssConnector.NewConnector())                      // rss
+registry.Register(opdsConnector.NewConnector())                     // opds
 registry.Register(gitlabConnector.NewConnector())                   // gitlab
 ```
 
-> 注意：`connector.go` 中的 `ConnectorMetadataRegistry` 仍包含尚未实现的连接器（GitHub、Google Drive、OneDrive、Web Crawler、Slack、IMAP 等）。当前实际注册可用的类型为：`feishu`、`lark`、`feishu_drive`、`lark_drive`、`notion`、`confluence`、`yuque`、`dingtalk`、`ima`、`rss`、`gitlab`。未注册类型在创建数据源时会被 `connectorRegistry.Get()` 以 `ErrConnectorNotFound` 拒绝。
+> 注意：`connector.go` 中的 `ConnectorMetadataRegistry` 仍包含尚未实现的连接器（GitHub、Google Drive、OneDrive、Web Crawler、Slack、IMAP 等）。当前实际注册可用的类型为：`feishu`、`lark`、`feishu_drive`、`lark_drive`、`notion`、`confluence`、`yuque`、`dingtalk`、`ima`、`rss`、`opds`、`gitlab`。未注册类型在创建数据源时会被 `connectorRegistry.Get()` 以 `ErrConnectorNotFound` 拒绝。
 
 ### 数据模型（internal/types/datasource.go）
 
