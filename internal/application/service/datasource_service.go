@@ -766,10 +766,13 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 	autoTagIDs := s.resolveAutoTagIDs(ctx, ds)
 
 	var ingestErr error
+	permanentFailures := 0
 	for _, item := range items {
 		item := item
 		err := s.applyFetchedItem(withKBActivitySuppressed(ctx), ds, &item, autoTagIDs, result)
-		if err != nil && ingestErr == nil {
+		if errors.Is(err, ErrInvalidFileType) {
+			permanentFailures++
+		} else if err != nil && ingestErr == nil {
 			ingestErr = err
 		}
 	}
@@ -781,7 +784,7 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 			types.SyncLogStatusFailed, ingestErr.Error(), wasPaused)
 		return ingestErr
 	}
-	if err := allFetchedItemsFailedError(result); err != nil {
+	if err := allFetchedItemsFailedError(result); err != nil && result.Failed != permanentFailures {
 		logger.Errorf(ctx, "data source sync failed while processing fetched items: %v", err)
 		s.updateSyncRunResult(ctx, ds, syncLog, result, resultJSON, types.SyncLogStatusFailed, err.Error(), wasPaused)
 		return err
@@ -981,6 +984,12 @@ func (s *DataSourceService) applyFetchedItem(
 			logger.Infof(ctx, "skipping embedded image %q (external_id=%s), not ingested: %v",
 				item.Title, item.ExternalID, err)
 			result.Skipped++
+		case errors.Is(err, ErrInvalidFileType):
+			result.Failed++
+			recordSyncError(result, types.SyncItemError{
+				Title: item.Title, Code: "unsupported_file_type", Message: "Unsupported file type",
+			})
+			return err
 		default:
 			logger.Warnf(ctx, "failed to ingest item %q (external_id=%s): %v", item.Title, item.ExternalID, err)
 			result.Failed++
@@ -1021,6 +1030,9 @@ type streamSyncHandler struct {
 	result    *types.SyncResult
 	syncLog   *types.SyncLog
 	ingestErr error
+	// Count separately from the capped error samples; permanent rejections may
+	// advance a cursor even when every item in this round is unsupported.
+	permanentFailures int
 }
 
 // Emit ingests one streamed item. Unexpected ingestion errors abort the stream
@@ -1033,7 +1045,12 @@ func (h *streamSyncHandler) Emit(ctx context.Context, item types.FetchedItem) er
 		return err
 	}
 	h.result.Total++
-	h.ingestErr = h.svc.applyFetchedItem(withKBActivitySuppressed(ctx), h.ds, &item, h.tagIDs, h.result)
+	err := h.svc.applyFetchedItem(withKBActivitySuppressed(ctx), h.ds, &item, h.tagIDs, h.result)
+	if errors.Is(err, ErrInvalidFileType) {
+		h.permanentFailures++
+		return nil
+	}
+	h.ingestErr = err
 	return h.ingestErr
 }
 
@@ -1154,7 +1171,7 @@ func (s *DataSourceService) processSyncStreaming(
 	}
 
 	resultJSON, _ := result.ToJSON()
-	if err := allFetchedItemsFailedError(result); err != nil {
+	if err := allFetchedItemsFailedError(result); err != nil && result.Failed != handler.permanentFailures {
 		logger.Errorf(ctx, "streaming sync failed while processing fetched items: %v", err)
 		s.updateSyncRunResult(ctx, ds, syncLog, result, resultJSON, types.SyncLogStatusFailed, err.Error(), wasPaused)
 		return err
@@ -1310,6 +1327,12 @@ func (s *DataSourceService) validateDataSourceConfig(ctx context.Context, ds *ty
 //
 // Returns (isUpdate, error) — isUpdate is true when an existing item was replaced.
 func (s *DataSourceService) ingestItem(ctx context.Context, ds *types.DataSource, item *types.FetchedItem, tagIDs []string) (bool, error) {
+	// Reject unsupported source files before replacing an existing document.
+	// Do not classify generic BadRequest errors: missing storage configuration
+	// also uses that type and must remain retryable.
+	if len(item.Content) > 0 && (IsVideoType(getFileType(item.FileName)) || !isValidFileType(item.FileName)) {
+		return false, ErrInvalidFileType
+	}
 	// Channel decides the knowledge "source" label shown in the UI. Prefer the
 	// connector-supplied metadata["channel"] (e.g. Feishu Drive sets it to
 	// "feishu" so Drive docs share the wiki's "飞书" label instead of showing
