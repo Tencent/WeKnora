@@ -42,8 +42,8 @@ const (
 	// arrive as thousands of nearly empty rows.
 	defaultReadSandboxMaxLines = 2000
 
-	// Room left for the header, the fences, and the continuation hint when
-	// sizing a page against the registry's output budget.
+	// Room left for metadata, fences, and the continuation hint when sizing
+	// a page against the registry's output budget. The path is counted separately.
 	readSandboxPageOverhead = 512
 
 	// How large a file may be and still be downloaded to serve a page. This is
@@ -262,7 +262,14 @@ func renderFilePage(ctx context.Context, input ReadFileInput, data []byte, sessi
 	// The two budgets are also in different units, and the mismatch runs
 	// opposite to intuition: 64 KiB of CJK is ~22k runes and fits, while 64 KiB
 	// of ASCII is 65k runes and does not.
-	maxRunes := max(OutputBudget(ctx)-readSandboxPageOverhead, 1)
+	maxRunes := OutputBudget(ctx) - readSandboxPageOverhead - utf8.RuneCountInString(clean)
+	if maxRunes <= 0 {
+		return &types.ToolResult{
+			Success: false,
+			Error:   "file path and metadata exceed this read's output budget; increase the tool output limit",
+			Data:    resultData,
+		}
+	}
 	page := paginateSandboxFile(string(data), input.Offset, input.Limit, maxBytes, maxRunes)
 
 	// A line wider than the whole byte budget cannot be paged around: every
