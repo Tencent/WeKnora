@@ -172,7 +172,9 @@ func TestTestMCPService_ListingCapabilityCompatibility(t *testing.T) {
 				requestsMu.Unlock()
 				if request.Method == tt.failMethod {
 					w.Header().Set("Content-Type", "application/json")
-					_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":` + string(request.ID) + `,"error":{"code":-32603,"message":"directory unavailable"}}`))
+					errBody := `{"jsonrpc":"2.0","id":` + string(request.ID) +
+						`,"error":{"code":-32603,"message":"directory unavailable"}}`
+					_, _ = w.Write([]byte(errBody))
 					return
 				}
 				if request.Method == tt.listMethod {
@@ -217,7 +219,7 @@ func TestTestMCPService_ListingCapabilityCompatibility(t *testing.T) {
 			requestsMu.Lock()
 			defer requestsMu.Unlock()
 			assert.True(t, requests["tools/list"])
-			assert.Equal(t, !(tt.tools && tt.failMethod == "tools/list"), requests["resources/list"])
+			assert.Equal(t, !tt.tools || tt.failMethod != "tools/list", requests["resources/list"])
 		})
 	}
 }
