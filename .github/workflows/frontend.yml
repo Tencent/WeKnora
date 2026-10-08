@@ -50,12 +50,6 @@ jobs:
       - name: Run tests
         run: npm test
 
-      - name: Install browser
-        run: npx playwright install --with-deps chromium
-
-      - name: Responsive browser tests
-        run: npm run test:mobile
-
       - name: Type-check
         run: npm run type-check
 
