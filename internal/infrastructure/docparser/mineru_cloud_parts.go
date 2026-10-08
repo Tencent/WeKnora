@@ -94,7 +94,10 @@ func (c *MinerUCloudReader) readCloudPart(ctx context.Context, req *types.ReadRe
 	if err != nil {
 		return nil, fmt.Errorf("MinerU Cloud poll: %w", err)
 	}
-	return &types.ReadResult{MarkdownContent: md, ImageRefs: refs, SourceBlocks: minerUSourceBlocks(md, contentList, req.FileType)}, nil
+	return &types.ReadResult{
+		MarkdownContent: md, ImageRefs: refs,
+		SourceBlocks: minerUSourceBlocks(md, contentList, req.FileType),
+	}, nil
 }
 
 func (c *MinerUCloudReader) readSplitPDF(ctx context.Context, req *types.ReadRequest) (*types.ReadResult, error) {

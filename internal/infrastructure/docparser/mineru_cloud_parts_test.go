@@ -124,7 +124,11 @@ func mockSplitCloud(t *testing.T) (*MinerUCloudReader, *atomic.Int32) {
 		switch {
 		case r.Method == http.MethodPost:
 			id := batches.Add(1)
-			_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": map[string]any{"batch_id": fmt.Sprint(id), "file_urls": []string{server.URL + "/upload"}}})
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"code": 0, "data": map[string]any{
+					"batch_id": fmt.Sprint(id), "file_urls": []string{server.URL + "/upload"},
+				},
+			})
 		case r.Method == http.MethodPut:
 			data, err := io.ReadAll(r.Body)
 			if err != nil || !bytes.HasPrefix(data, []byte("%PDF")) {
@@ -133,7 +137,11 @@ func mockSplitCloud(t *testing.T) (*MinerUCloudReader, *atomic.Int32) {
 			uploads.Add(1)
 		case strings.HasPrefix(r.URL.Path, "/extract-results/batch/"):
 			id := strings.TrimPrefix(r.URL.Path, "/extract-results/batch/")
-			_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": map[string]any{"extract_result": []map[string]string{{"state": "done", "full_zip_url": server.URL + "/zip/" + id}}}})
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"code": 0, "data": map[string]any{
+					"extract_result": []map[string]string{{"state": "done", "full_zip_url": server.URL + "/zip/" + id}},
+				},
+			})
 		case strings.HasPrefix(r.URL.Path, "/zip/"):
 			first, last := 1, 100
 			if strings.HasSuffix(r.URL.Path, "/2") {
@@ -141,9 +149,13 @@ func mockSplitCloud(t *testing.T) (*MinerUCloudReader, *atomic.Int32) {
 			}
 			text := fmt.Sprintf("pages %d-%d 庄子齐物论研究", first, last)
 			md := "![image](images/0.jpg) <img src=\"images/0.jpg\">\n\n" + text
-			list, _ := json.Marshal([]map[string]any{{"type": "text", "text": text, "page_idx": 0, "bbox": []int{0, 0, 100, 100}}})
+			list, _ := json.Marshal([]map[string]any{{
+				"type": "text", "text": text, "page_idx": 0, "bbox": []int{0, 0, 100, 100},
+			}})
 			z := zip.NewWriter(w)
-			for name, data := range map[string][]byte{"full.md": []byte(md), "images/0.jpg": []byte("image"), "book_content_list.json": list} {
+			for name, data := range map[string][]byte{
+				"full.md": []byte(md), "images/0.jpg": []byte("image"), "book_content_list.json": list,
+			} {
 				f, err := z.Create(name)
 				if err != nil {
 					t.Error(err)
