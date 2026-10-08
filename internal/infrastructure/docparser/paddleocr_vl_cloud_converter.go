@@ -23,28 +23,37 @@ const (
 	paddleOCRVLCloudDefaultBaseURL = "https://paddleocr.aistudio-app.com/api/v2/ocr/jobs"
 	paddleOCRVLCloudDefaultModel   = "PaddleOCR-VL-1.6"
 	paddleOCRVLCloudPollInterval   = 5 * time.Second
-	paddleOCRVLCloudTimeout        = 600 * time.Second
+	// paddleOCRVLCloudTimeout bounds how long one job is polled;
+	// WEKNORA_PADDLEOCR_VL_CLOUD_TIMEOUT overrides it for documents that take
+	// longer, mirroring WEKNORA_MINERU_CLOUD_TIMEOUT on the MinerU cloud reader.
+	paddleOCRVLCloudTimeout = 600 * time.Second
 )
 
 // PaddleOCRVLCloudReader calls the PaddleOCR-VL AI Studio cloud API.
 // Flow: POST /jobs (multipart) → poll GET /jobs/{id} → download result JSONL,
 // then fetch each referenced image URL.
 type PaddleOCRVLCloudReader struct {
-	token    string
-	baseURL  string
-	model    string
-	useSeal  bool
-	useChart bool
+	token        string
+	baseURL      string
+	model        string
+	useSeal      bool
+	useChart     bool
+	timeout      time.Duration
+	pollInterval time.Duration
 }
 
 // NewPaddleOCRVLCloudReader creates a reader from ParserEngineOverrides.
 func NewPaddleOCRVLCloudReader(overrides map[string]string) *PaddleOCRVLCloudReader {
 	return &PaddleOCRVLCloudReader{
-		token:    strings.TrimSpace(overrides["paddleocr_vl_cloud_token"]),
-		baseURL:  strings.TrimRight(stringOr(overrides["paddleocr_vl_cloud_base_url"], paddleOCRVLCloudDefaultBaseURL), "/"),
-		model:    stringOr(overrides["paddleocr_vl_cloud_model"], paddleOCRVLCloudDefaultModel),
-		useSeal:  parseBoolOr(overrides["paddleocr_vl_cloud_use_seal_recognition"], true),
-		useChart: parseBoolOr(overrides["paddleocr_vl_cloud_use_chart_recognition"], false),
+		token: strings.TrimSpace(overrides["paddleocr_vl_cloud_token"]),
+		baseURL: strings.TrimRight(stringOr(
+			overrides["paddleocr_vl_cloud_base_url"], paddleOCRVLCloudDefaultBaseURL,
+		), "/"),
+		model:        stringOr(overrides["paddleocr_vl_cloud_model"], paddleOCRVLCloudDefaultModel),
+		useSeal:      parseBoolOr(overrides["paddleocr_vl_cloud_use_seal_recognition"], true),
+		useChart:     parseBoolOr(overrides["paddleocr_vl_cloud_use_chart_recognition"], false),
+		timeout:      requestTimeoutFromEnv("WEKNORA_PADDLEOCR_VL_CLOUD_TIMEOUT", paddleOCRVLCloudTimeout),
+		pollInterval: paddleOCRVLCloudPollInterval,
 	}
 }
 
@@ -185,7 +194,7 @@ type paddleOCRVLCloudPollResponse struct {
 }
 
 func (c *PaddleOCRVLCloudReader) pollJob(ctx context.Context, jobID string) (string, error) {
-	deadline := time.Now().Add(paddleOCRVLCloudTimeout)
+	deadline := time.Now().Add(c.timeout)
 	pollCount := 0
 	url := c.baseURL + "/" + jobID
 
@@ -209,7 +218,7 @@ func (c *PaddleOCRVLCloudReader) pollJob(ctx context.Context, jobID string) (str
 		resp, err := client.Do(httpReq)
 		if err != nil {
 			logger.Errorf(context.Background(), "[PaddleOCR-VL Cloud] poll #%d failed: %v", pollCount, err)
-			sleepCtx(ctx, paddleOCRVLCloudPollInterval)
+			sleepCtx(ctx, c.pollInterval)
 			continue
 		}
 		respBody, _ := io.ReadAll(resp.Body)
@@ -217,14 +226,14 @@ func (c *PaddleOCRVLCloudReader) pollJob(ctx context.Context, jobID string) (str
 
 		if resp.StatusCode != http.StatusOK {
 			logger.Errorf(context.Background(), "[PaddleOCR-VL Cloud] poll #%d status %d: %s", pollCount, resp.StatusCode, string(respBody))
-			sleepCtx(ctx, paddleOCRVLCloudPollInterval)
+			sleepCtx(ctx, c.pollInterval)
 			continue
 		}
 
 		var pollResp paddleOCRVLCloudPollResponse
 		if err := json.Unmarshal(respBody, &pollResp); err != nil {
 			logger.Errorf(context.Background(), "[PaddleOCR-VL Cloud] poll #%d decode error: %v", pollCount, err)
-			sleepCtx(ctx, paddleOCRVLCloudPollInterval)
+			sleepCtx(ctx, c.pollInterval)
 			continue
 		}
 
@@ -244,10 +253,10 @@ func (c *PaddleOCRVLCloudReader) pollJob(ctx context.Context, jobID string) (str
 			return "", fmt.Errorf("task failed: %s", pollResp.Data.ErrorMsg)
 		}
 
-		sleepCtx(ctx, paddleOCRVLCloudPollInterval)
+		sleepCtx(ctx, c.pollInterval)
 	}
 
-	return "", fmt.Errorf("task timed out after %d polls", pollCount)
+	return "", fmt.Errorf("PaddleOCR-VL Cloud task timed out after %s (%d polls)", c.timeout, pollCount)
 }
 
 // --- result parsing ---
