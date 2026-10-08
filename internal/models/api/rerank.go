@@ -23,6 +23,9 @@ const (
 	// array, and rankings carrying an unbounded logit instead of a
 	// probability.
 	RerankNIM RerankAPI = "nim-rerank"
+	// RerankBedrock uses the AWS Bedrock Agent Runtime Rerank action, signed
+	// with SigV4 by the AWS SDK rather than an HTTP API key.
+	RerankBedrock RerankAPI = "bedrock-rerank"
 	// RerankTencentLKEAP is Tencent Cloud's RunRerank action, reached through
 	// the official SDK because it is TC3-signed rather than key-authenticated.
 	RerankTencentLKEAP RerankAPI = "tencent-lkeap"
@@ -34,7 +37,7 @@ const (
 // Known reports whether the value names a protocol this build implements.
 func (a RerankAPI) Known() bool {
 	switch a {
-	case RerankCohere, RerankDashScope, RerankNIM,
+	case RerankCohere, RerankDashScope, RerankNIM, RerankBedrock,
 		RerankTencentLKEAP, RerankVolcengineKnowledge:
 		return true
 	}
