@@ -1,0 +1,74 @@
+@media (max-width: 767px) { :root body .main:has(.knowledge-layout), :root body .main:has(.faq-content) { min-width: 0; } }
+@media (max-width: 767px) {
+:root body .knowledge-layout { padding: 12px 12px 0; margin: 0; gap: 12px; }
+:root body .kb-list-content { padding: 16px 12px; }
+:root body .kb-list-container { min-width: 0; max-width: 100%; }
+:root body .header .title-row { flex-wrap: wrap; gap: 8px; }
+:root body .header-title { min-width: 0; }
+:root body .header h2 { overflow-wrap: anywhere; }
+:root body .doc-filter-bar, :root body .doc-filter-bar__trailing { flex-wrap: wrap; }
+:root body .doc-filter-bar__trailing { width: 100%; }
+:root body .doc-filter-bar .doc-search-input { width: 100%; flex: 1; }
+:root body .kp-head-toolbar, :root body .kp-head-meta { flex-wrap: wrap; }
+:root body .kp-head { padding: 12px; }
+:root body .kp-head-doc-title { white-space: normal; overflow-wrap: anywhere; }
+:root body .kp-row { display: flex; flex-direction: column; align-items: stretch; height: auto; min-height: 64px; padding: 8px 0; }
+:root body .kp-cell-name { width: 100%; min-width: 0; }
+:root body .kp-cell-bar { min-height: 24px; width: 100%; }
+:root body .kp-ruler { display: none; }
+:root body .kp-error-head { flex-wrap: wrap; }
+:root body .kp-error-msg { overflow-wrap: anywhere; white-space: pre-wrap; }
+}
+@media (max-width: 767px) {
+:root body .kp-cell-dur { padding-left: 12px; }
+}
+@media (max-width: 767px) {
+:root body .knowledge-main.mobile-folder-open .kb-folder-tree { width: 100%; max-height: none; flex: 1; }
+:root body .knowledge-main.mobile-folder-open .tag-content { display: none; }
+:root body .kb-folder-tree__icon-btn, :root body .doc-folder-path__tree-toggle { min-width: 44px; min-height: 44px; }
+}
+@media (max-width: 767px) {
+:root body .document-header .document-breadcrumb { flex-wrap: wrap; font-size: var(--app-text-2xl); gap: 4px; }
+:root body .document-header .document-title-row { align-items: flex-start; }
+:root body .document-header .breadcrumb-link { white-space: nowrap; min-width: 0; }
+:root body .document-header .breadcrumb-link.dropdown { max-width: 220px; }
+:root body .document-header .breadcrumb-separator { flex-shrink: 0; }
+:root body .document-tabs { flex-basis: 100%; font-size: var(--app-text-xl); }
+:root body .document-tabs .breadcrumb-tab { min-height: 44px; white-space: nowrap; }
+}
+@media (max-width: 767px) {
+:root body .upload-confirm-modal { width: 100%; height: 100dvh; max-height: var(--app-viewport-height, 100dvh); border-radius: 0; }
+:root body .upload-confirm-modal .close-btn { width: 44px; height: 44px; top: 4px; right: 4px; }
+:root body .upload-confirm-modal .sidebar-header { padding-right: 52px; }
+:root body .upload-confirm-modal .files-panel { max-height: 25dvh; }
+:root body .upload-confirm-modal .setting-control { min-width: 0; }
+:root body .upload-confirm-modal .modal-footer { padding-bottom: max(12px, env(safe-area-inset-bottom)); }
+:root body .upload-tasks-panel { right: 8px; bottom: max(8px, env(safe-area-inset-bottom)); max-width: calc(100% - 16px); max-height: 60dvh; }
+:root body .upload-tasks-panel .t-button { min-width: 44px; min-height: 44px; }
+}
+@media (max-width: 767px) and (max-height: 500px) {
+:root body .knowledge-layout, :root body .faq-content { overflow-y: auto; }
+:root body .knowledge-main, :root body .faq-main { flex-shrink: 0; min-height: 60dvh; }
+}
+
+// Keep primary list controls compact; secondary controls expand without losing their state.
+@media (max-width: 767px) {
+  :root body .document-header-title, :root body .faq-header-title { width: 100%; min-width: 0; }
+  :root body .document-subtitle { display: none; }
+  :root body .document-subtitle.is-expanded { display: block; max-height: 20dvh; overflow-y: auto; }
+  :root body .document-header, :root body .faq-header { gap: 4px; }
+  :root body .knowledge-layout { gap: 8px; }
+  :root body .doc-filter-bar { gap: 8px; padding-bottom: 8px; }
+  :root body .doc-filter-bar__trailing { gap: 4px; flex-wrap: wrap; }
+  :root body .doc-search-input { flex: 1 1 0; min-width: 0; width: auto; }
+  :root body .doc-filter-label { display: none; }
+  :root body .doc-filter-toggle { min-width: 44px; padding: 0 8px; }
+  :root body .doc-filter-actions { margin-left: 0; }
+  :root body .doc-folder-path { min-width: 0; flex-wrap: nowrap; }
+  :root body .doc-folder-path__name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+  :root body .doc-folder-path__count { white-space: nowrap; flex-shrink: 0; }
+  :root body .header-subtitle, :root body .faq-subtitle { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  :root body .resource-sort-trigger { width: 44px; min-height: 44px; padding: 0; justify-content: center; }
+  :root body .resource-sort-trigger__label, :root body .resource-sort-trigger__caret { display: none; }
+  :root body .faq-filter-bar__trailing { flex-wrap: wrap; }
+}

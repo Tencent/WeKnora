@@ -2730,6 +2730,7 @@ export default {
     }
   },
   common: {
+    more: 'More actions',
     add: 'Add',
     me: 'Me',
     confirm: 'Confirm',

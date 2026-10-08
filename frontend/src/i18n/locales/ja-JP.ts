@@ -2730,6 +2730,7 @@ export default {
     }
   },
   common: {
+    more: 'その他の操作',
     add: '追加',
     me: '自分',
     confirm: '確認',
