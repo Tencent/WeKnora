@@ -112,35 +112,51 @@ func (t *weKnoraCloudPollTransport) RoundTrip(req *http.Request) (*http.Response
 	}, nil
 }
 
-// The configured budget, not the old hardcoded 20m, must end the poll loop even
-// when the caller has no deadline of its own.
+// The configured budget, not the old hardcoded 20m, must end the poll loop
+// whether or not the caller has a deadline of its own. Ingestion always calls
+// with a (much longer) DocReader deadline, so that case must not bypass it.
 func TestWeKnoraCloudPollStopsAtConfiguredTimeout(t *testing.T) {
-	t.Setenv("WEKNORA_WEKNORACLOUD_TIMEOUT", "300ms")
-	reader, err := NewWeKnoraCloudSignedDocumentReader("app-id", "api-key")
-	require.NoError(t, err)
+	for _, tt := range []struct {
+		name      string
+		parentCtx func() (context.Context, context.CancelFunc)
+	}{
+		{"no parent deadline", func() (context.Context, context.CancelFunc) {
+			return context.WithCancel(context.Background())
+		}},
+		{"longer parent deadline", func() (context.Context, context.CancelFunc) {
+			return context.WithTimeout(context.Background(), time.Minute)
+		}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("WEKNORA_WEKNORACLOUD_TIMEOUT", "300ms")
+			reader, err := NewWeKnoraCloudSignedDocumentReader("app-id", "api-key")
+			require.NoError(t, err)
 
-	transport := &weKnoraCloudPollTransport{}
-	reader.client = &http.Client{Transport: transport}
-	reader.initialPollInterval = 5 * time.Millisecond
-	reader.maxPollInterval = 10 * time.Millisecond
+			transport := &weKnoraCloudPollTransport{}
+			reader.client = &http.Client{Transport: transport}
+			reader.initialPollInterval = 5 * time.Millisecond
+			reader.maxPollInterval = 10 * time.Millisecond
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+			ctx, cancel := tt.parentCtx()
+			defer cancel()
 
-	done := make(chan error, 1)
-	start := time.Now()
-	go func() {
-		_, pollErr := reader.pollTaskResult(ctx, "task-1")
-		done <- pollErr
-	}()
+			done := make(chan error, 1)
+			start := time.Now()
+			go func() {
+				_, pollErr := reader.pollTaskResult(ctx, "task-1")
+				done <- pollErr
+			}()
 
-	select {
-	case pollErr := <-done:
-		require.Error(t, pollErr)
-		assert.True(t, errors.Is(pollErr, context.DeadlineExceeded), "err = %v", pollErr)
-		assert.Less(t, time.Since(start), 5*time.Second)
-		assert.Greater(t, transport.polls.Load(), int64(1), "the job must actually be polled before the budget ends it")
-	case <-time.After(5 * time.Second):
-		t.Fatalf("poll loop ignored WEKNORA_WEKNORACLOUD_TIMEOUT after %d polls", transport.polls.Load())
+			select {
+			case pollErr := <-done:
+				require.Error(t, pollErr)
+				assert.True(t, errors.Is(pollErr, context.DeadlineExceeded), "err = %v", pollErr)
+				assert.Less(t, time.Since(start), 5*time.Second)
+				assert.Greater(t, transport.polls.Load(), int64(1),
+					"the job must actually be polled before the budget ends it")
+			case <-time.After(5 * time.Second):
+				t.Fatalf("poll loop ignored WEKNORA_WEKNORACLOUD_TIMEOUT after %d polls", transport.polls.Load())
+			}
+		})
 	}
 }

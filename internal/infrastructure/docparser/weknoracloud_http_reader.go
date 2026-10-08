@@ -143,7 +143,7 @@ type weKnoraCloudAsyncTaskResponse struct {
 
 func (p *WeKnoraCloudSignedDocumentReader) pollTaskResult(ctx context.Context, taskID string) (*types.ReadResult, error) {
 	pollCtx := ctx
-	if _, ok := ctx.Deadline(); !ok && p.pollTimeout > 0 {
+	if p.pollTimeout > 0 {
 		var cancel context.CancelFunc
 		pollCtx, cancel = context.WithTimeout(ctx, p.pollTimeout)
 		defer cancel()
