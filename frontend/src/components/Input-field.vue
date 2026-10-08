@@ -57,6 +57,7 @@ import { SKILL_ICON, type MentionItem, type MentionItemType, type MentionRequest
 import { toolboxLocation } from '@/config/toolbox';
 import { supportedLevels, levelLabelKey, levelFromLegacy, clampLevel, type ReasoningLevel } from '@/utils/reasoningEffort';
 
+const submissionIssue = ref('');
 const route = useRoute();
 const router = useRouter();
 const settingsStore = useSettingsStore();
@@ -2015,6 +2016,7 @@ const createSession = async (
   delivery: 'inject' | 'after' = 'after',
   options: SendMessageOptions = {},
 ) => {
+  submissionIssue.value = '';
   if (props.composerLocked) {
     return;
   }
@@ -2115,6 +2117,7 @@ const createSession = async (
     settingsStore.selectedAgentSourceTenantId ?? undefined,
   );
   if (notReadyReasons.length > 0) {
+    submissionIssue.value = t('input.agentNotReadyDetail', { agentName: actualAgent.name, reasons: formatLocalizedList(notReadyReasons, locale.value) });
     showAgentNotReadyMessage(
       actualAgent,
       notReadyReasons,
@@ -2752,6 +2755,7 @@ defineExpose({
         </span>
       </div>
 
+      <p v-if="submissionIssue" class="composer-submission-error" role="alert">{{ submissionIssue }}</p>
       <!-- 实际输入框 -->
       <t-textarea ref="textareaRef" v-model="query" :placeholder="t('input.placeholder')" name="description" :autosize="true"
         @keydown="onKeydown" @input="onInput" @compositionstart="onCompositionStart" @compositionend="onCompositionEnd"
@@ -3025,6 +3029,7 @@ const getImgSrc = (url: string) => {
 }
 </script>
 <style scoped lang="less">
+.composer-submission-error { margin: 8px 14px; color: var(--td-error-color); font-size: var(--app-text-base); }
 @import './css/chat-resource-chips.less';
 
 .answers-input {
