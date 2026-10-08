@@ -994,6 +994,12 @@ export default {
       paths: '同步目錄', pathsPlaceholder: '每行一個目錄；留空同步整個專案',
       addProject: '新增專案', projectRequired: '請至少新增一個 GitLab 專案',
     },
+    seafile: {
+      baseUrl: 'Seafile 地址', apiToken: 'API 權杖',
+      apiTokenHint: '在 Seafile「設定 → Web API 權杖」中生成；帳號對所選資料庫有讀取權限即可，權杖不會隨檔案下載請求傳送。',
+      singleLibraryOnly: '一個資料源只能同步一個資料庫，請先取消已選資料庫中的內容再改選。',
+      selectionRequired: '請至少勾選一個資料庫、目錄或檔案',
+    },
     resourceHint: '選擇要同步的內容空間/資料夾',
     untitled: '無標題',
     resourceLoadFailed: '載入資源清單失敗',
@@ -1007,6 +1013,10 @@ export default {
     guideStep1_notion: '在 Notion 中打開你想要同步的頁面或資料庫',
     guideStep2_notion: '點擊右上角的「···」選單，選擇「Connect to」或「Add connections」',
     guideStep3_notion: '搜尋並選擇你的集成應用（Integration），然後回到這裡點重新載入',
+    noResourcesDesc_seafile: '該權杖能存取的資料庫為空，或全部為加密資料庫（不支持同步）',
+    guideStep1_seafile: '登入 Seafile，確認帳號至少擁有一個未加密資料庫的讀取權限',
+    guideStep2_seafile: '在「設定 → Web API 權杖」中生成或重新生成權杖',
+    guideStep3_seafile: '回到這裡填入新權杖並點重新載入',
     permissionDocLink: '查看飛書知識庫權限設定文件',
     syncScheduleLabel: '同步頻率',
     conflictLabel: '衝突策略',
@@ -1099,7 +1109,8 @@ export default {
     resourceType: {
       wikiSpace: '知識庫空間',
       docCategory: '文件標籤',
-      book: '語雀知識庫'
+      book: '語雀知識庫',
+      library: 'Seafile 資料庫'
     },
     scheduleHuman: {
       '30min': '每 30 分鐘',
@@ -1147,7 +1158,8 @@ export default {
       dingtalk: '同步釘釘知識庫中的線上文件',
       ima: '同步騰訊 IMA 知識庫中的文件、筆記與檔案（暫不支持 AI 會話與影片解析）',
       rss: '同步 RSS / Atom 訂閱源中的文章',
-      gitlab: '同步 GitLab 專案中的檔案'
+      gitlab: '同步 GitLab 專案中的檔案',
+      seafile: '同步 Seafile 資料庫中的目錄與檔案'
     },
     connector: {
       feishu: '飛書',
@@ -1160,7 +1172,8 @@ export default {
       dingtalk: '釘釘文件',
       ima: '騰訊 IMA',
       rss: 'RSS / Atom 訂閱',
-      gitlab: 'GitLab'
+      gitlab: 'GitLab',
+      seafile: 'Seafile'
     },
     logDetail: {
       startTime: '開始時間',
@@ -1224,7 +1237,15 @@ export default {
       dingtalk_resource_failed: '釘釘資源不可用，請檢查存取權限和已選資源後重試。',
       deletion_lookup_failed: '刪除前尋找文件失敗，請查看伺服器日誌',
       deletion_failed: '刪除失敗，請查看伺服器日誌',
-      ingest_failed: '匯入失敗，請查看伺服器日誌'
+      ingest_failed: '匯入失敗，請查看伺服器日誌',
+      seafile_permission_denied: '無權存取該 Seafile 檔案，請檢查權杖所屬帳號的資料庫權限。',
+      seafile_not_found: 'Seafile 檔案不存在或已被移動，下次同步將重試。',
+      seafile_file_too_large: 'Seafile 檔案超過大小限制，請調大 MAX_FILE_SIZE_MB 或縮小該檔案。',
+      seafile_empty_file: 'Seafile 檔案內容為空，已跳過。',
+      seafile_source_changed: 'Seafile 檔案在獲取過程中發生變化，下次同步將重試。',
+      seafile_invalid_response: 'Seafile 回傳了無法解析的回應，請檢查伺服器版本與反向代理設定。',
+      seafile_ssrf_blocked: 'Seafile 檔案下載地址被 SSRF 策略攔截，請將 fileserver 網域加入 SSRF_WHITELIST。',
+      seafile_fetch_failed: '從 Seafile 獲取檔案失敗，下次同步將重試。'
     },
   },
   ollama: {
@@ -7172,6 +7193,7 @@ export default {
     channelConfluence: 'Confluence',
     channelYuque: '語雀',
     channelGitLab: 'GitLab',
+    channelSeafile: 'Seafile',
     channelIma: '騰訊 IMA',
     channelUpload: '上傳',
     channelManual: '手動',
