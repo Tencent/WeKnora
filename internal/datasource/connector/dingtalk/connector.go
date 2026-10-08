@@ -67,6 +67,13 @@ func skipReason(n node, settings documentSettings) string {
 	// looking like a missing feature.
 	if n.isBinaryDocument() && !settings.IncludeUploadedFiles {
 		return "uploaded files are not ingested because include_uploaded_files is not enabled for this data source"
+
+	}
+	// A spreadsheet this connector can read, but this data source was never
+	// told to. Naming the switch makes the skip actionable instead of looking
+	// like a missing feature.
+	if n.isSheet() && !settings.IncludeSheets {
+		return "spreadsheets are not ingested because include_sheets is not enabled for this data source"
 	}
 	if label := ingestableDocumentExtensions[extension]; label != "" {
 		return label + " is ingested only from a FILE node in the ALIDOC category"

@@ -167,12 +167,18 @@ func (n node) isBinaryDocument() bool {
 // isIngestible reports whether this data source ingests the node: a read path
 // must exist and the switch guarding it must be on. Validate, the resource
 // picker and both sync modes select nodes through this one predicate, so a
-// switch that is off is off in every one of them.
+// switch that is off is off in every one of them. A guarded type has to be
+// admitted here rather than only in the sync path, because both the workspace
+// scan and the picker select nodes by this predicate — a sheet left out of it
+// is never enumerated at all, not merely rendered as unsupported.
 func (n node) isIngestible(settings documentSettings) bool {
 	if n.isOnlineDocument() {
 		return true
 	}
-	return n.isSheet() || (settings.IncludeUploadedFiles && n.isBinaryDocument())
+	if settings.IncludeSheets && n.isSheet() {
+		return true
+	}
+	return settings.IncludeUploadedFiles && n.isBinaryDocument()
 }
 
 func (n node) title() string {

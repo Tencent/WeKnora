@@ -227,16 +227,24 @@ const yuqueTOCOnly = computed({
   },
 })
 
-// DingTalk ingestion of uploaded Office/PDF files. Like the Yuque switches the
-// key lives in the raw settings bag, and a data source created before this
-// control existed carries no key at all — the getter therefore reports the
-// connector default (off) instead of rendering the checkbox blank, and nothing
-// is written back until the user toggles it, so merely opening an existing
-// source never changes what it syncs.
+// DingTalk ingestion of uploaded Office/PDF files and native spreadsheets
+// (axls). The keys live in the raw settings bag and are read by the connector
+// as opt-in: a data source created before these controls existed carries no key
+// at all, so the getters report the connector default (off) instead of
+// rendering the checkboxes blank, and nothing is written back until the user
+// toggles one. Merely opening an existing source therefore never changes what
+// it syncs.
 const dingtalkIncludeUploadedFiles = computed({
   get: () => form.value.config.settings?.include_uploaded_files === true,
   set: (on: boolean) => {
     form.value.config.settings = { ...form.value.config.settings, include_uploaded_files: on }
+  },
+})
+
+const dingtalkIncludeSheets = computed({
+  get: () => form.value.config.settings?.include_sheets === true,
+  set: (on: boolean) => {
+    form.value.config.settings = { ...form.value.config.settings, include_sheets: on }
   },
 })
 
@@ -2013,6 +2021,13 @@ const drawerConfirmText = computed(() => {
           </t-checkbox>
         </div>
         <p class="form-desc">{{ t('datasource.dingtalkIncludeUploadedFilesHint') }}</p>
+
+        <div class="form-item form-item--flat">
+          <t-checkbox v-model="dingtalkIncludeSheets">
+            {{ t('datasource.dingtalkIncludeSheets') }}
+          </t-checkbox>
+        </div>
+        <p class="form-desc">{{ t('datasource.dingtalkIncludeSheetsHint') }}</p>
       </section>
 
       <!-- Yuque only: how synced documents are laid out, and what may be admitted. -->

@@ -341,35 +341,48 @@ test('an existing Yuque data source on the TOC layout reports it', async () => {
   } finally { f.close() }
 })
 
-test('a DingTalk data source reports the uploaded-file switch, defaulting to off', async () => {
+test('a DingTalk data source reports both ingestion switches, defaulting to off', async () => {
   const off = await fixture({ type: 'dingtalk', settings: {} })
   try {
     // The connector treats a missing key as false, so an existing source that
-    // predates this control must render as off — and stay untouched.
+    // predates these controls must render as off — and stay untouched.
     assert.equal(off.vm.dingtalkIncludeUploadedFiles, false)
+    assert.equal(off.vm.dingtalkIncludeSheets, false)
     assert.equal(off.vm.form.config.settings.include_uploaded_files, undefined)
+    assert.equal(off.vm.form.config.settings.include_sheets, undefined)
   } finally { off.close() }
 
-  const on = await fixture({ type: 'dingtalk', settings: { include_uploaded_files: true } })
+  const on = await fixture({
+    type: 'dingtalk',
+    settings: { include_uploaded_files: true, include_sheets: true },
+  })
   try {
     assert.equal(on.vm.dingtalkIncludeUploadedFiles, true)
+    assert.equal(on.vm.dingtalkIncludeSheets, true)
   } finally { on.close() }
 
-  const explicitOff = await fixture({ type: 'dingtalk', settings: { include_uploaded_files: false } })
+  const sheetsOnly = await fixture({ type: 'dingtalk', settings: { include_sheets: true } })
   try {
-    assert.equal(explicitOff.vm.dingtalkIncludeUploadedFiles, false)
-  } finally { explicitOff.close() }
+    // The two switches are independent: one must never imply the other.
+    assert.equal(sheetsOnly.vm.dingtalkIncludeSheets, true)
+    assert.equal(sheetsOnly.vm.dingtalkIncludeUploadedFiles, false)
+  } finally { sheetsOnly.close() }
 })
 
-test('toggling the DingTalk uploaded-file switch writes the settings key', async () => {
+test('toggling one DingTalk switch leaves the other alone', async () => {
   const f = await fixture({ type: 'dingtalk', settings: {} })
   try {
+    f.vm.dingtalkIncludeSheets = true
+    assert.equal(f.vm.form.config.settings.include_sheets, true)
+    assert.equal(f.vm.form.config.settings.include_uploaded_files, undefined)
+
     f.vm.dingtalkIncludeUploadedFiles = true
+    assert.equal(f.vm.form.config.settings.include_sheets, true)
     assert.equal(f.vm.form.config.settings.include_uploaded_files, true)
-    f.vm.dingtalkIncludeUploadedFiles = false
-    assert.equal(f.vm.form.config.settings.include_uploaded_files, false)
-    // The switch is scoped to DingTalk: no other connector's key is written.
-    assert.equal(f.vm.form.config.settings.include_sheets, undefined)
+
+    f.vm.dingtalkIncludeSheets = false
+    assert.equal(f.vm.form.config.settings.include_sheets, false)
+    assert.equal(f.vm.form.config.settings.include_uploaded_files, true)
   } finally { f.close() }
 })
 

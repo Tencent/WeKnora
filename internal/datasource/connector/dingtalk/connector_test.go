@@ -157,6 +157,15 @@ func testConfigWithUploadedFiles(resources ...string) *types.DataSourceConfig {
 	return cfg
 }
 
+// testConfigWithSheets turns include_sheets on. Cases that exercise the
+// spreadsheet ingest path have to opt in, because the switch defaults to off
+// and testConfig deliberately leaves the settings bag empty.
+func testConfigWithSheets(resources ...string) *types.DataSourceConfig {
+	cfg := testConfig(resources...)
+	cfg.Settings = map[string]interface{}{"include_sheets": true}
+	return cfg
+}
+
 func rawJSON(value string) json.RawMessage {
 	return json.RawMessage(value)
 }
@@ -811,10 +820,12 @@ func TestScanScopeReportsSkippedNodesAndSingleDocumentScopeHasNone(t *testing.T)
 }
 
 // The reason has to say which kind of unsupported a node is: a video is skipped
-// on purpose, a native type has simply not been implemented, and an uploaded
-// file the connector could read is skipped only because its switch is off.
+// on purpose, a native type has simply not been implemented, and a file or
+// spreadsheet the connector could read is skipped only because its switch is
+// off.
 func TestSkipReasonDistinguishesMediaFromUnimplementedTypes(t *testing.T) {
 	enabled := documentSettings{IncludeUploadedFiles: true}
+	sheetsOn := documentSettings{IncludeSheets: true}
 	for _, testCase := range []struct {
 		label    string
 		node     node
@@ -892,11 +903,20 @@ func TestSkipReasonDistinguishesMediaFromUnimplementedTypes(t *testing.T) {
 			documentSettings{IncludeUploadedFiles: false},
 			"uploaded files are not ingested because include_uploaded_files is not enabled for this data source",
 		},
+
 		{
-			// A node that is not an uploaded file keeps its own reason even
-			// while the switch is on, so the switch never relabels a node it
-			// does not govern.
-			"unsupported type with the switch on",
+			// A node that is not a spreadsheet keeps its own reason even while
+			// the switch is on, so the switch never relabels a node it does not
+			// govern.
+			"unsupported type with the sheet switch on",
+			node{Type: "FILE", Category: "ALIDOC", Extension: "amind"},
+			sheetsOn,
+			"DingTalk mind map has no ingest path in this connector yet",
+		},
+		{
+			// The uploaded-file switch carries the same guarantee: turning it on
+			// must not relabel a node the upload path never governs.
+			"unsupported type with the uploaded-file switch on",
 			node{Type: "FILE", Category: "ALIDOC", Extension: "amind"},
 			enabled,
 			"DingTalk mind map has no ingest path in this connector yet",
@@ -1407,9 +1427,10 @@ func TestBinaryDocumentFileNameKeepsASingleExtension(t *testing.T) {
 
 // isDocument answers whether a read path exists at all, and isIngestible
 // answers whether this data source takes the node: the blocks API for adoc
-// always, the 钉盘 download API for an uploaded file only once
-// include_uploaded_files is on. Native DingTalk types stay out either way, so
-// nothing is ever enumerated that the sync cannot read.
+// always, the workbooks API for a native spreadsheet only once include_sheets
+// is on, and the 钉盘 download API for an uploaded file only once
+// include_uploaded_files is on. Types this connector cannot read stay out
+// either way, so nothing is ever enumerated that the sync cannot read.
 func TestNodeDocumentClassification(t *testing.T) {
 	for _, testCase := range []struct {
 		label    string
@@ -1443,15 +1464,14 @@ func TestNodeDocumentClassification(t *testing.T) {
 			if got := testCase.node.isBinaryDocument(); got != testCase.binary {
 				t.Fatalf("isBinaryDocument() = %v, want %v", got, testCase.binary)
 			}
-			// Off by default: with every switch unset only the read paths that
-			// need no switch are admitted — adoc, and the workbook path added
-			// with include_sheets — while a switch must never admit a node that
-			// has no read path at all.
-			unguarded := testCase.online || testCase.node.isSheet()
-			if got := testCase.node.isIngestible(documentSettings{}); got != unguarded {
-				t.Fatalf("isIngestible(off) = %v, want %v", got, unguarded)
+			// Off by default: with every switch unset only the native adoc
+			// path is admitted (the workbook path is guarded by include_sheets,
+			// the upload path by include_uploaded_files), and a switch must
+			// never admit a node that has no read path at all.
+			if got := testCase.node.isIngestible(documentSettings{}); got != testCase.online {
+				t.Fatalf("isIngestible(off) = %v, want %v", got, testCase.online)
 			}
-			enabled := documentSettings{IncludeUploadedFiles: true}
+			enabled := documentSettings{IncludeUploadedFiles: true, IncludeSheets: true}
 			if got := testCase.node.isIngestible(enabled); got != testCase.document {
 				t.Fatalf("isIngestible(on) = %v, want %v", got, testCase.document)
 			}

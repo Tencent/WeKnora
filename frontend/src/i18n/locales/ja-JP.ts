@@ -7082,6 +7082,8 @@ export default {
     dingtalkIngestLabel: 'DingTalk の取り込み範囲',
     dingtalkIncludeUploadedFiles: 'アップロードファイル（docx / pptx / xlsx / pdf）を取り込む',
     dingtalkIncludeUploadedFilesHint: '既定ではオフです。オンにすると、選択範囲にアップロードされた Word / PowerPoint / Excel / PDF ファイルをダウンロードして解析し、ナレッジベースに取り込みます（1 ファイルあたり 64 MiB まで）。本文はストレージと埋め込みのコストに算入されます。オフの場合は単にスキップされ、同期ログにスイッチが無効である旨が記録されます。既にナレッジベースにあるコピーは削除されません。',
+    dingtalkIncludeSheets: 'DingTalk スプレッドシート（axls）を取り込む',
+    dingtalkIncludeSheetsHint: '既定ではオフです。オンにすると、選択範囲の DingTalk スプレッドシートをワークシート API で読み取ります。1 シートあたり最大 10,000 行 × 256 列で、それを超える行列は切り捨てられ、切り捨て範囲が同期ログに記録されます。1 つのブックの空でないシートはすべて 1 つの Markdown にまとめられます。本文はストレージと埋め込みのコストに算入されます。オフの場合は単にスキップされ、同期ログにスイッチが無効である旨が記録されます。',
     prereqBarText_dingtalk: '初めての利用ですか？DingTalkアプリの設定ガイドを確認',
     prereqStep1Brief_dingtalk: '企業内部アプリを作成',
     prereqStep1Desc_dingtalk: 'DingTalk開発者プラットフォームで企業内部アプリを作成し、Client IDとClient Secretを取得します。',
