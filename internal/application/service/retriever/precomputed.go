@@ -3,6 +3,7 @@ package retriever
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/embedding"
@@ -14,9 +15,12 @@ import (
 // reproduce from the row's Content. vectors[i] belongs to indexInfoList[i].
 //
 // It goes through the same per-engine BatchIndex as text, so every backend
-// stores these rows exactly as it stores any other. A keyword engine in the
-// composite still indexes Content; retrieval discards keyword hits on
-// ImageSourceType rows.
+// stores these rows exactly as it stores any other, but only on engines that
+// serve vector retrieval: the rows are for vector recall, and a keyword-only
+// engine (Elasticsearch v7) would hold nothing but their caption, which the
+// caption's own chunk already indexes. An engine serving both kinds keeps
+// one row for both, so its keyword search still meets them; retrieval
+// discards those hits and refills the pool past them.
 func (c *CompositeRetrieveEngine) BatchIndexVectors(ctx context.Context,
 	model embedding.Embedder, indexInfoList []*types.IndexInfo, vectors [][]float32,
 ) error {
@@ -35,6 +39,9 @@ func (c *CompositeRetrieveEngine) BatchIndexVectors(ctx context.Context,
 	}
 	embedder := &precomputedEmbedder{Embedder: model, vectors: vectors}
 	return c.concurrentExecWithError(ctx, func(ctx context.Context, info *engineInfo) error {
+		if !slices.Contains(info.retrieverType, types.VectorRetrieverType) {
+			return nil
+		}
 		if err := info.retrieveEngine.BatchIndex(ctx, embedder, indexInfoList, info.retrieverType); err != nil {
 			logger.Errorf(ctx, "Repository %s failed to save precomputed vectors: %v",
 				info.retrieveEngine.EngineType(), err)

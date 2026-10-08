@@ -110,6 +110,78 @@ func TestContinueStream_MultilineDataFrame(t *testing.T) {
 	}
 }
 
+func TestContinueStream_EventFieldSpace(t *testing.T) {
+	cases := []struct {
+		name      string
+		eventType string
+		wantCount int
+	}{
+		{"no_space", "message", 1},
+		{"one_space", " message", 1},
+		{"two_spaces", "  message", 0},
+		{"tab", "\tmessage", 0},
+		{"trailing_space", " message ", 0},
+		{"other_event", " progress", 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "text/event-stream")
+				knowledgeSSEEvent(t, w, StreamResponse{
+					ResponseType: ResponseTypeAnswer,
+					Content:      "hello",
+				}, tc.eventType)
+			}))
+			defer srv.Close()
+
+			c := NewClient(srv.URL)
+			var count int
+			err := c.ContinueStream(context.Background(), "sess", "msg", func(e *StreamResponse) error {
+				count++
+				if e.ResponseType != ResponseTypeAnswer || e.Content != "hello" {
+					t.Errorf("response = %#v, want answer content hello", e)
+				}
+				return nil
+			})
+			if err != nil {
+				t.Fatalf("unexpected stream error: %v", err)
+			}
+			if count != tc.wantCount {
+				t.Errorf("callbacks = %d, want %d", count, tc.wantCount)
+			}
+		})
+	}
+}
+
+func TestContinueStream_SpacedTerminalError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		knowledgeSSEEvent(t, w, StreamResponse{
+			ResponseType: ResponseTypeError,
+			Content:      "model failed",
+			Done:         true,
+		}, " message")
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL)
+	var count int
+	err := c.ContinueStream(context.Background(), "sess", "msg", func(e *StreamResponse) error {
+		count++
+		if e.ResponseType != ResponseTypeError || e.Content != "model failed" || !e.Done {
+			t.Errorf("response = %#v, want terminal error content model failed", e)
+		}
+		return nil
+	})
+	var streamErr *SSEStreamError
+	if !errors.As(err, &streamErr) || streamErr.Content != "model failed" {
+		t.Errorf("err = %v, want terminal SSE error with content model failed", err)
+	}
+	if count != 1 {
+		t.Errorf("callbacks = %d, want 1", count)
+	}
+}
+
 // emptyDataFrameStream wraps a bare `data:` frame between two real events;
 // the empty frame must be skipped, not parsed as JSON.
 const emptyDataFrameStream = "data:{\"response_type\":\"answer\",\"content\":\"a\"}\n\n" +

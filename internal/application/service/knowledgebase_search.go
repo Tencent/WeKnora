@@ -257,15 +257,8 @@ func (s *knowledgeBaseService) hybridSearchCandidates(ctx context.Context,
 		return nil, nil
 	}
 
-	// Image vectors only exist where the embedding model embeds images; ask
-	// once for the search, since every KB in it shares the primary's model.
-	if !params.DisableVectorMatch && kb.IsVectorEnabled() && kb.EmbeddingModelID != "" &&
-		s.embeddingTakesImages(ctx, kb) {
-		for _, g := range groups {
-			g.ImageRecall = true
-			g.VectorThreshold = params.VectorThreshold
-		}
-	}
+	// Image vectors are recalled only for KBs that opted in to them.
+	s.applyImageRecall(ctx, kbs, groups, params)
 
 	// Execute retrieval with fan-out + score normalization (multi-store
 	// only) and a langfuse span around the entire retrieve step.

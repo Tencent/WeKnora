@@ -25,6 +25,35 @@ type notionClient struct {
 	httpClient *http.Client
 	limiter    *rate.Limiter
 	baseURL    string
+	// jsonLimit caps each API response body; a field so tests can lower it
+	// without materialising the production limit.
+	jsonLimit int64
+}
+
+// maxJSONResponseBytes bounds every API response body. Page and block payloads
+// are small; a larger body means a broken or hostile server.
+const maxJSONResponseBytes = 16 << 20
+
+// errResponseTooLarge marks a body over the cap. It is deterministic: the same
+// request returns the same oversized body, so callers must not retry it.
+var errResponseTooLarge = errors.New("response exceeds maximum size")
+
+// readCapped reads a response body, refusing anything larger than limit instead
+// of buffering it. Oversized payloads are reported as an error: a truncated
+// body would be indexed as if it were the whole document. A non-positive limit
+// (e.g. a zero-value client built in tests) falls back to maxJSONResponseBytes.
+func readCapped(body io.Reader, limit int64) ([]byte, error) {
+	if limit <= 0 {
+		limit = maxJSONResponseBytes
+	}
+	data, err := io.ReadAll(io.LimitReader(body, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > limit {
+		return nil, fmt.Errorf("%w (%d bytes)", errResponseTooLarge, limit)
+	}
+	return data, nil
 }
 
 // newClient creates a new Notion API client.
@@ -40,6 +69,7 @@ func newClient(token, baseURL string) (*notionClient, error) {
 		httpClient: datasource.NewConnectorHTTPClient(30 * time.Second),
 		limiter:    rate.NewLimiter(rate.Limit(3), 3),
 		baseURL:    baseURL,
+		jsonLimit:  maxJSONResponseBytes,
 	}, nil
 }
 
@@ -101,7 +131,7 @@ func (c *notionClient) doRequest(ctx context.Context, method, path string, body 
 			break
 		}
 
-		respBody, err := io.ReadAll(resp.Body)
+		respBody, err := readCapped(resp.Body, c.jsonLimit)
 		resp.Body.Close()
 		if err != nil {
 			return nil, fmt.Errorf("read response: %w", err)
@@ -238,8 +268,9 @@ func (c *notionClient) GetDataSourceInfo(ctx context.Context, dsID string) (*not
 func (c *notionClient) GetBlockChildrenFlat(ctx context.Context, blockID string) ([]notionBlock, error) {
 	var allBlocks []notionBlock
 	var startCursor string
+	seenCursors := make(map[string]struct{})
 
-	for {
+	for page := 1; ; page++ {
 		path := fmt.Sprintf("/v1/blocks/%s/children", blockID)
 		if startCursor != "" {
 			path += "?start_cursor=" + startCursor
@@ -265,7 +296,11 @@ func (c *notionClient) GetBlockChildrenFlat(ctx context.Context, blockID string)
 		if !resp.HasMore || resp.NextCursor == "" {
 			break
 		}
-		startCursor = resp.NextCursor
+		next, err := advancePaginationCursor(ctx, seenCursors, resp.NextCursor, page)
+		if err != nil {
+			return nil, fmt.Errorf("get block children for %s: %w", blockID, err)
+		}
+		startCursor = next
 	}
 
 	return allBlocks, nil
@@ -273,6 +308,19 @@ func (c *notionClient) GetBlockChildrenFlat(ctx context.Context, blockID string)
 
 const maxBlockDepth = 5       // Limit recursion depth — deeper content has diminishing value for knowledge bases
 const maxBlocksPerPage = 1000 // Limit total blocks fetched per page to prevent runaway API calls
+
+// blocksTruncated reports whether the maxBlocksPerPage cap stopped pagination
+// while the API still offered another page — i.e. whether content was actually
+// dropped. Hitting the cap on the last page of a document is not truncation,
+// so the caller can warn without a false positive.
+//
+// hasMore alone decides that: the Notion contract only clears it together with
+// next_cursor, so requiring a non-empty cursor here would let the anomalous
+// "has_more=true, next_cursor empty" response drop content in silence. That
+// anomaly is reported separately by the caller.
+func blocksTruncated(currentCount int, hasMore bool) bool {
+	return currentCount >= maxBlocksPerPage && hasMore
+}
 
 // GetBlockChildrenAll recursively fetches all blocks under a given block ID,
 // building a tree structure with Children populated for blocks with has_children=true.
@@ -308,6 +356,22 @@ func (c *notionClient) getBlockChildrenRecursive(ctx context.Context, blockID st
 		}
 
 		allBlocks = append(allBlocks, blocks...)
+
+		// The cap below stops pagination unconditionally; without this warning
+		// the dropped blocks (and any child_page/child_database they contain,
+		// which the connector layer never visits) vanish silently.
+		if blocksTruncated(len(allBlocks), resp.HasMore) {
+			logger.Warnf(ctx, "[Notion] block %s exceeded %d blocks; truncating, remaining blocks are not synced",
+				blockID, maxBlocksPerPage)
+		}
+
+		// has_more promises another page, but an empty next_cursor means there is
+		// no way to ask for it: pagination stops right here even below the cap,
+		// so everything after this page would be dropped without a trace.
+		if resp.HasMore && resp.NextCursor == "" {
+			logger.Warnf(ctx, "[Notion] block %s returned has_more=true without a next_cursor after %d blocks; "+
+				"cannot fetch further pages, remaining blocks are not synced", blockID, len(allBlocks))
+		}
 
 		if len(allBlocks) >= maxBlocksPerPage || !resp.HasMore || resp.NextCursor == "" {
 			break
@@ -440,6 +504,32 @@ func (c *notionClient) DownloadFile(ctx context.Context, fileURL string) ([]byte
 
 // --- Shared pagination helper ---
 
+// maxPaginationHops bounds every cursor-paginated loop in this file. A vendor
+// (or gateway) that keeps answering has_more=true would otherwise keep the
+// client paging until the sync task hits its deadline; the value mirrors the
+// guard Confluence and DingTalk already carry.
+const maxPaginationHops = 10000
+
+// advancePaginationCursor validates the progress of a cursor-paginated loop
+// after page `page` (1-based) has been fetched: a cursor handed back twice
+// means the vendor is repeating a page, and page >= maxPaginationHops means
+// the listing is unbounded. Both are reported instead of being followed
+// forever, and the hop cap is also logged because it is the one failure that
+// looks like a healthy, still-running sync from the outside.
+func advancePaginationCursor(
+	ctx context.Context, seen map[string]struct{}, cursor string, page int,
+) (string, error) {
+	if page >= maxPaginationHops {
+		logger.Warnf(ctx, "[Notion] pagination exceeded %d pages; aborting", maxPaginationHops)
+		return "", fmt.Errorf("pagination exceeded %d pages", maxPaginationHops)
+	}
+	if _, exists := seen[cursor]; exists {
+		return "", fmt.Errorf("pagination repeated next_cursor %q", cursor)
+	}
+	seen[cursor] = struct{}{}
+	return cursor, nil
+}
+
 // errQueryResultTruncated reports that a paginated response was cut short by a
 // vendor-side limit, so the rows collected so far are a prefix of the result set
 // rather than all of it. Notion signals this with has_more=false plus
@@ -456,8 +546,9 @@ var errQueryResultTruncated = errors.New("notion paginated response incomplete: 
 func (c *notionClient) paginatePages(ctx context.Context, method, path string) ([]notionPage, error) {
 	var allPages []notionPage
 	var startCursor string
+	seenCursors := make(map[string]struct{})
 
-	for {
+	for page := 1; ; page++ {
 		body := map[string]interface{}{
 			"page_size": 100,
 		}
@@ -509,7 +600,11 @@ func (c *notionClient) paginatePages(ctx context.Context, method, path string) (
 		if !resp.HasMore || resp.NextCursor == "" {
 			break
 		}
-		startCursor = resp.NextCursor
+		next, err := advancePaginationCursor(ctx, seenCursors, resp.NextCursor, page)
+		if err != nil {
+			return nil, fmt.Errorf("paginate %s: %w", path, err)
+		}
+		startCursor = next
 	}
 
 	return allPages, nil
@@ -610,8 +705,9 @@ func (c *notionClient) queryDataSourceWindow(
 	ctx context.Context, path string, windowStart *time.Time,
 ) (rows []notionPage, lastCreatedTime time.Time, incompleteReason string, err error) {
 	var startCursor string
+	seenCursors := make(map[string]struct{})
 
-	for {
+	for page := 1; ; page++ {
 		body := map[string]interface{}{
 			"page_size": dataSourceQueryPageSize,
 			"sorts": []map[string]string{
@@ -666,7 +762,11 @@ func (c *notionClient) queryDataSourceWindow(
 		if !resp.HasMore || resp.NextCursor == "" {
 			return rows, lastCreatedTime, incompleteReason, nil
 		}
-		startCursor = resp.NextCursor
+		next, cursorErr := advancePaginationCursor(ctx, seenCursors, resp.NextCursor, page)
+		if cursorErr != nil {
+			return nil, time.Time{}, "", fmt.Errorf("paginate %s: %w", path, cursorErr)
+		}
+		startCursor = next
 	}
 }
 

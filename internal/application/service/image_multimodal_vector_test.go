@@ -111,6 +111,15 @@ func imageVectorFixture(t *testing.T) (
 	return &ImageMultimodalService{chunkService: &vectorChunkService{repo: repo}}, repo, recorder, engine
 }
 
+// imageVectorKB has opted in to image vectors.
+func imageVectorKB() *types.KnowledgeBase {
+	return &types.KnowledgeBase{
+		ID:                    "kb",
+		IndexingStrategy:      types.IndexingStrategy{VectorEnabled: true},
+		ImageProcessingConfig: types.ImageProcessingConfig{ImageVectorEnabled: true},
+	}
+}
+
 func multimodalChunks() []*types.Chunk {
 	const info = `[{"url":"u"}]`
 	return []*types.Chunk{
@@ -125,7 +134,8 @@ func TestIndexImageVectorStoresTheImagesOwnVector(t *testing.T) {
 	payload := types.ImageMultimodalPayload{
 		ChunkID: "text-parent", KnowledgeID: "k", KnowledgeBaseID: "kb", TenantID: 1, ImageURL: "u",
 	}
-	status := svc.indexImageVector(context.Background(), payload, testPNG(t), multimodalChunks(), model, engine)
+	status := svc.indexImageVector(context.Background(), imageVectorKB(), payload, testPNG(t),
+		multimodalChunks(), model, engine)
 	require.Equal(t, "indexed", status)
 
 	require.Len(t, model.images, 1)
@@ -153,8 +163,8 @@ func TestIndexImageVectorStoresTheImagesOwnVector(t *testing.T) {
 
 func TestIndexImageVectorFallsBackToOCRText(t *testing.T) {
 	svc, repo, _, engine := imageVectorFixture(t)
-	status := svc.indexImageVector(context.Background(), types.ImageMultimodalPayload{}, testPNG(t),
-		multimodalChunks()[:1], &imageModel{dims: 3}, engine)
+	status := svc.indexImageVector(context.Background(), imageVectorKB(), types.ImageMultimodalPayload{},
+		testPNG(t), multimodalChunks()[:1], &imageModel{dims: 3}, engine)
 	require.Equal(t, "indexed", status)
 	for _, c := range repo.chunks {
 		assert.Equal(t, "SALES 2025", c.Content)
@@ -196,8 +206,34 @@ func TestIndexImageVectorSkips(t *testing.T) {
 			if img == nil {
 				img = testPNG(t)
 			}
-			assert.Equal(t, tc.want, svc.indexImageVector(context.Background(), tc.payload, img,
+			assert.Equal(t, tc.want, svc.indexImageVector(context.Background(), imageVectorKB(), tc.payload, img,
 				multimodalChunks(), tc.model, engine))
+			assert.Empty(t, repo.chunks)
+			assert.Empty(t, recorder.rows)
+		})
+	}
+}
+
+// An image-capable model alone does not index images: the knowledge base
+// has to opt in, and every knowledge base from before the switch is off.
+func TestIndexImageVectorNeedsTheKnowledgeBaseToOptIn(t *testing.T) {
+	cases := map[string]*types.KnowledgeBase{
+		"switch off (every KB after an upgrade)": {
+			ID: "kb", IndexingStrategy: types.IndexingStrategy{VectorEnabled: true},
+		},
+		"switch on but vector indexing off": {
+			ID: "kb", IndexingStrategy: types.IndexingStrategy{KeywordEnabled: true},
+			ImageProcessingConfig: types.ImageProcessingConfig{ImageVectorEnabled: true},
+		},
+	}
+	for name, kb := range cases {
+		t.Run(name, func(t *testing.T) {
+			svc, repo, recorder, engine := imageVectorFixture(t)
+			model := &imageModel{dims: 3}
+			status := svc.indexImageVector(context.Background(), kb, types.ImageMultimodalPayload{},
+				testPNG(t), multimodalChunks(), model, engine)
+			assert.Empty(t, status)
+			assert.Empty(t, model.images, "the image is not sent to the model")
 			assert.Empty(t, repo.chunks)
 			assert.Empty(t, recorder.rows)
 		})

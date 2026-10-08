@@ -33,6 +33,12 @@ func (f *fakeAPI) listNodes(_ context.Context, parentID string) ([]node, error) 
 	return f.nodes[parentID], nil
 }
 
+// listNodesPage serves every child of parentID as a single page.
+func (f *fakeAPI) listNodesPage(ctx context.Context, parentID, _ string) ([]node, string, error) {
+	nodes, err := f.listNodes(ctx, parentID)
+	return nodes, "", err
+}
+
 func (f *fakeAPI) documentBlocks(_ context.Context, documentID string) ([]json.RawMessage, error) {
 	if f.blockCalls == nil {
 		f.blockCalls = make(map[string]int)

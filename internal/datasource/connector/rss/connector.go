@@ -124,7 +124,7 @@ func (c *Connector) FetchAll(
 	return items, err
 }
 
-// FetchIncremental returns only items whose content fingerprint changed since
+// FetchIncremental returns only items whose item fingerprint changed since
 // the prior cursor. Deletions are intentionally not emitted (feeds drop old
 // items as a matter of course).
 func (c *Connector) FetchIncremental(
@@ -171,7 +171,7 @@ func (c *Connector) FetchIncremental(
 
 // walk is the shared implementation for FetchAll / FetchIncremental.
 //
-// When incremental is true, items whose feed signal and content fingerprint are
+// When incremental is true, items whose feed signal and item fingerprint are
 // both unchanged are omitted from the result (ingest skipped) without fetching
 // article pages. The returned cursor always reflects the best-known item state
 // so a later sync can detect changes.
@@ -250,7 +250,9 @@ func (c *Connector) walk(
 				if prevSignals != nil {
 					prevSig = prevSignals[itemID]
 				}
-				if prevFP != "" && feedSig == prevSig {
+				// Body-only legacy cursors must be upgraded (below) before the
+				// no-fetch fast path can trust them.
+				if strings.HasPrefix(prevFP, itemFingerprintPrefix) && feedSig == prevSig {
 					newCursor.FeedItems[feedURL][itemID] = prevFP
 					newCursor.FeedSignals[feedURL][itemID] = feedSig
 					skipped++
@@ -259,6 +261,26 @@ func (c *Connector) walk(
 			}
 
 			resolved := c.resolveItem(ctx, cli, feed, item, feedURL, itemID, feedContent)
+			if incremental && prevItems != nil && isLegacyFingerprint(prevItems[itemID]) {
+				switch {
+				case legacyContentFingerprint(string(resolved.item.Content)) == prevItems[itemID]:
+					// The stored body is unchanged: upgrade the cursor in place
+					// instead of deleting and rebuilding the document.
+					newCursor.FeedItems[feedURL][itemID] = resolved.fingerprint
+					if !resolved.articleFailed {
+						newCursor.FeedSignals[feedURL][itemID] = feedSig
+					}
+					skipped++
+					continue
+				case resolved.articleFailed:
+					// A transient article failure must not replace the stored
+					// full text with the feed summary: keep the legacy cursor
+					// and retry on the next sync.
+					newCursor.FeedItems[feedURL][itemID] = prevItems[itemID]
+					skipped++
+					continue
+				}
+			}
 			newCursor.FeedItems[feedURL][itemID] = resolved.fingerprint
 			// Keep fallback deduplication, but retry failed full-text extraction on
 			// the next sync even when the feed entry itself has not changed.
@@ -337,7 +359,7 @@ func (c *Connector) resolveItem(
 	}
 
 	return resolvedFeedItem{
-		fingerprint:   contentFingerprint(content),
+		fingerprint:   itemFingerprint(title, item.Link, content),
 		articleFailed: articleFailed,
 		item: types.FetchedItem{
 			ExternalID:       itemExternalID(feedURL, itemID),

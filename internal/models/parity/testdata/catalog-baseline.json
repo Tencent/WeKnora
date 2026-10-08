@@ -255,6 +255,8 @@
   "openrouter/KnowledgeQA/x-ai/grok-4.6": "b43bad43581cfc02bb2f7c8e56fbfea372edf6e4e6b1a34d15442efab0a0b0f4",
   "openrouter/KnowledgeQA/z-ai/glm-5.3": "d629d890b3e68a3e95a37d320390c60fe44019ff3bd80f9bb4bd897edcfa425c",
   "openrouter/Rerank/cohere/rerank-v3.5": "35f701fdcf196b6de1e71dc677dd3cdecf1a2a9b4fd71f08f2fb5cbc78601fc5",
+  "pinecone/Rerank/bge-reranker-v2-m3": "b7e3f9e779e7aaf8176a248cdc02f839e1fb0e224e0b99f8571c4522d5a04b45",
+  "pinecone/Rerank/pinecone-rerank-v0": "4edec140b7fb93c950ca8d6f8482e05f412b919e5269889d0919b60af6928835",
   "qianfan/Embedding/bge-large-zh": "121f5c8566989713874cba0044039f9e02cf53fe23db739709e122459b9a3fda",
   "qianfan/Embedding/embedding-v1": "cc6b2807cbedb3422ba1982e04cae952c7ddffbba2685e4b53f90774d56aeab0",
   "qianfan/Embedding/tao-8k": "af316a1f4b9f96f93088f52a3e7e4292b6e30b5aa6f49243830890f4f4043058",

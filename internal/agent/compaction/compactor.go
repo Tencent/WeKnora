@@ -315,6 +315,8 @@ func validateSummary(content, finishReason string) error {
 		return errors.New("empty response from LLM")
 	}
 	switch strings.ToLower(strings.TrimSpace(finishReason)) {
+	case types.FinishReasonIncomplete:
+		return errors.New(types.StreamEndedEarlyError)
 	case "length", "max_tokens", "max_output_tokens":
 		return errors.New("generation hit the token cap and the summary is incomplete")
 	}

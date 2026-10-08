@@ -588,7 +588,7 @@ func isFinalAsynqAttempt(ctx context.Context) bool {
 
 // indexChunks indexes the newly created multimodal chunks into the retrieval engine
 // so they can participate in semantic search, then embeds the image itself
-// when the knowledge base's embedding model takes images.
+// when the knowledge base opted in and its embedding model takes images.
 func (s *ImageMultimodalService) indexChunks(
 	ctx context.Context, payload types.ImageMultimodalPayload, chunks []*types.Chunk,
 	img []byte, out types.JSONMap,
@@ -683,7 +683,7 @@ func (s *ImageMultimodalService) indexChunks(
 	logger.Infof(ctx, "[ImageMultimodal] Indexed %d multimodal chunks for knowledge %s",
 		len(chunks), payload.KnowledgeID)
 
-	if status := s.indexImageVector(ctx, payload, img, chunks, embeddingModel, engine); status != "" {
+	if status := s.indexImageVector(ctx, kb, payload, img, chunks, embeddingModel, engine); status != "" {
 		out["image_vector"] = status
 	}
 }
@@ -691,14 +691,20 @@ func (s *ImageMultimodalService) indexChunks(
 // indexImageVector embeds the image itself with a multimodal embedding model
 // and stores the vector under an image_vector chunk, so a query can find the
 // image by what it shows even where the caption left that out. It returns a
-// short status for the trace, "" when the model takes no images.
+// short status for the trace, "" when the knowledge base has not opted in
+// (ImageProcessingConfig.ImageVectorEnabled) or the model takes no images.
 //
 // The caption and OCR chunks are already indexed, so a failure here only
 // loses the extra recall and never fails the task.
 func (s *ImageMultimodalService) indexImageVector(
-	ctx context.Context, payload types.ImageMultimodalPayload, img []byte, chunks []*types.Chunk,
-	model embedding.Embedder, engine *retriever.CompositeRetrieveEngine,
+	ctx context.Context, kb *types.KnowledgeBase, payload types.ImageMultimodalPayload, img []byte,
+	chunks []*types.Chunk, model embedding.Embedder, engine *retriever.CompositeRetrieveEngine,
 ) string {
+	// Off unless the knowledge base asked for it: a model that takes images
+	// is often chosen for text alone, and this costs a call per image.
+	if !kb.IsImageVectorEnabled() {
+		return ""
+	}
 	imageModel, ok := embedding.AsImageEmbedder(model)
 	if !ok {
 		return ""

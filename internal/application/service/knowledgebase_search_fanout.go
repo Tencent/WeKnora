@@ -59,13 +59,7 @@ func (s *knowledgeBaseService) retrieveFromStores(
 		return nil, nil
 	}
 	if len(groups) == 1 {
-		res, err := groups[0].Engine.Retrieve(ctx, paramsWithTopK(groups[0]))
-		res, err = retainPartialResults(ctx, groups[0], res, err)
-		if err != nil {
-			return nil, err
-		}
-		filterImageHits(res, groups[0])
-		return res, nil
+		return retrieveGroup(ctx, groups[0])
 	}
 
 	timeout := multiStoreRetrieveTimeout()
@@ -82,8 +76,7 @@ func (s *knowledgeBaseService) retrieveFromStores(
 		g.Go(func() error {
 			gcCtx, cancel := context.WithTimeout(gctx, timeout)
 			defer cancel()
-			res, err := grp.Engine.Retrieve(gcCtx, paramsWithTopK(grp))
-			res, err = retainPartialResults(gcCtx, grp, res, err)
+			res, err := retrieveGroup(gcCtx, grp)
 			if err != nil {
 				logger.WarnWithFields(gctx, logger.Fields{
 					"tenant_id":  grp.OwnerTenantID,
@@ -92,7 +85,6 @@ func (s *knowledgeBaseService) retrieveFromStores(
 				}, fmt.Sprintf("multi-store retrieve failed: %v", err))
 				return fmt.Errorf("store group retrieve: %w", err)
 			}
-			filterImageHits(res, grp)
 			mu.Lock()
 			all = append(all, res...)
 			mu.Unlock()
@@ -143,6 +135,22 @@ func (s *knowledgeBaseService) retrieveFromStores(
 	return all, nil
 }
 
+// retrieveGroup runs one group's retrieval and holds its hits to the group's
+// image rules (filterImageHits), refilling the document vector and keyword
+// pools first when image rows it drops took room in them
+// (refillPastDroppedImages).
+func retrieveGroup(ctx context.Context, g *storeGroup) ([]*types.RetrieveResult, error) {
+	params := paramsWithTopK(g)
+	res, err := g.Engine.Retrieve(ctx, params)
+	res, err = retainPartialResults(ctx, g, res, err)
+	if err != nil {
+		return nil, err
+	}
+	refillPastDroppedImages(ctx, g, params, res)
+	filterImageHits(res, g)
+	return res, nil
+}
+
 // retainPartialResults keeps results that arrive together with an error.
 //
 // CompositeRetrieveEngine returns a non-nil error alongside results only when
@@ -188,7 +196,7 @@ func paramsWithTopK(g *storeGroup) []types.RetrieveParams {
 	out := make([]types.RetrieveParams, len(g.BaseParams))
 	for i, p := range g.BaseParams {
 		p.TopK = g.TopK
-		if g.ImageRecall {
+		if g.imageRecall() {
 			p = withImageRecall(p)
 		}
 		out[i] = p

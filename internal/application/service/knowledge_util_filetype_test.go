@@ -1,6 +1,11 @@
 package service
 
-import "testing"
+import (
+	"slices"
+	"testing"
+
+	secutils "github.com/Tencent/WeKnora/internal/utils"
+)
 
 func TestIsValidFileTypeHTML(t *testing.T) {
 	tests := []struct {
@@ -57,8 +62,18 @@ func TestIsSupportedImportExtension(t *testing.T) {
 
 // Direct upload and URL import must agree on the accepted extension set,
 // otherwise #2447 (xlsx accepted on upload, rejected on URL import) regresses.
+// The set is pinned so moving it to internal/utils cannot silently change it.
 func TestImportExtensionSetIsSharedAcrossPaths(t *testing.T) {
-	for ext := range supportedImportFileExtensions {
+	want := []string{
+		"csv", "doc", "docx", "epub", "flac", "gif", "htm", "html", "jpeg", "jpg",
+		"json", "m4a", "markdown", "md", "mhtml", "mp3", "ogg", "pdf", "png", "ppt",
+		"pptx", "txt", "wav", "xls", "xlsx", "xmind",
+	}
+	exts := secutils.SupportedImportExtensions()
+	if !slices.Equal(exts, want) {
+		t.Fatalf("SupportedImportExtensions() = %v, want %v", exts, want)
+	}
+	for _, ext := range exts {
 		if !isValidFileType("file." + ext) {
 			t.Errorf("isValidFileType rejects supported extension %q", ext)
 		}

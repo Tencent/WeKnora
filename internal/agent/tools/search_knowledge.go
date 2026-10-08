@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"regexp"
@@ -31,6 +32,11 @@ const (
 	searchKnowledgeDefaultLimit = 10
 	searchKnowledgeMaxLimit     = 30
 )
+
+// errSearchPanicked reports a retrieval adapter that panicked. The barrier
+// logs the stack and the knowledge base is reported as failed, exactly like a
+// search that returned an error; the panic value itself is never surfaced.
+var errSearchPanicked = errors.New("knowledge base search failed with an internal error")
 
 var searchKnowledgeTool = BaseTool{
 	name: ToolSearchKnowledge,
@@ -664,6 +670,16 @@ func (t *SearchKnowledgeTool) concurrentSearchByTargets(
 		wg.Add(1)
 		go func(modelKey string, targets []*types.SearchTarget) {
 			defer wg.Done()
+			// The embedding adapter runs here, before any target is searched: a
+			// panic from it is contained and every target still pending in the
+			// group is reported as failed instead of ending the process.
+			defer RecoverGoroutine(ctx, "search knowledge embedding group", func() {
+				ids := make([]string, 0, len(targets))
+				for _, st := range targets {
+					ids = append(ids, st.KnowledgeBaseID)
+				}
+				fail(ids, errSearchPanicked)
+			})
 
 			needsEmbedding := false
 			for _, st := range targets {
@@ -728,6 +744,9 @@ func (t *SearchKnowledgeTool) concurrentSearchByTargets(
 				innerWg.Add(1)
 				go func(usedMode string, fullKBIDs []string) {
 					defer innerWg.Done()
+					defer RecoverGoroutine(ctx, "search knowledge combined retrieval", func() {
+						fail(fullKBIDs, errSearchPanicked)
+					})
 					attempt()
 					kbResults, err := t.knowledgeBaseService.HybridSearch(ctx, fullKBIDs[0], types.SearchParams{
 						QueryText:            query,
@@ -759,6 +778,9 @@ func (t *SearchKnowledgeTool) concurrentSearchByTargets(
 				innerWg.Add(1)
 				go func() {
 					defer innerWg.Done()
+					defer RecoverGoroutine(ctx, "search knowledge retrieval", func() {
+						fail([]string{st.KnowledgeBaseID}, errSearchPanicked)
+					})
 					attempt()
 					usedMode, _ := groupModeFor(st.KnowledgeBaseID)
 					stVectorThreshold, stKeywordThreshold := st.RecallThresholds(vectorThreshold, keywordThreshold)
