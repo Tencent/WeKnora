@@ -158,12 +158,22 @@ def _picture_sources(pptx_bytes: bytes) -> dict[str, deque[tuple[str, bytes] | N
             # part name. Names may repeat across slides or normalize equally.
             placeholder = re.sub(r"\W", "", shape.name) + ".jpg"
             source = None
-            relationship = shape._element.blipFill.blip.rEmbed
-            if relationship:
-                part = shape.part.related_part(relationship)
-                # Read the part directly: shape.image.content_type can require
-                # a decoder for the same vector format that triggered fallback.
-                source = (str(part.partname), part.blob)
+            try:
+                blip = shape._element.blipFill.blip
+                relationship = blip.rEmbed if blip is not None else None
+                if relationship:
+                    part = shape.part.related_part(relationship)
+                    # Read the part directly: shape.image.content_type can
+                    # require a decoder for the same vector format that
+                    # triggered fallback.
+                    source = (str(part.partname), part.blob)
+            except (AttributeError, KeyError, ValueError) as exc:
+                # A missing blip, a dangling or external r:embed, or a media
+                # part dropped at load time must only lose this picture, not
+                # the whole document. None keeps the queue position.
+                logger.warning(
+                    "Skipping unresolvable pptx picture %s: %s", shape.name, exc
+                )
             sources.setdefault(placeholder, deque()).append(source)
 
     presentation = Presentation(io.BytesIO(pptx_bytes))

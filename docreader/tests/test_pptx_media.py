@@ -15,7 +15,7 @@ from pptx.oxml.ns import qn
 from pptx.util import Inches
 
 from docreader.parser import pptx_media
-from docreader.parser.markitdown_parser import MarkitdownParser
+from docreader.parser.markitdown_parser import MarkitdownParser, StdMarkitdownParser
 
 RED = (220, 30, 40)
 BLUE = (30, 80, 220)
@@ -192,6 +192,77 @@ class TestPptxMediaAssociation(unittest.TestCase):
         )
         self.assertTrue(markdown.startswith(prefix))
         self.assertEqual(image_colors(markdown, images)[-1], RED)
+
+
+def deck_with_broken_picture(mutate):
+    """One slide: text, a good RED picture, then a BLUE picture `mutate` breaks."""
+    presentation = Presentation()
+    slide = presentation.slides.add_slide(presentation.slide_layouts[6])
+    textbox = slide.shapes.add_textbox(Inches(1), Inches(0.1), Inches(4), Inches(0.5))
+    textbox.text_frame.text = "SLIDE TEXT OK"
+    good = slide.shapes.add_picture(io.BytesIO(png(RED)), Inches(1), Inches(1))
+    good.name = "good"
+    bad = slide.shapes.add_picture(io.BytesIO(png(BLUE)), Inches(1), Inches(3))
+    bad.name = "bad"
+    media = mutate(slide, bad)
+    output = io.BytesIO()
+    presentation.save(output)
+    data = output.getvalue()
+    if media is None:
+        return data
+    # Drop the picture's media part from the package: python-pptx then drops
+    # the relationship at load time while the slide XML still points at it.
+    with zipfile.ZipFile(io.BytesIO(data)) as archive:
+        files = {name: archive.read(name) for name in archive.namelist()}
+    del files[media]
+    output = io.BytesIO()
+    with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as archive:
+        for name, blob in files.items():
+            archive.writestr(name, blob)
+    return output.getvalue()
+
+
+def remove_blip(slide, picture):
+    blip = picture._element.blipFill.blip
+    blip.getparent().remove(blip)
+
+
+def dangling_embed(slide, picture):
+    picture._element.blipFill.blip.set(qn("r:embed"), "rId999")
+
+
+def external_embed(slide, picture):
+    relationship = slide.part.relate_to(
+        "https://example.invalid/external.png",
+        RELATIONSHIP_TYPE.IMAGE,
+        is_external=True,
+    )
+    picture._element.blipFill.blip.set(qn("r:embed"), relationship)
+
+
+def missing_media_part(slide, picture):
+    part = slide.part.related_part(picture._element.blipFill.blip.rEmbed)
+    return str(part.partname).lstrip("/")
+
+
+class TestPptxMediaBrokenPictureRelationships(unittest.TestCase):
+    def test_broken_picture_keeps_the_document_and_other_pictures(self):
+        for mutate in (remove_blip, dangling_embed, external_embed, missing_media_part):
+            with self.subTest(mutate.__name__):
+                data = deck_with_broken_picture(mutate)
+                document = StdMarkitdownParser(
+                    file_name="deck.pptx", file_type="pptx"
+                ).parse_into_text(data)
+                self.assertIn("SLIDE TEXT OK", document.content)
+                self.assertEqual(
+                    image_colors(document.content, document.images), [RED, None]
+                )
+                self.assertIn("(bad.jpg)", document.content)
+
+                parsed = MarkitdownParser(
+                    file_name="deck.pptx", file_type="pptx"
+                ).parse(data)
+                self.assertIn("SLIDE TEXT OK", parsed.content)
 
 
 class TestPptxMediaRealFallback(unittest.TestCase):
