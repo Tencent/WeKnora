@@ -188,7 +188,7 @@ func paramsWithTopK(g *storeGroup) []types.RetrieveParams {
 	out := make([]types.RetrieveParams, len(g.BaseParams))
 	for i, p := range g.BaseParams {
 		p.TopK = g.TopK
-		if g.ImageRecall {
+		if g.imageRecall() {
 			p = withImageRecall(p)
 		}
 		out[i] = p

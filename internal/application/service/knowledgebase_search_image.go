@@ -29,6 +29,49 @@ func imageThreshold(textThreshold float64) float64 {
 	return min(textThreshold, imageVectorThreshold)
 }
 
+// applyImageRecall marks, on each store group, the KBs whose image vectors
+// this search recalls. A KB takes part only when it opted in
+// (KnowledgeBase.IsImageVectorEnabled) and the search's embedding model
+// embeds images; a model that merely could is not enough, since one that
+// takes images is often chosen for text alone. Groups left without such a
+// KB search exactly as text-only ones and drop any image row they meet.
+func (s *knowledgeBaseService) applyImageRecall(ctx context.Context,
+	kbs []*types.KnowledgeBase, groups []*storeGroup, params types.SearchParams,
+) {
+	if params.DisableVectorMatch {
+		return
+	}
+	optedIn := make(map[string]struct{})
+	var modelKB *types.KnowledgeBase
+	for _, kb := range kbs {
+		if kb.IsImageVectorEnabled() && kb.EmbeddingModelID != "" {
+			optedIn[kb.ID] = struct{}{}
+			if modelKB == nil {
+				modelKB = kb
+			}
+		}
+	}
+	// Ask about the model only when some KB wants images; the vector KBs of
+	// a search share one model (validateSameEmbeddingModel).
+	if modelKB == nil || !s.embeddingTakesImages(ctx, modelKB) {
+		return
+	}
+	for _, g := range groups {
+		for _, id := range g.KBIDs {
+			if _, ok := optedIn[id]; !ok {
+				continue
+			}
+			if g.ImageKBIDs == nil {
+				g.ImageKBIDs = make(map[string]struct{})
+			}
+			g.ImageKBIDs[id] = struct{}{}
+		}
+		if g.imageRecall() {
+			g.VectorThreshold = params.VectorThreshold
+		}
+	}
+}
+
 // embeddingTakesImages reports whether kb's embedding model embeds images,
 // which is what puts image vectors in its index.
 func (s *knowledgeBaseService) embeddingTakesImages(ctx context.Context, kb *types.KnowledgeBase) bool {
@@ -69,7 +112,9 @@ func withImageRecall(p types.RetrieveParams) types.RetrieveParams {
 //
 // Keyword hits on image rows are dropped whatever the group: the row's
 // Content is the caption, whose own chunk is already keyword-indexed, so a
-// match there would count the same text twice.
+// match there would count the same text twice. Vector hits on image rows
+// are kept only for KBs that recall images; a KB that indexed images while
+// opted in and has since opted out gets none back.
 func filterImageHits(results []*types.RetrieveResult, g *storeGroup) {
 	for _, rr := range results {
 		if rr == nil {
@@ -96,11 +141,12 @@ func keepHit(hit *types.IndexWithScore, retriever types.RetrieverType, g *storeG
 	case types.KeywordsRetrieverType:
 		return !image
 	case types.VectorRetrieverType:
-		if !g.ImageRecall {
-			return true
-		}
 		if image {
-			return hit.Score >= imageThreshold(g.VectorThreshold)
+			_, recalled := g.ImageKBIDs[hit.KnowledgeBaseID]
+			return recalled && hit.Score >= imageThreshold(g.VectorThreshold)
+		}
+		if !g.imageRecall() {
+			return true
 		}
 		return hit.Score >= g.VectorThreshold
 	}
