@@ -1,5 +1,5 @@
 .mobile-app-header { display: none; }
-.mobile-icon-button { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; flex-shrink: 0; border: 0; border-radius: var(--app-radius-md); color: var(--td-text-color-primary); background: transparent; cursor: pointer; }
+@media (max-width: 767px) { .mobile-icon-button { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; flex-shrink: 0; border: 0; border-radius: var(--app-radius-md); color: var(--td-text-color-primary); background: transparent; cursor: pointer; } }
 @media (max-width: 767px) { :root body .main { min-width: 0; flex-direction: column; height: var(--app-viewport-height, 100dvh); } }
 @media (max-width: 767px) {
 :root body .mobile-app-header { display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; min-height: 52px; padding: env(safe-area-inset-top) 8px 0; border-bottom: 1px solid var(--td-component-stroke); background: var(--td-bg-color-container); }
