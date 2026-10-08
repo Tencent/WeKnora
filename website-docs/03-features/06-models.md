@@ -210,6 +210,12 @@
 | `accepts_truncate_prompt_tokens` | bool | false | 服务是否支持 vLLM 的 `truncate_prompt_tokens` |
 | `request_timeout_seconds` | int | 0（默认 60 秒） | 单次请求超时（秒）；超时按调用失败处理，检索回退为召回顺序 |
 | `extra_body` | object | 空 | 附加到每次请求的字段 |
+| `image_field` | string | 空 | 仅 `cohere-rerank`：图片文档对象的键名（Jina 为 `image`）。留空表示该端点只收文本。NIM 协议的图片段落格式由协议固定，不需要填 |
+| `max_image_batch_size` | int | 1 | 单次请求的最大图片数；图片与文本分开请求，超出自动分批 |
+| `max_image_bytes` | int | 0（不限） | 单张图片的字节上限，超出的图片直接拒绝、不发请求 |
+| `image_mime_types` | array | 空（不限） | 厂商接受的图片格式 |
+
+只有模型能力 `input` 含 `image` 的重排模型（目录里是 `jina-reranker-m0` 与 `nvidia/llama-nemotron-rerank-vl-1b-v2`）会收到图片文档。
 
 **语音识别模型**
 

@@ -212,8 +212,16 @@ func newReranker(config *RerankerConfig) (Reranker, error) {
 		return nil, err
 	}
 
+	// Images need both halves: the catalog saying the model scores them, and
+	// a protocol that can carry one to this vendor.
+	var images api.ImageReranker
+	if ir, ok := client.(api.ImageReranker); ok && ir.AcceptsImages() && resolved.Spec.AcceptsImages() {
+		images = ir
+	}
+
 	return &protocolReranker{
 		inner:     client,
+		images:    images,
 		settings:  resolved.Rerank,
 		endpoint:  resolved.BaseURL,
 		modelName: config.ModelName,

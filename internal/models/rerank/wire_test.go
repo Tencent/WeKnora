@@ -2,6 +2,7 @@ package rerank
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -72,7 +73,13 @@ func texts(v any) []string {
 		case string:
 			out = append(out, d)
 		case map[string]any: // NIM passages, Volcengine datas
-			if text, ok := d["text"].(string); ok {
+			if image, ok := d["image"].(string); ok {
+				// An image scores by its decoded size, so a test can tell
+				// which image a score belongs to.
+				_, encoded, _ := strings.Cut(image, ";base64,")
+				raw, _ := base64.StdEncoding.DecodeString(encoded)
+				out = append(out, strings.Repeat("i", len(raw)))
+			} else if text, ok := d["text"].(string); ok {
 				out = append(out, text)
 			} else {
 				out = append(out, d["content"].(string))

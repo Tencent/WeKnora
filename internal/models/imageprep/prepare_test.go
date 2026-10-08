@@ -1,4 +1,4 @@
-package embedding
+package imageprep
 
 import (
 	"bytes"
@@ -42,7 +42,7 @@ func noise() func(x, y int) color.Color {
 
 func TestPrepareImagePassesThroughWhatTheModelTakes(t *testing.T) {
 	data := encoded(t, 8, 8, pngEncode, noise())
-	img, err := PrepareImage(data, ImageLimits{MaxBytes: 1 << 20, MIMETypes: []string{"image/png"}})
+	img, err := Prepare(data, Limits{MaxBytes: 1 << 20, MIMETypes: []string{"image/png"}})
 	require.NoError(t, err)
 	assert.Equal(t, "image/png", img.MIMEType)
 	assert.Equal(t, data, img.Data, "an acceptable image is sent untouched")
@@ -50,13 +50,13 @@ func TestPrepareImagePassesThroughWhatTheModelTakes(t *testing.T) {
 
 func TestPrepareImageConvertsAFormatTheModelDoesNotTake(t *testing.T) {
 	data := encoded(t, 8, 8, gifEncode, noise())
-	img, err := PrepareImage(data, ImageLimits{MIMETypes: []string{"image/png", "image/jpeg"}})
+	img, err := Prepare(data, Limits{MIMETypes: []string{"image/png", "image/jpeg"}})
 	require.NoError(t, err)
 	assert.Equal(t, "image/jpeg", img.MIMEType)
 	_, err = jpeg.Decode(bytes.NewReader(img.Data))
 	assert.NoError(t, err)
 
-	img, err = PrepareImage(data, ImageLimits{MIMETypes: []string{"image/png"}})
+	img, err = Prepare(data, Limits{MIMETypes: []string{"image/png"}})
 	require.NoError(t, err)
 	assert.Equal(t, "image/png", img.MIMEType, "PNG when the model takes no JPEG")
 }
@@ -64,7 +64,7 @@ func TestPrepareImageConvertsAFormatTheModelDoesNotTake(t *testing.T) {
 func TestPrepareImageShrinksUntilItFits(t *testing.T) {
 	data := encoded(t, 600, 600, pngEncode, noise())
 	limit := len(data) / 10
-	img, err := PrepareImage(data, ImageLimits{MaxBytes: limit})
+	img, err := Prepare(data, Limits{MaxBytes: limit})
 	require.NoError(t, err)
 	assert.LessOrEqual(t, len(img.Data), limit)
 	cfg, err := jpeg.DecodeConfig(bytes.NewReader(img.Data))
@@ -72,13 +72,13 @@ func TestPrepareImageShrinksUntilItFits(t *testing.T) {
 	assert.Less(t, cfg.Width, 600)
 	assert.Equal(t, cfg.Width, cfg.Height, "the aspect ratio is kept")
 
-	_, err = PrepareImage(data, ImageLimits{MaxBytes: 100})
+	_, err = Prepare(data, Limits{MaxBytes: 100})
 	assert.ErrorContains(t, err, "does not fit")
 }
 
 func TestPrepareImageFlattensTransparencyOntoWhite(t *testing.T) {
 	data := encoded(t, 8, 8, pngEncode, func(int, int) color.Color { return color.Transparent })
-	img, err := PrepareImage(data, ImageLimits{MIMETypes: []string{"image/jpeg"}})
+	img, err := Prepare(data, Limits{MIMETypes: []string{"image/jpeg"}})
 	require.NoError(t, err)
 	decoded, err := jpeg.Decode(bytes.NewReader(img.Data))
 	require.NoError(t, err)
@@ -89,8 +89,8 @@ func TestPrepareImageFlattensTransparencyOntoWhite(t *testing.T) {
 }
 
 func TestPrepareImageRejectsWhatIsNotAnImage(t *testing.T) {
-	_, err := PrepareImage([]byte("<svg xmlns='http://www.w3.org/2000/svg'/>"), ImageLimits{})
+	_, err := Prepare([]byte("<svg xmlns='http://www.w3.org/2000/svg'/>"), Limits{})
 	assert.ErrorContains(t, err, "not an image")
-	_, err = PrepareImage(nil, ImageLimits{})
+	_, err = Prepare(nil, Limits{})
 	assert.ErrorContains(t, err, "empty")
 }

@@ -15,6 +15,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/embedding"
+	"github.com/Tencent/WeKnora/internal/models/imageprep"
 	"github.com/Tencent/WeKnora/internal/models/utils/ollama"
 	"github.com/Tencent/WeKnora/internal/models/vlm"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
@@ -724,7 +725,7 @@ func (s *ImageMultimodalService) indexImageVector(
 		return "skipped: no caption or OCR text"
 	}
 
-	prepared, err := embedding.PrepareImage(img, imageModel.ImageLimits())
+	prepared, err := imageprep.Prepare(img, imageModel.ImageLimits())
 	if err != nil {
 		logger.Warnf(ctx, "[ImageMultimodal] Image %s not embeddable: %v", payload.ImageURL, err)
 		return "failed: " + err.Error()
