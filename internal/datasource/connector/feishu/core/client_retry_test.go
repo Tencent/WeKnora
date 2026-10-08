@@ -156,21 +156,31 @@ func TestDownloadRawBytes_4xxNotRetried(t *testing.T) {
 	}
 }
 
-func TestParseRetryAfter(t *testing.T) {
-	fallback := 5 * time.Second
+func TestFeishuRateLimitWait(t *testing.T) {
+	now := time.Now().Truncate(time.Second)
 	tests := []struct {
-		header string
-		want   time.Duration
+		reset string
+		retry string
+		want  time.Duration
 	}{
-		{"", fallback},
-		{"0", 100 * time.Millisecond},
-		{"-1", 100 * time.Millisecond}, // negative coerced to a short delay
-		{"3", 3 * time.Second},
-		{"abc", fallback}, // unparseable
+		{"", "", time.Minute},
+		{"", "0", 100 * time.Millisecond},
+		{"", "-1", 100 * time.Millisecond},
+		{"3", "", 3 * time.Second},
+		{"3", "5", 5 * time.Second},
+		{"5", "3", 5 * time.Second},
+		{"abc", "2", 2 * time.Second},
+		{"", now.Add(4 * time.Second).UTC().Format(http.TimeFormat), 4 * time.Second},
+		{"NaN", "Inf", time.Minute},
+		{"1e30", "abc", time.Minute},
 	}
+	t.Setenv("FEISHU_RATE_LIMIT_RETRY_WAIT", "")
 	for _, tt := range tests {
-		if got := parseRetryAfter(tt.header, fallback); got != tt.want {
-			t.Errorf("parseRetryAfter(%q) = %v, want %v", tt.header, got, tt.want)
+		headers := http.Header{}
+		headers.Set("x-ogw-ratelimit-reset", tt.reset)
+		headers.Set("Retry-After", tt.retry)
+		if got := feishuRateLimitWait(headers, now); got != tt.want {
+			t.Errorf("wait(reset=%q, retry=%q) = %v, want %v", tt.reset, tt.retry, got, tt.want)
 		}
 	}
 }
@@ -252,7 +262,9 @@ func (t countingTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 // small bound and never copied whole into the returned error.
 func TestDownloadRawBytes_BoundsErrorBodies(t *testing.T) {
 	const bodySize = 1 << 20
-	for _, status := range []int{http.StatusTooManyRequests, http.StatusInternalServerError, http.StatusForbidden} {
+	for _, status := range []int{
+		http.StatusTooManyRequests, http.StatusBadRequest, http.StatusInternalServerError, http.StatusForbidden,
+	} {
 		t.Run(http.StatusText(status), func(t *testing.T) {
 			handler := func(w http.ResponseWriter, _ *http.Request) {
 				if status == http.StatusTooManyRequests {
