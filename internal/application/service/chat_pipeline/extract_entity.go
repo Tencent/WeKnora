@@ -154,11 +154,14 @@ func (p *PluginExtractEntity) OnEvent(ctx context.Context,
 // Graph extraction can return many nodes and relations; 4096 tokens can truncate the JSON payload.
 const entityExtractionMaxTokens = 8192
 
-// errModelDeclined marks an LLM response that is prose rather than the
+// ErrModelDeclined marks an LLM response that is prose rather than the
 // requested structured output — typically a refusal for chunks that carry
 // no extractable entities (table-of-contents pages, prompts with no content).
-// Retrying the same input cannot change the outcome (issue #3600).
-var errModelDeclined = errors.New("model output is prose, not extractable structured content")
+// Retrying the same input cannot change the outcome (issue #3600), so the
+// async chunk-extraction task treats it as a skip. Other callers (the
+// /initialization "try extract" endpoint, query-side entity extraction)
+// keep reporting it as a failure.
+var ErrModelDeclined = errors.New("model output is prose, not extractable structured content")
 
 // previewDeclinedText truncates the model's prose for compact error logs.
 func previewDeclinedText(s string) string {
@@ -211,6 +214,13 @@ func (e *Extractor) Extract(ctx context.Context, content string) (*types.GraphDa
 
 	graph, err := e.formater.ParseGraph(ctx, chatResponse.Content)
 	if err != nil {
+		if errors.Is(err, ErrModelDeclined) && chatResponse.FinishReason == "length" {
+			// The output budget ran out before any JSON was written (e.g. the
+			// model spent it on prose "Step 1/Step 2" reasoning). That is
+			// truncation, not a refusal: keep it retriable. %v drops the
+			// ErrModelDeclined wrap on purpose.
+			err = fmt.Errorf("graph extraction truncated before JSON (finish_reason=length): %v", err)
+		}
 		logger.Errorf(ctx, "failed to parse graph: %v", err)
 		return nil, err
 	}
@@ -416,7 +426,7 @@ func (f *Formater) parseOutput(ctx context.Context, text string) ([]map[string]i
 		// same input can never succeed, so callers treat it as a terminal
 		// skip instead of a retriable failure (issue #3600).
 		if !strings.ContainsAny(content, "{[") {
-			return nil, fmt.Errorf("%w: %s", errModelDeclined, previewDeclinedText(content))
+			return nil, fmt.Errorf("%w: %s", ErrModelDeclined, previewDeclinedText(content))
 		}
 		return nil, fmt.Errorf("failed to parse %s content: %s", strings.ToUpper(string(f.formatType)), err.Error())
 	}
@@ -447,15 +457,8 @@ func (f *Formater) parseOutput(ctx context.Context, text string) ([]map[string]i
 func (f *Formater) ParseGraph(ctx context.Context, text string) (*types.GraphData, error) {
 	matchData, err := f.parseOutput(ctx, text)
 	if err != nil {
-		// A prose refusal means the chunk carries nothing extractable —
-		// e.g. a table-of-contents page. Return an empty graph instead of
-		// an error so the per-chunk task completes
-		// successfully and asynq does not replay a doomed LLM call
-		// (issue #3600). Malformed/truncated JSON still fails normally.
-		if errors.Is(err, errModelDeclined) {
-			logger.Warnf(ctx, "graph extraction skipped, model declined: %v", err)
-			return &types.GraphData{}, nil
-		}
+		// A prose refusal comes back wrapped in ErrModelDeclined; the caller
+		// decides whether that is a skip (async chunk task) or a failure.
 		return nil, err
 	}
 	if len(matchData) == 0 {

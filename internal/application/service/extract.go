@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -353,6 +354,14 @@ func (s *ChunkExtractService) Handle(ctx context.Context, t *asynq.Task) error {
 	}
 	extractor := chatpipeline.NewExtractor(chatModel, template)
 	graph, err := extractor.Extract(ctx, chunk.Content)
+	if errors.Is(err, chatpipeline.ErrModelDeclined) {
+		// The model answered in prose (e.g. declined a table-of-contents
+		// chunk). Replaying the same input cannot help, so finish the task
+		// instead of letting asynq retry it (issue #3600).
+		logger.Warnf(ctx, "graph extraction skipped for chunk %s: %v", p.ChunkID, err)
+		graphOut["skipped"] = "model_declined"
+		return nil
+	}
 	if err != nil {
 		handleErr = err
 		return err

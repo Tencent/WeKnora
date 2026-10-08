@@ -2,8 +2,12 @@ package chatpipeline
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
+
+	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/types"
 )
 
 // TestFormater_ParseGraph_FenceVariants exercises the JSON parsing path used
@@ -25,7 +29,10 @@ func TestFormater_ParseGraph_FenceVariants(t *testing.T) {
 		wantRels    int
 		wantErr     bool
 		errContains string
-		wantSkipped bool
+		// wantDeclined: ParseGraph fails with ErrModelDeclined (prose, no
+		// JSON). The async chunk task turns that into a skip (#3600); other
+		// callers keep reporting it as a failure.
+		wantDeclined bool
 	}{
 		{
 			name:      "wrapped in ```json fence",
@@ -101,31 +108,26 @@ func TestFormater_ParseGraph_FenceVariants(t *testing.T) {
 		},
 		{
 			// Fenced body with no JSON structure at all ({ or [) is a prose
-			// refusal dressed in a fence — skip, not a retriable error (#3600).
-			name:        "fenced but body has no JSON structure",
-			input:       "```json\nnot json at all\n```",
-			wantNodes:   0,
-			wantRels:    0,
-			wantSkipped: true,
+			// refusal dressed in a fence (#3600).
+			name:         "fenced but body has no JSON structure",
+			input:        "```json\nnot json at all\n```",
+			wantErr:      true,
+			wantDeclined: true,
 		},
 		{
 			// Issue #3600: a prose refusal carries no JSON structure at all.
-			// It must complete as an empty graph (a skip), not an error —
-			// retrying the same chunk can never succeed.
-			name:        "prose refusal with no JSON structure is a skip, not an error",
-			input:       "Sorry, I cannot extract a graph from this text.",
-			wantNodes:   0,
-			wantRels:    0,
-			wantSkipped: true,
+			name:         "prose refusal with no JSON structure is declined",
+			input:        "Sorry, I cannot extract a graph from this text.",
+			wantErr:      true,
+			wantDeclined: true,
 		},
 		{
 			// Issue #3600: Chinese refusal ("抱歉…") — its UTF-8 bytes show up
 			// in json errors as `invalid character 'æ'`.
-			name:        "Chinese prose refusal is a skip, not an error",
-			input:       "抱歉，该文本为目录页，没有可抽取的实体和关系。",
-			wantNodes:   0,
-			wantRels:    0,
-			wantSkipped: true,
+			name:         "Chinese prose refusal is declined",
+			input:        "抱歉，该文本为目录页，没有可抽取的实体和关系。",
+			wantErr:      true,
+			wantDeclined: true,
 		},
 		{
 			// Truncated JSON (braces present) remains a real, retriable failure.
@@ -149,6 +151,9 @@ func TestFormater_ParseGraph_FenceVariants(t *testing.T) {
 				if tc.errContains != "" && !strings.Contains(err.Error(), tc.errContains) {
 					t.Fatalf("error %q does not contain %q", err.Error(), tc.errContains)
 				}
+				if got := errors.Is(err, ErrModelDeclined); got != tc.wantDeclined {
+					t.Fatalf("errors.Is(err, ErrModelDeclined) = %v, want %v (err=%v)", got, tc.wantDeclined, err)
+				}
 				return
 			}
 			if err != nil {
@@ -156,13 +161,6 @@ func TestFormater_ParseGraph_FenceVariants(t *testing.T) {
 			}
 			if graph == nil {
 				t.Fatalf("expected non-nil graph")
-			}
-			if tc.wantSkipped {
-				// Skip path: a declined extraction completes as an empty
-				// graph, and the error must match errModelDeclined upstream.
-				if len(graph.Node) != 0 || len(graph.Relation) != 0 {
-					t.Fatalf("expected empty graph on skip, got %+v", graph)
-				}
 			}
 			if got := len(graph.Node); got != tc.wantNodes {
 				t.Errorf("nodes: got %d, want %d (graph=%+v)", got, tc.wantNodes, graph)
@@ -297,5 +295,49 @@ func TestNewExtractorUsesGraphOutputBudget(t *testing.T) {
 	extractor := NewExtractor(nil, nil)
 	if got := extractor.chatOpt.MaxTokens; got != 8192 {
 		t.Fatalf("MaxTokens = %d, want 8192", got)
+	}
+}
+
+// fixedChat returns one canned response from Chat.
+type fixedChat struct{ resp *types.ChatResponse }
+
+func (c fixedChat) Chat(context.Context, []chat.Message, *chat.ChatOptions) (*types.ChatResponse, error) {
+	return c.resp, nil
+}
+
+func (c fixedChat) ChatStream(
+	context.Context, []chat.Message, *chat.ChatOptions,
+) (<-chan types.StreamResponse, error) {
+	return nil, errors.New("not implemented")
+}
+func (c fixedChat) GetModelName() string { return "fixed" }
+func (c fixedChat) GetModelID() string   { return "fixed" }
+
+// A prose answer is only a refusal when the model stopped on its own. If the
+// output budget ran out before any JSON was written (finish_reason=length),
+// the same prose is truncation and must stay retriable.
+func TestExtractor_Extract_TruncatedProseIsNotDeclined(t *testing.T) {
+	const prose = "## Step 1: Entity Extraction\n1. Romeo and Juliet is a play"
+	tmpl := &types.PromptTemplateStructured{Description: "extract"}
+
+	cases := []struct {
+		name         string
+		finish       string
+		wantDeclined bool
+	}{
+		{"model stopped: declined", "stop", true},
+		{"output truncated: retriable", "length", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			e := NewExtractor(fixedChat{resp: &types.ChatResponse{Content: prose, FinishReason: tc.finish}}, tmpl)
+			graph, err := e.Extract(context.Background(), "chunk text")
+			if err == nil {
+				t.Fatalf("expected error, got graph %+v", graph)
+			}
+			if got := errors.Is(err, ErrModelDeclined); got != tc.wantDeclined {
+				t.Fatalf("errors.Is(err, ErrModelDeclined) = %v, want %v (err=%v)", got, tc.wantDeclined, err)
+			}
+		})
 	}
 }
