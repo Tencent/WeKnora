@@ -300,7 +300,13 @@ type FAQExportEntry struct {
 
 // FAQEntryPayload 用于创建/更新 FAQ 条目的 payload
 type FAQEntryPayload struct {
-	// ID 可选，用于数据迁移时指定 seq_id（必须小于自增起始值 100000000）
+	// ID 可选，用于数据迁移/导出回灌时指定 seq_id。保留与重分配规则：
+	// 低于 100000000（ChunkSeqIDSequenceStart，PG 序列 chunks_seq_id_seq 的起始值）
+	// 且未被占用 → 原样保留；PG 上 ≥ 100000000 → 重新分配（该区间归数据库序列
+	// 所有，显式写入的值会被后续 nextval 再次发出，撞 chunks.seq_id 唯一索引）；
+	// 已被占用（含只被软删行占用）→ 重新分配。
+	// 重新分配由 PG 序列 / SQLite 的 MAX(seq_id)+1 取号，导入后的 id 可能不等于请求
+	// 的 id，请以实际查询到的 seq_id 为准；重分配条数见 FAQImportProgress.SeqIDRemappedCount。
 	ID                *int64          `json:"id,omitempty"`
 	StandardQuestion  string          `json:"standard_question"    binding:"required"`
 	SimilarQuestions  []string        `json:"similar_questions"`
@@ -442,7 +448,9 @@ type FAQImportProgress struct {
 	MergedCount        int                 `json:"merged_count,omitempty"`         // 合并更新的条目数
 	AddedCount         int                 `json:"added_count,omitempty"`          // 新增的条目数
 
-	// 请求的 seq_id 已被占用（含软删行）而重新分配了 id 的条目数
+	// 请求的 seq_id 未被保留、由导入端重新分配了 id 的条目数：该 id 已被占用
+	// （含只被软删行占用），或在 PG 上 ≥ ChunkSeqIDSequenceStart（序列区间）。
+	// 为 0 时 JSON 里不出现该字段（omitempty）。
 	SeqIDRemappedCount int `json:"seq_id_remapped_count,omitempty"`
 
 	MergeDetails []FAQMergeDetail `json:"merge_details,omitempty"` // 合并详情
@@ -479,7 +487,8 @@ type FAQImportResult struct {
 	MergedCount        int `json:"merged_count"`         // 合并更新的条目数
 	AddedCount         int `json:"added_count"`          // 新增的条目数
 
-	// 请求的 seq_id 已被占用（含软删行）而重新分配了 id 的条目数
+	// 请求的 seq_id 未被保留、由导入端重新分配了 id 的条目数：该 id 已被占用
+	// （含只被软删行占用），或在 PG 上 ≥ ChunkSeqIDSequenceStart（序列区间）。
 	SeqIDRemappedCount int `json:"seq_id_remapped_count"`
 
 	// 导入模式和时间信息

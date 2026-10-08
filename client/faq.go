@@ -38,7 +38,13 @@ type FAQEntry struct {
 
 // FAQEntryPayload is used to create or update a FAQ entry.
 type FAQEntryPayload struct {
-	// ID is optional, used for data migration to specify seq_id (must be less than auto-increment start value 100000000)
+	// ID is optional, used for data migration / export-reimport to specify seq_id.
+	// Preservation rules: an id below 100000000 (the chunks_seq_id_seq start
+	// value) that is not occupied yet is kept as-is; an id >= 100000000 on
+	// PostgreSQL, or one already occupied (including by soft-deleted rows), is
+	// reassigned — on PostgreSQL by the sequence, on SQLite by MAX(seq_id)+1.
+	// The resulting id may therefore differ from the requested one; read the
+	// stored seq_id back, and see seq_id_remapped_count in the import progress.
 	ID                *int64   `json:"id,omitempty"`
 	StandardQuestion  string   `json:"standard_question"`
 	SimilarQuestions  []string `json:"similar_questions,omitempty"`
@@ -401,24 +407,24 @@ type FAQSuccessEntry struct {
 // FAQImportProgress represents the progress of an async FAQ import task.
 // When Status is "completed", the result fields (SkippedCount, ImportMode, ImportedAt, DisplayStatus, ProcessingTime) are populated.
 type FAQImportProgress struct {
-	TaskID           string           `json:"task_id"`
-	KBID             string           `json:"kb_id"`
-	KnowledgeID      string           `json:"knowledge_id"`
-	Status           string           `json:"status"`
-	Progress         int              `json:"progress"`
-	Total            int              `json:"total"`
-	Processed        int              `json:"processed"`
-	SuccessCount     int              `json:"success_count"`
-	FailedCount      int              `json:"failed_count"`
-	SkippedCount     int              `json:"skipped_count,omitempty"`
+	TaskID           string            `json:"task_id"`
+	KBID             string            `json:"kb_id"`
+	KnowledgeID      string            `json:"knowledge_id"`
+	Status           string            `json:"status"`
+	Progress         int               `json:"progress"`
+	Total            int               `json:"total"`
+	Processed        int               `json:"processed"`
+	SuccessCount     int               `json:"success_count"`
+	FailedCount      int               `json:"failed_count"`
+	SkippedCount     int               `json:"skipped_count,omitempty"`
 	FailedEntries    []FAQFailedEntry  `json:"failed_entries,omitempty"`
-	SuccessEntries   []FAQSuccessEntry `json:"success_entries,omitempty"`   // Successfully imported entries (when count is small)
+	SuccessEntries   []FAQSuccessEntry `json:"success_entries,omitempty"`    // Imported entries, small counts only
 	FailedEntriesURL string            `json:"failed_entries_url,omitempty"` // CSV download URL when too many failures
-	Message          string           `json:"message"`
-	Error            string           `json:"error,omitempty"`
-	CreatedAt        int64            `json:"created_at"`
-	UpdatedAt        int64            `json:"updated_at"`
-	DryRun           bool             `json:"dry_run,omitempty"` // Whether this is a dry run validation
+	Message          string            `json:"message"`
+	Error            string            `json:"error,omitempty"`
+	CreatedAt        int64             `json:"created_at"`
+	UpdatedAt        int64             `json:"updated_at"`
+	DryRun           bool              `json:"dry_run,omitempty"` // Whether this is a dry run validation
 
 	// Result fields (populated when Status == "completed")
 	ImportMode     string    `json:"import_mode,omitempty"`
