@@ -265,16 +265,21 @@ type ChunkingConfig struct {
 	ChunkOverlap int `yaml:"chunk_overlap" json:"chunk_overlap"`
 	// Separators
 	Separators []string `yaml:"separators"    json:"separators"`
-	// CustomSeparator marks a pre-chunked document: chunk boundaries were
-	// decided upstream (AI pipeline / engineering tooling) and segments are
-	// joined by this literal marker (e.g. "======" or "<|chunk|>").
-	// When set it takes precedence over every strategy and separator, and
-	// the marker is removed from chunk content so it never reaches
-	// embeddings or RAG output.
+	// CustomSeparator holds the pre-chunked document marker: chunk
+	// boundaries were decided upstream (AI pipeline / engineering tooling)
+	// and segments are joined by this literal marker (e.g. "======" or
+	// "<|chunk|>"). Only honored when Strategy is "custom_separator";
+	// under every other strategy the marker is inert. The marker is
+	// removed from chunk content so it never reaches embeddings or RAG
+	// output.
 	CustomSeparator string `yaml:"custom_separator,omitempty" json:"custom_separator,omitempty"`
-	// CustomSeparatorOnly restricts splitting to CustomSeparator alone:
-	// one marker-delimited segment = one chunk, no other splitting logic
-	// or chunk-size cap applies. Requires CustomSeparator to be set.
+	// CustomSeparatorOnly selects "marker only" mode of the
+	// custom_separator strategy: one marker-delimited segment = one chunk,
+	// no other splitting logic runs. Segments over the size budget
+	// (TokenLimit, or ChunkSize in characters when TokenLimit is 0) are
+	// still split further so the embedding batch layer cannot reject the
+	// document. Requires the custom_separator strategy and a non-empty
+	// CustomSeparator.
 	CustomSeparatorOnly bool `yaml:"custom_separator_only,omitempty" json:"custom_separator_only,omitempty"`
 	// ParserEngineRules configures which parser engine to use for each file type.
 	// When empty, DefaultParserEngine is used (builtin/simple routing, except
@@ -295,10 +300,13 @@ type ChunkingConfig struct {
 	// Strategy selects the adaptive chunking tier. Empty / "legacy" preserves
 	// the historical recursive splitter; "auto" lets a profiler pick between
 	// heading-aware, heuristic and recursive tiers; "heading" / "heuristic" /
-	// "recursive" pin the tier explicitly.
+	// "recursive" pin the tier explicitly; "custom_separator" treats the
+	// document as pre-chunked upstream and splits on CustomSeparator only
+	// (see CustomSeparator / CustomSeparatorOnly).
 	Strategy string `yaml:"strategy,omitempty" json:"strategy,omitempty"`
-	// TokenLimit caps chunk size in approximate tokens. 0 = use ChunkSize
-	// as a character count.
+	// TokenLimit caps chunk size in approximate tokens (a per-language
+	// character heuristic — not an exact model-token guarantee). 0 = use
+	// ChunkSize as a character count.
 	TokenLimit int `yaml:"token_limit,omitempty" json:"token_limit,omitempty"`
 	// Languages hints the heuristic patterns. Empty = auto-detect from content.
 	// Examples: ["de"], ["en", "zh"].

@@ -72,17 +72,26 @@ type SplitterConfig struct {
 	// Languages hints multilingual heuristic patterns. Empty = auto-detect.
 	Languages []string
 
-	// CustomSeparator marks a pre-chunked document: chunks were already
-	// decided upstream (AI pipeline / engineering tooling) and are joined by
-	// this literal marker, e.g. "======" or "<|chunk|>". When set it takes
-	// precedence over every strategy tier and over Separators, and the
-	// marker is stripped from chunk content. See custom_separator.go.
+	// CustomSeparator holds the pre-chunked document marker: chunks were
+	// already decided upstream (AI pipeline / engineering tooling) and are
+	// joined by this literal marker, e.g. "======" or "<|chunk|>". It is
+	// only honored when Strategy is "custom_separator"; under every other
+	// strategy the marker is inert. The marker is stripped from chunk
+	// content. See custom_separator.go.
 	CustomSeparator string
-	// CustomSeparatorOnly restricts splitting to the custom separator
-	// alone: each marker-delimited segment becomes exactly one chunk and
-	// no other splitting logic (or ChunkSize cap) applies. Ignored when
-	// CustomSeparator is empty.
+	// CustomSeparatorOnly selects "marker only" mode of the
+	// custom_separator strategy: each marker-delimited segment becomes one
+	// chunk and no other splitting logic runs — except that segments over
+	// the size budget are still split further (see customSegmentCharBudget)
+	// so the embedding batch layer cannot reject them. Ignored when the
+	// custom_separator strategy is not selected.
 	CustomSeparatorOnly bool
+
+	// EmbeddingCharLimit optionally caps chunk size by the embedding
+	// model's per-input character limit (from the vendor catalog /
+	// models.api settings). 0 = unknown, no additional cap. It only
+	// tightens budgets (marker-only segments today); it never loosens one.
+	EmbeddingCharLimit int
 }
 
 // Default chunk sizing constants. Single source of truth for the entire

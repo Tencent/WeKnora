@@ -3852,7 +3852,7 @@ export default {
         },
         custom: {
           label: 'Custom separator',
-          tooltip: 'For documents whose chunks were decided upstream (AI / engineering pipelines joining chunks with a special marker). Set the marker below: it takes precedence over everything and is stripped from chunk content.'
+          tooltip: 'For documents whose chunks were decided upstream (AI / engineering pipelines joining chunks with a special marker). Select this strategy, set the marker below, and it is stripped from chunk content; segments over the size budget are split further automatically.'
         }
       },
       overlapWarning: 'Overlap is large compared to chunk size — chunks will share most of their content.',

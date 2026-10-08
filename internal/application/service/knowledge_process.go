@@ -3944,7 +3944,7 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 	// Pre-chunked (custom separator) mode bypasses parent-child chunking:
 	// the marker decides every boundary, and flattening mid-pipeline would
 	// store parent chunks with no children, leaving nothing retrievable.
-	if eff.ChunkingConfig.EnableParentChild && eff.ChunkingConfig.CustomSeparator == "" {
+	if eff.ChunkingConfig.EnableParentChild && eff.ChunkingConfig.Strategy != chunker.StrategyCustomSeparator {
 		parentCfg, childCfg := buildParentChildConfigs(eff.ChunkingConfig, chunkCfg)
 		pcResult := chunker.SplitParentChild(convertResult.MarkdownContent, parentCfg, childCfg)
 		chunks = make([]types.ParsedChunk, len(pcResult.Children))

@@ -963,12 +963,12 @@ const chunkingStrategyOptions = computed(() => [
   { label: t('knowledgeEditor.chunking.strategies.heading.label'), value: 'heading' },
   { label: t('knowledgeEditor.chunking.strategies.heuristic.label'), value: 'heuristic' },
   { label: t('knowledgeEditor.chunking.strategies.legacy.label'), value: 'legacy' },
-  { label: t('knowledgeEditor.chunking.strategies.custom.label'), value: 'custom' },
+  { label: t('knowledgeEditor.chunking.strategies.custom.label'), value: 'custom_separator' },
 ])
 
-// UI-only sentinel strategy: "custom" = pre-chunked document mode driven by
-// custom_separator (no backend strategy value exists for it).
-const isCustomChunking = computed(() => uiState.value.chunkingConfig.strategy === 'custom')
+// The "custom_separator" strategy value maps 1:1 to the backend: it selects
+// the pre-chunked document mode driven by custom_separator.
+const isCustomChunking = computed(() => uiState.value.chunkingConfig.strategy === 'custom_separator')
 
 // Selecting the pre-chunked strategy turns parent-child chunking off: the
 // custom marker decides every boundary, a parent/child split would fight it.
@@ -1262,12 +1262,16 @@ function initFromKbInfo(kb: any) {
       parserEngineRules: kb.chunking_config?.parser_engine_rules || undefined,
       // Pre-chunked (custom separator) mode flattens parent-child chunking:
       // the marker decides every boundary, there is no parent/child split.
-      enableParentChild: kb.chunking_config?.custom_separator
-        ? false
-        : (kb.chunking_config?.enable_parent_child ?? false),
+      enableParentChild:
+        kb.chunking_config?.custom_separator || kb.chunking_config?.strategy === 'custom_separator'
+          ? false
+          : (kb.chunking_config?.enable_parent_child ?? false),
       parentChunkSize: kb.chunking_config?.parent_chunk_size || 4096,
       childChunkSize: kb.chunking_config?.child_chunk_size || 384,
-      strategy: kb.chunking_config?.custom_separator ? 'custom' : (kb.chunking_config?.strategy || 'auto'),
+      strategy:
+        kb.chunking_config?.custom_separator && !kb.chunking_config?.strategy
+          ? 'custom_separator'
+          : (kb.chunking_config?.strategy || 'auto'),
       tokenLimit: kb.chunking_config?.token_limit || 0,
       languages: kb.chunking_config?.languages || [],
       customSeparator: kb.chunking_config?.custom_separator || '',
@@ -1326,7 +1330,9 @@ function buildProcessOverrides(): KnowledgeProcessOverrides {
       enable_parent_child: isCustomChunking.value ? false : chunking.enableParentChild,
       parent_chunk_size: chunking.parentChunkSize,
       child_chunk_size: chunking.childChunkSize,
-      strategy: isCustomChunking.value ? '' : (chunking.strategy ?? ''),
+      // Strategy travels verbatim: the backend clears an inherited marker
+      // whenever the upload selects any strategy other than custom_separator.
+      strategy: chunking.strategy ?? '',
       token_limit: chunking.tokenLimit,
       languages: chunking.languages,
       custom_separator: isCustomChunking.value ? (chunking.customSeparator?.trim() || undefined) : undefined,
@@ -1393,8 +1399,8 @@ function applyOverridesToState(o?: KnowledgeProcessOverrides | null) {
     if (cc.child_chunk_size != null) s.chunkingConfig.childChunkSize = cc.child_chunk_size
     if (cc.strategy != null) s.chunkingConfig.strategy = cc.strategy
     if (cc.custom_separator) {
-      // Reflect API-configured pre-chunked mode as the sentinel strategy.
-      s.chunkingConfig.strategy = 'custom'
+      // Reflect API-configured pre-chunked mode as the strategy value.
+      s.chunkingConfig.strategy = 'custom_separator'
       s.chunkingConfig.customSeparator = cc.custom_separator
       if (cc.custom_separator_only != null) s.chunkingConfig.customSeparatorOnly = cc.custom_separator_only
     }

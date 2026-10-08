@@ -4166,6 +4166,11 @@ export default {
       separatorsLabel: '구분자',
       separatorsDescription: '분할 시 우선적으로 사용되는 문자/문자열. 우선순위가 높은 구분자를 먼저 시도; 기본 순서는 단락 → 문장 → 구두점.',
       separatorsPlaceholder: '구분자 선택 또는 사용자 정의',
+      customSeparatorLabel: '사용자 정의 청킹 구분자(사전 분할 문서)',
+      customSeparatorDescription: '상류 AI / 엔지니어링 파이프라인에서 이미 청킹된 문서용입니다. 각 청크는 "======" 또는 "<|chunk|>" 같은 특수 마커로 연결됩니다. "사용자 정의 구분자" 전략을 선택하면 활성화되며, 마커 자체는 청크 본문에서 제거되어 RAG에 영향을 주지 않습니다. "마커만 인식"을 켜면 한 세그먼트 = 한 청크입니다(크기 예산을 초과하는 세그먼트는 임베딩 모델에 맞춰 추가 분할됩니다).',
+      customSeparatorPlaceholder: '사전 분할 마커 입력, 예: ======',
+      customSeparatorOnlyOn: '마커만 인식',
+      customSeparatorOnlyOff: '마커만 인식',
       parentChildLabel: '부모-자식 청킹',
       parentChildDescription: '2단계 청킹: 작은 자식 청크는 벡터 매칭(정확한 히트), 큰 부모 청크는 LLM에 반환(풍부한 컨텍스트). 긴 문서(>10페이지)에 권장; 짧은 FAQ는 비활성화하여 저장 공간 절약.',
       parentChunkSizeLabel: '부모 청크 크기',
@@ -4223,6 +4228,10 @@ export default {
         legacy: {
           label: '길이 기준',
           tooltip: '구조를 무시하고 문자 수와 구분자로만 재귀 분할합니다 — 원래 동작. 위 전략들이 콘텐츠에서 잘못 작동할 때 사용하세요.'
+        },
+        custom: {
+          label: '지정 구분자',
+          tooltip: '청킹이 상류에서 완료된 문서용(AI / 엔지니어링 파이프라인이 특수 마커로 청크를 연결). 이 전략을 선택하고 아래에서 마커를 설정하면 마커는 본문에서 자동으로 제거되며, 크기 예산을 초과하는 세그먼트는 자동으로 추가 분할됩니다.'
         },
         heuristic: {
           label: '구조 인식',

@@ -21,7 +21,21 @@ const (
 	StrategyHeuristic = "heuristic"
 	StrategyRecursive = "recursive"
 	StrategyLegacy    = "legacy"
+	// StrategyCustomSeparator treats the document as pre-chunked upstream:
+	// CustomSeparator holds the literal marker that joins the ready-made
+	// chunks and CustomSeparatorOnly selects marker-only mode. See
+	// custom_separator.go.
+	StrategyCustomSeparator = "custom_separator"
 )
+
+// usesCustomSeparatorStrategy reports whether cfg selects the pre-chunked
+// document path: the strategy value plus a non-blank marker. A marker
+// without the strategy value is inert (except for the legacy migration in
+// ensureDefaults); the strategy without a marker falls through to the
+// ordinary resolver chain.
+func usesCustomSeparatorStrategy(cfg SplitterConfig) bool {
+	return cfg.Strategy == StrategyCustomSeparator && strings.TrimSpace(cfg.CustomSeparator) != ""
+}
 
 // Split chunks text using the strategy configured in cfg. When cfg.Strategy
 // is empty or "auto" the document profiler picks the tier. The function
@@ -36,9 +50,9 @@ func Split(text string, cfg SplitterConfig) []Chunk {
 		return nil
 	}
 	cfg = ensureDefaults(cfg)
-	// A declared custom separator marks a pre-chunked document and takes
-	// precedence over every strategy tier (see custom_separator.go).
-	if hasCustomSeparator(cfg) {
+	// Strategy "custom_separator" marks a pre-chunked document and diverts
+	// to the marker splitter before any tier resolution (custom_separator.go).
+	if usesCustomSeparatorStrategy(cfg) {
 		return SplitByCustomSeparator(text, cfg)
 	}
 	chain, profile := resolveChainWithProfile(text, cfg)
@@ -98,7 +112,7 @@ func SplitWithDiagnostics(text string, cfg SplitterConfig) ([]Chunk, *Diagnostic
 		return nil, diag
 	}
 	cfg = ensureDefaults(cfg)
-	if hasCustomSeparator(cfg) {
+	if usesCustomSeparatorStrategy(cfg) {
 		diag.SelectedTier = TierCustom
 		diag.TierChain = []StrategyTier{TierCustom}
 		return SplitByCustomSeparator(text, cfg), diag
@@ -162,9 +176,9 @@ func splitParentChild(text string, parentCfg, childCfg SplitterConfig, withDiagn
 	// Pre-chunked documents (custom separator) define authoritative chunk
 	// boundaries; parent-child refinement would fight them, so the custom
 	// separator wins and the result is a flat chunk list.
-	if hasCustomSeparator(parentCfg) || hasCustomSeparator(childCfg) {
+	if usesCustomSeparatorStrategy(parentCfg) || usesCustomSeparatorStrategy(childCfg) {
 		cfg := parentCfg
-		if !hasCustomSeparator(cfg) {
+		if !usesCustomSeparatorStrategy(cfg) {
 			cfg = childCfg
 		}
 		var diag *Diagnostics
@@ -222,6 +236,11 @@ func splitParentChild(text string, parentCfg, childCfg SplitterConfig, withDiagn
 // NormalizeSplitterConfig applies the same base splitter defaults used by
 // knowledge ingestion before parent-child derivation or single-pass splitting.
 func NormalizeSplitterConfig(cfg SplitterConfig) SplitterConfig {
+	// Same legacy migration as ensureDefaults: marker without strategy
+	// becomes the custom_separator strategy.
+	if cfg.CustomSeparator != "" && cfg.Strategy == "" {
+		cfg.Strategy = StrategyCustomSeparator
+	}
 	if cfg.ChunkSize <= 0 {
 		cfg.ChunkSize = DefaultChunkSize
 	}
@@ -359,6 +378,12 @@ func runTier(tier StrategyTier, text string, cfg SplitterConfig, profile *DocPro
 // that fits within that token limit (with a 10% safety factor). This makes
 // chunks safe for embedding APIs that have hard token caps.
 func ensureDefaults(cfg SplitterConfig) SplitterConfig {
+	// Legacy migration: configs saved before the "custom_separator" strategy
+	// value existed carry the marker with an empty strategy. Normalize them
+	// onto the strategy so the marker keeps working after the refactor.
+	if cfg.CustomSeparator != "" && cfg.Strategy == "" {
+		cfg.Strategy = StrategyCustomSeparator
+	}
 	if cfg.ChunkSize <= 0 {
 		cfg.ChunkSize = DefaultChunkSize
 	}

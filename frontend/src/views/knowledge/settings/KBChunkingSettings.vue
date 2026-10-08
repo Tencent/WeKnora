@@ -312,7 +312,11 @@ const localSeparators = ref([...props.config.separators])
 const localEnableParentChild = ref(props.config.enableParentChild ?? false)
 const localParentChunkSize = ref(props.config.parentChunkSize || 4096)
 const localChildChunkSize = ref(props.config.childChunkSize || 384)
-const localStrategy = ref(props.config.customSeparator ? 'custom' : (props.config.strategy ?? ''))
+const localStrategy = ref(
+  props.config.customSeparator && !props.config.strategy
+    ? 'custom_separator'
+    : (props.config.strategy ?? '')
+)
 const localTokenLimit = ref(props.config.tokenLimit ?? 0)
 const localLanguages = ref<string[]>([...(props.config.languages ?? [])])
 const localCustomSeparator = ref(props.config.customSeparator ?? '')
@@ -342,15 +346,15 @@ const strategyOptions = computed(() => [
   },
   {
     label: t('knowledgeEditor.chunking.strategies.custom.label'),
-    value: 'custom',
+    value: 'custom_separator',
     tooltip: t('knowledgeEditor.chunking.strategies.custom.tooltip')
   }
 ])
 
-// UI-only sentinel: the "custom" strategy option stands for the pre-chunked
-// document mode driven by custom_separator (the backend has no strategy
-// value for it — the separator itself diverts the splitter).
-const isCustomStrategy = computed(() => localStrategy.value === 'custom')
+// The "custom_separator" strategy value maps 1:1 to the backend: it selects
+// the pre-chunked document mode driven by custom_separator (see
+// internal/infrastructure/chunker/custom_separator.go).
+const isCustomStrategy = computed(() => localStrategy.value === 'custom_separator')
 
 const currentStrategyInfo = computed(() => {
   if (!localStrategy.value) {
@@ -376,7 +380,9 @@ const debugConfig = computed(() => ({
   childChunkSize: localChildChunkSize.value,
   strategy: localStrategy.value,
   tokenLimit: localTokenLimit.value,
-  languages: localLanguages.value
+  languages: localLanguages.value,
+  customSeparator: isCustomStrategy.value ? localCustomSeparator.value.trim() : '',
+  customSeparatorOnly: isCustomStrategy.value && localCustomSeparatorOnly.value
 }))
 
 const languageOptions = computed(() => [
@@ -396,10 +402,10 @@ const separatorOptions = computed(() => [
   { label: t('knowledgeEditor.chunking.separators.space'), value: ' ' }
 ])
 
-// Echo suppression: emitUpdate maps the UI sentinel strategy "custom" to
-// strategy:"" + custom_separator fields, and the parent echoes the merged
-// config right back via the deep watch below — which would otherwise reset
-// localStrategy to "" and instantly collapse the custom-separator form.
+// Echo suppression: emitUpdate sends the strategy verbatim
+// ("custom_separator" included), and the parent echoes the merged config
+// right back via the deep watch below — which would otherwise reset
+// localStrategy and collapse the custom-separator form.
 // The first watch firing after each emit is that echo; skip it.
 let pendingEchoes = 0
 
@@ -414,7 +420,10 @@ watch(() => props.config, (newConfig) => {
   localEnableParentChild.value = newConfig.enableParentChild ?? false
   localParentChunkSize.value = newConfig.parentChunkSize || 4096
   localChildChunkSize.value = newConfig.childChunkSize || 384
-  localStrategy.value = newConfig.customSeparator ? 'custom' : (newConfig.strategy ?? '')
+  localStrategy.value =
+    newConfig.customSeparator && !newConfig.strategy
+      ? 'custom_separator'
+      : (newConfig.strategy ?? '')
   localTokenLimit.value = newConfig.tokenLimit ?? 0
   localLanguages.value = [...(newConfig.languages ?? [])]
   localCustomSeparator.value = newConfig.customSeparator ?? ''
@@ -450,9 +459,9 @@ const emitUpdate = () => {
     enableParentChild: isCustomStrategy.value ? false : localEnableParentChild.value,
     parentChunkSize: localParentChunkSize.value,
     childChunkSize: localChildChunkSize.value,
-    // The "custom" strategy is a UI sentinel: downstream it becomes an empty
-    // strategy plus the custom_separator fields.
-    strategy: isCustomStrategy.value ? '' : localStrategy.value,
+    // The strategy travels verbatim; the backend only honors the marker
+    // fields under strategy "custom_separator".
+    strategy: localStrategy.value,
     tokenLimit: localTokenLimit.value,
     languages: [...localLanguages.value],
     customSeparator: isCustomStrategy.value ? localCustomSeparator.value.trim() : '',

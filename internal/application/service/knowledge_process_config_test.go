@@ -626,3 +626,77 @@ func TestResolveProcessConfig_SummaryEnabled(t *testing.T) {
 		})
 	}
 }
+
+func TestResolveProcessConfig_UploadStrategyDisablesInheritedMarker(t *testing.T) {
+	t.Parallel()
+
+	// KB is configured for pre-chunked documents; an upload that selects a
+	// regular strategy must clear the inherited marker (otherwise the
+	// chunker-side legacy migration would silently re-activate it).
+	kb := &types.KnowledgeBase{
+		ChunkingConfig: types.ChunkingConfig{
+			Strategy:            chunker.StrategyCustomSeparator,
+			CustomSeparator:     "======",
+			CustomSeparatorOnly: true,
+			ChunkSize:           512,
+		},
+	}
+	overrides := &types.KnowledgeProcessOverrides{
+		ChunkingConfig: &types.ChunkingConfig{Strategy: "heading"},
+	}
+	eff := ResolveProcessConfig(kb, overrides)
+	require.Equal(t, "heading", eff.ChunkingConfig.Strategy)
+	require.Empty(t, eff.ChunkingConfig.CustomSeparator)
+	require.False(t, eff.ChunkingConfig.CustomSeparatorOnly)
+}
+
+func TestResolveProcessConfig_UploadReselectsCustomSeparatorStrategy(t *testing.T) {
+	t.Parallel()
+
+	kb := &types.KnowledgeBase{
+		ChunkingConfig: types.ChunkingConfig{
+			Strategy:            chunker.StrategyCustomSeparator,
+			CustomSeparator:     "======",
+			CustomSeparatorOnly: true,
+		},
+	}
+
+	// Re-selecting the strategy without a marker inherits the KB marker and
+	// can steer the mode flag (e.g. switch marker-only off).
+	eff := ResolveProcessConfig(kb, &types.KnowledgeProcessOverrides{
+		ChunkingConfig: &types.ChunkingConfig{Strategy: chunker.StrategyCustomSeparator},
+	})
+	require.Equal(t, "======", eff.ChunkingConfig.CustomSeparator)
+	require.False(t, eff.ChunkingConfig.CustomSeparatorOnly)
+
+	// Providing a marker replaces the inherited one and carries its flag.
+	eff = ResolveProcessConfig(kb, &types.KnowledgeProcessOverrides{
+		ChunkingConfig: &types.ChunkingConfig{
+			Strategy:            chunker.StrategyCustomSeparator,
+			CustomSeparator:     "<|chunk|>",
+			CustomSeparatorOnly: true,
+		},
+	})
+	require.Equal(t, "<|chunk|>", eff.ChunkingConfig.CustomSeparator)
+	require.True(t, eff.ChunkingConfig.CustomSeparatorOnly)
+}
+
+func TestResolveProcessConfig_UploadEnablesMarkerViaStrategy(t *testing.T) {
+	t.Parallel()
+
+	// An upload on a plain KB turns on the pre-chunked mode by selecting the
+	// strategy and providing the marker.
+	kb := &types.KnowledgeBase{
+		ChunkingConfig: types.ChunkingConfig{Strategy: "auto"},
+	}
+	eff := ResolveProcessConfig(kb, &types.KnowledgeProcessOverrides{
+		ChunkingConfig: &types.ChunkingConfig{
+			Strategy:            chunker.StrategyCustomSeparator,
+			CustomSeparator:     "====",
+			CustomSeparatorOnly: true,
+		},
+	})
+	require.Equal(t, chunker.StrategyCustomSeparator, eff.ChunkingConfig.Strategy)
+	require.Equal(t, "====", eff.ChunkingConfig.CustomSeparator)
+	require.True(t, eff.ChunkingConfig.CustomSeparatorOnly)
+}
