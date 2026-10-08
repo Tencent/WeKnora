@@ -319,6 +319,11 @@ async function loadDriveRoot() {
   driveFolderToken.value = token
   form.value.config.resource_ids = [token]
   driveRootLoaded.value = false
+  // The create below has the same contract as the picker's draft: without a
+  // connector type or a knowledge base it is certain to be rejected, and there
+  // is no data source to list the token through. Skipping it keeps the
+  // placeholder instead of sending a request that cannot succeed.
+  if (!tempDsId.value && !canCreateTempDataSource()) return
   loadingResources.value = true
   try {
     if (!tempDsId.value) {
@@ -955,26 +960,73 @@ async function testConnection() {
 }
 
 // --- Load resources ---
-async function loadResources() {
-  loadingResources.value = true
-  try {
-    syncConfluencePublicFieldsToSettings()
-    if (!tempDsId.value) {
+
+// canCreateTempDataSource reports whether the create endpoint could accept a
+// request built from the form as it stands. The endpoint rejects a request
+// without a knowledge base (ErrKnowledgeBaseNotFound) and one whose type is not
+// a registered connector (ErrConnectorNotFound) before the connector is ever
+// reached, so a request missing either is certain to fail and must not be sent.
+// The one thing left that the endpoint checks — the credentials a connector
+// validates against the remote service — can only be answered by making the
+// call, so it is deliberately not pre-empted here.
+function canCreateTempDataSource(): boolean {
+  return (props.kbId || '').trim() !== '' && String(form.value.type || '').trim() !== ''
+}
+
+// ensureTempDataSource returns the data source the picker lists through,
+// creating the paused draft on first use (a data source must exist before the
+// resource endpoint can be called) and keeping it in step with the form while
+// the dialog is still a draft. A single in-flight creation is shared, so two
+// callers cannot create two rows for one dialog.
+let tempDsPromise: Promise<string> | null = null
+async function ensureTempDataSource(): Promise<string> {
+  if (tempDsId.value) {
+    if (!isEdit.value) {
+      await updateDataSource(tempDsId.value, {
+        ...form.value,
+        knowledge_base_id: props.kbId,
+      } as any)
+    }
+    return tempDsId.value
+  }
+  // A form that cannot produce a data source yet has nothing to list through,
+  // so the create is skipped rather than sent: no request, no error, and — this
+  // is the point of returning early — no cached promise, so a later attempt
+  // with a real type creates the draft normally.
+  if (!canCreateTempDataSource()) return ''
+  if (!tempDsPromise) {
+    tempDsPromise = (async () => {
       const res = await createDataSource({
         ...form.value,
         knowledge_base_id: props.kbId,
         status: 'paused',
       } as any)
       const created = res?.data || res
-      tempDsId.value = created.id
-    } else if (!isEdit.value) {
-      await updateDataSource(tempDsId.value, {
-        ...form.value,
-        knowledge_base_id: props.kbId,
-      } as any)
-    }
+      const createdId = typeof created?.id === 'string' ? created.id.trim() : ''
+      if (!createdId) {
+        // A create that answered without an id cannot be listed through, and
+        // /datasource//resources is certain to fail. Failing here instead keeps
+        // tempDsId unset, so the next attempt can create a usable draft.
+        throw new Error(t('datasource.saveFailed'))
+      }
+      tempDsId.value = createdId
+      return createdId
+    })().finally(() => { tempDsPromise = null })
+  }
+  return tempDsPromise
+}
 
-    const res = await listResources(tempDsId.value)
+async function loadResources() {
+  loadingResources.value = true
+  try {
+    syncConfluencePublicFieldsToSettings()
+    // No id means the form cannot be created yet (a blank connector type, or a
+    // missing knowledge base): the tree simply does not load, and nothing is
+    // reported — the request that would have produced that error is not sent.
+    const dsId = await ensureTempDataSource()
+    if (!dsId) return
+
+    const res = await listResources(dsId)
     resources.value = res?.data || res || []
     // Any parent that already arrived with children (connectors returning the
     // full tree, e.g. Notion) needs no further lazy fetch.
@@ -1003,8 +1055,11 @@ async function loadResources() {
     }
   } catch (e: any) {
     MessagePlugin.error(e?.message || e?.error || t('datasource.resourceLoadFailed'))
+  } finally {
+    // A skipped load returns from the try block, so the spinner is cleared here
+    // rather than after the block.
+    loadingResources.value = false
   }
-  loadingResources.value = false
 }
 
 // revealExistingSelections asks the backend which ancestors must be expanded to
