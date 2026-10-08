@@ -60,7 +60,7 @@ func TestQueryKnowledgeGraph_ReportsTotalValidationAcrossKnowledgeBases(t *testi
 	tool := NewQueryKnowledgeGraphTool(&budgetKnowledgeBaseService{}).
 		WithGraph(graphs, chunks).WithKnowledgeScope(documents)
 	result, err := tool.Execute(context.Background(),
-		json.RawMessage(`{"knowledge_base_ids":["kb-1","kb-2"],"query":"Acme"}`))
+		json.RawMessage(`{"knowledge_base_ids":["kb-1","kb-2","kb-1"],"query":"Acme"}`))
 	require.NoError(t, err)
 	require.True(t, result.Success)
 	require.Equal(t, true, result.Data["graph_validation_truncated"])
@@ -78,7 +78,7 @@ func TestQueryKnowledgeGraph_ReportsTotalValidationAcrossKnowledgeBases(t *testi
 			requested[kbID] = append(requested[kbID], id)
 		}
 	}
-	require.Equal(t, expected, requested, "each KB gets its own bounded candidate prefix")
+	require.Equal(t, expected, requested, "each distinct KB is validated once within its own budget")
 	require.Len(t, chunks.batches, 8)
 	require.Len(t, chunks.contentBatches, 2)
 	for _, batch := range chunks.contentBatches {
