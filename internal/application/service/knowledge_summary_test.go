@@ -107,6 +107,10 @@ func TestCheckSufficientSummaryContent_ThresholdOverride(t *testing.T) {
 	}
 }
 
+// validateSummaryOutput is the content-only contract shared by every caller
+// that just wants "did the model return text". A provider that stopped at the
+// completion budget still returned text, so the finish reason alone must not
+// turn it into an error here.
 func TestValidateSummaryOutput(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -126,6 +130,23 @@ func TestValidateSummaryOutput(t *testing.T) {
 			response: &types.ChatResponse{Content: "  useful summary \n"},
 			want:     "useful summary",
 		},
+		{
+			name:     "a normal stop is accepted",
+			response: &types.ChatResponse{Content: "useful summary", FinishReason: "stop"},
+			want:     "useful summary",
+		},
+		{
+			// The table/column description callers rely on this: a description
+			// cut off at 512/2048 tokens is still worth indexing.
+			name:     "plain text at the budget is accepted",
+			response: &types.ChatResponse{Content: "partial", FinishReason: "max_tokens"},
+			want:     "partial",
+		},
+		{
+			name:     "JSON at the budget is accepted here, rejected by the caller",
+			response: &types.ChatResponse{Content: `{"summary": "half a doc`, FinishReason: "length"},
+			want:     `{"summary": "half a doc`,
+		},
 	}
 
 	for _, tt := range tests {
@@ -133,7 +154,138 @@ func TestValidateSummaryOutput(t *testing.T) {
 			got, err := validateSummaryOutput(tt.response)
 			if tt.wantError {
 				if !errors.Is(err, errEmptySummaryOutput) {
-					t.Fatalf("expected errEmptySummaryOutput, got %v", err)
+					t.Fatalf("expected %v, got %v", errEmptySummaryOutput, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("summary = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// validateStructuredSummaryDocument is the document-summary gate: it only adds
+// the truncation verdict for replies that are actually producing structured
+// JSON, so a plain-text template that hits the budget keeps the legacy
+// fallback instead of failing the task.
+func TestValidateStructuredSummaryDocument(t *testing.T) {
+	tests := []struct {
+		name      string
+		response  *types.ChatResponse
+		want      string
+		wantError bool
+		wantErr   error // checked when set; otherwise wantError means errEmptySummaryOutput
+	}{
+		{name: "nil response rejected", response: nil, wantError: true},
+		{name: "empty response rejected", response: &types.ChatResponse{}, wantError: true},
+		{
+			name: "plain text at the budget is not an error",
+			response: &types.ChatResponse{
+				Content:      "This document explains the leave policy and the twenty days",
+				FinishReason: "length",
+			},
+			want: "This document explains the leave policy and the twenty days",
+		},
+		{
+			name: "plain text with max_tokens is not an error",
+			response: &types.ChatResponse{
+				Content:      "partial prose summary",
+				FinishReason: "max_tokens",
+			},
+			want: "partial prose summary",
+		},
+		{
+			name: "bracketed prose at the budget is not an error",
+			response: &types.ChatResponse{
+				Content:      "[文档摘要] 本文件说明请假制度与年度额度",
+				FinishReason: "length",
+			},
+			want: "[文档摘要] 本文件说明请假制度与年度额度",
+		},
+		{
+			name: "numbered prose at the budget is not an error",
+			response: &types.ChatResponse{
+				Content:      "[1] 本文件说明请假制度与年度额度",
+				FinishReason: "length",
+			},
+			want: "[1] 本文件说明请假制度与年度额度",
+		},
+		{
+			name: "truncated JSON object is rejected",
+			response: &types.ChatResponse{
+				Content:      `{"summary": "half a doc`,
+				FinishReason: "length",
+			},
+			wantError: true,
+			wantErr:   errSummaryOutputTruncated,
+		},
+		{
+			name: "complete but malformed JSON at the budget is rejected",
+			response: &types.ChatResponse{
+				Content:      "{\"summary\": \"line one\nline two\"}",
+				FinishReason: "length",
+			},
+			wantError: true,
+			wantErr:   errSummaryOutputTruncated,
+		},
+		{
+			name: "truncated fenced JSON is rejected",
+			response: &types.ChatResponse{
+				Content:      "```json\n{\"summary\": \"half a doc",
+				FinishReason: "length",
+			},
+			wantError: true,
+			wantErr:   errSummaryOutputTruncated,
+		},
+		{
+			name: "BOM-prefixed truncated JSON is rejected",
+			response: &types.ChatResponse{
+				Content:      "\uFEFF{\"summary\": \"half a doc",
+				FinishReason: "length",
+			},
+			wantError: true,
+			wantErr:   errSummaryOutputTruncated,
+		},
+		{
+			name: "truncated JSON array of objects is rejected",
+			response: &types.ChatResponse{
+				Content:      `[{"summary": "half a doc`,
+				FinishReason: "length",
+			},
+			wantError: true,
+			wantErr:   errSummaryOutputTruncated,
+		},
+		{
+			name: "malformed JSON without a length stop is left to the parser",
+			response: &types.ChatResponse{
+				Content: "{\"summary\": \"line one\nline two\"}",
+			},
+			want: "{\"summary\": \"line one\nline two\"}",
+		},
+		{
+			name: "structured JSON with a normal stop is accepted",
+			response: &types.ChatResponse{
+				Content:      `{"summary": "Two sentences."}`,
+				FinishReason: "stop",
+			},
+			want: `{"summary": "Two sentences."}`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := validateStructuredSummaryDocument(tt.response)
+			if tt.wantError {
+				wantErr := tt.wantErr
+				if wantErr == nil {
+					wantErr = errEmptySummaryOutput
+				}
+				if !errors.Is(err, wantErr) {
+					t.Fatalf("expected %v, got %v", wantErr, err)
 				}
 				return
 			}

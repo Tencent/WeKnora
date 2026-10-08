@@ -23,6 +23,9 @@ const (
 	// array, and rankings carrying an unbounded logit instead of a
 	// probability.
 	RerankNIM RerankAPI = "nim-rerank"
+	// RerankTEI is the native Text Embeddings Inference shape: POST /rerank
+	// with {query, texts}, answering a bare array of {index, score}.
+	RerankTEI RerankAPI = "tei-rerank"
 	// RerankTencentLKEAP is Tencent Cloud's RunRerank action, reached through
 	// the official SDK because it is TC3-signed rather than key-authenticated.
 	RerankTencentLKEAP RerankAPI = "tencent-lkeap"
@@ -34,7 +37,7 @@ const (
 // Known reports whether the value names a protocol this build implements.
 func (a RerankAPI) Known() bool {
 	switch a {
-	case RerankCohere, RerankDashScope, RerankNIM,
+	case RerankCohere, RerankDashScope, RerankNIM, RerankTEI,
 		RerankTencentLKEAP, RerankVolcengineKnowledge:
 		return true
 	}
@@ -46,7 +49,7 @@ func (a RerankAPI) Known() bool {
 // vendor SDKs are imported.
 func (a RerankAPI) HTTPServed() bool {
 	switch a {
-	case RerankCohere, RerankDashScope, RerankNIM:
+	case RerankCohere, RerankDashScope, RerankNIM, RerankTEI:
 		return true
 	}
 	return false
