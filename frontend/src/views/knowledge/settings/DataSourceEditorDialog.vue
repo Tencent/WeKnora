@@ -19,6 +19,16 @@ import {
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import DataSourceTypeIcon from './DataSourceTypeIcon.vue'
 import { getDatasourceIconUrl } from './datasourceIcons'
+import DingTalkManualSelection from './dingtalk/DingTalkManualSelection.vue'
+import {
+  DINGTALK_MANUAL_REFERENCE,
+  dingtalkResourceHint,
+} from './dingtalk/dingtalkResources'
+import {
+  resourceIconName,
+  resourceTypeLabel as resourceTypeLabelOf,
+  shouldShowResourceType,
+} from './resourcePresentation'
 
 const props = defineProps<{
   kbId: string
@@ -266,43 +276,22 @@ function seafileWithin(id: string, parent: string): boolean {
     (parentPath === '/' || path === parentPath || path.startsWith(parentPath + '/'))
 }
 
-// DingTalk manual entry: two kinds of DingTalk content are readable by id but
-// can never appear in the lazy-load tree — a document in the operator's personal
-// space (GET /v2.0/wiki/workspaces returns team workspaces only) and a
-// multi-dimensional table (no DingTalk API lists Bases at all). The user
-// therefore pastes a link or an id, the way the Drive connectors take a
-// folder_token. The kind cannot be inferred from the link: a document link and
-// a Base link are byte-identical in shape
-// (https://alidocs.dingtalk.com/i/nodes/<ID>), so the selector decides between
-// the node= and base= reference forms.
-const dingtalkManualId = ref('')
-const dingtalkManualKind = ref<'node' | 'base'>('node')
-const dingtalkManualError = ref('')
+// DingTalk is the one connector whose step mounts a dedicated selector: two
+// kinds of DingTalk content are readable by id but can never appear in the
+// lazy-load tree (a document in the operator's personal space, and a
+// multi-dimensional table), so they are entered by link or id instead of being
+// picked. The entry itself, the preview of what will sync and the reference
+// grammar all live in that component; what stays here is the tree it feeds and
+// the selection the wizard submits.
 const isDingTalkConnector = (type: string) => type === 'dingtalk'
-// Matches exactly what this block writes and nothing the tree writes: a node or
-// Base reference carrying no workspace. Tree-picked ids always carry
-// workspace=... (and usually ancestor=...), so they can never match.
-const DINGTALK_MANUAL_REFERENCE = /^dingtalk:v1\?(?:node|base)=[^&]+$/
-// DINGTALK_DESCRIBE_PARENT_PREFIX asks the connector to DESCRIBE one reference
-// instead of listing its children. A manual selection is invisible to every
-// listing — nothing enumerates Bases, and a personal-space node is absent from
-// the workspace listing — so this is the only call that can turn the id the
-// user pasted into the name the sync will use. It is a picker-only request form:
-// the connector answers with one row for the reference itself, which is why it
-// can share the resource endpoint with expansion without ever being confused
-// for it.
-const DINGTALK_DESCRIBE_PARENT_PREFIX = 'dingtalk:v1?describe='
 
-// dingtalkManualRows holds the described row of every manual reference, keyed by
-// the reference itself. The preview names its rows from it, so the two never
-// disagree, and the rows are merged into the tree so an expandable reference (a
-// Base, whose wiki children the connector lists) can be seen and expanded like
-// any other node.
-const dingtalkManualRows = ref<Record<string, Resource>>({})
-// References whose description is in flight. Adding two ids in a row must not
-// ask for the first one twice: the second call would not yet see it in
-// dingtalkManualRows.
-const dingtalkManualDescribePending = new Set<string>()
+// The rows the selector described, kept so a fresh listing can merge them back:
+// loadResources swaps the whole tree array, and a described reference is not in
+// any listing — nothing enumerates Bases, and a personal-space node is absent
+// from the workspace listing. Merging them as roots is what makes an expandable
+// reference reachable and openable like any other node.
+const dingtalkDescribedRows = ref<Record<string, Resource>>({})
+const dingtalkSelection = ref<InstanceType<typeof DingTalkManualSelection> | null>(null)
 
 interface GitLabProjectInput { project_id: string; ref: string; pathsText: string }
 const gitlabProjects = ref<GitLabProjectInput[]>([])
@@ -357,11 +346,6 @@ async function loadDriveRoot() {
   driveFolderToken.value = token
   form.value.config.resource_ids = [token]
   driveRootLoaded.value = false
-  // The create below has the same contract as the picker's draft: without a
-  // connector type or a knowledge base it is certain to be rejected, and there
-  // is no data source to list the token through. Skipping it keeps the
-  // placeholder instead of sending a request that cannot succeed.
-  if (!tempDsId.value && !canCreateTempDataSource()) return
   loadingResources.value = true
   try {
     if (!tempDsId.value) {
@@ -443,129 +427,21 @@ function classifyDriveLoadError(e: any): string {
   return raw || t('datasource.resourceLoadFailed')
 }
 
-// extractDingTalkId accepts a bare node/Base id or a DingTalk link
-// (https://alidocs.dingtalk.com/i/nodes/<ID>, with or without a query string
-// such as ?utm_scene=...) and returns the id. Matching is path-based, so any
-// host works. Unlike the Drive extractor there is deliberately no "last path
-// segment" fallback: a document link and a Base link are byte-identical, so an
-// id guessed out of an unrecognised URL would be more likely wrong than right.
-// Returns "" when nothing usable is found.
-function extractDingTalkId(input: string): string {
-  const raw = (input || '').trim()
-  if (!raw) return ''
-  let id = ''
-  if (!raw.includes('://') && !raw.includes('/')) {
-    // Bare id: no scheme, no slash - use as-is.
-    id = raw
-  } else {
-    const match = raw.match(/\/i\/nodes\/([^/?#]+)/)
-    if (match && match[1]) id = match[1]
-  }
-  // A character that would split or truncate the resource query cannot be part
-  // of a DingTalk id; accepting one would store a reference the backend can
-  // never decode, so it is reported as "nothing usable" instead.
-  return /[\s&=?#]/.test(id) ? '' : id
-}
-
-// dingtalkManualReference renders the resource_id for one manual entry. The
-// kind is what separates a wiki node (dingtalk:v1?node=<id>) from an
-// independent multi-dimensional table (dingtalk:v1?base=<id>); the backend
-// rejects a reference that mixes the two forms.
-function dingtalkManualReference(id: string, kind: 'node' | 'base'): string {
-  return kind === 'base' ? `dingtalk:v1?base=${id}` : `dingtalk:v1?node=${id}`
-}
-
 // dingtalkManualReferences lists the manually entered selections. They are not
 // in the tree, so the tree itself can never show or uncheck them; this is what
-// the entry block renders and what the selection count adds in.
+// the selection count adds in, and what tells loadResources that the tree is
+// showing the preview instead of the picker.
 const dingtalkManualReferences = computed(() =>
   selectedResourceIds.value.filter(id => DINGTALK_MANUAL_REFERENCE.test(id)),
 )
 
-// applyDingTalkManualEntry adds the entered id to the selection as the reference
-// the backend accepts for the chosen kind, and leaves the field holding that
-// entry. Returns false with the inline error set when nothing usable was
-// entered, so a caller advancing the wizard can stay on the step.
-function applyDingTalkManualEntry(): boolean {
-  const id = extractDingTalkId(dingtalkManualId.value)
-  if (!id) {
-    // Nothing usable was entered, so the input is kept exactly as typed: it is
-    // the text the user has to correct.
-    dingtalkManualError.value = t('datasource.dingtalk.manualIdRequired')
-    return false
-  }
-  dingtalkManualError.value = ''
-  // The committed entry stays in the field, normalised: a pasted link is
-  // replaced by the bare id it carried, so the box shows exactly what was added
-  // and can be read or reused without retyping. Adding it again, or leaving the
-  // step with it still in the box, does not duplicate anything — the selection
-  // is a cover set, so one reference is one entry.
-  dingtalkManualId.value = id
-  const cover = new Set(selectedResourceIds.value)
-  cover.add(dingtalkManualReference(id, dingtalkManualKind.value))
-  selectedResourceIds.value = [...cover]
-  // Keep the form's own copy in step: the paused data source created for the
-  // tree is built from it, and it is what the final submit sends.
-  form.value.config.resource_ids = [...selectedResourceIds.value]
-  // Ask the connector what the new reference is called; the row shows the id
-  // until that answer arrives (or forever, if it never does).
-  void resolveDingTalkManualNames()
-  return true
-}
-
-// resolveDingTalkManualNames turns each manual reference into a described row:
-// the connector reads the node (or Base) by id and reports its display name,
-// which is exactly the name the sync will title the item with. It is the only
-// call the collapsed presentation makes — never the tree listing — and every
-// failure degrades to the id already on screen, because a name lookup must not
-// be able to break the step.
-async function resolveDingTalkManualNames() {
-  if (!isDingTalkConnector(form.value.type)) return
-  const known = new Set(Object.keys(dingtalkManualRows.value))
-  const pending = dingtalkManualReferences.value.filter(
-    id => !known.has(id) && !dingtalkManualDescribePending.has(id),
-  )
-  if (pending.length === 0) return
-  let dsId = ''
-  try {
-    // A description is a call against the data source, so the draft the picker
-    // lists through has to exist first — the same draft the tree would create.
-    dsId = await ensureTempDataSource()
-  } catch (e: any) {
-    MessagePlugin.error(e?.message || e?.error || t('datasource.resourceLoadFailed'))
-    return
-  }
-  // No draft, no description: the rows keep the ids the user typed, and no
-  // listing is attempted (a describe against an empty id is certain to fail).
-  if (!dsId) return
-  for (const id of pending) dingtalkManualDescribePending.add(id)
-  await Promise.all(pending.map(async (id) => {
-    try {
-      const res = await listResources(dsId, DINGTALK_DESCRIBE_PARENT_PREFIX + id)
-      const rows: Resource[] = res?.data || res || []
-      // The connector echoes the reference it described, so an unexpected row
-      // is ignored rather than shown under the wrong name; a reference removed
-      // while the lookup was in flight is dropped for the same reason.
-      const row = rows.find(r => r.external_id === id)
-      if (row && dingtalkManualReferences.value.includes(id)) {
-        dingtalkManualRows.value = { ...dingtalkManualRows.value, [id]: row }
-      }
-    } catch {
-      // The id stays on screen; nothing else about the step depends on this.
-    } finally {
-      dingtalkManualDescribePending.delete(id)
-    }
-  }))
-  mergeDingTalkManualRowsIntoTree()
-}
-
-// mergeDingTalkManualRowsIntoTree adds the described rows to the tree, where
+// mergeDingTalkDescribedRowsIntoTree adds the described rows to the tree, where
 // they act as roots: a manual selection belongs to no listed parent, and a Base
 // needs its row in the tree for its children to be reachable at all. The rows
 // are merged, not replaced, and re-merged after every listing because
 // loadResources swaps the whole array.
-function mergeDingTalkManualRowsIntoTree() {
-  const rows = Object.values(dingtalkManualRows.value)
+function mergeDingTalkDescribedRowsIntoTree() {
+  const rows = Object.values(dingtalkDescribedRows.value)
   if (rows.length === 0) return
   const existing = new Set(resources.value.map(r => r.external_id))
   const missing = rows.filter(row => !existing.has(row.external_id))
@@ -573,147 +449,30 @@ function mergeDingTalkManualRowsIntoTree() {
   resources.value = [...resources.value, ...missing]
 }
 
-// removeDingTalkManualReference drops one manual entry from the selection. Only
-// ids this block wrote can be passed here, so the tree selections are untouched.
-// The described row goes with it: a row left behind would sit in the tree
-// unchecked, as if it were still part of the data source.
-function removeDingTalkManualReference(reference: string) {
-  selectedResourceIds.value = selectedResourceIds.value.filter(id => id !== reference)
-  form.value.config.resource_ids = [...selectedResourceIds.value]
-  if (!(reference in dingtalkManualRows.value)) return
-  const remaining = { ...dingtalkManualRows.value }
-  delete remaining[reference]
-  dingtalkManualRows.value = remaining
-  resources.value = resources.value.filter(r => r.external_id !== reference)
+// onDingTalkDescribed takes the rows the selector described and folds them into
+// the tree. The selector names its own rows from the same answer, so the two
+// views cannot disagree about a reference.
+function onDingTalkDescribed(rows: Record<string, Resource>) {
+  dingtalkDescribedRows.value = rows
+  mergeDingTalkDescribedRowsIntoTree()
 }
 
-// dingtalkManualReferenceId reads the stored id back out of a manual reference,
-// so the selection row shows the id the user entered rather than the raw
-// resource_id.
-function dingtalkManualReferenceId(reference: string): string {
-  return reference.slice(reference.indexOf('=') + 1)
+// onDingTalkSelectionChange takes a selection the selector wrote: the wizard
+// submits it, and the draft the picker lists through is built from the form, so
+// the two are kept in step at the moment the selection changes rather than at
+// submit time.
+function onDingTalkSelectionChange(ids: string[]) {
+  selectedResourceIds.value = [...ids]
+  form.value.config.resource_ids = [...ids]
 }
 
-// dingtalkManualKindLabel names what a stored manual reference points at
-// (多维表 / 文档节点) without decoding the resource id by hand.
-function dingtalkManualKindLabel(reference: string): string {
-  return t(reference.startsWith('dingtalk:v1?base=')
-    ? 'datasource.dingtalk.manualKindBase'
-    : 'datasource.dingtalk.manualKindNode')
-}
+// dingtalkSavedReference is the manual entry a saved data source already has.
+// The tree can never show it, so the selector is the only place it becomes
+// visible — and the only place it can be removed.
+const dingtalkSavedReference = computed(() =>
+  (form.value.config?.resource_ids || []).find(id => DINGTALK_MANUAL_REFERENCE.test(id)) || '',
+)
 
-// DingTalk is the only connector whose selectable content is partly invisible to
-// the tree: a personal-space document and a 多维表 Base are readable by id but
-// nothing enumerates them, so `revealExistingSelections` has nothing to reveal
-// for those refs and the picker would fall back to the bare root list (every
-// workspace the tenant exposes). The selection area therefore previews the
-// real selection — manual references and tree picks together — instead of
-// relying on the tree to show it.
-interface DingTalkSelectionRow {
-  id: string
-  manual: boolean
-  kind: string
-  label: string
-}
-
-const dingtalkSelectionRows = computed<DingTalkSelectionRow[]>(() => {
-  const byId = resourceById.value
-  return selectedResourceIds.value.map((id) => {
-    if (DINGTALK_MANUAL_REFERENCE.test(id)) {
-      // The described row carries the same name the sync puts on the item; the
-      // id stays the fallback whenever the name could not be resolved, so the
-      // row is never empty and never wrong.
-      const described = dingtalkManualRows.value[id]
-      return {
-        id,
-        manual: true,
-        kind: dingtalkManualKindLabel(id),
-        label: (described?.name || '').trim() || dingtalkManualReferenceId(id),
-      }
-    }
-    const resource = byId.get(id)
-    return {
-      id,
-      manual: false,
-      // A mapped connector type names itself; anything else is just "knowledge
-      // base". Before the lazy tree has loaded a saved node, only its id is
-      // known — showing the id is still exactly what will be synced.
-      kind: resource && shouldShowResourceType(resource.type)
-        ? resourceTypeLabel(resource.type)
-        : t('datasource.dingtalk.selectionTreeKind'),
-      label: resource?.name || id,
-    }
-  })
-})
-
-// resourceById is the lookup behind every per-row fact the preview states about
-// a selection — what it syncs, whether it can be expanded, which children it
-// has. Rows are keyed by external_id, which is also what a selection stores, so
-// a manual reference and a tree pick resolve the same way.
-const resourceById = computed(() => new Map(resources.value.map(r => [r.external_id, r])))
-
-// dingtalkSelectedResource returns the row a preview line stands for: the
-// connector's described row for a manual reference (the only answer a Base or a
-// personal-space node ever has) or the row a listing delivered. Reading one
-// lookup keeps the name, the hint and the expansion from disagreeing.
-function dingtalkSelectedResource(id: string): Resource | undefined {
-  return dingtalkManualRows.value[id] || resourceById.value.get(id)
-}
-
-// dingtalkSelectionRowExpandable reports whether a row may offer a disclosure
-// control. Only a row the connector reports as having children gets one: a leaf
-// has nothing to list, so an expander there could only promise content that does
-// not exist (and, before the connector answered a leaf with an empty listing,
-// could only fail).
-function dingtalkSelectionRowExpandable(row: DingTalkSelectionRow): boolean {
-  return dingtalkSelectedResource(row.id)?.has_children === true
-}
-
-// dingtalkSelectionRowChildren are the direct children of an expanded row. They
-// are the same rows the lazy tree renders: children fetched through
-// listResources(parent_id=<ref>) and indexed by their parent_id, so a child
-// shown here and the same child shown in the tree are one row, not two copies.
-function dingtalkSelectionRowChildren(id: string): Resource[] {
-  return childrenMap.value.get(id) || []
-}
-
-function dingtalkSelectionRowExpanded(id: string): boolean {
-  return expandedResourceIds.value.has(id)
-}
-
-function dingtalkSelectionRowLoading(id: string): boolean {
-  return loadingChildrenIds.value.has(id)
-}
-
-// dingtalkSelectionRowHint is the one-line answer to "what does this row sync",
-// rendered as part of the row so it is readable without expanding anything. Only
-// a Base has one: its tables are the content a base= reference ingests, while
-// the documents listed under it are separate selections.
-function dingtalkSelectionRowHint(row: DingTalkSelectionRow): string {
-  const described = dingtalkSelectedResource(row.id)
-  return described ? resourceHint(described) : ''
-}
-
-// dingtalkTableNames splits the table list the connector puts in a Base row's
-// description — notableTableNames joins the names with ", " in listing order.
-// The picker re-renders that same list with a separator a table line reads
-// better with; it never invents, reorders or drops a name.
-function dingtalkTableNames(description: string): string[] {
-  return (description || '').split(',').map(name => name.trim()).filter(Boolean)
-}
-
-// removeTreeSelectionRow drops one tree-picked resource from the preview. It
-// filters the cover set directly instead of going through toggleResource: a
-// saved node the lazy tree has not loaded has no check state yet, so
-// toggleResource would check it again rather than remove it.
-function removeTreeSelectionRow(id: string) {
-  selectedResourceIds.value = selectedResourceIds.value.filter(x => x !== id)
-  form.value.config.resource_ids = [...selectedResourceIds.value]
-}
-
-// hasDingTalkManualSelection is true once at least one manual reference is in
-// the selection. Everything below keys off it, so a user who never touches the
-// manual block keeps the exact tree-only presentation.
 const hasDingTalkManualSelection = computed(() => dingtalkManualReferences.value.length > 0)
 
 // dingtalkTreeExpanded is the explicit expander state of the knowledge-base
@@ -1151,16 +910,14 @@ watch(visible, async (v) => {
   driveFolderToken.value = ''
   driveFolderTokenError.value = ''
   driveRootLoaded.value = false
-  dingtalkManualId.value = ''
-  dingtalkManualKind.value = 'node'
-  dingtalkManualError.value = ''
   // Fresh open: the tree starts collapsed again if a saved manual reference is
   // restored below, and is not left expanded from a previous edit session.
   // Nothing about the tree has been fetched yet, and no reference has been
-  // described: both are learned lazily, on the step that needs them.
+  // described: both are learned lazily, on the step that needs them. The manual
+  // entry itself belongs to the selector, which mounts fresh with this state.
   dingtalkTreeExpanded.value = false
   dingtalkTreeLoaded.value = false
-  dingtalkManualRows.value = {}
+  dingtalkDescribedRows.value = {}
   rssAuthHeaders.value = []
   gitlabProjects.value = []
 
@@ -1206,17 +963,6 @@ watch(visible, async (v) => {
         // resource_id is "folderToken" or "folderToken:fileToken"; the root is
         // the first segment.
         driveFolderToken.value = rids[0].split(':')[0]
-      }
-    }
-    // Pre-fill the DingTalk manual entry from a saved manual selection:
-    // selectedResourceIds already carries it, so the tree never shows it and
-    // this is the only place the user can see (or remove) what was saved.
-    if (isDingTalkConnector(form.value.type)) {
-      const manual = (form.value.config?.resource_ids || [])
-        .find(id => DINGTALK_MANUAL_REFERENCE.test(id))
-      if (manual) {
-        dingtalkManualKind.value = manual.startsWith('dingtalk:v1?base=') ? 'base' : 'node'
-        dingtalkManualId.value = manual.slice(manual.indexOf('=') + 1)
       }
     }
     tempDsId.value = props.dataSource.id
@@ -1335,88 +1081,43 @@ async function testConnection() {
 }
 
 // --- Load resources ---
-
-// canCreateTempDataSource reports whether the create endpoint could accept a
-// request built from the form as it stands. The endpoint rejects a request
-// without a knowledge base (ErrKnowledgeBaseNotFound) and one whose type is not
-// a registered connector (ErrConnectorNotFound) before the connector is ever
-// reached, so a request missing either is certain to fail and must not be sent.
-// The one thing left that the endpoint checks — the credentials a connector
-// validates against the remote service — can only be answered by making the
-// call, so it is deliberately not pre-empted here.
-function canCreateTempDataSource(): boolean {
-  return (props.kbId || '').trim() !== '' && String(form.value.type || '').trim() !== ''
-}
-
-// ensureTempDataSource returns the data source the picker lists through,
-// creating the paused draft on first use (a data source must exist before the
-// resource endpoint can be called) and keeping it in step with the form while
-// the dialog is still a draft. A single in-flight creation is shared, so the
-// tree load and a name lookup cannot create two rows for one dialog.
-let tempDsPromise: Promise<string> | null = null
-async function ensureTempDataSource(): Promise<string> {
-  if (tempDsId.value) {
-    if (!isEdit.value) {
-      await updateDataSource(tempDsId.value, {
-        ...form.value,
-        knowledge_base_id: props.kbId,
-      } as any)
-    }
-    return tempDsId.value
-  }
-  // A form that cannot produce a data source yet has nothing to list through,
-  // so the create is skipped rather than sent: no request, no error, and — this
-  // is the point of returning early — no cached promise, so a later attempt
-  // with a real type creates the draft normally.
-  if (!canCreateTempDataSource()) return ''
-  if (!tempDsPromise) {
-    tempDsPromise = (async () => {
+async function loadResources() {
+  loadingResources.value = true
+  try {
+    syncConfluencePublicFieldsToSettings()
+    if (!tempDsId.value) {
       const res = await createDataSource({
         ...form.value,
         knowledge_base_id: props.kbId,
         status: 'paused',
       } as any)
       const created = res?.data || res
-      const createdId = typeof created?.id === 'string' ? created.id.trim() : ''
-      if (!createdId) {
-        // A create that answered without an id cannot be listed through, and
-        // /datasource//resources is certain to fail. Failing here instead keeps
-        // tempDsId unset, so the next attempt can create a usable draft.
-        throw new Error(t('datasource.saveFailed'))
-      }
-      tempDsId.value = createdId
-      return createdId
-    })().finally(() => { tempDsPromise = null })
-  }
-  return tempDsPromise
-}
+      tempDsId.value = created.id
+    } else if (!isEdit.value) {
+      await updateDataSource(tempDsId.value, {
+        ...form.value,
+        knowledge_base_id: props.kbId,
+      } as any)
+    }
+    // DingTalk with a manual selection shows the preview, not the tree: the
+    // knowledge-base tree is collapsed behind its expander, so there is nothing
+    // to fill and the team's knowledge bases must not be fetched. The draft
+    // above is still created — a describe call is made against the data source,
+    // not against the tree — and the tree is listed when the expander is first
+    // opened (see toggleDingTalkResourceTree), which is also the only moment its
+    // contents become visible.
+    if (isDingTalkConnector(form.value.type) && hasDingTalkManualSelection.value
+      && !dingtalkTreeExpanded.value) {
+      return
+    }
 
-async function loadResources() {
-  // DingTalk with a manual selection shows the preview, not the tree: the
-  // knowledge-base tree is collapsed behind its expander, so there is nothing
-  // to fill and the team's knowledge bases must not be fetched. The tree is
-  // listed when the expander is first opened (see toggleDingTalkResourceTree),
-  // which is also the only moment its contents become visible.
-  if (isDingTalkConnector(form.value.type) && hasDingTalkManualSelection.value
-    && !dingtalkTreeExpanded.value) {
-    return
-  }
-  loadingResources.value = true
-  try {
-    syncConfluencePublicFieldsToSettings()
-    // No id means the form cannot be created yet (a blank connector type, or a
-    // missing knowledge base): the tree simply does not load, and nothing is
-    // reported — the request that would have produced that error is not sent.
-    const dsId = await ensureTempDataSource()
-    if (!dsId) return
-
-    const res = await listResources(dsId)
+    const res = await listResources(tempDsId.value)
     resources.value = res?.data || res || []
     dingtalkTreeLoaded.value = true
     // The described rows of manual selections are roots of their own and are
     // merged back before the reveal step, so a Base already has a row and is
     // never "revealed" by expanding something the tree cannot show.
-    mergeDingTalkManualRowsIntoTree()
+    mergeDingTalkDescribedRowsIntoTree()
     // Any parent that already arrived with children (connectors returning the
     // full tree, e.g. Notion) needs no further lazy fetch.
     const parentsWithChildren = new Set<string>()
@@ -1451,9 +1152,6 @@ async function loadResources() {
   }
 }
 
-// revealExistingSelections asks the backend which ancestors must be expanded to
-// surface the current (possibly deeply nested) selection, then loads each level
-// so the saved selection becomes visible and correctly checked in the tree.
 async function revealExistingSelections(hiddenIds: string[]) {
   if (!tempDsId.value || hiddenIds.length === 0) return
   try {
@@ -1597,12 +1295,12 @@ async function nextStep() {
     }
     driveFolderTokenError.value = ''
   }
-  if (step.value === 2 && isDingTalkConnector(form.value.type) && dingtalkManualId.value.trim()) {
+  if (step.value === 2 && isDingTalkConnector(form.value.type) && dingtalkSelection.value?.hasPendingEntry) {
     // A typed id the user forgot to add would otherwise be dropped silently on
     // the way to the next step. The box keeps a committed entry, so this is
     // usually a re-application of what was just added: that is a no-op, because
     // the cover set holds one entry per reference.
-    if (!applyDingTalkManualEntry()) return
+    if (!dingtalkSelection.value.applyManualEntry()) return
   }
   if (step.value === 2 && isGitLabConnector(form.value.type)) {
     syncGitLabProjectsToSettings()
@@ -1629,12 +1327,10 @@ async function nextStep() {
       return
     }
     if (isGitLabConnector(form.value.type)) return
-    if (isDingTalkConnector(form.value.type)) {
-      // A saved manual reference is described as soon as the step opens, so the
-      // preview names it without ever touching the (collapsed) tree. With no
-      // manual reference this does nothing at all.
-      void resolveDingTalkManualNames()
-    }
+    // A saved DingTalk manual reference is described as soon as the selector has
+    // the draft to describe it through, which loadResources creates here; the
+    // selector does that on its own, and with no manual reference it does
+    // nothing at all.
     loadResources()
   }
 }
@@ -1766,28 +1462,11 @@ const selectedResourceCount = computed(() => {
   // connector has described does have a row in the tree — that row is already
   // counted above — so only the undescribed ones are added here, or the same
   // selection would be counted twice.
-  const described = new Set(Object.keys(dingtalkManualRows.value))
+  const described = new Set(Object.keys(dingtalkDescribedRows.value))
   return count + dingtalkManualReferences.value.filter(id => !described.has(id)).length
 })
 
 const hasExpandableNodes = computed(() => resources.value.some(r => r.has_children))
-
-function resourceIconName(r: Resource): string {
-  // Seafile libraries expand like folders but are the top-level unit a data
-  // source binds to, so they keep the root icon.
-  if (r.type === 'library') return 'root-list'
-  if (r.has_children) return 'folder'
-  switch (r.type) {
-    case 'wiki_space':
-      return 'root-list'
-    case 'book':
-      return 'book'
-    case 'doc_category':
-      return 'folder-open'
-    default:
-      return 'file'
-  }
-}
 
 function expandAllNodes() {
   const expandable = resources.value.filter(r => r.has_children)
@@ -1802,49 +1481,20 @@ function collapseAllNodes() {
   expandedResourceIds.value = new Set()
 }
 
-const resourceTypeLabelMap: Record<string, string> = {
-  wiki_space: 'datasource.resourceType.wikiSpace',
-  doc_category: 'datasource.resourceType.docCategory',
-  book: 'datasource.resourceType.book',
-  library: 'datasource.resourceType.library',
-  // DingTalk's self-addressing references are described by the connector rather
-  // than listed by a workspace. The two types are kept apart because they sync
-  // different things: a 多维表 ingests all of its tables as one document, while
-  // each wiki document under it is a separate selection.
-  base: 'datasource.dingtalk.resourceTypeBase',
-  base_child: 'datasource.dingtalk.resourceTypeBaseChild',
-}
-
+// The picker states a row's kind through the shared presentation module: the
+// DingTalk selector renders the same labels from its own component, and a tree
+// row and a preview row must never disagree about what a resource is.
 function resourceTypeLabel(type: string): string {
-  const key = resourceTypeLabelMap[type]
-  if (key) return t(key)
-  return ''
-}
-
-function shouldShowResourceType(type: string): boolean {
-  return !!resourceTypeLabelMap[type]
+  return resourceTypeLabelOf(type, t)
 }
 
 // resourceHint explains, in one line, what selecting a described row syncs. It
-// is rendered for a Base both in the tree and — this is the point of the line —
-// under the Base's own row in the selection preview, where the tables a base=
-// reference ingests must be readable without expanding anything. Without it the
-// documents listed under the Base would read as "the Base's contents", which
-// they are not: they are separate selections.
+// is rendered for a Base in the tree; the selector renders the same line under
+// the Base's own preview row. Without it the documents listed under the Base
+// would read as "the Base's contents", which they are not: they are separate
+// selections.
 function resourceHint(r: Resource): string {
-  if (r.type !== 'base') return ''
-  const tables = dingtalkTableNames(r.description)
-  return t('datasource.dingtalk.resourceHintBase', {
-    // The count and the "as one document" clause sit in the list phrase, so one
-    // outer sentence covers both answers: the tables the connector named, and
-    // — when it could not list them — "all tables", with no invented count.
-    tables: tables.length > 0
-      ? t('datasource.dingtalk.resourceHintBaseTableList', {
-        count: tables.length,
-        tables: tables.join(' · '),
-      })
-      : t('datasource.dingtalk.resourceHintBaseAllTables'),
-  })
+  return dingtalkResourceHint(r, t)
 }
 
 function resourceRowState(id: string): CheckState {
@@ -2244,134 +1894,29 @@ const drawerConfirmText = computed(() => {
       <h4 class="setting-drawer__section-title">{{ t('datasource.step.resources') }}</h4>
       <p class="ds-resource-hint">{{ t('datasource.resourceHint') }}</p>
 
-      <!-- DingTalk manual entry: shown alongside the tree, not instead of it.
-           A personal-space document and a multi-dimensional table are readable
-           by id but never appear in the lazy-load tree, so the user pastes a
-           link (or an id) and picks which of the two it is. The selector is
-           required: the two link shapes are identical. Tree picking below is
-           unchanged, and a user who only picks from the tree never touches
-           this. -->
-      <div v-if="isDingTalkConnector(form.type)" class="dingtalk-manual-input">
-        <label class="dingtalk-manual-input__label">
-          {{ t('datasource.dingtalk.manualLabel') }}
-          <t-tooltip :content="t('datasource.dingtalk.manualHint')" placement="top">
-            <t-icon name="help-circle" class="dingtalk-manual-input__help" />
-          </t-tooltip>
-        </label>
-        <div class="dingtalk-manual-input__row">
-          <t-radio-group v-model="dingtalkManualKind" :disabled="loadingResources">
-            <t-radio-button value="node">{{ t('datasource.dingtalk.manualKindNode') }}</t-radio-button>
-            <t-radio-button value="base">{{ t('datasource.dingtalk.manualKindBase') }}</t-radio-button>
-          </t-radio-group>
-          <t-input
-            v-model="dingtalkManualId"
-            class="dingtalk-manual-input__field"
-            :placeholder="t('datasource.dingtalk.manualPlaceholder')"
-            :status="dingtalkManualError ? 'error' : 'default'"
-            clearable
-            @enter="applyDingTalkManualEntry"
-            @input="dingtalkManualError = ''"
-          />
-          <t-button theme="primary" @click="applyDingTalkManualEntry">
-            {{ t('datasource.dingtalk.manualAdd') }}
-          </t-button>
-        </div>
-        <p v-if="dingtalkManualError" class="dingtalk-manual-input__error">{{ dingtalkManualError }}</p>
-      </div>
+      <!-- DingTalk multi-dimensional tables and in-app manual references: a
+           personal-space document and a Base are readable by id but never appear
+           in the lazy-load tree, so they are entered by link or id instead of
+           being picked. The selector owns that entry and the preview of what the
+           data source will sync; the tree below stays the dialog's, and the
+           selection it writes here is the one the wizard submits. -->
+      <DingTalkManualSelection
+        v-if="isDingTalkConnector(form.type)"
+        ref="dingtalkSelection"
+        :selected-resource-ids="selectedResourceIds"
+        :resources="resources"
+        :children-map="childrenMap"
+        :expanded-resource-ids="expandedResourceIds"
+        :loading-children-ids="loadingChildrenIds"
+        :data-source-id="tempDsId"
+        :loading="loadingResources"
+        :saved-reference="dingtalkSavedReference"
+        @update:selected-resource-ids="onDingTalkSelectionChange"
+        @described="onDingTalkDescribed"
+        @expand="toggleExpand"
+      />
 
-      <!-- What THIS data source will sync, first and prominently: the manual
-           references and the tree-checked resources together, in one list.
-           The tree below cannot show the manual part at all, so the selection
-           area must not depend on it. This is also why the picker is demoted
-           into the explicit expander: it adds to this list, it does not define
-           it. Rendered only once a manual reference exists, so a tree-only user
-           keeps the exact pre-existing step. -->
-      <div v-if="hasDingTalkManualSelection" class="ds-selection-preview">
-        <div class="ds-selection-preview__title">{{ t('datasource.dingtalk.selectionTitle') }}</div>
-        <div
-          v-for="row in dingtalkSelectionRows"
-          :key="row.id"
-          class="ds-selection-preview__row"
-        >
-          <div class="ds-selection-preview__head">
-            <!-- The disclosure control expands with the same lazy call the tree
-                 uses (listResources(parent_id=<ref>)). It exists only for a row
-                 the connector reports children for: a leaf has nothing to list,
-                 so an expander there would promise content that is not there. -->
-            <button
-              v-if="dingtalkSelectionRowExpandable(row)"
-              type="button"
-              class="ds-selection-preview__expand"
-              :aria-expanded="dingtalkSelectionRowExpanded(row.id)"
-              :aria-label="dingtalkSelectionRowExpanded(row.id)
-                ? t('knowledgeStages.collapseBranch')
-                : t('knowledgeStages.expandBranch')"
-              @click="toggleExpand(row.id)"
-            >
-              <t-loading v-if="dingtalkSelectionRowLoading(row.id)" size="12px" />
-              <t-icon
-                v-else
-                :name="dingtalkSelectionRowExpanded(row.id) ? 'chevron-down' : 'chevron-right'"
-                size="12px"
-              />
-            </button>
-            <span v-else class="ds-selection-preview__expand-spacer" aria-hidden="true" />
-            <span class="ds-selection-preview__kind">{{ row.kind }}</span>
-            <!-- The whole name, wrapped rather than ellipsised, and the id it
-                 came from on hover: a truncated name cannot be confirmed. -->
-            <span class="ds-selection-preview__label" :title="row.id">{{ row.label }}</span>
-            <!-- "Added by ID, not in the tree" explains the row, it is not part
-                 of its name: as an icon tooltip it costs the name no room. -->
-            <t-tooltip
-              v-if="row.manual"
-              :content="t('datasource.dingtalk.selectionManualNote')"
-              placement="top"
-            >
-              <span
-                class="ds-selection-preview__note-icon"
-                role="img"
-                :aria-label="t('datasource.dingtalk.selectionManualNote')"
-              >
-                <t-icon name="help-circle" />
-              </span>
-            </t-tooltip>
-            <button
-              type="button"
-              class="ds-selection-preview__remove"
-              @click="row.manual ? removeDingTalkManualReference(row.id) : removeTreeSelectionRow(row.id)"
-            >{{ t('datasource.dingtalk.selectionRemove') }}</button>
-          </div>
-          <!-- What the row syncs, in the row itself: for a Base the tables are
-               the content, and that is the single most important fact about the
-               selection, so it is never hidden behind an expansion. -->
-          <p v-if="dingtalkSelectionRowHint(row)" class="ds-selection-preview__hint">
-            {{ dingtalkSelectionRowHint(row) }}
-          </p>
-          <!-- The children the row lists on expansion. They are not selections:
-               under a Base they are knowledge-base documents that sync on their
-               own, which is exactly what their label says — they are not the
-               tables the line above describes. -->
-          <div
-            v-if="dingtalkSelectionRowExpanded(row.id)"
-            class="ds-selection-preview__children"
-          >
-            <div
-              v-for="child in dingtalkSelectionRowChildren(row.id)"
-              :key="child.external_id"
-              class="ds-selection-preview__child"
-            >
-              <t-icon :name="resourceIconName(child)" size="14px" />
-              <span class="ds-selection-preview__child-name" :title="child.name || t('datasource.untitled')">
-                {{ child.name || t('datasource.untitled') }}
-              </span>
-              <span
-                v-if="shouldShowResourceType(child.type)"
-                class="ds-selection-preview__child-kind"
-              >{{ resourceTypeLabel(child.type) }}</span>
-            </div>
-          </div>
-        </div>
-      </div>
+
 
       <!-- Drive (云盘) root input: shown alongside the tree (not as a switch).
            The user supplies a folder_token (or a Drive folder URL) and clicks
@@ -3169,207 +2714,6 @@ const drawerConfirmText = computed(() => {
   gap: 8px;
   align-items: center;
   padding-bottom: 20px
-}
-
-/* DingTalk manual entry (node / Base id) - shown before the lazy-load tree. */
-.dingtalk-manual-input {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 12px;
-  border: 1px solid var(--td-border-level-1-color);
-  border-radius: var(--app-radius-sm);
-  background: var(--td-bg-color-container);
-}
-
-.dingtalk-manual-input__label {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  font-size: var(--app-text-md);
-  font-weight: 500;
-  color: var(--td-text-color-primary);
-}
-
-.dingtalk-manual-input__help {
-  font-size: var(--app-text-lg);
-  color: var(--td-text-color-placeholder);
-  cursor: help;
-
-  &:hover {
-    color: var(--td-text-color-secondary);
-  }
-}
-
-.dingtalk-manual-input__row {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  flex-wrap: wrap;
-}
-
-.dingtalk-manual-input__field {
-  flex: 1;
-  min-width: 0;
-}
-
-.dingtalk-manual-input__error {
-  margin: 0;
-  font-size: var(--app-text-sm);
-  line-height: 1.5;
-  color: var(--td-error-color);
-}
-
-/* Selection preview: every resource this data source will sync, manual
-   references and tree picks alike. It is the primary content of the step
-   whenever a manual reference exists, because the tree can never show the
-   manual part. */
-.ds-selection-preview {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.ds-selection-preview__title {
-  font-size: var(--app-text-sm);
-  color: var(--td-text-color-secondary);
-}
-
-.ds-selection-preview__row {
-  .ds-inset-panel();
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 8px 10px;
-}
-
-/* The name line: expander | kind | name | note icon | remove. The name is the
-   only part that flexes, so it gets the row's spare width instead of the
-   ellipsis the old three-part layout forced on it. */
-.ds-selection-preview__head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-
-.ds-selection-preview__expand {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  width: 16px;
-  height: 16px;
-  padding: 0;
-  border: none;
-  border-radius: var(--app-radius-sm);
-  background: transparent;
-  color: var(--td-text-color-placeholder);
-  cursor: pointer;
-  transition: background var(--app-motion-instant) ease;
-}
-
-.ds-selection-preview__expand:hover,
-.ds-selection-preview__expand:focus-visible {
-  background: var(--td-bg-color-container-hover);
-  outline: none;
-}
-
-/* Keeps a leaf's name aligned with an expandable row's name. */
-.ds-selection-preview__expand-spacer {
-  flex-shrink: 0;
-  width: 16px;
-  height: 16px;
-}
-
-.ds-selection-preview__kind {
-  flex-shrink: 0;
-  font-size: var(--app-text-sm);
-  line-height: 1.4;
-  color: var(--td-text-color-secondary);
-}
-
-.ds-selection-preview__label {
-  flex: 1;
-  min-width: 0;
-  font-size: var(--app-text-md);
-  line-height: 1.5;
-  color: var(--td-text-color-primary);
-  /* Wrap the whole name instead of truncating it: the name is how the owner
-     confirms the row, so an ellipsis here is the defect, not a nicety. */
-  overflow-wrap: anywhere;
-}
-
-.ds-selection-preview__hint {
-  margin: 0;
-  /* Aligns with the name above, past the disclosure control. */
-  padding-left: 24px;
-  font-size: var(--app-text-sm);
-  line-height: 1.5;
-  color: var(--td-text-color-secondary);
-  /* The table list is the row's most important fact; it wraps rather than
-     being clipped to a few names. */
-  overflow-wrap: anywhere;
-}
-
-.ds-selection-preview__children {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  margin-left: 24px;
-  padding-left: 8px;
-  border-left: 1px solid var(--td-border-level-1-color);
-}
-
-.ds-selection-preview__child {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-  font-size: var(--app-text-sm);
-  line-height: 1.5;
-  color: var(--td-text-color-secondary);
-}
-
-.ds-selection-preview__child-name {
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-
-.ds-selection-preview__child-kind {
-  flex-shrink: 0;
-  font-size: var(--app-text-2xs);
-  color: var(--td-text-color-placeholder);
-}
-
-.ds-selection-preview__note-icon {
-  display: inline-flex;
-  flex-shrink: 0;
-  font-size: var(--app-text-lg);
-  color: var(--td-text-color-placeholder);
-  cursor: help;
-}
-
-.ds-selection-preview__note-icon:hover {
-  color: var(--td-text-color-secondary);
-}
-
-.ds-selection-preview__remove {
-  flex-shrink: 0;
-  padding: 0;
-  border: none;
-  background: transparent;
-  font: inherit;
-  font-size: var(--app-text-sm);
-  color: var(--td-text-color-placeholder);
-  cursor: pointer;
-  transition: color var(--app-motion-instant) ease;
-}
-
-.ds-selection-preview__remove:hover,
-.ds-selection-preview__remove:focus-visible {
-  color: var(--td-error-color);
-  outline: none;
 }
 
 /* Drive tree placeholder: shown before the first successful load. */
