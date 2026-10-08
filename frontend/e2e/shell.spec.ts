@@ -17,6 +17,7 @@ for (const width of [360, 390, 430, 768, 1024, 1440]) {
    await page.locator('[data-guide="nav-creatChat"]').click()
    await expect(page).toHaveURL(/creatChat/)
    await expect(page.locator('.platform-navigation')).toBeHidden()
+   await expect.poll(() => page.evaluate(() => document.documentElement.style.getPropertyValue('--app-viewport-height'))).not.toBe('')
   } else {
    await expect(page.locator('.mobile-app-header')).toBeHidden()
    await expect(page.locator('.platform-navigation')).toBeVisible()
