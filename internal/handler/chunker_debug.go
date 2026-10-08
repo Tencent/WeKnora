@@ -174,7 +174,7 @@ func PreviewChunking(c *gin.Context) {
 	go func() {
 		var chunks []chunker.Chunk
 		var diag *chunker.Diagnostics
-		if req.ChunkingConfig.EnableParentChild && cfg.CustomSeparator == "" {
+		if req.ChunkingConfig.EnableParentChild && cfg.Strategy != chunker.StrategyCustomSeparator {
 			parentCfg, childCfg := chunker.DeriveParentChildConfigs(
 				cfg,
 				req.ChunkingConfig.ParentChunkSize,
