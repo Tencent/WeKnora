@@ -486,6 +486,12 @@ func (s *knowledgeBaseService) FillKnowledgeBaseCounts(ctx context.Context, kb *
 // are cleared when the request enables a managed model, or when it disables
 // VLM without echoing back the stored model_name and base_url (the shape a
 // GET-then-PUT round trip sends). Request legacy fields are only compared.
+//
+// Only a pure legacy KB (no stored ModelID) keeps its legacy endpoint on an
+// echo or on enabled=true without a model_id. A config that carries a managed
+// ModelID next to legacy fields (CreateKnowledgeBase stores the request as
+// is) is treated as managed: clearing ModelID while keeping the legacy
+// fields would silently move image calls to the stored BaseURL.
 func (s *knowledgeBaseService) resolveUpdatedVLMConfig(
 	ctx context.Context, current, requested types.VLMConfig,
 ) (types.VLMConfig, error) {
@@ -497,10 +503,10 @@ func (s *knowledgeBaseService) resolveUpdatedVLMConfig(
 	if err := types.ValidateKnowledgeBasePromptInstructions(&types.KnowledgeBase{VLMConfig: next}); err != nil {
 		return types.VLMConfig{}, apperrors.NewBadRequestError("vlm_config: " + err.Error())
 	}
-	hasLegacy := current.ModelName != "" && current.BaseURL != ""
+	pureLegacy := current.ModelID == "" && current.ModelName != "" && current.BaseURL != ""
 	if !next.Enabled {
 		next.ModelID = ""
-		legacyEcho := hasLegacy &&
+		legacyEcho := pureLegacy &&
 			requested.ModelName == current.ModelName && requested.BaseURL == current.BaseURL
 		if !legacyEcho {
 			clearLegacyVLMFields(&next)
@@ -508,7 +514,7 @@ func (s *knowledgeBaseService) resolveUpdatedVLMConfig(
 		return next, nil
 	}
 	if next.ModelID == "" {
-		if !hasLegacy {
+		if !pureLegacy {
 			return types.VLMConfig{}, apperrors.NewBadRequestError(
 				"vlm_config.model_id is required when enabled")
 		}

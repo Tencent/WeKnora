@@ -206,3 +206,71 @@ func TestUpdateKnowledgeBaseRejectsInvalidVLMModel(t *testing.T) {
 		})
 	}
 }
+
+// CreateKnowledgeBase stores vlm_config as sent, so a managed model_id can sit
+// next to legacy model_name/base_url. resolveVLM uses the managed model then;
+// an update must not drop model_id and leave the legacy endpoint in charge.
+func newMixedVLMKB() *types.KnowledgeBase {
+	kb := newLegacyVLMKB()
+	kb.VLMConfig.Enabled = true
+	kb.VLMConfig.ModelID = "vlm-1"
+	return kb
+}
+
+func TestUpdateKnowledgeBaseMixedVLMDisableClearsLegacy(t *testing.T) {
+	cases := map[string]types.VLMConfig{
+		"plain disable": {Enabled: false},
+		"disable echoing stored legacy": {
+			Enabled: false, ModelID: "vlm-1", ModelName: "stored", BaseURL: "https://stored.example",
+		},
+	}
+	for name, req := range cases {
+		t.Run(name, func(t *testing.T) {
+			repo := newFakeKBRepo()
+			repo.rows["kb-1"] = newMixedVLMKB()
+			svc := newVLMUpdateService(repo)
+
+			kb, err := svc.UpdateKnowledgeBase(context.Background(), "kb-1", "n", "d", nil, &req)
+			require.NoError(t, err)
+			assert.False(t, kb.VLMConfig.IsEnabled(), "disable must not fall back to the stored base_url")
+			assert.Empty(t, kb.VLMConfig.ModelID)
+			assert.Empty(t, kb.VLMConfig.ModelName)
+			assert.Empty(t, kb.VLMConfig.BaseURL)
+			assert.Empty(t, kb.VLMConfig.APIKey)
+		})
+	}
+}
+
+// enabled=true without model_id is only a no-op for a pure legacy KB. On a
+// mixed config it would drop the managed model and run on the legacy
+// endpoint, so it is rejected like on any other managed KB.
+func TestUpdateKnowledgeBaseMixedVLMEnableWithoutModelRejected(t *testing.T) {
+	repo := newFakeKBRepo()
+	repo.rows["kb-1"] = newMixedVLMKB()
+	svc := newVLMUpdateService(repo)
+
+	_, err := svc.UpdateKnowledgeBase(context.Background(), "kb-1", "n", "d", nil, &types.VLMConfig{
+		Enabled: true, ModelName: "stored", BaseURL: "https://stored.example",
+	})
+
+	appErr, ok := apperrors.IsAppError(err)
+	require.True(t, ok, "error = %v, want an AppError", err)
+	assert.Equal(t, http.StatusBadRequest, appErr.HTTPCode)
+	assert.Equal(t, newMixedVLMKB().VLMConfig, repo.rows["kb-1"].VLMConfig)
+}
+
+// Echoing the managed model_id keeps it and drops the legacy fields.
+func TestUpdateKnowledgeBaseMixedVLMKeepsManagedModel(t *testing.T) {
+	repo := newFakeKBRepo()
+	repo.rows["kb-1"] = newMixedVLMKB()
+	svc := newVLMUpdateService(repo)
+
+	kb, err := svc.UpdateKnowledgeBase(context.Background(), "kb-1", "n", "d", nil, &types.VLMConfig{
+		Enabled: true, ModelID: "vlm-1", ModelName: "stored", BaseURL: "https://stored.example",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "vlm-1", kb.VLMConfig.ModelID)
+	assert.True(t, kb.VLMConfig.IsEnabled())
+	assert.Empty(t, kb.VLMConfig.ModelName)
+	assert.Empty(t, kb.VLMConfig.BaseURL)
+}
