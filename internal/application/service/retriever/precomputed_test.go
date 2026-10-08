@@ -55,6 +55,25 @@ func TestBatchIndexVectorsStoresTheGivenVectorsNotTheTextOnes(t *testing.T) {
 	assert.Equal(t, types.ImageSourceType, repo.rows[0].SourceType)
 }
 
+func TestBatchIndexVectorsSkipsKeywordOnlyEngines(t *testing.T) {
+	keywordOnly, vector := &recordingRepository{}, &recordingRepository{}
+	c := &CompositeRetrieveEngine{engineInfos: []*engineInfo{
+		{
+			retrieveEngine: &KeywordsVectorHybridRetrieveEngineService{indexRepository: keywordOnly},
+			retrieverType:  []types.RetrieverType{types.KeywordsRetrieverType},
+		},
+		{
+			retrieveEngine: &KeywordsVectorHybridRetrieveEngineService{indexRepository: vector},
+			retrieverType:  []types.RetrieverType{types.VectorRetrieverType},
+		},
+	}}
+	rows := []*types.IndexInfo{{SourceID: "a", ChunkID: "a", Content: "caption", SourceType: types.ImageSourceType}}
+	require.NoError(t, c.BatchIndexVectors(context.Background(), &capturingEmbedder{}, rows, [][]float32{{0.1}}))
+
+	assert.Empty(t, keywordOnly.rows, "an image row would hold only its caption in a keyword-only index")
+	assert.Len(t, vector.rows, 1)
+}
+
 func TestBatchIndexVectorsRefusesWhatWouldMisalignVectors(t *testing.T) {
 	c := compositeOver(&recordingRepository{}, types.VectorRetrieverType)
 	rows := []*types.IndexInfo{{SourceID: "a"}, {SourceID: "a"}}
