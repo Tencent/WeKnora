@@ -1332,18 +1332,8 @@ func (s *knowledgeService) moveKnowledgeReuseVectors(
 	if err != nil {
 		return err
 	}
-	// Image vectors exist only in a knowledge base that opted in to them
-	// (indexImageVector), as CloneChunk keeps them. A move reuses the rows in
-	// place, so for a target that did not opt in they are deleted here, the
-	// index rows before the chunks: a retry finds the chunks again and
-	// finishes the job, where the reverse order would leave orphaned rows.
-	var imageVectorIDs []string
 	chunkIDs := make([]string, 0, len(oldChunks))
 	for _, chunk := range oldChunks {
-		if chunk.ChunkType == types.ChunkTypeImageVector && !targetKB.IsImageVectorEnabled() {
-			imageVectorIDs = append(imageVectorIDs, chunk.ID)
-			continue
-		}
 		chunkIDs = append(chunkIDs, chunk.ID)
 	}
 	if knowledge.EmbeddingModelID != "" {
@@ -1361,12 +1351,6 @@ func (s *knowledgeService) moveKnowledgeReuseVectors(
 		if err != nil {
 			return err
 		}
-		if len(imageVectorIDs) > 0 {
-			err := engine.DeleteByChunkIDList(ctx, imageVectorIDs, model.GetDimensions(), sourceKB.Type)
-			if err != nil {
-				return fmt.Errorf("failed to delete image vector indices: %w", err)
-			}
-		}
 		// Move index metadata in place. Copy + delete by the unchanged document ID
 		// would also delete the just-created target indices.
 		if err := engine.MoveKnowledgeIndices(ctx,
@@ -1377,11 +1361,6 @@ func (s *knowledgeService) moveKnowledgeReuseVectors(
 			model.GetDimensions(),
 			sourceKB.Type); err != nil {
 			return err
-		}
-	}
-	if len(imageVectorIDs) > 0 {
-		if err := s.chunkRepo.DeleteChunks(ctx, tenantID, imageVectorIDs); err != nil {
-			return fmt.Errorf("failed to delete image vector chunks: %w", err)
 		}
 	}
 
