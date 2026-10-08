@@ -244,7 +244,7 @@ async function createNewSession(value: string, modelId: string, mentionedItems: 
     creationError.value = false;
     pendingQuestion.value = value;
     createdSessionId.value = '';
-    const restoreDraft = () => inputFieldRef.value?.prefill(value);
+    const restoreDraft = () => inputFieldRef.value?.prefill(value, options);
     const selectedKbs = settingsStore.settings.selectedKnowledgeBases || [];
     const selectedFiles = settingsStore.settings.selectedFiles || [];
 
