@@ -203,7 +203,7 @@ type EmbedChannel struct {
 | `name` | string | — | 渠道显示名称 |
 | `enabled` | bool | `true` | 渠道开关，关闭后所有公开接口拒绝访问 |
 | `agent_id` | string | `builtin-quick-answer` | 绑定的 Agent，决定知识库范围与对话能力 |
-| `allowed_origins` | string[] | — | **必填至少一项，填写嵌入宿主 A，不是 WeKnora 地址 B**。支持三种形式：完整 `http(s)://` Origin、子域名通配 `*.example.com`、全通配 `*`（仅开发模式允许，生产环境拒绝） |
+| `allowed_origins` | string[] | — | **必填至少一项，填写嵌入宿主 A，不是 WeKnora 地址 B**。支持三种形式：完整 `http(s)://` Origin（不含路径、查询参数）、子域名通配 `*.example.com`（只匹配子域，不含 `example.com` 本身；未写端口时匹配任意端口）、全通配 `*`（`GIN_MODE=release` 时拒绝保存，仅供开发） |
 | `welcome_message` | string | 空 | 打开挂件时的欢迎语 |
 | `rate_limit_per_minute` | int | `30` | 单 IP 每分钟请求上限 |
 | `rate_limit_per_day` | int | `10000` | 渠道级每日请求总量上限 |
@@ -220,7 +220,7 @@ type EmbedChannel struct {
 
 ### 管理 API（需登录鉴权）
 
-由 `RegisterEmbedChannelRoutes`（`internal/router/router.go`）注册，支持 API Key 的 `ManageChannels` 能力：
+由 `RegisterEmbedChannelRoutes`（`internal/router/routes_agent.go`）注册，支持 API Key 的 `ManageChannels` 能力：
 
 | 方法 | 路径 | 权限 | 说明 |
 | --- | --- | --- | --- |
@@ -320,7 +320,8 @@ sequenceDiagram
 | 匿名会话/Token | `internal/application/service/embed_session.go` |
 | Webhook 分发 | `internal/application/service/embed_webhook.go` |
 | 鉴权中间件 | `internal/middleware/embed_auth.go` |
-| 路由注册 | `internal/router/router.go`（`RegisterEmbedPublicRoutes` / `RegisterEmbedChannelRoutes`） |
+| 路由注册 | `internal/router/routes_agent.go`（`RegisterEmbedPublicRoutes` / `RegisterEmbedChannelRoutes` / 嵌入页 CSP 策略） |
+| 宿主来源规则 | `internal/embedpolicy/origin.go` |
 | 挂件加载器（SDK） | `frontend/public/weknora-widget.js` |
 | 嵌入页 SPA 入口 | `frontend/src/embed-main.ts`、`frontend/src/composables/useEmbedBridge.ts`、`useEmbedChatSession.ts` |
 | 数据库迁移 | `migrations/versioned/000060_embed_channels.up.sql` |

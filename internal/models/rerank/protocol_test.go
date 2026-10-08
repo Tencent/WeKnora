@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/models/api"
-	"github.com/Tencent/WeKnora/internal/models/catalog"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -38,7 +37,7 @@ func (f *fakeProtocol) Rerank(
 	return out, nil
 }
 
-func newWrapped(inner api.Reranker, settings catalog.RerankSettings) *protocolReranker {
+func newWrapped(inner api.Reranker, settings api.RerankSettings) *protocolReranker {
 	return &protocolReranker{
 		inner: inner, settings: settings,
 		endpoint: "https://example.invalid", modelName: "m", modelID: "id",
@@ -50,7 +49,7 @@ func newWrapped(inner api.Reranker, settings catalog.RerankSettings) *protocolRe
 // original slice, not into the batch.
 func TestBatchingSplitsAndRestoresGlobalIndices(t *testing.T) {
 	fake := &fakeProtocol{}
-	r := newWrapped(fake, catalog.RerankSettings{MaxDocuments: 2, MaxConcurrency: 1})
+	r := newWrapped(fake, api.RerankSettings{MaxDocuments: 2, MaxConcurrency: 1})
 
 	docs := []string{"d0", "d1", "d2", "d3", "d4"}
 	got, err := r.Rerank(context.Background(), "q", docs)
@@ -67,7 +66,7 @@ func TestBatchingSplitsAndRestoresGlobalIndices(t *testing.T) {
 
 func TestBatchingIsSkippedWhenTheVendorDeclaresNoLimit(t *testing.T) {
 	fake := &fakeProtocol{}
-	r := newWrapped(fake, catalog.RerankSettings{})
+	r := newWrapped(fake, api.RerankSettings{})
 
 	_, err := r.Rerank(context.Background(), "q", []string{"a", "b", "c", "d"})
 	require.NoError(t, err)
@@ -78,7 +77,7 @@ func TestBatchingIsSkippedWhenTheVendorDeclaresNoLimit(t *testing.T) {
 // so beats sending a prefix and returning a number for text nobody asked
 // about.
 func TestAnOversizedDocumentIsAnError(t *testing.T) {
-	r := newWrapped(&fakeProtocol{}, catalog.RerankSettings{MaxDocumentChars: 10})
+	r := newWrapped(&fakeProtocol{}, api.RerankSettings{MaxDocumentChars: 10})
 
 	_, err := r.Rerank(context.Background(), "q", []string{"ok", strings.Repeat("x", 99)})
 	require.Error(t, err)
@@ -86,7 +85,7 @@ func TestAnOversizedDocumentIsAnError(t *testing.T) {
 }
 
 func TestBatchErrorsPropagate(t *testing.T) {
-	r := newWrapped(&fakeProtocol{err: fmt.Errorf("upstream exploded")}, catalog.RerankSettings{})
+	r := newWrapped(&fakeProtocol{err: fmt.Errorf("upstream exploded")}, api.RerankSettings{})
 
 	_, err := r.Rerank(context.Background(), "q", []string{"a"})
 	require.Error(t, err)
@@ -95,7 +94,7 @@ func TestBatchErrorsPropagate(t *testing.T) {
 
 func TestEmptyInputMakesNoRequest(t *testing.T) {
 	fake := &fakeProtocol{}
-	r := newWrapped(fake, catalog.RerankSettings{})
+	r := newWrapped(fake, api.RerankSettings{})
 
 	got, err := r.Rerank(context.Background(), "q", nil)
 	require.NoError(t, err)
@@ -142,7 +141,7 @@ func TestProbabilityScoresPassThroughUntouched(t *testing.T) {
 // so the query is checked on its own before any request goes out.
 func TestAnOversizedQueryIsAnError(t *testing.T) {
 	fake := &fakeProtocol{}
-	r := newWrapped(fake, catalog.RerankSettings{MaxQueryChars: 10})
+	r := newWrapped(fake, api.RerankSettings{MaxQueryChars: 10})
 
 	_, err := r.Rerank(context.Background(), strings.Repeat("q", 11), []string{"d"})
 	require.Error(t, err)
@@ -151,7 +150,7 @@ func TestAnOversizedQueryIsAnError(t *testing.T) {
 }
 
 func TestAQueryWithinTheLimitPasses(t *testing.T) {
-	r := newWrapped(&fakeProtocol{}, catalog.RerankSettings{MaxQueryChars: 10})
+	r := newWrapped(&fakeProtocol{}, api.RerankSettings{MaxQueryChars: 10})
 	_, err := r.Rerank(context.Background(), strings.Repeat("中", 10), []string{"d"})
 	require.NoError(t, err, "runes, not bytes")
 }
@@ -161,7 +160,7 @@ func TestAQueryWithinTheLimitPasses(t *testing.T) {
 // caller would see the best of the first batch only.
 func TestMergedBatchesAreRankedGlobally(t *testing.T) {
 	// Scores are the position within the batch, so batch 2 holds the highest.
-	r := newWrapped(&fakeProtocol{}, catalog.RerankSettings{MaxDocuments: 2, MaxConcurrency: 1})
+	r := newWrapped(&fakeProtocol{}, api.RerankSettings{MaxDocuments: 2, MaxConcurrency: 1})
 
 	got, err := r.Rerank(context.Background(), "q", []string{"d0", "d1", "d2", "d3", "d4"})
 	require.NoError(t, err)

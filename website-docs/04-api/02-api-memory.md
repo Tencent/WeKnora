@@ -41,13 +41,15 @@ curl -X PUT "$BASE/api/v1/memory/settings" \
 | POST | `/memory/items` | `{kind,content,importance}`；200 `{success,data:MemoryItem}` |
 | PUT | `/memory/items/:id` | `{content,importance}`；200 `{success,data:MemoryItem}` |
 | DELETE | `/memory/items/:id` | 200 `{"success":true}` |
-| POST | `/memory/items/:id/confirm` | 200 `{success,data:MemoryItem}` |
+| POST | `/memory/items/:id/confirm` | 200 `{success,data:MemoryItem}`；推断已失效或其依据已被修改时返回 409 |
 | POST | `/memory/items/:id/reject` | 200 `{"success":true}` |
 | DELETE | `/memory/items` | 清空当前身份；200 `{success,removed}` |
 
 `status` 可为 active、pending、superseded、archived，省略不过滤。`limit` 默认 50，合法范围 1–200，越界回落 50；`offset` 默认 0，负值归零。kind 为 profile/preference/fact/task/interest；内容为简短记忆，最长 300 个字符，importance 用于重要度排序。
 
 MemoryItem 包括 `id`、`kind`、`content`、`topic`、`importance`、`origin`、`status`、`source_session_id`、`source_message_id`、`expires_at`、`superseded_by` 和创建/修改时间。pending 不参与提示词；编辑后按手工维护处理。
+
+用于修改已有记忆的 pending 推断，确认前旧条目继续生效；确认会在同一事务中激活推断并替换旧条目。已失效、已到期或所依据内容已被修改/删除的推断不能确认，返回 409，客户端应刷新列表。内容几乎全是凭据等敏感信息时，新增或编辑返回 400。
 
 ```bash
 curl -X POST "$BASE/api/v1/memory/items" \
@@ -93,4 +95,4 @@ curl "$BASE/api/v1/memory/export" -H "Authorization: Bearer $TOKEN" \
 curl -X POST "$BASE/api/v1/memory/consolidate" -H "Authorization: Bearer $TOKEN"
 ```
 
-参数无效返回 400；找不到当前身份的条目返回 404；认证/权限不满足返回 401/403。接口没有管理员读取他人记忆的 subject 参数。实现：`internal/handler/memory.go`、`internal/router/routes_memory.go`。
+参数无效、内容为敏感信息或记忆未开启时返回 400；找不到当前身份的条目返回 404；确认冲突返回 409；认证/权限不满足返回 401/403。接口没有管理员读取他人记忆的 subject 参数。实现：`internal/handler/memory.go`、`internal/router/routes_memory.go`。

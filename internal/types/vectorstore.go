@@ -893,13 +893,32 @@ func buildEnvStoreForDriver(driver string, envLookup EnvLookupFunc) *VectorStore
 			},
 		}
 	case "qdrant":
+		host := envLookup("QDRANT_HOST")
+		if host == "" {
+			host = "localhost"
+		}
+		port := 6334
+		if value, err := strconv.Atoi(envLookup("QDRANT_PORT")); err == nil {
+			port = value
+		}
+		useTLS := false
+		// Preserve the env convention: any nonempty value except false or 0 enables TLS.
+		if value := envLookup("QDRANT_USE_TLS"); value != "" {
+			value = strings.ToLower(strings.TrimSpace(value))
+			useTLS = value != "false" && value != "0"
+		}
 		return &VectorStore{
 			ID:         "__env_qdrant__",
 			Name:       "Qdrant",
 			EngineType: QdrantRetrieverEngineType,
 			ConnectionConfig: ConnectionConfig{
-				Host:   envLookup("QDRANT_HOST"),
+				Host:   host,
+				Port:   port,
 				APIKey: envLookup("QDRANT_API_KEY"),
+				UseTLS: useTLS,
+			},
+			IndexConfig: IndexConfig{
+				CollectionPrefix: envLookup("QDRANT_COLLECTION"),
 			},
 		}
 	case "milvus":

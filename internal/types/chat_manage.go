@@ -1,6 +1,9 @@
 package types
 
-import "maps"
+import (
+	"maps"
+	"strings"
+)
 
 // PipelineRequest holds immutable configuration set once at the request entry point.
 type PipelineRequest struct {
@@ -17,6 +20,10 @@ type PipelineRequest struct {
 	KeywordThreshold float64       `json:"keyword_threshold"`
 	EmbeddingTopK    int           `json:"embedding_top_k"`
 	VectorDatabase   string        `json:"vector_database"`
+	// DisableVectorMatch / DisableKeywordsMatch turn off one recall path for
+	// every search target. Set by the knowledge-search API.
+	DisableVectorMatch   bool `json:"disable_vector_match,omitempty"`
+	DisableKeywordsMatch bool `json:"disable_keywords_match,omitempty"`
 
 	// Rerank parameters
 	RerankModelID   string  `json:"rerank_model_id"`
@@ -114,6 +121,9 @@ type PipelineState struct {
 	RewriteQuery string      `json:"rewrite_query,omitempty"`
 	Intent       QueryIntent `json:"intent,omitempty"`
 	History      []*History  `json:"history,omitempty"`
+	// HistoryLoaded records that History was fetched this turn, so an empty
+	// History (a first turn) is not fetched again by a later stage.
+	HistoryLoaded bool `json:"-"`
 
 	SearchResult         []*SearchResult   `json:"-"`
 	RerankResult         []*SearchResult   `json:"-"`
@@ -134,6 +144,8 @@ type PipelineState struct {
 	// UsedMemories mirrors MemoryPrompt in structured form so the answer can
 	// tell the user which memories it saw.
 	UsedMemories UsedMemories `json:"-"`
+	// RerankDiagnostics records what the rerank stage did this turn.
+	RerankDiagnostics *RerankDiagnostics `json:"-"`
 }
 
 // PipelineContext holds runtime context for the current pipeline execution.
@@ -155,12 +167,31 @@ type ChatManage struct {
 // NeedsRetrieval returns true when the current pipeline execution should
 // run the retrieval stages (search, rerank, merge, etc.).
 // For IntentWebSearch, retrieval is only needed if web search is enabled;
-// for all other intents it delegates to QueryIntent.NeedsKBRetrieval().
+// otherwise the intent prompt (intent_prompts.yaml "web_search") tells the
+// user web search is unavailable. All other intents delegate to
+// QueryIntent.NeedsKBRetrieval().
 func (c *ChatManage) NeedsRetrieval() bool {
 	if c.Intent == IntentWebSearch {
 		return c.WebSearchEnabled
 	}
 	return c.Intent.NeedsKBRetrieval()
+}
+
+// NormalizeQueryIntent maps a model-produced intent label onto a known
+// intent. Case and separators are forgiven ("KB-Search" → kb_search); an
+// unknown label becomes the empty intent, which retrieves. Taking the label
+// verbatim turned any unexpected value into "no retrieval", so the answer
+// was generated without the knowledge base and without an error.
+func NormalizeQueryIntent(raw string) QueryIntent {
+	label := strings.ToLower(strings.TrimSpace(raw))
+	label = strings.NewReplacer("-", "_", " ", "_").Replace(label)
+	switch intent := QueryIntent(label); intent {
+	case IntentKBSearch, IntentWebSearch, IntentGreeting, IntentChitchat, IntentFollowUp,
+		IntentImageOnly, IntentDocOnly, IntentSummarize, IntentClarification:
+		return intent
+	default:
+		return ""
+	}
 }
 
 // Clone creates a deep copy of the ChatManage object.
@@ -217,6 +248,8 @@ func (c *ChatManage) Clone() *ChatManage {
 			KeywordThreshold:         c.KeywordThreshold,
 			EmbeddingTopK:            c.EmbeddingTopK,
 			VectorDatabase:           c.VectorDatabase,
+			DisableVectorMatch:       c.DisableVectorMatch,
+			DisableKeywordsMatch:     c.DisableKeywordsMatch,
 			RerankModelID:            c.RerankModelID,
 			RerankTopK:               c.RerankTopK,
 			RerankThreshold:          c.RerankThreshold,

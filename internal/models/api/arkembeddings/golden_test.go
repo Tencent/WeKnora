@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/models/api"
-	"github.com/Tencent/WeKnora/internal/models/catalog"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -35,7 +34,7 @@ const endpoint = "/api/v3/embeddings/multimodal"
 func newClient(url string, dims int) *Client {
 	return New(Config{
 		Endpoint: api.Endpoint{BaseURL: url, Model: "doubao-embedding-vision-251215", Auth: api.BearerAuth("k")},
-		Settings: catalog.EmbeddingsSettings{
+		Settings: api.EmbeddingsSettings{
 			SendEncodingFormat: true, DimensionsField: "dimensions",
 		},
 		Dimensions: dims,

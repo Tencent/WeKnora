@@ -11,7 +11,7 @@
     "'icon' is an inline <svg ...> string or an .svg path under this file's own",
     "directory — no absolute paths, no escaping it, 256 KB max: icons are served",
     "as a data: URI to everyone who can open the model pages.",
-    "Per-model 'compat' keys depend on the protocol; see internal/models/catalog/compat.go."
+    "Per-model 'compat' keys depend on the protocol; see website-docs/03-features/06-models.md (协议兼容覆盖 compat JSON)."
   ],
   "providers": {
     "openai": {

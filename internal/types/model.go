@@ -161,7 +161,7 @@ type ModelParameters struct {
 
 // ModelSpecOverride is the per-row slice of a catalog model entry that an
 // operator may pin from the UI or YAML. Compat is the flat protocol-specific
-// object documented in internal/models/catalog/compat.go.
+// object decoded by internal/models/runtime/compat.go using the API settings.
 type ModelSpecOverride struct {
 	API             string             `yaml:"api,omitempty"               json:"api,omitempty"`
 	Reasoning       *bool              `yaml:"reasoning,omitempty"         json:"reasoning,omitempty"`
@@ -199,6 +199,9 @@ func (o *ModelSpecOverride) CompatJSON() json.RawMessage {
 // built-in models YAML loader) must reject anything longer to avoid a
 // "value too long for type" failure at INSERT time.
 const ModelIDMaxLen = 64
+
+// ModelDisplayNameMaxLen matches models.display_name VARCHAR(255).
+const ModelDisplayNameMaxLen = 255
 
 // DefaultBuiltinModelTenantID is the tenant id that built-in models are
 // assigned to when YAML does not specify one. Kept in sync with the seed

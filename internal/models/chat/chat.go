@@ -15,11 +15,8 @@ import (
 	"github.com/Tencent/WeKnora/internal/models/api/googlegenai"
 	"github.com/Tencent/WeKnora/internal/models/api/openaicompletions"
 	"github.com/Tencent/WeKnora/internal/models/api/openairesponses"
-	"github.com/Tencent/WeKnora/internal/models/catalog"
+	modelruntime "github.com/Tencent/WeKnora/internal/models/runtime"
 	"github.com/Tencent/WeKnora/internal/models/utils/ollama"
-	// Built-in vendors register with the catalog through package init; the
-	// chat factory is the one place that must never see an empty catalog.
-	_ "github.com/Tencent/WeKnora/internal/models/vendors"
 	"github.com/Tencent/WeKnora/internal/types"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
@@ -141,11 +138,11 @@ func NewChat(config *ChatConfig, ollamaService *ollama.OllamaService) (Chat, err
 
 // Resolve looks the configuration up in the catalog. It is exposed so the
 // handler layer can report the effective protocol and capabilities.
-func Resolve(config *ChatConfig) (*catalog.Resolved, error) {
+func Resolve(config *ChatConfig) (*modelruntime.Resolved, error) {
 	if config == nil {
 		return nil, fmt.Errorf("chat config is nil")
 	}
-	return catalog.Resolve(catalog.Ref{
+	return modelruntime.Resolve(modelruntime.Ref{
 		Provider:  config.Provider,
 		Model:     config.ModelName,
 		BaseURL:   config.BaseURL,
@@ -182,47 +179,14 @@ func NewRemoteChat(config *ChatConfig) (Chat, error) {
 		}
 	}
 
-	creds := catalog.Credentials{APIKey: config.APIKey, AppID: config.AppID, AppSecret: config.AppSecret}
-	if creds.APIKey == "" {
-		creds.APIKey = vendor.DefaultAPIKey
-	}
-	if vendor.Auth == catalog.AuthSigned {
-		if creds.AppID == "" {
-			return nil, fmt.Errorf("%s provider: AppID is required", vendor.Name)
-		}
-		if creds.AppSecret == "" {
-			return nil, fmt.Errorf("%s provider: AppSecret is required", vendor.Name)
-		}
-	} else if vendor.RequiresAuth && resolved.API == api.APIAnthropicMessages && strings.TrimSpace(creds.APIKey) == "" {
-		return nil, fmt.Errorf("%s provider: API key is required", vendor.Name)
-	}
-
-	headers := make(map[string]string, len(vendor.Headers)+len(config.CustomHeaders))
-	for k, v := range vendor.Headers {
-		headers[k] = v
-	}
-	for k, v := range config.CustomHeaders {
-		headers[k] = v
-	}
-	endpoint := api.Endpoint{
-		BaseURL: resolved.BaseURL,
-		Model:   resolved.RemoteModel,
-		ModelID: config.ModelID,
-		Auth:    vendor.AuthFunc(resolved.API, creds),
-		Headers: headers,
-	}
-	if vendor.Endpoint != nil {
-		url, query := vendor.Endpoint(catalog.EndpointRequest{
-			BaseURL:   resolved.BaseURL,
-			Model:     resolved.RemoteModel,
-			ModelType: types.ModelTypeKnowledgeQA,
-			API:       resolved.API,
-			Extra:     config.ExtraConfig,
-		})
-		if url != "" {
-			endpoint.URL = url
-			endpoint.Query = query
-		}
+	endpoint, err := resolved.Endpoint(types.ModelTypeKnowledgeQA, modelruntime.Connection{
+		ModelID:     config.ModelID,
+		Credentials: api.Credentials{APIKey: config.APIKey, AppID: config.AppID, AppSecret: config.AppSecret},
+		Headers:     config.CustomHeaders,
+		Extra:       config.ExtraConfig,
+	})
+	if err != nil {
+		return nil, err
 	}
 
 	switch resolved.API {

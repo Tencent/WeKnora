@@ -80,6 +80,7 @@ API 默认返回 `resource://`，客户端通过鉴权代理获取文件。需�
 | 加了 `resource_urls=public` 返回 403 | 用的是限定知识库的 API Key | 改用 `handle` 模式，或使用已获授权的 full-access Key |
 | 嵌入挂件里图片不显示，但网页端正常 | 挂件走的是渠道代理，与主站凭证不同 | 确认挂件页面带着有效 Embed token；`resource_urls=public` 对嵌入渠道无效 |
 | 共享回答里的图片 403/404 | 消息上下文缺失、资源未绑定或共享已撤销 | 使用消息级代理并检查当前共享权限；不要拼属主租户的 /files 地址 |
+| 升级或更换密钥后已发出的链接失效 | 签名密钥（`SYSTEM_SIGNING_KEY`，或回退使用的 `SYSTEM_AES_KEY`）变化后旧签名无法校验 | 重新获取链接；多副本部署确认所有实例使用同一密钥 |
 | 外链过一段时间失效 | 外链是限时的（grant 2 小时 / MinIO 预签名 24 小时） | 不要缓存外链本身，需要时重新取；同一文件在有效期内会复用同一链接 |
 | 网页端图片 404，日志显示租户不匹配 | 跨租户共享库的图存在属主租户下 | 该场景应走 `/api/v1/knowledge-bases/:id/files`，确认前端拿到的是 KB 维度的代理地址 |
 
@@ -90,7 +91,7 @@ API 默认返回 `resource://`，客户端通过鉴权代理获取文件。需�
 | `APP_EXTERNAL_URL` | IM 渠道图片外链的外部可达地址；`resource://` 改写成 `<APP_EXTERNAL_URL>/r/<token>` 的前提 |
 | `RESOURCE_URL_MODE` | API 响应里文件引用的默认形式（`handle` / `public`） |
 | `MINIO_ENDPOINT` 等存储 endpoint | 设为公网地址时，外链可由存储预签名提供，不必依赖 `APP_EXTERNAL_URL` |
-| `SYSTEM_AES_KEY` | 建议配置：可复用 grant 行、稳定直链 URL，并降低读接口的写入压力 |
+| `SYSTEM_SIGNING_KEY`（未设置时回退 `SYSTEM_AES_KEY`） | 签名密钥。`/api/v1/files/presigned` 预签名链接依赖它；同时用于在有效期内复用 `/r/<token>` grant、稳定直链 URL，并降低读接口的写入压力。未配置、长度不足 16 或为示例值时无法签发预签名链接；更换后已签发的链接失效 |
 
 ## 相关文档 {#_5-相关章节}
 

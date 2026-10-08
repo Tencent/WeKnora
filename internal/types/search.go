@@ -149,6 +149,8 @@ func (st SearchTargets) ContainsKB(kbID string) bool {
 
 // SearchResult represents the search result
 type SearchResult struct {
+	// CitationSources retains independently citeable bodies after context expansion.
+	CitationSources []*SearchResult `json:"-" gorm:"-"`
 	// ID
 	ID string `gorm:"column:id"              json:"id"`
 	// Content
@@ -194,6 +196,9 @@ type SearchResult struct {
 
 	// ChunkMetadata stores chunk-level metadata (e.g., generated questions)
 	ChunkMetadata JSON `json:"chunk_metadata,omitempty"`
+	// ContextHeader is the chunk's heading breadcrumb, part of what was
+	// embedded (Chunk.EmbeddingContent) but not of Content. Internal only.
+	ContextHeader string `json:"-"`
 
 	// MatchedContent is the actual content that was matched in vector search
 	// For FAQ: this is the matched question text (standard or similar question)
@@ -207,6 +212,10 @@ type SearchResult struct {
 
 	// KnowledgeBaseID is the ID of the knowledge base this result belongs to
 	KnowledgeBaseID string `json:"knowledge_base_id,omitempty"`
+
+	// SourceLocators point back into the original file for citation
+	// navigation. Merged results carry the union of their chunks' locators.
+	SourceLocators SourceLocators `json:"source_locators,omitempty"`
 
 	// ContentRevision is the chunk edit revision at retrieval time.
 	// Internal only: used by the merge pipeline to decide whether source
@@ -249,6 +258,10 @@ type SearchParams struct {
 	// in processSearchResults. Used by the chat pipeline where context assembly
 	// is handled separately in the merge stage.
 	SkipContextEnrichment bool `json:"skip_context_enrichment,omitempty"`
+	// Rerank, when present and enabled, reranks the fused candidates before
+	// truncating to MatchCount. Only the hybrid-search API reads it; internal
+	// callers rerank on their own.
+	Rerank *RerankOptions `json:"rerank,omitempty"`
 }
 
 // Value implements the driver.Valuer interface, used to convert SearchResult to database value

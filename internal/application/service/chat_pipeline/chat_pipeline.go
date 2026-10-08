@@ -98,10 +98,6 @@ var (
 		Description: "Reranking failed",
 		ErrorType:   "rerank_failed",
 	}
-	ErrGetRerankModel = &PluginError{
-		Description: "Failed to get rerank model",
-		ErrorType:   "get_rerank_model_failed",
-	}
 	ErrGetChatModel = &PluginError{
 		Description: "Failed to get chat model",
 		ErrorType:   "get_chat_model_failed",

@@ -2,7 +2,18 @@ package types
 
 import (
 	"context"
+	"strings"
 )
+
+// UploadOnlyQuestion is the question asked on the user's behalf when a message
+// carries an image or file but no text. The stored user message keeps its
+// empty text; only model input uses this question.
+func UploadOnlyQuestion(locale string) string {
+	if strings.HasPrefix(locale, "zh") {
+		return "请根据我上传的内容回答。"
+	}
+	return "Please answer based on what I uploaded."
+}
 
 // SteerMessageContent adds delivery context only to model input. The persisted
 // user message and the UI always retain the user's original text.
@@ -56,6 +67,7 @@ type QARequest struct {
 	Query               string             // User query text
 	AssistantMessageID  string             // Pre-created assistant message ID
 	SummaryModelID      string             // Optional model override; empty = use agent/KB default
+	ReasoningEffort     string             // Optional per-request override; empty = use agent default
 	CustomAgent         *CustomAgent       // Optional custom agent for config override
 	SharedAgentReadOnly bool               // True only when access came from an agent share; source-workspace writes are forbidden
 	KnowledgeBaseIDs    []string           // Knowledge base IDs to search (from request + @mentions)

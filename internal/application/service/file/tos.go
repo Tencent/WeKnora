@@ -155,7 +155,11 @@ func joinTOSObjectKey(parts ...string) string {
 	return strings.Join(filtered, "/")
 }
 
+// parseTOSFilePath extracts bucket and object key from: tos://{bucket}/{objectKey}
+// Canonical storage://<backend-id>/tos://{bucket}/{objectKey} paths are
+// accepted too (see storageBackendInnerPath, #3151).
 func parseTOSFilePath(filePath string) (bucketName string, objectKey string, err error) {
+	filePath = storageBackendInnerPath(filePath)
 	if !strings.HasPrefix(filePath, tosScheme) {
 		return "", "", fmt.Errorf("invalid TOS file path: %s", filePath)
 	}

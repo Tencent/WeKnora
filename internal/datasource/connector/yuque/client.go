@@ -3,6 +3,7 @@ package yuque
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -18,6 +19,10 @@ const (
 	defaultTimeout  = 30 * time.Second
 	defaultPageSize = 100
 	userAgent       = "WeKnora-Yuque-Connector/1.0"
+
+	// maxJSONResponseBytes bounds every API response body. Listings and document
+	// payloads are small; a larger body means a broken or hostile server.
+	maxJSONResponseBytes = 16 << 20
 )
 
 // client wraps the Yuque Open API.
@@ -25,6 +30,9 @@ type client struct {
 	baseURL    string
 	token      string
 	httpClient *http.Client
+	// jsonLimit caps each API response body; a field so tests can lower it
+	// without materialising the production limit.
+	jsonLimit int64
 
 	// logTokenOnce ensures the redacted token identity is logged at most once
 	// per client lifetime (first real request), rather than on every call.
@@ -37,7 +45,30 @@ func newClient(cfg *Config) *client {
 		baseURL:    cfg.GetBaseURL(),
 		token:      cfg.APIToken,
 		httpClient: datasource.NewConnectorHTTPClient(defaultTimeout),
+		jsonLimit:  maxJSONResponseBytes,
 	}
+}
+
+// errResponseTooLarge marks a body over the cap. It is deterministic: the same
+// request returns the same oversized body, so callers must not retry it.
+var errResponseTooLarge = errors.New("response exceeds maximum size")
+
+// readCapped reads a response body, refusing anything larger than limit instead
+// of buffering it. Oversized payloads are reported as an error: a truncated
+// body would be indexed as if it were the whole document. A non-positive limit
+// (e.g. a zero-value client built in tests) falls back to maxJSONResponseBytes.
+func readCapped(body io.Reader, limit int64) ([]byte, error) {
+	if limit <= 0 {
+		limit = maxJSONResponseBytes
+	}
+	data, err := io.ReadAll(io.LimitReader(body, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > limit {
+		return nil, fmt.Errorf("%w (%d bytes)", errResponseTooLarge, limit)
+	}
+	return data, nil
 }
 
 // doRequest executes an authenticated request and decodes JSON, with retry logic
@@ -85,11 +116,11 @@ func (c *client) doRequest(ctx context.Context, method, path string, result inte
 			return lastErr
 		}
 
-		body, readErr := io.ReadAll(resp.Body)
+		body, readErr := readCapped(resp.Body, c.jsonLimit)
 		resp.Body.Close()
 		if readErr != nil {
 			lastErr = fmt.Errorf("read response body: %w", readErr)
-			if attempt < maxRetries {
+			if attempt < maxRetries && !errors.Is(readErr, errResponseTooLarge) {
 				if sErr := sleepCtx(ctx, backoff[attempt]); sErr != nil {
 					return sErr
 				}
@@ -291,6 +322,20 @@ func (c *client) GetDocDetail(ctx context.Context, docID int64) (v2DocDetail, er
 	var resp v2DocDetailResponse
 	if err := c.doRequest(ctx, http.MethodGet, path, &resp); err != nil {
 		return v2DocDetail{}, err
+	}
+	return resp.Data, nil
+}
+
+// ListBookTOC fetches the table of contents of a book.
+//
+// The endpoint returns the whole tree in a single flat list (no pagination), so
+// this costs exactly one request per book per sync. Callers fold the result into
+// per-document folder paths with buildTOCPaths.
+func (c *client) ListBookTOC(ctx context.Context, bookID int64) ([]v2TOCNode, error) {
+	path := fmt.Sprintf("/api/v2/repos/%d/toc", bookID)
+	var resp v2TOCResponse
+	if err := c.doRequest(ctx, http.MethodGet, path, &resp); err != nil {
+		return nil, err
 	}
 	return resp.Data, nil
 }

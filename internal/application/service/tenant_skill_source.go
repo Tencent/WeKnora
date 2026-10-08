@@ -15,7 +15,6 @@ import (
 	"sync"
 	"time"
 
-	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
 
@@ -103,12 +102,8 @@ func (s *TenantSkillService) InstallSkillFromSource(
 	// The config is authorized before the fetch, not by InstallSkill after it.
 	// The source is a caller-supplied host, so an unknown config ID must not
 	// be able to spend an outbound request and a body-sized download first.
-	cfgEntity, err := s.configs.GetByID(ctx, tenantID, configID)
-	if err != nil {
+	if err := s.requireSkillTarget(ctx, tenantID, configID); err != nil {
 		return "", err
-	}
-	if cfgEntity == nil {
-		return "", apperrors.NewNotFoundError("sandbox config not found")
 	}
 
 	bundle, archive, err := fetchNormalizedSkillBundle(ctx, source, s.sourceHTTP)

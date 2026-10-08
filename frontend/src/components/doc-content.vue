@@ -17,6 +17,7 @@ import {
 import { MessagePlugin } from "tdesign-vue-next";
 import { sanitizeHTML, safeMarkdownToHTML, createSafeImage, isValidImageURL, hydrateProtectedFileImages, isValidURL } from '@/utils/security';
 import { normalizeSpuriousTablePrefixes } from '@/utils/markdownTableNormalize';
+import { ensureLiteralSingleTildeOnGlobalMarked } from '@/utils/markedLiteralTilde';
 import { openMermaidFullscreen } from '@/utils/mermaidViewer';
 import { diffWikiLines, type WikiDiffLine } from '@/utils/wikiLineDiff';
 import { useI18n } from 'vue-i18n';
@@ -514,6 +515,7 @@ marked.use({
   gfm: true,         // 启用 GitHub Flavored Markdown
 });
 marked.use(markedKatex({ throwOnError: false, nonStandard: true }));
+ensureLiteralSingleTildeOnGlobalMarked();
 
 const preprocessMathDelimiters = (rawText: string): string => {
   if (!rawText || typeof rawText !== 'string') {

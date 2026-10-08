@@ -176,25 +176,24 @@ curl -X POST $BASE/api/v1/organizations/org-1/invite-code -H "Authorization: Bea
 
 ### GET /api/v1/organizations/:id/search-tenants
 
-用途：搜索可邀请的空间（返回按空间分组的候选）。权限：Admin+。
+用途：按空间 ID 解析可邀请的空间。权限：Admin+，且调用者空间须为组织 admin。自 v0.8.2 起只接受完整的空间 ID，不再按空间名称跨空间搜索，`limit` 参数已移除。
 
 | 查询参数 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
-| `q` | string | 是 | 空间名关键字 |
-| `limit` | int | 否 | 默认 10，上限 50 |
+| `q` | string | 是 | 完整的空间 ID |
 
-响应：200 `{"success":true,"data":[{"tenant_id","tenant_name"}]}`
+响应：200 `{"success":true,"data":[{"tenant_id","tenant_name"}]}`。`q` 不是有效 ID、空间不存在或已是组织成员时返回空数组，否则返回唯一候选。
 
 ```bash
-curl "$BASE/api/v1/organizations/org-1/search-tenants?q=demo" -H "Authorization: Bearer $TOKEN"
+curl "$BASE/api/v1/organizations/org-1/search-tenants?q=10002" -H "Authorization: Bearer $TOKEN"
 ```
 
 ### GET /api/v1/organizations/:id/search-users
 
-用途：已废弃别名，行为同 `search-tenants`（返回空间分组结果）。权限：Admin+。参数同上。
+用途：已废弃别名，行为同 `search-tenants`。权限：Admin+。参数同上。
 
 ```bash
-curl "$BASE/api/v1/organizations/org-1/search-users?q=demo" -H "Authorization: Bearer $TOKEN"
+curl "$BASE/api/v1/organizations/org-1/search-users?q=10002" -H "Authorization: Bearer $TOKEN"
 ```
 
 ### POST /api/v1/organizations/:id/invite
@@ -449,4 +448,4 @@ curl -X POST $BASE/api/v1/shared-agents/disabled -H "Authorization: Bearer $TOKE
 
 ## 实现参考
 
-路由注册：`internal/router/router.go` 的 `RegisterOrganizationRoutes`。Handler：`internal/handler/organization.go`。
+路由注册：`internal/router/routes_agent.go` 的 `RegisterOrganizationRoutes`。Handler：`internal/handler/organization.go`。

@@ -7,13 +7,15 @@ import { repoVersionLabel } from './version'
 
 const root = resolve(import.meta.dirname, '..')
 
-const sections: { dir: string; label: string }[] = [
+const sections: { dir: string; label: string; newestFirst?: boolean }[] = [
   { dir: '01-getting-started', label: '快速开始' },
   { dir: '02-architecture', label: '架构' },
   { dir: '03-features', label: '功能模块' },
   { dir: '04-api', label: 'API 参考' },
   { dir: '05-clients', label: '客户端' },
   { dir: '06-development', label: '开发指南' },
+  // 每个版本一页（v0.8.2.md），最新版本排在最前
+  { dir: '07-releases', label: '版本发布', newestFirst: true },
 ]
 
 /** 侧边栏条目文字：取正文一级标题，去掉冗余前后缀 */
@@ -27,10 +29,19 @@ function itemText(dir: string, file: string): string {
     .trim()
 }
 
-function itemsOf(dir: string): DefaultTheme.SidebarItem[] {
-  return readdirSync(resolve(root, dir))
-    .filter((f) => f.endsWith('.md'))
-    .sort()
+/** 版本号按数字比较，v0.10.0 排在 v0.9.0 之后 */
+function compareVersions(a: string, b: string): number {
+  const parts = (f: string) => f.replace(/^v|\.md$/g, '').split('.').map(Number)
+  const [x, y] = [parts(a), parts(b)]
+  for (let i = 0; i < Math.max(x.length, y.length); i++) {
+    if ((x[i] ?? 0) !== (y[i] ?? 0)) return (x[i] ?? 0) - (y[i] ?? 0)
+  }
+  return 0
+}
+
+function itemsOf(dir: string, newestFirst = false): DefaultTheme.SidebarItem[] {
+  const files = readdirSync(resolve(root, dir)).filter((f) => f.endsWith('.md'))
+  return (newestFirst ? files.sort(compareVersions).reverse() : files.sort())
     .map((f) => ({
       text: itemText(dir, f),
       link: `/${dir}/${f.replace(/\.md$/, '')}`,
@@ -40,7 +51,7 @@ function itemsOf(dir: string): DefaultTheme.SidebarItem[] {
 const sidebar: DefaultTheme.SidebarItem[] = sections.map((s) => ({
   text: s.label,
   collapsed: false,
-  items: itemsOf(s.dir),
+  items: itemsOf(s.dir, s.newestFirst),
 }))
 
 /** 本地搜索默认按空白分词，中文整段会被当作一个词，这里退化为字粒度切分 */

@@ -1,6 +1,6 @@
 {
   "name": "knowledage-base",
-  "version": "0.8.0",
+  "version": "0.8.2",
   "private": true,
   "type": "module",
   "scripts": {
@@ -34,6 +34,7 @@
     "mermaid": "^11.15.0",
     "pagefind": "^1.5.2",
     "papaparse": "^5.5.3",
+    "pdfjs-dist": "^6.3.289",
     "pinia": "^3.0.4",
     "swiper": "^12.1.4",
     "tdesign-icons-vue-next": "0.4.4",

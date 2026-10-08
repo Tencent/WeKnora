@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/models/api"
-	"github.com/Tencent/WeKnora/internal/models/catalog"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -19,7 +18,7 @@ import (
 // https://docs.api.nvidia.com/nim/reference/nvidia-llama-3_2-nv-rerankqa-1b-v2-infer
 //
 // Note the negative logit. This protocol does not return a 0..1 relevance
-// score, which is why catalog.RerankSettings.ScoreScale exists.
+// score, which is why api.RerankSettings.ScoreScale exists.
 const documentedResponse = `{
   "rankings": [
     {"index": 2, "logit": 0.226318359375},
@@ -28,7 +27,7 @@ const documentedResponse = `{
   ]
 }`
 
-func newClient(t *testing.T, url string, settings catalog.RerankSettings) *Client {
+func newClient(t *testing.T, url string, settings api.RerankSettings) *Client {
 	t.Helper()
 	return New(Config{
 		Endpoint: api.Endpoint{BaseURL: url, Model: "nvidia/nv-rerankqa-mistral-4b-v3", Auth: api.BearerAuth("k")},
@@ -38,7 +37,7 @@ func newClient(t *testing.T, url string, settings catalog.RerankSettings) *Clien
 
 func TestRequestBodyMatchesTheDocumentedSchema(t *testing.T) {
 	c := newClient(t, "https://ai.api.nvidia.com/v1/retrieval/nvidia/reranking",
-		catalog.RerankSettings{Truncate: "END", ScoreScale: api.ScoreLogit})
+		api.RerankSettings{Truncate: "END", ScoreScale: api.ScoreLogit})
 
 	body, err := c.BuildRequestBody("q", []string{"d0", "d1"})
 	require.NoError(t, err)
@@ -55,7 +54,7 @@ func TestRequestBodyMatchesTheDocumentedSchema(t *testing.T) {
 // passage instead of cutting it. A vendor that does not set it must not have
 // the key invented for it either.
 func TestTruncateIsOmittedWhenUnset(t *testing.T) {
-	c := newClient(t, "https://ai.api.nvidia.com/v1/retrieval/nvidia/reranking", catalog.RerankSettings{})
+	c := newClient(t, "https://ai.api.nvidia.com/v1/retrieval/nvidia/reranking", api.RerankSettings{})
 	body, err := c.BuildRequestBody("q", []string{"d0"})
 	require.NoError(t, err)
 	assert.NotContains(t, body, "truncate")
@@ -69,7 +68,7 @@ func TestDecodesTheDocumentedResponse(t *testing.T) {
 	}))
 	defer server.Close()
 
-	c := newClient(t, server.URL, catalog.RerankSettings{ScoreScale: api.ScoreLogit})
+	c := newClient(t, server.URL, api.RerankSettings{ScoreScale: api.ScoreLogit})
 	got, err := c.Rerank(context.Background(), "q", []string{"d0", "d1", "d2"})
 	require.NoError(t, err)
 
@@ -89,7 +88,7 @@ func TestRejectsAnOutOfRangeIndex(t *testing.T) {
 	}))
 	defer server.Close()
 
-	c := newClient(t, server.URL, catalog.RerankSettings{})
+	c := newClient(t, server.URL, api.RerankSettings{})
 	_, err := c.Rerank(context.Background(), "q", []string{"d0"})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "out of range")
@@ -103,7 +102,7 @@ func TestSurfacesTheVendorErrorBody(t *testing.T) {
 	}))
 	defer server.Close()
 
-	c := newClient(t, server.URL, catalog.RerankSettings{})
+	c := newClient(t, server.URL, api.RerankSettings{})
 	_, err := c.Rerank(context.Background(), "q", []string{"d0"})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "input too long")
@@ -120,7 +119,7 @@ func TestRequestReachesTheConfiguredURL(t *testing.T) {
 	}))
 	defer server.Close()
 
-	c := newClient(t, server.URL+"/v1/retrieval/nvidia/reranking", catalog.RerankSettings{})
+	c := newClient(t, server.URL+"/v1/retrieval/nvidia/reranking", api.RerankSettings{})
 	_, err := c.Rerank(context.Background(), "q", []string{"d0"})
 	require.NoError(t, err)
 	assert.Equal(t, "/v1/retrieval/nvidia/reranking", gotPath, "the base URL already names the endpoint")

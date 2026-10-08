@@ -38,7 +38,7 @@ func (kb *KnowledgeBase) IsGraphEnabled() bool {
 }
 ```
 
-- `IndexingStrategy.GraphEnabled`（`internal/types/indexing_strategy.go`）：知识库索引策略里的图谱开关，默认 `false`；旧字段 `ExtractConfig.Enabled` 会在读取时向 `IndexingStrategy.GraphEnabled` 单向同步（`knowledgebase.go` 635 行附近的 legacy sync）。
+- `IndexingStrategy.GraphEnabled`（`internal/types/indexing_strategy.go`）：知识库索引策略里的图谱开关，默认 `false`；旧字段 `ExtractConfig.Enabled` 会在读取时向 `IndexingStrategy.GraphEnabled` 单向同步（`knowledgebase.go` 中的 legacy sync）。
 - `ExtractConfig`（`internal/types/knowledgebase.go`）承载抽取的 few-shot 配置：
 
 | 名称 | 类型 | 默认值 | 说明 |
@@ -50,7 +50,7 @@ func (kb *KnowledgeBase) IsGraphEnabled() bool {
 | `relations` | []*GraphRelation | nil | 示例关系（node1 / node2 / type） |
 | `custom_instructions` | string | 空 | 领域自定义抽取指令（追加进系统提示，结构化输出协议仍由系统控制） |
 
-配置向导辅助 API（`internal/handler/initialization.go`，路由 `internal/router/router.go` 914-916 行）：
+配置向导辅助 API（`internal/handler/initialization.go`，路由注册于 `internal/router/routes_infra.go`，需 Admin；API Key 需 `manage_models` 能力）：
 
 - `POST /initialization/extract/text-relation`（`ExtractTextRelations`）：对一段文本（≤5000 字符）按选定标签试跑关系抽取，用于预览效果；
 - `POST /initialization/extract/fabri-text` / `fabri-tag`（`FabriText` / `FabriTag`）：让 LLM 生成示例文本 / 推荐标签，帮助用户快速搭建 `ExtractConfig`。
@@ -59,7 +59,11 @@ func (kb *KnowledgeBase) IsGraphEnabled() bool {
 
 ### 触发与任务编排
 
-文档解析完成后，`internal/application/service/knowledge_post_process.go` 在增强扇出阶段对每个文本 chunk 计数（`eff.GraphEnabled` 时 `graphChunkCount = len(textChunks)`），并调用 `internal/application/service/extract.go` 的 `NewChunkExtractTask` 逐 chunk 入队：
+文档解析完成后，`internal/application/service/knowledge_post_process.go` 在增强扇出阶段用 `selectGraphChunks` 选出抽取输入（`eff.GraphEnabled` 时 `graphChunkCount = len(graphChunks)`），并调用 `internal/application/service/extract.go` 的 `NewChunkExtractTask` 逐 chunk 入队。选取规则：
+
+- 有正文的文本 chunk 参与抽取；只含图片链接的文本 chunk 跳过；
+- 父文本 chunk 没有正文时（典型如扫描件 PDF 的页面图），改用它的 `image_ocr` 子 chunk，让 OCR 出的文字也能进入图谱；
+- `image_caption` 子 chunk 不参与，避免与 OCR 内容重复。
 
 ```go
 func NewChunkExtractTask(...) (bool, error) {
@@ -82,7 +86,7 @@ func NewChunkExtractTask(...) (bool, error) {
 
 1. 加载 chunk、知识库与文件级 `ProcessOverrides`，用 `ResolveProcessConfig` 求出生效的 `ExtractConfig`（未启用则跳过）。
 2. 组装结构化提示模板：系统协议部分来自 `config.ExtractManager.ExtractGraph`（`config/config.yaml` 的 `extract.extract_graph`，一个包含实体抽取 + 属性丰富 + 关系抽取步骤的多步指令），叠加知识库的 `custom_instructions`、`tags` 与 `ExtractConfig` 的 few-shot 示例（`Text/Nodes/Relations`）。
-3. `chatpipeline.NewExtractor(chatModel, template).Extract(ctx, chunk.Content)` 调用 Chat 模型（`temperature 0.3`、`max_tokens 4096`、关闭 thinking），由 `Formater.ParseGraph` 解析为 `types.GraphData`（`internal/types/extract_graph.go`）：
+3. `chatpipeline.NewExtractor(chatModel, template).Extract(ctx, chunk.Content)` 调用 Chat 模型（`temperature 0.3`、`max_tokens 8192`、关闭 thinking；输出上限足以容纳较多节点与关系，避免 JSON 被截断），由 `Formater.ParseGraph` 解析为 `types.GraphData`（`internal/types/extract_graph.go`）：
 
 ```go
 type GraphNode struct {
@@ -114,13 +118,16 @@ SET node.chunks = apoc.coll.union(node.chunks, row.chunks)
 ```
 
 - 删除知识 / 知识库时（`knowledge_delete.go`、`knowledgebase.go`）调用 `DelGraph`，用 `apoc.periodic.iterate` 按 1000 批并行删边删点。
+- `SearchNode` 的查询有两道上限，防止一个很短或很常见的实体名拉回整张图：
+  - 只有至少有一条关系的实体才能作为展开起点，最多 200 个种子实体；排序为名称完全匹配优先，其次名称较短者，再按字母序；
+  - 返回的（实体, 关系）行最多 2000 条，并沿用同样的排序，截断时保留排名靠前的种子的邻域。触达行数上限时记录 Warn 日志，提示结果已被截断。
 
 ## 检索时的图谱增强（GraphRAG）
 
 传统聊天管线（`internal/application/service/chat_pipeline`）中有两个插件：
 
 1. **PluginExtractEntity**（`extract_entity.go`，挂在 `QUERY_UNDERSTAND` 事件）：`NEO4J_ENABLE=true` 时，先筛出 `ExtractConfig.Enabled` 的知识库（存入 `chatManage.EntityKBIDs` / `EntityKnowledge`），再用 `ExtractManager.ExtractEntity` 模板 + Chat 模型从**用户查询**里抽取实体名，存入 `chatManage.Entity`。
-2. **PluginSearchEntity**（`search_entity.go`，挂在 `ENTITY_SEARCH` 事件）：对每个启用图谱的知识库 / 文件并行调用 `graphRepo.SearchNode`——Cypher 用 `n.name CONTAINS nodeText` 模糊匹配实体并返回一跳邻居与关系，合并为 `chatManage.GraphResult`；随后 `filterSeenChunk` 取出图谱节点携带的 `chunks`（去掉向量检索已命中的），从 `chunkRepo` 拉取原文并转换为 `SearchResult` 并入候选集，实现"实体 → 关联 chunk"的图谱补充召回。
+2. **PluginSearchEntity**（`search_entity.go`，挂在 `ENTITY_SEARCH` 事件）：对每个启用图谱的知识库 / 文件并行调用 `graphRepo.SearchNode`——Cypher 用 `n.name CONTAINS nodeText` 模糊匹配实体并返回一跳邻居与关系，合并为 `chatManage.GraphResult`（查询上限见下文）；随后 `filterSeenChunk` 取出图谱节点携带的 `chunks`（去掉向量检索已命中的），从 `chunkRepo` 拉取原文并转换为 `SearchResult` 并入候选集，实现"实体 → 关联 chunk"的图谱补充召回。
 
 Agent 模式则提供 `query_knowledge_graph` 工具（`internal/agent/tools/query_knowledge_graph.go`）：校验各知识库是否配置了图谱（`ExtractConfig.Nodes/Relations` 非空），并发对多库执行检索、按 chunk 去重排序，输出中附带各库的图谱配置状态（实体类型 / 关系类型清单）；未配置图谱的库回落为普通混合检索结果。该工具的能力要求是 `all_of: [graph]`，并且只有当 Agent 作用域内存在启用图谱的知识库时才会提供给模型——`agent_service.go` 装配工具白名单时会把它从没有图谱库的作用域中移除，避免模型反复调用一个只能返回退化结果的工具。
 
@@ -132,7 +139,7 @@ Agent 模式则提供 `query_knowledge_graph` 工具（`internal/agent/tools/que
 flowchart TD
     A["文档解析完成<br/>(knowledge_post_process)"] --> B{"kb.IsGraphEnabled() 且<br/>NEO4J_ENABLE=true?"}
     B -->|"否"| Z["跳过图谱抽取"]
-    B -->|"是"| C["逐文本 chunk 入队<br/>asynq QueueGraph / TypeChunkExtract<br/>(MaxRetry=3, Timeout=30m)"]
+    B -->|"是"| C["selectGraphChunks 选输入<br/>逐 chunk 入队<br/>asynq QueueGraph / TypeChunkExtract<br/>(MaxRetry=3, Timeout=30m)"]
     C --> D["ChunkExtractService.Handle"]
     D --> E["组装结构化提示:<br/>ExtractManager.ExtractGraph 协议<br/>+ ExtractConfig few-shot (text/nodes/relations)<br/>+ tags + custom_instructions"]
     E --> F["Chat 模型抽取<br/>(temp 0.3, 关闭 thinking)"]
@@ -151,7 +158,7 @@ flowchart TD
     U1 -->|"否"| SKIP["跳过, 走常规检索"]
     U1 -->|"是"| U2["LLM 从查询抽取实体名<br/>(ExtractManager.ExtractEntity 模板)"]
     U2 --> S["ENTITY_SEARCH:<br/>PluginSearchEntity"]
-    S --> S1["按知识库/文件并行<br/>Neo4j SearchNode<br/>(name CONTAINS entity, 返回一跳邻居)"]
+    S --> S1["按知识库/文件并行<br/>Neo4j SearchNode<br/>(name CONTAINS entity, 返回一跳邻居,<br/>种子 ≤200, 行 ≤2000)"]
     S1 --> S2["合并 GraphResult<br/>(nodes + relations)"]
     S2 --> S3["filterSeenChunk:<br/>取节点 chunks, 去掉已命中的"]
     S3 --> S4["chunkRepo 拉取原文<br/>转为 SearchResult 并入候选集"]

@@ -3,7 +3,7 @@
 //
 // Two things separate it from the Cohere dialect and both matter to callers.
 // The score is an unbounded log-odds value that is routinely negative, not a
-// 0..1 relevance — catalog.RerankSettings.ScoreScale says so. And `truncate`
+// 0..1 relevance — api.RerankSettings.ScoreScale says so. And `truncate`
 // defaults to "NONE", which means an over-long passage fails the request
 // instead of being cut, so the vendor sets it explicitly.
 //
@@ -16,13 +16,12 @@ import (
 	"fmt"
 
 	"github.com/Tencent/WeKnora/internal/models/api"
-	"github.com/Tencent/WeKnora/internal/models/catalog"
 )
 
-// Config is everything the client needs, already resolved by the catalog.
+// Config is everything the client needs, already resolved by the api.
 type Config struct {
 	Endpoint api.Endpoint
-	Settings catalog.RerankSettings
+	Settings api.RerankSettings
 }
 
 // Client talks NIM reranking to one endpoint.

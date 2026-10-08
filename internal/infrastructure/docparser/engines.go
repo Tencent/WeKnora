@@ -208,7 +208,7 @@ func (e *mineruEngine) CheckAvailable(_ bool, overrides map[string]string) (bool
 	if endpoint == "" {
 		return false, "MinerU service not configured"
 	}
-	return PingMinerU(endpoint)
+	return PingMinerU(endpoint, overrides["mineru_server_api_key"])
 }
 
 func (e *mineruEngine) NewReader(_ context.Context, deps ReaderDeps) (interfaces.DocReader, error) {

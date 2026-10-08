@@ -130,6 +130,28 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 	// copy, so this stays local to the call.
 	params.MatchCount = normalizedMatchCount(params.MatchCount)
 
+	chunks, err := s.hybridSearchCandidates(ctx, id, params)
+	if err != nil || len(chunks) == 0 {
+		return nil, err
+	}
+
+	// Truncate to the primary-match cap. MatchCount is guaranteed positive by
+	// the normalization at the top of this function; the slice bound below
+	// depends on that.
+	if len(chunks) > params.MatchCount {
+		chunks = chunks[:params.MatchCount]
+	}
+
+	return s.processSearchResults(ctx, chunks, params.SkipContextEnrichment)
+}
+
+// hybridSearchCandidates runs retrieval, fusion and FAQ post-processing for
+// HybridSearch and returns the fused chunks, best first, before the
+// MatchCount cut. params.MatchCount must already be normalized.
+func (s *knowledgeBaseService) hybridSearchCandidates(ctx context.Context,
+	id string,
+	params types.SearchParams,
+) ([]*types.IndexWithScore, error) {
 	// Determine the set of KB IDs to search.
 	searchKBIDs := params.KnowledgeBaseIDs
 	if len(searchKBIDs) == 0 {
@@ -203,10 +225,18 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 	// Skip when params already carries an embedding (e.g. the agent
 	// pre-computed it) or when the primary KB has no vector indexing
 	// configured.
-	if len(params.QueryEmbedding) == 0 &&
-		kb.IsVectorEnabled() && kb.EmbeddingModelID != "" &&
-		!params.DisableVectorMatch {
-		emb, embErr := s.GetQueryEmbedding(ctx, kb.ID, params.QueryText)
+	embeddingKB := kb
+	if !hasEmbeddingModel(embeddingKB) {
+		embeddingKB = nil
+		for _, candidate := range kbs {
+			if hasEmbeddingModel(candidate) {
+				embeddingKB = candidate
+				break
+			}
+		}
+	}
+	if len(params.QueryEmbedding) == 0 && embeddingKB != nil && !params.DisableVectorMatch {
+		emb, embErr := s.GetQueryEmbedding(ctx, embeddingKB.ID, params.QueryText)
 		if embErr != nil {
 			return nil, embErr
 		}
@@ -263,7 +293,8 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 	}
 
 	// Separate and fuse retrieval results.
-	vectorResults, keywordResults := classifyRetrievalResults(ctx, retrieveResults)
+	vectorLists, keywordLists := classifyRetrievalResults(ctx, retrieveResults)
+	vectorResults, keywordResults := flattenLists(vectorLists), flattenLists(keywordLists)
 	if len(vectorResults) == 0 && len(keywordResults) == 0 {
 		logger.Info(ctx, "No search results found")
 		return nil, nil
@@ -275,7 +306,7 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 	if tenantInfo != nil {
 		retrievalCfg = tenantInfo.RetrievalConfig
 	}
-	deduplicatedChunks := fuseOrDeduplicate(ctx, vectorResults, keywordResults, retrievalCfg)
+	deduplicatedChunks := fuseOrDeduplicate(ctx, vectorLists, keywordLists, retrievalCfg)
 
 	kb.EnsureDefaults()
 
@@ -284,20 +315,8 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 	// AppError from inside the iterative fan-out path (e.g. a per-group
 	// timeout surfaced as ErrVectorStoreUnavailable) must surface to the
 	// caller rather than be silently converted to a truncated chunk list.
-	deduplicatedChunks, err = s.applyFAQPostProcessing(
-		ctx, kb, deduplicatedChunks, vectorResults, groups, params, matchCount)
-	if err != nil {
-		return nil, err
-	}
-
-	// Truncate to the primary-match cap. MatchCount is guaranteed positive by
-	// the normalization at the top of this function; the slice bound below
-	// depends on that.
-	if len(deduplicatedChunks) > params.MatchCount {
-		deduplicatedChunks = deduplicatedChunks[:params.MatchCount]
-	}
-
-	return s.processSearchResults(ctx, deduplicatedChunks, params.SkipContextEnrichment)
+	return s.applyFAQPostProcessing(
+		ctx, kb, kbs, deduplicatedChunks, vectorLists, groups, params, matchCount)
 }
 
 // normalizedMatchCount resolves the effective primary-match cap for a search.
@@ -318,7 +337,17 @@ func normalizedMatchCount(requested int) int {
 	if requested <= 0 {
 		return types.DefaultRetrievalTopK
 	}
-	return requested
+	// A search never returns more than the pool it draws from, so capping here
+	// changes no result; it keeps the over-retrieval arithmetic
+	// (MatchCount*5*len(KBs), the FAQ path's MatchCount*3) from overflowing
+	// into a negative TopK on absurd input.
+	return min(requested, maxRetrievalPoolSize)
+}
+
+// hasEmbeddingModel reports whether kb is vector-indexed with a configured
+// embedding model, i.e. whether it can embed a query for vector retrieval.
+func hasEmbeddingModel(kb *types.KnowledgeBase) bool {
+	return kb != nil && kb.IsVectorEnabled() && kb.EmbeddingModelID != ""
 }
 
 // pickPrimary returns the KB whose ID matches id, or nil if id is not in
@@ -399,8 +428,19 @@ func (s *knowledgeBaseService) buildRetrievalParams(
 	// scope happens to include them (e.g. KBSelectionMode=all picking up a
 	// wiki-only KB).
 	var faqVectorKBIDs, docVectorKBIDs, docKeywordKBIDs []string
+	// The query is embedded with the primary's model, or with the first
+	// vector KB of the group when the primary has none (a wiki primary
+	// searched together with document KBs): asking the primary for its empty
+	// model ID failed the whole search.
+	embeddingKB := primary
+	if !hasEmbeddingModel(primary) {
+		embeddingKB = nil
+	}
 	for _, kb := range groupKBs {
-		if kb.IsVectorEnabled() && kb.EmbeddingModelID != "" {
+		if hasEmbeddingModel(kb) {
+			if embeddingKB == nil {
+				embeddingKB = kb
+			}
 			if kb.Type == types.KnowledgeBaseTypeFAQ {
 				faqVectorKBIDs = append(faqVectorKBIDs, kb.ID)
 			} else {
@@ -420,7 +460,7 @@ func (s *knowledgeBaseService) buildRetrievalParams(
 		(len(faqVectorKBIDs) > 0 || len(docVectorKBIDs) > 0) {
 		logger.Info(ctx, "Vector retrieval supported, preparing vector retrieval parameters")
 
-		queryEmbedding, err := s.resolveQueryEmbedding(ctx, primary, params, currentTenantID)
+		queryEmbedding, err := s.resolveQueryEmbedding(ctx, embeddingKB, params, currentTenantID)
 		if err != nil {
 			return nil, err
 		}

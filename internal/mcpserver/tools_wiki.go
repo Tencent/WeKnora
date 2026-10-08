@@ -75,6 +75,22 @@ type toolError struct{ msg string }
 
 func (e *toolError) Error() string { return e.msg }
 
+// withOutputInData keeps the wiki page body available to MCP clients that
+// only inspect structuredContent. Other tools retain their existing payload
+// shape because this compatibility field is only needed by the wiki tools.
+func withOutputInData(res *types.ToolResult) *types.ToolResult {
+	if res == nil || !res.Success || res.Output == "" {
+		return res
+	}
+	if res.Data == nil {
+		res.Data = map[string]interface{}{}
+	}
+	if _, exists := res.Data["content"]; !exists {
+		res.Data["content"] = res.Output
+	}
+	return res
+}
+
 func (s *Server) handleWikiSearch(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	ep, err := endpointFromContext(ctx)
 	if err != nil {
@@ -107,7 +123,7 @@ func (s *Server) handleWikiSearch(ctx context.Context, req mcp.CallToolRequest) 
 	}
 	args, _ := json.Marshal(callArgs)
 	res, execErr := tool.Execute(ctx, args)
-	return toolResultFromAgentTool(res, execErr), nil
+	return toolResultFromAgentTool(withOutputInData(res), execErr), nil
 }
 
 func (s *Server) handleWikiReadPage(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -132,7 +148,7 @@ func (s *Server) handleWikiReadPage(ctx context.Context, req mcp.CallToolRequest
 	)
 	args, _ := json.Marshal(map[string]any{"slug": strings.TrimSpace(slug)})
 	res, execErr := tool.Execute(ctx, args)
-	return toolResultFromAgentTool(res, execErr), nil
+	return toolResultFromAgentTool(withOutputInData(res), execErr), nil
 }
 
 func (s *Server) handleWikiIndex(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {

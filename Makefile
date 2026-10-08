@@ -112,12 +112,14 @@ run: build
 test:
 	go test -v ./...
 
-# Vendor catalog: invariants, legacy-behaviour parity and vendor facts.
-# Run this after adding a vendor or editing any models.json.
-.PHONY: model-catalog-check
+# Generate reviewed metadata + protocol overrides, then verify every model.
+.PHONY: model-catalog-generate model-catalog-check
+model-catalog-generate:
+	python3 scripts/model-catalog/generate.py
+
 model-catalog-check:
-	go test ./internal/models/parity/ ./internal/models/vendors/ ./internal/models/catalog/ ./internal/models/api/... \
-		./internal/models/rerank/ ./internal/models/embedding/ ./internal/models/asr/
+	python3 scripts/model-catalog/generate.py --check
+	go test ./internal/models/...
 
 # Vendor catalog: report where our model metadata differs from models.dev.
 # Development aid only — nothing is fetched at runtime and nothing is written
@@ -244,9 +246,18 @@ migrate-goto:
 	./scripts/migrate.sh goto $(version)
 
 # Generate API documentation (Swagger)
+#
+# internal/localsandbox is excluded because cmd/server does not depend on it
+# (its importers are behind the `desktop` build tag). Without the exclude,
+# swag walks into the directory, follows its `const X = core.X` aliases and
+# loads internal/localsandbox/core a second time through go/loader; that
+# second load re-registers every model under its short name without enum
+# values, so definitions lose their package-qualified names and
+# docs/swagger_contract_test.go fails.
 docs:
 	@echo "生成 Swagger API 文档..."
-	swag init -g $(MAIN_PATH)/main.go -o ./docs --parseDependency --parseInternal
+	swag init -g $(MAIN_PATH)/main.go -o ./docs --parseDependency --parseInternal \
+		--exclude ./internal/localsandbox
 	@echo "文档已生成到 ./docs 目录"
 	@echo "启动服务后访问 http://localhost:8080/swagger/index.html 查看文档"
 
@@ -367,5 +378,3 @@ dev-app:
 
 dev-frontend:
 	./scripts/dev.sh frontend
-
-

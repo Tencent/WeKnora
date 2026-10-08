@@ -5,10 +5,10 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 
-	"github.com/Tencent/WeKnora/internal/models/catalog"
+	modelruntime "github.com/Tencent/WeKnora/internal/models/runtime"
+
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -45,7 +45,7 @@ func TestVolcengineClientOutboundShape(t *testing.T) {
 
 	client, err := newVolcengineClient(
 		&RerankerConfig{APIKey: "AKLT-test", AppSecret: "secret-test"},
-		&catalog.Resolved{BaseURL: server.URL, RemoteModel: "doubao-seed-rerank"},
+		&modelruntime.Resolved{BaseURL: server.URL, RemoteModel: "doubao-seed-rerank"},
 	)
 	require.NoError(t, err)
 
@@ -80,7 +80,7 @@ func TestVolcengineClientSurfacesAnInBodyErrorCode(t *testing.T) {
 
 	client, err := newVolcengineClient(
 		&RerankerConfig{APIKey: "AKLT-test", AppSecret: "secret-test"},
-		&catalog.Resolved{BaseURL: server.URL, RemoteModel: "doubao-seed-rerank"},
+		&modelruntime.Resolved{BaseURL: server.URL, RemoteModel: "doubao-seed-rerank"},
 	)
 	require.NoError(t, err)
 
@@ -100,7 +100,7 @@ func TestVolcengineClientRejectsAScoreCountMismatch(t *testing.T) {
 
 	client, err := newVolcengineClient(
 		&RerankerConfig{APIKey: "AKLT-test", AppSecret: "secret-test"},
-		&catalog.Resolved{BaseURL: server.URL, RemoteModel: "doubao-seed-rerank"},
+		&modelruntime.Resolved{BaseURL: server.URL, RemoteModel: "doubao-seed-rerank"},
 	)
 	require.NoError(t, err)
 
@@ -114,7 +114,7 @@ func TestVolcengineClientRequiresAKAndSK(t *testing.T) {
 		{AppSecret: "sk"},
 		{APIKey: "ak"},
 	} {
-		_, err := newVolcengineClient(cfg, &catalog.Resolved{BaseURL: "https://example.invalid"})
+		_, err := newVolcengineClient(cfg, &modelruntime.Resolved{BaseURL: "https://example.invalid"})
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "access key and secret key are required")
 	}
@@ -125,7 +125,7 @@ func TestLKEAPClientRequiresCredentials(t *testing.T) {
 		{AppSecret: "sk"},
 		{APIKey: "id"},
 	} {
-		_, err := newLKEAPClient(cfg, &catalog.Resolved{})
+		_, err := newLKEAPClient(cfg, &modelruntime.Resolved{})
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "secret_id and secret_key are required")
 	}
@@ -136,20 +136,21 @@ func TestLKEAPClientRequiresCredentials(t *testing.T) {
 func TestLKEAPClientTakesTheSecretKeyFromExtraConfig(t *testing.T) {
 	client, err := newLKEAPClient(
 		&RerankerConfig{APIKey: "AKIDxxx", ExtraConfig: map[string]string{"secret_key": "sk"}},
-		&catalog.Resolved{RemoteModel: "lke-reranker-base"},
+		&modelruntime.Resolved{RemoteModel: "lke-reranker-base"},
 	)
 	require.NoError(t, err)
 	require.NotNil(t, client)
 }
 
 func TestLKEAPClientFallsBackToTheDefaultModel(t *testing.T) {
+	upstream := newUpstream(t)
 	client, err := newLKEAPClient(
 		&RerankerConfig{APIKey: "AKIDxxx", AppSecret: "sk"},
-		&catalog.Resolved{},
+		&modelruntime.Resolved{},
 	)
 	require.NoError(t, err)
-	inner, ok := client.(*lkeapClient)
-	require.True(t, ok)
-	assert.Equal(t, LKEAPDefaultRerankModel, inner.modelName)
-	assert.False(t, strings.Contains(inner.modelName, " "))
+	_, err = client.Rerank(context.Background(), "q", []string{"d"})
+	require.NoError(t, err)
+	require.Len(t, upstream.requests, 1)
+	assert.Equal(t, LKEAPDefaultRerankModel, upstream.requests[0].body["Model"])
 }

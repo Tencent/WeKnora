@@ -237,7 +237,7 @@ func newHostCollector(t *testing.T, hostSource *fakeSandboxSource) *ArtifactColl
 	collector.pinner = pinner
 	collector.host = NewHostSessionResolver(pinner, &hostArtifactManager{
 		artifactFallbackManager: artifactFallbackManager{source: hostSource},
-	})
+	}, false)
 	return collector
 }
 

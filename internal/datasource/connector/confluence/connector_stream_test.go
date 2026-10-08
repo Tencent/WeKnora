@@ -5,10 +5,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/datasource"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -25,11 +27,23 @@ type streamPage struct {
 }
 
 type streamAPI struct {
-	cloud      bool
-	pages      []streamPage
-	bodyCalls  int
-	bodyStatus map[string]int
-	listCalls  int
+	cloud         bool
+	pages         []streamPage
+	bodyCalls     int
+	bodyStatus    map[string]int
+	bodyHTML      map[string]string
+	imageCalls    int
+	listCalls     int
+	ancestorCalls int
+	spaceCalls    int
+	endlessNext   bool
+	probe         map[string]probeReply
+	probeCalls    int
+}
+
+type probeReply struct {
+	status   int
+	spaceKey string
 }
 
 func (a *streamAPI) jsonResponse(value any) (*http.Response, error) {
@@ -57,7 +71,17 @@ func (a *streamAPI) pageMaps() []any {
 func (a *streamAPI) response(req *http.Request) (*http.Response, error) {
 	path := req.URL.Path
 	switch {
+	case strings.HasPrefix(path, "/wiki/download/"):
+		a.imageCalls++
+		header := make(http.Header)
+		header.Set("Content-Type", "image/png")
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     header,
+			Body:       io.NopCloser(bytes.NewReader([]byte("private-png-bytes"))),
+		}, nil
 	case path == "/wiki/rest/api/space":
+		a.spaceCalls++
 		return a.jsonResponse(map[string]any{
 			"results": []any{map[string]any{
 				"id": 1, "key": "ENG", "name": "Engineering",
@@ -66,10 +90,68 @@ func (a *streamAPI) response(req *http.Request) (*http.Response, error) {
 		})
 	case path == "/wiki/rest/api/space/ENG/content/page":
 		a.listCalls++
+		if req.URL.Query().Get("depth") == "root" {
+			return a.jsonResponse(map[string]any{"results": a.pageMaps()})
+		}
+		if a.endlessNext {
+			results := a.pageMaps()
+			if a.listCalls > 1 {
+				results = []any{}
+			}
+			return a.jsonResponse(map[string]any{
+				"results": results,
+				"_links": map[string]any{
+					"next": fmt.Sprintf("/rest/api/space/ENG/content/page?limit=100&start=%d", a.listCalls*100),
+				},
+			})
+		}
 		return a.jsonResponse(map[string]any{
 			"results": a.pageMaps(),
 		})
+	case strings.HasPrefix(path, "/wiki/rest/api/content/") && req.URL.Query().Get("expand") == "space":
+		a.probeCalls++
+		id := strings.TrimPrefix(path, "/wiki/rest/api/content/")
+		reply, ok := a.probe[id]
+		if !ok {
+			return nil, errors.New("unexpected existence check for page " + id)
+		}
+		if reply.status != http.StatusOK {
+			return &http.Response{
+				StatusCode: reply.status,
+				Header:     make(http.Header),
+				Body:       io.NopCloser(strings.NewReader("{}")),
+			}, nil
+		}
+		return a.jsonResponse(
+			map[string]any{"id": id, "status": "current", "space": map[string]any{"key": reply.spaceKey}},
+		)
+	case strings.HasPrefix(path, "/wiki/rest/api/content/") && strings.HasSuffix(path, "/child/page"):
+		return a.jsonResponse(map[string]any{"results": []any{}})
 	case strings.HasPrefix(path, "/wiki/rest/api/content/"):
+		if req.URL.Query().Get("expand") == "ancestors,space" {
+			a.ancestorCalls++
+			return a.jsonResponse(map[string]any{
+				"id":        strings.TrimPrefix(path, "/wiki/rest/api/content/"),
+				"space":     map[string]any{"key": "ENG", "name": "Engineering"},
+				"ancestors": []any{},
+			})
+		}
+		if req.URL.Query().Get("expand") == "version,space" {
+			id := strings.TrimPrefix(path, "/wiki/rest/api/content/")
+			for _, page := range a.pages {
+				if page.id == id {
+					return a.jsonResponse(
+						map[string]any{
+							"id":      page.id,
+							"title":   page.title,
+							"version": map[string]any{"number": page.version},
+							"space":   map[string]any{"key": "ENG", "name": "Engineering"},
+						},
+					)
+				}
+			}
+			return nil, errors.New("missing page")
+		}
 		if req.URL.Query().Get("expand") != "body.view,version,space" {
 			return nil, errors.New("page body did not request rendered body.view")
 		}
@@ -95,8 +177,14 @@ func (a *streamAPI) response(req *http.Request) (*http.Response, error) {
 			})
 		}
 		return a.jsonResponse(map[string]any{"results": pages})
+	case strings.HasPrefix(path, "/wiki/api/v2/pages/") && strings.HasSuffix(path, "/ancestors"):
+		return a.jsonResponse(map[string]any{"results": []any{}})
+	case strings.HasPrefix(path, "/wiki/api/v2/pages/") && strings.HasSuffix(path, "/descendants"):
+		return a.jsonResponse(map[string]any{"results": []any{}})
+	case strings.HasPrefix(path, "/wiki/api/v2/pages/") && strings.HasSuffix(path, "/direct-children"):
+		return a.jsonResponse(map[string]any{"results": []any{}})
 	case strings.HasPrefix(path, "/wiki/api/v2/pages/"):
-		if req.URL.Query().Get("body-format") != "view" {
+		if req.URL.Query().Get("body-format") != "" && req.URL.Query().Get("body-format") != "view" {
 			return nil, errors.New("cloud page body did not request body-format=view")
 		}
 		return a.pageBody(strings.TrimPrefix(path, "/wiki/api/v2/pages/"))
@@ -116,12 +204,17 @@ func (a *streamAPI) pageBody(id string) (*http.Response, error) {
 	}
 	for _, page := range a.pages {
 		if page.id == id {
+			value := "<p>" + page.title + "</p>"
+			if custom, ok := a.bodyHTML[id]; ok {
+				value = custom
+			}
 			return a.jsonResponse(map[string]any{
 				"id": page.id, "title": page.title,
+				"spaceId": "1",
 				"version": map[string]any{"number": page.version, "by": map[string]any{"displayName": "Ada"}},
 				"space":   map[string]any{"key": "ENG", "name": "Engineering"},
 				"_links":  map[string]any{"webui": "/wiki/pages/" + page.id},
-				"body":    map[string]any{"view": map[string]any{"value": "<p>" + page.title + "</p>"}},
+				"body":    map[string]any{"view": map[string]any{"value": value}},
 			})
 		}
 	}
@@ -154,10 +247,11 @@ func cloudStreamConfig() *types.DataSourceConfig {
 }
 
 type captureHandler struct {
-	items        []types.FetchedItem
-	checkpoints  []*types.SyncCursor
-	emitErr      error
-	succeedFirst int
+	items           []types.FetchedItem
+	checkpoints     []*types.SyncCursor
+	emitErr         error
+	succeedFirst    int
+	checkpointErrAt int
 }
 
 func (h *captureHandler) Emit(_ context.Context, item types.FetchedItem) error {
@@ -172,6 +266,9 @@ func (h *captureHandler) Emit(_ context.Context, item types.FetchedItem) error {
 }
 
 func (h *captureHandler) Checkpoint(_ context.Context, c *types.SyncCursor) error {
+	if h.checkpointErrAt > 0 && len(h.checkpoints)+1 == h.checkpointErrAt {
+		return errors.New("checkpoint failed")
+	}
 	raw, _ := json.Marshal(c)
 	var stored types.SyncCursor
 	_ = json.Unmarshal(raw, &stored)
@@ -206,15 +303,143 @@ func TestFetchStreamSkipsUnchangedPages(t *testing.T) {
 	}
 }
 
+func TestFetchStreamUnknownVersionDoesNotSkipBody(t *testing.T) {
+	// version.number=0 with no when/createdAt leaves the version unknown; the
+	// legacy stable "t:" cursor value must not suppress the body refresh.
+	api := &streamAPI{pages: []streamPage{{id: "p1", title: "Page", version: 0}}}
+	h := &captureHandler{}
+	old := streamCursor(map[string]string{"p1": "t:"})
+	next, err := newStreamConnector(api).FetchStream(context.Background(), streamConfig(), old, h)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if api.bodyCalls != 1 || len(h.items) != 1 || h.items[0].IsDeleted {
+		t.Fatalf("unknown-version page fetched=%d items=%#v", api.bodyCalls, h.items)
+	}
+	if decoded := decodeCursor(next); decoded.SpacePages["1"]["p1"] != "" {
+		t.Fatalf("cursor stored a stable unknown version: %#v", decoded)
+	}
+}
+
 func TestFetchStreamDetectsDeletedPages(t *testing.T) {
 	api := &streamAPI{pages: []streamPage{{id: "p1", title: "Page", version: 1}}}
 	h := &captureHandler{}
 	old := streamCursor(map[string]string{"p1": "v:1", "p2": "v:1"})
-	if _, err := newStreamConnector(api).FetchStream(context.Background(), streamConfig(), old, h); err != nil {
+	next, err := newStreamConnector(api).FetchStream(context.Background(), streamConfig(), old, h)
+	if err != nil {
 		t.Fatal(err)
 	}
 	if len(h.items) != 1 || !h.items[0].IsDeleted || h.items[0].ExternalID != "p2" {
 		t.Fatalf("deletion items = %#v", h.items)
+	}
+	if decoded := decodeCursor(next); decoded.SpacePages["1"]["p2"] != "" {
+		t.Fatalf("deleted page stayed in cursor as a ghost: %#v", decoded)
+	}
+}
+
+func TestFetchStreamRemovesDeletedPageFromCursor(t *testing.T) {
+	api := &streamAPI{pages: []streamPage{{id: "p1", title: "Page", version: 1}}}
+	h := &captureHandler{}
+	old := streamCursor(map[string]string{"p1": "v:1", "p2": "v:1"})
+	next, err := newStreamConnector(api).FetchStream(context.Background(), streamConfig(), old, h)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(h.items) != 1 || !h.items[0].IsDeleted || h.items[0].ExternalID != "p2" {
+		t.Fatalf("deletion items = %#v", h.items)
+	}
+	decoded := decodeCursor(next)
+	if decoded.SpacePages["1"]["p1"] != "v:1" {
+		t.Fatalf("surviving page missing from cursor: %#v", decoded)
+	}
+	for _, checkpoint := range h.checkpoints {
+		if stored := decodeCursor(checkpoint); stored.SpacePages["1"]["p2"] != "" {
+			t.Fatalf("checkpoint recorded a not-yet-deleted page as deleted: %#v", stored)
+		}
+	}
+	// A follow-up run must not re-emit the already tombstoned page.
+	followUp := &captureHandler{}
+	if _, err := newStreamConnector(api).FetchStream(context.Background(), streamConfig(), next, followUp); err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range followUp.items {
+		if item.IsDeleted {
+			t.Fatalf("ghost page re-tombstoned on the next run: %#v", followUp.items)
+		}
+	}
+}
+
+func TestFetchStreamTombstoneResumeSkipsCompletedDeletions(t *testing.T) {
+	api := &streamAPI{pages: []streamPage{{id: "p1", title: "Page", version: 1}}}
+	old := streamCursor(map[string]string{"p1": "v:1", "p2": "v:1", "p3": "v:1"})
+	first := &captureHandler{succeedFirst: 1}
+	if _, err := newStreamConnector(api).FetchStream(context.Background(), streamConfig(), old, first); err == nil {
+		t.Fatal("interrupted tombstone run unexpectedly succeeded")
+	}
+	if len(first.items) != 1 || !first.items[0].IsDeleted || first.items[0].ExternalID != "p2" {
+		t.Fatalf("first run items = %#v", first.items)
+	}
+	if len(first.checkpoints) != 1 {
+		t.Fatalf("first run checkpoints = %d; want 1", len(first.checkpoints))
+	}
+	second := &captureHandler{}
+	next, err := newStreamConnector(api).FetchStream(context.Background(), streamConfig(), first.checkpoints[0], second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(second.items) != 1 || !second.items[0].IsDeleted || second.items[0].ExternalID != "p3" {
+		t.Fatalf("resume must tombstone only the remaining page: %#v", second.items)
+	}
+	if decoded := decodeCursor(next); decoded.SpacePages["1"]["p1"] != "v:1" || decoded.SpacePages["1"]["p3"] != "" {
+		t.Fatalf("resume cursor = %#v", decoded)
+	}
+}
+
+func TestFetchFullStreamTombstoneResumeSkipsCompletedDeletions(t *testing.T) {
+	api := &streamAPI{pages: []streamPage{{id: "p1", title: "Page", version: 1}}}
+	old := streamCursor(map[string]string{"p1": "v:1", "p2": "v:1", "p3": "v:1"})
+	// p1 re-fetch succeeds and the p2 tombstone is checkpointed before the
+	// worker dies on the p3 tombstone.
+	first := &captureHandler{succeedFirst: 2}
+	if _, err := newStreamConnector(api).FetchFullStream(context.Background(), streamConfig(), old, first); err == nil {
+		t.Fatal("interrupted full-sync tombstone run unexpectedly succeeded")
+	}
+	if len(first.items) != 2 || first.items[1].ExternalID != "p2" || !first.items[1].IsDeleted {
+		t.Fatalf("first run items = %#v", first.items)
+	}
+	if len(first.checkpoints) != 2 {
+		t.Fatalf("first run checkpoints = %d; want 2", len(first.checkpoints))
+	}
+	deletionCheckpoint := decodeCursor(first.checkpoints[1])
+	if !deletionCheckpoint.FullSync {
+		t.Fatalf("mid-full-sync checkpoint lost the resume flag: %#v", deletionCheckpoint)
+	}
+	if baseline := deletionCheckpoint.FullSyncBaseline["1"]; baseline["p1"] != "v:1" || baseline["p2"] != "" ||
+		baseline["p3"] != "v:1" {
+		t.Fatalf("tombstone checkpoint did not advance the deletion baseline: %#v", deletionCheckpoint)
+	}
+
+	resumeAPI := &streamAPI{pages: api.pages}
+	second := &captureHandler{}
+	next, err := newStreamConnector(
+		resumeAPI,
+	).FetchFullStream(context.Background(), streamConfig(), first.checkpoints[1], second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resumeAPI.bodyCalls != 0 {
+		t.Fatalf("resume re-fetched %d already synced page bodies", resumeAPI.bodyCalls)
+	}
+	if len(second.items) != 1 || !second.items[0].IsDeleted || second.items[0].ExternalID != "p3" {
+		t.Fatalf("resume must tombstone only the remaining page: %#v", second.items)
+	}
+	decoded := decodeCursor(next)
+	if decoded.FullSync || decoded.FullSyncBaseline != nil {
+		t.Fatalf("completed full sync left resume fields set: %#v", decoded)
+	}
+	if decoded.SpacePages["1"]["p1"] != "v:1" || decoded.SpacePages["1"]["p2"] != "" ||
+		decoded.SpacePages["1"]["p3"] != "" {
+		t.Fatalf("completed resume cursor = %#v", decoded)
 	}
 }
 
@@ -230,6 +455,67 @@ func TestFetchStreamRefusesMassDeletion(t *testing.T) {
 	)
 	if err == nil || len(h.items) != 0 {
 		t.Fatalf("mass deletion err=%v items=%#v", err, h.items)
+	}
+}
+
+func TestFetchStreamRefusesMassDeletionInSurvivingScope(t *testing.T) {
+	prior := make(map[string]string, 100)
+	for i := 0; i < 100; i++ {
+		prior[fmt.Sprintf("p%03d", i)] = "v:1"
+	}
+	// The selection is unchanged; a broken listing suddenly returns only five
+	// of the hundred previously synced pages.
+	listed := make([]streamPage, 0, 5)
+	for i := 0; i < 5; i++ {
+		listed = append(listed, streamPage{id: fmt.Sprintf("p%03d", i), title: "Page", version: 1})
+	}
+	api := &streamAPI{pages: listed}
+	h := &captureHandler{}
+	_, err := newStreamConnector(api).FetchStream(context.Background(), streamConfig(), streamCursor(prior), h)
+	if err == nil || len(h.items) != 0 {
+		t.Fatalf("surviving-scope mass deletion err=%v items=%#v", err, h.items)
+	}
+}
+
+func TestFetchStreamAllowsExplicitSpaceToSubtreeShrink(t *testing.T) {
+	prior := make(map[string]string, 100)
+	for i := 0; i < 100; i++ {
+		prior[fmt.Sprintf("p%03d", i)] = "v:1"
+	}
+	// The user deliberately narrows a whole-space selection down to a page
+	// subtree. The mass-deletion guard must only protect a surviving root.
+	api := &streamAPI{pages: []streamPage{{id: "erp", title: "ERP", version: 2}}}
+	ds := streamConfig()
+	ds.ResourceIDs = []string{"page:1:erp"}
+	h := &captureHandler{}
+	next, err := newStreamConnector(api).FetchStream(context.Background(), ds, streamCursor(prior), h)
+	if err != nil {
+		t.Fatalf("explicit scope shrink: %v", err)
+	}
+	if len(h.items) != len(prior)+1 || h.items[0].ExternalID != "erp" {
+		t.Fatalf("scope shrink items = %d, want selected page plus %d tombstones", len(h.items), len(prior))
+	}
+	deleted := 0
+	for _, item := range h.items[1:] {
+		if !item.IsDeleted {
+			t.Fatalf("scope shrink emitted a non-tombstone outside the new scope: %#v", item)
+		}
+		deleted++
+	}
+	if deleted != len(prior) {
+		t.Fatalf("scope shrink tombstones = %d, want %d", deleted, len(prior))
+	}
+	decoded := decodeCursor(next)
+	if len(decoded.SpacePages) != 1 || decoded.SpacePages["page:1:erp"]["erp"] != "v:2" {
+		t.Fatalf("scope shrink cursor retained cancelled roots: %#v", decoded.SpacePages)
+	}
+	if _, oldRootPresent := decoded.SpacePages["1"]; oldRootPresent {
+		t.Fatalf("cancelled space root returned to cursor: %#v", decoded.SpacePages)
+	}
+	for _, item := range h.items[1:] {
+		if item.SourceResourceID != "1" {
+			t.Fatalf("tombstone source = %q, want old root 1", item.SourceResourceID)
+		}
 	}
 }
 
@@ -304,6 +590,50 @@ func TestFetchFullStreamResumesFromCheckpoint(t *testing.T) {
 	}
 	if decoded := decodeCursor(next); decoded.FullSync || decoded.SpacePages["1"]["p2"] != "v:1" {
 		t.Fatalf("completed resume cursor = %#v", decoded)
+	}
+}
+
+func TestFetchFullStreamRetryRefetchesFailedPage(t *testing.T) {
+	pages := []streamPage{
+		{id: "p1", title: "One", version: 1},
+		{id: "p2", title: "Broken then healthy", version: 2},
+		{id: "p3", title: "Three", version: 1},
+	}
+	api := &streamAPI{pages: pages, bodyStatus: map[string]int{"p2": http.StatusForbidden}}
+	first := &captureHandler{checkpointErrAt: 2}
+	old := streamCursor(map[string]string{"p1": "v:1", "p2": "v:1", "p3": "v:1"})
+	_, err := newStreamConnector(api).FetchFullStream(context.Background(), streamConfig(), old, first)
+	if err == nil {
+		t.Fatal("interrupted full sync unexpectedly succeeded")
+	}
+	if len(first.checkpoints) != 1 {
+		t.Fatalf("first full-sync checkpoints = %d; want one successful checkpoint", len(first.checkpoints))
+	}
+	checkpoint := decodeCursor(first.checkpoints[0])
+	if !checkpoint.FullSync || checkpoint.FullSyncBaseline["1"]["p2"] != "v:1" ||
+		checkpoint.SpacePages["1"]["p2"] != "" {
+		t.Fatalf("failed page was not left pending in the full-sync checkpoint: %#v", checkpoint)
+	}
+
+	resumeAPI := &streamAPI{pages: pages}
+	second := &captureHandler{}
+	next, err := newStreamConnector(resumeAPI).FetchFullStream(
+		context.Background(), streamConfig(), first.checkpoints[0], second,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resumeAPI.bodyCalls != 2 {
+		t.Fatalf("retry fetched %d bodies, want failed p2 and uncheckpointed p3", resumeAPI.bodyCalls)
+	}
+	if len(second.items) != 2 || second.items[0].ExternalID != "p2" || second.items[1].ExternalID != "p3" {
+		t.Fatalf("retry items = %#v; failed page was skipped", second.items)
+	}
+	decoded := decodeCursor(next)
+	if decoded.FullSync || decoded.FullSyncBaseline != nil || len(decoded.SpacePages) != 1 ||
+		decoded.SpacePages["1"]["p1"] != "v:1" || decoded.SpacePages["1"]["p2"] != "v:2" ||
+		decoded.SpacePages["1"]["p3"] != "v:1" {
+		t.Fatalf("completed full-sync cursor = %#v", decoded)
 	}
 }
 
@@ -385,5 +715,539 @@ func TestListResourcesKeepsInvalidWebUI(t *testing.T) {
 	resources, err = foreign.ListResources(context.Background(), streamConfig(), "")
 	if err != nil || len(resources) != 1 || resources[0].URL != "https://confluence.test/wiki" {
 		t.Fatalf("ListResources() with hostile webui = %#v, %v", resources, err)
+	}
+}
+
+func TestListResourcesLoadsConfluencePagesLazily(t *testing.T) {
+	api := &streamAPI{pages: []streamPage{{id: "p1", title: "Home", version: 1}}}
+	connector := newStreamConnector(api)
+	spaces, err := connector.ListResources(context.Background(), streamConfig(), "")
+	if err != nil || len(spaces) != 1 || !spaces[0].HasChildren {
+		t.Fatalf("spaces = %#v, %v", spaces, err)
+	}
+	pages, err := connector.ListResources(context.Background(), streamConfig(), "1")
+	if err != nil || len(pages) != 1 {
+		t.Fatalf("top pages = %#v, %v", pages, err)
+	}
+	if pages[0].ExternalID != "page:1:p1" || pages[0].ParentID != "1" || pages[0].Type != "page" ||
+		!pages[0].HasChildren {
+		t.Fatalf("page resource = %#v", pages[0])
+	}
+	children, err := connector.ListResources(context.Background(), streamConfig(), "page:1:p1")
+	if err != nil || len(children) != 0 {
+		t.Fatalf("children = %#v, %v", children, err)
+	}
+	if api.listCalls != 1 {
+		t.Fatalf("space expansion made %d whole-space list calls", api.listCalls)
+	}
+	if api.ancestorCalls != 0 {
+		t.Fatalf("page expansion made %d unnecessary ancestor calls", api.ancestorCalls)
+	}
+}
+
+func TestPickerSpaceCacheIsPartitionedByCredentialFingerprint(t *testing.T) {
+	api := &streamAPI{}
+	connector := newStreamConnector(api)
+	client, cfg, err := connector.configured(streamConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := connector.pickerSpaces(context.Background(), client, cfg); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := connector.pickerSpaces(context.Background(), client, cfg); err != nil {
+		t.Fatal(err)
+	}
+	rotated := cfg
+	rotated.secret = "rotated-password"
+	if _, err := connector.pickerSpaces(context.Background(), client, rotated); err != nil {
+		t.Fatal(err)
+	}
+	if api.spaceCalls != 2 {
+		t.Fatalf("space list calls = %d; want 2 for distinct credentials", api.spaceCalls)
+	}
+}
+
+func TestPickerSpaceCachePrunesExpiredCredentialEntries(t *testing.T) {
+	api := &streamAPI{}
+	connector := newStreamConnector(api)
+	client, cfg, err := connector.configured(streamConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	expired := cfg
+	expired.secret = "expired-password"
+	connector.spaceCache.entries = map[string]cachedSpaces{
+		pickerSpaceCacheKey(expired): {expires: time.Now().Add(-time.Second)},
+	}
+	if _, err := connector.pickerSpaces(context.Background(), client, cfg); err != nil {
+		t.Fatal(err)
+	}
+	if len(connector.spaceCache.entries) != 1 {
+		t.Fatalf("cache entries = %#v; expired credential entry was retained", connector.spaceCache.entries)
+	}
+}
+
+func TestFetchStreamSyncsSelectedPageSubtree(t *testing.T) {
+	api := &streamAPI{pages: []streamPage{{id: "p1", title: "Selected", version: 2}}}
+	ds := streamConfig()
+	ds.ResourceIDs = []string{"page:1:p1"}
+	h := &captureHandler{}
+	next, err := newStreamConnector(api).FetchStream(context.Background(), ds, nil, h)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(h.items) != 1 || h.items[0].SourceResourceID != "page:1:p1" || h.items[0].ExternalID != "p1" {
+		t.Fatalf("items = %#v", h.items)
+	}
+	if decoded := decodeCursor(next); decoded.SpacePages["page:1:p1"]["p1"] != "v:2" {
+		t.Fatalf("cursor = %#v", decoded)
+	}
+}
+
+func TestFetchStreamReconcilesCancelledSpaceScope(t *testing.T) {
+	api := &streamAPI{pages: []streamPage{{id: "p1", title: "Selected", version: 2}}}
+	ds := streamConfig()
+	ds.ResourceIDs = []string{"page:1:p1"}
+	old := streamCursor(map[string]string{"p1": "v:1", "p2": "v:1"})
+	h := &captureHandler{}
+	next, err := newStreamConnector(api).FetchStream(context.Background(), ds, old, h)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(h.items) != 2 || !h.items[1].IsDeleted || h.items[1].ExternalID != "p2" {
+		t.Fatalf("items = %#v", h.items)
+	}
+	decoded := decodeCursor(next)
+	if _, oldScopePresent := decoded.SpacePages["1"]; oldScopePresent ||
+		decoded.SpacePages["page:1:p1"]["p1"] != "v:2" {
+		t.Fatalf("cursor = %#v", decoded)
+	}
+}
+
+func TestFetchStreamPreservesMovedPageWhenBodyFails(t *testing.T) {
+	api := &streamAPI{
+		pages:      []streamPage{{id: "p1", title: "Selected", version: 2}},
+		bodyStatus: map[string]int{"p1": http.StatusNotFound},
+	}
+	ds := streamConfig()
+	ds.ResourceIDs = []string{"page:1:p1"}
+	old := streamCursor(map[string]string{"p1": "v:1", "p2": "v:1"})
+	h := &captureHandler{}
+	next, err := newStreamConnector(api).FetchStream(context.Background(), ds, old, h)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded := decodeCursor(next)
+	if decoded.SpacePages["page:1:p1"]["p1"] != "v:1" {
+		t.Fatalf("prior version was not preserved: %#v", decoded)
+	}
+	deletedP2 := false
+	for _, item := range h.items {
+		if item.IsDeleted && item.ExternalID == "p1" {
+			t.Fatalf("failed page was deleted: %#v", h.items)
+		}
+		deletedP2 = deletedP2 || (item.IsDeleted && item.ExternalID == "p2")
+	}
+	if !deletedP2 {
+		t.Fatalf("cancelled scope page was not deleted: %#v", h.items)
+	}
+}
+
+func TestFetchStreamDoesNotDeleteWhenNewScopeCannotEnumerate(t *testing.T) {
+	api := &streamAPI{pages: []streamPage{{id: "p1", title: "Selected", version: 2}}}
+	connector := newStreamConnector(api)
+	originalFactory := connector.newClient
+	connector.newClient = func(cfg config) (*client, error) {
+		c, err := originalFactory(cfg)
+		if err != nil {
+			return nil, err
+		}
+		originalTransport := c.http.Transport
+		c.http.Transport = roundTripper(func(req *http.Request) (*http.Response, error) {
+			if req.URL.Path == "/wiki/rest/api/content/p1" && req.URL.Query().Get("expand") == "version,space" {
+				return &http.Response{
+					StatusCode: http.StatusNotFound,
+					Header:     make(http.Header),
+					Body:       io.NopCloser(strings.NewReader("missing")),
+				}, nil
+			}
+			return originalTransport.RoundTrip(req)
+		})
+		return c, nil
+	}
+	ds := streamConfig()
+	ds.ResourceIDs = []string{"page:1:p1"}
+	h := &captureHandler{}
+	_, err := connector.FetchStream(
+		context.Background(),
+		ds,
+		streamCursor(map[string]string{"p1": "v:1", "p2": "v:1"}),
+		h,
+	)
+	if err == nil {
+		t.Fatal("scope enumeration failure unexpectedly succeeded")
+	}
+	for _, item := range h.items {
+		if item.IsDeleted {
+			t.Fatalf("incomplete scope emitted a tombstone: %#v", h.items)
+		}
+	}
+}
+
+func TestBuildSyncPlanNormalizesOverlappingScopes(t *testing.T) {
+	api := &streamAPI{}
+	client := &client{
+		cfg: config{baseURL: "https://confluence.test/wiki"},
+		http: &http.Client{Transport: roundTripper(func(req *http.Request) (*http.Response, error) {
+			switch req.URL.Path {
+			case "/wiki/rest/api/space":
+				return api.jsonResponse(
+					map[string]any{"results": []any{map[string]any{"id": 1, "key": "ENG", "name": "Engineering"}}},
+				)
+			case "/wiki/rest/api/content/parent":
+				return api.jsonResponse(
+					map[string]any{"id": "parent", "space": map[string]any{"key": "ENG"}, "ancestors": []any{}},
+				)
+			case "/wiki/rest/api/content/child":
+				return api.jsonResponse(
+					map[string]any{
+						"id":        "child",
+						"space":     map[string]any{"key": "ENG"},
+						"ancestors": []any{map[string]any{"id": "parent"}},
+					},
+				)
+			default:
+				return nil, errors.New("unexpected endpoint: " + req.URL.String())
+			}
+		})},
+	}
+	connector := NewConnector()
+	plan, err := connector.buildSyncPlan(context.Background(), client, []string{"page:1:child", "page:1:parent"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Roots) != 1 || plan.Roots[0].ResourceID != "page:1:parent" {
+		t.Fatalf("page overlap plan = %#v", plan)
+	}
+	plan, err = connector.buildSyncPlan(context.Background(), client, []string{"1", "page:1:child"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Roots) != 1 || plan.Roots[0].Kind != syncWholeSpace || plan.Roots[0].ResourceID != "1" {
+		t.Fatalf("space overlap plan = %#v", plan)
+	}
+}
+
+func TestFetchStreamCloudSyncsSelectedPageSubtree(t *testing.T) {
+	api := &streamAPI{cloud: true, pages: []streamPage{{id: "p1", title: "Cloud", version: 3}}}
+	ds := cloudStreamConfig()
+	ds.ResourceIDs = []string{"page:1:p1"}
+	h := &captureHandler{}
+	next, err := newStreamConnector(api).FetchStream(context.Background(), ds, nil, h)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(h.items) != 1 || h.items[0].ExternalID != "p1" || h.items[0].SourceResourceID != "page:1:p1" {
+		t.Fatalf("items = %#v", h.items)
+	}
+	if decoded := decodeCursor(next); decoded.SpacePages["page:1:p1"]["p1"] != "v:3" {
+		t.Fatalf("cursor = %#v", decoded)
+	}
+}
+
+func TestListResourcesCloudStaysLazyWithContainerLimitation(t *testing.T) {
+	api := &streamAPI{}
+	var listDepths []string
+	conn := &Connector{newClient: func(cfg config) (*client, error) {
+		return &client{
+			cfg: cfg,
+			http: &http.Client{Transport: roundTripper(func(req *http.Request) (*http.Response, error) {
+				switch req.URL.Path {
+				case "/wiki/api/v2/spaces":
+					return api.jsonResponse(
+						map[string]any{
+							"results": []any{map[string]any{"id": "1", "key": "ENG", "name": "Engineering"}},
+						},
+					)
+				case "/wiki/api/v2/spaces/1/pages":
+					listDepths = append(listDepths, req.URL.Query().Get("depth"))
+					// depth=0 surfaces root pages only; the folder and the page nested
+					// inside it are unreachable through this endpoint (CONFCLOUD-84275).
+					return api.jsonResponse(map[string]any{"results": []any{
+						map[string]any{"id": "top", "type": "page", "title": "Top"},
+						map[string]any{"id": "folder", "type": "folder", "title": "Folder"},
+					}})
+				default:
+					return nil, errors.New("unexpected endpoint: " + req.URL.String())
+				}
+			})},
+		}, nil
+	}}
+	// Cloud spaces carry the limitation marker so the picker can explain why
+	// pages under top-level containers are not selectable.
+	spaces, err := conn.ListResources(context.Background(), cloudStreamConfig(), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(spaces) != 1 || spaces[0].Metadata["hierarchy_limitation"] != "cloud_top_level_containers" {
+		t.Fatalf("cloud space metadata = %#v", spaces)
+	}
+	resources, err := conn.ListResources(context.Background(), cloudStreamConfig(), "1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(resources) != 1 || resources[0].ExternalID != "page:1:top" {
+		t.Fatalf("resources = %#v", resources)
+	}
+	// Expanding a space must stay a single shallow call, never a whole-space
+	// scan, even though top-level folders hide some pages.
+	if len(listDepths) != 1 || listDepths[0] != "0" {
+		t.Fatalf("space expansion depths = %#v; want a single depth=0 call", listDepths)
+	}
+}
+
+func TestResolveResourceAncestorsSkipsUnresolvableSelections(t *testing.T) {
+	api := &streamAPI{}
+	connector := &Connector{newClient: func(cfg config) (*client, error) {
+		return &client{
+			cfg: cfg,
+			http: &http.Client{Transport: roundTripper(func(req *http.Request) (*http.Response, error) {
+				switch req.URL.Path {
+				case "/wiki/rest/api/space":
+					return api.jsonResponse(map[string]any{"results": []any{map[string]any{
+						"id": 1, "key": "ENG", "name": "Engineering",
+					}}})
+				case "/wiki/rest/api/content/alive":
+					return api.jsonResponse(map[string]any{
+						"id": "alive", "space": map[string]any{"key": "ENG"},
+						"ancestors": []any{map[string]any{"id": "parent"}},
+					})
+				case "/wiki/rest/api/content/gone":
+					return &http.Response{
+						StatusCode: http.StatusNotFound,
+						Header:     make(http.Header),
+						Body:       io.NopCloser(strings.NewReader("missing page")),
+					}, nil
+				default:
+					return nil, errors.New("unexpected endpoint: " + req.URL.String())
+				}
+			})},
+		}, nil
+	}}
+	ancestors, err := connector.ResolveResourceAncestors(
+		context.Background(), streamConfig(),
+		[]string{"page:1:alive", "page:1:gone", "page:9:elsewhere", "not-a-resource"},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"1", "page:1:parent"}
+	if len(ancestors) != len(want) || ancestors[0] != want[0] || ancestors[1] != want[1] {
+		t.Fatalf("ancestors = %#v; want %#v", ancestors, want)
+	}
+}
+
+func TestVisibleCloudPageChildrenTraversesContainers(t *testing.T) {
+	api := &streamAPI{}
+	client := &client{
+		cfg: config{edition: editionCloud, baseURL: "https://confluence.test/wiki"},
+		http: &http.Client{Transport: roundTripper(func(req *http.Request) (*http.Response, error) {
+			switch req.URL.Path {
+			case "/wiki/api/v2/pages/a/direct-children":
+				return api.jsonResponse(map[string]any{"results": []any{
+					map[string]any{"id": "b", "type": "page", "title": "B"},
+					map[string]any{"id": "folder", "type": "folder", "title": "Folder"},
+				}})
+			case "/wiki/api/v2/folders/folder/direct-children":
+				return api.jsonResponse(map[string]any{"results": []any{
+					map[string]any{"id": "c", "type": "page", "title": "C"},
+					map[string]any{"id": "db", "type": "database", "title": "DB"},
+				}})
+			case "/wiki/api/v2/databases/db/direct-children":
+				return api.jsonResponse(
+					map[string]any{"results": []any{map[string]any{"id": "e", "type": "page", "title": "E"}}},
+				)
+			default:
+				return nil, errors.New("unexpected endpoint: " + req.URL.String())
+			}
+		})},
+	}
+	pages, err := client.visibleCloudPageChildren(context.Background(), "a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pages) != 3 || pages[0].ID != "b" || pages[1].ID != "c" || pages[2].ID != "e" {
+		t.Fatalf("projected pages = %#v", pages)
+	}
+}
+
+func TestCloudPageSubtreeWalksDeepMixedHierarchy(t *testing.T) {
+	api := &streamAPI{}
+	client := &client{
+		cfg: config{edition: editionCloud, baseURL: "https://confluence.test/wiki"},
+		http: &http.Client{Transport: roundTripper(func(req *http.Request) (*http.Response, error) {
+			if req.Method != http.MethodGet {
+				return nil, fmt.Errorf("unexpected method %s", req.Method)
+			}
+			switch req.URL.Path {
+			case "/wiki/api/v2/pages/root":
+				return api.jsonResponse(map[string]any{"id": "root", "spaceId": "1"})
+			case "/wiki/api/v2/pages/p1":
+				return api.jsonResponse(map[string]any{
+					"id": "p1", "spaceId": "1", "version": map[string]any{"number": 2},
+				})
+			case "/wiki/api/v2/pages/p2":
+				return api.jsonResponse(map[string]any{
+					"id": "p2", "spaceId": "1", "version": map[string]any{"number": 3},
+				})
+			case "/wiki/api/v2/pages/p3":
+				return api.jsonResponse(map[string]any{
+					"id": "p3", "spaceId": "1", "version": map[string]any{"number": 4},
+				})
+			case "/wiki/api/v2/pages/root/direct-children":
+				return api.jsonResponse(map[string]any{"results": []any{
+					map[string]any{"id": "p1", "type": "page", "title": "First page"},
+					map[string]any{"id": "folder", "type": "folder", "title": "Folder"},
+				}})
+			case "/wiki/api/v2/pages/p1/direct-children":
+				return api.jsonResponse(map[string]any{"results": []any{
+					map[string]any{"id": "db", "type": "database", "title": "Database"},
+				}})
+			case "/wiki/api/v2/folders/folder/direct-children":
+				return api.jsonResponse(map[string]any{"results": []any{
+					map[string]any{"id": "p2", "type": "page", "title": "Second page"},
+				}})
+			case "/wiki/api/v2/databases/db/direct-children":
+				return api.jsonResponse(map[string]any{"results": []any{
+					map[string]any{"id": "p3", "type": "page", "title": "Deep page"},
+				}})
+			case "/wiki/api/v2/pages/p2/direct-children", "/wiki/api/v2/pages/p3/direct-children":
+				return api.jsonResponse(map[string]any{"results": []any{}})
+			default:
+				return nil, fmt.Errorf("unexpected endpoint: %s", req.URL.String())
+			}
+		})},
+	}
+
+	pages, err := client.pageSubtree(context.Background(), space{ID: "1"}, "root")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"root", "p1", "p2", "p3"}
+	if len(pages) != len(want) {
+		t.Fatalf("subtree pages = %#v; want IDs %v", pages, want)
+	}
+	for i, id := range want {
+		if pages[i].ID != id || pages[i].SpaceID != "1" {
+			t.Fatalf("subtree page[%d] = %#v; want ID %q in space 1", i, pages[i], id)
+		}
+	}
+}
+
+func TestFetchStreamChecksUnlistedPagesWhenServerListingNeverEnds(t *testing.T) {
+	api := &streamAPI{
+		endlessNext: true,
+		pages:       []streamPage{{id: "p1", title: "Page", version: 2}},
+		probe: map[string]probeReply{
+			"gone": {status: http.StatusNotFound},
+			"kept": {status: http.StatusOK, spaceKey: "ENG"},
+		},
+	}
+	h := &captureHandler{}
+	old := streamCursor(map[string]string{"p1": "v:1", "gone": "v:1", "kept": "v:1"})
+	got, err := newStreamConnector(api).FetchStream(context.Background(), streamConfig(), old, h)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if api.listCalls != 1+maxEmptyServerPages || api.probeCalls != 2 {
+		t.Fatalf("list/probe calls = %d/%d", api.listCalls, api.probeCalls)
+	}
+	if len(h.items) != 2 || !h.items[1].IsDeleted || h.items[1].ExternalID != "gone" {
+		t.Fatalf("items = %#v", h.items)
+	}
+	pages := decodeCursor(got).SpacePages["1"]
+	if pages["p1"] != "v:2" || pages["kept"] != "v:1" || len(pages) != 2 {
+		t.Fatalf("cursor pages = %#v", pages)
+	}
+}
+
+func TestFetchStreamDoesNotRestoreCancelledRootForPageFoundByPartialProbe(t *testing.T) {
+	api := &streamAPI{
+		endlessNext: true,
+		probe: map[string]probeReply{
+			"kept": {status: http.StatusOK, spaceKey: "ENG"},
+		},
+	}
+	h := &captureHandler{}
+	old := (&cursor{SpacePages: map[string]map[string]string{
+		"page:1:old-root": {"kept": "v:1"},
+	}}).syncCursor()
+	next, err := newStreamConnector(api).FetchStream(context.Background(), streamConfig(), old, h)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(h.items) != 0 {
+		t.Fatalf("confirmed-present page emitted items: %#v", h.items)
+	}
+	decoded := decodeCursor(next)
+	if len(decoded.SpacePages) != 1 || decoded.SpacePages["1"]["kept"] != "v:1" {
+		t.Fatalf("reconciled cursor = %#v; expected only the current root", decoded.SpacePages)
+	}
+	if _, oldRootPresent := decoded.SpacePages["page:1:old-root"]; oldRootPresent {
+		t.Fatalf("cancelled root was restored to cursor: %#v", decoded.SpacePages)
+	}
+}
+
+func TestFetchStreamDoesNotTombstoneWhenPartialListingProbeFails(t *testing.T) {
+	api := &streamAPI{
+		endlessNext: true,
+		probe: map[string]probeReply{
+			"gone":    {status: http.StatusNotFound},
+			"unknown": {status: http.StatusForbidden},
+		},
+	}
+	h := &captureHandler{}
+	old := streamCursor(map[string]string{"gone": "v:1", "unknown": "v:1"})
+	_, err := newStreamConnector(api).FetchStream(context.Background(), streamConfig(), old, h)
+	if err == nil {
+		t.Fatal("unverified partial-listing candidate unexpectedly completed reconciliation")
+	}
+	for _, item := range h.items {
+		if item.IsDeleted {
+			t.Fatalf("probe failure allowed a tombstone: %#v", h.items)
+		}
+	}
+	if len(h.checkpoints) != 0 {
+		t.Fatalf("probe failure checkpointed reconciliation: %#v", h.checkpoints)
+	}
+	if api.probeCalls == 0 {
+		t.Fatal("empty incomplete listing was rejected before checking prior pages")
+	}
+}
+
+func TestFetchStreamDefersWhenPartialListingProbeBudgetIsExhausted(t *testing.T) {
+	prior := make(map[string]string, maxDeletionProbes+1)
+	probes := make(map[string]probeReply, maxDeletionProbes+1)
+	for i := 0; i <= maxDeletionProbes; i++ {
+		id := fmt.Sprintf("p%03d", i)
+		prior[id] = "v:1"
+		probes[id] = probeReply{status: http.StatusNotFound}
+	}
+	api := &streamAPI{endlessNext: true, probe: probes}
+	h := &captureHandler{}
+	_, err := newStreamConnector(api).FetchStream(context.Background(), streamConfig(), streamCursor(prior), h)
+	if err == nil {
+		t.Fatal("partial listing with unverified candidates unexpectedly completed")
+	}
+	if api.probeCalls != maxDeletionProbes {
+		t.Fatalf("existence probes = %d; want capped at %d", api.probeCalls, maxDeletionProbes)
+	}
+	if len(h.items) != 0 || len(h.checkpoints) != 0 {
+		t.Fatalf(
+			"probe budget exhaustion emitted or checkpointed reconciliation: items=%#v checkpoints=%#v",
+			h.items,
+			h.checkpoints,
+		)
 	}
 }

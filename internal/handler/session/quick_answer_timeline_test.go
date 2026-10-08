@@ -2,7 +2,9 @@ package session
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -118,4 +120,43 @@ func TestQuickAnswerTruncationPersistsOnSharedStep(t *testing.T) {
 	require.Len(t, msg.AgentSteps, 1)
 	assert.Equal(t, "思考中", msg.AgentSteps[0].ReasoningContent)
 	assert.True(t, msg.AgentSteps[0].Truncated)
+}
+
+// Verify the durable completion boundary, including the message update and
+// JSON reload, independently of the provider's stream generation.
+func TestQuickAnswerFallbackTruncationSurvivesCompletion(t *testing.T) {
+	for _, content := range []string{"output budget exhausted", "partial answer"} {
+		t.Run(content, func(t *testing.T) {
+			messages := &imageCompletionMessages{}
+			stream := &imageCompletionStream{}
+			h := &Handler{messageService: messages, streamManager: stream}
+			bus := event.NewEventBus()
+			msg := &types.Message{ID: "m", SessionID: "s", Role: "assistant", Content: content, IsFallback: true}
+			appendQuickAnswerReasoning(msg, "reasoning")
+			markQuickAnswerTruncated(msg)
+			ctx := types.WithExecutionTenant(context.Background(), 1)
+			handler := h.setupStreamHandler(ctx, "s", "m", "req", 1, time.Now(), msg, bus)
+			require.NoError(t, bus.Emit(ctx, event.Event{
+				ID: "fallback", Type: event.EventAgentFinalAnswer,
+				Data: event.AgentFinalAnswerData{Content: content, Done: true, IsFallback: true, Truncated: true},
+			}))
+			require.NotEmpty(t, stream.events)
+			require.Equal(t, true, stream.events[0].Data["truncated"])
+			require.Equal(t, true, stream.events[0].Data["is_fallback"])
+			h.completeQuickAnswerTurn(ctx, &sseStreamContext{
+				eventBus: bus, streamHandler: handler, assistantMessage: msg,
+			}, "", "")
+			require.NotNil(t, messages.saved)
+			raw, err := json.Marshal(messages.saved)
+			require.NoError(t, err)
+			var restored types.Message
+			require.NoError(t, json.Unmarshal(raw, &restored))
+			require.Equal(t, content, restored.Content)
+			require.True(t, restored.IsFallback)
+			require.True(t, restored.IsCompleted)
+			require.Len(t, restored.AgentSteps, 1)
+			require.True(t, restored.AgentSteps[0].Truncated)
+			require.Equal(t, "reasoning", restored.AgentSteps[0].ReasoningContent)
+		})
+	}
 }

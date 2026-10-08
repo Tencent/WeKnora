@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/models/api"
-	"github.com/Tencent/WeKnora/internal/models/catalog"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -35,7 +34,7 @@ const endpoint = "/api/v1/services/embeddings/multimodal-embedding/multimodal-em
 func newClient(url string, dims int) *Client {
 	return New(Config{
 		Endpoint:   api.Endpoint{BaseURL: url, Model: "tongyi-embedding-vision-plus", Auth: api.BearerAuth("k")},
-		Settings:   catalog.EmbeddingsSettings{DimensionsField: "dimension"},
+		Settings:   api.EmbeddingsSettings{DimensionsField: "dimension"},
 		Dimensions: dims,
 	})
 }

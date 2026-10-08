@@ -10,7 +10,6 @@ import (
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/models/api"
-	"github.com/Tencent/WeKnora/internal/models/catalog"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -93,9 +92,9 @@ func serve(t *testing.T, status int, reply string) (*httptest.Server, *captured)
 	return server, got
 }
 
-func newClient(url, model string, settings catalog.TranscriptionsSettings) *Client {
+func newClient(url, model string, settings api.TranscriptionsSettings) *Client {
 	if settings.Path == "" {
-		settings.Path = catalog.DefaultTranscriptions().Path
+		settings.Path = api.DefaultTranscriptions().Path
 	}
 	return New(Config{
 		Endpoint: api.Endpoint{BaseURL: url, Model: model, Auth: api.BearerAuth("k")},
@@ -107,7 +106,7 @@ func newClient(url, model string, settings catalog.TranscriptionsSettings) *Clie
 // which is the default, so no response_format is sent.
 func TestBaselineFormIsFileAndModel(t *testing.T) {
 	server, got := serve(t, http.StatusOK, jsonResponse)
-	out, err := newClient(server.URL+"/v1", "gpt-4o-transcribe", catalog.TranscriptionsSettings{}).
+	out, err := newClient(server.URL+"/v1", "gpt-4o-transcribe", api.TranscriptionsSettings{}).
 		Transcribe(context.Background(), api.TranscriptionRequest{Audio: []byte("RIFF"), FileName: "meeting.wav"})
 	require.NoError(t, err)
 
@@ -129,12 +128,12 @@ func TestLanguageGoesWhereTheVendorDeclares(t *testing.T) {
 		wantHeader string
 	}{
 		{param: "", wantField: "", wantHeader: ""},
-		{param: catalog.LanguageForm, wantField: "zh", wantHeader: ""},
-		{param: catalog.LanguageHeader, wantField: "", wantHeader: "zh"},
+		{param: api.LanguageForm, wantField: "zh", wantHeader: ""},
+		{param: api.LanguageHeader, wantField: "", wantHeader: "zh"},
 	} {
 		t.Run("param="+tc.param, func(t *testing.T) {
 			server, got := serve(t, http.StatusOK, jsonResponse)
-			_, err := newClient(server.URL, "m", catalog.TranscriptionsSettings{LanguageParam: tc.param}).
+			_, err := newClient(server.URL, "m", api.TranscriptionsSettings{LanguageParam: tc.param}).
 				Transcribe(context.Background(), api.TranscriptionRequest{
 					Audio: []byte("x"), FileName: "a.wav", Language: "zh",
 				})
@@ -157,7 +156,7 @@ func TestDurationIsReadFromTheReply(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			server, _ := serve(t, http.StatusOK, reply)
-			out, err := newClient(server.URL, "m", catalog.TranscriptionsSettings{}).
+			out, err := newClient(server.URL, "m", api.TranscriptionsSettings{}).
 				Transcribe(context.Background(), api.TranscriptionRequest{Audio: []byte("x"), FileName: "a.wav"})
 			require.NoError(t, err)
 			assert.NotZero(t, out.Duration)
@@ -167,7 +166,7 @@ func TestDurationIsReadFromTheReply(t *testing.T) {
 
 func TestVerboseJSONCarriesSegments(t *testing.T) {
 	server, got := serve(t, http.StatusOK, verboseResponse)
-	settings := catalog.TranscriptionsSettings{ResponseFormat: "verbose_json"}
+	settings := api.TranscriptionsSettings{ResponseFormat: "verbose_json"}
 	out, err := newClient(server.URL+"/v1", "whisper-1", settings).
 		Transcribe(context.Background(), api.TranscriptionRequest{Audio: []byte("ID3"), FileName: "a.mp3"})
 	require.NoError(t, err)
@@ -182,7 +181,7 @@ func TestVerboseJSONCarriesSegments(t *testing.T) {
 // Silence is an empty transcript, and that is a valid answer.
 func TestEmptyTextIsSilence(t *testing.T) {
 	server, _ := serve(t, http.StatusOK, `{"text": ""}`)
-	out, err := newClient(server.URL, "m", catalog.TranscriptionsSettings{}).
+	out, err := newClient(server.URL, "m", api.TranscriptionsSettings{}).
 		Transcribe(context.Background(), api.TranscriptionRequest{Audio: []byte("x"), FileName: "a.wav"})
 	require.NoError(t, err)
 	assert.Equal(t, "", out.Text)
@@ -195,7 +194,7 @@ func TestEmptyTextIsSilence(t *testing.T) {
 func TestReplyWithoutTextIsAnError(t *testing.T) {
 	server, _ := serve(t, http.StatusOK,
 		`{"status_code": 500, "detail": "Failed to transcribe audio, boom", "headers": null}`)
-	_, err := newClient(server.URL, "m", catalog.TranscriptionsSettings{}).
+	_, err := newClient(server.URL, "m", api.TranscriptionsSettings{}).
 		Transcribe(context.Background(), api.TranscriptionRequest{Audio: []byte("x"), FileName: "a.wav"})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "Failed to transcribe audio")
@@ -204,7 +203,7 @@ func TestReplyWithoutTextIsAnError(t *testing.T) {
 func TestSurfacesTheVendorErrorBody(t *testing.T) {
 	// A stand-in rejection in OpenAI's error envelope.
 	server, _ := serve(t, http.StatusBadRequest, `{"error":{"message":"stand-in rejection"}}`)
-	_, err := newClient(server.URL, "gpt-4o-transcribe", catalog.TranscriptionsSettings{}).
+	_, err := newClient(server.URL, "gpt-4o-transcribe", api.TranscriptionsSettings{}).
 		Transcribe(context.Background(), api.TranscriptionRequest{Audio: []byte("x"), FileName: "a.wav"})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "stand-in rejection")
@@ -212,7 +211,7 @@ func TestSurfacesTheVendorErrorBody(t *testing.T) {
 
 func TestDoesNotDoubleThePath(t *testing.T) {
 	server, got := serve(t, http.StatusOK, jsonResponse)
-	_, err := newClient(server.URL+"/v1/audio/transcriptions", "m", catalog.TranscriptionsSettings{}).
+	_, err := newClient(server.URL+"/v1/audio/transcriptions", "m", api.TranscriptionsSettings{}).
 		Transcribe(context.Background(), api.TranscriptionRequest{Audio: []byte("x"), FileName: "a.wav"})
 	require.NoError(t, err)
 	assert.Equal(t, "/v1/audio/transcriptions", got.path)

@@ -140,7 +140,7 @@ func TestTerminalAttachResolvesTheLentWorkspace(t *testing.T) {
 
 	mgr := &destroyRecordingManager{}
 	resolver := &lendingResolver{mgr: mgr}
-	svc := NewSandboxTerminalService(pinner, resolver, nil, nil)
+	svc := NewSandboxTerminalService(pinner, resolver, nil, nil, HostSandboxManager{})
 
 	got, pin, err := svc.resolveSessionManager(borrowerCtx(), "s-1")
 
@@ -155,7 +155,7 @@ func TestTerminalAttachResolvesTheLentWorkspace(t *testing.T) {
 func TestTerminalProvisionUsesTheAgentsWorkspace(t *testing.T) {
 	pinner := NewSessionSandboxPinner(borrowedSessionDB(t))
 	resolver := &lendingResolver{mgr: &destroyRecordingManager{}}
-	svc := NewSandboxTerminalService(pinner, resolver, nil, nil)
+	svc := NewSandboxTerminalService(pinner, resolver, nil, nil, HostSandboxManager{})
 
 	// The PTY open that follows fails for this fake manager; what matters here
 	// is that resolution and the pin claim happened in the lending workspace.
@@ -172,12 +172,30 @@ func TestTerminalProvisionUsesTheAgentsWorkspace(t *testing.T) {
 		"a panel-created sandbox records its workspace like a chat turn does")
 }
 
+// Lite never resolves a remote sandbox, whatever the session pinned before
+// the upgrade or the panel asks to provision.
+func TestTerminalOnLiteIgnoresRemotePinsAndConfigs(t *testing.T) {
+	pinner := NewSessionSandboxPinner(borrowedSessionDB(t))
+	_, err := pinner.Pin(context.Background(), "s-1",
+		SandboxPin{ConfigID: lentSandboxConfig, TenantID: lenderTenant})
+	require.NoError(t, err)
+	resolver := &lendingResolver{mgr: &destroyRecordingManager{}}
+	svc := NewSandboxTerminalService(pinner, resolver, nil, nil, HostSandboxManager{Desktop: true})
+
+	_, err = svc.EnsureSessionTerminal(borrowerCtx(), "s-1",
+		SandboxPin{ConfigID: lentSandboxConfig, TenantID: lenderTenant},
+		sandbox.RemoteTerminalOptions{})
+
+	require.ErrorIs(t, err, sandbox.ErrNoLiveSessionSandbox)
+	require.Zero(t, resolver.lastTenant, "no remote config may be resolved on Lite")
+}
+
 // A zero provision pin stays lookup-only: opening a panel must never create
 // infrastructure on its own.
 func TestTerminalProvisionStaysLookupOnlyWithoutAPin(t *testing.T) {
 	pinner := NewSessionSandboxPinner(borrowedSessionDB(t))
 	resolver := &lendingResolver{mgr: &destroyRecordingManager{}}
-	svc := NewSandboxTerminalService(pinner, resolver, nil, nil)
+	svc := NewSandboxTerminalService(pinner, resolver, nil, nil, HostSandboxManager{})
 
 	_, err := svc.EnsureSessionTerminal(
 		borrowerCtx(), "s-1", SandboxPin{}, sandbox.RemoteTerminalOptions{})

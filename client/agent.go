@@ -137,9 +137,11 @@ func (c *Client) processAgentSSEStream(reader io.Reader, callback AgentEventCall
 
 		// Empty line indicates the end of an event
 		if line == "" {
-			if dataBuffer != "" {
+			// A bare `data:` frame carries no payload; skip it rather than
+			// failing the stream on an empty JSON document.
+			if data := completeSSEData(dataBuffer); data != "" {
 				var streamResponse AgentStreamResponse
-				if err := json.Unmarshal([]byte(dataBuffer), &streamResponse); err != nil {
+				if err := json.Unmarshal([]byte(data), &streamResponse); err != nil {
 					return fmt.Errorf("failed to parse SSE data: %w", err)
 				}
 
@@ -153,8 +155,8 @@ func (c *Client) processAgentSSEStream(reader io.Reader, callback AgentEventCall
 				if streamResponse.ResponseType == AgentResponseTypeError && streamResponse.Done {
 					return NewSSEStreamError(streamResponse.Content)
 				}
-				dataBuffer = ""
 			}
+			dataBuffer = ""
 			continue
 		}
 
@@ -167,7 +169,7 @@ func (c *Client) processAgentSSEStream(reader io.Reader, callback AgentEventCall
 
 		// Process lines with data: prefix
 		if strings.HasPrefix(line, "data:") {
-			dataBuffer = strings.TrimSpace(line[5:]) // Remove "data:" prefix
+			dataBuffer = appendSSEDataLine(dataBuffer, line)
 		}
 	}
 

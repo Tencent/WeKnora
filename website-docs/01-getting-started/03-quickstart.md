@@ -24,7 +24,7 @@
 - 用户名 2–50 个字符；密码为 8–32 位，至少包含字母和数字。启用复杂密码策略后，还须同时包含大小写字母和特殊字符，界面与 API 使用同一策略；
 - 团队部署可关闭公开注册，之后通过邀请链接添加成员。可设置 `DISABLE_REGISTRATION=true`（启动时把注册模式强制为 `invite_only`），或由系统管理员在「设置 → 系统」将 `auth.registration_mode` 改成 `invite_only`（立即生效，不用重启）；
 - 如果部署把默认空间策略设成了 `tenantless`（`auth.default_tenant_mode`），注册后**不会**自动建空间，而是被引导到 `/onboarding/workspace`，需要先自建或接受邀请加入一个空间才能继续；
-- 桌面版 / Lite 版免注册，启动即自动创建本地账号。
+- 桌面应用免注册，启动即自动创建本地账号并登录；Lite 单二进制在浏览器中访问时仍需注册和登录。
 
 ::: tip 空间与平台权限
 空间 Owner 管理所在空间的成员、模型和知识库。全局系统设置、平台任务队列及跨空间审计需要系统管理员身份，两类权限独立授予。
@@ -90,7 +90,7 @@
 
 ## 通过 API 完成首次问答 {#_7-用-api-走通同样的链路}
 
-以下示例按注册、登录、建库、模型初始化、上传和问答顺序调用 API。路径统一使用 `/api/v1` 前缀。
+以下示例按注册、登录、建库、模型初始化、上传和问答顺序调用 API。路径统一使用 `/api/v1` 前缀，需要 Bash、curl 和 jq。登录账号须已加入工作空间；若登录响应没有 `active_tenant`，请先创建或加入空间，再重新登录。
 
 ```bash
 BASE=http://localhost:8080/api/v1
@@ -99,9 +99,11 @@ BASE=http://localhost:8080/api/v1
 curl -s -X POST $BASE/auth/register -H "Content-Type: application/json" \
   -d '{"username":"admin","email":"admin@example.com","password":"pass123456"}'
 
-# 2) 登录，取 JWT
-TOKEN=$(curl -s -X POST $BASE/auth/login -H "Content-Type: application/json" \
-  -d '{"email":"admin@example.com","password":"pass123456"}' | jq -r '.token')
+# 2) 登录，保存 JWT 与当前工作空间 ID（后续创建 API Key 时使用）
+LOGIN_RESPONSE=$(curl -s -X POST $BASE/auth/login -H "Content-Type: application/json" \
+  -d '{"email":"admin@example.com","password":"pass123456"}')
+TOKEN=$(printf '%s\n' "$LOGIN_RESPONSE" | jq -r '.token')
+TENANT_ID=$(printf '%s\n' "$LOGIN_RESPONSE" | jq -r '.active_tenant.id')
 AUTH="Authorization: Bearer $TOKEN"
 
 # 3) 创建知识库
@@ -153,7 +155,7 @@ curl -s -X POST $BASE/knowledge-search -H "$AUTH" -H "Content-Type: application/
 服务端集成建议用 API Key 而不是 JWT：
 
 ```bash
-# 以 Owner 身份创建 API Key（TENANT_ID 来自登录响应）
+# 以当前工作空间 Owner 身份创建 API Key（TENANT_ID 已在登录步骤提取）
 curl -s -X POST $BASE/tenants/$TENANT_ID/api-keys -H "$AUTH" -H "Content-Type: application/json" \
   -d '{"name":"ci-bot","full_access":true}'
 # 之后所有请求改用：

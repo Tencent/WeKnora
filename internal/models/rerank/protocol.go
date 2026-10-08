@@ -9,7 +9,6 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/api"
-	"github.com/Tencent/WeKnora/internal/models/catalog"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -19,7 +18,7 @@ import (
 // ceilings, and putting the returned scores on one scale.
 type protocolReranker struct {
 	inner     api.Reranker
-	settings  catalog.RerankSettings
+	settings  api.RerankSettings
 	endpoint  string
 	modelName string
 	modelID   string
@@ -110,6 +109,22 @@ func (r *protocolReranker) Rerank(
 		return results[i].RelevanceScore > results[j].RelevanceScore
 	})
 	return results, nil
+}
+
+// MaxPassageRunes implements PassageLimiter from the documented per-document
+// and per-request ceilings; the query is charged against the latter because
+// every request repeats it.
+func (r *protocolReranker) MaxPassageRunes(query string) int {
+	limit := r.settings.MaxDocumentChars
+	if total := r.settings.MaxRequestChars; total > 0 {
+		// A query that leaves no room fails in Rerank with its own error;
+		// 1 keeps the limit meaningful rather than reading as "no limit".
+		room := max(total-utf8.RuneCountInString(query), 1)
+		if limit <= 0 || room < limit {
+			limit = room
+		}
+	}
+	return max(limit, 0)
 }
 
 func (r *protocolReranker) concurrency() int {

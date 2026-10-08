@@ -1,6 +1,6 @@
 # 扩展点指南
 
-WeKnora 的解析器、分块策略、检索引擎、模型 Provider、搜索引擎、数据源、IM 适配器、Agent 工具和存储后端均通过接口接入。新增实现时，先实现对应接口，再在注册入口装配，并验证现有调用链。以下按扩展类型列出接口、已有实现和接入步骤。
+WeKnora 的解析器、分块策略、检索引擎、模型厂商、搜索引擎、数据源、IM 适配器、Agent 工具和存储后端均通过接口接入。新增实现时，先实现对应接口，再在注册入口装配，并验证现有调用链。以下按扩展类型列出接口、已有实现和接入步骤。
 
 ## 扩展点总览 {#_0-扩展点总览}
 
@@ -12,7 +12,7 @@ graph LR
     subgraph APP["app (Go, internal/)"]
         P2["分块策略<br/>(infrastructure/chunker)"]
         P3["检索引擎<br/>(application/repository/retriever)"]
-        P4["模型 Provider<br/>(models/provider)"]
+        P4["模型厂商<br/>(models/providers)"]
         P5["联网搜索引擎<br/>(infrastructure/web_search)"]
         P6["数据源连接器<br/>(datasource/connector)"]
         P7["IM 平台适配器<br/>(im/adapter.go)"]
@@ -276,81 +276,103 @@ if slices.Contains(retrieveDriver, "postgres") {
 ```
 
    仿照上例为新引擎加分支，用 `retriever.NewKVHybridRetrieveEngine(repo, 引擎类型)` 包装后注册；
+   如需支持知识库间移动文档时复用已有向量，再实现可选接口 `KnowledgeIndexMover`（`MoveKnowledgeIndices`：保留 chunk ID 与向量，只改所属知识库，且可安全重试）；未实现时复用向量的移动会被拒绝，只能改用重新解析模式；
 4. 若引擎需要独立部署，在 `docker-compose.dev.yml` 加一个带 profile 的服务（参考 `qdrant`/`opensearch`），并在 `.env.example` 补连接变量。
 
 ---
 
-## 新增模型 Provider（internal/models/provider） {#_4-新增模型-provider-internal-models-provider}
+## 新增模型厂商（internal/models/providers） {#_4-新增模型-provider-internal-models-provider}
+
+模型接入分为协议、厂商、目录、运行时四层（概览见[模型管理](../03-features/06-models.md#分层结构)）。大多数新厂商只需新增一份厂商定义并补充模型目录，复用已有协议即可。
 
 ### 接口定义
 
-Provider 元数据接口 + 全局注册表在 `internal/models/provider/provider.go`：
+厂商定义是一个结构体，而不是接口实现，位于 `internal/models/providers/definition.go`：
 
 ```go
-// internal/models/provider/provider.go
-type ProviderName string // "openai" / "anthropic" / "aliyun" / "zhipu" / "deepseek" / ...
-
-type Provider interface {
-    // Info 返回服务商的元数据
-    Info() ProviderInfo
-    // ValidateConfig 验证服务商的配置
-    ValidateConfig(config *Config) error
-}
-
-// Register 添加一个提供者到全局注册表
-func Register(p Provider)
-```
-
-`ProviderInfo` 描述展示名、各模型类型（chat/embedding/rerank）的默认 BaseURL、是否需要鉴权、额外配置字段等。Chat 请求的差异化适配（endpoint 拼接、thinking 参数、鉴权头、工具调用元数据）由 `internal/models/chat/provider.go` 的内部适配器接口承担：
-
-```go
-// internal/models/chat/provider.go
-type providerAdapter interface {
-    Name() provider.ProviderName
-    Matches(model string) bool
-    Thinking() ThinkingStrategy
-    ShapeRequest(req *openai.ChatCompletionRequest, opts *ChatOptions, isStream bool)
-    TransformMessages(msgs []openai.ChatCompletionMessage) []openai.ChatCompletionMessage
-    Endpoint(baseURL, modelID string, isStream bool) string
-    Auth(req *http.Request, creds authCreds, body []byte)
-    ForceRawHTTP() bool
-    ExtractToolCallMetadata(raw json.RawMessage) types.ToolCallMetadata
-    InjectToolCallMetadata(toolCall map[string]any, metadata types.ToolCallMetadata)
+// internal/models/providers/definition.go（节选）
+type Definition struct {
+    ID           string            // 存入 models.parameters.provider 的稳定标识
+    Name         string
+    Names        map[string]string // 按语言的名称，如 "zh-CN"
+    Website      string
+    Icon         []byte            // SVG
+    API          api.API           // 默认对话协议
+    RerankAPI    api.RerankAPI     // 未声明时默认 cohere-rerank
+    EmbeddingAPI api.EmbeddingAPI  // 未声明时默认 openai-embeddings
+    TranscriptionAPI api.TranscriptionAPI // 未声明时默认 openai-transcriptions
+    DefaultBaseURLs  map[types.ModelType]string
+    ModelTypes       []types.ModelType
+    RequiresAuth     bool
+    Auth             AuthStyle          // bearer / api-key / x-api-key / x-goog-api-key / none / signed
+    URLPatterns      []string           // 旧行未填 provider 时按 URL 识别
+    ExtraFields      []ExtraField       // 编辑器动态渲染的额外字段
+    CredentialLabels []CredentialLabel  // 重命名凭证输入框（签名类接口）
+    Compat           VendorCompat       // 各协议的厂商级兼容默认值
+    ThinkingLevels   api.ThinkingLevelMap
+    Order            int                // 厂商列表排序
+    // 可选钩子
+    Endpoint  func(req EndpointRequest) (url string, query map[string]string)
+    PreferAPI func(baseURL string, spec models.ModelSpec) api.API
+    Signer    func(creds api.Credentials) api.AuthFunc
 }
 ```
 
-Embedding 与 Rerank 各自有独立接口：
+协议层按能力各有一个最小接口，新协议实现它即可接入：
 
 ```go
-// internal/models/embedding/embedder.go
-type Embedder interface {
-    Embed(ctx context.Context, text string) ([]float32, error)
-    BatchEmbed(ctx context.Context, texts []string) ([][]float32, error)
-    GetModelName() string
-    GetDimensions() int
-    GetModelID() string
-    EmbedderPooler
-}
-
-// internal/models/rerank/reranker.go
+// internal/models/api/rerank.go
 type Reranker interface {
-    Rerank(ctx context.Context, query string, documents []string) ([]RankResult, error)
-    GetModelName() string
-    GetModelID() string
+    Rerank(ctx context.Context, query string, documents []string) ([]RerankResult, error)
+}
+
+// internal/models/api/embeddings.go
+type Embedder interface {
+    Embed(ctx context.Context, texts []string, kind EmbedInputType) ([][]float32, error)
+}
+
+// internal/models/api/transcriptions.go
+type Transcriber interface {
+    Transcribe(ctx context.Context, req TranscriptionRequest) (*Transcription, error)
 }
 ```
+
+对话协议客户端实现 `internal/models/chat` 的 `Chat` 接口（`Chat` / `ChatStream` / `GetModelName` / `GetModelID`）。
 
 ### 现有实现
 
-`internal/models/provider/provider.go` 中已定义 27 个 `ProviderName` 常量：openai、anthropic、aliyun、zhipu、openrouter、litellm、requesty、siliconflow、jina、generic、deepseek、gemini、volcengine、hunyuan、minimax、mimo、gpustack、moonshot、modelscope、qianfan、qiniu、longcat、lkeap、nvidia 等。具体 Provider 实现分布在 `internal/models/provider/` 下的各文件（如 `zhipu.go`、`gemini.go`、`hunyuan.go`、`generic.go`）；特殊 embedding 实现如 `internal/models/embedding/jina.go`、`volcengine.go`、`nvidia.go`。
+- **厂商**：`internal/models/providers/` 下 27 个文件，一个厂商一份（`aliyun.go`、`deepseek.go`、`generic.go`、`weknoracloud.go` 等），由 `builtin.go` 的 `Builtins()` 显式列出；图标在 `providers/assets/<id>.svg`。
+- **协议**：`internal/models/api/<protocol>`。对话 `openaicompletions`、`openairesponses`、`anthropicmessages`、`googlegenai`；向量 `openaiembeddings`、`dashscopeembeddings`、`arkembeddings`、`googleembeddings`；重排 `cohererank`、`dashscoperank`、`nimrerank`、`tencentlkeap`、`volcengineknowledge`；语音 `openaitranscriptions`、`openaichataudio`。
+- **模型目录**：`internal/models/catalog/data/seed.json`（模型元数据）+ `overrides.json`（协议、思考映射与 compat 修正）→ 由脚本生成 `models.generated.json`，编译时嵌入。
+- **运行时**：`internal/models/runtime` 组合厂商定义与目录（`New()`），应用部署叠加 `config/models.json`，并为每个模型行解析出协议、端点和兼容设置。
 
 ### 新增步骤
 
-1. **注册点一：`internal/models/provider/provider.go`** — 增加 `ProviderName` 常量；
-2. 在 `internal/models/provider/` 新建 `myprovider.go`，实现 `Provider` 接口（`Info()` 给出默认 URL/支持的模型类型），并通过 `provider.Register(...)`（通常在 `init()` 或集中初始化处）挂入全局注册表——OpenAI 兼容协议的服务商到这一步即可用，chat 侧默认走通用 OpenAI 适配；
-3. **注册点二（可选）：`internal/models/chat/provider.go`** — 若 API 协议有差异（非标 endpoint、特殊鉴权、thinking 字段），实现并注册一个 `providerAdapter`；
-4. **注册点三（可选）**：需要专有 Embedding/Rerank 协议时，在 `internal/models/embedding/`、`internal/models/rerank/` 各加实现并接入其构造工厂；
-5. 如需开箱即用的内置模型，补充 `config/builtin_models.yaml` 声明（启动时会同步进 `models` 表）。
+1. **新建厂商定义**：`internal/models/providers/<id>.go`，声明名称、支持的模型类型、各类型默认地址、鉴权方式、协议默认值及特殊端点钩子，并在包注释中写明官方文档依据；
+2. **注册点一：`internal/models/providers/builtin.go`** — 把 `new<Id>Provider()` 加进 `Builtins()`；图标放入 `providers/assets/<id>.svg`；
+3. **注册点二：模型目录** — 在 `internal/models/catalog/data/seed.json` 中为该厂商加一个条目（即使暂时没有模型也要有空列表，运行时按厂商 ID 读取目录），维护模型元数据；协议、思考映射与 compat 修正写在 `overrides.json`。模型键包含类型与 id / match，同名的对话和向量模型可以共存；
+4. **生成目录**：执行 `make model-catalog-generate`。生成文件不要手改；
+5. **新协议（可选）**：已有协议能覆盖时直接复用；确需新协议时新增 `internal/models/api/<protocol>` 包，并在对应工厂的协议分支中接入（对话 `internal/models/chat/chat.go` 的 `NewRemoteChat`、向量 `internal/models/embedding/protocol.go`、重排 `internal/models/rerank/reranker.go`、语音 `internal/models/asr/protocol.go`）；
+6. **校验**：运行 `make model-catalog-check`。
+
+`make model-catalog-check` 先检查生成数据是否过期，再运行 `internal/models/...` 的全部测试：`providers` 的注册与图标检查；`runtime` 的解析与叠加；`parity` 包的**不变量**（每个模型条目的字段合法性、compat 键名可解码、上下文与最大输出自洽）和**逐模型出站请求检查**（每个对话模型在思考开 / 关两种情况下只能出现一个输出上限字段；不支持采样参数的模型不得带 temperature；始终思考的模型不得收到关闭开关等）。新厂商和新模型违反这些规则时测试直接失败，无需单独写用例。
+
+前端不需要改动：厂商下拉、图标、额外字段、模型目录都由 `GET /api/v1/models/providers` 动态渲染。开箱即用的内置模型行由运维在 `config/builtin_models.yaml` 中声明，与厂商定义无关。
+
+### 维护已有厂商
+
+**新增或调整模型元数据**（新模型 id、上下文窗口、价格）：先生成差异报告，再对照厂商文档更新 `seed.json`，最后重新生成目录。
+
+```bash
+make model-catalog-diff                 # 全部厂商
+make model-catalog-diff VENDOR=deepseek # 只看一家
+```
+
+报告对比 [models.dev](https://models.dev/api.json) 的公开元数据：`+` 是上游有而目录没有的模型，`~` 是数值差异，`?` 是上游没收录的条目（国内厂商和别名经常如此，不代表错）。脚本只读不写，也从不在运行时调用。字段名、思考格式这类行为事实不会被自动同步，必须以厂商文档为准手工维护。
+
+**厂商改了接口行为**（换了输出上限字段、新增 effort 取值、思考开关格式变化）：改 `providers/<id>.go` 的 `Compat`，或 `overrides.json` 中对应模型的 `compat`，重新生成目录，并同步更新注释里的文档链接。`internal/models/api/openaicompletions/golden_test.go` 等快照测试会钉死出站 JSON，改动需先改测试预期。
+
+**紧急修正**：不必等发版，可先用[部署叠加 `config/models.json`](../03-features/06-models.md#部署叠加-config-models-json)在部署侧修改，验证后再补回代码。
 
 ---
 
@@ -383,9 +405,11 @@ func (r *Registry) Register(id string, factory ProviderFactory)
 func (r *Registry) CreateProvider(providerType string, params types.WebSearchProviderParameters) (interfaces.WebSearchProvider, error)
 ```
 
+支持按地区、时效过滤的引擎可额外实现可选接口 `FilteredWebSearchProvider`（`SearchWithFilters`）；不支持过滤的引擎不得静默丢弃调用方请求的过滤条件。
+
 ### 现有实现
 
-`internal/infrastructure/web_search/` 目录：`duckduckgo.go`、`google.go`、`bing.go`、`tavily.go`、`ollama.go`、`baidu.go`、`searxng.go`、`keenable.go`、`zhipu.go`（另有 `proxy.go` 出站代理支持）。类型常量在 `internal/types/web_search_provider.go`（`WebSearchProviderTypeBing/Google/DuckDuckGo/Tavily/Ollama/Baidu/Searxng/Keenable/Zhipu`）。
+`internal/infrastructure/web_search/` 目录：`duckduckgo.go`、`google.go`、`bing.go`、`brave.go`、`tavily.go`、`ollama.go`、`baidu.go`、`searxng.go`、`keenable.go`、`zhipu.go`、`exa.go`、`metaso.go`、`bocha.go`、`serply.go`（另有 `proxy.go` 出站代理支持）。类型常量在 `internal/types/web_search_provider.go`（`WebSearchProviderTypeXxx`，与注册 ID 一一对应）。
 
 ### 新增步骤
 
@@ -455,16 +479,25 @@ type StreamingConnector interface {
 }
 ```
 
+另有两个可选接口用于全量同步时仍能对账删除：`FullStreamingConnector`（`FetchFullStream`）与 `FullSyncWithCursor`（`FetchAllFromCursor`），在强制全量或 `sync_mode=full` 时重新拉取全部条目，同时保留上一次游标用于识别已删除的文档。未实现时，全量同步无法产生删除事件。
+
 注册表同文件：`ConnectorRegistry`（`NewConnectorRegistry()` / `Register(connector)` / `Get(type)` / `List()`）；连接器的 UI 元数据（名称、AuthType、capabilities）在同文件的 `ConnectorMetadataRegistry` map 中。
 
 ### 现有实现
 
 | 类型 | 目录 | 说明 |
 | --- | --- | --- |
-| `feishu` / `lark` | `internal/datasource/connector/feishu/` | 同一实现，`NewConnector(RegionFeishu / RegionLark)` 区分区域 |
+| `feishu` / `lark` | `internal/datasource/connector/feishu/wiki/` | 飞书 / Lark 知识库，同一实现按区域区分 |
+| `feishu_drive` / `lark_drive` | `internal/datasource/connector/feishu/drive/` | 飞书 / Lark 云盘 |
 | `notion` | `internal/datasource/connector/notion/` | 页面与数据库 |
+| `confluence` | `internal/datasource/connector/confluence/` | Confluence |
 | `yuque` | `internal/datasource/connector/yuque/` | 语雀 |
+| `dingtalk` | `internal/datasource/connector/dingtalk/` | 钉钉文档 |
+| `ima` | `internal/datasource/connector/ima/` | 腾讯 ima 知识库 |
 | `rss` | `internal/datasource/connector/rss/` | RSS 订阅 |
+| `gitlab` | `internal/datasource/connector/gitlab/` | GitLab 仓库 |
+
+`internal/types/datasource.go` 中还有 `github`、`google_drive` 等尚未注册实现的类型常量。
 
 ### 新增步骤
 
@@ -478,7 +511,8 @@ if err := registry.Register(mysourceConnector.NewConnector()); err != nil {
 ```
 
 3. **注册点二：`internal/datasource/connector.go` 的 `ConnectorMetadataRegistry`** — 增加类型常量（`internal/types` 的 `ConnectorTypeXxx`）与元数据条目（Name/Description/AuthType/Capabilities）；
-4. 同步配置结构：`types.DataSourceConfig` 若需新增凭证字段，注意加密存储约定；前端数据源接入页按元数据渲染。
+4. 同步配置结构：`types.DataSourceConfig` 若需新增凭证字段，注意加密存储约定；前端数据源接入页按元数据渲染；
+5. 复用 `internal/datasource` 的公共工具：用户可填写的 API 地址先经 `ValidateConnectorBaseURL` 做 SSRF 校验，HTTP 请求使用 `NewConnectorHTTPClient`（带重定向与拨号期 SSRF 防护），生成文件名使用 `SanitizeFileName`。
 
 ---
 
@@ -604,9 +638,9 @@ func (r *ToolRegistry) ListTools() []string
 
 ### 现有实现
 
-工具名常量集中在 `internal/agent/tools/definitions.go`：`thinking`、`todo_write`、知识检索工具（`search_knowledge`、`read_document`、`list_documents`、`query_knowledge_graph`）、`database_query`、`data_analysis`、`data_schema`、`web_search`、`web_fetch`、沙箱/技能工具（`shell_exec`、`read_file`、`list_sandbox_files`、`write_sandbox_file`、`edit_sandbox_file`），记忆工具（`search_memory`、`search_conversations`）、wiki 工具（`wiki_read_page`、`wiki_write_page`、`wiki_replace_text`、`wiki_rename_page`、`wiki_delete_page`、`wiki_search`、`wiki_flag_issue`、`wiki_read_issue`、`wiki_update_issue`）。实现文件与工具同名（如 `search_knowledge.go`、`read_document.go`、`list_documents.go`、`data_analysis.go`、`mcp_tool.go`——后者把 MCP 服务的远程工具包装成 `types.Tool`）。
+工具名常量集中在 `internal/agent/tools/definitions.go`：`thinking`、`todo_write`、知识检索工具（`search_knowledge`、`read_document`、`list_documents`、`query_knowledge_graph`）、`database_query`、`data_analysis`、`data_schema`、`web_search`、`web_fetch`、MCP 按需调用工具（`discover_mcp_tools`、`call_mcp_tool`）、沙箱/技能工具（`shell_exec`、`read_file`、`list_sandbox_files`、`write_sandbox_file`、`edit_sandbox_file`、`write_skill_file`、`edit_skill_file`），记忆工具（`search_memory`、`search_conversations`）、wiki 工具（`wiki_read_page`、`wiki_write_page`、`wiki_replace_text`、`wiki_rename_page`、`wiki_delete_page`、`wiki_search`、`wiki_flag_issue`、`wiki_read_issue`、`wiki_update_issue`）；本机浏览器工具 `local_browser` 实现在 `browserskill*.go`。实现文件多与工具同名（如 `search_knowledge.go`、`read_document.go`、`list_documents.go`、`data_analysis.go`；`mcp_tool.go` / `mcp_catalog.go` 负责把 MCP 服务的远程工具按需发现与调用）。
 
-已退役的检索工具名（`knowledge_search`、`grep_chunks`、`list_knowledge_chunks`、`get_document_info`、`wiki_read_source_doc`）仍以 `LegacyTool*` 常量保留：`legacyToolSuccessors` 把它们映射到 `search_knowledge` / `read_document`，`NormalizeAllowedTools` 在注册工具时自动改写已保存 Agent 配置里的旧名字，`SuccessorToolName` / `IsLegacyRetrievalTool` 供其他服务判定。重命名或合并工具时请沿用这一机制，而不是做数据迁移。
+已退役的沙箱工具名（`execute_skill_script`、`read_skill`、`read_sandbox_file`）仅为解码历史记录保留，不再注册；已退役的检索工具名（`knowledge_search`、`grep_chunks`、`list_knowledge_chunks`、`get_document_info`、`wiki_read_source_doc`）仍以 `LegacyTool*` 常量保留：`legacyToolSuccessors` 把它们映射到 `search_knowledge` / `read_document`，`NormalizeAllowedTools` 在注册工具时自动改写已保存 Agent 配置里的旧名字，`SuccessorToolName` / `IsLegacyRetrievalTool` 供其他服务判定。重命名或合并工具时请沿用这一机制，而不是做数据迁移。
 
 ### 新增步骤
 
@@ -698,7 +732,7 @@ default:
 | 文档解析器 | `BaseParser.parse_into_text` | `docreader/parser/base_parser.py` | `docreader/parser/registry.py` `_build_default_registry()` |
 | 分块策略 | tier 函数 `func(text, cfg, profile) []Chunk` | `internal/infrastructure/chunker/strategy.go` | 同文件 `runTier()` + 策略常量 |
 | 检索引擎 | `RetrieveEngineRepository` | `internal/types/interfaces/retriever.go` | `container.go` `initRetrieveEngineRegistry()`（`RETRIEVE_DRIVER` 门控） |
-| 模型 Provider | `Provider` / `providerAdapter` / `Embedder` / `Reranker` | `internal/models/provider/provider.go` 等 | `provider.Register()` + `internal/models/chat/provider.go` |
+| 模型厂商 | `providers.Definition`（+ 协议层 `Reranker` / `Embedder` / `Transcriber`、`chat.Chat`） | `internal/models/providers/definition.go` | `internal/models/providers/builtin.go` `Builtins()` + `internal/models/catalog/data/seed.json` |
 | 联网搜索 | `WebSearchProvider` | `internal/types/interfaces/web_search.go` | `container.go` `registerWebSearchProviders()` |
 | 数据源连接器 | `Connector` / `StreamingConnector` | `internal/datasource/connector.go` | `container.go` `initConnectorRegistry()` + `ConnectorMetadataRegistry` |
 | IM 适配器 | `Adapter`（+`StreamSender`/`FileDownloader`） | `internal/im/adapter.go` | `container.go` `registerIMAdapterFactories()` |

@@ -62,10 +62,16 @@ export function useModalShell(options: ModalShellOptions) {
     return serialize(options.snapshot()) !== cleanSnapshot
   }
 
-  const requestClose = () => {
+  // Template handlers pass the DOM event as the first argument, so only call
+  // afterClose when it really is a callback.
+  const requestClose = (afterClose?: unknown) => {
     if (!options.visible() || confirming) return
-    if (!isDirty()) {
+    const close = () => {
       options.close()
+      if (typeof afterClose === 'function') afterClose()
+    }
+    if (!isDirty()) {
+      close()
       return
     }
     confirming = true
@@ -78,7 +84,7 @@ export function useModalShell(options: ModalShellOptions) {
       onConfirm: () => {
         confirming = false
         dialog.destroy()
-        options.close()
+        close()
       },
       onClose: () => {
         confirming = false

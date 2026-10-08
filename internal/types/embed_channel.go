@@ -126,23 +126,10 @@ type EmbedChannelPublicConfig struct {
 	DefaultLocale           string `json:"default_locale,omitempty"`
 }
 
-// Supported embed UI locales.
-var supportedEmbedLocales = map[string]struct{}{
-	"zh-CN": {},
-	"en-US": {},
-	"ko-KR": {},
-	"ja-JP": {},
-	"ru-RU": {},
-}
-
 // NormalizeEmbedDefaultLocale returns a supported locale tag or empty string
 // (meaning follow browser / host widget locale).
 func NormalizeEmbedDefaultLocale(locale string) string {
-	locale = strings.TrimSpace(locale)
-	if _, ok := supportedEmbedLocales[locale]; ok {
-		return locale
-	}
-	return ""
+	return NormalizeSupportedLocale(locale)
 }
 
 // EmbedSessionMarkerPrefix tags sessions created through an embed channel.

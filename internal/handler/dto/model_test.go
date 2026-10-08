@@ -6,7 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Tencent/WeKnora/internal/models/catalog"
+	"github.com/Tencent/WeKnora/internal/models/providers"
+	modelruntime "github.com/Tencent/WeKnora/internal/models/runtime"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -122,12 +123,12 @@ func TestModelResponse_ViewerStripsIntegrationDetail(t *testing.T) {
 func registerSecretExtraVendor(t *testing.T) string {
 	t.Helper()
 	id := "dto-secret-extra-vendor"
-	catalog.Register(&catalog.Vendor{
+	modelruntime.Register(&providers.Definition{
 		ID:          id,
 		Name:        "Secret Extra Vendor",
 		ModelTypes:  []types.ModelType{types.ModelTypeRerank},
 		URLPatterns: []string{"secret-extra-vendor.example.com"},
-		ExtraFields: []catalog.ExtraField{
+		ExtraFields: []providers.ExtraField{
 			{Key: "secret_key", Label: "Secret Key", Type: "password", Secret: true},
 			{Key: "region", Label: "Region", Type: "string"},
 		},

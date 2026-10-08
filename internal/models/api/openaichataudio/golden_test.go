@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/models/api"
-	"github.com/Tencent/WeKnora/internal/models/catalog"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -38,10 +37,10 @@ const qwenASRResponse = `{
 const withSeconds = `{"choices":[{"message":{"role":"assistant","content":"x"}}],"usage":{"seconds":3}}`
 
 func newClient(url, model string) *Client {
-	return newClientWith(url, model, catalog.TranscriptionsSettings{})
+	return newClientWith(url, model, api.TranscriptionsSettings{})
 }
 
-func newClientWith(url, model string, settings catalog.TranscriptionsSettings) *Client {
+func newClientWith(url, model string, settings api.TranscriptionsSettings) *Client {
 	return New(Config{
 		Endpoint: api.Endpoint{BaseURL: url, Model: model, Auth: api.BearerAuth("k")},
 		Settings: settings,
@@ -80,7 +79,7 @@ func TestDataURIMediaTypeFollowsTheExtension(t *testing.T) {
 // sized to exactly the encoded budget without the prefix goes over it.
 func TestEncodedCeilingCountsTheWholeDataURI(t *testing.T) {
 	const limit = 1024
-	c := newClientWith("https://example.invalid", "m", catalog.TranscriptionsSettings{MaxEncodedBytes: limit})
+	c := newClientWith("https://example.invalid", "m", api.TranscriptionsSettings{MaxEncodedBytes: limit})
 	audio := make([]byte, limit*3/4) // base64 of this is exactly limit bytes
 	_, err := c.BuildRequestBody(api.TranscriptionRequest{Audio: audio, FileName: "a.wav"})
 	require.Error(t, err)
@@ -99,7 +98,7 @@ func TestLanguageGoesInASROptionsWhereDeclared(t *testing.T) {
 	assert.NotContains(t, body, "asr_options", "undeclared, so not sent")
 
 	body, err = newClientWith("https://example.invalid", "m",
-		catalog.TranscriptionsSettings{LanguageParam: catalog.LanguageASROptions}).BuildRequestBody(req)
+		api.TranscriptionsSettings{LanguageParam: api.LanguageASROptions}).BuildRequestBody(req)
 	require.NoError(t, err)
 	assert.Equal(t, map[string]any{"language": "zh"}, body["asr_options"])
 }

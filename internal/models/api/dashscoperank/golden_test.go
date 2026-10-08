@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/models/api"
-	"github.com/Tencent/WeKnora/internal/models/catalog"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -29,7 +28,7 @@ const documentedResponse = `{
 
 const endpointURL = "https://dashscope.aliyuncs.com/api/v1/services/rerank/text-rerank/text-rerank"
 
-func newClient(t *testing.T, url string, settings catalog.RerankSettings) *Client {
+func newClient(t *testing.T, url string, settings api.RerankSettings) *Client {
 	t.Helper()
 	return New(Config{
 		Endpoint: api.Endpoint{BaseURL: url, Model: "gte-rerank-v2", Auth: api.BearerAuth("k")},
@@ -38,7 +37,7 @@ func newClient(t *testing.T, url string, settings catalog.RerankSettings) *Clien
 }
 
 func TestRequestBodyMatchesTheDocumentedSchema(t *testing.T) {
-	c := newClient(t, endpointURL, catalog.RerankSettings{SendReturnDocs: true})
+	c := newClient(t, endpointURL, api.RerankSettings{SendReturnDocs: true})
 	body, err := c.BuildRequestBody("上海天气", []string{"北京美食", "上海气候"})
 	require.NoError(t, err)
 
@@ -58,7 +57,7 @@ func TestRequestBodyMatchesTheDocumentedSchema(t *testing.T) {
 // top_n is mandatory in this shape: zero would ask for nothing back, so the
 // full document count is always sent regardless of vendor settings.
 func TestTopNAlwaysCarriesTheDocumentCount(t *testing.T) {
-	c := newClient(t, endpointURL, catalog.RerankSettings{})
+	c := newClient(t, endpointURL, api.RerankSettings{})
 	body, err := c.BuildRequestBody("q", []string{"a", "b", "c", "d"})
 	require.NoError(t, err)
 	assert.Equal(t, float64(4), body["parameters"].(map[string]any)["top_n"])
@@ -72,7 +71,7 @@ func TestDecodesTheDocumentedResponse(t *testing.T) {
 	}))
 	defer server.Close()
 
-	c := newClient(t, server.URL, catalog.RerankSettings{})
+	c := newClient(t, server.URL, api.RerankSettings{})
 	got, err := c.Rerank(context.Background(), "上海天气", []string{"北京美食", "上海气候"})
 	require.NoError(t, err)
 
@@ -91,7 +90,7 @@ func TestSurfacesAnInBodyError(t *testing.T) {
 	}))
 	defer server.Close()
 
-	c := newClient(t, server.URL, catalog.RerankSettings{})
+	c := newClient(t, server.URL, api.RerankSettings{})
 	_, err := c.Rerank(context.Background(), "q", []string{"d"})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "documents is too long")
@@ -108,7 +107,7 @@ func TestPostsToTheBaseURLItself(t *testing.T) {
 	}))
 	defer server.Close()
 
-	c := newClient(t, server.URL+"/api/v1/services/rerank/text-rerank/text-rerank", catalog.RerankSettings{})
+	c := newClient(t, server.URL+"/api/v1/services/rerank/text-rerank/text-rerank", api.RerankSettings{})
 	_, err := c.Rerank(context.Background(), "q", []string{"d"})
 	require.NoError(t, err)
 	assert.Equal(t, "/api/v1/services/rerank/text-rerank/text-rerank", gotPath,

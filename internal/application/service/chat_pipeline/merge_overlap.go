@@ -6,6 +6,7 @@ import (
 	"sort"
 
 	"github.com/Tencent/WeKnora/internal/searchutil"
+	"github.com/Tencent/WeKnora/internal/sourceloc"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -50,6 +51,8 @@ func (p *PluginMerge) mergeSequentialChunks(
 			lastChunk.Content = searchutil.JoinChunkContent(lastChunk.Content, current.Content, "\n\n")
 			recordMergedChild(ctx, knowledgeID, lastChunk, current, "image_merge")
 		}
+
+		lastChunk.SourceLocators = sourceloc.MergeLocators(lastChunk.SourceLocators, current.SourceLocators)
 
 		// Extend the merged group's span and keep the higher score.
 		if current.ChunkIndex > last.lastIndex {

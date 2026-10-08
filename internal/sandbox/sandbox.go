@@ -76,7 +76,7 @@ const (
 	DefaultDesktopDockerImage = "wechatopenai/weknora-sandbox:main-desktop"
 
 	// DefaultCubeDesktopTemplateImage is DefaultDesktopDockerImage plus Cube
-	// envd (target "desktop-cube"). amd64 only, same reason as the cube target.
+	// envd (target "desktop-cube").
 	DefaultCubeDesktopTemplateImage = "wechatopenai/weknora-sandbox:main-desktop-cube"
 
 	// DesktopWebsockifyPort is websockify inside the sandbox. WeKnora dials

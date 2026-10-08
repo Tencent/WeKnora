@@ -11,7 +11,15 @@ type KnowledgeProcessOverrides struct {
 	ASRConfig                *ASRConfig                `json:"asr_config,omitempty"`
 	QuestionGenerationConfig *QuestionGenerationConfig `json:"question_generation_config,omitempty"`
 	GraphEnabled             *bool                     `json:"graph_enabled,omitempty"`
-	ExtractConfig            *ExtractConfig            `json:"extract_config,omitempty"`
+	// ImageAttrsEnabled overrides the knowledge base's attribute-observed image
+	// pipeline switch for this one document. nil keeps the knowledge base's
+	// setting.
+	ImageAttrsEnabled *bool `json:"image_attrs_enabled,omitempty"`
+	// ImageActions overrides rows of the attribute->work table for this document
+	// (merged per action key on top of the knowledge base's table).
+	// nil keeps the knowledge base's setting.
+	ImageActions  *ImageActionsConfig `json:"image_actions,omitempty"`
+	ExtractConfig *ExtractConfig      `json:"extract_config,omitempty"`
 	// ParserEngineOverrides passes key-value configuration to docreader parsers
 	// (e.g. pdf_force_scanned=true). Merged with workspace-level overrides in the
 	// parse pipeline; per-upload values take priority on conflict.
@@ -27,5 +35,7 @@ type EffectiveProcessConfig struct {
 	ASRConfig                ASRConfig
 	QuestionGenerationConfig QuestionGenerationConfig
 	GraphEnabled             bool
+	ImageAttrsEnabled        bool
+	ImageActions             ImageActionsConfig
 	ExtractConfig            ExtractConfig
 }

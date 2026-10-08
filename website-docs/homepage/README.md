@@ -7,5 +7,6 @@ The Next.js homepage is one part of the unified site. Run `npm run setup`, `npm 
 - `app/interactive.tsx`: responsive navigation, theme switch, and on-demand README video.
 - `app/theme.ts`: VitePress-compatible theme persistence and pre-paint initialization.
 - `../shared/brand.css`: shared light/dark design tokens.
+- `public/docs/_home/`: homepage images. The site serves only `/` and `/docs/`, so build output and public assets both live under `/docs/_home/` (`homeAssets` in `../shared/header.ts`).
 
 `npm run dev` can still preview the homepage alone during development. `/docs/` requires the combined preview from the parent directory.

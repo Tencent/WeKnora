@@ -255,7 +255,7 @@ var validBuiltinModelStatuses = map[ModelStatus]struct{}{
 // Source is intentionally NOT validated against a fixed list because the
 // provider matrix in internal/models/* keeps growing and a too-strict
 // check here would force changes in two places per new provider.
-// ValidateModelParameters is set at startup to catalog.ValidateRow. It is a
+// ValidateModelParameters is set at startup to runtime.ValidateRow. It is a
 // hook rather than a direct call because internal/models/catalog imports this
 // package, so the dependency can only run in this direction. A nil hook (unit
 // tests, tools that never build the container) simply skips the check.

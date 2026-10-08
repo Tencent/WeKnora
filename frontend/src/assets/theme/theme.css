@@ -217,6 +217,14 @@ select:-webkit-autofill {
     --app-accent-purple: #9d7cff;
 }
 
+/* 引用原文定位的高亮：荧光笔黄，和品牌绿的界面元素（表头、选中态）区分开 */
+:root {
+    --app-source-highlight: #ffd84d;
+}
+:root[theme-mode="dark"] {
+    --app-source-highlight: #b58f1c;
+}
+
 /* 全局旋转动画：spinner / 刷新图标统一用 `animation: wk-spin 0.8s linear infinite` */
 @keyframes wk-spin {
     to {

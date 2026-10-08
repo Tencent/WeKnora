@@ -21,13 +21,12 @@ import (
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/models/api"
-	"github.com/Tencent/WeKnora/internal/models/catalog"
 )
 
-// Config is everything the client needs, already resolved by the catalog.
+// Config is everything the client needs, already resolved by the api.
 type Config struct {
 	Endpoint api.Endpoint
-	Settings catalog.TranscriptionsSettings
+	Settings api.TranscriptionsSettings
 	Retry    api.RetryPolicy
 }
 
@@ -104,7 +103,7 @@ func (c *Client) BuildRequestBody(req api.TranscriptionRequest) (map[string]any,
 			}},
 		}},
 	}
-	if req.Language != "" && c.cfg.Settings.LanguageParam == catalog.LanguageASROptions {
+	if req.Language != "" && c.cfg.Settings.LanguageParam == api.LanguageASROptions {
 		body["asr_options"] = map[string]any{"language": req.Language}
 	}
 	return body, nil

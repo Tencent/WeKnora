@@ -2,14 +2,17 @@ package handler
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"net/http"
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/handler/dto"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/models"
 	"github.com/Tencent/WeKnora/internal/models/api"
-	"github.com/Tencent/WeKnora/internal/models/catalog"
+	"github.com/Tencent/WeKnora/internal/models/providers"
+	modelruntime "github.com/Tencent/WeKnora/internal/models/runtime"
 	"github.com/Tencent/WeKnora/internal/types"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/gin-gonic/gin"
@@ -27,19 +30,19 @@ type ModelProviderDTO struct {
 	Descriptions map[string]string `json:"descriptions,omitempty"`
 	Website      string            `json:"website,omitempty"`
 	// Icon is a data: URI (image/svg+xml;base64) ready for <img src>.
-	Icon         string               `json:"icon,omitempty"`
-	API          api.API              `json:"api"`
-	Auth         catalog.AuthStyle    `json:"auth"`
-	RequiresAuth bool                 `json:"requiresAuth"`
-	DefaultURLs  map[string]string    `json:"defaultUrls"`
-	ModelTypes   []string             `json:"modelTypes"`
-	ExtraFields  []catalog.ExtraField `json:"extraFields,omitempty"`
+	Icon         string                 `json:"icon,omitempty"`
+	API          api.API                `json:"api"`
+	Auth         providers.AuthStyle    `json:"auth"`
+	RequiresAuth bool                   `json:"requiresAuth"`
+	DefaultURLs  map[string]string      `json:"defaultUrls"`
+	ModelTypes   []string               `json:"modelTypes"`
+	ExtraFields  []providers.ExtraField `json:"extraFields,omitempty"`
 	// CredentialLabels rename the primary credential input for the model
 	// types that do not take a plain API key (signed rerank APIs).
-	CredentialLabels []catalog.CredentialLabel `json:"credentialLabels,omitempty"`
-	Models           []ModelCatalogEntryDTO    `json:"models,omitempty"`
-	Thinking         ProviderThinkingDTO       `json:"thinking"`
-	Order            int                       `json:"order"`
+	CredentialLabels []providers.CredentialLabel `json:"credentialLabels,omitempty"`
+	Models           []ModelCatalogEntryDTO      `json:"models,omitempty"`
+	Thinking         ProviderThinkingDTO         `json:"thinking"`
+	Order            int                         `json:"order"`
 }
 
 // ProviderThinkingDTO summarizes how the vendor encodes thinking so the UI
@@ -61,7 +64,7 @@ type ModelCatalogEntryDTO struct {
 	MaxOutputTokens int                   `json:"max_output_tokens,omitempty"`
 	Dimension       int                   `json:"dimension,omitempty"`
 	ThinkingLevels  []api.ReasoningEffort `json:"thinking_levels"`
-	Cost            *catalog.ModelCost    `json:"cost,omitempty"`
+	Cost            *models.ModelCost     `json:"cost,omitempty"`
 	// Source is the vendor page these facts were read from, so the editor can
 	// send an operator to the documentation for this exact model.
 	Source string `json:"source,omitempty"`
@@ -93,7 +96,7 @@ func iconDataURI(svg []byte) string {
 	return "data:image/svg+xml;base64," + base64.StdEncoding.EncodeToString(svg)
 }
 
-func providerDTO(v *catalog.Vendor, modelType types.ModelType, includeModels bool) ModelProviderDTO {
+func providerDTO(v *modelruntime.Provider, modelType types.ModelType, includeModels bool) ModelProviderDTO {
 	defaultURLs := make(map[string]string, len(v.DefaultBaseURLs))
 	for mt, url := range v.DefaultBaseURLs {
 		defaultURLs[modelTypeToFrontend(mt)] = url
@@ -123,7 +126,12 @@ func providerDTO(v *catalog.Vendor, modelType types.ModelType, includeModels boo
 	}
 	// Vendor-level thinking summary: resolve an unknown model so only the
 	// vendor defaults contribute.
-	if resolved, err := catalog.Resolve(catalog.Ref{Provider: v.ID, Model: "__vendor_default__"}); err == nil {
+	if resolved, err := v.Resolve(
+		modelruntime.Ref{
+			Provider: v.ID,
+			Model:    "__vendor_default__",
+		},
+	); err == nil {
 		caps := resolved.Capabilities()
 		dto.Thinking = ProviderThinkingDTO{Format: caps.ThinkingFormat, Levels: caps.ThinkingLevels}
 	}
@@ -162,7 +170,7 @@ func providerDTO(v *catalog.Vendor, modelType types.ModelType, includeModels boo
 			// derived from Input), so this covers reasoning VLMs too;
 			// embedding / rerank / ASR entries have no thinking levels.
 			if m.Type == "" || m.Type == "KnowledgeQA" {
-				if resolved, err := catalog.Resolve(catalog.Ref{Provider: v.ID, Model: m.ID}); err == nil {
+				if resolved, err := v.Resolve(modelruntime.Ref{Provider: v.ID, Model: m.ID}); err == nil {
 					entry.ThinkingLevels = resolved.Capabilities().ThinkingLevels
 				}
 			}
@@ -190,7 +198,7 @@ func (h *ModelHandler) ListModelProviders(c *gin.Context) {
 
 	var backendType types.ModelType
 	if modelType != "" {
-		parsed, ok := catalog.ParseModelType(modelType)
+		parsed, ok := models.ParseModelType(modelType)
 		if !ok {
 			_ = c.Error(errors.NewBadRequestError("unknown model_type"))
 			return
@@ -198,11 +206,11 @@ func (h *ModelHandler) ListModelProviders(c *gin.Context) {
 		backendType = parsed
 	}
 
-	var vendors []*catalog.Vendor
+	var vendors []*modelruntime.Provider
 	if backendType != "" {
-		vendors = catalog.ListByType(backendType)
+		vendors = modelruntime.ListByType(backendType)
 	} else {
-		vendors = catalog.List()
+		vendors = modelruntime.List()
 	}
 	// Default base URLs are the editor's prefill, and only a caller who may
 	// configure integrations can use them. A deployment overlay may also
@@ -237,13 +245,40 @@ func (h *ModelHandler) ListModelProviders(c *gin.Context) {
 // @Security     ApiKeyAuth
 // @Router       /models/catalog/resolve [get]
 func (h *ModelHandler) ResolveModelCatalog(c *gin.Context) {
+	// POST carries the row spec in the body; GET remains compatible with old clients.
+	query := c.Query
+	var spec *types.ModelSpecOverride
+	if c.Request.Method == http.MethodPost {
+		var body map[string]json.RawMessage
+		if err := c.ShouldBindJSON(&body); err != nil {
+			_ = c.Error(errors.NewBadRequestError(err.Error()))
+			return
+		}
+		values := map[string]string{}
+		for key, raw := range body {
+			if key == "spec" {
+				if err := json.Unmarshal(raw, &spec); err != nil {
+					_ = c.Error(errors.NewBadRequestError("invalid model spec"))
+					return
+				}
+				continue
+			}
+			var value string
+			if err := json.Unmarshal(raw, &value); err != nil {
+				_ = c.Error(errors.NewBadRequestError("invalid resolve field: " + key))
+				return
+			}
+			values[key] = value
+		}
+		query = func(key string) string { return values[key] }
+	}
 	ctx := c.Request.Context()
-	providerID := strings.TrimSpace(c.Query("provider"))
-	modelName := strings.TrimSpace(c.Query("model"))
-	baseURL := strings.TrimSpace(c.Query("base_url"))
+	providerID := strings.TrimSpace(query("provider"))
+	modelName := strings.TrimSpace(query("model"))
+	baseURL := strings.TrimSpace(query("base_url"))
 	modelType := types.ModelTypeKnowledgeQA
-	if raw := c.Query("model_type"); raw != "" {
-		if parsed, ok := catalog.ParseModelType(raw); ok {
+	if raw := query("model_type"); raw != "" {
+		if parsed, ok := models.ParseModelType(raw); ok {
 			modelType = parsed
 		}
 	}
@@ -255,23 +290,23 @@ func (h *ModelHandler) ResolveModelCatalog(c *gin.Context) {
 	// here. Secret fields are never accepted: this is a GET, and a credential
 	// in a query string lands in access logs and browser history.
 	extra := map[string]string{}
-	for _, key := range []string{catalog.ExtraAPI, catalog.ExtraThinkingControl, catalog.ExtraRemoteModelName} {
-		if v := strings.TrimSpace(c.Query(key)); v != "" {
+	for _, key := range []string{models.ExtraAPI, models.ExtraThinkingControl, models.ExtraRemoteModelName} {
+		if v := strings.TrimSpace(query(key)); v != "" {
 			extra[key] = v
 		}
 	}
-	if vendor, ok := catalog.Get(providerID); ok {
+	if vendor, ok := modelruntime.Get(providerID); ok {
 		for _, field := range vendor.ExtraFields {
 			if field.Secret || field.Type == "password" {
 				continue
 			}
-			if v := strings.TrimSpace(c.Query(field.Key)); v != "" {
+			if v := strings.TrimSpace(query(field.Key)); v != "" {
 				extra[field.Key] = v
 			}
 		}
 	}
-	resolved, err := catalog.Resolve(catalog.Ref{
-		Provider: providerID, Model: modelName, BaseURL: baseURL, ModelType: modelType, Extra: extra,
+	resolved, err := modelruntime.Resolve(modelruntime.Ref{
+		Provider: providerID, Model: modelName, BaseURL: baseURL, ModelType: modelType, Extra: extra, Override: spec,
 	})
 	if err != nil {
 		_ = c.Error(errors.NewBadRequestError(err.Error()))
@@ -300,7 +335,7 @@ func (h *ModelHandler) ResolveModelCatalog(c *gin.Context) {
 		// normalise several base-URL shapes) report nothing rather than a
 		// path this endpoint would have to guess.
 		if resolved.Vendor.Endpoint != nil {
-			endpointURL, query := resolved.Vendor.Endpoint(catalog.EndpointRequest{
+			endpointURL, query := resolved.Vendor.Endpoint(providers.EndpointRequest{
 				BaseURL:      resolved.BaseURL,
 				Model:        resolved.RemoteModel,
 				ModelType:    modelType,

@@ -26,12 +26,13 @@ type sessionConfigReader interface {
 type HostSessionResolver struct {
 	sessions sessionConfigReader // reads the session sandbox pin
 	host     sandbox.Manager     // nil outside Lite / unsupported platforms
+	desktop  bool                // Lite desktop: named pins still resolve to host
 }
 
 // NewHostSessionResolver wires the shared host-session probe. A nil host
 // manager keeps every caller on the remote path, byte-for-byte.
-func NewHostSessionResolver(sessions sessionConfigReader, host sandbox.Manager) *HostSessionResolver {
-	return &HostSessionResolver{sessions: sessions, host: host}
+func NewHostSessionResolver(sessions sessionConfigReader, host sandbox.Manager, desktop bool) *HostSessionResolver {
+	return &HostSessionResolver{sessions: sessions, host: host, desktop: desktop}
 }
 
 // HostManagerFor returns the host manager when this session has no named
@@ -42,6 +43,9 @@ func (r *HostSessionResolver) HostManagerFor(ctx context.Context, sessionID stri
 	}
 	if r.host.GetType() != sandbox.SandboxTypeHost {
 		return nil
+	}
+	if r.desktop {
+		return r.host
 	}
 	pin, err := r.sessions.Read(ctx, sessionID)
 	if err != nil {
@@ -55,7 +59,8 @@ func (r *HostSessionResolver) HostManagerFor(ctx context.Context, sessionID stri
 
 func hasNamedSandboxConfig(configID string) bool {
 	configID = strings.TrimSpace(configID)
-	return configID != "" && configID != types.SandboxConfigIDGlobalDefault
+	return configID != "" && configID != types.SandboxConfigIDGlobalDefault &&
+		!sandbox.IsHostSkillTarget(configID)
 }
 
 var _ sessionConfigReader = (*SessionSandboxPinner)(nil)

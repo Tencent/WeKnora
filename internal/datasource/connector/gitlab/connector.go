@@ -178,39 +178,26 @@ func (c *Connector) FetchIncremental(ctx context.Context, ds *types.DataSourceCo
 				out = append(out, item)
 			}
 		} else if previous != head {
-			diff, err := c.client.compare(ctx, s.ProjectID, previous, head)
-			if err != nil || diff.CompareTimeout {
-				// A compare may be unavailable after history rewrites or truncated by
-				// the server. Re-enumerate the configured scope to preserve updates.
-				files, listErr := c.files(ctx, s.ProjectID, ref, s.Paths)
-				if listErr != nil {
-					return nil, nil, fmt.Errorf("gitlab list files %s: %w", s.ProjectID, listErr)
-				}
-				for _, f := range files {
-					item, itemErr := c.item(ctx, p, ref, f)
-					if itemErr != nil {
-						return nil, nil, itemErr
-					}
-					out = append(out, item)
-				}
-			} else {
-				for _, d := range diff.Diffs {
-					if d.DeletedFile {
-						if c.inScope(d.OldPath, s.Paths) && isSupportedFile(d.OldPath) {
-							out = append(out, c.deleted(p, ref, d.OldPath))
-						}
-						continue
-					}
-					if d.RenamedFile && c.inScope(d.OldPath, s.Paths) && isSupportedFile(d.OldPath) {
+			diff, err := c.compareChanges(ctx, s.ProjectID, previous, head)
+			if err != nil {
+				return nil, nil, err
+			}
+			for _, d := range diff.Diffs {
+				if d.DeletedFile {
+					if c.inScope(d.OldPath, s.Paths) && isSupportedFile(d.OldPath) {
 						out = append(out, c.deleted(p, ref, d.OldPath))
 					}
-					if c.inScope(d.NewPath, s.Paths) && isSupportedFile(d.NewPath) {
-						item, err := c.item(ctx, p, ref, d.NewPath)
-						if err != nil {
-							return nil, nil, err
-						}
-						out = append(out, item)
+					continue
+				}
+				if d.RenamedFile && c.inScope(d.OldPath, s.Paths) && isSupportedFile(d.OldPath) {
+					out = append(out, c.deleted(p, ref, d.OldPath))
+				}
+				if c.inScope(d.NewPath, s.Paths) && isSupportedFile(d.NewPath) {
+					item, err := c.item(ctx, p, ref, d.NewPath)
+					if err != nil {
+						return nil, nil, err
 					}
+					out = append(out, item)
 				}
 			}
 		}
@@ -294,11 +281,9 @@ func gitLabCursor(value cursor) *types.SyncCursor {
 func (c *Connector) streamChanges(
 	ctx context.Context, project *project, ref, from, to string, roots []string, h datasource.StreamHandler,
 ) error {
-	diff, err := c.client.compare(ctx, fmt.Sprint(project.ID), from, to)
-	if err != nil || diff.CompareTimeout {
-		// A compare can be unavailable after history rewrites or be truncated by
-		// GitLab. Re-enumerating the configured scope preserves file updates.
-		return c.streamFiles(ctx, project, ref, roots, h)
+	diff, err := c.compareChanges(ctx, fmt.Sprint(project.ID), from, to)
+	if err != nil {
+		return err
 	}
 	for _, change := range diff.Diffs {
 		if change.DeletedFile {
@@ -325,6 +310,17 @@ func (c *Connector) streamChanges(
 		}
 	}
 	return nil
+}
+
+func (c *Connector) compareChanges(ctx context.Context, projectID, from, to string) (*comparison, error) {
+	diff, err := c.client.compare(ctx, projectID, from, to)
+	if err != nil {
+		return nil, fmt.Errorf("gitlab compare project %s: %w", projectID, err)
+	}
+	if diff.CompareTimeout {
+		return nil, fmt.Errorf("gitlab compare project %s timed out", projectID)
+	}
+	return diff, nil
 }
 
 func (c *Connector) streamFiles(

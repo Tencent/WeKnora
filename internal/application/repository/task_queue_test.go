@@ -392,14 +392,31 @@ func TestTaskPendingOps_EnqueueIfKnowledgeBaseActive(t *testing.T) {
 		deleted_at DATETIME
 	)`).Error)
 	require.NoError(t, db.Exec(
-		"INSERT INTO knowledge_bases (id, tenant_id, deleted_at) VALUES (?, ?, NULL), (?, ?, ?)",
-		"kb-active", 1, "kb-deleted", 1, time.Now(),
+		"INSERT INTO knowledge_bases (id, tenant_id, deleted_at) VALUES (?, ?, NULL), (?, ?, ?), (?, ?, NULL)",
+		"kb-active", 1, "kb-deleted", 1, time.Now(), "kb-t2", 2,
+	).Error)
+	require.NoError(t, db.Exec(`CREATE TABLE tenants (
+		id INTEGER PRIMARY KEY,
+		deleted_at DATETIME
+	)`).Error)
+	require.NoError(t, db.Exec(
+		"INSERT INTO tenants (id, deleted_at) VALUES (?, NULL), (?, ?)",
+		1, 2, time.Now(),
 	).Error)
 
 	repo := NewTaskPendingOpsRepository(db)
 	guard, ok := repo.(interfaces.TaskPendingOpsKnowledgeBaseGuard)
 	require.True(t, ok)
+	liveness, ok := repo.(interfaces.TaskPendingOpsTenantLiveness)
+	require.True(t, ok, "task pending repository must expose tenant liveness for wiki task guards")
 	ctx := context.Background()
+
+	activeTenant, err := liveness.HasActiveTenant(ctx, 1)
+	require.NoError(t, err)
+	assert.True(t, activeTenant)
+	deletedTenant, err := liveness.HasActiveTenant(ctx, 2)
+	require.NoError(t, err)
+	assert.False(t, deletedTenant)
 
 	accepted, err := guard.EnqueueIfKnowledgeBaseActive(ctx,
 		makePendingOp(types.TypeWikiIngest, types.TaskScopeKnowledgeBase, "kb-active", "ingest", "active", nil))
@@ -425,6 +442,10 @@ func TestTaskPendingOps_EnqueueIfKnowledgeBaseActive(t *testing.T) {
 		{name: "tenant mismatch", op: &types.TaskPendingOp{
 			TenantID: 2, TaskType: types.TypeWikiIngest, Scope: types.TaskScopeKnowledgeBase,
 			ScopeID: "kb-active", Op: "ingest", DedupKey: "wrong-tenant",
+		}},
+		{name: "deleted tenant with live KB", op: &types.TaskPendingOp{
+			TenantID: 2, TaskType: types.TypeWikiIngest, Scope: types.TaskScopeKnowledgeBase,
+			ScopeID: "kb-t2", Op: "ingest", DedupKey: "deleted-tenant",
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1015,4 +1036,45 @@ func TestTaskPendingOps_DrainUnclaimedAndReleaseRollsBackOnReleaseFailure(t *tes
 	var count int64
 	require.NoError(t, db.Model(&types.TaskPendingOp{}).Count(&count).Error)
 	assert.Equal(t, int64(1), count)
+}
+
+func TestTaskPendingOps_ClaimableCountMatchesClaimBatch(t *testing.T) {
+	db := setupTaskQueueTestDB(t)
+	repo := NewTaskPendingOpsRepository(db)
+	counter := repo.(interfaces.TaskPendingOpsClaimableCounter)
+	ctx := context.Background()
+	staleBefore := time.Now().Add(-time.Hour)
+	for _, key := range []string{"ready", "ready", "stale", "stale", "busy", "busy"} {
+		require.NoError(t, repo.Enqueue(ctx,
+			makePendingOp("wiki:ingest", "knowledge_base", "kb-1", "ingest", key, nil)))
+	}
+	require.NoError(t, db.Model(&types.TaskPendingOp{}).Where("dedup_key = ?", "stale").
+		Update("claimed_at", staleBefore.Add(-time.Second)).Error)
+	require.NoError(t, db.Model(&types.TaskPendingOp{}).Where("dedup_key = ?", "busy").
+		Update("claimed_at", time.Now()).Error)
+	// An unclaimed late sibling of a busy key is not eligible on its own.
+	require.NoError(t, repo.Enqueue(ctx,
+		makePendingOp("wiki:ingest", "knowledge_base", "kb-1", "retract", "busy", nil)))
+	// Identical keys in another tuple must not exclude the ready document.
+	other := makePendingOp("wiki:ingest", "knowledge_base", "other-kb", "ingest", "ready", nil)
+	require.NoError(t, repo.Enqueue(ctx, other))
+	require.NoError(t, db.Model(&types.TaskPendingOp{}).Where("scope_id = ?", "other-kb").
+		Update("claimed_at", time.Now()).Error)
+	n, err := counter.ClaimableCount(ctx, "wiki:ingest", "knowledge_base", "kb-1", staleBefore)
+	require.NoError(t, err)
+	require.Equal(t, int64(2), n)
+	rows, err := repo.ClaimBatch(ctx, "wiki:ingest", "knowledge_base", "kb-1", 2, staleBefore)
+	require.NoError(t, err)
+	require.Len(t, rows, 4)
+	keys := map[string]bool{}
+	for _, row := range rows {
+		keys[row.DedupKey] = true
+	}
+	require.Len(t, keys, int(n))
+	n, err = counter.ClaimableCount(ctx, "wiki:ingest", "knowledge_base", "kb-1", staleBefore)
+	require.NoError(t, err)
+	require.Zero(t, n)
+	pending, err := repo.PendingCount(ctx, "wiki:ingest", "knowledge_base", "kb-1")
+	require.NoError(t, err)
+	require.Equal(t, int64(7), pending, "crash recovery must still see claimed rows")
 }

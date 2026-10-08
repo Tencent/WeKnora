@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/models/api"
-	"github.com/Tencent/WeKnora/internal/models/catalog"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -21,7 +20,7 @@ func newClient(t *testing.T, mutate func(*Config)) *Client {
 		Endpoint: api.Endpoint{
 			BaseURL: "https://example.com/v1", Model: "m", ModelID: "id", Auth: api.BearerAuth("k"),
 		},
-		Settings:       catalog.DefaultOpenAICompletions(),
+		Settings:       api.DefaultOpenAICompletions(),
 		ThinkingLevels: api.ThinkingLevelMap{},
 	}
 	if mutate != nil {
@@ -76,7 +75,7 @@ func TestGolden(t *testing.T) {
 			mutate: func(c *Config) {
 				c.Settings.SupportsStore = true
 				c.Settings.SupportsDeveloperRole = true
-				c.Settings.ThinkingFormat = catalog.ThinkingFormatOpenAI
+				c.Settings.ThinkingFormat = api.ThinkingFormatOpenAI
 				c.Settings.SupportsReasoningEffort = true
 			},
 			opts:   toolOpts,
@@ -94,7 +93,7 @@ func TestGolden(t *testing.T) {
 				c.Reasoning = true
 				c.Settings.SupportsDeveloperRole = true
 				c.Settings.SupportsTemperature = false
-				c.Settings.ThinkingFormat = catalog.ThinkingFormatOpenAI
+				c.Settings.ThinkingFormat = api.ThinkingFormatOpenAI
 				c.Settings.SupportsReasoningEffort = true
 			},
 			opts: &api.Options{Temperature: 0.7, MaxTokens: 10, ReasoningEffort: api.ReasoningMedium},
@@ -105,7 +104,7 @@ func TestGolden(t *testing.T) {
 		{
 			name: "openai gpt-5.1 off maps to reasoning_effort none",
 			mutate: func(c *Config) {
-				c.Settings.ThinkingFormat = catalog.ThinkingFormatOpenAI
+				c.Settings.ThinkingFormat = api.ThinkingFormatOpenAI
 				c.Settings.SupportsReasoningEffort = true
 				c.ThinkingLevels = api.ThinkingLevelMap{api.ReasoningOff: api.StringPtr("none")}
 			},
@@ -116,7 +115,7 @@ func TestGolden(t *testing.T) {
 			name: "deepseek: max_tokens, thinking.type + effort clamp, tool_choice required dropped",
 			mutate: func(c *Config) {
 				c.Settings.MaxTokensField = "max_tokens"
-				c.Settings.ThinkingFormat = catalog.ThinkingFormatThinkingType
+				c.Settings.ThinkingFormat = api.ThinkingFormatThinkingType
 				c.Settings.SupportsReasoningEffort = true
 				c.Settings.ToolChoiceModes = []string{"none", "auto"}
 				c.ThinkingLevels = api.ThinkingLevelMap{api.ReasoningMedium: api.StringPtr("high")}
@@ -131,7 +130,7 @@ func TestGolden(t *testing.T) {
 		{
 			name: "deepseek reasoner: always-on, off request sends nothing",
 			mutate: func(c *Config) {
-				c.Settings.ThinkingFormat = catalog.ThinkingFormatThinkingType
+				c.Settings.ThinkingFormat = api.ThinkingFormatThinkingType
 				c.ThinkingLevels = api.ThinkingLevelMap{api.ReasoningOff: nil}
 			},
 			opts: &api.Options{Thinking: ptrBool(false)},
@@ -140,7 +139,7 @@ func TestGolden(t *testing.T) {
 		{
 			name: "zhipu: thinking disabled explicitly",
 			mutate: func(c *Config) {
-				c.Settings.ThinkingFormat = catalog.ThinkingFormatThinkingType
+				c.Settings.ThinkingFormat = api.ThinkingFormatThinkingType
 			},
 			opts: &api.Options{Thinking: ptrBool(false)},
 			want: map[string]any{"thinking": map[string]any{"type": "disabled"}},
@@ -148,7 +147,7 @@ func TestGolden(t *testing.T) {
 		{
 			name: "minimax m3: adaptive thinking value",
 			mutate: func(c *Config) {
-				c.Settings.ThinkingFormat = catalog.ThinkingFormatThinkingType
+				c.Settings.ThinkingFormat = api.ThinkingFormatThinkingType
 				c.Settings.ThinkingEnabledValue = "adaptive"
 			},
 			opts: &api.Options{Thinking: ptrBool(true)},
@@ -158,7 +157,7 @@ func TestGolden(t *testing.T) {
 			name: "dashscope hybrid: enable_thinking always sent, budget, non-stream forces off",
 			mutate: func(c *Config) {
 				c.Settings.MaxTokensField = "max_tokens"
-				c.Settings.ThinkingFormat = catalog.ThinkingFormatEnableThinking
+				c.Settings.ThinkingFormat = api.ThinkingFormatEnableThinking
 				c.Settings.ThinkingBudgetField = "thinking_budget"
 				c.Settings.ThinkingAlwaysSend = true
 				c.Settings.ThinkingDisableOnNonStream = true
@@ -170,7 +169,7 @@ func TestGolden(t *testing.T) {
 		{
 			name: "dashscope qwen3.8: effort and budget are mutually exclusive, budget yields",
 			mutate: func(c *Config) {
-				c.Settings.ThinkingFormat = catalog.ThinkingFormatEnableThinking
+				c.Settings.ThinkingFormat = api.ThinkingFormatEnableThinking
 				c.Settings.ThinkingBudgetField = "thinking_budget"
 				c.Settings.ThinkingBudgetExcludesEffort = true
 				c.Settings.SupportsReasoningEffort = true
@@ -187,7 +186,7 @@ func TestGolden(t *testing.T) {
 		{
 			name: "dashscope qwen3.8: budget still rides along when no effort is graded",
 			mutate: func(c *Config) {
-				c.Settings.ThinkingFormat = catalog.ThinkingFormatEnableThinking
+				c.Settings.ThinkingFormat = api.ThinkingFormatEnableThinking
 				c.Settings.ThinkingBudgetField = "thinking_budget"
 				c.Settings.ThinkingBudgetExcludesEffort = true
 			},
@@ -200,7 +199,7 @@ func TestGolden(t *testing.T) {
 		{
 			name: "dashscope hybrid streaming: enable_thinking true with budget",
 			mutate: func(c *Config) {
-				c.Settings.ThinkingFormat = catalog.ThinkingFormatEnableThinking
+				c.Settings.ThinkingFormat = api.ThinkingFormatEnableThinking
 				c.Settings.ThinkingBudgetField = "thinking_budget"
 				c.Settings.ThinkingAlwaysSend = true
 				c.Settings.ThinkingDisableOnNonStream = true
@@ -212,7 +211,7 @@ func TestGolden(t *testing.T) {
 		{
 			name: "dashscope: no preference still pins enable_thinking false",
 			mutate: func(c *Config) {
-				c.Settings.ThinkingFormat = catalog.ThinkingFormatEnableThinking
+				c.Settings.ThinkingFormat = api.ThinkingFormatEnableThinking
 				c.Settings.ThinkingAlwaysSend = true
 			},
 			opts: &api.Options{Temperature: 0.1},
@@ -221,15 +220,45 @@ func TestGolden(t *testing.T) {
 		{
 			name: "vllm: chat_template_kwargs",
 			mutate: func(c *Config) {
-				c.Settings.ThinkingFormat = catalog.ThinkingFormatChatTemplateKwargs
+				c.Settings.ThinkingFormat = api.ThinkingFormatChatTemplateKwargs
 			},
 			opts: &api.Options{Thinking: ptrBool(true)},
 			want: map[string]any{"chat_template_kwargs": map[string]any{"enable_thinking": true}},
 		},
 		{
+			// Without the effort opt-in the graded level the caller picked is
+			// not expressible in this dialect: the branch carries only the
+			// boolean and no reasoning_effort may leak onto the wire
+			// (capabilities must not advertise rungs for the same reason).
+			name: "vllm: graded effort request still carries only the boolean",
+			mutate: func(c *Config) {
+				c.Settings.ThinkingFormat = api.ThinkingFormatChatTemplateKwargs
+			},
+			opts: &api.Options{Thinking: ptrBool(true), ReasoningEffort: api.ReasoningHigh},
+			want: map[string]any{
+				"chat_template_kwargs": map[string]any{"enable_thinking": true},
+				"reasoning_effort":     nil,
+			},
+		},
+		{
+			// With the effort opt-in the graded level rides on top of the
+			// switch, exactly like the enable_thinking dialect (#3552
+			// review): capabilities keep the ladder for the same reason.
+			name: "nim-style opt-in: chat_template_kwargs plus reasoning_effort",
+			mutate: func(c *Config) {
+				c.Settings.ThinkingFormat = api.ThinkingFormatChatTemplateKwargs
+				c.Settings.SupportsReasoningEffort = true
+			},
+			opts: &api.Options{Thinking: ptrBool(true), ReasoningEffort: api.ReasoningHigh},
+			want: map[string]any{
+				"chat_template_kwargs": map[string]any{"enable_thinking": true},
+				"reasoning_effort":     "high",
+			},
+		},
+		{
 			name: "openrouter: reasoning effort object and enabled=false",
 			mutate: func(c *Config) {
-				c.Settings.ThinkingFormat = catalog.ThinkingFormatOpenRouter
+				c.Settings.ThinkingFormat = api.ThinkingFormatOpenRouter
 				c.Settings.SupportsReasoningEffort = true
 			},
 			opts: &api.Options{ReasoningEffort: api.ReasoningHigh},
@@ -238,7 +267,7 @@ func TestGolden(t *testing.T) {
 		{
 			name: "openrouter: auto enables without effort",
 			mutate: func(c *Config) {
-				c.Settings.ThinkingFormat = catalog.ThinkingFormatOpenRouter
+				c.Settings.ThinkingFormat = api.ThinkingFormatOpenRouter
 				c.Settings.SupportsReasoningEffort = true
 			},
 			opts: &api.Options{ReasoningEffort: api.ReasoningAuto},
@@ -256,7 +285,7 @@ func TestGolden(t *testing.T) {
 		{
 			name: "no thinking preference on a plain vendor sends no thinking fields",
 			mutate: func(c *Config) {
-				c.Settings.ThinkingFormat = catalog.ThinkingFormatThinkingType
+				c.Settings.ThinkingFormat = api.ThinkingFormatThinkingType
 			},
 			opts: &api.Options{Temperature: 0.2},
 			want: map[string]any{"thinking": nil, "reasoning_effort": nil, "enable_thinking": nil},
@@ -276,6 +305,35 @@ func TestGolden(t *testing.T) {
 			},
 			opts: &api.Options{Temperature: 0.2},
 			want: map[string]any{"enable_search": true, "temperature": 0.2},
+		},
+		{
+			name: "both caller budget aliases produce only the configured wire field",
+			opts: &api.Options{MaxTokens: 100, MaxCompletionTokens: 200},
+			want: map[string]any{"max_completion_tokens": float64(200), "max_tokens": nil},
+		},
+		{
+			name: "extra_body cannot add the legacy budget beside the caller completion budget",
+			mutate: func(c *Config) {
+				c.Settings.ExtraBody = map[string]any{"max_tokens": 900, "max_completion_tokens": 800}
+			},
+			opts: &api.Options{MaxTokens: 100},
+			want: map[string]any{"max_completion_tokens": float64(100), "max_tokens": nil},
+		},
+		{
+			name: "conflicting extra_body budgets follow the configured field without caller options",
+			mutate: func(c *Config) {
+				c.Settings.ExtraBody = map[string]any{"max_tokens": 900, "max_completion_tokens": 800}
+			},
+			want: map[string]any{"max_completion_tokens": float64(800), "max_tokens": nil},
+		},
+		{
+			name: "legacy budget vendors discard the conflicting completion budget",
+			mutate: func(c *Config) {
+				c.Settings.MaxTokensField = "max_tokens"
+				c.Settings.ExtraBody = map[string]any{"max_completion_tokens": 800}
+			},
+			opts: &api.Options{MaxTokens: 100},
+			want: map[string]any{"max_tokens": float64(100), "max_completion_tokens": nil},
 		},
 	}
 	for _, tc := range cases {
@@ -383,8 +441,8 @@ func TestChat_NonStreamDecoding(t *testing.T) {
 			BaseURL: server.URL + "/v1", Model: "m", Auth: api.BearerAuth("sk"),
 			Headers: map[string]string{"X-Custom": "1", "Authorization": "Bearer evil"},
 		},
-		Settings: func() catalog.OpenAICompletionsSettings {
-			s := catalog.DefaultOpenAICompletions()
+		Settings: func() api.OpenAICompletionsSettings {
+			s := api.DefaultOpenAICompletions()
 			s.PromptCacheAccounting = true
 			return s
 		}(),
@@ -409,7 +467,7 @@ func TestChat_HTTPErrorSurfacesBody(t *testing.T) {
 	}))
 	defer server.Close()
 	c := New(Config{
-		Endpoint: api.Endpoint{BaseURL: server.URL, Model: "m"}, Settings: catalog.DefaultOpenAICompletions(),
+		Endpoint: api.Endpoint{BaseURL: server.URL, Model: "m"}, Settings: api.DefaultOpenAICompletions(),
 	})
 	_, err := c.Chat(context.Background(), []api.Message{{Role: "user", Content: "hi"}}, nil)
 	require.Error(t, err)
@@ -451,7 +509,7 @@ func TestChatStream_Sequence(t *testing.T) {
 	defer server.Close()
 
 	c := New(Config{
-		Endpoint: api.Endpoint{BaseURL: server.URL, Model: "m"}, Settings: catalog.DefaultOpenAICompletions(),
+		Endpoint: api.Endpoint{BaseURL: server.URL, Model: "m"}, Settings: api.DefaultOpenAICompletions(),
 	})
 	ch, err := c.ChatStream(context.Background(), []api.Message{{Role: "user", Content: "hi"}}, nil)
 	require.NoError(t, err)
@@ -527,8 +585,8 @@ func TestChat_ClassifiesCacheStatusWithoutUsageBlock(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			c := New(Config{
 				Endpoint: api.Endpoint{BaseURL: server.URL + "/v1", Model: "m", Auth: api.BearerAuth("sk")},
-				Settings: func() catalog.OpenAICompletionsSettings {
-					s := catalog.DefaultOpenAICompletions()
+				Settings: func() api.OpenAICompletionsSettings {
+					s := api.DefaultOpenAICompletions()
 					s.PromptCacheAccounting = tc.accounting
 					return s
 				}(),
@@ -554,7 +612,7 @@ func TestChatStream_TolerantDoneSentinel(t *testing.T) {
 
 	c := New(Config{
 		Endpoint: api.Endpoint{BaseURL: server.URL + "/v1", Model: "m", Auth: api.BearerAuth("sk")},
-		Settings: catalog.DefaultOpenAICompletions(),
+		Settings: api.DefaultOpenAICompletions(),
 	})
 	ch, err := c.ChatStream(context.Background(), []api.Message{{Role: "user", Content: "hi"}}, nil)
 	require.NoError(t, err)
@@ -586,7 +644,7 @@ func TestChatStream_UndecodableChunkFailsTheStream(t *testing.T) {
 
 	c := New(Config{
 		Endpoint: api.Endpoint{BaseURL: server.URL + "/v1", Model: "m", Auth: api.BearerAuth("sk")},
-		Settings: catalog.DefaultOpenAICompletions(),
+		Settings: api.DefaultOpenAICompletions(),
 	})
 	ch, err := c.ChatStream(context.Background(), []api.Message{{Role: "user", Content: "hi"}}, nil)
 	require.NoError(t, err)
@@ -619,7 +677,7 @@ func TestChat_MalformedToolCallIsAnError(t *testing.T) {
 
 	c := New(Config{
 		Endpoint: api.Endpoint{BaseURL: server.URL + "/v1", Model: "m", Auth: api.BearerAuth("sk")},
-		Settings: catalog.DefaultOpenAICompletions(),
+		Settings: api.DefaultOpenAICompletions(),
 	})
 	_, err := c.Chat(context.Background(), []api.Message{{Role: "user", Content: "hi"}}, nil)
 	require.Error(t, err, "a tool call that will not decode must not pass as a plain answer")
@@ -642,7 +700,7 @@ func TestChatStream_MalformedToolCallFailsTheStream(t *testing.T) {
 
 	c := New(Config{
 		Endpoint: api.Endpoint{BaseURL: server.URL + "/v1", Model: "m", Auth: api.BearerAuth("sk")},
-		Settings: catalog.DefaultOpenAICompletions(),
+		Settings: api.DefaultOpenAICompletions(),
 	})
 	ch, err := c.ChatStream(context.Background(), []api.Message{{Role: "user", Content: "hi"}}, nil)
 	require.NoError(t, err)
@@ -659,4 +717,46 @@ func TestChatStream_MalformedToolCallFailsTheStream(t *testing.T) {
 	}
 	assert.True(t, sawError, "a dropped tool call must surface as an error")
 	assert.Equal(t, "ok", answer.String(), "decoding stops at the bad chunk")
+}
+
+// A body that runs out without [DONE] or any finish_reason is what a proxy
+// cutting the connection mid-answer looks like; it must not read as a stop.
+// [DONE] alone stays a clean end, since some vendors never send finish_reason.
+func TestChatStream_EOFWithoutFinishReasonIsIncomplete(t *testing.T) {
+	cases := []struct {
+		name, tail, want string
+	}{
+		{"cut off", "", types.FinishReasonIncomplete},
+		{
+			"finish reason without DONE",
+			"data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n", "stop",
+		},
+		{"DONE without finish reason", "data: [DONE]\n\n", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("SSRF_WHITELIST", "127.0.0.1")
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "text/event-stream")
+				head := "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Hel\"}}]}\n\n"
+				_, _ = w.Write([]byte(head + tc.tail))
+			}))
+			defer server.Close()
+
+			c := New(Config{
+				Endpoint: api.Endpoint{BaseURL: server.URL + "/v1", Model: "m", Auth: api.BearerAuth("sk")},
+				Settings: api.DefaultOpenAICompletions(),
+			})
+			ch, err := c.ChatStream(context.Background(), []api.Message{{Role: "user", Content: "hi"}}, nil)
+			require.NoError(t, err)
+			var last types.StreamResponse
+			for chunk := range ch {
+				require.NotEqual(t, types.ResponseTypeError, chunk.ResponseType, chunk.Content)
+				if chunk.Done && chunk.ResponseType == types.ResponseTypeAnswer {
+					last = chunk
+				}
+			}
+			assert.Equal(t, tc.want, last.FinishReason)
+		})
+	}
 }

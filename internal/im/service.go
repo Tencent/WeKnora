@@ -417,12 +417,20 @@ func formatQuotedContext(quote *QuotedMessage) string {
 // user (recognised by types.IsSyntheticUserID) lets Organization-shared
 // knowledge bases be merged and resolved correctly, since the shared-KB code
 // gates on a non-empty UserID. Viewer is the least privilege sufficient to
-// retrieve shared KBs.
-func withIMIdentity(ctx context.Context, tenantID uint64, channelID string, msg *IncomingMessage) context.Context {
+// retrieve shared KBs. The channel locale replaces any HTTP middleware value
+// because webhook Accept-Language belongs to the IM platform, not the writer;
+// channels without an explicit locale use the deployment default.
+func withIMIdentity(ctx context.Context, channel *IMChannel, msg *IncomingMessage) context.Context {
+	tenantID := channel.TenantID
 	ctx = context.WithValue(ctx, types.TenantIDContextKey, tenantID)
 	ctx = context.WithValue(ctx, types.UserIDContextKey, fmt.Sprintf("system-%d", tenantID))
+	locale := channel.Locale
+	if locale == "" {
+		locale = types.DefaultLanguage()
+	}
+	ctx = context.WithValue(ctx, types.LanguageContextKey, locale)
 	if msg != nil {
-		principalID := fmt.Sprintf("%d:%s:%s:%s", tenantID, channelID, msg.Platform, msg.UserID)
+		principalID := fmt.Sprintf("%d:%s:%s:%s", tenantID, channel.ID, msg.Platform, msg.UserID)
 		ctx = types.WithPrincipal(ctx, types.Principal{Type: types.PrincipalIMUser, ID: principalID})
 	}
 	ctx = context.WithValue(ctx, types.TenantRoleContextKey, types.TenantRoleViewer)
@@ -1606,6 +1614,7 @@ func sameChannelRuntimeConfig(cached, fresh *IMChannel) bool {
 		cached.Enabled == fresh.Enabled &&
 		cached.Mode == fresh.Mode &&
 		cached.OutputMode == fresh.OutputMode &&
+		cached.Locale == fresh.Locale &&
 		cached.KnowledgeBaseID == fresh.KnowledgeBaseID &&
 		cached.SessionMode == fresh.SessionMode &&
 		equalChannelCredentials(cached.Credentials, fresh.Credentials)
@@ -1763,7 +1772,7 @@ func (s *Service) HandleMessage(ctx context.Context, msg *IncomingMessage, chann
 		return fmt.Errorf("get tenant: %w", err)
 	}
 	sessionCtx := context.WithValue(ctx, types.TenantInfoContextKey, tenant)
-	sessionCtx = withIMIdentity(sessionCtx, tenantID, channelID, msg)
+	sessionCtx = withIMIdentity(sessionCtx, channel, msg)
 
 	// 2. Resolve or create a WeKnora session
 	channelSession, err := s.resolveSession(sessionCtx, msg, tenantID, agentID, channelID, channel.SessionMode)
@@ -3167,6 +3176,7 @@ type ChannelWithAgent struct {
 	Enabled     bool      `json:"enabled"`
 	Mode        string    `json:"mode"`
 	OutputMode  string    `json:"output_mode"`
+	Locale      string    `json:"locale"`
 	SessionMode string    `json:"session_mode"`
 	BotIdentity string    `json:"bot_identity"`
 	CreatedAt   time.Time `json:"created_at"`
@@ -3184,7 +3194,7 @@ func (s *Service) ListChannelsByTenant(ctx context.Context, tenantID uint64) ([]
 	q := s.db.Table("im_channels AS c").
 		Select(`c.id, c.tenant_id, c.agent_id,
                 COALESCE(a.name, '') AS agent_name,
-                c.platform, c.name, c.enabled, c.mode, c.output_mode,
+                c.platform, c.name, c.enabled, c.mode, c.output_mode, c.locale,
                 c.session_mode, c.bot_identity, c.created_at, c.updated_at`).
 		Joins(`LEFT JOIN custom_agents AS a
                ON a.id = c.agent_id AND a.tenant_id = c.tenant_id AND a.deleted_at IS NULL`).

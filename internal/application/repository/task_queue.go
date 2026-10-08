@@ -53,11 +53,13 @@ func preparePendingOp(op *types.TaskPendingOp) error {
 }
 
 // EnqueueIfKnowledgeBaseActive prevents detached wiki cleanup from writing new
-// durable work after a KB was soft-deleted. On Postgres the share lock
-// serializes this check+insert transaction against the row update performed by
-// soft deletion: whichever operation acquires the row first determines the
-// order, and the deletion path's subsequent scope scrub removes any insert
-// that committed before it.
+// durable work after a KB was soft-deleted. The tenant must also be alive: a
+// tenant soft-deletion removes the workspace without touching its knowledge
+// bases, and a deleted tenant must never accrue new model-backed work. On
+// Postgres the share lock serializes this check+insert transaction against
+// the row update performed by soft deletion: whichever operation acquires the
+// row first determines the order, and the deletion path's subsequent scope
+// scrub removes any insert that committed before it.
 func (r *taskPendingOpsRepository) EnqueueIfKnowledgeBaseActive(
 	ctx context.Context,
 	op *types.TaskPendingOp,
@@ -84,6 +86,10 @@ func (r *taskPendingOpsRepository) EnqueueIfKnowledgeBaseActive(
 			}
 			return err
 		}
+		active, err := tenantActiveWithinTx(tx, op.TenantID)
+		if err != nil || !active {
+			return err
+		}
 		if err := tx.Create(op).Error; err != nil {
 			return err
 		}
@@ -91,6 +97,31 @@ func (r *taskPendingOpsRepository) EnqueueIfKnowledgeBaseActive(
 		return nil
 	})
 	return accepted, err
+}
+
+// tenantActiveWithinTx reports whether the tenant row exists and is not
+// soft-deleted, inside the caller's transaction. Callers that cannot see a
+// tenants table (legacy test doubles) fail closed.
+func tenantActiveWithinTx(tx *gorm.DB, tenantID uint64) (bool, error) {
+	if tenantID == 0 {
+		return false, nil
+	}
+	var tenant types.Tenant
+	err := tx.Model(&types.Tenant{}).Select("id").Where("id = ?", tenantID).Take(&tenant).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// HasActiveTenant reports whether the tenant exists and has not been
+// soft-deleted. Wiki task consumers call this before doing durable or
+// model-backed work on the tenant's behalf (#3593).
+func (r *taskPendingOpsRepository) HasActiveTenant(ctx context.Context, tenantID uint64) (bool, error) {
+	return tenantActiveWithinTx(r.db.WithContext(ctx), tenantID)
 }
 
 // SeedKnowledgeFinalizingWithPendingOp commits the finalizing counter and the
@@ -447,6 +478,25 @@ func (r *taskPendingOpsRepository) PendingCount(
 		return 0, err
 	}
 	return n, nil
+}
+
+// ClaimableCount uses ClaimBatch's eligibility and grouping rules so running
+// documents and multiple queued operations for one document do not inflate
+// the number of batches a scheduler needs to dispatch.
+func (r *taskPendingOpsRepository) ClaimableCount(
+	ctx context.Context, taskType, scope, scopeID string, staleBefore time.Time,
+) (int64, error) {
+	freshKeys := r.db.WithContext(ctx).Model(&types.TaskPendingOp{}).
+		Select("dedup_key").
+		Where("task_type = ? AND scope = ? AND scope_id = ?", taskType, scope, scopeID).
+		Where("claimed_at IS NOT NULL AND claimed_at >= ?", staleBefore)
+	var n int64
+	err := r.db.WithContext(ctx).Model(&types.TaskPendingOp{}).
+		Where("task_type = ? AND scope = ? AND scope_id = ?", taskType, scope, scopeID).
+		Where("claimed_at IS NULL OR claimed_at < ?", staleBefore).
+		Where("dedup_key NOT IN (?)", freshKeys).
+		Distinct("dedup_key").Count(&n).Error
+	return n, err
 }
 
 // DeleteByDedupKey drops rows in the tuple whose dedup_key matches.

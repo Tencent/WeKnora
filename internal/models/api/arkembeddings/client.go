@@ -22,13 +22,12 @@ import (
 	"fmt"
 
 	"github.com/Tencent/WeKnora/internal/models/api"
-	"github.com/Tencent/WeKnora/internal/models/catalog"
 )
 
-// Config is everything the client needs, already resolved by the catalog.
+// Config is everything the client needs, already resolved by the api.
 type Config struct {
 	Endpoint   api.Endpoint
-	Settings   catalog.EmbeddingsSettings
+	Settings   api.EmbeddingsSettings
 	Dimensions int
 	Retry      api.RetryPolicy
 }

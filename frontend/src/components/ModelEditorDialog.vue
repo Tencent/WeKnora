@@ -333,7 +333,7 @@
               :meta="credentialMeta" @changed="invalidateConnectionTest()" />
             <t-input v-else v-model="formData.apiKey" type="password"
               :placeholder="apiKeyPlaceholder"
-              class="api-key-input" autocomplete="off" spellcheck="false">
+              class="api-key-input" autocomplete="new-password" spellcheck="false">
               <template #prefix-icon><t-icon name="lock-on" /></template>
             </t-input>
             <p v-if="apiKeyHint" class="form-desc">{{ apiKeyHint }}</p>
@@ -346,7 +346,7 @@
           <div v-if="secretExtraField && !isEdit && formData.provider !== 'weknoracloud'" class="form-item">
             <label class="form-label" :class="{ required: secretExtraField.required }">{{ extraFieldDisplayLabel(secretExtraField) }}</label>
             <t-input v-model="formData.appSecret" type="password"
-              :placeholder="secretExtraField.placeholder || ''" autocomplete="off" spellcheck="false">
+              :placeholder="secretExtraField.placeholder || ''" autocomplete="new-password" spellcheck="false">
               <template #prefix-icon><t-icon name="lock-on" /></template>
             </t-input>
             <p v-if="secretExtraField.placeholder" class="form-desc">{{ secretExtraField.placeholder }}</p>
@@ -370,7 +370,7 @@
               type="number" :placeholder="extraFieldDisplayPlaceholder(field)"
               @update:model-value="(v: string | number) => setExtraConfig(field.key, String(v ?? ''))" />
             <t-input v-else-if="field.type === 'password'" :model-value="formData.extraConfig[field.key] || ''"
-              type="password" :placeholder="extraFieldDisplayPlaceholder(field)" autocomplete="off" spellcheck="false"
+              type="password" :placeholder="extraFieldDisplayPlaceholder(field)" autocomplete="new-password" spellcheck="false"
               @update:model-value="(v: string) => setExtraConfig(field.key, v)">
               <template #prefix-icon><t-icon name="lock-on" /></template>
             </t-input>
@@ -589,7 +589,13 @@
                 :placeholder="$t('model.editor.advanced.compat.placeholder')" class="compat-textarea"
                 :status="specCompatError ? 'error' : undefined" />
               <p v-if="specCompatError" class="form-desc form-desc--error">{{ $t('model.editor.advanced.compat.invalid') }}: {{ specCompatError }}</p>
-              <p v-else class="form-desc">{{ $t('model.editor.advanced.compat.desc') }}</p>
+              <p v-else class="form-desc">
+                {{ $t('model.editor.advanced.compat.desc') }}
+                <a :href="COMPAT_DOC_URL" target="_blank" rel="noopener noreferrer" class="compat-doc-link">
+                  {{ $t('model.editor.advanced.compat.docLink') }}
+                  <t-icon name="jump" size="12px" />
+                </a>
+              </p>
             </div>
           </template>
         </template>
@@ -639,6 +645,8 @@ import CredentialResource, {
   type CredentialResourceApi,
 } from '@/components/credentials/CredentialResource.vue'
 import { shouldShowOllamaUnavailableTip } from '@/components/modelEditorSourceState'
+import { WEKNORA_CLOUD_PROVIDER, WKC_MODEL_KINDS, WKC_MODEL_NAME_BY_KIND } from '@/utils/weknoraCloudModels'
+import { docsUrl } from '@/utils/docsUrl'
 
 interface CustomHeaderItem {
   key: string
@@ -695,6 +703,9 @@ const PROTOCOL_OPTIONS = [
   'google-generative-ai',
 ] as const
 
+/** Field reference for parameters.spec.compat, per protocol and model type. */
+const COMPAT_DOC_URL = docsUrl('modelsCompat')
+
 /** Legacy thinking_control values still honoured by catalog.Resolve. */
 const LEGACY_THINKING_CONTROL_VALUES = ['none', 'enable_thinking', 'thinking_type', 'chat_template_kwargs'] as const
 
@@ -742,9 +753,9 @@ const modelTypeChoices = computed(() => ([
 // 厂商列表完全来自后端目录（store 按模型类型缓存）；前端不再维护任何厂商表。
 const loadingProviders = computed(() => providersStore.isLoading(activeModelType.value))
 
-const loadProviders = async () => {
+const loadProviders = async (force = false) => {
   try {
-    await providersStore.ensureLoaded(activeModelType.value)
+    await providersStore.ensureLoaded(activeModelType.value, force)
   } catch (error) {
     console.error('Failed to load providers from API', error)
   }
@@ -879,12 +890,23 @@ interface CatalogModelOption {
 }
 
 const catalogEntries = computed<ModelCatalogEntry[]>(() => {
+  const entries = selectedProvider.value?.models || []
+  // Managed aliases are already used by the cloud setup page. They have no
+  // published limits, so the backend catalog is empty, but they can still be
+  // offered by name without inventing context windows or embedding dimensions.
+  if (formData.value.provider === WEKNORA_CLOUD_PROVIDER && entries.length === 0) {
+    const kind = WKC_MODEL_KINDS.find(kind => kind === activeModelType.value)
+    if (kind) {
+      const name = WKC_MODEL_NAME_BY_KIND[kind]
+      return [{ id: name, name, type: kind === 'vllm' ? 'chat' : kind, input: kind === 'vllm' ? ['text', 'image'] : ['text'] }]
+    }
+  }
   // The list is already scoped: providers are fetched per model type, so the
   // backend returned exactly the entries that type can use. Filtering again
   // here on entry.type was wrong for 视觉 — a VLM entry is a chat model that
   // accepts images, so it arrives typed "chat" and every one of them was
   // dropped, leaving the picker empty for every vendor.
-  return selectedProvider.value?.models || []
+  return entries
 })
 
 const catalogModelOptions = computed<CatalogModelOption[]>(() => {
@@ -1003,6 +1025,7 @@ const runResolve = async () => {
   try {
     const result = await resolveModelCatalog({
       provider,
+      spec: buildSpec(),
       model: formData.value.modelName || '',
       base_url: formData.value.baseUrl || '',
       model_type: activeModelType.value,
@@ -1066,6 +1089,16 @@ const specCompatError = computed(() => {
     return error?.message || 'invalid JSON'
   }
 })
+
+// Match the parent save path: retain row metadata, replace the edited compat.
+const buildSpec = (): ModelSpecOverride => {
+  if (specCompatError.value) throw new Error(specCompatError.value)
+  const spec: ModelSpecOverride = { ...(formData.value.spec || {}) }
+  const text = (formData.value.specCompat || '').trim()
+  if (text) spec.compat = JSON.parse(text)
+  else delete spec.compat
+  return spec
+}
 
 const dialogVisible = computed({
   get: () => props.visible,
@@ -1303,6 +1336,7 @@ watch(
     props.visible, formData.value.source, formData.value.provider, formData.value.modelName,
     formData.value.baseUrl, formData.value.extraConfig?.api, formData.value.extraConfig?.remote_model_name,
     formData.value.thinkingControl, activeModelType.value,
+ formData.value.specCompat, JSON.stringify(formData.value.spec),
   ],
   () => {
     if (!props.visible) return
@@ -1425,8 +1459,10 @@ watch(() => props.visible, (val) => {
     // 检查Ollama服务状态
     checkOllamaServiceStatus()
 
-    // 从 API 加载 Model Provider 列表（编辑已有行时顺便补齐额外字段默认值）
-    loadProviders().then(() => {
+    // 从 API 加载 Model Provider 列表（编辑已有行时顺便补齐额外字段默认值）。
+    // Catalogs can be published by another administrator while this page is
+    // open, so refresh this type without dropping other types' cached lists.
+    loadProviders(true).then(() => {
       if (props.visible && !isEdit.value) applyExtraFieldDefaults()
     })
     advancedOpen.value = false
@@ -1503,6 +1539,7 @@ watch(
     formData.value.apiKey, formData.value.appSecret, formData.value.customHeaders,
     formData.value.dimension, formData.value.supportsDimensionOverride,
     formData.value.extraConfig, formData.value.thinkingControl,
+ formData.value.specCompat, formData.value.spec,
   ],
   () => {
     if (!applyingDetectedDimension) invalidateConnectionTest(props.visible && !hydratingForm.value)
@@ -1826,6 +1863,7 @@ const checkRemoteAPI = async () => {
     // 使测试连接走与生产调用相同的目录解析路径。
     const extraConfig = buildExtraConfig()
     const extraPayload = {
+      spec: buildSpec(),
       ...(Object.keys(extraConfig).length > 0 ? { extraConfig } : {}),
       ...(formData.value.appSecret?.trim() ? { appSecret: formData.value.appSecret.trim() } : {}),
     }
@@ -2150,17 +2188,18 @@ const handleCancel = () => {
 <style lang="less" scoped>
 .provider-doc-link {
   margin-top: 6px;
+}
 
-  a {
-    display: inline-flex;
-    align-items: center;
-    gap: 3px;
-    color: var(--td-text-color-link);
-    text-decoration: none;
+.provider-doc-link a,
+.compat-doc-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--td-text-color-link);
+  text-decoration: none;
 
-    &:hover {
-      text-decoration: underline;
-    }
+  &:hover {
+    text-decoration: underline;
   }
 }
 

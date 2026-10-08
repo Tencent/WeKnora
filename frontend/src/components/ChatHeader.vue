@@ -26,6 +26,10 @@
       <t-icon v-if="session?.is_pinned" name="pin" size="12px" class="chat-header__pin" />
       <span ref="titleTextRef" class="chat-header__title-text">{{ displayTitle }}</span>
     </h1>
+    <span
+      v-if="!titleEditing && workspaceLabel"
+      class="chat-header__workspace"
+    >{{ workspaceLabel }}</span>
     <t-popup
       v-if="!titleEditing"
       v-model:visible="menuVisible"
@@ -104,6 +108,8 @@ import {
 import { normalizeSessionTitleDraft, SESSION_TITLE_MAX_LENGTH } from './sessionTitleEdit'
 import { buildSessionMarkdown, collectAllSessionMessages } from '@/utils/sessionMarkdown'
 import { useSessionTitleMotion } from '@/composables/useSessionTitleMotion'
+import { useDeploymentCapabilitiesStore } from '@/stores/deploymentCapabilities'
+import { hostWorkspaceHeaderText, shouldRenderHostProjectSettings } from '@/utils/hostWorkspace'
 
 interface ChatHeaderSession {
   id: string
@@ -111,6 +117,7 @@ interface ChatHeaderSession {
   description?: string
   tenant_id?: number | string
   is_pinned?: boolean
+  host_workspace_dir?: string
 }
 
 type MenuMode = 'menu' | 'delete'
@@ -120,6 +127,7 @@ const props = defineProps<{
 }>()
 
 const { t } = useI18n()
+const deploymentCapabilities = useDeploymentCapabilitiesStore()
 const busyAction = ref('')
 const menuVisible = ref(false)
 const menuMode = ref<MenuMode>('menu')
@@ -130,6 +138,13 @@ const titleInputRef = ref<HTMLInputElement | null>(null)
 const displayTitle = computed(() => props.session?.title?.trim() || t('menu.newSession'))
 const titleTextRef = ref<HTMLElement | null>(null)
 useSessionTitleMotion(titleTextRef, () => props.session?.id, () => displayTitle.value)
+const workspaceLabel = computed(() => {
+  if (!props.session) return ''
+  if (!shouldRenderHostProjectSettings(deploymentCapabilities.isSupported('settings.sandbox.host'))) {
+    return ''
+  }
+  return hostWorkspaceHeaderText(props.session.host_workspace_dir, t('chatHeader.temporaryWorkspace'))
+})
 const menuOverlayClass = computed(() => (
   menuMode.value === 'menu' ? 'card-more chat-header-menu-popup' : 'card-more chat-header-menu-popup is-confirm'
 ))
@@ -315,6 +330,20 @@ async function submitDeleteSession(): Promise<void> {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.chat-header__workspace {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0 6px;
+  color: var(--td-text-color-placeholder);
+  font-size: var(--app-text-xs);
+  font-weight: 400;
+  line-height: 20px;
 }
 
 .chat-header__pin {

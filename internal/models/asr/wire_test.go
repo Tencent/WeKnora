@@ -11,7 +11,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/Tencent/WeKnora/internal/models/catalog"
+	modelruntime "github.com/Tencent/WeKnora/internal/models/runtime"
 	"github.com/Tencent/WeKnora/internal/types"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/stretchr/testify/assert"
@@ -260,7 +260,7 @@ func TestVendorsWithoutASRAreNotRoutedThroughTheirHooks(t *testing.T) {
 	// host detects as Azure while the request still reaches the test server.
 	url, got, _ := upstream(t)
 	base := url + "/openai.azure.com/v1"
-	require.Equal(t, "azure_openai", catalog.DetectByURL(base))
+	require.Equal(t, "azure_openai", modelruntime.DetectByURL(base))
 	a, err := NewASR(&Config{
 		Source: types.ModelSourceRemote, BaseURL: base, ModelName: "whisper", APIKey: "k",
 	})

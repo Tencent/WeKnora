@@ -2,7 +2,8 @@
   <SettingDrawer
     :visible="dialogVisible"
     :title="mode === 'add' ? t('mcpServiceDialog.addTitle') : t('mcpServiceDialog.editTitle')"
-    :class="`mcp-drawer mcp-drawer--${formData.transport_type}`"
+    class="mcp-drawer"
+    icon="tools"
     :confirm-loading="submitting"
     :confirm-disabled="metadataBusy || generatingUsage || (step === 1 && !toolsSynced)"
     :confirm-text="t(step === 0 ? 'mcpMetadata.saveNext' : 'common.save')"
@@ -14,25 +15,18 @@
     @confirm="step === 0 ? handleNext() : handleSubmit()"
     @cancel="handleClose"
   >
-    <!--
-      Header icon — 抽屉通过 transport 类型区分连接配置：
-      transport_type 决定图标和容器配色。SSE 绿、HTTP-Streamable 蓝。
-      非 scoped 块 .mcp-drawer--{transport} 注入背景与文字色，currentColor
-      让 t-icon 跟着染色。
-    -->
-    <template #headerIcon>
-      <t-icon :name="transportIcon" />
-    </template>
-
-    <!-- 副标题：transport 类型名 + 启用状态 mini chip -->
+    <!-- 副标题：编辑时显示已保存服务的 transport 与启用状态；新建时还没有状态可展示 -->
     <template #subtitle>
-      <span>{{ transportLabel }}</span>
-      <span
-        class="subtitle-tag"
-        :class="formData.enabled ? 'subtitle-tag--ok' : 'subtitle-tag--muted'"
-      >
-        {{ formData.enabled ? t('mcpSettings.enabled', '已启用') : t('mcpSettings.disabled', '已禁用') }}
-      </span>
+      <template v-if="mode === 'edit'">
+        <span>{{ transportLabel }}</span>
+        <span
+          class="subtitle-tag"
+          :class="formData.enabled ? 'subtitle-tag--ok' : 'subtitle-tag--muted'"
+        >
+          {{ formData.enabled ? t('mcpSettings.enabled', '已启用') : t('mcpSettings.disabled', '已禁用') }}
+        </span>
+      </template>
+      <template v-else>{{ t('mcpServiceDialog.addDesc') }}</template>
     </template>
 
     <template #header-extra>
@@ -703,10 +697,6 @@ async function handleRevokeOAuth() {
 
 // Header icon name + transport label, mirrored from McpSettings list cards
 // so the list-card → drawer hand-off stays visually continuous.
-const transportIcon = computed(() => {
-  return formData.value.transport_type === 'http-streamable' ? 'link' : 'cast'
-})
-
 const transportLabel = computed(() => {
   return formData.value.transport_type === 'http-streamable' ? 'HTTP Streamable' : 'SSE'
 })
@@ -1416,14 +1406,5 @@ const handleClose = () => {
 
   .setting-drawer__section-title { margin: 0; }
   &:last-child { border-bottom: 0; padding-bottom: 0; }
-}
-.mcp-drawer--sse .setting-drawer__header-icon {
-  background: rgba(17, 128, 83, 0.12);
-  color: #118053;
-}
-
-.mcp-drawer--http-streamable .setting-drawer__header-icon {
-  background: rgba(0, 82, 217, 0.1);
-  color: #0052D9;
 }
 </style>

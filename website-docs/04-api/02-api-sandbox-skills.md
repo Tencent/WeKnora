@@ -1,6 +1,6 @@
 # API 参考：沙箱、技能与个人变量
 
-管理沙箱配置、技能目录、安装任务和个人环境变量。路径均以 `/api/v1` 为前缀；示例中的 `$BASE` 为服务地址，`$TOKEN` 为当前用户的 Bearer token。界面操作步骤见[技能目录与沙箱](../03-features/22-skills-sandbox.md)。
+管理沙箱配置、技能目录、安装任务、会话交互终端和个人环境变量。路径均以 `/api/v1` 为前缀；示例中的 `$BASE` 为服务地址，`$TOKEN` 为当前用户的 Bearer token。界面操作步骤见[技能目录与沙箱](../03-features/22-skills-sandbox.md)。
 
 ## 权限
 
@@ -9,7 +9,8 @@
 | 沙箱配置列表/详情 | Viewer+；API Key 必须 full-access | Admin+；API Key 必须 full-access |
 | 沙箱实例清单、已安装技能及文件 | Admin+ | Admin+；API Key 必须 full-access |
 | 技能目录列表 | Viewer+，JWT | 目录增删、安装、包文件浏览需 Admin+；写组的 API Key 必须 full-access |
-| `/skills` 可用技能 | Viewer+，JWT | 只读，查询参数 sandbox_config_id |
+| `/skills` 可用技能 | Viewer+，JWT | 只读，查询参数 sandbox_config_id；共享智能体另传 agent_id、agent_source_tenant_id |
+| 会话交互终端 | 会话属主，仅登录 JWT | 取票据后建立 WebSocket |
 | `/me/env-vars*` | 已登录的当前调用者 | 仅修改自己，服务端推导身份；无额外管理员门槛，使用 Bearer JWT |
 
 跨空间 ID 不授予访问权。个人变量接口不能替代空间技能管理接口。
@@ -25,7 +26,7 @@
 | DELETE | `/sandbox-configs/:id` | 可选 `force=true`；200 `{success:true}` |
 | GET | `/sandbox-configs/:id/sandboxes` | 200 `{success,data:SandboxInventory}`，包含占用和关联智能体 |
 | PUT | `/sandbox-configs/workspace-policy` | `{"scripts_disabled":true}`；返回 success/workspace_scripts_disabled |
-| POST | `/sandbox-configs/templates/query` | `{config,config_id?,ensure_standard?,replace_standard?}`；查询远端模板，可创建/替换标准模板 |
+| POST | `/sandbox-configs/templates/query` | `{config,config_id?,ensure_standard?,replace_standard?,ensure_desktop?,replace_desktop?}`；查询远端模板，可创建/替换标准模板或桌面模板，replace 需要 config_id |
 
 ConfigResponse 为 `{id,name,description,sandbox_type,config,created_at,updated_at}`，凭据脱敏。编辑时以保存的配置为基础更新；脱敏占位值保留旧凭据，`skill_image` 由安装服务维护，客户端不能替换。
 
@@ -33,8 +34,10 @@ ConfigResponse 为 `{id,name,description,sandbox_type,config,created_at,updated_
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
-| `sandbox_type` | string | docker/cube/e2b；local 已移除 |
+| `sandbox_type` | string | docker/cube/e2b；local 已移除；Lite 桌面的 host 不能保存为配置 |
 | `default_timeout_sec` | int | 执行超时，0 使用内置默认 |
+| `terminal_idle_disconnect_sec` | int | 终端/桌面无操作多久断开，0 为默认 900 秒，生效范围 60 秒–24 小时 |
+| `desktop_enabled` | bool | 声明所选模板是 Cube/E2B 桌面模板；已安装技能后不能切换 |
 | `allow_private_endpoints` | bool | 允许私网集群地址，不放行 link-local/云元数据 |
 | `env_vars` | map[string]string | 该沙箱配置的环境，值加密保存 |
 | `skill_rollout` | string | next_turn（默认）/new_session |
@@ -103,7 +106,7 @@ curl -X POST "$BASE/api/v1/system/sandbox-check" \
 
 | 方法 | 路径 | 请求 / 响应 |
 | --- | --- | --- |
-| GET | `/skills/catalog` | 200 `{success,data:[CatalogItem]}` |
+| GET | `/skills/catalog` | 200 `{success,data:[CatalogItem]}`；CatalogItem 含 `installations:[{sandbox_config_id,status,enabled,version,bundle_sha256,served?,...}]` |
 | POST | `/skills/catalog` | multipart `file` 或 JSON `{"source":"@owner/slug"}`；201 `{success,data:{id,name,version,description}}` |
 | POST | `/skills/catalog/:id/install` | `{"sandbox_config_ids":["cfg-1","cfg-2"]}`；202 `{success,data:{installs,errors?}}` |
 | GET | `/skills/catalog/:id/files` | 200 `{success,data:[FileEntry]}` |
@@ -131,8 +134,10 @@ curl -X POST "$BASE/api/v1/skills/catalog/catalog-1/install" \
 | GET | 空 | `{success,data:[SkillResponse]}` |
 | POST | 空 | ZIP file 或 source JSON 安装；202 `{success,data:{skill_id}}` |
 | GET | `/:skillId` | `{success,data:SkillResponse}` |
-| POST | `/:skillId/reinstall` | 复用包重装；202 `{success,data:{skill_id}}` |
+| POST | `/:skillId/reinstall` | 复用包重装，可选 `{"instructions":"..."}`（≤10000 字符）作为安装说明；202 `{success,data:{skill_id}}` |
 | POST | `/:skillId/stop` | 停止安装；200 返回技能状态，已 failed 可重复调用，其他非 installing 状态拒绝 |
+| GET | `/:skillId/guidance` | 当前安装运行的说明：`{success,data:{accepting,messages:[{id,content,status}]}}` |
+| POST | `/:skillId/guidance` | 安装进行中追加说明 `{expected_message_id,steer_id,content}`：`expected_message_id` 取 SkillResponse 的 `install_message_id`，`steer_id` 为客户端生成的 UUID（重试不会重复追加），`content` 1–10000 字符；202 `{success:true}`，安装已换轮次返回 409 |
 | PATCH | `/:skillId` | `enabled?`、`envs?`；省略不修改 |
 | DELETE | `/:skillId` | 从此沙箱卸载，保留目录包 |
 | GET | `/:skillId/files` | 文件清单 |
@@ -140,7 +145,7 @@ curl -X POST "$BASE/api/v1/skills/catalog/catalog-1/install" \
 | GET | `/:skillId/install-events` | SSE 安装进度 |
 | GET | `/:skillId/transcript` | SSE 安装过程事件 |
 
-SkillResponse 包括 id/name/version/description/enabled/status/error/bundle_sha256/installed_snapshot_id/install_session_id/install_message_id/created_at/updated_at，以及 `envs:[{name,description,required,is_set}]`。文件响应可为 UTF-8 文本、小图片的 base64 或二进制元数据，不能假定所有文件都有文本内容。
+SkillResponse 包括 id/name/version/description/enabled/status/error/bundle_sha256/installed_snapshot_id/install_session_id/install_message_id/created_at/updated_at，以及 `envs:[{name,description,required,is_set}]`。升级或重装进行中、或失败后，`served:{version}` 标明沙箱仍在提供的上一个就绪版本；智能体可用技能以该版本为准。文件响应可为 UTF-8 文本、小图片的 base64 或二进制元数据，不能假定所有文件都有文本内容。
 
 PATCH 的 envs 只更新已声明变量；未声明名称忽略，空字符串清除值、保留声明。
 
@@ -156,6 +161,45 @@ curl -N "$BASE/api/v1/sandbox-configs/cfg-1/skills/skill-1/install-events" \
 进度载荷为 `{percent,stage,log?,status?,done}`。断开连接不取消安装；done 可能只是无法继续跟随进度，最终结果以技能 status 为准。无 Redis 时流提示改为轮询状态。transcript 的 204 表示安装刚开始、事件定位尚未准备；404 可表示无日志或日志已过期，不能据此判定安装失败。
 
 `GET /skills?sandbox_config_id=cfg-1` 返回可用于智能体的技能元数据 `{success,data:[{name,description}],skills_available}`，与管理员看到的全部安装记录不同。
+
+同时传 `agent_id` 和 `agent_source_tenant_id`（共享智能体的来源空间 ID）时，列出该共享智能体可 @ 的技能：沙箱配置取自智能体本身，忽略查询中的 `sandbox_config_id`；智能体技能范围为 `selected` 时只返回指定技能，禁用时返回空列表且 `skills_available:false`。调用者无权使用该智能体时返回 403。
+
+## 会话交互终端
+
+对话侧栏的终端通过 WebSocket 连接本会话的远程沙箱，仅 Cube/E2B 支持。路由由 `internal/router/routes_chat.go` 注册，尚未进入 Swagger；桌面接口见[会话 API](02-api-chat.md#sandbox-desktop)，代理要求见[沙箱部署](../06-development/04-sandbox-deployment.md#交互终端与图形桌面)。
+
+### POST /api/v1/sessions/:session_id/sandbox/terminal-ticket
+
+签发两分钟有效的握手票据。需要会话属主的登录 Bearer access token，API Key 不能调用。
+
+```bash
+curl -X POST "$BASE/api/v1/sessions/$SESSION_ID/sandbox/terminal-ticket" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+响应：200 `{"success":true,"data":{"ticket":"<ticket>","expires_in":120}}`。
+
+### GET /api/v1/sessions/:id/sandbox/terminal
+
+WebSocket 握手，不走普通认证中间件：
+
+| 查询参数 | 必填 | 说明 |
+| --- | --- | --- |
+| `ticket` | 是 | 上一步取得的票据，绑定用户、空间、会话和签发时的 access token |
+| `provision` | 否 | `1` 表示允许创建或唤醒沙箱（可能计费）；省略时只连接正在运行的沙箱 |
+| `agent_id` / `agent_source_tenant_id` | 否 | 与 `provision=1` 一起使用，指定按哪个智能体（含共享智能体）的沙箱配置创建 |
+| `cols` / `rows` | 否 | 初始终端尺寸 |
+| `pty_id` | 否 | 重新接上之前 `ready` 帧返回的 Shell 进程 |
+
+连接后，二进制帧双向传输终端输入输出；文本帧为 JSON 控制消息：服务端发送 `ready`（含 `pty_id`、`backend`）、`exited`（含 `exit_code`）和 `error`，客户端可发送 `{"type":"resize","cols":..,"rows":..}`。错误码包括 `SANDBOX_NOT_BOUND`、`SANDBOX_PAUSED`、`TERMINAL_UNSUPPORTED`、`IDLE_DISCONNECTED`、`AUTH_REVOKED`、`INTERNAL`。每个会话最多同时 5 个终端，超出返回 429。
+
+## Lite 本机项目目录
+
+仅 Lite 桌面版提供，其他部署返回 404。它在运行 Lite 的电脑上弹出系统目录选择框，用户选定的目录会加入已批准列表；随后创建会话时把返回的 `dir` 作为 `project_dir` 传入，即可让该会话在[本机沙箱](../03-features/22-skills-sandbox.md#lite-host)中使用这个目录。`project_dir` 字段见[会话 API](02-api-chat.md)。
+
+| 方法 | 路径 | 请求 / 响应 |
+| --- | --- | --- |
+| POST | `/system/host-project-dir` | 无请求体；200 `{"code":0,"msg":"success","data":{"dir":"/Users/me/project"}}`，取消选择时 `dir` 为空。仅接受登录 JWT，Viewer+，API Key 被拒绝 |
 
 ## 个人环境变量
 
@@ -181,4 +225,4 @@ curl -X DELETE "$BASE/api/v1/me/env-vars/skill" \
   -d '{"skill_id":"skill-1","name":"API_TOKEN"}'
 ```
 
-覆盖顺序为个人技能值 > 个人沙箱值 > 空间技能值。写入个人值不会更改管理员配置。实现参考：`internal/router/routes_infra.go`、`routes_agent.go`、`routes_auth_tenant.go`，以及 `internal/handler/sandbox_config.go`、`sandbox_skill.go`、`skill_catalog.go`、`me_env_var.go`。
+覆盖顺序为个人技能值 > 个人沙箱值 > 空间技能值。写入个人值不会更改管理员配置。实现参考：`internal/router/routes_infra.go`、`routes_agent.go`、`routes_auth_tenant.go`，以及 `internal/handler/sandbox_config.go`、`sandbox_skill.go`、`skill_catalog.go`、`me_env_var.go`、`host_project_picker.go`。

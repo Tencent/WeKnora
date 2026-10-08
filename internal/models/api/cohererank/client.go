@@ -5,7 +5,7 @@
 // Jina, Zhipu, SiliconFlow, Qianfan, GPUStack, WeKnora Cloud and any
 // OpenAI-compatible gateway that serves rerank all speak it. Their
 // differences — which optional fields are accepted, where the endpoint sits,
-// what the documented ceilings are — arrive as catalog.RerankSettings; this
+// what the documented ceilings are — arrive as api.RerankSettings; this
 // package contains no vendor names.
 package cohererank
 
@@ -16,13 +16,12 @@ import (
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/models/api"
-	"github.com/Tencent/WeKnora/internal/models/catalog"
 )
 
-// Config is everything the client needs, already resolved by the catalog.
+// Config is everything the client needs, already resolved by the api.
 type Config struct {
 	Endpoint api.Endpoint
-	Settings catalog.RerankSettings
+	Settings api.RerankSettings
 }
 
 // Client talks the Cohere rerank shape to one endpoint.
