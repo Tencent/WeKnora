@@ -52,6 +52,7 @@ export type ImageSortOrder = 'asc' | 'desc';
 
 /** Query parameters accepted by GET /knowledge-bases/:id/images. */
 export interface ImageListParams {
+  searchMode?: 'keyword' | 'semantic';
   /** Case-insensitive substring match against the union of searchIn fields. */
   keyword?: string;
   /**
@@ -83,6 +84,7 @@ export interface ImageListParams {
 }
 
 export interface ImageListResult {
+  truncated: boolean;
   items: ImageAsset[];
   total: number;
   page: number;
@@ -100,6 +102,7 @@ export async function listGalleryImages(
 ): Promise<ImageListResult> {
   const query = new URLSearchParams();
   if (params.keyword) query.set('keyword', params.keyword);
+  if (params.searchMode) query.set('search_mode', params.searchMode);
   if (params.searchIn && params.searchIn.length) {
     query.set('search_in', params.searchIn.join(','));
   }
@@ -121,6 +124,7 @@ export async function listGalleryImages(
   const res = await get<{
     success: boolean;
     data: ImageAsset[];
+    truncated?: boolean;
     total: number;
     page: number;
     page_size: number;
@@ -128,6 +132,7 @@ export async function listGalleryImages(
 
   return {
     items: res.data,
+    truncated: res.truncated === true,
     total: res.total,
     page: res.page,
     pageSize: res.page_size,

@@ -631,6 +631,9 @@ func (q *qdrantRepository) getBaseFilter(params types.RetrieveParams) *qdrant.Fi
 	if len(params.KnowledgeIDs) > 0 {
 		must = append(must, qdrant.NewMatchKeywords(fieldKnowledgeID, params.KnowledgeIDs...))
 	}
+	if len(params.ChunkIDs) > 0 {
+		must = append(must, qdrant.NewMatchKeywords(fieldChunkID, params.ChunkIDs...))
+	}
 	// Filter by tag IDs if specified
 	if len(params.TagIDs) > 0 {
 		must = append(must, qdrant.NewMatchKeywords(fieldTagID, params.TagIDs...))

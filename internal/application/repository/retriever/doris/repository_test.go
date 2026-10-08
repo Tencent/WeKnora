@@ -129,11 +129,13 @@ func TestWhereBuilder(t *testing.T) {
 			TagIDs:              []string{"t1"},
 			ExcludeKnowledgeIDs: []string{"k9"},
 			ExcludeChunkIDs:     []string{"c9"},
+			ChunkIDs:            []string{"c1"},
 		})
 		clause, _ := w.build()
 		assert.Contains(t, clause, "is_enabled = ?")
 		assert.Contains(t, clause, "knowledge_base_id IN (?)")
 		assert.Contains(t, clause, "knowledge_id IN (?, ?)")
+		assert.Contains(t, clause, "chunk_id IN (?)")
 		assert.Contains(t, clause, "tag_id IN (?)")
 		assert.Contains(t, clause, "knowledge_id NOT IN (?)")
 		assert.Contains(t, clause, "chunk_id NOT IN (?)")

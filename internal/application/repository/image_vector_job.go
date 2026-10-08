@@ -241,3 +241,30 @@ func (r *ImageVectorRepository) RefreshMetadata(
 	return r.db.WithContext(ctx).Model(&types.Chunk{}).Where("id IN (?)", ids).
 		Updates(map[string]any{"content": content, "image_info": string(raw)}).Error
 }
+
+// ImageSearchIndex connects one retrieval chunk to its gallery image identity.
+type ImageSearchIndex struct {
+	ChunkID  string
+	ImageKey string
+}
+
+// SearchIndices returns only live image evidence in the active vector space.
+func (r *ImageVectorRepository) SearchIndices(
+	ctx context.Context, tenant uint64, kb, fingerprint string, keys []string,
+) ([]ImageSearchIndex, error) {
+	if len(keys) == 0 {
+		return nil, nil
+	}
+	var rows []ImageSearchIndex
+	err := r.db.WithContext(ctx).Table("chunk_images i").
+		Joins("JOIN chunks c ON c.id = i.chunk_id AND c.deleted_at IS NULL AND c.is_enabled = ? AND c.status = ?",
+			true, types.ChunkStatusIndexed).
+		Joins("JOIN knowledges k ON k.id = i.knowledge_id AND k.tenant_id = i.tenant_id AND k.deleted_at IS NULL").
+		Where("i.tenant_id = ? AND i.knowledge_base_id = ? AND i.image_key IN ?", tenant, kb, keys).
+		Where(`i.chunk_type IN ? OR (i.chunk_type = ? AND EXISTS
+   (SELECT 1 FROM image_vector_jobs j WHERE j.chunk_id = i.chunk_id AND j.tenant_id = i.tenant_id
+    AND j.knowledge_base_id = i.knowledge_base_id AND j.fingerprint = ? AND j.status = 'completed'))`,
+			[]string{types.ChunkTypeImageCaption, types.ChunkTypeImageOCR}, types.ChunkTypeImageVector, fingerprint).
+		Select("DISTINCT i.chunk_id, i.image_key").Order("i.chunk_id, i.image_key").Scan(&rows).Error
+	return rows, err
+}

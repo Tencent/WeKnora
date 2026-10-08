@@ -1,4 +1,13 @@
 export default {
+  gallerySemantic: {
+    "mode": "搜索方式",
+    "keyword": "关键词",
+    "semantic": "语义检索",
+    "placeholder": "描述你想找的图片内容",
+    "ranked": "按相关度排序 · {count} 条结果，仅包含已建立索引的图片",
+    "limited": "展示相关度最高的 {count} 条结果，仅包含已建立索引的图片"
+},
+
   imageVectorStatus: {
     "disabled": "图片向量尚未开启；文字搜索仍可使用",
     "unsupported": "当前向量模型不支持图片",

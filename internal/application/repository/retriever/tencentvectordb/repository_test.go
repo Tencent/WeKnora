@@ -55,11 +55,13 @@ func TestBaseFilterBuildsTencentVectorDBCondition(t *testing.T) {
 		TagIDs:              []string{"tag-1"},
 		ExcludeKnowledgeIDs: []string{"knowledge-9"},
 		ExcludeChunkIDs:     []string{"chunk-9"},
+		ChunkIDs:            []string{"chunk-1"},
 	})
 	cond := filter.Cond()
 
 	for _, want := range []string{
 		"is_enabled=1",
+		`chunk_id in ("chunk-1")`,
 		"knowledge_base_id in (\"kb-1\")",
 		"knowledge_id in (\"knowledge-1\",\"knowledge-2\")",
 		"tag_id in (\"tag-1\")",

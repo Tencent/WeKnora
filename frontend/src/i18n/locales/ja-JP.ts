@@ -1,4 +1,13 @@
 export default {
+  gallerySemantic: {
+    "mode": "検索方法",
+    "keyword": "キーワード",
+    "semantic": "意味検索",
+    "placeholder": "探したい画像の内容を説明",
+    "ranked": "関連度順 · {count} 件。索引作成済みの画像のみ対象です。",
+    "limited": "関連度の高い上位 {count} 件。索引作成済みの画像のみ対象です。"
+},
+
   imageVectorStatus: {
     "disabled": "画像ベクトルは無効です。テキスト検索は利用できます",
     "unsupported": "埋め込みモデルは画像に対応していません",

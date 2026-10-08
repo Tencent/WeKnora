@@ -1,4 +1,13 @@
 export default {
+  gallerySemantic: {
+    "mode": "검색 방식",
+    "keyword": "키워드",
+    "semantic": "의미 검색",
+    "placeholder": "찾고 싶은 이미지 내용을 설명하세요",
+    "ranked": "관련도순 · {count}개 결과. 색인이 생성된 이미지만 포함됩니다.",
+    "limited": "관련도가 높은 상위 {count}개 결과. 색인이 생성된 이미지만 포함됩니다."
+},
+
   imageVectorStatus: {
     "disabled": "이미지 벡터가 꺼져 있습니다. 텍스트 검색은 사용할 수 있습니다",
     "unsupported": "임베딩 모델이 이미지를 지원하지 않습니다",

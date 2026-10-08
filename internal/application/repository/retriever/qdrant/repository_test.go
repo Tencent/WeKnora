@@ -762,3 +762,18 @@ func TestKeywordsRetrieveWarnsWhenNoCollectionMatchesBaseName(t *testing.T) {
 		t.Fatal("a search that never ran must not be logged as a search that found no matches")
 	}
 }
+
+func TestImageChunkAllowListIsAPositiveFilter(t *testing.T) {
+	repo := &qdrantRepository{}
+	filter := repo.getBaseFilter(types.RetrieveParams{ChunkIDs: []string{"image-only"}})
+	for _, condition := range filter.Must {
+		field := condition.GetField()
+		if field != nil && field.Key == fieldChunkID {
+			if !slices.Equal(field.GetMatch().GetKeywords().GetStrings(), []string{"image-only"}) {
+				t.Fatal(field)
+			}
+			return
+		}
+	}
+	t.Fatal("missing positive image chunk restriction")
+}

@@ -1341,3 +1341,14 @@ func TestDrainAndClose_DrainsAndClosesBody(t *testing.T) {
 	// Second close should not panic (io.NopCloser is idempotent).
 	drainAndClose(body)
 }
+
+func TestRetrieveFiltersRestrictImageCandidatesBeforeKNN(t *testing.T) {
+	f := fromParams(types.RetrieveParams{KnowledgeBaseIDs: []string{"kb"}, ChunkIDs: []string{"image-only"}})
+	body, err := buildKNNQuery([]float32{1, 0}, 1, 0, f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), `"chunk_id":["image-only"]`) {
+		t.Fatalf("missing chunk restriction: %s", body)
+	}
+}

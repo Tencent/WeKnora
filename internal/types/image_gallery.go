@@ -5,6 +5,8 @@ import "time"
 // ImageAsset is a single image projected from a chunk's image_info array.
 // It is the unit the gallery lists, filters, sorts and serves.
 type ImageAsset struct {
+	// Relevance is populated only for semantic searches; it is not a probability.
+	Relevance float64 `json:"relevance,omitempty"`
 	// ID is stable and unique within a KB: "<chunkID>#<index-in-array>".
 	ID string `json:"id"`
 	// ChunkID is the owning chunk (text chunk for embedded images, or the

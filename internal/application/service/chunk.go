@@ -230,6 +230,18 @@ func (s *chunkService) ListImagesByKnowledgeBaseID(
 		return nil, err
 	}
 
+	assets := imageAssetsFromRows(rows)
+
+	// Resolve the human-readable name of each source knowledge item in one
+	// batch so the viewer can show "来源" without a per-image round trip.
+	sourceNames := resolveImageAssetSourceNames(ctx, s.knowledgeRepo, tenantID, assets)
+	for i := range assets {
+		assets[i].SourceName = sourceNames[assets[i].KnowledgeID]
+	}
+	return types.NewPageResult(total, page, assets), nil
+}
+
+func imageAssetsFromRows(rows []types.ImageAssetRow) []types.ImageAsset {
 	assets := make([]types.ImageAsset, 0, len(rows))
 	for _, row := range rows {
 		attrs := map[string]any{}
@@ -253,13 +265,7 @@ func (s *chunkService) ListImagesByKnowledgeBaseID(
 		})
 	}
 
-	// Resolve the human-readable name of each source knowledge item in one
-	// batch so the viewer can show "来源" without a per-image round trip.
-	sourceNames := resolveImageAssetSourceNames(ctx, s, tenantID, assets)
-	for i := range assets {
-		assets[i].SourceName = sourceNames[assets[i].KnowledgeID]
-	}
-	return types.NewPageResult(total, page, assets), nil
+	return assets
 }
 
 // resolveImageAssetSourceNames maps each distinct KnowledgeID among the assets
@@ -267,7 +273,7 @@ func (s *chunkService) ListImagesByKnowledgeBaseID(
 // empty name, and the UI falls back to the raw KnowledgeID.
 func resolveImageAssetSourceNames(
 	ctx context.Context,
-	s *chunkService,
+	repo interfaces.KnowledgeRepository,
 	tenantID uint64,
 	assets []types.ImageAsset,
 ) map[string]string {
@@ -281,10 +287,10 @@ func resolveImageAssetSourceNames(
 		seenID[a.KnowledgeID] = true
 		ids = append(ids, a.KnowledgeID)
 	}
-	if len(ids) == 0 || s.knowledgeRepo == nil {
+	if len(ids) == 0 || repo == nil {
 		return names
 	}
-	items, err := s.knowledgeRepo.GetKnowledgeBatch(ctx, tenantID, ids)
+	items, err := repo.GetKnowledgeBatch(ctx, tenantID, ids)
 	if err != nil {
 		logger.WarnWithFields(ctx, logger.Fields{
 			"knowledge_ids": ids,

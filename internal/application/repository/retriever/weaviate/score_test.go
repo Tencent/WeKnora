@@ -1,6 +1,7 @@
 package weaviate
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/types"
@@ -20,4 +21,18 @@ func TestParseGraphQLResponseReportsCosine(t *testing.T) {
 	if len(got) != 1 || got[0].Score < 0.8-1e-9 || got[0].Score > 0.8+1e-9 {
 		t.Fatalf("scores = %+v, want cosine 0.8", got)
 	}
+}
+
+func TestImageChunkAllowListIsAPositiveFilter(t *testing.T) {
+	repo := &weaviateRepository{}
+	filter := repo.getBaseFilter(types.RetrieveParams{ChunkIDs: []string{"image-only"}}).Build()
+	for _, operand := range filter.Operands {
+		if slices.Equal(operand.Path, []string{fieldChunkID}) {
+			if operand.Operator != "ContainsAny" || !slices.Equal(operand.ValueTextArray, []string{"image-only"}) {
+				t.Fatalf("incorrect positive image filter: %+v", operand)
+			}
+			return
+		}
+	}
+	t.Fatal("missing positive image chunk restriction")
 }

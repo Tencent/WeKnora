@@ -1,4 +1,13 @@
 export default {
+  gallerySemantic: {
+    "mode": "Search mode",
+    "keyword": "Keyword",
+    "semantic": "Semantic",
+    "placeholder": "Describe the image you want to find",
+    "ranked": "Ranked by relevance · {count} results. Only indexed images are included.",
+    "limited": "Top {count} results by relevance. Only indexed images are included."
+},
+
   imageVectorStatus: {
     "disabled": "Image vectors are disabled; text search is available",
     "unsupported": "The embedding model does not support images",

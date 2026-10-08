@@ -883,6 +883,12 @@ func buildFilterWhere(params types.RetrieveParams, tableAlias string) []whereCla
 			args:   toInterfaceSlice(params.KnowledgeIDs),
 		})
 	}
+	if len(params.ChunkIDs) > 0 {
+		parts = append(parts, whereClause{
+			clause: tableAlias + ".chunk_id IN (" + placeholders(len(params.ChunkIDs)) + ")",
+			args:   toInterfaceSlice(params.ChunkIDs),
+		})
+	}
 	if len(params.TagIDs) > 0 {
 		parts = append(parts, whereClause{
 			clause: tableAlias + ".tag_id IN (" + placeholders(len(params.TagIDs)) + ")",
