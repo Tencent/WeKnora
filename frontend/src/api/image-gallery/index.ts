@@ -1,4 +1,4 @@
-import { get } from '@/utils/request';
+import { get, post } from '@/utils/request';
 
 // ---------------------------------------------------------------------------
 // Image Gallery API
@@ -203,4 +203,24 @@ export async function fetchGalleryConfig(kbId: string): Promise<GalleryConfig> {
     mode: res.data.mode === 'custom' ? 'custom' : 'all',
     status: res.data.status ?? {},
   };
+}
+
+export interface ImageVectorCoverage {
+  enabled: boolean;
+  supported: boolean;
+  total: number;
+  completed: number;
+  pending: number;
+  failed: number;
+  skipped: number;
+  missing: number;
+}
+
+export async function fetchImageVectorCoverage(kbId: string): Promise<ImageVectorCoverage> {
+  const res = await get<{ success: boolean; data: ImageVectorCoverage }>(`/api/v1/knowledge-bases/${kbId}/image-vectors`);
+  return res.data;
+}
+
+export async function backfillImageVectors(kbId: string): Promise<void> {
+  await post(`/api/v1/knowledge-bases/${kbId}/image-vectors/backfill`, {});
 }

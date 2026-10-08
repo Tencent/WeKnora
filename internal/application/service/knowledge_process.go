@@ -589,6 +589,20 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 			SourceLocators:  chunkData.SourceLocators,
 		}
 
+		// Persist original image addresses before optional VLM enrichment.
+		var sourceImages []types.ImageInfo
+		for _, img := range options.StoredImages {
+			if img.ServingURL != "" && strings.Contains(chunkData.Content, img.ServingURL) {
+				sourceImages = append(sourceImages, types.ImageInfo{
+					URL: img.ServingURL, OriginalURL: img.ServingURL, SourceType: options.Metadata["image_source_type"],
+				})
+			}
+		}
+		if len(sourceImages) > 0 {
+			raw, _ := json.Marshal(sourceImages)
+			textChunk.ImageInfo = string(raw)
+		}
+
 		// Wire up ParentChunkID for child chunks
 		if hasParentChild && chunkData.ParentIndex >= 0 && chunkData.ParentIndex < len(parentDBChunks) {
 			textChunk.ParentChunkID = parentDBChunks[chunkData.ParentIndex].ID
@@ -827,6 +841,13 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 
 	if err := s.updateKnowledgeUnlessSourceReplaced(ctx, knowledge); err != nil {
 		logger.GetLogger(ctx).WithField("error", err).Errorf("processChunks update knowledge failed")
+	}
+
+	// Image indexing has its own durable status and retries, independent of VLM.
+	if s.imageVectors != nil && kb.IsImageVectorEnabled() && len(options.StoredImages) > 0 {
+		if err := s.imageVectors.Schedule(ctx, kb.ID, knowledge.ID, options.Metadata["image_source_type"]); err != nil {
+			logger.Warnf(ctx, "Image vector scheduling failed for %s: %v", knowledge.ID, err)
+		}
 	}
 
 	// Enqueue multimodal tasks for images (async, non-blocking)
@@ -3793,7 +3814,8 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 	ctx = withAttempt(ctx, attempt)
 
 	// 检查多模态配置（仅对文件导入）
-	if payload.FilePath != "" && !payload.EnableMultimodel && IsImageType(payload.FileType) {
+	if payload.FilePath != "" && !payload.EnableMultimodel && !kb.IsImageVectorEnabled() &&
+		IsImageType(payload.FileType) {
 		logger.GetLogger(ctx).WithField("knowledge_id", knowledge.ID).
 			WithField("error", ErrImageNotParse).Errorf("processDocument image without enable multimodel")
 		knowledge.ParseStatus = "failed"

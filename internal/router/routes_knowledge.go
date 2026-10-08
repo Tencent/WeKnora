@@ -90,6 +90,9 @@ func RegisterKnowledgeRoutes(r *gin.RouterGroup, handler *handler.KnowledgeHandl
 	kbImagesRead := kbImages.With(apiKeyRetrieve(apiKeyFullAccess()))
 	{
 		kbImagesRead.GET("/images", g.Viewer(), g.KBAccessRead("id"), handler.ListImages)
+		kbImagesRead.GET("/image-vectors", g.Viewer(), g.KBAccessRead("id"), handler.ImageVectorCoverage)
+		kbImages.With(apiKeyIngest(apiKeyFullAccess())).POST("/image-vectors/backfill",
+			g.OwnedKBOrAdmin(), g.KBAccessWrite("id"), handler.BackfillImageVectors)
 		// Self-describing gallery contract: live attribute sources, the
 		// resolved attribute list (definitions + merged usage) and the
 		// caller's search activation state. Per-KB because KB-defined

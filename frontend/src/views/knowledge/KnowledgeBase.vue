@@ -2338,7 +2338,7 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
       </div>
 
       <!-- Image Gallery (4th tab) -->
-      <ImageGallery v-if="activeKbTab === 'gallery' && kbId" :knowledge-base-id="kbId" @open-source-doc="openSourceDoc" />
+      <ImageGallery v-if="activeKbTab === 'gallery' && kbId" :knowledge-base-id="kbId" :can-edit="canEdit" @open-source-doc="openSourceDoc" />
 
       <!-- wiki/graph tabs only exist on wiki KBs; a stale tab (?tab= or one
            carried over from a previous KB) falls back to documents. -->
