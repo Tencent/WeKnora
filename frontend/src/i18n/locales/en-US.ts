@@ -4032,6 +4032,7 @@ export default {
         desktopRetry: 'Reconnect',
         notStarted: 'The terminal is not running yet. Starting it connects to this conversation\'s sandbox, creating or resuming one if none is available.',
         paused: 'This conversation\'s sandbox is paused. Starting the terminal resumes it.',
+        stopped: 'This conversation\'s sandbox is not running: it was stopped, or reclaimed after being idle. Starting the terminal restarts it; if it was reclaimed, a new sandbox is created and previous files and installed software are not kept.',
         start: 'Start terminal',
         connecting: 'Connecting to sandbox…',
         needsProvision: 'This conversation has no running sandbox. Creating one starts a new sandbox, billed according to your workspace configuration.',

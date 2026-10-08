@@ -71,6 +71,7 @@ var terminalAuthRecheckInterval = time.Minute
 const (
 	terminalErrNotBound    = "SANDBOX_NOT_BOUND"
 	terminalErrPaused      = "SANDBOX_PAUSED"
+	terminalErrStopped     = "SANDBOX_STOPPED"
 	terminalErrUnsupported = "TERMINAL_UNSUPPORTED"
 	terminalErrInternal    = "INTERNAL"
 	terminalErrIdle        = "IDLE_DISCONNECTED"
@@ -399,6 +400,9 @@ func terminalErrorFrame(err error) (code, message string) {
 	switch {
 	case stderrors.Is(err, sandbox.ErrNoLiveSessionSandbox):
 		return terminalErrNotBound, "session has no live sandbox"
+	// Before ErrSandboxPaused, which it wraps.
+	case stderrors.Is(err, sandbox.ErrSandboxStopped):
+		return terminalErrStopped, "session sandbox is stopped or was reclaimed"
 	case stderrors.Is(err, sandbox.ErrSandboxPaused):
 		return terminalErrPaused, "session sandbox is paused"
 	case stderrors.Is(err, service.ErrTerminalUnsupported):

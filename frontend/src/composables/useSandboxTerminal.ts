@@ -66,7 +66,9 @@ function statusFromErrorCode(
   if (code === 'SANDBOX_NOT_BOUND') {
     return provisionAttempted ? 'no_sandbox' : 'needs_provision'
   }
-  if (code === 'SANDBOX_PAUSED') return 'paused'
+  // SANDBOX_STOPPED 是不会暂停的后端（Docker）的同一状态：同样要用户确认才
+  // 启动，只是提示文案不同，见 sandboxMayBeReclaimed。
+  if (code === 'SANDBOX_PAUSED' || code === 'SANDBOX_STOPPED') return 'paused'
   if (code === 'TERMINAL_UNSUPPORTED') return 'unsupported'
   if (code === 'IDLE_DISCONNECTED') return 'idle'
   if (code === 'AUTH_REVOKED') return 'unauthorized'
@@ -75,6 +77,12 @@ function statusFromErrorCode(
 
 export type SandboxTerminalSession = {
   status: Ref<SandboxTerminalStatus>
+  /**
+   * status 为 paused 时，沙箱是否可能已被回收（后端回的是 SANDBOX_STOPPED）。
+   * Docker 没有暂停：没在运行的容器要么是停止了，要么已被空闲回收删掉，
+   * 启动后可能是一个全新的沙箱，不能对用户说"唤醒"。
+   */
+  sandboxMayBeReclaimed: Ref<boolean>
   /**
    * 由 SandboxTerminal.vue 注入：PTY 输出写入 xterm。
    * 在 handler 注册前到达的二进制帧会先入队，避免 bash 提示符在 xterm
@@ -108,6 +116,7 @@ export function useSandboxTerminal(
   agentSourceTenantId: Ref<string | number | null | undefined> = ref(undefined),
 ): SandboxTerminalSession {
   const status = ref<SandboxTerminalStatus>('connecting')
+  const sandboxMayBeReclaimed = ref(false)
 
   let ws: WebSocket | null = null
   let opening = false
@@ -241,11 +250,13 @@ export function useSandboxTerminal(
         event.code === 1008
         || reason === 'SANDBOX_NOT_BOUND'
         || reason === 'SANDBOX_PAUSED'
+        || reason === 'SANDBOX_STOPPED'
         || reason === 'TERMINAL_UNSUPPORTED'
         || reason === 'IDLE_DISCONNECTED'
         || reason === 'AUTH_REVOKED'
       ) {
         if (reason) {
+          sandboxMayBeReclaimed.value = reason === 'SANDBOX_STOPPED'
           status.value = statusFromErrorCode(reason, allowProvision)
         } else if (status.value === 'ready' || status.value === 'connecting') {
           status.value = 'error'
@@ -303,6 +314,7 @@ export function useSandboxTerminal(
         break
       }
       case 'error': {
+        sandboxMayBeReclaimed.value = frame.code === 'SANDBOX_STOPPED'
         status.value = statusFromErrorCode(frame.code, allowProvision)
         if (status.value !== 'idle' && status.value !== 'unauthorized' && status.value !== 'paused') {
           rememberPid(null)
@@ -342,6 +354,7 @@ export function useSandboxTerminal(
 
   const session: SandboxTerminalSession = {
     status,
+    sandboxMayBeReclaimed,
     onOutput(handler) {
       outputHandler = handler
       if (!handler) return

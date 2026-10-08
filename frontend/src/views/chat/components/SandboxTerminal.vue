@@ -125,12 +125,14 @@ const terminal = useSandboxTerminal(
     toRef(props, 'agentId'),
     toRef(props, 'agentSourceTenantId'),
 );
-const { status } = terminal;
+const { status, sandboxMayBeReclaimed } = terminal;
 
 const statusText = computed(() => {
     switch (status.value as SandboxTerminalStatus) {
         case 'paused':
-            return t('chat.sandbox.paused');
+            return sandboxMayBeReclaimed.value
+                ? t('chat.sandbox.stopped')
+                : t('chat.sandbox.paused');
         case 'connecting':
             return t('chat.sandbox.connecting');
         case 'needs_provision':

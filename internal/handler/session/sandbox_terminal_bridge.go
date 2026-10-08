@@ -328,8 +328,8 @@ func (b *terminalBridge) heartbeat(done chan struct{}) {
 // session slot. Callers must go through teardownWith so the reason is logged.
 func (b *terminalBridge) teardownLocked() {
 	b.cancel()
-	// Close only disconnects WeKnora from the PTY; the shell keeps running in
-	// the sandbox and can be reattached provider-side.
+	// On Cube/E2B Close only disconnects WeKnora from the PTY and the shell
+	// stays reattachable; Docker cannot reattach, so its Close ends the shell.
 	if err := b.terminal.Session.Close(); err != nil {
 		logger.Debugf(b.ctx, "[sandbox-terminal] close failed session=%s: %v",
 			b.session, err)
