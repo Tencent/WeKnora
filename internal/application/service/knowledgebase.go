@@ -479,7 +479,13 @@ func (s *knowledgeBaseService) FillKnowledgeBaseCounts(ctx context.Context, kb *
 // Only the model-managed fields are taken from the request: the legacy
 // ModelName/BaseURL/APIKey/InterfaceType fields make the VLM client call
 // BaseURL directly, bypassing model management and its SSRF checks, so they
-// keep whatever is stored. A referenced model must exist and be a VLM model.
+// are never written from the request. A referenced model must exist and be a
+// VLM model.
+//
+// Stored legacy fields keep VLMConfig.IsEnabled() true on their own, so they
+// are cleared when the request enables a managed model, or when it disables
+// VLM without echoing back the stored model_name and base_url (the shape a
+// GET-then-PUT round trip sends). Request legacy fields are only compared.
 func (s *knowledgeBaseService) resolveUpdatedVLMConfig(
 	ctx context.Context, current, requested types.VLMConfig,
 ) (types.VLMConfig, error) {
@@ -488,11 +494,24 @@ func (s *knowledgeBaseService) resolveUpdatedVLMConfig(
 	next.ModelID = strings.TrimSpace(requested.ModelID)
 	next.DescriptionLanguage = strings.TrimSpace(requested.DescriptionLanguage)
 	next.CustomInstructions = strings.TrimSpace(requested.CustomInstructions)
+	if err := types.ValidateKnowledgeBasePromptInstructions(&types.KnowledgeBase{VLMConfig: next}); err != nil {
+		return types.VLMConfig{}, apperrors.NewBadRequestError("vlm_config: " + err.Error())
+	}
+	hasLegacy := current.ModelName != "" && current.BaseURL != ""
 	if !next.Enabled {
 		next.ModelID = ""
+		legacyEcho := hasLegacy &&
+			requested.ModelName == current.ModelName && requested.BaseURL == current.BaseURL
+		if !legacyEcho {
+			clearLegacyVLMFields(&next)
+		}
 		return next, nil
 	}
 	if next.ModelID == "" {
+		if !hasLegacy {
+			return types.VLMConfig{}, apperrors.NewBadRequestError(
+				"vlm_config.model_id is required when enabled")
+		}
 		return next, nil
 	}
 	model, err := s.modelService.GetModelByID(ctx, next.ModelID)
@@ -506,7 +525,16 @@ func (s *knowledgeBaseService) resolveUpdatedVLMConfig(
 		return types.VLMConfig{}, apperrors.NewBadRequestError(
 			fmt.Sprintf("vlm_config.model_id: model type is %s, want %s", model.Type, types.ModelTypeVLLM))
 	}
+	clearLegacyVLMFields(&next)
 	return next, nil
+}
+
+// clearLegacyVLMFields drops the pre-model-management inline VLM endpoint.
+func clearLegacyVLMFields(cfg *types.VLMConfig) {
+	cfg.ModelName = ""
+	cfg.BaseURL = ""
+	cfg.APIKey = ""
+	cfg.InterfaceType = ""
 }
 
 // UpdateKnowledgeBase updates a knowledge base's mutable properties.

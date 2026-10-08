@@ -761,7 +761,7 @@ func (h *KnowledgeBaseHandler) UpdateKnowledgeBase(c *gin.Context) {
 	logger.Info(ctx, "Start updating knowledge base")
 
 	// Validate and get the knowledge base
-	_, id, _, permission, err := h.validateAndGetKnowledgeBase(c)
+	currentKB, id, _, permission, err := h.validateAndGetKnowledgeBase(c)
 	if err != nil {
 		c.Error(err)
 		return
@@ -779,6 +779,14 @@ func (h *KnowledgeBaseHandler) UpdateKnowledgeBase(c *gin.Context) {
 		logger.Error(ctx, "Failed to parse request parameters", err)
 		c.Error(apperrors.NewBadRequestError("Invalid request parameters").WithDetails(err.Error()))
 		return
+	}
+	// The VLM model is a KB setting: like PUT /initialization/config, only the
+	// owner workspace or an admin share may change it, not a share editor.
+	if req.VLMConfig != nil {
+		if _, err := kbSettingsAccess(c, currentKB); err != nil {
+			_ = c.Error(err)
+			return
+		}
 	}
 	if req.Config != nil {
 		probe := &types.KnowledgeBase{

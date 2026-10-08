@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -63,27 +64,127 @@ func TestUpdateKnowledgeBaseAppliesVLMConfig(t *testing.T) {
 	assert.Empty(t, kb.VLMConfig.ModelID)
 }
 
-// The legacy fields point the VLM client straight at BaseURL, outside model
-// management and its SSRF checks, so the update API must not let a caller set
-// them; whatever is stored stays as it was.
-func TestUpdateKnowledgeBaseIgnoresLegacyVLMFields(t *testing.T) {
-	repo := newFakeKBRepo()
-	repo.rows["kb-1"] = &types.KnowledgeBase{
+func newLegacyVLMKB() *types.KnowledgeBase {
+	return &types.KnowledgeBase{
 		ID: "kb-1", Name: "old", TenantID: 1,
-		VLMConfig: types.VLMConfig{ModelName: "stored", BaseURL: "https://stored.example"},
+		VLMConfig: types.VLMConfig{
+			ModelName: "stored", BaseURL: "https://stored.example", APIKey: "sk", InterfaceType: "openai",
+		},
 	}
-	svc := newVLMUpdateService(repo)
+}
 
-	kb, err := svc.UpdateKnowledgeBase(context.Background(), "kb-1", "n", "d", nil, &types.VLMConfig{
+// The legacy fields point the VLM client straight at BaseURL, outside model
+// management and its SSRF checks, so the update API never writes them from the
+// request. Switching to a managed model clears the stored ones, so a later
+// disable cannot fall back to the old endpoint.
+func TestUpdateKnowledgeBaseManagedVLMClearsLegacyFields(t *testing.T) {
+	repo := newFakeKBRepo()
+	repo.rows["kb-1"] = newLegacyVLMKB()
+	svc := newVLMUpdateService(repo)
+	ctx := context.Background()
+
+	kb, err := svc.UpdateKnowledgeBase(ctx, "kb-1", "n", "d", nil, &types.VLMConfig{
 		Enabled: true, ModelID: "vlm-1",
-		ModelName: "evil", BaseURL: "http://169.254.169.254", APIKey: "k", InterfaceType: "openai",
+		ModelName: "evil", BaseURL: "http://169.254.169.254", APIKey: "k", InterfaceType: "ollama",
 	})
 	require.NoError(t, err)
 	assert.Equal(t, "vlm-1", kb.VLMConfig.ModelID)
-	assert.Equal(t, "stored", kb.VLMConfig.ModelName)
-	assert.Equal(t, "https://stored.example", kb.VLMConfig.BaseURL)
+	assert.Empty(t, kb.VLMConfig.ModelName)
+	assert.Empty(t, kb.VLMConfig.BaseURL)
 	assert.Empty(t, kb.VLMConfig.APIKey)
 	assert.Empty(t, kb.VLMConfig.InterfaceType)
+
+	kb, err = svc.UpdateKnowledgeBase(ctx, "kb-1", "n", "d", nil, &types.VLMConfig{Enabled: false})
+	require.NoError(t, err)
+	assert.False(t, kb.VLMConfig.IsEnabled(), "disable after managed must not fall back to legacy")
+}
+
+// An explicit disable on a legacy KB must actually turn VLM off: the stored
+// ModelName/BaseURL alone keep IsEnabled() true, so they are cleared too.
+func TestUpdateKnowledgeBaseDisablesLegacyVLM(t *testing.T) {
+	cases := map[string]types.VLMConfig{
+		"plain disable":        {Enabled: false},
+		"disable other legacy": {Enabled: false, ModelName: "stored", BaseURL: "http://169.254.169.254"},
+	}
+	for name, req := range cases {
+		t.Run(name, func(t *testing.T) {
+			repo := newFakeKBRepo()
+			repo.rows["kb-1"] = newLegacyVLMKB()
+			svc := newVLMUpdateService(repo)
+
+			kb, err := svc.UpdateKnowledgeBase(context.Background(), "kb-1", "n", "d", nil, &req)
+			require.NoError(t, err)
+			assert.False(t, kb.VLMConfig.IsEnabled())
+			assert.Empty(t, kb.VLMConfig.ModelName)
+			assert.Empty(t, kb.VLMConfig.BaseURL)
+			assert.Empty(t, kb.VLMConfig.APIKey)
+		})
+	}
+}
+
+// GET returns model_name/base_url verbatim with enabled=false for a legacy KB;
+// PUTting that body back is an unrelated save and must keep legacy VLM on.
+func TestUpdateKnowledgeBaseLegacyVLMEchoKeepsLegacy(t *testing.T) {
+	repo := newFakeKBRepo()
+	repo.rows["kb-1"] = newLegacyVLMKB()
+	svc := newVLMUpdateService(repo)
+	ctx := context.Background()
+
+	kb, err := svc.UpdateKnowledgeBase(ctx, "kb-1", "n", "d", nil, &types.VLMConfig{
+		Enabled: false, ModelName: "stored", BaseURL: "https://stored.example",
+	})
+	require.NoError(t, err)
+	assert.True(t, kb.VLMConfig.IsEnabled())
+	assert.Equal(t, newLegacyVLMKB().VLMConfig, kb.VLMConfig)
+
+	// enabled=true without a model_id keeps a legacy KB as it is.
+	kb, err = svc.UpdateKnowledgeBase(ctx, "kb-1", "n", "d", nil, &types.VLMConfig{Enabled: true})
+	require.NoError(t, err)
+	assert.True(t, kb.VLMConfig.IsEnabled())
+	assert.Equal(t, "https://stored.example", kb.VLMConfig.BaseURL)
+}
+
+// Enabling without a model on a non-legacy KB would store Enabled=true while
+// IsEnabled() stays false; reject it instead.
+func TestUpdateKnowledgeBaseRejectsEnableWithoutModel(t *testing.T) {
+	repo := newFakeKBRepo()
+	repo.rows["kb-1"] = &types.KnowledgeBase{ID: "kb-1", Name: "old", TenantID: 1}
+	svc := newVLMUpdateService(repo)
+
+	_, err := svc.UpdateKnowledgeBase(context.Background(), "kb-1", "n", "d", nil, &types.VLMConfig{Enabled: true})
+
+	appErr, ok := apperrors.IsAppError(err)
+	require.True(t, ok, "error = %v, want an AppError", err)
+	assert.Equal(t, http.StatusBadRequest, appErr.HTTPCode)
+	assert.False(t, repo.rows["kb-1"].VLMConfig.Enabled)
+}
+
+// custom_instructions has the same 4000-character cap as create and
+// /initialization/config.
+func TestUpdateKnowledgeBaseRejectsOverlongVLMInstructions(t *testing.T) {
+	repo := newFakeKBRepo()
+	repo.rows["kb-1"] = &types.KnowledgeBase{
+		ID: "kb-1", Name: "old", TenantID: 1,
+		VLMConfig: types.VLMConfig{Enabled: true, ModelID: "vlm-1", CustomInstructions: "keep"},
+	}
+	svc := newVLMUpdateService(repo)
+	ctx := context.Background()
+
+	_, err := svc.UpdateKnowledgeBase(ctx, "kb-1", "n", "d", nil, &types.VLMConfig{
+		Enabled: true, ModelID: "vlm-1",
+		CustomInstructions: strings.Repeat("字", types.MaxCustomPromptInstructionsLength+1),
+	})
+	appErr, ok := apperrors.IsAppError(err)
+	require.True(t, ok, "error = %v, want an AppError", err)
+	assert.Equal(t, http.StatusBadRequest, appErr.HTTPCode)
+	assert.Equal(t, "keep", repo.rows["kb-1"].VLMConfig.CustomInstructions)
+
+	kb, err := svc.UpdateKnowledgeBase(ctx, "kb-1", "n", "d", nil, &types.VLMConfig{
+		Enabled: true, ModelID: "vlm-1",
+		CustomInstructions: strings.Repeat("字", types.MaxCustomPromptInstructionsLength),
+	})
+	require.NoError(t, err)
+	assert.Len(t, []rune(kb.VLMConfig.CustomInstructions), types.MaxCustomPromptInstructionsLength)
 }
 
 // A vlm_config that names a missing model or a non-VLM model is rejected as a

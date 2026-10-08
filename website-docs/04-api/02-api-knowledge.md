@@ -101,6 +101,7 @@ curl $BASE/api/v1/knowledge-bases/kb-1 -H "Authorization: Bearer $TOKEN"
 | `name` | string | 是（`binding:"required"`） | 名称 |
 | `description` | string | 否 | 描述 |
 | `config` | object | 否 | 局部配置更新：`chunking_config`、`image_processing_config`、`faq_config`、`wiki_config`、`auto_tag_config`、`profile_config`、`indexing_strategy` |
+| `vlm_config` | object | 否 | 多模态配置，整体替换：只取 `enabled`、`model_id`（须为 VLLM 模型）、`description_language`、`custom_instructions`（≤4000 字），未传的字段按空值处理；不想改就不要传。共享库需所有者空间或共享 admin 权限（editor 返回 403）。旧版内联字段 `model_name`/`base_url`/`api_key`/`interface_type` 不会被写入：启用托管 `model_id` 或关闭时会清空已存的旧版配置，但原样回传 GET 结果（`enabled=false` 且 `model_name`/`base_url` 与存储一致）视为不改；非旧版库 `enabled=true` 却缺 `model_id` 返回 400 |
 
 响应：200 `{"success":true,"data":{KnowledgeBase}}`
 
