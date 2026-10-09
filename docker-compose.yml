@@ -336,6 +336,10 @@ services:
       - WEKNORA_MINERU_TIMEOUT=${WEKNORA_MINERU_TIMEOUT:-}
       # MinerU 云端轮询解析结果的最长时间（Go duration，默认 600s）
       - WEKNORA_MINERU_CLOUD_TIMEOUT=${WEKNORA_MINERU_CLOUD_TIMEOUT:-}
+      # PaddleOCR-VL 云端轮询解析结果的最长时间（Go duration，默认 600s）
+      - WEKNORA_PADDLEOCR_VL_CLOUD_TIMEOUT=${WEKNORA_PADDLEOCR_VL_CLOUD_TIMEOUT:-}
+      # WeKnoraCloud 托管 docreader 轮询任务结果的最长时间（Go duration，默认 20m，应小于 DocReader RPC 超时）
+      - WEKNORA_WEKNORACLOUD_TIMEOUT=${WEKNORA_WEKNORACLOUD_TIMEOUT:-}
       # 知识库巡检回收（回收卡在 processing 的脏数据；false 禁用，不建议）
       - WEKNORA_HOUSEKEEPING_ENABLED=${WEKNORA_HOUSEKEEPING_ENABLED:-}
       - WEKNORA_CHAT_ATTACHMENT_TTL_HOURS=${WEKNORA_CHAT_ATTACHMENT_TTL_HOURS:-24}
@@ -415,6 +419,8 @@ services:
       dockerfile: docker/Dockerfile.docreader
       args:
         - APT_MIRROR=${APT_MIRROR:-}
+        - PLAYWRIGHT_DOWNLOAD_HOST=${PLAYWRIGHT_DOWNLOAD_HOST:-}
+        - PLAYWRIGHT_WEBKIT_DOWNLOAD_HOST=${PLAYWRIGHT_WEBKIT_DOWNLOAD_HOST:-}
     container_name: WeKnora-docreader
     # docreader gRPC ships without auth/TLS and is only consumed by the app
     # container over the WeKnora-network (DOCREADER_ADDR defaults to

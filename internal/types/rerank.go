@@ -95,6 +95,11 @@ type RerankDiagnostics struct {
 	TopScore       float64 `json:"top_score"`
 	CandidateCount int     `json:"candidate_count"`
 	ResultCount    int     `json:"result_count"`
+	// ImagesScored counts image hits a multimodal reranker scored by their
+	// image; ImagesKept the pictorial image hits kept over a text reranker's
+	// rejection on their vector's evidence.
+	ImagesScored int `json:"images_scored,omitempty"`
+	ImagesKept   int `json:"images_kept,omitempty"`
 	// Error carries the reason for model_error / model_unavailable.
 	Error string `json:"error,omitempty"`
 }

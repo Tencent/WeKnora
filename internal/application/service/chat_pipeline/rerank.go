@@ -13,12 +13,18 @@ import (
 // PluginRerank implements reranking functionality for chat pipeline
 type PluginRerank struct {
 	modelService interfaces.ModelService // Service to access rerank models
+	// kbService reads the images of image hits for a reranker that scores
+	// images. Nil scores them by their text.
+	kbService interfaces.KnowledgeBaseService
 }
 
 // NewPluginRerank creates a new rerank plugin instance
-func NewPluginRerank(eventManager *EventManager, modelService interfaces.ModelService) *PluginRerank {
+func NewPluginRerank(
+	eventManager *EventManager, modelService interfaces.ModelService, kbService interfaces.KnowledgeBaseService,
+) *PluginRerank {
 	res := &PluginRerank{
 		modelService: modelService,
+		kbService:    kbService,
 	}
 	eventManager.Register(res)
 	return res
@@ -104,6 +110,10 @@ func (p *PluginRerank) OnEvent(ctx context.Context,
 		TopK:             max(1, chatManage.RerankTopK),
 		MaxCandidates:    max(reranking.DefaultMaxCandidates, chatManage.RerankTopK),
 		FallbackMinScore: reranking.FallbackMinScore(chatManage.SearchTargets.HasRecallThresholdOverride()),
+		ImageKeepScore:   reranking.ImageKeepScoreFor(chatManage.VectorThreshold),
+	}
+	if p.kbService != nil {
+		opts.LoadImage = p.kbService.ReadChunkImage
 	}
 	if chatManage.FAQPriorityEnabled {
 		opts.FAQScoreBoost = chatManage.FAQScoreBoost
@@ -147,6 +157,20 @@ func (p *PluginRerank) OnEvent(ctx context.Context,
 			"threshold":    diag.EffectiveThreshold,
 		})
 		return ErrSearchNothing
+	}
+	// Rerank drops candidates before FILTER_TOP_K ever runs: threshold
+	// rejection, the MaxCandidates cap and the MMR top-k all hide passage
+	// candidates that retrieval produced. Record the cut from the pool the
+	// stage received so the prompt can say its passages are a subset, whether
+	// or not FILTER_TOP_K finds anything left to cut.
+	if dropped := len(chatManage.SearchResult) - len(chatManage.RerankResult); dropped > 0 {
+		chatManage.RecordRetrievalCut(types.RetrievalStageRerank, len(chatManage.SearchResult))
+		pipelineInfo(ctx, "Rerank", "truncation", map[string]interface{}{
+			"stage":      types.RetrievalStageRerank,
+			"candidates": len(chatManage.SearchResult),
+			"kept":       len(chatManage.RerankResult),
+			"dropped":    dropped,
+		})
 	}
 	pipelineInfo(ctx, "Rerank", "output", map[string]interface{}{
 		"filtered_cnt": len(chatManage.RerankResult),

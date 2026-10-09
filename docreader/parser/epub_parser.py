@@ -288,13 +288,12 @@ class EPUBParser(BaseParser):
         aliases = {
             original_path,
             normalized,
-            unquote(original_path),
-            unquote(normalized),
-            posixpath.basename(normalized),
         }
         for alias in aliases:
             if alias:
                 image_aliases[alias] = image_path
+        # A basename fallback must not overwrite a real archive-root path.
+        image_aliases.setdefault(posixpath.basename(normalized), image_path)
 
     @staticmethod
     def _rewrite_image_sources(
@@ -306,17 +305,26 @@ class EPUBParser(BaseParser):
             src = (img.get("src") or "").strip()
             if not src:
                 continue
-            normalized_src = EPUBParser._normalize_epub_path(src)
-            candidates = [
-                src,
-                normalized_src,
-                unquote(src),
-                unquote(normalized_src),
-                posixpath.basename(normalized_src),
-            ]
+            # Only src is a URI reference. Strip its URI suffixes before decoding
+            # once; archive paths from EbookLib and ZIP already contain literal
+            # characters, including #, ? and percent-encoded-looking names.
+            raw_path = src.split("#", 1)[0].split("?", 1)[0].replace("\\", "/")
+            src_path = unquote(raw_path).replace("\\", "/")
+            normalized_src = EPUBParser._normalize_epub_path(src_path)
+            # Some EPUBs reference literal percent-looking names verbatim.
+            # Try the undecoded path after the decoded path at each location.
+            raw_normalized = EPUBParser._normalize_epub_path(raw_path)
+            candidates = [normalized_src, raw_normalized]
             if base_path:
-                joined = EPUBParser._normalize_epub_path(posixpath.join(base_path, src))
-                candidates.extend([joined, unquote(joined)])
+                joined = EPUBParser._normalize_epub_path(
+                    posixpath.join(base_path, src_path)
+                )
+                raw_joined = EPUBParser._normalize_epub_path(
+                    posixpath.join(base_path, raw_path)
+                )
+                # Resolve relative to the chapter before trying ambiguous aliases.
+                candidates[:0] = [joined, raw_joined]
+            candidates.append(posixpath.basename(normalized_src))
             for candidate in candidates:
                 if candidate in image_aliases:
                     img["src"] = image_aliases[candidate]
@@ -324,6 +332,6 @@ class EPUBParser(BaseParser):
 
     @staticmethod
     def _normalize_epub_path(path: str) -> str:
-        path = unquote(path).split("#", 1)[0].split("?", 1)[0].replace("\\", "/")
-        normalized = posixpath.normpath(path)
+        """Normalize a decoded archive path without interpreting it as a URI."""
+        normalized = posixpath.normpath(path.replace("\\", "/"))
         return "" if normalized == "." else normalized.lstrip("/")

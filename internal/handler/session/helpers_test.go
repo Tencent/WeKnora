@@ -79,6 +79,9 @@ func TestSearchResultFromMap_RoundTrip(t *testing.T) {
 		KnowledgeDescription: "desc",
 		KnowledgeBaseID:      "kb-1",
 		Metadata:             map[string]string{"page": "3"},
+		MatchedImages: []types.MatchedImage{
+			{ChunkID: "image-1", KnowledgeBaseID: "kb-1", URL: "resource://image"},
+		},
 		SourceLocators: types.SourceLocators{
 			{Type: types.SourceLocatorPDF, Page: 4, BBox: []float64{0.1, 0.2, 0.9, 0.3}, Quote: "q"},
 		},
@@ -103,6 +106,7 @@ func TestSearchResultFromMap_RoundTrip(t *testing.T) {
 	assert.Equal(t, original.ChunkType, got.ChunkType)
 	assert.Equal(t, original.ParentChunkID, got.ParentChunkID)
 	assert.Equal(t, original.ImageInfo, got.ImageInfo)
+	assert.Equal(t, original.MatchedImages, got.MatchedImages)
 	assert.Equal(t, original.KnowledgeFilename, got.KnowledgeFilename)
 	assert.Equal(t, original.KnowledgeSource, got.KnowledgeSource)
 	assert.Equal(t, original.KnowledgeDescription, got.KnowledgeDescription)

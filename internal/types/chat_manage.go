@@ -2,6 +2,7 @@ package types
 
 import (
 	"maps"
+	"slices"
 	"strings"
 )
 
@@ -115,6 +116,52 @@ func (i QueryIntent) NeedsKBRetrieval() bool {
 	}
 }
 
+// Retrieval stage names recorded on RetrievalTruncation.Stage, in pipeline
+// order.
+const (
+	// RetrievalStageRerank is the CHUNK_RERANK stage, which drops candidates
+	// through threshold rejection, its candidate cap or its MMR top-k.
+	RetrievalStageRerank = "rerank"
+	// RetrievalStageMerge is the CHUNK_MERGE fallback cut to RerankTopK, taken
+	// when rerank produced nothing to merge.
+	RetrievalStageMerge = "merge"
+	// RetrievalStageFilterTopK is the FILTER_TOP_K stage.
+	RetrievalStageFilterTopK = "filter_top_k"
+)
+
+// RetrievalTruncation records that the passages in the model context are a
+// subset of this turn's ranked candidates.
+//
+// Stage is the first pipeline stage that dropped candidates and Candidates is
+// the number of candidate passages that stage received, so the pair always
+// describes one population: the retrieval set that entered the ranked filter
+// chain (rerank → merge → FILTER_TOP_K). Candidates is a pipeline-local count
+// of retrieved passages — never the number of matches in the knowledge base,
+// which retrieval never computes — and a later, narrower cut never replaces
+// it. How many of those candidates the prompt actually shows is counted where
+// the prompt is built, so the caveat is only emitted when the context really
+// is a subset.
+type RetrievalTruncation struct {
+	Stage      string `json:"stage"`
+	Candidates int    `json:"candidates"`
+}
+
+// RecordRetrievalCut notes that a ranked-list stage dropped candidate passages
+// before the model context was built. candidates is the population that stage
+// received, read before the cut; it must never be a knowledge-base match count,
+// which retrieval does not compute at this depth.
+//
+// The first cut wins. Later stages only see an equal or narrower population
+// (FILTER_TOP_K cuts merge output, merge's fallback cuts the search output), so
+// letting them overwrite the record would restate the candidate pool as
+// something smaller than what retrieval produced and hide how much was dropped.
+func (c *ChatManage) RecordRetrievalCut(stage string, candidates int) {
+	if c == nil || c.Truncation != nil || candidates <= 0 {
+		return
+	}
+	c.Truncation = &RetrievalTruncation{Stage: stage, Candidates: candidates}
+}
+
 // PipelineState holds mutable intermediate data that plugins read and write
 // as the pipeline progresses.
 type PipelineState struct {
@@ -125,19 +172,30 @@ type PipelineState struct {
 	// History (a first turn) is not fetched again by a later stage.
 	HistoryLoaded bool `json:"-"`
 
-	SearchResult         []*SearchResult   `json:"-"`
-	RerankResult         []*SearchResult   `json:"-"`
-	MergeResult          []*SearchResult   `json:"-"`
-	Entity               []string          `json:"-"`
-	EntityKBIDs          []string          `json:"-"`
-	EntityKnowledge      map[string]string `json:"-"`
-	GraphResult          *GraphData        `json:"-"`
-	UserContent          string            `json:"-"`
-	RenderedContexts     string            `json:"-"`
-	ChatResponse         *ChatResponse     `json:"-"`
-	ImageDescription     string            `json:"-"`
-	QuotedContext        string            `json:"-"` // Quoted message text, injected at LLM prompt stage
-	SystemPromptOverride string            `json:"-"`
+	SearchResult     []*SearchResult   `json:"-"`
+	RerankResult     []*SearchResult   `json:"-"`
+	MergeResult      []*SearchResult   `json:"-"`
+	Entity           []string          `json:"-"`
+	EntityKBIDs      []string          `json:"-"`
+	EntityKnowledge  map[string]string `json:"-"`
+	GraphResult      *GraphData        `json:"-"`
+	UserContent      string            `json:"-"`
+	RenderedContexts string            `json:"-"`
+	// ContextImages are retrieved images, as data URIs, shown to a vision
+	// chat model beside the contexts they belong to; see INTO_CHAT_MESSAGE.
+	ContextImages []string `json:"-"`
+	// ContextImageChunkIDs identifies the source of each image for final model handle rendering.
+	ContextImageChunkIDs []string      `json:"-"`
+	ChatResponse         *ChatResponse `json:"-"`
+	ImageDescription     string        `json:"-"`
+	QuotedContext        string        `json:"-"` // Quoted message text, injected at LLM prompt stage
+	SystemPromptOverride string        `json:"-"`
+	// Truncation records the first ranked-list cut this turn: the stage that
+	// dropped candidates and the size of the candidate pool it cut. Nil when
+	// no stage dropped anything, so a prompt only carries the caveat when its
+	// context really is a subset.
+	Truncation *RetrievalTruncation `json:"-"`
+
 	// MemoryPrompt is the long-term memory envelope appended to the system
 	// prompt for this turn, empty when memory is off or nothing matched.
 	MemoryPrompt string `json:"-"`
@@ -290,6 +348,8 @@ func (c *ChatManage) Clone() *ChatManage {
 			MemoryPrompt:         c.MemoryPrompt,
 			UsedMemories:         append(UsedMemories(nil), c.UsedMemories...),
 			RenderedContexts:     c.RenderedContexts,
+			ContextImages:        slices.Clone(c.ContextImages),
+			ContextImageChunkIDs: slices.Clone(c.ContextImageChunkIDs),
 			Entity:               entity,
 			EntityKBIDs:          entityKBIDs,
 			EntityKnowledge:      entityKnowledge,

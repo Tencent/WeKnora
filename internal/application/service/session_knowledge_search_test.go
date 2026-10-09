@@ -71,7 +71,7 @@ func newSearchKnowledgeService(
 	t.Helper()
 	events := chatpipeline.NewEventManager()
 	events.Register(retrieval)
-	chatpipeline.NewPluginRerank(events, models)
+	chatpipeline.NewPluginRerank(events, models, nil)
 	chatpipeline.NewPluginFilterTopK(events)
 	return &sessionService{
 		cfg:                  &config.Config{Conversation: &config.ConversationConfig{}},
