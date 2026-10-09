@@ -144,7 +144,9 @@ func TestVLLMImageMessageMatchesItsExample(t *testing.T) {
 	}, body)
 
 	bare := newClient("http://vllm.internal/v1", api.EmbeddingsSettings{ImageFormat: api.EmbeddingImageMessages}, 0)
-	content := bare.BuildImageMessageBody(api.EmbedImage{Data: []byte{0x89}, MIMEType: "image/png"}, api.EmbedDocument)["messages"].([]any)[0].(map[string]any)["content"]
+	content := bare.BuildImageMessageBody(
+		api.EmbedImage{Data: []byte{0x89}, MIMEType: "image/png"}, api.EmbedDocument,
+	)["messages"].([]any)[0].(map[string]any)["content"]
 	assert.Len(t, content, 1, "no prompt configured, so the image goes alone")
 }
 
@@ -152,7 +154,9 @@ func TestVLLMImageMessageMatchesItsExample(t *testing.T) {
 func TestImageFormatDecidesWhetherImagesAreAccepted(t *testing.T) {
 	assert.False(t, newClient("u", api.EmbeddingsSettings{}, 0).AcceptsImages())
 	assert.False(t, newClient("u", api.EmbeddingsSettings{ImageFormat: api.EmbeddingImageObject}, 0).AcceptsImages())
-	assert.True(t, newClient("u", api.EmbeddingsSettings{ImageInput: api.ImageInput{ImageField: "image"}}, 0).AcceptsImages())
+	assert.True(t, newClient("u", api.EmbeddingsSettings{
+		ImageInput: api.ImageInput{ImageField: "image"},
+	}, 0).AcceptsImages())
 	assert.True(t, newClient("u", api.EmbeddingsSettings{ImageFormat: api.EmbeddingImageMessages}, 0).AcceptsImages())
 }
 
@@ -194,7 +198,9 @@ func TestMessagesFormatSendsOneRequestPerItem(t *testing.T) {
 	assert.Equal(t, []any{"a", "b"}, bodies[0]["input"])
 
 	bodies = nil
-	c = newClient(server.URL+"/v1", api.EmbeddingsSettings{ImageFormat: api.EmbeddingImageMessages, TextAsMessages: true}, 0)
+	c = newClient(server.URL+"/v1", api.EmbeddingsSettings{
+		ImageFormat: api.EmbeddingImageMessages, TextAsMessages: true,
+	}, 0)
 	got, err = c.Embed(context.Background(), []string{"a", "b"}, api.EmbedQuery)
 	require.NoError(t, err)
 	assert.Equal(t, [][]float32{{1}, {2}}, got)

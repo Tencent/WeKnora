@@ -156,7 +156,9 @@ func TestImageEmbeddingNeedsBothTheModelAndTheEndpoint(t *testing.T) {
 		{"declared on a generic (vLLM) endpoint", "generic", "my-clip", declare, true},
 		{
 			"declared, but the row switched to an object format without a field", "generic", "my-clip",
-			&types.ModelSpecOverride{Input: []string{"text", "image"}, Compat: map[string]any{"image_format": "object"}},
+			&types.ModelSpecOverride{
+				Input: []string{"text", "image"}, Compat: map[string]any{"image_format": "object"},
+			},
 			false,
 		},
 		{"declared on a vendor that names one", "jina", "my-jina-omni", declare, true},

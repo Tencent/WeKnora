@@ -225,7 +225,9 @@ func (e *similarityEmbedder) BatchEmbedImages(context.Context, []embedding.Image
 	return [][]float32{similarityAxes["image"]}, nil
 }
 
-func runSimilarityDebug(t *testing.T, embed *similarityEmbedder, query, documents string, file []byte) (map[string]any, string) {
+func runSimilarityDebug(
+	t *testing.T, embed *similarityEmbedder, query, documents string, file []byte,
+) (map[string]any, string) {
 	t.Helper()
 	svc := &debugImageService{row: &types.Model{Type: types.ModelTypeEmbedding}}
 	svc.similarity = embed
