@@ -419,6 +419,8 @@ services:
       dockerfile: docker/Dockerfile.docreader
       args:
         - APT_MIRROR=${APT_MIRROR:-}
+        - PLAYWRIGHT_DOWNLOAD_HOST=${PLAYWRIGHT_DOWNLOAD_HOST:-}
+        - PLAYWRIGHT_WEBKIT_DOWNLOAD_HOST=${PLAYWRIGHT_WEBKIT_DOWNLOAD_HOST:-}
     container_name: WeKnora-docreader
     # docreader gRPC ships without auth/TLS and is only consumed by the app
     # container over the WeKnora-network (DOCREADER_ADDR defaults to
