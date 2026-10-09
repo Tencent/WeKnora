@@ -96,3 +96,37 @@ func TestAgentWebSearchContentFetchesLeadingPagesOnly(t *testing.T) {
 	assert.Equal(t, "skipped", rows[4]["page_status"])
 	assert.Equal(t, "d", rows[3]["snippet"])
 }
+
+// TestAgentWebSearchReportsDroppedResults provider 有返回、但一条都没通过 URL 校验时，
+// 必须与"provider 真的没结果"区分开：前者要查 provider 配置或响应形状，后者要换查询词。
+func TestAgentWebSearchReportsDroppedResults(t *testing.T) {
+	svc := &searchOnlyWebService{results: []*types.WebSearchResult{
+		{URL: "javascript:alert(1)"},
+		{URL: "ftp://example.com/file"},
+		nil,
+	}}
+	tool := NewWebSearchTool(svc, 5, "provider-1")
+	ctx := context.WithValue(t.Context(), types.TenantIDContextKey, uint64(1))
+
+	result, err := tool.Execute(ctx, json.RawMessage(`{"query":"q"}`))
+	require.NoError(t, err)
+	require.True(t, result.Success, "an empty result is not a failure")
+	assert.Equal(t, 0, result.Data["count"])
+	assert.Equal(t, 3, result.Data["raw_returned"])
+	assert.Contains(t, result.Output, "provider returned 3 result(s)")
+	assert.Contains(t, result.Output, "none survived URL validation")
+}
+
+// TestAgentWebSearchEmptyResultWithoutProviderResults provider 确实没返回时，不该
+// 追加"结果被丢弃"的说明。
+func TestAgentWebSearchEmptyResultWithoutProviderResults(t *testing.T) {
+	svc := &searchOnlyWebService{}
+	tool := NewWebSearchTool(svc, 5, "provider-1")
+	ctx := context.WithValue(t.Context(), types.TenantIDContextKey, uint64(1))
+
+	result, err := tool.Execute(ctx, json.RawMessage(`{"query":"q"}`))
+	require.NoError(t, err)
+	require.True(t, result.Success)
+	assert.Equal(t, 0, result.Data["raw_returned"])
+	assert.Equal(t, "No web search results found for query: q", result.Output)
+}

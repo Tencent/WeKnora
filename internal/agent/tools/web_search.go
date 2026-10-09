@@ -185,6 +185,7 @@ func (t *WebSearchTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 	logger.Infof(ctx, "[Tool][WebSearch] Web search returned %d results", len(webResults))
 
 	// Providers can over-return or include unusable rows. Enforce the tool contract locally.
+	rawCount := len(webResults)
 	filtered := make([]*types.WebSearchResult, 0, maxResults)
 	seen := make(map[string]bool)
 	for _, result := range webResults {
@@ -211,13 +212,23 @@ func (t *WebSearchTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 
 	// Format output
 	if len(webResults) == 0 {
+		message := fmt.Sprintf("No web search results found for query: %s", query)
+		if rawCount > 0 {
+			// provider 有返回但一条都没通过 URL 校验，说明问题在 provider 配置或响应
+			// 形状上，而不是"这个词真的搜不到"。两种情况的排查方向完全不同，必须区分。
+			message += fmt.Sprintf(
+				" (provider returned %d result(s), but none survived URL validation;"+
+					" check the web search provider configuration)", rawCount)
+		}
+		logger.Warnf(ctx, "[Tool][WebSearch] empty result: query=%q raw=%d filtered=0", query, rawCount)
 		return &types.ToolResult{
 			Success: true,
-			Output:  fmt.Sprintf("No web search results found for query: %s", query),
+			Output:  message,
 			Data: map[string]interface{}{
-				"query":   query,
-				"results": []interface{}{},
-				"count":   0,
+				"query":        query,
+				"results":      []interface{}{},
+				"count":        0,
+				"raw_returned": rawCount,
 			},
 		}, nil
 	}
