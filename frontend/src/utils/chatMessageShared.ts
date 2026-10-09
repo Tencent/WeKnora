@@ -1,6 +1,6 @@
 import i18n from '@/i18n';
 import { buildMermaidBlockHtml, buildMermaidLoadingHtml } from '@/utils/markdownEnhancements';
-import { buildManualDraft, deriveManualTitle, resolveManualDraftKnowledgeBaseId } from './manualKnowledgeDraft';
+import { buildManualDraft, collectManualDraftPreferredKbIds, deriveManualTitle } from './manualKnowledgeDraft';
 import {
   injectCachedMermaidSvg as injectCachedMermaidSvgHtml,
   maskMermaidBlocksForStreaming as maskMermaidBlocks,
@@ -79,10 +79,11 @@ export const buildManualMarkdown = (_question: string, answer: string): string =
 };
 
 /**
- * Knowledge base to preselect in the manual editor for a chat answer, or null
- * when the answer carries no retrievable provenance. See
- * `resolveManualDraftKnowledgeBaseId` for why chat should name one (#2081).
+ * Soft knowledge-base preferences for the manual editor, in citation order.
+ * The editor resolves the first id that is already in its writable candidate
+ * list; nothing is force-inserted. Empty when the answer has no retrievable
+ * provenance (plain chat / missing references).
  */
-export const resolveManualKnowledgeBaseId = (
+export const collectManualPreferredKbIds = (
   references?: { knowledge_base_id?: string }[] | null,
-): string | null => resolveManualDraftKnowledgeBaseId(references);
+): string[] => collectManualDraftPreferredKbIds(references);

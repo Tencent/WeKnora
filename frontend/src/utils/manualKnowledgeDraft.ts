@@ -40,33 +40,60 @@ export interface ManualDraftReference {
 }
 
 /**
- * Pick the knowledge base a chat answer belongs to, for the manual editor.
+ * Collect knowledge-base ids cited by a chat answer, in reference order.
  *
- * The "add answer to knowledge base" action in chat opens the editor without
- * naming a knowledge base. The editor then defaults the field to `list[0]` —
- * the first knowledge base the user happens to own, which is usually unrelated
- * to the conversation. A user with no writable knowledge base has nothing to
- * fall back to and cannot publish at all. Either way the answer lands somewhere
- * the user did not intend, and there is no cue in the UI that a choice was made
- * for them (#2081).
+ * Used as a soft preference when opening the manual editor from chat: the
+ * editor resolves the first id that appears in its writable candidate list,
+ * and otherwise keeps the existing first-option fallback. Viewer-only shares,
+ * FAQ bases, and unknown ids are never force-inserted — those would reject
+ * a save or create an invisible FAQ document.
+ */
+export function collectManualDraftPreferredKbIds(
+  references?: ManualDraftReference[] | null,
+): string[] {
+  if (!Array.isArray(references)) return []
+  const ids: string[] = []
+  const seen = new Set<string>()
+  for (const reference of references) {
+    const kbId = reference?.knowledge_base_id
+    if (typeof kbId !== 'string') continue
+    const trimmed = kbId.trim()
+    if (!trimmed || seen.has(trimmed)) continue
+    seen.add(trimmed)
+    ids.push(trimmed)
+  }
+  return ids
+}
+
+/**
+ * Pick a preferred knowledge base that is already in the editor's candidates.
  *
- * An answer that cites sources was retrieved from a specific knowledge base, so
- * preselect that and let the user override it. Returns null when the answer has
- * no retrievable provenance — a plain chat turn, or a reply whose references
- * never arrived — which leaves the existing first-option fallback untouched.
- *
- * The first reference wins so the choice is stable across renders; a mixed-KB
- * answer lands in the base of its first citation.
+ * Returns the first preferred id that appears in `candidateIds`, or the first
+ * candidate (or '') when nothing matches — matching the editor's historical
+ * `list[0]?.value ?? ''` fallback.
+ */
+export function resolvePreferredKnowledgeBaseId(
+  preferredIds: string[] | null | undefined,
+  candidateIds: string[],
+): string {
+  if (candidateIds.length === 0) return ''
+  const candidates = new Set(candidateIds)
+  for (const id of preferredIds || []) {
+    if (candidates.has(id)) return id
+  }
+  return candidateIds[0] ?? ''
+}
+
+/**
+ * @deprecated Prefer {@link collectManualDraftPreferredKbIds} + editor-side
+ * resolution against the writable candidate list. Kept as a thin first-id
+ * helper for call sites that only need the raw citation order.
  */
 export function resolveManualDraftKnowledgeBaseId(
   references?: ManualDraftReference[] | null,
 ): string | null {
-  if (!Array.isArray(references)) return null
-  for (const reference of references) {
-    const kbId = reference?.knowledge_base_id
-    if (typeof kbId === 'string' && kbId.trim()) return kbId.trim()
-  }
-  return null
+  const ids = collectManualDraftPreferredKbIds(references)
+  return ids[0] ?? null
 }
 
 /**

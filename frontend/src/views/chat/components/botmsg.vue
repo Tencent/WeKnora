@@ -167,7 +167,7 @@ import { useUIStore } from '@/stores/ui';
 import {
     buildManualMarkdown,
     formatManualTitle,
-    resolveManualKnowledgeBaseId,
+    collectManualPreferredKbIds,
 } from '@/utils/chatMessageShared';
 import { copyWithToast } from '@/utils/clipboard';
 import {
@@ -460,7 +460,7 @@ const handleAddToKnowledge = () => {
     ``
     uiStore.openManualEditor({
         mode: 'create',
-        kbId: resolveManualKnowledgeBaseId(props.session?.knowledge_references),
+        preferredKbIds: collectManualPreferredKbIds(props.session?.knowledge_references),
         title: manualTitle,
         content: manualContent,
         status: 'draft',
