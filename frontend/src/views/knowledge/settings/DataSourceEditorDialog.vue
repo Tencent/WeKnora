@@ -19,6 +19,16 @@ import {
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
 import DataSourceTypeIcon from './DataSourceTypeIcon.vue'
 import { getDatasourceIconUrl } from './datasourceIcons'
+import DingTalkManualSelection from './dingtalk/DingTalkManualSelection.vue'
+import {
+  DINGTALK_MANUAL_REFERENCE,
+  dingtalkResourceHint,
+} from './dingtalk/dingtalkResources'
+import {
+  resourceIconName,
+  resourceTypeLabel as resourceTypeLabelOf,
+  shouldShowResourceType,
+} from './resourcePresentation'
 
 const props = defineProps<{
   kbId: string
@@ -266,6 +276,23 @@ function seafileWithin(id: string, parent: string): boolean {
     (parentPath === '/' || path === parentPath || path.startsWith(parentPath + '/'))
 }
 
+// DingTalk is the one connector whose step mounts a dedicated selector: two
+// kinds of DingTalk content are readable by id but can never appear in the
+// lazy-load tree (a document in the operator's personal space, and a
+// multi-dimensional table), so they are entered by link or id instead of being
+// picked. The entry itself, the preview of what will sync and the reference
+// grammar all live in that component; what stays here is the tree it feeds and
+// the selection the wizard submits.
+const isDingTalkConnector = (type: string) => type === 'dingtalk'
+
+// The rows the selector described, kept so a fresh listing can merge them back:
+// loadResources swaps the whole tree array, and a described reference is not in
+// any listing — nothing enumerates Bases, and a personal-space node is absent
+// from the workspace listing. Merging them as roots is what makes an expandable
+// reference reachable and openable like any other node.
+const dingtalkDescribedRows = ref<Record<string, Resource>>({})
+const dingtalkSelection = ref<InstanceType<typeof DingTalkManualSelection> | null>(null)
+
 interface GitLabProjectInput { project_id: string; ref: string; pathsText: string }
 const gitlabProjects = ref<GitLabProjectInput[]>([])
 function syncGitLabProjectsToSettings() {
@@ -399,6 +426,97 @@ function classifyDriveLoadError(e: any): string {
   }
   return raw || t('datasource.resourceLoadFailed')
 }
+
+// dingtalkManualReferences lists the manually entered selections. They are not
+// in the tree, so the tree itself can never show or uncheck them; this is what
+// the selection count adds in, and what tells loadResources that the tree is
+// showing the preview instead of the picker.
+const dingtalkManualReferences = computed(() =>
+  selectedResourceIds.value.filter(id => DINGTALK_MANUAL_REFERENCE.test(id)),
+)
+
+// mergeDingTalkDescribedRowsIntoTree adds the described rows to the tree, where
+// they act as roots: a manual selection belongs to no listed parent, and a Base
+// needs its row in the tree for its children to be reachable at all. The rows
+// are merged, not replaced, and re-merged after every listing because
+// loadResources swaps the whole array.
+function mergeDingTalkDescribedRowsIntoTree() {
+  const rows = Object.values(dingtalkDescribedRows.value)
+  if (rows.length === 0) return
+  const existing = new Set(resources.value.map(r => r.external_id))
+  const missing = rows.filter(row => !existing.has(row.external_id))
+  if (missing.length === 0) return
+  resources.value = [...resources.value, ...missing]
+}
+
+// onDingTalkDescribed takes the rows the selector described and folds them into
+// the tree. The selector names its own rows from the same answer, so the two
+// views cannot disagree about a reference.
+function onDingTalkDescribed(rows: Record<string, Resource>) {
+  dingtalkDescribedRows.value = rows
+  mergeDingTalkDescribedRowsIntoTree()
+}
+
+// onDingTalkSelectionChange takes a selection the selector wrote: the wizard
+// submits it, and the draft the picker lists through is built from the form, so
+// the two are kept in step at the moment the selection changes rather than at
+// submit time.
+function onDingTalkSelectionChange(ids: string[]) {
+  selectedResourceIds.value = [...ids]
+  form.value.config.resource_ids = [...ids]
+}
+
+// dingtalkSavedReference is the manual entry a saved data source already has.
+// The tree can never show it, so the selector is the only place it becomes
+// visible — and the only place it can be removed.
+const dingtalkSavedReference = computed(() =>
+  (form.value.config?.resource_ids || []).find(id => DINGTALK_MANUAL_REFERENCE.test(id)) || '',
+)
+
+const hasDingTalkManualSelection = computed(() => dingtalkManualReferences.value.length > 0)
+
+// dingtalkTreeExpanded is the explicit expander state of the knowledge-base
+// tree while manual references exist. The picker is collapsed by default then:
+// the selection area is the preview of what will sync, so the team's knowledge
+// bases must not sit next to one pasted 多维表 as if they were part of it.
+// Expanding changes nothing about the selection itself.
+const dingtalkTreeExpanded = ref(false)
+
+// dingtalkTreeLoaded records that the knowledge-base tree has really been
+// fetched. The tree is listed lazily — the first time the expander is opened —
+// so a data source whose only selection is a pasted 多维表 never asks for the
+// knowledge bases it will not use. Collapsing and re-expanding must not fetch
+// again, which is what this flag answers.
+const dingtalkTreeLoaded = ref(false)
+
+// showDingTalkResourceTree gates the tree rows (toolbar + list). Without a
+// manual reference it is always true, which is the pre-existing behaviour for
+// every connector, DingTalk included: a tree-only user gets the tree open by
+// default and never sees the expander row.
+const showDingTalkResourceTree = computed(() =>
+  !hasDingTalkManualSelection.value || dingtalkTreeExpanded.value,
+)
+
+function toggleDingTalkResourceTree() {
+  dingtalkTreeExpanded.value = !dingtalkTreeExpanded.value
+  // The tree is filled on first use, not when the step opens: until this point
+  // there was no tree to fill. The promise is returned so a caller (and a test)
+  // can tell when that first listing has settled.
+  if (dingtalkTreeExpanded.value && !dingtalkTreeLoaded.value) return loadResources()
+}
+
+// Adding the first manual reference collapses the tree again, so "collapsed by
+// default whenever a manual reference is selected" also holds after the user
+// expanded the tree once before adding the reference. Removing the last manual
+// reference restores the tree-only presentation on its own — and with it the
+// tree's own listing, which was skipped while the preview replaced it.
+watch(
+  () => dingtalkManualReferences.value.length,
+  (count, previous) => {
+    if (count > 0 && previous === 0) dingtalkTreeExpanded.value = false
+    if (count === 0 && previous > 0 && !dingtalkTreeLoaded.value) void loadResources()
+  },
+)
 
 // Shared children/parent indexes — used by tree rendering and selection logic
 const childrenMap = computed(() => {
@@ -792,6 +910,14 @@ watch(visible, async (v) => {
   driveFolderToken.value = ''
   driveFolderTokenError.value = ''
   driveRootLoaded.value = false
+  // Fresh open: the tree starts collapsed again if a saved manual reference is
+  // restored below, and is not left expanded from a previous edit session.
+  // Nothing about the tree has been fetched yet, and no reference has been
+  // described: both are learned lazily, on the step that needs them. The manual
+  // entry itself belongs to the selector, which mounts fresh with this state.
+  dingtalkTreeExpanded.value = false
+  dingtalkTreeLoaded.value = false
+  dingtalkDescribedRows.value = {}
   rssAuthHeaders.value = []
   gitlabProjects.value = []
 
@@ -973,9 +1099,25 @@ async function loadResources() {
         knowledge_base_id: props.kbId,
       } as any)
     }
+    // DingTalk with a manual selection shows the preview, not the tree: the
+    // knowledge-base tree is collapsed behind its expander, so there is nothing
+    // to fill and the team's knowledge bases must not be fetched. The draft
+    // above is still created — a describe call is made against the data source,
+    // not against the tree — and the tree is listed when the expander is first
+    // opened (see toggleDingTalkResourceTree), which is also the only moment its
+    // contents become visible.
+    if (isDingTalkConnector(form.value.type) && hasDingTalkManualSelection.value
+      && !dingtalkTreeExpanded.value) {
+      return
+    }
 
     const res = await listResources(tempDsId.value)
     resources.value = res?.data || res || []
+    dingtalkTreeLoaded.value = true
+    // The described rows of manual selections are roots of their own and are
+    // merged back before the reveal step, so a Base already has a row and is
+    // never "revealed" by expanding something the tree cannot show.
+    mergeDingTalkDescribedRowsIntoTree()
     // Any parent that already arrived with children (connectors returning the
     // full tree, e.g. Notion) needs no further lazy fetch.
     const parentsWithChildren = new Set<string>()
@@ -1003,13 +1145,13 @@ async function loadResources() {
     }
   } catch (e: any) {
     MessagePlugin.error(e?.message || e?.error || t('datasource.resourceLoadFailed'))
+  } finally {
+    // A skipped load returns from the try block, so the spinner is cleared here
+    // rather than after the block.
+    loadingResources.value = false
   }
-  loadingResources.value = false
 }
 
-// revealExistingSelections asks the backend which ancestors must be expanded to
-// surface the current (possibly deeply nested) selection, then loads each level
-// so the saved selection becomes visible and correctly checked in the tree.
 async function revealExistingSelections(hiddenIds: string[]) {
   if (!tempDsId.value || hiddenIds.length === 0) return
   try {
@@ -1153,6 +1295,13 @@ async function nextStep() {
     }
     driveFolderTokenError.value = ''
   }
+  if (step.value === 2 && isDingTalkConnector(form.value.type) && dingtalkSelection.value?.hasPendingEntry) {
+    // A typed id the user forgot to add would otherwise be dropped silently on
+    // the way to the next step. The box keeps a committed entry, so this is
+    // usually a re-application of what was just added: that is a no-op, because
+    // the cover set holds one entry per reference.
+    if (!dingtalkSelection.value.applyManualEntry()) return
+  }
   if (step.value === 2 && isGitLabConnector(form.value.type)) {
     syncGitLabProjectsToSettings()
     if (!gitlabProjects.value.some(project => project.project_id.trim())) {
@@ -1178,6 +1327,10 @@ async function nextStep() {
       return
     }
     if (isGitLabConnector(form.value.type)) return
+    // A saved DingTalk manual reference is described as soon as the selector has
+    // the draft to describe it through, which loadResources creates here; the
+    // selector does that on its own, and with no manual reference it does
+    // nothing at all.
     loadResources()
   }
 }
@@ -1303,27 +1456,17 @@ const selectedResourceCount = computed(() => {
   for (const state of checkStates.value.values()) {
     if (state === 'checked') count++
   }
-  return count
+  // Manually entered DingTalk ids are not part of the tree, so they carry no
+  // check state; they are real selections all the same and must be counted, or
+  // a sync of only pasted ids would report "0 selected". A reference the
+  // connector has described does have a row in the tree — that row is already
+  // counted above — so only the undescribed ones are added here, or the same
+  // selection would be counted twice.
+  const described = new Set(Object.keys(dingtalkDescribedRows.value))
+  return count + dingtalkManualReferences.value.filter(id => !described.has(id)).length
 })
 
 const hasExpandableNodes = computed(() => resources.value.some(r => r.has_children))
-
-function resourceIconName(r: Resource): string {
-  // Seafile libraries expand like folders but are the top-level unit a data
-  // source binds to, so they keep the root icon.
-  if (r.type === 'library') return 'root-list'
-  if (r.has_children) return 'folder'
-  switch (r.type) {
-    case 'wiki_space':
-      return 'root-list'
-    case 'book':
-      return 'book'
-    case 'doc_category':
-      return 'folder-open'
-    default:
-      return 'file'
-  }
-}
 
 function expandAllNodes() {
   const expandable = resources.value.filter(r => r.has_children)
@@ -1338,21 +1481,20 @@ function collapseAllNodes() {
   expandedResourceIds.value = new Set()
 }
 
-const resourceTypeLabelMap: Record<string, string> = {
-  wiki_space: 'datasource.resourceType.wikiSpace',
-  doc_category: 'datasource.resourceType.docCategory',
-  book: 'datasource.resourceType.book',
-  library: 'datasource.resourceType.library',
-}
-
+// The picker states a row's kind through the shared presentation module: the
+// DingTalk selector renders the same labels from its own component, and a tree
+// row and a preview row must never disagree about what a resource is.
 function resourceTypeLabel(type: string): string {
-  const key = resourceTypeLabelMap[type]
-  if (key) return t(key)
-  return ''
+  return resourceTypeLabelOf(type, t)
 }
 
-function shouldShowResourceType(type: string): boolean {
-  return !!resourceTypeLabelMap[type]
+// resourceHint explains, in one line, what selecting a described row syncs. It
+// is rendered for a Base in the tree; the selector renders the same line under
+// the Base's own preview row. Without it the documents listed under the Base
+// would read as "the Base's contents", which they are not: they are separate
+// selections.
+function resourceHint(r: Resource): string {
+  return dingtalkResourceHint(r, t)
 }
 
 function resourceRowState(id: string): CheckState {
@@ -1752,6 +1894,30 @@ const drawerConfirmText = computed(() => {
       <h4 class="setting-drawer__section-title">{{ t('datasource.step.resources') }}</h4>
       <p class="ds-resource-hint">{{ t('datasource.resourceHint') }}</p>
 
+      <!-- DingTalk multi-dimensional tables and in-app manual references: a
+           personal-space document and a Base are readable by id but never appear
+           in the lazy-load tree, so they are entered by link or id instead of
+           being picked. The selector owns that entry and the preview of what the
+           data source will sync; the tree below stays the dialog's, and the
+           selection it writes here is the one the wizard submits. -->
+      <DingTalkManualSelection
+        v-if="isDingTalkConnector(form.type)"
+        ref="dingtalkSelection"
+        :selected-resource-ids="selectedResourceIds"
+        :resources="resources"
+        :children-map="childrenMap"
+        :expanded-resource-ids="expandedResourceIds"
+        :loading-children-ids="loadingChildrenIds"
+        :data-source-id="tempDsId"
+        :loading="loadingResources"
+        :saved-reference="dingtalkSavedReference"
+        @update:selected-resource-ids="onDingTalkSelectionChange"
+        @described="onDingTalkDescribed"
+        @expand="toggleExpand"
+      />
+
+
+
       <!-- Drive (云盘) root input: shown alongside the tree (not as a switch).
            The user supplies a folder_token (or a Drive folder URL) and clicks
            "load"; the tree below stays as a placeholder until load succeeds.
@@ -1791,8 +1957,28 @@ const drawerConfirmText = computed(() => {
       </div>
 
       <div v-else-if="loadingResources" class="ds-loading-center"><t-loading /></div>
-      <div v-else-if="resources.length > 0" class="resource-picker">
-        <div class="resource-picker__toolbar">
+      <!-- The expander row must exist before the tree has ever been listed:
+           with a manual selection the listing is deliberately deferred until
+           the row is used, so this branch renders on the selection alone. -->
+      <div
+        v-else-if="resources.length > 0 || hasDingTalkManualSelection"
+        class="resource-picker"
+      >
+        <!-- The picker, demoted: this row is the only way in, and it says what
+             it does — adding to the preview above, never replacing it. It is
+             absent for a tree-only user, who therefore never sees it and gets
+             the tree as it always was. -->
+        <button
+          v-if="hasDingTalkManualSelection"
+          type="button"
+          class="resource-picker__tree-toggle"
+          :aria-expanded="showDingTalkResourceTree"
+          @click="toggleDingTalkResourceTree"
+        >
+          <t-icon :name="showDingTalkResourceTree ? 'chevron-down' : 'chevron-right'" size="12px" />
+          {{ t('datasource.dingtalk.treeAddRow') }}
+        </button>
+        <div v-if="showDingTalkResourceTree" class="resource-picker__toolbar">
           <span class="resource-picker__count">
             {{ t('knowledgeBase.selectedCount', { count: selectedResourceCount }) }}
           </span>
@@ -1806,7 +1992,21 @@ const drawerConfirmText = computed(() => {
             </button>
           </div>
         </div>
-        <div class="resource-picker__list" role="tree">
+        <!-- The listing was attempted but produced nothing (or failed): the
+             expander stays usable and says so instead of showing an empty
+             tree. -->
+        <div
+          v-if="showDingTalkResourceTree && resources.length === 0 && !loadingResources"
+          class="ds-resource-empty"
+        >
+          <p class="ds-empty-title">{{ t('datasource.noResources') }}</p>
+          <div class="ds-empty-actions">
+            <button type="button" class="ds-empty-retry" @click="loadResources">
+              {{ t('datasource.retryLoadResources') }}
+            </button>
+          </div>
+        </div>
+        <div v-if="showDingTalkResourceTree" class="resource-picker__list" role="tree">
           <template
             v-for="{ resource: r, depth, noticeAfter } in visibleTree"
             :key="noticeAfter ? `${r.external_id}__notice` : r.external_id"
@@ -1876,6 +2076,11 @@ const drawerConfirmText = computed(() => {
                 class="resource-picker__type"
               >{{ resourceTypeLabel(r.type) }}</span>
             </span>
+            <span
+              v-if="resourceHint(r)"
+              class="resource-picker__hint"
+              :title="resourceHint(r)"
+            >{{ resourceHint(r) }}</span>
           </div>
           <p
             v-else
@@ -2546,6 +2751,30 @@ const drawerConfirmText = computed(() => {
   gap: 6px;
 }
 
+/* Expander row that opens the (default-collapsed) knowledge-base picker while
+   a manual reference exists. The label itself says the tree adds to the
+   preview instead of replacing it. */
+.resource-picker__tree-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  align-self: flex-start;
+  padding: 0;
+  border: none;
+  background: transparent;
+  font: inherit;
+  font-size: var(--app-text-md);
+  color: var(--td-text-color-primary);
+  cursor: pointer;
+  transition: color var(--app-motion-instant) ease;
+}
+
+.resource-picker__tree-toggle:hover,
+.resource-picker__tree-toggle:focus-visible {
+  color: var(--td-brand-color);
+  outline: none;
+}
+
 .resource-picker__toolbar {
   display: flex;
   align-items: center;
@@ -2713,6 +2942,21 @@ const drawerConfirmText = computed(() => {
   border-radius: var(--app-radius-xs);
   color: var(--td-text-color-placeholder);
   background: color-mix(in srgb, var(--td-text-color-placeholder) 8%, transparent);
+}
+
+/* One line saying what a described row syncs. It is what keeps the wiki
+   documents listed under a 多维表 from reading as that Base's content. */
+.resource-picker__hint {
+  flex-shrink: 0;
+  margin-left: auto;
+  padding-left: 12px;
+  font-size: var(--app-text-2xs);
+  line-height: 1.4;
+  color: var(--td-text-color-placeholder);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 45%;
 }
 
 .resource-picker__notice {

@@ -24,6 +24,11 @@ const (
 	maxResponseBytes = 16 << 20
 	maxPages         = 1000
 	maxAttempts      = 3
+
+	// notableRecordPageSize is how many notable records one records/list call
+	// asks for. The value travels in the request body: this endpoint is
+	// POST-only and ignores maxResults in the query string.
+	notableRecordPageSize = 100
 )
 
 type config struct {
@@ -84,6 +89,38 @@ type node struct {
 	HasChildren       bool   `json:"hasChildren"`
 }
 
+// notableTable is one table of a multi-dimensional table (able). The notable
+// API calls these objects "sheets", but they are tables to their users — records
+// live in them and fields describe their columns — so the connector uses the
+// user-facing word everywhere.
+type notableTable struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+// notableField is one column definition. Type drives how a cell is rendered:
+// the API returns dates as epoch milliseconds, selects as {name,id} objects and
+// users as arrays of objects, none of which are the string a reader expects.
+type notableField struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	Type string `json:"type"`
+}
+
+// notableRecord is one row. Fields is keyed by field name, so a member that is
+// absent from the map is an empty cell rather than a missing column.
+type notableRecord struct {
+	ID     string         `json:"id"`
+	Fields map[string]any `json:"fields"`
+}
+
+// notableRecordPage is one page of records/list.
+type notableRecordPage struct {
+	Records   []notableRecord `json:"records"`
+	NextToken string          `json:"nextToken"`
+	HasMore   bool            `json:"hasMore"`
+}
+
 func (n node) isFolder() bool {
 	return strings.EqualFold(n.Type, "FOLDER")
 }
@@ -122,7 +159,18 @@ type dingTalkAPI interface {
 	listWorkspaces(context.Context) ([]workspace, error)
 	listNodes(context.Context, string) ([]node, error)
 	listNodesPage(ctx context.Context, parentNodeID, pageToken string) ([]node, string, error)
+	// getNode reads one wiki node by its own id. A node in a personal space is
+	// reachable this way but never appears in listWorkspaces, so listing alone
+	// cannot resolve it.
+	getNode(context.Context, string) (node, error)
 	documentBlocks(context.Context, string) ([]json.RawMessage, error)
+	// listNotableTables, listNotableFields and listNotableRecords read a
+	// multi-dimensional table (able) through the notable API. A Base is a wiki
+	// node but not a wiki document and has no listable index, so every call is
+	// addressed by the Base ID the user supplied.
+	listNotableTables(context.Context, string) ([]notableTable, error)
+	listNotableFields(context.Context, string, string) ([]notableField, error)
+	listNotableRecords(context.Context, string, string, string) (notableRecordPage, error)
 }
 
 type client struct {
@@ -406,6 +454,97 @@ func (c *client) documentBlocks(ctx context.Context, documentID string) ([]json.
 		}
 	}
 	return nil, fmt.Errorf("DingTalk document block pagination exceeded %d pages", maxPages)
+}
+
+// getNode reads one wiki node by its own id. Listing a workspace's children
+// requires the workspace root, which only exists for workspaces returned by
+// listWorkspaces; this endpoint answers for a node in a workspace the listing
+// never returns, such as the operator's personal space.
+//
+// Verified live: GET /v2.0/wiki/nodes/{nodeId} answers 200 with
+// {"node":{...same shape as a listed node...}} and 404 nodeNotExist for an
+// unknown id, so the API itself decides whether an explicitly referenced node
+// is readable.
+func (c *client) getNode(ctx context.Context, nodeID string) (node, error) {
+	query := url.Values{"operatorId": {c.operator}}
+	path := "/v2.0/wiki/nodes/" + url.PathEscape(nodeID) + "?" + query.Encode()
+
+	var response struct {
+		Node node `json:"node"`
+	}
+	if err := c.doJSON(ctx, http.MethodGet, path, nil, true, &response); err != nil {
+		return node{}, fmt.Errorf("read DingTalk node: %w", err)
+	}
+	if strings.TrimSpace(response.Node.ID) == "" {
+		return node{}, errors.New("DingTalk returned no node for the requested id")
+	}
+	return response.Node, nil
+}
+
+// listNotableTables names the tables of one multi-dimensional table (Base).
+// This is also the cheapest proof that a Base is readable: there is no endpoint
+// that returns a Base itself, and no endpoint lists Bases at all.
+func (c *client) listNotableTables(ctx context.Context, baseID string) ([]notableTable, error) {
+	query := url.Values{"operatorId": {c.operator}}
+	path := "/v1.0/notable/bases/" + url.PathEscape(baseID) + "/sheets?" + query.Encode()
+
+	var response struct {
+		Value []notableTable `json:"value"`
+	}
+	if err := c.doJSON(ctx, http.MethodGet, path, nil, true, &response); err != nil {
+		return nil, fmt.Errorf("list DingTalk notable tables: %w", err)
+	}
+	return response.Value, nil
+}
+
+// listNotableFields reads one table's column definitions, including each
+// column's type. The response order is the table's column order and is the only
+// order a rendered row may follow.
+func (c *client) listNotableFields(
+	ctx context.Context,
+	baseID, tableID string,
+) ([]notableField, error) {
+	query := url.Values{"operatorId": {c.operator}}
+	path := "/v1.0/notable/bases/" + url.PathEscape(baseID) +
+		"/sheets/" + url.PathEscape(tableID) + "/fields?" + query.Encode()
+
+	var response struct {
+		Value []notableField `json:"value"`
+	}
+	if err := c.doJSON(ctx, http.MethodGet, path, nil, true, &response); err != nil {
+		return nil, fmt.Errorf("list DingTalk notable fields: %w", err)
+	}
+	return response.Value, nil
+}
+
+// listNotableRecords reads one page of a table's records. The endpoint is
+// POST-only — a GET answers 404 — and maxResults belongs in the body, so both
+// facts are encoded here rather than at the call site.
+//
+// operatorId has to be the operator's unionId; a userid is rejected with
+// 400 invalidRequest.inputArgs.invalid.
+func (c *client) listNotableRecords(
+	ctx context.Context,
+	baseID, tableID, nextToken string,
+) (notableRecordPage, error) {
+	query := url.Values{"operatorId": {c.operator}}
+	path := "/v1.0/notable/bases/" + url.PathEscape(baseID) +
+		"/sheets/" + url.PathEscape(tableID) + "/records/list?" + query.Encode()
+
+	body := map[string]any{"maxResults": notableRecordPageSize}
+	if nextToken != "" {
+		body["nextToken"] = nextToken
+	}
+
+	var page notableRecordPage
+	if err := c.doJSON(ctx, http.MethodPost, path, body, true, &page); err != nil {
+		// A wrong base id has produced a 403 whose message blames a missing
+		// Notable.Base.Read permission. That message is misleading: the app is
+		// not necessarily under-permissioned, so it is passed through verbatim
+		// and never translated into connector-level permission guidance.
+		return notableRecordPage{}, fmt.Errorf("list DingTalk notable records: %w", err)
+	}
+	return page, nil
 }
 
 type apiError struct {
