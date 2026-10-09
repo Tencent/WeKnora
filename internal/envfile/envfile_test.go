@@ -11,7 +11,11 @@ import (
 
 func TestLoadLiteBuildLoadsEnvLite(t *testing.T) {
 	dir := t.TempDir()
-	require.NoError(t, os.WriteFile(filepath.Join(dir, ".env.lite"), []byte("DB_DRIVER=sqlite\nJWT_SECRET=from-lite\n"), 0o600))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dir, ".env.lite"),
+		[]byte("DB_DRIVER=sqlite\nJWT_SECRET=from-lite\n"),
+		0o600,
+	))
 	t.Chdir(dir)
 
 	unsetEnvForTest(t, "ENV_FILE", "DB_DRIVER", "JWT_SECRET")
@@ -25,7 +29,11 @@ func TestLoadLiteBuildLoadsEnvLite(t *testing.T) {
 func TestLoadLiteBuildIgnoresDotEnv(t *testing.T) {
 	dir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(dir, ".env.lite"), []byte("DB_DRIVER=sqlite\n"), 0o600))
-	require.NoError(t, os.WriteFile(filepath.Join(dir, ".env"), []byte("DB_DRIVER=postgres\nREDIS_ADDR=redis:6379\n"), 0o600))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(dir, ".env"),
+		[]byte("DB_DRIVER=postgres\nREDIS_ADDR=redis:6379\n"),
+		0o600,
+	))
 	t.Chdir(dir)
 
 	unsetEnvForTest(t, "ENV_FILE", "DB_DRIVER", "REDIS_ADDR")
