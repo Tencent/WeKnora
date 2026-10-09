@@ -5,12 +5,15 @@ package vlm
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"math"
 	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/models/api"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -543,8 +546,23 @@ func (rt *modelRuntime) scaleRPM(factor float64) {
 // Circuit breaker (cross-request, per model id)
 // ---------------------------------------------------------------------------
 
+// errServerDown is the error surfaced to callers when the breaker is open: the
+// per-model circuit breaker has tripped because the endpoint is unreachable, so
+// the request is turned away without ever hitting the model. It carries the
+// ErrServerDown sentinel (for callers that import vlm and can errors.Is it) AND
+// an api.TransportError in the "send request" phase, so callers that only
+// inspect the stable api.* types — e.g. the image task handler on the #3746
+// branch, which cannot import the vlm sentinel — still classify it as a
+// permanent, server-down failure and skip the task retry.
+func errServerDown() error {
+	return fmt.Errorf("%w: %w", ErrServerDown, &api.TransportError{
+		Op:  "send request",
+		Err: errors.New("circuit breaker open: model endpoint is down"),
+	})
+}
+
 // guardCircuit enforces the per-model circuit breaker. It returns nil when the
-// request may proceed, or ErrServerDown (or the caller's context error) when it
+// request may proceed, or errServerDown (or the caller's context error) when it
 // must fail fast. It is called once at the top of every call — BEFORE queuing
 // or admission — so a tripped breaker costs no slot, no wait and no retry:
 // the 100 requests piled behind a dead endpoint all surface immediately instead
@@ -559,7 +577,7 @@ func (rt *modelRuntime) guardCircuit(ctx context.Context) error {
 		return nil
 	case cbServerDown:
 		if time.Now().Before(time.Unix(0, rt.cbProbeAt.Load())) {
-			return ErrServerDown
+			return errServerDown()
 		}
 		// Cooldown elapsed: transition to probing and issue a single probe
 		// permit, then let this request be that probe.
@@ -571,7 +589,7 @@ func (rt *modelRuntime) guardCircuit(ctx context.Context) error {
 		if rt.cbProbeRemaining.Add(-1) >= 0 {
 			return nil // this request is the allowed probe
 		}
-		return ErrServerDown
+		return errServerDown()
 	}
 	return nil
 }
