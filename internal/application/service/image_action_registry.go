@@ -377,15 +377,17 @@ func runOCRAction(ctx context.Context, r *runContext) error {
 
 	ocrText, err := r.predictOCR(ctx, prompt)
 	if err != nil {
-		// NOTE: swallowing the model-side error into a "success" here is the
-		// subject of issue #4064. The vlm manager now passes the error through
-		// transparently (it only reports what the server returned, and runs its
-		// own adaptive control internally); deciding whether this is a retryable
-		// failure vs. a genuine empty answer is the CALLER's responsibility. The
-		// caller-side fix is tracked in works/pr-3746/ (see vlm-caller-err-decoupling.md).
+		// A model-side failure is not "this image carries no text". Any non-2xx
+		// answer — 429, 5xx, a timeout, a transport reset, and the 4xx the
+		// endpoint may reject a request with (400/413/431) — arrives here as one
+		// error, and the caller deliberately does not classify it. Swallowing it
+		// is what let a failed OCR be recorded as a finished image with no
+		// content, the loss #4064 describes. Return it so the pipeline fails and
+		// the task retries; transport-level retry is the manager's job, and an
+		// image that genuinely carries nothing stays the empty branch below.
 		logger.Warnf(ctx, "[ImageMultimodal] OCR failed for %s: %v", r.payload.ImageURL, err)
 		r.out["ocr_error"] = err.Error()
-		return nil
+		return err
 	}
 	ocrText = sanitizeOCRText(ocrText)
 	if ocrText != "" {
