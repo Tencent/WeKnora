@@ -134,27 +134,38 @@ func filterImageHits(results []*types.RetrieveResult, g *storeGroup) {
 }
 
 func keepHit(hit *types.IndexWithScore, retriever types.RetrieverType, g *storeGroup) bool {
-	if hit == nil {
-		return false
-	}
-	if retriever == types.VectorRetrieverType {
-		// Recorded here, before normalization and fusion rewrite Score.
+	if hit != nil && retriever == types.VectorRetrieverType {
+		// Preserve the raw score before normalization and fusion.
 		hit.VectorScore = hit.Score
+	}
+	return imageHitDropReason(hit, retriever, g) == ""
+}
+
+// imageHitDropReason is shared by filtering and diagnostics so the trace uses
+// the actual admission rules. It does not mutate scores or candidate order.
+func imageHitDropReason(hit *types.IndexWithScore, retriever types.RetrieverType, g *storeGroup) string {
+	if hit == nil {
+		return "nil_hit"
 	}
 	image := hit.SourceType == types.ImageSourceType
 	switch retriever {
 	case types.KeywordsRetrieverType:
-		return !image
+		if image {
+			return "duplicate_image_keyword"
+		}
 	case types.VectorRetrieverType:
 		if image {
-			return !staleImage(hit, g) && hit.Score >= imageThreshold(g.VectorThreshold)
+			if staleImage(hit, g) {
+				return "image_recall_disabled"
+			}
+			if !(hit.Score >= imageThreshold(g.VectorThreshold)) {
+				return "below_image_threshold"
+			}
+		} else if g.imageRecall() && !(hit.Score >= g.VectorThreshold) {
+			return "below_text_threshold"
 		}
-		if !g.imageRecall() {
-			return true
-		}
-		return hit.Score >= g.VectorThreshold
 	}
-	return true
+	return ""
 }
 
 // staleImage reports whether a vector hit is an image row of a KB that does
@@ -258,7 +269,7 @@ func refillPool(ctx context.Context, g *storeGroup, retriever types.RetrieverTyp
 // refillSearch runs one refill search and reports whether its answer is
 // complete; refillPool keeps the pool it has otherwise.
 func refillSearch(ctx context.Context, g *storeGroup, p types.RetrieveParams) (*types.RetrieveResult, bool) {
-	more, err := g.Engine.Retrieve(ctx, []types.RetrieveParams{p})
+	more, err := retrieveObservedImagePool(ctx, g, []types.RetrieveParams{p}, "refill")
 	if err == nil && len(more) == 1 && more[0] != nil && more[0].Error != nil {
 		err = more[0].Error
 	}
