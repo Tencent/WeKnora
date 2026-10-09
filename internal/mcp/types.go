@@ -43,8 +43,9 @@ type ServerInfo struct {
 
 // CallToolResult represents the result of tools/call request
 type CallToolResult struct {
-	Content []ContentItem `json:"content"`
-	IsError bool          `json:"isError,omitempty"`
+	Content           []ContentItem `json:"content"`
+	StructuredContent any           `json:"structuredContent,omitempty"`
+	IsError           bool          `json:"isError,omitempty"`
 }
 
 // ContentItem represents a content item in tool result
