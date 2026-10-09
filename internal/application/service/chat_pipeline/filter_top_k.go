@@ -4,6 +4,7 @@ import (
 	"context"
 	"sort"
 
+	"github.com/Tencent/WeKnora/internal/searchutil"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -41,12 +42,17 @@ func (p *PluginFilterTopK) OnEvent(ctx context.Context,
 	filterTopK := func(searchResult []*types.SearchResult, topK int) []*types.SearchResult {
 		sortSearchResultsDeterministically(searchResult)
 		if topK > 0 && len(searchResult) > topK {
+			// Results the rerank stage kept outside its top-k (pictorial
+			// images a text reranker could not judge) ride along.
+			filtered := searchutil.TopKKeepingKept(searchResult, topK)
 			pipelineInfo(ctx, "FilterTopK", "filter", map[string]interface{}{
 				"before": len(searchResult),
-				"after":  topK,
+				"after":  len(filtered),
 			})
-			chatManage.RecordRetrievalCut(types.RetrievalStageFilterTopK, len(searchResult))
-			searchResult = searchResult[:topK]
+			if len(filtered) < len(searchResult) {
+				chatManage.RecordRetrievalCut(types.RetrievalStageFilterTopK, len(searchResult))
+			}
+			searchResult = filtered
 		}
 		return searchResult
 	}

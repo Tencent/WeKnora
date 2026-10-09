@@ -13,12 +13,18 @@ import (
 // PluginRerank implements reranking functionality for chat pipeline
 type PluginRerank struct {
 	modelService interfaces.ModelService // Service to access rerank models
+	// kbService reads the images of image hits for a reranker that scores
+	// images. Nil scores them by their text.
+	kbService interfaces.KnowledgeBaseService
 }
 
 // NewPluginRerank creates a new rerank plugin instance
-func NewPluginRerank(eventManager *EventManager, modelService interfaces.ModelService) *PluginRerank {
+func NewPluginRerank(
+	eventManager *EventManager, modelService interfaces.ModelService, kbService interfaces.KnowledgeBaseService,
+) *PluginRerank {
 	res := &PluginRerank{
 		modelService: modelService,
+		kbService:    kbService,
 	}
 	eventManager.Register(res)
 	return res
@@ -104,6 +110,10 @@ func (p *PluginRerank) OnEvent(ctx context.Context,
 		TopK:             max(1, chatManage.RerankTopK),
 		MaxCandidates:    max(reranking.DefaultMaxCandidates, chatManage.RerankTopK),
 		FallbackMinScore: reranking.FallbackMinScore(chatManage.SearchTargets.HasRecallThresholdOverride()),
+		ImageKeepScore:   reranking.ImageKeepScoreFor(chatManage.VectorThreshold),
+	}
+	if p.kbService != nil {
+		opts.LoadImage = p.kbService.ReadChunkImage
 	}
 	if chatManage.FAQPriorityEnabled {
 		opts.FAQScoreBoost = chatManage.FAQScoreBoost

@@ -78,6 +78,32 @@ func (c *Client) BuildRequestBody(query string, documents []string) (map[string]
 	return out, nil
 }
 
+// imagePassage is a passage that is an image. The VLM reranking reference:
+// images "must be base64 data URLs, such as data:image/jpeg;base64,...",
+// and "For image-only passages, omit text. Do not set text to an empty
+// string." Text passages keep their own type, so their shape never changes.
+type imagePassage struct {
+	Image string `json:"image"`
+}
+
+// BuildImageRequestBody is the golden-test entry point for image passages.
+func (c *Client) BuildImageRequestBody(query string, images []api.EmbedImage) (map[string]any, error) {
+	passages := make([]imagePassage, len(images))
+	for i, img := range images {
+		passages[i] = imagePassage{Image: img.DataURI()}
+	}
+	body, err := c.BuildRequestBody(query, nil)
+	if err != nil {
+		return nil, err
+	}
+	body["passages"] = passages
+	return roundTrip(body)
+}
+
+// AcceptsImages is true: image passages are part of the NIM ranking schema.
+// Only the VL models score them, which their catalog input says.
+func (c *Client) AcceptsImages() bool { return true }
+
 // Rerank scores documents against the query. The returned scores are logits;
 // see the package comment.
 func (c *Client) Rerank(ctx context.Context, query string, documents []string) ([]api.RerankResult, error) {
@@ -85,6 +111,24 @@ func (c *Client) Rerank(ctx context.Context, query string, documents []string) (
 	if err != nil {
 		return nil, err
 	}
+	out, err := c.post(ctx, body, len(documents))
+	for i := range out {
+		out[i].Text = documents[out[i].Index]
+	}
+	return out, err
+}
+
+// RerankImages scores image passages against the query; indices refer to
+// images.
+func (c *Client) RerankImages(ctx context.Context, query string, images []api.EmbedImage) ([]api.RerankResult, error) {
+	body, err := c.BuildImageRequestBody(query, images)
+	if err != nil {
+		return nil, err
+	}
+	return c.post(ctx, body, len(images))
+}
+
+func (c *Client) post(ctx context.Context, body map[string]any, count int) ([]api.RerankResult, error) {
 	var decoded response
 	url := c.cfg.Endpoint.Resolve(c.cfg.Settings.Path)
 	if err := c.cfg.Endpoint.PostJSON(ctx, url, body, &decoded); err != nil {
@@ -92,14 +136,23 @@ func (c *Client) Rerank(ctx context.Context, query string, documents []string) (
 	}
 	out := make([]api.RerankResult, 0, len(decoded.Rankings))
 	for _, item := range decoded.Rankings {
-		if item.Index < 0 || item.Index >= len(documents) {
-			return nil, fmt.Errorf("rerank index %d out of range for %d documents", item.Index, len(documents))
+		if item.Index < 0 || item.Index >= count {
+			return nil, fmt.Errorf("rerank index %d out of range for %d documents", item.Index, count)
 		}
-		out = append(out, api.RerankResult{
-			Index: item.Index,
-			Score: item.Logit,
-			Text:  documents[item.Index],
-		})
+		out = append(out, api.RerankResult{Index: item.Index, Score: item.Logit})
+	}
+	return out, nil
+}
+
+// roundTrip renders a body through JSON, so golden tests compare plain maps.
+func roundTrip(body map[string]any) (map[string]any, error) {
+	raw, err := json.Marshal(body)
+	if err != nil {
+		return nil, fmt.Errorf("marshal request: %w", err)
+	}
+	var out map[string]any
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, fmt.Errorf("marshal request: %w", err)
 	}
 	return out, nil
 }

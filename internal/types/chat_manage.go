@@ -2,6 +2,7 @@ package types
 
 import (
 	"maps"
+	"slices"
 	"strings"
 )
 
@@ -171,24 +172,30 @@ type PipelineState struct {
 	// History (a first turn) is not fetched again by a later stage.
 	HistoryLoaded bool `json:"-"`
 
-	SearchResult         []*SearchResult   `json:"-"`
-	RerankResult         []*SearchResult   `json:"-"`
-	MergeResult          []*SearchResult   `json:"-"`
-	Entity               []string          `json:"-"`
-	EntityKBIDs          []string          `json:"-"`
-	EntityKnowledge      map[string]string `json:"-"`
-	GraphResult          *GraphData        `json:"-"`
-	UserContent          string            `json:"-"`
-	RenderedContexts     string            `json:"-"`
-	ChatResponse         *ChatResponse     `json:"-"`
-	ImageDescription     string            `json:"-"`
-	QuotedContext        string            `json:"-"` // Quoted message text, injected at LLM prompt stage
-	SystemPromptOverride string            `json:"-"`
+	SearchResult     []*SearchResult   `json:"-"`
+	RerankResult     []*SearchResult   `json:"-"`
+	MergeResult      []*SearchResult   `json:"-"`
+	Entity           []string          `json:"-"`
+	EntityKBIDs      []string          `json:"-"`
+	EntityKnowledge  map[string]string `json:"-"`
+	GraphResult      *GraphData        `json:"-"`
+	UserContent      string            `json:"-"`
+	RenderedContexts string            `json:"-"`
+	// ContextImages are retrieved images, as data URIs, shown to a vision
+	// chat model beside the contexts they belong to; see INTO_CHAT_MESSAGE.
+	ContextImages []string `json:"-"`
+	// ContextImageChunkIDs identifies the source of each image for final model handle rendering.
+	ContextImageChunkIDs []string      `json:"-"`
+	ChatResponse         *ChatResponse `json:"-"`
+	ImageDescription     string        `json:"-"`
+	QuotedContext        string        `json:"-"` // Quoted message text, injected at LLM prompt stage
+	SystemPromptOverride string        `json:"-"`
 	// Truncation records the first ranked-list cut this turn: the stage that
 	// dropped candidates and the size of the candidate pool it cut. Nil when
 	// no stage dropped anything, so a prompt only carries the caveat when its
 	// context really is a subset.
 	Truncation *RetrievalTruncation `json:"-"`
+
 	// MemoryPrompt is the long-term memory envelope appended to the system
 	// prompt for this turn, empty when memory is off or nothing matched.
 	MemoryPrompt string `json:"-"`
@@ -341,6 +348,8 @@ func (c *ChatManage) Clone() *ChatManage {
 			MemoryPrompt:         c.MemoryPrompt,
 			UsedMemories:         append(UsedMemories(nil), c.UsedMemories...),
 			RenderedContexts:     c.RenderedContexts,
+			ContextImages:        slices.Clone(c.ContextImages),
+			ContextImageChunkIDs: slices.Clone(c.ContextImageChunkIDs),
 			Entity:               entity,
 			EntityKBIDs:          entityKBIDs,
 			EntityKnowledge:      entityKnowledge,

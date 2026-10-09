@@ -335,6 +335,7 @@ func (p *PluginMerge) resolveParentChunks(
 	}
 
 	for _, r := range results {
+		searchutil.CaptureImageEvidence(r)
 		if r.ParentChunkID == "" {
 			continue
 		}

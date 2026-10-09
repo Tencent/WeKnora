@@ -3,7 +3,6 @@ package embedding
 import (
 	"context"
 	"fmt"
-	"slices"
 	"strings"
 	"time"
 
@@ -12,6 +11,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/models/api/dashscopeembeddings"
 	"github.com/Tencent/WeKnora/internal/models/api/googleembeddings"
 	"github.com/Tencent/WeKnora/internal/models/api/openaiembeddings"
+	"github.com/Tencent/WeKnora/internal/models/imageprep"
 	modelruntime "github.com/Tencent/WeKnora/internal/models/runtime"
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -172,7 +172,7 @@ func (e *protocolEmbedder) BatchEmbed(ctx context.Context, texts []string) ([][]
 func (e *protocolEmbedder) AcceptsImages() bool { return e.images != nil }
 
 func (e *protocolEmbedder) ImageLimits() ImageLimits {
-	return ImageLimits{MaxBytes: e.settings.MaxImageBytes, MIMETypes: slices.Clone(e.settings.ImageMIMETypes)}
+	return imageprep.LimitsOf(e.settings.ImageInput)
 }
 
 // BatchEmbedImages checks every image against the documented limits before

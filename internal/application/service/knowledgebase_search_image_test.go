@@ -496,3 +496,30 @@ func TestRetrieveFromStoresKeepsThePoolWhenARefillIsIncomplete(t *testing.T) {
 		})
 	}
 }
+
+// Fusion turns Score into a rank-based number; reranking still needs to know
+// how close an image's vector actually was, so the engine's similarity is
+// recorded before that happens and survives it.
+func TestVectorScoreSurvivesFusion(t *testing.T) {
+	g := &storeGroup{ImageKBIDs: recalls("kb"), VectorThreshold: 0.3}
+	vector := &types.RetrieveResult{RetrieverType: types.VectorRetrieverType, Results: []*types.IndexWithScore{
+		hit("text", 0.62, types.ChunkSourceType),
+		hit("image", 0.41, types.ImageSourceType),
+	}}
+	keyword := &types.RetrieveResult{RetrieverType: types.KeywordsRetrieverType, Results: []*types.IndexWithScore{
+		hit("text", 7.5, types.ChunkSourceType),
+		hit("kw-only", 3.1, types.ChunkSourceType),
+	}}
+	filterImageHits([]*types.RetrieveResult{vector, keyword}, g)
+
+	fused := fuseOrDeduplicate(context.Background(),
+		[][]*types.IndexWithScore{vector.Results}, [][]*types.IndexWithScore{keyword.Results}, nil)
+	byID := map[string]*types.IndexWithScore{}
+	for _, h := range fused {
+		byID[h.ChunkID] = h
+	}
+	assert.Equal(t, 0.62, byID["text"].VectorScore)
+	assert.Equal(t, 0.41, byID["image"].VectorScore)
+	assert.NotEqual(t, 0.41, byID["image"].Score, "fusion rewrote Score")
+	assert.Zero(t, byID["kw-only"].VectorScore, "a keyword hit has no vector similarity")
+}

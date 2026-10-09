@@ -2223,6 +2223,10 @@
         "id": "jina-reranker-m0",
         "name": "Jina Reranker m0 (multimodal)",
         "type": "Rerank",
+        "input": [
+          "text",
+          "image"
+        ],
         "context_window": 10000,
         "source": "https://jina.ai/reranker/"
       },
@@ -3435,6 +3439,10 @@
         "id": "nvidia/llama-nemotron-rerank-vl-1b-v2",
         "name": "Llama Nemotron Rerank VL 1B v2",
         "type": "Rerank",
+        "input": [
+          "text",
+          "image"
+        ],
         "source": "https://build.nvidia.com"
       },
       {
