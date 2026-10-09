@@ -120,6 +120,44 @@ func TestSeatbeltDeniesRecreatingProtectedDirectory(t *testing.T) {
 	require.NotEqual(t, 0, status.Code, out)
 }
 
+// A second writable root that covers the workspace must not reopen its .git.
+func TestSeatbeltCoveringRootKeepsGitReadOnly(t *testing.T) {
+	backend, p, base := darwinFixture(t)
+	p.WritableRoots = append(p.WritableRoots, core.WritableRoot{Path: base})
+
+	status, out := runSandboxed(t, backend, p, `echo x > ./.git/config`)
+	require.NotEqual(t, 0, status.Code, out)
+	require.NoFileExists(t, filepath.Join(p.Cwd, ".git", "config"))
+
+	status, out = runSandboxed(t, backend, p, `echo x > ../beside.txt`)
+	require.Equal(t, 0, status.Code, out)
+}
+
+func TestSeatbeltProtectGitDirsDeniesEveryGitDirUnderTheRoot(t *testing.T) {
+	backend, p, base := darwinFixture(t)
+	other := filepath.Join(base, "Other Project")
+	require.NoError(t, os.MkdirAll(filepath.Join(other, "app", ".git", "hooks"), 0o755))
+	p.WritableRoots = append(p.WritableRoots, core.WritableRoot{Path: other, ProtectGitDirs: true})
+
+	for _, script := range []string{
+		`echo x > "` + filepath.Join(other, "app", ".git", "hooks", "pre-commit") + `"`,
+		`rm -rf "` + filepath.Join(other, "app", ".git") + `"`,
+		`mv "` + filepath.Join(other, "app", ".git") + `" "` + filepath.Join(other, "app", "moved") + `"`,
+		`mkdir -p "` + filepath.Join(other, "new", ".git", "hooks") + `"`,
+		`mkdir -p "` + filepath.Join(other, "upper", ".GIT") + `"`,
+	} {
+		status, out := runSandboxed(t, backend, p, script)
+		require.NotEqual(t, 0, status.Code, script+"\n"+out)
+	}
+	require.DirExists(t, filepath.Join(other, "app", ".git", "hooks"))
+	require.NoDirExists(t, filepath.Join(other, "new", ".git"))
+
+	app := filepath.Join(other, "app")
+	status, out := runSandboxed(t, backend, p,
+		`echo x > "`+filepath.Join(app, "main.go")+`" && echo x > "`+filepath.Join(app, ".gitignore")+`"`)
+	require.Equal(t, 0, status.Code, out)
+}
+
 func TestSeatbeltDeniesSymlinkEscapeToSecrets(t *testing.T) {
 	backend, p, base := darwinFixture(t)
 	status, out := runSandboxed(t, backend, p,
@@ -159,6 +197,39 @@ func TestSeatbeltAllowsReadingWorkspaceInsidePrivateRoot(t *testing.T) {
 	status, out := runSandboxed(t, backend, p, `echo body > ./f.txt && cat ./f.txt`)
 	require.Equal(t, 0, status.Code, out)
 	require.Contains(t, out, "body")
+}
+
+func TestSeatbeltProjectFromBuilderKeepsEveryGitDirReadOnly(t *testing.T) {
+	backend, err := New()
+	require.NoError(t, err)
+	require.NoError(t, backend.Available())
+
+	home, err := filepath.EvalSymlinks(t.TempDir())
+	require.NoError(t, err)
+	project := filepath.Join(home, "Documents", "proj")
+	submodule := filepath.Join(project, "vendor", "lib")
+	require.NoError(t, os.MkdirAll(filepath.Join(submodule, ".git", "hooks"), 0o755))
+
+	builder := core.NewPolicyBuilder(home, filepath.Join(home, "Library", "App"))
+	p, err := builder.Build(core.ModeAuto, core.Workspace{
+		Kind: core.WorkspaceProject, Root: project, ProtectGit: true,
+	})
+	require.NoError(t, err)
+
+	for _, script := range []string{
+		`mkdir ./.GIT`,
+		`mkdir ./.git`,
+		`echo x > ./vendor/lib/.git/hooks/pre-commit`,
+		`rm -rf ./vendor/lib/.git`,
+	} {
+		status, out := runSandboxed(t, backend, p, script)
+		require.NotEqual(t, 0, status.Code, script+"\n"+out)
+	}
+	require.NoDirExists(t, filepath.Join(project, ".GIT"))
+	require.NoFileExists(t, filepath.Join(submodule, ".git", "hooks", "pre-commit"))
+
+	status, out := runSandboxed(t, backend, p, `echo x > ./vendor/lib/main.go && echo x > ./.gitignore`)
+	require.Equal(t, 0, status.Code, out)
 }
 
 // End-to-end through the real PolicyBuilder rather than a hand-written
