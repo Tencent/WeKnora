@@ -552,7 +552,8 @@ func TestAttachmentPromptUsesLayoutRoot(t *testing.T) {
 	})
 
 	require.Contains(t, prompt, `root="/Users/dev/appdata/s1/input"`)
-	require.Contains(t, prompt, "Edit files in place under /Users/dev/My Project")
+	require.Contains(t, prompt, "Edit files under /Users/dev/My Project")
+	require.Contains(t, prompt, "already approved for this session")
 	require.NotContains(t, prompt, "/workspace")
 	require.NotContains(t, prompt, "only directory collected")
 }

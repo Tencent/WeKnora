@@ -301,10 +301,12 @@ func formatToolGuidanceForMode(names []string, skillInstallMode bool, layout san
 			if root := sandbox.PromptSafePath(layout.Root); root != "" {
 				b.WriteString("Session workspace: ")
 				b.WriteString(root)
-				b.WriteString(". Edit files in place under that folder. Commands start from ")
+				b.WriteString(". That folder is the default place to edit, along with directories the user " +
+					"has already approved for this session. Commands start from ")
 				b.WriteString(root)
-				b.WriteString(" on every call unless work_dir names a subdirectory. " +
-					"Files persist on the user's machine.\n")
+				b.WriteString(" on every call unless work_dir names a subdirectory or an approved directory. " +
+					"shell_exec may try a path outside the workspace; the sandbox asks the user before opening it. " +
+					"Deletes ask even inside the workspace. Files persist on the user's machine.\n")
 			}
 		} else {
 			b.WriteString("Session workspace: /workspace. Preserve uploaded originals in /workspace/input. ")
