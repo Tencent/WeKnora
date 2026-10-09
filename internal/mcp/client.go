@@ -616,8 +616,9 @@ func (c *mcpGoClient) CallTool(ctx context.Context, name string, args map[string
 	}
 
 	return &CallToolResult{
-		IsError: result.IsError,
-		Content: toolContentItems(result.Content),
+		IsError:           result.IsError,
+		Content:           toolContentItems(result.Content),
+		StructuredContent: result.StructuredContent,
 	}, nil
 }
 
