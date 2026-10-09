@@ -20,6 +20,31 @@ type fakeAPI struct {
 	nodeErrors  map[string]error
 	blockErrors map[string]error
 	blockCalls  map[string]int
+
+	// Native DingTalk spreadsheets (axls). Sheets are listed per workbook,
+	// their extents are read per sheet, and cells are served per ranges window
+	// so a test can assert the exact windows the connector asked for.
+	sheets           map[string][]sheet
+	sheetInfos       map[string]sheet
+	sheetValues      map[string][][]string
+	sheetListErrors  map[string]error
+	sheetInfoErrors  map[string]error
+	sheetRangeErrors map[string]error
+	sheetListCalls   map[string]int
+	sheetRangeCalls  []string
+	// sheetRangeFunc, when set, synthesises a window's cells instead of reading
+	// sheetValues: chunking and cap tests need rows that depend on the range.
+	sheetRangeFunc func(workbookID, sheetID, ranges string) ([][]string, error)
+}
+
+// sheetKey addresses one sheet's metadata in the fake.
+func sheetKey(workbookID, sheetID string) string {
+	return workbookID + "/" + sheetID
+}
+
+// sheetRangeKey addresses one ranges request in the fake.
+func sheetRangeKey(workbookID, sheetID, ranges string) string {
+	return sheetKey(workbookID, sheetID) + "/" + ranges
 }
 
 func (f *fakeAPI) listWorkspaces(context.Context) ([]workspace, error) {
@@ -50,6 +75,39 @@ func (f *fakeAPI) documentBlocks(_ context.Context, documentID string) ([]json.R
 	return f.blocks[documentID], nil
 }
 
+func (f *fakeAPI) listSheets(_ context.Context, workbookID string) ([]sheet, error) {
+	if f.sheetListCalls == nil {
+		f.sheetListCalls = make(map[string]int)
+	}
+	f.sheetListCalls[workbookID]++
+	if err := f.sheetListErrors[workbookID]; err != nil {
+		return nil, err
+	}
+	return f.sheets[workbookID], nil
+}
+
+func (f *fakeAPI) sheetInfo(_ context.Context, workbookID, sheetID string) (sheet, error) {
+	if err := f.sheetInfoErrors[sheetKey(workbookID, sheetID)]; err != nil {
+		return sheet{}, err
+	}
+	return f.sheetInfos[sheetKey(workbookID, sheetID)], nil
+}
+
+func (f *fakeAPI) sheetRange(
+	_ context.Context,
+	workbookID, sheetID, ranges string,
+) ([][]string, error) {
+	key := sheetRangeKey(workbookID, sheetID, ranges)
+	f.sheetRangeCalls = append(f.sheetRangeCalls, key)
+	if f.sheetRangeFunc != nil {
+		return f.sheetRangeFunc(workbookID, sheetID, ranges)
+	}
+	if err := f.sheetRangeErrors[key]; err != nil {
+		return nil, err
+	}
+	return f.sheetValues[key], nil
+}
+
 func testConnector(api dingTalkAPI) *Connector {
 	return &Connector{newAPI: func(*config) dingTalkAPI { return api }}
 }
@@ -64,6 +122,15 @@ func testConfig(resources ...string) *types.DataSourceConfig {
 		},
 		ResourceIDs: resources,
 	}
+}
+
+// testConfigWithSheets turns include_sheets on. Cases that exercise the
+// spreadsheet ingest path have to opt in, because the switch defaults to off
+// and testConfig deliberately leaves the settings bag empty.
+func testConfigWithSheets(resources ...string) *types.DataSourceConfig {
+	cfg := testConfig(resources...)
+	cfg.Settings = map[string]interface{}{"include_sheets": true}
+	return cfg
 }
 
 func rawJSON(value string) json.RawMessage {
@@ -687,7 +754,7 @@ func TestScanScopeReportsSkippedNodesAndSingleDocumentScopeHasNone(t *testing.T)
 		ResourceID:  "resource",
 		Reference:   resourceReference{WorkspaceID: "space"},
 		StartNodeID: "root",
-	})
+	}, documentSettings{})
 	if err != nil {
 		t.Fatalf("scanScope() error = %v", err)
 	}
@@ -713,61 +780,106 @@ func TestScanScopeReportsSkippedNodesAndSingleDocumentScopeHasNone(t *testing.T)
 		ResourceID: "resource",
 		Reference:  resourceReference{WorkspaceID: "space"},
 		Document:   &document,
-	})
+	}, documentSettings{})
 	if err != nil || len(documents) != 1 || documents[0].ID != "doc" || len(skipped) != 0 {
 		t.Fatalf("single-document scanScope() = %#v, %#v, %v", documents, skipped, err)
 	}
 }
 
 // The reason has to say which kind of unsupported a node is: a video is skipped
-// on purpose, a native type has simply not been implemented.
+// on purpose, a native type has simply not been implemented, and a spreadsheet
+// the connector could read is skipped only because its switch is off.
 func TestSkipReasonDistinguishesMediaFromUnimplementedTypes(t *testing.T) {
+	sheetsOn := documentSettings{IncludeSheets: true}
 	for _, testCase := range []struct {
-		label string
-		node  node
-		want  string
+		label    string
+		node     node
+		settings documentSettings
+		want     string
 	}{
 		{
 			"video category",
 			node{Type: "FILE", Category: "VIDEO", Extension: "mp4"},
+			documentSettings{},
 			"video/media files are deliberately not downloaded by this connector",
 		},
 		{
 			"video extension without a category",
 			node{Type: "FILE", Category: "OTHER", Extension: "MOV"},
+			documentSettings{},
 			"video/media files are deliberately not downloaded by this connector",
 		},
 		{
 			"audio extension",
 			node{Type: "FILE", Category: "OTHER", Extension: "mp3"},
+			documentSettings{},
 			"video/media files are deliberately not downloaded by this connector",
 		},
 		{
 			// Only the types with a name worth printing are in the map; every
 			// other unsupported node gets the generic reason. Kept as a
-			// regression guard on the map.
+			// regression guard on the map. The sample carries no extension:
+			// naming a concrete type here would duplicate that type's own
+			// entry, and naming an ingestible type would make the guard assert
+			// the opposite of what the connector does.
 			"type without a dedicated label",
-			node{Type: "FILE", Category: "ALIDOC", Extension: "axls"},
+			node{Type: "FILE", Category: "ALIDOC"},
+			documentSettings{},
 			"no ingest path for this DingTalk node type in this connector yet",
+		},
+		{
+			// A spreadsheet does have an ingest path, so an axls node that is
+			// still skipped must not be told otherwise: the skip names the type
+			// and the node shape it is read from.
+			"spreadsheet outside its file node shape",
+			node{Type: "FOLDER", Category: "ALIDOC", Extension: "axls"},
+			documentSettings{},
+			"DingTalk spreadsheet is ingested only from a FILE node in the ALIDOC category",
 		},
 		{
 			"multidimensional table",
 			node{Type: "FILE", Category: "ALIDOC", Extension: "able"},
+			documentSettings{},
 			"DingTalk multi-dimensional table has no ingest path in this connector yet",
 		},
 		{
 			"mind map",
 			node{Type: "FILE", Category: "ALIDOC", Extension: "amind"},
+			documentSettings{},
 			"DingTalk mind map has no ingest path in this connector yet",
 		},
 		{
 			"unknown type",
 			node{Type: "FILE", Category: "OTHER", Extension: "bin"},
+			documentSettings{},
 			"no ingest path for this DingTalk node type in this connector yet",
+		},
+		{
+			// The skip is not a missing feature: the workbook is readable, the
+			// data source simply never opted in, and the log has to say so.
+			"spreadsheet with the switch off",
+			node{Type: "FILE", Category: "ALIDOC", Extension: "axls"},
+			documentSettings{},
+			"spreadsheets are not ingested because include_sheets is not enabled for this data source",
+		},
+		{
+			// A node that is not a spreadsheet keeps its own reason even while
+			// the switch is on, so the switch never relabels a node it does not
+			// govern.
+			"unsupported type with the switch on",
+			node{Type: "FILE", Category: "ALIDOC", Extension: "amind"},
+			sheetsOn,
+			"DingTalk mind map has no ingest path in this connector yet",
+		},
+		{
+			"media with the switch on",
+			node{Type: "FILE", Category: "VIDEO", Extension: "mp4"},
+			sheetsOn,
+			"video/media files are deliberately not downloaded by this connector",
 		},
 	} {
 		t.Run(testCase.label, func(t *testing.T) {
-			if got := skipReason(testCase.node); got != testCase.want {
+			if got := skipReason(testCase.node, testCase.settings); got != testCase.want {
 				t.Fatalf("skipReason() = %q, want %q", got, testCase.want)
 			}
 		})

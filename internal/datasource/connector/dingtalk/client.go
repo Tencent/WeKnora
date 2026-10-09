@@ -84,14 +84,57 @@ type node struct {
 	HasChildren       bool   `json:"hasChildren"`
 }
 
+// sheet is one worksheet of a native DingTalk spreadsheet (axls). The response
+// also carries rowCount and columnCount, but those describe the sheet's nominal
+// size (a fresh sheet is 200x40) and are far larger than the data; only
+// lastNonEmptyRow/lastNonEmptyColumn bound a read. An empty sheet reports -1 for
+// both.
+type sheet struct {
+	ID                 string `json:"id"`
+	Name               string `json:"name"`
+	LastNonEmptyRow    int    `json:"lastNonEmptyRow"`
+	LastNonEmptyColumn int    `json:"lastNonEmptyColumn"`
+}
+
 func (n node) isFolder() bool {
 	return strings.EqualFold(n.Type, "FOLDER")
 }
 
-func (n node) isDocument() bool {
+// isSheet reports whether the node is a native DingTalk spreadsheet (axls).
+// Spreadsheets share the ALIDOC category with adoc documents but are read
+// through the workbooks API instead of the blocks API.
+func (n node) isSheet() bool {
+	return strings.EqualFold(n.Type, "FILE") &&
+		strings.EqualFold(n.Category, "ALIDOC") &&
+		strings.EqualFold(n.Extension, "axls")
+}
+
+// isOnlineDocument reports whether the node is a native DingTalk document whose
+// blocks can be read through the doc suites API.
+func (n node) isOnlineDocument() bool {
 	return strings.EqualFold(n.Type, "FILE") &&
 		strings.EqualFold(n.Category, "ALIDOC") &&
 		strings.EqualFold(n.Extension, "adoc")
+}
+
+// isDocument reports whether the connector has a read path for the node at all:
+// a native adoc document through the blocks API or a native spreadsheet through
+// the workbooks API. Whether a given data source takes it is isIngestible's
+// answer, because a sheet is guarded by its own switch.
+func (n node) isDocument() bool {
+	return n.isOnlineDocument() || n.isSheet()
+}
+
+// isIngestible reports whether this data source ingests the node: a read path
+// must exist and the switch guarding it must be on. A sheet has to be admitted
+// here rather than only in the sync path, because both the workspace scan and
+// the picker select nodes by this predicate — a sheet left out of it is never
+// enumerated at all, not merely rendered as unsupported.
+func (n node) isIngestible(settings documentSettings) bool {
+	if n.isOnlineDocument() {
+		return true
+	}
+	return settings.IncludeSheets && n.isSheet()
 }
 
 func (n node) title() string {
@@ -123,6 +166,12 @@ type dingTalkAPI interface {
 	listNodes(context.Context, string) ([]node, error)
 	listNodesPage(ctx context.Context, parentNodeID, pageToken string) ([]node, string, error)
 	documentBlocks(context.Context, string) ([]json.RawMessage, error)
+	// listSheets, sheetInfo and sheetRange read a native DingTalk spreadsheet
+	// (axls). The wiki node id of such a node is already its workbook id, so
+	// these calls need no further lookup to translate it.
+	listSheets(context.Context, string) ([]sheet, error)
+	sheetInfo(context.Context, string, string) (sheet, error)
+	sheetRange(context.Context, string, string, string) ([][]string, error)
 }
 
 type client struct {
@@ -406,6 +455,66 @@ func (c *client) documentBlocks(ctx context.Context, documentID string) ([]json.
 		}
 	}
 	return nil, fmt.Errorf("DingTalk document block pagination exceeded %d pages", maxPages)
+}
+
+// listSheets names every worksheet of a native DingTalk spreadsheet (axls). The
+// wiki node id is the workbook id itself, so unlike an uploaded file there is
+// no extra lookup to translate it first.
+func (c *client) listSheets(ctx context.Context, workbookID string) ([]sheet, error) {
+	query := url.Values{"operatorId": {c.operator}}
+	path := "/v1.0/doc/workbooks/" + url.PathEscape(workbookID) + "/sheets?" + query.Encode()
+
+	var response struct {
+		Value []sheet `json:"value"`
+	}
+	if err := c.doJSON(ctx, http.MethodGet, path, nil, true, &response); err != nil {
+		return nil, fmt.Errorf("list DingTalk workbook sheets: %w", err)
+	}
+	return response.Value, nil
+}
+
+// sheetInfo reads one worksheet's metadata, which is where the extent of the
+// real data (lastNonEmptyRow/lastNonEmptyColumn) is reported.
+func (c *client) sheetInfo(ctx context.Context, workbookID, sheetID string) (sheet, error) {
+	query := url.Values{"operatorId": {c.operator}}
+	path := "/v1.0/doc/workbooks/" + url.PathEscape(workbookID) +
+		"/sheets/" + url.PathEscape(sheetID) + "?" + query.Encode()
+
+	var info sheet
+	if err := c.doJSON(ctx, http.MethodGet, path, nil, true, &info); err != nil {
+		return sheet{}, fmt.Errorf("read DingTalk sheet info: %w", err)
+	}
+	return info, nil
+}
+
+// sheetRange reads the cells of one A1-style range, row-major. The endpoint has
+// returned both plain strings and {"text": ...} cell objects, so the payload is
+// decoded generically and each cell is reduced to its text: a shape change must
+// not silently drop a column of data.
+func (c *client) sheetRange(
+	ctx context.Context,
+	workbookID, sheetID, ranges string,
+) ([][]string, error) {
+	query := url.Values{"operatorId": {c.operator}}
+	path := "/v1.0/doc/workbooks/" + url.PathEscape(workbookID) +
+		"/sheets/" + url.PathEscape(sheetID) +
+		"/ranges/" + url.PathEscape(ranges) + "?" + query.Encode()
+
+	var response struct {
+		Values [][]any `json:"values"`
+	}
+	if err := c.doJSON(ctx, http.MethodGet, path, nil, true, &response); err != nil {
+		return nil, fmt.Errorf("read DingTalk sheet range: %w", err)
+	}
+	rows := make([][]string, len(response.Values))
+	for i, row := range response.Values {
+		cells := make([]string, len(row))
+		for j, cell := range row {
+			cells[j] = tableCellText(cell)
+		}
+		rows[i] = cells
+	}
+	return rows, nil
 }
 
 type apiError struct {
