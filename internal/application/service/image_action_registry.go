@@ -377,6 +377,12 @@ func runOCRAction(ctx context.Context, r *runContext) error {
 
 	ocrText, err := r.predictOCR(ctx, prompt)
 	if err != nil {
+		// NOTE: swallowing the model-side error into a "success" here is the
+		// subject of issue #4064. The vlm manager now passes the error through
+		// transparently (it only reports what the server returned, and runs its
+		// own adaptive control internally); deciding whether this is a retryable
+		// failure vs. a genuine empty answer is the CALLER's responsibility. The
+		// caller-side fix is tracked in works/pr-3746/ (see vlm-caller-err-decoupling.md).
 		logger.Warnf(ctx, "[ImageMultimodal] OCR failed for %s: %v", r.payload.ImageURL, err)
 		r.out["ocr_error"] = err.Error()
 		return nil

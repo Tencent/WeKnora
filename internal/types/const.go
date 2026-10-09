@@ -104,6 +104,10 @@ const (
 	// ChatParserEngineContextKey carries the resolved parser engine
 	// from the agent's ChatParserEngineRules for chat attachment processing.
 	ChatParserEngineContextKey ContextKey = "ChatParserEngine"
+	// VLMCallerContextKey carries the CallerType identifying who issued a VLM
+	// request, so the vlm manager can assign priority and concurrency budget.
+	// See WithVLMCaller / VLMCallerFromContext.
+	VLMCallerContextKey ContextKey = "VLMCaller"
 )
 
 // String returns the string representation of the context key

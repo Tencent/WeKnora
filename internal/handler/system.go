@@ -24,6 +24,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/infrastructure/docparser"
 	"github.com/Tencent/WeKnora/internal/logger"
 	modellimiter "github.com/Tencent/WeKnora/internal/models/limiter"
+	"github.com/Tencent/WeKnora/internal/models/vlm"
 	"github.com/Tencent/WeKnora/internal/runtime"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -1726,7 +1727,11 @@ type RuntimeQueuesResponse struct {
 	Queues                []types.QueueStat          `json:"queues"`
 	ModelLimiterAvailable bool                       `json:"model_limiter_available"`
 	Models                []modellimiter.RuntimeStat `json:"models"`
-	Timestamp             int64                      `json:"timestamp"`
+	// VLM carries the per-model VLM admission + adaptive runtime stats collected
+	// by the vlm manager. Phase 1 backend observation only (the admin panel does
+	// not render it yet; see works/vlm-manager). Ignored by older clients.
+	VLM       []vlm.RuntimeStat `json:"vlm"`
+	Timestamp int64             `json:"timestamp"`
 }
 
 func aggregateRuntimeWorkerPools(pools []RuntimeWorkerPool, servers []types.WorkerServerStat) {
@@ -1843,6 +1848,12 @@ func (h *SystemHandler) GetRuntimeQueues(c *gin.Context) {
 	}
 	resp.ModelLimiterAvailable = modelSupported
 	resp.Models = modelStats
+
+	// Per-model VLM admission + adaptive runtime stats (Phase 1 observation).
+	resp.VLM = vlm.RuntimeStats()
+	if resp.VLM == nil {
+		resp.VLM = []vlm.RuntimeStat{}
+	}
 
 	c.JSON(http.StatusOK, resp)
 }

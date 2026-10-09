@@ -221,6 +221,12 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) (
 		}
 	}()
 
+	// Mark this as a knowledge-base background VLM call so the vlm manager
+	// routes it to the low-priority, blocking tier (behind interactive traffic).
+	// The marker flows through processImage → pipeline → action handlers →
+	// PredictWithOptions, which is where the manager reads the caller identity.
+	// See internal/types/vlm_caller.go and the vlm-manager plan (§2.8).
+	ctx = types.WithVLMCaller(ctx, types.CallerKBBackground)
 	vlmModel, vlmCfg, err := s.resolveVLM(ctx, payload.KnowledgeBaseID, payload.KnowledgeID)
 	if err != nil {
 		handleErr = fmt.Errorf("resolve VLM: %w", err)
