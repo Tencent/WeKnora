@@ -1,4 +1,12 @@
 export default {
+  imageVectorStatus: {
+    "disabled": "图片向量尚未开启；文字搜索仍可使用",
+    "unsupported": "当前向量模型不支持图片",
+    "coverage": "图片索引：完成 {completed}/{total} · 待处理 {pending} · 失败 {failed} · 跳过 {skipped} · 未建立 {missing}",
+    "backfill": "补建／重试",
+    "failed": "操作失败，请重试",
+    "refresh": "刷新状态"
+},
   modelCatalog: {
     "title": "模型目录",
     "description": "模型目录决定添加模型时可选的模型列表，以及上下文窗口、是否支持思考等默认参数。在这里修改后，所有空间立即生效。",
@@ -4126,7 +4134,7 @@ export default {
         imageAttrsLabel: '图片属性观察',
         imageAttrsDescription: '开启后，解析时对每张图片先「观察属性＋描述」，再按属性决定是否对图内文字再跑一轮 OCR；关闭则沿用基础模式：所有图片逐张描述并全部 OCR',
         imageVectorLabel: '图片向量检索',
-        imageVectorDescription: '开启后，生成图片描述之后再用向量模型直接对图片编码，检索时按图片内容召回描述没写到的信息。需要向量模型支持图片输入；每张图片多一次向量调用，向量检索的候选范围也会放大。只对此后入库或重新解析的文档生效，扫描件 PDF 页不生成',
+        imageVectorDescription: "开启后，独立后台任务直接对原图编码，无需等待图片描述。需要支持图片输入的向量模型，每张图片增加一次向量调用。可在画廊补建历史图片索引或重试失败任务，无需重新解析文档；扫描件 PDF 页除外。",
         imageVectorModelUnsupported: '当前向量模型未声明图片输入，开启后不会生成或召回图片向量',
         imageAttrsSchemaLabel: '可观察的图片属性',
         imageAttrsSchemaDescription: '模型会观察以下属性（由后端注册表定义）以驱动 OCR 策略',

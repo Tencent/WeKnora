@@ -364,8 +364,8 @@
               </div>
             </div>
 
-            <!-- 图片向量：默认关闭，显式开启才为图片单独编码、检索时召回 -->
-            <div v-if="formData.multimodalConfig.enabled" class="setting-row">
+            <!-- 图片向量独立于 VLM 描述任务，默认关闭 -->
+            <div class="setting-row">
               <div class="setting-info">
                 <label>{{ $t('knowledgeEditor.advanced.multimodal.imageVectorLabel') }}</label>
                 <p class="desc">{{ $t('knowledgeEditor.advanced.multimodal.imageVectorDescription') }}</p>

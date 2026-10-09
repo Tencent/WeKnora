@@ -10,12 +10,14 @@ import {
   type ImageListParams,
 } from '@/api/image-gallery'
 import { updateMyPreferences } from '@/api/auth'
+import ImageVectorStatus from './ImageVectorStatus.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import { galleryImageRequest } from './galleryImageSrc'
 import GalleryViewer, { type GalleryAttrRow } from './GalleryViewer.vue'
 
 const props = defineProps<{
   knowledgeBaseId: string
+  canEdit?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -578,6 +580,7 @@ watch(
 
 <template>
   <div class="image-gallery">
+    <ImageVectorStatus :knowledge-base-id="knowledgeBaseId" :can-edit="canEdit" />
     <!-- Same shape as the documents tab: what is listed on the left, the
          controls that narrow and order it on the right. -->
     <div class="ig-toolbar">

@@ -88,6 +88,8 @@ var taskTypesForKnowledgeCancel = map[string]struct{}{
 	types.TypeDocumentProcess:      {},
 	types.TypeManualProcess:        {},
 	types.TypeImageMultimodal:      {},
+	types.TypeImageVector:          {},
+	types.TypeImageVectorBackfill:  {},
 	types.TypeKnowledgePostProcess: {},
 	types.TypeQuestionGeneration:   {},
 	types.TypeSummaryGeneration:    {},

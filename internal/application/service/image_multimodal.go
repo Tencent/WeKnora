@@ -14,8 +14,6 @@ import (
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	"github.com/Tencent/WeKnora/internal/logger"
-	"github.com/Tencent/WeKnora/internal/models/embedding"
-	"github.com/Tencent/WeKnora/internal/models/imageprep"
 	"github.com/Tencent/WeKnora/internal/models/utils/ollama"
 	"github.com/Tencent/WeKnora/internal/models/vlm"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
@@ -80,6 +78,7 @@ func buildVLMOCRPrompt(sourceType string, _ types.VLMConfig) string {
 // It reads images from storage (via FileService for provider:// URLs),
 // performs OCR and VLM caption, and creates child chunks.
 type ImageMultimodalService struct {
+	imageVectors   *repository.ImageVectorRepository
 	chunkService   interfaces.ChunkService
 	modelService   interfaces.ModelService
 	kbService      interfaces.KnowledgeBaseService
@@ -122,6 +121,7 @@ func NewImageMultimodalService(
 	storageResolver interfaces.StorageBackendResolver,
 	resourceCatalog interfaces.ResourceCatalog,
 	spanTracker SpanTracker,
+	imageVectors *repository.ImageVectorRepository,
 ) interfaces.TaskHandler {
 	return &ImageMultimodalService{
 		chunkService:    chunkService,
@@ -138,6 +138,7 @@ func NewImageMultimodalService(
 		storageResolver: storageResolver,
 		resourceCatalog: resourceCatalog,
 		spanTracker:     spanTracker,
+		imageVectors:    imageVectors,
 	}
 }
 
@@ -329,6 +330,7 @@ func (s *ImageMultimodalService) processImage(
 		SHA256:      fmt.Sprintf("%x", sha256.Sum256(imgBytes)),
 		URL:         payload.ImageURL,
 		OriginalURL: payload.ImageURL,
+		SourceType:  payload.ImageSourceType,
 	}
 
 	// --- Unified action loop: the decision + dispatch half of the image
@@ -424,6 +426,12 @@ func (s *ImageMultimodalService) processImage(
 	// Index chunks so they can be retrieved
 	s.indexChunks(ctx, *payload, newChunks, imgBytes, out)
 	out["indexed"] = true
+	if s.imageVectors != nil {
+		if err := s.imageVectors.RefreshMetadata(ctx, payload.TenantID, payload.KnowledgeBaseID,
+			payload.KnowledgeID, imageInfo); err != nil {
+			logger.Warnf(ctx, "[ImageMultimodal] Failed to refresh image vector metadata: %v", err)
+		}
+	}
 
 	return nil
 }
@@ -682,117 +690,6 @@ func (s *ImageMultimodalService) indexChunks(
 
 	logger.Infof(ctx, "[ImageMultimodal] Indexed %d multimodal chunks for knowledge %s",
 		len(chunks), payload.KnowledgeID)
-
-	if status := s.indexImageVector(ctx, kb, payload, img, chunks, embeddingModel, engine); status != "" {
-		out["image_vector"] = status
-	}
-}
-
-// indexImageVector embeds the image itself with a multimodal embedding model
-// and stores the vector under an image_vector chunk, so a query can find the
-// image by what it shows even where the caption left that out. It returns a
-// short status for the trace, "" when the knowledge base has not opted in
-// (ImageProcessingConfig.ImageVectorEnabled) or the model takes no images.
-//
-// The caption and OCR chunks are already indexed, so a failure here only
-// loses the extra recall and never fails the task.
-func (s *ImageMultimodalService) indexImageVector(
-	ctx context.Context, kb *types.KnowledgeBase, payload types.ImageMultimodalPayload, img []byte,
-	chunks []*types.Chunk, model embedding.Embedder, engine *retriever.CompositeRetrieveEngine,
-) string {
-	// Off unless the knowledge base asked for it: a model that takes images
-	// is often chosen for text alone, and this costs a call per image.
-	if !kb.IsImageVectorEnabled() {
-		return ""
-	}
-	imageModel, ok := embedding.AsImageEmbedder(model)
-	if !ok {
-		return ""
-	}
-	// A scanned page is text, which its OCR chunk already carries better
-	// than an image vector can: multimodal embeddings are weakest on dense
-	// text, and a document of such pages would cost a call each.
-	if payload.ImageSourceType == "scanned_pdf" {
-		return "skipped: scanned page"
-	}
-	// The chunk needs text for reranking and the answer context; the caption
-	// describes the image, the OCR text is the fallback.
-	var source *types.Chunk
-	for _, c := range chunks {
-		if c.ChunkType == types.ChunkTypeImageCaption {
-			source = c
-			break
-		}
-		if c.ChunkType == types.ChunkTypeImageOCR {
-			source = c
-		}
-	}
-	if source == nil {
-		return "skipped: no caption or OCR text"
-	}
-
-	prepared, err := imageprep.Prepare(img, imageModel.ImageLimits())
-	if err != nil {
-		logger.Warnf(ctx, "[ImageMultimodal] Image %s not embeddable: %v", payload.ImageURL, err)
-		return "failed: " + err.Error()
-	}
-	vectors, err := imageModel.BatchEmbedImages(ctx, []embedding.Image{prepared})
-	if err != nil {
-		logger.Warnf(ctx, "[ImageMultimodal] Image embedding failed for %s: %v", payload.ImageURL, err)
-		return "failed: " + err.Error()
-	}
-	if dims := model.GetDimensions(); dims > 0 && len(vectors[0]) != dims {
-		// The index is laid out for the text vectors' width; a vector of
-		// another would land in a different collection or be refused.
-		logger.Warnf(ctx, "[ImageMultimodal] Image vector for %s has %d dimensions, the index %d",
-			payload.ImageURL, len(vectors[0]), dims)
-		return fmt.Sprintf("failed: %d dimensions, index has %d", len(vectors[0]), dims)
-	}
-
-	now := time.Now()
-	chunk := &types.Chunk{
-		ID:              uuid.New().String(),
-		TenantID:        payload.TenantID,
-		KnowledgeID:     payload.KnowledgeID,
-		KnowledgeBaseID: payload.KnowledgeBaseID,
-		Content:         source.Content,
-		ChunkType:       types.ChunkTypeImageVector,
-		ParentChunkID:   payload.ChunkID,
-		IsEnabled:       true,
-		Flags:           types.ChunkFlagRecommended,
-		ImageInfo:       source.ImageInfo,
-		CreatedAt:       now,
-		UpdatedAt:       now,
-	}
-	if err := s.chunkService.GetRepository().CreateChunks(ctx, []*types.Chunk{chunk}); err != nil {
-		logger.Warnf(ctx, "[ImageMultimodal] Failed to create image vector chunk for %s: %v", payload.ImageURL, err)
-		return "failed: " + err.Error()
-	}
-	err = engine.BatchIndexVectors(ctx, model, []*types.IndexInfo{{
-		Content:         chunk.Content,
-		SourceID:        chunk.ID,
-		SourceType:      types.ImageSourceType,
-		ChunkID:         chunk.ID,
-		KnowledgeID:     chunk.KnowledgeID,
-		KnowledgeBaseID: chunk.KnowledgeBaseID,
-		IsEnabled:       true,
-	}}, vectors)
-	if err != nil {
-		// The chunk stays unindexed: nothing retrieves it, and a re-parse
-		// replaces it with the rest of the knowledge's chunks.
-		logger.Warnf(ctx, "[ImageMultimodal] Failed to index image vector for %s: %v", payload.ImageURL, err)
-		return "failed: " + err.Error()
-	}
-	// Re-fetch for the same reason as indexChunks: GORM Save would zero
-	// the generated fields the in-memory chunk lacks.
-	if dbChunk, err := s.chunkService.GetChunkByIDOnly(ctx, chunk.ID); err == nil {
-		dbChunk.Status = int(types.ChunkStatusIndexed)
-		if err := s.chunkService.GetRepository().UpdateChunk(ctx, dbChunk); err != nil {
-			logger.Warnf(ctx, "[ImageMultimodal] Failed to mark image vector chunk %s indexed: %v", chunk.ID, err)
-		}
-	}
-	logger.Infof(ctx, "[ImageMultimodal] Indexed image vector chunk %s for image %s", chunk.ID, payload.ImageURL)
-	return "indexed"
 }
 
 // resolveVLM creates a vlm.VLM instance for the given knowledge base,

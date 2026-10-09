@@ -124,7 +124,7 @@ func validateDefaultFileImportRequirements(
 	fileType string,
 ) error {
 	fileType = normalizeFileExtension(fileType)
-	if IsImageType(fileType) && !eff.VLMConfig.IsEnabled() {
+	if IsImageType(fileType) && !eff.VLMConfig.IsEnabled() && !kb.IsImageVectorEnabled() {
 		logger.Error(ctx, "VLM model is not configured")
 		return werrors.NewBadRequestError("上传图片文件需要设置VLM模型")
 	}
@@ -192,7 +192,7 @@ func ValidateProcessOverrides(
 	eff := ResolveProcessConfig(kb, overrides)
 
 	if hasImage {
-		if !eff.VLMConfig.IsEnabled() {
+		if !eff.VLMConfig.IsEnabled() && !kb.IsImageVectorEnabled() {
 			return werrors.NewBadRequestError("上传图片文件需要设置VLM模型")
 		}
 	}

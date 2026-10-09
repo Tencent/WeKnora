@@ -1,4 +1,12 @@
 export default {
+  imageVectorStatus: {
+    "disabled": "圖片向量尚未啟用；文字搜尋仍可使用",
+    "unsupported": "目前向量模型不支援圖片",
+    "coverage": "圖片索引：完成 {completed}/{total} · 待處理 {pending} · 失敗 {failed} · 略過 {skipped} · 未建立 {missing}",
+    "backfill": "補建／重試",
+    "failed": "操作失敗，請重試",
+    "refresh": "重新整理"
+},
   modelCatalog: {
     "title": "模型目錄",
     "description": "模型目錄決定新增模型時可選的模型清單，以及脈絡視窗、是否支持思考等預設參數。在這裡修改後，所有空間立即生效。",
@@ -4126,7 +4134,7 @@ export default {
         imageAttrsLabel: '圖片屬性觀察',
         imageAttrsDescription: '開啟後，解析時對每張圖片先「觀察屬性＋描述」，再按屬性決定是否對圖內文字再跑一輪 OCR；關閉則沿用基礎模式：所有圖片逐張描述並全部 OCR',
         imageVectorLabel: '圖片向量檢索',
-        imageVectorDescription: '開啟後，產生圖片描述之後再用向量模型直接對圖片編碼，檢索時可依圖片內容找回描述中沒寫到的資訊。需要向量模型支援圖片輸入；每張圖片多一次向量呼叫，向量檢索的候選範圍也會擴大。僅對之後匯入或重新解析的文件生效，掃描版 PDF 頁面不會產生',
+        imageVectorDescription: "開啟後，獨立背景工作直接對原圖編碼，無需等待圖片描述。需要支援圖片輸入的向量模型，每張圖片增加一次向量呼叫。可在畫廊補建歷史圖片索引或重試失敗工作，無需重新解析文件；掃描版 PDF 頁面除外。",
         imageVectorModelUnsupported: '目前的向量模型未宣告支援圖片輸入，開啟後不會產生或檢索圖片向量',
         imageAttrsSchemaLabel: '可觀察的圖片屬性',
         imageAttrsSchemaDescription: '模型會觀察以下屬性（由後端登錄檔定義）以驅動 OCR 策略',

@@ -1,4 +1,12 @@
 export default {
+  imageVectorStatus: {
+    "disabled": "Image vectors are disabled; text search is available",
+    "unsupported": "The embedding model does not support images",
+    "coverage": "Image index: {completed}/{total} ready · {pending} pending · {failed} failed · {skipped} skipped · {missing} missing",
+    "backfill": "Build missing / retry",
+    "failed": "Operation failed. Please retry.",
+    "refresh": "Refresh status"
+},
   modelCatalog: {
     "title": "Model catalog",
     "description": "The model catalog defines which models are offered when adding a model, along with defaults such as context window and reasoning support. Changes here apply to all workspaces immediately.",
@@ -3961,7 +3969,7 @@ export default {
         imageAttrsLabel: 'Image attribute observation',
         imageAttrsDescription: 'When on, each image is first observed for attributes and described, then the attributes decide whether an OCR round runs for the text in the image. When off, the basic mode applies: every image is described and OCR runs for all of them',
         imageVectorLabel: 'Image vector search',
-        imageVectorDescription: 'When on, each image is also encoded by the embedding model itself after its description is generated, so searches can find images by what they show even where the description leaves it out. Needs an embedding model that takes images; costs one extra embedding call per image and widens the vector search pool. Applies to documents ingested or re-parsed afterwards; scanned PDF pages are skipped',
+        imageVectorDescription: "Encode original images in independent background jobs without waiting for captions. Requires an image-capable embedding model and one additional embedding call per image. Backfill existing images or retry failures from the gallery without reparsing documents. Scanned PDF pages are excluded.",
         imageVectorModelUnsupported: 'The current embedding model does not declare image input, so no image vectors will be indexed or recalled',
         imageAttrsSchemaLabel: 'Observable image attributes',
         imageAttrsSchemaDescription: 'The model observes the attributes below (defined by the backend registry) to drive the OCR policy',

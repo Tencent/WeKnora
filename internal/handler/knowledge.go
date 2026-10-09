@@ -40,6 +40,7 @@ type KnowledgeHandler struct {
 	asynqClient       interfaces.TaskEnqueuer
 	spanRepo          repository.KnowledgeSpanRepository
 	backlog           backlogProbe
+	imageVectors      *service.ImageVectorService
 }
 
 // backlogProbe tells a backlogged document (work still queued) from a stuck
@@ -88,6 +89,7 @@ func NewKnowledgeHandler(
 	asynqClient interfaces.TaskEnqueuer,
 	spanRepo repository.KnowledgeSpanRepository,
 	housekeeping *service.HousekeepingService,
+	imageVectors *service.ImageVectorService,
 ) *KnowledgeHandler {
 	var backlog backlogProbe
 	if housekeeping != nil {
@@ -95,6 +97,7 @@ func NewKnowledgeHandler(
 	}
 	return &KnowledgeHandler{
 		backlog:           backlog,
+		imageVectors:      imageVectors,
 		cfg:               cfg,
 		kgService:         kgService,
 		kbService:         kbService,

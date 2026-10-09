@@ -370,3 +370,24 @@ func TestListImageAssets_MigrationBackfillsExistingChunks(t *testing.T) {
 		}
 	})
 }
+
+func TestListImageAssets_VectorCopiesDoNotReplaceGalleryMetadata(t *testing.T) {
+	imageAssetBackends(t, func(t *testing.T, db *gorm.DB) {
+		fx := newImageFixture(t, db)
+		caption := fx.add("image_caption", 1, fixtureImage{
+			URL: "local://picture", Caption: "red bowl",
+			Attrs: map[string]any{"contain.text": true},
+		})
+		fx.add("image_vector", 2, fixtureImage{URL: "local://picture"})
+		rows, total := fx.list(types.ImageAssetQuery{})
+		require.EqualValues(t, 1, total)
+		require.Len(t, rows, 1)
+		require.Equal(t, caption.ID, rows[0].ChunkID)
+		require.Equal(t, "red bowl", rows[0].Caption)
+		rows, total = fx.list(types.ImageAssetQuery{
+			Keyword: "red", SearchFields: []types.ImageAssetField{fieldCaption},
+		})
+		require.EqualValues(t, 1, total)
+		require.Len(t, rows, 1)
+	})
+}
