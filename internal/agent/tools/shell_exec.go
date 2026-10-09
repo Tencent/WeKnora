@@ -166,16 +166,19 @@ func shellExecDescription(l sandbox.WorkspaceLayout) string {
 
 const hostShellExecDescription = "Execute a command in %s. The process is OS-sandboxed on this machine.\n" +
 	"- CWD defaults to %s on every call; cd does not persist. " +
-	"work_dir must be that folder or a subdirectory.\n" +
+	"work_dir may be that folder, a subdirectory, or a directory the user already approved for this session.\n" +
 	"- Use ls/find to discover files, grep/awk to search, and cat/head/tail/sed to inspect text. " +
-	"Read known paths directly.\n" +
+	"Read known paths directly. " +
+	"A path outside the workspace can be tried; if the sandbox blocks it, the user is asked.\n" +
 	"- Use write_sandbox_file for scripts or large text; edit_sandbox_file for precise changes. " +
 	"Commands are limited to 8192 bytes. Execution is synchronous (no nohup or trailing &).\n" +
-	"- Edit files in place under %s.\n" +
+	"- Edit files under %s when they belong there. Writing outside it can be attempted: " +
+	"the sandbox blocks the path and asks the user before opening it. " +
+	"Deletes (rm, rmdir, unlink, git rm, git clean, find -delete) ask even inside the workspace.\n" +
 	"- Non-zero exit_code is a command result: inspect stderr before deciding whether a corrected call is useful. " +
-	"Do not bypass permission or policy denials through another tool.\n" +
+	"Do not bypass a user refusal by switching tools or rewriting the same action.\n" +
 	"- stdout/stderr have independent byte limits. " +
-	"Redirect verbose commands to a workspace log when output must be kept."
+	"Redirect verbose commands to a file under the workspace when output must be kept."
 
 // ShellExecInput defines the input parameters for shell_exec.
 type ShellExecInput struct {
@@ -266,6 +269,7 @@ type ShellExecTool struct {
 	// inject them. Install-mode tools never invoke it.
 	envCapture       SkillEnvCapture
 	skillEnvironment *skills.Manager
+	hostApproval     HostApproval
 }
 
 func (t *ShellExecTool) WithSkillEnvironment(manager *skills.Manager) *ShellExecTool {
@@ -581,8 +585,12 @@ func (t *ShellExecTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 	}
 	output, finishOutput := shellCommandOutput(ctx, command)
 	defer finishOutput()
+	execBase := ctx
+	if layout.IsHost() {
+		execBase = t.hostApprovalContext(ctx, command, input.Stdin)
+	}
 	// Observe only the requested command, not skill staging or artifact probes.
-	execCtx := sandbox.WithCommandOutput(ctx, output)
+	execCtx := sandbox.WithCommandOutput(execBase, output)
 	var res *sandbox.ExecuteResult
 	var err error
 	var outputFiles []string

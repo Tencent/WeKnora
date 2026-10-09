@@ -186,6 +186,7 @@ func TestShellExecHostLayoutAllowsWorkDirUnderWriteRoots(t *testing.T) {
 func TestShellExecHostDescriptionUsesActualWorkspacePath(t *testing.T) {
 	tool := NewShellExecTool(&layoutShellExecutor{layout: hostLayout()}, nil)
 	require.Contains(t, tool.Description(), hostLayout().Root)
+	require.Contains(t, tool.Description(), "asks the user before opening it")
 	require.NotContains(t, tool.Description(), sandbox.SessionWorkspaceRoot)
 	require.Contains(t, string(tool.Parameters()), hostLayout().Root)
 	require.NotContains(t, string(tool.Parameters()), sandbox.SessionWorkspaceRoot)
