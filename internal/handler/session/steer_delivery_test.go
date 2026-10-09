@@ -98,7 +98,7 @@ func TestPollSteerSkipsAfterDeliveryAndAdvancesOffset(t *testing.T) {
 		steerEvent("c", "inject-c", nil, "web"),
 	}))
 
-	sink := newSteerSink(ctx, "sess", "req", &types.Message{ID: "assist"}, nil, mgr)
+	sink := newSteerSink(ctx, "sess", "req", &types.Message{ID: "assist"}, &steerPersistingMessageStub{}, mgr)
 	events, next, err := sink.PollSteer(ctx, "sess", "assist", 0)
 	require.NoError(t, err)
 	require.Len(t, events, 2)
@@ -106,6 +106,16 @@ func TestPollSteerSkipsAfterDeliveryAndAdvancesOffset(t *testing.T) {
 	assert.Equal(t, "c", events[1]["id"])
 	assert.Equal(t, 3, next)
 	assert.Equal(t, 3, sink.DrainedOffset())
+
+	repolled, _, err := sink.PollSteer(ctx, "sess", "assist", next)
+	require.NoError(t, err)
+	assert.Equal(t, events, repolled, "polling must leave unpersisted items available for retry")
+	assert.Empty(t, sink.InjectedIDs(), "polling alone must not hide items from follow-up handoff")
+	for _, evt := range events {
+		require.NotEmpty(t, sink.PersistSteerMessage(ctx, "sess", "assist",
+			getString(evt, "id"), getString(evt, "content"), nil, "web"))
+	}
+	assert.Len(t, sink.InjectedIDs(), len(events))
 
 	events, next, err = sink.PollSteer(ctx, "sess", "assist", next)
 	require.NoError(t, err)

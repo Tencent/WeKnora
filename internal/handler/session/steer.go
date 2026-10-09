@@ -103,7 +103,8 @@ func (s *steerSink) PollSteer(
 ) ([]map[string]interface{}, int, error) {
 	// Always read from the start so an after→inject promote of an already
 	// skipped event is visible on the next drain. Consumed injects are
-	// filtered by injectedIDs rather than offset.
+	// filtered by injectedIDs rather than offset. Polling does not consume:
+	// the engine may stop a batch early when persistence fails.
 	_ = lastOffset
 	events, total, err := s.streamManager.GetSteerEvents(ctx, sessionID, messageID, 0)
 	if err != nil {
@@ -120,7 +121,6 @@ func (s *steerSink) PollSteer(
 		if len(out) >= steerDrainBatchLimit {
 			break
 		}
-		s.markInjected(evt.ID)
 		out = append(out, steerEventToRaw(evt))
 	}
 	s.mu.Lock()
@@ -151,15 +151,6 @@ func (s *steerSink) markInjected(id string) {
 		s.injectedIDs = make(map[string]struct{})
 	}
 	s.injectedIDs[id] = struct{}{}
-}
-
-func (s *steerSink) unmarkInjected(id string) {
-	if id == "" {
-		return
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	delete(s.injectedIDs, id)
 }
 
 // InjectedIDs is a copy of steer event IDs the engine has already consumed.
@@ -214,10 +205,10 @@ func (s *steerSink) PersistSteerMessage(
 	channel string,
 ) string {
 	if s.messageService == nil {
-		s.unmarkInjected(steerID)
 		return ""
 	}
 	if existing := s.persistedUserMessageID(ctx, sessionID, messageID, steerID); existing != "" {
+		s.markInjected(steerID)
 		s.mu.Lock()
 		s.lastUserMessageID = existing
 		s.mu.Unlock()
@@ -241,7 +232,6 @@ func (s *steerSink) PersistSteerMessage(
 			"session_id": sessionID,
 			"steer_id":   steerID,
 		})
-		s.unmarkInjected(steerID)
 		return ""
 	}
 	updated, err := s.streamManager.UpdateSteerEventData(ctx, sessionID, messageID, steerID,
@@ -260,8 +250,8 @@ func (s *steerSink) PersistSteerMessage(
 			logger.Warnf(ctx, "steer persist rollback failed for session %s message %s: %v",
 				sessionID, msg.ID, delErr)
 		}
-		s.unmarkInjected(steerID)
 		if existing := s.persistedUserMessageID(ctx, sessionID, messageID, steerID); existing != "" {
+			s.markInjected(steerID)
 			s.mu.Lock()
 			s.lastUserMessageID = existing
 			s.mu.Unlock()
@@ -269,6 +259,7 @@ func (s *steerSink) PersistSteerMessage(
 		}
 		return ""
 	}
+	s.markInjected(steerID)
 	s.mu.Lock()
 	s.lastUserMessageID = msg.ID
 	s.mu.Unlock()
@@ -401,8 +392,8 @@ func steerEventConsumed(evt interfaces.StreamEvent) bool {
 // yet consumed as an inject. After events (never consumed) and inject events
 // that arrived too late both belong here; consumed events do not.
 //
-// injectedIDs is the in-flight run's own view, which can be a beat ahead of
-// the durable flag; both are checked so a message is never injected twice.
+// injectedIDs is the in-flight run's own view of successful consumption;
+// both it and the durable flag are checked so a message is never injected twice.
 func selectSteerBacklog(events []interfaces.StreamEvent, injectedIDs map[string]struct{}) []interfaces.StreamEvent {
 	out := make([]interfaces.StreamEvent, 0)
 	for _, evt := range events {
@@ -419,7 +410,7 @@ func selectSteerBacklog(events []interfaces.StreamEvent, injectedIDs map[string]
 
 // pendingSteerQueueItems is the overlay restore payload: every steer event
 // the live run has not yet consumed as an inject. After events always appear;
-// inject events drop out once PollSteer marked them.
+// inject events drop out once PersistSteerMessage marked them.
 func pendingSteerQueueItems(events []interfaces.StreamEvent, injectedIDs map[string]struct{}) []map[string]interface{} {
 	pending := selectSteerBacklog(events, injectedIDs)
 	out := make([]map[string]interface{}, 0, len(pending))
