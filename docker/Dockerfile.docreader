@@ -142,8 +142,16 @@ ENV PATH="${VIRTUAL_ENV}/bin:${PATH}"
 
 COPY --from=builder /usr/local/bin /usr/local/bin
 
-# 安装 Playwright 浏览器（网页解析）
-RUN python -m playwright install webkit
+# 安装 Playwright 浏览器（网页解析）。可在构建时切换为内部制品库或镜像源。
+ARG PLAYWRIGHT_DOWNLOAD_HOST=""
+ARG PLAYWRIGHT_WEBKIT_DOWNLOAD_HOST=""
+RUN if [ -n "$PLAYWRIGHT_WEBKIT_DOWNLOAD_HOST" ]; then \
+        PLAYWRIGHT_WEBKIT_DOWNLOAD_HOST="$PLAYWRIGHT_WEBKIT_DOWNLOAD_HOST" python -m playwright install webkit; \
+    elif [ -n "$PLAYWRIGHT_DOWNLOAD_HOST" ]; then \
+        PLAYWRIGHT_DOWNLOAD_HOST="$PLAYWRIGHT_DOWNLOAD_HOST" python -m playwright install webkit; \
+    else \
+        python -m playwright install webkit; \
+    fi
 RUN python -m playwright install-deps webkit
 
 COPY docreader/pyproject.toml docreader/uv.lock ./

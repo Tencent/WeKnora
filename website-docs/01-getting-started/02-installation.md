@@ -133,7 +133,7 @@ make dev-logs / dev-status / dev-stop / dev-restart
 | Dockerfile | 产物镜像 | 要点 |
 | --- | --- | --- |
 | `docker/Dockerfile.app` | `wechatopenai/weknora-app` | 三阶段：先构建 BrowserSkill 的 `bsk` 与配套 Chrome 扩展（装入 `/opt/weknora/browserskill/`，见[本机浏览器](../05-clients/09-local-browser.md)）；再用 `golang:1.26-bookworm` 编译（`make build-prod`，默认 `WITH_ANYDOC=1` 链接进程内 office 解析引擎，注入版本信息，预下载 DuckDB 扩展 `cmd/download/duckdb`）→ `debian:12.12-slim` 运行层（含 `migrate` 迁移工具、python3/node/uvx（供 stdio MCP 使用）、ffmpeg（ASR）、gosu 降权，以及第三方许可证文本）。入口 `scripts/docker-entrypoint.sh`：修复挂载目录属主；若挂载了 docker.sock，按 socket GID 把 appuser 加入对应组（compose `group_add` 在 gosu 后无效），再以 appuser 运行 `./WeKnora`。`EXPOSE 8080` |
-| `docker/Dockerfile.docreader` | `wechatopenai/weknora-docreader` | Python 3.10 + uv 依赖锁定；生成 protobuf；运行层安装 LibreOffice、OpenJDK 17、antiword、Playwright（webkit）与 `grpc_health_probe`。轻量版不含 PaddleOCR。`EXPOSE 50051`。支持 `APT_MIRROR` 构建参数 |
+| `docker/Dockerfile.docreader` | `wechatopenai/weknora-docreader` | Python 3.10 + uv 依赖锁定；生成 protobuf；运行层安装 LibreOffice、OpenJDK 17、antiword、Playwright（webkit）与 `grpc_health_probe`。轻量版不含 PaddleOCR。`EXPOSE 50051`。支持 `APT_MIRROR`、`PLAYWRIGHT_DOWNLOAD_HOST` 和 `PLAYWRIGHT_WEBKIT_DOWNLOAD_HOST` 构建参数 |
 | `docker/Dockerfile.odl-hybrid` | `weknora-odl-hybrid:local` | 安装 `opendataloader-pdf[hybrid]`（Docling），监听 5002，默认 `--no-ocr`；仅本地构建不发布 |
 | `docker/Dockerfile.sandbox` | `wechatopenai/weknora-sandbox` | Agent 会话沙箱镜像。基础环境为 Python 3.12-slim + Node 20 + uv/pnpm，默认 `root` 执行，保留 `user`(UID 1000) 供显式选择。默认构建目标 `sandbox` 供 Docker 后端使用；另有 `cube`（含 Cube envd）、`desktop` / `desktop-cube`（带图形桌面）等目标，见[沙箱部署](../06-development/04-sandbox-deployment.md) |
 | `frontend/Dockerfile` | `wechatopenai/weknora-ui` | 两阶段：digest 锁定的 `node:24-bookworm-slim`（`$BUILDPLATFORM`，避免多架构 CI 用 QEMU 跑 Vite）内 `npm ci` + `npm run build`（`VITE_IS_DOCKER` / `VITE_FRONTEND_COMMIT`），可选 `NPM_REGISTRY` / `NODE_MAX_OLD_SPACE_SIZE`；运行层为按 digest 固定的 `nginx:1.30.3-alpine`（兼容 CentOS 7 旧内核）。无需宿主机预构建 `dist/` |
@@ -147,6 +147,16 @@ make docker-build-app
 make docker-build-docreader
 make docker-build-frontend
 ```
+
+docreader 在国内或企业内网构建时，可同时切换 APT 和 Playwright 制品源：
+
+```bash
+APT_MIRROR=https://your-apt-mirror.example.com \
+PLAYWRIGHT_WEBKIT_DOWNLOAD_HOST=https://your-playwright-mirror.example.com \
+./scripts/build_images.sh --docreader
+```
+
+`APT_MIRROR` 需传入保留 `/debian` 和 `/debian-security` 路径结构的镜像站根地址；Playwright 制品源需保留官方制品的路径结构。仅配置 WebKit 时优先使用 `PLAYWRIGHT_WEBKIT_DOWNLOAD_HOST`，它的优先级高于通用的 `PLAYWRIGHT_DOWNLOAD_HOST`。
 
 ## 四、Makefile 部署相关目标速查
 
