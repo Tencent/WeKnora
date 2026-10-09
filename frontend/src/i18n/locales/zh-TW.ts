@@ -4134,6 +4134,13 @@ export default {
         imageAttrsOcrConditionsDesc: '當觀察到的屬性滿足以下條件時，對圖片進行 OCR',
         imageAttrsOcrOnUnobserved: '圖片屬性觀察失敗時仍執行 OCR',
         imageAttrsOcrOnUnobservedDesc: '當模型未能正確觀察到圖片屬性時，預設仍執行 OCR 兜底，以免漏掉正文文字；關閉則跳過。（採用 4B 等小參數視覺模型，或自定義的圖片解析提示語與系統提示語衝突時，可能造成觀察失敗；8B 及以上模型的失敗概率很低，不建議關閉）',
+        imagePipelineSectionLabel: '圖片解析方案',
+        imagePipelineSectionDescription: '多模態解析開啟後，可以根據需要選擇圖片的解析方案',
+        imagePipelineLabel: '選擇解析方案',
+        imagePipelinePlaceholder: '請選擇解析方案',
+        imagePipelineLoading: '正在讀取流水線…',
+        imagePipelineLoadError: '讀取流水線失敗',
+        imagePipelineValidateError: '無法校驗當前設定，儲存時後端會再次檢查。',
         imagePipelineKbNote: '預設跟隨知識庫設定，可針對本次任務調整'
       },
       tableMetadataInstructions: {
@@ -7825,5 +7832,42 @@ export default {
         'false': { label: '否', description: '否 ── 照片、插畫、圖示或裝飾圖' }
       }
     }
-  }
+  },
+  imagePipeline: {
+    errors: {
+      noActionEnabled: '至少開啟一個解析動作，否則多模態不會處理任何內容。',
+    },
+    default: {
+      name: '傳統',
+      description: '使用者根據任務需要手動選擇解析動作開關。',
+      enable_caption: {
+        label: '圖片描述',
+        description: '讓模型為每張圖片生成一句內容描述，作為圖片的說明文字。',
+      },
+      enable_ocr: {
+        label: '文字辨識',
+        description: '提取圖片中出現的文字。',
+      },
+      caption_thinking: {
+        label: '圖片描述時開啟思考',
+        description: '讓模型在寫描述前先思考。一般情況下不需要開啟思考，開啟之後不僅更慢，還可能造成大模型思考內容過長截斷正文輸出造成任務失敗。請僅在確認有必要的情況下開啟。',
+      },
+      ocr_thinking: {
+        label: '文字辨識時開啟思考',
+        description: '讓模型在提取文字前先思考。一般情況下不需要開啟思考，開啟之後不僅更慢，還可能造成大模型思考內容過長截斷正文輸出造成任務失敗。請僅在確認有必要的情況下開啟。',
+      },
+    },
+    smartocr: {
+      name: '智能模式',
+      describe_thinking: {
+        label: '描述時開啟思考',
+        description: '讓模型在描述圖片並觀察屬性前先思考。一般情況下不需要開啟思考，開啟之後不僅更慢，還可能造成大模型思考內容過長截斷正文輸出造成任務失敗。請僅在確認有必要的情況下開啟。',
+      },
+      text_thinking: {
+        label: '文字辨識時開啟思考',
+        description: '讓模型在提取文字前先思考。一般情況下不需要開啟思考，開啟之後不僅更慢，還可能造成大模型思考內容過長截斷正文輸出造成任務失敗。請僅在確認有必要的情況下開啟。',
+      },
+      description: '先觀察圖片特徵並進行圖片描述，再根據圖片特徵決定是否呼叫 OCR 對圖片進行辨識，以節省模型呼叫次數並提升解析速度。',
+    },
+  },
 }

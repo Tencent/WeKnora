@@ -22,9 +22,25 @@ func (w *concurrencyVLM) GetModelName() string { return w.inner.GetModelName() }
 func (w *concurrencyVLM) GetModelID() string   { return w.inner.GetModelID() }
 
 func (w *concurrencyVLM) Predict(ctx context.Context, imgBytes [][]byte, prompt string) (string, error) {
+	return w.call(ctx, func(c context.Context) (string, error) {
+		return w.inner.Predict(c, imgBytes, prompt)
+	})
+}
+
+func (w *concurrencyVLM) PredictWithOptions(
+	ctx context.Context, imgBytes [][]byte, prompt string, opts *PredictOptions,
+) (string, error) {
+	return w.call(ctx, func(c context.Context) (string, error) {
+		return w.inner.PredictWithOptions(c, imgBytes, prompt, opts)
+	})
+}
+
+// call holds the per-model concurrency slot only around the provider
+// round-trip, so waiting for a free slot is not attributed to the model.
+func (w *concurrencyVLM) call(ctx context.Context, run func(context.Context) (string, error)) (string, error) {
 	release := limiter.GateNamedN(ctx, w.inner.GetModelID(), w.inner.GetModelName(), w.limit)
 	defer release()
-	return w.inner.Predict(ctx, imgBytes, prompt)
+	return run(ctx)
 }
 
 // wrapVLMConcurrency installs the background concurrency governor as the

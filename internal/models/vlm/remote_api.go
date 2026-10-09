@@ -93,6 +93,17 @@ func NewRemoteAPIVLM(config *Config) (*RemoteAPIVLM, error) {
 
 // Predict sends images with a text prompt through the chat client.
 func (v *RemoteAPIVLM) Predict(ctx context.Context, imgBytesList [][]byte, prompt string) (string, error) {
+	return v.PredictWithOptions(ctx, imgBytesList, prompt, nil)
+}
+
+// PredictWithOptions sends the same request, carrying a per-call thinking
+// switch into the chat client. The switch rides on Options.Thinking, which the
+// protocol layer turns into whatever key this vendor uses, so a model that only
+// understands chat_template_kwargs still gets that spelling rather than a
+// bare enable_thinking the server would ignore.
+func (v *RemoteAPIVLM) PredictWithOptions(
+	ctx context.Context, imgBytesList [][]byte, prompt string, opts *PredictOptions,
+) (string, error) {
 	parts := []chat.MessageContentPart{{Type: "text", Text: prompt}}
 	totalImageSize := 0
 	for _, imgBytes := range imgBytesList {
@@ -109,12 +120,20 @@ func (v *RemoteAPIVLM) Predict(ctx context.Context, imgBytesList [][]byte, promp
 	logger.Infof(ctx, "[VLM] Calling chat protocol, model=%s, numImages=%d, totalImageSize=%d",
 		v.modelName, len(imgBytesList), totalImageSize)
 
-	ctx, cancel := context.WithTimeout(ctx, vlmHTTPTimeout())
-	defer cancel()
-	resp, err := v.chat.Chat(ctx, []chat.Message{{Role: "user", MultiContent: parts}}, &chat.ChatOptions{
+	chatOpts := &chat.ChatOptions{
 		Temperature: v.temperature,
 		MaxTokens:   defaultMaxToks,
-	})
+	}
+	// Only an explicit preference is forwarded. The protocol layer skips the
+	// thinking fields entirely when nobody asked for a level, which is what
+	// leaves an always-on reasoning model running as its vendor intends.
+	if opts != nil && opts.Thinking != nil {
+		chatOpts.Thinking = opts.Thinking
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, vlmHTTPTimeout())
+	defer cancel()
+	resp, err := v.chat.Chat(ctx, []chat.Message{{Role: "user", MultiContent: parts}}, chatOpts)
 	if err != nil {
 		return "", fmt.Errorf("VLM request: %w", err)
 	}
