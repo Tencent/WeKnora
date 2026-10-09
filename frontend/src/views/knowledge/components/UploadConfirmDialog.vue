@@ -997,7 +997,7 @@ const showAsrModelError = computed(() => {
 
 const issueSectionKeys = computed(() => {
   const keys = new Set<IssueSectionKey>()
-  if (hasImages.value) {
+  if (hasImages.value && !props.kbInfo?.image_processing_config?.image_vector_enabled) {
     if (!uiState.value.multimodalConfig.enabled || !uiState.value.multimodalConfig.vllmModelId) {
       keys.add('multimodal')
     }
@@ -1149,7 +1149,7 @@ function getSectionNavStatus(
 const canConfirm = computed(() => {
   if (props.mode === 'file' && batchItemCount.value === 0) return false
   if (props.mode === 'manual' && !props.manualPreview?.content?.trim()) return false
-  if (hasImages.value) {
+  if (hasImages.value && !props.kbInfo?.image_processing_config?.image_vector_enabled) {
     if (!uiState.value.multimodalConfig.enabled || !uiState.value.multimodalConfig.vllmModelId) {
       return false
     }
@@ -1525,7 +1525,7 @@ const handleNodeExtractUpdate = (config: UploadUIState['nodeExtractConfig']) => 
 }
 
 const validateBeforeConfirm = (): boolean => {
-  if (hasImages.value) {
+  if (hasImages.value && !props.kbInfo?.image_processing_config?.image_vector_enabled) {
     if (!uiState.value.multimodalConfig.enabled || !uiState.value.multimodalConfig.vllmModelId) {
       MessagePlugin.warning(t('uploadConfirm.vlmModelRequired'))
       uiState.value.multimodalConfig.enabled = true

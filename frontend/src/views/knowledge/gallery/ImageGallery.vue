@@ -10,12 +10,14 @@ import {
   type ImageListParams,
 } from '@/api/image-gallery'
 import { updateMyPreferences } from '@/api/auth'
+import ImageVectorStatus from './ImageVectorStatus.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import { galleryImageRequest } from './galleryImageSrc'
 import GalleryViewer, { type GalleryAttrRow } from './GalleryViewer.vue'
 
 const props = defineProps<{
   knowledgeBaseId: string
+  canEdit?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -36,6 +38,9 @@ const page = ref(1)
 const pageSize = ref(24)
 
 const keyword = ref('')
+const retrievalMode = ref<'keyword' | 'semantic'>('keyword')
+const semanticActive = computed(() => retrievalMode.value === 'semantic' && !!keyword.value.trim())
+const truncated = ref(false)
 const sortBy = ref('')
 const sortOrder = ref<'asc' | 'desc'>('desc')
 
@@ -390,6 +395,7 @@ function buildParams(): ImageListParams {
   const selections = activeSelections.value
   return {
     keyword: keyword.value.trim() || undefined,
+    searchMode: retrievalMode.value,
     searchIn: activeSearchIds.value,
     sortBy: sortBy.value || undefined,
     sortOrder: sortOrder.value,
@@ -419,6 +425,7 @@ async function reload(focus?: 'first' | 'last') {
     if (token !== listToken) return
     items.value = res.items
     total.value = res.total
+    truncated.value = res.truncated
     if (focus && res.items.length) viewerIndex.value = focus === 'first' ? 0 : res.items.length - 1
     else if (viewerOpen.value && viewerIndex.value >= res.items.length) closeViewer()
     void resolveThumbnails(token)
@@ -427,6 +434,7 @@ async function reload(focus?: 'first' | 'last') {
     error.value = e instanceof Error ? e.message : String(e)
     items.value = []
     total.value = 0
+    truncated.value = false
     thumbUrls.value = {}
     closeViewer()
   } finally {
@@ -578,6 +586,7 @@ watch(
 
 <template>
   <div class="image-gallery">
+    <ImageVectorStatus :knowledge-base-id="knowledgeBaseId" :can-edit="canEdit" />
     <!-- Same shape as the documents tab: what is listed on the left, the
          controls that narrow and order it on the right. -->
     <div class="ig-toolbar">
@@ -589,9 +598,14 @@ watch(
       </div>
 
       <div class="ig-toolbar__trailing">
+        <t-select v-model="retrievalMode" :aria-label="t('gallerySemantic.mode')" style="width: 130px"
+          @change="resetPageAndReload">
+          <t-option value="keyword" :label="t('gallerySemantic.keyword')" />
+          <t-option value="semantic" :label="t('gallerySemantic.semantic')" />
+        </t-select>
         <t-input
           v-model="keyword"
-          :placeholder="t(`${NS}.searchPlaceholder`)"
+          :placeholder="semanticActive || retrievalMode === 'semantic' ? t('gallerySemantic.placeholder') : t(`${NS}.searchPlaceholder`)"
           :aria-label="t(`${NS}.searchPlaceholder`)"
           clearable
           class="ig-search"
@@ -628,7 +642,7 @@ watch(
                 </button>
               </header>
 
-              <div v-if="searchAttrs.length" class="ig-filter-section">
+              <div v-if="searchAttrs.length && retrievalMode === 'keyword'" class="ig-filter-section">
                 <div class="ig-filter-section__title">{{ t(`${NS}.searchIn`) }}</div>
                 <div class="ig-filter-section__hint">{{ t(`${NS}.searchInHint`) }}</div>
                 <div class="ig-search-fields">
@@ -698,7 +712,7 @@ watch(
         </t-popup>
 
         <t-popup
-          v-if="sortAttrs.length"
+          v-if="sortAttrs.length && !semanticActive"
           v-model:visible="sortPanelVisible"
           trigger="click"
           placement="bottom-right"
@@ -759,6 +773,9 @@ watch(
       </div>
     </div>
 
+    <p v-if="semanticActive" class="ig-semantic-hint">
+      {{ t(truncated ? 'gallerySemantic.limited' : 'gallerySemantic.ranked', { count: total }) }}
+    </p>
     <div ref="scrollEl" class="ig-scroll" :class="{ 'is-empty': !items.length }">
       <t-loading :loading="loading" size="small" class="ig-loading">
         <div v-if="error" class="ig-error">{{ error }}</div>
@@ -1160,6 +1177,8 @@ watch(
     font-weight: 500;
   }
 }
+
+.ig-semantic-hint { color: var(--td-text-color-secondary); font-size: var(--app-text-xs); margin: 8px 0 0; }
 
 // Grid
 .ig-scroll {

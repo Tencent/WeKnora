@@ -528,6 +528,12 @@ func (w *weaviateRepository) getBaseFilter(params types.RetrieveParams) *filters
 			WithOperator(filters.ContainsAny).
 			WithValueText(params.KnowledgeIDs...))
 	}
+	if len(params.ChunkIDs) > 0 {
+		operands = append(operands, filters.Where().
+			WithPath([]string{fieldChunkID}).
+			WithOperator(filters.ContainsAny).
+			WithValueText(params.ChunkIDs...))
+	}
 
 	if len(params.TagIDs) > 0 {
 		operands = append(operands, filters.Where().

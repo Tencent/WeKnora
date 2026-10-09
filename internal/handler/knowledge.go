@@ -40,6 +40,8 @@ type KnowledgeHandler struct {
 	asynqClient       interfaces.TaskEnqueuer
 	spanRepo          repository.KnowledgeSpanRepository
 	backlog           backlogProbe
+	imageVectors      *service.ImageVectorService
+	gallerySearch     *service.GallerySearchService
 }
 
 // backlogProbe tells a backlogged document (work still queued) from a stuck
@@ -88,6 +90,8 @@ func NewKnowledgeHandler(
 	asynqClient interfaces.TaskEnqueuer,
 	spanRepo repository.KnowledgeSpanRepository,
 	housekeeping *service.HousekeepingService,
+	imageVectors *service.ImageVectorService,
+	gallerySearch *service.GallerySearchService,
 ) *KnowledgeHandler {
 	var backlog backlogProbe
 	if housekeeping != nil {
@@ -95,6 +99,8 @@ func NewKnowledgeHandler(
 	}
 	return &KnowledgeHandler{
 		backlog:           backlog,
+		imageVectors:      imageVectors,
+		gallerySearch:     gallerySearch,
 		cfg:               cfg,
 		kgService:         kgService,
 		kbService:         kbService,
@@ -1250,19 +1256,33 @@ func (h *KnowledgeHandler) ListImages(c *gin.Context) {
 		filter.SortBy = ""
 	}
 
-	result, err := h.chunkService.ListImagesByKnowledgeBaseID(ctx, kbID, &pagination, filter)
+	searchMode := c.DefaultQuery("search_mode", "keyword")
+	if searchMode != "keyword" && searchMode != "semantic" {
+		_ = c.Error(errors.NewBadRequestError("unknown image search mode"))
+		return
+	}
+	var result *types.PageResult
+	truncated := false
+	if searchMode == "semantic" && filter.Keyword != "" {
+		result, truncated, err = h.gallerySearch.Search(ctx, kbID, &pagination, filter)
+	} else {
+		result, err = h.chunkService.ListImagesByKnowledgeBaseID(ctx, kbID, &pagination, filter)
+	}
+
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{"kb_id": kbID})
-		_ = c.Error(errors.NewInternalServerError(err.Error()))
+		_ = c.Error(err)
 		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"success":   true,
-		"data":      result.Data,
-		"total":     result.Total,
-		"page":      result.Page,
-		"page_size": result.PageSize,
+		"success":     true,
+		"data":        result.Data,
+		"total":       result.Total,
+		"page":        result.Page,
+		"page_size":   result.PageSize,
+		"truncated":   truncated,
+		"search_mode": searchMode,
 	})
 }
 

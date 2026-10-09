@@ -266,6 +266,9 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	// Extract services - register individual extracters with names
 	must(container.Provide(service.NewChunkExtractService, dig.Name("chunkExtractor")))
 	must(container.Provide(service.NewDataTableSummaryService, dig.Name("dataTableSummary")))
+	must(container.Provide(repository.NewImageVectorRepository))
+	must(container.Provide(service.NewImageVectorService))
+	must(container.Provide(service.NewGallerySearchService))
 	must(container.Provide(service.NewImageMultimodalService, dig.Name("imageMultimodal")))
 	must(container.Provide(service.NewKnowledgePostProcessService, dig.Name("knowledgePostProcess")))
 	must(container.Provide(service.NewKnowledgeAutoTagService, dig.Name("knowledgeAutoTag")))

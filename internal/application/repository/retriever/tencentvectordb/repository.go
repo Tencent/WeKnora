@@ -516,6 +516,9 @@ func (r *repository) baseFilter(params types.RetrieveParams) *tcvectordb.Filter 
 	if len(params.KnowledgeIDs) > 0 {
 		conditions = append(conditions, tcvectordb.In(fieldKnowledgeID, params.KnowledgeIDs))
 	}
+	if len(params.ChunkIDs) > 0 {
+		conditions = append(conditions, tcvectordb.In(fieldChunkID, params.ChunkIDs))
+	}
 	if len(params.TagIDs) > 0 {
 		conditions = append(conditions, tcvectordb.In(fieldTagID, params.TagIDs))
 	}

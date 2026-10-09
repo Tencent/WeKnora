@@ -211,6 +211,13 @@ func (g *pgRepository) KeywordsRetrieve(ctx context.Context,
 			Values: common.ToInterfaceSlice(params.KnowledgeIDs),
 		})
 	}
+	if len(params.ChunkIDs) > 0 {
+		logger.GetLogger(ctx).Debugf("[Postgres] Filtering by chunk IDs: %v", params.ChunkIDs)
+		conds = append(conds, clause.IN{
+			Column: "chunk_id",
+			Values: common.ToInterfaceSlice(params.ChunkIDs),
+		})
+	}
 	// Filter by tag IDs if specified
 	if len(params.TagIDs) > 0 {
 		logger.GetLogger(ctx).Debugf("[Postgres] Filtering by tag IDs: %v", params.TagIDs)
@@ -338,6 +345,20 @@ func (g *pgRepository) VectorRetrieve(ctx context.Context,
 			allVars = append(allVars, params.KnowledgeIDs[i])
 		}
 		whereParts = append(whereParts, fmt.Sprintf("knowledge_id IN (%s)",
+			strings.Join(placeholders, ", ")))
+	}
+	if len(params.ChunkIDs) > 0 {
+		logger.GetLogger(ctx).Debugf(
+			"[Postgres] Filtering vector search by chunk IDs: %v",
+			params.ChunkIDs,
+		)
+		placeholders := make([]string, len(params.ChunkIDs))
+		paramStart := len(allVars) + 1
+		for i := range params.ChunkIDs {
+			placeholders[i] = fmt.Sprintf("$%d", paramStart+i)
+			allVars = append(allVars, params.ChunkIDs[i])
+		}
+		whereParts = append(whereParts, fmt.Sprintf("chunk_id IN (%s)",
 			strings.Join(placeholders, ", ")))
 	}
 	// Filter by tag IDs if specified

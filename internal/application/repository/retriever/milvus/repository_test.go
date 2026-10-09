@@ -100,3 +100,12 @@ func TestUpdateChunkEnabledStatusInCollectionsIgnoresExtendedPrefix(t *testing.T
 	require.NoError(t, err)
 	require.Equal(t, []string{"weknora_embeddings_1024"}, seen)
 }
+
+func TestImageChunkAllowListIsAPositiveFilter(t *testing.T) {
+	repo := &milvusRepository{}
+	expr, params, err := repo.getBaseFilterForQuery(types.RetrieveParams{ChunkIDs: []string{"image-only"}})
+	require.NoError(t, err)
+	require.Contains(t, expr, "chunk_id in")
+	require.NotContains(t, expr, "not in")
+	require.NotEmpty(t, params)
+}

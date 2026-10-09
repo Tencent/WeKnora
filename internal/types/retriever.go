@@ -46,6 +46,8 @@ type RetrieveParams struct {
 	KnowledgeBaseIDs []string
 	// Knowledge IDs
 	KnowledgeIDs []string
+	// Chunk IDs restrict candidates before ranking. Empty means no restriction.
+	ChunkIDs []string
 	// Tag IDs for filtering (used for FAQ priority filtering)
 	TagIDs []string
 	// Excluded knowledge IDs

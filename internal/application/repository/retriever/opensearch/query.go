@@ -22,6 +22,7 @@ import (
 //     observe disabled chunks. Service layer pins false for user-facing
 //     APIs.
 type retrieveFilters struct {
+	ChunkIDs            []string
 	KBIDs               []string
 	KnowledgeIDs        []string
 	TagIDs              []string
@@ -36,6 +37,7 @@ type retrieveFilters struct {
 // behaviour of the Qdrant / pgvector drivers.
 func fromParams(p types.RetrieveParams) *retrieveFilters {
 	return &retrieveFilters{
+		ChunkIDs:            p.ChunkIDs,
 		KBIDs:               p.KnowledgeBaseIDs,
 		KnowledgeIDs:        p.KnowledgeIDs,
 		TagIDs:              p.TagIDs,
@@ -61,6 +63,11 @@ func (f *retrieveFilters) toBoolMust() []map[string]any {
 	if len(f.KnowledgeIDs) > 0 {
 		must = append(must, map[string]any{
 			"terms": map[string]any{"knowledge_id": f.KnowledgeIDs},
+		})
+	}
+	if len(f.ChunkIDs) > 0 {
+		must = append(must, map[string]any{
+			"terms": map[string]any{"chunk_id": f.ChunkIDs},
 		})
 	}
 	if len(f.TagIDs) > 0 {

@@ -681,6 +681,13 @@ func (m *milvusRepository) getBaseFilterForQuery(params types.RetrieveParams) (s
 			Value:    params.KnowledgeIDs,
 		})
 	}
+	if len(params.ChunkIDs) > 0 {
+		filters = append(filters, &universalFilterCondition{
+			Field:    fieldChunkID,
+			Operator: operatorIn,
+			Value:    params.ChunkIDs,
+		})
+	}
 	if len(params.TagIDs) > 0 {
 		filters = append(filters, &universalFilterCondition{
 			Field:    fieldTagID,

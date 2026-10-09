@@ -41,6 +41,7 @@ type AsynqTaskParams struct {
 	ChunkExtractor       interfaces.TaskHandler `name:"chunkExtractor"`
 	DataTableSummary     interfaces.TaskHandler `name:"dataTableSummary"`
 	ImageMultimodal      interfaces.TaskHandler `name:"imageMultimodal"`
+	ImageVector          *service.ImageVectorService
 	KnowledgePostProcess interfaces.TaskHandler `name:"knowledgePostProcess"`
 	KnowledgeAutoTag     interfaces.TaskHandler `name:"knowledgeAutoTag"`
 	KnowledgeBaseProfile interfaces.TaskHandler `name:"knowledgeBaseProfile"`
@@ -301,6 +302,8 @@ func RunAsynqServer(params AsynqTaskParams) *asynq.ServeMux {
 
 	// Register image multimodal handler
 	mux.HandleFunc(types.TypeImageMultimodal, params.ImageMultimodal.Handle)
+	mux.HandleFunc(types.TypeImageVector, params.ImageVector.Handle)
+	mux.HandleFunc(types.TypeImageVectorBackfill, params.ImageVector.Handle)
 
 	// Register knowledge post process handler
 	mux.HandleFunc(types.TypeKnowledgePostProcess, params.KnowledgePostProcess.Handle)

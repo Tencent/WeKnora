@@ -1,4 +1,21 @@
 export default {
+  gallerySemantic: {
+    "mode": "検索方法",
+    "keyword": "キーワード",
+    "semantic": "意味検索",
+    "placeholder": "探したい画像の内容を説明",
+    "ranked": "関連度順 · {count} 件。索引作成済みの画像のみ対象です。",
+    "limited": "関連度の高い上位 {count} 件。索引作成済みの画像のみ対象です。"
+},
+
+  imageVectorStatus: {
+    "disabled": "画像ベクトルは無効です。テキスト検索は利用できます",
+    "unsupported": "埋め込みモデルは画像に対応していません",
+    "coverage": "画像索引：{completed}/{total} 完了 · {pending} 待機 · {failed} 失敗 · {skipped} スキップ · {missing} 未作成",
+    "backfill": "不足分を作成／再試行",
+    "failed": "操作に失敗しました。再試行してください。",
+    "refresh": "状態を更新"
+},
   modelCatalog: {
     "title": "モデルカタログ",
     "description": "モデルカタログは、モデル追加時に選べるモデル一覧と、コンテキスト長や思考対応などの既定値を定義します。ここでの変更はすべてのワークスペースに即時反映されます。",
@@ -3961,7 +3978,7 @@ export default {
         imageAttrsLabel: '画像属性の観察',
         imageAttrsDescription: 'オンにすると各画像を先に「属性観察＋説明」し、その属性で画像内テキストへの OCR 実行可否を決定します。オフは基本モード：全画像を1枚ずつ説明し全て OCR します',
         imageVectorLabel: '画像ベクトル検索',
-        imageVectorDescription: 'オンにすると、画像の説明を生成した後に埋め込みモデルで画像そのものもエンコードし、説明に書かれていない内容でも画像を検索できるようにします。画像入力に対応した埋め込みモデルが必要で、画像ごとに埋め込み呼び出しが1回増え、ベクトル検索の候補範囲も広がります。以降に取り込み・再解析した文書にのみ適用され、スキャン PDF のページは対象外です',
+        imageVectorDescription: "説明の生成を待たず、独立したバックグラウンド処理で元画像をエンコードします。画像入力対応の埋め込みモデルが必要で、画像ごとに呼び出しが1回増えます。ギャラリーから既存画像の索引作成や失敗時の再試行ができ、文書の再解析は不要です。スキャン PDF のページは対象外です。",
         imageVectorModelUnsupported: '現在の埋め込みモデルは画像入力を宣言していないため、画像ベクトルは生成も検索もされません',
         imageAttrsSchemaLabel: '観察可能な画像属性',
         imageAttrsSchemaDescription: 'モデルは以下の属性（バックエンドのレジストリで定義）を観察して OCR ポリシーを決めます',

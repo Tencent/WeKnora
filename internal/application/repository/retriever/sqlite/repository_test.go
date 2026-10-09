@@ -77,6 +77,11 @@ func TestVectorRetrieveFiltersBeforeTopK(t *testing.T) {
 			},
 		},
 		{
+			name:      "chunk allow list",
+			blocker:   sqliteTestIndex("blocker", "kb-target", "knowledge-target", "tag-target", true),
+			configure: func(params *types.RetrieveParams) { params.ChunkIDs = []string{"target"} },
+		},
+		{
 			name:    "tag",
 			blocker: sqliteTestIndex("blocker", "kb-target", "knowledge-target", "tag-other", true),
 			configure: func(params *types.RetrieveParams) {

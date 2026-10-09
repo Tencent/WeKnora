@@ -1,4 +1,21 @@
 export default {
+  gallerySemantic: {
+    "mode": "검색 방식",
+    "keyword": "키워드",
+    "semantic": "의미 검색",
+    "placeholder": "찾고 싶은 이미지 내용을 설명하세요",
+    "ranked": "관련도순 · {count}개 결과. 색인이 생성된 이미지만 포함됩니다.",
+    "limited": "관련도가 높은 상위 {count}개 결과. 색인이 생성된 이미지만 포함됩니다."
+},
+
+  imageVectorStatus: {
+    "disabled": "이미지 벡터가 꺼져 있습니다. 텍스트 검색은 사용할 수 있습니다",
+    "unsupported": "임베딩 모델이 이미지를 지원하지 않습니다",
+    "coverage": "이미지 색인: {completed}/{total} 완료 · {pending} 대기 · {failed} 실패 · {skipped} 건너뜀 · {missing} 미생성",
+    "backfill": "누락 생성 / 재시도",
+    "failed": "작업이 실패했습니다. 다시 시도하세요.",
+    "refresh": "상태 새로고침"
+},
   modelCatalog: {
     "title": "모델 카탈로그",
     "description": "모델 카탈로그는 모델 추가 시 선택할 수 있는 모델 목록과 컨텍스트 창, 추론 지원 여부 같은 기본값을 정의합니다. 여기서 변경하면 모든 워크스페이스에 즉시 적용됩니다.",
@@ -4124,7 +4141,7 @@ export default {
         imageAttrsLabel: '이미지 속성 관찰',
         imageAttrsDescription: '켜면 각 이미지를 먼저 속성 관찰+설명한 뒤, 속성에 따라 이미지 내 텍스트에 OCR을 실행할지 결정합니다. 끄면 기본 모드: 모든 이미지를 하나씩 설명하고 모두 OCR합니다',
         imageVectorLabel: '이미지 벡터 검색',
-        imageVectorDescription: '켜면 이미지 설명을 생성한 뒤 임베딩 모델로 이미지 자체도 인코딩하여, 설명에 없는 내용으로도 이미지를 검색할 수 있습니다. 이미지 입력을 지원하는 임베딩 모델이 필요하며, 이미지마다 임베딩 호출이 한 번 늘고 벡터 검색 후보 범위도 넓어집니다. 이후 수집하거나 다시 파싱한 문서에만 적용되며, 스캔 PDF 페이지는 제외됩니다',
+        imageVectorDescription: "설명 생성을 기다리지 않고 독립적인 백그라운드 작업으로 원본 이미지를 인코딩합니다. 이미지 입력을 지원하는 임베딩 모델이 필요하며 이미지마다 호출이 한 번 추가됩니다. 문서를 다시 파싱하지 않고 갤러리에서 기존 이미지 색인을 생성하거나 실패한 작업을 재시도할 수 있습니다. 스캔 PDF 페이지는 제외됩니다.",
         imageVectorModelUnsupported: '현재 임베딩 모델은 이미지 입력을 선언하지 않아 이미지 벡터가 생성되거나 검색되지 않습니다',
         imageAttrsSchemaLabel: '관찰 가능한 이미지 속성',
         imageAttrsSchemaDescription: '모델은 아래 속성(백엔드 레지스트리 정의)을 관찰해 OCR 정책을 결정합니다',

@@ -131,6 +131,9 @@ func buildBaseFilter(params types.RetrieveParams) *whereBuilder {
 	if len(params.KnowledgeIDs) > 0 {
 		w.addIn(fieldKnowledgeID, params.KnowledgeIDs)
 	}
+	if len(params.ChunkIDs) > 0 {
+		w.addIn(fieldChunkID, params.ChunkIDs)
+	}
 	if len(params.TagIDs) > 0 {
 		w.addIn(fieldTagID, params.TagIDs)
 	}
