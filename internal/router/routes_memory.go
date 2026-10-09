@@ -38,3 +38,34 @@ func RegisterMemoryRoutes(r *gin.RouterGroup, memoryHandler *handler.MemoryHandl
 		memoryGroup.POST("/consolidate", memoryHandler.Consolidate)
 	}
 }
+
+// RegisterMasteryRoutes registers the personal answer-feedback endpoints and
+// the KB-scoped knowledge-guidance endpoints. The latter deliberately carry the
+// KB in the path so the shared KBAccessRead guard can run before any handler
+// touches wiki pages or returns profile metadata.
+func RegisterMasteryRoutes(r *gin.RouterGroup, masteryHandler *handler.MasteryHandler, g *rbacGuards) {
+	if masteryHandler == nil {
+		return
+	}
+
+	// Answer likes and profile deletion are scoped only to the caller's own
+	// memory subject; they do not read a client-selected knowledge base.
+	personal := g.apiKeyGroup(r.Group("/memory", g.Viewer()), apiKeyFullAccess())
+	{
+		personal.POST("/answer-like", masteryHandler.RecordAnswerLike)
+		personal.DELETE("/answer-like/:message_id", masteryHandler.CancelAnswerLike)
+		personal.DELETE("/mastery", masteryHandler.DeleteMastery)
+	}
+
+	// All endpoints below accept or return KB content. Keep the KB identifier in
+	// the route so authorization is performed before GetPageBySlug,
+	// ListPagesCursor, or the export renderer can observe anything about it.
+	kbMastery := g.apiKeyGroup(r.Group("/knowledge-bases/:kb_id/memory"), apiKeyFullAccess())
+	{
+		kbMastery.POST("/page-view", g.Viewer(), g.KBAccessRead("kb_id"), masteryHandler.RecordPageView)
+		kbMastery.POST("/exposure", g.Viewer(), g.KBAccessRead("kb_id"), masteryHandler.RecordExposure)
+		kbMastery.POST("/exposure/click", g.Viewer(), g.KBAccessRead("kb_id"), masteryHandler.ExposureClick)
+		kbMastery.GET("/mastery", g.Viewer(), g.KBAccessRead("kb_id"), masteryHandler.Profile)
+		kbMastery.GET("/mastery/export", g.Viewer(), g.KBAccessRead("kb_id"), masteryHandler.ExportProfile)
+	}
+}
