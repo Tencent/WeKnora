@@ -241,7 +241,7 @@ curl -X PUT $BASE/api/v1/knowledgebase/kb-1/wiki/move-page -H "Authorization: Be
 
 用途：获取页面（`*slug` 为通配路径）。
 
-响应：200 `WikiPage`
+响应：200 `WikiPageDetail`。保留 `WikiPage` 的所有字段，并增加 `in_link_titles`，将 `in_links` 中存在的页面 slug 映射为展示标题，例如 `{"concept/example":"示例标题"}`。没有可解析的反向链接时返回空对象；不存在的目标不出现在映射中。标题查询失败时返回 500，避免返回不完整的成功响应。
 
 ```bash
 curl $BASE/api/v1/knowledgebase/kb-1/wiki/pages/overview -H "Authorization: Bearer $TOKEN"
