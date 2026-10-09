@@ -584,6 +584,11 @@
         "id": "tongyi-embedding-vision-plus",
         "name": "Tongyi Embedding Vision Plus",
         "type": "Embedding",
+        "input": [
+          "text",
+          "image",
+          "video"
+        ],
         "dimension": 1152,
         "source": "https://help.aliyun.com/zh/model-studio/multimodal-embedding-api-reference"
       },
@@ -591,30 +596,55 @@
         "name": "tongyi-embedding-vision-flash (fixed 768 dimensions)",
         "match": "tongyi-embedding-vision-flash",
         "type": "Embedding",
+        "input": [
+          "text",
+          "image",
+          "video"
+        ],
         "source": "https://help.aliyun.com/zh/model-studio/multimodal-embedding-api-reference"
       },
       {
         "name": "tongyi-embedding-vision snapshots",
         "match": "tongyi-embedding-vision*",
         "type": "Embedding",
+        "input": [
+          "text",
+          "image",
+          "video"
+        ],
         "source": "https://help.aliyun.com/zh/model-studio/multimodal-embedding-api-reference"
       },
       {
         "name": "qwen3-vl-embedding (independent vectors by default)",
         "match": "qwen3-vl-embedding*",
         "type": "Embedding",
+        "input": [
+          "text",
+          "image",
+          "video"
+        ],
         "source": "https://help.aliyun.com/zh/model-studio/multimodal-embedding-api-reference"
       },
       {
         "name": "qwen2.5-vl-embedding (fused vectors only)",
         "match": "qwen2.5-vl-embedding*",
         "type": "Embedding",
+        "input": [
+          "text",
+          "image",
+          "video"
+        ],
         "source": "https://help.aliyun.com/zh/model-studio/multimodal-embedding-api-reference"
       },
       {
         "name": "multimodal-embedding-v1",
         "match": "multimodal-embedding*",
         "type": "Embedding",
+        "input": [
+          "text",
+          "image",
+          "video"
+        ],
         "source": "https://help.aliyun.com/zh/model-studio/multimodal-embedding-api-reference"
       },
       {
@@ -1497,6 +1527,10 @@
         "id": "jina-embeddings-v4",
         "name": "Jina Embeddings v4",
         "type": "Embedding",
+        "input": [
+          "text",
+          "image"
+        ],
         "dimension": 2048,
         "context_window": 32768,
         "source": "https://jina.ai/models/jina-embeddings-v4/"
@@ -1543,6 +1577,10 @@
         "id": "jina-reranker-m0",
         "name": "Jina Reranker m0 (multimodal)",
         "type": "Rerank",
+        "input": [
+          "text",
+          "image"
+        ],
         "context_window": 10000,
         "source": "https://jina.ai/reranker/"
       },
@@ -2628,6 +2666,10 @@
         "id": "nvidia/llama-nemotron-rerank-vl-1b-v2",
         "name": "Llama Nemotron Rerank VL 1B v2",
         "type": "Rerank",
+        "input": [
+          "text",
+          "image"
+        ],
         "source": "https://build.nvidia.com"
       },
       {
@@ -3350,6 +3392,22 @@
         "name": "Whisper Large v3",
         "type": "ASR",
         "source": "https://openrouter.ai/docs/api/api-reference/stt/create-transcription"
+      }
+    ],
+    "pinecone": [
+      {
+        "id": "bge-reranker-v2-m3",
+        "name": "BGE Reranker v2 M3 (Pinecone)",
+        "type": "Rerank",
+        "context_window": 1024,
+        "source": "https://docs.pinecone.io/reference/api/2025-10/inference/list_models"
+      },
+      {
+        "id": "pinecone-rerank-v0",
+        "name": "Pinecone Rerank v0",
+        "type": "Rerank",
+        "context_window": 512,
+        "source": "https://docs.pinecone.io/reference/api/2025-10/inference/list_models"
       }
     ],
     "qianfan": [
@@ -4306,6 +4364,11 @@
         "id": "doubao-embedding-vision-251215",
         "name": "Doubao Embedding Vision (251215)",
         "type": "Embedding",
+        "input": [
+          "text",
+          "image",
+          "video"
+        ],
         "dimension": 2048,
         "source": "https://docs.volcengine.com/docs/ark/multimodal-vectorization-api?lang=zh"
       },
@@ -4313,6 +4376,11 @@
         "id": "doubao-embedding-vision-250615",
         "name": "Doubao Embedding Vision",
         "type": "Embedding",
+        "input": [
+          "text",
+          "image",
+          "video"
+        ],
         "dimension": 2048,
         "source": "https://docs.volcengine.com/docs/ark/multimodal-vectorization-api?lang=zh"
       },

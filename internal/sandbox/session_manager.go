@@ -1571,9 +1571,10 @@ func buildSessionCreateRequest(provider RemoteProvider, cfg *Config) (RemoteCrea
 			ttl = DefaultCubeSandboxTTL
 		}
 		return RemoteCreateRequest{
-			TemplateID: cfg.CubeTemplate,
-			EnvVars:    envVars,
-			Network:    cfg.Network,
+			TemplateID:   cfg.CubeTemplate,
+			FromSnapshot: cfg.TemplateFromSnapshot,
+			EnvVars:      envVars,
+			Network:      cfg.Network,
 			Timeout: RemoteTimeoutPolicy{
 				Mode:       RemoteTimeoutExplicit,
 				Value:      ttl,
@@ -1588,9 +1589,10 @@ func buildSessionCreateRequest(provider RemoteProvider, cfg *Config) (RemoteCrea
 			ttl = DefaultE2BSandboxTTL
 		}
 		return RemoteCreateRequest{
-			TemplateID: cfg.E2BTemplate,
-			EnvVars:    envVars,
-			Network:    cfg.Network,
+			TemplateID:   cfg.E2BTemplate,
+			FromSnapshot: cfg.TemplateFromSnapshot,
+			EnvVars:      envVars,
+			Network:      cfg.Network,
 			Timeout: RemoteTimeoutPolicy{
 				Mode:       RemoteTimeoutExplicit,
 				Value:      ttl,

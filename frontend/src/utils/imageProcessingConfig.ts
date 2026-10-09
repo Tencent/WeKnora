@@ -14,6 +14,8 @@ export const LEGACY_PIPELINE_OB_CAP_OCR = 'ob_cap_ocr'
 /** The fields of the KB editor that feed image_processing_config. */
 export interface ImageProcessingEdits {
   imageAttrsEnabled: boolean
+  /** Index and recall images by their own vectors (off unless opted in). */
+  imageVectorEnabled: boolean
   onUnobserved: boolean
   /** The registry's current default OCR conditions (GET /image-attrs/schema). */
   defaultOn: ImageAttrConditionLike[]
@@ -79,6 +81,9 @@ export function buildPipelineFields(
  * The pipeline and its parameters are written too. They are the panel's own
  * settings; the observation switch is kept in step with the pick so a base that
  * was edited through the UI still reads the same way through the older switch.
+ * image_vector_enabled is written only when it is on or was already stored:
+ * a knowledge base that never touched the switch reads as off on the
+ * backend, so writing `false` into it would be a change for nothing.
  */
 export function buildImageProcessingConfig(
   snapshot: Record<string, unknown> | null | undefined,
@@ -104,6 +109,9 @@ export function buildImageProcessingConfig(
   else delete built.image_pipeline
   if (pipeline.image_pipeline_params) built.image_pipeline_params = pipeline.image_pipeline_params
   else delete built.image_pipeline_params
+  if (edits.imageVectorEnabled || 'image_vector_enabled' in snap) {
+    built.image_vector_enabled = edits.imageVectorEnabled
+  }
   return JSON.stringify(built) === JSON.stringify(snap) ? null : built
 }
 

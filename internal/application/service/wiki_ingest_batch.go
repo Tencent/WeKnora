@@ -742,6 +742,7 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 				changed        bool
 				affectedType   string
 				additionFailed bool
+				updateDeferred bool
 				reduceErr      error
 			)
 			// Serialize same-slug read-modify-write across concurrent batches
@@ -755,7 +756,7 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 						reduceErr = fmt.Errorf("wiki reduce panicked for slug %s: %v", slug, r)
 					}
 				}()
-				changed, affectedType, additionFailed, reduceErr = s.reduceSlugUpdates(
+				changed, affectedType, additionFailed, updateDeferred, reduceErr = s.reduceSlugUpdates(
 					reduceCtx, chatModel, payload.KnowledgeBaseID, slug, updates, payload.TenantID, batchCtx, kidToWikiSpan)
 				return reduceErr
 			})
@@ -773,6 +774,18 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 				logger.Warnf(reduceCtx, "wiki ingest: slug %s busy > %s, deferring update", slug, wikiSlugLockWait)
 				collectUnapplied(updates)
 				return nil
+			}
+			if updateDeferred {
+				// The page kept its previous body because the rewrite dropped
+				// table rows that are still on it. Not an error and the page is
+				// not damaged, but this slug's contribution never landed, so the
+				// documents behind it must survive the trim phase and come back
+				// in a later batch — trimming them here would delete their
+				// pending row and lose the addition for good.
+				logger.Warnf(reduceCtx,
+					"wiki ingest: slug %s kept its previous content (rewrite dropped rows), deferring update",
+					slug)
+				collectUnapplied(updates)
 			}
 			if reduceErr != nil {
 				// The page's read-modify-write failed, so this slug's update
@@ -1858,6 +1871,11 @@ func resolveSlugUpdateLanguage(ctx context.Context, updates []SlugUpdate) string
 //     refreshed for it. Callers use this to sanitize dead [[slug]] links
 //     elsewhere (e.g. in the doc's summary page) and to drop the slug from
 //     the wiki log feed so users don't see a clickable entry that 404s.
+//   - updateDeferred:   true iff the page write was refused by the row guard
+//     (ErrWikiWriteDroppedTableRows): the page kept its previous body, so this
+//     slug's contribution never landed and its documents must be re-queued
+//     rather than trimmed. Distinct from err: a successful write that changes
+//     nothing user-visible also leaves `version` alone, and that one IS applied.
 //   - err:              transport / repo error from the persisted upsert.
 func (s *wikiIngestService) reduceSlugUpdates(
 	ctx context.Context,
@@ -1868,7 +1886,7 @@ func (s *wikiIngestService) reduceSlugUpdates(
 	tenantID uint64,
 	batchCtx *WikiBatchContext,
 	kidToWikiSpan map[string]*Span,
-) (changed bool, affectedType string, additionFailed bool, err error) {
+) (changed bool, affectedType string, additionFailed bool, updateDeferred bool, err error) {
 	// Final safety net for the ingest/delete race: between Map (which already
 	// checks isKnowledgeGone) and Reduce there is a long LLM call where the
 	// source document may be deleted. Drop any addition/summary updates whose
@@ -1877,10 +1895,10 @@ func (s *wikiIngestService) reduceSlugUpdates(
 	// want when the doc is gone.
 	updates, err = s.filterLiveUpdates(ctx, kbID, updates)
 	if err != nil {
-		return false, "", false, err
+		return false, "", false, false, err
 	}
 	if len(updates) == 0 {
-		return false, "", false, nil
+		return false, "", false, false, nil
 	}
 
 	// Per-slug page span attribution: a single slug can receive
@@ -1964,7 +1982,7 @@ func (s *wikiIngestService) reduceSlugUpdates(
 			}
 		}
 		if !hasAdditions {
-			return false, "", false, nil
+			return false, "", false, false, nil
 		}
 
 		page = &types.WikiPage{
@@ -2015,11 +2033,17 @@ func (s *wikiIngestService) reduceSlugUpdates(
 		changed = true
 
 		if exists {
-			_, err = s.wikiService.UpdatePage(ctx, page)
+			// A summary rewrite can drop table rows too, and the refusal has
+			// the same meaning here: the page kept its previous body, so this
+			// slug's contribution never landed and its documents must survive
+			// the trim phase. Classify the explicit signal; do not read it off
+			// the page version.
+			_, writeErr := s.wikiService.UpdatePage(ctx, page)
+			updateDeferred, err = classifyWikiPageWrite(writeErr)
 		} else {
 			_, err = s.wikiService.CreatePage(ctx, page)
 		}
-		return changed, affectedType, false, err
+		return changed, affectedType, false, updateDeferred, err
 	}
 
 	var remainingSourcesContent strings.Builder
@@ -2270,14 +2294,51 @@ func (s *wikiIngestService) reduceSlugUpdates(
 		// on top of what was already there, deduplicated.
 		page.ChunkRefs = mergeChunkRefs(page.ChunkRefs, additions)
 		if exists {
-			_, err = s.wikiService.UpdatePage(ctx, page)
+			// A retraction removes a deleted document's contribution on
+			// purpose, so this write is allowed to drop the table rows that
+			// contribution owned. Saying so explicitly is what lets the choke
+			// point in UpdatePage refuse an accidental truncation everywhere
+			// else; without it a retract round would be refused and the stale
+			// content would stay on the page for good.
+			writeCtx := ctx
+			if len(retracts) > 0 {
+				writeCtx = types.WithWikiShrinkAllowed(ctx)
+			}
+			// UpdatePage refuses a machine rewrite that drops too many table
+			// rows still on the page and says so with
+			// ErrWikiWriteDroppedTableRows. That refusal is not a failure — the
+			// page is intact and this caller did nothing wrong — but it does
+			// mean this slug's contribution never landed, and its documents
+			// must be kept for a later batch. The version cannot stand in for
+			// that signal: a successful write that changes nothing
+			// user-visible leaves `version` alone too (see the version-bump
+			// policy in wiki_page.go), so only the explicit refusal is
+			// classified as deferred.
+			_, updateErr := s.wikiService.UpdatePage(writeCtx, page)
+			updateDeferred, err = classifyWikiPageWrite(updateErr)
 		} else {
 			_, err = s.wikiService.CreatePage(ctx, page)
 		}
-		return true, affectedType, additionFailed, err
+		return true, affectedType, additionFailed, updateDeferred, err
 	}
 
-	return false, "", additionFailed, nil
+	return false, "", additionFailed, false, nil
+}
+
+// classifyWikiPageWrite turns the result of one guarded UpdatePage call into
+// the reduce phase's (updateDeferred, err) pair.
+//
+// ErrWikiWriteDroppedTableRows means the row guard refused the write: the page
+// was not modified, but nothing failed, so the caller must keep this slug's
+// contributing documents for a later batch (updateDeferred) instead of
+// reporting an error. Every other outcome — including a successful write that
+// only refreshed bookkeeping and therefore did not bump `version` — was
+// applied and is not deferred.
+func classifyWikiPageWrite(updateErr error) (deferred bool, err error) {
+	if errors.Is(updateErr, ErrWikiWriteDroppedTableRows) {
+		return true, nil
+	}
+	return false, updateErr
 }
 
 // mergeChunkRefs unions the chunk IDs currently on the page with the ones

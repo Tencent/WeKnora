@@ -21,6 +21,7 @@ const DEFAULT_ON = [
 function editsWith(overrides: Partial<ImageProcessingEdits> = {}): ImageProcessingEdits {
   return {
     imageAttrsEnabled: true,
+    imageVectorEnabled: false,
     onUnobserved: false,
     defaultOn: DEFAULT_ON,
     pipelineId: IMAGE_PIPELINE_SMARTOCR,
@@ -85,6 +86,34 @@ test('an unchanged configuration is not sent', () => {
     image_pipeline: IMAGE_PIPELINE_SMARTOCR,
   }
 
+  assert.equal(
+    buildImageProcessingConfig(snapshot, editsWith({ onUnobserved: true })),
+    null,
+  )
+})
+
+test('the image-vector switch is saved when turned on and when turned back off', () => {
+  const on = buildImageProcessingConfig(
+    { model_id: 'vlm-1' },
+    editsWith({ imageAttrsEnabled: false, imageVectorEnabled: true }),
+  )
+  assert.equal(on?.image_vector_enabled, true)
+
+  const off = buildImageProcessingConfig(
+    { model_id: 'vlm-1', image_vector_enabled: true },
+    editsWith({ imageAttrsEnabled: false, imageVectorEnabled: false }),
+  )
+  assert.equal(off?.image_vector_enabled, false)
+})
+
+test('a knowledge base that never touched the image-vector switch does not get one written', () => {
+  // The backend reads a missing key as off, which is what every knowledge
+  // base from before the switch has; an unrelated save must leave it so.
+  const snapshot = {
+    image_attrs_enabled: true,
+    image_actions: { ocr: { on: DEFAULT_ON, on_unobserved: true } },
+    image_pipeline: IMAGE_PIPELINE_SMARTOCR,
+  }
   assert.equal(
     buildImageProcessingConfig(snapshot, editsWith({ onUnobserved: true })),
     null,

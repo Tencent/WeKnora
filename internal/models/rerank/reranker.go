@@ -12,6 +12,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/models/api/cohererank"
 	"github.com/Tencent/WeKnora/internal/models/api/dashscoperank"
 	"github.com/Tencent/WeKnora/internal/models/api/nimrerank"
+	"github.com/Tencent/WeKnora/internal/models/api/pineconerank"
 	"github.com/Tencent/WeKnora/internal/models/api/teirank"
 	modelruntime "github.com/Tencent/WeKnora/internal/models/runtime"
 
@@ -202,6 +203,8 @@ func newReranker(config *RerankerConfig) (Reranker, error) {
 		client = dashscoperank.New(dashscoperank.Config{Endpoint: endpoint, Settings: resolved.Rerank})
 	case api.RerankNIM:
 		client = nimrerank.New(nimrerank.Config{Endpoint: endpoint, Settings: resolved.Rerank})
+	case api.RerankPinecone:
+		client = pineconerank.New(pineconerank.Config{Endpoint: endpoint, Settings: resolved.Rerank})
 	case api.RerankTEI:
 		client = teirank.New(teirank.Config{Endpoint: endpoint, Settings: resolved.Rerank})
 	case api.RerankTencentLKEAP:
@@ -215,8 +218,16 @@ func newReranker(config *RerankerConfig) (Reranker, error) {
 		return nil, err
 	}
 
+	// Images need both halves: the catalog saying the model scores them, and
+	// a protocol that can carry one to this vendor.
+	var images api.ImageReranker
+	if ir, ok := client.(api.ImageReranker); ok && ir.AcceptsImages() && resolved.Spec.AcceptsImages() {
+		images = ir
+	}
+
 	return &protocolReranker{
 		inner:     client,
+		images:    images,
 		settings:  resolved.Rerank,
 		endpoint:  resolved.BaseURL,
 		modelName: config.ModelName,

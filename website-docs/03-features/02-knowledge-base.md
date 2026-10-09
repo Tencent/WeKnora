@@ -184,13 +184,14 @@ graph TB
 
 **ASRConfig**：`enabled` / `model_id` / `language`（语言提示，可选）。
 
-**ImageProcessingConfig（图片属性观察与条件 OCR）**：
+**ImageProcessingConfig（图片属性观察、条件 OCR 与图片向量）**：
 
 | 字段 | 类型 | 默认 | 说明 |
 | --- | --- | --- | --- |
 | `model_id` | string | - | 图片理解使用的 VLM 模型 ID（参与模型用量追踪） |
 | `image_attrs_enabled` | bool | false | 图片属性观察管线开关。关闭（默认）＝历史行为：每张图片各发一次描述请求、各发一次 OCR 请求，不做属性观察；开启后第一轮「属性观察＋描述」，再由代码纯函数按观察结果决定该图是否值得再跑一轮 OCR |
 | `image_actions` | object | 见下 | OCR 触发条件：`{ ocr: { on: ImageAttrCondition[], on_unobserved: bool } }`。`on` 为「属性=值」触发条件列表；`on_unobserved` 为属性未被模型观察时的保守兜底（默认 true＝仍 OCR） |
+| `image_vector_enabled` | bool | false | 图片向量开关。开启且知识库的向量模型能处理图片（模型「图片输入」能力）时，生成图片描述之后再用向量模型直接对图片编码、存一条图片向量，检索时一并召回；见下文「图片向量」 |
 
 开启 `image_attrs_enabled` 后，模型**不再对图片分类**，只逐项「观察」属性并产出描述。本期激活两个观察项（完整注册表见 `GET /api/v1/image-attrs/schema`，只读、需 Viewer 权限；该注册表是全局的，不随知识库变化）：
 
@@ -210,6 +211,14 @@ OCR 决策是代码纯函数 `DecideOCR`（`internal/application/service/image_a
 管线与观察结果记录在每张图的处理轨迹子 span 上，便于核对与排查：input `pipeline` = `observation_driven`（本开关开启）或 `caption_ocr`（关闭，历史行为）；output `attr_policy`（本轮 OCR 决策）、`image_attrs`（观察到的属性）、`ocr_skipped`（`attr_policy`＝被策略跳过 / `disabled`＝OCR 总开关关闭）、`observation_failed`（未形成有效观察）、`chunks_created`。
 
 单次上传 / 重新解析可在请求体的 `process_config`（`KnowledgeProcessOverrides`）里按文档覆盖 `image_attrs_enabled` 与 `image_actions`；未传的项沿用知识库设置。`image_actions` 按 action key 合并（`on` 整体替换）。接口字段见[知识库 API](../04-api/02-api-knowledge.md)，管线细节见[文档解析](03-document-parsing.md)。
+
+**图片向量（`image_vector_enabled`）**：默认关闭，升级后已有知识库也保持关闭（库里存的配置没有这个键，读出来就是 false），需要在知识库设置「图像处理配置 → 图片向量检索」里（开启多模态后出现）或通过 API 显式开启。只有**开关打开且向量模型能处理图片**时才生效，两者缺一则入库不生成图片向量、检索也不召回图片向量。之所以不随模型能力自动开启：能处理图片的向量模型常常只是被用来编码文本，自动开启会给这些知识库凭空增加每张图片一次的向量调用，并改变检索行为——开启后文档向量检索的候选池放大 1.5 倍，图片命中按 `min(VectorThreshold, 0.1)` 的单独阈值过滤。
+
+- 图片向量在多模态任务里生成，所以还需要开启多模态（VLM）：图片向量的 `Content` 复用图片描述（没有描述时用 OCR 文本）；扫描件 PDF 页不生成；
+- 开关只影响此后入库或重新解析的文档；已有文档要补图片向量需重新解析；
+- 开关关闭时，已有的图片向量（关闭前生成的，或文档从开启了图片向量的知识库**移动**过来时随文档带来的）连同其分块会保留，但检索时一律丢弃，不再召回；删除或重新解析文档、删除知识库时随文档一起清除；重新开启开关后，这些保留的图片向量恢复召回。**复制**文档到未开启的知识库则不会复制图片向量；
+- 多知识库联合检索时按知识库各自的开关判断，未开启的知识库不召回图片向量；
+- 检索引擎无法按来源类型过滤，不召回的图片行（未开启知识库的图片向量命中，以及关键词检索命中的任何图片行）只能在结果返回后丢弃。为免它们占满候选池、把文本挤出去，文档向量池或关键词池打满且含这类图片行时，会把 TopK 翻倍重新检索，直到凑够不需丢弃的候选（文本命中，以及开启了图片向量的知识库的图片命中）、索引耗尽或到达 500 条候选上限（以默认的 50 条池计，每个池最多多 4 次查询）。因此含图片行的 store 组可能多出几次检索查询；排在文本前面的图片行超过约 500 条时，文本命中仍可能被漏掉。补检失败或只部分返回时保留上一轮的完整结果。
 
 **QuestionGenerationConfig（问题生成）**：`enabled`；`question_count` 每分块生成问题数（默认 3，上限 10）；`custom_instructions` 目标受众 / 风格说明。
 

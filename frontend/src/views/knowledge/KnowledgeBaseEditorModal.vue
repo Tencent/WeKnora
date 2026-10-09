@@ -364,6 +364,20 @@
               </div>
             </div>
 
+            <!-- 图片向量：默认关闭，显式开启才为图片单独编码、检索时召回 -->
+            <div v-if="formData.multimodalConfig.enabled" class="setting-row">
+              <div class="setting-info">
+                <label>{{ $t('knowledgeEditor.advanced.multimodal.imageVectorLabel') }}</label>
+                <p class="desc">{{ $t('knowledgeEditor.advanced.multimodal.imageVectorDescription') }}</p>
+                <p v-if="formData.imageVectorEnabled && !embeddingTakesImages" class="desc desc-warning">
+                  {{ $t('knowledgeEditor.advanced.multimodal.imageVectorModelUnsupported') }}
+                </p>
+              </div>
+              <div class="setting-control">
+                <t-switch v-model="formData.imageVectorEnabled" size="medium" />
+              </div>
+            </div>
+
             <div v-if="formData.multimodalConfig.enabled" class="setting-row setting-row-vertical">
               <div class="setting-info">
                 <label>{{ $t('knowledgeEditor.advanced.multimodal.imagePipelineSectionLabel') }}</label>
@@ -845,6 +859,13 @@ const advancedSettingsRef = ref<InstanceType<typeof KBAdvancedSettings>>()
 
 // 表单数据
 const formData = ref<any>(null)
+// 图片向量只在向量模型能处理图片时生效；模型列表里查不到（未加载、跨租户共享）时
+// 不报警，后端会按实际模型判断。
+const embeddingTakesImages = computed(() => {
+  const id = formData.value?.modelConfig.embeddingModelId
+  const model = id ? allModels.value.find((m) => m.id === id) : undefined
+  return !model || !!model.capabilities?.input?.includes('image')
+})
 const isFAQ = computed(() => formData.value?.type === 'faq')
 
 const kbCreateNeedsEmbedding = computed(() => {
@@ -926,6 +947,8 @@ const initFormData = (type: 'document' | 'faq' = 'document') => {
     // 的设置洗掉。新建模式也必须用完整默认动作初始化——imageActions.ocr
     // .on_unobserved 直接被开关绑定，缺省会让打开开关的瞬间渲染崩溃。
     imageAttrsEnabled: false,
+    // 图片向量默认关闭：能处理图片的向量模型也常只用来编码文本。
+    imageVectorEnabled: false,
     imageActions: mergeImageActions(),
     // 方案没有「留空」选项：多模态开关决定是否处理图片，开了就一定要有
     // 方案可跑，所以默认落在 default（内部名，UI 显示为「传统」）。选中的
@@ -1090,6 +1113,8 @@ const loadKBData = async (
       imagePipeline: resolveKbImagePipeline(kb),
       // 旧观察开关与选中的方案保持同一个意思：只有智能模式把它点亮。
       imageAttrsEnabled: resolveKbImagePipeline(kb) === IMAGE_PIPELINE_SMARTOCR,
+      imageVectorEnabled:
+        !!(kb as Record<string, any>).image_processing_config?.image_vector_enabled,
       imageActions: mergeImageActions(
         (kb as Record<string, any>).image_processing_config?.image_actions,
       ),
@@ -1521,6 +1546,7 @@ const buildSubmitData = () => {
   {
     const built = buildImageProcessingConfig(formData.value.imageProcessingConfigSnapshot, {
       imageAttrsEnabled: formData.value.imageAttrsEnabled,
+      imageVectorEnabled: formData.value.imageVectorEnabled,
       onUnobserved: formData.value.imageActions.ocr.on_unobserved,
       defaultOn: displaySchema.value.default_actions.ocr.on,
       // 多模态开关决定是否处理图片：关闭时不写流水线字段（buildImageProcessingConfig
@@ -2310,6 +2336,11 @@ watch(() => chatResources.allModels, (list) => {
       color: var(--td-text-color-secondary);
       margin: 0;
       line-height: 1.5;
+    }
+
+    .desc-warning {
+      margin-top: 4px;
+      color: var(--td-warning-color);
     }
   }
 

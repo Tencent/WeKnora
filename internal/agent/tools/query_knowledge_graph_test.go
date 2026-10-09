@@ -76,6 +76,10 @@ func (s *stubKnowledgeBaseService) HybridSearchWithRerank(
 	return &types.RetrievalResult{Results: results}, err
 }
 
+func (s *stubKnowledgeBaseService) ReadChunkImage(context.Context, *types.SearchResult) ([]byte, error) {
+	return nil, nil
+}
+
 func (s *stubKnowledgeBaseService) GetQueryEmbedding(context.Context, string, string) ([]float32, error) {
 	return nil, nil
 }

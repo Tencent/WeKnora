@@ -5,9 +5,11 @@ import (
 	"context"
 	"crypto/hmac"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mime"
+	"net"
 	"net/http"
 	"net/url"
 	"path/filepath"
@@ -48,6 +50,11 @@ var validateDownloadFileURL = func(rawURL string) error {
 // maxDownloadFileSize caps the size of a file downloaded from Yunzhijia and read
 // into memory, to avoid unbounded memory usage from a large/malicious response.
 const maxDownloadFileSize = 32 << 20 // 32 MiB
+
+const (
+	attachmentDownloadAttempts = 2
+	attachmentRetryDelay       = 500 * time.Millisecond
+)
 
 // maxDownloadRedirects limits how many redirects DownloadFile follows manually.
 // The shared httpClient disables automatic redirects (SSRF safety), but the
@@ -410,11 +417,73 @@ func (a *Adapter) DownloadFile(ctx context.Context, msg *im.IncomingMessage) (io
 	return newLimitedReadCloser(resp.Body, maxDownloadFileSize), fileName, nil
 }
 
-// fetchDownload performs the download request, following at most maxDownloadRedirects
-// redirects. Each redirect target is re-validated against the allowed host suffix so
-// the request cannot be redirected off the trusted domain. The bearer token is only
-// sent on the initial request and never forwarded across a redirect.
+// Attachment downloads use the existing configured HTTP timeout.
+// Retry once on timeout, with a 500ms delay.
+// The parent IM attachment deadline still limits the total duration.
 func (a *Adapter) fetchDownload(ctx context.Context, downloadURL, accessToken string) (*http.Response, error) {
+	downloadClient := *a.httpClient
+
+	var lastErr error
+	for attempt := 0; attempt < attachmentDownloadAttempts; attempt++ {
+		attemptCtx, cancel := context.WithTimeout(ctx, downloadClient.Timeout)
+		resp, err := a.fetchDownloadOnce(attemptCtx, &downloadClient, downloadURL, accessToken)
+		if err == nil {
+			if resp.StatusCode != http.StatusOK {
+				body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+				_ = resp.Body.Close()
+				cancel()
+				resp.Body = io.NopCloser(bytes.NewReader(body))
+				return resp, nil
+			}
+
+			body, readErr := io.ReadAll(io.LimitReader(resp.Body, maxDownloadFileSize+1))
+			_ = resp.Body.Close()
+			cancel()
+			if readErr == nil {
+				if len(body) > maxDownloadFileSize {
+					return nil, fmt.Errorf("yunzhijia file exceeds max download size of %d bytes", maxDownloadFileSize)
+				}
+				resp.Body = io.NopCloser(bytes.NewReader(body))
+				return resp, nil
+			}
+			err = fmt.Errorf("read download file body: %w", readErr)
+		} else {
+			cancel()
+		}
+
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		lastErr = err
+		if !isDownloadTimeout(err) || attempt == attachmentDownloadAttempts-1 {
+			break
+		}
+		timer := time.NewTimer(attachmentRetryDelay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, ctx.Err()
+		case <-timer.C:
+		}
+	}
+	return nil, lastErr
+}
+
+func isDownloadTimeout(err error) bool {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	var netErr net.Error
+	return errors.As(err, &netErr) && netErr.Timeout()
+}
+
+// fetchDownloadOnce follows at most maxDownloadRedirects redirects. Each target
+// is re-validated, and the bearer token is only sent on the initial request.
+func (a *Adapter) fetchDownloadOnce(
+	ctx context.Context,
+	client *http.Client,
+	downloadURL, accessToken string,
+) (*http.Response, error) {
 	currentURL := downloadURL
 	for redirects := 0; ; redirects++ {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, currentURL, nil)
@@ -424,7 +493,7 @@ func (a *Adapter) fetchDownload(ctx context.Context, downloadURL, accessToken st
 		if redirects == 0 {
 			req.Header.Set("Authorization", "Bearer "+accessToken)
 		}
-		resp, err := a.httpClient.Do(req)
+		resp, err := client.Do(req)
 		if err != nil {
 			return nil, fmt.Errorf("download file: %w", err)
 		}
