@@ -170,7 +170,9 @@ func writeSandboxDescription(l sandbox.WorkspaceLayout, sizeGuidance string) str
 	return fmt.Sprintf(rewriteRemoteWorkspaceCopy(writeSandboxFileDescription, l), sizeGuidance)
 }
 
-const hostWriteSandboxFileDescription = "Create, overwrite, or append a text file in %s.\n" +
+const hostWriteSandboxFileDescription = "Create, overwrite, or append a text file in %s, " +
+	"or in a directory the user has already approved for this session. " +
+	"Paths outside that are refused; use shell_exec when the user should be asked to open a new directory.\n" +
 	"Send both path and content (path first). Use edit_sandbox_file for small changes to an existing file. " +
 	"File content does not pass through shell quoting.\n" +
 	"Large files: first call uses mode=overwrite (default), " +

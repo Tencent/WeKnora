@@ -41,6 +41,7 @@ func TestToolGuidanceForHostUsesActualWorkspace(t *testing.T) {
 		[]string{"shell_exec", "read_file", "write_sandbox_file"}, false, layout,
 	)
 	require.Contains(t, text, "Session workspace: /Users/dev/My Project")
+	require.Contains(t, text, "asks the user before opening it")
 	require.NotContains(t, text, sandbox.SessionWorkspaceRoot)
 	require.NotContains(t, text, "is the only directory collected")
 	require.NotContains(t, text, "sandbox:<file name>")
