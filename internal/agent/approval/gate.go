@@ -40,6 +40,8 @@ type resolveMessage struct {
 	Reason       string          `json:"reason,omitempty"`
 	TimedOut     bool            `json:"timed_out,omitempty"`
 	Canceled     bool            `json:"canceled,omitempty"`
+	Scope        string          `json:"scope,omitempty"`
+	Access       string          `json:"access,omitempty"`
 	// ReplyChannel, when non-empty, asks the owning instance to publish a
 	// resolveAck so the caller can know if delivery actually happened.
 	ReplyChannel string `json:"reply_channel,omitempty"`
@@ -80,6 +82,10 @@ type Decision struct {
 	Reason          string
 	TimedOut        bool
 	ContextCanceled bool
+	// Scope is "once" or "session" for host approvals; empty means once.
+	Scope string
+	// Access narrows a host grant to "read"; empty keeps the proposal.
+	Access string
 }
 
 // PendingRequest carries everything needed to block and notify the UI.
@@ -147,7 +153,11 @@ type waiter struct {
 	ch       chan Decision
 	tenantID uint64
 	userID   string // empty means "skip user check"
-	once     sync.Once
+	// prompt is set for host approvals so the UI can poll for it. The Lite
+	// webview can hold back the tail of an SSE response, so the stream alone
+	// does not reliably show the card while the command is blocked.
+	prompt *event.ToolApprovalRequiredData
+	once   sync.Once
 	// resolved is atomic so deliverLocal can read it without holding g.mu
 	// (deliver writes it from timer/ctx branches that don't take g.mu).
 	resolved atomic.Bool
@@ -238,6 +248,8 @@ func (g *Gate) runSubscriber() {
 				Reason:          m.Reason,
 				TimedOut:        m.TimedOut,
 				ContextCanceled: m.Canceled,
+				Scope:           m.Scope,
+				Access:          m.Access,
 			})
 			// Reply to the originating instance so it can return accurate HTTP
 			// status codes. Only the owning instance (or one that detects a
@@ -434,6 +446,113 @@ func (g *Gate) RequestAndWait(ctx context.Context, req PendingRequest) (Decision
 	}
 }
 
+// HostApprovalKindCommand marks a Lite host shell command approval.
+const HostApprovalKindCommand = "host_command"
+
+// HostPendingRequest asks the session owner about one Lite host command.
+type HostPendingRequest struct {
+	TenantID           uint64
+	UserID             string
+	SessionID          string
+	AssistantMessageID string
+	RequestID          string
+	ToolCallID         string
+	EventBus           *event.EventBus
+	Host               event.HostApprovalPayload
+}
+
+// RequestHostAndWait blocks until the session owner answers a Lite host
+// command approval, the wait times out, or ctx is canceled. Unlike
+// RequestAndWait it never consults the MCP checker: a nil checker must not
+// turn a host question into an automatic yes.
+func (g *Gate) RequestHostAndWait(ctx context.Context, req HostPendingRequest) (Decision, error) {
+	if g == nil {
+		return Decision{}, fmt.Errorf("host approval: nil gate")
+	}
+	if req.EventBus == nil {
+		return Decision{}, fmt.Errorf("host approval: EventBus is nil")
+	}
+	if strings.TrimSpace(req.UserID) == "" {
+		return Decision{}, fmt.Errorf("host approval: session owner is unknown")
+	}
+
+	pendingID := uuid.New().String()
+	timeoutSec := int(g.timeout / time.Second)
+	if timeoutSec < 1 {
+		timeoutSec = 1
+	}
+	host := req.Host
+	prompt := event.ToolApprovalRequiredData{
+		PendingID:          pendingID,
+		TenantID:           req.TenantID,
+		SessionID:          req.SessionID,
+		AssistantMessageID: req.AssistantMessageID,
+		RegisteredToolName: "shell_exec",
+		TimeoutSeconds:     timeoutSec,
+		RequestedAtUnix:    time.Now().Unix(),
+		ToolCallID:         req.ToolCallID,
+		RequestID:          req.RequestID,
+		Kind:               HostApprovalKindCommand,
+		Host:               &host,
+	}
+	w := &waiter{ch: make(chan Decision, 1), tenantID: req.TenantID, userID: req.UserID, prompt: &prompt}
+	g.mu.Lock()
+	g.pending[pendingID] = w
+	g.mu.Unlock()
+	defer func() {
+		g.mu.Lock()
+		delete(g.pending, pendingID)
+		g.mu.Unlock()
+	}()
+
+	if err := req.EventBus.Emit(ctx, event.Event{
+		ID:        pendingID + "-approval-required",
+		Type:      event.EventToolApprovalRequired,
+		SessionID: req.SessionID,
+		Data:      prompt,
+		Metadata: map[string]interface{}{
+			"assistant_message_id": req.AssistantMessageID,
+			"pending_id":           pendingID,
+		},
+		RequestID: req.RequestID,
+	}); err != nil {
+		return Decision{}, fmt.Errorf("emit host approval required: %w", err)
+	}
+
+	emitResolved := func(d Decision) {
+		_ = req.EventBus.Emit(context.WithoutCancel(ctx), event.Event{
+			ID:        pendingID + "-approval-resolved",
+			Type:      event.EventToolApprovalResolved,
+			SessionID: req.SessionID,
+			Data: event.ToolApprovalResolvedData{
+				PendingID: pendingID,
+				Approved:  d.Approved,
+				Reason:    d.Reason,
+				TimedOut:  d.TimedOut,
+				Canceled:  d.ContextCanceled,
+				Scope:     d.Scope,
+			},
+			Metadata:  map[string]interface{}{"assistant_message_id": req.AssistantMessageID},
+			RequestID: req.RequestID,
+		})
+	}
+
+	timer := time.NewTimer(g.timeout)
+	defer timer.Stop()
+	var d Decision
+	select {
+	case d = <-w.ch:
+	case <-timer.C:
+		_ = w.deliver(Decision{Approved: false, Reason: "approval timeout", TimedOut: true})
+		d = <-w.ch
+	case <-ctx.Done():
+		_ = w.deliver(Decision{Approved: false, Reason: "request canceled", ContextCanceled: true})
+		d = <-w.ch
+	}
+	emitResolved(d)
+	return d, nil
+}
+
 // RequestOAuthAndWait emits an "MCP OAuth required" UI event, then blocks
 // until the user authorizes (delivered via Resolve), the wait times out, or
 // the request ctx is canceled. A returned Decision.Approved==true means the
@@ -602,6 +721,8 @@ func (g *Gate) resolveCrossInstance(tenantID uint64, userID, pendingID string, d
 		Reason:       d.Reason,
 		TimedOut:     d.TimedOut,
 		Canceled:     d.ContextCanceled,
+		Scope:        d.Scope,
+		Access:       d.Access,
 		ReplyChannel: replyChannel,
 		OriginID:     instanceID,
 		RequestNonce: nonce,

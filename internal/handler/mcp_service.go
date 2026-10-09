@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	stderrors "errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"unicode/utf8"
@@ -712,6 +713,45 @@ type resolveToolApprovalBody struct {
 	Decision     string          `json:"decision" binding:"required"` // approve | reject
 	ModifiedArgs json.RawMessage `json:"modified_args"`
 	Reason       string          `json:"reason"`
+	// Scope and Access are only read by Lite host command approvals.
+	Scope  string `json:"scope"`
+	Access string `json:"access"`
+}
+
+func toolApprovalDecision(body resolveToolApprovalBody) (approval.Decision, error) {
+	dec := approval.Decision{Reason: body.Reason}
+	switch body.Decision {
+	case "approve":
+		dec.Approved = true
+		// Reject "null" / non-object payloads up front. Without this, "null"
+		// (4 bytes) passes the len>0 check and the downstream tool sees a nil
+		// argument map, silently losing the original args.
+		trimmed := strings.TrimSpace(string(body.ModifiedArgs))
+		if len(trimmed) > 0 && trimmed != "null" {
+			var probe map[string]interface{}
+			if err := json.Unmarshal(body.ModifiedArgs, &probe); err != nil || probe == nil {
+				return approval.Decision{}, fmt.Errorf("modified_args must be a non-null JSON object")
+			}
+			dec.ModifiedArgs = body.ModifiedArgs
+		}
+	case "reject":
+		dec.Approved = false
+	default:
+		return approval.Decision{}, fmt.Errorf("decision must be approve or reject")
+	}
+	switch body.Scope {
+	case "", "once", "session":
+		dec.Scope = body.Scope
+	default:
+		return approval.Decision{}, fmt.Errorf("scope must be once or session")
+	}
+	switch body.Access {
+	case "", "read", "write":
+		dec.Access = body.Access
+	default:
+		return approval.Decision{}, fmt.Errorf("access must be read or write")
+	}
+	return dec, nil
 }
 
 // ResolveToolApproval completes a pending MCP tool approval (agent execution resumes).
@@ -747,26 +787,9 @@ func (h *MCPServiceHandler) ResolveToolApproval(c *gin.Context) {
 		c.Error(errors.NewBadRequestError(err.Error()))
 		return
 	}
-	dec := approval.Decision{Reason: body.Reason}
-	switch body.Decision {
-	case "approve":
-		dec.Approved = true
-		// Reject "null" / non-object payloads up front. Without this, "null"
-		// (4 bytes) passes the len>0 check and the downstream tool sees a nil
-		// argument map, silently losing the original args.
-		trimmed := strings.TrimSpace(string(body.ModifiedArgs))
-		if len(trimmed) > 0 && trimmed != "null" {
-			var probe map[string]interface{}
-			if err := json.Unmarshal(body.ModifiedArgs, &probe); err != nil || probe == nil {
-				c.Error(errors.NewBadRequestError("modified_args must be a non-null JSON object"))
-				return
-			}
-			dec.ModifiedArgs = body.ModifiedArgs
-		}
-	case "reject":
-		dec.Approved = false
-	default:
-		c.Error(errors.NewBadRequestError("decision must be approve or reject"))
+	dec, err := toolApprovalDecision(body)
+	if err != nil {
+		_ = c.Error(errors.NewBadRequestError(err.Error()))
 		return
 	}
 	principal, _ := types.PrincipalFromContext(ctx)
