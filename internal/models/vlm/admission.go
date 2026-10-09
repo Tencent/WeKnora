@@ -1,3 +1,6 @@
+// Package vlm wraps a VLM model with per-model admission control, adaptive
+// concurrency, and in-place retry so a single overloaded upstream does not
+// take down the whole knowledge-base ingestion pipeline.
 package vlm
 
 import (
