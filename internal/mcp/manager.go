@@ -30,6 +30,7 @@ type pendingMCPConnection struct {
 	client  MCPClient
 	err     error
 	version time.Time
+	retired MCPClient // closed by the connection worker before opening its replacement
 }
 
 type managedMCPClient struct {
@@ -111,6 +112,7 @@ func (m *MCPManager) GetOrCreateClient(ctx context.Context, service *types.MCPSe
 	}
 	key := cacheKey(service, principal)
 
+	var retired MCPClient
 	m.clientsMu.Lock()
 	if err := m.ctx.Err(); err != nil {
 		m.clientsMu.Unlock()
@@ -122,7 +124,7 @@ func (m *MCPManager) GetOrCreateClient(ctx context.Context, service *types.MCPSe
 			m.clientsMu.Unlock()
 			return client, nil
 		}
-		_ = client.Disconnect()
+		retired = client
 		delete(m.clients, key)
 	}
 	pending := m.connecting[key]
@@ -133,7 +135,9 @@ func (m *MCPManager) GetOrCreateClient(ctx context.Context, service *types.MCPSe
 	}
 	if pending == nil {
 		lifeCtx, cancel := context.WithCancel(m.ctx)
-		pending = &pendingMCPConnection{done: make(chan struct{}), cancel: cancel, version: service.UpdatedAt}
+		pending = &pendingMCPConnection{
+			done: make(chan struct{}), cancel: cancel, version: service.UpdatedAt, retired: retired,
+		}
 		m.connecting[key] = pending
 		config := &ClientConfig{Service: service, TenantID: tenantID, Principal: principal, OAuthRepo: m.oauthRepo}
 		go m.connectClient(lifeCtx, key, config, pending)
@@ -150,7 +154,16 @@ func (m *MCPManager) GetOrCreateClient(ctx context.Context, service *types.MCPSe
 func (m *MCPManager) connectClient(
 	ctx context.Context, key string, config *ClientConfig, pending *pendingMCPConnection,
 ) {
-	client, err := NewMCPClient(config)
+	// Closing a session can issue a remote DELETE. Keep it off the manager
+	// lock and the caller's goroutine, while preserving replacement order.
+	if pending.retired != nil {
+		_ = pending.retired.Disconnect()
+	}
+	var client MCPClient
+	err := ctx.Err()
+	if err == nil {
+		client, err = NewMCPClient(config)
+	}
 	if err == nil {
 		// SSE needs the connection lifetime, not the requesting turn's deadline.
 		err = client.Connect(ctx)
@@ -171,15 +184,15 @@ func (m *MCPManager) connectClient(
 	} else {
 		pending.err = err
 		pending.cancel()
-		if client != nil {
-			_ = client.Disconnect()
-		}
 	}
 	if m.connecting[key] == pending {
 		delete(m.connecting, key)
 	}
 	close(pending.done)
 	m.clientsMu.Unlock()
+	if err != nil && client != nil {
+		_ = client.Disconnect()
+	}
 }
 
 // initializeClient handles the shared initialization flow with timeout enforcement.
@@ -222,7 +235,6 @@ func (m *MCPManager) GetClient(serviceID string) (MCPClient, bool) {
 // the service ID).
 func (m *MCPManager) CloseClient(serviceID string) error {
 	m.clientsMu.Lock()
-	defer m.clientsMu.Unlock()
 	for key, pending := range m.connecting {
 		if key == serviceID || strings.HasPrefix(key, serviceID+"\x00") {
 			pending.cancel()
@@ -230,16 +242,24 @@ func (m *MCPManager) CloseClient(serviceID string) error {
 		}
 	}
 
+	retired := make(map[string]MCPClient)
 	for key, client := range m.clients {
 		// Match the plain service-ID key as well as per-principal OAuth keys
 		// ("<serviceID>\x00<principal>").
 		if key != serviceID && !strings.HasPrefix(key, serviceID+"\x00") {
 			continue
 		}
+		retired[key] = client
+		delete(m.clients, key)
+	}
+	m.clientsMu.Unlock()
+
+	// Remove only the captured clients. A replacement may be installed while
+	// a remote server is still acknowledging the old session's closure.
+	for key, client := range retired {
 		if err := client.Disconnect(); err != nil {
 			logger.GetLogger(m.ctx).Errorf("Failed to disconnect MCP client %s: %v", key, err)
 		}
-		delete(m.clients, key)
 		logger.GetLogger(m.ctx).Infof("MCP client closed: %s", key)
 	}
 	return nil
