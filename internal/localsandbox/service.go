@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
@@ -178,7 +179,8 @@ func (s *Service) Run(ctx context.Context, req RunRequest) (*RunResult, error) {
 	if review == "" {
 		review = req.Command
 	}
-	if refused := s.approveDelete(ctx, req, review, cwd); refused != nil {
+	policy, refused := s.approveDelete(ctx, req, policy, review, cwd)
+	if refused != nil {
 		return refused, nil
 	}
 	res, err := s.runPolicy(ctx, ws.Root, policy, req)
@@ -190,10 +192,15 @@ func (s *Service) Run(ctx context.Context, req RunRequest) (*RunResult, error) {
 
 var errNoApprover = errors.New("nobody can approve it in this session")
 
-func (s *Service) approveDelete(ctx context.Context, req RunRequest, review, cwd string) *RunResult {
+// approveDelete asks before a delete runs. A delete outside the policy also
+// needs its directory, so the same card asks for both and the command runs
+// once with that access instead of failing first and asking again.
+func (s *Service) approveDelete(
+	ctx context.Context, req RunRequest, policy Policy, review, cwd string,
+) (Policy, *RunResult) {
 	segments := DeleteSegments(review, s.builder.HomeDir())
 	if len(segments) == 0 {
-		return nil
+		return policy, nil
 	}
 	dangerous := false
 	opaque := false
@@ -208,8 +215,9 @@ func (s *Service) approveDelete(ctx context.Context, req RunRequest, review, cwd
 	// delete in the command must be covered. An opaque command hides a
 	// delete no rule can name, so it is asked every time.
 	rememberable := !dangerous && !opaque
-	if rememberable && s.sessions.rulesCover(req.SessionID, cwd, rules) {
-		return nil
+	proposed, needsDir := s.deleteGrant(policy, review, cwd)
+	if rememberable && !needsDir && s.sessions.rulesCover(req.SessionID, cwd, rules) {
+		return policy, nil
 	}
 	reason := ReasonDelete
 	if dangerous {
@@ -225,16 +233,58 @@ func (s *Service) approveDelete(ctx context.Context, req RunRequest, review, cwd
 	if rememberable {
 		approval.SessionRules = ruleLabels(rules)
 	}
+	if needsDir {
+		approval.Proposed = &proposed
+	}
 	d, err := s.ask(ctx, req.Approver, approval)
 	if err != nil || !d.Approved {
-		return &RunResult{Exit: ExitStatus{Code: 1}, Notice: refusalNotice("delete command", d, err)}
+		return policy, &RunResult{Exit: ExitStatus{Code: 1}, Notice: refusalNotice("delete command", d, err)}
+	}
+	if needsDir {
+		// A delete needs write access, so the card's read-only choice is ignored.
+		relaxed, err := s.builder.Relax(policy, proposed)
+		if err != nil {
+			return policy, &RunResult{
+				Exit:   ExitStatus{Code: 1},
+				Notice: fmt.Sprintf("[sandbox] could not widen the sandbox for %s: %v", proposed.Path, err),
+			}
+		}
+		policy = relaxed
+		logger.Infof(ctx, "[LocalSandbox] delete runs with grant session=%s path=%s session_scope=%t",
+			req.SessionID, proposed.Path, d.Session)
 	}
 	if d.Session && rememberable {
 		for _, rule := range rules {
 			s.sessions.approveRule(req.SessionID, cwd, rule)
 		}
+		if needsDir {
+			s.sessions.addGrant(req.SessionID, proposed)
+		}
 	}
-	return nil
+	return policy, nil
+}
+
+// deleteGrant is the directory a delete needs when it removes something the
+// policy cannot write. Removing an entry writes its parent, so the proposal is
+// a target's parent directory; a grant on a directory being removed would
+// leave its own rmdir blocked. Only the first grantable directory is offered;
+// a second one is still asked after the run, like any other denial.
+func (s *Service) deleteGrant(policy Policy, review, cwd string) (Grant, bool) {
+	guard := NewPathGuard(policy)
+	for _, target := range DeleteTargets(review, s.builder.HomeDir()) {
+		if !filepath.IsAbs(target) {
+			target = filepath.Join(cwd, target)
+		}
+		target = filepath.Clean(target)
+		if _, err := guard.CheckWrite(target); err == nil {
+			continue
+		}
+		parent := Denial{Reason: DenialPolicy, Path: filepath.Dir(target)}
+		if g, ok := s.builder.ProposeGrant(policy, parent, cwd); ok {
+			return g, true
+		}
+	}
+	return Grant{}, false
 }
 
 func ruleLabels(rules []DeleteRule) []string {
