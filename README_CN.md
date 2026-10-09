@@ -320,7 +320,7 @@ docker compose up -d    # 用新镜像重建容器
 | [文档格式](https://weknora.weixin.qq.com/docs/03-features/03-document-parsing) | PDF / Word / PPT / Excel / CSV / TXT / Markdown / HTML / EPUB / MHTML / JSON / XMind / 图片 |
 | [数据源](https://weknora.weixin.qq.com/docs/03-features/10-datasource) | 飞书知识库 / 飞书云盘 / Lark / Confluence / GitLab / 腾讯 IMA / Notion / 语雀 / 钉钉文档 / Seafile / RSS |
 | [IM 渠道](https://weknora.weixin.qq.com/docs/03-features/12-im-integration) | 企业微信 / 飞书 / Lark / QQBot / Slack / Telegram / 钉钉 / Mattermost / 微信 / 云之家 |
-| [网络搜索](https://weknora.weixin.qq.com/docs/03-features/11-web-search) | DuckDuckGo / Bing / Google / Tavily / Baidu / Ollama / SearXNG / Keenable / 智谱 AI / Exa / Metaso / 博查 / Serply |
+| [网络搜索](https://weknora.weixin.qq.com/docs/03-features/11-web-search) | DuckDuckGo / Bing / Google / Tavily / Baidu / Ollama / SearXNG / Keenable / 智谱 AI / Exa / Metaso / 博查 / Serply / Firecrawl |
 | 部署 | Docker Compose / Kubernetes (Helm) / Lite 单二进制 / 桌面版；支持离线与私有云部署；界面支持中文、英文、日文、韩文、俄文 |
 
 ## 客户端与生态

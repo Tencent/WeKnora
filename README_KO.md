@@ -330,7 +330,7 @@ docker compose up -d    # 새 이미지로 컨테이너 재생성
 | [문서 포맷](https://weknora.weixin.qq.com/docs/03-features/03-document-parsing) | PDF / Word / PPT / Excel / CSV / TXT / Markdown / HTML / EPUB / MHTML / JSON / XMind / 이미지 |
 | [데이터 소스](https://weknora.weixin.qq.com/docs/03-features/10-datasource) | Feishu 지식베이스 / Feishu 클라우드 드라이브 / Lark / Confluence / GitLab / Tencent IMA / Notion / Yuque / DingTalk Docs / Seafile / RSS |
 | [IM 통합](https://weknora.weixin.qq.com/docs/03-features/12-im-integration) | WeChat Work / Feishu / Lark / QQBot / Slack / Telegram / DingTalk / Mattermost / WeChat / Yunzhijia |
-| [웹 검색](https://weknora.weixin.qq.com/docs/03-features/11-web-search) | DuckDuckGo / Bing / Google / Tavily / Baidu / Ollama / SearXNG / Keenable / Zhipu AI / Exa / Metaso / Bocha / Serply |
+| [웹 검색](https://weknora.weixin.qq.com/docs/03-features/11-web-search) | DuckDuckGo / Bing / Google / Tavily / Baidu / Ollama / SearXNG / Keenable / Zhipu AI / Exa / Metaso / Bocha / Serply / Firecrawl |
 | 배포 | Docker Compose / Kubernetes (Helm) / Lite 단일 바이너리 / 데스크톱 앱. 오프라인·프라이빗 클라우드 배포 지원. UI는 중국어 / 영어 / 일본어 / 한국어 / 러시아어 지원 |
 
 ## 클라이언트와 생태계
