@@ -12,11 +12,6 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
-// TestMetasoProviderSearch pins the regression this package fixed: Metaso puts
-// scholar results under "scholars", so a provider that only reads "webpages"
-// returns zero results for scope=scholar. The fixture deliberately mirrors a
-// real scholar response (total/score/position/authors/date) rather than the
-// "webpages" key the previous fixture used.
 func TestMetasoProviderSearch(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -68,15 +63,6 @@ func TestMetasoProviderSearch(t *testing.T) {
 	}
 }
 
-// TestMetasoProviderScopeArrays covers the "response key follows the scope"
-// behaviour for every selectable scope.
-//
-// The document and scholar payloads are taken from real Metaso responses with
-// domains and snippets sanitised; the remaining scopes use handwritten
-// fixtures. Key names and JSON types are kept verbatim (total is a number,
-// score a string, position/imageWidth/imageHeight numbers, authors an array,
-// searchParameters an object) because those types are exactly what a naive
-// struct declaration gets wrong.
 func TestMetasoProviderScopeArrays(t *testing.T) {
 	fixtures := map[string]struct {
 		payload string
@@ -88,8 +74,6 @@ func TestMetasoProviderScopeArrays(t *testing.T) {
 			want: 1,
 		},
 		"document": {
-			// The second link keeps the literal space a real document response
-			// contained: the provider must pass links through untouched.
 			payload: `{"credits":3,"searchParameters":{"q":"1","scope":"document"},"total":15,
 				"documents":[
 				{"title":"文档标题一","link":"https://example.com/doc/1","score":"high",
@@ -100,8 +84,6 @@ func TestMetasoProviderScopeArrays(t *testing.T) {
 			want: 2,
 		},
 		"scholar": {
-			// The second entry mirrors a real one that carried an empty snippet
-			// and no authors: it must still be returned.
 			payload: `{"credits":3,"searchParameters":{"q":"1","scope":"scholar"},"total":43,
 				"scholars":[
 				{"title":"学术标题一","link":"https://example.com/paper?q=1","score":"high",
@@ -157,10 +139,6 @@ func TestMetasoProviderScopeArrays(t *testing.T) {
 	}
 }
 
-// TestMetasoProviderImageScopeHasNoLink records a known limitation rather than
-// a guarantee: image entries carry imageUrl but no link, and this provider
-// reads only link, so image scope yields results with an empty URL and the
-// agent-side URL check drops them. That is the same outcome main produced.
 func TestMetasoProviderImageScopeHasNoLink(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -189,10 +167,6 @@ func TestMetasoProviderImageScopeHasNoLink(t *testing.T) {
 	}
 }
 
-// TestMetasoProviderToleratesNonStringURLFields guards the field list from the
-// other direction: "url" and "imageUrl" must stay undeclared. A real response
-// can carry them as objects, and declaring either as a string would fail the
-// whole unmarshal and return zero results.
 func TestMetasoProviderToleratesNonStringURLFields(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -215,19 +189,9 @@ func TestMetasoProviderToleratesNonStringURLFields(t *testing.T) {
 	}
 }
 
-// TestMetasoProviderToleratesUnmodelledFields pins the "declare only what is
-// read" constraint.
-//
-// Regression background: the response once carried a Total string declaration
-// while the live payload returned a JSON number, so json.Unmarshal failed and
-// the whole search returned zero results. Unknown keys, and keys whose types
-// contradict our assumptions, must not affect result parsing.
 func TestMetasoProviderToleratesUnmodelledFields(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		// total is a number, score is a number, position is a string: all
-		// deliberately opposite to what "convenient" declarations would guess,
-		// proving these keys are genuinely undeclared.
 		_, _ = w.Write([]byte(`{"total":3,"pageSize":10,"webpages":[
 			{"title":"W","link":"https://example.com/w","snippet":"片段",
 			 "score":123,"position":"1","authors":null,"unknownNested":{"a":[1,2]}}]}`))

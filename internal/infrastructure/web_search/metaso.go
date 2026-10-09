@@ -195,11 +195,6 @@ type metasoSearchRequest struct {
 	ConciseSnippet    bool   `json:"conciseSnippet"`
 }
 
-// metasoSearchResponse declares one result array per scope.
-//
-// Metaso stores results under a key matching the scope (webpage→webpages,
-// scholar→scholars, …), so reading a single hard-coded key makes every other
-// scope return zero results.
 type metasoSearchResponse struct {
 	Webpages  []metasoWebpage `json:"webpages"`
 	Documents []metasoWebpage `json:"documents"`
@@ -209,9 +204,6 @@ type metasoSearchResponse struct {
 	Images    []metasoWebpage `json:"images"`
 }
 
-// itemsForScope returns the result array for scope along with its response key,
-// which is used for logging. The response key matches the scope name, so a
-// direct lookup is enough.
 func (r metasoSearchResponse) itemsForScope(scope string) ([]metasoWebpage, string) {
 	switch scope {
 	case "document":
@@ -230,12 +222,6 @@ func (r metasoSearchResponse) itemsForScope(scope string) ([]metasoWebpage, stri
 	return nil, "webpages"
 }
 
-// metasoWebpage declares only the fields that are actually read.
-//
-// The response also carries score/position/authors/duration/coverImage/
-// imageWidth/imageHeight and similar keys, which are deliberately left out:
-// declaring a field whose type does not match the payload fails the whole
-// unmarshal and yields zero results, while extra keys are ignored anyway.
 type metasoWebpage struct {
 	Title      string `json:"title"`
 	Link       string `json:"link"`
