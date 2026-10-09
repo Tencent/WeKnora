@@ -17,6 +17,10 @@ type (
 	NetworkMode = core.NetworkMode
 	// Command is one execution request.
 	Command = core.Command
+	// CommandSegment is one apparent delete inside a shell invocation.
+	CommandSegment = core.CommandSegment
+	// DeleteRule is the shape of a delete a session approval remembers.
+	DeleteRule = core.DeleteRule
 	// ExitStatus is the platform-neutral outcome of one sandboxed process.
 	ExitStatus = core.ExitStatus
 	// Denial is the heuristic verdict on whether a failure came from the sandbox.
@@ -47,6 +51,10 @@ type (
 	PolicyBuilder = core.PolicyBuilder
 	// Grant is a permission the user has already approved.
 	Grant = core.Grant
+	// Access is what a Grant opens on its path.
+	Access = core.Access
+	// CommandVerdict is what a command's text says about deleting files.
+	CommandVerdict = core.CommandVerdict
 )
 
 const (
@@ -63,6 +71,11 @@ const (
 	ModeAuto = core.ModeAuto
 	// ModeFull runs without any sandbox. Not shipped.
 	ModeFull = core.ModeFull
+
+	// AccessRead adds a grant as a readable root.
+	AccessRead = core.AccessRead
+	// AccessWrite adds a grant as a writable root.
+	AccessWrite = core.AccessWrite
 
 	// WorkspaceProject is a directory the user picked.
 	WorkspaceProject = core.WorkspaceProject
@@ -134,4 +147,14 @@ func ClassifyDenial(status ExitStatus, stdout, stderr string) Denial {
 // when the policy withheld the network.
 func ClassifyRunDenial(p Policy, status ExitStatus, stdout, stderr string) Denial {
 	return core.ClassifyRunDenial(p, status, stdout, stderr)
+}
+
+// ClassifyCommand reports whether command deletes files.
+func ClassifyCommand(command, homeDir string) CommandVerdict {
+	return core.ClassifyCommand(command, homeDir)
+}
+
+// DeleteSegments returns the apparent delete commands inside command.
+func DeleteSegments(command, homeDir string) []CommandSegment {
+	return core.DeleteSegments(command, homeDir)
 }
