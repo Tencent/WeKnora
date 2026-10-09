@@ -2,6 +2,7 @@ package core
 
 import (
 	"path"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
@@ -206,6 +207,111 @@ func DeleteSegments(command, homeDir string) []CommandSegment {
 		Dangerous: segmentDangerous(out) || mentionsDangerousDelete(command, homeDir),
 		Opaque:    true,
 	}}
+}
+
+// DeleteTargets returns the operands of visible rm, rmdir and unlink commands,
+// with ~ and $HOME expanded. Relative operands stay relative to the command's
+// cwd and globs stay as written. Operands built from other variables or
+// redirections are skipped, and a command that hides a delete has no targets.
+// The result only decides which directory a delete card offers; the sandbox
+// still enforces every write.
+func DeleteTargets(command, homeDir string) []string {
+	if hidesDelete(command) {
+		return nil
+	}
+	var out []string
+	for _, segment := range commandSeparators.Split(command, -1) {
+		words := shellWords(segment)
+		i := programIndex(words)
+		if i >= len(words) {
+			continue
+		}
+		switch programName(words[i]) {
+		case "rm", "rmdir", "unlink":
+		default:
+			continue
+		}
+		operands := false
+		for _, arg := range words[i+1:] {
+			if !operands {
+				if arg == "--" {
+					operands = true
+					continue
+				}
+				if strings.HasPrefix(arg, "-") && len(arg) > 1 {
+					continue
+				}
+			}
+			if target, ok := expandHome(arg, homeDir); ok {
+				out = append(out, target)
+			}
+		}
+	}
+	return out
+}
+
+func expandHome(arg, homeDir string) (string, bool) {
+	if strings.ContainsAny(arg, "<>") {
+		return "", false
+	}
+	for _, prefix := range []string{"~", "$HOME", "${HOME}"} {
+		if arg != prefix && !strings.HasPrefix(arg, prefix+"/") {
+			continue
+		}
+		if homeDir == "" {
+			return "", false
+		}
+		return filepath.Join(homeDir, strings.TrimPrefix(arg, prefix)), true
+	}
+	if strings.ContainsAny(arg, "$`") || strings.HasPrefix(arg, "~") {
+		return "", false
+	}
+	return arg, true
+}
+
+// shellWords splits one segment the way the shell groups plain words: quotes
+// join, a backslash escapes the next character. Expansions stay as text.
+func shellWords(segment string) []string {
+	var words []string
+	var cur strings.Builder
+	inWord := false
+	var quote byte
+	flush := func() {
+		if w := strings.Trim(cur.String(), "(){}"); inWord && w != "" {
+			words = append(words, w)
+		}
+		cur.Reset()
+		inWord = false
+	}
+	for i := 0; i < len(segment); i++ {
+		c := segment[i]
+		switch {
+		case quote != 0:
+			switch {
+			case c == quote:
+				quote = 0
+			case c == '\\' && quote == '"' && i+1 < len(segment):
+				i++
+				cur.WriteByte(segment[i])
+			default:
+				cur.WriteByte(c)
+			}
+		case c == '\'' || c == '"':
+			quote = c
+			inWord = true
+		case c == '\\' && i+1 < len(segment):
+			i++
+			cur.WriteByte(segment[i])
+			inWord = true
+		case c == ' ' || c == '\t' || c == '\r':
+			flush()
+		default:
+			cur.WriteByte(c)
+			inWord = true
+		}
+	}
+	flush()
+	return words
 }
 
 func wholeCommand(command string) string {

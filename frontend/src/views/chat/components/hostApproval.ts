@@ -73,6 +73,12 @@ export function sessionRuleLabels(host: HostApprovalPayload): string[] {
   return (host.session_rules || []).map((rule) => `${rule} …`)
 }
 
+// A delete card can carry the directory the delete needs, but removing a file
+// takes write access, so only a sandbox block offers read-only.
+export function canNarrowAccess(host: HostApprovalPayload): boolean {
+  return host.reason === 'sandbox_denied' && !!host.grant_path
+}
+
 export type HostApprovalScope = 'once' | 'session'
 export type HostApprovalAccess = 'read' | 'write'
 

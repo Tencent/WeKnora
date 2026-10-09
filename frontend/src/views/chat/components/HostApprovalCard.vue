@@ -19,7 +19,7 @@
       <template v-if="host.grant_path">
         <div class="host-approval__label">{{ $t('agentStream.hostApproval.grantPath') }}</div>
         <pre class="host-approval__code">{{ host.grant_path }}</pre>
-        <t-radio-group v-if="!resolved" v-model="access" variant="default-filled" size="small">
+        <t-radio-group v-if="!resolved && canNarrowAccess(host)" v-model="access" variant="default-filled" size="small">
           <t-radio-button value="write">{{ $t('agentStream.hostApproval.accessWrite') }}</t-radio-button>
           <t-radio-button value="read">{{ $t('agentStream.hostApproval.accessRead') }}</t-radio-button>
         </t-radio-group>
@@ -67,6 +67,7 @@ import { useI18n } from 'vue-i18n'
 import { resolveToolApproval } from '@/api/mcp-service'
 import {
   buildHostResolveBody,
+  canNarrowAccess,
   clearComposerApproval,
   hostApprovalTitleKey,
   sessionRuleLabels,

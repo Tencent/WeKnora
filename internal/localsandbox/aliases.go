@@ -158,3 +158,8 @@ func ClassifyCommand(command, homeDir string) CommandVerdict {
 func DeleteSegments(command, homeDir string) []CommandSegment {
 	return core.DeleteSegments(command, homeDir)
 }
+
+// DeleteTargets returns the paths visible rm, rmdir and unlink commands remove.
+func DeleteTargets(command, homeDir string) []string {
+	return core.DeleteTargets(command, homeDir)
+}
