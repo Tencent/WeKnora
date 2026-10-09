@@ -9,8 +9,8 @@ type CommandApprovalRequest struct {
 	Command   string
 	Cwd       string
 	Reason    string
-	// GrantPath and GrantAccess describe the widening asked for; set only
-	// when Reason is "sandbox_denied".
+	// GrantPath and GrantAccess describe the widening asked for: after a
+	// "sandbox_denied" block, or with a delete outside the workspace.
 	GrantPath       string
 	GrantAccess     string
 	DenialSnippet   string

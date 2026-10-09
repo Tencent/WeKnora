@@ -105,6 +105,31 @@ func TestDeleteSegmentsDeriveARuleWithoutOperands(t *testing.T) {
 	}
 }
 
+// The sandbox needs to know where a delete lands before it runs, so a delete
+// outside the workspace can ask for that directory on the same card.
+func TestDeleteTargetsNamesTheOperandsOfVisibleDeletes(t *testing.T) {
+	home := "/Users/dev"
+	cases := []struct {
+		command string
+		want    []string
+	}{
+		{"rm a.txt", []string{"a.txt"}},
+		{"rm -rf ~/Desktop/dir", []string{"/Users/dev/Desktop/dir"}},
+		{"sudo rm -f $HOME/a ${HOME}/b ~", []string{"/Users/dev/a", "/Users/dev/b", "/Users/dev"}},
+		{"rm -- -f", []string{"-f"}},
+		{"ls && rmdir out && unlink /tmp/x", []string{"out", "/tmp/x"}},
+		{"rm \"/Users/dev/My File.txt\" 'b c'", []string{"/Users/dev/My File.txt", "b c"}},
+		{`rm my\ file.txt`, []string{"my file.txt"}},
+		{"rm $TMPDIR/x", nil},
+		{"git clean -fdx", nil},
+		{"find . -delete", nil},
+		{"echo hi", nil},
+	}
+	for _, tc := range cases {
+		require.Equal(t, tc.want, DeleteTargets(tc.command, home), tc.command)
+	}
+}
+
 func TestDeleteRuleCoversTheSameProgramWithFewerOptions(t *testing.T) {
 	rf := DeleteRule{Program: "rm", Flags: []string{"-f", "-r"}}
 	require.True(t, rf.Covers(DeleteRule{Program: "rm", Flags: []string{"-f", "-r"}}))

@@ -58,6 +58,7 @@ func TestRunAsksBeforeDelete(t *testing.T) {
 	require.Equal(t, "rm a.txt", req.Command)
 	require.Equal(t, root, req.Cwd)
 	require.True(t, req.AllowSession)
+	require.Nil(t, req.Proposed, "a delete inside the workspace needs no directory")
 }
 
 func TestRunRefusesDeleteWithoutApprover(t *testing.T) {
@@ -304,6 +305,93 @@ func TestRunDoesNotEscalateWhenExitIsZero(t *testing.T) {
 	require.Len(t, backend.prepared, 1)
 }
 
+// A delete outside the workspace asks once, before it runs, for both the
+// delete and the directory, and then runs a single time with that access.
+func TestRunOutsideDeleteAsksOnceWithTheDirectory(t *testing.T) {
+	backend := &fakeBackend{}
+	svc, _, other := approvalFixture(t, backend)
+	target := filepath.Join(other, "test.txt")
+	require.NoError(t, os.WriteFile(target, []byte("x"), 0o644))
+	approver := &fakeApprover{decisions: []ApprovalDecision{{Approved: true}}}
+
+	runAll(t, svc, approver, "ls", "rm "+target)
+
+	require.Len(t, approver.requests, 1)
+	req := approver.requests[0]
+	require.Equal(t, ReasonDelete, req.Reason)
+	require.Equal(t, &Grant{Path: other, Access: AccessWrite}, req.Proposed)
+	require.False(t, req.FirstAttemptRan)
+	require.Len(t, backend.prepared, 2, "the delete must run once")
+	require.NotEqual(t, backend.prepared[0], backend.prepared[1], "the delete must run with the directory open")
+	require.Empty(t, svc.SessionGrants("s1"), "a one-time approval must not stick")
+}
+
+func TestRunOutsideDeleteSessionApprovalCoversTheNextFile(t *testing.T) {
+	backend := &fakeBackend{}
+	svc, _, other := approvalFixture(t, backend)
+	approver := &fakeApprover{decisions: []ApprovalDecision{{Approved: true, Session: true}}}
+
+	runAll(t, svc, approver, "rm "+filepath.Join(other, "a.txt"), "rm "+filepath.Join(other, "b.txt"))
+
+	require.Len(t, approver.requests, 1)
+	require.Equal(t, []Grant{{Path: other, Access: AccessWrite}}, svc.SessionGrants("s1"))
+	require.Len(t, backend.prepared, 2)
+}
+
+// Removing a directory writes its parent; a grant on the directory itself
+// would leave rmdir blocked by the writable-root anchor.
+func TestRunOutsideDirectoryDeleteGrantsTheParent(t *testing.T) {
+	backend := &fakeBackend{}
+	svc, _, other := approvalFixture(t, backend)
+	dir := filepath.Join(other, "dir")
+	require.NoError(t, os.MkdirAll(dir, 0o755))
+	approver := &fakeApprover{decisions: []ApprovalDecision{{Approved: true}}}
+
+	runAll(t, svc, approver, "rm -rf "+dir)
+
+	require.Len(t, approver.requests, 1)
+	require.Equal(t, &Grant{Path: other, Access: AccessWrite}, approver.requests[0].Proposed)
+}
+
+// A session-approved rule skips the delete question, but the directory was
+// never opened; that is still one card, not a run that fails first.
+func TestRunApprovedDeleteRuleStillAsksOnceForANewDirectory(t *testing.T) {
+	backend := &fakeBackend{}
+	svc, _, other := approvalFixture(t, backend)
+	approver := &fakeApprover{decisions: []ApprovalDecision{{Approved: true, Session: true}, {Approved: true}}}
+
+	runAll(t, svc, approver, "rm a.txt", "rm "+filepath.Join(other, "b.txt"))
+
+	require.Len(t, approver.requests, 2)
+	require.Nil(t, approver.requests[0].Proposed)
+	require.Equal(t, ReasonDelete, approver.requests[1].Reason)
+	require.Equal(t, &Grant{Path: other, Access: AccessWrite}, approver.requests[1].Proposed)
+	require.Len(t, backend.prepared, 2)
+}
+
+func TestRunOutsideDeleteCannotBeNarrowedToRead(t *testing.T) {
+	backend := &fakeBackend{}
+	svc, _, other := approvalFixture(t, backend)
+	approver := &fakeApprover{decisions: []ApprovalDecision{{
+		Approved: true, Session: true, Grant: &Grant{Path: other, Access: AccessRead},
+	}}}
+
+	runAll(t, svc, approver, "rm "+filepath.Join(other, "a.txt"))
+
+	require.Equal(t, []Grant{{Path: other, Access: AccessWrite}}, svc.SessionGrants("s1"))
+}
+
+func TestRunDeleteOfAnUngrantableTargetOffersNoDirectory(t *testing.T) {
+	backend := &fakeBackend{}
+	svc, _, _ := approvalFixture(t, backend)
+	approver := &fakeApprover{decisions: []ApprovalDecision{{Approved: true}}}
+
+	runAll(t, svc, approver, "rm ~/.ssh/id_rsa")
+
+	require.Len(t, approver.requests, 1)
+	require.Nil(t, approver.requests[0].Proposed)
+}
+
 func TestRunRejectedDirectoryAsksAgainOnALaterDelete(t *testing.T) {
 	backend := &fakeBackend{}
 	svc, _, other := approvalFixture(t, backend)
@@ -324,10 +412,9 @@ func TestRunRejectedDirectoryAsksAgainOnALaterDelete(t *testing.T) {
 
 	res, err = svc.Run(ctx, RunRequest{SessionID: "s1", Command: "rm " + target, Approver: approver})
 	require.NoError(t, err)
-	require.Len(t, approver.requests, 3)
+	require.Len(t, approver.requests, 2)
 	require.Equal(t, ReasonDelete, approver.requests[1].Reason)
-	require.Equal(t, ReasonDenied, approver.requests[2].Reason)
-	require.Equal(t, other, approver.requests[2].Proposed.Path)
+	require.Equal(t, other, approver.requests[1].Proposed.Path)
 	require.NotContains(t, res.Notice, "already denied")
 }
 

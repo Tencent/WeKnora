@@ -4,10 +4,18 @@ import test from 'node:test'
 import {
   approvalEventFromRecord,
   buildHostResolveBody,
+  canNarrowAccess,
   hostApprovalTitleKey,
   isHostApprovalEvent,
   sessionRuleLabels,
 } from './hostApproval'
+
+test('only a sandbox block may be narrowed to read-only; a delete needs write', () => {
+  assert.equal(canNarrowAccess({ reason: 'sandbox_denied', grant_path: '/x', grant_access: 'write' }), true)
+  assert.equal(canNarrowAccess({ reason: 'delete', grant_path: '/x', grant_access: 'write' }), false)
+  assert.equal(canNarrowAccess({ reason: 'dangerous', grant_path: '/x', grant_access: 'write' }), false)
+  assert.equal(canNarrowAccess({ reason: 'sandbox_denied' }), false)
+})
 
 test('a stored approval becomes a resolved timeline event', () => {
   const event = approvalEventFromRecord({
