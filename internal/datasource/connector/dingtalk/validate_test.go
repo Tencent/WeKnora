@@ -147,6 +147,11 @@ func TestValidateReportsWhenNoVisibleDocumentIsReadable(t *testing.T) {
 			t.Fatalf("Validate error should carry %s, got: %v", want, err)
 		}
 	}
+	// Both documents were probed, so the cap did not stop the walk and the
+	// error must not claim that it did.
+	if strings.Contains(err.Error(), "only the first") {
+		t.Fatalf("Validate error should not mention the probe cap, got: %v", err)
+	}
 }
 
 // A tenant with no documents anywhere leaves nothing to read, so the
@@ -194,9 +199,10 @@ func TestValidateSurvivesWorkspaceListingFailure(t *testing.T) {
 	}
 }
 
-// An app without the document read permission fails every probe. Validate must
-// probe at most one document per workspace and stop after maxValidateProbes,
-// instead of firing one call per document across the whole tenant.
+// An app without the document read permission fails every probe. Validate keeps
+// going to the next document in the same workspace, but it still stops after
+// maxValidateProbes reads and says so, instead of firing one call per document
+// across the whole tenant.
 func TestValidateCapsProbesWhenEveryDocumentIsUnreadable(t *testing.T) {
 	api := &fakeAPI{
 		nodes:       map[string][]node{},
@@ -216,20 +222,32 @@ func TestValidateCapsProbesWhenEveryDocumentIsUnreadable(t *testing.T) {
 	}
 
 	c := testConnector(api)
-	if err := c.Validate(context.Background(), testConfig()); err == nil {
+	err := c.Validate(context.Background(), testConfig())
+	if err == nil {
 		t.Fatal("Validate must fail when no visible document can be read")
 	}
 	total := 0
 	for _, n := range api.blockCalls {
 		total += n
 	}
-	if total > maxValidateProbes {
-		t.Fatalf("Validate made %d document probes, want at most %d", total, maxValidateProbes)
+	if total != maxValidateProbes {
+		t.Fatalf("Validate made %d document probes, want %d", total, maxValidateProbes)
 	}
-	for w := 0; w < workspaces; w++ {
-		if api.blockCalls[fmt.Sprintf("doc-%d-1", w)] != 0 {
-			t.Fatalf("workspace root-%d was probed past its first document", w)
-		}
+	// The first workspace has four unreadable documents, so the cap must be
+	// spent there and on the next workspace's first document — not one probe
+	// per workspace, and not on a third workspace.
+	if api.blockCalls["doc-0-1"] != 1 {
+		t.Fatal("a failed probe must not stop the workspace from trying its next document")
+	}
+	if api.blockCalls["doc-1-0"] != 1 || api.blockCalls["doc-1-1"] != 0 || api.blockCalls["doc-2-0"] != 0 {
+		t.Fatalf("probe cap was not applied across workspaces, calls=%v", api.blockCalls)
+	}
+	wantNote := fmt.Sprintf("only the first %d documents were probed", maxValidateProbes)
+	if !strings.Contains(err.Error(), wantNote) {
+		t.Fatalf("Validate error should say the probe cap stopped the walk, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), `document "doc-1-0"`) {
+		t.Fatalf("Validate error should name the last probed document, got: %v", err)
 	}
 }
 
@@ -554,10 +572,14 @@ func TestValidateBudgetCountsNodeListingPages(t *testing.T) {
 
 // A folder's later pages must be read before its subfolders: otherwise a root
 // whose first page is all folders spends the budget below them and never sees
-// the document on the root's second page.
+// the document on the root's second page. The document is unreadable and the
+// twenty subfolders cannot all be listed after that page spends a budget unit,
+// so the rest of the tree is unknown and Validate accepts.
 func TestValidateReadsFolderPagesBeforeDescending(t *testing.T) {
 	var mu sync.Mutex
 	probed := false
+	folderLists := 0
+	folderListsBeforeProbe := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch {
@@ -578,6 +600,12 @@ func TestValidateReadsFolderPagesBeforeDescending(t *testing.T) {
 				_, _ = w.Write([]byte(
 					`{"nodes":[{"nodeId":"doc","name":"Doc","type":"FILE","category":"ALIDOC","extension":"adoc"}]}`))
 			default:
+				mu.Lock()
+				folderLists++
+				if !probed {
+					folderListsBeforeProbe++
+				}
+				mu.Unlock()
 				_, _ = w.Write([]byte(`{"nodes":[{"nodeId":"pdf","type":"FILE","category":"FILE","extension":"pdf"}]}`))
 			}
 		case strings.HasPrefix(r.URL.Path, "/v1.0/doc/suites/documents/"):
@@ -598,8 +626,14 @@ func TestValidateReadsFolderPagesBeforeDescending(t *testing.T) {
 	if !probed {
 		t.Fatalf("the document on the root's second page was never probed (err=%v)", err)
 	}
-	if err == nil {
-		t.Fatal("Validate must report the unreadable document instead of accepting")
+	if folderListsBeforeProbe != 0 {
+		t.Fatalf("listed %d subfolders before probing the root's second page", folderListsBeforeProbe)
+	}
+	if folderLists == 0 {
+		t.Fatal("Validate stopped at the unreadable document instead of continuing the walk")
+	}
+	if err != nil {
+		t.Fatalf("Validate must accept once the listing budget leaves folders unexplored, got: %v", err)
 	}
 }
 
@@ -638,5 +672,430 @@ func TestValidateStopsOnRepeatedPageToken(t *testing.T) {
 	defer mu.Unlock()
 	if folderRequests != 2 {
 		t.Fatalf("folder was listed %d times, want 2 (first page + the repeated token once)", folderRequests)
+	}
+}
+
+// The first document of a workspace can be unreadable while a later one in the
+// same folder is not. Stopping at the first probe would reject a data source
+// the operator can actually sync.
+func TestValidateTriesTheNextDocumentAfterAFailedProbe(t *testing.T) {
+	api := &fakeAPI{
+		workspaces: []workspace{{ID: "a", RootNodeID: "root-a", Name: "Alpha"}},
+		nodes: map[string][]node{
+			"root-a": {
+				{ID: "doc-bad", Name: "Old", Type: "FILE", Category: "ALIDOC", Extension: "adoc"},
+				{ID: "doc-good", Name: "New", Type: "FILE", Category: "ALIDOC", Extension: "adoc"},
+			},
+		},
+		blocks: map[string][]json.RawMessage{
+			"doc-good": {rawJSON(`{"paragraph":{"text":"hello"}}`)},
+		},
+		blockErrors: map[string]error{
+			"doc-bad": errors.New("forbidden.accessDenied: the operator has no permission"),
+		},
+	}
+
+	if err := testConnector(api).Validate(context.Background(), testConfig()); err != nil {
+		t.Fatalf("Validate must accept once a later document in the folder is readable, got: %v", err)
+	}
+	if api.blockCalls["doc-bad"] != 1 || api.blockCalls["doc-good"] != 1 {
+		t.Fatalf("both documents should be probed, calls=%v", api.blockCalls)
+	}
+}
+
+// A readable document that lives in a later sibling folder must still be
+// reached after the first folder's document fails. The same walk, when every
+// document fails, reports the later one: the workspace is conclusive.
+func TestValidateTriesADocumentInALaterSiblingFolder(t *testing.T) {
+	denied := errors.New("forbidden.accessDenied: the operator has no permission")
+	t.Run("later folder readable", func(t *testing.T) {
+		api := &fakeAPI{
+			workspaces: []workspace{{ID: "a", RootNodeID: "root-a", Name: "Alpha"}},
+			nodes: map[string][]node{
+				"root-a": {
+					{ID: "folder-a", Name: "A", Type: "FOLDER"},
+					{ID: "folder-b", Name: "B", Type: "FOLDER"},
+				},
+				"folder-a": {
+					{ID: "doc-bad", Name: "Old", Type: "FILE", Category: "ALIDOC", Extension: "adoc"},
+				},
+				"folder-b": {
+					{ID: "doc-good", Name: "New", Type: "FILE", Category: "ALIDOC", Extension: "adoc"},
+				},
+			},
+			blocks: map[string][]json.RawMessage{
+				"doc-good": {rawJSON(`{"paragraph":{"text":"hello"}}`)},
+			},
+			blockErrors: map[string]error{"doc-bad": denied},
+		}
+		if err := testConnector(api).Validate(context.Background(), testConfig()); err != nil {
+			t.Fatalf("Validate must accept the readable document in the later folder, got: %v", err)
+		}
+		if api.blockCalls["doc-bad"] != 1 || api.blockCalls["doc-good"] != 1 {
+			t.Fatalf("both sibling documents should be probed, calls=%v", api.blockCalls)
+		}
+	})
+	t.Run("every document unreadable", func(t *testing.T) {
+		api := &fakeAPI{
+			workspaces: []workspace{{ID: "a", RootNodeID: "root-a", Name: "Alpha"}},
+			nodes: map[string][]node{
+				"root-a": {
+					{ID: "folder-a", Name: "A", Type: "FOLDER"},
+					{ID: "folder-b", Name: "B", Type: "FOLDER"},
+				},
+				"folder-a": {
+					{ID: "doc-first", Name: "First", Type: "FILE", Category: "ALIDOC", Extension: "adoc"},
+				},
+				"folder-b": {
+					{ID: "doc-second", Name: "Second", Type: "FILE", Category: "ALIDOC", Extension: "adoc"},
+				},
+			},
+			blockErrors: map[string]error{"doc-first": denied, "doc-second": denied},
+		}
+		err := testConnector(api).Validate(context.Background(), testConfig())
+		if err == nil || !strings.Contains(err.Error(), `document "Second"`) {
+			t.Fatalf("Validate must report the later unreadable document, got: %v", err)
+		}
+		if api.blockCalls["doc-first"] != 1 || api.blockCalls["doc-second"] != 1 {
+			t.Fatalf("both sibling documents should be probed, calls=%v", api.blockCalls)
+		}
+	})
+}
+
+// An unreadable document on a later root page is conclusive when the rest of
+// the workspace fits in the listing budget. The page is still read before any
+// subfolder, and the walk then finishes those subfolders instead of stopping
+// on the first failed probe.
+func TestValidateReportsUnreadableDocumentOnALaterRootPage(t *testing.T) {
+	var mu sync.Mutex
+	probed := false
+	folderLists := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/v1.0/oauth2/accessToken":
+			_, _ = w.Write([]byte(`{"accessToken":"token","expireIn":7200}`))
+		case "/v2.0/wiki/workspaces":
+			_, _ = w.Write([]byte(`{"workspaces":[{"workspaceId":"a","rootNodeId":"root-a","name":"A"}]}`))
+		case "/v2.0/wiki/nodes":
+			parent := r.URL.Query().Get("parentNodeId")
+			switch {
+			case parent == "root-a" && r.URL.Query().Get("nextToken") == "":
+				_, _ = w.Write([]byte(`{"nodes":[{"nodeId":"folder","type":"FOLDER"}],"nextToken":"p2"}`))
+			case parent == "root-a":
+				_, _ = w.Write([]byte(
+					`{"nodes":[{"nodeId":"doc","name":"Doc","type":"FILE","category":"ALIDOC","extension":"adoc"}]}`))
+			default:
+				mu.Lock()
+				folderLists++
+				mu.Unlock()
+				_, _ = w.Write([]byte(`{"nodes":[{"nodeId":"pdf","type":"FILE","category":"FILE","extension":"pdf"}]}`))
+			}
+		case "/v1.0/doc/suites/documents/doc/blocks":
+			mu.Lock()
+			probed = true
+			mu.Unlock()
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte(`{"code":"forbidden.accessDenied","message":"no permission"}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	err := testConnector(testClient(server)).Validate(context.Background(), testConfig())
+	mu.Lock()
+	defer mu.Unlock()
+	if !probed || folderLists != 1 {
+		t.Fatalf("probed=%v folderLists=%d, want the page probed and its subfolder listed", probed, folderLists)
+	}
+	if err == nil || !strings.Contains(err.Error(), `document "Doc"`) {
+		t.Fatalf("Validate must report the unreadable document, got: %v", err)
+	}
+	if strings.Contains(err.Error(), "only the first") {
+		t.Fatalf("one probed document must not be described as the probe cap, got: %v", err)
+	}
+}
+
+// A root listing that fails on a later page is the same failure sync sees from
+// listNodes: the workspace is not "unexplored", even when an earlier page
+// already named a folder that holds a readable document. Another workspace can
+// still prove the credentials, as a failed first page already can.
+func TestValidateRejectsAFailedLaterRootPage(t *testing.T) {
+	const workspaces = `{"workspaces":[` +
+		`{"workspaceId":"a","rootNodeId":"root-a","name":"A"},` +
+		`{"workspaceId":"b","rootNodeId":"root-b","name":"B"}]}`
+	handler := func(extraWorkspace bool) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			switch r.URL.Path {
+			case "/v1.0/oauth2/accessToken":
+				_, _ = w.Write([]byte(`{"accessToken":"token","expireIn":7200}`))
+			case "/v2.0/wiki/workspaces":
+				if extraWorkspace {
+					_, _ = w.Write([]byte(workspaces))
+					return
+				}
+				_, _ = w.Write([]byte(`{"workspaces":[{"workspaceId":"a","rootNodeId":"root-a","name":"A"}]}`))
+			case "/v2.0/wiki/nodes":
+				parent := r.URL.Query().Get("parentNodeId")
+				switch {
+				case parent == "root-a" && r.URL.Query().Get("nextToken") == "":
+					_, _ = w.Write([]byte(`{"nodes":[{"nodeId":"folder","type":"FOLDER"}],"nextToken":"p2"}`))
+				case parent == "root-a":
+					w.WriteHeader(http.StatusBadRequest)
+					_, _ = w.Write([]byte(`{"code":"invalidRequest","message":"bad page"}`))
+				case parent == "folder":
+					_, _ = w.Write([]byte(`{"nodes":[{"nodeId":"hidden","name":"Hidden",` +
+						`"type":"FILE","category":"ALIDOC","extension":"adoc"}]}`))
+				default:
+					_, _ = w.Write([]byte(`{"nodes":[{"nodeId":"doc-b","name":"Handbook",` +
+						`"type":"FILE","category":"ALIDOC","extension":"adoc"}]}`))
+				}
+			case "/v1.0/doc/suites/documents/hidden/blocks", "/v1.0/doc/suites/documents/doc-b/blocks":
+				_, _ = w.Write([]byte(`{"success":true,"result":{"data":[{"blockType":"paragraph"}]}}`))
+			default:
+				http.NotFound(w, r)
+			}
+		}
+	}
+	t.Run("only workspace", func(t *testing.T) {
+		server := httptest.NewServer(handler(false))
+		defer server.Close()
+		err := testConnector(testClient(server)).Validate(context.Background(), testConfig())
+		if err == nil || !strings.Contains(err.Error(), "status=400") ||
+			!strings.Contains(err.Error(), `workspace "A"`) {
+			t.Fatalf("Validate must surface the root page failure, got: %v", err)
+		}
+	})
+	t.Run("later workspace readable", func(t *testing.T) {
+		server := httptest.NewServer(handler(true))
+		defer server.Close()
+		if err := testConnector(testClient(server)).Validate(context.Background(), testConfig()); err != nil {
+			t.Fatalf("Validate must survive one workspace whose later root page fails, got: %v", err)
+		}
+	})
+}
+
+// The first folder under the root can hold more non-document pages than the
+// listing budget. Those pages must not be spent to the end while a sibling
+// folder is still queued: the sibling is opened, and a document there is
+// probed. A short folder is still finished first, so a document on its second
+// page is not skipped just because a sibling is waiting.
+func TestValidateOpensSiblingFolderBeforeSpendingTheListingBudget(t *testing.T) {
+	const fatPages = 30
+	type listingStats struct {
+		fatPages int
+		probed   map[string]int
+	}
+	start := func(t *testing.T, siblingReadable, docOnSecondPage bool) (*httptest.Server, *listingStats) {
+		t.Helper()
+		stats := &listingStats{probed: map[string]int{}}
+		var mu sync.Mutex
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			switch r.URL.Path {
+			case "/v1.0/oauth2/accessToken":
+				_, _ = w.Write([]byte(`{"accessToken":"token","expireIn":7200}`))
+			case "/v2.0/wiki/workspaces":
+				_, _ = w.Write([]byte(`{"workspaces":[{"workspaceId":"a","rootNodeId":"root-a","name":"A"}]}`))
+			case "/v2.0/wiki/nodes":
+				parent := r.URL.Query().Get("parentNodeId")
+				token := r.URL.Query().Get("nextToken")
+				switch parent {
+				case "root-a":
+					_, _ = w.Write([]byte(`{"nodes":[` +
+						`{"nodeId":"folder-a","type":"FOLDER"},` +
+						`{"nodeId":"folder-b","type":"FOLDER"}]}`))
+				case "folder-a":
+					mu.Lock()
+					stats.fatPages++
+					page := stats.fatPages
+					mu.Unlock()
+					if token != "" && token != strconv.Itoa(page-1) {
+						t.Errorf("folder-a page token = %q, previous page was %d", token, page-1)
+					}
+					item := fmt.Sprintf(
+						`{"nodeId":"pdf-%d","type":"FILE","category":"FILE","extension":"pdf"}`, page,
+					)
+					if docOnSecondPage && page == 2 {
+						item = `{"nodeId":"doc-early","name":"Early",` +
+							`"type":"FILE","category":"ALIDOC","extension":"adoc"}`
+					}
+					next := ""
+					if page < fatPages {
+						next = strconv.Itoa(page)
+					}
+					_, _ = fmt.Fprintf(w, `{"nodes":[%s],"nextToken":%q}`, item, next)
+				case "folder-b":
+					_, _ = w.Write([]byte(`{"nodes":[{"nodeId":"doc-b","name":"Sibling",` +
+						`"type":"FILE","category":"ALIDOC","extension":"adoc"}]}`))
+				default:
+					http.NotFound(w, r)
+				}
+			default:
+				const prefix = "/v1.0/doc/suites/documents/"
+				if !strings.HasPrefix(r.URL.Path, prefix) || !strings.HasSuffix(r.URL.Path, "/blocks") {
+					http.NotFound(w, r)
+					return
+				}
+				id := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, prefix), "/blocks")
+				mu.Lock()
+				stats.probed[id]++
+				mu.Unlock()
+				if id == "doc-b" && !siblingReadable {
+					w.WriteHeader(http.StatusForbidden)
+					_, _ = w.Write([]byte(`{"code":"forbidden.accessDenied","message":"no permission"}`))
+					return
+				}
+				_, _ = w.Write([]byte(`{"success":true,"result":{"data":[{"blockType":"paragraph"}]}}`))
+			}
+		}))
+		return server, stats
+	}
+
+	t.Run("sibling document readable", func(t *testing.T) {
+		server, stats := start(t, true, false)
+		defer server.Close()
+		if err := testConnector(testClient(server)).Validate(context.Background(), testConfig()); err != nil {
+			t.Fatalf("Validate must accept the sibling document, got: %v", err)
+		}
+		if stats.probed["doc-b"] != 1 {
+			t.Fatalf("sibling document probes=%d, want 1 (fat folder pages=%d)", stats.probed["doc-b"], stats.fatPages)
+		}
+		if stats.fatPages >= maxValidateListings {
+			t.Fatalf("fat folder used %d pages, want fewer than %d so the sibling still fits",
+				stats.fatPages, maxValidateListings)
+		}
+	})
+	t.Run("sibling document unreadable", func(t *testing.T) {
+		server, stats := start(t, false, false)
+		defer server.Close()
+		err := testConnector(testClient(server)).Validate(context.Background(), testConfig())
+		if err == nil || !strings.Contains(err.Error(), `document "Sibling"`) {
+			t.Fatalf("Validate must report the sibling document, got: %v", err)
+		}
+		if stats.probed["doc-b"] != 1 {
+			t.Fatalf("sibling document probes=%d, want 1 (fat folder pages=%d)", stats.probed["doc-b"], stats.fatPages)
+		}
+		if stats.fatPages >= maxValidateListings {
+			t.Fatalf("fat folder used %d pages, want fewer than %d so the sibling still fits",
+				stats.fatPages, maxValidateListings)
+		}
+	})
+	t.Run("short folder still yields its second page", func(t *testing.T) {
+		server, stats := start(t, false, true)
+		defer server.Close()
+		if err := testConnector(testClient(server)).Validate(context.Background(), testConfig()); err != nil {
+			t.Fatalf("Validate must accept the document on the short folder's second page, got: %v", err)
+		}
+		if stats.probed["doc-early"] != 1 || stats.probed["doc-b"] != 0 {
+			t.Fatalf("probes=%v, want only the document on page 2", stats.probed)
+		}
+		if stats.fatPages != 2 {
+			t.Fatalf("folder-a was listed %d times, want 2", stats.fatPages)
+		}
+	})
+}
+
+// Skipping the unread tail of a fat folder is what leaves room for its sibling.
+// When that sample contains no document, the tail might still hold the only
+// readable one, so an unreadable document in another workspace must not fail
+// the data source.
+func TestValidateSkippedTailWithoutAProbeStaysInconclusive(t *testing.T) {
+	var mu sync.Mutex
+	probed := false
+	fatPages := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/v1.0/oauth2/accessToken":
+			_, _ = w.Write([]byte(`{"accessToken":"token","expireIn":7200}`))
+		case "/v2.0/wiki/workspaces":
+			_, _ = w.Write([]byte(`{"workspaces":[` +
+				`{"workspaceId":"a","rootNodeId":"root-a","name":"A"},` +
+				`{"workspaceId":"b","rootNodeId":"root-b","name":"B"}]}`))
+		case "/v2.0/wiki/nodes":
+			parent := r.URL.Query().Get("parentNodeId")
+			switch parent {
+			case "root-a":
+				_, _ = w.Write([]byte(`{"nodes":[` +
+					`{"nodeId":"folder-a","type":"FOLDER"},` +
+					`{"nodeId":"folder-b","type":"FOLDER"}]}`))
+			case "folder-a":
+				mu.Lock()
+				fatPages++
+				page := fatPages
+				mu.Unlock()
+				next := ""
+				if page < 30 {
+					next = strconv.Itoa(page)
+				}
+				_, _ = fmt.Fprintf(w,
+					`{"nodes":[{"nodeId":"pdf-%d","type":"FILE","category":"FILE","extension":"pdf"}],"nextToken":%q}`,
+					page, next)
+			case "folder-b":
+				_, _ = w.Write([]byte(`{"nodes":[{"nodeId":"pdf-b","type":"FILE",` +
+					`"category":"FILE","extension":"pdf"}]}`))
+			default:
+				_, _ = w.Write([]byte(`{"nodes":[{"nodeId":"doc-b","name":"Secret",` +
+					`"type":"FILE","category":"ALIDOC","extension":"adoc"}]}`))
+			}
+		case "/v1.0/doc/suites/documents/doc-b/blocks":
+			mu.Lock()
+			probed = true
+			mu.Unlock()
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte(`{"code":"forbidden.accessDenied","message":"no permission"}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	err := testConnector(testClient(server)).Validate(context.Background(), testConfig())
+	mu.Lock()
+	defer mu.Unlock()
+	if err != nil {
+		t.Fatalf("Validate must accept when the skipped tail was never probed, got: %v", err)
+	}
+	if !probed {
+		t.Fatal("the other workspace's document was never probed")
+	}
+	if fatPages >= maxValidateListings {
+		t.Fatalf("fat folder used %d pages, want room left for its sibling", fatPages)
+	}
+}
+
+// An unlistable folder already makes the walk inconclusive. Hitting the probe
+// cap afterwards must not turn that into a failure: a readable document may
+// still sit in the folder that could not be listed.
+func TestValidateProbeCapDoesNotOverrideAnInconclusiveWalk(t *testing.T) {
+	api := &fakeAPI{
+		nodes: map[string][]node{
+			"root-deep": {{ID: "folder", Name: "Folder", Type: "FOLDER"}},
+		},
+		nodeErrors:  map[string]error{"folder": errors.New("DingTalk API status=500")},
+		blockErrors: map[string]error{},
+	}
+	api.workspaces = []workspace{{ID: "deep", RootNodeID: "root-deep", Name: "Deep"}}
+	denied := errors.New("forbidden.accessDenied: the operator has no permission")
+	for w := 0; w < maxValidateProbes+2; w++ {
+		root := fmt.Sprintf("root-%d", w)
+		id := fmt.Sprintf("doc-%d", w)
+		api.workspaces = append(api.workspaces, workspace{ID: root, RootNodeID: root, Name: root})
+		api.nodes[root] = []node{{ID: id, Name: id, Type: "FILE", Category: "ALIDOC", Extension: "adoc"}}
+		api.blockErrors[id] = denied
+	}
+
+	if err := testConnector(api).Validate(context.Background(), testConfig()); err != nil {
+		t.Fatalf("Validate must accept an inconclusive walk even after the probe cap, got: %v", err)
+	}
+	total := 0
+	for _, n := range api.blockCalls {
+		total += n
+	}
+	if total != maxValidateProbes {
+		t.Fatalf("Validate made %d document probes, want %d", total, maxValidateProbes)
 	}
 }
