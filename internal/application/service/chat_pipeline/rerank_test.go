@@ -224,3 +224,88 @@ func TestMergeFallbackKeepsRerankTopK(t *testing.T) {
 		t.Fatalf("fallback input = %+v", got)
 	}
 }
+
+// Rerank drops candidates before FILTER_TOP_K ever runs — threshold
+// rejection, the candidate cap and the MMR top-k all hide passages. The cut
+// has to be recorded here, or a turn with a rerank model reaches the prompt
+// with no record that its context is a subset, and a count question reads the
+// shown passages as the whole result set.
+func TestPluginRerankRecordsEarlyTruncation(t *testing.T) {
+	cm := &types.ChatManage{
+		PipelineRequest: types.PipelineRequest{RerankModelID: "rr-1", RerankTopK: 2, RerankThreshold: 0.3},
+		PipelineState: types.PipelineState{
+			RewriteQuery: "q",
+			SearchResult: []*types.SearchResult{
+				{ID: "c1", Content: "first", Score: 0.5},
+				{ID: "c2", Content: "second", Score: 0.4},
+				{ID: "c3", Content: "third", Score: 0.3},
+				{ID: "c4", Content: "fourth", Score: 0.2},
+			},
+		},
+	}
+	plugin := &PluginRerank{modelService: &rerankOnlyModelService{
+		reranker: &fixedReranker{scores: []float64{0.9, 0.8, 0.7, 0.6}},
+	}}
+
+	err := plugin.OnEvent(context.Background(), types.CHUNK_RERANK, cm, func() *PluginError { return nil })
+	if err != nil {
+		t.Fatalf("OnEvent: %v", err)
+	}
+	if len(cm.RerankResult) != 2 {
+		t.Fatalf("rerank result = %d, want 2", len(cm.RerankResult))
+	}
+	want := types.RetrievalTruncation{Stage: types.RetrievalStageRerank, Candidates: 4}
+	if cm.Truncation == nil || *cm.Truncation != want {
+		t.Fatalf("truncation = %+v, want %+v", cm.Truncation, want)
+	}
+}
+
+// A rerank that returned every candidate it received did not hide anything,
+// so the prompt must stay free of the subset caveat.
+func TestPluginRerankKeepsAllCandidatesWithoutTruncation(t *testing.T) {
+	cm := rerankChatManage(0.3)
+	plugin := &PluginRerank{modelService: &rerankOnlyModelService{
+		reranker: &fixedReranker{scores: []float64{0.9, 0.8}},
+	}}
+
+	err := plugin.OnEvent(context.Background(), types.CHUNK_RERANK, cm, func() *PluginError { return nil })
+	if err != nil {
+		t.Fatalf("OnEvent: %v", err)
+	}
+	if len(cm.RerankResult) != 2 || cm.Truncation != nil {
+		t.Fatalf("rerank result = %d, truncation = %+v", len(cm.RerankResult), cm.Truncation)
+	}
+}
+
+// The merge fallback hides candidates too, and with rerank skipped it is the
+// last stage that can say so: FILTER_TOP_K sees the already cut list and finds
+// nothing left to truncate.
+func TestMergeFallbackRecordsTruncation(t *testing.T) {
+	cm := &types.ChatManage{
+		PipelineRequest: types.PipelineRequest{RerankTopK: 2},
+		PipelineState: types.PipelineState{SearchResult: []*types.SearchResult{
+			{ID: "low", Score: 0.1}, {ID: "high", Score: 0.9}, {ID: "mid", Score: 0.5},
+		}},
+	}
+	(&PluginMerge{}).selectInputResults(context.Background(), cm)
+	want := types.RetrievalTruncation{Stage: types.RetrievalStageMerge, Candidates: 3}
+	if cm.Truncation == nil || *cm.Truncation != want {
+		t.Fatalf("truncation = %+v, want %+v", cm.Truncation, want)
+	}
+}
+
+// Graph hits survive the fallback cut, so a cut that only skipped graph hits
+// dropped nothing the prompt would miss and must not raise the subset caveat.
+func TestMergeFallbackWithoutLossRecordsNothing(t *testing.T) {
+	cm := &types.ChatManage{
+		PipelineRequest: types.PipelineRequest{RerankTopK: 1},
+		PipelineState: types.PipelineState{SearchResult: []*types.SearchResult{
+			{ID: "high", Score: 0.9},
+			{ID: "graph", Score: 0, MatchType: types.MatchTypeGraph},
+		}},
+	}
+	got := (&PluginMerge{}).selectInputResults(context.Background(), cm)
+	if len(got) != 2 || cm.Truncation != nil {
+		t.Fatalf("fallback input = %d, truncation = %+v", len(got), cm.Truncation)
+	}
+}
