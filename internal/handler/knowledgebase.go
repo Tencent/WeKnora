@@ -828,6 +828,46 @@ func (h *KnowledgeBaseHandler) UpdateKnowledgeBase(c *gin.Context) {
 	})
 }
 
+// AlignGeneratedQuestions godoc
+// @Summary      对齐预生成问题
+// @Description  按当前问题生成开关停用或恢复问句向量与 chunk metadata。开关已关闭时也可调用以清理历史问句。停用可逆，不删除问句文本。
+// @Tags         知识库
+// @Produce      json
+// @Param        id   path      string  true  "知识库ID"
+// @Success      200  {object}  map[string]interface{}  "对齐结果"
+// @Failure      400  {object}  errors.AppError         "请求参数错误"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /knowledge-bases/{id}/generated-questions/align [post]
+func (h *KnowledgeBaseHandler) AlignGeneratedQuestions(c *gin.Context) {
+	ctx := c.Request.Context()
+	_, id, _, permission, err := h.validateAndGetKnowledgeBase(c)
+	if err != nil {
+		_ = c.Error(err)
+		return
+	}
+	if permission != types.OrgRoleAdmin && permission != types.OrgRoleEditor {
+		_ = c.Error(apperrors.NewForbiddenError("No permission to update knowledge base"))
+		return
+	}
+	aligner, ok := h.service.(interfaces.GeneratedQuestionAligner)
+	if !ok {
+		_ = c.Error(apperrors.NewInternalServerError("generated question alignment is unavailable"))
+		return
+	}
+	result, err := aligner.AlignGeneratedQuestions(ctx, id)
+	if err != nil {
+		if appErr, ok := apperrors.IsAppError(err); ok {
+			_ = c.Error(appErr)
+			return
+		}
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{"knowledge_base_id": id})
+		_ = c.Error(apperrors.NewInternalServerError(err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": result})
+}
+
 // GenerateKnowledgeBaseProfile godoc
 // @Summary      生成知识库描述
 // @Description  基于文档画像聚合，立即重新生成知识库的 AI 描述（不覆盖手写描述）

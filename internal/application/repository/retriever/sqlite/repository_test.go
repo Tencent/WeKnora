@@ -115,6 +115,95 @@ func TestVectorRetrieveFiltersBeforeTopK(t *testing.T) {
 	}
 }
 
+func TestVectorRetrieveDropsGeneratedQuestionsBeforeTopK(t *testing.T) {
+	repository := newSQLiteRetrieverTestRepository(t)
+	const chunkID = "chunk-body"
+	body := sqliteTestIndex(chunkID, "kb-off", "knowledge-1", "", true)
+	body.SourceID = chunkID
+	body.Content = "month end close steps"
+	question := sqliteTestIndex(chunkID, "kb-off", "knowledge-1", "", true)
+	question.SourceID = chunkID + "-q1"
+	question.Content = "how do I close the books"
+	other := sqliteTestIndex("other", "kb-on", "knowledge-2", "", true)
+	other.SourceID = "other-q1"
+	other.Content = "question in a knowledge base that still generates questions"
+
+	saveSQLiteTestVector(t, repository, question, []float32{1, 0})
+	saveSQLiteTestVector(t, repository, body, []float32{0.2, 0.8})
+	saveSQLiteTestVector(t, repository, other, []float32{0.9, 0.1})
+
+	results, err := repository.vectorRetrieve(context.Background(), types.RetrieveParams{
+		Embedding:                     []float32{1, 0},
+		KnowledgeBaseIDs:              []string{"kb-off", "kb-on"},
+		ExcludeGeneratedQuestionKBIDs: []string{"kb-off"},
+		TopK:                          2,
+		RetrieverType:                 types.VectorRetrieverType,
+	})
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	got := make([]string, 0, len(results[0].Results))
+	for _, hit := range results[0].Results {
+		got = append(got, hit.SourceID)
+	}
+	assert.ElementsMatch(t, []string{chunkID, "other-q1"}, got)
+}
+
+func TestSetGeneratedQuestionEnabledLeavesTheChunkBody(t *testing.T) {
+	repository := newSQLiteRetrieverTestRepository(t)
+	const chunkID = "chunk-body"
+	body := sqliteTestIndex(chunkID, "kb-off", "knowledge-1", "", true)
+	body.SourceID = chunkID
+	question := sqliteTestIndex(chunkID, "kb-off", "knowledge-1", "", true)
+	question.SourceID = chunkID + "-q9"
+	unrelated := sqliteTestIndex(chunkID, "kb-off", "knowledge-1", "", true)
+	unrelated.SourceID = "notes-" + chunkID
+
+	saveSQLiteTestVector(t, repository, body, []float32{1, 0})
+	saveSQLiteTestVector(t, repository, question, []float32{0, 1})
+	saveSQLiteTestVector(t, repository, unrelated, []float32{0, 1})
+
+	affected, err := repository.SetGeneratedQuestionEnabled(context.Background(), "kb-off", false)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), affected)
+
+	var enabled []bool
+	require.NoError(t, repository.db.Raw(
+		`SELECT is_enabled FROM lite_embeddings WHERE source_id = ?`, question.SourceID,
+	).Scan(&enabled).Error)
+	require.Len(t, enabled, 1)
+	assert.False(t, enabled[0])
+
+	var bodyEnabled []bool
+	require.NoError(t, repository.db.Raw(
+		`SELECT is_enabled FROM lite_embeddings WHERE source_id = ?`, body.SourceID,
+	).Scan(&bodyEnabled).Error)
+	require.Len(t, bodyEnabled, 1)
+	assert.True(t, bodyEnabled[0])
+
+	disabledBody := sqliteTestIndex("chunk-off", "kb-off", "knowledge-1", "", false)
+	disabledBody.SourceID = disabledBody.ChunkID
+	disabledQuestion := sqliteTestIndex("chunk-off", "kb-off", "knowledge-1", "", false)
+	disabledQuestion.SourceID = disabledQuestion.ChunkID + "-q1"
+	saveSQLiteTestVector(t, repository, disabledBody, []float32{1, 0})
+	saveSQLiteTestVector(t, repository, disabledQuestion, []float32{0, 1})
+
+	affected, err = repository.SetGeneratedQuestionEnabled(context.Background(), "kb-off", true)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), affected)
+	require.NoError(t, repository.db.Raw(
+		`SELECT is_enabled FROM lite_embeddings WHERE source_id = ?`, question.SourceID,
+	).Scan(&enabled).Error)
+	require.Len(t, enabled, 1)
+	assert.True(t, enabled[0])
+
+	var disabledEnabled []bool
+	require.NoError(t, repository.db.Raw(
+		`SELECT is_enabled FROM lite_embeddings WHERE source_id = ?`, disabledQuestion.SourceID,
+	).Scan(&disabledEnabled).Error)
+	require.Len(t, disabledEnabled, 1)
+	assert.False(t, disabledEnabled[0])
+}
+
 func TestVectorRetrieveZeroThresholdDoesNotFilter(t *testing.T) {
 	repository := newSQLiteRetrieverTestRepository(t)
 	saveSQLiteTestVector(t, repository,

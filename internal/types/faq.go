@@ -57,6 +57,10 @@ type DocumentChunkMetadata struct {
 	GeneratedQuestions []GeneratedQuestion `json:"generated_questions,omitempty"`
 	// GeneratedQuestionsRevision ties the questions to Chunk.ContentRevision.
 	GeneratedQuestionsRevision int `json:"generated_questions_revision,omitempty"`
+	// GeneratedQuestionsInactive is set while question generation is off so
+	// rerank ignores the stored questions. Turning the switch back on clears
+	// it; the question text stays so retrieval can resume without a new LLM run.
+	GeneratedQuestionsInactive bool `json:"generated_questions_inactive,omitempty"`
 }
 
 // IsQuestionCurrent reports whether a generated question was authored for the

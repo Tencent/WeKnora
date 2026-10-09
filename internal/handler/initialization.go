@@ -418,6 +418,7 @@ func (h *InitializationHandler) UpdateKBConfig(c *gin.Context) {
 	}
 
 	// 更新问题生成配置
+	questionGenerationWasActive := types.QuestionGenerationActive(kb)
 	if req.QuestionGeneration.Enabled {
 		questionCount := req.QuestionGeneration.QuestionCount
 		if questionCount <= 0 {
@@ -448,6 +449,17 @@ func (h *InitializationHandler) UpdateKBConfig(c *gin.Context) {
 		logger.Error(ctx, "Failed to update knowledge base", err)
 		c.Error(errors.NewInternalServerError("更新知识库失败: " + err.Error()))
 		return
+	}
+	questionGenerationNowActive := types.QuestionGenerationActive(kb)
+	// Saving while the switch is off also cleans knowledge bases that were
+	// already off: a true→false edge never fires for those rows.
+	if kb.Type != types.KnowledgeBaseTypeFAQ &&
+		(questionGenerationWasActive != questionGenerationNowActive || !questionGenerationNowActive) {
+		if aligner, ok := h.kbService.(interfaces.GeneratedQuestionAligner); ok {
+			if _, err := aligner.AlignGeneratedQuestions(ctx, kb.ID); err != nil {
+				logger.Errorf(ctx, "Failed to align generated questions for knowledge base %s: %v", kb.ID, err)
+			}
+		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{

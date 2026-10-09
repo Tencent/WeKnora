@@ -228,6 +228,7 @@ func TestKnowledgeBaseManagementRoutesDeclareManageKBsCapability(t *testing.T) {
 		path   string
 	}{
 		{http.MethodPut, "/api/v1/knowledge-bases/:id"},
+		{http.MethodPost, "/api/v1/knowledge-bases/:id/generated-questions/align"},
 		{http.MethodDelete, "/api/v1/knowledge-bases/:id"},
 		{http.MethodPost, "/api/v1/initialization/initialize/:kbId"},
 		{http.MethodPut, "/api/v1/initialization/config/:kbId"},

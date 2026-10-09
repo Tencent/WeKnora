@@ -54,6 +54,7 @@ func (c *CompositeRetrieveEngine) Retrieve(ctx context.Context,
 					if err != nil {
 						return err
 					}
+					result = types.FilterGeneratedQuestionHits(param.ExcludeGeneratedQuestionKBIDs, result)
 					for _, one := range result {
 						if one == nil || one.Error == nil {
 							continue
@@ -124,6 +125,44 @@ func (c *CompositeRetrieveEngine) SupportRetriever(r types.RetrieverType) bool {
 		}
 	}
 	return false
+}
+
+type generatedQuestionSetter interface {
+	SetGeneratedQuestionEnabled(ctx context.Context, knowledgeBaseID string, enabled bool) (int64, error)
+}
+
+// SetGeneratedQuestionEnabled flips generated-question rows on every engine
+// that can address them by source id. When none can, it returns
+// ErrGeneratedQuestionIndexUnsupported and changes nothing.
+func (c *CompositeRetrieveEngine) SetGeneratedQuestionEnabled(
+	ctx context.Context, knowledgeBaseID string, enabled bool,
+) (int64, error) {
+	var total int64
+	supported := false
+	var errs []error
+	for _, engineInfo := range c.engineInfos {
+		if engineInfo == nil {
+			continue
+		}
+		setter, ok := engineInfo.retrieveEngine.(generatedQuestionSetter)
+		if !ok {
+			continue
+		}
+		n, err := setter.SetGeneratedQuestionEnabled(ctx, knowledgeBaseID, enabled)
+		if errors.Is(err, ErrGeneratedQuestionIndexUnsupported) {
+			continue
+		}
+		supported = true
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		total += n
+	}
+	if !supported {
+		return 0, ErrGeneratedQuestionIndexUnsupported
+	}
+	return total, errors.Join(errs...)
 }
 
 // BatchUpdateChunkEnabledStatus updates the enabled status of chunks in batch

@@ -48,6 +48,12 @@ type RetrieveParams struct {
 	KnowledgeIDs []string
 	// Tag IDs for filtering (used for FAQ priority filtering)
 	TagIDs []string
+	// ExcludeGeneratedQuestionKBIDs drops generated-question index rows for
+	// these knowledge bases before TopK is applied. Document knowledge bases
+	// with question generation turned off are listed here so historical
+	// question vectors stop occupying recall. FAQ similar-question rows share
+	// the source-id shape and must not be listed.
+	ExcludeGeneratedQuestionKBIDs []string
 	// Excluded knowledge IDs
 	ExcludeKnowledgeIDs []string
 	// Excluded chunk IDs
