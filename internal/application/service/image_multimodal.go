@@ -303,7 +303,13 @@ func (s *ImageMultimodalService) processImage(
 		}
 		if handleErr == nil {
 			tracker.EndSpan(ctx, imgSpan, out)
-		} else if isFinalAsynqAttempt(ctx) {
+		} else {
+			// Any genuinely failed attempt must close its span red, not
+			// leave it dangling as "in progress". The span is a Generation
+			// subspan, so FailSpan here cannot poison the parent stage or
+			// the attempt status (cascade only fires for Stage-kind spans);
+			// it merely records this attempt's outcome and lets a later
+			// retry open its own span under the new attempt.
 			tracker.FailSpan(ctx, imgSpan,
 				"MULTIMODAL_VLM_FAILED",
 				handleErr.Error(),
@@ -344,6 +350,11 @@ func (s *ImageMultimodalService) processImage(
 		imageInfo:  &imageInfo,
 		out:        out,
 	}); err != nil {
+		// Surface the pipeline failure on this image's span instead of
+		// letting the deferred finalize misread it as success. Without
+		// this assignment the span below keeps handleErr == nil and the
+		// UI shows a green (done) result for a genuinely failed image.
+		handleErr = err
 		return err
 	}
 
