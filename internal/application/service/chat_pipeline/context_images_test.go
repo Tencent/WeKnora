@@ -121,6 +121,10 @@ func TestFilterTopKLetsKeptImagesRideAlong(t *testing.T) {
 		ids[i] = r.ID
 	}
 	assert.Equal(t, []string{"a", "kept"}, ids)
+	require.NotNil(t, cm.Truncation)
+	assert.Equal(t, types.RetrievalTruncation{
+		Stage: types.RetrievalStageFilterTopK, Candidates: 3,
+	}, *cm.Truncation)
 }
 
 func TestExpandedImageEvidenceKeepsItsOwnImageAndStorage(t *testing.T) {
@@ -206,4 +210,33 @@ func TestFAQImageNoteUsesFinalHandlesAfterCitationExpansion(t *testing.T) {
 	clone := cm.Clone()
 	clone.ContextImageChunkIDs[0] = "changed"
 	require.Equal(t, "v1", cm.ContextImageChunkIDs[0])
+}
+
+func TestFilterTopKDoesNotRecordTruncationWhenKeptImagesPreserveAllCandidates(t *testing.T) {
+	for _, input := range []string{"merge", "rerank", "search"} {
+		t.Run(input, func(t *testing.T) {
+			results := []*types.SearchResult{
+				{ID: "text", Score: 0.9},
+				{ID: "image", Score: 0.1, Metadata: map[string]string{types.MetadataKeptBy: types.KeptByImageVector}},
+			}
+			cm := &types.ChatManage{PipelineRequest: types.PipelineRequest{
+				RerankTopK: 1, KnowledgeBaseIDs: []string{"kb"},
+			}}
+			var output *[]*types.SearchResult
+			switch input {
+			case "merge":
+				output = &cm.MergeResult
+			case "rerank":
+				output = &cm.RerankResult
+			case "search":
+				output = &cm.SearchResult
+			}
+			*output = results
+			require.Nil(t, (&PluginFilterTopK{}).OnEvent(t.Context(), types.FILTER_TOP_K, cm,
+				func() *PluginError { return nil }))
+			require.Len(t, *output, 2)
+			assert.Equal(t, "image", (*output)[1].ID)
+			assert.Nil(t, cm.Truncation, "exceeding top-k is not a cut when all candidates are preserved")
+		})
+	}
 }

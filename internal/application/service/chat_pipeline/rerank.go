@@ -158,6 +158,20 @@ func (p *PluginRerank) OnEvent(ctx context.Context,
 		})
 		return ErrSearchNothing
 	}
+	// Rerank drops candidates before FILTER_TOP_K ever runs: threshold
+	// rejection, the MaxCandidates cap and the MMR top-k all hide passage
+	// candidates that retrieval produced. Record the cut from the pool the
+	// stage received so the prompt can say its passages are a subset, whether
+	// or not FILTER_TOP_K finds anything left to cut.
+	if dropped := len(chatManage.SearchResult) - len(chatManage.RerankResult); dropped > 0 {
+		chatManage.RecordRetrievalCut(types.RetrievalStageRerank, len(chatManage.SearchResult))
+		pipelineInfo(ctx, "Rerank", "truncation", map[string]interface{}{
+			"stage":      types.RetrievalStageRerank,
+			"candidates": len(chatManage.SearchResult),
+			"kept":       len(chatManage.RerankResult),
+			"dropped":    dropped,
+		})
+	}
 	pipelineInfo(ctx, "Rerank", "output", map[string]interface{}{
 		"filtered_cnt": len(chatManage.RerankResult),
 		"outcome":      diag.Outcome,

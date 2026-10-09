@@ -201,7 +201,7 @@ ClientInfo: mcp.Implementation{ Name: "WeKnora", Version: "1.0.0" }
 | GET | `/mcp-services/{id}` | Viewer+ | 服务详情（经 DTO 脱敏） |
 | PUT | `/mcp-services/{id}` | Admin+ | 更新服务；主 PUT **忽略** `auth_config.api_key` / `auth_config.token`（打 deprecated 警告） |
 | DELETE | `/mcp-services/{id}` | Admin+ | 删除服务（软删除，先 `CloseClient`） |
-| POST | `/mcp-services/{id}/test` | Admin+ | 连接测试：临时客户端 Connect + Initialize + ListTools + ListResources；返回 `MCPTestResult`（含 `oauth_required` 标记） |
+| POST | `/mcp-services/{id}/test` | Admin+ | 连接测试：临时客户端 Connect + Initialize，并尝试读取工具与资源列表；读取失败且服务端声明支持该能力时返回失败结果，否则记录警告并按空列表继续。返回 `MCPTestResult`（含 `oauth_required` 标记） |
 | GET | `/mcp-services/{id}/tools` | Viewer+ | 拉取 MCP 服务的工具列表 |
 | GET | `/mcp-services/{id}/resources` | Viewer+ | 拉取 MCP 服务的资源列表 |
 | PUT | `/mcp-services/{id}/credentials` | Admin+ | 写入 `api_key` / `token` 凭据（见下） |

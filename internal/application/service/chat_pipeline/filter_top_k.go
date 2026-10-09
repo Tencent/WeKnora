@@ -49,6 +49,9 @@ func (p *PluginFilterTopK) OnEvent(ctx context.Context,
 				"before": len(searchResult),
 				"after":  len(filtered),
 			})
+			if len(filtered) < len(searchResult) {
+				chatManage.RecordRetrievalCut(types.RetrievalStageFilterTopK, len(searchResult))
+			}
 			searchResult = filtered
 		}
 		return searchResult
