@@ -1,6 +1,7 @@
 package session
 
 import (
+	"bytes"
 	"context"
 	stderrors "errors"
 	"strings"
@@ -12,6 +13,32 @@ import (
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/gin-gonic/gin"
 )
+
+// streamPushPadding is an SSE comment written after an event that waits on the
+// user. A line starting with ':' is ignored by the client, and it is not
+// followed by a blank line, so it does not dispatch an empty event.
+//
+// Lite delivers the page through WKURLSchemeTask. A short trailing chunk on
+// that still-open task stays invisible until a later write arrives. The
+// approval (or OAuth) prompt is otherwise the last write until the user
+// answers, so this comment follows it and pushes that frame to the page.
+var streamPushPadding = func() []byte {
+	const size = 32 << 10
+	buf := make([]byte, 2, size+3)
+	buf[0] = ':'
+	buf[1] = ' '
+	buf = append(buf, bytes.Repeat([]byte{' '}, size)...)
+	return append(buf, '\n')
+}()
+
+func streamPausesForUser(eventType types.ResponseType) bool {
+	switch eventType {
+	case types.ResponseTypeToolApprovalRequired, types.ResponseTypeMCPOAuthRequired:
+		return true
+	default:
+		return false
+	}
+}
 
 // resourceModeError turns a mode-resolution failure into the response the client
 // should see: a rejected scope is a 403, a typo in the parameter is a 400.
@@ -123,6 +150,10 @@ func emitStreamEvent(
 	}
 	c.SSEvent("message", response)
 	c.Writer.Flush()
+	if streamPausesForUser(evt.Type) {
+		_, _ = c.Writer.Write(streamPushPadding)
+		c.Writer.Flush()
+	}
 }
 
 // flushHeldStreamContent emits whatever the holdback buffer still retains, so a
