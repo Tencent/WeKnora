@@ -265,15 +265,19 @@ func (r *runContext) ParamSnapshot(keys ...string) types.JSONMap {
 }
 
 // predictCaption asks for a caption, with the tunable the current pipeline
-// offers for it.
-func (r *runContext) predictCaption(ctx context.Context, prompt string) (string, error) {
-	return r.think(ctx, prompt, r.captionThinkingKey)
+// offers for it. purpose labels the underlying VLM call in the usage log so the
+// observation step can be told apart from OCR after the fact: a plain caption
+// passes "image_caption", the attribute-observing caption passes
+// "image_observation".
+func (r *runContext) predictCaption(ctx context.Context, prompt, purpose string) (string, error) {
+	return r.think(types.WithLLMCallMetadata(ctx, purpose, ""), prompt, r.captionThinkingKey)
 }
 
 // predictOCR transcribes text from an image, with the tunable the current
-// pipeline offers for it.
+// pipeline offers for it. The image_ocr purpose labels the VLM call in the
+// usage log so it can be told apart from the observation step.
 func (r *runContext) predictOCR(ctx context.Context, prompt string) (string, error) {
-	return r.think(ctx, prompt, r.ocrThinkingKey)
+	return r.think(types.WithLLMCallMetadata(ctx, "image_ocr", ""), prompt, r.ocrThinkingKey)
 }
 
 // think asks the model with the thinking switch the pipeline wired to this
@@ -315,7 +319,7 @@ func (r *runContext) execute(ctx context.Context, id types.ImageActionID) error 
 
 // runCaptionAction asks for a one-line description and stores it as the caption.
 func runCaptionAction(ctx context.Context, r *runContext) error {
-	raw, err := r.predictCaption(ctx, buildVLMCaptionPrompt(ctx, r.vlmCfg))
+	raw, err := r.predictCaption(ctx, buildVLMCaptionPrompt(ctx, r.vlmCfg), "image_caption")
 	if err != nil {
 		// Only recorded, not logged: an observation failure below is the same
 		// kind of event and logs its own line, and a caption miss must not be
@@ -336,7 +340,7 @@ func runCaptionAction(ctx context.Context, r *runContext) error {
 // run wants a caption — the observation itself always happens, because the
 // attributes are the point of this action and the OCR policy reads them back.
 func runObservationCaptionAction(ctx context.Context, r *runContext) error {
-	raw, err := r.predictCaption(ctx, buildImageAttrsPrompt(ctx, r.vlmCfg))
+	raw, err := r.predictCaption(ctx, buildImageAttrsPrompt(ctx, r.vlmCfg), "image_observation")
 	if err != nil {
 		logger.Warnf(ctx, "[ImageMultimodal] Describe and observe failed for %s: %v", r.payload.ImageURL, err)
 		r.out["caption_error"] = err.Error()
