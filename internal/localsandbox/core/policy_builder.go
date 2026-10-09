@@ -124,9 +124,10 @@ var ErrInstallDirOutsideSkillsRoot = errors.New("localsandbox: install directory
 
 // PolicyBuilder derives a Policy from an approval mode and a workspace.
 type PolicyBuilder struct {
-	homeDir    string
-	appDataDir string
-	skillsRoot string
+	homeDir     string
+	appDataDir  string
+	skillsRoot  string
+	sessionRoot string
 }
 
 // NewPolicyBuilder returns a builder scoped to the user's home and app-data dirs.
@@ -136,6 +137,9 @@ func NewPolicyBuilder(homeDir, appDataDir string) *PolicyBuilder {
 		appDataDir: filepath.Clean(appDataDir),
 	}
 }
+
+// HomeDir is the user's home the builder protects.
+func (b *PolicyBuilder) HomeDir() string { return b.homeDir }
 
 // Build derives a policy from the mode and the workspace. Pure: no IO, so it
 // is directly unit-testable.
@@ -165,6 +169,9 @@ func (b *PolicyBuilder) Build(mode ApprovalMode, ws Workspace) (Policy, error) {
 			// Losing .git to a hallucinated rm -rf is unrecoverable, and it is
 			// the least appropriate thing for an LLM to decide unilaterally.
 			root.ReadOnlySubpaths = []string{filepath.Join(ws.Root, ".git")}
+			// Submodules and nested repositories carry hooks that run
+			// outside the sandbox the next time the user uses git there.
+			root.ProtectGitDirs = true
 		}
 		p.WritableRoots = []WritableRoot{root}
 	case ModeAsk:
@@ -220,6 +227,16 @@ func (b *PolicyBuilder) readableRoots(ws Workspace) []string {
 func (b *PolicyBuilder) WithSkillsRoot(root string) *PolicyBuilder {
 	if root = strings.TrimSpace(root); root != "" {
 		b.skillsRoot = filepath.Clean(root)
+	}
+	return b
+}
+
+// WithSessionRoot records where session workspaces live. Grants cannot cover
+// that tree or the skills tree: one session must not rewrite another
+// session's files or the skills every session reads.
+func (b *PolicyBuilder) WithSessionRoot(root string) *PolicyBuilder {
+	if root = strings.TrimSpace(root); root != "" {
+		b.sessionRoot = filepath.Clean(root)
 	}
 	return b
 }
@@ -280,11 +297,17 @@ func (b *PolicyBuilder) rejectBroadWorkspace(root string) error {
 	if root == "" || !filepath.IsAbs(root) {
 		return fmt.Errorf("%w: %q", ErrRelativePath, root)
 	}
+	if resolved, err := resolveExistingPrefix(root); err == nil {
+		root = resolved
+	}
 	if isFilesystemRoot(root) {
 		return fmt.Errorf("%w: %q", ErrFilesystemRoot, root)
 	}
 	if b.homeDir != "" && b.homeDir != string(filepath.Separator) {
 		home := filepath.Clean(b.homeDir)
+		if resolved, err := resolveExistingPrefix(home); err == nil {
+			home = resolved
+		}
 		if PathUnder(home, root) {
 			return fmt.Errorf("%w: %q covers the home directory", ErrWorkspaceTooBroad, root)
 		}
@@ -320,36 +343,101 @@ func (b *PolicyBuilder) denyRead() []string {
 	return deny
 }
 
-// Grant is one approved escalation.
+// Access is what a Grant opens on its path.
+type Access string
+
+const (
+	// AccessRead adds the path as a readable root.
+	AccessRead Access = "read"
+	// AccessWrite adds the path as a writable root, which is also readable.
+	AccessWrite Access = "write"
+)
+
+// Grant is one approved escalation: a directory added to the policy.
 type Grant struct {
-	WritePath    string
-	AllowNetwork bool
+	Path   string
+	Access Access
 }
 
 // Relax derives a wider policy after the user approved an escalation. It never
 // removes a deny-read entry: those are the only mechanism enforcing them.
+//
+// The grant path is resolved on every call. A symlink approved earlier can be
+// retargeted; the next command must see the new target and refuse it when
+// that target is no longer grantable.
 func (b *PolicyBuilder) Relax(base Policy, g Grant) (Policy, error) {
+	path, err := resolveExistingPrefix(g.Path)
+	if err != nil {
+		return Policy{}, err
+	}
+	if info, statErr := os.Lstat(path); statErr == nil && !info.IsDir() {
+		path = filepath.Dir(path)
+	}
+	if err := b.rejectGrantPath(base, path); err != nil {
+		return Policy{}, err
+	}
+
 	out := base
 	out.WritableRoots = append([]WritableRoot(nil), base.WritableRoots...)
-
-	if g.WritePath != "" {
-		path := filepath.Clean(g.WritePath)
-		if err := b.rejectBroadWorkspace(path); err != nil {
-			return Policy{}, err
-		}
-		for _, deny := range base.DenyRead {
-			if PathUnder(path, deny) {
-				return Policy{}, fmt.Errorf(
-					"localsandbox: %q is read-denied and cannot be granted", path)
-			}
-		}
-		out.WritableRoots = append(out.WritableRoots, WritableRoot{Path: path})
-	}
-	if g.AllowNetwork {
-		out.Network = NetworkUnrestricted
+	out.ReadableRoots = append([]string(nil), base.ReadableRoots...)
+	switch g.Access {
+	case AccessWrite:
+		out.WritableRoots = append(out.WritableRoots, WritableRoot{
+			Path:             path,
+			ReadOnlySubpaths: gitMetadataPaths(path),
+			ProtectGitDirs:   true,
+		})
+	case AccessRead:
+		out.ReadableRoots = append(out.ReadableRoots, path)
+	default:
+		return Policy{}, fmt.Errorf("localsandbox: unknown grant access %q", g.Access)
 	}
 	if err := out.Validate(); err != nil {
 		return Policy{}, err
 	}
 	return out, nil
+}
+
+// gitMetadataPaths is what a write grant on root must keep read-only: hooks
+// and config there run with the user's own rights outside the sandbox. A
+// missing .git is protected too, so git init cannot create a writable one.
+// When .git is a file (worktree, submodule), the directory it names is
+// protected as well if it lies inside root; outside root this grant does not
+// make it writable.
+func gitMetadataPaths(root string) []string {
+	dotGit := filepath.Join(root, ".git")
+	paths := []string{dotGit}
+	info, err := os.Lstat(dotGit)
+	if err != nil || !info.Mode().IsRegular() {
+		return paths
+	}
+	data, err := os.ReadFile(dotGit)
+	if err != nil {
+		return paths
+	}
+	line, _, _ := strings.Cut(string(data), "\n")
+	gitdir, ok := strings.CutPrefix(strings.TrimSpace(line), "gitdir:")
+	if !ok {
+		return paths
+	}
+	gitdir = strings.TrimSpace(gitdir)
+	if !filepath.IsAbs(gitdir) {
+		gitdir = filepath.Join(root, gitdir)
+	}
+	resolved, err := resolveExistingPrefix(gitdir)
+	if err != nil || !PathUnder(resolved, root) || samePath(resolved, root) {
+		return paths
+	}
+	return append(paths, resolved)
+}
+
+// hasGitComponent reports whether any element of path is named .git. APFS
+// ignores case, so .GIT is the same directory to git.
+func hasGitComponent(path string) bool {
+	for _, part := range strings.Split(filepath.ToSlash(path), "/") {
+		if strings.EqualFold(part, ".git") {
+			return true
+		}
+	}
+	return false
 }

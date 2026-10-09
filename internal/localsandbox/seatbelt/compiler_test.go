@@ -118,6 +118,35 @@ func TestCompileSeatbeltAnchorsWritableRoot(t *testing.T) {
 		`(deny file-write-unlink (require-all (literal (param "WRITABLE_ROOT_0")) (vnode-type DIRECTORY)))`)
 }
 
+// Another writable root may cover a read-only subpath; its allow would
+// reopen the carve-out, so the carve-out is also a final deny.
+func TestCompileSeatbeltDeniesReadOnlySubpathAfterEveryAllow(t *testing.T) {
+	prog, err := compileSeatbelt(seatbeltPolicy())
+	require.NoError(t, err)
+
+	lastAllow := strings.LastIndex(prog.Profile, "(allow ")
+	for _, rule := range []string{
+		`(deny file-write* (subpath (param "WRITABLE_ROOT_0_EXCLUDED_0")))`,
+		`(deny file-write* (literal (param "WRITABLE_ROOT_0_EXCLUDED_0")))`,
+	} {
+		require.Greater(t, strings.Index(prog.Profile, rule), lastAllow, rule)
+	}
+}
+
+func TestCompileSeatbeltDeniesGitDirsUnderAProtectedRoot(t *testing.T) {
+	p := seatbeltPolicy()
+	p.WritableRoots = append(p.WritableRoots, core.WritableRoot{
+		Path:           "/Users/dev/Other",
+		ProtectGitDirs: true,
+	})
+	prog, err := compileSeatbelt(p)
+	require.NoError(t, err)
+
+	rule := `(deny file-write* (require-all (subpath (param "WRITABLE_ROOT_1")) (regex #"/\.[Gg][Ii][Tt](/|$)")))`
+	require.Greater(t, strings.Index(prog.Profile, rule), strings.LastIndex(prog.Profile, "(allow "))
+	require.NotContains(t, prog.Profile, `(subpath (param "WRITABLE_ROOT_0")) (regex`)
+}
+
 func TestCompileSeatbeltDeniesNetworkByDefault(t *testing.T) {
 	prog, err := compileSeatbelt(seatbeltPolicy())
 	require.NoError(t, err)
