@@ -228,7 +228,7 @@ pipeline = types.NewPipelineBuilder().
      - 诊断里记录 `images_scored` / `images_kept`。
 4. **复合打分** `compositeScore`：`0.6*模型分 + 0.3*检索基础分 + 0.1*来源权重`（web_search 来源权重 0.95，其余 1.0），clamp 到 [0,1]。图谱实体检索命中的 chunk 没有检索分，基础分用模型分代替。基础分/模型分/复合分记录在 `Metadata["base_score"]` / `["model_score"]` / `["composite_score"]`。早期版本还会乘一个「越靠文档前部越高」的位置先验（±0.05），因为它与分块编辑后的偏移变化耦合且收益不明确，已被移除。
 5. **FAQ 加权**：`FAQPriorityEnabled` 且 `FAQScoreBoost > 1.0` 时，FAQ chunk 分数乘以 boost，记 `Metadata["faq_boosted"]`。结果不封顶到 1.0——封顶会让高分 FAQ 全部并列 1.0，彼此顺序退化为 tie-breaker。
-6. **MMR 多样性选择** `applyMMR`（λ=0.7，k=`RerankTopK`）：`mmr = 0.7*relevance - 0.3*max_jaccard_redundancy`，用 `searchutil.TokenizeSimple` + `Jaccard` 并行预计算 token 集合，迭代贪心选出 `RerankResult`。
+6. **MMR 多样性选择** `reranking.SelectMMR`（λ=0.7，k=`RerankTopK`）：`mmr = 0.7*relevance - 0.3*max_jaccard_redundancy`。对增强后的分块正文用 `searchutil.TokenizeSimple` 分词一次，再构建「token → 候选下标」倒排索引。每轮只累计与新选中分块共享 token 的候选交集，用 `交集 / (两侧 token 数之和 - 交集)` 计算 Jaccard，并更新最大冗余缓存；没有共享 token 的候选无需比较。索引使用连续数组存储，额外空间与候选 token 总数成正比，选择结果和平分时的输入顺序保持不变。`k=1` 时直接按相关性选择，跳过正文清洗、分词和索引构建。聊天、Agent 检索工具和检索 API 共用这一实现。
 
 **PluginMemoryAffinity**（`memory_affinity.go`）注册在链的最内层，同样先 `next()` 再后置处理：对该调用者过往回答中至少引用过 2 次的文档，按使用次数对数增长加权，最高 ×1.15，只用于在相近候选之间打破平局。随后才轮到 WikiBoost 的后置加权。
 
