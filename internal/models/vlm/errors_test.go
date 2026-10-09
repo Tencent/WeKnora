@@ -95,8 +95,11 @@ func TestClassifyErrorMessageFallback(t *testing.T) {
 	}{
 		{"rate limit exceeded", KindRateLimited},
 		{"HTTP 429 Too Many Requests", KindRateLimited},
-		{"i/o timeout", KindUnavailable},
-		{"connection refused", KindUnavailable},
+		// Connection-level failures (a refused connection or a dial / first-byte
+		// timeout) are hard-down: they trip the per-model circuit breaker, so a
+		// dead endpoint is detected once and every other request fails fast.
+		{"i/o timeout", KindHardDown},
+		{"connection refused", KindHardDown},
 	}
 	for _, tc := range cases {
 		if kind, _, _ := classifyError(errors.New(tc.msg)); kind != tc.kind {

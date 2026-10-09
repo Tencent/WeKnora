@@ -103,6 +103,14 @@ func (m *managerVLM) call(
 	rt := defaultRegistry.runtimeFor(m.modelID, m.configuredLimit, m.configuredRPM)
 	prio := m.priorityFor(caller)
 
+	// Circuit breaker: fail fast before any queuing or admission when the
+	// endpoint is declared down. This is what turns "100 tasks waiting on a
+	// dead model" into "100 tasks reporting the outage immediately" — no slot
+	// consumed, no admission wait, no retry budget burned.
+	if err := rt.guardCircuit(ctx); err != nil {
+		return "", err
+	}
+
 	m.status(ctx, opts, PhaseQueued, PhaseInfo{})
 	rt.markQueued(caller)
 	start := time.Now()
@@ -127,13 +135,16 @@ func (m *managerVLM) call(
 		text, usage, _, innerErr := m.runInner(ctx, imgBytes, prompt, opts, genStart)
 
 		if innerErr != nil {
-			// Drive the adaptive controller on EVERY failed attempt (each 429
-			// should shed load), then decide whether to absorb the failure with
-			// an in-place retry. The manager still passes the raw error through
-			// — it never imposes a success/failure verdict on the caller.
+			// Drive the adaptive controller and the circuit breaker on EVERY
+			// failed attempt (each 429 should shed load; each hard-down should
+			// be counted toward a trip). If the failure is not retried in place,
+			// surface a typed verdict (dead endpoint / permanent client fault)
+			// so the caller can stop spending its own retry budget on a lost
+			// cause. The raw error survives via wrapping.
 			m.handleFailure(rt, innerErr)
+			kind, _, _ := classifyError(innerErr)
 			if !m.retryInPlace(ctx, rt, innerErr, attempt, budget) {
-				return "", innerErr
+				return "", wrapVerdict(innerErr, kind)
 			}
 			continue
 		}
@@ -141,12 +152,15 @@ func (m *managerVLM) call(
 		if strings.TrimSpace(text) == "" {
 			// A genuine empty answer (HTTP 200, no text) is the content
 			// received. The caller routes it to "skipped" via the empty-string
-			// result; the manager never fabricates a verdict.
+			// result; the manager never fabricates a verdict. A 200 — even an
+			// empty one — proves the endpoint is reachable, so close the breaker.
 			rt.onEmptyContent()
+			rt.cbOnSuccess()
 			m.status(ctx, opts, PhaseDone, PhaseInfo{Dwell: time.Since(genStart)})
 			return "", nil
 		}
 
+		rt.cbOnSuccess()
 		rt.onSuccess(tokenTotal(usage), time.Since(genStart))
 		if m.usageReporter != nil && usage != nil {
 			m.usageReporter.Report(m.modelID, *usage)
@@ -317,6 +331,12 @@ func (m *managerVLM) handleFailure(rt *modelRuntime, innerErr error) {
 		// A client-side fault (bad key / oversized image / bad request): record
 		// it but do NOT shed load or cool down.
 		rt.onClientError()
+	case KindHardDown:
+		// A connection-level failure (refused / DNS / TLS / first-byte
+		// timeout): count it toward the circuit-breaker trip window. The breaker
+		// is what turns "this one request died" into "the whole endpoint is
+		// declared down for every other caller".
+		rt.cbRecordFailure()
 	}
 }
 
@@ -357,10 +377,16 @@ func (m *managerVLM) retryInPlace(
 	return sleepCtx(ctx, retryWait(retryAfter, attempt))
 }
 
-// isRetryable reports whether an error class is worth retrying in place.
-// Permanent client faults (bad key, oversized image, unsupported request) are
-// not: repeating them only burns budget and bills the provider again.
-func isRetryable(kind ErrorKind) bool { return kind != KindPermanent }
+// isRetryable reports whether an error class is worth retrying in place. A
+// permanent client fault (bad key, oversized image, unsupported request) is
+// not — repeating it only burns budget and bills the provider again. A
+// hard-down (dead endpoint) is not either: a refused connection will not start
+// answering if we simply try again, and once the circuit breaker trips it
+// already fails the other requests fast, so an in-place retry here would just
+// add latency to the one request that arrived before the trip.
+func isRetryable(kind ErrorKind) bool {
+	return kind != KindPermanent && kind != KindHardDown
+}
 
 // retryWait returns how long to wait before the next in-place retry, honouring
 // the provider's Retry-After when it is longer than our own exponential base.

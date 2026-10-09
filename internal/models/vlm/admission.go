@@ -39,6 +39,36 @@ const (
 	recoveryThreshold = 10 // consecutive successes before nudging the limit up
 )
 
+// Circuit-breaker (per-model) configuration. Cross-request: every caller of a
+// given model id shares one breaker, so a single dead endpoint is detected once
+// and all queued / inflight requests fail fast instead of each burning a full
+// retry budget. These are constants now; flipping them to env overrides
+// (WEKNORA_VLM_CB_*) is a trivial follow-up once a good default is confirmed.
+const (
+	// cbTripThreshold is how many CONSECUTIVE hard-down events (since the last
+	// successful round-trip) trip the breaker open.
+	//
+	// We deliberately count consecutively rather than within a tight time
+	// window. A dead endpoint configured with low concurrency (e.g.
+	// concurrency=1) may only produce one failing attempt every ~10s, so a 10s
+	// sliding window would never accumulate three failures and the breaker would
+	// never open — the exact scenario the user wants to catch. Consecutive
+	// counting also resets on any success, so a merely-flaky (mostly-up)
+	// endpoint is never tripped, while a genuinely dead one trips after three
+	// failures in a row regardless of how slowly they arrive.
+	cbTripThreshold = 3
+	// cbCooldown is how long the breaker stays open (serverDown) before it
+	// allows a single probe request.
+	cbCooldown = 30 * time.Second
+)
+
+// Circuit-breaker states (stored in modelRuntime.cbState).
+const (
+	cbServerUp      int32 = iota // normal: requests flow
+	cbServerDown                 // open: fail fast, no request issued
+	cbServerProbing              // half-open: exactly one probe allowed
+)
+
 type priority int
 
 const (
@@ -102,6 +132,13 @@ type modelRuntime struct {
 	available      atomic.Bool
 	cooldownUntil  atomic.Int64 // unix nanos; advisory (reduces limit, never hard-blocks)
 	consecSuccess  atomic.Int64
+
+	// Circuit breaker (cross-request, per model id). Written by result handlers
+	// and read on the hot admit path, so it is entirely atomic / mutex-guarded.
+	cbState          atomic.Int32 // cbServerUp | cbServerDown | cbServerProbing
+	cbProbeAt        atomic.Int64 // unix nanos: earliest time to probe after a trip
+	cbProbeRemaining atomic.Int64 // probe permits issued during cbServerProbing
+	cbConsecHardDown atomic.Int64 // consecutive hard-downs since last success
 
 	// Scheduler-owned.
 	admitCh   chan *waiter
@@ -503,6 +540,88 @@ func (rt *modelRuntime) scaleRPM(factor float64) {
 }
 
 // ---------------------------------------------------------------------------
+// Circuit breaker (cross-request, per model id)
+// ---------------------------------------------------------------------------
+
+// guardCircuit enforces the per-model circuit breaker. It returns nil when the
+// request may proceed, or ErrServerDown (or the caller's context error) when it
+// must fail fast. It is called once at the top of every call — BEFORE queuing
+// or admission — so a tripped breaker costs no slot, no wait and no retry:
+// the 100 requests piled behind a dead endpoint all surface immediately instead
+// of each burning a full retry budget.
+func (rt *modelRuntime) guardCircuit(ctx context.Context) error {
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	state := rt.cbState.Load()
+	switch state {
+	case cbServerUp:
+		return nil
+	case cbServerDown:
+		if time.Now().Before(time.Unix(0, rt.cbProbeAt.Load())) {
+			return ErrServerDown
+		}
+		// Cooldown elapsed: transition to probing and issue a single probe
+		// permit, then let this request be that probe.
+		if rt.cbState.CompareAndSwap(cbServerDown, cbServerProbing) {
+			rt.cbProbeRemaining.Store(1)
+		}
+		fallthrough
+	case cbServerProbing:
+		if rt.cbProbeRemaining.Add(-1) >= 0 {
+			return nil // this request is the allowed probe
+		}
+		return ErrServerDown
+	}
+	return nil
+}
+
+// cbRecordFailure records a connection-level (hard-down) failure and trips the
+// breaker once cbTripThreshold CONSECUTIVE hard-downs have occurred since the
+// last success. A failed probe (state == probing) re-arms the breaker as down
+// and restarts the cooldown, so an endpoint that is still dead after a probe
+// does not get stuck in the probing state. While the breaker is already open
+// (serverDown) it is a no-op: the cooldown already covers the outage, so
+// repeated hard-downs during a blackout cannot re-extend it.
+func (rt *modelRuntime) cbRecordFailure() {
+	switch rt.cbState.Load() {
+	case cbServerDown:
+		return // already open; cooldown covers the outage
+	case cbServerProbing:
+		// The single probe failed: still down, restart the cooldown.
+		rt.cbTrip(time.Now())
+		return
+	}
+	// cbServerUp: count consecutive hard-downs since the last success.
+	n := rt.cbConsecHardDown.Add(1)
+	if n >= cbTripThreshold {
+		rt.cbTrip(time.Now())
+	}
+}
+
+// cbTrip opens the breaker (serverDown) and arms the probe time. Safe to call
+// repeatedly: it only transitions from up/probing and only resets the
+// consecutive counter on the transition.
+func (rt *modelRuntime) cbTrip(now time.Time) {
+	if rt.cbState.CompareAndSwap(cbServerUp, cbServerDown) ||
+		rt.cbState.CompareAndSwap(cbServerProbing, cbServerDown) {
+		rt.cbProbeAt.Store(now.Add(cbCooldown).UnixNano())
+		rt.cbConsecHardDown.Store(0)
+	}
+}
+
+// cbOnSuccess closes the breaker on a successful (HTTP 200) round-trip, whether
+// or not it carried content. A server that answered at all is reachable, so the
+// outage is over: the state is closed and the consecutive-failure counter is
+// cleared.
+func (rt *modelRuntime) cbOnSuccess() {
+	if rt.cbState.CompareAndSwap(cbServerProbing, cbServerUp) ||
+		rt.cbState.CompareAndSwap(cbServerDown, cbServerUp) {
+		rt.cbConsecHardDown.Store(0)
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Runtime stat snapshot (for the admin API)
 // ---------------------------------------------------------------------------
 
@@ -524,6 +643,8 @@ type RuntimeStat struct {
 	EffectiveRPM         int                       `json:"effective_rpm"`
 	Available            bool                      `json:"available"`
 	CooldownRemainingSec int                       `json:"cooldown_remaining_sec"`
+	CircuitState         string                    `json:"circuit_state"`
+	CircuitCooldownSec   int                       `json:"circuit_cooldown_sec"`
 	InFlight             int                       `json:"in_flight"`
 	SoftInFlight         int                       `json:"soft_in_flight"`
 	RetryingInFlight     int                       `json:"retrying_in_flight"`
@@ -557,6 +678,17 @@ func (rt *modelRuntime) Snapshot() RuntimeStat {
 	if cd < 0 {
 		cd = 0
 	}
+	cbState := "server_up"
+	switch rt.cbState.Load() {
+	case cbServerDown:
+		cbState = "server_down"
+	case cbServerProbing:
+		cbState = "server_probing"
+	}
+	circuitCD := time.Until(time.Unix(0, rt.cbProbeAt.Load())).Seconds()
+	if circuitCD < 0 {
+		circuitCD = 0
+	}
 	return RuntimeStat{
 		ModelID:              rt.modelID,
 		ConfiguredLimit:      rt.configuredLimit,
@@ -565,6 +697,8 @@ func (rt *modelRuntime) Snapshot() RuntimeStat {
 		EffectiveRPM:         int(rt.effectiveRPM.Load()),
 		Available:            rt.available.Load(),
 		CooldownRemainingSec: int(cd),
+		CircuitState:         cbState,
+		CircuitCooldownSec:   int(circuitCD),
 		InFlight:             rt.inFlight,
 		SoftInFlight:         int(rt.softInflight.Load()),
 		RetryingInFlight:     int(rt.retryingInflight.Load()),

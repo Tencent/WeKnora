@@ -38,9 +38,13 @@ type fakeVLM struct {
 
 	streamChunks    []StreamChunk
 	firstChunkDelay time.Duration // delays the first streamed token so TTFT is observable
+	errDelay        time.Duration // sleeps before each buffered answer (simulates a slow dead endpoint)
 }
 
 func (f *fakeVLM) answer() (string, error) {
+	if f.errDelay > 0 {
+		time.Sleep(f.errDelay)
+	}
 	n := f.calls.Add(1)
 	if len(f.responses) > 0 {
 		i := int(n) - 1
