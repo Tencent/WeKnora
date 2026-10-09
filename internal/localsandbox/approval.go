@@ -22,7 +22,9 @@ type ApprovalRequest struct {
 	Command string
 	Cwd     string
 	Reason  ApprovalReason
-	// Proposed is set only for ReasonDenied.
+	// Proposed is the directory approving opens: after a denial, or before a
+	// delete that removes something outside the policy. A delete grant is
+	// always write; narrowing it to read is ignored.
 	Proposed      *Grant
 	DenialSnippet string
 	// FirstAttemptRan warns that approving re-runs the whole command.
