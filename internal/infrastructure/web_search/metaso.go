@@ -116,27 +116,17 @@ func (p *MetasoProvider) Search(ctx context.Context, query string, maxResults in
 	if err := json.Unmarshal(respBody, &response); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal Metaso response: %w", err)
 	}
-	// Metaso 的结果数组键名随 scope 变化（webpages/documents/scholars/…），
-	// 只读 webpages 会让任何 scope != webpage 的配置永久返回 0 条。
 	items, arrayName := response.itemsForScope(p.scope)
-	if _, ok := validMetasoScopes[p.scope]; !ok {
-		logger.Warnf(ctx, "[WebSearch][Metaso] unknown scope %q; fell back to the %q array",
-			p.scope, arrayName)
-	}
 	results := make([]*types.WebSearchResult, 0, len(items))
 	for _, item := range items {
-		link := item.location()
-		if strings.TrimSpace(item.Title) == "" && link == "" {
+		if strings.TrimSpace(item.Title) == "" && strings.TrimSpace(item.Link) == "" {
 			continue
 		}
 		snippet := strings.TrimSpace(item.Summary)
 		if snippet == "" {
 			snippet = strings.TrimSpace(item.Snippet)
 		}
-		result := &types.WebSearchResult{
-			Title: item.Title, URL: link, Snippet: snippet,
-			Content: item.RawContent, Source: "metaso",
-		}
+		result := &types.WebSearchResult{Title: item.Title, URL: item.Link, Snippet: snippet, Content: item.RawContent, Source: "metaso"}
 		if includeDate {
 			if publishedAt, ok := parseMetasoDate(item.Date); ok {
 				result.PublishedAt = &publishedAt
@@ -188,13 +178,7 @@ func metasoHTTPError(statusCode int, body []byte) error {
 }
 
 func parseMetasoDate(value string) (time.Time, bool) {
-	for _, layout := range []string{
-		time.RFC3339Nano,
-		"2006-01-02 15:04:05",
-		"2006-01-02",
-		"2006年01月02日", // webpage scope 实际返回的日期格式
-		"2006/01/02",
-	} {
+	for _, layout := range []string{time.RFC3339Nano, "2006-01-02 15:04:05", "2006-01-02"} {
 		if parsed, err := time.Parse(layout, strings.TrimSpace(value)); err == nil {
 			return parsed, true
 		}
@@ -211,10 +195,11 @@ type metasoSearchRequest struct {
 	ConciseSnippet    bool   `json:"conciseSnippet"`
 }
 
-// metasoSearchResponse 只声明各 scope 对应的结果数组。
+// metasoSearchResponse declares one result array per scope.
 //
-// Metaso 把结果放在与 scope 同名的键下（webpage→webpages、scholar→scholars…），
-// 因此每个 scope 都要有自己的字段，读错键就会得到 0 条结果。
+// Metaso stores results under a key matching the scope (webpage→webpages,
+// scholar→scholars, …), so reading a single hard-coded key makes every other
+// scope return zero results.
 type metasoSearchResponse struct {
 	Webpages  []metasoWebpage `json:"webpages"`
 	Documents []metasoWebpage `json:"documents"`
@@ -224,11 +209,9 @@ type metasoSearchResponse struct {
 	Images    []metasoWebpage `json:"images"`
 }
 
-// itemsForScope 按 scope 取对应的结果数组，并返回数组名用于日志。
-//
-// 实测（https://metaso.cn/api/v1/search）响应键名与 scope 一一对应：
-// webpage→webpages、document→documents、scholar→scholars、
-// podcast→podcasts、video→videos、image→images。
+// itemsForScope returns the result array for scope along with its response key,
+// which is used for logging. The response key matches the scope name, so a
+// direct lookup is enough.
 func (r metasoSearchResponse) itemsForScope(scope string) ([]metasoWebpage, string) {
 	switch scope {
 	case "document":
@@ -244,49 +227,20 @@ func (r metasoSearchResponse) itemsForScope(scope string) ([]metasoWebpage, stri
 	case "webpage":
 		return r.Webpages, "webpages"
 	}
-	// 未知 scope：回退到第一个非空数组，尽量不丢结果
-	for _, candidate := range []struct {
-		name  string
-		items []metasoWebpage
-	}{
-		{"webpages", r.Webpages},
-		{"documents", r.Documents},
-		{"scholars", r.Scholars},
-		{"podcasts", r.Podcasts},
-		{"videos", r.Videos},
-		{"images", r.Images},
-	} {
-		if len(candidate.items) > 0 {
-			return candidate.items, candidate.name
-		}
-	}
 	return nil, "webpages"
 }
 
-// metasoWebpage 只声明真正会被读取的字段。
+// metasoWebpage declares only the fields that are actually read.
 //
-// 响应里还有 score/position/authors/duration/coverImage/imageWidth/imageHeight
-// 等键，此处刻意不建模：多声明一个类型不符的字段，整次搜索就会因反序列化
-// 失败而返回 0 条，而多出来的键本来就会被 encoding/json 忽略。
+// The response also carries score/position/authors/duration/coverImage/
+// imageWidth/imageHeight and similar keys, which are deliberately left out:
+// declaring a field whose type does not match the payload fails the whole
+// unmarshal and yields zero results, while extra keys are ignored anyway.
 type metasoWebpage struct {
 	Title      string `json:"title"`
 	Link       string `json:"link"`
-	URL        string `json:"url"`
 	Snippet    string `json:"snippet"`
 	Summary    string `json:"summary"`
 	RawContent string `json:"rawContent"`
 	Date       string `json:"date"`
-	ImageURL   string `json:"imageUrl"`
-}
-
-// location 返回条目的可访问地址。
-// image scope 的条目没有 link，只有 imageUrl；若只认 link，
-// 这些条目会被 agent 侧的 URL 校验丢弃，导致「有结果但返回 0 条」。
-func (w metasoWebpage) location() string {
-	for _, candidate := range []string{w.Link, w.URL, w.ImageURL} {
-		if trimmed := strings.TrimSpace(candidate); trimmed != "" {
-			return trimmed
-		}
-	}
-	return ""
 }
