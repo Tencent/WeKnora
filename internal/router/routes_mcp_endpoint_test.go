@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -30,6 +31,7 @@ func (*protocolEndpointService) Authenticate(_ context.Context, id, token string
 		KnowledgeBaseIDs: types.StringArray{"kb-own"},
 		Tools: types.StringArray{
 			types.MCPEndpointToolListKnowledgeBases, types.MCPEndpointToolSearchKnowledge,
+			types.MCPEndpointToolWikiReadPage,
 		},
 	}, nil
 }
@@ -45,13 +47,59 @@ type protocolKBService struct {
 }
 
 func (*protocolKBService) GetKnowledgeBaseByIDOnly(_ context.Context, id string) (*types.KnowledgeBase, error) {
-	return &types.KnowledgeBase{ID: id, TenantID: 1, Name: id}, nil
+	return &types.KnowledgeBase{
+		ID: id, TenantID: 1, Name: id,
+		IndexingStrategy: types.IndexingStrategy{KeywordEnabled: true, WikiEnabled: true},
+	}, nil
+}
+
+func (*protocolKBService) HybridSearch(ctx context.Context, id string, params types.SearchParams) (
+	[]*types.SearchResult, error,
+) {
+	if types.MustTenantIDFromContext(ctx) != 1 || id != "kb-own" ||
+		params.QueryText != "fixture" || len(params.KnowledgeBaseIDs) != 1 || params.KnowledgeBaseIDs[0] != id {
+		return nil, fmt.Errorf("unexpected retrieval scope or query")
+	}
+	return []*types.SearchResult{{
+		ID: "chunk-1", KnowledgeBaseID: id,
+		KnowledgeID: "doc-1", Content: "retrieval fixture body", Score: 1,
+	}}, nil
+}
+
+func (s *protocolKBService) GetKnowledgeBasesByIDsOnly(ctx context.Context, ids []string) (
+	[]*types.KnowledgeBase, error,
+) {
+	kbs := make([]*types.KnowledgeBase, 0, len(ids))
+	for _, id := range ids {
+		kb, err := s.GetKnowledgeBaseByIDOnly(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		kbs = append(kbs, kb)
+	}
+	return kbs, nil
+}
+
+func (*protocolKBService) ResolveEmbeddingModelKeys(context.Context, []*types.KnowledgeBase) map[string]string {
+	return nil // Keyword-only fixture does not call an embedding model.
+}
+
+type protocolWikiService struct{ interfaces.WikiPageService }
+
+func (*protocolWikiService) GetPageBySlug(ctx context.Context, id, slug string) (*types.WikiPage, error) {
+	if types.MustTenantIDFromContext(ctx) != 1 || id != "kb-own" || slug != "concept/fixture" {
+		return nil, fmt.Errorf("unexpected wiki scope or slug")
+	}
+	return &types.WikiPage{
+		ID: "page-1", KnowledgeBaseID: id, Slug: slug, Title: "Fixture",
+		Content: "wiki fixture body", Status: "published",
+	}, nil
 }
 
 func TestPublishedMCPRouteProtocolAndAuthorization(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	t.Setenv("LOCAL_STORAGE_BASE_DIR", t.TempDir())
-	srv := mcpserver.NewServer(&protocolKBService{}, nil, nil, nil, nil, nil, nil, nil,
+	srv := mcpserver.NewServer(&protocolKBService{}, nil, nil, &protocolWikiService{}, nil, nil, nil, nil,
 		nil, nil, nil, nil, nil, nil, nil, nil)
 	r := NewRouter(RouterParams{
 		Config: &config.Config{Tenant: &config.TenantConfig{}}, SystemHandler: &handler.SystemHandler{},
@@ -121,7 +169,7 @@ func TestPublishedMCPRouteProtocolAndAuthorization(t *testing.T) {
 			listed := decode(call("tools/list", "fixture", version, map[string]any{}))
 			require.Nil(t, listed["error"])
 			listResult := listed["result"].(map[string]any)
-			require.Len(t, listResult["tools"], 2)
+			require.Len(t, listResult["tools"], 3)
 			if version == "2026-07-28" {
 				require.Equal(t, "complete", listResult["resultType"])
 				require.Equal(t, "private", listResult["cacheScope"])
@@ -136,6 +184,34 @@ func TestPublishedMCPRouteProtocolAndAuthorization(t *testing.T) {
 			rows := called["result"].(map[string]any)["structuredContent"].(map[string]any)["knowledge_bases"].([]any)
 			require.Len(t, rows, 1)
 			require.Equal(t, "kb-own", rows[0].(map[string]any)["id"])
+			for _, tc := range []struct {
+				tool string
+				args map[string]any
+				body string
+			}{
+				{
+					types.MCPEndpointToolSearchKnowledge,
+					map[string]any{"query": "fixture", "mode": "keyword"},
+					"retrieval fixture body",
+				},
+				{
+					types.MCPEndpointToolWikiReadPage,
+					map[string]any{"slug": "concept/fixture", "knowledge_base_id": "kb-own"},
+					"wiki fixture body",
+				},
+			} {
+				response := decode(call("tools/call", "fixture", version,
+					map[string]any{"name": tc.tool, "arguments": tc.args}))
+				require.Nil(t, response["error"])
+				result := response["result"].(map[string]any)
+				require.NotEqual(t, true, result["isError"])
+				encoded, err := json.Marshal(result)
+				require.NoError(t, err)
+				require.Contains(t, string(encoded), tc.body)
+				if version == "2026-07-28" {
+					require.Equal(t, "complete", result["resultType"])
+				}
+			}
 			denied := decode(call("tools/call", "fixture", version, map[string]any{
 				"name":      types.MCPEndpointToolSearchKnowledge,
 				"arguments": map[string]any{"query": "fixture", "knowledge_base_ids": []string{"kb-other"}},

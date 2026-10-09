@@ -75,6 +75,7 @@ type mcpGoClient struct {
 	initialized  atomic.Bool
 	metadataMu   sync.RWMutex
 	instructions string
+	toolSchemas  map[string]json.RawMessage
 }
 
 // applyAuthHeaders injects the auth header for the SELECTED strategy only —
@@ -373,6 +374,9 @@ func (c *mcpGoClient) Disconnect() error {
 		return nil
 	}
 	c.initialized.Store(false)
+	c.metadataMu.Lock()
+	c.toolSchemas = nil
+	c.metadataMu.Unlock()
 
 	// Close the client
 	if c.client != nil {
@@ -486,6 +490,14 @@ func (c *mcpGoClient) ListTools(ctx context.Context) ([]*types.MCPTool, error) {
 		c.checkErrorAndDisconnectIfNeeded(err)
 		return nil, fmt.Errorf("failed to list tools: %w", err)
 	}
+	// Publish header annotations only after the bounded directory is complete.
+	schemas := make(map[string]json.RawMessage, len(tools))
+	for _, tool := range tools {
+		schemas[tool.Name] = append(json.RawMessage(nil), tool.InputSchema...)
+	}
+	c.metadataMu.Lock()
+	c.toolSchemas = schemas
+	c.metadataMu.Unlock()
 
 	return tools, nil
 }
@@ -624,6 +636,21 @@ func (c *mcpGoClient) CallTool(ctx context.Context, name string, args map[string
 			Name:      name,
 			Arguments: args,
 		},
+	}
+	if mcp.IsModernProtocol(c.client.ProtocolVersion()) {
+		c.metadataMu.RLock()
+		schema := c.toolSchemas[name]
+		c.metadataMu.RUnlock()
+		// Raw directory reads bypass the SDK's tool cache. Reuse its annotation
+		// helper so modern gateways receive the same parameter headers.
+		params, err := json.Marshal(req.Params)
+		if err != nil {
+			return nil, fmt.Errorf("failed to encode tool arguments: %w", err)
+		}
+		req.Header = make(http.Header)
+		for key, value := range mcp.GenerateParamHeaders(&mcp.Tool{Name: name, RawInputSchema: schema}, params) {
+			req.Header.Set(key, value)
+		}
 	}
 
 	result, err := oauthCall(ctx, c, func() (*mcp.CallToolResult, error) {

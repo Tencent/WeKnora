@@ -27,7 +27,8 @@ func TestOutboundProtocolNegotiation(t *testing.T) {
 			schema := json.RawMessage(`{
 				"type":"object", "oneOf":[{"required":["x"]},{"required":["y"]}],
 				"definitions":{"value":{"type":"string"}},
-				"properties":{"x":{"$ref":"#/definitions/value"},"y":{"type":"string"}}
+				"properties":{"x":{"type":"string","x-mcp-header":"Value"},
+				"y":{"$ref":"#/definitions/value"}}
 			}`)
 			for _, name := range []string{"first", "second"} {
 				s.AddTool(sdk.Tool{Name: name, RawInputSchema: schema},
@@ -61,6 +62,17 @@ func TestOutboundProtocolNegotiation(t *testing.T) {
 				mu.Unlock()
 				if r.Header.Get("Authorization") != "Bearer fixture" {
 					t.Error("missing bearer")
+				}
+				if request.Method == "tools/call" {
+					if mode == "modern" {
+						if got := r.Header.Get("Mcp-Param-Value"); got != "value" {
+							t.Errorf("Mcp-Param-Value = %q, want value", got)
+						}
+					} else {
+						if got := r.Header.Get("Mcp-Param-Value"); got != "" {
+							t.Errorf("legacy call added Mcp-Param-Value = %q", got)
+						}
+					}
 				}
 				if mode == "unauthorized" {
 					http.Error(w, "unauthorized", http.StatusUnauthorized)
