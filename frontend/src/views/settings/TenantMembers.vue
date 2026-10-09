@@ -54,7 +54,7 @@
         {{ $t('tenantMember.sectionDescription') }}
         <a
           class="doc-link"
-          href="https://github.com/Tencent/WeKnora/blob/main/website-docs/03-features/01-tenant-auth.md"
+          :href="docsUrl('tenantAuth')"
           target="_blank"
           rel="noopener noreferrer"
         >
@@ -198,7 +198,7 @@
               </t-input>
             </div>
             <t-popup v-if="canManage" v-model="invitePopupVisible" trigger="click" placement="bottom-end"
-              destroy-on-close overlay-class-name="wk-popover member-invite-popup-overlay">
+              destroy-on-close overlay-class-name="wk-popover wk-popover--form member-invite-popup-overlay">
               <t-button theme="primary" variant="outline" shape="square" size="small" class="members-list-add-btn"
                 :title="$t('tenantMember.add.button')" :aria-label="$t('tenantMember.add.button')">
                 <template #icon><t-icon name="user-add" /></template>
@@ -247,7 +247,7 @@
                  popup so the two flows live side-by-side: "I know who"
                  (email input) vs "I don't" (one link, group chat). -->
             <t-popup v-if="canManage" v-model="shareLinkPopupVisible" trigger="click" placement="bottom-end"
-              destroy-on-close overlay-class-name="wk-popover member-invite-popup-overlay">
+              destroy-on-close overlay-class-name="wk-popover wk-popover--form member-invite-popup-overlay">
               <t-button theme="default" variant="outline" shape="square" size="small" class="members-list-add-btn"
                 :title="$t('tenantInvitation.shareLink.button')"
                 :aria-label="$t('tenantInvitation.shareLink.button')">
@@ -535,6 +535,7 @@ import {
   revokeInvitation,
   type TenantInvitation,
 } from '@/api/tenant/invitations'
+import { docsUrl } from '@/utils/docsUrl'
 import {
   listAuditLog,
   type AuditLog,

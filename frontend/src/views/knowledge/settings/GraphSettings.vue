@@ -326,6 +326,7 @@ import { useI18n } from 'vue-i18n'
 import { extractTextRelations, fabriText, fabriTag, type Node, type Relation } from '@/api/initialization'
 import { useEditorResourcesStore } from '@/stores/editorResources'
 import { useAuthStore } from '@/stores/auth'
+import { docsUrl } from '@/utils/docsUrl'
 
 const { t } = useI18n()
 const authStore = useAuthStore()
@@ -587,8 +588,7 @@ const loadSystemInfo = async (force = false) => {
 }
 
 const graphGuideUrl =
-  import.meta.env.VITE_KG_GUIDE_URL ||
-  'https://github.com/Tencent/WeKnora/blob/main/website-docs/03-features/09-knowledge-graph.md'
+  import.meta.env.VITE_KG_GUIDE_URL || docsUrl('knowledgeGraph')
 
 // Open guide documentation to show how to enable graph database
 const handleOpenGraphGuide = () => {

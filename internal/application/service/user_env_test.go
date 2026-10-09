@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/Tencent/WeKnora/internal/application/repository"
+	"github.com/Tencent/WeKnora/internal/sandbox"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -80,6 +81,10 @@ var _ repository.TenantSandboxConfigRepository = (*userEnvConfigRepo)(nil)
 // still installing, the one declaring nothing, and one belonging to somebody
 // else's workspace.
 func newUserEnvFixture(t *testing.T) (*UserEnvService, *installSkillRepo) {
+	return newUserEnvFixtureWithHost(t, HostSandboxManager{})
+}
+
+func newUserEnvFixtureWithHost(t *testing.T, host HostSandboxManager) (*UserEnvService, *installSkillRepo) {
 	t.Helper()
 	repo := newInstallSkillRepo()
 	ctx := context.Background()
@@ -121,7 +126,21 @@ func newUserEnvFixture(t *testing.T) (*UserEnvService, *installSkillRepo) {
 		{ID: "cfg-2", TenantID: userEnvTenantID, Name: "Staging"},
 		{ID: "cfg-9", TenantID: 8, Name: "Theirs"},
 	}}
-	return NewUserEnvService(repo, configs), repo
+	return NewUserEnvService(repo, configs, host), repo
+}
+
+func TestUserEnvOnLiteListsOnlyTheHostGroup(t *testing.T) {
+	svc, repo := newUserEnvFixtureWithHost(t, HostSandboxManager{Desktop: true})
+	ctx := userEnvCtx(7, "u-1")
+	groups, err := svc.ListMine(ctx)
+	require.NoError(t, err)
+	require.Len(t, groups, 1)
+	require.Equal(t, sandbox.HostSkillTargetID, groups[0].SandboxConfigID)
+	require.Equal(t, hostSkillTargetName, groups[0].SandboxConfigName)
+
+	require.NoError(t, svc.SetMineSandbox(ctx, sandbox.HostSkillTargetID, "FOO", "bar"))
+	require.Error(t, svc.SetMineSandbox(ctx, "cfg-1", "FOO", "bar"))
+	_ = repo
 }
 
 func configByID(t *testing.T, groups []ConfigEnvGroup, configID string) ConfigEnvGroup {

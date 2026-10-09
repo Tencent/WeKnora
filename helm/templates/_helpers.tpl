@@ -114,16 +114,20 @@ Defaults to Chart.appVersion if tag is not specified.
 
 {{/*
 Return the frontend image with tag.
+Defaults to Chart.appVersion if tag is not specified.
 */}}
 {{- define "weknora.frontend.image" -}}
-{{- printf "%s:%s" .Values.frontend.image.repository .Values.frontend.image.tag }}
+{{- $tag := default .Chart.AppVersion .Values.frontend.image.tag }}
+{{- printf "%s:%s" .Values.frontend.image.repository $tag }}
 {{- end }}
 
 {{/*
 Return the docreader image with tag.
+Defaults to Chart.appVersion if tag is not specified.
 */}}
 {{- define "weknora.docreader.image" -}}
-{{- printf "%s:%s" .Values.docreader.image.repository .Values.docreader.image.tag }}
+{{- $tag := default .Chart.AppVersion .Values.docreader.image.tag }}
+{{- printf "%s:%s" .Values.docreader.image.repository $tag }}
 {{- end }}
 
 {{/*

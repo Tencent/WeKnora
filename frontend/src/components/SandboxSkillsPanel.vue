@@ -93,8 +93,8 @@
           <t-popconfirm
             theme="warning"
             attach="body"
-            :content="$t('settings.skills.manageUninstallConfirm', { name: managedSkill?.name || '' })"
-            :confirm-btn="{ content: $t('settings.skills.manageUninstall'), theme: 'danger' }"
+            :content="hostCopy('settings.skills.manageUninstallConfirm', 'manageUninstallConfirm', { name: managedSkill?.name || '' })"
+            :confirm-btn="{ content: hostCopy('settings.skills.manageUninstall', 'manageUninstall'), theme: 'danger' }"
             :cancel-btn="{ content: $t('common.cancel') }"
             placement="bottom-right"
             @confirm="managedSkill && removeSkill(managedSkill)"
@@ -107,13 +107,13 @@
               :disabled="!managedSkill || isBusy(managedSkill)"
               :loading="!!managedSkill && deletingId === managedSkill.id"
             >
-              {{ $t('settings.skills.manageUninstall') }}
+              {{ hostCopy('settings.skills.manageUninstall', 'manageUninstall') }}
             </t-button>
           </t-popconfirm>
         </Teleport>
         <div v-if="uninstallDone" class="skill-manage__done">
           <t-icon name="check-circle-filled" size="22px" />
-          <p>{{ $t('settings.sandbox.skillRemoveDone', { name: uninstallingName }) }}</p>
+          <p>{{ hostCopy('settings.sandbox.skillRemoveDone', 'removeDone', { name: uninstallingName }) }}</p>
         </div>
         <template v-else-if="managedSkill && isRemoving(managedSkill)">
           <section class="skill-manage__section skill-manage__section--remove">
@@ -154,7 +154,7 @@
           <div class="skill-manage__row">
             <div class="skill-manage__info">
               <label>{{ $t('settings.skills.manageEnable') }}</label>
-              <p>{{ $t('settings.sandbox.skillDisableHint') }}</p>
+              <p>{{ hostCopy('settings.sandbox.skillDisableHint', 'disableHint') }}</p>
             </div>
             <div class="skill-manage__controls">
               <t-switch
@@ -189,7 +189,7 @@
           </ul>
           <section v-if="skillHasDeclaredEnvs(managedSkill)" class="skill-manage__section">
             <h4>{{ $t('settings.sandbox.skillEnv.toggle') }}</h4>
-            <p class="skill-envs__hint">{{ $t('settings.sandbox.skillEnv.workspaceHint') }}</p>
+            <p class="skill-envs__hint">{{ hostCopy('settings.sandbox.skillEnv.workspaceHint', 'envWorkspaceHint') }}</p>
             <div class="skill-envs__rows">
               <div v-for="(env, envIdx) in managedSkill.envs" :key="env.name" class="skill-envs__row">
                 <div class="skill-envs__meta">
@@ -326,7 +326,7 @@
                   {{ cardStatusText(skill) }}
                 </span>
                 <div class="skill-card__actions">
-                  <t-tooltip :content="$t('settings.sandbox.skillDisableHint')" placement="top">
+                  <t-tooltip :content="hostCopy('settings.sandbox.skillDisableHint', 'disableHint')" placement="top">
                     <t-switch
                       size="small"
                       :value="skill.enabled"
@@ -378,7 +378,7 @@
                             </t-button>
                           </header>
                           <div class="skill-env-popup__body">
-                            <p class="skill-envs__hint">{{ $t('settings.sandbox.skillEnv.workspaceHint') }}</p>
+                            <p class="skill-envs__hint">{{ hostCopy('settings.sandbox.skillEnv.workspaceHint', 'envWorkspaceHint') }}</p>
                             <div class="skill-envs__rows">
                               <div v-for="(env, envIdx) in skill.envs" :key="env.name" class="skill-envs__row">
                                 <div class="skill-envs__meta">
@@ -570,7 +570,7 @@
                     theme="warning"
                     attach="body"
                     :content="deleteHint"
-                    :confirm-btn="{ content: $t('settings.skills.manageUninstall'), theme: 'danger' }"
+                    :confirm-btn="{ content: hostCopy('settings.skills.manageUninstall', 'manageUninstall'), theme: 'danger' }"
                     :cancel-btn="{ content: $t('common.cancel') }"
                     placement="top-right"
                     @confirm="removeSkill(skill)"
@@ -579,7 +579,7 @@
                       type="button"
                       class="skill-card__icon-btn skill-card__icon-btn--danger"
                       :disabled="deletingId === skill.id"
-                      :aria-label="$t('settings.skills.manageUninstall')"
+                      :aria-label="hostCopy('settings.skills.manageUninstall', 'manageUninstall')"
                     >
                       <t-icon name="delete" size="14px" />
                     </button>
@@ -685,7 +685,13 @@ const emit = defineEmits<{
   installed: [skillId: string]
 }>()
 
-const { t } = useI18n()
+const { t, te } = useI18n()
+
+function hostCopy(base: string, hostSuffix: string, params: Record<string, unknown> = {}) {
+  const hostKey = `settings.skills.host.${hostSuffix}`
+  if (props.record?.sandbox_type === 'host' && te(hostKey)) return t(hostKey, params)
+  return t(base, params)
+}
 const headerActionsTarget = inject(SETTING_DRAWER_HEADER_ACTIONS_ID, '')
 
 const loading = ref(false)
@@ -728,7 +734,9 @@ const {
 } = useConfigSkillInstallProgress({
   retainProgress: true,
   onDone() {
-    void loadSkills()
+    // A silent refresh. The non-silent path turns the loading mask on for
+    // every completion, which flashes the whole progress drawer.
+    void loadSkills(true)
     void refreshImage()
   },
 })
@@ -1078,10 +1086,14 @@ const REMOVE_STAGE_I18N: Record<string, string> = {
 
 function progressStageText(skill: ConfigSkill): string {
   const ev = progressEvent(skill.id)
+  if (props.record?.sandbox_type === 'host') {
+    if (ev?.stage === 'sandbox_ready') return hostCopy('settings.sandbox.skillRemoveStage.sandbox_ready', 'removeSandboxReady')
+    if (ev?.stage === 'removed') return hostCopy('settings.sandbox.skillRemoveStage.removed', 'removeRemoved')
+  }
   const stageKey = ev?.stage ? REMOVE_STAGE_I18N[ev.stage] : ''
   if (stageKey) return t(stageKey)
   if (skill.status === 'removing' || deletingId.value === skill.id) {
-    return t('settings.sandbox.skillRemoveWaiting')
+    return hostCopy('settings.sandbox.skillRemoveWaiting', 'removeWaiting')
   }
   return ev?.log || ''
 }
@@ -1158,7 +1170,7 @@ function followProgress(skillId: string) {
 }
 
 async function refreshImage() {
-  if (!props.record) return
+  if (!props.record || props.record.sandbox_type === 'host') return
   const generation = panelGeneration
   try {
     const res = await getSandboxConfigById(props.record.id)

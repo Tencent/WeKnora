@@ -3,6 +3,7 @@ package docparser
 import (
 	"context"
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 	"time"
@@ -26,6 +27,23 @@ func parseBoolOr(val string, fallback bool) bool {
 		return fallback
 	}
 	return val == "true" || val == "1" || val == "yes"
+}
+
+// requestTimeoutFromEnv reads a positive Go duration from env, falling back to
+// fallback when the variable is unset, invalid or not positive. It bounds a
+// self-hosted engine's request; the caller's context may impose an earlier
+// deadline.
+func requestTimeoutFromEnv(env string, fallback time.Duration) time.Duration {
+	value := strings.TrimSpace(os.Getenv(env))
+	if value == "" {
+		return fallback
+	}
+	timeout, err := time.ParseDuration(value)
+	if err != nil || timeout <= 0 {
+		logger.Warnf(context.Background(), "Invalid %s %q; using %s", env, value, fallback)
+		return fallback
+	}
+	return timeout
 }
 
 // firstNonEmpty returns the first non-empty string, or "" if all are empty.

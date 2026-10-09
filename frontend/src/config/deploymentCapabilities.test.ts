@@ -4,6 +4,7 @@ import test from 'node:test'
 import {
   SETTINGS_SECTION_CAPABILITY,
   isDeploymentCapabilitySupported,
+  skillSettingsSupported,
   type DeploymentCapabilityMap,
 } from './deploymentCapabilities'
 
@@ -43,14 +44,17 @@ test('only route-backed settings sections require deployment capabilities', () =
 test('skill credentials follow the sandbox capability rather than a key of their own', () => {
   // The values are injected into a skill script's process, so a deployment with
   // no sandbox support has nowhere to put them and the page could only ever show
-  // its empty state.
+  // its empty state. Task 16 will gate this section with skillSettingsSupported.
   assert.equal(SETTINGS_SECTION_CAPABILITY.envvars, 'settings.sandbox')
-  assert.equal(SETTINGS_SECTION_CAPABILITY.envvars, SETTINGS_SECTION_CAPABILITY.sandbox)
 })
 
 test('the skill catalog follows the sandbox capability', () => {
+  // Task 16 will gate this section with skillSettingsSupported.
   assert.equal(SETTINGS_SECTION_CAPABILITY.skills, 'settings.sandbox')
-  assert.equal(SETTINGS_SECTION_CAPABILITY.skills, SETTINGS_SECTION_CAPABILITY.sandbox)
+})
+
+test('sandbox settings section requires the remote sandbox capability', () => {
+  assert.equal(SETTINGS_SECTION_CAPABILITY.sandbox, 'settings.sandbox.remote')
 })
 
 test('host sandbox stays hidden unless the deployment explicitly enables it', () => {
@@ -87,4 +91,19 @@ test('docker sandbox stays hidden unless the deployment explicitly enables it', 
     ),
     true,
   )
+})
+
+test('remote sandbox capability fails closed', () => {
+  assert.equal(isDeploymentCapabilitySupported({}, 'settings.sandbox.remote'), false)
+  assert.equal(
+    isDeploymentCapabilitySupported({ 'settings.sandbox.remote': { supported: true } }, 'settings.sandbox.remote'),
+    true,
+  )
+})
+
+test('skill settings need a remote sandbox or the host sandbox', () => {
+  assert.equal(skillSettingsSupported({ 'settings.sandbox': { supported: true }, 'settings.sandbox.remote': { supported: true } }), true)
+  assert.equal(skillSettingsSupported({ 'settings.sandbox': { supported: true }, 'settings.sandbox.host': { supported: true } }), true)
+  assert.equal(skillSettingsSupported({ 'settings.sandbox': { supported: true } }), false)
+  assert.equal(skillSettingsSupported({ 'settings.sandbox': { supported: false }, 'settings.sandbox.host': { supported: true } }), false)
 })

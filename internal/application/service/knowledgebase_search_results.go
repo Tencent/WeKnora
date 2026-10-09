@@ -84,7 +84,10 @@ func (s *knowledgeBaseService) processSearchResults(ctx context.Context,
 	// Build final search results
 	searchResults := s.assembleSearchResults(ctx, chunks, chunkMap, knowledgeMap, index, skipEnrichment)
 
-	searchutil.EnrichSearchResultsImageInfo(ctx, s.chunkRepo, tenantID, searchResults)
+	// Results can come from org-shared KBs owned by another workspace; the
+	// chunks above were already permission checked, so look up their image
+	// children without the caller-tenant filter (#3342).
+	searchutil.EnrichSearchResultsImageInfoOnly(ctx, s.chunkRepo, searchResults)
 
 	logger.Infof(ctx, "Search results processed, total: %d", len(searchResults))
 	return searchResults, nil
@@ -95,6 +98,7 @@ type chunkIndex struct {
 	knowledgeIDs    []string
 	chunkIDs        []string
 	scores          map[string]float64
+	vectorScores    map[string]float64
 	matchTypes      map[string]types.MatchType
 	matchedContents map[string]string
 	processedIDs    map[string]bool // tracks all IDs (chunk + enrichment) to avoid duplicates
@@ -105,6 +109,7 @@ type chunkIndex struct {
 func (s *knowledgeBaseService) buildChunkIndex(chunks []*types.IndexWithScore) *chunkIndex {
 	idx := &chunkIndex{
 		scores:          make(map[string]float64, len(chunks)),
+		vectorScores:    make(map[string]float64, len(chunks)),
 		matchTypes:      make(map[string]types.MatchType, len(chunks)),
 		matchedContents: make(map[string]string, len(chunks)),
 		processedIDs:    make(map[string]bool, len(chunks)*2),
@@ -118,6 +123,7 @@ func (s *knowledgeBaseService) buildChunkIndex(chunks []*types.IndexWithScore) *
 		}
 		idx.chunkIDs = append(idx.chunkIDs, chunk.ChunkID)
 		idx.scores[chunk.ChunkID] = chunk.Score
+		idx.vectorScores[chunk.ChunkID] = chunk.VectorScore
 		idx.matchTypes[chunk.ChunkID] = chunk.MatchType
 		idx.matchedContents[chunk.ChunkID] = chunk.Content
 	}
@@ -192,10 +198,10 @@ func (s *knowledgeBaseService) collectParentChunkIDs(
 	return ids
 }
 
-// hasImageChunks returns true if any chunk is an image_ocr or image_caption type.
+// hasImageChunks returns true if any chunk is one of the image child types.
 func (s *knowledgeBaseService) hasImageChunks(chunks []*types.Chunk) bool {
 	for _, c := range chunks {
-		if c.ChunkType == types.ChunkTypeImageOCR || c.ChunkType == types.ChunkTypeImageCaption {
+		if types.IsImageChildChunkType(c.ChunkType) {
 			return true
 		}
 	}
@@ -240,7 +246,10 @@ func (s *knowledgeBaseService) assembleSearchResults(
 		if knowledge, ok := knowledgeMap[chunk.KnowledgeID]; ok {
 			matchType := idx.matchTypes[chunk.ID]
 			matchedContent := idx.matchedContents[chunk.ID]
-			searchResults = append(searchResults, s.buildSearchResult(chunk, knowledge, score, matchType, matchedContent))
+			result := s.buildSearchResult(chunk, knowledge, score, matchType, matchedContent)
+			result.VectorScore = idx.vectorScores[chunk.ID]
+			searchutil.CaptureImageEvidence(result)
+			searchResults = append(searchResults, result)
 			addedChunkIDs[chunk.ID] = true
 		} else {
 			logger.Warnf(ctx, "Knowledge not found for chunk: %s, knowledge_id: %s", chunk.ID, chunk.KnowledgeID)
@@ -353,8 +362,10 @@ func (s *knowledgeBaseService) buildSearchResult(chunk *types.Chunk,
 		KnowledgeDescription:    knowledge.Description,
 		KnowledgeCustomMetadata: knowledge.CustomMetadataText(),
 		ChunkMetadata:           chunk.Metadata,
+		ContextHeader:           chunk.ContextHeader,
 		MatchedContent:          matchedContent,
 		KnowledgeBaseID:         knowledge.KnowledgeBaseID,
+		SourceLocators:          chunk.SourceLocators,
 	}
 }
 
@@ -373,6 +384,6 @@ func (s *knowledgeBaseService) isSearchableChunk(chunk *types.Chunk) bool {
 		types.ChunkTypeText, types.ChunkTypeSummary,
 		types.ChunkTypeTableColumn, types.ChunkTypeTableSummary,
 		types.ChunkTypeFAQ,
-		types.ChunkTypeImageOCR, types.ChunkTypeImageCaption,
+		types.ChunkTypeImageOCR, types.ChunkTypeImageCaption, types.ChunkTypeImageVector,
 	}, chunk.ChunkType)
 }

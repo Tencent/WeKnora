@@ -4,6 +4,7 @@ package container
 
 import (
 	"context"
+	"errors"
 	"strings"
 
 	"gorm.io/gorm"
@@ -37,7 +38,10 @@ func (l *hostProjectLookupImpl) ProjectDirForSession(ctx context.Context, sessio
 		Where("id = ?", sessionID).
 		First(&sess).Error
 	if err != nil {
-		return "", false, nil
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return "", false, nil
+		}
+		return "", false, err
 	}
 	raw := strings.TrimSpace(sess.HostWorkspaceDir)
 	if raw == "" {

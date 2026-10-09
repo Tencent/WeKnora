@@ -12,6 +12,8 @@ import (
 	"github.com/Tencent/WeKnora/internal/models/api/cohererank"
 	"github.com/Tencent/WeKnora/internal/models/api/dashscoperank"
 	"github.com/Tencent/WeKnora/internal/models/api/nimrerank"
+	"github.com/Tencent/WeKnora/internal/models/api/pineconerank"
+	"github.com/Tencent/WeKnora/internal/models/api/teirank"
 	modelruntime "github.com/Tencent/WeKnora/internal/models/runtime"
 
 	// modelruntime.Resolve answers from the vendor catalog, which is empty until
@@ -31,6 +33,26 @@ type Reranker interface {
 
 	// GetModelID returns the model ID
 	GetModelID() string
+}
+
+// PassageLimiter is implemented by rerankers whose vendor documents how large
+// a document may be. The rerank stage builds its passages itself (title,
+// chunk body, captions, OCR text, generated questions), so it can fit them to
+// the limit instead of letting one oversized candidate fail the whole
+// request, which the protocol layer rightly refuses to truncate on its own.
+type PassageLimiter interface {
+	// MaxPassageRunes returns the longest document, in runes, one request
+	// can carry beside query. 0 means no documented limit.
+	MaxPassageRunes(query string) int
+}
+
+// MaxPassageRunes reports r's passage limit for query, or 0 when r documents
+// none.
+func MaxPassageRunes(r Reranker, query string) int {
+	if limiter, ok := r.(PassageLimiter); ok {
+		return limiter.MaxPassageRunes(query)
+	}
+	return 0
 }
 
 type RankResult struct {
@@ -181,6 +203,10 @@ func newReranker(config *RerankerConfig) (Reranker, error) {
 		client = dashscoperank.New(dashscoperank.Config{Endpoint: endpoint, Settings: resolved.Rerank})
 	case api.RerankNIM:
 		client = nimrerank.New(nimrerank.Config{Endpoint: endpoint, Settings: resolved.Rerank})
+	case api.RerankPinecone:
+		client = pineconerank.New(pineconerank.Config{Endpoint: endpoint, Settings: resolved.Rerank})
+	case api.RerankTEI:
+		client = teirank.New(teirank.Config{Endpoint: endpoint, Settings: resolved.Rerank})
 	case api.RerankTencentLKEAP:
 		client, err = newLKEAPClient(config, resolved)
 	case api.RerankVolcengineKnowledge:
@@ -192,8 +218,16 @@ func newReranker(config *RerankerConfig) (Reranker, error) {
 		return nil, err
 	}
 
+	// Images need both halves: the catalog saying the model scores them, and
+	// a protocol that can carry one to this vendor.
+	var images api.ImageReranker
+	if ir, ok := client.(api.ImageReranker); ok && ir.AcceptsImages() && resolved.Spec.AcceptsImages() {
+		images = ir
+	}
+
 	return &protocolReranker{
 		inner:     client,
+		images:    images,
 		settings:  resolved.Rerank,
 		endpoint:  resolved.BaseURL,
 		modelName: config.ModelName,

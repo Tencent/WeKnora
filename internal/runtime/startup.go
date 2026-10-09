@@ -11,6 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/utils"
 )
 
 // SilenceGinRouteSpam mutes Gin's per-route "[GIN-debug] METHOD path -->
@@ -74,6 +75,7 @@ type envVarSpec struct {
 var startupEnvVars = []envVarSpec{
 	// Security
 	{name: "SYSTEM_AES_KEY", sensitive: true},
+	{name: "SYSTEM_SIGNING_KEY", sensitive: true},
 	{name: "JWT_SECRET", sensitive: true},
 	// Runtime
 	{name: "GIN_MODE"},
@@ -138,6 +140,15 @@ func LogStartupEnv(ctx context.Context) {
 		logger.Warnf(ctx,
 			"[startup-env] SYSTEM_AES_KEY is set but %d bytes long; AES-256 requires exactly 32 bytes — encryption is DISABLED",
 			len(k))
+	}
+	// Upgrades from example configs keep the published example AES key,
+	// which SystemHMACKey rejects — embed sessions and presigned links then
+	// fail at request time with no hint at boot.
+	if len(utils.SystemHMACKey()) == 0 {
+		logger.Warn(ctx,
+			"[startup-env] no usable signing key: set SYSTEM_SIGNING_KEY (e.g. `openssl rand -hex 32`) — "+
+				"embed sessions and presigned file links are DISABLED. SYSTEM_AES_KEY is only used as a fallback "+
+				"when it is at least 16 chars and not an example value; do not change it to fix this")
 	}
 	if strings.EqualFold(strings.TrimSpace(os.Getenv("REDIS_TLS_INSECURE_SKIP_VERIFY")), "true") {
 		logger.Warn(ctx,

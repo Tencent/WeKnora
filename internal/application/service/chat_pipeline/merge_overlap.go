@@ -6,6 +6,7 @@ import (
 	"sort"
 
 	"github.com/Tencent/WeKnora/internal/searchutil"
+	"github.com/Tencent/WeKnora/internal/sourceloc"
 	"github.com/Tencent/WeKnora/internal/types"
 )
 
@@ -50,6 +51,8 @@ func (p *PluginMerge) mergeSequentialChunks(
 			lastChunk.Content = searchutil.JoinChunkContent(lastChunk.Content, current.Content, "\n\n")
 			recordMergedChild(ctx, knowledgeID, lastChunk, current, "image_merge")
 		}
+
+		lastChunk.SourceLocators = sourceloc.MergeLocators(lastChunk.SourceLocators, current.SourceLocators)
 
 		// Extend the merged group's span and keep the higher score.
 		if current.ChunkIndex > last.lastIndex {
@@ -153,6 +156,7 @@ func classifyMerge(lastChunk *types.SearchResult, lastIndex int, current *types.
 // to SubChunkID (deduplicated) and merges its ImageInfo, warning on failure.
 // warnKey distinguishes merge contexts in pipeline diagnostics.
 func recordMergedChild(ctx context.Context, knowledgeID string, target, source *types.SearchResult, warnKey string) {
+	searchutil.InheritImageEvidence(target, source)
 	if !containsID(target.SubChunkID, source.ID) {
 		target.SubChunkID = append(target.SubChunkID, source.ID)
 	}

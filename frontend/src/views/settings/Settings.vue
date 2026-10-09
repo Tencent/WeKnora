@@ -1,5 +1,6 @@
 <template>
-  <SettingsModalShell :visible="visible" :title="$t('general.settings')" @close="modalShell.requestClose">
+  <SettingsModalShell :visible="visible" :title="$t('general.settings')" overlay-class="all-settings-overlay"
+    @close="modalShell.requestClose">
     <template #nav>
       <template v-for="group in navGroups" :key="group.key">
         <div class="nav-group-title">{{ group.label }}</div>
@@ -233,8 +234,9 @@ import {
   SETTINGS_SECTION_MIN_ROLE,
   SYSTEM_ADMIN_SETTINGS_SECTIONS,
 } from '@/config/settingsAccess'
-import { SETTINGS_SECTION_CAPABILITY } from '@/config/deploymentCapabilities'
+import { SETTINGS_SECTION_CAPABILITY, skillSettingsSupported } from '@/config/deploymentCapabilities'
 import { isToolboxSection, toolboxLocation } from '@/config/toolbox'
+import { hostSkillsOnly } from '@/utils/skillTarget'
 import {
   buildSettingsRouteQuery,
   integrationSectionKey,
@@ -249,7 +251,16 @@ const router = useRouter()
 const uiStore = useUIStore()
 const authStore = useAuthStore()
 const deploymentCapabilities = useDeploymentCapabilitiesStore()
-const { t } = useI18n()
+const { t, te } = useI18n()
+const hostSkills = computed(() => hostSkillsOnly(
+  deploymentCapabilities.isSupported('settings.sandbox.remote'),
+  deploymentCapabilities.isSupported('settings.sandbox.host'),
+))
+function envNavLabel(): string {
+  const hostKey = 'envVarSettings.host.title'
+  if (hostSkills.value && te(hostKey)) return t(hostKey)
+  return t('envVarSettings.title')
+}
 
 const currentSection = ref<string>('general')
 const currentSubSection = ref<string>('')
@@ -306,6 +317,9 @@ const isSectionSupported = (key: string): boolean => {
       INTEGRATION_TAB_CAPABILITY[integrationTabFromSection(key)],
     )
   }
+  if (key === 'skills' || key === 'envvars') {
+    return skillSettingsSupported(deploymentCapabilities.capabilities)
+  }
   return deploymentCapabilities.isSupported(SETTINGS_SECTION_CAPABILITY[key])
 }
 
@@ -356,7 +370,7 @@ const navItems = computed(() => {
     { key: 'system-audit-log', icon: 'history', label: t('system.globalSettings.audit.tabLabel') },
     { key: 'userprofile', icon: 'user', label: t('userProfile.title') },
     { key: 'mymemory', icon: 'bookmark', label: t('memorySettings.title') },
-    { key: 'envvars', icon: 'key', label: t('envVarSettings.title') },
+    { key: 'envvars', icon: 'key', label: envNavLabel() },
     { key: 'tenant', icon: 'user-circle', label: t('settings.tenantInfo') },
     { key: 'members', icon: 'usergroup', label: t('tenantMember.title') },
     ...integrationItems,
@@ -607,6 +621,13 @@ onUnmounted(() => {
 })
 </script>
 
+<style lang="less">
+.settings-modal-shell.all-settings-overlay > .settings-modal {
+  max-width: 1280px;
+  height: 900px;
+}
+</style>
+
 <style lang="less" scoped>
 /* 遮罩层 */
 /* 弹窗容器 */
@@ -679,28 +700,18 @@ onUnmounted(() => {
 
 /* 右侧内容区域 */
 .content-wrapper {
-  // Bumped from 600 to 760 when the modal grew from 900→1080 (see
-  // .settings-modal). Without this, single-column panes (General,
-  // Tenant, API key, …) leave a wide right-hand gutter inside the
-  // wider modal. 760 keeps comfortable reading-width on long
-  // descriptions without the form fields stretching to the full
-  // panel width — which would look stranger than a small gutter.
-  max-width: 760px;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
   padding: 40px 48px;
 
-  /* 成员 / 审计表格列多，600px 会把操作列挤到贴边；铺满右侧内容列更稳。 */
+  /* 表格页面缩小内边距，为多列内容留出空间。 */
   &--wide {
-    max-width: none;
-    width: 100%;
     padding: 32px 36px 40px;
-    box-sizing: border-box;
   }
 
   &--full {
-    max-width: none;
-    width: 100%;
     padding: 30px 34px 40px;
-    box-sizing: border-box;
   }
 }
 

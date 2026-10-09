@@ -17,6 +17,7 @@ import (
 type hybridSearchTestService struct {
 	interfaces.KnowledgeBaseService
 	searchCalls  int
+	rerankCalls  int
 	searchParams types.SearchParams
 	results      []*types.SearchResult
 }
@@ -36,6 +37,21 @@ func (s *hybridSearchTestService) HybridSearch(
 		return s.results, nil
 	}
 	return []*types.SearchResult{}, nil
+}
+
+func (s *hybridSearchTestService) HybridSearchWithRerank(
+	_ context.Context,
+	_ string,
+	params types.SearchParams,
+) (*types.RetrievalResult, error) {
+	s.rerankCalls++
+	s.searchParams = params
+	return &types.RetrievalResult{
+		Results: []*types.SearchResult{{ID: "c1", Score: 0.8}},
+		Meta: types.RetrievalMeta{Rerank: &types.RerankDiagnostics{
+			Applied: true, Outcome: types.RerankOutcomeOK, ModelID: "rr-1",
+		}},
+	}, nil
 }
 
 func newHybridSearchTestRouter(svc interfaces.KnowledgeBaseService) *gin.Engine {
@@ -83,6 +99,56 @@ func TestHybridSearchRejectsMissingQueryText(t *testing.T) {
 				t.Fatalf("expected bad-request envelope, got %s", response.Body.String())
 			}
 		})
+	}
+}
+
+func TestHybridSearchRejectsInvalidRerank(t *testing.T) {
+	for name, body := range map[string]string{
+		"negative top_k": `{"query_text":"q","rerank":{"top_k":-1}}`,
+		"rerank without query_text": `{"query_embedding":[0.1],"disable_keywords_match":true,` +
+			`"rerank":{"model_id":"rr-1"}}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			svc := &hybridSearchTestService{}
+			response := performHybridSearchRequest(svc, body)
+			if response.Code != http.StatusBadRequest {
+				t.Fatalf("expected 400, got %d body=%s", response.Code, response.Body.String())
+			}
+			if svc.searchCalls+svc.rerankCalls != 0 {
+				t.Fatal("invalid request reached the service")
+			}
+		})
+	}
+}
+
+func TestHybridSearchWithoutRerankKeepsResponseShape(t *testing.T) {
+	svc := &hybridSearchTestService{}
+	response := performHybridSearchRequest(svc, `{"query_text":"q"}`)
+	if response.Code != http.StatusOK || svc.searchCalls != 1 || svc.rerankCalls != 0 {
+		t.Fatalf("code=%d search=%d rerank=%d", response.Code, svc.searchCalls, svc.rerankCalls)
+	}
+	if strings.Contains(response.Body.String(), `"meta"`) {
+		t.Fatalf("plain hybrid search must not grow a meta field: %s", response.Body.String())
+	}
+}
+
+func TestHybridSearchWithRerankReturnsMeta(t *testing.T) {
+	svc := &hybridSearchTestService{}
+	response := performHybridSearchRequest(svc,
+		`{"query_text":"q","match_count":5,"rerank":{"model_id":"rr-1","top_k":3,"threshold":0}}`)
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", response.Code, response.Body.String())
+	}
+	if svc.rerankCalls != 1 || svc.searchCalls != 0 {
+		t.Fatalf("search=%d rerank=%d", svc.searchCalls, svc.rerankCalls)
+	}
+	rr := svc.searchParams.Rerank
+	if rr == nil || rr.ModelID != "rr-1" || rr.TopK != 3 || rr.Threshold == nil || *rr.Threshold != 0 {
+		t.Fatalf("rerank options not passed through: %+v", rr)
+	}
+	body := response.Body.String()
+	if !strings.Contains(body, `"meta":{"rerank":{"applied":true,"outcome":"ok","model_id":"rr-1"`) {
+		t.Fatalf("expected rerank meta, got %s", body)
 	}
 }
 

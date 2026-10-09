@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -27,11 +28,40 @@ type Client struct {
 	location *time.Location
 
 	httpClient *http.Client
+	// jsonLimit caps each API response body; a field so tests can lower it
+	// without materialising the production limit.
+	jsonLimit int64
 
 	// Token cache (thread-safe)
 	tokenMu    sync.Mutex
 	tokenCache string
 	tokenExpAt time.Time
+}
+
+// maxJSONResponseBytes bounds every API response body. Document and wiki
+// payloads are small; a larger body means a broken or hostile server.
+const maxJSONResponseBytes = 16 << 20
+
+// errResponseTooLarge marks a body over the cap. It is deterministic: the same
+// request returns the same oversized body, so callers must not retry it.
+var errResponseTooLarge = errors.New("response exceeds maximum size")
+
+// readCapped reads a response body, refusing anything larger than limit instead
+// of buffering it. Oversized payloads are reported as an error: a truncated
+// body would be indexed as if it were the whole document. A non-positive limit
+// (e.g. a zero-value client built in tests) falls back to maxJSONResponseBytes.
+func readCapped(body io.Reader, limit int64) ([]byte, error) {
+	if limit <= 0 {
+		limit = maxJSONResponseBytes
+	}
+	data, err := io.ReadAll(io.LimitReader(body, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > limit {
+		return nil, fmt.Errorf("%w (%d bytes)", errResponseTooLarge, limit)
+	}
+	return data, nil
 }
 
 type WikiNodeListFailure struct {
@@ -71,6 +101,7 @@ func NewClient(config *Config) *Client {
 		appSecret:  config.AppSecret,
 		location:   resolveLocation(config.Timezone),
 		httpClient: datasource.NewConnectorHTTPClient(30 * time.Second),
+		jsonLimit:  maxJSONResponseBytes,
 	}
 }
 
@@ -102,8 +133,12 @@ func (c *Client) GetTenantAccessToken(ctx context.Context) (string, error) {
 	}
 	defer resp.Body.Close()
 
+	respBody, err := readCapped(resp.Body, c.jsonLimit)
+	if err != nil {
+		return "", fmt.Errorf("read token response: %w", err)
+	}
 	var result TokenResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := json.Unmarshal(respBody, &result); err != nil {
 		return "", fmt.Errorf("decode token response: %w", err)
 	}
 	if result.Code != 0 {
@@ -138,6 +173,10 @@ const (
 	feishuMax5xxRetries = 1
 	feishuRetry5xxDelay = 2 * time.Second
 )
+
+// maxFeishuErrorPreviewBytes bounds how much of a failed download's body is
+// read for diagnostics; only the first 500 bytes are ever logged.
+const maxFeishuErrorPreviewBytes = 4 << 10
 
 // maxFeishuDownloadBytes bounds a single file download to protect the sync
 // worker from adversarial or pathological oversized responses.
@@ -205,11 +244,11 @@ func (c *Client) DoRequest(ctx context.Context, method, path string, body interf
 			return lastErr
 		}
 
-		respBody, readErr := io.ReadAll(resp.Body)
+		respBody, readErr := readCapped(resp.Body, c.jsonLimit)
 		resp.Body.Close()
 		if readErr != nil {
 			lastErr = fmt.Errorf("read response body: %w", readErr)
-			if attempt < maxRetries {
+			if attempt < maxRetries && !errors.Is(readErr, errResponseTooLarge) {
 				if sErr := sleepCtx(ctx, backoff[attempt]); sErr != nil {
 					return sErr
 				}
@@ -304,6 +343,7 @@ func truncate(s string, maxLen int) string {
 func (c *Client) ListWikiSpaces(ctx context.Context) ([]WikiSpace, error) {
 	var allSpaces []WikiSpace
 	pageToken := ""
+	seenPageTokens := make(map[string]struct{})
 
 	for {
 		path := "/open-apis/wiki/v2/spaces?page_size=50"
@@ -330,6 +370,10 @@ func (c *Client) ListWikiSpaces(ctx context.Context) ([]WikiSpace, error) {
 		if !resp.Data.HasMore || resp.Data.PageToken == "" {
 			break
 		}
+		if _, exists := seenPageTokens[resp.Data.PageToken]; exists {
+			return nil, fmt.Errorf("feishu wiki space pagination repeated page token %q", resp.Data.PageToken)
+		}
+		seenPageTokens[resp.Data.PageToken] = struct{}{}
 		pageToken = resp.Data.PageToken
 	}
 
@@ -342,6 +386,7 @@ func (c *Client) ListWikiSpaces(ctx context.Context) ([]WikiSpace, error) {
 func (c *Client) ListWikiNodes(ctx context.Context, spaceID string, parentNodeToken string) ([]WikiNode, error) {
 	var allNodes []WikiNode
 	pageToken := ""
+	seenPageTokens := make(map[string]struct{})
 
 	for {
 		path := fmt.Sprintf("/open-apis/wiki/v2/spaces/%s/nodes?page_size=50", spaceID)
@@ -373,6 +418,10 @@ func (c *Client) ListWikiNodes(ctx context.Context, spaceID string, parentNodeTo
 		if !resp.Data.HasMore || resp.Data.PageToken == "" {
 			break
 		}
+		if _, exists := seenPageTokens[resp.Data.PageToken]; exists {
+			return nil, fmt.Errorf("feishu wiki node pagination repeated page token %q", resp.Data.PageToken)
+		}
+		seenPageTokens[resp.Data.PageToken] = struct{}{}
 		pageToken = resp.Data.PageToken
 	}
 
@@ -712,7 +761,7 @@ func (c *Client) downloadRawBytes(ctx context.Context, path string) ([]byte, err
 		}
 
 		if resp.StatusCode == http.StatusTooManyRequests {
-			body, _ := io.ReadAll(resp.Body)
+			body, _ := io.ReadAll(io.LimitReader(resp.Body, maxFeishuErrorPreviewBytes))
 			resp.Body.Close()
 			wait := parseRetryAfter(resp.Header.Get("Retry-After"), feishuRetryBackoff[min(attempt, len(feishuRetryBackoff)-1)])
 			lastErr = fmt.Errorf("download rate limited: status=429 body=%s", truncate(string(body), 500))
@@ -726,7 +775,7 @@ func (c *Client) downloadRawBytes(ctx context.Context, path string) ([]byte, err
 		}
 
 		if resp.StatusCode >= 500 && resp.StatusCode < 600 {
-			body, _ := io.ReadAll(resp.Body)
+			body, _ := io.ReadAll(io.LimitReader(resp.Body, maxFeishuErrorPreviewBytes))
 			resp.Body.Close()
 			lastErr = fmt.Errorf("download server error: status=%d body=%s", resp.StatusCode, truncate(string(body), 500))
 			if attempt < feishuMax5xxRetries {
@@ -739,10 +788,10 @@ func (c *Client) downloadRawBytes(ctx context.Context, path string) ([]byte, err
 		}
 
 		if resp.StatusCode != http.StatusOK {
-			body, _ := io.ReadAll(resp.Body)
+			body, _ := io.ReadAll(io.LimitReader(resp.Body, maxFeishuErrorPreviewBytes))
 			resp.Body.Close()
 			logger.Errorf(ctx, "[Feishu] download GET %s → status=%d body=%s", path, resp.StatusCode, truncate(string(body), 500))
-			return nil, fmt.Errorf("download failed: status=%d body=%s", resp.StatusCode, string(body))
+			return nil, fmt.Errorf("download failed: status=%d body=%s", resp.StatusCode, truncate(string(body), 500))
 		}
 
 		data, readErr := io.ReadAll(io.LimitReader(resp.Body, maxFeishuDownloadBytes+1))
@@ -777,14 +826,19 @@ func (c *Client) downloadRawBytes(ctx context.Context, path string) ([]byte, err
 
 // listDriveFiles lists files in a Drive folder (non-recursive), one page at a
 // time. Pass pageToken="" for the first page; the returned nextPageToken is ""
-// when there are no more pages.
+// when there are no more pages. hasMore mirrors the API's has_more field and
+// is the authoritative stop signal: nextPageToken can be non-empty even when
+// has_more is false.
 //
 // folderToken == "" is rejected: the root folder is not paginated and does
 // not return shortcuts (Feishu API limitation), which would silently drop
 // content and risk an unbounded single response. See ADR-0004.
-func (c *Client) listDriveFiles(ctx context.Context, folderToken, pageToken string) ([]DriveFile, string, error) {
+func (c *Client) listDriveFiles(
+	ctx context.Context, folderToken, pageToken string,
+) ([]DriveFile, string, bool, error) {
 	if folderToken == "" {
-		return nil, "", fmt.Errorf("root folder not supported; specify a concrete folder_token (root folder is not paginated and does not return shortcuts)")
+		return nil, "", false, fmt.Errorf("root folder not supported; specify a concrete folder_token " +
+			"(root folder is not paginated and does not return shortcuts)")
 	}
 
 	path := "/open-apis/drive/v1/files?folder_token=" + url.QueryEscape(folderToken)
@@ -796,15 +850,15 @@ func (c *Client) listDriveFiles(ctx context.Context, folderToken, pageToken stri
 
 	var resp DriveFileListResponse
 	if err := c.DoRequest(ctx, http.MethodGet, path, nil, &resp); err != nil {
-		return nil, "", fmt.Errorf("list drive files: %w", err)
+		return nil, "", false, fmt.Errorf("list drive files: %w", err)
 	}
 	if resp.Code != 0 {
-		return nil, "", fmt.Errorf("list drive files error: code=%d msg=%s", resp.Code, resp.Msg)
+		return nil, "", false, fmt.Errorf("list drive files error: code=%d msg=%s", resp.Code, resp.Msg)
 	}
 
 	logger.Infof(ctx, "[FeishuDrive] listDriveFiles: folder=%s got %d files, has_more=%v",
 		folderToken, len(resp.Data.Files), resp.Data.HasMore)
-	return resp.Data.Files, resp.Data.NextPageToken, nil
+	return resp.Data.Files, resp.Data.NextPageToken, resp.Data.HasMore, nil
 }
 
 // GetDriveFolderMeta returns the metadata (name, owner, etc.) of a single Drive
@@ -831,15 +885,20 @@ func (c *Client) GetDriveFolderMeta(ctx context.Context, folderToken string) (dr
 func (c *Client) ListDriveFilesAllPages(ctx context.Context, folderToken string) ([]DriveFile, error) {
 	var all []DriveFile
 	pageToken := ""
+	seenPageTokens := make(map[string]struct{})
 	for {
-		files, next, err := c.listDriveFiles(ctx, folderToken, pageToken)
+		files, next, hasMore, err := c.listDriveFiles(ctx, folderToken, pageToken)
 		if err != nil {
 			return nil, err
 		}
 		all = append(all, files...)
-		if next == "" {
+		if !hasMore || next == "" {
 			break
 		}
+		if _, exists := seenPageTokens[next]; exists {
+			return nil, fmt.Errorf("feishu drive file pagination repeated page token %q", next)
+		}
+		seenPageTokens[next] = struct{}{}
 		pageToken = next
 	}
 	return all, nil

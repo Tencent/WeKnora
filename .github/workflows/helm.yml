@@ -1,0 +1,62 @@
+name: Helm
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "helm/**"
+      - ".github/workflows/helm.yml"
+  pull_request:
+    paths:
+      - "helm/**"
+      - ".github/workflows/helm.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  chart:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.19.0
+
+      - name: Lint chart
+        run: helm lint ./helm
+
+      - name: Verify application image tags
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          render_image() {
+            local template="$1"
+            shift
+            helm template weknora ./helm \
+              --show-only "$template" \
+              --set secrets.dbPassword=test \
+              --set secrets.redisPassword=test \
+              --set secrets.jwtSecret=test \
+              "$@" \
+              | awk '$1 == "image:" { print $2; exit }'
+          }
+
+          app_image="$(render_image templates/app.yaml)"
+          frontend_image="$(render_image templates/frontend.yaml)"
+          docreader_image="$(render_image templates/docreader.yaml)"
+          app_tag="${app_image##*:}"
+
+          test "${frontend_image##*:}" = "$app_tag"
+          test "${docreader_image##*:}" = "$app_tag"
+
+          frontend_override="$(render_image templates/frontend.yaml --set frontend.image.tag=ui-test)"
+          docreader_override="$(render_image templates/docreader.yaml --set docreader.image.tag=reader-test)"
+
+          test "$frontend_override" = "wechatopenai/weknora-ui:ui-test"
+          test "$docreader_override" = "wechatopenai/weknora-docreader:reader-test"

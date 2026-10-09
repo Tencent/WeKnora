@@ -14,7 +14,7 @@ const docs = "/docs/";
 const guide = (path: string) => `${docs}${path}.html`;
 const modes = [
   { number: "01", icon: "search", label: "RAG", title: "回答有据可查", description: "结合语义与关键词检索查找相关资料，回答附带来源引用，可打开原文核对。", tags: ["混合检索", "多模态解析", "原文引用"], link: "03-features/05-retrieval-engines" },
-  { number: "02", icon: "agent", label: "Agent", title: "用知识和工具完成任务", description: "智能体根据任务检索知识库、搜索网页、调用 MCP 工具与技能，在沙箱中处理文件、运行脚本，并可跨会话记住你确认过的偏好。", tags: ["多步推理", "工具调用", "技能执行", "长期记忆"], link: "03-features/07-agent" },
+  { number: "02", icon: "agent", label: "Agent", title: "用知识和工具完成任务", description: "智能体根据任务检索知识库、搜索网页、调用 MCP 工具与技能，在沙箱中处理文件、运行脚本，还能操作你电脑上的浏览器，并跨会话记住你确认过的偏好。", tags: ["多步推理", "技能与沙箱", "本机浏览器", "MCP 工具", "长期记忆"], link: "03-features/07-agent" },
   { number: "03", icon: "wiki", label: "Wiki", title: "把文档整理成 Wiki", description: "从原始文档生成相互链接的 Wiki 页面与知识图谱，支持浏览、编辑和版本回滚。", tags: ["自动组织", "知识图谱", "版本回滚"], link: "03-features/14-wiki" },
 ];
 const releaseExtras = ["Confluence / 钉钉文档数据源", "27 家模型厂商目录", "博查 / Serply 联网搜索", "日语界面", "仅白名单出站"];
@@ -97,7 +97,7 @@ export default function Home() {
           <div className={s.ecosystemCore}><BrandLogo /><span>团队知识库与智能体</span><div>理解 · 检索 · 推理 · 行动</div></div>
           <div className={s.ecosystemColumn}><Icon name="channels" /><h3>在常用工具中访问</h3><p>支持 IM 问答、浏览器插件、MCP 客户端和开发工具集成。</p><div className={s.integrations}>{clients.map(item => <span key={item.name}><IntegrationMark item={item} /></span>)}</div><a className={s.textLink} href={guide("03-features/12-im-integration")}>客户端与渠道 <Icon name="arrow" /></a></div>
         </div>
-        <div className={s.models}><span>模型由你选择 · 内置 27 家厂商 <a className={s.textLink} href={guide("03-features/06-models")}>查看全部 <Icon name="arrow" /></a></span>{modelProviders.map(item => <p key={item.name}><IntegrationMark item={item} /></p>)}</div>
+        <div className={s.models}><span>模型由你选择 · 内置 29 家厂商 <a className={s.textLink} href={guide("03-features/06-models")}>查看全部 <Icon name="arrow" /></a></span>{modelProviders.map(item => <p key={item.name}><IntegrationMark item={item} /></p>)}</div>
       </section>
       <section id="enterprise" className={s.enterprise} aria-labelledby="enterprise-title"><div className={s.shell}>
         <div className={s.sectionHeading}><div><p className={s.eyebrow}>06 / BUILT FOR YOUR TEAM</p><h2 id="enterprise-title">私有化部署，<br />按团队需要管理权限。</h2></div><p>配置数据存储与成员权限，<br />查看操作记录和任务运行状态。</p></div>

@@ -116,9 +116,9 @@ func TestErrorDetailSurvivesConcurrency(t *testing.T) {
 			defer wg.Done()
 			// docx and xlsx failures carry distinctive messages, so a detail
 			// naming the other format proves it came from the wrong thread.
-			format, want, other := "docx", "not a readable zip archive", "unreadable workbook"
+			format, want, other := "docx", "not a readable zip archive", "not a readable workbook container"
 			if i%2 == 1 {
-				format, want, other = "xlsx", "unreadable workbook", "not a readable zip archive"
+				format, want, other = "xlsx", "not a readable workbook container", "not a readable zip archive"
 			}
 			_, err := Convert([]byte(fmt.Sprintf("garbage %d", i)), Options{Format: format})
 			if err == nil {

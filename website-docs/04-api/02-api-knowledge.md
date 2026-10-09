@@ -21,7 +21,7 @@
 | `type` | string | 否 | `document`（默认）/`faq`/`wiki` |
 | `embedding_model_id` | string | 否 | Embedding 模型 ID |
 | `chunking_config` | object | 否 | 分块配置（chunk_size/overlap/separators/strategy…） |
-| `image_processing_config` | object | 否 | 图像处理（多模态）配置 |
+| `image_processing_config` | object | 否 | 图片处理配置：`model_id` / `image_attrs_enabled` / `image_actions`（`{ ocr: { on: [...], on_unobserved: bool } }`）/ `image_vector_enabled`（图片向量索引与召回，默认 false，见[知识库功能](../03-features/02-knowledge-base.md)） |
 | `storage_provider_config` | object | 否 | 存储配置 |
 | `vector_store_id` | string | 否 | 向量库绑定（非法返回 code 2200/2201） |
 | `faq_config` / `wiki_config` / `extract_config` / `indexing_strategy` | object | 否 | 类型相关配置 |
@@ -100,7 +100,8 @@ curl $BASE/api/v1/knowledge-bases/kb-1 -H "Authorization: Bearer $TOKEN"
 | --- | --- | --- | --- |
 | `name` | string | 是（`binding:"required"`） | 名称 |
 | `description` | string | 否 | 描述 |
-| `config` | object | 否 | 局部配置更新：`chunking_config`、`image_processing_config`、`faq_config`、`wiki_config`、`auto_tag_config`、`profile_config`、`indexing_strategy` |
+| `config` | object | 否 | 局部配置更新：`chunking_config`、`image_processing_config`、`faq_config`、`wiki_config`、`auto_tag_config`、`profile_config`、`indexing_strategy`。`image_processing_config` 不传则保持不变，传了则整体替换（未带的 `image_vector_enabled` 等字段回到 false） |
+| `vlm_config` | object | 否 | 多模态配置，整体替换：只取 `enabled`、`model_id`（须为 VLLM 模型）、`description_language`、`custom_instructions`（≤4000 字），未传的字段按空值处理；不想改就不要传。共享库需所有者空间或共享 admin 权限（editor 返回 403）。旧版内联字段 `model_name`/`base_url`/`api_key`/`interface_type` 不会被写入：启用托管 `model_id` 或关闭时会清空已存的旧版配置，但纯旧版库（未存 `model_id`，只存了 `model_name`/`base_url`）原样回传 GET 结果（`enabled=false` 且 `model_name`/`base_url` 与存储一致）视为不改；其余库 `enabled=true` 却缺 `model_id` 返回 400 |
 
 响应：200 `{"success":true,"data":{KnowledgeBase}}`
 
@@ -131,7 +132,7 @@ curl -X PUT $BASE/api/v1/knowledge-bases/kb-1/pin -H "Authorization: Bearer $TOK
 
 ### POST /api/v1/knowledge-bases/:id/hybrid-search（兼容 GET）
 
-用途：KB 内混合检索（向量+关键词）。权限：Viewer+，KB read；API key `retrieve`/full。GET 携带 JSON body 仅为向后兼容（#1727），推荐 POST。
+用途：KB 内的底层召回（向量+关键词），默认不做 rerank，返回召回分；可选开启 rerank。适合评测召回、传预计算向量等需要控制原始召回的场景，一般的检索请用 [`knowledge-search`](./02-api-chat.md)，选择方法见[检索接口怎么选](./01-api-overview.md#retrieval-api)。权限：Viewer+，KB read；API key `retrieve`/full。GET 携带 JSON body 仅为向后兼容（#1727），推荐 POST。
 
 查询参数：`resource_urls=handle|public`（`public` 把结果 `content` / `image_info` 里的 `resource://` 换成可加载直链，详见 [API 总览](./01-api-overview.md)）。
 
@@ -139,21 +140,28 @@ curl -X PUT $BASE/api/v1/knowledge-bases/kb-1/pin -H "Authorization: Bearer $TOK
 
 | 字段 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
-| `query_text` | string | 条件必填 | 查询文本（除非提供 `query_embedding`） |
+| `query_text` | string | 条件必填 | 查询文本（除非提供 `query_embedding`；开启 rerank 时必填） |
 | `query_embedding` | []float32 | 否 | 预计算向量 |
 | `vector_threshold` / `keyword_threshold` | float64 | 否 | 匹配阈值 |
-| `match_count` | int | 否 | 返回条数上限 |
+| `match_count` | int | 否 | 返回条数上限（默认 50） |
 | `disable_keywords_match` / `disable_vector_match` | bool | 否 | 关闭某一路召回 |
+| `knowledge_base_ids` | []string | 否 | 一次检索多个知识库，路径上的 `:id` 必须在其中；这些知识库的 embedding 模型必须相同，否则返回 400 |
 | `knowledge_ids` | []string | 否 | 限定知识条目 |
 | `tag_ids` | []string | 否 | 标签过滤（OR） |
 | `only_recommended` | bool | 否 | FAQ 仅推荐条目 |
 | `skip_context_enrichment` | bool | 否 | 跳过父块/上下文补齐 |
+| `rerank` | object | 否 | 传入即开启 rerank（`{}` 使用空间配置的模型），字段见 [rerank 对象](./01-api-overview.md#retrieval-api) |
 
-响应：200 `{"success":true,"data":[SearchResult]}`
+响应：200 `{"success":true,"data":[SearchResult]}`；带 `rerank` 时多一个 `meta.rerank`（见 [meta.rerank 诊断](./01-api-overview.md#retrieval-api)）。
 
 ```bash
 curl -X POST "$BASE/api/v1/knowledge-bases/kb-1/hybrid-search?resource_urls=public" -H "X-API-Key: $API_KEY" \
   -H 'Content-Type: application/json' -d '{"query_text":"退款流程","match_count":5}'
+
+# 固定召回参数，再用指定模型 rerank
+curl -X POST $BASE/api/v1/knowledge-bases/kb-1/hybrid-search -H "X-API-Key: $API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"query_text":"退款流程","vector_threshold":0.3,"match_count":5,"rerank":{"model_id":"rr-1","threshold":0.2}}'
 ```
 
 ### POST /api/v1/knowledge-bases/copy

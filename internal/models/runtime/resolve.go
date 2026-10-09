@@ -169,7 +169,9 @@ func resolveWithVendor(ref Ref, vendor *Provider) (*Resolved, error) {
 	); err != nil {
 		return nil, err
 	}
-	applyLegacyThinkingControl(&completions, ref.Extra[models.ExtraThinkingControl])
+	legacyThinkingControlApplied := applyLegacyThinkingControl(
+		&completions, ref.Extra[models.ExtraThinkingControl],
+	)
 	out.OpenAICompletions = completions
 
 	responses := api.DefaultOpenAIResponses()
@@ -213,9 +215,9 @@ func resolveWithVendor(ref Ref, vendor *Provider) (*Resolved, error) {
 		return nil, err
 	}
 	out.GoogleGenerativeAI = google
-	// An explicit legacy thinking_control is the operator saying "this row
-	// does think, send the switch this way", so it outranks the catalog.
-	if strings.TrimSpace(ref.Extra[models.ExtraThinkingControl]) == "" {
+	// A non-default legacy thinking_control is an explicit per-row override.
+	// An ignored provider default lets the catalog's reasoning metadata apply.
+	if !legacyThinkingControlApplied {
 		out.silenceThinkingForNonReasoningModel()
 	}
 
@@ -298,6 +300,12 @@ func (r *Resolved) Capabilities() Capabilities {
 		ContextWindow:   r.Spec.ContextWindow,
 		MaxOutputTokens: r.Spec.MaxOutputTokens,
 	}
+	// Embedding, rerank and ASR references resolve no chat protocol, and an
+	// empty level map reads as "every level supported"; they do not think.
+	if r.API == "" {
+		caps.ThinkingLevels = []api.ReasoningEffort{}
+		return caps
+	}
 	switch r.API {
 	case api.APIOpenAICompletions:
 		caps.ThinkingFormat = string(r.OpenAICompletions.ThinkingFormat)
@@ -324,6 +332,23 @@ func (r *Resolved) Capabilities() Capabilities {
 		caps.MaxTokensField = "num_predict"
 	}
 	caps.ThinkingLevels = r.ThinkingLevels.SupportedLevels()
+	// A chat-template switch carries only the enable_thinking boolean: every
+	// graded rung is silently dropped on the wire (and a relay backend that
+	// does not know enable_thinking drops the boolean too), so the selector
+	// must not offer rungs the request cannot express. Vendors that opt into
+	// a top-level effort field keep their ladders (#3489 moved its NIM
+	// entries to that shape).
+	if r.API == api.APIOpenAICompletions &&
+		r.OpenAICompletions.ThinkingFormat == api.ThinkingFormatChatTemplateKwargs &&
+		!r.OpenAICompletions.SupportsReasoningEffort {
+		keep := make([]api.ReasoningEffort, 0, 2)
+		for _, level := range caps.ThinkingLevels {
+			if !level.Graded() {
+				keep = append(keep, level)
+			}
+		}
+		caps.ThinkingLevels = keep
+	}
 	return caps
 }
 

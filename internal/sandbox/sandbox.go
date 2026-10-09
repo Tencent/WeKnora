@@ -76,7 +76,7 @@ const (
 	DefaultDesktopDockerImage = "wechatopenai/weknora-sandbox:main-desktop"
 
 	// DefaultCubeDesktopTemplateImage is DefaultDesktopDockerImage plus Cube
-	// envd (target "desktop-cube"). amd64 only, same reason as the cube target.
+	// envd (target "desktop-cube").
 	DefaultCubeDesktopTemplateImage = "wechatopenai/weknora-sandbox:main-desktop-cube"
 
 	// DesktopWebsockifyPort is websockify inside the sandbox. WeKnora dials
@@ -421,6 +421,13 @@ type Config struct {
 
 	// E2BTemplate is the E2B template ID used at sandbox creation.
 	E2BTemplate string
+
+	// TemplateFromSnapshot reports that the boot target (E2BTemplate or
+	// CubeTemplate) was replaced by a skill snapshot. The env baked into that
+	// snapshot must not be sent again: Aliyun Agent Sandbox returns 400
+	// "creating from a snapshot does not allow envVars or function config
+	// overrides".
+	TemplateFromSnapshot bool
 
 	// E2BSandboxTTL is the E2B-side idle timeout hint.
 	E2BSandboxTTL time.Duration

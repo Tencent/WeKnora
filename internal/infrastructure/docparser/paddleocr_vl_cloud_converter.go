@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/sourceloc"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/utils"
 )
@@ -22,28 +23,37 @@ const (
 	paddleOCRVLCloudDefaultBaseURL = "https://paddleocr.aistudio-app.com/api/v2/ocr/jobs"
 	paddleOCRVLCloudDefaultModel   = "PaddleOCR-VL-1.6"
 	paddleOCRVLCloudPollInterval   = 5 * time.Second
-	paddleOCRVLCloudTimeout        = 600 * time.Second
+	// paddleOCRVLCloudTimeout bounds how long one job is polled;
+	// WEKNORA_PADDLEOCR_VL_CLOUD_TIMEOUT overrides it for documents that take
+	// longer, mirroring WEKNORA_MINERU_CLOUD_TIMEOUT on the MinerU cloud reader.
+	paddleOCRVLCloudTimeout = 600 * time.Second
 )
 
 // PaddleOCRVLCloudReader calls the PaddleOCR-VL AI Studio cloud API.
 // Flow: POST /jobs (multipart) → poll GET /jobs/{id} → download result JSONL,
 // then fetch each referenced image URL.
 type PaddleOCRVLCloudReader struct {
-	token    string
-	baseURL  string
-	model    string
-	useSeal  bool
-	useChart bool
+	token        string
+	baseURL      string
+	model        string
+	useSeal      bool
+	useChart     bool
+	timeout      time.Duration
+	pollInterval time.Duration
 }
 
 // NewPaddleOCRVLCloudReader creates a reader from ParserEngineOverrides.
 func NewPaddleOCRVLCloudReader(overrides map[string]string) *PaddleOCRVLCloudReader {
 	return &PaddleOCRVLCloudReader{
-		token:    strings.TrimSpace(overrides["paddleocr_vl_cloud_token"]),
-		baseURL:  strings.TrimRight(stringOr(overrides["paddleocr_vl_cloud_base_url"], paddleOCRVLCloudDefaultBaseURL), "/"),
-		model:    stringOr(overrides["paddleocr_vl_cloud_model"], paddleOCRVLCloudDefaultModel),
-		useSeal:  parseBoolOr(overrides["paddleocr_vl_cloud_use_seal_recognition"], true),
-		useChart: parseBoolOr(overrides["paddleocr_vl_cloud_use_chart_recognition"], false),
+		token: strings.TrimSpace(overrides["paddleocr_vl_cloud_token"]),
+		baseURL: strings.TrimRight(stringOr(
+			overrides["paddleocr_vl_cloud_base_url"], paddleOCRVLCloudDefaultBaseURL,
+		), "/"),
+		model:        stringOr(overrides["paddleocr_vl_cloud_model"], paddleOCRVLCloudDefaultModel),
+		useSeal:      parseBoolOr(overrides["paddleocr_vl_cloud_use_seal_recognition"], true),
+		useChart:     parseBoolOr(overrides["paddleocr_vl_cloud_use_chart_recognition"], false),
+		timeout:      requestTimeoutFromEnv("WEKNORA_PADDLEOCR_VL_CLOUD_TIMEOUT", paddleOCRVLCloudTimeout),
+		pollInterval: paddleOCRVLCloudPollInterval,
 	}
 }
 
@@ -73,7 +83,7 @@ func (c *PaddleOCRVLCloudReader) Read(ctx context.Context, req *types.ReadReques
 		return nil, fmt.Errorf("PaddleOCR-VL Cloud poll: %w", err)
 	}
 
-	mdContent, imagesURL, err := c.fetchResults(jsonlURL)
+	mdContent, imagesURL, layoutUnits, err := c.fetchResults(jsonlURL)
 	if err != nil {
 		return nil, fmt.Errorf("PaddleOCR-VL Cloud fetch results: %w", err)
 	}
@@ -89,6 +99,7 @@ func (c *PaddleOCRVLCloudReader) Read(ctx context.Context, req *types.ReadReques
 	return &types.ReadResult{
 		MarkdownContent: mdContent,
 		ImageRefs:       imageRefs,
+		SourceBlocks:    paddleOCRVLSourceBlocks(mdContent, layoutUnits, req.FileType),
 	}, nil
 }
 
@@ -183,7 +194,7 @@ type paddleOCRVLCloudPollResponse struct {
 }
 
 func (c *PaddleOCRVLCloudReader) pollJob(ctx context.Context, jobID string) (string, error) {
-	deadline := time.Now().Add(paddleOCRVLCloudTimeout)
+	deadline := time.Now().Add(c.timeout)
 	pollCount := 0
 	url := c.baseURL + "/" + jobID
 
@@ -207,7 +218,7 @@ func (c *PaddleOCRVLCloudReader) pollJob(ctx context.Context, jobID string) (str
 		resp, err := client.Do(httpReq)
 		if err != nil {
 			logger.Errorf(context.Background(), "[PaddleOCR-VL Cloud] poll #%d failed: %v", pollCount, err)
-			sleepCtx(ctx, paddleOCRVLCloudPollInterval)
+			sleepCtx(ctx, c.pollInterval)
 			continue
 		}
 		respBody, _ := io.ReadAll(resp.Body)
@@ -215,14 +226,14 @@ func (c *PaddleOCRVLCloudReader) pollJob(ctx context.Context, jobID string) (str
 
 		if resp.StatusCode != http.StatusOK {
 			logger.Errorf(context.Background(), "[PaddleOCR-VL Cloud] poll #%d status %d: %s", pollCount, resp.StatusCode, string(respBody))
-			sleepCtx(ctx, paddleOCRVLCloudPollInterval)
+			sleepCtx(ctx, c.pollInterval)
 			continue
 		}
 
 		var pollResp paddleOCRVLCloudPollResponse
 		if err := json.Unmarshal(respBody, &pollResp); err != nil {
 			logger.Errorf(context.Background(), "[PaddleOCR-VL Cloud] poll #%d decode error: %v", pollCount, err)
-			sleepCtx(ctx, paddleOCRVLCloudPollInterval)
+			sleepCtx(ctx, c.pollInterval)
 			continue
 		}
 
@@ -242,45 +253,42 @@ func (c *PaddleOCRVLCloudReader) pollJob(ctx context.Context, jobID string) (str
 			return "", fmt.Errorf("task failed: %s", pollResp.Data.ErrorMsg)
 		}
 
-		sleepCtx(ctx, paddleOCRVLCloudPollInterval)
+		sleepCtx(ctx, c.pollInterval)
 	}
 
-	return "", fmt.Errorf("task timed out after %d polls", pollCount)
+	return "", fmt.Errorf("PaddleOCR-VL Cloud task timed out after %s (%d polls)", c.timeout, pollCount)
 }
 
 // --- result parsing ---
 
 type paddleOCRVLCloudResultLine struct {
 	Result struct {
-		LayoutParsingResults []struct {
-			Markdown struct {
-				Text   string            `json:"text"`
-				Images map[string]string `json:"images"`
-			} `json:"markdown"`
-		} `json:"layoutParsingResults"`
+		LayoutParsingResults []paddleOCRVLPage `json:"layoutParsingResults"`
 	} `json:"result"`
 }
 
-func (c *PaddleOCRVLCloudReader) fetchResults(jsonlURL string) (string, map[string]string, error) {
+func (c *PaddleOCRVLCloudReader) fetchResults(jsonlURL string) (string, map[string]string, []sourceloc.Unit, error) {
 	if err := utils.ValidateURLForSSRF(jsonlURL); err != nil {
-		return "", nil, fmt.Errorf("jsonl URL blocked by SSRF check: %v", err)
+		return "", nil, nil, fmt.Errorf("jsonl URL blocked by SSRF check: %v", err)
 	}
 	client := utils.NewSSRFSafeHTTPClient(utils.SSRFSafeHTTPClientConfig{Timeout: 120 * time.Second, MaxRedirects: 5})
 	resp, err := client.Get(jsonlURL)
 	if err != nil {
-		return "", nil, fmt.Errorf("download jsonl: %w", err)
+		return "", nil, nil, fmt.Errorf("download jsonl: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return "", nil, fmt.Errorf("download jsonl status %d", resp.StatusCode)
+		return "", nil, nil, fmt.Errorf("download jsonl status %d", resp.StatusCode)
 	}
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", nil, fmt.Errorf("read jsonl body: %w", err)
+		return "", nil, nil, fmt.Errorf("read jsonl body: %w", err)
 	}
 
 	texts := make([]string, 0)
 	images := make(map[string]string)
+	var units []sourceloc.Unit
+	pageNumber := 0
 	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
@@ -292,6 +300,8 @@ func (c *PaddleOCRVLCloudReader) fetchResults(jsonlURL string) (string, map[stri
 			continue
 		}
 		for _, p := range parsed.Result.LayoutParsingResults {
+			pageNumber++
+			units = append(units, paddleOCRVLPageUnits(pageNumber, p)...)
 			if t := strings.TrimSpace(p.Markdown.Text); t != "" {
 				texts = append(texts, p.Markdown.Text)
 			}
@@ -304,7 +314,7 @@ func (c *PaddleOCRVLCloudReader) fetchResults(jsonlURL string) (string, map[stri
 	}
 
 	logger.Infof(context.Background(), "[PaddleOCR-VL Cloud] fetched %d page(s), images=%d", len(texts), len(images))
-	return strings.Join(texts, "\n\n"), images, nil
+	return strings.Join(texts, "\n\n"), images, units, nil
 }
 
 // downloadImages fetches each referenced image URL and builds ImageRef entries.

@@ -3,7 +3,7 @@ import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { MessagePlugin } from 'tdesign-vue-next';
 import { useI18n } from 'vue-i18n';
 import { MAX_FILE_SIZE_MB } from '@/utils';
-import { getParserEngines } from '@/api/system';
+import { useEditorResourcesStore } from '@/stores/editorResources';
 import {
   deleteTemporaryAttachment,
   getTemporaryAttachment,
@@ -12,6 +12,7 @@ import {
 } from '@/api/chat/temporary-attachments';
 
 const { t } = useI18n();
+const editorResources = useEditorResourcesStore();
 
 export interface AttachmentFile {
   file: File;
@@ -61,8 +62,8 @@ const supportedTypes = ref([
 
 onMounted(async () => {
   try {
-    const response = await getParserEngines();
-    const discovered = (response.data || [])
+    await editorResources.ensureParserEngines();
+    const discovered = editorResources.parserEngines
       .filter(engine => engine.Available !== false)
       .flatMap(engine => engine.FileTypes || [])
       .filter(type => type && type.toLowerCase() !== 'url')

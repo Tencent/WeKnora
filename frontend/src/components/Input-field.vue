@@ -30,6 +30,8 @@ import {
 import { type CustomAgent, BUILTIN_QUICK_ANSWER_ID, BUILTIN_SMART_REASONING_ID } from '@/api/agent';
 import { useChatResourcesStore } from '@/stores/chatResources';
 import { useEditorResourcesStore } from '@/stores/editorResources';
+import { useDeploymentCapabilitiesStore } from '@/stores/deploymentCapabilities';
+import { hostSkillsOnly, mentionSkillTargetId } from '@/utils/skillTarget';
 import { useI18n } from 'vue-i18n';
 import AttachmentUpload, { type AttachmentFile } from './AttachmentUpload.vue';
 import {
@@ -64,6 +66,7 @@ const orgStore = useOrganizationStore();
 const menuStore = useMenuStore();
 const chatResources = useChatResourcesStore();
 const editorResources = useEditorResourcesStore();
+const deploymentCapabilities = useDeploymentCapabilitiesStore();
 const {
   agents,
   disabledOwnAgentIds,
@@ -1424,9 +1427,17 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
     const skillsMode = agentSkillsSelectionMode.value;
     if (skillsMode !== 'none') {
       // The scope makes a shared agent's skills resolve in its owner's
-      // workspace, where they are actually installed.
+      // workspace, where they are actually installed. Lite agents store no
+      // sandbox config id; their skills live on the host target.
+      await deploymentCapabilities.ensureLoaded();
       await editorResources.ensureSkills(
-        currentAgentConfig.value?.sandbox_config_id,
+        mentionSkillTargetId(
+          hostSkillsOnly(
+            deploymentCapabilities.isSupported('settings.sandbox.remote'),
+            deploymentCapabilities.isSupported('settings.sandbox.host'),
+          ),
+          currentAgentConfig.value?.sandbox_config_id,
+        ),
         currentAgentScope.value,
       );
       skillItems = editorResources.skills
@@ -1969,18 +1980,12 @@ watch(() => route.params.kbId, (newKbId) => {
   }
 });
 
+// 模型 / 联网搜索列表由设置页在写操作后直接写回 chatResources
+// （replaceModels / ensureWebSearchProviders(true)），这里读的是同一份快照，
+// 不再靠「设置弹窗关闭」「离开设置路由」两个信号各强刷一次。
 watch(() => uiStore.showSettingsModal, (visible, prevVisible) => {
-  if (prevVisible && !visible) {
-    loadWebSearchConfig(true);
-    loadChatModels(true);
-    if (!props.embeddedMode) void browserConnection.refresh();
-  }
-});
-
-watch(() => route.path, (path, prev) => {
-  if (prev === '/platform/settings' && path !== '/platform/settings') {
-    loadWebSearchConfig(true);
-    loadChatModels(true);
+  if (prevVisible && !visible && !props.embeddedMode) {
+    void browserConnection.refresh();
   }
 });
 
@@ -2088,7 +2093,7 @@ const createSession = async (
     return;
   }
 
-  if (!chatResources.isFresh('models')) {
+  if (!chatResources.isLoaded('models')) {
     await loadChatModels()
   }
 
@@ -2237,7 +2242,7 @@ const toggleAgentModeSelector = () => {
 
   showAgentModeSelector.value = !showAgentModeSelector.value;
   if (showAgentModeSelector.value) {
-    if (!chatResources.isFresh('agents')) {
+    if (!chatResources.isLoaded('agents')) {
       void loadAgents(true);
     }
     // 多次更新位置确保准确
@@ -2254,7 +2259,7 @@ const toggleAgentModeSelector = () => {
 }
 
 const selectAgentMode = async (mode: 'quick-answer' | 'smart-reasoning') => {
-  if (!chatResources.isFresh('models')) {
+  if (!chatResources.isLoaded('models')) {
     await loadChatModels()
   }
 
@@ -2294,7 +2299,7 @@ const handleAgentNotReady = (
 };
 
 const handleSelectAgent = async (agent: CustomAgent, sourceTenantId?: string) => {
-  if (!chatResources.isFresh('models')) {
+  if (!chatResources.isLoaded('models')) {
     await loadChatModels()
   }
 

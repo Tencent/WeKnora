@@ -810,6 +810,7 @@ export default {
     channelConfluence: 'Confluence',
     channelYuque: 'Yuque',
     channelGitLab: 'GitLab',
+    channelSeafile: 'Seafile',
     channelIma: 'Tencent IMA',
     channelOutline: 'Outline',
     channelUpload: 'アップロード',
@@ -1169,6 +1170,12 @@ export default {
       cancelled: 'キャンセル済み'
     },
     errorCode: {
+      DOCREADER_UNAVAILABLE: "文書解析サービスを利用できません",
+      DOCREADER_UNAVAILABLE_SUGGESTION: "DocReader に接続できないか、接続が切断されました。サービスの稼働状態、再起動の繰り返し、ネットワークを確認し、復旧後に再試行してください。再アップロードは不要です。",
+      DOCREADER_TIMEOUT: "文書解析がタイムアウトしました",
+      DOCREADER_TIMEOUT_SUGGESTION: "DocReader の稼働状態と負荷を確認してから再試行してください。必要に応じて大きなファイルを分割してください。",
+      DOCREADER_PARSE_FAILED: "文書解析に失敗しました",
+      DOCREADER_PARSE_FAILED_SUGGESTION: "ファイル形式を確認し、管理者に今回の DocReader ログの確認を依頼してください。",
       TASK_STALLED: '進捗がないため自動停止しました',
       TASK_STALLED_SUGGESTION: 'しきい値を超えても進捗がなく、キューにも対応するタスクがないため失敗としてマークされました。「再試行」を押してください。繰り返し発生する場合は、この段階が依存するサービス（文書解析、モデル、ベクトルストア）を確認してください。',
       UNKNOWN_SUGGESTION: '詳細はアプリケーションログを確認してください。'
@@ -1407,6 +1414,13 @@ export default {
       fallbackPromptPlaceholder: '空欄の場合はデフォルトのプロンプトを使用します',
       skillsConfig: 'スキル',
       skillsConfigDesc: '実行中のサンドボックスを選択してから、下でスキルを選択してください。そのサンドボックスにないスキルには「インストール」が表示され、インストール後にのみ選択できます。',
+      hostSkillsConfigDesc: 'このコンピューターにインストール済みのスキルを選びます。未インストールのものは「インストール」と表示され、インストール後にのみ選択できます。',
+      hostSkillsSelectionDesc: 'ワークスペースのスキルが一覧されます。このコンピューターにインストール済みのものはすぐ使え、それ以外は先にインストールしてください。',
+      hostSelectSkillsDesc: 'このエージェントで使うスキルにチェックを入れてください。このコンピューターにないスキルは選択できません。先に「インストール」を押してください。',
+      hostSkillsAllListHint: '「すべて」に含まれるのは、このコンピューターにインストール済みのスキルだけです。未インストールのものは、インストールするまで含まれません。',
+      hostInstallToThisComputer: 'このコンピューターにインストール',
+      hostUpgradeOnThisComputer: 'このコンピューター上のスキルをカタログのバージョンにアップグレード',
+      hostSkillDisabled: 'このコンピューターでは無効',
       skillsSelection: 'スキル一覧',
       skillsSelectionDesc: 'ワークスペースのスキルがすべて表示されます。インストール済みのものはすぐに使用でき、それ以外は先にインストールが必要です。',
       skillsAll: 'すべて',
@@ -1876,6 +1890,30 @@ export default {
       title: 'スキル管理',
       description: 'スキルはワークスペースのカタログに登録されます。まず登録し、その後1つ以上のサンドボックスにインストールしてください。エージェントは、自身のサンドボックスで準備完了しているスキルのみ有効化できます。',
       helpTooltip: 'カタログのスキルは、どこかにインストールされている必要はありません。スクリプトは、エージェントが使用するサンドボックスイメージにスキルがインストールされて初めて実行されます。Docker、Cube、E2Bのイメージには互換性がないため、サンドボックスごとにインストールしてください。',
+      hostTarget: 'このコンピューター',
+      host: {
+        description: 'スキルはワークスペースのカタログにあります。このコンピューターにインストールしてから、エージェントで有効にできます。',
+        helpTooltip: 'カタログのスキルは未インストールのままでも構いません。スクリプトは、このコンピューターにインストールしてから実行されます。',
+        emptyDesc: 'スキルがまだありません。追加すると、このコンピューターにインストールできます。',
+        addStepInstallDesc: '解析結果を確認し、インストール用モデルを選んでください。このコンピューターにインストールされます。',
+        installToSandbox: 'このコンピューターにインストール',
+        installToSandboxDesc: '依存関係はこのコンピューター上で準備されます。完了後、エージェントが使えます。',
+        installDrawerDesc: '「{name}」をこのコンピューターにインストールします。',
+        noInstalls: 'このコンピューターには未インストール',
+        installedOnName: 'このコンピューターにインストール済み',
+        manageDrawerDesc: 'このコンピューター上で有効化、変数、アンインストールを管理します。',
+        manageUninstall: 'このコンピューターからアンインストール',
+        manageUninstallConfirm: 'このコンピューターから「{name}」をアンインストールしますか？',
+        deleteCatalogConfirm: 'カタログから「{name}」を削除しますか？先にこのコンピューターからアンインストールしてください。',
+        deleteCatalogBlocked: '先にこのスキルをこのコンピューターからアンインストールしてください。',
+        upgradeDrawerDesc: '「{name}」をカタログのバージョンにアップグレードします。完了するまで現在のバージョンを使い続け、失敗してもそれは残ります。',
+        disableHint: '無効にするとエージェントから見えなくなります。ファイルはこのコンピューターに残ります。変更は次の実行から反映されます。',
+        removeDone: 'このコンピューターから「{name}」をアンインストールしました。カタログには残るので、後から再インストールできます。',
+        removeWaiting: 'アンインストールを開始しました。進捗を待っています…',
+        removeSandboxReady: 'ローカルディレクトリを準備しています',
+        removeRemoved: 'ファイルを削除しました',
+        envWorkspaceHint: '自分の値を設定していないメンバーは、ここの値を使います。個人の値は「設定 → 環境変数」で入力できます。',
+      },
       goSandboxSettings: 'サンドボックスを設定',
       noConfigsDesc: 'サンドボックスがまだありません。スキルをインストールするにはイメージが必要です。',
       addSkill: 'スキルを追加',
@@ -2055,6 +2093,18 @@ export default {
       serverUrl: 'サーバURL',
       vlmServerUrlPlaceholder: '例: http://your-vllm-server:8000',
       vlmServerUrlHint: 'バックエンドがvlm-http-clientまたはhybrid-http-clientの場合は必須です',
+      mineruEndpointHint: 'サーバーのバージョンを自動判別します：MinerU 4.0 以降は V1 API、それ以前は /file_parse を使用します。',
+      mineruServerApiKeyPlaceholder: 'サーバー起動引数 --api-key の値（認証なしの場合は空欄）',
+      mineruServerApiKeyHint: 'MinerU 4.0 以降でのみ使用されます。',
+      mineruTierLabel: '解析ティア',
+      mineruTierDefault: 'サーバーのデフォルト（standard 優先）',
+      mineruTierFlash: 'flash（最速・最低品質）',
+      mineruTierBasic: 'basic（小型モデル・CPU で動作）',
+      mineruTierStandard: 'standard（VLM・高品質）',
+      mineruTierAdvanced: 'advanced（VLM・最高品質・最も低速）',
+      mineruTierHint: 'MinerU 4.0 以降でのみ有効です。利用可能なティアはサーバーの --tier 設定によります。',
+      mineruLegacySection: '旧バージョン向け設定（MinerU 3.x 以前）',
+      mineruLegacySectionHint: 'MinerU 4.0 ではこれらのリクエストパラメータが廃止されたため、4.0 以降のサーバーでは無視されます。VLM サーバーは MinerU 側で設定してください。',
       paddleocrVlEndpointPlaceholder: '例: http://your-paddleocr-vl:8080',
       paddleocrVlEndpointHint: 'PaddleOCR-VLパイプラインサービスのベースURLです。末尾に/layout-parsingを付ける必要はありません',
       paddleocrVlCloudTokenPlaceholder: 'PaddleOCR-VL AI Studio Token'
@@ -2391,6 +2441,17 @@ export default {
   },
   envVarSettings: {
     title: 'サンドボックスのシークレット',
+    host: {
+      title: '環境変数',
+      description: 'このコンピューター上のスキルで使う個人用のキーです。WeKnoraのシステム設定やデプロイ設定ではありません。',
+      helpAria: '環境変数について',
+      introRuntimeBody: 'スキルがこのコンピューターで動くときに注入されます。対話中にその場で渡すこともできます。保存後は平文を再表示しません。',
+      loadFailed: '環境変数を読み込めませんでした。',
+      sandboxTitle: 'このコンピューターで常に渡す値',
+      sandboxHint: 'このコンピューターで実行するコマンドにだけ付きます。必要になったときだけ追加してください。対話中にその場で渡すこともできます。',
+      nameInvalid: 'この名前は使えません。予約名（PATH や WEKNORA_ で始まる名前）は受け付けません。',
+      deleteConfirm: '{name} を削除しますか？これ以降、このコンピューターでの実行には含まれません。',
+    },
     description: 'スキルとサンドボックスで使う個人用のキーです。WeKnoraのシステム設定やデプロイ設定ではありません。',
     helpAria: 'サンドボックスのシークレットについて',
     introPersonalTitle: 'あなただけのもの',
@@ -2946,8 +3007,8 @@ export default {
       duplicate: '複製'
     },
     pin: {
-      pin: '先頭に固定',
-      unpin: '固定を解除',
+              pin: '先頭に固定',
+              unpin: '固定を解除',
       pinSuccess: '固定しました',
       unpinSuccess: '固定を解除しました',
       failed: '操作に失敗しました'
@@ -3409,6 +3470,77 @@ export default {
       editingBadge: '編集中',
       pageActions: 'ページ操作',
       tabDocuments: 'ドキュメント',
+      tabGallery: 'ギャラリー',
+      tabDocumentsTip: '元のドキュメントをアップロード・管理',
+      tabWikiTip: 'ドキュメントから自動で整理された Wiki ページ',
+      tabGalleryTip: 'ドキュメントから抽出されたすべての画像を閲覧',
+      viewTabs: 'ナレッジベースのビュー',
+      gallery: {
+        title: 'ギャラリー',
+        allImages: 'すべての画像',
+        count: '{count} 枚',
+        countFiltered: '{count} 枚が該当',
+        searchPlaceholder: '説明や画像内の文字を検索',
+        filters: 'フィルター',
+        clearFilters: 'フィルターをクリア',
+        searchIn: '検索対象',
+        searchInHint: 'キーワードはチェックした内容だけで照合します',
+        attrSection: '画像属性',
+        attrHint: '「非表示」はその値を持つ画像を除外し、「常に表示」は他の条件で非表示になっても残します',
+        verdictDefault: '指定なし',
+        verdictOff: '非表示',
+        verdictOn: '常に表示',
+        keywordsPlaceholder: 'キーワードはカンマで区切る',
+        noAttrs: '絞り込める属性はありません',
+        sort: '並べ替え',
+        sortField: '並べ替え基準',
+        sortOrder: '順序',
+        orderAsc: '昇順',
+        orderDesc: '降順',
+        empty: '閲覧できる画像はまだありません',
+        emptyHint: 'ドキュメント内の画像は解析完了後にここに表示されます',
+        emptyFiltered: '条件に一致する画像はありません',
+        imageLoadError: '画像の読み込みに失敗しました',
+        noCaption: '説明なし',
+        noOcr: '文字は認識されませんでした',
+        caption: '説明',
+        ocr: '画像内の文字（OCR）',
+        attributes: '属性',
+        source: '元のドキュメント',
+        details: '詳細',
+        dimensions: 'サイズ',
+        status: '状態',
+        openSource: '元のドキュメントを開く',
+        copy: 'コピー',
+        zoomIn: '拡大 (+)',
+        zoomOut: '縮小 (-)',
+        zoomReset: 'ウィンドウに合わせる (0)',
+        actualSize: '実寸',
+        rotate: '回転 (R)',
+        download: 'ダウンロード',
+        openOriginal: '新しいタブで開く',
+        toggleInfo: '画像情報 (I)',
+        viewerClose: '閉じる (Esc)',
+        prev: '前へ (←)',
+        next: '次へ (→)',
+        // Display names for the builtin attributes the gallery itself
+        // declares. Attributes contributed by other sources fall back to the
+        // pipeline's own wording (see the imageAttr namespace).
+        attr: {
+          builtin_caption: '説明',
+          builtin_caption_description: 'モデルが生成した画像の説明',
+          builtin_ocr_text: 'OCR テキスト',
+          builtin_ocr_text_description: 'OCR で画像から抽出した文字',
+          builtin_created_at: '作成日時',
+          builtin_created_at_description: '所属ドキュメントチャンクの作成日時',
+          builtin_updated_at: '更新日時',
+          builtin_updated_at_description: '所属ドキュメントチャンクの最終更新日時',
+          builtin_is_enabled: '有効状態',
+          builtin_is_enabled_description: '所属ドキュメントチャンクが検索対象かどうか',
+          builtin_is_enabled_value_true: '有効',
+          builtin_is_enabled_value_false: '無効',
+        },
+      },
       tabGraph: 'グラフ',
       tabGraphTip: 'Wikiページ間のリンクを表したグラフ（ページリンクグラフ）です。「ナレッジベース設定 → ナレッジグラフ」で設定する、LLMが抽出するエンティティ・リレーションのナレッジグラフとは異なります。',
       searchPlaceholder: 'Wikiページを検索...',
@@ -3826,7 +3958,19 @@ export default {
         descriptionLanguageAuto: 'ドキュメントの言語に従う',
         customInstructionsLabel: '画像処理の指示',
         customInstructionsDescription: 'OCRとMarkdown出力の仕様は固定したまま、視覚的に優先する対象を追加できます',
-        customInstructionsPlaceholder: '例: 銘板、型番、アラームコード、表の単位を優先する…'
+        customInstructionsPlaceholder: '例: 銘板、型番、アラームコード、表の単位を優先する…',
+        imageAttrsLabel: '画像属性の観察',
+        imageAttrsDescription: 'オンにすると各画像を先に「属性観察＋説明」し、その属性で画像内テキストへの OCR 実行可否を決定します。オフは基本モード：全画像を1枚ずつ説明し全て OCR します',
+        imageVectorLabel: '画像ベクトル検索',
+        imageVectorDescription: 'オンにすると、画像の説明を生成した後に埋め込みモデルで画像そのものもエンコードし、説明に書かれていない内容でも画像を検索できるようにします。画像入力に対応した埋め込みモデルが必要で、画像ごとに埋め込み呼び出しが1回増え、ベクトル検索の候補範囲も広がります。以降に取り込み・再解析した文書にのみ適用され、スキャン PDF のページは対象外です',
+        imageVectorModelUnsupported: '現在の埋め込みモデルは画像入力を宣言していないため、画像ベクトルは生成も検索もされません',
+        imageAttrsSchemaLabel: '観察可能な画像属性',
+        imageAttrsSchemaDescription: 'モデルは以下の属性（バックエンドのレジストリで定義）を観察して OCR ポリシーを決めます',
+        imageAttrsOcrConditions: '観察した属性条件に基づいて OCR を実行',
+        imageAttrsOcrConditionsDesc: '観察した属性が以下の条件を満たす場合、その画像に OCR を実行します',
+        imageAttrsOcrOnUnobserved: '画像属性の観察に失敗した場合も OCR を実行',
+        imageAttrsOcrOnUnobservedDesc: 'モデルが画像属性を正しく観察できなかった場合、本文テキストを逃さないようデフォルトで OCR を実行します。オフにするとスキップします。（4B など小規模な視覚モデルを使う場合や、カスタムの画像指示がシステムプロンプトと衝突する場合に観察が失敗することがあります。8B 以上は失敗の可能性が低く、オフは推奨しません）',
+        imagePipelineKbNote: 'デフォルトはナレッジベースの設定に従い、今回のタスク向けに調整できます'
       }
     }
   },
@@ -3938,6 +4082,20 @@ export default {
     channelIm: 'IM',
     chunkLabel: 'チャンク{index}:',
     navigateToDocument: 'ドキュメント詳細を表示',
+    referenceSourceBack: 'すべての出典',
+    referenceSourceView: '原文を表示',
+    referenceSourceRelocate: '再度位置を特定',
+    referenceSourceLocating: '引用箇所を特定しています…',
+    referenceSourceExact: "原文の該当箇所を特定しました",
+    referenceSourcePartial: "確認できた原文を強調表示しています。引用の一部は未照合です",
+    referenceSourceBlock: "原文の領域を表示しています。文字の完全一致は未確認です",
+    referenceSourceAmbiguous: "一致する箇所が複数あり、特定できません",
+    referenceSourceStale: "原文または内容が更新され、引用箇所を特定できません",
+    referenceSourcePrevious: "前の引用箇所",
+    referenceSourceNext: "次の引用箇所",
+    referenceSourceFoundPage: '{page} ページで見つかりました',
+    referenceSourceNotFound: '引用箇所を特定できなかったため、原文を開きました',
+    referenceSourceOpenWeb: '元の Web ページで該当箇所を開く',
     chunkIdLabel: 'チャンクID:',
     documentIdLabel: 'ドキュメントID:',
     faqIdLabel: 'FAQ ID:',
@@ -4467,7 +4625,7 @@ export default {
       },
       keyLabels: {
         auth: {
-          registration_mode: 'セルフサービス登録モード',
+          registration_mode: '登録モード',
           default_tenant_mode: 'デフォルトのワークスペース作成方式',
           complex_password_enabled: '複雑なパスワードを必須にする'
         },
@@ -4498,7 +4656,7 @@ export default {
       },
       keyDescriptions: {
         auth: {
-          registration_mode: 'セルフサービス登録のモードです。self_serveは誰でもアカウントを登録でき、invite_onlyは公開登録を無効にし、オーナー/管理者による招待のみを許可します。保存後すぐに反映されますが、self_serveはインターネットからのスパム登録を招くため慎重に利用してください。',
+          registration_mode: '登録モード。公開登録では誰でもアカウントを作成できます。招待登録には有効な招待リンクが必要です。登録禁止でも既存アカウントは招待を承諾できます。保存後すぐに反映されます。',
           default_tenant_mode: '公開登録後のワークスペース作成方式です。create_personalはオーナー権限のワークスペースを作成し、tenantlessはアカウントのみを作成して、ユーザが招待を承諾するかワークスペースを作成するまで待ちます。新規ユーザにのみ適用されます。',
           complex_password_enabled: '複雑なパスワードを必須にするかどうかです。有効にすると、パスワードに大文字・小文字・数字・特殊文字を含める必要があります。変更はすぐに反映され、新規登録ユーザおよび新たなパスワード変更・リセットにのみ適用されます。特殊文字は{specialChars}です'
         },
@@ -4531,7 +4689,8 @@ export default {
         auth: {
           registration_mode: {
             self_serve: 'セルフサービス（誰でも登録可能）',
-            invite_only: '招待のみ（公開登録は無効）'
+            invite_register: '招待リンクでのみ登録可能',
+            invite_only: '登録禁止（既存アカウントは招待を承諾可能）'
           },
           default_tenant_mode: {
             create_personal: '個人ワークスペースを作成',
@@ -4921,6 +5080,8 @@ export default {
       dimensionOverrideDesc: 'プロバイダのドキュメントでこのモデルがdimensionsパラメータに対応していると記載されている場合にのみ有効にしてください。デフォルトでは検出された実際の次元数のみを使用します。',
       supportsVisionLabel: '視覚・マルチモーダルに対応',
       supportsVisionDesc: 'モデルが画像やマルチモーダル入力を受け付けるかどうか',
+      embeddingImageInputLabel: '画像入力',
+      embeddingImageInputDesc: 'モデルが画像をテキストと同じベクトル空間に埋め込めるかどうか。カタログ内のモデルは自動判定され、カスタムモデルは手動で宣言します',
       contextWindowLabel: 'コンテキストウィンドウ',
       contextWindowPlaceholder: 'デフォルト値{value}',
       contextWindowDesc: '1回のリクエストでこのモデルが受け付けられるトークン数です。エージェントの履歴圧縮はこの上限を基準にします。空欄の場合はデフォルト値の200000（200K）が使われます。プロバイダの実際のウィンドウサイズを指定してください。大きすぎる値を指定すると圧縮が働かず、プロバイダにリクエストを拒否されます。',
@@ -4966,6 +5127,7 @@ export default {
   },
   language: {
     zhCN: '简体中文',
+    zhTW: '繁体字中国語',
     enUS: 'English',
     ruRU: 'Русский',
     koKR: '한국어',
@@ -5871,6 +6033,8 @@ export default {
     retry: '再試行',
     unsupported: 'このファイル形式はオンラインプレビューに対応していません',
     unsupportedHint: 'ダウンロードして、ローカルのアプリケーションで開いてください',
+    zoomIn: '拡大',
+    zoomOut: '縮小',
     fullscreen: '全画面表示',
     exitFullscreen: '全画面表示を終了',
     htmlRendered: 'レンダリング表示',
@@ -6713,6 +6877,12 @@ export default {
       paths: 'ディレクトリ', pathsPlaceholder: '1行に1つのディレクトリを入力します。空欄の場合はプロジェクト全体を同期します',
       addProject: 'プロジェクトを追加', projectRequired: 'GitLabプロジェクトを1つ以上追加してください',
     },
+    seafile: {
+      baseUrl: 'Seafile URL', apiToken: 'APIトークン',
+      apiTokenHint: 'Seafileの「設定 → Web APIトークン」で生成します。アカウントに選択したライブラリの読み取り権限があれば十分で、トークンはファイルのダウンロード要求には送信されません。',
+      singleLibraryOnly: '1つのデータソースは1つのライブラリのみ同期できます。別のライブラリを選ぶ前に現在の選択を解除してください。',
+      selectionRequired: 'ライブラリ、フォルダまたはファイルを1つ以上選択してください',
+    },
     resourceHint: '同期するスペースまたはフォルダを選択してください',
     untitled: '無題',
     resourceLoadFailed: 'リソースの読み込みに失敗しました',
@@ -6726,6 +6896,10 @@ export default {
     guideStep1_notion: '同期したいページまたはデータベースをNotionで開きます',
     guideStep2_notion: '右上の「···」メニューをクリックし、「Connect to」または「Add connections」を選択します',
     guideStep3_notion: '作成したIntegrationアプリを検索して選択し、戻って「再試行」をクリックします',
+    noResourcesDesc_seafile: 'このトークンでアクセスできるライブラリがないか、すべて暗号化ライブラリです（暗号化ライブラリは同期できません）',
+    guideStep1_seafile: 'Seafileにサインインし、アカウントが暗号化されていないライブラリを1つ以上読めることを確認します',
+    guideStep2_seafile: '「設定 → Web APIトークン」でトークンを生成または再生成します',
+    guideStep3_seafile: 'ここに戻って新しいトークンを入力し、「再試行」をクリックします',
     permissionDocLink: 'FeishuのWiki権限ドキュメントを見る',
     syncScheduleLabel: '同期スケジュール',
     conflictLabel: '競合時の処理',
@@ -6785,6 +6959,7 @@ export default {
       rss: 'RSS / Atomフィード',
       ima: 'Tencent IMA',
       gitlab: 'GitLab',
+      seafile: 'Seafile',
       outline: 'Outline',
     },
     connectorDesc: {
@@ -6799,6 +6974,7 @@ export default {
       rss: 'RSS / Atomフィードから記事を同期します',
       ima: 'Tencent IMAのナレッジベースからドキュメント、ノート、ファイルを同期します（AIセッションと動画の解析は非対応）',
       gitlab: 'GitLabプロジェクトからファイルを同期します',
+      seafile: 'Seafileライブラリのフォルダとファイルを同期します',
       outline: 'Outline のコレクションからドキュメントを同期（クラウド／セルフホスト）',
     },
     drive: {
@@ -6839,6 +7015,9 @@ export default {
       authHeaders: 'カスタムヘッダー（任意）',
       authHeadersHint: '非公開フィード用です。1行に1つ「名前: 値」の形式で入力します（例: Authorization: Bearer xxxx）'
     },
+    confluence: {
+      cloudFolderLimitation: 'Confluence Cloud では、スペース直下のフォルダーなどコンテナ配下のページをここに一覧できません。スペース全体を選択すれば同期されます。'
+    },
     comingSoon: '近日対応予定',
     docHint: '認証情報の取得先:',
     openDoc: 'ドキュメントを開く',
@@ -6875,6 +7054,15 @@ export default {
     prereqStep3Brief_lark_drive: 'アプリの権限を設定',
     prereqStep3Desc_lark_drive: 'drive:drive:readonly、drive:export:readonly、docx:document:readonlyの権限を有効にします',
     prereqOpenConsole_yuque: 'Yuqueのトークン設定を開く',
+    yuqueFolderModeLabel: 'フォルダ構成',
+    yuqueFolderModeToc: 'Yuqueの目次どおりに階層化',
+    yuqueFolderModeNone: 'ルートに平置き',
+    yuqueFolderModeHint: 'Yuqueの目次階層に従って文書を配置します。なお、その後ナレッジベース上で手動で移動したフォルダは、次回その文書を同期したときにYuqueの構成へ上書きされます。',
+    yuqueTOCOnly: 'Yuqueの目次に表示される文書だけ同期',
+    yuqueTOCOnlyHint: '「Yuqueの目次どおりに階層化」を選ぶと有効になります。すでにナレッジベースにある文書はそのまま残り、Yuqueの目次にない文書は新たに追加されなくなるだけで、削除はされません。',
+    dingtalkIngestLabel: 'DingTalk の取り込み範囲',
+    dingtalkIncludeUploadedFiles: 'アップロードファイル（docx / pptx / xlsx / pdf）を取り込む',
+    dingtalkIncludeUploadedFilesHint: '既定ではオフです。オンにすると、選択範囲にアップロードされた Word / PowerPoint / Excel / PDF ファイルをダウンロードして解析し、ナレッジベースに取り込みます（1 ファイルあたり 64 MiB まで）。本文はストレージと埋め込みのコストに算入されます。オフの場合は単にスキップされ、同期ログにスイッチが無効である旨が記録されます。既にナレッジベースにあるコピーは削除されません。',
     prereqBarText_dingtalk: '初めての利用ですか？DingTalkアプリの設定ガイドを確認',
     prereqStep1Brief_dingtalk: '企業内部アプリを作成',
     prereqStep1Desc_dingtalk: 'DingTalk開発者プラットフォームで企業内部アプリを作成し、Client IDとClient Secretを取得します。',
@@ -6922,6 +7110,7 @@ export default {
       wikiSpace: 'Wikiスペース',
       docCategory: 'ドキュメントタグ',
       book: 'Yuqueナレッジベース',
+      library: 'Seafileライブラリ',
       collection: 'Outline コレクション'
     },
     neverSynced: '未同期',
@@ -6935,6 +7124,14 @@ export default {
       deletion_lookup_failed: '削除前の項目の照会に失敗しました。サーバログを確認してください',
       deletion_failed: '削除に失敗しました。サーバログを確認してください',
       ingest_failed: '取り込みに失敗しました。サーバログを確認してください',
+      seafile_permission_denied: 'Seafileファイルへのアクセスが拒否されました。トークン所有者のライブラリ権限を確認してください。',
+      seafile_not_found: 'Seafileファイルが存在しないか移動されました。次回の同期で再試行します。',
+      seafile_file_too_large: 'Seafileファイルがサイズ上限を超えています。MAX_FILE_SIZE_MBを引き上げるかファイルを小さくしてください。',
+      seafile_empty_file: 'Seafileファイルが空のためスキップしました。',
+      seafile_source_changed: '取得中にSeafileファイルが変更されました。次回の同期で再試行します。',
+      seafile_invalid_response: 'Seafileから解析できない応答が返されました。サーバのバージョンとリバースプロキシを確認してください。',
+      seafile_ssrf_blocked: 'SeafileのダウンロードURLがSSRFポリシーでブロックされました。fileserverのホストをSSRF_WHITELISTに追加してください。',
+      seafile_fetch_failed: 'Seafileからファイルを取得できませんでした。次回の同期で再試行します。',
       move_failed: '新しいフォルダへの移動に失敗しました。サーバログを確認してください'
     }
   },
@@ -6966,7 +7163,7 @@ export default {
       empty: 'MCP エンドポイントはまだありません',
       disabled: '停止中',
       cardSummary: '{tools} 個のツール · {scope}',
-      scopeAll: 'すべてのナレッジベース',
+              scopeAll: 'すべてのナレッジベース',
       scopeCount: '{count} 個のナレッジベース',
       create: 'エンドポイントを作成',
       editTitle: 'MCP エンドポイントを編集',
@@ -7614,5 +7811,28 @@ export default {
     capabilityRequired: '権限を1つ以上選択してください',
     loadFailed: 'プラットフォームAPIキーの読み込みに失敗しました',
     createFailed: 'プラットフォームAPIキーの作成に失敗しました'
+  },
+  // 観察属性の表示文言。属性名で索引し、ここでは翻訳のみを担当します。
+  // 属性名のドットはアンダースコアにエスケープします（contain.text → contain_text）——
+  // vue-i18n はキーをドットで辿るため、リテラルの 'contain.text' は解決できません。
+  // 未翻訳の属性はバックエンド登録表の説明にフォールバックします。
+  imageAttr: {
+    contain_text: {
+      label: '画像内のテキスト量',
+      description: '画像自体がどれだけ本文テキストを含むか。テキスト読み取りのために別途 OCR を行う価値があるかを判断します。',
+      values: {
+        none: { label: 'テキストなし', description: 'テキストは一切含まれていません' },
+        sparse: { label: 'わずかな文字', description: 'わずかな文字のみ —— ロゴ、道路標識、単一のラベル' },
+        block: { label: 'まとまった本文', description: 'まとまった本文 —— スクリーンショット、表、文書ページ' }
+      }
+    },
+    contain_data_visual: {
+      label: 'データ可視化',
+      description: '画像がグラフ・図表・ダイアグラム・インフォグラフィックとしてデータを伝えているか。文字が少なく見えても OCR の対象に残します。',
+      values: {
+        'true': { label: 'はい', description: 'はい —— グラフ・図表・ダイアグラム' },
+        'false': { label: 'いいえ', description: 'いいえ —— 写真・イラスト・アイコン・装飾' }
+      }
+    }
   }
 }

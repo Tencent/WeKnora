@@ -94,6 +94,8 @@ var (
 	ErrWorkspaceTooBroad = core.ErrWorkspaceTooBroad
 	// ErrProjectDirRevoked is returned when a stored host project is no longer approved.
 	ErrProjectDirRevoked = core.ErrProjectDirRevoked
+	// ErrInstallDirOutsideSkillsRoot is returned when an install dir is not under the skills root.
+	ErrInstallDirOutsideSkillsRoot = core.ErrInstallDirOutsideSkillsRoot
 )
 
 // BuildCommandEnv filters the host environment and overlays explicit vars.

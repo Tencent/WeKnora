@@ -38,6 +38,7 @@ const (
 	ConnectorTypeRSS         = "rss"
 	ConnectorTypeGitLab      = "gitlab"
 	ConnectorTypeIMA         = "ima"
+	ConnectorTypeSeafile     = "seafile"
 	// ConnectorTypeOutline is Outline (getoutline.com), cloud or self-hosted.
 	ConnectorTypeOutline = "outline"
 

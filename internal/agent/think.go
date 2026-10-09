@@ -184,6 +184,12 @@ func (e *AgentEngine) streamLLMToEventBus(
 	if stalled.Load() {
 		result.StreamError = fmt.Sprintf("LLM stream stalled: no output for %s", stallTimeout)
 	}
+	// The provider layer closes a body that ran out without a finish reason
+	// as an incomplete answer rather than an error chunk; for a round that is
+	// the same broken stream and goes down the same retry path.
+	if result.StreamError == "" && result.FinishReason == types.FinishReasonIncomplete {
+		result.StreamError = types.StreamEndedEarlyError
+	}
 
 	// Stream diagnostic summary: helps identify non-streaming patterns
 	streamDuration := time.Duration(0)
@@ -221,7 +227,10 @@ func watchStreamStall(
 	stalled := &atomic.Bool{}
 	done := make(chan struct{})
 
-	go func() {
+	// This goroutine cancels a stream in flight: a panic here (a non-positive
+	// stall timeout reaches time.NewTicker) must not end the process, and no
+	// unit of work needs a failure recorded.
+	agenttools.GoRecovered(ctx, func() {
 		// Poll well inside the window so the detected gap stays close to the
 		// configured timeout instead of rounding up to twice it.
 		ticker := time.NewTicker(stallTimeout / 4)
@@ -243,7 +252,7 @@ func watchStreamStall(
 				return
 			}
 		}
-	}()
+	})
 
 	var once sync.Once
 	return stalled, func() { once.Do(func() { close(done) }) }
@@ -565,10 +574,18 @@ func (e *AgentEngine) callLLMWithRetry(
 	if err != nil && isTransientError(err) {
 		// Retry transient errors (timeout, rate limit, server errors) up to maxLLMRetries times
 		for retry := 1; retry <= maxLLMRetries; retry++ {
-			retryDelay := time.Duration(retry) * time.Second
+			retryDelay := llmRetryDelay(err, retry)
 			logger.Warnf(ctx, "[Agent][Round-%d] LLM transient error (attempt %d/%d), retrying in %v: %v",
 				round, retry, maxLLMRetries, retryDelay, err)
-			time.Sleep(retryDelay)
+			// A stop pressed during the backoff ends the turn now rather than
+			// after the delay and one more doomed request.
+			select {
+			case <-ctx.Done():
+			case <-time.After(retryDelay):
+			}
+			if ctx.Err() != nil {
+				break
+			}
 
 			response, err = e.streamThinkingToEventBus(ctx, messages, tools, iteration, sessionID)
 			if err == nil || !isTransientError(err) {

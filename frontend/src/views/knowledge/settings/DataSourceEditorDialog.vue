@@ -205,6 +205,41 @@ const form = ref({
   sync_deletions: true,
 })
 
+// Yuque folder layout. The key lives in the raw settings bag, and a data source
+// created before this control existed carries no folder_mode at all — the
+// getter therefore reports the connector's own default (flat) rather than
+// rendering the select blank. Writing back is a no-op until the user picks
+// something, so opening an existing source can never change its behaviour.
+const yuqueFolderMode = computed({
+  get: () => (form.value.config.settings?.folder_mode === 'toc' ? 'toc' : 'none'),
+  set: (mode: string) => {
+    form.value.config.settings = { ...form.value.config.settings, folder_mode: mode }
+  },
+})
+
+// toc_only is an admission filter, and the connector only reads the table of
+// contents when folder_mode is 'toc' — under the flat layout the flag has no
+// effect at all, which is why the control is disabled there.
+const yuqueTOCOnly = computed({
+  get: () => form.value.config.settings?.toc_only === true,
+  set: (on: boolean) => {
+    form.value.config.settings = { ...form.value.config.settings, toc_only: on }
+  },
+})
+
+// DingTalk ingestion of uploaded Office/PDF files. Like the Yuque switches the
+// key lives in the raw settings bag, and a data source created before this
+// control existed carries no key at all — the getter therefore reports the
+// connector default (off) instead of rendering the checkbox blank, and nothing
+// is written back until the user toggles it, so merely opening an existing
+// source never changes what it syncs.
+const dingtalkIncludeUploadedFiles = computed({
+  get: () => form.value.config.settings?.include_uploaded_files === true,
+  set: (on: boolean) => {
+    form.value.config.settings = { ...form.value.config.settings, include_uploaded_files: on }
+  },
+})
+
 // Step 2: Resources
 const resources = ref<Resource[]>([])
 const loadingResources = ref(false)
@@ -231,6 +266,18 @@ const driveFolderTokenError = ref('')
 const driveRootLoaded = ref(false)
 const isDriveConnector = (type: string) => type === 'feishu_drive' || type === 'lark_drive'
 const isGitLabConnector = (type: string) => type === 'gitlab'
+// Seafile resource IDs are "<repo_id>:<path>"; one data source syncs one
+// library, so the picker refuses a selection that spans two libraries.
+const isSeafileConnector = (type: string) => type === 'seafile'
+const seafileLibraryOf = (id: string) => id.split(':')[0]
+// Seafile IDs encode the hierarchy, so a saved selection whose node has
+// vanished from the tree can still be recognised as living under `parent`.
+function seafileWithin(id: string, parent: string): boolean {
+  const [repo, path] = [seafileLibraryOf(id), id.slice(id.indexOf(':') + 1)]
+  const parentPath = parent.slice(parent.indexOf(':') + 1)
+  return repo === seafileLibraryOf(parent) &&
+    (parentPath === '/' || path === parentPath || path.startsWith(parentPath + '/'))
+}
 
 interface GitLabProjectInput { project_id: string; ref: string; pathsText: string }
 const gitlabProjects = ref<GitLabProjectInput[]>([])
@@ -449,6 +496,16 @@ async function ensureChildrenLoaded(id: string) {
         if (!existing.has(c.external_id)) merged.push(c)
       }
       resources.value = merged
+    } else {
+      // Connectors may conservatively advertise HasChildren to avoid an N+1
+      // probe. Once lazy loading proves this is a leaf, collapse it and retain
+      // that fact so another expand cannot trigger another empty request.
+      resources.value = resources.value.map(r => r.external_id === id
+        ? { ...r, has_children: false }
+        : r)
+      const expanded = new Set(expandedResourceIds.value)
+      expanded.delete(id)
+      expandedResourceIds.value = expanded
     }
     loadedChildrenIds.value = new Set(loadedChildrenIds.value).add(id)
   } catch (e: any) {
@@ -466,12 +523,20 @@ async function ensureChildrenLoaded(id: string) {
 
 const visibleTree = computed(() => {
   const roots = resources.value.filter(r => !r.parent_id)
-  const result: { resource: Resource; depth: number }[] = []
+  const result: { resource: Resource; depth: number; noticeAfter?: boolean }[] = []
   function walk(items: Resource[], depth: number) {
     for (const r of items) {
       result.push({ resource: r, depth })
       if (r.has_children && expandedResourceIds.value.has(r.external_id)) {
         walk(childrenMap.value.get(r.external_id) || [], depth + 1)
+      }
+      // Keep this visible after an empty root listing is recognized as a leaf.
+      if (
+        r.metadata?.hierarchy_limitation === 'cloud_top_level_containers' &&
+        (expandedResourceIds.value.has(r.external_id) ||
+          (!r.has_children && loadedChildrenIds.value.has(r.external_id)))
+      ) {
+        result.push({ resource: r, depth: depth + 1, noticeAfter: true })
       }
     }
   }
@@ -689,6 +754,14 @@ const connectorDefs = computed<ConnectorDef[]>(() => [
     ],
   },
   {
+    type: 'seafile', available: true, docUrl: 'https://help.seafile.com/',
+    permissionDocUrl: '', permissionPageUrl: '', requiredPermissions: [],
+    fields: [
+      { key: 'base_url', labelKey: 'datasource.seafile.baseUrl', placeholder: 'https://seafile.example.com' },
+      { key: 'api_token', labelKey: 'datasource.seafile.apiToken', placeholder: '', secret: true, hintKey: 'datasource.seafile.apiTokenHint' },
+    ],
+  },
+  {
     // Outline (getoutline.com). API token auth; base_url is only needed for a
     // self-hosted instance and defaults to the public cloud when left empty.
     type: 'outline',
@@ -849,6 +922,12 @@ function selectType(def: ConnectorDef) {
   form.value.config.credentials = def.type === "confluence" ? { edition: "server" } : {}
   if (def.type === 'confluence') {
     form.value.config.settings = { ...form.value.config.settings, edition: 'server' }
+  }
+  // A new Yuque source opts into the book's folder hierarchy. Only on create:
+  // an existing source keeps what it was built with, so the "folder layout is
+  // owned by the connector" caveat never applies to sources that predate it.
+  if (def.type === 'yuque' && !isEdit.value) {
+    form.value.config.settings = { ...form.value.config.settings, folder_mode: 'toc' }
   }
   if (isGitLabConnector(def.type)) addGitLabProject()
   rssAuthHeaders.value = []
@@ -1037,10 +1116,22 @@ function uncheckResource(id: string, cover: Set<string>) {
 
 function toggleResource(id: string) {
   const cover = new Set(selectedResourceIds.value)
+  const seafile = isSeafileConnector(form.value.type)
   if ((checkStates.value.get(id) || 'unchecked') === 'unchecked') {
     checkResource(id, cover)
   } else {
     uncheckResource(id, cover)
+    // Unchecking also drops saved Seafile selections below this node that
+    // the tree no longer lists; otherwise they could never be cleared.
+    if (seafile) {
+      for (const sel of [...cover]) {
+        if (seafileWithin(sel, id)) cover.delete(sel)
+      }
+    }
+  }
+  if (seafile && new Set([...cover].map(seafileLibraryOf)).size > 1) {
+    MessagePlugin.warning(t('datasource.seafile.singleLibraryOnly'))
+    return
   }
   selectedResourceIds.value = [...cover]
 }
@@ -1095,6 +1186,11 @@ async function nextStep() {
       MessagePlugin.warning(t('datasource.gitlab.projectRequired'))
       return
     }
+  }
+  // Seafile has no "whole account" scope: the backend rejects an empty selection.
+  if (step.value === 2 && isSeafileConnector(form.value.type) && selectedResourceIds.value.length === 0) {
+    MessagePlugin.warning(t('datasource.seafile.selectionRequired'))
+    return
   }
   step.value++
   if (step.value === 2) {
@@ -1240,6 +1336,9 @@ const selectedResourceCount = computed(() => {
 const hasExpandableNodes = computed(() => resources.value.some(r => r.has_children))
 
 function resourceIconName(r: Resource): string {
+  // Seafile libraries expand like folders but are the top-level unit a data
+  // source binds to, so they keep the root icon.
+  if (r.type === 'library') return 'root-list'
   if (r.has_children) return 'folder'
   switch (r.type) {
     case 'wiki_space':
@@ -1270,6 +1369,7 @@ const resourceTypeLabelMap: Record<string, string> = {
   wiki_space: 'datasource.resourceType.wikiSpace',
   doc_category: 'datasource.resourceType.docCategory',
   book: 'datasource.resourceType.book',
+  library: 'datasource.resourceType.library',
   collection: 'datasource.resourceType.collection',
 }
 
@@ -1735,9 +1835,12 @@ const drawerConfirmText = computed(() => {
           </div>
         </div>
         <div class="resource-picker__list" role="tree">
+          <template
+            v-for="{ resource: r, depth, noticeAfter } in visibleTree"
+            :key="noticeAfter ? `${r.external_id}__notice` : r.external_id"
+          >
           <div
-            v-for="{ resource: r, depth } in visibleTree"
-            :key="r.external_id"
+            v-if="!noticeAfter"
             class="resource-picker__row"
             :class="{
               'is-checked': resourceRowState(r.external_id) === 'checked',
@@ -1802,6 +1905,14 @@ const drawerConfirmText = computed(() => {
               >{{ resourceTypeLabel(r.type) }}</span>
             </span>
           </div>
+          <p
+            v-else
+            class="resource-picker__notice"
+            :style="{ '--depth': depth }"
+          >
+            {{ t('datasource.confluence.cloudFolderLimitation') }}
+          </p>
+          </template>
         </div>
       </div>
       <div v-else class="ds-resource-empty">
@@ -1906,6 +2017,58 @@ const drawerConfirmText = computed(() => {
         <div class="form-item form-item--flat">
           <t-checkbox v-model="form.sync_deletions">{{ t('datasource.syncDeletions') }}</t-checkbox>
         </div>
+      </section>
+
+      <!-- DingTalk only: which extra node types the connector may ingest. -->
+      <section v-if="form.type === 'dingtalk'" class="setting-drawer__section">
+        <h4 class="setting-drawer__section-title">{{ t('datasource.dingtalkIngestLabel') }}</h4>
+        <div class="form-item form-item--flat">
+          <t-checkbox v-model="dingtalkIncludeUploadedFiles">
+            {{ t('datasource.dingtalkIncludeUploadedFiles') }}
+          </t-checkbox>
+        </div>
+        <p class="form-desc">{{ t('datasource.dingtalkIncludeUploadedFilesHint') }}</p>
+      </section>
+
+      <!-- Yuque only: how synced documents are laid out, and what may be admitted. -->
+      <section v-if="form.type === 'yuque'" class="setting-drawer__section">
+        <h4 class="setting-drawer__section-title">{{ t('datasource.yuqueFolderModeLabel') }}</h4>
+        <div class="form-item form-item--flat">
+          <div
+            class="option-group"
+            role="radiogroup"
+            :aria-label="t('datasource.yuqueFolderModeLabel')"
+          >
+            <button
+              type="button"
+              class="option-pill"
+              :class="{ 'is-active': yuqueFolderMode === 'toc' }"
+              role="radio"
+              :aria-checked="yuqueFolderMode === 'toc'"
+              @click="yuqueFolderMode = 'toc'"
+            >
+              {{ t('datasource.yuqueFolderModeToc') }}
+            </button>
+            <button
+              type="button"
+              class="option-pill"
+              :class="{ 'is-active': yuqueFolderMode === 'none' }"
+              role="radio"
+              :aria-checked="yuqueFolderMode === 'none'"
+              @click="yuqueFolderMode = 'none'"
+            >
+              {{ t('datasource.yuqueFolderModeNone') }}
+            </button>
+          </div>
+        </div>
+        <p class="form-desc">{{ t('datasource.yuqueFolderModeHint') }}</p>
+
+        <div class="form-item form-item--flat">
+          <t-checkbox v-model="yuqueTOCOnly" :disabled="yuqueFolderMode !== 'toc'">
+            {{ t('datasource.yuqueTOCOnly') }}
+          </t-checkbox>
+        </div>
+        <p class="form-desc">{{ t('datasource.yuqueTOCOnlyHint') }}</p>
       </section>
     </template>
   </SettingDrawer>
@@ -2589,6 +2752,19 @@ const drawerConfirmText = computed(() => {
   border-radius: var(--app-radius-xs);
   color: var(--td-text-color-placeholder);
   background: color-mix(in srgb, var(--td-text-color-placeholder) 8%, transparent);
+}
+
+.resource-picker__notice {
+  --depth: 0;
+  margin: 0 0 2px;
+  padding: 4px 8px 4px calc(8px + var(--depth) * 14px);
+  font-size: var(--app-text-xs);
+  line-height: 1.5;
+  color: var(--td-text-color-placeholder);
+}
+
+.resource-picker__notice:last-child {
+  margin-bottom: 0;
 }
 
 /* --- Step 2: empty state --- */

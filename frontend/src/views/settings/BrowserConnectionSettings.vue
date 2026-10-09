@@ -168,6 +168,7 @@
 import { computed, onMounted, onBeforeUnmount, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { get, post, getDown } from '@/utils/request'
+import { pairingPageOrigin, preferredDesktopAPIBase } from '@/utils/browserPairingOrigin'
 import { useBrowserConnectionStore } from '@/stores/browserConnection'
 import { useUIStore } from '@/stores/ui'
 import browserLogo from '@/assets/browserskill/logo.png'
@@ -206,6 +207,22 @@ const capabilities = [
 ]
 const formatDate = (value: string) => new Date(value).toLocaleString(locale.value, { dateStyle: 'short', timeStyle: 'short' })
 function clearPairing() { pairing.value = ''; copied.value = false; copyFallback.value = false; clearTimeout(expiry) }
+async function desktopApiBase(): Promise<string> {
+  const win = window as Window & {
+    __WEKNORA_API_BASE__?: string
+    go?: { main?: { App?: { GetAPIBaseURL?: () => Promise<string> | string } } }
+  }
+  let native = ''
+  const fn = win.go?.main?.App?.GetAPIBaseURL
+  if (typeof fn === 'function') {
+    try {
+      native = String(await Promise.resolve(fn()) || '')
+    } catch {
+      native = ''
+    }
+  }
+  return preferredDesktopAPIBase(native, win.__WEKNORA_API_BASE__)
+}
 async function refresh() {
   try {
     if (!busy.value && !document.hidden) {
@@ -225,7 +242,8 @@ async function pair() {
   busy.value = true; error.value = ''; revision++
   try {
     if (!pairing.value || Date.now() >= pairExpires) {
-      const result = await post<{ data: { pairing_link: string } }>(endpoint, { action: 'pair', origin: window.location.origin }, { timeout: 15000, signal: controller.signal })
+      const origin = pairingPageOrigin(window.location.origin, await desktopApiBase())
+      const result = await post<{ data: { pairing_link: string } }>(endpoint, { action: 'pair', origin }, { timeout: 15000, signal: controller.signal })
       if (!alive) return
       pairing.value = result.data.pairing_link; pairExpires = Date.now() + 5 * 60 * 1000
       clearTimeout(expiry); expiry = setTimeout(clearPairing, 5 * 60 * 1000)

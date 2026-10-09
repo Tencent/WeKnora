@@ -845,7 +845,7 @@ export default {
       empty: '暂无 MCP 端点',
       disabled: '已停用',
       cardSummary: '{tools} 个工具 · {scope}',
-      scopeAll: '全部知识库',
+              scopeAll: '全部知识库',
       scopeCount: '{count} 个知识库',
       create: '新建端点',
       editTitle: '编辑 MCP 端点',
@@ -994,6 +994,12 @@ export default {
       paths: '同步目录', pathsPlaceholder: '每行一个目录；留空同步整个项目',
       addProject: '添加项目', projectRequired: '请至少添加一个 GitLab 项目',
     },
+    seafile: {
+      baseUrl: 'Seafile 地址', apiToken: 'API 令牌',
+      apiTokenHint: '在 Seafile「设置 → Web API 令牌」中生成；账号对所选资料库有读权限即可，令牌不会随文件下载请求发送。',
+      singleLibraryOnly: '一个数据源只能同步一个资料库，请先取消已选资料库中的内容再改选。',
+      selectionRequired: '请至少勾选一个资料库、目录或文件',
+    },
     resourceHint: '选择要同步的内容空间/文件夹',
     untitled: '无标题',
     resourceLoadFailed: '加载资源列表失败',
@@ -1007,6 +1013,10 @@ export default {
     guideStep1_notion: '在 Notion 中打开你想要同步的页面或数据库',
     guideStep2_notion: '点击右上角的「···」菜单，选择「Connect to」或「Add connections」',
     guideStep3_notion: '搜索并选择你的集成应用（Integration），然后回到这里点重新加载',
+    noResourcesDesc_seafile: '该令牌能访问的资料库为空，或全部为加密资料库（不支持同步）',
+    guideStep1_seafile: '登录 Seafile，确认账号至少拥有一个未加密资料库的读取权限',
+    guideStep2_seafile: '在「设置 → Web API 令牌」中生成或重新生成令牌',
+    guideStep3_seafile: '回到这里填入新令牌并点重新加载',
     permissionDocLink: '查看飞书知识库权限配置文档',
     syncScheduleLabel: '同步频率',
     conflictLabel: '冲突策略',
@@ -1031,6 +1041,15 @@ export default {
     prereqStep3Brief_yuque: '（可选）企业版填写 Base URL',
     prereqStep3Desc_yuque: '公有云用户无需填写；语雀企业版或私有部署请填写企业域名',
     prereqOpenConsole_yuque: '前往语雀 Token 设置',
+    yuqueFolderModeLabel: '目录结构',
+    yuqueFolderModeToc: '按语雀目录分层',
+    yuqueFolderModeNone: '平铺在根目录',
+    yuqueFolderModeHint: '按语雀的目录层级放置文档。注意：之后在知识库里手动调整的目录，会在该文档下次同步时被覆盖回语雀的结构。',
+    yuqueTOCOnly: '只同步语雀目录中可见的文档',
+    yuqueTOCOnlyHint: '需要先选择「按语雀目录分层」。已经同步进知识库的文档不受影响——语雀中不在目录里的文档只是不再新增，不会被删除。',
+    dingtalkIngestLabel: '钉钉摄取范围',
+    dingtalkIncludeUploadedFiles: '摄取知识库中的上传文件（docx / pptx / xlsx / pdf）',
+    dingtalkIncludeUploadedFilesHint: '默认关闭。开启后，所选范围内的 Word / PowerPoint / Excel / PDF 上传文件会被下载并解析入库，单个文件上限 64 MiB；这些文件的正文会计入存储与向量化成本。关闭时它们只是被跳过，同步日志会说明开关未开启，不会删除知识库中已有的副本。',
     prereqBarText_dingtalk: '首次使用？点击查看钉钉应用配置指引',
     prereqStep1Brief_dingtalk: '创建企业内部应用',
     prereqStep1Desc_dingtalk: '在钉钉开放平台创建企业内部应用，并获取 Client ID 和 Client Secret',
@@ -1100,6 +1119,7 @@ export default {
       wikiSpace: '知识库空间',
       docCategory: '文档标签',
       book: '语雀知识库',
+      library: 'Seafile 资料库',
       collection: 'Outline 集合'
     },
     scheduleHuman: {
@@ -1134,6 +1154,9 @@ export default {
       authHeaders: '自定义请求头（可选）',
       authHeadersHint: '用于访问私有订阅源，每行一个，格式为「名称: 值」，例如 Authorization: Bearer xxxx'
     },
+    confluence: {
+      cloudFolderLimitation: 'Confluence Cloud 暂不支持在此列出空间顶层文件夹等容器下的页面；选择整个空间仍会同步它们。'
+    },
     connectorDesc: {
       feishu: '同步飞书知识库中的文档、表格、文件',
       lark: '同步 Lark 知识库中的文档、表格、文件（飞书国际版）',
@@ -1146,6 +1169,7 @@ export default {
       ima: '同步腾讯 IMA 知识库中的文档、笔记与文件（暂不支持 AI 会话与视频解析）',
       rss: '同步 RSS / Atom 订阅源中的文章',
       gitlab: '同步 GitLab 项目中的文件',
+      seafile: '同步 Seafile 资料库中的目录与文件',
       outline: '同步 Outline 集合中的文档（云端或私有化部署）',
     },
     connector: {
@@ -1160,6 +1184,7 @@ export default {
       ima: '腾讯 IMA',
       rss: 'RSS / Atom 订阅',
       gitlab: 'GitLab',
+      seafile: 'Seafile',
       outline: 'Outline',
     },
     logDetail: {
@@ -1225,6 +1250,14 @@ export default {
       deletion_lookup_failed: '删除前查找文档失败，请查看服务器日志',
       deletion_failed: '删除失败，请查看服务器日志',
       ingest_failed: '导入失败，请查看服务器日志',
+      seafile_permission_denied: '无权访问该 Seafile 文件，请检查令牌所属账号的资料库权限。',
+      seafile_not_found: 'Seafile 文件不存在或已被移动，下次同步将重试。',
+      seafile_file_too_large: 'Seafile 文件超过大小限制，请调大 MAX_FILE_SIZE_MB 或缩小该文件。',
+      seafile_empty_file: 'Seafile 文件内容为空，已跳过。',
+      seafile_source_changed: 'Seafile 文件在获取过程中发生变化，下次同步将重试。',
+      seafile_invalid_response: 'Seafile 返回了无法解析的响应，请检查服务器版本与反向代理配置。',
+      seafile_ssrf_blocked: 'Seafile 文件下载地址被 SSRF 策略拦截，请将 fileserver 域名加入 SSRF_WHITELIST。',
+      seafile_fetch_failed: '从 Seafile 获取文件失败，下次同步将重试。',
       move_failed: '移动到新目录失败，请查看服务器日志'
     },
   },
@@ -2020,6 +2053,8 @@ export default {
     retry: '重试',
     unsupported: '该文件类型暂不支持在线预览',
     unsupportedHint: '请下载文件后使用本地应用查看',
+    zoomIn: '放大',
+    zoomOut: '缩小',
     fullscreen: '全屏预览',
     exitFullscreen: '退出全屏',
     htmlRendered: '渲染预览',
@@ -2919,6 +2954,7 @@ export default {
   },
   language: {
     zhCN: '简体中文',
+    zhTW: '繁體中文',
     enUS: 'English',
     ruRU: 'Русский',
     koKR: '한국어',
@@ -3045,6 +3081,8 @@ export default {
       dimensionOverrideDesc: '仅在确认该模型支持 dimensions 参数时开启；默认只使用检测到的实际维度。',
       supportsVisionLabel: '支持视觉/多模态',
       supportsVisionDesc: '模型是否支持图片等多模态输入',
+      embeddingImageInputLabel: '图片输入',
+      embeddingImageInputDesc: '模型能把图片编码到与文本相同的向量空间。目录内的模型自动识别，自定义模型需手动声明',
       contextWindowLabel: '上下文窗口',
       contextWindowPlaceholder: '默认 {value}',
       contextWindowDesc: '该模型一次请求能容纳的 token 数。智能体压缩对话历史会按此上限工作。留空则使用默认 200000（200K）。请按厂商文档填写真实值，填大会导致压缩不触发、上游直接拒绝请求。',
@@ -3410,7 +3448,8 @@ export default {
           },
           registration_mode: {
             self_serve: '自助注册（任何人可注册）',
-            invite_only: '仅邀请（关闭公网注册）'
+            invite_register: '仅限邀请注册（需有效邀请链接）',
+            invite_only: '禁止注册（已有账号仍可接受邀请）'
           }
         }
       },
@@ -3440,7 +3479,7 @@ export default {
           docker_enabled: '是否允许 Docker 沙箱后端。本机 docker.sock 等同宿主机 root，默认关闭。仅系统管理员可打开；打开后立即生效，无需重启。私有化单机且已挂载 daemon socket，或配置了带 TLS 的远程 tcp:// 时再启用。'
         },
         auth: {
-          registration_mode: '自助注册模式。self_serve = 任何人可注册账号；invite_only = 关闭公网注册，仅 Owner/Admin 可邀请。修改后立即生效，但谨慎对待 self_serve（公网会接受 spam）。',
+          registration_mode: '注册模式。开放注册允许任何人创建账号；仅限邀请注册要求有效邀请链接；禁止注册不允许创建账号，但已有账号仍可接受邀请。保存后立即生效。',
           default_tenant_mode: '公开注册后的空间初始化策略。create_personal 会自动创建个人空间并授予 Owner；tenantless 仅创建账户，用户需要接受邀请或主动创建空间。只影响之后注册的用户。',
           complex_password_enabled: '是否启用复杂密码。开启后密码必须包含大小写字母、数字和特殊字符。修改后立即生效，只影响新注册用户或新密码修改/重置操作。特殊字符包含：{specialChars}'
         }
@@ -3471,7 +3510,7 @@ export default {
           docker_enabled: '启用 Docker 沙箱'
         },
         auth: {
-          registration_mode: '自助注册模式',
+          registration_mode: '注册模式',
           default_tenant_mode: '注册默认空间策略',
           complex_password_enabled: '启用复杂密码'
         }
@@ -3960,6 +3999,20 @@ export default {
     channelIm: 'IM',
     chunkLabel: '片段{index}:',
     navigateToDocument: '查看文档详情',
+    referenceSourceBack: '全部引用',
+    referenceSourceView: '查看原文',
+    referenceSourceRelocate: '重新定位',
+    referenceSourceLocating: '正在定位引用位置…',
+    referenceSourceExact: "已精确定位原文片段",
+    referenceSourcePartial: "已高亮核验通过的原文片段，部分引用内容尚未匹配",
+    referenceSourceBlock: "已定位到来源区域，尚未精确匹配文字",
+    referenceSourceAmbiguous: "原文有多处相同内容，无法唯一定位",
+    referenceSourceStale: "原文或内容已更新，当前引用无法精确定位",
+    referenceSourcePrevious: "上一处引用",
+    referenceSourceNext: "下一处引用",
+    referenceSourceFoundPage: '已定位到第 {page} 页',
+    referenceSourceNotFound: '未能精确定位引用内容，已为你打开原文',
+    referenceSourceOpenWeb: '打开原网页并定位',
     chunkIdLabel: '片段ID:',
     documentIdLabel: '文档ID:',
     faqIdLabel: 'FAQ ID:',
@@ -4079,7 +4132,19 @@ export default {
         descriptionLanguageAuto: '自动跟随文档语言',
         customInstructionsLabel: '图片解析要求',
         customInstructionsDescription: '补充需要重点识别的视觉信息，OCR 和 Markdown 格式协议保持不变',
-        customInstructionsPlaceholder: '例如：重点识别设备铭牌、型号、告警代码和表格中的单位…'
+        customInstructionsPlaceholder: '例如：重点识别设备铭牌、型号、告警代码和表格中的单位…',
+        imageAttrsLabel: '图片属性观察',
+        imageAttrsDescription: '开启后，解析时对每张图片先「观察属性＋描述」，再按属性决定是否对图内文字再跑一轮 OCR；关闭则沿用基础模式：所有图片逐张描述并全部 OCR',
+        imageVectorLabel: '图片向量检索',
+        imageVectorDescription: '开启后，生成图片描述之后再用向量模型直接对图片编码，检索时按图片内容召回描述没写到的信息。需要向量模型支持图片输入；每张图片多一次向量调用，向量检索的候选范围也会放大。只对此后入库或重新解析的文档生效，扫描件 PDF 页不生成',
+        imageVectorModelUnsupported: '当前向量模型未声明图片输入，开启后不会生成或召回图片向量',
+        imageAttrsSchemaLabel: '可观察的图片属性',
+        imageAttrsSchemaDescription: '模型会观察以下属性（由后端注册表定义）以驱动 OCR 策略',
+        imageAttrsOcrConditions: '根据观察到的属性条件触发 OCR',
+        imageAttrsOcrConditionsDesc: '当观察到的属性满足以下条件时，对图片进行 OCR',
+        imageAttrsOcrOnUnobserved: '图片属性观察失败时仍执行 OCR',
+        imageAttrsOcrOnUnobservedDesc: '当模型未能正确观察到图片属性时，默认仍执行 OCR 兜底，以免漏掉正文文字；关闭则跳过。（采用 4B 等小参数视觉模型，或自定义的图片解析提示词与系统提示词冲突时，可能造成观察失败；8B 及以上模型的失败概率很低，不建议关闭）',
+        imagePipelineKbNote: '默认跟随知识库设置，可针对本次任务调整'
       },
       tableMetadataInstructions: {
         label: '表格元数据生成要求',
@@ -4445,6 +4510,77 @@ export default {
       editingBadge: '编辑中',
       pageActions: '页面操作',
       tabDocuments: '文档',
+      tabGallery: '画廊',
+      tabDocumentsTip: '上传和管理原始文档',
+      tabWikiTip: '由文档自动整理生成的 Wiki 页面',
+      tabGalleryTip: '浏览从文档中解析出的全部图片',
+      viewTabs: '知识库视图',
+      gallery: {
+        title: '画廊',
+        allImages: '全部图片',
+        count: '共 {count} 张',
+        countFiltered: '筛选出 {count} 张',
+        searchPlaceholder: '搜索图片描述或文字',
+        filters: '筛选',
+        clearFilters: '清除筛选',
+        searchIn: '搜索范围',
+        searchInHint: '关键词只在勾选的内容中匹配',
+        attrSection: '图片属性',
+        attrHint: '「隐藏」不显示带该属性的图片；「始终显示」即使被其他条件隐藏也保留',
+        verdictDefault: '不限',
+        verdictOff: '隐藏',
+        verdictOn: '始终显示',
+        keywordsPlaceholder: '多个关键词用逗号分隔',
+        noAttrs: '暂无可筛选的属性',
+        sort: '排序',
+        sortField: '排序依据',
+        sortOrder: '顺序',
+        orderAsc: '升序',
+        orderDesc: '降序',
+        empty: '还没有可浏览的图片',
+        emptyHint: '文档中的图片在解析完成后会出现在这里',
+        emptyFiltered: '没有符合条件的图片',
+        imageLoadError: '图片加载失败',
+        noCaption: '暂无描述',
+        noOcr: '未识别到文字',
+        caption: '描述',
+        ocr: '图中文字（OCR）',
+        attributes: '属性',
+        source: '来源文档',
+        details: '详细信息',
+        dimensions: '尺寸',
+        status: '状态',
+        openSource: '打开来源文档',
+        copy: '复制',
+        zoomIn: '放大 (+)',
+        zoomOut: '缩小 (-)',
+        zoomReset: '适应窗口 (0)',
+        actualSize: '原始尺寸',
+        rotate: '旋转 (R)',
+        download: '下载',
+        openOriginal: '在新标签页打开',
+        toggleInfo: '图片信息 (I)',
+        viewerClose: '关闭 (Esc)',
+        prev: '上一张 (←)',
+        next: '下一张 (→)',
+        // Display names for the builtin attributes the gallery itself
+        // declares. Attributes contributed by other sources fall back to the
+        // pipeline's own wording (see the imageAttr namespace).
+        attr: {
+          builtin_caption: '描述',
+          builtin_caption_description: '模型生成的图片描述',
+          builtin_ocr_text: 'OCR 文本',
+          builtin_ocr_text_description: 'OCR 从图片中提取的文字',
+          builtin_created_at: '创建时间',
+          builtin_created_at_description: '所属文档片段的创建时间',
+          builtin_updated_at: '更新时间',
+          builtin_updated_at_description: '所属文档片段的最后更新时间',
+          builtin_is_enabled: '启用状态',
+          builtin_is_enabled_description: '所属文档片段是否参与检索',
+          builtin_is_enabled_value_true: '已启用',
+          builtin_is_enabled_value_false: '已停用',
+        },
+      },
       tabGraph: '图谱',
       tabGraphTip: 'Wiki 页面之间的引用关系图（即页面链接图谱），与「知识库设置 → 知识图谱」中基于 LLM 抽取的实体-关系图谱不是同一个概念',
       searchPlaceholder: '搜索 Wiki 页面...',
@@ -4945,8 +5081,8 @@ export default {
       sharedReadonly: '共享给我 · 仅查看'
     },
     pin: {
-      pin: '置顶',
-      unpin: '取消置顶',
+              pin: '置顶',
+              unpin: '取消置顶',
       pinSuccess: '已置顶',
       unpinSuccess: '已取消置顶',
       failed: '操作失败'
@@ -5539,6 +5675,17 @@ export default {
   },
   envVarSettings: {
     title: '沙箱密钥',
+    host: {
+      title: '环境变量',
+      description: '给本机技能用的个人密钥，不是 WeKnora 的系统或部署配置。',
+      helpAria: '环境变量说明',
+      introRuntimeBody: '技能在这台电脑上运行时才会注入；对话里也可以当场提供。保存后不再显示明文。',
+      loadFailed: '环境变量加载失败。',
+      sandboxTitle: '在这台电脑上始终带上的值',
+      sandboxHint: '只带给你在这台电脑上跑的命令。多数情况用不到；需要时再加，对话里也可以当场提供。',
+      nameInvalid: '这个名字不能用。保留名（例如 PATH，或以 WEKNORA_ 开头的名字）不接受。',
+      deleteConfirm: '删除 {name}？之后在这台电脑上运行的东西都不会再带上它。',
+    },
     description: '给技能和沙箱用的个人密钥，不是 WeKnora 的系统或部署配置。',
     helpAria: '沙箱密钥说明',
     introPersonalTitle: '只属于你',
@@ -6136,6 +6283,30 @@ export default {
       title: '技能管理',
       description: '技能属于空间目录，可以只登记，也可以装到一份或多份沙箱。智能体只能启用当前沙箱里已就绪的技能。',
       helpTooltip: '目录里的技能可以不装任何沙箱。脚本要跑起来，必须装进智能体所用的那份沙箱镜像。Docker、Cube、E2B 互不通用，装到几份就要装几次。',
+      hostTarget: '本机',
+      host: {
+        description: '技能属于空间目录。装到这台电脑上之后，智能体才能启用。',
+        helpTooltip: '目录里的技能可以先只登记。脚本要跑起来，需要装到这台电脑上。',
+        emptyDesc: '还没有技能。添加后会装到这台电脑上。',
+        addStepInstallDesc: '确认解析结果后选择安装模型。技能会装到这台电脑上。',
+        installToSandbox: '安装到本机',
+        installToSandboxDesc: '安装会在这台电脑上准备依赖，装好后智能体可以直接使用。',
+        installDrawerDesc: '把「{name}」装到这台电脑上。',
+        noInstalls: '尚未安装到本机',
+        installedOnName: '已安装到本机',
+        manageDrawerDesc: '在这台电脑上管理启用、变量和卸载。',
+        manageUninstall: '从本机卸载',
+        manageUninstallConfirm: '确定从这台电脑卸载「{name}」？',
+        deleteCatalogConfirm: '确定从目录删除「{name}」？请先从本机卸载。',
+        deleteCatalogBlocked: '请先从本机卸载此技能。',
+        upgradeDrawerDesc: '把「{name}」升级到目录中的当前版本。升级期间继续使用当前版本，升级失败也不影响它。',
+        disableHint: '禁用后该技能对智能体不可见，文件仍留在这台电脑上。变更将在会话下一次执行时生效。',
+        removeDone: '已从本机卸载「{name}」。技能仍在目录里，可以稍后再装回去。',
+        removeWaiting: '已开始卸载，正在等待进度…',
+        removeSandboxReady: '正在准备本机目录',
+        removeRemoved: '文件已删除',
+        envWorkspaceHint: '所有没有填写自己值的成员都会用这里的值。成员可以在「设置 → 环境变量」里填自己的值。',
+      },
       goSandboxSettings: '去配置沙箱',
       noConfigsDesc: '还没有沙箱，技能需要先有一份可写入的镜像。',
       addSkill: '添加技能',
@@ -6366,6 +6537,18 @@ export default {
       serverUrl: '服务器地址',
       vlmServerUrlPlaceholder: '如 http://your-vllm-server:8000',
       vlmServerUrlHint: '当 Backend 选择 vlm-http-client 或 hybrid-http-client 时需要填写',
+      mineruEndpointHint: '自动识别服务版本：MinerU 4.0 及以上走 V1 API，更早版本走 /file_parse。',
+      mineruServerApiKeyPlaceholder: '服务端启动参数 --api-key 的值（未启用鉴权可留空）',
+      mineruServerApiKeyHint: '仅 MinerU 4.0 及以上使用。',
+      mineruTierLabel: '解析档位',
+      mineruTierDefault: '服务端默认（优先 standard）',
+      mineruTierFlash: 'flash（最快，质量最低）',
+      mineruTierBasic: 'basic（基础模型，CPU 可运行）',
+      mineruTierStandard: 'standard（VLM，高质量）',
+      mineruTierAdvanced: 'advanced（VLM，质量最高、最慢）',
+      mineruTierHint: '仅 MinerU 4.0 及以上生效；可选档位取决于服务端启动时的 --tier。',
+      mineruLegacySection: '旧版参数（MinerU 3.x 及更早）',
+      mineruLegacySectionHint: 'MinerU 4.0 已移除以下请求参数，连接 4.0 及以上服务时会被忽略；VLM 地址改在 MinerU 服务端配置。',
       paddleocrVlEndpointPlaceholder: '如 http://your-paddleocr-vl:8080',
       paddleocrVlEndpointHint: '填写 PaddleOCR-VL 完整服务（pipeline）地址，无需 /layout-parsing 后缀',
       paddleocrVlCloudTokenPlaceholder: 'PaddleOCR-VL 飞桨星河社区 Token'
@@ -6606,6 +6789,13 @@ export default {
       fallbackPromptPlaceholder: '留空使用系统默认提示词',
       skillsConfig: '技能',
       skillsConfigDesc: '先选择运行沙箱，再从下面列表选用技能。没装到该沙箱的会显示「安装」，装好后才能勾选。',
+      hostSkillsConfigDesc: '从下面列表选用已经装到这台电脑上的技能。没装的会显示「安装」，装好后才能勾选。',
+      hostSkillsSelectionDesc: '这里列出空间目录中的技能。已经装到这台电脑上的可以直接用；没装的请先点「安装」。',
+      hostSelectSkillsDesc: '勾选要给这个智能体用的技能。没装到这台电脑上的不能勾选，请先点右侧「安装」。',
+      hostSkillsAllListHint: '「全部」只包含已经装到这台电脑上的技能。没装的不会自动带上，点「安装」装好后才会算进去。',
+      hostInstallToThisComputer: '安装到这台电脑',
+      hostUpgradeOnThisComputer: '把这台电脑上的技能升级到目录版本',
+      hostSkillDisabled: '已在本机停用',
       skillsSelection: '技能列表',
       skillsSelectionDesc: '这里列出空间目录中的技能。已装到当前沙箱的可以直接用；没装的请先点「安装」。',
       skillsAll: '全部',
@@ -6752,6 +6942,12 @@ export default {
     noActivity: '暂无解析记录',
     totalDuration: '总耗时：{d}',
     errorCode: {
+      DOCREADER_UNAVAILABLE: "文档解析服务不可用",
+      DOCREADER_UNAVAILABLE_SUGGESTION: "无法连接 DocReader，或连接已中断。请检查解析服务是否启动、是否反复重启以及网络是否正常；服务恢复后再重试，无需重复上传文件。",
+      DOCREADER_TIMEOUT: "文档解析超时",
+      DOCREADER_TIMEOUT_SUGGESTION: "请检查 DocReader 的健康状态和负载；服务正常后再重试，必要时拆分大文件。",
+      DOCREADER_PARSE_FAILED: "文档解析失败",
+      DOCREADER_PARSE_FAILED_SUGGESTION: "请检查文件格式，并让管理员查看本次解析对应的 DocReader 日志。",
       TASK_STALLED: '长时间无进展，已自动终止',
       TASK_STALLED_SUGGESTION: '处理超过阈值仍没有任何进展，且队列中已无对应任务，已被系统标记为失败。请点击「重试」；如反复出现，请检查该阶段依赖的服务（文档解析、模型、向量库）是否正常。',
       UNKNOWN_SUGGESTION: '请查看应用日志获取详细信息。'
@@ -7010,6 +7206,7 @@ export default {
     channelConfluence: 'Confluence',
     channelYuque: '语雀',
     channelGitLab: 'GitLab',
+    channelSeafile: 'Seafile',
     channelIma: '腾讯 IMA',
     channelOutline: 'Outline',
     channelUpload: '上传',
@@ -7616,5 +7813,28 @@ export default {
     myChats: '我的对话',
     apiChats: 'API 会话',
     noSessions: '暂无对话'
+  },
+  // 图片属性的展示文案，按属性名索引（后端注册表给出属性名，这里只做翻译）。
+  // 注意：属性名里的点号要转义成下划线（contain.text → contain_text）——vue-i18n 按点号
+  // 逐段下钻，写成字面量 'contain.text' 的键永远取不到。
+  // 未翻译的属性会回落到后端注册表自带的说明，所以新增属性不会显示成空行。
+  imageAttr: {
+    contain_text: {
+      label: '图中文字量',
+      description: '图片自身承载多少正文文字，决定是否值得为它单独跑一轮 OCR。',
+      values: {
+        none: { label: '无文字', description: '完全没有文字' },
+        sparse: { label: '少量文字', description: '只有少量文字 —— 图标、路牌、单个标签' },
+        block: { label: '成段正文', description: '成段正文 —— 截图、表格、文档页面' }
+      }
+    },
+    contain_data_visual: {
+      label: '数据可视化',
+      description: '图片是否以图表、曲线、示意图或信息图的方式承载数据；这类图即使看起来文字很少，也会保留在 OCR 路径上。',
+      values: {
+        'true': { label: '是', description: '是 —— 图表、曲线或示意图' },
+        'false': { label: '否', description: '否 —— 照片、插画、图标或装饰图' }
+      }
+    }
   }
 }

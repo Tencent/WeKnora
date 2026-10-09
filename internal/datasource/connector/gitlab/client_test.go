@@ -1,6 +1,7 @@
 package gitlab
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -202,7 +203,8 @@ func TestFetchIncrementalSyncsMultipleProjects(t *testing.T) {
 				map[string]interface{}{"project_id": "1", "ref": "master", "paths": []interface{}{}},
 				map[string]interface{}{"project_id": "2", "ref": "master", "paths": []interface{}{}},
 			},
-		}}
+		},
+	}
 
 	items, cursor, err := connector.FetchIncremental(context.Background(), config, nil)
 	if err != nil {
@@ -404,5 +406,288 @@ func TestGitlabFilePathEscape(t *testing.T) {
 	want := "docs%2Finternal%2F%E4%B8%AD%E6%96%87-file%2Emd"
 	if got != want {
 		t.Fatalf("gitlabFilePathEscape() = %q, want %q", got, want)
+	}
+}
+
+// newCappedTestClient builds a client whose JSON and raw-file caps are small
+// enough to exercise them without materialising the production limits.
+// compareLimit stays at the production value unless the test assigns it.
+func newCappedTestClient(t *testing.T, serverURL string, jsonLimit, rawLimit int64) *client {
+	t.Helper()
+	c, err := newClient(serverURL, "token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.jsonLimit = jsonLimit
+	c.rawLimit = rawLimit
+	return c
+}
+
+func TestGetRawRejectsBlobLargerThanCap(t *testing.T) {
+	allowLocalGitLabServer(t)
+	const rawLimit = 1 << 20
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write(bytes.Repeat([]byte("a"), rawLimit+1))
+	}))
+	defer server.Close()
+
+	c := newCappedTestClient(t, server.URL, maxJSONResponseBytes, rawLimit)
+	content, err := c.getRaw(context.Background(), "/projects/1/repository/files/big.bin/raw")
+	if err == nil {
+		t.Fatalf("getRaw() accepted a %d-byte blob under a %d-byte cap", len(content), rawLimit)
+	}
+	if content != nil {
+		t.Fatalf("getRaw() returned %d bytes alongside the error, want no partial body", len(content))
+	}
+	if !strings.Contains(err.Error(), "exceeds maximum size") {
+		t.Fatalf("error = %v, want an explicit over-limit error", err)
+	}
+	if !strings.Contains(err.Error(), fmt.Sprint(rawLimit)) {
+		t.Fatalf("error = %v, want it to name the %d-byte limit", err, rawLimit)
+	}
+}
+
+func TestGetRawAcceptsBlobAtCap(t *testing.T) {
+	allowLocalGitLabServer(t)
+	const rawLimit = 1 << 20
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write(bytes.Repeat([]byte("a"), rawLimit))
+	}))
+	defer server.Close()
+
+	c := newCappedTestClient(t, server.URL, maxJSONResponseBytes, rawLimit)
+	content, err := c.getRaw(context.Background(), "/projects/1/repository/files/fit.bin/raw")
+	if err != nil {
+		t.Fatalf("getRaw() rejected a blob exactly at the cap: %v", err)
+	}
+	if len(content) != rawLimit {
+		t.Fatalf("content = %d bytes, want the full %d", len(content), rawLimit)
+	}
+}
+
+// TestRawSurfacesOversizedBlobInsteadOfFallingBack checks that hitting the size
+// cap fails the fetch rather than being mistaken for a missing /raw route and
+// retried through the base64 detail endpoint.
+func TestRawSurfacesOversizedBlobInsteadOfFallingBack(t *testing.T) {
+	allowLocalGitLabServer(t)
+	const rawLimit = 1 << 20
+	detailHits := 0
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.EscapedPath(), "/raw") {
+			_, _ = w.Write(bytes.Repeat([]byte("a"), rawLimit+1))
+			return
+		}
+		detailHits++
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"encoding":"base64","content":"SGk="}`))
+	}))
+	defer server.Close()
+
+	c := newCappedTestClient(t, server.URL, maxJSONResponseBytes, rawLimit)
+	const file = "docs/guide.mp3"
+	content, err := c.raw(context.Background(), "1", "main", file)
+	if err == nil {
+		t.Fatalf("raw() accepted a %d-byte blob under a %d-byte cap", len(content), rawLimit)
+	}
+	if !strings.Contains(err.Error(), "exceeds maximum size") {
+		t.Fatalf("error = %v, want an explicit over-limit error", err)
+	}
+	if !strings.Contains(err.Error(), file) {
+		t.Fatalf("error = %v, want the repository path %s", err, file)
+	}
+	if detailHits != 0 {
+		t.Fatalf("base64 detail endpoint hit %d times, want 0", detailHits)
+	}
+}
+
+func TestBase64FallbackRejectsOversizedDetail(t *testing.T) {
+	allowLocalGitLabServer(t)
+	const rawLimit = 3 << 20
+	limit := base64FileBytes(rawLimit)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.EscapedPath(), "/raw") {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(bytes.Repeat([]byte("a"), int(limit)+1))
+	}))
+	defer server.Close()
+
+	c := newCappedTestClient(t, server.URL, maxJSONResponseBytes, rawLimit)
+	const file = "docs/guide.mp3"
+	if _, err := c.raw(context.Background(), "1", "main", file); err == nil {
+		t.Fatal("raw() accepted an oversized base64 detail response")
+	} else if !strings.Contains(err.Error(), "exceeds maximum size") {
+		t.Fatalf("error = %v, want an explicit over-limit error", err)
+	} else if !strings.Contains(err.Error(), file) {
+		t.Fatalf("error = %v, want the repository path %s", err, file)
+	}
+}
+
+func TestGetRejectsOversizedJSONResponse(t *testing.T) {
+	allowLocalGitLabServer(t)
+	const jsonLimit = 512 << 10
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(bytes.Repeat([]byte("a"), jsonLimit+1))
+	}))
+	defer server.Close()
+
+	c := newCappedTestClient(t, server.URL, jsonLimit, maxRawFileBytes)
+	var out struct{}
+	err := c.get(context.Background(), "/projects/1", &out)
+	if err == nil {
+		t.Fatal("get() accepted an oversized JSON response")
+	}
+	if !strings.Contains(err.Error(), "exceeds maximum size") {
+		t.Fatalf("error = %v, want an explicit over-limit error", err)
+	}
+}
+
+func TestGetPageRejectsOversizedJSONResponse(t *testing.T) {
+	allowLocalGitLabServer(t)
+	const jsonLimit = 512 << 10
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(bytes.Repeat([]byte("a"), jsonLimit+1))
+	}))
+	defer server.Close()
+
+	c := newCappedTestClient(t, server.URL, jsonLimit, maxRawFileBytes)
+	if _, err := c.tree(context.Background(), "1", "main", ""); err == nil {
+		t.Fatal("tree() accepted an oversized JSON response")
+	} else if !strings.Contains(err.Error(), "exceeds maximum size") {
+		t.Fatalf("error = %v, want an explicit over-limit error", err)
+	}
+}
+
+// TestOversizedErrorBodyKeepsStatusError pins that an oversized body on a
+// non-2xx response is still reported as the HTTP status, so a large error page
+// cannot mask the real failure.
+func TestOversizedErrorBodyKeepsStatusError(t *testing.T) {
+	allowLocalGitLabServer(t)
+	const jsonLimit = 512 << 10
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write(bytes.Repeat([]byte("a"), jsonLimit+1))
+	}))
+	defer server.Close()
+
+	for name, call := range map[string]func(*client) error{
+		"get": func(c *client) error {
+			var out struct{}
+			return c.get(context.Background(), "/projects/1", &out)
+		},
+		"getPage": func(c *client) error {
+			_, err := c.tree(context.Background(), "1", "main", "")
+			return err
+		},
+	} {
+		c := newCappedTestClient(t, server.URL, jsonLimit, maxRawFileBytes)
+		err := call(c)
+		var apiErr *apiError
+		if !errors.As(err, &apiErr) {
+			t.Fatalf("%s: error = %v, want an *apiError", name, err)
+		}
+		if apiErr.status != http.StatusInternalServerError {
+			t.Fatalf("%s: status = %d, want %d", name, apiErr.status, http.StatusInternalServerError)
+		}
+	}
+}
+
+func TestNewClientSetsResponseCaps(t *testing.T) {
+	allowLocalGitLabServer(t)
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	defer server.Close()
+
+	c, err := newClient(server.URL, "token")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.jsonLimit != maxJSONResponseBytes ||
+		c.compareLimit != maxCompareResponseBytes ||
+		c.rawLimit != maxRawFileBytes {
+		t.Fatalf("caps = json %d compare %d raw %d", c.jsonLimit, c.compareLimit, c.rawLimit)
+	}
+	if c.compareLimit <= c.jsonLimit {
+		t.Fatalf("compare cap %d must sit above the metadata cap %d", c.compareLimit, c.jsonLimit)
+	}
+}
+
+// TestCompareAllowsPayloadAboveMetadataCap pins that a straight compare larger
+// than the metadata JSON cap still succeeds. That body carries commits and
+// patches the sync does not store; rejecting it would stall the project cursor.
+func TestCompareAllowsPayloadAboveMetadataCap(t *testing.T) {
+	allowLocalGitLabServer(t)
+	const (
+		jsonLimit    = 512
+		compareLimit = 8 << 10
+	)
+	padding := strings.Repeat("p", jsonLimit)
+	payload := `{"diffs":[{"old_path":"docs/old.md","new_path":"docs/new.md","renamed_file":true}],` +
+		`"compare_timeout":false,"padding":"` + padding + `"}`
+	body := []byte(payload)
+	if int64(len(body)) <= jsonLimit || int64(len(body)) > compareLimit {
+		t.Fatalf("fixture is %d bytes, want it between %d and %d", len(body), jsonLimit, compareLimit)
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(body)
+	}))
+	defer server.Close()
+
+	c := newCappedTestClient(t, server.URL, jsonLimit, maxRawFileBytes)
+	c.compareLimit = compareLimit
+
+	var project struct{}
+	if err := c.get(context.Background(), "/projects/1", &project); err == nil {
+		t.Fatal("get() accepted a body above the metadata cap")
+	} else if !strings.Contains(err.Error(), "exceeds maximum size") {
+		t.Fatalf("get() error = %v, want an explicit over-limit error", err)
+	}
+
+	diff, err := c.compare(context.Background(), "1", "abc", "def")
+	if err != nil {
+		t.Fatalf("compare() rejected a body above the metadata cap and under the compare cap: %v", err)
+	}
+	if diff.CompareTimeout {
+		t.Fatal("compare_timeout = true, want false")
+	}
+	if len(diff.Diffs) != 1 ||
+		diff.Diffs[0].OldPath != "docs/old.md" ||
+		diff.Diffs[0].NewPath != "docs/new.md" ||
+		!diff.Diffs[0].RenamedFile {
+		t.Fatalf("diffs = %+v", diff.Diffs)
+	}
+}
+
+func TestCompareRejectsPayloadAboveCompareCap(t *testing.T) {
+	allowLocalGitLabServer(t)
+	const compareLimit = 1024
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(bytes.Repeat([]byte("a"), compareLimit+1))
+	}))
+	defer server.Close()
+
+	c := newCappedTestClient(t, server.URL, maxJSONResponseBytes, maxRawFileBytes)
+	c.compareLimit = compareLimit
+	_, err := c.compare(context.Background(), "1", "abc", "def")
+	if err == nil {
+		t.Fatal("compare() accepted a body above the compare cap")
+	}
+	if !strings.Contains(err.Error(), "exceeds maximum size") ||
+		!strings.Contains(err.Error(), fmt.Sprint(compareLimit)) {
+		t.Fatalf("error = %v, want an explicit over-limit error naming %d", err, compareLimit)
 	}
 }

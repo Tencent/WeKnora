@@ -1401,6 +1401,20 @@ func TestSortedScriptPathsIsDeterministic(t *testing.T) {
 		"only files the runtime can execute are scripts")
 }
 
+func TestSortedScriptPathsSkipsVendoredTreesAtAnyDepth(t *testing.T) {
+	bundle := &SkillBundle{Files: map[string][]byte{
+		"scripts/main.py":                    []byte("x"),
+		".venv/lib/pkg/a.py":                 []byte("x"),
+		"node_modules/leftpad/index.js":      []byte("x"),
+		"tools/.venv/lib/otherpkg/b.py":      []byte("x"),
+		"sub/package/node_modules/pkg/c.mjs": []byte("x"),
+	}}
+
+	require.Equal(t, []string{"scripts/main.py"},
+		sortedScriptPaths(bundle, allScriptExtensions...),
+		"vendored trees are skipped at the bundle root and nested under subprojects")
+}
+
 type stubWorkspaceSandboxPolicy struct {
 	disabled bool
 }
@@ -2096,6 +2110,7 @@ func newInstallFixture(t *testing.T) *installFixture {
 		nil,
 		&transcriptStreams{},
 		&transcriptMessages{},
+		HostSandboxManager{},
 	)
 	fx.svc.now = func() time.Time { return time.Date(2026, 8, 19, 9, 30, 0, 0, time.UTC) }
 	return fx
@@ -3307,9 +3322,9 @@ func (s *installSessionService) KnowledgeQAByEvent(context.Context, *types.ChatM
 }
 
 func (s *installSessionService) SearchKnowledge(
-	context.Context, []string, []string, []types.TagScope, string,
-) ([]*types.SearchResult, error) {
-	return nil, nil
+	context.Context, []string, []string, []types.TagScope, string, *types.KnowledgeSearchOptions,
+) (*types.RetrievalResult, error) {
+	return &types.RetrievalResult{}, nil
 }
 
 func (s *installSessionService) AgentQA(context.Context, *types.QARequest, *event.EventBus) error {
@@ -3323,6 +3338,10 @@ type installModelService struct {
 }
 
 func (s *installModelService) CreateModel(context.Context, *types.Model) error { return nil }
+func (s *installModelService) CopyModel(context.Context, string, string) (*types.Model, error) {
+	return nil, nil
+}
+
 func (s *installModelService) GetModelByID(context.Context, string) (*types.Model, error) {
 	return nil, nil
 }

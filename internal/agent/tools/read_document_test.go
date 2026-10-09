@@ -5,12 +5,50 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
+
+func TestReadDocumentCitationIdentitySurvivesClientAndHistoryCompaction(t *testing.T) {
+	knowledge := &types.Knowledge{
+		ID: "doc-1", KnowledgeBaseID: "kb-1", Title: "Proposal.pptx", FileName: "Proposal.pptx",
+	}
+	rows := []readChunkRow{
+		{chunk: &types.Chunk{ID: "chunk-1", Content: "First body"}},
+		{chunk: &types.Chunk{
+			ID: "chunk-2", Content: "Cited body",
+			SourceLocators: types.SourceLocators{{Type: types.SourceLocatorSlide, Slide: 8}},
+		}},
+	}
+	data := (&ReadDocumentTool{}).buildData(knowledge, 2, rows)
+	result := &types.ToolResult{Success: true, Data: data, Output: "full model-only output"}
+	steps := []types.AgentStep{{ToolCalls: []types.ToolCall{{Name: ToolReadDocument, Result: result}}}}
+	stored := SanitizeAgentStepsForStorage(steps)[0].ToolCalls[0].Result
+	for name, compact := range map[string]map[string]interface{}{
+		"live":    SanitizeToolResultForClient(ToolReadDocument, result),
+		"history": stored.Data,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if compact["knowledge_id"] != "doc-1" || compact["knowledge_base_id"] != "kb-1" ||
+				compact["source_chunk_id"] != "chunk-2" {
+				t.Fatalf("lost citation provenance: %#v", compact)
+			}
+			if !reflect.DeepEqual(compact["chunk_ids"], []string{"chunk-1", "chunk-2"}) {
+				t.Fatalf("lost cited chunk IDs: %#v", compact["chunk_ids"])
+			}
+			if _, exists := compact["chunks"]; exists {
+				t.Fatal("chunk bodies should still be omitted")
+			}
+		})
+	}
+	if len(data["chunks"].([]map[string]interface{})) != 2 || result.Output != "full model-only output" {
+		t.Fatal("compaction must not mutate the full model result")
+	}
+}
 
 // ---- fakes -----------------------------------------------------------------
 
@@ -523,5 +561,41 @@ func TestReadDocumentFAQChunkExposesQuestion(t *testing.T) {
 	}
 	if !strings.Contains(res.Output, "<answer>Hold the button.</answer>") {
 		t.Fatalf("output = %s", res.Output)
+	}
+}
+
+// A truncated query result says where to continue, and offset resumes the
+// scan there; matches past the cap used to be reachable only by paging the
+// whole document.
+func TestReadDocumentQueryContinuesFromNextOffset(t *testing.T) {
+	tool, repo := newReadDocumentFixture(12)
+	for _, c := range repo.ordered {
+		c.Content = "needle " + strings.Repeat("x", 400)
+	}
+	ctx := WithOutputBudget(context.Background(), 1500)
+	first, err := tool.Execute(ctx, json.RawMessage(`{"id":"doc-1","query":"needle"}`))
+	if err != nil || !first.Success || first.Data["truncated"] != true {
+		t.Fatalf("first=%+v err=%v", first, err)
+	}
+	next, ok := first.Data["next_offset"].(int)
+	if !ok || next <= 0 || next >= 12 {
+		t.Fatalf("next_offset = %v", first.Data["next_offset"])
+	}
+	firstIDs := chunkIDsFromData(t, first.Data)
+
+	second, err := tool.Execute(ctx, json.RawMessage(fmt.Sprintf(`{"id":"doc-1","query":"needle","offset":%d}`, next)))
+	if err != nil || !second.Success {
+		t.Fatalf("second=%+v err=%v", second, err)
+	}
+	secondIDs := chunkIDsFromData(t, second.Data)
+	if len(secondIDs) == 0 {
+		t.Fatal("continuation returned nothing")
+	}
+	for _, id := range secondIDs {
+		for _, seen := range firstIDs {
+			if id == seen && id != secondIDs[0] {
+				t.Fatalf("continuation repeated %s: first=%v second=%v", id, firstIDs, secondIDs)
+			}
+		}
 	}
 }

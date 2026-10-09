@@ -217,6 +217,20 @@ select:-webkit-autofill {
     --app-accent-purple: #9d7cff;
 }
 
+/* 引用原文定位：低饱和薄荷绿，文字轻染色，较大区域用浅底和细描边。 */
+:root {
+    --app-source-highlight: #3b9b83;
+    --app-source-highlight-bg: color-mix(in srgb, var(--app-source-highlight) 20%, transparent);
+    --app-source-highlight-soft-bg: color-mix(in srgb, var(--app-source-highlight) 8%, transparent);
+    --app-source-highlight-border: color-mix(in srgb, var(--app-source-highlight) 40%, transparent);
+}
+:root[theme-mode="dark"] {
+    --app-source-highlight: #71c4aa;
+    --app-source-highlight-bg: color-mix(in srgb, var(--app-source-highlight) 24%, transparent);
+    --app-source-highlight-soft-bg: color-mix(in srgb, var(--app-source-highlight) 10%, transparent);
+    --app-source-highlight-border: color-mix(in srgb, var(--app-source-highlight) 48%, transparent);
+}
+
 /* 全局旋转动画：spinner / 刷新图标统一用 `animation: wk-spin 0.8s linear infinite` */
 @keyframes wk-spin {
     to {

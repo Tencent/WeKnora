@@ -14,6 +14,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/agent"
+	apprepo "github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/searchutil"
@@ -353,6 +354,10 @@ type WikiPendingOp struct {
 	KnowledgeID string `json:"knowledge_id"`
 	// Ingest fields
 	Language string `json:"language,omitempty"`
+	// Attempt is the parse attempt whose finalizing counter owns this op's
+	// slot. An op that outlived a reparse must not release a slot of the
+	// newer attempt. Zero on ops queued before this field existed.
+	Attempt int `json:"attempt,omitempty"`
 	// Retract fields
 	DocTitle   string   `json:"doc_title,omitempty"`
 	DocSummary string   `json:"doc_summary,omitempty"`
@@ -527,7 +532,6 @@ func EnqueueWikiIngest(
 	kbID, knowledgeID string,
 ) (bool, error) {
 	pendingOp, err := newWikiIngestPendingOp(ctx, tenantID, kbID, knowledgeID)
-
 	// Persist the pending op. A re-ingest of the same knowledge id while
 	// a previous op is still queued simply appends another row; the
 	// peekPendingList consumer collapses by dedup_key (== knowledge_id),
@@ -587,6 +591,7 @@ func newWikiIngestPendingOp(
 		Op:          WikiOpIngest,
 		KnowledgeID: knowledgeID,
 		Language:    lang,
+		Attempt:     attemptFromCtx(ctx),
 	}
 	payloadBytes, err := json.Marshal(op)
 	if err != nil {
@@ -1107,6 +1112,34 @@ func (s *wikiIngestService) reserveInflightSlot(ctx context.Context, kbID string
 	}, true
 }
 
+// wikiInflightCountScript purges expired slots exactly like the reserve
+// script does, then returns the live count. Read-mostly companion to
+// wikiInflightReserveScript so a fan-out decision sees the same view of the
+// cap a reserver would.
+const wikiInflightCountScript = `
+redis.call('ZREMRANGEBYSCORE', KEYS[1], 0, tonumber(ARGV[1]))
+return redis.call('ZCARD', KEYS[1])
+`
+
+// activeInflightSlots reports how many batches currently hold one of KB's
+// in-flight slots (standard/Redis mode). Returns -1 when the count is
+// unavailable (no Redis client, or a Redis error); callers must treat that as
+// "unknown" and stay conservative instead of scaling on a stale number.
+func (s *wikiIngestService) activeInflightSlots(ctx context.Context, kbID string) int {
+	if s.redisClient == nil {
+		return -1
+	}
+	res, err := s.redisClient.Eval(ctx, wikiInflightCountScript,
+		[]string{wikiInflightPrefix + kbID},
+		time.Now().UnixMilli(),
+	).Int()
+	if err != nil {
+		logger.Warnf(ctx, "wiki ingest: inflight count failed for KB %s: %v", kbID, err)
+		return -1
+	}
+	return res
+}
+
 // scheduleCappedRetry enqueues a single coalesced follow-up trigger after a
 // batch was turned away by the in-flight cap. asynq.TaskID collapses all
 // turned-away triggers for one KB into a single pending retry (no thundering
@@ -1262,12 +1295,17 @@ func (s *wikiIngestService) trimPendingList(ctx context.Context, ids []int64) er
 // already zero: FinalizeSubtask guards both the decrement (count > 0) and
 // the promote (parse_status = finalizing AND count = 0), so an op enqueued
 // before this accounting shipped is a harmless no-op.
-func (s *wikiIngestService) finalizeWikiSubtask(ctx context.Context, knowledgeID string) {
+func (s *wikiIngestService) finalizeWikiSubtask(ctx context.Context, knowledgeID string, attempt int) {
 	// Wiki is only finalized when its op reaches a terminal state, so this is
 	// always an intended drain (retErr=nil, final=true). Detached context: the
 	// wiki batch worker may be mid-shutdown or have a cancelled ctx when this
 	// runs; a swallowed failure would strand the parent in "finalizing".
-	finalizeSubtaskDetached(ctx, s.knowledgeRepo, knowledgeID, "wiki", nil, false, true)
+	//
+	// An op from a superseded attempt skips the drain: reparse zeroed that
+	// attempt's counter, and draining now would release a slot of the new
+	// run, promoting it to completed before its own enrichment finished.
+	superseded := attemptSuperseded(ctx, s.tracker(), knowledgeID, attempt)
+	finalizeSubtaskDetached(ctx, s.knowledgeRepo, knowledgeID, "wiki", nil, superseded, true)
 }
 
 // requeueFailedOps records in-batch failures.
@@ -1326,7 +1364,7 @@ func (s *wikiIngestService) requeueFailedOps(ctx context.Context, payload WikiIn
 		// for deleted knowledge that has no counter to drain). The
 		// matching +1 was seeded by KnowledgePostProcess.SetFinalizing.
 		if op.Op == WikiOpIngest {
-			s.finalizeWikiSubtask(ctx, op.KnowledgeID)
+			s.finalizeWikiSubtask(ctx, op.KnowledgeID, op.Attempt)
 		}
 		logger.Warnf(ctx, "wiki ingest: dropping op %s (%s) after %d failures (limit %d)", op.KnowledgeID, op.DocTitle, count, wikiMaxFailRetries)
 		if s.deadLetterRepo != nil {
@@ -3014,45 +3052,58 @@ func isTransientLLMError(ctx context.Context, err error) bool {
 // to the DB. A nil result from GetKnowledgeByIDOnly also counts as gone: the
 // repo layer uses GORM First() which filters soft-deleted rows, so a
 // soft-deleted knowledge surfaces as "not found" here — exactly what we want.
-func (s *wikiIngestService) isKnowledgeGone(ctx context.Context, kbID, knowledgeID string) bool {
+// Other lookup errors leave liveness unknown and must reach the caller so it
+// can retry instead of discarding the document's pending work.
+func (s *wikiIngestService) isKnowledgeGone(ctx context.Context, kbID, knowledgeID string) (bool, error) {
 	if knowledgeID == "" {
-		return true
+		return true, nil
 	}
 	if s.redisClient != nil {
 		if exists, err := s.redisClient.Exists(ctx, WikiDeletedTombstoneKey(kbID, knowledgeID)).Result(); err == nil && exists > 0 {
-			return true
+			return true, nil
 		}
 	}
 	kn, err := s.knowledgeSvc.GetKnowledgeByIDOnly(ctx, knowledgeID)
-	if err != nil || kn == nil {
-		return true
+	if errors.Is(err, apprepo.ErrKnowledgeNotFound) {
+		return true, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("wiki ingest: check knowledge %s: %w", knowledgeID, err)
+	}
+	if kn == nil {
+		return true, nil
 	}
 	switch kn.ParseStatus {
 	case types.ParseStatusDeleting, types.ParseStatusCancelled:
-		return true
+		return true, nil
 	}
-	return false
+	return false, nil
 }
 
 // filterLiveUpdates drops additions/summaries whose source knowledge has been
 // deleted since the Map phase finished. Retract updates are preserved so
 // pages still get cleaned up. Caches per-knowledge results to avoid DB
 // hammering when a single reduce slug carries many updates for the same doc.
-func (s *wikiIngestService) filterLiveUpdates(ctx context.Context, kbID string, updates []SlugUpdate) []SlugUpdate {
+func (s *wikiIngestService) filterLiveUpdates(
+	ctx context.Context, kbID string, updates []SlugUpdate,
+) ([]SlugUpdate, error) {
 	if len(updates) == 0 {
-		return updates
+		return updates, nil
 	}
 	goneCache := make(map[string]bool)
-	isGone := func(kid string) bool {
+	isGone := func(kid string) (bool, error) {
 		if kid == "" {
-			return false
+			return false, nil
 		}
 		if v, ok := goneCache[kid]; ok {
-			return v
+			return v, nil
 		}
-		v := s.isKnowledgeGone(ctx, kbID, kid)
+		v, err := s.isKnowledgeGone(ctx, kbID, kid)
+		if err != nil {
+			return false, err
+		}
 		goneCache[kid] = v
-		return v
+		return v, nil
 	}
 	filtered := make([]SlugUpdate, 0, len(updates))
 	dropped := 0
@@ -3061,7 +3112,11 @@ func (s *wikiIngestService) filterLiveUpdates(ctx context.Context, kbID string, 
 		case "retract", "retractStale":
 			filtered = append(filtered, u)
 		default:
-			if isGone(u.KnowledgeID) {
+			gone, err := isGone(u.KnowledgeID)
+			if err != nil {
+				return nil, err
+			}
+			if gone {
 				dropped++
 				continue
 			}
@@ -3071,7 +3126,7 @@ func (s *wikiIngestService) filterLiveUpdates(ctx context.Context, kbID string, 
 	if dropped > 0 {
 		logger.Infof(ctx, "wiki ingest: reduce dropped %d updates for deleted knowledge(s)", dropped)
 	}
-	return filtered
+	return filtered, nil
 }
 
 // reconstructContent rebuilds document text from chunks.

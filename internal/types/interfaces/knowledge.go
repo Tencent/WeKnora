@@ -264,6 +264,9 @@ type KnowledgeRepository interface {
 	DeleteKnowledge(ctx context.Context, tenantID uint64, id string) error
 	DeleteKnowledgeList(ctx context.Context, tenantID uint64, ids []string) error
 	GetKnowledgeBatch(ctx context.Context, tenantID uint64, ids []string) ([]*types.Knowledge, error)
+	// GetKnowledgeBatchByIDOnly returns knowledge by IDs without tenant filter
+	// (for shared-KB resolution; callers check permissions on every row).
+	GetKnowledgeBatchByIDOnly(ctx context.Context, ids []string) ([]*types.Knowledge, error)
 	// CheckKnowledgeExists checks if knowledge already exists.
 	// For file types, check by fileHash or (fileName+fileSize).
 	// For URL types, check by URL.

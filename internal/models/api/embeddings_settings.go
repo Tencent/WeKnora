@@ -22,6 +22,10 @@ type EmbeddingsCompat struct {
 	AcceptsTruncatePromptTokens *bool          `json:"accepts_truncate_prompt_tokens,omitempty"`
 	RequestTimeout              *int           `json:"request_timeout_seconds,omitempty"`
 	ExtraBody                   map[string]any `json:"extra_body,omitempty"`
+	ImageField                  *string        `json:"image_field,omitempty"`
+	MaxImageBatchSize           *int           `json:"max_image_batch_size,omitempty"`
+	MaxImageBytes               *int           `json:"max_image_bytes,omitempty"`
+	ImageMIMETypes              []string       `json:"image_mime_types,omitempty"`
 }
 
 // EmbeddingsSettings is the resolved (fully defaulted) form.
@@ -67,6 +71,11 @@ type EmbeddingsSettings struct {
 	// without its own deadline and lets the caller's context govern.
 	RequestTimeout int
 	ExtraBody      map[string]any
+	// ImageInput is how this endpoint takes images: on the OpenAI shape, the
+	// key of the input object that carries one ("image" on Jina; that shape
+	// has no standard image input, so an endpoint that names none takes no
+	// images), plus the documented per-request and per-image limits.
+	ImageInput
 }
 
 // BatchLimits renders the documented ceilings for SplitBatches.

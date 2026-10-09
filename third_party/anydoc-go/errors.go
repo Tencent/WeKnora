@@ -10,6 +10,7 @@ import "fmt"
 
 // Error codes mirroring the C ABI (ERR_*). Stable across versions.
 const (
+	errNeedsOCR      = C.ERR_NEEDS_OCR
 	errOK            = C.ERR_OK
 	errUnsupported   = C.ERR_UNSUPPORTED
 	errMalformed     = C.ERR_MALFORMED
@@ -27,13 +28,17 @@ const (
 // ("unsupported", "malformed", "encrypted", ...) plus the crate's
 // human-readable detail.
 type ConvertError struct {
-	// Kind is the lowercase variant name, matching the Node and Python
-	// bindings: "unsupported", "malformed", "encrypted", "resource_limit",
-	// "missing_part", "io", "pdf_no_model". Go also reports
+	// Kind is the snake-case variant name: "unsupported", "malformed", "encrypted", "resource_limit",
+	// "missing_part", "io", "pdf_no_model", "needs_ocr". Go also reports
 	// "unknown_format" for an invalid explicit Format.
 	Kind string
 	// Detail is the crate's Display output for the error.
 	Detail string
+}
+
+// NeedsOCR reports the typed scanned-page failure without matching error text.
+func (e *ConvertError) NeedsOCR() bool {
+	return e != nil && e.Kind == "needs_ocr"
 }
 
 func (e *ConvertError) Error() string {
@@ -59,6 +64,8 @@ func convertError(code C.int) error {
 
 func errorKind(code C.int) string {
 	switch code {
+	case errNeedsOCR:
+		return "needs_ocr"
 	case errUnsupported:
 		return "unsupported"
 	case errMalformed:

@@ -183,6 +183,11 @@ func TestMinerUReaderPreservesMultipartFilename(t *testing.T) {
 			}
 
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/v1/health" {
+					// MinerU <= 3.x has no V1 API.
+					http.NotFound(w, r)
+					return
+				}
 				got := capturedRequest{method: r.Method, path: r.URL.Path}
 				file, header, err := r.FormFile("files")
 				if err != nil {

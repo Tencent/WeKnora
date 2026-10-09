@@ -99,6 +99,10 @@ func (s *stubResourceCatalog) Release(context.Context, string, string, string) (
 	panic("unexpected Release")
 }
 
+func (s *stubResourceCatalog) ListReferencesByOwner(context.Context, string, ...string) ([]string, error) {
+	return nil, nil
+}
+
 func (s *stubResourceCatalog) MarkDeleted(context.Context, string) error {
 	panic("unexpected MarkDeleted")
 }

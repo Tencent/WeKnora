@@ -30,8 +30,26 @@ func SanitizeMessages(messages []chat.Message) []chat.Message {
 		if len(result) > 0 && msg.Role != "tool" {
 			prev := result[len(result)-1]
 			if prev.Role == msg.Role && prev.Role != "tool" {
-				// Merge with previous message
-				result[len(result)-1].Content += "\n\n" + msg.Content
+				// Merge with previous message.
+				//
+				// The merge has to take the tool calls along: the tool results
+				// that follow still reference them, and a tool message whose
+				// tool_call_id has no matching assistant call is rejected by
+				// OpenAI-compatible endpoints. Dropping them here is what used
+				// to turn one merged pair into a 400, and the agent then fell
+				// back to a tool-less summary call where the model can only
+				// write the call it wanted to make as text.
+				merged := prev
+				merged.Content += "\n\n" + msg.Content
+				if len(msg.ToolCalls) > 0 {
+					// Copy instead of appending in place: prev may share its
+					// backing array with the caller's slice.
+					calls := make([]chat.ToolCall, 0, len(prev.ToolCalls)+len(msg.ToolCalls))
+					calls = append(calls, prev.ToolCalls...)
+					calls = append(calls, msg.ToolCalls...)
+					merged.ToolCalls = calls
+				}
+				result[len(result)-1] = merged
 				continue
 			}
 		}

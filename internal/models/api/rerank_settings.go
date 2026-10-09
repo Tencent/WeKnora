@@ -20,6 +20,10 @@ type RerankCompat struct {
 	// UnsupportedReason marks a model this build cannot call.
 	UnsupportedReason *string        `json:"unsupported_reason,omitempty"`
 	ExtraBody         map[string]any `json:"extra_body,omitempty"`
+	ImageField        *string        `json:"image_field,omitempty"`
+	MaxImageBatchSize *int           `json:"max_image_batch_size,omitempty"`
+	MaxImageBytes     *int           `json:"max_image_bytes,omitempty"`
+	ImageMIMETypes    []string       `json:"image_mime_types,omitempty"`
 }
 
 // RerankSettings is the resolved (fully defaulted) form.
@@ -49,9 +53,8 @@ type RerankSettings struct {
 	// MaxConcurrency bounds in-flight batches when the input is split. 0
 	// means the caller's default.
 	MaxConcurrency int
-	// RequestTimeout caps one request, in seconds. 0 leaves the HTTP client
-	// without its own deadline and lets the caller's context govern, which is
-	// what every vendor but WeKnora Cloud has always done here.
+	// RequestTimeout caps one request, in seconds. 0 uses the rerank
+	// client's default (see rerank.newRerankHTTPClient).
 	RequestTimeout int
 	// AcceptsTruncatePromptTokens reports that this vendor is a vLLM-class
 	// runtime, which is the only kind that implements the
@@ -70,6 +73,12 @@ type RerankSettings struct {
 	// with different context windows. Zero sends nothing.
 	TruncatePromptTokens int
 	ExtraBody            map[string]any
+	// ImageInput is how this endpoint takes image documents, for the models
+	// whose catalog input lists image. Image documents are sent in requests
+	// of their own, at most ImageBatchLimit per request; each is scored
+	// against the query on its own, so their scores compare with the text
+	// documents' as any two batches do.
+	ImageInput
 }
 
 // BatchLimits renders the documented ceilings for SplitBatches.

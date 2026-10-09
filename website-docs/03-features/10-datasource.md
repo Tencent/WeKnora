@@ -20,6 +20,8 @@
 
 凭据更新需要提交完整配置，系统会在线验证。暂停数据源可停止后续计划同步；恢复后重新注册调度。
 
+`sync_schedule` 使用包含秒的六段 cron，例如 `0 0 */6 * * *` 表示每六小时触发；空字符串表示仅手动同步。创建、编辑及恢复数据源时会校验表达式，无效值返回 HTTP 400，不改变已保存配置或已有定时任务。历史数据源若保存了无效表达式，需先修改为合法表达式或清空，再恢复同步。
+
 ## 选择连接器
 
 | 连接器 | 类型标识 | 同步对象 |
@@ -33,6 +35,7 @@
 | 腾讯 IMA | `ima` | 知识库中的文件与笔记 |
 | Outline | `outline` | 集合（collection）中的文档，含嵌套文档 |
 | GitLab | `gitlab` | 仓库指定分支/标签下的目录 |
+| Seafile | `seafile` | 资料库中的目录与文件 |
 | RSS / Atom | `rss` | 订阅源文章 |
 
 各连接器支持的格式、认证与删除检测见参考部分。
@@ -90,6 +93,19 @@
 {"credentials":{"base_url":"https://gitlab.example.com","access_token":"<token>"},"settings":{"projects":[{"project_id":"123","ref":"main","paths":["docs"]}]}}
 ```
 
+#### Seafile（`connector/seafile/`）
+
+1. 获取 Seafile 账号的用户 API Token，确认该账号对目标资料库有读取权限。
+2. 添加「Seafile」数据源，填写 Seafile 地址（支持部署路径前缀）和 API Token。私网部署或独立 fileserver 地址需先加入 `SSRF_WHITELIST`。
+3. 测试连接后，在资源树中勾选同一资料库内的根目录、目录或文件；加密资料库和不支持的文件格式不会出现在选择器中。
+4. 发起首次同步；文件按 `<资料库名>/<资料库内路径>` 进入知识库，来源显示为「Seafile」。
+
+连接器支持定时、增量、流式检查点及同步删除。同步逐层扫描目录，以「对象 ID + 修改时间 + 大小」比较文件指纹，只下载需要更新的文件；下载经过 API 获取链接、fileserver 获取内容两步，fileserver 请求不携带令牌。每 50 次游标变更保存检查点，中断后从检查点继续。
+
+单文件获取失败不阻断其他文件，已知路径保留待重试状态；目录扫描失败或 `Retry-After` 超过 60 秒时停止本轮并暂停删除对账。删除知识条目受「同步删除」开关控制，单文件大小沿用 `MAX_FILE_SIZE_MB`。已同步的数据源不能改绑其他资料库，需新建数据源。
+
+配置、格式限制、失败恢复与删除边界见 [Seafile 接入](25-seafile.md)。
+
 #### 腾讯 IMA（`connector/ima/`）
 
 填写 credentials.client_id 和 api_key；base_url 可选，默认 `https://ima.qq.com`。资源列表是该凭据可见的 IMA 知识库（扁平列表，不展开目录），选择结果保存为 config.resource_ids；同步时递归遍历所选知识库中的全部子文件夹。源端授权失败或资源不可见时，先检查 IMA 凭据及知识库访问权。
@@ -145,14 +161,25 @@
 - **资源列举**：`GET /api/v2/user` 判断 token 身份——`type=="Group"` 为团队 token，直接列团队 repo；否则列个人 repo + 已加入 group 的 repo（用户未加入任何 group 时语雀返回 404，按空处理）。输出扁平的 `book` 资源列表，按 ExternalID 稳定排序。
 - **抓取**（`walk`，全量/增量共用）：`ListBookDocs` 列文档 → 过滤 `type != "Doc"`（跳过 Sheet/Thread/Board/Table）与 `status != "1"`（跳过草稿）→ 每次 `GetDocDetail` 之间 sleep 300ms 规避限流 → `format` 为 `markdown`/`lake` 时取 `body` Markdown 原文入库（其他格式如 html 防御性跳过并记 `skip_reason`）。
 - **增量逻辑**：游标 `yuqueCursor.BookDocTimes`（`bookID → docID → content_updated_at`），一致则跳过。删除检测：游标里有、当前列表没有 → `IsDeleted`。
+- **目录结构（`settings` 配置项）**：默认所有文档平铺在知识库根目录。两个键控制这一点：
+  - **`folder_mode`**（默认 `none`）：`none` 输出裸的 `<标题>.md`，与历史行为逐字节一致；`toc` 按书的目录层级拼出 `<书名>/<分组>/…/<标题>.md`。前端在**新建**数据源时写入 `toc`，已有数据源保持 `none`，因此升级不会改变现有来源的行为。
+  - **`toc_only`**（默认 `false`）：只让出现在该书目录节点列表中的文档入库。**仅在 `folder_mode=toc` 时生效**——目录只在该模式下才会被拉取，平铺模式下这个键不起作用。判据是"是否出现在目录中"，不是"是否有路径"——挂在目录下但未归入任何分组的文档仍会保留。**它是准入过滤器，不是清理器**：被过滤的文档只是不入库，已经同步进知识库的副本原样保留，不会被报成删除。语雀 Web UI 不显示"通过 API 创建、从未挂到目录"的文档，若把这类文档判为已删除，其内容会在源端和知识库两侧都不可达。
+- **目录归属**：`toc` 开启后目录由连接器托管——在知识库里手动调整过的目录，会在该文档下次同步时被覆盖回语雀的结构。
+- **注意 / 限制**：
+  - **切换目录模式后跑一次全量同步**：已有数据源修改 `folder_mode` 后，增量同步只会移动内容有变化的文档；手动触发一次全量同步，已导入的文档才会整体按新模式重新归位。
+  - **仅在语雀目录中移动文档不会立即反映**：增量同步按 `content_updated_at` 判断变化，只调整目录位置、未改内容的文档，会在下次内容变更或全量同步时移到新目录。
+  - **`toc_only` 不会移除已导入的文档**：开启后被过滤掉的文档不再同步，知识库中已有的副本原样保留，之后它在语雀被删除也不会同步删除，需要时请在知识库中手动清理。
 
 #### 钉钉文档（`connector/dingtalk/`）
 
 - **认证**：企业内部应用 Client ID、Client Secret 和有目标知识库访问权限的操作人 Union ID；开通 `Wiki.Workspace.Read`、`Wiki.Node.Read`、`Storage.File.Read` 后发布应用。
-- **范围**：选择知识库、文件夹或单篇 `ALIDOC/adoc` 在线文档，通过公开 Wiki / Blocks API 转为 Markdown。当前不导入钉钉表格或普通上传附件，也不依赖异步导出回调。
+- **范围**：选择知识库、文件夹或单篇 `ALIDOC/adoc` 在线文档，通过公开 Wiki / Blocks API 转为 Markdown。当前不导入钉钉表格，也不依赖异步导出回调。
+- **上传文件（默认关闭）**：`Settings.include_uploaded_files`（默认 `false`）开启后，所选范围内钉盘中的普通上传附件（`FILE/DOCUMENT` 的 `docx` / `pptx` / `xlsx` / `pdf`）会被下载并交给 WeKnora 自带解析器入库，文件名保留原扩展名、按扩展名选择解析器；单个文件上限 64 MiB，超出上限即失败且不重试（重签名只会拿到同样的字节）。下载失败（401/403/404 等）会重新申请签名后重试，最多 3 次。
+- **开关的默认值与成本**：`include_uploaded_files` 未设置或非法值一律按 `false` 处理，因此**存量数据源升级后的下一次同步（含增量同步）行为不变**，不会突然开始下载和向量化附件。打开后，这些文件的正文会进入知识库，占用存储并产生 embedding 成本；不需要时请保持关闭。关闭时连接校验、资源列表和同步都会跳过上传附件，同步日志给出的原因是 `include_uploaded_files` 未启用，而不是类型不支持。
+- **开关的作用点**：测试连接（校验）、资源选择列表、全量同步与增量同步共用同一个判据，一处关闭即处处一致。
 - **同步**：按文档 `modifiedTimestamp`（毫秒）增量读取，缺失时回退 `modifiedTime`；合并重叠选择。全量同步也会对照上次游标对账删除，避免 `sync_mode=full` 漏删。目录遍历不完整时暂缓删除。
 - **正文**：公开 Blocks API 只返回文档根下的一级块；高亮块等容器若响应里带有 `children` 会继续渲染，否则在元数据中标记 `nested_blocks_unavailable`，避免把残缺正文当成完整成功。
-- **校验**：测试连接会列出知识库、探测根节点列表，并在根下存在在线文档时试读 Blocks，以便尽早发现缺少 `Wiki.Node.Read` / `Storage.File.Read`。
+- **校验**：测试连接会列出知识库、探测根节点列表，并在根下存在在线文档时试读 Blocks；对已开启摄取的上传文件只解析存储位置并申请下载 URL，不下载正文，以便尽早发现缺少 `Wiki.Node.Read` / `Storage.File.Read`，同时让校验对多兆字节文件保持廉价。
 - **失败与恢复**：资源失效不阻断其他范围；失败范围和正文失败文档保留旧版本以便重试。任一范围无法完整扫描时暂缓删除，并保留待核对记录。失效的单独选择需要检查权限或重新选择。
 - **删除开关**：开启同步删除才移除确认在源端删除的本地知识；不可访问的资源不会直接视为已删除。
 
@@ -398,10 +425,11 @@ registry.Register(dingtalkConnector.NewConnector())                 // dingtalk
 registry.Register(imaConnector.NewConnector())                      // ima
 registry.Register(rssConnector.NewConnector())                      // rss
 registry.Register(gitlabConnector.NewConnector())                   // gitlab
+registry.Register(seafileConnector.NewConnector())                  // seafile
 registry.Register(outlineConnector.NewConnector())                  // outline
 ```
 
-> 注意：`connector.go` 中的 `ConnectorMetadataRegistry` 仍包含尚未实现的连接器（GitHub、Google Drive、OneDrive、Web Crawler、Slack、IMAP 等）。当前实际注册可用的类型为：`feishu`、`lark`、`feishu_drive`、`lark_drive`、`notion`、`confluence`、`yuque`、`dingtalk`、`ima`、`rss`、`gitlab`、`outline`。未注册类型在创建数据源时会被 `connectorRegistry.Get()` 以 `ErrConnectorNotFound` 拒绝。
+> 注意：`connector.go` 中的 `ConnectorMetadataRegistry` 仍包含尚未实现的连接器（GitHub、Google Drive、OneDrive、Web Crawler、Slack、IMAP 等）。当前实际注册可用的类型为：`feishu`、`lark`、`feishu_drive`、`lark_drive`、`notion`、`confluence`、`yuque`、`dingtalk`、`ima`、`rss`、`gitlab`、`seafile`、`outline`。未注册类型在创建数据源时会被 `connectorRegistry.Get()` 以 `ErrConnectorNotFound` 拒绝。
 
 ### 数据模型（internal/types/datasource.go）
 

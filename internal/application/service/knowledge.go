@@ -22,6 +22,8 @@ import (
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/redis/go-redis/v9"
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // Error definitions for knowledge service operations
@@ -200,6 +202,30 @@ func attemptSuperseded(ctx context.Context, tracker SpanTracker, knowledgeID str
 	return tracker.LatestAttempt(ctx, knowledgeID) > attempt
 }
 
+// currentAttemptSuperseded reports whether a newer attempt has started than the
+// one this pipeline step runs under (see withAttempt).
+func (s *knowledgeService) currentAttemptSuperseded(ctx context.Context, knowledgeID string) bool {
+	return attemptSuperseded(ctx, s.tracker(), knowledgeID, attemptFromCtx(ctx))
+}
+
+// summaryStatusClosedExpr moves a summary that is still pending or processing
+// to closed, and leaves a finished one alone. For writes that end a parse run:
+// the run's summary task no longer exists to settle the status itself.
+func summaryStatusClosedExpr(closed string) clause.Expr {
+	return gorm.Expr("CASE WHEN summary_status IN (?, ?) THEN ? ELSE summary_status END",
+		types.SummaryStatusPending, types.SummaryStatusProcessing, closed)
+}
+
+// isInFlightParseStatus reports whether a parse run may still own queued or
+// running tasks for a knowledge in this status.
+func isInFlightParseStatus(status string) bool {
+	switch status {
+	case types.ParseStatusPending, types.ParseStatusProcessing, types.ParseStatusFinalizing:
+		return true
+	}
+	return false
+}
+
 // finalizeSubtaskDetachedTimeout bounds the detached decrement so a wedged DB
 // connection can't hang a worker goroutine forever in its terminal defer.
 const finalizeSubtaskDetachedTimeout = 10 * time.Second
@@ -237,12 +263,45 @@ func finalizeSubtaskDetached(
 	if !willDrain {
 		return
 	}
+	if err := releaseSubtaskSlot(ctx, repo, knowledgeID); err != nil {
+		logger.Errorf(ctx, "finalize subtask decrement failed source=%s knowledge=%s err=%v; "+
+			"row will be left to the housekeeping sweep", source, knowledgeID, err)
+	}
+}
+
+// subtaskSlotReleaseAttempts bounds the retry of one slot release. The
+// release is the only thing that drains the slot — the task has already
+// finished — so one transient DB error must not strand the row in
+// "finalizing". The decrement and promote commit together, so a failed
+// attempt rolled back and retrying it cannot drain twice.
+const (
+	subtaskSlotReleaseAttempts = 3
+	subtaskSlotReleaseBackoff  = 200 * time.Millisecond
+)
+
+// releaseSubtaskSlot releases one finalizing slot on a context detached from
+// the caller's cancellation (see finalizeSubtaskDetached), retrying transient
+// failures within finalizeSubtaskDetachedTimeout.
+func releaseSubtaskSlot(ctx context.Context, repo interfaces.KnowledgeRepository, knowledgeID string) error {
 	dctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), finalizeSubtaskDetachedTimeout)
 	defer cancel()
-	if _, _, err := repo.FinalizeSubtask(dctx, knowledgeID); err != nil {
-		logger.Warnf(ctx, "finalize subtask decrement failed source=%s knowledge=%s err=%v",
-			source, knowledgeID, err)
+	var lastErr error
+	for attempt := 1; attempt <= subtaskSlotReleaseAttempts; attempt++ {
+		_, _, err := repo.FinalizeSubtask(dctx, knowledgeID)
+		if err == nil {
+			return nil
+		}
+		lastErr = err
+		if attempt == subtaskSlotReleaseAttempts {
+			break
+		}
+		select {
+		case <-time.After(time.Duration(attempt) * subtaskSlotReleaseBackoff):
+		case <-dctx.Done():
+			return fmt.Errorf("%w (last error: %v)", dctx.Err(), lastErr)
+		}
 	}
+	return lastErr
 }
 
 // beginStage / endStage / failStage / skipStage are the by-name shims

@@ -11,7 +11,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/application/access"
 	"github.com/Tencent/WeKnora/internal/application/repository"
+	"github.com/Tencent/WeKnora/internal/common"
+	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -45,9 +48,12 @@ type wikiPageService struct {
 	repo            interfaces.WikiPageRepository
 	chunkRepo       interfaces.ChunkRepository
 	kbService       interfaces.KnowledgeBaseService
+	kbShareService  interfaces.KBShareService
 	taskPendingRepo interfaces.TaskPendingOpsRepository
 	redisClient     *redis.Client
 }
+
+const maxWikiSearchKnowledgeBases = 32
 
 // NewWikiPageService creates a new wiki page service
 func NewWikiPageService(
@@ -56,11 +62,13 @@ func NewWikiPageService(
 	kbService interfaces.KnowledgeBaseService,
 	taskPendingRepo interfaces.TaskPendingOpsRepository,
 	redisClient *redis.Client,
+	kbShareService interfaces.KBShareService,
 ) interfaces.WikiPageService {
 	return &wikiPageService{
 		repo:            repo,
 		chunkRepo:       chunkRepo,
 		kbService:       kbService,
+		kbShareService:  kbShareService,
 		taskPendingRepo: taskPendingRepo,
 		redisClient:     redisClient,
 	}
@@ -124,6 +132,92 @@ func (s *wikiPageService) UpdatePage(ctx context.Context, page *types.WikiPage) 
 		return nil, fmt.Errorf("get existing page: %w", err)
 	}
 	stripWikiPageInlineChunkCitations(page)
+
+	// ── Truncation choke point ────────────────
+	//
+	// Machine edits hand the *whole* page to a model and persist whatever comes
+	// back, and markdown tables are the shape it gets wrong most often: a
+	// hundred-row certificate ledger returns with thirty rows, finish_reason=
+	// stop, no provider error. That is not the completion-budget truncation
+	// handled on the ingest side (which continues and then refuses) — the answer
+	// is complete, it is simply short on rows. Storing it shrinks the page with
+	// no error, no failed addition, and a revision entry that reads like any
+	// other edit. Measured on a table-heavy knowledge base: a bulk ingest left a
+	// batch of untouched pages shorter than before it ran.
+	//
+	// The check lives here, on the one write path every caller shares, because a
+	// guard in the ingest caller only covers the ingest caller: the agent's
+	// whole-page writer hands its own model output to this same method.
+	//
+	// The two machine callers get different allowances:
+	//
+	//   - The agent's whole-page writer can be told to try again, so it is held
+	//     to "no stored row identity may vanish": its loss limit is zero and any
+	//     loss refuses the write, which the tool returns to the model so it can
+	//     re-emit the page (or switch to exact-text replacement).
+	//   - Ingest cannot retry cheaply — a refusal keeps the contributing
+	//     documents queued for another full Map and spends their retry budget —
+	//     and its editor prompt explicitly allows de-duplicating rows, so only a
+	//     loss STRICTLY above wikiWriteIngestRowIdentityLossLimit counts as
+	//     truncation. The ratio is computed over distinct identities (see
+	//     wikiWriteUniqueRowIdentityCount), never over row counts.
+	//
+	// Deliberate shrinkages are exempt: a human deleting rows through the wiki
+	// UI, a revert to an older (possibly shorter) revision, and any caller that
+	// knows it is removing content and says so with types.WithWikiShrinkAllowed
+	// (the ingest retract path and the agent's exact-text replacement do).
+	source := types.WikiEditSourceFromContext(ctx)
+	if source != types.WikiEditSourceUser && source != types.WikiEditSourceRevert &&
+		!types.WikiShrinkAllowedFromContext(ctx) {
+		if missing := wikiWriteMissingRowIdentities(existing.Content, page.Content); len(missing) > 0 {
+			storedIdentities := wikiWriteUniqueRowIdentityCount(existing.Content)
+			lossRatio := wikiWriteRowIdentityLossRatio(len(missing), storedIdentities)
+			lossLimit := wikiWriteIngestRowIdentityLossLimit
+			if source == types.WikiEditSourceAgent {
+				lossLimit = 0
+			}
+			if lossRatio > lossLimit {
+				examples := strings.Join(wikiWriteDroppedRowExamples(missing), ", ")
+				// Identities, not rows: several rows of the stored page may
+				// share one identity, and mixing the two counts would make the
+				// ratio unreadable.
+				logger.Warnf(ctx,
+					"wiki page write refused (rewrite dropped %d of %d distinct table row identities, "+
+						"ratio %.2f > limit %.2f): slug=%s source=%s content %d -> %d chars; "+
+						"keeping the stored version (e.g. %s)",
+					len(missing), storedIdentities, lossRatio, lossLimit, page.Slug, source,
+					len(existing.Content), len(page.Content), examples)
+				common.PipelineWarn(ctx, "WikiWrite", "page_write_dropped_table_rows", map[string]interface{}{
+					"slug":               page.Slug,
+					"source":             source,
+					"stored_identities":  storedIdentities,
+					"missing_identities": len(missing),
+					"loss_ratio":         lossRatio,
+					"loss_limit":         lossLimit,
+					"examples":           examples,
+				})
+				// The refusal is an explicit error, not "the stored page came
+				// back unchanged": a successful write that changes nothing
+				// user-visible leaves `version` alone too (see the version-bump
+				// policy above), so the version cannot tell a caller whether
+				// its write landed. Ingest maps this sentinel to a deferred
+				// update — the documents behind it are kept for a later batch
+				// instead of being trimmed — while the agent surfaces it to the
+				// model, which can re-emit the rows.
+				return nil, fmt.Errorf(
+					"%w: slug %s lost %d of %d table row identities (e.g. %s); the stored page is unchanged",
+					ErrWikiWriteDroppedTableRows, page.Slug, len(missing), storedIdentities, examples)
+			}
+			// Inside the ingest tolerance: the rewrite is written, and the loss
+			// is recorded for anyone tuning the limit. The identity is only the
+			// row's first non-empty cell, so a tolerated loss may be a merge of
+			// same-identity rows and says nothing about their other columns.
+			logger.Debugf(ctx,
+				"wiki page write kept a rewrite that dropped %d of %d distinct table row identities "+
+					"(ratio %.2f <= limit %.2f): slug=%s source=%s",
+				len(missing), storedIdentities, lossRatio, lossLimit, page.Slug, source)
+		}
+	}
 
 	oldOutLinks := existing.OutLinks
 
@@ -908,12 +1002,22 @@ func (s *wikiPageService) RebuildLinks(ctx context.Context, kbID string) error {
 		}
 	}
 
-	// Save all pages (link rebuild is metadata-only, no version bump)
+	// Save all pages (link rebuild is metadata-only, no version bump).
+	// The rebuild stays best-effort — one unwritable page must not discard the
+	// pages that can be written — but the failures are accumulated and
+	// reported, so callers never see a successful rebuild for a half-written
+	// link graph.
+	var failures []error
 	for _, p := range pages {
 		p.UpdatedAt = time.Now()
 		if err := s.repo.UpdateMeta(ctx, p); err != nil {
 			logger.Warnf(ctx, "wiki: failed to update links for page %s: %v", p.Slug, err)
+			failures = append(failures, fmt.Errorf("%s: %w", p.Slug, err))
 		}
+	}
+	if len(failures) > 0 {
+		return fmt.Errorf("rebuild wiki links: %d of %d pages failed: %w",
+			len(failures), len(pages), errors.Join(failures...))
 	}
 
 	return nil
@@ -1020,6 +1124,109 @@ func (s *wikiPageService) CountByType(ctx context.Context, kbID string) (map[str
 // SearchPages performs full-text search over wiki pages
 func (s *wikiPageService) SearchPages(ctx context.Context, kbID string, query string, limit int) ([]*types.WikiPage, error) {
 	return s.repo.Search(ctx, kbID, query, limit)
+}
+
+func (s *wikiPageService) SearchPagesAcross(
+	ctx context.Context, kbIDs []string, query string, limit int,
+) ([]*types.WikiPage, error) {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return nil, apperrors.NewBadRequestError("query is required")
+	}
+
+	ids := uniqueNonEmptyWikiSearchKBIDs(kbIDs)
+	if len(ids) == 0 {
+		return nil, apperrors.NewBadRequestError(
+			"at least one knowledge_base_id or knowledge_base_ids must be provided")
+	}
+	if len(ids) > maxWikiSearchKnowledgeBases {
+		return nil, apperrors.NewBadRequestError(
+			fmt.Sprintf("at most %d knowledge_base_ids are allowed", maxWikiSearchKnowledgeBases))
+	}
+
+	if s.kbService == nil {
+		return nil, apperrors.NewInternalServerError("knowledge base service is not configured")
+	}
+
+	kbs, err := s.kbService.GetKnowledgeBasesByIDsOnly(ctx, ids)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{
+			"knowledge_base_ids": ids,
+		})
+		return nil, err
+	}
+
+	kbByID := make(map[string]*types.KnowledgeBase, len(kbs))
+	for _, kb := range kbs {
+		if kb == nil || kb.ID == "" {
+			continue
+		}
+		kbByID[kb.ID] = kb
+	}
+
+	authorized := make([]*types.KnowledgeBase, 0, len(ids))
+	for _, id := range ids {
+		kb, ok := kbByID[id]
+		if !ok {
+			return nil, apperrors.NewNotFoundError("knowledge base not found")
+		}
+		authorized = append(authorized, kb)
+	}
+
+	if types.CallerFromContext(ctx).TenantID == 0 {
+		return nil, apperrors.NewUnauthorizedError("tenant id is required")
+	}
+	// Authorize before inspecting KB settings so an unauthorized caller gets
+	// the same NotFound for a foreign KB regardless of its wiki setting.
+	if err := access.AuthorizeKBAccess(ctx, s.kbShareService, authorized); err != nil {
+		return nil, err
+	}
+	for _, kb := range authorized {
+		if !kb.IsWikiEnabled() {
+			return nil, apperrors.NewBadRequestError("Wiki feature is not enabled for this knowledge base")
+		}
+	}
+
+	pages, err := s.repo.SearchAcross(ctx, ids, query, limit)
+	if err != nil {
+		if isInvalidWikiSearchQuery(err) {
+			return nil, apperrors.NewBadRequestError("invalid search query")
+		}
+		return nil, err
+	}
+	if pages == nil {
+		return []*types.WikiPage{}, nil
+	}
+	return pages, nil
+}
+
+func uniqueNonEmptyWikiSearchKBIDs(ids []string) []string {
+	if len(ids) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(ids))
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	return out
+}
+
+func isInvalidWikiSearchQuery(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "invalid regular expression") ||
+		strings.Contains(msg, "invalid regex")
 }
 
 // --- Internal helpers ---

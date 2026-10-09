@@ -53,8 +53,18 @@ class ImageRef(_message.Message):
     image_data: bytes
     def __init__(self, filename: _Optional[str] = ..., original_ref: _Optional[str] = ..., mime_type: _Optional[str] = ..., storage_key: _Optional[str] = ..., image_data: _Optional[bytes] = ...) -> None: ...
 
+class SourceBlock(_message.Message):
+    __slots__ = ("start", "end", "locator_json")
+    START_FIELD_NUMBER: _ClassVar[int]
+    END_FIELD_NUMBER: _ClassVar[int]
+    LOCATOR_JSON_FIELD_NUMBER: _ClassVar[int]
+    start: int
+    end: int
+    locator_json: str
+    def __init__(self, start: _Optional[int] = ..., end: _Optional[int] = ..., locator_json: _Optional[str] = ...) -> None: ...
+
 class ReadResponse(_message.Message):
-    __slots__ = ("markdown_content", "image_refs", "image_dir_path", "metadata", "error")
+    __slots__ = ("markdown_content", "image_refs", "image_dir_path", "metadata", "error", "source_blocks")
     class MetadataEntry(_message.Message):
         __slots__ = ("key", "value")
         KEY_FIELD_NUMBER: _ClassVar[int]
@@ -67,15 +77,17 @@ class ReadResponse(_message.Message):
     IMAGE_DIR_PATH_FIELD_NUMBER: _ClassVar[int]
     METADATA_FIELD_NUMBER: _ClassVar[int]
     ERROR_FIELD_NUMBER: _ClassVar[int]
+    SOURCE_BLOCKS_FIELD_NUMBER: _ClassVar[int]
     markdown_content: str
     image_refs: _containers.RepeatedCompositeFieldContainer[ImageRef]
     image_dir_path: str
     metadata: _containers.ScalarMap[str, str]
     error: str
-    def __init__(self, markdown_content: _Optional[str] = ..., image_refs: _Optional[_Iterable[_Union[ImageRef, _Mapping]]] = ..., image_dir_path: _Optional[str] = ..., metadata: _Optional[_Mapping[str, str]] = ..., error: _Optional[str] = ...) -> None: ...
+    source_blocks: _containers.RepeatedCompositeFieldContainer[SourceBlock]
+    def __init__(self, markdown_content: _Optional[str] = ..., image_refs: _Optional[_Iterable[_Union[ImageRef, _Mapping]]] = ..., image_dir_path: _Optional[str] = ..., metadata: _Optional[_Mapping[str, str]] = ..., error: _Optional[str] = ..., source_blocks: _Optional[_Iterable[_Union[SourceBlock, _Mapping]]] = ...) -> None: ...
 
 class ReadStreamMeta(_message.Message):
-    __slots__ = ("markdown_content", "image_dir_path", "metadata", "error", "image_count")
+    __slots__ = ("markdown_content", "image_dir_path", "metadata", "error", "image_count", "source_blocks")
     class MetadataEntry(_message.Message):
         __slots__ = ("key", "value")
         KEY_FIELD_NUMBER: _ClassVar[int]
@@ -88,12 +100,14 @@ class ReadStreamMeta(_message.Message):
     METADATA_FIELD_NUMBER: _ClassVar[int]
     ERROR_FIELD_NUMBER: _ClassVar[int]
     IMAGE_COUNT_FIELD_NUMBER: _ClassVar[int]
+    SOURCE_BLOCKS_FIELD_NUMBER: _ClassVar[int]
     markdown_content: str
     image_dir_path: str
     metadata: _containers.ScalarMap[str, str]
     error: str
     image_count: int
-    def __init__(self, markdown_content: _Optional[str] = ..., image_dir_path: _Optional[str] = ..., metadata: _Optional[_Mapping[str, str]] = ..., error: _Optional[str] = ..., image_count: _Optional[int] = ...) -> None: ...
+    source_blocks: _containers.RepeatedCompositeFieldContainer[SourceBlock]
+    def __init__(self, markdown_content: _Optional[str] = ..., image_dir_path: _Optional[str] = ..., metadata: _Optional[_Mapping[str, str]] = ..., error: _Optional[str] = ..., image_count: _Optional[int] = ..., source_blocks: _Optional[_Iterable[_Union[SourceBlock, _Mapping]]] = ...) -> None: ...
 
 class ReadStreamResponse(_message.Message):
     __slots__ = ("meta", "image")

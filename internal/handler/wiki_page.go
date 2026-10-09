@@ -12,6 +12,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/searchutil"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
@@ -404,12 +405,12 @@ func (h *WikiPageHandler) recordManualWikiActivity(
 
 // GetPage godoc
 // @Summary      Get a wiki page by slug
-// @Description  Retrieve a wiki page by its slug
+// @Description  Retrieve a wiki page by its slug, including titles of existing backlinks
 // @Tags         Wiki
 // @Produce      json
 // @Param        kb_id  path  string  true  "Knowledge base ID"
 // @Param        slug   path  string  true  "Page slug"
-// @Success      200  {object}  types.WikiPage
+// @Success      200  {object}  types.WikiPageDetail
 // @Failure      404  {object}  errors.AppError
 // @Security     Bearer
 // @Router       /knowledgebase/{kb_id}/wiki/pages/{slug} [get]
@@ -436,7 +437,24 @@ func (h *WikiPageHandler) GetPage(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, page)
+	titles := make(map[string]string, len(page.InLinks))
+	// Bound SQL parameters while resolving every backlink, including pages
+	// outside the sidebar's paginated window.
+	const batchSize = 1000
+	for start := 0; start < len(page.InLinks); start += batchSize {
+		end := min(start+batchSize, len(page.InLinks))
+		pages, err := h.wikiService.ListBySlugs(c.Request.Context(), kbID, page.InLinks[start:end])
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		for slug, backlink := range pages {
+			if backlink != nil {
+				titles[slug] = backlink.Title
+			}
+		}
+	}
+	c.JSON(http.StatusOK, types.WikiPageDetail{WikiPage: page, InLinkTitles: titles})
 }
 
 // UpdatePage godoc
@@ -1017,6 +1035,118 @@ func (h *WikiPageHandler) SearchPages(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"pages": pages})
+}
+
+// SearchWikiRequest is the body for POST /api/v1/wiki-search.
+type SearchWikiRequest struct {
+	Query            string   `json:"query" binding:"required"`
+	KnowledgeBaseID  string   `json:"knowledge_base_id"`
+	KnowledgeBaseIDs []string `json:"knowledge_base_ids"`
+	Limit            int      `json:"limit"`
+}
+
+// WikiSearchHit is the slim POST /wiki-search hit. Full page body is on
+// GET /knowledgebase/:kb_id/wiki/pages/*slug.
+type WikiSearchHit struct {
+	ID              string            `json:"id"`
+	KnowledgeBaseID string            `json:"knowledge_base_id"`
+	Slug            string            `json:"slug"`
+	Title           string            `json:"title"`
+	PageType        string            `json:"page_type"`
+	Aliases         types.StringArray `json:"aliases"`
+	Summary         string            `json:"summary"`
+	MatchSnippet    string            `json:"match_snippet,omitempty"`
+}
+
+// SearchPagesAcross godoc
+// @Summary      Cross-KB wiki search
+// @Description  Cross-KB wiki search using the same POSIX regex ranking as single-KB wiki search
+// @Tags         Wiki
+// @Accept       json
+// @Produce      json
+// @Param        request  body  SearchWikiRequest  true  "Wiki search request"
+// @Success      200  {object}  map[string]interface{}
+// @Failure      400  {object}  errors.AppError
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /wiki-search [post]
+func (h *WikiPageHandler) SearchPagesAcross(c *gin.Context) {
+	ctx := logger.CloneContext(c.Request.Context())
+
+	var request SearchWikiRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		_ = c.Error(errors.NewBadRequestError(err.Error()))
+		return
+	}
+
+	kbIDs := mergeWikiSearchKBIDs(request.KnowledgeBaseIDs, request.KnowledgeBaseID)
+	if strings.TrimSpace(request.Query) == "" {
+		_ = c.Error(errors.NewBadRequestError("query is required"))
+		return
+	}
+	if len(kbIDs) == 0 {
+		_ = c.Error(errors.NewBadRequestError(
+			"at least one knowledge_base_id or knowledge_base_ids must be provided"))
+		return
+	}
+	if err := types.AuthorizeTenantAPIKeyKnowledgeTargets(ctx, kbIDs, nil); err != nil {
+		_ = c.Error(err)
+		return
+	}
+
+	logger.Infof(ctx, "Wiki search request, knowledge base IDs: %v, query: %s",
+		secutils.SanitizeForLogArray(kbIDs), secutils.SanitizeForLog(request.Query))
+
+	pages, err := h.wikiService.SearchPagesAcross(ctx, kbIDs, request.Query, request.Limit)
+	if err != nil {
+		if _, ok := errors.IsAppError(err); ok {
+			_ = c.Error(err)
+			return
+		}
+		logger.ErrorWithFields(ctx, err, nil)
+		_ = c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    wikiPagesToSearchHits(pages, request.Query),
+	})
+}
+
+func wikiPagesToSearchHits(pages []*types.WikiPage, query string) []WikiSearchHit {
+	hits := make([]WikiSearchHit, 0, len(pages))
+	for _, page := range pages {
+		if page == nil {
+			continue
+		}
+		hits = append(hits, WikiSearchHit{
+			ID:              page.ID,
+			KnowledgeBaseID: page.KnowledgeBaseID,
+			Slug:            page.Slug,
+			Title:           page.Title,
+			PageType:        page.PageType,
+			Aliases:         page.Aliases,
+			Summary:         page.Summary,
+			MatchSnippet:    searchutil.ExtractSnippet(page.Content, query),
+		})
+	}
+	return hits
+}
+
+func mergeWikiSearchKBIDs(ids []string, single string) []string {
+	out := make([]string, 0, len(ids)+1)
+	appendID := func(id string) {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			return
+		}
+		out = append(out, id)
+	}
+	for _, id := range ids {
+		appendID(id)
+	}
+	appendID(single)
+	return out
 }
 
 // RebuildLinks godoc

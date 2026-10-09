@@ -47,7 +47,7 @@ flowchart LR
 | `server.port` | int | 8080 | HTTP 监听端口，校验范围 1–65535 |
 | `server.host` | string | "0.0.0.0" | 监听地址 |
 | `server.log_path` | string | 空 | 日志文件路径（也可用环境变量 `LOG_PATH`） |
-| `server.shutdown_timeout` | duration | 30s | 优雅停机超时 |
+| `server.shutdown_timeout` | duration | 30s | 优雅停机总预算。连接排空与资源清理共用，默认留 5s 给清理 |
 
 ### conversation（`ConversationConfig`）——检索问答管线
 
@@ -294,6 +294,10 @@ AWS S3 的 `S3_ACCESS_KEY` / `S3_SECRET_KEY` 可以**同时留空**，此时走 
 | `WEKNORA_HOUSEKEEPING_ENABLED` | 启用 | 回收卡在 processing 的脏数据 |
 | `WEKNORA_DOCUMENT_PROCESS_TIMEOUT` / `WEKNORA_DOCREADER_CALL_TIMEOUT` | 2h / 30m | 文档处理任务与单次 RPC 超时 |
 | `WEKNORA_PADDLEOCR_VL_TIMEOUT` | 1000s | 自建 PaddleOCR-VL HTTP 请求超时，支持正数 Go duration（如 `5400s`、`90m`）；空值、无效值或非正数使用默认值。外层超时需留余量，例如本项 `90m`、DocReader `100m`、文档任务 `2h` |
+| `WEKNORA_MINERU_TIMEOUT` | 1000s | 自建 MinerU 单次解析超时（V1 API 为整个解析任务，旧版为 `/file_parse` 请求），格式与默认值规则同上；超大 PDF 同样需要外层超时留余量 |
+| `WEKNORA_MINERU_CLOUD_TIMEOUT` | 600s | MinerU 云端（mineru.net）轮询解析结果的最长时间，格式与默认值规则同上 |
+| `WEKNORA_PADDLEOCR_VL_CLOUD_TIMEOUT` | 600s | PaddleOCR-VL 云端（AI Studio）轮询解析结果的最长时间，格式与默认值规则同上 |
+| `WEKNORA_WEKNORACLOUD_TIMEOUT` | 20m | WeKnoraCloud 托管 docreader 轮询任务结果的最长时间，格式与默认值规则同上；应小于 `WEKNORA_DOCREADER_CALL_TIMEOUT` |
 
 沙箱后端、网络策略、脚本开关与个人环境变量使用空间配置/API 管理，见[技能与沙箱](../03-features/22-skills-sandbox.md)。长期记忆与自动标签均默认关闭，分别使用租户 memory_config 和知识库 auto_tag_config，不用全局环境变量替代各空间配置。
 

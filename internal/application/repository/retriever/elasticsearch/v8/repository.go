@@ -12,6 +12,7 @@ import (
 	typesLocal "github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/elastic/go-elasticsearch/v8"
+	"github.com/elastic/go-elasticsearch/v8/typedapi/core/bulk"
 	"github.com/elastic/go-elasticsearch/v8/typedapi/core/search"
 	"github.com/elastic/go-elasticsearch/v8/typedapi/types"
 	"github.com/elastic/go-elasticsearch/v8/typedapi/types/enums/scriptlanguage"
@@ -205,15 +206,64 @@ func (e *elasticsearchRepository) BatchSave(ctx context.Context,
 		log.Debugf("[Elasticsearch] Added chunk ID %s to bulk request", embedding.ChunkID)
 	}
 
-	// Execute the bulk request
-	_, err := indexRequest.Do(ctx)
+	// Execute the bulk request. Elasticsearch answers an accepted _bulk call
+	// with HTTP 200 even when it rejects individual documents, so the
+	// per-item errors in the response body are the only failure signal.
+	resp, err := indexRequest.Do(ctx)
 	if err != nil {
 		log.Errorf("[Elasticsearch] Failed to execute bulk operation: %v", err)
 		return fmt.Errorf("failed to do bulk: %w", err)
 	}
+	if err := inspectBulkResponse(ctx, resp); err != nil {
+		return err
+	}
 
 	log.Infof("[Elasticsearch] Successfully batch saved %d indices", len(embeddingList))
 	return nil
+}
+
+// bulkErrorSummaryLimit caps how many per-item failures are described in the
+// returned error; the reported count always covers every failed item.
+const bulkErrorSummaryLimit = 5
+
+// inspectBulkResponse converts per-item _bulk failures into an error. A bulk
+// request that the server accepted answers HTTP 200, so a document rejected
+// for a mapping mismatch, a read-only index or an item-level rejection is
+// visible only in the response body.
+//
+// The error names the document _id and the bounded error.type of up to
+// bulkErrorSummaryLimit failed items. error.reason is deliberately excluded
+// because it can embed document content.
+func inspectBulkResponse(ctx context.Context, resp *bulk.Response) error {
+	if resp == nil || !resp.Errors {
+		return nil
+	}
+
+	log := logger.GetLogger(ctx)
+	msgs := make([]string, 0, bulkErrorSummaryLimit)
+	failed := 0
+	for _, item := range resp.Items {
+		for op, detail := range item {
+			if detail.Error == nil {
+				continue
+			}
+			failed++
+			id := ""
+			if detail.Id_ != nil {
+				id = *detail.Id_
+			}
+			log.Debugf("[Elasticsearch] Bulk item failed: op=%s id=%s type=%s",
+				op, id, detail.Error.Type)
+			if len(msgs) < bulkErrorSummaryLimit {
+				msgs = append(msgs, fmt.Sprintf("[%s %s] %s", op, id, detail.Error.Type))
+			}
+		}
+	}
+	if failed == 0 {
+		return fmt.Errorf("elasticsearch: bulk reported errors without per-item failure detail")
+	}
+	return fmt.Errorf("elasticsearch: bulk partial failure (%d/%d documents failed, first %d: %s)",
+		failed, len(resp.Items), len(msgs), strings.Join(msgs, "; "))
 }
 
 // DeleteByChunkIDList removes documents from the index based on chunk IDs
@@ -557,6 +607,14 @@ func (e *elasticsearchRepository) KeywordsRetrieve(ctx context.Context,
 	}, nil
 }
 
+// copySourceDoc decodes a source row for CopyIndices. IsEnabled shadows the
+// embedded field so a row written before is_enabled existed, which retrieval
+// treats as enabled, can be told apart from an explicit false.
+type copySourceDoc struct {
+	elasticsearchRetriever.VectorEmbedding
+	IsEnabled *bool `json:"is_enabled"`
+}
+
 // CopyIndices 复制索引数据
 func (e *elasticsearchRepository) CopyIndices(ctx context.Context,
 	sourceKnowledgeBaseID string,
@@ -577,13 +635,13 @@ func (e *elasticsearchRepository) CopyIndices(ctx context.Context,
 		return nil
 	}
 
-	// Build query parameters
-	params := typesLocal.RetrieveParams{
-		KnowledgeBaseIDs: []string{sourceKnowledgeBaseID},
-	}
-
-	// Build base query conditions
-	filter := e.getBaseConds(params)
+	// Scan every row of the source knowledge base. getBaseConds is not used
+	// here because it drops disabled rows, which must be copied as disabled.
+	filter := []types.Query{{Terms: &types.TermsQuery{
+		TermsQuery: map[string]types.TermsQueryField{
+			e.idField("knowledge_base_id"): []string{sourceKnowledgeBaseID},
+		},
+	}}}
 
 	// Set batch processing parameters
 	batchSize := 500
@@ -617,7 +675,7 @@ func (e *elasticsearchRepository) CopyIndices(ctx context.Context,
 
 		for _, hit := range searchResponse.Hits.Hits {
 			// Parse source document
-			var sourceDoc elasticsearchRetriever.VectorEmbedding
+			var sourceDoc copySourceDoc
 			if err := json.Unmarshal(hit.Source_, &sourceDoc); err != nil {
 				log.Errorf("[Elasticsearch] Failed to parse source index data: %v", err)
 				continue
@@ -639,11 +697,6 @@ func (e *elasticsearchRepository) CopyIndices(ctx context.Context,
 				continue
 			}
 
-			// Save embedding vector to embeddingMap
-			if len(sourceDoc.Embedding) > 0 {
-				embeddingMap[targetChunkID] = sourceDoc.Embedding
-			}
-
 			// Handle SourceID transformation for generated questions
 			// Generated questions have SourceID format: {chunkID}-{questionID}
 			// Regular chunks have SourceID == ChunkID
@@ -660,6 +713,12 @@ func (e *elasticsearchRepository) CopyIndices(ctx context.Context,
 				targetSourceID = uuid.New().String()
 			}
 
+			// BatchSave looks embeddings up by SourceID, so key by the target
+			// SourceID; rows of one chunk would collide on the chunk ID.
+			if len(sourceDoc.Embedding) > 0 {
+				embeddingMap[targetSourceID] = sourceDoc.Embedding
+			}
+
 			// Create new index information
 			indexInfo := &typesLocal.IndexInfo{
 				Content:         sourceDoc.Content,
@@ -668,6 +727,7 @@ func (e *elasticsearchRepository) CopyIndices(ctx context.Context,
 				ChunkID:         targetChunkID,
 				KnowledgeID:     targetKnowledgeID,
 				KnowledgeBaseID: targetKnowledgeBaseID,
+				IsEnabled:       sourceDoc.IsEnabled == nil || *sourceDoc.IsEnabled,
 			}
 
 			indexInfoList = append(indexInfoList, indexInfo)
