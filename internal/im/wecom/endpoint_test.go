@@ -13,9 +13,11 @@ import (
 func setWhitelistForTest(t *testing.T, entries string) {
 	t.Helper()
 	secutils.ResetSSRFWhitelistForTest()
-	os.Setenv("SSRF_WHITELIST", entries)
+	if err := os.Setenv("SSRF_WHITELIST", entries); err != nil {
+		t.Fatalf("failed to set SSRF_WHITELIST: %v", err)
+	}
 	t.Cleanup(func() {
-		os.Unsetenv("SSRF_WHITELIST")
+		_ = os.Unsetenv("SSRF_WHITELIST")
 		secutils.ResetSSRFWhitelistForTest()
 	})
 }
@@ -35,10 +37,12 @@ func TestValidateEndpointURLAcceptsWhitelistedCustomWssEndpoint(t *testing.T) {
 // The scheme pin is untouched: an https:// URL is still rejected where a wss
 // endpoint is required, and vice versa.
 func TestValidateEndpointURLSchemePinUnchanged(t *testing.T) {
-	if err := validateEndpointURL("https://im.example.com", defaultWSEndpoint, "wss"); err == nil || !strings.Contains(err.Error(), "wss://") {
+	err := validateEndpointURL("https://im.example.com", defaultWSEndpoint, "wss")
+	if err == nil || !strings.Contains(err.Error(), "wss://") {
 		t.Fatalf("https endpoint must be rejected for a wss slot, got: %v", err)
 	}
-	if err := validateEndpointURL("wss://api.example.com", defaultAPIBaseURL, "https"); err == nil || !strings.Contains(err.Error(), "https://") {
+	err = validateEndpointURL("wss://api.example.com", defaultAPIBaseURL, "https")
+	if err == nil || !strings.Contains(err.Error(), "https://") {
 		t.Fatalf("wss endpoint must be rejected for an https slot, got: %v", err)
 	}
 }
