@@ -15,6 +15,9 @@ const modules = {
   '@/composables/useChatStreamHandler': {
     isAwaitingInput: (m) => m?.run_state === 'awaiting_input',
   },
+  '@/views/chat/components/hostApproval': {
+    isHostApprovalEvent: (e) => e?.kind === 'host_command' || e?.host != null,
+  },
 }
 const exports = {}
 vm.runInNewContext(compiled, {
@@ -45,6 +48,16 @@ test('docks the open prompts of streaming and suspended runs, oldest first', () 
     },
   ])
   assert.deepEqual(ids(prompts), ['a', 'b', 'c'])
+})
+
+test('leaves Lite host approvals to the composer card', () => {
+  const prompts = pendingPrompts([{
+    role: 'assistant', is_completed: false, agentEventStream: [
+      approval('host', { kind: 'host_command', host: { command: 'rm a' } }),
+      approval('mcp'),
+    ],
+  }])
+  assert.deepEqual(ids(prompts), ['mcp'])
 })
 
 test('leaves settled runs, resolved prompts and unknown kinds in the timeline', () => {
