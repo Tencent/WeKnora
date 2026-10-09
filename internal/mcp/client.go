@@ -297,9 +297,12 @@ func (c *mcpGoClient) onConnectionLost(err error) {
 // checkErrorAndDisconnectIfNeeded checks for transport errors that indicate the
 // session is no longer valid and proactively disconnects the client so that
 // subsequent GetOrCreateClient calls will establish a fresh connection.
-// Both SSE and HTTP Streamable transports use server-assigned sessions
-// (via Mcp-Session-Id header) that can expire or be invalidated.
+// Legacy connections use server-assigned sessions that can expire. Modern
+// connections are stateless, so a method-level 404 is not session loss.
 func (c *mcpGoClient) checkErrorAndDisconnectIfNeeded(err error) {
+	if c.client != nil && mcp.IsModernProtocol(c.client.ProtocolVersion()) {
+		return
+	}
 	var transportErr *transport.Error
 	if !errors.As(err, &transportErr) || transportErr.Err == nil {
 		return
@@ -512,13 +515,29 @@ func (c *mcpGoClient) listRawTools(ctx context.Context) ([]*types.MCPTool, error
 		if pages >= maxToolListPages {
 			return nil, fmt.Errorf("tools/list exceeded %d pages", maxToolListPages)
 		}
+		params := struct {
+			Cursor string    `json:"cursor,omitempty"`
+			Meta   *mcp.Meta `json:"_meta,omitempty"`
+		}{Cursor: cursor}
+		var headers http.Header
+		if version := c.client.ProtocolVersion(); mcp.IsModernProtocol(version) {
+			// This raw-schema path bypasses the SDK request builder. Use its
+			// metadata/header helpers without losing unknown JSON Schema fields.
+			params.Meta = &mcp.Meta{}
+			params.Meta.SetProtocolVersion(version)
+			params.Meta.SetClientInfo(mcp.Implementation{Name: "WeKnora", Version: "1.0.0"})
+			params.Meta.SetClientCapabilities(mcp.ClientCapabilities{})
+			headers = make(http.Header)
+			for name, value := range mcp.StandardHeaders(version, mcp.MethodToolsList, nil) {
+				headers.Set(name, value)
+			}
+		}
 		response, err := c.client.GetTransport().SendRequest(ctx, transport.JSONRPCRequest{
 			JSONRPC: mcp.JSONRPC_VERSION,
 			ID:      mcp.NewRequestId("weknora-tools-" + uuid.NewString()),
 			Method:  "tools/list",
-			Params: struct {
-				Cursor string `json:"cursor,omitempty"`
-			}{cursor},
+			Params:  params,
+			Header:  headers,
 		})
 		if err != nil {
 			return nil, transport.NewError(err)
