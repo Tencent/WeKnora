@@ -182,6 +182,10 @@ type ToolApprovalPromptResponse struct {
 	// ModifiedArgs, when set on approval, replaces the original arguments.
 	ModifiedArgs json.RawMessage `json:"modified_args,omitempty"`
 	Reason       string          `json:"reason,omitempty"`
+	// Scope is "once" or "session" for Lite host approvals; empty means once.
+	Scope string `json:"scope,omitempty"`
+	// Access narrows a host grant to "read"; empty keeps the proposal.
+	Access string `json:"access,omitempty"`
 }
 
 // MCPOAuthPromptRequest is the Request of an AgentPromptKindMCPOAuth.
