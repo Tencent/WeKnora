@@ -65,6 +65,9 @@ type e2bMockServer struct {
 	sandboxes               map[string]map[string]any // sandboxID -> SandboxInfo JSON
 	snapshots               map[string]map[string]any // snapshotID -> SnapshotInfo JSON
 	trafficAccessToken      string
+	// rejectSnapshotEnv answers 400 when a create body includes envVars, matching
+	// Aliyun Agent Sandbox's snapshot restore rule.
+	rejectSnapshotEnv atomic.Bool
 }
 
 func newE2BMockServer(t *testing.T) *e2bMockServer {
@@ -85,6 +88,9 @@ func (m *e2bMockServer) handle(w http.ResponseWriter, r *http.Request) {
 	case r.URL.Path == "/sandboxes" && r.Method == http.MethodPost:
 		m.createCount.Add(1)
 		body, _ := io.ReadAll(r.Body)
+		// Unmarshal merges into an existing map and would keep envVars from a
+		// rejected attempt, so each create starts from an empty body.
+		m.createBody = nil
 		_ = json.Unmarshal(body, &m.createBody)
 		id := "e2b-" + strconv.FormatInt(m.nextID.Add(1), 10)
 		m.sandboxes[id] = map[string]any{
@@ -94,6 +100,17 @@ func (m *e2bMockServer) handle(w http.ResponseWriter, r *http.Request) {
 			"envdVersion": "test",
 			"startedAt":   time.Now().UTC().Format(time.RFC3339),
 			"metadata":    m.createBody["metadata"],
+		}
+		if m.rejectSnapshotEnv.Load() {
+			if _, ok := m.createBody["envVars"]; ok {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusBadRequest)
+				_, _ = w.Write([]byte(
+					`{"code":400,"message":"creating from a snapshot ` +
+						`does not allow envVars or function config overrides"}`,
+				))
+				return
+			}
 		}
 		m.mu.Lock()
 		trafficAccessToken := m.trafficAccessToken
@@ -1043,6 +1060,82 @@ func TestE2BRemoteClientCreateWritesMetadataAndPauseLifecycle(t *testing.T) {
 	require.True(t, ok, "network payload missing: %#v", mock.createBody["network"])
 	require.Equal(t, false, networkPayload["allowPublicTraffic"])
 
+}
+
+func TestE2BSnapshotCreateDropsEnvVarsAfterProviderRejectsThem(t *testing.T) {
+	mock := newE2BMockServer(t)
+	mock.rejectSnapshotEnv.Store(true)
+	client := newTestE2BRemoteClient(t, mock)
+
+	handle, err := client.Create(context.Background(), RemoteCreateRequest{
+		TemplateID:   "snap-1",
+		FromSnapshot: true,
+		EnvVars:      map[string]string{"WEKNORA_SKILL_OUTPUT_DIR": "/workspace/output"},
+		Timeout: RemoteTimeoutPolicy{
+			Mode:       RemoteTimeoutExplicit,
+			Value:      time.Minute,
+			Action:     RemoteOnTimeoutPause,
+			AutoResume: true,
+		},
+	})
+
+	require.NoError(t, err)
+	require.NotEmpty(t, handle.ID())
+	require.Equal(t, int32(2), mock.createCount.Load(), "the rejected create must be retried once without envVars")
+	_, hasEnv := mock.createBody["envVars"]
+	require.False(t, hasEnv, "the successful create must omit envVars: %#v", mock.createBody)
+	_, hasMemory := mock.createBody["autoPauseMemory"]
+	require.False(t, hasMemory, "function-config overrides must be omitted with envVars")
+	require.Equal(t, true, mock.createBody["autoPause"])
+}
+
+func TestE2BAliyunSnapshotCreateOmitsEnvVarsUpFront(t *testing.T) {
+	mock := newE2BMockServer(t)
+	mock.rejectSnapshotEnv.Store(true)
+	client := newTestE2BRemoteClient(t, mock)
+	client.snapshotCreateImmutable = true
+
+	_, err := client.Create(context.Background(), RemoteCreateRequest{
+		TemplateID:   "snap-1",
+		FromSnapshot: true,
+		EnvVars:      map[string]string{"WEKNORA_SKILL_OUTPUT_DIR": "/workspace/output", "HF_TOKEN": "secret"},
+		Timeout: RemoteTimeoutPolicy{
+			Mode:       RemoteTimeoutExplicit,
+			Value:      time.Minute,
+			Action:     RemoteOnTimeoutPause,
+			AutoResume: true,
+		},
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, int32(1), mock.createCount.Load())
+	_, hasEnv := mock.createBody["envVars"]
+	require.False(t, hasEnv)
+	_, hasMemory := mock.createBody["autoPauseMemory"]
+	require.False(t, hasMemory)
+	require.Equal(t, true, mock.createBody["autoResume"].(map[string]any)["enabled"])
+}
+
+func TestE2BSnapshotCreateKeepsEnvVarsOnOrdinaryProviders(t *testing.T) {
+	mock := newE2BMockServer(t)
+	client := newTestE2BRemoteClient(t, mock)
+
+	_, err := client.Create(context.Background(), RemoteCreateRequest{
+		TemplateID:   "snap-1",
+		FromSnapshot: true,
+		EnvVars:      map[string]string{"LANG": "C.UTF-8"},
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, int32(1), mock.createCount.Load())
+	require.Equal(t, map[string]any{"LANG": "C.UTF-8"}, mock.createBody["envVars"])
+}
+
+func TestE2BSnapshotCreateImmutableHost(t *testing.T) {
+	require.True(t, e2bSnapshotCreateImmutable("https://api.cn-hangzhou.e2b.fc.aliyuncs.com"))
+	require.True(t, e2bSnapshotCreateImmutable("https://api.cn-beijing.sandbox.aliyuncs.com"))
+	require.False(t, e2bSnapshotCreateImmutable("https://api.e2b.app"))
+	require.False(t, e2bSnapshotCreateImmutable(""))
 }
 
 func TestE2BRemoteClientCreateValidatesTimeoutAction(t *testing.T) {
