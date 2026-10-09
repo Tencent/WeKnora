@@ -39,6 +39,11 @@ type E2BRemoteClient struct {
 
 	templateID string
 	timeout    time.Duration
+
+	// snapshotCreateImmutable is true for Aliyun Agent Sandbox. Creating a
+	// sandbox from a snapshot there rejects envVars and function-config
+	// overrides with HTTP 400, even when the values match the snapshot.
+	snapshotCreateImmutable bool
 }
 
 // NewE2BRemoteClient builds an E2B-backed RemoteSandboxClient from Config.
@@ -127,13 +132,61 @@ func newE2BRemoteClient(
 		ttl = DefaultE2BSandboxTTL
 	}
 	return &E2BRemoteClient{
-		client:         client,
-		inboundTokens:  inboundTokens,
-		wsDialer:       wsDialer,
-		desktopEnabled: cfg.DesktopEnabled,
-		templateID:     strings.TrimSpace(cfg.E2BTemplate),
-		timeout:        ttl,
+		client:                  client,
+		inboundTokens:           inboundTokens,
+		wsDialer:                wsDialer,
+		desktopEnabled:          cfg.DesktopEnabled,
+		templateID:              strings.TrimSpace(cfg.E2BTemplate),
+		timeout:                 ttl,
+		snapshotCreateImmutable: e2bSnapshotCreateImmutable(cfg.E2BAPIURL),
 	}, nil
+}
+
+// e2bSnapshotCreateImmutable reports Aliyun Agent Sandbox control planes.
+// Their create-from-snapshot API refuses envVars and function-config fields
+// that official E2B accepts.
+func e2bSnapshotCreateImmutable(apiURL string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(apiURL))
+	if err != nil {
+		return false
+	}
+	host := strings.ToLower(parsed.Hostname())
+	return host == "aliyuncs.com" || strings.HasSuffix(host, ".aliyuncs.com")
+}
+
+// stripSnapshotCreateOverrides removes the fields Aliyun rejects when the
+// template is a snapshot. The snapshot already carries the env and function
+// config of the sandbox it was taken from. The returned text names what was
+// removed so the caller can log it; environment values are never included.
+func stripSnapshotCreateOverrides(config *e2b.SandboxConfig) string {
+	var dropped []string
+	if len(config.EnvVars) > 0 {
+		names := make([]string, 0, len(config.EnvVars))
+		for name := range config.EnvVars {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		dropped = append(dropped, "envVars ["+strings.Join(names, ", ")+"]")
+	}
+	config.EnvVars = nil
+	if len(config.VolumeMounts) > 0 {
+		dropped = append(dropped, fmt.Sprintf("volumeMounts (%d)", len(config.VolumeMounts)))
+	}
+	config.VolumeMounts = nil
+	if config.AutoPauseMemory != nil {
+		dropped = append(dropped, "autoPauseMemory")
+	}
+	config.AutoPauseMemory = nil
+	return strings.Join(dropped, ", ")
+}
+
+func snapshotOverrideRejected(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "does not allow envvars") ||
+		strings.Contains(msg, "creating from a snapshot does not allow")
 }
 
 // e2bRemoteHandle is the RemoteSandboxHandle E2B returns. It carries the
@@ -615,7 +668,28 @@ func (c *E2BRemoteClient) Create(
 		config.AutoPauseMemory = &autoPauseMemory
 		config.AutoResume = &e2b.AutoResumeConfig{Enabled: true}
 	}
+	// Aliyun stores env and function config inside the snapshot. Resending
+	// them is an override and the control plane answers 400 before the
+	// sandbox exists. Official E2B still accepts the fields, so they stay
+	// unless this client is pointed at Aliyun — or the provider says so.
+	if request.FromSnapshot && c.snapshotCreateImmutable {
+		if dropped := stripSnapshotCreateOverrides(&config); dropped != "" {
+			logger.Infof(ctx,
+				"e2b snapshot create omits fields Aliyun rejects: template %s: %s",
+				template, dropped,
+			)
+		}
+	}
 	sandbox, err := c.client.NewSandbox(ctx, config)
+	if err != nil && request.FromSnapshot && snapshotOverrideRejected(err) &&
+		(config.EnvVars != nil || len(config.VolumeMounts) > 0 || config.AutoPauseMemory != nil) {
+		dropped := stripSnapshotCreateOverrides(&config)
+		logger.Infof(ctx,
+			"e2b snapshot create rejected overrides; retrying without %s: template %s",
+			dropped, template,
+		)
+		sandbox, err = c.client.NewSandbox(ctx, config)
+	}
 	if err != nil {
 		return nil, normalizeE2BError("Create", err)
 	}

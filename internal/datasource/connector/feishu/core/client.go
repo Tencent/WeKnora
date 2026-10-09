@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -27,11 +28,40 @@ type Client struct {
 	location *time.Location
 
 	httpClient *http.Client
+	// jsonLimit caps each API response body; a field so tests can lower it
+	// without materialising the production limit.
+	jsonLimit int64
 
 	// Token cache (thread-safe)
 	tokenMu    sync.Mutex
 	tokenCache string
 	tokenExpAt time.Time
+}
+
+// maxJSONResponseBytes bounds every API response body. Document and wiki
+// payloads are small; a larger body means a broken or hostile server.
+const maxJSONResponseBytes = 16 << 20
+
+// errResponseTooLarge marks a body over the cap. It is deterministic: the same
+// request returns the same oversized body, so callers must not retry it.
+var errResponseTooLarge = errors.New("response exceeds maximum size")
+
+// readCapped reads a response body, refusing anything larger than limit instead
+// of buffering it. Oversized payloads are reported as an error: a truncated
+// body would be indexed as if it were the whole document. A non-positive limit
+// (e.g. a zero-value client built in tests) falls back to maxJSONResponseBytes.
+func readCapped(body io.Reader, limit int64) ([]byte, error) {
+	if limit <= 0 {
+		limit = maxJSONResponseBytes
+	}
+	data, err := io.ReadAll(io.LimitReader(body, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > limit {
+		return nil, fmt.Errorf("%w (%d bytes)", errResponseTooLarge, limit)
+	}
+	return data, nil
 }
 
 type WikiNodeListFailure struct {
@@ -71,6 +101,7 @@ func NewClient(config *Config) *Client {
 		appSecret:  config.AppSecret,
 		location:   resolveLocation(config.Timezone),
 		httpClient: datasource.NewConnectorHTTPClient(30 * time.Second),
+		jsonLimit:  maxJSONResponseBytes,
 	}
 }
 
@@ -102,8 +133,12 @@ func (c *Client) GetTenantAccessToken(ctx context.Context) (string, error) {
 	}
 	defer resp.Body.Close()
 
+	respBody, err := readCapped(resp.Body, c.jsonLimit)
+	if err != nil {
+		return "", fmt.Errorf("read token response: %w", err)
+	}
 	var result TokenResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := json.Unmarshal(respBody, &result); err != nil {
 		return "", fmt.Errorf("decode token response: %w", err)
 	}
 	if result.Code != 0 {
@@ -138,6 +173,10 @@ const (
 	feishuMax5xxRetries = 1
 	feishuRetry5xxDelay = 2 * time.Second
 )
+
+// maxFeishuErrorPreviewBytes bounds how much of a failed download's body is
+// read for diagnostics; only the first 500 bytes are ever logged.
+const maxFeishuErrorPreviewBytes = 4 << 10
 
 // maxFeishuDownloadBytes bounds a single file download to protect the sync
 // worker from adversarial or pathological oversized responses.
@@ -205,11 +244,11 @@ func (c *Client) DoRequest(ctx context.Context, method, path string, body interf
 			return lastErr
 		}
 
-		respBody, readErr := io.ReadAll(resp.Body)
+		respBody, readErr := readCapped(resp.Body, c.jsonLimit)
 		resp.Body.Close()
 		if readErr != nil {
 			lastErr = fmt.Errorf("read response body: %w", readErr)
-			if attempt < maxRetries {
+			if attempt < maxRetries && !errors.Is(readErr, errResponseTooLarge) {
 				if sErr := sleepCtx(ctx, backoff[attempt]); sErr != nil {
 					return sErr
 				}
@@ -722,7 +761,7 @@ func (c *Client) downloadRawBytes(ctx context.Context, path string) ([]byte, err
 		}
 
 		if resp.StatusCode == http.StatusTooManyRequests {
-			body, _ := io.ReadAll(resp.Body)
+			body, _ := io.ReadAll(io.LimitReader(resp.Body, maxFeishuErrorPreviewBytes))
 			resp.Body.Close()
 			wait := parseRetryAfter(resp.Header.Get("Retry-After"), feishuRetryBackoff[min(attempt, len(feishuRetryBackoff)-1)])
 			lastErr = fmt.Errorf("download rate limited: status=429 body=%s", truncate(string(body), 500))
@@ -736,7 +775,7 @@ func (c *Client) downloadRawBytes(ctx context.Context, path string) ([]byte, err
 		}
 
 		if resp.StatusCode >= 500 && resp.StatusCode < 600 {
-			body, _ := io.ReadAll(resp.Body)
+			body, _ := io.ReadAll(io.LimitReader(resp.Body, maxFeishuErrorPreviewBytes))
 			resp.Body.Close()
 			lastErr = fmt.Errorf("download server error: status=%d body=%s", resp.StatusCode, truncate(string(body), 500))
 			if attempt < feishuMax5xxRetries {
@@ -749,10 +788,10 @@ func (c *Client) downloadRawBytes(ctx context.Context, path string) ([]byte, err
 		}
 
 		if resp.StatusCode != http.StatusOK {
-			body, _ := io.ReadAll(resp.Body)
+			body, _ := io.ReadAll(io.LimitReader(resp.Body, maxFeishuErrorPreviewBytes))
 			resp.Body.Close()
 			logger.Errorf(ctx, "[Feishu] download GET %s → status=%d body=%s", path, resp.StatusCode, truncate(string(body), 500))
-			return nil, fmt.Errorf("download failed: status=%d body=%s", resp.StatusCode, string(body))
+			return nil, fmt.Errorf("download failed: status=%d body=%s", resp.StatusCode, truncate(string(body), 500))
 		}
 
 		data, readErr := io.ReadAll(io.LimitReader(resp.Body, maxFeishuDownloadBytes+1))

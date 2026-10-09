@@ -130,20 +130,69 @@ func (c *Client) BuildRequestBody(query string, documents []string) (map[string]
 	return out, nil
 }
 
+// BuildImageRequestBody is the golden-test entry point for image documents.
+// The shape has no standard image document; a vendor that extends it names
+// the key of the object that carries one. Jina's reranker reference gives
+// {"image": URL or base64} documents; it shows no base64 example, so the
+// data URI its embeddings reference documents is used (unverified for
+// rerank). The request carries images only, so text documents never change
+// shape.
+func (c *Client) BuildImageRequestBody(query string, images []api.EmbedImage) (map[string]any, error) {
+	documents := make([]any, len(images))
+	for i, img := range images {
+		documents[i] = map[string]any{c.cfg.Settings.ImageField: img.DataURI()}
+	}
+	body, err := c.BuildRequestBody(query, nil)
+	if err != nil {
+		return nil, err
+	}
+	body["documents"] = documents
+	if c.cfg.Settings.SendTopN {
+		body["top_n"] = len(images)
+	}
+	// Results are matched by index; an echoed image document would carry its
+	// whole base64 payload back for nothing.
+	if _, asked := body["return_documents"]; asked {
+		body["return_documents"] = false
+	}
+	return body, nil
+}
+
+// AcceptsImages reports whether the vendor names an image field; without one
+// a Cohere-shaped endpoint takes text documents only.
+func (c *Client) AcceptsImages() bool { return c.cfg.Settings.ImageField != "" }
+
 // Rerank scores documents against the query, in the order they were given.
 func (c *Client) Rerank(ctx context.Context, query string, documents []string) ([]api.RerankResult, error) {
 	body, err := c.BuildRequestBody(query, documents)
 	if err != nil {
 		return nil, err
 	}
+	return c.post(ctx, body, len(documents))
+}
+
+// RerankImages scores image documents against the query; indices refer to
+// images.
+func (c *Client) RerankImages(ctx context.Context, query string, images []api.EmbedImage) ([]api.RerankResult, error) {
+	if !c.AcceptsImages() {
+		return nil, fmt.Errorf("this rerank endpoint declares no image documents")
+	}
+	body, err := c.BuildImageRequestBody(query, images)
+	if err != nil {
+		return nil, err
+	}
+	return c.post(ctx, body, len(images))
+}
+
+func (c *Client) post(ctx context.Context, body map[string]any, count int) ([]api.RerankResult, error) {
 	var decoded response
 	if err := c.cfg.Endpoint.PostJSON(ctx, c.url(), body, &decoded); err != nil {
 		return nil, err
 	}
 	out := make([]api.RerankResult, 0, len(decoded.Results))
 	for _, item := range decoded.Results {
-		if item.Index < 0 || item.Index >= len(documents) {
-			return nil, fmt.Errorf("rerank index %d out of range for %d documents", item.Index, len(documents))
+		if item.Index < 0 || item.Index >= count {
+			return nil, fmt.Errorf("rerank index %d out of range for %d documents", item.Index, count)
 		}
 		out = append(out, api.RerankResult{
 			Index: item.Index,

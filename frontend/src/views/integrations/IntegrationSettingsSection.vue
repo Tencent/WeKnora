@@ -1,6 +1,6 @@
 <template>
   <div class="integrations-settings">
-    <div class="integrations-settings__body" :class="{ 'integrations-settings__body--landing': isLandingSection }">
+    <div class="integrations-settings__body">
       <div v-if="tab === 'im'" class="section">
         <div class="section-header">
           <h2>{{ $t('agentEditor.im.title') }}</h2>
@@ -52,7 +52,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import IMChannelPanel from '@/components/IMChannelPanel.vue'
 import AgentEmbedChannelPanel from '@/components/AgentEmbedChannelPanel.vue'
@@ -66,15 +66,11 @@ import { docsUrl } from '@/utils/docsUrl'
 
 const filterAgentId = ref('')
 
-const props = defineProps<{
+defineProps<{
   tab: IntegrationTab
 }>()
 
 const route = useRoute()
-
-const isLandingSection = computed(
-  () => props.tab === 'chrome' || props.tab === 'claw' || props.tab === 'cli',
-)
 
 function applyAgentFilterFromRoute() {
   filterAgentId.value = (route.query.agentId as string) || ''
@@ -97,10 +93,6 @@ watch(
 
 .integrations-settings__body {
   min-width: 0;
-}
-
-.integrations-settings__body--landing {
-  max-width: 760px;
 }
 
 .section-header {
