@@ -76,33 +76,34 @@
       <template v-if="selectedModel">
         <section class="setting-drawer__section">
           <h4 class="setting-drawer__section-title">{{ $t('modelSettings.debug.groupInput') }}</h4>
-          <div v-if="hasImageMode" class="form-item">
+          <div v-if="hasImageMode || isEmbedding" class="form-item">
             <t-radio-group v-model="inputMode" @change="clearFile">
-              <t-radio-button value="text">{{ selectedModel.type === 'Embedding' ? $t('modelSettings.debug.embeddingInput') : $t('modelSettings.debug.documents') }}</t-radio-button>
-              <t-radio-button value="image">{{ $t('modelSettings.debug.imageFile') }}</t-radio-button>
+              <t-radio-button value="text">{{ isEmbedding ? $t('modelSettings.debug.embeddingInput') : $t('modelSettings.debug.documents') }}</t-radio-button>
+              <t-radio-button v-if="hasImageMode" value="image">{{ $t('modelSettings.debug.imageFile') }}</t-radio-button>
+              <t-radio-button v-if="isEmbedding" value="similarity">{{ $t('modelSettings.debug.similarityMode') }}</t-radio-button>
             </t-radio-group>
           </div>
-          <div v-if="selectedModel.type !== 'ASR' && !(selectedModel.type === 'Embedding' && useImageMode)" class="form-item">
+          <div v-if="selectedModel.type !== 'ASR' && !(isEmbedding && useImageMode)" class="form-item">
             <label class="form-label">{{ inputLabel }}</label>
             <t-textarea
               v-model="input"
               :placeholder="inputPlaceholder"
-              :autosize="{ minRows: 4, maxRows: 8 }"
+              :autosize="{ minRows: useSimilarityMode ? 2 : 4, maxRows: 8 }"
             />
           </div>
 
-          <div v-if="selectedModel.type === 'Rerank' && !useImageMode" class="form-item">
-            <label class="form-label">{{ $t('modelSettings.debug.documents') }}</label>
+          <div v-if="(selectedModel.type === 'Rerank' && !useImageMode) || useSimilarityMode" class="form-item">
+            <label class="form-label">{{ useSimilarityMode ? $t('modelSettings.debug.similarityCandidates') : $t('modelSettings.debug.documents') }}</label>
             <t-textarea
               v-model="documentsText"
-              :placeholder="$t('modelSettings.debug.documentsPlaceholder')"
+              :placeholder="useSimilarityMode ? $t('modelSettings.debug.similarityCandidatesPlaceholder') : $t('modelSettings.debug.documentsPlaceholder')"
               :autosize="{ minRows: 4, maxRows: 8 }"
             />
-            <p class="form-desc">{{ $t('modelSettings.debug.documentsHint') }}</p>
+            <p class="form-desc">{{ useSimilarityMode ? $t('modelSettings.debug.similarityHint') : $t('modelSettings.debug.documentsHint') }}</p>
           </div>
 
           <div v-if="showFilePicker" class="form-item">
-            <label class="form-label">{{ fileLabel }}</label>
+            <label class="form-label">{{ useSimilarityMode ? $t('modelSettings.debug.similarityImage') : fileLabel }}</label>
             <div class="file-picker">
               <input
                 ref="fileInputRef"
@@ -206,6 +207,23 @@
 
             <p v-if="result.error" class="result-error">{{ result.error }}</p>
 
+            <div v-if="similarityResults.length > 0" class="similarity-list">
+              <div v-for="(item, rank) in similarityResults" :key="item.index" class="similarity-row">
+                <span class="similarity-row__rank">{{ rank + 1 }}</span>
+                <span class="similarity-row__content">
+                  <template v-if="item.kind === 'image'">
+                    <img v-if="imagePreview" :src="imagePreview" :alt="file?.name" class="similarity-row__image">
+                    {{ $t('modelSettings.debug.similarityImageCandidate') }}
+                  </template>
+                  <template v-else>{{ item.content }}</template>
+                </span>
+                <span class="similarity-row__bar">
+                  <span :style="{ width: `${Math.max(0, item.similarity) * 100}%` }" />
+                </span>
+                <span class="similarity-row__score">{{ item.similarity.toFixed(4) }}</span>
+              </div>
+            </div>
+
             <t-tabs v-model="resultTab" class="result-tabs">
               <t-tab-panel value="response" :label="$t('modelSettings.debug.rawResponse')" />
               <t-tab-panel value="request" :label="$t('modelSettings.debug.requestPreview')" />
@@ -264,7 +282,7 @@ const selectedModelId = ref('')
 const input = ref('')
 const documentsText = ref('')
 const file = ref<File | null>(null)
-const inputMode = ref<'text' | 'image'>('text')
+const inputMode = ref<'text' | 'image' | 'similarity'>('text')
 const imagePreview = ref('')
 const fileInputRef = ref<HTMLInputElement | null>(null)
 const reasoningEffort = ref<ReasoningLevel>('off')
@@ -298,12 +316,16 @@ const acceptsImages = computed(() => {
 })
 const hasImageMode = computed(() => acceptsImages.value && ['Embedding', 'Rerank'].includes(selectedModel.value?.type || ''))
 const useImageMode = computed(() => hasImageMode.value && inputMode.value === 'image')
+const isEmbedding = computed(() => selectedModel.value?.type === 'Embedding')
+const useSimilarityMode = computed(() => isEmbedding.value && inputMode.value === 'similarity')
+// In similarity mode the image is an optional extra candidate.
 const showFilePicker = computed(() => selectedModel.value?.type === 'ASR'
-  || (acceptsImages.value && (!hasImageMode.value || useImageMode.value)))
+  || (acceptsImages.value && (!hasImageMode.value || useImageMode.value || useSimilarityMode.value)))
 const needsFile = computed(() => useImageMode.value || ['VLLM', 'ASR'].includes(selectedModel.value?.type || ''))
 const documents = computed(() => documentsText.value.split('\n').map(item => item.trim()).filter(Boolean))
 const canRun = computed(() => {
   if (!selectedModel.value) return false
+  if (useSimilarityMode.value) return !!input.value.trim() && (documents.value.length > 0 || !!file.value)
   if (needsFile.value && !file.value) return false
   if (['ASR', 'VLLM'].includes(selectedModel.value.type) || (selectedModel.value.type === 'Embedding' && useImageMode.value)) return true
   if (selectedModel.value.type === 'Rerank') return !!input.value.trim() && (useImageMode.value ? !!file.value : documents.value.length > 0)
@@ -342,6 +364,7 @@ const vendorLabel = (model: ModelConfig) => {
 }
 
 const inputLabel = computed(() => {
+  if (useSimilarityMode.value) return t('modelSettings.debug.similarityQuery')
   if (selectedModel.value?.type === 'Embedding') return t('modelSettings.debug.embeddingInput')
   if (selectedModel.value?.type === 'VLLM') return t('modelSettings.debug.vlmPrompt')
   if (selectedModel.value?.type === 'Rerank') return t('modelSettings.debug.query')
@@ -349,6 +372,7 @@ const inputLabel = computed(() => {
 })
 
 const inputPlaceholder = computed(() => {
+  if (useSimilarityMode.value) return t('modelSettings.debug.similarityQueryPlaceholder')
   if (selectedModel.value?.type === 'Embedding') return t('modelSettings.debug.embeddingPlaceholder')
   if (selectedModel.value?.type === 'VLLM') return t('modelSettings.debug.vlmPromptPlaceholder')
   return t('modelSettings.debug.queryPlaceholder')
@@ -366,6 +390,19 @@ const formattedResult = computed(() => {
     ? result.value.raw_response
     : result.value.request
   return JSON.stringify(value, null, 2)
+})
+
+interface SimilarityResult {
+  index: number
+  kind: 'text' | 'image'
+  content?: string
+  similarity: number
+}
+
+const similarityResults = computed<SimilarityResult[]>(() => {
+  const response = result.value?.raw_response as { results?: unknown } | null | undefined
+  if (!isEmbedding.value || !result.value?.ok || !response || !Array.isArray(response.results)) return []
+  return response.results as SimilarityResult[]
 })
 
 const OBSERVATION_LABELS: Record<string, string> = {
@@ -505,8 +542,8 @@ const runDebug = async () => {
   try {
     const level: ReasoningLevel | null = supportsThinking.value ? reasoningEffort.value : null
     const nextResult = await debugModel(selectedModel.value.id, {
-      input: selectedModel.value.type === 'Embedding' && useImageMode.value ? '' : input.value.trim(),
-      documents: selectedModel.value.type === 'Rerank' && !useImageMode.value ? documents.value : [],
+      input: isEmbedding.value && useImageMode.value ? '' : input.value.trim(),
+      documents: (selectedModel.value.type === 'Rerank' && !useImageMode.value) || useSimilarityMode.value ? documents.value : [],
       file: showFilePicker.value ? file.value : null,
       options: isChat.value ? {
         system_prompt: systemPrompt.value.trim() || undefined,
@@ -515,7 +552,7 @@ const runDebug = async () => {
         max_tokens: maxTokens.value,
         // reasoning_effort is authoritative; the boolean keeps older backends working.
         ...(level ? { reasoning_effort: level, thinking: levelEnablesThinking(level) } : { thinking: false }),
-      } : {},
+      } : useSimilarityMode.value ? { similarity: true } : {},
     })
     result.value = nextResult
     history.value.unshift({
@@ -765,6 +802,65 @@ onBeforeUnmount(() => {
   background: var(--td-bg-color-secondarycontainer);
   color: var(--td-text-color-secondary);
   font-size: var(--app-text-sm);
+}
+
+.similarity-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 10px;
+}
+
+.similarity-row {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) 80px 56px;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: var(--app-radius-sm);
+  background: var(--td-bg-color-secondarycontainer);
+  font-size: var(--app-text-sm);
+
+  &__rank {
+    color: var(--td-text-color-placeholder);
+    text-align: right;
+  }
+
+  &__content {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    overflow: hidden;
+    color: var(--td-text-color-primary);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  &__image {
+    width: 24px;
+    height: 24px;
+    object-fit: cover;
+    border-radius: var(--app-radius-xs);
+  }
+
+  &__bar {
+    height: 6px;
+    overflow: hidden;
+    border-radius: 3px;
+    background: var(--td-component-stroke);
+
+    span {
+      display: block;
+      height: 100%;
+      background: var(--td-brand-color);
+    }
+  }
+
+  &__score {
+    color: var(--td-text-color-secondary);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    text-align: right;
+  }
 }
 
 .result-error {

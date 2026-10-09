@@ -82,6 +82,47 @@ for (const type of ['Embedding', 'Rerank']) {
   })
 }
 
+test('embedding similarity sends the query, candidates and an optional image', async () => {
+  const f = await fixture('Embedding')
+  try {
+    f.vm.inputMode = 'similarity'
+    await nextTick()
+    assert.equal(f.vm.useSimilarityMode, true)
+    assert.equal(f.vm.showFilePicker, true)
+    assert.equal(f.vm.canRun, false)
+    f.vm.input = 'a dog'
+    assert.equal(f.vm.canRun, false, 'a query alone has nothing to compare against')
+    f.vm.documentsText = 'a puppy\n\na car'
+    assert.equal(f.vm.canRun, true)
+    await f.vm.runDebug()
+    assert.equal(f.requests[0].input, 'a dog')
+    assert.deepEqual([...f.requests[0].documents], ['a puppy', 'a car'])
+    assert.equal(f.requests[0].options.similarity, true)
+    assert.equal(f.requests[0].file, null)
+
+    f.vm.documentsText = ''
+    f.vm.onNativeFileChange({ target: { files: [file] } })
+    assert.equal(f.vm.canRun, true, 'an image is a candidate on its own')
+    await f.vm.runDebug()
+    assert.equal(f.requests[1].file.name, file.name)
+  } finally { f.dispose() }
+})
+
+test('embedding similarity is offered on text-only models without an image picker', async () => {
+  const f = await fixture('Embedding', false)
+  try {
+    assert.equal(f.vm.hasImageMode, false)
+    f.vm.inputMode = 'similarity'
+    await nextTick()
+    assert.equal(f.vm.showFilePicker, false)
+    f.vm.input = 'a dog'
+    f.vm.documentsText = 'a puppy'
+    await f.vm.runDebug()
+    assert.equal(f.requests[0].file, null)
+    assert.equal(f.requests[0].options.similarity, true)
+  } finally { f.dispose() }
+})
+
 test('image-capable chat sends text and an optional image, including image-only input', async () => {
   const f = await fixture('KnowledgeQA')
   try {

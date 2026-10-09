@@ -24,10 +24,11 @@ import (
 
 type debugImageService struct {
 	interfaces.ModelService
-	row   *types.Model
-	embed *debugImageEmbedder
-	rank  *debugImageReranker
-	chat  *debugImageChat
+	row        *types.Model
+	embed      *debugImageEmbedder
+	similarity *similarityEmbedder
+	rank       *debugImageReranker
+	chat       *debugImageChat
 }
 
 func (s *debugImageService) GetModelByID(context.Context, string) (*types.Model, error) {
@@ -35,6 +36,9 @@ func (s *debugImageService) GetModelByID(context.Context, string) (*types.Model,
 }
 
 func (s *debugImageService) GetEmbeddingModel(context.Context, string) (embedding.Embedder, error) {
+	if s.similarity != nil {
+		return s.similarity, nil
+	}
 	return s.embed, nil
 }
 
@@ -176,6 +180,134 @@ func TestModelDebugImageEmbedding(t *testing.T) {
 			}
 		})
 	}
+}
+
+// similarityEmbedder places each text on a fixed axis so the expected cosine
+// is known, and records which side every call was embedded as.
+type similarityEmbedder struct {
+	embedding.Embedder
+	accepts    bool
+	imageWidth int
+	queries    []string
+	documents  []string
+	images     int
+}
+
+var similarityAxes = map[string][]float32{
+	"dog": {1, 0, 0}, "puppy": {0.9, 0.1, 0}, "car": {0, 1, 0}, "image": {0.6, 0.8, 0},
+}
+
+func (e *similarityEmbedder) Embed(ctx context.Context, text string) ([]float32, error) {
+	if types.IsEmbedQuery(ctx) {
+		e.queries = append(e.queries, text)
+	}
+	return similarityAxes[text], nil
+}
+
+func (e *similarityEmbedder) BatchEmbed(ctx context.Context, texts []string) ([][]float32, error) {
+	if !types.IsEmbedQuery(ctx) {
+		e.documents = append(e.documents, texts...)
+	}
+	out := make([][]float32, len(texts))
+	for i, text := range texts {
+		out[i] = similarityAxes[text]
+	}
+	return out, nil
+}
+
+func (e *similarityEmbedder) AcceptsImages() bool           { return e.accepts }
+func (e *similarityEmbedder) ImageLimits() imageprep.Limits { return imageprep.Limits{} }
+func (e *similarityEmbedder) BatchEmbedImages(context.Context, []embedding.Image) ([][]float32, error) {
+	e.images++
+	if e.imageWidth > 0 {
+		return [][]float32{make([]float32, e.imageWidth)}, nil
+	}
+	return [][]float32{similarityAxes["image"]}, nil
+}
+
+func runSimilarityDebug(t *testing.T, embed *similarityEmbedder, query, documents string, file []byte) (map[string]any, string) {
+	t.Helper()
+	svc := &debugImageService{row: &types.Model{Type: types.ModelTypeEmbedding}}
+	svc.similarity = embed
+	var body bytes.Buffer
+	w := multipart.NewWriter(&body)
+	require.NoError(t, w.WriteField("input", query))
+	require.NoError(t, w.WriteField("documents", documents))
+	require.NoError(t, w.WriteField("options", `{"similarity":true}`))
+	if file != nil {
+		f, err := w.CreateFormFile("file", "test.png")
+		require.NoError(t, err)
+		_, err = f.Write(file)
+		require.NoError(t, err)
+	}
+	require.NoError(t, w.Close())
+	req := httptest.NewRequest(http.MethodPost, "/models/test/debug", &body)
+	req.Header.Set("Content-Type", w.FormDataContentType())
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = req
+	c.Params = gin.Params{{Key: "id", Value: "test"}}
+	(&ModelHandler{service: svc}).DebugModel(c)
+	if len(c.Errors) > 0 {
+		return nil, c.Errors.Last().Error()
+	}
+	var result struct {
+		Data map[string]any `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &result))
+	return result.Data, ""
+}
+
+func TestModelDebugEmbeddingSimilarity(t *testing.T) {
+	embed := &similarityEmbedder{accepts: true}
+	result, errText := runSimilarityDebug(t, embed, "dog", `["car","puppy"]`, debugPNG(t))
+	require.Empty(t, errText)
+	require.Equal(t, true, result["ok"], result["error"])
+	require.Equal(t, []string{"dog"}, embed.queries, "the query is embedded as a search query")
+	require.Equal(t, []string{"car", "puppy"}, embed.documents, "candidates are embedded as content")
+	require.Equal(t, 1, embed.images)
+
+	results := result["raw_response"].(map[string]any)["results"].([]any)
+	require.Len(t, results, 3)
+	var order []string
+	for _, r := range results {
+		item := r.(map[string]any)
+		content, _ := item["content"].(string)
+		order = append(order, item["kind"].(string)+":"+content)
+	}
+	require.Equal(t, []string{"text:puppy", "image:", "text:car"}, order, "sorted by cosine, highest first")
+	require.InDelta(t, 0.6, results[1].(map[string]any)["similarity"], 1e-6)
+	require.Equal(t, float64(2), results[1].(map[string]any)["index"], "the image follows the documents")
+	require.Equal(t, float64(3), result["observations"].(map[string]any)["result_count"])
+}
+
+func TestModelDebugEmbeddingSimilarityRefusals(t *testing.T) {
+	for _, tc := range []struct {
+		name, query, documents string
+		file                   bool
+		embed                  *similarityEmbedder
+		wantErr                string
+	}{
+		{"no query", "", `["car"]`, false, &similarityEmbedder{}, "at least one candidate"},
+		{"no candidate", "dog", "", false, &similarityEmbedder{}, "at least one candidate"},
+		{"image on a text model", "dog", "", true, &similarityEmbedder{}, "does not accept images"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var file []byte
+			if tc.file {
+				file = debugPNG(t)
+			}
+			_, errText := runSimilarityDebug(t, tc.embed, tc.query, tc.documents, file)
+			require.Contains(t, errText, tc.wantErr)
+			require.Empty(t, tc.embed.queries, "nothing is sent for a refused test")
+		})
+	}
+
+	// An image vector of another width is a failed call, not a cosine of 0.
+	result, errText := runSimilarityDebug(t, &similarityEmbedder{accepts: true, imageWidth: 5}, "dog", "", debugPNG(t))
+	require.Empty(t, errText)
+	require.Equal(t, false, result["ok"])
+	require.Contains(t, result["error"], "5 dimensions, the query 3")
 }
 
 func TestModelDebugImageChat(t *testing.T) {

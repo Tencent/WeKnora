@@ -296,6 +296,9 @@ type ModelDebugOptions struct {
 	Thinking     *bool    `json:"thinking,omitempty"`
 	// ReasoningEffort is the graded level; when set it overrides Thinking.
 	ReasoningEffort string `json:"reasoning_effort,omitempty"`
+	// Similarity makes an embedding test score the documents (and an
+	// optional image) against the input as a search query.
+	Similarity bool `json:"similarity,omitempty"`
 }
 
 func parseModelDebugOptions(raw string) (ModelDebugOptions, error) {
@@ -613,6 +616,10 @@ func (h *ModelHandler) DebugModel(c *gin.Context) {
 		}
 		writeModelDebugResult(c, started, requestPreview, resp, callErr, observations)
 	case types.ModelTypeEmbedding:
+		if opts.Similarity {
+			h.debugEmbeddingSimilarity(c, id, input, documents, fileBytes, started, requestPreview, observations)
+			return
+		}
 		if strings.TrimSpace(input) == "" && len(fileBytes) == 0 {
 			_ = c.Error(errors.NewBadRequestError("input cannot be empty"))
 			return
