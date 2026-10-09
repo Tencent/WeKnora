@@ -74,6 +74,11 @@ export interface KnowledgeProcessOverrides {
   // Per-upload override of the knowledge base's attribute-observed image
   // pipeline switch.
   image_attrs_enabled?: boolean
+  // Per-upload override of the image pipeline and its private tunables. The
+  // pair travels as one unit; when image_pipeline is set the backend also
+  // derives image_attrs_enabled from it.
+  image_pipeline?: string
+  image_pipeline_params?: Record<string, unknown>
   // Per-task attribute -> work table; merged per action key on top of the
   // knowledge base's table.
   image_actions?: ImageActionsConfig

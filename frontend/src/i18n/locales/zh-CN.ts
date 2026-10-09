@@ -4130,6 +4130,13 @@ export default {
         imageVectorModelUnsupported: '当前向量模型未声明图片输入，开启后不会生成或召回图片向量',
         imageAttrsSchemaLabel: '可观察的图片属性',
         imageAttrsSchemaDescription: '模型会观察以下属性（由后端注册表定义）以驱动 OCR 策略',
+        imagePipelineSectionLabel: '图片解析方案',
+        imagePipelineSectionDescription: '多模态解析开启后，可以根据需要选择图片的解析方案',
+        imagePipelineLabel: '选择解析方案',
+        imagePipelinePlaceholder: '请选择解析方案',
+        imagePipelineLoading: '正在读取流水线…',
+        imagePipelineLoadError: '读取流水线失败',
+          imagePipelineValidateError: '无法校验当前设置，保存时后端会再次检查。',
         imageAttrsOcrConditions: '根据观察到的属性条件触发 OCR',
         imageAttrsOcrConditionsDesc: '当观察到的属性满足以下条件时，对图片进行 OCR',
         imageAttrsOcrOnUnobserved: '图片属性观察失败时仍执行 OCR',
@@ -7824,6 +7831,46 @@ export default {
         'true': { label: '是', description: '是 —— 图表、曲线或示意图' },
         'false': { label: '否', description: '否 —— 照片、插画、图标或装饰图' }
       }
+    }
+  },
+  // 流水线选择面板的覆盖文案：按流水线 id 与字段 key 索引（后端注册表给出
+  // id 与 key，这里只做翻译）。未覆盖的流水线或字段回落到后端自带的英文
+  // 说明，所以新增流水线不会显示成键名。
+  imagePipeline: {
+    errors: {
+      noActionEnabled: '至少开启一个解析动作，否则多模态不会处理任何内容。',
+    },
+    default: {
+      name: '传统',
+      description: '用户根据任务需要手动选择解析动作开关。',
+      enable_caption: {
+        label: '图片描述',
+        description: '让模型为每张图片生成一句内容描述，作为图片的说明文字。'
+      },
+      enable_ocr: {
+        label: '文字识别',
+        description: '提取图片中出现的文字。'
+      },
+      caption_thinking: {
+        label: '图片描述时开启思考',
+        description: '让模型在写描述前先思考。一般情况下不需要开启思考，开启之后不仅更慢，还可能造成大模型思考内容过长截断正文输出造成任务失败。请仅在确认有必要的情况下开启。'
+      },
+      ocr_thinking: {
+        label: '文字识别时开启思考',
+        description: '让模型在提取文字前先思考。一般情况下不需要开启思考，开启之后不仅更慢，还可能造成大模型思考内容过长截断正文输出造成任务失败。请仅在确认有必要的情况下开启。'
+      }
+    },
+    smartocr: {
+      name: '智能模式',
+      describe_thinking: {
+        label: '描述时开启思考',
+        description: '让模型在描述图片并观察属性前先思考。一般情况下不需要开启思考，开启之后不仅更慢，还可能造成大模型思考内容过长截断正文输出造成任务失败。请仅在确认有必要的情况下开启。'
+      },
+      text_thinking: {
+        label: '文字识别时开启思考',
+        description: '让模型在提取文字前先思考。一般情况下不需要开启思考，开启之后不仅更慢，还可能造成大模型思考内容过长截断正文输出造成任务失败。请仅在确认有必要的情况下开启。'
+      },
+      description: '先观察图片特征并进行图片描述，再根据图片特征决定是否调用OCR对图片进行识别，以节省模型调用次数并提升解析速度。'
     }
   }
 }

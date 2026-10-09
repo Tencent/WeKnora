@@ -16,9 +16,27 @@ import (
 type VLM interface {
 	// Predict sends one or more images with a text prompt to the VLM and returns the generated text.
 	Predict(ctx context.Context, imgBytes [][]byte, prompt string) (string, error)
+	// PredictWithOptions sends the same request with per-call tunings that the
+	// client-level config cannot express. Implementations must honour it; the
+	// decorators below pass it through untouched.
+	PredictWithOptions(ctx context.Context, imgBytes [][]byte, prompt string, opts *PredictOptions) (string, error)
 
 	GetModelName() string
 	GetModelID() string
+}
+
+// PredictOptions tunes a single image request. Every field is optional and nil
+// means "whatever this client was built with", which is what keeps the model
+// row, the knowledge base and the per-action switch from overriding each other
+// by accident: an unset field never writes anything.
+type PredictOptions struct {
+	// Thinking pins the thinking switch for this call. Leaving a reasoning model
+	// on costs a vision call more than it returns it: the completion budget goes
+	// to reasoning, and at the vision default temperature the answer can come
+	// back empty after the model has already listed the answer in its reasoning.
+	// An OCR caller cannot tell that apart from an image with no text, so the
+	// switch is per-action rather than per-model.
+	Thinking *bool
 }
 
 // Config holds the configuration needed to create a VLM instance.
