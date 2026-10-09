@@ -984,6 +984,12 @@ export default {
     connectionFailed: '連結失敗',
     isRequired: '為必填項',
     credentialsLabel: '憑證',
+    localFolder: {
+      title: '本機資料夾', rootPath: '資料夾路徑',
+      rootPathHint: 'WeKnora 伺服器或容器內的絕對路徑（不是你目前電腦上的路徑），必須位於 WEKNORA_LOCAL_FOLDER_ROOTS 允許的目錄下（例如以唯讀方式掛載進來的 Obsidian 筆記庫）。',
+      include: '包含規則', exclude: '排除規則',
+      patternsHint: '每行一條 glob 規則，相對於該資料夾（** 比對任意層目錄）。留空則使用預設規則，涵蓋常見文件格式（Markdown、文字、PDF、Office、CSV、HTML、EPUB）。圖片和音訊需要 VLM/ASR，需自行新增規則；WeKnora 不支援匯入的格式會被跳過。',
+    },
     gitlab: {
       baseUrl: 'GitLab 地址',
       accessToken: '個人存取權杖',
@@ -1162,7 +1168,8 @@ export default {
       ima: '同步騰訊 IMA 知識庫中的文件、筆記與檔案（暫不支持 AI 會話與影片解析）',
       rss: '同步 RSS / Atom 訂閱源中的文章',
       gitlab: '同步 GitLab 專案中的檔案',
-      seafile: '同步 Seafile 資料庫中的目錄與檔案'
+      seafile: '同步 Seafile 資料庫中的目錄與檔案',
+      local_folder: '同步伺服器上的資料夾，例如掛載進來的 Obsidian 筆記庫'
     },
     connector: {
       feishu: '飛書',
@@ -1176,7 +1183,8 @@ export default {
       ima: '騰訊 IMA',
       rss: 'RSS / Atom 訂閱',
       gitlab: 'GitLab',
-      seafile: 'Seafile'
+      seafile: 'Seafile',
+      local_folder: '本機資料夾'
     },
     logDetail: {
       startTime: '開始時間',
@@ -7198,6 +7206,7 @@ export default {
     channelGitLab: 'GitLab',
     channelSeafile: 'Seafile',
     channelIma: '騰訊 IMA',
+    channelLocalFolder: '本機資料夾',
     channelUpload: '上傳',
     channelManual: '手動',
     channelUrl: '網頁',
