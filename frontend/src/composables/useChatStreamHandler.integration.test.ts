@@ -8,6 +8,7 @@ import * as finalContent from '../utils/finalArtifactContent.ts'
 import * as history from '../utils/rag-pipeline-history.ts'
 import * as timestamps from '../utils/messageTimestamp.ts'
 import * as steering from '../utils/steerStreamFork.ts'
+import * as hostApproval from '../views/chat/components/hostApproval.ts'
 import { useProtectedImageRecovery } from './useProtectedImageRecovery.ts'
 import { clearProtectedFileFailureCache, hydrateProtectedFileImages } from '../utils/security.ts'
 import { setDefaultProtectedFileAccess } from '../utils/protectedFileAccess.ts'
@@ -25,6 +26,7 @@ const modules: Record<string, unknown> = {
   '@/utils/rag-pipeline-history': history,
   '@/utils/messageTimestamp': timestamps,
   '@/utils/steerStreamFork': steering,
+  '@/views/chat/components/hostApproval': hostApproval,
 }
 const exports: { useChatStreamHandler?: typeof StreamHandler } = {}
 vm.runInNewContext(compiled, {
@@ -148,6 +150,27 @@ for (const mode of ['ordinary', 'quick-timeline', 'agent'] as const) {
     assert.equal(h.requests.length, 0, 'a persistence error must not trigger a completion retry')
   })
 }
+
+test('a live host approval reaches the composer while the tool is still running', async t => {
+  const h = setup(t, 'agent')
+  hostApproval.clearComposerApproval()
+  h.send('tool_call', '', false, { tool_call_id: 'call-1', tool_name: 'shell_exec', arguments: { command: 'rm a.txt' } })
+  h.send('tool_approval_required', 'MCP tool requires human approval', true, {
+    pending_id: 'pending-1', kind: 'host_command', tool_call_id: 'call-1',
+    host: { reason: 'delete', command: 'rm a.txt', allow_session: true },
+  })
+  await h.flush()
+  assert.equal(hostApproval.pendingComposerApprovals.value[0]?.pending_id, 'pending-1')
+  h.send('tool_approval_required', 'MCP tool requires human approval', true, {
+    pending_id: 'pending-2', kind: 'host_command', tool_call_id: 'call-2',
+    host: { reason: 'delete', command: 'rm b.txt', allow_session: true },
+  })
+  await h.flush()
+  assert.deepEqual(hostApproval.pendingComposerApprovals.value.map((item) => item.pending_id), ['pending-1', 'pending-2'])
+  h.send('tool_approval_resolved', '', true, { pending_id: 'pending-1', approved: true, scope: 'once' })
+  await h.flush()
+  assert.deepEqual(hostApproval.pendingComposerApprovals.value.map((item) => item.pending_id), ['pending-2'])
+})
 
 test('ordinary completion waits for the buffered typewriter before recovering images', async t => {
   const h = setup(t, 'ordinary')

@@ -1,3 +1,4 @@
+import { approvalEventFromRecord, clearComposerApproval, showComposerApproval } from '@/views/chat/components/hostApproval'
 import { applyFinalArtifactContent } from '@/utils/finalArtifactContent'
 import { markRaw, nextTick, type Ref } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -370,6 +371,11 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
           })
         }
 
+        const approvals = Array.isArray(step.approvals) ? step.approvals as ChatMessage[] : []
+        approvals.forEach((record) => {
+          events.push(approvalEventFromRecord(record))
+        })
+
         if (toolCalls && Array.isArray(toolCalls)) {
           toolCalls.forEach((toolCall: ChatMessage) => {
             if (toolCall.name === 'final_answer') return
@@ -681,7 +687,7 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
       case 'tool_approval_required': {
         if (!message.agentEventStream) message.agentEventStream = []
         const d = dataPayload || {}
-        ;(message.agentEventStream as ChatMessage[]).push({
+        const approvalEvent = {
           type: 'tool_approval_required',
           pending_id: d.pending_id,
           service_name: d.service_name,
@@ -691,8 +697,18 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
           timeout_seconds: d.timeout_seconds,
           requested_at: d.requested_at,
           tool_call_id: d.tool_call_id,
+          kind: d.kind,
+          host: d.host,
           resolved: false,
-        })
+        }
+        // Replace the array. A markRaw stream ignores push, so the open chat
+        // stayed on "running" until a session reload rebuilt it.
+        message.agentEventStream = [
+          ...(message.agentEventStream as ChatMessage[]),
+          approvalEvent,
+        ]
+        message.pendingHostApproval = approvalEvent
+        showComposerApproval(approvalEvent)
         break
       }
       case 'tool_approval_resolved': {
@@ -707,7 +723,14 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
           ev.resolve_reason = d.reason
           ev.timed_out = d.timed_out
           ev.canceled = d.canceled
+          ev.resolve_scope = d.scope
+          message.agentEventStream = [...(message.agentEventStream as ChatMessage[])]
         }
+        const pending = message.pendingHostApproval as { pending_id?: string } | undefined
+        if (pending && pending.pending_id === pid) {
+          message.pendingHostApproval = null
+        }
+        clearComposerApproval(typeof pid === 'string' ? pid : undefined)
         break
       }
       case 'mcp_oauth_required': {
@@ -1182,7 +1205,11 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
       data.response_type === 'reflection' ||
       data.response_type === 'artifacts_pending' ||
       data.response_type === 'context_compacted' ||
-      data.response_type === 'user_message_injected'
+      data.response_type === 'user_message_injected' ||
+      data.response_type === 'tool_approval_required' ||
+      data.response_type === 'tool_approval_resolved' ||
+      data.response_type === 'mcp_oauth_required' ||
+      data.response_type === 'mcp_oauth_resolved'
 
     const activeAssistant = getTrailingIncompleteAssistant()
     const isCurrentlyAgentMode = activeAssistant?.isAgentMode === true

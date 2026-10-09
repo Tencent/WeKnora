@@ -1878,6 +1878,29 @@ export default {
       submitted: '제출됨',
       submitFailed: '제출 실패',
       userRejected: '사용자 거부'
+    },
+    hostApproval: {
+      titleDelete: '파일을 삭제하기 전에 확인이 필요합니다',
+      titleDangerous: '위험한 작업 확인',
+      titleDenied: '샌드박스가 이 명령을 차단했습니다. 다음 디렉터리에 대한 접근이 필요합니다',
+      titleGeneric: '확인이 필요합니다',
+      command: '명령',
+      cwd: '디렉터리',
+      grantPath: '접근이 필요한 경로',
+      accessWrite: '읽기 및 쓰기',
+      accessRead: '읽기 전용',
+      firstAttemptRan: '이 명령은 이미 한 번 실행되어 실패했습니다. 승인하면 명령 전체가 다시 실행됩니다',
+      snippet: '차단 상세',
+      sessionRules: '이 세션에서 허용하면 이 디렉터리의 다음 삭제는 다시 묻지 않습니다(파일 이름은 달라도 됨)',
+      reject: '거부',
+      approveOnce: '한 번만 허용',
+      approveSession: '이 세션에서 허용',
+      approvedOnce: '한 번 허용됨',
+      approvedSession: '이 세션에서 허용됨',
+      rejectedTag: '거부됨',
+      submitted: '제출됨',
+      submitFailed: '제출 실패',
+      userRejected: '사용자가 거부함'
     }
   },
   kbSettings: {
