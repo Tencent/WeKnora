@@ -1390,6 +1390,16 @@
         "match": "o4*",
         "reasoning": true,
         "source": "https://platform.openai.com/docs/guides/reasoning"
+      },
+      {
+        "name": "Qwen3-VL-Embedding (self-hosted)",
+        "match": "*qwen3-vl-embedding*",
+        "type": "Embedding",
+        "input": [
+          "text",
+          "image"
+        ],
+        "source": "https://huggingface.co/Qwen/Qwen3-VL-Embedding-8B"
       }
     ],
     "gpustack": [],

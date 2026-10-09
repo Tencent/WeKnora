@@ -89,7 +89,8 @@
 | 需要附带厂商私有参数，如阿里云联网搜索 | `{"extra_body": {"enable_search": true}}` |
 | 多轮对话回传思考内容时报错 | `{"replay_reasoning_content": false}` |
 | 自建向量服务一次请求只接受 16 条 | `{"max_batch_size": 16}` |
-| vLLM 部署的多模态向量模型（VLM2Vec、GME 等） | 打开「图片输入」即可，自定义厂商默认按 vLLM 的 `messages` 格式发图片；模板需要指令时加 `{"image_prompt": "Represent the given image."}` |
+| vLLM 部署的多模态向量模型（VLM2Vec、GME 等） | 打开「图片输入」即可，自定义厂商默认按 vLLM 的 `messages` 格式发图片；模板需要指令时加 `{"image_prompt": "Represent the given image."}`；文本也必须经过对话模板才和图片同空间时加 `{"text_as_messages": true}` |
+| vLLM 部署的 Qwen3-VL-Embedding | 无需填写：自定义厂商下模型名含 `qwen3-vl-embedding` 时已内置图片输入与 `{"text_as_messages": true, "extra_body": {"add_special_tokens": true}}`。文本走普通 `input` 会绕过对话模板，与图片不在同一空间；不加 `add_special_tokens` 时末尾缺少模型取向量用的 `<\|endoftext\|>`，与[模型卡](https://huggingface.co/Qwen/Qwen3-VL-Embedding-8B)结果不符。已用该模型建立的索引需重建向量 |
 | SGLang 部署的多模态向量模型 | 打开「图片输入」，并填 `{"image_format": "object", "image_field": "image"}` |
 | 向量或重排服务响应慢，需要更长的超时 | `{"request_timeout_seconds": 120}` |
 | 自建重排服务返回的是未归一化分数（logit） | `{"score_scale": "logit"}` |
@@ -196,7 +197,7 @@
 | `image_field` | string | 空 | 仅 `openai-embeddings`：`input` 里承载图片的对象键名（Jina、SGLang 为 `image`）。留空且 `image_format` 不是 `messages` 时表示该端点不收图片 |
 | `image_format` | string | 空（自定义厂商为 `messages`） | 仅 `openai-embeddings`：图片的发送方式。`object` 把 `{image_field: 图片}` 放进 `input`；`messages` 把图片作为一轮对话放进 `messages`（vLLM 的多模态向量接口），每张图一个请求。留空时有 `image_field` 即按 `object` 处理 |
 | `image_prompt` | string | 空 | 仅 `messages` 格式：随图片一起发送的文字，部分模型的对话模板需要（如 VLM2Vec 的 `Represent the given image.`） |
-| `text_as_messages` | bool | false | 仅 `openai-embeddings`：文本也按 `messages` 格式发送，每条一个请求。适用于必须经过对话模板、文本和图片才在同一向量空间的模型；已有索引的模型改动后需要重建向量 |
+| `text_as_messages` | bool | false | 仅 `openai-embeddings`：文本也按 `messages` 格式发送，每条一个请求。适用于必须经过对话模板、文本和图片才在同一向量空间的模型（自定义厂商下的 Qwen3-VL-Embedding 已内置）；已有索引的模型改动后需要重建向量 |
 | `max_image_batch_size` | int | 1 | 单次请求的最大图片数，超出自动分批 |
 | `max_image_bytes` | int | 0（不限） | 单张图片的字节上限，超出的图片直接拒绝、不发请求 |
 | `image_mime_types` | array | 空（不限） | 厂商接受的图片格式，如 `["image/png", "image/jpeg"]` |

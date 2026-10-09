@@ -182,6 +182,37 @@ func TestImageEmbeddingNeedsBothTheModelAndTheEndpoint(t *testing.T) {
 	}
 }
 
+// Qwen3-VL-Embedding on vLLM matches its model card only when text and
+// image both pass the chat template and the prompt ends in <|endoftext|>,
+// the token its last-token pooling reads. A plain `input` string skips the
+// template and lands in a different space from the images.
+func TestSelfHostedQwen3VLEmbeddingSendsTextAndImagesThroughTheTemplate(t *testing.T) {
+	up := newUpstream(t)
+	e := imageEmbedder(t, up, "generic", "Qwen/Qwen3-VL-Embedding-8B", "/v1", nil)
+	ie, ok := AsImageEmbedder(e)
+	require.True(t, ok, "the catalog declares image input without a row override")
+
+	got, err := e.BatchEmbed(types.WithEmbedQuery(context.Background()), []string{"ab", "c"})
+	require.NoError(t, err)
+	assert.Equal(t, [][]float32{{2}, {1}}, got)
+	_, err = ie.BatchEmbedImages(context.Background(), pngs(1))
+	require.NoError(t, err)
+
+	message := func(part map[string]any) map[string]any {
+		return map[string]any{
+			"model": "Qwen/Qwen3-VL-Embedding-8B", "encoding_format": "float",
+			"truncate_prompt_tokens": float64(511), "add_special_tokens": true,
+			"messages": []any{map[string]any{"role": "user", "content": []any{part}}},
+		}
+	}
+	require.Len(t, up.requests, 3, "the messages format carries one input per request")
+	assert.Equal(t, message(map[string]any{"type": "text", "text": "ab"}), up.requests[0].body)
+	assert.Equal(t, message(map[string]any{"type": "text", "text": "c"}), up.requests[1].body)
+	assert.Equal(t, message(map[string]any{
+		"type": "image_url", "image_url": map[string]any{"url": "data:image/png;base64,iQ=="},
+	}), up.requests[2].body)
+}
+
 func TestImageEmbeddingRefusesWhatTheVendorDocumentsItWillNotTake(t *testing.T) {
 	up := newUpstream(t)
 	gemini, ok := AsImageEmbedder(imageEmbedder(t, up, "gemini", "gemini-embedding-2", "/v1beta", nil))

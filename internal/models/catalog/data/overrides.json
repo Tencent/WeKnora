@@ -970,6 +970,16 @@
           "xhigh": "high",
           "max": "high"
         }
+      },
+      {
+        "match": "*qwen3-vl-embedding*",
+        "type": "Embedding",
+        "compat": {
+          "text_as_messages": true,
+          "extra_body": {
+            "add_special_tokens": true
+          }
+        }
       }
     ],
     "hunyuan": [
