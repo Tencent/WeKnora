@@ -56,7 +56,7 @@ var ErrProjectDirRevoked = errors.New("localsandbox: session project directory i
 // DirLayout names the roots the resolver allocates under.
 type DirLayout struct {
 	// SessionRoot is where session workspaces are created, by default
-	// ~/Documents/WeKnoraLite. It is user-visible on purpose.
+	// ~/.weknora/sessions. Each one is <root>/<year>/<month>/<day>/session-<id>.
 	SessionRoot string
 }
 
@@ -106,7 +106,6 @@ func (r *workspaceResolver) Resolve(ctx context.Context, sessionID string) (Work
 		}
 	}
 
-	day := r.now().Format("2006-01-02")
 	seg := sanitizeSegment(sessionID)
 	if existing, ok := r.existingSessionDir(seg); ok {
 		logger.Infof(ctx, "[LocalSandbox] workspace session=%s kind=session root=%s", sessionID, existing)
@@ -116,7 +115,8 @@ func (r *workspaceResolver) Resolve(ctx context.Context, sessionID string) (Work
 			ProtectGit: false,
 		}, nil
 	}
-	root := filepath.Join(r.layout.SessionRoot, day, "session-"+seg)
+	now := r.now()
+	root := filepath.Join(r.layout.SessionRoot, now.Format("2006"), now.Format("01"), now.Format("02"), "session-"+seg)
 	if err := os.MkdirAll(root, 0o700); err != nil {
 		logger.Errorf(ctx, "[LocalSandbox] create session workspace session=%s root=%s: %v",
 			sessionID, root, err)
@@ -164,7 +164,7 @@ func (r *workspaceResolver) existingSessionDir(seg string) (string, bool) {
 	if r.layout.SessionRoot == "" || seg == "" {
 		return "", false
 	}
-	matches, err := filepath.Glob(filepath.Join(r.layout.SessionRoot, "*", "session-"+seg))
+	matches, err := filepath.Glob(filepath.Join(r.layout.SessionRoot, "*", "*", "*", "session-"+seg))
 	if err != nil || len(matches) == 0 {
 		return "", false
 	}
