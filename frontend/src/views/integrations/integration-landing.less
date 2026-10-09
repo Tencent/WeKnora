@@ -2,9 +2,11 @@
 @claw-accent-dark: #c44d1f;
 
 .integration-landing {
+  container-type: inline-size;
+  container-name: integration-landing;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 24px;
 
   // TDesign 按钮内 icon / 文案垂直居中（落地页局部修正）
   :deep(.t-button) {
@@ -21,151 +23,94 @@
   }
 }
 
-// ── Hero ──
+// ── 页头：与设置页对齐，通过入口图标和局部主题色区分集成 ──
 .landing-hero {
   flex-shrink: 0;
   display: flex;
-  align-items: flex-start;
+  flex-direction: column;
   gap: 16px;
-  padding: 16px 18px;
-  border-radius: var(--app-radius-lg);
-  border: 1px solid var(--td-component-stroke);
-  background: linear-gradient(
-    135deg,
-    color-mix(in srgb, var(--td-brand-color) 10%, var(--td-bg-color-container)) 0%,
-    color-mix(in srgb, var(--td-brand-color) 4%, var(--td-bg-color-container)) 42%,
-    var(--td-bg-color-container) 72%
-  );
-  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--td-brand-color) 8%, transparent);
-
-  &--claw {
-    background: linear-gradient(
-      135deg,
-      color-mix(in srgb, @claw-accent 12%, var(--td-bg-color-container)) 0%,
-      color-mix(in srgb, @claw-accent 5%, var(--td-bg-color-container)) 45%,
-      var(--td-bg-color-container) 72%
-    );
-    box-shadow: inset 0 1px 0 color-mix(in srgb, @claw-accent 10%, transparent);
-  }
+  // 给弹窗右上角的关闭按钮留出空间。
+  padding: 0 16px 24px 0;
+  border-bottom: 1px solid var(--td-component-stroke);
 
   &__content {
-    flex: 1;
     min-width: 0;
   }
 
   &__title {
-    margin: 0 0 4px;
-    font-size: var(--app-text-xl);
+    margin: 0 0 8px;
+    font-size: var(--app-text-3xl);
     font-weight: 600;
-    line-height: 1.35;
+    line-height: 28px;
     color: var(--td-text-color-primary);
   }
 
   &__subtitle {
     margin: 0;
-    font-size: var(--app-text-md);
-    line-height: 1.55;
+    font-size: var(--app-text-base);
+    line-height: 1.7;
     color: var(--td-text-color-secondary);
   }
 
   &__tags {
     display: flex;
     flex-wrap: wrap;
-    gap: 6px;
-    margin-top: 8px;
+    gap: 8px;
+    margin-top: 14px;
   }
 
   &__actions {
-    margin-top: 14px;
-    align-self: stretch;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    min-width: 0;
   }
 }
 
 .ext-cta {
-  display: flex;
+  --integration-cta-accent: var(--td-brand-color);
+  --integration-cta-foreground: var(--td-brand-color);
+  display: inline-flex;
   align-items: center;
-  gap: 12px;
-  width: 100%;
-  min-height: 52px;
-  padding: 10px 12px;
-  border-radius: var(--app-radius-md);
-  border: 1px dashed color-mix(in srgb, var(--td-brand-color) 28%, var(--td-component-stroke));
-  background: color-mix(in srgb, var(--td-bg-color-container) 55%, transparent);
+  gap: 8px;
+  max-width: 100%;
+  min-height: 32px;
+  padding: 4px 0;
+  border-radius: var(--app-radius-xs);
+  border: none;
+  background: transparent;
   cursor: pointer;
   text-align: left;
   font: inherit;
-  color: inherit;
+  color: var(--integration-cta-foreground);
   box-sizing: border-box;
-  transition:
-    border-color 0.18s ease,
-    border-style 0.18s ease,
-    background 0.18s ease,
-    box-shadow 0.18s ease;
 
-  &:not(&--claw):hover {
-    border-style: solid;
-    border-color: color-mix(in srgb, var(--td-brand-color) 40%, var(--td-component-stroke));
-    background: color-mix(in srgb, var(--td-bg-color-container) 92%, transparent);
-    box-shadow: 0 2px 10px rgba(15, 23, 42, 0.05);
+  &:hover &__label {
+    text-decoration: underline;
+    text-underline-offset: 4px;
   }
 
-  &:not(&--claw):active {
-    box-shadow: none;
-  }
-
-  &:not(&--claw):focus-visible {
-    outline: 2px solid var(--td-brand-color);
+  &:focus-visible {
+    outline: 2px solid var(--integration-cta-accent);
     outline-offset: 2px;
   }
 
   &--claw {
-    border-color: color-mix(in srgb, @claw-accent 30%, var(--td-component-stroke));
-
-    &:hover {
-      border-style: solid;
-      border-color: color-mix(in srgb, @claw-accent 45%, var(--td-component-stroke));
-      background: color-mix(in srgb, var(--td-bg-color-container) 92%, transparent);
-      box-shadow: 0 2px 10px rgba(15, 23, 42, 0.05);
-    }
-
-    &:active {
-      box-shadow: none;
-    }
-
-    .ext-cta__badge {
-      background: color-mix(in srgb, @claw-accent 12%, var(--td-bg-color-container));
-      color: @claw-accent-dark;
-    }
-
-    .ext-cta__arrow-wrap {
-      background: color-mix(in srgb, @claw-accent 10%, transparent);
-      color: @claw-accent-dark;
-    }
-
-    &:hover .ext-cta__arrow-wrap {
-      background: color-mix(in srgb, @claw-accent 16%, transparent);
-      color: @claw-accent-dark;
-    }
-
-    &:focus-visible {
-      outline: 2px solid @claw-accent;
-      outline-offset: 2px;
-    }
+    --integration-cta-accent: @claw-accent;
+    --integration-cta-foreground: @claw-accent-dark;
   }
 
   &__badge {
     flex-shrink: 0;
-    width: 34px;
-    height: 34px;
-    border-radius: var(--app-radius-md);
+    width: 18px;
+    height: 18px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    background: color-mix(in srgb, var(--td-brand-color) 10%, var(--td-bg-color-container));
-    color: var(--td-brand-color);
+    font-size: var(--app-text-2xl);
     line-height: 0;
 
-    :deep(.t-icon) {
+    .t-icon {
       display: inline-flex;
       align-items: center;
       justify-content: center;
@@ -173,52 +118,29 @@
     }
   }
 
-  &__body {
-    flex: 1;
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    gap: 1px;
-  }
-
   &__label {
-    font-size: var(--app-text-md);
-    font-weight: 600;
-    line-height: 1.35;
-    color: var(--td-text-color-primary);
-  }
-
-  &__hint {
-    font-size: var(--app-text-xs);
-    line-height: 1.4;
-    color: var(--td-text-color-placeholder);
+    min-width: 0;
+    font-size: var(--app-text-base);
+    font-weight: 500;
+    line-height: 1.5;
+    overflow-wrap: anywhere;
   }
 
   &__arrow-wrap {
     flex-shrink: 0;
-    width: 30px;
-    height: 30px;
-    border-radius: 7px;
+    width: 16px;
+    height: 16px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    background: color-mix(in srgb, var(--td-brand-color) 8%, transparent);
-    color: var(--td-text-color-secondary);
-    transition: background 0.18s ease, color 0.18s ease;
   }
 
   &__arrow {
-    font-size: var(--app-text-lg);
+    font-size: var(--app-text-base);
     line-height: 0;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-  }
-
-  &:not(&--claw):hover &__arrow-wrap {
-    background: color-mix(in srgb, var(--td-brand-color) 14%, transparent);
-    color: var(--td-brand-color);
   }
 }
 
@@ -288,9 +210,9 @@
 }
 
 .scenario-tag {
-  padding: 2px 8px;
+  padding: 4px 10px;
   border-radius: var(--app-radius-xs);
-  font-size: var(--app-text-xs);
+  font-size: var(--app-text-md);
   line-height: 1.45;
   color: var(--td-text-color-secondary);
   background: color-mix(in srgb, var(--td-bg-color-container) 70%, transparent);
@@ -300,11 +222,11 @@
 // ── 双栏：面板等高，内容保持自然高度 ──
 .landing-body {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(300px, 380px);
-  gap: 14px;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+  gap: 24px;
   align-items: stretch;
 
-  @media (max-width: 820px) {
+  @container integration-landing (max-width: 880px) {
     grid-template-columns: 1fr;
   }
 }
@@ -322,32 +244,33 @@
   width: 100%;
   display: flex;
   flex-direction: column;
-  padding: 2px 16px 14px;
+  padding: 24px;
   border: 1px solid var(--td-component-stroke);
   border-radius: var(--app-radius-lg);
   background: var(--td-bg-color-container);
   box-sizing: border-box;
 
   .setting-drawer__section {
-    padding: 12px 0 14px;
+    padding: 24px 0;
     border-bottom: 1px solid var(--td-component-stroke);
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: 20px;
     flex: 1;
 
     &:first-child {
-      padding-top: 10px;
+      padding-top: 0;
     }
 
     &:last-child {
       border-bottom: none;
-      padding-bottom: 10px;
+      padding-bottom: 0;
     }
   }
 
   .setting-drawer__section-title {
-    font-size: var(--app-text-md);
+    font-size: var(--app-text-xl);
+    line-height: 1.5;
     font-weight: 600;
     color: var(--td-text-color-primary);
     margin: 0;
@@ -360,7 +283,7 @@
     &::before {
       content: '';
       width: 3px;
-      height: 14px;
+      height: 18px;
       background: var(--td-brand-color);
       border-radius: 2px;
       flex-shrink: 0;
@@ -383,9 +306,9 @@
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   grid-auto-rows: auto;
-  gap: 10px;
+  gap: 16px;
 
-  @media (max-width: 520px) {
+  @container integration-landing (max-width: 520px) {
     grid-template-columns: 1fr;
   }
 
@@ -399,8 +322,8 @@
 .capability-card {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 12px;
+  gap: 12px;
+  padding: 18px;
   border: 1px solid var(--td-component-stroke);
   border-radius: var(--app-radius-md);
   background: var(--td-bg-color-secondarycontainer);
@@ -428,7 +351,7 @@
 
   &__title {
     margin: 0;
-    font-size: var(--app-text-md);
+    font-size: var(--app-text-lg);
     font-weight: 600;
     line-height: 1.4;
     color: var(--td-text-color-primary);
@@ -436,8 +359,8 @@
 
   &__desc {
     margin: 0;
-    font-size: var(--app-text-sm);
-    line-height: 1.5;
+    font-size: var(--app-text-base);
+    line-height: 1.7;
     color: var(--td-text-color-secondary);
   }
 }
@@ -471,11 +394,11 @@
   margin-top: auto;
 }
 
-.field-desc {
+.integration-landing .field-desc {
   margin: 0;
-  font-size: var(--app-text-sm);
-  line-height: 1.55;
-  color: var(--td-text-color-placeholder);
+  font-size: var(--app-text-base);
+  line-height: 1.7;
+  color: var(--td-text-color-secondary);
 }
 
 .credential-row {
@@ -521,10 +444,10 @@
     flex: 1;
     min-width: 0;
     margin: 0;
-    padding: 10px 12px;
+    padding: 14px 16px;
     font-family: var(--app-font-family-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
-    font-size: var(--app-text-xs);
-    line-height: 1.55;
+    font-size: var(--app-text-md);
+    line-height: 1.7;
     color: var(--td-text-color-primary);
     overflow-x: auto;
     white-space: pre;
@@ -551,9 +474,9 @@
 
 .landing-step {
   display: flex;
-  gap: 10px;
+  gap: 12px;
   align-items: flex-start;
-  padding: 9px 0;
+  padding: 18px 0;
   border-bottom: 1px solid var(--td-component-stroke);
 
   &:first-child {
@@ -568,13 +491,13 @@
 
 .landing-step-num {
   flex-shrink: 0;
-  width: 20px;
-  height: 20px;
+  width: 26px;
+  height: 26px;
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: var(--app-text-xs);
+  font-size: var(--app-text-md);
   font-weight: 600;
   background: color-mix(in srgb, var(--td-brand-color) 12%, transparent);
   color: var(--td-brand-color);
@@ -586,27 +509,28 @@
 }
 
 .landing-step-title {
-  font-size: var(--app-text-sm);
+  font-size: var(--app-text-lg);
   font-weight: 600;
-  line-height: 1.4;
+  line-height: 1.6;
   color: var(--td-text-color-primary);
-  margin-bottom: 2px;
+  margin-bottom: 6px;
 }
 
 .landing-step-desc {
   margin: 0;
-  font-size: var(--app-text-xs);
-  line-height: 1.5;
+  font-size: var(--app-text-base);
+  line-height: 1.7;
+  overflow-wrap: anywhere;
   color: var(--td-text-color-secondary);
 }
 
 .landing-step-action,
 .landing-step-embed {
-  margin-top: 8px;
+  margin-top: 12px;
 }
 
 .landing-step-embed.credential-row {
-  margin-top: 8px;
+  margin-top: 12px;
 }
 
 .landing-footer {
@@ -619,9 +543,9 @@
 .landing-footer-bar {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 8px;
   width: 100%;
-  padding: 10px 12px;
+  padding: 16px 18px;
   border-radius: var(--app-radius-md);
   border: 1px solid var(--td-component-stroke);
   background: var(--td-bg-color-secondarycontainer);
@@ -629,13 +553,14 @@
 
   &__note {
     margin: 0;
-    font-size: var(--app-text-sm);
-    line-height: 1.55;
+    font-size: var(--app-text-base);
+    line-height: 1.7;
     color: var(--td-text-color-secondary);
   }
 }
 
 .landing-meta {
-  font-size: var(--app-text-xs);
+  font-size: var(--app-text-md);
+  line-height: 1.6;
   color: var(--td-text-color-placeholder);
 }

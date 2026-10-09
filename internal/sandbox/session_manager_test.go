@@ -505,6 +505,21 @@ func TestBuildSessionCreateRequestCarriesNetworkPolicy(t *testing.T) {
 	}
 }
 
+func TestBuildSessionCreateRequestMarksSkillSnapshot(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Type = SandboxTypeE2B
+	cfg.E2BTemplate = "snap-1"
+	cfg.TemplateFromSnapshot = true
+	cfg.EnvVars = map[string]string{"HF_TOKEN": "secret"}
+
+	request, err := buildSessionCreateRequest(SandboxTypeE2B, cfg)
+
+	require.NoError(t, err)
+	require.True(t, request.FromSnapshot)
+	require.Equal(t, "secret", request.EnvVars["HF_TOKEN"])
+	require.NotEmpty(t, request.EnvVars["WEKNORA_SKILL_OUTPUT_DIR"])
+}
+
 func newSessionManagerExecTestHarness(t *testing.T) (*SessionBoundManager, *fakeRemoteClient) {
 	t.Helper()
 

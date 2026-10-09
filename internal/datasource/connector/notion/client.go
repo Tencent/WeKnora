@@ -25,6 +25,35 @@ type notionClient struct {
 	httpClient *http.Client
 	limiter    *rate.Limiter
 	baseURL    string
+	// jsonLimit caps each API response body; a field so tests can lower it
+	// without materialising the production limit.
+	jsonLimit int64
+}
+
+// maxJSONResponseBytes bounds every API response body. Page and block payloads
+// are small; a larger body means a broken or hostile server.
+const maxJSONResponseBytes = 16 << 20
+
+// errResponseTooLarge marks a body over the cap. It is deterministic: the same
+// request returns the same oversized body, so callers must not retry it.
+var errResponseTooLarge = errors.New("response exceeds maximum size")
+
+// readCapped reads a response body, refusing anything larger than limit instead
+// of buffering it. Oversized payloads are reported as an error: a truncated
+// body would be indexed as if it were the whole document. A non-positive limit
+// (e.g. a zero-value client built in tests) falls back to maxJSONResponseBytes.
+func readCapped(body io.Reader, limit int64) ([]byte, error) {
+	if limit <= 0 {
+		limit = maxJSONResponseBytes
+	}
+	data, err := io.ReadAll(io.LimitReader(body, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > limit {
+		return nil, fmt.Errorf("%w (%d bytes)", errResponseTooLarge, limit)
+	}
+	return data, nil
 }
 
 // newClient creates a new Notion API client.
@@ -40,6 +69,7 @@ func newClient(token, baseURL string) (*notionClient, error) {
 		httpClient: datasource.NewConnectorHTTPClient(30 * time.Second),
 		limiter:    rate.NewLimiter(rate.Limit(3), 3),
 		baseURL:    baseURL,
+		jsonLimit:  maxJSONResponseBytes,
 	}, nil
 }
 
@@ -101,7 +131,7 @@ func (c *notionClient) doRequest(ctx context.Context, method, path string, body 
 			break
 		}
 
-		respBody, err := io.ReadAll(resp.Body)
+		respBody, err := readCapped(resp.Body, c.jsonLimit)
 		resp.Body.Close()
 		if err != nil {
 			return nil, fmt.Errorf("read response: %w", err)

@@ -99,6 +99,7 @@ func TestCopyReferences_DoesNotMutateOriginals(t *testing.T) {
 	original := &types.SearchResult{
 		Content:        "chunk ![c](resource://xifDo7NTSL300Lp1goVutw)",
 		MatchedContent: "match ![m](resource://xifDo7NTSL300Lp1goVutw)",
+		MatchedImages:  []types.MatchedImage{{ChunkID: "image-1", URL: "resource://xifDo7NTSL300Lp1goVutw"}},
 		ImageInfo:      `[{"url":"resource://xifDo7NTSL300Lp1goVutw"}]`,
 	}
 	refs := []*types.SearchResult{original, nil}
@@ -112,6 +113,8 @@ func TestCopyReferences_DoesNotMutateOriginals(t *testing.T) {
 	assert.Equal(t, "chunk ![c](https://cdn.example.com/x.png)", out[0].Content)
 	assert.Equal(t, "match ![m](https://cdn.example.com/x.png)", out[0].MatchedContent)
 	assert.Equal(t, `[{"url":"https://cdn.example.com/x.png"}]`, out[0].ImageInfo)
+	assert.Equal(t, "resource://xifDo7NTSL300Lp1goVutw", original.MatchedImages[0].URL)
+	assert.Equal(t, "https://cdn.example.com/x.png", out[0].MatchedImages[0].URL)
 	assert.Nil(t, out[1])
 }
 

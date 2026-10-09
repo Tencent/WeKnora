@@ -438,8 +438,20 @@ func (c *mcpGoClient) Initialize(ctx context.Context) (*InitializeResult, error)
 		)
 	}
 
+	capabilities := ServerCapabilities{}
+	if result.Capabilities.Tools != nil {
+		capabilities.Tools = &ToolsCapability{ListChanged: result.Capabilities.Tools.ListChanged}
+	}
+	if result.Capabilities.Resources != nil {
+		capabilities.Resources = &ResourcesCapability{
+			Subscribe:   result.Capabilities.Resources.Subscribe,
+			ListChanged: result.Capabilities.Resources.ListChanged,
+		}
+	}
+
 	return &InitializeResult{
 		ProtocolVersion: result.ProtocolVersion,
+		Capabilities:    capabilities,
 		Instructions:    result.Instructions,
 		ServerInfo: ServerInfo{
 			Name:        result.ServerInfo.Name,

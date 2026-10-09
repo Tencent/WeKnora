@@ -394,6 +394,8 @@ gRPC 响应中不再返回 chunks（`ReadResponse` 没有 chunk 字段）；`Exc
 | `WEKNORA_PADDLEOCR_VL_TIMEOUT` | Go duration | `1000s` | 自建 PaddleOCR-VL 引擎的 HTTP 请求超时；空值、无效值或非正数使用默认值 |
 | `WEKNORA_MINERU_TIMEOUT` | Go duration | `1000s` | 自建 MinerU 引擎的单次解析超时（V1 API 覆盖上传到下载的整个任务，旧版覆盖 `/file_parse` 请求）；空值、无效值或非正数使用默认值 |
 | `WEKNORA_MINERU_CLOUD_TIMEOUT` | Go duration | `600s` | MinerU 云端（mineru.net）轮询解析结果的最长时间；空值、无效值或非正数使用默认值 |
+| `WEKNORA_PADDLEOCR_VL_CLOUD_TIMEOUT` | Go duration | `600s` | PaddleOCR-VL 云端（AI Studio）轮询解析结果的最长时间；空值、无效值或非正数使用默认值 |
+| `WEKNORA_WEKNORACLOUD_TIMEOUT` | Go duration | `20m` | WeKnoraCloud 托管 docreader 轮询任务结果的最长时间，应小于 `WEKNORA_DOCREADER_CALL_TIMEOUT`；空值、无效值或非正数使用默认值 |
 
 处理大文件时从内到外逐级留出余量，例如 PaddleOCR-VL 或 MinerU `90m`、docreader `100m`、文档处理 `2h`。
 

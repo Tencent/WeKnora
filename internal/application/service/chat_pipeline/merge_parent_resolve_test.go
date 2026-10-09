@@ -361,3 +361,43 @@ func TestResolveImageOCRHit_KeepsTextWhenPlaceholderIsPruned(t *testing.T) {
 		t.Fatalf("OCR count after chat enrichment = %d: %q", strings.Count(passage, ocrText), passage)
 	}
 }
+
+// An image found by its own vector reads like a caption hit: the caption is
+// its body, and the text around the image comes from the parent chunks.
+func TestResolveImageVectorHit_ExpandsLikeACaptionHit(t *testing.T) {
+	caption := "柱状图：2025 年各季度销售额，第三季度最高"
+	imageInfo, err := json.Marshal([]types.ImageInfo{{URL: "images/sales.png", Caption: caption}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo := &expandChunkRepo{
+		chunks: map[string]*types.Chunk{
+			"text": {
+				ID: "text", ParentChunkID: "parent", ChunkType: types.ChunkTypeText, ChunkIndex: 2,
+				Content: "季度回顾如下：\n![sales.png](images/sales.png)",
+			},
+			"parent": {
+				ID: "parent", ChunkType: types.ChunkTypeParentText,
+				Content: "第二章 经营情况\n季度回顾如下：\n![sales.png](images/sales.png)",
+			},
+		},
+	}
+	plugin := &PluginMerge{chunkRepo: repo}
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(1))
+	result := &types.SearchResult{
+		ID: "vec-1", KnowledgeID: "doc", ChunkType: string(types.ChunkTypeImageVector),
+		ParentChunkID: "text", Content: caption, ImageInfo: string(imageInfo),
+	}
+
+	got := plugin.resolveParentChunks(ctx, &types.ChatManage{}, []*types.SearchResult{result})
+	if len(got) != 1 {
+		t.Fatalf("result count = %d, want 1", len(got))
+	}
+	if !strings.Contains(got[0].Content, "经营情况") || !strings.Contains(got[0].Content, "第三季度最高") {
+		t.Fatalf("image hit lost its surrounding text or caption: %q", got[0].Content)
+	}
+	passage := getEnrichedPassageForChat(ctx, got[0])
+	if strings.Count(passage, caption) != 1 {
+		t.Fatalf("caption duplicated after chat enrichment: %q", passage)
+	}
+}
