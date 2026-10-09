@@ -118,6 +118,10 @@ func answer(path string, body map[string]any) string {
 	case strings.HasSuffix(path, "/embeddings/multimodal"):
 		n := itemLen(body["input"].([]any)[0])
 		return fmt.Sprintf(`{"data":{"embedding":[%d],"object":"embedding"}}`, n)
+	case body["messages"] != nil:
+		turn := body["messages"].([]any)[0].(map[string]any)
+		n := itemLen(turn["content"].([]any)[0])
+		return fmt.Sprintf(`{"data":[{"index":0,"embedding":[%d]}]}`, n)
 	default:
 		input := body["input"].([]any)
 		for i := len(input) - 1; i >= 0; i-- {

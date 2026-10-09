@@ -105,11 +105,26 @@ func TestImageEmbeddingWireFormatPerVendor(t *testing.T) {
 				"input": []any{map[string]any{"image": uri}},
 			},
 		},
+		{
+			name: "a generic (vLLM) row sends each image as a messages conversation", provider: "generic",
+			model: "TIGER-Lab/VLM2Vec-Full", base: "/v1", images: 2, wantRequests: 2,
+			wantPath: "/v1/embeddings",
+			wantBody: map[string]any{
+				"model": "TIGER-Lab/VLM2Vec-Full", "encoding_format": "float", "truncate_prompt_tokens": float64(511),
+				"messages": []any{map[string]any{"role": "user", "content": []any{
+					map[string]any{"type": "image_url", "image_url": map[string]any{"url": uri}},
+				}}},
+			},
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			up := newUpstream(t)
-			ie, ok := AsImageEmbedder(imageEmbedder(t, up, tc.provider, tc.model, tc.base, nil))
+			var spec *types.ModelSpecOverride
+			if tc.provider == "generic" {
+				spec = &types.ModelSpecOverride{Input: []string{"text", "image"}}
+			}
+			ie, ok := AsImageEmbedder(imageEmbedder(t, up, tc.provider, tc.model, tc.base, spec))
 			require.True(t, ok, "the catalog lists this model as taking images")
 
 			images := pngs(tc.images)
@@ -137,9 +152,13 @@ func TestImageEmbeddingNeedsBothTheModelAndTheEndpoint(t *testing.T) {
 	}{
 		{"text model on a vendor with an image field", "jina", "jina-embeddings-v3", nil, false},
 		{"text model on the OpenAI shape", "openai", "text-embedding-3-small", nil, false},
-		// A generic OpenAI-compatible server has no image input to send to,
-		// whatever the row declares.
-		{"declared, but the endpoint names no image field", "generic", "my-clip", declare, false},
+		{"generic endpoint, image input not declared", "generic", "my-clip", nil, false},
+		{"declared on a generic (vLLM) endpoint", "generic", "my-clip", declare, true},
+		{
+			"declared, but the row switched to an object format without a field", "generic", "my-clip",
+			&types.ModelSpecOverride{Input: []string{"text", "image"}, Compat: map[string]any{"image_format": "object"}},
+			false,
+		},
 		{"declared on a vendor that names one", "jina", "my-jina-omni", declare, true},
 		{
 			"the row narrows a multimodal catalog entry", "volcengine", "doubao-embedding-vision-251215",
