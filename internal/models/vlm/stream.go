@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"fmt"
 
+	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -32,14 +33,23 @@ type StreamingVLM interface {
 // PredictStream streams a vision request through the chat client. It is used by
 // the manager for first-token / TTFT observation and (when the caller wants an
 // incremental UX) for token forwarding.
+//
+// It mirrors the buffered PredictWithOptions markers: a "[VLM] Calling chat
+// protocol" line is emitted before the request is sent, and a terminal line is
+// emitted when the stream ends — a "[VLM] response received" on success, or a
+// "[VLM] stream ended" carrying the error otherwise. The two lines bracket a
+// single call so its round-trip can be timed from logs; without them, streaming
+// VLM calls (flash, qwen) left no per-call duration evidence at all.
 func (v *RemoteAPIVLM) PredictStream(
 	ctx context.Context, imgBytes [][]byte, prompt string, opts *PredictOptions,
 ) (<-chan StreamChunk, error) {
 	parts := []chat.MessageContentPart{{Type: "text", Text: prompt}}
+	totalImageSize := 0
 	for _, b := range imgBytes {
 		if len(b) == 0 {
 			continue
 		}
+		totalImageSize += len(b)
 		dataURI := fmt.Sprintf("data:%s;base64,%s",
 			detectImageMIME(b), base64.StdEncoding.EncodeToString(b))
 		parts = append(parts, chat.MessageContentPart{
@@ -57,6 +67,11 @@ func (v *RemoteAPIVLM) PredictStream(
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, vlmHTTPTimeout())
+	// Same request marker the buffered path emits, so streaming and buffered VLM
+	// calls are observable identically.
+	logger.Infof(ctx, "[VLM] Calling chat protocol, model=%s, numImages=%d, totalImageSize=%d",
+		v.modelName, len(imgBytes), totalImageSize)
+
 	ch, err := v.chat.ChatStream(ctx, []chat.Message{{Role: "user", MultiContent: parts}}, chatOpts)
 	if err != nil {
 		cancel()
@@ -67,11 +82,14 @@ func (v *RemoteAPIVLM) PredictStream(
 	go func() {
 		defer close(out)
 		defer cancel()
+		var totalLen int
 		for resp := range ch {
 			if resp.ResponseType == types.ResponseTypeError {
 				out <- StreamChunk{Err: fmt.Errorf("VLM stream error: %s", resp.Content)}
+				logger.Infof(ctx, "[VLM] stream ended, len=%d, err=%s", totalLen, resp.Content)
 				return
 			}
+			totalLen += len(resp.Content)
 			out <- StreamChunk{
 				Text:  resp.Content,
 				Done:  resp.Done,
@@ -79,6 +97,7 @@ func (v *RemoteAPIVLM) PredictStream(
 				Err:   nil,
 			}
 			if resp.Done {
+				logger.Infof(ctx, "[VLM] response received, len=%d", totalLen)
 				return
 			}
 			if resp.FinishReason == types.FinishReasonIncomplete {
@@ -86,11 +105,13 @@ func (v *RemoteAPIVLM) PredictStream(
 				// accumulated text is partial; report it as a transport error
 				// so the caller retries rather than recording a half answer.
 				out <- StreamChunk{Err: fmt.Errorf("%s", types.StreamEndedEarlyError)}
+				logger.Infof(ctx, "[VLM] stream ended, len=%d, err=%s", totalLen, types.StreamEndedEarlyError)
 				return
 			}
 		}
 		// Channel closed with no terminal chunk: treat as incomplete.
 		out <- StreamChunk{Err: fmt.Errorf("%s", types.StreamEndedEarlyError)}
+		logger.Infof(ctx, "[VLM] stream ended, len=%d, err=%s", totalLen, types.StreamEndedEarlyError)
 	}()
 	return out, nil
 }
