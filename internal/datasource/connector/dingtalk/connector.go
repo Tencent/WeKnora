@@ -45,11 +45,17 @@ var unsupportedDocumentExtensions = map[string]string{
 // just listed will not be ingested. Both answers are deterministic: retrying
 // the sync can never turn such a node into a document, which is what separates
 // a skip from a failed read that must be retried.
-func skipReason(n node) string {
+func skipReason(n node, settings documentSettings) string {
 	extension := strings.ToLower(strings.TrimSpace(n.Extension))
 	_, knownMediaExtension := mediaExtensions[extension]
 	if strings.EqualFold(n.Category, "VIDEO") || knownMediaExtension {
 		return "video/media files are deliberately not downloaded by this connector"
+	}
+	// An uploaded file this connector could read, but this data source was
+	// never told to. Naming the switch makes the skip actionable instead of
+	// looking like a missing feature.
+	if n.isBinaryDocument() && !settings.IncludeUploadedFiles {
+		return "uploaded files are not ingested because include_uploaded_files is not enabled for this data source"
 	}
 	if label := unsupportedDocumentExtensions[extension]; label != "" {
 		return label + " has no ingest path in this connector yet"
@@ -77,7 +83,8 @@ var (
 
 type apiFactory func(*config) dingTalkAPI
 
-// Connector imports native DingTalk documents through the Wiki and Blocks APIs.
+// Connector imports DingTalk wiki documents: native adoc documents through the
+// blocks API, and uploaded Office/PDF files through the 钉盘 download API.
 type Connector struct {
 	newAPI apiFactory
 }
@@ -118,6 +125,7 @@ func (c *Connector) Validate(ctx context.Context, dataSourceConfig *types.DataSo
 		return err
 	}
 	api := c.api(cfg)
+	settings := parseDocumentSettings(dataSourceConfig)
 	workspaces, err := api.listWorkspaces(ctx)
 	if err != nil {
 		return fmt.Errorf("validate DingTalk data source: %w", err)
@@ -136,7 +144,9 @@ func (c *Connector) Validate(ctx context.Context, dataSourceConfig *types.DataSo
 		if rootNodeID == "" {
 			continue
 		}
-		document, found, unexplored, err := firstValidateDocument(ctx, api, rootNodeID, &listings)
+		document, found, unexplored, err := firstValidateDocument(
+			ctx, api, rootNodeID, settings, &listings,
+		)
 		if err != nil {
 			lastErr = fmt.Errorf("workspace %q: %w", item.Name, err)
 			// A cancelled or timed-out request proves nothing about the
@@ -201,8 +211,15 @@ const maxValidateListings = 20
 // unexplored reports that some nodes were never seen, because the budget ran
 // out or a folder could not be listed, so the walk cannot prove the workspace
 // holds no readable document.
+//
+// The walk selects nodes with the same settings-aware predicate the picker and
+// the sync use, so a type the data source does not ingest is never probed.
 func firstValidateDocument(
-	ctx context.Context, api dingTalkAPI, rootNodeID string, listings *int,
+	ctx context.Context,
+	api dingTalkAPI,
+	rootNodeID string,
+	settings documentSettings,
+	listings *int,
 ) (document node, found, unexplored bool, err error) {
 	queue := []string{rootNodeID}
 	visited := map[string]struct{}{rootNodeID: {}}
@@ -235,7 +252,7 @@ func firstValidateDocument(
 				break
 			}
 			for _, child := range children {
-				if child.isDocument() {
+				if child.isIngestible(settings) {
 					return child, true, unexplored, nil
 				}
 				if child.isFolder() || child.HasChildren {
@@ -263,16 +280,23 @@ func firstValidateDocument(
 	return node{}, false, unexplored, nil
 }
 
-// verifyDocument proves one visible document is readable by calling the read
-// API that backs its ingest path — the blocks API for adoc today. The caller
-// only reaches this function for nodes isDocument accepts, and a native type
-// becomes a document, gains a sync read path and gains its probe here in the
-// same change. Types that are not ingestible yet are therefore not documents
-// yet: uploaded files and native spreadsheets join all three together when
-// their ingest paths land, instead of being probed here in advance.
+// verifyDocument proves one visible document is readable. Native documents are
+// probed through their own read API — the blocks API for adoc — while uploaded
+// files resolve their 钉盘 download location, which exercises the same
+// permissions and returns the same errors a real download would, without
+// transferring the payload.
+//
+// #3782 landed a narrower version of this probe (the blocks API only) with a
+// comment saying uploaded files and native spreadsheets join it "when their
+// ingest paths land". This is that follow-up: an uploaded file is not an adoc,
+// so probing it through documentBlocks would report a readable file as
+// unreadable and reject a working data source.
 func verifyDocument(ctx context.Context, api dingTalkAPI, document node) error {
-	_, err := api.documentBlocks(ctx, document.ID)
-	return err
+	if document.isOnlineDocument() {
+		_, err := api.documentBlocks(ctx, document.ID)
+		return err
+	}
+	return api.verifyDocumentDownload(ctx, document.ID)
 }
 
 // ListResources lazily lists selectable workspaces, folders and documents.
@@ -286,6 +310,7 @@ func (c *Connector) ListResources(
 		return nil, err
 	}
 	api := c.api(cfg)
+	settings := parseDocumentSettings(dataSourceConfig)
 	if strings.TrimSpace(parentID) == "" {
 		workspaces, err := api.listWorkspaces(ctx)
 		if err != nil {
@@ -345,7 +370,7 @@ func (c *Connector) ListResources(
 		if err != nil {
 			return nil, err
 		}
-		scopes, failures, err := resolveSyncScopes(ctx, api, workspaces, []string{parentID})
+		scopes, failures, err := resolveSyncScopes(ctx, api, workspaces, []string{parentID}, settings)
 		if err != nil {
 			return nil, err
 		}
@@ -383,7 +408,7 @@ func (c *Connector) ListResources(
 	}
 	resources := make([]types.Resource, 0, len(children))
 	for _, child := range children {
-		if !child.isFolder() && !child.isDocument() {
+		if !child.isFolder() && !child.isIngestible(settings) {
 			continue
 		}
 		if child.WorkspaceID != "" && child.WorkspaceID != parentRef.WorkspaceID {
@@ -599,11 +624,12 @@ func (c *Connector) sync(
 	}
 
 	api := c.api(cfg)
+	settings := parseDocumentSettings(dataSourceConfig)
 	workspaces, err := api.listWorkspaces(ctx)
 	if err != nil {
 		return nil, nil, err
 	}
-	scopes, failures, err := resolveSyncScopes(ctx, api, workspaces, selected)
+	scopes, failures, err := resolveSyncScopes(ctx, api, workspaces, selected, settings)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -639,7 +665,7 @@ func (c *Connector) sync(
 				oldRevisions = stored
 			}
 		}
-		documents, skipped, err := scanScope(ctx, api, scope)
+		documents, skipped, err := scanScope(ctx, api, scope, settings)
 		if err != nil {
 			if isContextError(err) {
 				return nil, nil, err
@@ -660,7 +686,7 @@ func (c *Connector) sync(
 		// read below, which must stay retryable.
 		for _, node := range skipped {
 			logger.Infof(ctx, "[DingTalk] skip node %s (name=%q type=%s category=%s extension=%s): %s",
-				node.ID, node.title(), node.Type, node.Category, node.Extension, skipReason(node))
+				node.ID, node.title(), node.Type, node.Category, node.Extension, skipReason(node, settings))
 		}
 
 		newRevisions := make(map[string]string, len(documents))
@@ -681,7 +707,7 @@ func (c *Connector) sync(
 				continue
 			}
 
-			blocks, err := api.documentBlocks(ctx, document.ID)
+			item, err := readDocument(ctx, api, scope.ResourceID, scope.Reference.WorkspaceID, document)
 			if err != nil {
 				if isContextError(err) {
 					return nil, nil, err
@@ -700,13 +726,7 @@ func (c *Connector) sync(
 				}
 				continue
 			}
-			rendered := renderDocument(document.title(), blocks)
-			// The renderer stays context-free; the warning is emitted here,
-			// where both the request context and the node identity are known.
-			warnUnknownBlockTypes(ctx, document, rendered)
-			items = append(items, fetchedDocument(
-				scope.ResourceID, scope.Reference.WorkspaceID, document, rendered,
-			))
+			items = append(items, item)
 			synced++
 			newRevisions[document.ID] = revision
 		}
@@ -768,6 +788,7 @@ func resolveSyncScopes(
 	api dingTalkAPI,
 	workspaces []workspace,
 	resourceIDs []string,
+	settings documentSettings,
 ) ([]syncScope, map[string]error, error) {
 	byID := make(map[string]workspace, len(workspaces))
 	for _, item := range workspaces {
@@ -843,7 +864,7 @@ func resolveSyncScopes(
 			return syncScope{
 				ResourceID: canonicalID, Reference: ref, StartNodeID: selectedNode.ID,
 			}, nil
-		case selectedNode.isDocument():
+		case selectedNode.isIngestible(settings):
 			document := selectedNode
 			return syncScope{
 				ResourceID: canonicalID, Reference: ref, Document: &document,
@@ -910,11 +931,16 @@ func childByID(children []node, nodeID string) (node, bool) {
 // nodes it saw but cannot ingest. The skipped nodes are returned rather than
 // discarded so the caller can report them: a full sync must never look clean
 // while silently dropping part of the tree.
-func scanScope(ctx context.Context, api dingTalkAPI, scope syncScope) ([]node, []node, error) {
+func scanScope(
+	ctx context.Context,
+	api dingTalkAPI,
+	scope syncScope,
+	settings documentSettings,
+) ([]node, []node, error) {
 	if scope.Document != nil {
 		return []node{*scope.Document}, nil, nil
 	}
-	return scanWorkspace(ctx, api, scope.Reference.WorkspaceID, scope.StartNodeID)
+	return scanWorkspace(ctx, api, scope.Reference.WorkspaceID, scope.StartNodeID, settings)
 }
 
 // scanWorkspace walks a workspace subtree breadth-first. Folders are traversal
@@ -924,6 +950,7 @@ func scanWorkspace(
 	api dingTalkAPI,
 	workspaceID string,
 	rootNodeID string,
+	settings documentSettings,
 ) ([]node, []node, error) {
 	queue := []string{rootNodeID}
 	visitedParents := make(map[string]struct{})
@@ -961,7 +988,7 @@ func scanWorkspace(
 				return nil, nil, fmt.Errorf("DingTalk workspace exceeds %d nodes", maxTraversalNodes)
 			}
 			switch {
-			case child.isDocument():
+			case child.isIngestible(settings):
 				documents = append(documents, child)
 			case child.isFolder():
 				// Containers hold no content of their own, so they are never
@@ -1049,37 +1076,141 @@ func warnUnknownBlockTypes(ctx context.Context, document node, rendered renderRe
 	common.PipelineWarn(ctx, "DingTalkConnector", "unknown_block_types", unknown.fields())
 }
 
-func fetchedDocument(
+// readDocument turns one supported wiki node into a FetchedItem. Native adoc
+// documents are rendered from their blocks, and uploaded files are transferred
+// byte-for-byte so WeKnora's own parsers can read them.
+func readDocument(
+	ctx context.Context,
+	api dingTalkAPI,
 	sourceResourceID string,
 	workspaceID string,
 	document node,
-	rendered renderResult,
-) types.FetchedItem {
-	metadata := map[string]string{
+) (types.FetchedItem, error) {
+	switch {
+	case document.isOnlineDocument():
+		blocks, err := api.documentBlocks(ctx, document.ID)
+		if err != nil {
+			return types.FetchedItem{}, err
+		}
+		rendered := renderDocument(document.title(), blocks)
+		// The renderer stays context-free; the warning is emitted here, where
+		// both the request context and the node identity are known. Uploaded
+		// files take the default branch and have no rendering step to lose.
+		warnUnknownBlockTypes(ctx, document, rendered)
+		return fetchedDocument(sourceResourceID, workspaceID, document, rendered), nil
+	default:
+		data, err := api.downloadDocument(ctx, document.ID)
+		if err != nil {
+			return types.FetchedItem{}, err
+		}
+		return fetchedBinaryDocument(sourceResourceID, workspaceID, document, data), nil
+	}
+}
+
+// documentMetadata describes a wiki node the same way for rendered and
+// downloaded documents, so both stay searchable by their DingTalk identity.
+func documentMetadata(workspaceID string, document node) map[string]string {
+	return map[string]string{
 		"channel":      types.ChannelDingtalk,
 		"workspace_id": workspaceID,
 		"node_id":      document.ID,
 		"category":     document.Category,
 		"extension":    document.Extension,
 	}
+}
+
+// documentURL is the address a reader can open the node at in DingTalk.
+func documentURL(document node) string {
+	if url := strings.TrimSpace(document.URL); url != "" {
+		return url
+	}
+	return "https://alidocs.dingtalk.com/i/nodes/" + url.PathEscape(document.ID)
+}
+
+func fetchedDocument(
+	sourceResourceID string,
+	workspaceID string,
+	document node,
+	rendered renderResult,
+) types.FetchedItem {
+	metadata := documentMetadata(workspaceID, document)
 	if len(rendered.UnknownTypes) > 0 {
 		metadata["unknown_block_types"] = strings.Join(rendered.UnknownTypes, ",")
-	}
-	documentURL := strings.TrimSpace(document.URL)
-	if documentURL == "" {
-		documentURL = "https://alidocs.dingtalk.com/i/nodes/" + url.PathEscape(document.ID)
 	}
 	return types.FetchedItem{
 		ExternalID:       document.ID,
 		Title:            document.title(),
 		Content:          []byte(rendered.Markdown),
 		ContentType:      "text/markdown",
-		FileName:         sanitizeFilename(document.title()) + ".md",
-		URL:              documentURL,
+		FileName:         renderedDocumentFileName(document.title()),
+		URL:              documentURL(document),
 		UpdatedAt:        document.modifiedAt(),
 		Metadata:         metadata,
 		SourceResourceID: sourceResourceID,
 	}
+}
+
+// renderedDocumentFileName names a document this connector renders as markdown.
+// The node's name is used as reported — a DingTalk name normally carries its
+// own extension — but ".md" is appended exactly once, so a name that already
+// ends in .md does not grow a second extension.
+func renderedDocumentFileName(title string) string {
+	name := sanitizeFilename(title)
+	if stem, trimmed := trimSuffixFold(name, ".md"); trimmed {
+		name = stem
+	}
+	return name + ".md"
+}
+
+// fetchedBinaryDocument wraps an uploaded file's raw bytes. The file name keeps
+// the original extension because that is what selects the parser during
+// ingestion; the MIME type records the same fact and is set to a concrete Office
+// type rather than the generic octet-stream the object store reports.
+func fetchedBinaryDocument(
+	sourceResourceID string,
+	workspaceID string,
+	document node,
+	data []byte,
+) types.FetchedItem {
+	contentType, ok := document.binaryContentType()
+	if !ok {
+		contentType = "application/octet-stream"
+	}
+	return types.FetchedItem{
+		ExternalID:       document.ID,
+		Title:            document.title(),
+		Content:          data,
+		ContentType:      contentType,
+		FileName:         binaryDocumentFileName(document),
+		URL:              documentURL(document),
+		UpdatedAt:        document.modifiedAt(),
+		Metadata:         documentMetadata(workspaceID, document),
+		SourceResourceID: sourceResourceID,
+	}
+}
+
+// binaryDocumentFileName derives the stored file name. DingTalk node names
+// normally already end in the extension, so it is replaced rather than
+// appended: "Employee-Handbook.docx" must not become
+// "Employee-Handbook.docx.docx".
+func binaryDocumentFileName(document node) string {
+	extension := strings.ToLower(strings.TrimSpace(document.Extension))
+	name := strings.TrimSpace(document.title())
+	if extension == "" {
+		return sanitizeFilename(name)
+	}
+	if stem, ok := trimSuffixFold(name, "."+extension); ok {
+		name = stem
+	}
+	return sanitizeFilename(name) + "." + extension
+}
+
+// trimSuffixFold removes suffix from value, comparing case-insensitively.
+func trimSuffixFold(value, suffix string) (string, bool) {
+	if !strings.HasSuffix(strings.ToLower(value), strings.ToLower(suffix)) {
+		return value, false
+	}
+	return value[:len(value)-len(suffix)], true
 }
 
 func failedDocument(
