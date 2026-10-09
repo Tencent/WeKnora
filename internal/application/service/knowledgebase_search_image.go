@@ -15,10 +15,9 @@ import (
 // passage saying the same thing (the modality gap). So they get their own
 // threshold, and vector retrieval widens its pool to leave them room.
 const (
-	// imageVectorThreshold is the most an image hit is asked to score. It is
-	// empirical, a ceiling below the text defaults (0.15–0.2); a lower text
-	// threshold, or none, still wins.
-	imageVectorThreshold = 0.1
+	// imageVectorThreshold caps the image recall threshold at an empirical
+	// value; a lower text threshold, or none, still wins.
+	imageVectorThreshold = 0.2
 	// imageRecallWidening is how much larger the vector pool is when image
 	// hits compete in it: one half again, so text keeps close to the pool
 	// it had before images arrived.

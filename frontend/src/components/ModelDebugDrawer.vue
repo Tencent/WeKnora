@@ -76,7 +76,13 @@
       <template v-if="selectedModel">
         <section class="setting-drawer__section">
           <h4 class="setting-drawer__section-title">{{ $t('modelSettings.debug.groupInput') }}</h4>
-          <div v-if="selectedModel.type !== 'ASR'" class="form-item">
+          <div v-if="hasImageMode" class="form-item">
+            <t-radio-group v-model="inputMode" @change="clearFile">
+              <t-radio-button value="text">{{ selectedModel.type === 'Embedding' ? $t('modelSettings.debug.embeddingInput') : $t('modelSettings.debug.documents') }}</t-radio-button>
+              <t-radio-button value="image">{{ $t('modelSettings.debug.imageFile') }}</t-radio-button>
+            </t-radio-group>
+          </div>
+          <div v-if="selectedModel.type !== 'ASR' && !(selectedModel.type === 'Embedding' && useImageMode)" class="form-item">
             <label class="form-label">{{ inputLabel }}</label>
             <t-textarea
               v-model="input"
@@ -85,7 +91,7 @@
             />
           </div>
 
-          <div v-if="selectedModel.type === 'Rerank'" class="form-item">
+          <div v-if="selectedModel.type === 'Rerank' && !useImageMode" class="form-item">
             <label class="form-label">{{ $t('modelSettings.debug.documents') }}</label>
             <t-textarea
               v-model="documentsText"
@@ -95,14 +101,14 @@
             <p class="form-desc">{{ $t('modelSettings.debug.documentsHint') }}</p>
           </div>
 
-          <div v-if="needsFile" class="form-item">
+          <div v-if="showFilePicker" class="form-item">
             <label class="form-label">{{ fileLabel }}</label>
             <div class="file-picker">
               <input
                 ref="fileInputRef"
                 class="file-picker__input"
                 type="file"
-                :accept="selectedModel.type === 'VLLM' ? 'image/*' : 'audio/*'"
+                :accept="selectedModel.type === 'ASR' ? 'audio/*' : 'image/*'"
                 @change="onNativeFileChange"
               >
               <t-button variant="outline" size="small" @click="fileInputRef?.click()">
@@ -110,7 +116,11 @@
                 {{ $t('modelSettings.debug.chooseFile') }}
               </t-button>
             </div>
-            <p v-if="file" class="form-desc">{{ file.name }} · {{ formatBytes(file.size) }}</p>
+            <div v-if="file" class="selected-file">
+              <img v-if="imagePreview" :src="imagePreview" :alt="file.name" class="image-preview">
+              <p class="form-desc">{{ file.name }} · {{ formatBytes(file.size) }}</p>
+              <t-button variant="text" size="small" @click="clearFile">{{ $t('common.clear') }}</t-button>
+            </div>
           </div>
         </section>
 
@@ -254,6 +264,8 @@ const selectedModelId = ref('')
 const input = ref('')
 const documentsText = ref('')
 const file = ref<File | null>(null)
+const inputMode = ref<'text' | 'image'>('text')
+const imagePreview = ref('')
 const fileInputRef = ref<HTMLInputElement | null>(null)
 const reasoningEffort = ref<ReasoningLevel>('off')
 const temperature = ref(0.7)
@@ -277,14 +289,25 @@ const isChat = computed(() => selectedModel.value?.type === 'KnowledgeQA')
 // (remote chat models carry `capabilities` computed by the backend).
 const supportsThinking = computed(() => modelCanThink(selectedModel.value?.capabilities))
 const reasoningOptions = computed(() => supportedLevels(selectedModel.value?.capabilities))
-const needsFile = computed(() => ['VLLM', 'ASR'].includes(selectedModel.value?.type || ''))
+const acceptsImages = computed(() => {
+  const model = selectedModel.value
+  if (!model || model.type === 'ASR') return false
+  return model.type === 'VLLM'
+    || model.capabilities?.input?.includes('image') === true
+    || (model.type === 'KnowledgeQA' && model.parameters.supports_vision === true)
+})
+const hasImageMode = computed(() => acceptsImages.value && ['Embedding', 'Rerank'].includes(selectedModel.value?.type || ''))
+const useImageMode = computed(() => hasImageMode.value && inputMode.value === 'image')
+const showFilePicker = computed(() => selectedModel.value?.type === 'ASR'
+  || (acceptsImages.value && (!hasImageMode.value || useImageMode.value)))
+const needsFile = computed(() => useImageMode.value || ['VLLM', 'ASR'].includes(selectedModel.value?.type || ''))
 const documents = computed(() => documentsText.value.split('\n').map(item => item.trim()).filter(Boolean))
 const canRun = computed(() => {
   if (!selectedModel.value) return false
   if (needsFile.value && !file.value) return false
-  if (selectedModel.value.type === 'ASR') return true
-  if (selectedModel.value.type === 'Rerank') return !!input.value.trim() && documents.value.length > 0
-  return !!input.value.trim()
+  if (['ASR', 'VLLM'].includes(selectedModel.value.type) || (selectedModel.value.type === 'Embedding' && useImageMode.value)) return true
+  if (selectedModel.value.type === 'Rerank') return !!input.value.trim() && (useImageMode.value ? !!file.value : documents.value.length > 0)
+  return !!input.value.trim() || (isChat.value && acceptsImages.value && !!file.value)
 })
 
 const allModelTypeOptions = computed(() => {
@@ -332,9 +355,9 @@ const inputPlaceholder = computed(() => {
 })
 
 const fileLabel = computed(() =>
-  selectedModel.value?.type === 'VLLM'
-    ? t('modelSettings.debug.imageFile')
-    : t('modelSettings.debug.audioFile'),
+  selectedModel.value?.type === 'ASR'
+    ? t('modelSettings.debug.audioFile')
+    : t('modelSettings.debug.imageFile'),
 )
 
 const formattedResult = computed(() => {
@@ -418,11 +441,9 @@ watch(() => selectedModel.value?.id, () => {
   reasoningEffort.value = clampLevel(reasoningEffort.value, reasoningOptions.value)
 }, { immediate: true })
 
-watch(() => selectedModel.value?.type, () => {
-  file.value = null
-  result.value = null
-  history.value = []
-  resultTab.value = 'response'
+watch(() => selectedModel.value?.id, () => {
+  inputMode.value = 'text'
+  clearFile()
 })
 
 const resetResult = () => {
@@ -440,6 +461,17 @@ const selectModelType = (type: DebugModelType) => {
   file.value = null
   resetResult()
 }
+
+const clearFile = () => {
+  file.value = null
+  if (fileInputRef.value) fileInputRef.value.value = ''
+  resetResult()
+}
+
+watch(file, value => {
+  if (imagePreview.value) URL.revokeObjectURL(imagePreview.value)
+  imagePreview.value = value && selectedModel.value?.type !== 'ASR' ? URL.createObjectURL(value) : ''
+})
 
 const onNativeFileChange = (event: Event) => {
   const target = event.target as HTMLInputElement
@@ -473,9 +505,9 @@ const runDebug = async () => {
   try {
     const level: ReasoningLevel | null = supportsThinking.value ? reasoningEffort.value : null
     const nextResult = await debugModel(selectedModel.value.id, {
-      input: input.value.trim(),
-      documents: documents.value,
-      file: file.value,
+      input: selectedModel.value.type === 'Embedding' && useImageMode.value ? '' : input.value.trim(),
+      documents: selectedModel.value.type === 'Rerank' && !useImageMode.value ? documents.value : [],
+      file: showFilePicker.value ? file.value : null,
       options: isChat.value ? {
         system_prompt: systemPrompt.value.trim() || undefined,
         temperature: temperature.value,
@@ -506,6 +538,7 @@ const copyResult = async () => {
 }
 
 onBeforeUnmount(() => {
+  if (imagePreview.value) URL.revokeObjectURL(imagePreview.value)
   if (document.activeElement instanceof HTMLElement) {
     document.activeElement.blur()
   }
@@ -630,6 +663,20 @@ onBeforeUnmount(() => {
     opacity: 0;
     pointer-events: none;
   }
+}
+
+.selected-file {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.image-preview {
+  width: 80px;
+  height: 80px;
+  object-fit: contain;
+  border-radius: var(--app-radius-sm);
 }
 
 .history-list {

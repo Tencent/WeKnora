@@ -593,6 +593,18 @@
         "source": "https://help.aliyun.com/zh/model-studio/multimodal-embedding-api-reference"
       },
       {
+        "id": "tongyi-embedding-vision-flash",
+        "name": "tongyi-embedding-vision-flash",
+        "type": "Embedding",
+        "input": [
+          "text",
+          "image",
+          "video"
+        ],
+        "dimension": 768,
+        "source": "https://help.aliyun.com/zh/model-studio/multimodal-embedding-api-reference"
+      },
+      {
         "name": "tongyi-embedding-vision-flash (fixed 768 dimensions)",
         "match": "tongyi-embedding-vision-flash",
         "type": "Embedding",
@@ -615,6 +627,18 @@
         "source": "https://help.aliyun.com/zh/model-studio/multimodal-embedding-api-reference"
       },
       {
+        "id": "qwen3-vl-embedding",
+        "name": "qwen3-vl-embedding",
+        "type": "Embedding",
+        "input": [
+          "text",
+          "image",
+          "video"
+        ],
+        "dimension": 2560,
+        "source": "https://help.aliyun.com/zh/model-studio/multimodal-embedding-api-reference"
+      },
+      {
         "name": "qwen3-vl-embedding (independent vectors by default)",
         "match": "qwen3-vl-embedding*",
         "type": "Embedding",
@@ -626,6 +650,18 @@
         "source": "https://help.aliyun.com/zh/model-studio/multimodal-embedding-api-reference"
       },
       {
+        "id": "qwen2.5-vl-embedding",
+        "name": "qwen2.5-vl-embedding",
+        "type": "Embedding",
+        "input": [
+          "text",
+          "image",
+          "video"
+        ],
+        "dimension": 1024,
+        "source": "https://help.aliyun.com/zh/model-studio/multimodal-embedding-api-reference"
+      },
+      {
         "name": "qwen2.5-vl-embedding (fused vectors only)",
         "match": "qwen2.5-vl-embedding*",
         "type": "Embedding",
@@ -634,6 +670,18 @@
           "image",
           "video"
         ],
+        "source": "https://help.aliyun.com/zh/model-studio/multimodal-embedding-api-reference"
+      },
+      {
+        "id": "multimodal-embedding-v1",
+        "name": "multimodal-embedding-v1",
+        "type": "Embedding",
+        "input": [
+          "text",
+          "image",
+          "video"
+        ],
+        "dimension": 1024,
         "source": "https://help.aliyun.com/zh/model-studio/multimodal-embedding-api-reference"
       },
       {

@@ -22,6 +22,65 @@ var expectedIDs = []string{
 	"jina", "nvidia", "novita", "gpustack",
 }
 
+func TestMinimaxOfficialDefaultURLs(t *testing.T) {
+	v, ok := modelruntime.Get(providers.MinimaxID)
+	if !ok {
+		t.Fatal("MiniMax provider missing")
+	}
+	for _, kind := range []types.ModelType{types.ModelTypeKnowledgeQA, types.ModelTypeASR} {
+		if got := v.GetDefaultURL(kind); got != "https://api.minimax.cn/v1" {
+			t.Errorf("%s default = %q, want current mainland endpoint", kind, got)
+		}
+	}
+	if providers.MinimaxAnthropicBaseURL != "https://api.minimax.cn/anthropic" {
+		t.Errorf("unexpected mainland Anthropic URL: %s", providers.MinimaxAnthropicBaseURL)
+	}
+	if v.Website != "https://platform.minimax.cn" {
+		t.Errorf("unexpected mainland website: %s", v.Website)
+	}
+	for _, base := range []string{
+		"https://api.minimax.cn/v1", "https://api.minimax.cn/anthropic",
+		"https://api.minimaxi.com/v1", "https://api.minimaxi.com/anthropic",
+		"https://api.minimax.io/v1", "https://api.minimax.io/anthropic",
+	} {
+		if got := modelruntime.DetectByURL(base); got != providers.MinimaxID {
+			t.Errorf("DetectByURL(%q) = %q", base, got)
+		}
+		resolved, err := modelruntime.Resolve(modelruntime.Ref{BaseURL: base, Model: "MiniMax-M2.7"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if resolved.BaseURL != base {
+			t.Errorf("explicit address was rewritten: %q -> %q", base, resolved.BaseURL)
+		}
+		wantAPI := api.APIOpenAICompletions
+		if strings.HasSuffix(base, "/anthropic") {
+			wantAPI = api.APIAnthropicMessages
+		}
+		if resolved.API != wantAPI {
+			t.Errorf("%s resolved API = %s, want %s", base, resolved.API, wantAPI)
+		}
+	}
+}
+
+func TestBuiltinDefaultURLsAcrossModelTypes(t *testing.T) {
+	for _, vendor := range modelruntime.List() {
+		for _, kind := range vendor.ModelTypes {
+			base := vendor.GetDefaultURL(kind)
+			// These connections have no hosted service to prefill.
+			if vendor.ID == "generic" || vendor.ID == "huggingface_tei" {
+				if base != "" {
+					t.Errorf("%s/%s should require an operator URL", vendor.ID, kind)
+				}
+				continue
+			}
+			if !strings.HasPrefix(base, "https://") && !strings.HasPrefix(base, "http://") {
+				t.Errorf("%s/%s has no absolute default URL: %q", vendor.ID, kind, base)
+			}
+		}
+	}
+}
+
 func TestAllVendorsRegistered(t *testing.T) {
 	if len(expectedIDs) != 29 {
 		t.Fatalf("expected 29 vendor ids in the spec, got %d", len(expectedIDs))

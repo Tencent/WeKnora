@@ -7009,6 +7009,11 @@ export default {
     }
   },
   uploadConfirm: {
+    imageEmbeddingModel: "이미지 인덱싱 Embedding 모델",
+    imageIndexInherited: "이미지 인덱싱에는 지식 베이스에 연결된 Embedding 모델을 사용합니다. 변경하려면 지식 베이스 설정으로 이동하세요.",
+    imageVectorIndex: "이번 가져오기의 이미지 벡터 인덱싱",
+    imageVectorIndexHint: "이번 업로드 또는 재분석에서 이미지 벡터를 생성하며 지식 베이스 기본 설정은 변경하지 않습니다. 검색 사용 여부는 지식 베이스의 이미지 벡터 검색 설정을 따릅니다.",
+    imageVectorRequiresIndex: "먼저 지식 베이스 설정에서 벡터 인덱싱을 활성화하세요.",
     documentSummary: "문서 요약",
     documentSummaryDescription: "이번에 가져오는 문서의 요약을 자동으로 생성할지 선택합니다.",
     generateSummary: "문서 요약 생성",

@@ -1009,6 +1009,11 @@ export default {
     chunkLoadFailed: 'Failed to load chunks'
   },
   uploadConfirm: {
+    imageEmbeddingModel: "Image indexing embedding model",
+    imageIndexInherited: "Image indexing uses the embedding model assigned to this knowledge base. Change it in knowledge base settings.",
+    imageVectorIndex: "Image vector indexing for this import",
+    imageVectorIndexHint: "Generate image vectors for this upload or reparse without changing knowledge base defaults. Retrieval still follows the knowledge base image vector search setting.",
+    imageVectorRequiresIndex: "Enable vector indexing in knowledge base settings first.",
     documentSummary: "Document summary",
     documentSummaryDescription: "Choose whether to automatically summarize documents in this import.",
     generateSummary: "Generate document summaries",

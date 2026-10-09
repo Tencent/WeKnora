@@ -7011,6 +7011,11 @@ export default {
     }
   },
   uploadConfirm: {
+    imageEmbeddingModel: "圖像索引 Embedding 模型",
+    imageIndexInherited: "圖像索引使用知識庫綁定的 Embedding 模型；如需更換，請前往知識庫設定。",
+    imageVectorIndex: "本次圖片向量索引",
+    imageVectorIndexHint: "為本次上傳或重新解析的圖片產生向量，不改變知識庫預設設定。是否參與檢索仍由知識庫的「圖片向量檢索」開關決定。",
+    imageVectorRequiresIndex: "請先在知識庫設定中開啟向量索引。",
     documentSummary: "文件摘要",
     documentSummaryDescription: "為本次匯入的文件選擇是否自動生成摘要。",
     generateSummary: "生成文件摘要",

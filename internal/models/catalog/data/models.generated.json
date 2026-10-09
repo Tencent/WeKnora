@@ -817,6 +817,24 @@
         }
       },
       {
+        "id": "tongyi-embedding-vision-flash",
+        "name": "tongyi-embedding-vision-flash",
+        "type": "Embedding",
+        "input": [
+          "text",
+          "image",
+          "video"
+        ],
+        "dimension": 768,
+        "source": "https://help.aliyun.com/zh/model-studio/multimodal-embedding-api-reference",
+        "compat": {
+          "api": "dashscope-embeddings",
+          "dimensions_field": "",
+          "max_image_batch_size": 8,
+          "max_image_bytes": 3000000
+        }
+      },
+      {
         "name": "tongyi-embedding-vision-flash (fixed 768 dimensions)",
         "match": "tongyi-embedding-vision-flash",
         "type": "Embedding",
@@ -852,6 +870,25 @@
         }
       },
       {
+        "id": "qwen3-vl-embedding",
+        "name": "qwen3-vl-embedding",
+        "type": "Embedding",
+        "input": [
+          "text",
+          "image",
+          "video"
+        ],
+        "dimension": 2560,
+        "source": "https://help.aliyun.com/zh/model-studio/multimodal-embedding-api-reference",
+        "compat": {
+          "api": "dashscope-embeddings",
+          "dimensions_field": "dimension",
+          "max_batch_size": 20,
+          "max_image_batch_size": 10,
+          "max_image_bytes": 10000000
+        }
+      },
+      {
         "name": "qwen3-vl-embedding (independent vectors by default)",
         "match": "qwen3-vl-embedding*",
         "type": "Embedding",
@@ -870,6 +907,25 @@
         }
       },
       {
+        "id": "qwen2.5-vl-embedding",
+        "name": "qwen2.5-vl-embedding",
+        "type": "Embedding",
+        "input": [
+          "text",
+          "image",
+          "video"
+        ],
+        "dimension": 1024,
+        "source": "https://help.aliyun.com/zh/model-studio/multimodal-embedding-api-reference",
+        "compat": {
+          "api": "dashscope-embeddings",
+          "dimensions_field": "dimension",
+          "max_batch_size": 1,
+          "max_image_batch_size": 1,
+          "max_image_bytes": 5000000
+        }
+      },
+      {
         "name": "qwen2.5-vl-embedding (fused vectors only)",
         "match": "qwen2.5-vl-embedding*",
         "type": "Embedding",
@@ -885,6 +941,25 @@
           "max_batch_size": 1,
           "max_image_batch_size": 1,
           "max_image_bytes": 5000000
+        }
+      },
+      {
+        "id": "multimodal-embedding-v1",
+        "name": "multimodal-embedding-v1",
+        "type": "Embedding",
+        "input": [
+          "text",
+          "image",
+          "video"
+        ],
+        "dimension": 1024,
+        "source": "https://help.aliyun.com/zh/model-studio/multimodal-embedding-api-reference",
+        "compat": {
+          "api": "dashscope-embeddings",
+          "dimensions_field": "",
+          "max_batch_size": 20,
+          "max_image_batch_size": 1,
+          "max_image_bytes": 3000000
         }
       },
       {
