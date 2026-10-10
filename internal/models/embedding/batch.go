@@ -6,6 +6,7 @@ import (
 	"os"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/models/utils"
 	"github.com/panjf2000/ants/v2"
@@ -34,9 +35,15 @@ func (e *batchEmbedder) BatchEmbedWithPool(ctx context.Context, model Embedder, 
 		batchSizeStr = "5"
 	}
 	batchSize, err := strconv.Atoi(batchSizeStr)
-	if err != nil {
+	if err != nil || batchSize <= 0 {
+		return nil, fmt.Errorf("BATCH_EMBED_SIZE must be a positive integer, got %q", batchSizeStr)
+	}
+	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	// Wait for every submitted callback before returning, including on cancel
+	// or pool submission failure. Otherwise callbacks can outlive this call.
+	defer wg.Wait()
 	textEmbeddings := utils.MapSlice(texts, func(text string) *textEmbedding {
 		return &textEmbedding{text: text}
 	})
@@ -46,7 +53,10 @@ func (e *batchEmbedder) BatchEmbedWithPool(ctx context.Context, model Embedder, 
 		return func() {
 			defer wg.Done()
 			// If an error has already occurred, don't continue processing
-			if firstErr != nil {
+			mu.Lock()
+			failed := firstErr != nil
+			mu.Unlock()
+			if failed || ctx.Err() != nil {
 				return
 			}
 			// Embed text
@@ -81,16 +91,43 @@ func (e *batchEmbedder) BatchEmbedWithPool(ctx context.Context, model Embedder, 
 	}
 
 	// Submit all tasks to the goroutine pool
-	for _, texts := range utils.ChunkSlice(textEmbeddings, batchSize) {
+	intervalStr := os.Getenv("EMBED_BATCH_INTERVAL_MS")
+	var interval time.Duration
+	if intervalStr != "" {
+		if n, err := strconv.Atoi(intervalStr); err == nil && n > 0 && int64(n) <= int64((1<<63-1)/time.Millisecond) {
+			interval = time.Duration(n) * time.Millisecond
+		}
+	}
+	for i, texts := range utils.ChunkSlice(textEmbeddings, batchSize) {
+		mu.Lock()
+		failed := firstErr != nil
+		mu.Unlock()
+		if failed {
+			break
+		}
+		if i > 0 && interval > 0 {
+			select {
+			case <-time.After(interval):
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		wg.Add(1)
 		err := e.pool.Submit(processChunk(texts))
 		if err != nil {
+			wg.Done() // No callback will run for a rejected submission.
 			return nil, err
 		}
 	}
 
 	// Wait for all tasks to complete
 	wg.Wait()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 
 	// Check if any errors occurred
 	if firstErr != nil {
