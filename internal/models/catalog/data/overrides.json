@@ -976,6 +976,8 @@
         "type": "Embedding",
         "compat": {
           "text_as_messages": true,
+          "batch_messages": true,
+          "max_image_batch_size": 5,
           "extra_body": {
             "add_special_tokens": true
           }
