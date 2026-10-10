@@ -115,8 +115,7 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  # Service name must be "neo4j" - app references this
-  name: neo4j
+  name: {{ include "weknora.serviceName" (dict "component" "neo4j" "context" .) | quote }}
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "weknora.componentLabels" (dict "component" "graph" "context" .) | nindent 4 }}
