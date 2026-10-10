@@ -639,8 +639,23 @@ func (c *mcpGoClient) CallTool(ctx context.Context, name string, args map[string
 	}
 	if mcp.IsModernProtocol(c.client.ProtocolVersion()) {
 		c.metadataMu.RLock()
-		schema := c.toolSchemas[name]
+		schema, cached := c.toolSchemas[name]
 		c.metadataMu.RUnlock()
+		if !cached {
+			// Agent discovery may use a persisted directory or a different
+			// connection. Reconnects also start with no header annotations.
+			// Load the complete, bounded directory on this authenticated client
+			// before executing; never send a call with incomplete metadata.
+			if _, err := c.ListTools(ctx); err != nil {
+				return nil, fmt.Errorf("failed to load schema for tool %q: %w", name, err)
+			}
+			c.metadataMu.RLock()
+			schema, cached = c.toolSchemas[name]
+			c.metadataMu.RUnlock()
+			if !cached {
+				return nil, fmt.Errorf("tool %q not found in MCP directory", name)
+			}
+		}
 		// Raw directory reads bypass the SDK's tool cache. Reuse its annotation
 		// helper so modern gateways receive the same parameter headers.
 		params, err := json.Marshal(req.Params)
