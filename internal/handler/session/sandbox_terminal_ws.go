@@ -134,6 +134,10 @@ type terminalControlFrame struct {
 	PID uint32 `json:"pty_id,omitempty"`
 	// Backend names the sandbox provider on ready frames.
 	Backend string `json:"backend,omitempty"`
+	// Reattachable tells the browser, on ready frames, whether reconnecting
+	// with pty_id resumes this shell. False (Docker) means a reconnect gets a
+	// fresh shell, so the client must not redial silently.
+	Reattachable *bool `json:"reattachable,omitempty"`
 	// ExitCode is set on exited frames (-1 when the provider didn't say).
 	ExitCode *int `json:"exit_code,omitempty"`
 	// Cols/Rows carry resize requests.

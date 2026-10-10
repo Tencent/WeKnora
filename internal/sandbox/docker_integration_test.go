@@ -886,6 +886,11 @@ func TestDockerBackendTerminalCloseTerminatesShellIntegration(t *testing.T) {
 	if err := session.Write(ctx, []byte("echo $$ > /tmp/weknora-close.pid\n")); err != nil {
 		t.Fatalf("write pid: %v", err)
 	}
+	// A job the user detached on purpose must outlive the hangup, as it would
+	// when any real terminal closes.
+	if err := session.Write(ctx, []byte("nohup sleep 3619 >/dev/null 2>&1 &\n")); err != nil {
+		t.Fatalf("write nohup job: %v", err)
+	}
 	if err := session.Write(ctx, []byte("sleep 3611\n")); err != nil {
 		t.Fatalf("write job: %v", err)
 	}
@@ -907,17 +912,26 @@ func TestDockerBackendTerminalCloseTerminatesShellIntegration(t *testing.T) {
 	if !terminalProbeJobAlive(t, ctx, executor, sessionID, "sleep 3611") {
 		t.Fatal("positive control failed: foreground job not visible before close")
 	}
+	if !terminalProbeJobAlive(t, ctx, executor, sessionID, "sleep 3619") {
+		t.Fatal("positive control failed: nohup job not visible before close")
+	}
 
 	if err := session.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
 
-	// The kill runs as a detached exec, so it may land just after Close
+	// The hangup runs as a detached exec, so it may land just after Close
 	// returns; poll until both the shell and its job are gone.
 	for deadline := time.Now().Add(20 * time.Second); time.Now().Before(deadline); {
 		alive := strings.Contains(terminalProbeOutput(t, ctx, executor, sessionID,
 			"if [ -d /proc/"+shellPID+" ]; then echo ALIVE; else echo DEAD; fi"), "ALIVE")
 		if !alive && !terminalProbeJobAlive(t, ctx, executor, sessionID, "sleep 3611") {
+			// Past the script's SIGKILL pass too, so a survivor is not just
+			// a job the second pass has yet to reach.
+			time.Sleep(3 * time.Second)
+			if !terminalProbeJobAlive(t, ctx, executor, sessionID, "sleep 3619") {
+				t.Fatal("Close killed a nohup'd job; a terminal hangup must spare it")
+			}
 			return
 		}
 		time.Sleep(500 * time.Millisecond)

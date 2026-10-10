@@ -70,6 +70,8 @@ type RemoteTerminalSession interface {
 	Output() <-chan RemoteTerminalEvent
 
 	// PID is the remote shell's process ID, when the provider exposes one.
+	// It doubles as the reattach handle: 0 means a reconnect cannot resume
+	// this shell and the browser must not redial on its own.
 	PID() uint32
 
 	// Write feeds raw bytes (keystrokes) into the PTY.

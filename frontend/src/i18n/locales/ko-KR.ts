@@ -3947,6 +3947,8 @@ export default {
         retry: '다시 연결',
         sessionEnded: '터미널 세션이 종료되었습니다',
         idleDisconnected: '터미널이 유휴 상태로 연결이 끊어졌습니다. 샌드박스는 TTL에 따라 일시 중지됩니다. 다시 연결할 수 있습니다.',
+        idleDisconnectedNewShell: '터미널이 유휴 상태로 연결이 끊어져 셸이 종료되었습니다(nohup으로 시작한 백그라운드 작업은 영향을 받지 않습니다). 다시 연결하면 새 셸이 열립니다.',
+        disconnectedNewShell: '연결이 끊어져 터미널의 셸이 종료되었습니다(nohup으로 시작한 백그라운드 작업은 영향을 받지 않습니다). 다시 연결하면 새 셸이 열립니다.',
         authRevoked: '로그인 상태가 더 이상 유효하지 않아 터미널 연결이 끊어졌습니다. 다시 로그인한 뒤 재연결하세요.',
     },
     questionMinimapTitle: '질문',

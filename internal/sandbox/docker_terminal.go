@@ -12,8 +12,8 @@
 // gets a fresh shell. It also cannot be left running: unlike Cube/E2B, closing
 // the hijacked connection does NOT end the shell (verified against a live
 // daemon — an idle bash and its foreground jobs survive), so abandoning it
-// would strand processes in the container. Close therefore terminates the
-// shell and every process it started, explicitly. See dockerTerminalKillCmd.
+// would strand processes in the container. Close therefore hangs up the shell
+// the way a closing terminal emulator would. See dockerTerminalKillCmd.
 
 package sandbox
 
@@ -43,6 +43,10 @@ const (
 	// dockerTerminalInspectTimeout bounds the exit-code read that follows the
 	// stream ending.
 	dockerTerminalInspectTimeout = 5 * time.Second
+	// dockerTerminalInspectPoll is how often that read retries while the
+	// daemon still reports the exec as running: the hijacked stream can hit
+	// EOF before the daemon records the exit code.
+	dockerTerminalInspectPoll = 100 * time.Millisecond
 	// dockerTerminalKillTimeout bounds the best-effort terminate exec issued
 	// when a terminal is closed while its shell is still alive.
 	dockerTerminalKillTimeout = 10 * time.Second
@@ -265,11 +269,20 @@ func (s *dockerTerminalSession) pump() {
 func (s *dockerTerminalSession) inspectExitCode() int {
 	ctx, cancel := context.WithTimeout(s.inspectCtx, dockerTerminalInspectTimeout)
 	defer cancel()
-	inspected, err := s.api.ExecInspect(ctx, s.execID, client.ExecInspectOptions{})
-	if err != nil {
-		return -1
+	for {
+		inspected, err := s.api.ExecInspect(ctx, s.execID, client.ExecInspectOptions{})
+		if err != nil {
+			return -1
+		}
+		if !inspected.Running {
+			return inspected.ExitCode
+		}
+		select {
+		case <-ctx.Done():
+			return -1
+		case <-time.After(dockerTerminalInspectPoll):
+		}
 	}
-	return inspected.ExitCode
 }
 
 func (s *dockerTerminalSession) Output() <-chan RemoteTerminalEvent { return s.out }
@@ -316,7 +329,7 @@ func (s *dockerTerminalSession) Resize(ctx context.Context, cols, rows uint32) e
 }
 
 // Close detaches WeKnora from the PTY and, because Docker has no re-attach to
-// preserve, terminates the shell inside the container. Unlike Cube/E2B,
+// preserve, hangs up the shell inside the container. Unlike Cube/E2B,
 // closing the hijacked connection does not end the exec — the daemon keeps it
 // (and any foreground jobs) alive — so a bare disconnect would strand the
 // process until the container is swept. Safe to call more than once.
@@ -326,13 +339,13 @@ func (s *dockerTerminalSession) Close() error {
 	return nil
 }
 
-// terminate kills the exec's shell and every process it started, best effort.
-// It runs from Close only, but Close follows every session end, including a
-// shell that already exited on its own: then the shell is gone and the kill
-// only reaches background jobs it left behind. Runs at most once.
+// terminate hangs up the exec's shell and the processes it started, best
+// effort. It runs from Close only, but Close follows every session end,
+// including a shell that already exited on its own: then the shell is gone and
+// the hangup only reaches jobs it left behind. Runs at most once.
 //
-// A failed kill leaves the shell running until the container is swept, so it
-// is logged: nothing else would ever surface the leak.
+// A failed terminate leaves the shell running until the container is swept, so
+// it is logged: nothing else would ever surface the leak.
 func (s *dockerTerminalSession) terminate() {
 	s.killOnce.Do(func() {
 		ctx, cancel := context.WithTimeout(s.inspectCtx, dockerTerminalKillTimeout)
@@ -354,29 +367,44 @@ func (s *dockerTerminalSession) terminate() {
 	})
 }
 
-// dockerTerminalKillCmd builds the argv that terminates an abandoned PTY shell
-// together with every process it started.
+// dockerTerminalKillCmd builds the argv that hangs up an abandoned PTY shell
+// and the processes it started.
 //
 // It matches on the marker environment variable rather than a PID because
 // ExecInspect reports the *host* PID, which is meaningless inside the
 // container's PID namespace — a kill exec running there cannot see /proc/<pid>.
 // Every process the shell starts inherits WEKNORA_TERMINAL_ID, so walking
-// /proc and killing each carrier catches the shell and its whole job tree
-// (a running foreground job is in its own process group, so killing the shell
-// or its group alone would orphan it). A shell that already exited has no
-// carriers left, which is why no existence check is needed before running it.
+// /proc finds the shell and its whole job tree (a running foreground job is in
+// its own process group, so signalling the shell or its group alone would
+// orphan it). A shell that already exited has no carriers left, which is why
+// no existence check is needed before running it.
+//
+// The signals mirror a terminal emulator closing: SIGHUP (plus SIGCONT so a
+// stopped job sees it) ends the shell and its jobs, while anything the user
+// detached on purpose with nohup or a HUP trap keeps running, as it would on
+// any real terminal. Only the session leader — the shell itself — is SIGKILLed
+// if it is still alive after the grace period.
 //
 // /proc is read directly instead of shelling out to pgrep/pkill, which minimal
 // sandbox images do not ship; the entry is compared with a shell `case` rather
 // than grep for the same reason.
 func dockerTerminalKillCmd(token string) []string {
-	script := `tok=$1
+	script := `m="` + dockerTerminalIDEnv + `=$1"
+carriers() {
 for d in /proc/[0-9]*; do
-q=${d#/proc/}
 e=$(tr '\0' '\n' < "$d/environ" 2>/dev/null) || continue
-case "$e" in
-*"` + dockerTerminalIDEnv + `=$tok"*) kill -9 "$q" 2>/dev/null ;;
-esac
+case "$e" in *"$m"*) echo "${d#/proc/}" ;; esac
+done
+}
+pids=$(carriers)
+[ -n "$pids" ] || exit 0
+kill -HUP $pids 2>/dev/null
+kill -CONT $pids 2>/dev/null
+sleep 2
+for q in $(carriers); do
+s=$(cat "/proc/$q/stat" 2>/dev/null) || continue
+set -- ${s##*) }
+[ "$4" = "$q" ] && kill -9 "$q" 2>/dev/null
 done
 exit 0`
 	return []string{"/bin/sh", "-c", script, "weknora-terminate", token}

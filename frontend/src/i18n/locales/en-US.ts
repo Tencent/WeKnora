@@ -4043,6 +4043,8 @@ export default {
         retry: 'Reconnect',
         sessionEnded: 'Terminal session ended',
         idleDisconnected: 'The terminal disconnected after being idle. The sandbox will pause on its own TTL. You can reconnect.',
+        idleDisconnectedNewShell: 'The terminal disconnected after being idle and its shell has ended (background jobs started with nohup keep running). Reconnecting opens a new shell.',
+        disconnectedNewShell: 'Connection lost and the terminal\'s shell has ended (background jobs started with nohup keep running). Reconnecting opens a new shell.',
         authRevoked: 'Your session is no longer valid, so the terminal was disconnected. Sign in again, then reconnect.',
     },
     questionMinimapTitle: 'Q&A',

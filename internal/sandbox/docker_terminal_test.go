@@ -202,6 +202,38 @@ func TestDockerTerminalStreamsRawBytesAndExitCode(t *testing.T) {
 	require.Equal(t, 7, *exitCode)
 }
 
+// The TTY stream can reach EOF before the daemon records the exit; reading the
+// exit code once at that moment would report 0 for a shell that failed.
+func TestDockerTerminalWaitsForExecExitBeforeReportingCode(t *testing.T) {
+	engine := newFakeDockerEngine()
+	engine.execExit = 23
+	engine.execInspectRunning.Store(2)
+	docker := newTestDockerClient(t, engine)
+
+	session, err := docker.OpenTerminal(context.Background(), testHandle("c"),
+		RemoteTerminalOptions{})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = session.Close() })
+
+	deadline := time.After(3 * time.Second)
+	for {
+		select {
+		case ev, ok := <-session.Output():
+			require.True(t, ok, "stream closed without an exit event")
+			require.NoError(t, ev.Err)
+			if !ev.Exited {
+				continue
+			}
+			require.Equal(t, 23, ev.ExitCode)
+			require.EqualValues(t, 3, engine.execInspects.Load(),
+				"the exit code is read only once the exec stops running")
+			return
+		case <-deadline:
+			t.Fatal("timed out waiting for exit")
+		}
+	}
+}
+
 func TestDockerTerminalWriteResizeAndPID(t *testing.T) {
 	engine := newFakeDockerEngine()
 	engine.execInspectPID = 4321
@@ -308,9 +340,16 @@ func TestDockerTerminalKillCmdTargetsMarkerEnv(t *testing.T) {
 	require.Equal(t, "-c", cmd[1])
 	require.Equal(t, "weknora-terminate", cmd[3])
 	require.Equal(t, "deadbeef", cmd[4], "the token travels as argv")
-	require.Contains(t, cmd[2], dockerTerminalIDEnv+"=$tok",
+	require.Contains(t, cmd[2], dockerTerminalIDEnv+"=$1",
 		"the script matches the marker env")
-	require.Contains(t, cmd[2], "kill -9", "the script must kill, not signal politely")
+	require.Contains(t, cmd[2], "kill -HUP $pids",
+		"closing must hang up like a terminal so nohup'd jobs survive")
+	require.Contains(t, cmd[2], "kill -CONT $pids",
+		"a stopped job only acts on the hangup once continued")
+	require.NotContains(t, cmd[2], "kill -9 $pids",
+		"SIGKILL on every carrier would also take out nohup'd jobs")
+	require.Contains(t, cmd[2], `[ "$4" = "$q" ] && kill -9`,
+		"only the session leader (the shell) is force-killed after the grace period")
 	require.Contains(t, cmd[2], "/proc/[0-9]*", "it must walk every process")
 	require.NotContains(t, cmd[2], "ExecInspect")
 }

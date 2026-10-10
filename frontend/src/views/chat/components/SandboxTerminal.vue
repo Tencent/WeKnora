@@ -125,7 +125,7 @@ const terminal = useSandboxTerminal(
     toRef(props, 'agentId'),
     toRef(props, 'agentSourceTenantId'),
 );
-const { status, sandboxMayBeReclaimed } = terminal;
+const { status, sandboxMayBeReclaimed, reattachable } = terminal;
 
 const statusText = computed(() => {
     switch (status.value as SandboxTerminalStatus) {
@@ -144,11 +144,15 @@ const statusText = computed(() => {
         case 'exited':
             return t('chat.sandbox.sessionEnded');
         case 'idle':
-            return t('chat.sandbox.idleDisconnected');
+            return reattachable.value
+                ? t('chat.sandbox.idleDisconnected')
+                : t('chat.sandbox.idleDisconnectedNewShell');
         case 'unauthorized':
             return t('chat.sandbox.authRevoked');
         default:
-            return t('chat.sandbox.disconnected');
+            return reattachable.value
+                ? t('chat.sandbox.disconnected')
+                : t('chat.sandbox.disconnectedNewShell');
     }
 });
 

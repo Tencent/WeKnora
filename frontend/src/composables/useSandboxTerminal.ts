@@ -23,6 +23,7 @@ export type SandboxTerminalControlFrame = {
   message?: string
   pty_id?: number
   backend?: string
+  reattachable?: boolean
   exit_code?: number | null
   cols?: number
   rows?: number
@@ -84,6 +85,12 @@ export type SandboxTerminalSession = {
    */
   sandboxMayBeReclaimed: Ref<boolean>
   /**
+   * 最近一次 ready 帧声明的：断线后重连能否接回同一个 shell。Docker 为
+   * false：断开即结束 shell，重连只会得到新 shell，所以不自动重连，
+   * 由用户点"重新连接"。
+   */
+  reattachable: Ref<boolean>
+  /**
    * 由 SandboxTerminal.vue 注入：PTY 输出写入 xterm。
    * 在 handler 注册前到达的二进制帧会先入队，避免 bash 提示符在 xterm
    * 挂载前被丢弃。传入 null 可在卸载时重新开始缓冲。
@@ -117,9 +124,13 @@ export function useSandboxTerminal(
 ): SandboxTerminalSession {
   const status = ref<SandboxTerminalStatus>('connecting')
   const sandboxMayBeReclaimed = ref(false)
+  const reattachable = ref(true)
 
   let ws: WebSocket | null = null
   let opening = false
+  // 当前这条连接是否已收到 ready。ready 之前断线时服务端未必开了 shell，
+  // 照常自动重连；ready 之后断线是否重连取决于 reattachable。
+  let readyReceived = false
   let outputHandler: ((data: Uint8Array) => void) | null = null
   let pendingOutput: Uint8Array[] = []
   let pendingOutputBytes = 0
@@ -178,6 +189,7 @@ export function useSandboxTerminal(
     if (!sid) return
 
     opening = true
+    readyReceived = false
     status.value = 'connecting'
     try {
       const ticket = await mintTerminalTicket(sid)
@@ -278,6 +290,7 @@ export function useSandboxTerminal(
         && status.value !== 'unauthorized'
       ) {
         status.value = 'error'
+        if (readyReceived && !reattachable.value) return
         scheduleReconnect()
       }
     }
@@ -297,6 +310,8 @@ export function useSandboxTerminal(
     switch (frame.type) {
       case 'ready':
         status.value = 'ready'
+        readyReceived = true
+        reattachable.value = frame.reattachable !== false
         rememberPid(typeof frame.pty_id === 'number' ? frame.pty_id : null)
         reconnectAttempt = 0
         // 创建意图到此为止。它只用来解释 SANDBOX_NOT_BOUND：连上之前是"还没
@@ -355,6 +370,7 @@ export function useSandboxTerminal(
   const session: SandboxTerminalSession = {
     status,
     sandboxMayBeReclaimed,
+    reattachable,
     onOutput(handler) {
       outputHandler = handler
       if (!handler) return

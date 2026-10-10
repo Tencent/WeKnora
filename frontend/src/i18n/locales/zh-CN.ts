@@ -3949,6 +3949,8 @@ export default {
         retry: '重新连接',
         sessionEnded: '终端会话已结束',
         idleDisconnected: '终端空闲已断开，沙箱将按工作区 TTL 自行暂停。可重新连接。',
+        idleDisconnectedNewShell: '终端空闲已断开，其中的 shell 已结束（nohup 启动的后台任务不受影响）。重新连接会打开一个新的 shell。',
+        disconnectedNewShell: '连接已断开，终端中的 shell 已结束（nohup 启动的后台任务不受影响）。重新连接会打开一个新的 shell。',
         authRevoked: '登录状态已失效，终端已断开。请重新登录后再连接。',
     },
     questionMinimapTitle: '问答',

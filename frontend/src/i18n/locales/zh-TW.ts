@@ -3949,6 +3949,8 @@ export default {
         retry: '重新連結',
         sessionEnded: '終端會話已結束',
         idleDisconnected: '終端空閒已斷開，沙箱將按工作區 TTL 自行暫停。可重新連結。',
+        idleDisconnectedNewShell: '終端閒置已斷開，其中的 shell 已結束（nohup 啟動的背景任務不受影響）。重新連結會開啟一個新的 shell。',
+        disconnectedNewShell: '連結已斷開，終端中的 shell 已結束（nohup 啟動的背景任務不受影響）。重新連結會開啟一個新的 shell。',
         authRevoked: '登入狀態已失效，終端已斷開。請重新登入後再連結。',
     },
     questionMinimapTitle: '問答',

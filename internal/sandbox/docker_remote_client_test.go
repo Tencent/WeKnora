@@ -60,6 +60,11 @@ type fakeDockerEngine struct {
 	// execInspectPID is what ExecInspect reports as the running process PID,
 	// used by the terminal's best-effort PID lookup.
 	execInspectPID int
+	// execInspectRunning is how many ExecInspect calls still report the exec
+	// as running before it reports the exit, which is how a daemon that has
+	// not recorded the exit code yet when the TTY stream hits EOF looks.
+	execInspectRunning atomic.Int32
+	execInspects       atomic.Int32
 	// execStarts records every ExecStart, so a test can prove the terminal's
 	// terminate exec was launched (detached) at close.
 	execStarts   []execStartCall
@@ -339,6 +344,10 @@ type execStartCall struct {
 func (f *fakeDockerEngine) ExecInspect(
 	_ context.Context, _ string, _ client.ExecInspectOptions,
 ) (client.ExecInspectResult, error) {
+	f.execInspects.Add(1)
+	if f.execInspectRunning.Add(-1) >= 0 {
+		return client.ExecInspectResult{Running: true, PID: f.execInspectPID}, nil
+	}
 	return client.ExecInspectResult{ExitCode: f.execExit, PID: f.execInspectPID}, nil
 }
 

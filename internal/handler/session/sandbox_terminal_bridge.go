@@ -56,10 +56,13 @@ func (b *terminalBridge) teardownWith(reason string) {
 }
 
 func (b *terminalBridge) run() {
+	pid := b.terminal.Session.PID()
+	reattachable := pid > 0
 	b.sendControl(terminalControlFrame{
-		Type:    "ready",
-		PID:     b.terminal.Session.PID(),
-		Backend: b.terminal.Backend,
+		Type:         "ready",
+		PID:          pid,
+		Backend:      b.terminal.Backend,
+		Reattachable: &reattachable,
 	})
 
 	// Liveness defaults; the read loop also refreshes on every frame.
