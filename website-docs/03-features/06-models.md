@@ -273,10 +273,37 @@
 | GPUStack | `gpustack` | ✓ | ✓ | ✓ | ✓ | ✓ |
 | Hugging Face TEI | `huggingface_tei` | | | ✓ | | |
 | Pinecone | `pinecone` | | | ✓ | | |
+| Cohere | `cohere` | | | ✓ | | |
 
 表中的「视觉」指可在视觉模型类型下选择该厂商；对话模型本身是否接受图片，以模型目录和「支持视觉/多模态」开关为准。WeKnora 云服务需先在设置中保存云服务凭证，模型名称可选 `chat`、`embedding`、`rerank`、`vlm`。
 
 厂商列表、默认地址和模型目录由服务端下发（`GET /api/v1/models/providers`），运维可以通过[部署叠加](#部署叠加-config-models-json)修改或新增厂商。
+
+### Cohere 重排
+
+新增远程重排模型时，选择 **Cohere**，填写 Cohere API Key，并选择
+`rerank-v4.0-pro`、`rerank-v4.0-fast` 或 `rerank-v3.5`。默认地址为
+`https://api.cohere.com/v2`，也可填写完整的 `/v2/rerank` 地址。
+
+通过 `POST /api/v1/models` 创建时，请求体示例：
+
+```json
+{
+  "name": "rerank-v4.0-pro",
+  "type": "Rerank",
+  "source": "remote",
+  "parameters": {
+    "provider": "cohere",
+    "base_url": "https://api.cohere.com/v2",
+    "api_key": "your-cohere-api-key"
+  }
+}
+```
+
+请求仅发送文本查询和文档，按响应索引恢复原文。WeKnora 遵循
+[Cohere API 建议](https://docs.cohere.com/v2/reference/rerank)，将超过 1000 篇的候选集
+拆成多个请求；1000 是采用的推荐批次大小。省略 `top_n` 以获取全部候选的分数，
+超长文档沿用服务端默认截断行为。本接入仅提供 Cohere 文本重排。
 
 ## 查看引用与调整配置
 

@@ -4663,6 +4663,38 @@
         "type": "ASR",
         "source": "https://docs.bigmodel.cn/api-reference/模型-api/语音转文本"
       }
+    ],
+    "cohere": [
+      {
+        "id": "rerank-v4.0-pro",
+        "name": "rerank-v4.0-pro",
+        "type": "Rerank",
+        "input": [
+          "text"
+        ],
+        "context_window": 32768,
+        "source": "https://docs.cohere.com/docs/models#rerank"
+      },
+      {
+        "id": "rerank-v4.0-fast",
+        "name": "rerank-v4.0-fast",
+        "type": "Rerank",
+        "input": [
+          "text"
+        ],
+        "context_window": 32768,
+        "source": "https://docs.cohere.com/docs/models#rerank"
+      },
+      {
+        "id": "rerank-v3.5",
+        "name": "rerank-v3.5",
+        "type": "Rerank",
+        "input": [
+          "text"
+        ],
+        "context_window": 4096,
+        "source": "https://docs.cohere.com/docs/models#rerank"
+      }
     ]
   }
 }
