@@ -57,7 +57,6 @@ import { SKILL_ICON, type MentionItem, type MentionItemType, type MentionRequest
 import { toolboxLocation } from '@/config/toolbox';
 import { supportedLevels, levelLabelKey, levelFromLegacy, clampLevel, type ReasoningLevel } from '@/utils/reasoningEffort';
 
-const submissionIssue = ref('');
 const route = useRoute();
 const router = useRouter();
 const settingsStore = useSettingsStore();
@@ -78,6 +77,7 @@ const {
 const { t, locale } = useI18n();
 
 let query = ref("");
+const submissionIssue = ref('');
 const showKbSelector = ref(false);
 
 // Image upload state
@@ -269,6 +269,7 @@ watch([selectedAgentId, agentKnowledgeBases, agentKBSelectionMode], ([newAgentId
 
 // 共享智能体时预取该智能体知识库列表，使已选标签在未打开 @ 时也能显示共享空间角标
 watch([selectedAgentId, () => settingsStore.selectedAgentSourceTenantId], async ([agentId, sourceTenantId]) => {
+  submissionIssue.value = '';
   if (sourceTenantId && agentId) {
     try {
       const list = await chatResources.ensureAgentKnowledgeBases(agentId, sourceTenantId);
@@ -2117,7 +2118,6 @@ const createSession = async (
     settingsStore.selectedAgentSourceTenantId ?? undefined,
   );
   if (notReadyReasons.length > 0) {
-    submissionIssue.value = t('input.agentNotReadyDetail', { agentName: actualAgent.name, reasons: formatLocalizedList(notReadyReasons, locale.value) });
     showAgentNotReadyMessage(
       actualAgent,
       notReadyReasons,
@@ -2542,6 +2542,15 @@ const goToAgentEditor = (
   });
 };
 
+// Keep the inline explanation and editor toast consistent for shared agents.
+const buildAgentNotReadyText = (agent: CustomAgent, reasons: string[], sourceTenantId?: string) =>
+  t(canLocallyConfigureAgent(sourceTenantId) ? 'input.agentNotReadyDetail' : 'input.sharedAgentNotReadyDetail', {
+    agentName: agent.name,
+    reasons: formatLocalizedList(reasons, locale.value),
+  });
+
+watch(currentAgentConfig, () => { submissionIssue.value = ''; }, { deep: true });
+
 // 显示智能体未就绪的消息（统一处理内置和自定义智能体）
 const showAgentNotReadyMessage = (
   agent: CustomAgent,
@@ -2549,16 +2558,14 @@ const showAgentNotReadyMessage = (
   reasonKeys?: AgentNotReadyReasonKey[],
   sourceTenantId?: string,
 ) => {
-  const reasonsText = formatLocalizedList(reasons, locale.value)
+  submissionIssue.value = buildAgentNotReadyText(agent, reasons, sourceTenantId);
   const isRemoteShared = !canLocallyConfigureAgent(sourceTenantId)
 
   const messageContent = h('div', { style: 'display: flex; flex-direction: column; gap: 8px; max-width: 320px;' }, [
     h(
       'span',
       { style: 'color: var(--td-text-color-primary); line-height: 1.5;' },
-      isRemoteShared
-        ? t('input.sharedAgentNotReadyDetail', { agentName: agent.name, reasons: reasonsText })
-        : t('input.agentNotReadyDetail', { agentName: agent.name, reasons: reasonsText }),
+      submissionIssue.value,
     ),
     ...(isRemoteShared ? [] : [
       h('a', {
@@ -2755,7 +2762,7 @@ defineExpose({
         </span>
       </div>
 
-      <p v-if="submissionIssue" class="composer-submission-error" role="alert">{{ submissionIssue }}</p>
+      <p v-if="submissionIssue" class="composer-submission-error" role="status">{{ submissionIssue }}</p>
       <!-- 实际输入框 -->
       <t-textarea ref="textareaRef" v-model="query" :placeholder="t('input.placeholder')" name="description" :autosize="true"
         @keydown="onKeydown" @input="onInput" @compositionstart="onCompositionStart" @compositionend="onCompositionEnd"
@@ -3029,8 +3036,13 @@ const getImgSrc = (url: string) => {
 }
 </script>
 <style scoped lang="less">
-.composer-submission-error { margin: 8px 14px; color: var(--td-error-color); font-size: var(--app-text-base); }
 @import './css/chat-resource-chips.less';
+
+.composer-submission-error {
+  margin: 8px 14px;
+  color: var(--td-error-color);
+  font-size: var(--app-text-base);
+}
 
 .answers-input {
   position: absolute;
