@@ -326,13 +326,34 @@ func (r *runContext) execute(ctx context.Context, id types.ImageActionID) error 
 }
 
 // runCaptionAction asks for a one-line description and stores it as the caption.
+// Its failure subspan mirrors the OCR one (#4132): a caption miss is recorded
+// (caption_error + a red .caption subspan) without failing the image.
 func runCaptionAction(ctx context.Context, r *runContext) error {
+	var captionSpan *Span
+	if r.tracker != nil && r.imgSpan != nil {
+		captionSpan = r.tracker.BeginSubSpan(ctx, r.imgSpan, r.imgSpan.Name+".caption",
+			types.SpanKindGeneration, nil)
+	}
+	resolve := func(failed bool) {
+		if captionSpan == nil {
+			return
+		}
+		if failed {
+			message, _ := r.out["caption_error"].(string)
+			r.tracker.FailSpan(ctx, captionSpan, "CAPTION_FAILED", message, nil)
+			return
+		}
+		r.tracker.EndSpan(ctx, captionSpan, types.JSONMap{
+			"status": "succeeded", "chars": r.out["caption_chars"],
+		})
+	}
 	raw, err := r.predictCaption(ctx, buildVLMCaptionPrompt(ctx, r.vlmCfg), "image_caption")
 	if err != nil {
 		// Only recorded, not logged: an observation failure below is the same
 		// kind of event and logs its own line, and a caption miss must not be
 		// louder than the rest of the run.
 		r.out["caption_error"] = err.Error()
+		resolve(true)
 		return nil
 	}
 	if text := strings.TrimSpace(raw); text != "" {
@@ -340,6 +361,7 @@ func runCaptionAction(ctx context.Context, r *runContext) error {
 		r.out["caption_chars"] = len([]rune(text))
 		r.out["caption_preview"] = previewText(text, 200)
 	}
+	resolve(false)
 	return nil
 }
 
@@ -348,10 +370,27 @@ func runCaptionAction(ctx context.Context, r *runContext) error {
 // run wants a caption — the observation itself always happens, because the
 // attributes are the point of this action and the OCR policy reads them back.
 func runObservationCaptionAction(ctx context.Context, r *runContext) error {
+	var obsSpan *Span
+	if r.tracker != nil && r.imgSpan != nil {
+		obsSpan = r.tracker.BeginSubSpan(ctx, r.imgSpan, r.imgSpan.Name+".observation",
+			types.SpanKindGeneration, nil)
+	}
+	resolve := func(failed bool) {
+		if obsSpan == nil {
+			return
+		}
+		if failed {
+			message, _ := r.out["caption_error"].(string)
+			r.tracker.FailSpan(ctx, obsSpan, "OBSERVATION_FAILED", message, nil)
+			return
+		}
+		r.tracker.EndSpan(ctx, obsSpan, types.JSONMap{"status": "succeeded"})
+	}
 	raw, err := r.predictCaption(ctx, buildImageAttrsPrompt(ctx, r.vlmCfg), "image_observation")
 	if err != nil {
 		logger.Warnf(ctx, "[ImageMultimodal] Describe and observe failed for %s: %v", r.payload.ImageURL, err)
 		r.out["caption_error"] = err.Error()
+		resolve(true)
 		return nil
 	}
 	obs, ok := types.ParseImageAttrsResponse(raw)
@@ -372,6 +411,7 @@ func runObservationCaptionAction(ctx context.Context, r *runContext) error {
 	if !ok {
 		r.out["caption_missing"] = true
 	}
+	resolve(false)
 	return nil
 }
 
