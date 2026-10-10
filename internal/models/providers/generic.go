@@ -21,6 +21,9 @@
 //     whatever the hop count;
 //   - no default base URL: the operator must supply one (Validate enforces
 //     it) and a key is optional because local deployments run without one;
+//   - replayed tool calls start with OpenAI's string-valued arguments. If a
+//     backend returns the known Jinja mapping-type error, the protocol client
+//     retries once with object-valued arguments and remembers that result;
 //   - no URL patterns: DetectByURL falls back to this vendor when nothing
 //     else matches.
 //
@@ -133,8 +136,9 @@ func newGenericProvider() *Definition {
 				AcceptsTruncatePromptTokens: api.Ptr(true),
 			},
 			OpenAICompletions: api.OpenAICompletionsCompat{
-				MaxTokensField: api.Ptr("max_tokens"),
-				ThinkingFormat: api.Ptr(api.ThinkingFormatChatTemplateKwargs),
+				MaxTokensField:              api.Ptr("max_tokens"),
+				ThinkingFormat:              api.Ptr(api.ThinkingFormatChatTemplateKwargs),
+				AutoToolCallArgumentsObject: api.Ptr(true),
 			},
 		},
 		Validate: func(cfg *Config) error {
