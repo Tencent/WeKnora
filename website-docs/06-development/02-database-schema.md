@@ -413,7 +413,7 @@ make migrate-up
 
 BM25 索引（`USING bm25`、Lindera 中文分词）只在 ParadeDB 可用；原生 Postgres 部署需保证相应迁移的条件分支生效或改用 Elasticsearch 等外部检索引擎。存量原生 Postgres 库切到 ParadeDB 可参考 `migrations/paradedb/01-migrate-to-paradedb.sql`。
 
-官方镜像自 v0.8.2 起为 `paradedb/paradedb:v0.22.6-pg17`。迁移 000099 只把已安装的 pg_search 0.22.2–0.22.5 升级到 0.22.6：若启动日志提示 `pg_search 0.22.6 is not available`，说明数据库镜像还没换，换镜像后手工执行 `ALTER EXTENSION pg_search UPDATE TO '0.22.6'`；其他版本线不会被自动升级或降级。
+官方镜像为 `paradedb/paradedb:v0.25.11-pg17`（v0.8.2 起曾为 `v0.22.6-pg17`）。迁移 000099 只把已安装的 pg_search 0.22.2–0.22.5 升级到 0.22.6：若启动日志提示 `pg_search 0.22.6 is not available`，说明数据库镜像还没换，换镜像后手工执行 `ALTER EXTENSION pg_search UPDATE TO '0.22.6'`；其他版本线（含 0.25.x）不会被自动升级或降级，跨到 0.25.11 需按《ParadeDB 存量库升级》手工执行 `ALTER EXTENSION pg_search UPDATE`。
 
 ### 版本文件冲突 {#_7-5-版本文件冲突}
 

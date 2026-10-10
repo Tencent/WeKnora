@@ -1,6 +1,6 @@
 # ParadeDB 存量库升级
 
-仓库的生产与开发 Compose 使用 `paradedb/paradedb:v0.22.6-pg17`。本文处理 **0.22.2 → 0.22.6、PostgreSQL 主版本保持 17** 的升级；不适用于 PostgreSQL 跨主版本升级，也不代表 Helm 中其他旧版本可以直接套用。
+仓库的生产与开发 Compose 使用 `paradedb/paradedb:v0.25.11-pg17`。本文处理 **0.22.2 → 0.22.6** 与 **0.22.6 → 0.25.11** 两次升级，PostgreSQL 主版本保持 17；不适用于 PostgreSQL 跨主版本升级，也不代表 Helm 中其他旧版本可以直接套用。
 
 ## 升级步骤
 
@@ -44,6 +44,22 @@
    在**其他已安装 `pg_search` 的数据库**中同样执行，包括安装过该扩展的 `postgres`、模板库或 Langfuse 库。不要为了升级而向原本不需要的数据库安装扩展。catalog 与 `paradedb.version_info()` 应均报告 0.22.6。
 
 5. 恢复原先运行的写入服务，确认数据库迁移状态，执行有代表性的关键词与向量检索。这个补丁升级无需专门重建全部索引或重新导入文档；保留备份直到验证完成。
+
+## 0.22.6 → 0.25.11
+
+备份与停止写入方的要求同上（步骤 1–3 使用新镜像标签 `v0.25.11-pg17`）。该版本线同时带来 PostgreSQL 17.9 → 17.11、pgvector 0.8.1 → 0.8.4（修复并行 HNSW 构建缓冲区溢出与 HNSW vacuum 期间的索引损坏）以及 pg_search WAL 崩溃恢复（0.24.0 起，见 paradedb#4901）。
+
+替换镜像并启动后，扩展 catalog 仍是旧版本——与 0.22.x 补丁升级不同，**没有迁移代管这一步**（迁移 `000099` 对 0.25.x 不生效），需要手工执行：
+
+```bash
+docker compose exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1' <<'SQL'
+ALTER EXTENSION pg_search UPDATE;
+ALTER EXTENSION vector UPDATE;
+SELECT extname, extversion FROM pg_extension WHERE extname IN ('pg_search', 'vector');
+SQL
+```
+
+在**其他已安装这些扩展的数据库**（如 Langfuse 库）中同样执行。不做 `ALTER EXTENSION` 时旧 catalog 版本配新二进制也可正常读写（已在 0.22.6 数据卷上实测关键词与向量检索一致），但建议执行以对齐版本。实测 0.22.6 建立的 BM25 与 HNSW 索引在新版本下读写正常，无需强制 REINDEX；如遇异常可重建索引。
 
 ## 自动迁移的范围
 
