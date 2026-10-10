@@ -92,6 +92,7 @@
 ## 相关文档 {#相关}
 
 - 空间内的四级角色与 API Key：[租户、用户与认证授权](01-tenant-auth.md)
+- 账号的创建 / 禁用 / 删除与 OIDC、LDAP 登录源配置：[用户管理](25-user-management.md)
 - 队列拓扑与 worker pool：[异步任务系统](../02-architecture/05-async-tasks.md)
 - 审计日志与追踪：[可观测性与审计](16-observability.md)
 - 接口清单：[系统与平台管理 API](../04-api/02-api-system.md)

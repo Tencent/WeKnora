@@ -1,6 +1,6 @@
 # API 参考：系统与平台管理
 
-提供部署级系统信息和平台管理接口，包括全局设置、任务队列、平台 API Key、跨空间审计和用户密码重置。功能说明见[平台管理与系统管理员](../03-features/20-platform-admin.md)。
+提供部署级系统信息和平台管理接口，包括全局设置、任务队列、平台 API Key、跨空间审计、用户密码重置与用户管理（本地用户 / 通用 OIDC / LDAP）。功能说明见[平台管理与系统管理员](../03-features/20-platform-admin.md)与[用户管理](../03-features/25-user-management.md)。
 
 `/system/admin/*` 全组挂 `SystemAdmin()` 守卫；平台 API Key 按能力细分（`system_settings_read/manage`、`system_runtime_read/manage`、`system_tenants_read/manage`、`system_audit_read`）。
 
@@ -276,6 +276,147 @@ curl -X POST $BASE/api/v1/system/admin/tenants/apply-default-storage-quota -H "A
 curl $BASE/api/v1/system/admin/audit-log -H "Authorization: Bearer $TOKEN"
 ```
 
+## 用户管理（/api/v1/system/admin，用户管理）
+
+Handler: `internal/handler/user_management.go`。功能说明见[用户管理](../03-features/25-user-management.md)。整组继承 `SystemAdmin()` 守卫；系统管理员本地密码会话可用，平台 API Key 目前不覆盖这组接口。
+
+新建用户与重置密码复用上面的 `POST /system/admin/users/create`、`POST /system/admin/users/reset-password`。
+
+### GET /api/v1/system/admin/users
+
+用途：分页列出平台内全部账号，附登录来源与统计。
+
+查询参数：`keyword`（用户名 / 邮箱模糊匹配）、`offset`（默认 0）、`limit`（默认 20，上限 200）。
+
+响应：200 `types.ListManagedUsersResponse`：
+
+```json
+{
+  "total": 9,
+  "users": [
+    {
+      "id": "u_1",
+      "username": "alice",
+      "email": "alice@example.com",
+      "tenant_id": 1,
+      "tenant_name": "Alice 的个人空间",
+      "is_active": true,
+      "is_system_admin": true,
+      "auth_source": "local",
+      "has_local_password": true
+    }
+  ],
+  "stats": { "total": 9, "enabled": 9, "disabled": 0, "admins": 1, "ldap": 1, "oidc": 1 }
+}
+```
+
+`auth_source` 取 `local` / `oidc` / `ldap`，用于在表格中标记登录来源。
+
+```bash
+curl "$BASE/api/v1/system/admin/users?keyword=alice&limit=20" -H "Authorization: Bearer $TOKEN"
+```
+
+### POST /api/v1/system/admin/users/:id/disable
+
+用途：禁用账号并撤销其全部会话。**不能禁用自己**（400 `Cannot disable your own account`）。审计动作 `system.user_disabled`。
+
+响应：200 `types.ManagedUserInfo`。
+
+```bash
+curl -X POST $BASE/api/v1/system/admin/users/u_1/disable -H "Authorization: Bearer $TOKEN"
+```
+
+### POST /api/v1/system/admin/users/:id/enable
+
+用途：重新启用已禁用账号。审计动作 `system.user_enabled`。
+
+响应：200 `types.ManagedUserInfo`。
+
+### DELETE /api/v1/system/admin/users/:id
+
+用途：墓碑化软删除账号——软删除并撤销全部会话，同时释放邮箱 / 用户名以便重新开通。不能删除自己，也不能删除最后一位系统管理员（400）。审计动作 `system.user_deleted`。
+
+响应：200 `{"message":"User deleted","user":UserInfo}`。
+
+```bash
+curl -X DELETE $BASE/api/v1/system/admin/users/u_1 -H "Authorization: Bearer $TOKEN"
+```
+
+### GET /api/v1/system/admin/auth/oidc
+
+用途：读取当前生效的通用 OIDC 配置。`client_secret` **只写不读**，响应只含 `has_secret`。`source` 标识配置来自 `database` / `environment` / `default`；`env_overrides` 列出仍设置着的 `OIDC_AUTH_*` 变量（密钥类显示为 `(set)`）。
+
+响应：200 `types.OIDCProviderView`。
+
+```bash
+curl $BASE/api/v1/system/admin/auth/oidc -H "Authorization: Bearer $TOKEN"
+```
+
+### PUT /api/v1/system/admin/auth/oidc
+
+用途：保存 OIDC 配置。启用时 `client_id` 必填，且需要 `issuer_url` / `discovery_url`，或同时提供 `authorization_endpoint` 与 `token_endpoint`。
+
+`client_secret` 为指针语义：省略或空串保留已存密钥，填写新值则覆盖，`clear_secret: true` 清除。保存后数据库接管全部字段，环境变量不再参与解析。审计动作 `system.auth_provider_updated`。
+
+响应：200 `types.OIDCProviderView`（与 GET 同形，便于前端直接回填）。
+
+```bash
+curl -X PUT $BASE/api/v1/system/admin/auth/oidc \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"enabled":true,"issuer_url":"https://idp.example.com","client_id":"weknora","client_secret":"s3cret"}'
+```
+
+### POST /api/v1/system/admin/auth/oidc/test
+
+用途：探测已保存的 OIDC 端点，不修改状态。按配置推导 discovery 地址并拉取文档，回报签发方与各端点；若只提供显式端点则跳过联网探测。
+
+响应：200 `types.OIDCTestResponse`（`success`、`message`、`discovery_ok`、各端点、`warnings`）。
+
+### GET /api/v1/system/admin/auth/ldap
+
+用途：读取 LDAP 配置。`bind_password` **只写不读**，响应只含 `has_bind_password`。未配置过的部署返回内置默认值（端口 389、默认过滤器与属性映射），`source` 为 `default`。
+
+响应：200 `types.LDAPProviderView`。
+
+```bash
+curl $BASE/api/v1/system/admin/auth/ldap -H "Authorization: Bearer $TOKEN"
+```
+
+### PUT /api/v1/system/admin/auth/ldap
+
+用途：保存 LDAP 配置。启用时 `host` 与 `base_dn` 必填；`host` 不得包含协议前缀；`use_tls` 与 `start_tls` 互斥；`default_tenant_mode` 只接受 `create_personal` / `tenantless`（留空遵循 `auth.default_tenant_mode`）。
+
+`bind_password` 语义同 OIDC：省略 / 空串保留，新值覆盖，`clear_bind_password: true` 清除。审计动作 `system.auth_provider_updated`。
+
+响应：200 `types.LDAPProviderView`。
+
+```bash
+curl -X PUT $BASE/api/v1/system/admin/auth/ldap \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"enabled":true,"host":"ldap.example.com","port":389,"base_dn":"dc=example,dc=com","bind_dn":"cn=svc,dc=example,dc=com","bind_password":"pw"}'
+```
+
+### POST /api/v1/system/admin/auth/ldap/test
+
+用途：三步探测——服务账号绑定、可选用户检索、可选用户绑定。两者都留空时只验证连通性。不修改状态。
+
+请求体（两个字段均可选）：`{"username":"alice@example.com","password":"..."}`
+
+响应：200 `types.LDAPTestResponse`：
+
+```json
+{
+  "success": true,
+  "message": "服务绑定 + 用户检索 + 用户绑定全部通过",
+  "service_ok": true,
+  "user_found": true,
+  "user_dn": "cn=Alice,ou=people,dc=example,dc=com",
+  "detected_subject_attribute": "entryUUID",
+  "attributes": { "cn": "Alice", "mail": "alice@example.com" },
+  "warnings": []
+}
+```
+
 ## 实现参考
 
-路由注册：`internal/router/routes_auth_tenant.go` 的 `RegisterSystemAdminRoutes` 与 `RegisterSystemRoutes`。Handler：`internal/handler/system.go`、`internal/handler/audit_log.go`。
+路由注册：`internal/router/routes_auth_tenant.go` 的 `RegisterSystemAdminRoutes` 与 `RegisterSystemRoutes`。Handler：`internal/handler/system.go`、`internal/handler/audit_log.go`、`internal/handler/user_management.go`。
