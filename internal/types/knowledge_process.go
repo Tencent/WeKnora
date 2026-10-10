@@ -15,6 +15,14 @@ type KnowledgeProcessOverrides struct {
 	// pipeline switch for this one document. nil keeps the knowledge base's
 	// setting.
 	ImageAttrsEnabled *bool `json:"image_attrs_enabled,omitempty"`
+	// ImagePipelineID overrides which image pipeline runs for this one
+	// document. nil keeps the knowledge base's resolved pipeline. When set,
+	// ImagePipelineParams travels with it: the params of one pipeline are
+	// meaningless to another, so the pair is replaced as a unit.
+	ImagePipelineID *ImagePipelineID `json:"image_pipeline,omitempty"`
+	// ImagePipelineParams are the overridden pipeline's private tunables. They
+	// are only applied together with ImagePipelineID.
+	ImagePipelineParams map[string]any `json:"image_pipeline_params,omitempty"`
 	// ImageVectorEnabled overrides image vector indexing for this document.
 	// It does not change the KB-wide retrieval setting or embedding model.
 	ImageVectorEnabled *bool `json:"image_vector_enabled,omitempty"`
@@ -41,5 +49,7 @@ type EffectiveProcessConfig struct {
 	ImageAttrsEnabled        bool
 	ImageVectorEnabled       bool
 	ImageActions             ImageActionsConfig
+	ImagePipelineID          ImagePipelineID
+	ImagePipelineParams      map[string]any
 	ExtractConfig            ExtractConfig
 }

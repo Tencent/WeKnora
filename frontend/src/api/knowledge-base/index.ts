@@ -220,10 +220,81 @@ export interface ImageProcessingConfig {
   model_id?: string;
   image_actions?: ImageActionsConfig;
   image_attrs_enabled?: boolean;
+  /** Which image pipeline runs for this base; empty means "follow the switch". */
+  image_pipeline?: string;
+  /** That pipeline's private tunables, keyed by field. See ImagePipelineField. */
+  image_pipeline_params?: Record<string, unknown>;
   // Index and recall images by their own vectors. Off unless the knowledge
   // base opts in, and only takes effect with an embedding model that takes
   // images.
   image_vector_enabled?: boolean;
+}
+
+// Mirrors types.ImagePipelineSpec and types.ImageFieldDef.
+//
+// A field is private to the pipeline that declared it, which is why two
+// pipelines may both own a field called "enable_ocr". The knowledge base stores
+// them per pipeline rather than in one flat map, and the panel renders one
+// control per field without naming any pipeline.
+export interface ImagePipelineField {
+  key: string;
+  type: 'bool' | 'string' | 'enum';
+  label: string;
+  description: string;
+  default: unknown;
+  options: string[] | null;
+  /** Whether this field turns an action on or off, as opposed to tuning one. */
+  decides_action?: boolean;
+}
+
+/** One condition the chosen pipeline places on its own tunables. The backend
+ * owns the rules — including the wording each one triggers — so the panel never
+ * decides on its own what a set of settings may or may not be. */
+export interface ImagePipelineRule {
+  at_least_one: string[];
+  /** i18n key of this rule's own message, translated at render time. */
+  message_key: string;
+  /** Which control to point at; defaults to the first of at_least_one. */
+  field?: string;
+}
+
+export interface ImagePipelineSpec {
+  id: string;
+  name: string;
+  /** How the pipeline works, shown under the pick; i18n overlays on top. */
+  description: string;
+  fields: ImagePipelineField[];
+  /** Conditions over those fields. Empty means the pipeline accepts any of it. */
+  rules?: ImagePipelineRule[];
+}
+
+export interface ImagePipelineViolation {
+  message_key: string;
+  field?: string;
+}
+
+/** POST /api/v1/image-pipelines/validate: every rule of the named pipeline that
+ * the given tunables break, translated by the caller rather than sent as prose.
+ * `valid: true` means the backend found none. */
+export async function validateImagePipelines(
+  pipelineId: string,
+  params: Record<string, unknown>,
+): Promise<{ valid: boolean; violations: ImagePipelineViolation[] }> {
+  const res = await post<{
+    success: boolean;
+    data: { valid: boolean; violations: ImagePipelineViolation[] };
+  }>(`/api/v1/image-pipelines/validate`, { pipeline_id: pipelineId, params });
+  return res.data;
+}
+
+// Fetch every registered image pipeline. The backend owns the list, so a
+// pipeline added there shows up here as an option with no frontend change. The
+// registry is global, not per-KB, hence the top-level route.
+export async function fetchImagePipelines(): Promise<ImagePipelineSpec[]> {
+  const res = await get<{ success: boolean; data: ImagePipelineSpec[] }>(
+    `/api/v1/image-pipelines`,
+  );
+  return res.data;
 }
 
 export type VectorStoreSource = 'env' | 'user' | 'shared' | 'unavailable';

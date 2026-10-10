@@ -4443,21 +4443,21 @@ func (s *knowledgeService) enqueueImageMultimodalTasks(
 		}
 
 		payload := types.ImageMultimodalPayload{
-			TenantID:           knowledge.TenantID,
-			KnowledgeID:        knowledge.ID,
-			KnowledgeBaseID:    kb.ID,
-			ChunkID:            chunkID,
-			ImageURL:           img.ServingURL,
-			EnableOCR:          true,
-			EnableCaption:      true,
-			ImageAttrsEnabled:  eff.ImageAttrsEnabled,
-			ImageVectorEnabled: &eff.ImageVectorEnabled,
-			ImageActions:       eff.ImageActions,
-			Language:           lang,
-			ImageSourceType:    metadata["image_source_type"],
-			Attempt:            attempt,
-			ImageIndex:         idx,
-			SourceLocators:     img.SourceLocators,
+			TenantID:            knowledge.TenantID,
+			KnowledgeID:         knowledge.ID,
+			KnowledgeBaseID:     kb.ID,
+			ChunkID:             chunkID,
+			ImageURL:            img.ServingURL,
+			ImagePipelineID:     eff.ImagePipelineID,
+			ImagePipelineParams: eff.ImagePipelineParams,
+			ImageAttrsEnabled:   eff.ImageAttrsEnabled,
+			ImageActions:        eff.ImageActions,
+			Language:            lang,
+			ImageSourceType:     metadata["image_source_type"],
+			Attempt:             attempt,
+			ImageIndex:          idx,
+			SourceLocators:      img.SourceLocators,
+			ImageVectorEnabled:  &eff.ImageVectorEnabled,
 		}
 
 		langfuse.InjectTracing(ctx, &payload)

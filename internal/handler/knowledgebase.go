@@ -11,6 +11,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/application/access"
 	"github.com/Tencent/WeKnora/internal/application/repository"
+	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/errors"
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
@@ -1367,5 +1368,69 @@ func (h *KnowledgeBaseHandler) GetImageAttrsSchema(c *gin.Context) {
 			"attributes":      types.ImageAttrRegistry,
 			"default_actions": types.DefaultImageActions(),
 		},
+	})
+}
+
+// GetImagePipelines returns every registered image pipeline in the shape the
+// settings panel renders: id, name, and the fields each one owns. The panel
+// reads this instead of carrying a list of its own, so adding a pipeline is a
+// backend-only change — its fields arrive here already described, and no UI code
+// mentions the pipeline by name.
+//
+// The fields of two pipelines are deliberately allowed to share a key. Each is
+// private to the pipeline that declared it, which is why the knowledge base
+// stores them under that pipeline's own group rather than in one flat map.
+// Read-only, and global rather than per-KB, so only the Viewer role is required.
+func (h *KnowledgeBaseHandler) GetImagePipelines(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    service.ListImagePipelines(),
+	})
+}
+
+// ValidateImagePipelines answers the settings panel's question — could what is
+// on screen be saved? — without saving anything. The panel asks as the user
+// types so the warnings arrive before the save rather than as a rejection after
+// it; the save path asks again on its own, so this endpoint is the polite half
+// of one check, not the whole of it.
+//
+// Nothing is judged here. The rules come from the pipeline being validated, the
+// same ones ListImagePipelines publishes, so a pipeline whose actions are not
+// the user's to switch off declares none and is never told that it is wrong.
+// Every broken rule is reported, each with the i18n key of its own wording and
+// the name of the field that is at fault: the panel translates and points, as
+// it does for the strings already on it.
+func (h *KnowledgeBaseHandler) ValidateImagePipelines(c *gin.Context) {
+	var request struct {
+		PipelineID types.ImagePipelineID `json:"pipeline_id"`
+		Params     map[string]any        `json:"params"`
+	}
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"success": false,
+			"message": "invalid request body",
+		})
+		return
+	}
+
+	broken := service.BrokenImagePipelineRules(request.PipelineID, request.Params)
+	if len(broken) == 0 {
+		c.JSON(http.StatusOK, gin.H{
+			"success": true,
+			"data":    gin.H{"valid": true, "violations": []any{}},
+		})
+		return
+	}
+
+	violations := make([]gin.H, 0, len(broken))
+	for _, invalid := range broken {
+		violations = append(violations, gin.H{
+			"message_key": invalid.MessageKey,
+			"field":       invalid.Field,
+		})
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    gin.H{"valid": false, "violations": violations},
 	})
 }

@@ -15,8 +15,20 @@ type debugVLM struct {
 }
 
 func (d *debugVLM) Predict(ctx context.Context, imgBytes [][]byte, prompt string) (string, error) {
+	return d.call(ctx, imgBytes, prompt, nil)
+}
+
+func (d *debugVLM) PredictWithOptions(
+	ctx context.Context, imgBytes [][]byte, prompt string, opts *PredictOptions,
+) (string, error) {
+	return d.call(ctx, imgBytes, prompt, opts)
+}
+
+func (d *debugVLM) call(
+	ctx context.Context, imgBytes [][]byte, prompt string, opts *PredictOptions,
+) (string, error) {
 	start := time.Now()
-	result, err := d.inner.Predict(ctx, imgBytes, prompt)
+	result, err := d.inner.PredictWithOptions(ctx, imgBytes, prompt, opts)
 	logVLMDebug(ctx, d.inner.GetModelName(), imgBytes, prompt, result, err, time.Since(start))
 	return result, err
 }

@@ -30,12 +30,27 @@ func NewOllamaVLM(config *Config, ollamaService *ollama.OllamaService) (*OllamaV
 
 // Predict sends an image with a text prompt to the Ollama vision model.
 func (v *OllamaVLM) Predict(ctx context.Context, imgBytesList [][]byte, prompt string) (string, error) {
+	return v.PredictWithOptions(ctx, imgBytesList, prompt, nil)
+}
+
+// PredictWithOptions sends the same request with Ollama's own spelling of the
+// thinking switch. Ollama carries extra options as free-form entries, and a
+// server older than the switch ignores an unknown one instead of rejecting the
+// request, so the cost of passing it when the model cannot use it is nil.
+func (v *OllamaVLM) PredictWithOptions(
+	ctx context.Context, imgBytesList [][]byte, prompt string, opts *PredictOptions,
+) (string, error) {
 	streamFlag := false
 	var images []ollamaapi.ImageData
 	for _, imgBytes := range imgBytesList {
 		if len(imgBytes) > 0 {
 			images = append(images, imgBytes)
 		}
+	}
+
+	ollamaOptions := map[string]interface{}{"temperature": 0.1}
+	if opts != nil && opts.Thinking != nil {
+		ollamaOptions["think"] = *opts.Thinking
 	}
 
 	chatReq := &ollamaapi.ChatRequest{
@@ -48,7 +63,7 @@ func (v *OllamaVLM) Predict(ctx context.Context, imgBytesList [][]byte, prompt s
 			},
 		},
 		Stream:  &streamFlag,
-		Options: map[string]interface{}{"temperature": 0.1},
+		Options: ollamaOptions,
 	}
 
 	totalImageSize := 0

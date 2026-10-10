@@ -3970,6 +3970,14 @@ export default {
         imageVectorModelUnsupported: '現在の埋め込みモデルは画像入力を宣言していないため、画像ベクトルは生成も検索もされません',
         imageAttrsSchemaLabel: '観察可能な画像属性',
         imageAttrsSchemaDescription: 'モデルは以下の属性（バックエンドのレジストリで定義）を観察して OCR ポリシーを決めます',
+        imagePipelineSectionLabel: '画像解析方式',
+        imagePipelineSectionDescription:
+          'マルチモーダル解析が有効な場合、画像の解析方式を選択できます。',
+        imagePipelineLabel: '解析方式',
+        imagePipelinePlaceholder: '解析方式を選択',
+        imagePipelineLoading: 'パイプラインを読み込み中…',
+        imagePipelineLoadError: 'パイプラインの読み込みに失敗しました',
+          imagePipelineValidateError: '現在の設定を検証できませんでした。保存時にバックエンドが再度检查します。',
         imageAttrsOcrConditions: '観察した属性条件に基づいて OCR を実行',
         imageAttrsOcrConditionsDesc: '観察した属性が以下の条件を満たす場合、その画像に OCR を実行します',
         imageAttrsOcrOnUnobserved: '画像属性の観察に失敗した場合も OCR を実行',
@@ -7838,6 +7846,56 @@ export default {
         'true': { label: 'はい', description: 'はい —— グラフ・図表・ダイアグラム' },
         'false': { label: 'いいえ', description: 'いいえ —— 写真・イラスト・アイコン・装飾' }
       }
+    }
+  },
+  // パイプラインパネルの上書き文言：パイプライン id とフィールド key で索引
+  // （どちらもバックエンドのレジストリが提供し、ここでは翻訳のみ）。ここに
+  // ない部分はバックエンド固有の文言にフォールバックするため、新しい
+  // パイプラインがキー名のまま表示されることはありません。
+  imagePipeline: {
+    errors: {
+      noActionEnabled: '解析アクションを1つ以上オンにしてください。オフのままでは何も処理されません。',
+    },
+    default: {
+      name: 'マニュアル',
+      description: 'タスクに合わせて解析アクションのスイッチを手動でオン/オフします。',
+      enable_caption: {
+        label: '画像説明',
+        description: '各画像について一言の説明を生成し、キャプションとして保存します。'
+      },
+      enable_ocr: {
+        label: '文字認識',
+        description: '画像内に出現するテキストを抽出します。'
+      },
+      caption: {
+        thinking: {
+          label: '説明時に思考を有効',
+          description: '説明を書く前にモデルに考えさせます。基本的に思考は必要ありません。有効にすると解析が遅くなるだけでなく、思考が長くなりすぎて本文が切り詰められ、タスクが失敗する可能性があります。必要だと判断した場合のみ有効にしてください。',
+        },
+      },
+      ocr: {
+        thinking: {
+          label: '文字認識時に思考を有効',
+          description: 'テキストを抽出する前にモデルに考えさせます。基本的に思考は必要ありません。有効にすると解析が遅くなるだけでなく、思考が長くなりすぎて本文が切り詰められ、タスクが失敗する可能性があります。必要だと判断した場合のみ有効にしてください。',
+        },
+      }
+    },
+    smartocr: {
+      name: 'スマート',
+      caption: {
+        thinking: {
+          label: '説明時に思考を有効',
+          description: '画像を説明し属性を報告する前にモデルに考えさせます。基本的に思考は必要ありません。有効にすると解析が遅くなるだけでなく、思考が長くなりすぎて本文が切り詰められ、タスクが失敗する可能性があります。必要だと判断した場合のみ有効にしてください。',
+        },
+      },
+      ocr: {
+        thinking: {
+          label: '文字認識時に思考を有効',
+          description: 'テキストを抽出する前にモデルに考えさせます。基本的に思考は必要ありません。有効にすると解析が遅くなるだけでなく、思考が長くなりすぎて本文が切り詰められ、タスクが失敗する可能性があります。必要だと判断した場合のみ有効にしてください。',
+        },
+      },
+      description:
+        'まず画像の特徴を観察して説明を生成し、その特徴に基づいて OCR を実行するかどうかを判断します。モデル呼び出しを節約し、解析速度を向上させます。'
     }
   }
 }

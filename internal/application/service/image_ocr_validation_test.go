@@ -69,10 +69,30 @@ func TestImageOCRRejectsInvalidContentBeforePersistence(t *testing.T) {
 				}}
 				tracker := &ocrTestTracker{failed: map[string]string{}, outputs: map[string]types.JSONMap{}}
 				out := types.JSONMap{}
+				// The pipeline framework carries the caption/OCR switches as
+				// the manual pipeline's own tunables (both default true), the
+				// whole-task EnableOCR/EnableCaption pair of the action loop
+				// having been superseded by the image_pipeline field.
 				err := svc.processImage(context.Background(), &types.ImageMultimodalPayload{
-					ImageURL: "local://test.png", EnableOCR: true, EnableCaption: caption, Attempt: 1,
+					ImageURL:            "local://test.png",
+					ImagePipelineParams: map[string]any{"enable_caption": caption, "enable_ocr": true},
+					Attempt:             1,
 				}, model, types.VLMConfig{}, tracker, out)
-				require.NoError(t, err, "bad OCR must not retry the whole image and duplicate a valid caption")
+				if caption {
+					// A valid caption exists: the OCR failure is recorded, not
+					// propagated — failing the image would retry it and
+					// duplicate the caption chunk (#4132).
+					require.NoError(t, err)
+				} else if tc.code != "" {
+					// Caption off + OCR failed = every VLM call failed and
+					// nothing was produced: the image fails honestly instead
+					// of passing as a silent skip (there is no caption to
+					// protect, so the #4132 no-duplicate rationale is void).
+					require.Error(t, err, "bad OCR with no caption must fail the image")
+				} else {
+					// OCR answered no_text: a genuine blank, not a failure.
+					require.NoError(t, err)
+				}
 				require.Equal(t, tc.status, out["ocr_status"])
 				require.Equal(t, 0, out["ocr_chars"])
 				require.NotContains(t, out, "ocr_preview")
