@@ -52,6 +52,19 @@ func TestResolveAPIPrincipalDirectHeader(t *testing.T) {
 	}
 }
 
+func TestResolveAPIPrincipalIdentityReturnsRawValidatedExternalID(t *testing.T) {
+	tenant := &types.Tenant{ID: 7, APIPrincipalConfig: &types.APIPrincipalConfig{Mode: types.APIPrincipalModeDirect}}
+	header := http.Header{}
+	header.Set("X-External-User-ID", "employee-42")
+	p, externalID, err := resolveAPIPrincipalIdentity(context.Background(), tenant, header)
+	if err != nil {
+		t.Fatalf("resolveAPIPrincipalIdentity error = %v", err)
+	}
+	if p.Type != types.PrincipalAPIExternalUser || p.ID != "7:employee-42" || externalID != "employee-42" {
+		t.Fatalf("principal = %#v, raw external ID = %q", p, externalID)
+	}
+}
+
 func TestResolveAPIPrincipalSignedToken(t *testing.T) {
 	secret := "test-secret"
 	header := http.Header{}
@@ -62,7 +75,7 @@ func TestResolveAPIPrincipalSignedToken(t *testing.T) {
 		"exp":       time.Now().Add(time.Minute).Unix(),
 	}))
 
-	p, err := resolveAPIPrincipal(context.Background(), &types.Tenant{
+	p, rawExternalID, err := resolveAPIPrincipalIdentity(context.Background(), &types.Tenant{
 		ID: 7,
 		APIPrincipalConfig: &types.APIPrincipalConfig{
 			Mode:       types.APIPrincipalModeSignedToken,
@@ -73,8 +86,8 @@ func TestResolveAPIPrincipalSignedToken(t *testing.T) {
 		t.Fatalf("resolveAPIPrincipal error = %v", err)
 	}
 
-	if p.Type != types.PrincipalAPIExternalUser || p.ID != "7:external-u1" {
-		t.Fatalf("principal = %#v", p)
+	if p.Type != types.PrincipalAPIExternalUser || p.ID != "7:external-u1" || rawExternalID != "external-u1" {
+		t.Fatalf("principal = %#v, raw external ID = %q", p, rawExternalID)
 	}
 }
 

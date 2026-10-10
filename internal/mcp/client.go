@@ -53,7 +53,9 @@ type MCPClient interface {
 
 // ClientConfig represents configuration for creating an MCP client
 type ClientConfig struct {
-	Service *types.MCPService
+	Service     *types.MCPService
+	headers     map[string]string
+	headerScope string
 
 	// OAuth wiring (only used when Service.AuthConfig.AuthType == oauth).
 	// The token store is scoped to (TenantID, Principal, Service.ID) so each
@@ -172,11 +174,16 @@ func NewMCPClient(config *ClientConfig) (MCPClient, error) {
 	httpClient := secutils.NewSSRFSafeHTTPClient(clientCfg)
 
 	// Build headers
-	headers := make(map[string]string)
-	for key, value := range config.Service.Headers {
-		headers[key] = value
+	headers := config.headers
+	if headers == nil {
+		// Legacy/internal callers without a request can still construct static
+		// clients. Dynamic templates require the prepared request snapshot.
+		prepared, prepareErr := PrepareClientConfig(context.Background(), config.Service, config.OAuthRepo)
+		if prepareErr != nil {
+			return nil, prepareErr
+		}
+		headers = prepared.headers
 	}
-	applyAuthHeaders(headers, config.Service.AuthConfig)
 
 	// Build OAuth config when this service uses the OAuth strategy. The
 	// client_id comes from the dynamically-registered client persisted at

@@ -34,6 +34,7 @@ function fixture(generate: () => Promise<string> = async () => 'Query logs by mo
           return { ...props.service, ...data }
         },
       }
+      if (name === '@/utils/mcpHeaderTemplate') return require('../../../utils/mcpHeaderTemplate.ts')
       return { default: {} }
     },
     URL, console,
@@ -85,6 +86,29 @@ test('connection save omits usage instructions so new services can sync tools fi
     assert.equal('usage_instructions' in body, false)
     assert.equal('description' in body, false)
     assert.equal(body.url, 'https://example.com/mcp')
+  } finally { f.close() }
+})
+
+test('manual usage instructions can finish an unsynced service without claiming tools were synced', async () => {
+  const f = fixture(undefined, 1)
+  try {
+    assert.equal(f.vm.toolsSynced, false)
+    f.vm.formData.usage_instructions = 'Use this service to query meetings.'
+    await f.vm.handleSubmit()
+    assert.equal(f.updates.length, 1)
+    assert.deepEqual({ ...f.updates[0]?.data }, { usage_instructions: 'Use this service to query meetings.' })
+  } finally { f.close() }
+})
+
+test('custom header variable picker appends an identity expression without replacing static text', () => {
+  const f = fixture()
+  try {
+    f.vm.formData.headers = [{ key: 'AAA', value: 'dept:' }]
+    f.vm.insertHeaderTemplate(0, 'user.email')
+    assert.equal(f.vm.formData.headers[0].value, 'dept:{{user.email}}')
+    assert.equal(f.vm.hasDynamicHeaders, true)
+    f.vm.insertHeaderTemplate(0, 'env.SECRET')
+    assert.equal(f.vm.formData.headers[0].value, 'dept:{{user.email}}')
   } finally { f.close() }
 })
 

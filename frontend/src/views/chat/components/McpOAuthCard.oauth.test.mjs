@@ -48,9 +48,11 @@ test('settings distinguishes refreshable tokens from usable authorization', () =
   assert.match(apiSource, /state: data\?\.state \?\? 'reauth_required'/)
 })
 
-test('settings wizard requires a synchronized directory before save', () => {
-  assert.match(settingsSource, /step === 1 && !toolsSynced/)
-  assert.match(settingsSource, /mcpMetadata\.syncRequired/)
+test('settings wizard allows manually documented services before tool sync', () => {
+  assert.doesNotMatch(settingsSource, /step === 1 && !toolsSynced/)
+  assert.match(settingsSource, /mcpMetadata\.unsyncedSaveHint/)
+  assert.match(settingsSource, /mcpMetadata\.instructionsRequired/)
+  assert.match(settingsSource, /!toolsSynced\.value\) return/)
   assert.match(settingsSource, /formRef\.value\?\.validate\(\)/)
   assert.match(settingsSource, /if \(valid !== true\) return null/)
 })

@@ -2,6 +2,9 @@ package middleware
 
 import (
 	"context"
+	"strconv"
+
+	"github.com/Tencent/WeKnora/internal/mcp/headertemplate"
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/gin-gonic/gin"
@@ -16,8 +19,9 @@ import (
 // pairs out by hand.
 type authSession struct {
 	// User is the authenticated (possibly synthetic) user. Required.
-	User      *types.User
-	Principal types.Principal
+	User           *types.User
+	Principal      types.Principal
+	ExternalUserID string
 	// TenantID / Tenant scope the request to a workspace. TenantID == 0 means
 	// a tenantless session (identity-level routes only) and attaches neither
 	// key. Tenant may be nil even when TenantID is set (not expected today,
@@ -82,5 +86,17 @@ func applyAuthSession(c *gin.Context, s authSession) {
 		userID = s.User.ID
 	}
 	ctx = types.WithCaller(ctx, types.Caller{TenantID: s.TenantID, UserID: userID, Role: s.Role})
+	values := map[string]string{
+		"tenant.id":      strconv.FormatUint(s.TenantID, 10),
+		"principal.id":   s.Principal.ID,
+		"principal.type": string(s.Principal.Type),
+	}
+	if s.Principal.Type == types.PrincipalWebUser && s.User != nil && s.User.ID == s.Principal.ID {
+		values["user.id"], values["user.email"] = s.User.ID, s.User.Email
+	}
+	if s.Principal.Type == types.PrincipalAPIExternalUser {
+		values["external.user_id"] = s.ExternalUserID
+	}
+	set(types.MCPHeaderContextKey, headertemplate.NewContext(values, c.Request.Header))
 	c.Request = c.Request.WithContext(ctx)
 }

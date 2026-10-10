@@ -197,11 +197,9 @@ func (s *mcpServiceService) RefreshMCPMetadata(
 		return nil, err
 	}
 	started := time.Now().UTC()
-	config := &mcp.ClientConfig{Service: service}
-	if service.AuthConfig.IsOAuth() {
-		config.OAuthRepo, config.TenantID, config.Principal = s.oauthRepo, tenant, types.MCPOAuthPrincipalFromContext(
-			ctx,
-		)
+	config, err := mcp.PrepareClientConfig(ctx, service, s.oauthRepo)
+	if err != nil {
+		return nil, err
 	}
 	client, err := mcp.NewMCPClient(config)
 	if err != nil {

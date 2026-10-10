@@ -37,6 +37,9 @@ func NewMCPServiceService(
 
 // CreateMCPService creates a new MCP service
 func (s *mcpServiceService) CreateMCPService(ctx context.Context, service *types.MCPService) error {
+	if err := mcp.ValidateHeaderTemplates(service); err != nil {
+		return err
+	}
 	// Stdio transport is disabled for security reasons
 	if service.TransportType == types.MCPTransportStdio {
 		return fmt.Errorf("stdio transport is disabled for security reasons; please use SSE or HTTP Streamable transport instead")
@@ -178,6 +181,7 @@ func (s *mcpServiceService) UpdateMCPService(
 		preStdioArgs = append([]string(nil), existing.StdioConfig.Args...)
 	}
 	preTransportType := existing.TransportType
+	preServiceHeaders := maps.Clone(existing.Headers)
 	preHeaders := map[string]string{}
 	if existing.AuthConfig != nil && existing.AuthConfig.CustomHeaders != nil {
 		maps.Copy(preHeaders, existing.AuthConfig.CustomHeaders)
@@ -253,6 +257,9 @@ func (s *mcpServiceService) UpdateMCPService(
 	}
 
 	// Update timestamp
+	if err := mcp.ValidateHeaderTemplates(existing); err != nil {
+		return err
+	}
 	if err := mcp.ValidateServiceOutboundURLs(existing); err != nil {
 		return err
 	}
@@ -272,7 +279,7 @@ func (s *mcpServiceService) UpdateMCPService(
 	// AuthConfig API key / token changes do NOT go through this path; they
 	// are handled by the /credentials subresource which triggers CloseClient
 	// inline.
-	configChanged := false
+	configChanged := !maps.Equal(preServiceHeaders, existing.Headers)
 	currURLSet := existing.URL != nil
 	switch {
 	case currURLSet != preURLSet:
@@ -391,13 +398,9 @@ func (s *mcpServiceService) TestMCPService(
 	// per-user token store so the test connects with the current user's
 	// authorization (and surfaces an authorization-required message when the
 	// user has not authorized yet).
-	config := &mcp.ClientConfig{
-		Service: service,
-	}
-	if service.AuthConfig.IsOAuth() {
-		config.OAuthRepo = s.oauthRepo
-		config.TenantID, _ = types.TenantIDFromContext(ctx)
-		config.Principal, _ = types.PrincipalFromContext(ctx)
+	config, err := mcp.PrepareClientConfig(ctx, service, s.oauthRepo)
+	if err != nil {
+		return mcpTestFailure(err, "Invalid MCP headers"), nil
 	}
 
 	client, err := mcp.NewMCPClient(config)

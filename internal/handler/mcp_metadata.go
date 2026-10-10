@@ -7,6 +7,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/mcp"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
@@ -31,7 +32,7 @@ func (h *MCPServiceHandler) GetMCPMetadata(c *gin.Context) { h.mcpMetadata(c, fa
 
 // RefreshMCPMetadata godoc
 // @Summary      同步 MCP 工具目录
-// @Description  显式连接上游并原子替换完整目录。OAuth 服务写入当前用户的快照，Viewer 及以上可调用；静态认证写入租户共享快照，需要 Admin。
+// @Description  显式连接上游并原子替换完整目录。OAuth 服务写入当前授权主体的快照，Viewer 及以上可调用；非 OAuth 服务写入租户共享快照，需要 Admin。
 // @Tags         MCP服务
 // @Accept       json
 // @Produce      json
@@ -92,7 +93,7 @@ func (h *MCPServiceHandler) mcpMetadata(c *gin.Context, refresh bool) {
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": snapshot})
 }
 
-// mayWriteSharedMCPMetadata is the extra gate for static-auth catalogs. The
+// mayWriteSharedMCPMetadata is the extra gate for non-OAuth shared catalogs. The
 // route stays Viewer+ so OAuth users can persist their own snapshot after
 // authorizing in chat. API keys already passed manage-MCP; JWT callers need Admin.
 func mayWriteSharedMCPMetadata(ctx context.Context) bool {
@@ -106,6 +107,10 @@ func mayWriteSharedMCPMetadata(ctx context.Context) bool {
 }
 
 func mcpMetadataAppError(err error, refresh bool) *errors.AppError {
+	var headerErr *mcp.HeaderTemplateError
+	if stderrors.As(err, &headerErr) {
+		return errors.NewBadRequestError(headerErr.Error())
+	}
 	switch {
 	case stderrors.Is(err, types.ErrMCPServiceNotFound):
 		return errors.NewNotFoundError("MCP service not found")
