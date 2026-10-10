@@ -45,7 +45,7 @@ func retrieveObservedImagePool(ctx context.Context, g *storeGroup, params []type
 		out["kb_ids"], out["image_kb_ids"] = g.KBIDs, imageKBs
 		out["result_complete"] = err == nil && rr.Error == nil
 		out["unreturned_images"] = "unknown: engine threshold, top_k, or no eligible indexed images"
-		recordImageRecallDecision(ctx, "engine_pool", nil, out)
+		recordImageRecallDecision(ctx, "result_pool."+phase, rr.RetrieverType, out)
 	}
 	return res, err
 }
@@ -131,10 +131,22 @@ func summarizeImageCandidateCut(hits []*types.IndexWithScore, limit int) map[str
 	}
 }
 
-func recordImageRecallDecision(ctx context.Context, stage string, input, output map[string]interface{}) {
-	logger.GetLogger(ctx).WithFields(logger.Fields(output)).Info("image recall " + stage)
+// Diagnostic snapshots describe existing results, not another retrieval call.
+// Counts cover the entire pool; detailed samples focus on image-vector hits.
+func recordImageRecallDecision(
+	ctx context.Context, stage string, retriever types.RetrieverType, output map[string]interface{},
+) {
+	name := "diagnostics.retrieval."
+	if retriever != "" {
+		name += string(retriever) + "."
+	}
+	name += stage
+	logger.GetLogger(ctx).WithFields(logger.Fields(output)).Info(name)
 	_, span := langfuse.GetManager().StartSpan(ctx, langfuse.SpanOptions{
-		Name: "retrieval.image_" + stage, Input: input,
+		Name: name,
+		Metadata: map[string]interface{}{
+			"observation_kind": "diagnostic", "stage": stage, "sample_scope": "image_vectors",
+		},
 	})
 	span.Finish(output, nil, nil)
 }

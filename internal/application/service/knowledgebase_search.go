@@ -135,7 +135,8 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 		return nil, err
 	}
 
-	recordImageRecallDecision(ctx, "candidate_cut", nil, summarizeImageCandidateCut(chunks, params.MatchCount))
+	recordImageRecallDecision(ctx, "fusion.candidate_selection", "",
+		summarizeImageCandidateCut(chunks, params.MatchCount))
 
 	// Truncate to the primary-match cap. MatchCount is guaranteed positive by
 	// the normalization at the top of this function; the slice bound below
