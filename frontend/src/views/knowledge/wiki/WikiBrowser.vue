@@ -55,7 +55,7 @@
           <button type="button" class="mobile-icon-button" :aria-label="$t('wikiMobile.zoomIn')" @click="zoomGraph(1.25)"><t-icon name="add" /></button>
           <button type="button" class="mobile-icon-button" :aria-label="$t('wikiMobile.zoomOut')" @click="zoomGraph(0.8)"><t-icon name="minus" /></button>
         </div>
-        <button v-if="graphReady && isMobile" type="button" class="mobile-graph-legend-toggle" :aria-expanded="mobileLegendOpen" @click="mobileLegendOpen = !mobileLegendOpen">{{ $t('knowledgeEditor.wikiBrowser.filterConcept') }}<t-icon :name="mobileLegendOpen ? 'chevron-down' : 'chevron-up'" /></button>
+        <button v-if="graphReady && isMobile" type="button" class="mobile-graph-legend-toggle" :aria-expanded="mobileLegendOpen" @click="mobileLegendOpen = !mobileLegendOpen">{{ $t('wikiMobile.legend') }}<t-icon :name="mobileLegendOpen ? 'chevron-down' : 'chevron-up'" /></button>
         <div v-if="graphReady && (!isMobile || mobileLegendOpen)" class="wiki-graph-legend" :class="{ 'legend-shifted': graphDrawerVisible }">
           <div class="legend-items">
             <div class="legend-item clickable" :class="{ disabled: !graphFilterTypes.has('summary') }"
@@ -1008,6 +1008,14 @@ const graphData = ref<WikiGraphData | null>(null)
 const searchQuery = ref('')
 const graphSearchValue = ref('')
 const graphRef = ref<HTMLElement | null>(null)
+watch(isMobile, mobile => {
+  graphRef.value?.querySelectorAll<SVGGElement>('g[role="button"]').forEach(node => {
+    if (mobile) node.setAttribute('tabindex', '0')
+    else node.removeAttribute('tabindex')
+  })
+  if (!mobile) mobileLegendOpen.value = false
+})
+
 const readerBodyRef = ref<HTMLElement | null>(null)
 const drawerBodyRef = ref<HTMLElement | null>(null)
 const loading = ref(false)

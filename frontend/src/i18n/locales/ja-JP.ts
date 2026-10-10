@@ -2730,6 +2730,7 @@ export default {
     }
   },
   wikiMobile: {
+    legend: '凡例と操作',
     contents: '目次',
     zoomIn: '拡大',
     zoomOut: '縮小',

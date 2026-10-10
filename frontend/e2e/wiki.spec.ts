@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test'
 import { mockApp, fitsViewport } from './fixtures'
-test.use({ hasTouch: true })
+// Phone projects use isMobile:true; desktop cases run in a separate project.
 
 for (const tab of ['wiki', 'graph']) {
   test(`mobile ${tab} remains usable with real content`, async ({ page }) => {
@@ -20,6 +20,11 @@ for (const tab of ['wiki', 'graph']) {
       await page.locator('.mobile-wiki-directory').click()
       expect(await reader.evaluate(node => node.scrollTop)).toBeGreaterThan(0)
     } else {
+      await expect(page.locator('.wiki-graph-legend')).toHaveCount(0)
+      await page.locator('.mobile-graph-legend-toggle').click()
+      await expect(page.locator('.wiki-graph-legend')).toBeVisible()
+      await page.locator('.mobile-graph-legend-toggle').click()
+      await expect(page.locator('.wiki-graph-legend')).toHaveCount(0)
       const svg = page.locator('.wiki-graph-canvas svg')
       await expect(svg).toBeVisible()
       const before = await svg.locator(':scope > g').first().getAttribute('transform')
@@ -51,14 +56,26 @@ test('touch graph supports pan and pinch without opening a node', async ({ brows
 })
 
 
-test('desktop graph keeps wheel zoom and hides mobile-only controls', async ({ page }) => {
+test('@desktop desktop graph keeps wheel zoom and hides mobile-only controls', async ({ page }) => {
  await mockApp(page); await page.setViewportSize({ width: 1440, height: 900 })
  await page.goto('/platform/knowledge-bases/mobile-kb?tab=graph')
  await expect(page.locator('.mobile-graph-zoom')).toHaveCount(0)
  await expect(page.locator('.mobile-wiki-directory')).toHaveCount(0)
  const svg = page.locator('.wiki-graph-canvas svg')
  await expect(svg).toBeVisible()
+ await expect(svg.locator('g[tabindex=\"0\"]')).toHaveCount(0)
  const graph = svg.locator('.graph-root'); const before = await graph.getAttribute('transform')
  await svg.hover(); await page.mouse.wheel(0, 100)
  await expect(graph).not.toHaveAttribute('transform', before || '')
+})
+
+test('resizing a phone graph to desktop removes node tab stops', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await mockApp(page)
+  await page.goto('/platform/knowledge-bases/mobile-kb?tab=graph')
+  const nodes = page.locator('.wiki-graph-canvas g[role="button"]')
+  await expect(nodes.first()).toHaveAttribute('tabindex', '0')
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await expect(nodes.first()).not.toHaveAttribute('tabindex')
+  await expect(page.locator('.mobile-graph-legend-toggle')).toHaveCount(0)
 })

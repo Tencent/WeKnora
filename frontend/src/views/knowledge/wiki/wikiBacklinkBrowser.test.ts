@@ -50,6 +50,8 @@ async function fixture() {
     setTimeout, clearTimeout, setInterval, clearInterval,
     localStorage: { getItem: () => null, setItem() {} },
     require(name: string) {
+      if (name.endsWith('.less')) return {}
+      if (name === '@/composables/useResponsive') return { useResponsive: () => ({ isMobile: require('vue').ref(false) }) }
       if (name === 'vue' || name === 'marked') return require(name)
       if (name === 'vue-router') return { useRouter: () => ({}), useRoute: () => ({ query: {} }) }
       if (name === 'vue-i18n') return { useI18n: () => ({ t: (key: string) => key }) }

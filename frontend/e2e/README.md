@@ -1,10 +1,7 @@
-# Local browser regressions
+# Browser validation
 
-Run `npm ci`, `npx playwright install chromium`, then `CI=true npm run test:e2e`.
-Tests use isolated mock API data, with no real credentials or paid model calls.
-CI workflow setup is intentionally unchanged.
+Apply the shared browser infrastructure PR #4141 before running these tests. The dependency owns Playwright, the strict common fixtures, device projects and CI wiring; this page PR contains only its relevant regressions.
 
-`PLAYWRIGHT_PORT` selects a local port (default 5186); the server fails immediately
-if that port is occupied instead of silently testing another service.
-`PLAYWRIGHT_CHROMIUM_EXECUTABLE` selects an already installed Chromium binary.
-The noVNC main-fail/fix-pass reproduction, when included, is documented in `novnc.md`.
+Run `npm run test:e2e` locally with Chromium installed. The phone project sets `isMobile: true` and `hasTouch: true`; desktop cases use a separate context. Fixtures intentionally do not set `sidebar_collapsed`, and unknown API requests fail instead of receiving a success response.
+
+This page suite requires the navigation/viewport base in Tencent/WeKnora#4041; apply that PR before testing wiki. No CI workflow is changed in this PR. Device emulation proves layout and touch-event handling, not physical iOS keyboard or Safari behavior.

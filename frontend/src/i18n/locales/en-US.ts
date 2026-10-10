@@ -2730,6 +2730,7 @@ export default {
     }
   },
   wikiMobile: {
+    legend: 'Legend and controls',
     contents: 'Contents',
     zoomIn: 'Zoom in',
     zoomOut: 'Zoom out',

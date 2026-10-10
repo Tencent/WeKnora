@@ -1260,6 +1260,8 @@ export default {
   mermaid: {
     diagram: '圖表',
     expand: '全螢幕查看',
+    zoomIn: '放大',
+    zoomOut: '縮小',
     reset: '重設',
     download: '下載圖片',
     close: '關閉',
@@ -5295,13 +5297,12 @@ export default {
     noCompatibleKbForAgent: '當前智慧代理的工具與作用域內知識庫的能力不比對，暫無可引用的知識庫。'
   },
   wikiMobile: {
+    legend: '圖例與操作',
     contents: '目錄',
     zoomIn: '放大',
     zoomOut: '縮小',
   },
   common: {
-    zoomIn: '放大',
-    zoomOut: '縮小',
     add: '新增',
     me: '我',
     confirm: '確認',

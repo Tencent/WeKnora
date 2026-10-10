@@ -1258,6 +1258,8 @@ export default {
   mermaid: {
     diagram: '다이어그램',
     expand: '전체 화면',
+    zoomIn: '확대',
+    zoomOut: '축소',
     reset: '초기화',
     download: '이미지 다운로드',
     close: '닫기',
@@ -5293,13 +5295,12 @@ export default {
     noCompatibleKbForAgent: '현재 에이전트의 도구와 범위 내 지식베이스의 기능이 일치하지 않아 참조할 수 있는 지식베이스가 없습니다.'
   },
   wikiMobile: {
+    legend: '범례 및 조작',
     contents: '목차',
     zoomIn: '확대',
     zoomOut: '축소',
   },
   common: {
-    zoomIn: '확대',
-    zoomOut: '축소',
     add: '추가',
     me: '나',
     confirm: '확인',
