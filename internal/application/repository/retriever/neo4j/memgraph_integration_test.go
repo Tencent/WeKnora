@@ -42,7 +42,7 @@ func TestMemgraphGraphRepository(t *testing.T) {
 		KnowledgeBase: "memgraph_test_" + time.Now().Format("150405000000"),
 		Knowledge:     "knowledge",
 	}
-	repo := NewNeo4jRepository(db).(*Neo4jRepository)
+	repo := NewNeo4jRepository(db, EngineMemgraph).(*Neo4jRepository)
 	t.Cleanup(func() {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 20*time.Second)
 		defer cleanupCancel()
@@ -69,5 +69,38 @@ func TestMemgraphGraphRepository(t *testing.T) {
 	}
 	if err := repo.DelGraph(ctx, []types.NameSpace{namespace}); err != nil {
 		t.Fatal(err)
+	}
+	// Deletion has to leave the namespace empty: the batched delete stops when
+	// a batch comes back empty, so a surviving node or relationship means the
+	// loop stopped early, not that it had nothing to do.
+	assertNamespaceEmpty(ctx, t, db, repo.Label(namespace))
+}
+
+// assertNamespaceEmpty counts what is left under a label after a deletion.
+// Relationships are counted without a label filter on the far endpoint so an
+// edge left dangling to another namespace still shows up.
+func assertNamespaceEmpty(ctx context.Context, t *testing.T, db driver.Driver, label string) {
+	t.Helper()
+	for _, probe := range []struct {
+		what  string
+		query string
+	}{
+		{what: "nodes", query: "MATCH (n:" + label + ") RETURN count(n) AS remaining"},
+		{what: "relationships", query: "MATCH (n:" + label + ")-[r]-() RETURN count(r) AS remaining"},
+	} {
+		result, err := driver.ExecuteQuery(ctx, db, probe.query, nil, driver.EagerResultTransformer)
+		if err != nil {
+			t.Fatalf("count remaining %s: %v", probe.what, err)
+		}
+		if len(result.Records) != 1 {
+			t.Fatalf("counting %s returned %d records, want 1", probe.what, len(result.Records))
+		}
+		remaining, _, err := driver.GetRecordValue[int64](result.Records[0], "remaining")
+		if err != nil {
+			t.Fatalf("decode remaining %s: %v", probe.what, err)
+		}
+		if remaining != 0 {
+			t.Errorf("%d %s survived DelGraph", remaining, probe.what)
+		}
 	}
 }

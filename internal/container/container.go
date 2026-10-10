@@ -150,6 +150,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(docparser.NewImageResolver))
 	must(container.Provide(initOllamaService))
 	must(container.Provide(initNeo4jClient))
+	must(container.Provide(provideGraphEngine))
 	must(container.Provide(stream.NewStreamManager))
 	logger.Debugf(ctx, "[Container] Initializing DuckDB...")
 	must(container.Provide(NewDuckDB))
@@ -1731,13 +1732,13 @@ func initNeo4jClient() (neo4j.Driver, error) {
 	if err != nil {
 		return nil, err
 	}
-	if engine == "neo4j" {
-		if username == "" {
-			username = "neo4j"
-		}
-		if password == "" {
-			password = "password"
-		}
+	// Credentials come from the environment only; nothing is invented here. The
+	// Compose files keep carrying the Neo4j defaults. Memgraph ships without
+	// authentication, so for it empty credentials mean "connect unauthenticated"
+	// instead of an empty basic-auth login.
+	auth := neo4j.BasicAuth(username, password, "")
+	if engine == neo4jRepo.EngineMemgraph && username == "" && password == "" {
+		auth = neo4j.NoAuth()
 	}
 
 	// Retry configuration
@@ -1747,7 +1748,7 @@ func initNeo4jClient() (neo4j.Driver, error) {
 	var driver neo4j.Driver
 
 	for attempt := 1; attempt <= maxRetries; attempt++ {
-		driver, err = neo4j.NewDriver(uri, neo4j.BasicAuth(username, password, ""))
+		driver, err = neo4j.NewDriver(uri, auth)
 		if err != nil {
 			logger.Warnf(ctx, "Failed to create %s driver (attempt %d/%d): %v", engine, attempt, maxRetries, err)
 			time.Sleep(retryInterval)
@@ -1770,15 +1771,24 @@ func initNeo4jClient() (neo4j.Driver, error) {
 	return nil, fmt.Errorf("failed to connect to %s after %d attempts: %w", engine, maxRetries, err)
 }
 
-func graphDatabaseEngine(value string) (string, error) {
-	engine := strings.ToLower(strings.TrimSpace(value))
-	if engine == "" {
-		return "neo4j", nil
+// graphDatabaseEngine resolves GRAPH_DATABASE_ENGINE. Unset means Neo4j, so an
+// existing deployment keeps its behaviour without touching its environment.
+func graphDatabaseEngine(value string) (neo4jRepo.GraphEngine, error) {
+	switch engine := neo4jRepo.GraphEngine(strings.ToLower(strings.TrimSpace(value))); engine {
+	case "":
+		return neo4jRepo.EngineNeo4j, nil
+	case neo4jRepo.EngineNeo4j, neo4jRepo.EngineMemgraph:
+		return engine, nil
+	default:
+		return "", fmt.Errorf("unsupported GRAPH_DATABASE_ENGINE %q (expected neo4j or memgraph)", string(engine))
 	}
-	if engine != "neo4j" && engine != "memgraph" {
-		return "", fmt.Errorf("unsupported GRAPH_DATABASE_ENGINE %q (expected neo4j or memgraph)", engine)
-	}
-	return engine, nil
+}
+
+// provideGraphEngine hands the engine to the graph repository through the
+// container, so the repository picks its Cypher dialect from configuration
+// rather than reading the environment itself.
+func provideGraphEngine() (neo4jRepo.GraphEngine, error) {
+	return graphDatabaseEngine(os.Getenv("GRAPH_DATABASE_ENGINE"))
 }
 
 func NewDuckDB() (*sql.DB, error) {

@@ -1,15 +1,19 @@
 package container
 
-import "testing"
+import (
+	"testing"
+
+	neo4jRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/neo4j"
+)
 
 func TestGraphDatabaseEngine(t *testing.T) {
 	for _, test := range []struct {
 		value string
-		want  string
+		want  neo4jRepo.GraphEngine
 	}{
-		{value: "", want: "neo4j"},
-		{value: " neo4j ", want: "neo4j"},
-		{value: "MEMGRAPH", want: "memgraph"},
+		{value: "", want: neo4jRepo.EngineNeo4j},
+		{value: " neo4j ", want: neo4jRepo.EngineNeo4j},
+		{value: "MEMGRAPH", want: neo4jRepo.EngineMemgraph},
 	} {
 		got, err := graphDatabaseEngine(test.value)
 		if err != nil || got != test.want {

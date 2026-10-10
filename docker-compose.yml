@@ -294,8 +294,8 @@ services:
       - NEO4J_ENABLE=${NEO4J_ENABLE:-}
       - GRAPH_DATABASE_ENGINE=${GRAPH_DATABASE_ENGINE:-neo4j}
       - NEO4J_URI=${NEO4J_URI:-bolt://neo4j:7687}
-      - NEO4J_USERNAME=${NEO4J_USERNAME:-}
-      - NEO4J_PASSWORD=${NEO4J_PASSWORD:-}
+      - NEO4J_USERNAME=${NEO4J_USERNAME:-neo4j}
+      - NEO4J_PASSWORD=${NEO4J_PASSWORD:-password}
       # 数据库中 API Key 等敏感字段落盘加密的 AES-256 主密钥（必须为 32 字节）。
       # 加密范围：tenants.api_key、模型 API key、向量库凭证、web search provider key、
       # WeKnoraCloud.AppSecret 等。缺失或长度不对时，已加密字段无法解密（UI 显示为空，

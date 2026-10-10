@@ -27,7 +27,7 @@ func TestSearchNodeIntegration(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { assert.NoError(t, driver.Close(context.Background())) })
 	require.NoError(t, driver.VerifyConnectivity(ctx))
-	repo := NewNeo4jRepository(driver).(*Neo4jRepository)
+	repo := NewNeo4jRepository(driver, EngineNeo4j).(*Neo4jRepository)
 	namespace := types.NameSpace{KnowledgeBase: fmt.Sprintf("graph_regression_%d", time.Now().UnixNano())}
 	label := repo.Label(namespace)
 	t.Cleanup(func() {
