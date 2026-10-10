@@ -3,6 +3,7 @@ package neo4j
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"testing"
 	"time"
@@ -18,9 +19,7 @@ func TestMemgraphGraphRepository(t *testing.T) {
 	if uri == "" {
 		t.Skip("WEKNORA_MEMGRAPH_URI is not set")
 	}
-	username := os.Getenv("WEKNORA_MEMGRAPH_USERNAME")
-	password := os.Getenv("WEKNORA_MEMGRAPH_PASSWORD")
-	db, err := driver.NewDriver(uri, driver.BasicAuth(username, password, ""))
+	db, err := driver.NewDriver(uri, memgraphTestAuth())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,5 +101,115 @@ func assertNamespaceEmpty(ctx context.Context, t *testing.T, db driver.Driver, l
 		if remaining != 0 {
 			t.Errorf("%d %s survived DelGraph", remaining, probe.what)
 		}
+	}
+}
+
+// countUnderLabel counts nodes or relationships attached to a label.
+func countUnderLabel(ctx context.Context, t *testing.T, db driver.Driver, label, what string) int64 {
+	t.Helper()
+	query := "MATCH (n:" + label + ") RETURN count(n) AS remaining"
+	if what == "relationships" {
+		query = "MATCH (n:" + label + ")-[r]-() RETURN count(DISTINCT r) AS remaining"
+	}
+	result, err := driver.ExecuteQuery(ctx, db, query, nil, driver.EagerResultTransformer)
+	if err != nil {
+		t.Fatalf("count %s: %v", what, err)
+	}
+	if len(result.Records) != 1 {
+		t.Fatalf("counting %s returned %d records, want 1", what, len(result.Records))
+	}
+	count, _, err := driver.GetRecordValue[int64](result.Records[0], "remaining")
+	if err != nil {
+		t.Fatalf("decode %s count: %v", what, err)
+	}
+	return count
+}
+
+// TestMemgraphDeletesInMoreThanOneBatch stores more relationships than one
+// delete batch holds, so the batching loop has to run more than once. A single
+// unbounded DELETE would pass the emptiness check too, so this is the test that
+// distinguishes "bounded batches" from "one big transaction".
+func TestMemgraphDeletesInMoreThanOneBatch(t *testing.T) {
+	uri := os.Getenv("WEKNORA_MEMGRAPH_URI")
+	if uri == "" {
+		t.Skip("WEKNORA_MEMGRAPH_URI is not set")
+	}
+	db, err := driver.NewDriver(uri, memgraphTestAuth())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cleanupCancel()
+		if err := db.Close(cleanupCtx); err != nil {
+			t.Errorf("close test driver: %v", err)
+		}
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	if err := db.VerifyConnectivity(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	namespace := types.NameSpace{
+		KnowledgeBase: "memgraph_batch_" + time.Now().Format("150405000000"),
+		Knowledge:     "knowledge",
+	}
+	repo := NewNeo4jRepository(db, EngineMemgraph).(*Neo4jRepository)
+	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cleanupCancel()
+		if err := repo.DelGraph(cleanupCtx, []types.NameSpace{namespace}); err != nil {
+			t.Errorf("clean up test graph: %v", err)
+		}
+	})
+
+	// One and a half batches of relationships, so the second batch is a short
+	// one and the third comes back empty.
+	const relationships = memgraphDeleteBatchSize + memgraphDeleteBatchSize/2
+	graph := &types.GraphData{}
+	for i := 0; i <= relationships; i++ {
+		graph.Node = append(graph.Node, &types.GraphNode{
+			Name:   fmt.Sprintf("node-%04d", i),
+			Chunks: []string{fmt.Sprintf("chunk-%04d", i)},
+		})
+	}
+	for i := 0; i < relationships; i++ {
+		graph.Relation = append(graph.Relation, &types.GraphRelation{
+			Node1: fmt.Sprintf("node-%04d", i),
+			Node2: fmt.Sprintf("node-%04d", i+1),
+			Type:  "RELATED_TO",
+		})
+	}
+	if err := repo.AddGraph(ctx, namespace, []*types.GraphData{graph}); err != nil {
+		t.Fatal(err)
+	}
+	assertNamespaceCount(ctx, t, db, repo.Label(namespace), "nodes", int64(relationships+1))
+	assertNamespaceCount(ctx, t, db, repo.Label(namespace), "relationships", int64(relationships))
+
+	if err := repo.DelGraph(ctx, []types.NameSpace{namespace}); err != nil {
+		t.Fatal(err)
+	}
+	assertNamespaceEmpty(ctx, t, db, repo.Label(namespace))
+}
+
+// memgraphTestAuth mirrors how the application connects: empty credentials mean
+// an unauthenticated connection, which is Memgraph's default configuration.
+func memgraphTestAuth() driver.AuthToken {
+	username := os.Getenv("WEKNORA_MEMGRAPH_USERNAME")
+	password := os.Getenv("WEKNORA_MEMGRAPH_PASSWORD")
+	if username == "" && password == "" {
+		return driver.NoAuth()
+	}
+	return driver.BasicAuth(username, password, "")
+}
+
+// assertNamespaceCount counts nodes or relationships under a label.
+func assertNamespaceCount(
+	ctx context.Context, t *testing.T, db driver.Driver, label, what string, want int64,
+) {
+	t.Helper()
+	if got := countUnderLabel(ctx, t, db, label, what); got != want {
+		t.Errorf("%s under %s = %d, want %d", what, label, got, want)
 	}
 }

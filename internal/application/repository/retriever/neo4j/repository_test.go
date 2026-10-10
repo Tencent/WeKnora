@@ -16,7 +16,7 @@ import (
 // hits, and both LIMITs are preceded by the same ordering key so a truncated
 // result keeps the neighbourhoods of the highest-ranked seeds.
 func TestGraphSearchCypherBoundsAndOrders(t *testing.T) {
-	query, params := graphSearchCypher("ENTITY_kb", []string{"安恒"})
+	query, params := graphSearchCypher(EngineNeo4j, "ENTITY_kb", []string{"安恒"})
 
 	for _, want := range []string{
 		"EXISTS { (n)--() }",
@@ -300,6 +300,34 @@ func TestMemgraphCompatibleCypherAvoidsAPOC(t *testing.T) {
 	}
 	if _, err := memgraphRelationshipImportQuery("ENTITY_kb", "\n"); err == nil {
 		t.Fatal("expected an empty relationship type to be rejected")
+	}
+}
+
+// Memgraph has no elementId(); #3950 added it to the search ordering as the
+// final tie breaker, which made the shared query fail on Memgraph with
+// "Function 'elementId' doesn't exist".
+func TestGraphSearchCypherUsesTheEngineIdentityFunction(t *testing.T) {
+	neo4jQuery, _ := graphSearchCypher(EngineNeo4j, "ENTITY_kb", []string{"Acme"})
+	for _, want := range []string{"n.kg, elementId(n)", "ORDER BY seed_index, elementId(r)"} {
+		if !strings.Contains(neo4jQuery, want) {
+			t.Errorf("the Neo4j ordering must keep %q: %s", want, neo4jQuery)
+		}
+	}
+
+	memgraphQuery, _ := graphSearchCypher(EngineMemgraph, "ENTITY_kb", []string{"Acme"})
+	for _, want := range []string{"n.kg, id(n)", "ORDER BY seed_index, id(r)"} {
+		if !strings.Contains(memgraphQuery, want) {
+			t.Errorf("the Memgraph ordering must use %q: %s", want, memgraphQuery)
+		}
+	}
+	if strings.Contains(memgraphQuery, "elementId(") {
+		t.Errorf("Memgraph has no elementId(): %s", memgraphQuery)
+	}
+	// Everything but the identity function has to stay shared; a second copy of
+	// the query would drift the next time the ordering changes.
+	if strings.ReplaceAll(memgraphQuery, "id(", "elementId(") != neo4jQuery {
+		t.Errorf("the two queries differ by more than the identity function:\n%s\n%s",
+			neo4jQuery, memgraphQuery)
 	}
 }
 

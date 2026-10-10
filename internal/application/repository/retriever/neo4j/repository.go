@@ -25,6 +25,16 @@ const (
 	EngineMemgraph GraphEngine = "memgraph"
 )
 
+// elementIDFunc names the Cypher function that yields a stable internal
+// identity, used as the last tie breaker in the search ordering. Memgraph has
+// no elementId(); its equivalent is id().
+func (e GraphEngine) elementIDFunc() string {
+	if e == EngineMemgraph {
+		return "id"
+	}
+	return "elementId"
+}
+
 // Neo4jRepository is a repository for Neo4j
 type Neo4jRepository struct {
 	driver     neo4j.Driver
@@ -270,6 +280,9 @@ func (n *Neo4jRepository) deleteInBatches(ctx context.Context, query, knowledgeI
 			return total, nil
 		}
 		total += deleted
+		// Per batch, so the batch boundaries are observable: a run that only
+		// ever logs one batch is not batching.
+		logger.Debugf(ctx, "deleted a batch of %d (%d so far, cap %d)", deleted, total, memgraphDeleteBatchSize)
 	}
 }
 
@@ -419,7 +432,7 @@ func (n *Neo4jRepository) SearchNode(
 	defer session.Close(ctx)
 
 	result, err := session.ExecuteRead(ctx, func(tx neo4j.ManagedTransaction) (interface{}, error) {
-		query, params := graphSearchCypher(n.Label(namespace), nodes)
+		query, params := graphSearchCypher(n.engine, n.Label(namespace), nodes)
 		result, err := tx.Run(ctx, query, params)
 		if err != nil {
 			return nil, fmt.Errorf("failed to run query: %v", err)
@@ -553,7 +566,10 @@ func decodeGraphNode(node neo4j.Node) (*types.GraphNode, error) {
 // Each edge is expanded only from its earliest seed, so duplicate endpoint
 // matches cannot consume the row cap. Only the bounded seed list is collected;
 // grouping every candidate relationship would require unbounded working memory.
-func graphSearchCypher(labelExpr string, nodes []string) (string, map[string]interface{}) {
+func graphSearchCypher(
+	engine GraphEngine, labelExpr string, nodes []string,
+) (string, map[string]interface{}) {
+	elementID := engine.elementIDFunc()
 	query := `
 		MATCH (n:` + labelExpr + `)
 		WHERE ANY(nodeText IN $nodes WHERE n.name CONTAINS nodeText)
@@ -562,7 +578,7 @@ func graphSearchCypher(labelExpr string, nodes []string) (string, map[string]int
 		     CASE WHEN n.name IN $nodes THEN 0 ELSE 1 END AS seed_rank,
 		     size(n.name) AS name_len,
 		     n.name AS name
-		ORDER BY seed_rank, name_len, name, n.kg, elementId(n)
+		ORDER BY seed_rank, name_len, name, n.kg, ` + elementID + `(n)
 		LIMIT $maxSeedNodes
 		WITH collect(n) AS seeds
 		UNWIND range(0, size(seeds) - 1) AS seed_index
@@ -570,7 +586,7 @@ func graphSearchCypher(labelExpr string, nodes []string) (string, map[string]int
 		MATCH (n)-[r]-(m:` + labelExpr + `)
 		WHERE NOT m IN earlier_seeds
 		WITH n, r, m, seed_index
-		ORDER BY seed_index, elementId(r)
+		ORDER BY seed_index, ` + elementID + `(r)
 		LIMIT $maxRows
 		RETURN n, r, m
 	`
