@@ -105,11 +105,26 @@ func TestImageEmbeddingWireFormatPerVendor(t *testing.T) {
 				"input": []any{map[string]any{"image": uri}},
 			},
 		},
+		{
+			name: "a generic (vLLM) row sends each image as a messages conversation", provider: "generic",
+			model: "TIGER-Lab/VLM2Vec-Full", base: "/v1", images: 2, wantRequests: 2,
+			wantPath: "/v1/embeddings",
+			wantBody: map[string]any{
+				"model": "TIGER-Lab/VLM2Vec-Full", "encoding_format": "float", "truncate_prompt_tokens": float64(511),
+				"messages": []any{map[string]any{"role": "user", "content": []any{
+					map[string]any{"type": "image_url", "image_url": map[string]any{"url": uri}},
+				}}},
+			},
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			up := newUpstream(t)
-			ie, ok := AsImageEmbedder(imageEmbedder(t, up, tc.provider, tc.model, tc.base, nil))
+			var spec *types.ModelSpecOverride
+			if tc.provider == "generic" {
+				spec = &types.ModelSpecOverride{Input: []string{"text", "image"}}
+			}
+			ie, ok := AsImageEmbedder(imageEmbedder(t, up, tc.provider, tc.model, tc.base, spec))
 			require.True(t, ok, "the catalog lists this model as taking images")
 
 			images := pngs(tc.images)
@@ -137,9 +152,15 @@ func TestImageEmbeddingNeedsBothTheModelAndTheEndpoint(t *testing.T) {
 	}{
 		{"text model on a vendor with an image field", "jina", "jina-embeddings-v3", nil, false},
 		{"text model on the OpenAI shape", "openai", "text-embedding-3-small", nil, false},
-		// A generic OpenAI-compatible server has no image input to send to,
-		// whatever the row declares.
-		{"declared, but the endpoint names no image field", "generic", "my-clip", declare, false},
+		{"generic endpoint, image input not declared", "generic", "my-clip", nil, false},
+		{"declared on a generic (vLLM) endpoint", "generic", "my-clip", declare, true},
+		{
+			"declared, but the row switched to an object format without a field", "generic", "my-clip",
+			&types.ModelSpecOverride{
+				Input: []string{"text", "image"}, Compat: map[string]any{"image_format": "object"},
+			},
+			false,
+		},
 		{"declared on a vendor that names one", "jina", "my-jina-omni", declare, true},
 		{
 			"the row narrows a multimodal catalog entry", "volcengine", "doubao-embedding-vision-251215",
@@ -161,6 +182,61 @@ func TestImageEmbeddingNeedsBothTheModelAndTheEndpoint(t *testing.T) {
 			}
 		})
 	}
+}
+
+// Qwen3-VL-Embedding on vLLM matches its model card only when text and
+// image both pass the chat template and the prompt ends in <|endoftext|>,
+// the token its last-token pooling reads. A plain `input` string skips the
+// template and lands in a different space from the images.
+func TestSelfHostedQwen3VLEmbeddingSendsTextAndImagesThroughTheTemplate(t *testing.T) {
+	up := newUpstream(t)
+	e := imageEmbedder(t, up, "generic", "Qwen/Qwen3-VL-Embedding-8B", "/v1", nil)
+	ie, ok := AsImageEmbedder(e)
+	require.True(t, ok, "the catalog declares image input without a row override")
+
+	got, err := e.BatchEmbed(types.WithEmbedQuery(context.Background()), []string{"ab", "c"})
+	require.NoError(t, err)
+	assert.Equal(t, [][]float32{{2}, {1}}, got)
+	images, err := ie.BatchEmbedImages(context.Background(), pngs(6))
+	require.NoError(t, err)
+	assert.Equal(t, [][]float32{{1}, {2}, {3}, {4}, {5}, {6}}, images)
+
+	message := func(part map[string]any) map[string]any {
+		return map[string]any{
+			"model": "Qwen/Qwen3-VL-Embedding-8B", "encoding_format": "float",
+			"truncate_prompt_tokens": float64(511), "add_special_tokens": true,
+			"messages": []any{map[string]any{"role": "user", "content": []any{part}}},
+		}
+	}
+	textBatch := message(nil)
+	textBatch["messages"] = []any{
+		message(map[string]any{"type": "text", "text": "ab"})["messages"],
+		message(map[string]any{"type": "text", "text": "c"})["messages"],
+	}
+	imageMessage := func(img Image) map[string]any {
+		return message(map[string]any{"type": "image_url", "image_url": map[string]any{"url": img.DataURI()}})
+	}
+	imageBatch := message(nil)
+	conversations := make([]any, 5)
+	for i, img := range pngs(5) {
+		conversations[i] = imageMessage(img)["messages"]
+	}
+	imageBatch["messages"] = conversations
+	require.Len(t, up.requests, 3, "one text batch and image batches of five and one")
+	assert.Equal(t, textBatch, up.requests[0].body)
+	assert.Equal(t, imageBatch, up.requests[1].body)
+	assert.Equal(t, imageMessage(pngs(6)[5]), up.requests[2].body)
+}
+
+func TestSelfHostedQwenMessagesBatchCanBeDisabledForOlderServers(t *testing.T) {
+	up := newUpstream(t)
+	e := imageEmbedder(t, up, "generic", "Qwen/Qwen3-VL-Embedding-8B", "/v1",
+		&types.ModelSpecOverride{Compat: map[string]any{"batch_messages": false}})
+	got, err := e.BatchEmbed(context.Background(), []string{"ab", "c"})
+	require.NoError(t, err)
+	assert.Equal(t, [][]float32{{2}, {1}}, got)
+	require.Len(t, up.requests, 2)
+	assert.IsType(t, map[string]any{}, up.requests[0].body["messages"].([]any)[0])
 }
 
 func TestImageEmbeddingRefusesWhatTheVendorDocumentsItWillNotTake(t *testing.T) {

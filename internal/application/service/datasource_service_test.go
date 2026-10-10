@@ -113,6 +113,10 @@ func (s *processSyncKBService) HybridSearchWithRerank(
 	return &types.RetrievalResult{Results: results}, err
 }
 
+func (s *processSyncKBService) ReadChunkImage(context.Context, *types.SearchResult) ([]byte, error) {
+	return nil, nil
+}
+
 func (s *processSyncKBService) GetQueryEmbedding(context.Context, string, string) ([]float32, error) {
 	return nil, nil
 }

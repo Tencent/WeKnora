@@ -24,6 +24,7 @@ import (
 	"os"
 	"path"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -690,4 +691,362 @@ func TestDockerSkillSnapshotIntegration(t *testing.T) {
 			t.Fatalf("skill snapshot %s leaked into the template catalog", ref.ID)
 		}
 	}
+}
+
+// terminalCapture drains a PTY session in the background so assertions can wait
+// for output that arrived before the check, which a direct receive would have
+// consumed.
+type terminalCapture struct {
+	mu   sync.Mutex
+	buf  bytes.Buffer
+	done chan struct{}
+}
+
+func captureTerminal(session RemoteTerminalSession) *terminalCapture {
+	capture := &terminalCapture{done: make(chan struct{})}
+	go func() {
+		defer close(capture.done)
+		for event := range session.Output() {
+			if event.Err != nil {
+				return
+			}
+			capture.mu.Lock()
+			capture.buf.Write(event.Data)
+			capture.mu.Unlock()
+		}
+	}()
+	return capture
+}
+
+func (c *terminalCapture) String() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.buf.String()
+}
+
+func (c *terminalCapture) waitFor(t *testing.T, want string, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if strings.Contains(c.String(), want) {
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatalf("terminal output never contained %q; got: %q", want, c.String())
+}
+
+func (c *terminalCapture) assertNever(t *testing.T, unwanted string, window time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(window)
+	for time.Now().Before(deadline) {
+		if strings.Contains(c.String(), unwanted) {
+			t.Fatalf("terminal output unexpectedly contained %q: %q", unwanted, c.String())
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+// TestDockerBackendTerminalIntegration exercises the interactive PTY against a
+// real daemon and the standard image: live output, window resize, and Ctrl-C.
+func TestDockerBackendTerminalIntegration(t *testing.T) {
+	cfg := dockerIntegrationConfig(t)
+	manager := newDockerIntegrationManager(t, cfg)
+
+	ctx, cancel := context.WithTimeout(
+		types.WithSandboxTenantID(context.Background(), dockerIntegrationTenantID),
+		6*time.Minute,
+	)
+	defer cancel()
+
+	sessionID := fmt.Sprintf("docker-terminal-%d", time.Now().UnixNano())
+	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(
+			types.WithSandboxTenantID(context.Background(), dockerIntegrationTenantID),
+			2*time.Minute,
+		)
+		defer cleanupCancel()
+		if err := manager.DestroySession(cleanupCtx, sessionID); err != nil {
+			t.Errorf("DestroySession: %v", err)
+		}
+	})
+
+	// Provision the session sandbox the way a chat turn would, then open the
+	// PTY on it.
+	executor := manager.SessionShellExecutor()
+	if executor == nil {
+		t.Fatal("session shell executor is unavailable on a healthy docker backend")
+	}
+	if _, err := executor.ExecShellCommand(
+		ctx, sessionID, "true", SessionWorkspaceRoot, time.Minute, nil,
+	); err != nil {
+		t.Fatalf("provision session sandbox: %v", err)
+	}
+
+	terminal := manager.SessionTerminalManager()
+	if terminal == nil {
+		t.Fatal("docker backend must advertise the terminal capability")
+	}
+	session, err := manager.OpenSessionTerminal(ctx, sessionID,
+		RemoteTerminalOptions{Cols: 100, Rows: 40})
+	if err != nil {
+		t.Fatalf("OpenSessionTerminal: %v", err)
+	}
+	t.Cleanup(func() { _ = session.Close() })
+
+	capture := captureTerminal(session)
+
+	// Live output: the computed value 42 does not appear in the typed command's
+	// own echo, so matching it proves the shell actually ran the line.
+	if err := session.Write(ctx, []byte("echo LIVE=$((6*7))\n")); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	capture.waitFor(t, "LIVE=42", 30*time.Second)
+
+	// Resize: stty reports the geometry the PTY was resized to. The target
+	// differs from the 100x40 the PTY opened at, so a match proves ExecResize
+	// took effect rather than echoing the create-time ConsoleSize.
+	if err := session.Resize(ctx, 120, 30); err != nil {
+		t.Fatalf("resize: %v", err)
+	}
+	if err := session.Write(ctx, []byte("stty size\n")); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	capture.waitFor(t, "30 120", 30*time.Second)
+
+	// The adapter's interactive defaults reach the shell (the daemon alone
+	// would leave TERM=xterm).
+	if err := session.Write(ctx, []byte("echo ENV=$TERM/$LC_ALL\n")); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	capture.waitFor(t, "ENV=xterm-256color/C.UTF-8", 30*time.Second)
+
+	// Interrupt: Ctrl-C cancels the sleeping command, and its sentinel never
+	// runs. The prompt returning is proven by the follow-up echo completing.
+	if err := session.Write(ctx, []byte("sleep 60; echo SLOW=$((2+2))\n")); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	time.Sleep(500 * time.Millisecond)
+	if err := session.Write(ctx, []byte{0x03}); err != nil {
+		t.Fatalf("interrupt: %v", err)
+	}
+	if err := session.Write(ctx, []byte("echo AFTER=$((5+5))\n")); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	capture.waitFor(t, "AFTER=10", 20*time.Second)
+	capture.assertNever(t, "SLOW=4", 3*time.Second)
+}
+
+// Closing a live Docker terminal must terminate the shell. The daemon keeps an
+// exec (and its foreground jobs) alive when the hijacked connection goes away,
+// so a bare disconnect would strand the process until the container is swept.
+func TestDockerBackendTerminalCloseTerminatesShellIntegration(t *testing.T) {
+	cfg := dockerIntegrationConfig(t)
+	manager := newDockerIntegrationManager(t, cfg)
+
+	ctx, cancel := context.WithTimeout(
+		types.WithSandboxTenantID(context.Background(), dockerIntegrationTenantID),
+		6*time.Minute,
+	)
+	defer cancel()
+
+	sessionID := fmt.Sprintf("docker-terminal-close-%d", time.Now().UnixNano())
+	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(
+			types.WithSandboxTenantID(context.Background(), dockerIntegrationTenantID),
+			2*time.Minute,
+		)
+		defer cleanupCancel()
+		if err := manager.DestroySession(cleanupCtx, sessionID); err != nil {
+			t.Errorf("DestroySession: %v", err)
+		}
+	})
+
+	executor := manager.SessionShellExecutor()
+	if executor == nil {
+		t.Fatal("session shell executor is unavailable on a healthy docker backend")
+	}
+	if _, err := executor.ExecShellCommand(
+		ctx, sessionID, "true", SessionWorkspaceRoot, time.Minute, nil,
+	); err != nil {
+		t.Fatalf("provision session sandbox: %v", err)
+	}
+
+	session, err := manager.OpenSessionTerminal(ctx, sessionID, RemoteTerminalOptions{})
+	if err != nil {
+		t.Fatalf("OpenSessionTerminal: %v", err)
+	}
+	go func() {
+		for range session.Output() {
+		}
+	}()
+
+	// Record the shell PID and start a long foreground job with a unique
+	// marker so the probe can find the job without matching itself.
+	if err := session.Write(ctx, []byte("echo $$ > /tmp/weknora-close.pid\n")); err != nil {
+		t.Fatalf("write pid: %v", err)
+	}
+	// A job the user detached on purpose must outlive the hangup, as it would
+	// when any real terminal closes.
+	if err := session.Write(ctx, []byte("nohup sleep 3619 >/dev/null 2>&1 &\n")); err != nil {
+		t.Fatalf("write nohup job: %v", err)
+	}
+	if err := session.Write(ctx, []byte("sleep 3611\n")); err != nil {
+		t.Fatalf("write job: %v", err)
+	}
+
+	// Positive control: the shell and its job must both be visible before the
+	// close, or a broken probe would read as a pass.
+	var shellPID string
+	for deadline := time.Now().Add(15 * time.Second); time.Now().Before(deadline); {
+		shellPID = strings.TrimSpace(terminalProbeOutput(
+			t, ctx, executor, sessionID, "cat /tmp/weknora-close.pid 2>/dev/null || true"))
+		if shellPID != "" && terminalProbeJobAlive(t, ctx, executor, sessionID, "sleep 3611") {
+			break
+		}
+		time.Sleep(300 * time.Millisecond)
+	}
+	if shellPID == "" {
+		t.Fatal("terminal shell never recorded its PID")
+	}
+	if !terminalProbeJobAlive(t, ctx, executor, sessionID, "sleep 3611") {
+		t.Fatal("positive control failed: foreground job not visible before close")
+	}
+	if !terminalProbeJobAlive(t, ctx, executor, sessionID, "sleep 3619") {
+		t.Fatal("positive control failed: nohup job not visible before close")
+	}
+
+	if err := session.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	// The hangup runs as a detached exec, so it may land just after Close
+	// returns; poll until both the shell and its job are gone.
+	for deadline := time.Now().Add(20 * time.Second); time.Now().Before(deadline); {
+		alive := strings.Contains(terminalProbeOutput(t, ctx, executor, sessionID,
+			"if [ -d /proc/"+shellPID+" ]; then echo ALIVE; else echo DEAD; fi"), "ALIVE")
+		if !alive && !terminalProbeJobAlive(t, ctx, executor, sessionID, "sleep 3611") {
+			// Past the script's SIGKILL pass too, so a survivor is not just
+			// a job the second pass has yet to reach.
+			time.Sleep(3 * time.Second)
+			if !terminalProbeJobAlive(t, ctx, executor, sessionID, "sleep 3619") {
+				t.Fatal("Close killed a nohup'd job; a terminal hangup must spare it")
+			}
+			return
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	t.Fatalf("Close left the shell (pid %s) and/or its foreground job running", shellPID)
+}
+
+// Cancelling the caller's context must terminate the shell just like Close. The
+// adapter's stream never observes the context on its own — the pump reads the
+// hijacked connection and the moby hijack stops watching the context once
+// upgraded — so without the lifetime watcher a cancelled context would leak the
+// shell and (via the detached TTL refresh) pin the container forever.
+func TestDockerBackendTerminalContextCancelTerminatesShellIntegration(t *testing.T) {
+	cfg := dockerIntegrationConfig(t)
+	manager := newDockerIntegrationManager(t, cfg)
+
+	probeCtx, cancelProbe := context.WithTimeout(
+		types.WithSandboxTenantID(context.Background(), dockerIntegrationTenantID),
+		6*time.Minute,
+	)
+	defer cancelProbe()
+
+	sessionID := fmt.Sprintf("docker-terminal-cancel-%d", time.Now().UnixNano())
+	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(
+			types.WithSandboxTenantID(context.Background(), dockerIntegrationTenantID),
+			2*time.Minute,
+		)
+		defer cleanupCancel()
+		if err := manager.DestroySession(cleanupCtx, sessionID); err != nil {
+			t.Errorf("DestroySession: %v", err)
+		}
+	})
+
+	executor := manager.SessionShellExecutor()
+	if executor == nil {
+		t.Fatal("session shell executor is unavailable on a healthy docker backend")
+	}
+	if _, err := executor.ExecShellCommand(
+		probeCtx, sessionID, "true", SessionWorkspaceRoot, time.Minute, nil,
+	); err != nil {
+		t.Fatalf("provision session sandbox: %v", err)
+	}
+
+	// The session ctx is a child of probeCtx so the probes below keep a live
+	// context after we cancel only the session's.
+	sessionCtx, cancelSession := context.WithCancel(probeCtx)
+	defer cancelSession()
+	session, err := manager.OpenSessionTerminal(sessionCtx, sessionID, RemoteTerminalOptions{})
+	if err != nil {
+		t.Fatalf("OpenSessionTerminal: %v", err)
+	}
+	go func() {
+		for range session.Output() {
+		}
+	}()
+
+	if err := session.Write(sessionCtx, []byte("echo $$ > /tmp/weknora-cancel.pid\n")); err != nil {
+		t.Fatalf("write pid: %v", err)
+	}
+	if err := session.Write(sessionCtx, []byte("sleep 3613\n")); err != nil {
+		t.Fatalf("write job: %v", err)
+	}
+
+	var shellPID string
+	for deadline := time.Now().Add(15 * time.Second); time.Now().Before(deadline); {
+		shellPID = strings.TrimSpace(terminalProbeOutput(
+			t, probeCtx, executor, sessionID, "cat /tmp/weknora-cancel.pid 2>/dev/null || true"))
+		if shellPID != "" && terminalProbeJobAlive(t, probeCtx, executor, sessionID, "sleep 3613") {
+			break
+		}
+		time.Sleep(300 * time.Millisecond)
+	}
+	if shellPID == "" {
+		t.Fatal("terminal shell never recorded its PID")
+	}
+	if !terminalProbeJobAlive(t, probeCtx, executor, sessionID, "sleep 3613") {
+		t.Fatal("positive control failed: foreground job not visible before cancel")
+	}
+
+	// Cancel only. No Close().
+	cancelSession()
+
+	for deadline := time.Now().Add(20 * time.Second); time.Now().Before(deadline); {
+		alive := strings.Contains(terminalProbeOutput(t, probeCtx, executor, sessionID,
+			"if [ -d /proc/"+shellPID+" ]; then echo ALIVE; else echo DEAD; fi"), "ALIVE")
+		if !alive && !terminalProbeJobAlive(t, probeCtx, executor, sessionID, "sleep 3613") {
+			return
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	t.Fatalf("cancelling the context left the shell (pid %s) and/or its job running", shellPID)
+}
+
+func terminalProbeOutput(
+	t *testing.T, ctx context.Context, executor SessionShellExecutor, sessionID, script string,
+) string {
+	t.Helper()
+	result, err := executor.ExecShellCommand(
+		ctx, sessionID, script, SessionWorkspaceRoot, 30*time.Second, nil)
+	if err != nil {
+		t.Fatalf("probe: %v", err)
+	}
+	return result.Stdout
+}
+
+// terminalProbeJobAlive reports whether the foreground job (jobCmd, e.g.
+// "sleep 3611") is still running. The pattern is anchored to the start of the
+// command line so the probe's own shell (whose argv contains the pattern text)
+// never matches itself.
+func terminalProbeJobAlive(
+	t *testing.T, ctx context.Context, executor SessionShellExecutor, sessionID, jobCmd string,
+) bool {
+	t.Helper()
+	out := terminalProbeOutput(t, ctx, executor, sessionID,
+		`n=0; for p in /proc/[0-9]*; do cmd=$(tr '\0' ' ' < "$p/cmdline" 2>/dev/null); case "$cmd" in "`+jobCmd+` "*) n=$((n+1));; esac; done; echo $n`)
+	return strings.TrimSpace(out) != "0"
 }

@@ -120,6 +120,13 @@ func (p *PluginMerge) selectInputResults(ctx context.Context, chatManage *types.
 				kept = append(kept, r)
 			}
 		}
+		// This cut already hides candidates from the prompt, so record it
+		// here: with rerank skipped there is nothing left for FILTER_TOP_K to
+		// cut, and without the record the model would read a subset as the
+		// complete result set.
+		if len(kept) < len(result) {
+			chatManage.RecordRetrievalCut(types.RetrievalStageMerge, len(result))
+		}
 		result = kept
 	}
 	pipelineWarn(ctx, "Merge", "fallback", map[string]interface{}{
@@ -328,6 +335,7 @@ func (p *PluginMerge) resolveParentChunks(
 	}
 
 	for _, r := range results {
+		searchutil.CaptureImageEvidence(r)
 		if r.ParentChunkID == "" {
 			continue
 		}

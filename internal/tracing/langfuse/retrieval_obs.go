@@ -96,6 +96,7 @@ func SummarizeSearchResults(results []*types.SearchResult, limit int) map[string
 			"composite_score": fmt.Sprintf("%.4f", sr.Score),
 			"match_type":      sr.MatchType,
 			"chunk_type":      sr.ChunkType,
+			"vector_score":    fmt.Sprintf("%.4f", sr.VectorScore),
 			"preview":         TruncateRunes(sr.Content, 160),
 		}
 		if sr.Metadata != nil {
@@ -160,6 +161,8 @@ func summarizeIndexHits(hits []*types.IndexWithScore, limit int) []map[string]in
 			"knowledge_base_id": hit.KnowledgeBaseID,
 			"score":             fmt.Sprintf("%.4f", hit.Score),
 			"match_type":        hit.MatchType,
+			"source_type":       hit.SourceType,
+			"vector_score":      fmt.Sprintf("%.4f", hit.VectorScore),
 			"preview":           TruncateRunes(hit.Content, 160),
 		})
 	}
@@ -253,6 +256,8 @@ func summarizeRetrieveHits(
 			"knowledge_base_id": hit.KnowledgeBaseID,
 			"score":             fmt.Sprintf("%.4f", hit.Score),
 			"match_type":        hit.MatchType,
+			"source_type":       hit.SourceType,
+			"vector_score":      fmt.Sprintf("%.4f", hit.VectorScore),
 			"engine":            string(ref.engine),
 			"retriever":         string(ref.retriever),
 			"preview":           TruncateRunes(hit.Content, 160),
@@ -287,6 +292,8 @@ func SummarizePassagePreviews(
 			"knowledge_title": sr.KnowledgeTitle,
 			"retrieval_score": fmt.Sprintf("%.4f", sr.Score),
 			"match_type":      sr.MatchType,
+			"chunk_type":      sr.ChunkType,
+			"vector_score":    fmt.Sprintf("%.4f", sr.VectorScore),
 			"preview":         TruncateRunes(passages[i], 160),
 		})
 	}

@@ -2209,7 +2209,6 @@ onBeforeUnmount(stopPlayground)
   flex-direction: column;
   gap: 12px;
   width: 100%;
-  max-width: 760px;
 }
 
 .mode-callout {
@@ -2585,10 +2584,6 @@ onBeforeUnmount(stopPlayground)
       flex: 1 1 0;
       min-width: 0;
     }
-  }
-
-  .mode-detail {
-    max-width: none;
   }
 
   .playground-entry {

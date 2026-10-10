@@ -3,6 +3,7 @@ package service
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"image"
 	"image/png"
 	"testing"
@@ -236,6 +237,68 @@ func TestIndexImageVectorNeedsTheKnowledgeBaseToOptIn(t *testing.T) {
 			assert.Empty(t, model.images, "the image is not sent to the model")
 			assert.Empty(t, repo.chunks)
 			assert.Empty(t, recorder.rows)
+		})
+	}
+}
+
+// Follow the saved per-document choice through metadata, config resolution,
+// queue serialization and the worker, without changing KB retrieval defaults.
+func TestImageVectorUploadOverrideReachesWorker(t *testing.T) {
+	for _, tc := range []struct {
+		name                     string
+		kbEnabled, vectorEnabled bool
+		override                 *bool
+		want                     bool
+	}{
+		{"enable one upload", false, true, processConfigBoolPtr(true), true},
+		{"disable one upload", true, true, processConfigBoolPtr(false), false},
+		{"inherit enabled", true, true, nil, true},
+		{"inherit disabled", false, true, nil, false},
+		{"no vector index", true, false, processConfigBoolPtr(true), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			knowledge, kb, images, chunks := slotReleaseFixture(1)
+			knowledge.ID = "image-vector-" + tc.name
+			useLiteCounter(t, knowledge.ID)
+			kb.IndexingStrategy.VectorEnabled = tc.vectorEnabled
+			kb.ImageProcessingConfig.ImageVectorEnabled = tc.kbEnabled
+			require.NoError(t, knowledge.SetProcessOverrides(&types.KnowledgeProcessOverrides{
+				ImageVectorEnabled: tc.override,
+			}))
+			overrides, err := knowledge.ProcessOverrides()
+			require.NoError(t, err)
+			eff := ResolveProcessConfig(kb, overrides)
+			wantSetting := tc.kbEnabled
+			if tc.override != nil {
+				wantSetting = *tc.override
+			}
+			require.Equal(t, wantSetting, eff.ImageVectorEnabled)
+			enqueuer := &metadataUpdateTaskEnqueuer{}
+			enqueueService := &knowledgeService{task: enqueuer}
+			require.NoError(t, enqueueService.enqueueImageMultimodalTasks(
+				context.Background(), knowledge, kb, images, chunks, nil,
+			))
+			require.Len(t, enqueuer.tasks, 1)
+			var payload types.ImageMultimodalPayload
+			require.NoError(t, json.Unmarshal(enqueuer.tasks[0].Payload(), &payload))
+			require.NotNil(t, payload.ImageVectorEnabled, "explicit false must survive JSON serialization")
+			require.Equal(t, wantSetting, *payload.ImageVectorEnabled)
+			// The queued choice survives a later change to the KB default.
+			kb.ImageProcessingConfig.ImageVectorEnabled = !tc.kbEnabled
+			svc, repo, recorder, engine := imageVectorFixture(t)
+			model := &imageModel{dims: 3}
+			status := svc.indexImageVector(
+				context.Background(), kb, payload, testPNG(t), multimodalChunks(), model, engine,
+			)
+			if tc.want {
+				require.Equal(t, "indexed", status)
+				require.Len(t, model.images, 1)
+				require.Len(t, recorder.rows, 1)
+			} else {
+				require.Empty(t, status)
+				require.Empty(t, model.images)
+				require.Empty(t, repo.chunks)
+			}
 		})
 	}
 }

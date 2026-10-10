@@ -98,7 +98,9 @@ func (s *knowledgeService) cloneKnowledge(
 		}
 		srcSvc := s.resolveFileServiceForPath(ctx, srcKB, src.FilePath)
 		dstSvc := s.resolveFileService(ctx, targetKB)
-		newPath, copyErr := copyOwnedObject(ctx, srcSvc, dstSvc, src.FilePath, targetKB.TenantID, dst.ID)
+		newPath, copyErr := copyOwnedObject(
+			ctx, srcSvc, dstSvc, src.FilePath, targetKB.TenantID, dst.ID,
+			s.resourceCatalog, types.ResourceRelationSourceFile)
 		if copyErr != nil {
 			return fmt.Errorf("clone knowledge file copy failed: %w", copyErr)
 		}
@@ -4441,20 +4443,21 @@ func (s *knowledgeService) enqueueImageMultimodalTasks(
 		}
 
 		payload := types.ImageMultimodalPayload{
-			TenantID:          knowledge.TenantID,
-			KnowledgeID:       knowledge.ID,
-			KnowledgeBaseID:   kb.ID,
-			ChunkID:           chunkID,
-			ImageURL:          img.ServingURL,
-			EnableOCR:         true,
-			EnableCaption:     true,
-			ImageAttrsEnabled: eff.ImageAttrsEnabled,
-			ImageActions:      eff.ImageActions,
-			Language:          lang,
-			ImageSourceType:   metadata["image_source_type"],
-			Attempt:           attempt,
-			ImageIndex:        idx,
-			SourceLocators:    img.SourceLocators,
+			TenantID:           knowledge.TenantID,
+			KnowledgeID:        knowledge.ID,
+			KnowledgeBaseID:    kb.ID,
+			ChunkID:            chunkID,
+			ImageURL:           img.ServingURL,
+			EnableOCR:          true,
+			EnableCaption:      true,
+			ImageAttrsEnabled:  eff.ImageAttrsEnabled,
+			ImageVectorEnabled: &eff.ImageVectorEnabled,
+			ImageActions:       eff.ImageActions,
+			Language:           lang,
+			ImageSourceType:    metadata["image_source_type"],
+			Attempt:            attempt,
+			ImageIndex:         idx,
+			SourceLocators:     img.SourceLocators,
 		}
 
 		langfuse.InjectTracing(ctx, &payload)

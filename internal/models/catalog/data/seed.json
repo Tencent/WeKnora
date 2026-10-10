@@ -593,6 +593,18 @@
         "source": "https://help.aliyun.com/zh/model-studio/multimodal-embedding-api-reference"
       },
       {
+        "id": "tongyi-embedding-vision-flash",
+        "name": "tongyi-embedding-vision-flash",
+        "type": "Embedding",
+        "input": [
+          "text",
+          "image",
+          "video"
+        ],
+        "dimension": 768,
+        "source": "https://help.aliyun.com/zh/model-studio/multimodal-embedding-api-reference"
+      },
+      {
         "name": "tongyi-embedding-vision-flash (fixed 768 dimensions)",
         "match": "tongyi-embedding-vision-flash",
         "type": "Embedding",
@@ -615,6 +627,18 @@
         "source": "https://help.aliyun.com/zh/model-studio/multimodal-embedding-api-reference"
       },
       {
+        "id": "qwen3-vl-embedding",
+        "name": "qwen3-vl-embedding",
+        "type": "Embedding",
+        "input": [
+          "text",
+          "image",
+          "video"
+        ],
+        "dimension": 2560,
+        "source": "https://help.aliyun.com/zh/model-studio/multimodal-embedding-api-reference"
+      },
+      {
         "name": "qwen3-vl-embedding (independent vectors by default)",
         "match": "qwen3-vl-embedding*",
         "type": "Embedding",
@@ -626,6 +650,18 @@
         "source": "https://help.aliyun.com/zh/model-studio/multimodal-embedding-api-reference"
       },
       {
+        "id": "qwen2.5-vl-embedding",
+        "name": "qwen2.5-vl-embedding",
+        "type": "Embedding",
+        "input": [
+          "text",
+          "image",
+          "video"
+        ],
+        "dimension": 1024,
+        "source": "https://help.aliyun.com/zh/model-studio/multimodal-embedding-api-reference"
+      },
+      {
         "name": "qwen2.5-vl-embedding (fused vectors only)",
         "match": "qwen2.5-vl-embedding*",
         "type": "Embedding",
@@ -634,6 +670,18 @@
           "image",
           "video"
         ],
+        "source": "https://help.aliyun.com/zh/model-studio/multimodal-embedding-api-reference"
+      },
+      {
+        "id": "multimodal-embedding-v1",
+        "name": "multimodal-embedding-v1",
+        "type": "Embedding",
+        "input": [
+          "text",
+          "image",
+          "video"
+        ],
+        "dimension": 1024,
         "source": "https://help.aliyun.com/zh/model-studio/multimodal-embedding-api-reference"
       },
       {
@@ -1342,6 +1390,16 @@
         "match": "o4*",
         "reasoning": true,
         "source": "https://platform.openai.com/docs/guides/reasoning"
+      },
+      {
+        "name": "Qwen3-VL-Embedding (self-hosted)",
+        "match": "*qwen3-vl-embedding*",
+        "type": "Embedding",
+        "input": [
+          "text",
+          "image"
+        ],
+        "source": "https://huggingface.co/Qwen/Qwen3-VL-Embedding-8B"
       }
     ],
     "gpustack": [],
@@ -1577,6 +1635,10 @@
         "id": "jina-reranker-m0",
         "name": "Jina Reranker m0 (multimodal)",
         "type": "Rerank",
+        "input": [
+          "text",
+          "image"
+        ],
         "context_window": 10000,
         "source": "https://jina.ai/reranker/"
       },
@@ -2662,6 +2724,10 @@
         "id": "nvidia/llama-nemotron-rerank-vl-1b-v2",
         "name": "Llama Nemotron Rerank VL 1B v2",
         "type": "Rerank",
+        "input": [
+          "text",
+          "image"
+        ],
         "source": "https://build.nvidia.com"
       },
       {

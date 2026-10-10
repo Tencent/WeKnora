@@ -116,8 +116,9 @@ func (p *MetasoProvider) Search(ctx context.Context, query string, maxResults in
 	if err := json.Unmarshal(respBody, &response); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal Metaso response: %w", err)
 	}
-	results := make([]*types.WebSearchResult, 0, len(response.Webpages))
-	for _, item := range response.Webpages {
+	items, arrayName := response.itemsForScope(p.scope)
+	results := make([]*types.WebSearchResult, 0, len(items))
+	for _, item := range items {
 		if strings.TrimSpace(item.Title) == "" && strings.TrimSpace(item.Link) == "" {
 			continue
 		}
@@ -136,7 +137,8 @@ func (p *MetasoProvider) Search(ctx context.Context, query string, maxResults in
 			break
 		}
 	}
-	logger.Infof(ctx, "[WebSearch][Metaso] returned %d results", len(results))
+	logger.Infof(ctx, "[WebSearch][Metaso] scope=%s array=%s returned=%d",
+		p.scope, arrayName, len(results))
 	return results, nil
 }
 
@@ -194,7 +196,30 @@ type metasoSearchRequest struct {
 }
 
 type metasoSearchResponse struct {
-	Webpages []metasoWebpage `json:"webpages"`
+	Webpages  []metasoWebpage `json:"webpages"`
+	Documents []metasoWebpage `json:"documents"`
+	Scholars  []metasoWebpage `json:"scholars"`
+	Podcasts  []metasoWebpage `json:"podcasts"`
+	Videos    []metasoWebpage `json:"videos"`
+	Images    []metasoWebpage `json:"images"`
+}
+
+func (r metasoSearchResponse) itemsForScope(scope string) ([]metasoWebpage, string) {
+	switch scope {
+	case "document":
+		return r.Documents, "documents"
+	case "scholar":
+		return r.Scholars, "scholars"
+	case "podcast":
+		return r.Podcasts, "podcasts"
+	case "video":
+		return r.Videos, "videos"
+	case "image":
+		return r.Images, "images"
+	case "webpage":
+		return r.Webpages, "webpages"
+	}
+	return nil, "webpages"
 }
 
 type metasoWebpage struct {
