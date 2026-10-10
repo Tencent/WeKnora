@@ -118,9 +118,21 @@ func (smartOcrPipeline) Run(ctx context.Context, r *runContext) error {
 	r.out["attr_policy"] = types.JSONMap{"ocr": want}
 	r.out["image_attrs"] = r.imageInfo.Attrs.Attrs
 	if !want {
-		logger.Infof(ctx, "[ImageMultimodal] Skipping OCR for %s (attrs=%v)",
-			r.payload.ImageURL, r.imageInfo.Attrs.Attrs)
-		r.out["ocr_skipped"] = "attr_policy"
+		// WHY the policy said no: a failed observation left no attributes to
+		// decide on (the OnUnobserved clause declined), which is a different
+		// story from attributes that were observed and voted against OCR. The
+		// trace keeps the two apart instead of a generic "attr_policy" that
+		// reads as if a decision was made on data nobody produced.
+		observationFailed := r.out["observation_failed"] == true || r.out["caption_error"] != nil
+		if observationFailed {
+			logger.Infof(ctx, "[ImageMultimodal] Skipping OCR for %s (observation failed, attrs=%v)",
+				r.payload.ImageURL, r.imageInfo.Attrs.Attrs)
+			r.out["ocr_skipped"] = "no_ocr_after_observation_failed"
+		} else {
+			logger.Infof(ctx, "[ImageMultimodal] Skipping OCR for %s (attrs=%v)",
+				r.payload.ImageURL, r.imageInfo.Attrs.Attrs)
+			r.out["ocr_skipped"] = "attr_policy"
+		}
 		return nil
 	}
 	return r.execute(ctx, types.ImageActionOCR)

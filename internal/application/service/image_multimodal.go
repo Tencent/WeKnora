@@ -423,6 +423,10 @@ func (s *ImageMultimodalService) processImage(
 		out["skipped"] = "no_extracted_content"
 		if out["ocr_status"] == "failed" {
 			out["skipped"] = "ocr_failed"
+		} else if out["ocr_skipped"] == "no_ocr_after_observation_failed" {
+			// The image produced nothing because the observation round never
+			// came back — not because the image genuinely carried no content.
+			out["skipped"] = "observation_failed"
 		}
 		return nil
 	}

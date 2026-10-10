@@ -390,6 +390,10 @@ func runObservationCaptionAction(ctx context.Context, r *runContext) error {
 	if err != nil {
 		logger.Warnf(ctx, "[ImageMultimodal] Describe and observe failed for %s: %v", r.payload.ImageURL, err)
 		r.out["caption_error"] = err.Error()
+		// The request itself failed: no attributes will ever arrive. Flag it so
+		// the pipeline's OCR decision can tell "observed and declined" from
+		// "no observation to decide on".
+		r.out["observation_failed"] = true
 		resolve(true)
 		return nil
 	}
