@@ -709,6 +709,7 @@
 </template>
 
 <script setup lang="ts">
+import { isKnowledgeBaseReady as isInitialized } from '@/utils/knowledgeBaseReady';
 import { onMounted, onUnmounted, ref, computed, watch, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { MessagePlugin, Icon as TIcon } from 'tdesign-vue-next'
@@ -1410,7 +1411,7 @@ const agentKbStrategyText = (mode: string) => {
 // 从右侧面板进入知识库
 const goToSharedKbFromPanel = () => {
   if (currentSharedKbForDetail.value) {
-    router.push(`/platform/knowledge-bases/${currentSharedKbForDetail.value.knowledge_base.id}`)
+    goDetail(currentSharedKbForDetail.value.knowledge_base.id)
     closeSharedDetailPanel()
   }
 }
@@ -1441,16 +1442,6 @@ const requestDelete = (kb: KB) => {
   })
 }
 
-const isInitialized = (kb: KB) => {
-  // LLM (summary) model is always required
-  if (!kb.summary_model_id || kb.summary_model_id === '') return false
-  // Embedding model only required when RAG indexing is enabled (vector or keyword)
-  const strategy = (kb as any).indexing_strategy
-  const needsEmbedding = !strategy || strategy.vector_enabled || strategy.keyword_enabled
-  if (needsEmbedding && (!kb.embedding_model_id || kb.embedding_model_id === '')) return false
-  return true
-}
-
 const isWikiKb = (kb: unknown) =>
   !!(kb as { indexing_strategy?: { wiki_enabled?: boolean } } | null | undefined)?.indexing_strategy?.wiki_enabled
 
@@ -1478,10 +1469,11 @@ const toggleFavoriteKb = (kbId: string, evt?: Event) => {
 const isKbFavorited = (kbId: string) => pins.isFavorite('kb', kbId)
 
 const goDetail = async (id: string) => {
-  openingKnowledgeBase.value = true
+  const timer = setTimeout(() => { openingKnowledgeBase.value = true }, 180)
   try {
     await router.push(`/platform/knowledge-bases/${id}`)
   } finally {
+    clearTimeout(timer)
     openingKnowledgeBase.value = false
   }
 }
