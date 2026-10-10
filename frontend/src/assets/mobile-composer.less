@@ -4,14 +4,12 @@
 :root body .dialogue-wrap { min-width: 0; width: 100%; }
 :root body .dialogue-title { font-size: var(--app-text-4xl); padding: 16px; }
 :root body .dialogue-answers { padding-left: 12px; padding-right: 12px; }
-:root body .suggested-questions-grid { grid-template-columns: 1fr; }
 :root body .input-field, :root body .input-container { max-width: 100%; min-width: 0; }
 :root body .control-bar { flex-wrap: wrap; gap: 4px; }
 :root body .control-bar .mobile-composer-more { display: inline-flex; }
 :root body .control-bar .control-left { display: none; }
 :root body .control-bar .control-btn { min-width: 44px; min-height: 44px; }
 :root body .control-bar .model-selector-trigger { min-height: 44px; max-width: 100%; }
-:root body .control-bar .control-right { margin-left: auto; }
 :root body .control-bar .model-selector-name { max-width: 120px; }
 :root body .control-bar .model-selector-ctx { display: none; }
 :root body .chat .markdown-content pre { max-width: 100%; overflow-x: auto; }
@@ -40,7 +38,7 @@
 :root body .control-bar .control-right { margin-left: 0; flex-shrink: 0; }
 :root body .control-bar .send-btn, :root body .control-bar .stop-btn { width: 44px; height: 44px; padding: 0; border-radius: 50%; }
 :root body .control-bar.mobile-tools-open .control-left {
-    order: 10; flex: 1 0 100%; width: 100%; max-height: min(160px, 28dvh); overflow-y: auto;
+    display: flex; flex-wrap: wrap; order: 10; flex: 1 0 100%; width: 100%; max-height: min(160px, 28dvh); overflow-y: auto;
     padding: 8px 0 0; border-bottom: 0; border-top: 1px solid var(--td-component-stroke);
     gap: 6px; animation: composer-tools-reveal var(--app-motion-base) cubic-bezier(0.16, 1, 0.3, 1);
   }
@@ -50,7 +48,6 @@
 }
 @media (max-width: 767px) {
 :root body .suggested-questions-container { height: auto !important; padding: 0 0 12px; }
-:root body .suggested-question-card {  }
 :root body .suggested-questions-refresh { width: 44px; height: 44px; }
 }
 @media (max-width: 767px) {

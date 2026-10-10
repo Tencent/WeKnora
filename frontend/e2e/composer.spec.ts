@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test'
 import { mockApp, fitsViewport } from './fixtures'
-test.use({ hasTouch: true })
+// Phone projects use isMobile:true; desktop cases run in a separate project.
 
 test('mobile composer expands tools and keeps draft after viewport change', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
@@ -29,7 +29,7 @@ test('landscape and enlarged text keep navigation and composer reachable', async
 })
 
 
-test('desktop composer keeps tools visible without a mobile toggle', async ({ page }) => {
+test('@desktop desktop composer keeps tools visible without a mobile toggle', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
   await mockApp(page)
   await page.goto('/platform/creatChat')
@@ -54,11 +54,15 @@ test('history renders long code and references without widening the phone', asyn
   await expect(page.locator('.chat-references-panel')).toContainText('庄子集释')
   await page.locator('.chat-references-panel__close').click()
   await fitsViewport(page)
+  const input = page.locator('[data-guide="chat-input"] textarea')
+  await input.fill('继续解释郭象')
+  await page.setViewportSize({ width: 390, height: 420 })
+  await expect(input).toHaveValue('继续解释郭象')
   await expect(page.locator('[data-guide="chat-send"]')).toBeInViewport()
 })
 
 for (const width of [360, 390, 430]) {
-  test(`composer grows for typing and contracts when empty at ${width}px`, async ({ page }) => {
+  test(`composer grows for typing and contracts when empty at ${width}px${width === 1440 ? ' @desktop' : ''}`, async ({ page }) => {
     await page.setViewportSize({ width, height: 844 })
     await mockApp(page)
     await page.goto('/platform/creatChat')
