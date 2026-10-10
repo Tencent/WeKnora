@@ -73,13 +73,13 @@ func TestAIMDRecovery(t *testing.T) {
 		t.Errorf("consecSuccess should reset after a recovery step, got %d", got)
 	}
 	// Recover all the way back to the configured limit and confirm available flips true.
-	for rt.effectiveLimit.Load() < int64(rt.configuredLimit) {
+	for rt.effectiveLimit.Load() < rt.configuredLimit.Load() {
 		for i := 0; i < recoveryThreshold; i++ {
 			rt.onSuccess(10, time.Second)
 		}
 	}
-	if got := rt.effectiveLimit.Load(); got != int64(rt.configuredLimit) {
-		t.Errorf("effectiveLimit = %d, want %d", got, rt.configuredLimit)
+	if got := rt.effectiveLimit.Load(); got != rt.configuredLimit.Load() {
+		t.Errorf("effectiveLimit = %d, want %d", got, rt.configuredLimit.Load())
 	}
 	if !rt.available.Load() {
 		t.Error("available should be true once back at the configured limit")

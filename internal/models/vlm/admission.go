@@ -126,8 +126,12 @@ type (
 type modelRuntime struct {
 	modelID string
 
-	configuredLimit int
-	configuredRPM   int
+	// configuredLimit / configuredRPM are the model's own caps (0 → default 32
+	// / unlimited). They are atomics because they are written on the request
+	// path (refreshConfig) and read on result-handler goroutines, so a plain
+	// int would race.
+	configuredLimit atomic.Int64
+	configuredRPM   atomic.Int64
 
 	// Adaptive (atomic — written by result handlers, read by the loop).
 	effectiveLimit atomic.Int64
@@ -181,17 +185,17 @@ func newModelRuntime(modelID string, configuredLimit, configuredRPM int) *modelR
 		configuredRPM = 0
 	}
 	rt := &modelRuntime{
-		modelID:         modelID,
-		configuredLimit: configuredLimit,
-		configuredRPM:   configuredRPM,
-		admitCh:         make(chan *waiter, 64),
-		releaseCh:       make(chan releaseMsg, 256),
-		cancelCh:        make(chan cancelMsg, 64),
-		stopCh:          make(chan struct{}),
-		rpmTokens:       float64(configuredRPM),
-		rpmLast:         time.Now(),
-		perCaller:       make(map[types.CallerType]*callerStats),
+		modelID:   modelID,
+		admitCh:   make(chan *waiter, 64),
+		releaseCh: make(chan releaseMsg, 256),
+		cancelCh:  make(chan cancelMsg, 64),
+		stopCh:    make(chan struct{}),
+		rpmTokens: float64(configuredRPM),
+		rpmLast:   time.Now(),
+		perCaller: make(map[types.CallerType]*callerStats),
 	}
+	rt.configuredLimit.Store(int64(configuredLimit))
+	rt.configuredRPM.Store(int64(configuredRPM))
 	rt.effectiveLimit.Store(int64(configuredLimit))
 	rt.effectiveRPM.Store(int64(configuredRPM))
 	rt.available.Store(true)
@@ -498,15 +502,15 @@ func (rt *modelRuntime) onSuccess(tokens int, genDur time.Duration) {
 	}
 	if rt.consecSuccess.Load() >= recoveryThreshold {
 		cur := rt.effectiveLimit.Load()
-		if cur < int64(rt.configuredLimit) {
+		if cur < rt.configuredLimit.Load() {
 			rt.effectiveLimit.Store(cur + 1)
 		}
-		if rt.effectiveRPM.Load() < int64(rt.configuredRPM) {
+		if rt.effectiveRPM.Load() < rt.configuredRPM.Load() {
 			rt.effectiveRPM.Add(1)
 		}
 		rt.consecSuccess.Store(0)
 	}
-	if !rt.available.Load() && rt.effectiveLimit.Load() >= int64(rt.configuredLimit) {
+	if !rt.available.Load() && rt.effectiveLimit.Load() >= rt.configuredLimit.Load() {
 		rt.available.Store(true)
 	}
 }
@@ -521,14 +525,14 @@ func (rt *modelRuntime) scaleLimit(factor float64) {
 	if next < 1 {
 		next = 1
 	}
-	if next > int64(rt.configuredLimit) {
-		next = int64(rt.configuredLimit)
+	if next > rt.configuredLimit.Load() {
+		next = rt.configuredLimit.Load()
 	}
 	rt.effectiveLimit.Store(next)
 }
 
 func (rt *modelRuntime) scaleRPM(factor float64) {
-	if rt.configuredRPM <= 0 {
+	if rt.configuredRPM.Load() <= 0 {
 		return
 	}
 	cur := rt.effectiveRPM.Load()
@@ -536,8 +540,8 @@ func (rt *modelRuntime) scaleRPM(factor float64) {
 	if next < 1 {
 		next = 1
 	}
-	if next > int64(rt.configuredRPM) {
-		next = int64(rt.configuredRPM)
+	if next > rt.configuredRPM.Load() {
+		next = rt.configuredRPM.Load()
 	}
 	rt.effectiveRPM.Store(next)
 }
@@ -709,9 +713,9 @@ func (rt *modelRuntime) Snapshot() RuntimeStat {
 	}
 	return RuntimeStat{
 		ModelID:              rt.modelID,
-		ConfiguredLimit:      rt.configuredLimit,
+		ConfiguredLimit:      int(rt.configuredLimit.Load()),
 		EffectiveLimit:       int(rt.effectiveLimit.Load()),
-		ConfiguredRPM:        rt.configuredRPM,
+		ConfiguredRPM:        int(rt.configuredRPM.Load()),
 		EffectiveRPM:         int(rt.effectiveRPM.Load()),
 		Available:            rt.available.Load(),
 		CooldownRemainingSec: int(cd),
@@ -744,18 +748,70 @@ type vlmRegistry struct {
 
 var defaultRegistry = &vlmRegistry{runtimes: make(map[string]*modelRuntime)}
 
-// runtimeFor returns the shared per-model runtime, creating it on first use.
-// configuredLimit / configuredRPM are the model's own caps (0 → default 32 /
-// unlimited); they are only applied at creation, so the adaptive state of an
-// existing runtime is never clobbered by a later call.
+// refreshConfig reconciles the runtime's configured caps with the latest values
+// supplied by the caller. modelRuntime is a per-model singleton created once and
+// cached for the process lifetime — its admission / circuit-breaker / adaptive
+// state MUST persist across requests — but the model's MaxConcurrency /
+// RequestsPerMinute can be changed from the admin UI at any time. Because
+// GetVLMModel rebuilds the outer manager with the fresh DB config on every call,
+// the value passed into runtimeFor is always current, so we lazily adopt it here
+// on the request path instead of requiring an app restart or a polling
+// goroutine. Only a genuine change triggers any mutation; the common case (no
+// change) is a single atomic compare.
+//
+// Reconciling effectiveLimit:
+//   - capacity increased: raise the ceiling immediately to the new configured
+//     limit. Any prior adaptive downscaling was tied to the old (smaller) cap and
+//     must not persist; the scheduler loop grants new permits up to the new limit
+//     on its next iteration. A stuck "unavailable" cooldown is also cleared so
+//     the raised limit is actually usable.
+//   - capacity decreased: clamp effectiveLimit down to the new limit so the loop
+//     stops over-admitting. In-flight permits above the new cap drain naturally
+//     as requests complete; no in-flight request is preempted.
+func (rt *modelRuntime) refreshConfig(desiredLimit, desiredRPM int) {
+	if desiredLimit <= 0 {
+		desiredLimit = defaultVLMMaxConcurrency
+	}
+	if desiredRPM < 0 {
+		desiredRPM = 0
+	}
+	if desiredLimit == int(rt.configuredLimit.Load()) && desiredRPM == int(rt.configuredRPM.Load()) {
+		return
+	}
+	rt.configuredLimit.Store(int64(desiredLimit))
+	rt.configuredRPM.Store(int64(desiredRPM))
+
+	curEff := rt.effectiveLimit.Load()
+	switch {
+	case int64(desiredLimit) > curEff:
+		rt.effectiveLimit.Store(int64(desiredLimit))
+		if !rt.available.Load() {
+			rt.available.Store(true)
+		}
+	case int64(desiredLimit) < curEff:
+		rt.effectiveLimit.Store(int64(desiredLimit))
+	}
+	if desiredRPM > 0 {
+		if rt.effectiveRPM.Load() != int64(desiredRPM) {
+			rt.effectiveRPM.Store(int64(desiredRPM))
+		}
+	}
+}
+
+// runtimeFor returns the shared per-model runtime, creating it on first use and
+// then lazily reconciling its configured caps with the values supplied by the
+// caller (see refreshConfig). The values come from the freshly-built outer
+// manager, so a model-concurrency change made in the admin UI takes effect on
+// the next VLM request without an app restart.
 func (reg *vlmRegistry) runtimeFor(modelID string, configuredLimit, configuredRPM int) *modelRuntime {
 	reg.mu.Lock()
-	defer reg.mu.Unlock()
 	rt, ok := reg.runtimes[modelID]
 	if !ok {
 		rt = newModelRuntime(modelID, configuredLimit, configuredRPM)
 		reg.runtimes[modelID] = rt
 	}
+	reg.mu.Unlock()
+	rt.refreshConfig(configuredLimit, configuredRPM)
 	return rt
 }
 
