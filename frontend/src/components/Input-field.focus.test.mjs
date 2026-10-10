@@ -56,6 +56,7 @@ test('teardown blurs the active textarea before it is detached', () => {
   let teardown, blurred = false
   const textarea = { isConnected: true, blur: () => { blurred = true } }
   vm.runInNewContext(code, {
+    props: { preserveDraftUntilNavigation: false },
     onBeforeUnmount: fn => { teardown = fn }, getTextareaEl: () => textarea,
     document: { activeElement: textarea },
   })
@@ -78,4 +79,24 @@ test('new-session focus survives consumption of the first query and runs on chil
   assert.equal(focused, false)
   mounted()
   assert.equal(focused, true)
+})
+
+test('preserved previews are released on navigation without deleting the sent File', () => {
+  const teardownCode = source.slice(source.indexOf('onBeforeUnmount(() =>'), source.indexOf('onUnmounted(() =>'))
+  const cleanupCode = source.slice(source.indexOf('const clearPendingUploads ='), source.indexOf('const steerShortcutLabel'))
+  const file = { name: 'photo.png' }, images = { value: [{ file, preview: 'blob:test' }] }, attachments = { value: [{}] }
+  const revoked = []
+  let teardown, cleared = 0
+  vm.runInNewContext(ts.transpile(`${teardownCode}
+${cleanupCode}`), {
+    onBeforeUnmount: fn => { teardown = fn }, getTextareaEl: () => null, document: {},
+    props: { preserveDraftUntilNavigation: true }, uploadedImages: images, uploadedAttachments: attachments,
+    URL: { revokeObjectURL: url => revoked.push(url) }, attachmentUploadRef: { value: { clear: () => cleared++ } },
+  })
+  teardown()
+  assert.deepEqual(revoked, ['blob:test'])
+  assert.equal(images.value.length, 0)
+  assert.equal(attachments.value.length, 0)
+  assert.equal(cleared, 1)
+  assert.equal(file.name, 'photo.png')
 })

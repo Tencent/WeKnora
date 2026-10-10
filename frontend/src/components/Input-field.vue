@@ -1958,6 +1958,7 @@ onBeforeUnmount(() => {
   // Let TDesign handle blur while its textarea is still attached to the DOM.
   const textarea = getTextareaEl();
   if (textarea?.isConnected && document.activeElement === textarea) textarea.blur();
+  if (props.preserveDraftUntilNavigation) clearPendingUploads();
 });
 
 onUnmounted(() => {

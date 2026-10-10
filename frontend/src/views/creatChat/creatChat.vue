@@ -63,7 +63,7 @@
                 </div>
                 <p v-if="creationError" class="composer-submission-error" role="alert">{{ $t(createdSessionId ? 'createChat.messages.navigationError' : 'createChat.messages.createError') }}</p>
                 <t-button v-if="creationError && createdSessionId" variant="outline" @click="retryNavigation">{{ $t('common.retry') }}</t-button>
-                <InputField ref="inputFieldRef" :composer-locked="creatingSession || !!createdSessionId" preserve-draft-until-navigation @send-msg="sendMsg"></InputField>
+                <InputField ref="inputFieldRef" :inert="creatingSession || !!createdSessionId" :composer-locked="creatingSession || !!createdSessionId" preserve-draft-until-navigation @send-msg="sendMsg"></InputField>
             </div>
         </div>
     </div>
