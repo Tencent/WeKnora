@@ -144,9 +144,7 @@ helm install weknora ./helm \
 
 ### Service names
 
-Service names keep their historical defaults independently of the Helm release name.
-Use the optional overrides below to preserve existing names or deploy separate
-releases into one namespace:
+Optional Service name overrides preserve the following defaults:
 
 | Parameter | Default when omitted or empty |
 |-----------|-------------------------------|
@@ -160,47 +158,26 @@ releases into one namespace:
 For example, save this as `service-names.yaml`:
 
 ```yaml
-app:
-  service:
-    name: weknora-app
-frontend:
-  service:
-    name: weknora-frontend
-postgresql:
-  service:
-    name: weknora-postgres
-redis:
-  service:
-    name: weknora-redis
-docreader:
-  service:
-    name: weknora-docreader
-neo4j:
-  service:
-    name: weknora-neo4j
+app:        {service: {name: weknora-app}}
+frontend:   {service: {name: weknora-frontend}}
+postgresql: {service: {name: weknora-postgres}}
+redis:      {service: {name: weknora-redis}}
+docreader:  {service: {name: weknora-docreader}}
+neo4j:      {service: {name: weknora-neo4j}}
 ```
 
-Pass `-f service-names.yaml` alongside your other installation values. Names must
-be valid Kubernetes Service names and unique within the namespace. The chart uses
-them consistently in Service resources, backend connection addresses, the
-frontend's default `APP_HOST`, Ingress backends and the port-forward command in
-installation notes. An explicit `frontend.appHost` still takes precedence;
-`frontend.appPort` and `app.extraEnv` continue to work as before. Changing a Service
-name does not change a workload's labels, selectors, ports or PVC names.
+Pass `-f service-names.yaml` alongside your other values. Names must be valid
+Kubernetes Service names. Services, backend addresses, Ingress and installation
+notes use these names consistently. Frontend's `APP_HOST` follows the App Service
+unless `frontend.appHost` is explicitly set.
 
-For two releases in one namespace, give each release distinct Service names
-(for example, `alpha-app` and `beta-app`, and the same pattern for every enabled
-component). Keeping the defaults for both releases still causes name collisions.
-Use distinct Ingress hosts and independently managed credentials/storage as
-appropriate for each installation.
+For multiple releases in one namespace, use distinct names for every enabled
+Service (for example, `alpha-app` and `beta-app`). Defaults are not release-prefixed
+and still collide. Configure separate Ingress hosts when needed.
 
-Existing installations with no overrides keep the same Service names on upgrade.
-Adding an override to an installed release intentionally renames that Service;
-plan the DNS/consumer cutover and Helm resource ownership before doing so.
-Matching the name of a pre-existing Service does not automatically transfer its
-ownership to Helm. When a bundled component is disabled, its configured name can
-refer to a Service supplied separately in the same namespace; the chart does not
-create that Service.
+Omitted or empty overrides preserve Service names on upgrade. Changing a name on
+an existing installation requires a DNS/consumer cutover plan; matching a
+pre-existing Service name does not automatically transfer its ownership to Helm.
 
 ### Global Parameters
 
