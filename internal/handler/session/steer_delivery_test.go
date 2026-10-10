@@ -98,7 +98,7 @@ func TestPollSteerSkipsAfterDeliveryAndAdvancesOffset(t *testing.T) {
 		steerEvent("c", "inject-c", nil, "web"),
 	}))
 
-	sink := newSteerSink(ctx, "sess", "req", &types.Message{ID: "assist"}, nil, mgr)
+	sink := newSteerSink(ctx, "sess", "req", &types.Message{ID: "assist"}, &steerPersistingMessageStub{}, mgr)
 	events, next, err := sink.PollSteer(ctx, "sess", "assist", 0)
 	require.NoError(t, err)
 	require.Len(t, events, 2)
@@ -106,6 +106,16 @@ func TestPollSteerSkipsAfterDeliveryAndAdvancesOffset(t *testing.T) {
 	assert.Equal(t, "c", events[1]["id"])
 	assert.Equal(t, 3, next)
 	assert.Equal(t, 3, sink.DrainedOffset())
+
+	repolled, _, err := sink.PollSteer(ctx, "sess", "assist", next)
+	require.NoError(t, err)
+	assert.Equal(t, events, repolled, "polling must leave unpersisted items available for retry")
+	assert.Empty(t, sink.InjectedIDs(), "polling alone must not hide items from follow-up handoff")
+	for _, evt := range events {
+		require.NotEmpty(t, sink.PersistSteerMessage(ctx, "sess", "assist",
+			getString(evt, "id"), getString(evt, "content"), nil, "web"))
+	}
+	assert.Len(t, sink.InjectedIDs(), len(events))
 
 	events, next, err = sink.PollSteer(ctx, "sess", "assist", next)
 	require.NoError(t, err)
@@ -314,6 +324,37 @@ func TestPersistSteerMessageRollsBackRowWhenConsumeFails(t *testing.T) {
 		&steerUpdateFailingManager{StreamManager: inner})
 	assert.Empty(t, sink.PersistSteerMessage(ctx, "sess", "assist", "a", "do it now", nil, "web"))
 	assert.Empty(t, msgs.byID, "failed consume must delete the user row so a retry cannot duplicate it")
+}
+
+func TestPersistSteerMessageDropsAfterRepeatedInsertFailures(t *testing.T) {
+	mgr := stream.NewMemoryStreamManager()
+	ctx := context.Background()
+	require.NoError(t, mgr.AppendSteerEvents(ctx, "sess", "assist", []interfaces.StreamEvent{
+		steerEventWithDelivery("a", "unwritable", steerDeliveryInject),
+		steerEventWithDelivery("b", "next", steerDeliveryInject),
+	}))
+	sink := newSteerSink(ctx, "sess", "req", &types.Message{ID: "assist"}, &steerFailingCreateStub{}, mgr)
+
+	for i := 1; i < maxSteerPersistAttempts; i++ {
+		require.Empty(t, sink.PersistSteerMessage(ctx, "sess", "assist", "a", "unwritable", nil, "web"))
+		events, _, err := sink.PollSteer(ctx, "sess", "assist", 0)
+		require.NoError(t, err)
+		require.Len(t, events, 2, "a failure below the bound keeps the event at the head of the queue")
+	}
+
+	require.Empty(t, sink.PersistSteerMessage(ctx, "sess", "assist", "a", "unwritable", nil, "web"))
+	events, _, err := sink.PollSteer(ctx, "sess", "assist", 0)
+	require.NoError(t, err)
+	require.Len(t, events, 1)
+	assert.Equal(t, "b", events[0]["id"], "later messages proceed once the head is retired")
+
+	all, _, err := mgr.GetSteerEvents(ctx, "sess", "assist", 0)
+	require.NoError(t, err)
+	assert.True(t, steerEventConsumed(all[0]))
+	assert.Equal(t, true, all[0].Data[steerDataDropped])
+	backlog := selectSteerBacklog(all, sink.InjectedIDs())
+	require.Len(t, backlog, 1, "a dropped event must not become the follow-up query")
+	assert.Equal(t, "b", backlog[0].ID)
 }
 
 func TestPersistSteerMessageIsIdempotentAfterConsume(t *testing.T) {
