@@ -2,6 +2,7 @@ package chatpipeline
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -186,15 +187,16 @@ func TestStreamReportsEmptyLengthTruncation(t *testing.T) {
 		func() *PluginError { return nil },
 	))
 
-	want := event.AgentFinalAnswerData{
-		Content:   EmptyTruncatedAnswerFallback,
-		Done:      true,
-		Truncated: true,
+	// The fallback text streams out as a content event; the Done marker waits
+	// for the channel to close so it can carry the closing chunk's usage.
+	want := []event.AgentFinalAnswerData{
+		{Content: EmptyTruncatedAnswerFallback, Truncated: true},
+		{Done: true, Truncated: true},
 	}
 	require.Eventually(t, func() bool {
-		return len(bus.finalAnswerEvents()) == 1
+		return len(bus.finalAnswerEvents()) == len(want)
 	}, 2*time.Second, 5*time.Millisecond)
-	require.Equal(t, []event.AgentFinalAnswerData{want}, bus.finalAnswerEvents())
+	require.Equal(t, want, bus.finalAnswerEvents())
 }
 
 func TestStreamMarksPartialLengthTruncation(t *testing.T) {
@@ -216,17 +218,84 @@ func TestStreamMarksPartialLengthTruncation(t *testing.T) {
 			))
 
 			require.Eventually(t, func() bool {
-				return len(bus.finalAnswerEvents()) == 2
+				return len(bus.finalAnswerEvents()) >= 2
 			}, 2*time.Second, 5*time.Millisecond)
 			events := bus.finalAnswerEvents()
-			require.Equal(t, "partial answer", events[0].Content+events[1].Content)
-			require.False(t, events[0].Done)
-			require.False(t, events[0].Truncated)
-			require.True(t, events[1].Done)
-			require.True(t, events[1].Truncated)
-			require.NotContains(t, events[1].Content, EmptyTruncatedAnswerFallback)
+			var delivered strings.Builder
+			for _, e := range events[:len(events)-1] {
+				delivered.WriteString(e.Content)
+				require.False(t, e.Done)
+			}
+			last := events[len(events)-1]
+			require.True(t, last.Done)
+			require.True(t, last.Truncated)
+			require.NotContains(t, last.Content, EmptyTruncatedAnswerFallback)
+			require.Equal(t, "partial answer", delivered.String())
 		})
 	}
+}
+
+// TestStreamCarriesUsageOnDoneMarker verifies the fix for #3865: providers
+// report usage on the stream's closing chunk, after finish_reason, so the
+// Done marker must wait for the channel close and carry that usage out.
+func TestStreamCarriesUsageOnDoneMarker(t *testing.T) {
+	usage := &types.TokenUsage{PromptTokens: 21203, CompletionTokens: 27, TotalTokens: 21230}
+	bus := &syncEventBus{}
+	model := &openStreamChat{closeStream: true, chunks: []types.StreamResponse{
+		{ResponseType: types.ResponseTypeAnswer, Content: "DONE"},
+		// finish_reason first…
+		{ResponseType: types.ResponseTypeAnswer, Done: true, FinishReason: "stop"},
+		// …then the EOF sentinel carrying usage, mirroring StreamAssembler.End.
+		{ResponseType: types.ResponseTypeAnswer, Done: true, FinishReason: "stop", Usage: usage},
+	}}
+
+	chatManage := &types.ChatManage{}
+	chatManage.SessionID = "sess-usage"
+	chatManage.EventBus = bus
+	plugin := &PluginChatCompletionStream{modelService: &stubModelService{model: model}}
+	require.Nil(t, plugin.OnEvent(
+		context.Background(), types.CHAT_COMPLETION_STREAM, chatManage,
+		func() *PluginError { return nil },
+	))
+
+	want := []event.AgentFinalAnswerData{
+		{Content: "DONE"},
+		{Done: true, Usage: usage},
+	}
+	require.Eventually(t, func() bool {
+		return len(bus.finalAnswerEvents()) == len(want)
+	}, 2*time.Second, 5*time.Millisecond)
+	require.Equal(t, want, bus.finalAnswerEvents())
+}
+
+// TestStreamUsageOnFinishChunkAloneStillCarried covers providers that attach
+// usage to the finish_reason chunk itself and close right after: the Done
+// marker is emitted at the channel close either way.
+func TestStreamUsageOnFinishChunkAloneStillCarried(t *testing.T) {
+	usage := &types.TokenUsage{PromptTokens: 5, CompletionTokens: 7, TotalTokens: 12}
+	bus := &syncEventBus{}
+	model := &openStreamChat{closeStream: true, chunks: []types.StreamResponse{
+		{ResponseType: types.ResponseTypeAnswer, Content: "ok"},
+		{ResponseType: types.ResponseTypeAnswer, Done: true, FinishReason: "stop", Usage: usage},
+	}}
+
+	chatManage := &types.ChatManage{}
+	chatManage.SessionID = "sess-usage-inline"
+	chatManage.EventBus = bus
+	plugin := &PluginChatCompletionStream{modelService: &stubModelService{model: model}}
+	require.Nil(t, plugin.OnEvent(
+		context.Background(), types.CHAT_COMPLETION_STREAM, chatManage,
+		func() *PluginError { return nil },
+	))
+
+	want := []event.AgentFinalAnswerData{
+		{Content: "ok"},
+		{Done: true, Usage: usage},
+	}
+	require.Eventually(t, func() bool {
+		return len(bus.finalAnswerEvents()) == len(want)
+	}, 2*time.Second, 5*time.Millisecond)
+	require.Equal(t, want, bus.finalAnswerEvents())
 }
 
 func TestStreamLeavesEmptyNaturalStopUnchanged(t *testing.T) {

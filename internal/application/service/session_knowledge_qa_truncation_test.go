@@ -50,19 +50,28 @@ func TestConsumeFallbackStreamTruncation(t *testing.T) {
 			ch <- types.StreamResponse{ResponseType: types.ResponseTypeAnswer, Done: true}
 			close(ch)
 			(&sessionService{}).consumeFallbackStream(context.Background(), cm, ch, modelcontext.NewRegistry(false))
-			require.Len(t, answers, len(tt.chunks)+1, "ignore reasoning and duplicate EOF")
+			require.GreaterOrEqual(t, len(answers), len(tt.chunks)+1, "ignore reasoning and duplicate EOF")
+			// The Done marker is deferred to the channel close — it carries the
+			// closing chunk's usage — so every content event precedes it.
+			last := len(answers) - 1
+			require.True(t, answers[last].Done, "the deferred Done marker closes the stream")
+			require.Equal(t, tt.truncated, answers[last].Truncated)
 			var delivered strings.Builder
+			var lastContent string
 			for i, answer := range answers {
 				delivered.WriteString(answer.Content)
 				require.True(t, answer.IsFallback)
-				require.Equal(t, i == len(answers)-1, answer.Done)
-				require.Equal(t, i == len(answers)-1 && tt.truncated, answer.Truncated)
+				if i < last {
+					require.False(t, answer.Done)
+					lastContent = answer.Content
+				}
 			}
 			require.NotNil(t, cm.ChatResponse)
 			require.Equal(t, delivered.String(), cm.ChatResponse.Content, "store all emitted chunks")
 			original := strings.Join(tt.chunks, "")
 			if tt.truncated && strings.TrimSpace(original) == "" {
-				require.NotEmpty(t, strings.TrimSpace(answers[len(answers)-1].Content))
+				// The empty-truncation fallback text streamed as the last content event.
+				require.NotEmpty(t, strings.TrimSpace(lastContent))
 			} else {
 				require.Equal(t, original, delivered.String(), "partial and natural-stop answers must be preserved")
 			}
@@ -138,4 +147,35 @@ func TestConsumeFallbackStreamPrematureClose(t *testing.T) {
 	require.Equal(t, event.AgentFinalAnswerData{
 		Content: cm.FallbackResponse, Done: true, IsFallback: true,
 	}, answers[1], "a missing Done marker must keep the existing fixed-fallback behavior")
+}
+
+// TestConsumeFallbackStreamCarriesUsageOnDone verifies the fallback half of
+// #3865: the Done marker is deferred to the channel close so the usage
+// reported on the closing chunk (after finish_reason) rides out with it.
+func TestConsumeFallbackStreamCarriesUsageOnDone(t *testing.T) {
+	usage := &types.TokenUsage{PromptTokens: 10, CompletionTokens: 20, TotalTokens: 30}
+	bus := event.NewEventBus()
+	var answers []event.AgentFinalAnswerData
+	bus.On(event.EventAgentFinalAnswer, func(_ context.Context, evt event.Event) error {
+		answers = append(answers, evt.Data.(event.AgentFinalAnswerData))
+		return nil
+	})
+	cm := &types.ChatManage{}
+	cm.EventBus = bus.AsEventBusInterface()
+	ch := make(chan types.StreamResponse, 3)
+	ch <- types.StreamResponse{ResponseType: types.ResponseTypeAnswer, Content: "fallback text"}
+	ch <- types.StreamResponse{ResponseType: types.ResponseTypeAnswer, Done: true, FinishReason: "stop"}
+	ch <- types.StreamResponse{ResponseType: types.ResponseTypeAnswer, Done: true, Usage: usage}
+	close(ch)
+	(&sessionService{}).consumeFallbackStream(context.Background(), cm, ch, modelcontext.NewRegistry(false))
+
+	require.Len(t, answers, 2)
+	require.Equal(t, "fallback text", answers[0].Content)
+	require.False(t, answers[0].Done)
+	require.True(t, answers[1].Done)
+	require.True(t, answers[1].IsFallback)
+	gotUsage, ok := answers[1].Usage.(*types.TokenUsage)
+	require.True(t, ok, "done marker must carry the turn usage")
+	require.Equal(t, usage, gotUsage)
+	require.NotNil(t, cm.ChatResponse)
 }

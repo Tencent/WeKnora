@@ -717,6 +717,9 @@ type sseStreamContext struct {
 	// mode releases on completion (the pipeline returns before the stream
 	// finishes); agent mode releases when AgentQA returns.
 	releaseTurn func()
+	// startAt anchors the quick-answer TotalDurationMs reported on the
+	// complete event. Agent mode measures inside the engine instead.
+	startAt time.Time
 }
 
 // setupSSEStream sets up the SSE streaming context
@@ -761,6 +764,7 @@ func (h *Handler) setupSSEStream(reqCtx *qaRequestContext, generateTitle bool, m
 		asyncCtx:         asyncCtx,
 		cancel:           cancel,
 		assistantMessage: reqCtx.assistantMessage,
+		startAt:          time.Now(),
 	}
 
 	// Mid-run steering: only ReAct agent turns (qaModeAgent) have an engine
@@ -1367,6 +1371,12 @@ func (h *Handler) executeQA(reqCtx *qaRequestContext, mode qaMode, generateTitle
 			if data.Truncated {
 				markQuickAnswerTruncated(streamCtx.assistantMessage)
 			}
+			// The stream's Done marker carries the turn's token usage
+			// (reported only on the closing chunk); keep it on the message so
+			// the complete event and the persisted row both carry it.
+			if usage, ok := data.Usage.(*types.TokenUsage); ok && usage != nil {
+				streamCtx.assistantMessage.Usage = usage
+			}
 			if data.Done {
 				if completionHandled {
 					return nil
@@ -1882,12 +1892,26 @@ func (h *Handler) completeQuickAnswerTurn(
 	if streamCtx.eventBus != nil {
 		// MessageID is what handleComplete keys on. Leave FinalAnswer empty:
 		// KnowledgeQA already accumulated the answer on the message, and
-		// handleComplete would append FinalAnswer a second time.
+		// handleComplete would append FinalAnswer a second time. Usage was
+		// captured from the stream's Done marker by the final-answer handler,
+		// so handleComplete publishes it on the complete event and persists
+		// it with the message (#3865). A turn whose provider reports no usage
+		// keeps the field nil and the event simply omits it.
+		var turnUsage interface{}
+		if streamCtx.assistantMessage.Usage != nil {
+			turnUsage = streamCtx.assistantMessage.Usage
+		}
+		totalDurationMs := int64(0)
+		if !streamCtx.startAt.IsZero() {
+			totalDurationMs = time.Since(streamCtx.startAt).Milliseconds()
+		}
 		_ = streamCtx.eventBus.Emit(ctx, event.Event{
 			Type:      event.EventAgentComplete,
 			SessionID: streamCtx.assistantMessage.SessionID,
 			Data: event.AgentCompleteData{
-				MessageID: streamCtx.assistantMessage.ID,
+				MessageID:       streamCtx.assistantMessage.ID,
+				Usage:           turnUsage,
+				TotalDurationMs: totalDurationMs,
 			},
 		})
 	}
