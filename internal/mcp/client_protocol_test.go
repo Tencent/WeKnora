@@ -39,11 +39,16 @@ func (*protocolTestTransport) SendNotification(context.Context, sdk.JSONRPCNotif
 	return nil
 }
 
-func newProtocolTestClient(
-	t *testing.T,
-	timeout int,
-	send func(context.Context, transport.JSONRPCRequest) (*transport.JSONRPCResponse, error),
-) *mcpGoClient {
+type protocolTestSend func(context.Context, transport.JSONRPCRequest) (*transport.JSONRPCResponse, error)
+
+func newProtocolTestClient(t *testing.T, timeout int, send protocolTestSend) *mcpGoClient {
+	t.Helper()
+	return newProtocolProbeTestClient(t, timeout, send, send)
+}
+
+// The live connection and the independent re-probe connection get separate
+// mock transports so tests can tell which one a request used.
+func newProtocolProbeTestClient(t *testing.T, timeout int, live, probe protocolTestSend) *mcpGoClient {
 	t.Helper()
 	utils.SetSSRFWhitelistFromRaw("127.0.0.1")
 	t.Cleanup(utils.ResetSSRFWhitelistForTest)
@@ -54,7 +59,16 @@ func newProtocolTestClient(
 	}})
 	require.NoError(t, err)
 	wrapped := c.(*mcpGoClient)
-	wrapped.discovery.HTTPConnection = &protocolTestTransport{send: send}
+	wrapped.discovery.HTTPConnection = &protocolTestTransport{send: live}
+	newProbe := wrapped.newProbe
+	wrapped.newProbe = func() (*mcpGoClient, error) {
+		p, err := newProbe()
+		if err != nil {
+			return nil, err
+		}
+		p.discovery.HTTPConnection = &protocolTestTransport{send: probe}
+		return p, nil
+	}
 	require.NoError(t, c.Connect(context.Background()))
 	t.Cleanup(func() { require.NoError(t, c.Disconnect()) })
 	return wrapped
@@ -68,64 +82,26 @@ func TestProtocolDiscoveryRetry(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 			defer cancel()
-			discoverCount, initializeCount := 0, 0
-			c := newProtocolTestClient(t, 1, func(
-				ctx context.Context, request transport.JSONRPCRequest,
-			) (*transport.JSONRPCResponse, error) {
-				if err := ctx.Err(); err != nil {
-					return nil, err
-				}
-				result := func(raw string) (*transport.JSONRPCResponse, error) {
-					return &transport.JSONRPCResponse{Result: json.RawMessage(raw)}, nil
-				}
-				switch request.Method {
-				case "server/discover":
-					discoverCount++
-					if mode == "method-not-found" {
-						return &transport.JSONRPCResponse{Error: &sdk.JSONRPCErrorDetails{
-							Code: -32601, Message: "Method not found",
-						}}, nil
+			discoverCount, liveDiscovers, liveInitializes, probeInitializes := 0, 0, 0, 0
+			peer := func(probe bool) protocolTestSend {
+				return func(ctx context.Context, request transport.JSONRPCRequest) (*transport.JSONRPCResponse, error) {
+					if err := ctx.Err(); err != nil {
+						return nil, err
 					}
-					if mode == "silent-legacy" || (mode == "transient-timeout" && discoverCount == 1) {
-						<-ctx.Done()
-						return nil, ctx.Err()
-					}
-					if mode == "cancelled" {
-						cancel()
-						return nil, ctx.Err()
-					}
-					if discoverCount == 1 || mode == "unavailable" {
-						if mode == "transient-unauthorized" {
-							return nil, &transport.AuthorizationRequiredError{}
+					if !probe {
+						switch request.Method {
+						case "server/discover":
+							liveDiscovers++
+						case "initialize":
+							liveInitializes++
 						}
-						return nil, errors.New("request failed with status 503")
+					} else if request.Method == "initialize" {
+						probeInitializes++
 					}
-					return result(`{"capabilities":{"tools":{}},"protocolVersions":["2026-07-28"]}`)
-				case "initialize":
-					initializeCount++
-					if mode == "unavailable" {
-						return nil, errors.New("request failed with status 503")
-					}
-					if mode == "cancelled-after-handshake" {
-						cancel()
-					}
-					return result(`{"protocolVersion":"2025-11-25","capabilities":{"tools":{}},` +
-						`"serverInfo":{"name":"peer","version":"1"}}`)
-				case "tools/list":
-					return result(`{"tools":[{"name":"echo","inputSchema":{"type":"object",` +
-						`"properties":{"x":{"type":"string","x-mcp-header":"Value"}}}}]}`)
-				case "tools/call":
-					wantHeader := "value"
-					if mode == "silent-legacy" || mode == "method-not-found" {
-						wantHeader = ""
-					}
-					require.Equal(t, wantHeader, request.Header.Get("Mcp-Param-Value"))
-					return result(`{"content":[{"type":"text","text":"ok"}]}`)
-				default:
-					t.Fatalf("unexpected method %s", request.Method)
-					return nil, nil
+					return protocolRetryPeer(t, mode, &discoverCount, cancel)(ctx, request)
 				}
-			})
+			}
+			c := newProtocolProbeTestClient(t, 1, peer(false), peer(true))
 			result, err := c.Initialize(ctx)
 			if mode == "cancelled" || mode == "cancelled-after-handshake" || mode == "unavailable" {
 				require.Error(t, err)
@@ -149,17 +125,70 @@ func TestProtocolDiscoveryRetry(t *testing.T) {
 			} else {
 				require.Equal(t, 2, discoverCount)
 			}
-			if mode == "silent-legacy" {
-				require.Equal(t, 2, initializeCount)
-			} else {
-				require.Equal(t, 1, initializeCount)
-			}
+			require.Equal(t, 1, liveDiscovers, "the live session must never be probed again")
+			require.Equal(t, 1, liveInitializes, "the live session must never be re-initialized")
+			require.Zero(t, probeInitializes, "the probe must not open a second legacy session")
 			_, err = c.ListTools(ctx)
 			require.NoError(t, err)
 			call, err := c.CallTool(ctx, "echo", map[string]interface{}{"x": "value"})
 			require.NoError(t, err)
 			require.Equal(t, "ok", call.Content[0].Text)
 		})
+	}
+}
+
+func protocolRetryPeer(t *testing.T, mode string, discoverCount *int, cancel context.CancelFunc) protocolTestSend {
+	return func(ctx context.Context, request transport.JSONRPCRequest) (*transport.JSONRPCResponse, error) {
+		result := func(raw string) (*transport.JSONRPCResponse, error) {
+			return &transport.JSONRPCResponse{Result: json.RawMessage(raw)}, nil
+		}
+		switch request.Method {
+		case "server/discover":
+			*discoverCount++
+			discoverCount := *discoverCount
+			if mode == "method-not-found" {
+				return &transport.JSONRPCResponse{Error: &sdk.JSONRPCErrorDetails{
+					Code: -32601, Message: "Method not found",
+				}}, nil
+			}
+			if mode == "silent-legacy" || (mode == "transient-timeout" && discoverCount == 1) {
+				<-ctx.Done()
+				return nil, ctx.Err()
+			}
+			if mode == "cancelled" {
+				cancel()
+				return nil, ctx.Err()
+			}
+			if discoverCount == 1 || mode == "unavailable" {
+				if mode == "transient-unauthorized" {
+					return nil, &transport.AuthorizationRequiredError{}
+				}
+				return nil, errors.New("request failed with status 503")
+			}
+			return result(`{"capabilities":{"tools":{}},"protocolVersions":["2026-07-28"]}`)
+		case "initialize":
+			if mode == "unavailable" {
+				return nil, errors.New("request failed with status 503")
+			}
+			if mode == "cancelled-after-handshake" {
+				cancel()
+			}
+			return result(`{"protocolVersion":"2025-11-25","capabilities":{"tools":{}},` +
+				`"serverInfo":{"name":"peer","version":"1"}}`)
+		case "tools/list":
+			return result(`{"tools":[{"name":"echo","inputSchema":{"type":"object",` +
+				`"properties":{"x":{"type":"string","x-mcp-header":"Value"}}}}]}`)
+		case "tools/call":
+			wantHeader := "value"
+			if mode == "silent-legacy" || mode == "method-not-found" {
+				wantHeader = ""
+			}
+			require.Equal(t, wantHeader, request.Header.Get("Mcp-Param-Value"))
+			return result(`{"content":[{"type":"text","text":"ok"}]}`)
+		default:
+			t.Fatalf("unexpected method %s", request.Method)
+			return nil, nil
+		}
 	}
 }
 
@@ -173,8 +202,27 @@ func TestProtocolDiscoveryRetryKeepsLegacySuccess(t *testing.T) {
 			}
 			ctx, cancel := context.WithTimeout(context.Background(), timeout)
 			defer cancel()
-			discoverCount, initializeCount := 0, 0
-			c := newProtocolTestClient(t, 1, func(
+			discoverCount, initializeCount, probeDiscovers, probeInitializes, liveLists := 0, 0, 0, 0, 0
+			probe := func(ctx context.Context, request transport.JSONRPCRequest) (*transport.JSONRPCResponse, error) {
+				switch request.Method {
+				case "server/discover":
+					discoverCount++
+					probeDiscovers++
+					if mode == "retry-cancelled" {
+						cancel()
+						return nil, ctx.Err()
+					}
+					// A stateful legacy peer rejects a sessionless request.
+					return nil, transport.ErrSessionTerminated
+				case "initialize":
+					probeInitializes++
+					return nil, errors.New("request failed with status 503")
+				default:
+					t.Fatalf("unexpected probe method %s", request.Method)
+					return nil, nil
+				}
+			}
+			c := newProtocolProbeTestClient(t, 1, func(
 				ctx context.Context, request transport.JSONRPCRequest,
 			) (*transport.JSONRPCResponse, error) {
 				if err := ctx.Err(); err != nil {
@@ -183,10 +231,6 @@ func TestProtocolDiscoveryRetryKeepsLegacySuccess(t *testing.T) {
 				switch request.Method {
 				case "server/discover":
 					discoverCount++
-					if discoverCount == 2 && mode == "retry-cancelled" {
-						cancel()
-						return nil, ctx.Err()
-					}
 					return nil, errors.New("request failed with status 503")
 				case "initialize":
 					initializeCount++
@@ -205,6 +249,7 @@ func TestProtocolDiscoveryRetryKeepsLegacySuccess(t *testing.T) {
 							`"serverInfo":{"name":"peer","version":"1"}}`,
 					)}, nil
 				case "tools/list":
+					liveLists++
 					return &transport.JSONRPCResponse{Result: json.RawMessage(
 						`{"tools":[{"name":"echo","inputSchema":{"type":"object"}}]}`,
 					)}, nil
@@ -212,27 +257,144 @@ func TestProtocolDiscoveryRetryKeepsLegacySuccess(t *testing.T) {
 					t.Fatalf("unexpected method %s", request.Method)
 					return nil, nil
 				}
-			})
+			}, probe)
 			result, err := c.Initialize(ctx)
 			require.NoError(t, err)
 			require.NotNil(t, result)
 			require.Equal(t, sdk.LATEST_LEGACY_PROTOCOL_VERSION, result.ProtocolVersion)
 			require.Equal(t, sdk.LATEST_LEGACY_PROTOCOL_VERSION, c.client.ProtocolVersion())
 			require.True(t, c.initialized.Load())
-			switch mode {
-			case "retry-unavailable":
-				require.Equal(t, 2, discoverCount)
-				require.Equal(t, 2, initializeCount)
-			case "retry-cancelled":
-				require.Equal(t, 2, discoverCount)
-				require.Equal(t, 1, initializeCount)
-			case "retry-skipped":
+			require.Equal(t, 1, initializeCount, "the live session must never be re-initialized")
+			require.Zero(t, probeInitializes, "the probe must not open a second legacy session")
+			if mode == "retry-skipped" {
 				require.Equal(t, 1, discoverCount)
-				require.Equal(t, 1, initializeCount)
+				require.Zero(t, probeDiscovers)
+			} else {
+				require.Equal(t, 2, discoverCount)
+				require.Equal(t, 1, probeDiscovers)
 			}
 			tools, err := c.ListTools(context.Background())
 			require.NoError(t, err)
 			require.Len(t, tools, 1)
+			require.Equal(t, 1, liveLists, "the original connection keeps serving requests")
+		})
+	}
+}
+
+// statefulLegacyPeer behaves like a session-managed legacy Streamable HTTP
+// server: every non-initialize request without its session gets a 404, which
+// mcp-go reports as session termination and answers by clearing its session.
+type statefulLegacyPeer struct {
+	modernRetry bool
+	mu          sync.Mutex
+	discovers   int
+	initializes int
+	lists       int
+	deleted     []string
+}
+
+func (p *statefulLegacyPeer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	session := r.Header.Get("Mcp-Session-Id")
+	if r.Method == http.MethodDelete {
+		p.mu.Lock()
+		p.deleted = append(p.deleted, session)
+		p.mu.Unlock()
+		return
+	}
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	var request struct {
+		ID     json.RawMessage `json:"id"`
+		Method string          `json:"method"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+	reply := func(result string) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"jsonrpc": "2.0", "id": request.ID, "result": json.RawMessage(result),
+		})
+	}
+	modern := r.Header.Get("Mcp-Protocol-Version") == sdk.LATEST_PROTOCOL_VERSION
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	switch {
+	case request.Method == "server/discover":
+		p.discovers++
+		switch {
+		case p.discovers == 1:
+			w.WriteHeader(http.StatusServiceUnavailable)
+		case p.modernRetry:
+			reply(`{"capabilities":{"tools":{}},"protocolVersions":["2026-07-28"]}`)
+		case session == "":
+			w.WriteHeader(http.StatusNotFound)
+		default:
+			w.WriteHeader(http.StatusBadRequest)
+		}
+	case request.Method == "initialize":
+		p.initializes++
+		if p.initializes > 1 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		w.Header().Set("Mcp-Session-Id", "sess-1")
+		reply(`{"protocolVersion":"2025-11-25","capabilities":{"tools":{}},` +
+			`"serverInfo":{"name":"stateful","version":"1"}}`)
+	case !modern && session != "sess-1":
+		w.WriteHeader(http.StatusNotFound)
+	case request.ID == nil:
+		w.WriteHeader(http.StatusAccepted)
+	case request.Method == "tools/list":
+		p.lists++
+		reply(`{"tools":[{"name":"echo","inputSchema":{"type":"object"}}]}`)
+	default:
+		w.WriteHeader(http.StatusBadRequest)
+	}
+}
+
+func TestProtocolDiscoveryRetryKeepsStatefulLegacySession(t *testing.T) {
+	utils.SetSSRFWhitelistFromRaw("127.0.0.1")
+	t.Cleanup(utils.ResetSSRFWhitelistForTest)
+	for _, mode := range []string{"probe-legacy", "probe-modern"} {
+		t.Run(mode, func(t *testing.T) {
+			peer := &statefulLegacyPeer{modernRetry: mode == "probe-modern"}
+			httpServer := httptest.NewServer(peer)
+			defer httpServer.Close()
+			c, err := NewMCPClient(&ClientConfig{Service: &types.MCPService{
+				ID: "stateful", Name: "stateful", URL: &httpServer.URL,
+				TransportType:  types.MCPTransportHTTPStreamable,
+				AdvancedConfig: &types.MCPAdvancedConfig{Timeout: 3},
+			}})
+			require.NoError(t, err)
+			wrapped := c.(*mcpGoClient)
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			require.NoError(t, c.Connect(ctx))
+			result, err := c.Initialize(ctx)
+			require.NoError(t, err)
+			wantVersion := sdk.LATEST_LEGACY_PROTOCOL_VERSION
+			if mode == "probe-modern" {
+				wantVersion = sdk.LATEST_PROTOCOL_VERSION
+			}
+			require.Equal(t, wantVersion, result.ProtocolVersion)
+			require.Equal(t, wantVersion, wrapped.client.ProtocolVersion())
+			if mode == "probe-legacy" {
+				require.Equal(t, "sess-1", wrapped.client.GetSessionId(), "the probe must not clear the live session")
+			}
+			tools, err := c.ListTools(ctx)
+			require.NoError(t, err)
+			require.Len(t, tools, 1)
+			require.NoError(t, c.Disconnect())
+			peer.mu.Lock()
+			defer peer.mu.Unlock()
+			require.Equal(t, 2, peer.discovers)
+			require.Equal(t, 1, peer.initializes, "neither connection may initialize again")
+			require.Equal(t, 1, peer.lists)
+			require.Equal(t, []string{"sess-1"}, peer.deleted, "the legacy session is closed exactly once")
 		})
 	}
 }
@@ -509,10 +671,8 @@ func TestOutboundSSEProtocolNegotiation(t *testing.T) {
 			case "modern":
 				require.Equal(t, 1, discoverCount)
 				require.Zero(t, initializeCount)
-			case "silent-legacy":
-				require.Equal(t, 2, discoverCount)
-				require.Equal(t, 2, initializeCount)
 			default:
+				// The re-probe uses its own SSE session and never initializes it.
 				require.Equal(t, 2, discoverCount)
 				require.Equal(t, 1, initializeCount)
 			}

@@ -77,6 +77,8 @@ type mcpGoClient struct {
 	metadataMu   sync.RWMutex
 	instructions string
 	toolSchemas  map[string]json.RawMessage
+	// newProbe builds an independent connection with the same outbound policy.
+	newProbe func() (*mcpGoClient, error)
 }
 
 // The SDK hides probe failures when the legacy handshake succeeds. Observe
@@ -84,11 +86,18 @@ type mcpGoClient struct {
 type discoverTransport struct {
 	transport.HTTPConnection
 	failed atomic.Bool
+	// probeOnly stops the SDK's legacy fallback from opening a second session.
+	probeOnly atomic.Bool
 }
+
+var errDiscoverProbeOnly = errors.New("protocol probe does not open legacy sessions")
 
 func (t *discoverTransport) SendRequest(
 	ctx context.Context, request transport.JSONRPCRequest,
 ) (*transport.JSONRPCResponse, error) {
+	if request.Method == string(mcp.MethodInitialize) && t.probeOnly.Load() {
+		return nil, errDiscoverProbeOnly
+	}
 	response, err := t.HTTPConnection.SendRequest(ctx, request)
 	if request.Method == string(mcp.MethodServerDiscover) {
 		// JSON-RPC errors, including method-not-found, are valid peer answers
@@ -279,6 +288,15 @@ func NewMCPClient(config *ClientConfig) (MCPClient, error) {
 			oauthConfig,
 		)
 	}
+	probeConfig := *config
+	instance.newProbe = func() (*mcpGoClient, error) {
+		cfg := probeConfig
+		probe, err := NewMCPClient(&cfg)
+		if err != nil {
+			return nil, err
+		}
+		return probe.(*mcpGoClient), nil
+	}
 	mcpClient.OnConnectionLost(instance.onConnectionLost)
 	return instance, nil
 }
@@ -453,21 +471,13 @@ func (c *mcpGoClient) Initialize(ctx context.Context) (*InitializeResult, error)
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
-		if err != nil || mcp.IsModernProtocol(result.ProtocolVersion) ||
-			c.discovery == nil || !c.discovery.failed.Load() {
-			return result, err
-		}
-		if deadline, ok := ctx.Deadline(); ok && time.Until(deadline) < discoverProbeTimeout(c.service) {
-			return result, nil
-		}
-		// Retry negotiation once before the manager caches a legacy client.
-		// The working legacy session is kept unless the retry turns modern.
-		retry, retryErr := c.client.Initialize(ctx, req)
-		if retryErr == nil && mcp.IsModernProtocol(retry.ProtocolVersion) {
-			return retry, nil
-		}
-		return result, nil
+		return result, err
 	})
+	if err == nil && c.shouldReprobe(ctx, result.ProtocolVersion) {
+		if modern := c.adoptModernProbe(ctx, req); modern != nil {
+			result = modern
+		}
+	}
 	if err != nil {
 		c.checkErrorAndDisconnectIfNeeded(err)
 		if oerr := asOAuthRequired(err); oerr != nil {
@@ -531,6 +541,48 @@ func (c *mcpGoClient) Initialize(ctx context.Context) (*InitializeResult, error)
 	}, nil
 }
 
+// A transient discover failure gets one more probe before the manager caches a
+// legacy client, unless too little time is left for it.
+func (c *mcpGoClient) shouldReprobe(ctx context.Context, version string) bool {
+	if mcp.IsModernProtocol(version) || c.newProbe == nil || c.discovery == nil || !c.discovery.failed.Load() {
+		return false
+	}
+	deadline, ok := ctx.Deadline()
+	return !ok || time.Until(deadline) >= discoverProbeTimeout(c.service)
+}
+
+// A second Initialize on the live client would send server/discover without
+// Mcp-Session-Id. Stateful legacy peers answer 404, which the SDK treats as
+// session termination and clears the working session even if it then falls
+// back to legacy. Probe on an independent connection instead and adopt it only
+// once it has negotiated the stateless protocol; otherwise the live session
+// stays untouched.
+func (c *mcpGoClient) adoptModernProbe(ctx context.Context, req mcp.InitializeRequest) *mcp.InitializeResult {
+	probe, err := c.newProbe()
+	if err != nil {
+		return nil
+	}
+	probe.discovery.probeOnly.Store(true)
+	if err := probe.Connect(ctx); err != nil {
+		_ = probe.client.Close()
+		return nil
+	}
+	result, err := probe.client.Initialize(ctx, req)
+	if err != nil || ctx.Err() != nil || !mcp.IsModernProtocol(result.ProtocolVersion) {
+		_ = probe.Disconnect()
+		return nil
+	}
+	probe.discovery.probeOnly.Store(false)
+	legacy := c.client
+	legacy.OnConnectionLost(func(error) {})
+	c.client, c.discovery, c.oauth = probe.client, probe.discovery, probe.oauth
+	c.client.OnConnectionLost(c.onConnectionLost)
+	_ = legacy.Close()
+	logger.Debugf(ctx, "MCP protocol re-probe adopted %s service=%s",
+		result.ProtocolVersion, secutils.SanitizeForLog(c.service.Name))
+	return result
+}
+
 // ServerInstructions retains server-wide MCP documentation from initialize.
 // It is separate from credentials and can accompany model-facing tools.
 func (c *mcpGoClient) ServerInstructions() string {
@@ -562,6 +614,12 @@ func (c *mcpGoClient) ListTools(ctx context.Context) ([]*types.MCPTool, error) {
 	c.metadataMu.Unlock()
 
 	return tools, nil
+}
+
+func (c *mcpGoClient) invalidateToolSchemas() {
+	c.metadataMu.Lock()
+	c.toolSchemas = nil
+	c.metadataMu.Unlock()
 }
 
 // A tenant-supplied MCP endpoint is untrusted, and the whole directory is held
