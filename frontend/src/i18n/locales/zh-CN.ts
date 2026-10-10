@@ -5297,7 +5297,6 @@ export default {
     noCompatibleKbForAgent: '当前智能体的工具与作用域内知识库的能力不匹配，暂无可引用的知识库。'
   },
   common: {
-    more: '更多操作',
     add: '添加',
     me: '我',
     confirm: '确认',
@@ -7085,6 +7084,7 @@ export default {
     }
   },
   knowledgeBase: {
+    more: '更多操作',
     tagAddAction: '添加标签',
     documentCount: '{count} 个文档',
     filters: '筛选',

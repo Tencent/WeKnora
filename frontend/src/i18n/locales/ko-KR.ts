@@ -5295,7 +5295,6 @@ export default {
     noCompatibleKbForAgent: '현재 에이전트의 도구와 범위 내 지식베이스의 기능이 일치하지 않아 참조할 수 있는 지식베이스가 없습니다.'
   },
   common: {
-    more: '추가 작업',
     add: '추가',
     me: '나',
     confirm: '확인',
@@ -7083,6 +7082,7 @@ export default {
     }
   },
   knowledgeBase: {
+    more: '추가 작업',
     tagAddAction: '태그 추가',
     documentCount: '문서 {count}개',
     filters: '필터',

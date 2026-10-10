@@ -718,3 +718,10 @@ onBeforeUnmount(() => {
   }
 }
 </style>
+
+<style lang="less">
+@media (max-width: 767px) {
+:root body .upload-tasks-panel { right: 8px; bottom: max(8px, env(safe-area-inset-bottom)); max-width: calc(100% - 16px); max-height: 60dvh; }
+:root body .upload-tasks-panel .t-button { min-width: 44px; min-height: 44px; }
+}
+</style>

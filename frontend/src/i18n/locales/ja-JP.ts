@@ -652,6 +652,7 @@ export default {
     sharedTooltip: '共有スペース経由で外部ワークスペースからアクセス'
   },
   knowledgeBase: {
+    more: 'その他の操作',
     tagAddAction: 'タグを追加',
     documentCount: '{count} 件のドキュメント',
     filters: '絞り込み',
@@ -2730,7 +2731,6 @@ export default {
     }
   },
   common: {
-    more: 'その他の操作',
     add: '追加',
     me: '自分',
     confirm: '確認',

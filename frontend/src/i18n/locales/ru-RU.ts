@@ -5295,7 +5295,6 @@ export default {
     noCompatibleKbForAgent: 'Инструменты текущего агента не соответствуют возможностям ни одной базы знаний в области видимости — нечего упомянуть.'
   },
   common: {
-    more: 'Другие действия',
     add: 'Добавить',
     me: 'Я',
     confirm: 'Подтвердить',
@@ -7083,6 +7082,7 @@ export default {
     }
   },
   knowledgeBase: {
+    more: 'Другие действия',
     tagAddAction: 'Добавить теги',
     documentCount: 'Документов: {count}',
     filters: 'Фильтры',

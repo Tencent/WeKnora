@@ -6,7 +6,7 @@ const panelId = useId()
 
 <template>
   <div class="responsive-toolbar-group">
-    <button type="button" class="responsive-toolbar-toggle" :aria-label="$t('common.more')"
+    <button type="button" class="responsive-toolbar-toggle" :aria-label="$t('knowledgeBase.more')"
       :aria-expanded="open" :aria-controls="panelId" @click="open = !open">
       <t-icon :name="open ? 'chevron-up' : 'more'" size="20px" />
     </button>

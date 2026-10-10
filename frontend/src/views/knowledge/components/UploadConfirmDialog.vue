@@ -2525,3 +2525,14 @@ const handleConfirm = () => {
   }
 }
 </style>
+
+<style lang="less">
+@media (max-width: 767px) {
+:root body .upload-confirm-modal { width: 100%; height: 100dvh; max-height: var(--app-viewport-height, 100dvh); border-radius: 0; }
+:root body .upload-confirm-modal .close-btn { width: 44px; height: 44px; top: 4px; right: 4px; }
+:root body .upload-confirm-modal .sidebar-header { padding-right: 52px; }
+:root body .upload-confirm-modal .files-panel { max-height: 25dvh; }
+:root body .upload-confirm-modal .setting-control { min-width: 0; }
+:root body .upload-confirm-modal .modal-footer { padding-bottom: max(12px, env(safe-area-inset-bottom)); }
+}
+</style>
