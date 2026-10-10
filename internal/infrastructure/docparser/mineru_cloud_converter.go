@@ -25,7 +25,7 @@ const (
 	defaultPollInterval = 3 * time.Second
 	// defaultCloudTimeout bounds how long one batch is polled;
 	// WEKNORA_MINERU_CLOUD_TIMEOUT overrides it for documents that take longer.
-	defaultCloudTimeout = 600 * time.Second
+	defaultCloudTimeout = 30 * time.Minute
 	defaultBaseURL      = "https://mineru.net/api/v4"
 )
 
@@ -82,27 +82,17 @@ func (c *MinerUCloudReader) Read(ctx context.Context, req *types.ReadRequest) (*
 		fileName = "document" + ext
 	}
 
-	batchID, uploadURL, err := c.applyUploadURLs(ctx, fileName, ext)
+	copyReq := *req
+	copyReq.FileName = fileName
+	if strings.EqualFold(ext, ".pdf") {
+		return c.readSplitPDF(ctx, &copyReq)
+	}
+	result, err := c.readCloudPart(ctx, &copyReq)
 	if err != nil {
-		return nil, fmt.Errorf("MinerU Cloud apply upload URLs: %w", err)
+		return nil, err
 	}
-
-	if err := c.uploadFile(ctx, uploadURL, content); err != nil {
-		return nil, fmt.Errorf("MinerU Cloud file upload: %w", err)
-	}
-
-	mdContent, imageRefs, contentList, err := c.pollBatchResult(ctx, batchID)
-	if err != nil {
-		return nil, fmt.Errorf("MinerU Cloud poll: %w", err)
-	}
-
-	mdContent, imageRefs = ensureOriginalImageRef(req, mdContent, imageRefs)
-
-	return &types.ReadResult{
-		MarkdownContent: mdContent,
-		ImageRefs:       imageRefs,
-		SourceBlocks:    minerUSourceBlocks(mdContent, contentList, req.FileType),
-	}, nil
+	result.MarkdownContent, result.ImageRefs = ensureOriginalImageRef(req, result.MarkdownContent, result.ImageRefs)
+	return result, nil
 }
 
 // --- batch upload API ---
@@ -176,7 +166,7 @@ func (c *MinerUCloudReader) uploadFile(ctx context.Context, uploadURL string, co
 		return fmt.Errorf("create PUT request: %w", err)
 	}
 
-	client := utils.NewSSRFSafeHTTPClient(utils.SSRFSafeHTTPClientConfig{Timeout: 120 * time.Second, MaxRedirects: 5})
+	client := utils.NewSSRFSafeHTTPClient(utils.SSRFSafeHTTPClientConfig{Timeout: 10 * time.Minute, MaxRedirects: 5})
 	resp, err := client.Do(httpReq)
 	if err != nil {
 		return fmt.Errorf("PUT upload: %w", err)
@@ -338,7 +328,7 @@ func (c *MinerUCloudReader) fetchBatchStatus(ctx context.Context, batchID string
 // extractDoneResult extracts markdown and images from a completed batch item.
 // Prefers inline markdown/content fields; falls back to downloading full_zip_url.
 func (c *MinerUCloudReader) extractDoneResult(
-	_ context.Context, item *extractResultItem,
+	ctx context.Context, item *extractResultItem,
 ) (string, []types.ImageRef, []byte, error) {
 	text := firstNonEmpty(item.Markdown, item.Content, item.Text)
 	if text != "" {
@@ -350,7 +340,7 @@ func (c *MinerUCloudReader) extractDoneResult(
 		return "", nil, nil, fmt.Errorf("MinerU Cloud state=done but no markdown/content or full_zip_url")
 	}
 
-	md, imageRefs, contentList, err := downloadAndExtractZip(item.FullZipURL)
+	md, imageRefs, contentList, err := downloadAndExtractZip(ctx, item.FullZipURL)
 	if err != nil {
 		return "", nil, nil, fmt.Errorf("extract zip: %w", err)
 	}
@@ -362,12 +352,16 @@ func (c *MinerUCloudReader) extractDoneResult(
 // --- ZIP handling ---
 
 // downloadAndExtractZip also returns the content_list of the package, if any.
-func downloadAndExtractZip(zipURL string) (string, []types.ImageRef, []byte, error) {
+func downloadAndExtractZip(ctx context.Context, zipURL string) (string, []types.ImageRef, []byte, error) {
 	if err := utils.ValidateURLForSSRF(zipURL); err != nil {
 		return "", nil, nil, fmt.Errorf("zip URL blocked by SSRF check: %v", err)
 	}
-	client := utils.NewSSRFSafeHTTPClient(utils.SSRFSafeHTTPClientConfig{Timeout: 120 * time.Second, MaxRedirects: 5})
-	resp, err := client.Get(zipURL)
+	client := utils.NewSSRFSafeHTTPClient(utils.SSRFSafeHTTPClientConfig{Timeout: 10 * time.Minute, MaxRedirects: 5})
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, zipURL, nil)
+	if err != nil {
+		return "", nil, nil, err
+	}
+	resp, err := client.Do(request)
 	if err != nil {
 		return "", nil, nil, fmt.Errorf("download zip: %w", err)
 	}
