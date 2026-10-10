@@ -350,14 +350,11 @@ async function renderMarkdown(blob: Blob) {
 
   const generation = ++markdownImageGeneration;
   revokeMarkdownImageUrls();
-  // Paint the text immediately. Relative images stay on a data URI until the
-  // sibling lookup finishes, so the browser does not request them from the
-  // knowledge-base route.
+  // Relative images stay on a data URI unless a sibling file replaces them.
+  // Painting the original href makes the browser request it from the page route.
+  let source = props.knowledgeId ? neutralizeRelativePreviewImages(text) : text;
   if (props.knowledgeId) {
-    markdownHtml.value = renderDocumentPreviewMarkdown(neutralizeRelativePreviewImages(text));
-  }
-  let source = text;
-  if (props.knowledgeId) {
+    markdownHtml.value = renderDocumentPreviewMarkdown(source);
     try {
       const rewritten = await rewriteKnowledgeMarkdownImages(text, props.knowledgeId, {
         getKnowledge: async (id) => {
@@ -392,7 +389,7 @@ async function renderMarkdown(blob: Blob) {
         return;
       }
       markdownImageUrls = rewritten.objectUrls;
-      source = rewritten.markdown;
+      source = neutralizeRelativePreviewImages(rewritten.markdown);
     } catch (err) {
       console.warn('Relative markdown images were left unresolved', err);
     }

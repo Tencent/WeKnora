@@ -134,6 +134,9 @@ test('rewrite does not guess a root file from a relative directory', async () =>
   assert.equal(listed, true)
   assert.equal(rewritten.markdown, '![](images/image_001.jpg)')
   assert.deepEqual(rewritten.objectUrls, [])
+  const shown = neutralizeRelativePreviewImages(rewritten.markdown)
+  assert.equal(shown.includes('images/image_001.jpg'), false)
+  assert.equal(shown.includes('data:image/gif'), true)
 })
 
 test('rewrite does not request a path that escapes the knowledge base', async () => {
