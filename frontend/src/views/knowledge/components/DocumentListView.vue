@@ -808,6 +808,20 @@ const handleAction = (action: 'download' | 'edit' | 'reparse' | 'cancel-parse' |
   .cell-actions { grid-column: 4; grid-row: 1; }
   .row-file-meta { flex-wrap: wrap; gap: 2px 6px; }
 }
+@media (max-width: 767px) {
+  .doc-list-header, .doc-list-row {
+    grid-template-columns: 24px minmax(0, 1fr) 44px;
+    column-gap: 8px;
+  }
+  .doc-list-header .cell-status { display: none; }
+  .doc-list-row .cell-name { grid-column: 2; grid-row: 1; }
+  .doc-list-row .cell-status { grid-column: 2; grid-row: 2; padding-left: 44px; }
+  .doc-list-row .cell-tags { grid-column: 2; grid-row: 3; }
+  .cell-actions { grid-column: 3; grid-row: 1 / span 3; }
+  .row-file-name { white-space: normal; overflow-wrap: anywhere; text-align: left; }
+  .row-file-meta { font-size: var(--app-text-xs); flex-wrap: wrap; }
+  .row-more-btn { width: 44px; height: 44px; }
+}
 @media (hover: none) {
   .row-more-btn { opacity: 1; }
 }

@@ -652,6 +652,7 @@ export default {
     sharedTooltip: 'Accessed from an external workspace via a shared space'
   },
   knowledgeBase: {
+    more: 'More actions',
     tagAddAction: 'Add tags',
     documentCount: '{count} documents',
     filters: 'Filters',

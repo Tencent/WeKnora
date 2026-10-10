@@ -708,6 +708,7 @@
 </template>
 
 <script setup lang="ts">
+import '@/assets/mobile-knowledge.less'
 import { onMounted, onUnmounted, ref, computed, watch, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { MessagePlugin, Icon as TIcon } from 'tdesign-vue-next'

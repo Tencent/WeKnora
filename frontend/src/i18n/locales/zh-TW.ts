@@ -7087,6 +7087,7 @@ export default {
     }
   },
   knowledgeBase: {
+    more: '更多操作',
     tagAddAction: '新增標籤',
     documentCount: '{count} 個文件',
     filters: '篩選',

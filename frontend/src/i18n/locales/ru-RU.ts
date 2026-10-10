@@ -7085,6 +7085,7 @@ export default {
     }
   },
   knowledgeBase: {
+    more: 'Другие действия',
     tagAddAction: 'Добавить теги',
     documentCount: 'Документов: {count}',
     filters: 'Фильтры',
