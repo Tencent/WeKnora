@@ -4503,6 +4503,7 @@ definitions:
     - searxng
     - keenable
     - zhipu
+    - zhipu_prime
     - exa
     - metaso
     - bocha
@@ -4519,6 +4520,7 @@ definitions:
     - WebSearchProviderTypeSearxng
     - WebSearchProviderTypeKeenable
     - WebSearchProviderTypeZhipu
+    - WebSearchProviderTypeZhipuPrime
     - WebSearchProviderTypeExa
     - WebSearchProviderTypeMetaso
     - WebSearchProviderTypeBocha
