@@ -7873,24 +7873,32 @@ export default {
         label: 'OCR',
         description: 'Extract the text that appears in the image.'
       },
-      caption_thinking: {
-        label: 'Caption with thinking',
-        description: 'Let the model think before it writes the caption. In general you do not need thinking; enabling it makes parsing slower and may make the model overthink, so overly long reasoning can run past the limit and truncate the caption, failing the task. Only enable it when you have confirmed it is necessary.'
+      caption: {
+        thinking: {
+          label: 'Caption with thinking',
+          description: 'Let the model think before it writes the caption. In general you do not need thinking; enabling it makes parsing slower and may make the model overthink, so overly long reasoning can run past the limit and truncate the caption, failing the task. Only enable it when you have confirmed it is necessary.',
+        },
       },
-      ocr_thinking: {
-        label: 'OCR with thinking',
-        description: 'Let the model think before it transcribes the text. In general you do not need thinking; enabling it makes parsing slower and may make the model overthink, so overly long reasoning can run past the limit and truncate the transcribed text, failing the task. Only enable it when you have confirmed it is necessary.'
+      ocr: {
+        thinking: {
+          label: 'OCR with thinking',
+          description: 'Let the model think before it transcribes the text. In general you do not need thinking; enabling it makes parsing slower and may make the model overthink, so overly long reasoning can run past the limit and truncate the transcribed text, failing the task. Only enable it when you have confirmed it is necessary.',
+        },
       }
     },
     smartocr: {
       name: 'Smart',
-      describe_thinking: {
-        label: 'Describe with thinking',
-        description: 'Let the model think before it describes the image and reports its attributes. In general you do not need thinking; enabling it makes parsing slower and may make the model overthink, so overly long reasoning can run past the limit and truncate the description, failing the task. Only enable it when you have confirmed it is necessary.'
+      caption: {
+        thinking: {
+          label: 'Describe with thinking',
+          description: 'Let the model think before it describes the image and reports its attributes. In general you do not need thinking; enabling it makes parsing slower and may make the model overthink, so overly long reasoning can run past the limit and truncate the description, failing the task. Only enable it when you have confirmed it is necessary.',
+        },
       },
-      text_thinking: {
-        label: 'Text recognition with thinking',
-        description: 'Let the model think before it transcribes the text. In general you do not need thinking; enabling it makes parsing slower and may make the model overthink, so overly long reasoning can run past the limit and truncate the transcribed text, failing the task. Only enable it when you have confirmed it is necessary.'
+      ocr: {
+        thinking: {
+          label: 'Text recognition with thinking',
+          description: 'Let the model think before it transcribes the text. In general you do not need thinking; enabling it makes parsing slower and may make the model overthink, so overly long reasoning can run past the limit and truncate the transcribed text, failing the task. Only enable it when you have confirmed it is necessary.',
+        },
       },
       description:
         'Observe the image attributes and describe the image first, then decide from the attributes whether to run OCR, saving model calls and speeding up parsing.'
