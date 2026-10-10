@@ -13,6 +13,13 @@ func TestClassifyDenialIgnoresSuccess(t *testing.T) {
 	require.False(t, d.IsDenied())
 }
 
+func TestClassifyDenialIgnoresExitZeroEvenWhenOutputNamesAPath(t *testing.T) {
+	d := ClassifyDenial(ExitStatus{Code: 0}, "",
+		"bash: /Users/dev/Desktop/probe.txt: Operation not permitted")
+	require.Equal(t, DenialNone, d.Reason)
+	require.False(t, d.IsDenied())
+}
+
 func TestClassifyDenialDetectsOperationNotPermitted(t *testing.T) {
 	d := ClassifyDenial(ExitStatus{Code: 1}, "",
 		"touch: /Users/dev/outside.txt: Operation not permitted")

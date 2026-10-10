@@ -450,13 +450,49 @@ type AgentStep struct {
 	ReasoningSignature string           `json:"reasoning_signature,omitempty"`
 	ReasoningMetadata  ProviderMetadata `json:"reasoning_metadata,omitempty"`
 	ToolCalls          []ToolCall       `json:"tool_calls"` // Tools called in this step (Act phase)
-	Timestamp          time.Time        `json:"timestamp"`  // When this step occurred
+	// Approvals is the user decision for tools in this step. It is stored with
+	// the step so a reloaded transcript can show what was allowed or refused.
+	Approvals []ToolApprovalRecord `json:"approvals,omitempty"`
+	Timestamp time.Time            `json:"timestamp"` // When this step occurred
 	// Truncated marks the round the completion-token cap cut off. It rides in
 	// the agent_steps JSON so a reloaded, shared or re-opened conversation can
 	// still show that the answer stops mid-sentence by design, rather than
 	// looking finished. Live streaming carries the same fact on the answer
 	// event; this is what survives the round trip.
 	Truncated bool `json:"truncated,omitempty"`
+}
+
+// HostApprovalSnapshot is the Lite host card stored with a tool approval.
+type HostApprovalSnapshot struct {
+	Reason          string   `json:"reason"`
+	Command         string   `json:"command,omitempty"`
+	Cwd             string   `json:"cwd,omitempty"`
+	GrantPath       string   `json:"grant_path,omitempty"`
+	GrantAccess     string   `json:"grant_access,omitempty"`
+	DenialSnippet   string   `json:"denial_snippet,omitempty"`
+	FirstAttemptRan bool     `json:"first_attempt_ran,omitempty"`
+	AllowSession    bool     `json:"allow_session"`
+	SessionRules    []string `json:"session_rules,omitempty"`
+}
+
+// ToolApprovalRecord is one human approval attached to an agent step.
+type ToolApprovalRecord struct {
+	PendingID      string                `json:"pending_id"`
+	ToolCallID     string                `json:"tool_call_id,omitempty"`
+	Kind           string                `json:"kind,omitempty"`
+	ServiceName    string                `json:"service_name,omitempty"`
+	MCPToolName    string                `json:"mcp_tool_name,omitempty"`
+	Description    string                `json:"description,omitempty"`
+	ArgsJSON       string                `json:"args_json,omitempty"`
+	TimeoutSeconds int                   `json:"timeout_seconds,omitempty"`
+	RequestedAt    int64                 `json:"requested_at,omitempty"`
+	Host           *HostApprovalSnapshot `json:"host,omitempty"`
+	Resolved       bool                  `json:"resolved,omitempty"`
+	Approved       bool                  `json:"approved,omitempty"`
+	Reason         string                `json:"reason,omitempty"`
+	TimedOut       bool                  `json:"timed_out,omitempty"`
+	Canceled       bool                  `json:"canceled,omitempty"`
+	Scope          string                `json:"scope,omitempty"`
 }
 
 // GetObservations returns observations from all tool calls in this step

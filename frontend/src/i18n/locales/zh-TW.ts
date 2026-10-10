@@ -1880,6 +1880,29 @@ export default {
       submitted: '已提交',
       submitFailed: '提交失敗',
       userRejected: '使用者拒絕'
+    },
+    hostApproval: {
+      titleDelete: '刪除檔案前需要你確認',
+      titleDangerous: '危險操作確認',
+      titleDenied: '命令被沙盒攔截，需要存取以下目錄',
+      titleGeneric: '需要你確認',
+      command: '命令',
+      cwd: '目錄',
+      grantPath: '需要存取',
+      accessWrite: '讀寫',
+      accessRead: '唯讀',
+      firstAttemptRan: '這條命令已經執行過一次並失敗，批准後會整條重新執行',
+      snippet: '攔截詳情',
+      sessionRules: '本工作階段允許後，同目錄下這類刪除不再詢問（檔名可以不同）',
+      reject: '拒絕',
+      approveOnce: '允許一次',
+      approveSession: '本工作階段允許',
+      approvedOnce: '已允許一次',
+      approvedSession: '本工作階段已允許',
+      rejectedTag: '已拒絕',
+      submitted: '已提交',
+      submitFailed: '提交失敗',
+      userRejected: '使用者拒絕'
     }
   },
   kbSettings: {

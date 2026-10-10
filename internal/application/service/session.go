@@ -739,6 +739,9 @@ func (s *sessionService) destroyBoundSandbox(ctx context.Context, sessionID stri
 	if sessionID == "" {
 		return
 	}
+	if releaser, ok := s.hostSandbox.(sandbox.SessionStateReleaser); ok {
+		releaser.ReleaseSessionState(ctx, sessionID)
+	}
 	// Resolve the workspace's own manager: the sandbox to release lives on
 	// whichever backend that workspace is configured for, not necessarily the
 	// process-wide default.

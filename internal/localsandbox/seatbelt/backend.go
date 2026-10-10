@@ -157,7 +157,9 @@ func resolvePolicyPaths(p core.Policy) (core.Policy, error) {
 				return core.Policy{}, err
 			}
 		}
-		out.WritableRoots[i] = core.WritableRoot{Path: path, ReadOnlySubpaths: subs}
+		out.WritableRoots[i] = core.WritableRoot{
+			Path: path, ReadOnlySubpaths: subs, ProtectGitDirs: root.ProtectGitDirs,
+		}
 	}
 	out.ReadableRoots = make([]string, len(p.ReadableRoots))
 	for i, root := range p.ReadableRoots {

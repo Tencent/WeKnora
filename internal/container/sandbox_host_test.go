@@ -72,8 +72,8 @@ func TestHostSandboxManagerNilWhenAvailableFails(t *testing.T) {
 	}))
 }
 
-func TestDefaultHostSessionRootUsesWeKnoraLite(t *testing.T) {
-	require.Equal(t, "/Users/dev/Documents/WeKnoraLite", defaultHostSessionRoot("/Users/dev"))
+func TestDefaultHostSessionRootUsesDotWeknora(t *testing.T) {
+	require.Equal(t, "/Users/dev/.weknora/sessions", defaultHostSessionRoot("/Users/dev"))
 }
 
 func TestDefaultHostSkillsRootIsDotWeknora(t *testing.T) {

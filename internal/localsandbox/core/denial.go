@@ -64,6 +64,11 @@ var denialPathPattern = regexp.MustCompile(
 		`\s*:\s*(?:operation not permitted|permission denied|read-only file system)`)
 
 // ClassifyDenial inspects a failed execution for signs of a sandbox denial.
+//
+// Exit code 0 is success, including a compound command whose earlier segment
+// was denied and whose later segment succeeded. Treating that as a denial
+// would ask the user to approve a command that already finished, then run
+// the whole command again.
 func ClassifyDenial(status ExitStatus, stdout, stderr string) Denial {
 	if status.Killed || status.Code == 0 {
 		return Denial{}
@@ -75,6 +80,7 @@ func ClassifyDenial(status ExitStatus, stdout, stderr string) Denial {
 	}
 
 	combined := stderr + "\n" + stdout
+	path := firstDenialPath(combined)
 	lowered := strings.ToLower(combined)
 	for _, marker := range denialMarkers {
 		if !strings.Contains(lowered, marker.needle) {
@@ -82,7 +88,7 @@ func ClassifyDenial(status ExitStatus, stdout, stderr string) Denial {
 		}
 		return Denial{
 			Reason:  marker.reason,
-			Path:    firstDenialPath(combined),
+			Path:    path,
 			Snippet: truncateSnippet(combined),
 		}
 	}

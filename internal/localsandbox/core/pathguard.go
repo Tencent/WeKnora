@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // ErrPathDenied is returned for every rejected path. Callers surface it to
@@ -52,18 +53,38 @@ func (g *PathGuard) CheckWrite(path string) (string, error) {
 	if g.denied(resolved) {
 		return "", fmt.Errorf("%w: %q", ErrPathDenied, path)
 	}
+	if g.readOnly(resolved) {
+		return "", fmt.Errorf("%w: %q is read-only", ErrPathDenied, path)
+	}
 	for _, root := range g.writable {
-		if !PathUnder(resolved, root.Path) {
-			continue
+		if PathUnder(resolved, root.Path) {
+			return resolved, nil
 		}
-		for _, ro := range root.ReadOnlySubpaths {
-			if PathUnder(resolved, ro) {
-				return "", fmt.Errorf("%w: %q is read-only", ErrPathDenied, path)
-			}
-		}
-		return resolved, nil
 	}
 	return "", fmt.Errorf("%w: %q", ErrPathDenied, path)
+}
+
+// readOnly checks every root, not only the one that admits path: a root that
+// covers another must not reopen that root's carve-outs. Seatbelt compiles
+// the same rules as final denies.
+func (g *PathGuard) readOnly(path string) bool {
+	for _, root := range g.writable {
+		for _, ro := range root.ReadOnlySubpaths {
+			if PathUnder(path, ro) {
+				return true
+			}
+		}
+		if root.ProtectGitDirs && PathUnder(path, root.Path) {
+			// Count elements instead of slicing bytes: PathUnder folds case,
+			// and folding can change a string's length.
+			parts := strings.Split(filepath.ToSlash(path), "/")
+			depth := len(strings.Split(filepath.ToSlash(root.Path), "/"))
+			if hasGitComponent(strings.Join(parts[depth:], "/")) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // CheckRead returns the resolved absolute path when reading is permitted.

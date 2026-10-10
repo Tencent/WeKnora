@@ -1880,6 +1880,29 @@ export default {
       submitted: '已提交',
       submitFailed: '提交失败',
       userRejected: '用户拒绝'
+    },
+    hostApproval: {
+      titleDelete: '删除文件前需要你确认',
+      titleDangerous: '危险操作确认',
+      titleDenied: '命令被沙盒拦截，需要访问以下目录',
+      titleGeneric: '需要你确认',
+      command: '命令',
+      cwd: '目录',
+      grantPath: '需要访问',
+      accessWrite: '读写',
+      accessRead: '只读',
+      firstAttemptRan: '这条命令已经执行过一次并失败，批准后会整条重新执行',
+      snippet: '拦截详情',
+      sessionRules: '本会话允许后，同目录下这类删除不再询问（文件名可以不同）',
+      reject: '拒绝',
+      approveOnce: '允许一次',
+      approveSession: '本会话允许',
+      approvedOnce: '已允许一次',
+      approvedSession: '本会话已允许',
+      rejectedTag: '已拒绝',
+      submitted: '已提交',
+      submitFailed: '提交失败',
+      userRejected: '用户拒绝'
     }
   },
   kbSettings: {

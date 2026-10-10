@@ -62,6 +62,7 @@ type AgentStreamHandler struct {
 	sandboxIDLookup SandboxIDLookup
 
 	// State tracking
+	toolApprovals   []types.ToolApprovalRecord
 	knowledgeRefs   []*types.SearchResult
 	finalAnswer     string
 	answerSegments  []*answerSegment     // Per-answer-event-ID accumulation, so superseded preambles can be dropped
@@ -329,12 +330,96 @@ func toolApprovalDataToMap(v interface{}) map[string]interface{} {
 	return m
 }
 
+func (h *AgentStreamHandler) rememberToolApproval(data event.ToolApprovalRequiredData) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.toolApprovals = append(h.toolApprovals, types.ToolApprovalRecord{
+		PendingID:      data.PendingID,
+		ToolCallID:     data.ToolCallID,
+		Kind:           data.Kind,
+		ServiceName:    data.ServiceName,
+		MCPToolName:    data.MCPToolName,
+		Description:    data.Description,
+		ArgsJSON:       data.ArgsJSON,
+		TimeoutSeconds: data.TimeoutSeconds,
+		RequestedAt:    data.RequestedAtUnix,
+		Host:           hostApprovalSnapshot(data.Host),
+	})
+}
+
+func (h *AgentStreamHandler) resolveRememberedToolApproval(data event.ToolApprovalResolvedData) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for i := range h.toolApprovals {
+		if h.toolApprovals[i].PendingID != data.PendingID {
+			continue
+		}
+		h.toolApprovals[i].Resolved = true
+		h.toolApprovals[i].Approved = data.Approved
+		h.toolApprovals[i].Reason = data.Reason
+		h.toolApprovals[i].TimedOut = data.TimedOut
+		h.toolApprovals[i].Canceled = data.Canceled
+		h.toolApprovals[i].Scope = data.Scope
+		return
+	}
+}
+
+func hostApprovalSnapshot(host *event.HostApprovalPayload) *types.HostApprovalSnapshot {
+	if host == nil {
+		return nil
+	}
+	return &types.HostApprovalSnapshot{
+		Reason:          host.Reason,
+		Command:         host.Command,
+		Cwd:             host.Cwd,
+		GrantPath:       host.GrantPath,
+		GrantAccess:     host.GrantAccess,
+		DenialSnippet:   host.DenialSnippet,
+		FirstAttemptRan: host.FirstAttemptRan,
+		AllowSession:    host.AllowSession,
+		SessionRules:    append([]string(nil), host.SessionRules...),
+	}
+}
+
+// attachToolApprovals copies each decision onto the step that ran that tool.
+// A decision with no matching call stays on the last step.
+func attachToolApprovals(steps []types.AgentStep, records []types.ToolApprovalRecord) []types.AgentStep {
+	if len(steps) == 0 || len(records) == 0 {
+		return steps
+	}
+	used := make([]bool, len(records))
+	for i := range steps {
+		for j, rec := range records {
+			if used[j] || rec.ToolCallID == "" {
+				continue
+			}
+			for _, call := range steps[i].ToolCalls {
+				if call.ID != rec.ToolCallID {
+					continue
+				}
+				steps[i].Approvals = append(steps[i].Approvals, rec)
+				used[j] = true
+				break
+			}
+		}
+	}
+	last := len(steps) - 1
+	for j, rec := range records {
+		if used[j] {
+			continue
+		}
+		steps[last].Approvals = append(steps[last].Approvals, rec)
+	}
+	return steps
+}
+
 // handleToolApprovalRequired persists MCP tool human-approval prompts for SSE / replay (issue #1173).
 func (h *AgentStreamHandler) handleToolApprovalRequired(ctx context.Context, evt event.Event) error {
 	data, ok := evt.Data.(event.ToolApprovalRequiredData)
 	if !ok {
 		return nil
 	}
+	h.rememberToolApproval(data)
 	meta := toolApprovalDataToMap(data)
 	meta["pending_id"] = data.PendingID
 	if err := h.streamManager.AppendEvent(h.ctx, h.sessionID, h.assistantMessageID, interfaces.StreamEvent{
@@ -356,6 +441,7 @@ func (h *AgentStreamHandler) handleToolApprovalResolved(ctx context.Context, evt
 	if !ok {
 		return nil
 	}
+	h.resolveRememberedToolApproval(data)
 	meta := toolApprovalDataToMap(data)
 	meta["pending_id"] = data.PendingID
 	if err := h.streamManager.AppendEvent(h.ctx, h.sessionID, h.assistantMessageID, interfaces.StreamEvent{
@@ -741,6 +827,7 @@ func (h *AgentStreamHandler) handleComplete(ctx context.Context, evt event.Event
 		// Update agent steps if provided
 		if data.AgentSteps != nil {
 			if steps, ok := data.AgentSteps.([]types.AgentStep); ok {
+				steps = attachToolApprovals(steps, h.toolApprovals)
 				h.assistantMessage.AgentSteps = agenttools.SanitizeAgentStepsForStorage(steps)
 			}
 		}

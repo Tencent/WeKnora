@@ -6,6 +6,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -238,6 +239,47 @@ func TestHandleAgentEventsForSSE_FlushesHeldContentOnStop(t *testing.T) {
 		indexOf(body, `"response_type":"stop"`),
 		"held content must precede the stop notification",
 	)
+}
+
+func TestEmitStreamEvent_UserWaitPushesTheFrameWithAnSSEComment(t *testing.T) {
+	rewriter := storageurl.NewStreamRewriter(storageurl.NewRewriter(nil, "TEST"))
+	for _, eventType := range []types.ResponseType{
+		types.ResponseTypeToolApprovalRequired,
+		types.ResponseTypeMCPOAuthRequired,
+	} {
+		t.Run(string(eventType), func(t *testing.T) {
+			c, recorder := newTestGinContext(t, "")
+			emitStreamEvent(context.Background(), c, interfaces.StreamEvent{
+				ID:   "wait-1",
+				Type: eventType,
+				Data: map[string]interface{}{"pending_id": "p1"},
+			}, "req-1", rewriter)
+
+			body := recorder.Body.String()
+			frame := indexOf(body, `"response_type":"`+string(eventType)+`"`)
+			comment := indexOf(body, "\n: ")
+			require.GreaterOrEqual(t, frame, 0)
+			require.Greater(t, comment, frame)
+			line, rest, found := strings.Cut(body[comment+1:], "\n")
+			require.True(t, found)
+			assert.GreaterOrEqual(t, len(line), 32<<10)
+			assert.Empty(t, rest, "the comment must not dispatch an empty event")
+			assert.NotContains(t, line, "\n")
+		})
+	}
+}
+
+func TestEmitStreamEvent_AnswerIsNotPadded(t *testing.T) {
+	c, recorder := newTestGinContext(t, "")
+	rewriter := storageurl.NewStreamRewriter(storageurl.NewRewriter(nil, "TEST"))
+	emitStreamEvent(context.Background(), c, interfaces.StreamEvent{
+		ID: "answer-1", Type: types.ResponseTypeAnswer, Content: "hello",
+	}, "req-1", rewriter)
+
+	body := recorder.Body.String()
+	assert.Contains(t, body, `"response_type":"answer"`)
+	assert.NotContains(t, body, "\n: ")
+	assert.Less(t, len(body), 8<<10)
 }
 
 func TestHoldbackKeyRoundTrip(t *testing.T) {

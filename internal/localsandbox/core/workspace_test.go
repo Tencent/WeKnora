@@ -86,6 +86,8 @@ func TestResolveSessionWorkspaceCreatesDatedDirectory(t *testing.T) {
 	require.Equal(t, WorkspaceSession, ws.Kind)
 	require.DirExists(t, ws.Root)
 	require.Contains(t, ws.Root, "session-")
+	today := time.Now()
+	require.Contains(t, ws.Root, filepath.Join(today.Format("2006"), today.Format("01"), today.Format("02")))
 	require.False(t, ws.ProtectGit)
 	require.NoDirExists(t, filepath.Join(ws.Root, "input"))
 	require.NoDirExists(t, filepath.Join(ws.Root, "output"))

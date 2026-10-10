@@ -140,7 +140,9 @@ func (t *EditSandboxFileTool) boundLayout() sandbox.WorkspaceLayout {
 	return t.describeLayout(t.editor)
 }
 
-const hostEditSandboxFileDescription = "Apply exact text replacements to an existing text file in %s.\n" +
+const hostEditSandboxFileDescription = "Apply exact text replacements to an existing text file in %s, " +
+	"or in a directory the user has already approved for this session. " +
+	"Paths outside that are refused; use shell_exec when the user should be asked to open a new directory.\n" +
 	"Read the relevant content first. Send edits as an array, even for one replacement. \n" +
 	"Every old_string matches the original file, must be unique unless replace_all=true, " +
 	"and must not overlap another edit. \n" +
