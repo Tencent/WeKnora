@@ -256,6 +256,12 @@ type runContext struct {
 	// nil when the attempt has no parent span to hang a subspan on.
 	tracker SpanTracker
 	imgSpan *Span
+	// vlmErr keeps the FIRST typed VLM error the run recorded. Actions
+	// record failures instead of propagating them (#4132: a failed OCR must
+	// not fail an image that already produced a valid caption), but when the
+	// run ends with nothing produced at all, the task layer needs the typed
+	// error to tell a permanent failure (SkipRetry) from a transient one.
+	vlmErr error
 }
 
 // Param reads one private tunable, falling back to the default the pipeline
@@ -410,6 +416,9 @@ func runCaptionAction(ctx context.Context, r *runContext) error {
 		// kind of event and logs its own line, and a caption miss must not be
 		// louder than the rest of the run.
 		r.out["caption_error"] = err.Error()
+		if r.vlmErr == nil {
+			r.vlmErr = err
+		}
 		resolve(true)
 		return nil
 	}
@@ -451,6 +460,9 @@ func runObservationCaptionAction(ctx context.Context, r *runContext) error {
 		// the pipeline's OCR decision can tell "observed and declined" from
 		// "no observation to decide on".
 		r.out["observation_failed"] = true
+		if r.vlmErr == nil {
+			r.vlmErr = err
+		}
 		resolve(true)
 		return nil
 	}
@@ -532,6 +544,9 @@ func runOCRAction(ctx context.Context, r *runContext) error {
 		// either — the caption may already be valid. Record the failure with
 		// a stable code and let the outcome summary classify the image.
 		logger.Warnf(ctx, "[ImageMultimodal] OCR failed for %s: %v", r.payload.ImageURL, err)
+		if r.vlmErr == nil {
+			r.vlmErr = err
+		}
 		r.out["ocr_status"] = "failed"
 		r.out["ocr_error_code"] = "OCR_REQUEST_FAILED"
 		if errors.Is(err, vlm.ErrTruncatedCompletion) {

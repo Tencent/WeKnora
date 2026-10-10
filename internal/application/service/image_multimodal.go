@@ -14,6 +14,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/application/service/retriever"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/models/api"
 	"github.com/Tencent/WeKnora/internal/models/embedding"
 	"github.com/Tencent/WeKnora/internal/models/imageprep"
 	"github.com/Tencent/WeKnora/internal/models/utils/ollama"
@@ -212,7 +213,13 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) (
 	// double-count and prematurely trigger post-process.
 	var handleErr error
 	defer func() {
-		if handleErr == nil || isFinalAsynqAttempt(ctx) {
+		// Finalize on success, on the final asynq retry, or when the error is
+		// a permanent failure wrapped with asynq.SkipRetry. The SkipRetry
+		// branch is essential: a SkipRetry error makes the executor break
+		// before the retry counter reaches maxRetry, so isFinalAsynqAttempt
+		// would otherwise return false and the parent knowledge would be
+		// stranded in "processing" forever.
+		if handleErr == nil || isFinalAsynqAttempt(ctx) || errors.Is(handleErr, asynq.SkipRetry) {
 			if err := s.checkAndFinalizeAllImages(ctx, payload); err != nil && retErr == nil {
 				retErr = err
 			}
@@ -244,7 +251,7 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) (
 		imgOut["vlm_model_id"] = "legacy_inline"
 	}
 
-	handleErr = s.processImage(ctx, &payload, vlmModel, vlmCfg, tracker, imgOut)
+	handleErr = wrapSkipRetry(s.processImage(ctx, &payload, vlmModel, vlmCfg, tracker, imgOut))
 	return handleErr
 }
 
@@ -315,9 +322,15 @@ func (s *ImageMultimodalService) processImage(
 			// subspan, so FailSpan here cannot poison the parent stage or
 			// the attempt status (cascade only fires for Stage-kind spans);
 			// it merely records this attempt's outcome and lets a later
-			// retry open its own span under the new attempt.
+			// retry open its own span under the new attempt. A caller
+			// cancellation gets its own code: the run did not fail, it was
+			// walked away from.
+			code := "MULTIMODAL_VLM_FAILED"
+			if errors.Is(handleErr, context.Canceled) {
+				code = "MULTIMODAL_CANCELLED"
+			}
 			tracker.FailSpan(ctx, imgSpan,
-				"MULTIMODAL_VLM_FAILED",
+				code,
 				handleErr.Error(),
 				handleErr)
 		}
@@ -349,7 +362,7 @@ func (s *ImageMultimodalService) processImage(
 	// the OCR action can raise and resolve its own subspan exactly like the
 	// action-loop layout did (a failed OCR fails the .ocr subspan and the
 	// outcome summary, without failing or retrying the whole image).
-	if err := pipeline.Run(ctx, &runContext{
+	rc := &runContext{
 		payload:    payload,
 		pipelineID: string(payload.ImagePipelineID),
 		params:     payload.ImagePipelineParams,
@@ -361,7 +374,8 @@ func (s *ImageMultimodalService) processImage(
 		out:        out,
 		tracker:    tracker,
 		imgSpan:    imgSpan,
-	}); err != nil {
+	}
+	if err := pipeline.Run(ctx, rc); err != nil {
 		// Surface the pipeline failure on this image's span instead of
 		// letting the deferred finalize misread it as success. Without
 		// this assignment the span below keeps handleErr == nil and the
@@ -412,23 +426,50 @@ func (s *ImageMultimodalService) processImage(
 		})
 	}
 	out["chunks_created"] = len(newChunks)
-	if out["ocr_status"] == "failed" {
-		out["outcome"] = "partial_failure"
-		if len(newChunks) == 0 {
-			out["outcome"] = "failed"
+
+	// Nothing was produced AND every VLM call failed or never ran: the image
+	// has no image_info, so it will not appear in the gallery, and a silent
+	// "skipped" success would hide a dead endpoint behind a green trace.
+	// Report the failure to the task layer — the caller wraps permanent
+	// failures (dead endpoint, bad key) with SkipRetry, transient ones burn
+	// at most the asynq retry budget, and the deferred finalize marks this
+	// image's span red (MULTIMODAL_CANCELLED when the run was walked away
+	// from). The #4132 refinement: failures stay recorded-not-propagated only
+	// while there is content to protect — a valid caption must not be
+	// duplicated by an OCR retry; with nothing produced there is nothing to
+	// protect, so the image fails honestly.
+	allFailed := out["ocr_status"] == "failed" ||
+		out["ocr_skipped"] == "no_ocr_after_observation_failed"
+	if len(newChunks) == 0 && allFailed {
+		out["outcome"] = "failed"
+		if ctx.Err() != nil {
+			handleErr = fmt.Errorf("image processing cancelled with no content produced: %w", ctx.Err())
+			return handleErr
 		}
+		if rc.vlmErr != nil {
+			// The typed VLM error travels with the verdict so the task
+			// layer can tell a permanent failure (SkipRetry) from a
+			// transient one.
+			handleErr = fmt.Errorf("image produced no content: %w", rc.vlmErr)
+		} else {
+			handleErr = fmt.Errorf("image produced no content (ocr_status=%v, caption_error=%v)",
+				out["ocr_status"], out["caption_error"])
+		}
+		return handleErr
+	}
+
+	if out["ocr_status"] == "failed" {
+		// Some content exists (a valid caption was persisted) — the failure
+		// is recorded on the .ocr subspan and the outcome, and the image
+		// stays a success at the task level (#4132).
+		out["outcome"] = "partial_failure"
 	}
 
 	if len(newChunks) == 0 {
-		// Deferred finalize will count this image on success.
+		// Deferred finalize will count this image on success. A genuine
+		// blank (OCR answered no_text) or a policy-declined image keeps its
+		// trace-level skip.
 		out["skipped"] = "no_extracted_content"
-		if out["ocr_status"] == "failed" {
-			out["skipped"] = "ocr_failed"
-		} else if out["ocr_skipped"] == "no_ocr_after_observation_failed" {
-			// The image produced nothing because the observation round never
-			// came back — not because the image genuinely carried no content.
-			out["skipped"] = "observation_failed"
-		}
 		return nil
 	}
 
@@ -552,6 +593,63 @@ func (s *ImageMultimodalService) shouldDropOrphanedMultimodal(
 // Returns false when the values are unavailable (e.g. when the handler is
 // invoked outside an asynq worker, as in unit tests). Treating that case as
 // "not final" keeps test ergonomics — tests should drive finalize explicitly.
+// isPermanentVLMFailure reports whether an error returned by the image run is
+// a permanent failure that must NOT be retried by the task layer. Retrying
+// such an error only burns queue capacity and re-hits the same dead end, so
+// the caller wraps it with asynq.SkipRetry to archive the task immediately.
+//
+// Permanent (SkipRetry):
+//   - a 4xx client error (bad key, oversized image, unsupported request): the
+//     request cannot succeed on retry;
+//   - a connection-level failure (connection refused / DNS / TLS / first-byte
+//     timeout) surfaced as an api.TransportError in the "send request" phase:
+//     the endpoint is unreachable, so every retry fails identically.
+//
+// Retryable (leave to the task-layer backoff):
+//   - 5xx, 408, 429;
+//   - a mid-stream transport error ("read response"): the stream broke after
+//     the server answered, which is transient;
+//   - anything else (unknown / context errors): safest to let the task retry.
+//
+// This is deliberately decoupled from the vlm package: it inspects only the
+// stable api.* error types the manager always propagates. The manager wraps
+// the original api error with %w, so errors.As still reaches it here.
+func isPermanentVLMFailure(err error) bool {
+	if err == nil {
+		return false
+	}
+	var httpErr *api.HTTPError
+	if errors.As(err, &httpErr) {
+		switch {
+		case httpErr.StatusCode == 429, // Too Many Requests
+			httpErr.StatusCode == 408: // Request Timeout
+			return false
+		case httpErr.StatusCode >= 500:
+			return false
+		case httpErr.StatusCode >= 400:
+			return true // permanent client error
+		}
+	}
+	var transportErr *api.TransportError
+	if errors.As(err, &transportErr) {
+		// "send request" = failure before any response (connect / TLS /
+		// first-byte timeout): endpoint is down. "read response" = the stream
+		// broke mid-flight, which is transient.
+		return transportErr.Op == "send request"
+	}
+	return false
+}
+
+// wrapSkipRetry marks a permanent VLM failure so the task layer archives the
+// task immediately instead of retrying it. Retryable errors are returned
+// unchanged.
+func wrapSkipRetry(err error) error {
+	if err == nil || !isPermanentVLMFailure(err) {
+		return err
+	}
+	return fmt.Errorf("%w: %w", asynq.SkipRetry, err)
+}
+
 func isFinalAsynqAttempt(ctx context.Context) bool {
 	retried, ok := asynq.GetRetryCount(ctx)
 	if ok {
