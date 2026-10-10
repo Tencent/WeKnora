@@ -16,7 +16,7 @@ import (
 // hits, and both LIMITs are preceded by the same ordering key so a truncated
 // result keeps the neighbourhoods of the highest-ranked seeds.
 func TestGraphSearchCypherBoundsAndOrders(t *testing.T) {
-	query, params := graphSearchCypher("ENTITY_kb", []string{"安恒"})
+	query, params := graphSearchCypher(EngineNeo4j, "ENTITY_kb", []string{"安恒"})
 
 	for _, want := range []string{
 		"EXISTS { (n)--() }",
@@ -221,4 +221,143 @@ func TestDecodeGraphSearchReportsInvalidRecordsAndStreamErrors(t *testing.T) {
 	}})
 	require.NoError(t, err)
 	assert.Empty(t, graph.Node[0].Attributes)
+}
+
+func TestNeo4jEngineKeepsAPOCQueries(t *testing.T) {
+	// The Neo4j path is what existing deployments run: it must keep using the
+	// APOC procedures, and keep letting APOC do the delete batching.
+	for _, want := range []string{"apoc.merge.node(row.labels", "apoc.coll.union(node.chunks"} {
+		if !strings.Contains(neo4jNodeImportQuery, want) {
+			t.Errorf("node import query no longer uses %q: %s", want, neo4jNodeImportQuery)
+		}
+	}
+	for _, want := range []string{"apoc.merge.node(row.source_labels", "apoc.merge.relationship(source"} {
+		if !strings.Contains(neo4jRelationshipImportQuery, want) {
+			t.Errorf("relationship import query no longer uses %q: %s", want, neo4jRelationshipImportQuery)
+		}
+	}
+	deleteRels, deleteNodes := neo4jDeleteQueries("ENTITY_kb:ENTITY_doc")
+	for _, query := range []string{deleteRels, deleteNodes} {
+		for _, want := range []string{"apoc.periodic.iterate(", "batchSize: 1000"} {
+			if !strings.Contains(query, want) {
+				t.Errorf("delete query no longer uses %q: %s", want, query)
+			}
+		}
+		if !strings.Contains(query, "ENTITY_kb:ENTITY_doc") {
+			t.Errorf("label expression not applied: %s", query)
+		}
+	}
+	// Nodes are deleted after their relationships, so a plain DELETE suffices
+	// and a stray DETACH would silently widen the blast radius.
+	if strings.Contains(deleteNodes, "DETACH DELETE") {
+		t.Errorf("the Neo4j node deletion must stay a plain DELETE: %s", deleteNodes)
+	}
+}
+
+func TestNewNeo4jRepositoryDefaultsToNeo4jEngine(t *testing.T) {
+	// An unset GRAPH_DATABASE_ENGINE must not route an existing deployment onto
+	// the Memgraph queries.
+	for value, want := range map[GraphEngine]GraphEngine{
+		"":             EngineNeo4j,
+		EngineNeo4j:    EngineNeo4j,
+		EngineMemgraph: EngineMemgraph,
+	} {
+		repo := NewNeo4jRepository(nil, value).(*Neo4jRepository)
+		if repo.engine != want {
+			t.Errorf("NewNeo4jRepository(_, %q).engine = %q, want %q", value, repo.engine, want)
+		}
+	}
+}
+
+func TestMemgraphCompatibleCypherAvoidsAPOC(t *testing.T) {
+	nodeQuery := memgraphNodeImportQuery("ENTITY_kb:ENTITY_doc")
+	if !strings.Contains(nodeQuery, "MERGE (node:ENTITY_kb:ENTITY_doc") {
+		t.Errorf("node query missing the label expression: %s", nodeQuery)
+	}
+
+	query, err := memgraphRelationshipImportQuery("ENTITY_kb:ENTITY_doc", "MENTIONS")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"MERGE (source:ENTITY_kb:ENTITY_doc", "MERGE (source)-[rel:`MENTIONS`]->(target)"} {
+		if !strings.Contains(query, want) {
+			t.Errorf("relationship query missing %q: %s", want, query)
+		}
+	}
+	deleteRels, deleteNodes := memgraphDeleteQueries("ENTITY_kb:ENTITY_doc", memgraphDeleteBatchSize)
+	for _, query := range []string{nodeQuery, query, deleteRels, deleteNodes} {
+		if strings.Contains(strings.ToLower(query), "apoc.") {
+			t.Fatalf("Memgraph query must not depend on APOC: %s", query)
+		}
+	}
+
+	escaped, err := memgraphRelationshipImportQuery("ENTITY_kb", "TYPE WITH `TICK`")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(escaped, "[rel:`TYPE WITH ``TICK```]") {
+		t.Fatalf("relationship type was not escaped as an identifier: %s", escaped)
+	}
+	if _, err := memgraphRelationshipImportQuery("ENTITY_kb", "\n"); err == nil {
+		t.Fatal("expected an empty relationship type to be rejected")
+	}
+}
+
+// Memgraph has no elementId(); #3950 added it to the search ordering as the
+// final tie breaker, which made the shared query fail on Memgraph with
+// "Function 'elementId' doesn't exist".
+func TestGraphSearchCypherUsesTheEngineIdentityFunction(t *testing.T) {
+	neo4jQuery, _ := graphSearchCypher(EngineNeo4j, "ENTITY_kb", []string{"Acme"})
+	for _, want := range []string{"n.kg, elementId(n)", "ORDER BY seed_index, elementId(r)"} {
+		if !strings.Contains(neo4jQuery, want) {
+			t.Errorf("the Neo4j ordering must keep %q: %s", want, neo4jQuery)
+		}
+	}
+
+	memgraphQuery, _ := graphSearchCypher(EngineMemgraph, "ENTITY_kb", []string{"Acme"})
+	for _, want := range []string{"n.kg, id(n)", "ORDER BY seed_index, id(r)"} {
+		if !strings.Contains(memgraphQuery, want) {
+			t.Errorf("the Memgraph ordering must use %q: %s", want, memgraphQuery)
+		}
+	}
+	if strings.Contains(memgraphQuery, "elementId(") {
+		t.Errorf("Memgraph has no elementId(): %s", memgraphQuery)
+	}
+	// Everything but the identity function has to stay shared; a second copy of
+	// the query would drift the next time the ordering changes.
+	if strings.ReplaceAll(memgraphQuery, "id(", "elementId(") != neo4jQuery {
+		t.Errorf("the two queries differ by more than the identity function:\n%s\n%s",
+			neo4jQuery, memgraphQuery)
+	}
+}
+
+// Memgraph has no apoc.periodic.iterate, so the batching lives in Go: each
+// batch is capped and reports its row count, and the caller commits one batch
+// per transaction until a batch comes back empty.
+func TestMemgraphDeleteQueriesAreBoundedAndCounted(t *testing.T) {
+	deleteRels, deleteNodes := memgraphDeleteQueries("ENTITY_kb", 1000)
+	for _, query := range []string{deleteRels, deleteNodes} {
+		for _, want := range []string{"LIMIT 1000", "RETURN count(*) AS deleted"} {
+			if !strings.Contains(query, want) {
+				t.Errorf("delete batch missing %q: %s", want, query)
+			}
+		}
+		if strings.Index(query, "LIMIT 1000") > strings.Index(query, "DELETE") {
+			t.Errorf("the cap must be applied before the delete: %s", query)
+		}
+	}
+	// Relationships are matched undirected, so the same relationship can arrive
+	// twice; without DISTINCT a batch would spend its cap on duplicates.
+	if !strings.Contains(deleteRels, "WITH DISTINCT r LIMIT") {
+		t.Errorf("relationship batches must be deduplicated: %s", deleteRels)
+	}
+	// The node batch runs after the relationship batches but must not depend on
+	// them having removed every edge: a node with a surviving edge would make a
+	// plain DELETE fail and leave the namespace behind.
+	if !strings.Contains(deleteNodes, "DETACH DELETE n") {
+		t.Errorf("node batches must detach: %s", deleteNodes)
+	}
+	if other, _ := memgraphDeleteQueries("ENTITY_kb", 7); !strings.Contains(other, "LIMIT 7") {
+		t.Errorf("batch size is not applied: %s", other)
+	}
 }

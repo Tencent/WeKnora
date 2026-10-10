@@ -150,6 +150,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(docparser.NewImageResolver))
 	must(container.Provide(initOllamaService))
 	must(container.Provide(initNeo4jClient))
+	must(container.Provide(provideGraphEngine))
 	must(container.Provide(stream.NewStreamManager))
 	logger.Debugf(ctx, "[Container] Initializing DuckDB...")
 	must(container.Provide(NewDuckDB))
@@ -1727,18 +1728,29 @@ func initNeo4jClient() (neo4j.Driver, error) {
 	uri := os.Getenv("NEO4J_URI")
 	username := os.Getenv("NEO4J_USERNAME")
 	password := os.Getenv("NEO4J_PASSWORD")
+	engine, err := graphDatabaseEngine(os.Getenv("GRAPH_DATABASE_ENGINE"))
+	if err != nil {
+		return nil, err
+	}
+	// Credentials come from the environment only; nothing is invented here. The
+	// Compose files keep carrying the Neo4j defaults. Memgraph ships without
+	// authentication, so for it empty credentials mean "connect unauthenticated"
+	// instead of an empty basic-auth login.
+	auth := neo4j.BasicAuth(username, password, "")
+	if engine == neo4jRepo.EngineMemgraph && username == "" && password == "" {
+		auth = neo4j.NoAuth()
+	}
 
 	// Retry configuration
 	maxRetries := 30                 // Max retry attempts
 	retryInterval := 2 * time.Second // Wait between retries
 
 	var driver neo4j.Driver
-	var err error
 
 	for attempt := 1; attempt <= maxRetries; attempt++ {
-		driver, err = neo4j.NewDriver(uri, neo4j.BasicAuth(username, password, ""))
+		driver, err = neo4j.NewDriver(uri, auth)
 		if err != nil {
-			logger.Warnf(ctx, "Failed to create Neo4j driver (attempt %d/%d): %v", attempt, maxRetries, err)
+			logger.Warnf(ctx, "Failed to create %s driver (attempt %d/%d): %v", engine, attempt, maxRetries, err)
 			time.Sleep(retryInterval)
 			continue
 		}
@@ -1746,17 +1758,37 @@ func initNeo4jClient() (neo4j.Driver, error) {
 		err = driver.VerifyAuthentication(ctx, nil)
 		if err == nil {
 			if attempt > 1 {
-				logger.Infof(ctx, "Successfully connected to Neo4j after %d attempts", attempt)
+				logger.Infof(ctx, "Successfully connected to %s after %d attempts", engine, attempt)
 			}
 			return driver, nil
 		}
 
-		logger.Warnf(ctx, "Failed to verify Neo4j authentication (attempt %d/%d): %v", attempt, maxRetries, err)
+		logger.Warnf(ctx, "Failed to verify %s authentication (attempt %d/%d): %v", engine, attempt, maxRetries, err)
 		driver.Close(ctx)
 		time.Sleep(retryInterval)
 	}
 
-	return nil, fmt.Errorf("failed to connect to Neo4j after %d attempts: %w", maxRetries, err)
+	return nil, fmt.Errorf("failed to connect to %s after %d attempts: %w", engine, maxRetries, err)
+}
+
+// graphDatabaseEngine resolves GRAPH_DATABASE_ENGINE. Unset means Neo4j, so an
+// existing deployment keeps its behaviour without touching its environment.
+func graphDatabaseEngine(value string) (neo4jRepo.GraphEngine, error) {
+	switch engine := neo4jRepo.GraphEngine(strings.ToLower(strings.TrimSpace(value))); engine {
+	case "":
+		return neo4jRepo.EngineNeo4j, nil
+	case neo4jRepo.EngineNeo4j, neo4jRepo.EngineMemgraph:
+		return engine, nil
+	default:
+		return "", fmt.Errorf("unsupported GRAPH_DATABASE_ENGINE %q (expected neo4j or memgraph)", string(engine))
+	}
+}
+
+// provideGraphEngine hands the engine to the graph repository through the
+// container, so the repository picks its Cypher dialect from configuration
+// rather than reading the environment itself.
+func provideGraphEngine() (neo4jRepo.GraphEngine, error) {
+	return graphDatabaseEngine(os.Getenv("GRAPH_DATABASE_ENGINE"))
 }
 
 func NewDuckDB() (*sql.DB, error) {
