@@ -23543,7 +23543,7 @@
                 "exa",
                 "metaso",
                 "bocha",
-                "serply"
+                "serply", "doubao"
             ],
             "x-enum-varnames": [
                 "WebSearchProviderTypeBrave",
@@ -23559,7 +23559,7 @@
                 "WebSearchProviderTypeExa",
                 "WebSearchProviderTypeMetaso",
                 "WebSearchProviderTypeBocha",
-                "WebSearchProviderTypeSerply"
+                "WebSearchProviderTypeSerply", "WebSearchProviderTypeDoubao"
             ]
         },
         "github_com_Tencent_WeKnora_internal_types.WikiConfig": {
