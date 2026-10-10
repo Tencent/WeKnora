@@ -44,6 +44,7 @@ func NewQdrantRetrieveEngineRepository(client *qdrant.Client, indexCfg *types.In
 		collectionBaseName: collectionBaseName,
 		shardNumber:        indexCfg.GetShardNumber(0),
 		replicationFactor:  indexCfg.GetReplicationFactor(0),
+		bm25:               indexCfg != nil && indexCfg.QdrantKeywordSearch == "bm25",
 	}
 
 	log.Info("[Qdrant] Successfully initialized repository")
@@ -142,6 +143,9 @@ func (q *qdrantRepository) deletePoints(ctx context.Context, dimension int, coll
 
 // ensureCollection ensures the collection exists for the given dimension
 func (q *qdrantRepository) ensureCollection(ctx context.Context, dimension int) error {
+	if _, ok := q.initializedCollections.Load(dimension); ok {
+		return nil
+	}
 	collectionName := q.getCollectionName(dimension)
 
 	log := logger.GetLogger(ctx)
@@ -156,7 +160,7 @@ func (q *qdrantRepository) ensureCollection(ctx context.Context, dimension int) 
 	if !exists {
 		log.Infof("[Qdrant] Creating collection %s with dimension %d", collectionName, dimension)
 
-		err = q.client.CreateCollection(ctx, &qdrant.CreateCollection{
+		collection := &qdrant.CreateCollection{
 			CollectionName: collectionName,
 			VectorsConfig: qdrant.NewVectorsConfig(&qdrant.VectorParams{
 				Size:     uint64(dimension),
@@ -164,7 +168,11 @@ func (q *qdrantRepository) ensureCollection(ctx context.Context, dimension int) 
 			}),
 			ShardNumber:       types.OptionalUint32(q.shardNumber),
 			ReplicationFactor: types.OptionalUint32(q.replicationFactor),
-		})
+		}
+		if q.bm25 {
+			collection.SparseVectorsConfig = bm25Config()
+		}
+		err = q.client.CreateCollection(ctx, collection)
 		if err != nil {
 			log.Errorf("[Qdrant] Failed to create collection: %v", err)
 			return fmt.Errorf("failed to create collection: %w", err)
@@ -172,6 +180,9 @@ func (q *qdrantRepository) ensureCollection(ctx context.Context, dimension int) 
 
 		// Create payload indexes for filtering
 		indexFields := []string{fieldChunkID, fieldKnowledgeID, fieldKnowledgeBaseID, fieldSourceID}
+		if q.bm25 {
+			indexFields = append(indexFields, fieldTagID)
+		}
 		for _, field := range indexFields {
 			_, err = q.client.CreateFieldIndex(ctx, &qdrant.CreateFieldIndexCollection{
 				CollectionName: collectionName,
@@ -217,6 +228,11 @@ func (q *qdrantRepository) ensureCollection(ctx context.Context, dimension int) 
 	}
 
 	// Mark as initialized
+	if q.bm25 {
+		if err := q.checkBM25Collection(ctx, collectionName, dimension); err != nil {
+			return err
+		}
+	}
 	q.initializedCollections.Store(dimension, true)
 	return nil
 }
@@ -268,7 +284,7 @@ func (q *qdrantRepository) Save(ctx context.Context,
 	pointID := uuid.New().String()
 	point := &qdrant.PointStruct{
 		Id:      qdrant.NewID(pointID),
-		Vectors: qdrant.NewVectors(embeddingDB.Embedding...),
+		Vectors: q.pointVectors(embeddingDB.Embedding, embeddingDB.Content),
 		Payload: createPayload(embeddingDB),
 	}
 
@@ -312,7 +328,7 @@ func (q *qdrantRepository) BatchSave(ctx context.Context,
 		dimension := len(embeddingDB.Embedding)
 		point := &qdrant.PointStruct{
 			Id:      qdrant.NewID(uuid.New().String()),
-			Vectors: qdrant.NewVectors(embeddingDB.Embedding...),
+			Vectors: q.pointVectors(embeddingDB.Embedding, embeddingDB.Content),
 			Payload: createPayload(embeddingDB),
 		}
 		pointsByDimension[dimension] = append(pointsByDimension[dimension], point)
@@ -759,6 +775,9 @@ func (q *qdrantRepository) VectorRetrieve(ctx context.Context,
 func (q *qdrantRepository) KeywordsRetrieve(ctx context.Context,
 	params types.RetrieveParams,
 ) ([]*types.RetrieveResult, error) {
+	if q.bm25 {
+		return q.bm25Retrieve(ctx, params)
+	}
 	log := logger.GetLogger(ctx)
 	log.Infof("[Qdrant] Performing keywords retrieval with query: %s, topK: %d", params.Query, params.TopK)
 
@@ -1033,21 +1052,15 @@ func (q *qdrantRepository) CopyIndices(ctx context.Context,
 				fieldIsEnabled:       isEnabled,
 			})
 
-			var vectors *qdrant.Vectors
-			if vectorOutput := sourcePoint.Vectors.GetVector(); vectorOutput != nil {
-				if denseVector := vectorOutput.GetDenseVector(); denseVector != nil {
-					vectors = qdrant.NewVectors(denseVector.Data...)
-				}
-			}
-
-			if vectors == nil {
+			dense := denseVectorData(sourcePoint.Vectors)
+			if len(dense) == 0 {
 				log.Warnf("[Qdrant] No vectors found for source point with chunk %s, skipping", sourceChunkID)
 				continue
 			}
 
 			newPoint := &qdrant.PointStruct{
 				Id:      qdrant.NewID(uuid.New().String()),
-				Vectors: vectors,
+				Vectors: q.pointVectors(dense, payload[fieldContent].GetStringValue()),
 				Payload: newPayload,
 			}
 

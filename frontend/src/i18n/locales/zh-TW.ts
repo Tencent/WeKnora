@@ -5791,6 +5791,7 @@ export default {
     }
   },
   vectorStoreSettings: {
+    fields: { qdrant_keyword_search: '關鍵字檢索' },
     title: '向量資料庫引擎',
     description: '註冊和管理用於知識庫搜尋的向量資料庫實例。',
     basicSection: '基本資訊',

@@ -2270,6 +2270,7 @@ export default {
     }
   },
   vectorStoreSettings: {
+    fields: { qdrant_keyword_search: 'キーワード検索' },
     title: 'ベクトルデータベースエンジン',
     description: 'ナレッジベースの検索に使用するベクトルデータベースのインスタンスを登録・管理します。',
     basicSection: '基本',
