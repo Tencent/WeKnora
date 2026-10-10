@@ -197,7 +197,9 @@ func qwenToolCallArguments(tc api.ToolCall) (map[string]any, error) {
 		)
 	}
 	var decoded any
-	if err := json.Unmarshal([]byte(raw), &decoded); err != nil {
+	decoder := json.NewDecoder(strings.NewReader(raw))
+	decoder.UseNumber()
+	if err := decoder.Decode(&decoded); err != nil {
 		return nil, fmt.Errorf(
 			"tool call %q arguments are invalid JSON in Qwen compatibility mode: %w", tc.ID, err,
 		)
