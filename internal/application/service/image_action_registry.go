@@ -187,6 +187,9 @@ type runContext struct {
 	vlmCfg     types.VLMConfig
 	imageInfo  *types.ImageInfo
 	out        types.JSONMap
+	// Caption and observation failures allow OCR to continue, but must be
+	// returned if the pipeline ultimately produces no content.
+	captionErr error
 	// params is this pipeline's private tunables, as resolved from the
 	// knowledge base. Nothing else may read it: a key understood by one
 	// pipeline says nothing about another's, so the key only has to be
@@ -325,6 +328,7 @@ func runCaptionAction(ctx context.Context, r *runContext) error {
 		// kind of event and logs its own line, and a caption miss must not be
 		// louder than the rest of the run.
 		r.out["caption_error"] = err.Error()
+		r.captionErr = err
 		return nil
 	}
 	if text := strings.TrimSpace(raw); text != "" {
@@ -344,6 +348,7 @@ func runObservationCaptionAction(ctx context.Context, r *runContext) error {
 	if err != nil {
 		logger.Warnf(ctx, "[ImageMultimodal] Describe and observe failed for %s: %v", r.payload.ImageURL, err)
 		r.out["caption_error"] = err.Error()
+		r.captionErr = err
 		return nil
 	}
 	obs, ok := types.ParseImageAttrsResponse(raw)

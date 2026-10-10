@@ -255,10 +255,10 @@ func (s *ImageMultimodalService) Handle(ctx context.Context, task *asynq.Task) (
 // first, then act" possible: an image whose text is reliably absent does not pay
 // for OCR.
 //
-// An observation (describe) failure is not fatal. The attributes then stay at
-// their conservative defaults, which keeps OCR running, so a model that cannot
-// observe costs one extra call rather than losing the text. This mirrors the
-// upstream caption path, where a failed caption is also just a warning.
+// A caption or observation failure allows OCR to continue. If OCR extracts
+// text, that result is kept; if the pipeline produces no content, the earlier
+// failure is returned instead of reporting a successful empty image. OCR
+// failures remain fatal regardless of whether a caption was produced.
 //
 // out is the per-image trace map, owned by the caller and closed by the span
 // this function ends; every field the pipeline discovers is written into it.
@@ -344,9 +344,9 @@ func (s *ImageMultimodalService) processImage(
 	}
 
 	// The pipeline runs to completion, including the decision it makes about
-	// OCR. Nothing below re-reads its result except the chunk building that
-	// follows.
-	if err := pipeline.Run(ctx, &runContext{
+	// OCR. Caption/observation errors are retained for the empty-result check
+	// after chunk building.
+	run := &runContext{
 		payload:    payload,
 		params:     payload.ImagePipelineParams,
 		declared:   pipeline.Fields(),
@@ -355,7 +355,8 @@ func (s *ImageMultimodalService) processImage(
 		vlmCfg:     vlmCfg,
 		imageInfo:  &imageInfo,
 		out:        out,
-	}); err != nil {
+	}
+	if err := pipeline.Run(ctx, run); err != nil {
 		// Surface the pipeline failure on this image's span instead of
 		// letting the deferred finalize misread it as success. Without
 		// this assignment the span below keeps handleErr == nil and the
@@ -408,6 +409,10 @@ func (s *ImageMultimodalService) processImage(
 	out["chunks_created"] = len(newChunks)
 
 	if len(newChunks) == 0 {
+		if run.captionErr != nil {
+			handleErr = fmt.Errorf("extract image content: %w", run.captionErr)
+			return handleErr
+		}
 		// Deferred finalize will count this image on success.
 		out["skipped"] = "no_extracted_content"
 		return nil
