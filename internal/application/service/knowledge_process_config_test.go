@@ -145,7 +145,7 @@ func TestBuildSplitterConfigFromChunking_UsesEffectiveChunkingConfig(t *testing.
 		ChunkingConfig: &types.ChunkingConfig{ChunkSize: 1500, ChunkOverlap: 120, Strategy: "character"},
 	}
 	eff := ResolveProcessConfig(kb, overrides)
-	cfg := buildSplitterConfigFromChunking(eff.ChunkingConfig)
+	cfg := buildSplitterConfigFromChunking(eff.ChunkingConfig, 0)
 
 	require.Equal(t, 1500, cfg.ChunkSize)
 	require.Equal(t, 120, cfg.ChunkOverlap)
@@ -700,3 +700,36 @@ func TestResolveProcessConfig_UploadEnablesMarkerViaStrategy(t *testing.T) {
 	require.Equal(t, "====", eff.ChunkingConfig.CustomSeparator)
 	require.True(t, eff.ChunkingConfig.CustomSeparatorOnly)
 }
+
+// Production budget regression: a marker-only segment larger than ChunkSize
+// but under it must still be capped by the embedding model's declared
+// per-input character limit, or the embedding batch layer rejects the
+// document. Mirrors the review scenario: 1,500-char segment, ChunkSize
+// 2000, embedding limit 1024.
+func TestBuildSplitterConfigFromChunking_WiresEmbeddingCharLimit(t *testing.T) {
+	t.Parallel()
+
+	kb := &types.KnowledgeBase{
+		ChunkingConfig: types.ChunkingConfig{
+			ChunkSize:           2000,
+			ChunkOverlap:        0,
+			Strategy:            chunker.StrategyCustomSeparator,
+			CustomSeparator:     "======",
+			CustomSeparatorOnly: true,
+		},
+	}
+	eff := ResolveProcessConfig(kb, nil)
+	cfg := buildSplitterConfigFromChunking(eff.ChunkingConfig, 1024)
+	require.Equal(t, 1024, cfg.EmbeddingCharLimit)
+
+	seg := strings.Repeat("段", 1500)
+	text := seg + "\n======\n尾。"
+	chunks := chunker.Split(text, cfg)
+	require.Greater(t, len(chunks), 1, "1500-rune segment must be split under the 1024-char embedding limit")
+	for _, c := range chunks {
+		require.LessOrEqual(t, runeLen(c.Content), 1024-256,
+			"chunk %d exceeds the embedding budget minus the title/context reserve", c.Seq)
+	}
+}
+
+func runeLen(s string) int { n := 0; for range s { n++ }; return n }

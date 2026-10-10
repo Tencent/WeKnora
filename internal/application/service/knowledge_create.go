@@ -1362,7 +1362,7 @@ func (s *knowledgeService) triggerManualProcessing(ctx context.Context,
 	clean = docparser.NormalizeHTMLTables(clean)
 
 	// Manual content is markdown - chunk directly with Go chunker
-	chunkCfg := buildSplitterConfigFromChunking(eff.ChunkingConfig)
+	chunkCfg := buildSplitterConfigFromChunking(eff.ChunkingConfig, s.embeddingInputLimit(ctx, kb))
 
 	var parsed []types.ParsedChunk
 	opts := ProcessChunksOptions{
