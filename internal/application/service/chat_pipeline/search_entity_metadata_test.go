@@ -16,7 +16,10 @@ func TestChunk2SearchResultIncludesCustomMetadata(t *testing.T) {
 		Source:          "api",
 		Channel:         "web",
 		KnowledgeBaseID: "kb-1",
-		CustomMetadata:  types.JSON(`{"lesson_url":"https://example.com/lesson","course_url":"https://example.com/course"}`),
+		CustomMetadata: types.JSON(`{
+			"lesson_url":"https://example.com/lesson",
+			"course_url":"https://example.com/course"
+		}`),
 	}
 	chunk := &types.Chunk{
 		ID:          "chunk-1",
@@ -27,7 +30,10 @@ func TestChunk2SearchResultIncludesCustomMetadata(t *testing.T) {
 
 	got := chunk2SearchResult(chunk, knowledge)
 
-	require.Equal(t, "course_url: https://example.com/course\nlesson_url: https://example.com/lesson", got.KnowledgeCustomMetadata)
+	require.Equal(t,
+		"course_url: https://example.com/course\nlesson_url: https://example.com/lesson",
+		got.KnowledgeCustomMetadata,
+	)
 	require.Equal(t, "desc", got.KnowledgeDescription)
 	require.Equal(t, "web", got.KnowledgeChannel)
 	require.Equal(t, 0.0, got.Score)
