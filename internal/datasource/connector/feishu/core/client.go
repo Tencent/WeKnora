@@ -184,6 +184,17 @@ const maxFeishuDownloadBytes = 512 * 1024 * 1024 // 512 MB
 
 var feishuRetryBackoff = []time.Duration{2 * time.Second, 4 * time.Second, 8 * time.Second}
 
+// apiError preserves business errors carried by non-200 responses without
+// decoding an unsuccessful response into the caller's result.
+type apiError struct {
+	status int
+	ApiResponse
+}
+
+func (e *apiError) Error() string {
+	return fmt.Sprintf("feishu api error: status=%d code=%d msg=%s", e.status, e.Code, e.Msg)
+}
+
 // DoRequest executes an authenticated API request and decodes the JSON response,
 // retrying transient failures (transport errors, HTTP 429, 5xx). Feishu's drive
 // export/wiki APIs are aggressively rate limited, and a thousand-document sync
@@ -284,6 +295,10 @@ func (c *Client) DoRequest(ctx context.Context, method, path string, body interf
 		}
 
 		if resp.StatusCode != http.StatusOK {
+			var apiResp ApiResponse
+			if json.Unmarshal(respBody, &apiResp) == nil && apiResp.Code != 0 {
+				return &apiError{status: resp.StatusCode, ApiResponse: apiResp}
+			}
 			return fmt.Errorf("feishu api error: status=%d body=%s", resp.StatusCode, string(respBody))
 		}
 

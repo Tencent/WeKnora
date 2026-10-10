@@ -58,7 +58,7 @@ func TestBlocksToMarkdown_EmbeddedSheetAndFile(t *testing.T) {
 	}
 }
 
-func TestBlocksToMarkdown_SheetTruncatedNote(t *testing.T) {
+func TestBlocksToMarkdown_SheetReadBoundaryNote(t *testing.T) {
 	blocks := []DocxBlock{
 		{BlockID: "root", BlockType: BlockTypePage},
 		{BlockID: "s", BlockType: BlockTypeSheet, Sheet: &BlockTokenRef{Token: "sht_a_0"}},
@@ -68,8 +68,8 @@ func TestBlocksToMarkdown_SheetTruncatedNote(t *testing.T) {
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
-	if !strings.Contains(string(md), "表格已截断") {
-		t.Errorf("want truncation note, got:\n%s", md)
+	if !strings.Contains(string(md), "未完整读取") || strings.Contains(string(md), "500") {
+		t.Errorf("want an incomplete-read note without an incorrect row count, got:\n%s", md)
 	}
 }
 
@@ -291,5 +291,15 @@ func TestBlocksToMarkdown_CalloutContainerNoOp(t *testing.T) {
 	}
 	if strings.TrimSpace(string(md)) != "" {
 		t.Errorf("empty callout should Emit nothing, got:\n%q", md)
+	}
+}
+
+func TestInlineTable_TruncationBeforeFirstRowIsVisible(t *testing.T) {
+	for _, kind := range []string{"sheet", "bitable"} {
+		reader := fakeReader{sheetTruncated: true, bitableTruncated: true}
+		got := inlineTable(context.Background(), reader, "token", kind)
+		if !strings.Contains(got, "未完整读取") || strings.Contains(got, "500") {
+			t.Fatalf("lost incomplete-table note: %q", got)
+		}
 	}
 }
