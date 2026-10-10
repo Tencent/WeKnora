@@ -1099,3 +1099,105 @@ func TestValidateProbeCapDoesNotOverrideAnInconclusiveWalk(t *testing.T) {
 		t.Fatalf("Validate made %d document probes, want %d", total, maxValidateProbes)
 	}
 }
+
+// Once the probe cap is spent no later probe can succeed. A workspace walked
+// after that point must not get the chance to find an unlistable folder and
+// turn every failed probe into acceptance.
+func TestValidateStopsWalkingOnceTheProbeCapIsSpent(t *testing.T) {
+	api := &fakeAPI{
+		nodes:       map[string][]node{},
+		nodeErrors:  map[string]error{"folder": errors.New("DingTalk API status=500")},
+		blockErrors: map[string]error{},
+	}
+	denied := errors.New("forbidden.accessDenied: the operator has no permission")
+	for w := 0; w < maxValidateProbes; w++ {
+		root := fmt.Sprintf("root-%d", w)
+		id := fmt.Sprintf("doc-%d", w)
+		api.workspaces = append(api.workspaces, workspace{ID: root, RootNodeID: root, Name: root})
+		api.nodes[root] = []node{{ID: id, Name: id, Type: "FILE", Category: "ALIDOC", Extension: "adoc"}}
+		api.blockErrors[id] = denied
+	}
+	api.workspaces = append(api.workspaces, workspace{ID: "late", RootNodeID: "root-late", Name: "Late"})
+	api.nodes["root-late"] = []node{{ID: "folder", Name: "Folder", Type: "FOLDER"}}
+
+	err := testConnector(api).Validate(context.Background(), testConfig())
+	if err == nil || !strings.Contains(err.Error(), "no permission") {
+		t.Fatalf("Validate must report the failed probes, got: %v", err)
+	}
+	wantNote := fmt.Sprintf("only the first %d documents were probed", maxValidateProbes)
+	if !strings.Contains(err.Error(), wantNote) {
+		t.Fatalf("Validate error should say the probe cap stopped the walk, got: %v", err)
+	}
+}
+
+// A tail skipped to make room for siblings is only covered by a probe made
+// after it. A document probed before the skip says nothing about the skipped
+// pages, so an empty sibling must leave the walk inconclusive.
+func TestValidateSkippedTailIsNotCoveredByAnEarlierProbe(t *testing.T) {
+	var mu sync.Mutex
+	fatPages := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/v1.0/oauth2/accessToken":
+			_, _ = w.Write([]byte(`{"accessToken":"token","expireIn":7200}`))
+		case "/v2.0/wiki/workspaces":
+			_, _ = w.Write([]byte(`{"workspaces":[{"workspaceId":"a","rootNodeId":"root-a","name":"A"}]}`))
+		case "/v2.0/wiki/nodes":
+			switch r.URL.Query().Get("parentNodeId") {
+			case "root-a":
+				_, _ = w.Write([]byte(`{"nodes":[` +
+					`{"nodeId":"doc-x","name":"X","type":"FILE","category":"ALIDOC","extension":"adoc"},` +
+					`{"nodeId":"folder-a","type":"FOLDER"},` +
+					`{"nodeId":"folder-b","type":"FOLDER"}]}`))
+			case "folder-a":
+				mu.Lock()
+				fatPages++
+				page := fatPages
+				mu.Unlock()
+				next := ""
+				if page < 30 {
+					next = strconv.Itoa(page)
+				}
+				_, _ = fmt.Fprintf(w,
+					`{"nodes":[{"nodeId":"pdf-%d","type":"FILE","category":"FILE","extension":"pdf"}],"nextToken":%q}`,
+					page, next)
+			case "folder-b":
+				_, _ = w.Write([]byte(`{"nodes":[]}`))
+			default:
+				http.NotFound(w, r)
+			}
+		case "/v1.0/doc/suites/documents/doc-x/blocks":
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte(`{"code":"forbidden.accessDenied","message":"no permission"}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	if err := testConnector(testClient(server)).Validate(context.Background(), testConfig()); err != nil {
+		t.Fatalf("Validate must accept when the skipped tail was never covered by a probe, got: %v", err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if fatPages >= maxValidateListings {
+		t.Fatalf("fat folder used %d pages, want room left for its sibling", fatPages)
+	}
+}
+
+// A probe cancelled by the caller's deadline still names the document, so the
+// operator can tell which read timed out.
+func TestValidateContextErrorNamesTheProbedDocument(t *testing.T) {
+	api := &fakeAPI{
+		workspaces: []workspace{{ID: "a", RootNodeID: "root-a", Name: "Alpha"}},
+		nodes: map[string][]node{
+			"root-a": {{ID: "doc", Name: "Handbook", Type: "FILE", Category: "ALIDOC", Extension: "adoc"}},
+		},
+		blockErrors: map[string]error{"doc": context.DeadlineExceeded},
+	}
+	err := testConnector(api).Validate(context.Background(), testConfig())
+	if !errors.Is(err, context.DeadlineExceeded) || !strings.Contains(err.Error(), `document "Handbook"`) {
+		t.Fatalf("Validate must surface the timed-out probe with its document, got: %v", err)
+	}
+}

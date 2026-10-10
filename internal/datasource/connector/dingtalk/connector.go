@@ -141,7 +141,7 @@ func (c *Connector) Validate(ctx context.Context, dataSourceConfig *types.DataSo
 		listings      int
 		probeCapHit   bool
 	)
-	for _, item := range workspaces {
+	for i, item := range workspaces {
 		rootNodeID := strings.TrimSpace(item.RootNodeID)
 		if rootNodeID == "" {
 			continue
@@ -166,8 +166,11 @@ func (c *Connector) Validate(ctx context.Context, dataSourceConfig *types.DataSo
 		if unexplored {
 			inconclusive = true
 		}
-		if hitCap {
-			probeCapHit = true
+		// Once the cap is spent no further probe can succeed, so walking on
+		// could only find an unlistable folder and turn the failed probes
+		// into acceptance.
+		if probes >= maxValidateProbes {
+			probeCapHit = hitCap || i+1 < len(workspaces)
 			break
 		}
 	}
@@ -208,24 +211,25 @@ const maxValidateListings = 20
 
 // sampleWorkspace walks one workspace breadth-first, the way scanWorkspace
 // does, and probes ingestible documents until one is readable, the probe cap
-// is hit, or the walk runs out of nodes. It requests one page at a time
+// is spent, or the walk runs out of nodes. It requests one page at a time
 // instead of listing whole folders, so the budget bounds real requests.
 //
 // unexplored reports that some folder was never opened or could not be listed,
 // so a failed probe elsewhere must not reject the data source. readable reports
-// that a probe succeeded. capHit reports that another document was visible but
-// maxValidateProbes had already been spent; the caller turns that into an
-// error only when the walk is conclusive.
+// that a probe succeeded. The walk stops as soon as the failed probe that
+// spends maxValidateProbes returns, without another listing; capHit then
+// reports that nodes of this workspace were still left to visit. The caller
+// turns that into an error only when the walk is conclusive.
 //
 // A folder's later pages are held back once the listings still in the budget
 // are no longer enough to open every sibling already queued, so each of those
 // siblings still gets one page. The unread tail is not itself "unexplored"
-// when this workspace already probed a document: the sample has seen one, and
-// the reservation is what made room for it. A tail skipped before any document
-// was probed stays inconclusive, because the only readable document may sit on
-// a page the sample never requested. A folder that receives no page at all, a
-// subfolder listing error, a repeated page token, or a tail with no sibling
-// waiting all stay inconclusive too.
+// when a document was probed after it was skipped: the reservation is what
+// made room for that probe. A tail skipped with no probe after it stays
+// inconclusive, because the only readable document may sit on a page the
+// sample never requested. A folder that receives no page at all, a subfolder
+// listing error, a repeated page token, or a tail with no sibling waiting all
+// stay inconclusive too.
 //
 // Any failed page of the workspace root is a hard error, matching listNodes
 // during sync. Subfolder listing errors stay inconclusive unless the request
@@ -246,8 +250,7 @@ func sampleWorkspace(
 ) (readable, unexplored, capHit bool, err error) {
 	queue := []string{rootNodeID}
 	visited := map[string]struct{}{rootNodeID: {}}
-	probedHere := false
-	skippedTail := false
+	uncoveredSkip := false
 	for len(queue) > 0 {
 		parent := queue[0]
 		queue = queue[1:]
@@ -268,7 +271,7 @@ func sampleWorkspace(
 				if len(queue) == 0 {
 					unexplored = true
 				} else {
-					skippedTail = true
+					uncoveredSkip = true
 				}
 				break
 			}
@@ -290,25 +293,24 @@ func sampleWorkspace(
 				unexplored = true
 				break
 			}
-			for _, child := range children {
+			for i, child := range children {
 				if child.isIngestible(settings) {
-					if *probes >= maxValidateProbes {
-						if skippedTail && !probedHere {
-							unexplored = true
-						}
-						return false, unexplored, true, nil
-					}
 					*probes++
 					*sawDocument = true
-					probedHere = true
+					uncoveredSkip = false
 					probeErr := verifyDocument(ctx, api, child)
 					if probeErr != nil {
 						if ctx.Err() != nil || isContextError(probeErr) {
-							return false, false, false, probeErr
+							return false, false, false, fmt.Errorf("document %q: %w", child.Name, probeErr)
 						}
 						*lastErr = fmt.Errorf(
 							"workspace %q document %q: %w", workspaceName, child.Name, probeErr,
 						)
+						if *probes >= maxValidateProbes {
+							more := i+1 < len(children) || len(subfolders) > 0 ||
+								next != "" || len(queue) > 0
+							return false, unexplored, more, nil
+						}
 						continue
 					}
 					return true, false, false, nil
@@ -335,7 +337,7 @@ func sampleWorkspace(
 		}
 		queue = append(queue, subfolders...)
 	}
-	if skippedTail && !probedHere {
+	if uncoveredSkip {
 		unexplored = true
 	}
 	return false, unexplored, false, nil
