@@ -87,41 +87,6 @@ func ApplySkipGeneratedQuestions(results []*SearchResult, disabled map[string]st
 	}
 }
 
-// FilterGeneratedQuestionHits drops generated-question index rows that belong
-// to one of kbIDs. Engines that already exclude those rows in SQL return the
-// same slice contents.
-func FilterGeneratedQuestionHits(kbIDs []string, results []*RetrieveResult) []*RetrieveResult {
-	if len(kbIDs) == 0 {
-		return results
-	}
-	blocked := make(map[string]struct{}, len(kbIDs))
-	for _, id := range kbIDs {
-		if id != "" {
-			blocked[id] = struct{}{}
-		}
-	}
-	if len(blocked) == 0 {
-		return results
-	}
-	for _, result := range results {
-		if result == nil || len(result.Results) == 0 {
-			continue
-		}
-		kept := make([]*IndexWithScore, 0, len(result.Results))
-		for _, hit := range result.Results {
-			if hit != nil {
-				_, blockKB := blocked[hit.KnowledgeBaseID]
-				if blockKB && IsGeneratedQuestionSource(hit.ChunkID, hit.SourceID, hit.SourceType) {
-					continue
-				}
-			}
-			kept = append(kept, hit)
-		}
-		result.Results = kept
-	}
-	return results
-}
-
 // GeneratedQuestionAlignResult is what aligning the index and chunk metadata
 // to the current question-generation switch changed.
 type GeneratedQuestionAlignResult struct {

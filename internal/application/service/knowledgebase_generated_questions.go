@@ -14,45 +14,6 @@ type generatedQuestionMetadataStore interface {
 	SetGeneratedQuestionsInactive(ctx context.Context, kbID string, inactive bool) (int64, error)
 }
 
-// markDisabledQuestionGeneration tells rerank to leave generated questions
-// out of the passage when that knowledge base's switch is off. A lookup
-// failure leaves the flag unset so a blip does not hide questions that are
-// still supposed to participate.
-func (s *knowledgeBaseService) markDisabledQuestionGeneration(
-	ctx context.Context, results []*types.SearchResult,
-) {
-	if len(results) == 0 {
-		return
-	}
-	seen := make(map[string]struct{}, len(results))
-	ids := make([]string, 0, len(results))
-	for _, result := range results {
-		if result == nil || result.KnowledgeBaseID == "" {
-			continue
-		}
-		if _, ok := seen[result.KnowledgeBaseID]; ok {
-			continue
-		}
-		seen[result.KnowledgeBaseID] = struct{}{}
-		ids = append(ids, result.KnowledgeBaseID)
-	}
-	if len(ids) == 0 {
-		return
-	}
-	kbs, err := s.repo.GetKnowledgeBaseByIDs(ctx, ids)
-	if err != nil {
-		logger.Warnf(ctx, "Failed to read question generation config for rerank: %v", err)
-		return
-	}
-	disabled := make(map[string]struct{})
-	for _, kb := range kbs {
-		if types.QuestionGenerationDisabled(kb) {
-			disabled[kb.ID] = struct{}{}
-		}
-	}
-	types.ApplySkipGeneratedQuestions(results, disabled)
-}
-
 // AlignGeneratedQuestions makes generated-question index rows and chunk
 // metadata follow the current switch. Disable sets is_enabled=false and marks
 // the questions inactive. Enable flips both back, so the existing vectors and

@@ -54,7 +54,6 @@ func (c *CompositeRetrieveEngine) Retrieve(ctx context.Context,
 					if err != nil {
 						return err
 					}
-					result = types.FilterGeneratedQuestionHits(param.ExcludeGeneratedQuestionKBIDs, result)
 					for _, one := range result {
 						if one == nil || one.Error == nil {
 							continue

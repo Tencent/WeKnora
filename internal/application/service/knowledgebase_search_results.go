@@ -88,7 +88,6 @@ func (s *knowledgeBaseService) processSearchResults(ctx context.Context,
 	// chunks above were already permission checked, so look up their image
 	// children without the caller-tenant filter (#3342).
 	searchutil.EnrichSearchResultsImageInfoOnly(ctx, s.chunkRepo, searchResults)
-	s.markDisabledQuestionGeneration(ctx, searchResults)
 
 	logger.Infof(ctx, "Search results processed, total: %d", len(searchResults))
 	return searchResults, nil
