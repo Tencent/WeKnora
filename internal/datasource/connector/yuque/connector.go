@@ -270,6 +270,19 @@ func (c *Connector) walk(
 
 			detail, err := cli.GetDocDetail(ctx, d.ID)
 			if err != nil {
+				// Do not acknowledge the doc's new version when its detail fetch
+				// failed: rewind the cursor entry to the previously synced version
+				// (existing docs) or drop it (new docs), so the next incremental
+				// sync re-fetches the doc once the endpoint recovers. Acking before
+				// the fetch succeeded made the doc silently skipped by every later
+				// incremental sync (Tencent/WeKnora#3690). The doc stays in
+				// currentDocs, so deletion detection is unaffected.
+				if prev != nil && prev.BookDocTimes != nil {
+					newCursor.BookDocTimes[bookIDStr][docIDStr] = prev.BookDocTimes[bookIDStr][docIDStr]
+				}
+				if newCursor.BookDocTimes[bookIDStr][docIDStr] == "" {
+					delete(newCursor.BookDocTimes[bookIDStr], docIDStr)
+				}
 				// Record failure but continue (placeholder item with error metadata).
 				// Keep doc_id/book_id/slug for observability pipelines that join on these.
 				out = append(out, types.FetchedItem{

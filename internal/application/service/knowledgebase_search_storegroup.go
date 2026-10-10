@@ -62,6 +62,20 @@ type storeGroup struct {
 	// (knowledgebase_search_faq.go) updates this between calls to
 	// retrieveFromStores. Single-shot HybridSearch sets it once.
 	TopK int
+
+	// ImageKBIDs are the KBs of this group whose image vectors the search
+	// recalls: they opted in (KnowledgeBase.IsImageVectorEnabled) and the
+	// embedding model embeds images. When it is non-empty the group's
+	// document vector search is widened to find image rows, and
+	// VectorThreshold is the text threshold, which filterImageHits restores
+	// on text hits. Image hits of any other KB are dropped.
+	ImageKBIDs      map[string]struct{}
+	VectorThreshold float64
+}
+
+// imageRecall reports whether any KB of the group recalls image vectors.
+func (g *storeGroup) imageRecall() bool {
+	return len(g.ImageKBIDs) > 0
 }
 
 // resolveStoreGroups partitions kbs by (VectorStoreID, KB.TenantID),

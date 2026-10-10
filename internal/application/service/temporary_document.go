@@ -602,7 +602,10 @@ func (s *temporaryDocumentService) understandImagesWithVLM(
 				logger.Warnf(ctx, "temporary document VLM OCR failed on image %d: %v", idx, ocrErr)
 				return
 			}
-			ocrResults[idx] = sanitizeOCRText(ocrText)
+			ocrResults[idx], ocrErr = validateOCRText(ocrText)
+			if ocrErr != nil {
+				logger.Warnf(ctx, "temporary document VLM OCR rejected on image %d: %v", idx, ocrErr)
+			}
 		}(idx, img)
 	}
 	wg.Wait()

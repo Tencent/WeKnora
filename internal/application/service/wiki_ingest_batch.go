@@ -18,28 +18,41 @@ import (
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
 	"golang.org/x/sync/errgroup"
 )
 
-// scheduleFollowUp enqueues another asynq trigger task if there are
-// still pending ops in task_pending_ops for this KB. Returns true when
-// a follow-up was scheduled.
-//
-// Post-Phase-3 this only backstops the case where a batch drained its
-// claimed window but more rows remain and no other trigger is pending
-// (e.g. steady trickle of uploads). Standard mode already fans a KB's
-// backlog across concurrent claiming batches, so the short delay is
-// normally just a light debounce rather than a lock-release wait.
-//
-// `delay` is the ProcessIn before the follow-up fires. Callers pass
-// wikiFollowUpDelay for the normal case and wikiRateLimitBackoff when the
-// batch tripped an upstream rate limit — the released failed rows are
-// eligible immediately, but nothing claims them until a trigger fires, so
-// stretching the follow-up interval is what actually paces retries down
-// during a 429 storm.
-func (s *wikiIngestService) scheduleFollowUp(ctx context.Context, payload WikiIngestPayload, delay time.Duration) bool {
+// followUpTriggerCount estimates useful new work from claimable documents and
+// running slots. reserveFollowUpTasks additionally bounds all outstanding
+// follow-ups (scheduled, queued, running and retrying) across batch completions.
+// The +1 allows the completing batch to replace itself before releasing its slot.
+func followUpTriggerCount(pending, batchSize, activeSlots, maxInflight int) int {
+	if pending <= 0 || batchSize <= 0 {
+		return 0
+	}
+	batchesNeeded := (pending + batchSize - 1) / batchSize
+	if activeSlots < 0 || maxInflight <= 1 {
+		return 1
+	}
+	freeSlots := maxInflight - activeSlots + 1 // caller's slot releases on return
+	if freeSlots < 1 {
+		freeSlots = 1
+	}
+	return min(batchesNeeded, freeSlots)
+}
+
+// scheduleFollowUp replenishes the KB's bounded supply of follow-up tasks.
+// Lite mode and rate-limited completions request only one successor. A 429
+// delays this batch's successor; it does not pause other batches in the KB.
+func (s *wikiIngestService) scheduleFollowUp(
+	ctx context.Context,
+	payload WikiIngestPayload,
+	delay time.Duration,
+	batchSize, maxInflight int,
+	rateLimited bool,
+) bool {
 	if s.pendingRepo == nil {
 		return false
 	}
@@ -48,21 +61,75 @@ func (s *wikiIngestService) scheduleFollowUp(ctx context.Context, payload WikiIn
 		return false
 	}
 
-	logger.Infof(ctx, "wiki ingest: %d more documents pending for KB %s, scheduling follow-up in %s", count, payload.KnowledgeBaseID, delay)
+	if s.redisClient != nil {
+		if counter, ok := s.pendingRepo.(interfaces.TaskPendingOpsClaimableCounter); ok {
+			count, err = counter.ClaimableCount(ctx, wikiTaskType, wikiTaskScope,
+				payload.KnowledgeBaseID, time.Now().Add(-wikiClaimStaleAfter))
+			if err != nil {
+				logger.Warnf(ctx, "wiki ingest: claimable count failed: %v", err)
+				return s.scheduleFollowUpRecheck(ctx, payload)
+			}
+			if count == 0 {
+				return s.scheduleStaleClaimRecheck(ctx, payload)
+			}
+		}
+		// ClaimBatch caps the number of distinct keys at 1000.
+		batchSize = min(batchSize, 1000)
+	}
+
+	// activeSlots stays -1 (unknown → single follow-up) in Lite mode and on
+	// a rate-limited exit.
+	activeSlots := -1
+	if !rateLimited {
+		activeSlots = s.activeInflightSlots(ctx, payload.KnowledgeBaseID)
+	}
+	n := followUpTriggerCount(int(count), batchSize, activeSlots, maxInflight)
+
+	var taskIDs []string
+	if s.redisClient != nil {
+		taskIDs, err = s.reserveFollowUpTasks(ctx, payload.KnowledgeBaseID, n, maxInflight)
+		if err != nil {
+			logger.Warnf(ctx, "wiki ingest: follow-up reservation failed: %v", err)
+			// Keep the pre-fan-out behavior while Redis is unavailable.
+			n = 1
+		} else {
+			n = len(taskIDs)
+			if n == 0 {
+				return s.scheduleFollowUpRecheck(ctx, payload)
+			}
+		}
+	}
+	logger.Infof(ctx, "wiki ingest: %d claimable documents for KB %s, scheduling %d follow-up(s) in %s",
+		count, payload.KnowledgeBaseID, n, delay)
 
 	langfuse.InjectTracing(ctx, &payload)
 	payloadBytes, _ := json.Marshal(payload)
-	t := asynq.NewTask(types.TypeWikiIngest, payloadBytes,
-		asynq.Queue(types.QueueWiki),
-		asynq.MaxRetry(wikiIngestMaxRetry),
-		asynq.Timeout(60*time.Minute),
-		asynq.ProcessIn(delay), // debounce (or rate-limit backoff) before draining the remainder
-	)
-	if _, err := s.task.Enqueue(t); err != nil {
-		logger.Warnf(ctx, "wiki ingest: follow-up enqueue failed: %v", err)
-		return false
+	scheduled := false
+	needsRecheck := false
+	for i := 0; i < n; i++ {
+		opts := []asynq.Option{
+			asynq.Queue(types.QueueWiki),
+			asynq.MaxRetry(wikiIngestMaxRetry),
+			asynq.Timeout(60 * time.Minute),
+			asynq.ProcessIn(delay),
+		}
+		if len(taskIDs) > 0 {
+			opts = append(opts, asynq.TaskID(taskIDs[i]))
+		}
+		t := asynq.NewTask(types.TypeWikiIngest, payloadBytes, opts...)
+		if _, err := s.task.Enqueue(t); err != nil {
+			logger.Warnf(ctx, "wiki ingest: follow-up enqueue %d/%d failed: %v", i+1, n, err)
+			// A timeout may mean the enqueue succeeded. Keep its reservation
+			// until reconciliation can establish the actual queue state.
+			needsRecheck = true
+			continue
+		}
+		scheduled = true
 	}
-	return true
+	if needsRecheck {
+		scheduled = s.scheduleFollowUpRecheck(ctx, payload) || scheduled
+	}
+	return scheduled
 }
 
 // newWikiBatchContext builds the per-run lazy fetchers used by both the ingest
@@ -190,7 +257,7 @@ func (s *wikiIngestService) newWikiBatchContext(
 	}
 }
 
-func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task) error {
+func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task) (retErr error) {
 	taskStartedAt := time.Now()
 	retryCount, _ := asynq.GetRetryCount(ctx)
 	maxRetry, _ := asynq.GetMaxRetry(ctx)
@@ -248,6 +315,16 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 		exitStatus = "invalid_payload"
 		return fmt.Errorf("wiki ingest: unmarshal payload: %w", err)
 	}
+
+	defer func() {
+		if p := recover(); p != nil {
+			// Asynq retries panics too: retain the outstanding reservation.
+			panic(p)
+		}
+		if retErr == nil {
+			s.releaseFollowUpTask(ctx, payload.KnowledgeBaseID)
+		}
+	}()
 
 	// Inject context
 	ctx = context.WithValue(ctx, types.TenantIDContextKey, payload.TenantID)
@@ -665,6 +742,7 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 				changed        bool
 				affectedType   string
 				additionFailed bool
+				updateDeferred bool
 				reduceErr      error
 			)
 			// Serialize same-slug read-modify-write across concurrent batches
@@ -678,7 +756,7 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 						reduceErr = fmt.Errorf("wiki reduce panicked for slug %s: %v", slug, r)
 					}
 				}()
-				changed, affectedType, additionFailed, reduceErr = s.reduceSlugUpdates(
+				changed, affectedType, additionFailed, updateDeferred, reduceErr = s.reduceSlugUpdates(
 					reduceCtx, chatModel, payload.KnowledgeBaseID, slug, updates, payload.TenantID, batchCtx, kidToWikiSpan)
 				return reduceErr
 			})
@@ -696,6 +774,18 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 				logger.Warnf(reduceCtx, "wiki ingest: slug %s busy > %s, deferring update", slug, wikiSlugLockWait)
 				collectUnapplied(updates)
 				return nil
+			}
+			if updateDeferred {
+				// The page kept its previous body because the rewrite dropped
+				// table rows that are still on it. Not an error and the page is
+				// not damaged, but this slug's contribution never landed, so the
+				// documents behind it must survive the trim phase and come back
+				// in a later batch — trimming them here would delete their
+				// pending row and lose the addition for good.
+				logger.Warnf(reduceCtx,
+					"wiki ingest: slug %s kept its previous content (rewrite dropped rows), deferring update",
+					slug)
+				collectUnapplied(updates)
 			}
 			if reduceErr != nil {
 				// The page's read-modify-write failed, so this slug's update
@@ -946,7 +1036,7 @@ func (s *wikiIngestService) ProcessWikiIngest(ctx context.Context, t *asynq.Task
 		logger.Warnf(ctx, "wiki ingest: KB %s hit upstream rate limiting, backing off follow-up to %s", payload.KnowledgeBaseID, followUpDelay)
 	}
 	followCtx, followCancel := wikiIngestCleanupContext(ctx)
-	followUpScheduled = s.scheduleFollowUp(followCtx, payload, followUpDelay)
+	followUpScheduled = s.scheduleFollowUp(followCtx, payload, followUpDelay, batchSize, maxInflight, rateLimited)
 	followCancel()
 	return nil
 }
@@ -1255,7 +1345,14 @@ func (s *wikiIngestService) mapOneDocument(
 	// was in flight, we must NOT proceed to LLM extraction — doing so would
 	// create wiki pages whose source_refs point at a ghost knowledge ID,
 	// permanently unreachable via wiki_read_source_doc.
-	if s.isKnowledgeGone(ctx, payload.KnowledgeBaseID, knowledgeID) {
+	gone, err := s.isKnowledgeGone(ctx, payload.KnowledgeBaseID, knowledgeID)
+	if err != nil {
+		failCtx, cancel := wikiIngestCleanupContext(ctx)
+		defer cancel()
+		s.tracker().FailSpan(failCtx, wikiSpan, "KNOWLEDGE_LOOKUP_FAILED", err.Error(), err)
+		return nil, nil, err
+	}
+	if gone {
 		logger.Infof(ctx, "wiki ingest: knowledge %s has been deleted, skip map", knowledgeID)
 		s.tracker().SkipSpan(ctx, wikiSpan, "knowledge_deleted")
 		return nil, nil, nil
@@ -1774,6 +1871,11 @@ func resolveSlugUpdateLanguage(ctx context.Context, updates []SlugUpdate) string
 //     refreshed for it. Callers use this to sanitize dead [[slug]] links
 //     elsewhere (e.g. in the doc's summary page) and to drop the slug from
 //     the wiki log feed so users don't see a clickable entry that 404s.
+//   - updateDeferred:   true iff the page write was refused by the row guard
+//     (ErrWikiWriteDroppedTableRows): the page kept its previous body, so this
+//     slug's contribution never landed and its documents must be re-queued
+//     rather than trimmed. Distinct from err: a successful write that changes
+//     nothing user-visible also leaves `version` alone, and that one IS applied.
 //   - err:              transport / repo error from the persisted upsert.
 func (s *wikiIngestService) reduceSlugUpdates(
 	ctx context.Context,
@@ -1784,16 +1886,19 @@ func (s *wikiIngestService) reduceSlugUpdates(
 	tenantID uint64,
 	batchCtx *WikiBatchContext,
 	kidToWikiSpan map[string]*Span,
-) (changed bool, affectedType string, additionFailed bool, err error) {
+) (changed bool, affectedType string, additionFailed bool, updateDeferred bool, err error) {
 	// Final safety net for the ingest/delete race: between Map (which already
 	// checks isKnowledgeGone) and Reduce there is a long LLM call where the
 	// source document may be deleted. Drop any addition/summary updates whose
 	// knowledge no longer exists so we don't resurrect a ghost source_ref.
 	// Retract updates are kept — they actively remove refs, which is what we
 	// want when the doc is gone.
-	updates = s.filterLiveUpdates(ctx, kbID, updates)
+	updates, err = s.filterLiveUpdates(ctx, kbID, updates)
+	if err != nil {
+		return false, "", false, false, err
+	}
 	if len(updates) == 0 {
-		return false, "", false, nil
+		return false, "", false, false, nil
 	}
 
 	// Per-slug page span attribution: a single slug can receive
@@ -1877,7 +1982,7 @@ func (s *wikiIngestService) reduceSlugUpdates(
 			}
 		}
 		if !hasAdditions {
-			return false, "", false, nil
+			return false, "", false, false, nil
 		}
 
 		page = &types.WikiPage{
@@ -1928,11 +2033,17 @@ func (s *wikiIngestService) reduceSlugUpdates(
 		changed = true
 
 		if exists {
-			_, err = s.wikiService.UpdatePage(ctx, page)
+			// A summary rewrite can drop table rows too, and the refusal has
+			// the same meaning here: the page kept its previous body, so this
+			// slug's contribution never landed and its documents must survive
+			// the trim phase. Classify the explicit signal; do not read it off
+			// the page version.
+			_, writeErr := s.wikiService.UpdatePage(ctx, page)
+			updateDeferred, err = classifyWikiPageWrite(writeErr)
 		} else {
 			_, err = s.wikiService.CreatePage(ctx, page)
 		}
-		return changed, affectedType, false, err
+		return changed, affectedType, false, updateDeferred, err
 	}
 
 	var remainingSourcesContent strings.Builder
@@ -2183,14 +2294,51 @@ func (s *wikiIngestService) reduceSlugUpdates(
 		// on top of what was already there, deduplicated.
 		page.ChunkRefs = mergeChunkRefs(page.ChunkRefs, additions)
 		if exists {
-			_, err = s.wikiService.UpdatePage(ctx, page)
+			// A retraction removes a deleted document's contribution on
+			// purpose, so this write is allowed to drop the table rows that
+			// contribution owned. Saying so explicitly is what lets the choke
+			// point in UpdatePage refuse an accidental truncation everywhere
+			// else; without it a retract round would be refused and the stale
+			// content would stay on the page for good.
+			writeCtx := ctx
+			if len(retracts) > 0 {
+				writeCtx = types.WithWikiShrinkAllowed(ctx)
+			}
+			// UpdatePage refuses a machine rewrite that drops too many table
+			// rows still on the page and says so with
+			// ErrWikiWriteDroppedTableRows. That refusal is not a failure — the
+			// page is intact and this caller did nothing wrong — but it does
+			// mean this slug's contribution never landed, and its documents
+			// must be kept for a later batch. The version cannot stand in for
+			// that signal: a successful write that changes nothing
+			// user-visible leaves `version` alone too (see the version-bump
+			// policy in wiki_page.go), so only the explicit refusal is
+			// classified as deferred.
+			_, updateErr := s.wikiService.UpdatePage(writeCtx, page)
+			updateDeferred, err = classifyWikiPageWrite(updateErr)
 		} else {
 			_, err = s.wikiService.CreatePage(ctx, page)
 		}
-		return true, affectedType, additionFailed, err
+		return true, affectedType, additionFailed, updateDeferred, err
 	}
 
-	return false, "", additionFailed, nil
+	return false, "", additionFailed, false, nil
+}
+
+// classifyWikiPageWrite turns the result of one guarded UpdatePage call into
+// the reduce phase's (updateDeferred, err) pair.
+//
+// ErrWikiWriteDroppedTableRows means the row guard refused the write: the page
+// was not modified, but nothing failed, so the caller must keep this slug's
+// contributing documents for a later batch (updateDeferred) instead of
+// reporting an error. Every other outcome — including a successful write that
+// only refreshed bookkeeping and therefore did not bump `version` — was
+// applied and is not deferred.
+func classifyWikiPageWrite(updateErr error) (deferred bool, err error) {
+	if errors.Is(updateErr, ErrWikiWriteDroppedTableRows) {
+		return true, nil
+	}
+	return false, updateErr
 }
 
 // mergeChunkRefs unions the chunk IDs currently on the page with the ones

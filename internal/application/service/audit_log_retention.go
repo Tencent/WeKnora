@@ -8,6 +8,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/runtime"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 )
 
@@ -102,6 +103,13 @@ func (r *AuditLogRetentionRunner) Start(ctx context.Context) {
 // If Start was never called, Stop returns immediately (no doneCh to
 // wait on — see the `started` flag in the struct comment).
 func (r *AuditLogRetentionRunner) Stop() {
+	r.StopWithin(0)
+}
+
+// StopWithin is Stop with a bound. timeout <= 0 waits until the loop
+// returns. A positive timeout continues shutdown while a purge is still
+// inside its own database deadline, instead of holding every later hook.
+func (r *AuditLogRetentionRunner) StopWithin(timeout time.Duration) {
 	if r == nil {
 		return
 	}
@@ -111,7 +119,10 @@ func (r *AuditLogRetentionRunner) Stop() {
 	r.stopOnce.Do(func() {
 		close(r.stopCh)
 	})
-	<-r.doneCh
+	if runtime.WaitFor(r.doneCh, timeout) {
+		return
+	}
+	logger.Warnf(context.Background(), "[audit-retention] sweep still running after %s; continuing shutdown", timeout)
 }
 
 // loop runs the actual sweep cadence. Uses a fresh context.Background

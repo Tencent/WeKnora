@@ -357,7 +357,19 @@
         "type": "Embedding",
         "compat": {
           "api": "dashscope-embeddings",
-          "dimensions_field": ""
+          "dimensions_field": "",
+          "max_image_batch_size": 8,
+          "max_image_bytes": 3000000
+        }
+      },
+      {
+        "id": "tongyi-embedding-vision-flash",
+        "type": "Embedding",
+        "compat": {
+          "api": "dashscope-embeddings",
+          "dimensions_field": "",
+          "max_image_batch_size": 8,
+          "max_image_bytes": 3000000
         }
       },
       {
@@ -365,7 +377,9 @@
         "type": "Embedding",
         "compat": {
           "api": "dashscope-embeddings",
-          "dimensions_field": ""
+          "dimensions_field": "",
+          "max_image_batch_size": 8,
+          "max_image_bytes": 3000000
         }
       },
       {
@@ -374,7 +388,20 @@
         "compat": {
           "api": "dashscope-embeddings",
           "dimensions_field": "dimension",
-          "max_batch_size": 20
+          "max_batch_size": 20,
+          "max_image_batch_size": 8,
+          "max_image_bytes": 3000000
+        }
+      },
+      {
+        "id": "qwen3-vl-embedding",
+        "type": "Embedding",
+        "compat": {
+          "api": "dashscope-embeddings",
+          "dimensions_field": "dimension",
+          "max_batch_size": 20,
+          "max_image_batch_size": 10,
+          "max_image_bytes": 10000000
         }
       },
       {
@@ -383,7 +410,20 @@
         "compat": {
           "api": "dashscope-embeddings",
           "dimensions_field": "dimension",
-          "max_batch_size": 20
+          "max_batch_size": 20,
+          "max_image_batch_size": 10,
+          "max_image_bytes": 10000000
+        }
+      },
+      {
+        "id": "qwen2.5-vl-embedding",
+        "type": "Embedding",
+        "compat": {
+          "api": "dashscope-embeddings",
+          "dimensions_field": "dimension",
+          "max_batch_size": 1,
+          "max_image_batch_size": 1,
+          "max_image_bytes": 5000000
         }
       },
       {
@@ -392,7 +432,20 @@
         "compat": {
           "api": "dashscope-embeddings",
           "dimensions_field": "dimension",
-          "max_batch_size": 1
+          "max_batch_size": 1,
+          "max_image_batch_size": 1,
+          "max_image_bytes": 5000000
+        }
+      },
+      {
+        "id": "multimodal-embedding-v1",
+        "type": "Embedding",
+        "compat": {
+          "api": "dashscope-embeddings",
+          "dimensions_field": "",
+          "max_batch_size": 20,
+          "max_image_batch_size": 1,
+          "max_image_bytes": 3000000
         }
       },
       {
@@ -401,7 +454,9 @@
         "compat": {
           "api": "dashscope-embeddings",
           "dimensions_field": "",
-          "max_batch_size": 20
+          "max_batch_size": 20,
+          "max_image_batch_size": 1,
+          "max_image_bytes": 3000000
         }
       },
       {
@@ -848,6 +903,17 @@
         "compat": {
           "thinking_mode": "budget"
         }
+      },
+      {
+        "id": "gemini-embedding-2",
+        "type": "Embedding",
+        "compat": {
+          "max_image_batch_size": 6,
+          "image_mime_types": [
+            "image/png",
+            "image/jpeg"
+          ]
+        }
       }
     ],
     "generic": [
@@ -903,6 +969,18 @@
           "minimal": "low",
           "xhigh": "high",
           "max": "high"
+        }
+      },
+      {
+        "match": "*qwen3-vl-embedding*",
+        "type": "Embedding",
+        "compat": {
+          "text_as_messages": true,
+          "batch_messages": true,
+          "max_image_batch_size": 5,
+          "extra_body": {
+            "add_special_tokens": true
+          }
         }
       }
     ],
@@ -1532,6 +1610,24 @@
           "minimal": "low",
           "xhigh": "xhigh",
           "max": "xhigh"
+        }
+      }
+    ],
+    "pinecone": [
+      {
+        "id": "bge-reranker-v2-m3",
+        "type": "Rerank",
+        "compat": {
+          "max_documents": 100,
+          "truncate": "END"
+        }
+      },
+      {
+        "id": "pinecone-rerank-v0",
+        "type": "Rerank",
+        "compat": {
+          "max_documents": 100,
+          "truncate": "END"
         }
       }
     ],

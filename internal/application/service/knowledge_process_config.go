@@ -50,6 +50,7 @@ func ResolveProcessConfig(kb *types.KnowledgeBase, overrides *types.KnowledgePro
 		GraphEnabled:             kb.IsGraphEnabled(),
 		ExtractConfig:            derefExtractConfig(kb.ExtractConfig),
 		ImageAttrsEnabled:        imageCfg.ImageAttrsEnabled,
+		ImageVectorEnabled:       imageCfg.ImageVectorEnabled,
 		ImageActions:             types.ResolveImageActions(imageCfg.ImageActions),
 	}
 	if overrides == nil {
@@ -93,6 +94,9 @@ func ResolveProcessConfig(kb *types.KnowledgeBase, overrides *types.KnowledgePro
 	}
 	if overrides.ImageAttrsEnabled != nil {
 		eff.ImageAttrsEnabled = *overrides.ImageAttrsEnabled
+	}
+	if overrides.ImageVectorEnabled != nil {
+		eff.ImageVectorEnabled = *overrides.ImageVectorEnabled
 	}
 	if overrides.ImageActions != nil {
 		base := eff.ImageActions

@@ -218,6 +218,8 @@ type EmbedChannel struct {
 | `webhook_url` | string | 空 | 事件回调地址，**必须为 HTTPS 且通过 SSRF 校验**（禁止内网/链路本地地址） |
 | `webhook_secret` | string | 空 | webhook 签名密钥（API 响应中永不回显） |
 
+渠道和绑定 Agent 均开启图片上传后，访客可在聊天输入框中粘贴截图，确认预览后发送，也可移除预览中的图片。粘贴与文件选择共用限制：JPEG、PNG、GIF、WebP，每张不超过 10 MB，每次最多 5 张。纯文本粘贴保持原有行为；剪贴板同时包含图片和文本时，按主聊天的方式仅添加图片。
+
 ### 管理 API（需登录鉴权）
 
 由 `RegisterEmbedChannelRoutes`（`internal/router/routes_agent.go`）注册，支持 API Key 的 `ManageChannels` 能力：

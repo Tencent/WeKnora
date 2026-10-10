@@ -1,0 +1,1 @@
+Fixtures from [firecrawl/anydoc v0.2.4](https://github.com/firecrawl/anydoc/tree/42bf1c5ecdde9eb0d96d6bd75a9e6698cf93b14c/tests/fixtures), under the included MIT license. Used for Go ABI regression tests and repeatable conversion benchmarks. Files are copied unchanged.

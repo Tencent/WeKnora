@@ -16,6 +16,9 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/api"
 	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/models/embedding"
+	"github.com/Tencent/WeKnora/internal/models/imageprep"
+	"github.com/Tencent/WeKnora/internal/models/rerank"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
@@ -128,6 +131,76 @@ func (h *ModelHandler) CreateModel(c *gin.Context) {
 	})
 }
 
+// CopyModelRequest is the body of POST /models/:id/copy. Only the display
+// name is client-supplied. The model name and credentials come from the
+// stored source row.
+type CopyModelRequest struct {
+	DisplayName string `json:"display_name" binding:"required"`
+}
+
+// CopyModel godoc
+// @Summary      复制模型
+// @Description  复制模型配置。name 与源模型一致，凭证从已存记录复制，不接受客户端重传。
+// @Tags         模型管理
+// @Accept       json
+// @Produce      json
+// @Param        id       path      string           true  "源模型ID"
+// @Param        request  body      CopyModelRequest true  "副本展示名"
+// @Success      201      {object}  map[string]interface{}  "复制的模型"
+// @Failure      400      {object}  errors.AppError         "请求参数错误"
+// @Failure      404      {object}  errors.AppError         "模型不存在"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /models/{id}/copy [post]
+func (h *ModelHandler) CopyModel(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	id := secutils.SanitizeForLog(c.Param("id"))
+	if id == "" {
+		logger.Error(ctx, "Model ID is empty")
+		_ = c.Error(errors.NewBadRequestError("Model ID cannot be empty"))
+		return
+	}
+
+	var req CopyModelRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		logger.Error(ctx, "Failed to parse request parameters", err)
+		_ = c.Error(errors.NewBadRequestError(err.Error()))
+		return
+	}
+	tenantID := c.GetUint64(types.TenantIDContextKey.String())
+	if tenantID == 0 {
+		logger.Error(ctx, "Tenant ID is empty")
+		_ = c.Error(errors.NewBadRequestError("Workspace ID cannot be empty"))
+		return
+	}
+
+	model, err := h.service.CopyModel(ctx, id, req.DisplayName)
+	if err != nil {
+		if err == service.ErrModelNotFound {
+			logger.Warnf(ctx, "Model not found, ID: %s", id)
+			_ = c.Error(errors.NewNotFoundError("Model not found"))
+			return
+		}
+		if appErr, ok := errors.IsAppError(err); ok {
+			_ = c.Error(appErr)
+			return
+		}
+		logger.ErrorWithFields(ctx, err, nil)
+		_ = c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+
+	logger.Infof(ctx, "Model copied successfully, ID: %s, Name: %s",
+		secutils.SanitizeForLog(model.ID),
+		secutils.SanitizeForLog(model.Name),
+	)
+	c.JSON(http.StatusCreated, gin.H{
+		"success": true,
+		"data":    dto.NewModelResponse(ctx, model),
+	})
+}
+
 // GetModel godoc
 // @Summary      获取模型详情
 // @Description  根据ID获取模型详情
@@ -223,6 +296,9 @@ type ModelDebugOptions struct {
 	Thinking     *bool    `json:"thinking,omitempty"`
 	// ReasoningEffort is the graded level; when set it overrides Thinking.
 	ReasoningEffort string `json:"reasoning_effort,omitempty"`
+	// Similarity makes an embedding test score the documents (and an
+	// optional image) against the input as a search query.
+	Similarity bool `json:"similarity,omitempty"`
 }
 
 func parseModelDebugOptions(raw string) (ModelDebugOptions, error) {
@@ -363,6 +439,18 @@ func consumeModelDebugChatStream(stream <-chan types.StreamResponse) (*modelDebu
 	return result, nil
 }
 
+// Model metadata and the legacy vision switch both allow image chat tests.
+func modelDebugChatAcceptsImages(model *types.Model) bool {
+	if model.Parameters.SupportsVision {
+		return true
+	}
+	if model.Source == types.ModelSourceLocal {
+		return false
+	}
+	resolved, err := chat.Resolve(chat.ConfigFromModel(model, "", ""))
+	return err == nil && resolved.Spec.AcceptsImages()
+}
+
 // DebugModel executes a saved model through the same service constructors used
 // by production calls and returns the complete normalized response. Credentials
 // stay server-side; the request preview contains only non-secret fields.
@@ -446,13 +534,26 @@ func (h *ModelHandler) DebugModel(c *gin.Context) {
 		fileSize = int64(len(fileBytes))
 	}
 
+	var image api.EmbedImage
+	if fileName != "" && model.Type != types.ModelTypeASR {
+		image, err = imageprep.Prepare(fileBytes, imageprep.Limits{})
+		if err != nil {
+			_ = c.Error(errors.NewBadRequestError(err.Error()))
+			return
+		}
+	}
+
 	requestPreview := modelDebugRequestPreview(model, input, documents, opts, fileName, fileSize)
 	observations := gin.H{}
 
 	switch model.Type {
 	case types.ModelTypeKnowledgeQA:
-		if strings.TrimSpace(input) == "" {
-			c.Error(errors.NewBadRequestError("query cannot be empty"))
+		if len(fileBytes) > 0 && !modelDebugChatAcceptsImages(model) {
+			_ = c.Error(errors.NewBadRequestError("chat model does not accept images"))
+			return
+		}
+		if strings.TrimSpace(input) == "" && len(fileBytes) == 0 {
+			_ = c.Error(errors.NewBadRequestError("query cannot be empty"))
 			return
 		}
 		instance, callErr := h.service.GetChatModel(ctx, id)
@@ -464,7 +565,17 @@ func (h *ModelHandler) DebugModel(c *gin.Context) {
 		if strings.TrimSpace(opts.SystemPrompt) != "" {
 			messages = append(messages, chat.Message{Role: "system", Content: opts.SystemPrompt})
 		}
-		messages = append(messages, chat.Message{Role: "user", Content: input})
+		message := chat.Message{Role: "user", Content: input}
+		if len(fileBytes) > 0 {
+			message.Content = ""
+			if strings.TrimSpace(input) != "" {
+				message.MultiContent = append(message.MultiContent, chat.MessageContentPart{Type: "text", Text: input})
+			}
+			message.MultiContent = append(message.MultiContent, chat.MessageContentPart{
+				Type: "image_url", ImageURL: &chat.ImageURL{URL: image.DataURI()},
+			})
+		}
+		messages = append(messages, message)
 		chatOpts := &chat.ChatOptions{}
 		if opts.Temperature != nil {
 			chatOpts.Temperature = *opts.Temperature
@@ -505,8 +616,12 @@ func (h *ModelHandler) DebugModel(c *gin.Context) {
 		}
 		writeModelDebugResult(c, started, requestPreview, resp, callErr, observations)
 	case types.ModelTypeEmbedding:
-		if strings.TrimSpace(input) == "" {
-			c.Error(errors.NewBadRequestError("input cannot be empty"))
+		if opts.Similarity {
+			h.debugEmbeddingSimilarity(c, id, input, documents, fileBytes, started, requestPreview, observations)
+			return
+		}
+		if strings.TrimSpace(input) == "" && len(fileBytes) == 0 {
+			_ = c.Error(errors.NewBadRequestError("input cannot be empty"))
 			return
 		}
 		instance, callErr := h.service.GetEmbeddingModel(ctx, id)
@@ -514,17 +629,60 @@ func (h *ModelHandler) DebugModel(c *gin.Context) {
 			writeModelDebugResult(c, started, requestPreview, nil, callErr, observations)
 			return
 		}
+		if len(fileBytes) > 0 {
+			if strings.TrimSpace(input) != "" {
+				_ = c.Error(errors.NewBadRequestError("test either text or an image for embedding"))
+				return
+			}
+			imageModel, ok := embedding.AsImageEmbedder(instance)
+			if !ok {
+				_ = c.Error(errors.NewBadRequestError(embedding.ErrImagesUnsupported.Error()))
+				return
+			}
+			prepared, prepErr := imageprep.Prepare(fileBytes, imageModel.ImageLimits())
+			if prepErr != nil {
+				_ = c.Error(errors.NewBadRequestError(prepErr.Error()))
+				return
+			}
+			vectors, callErr := imageModel.BatchEmbedImages(ctx, []embedding.Image{prepared})
+			observations["result_count"] = len(vectors)
+			if len(vectors) > 0 {
+				observations["dimension"] = len(vectors[0])
+			}
+			writeModelDebugResult(c, started, requestPreview, vectors, callErr, observations)
+			return
+		}
 		vector, callErr := instance.Embed(ctx, input)
 		observations["dimension"] = len(vector)
 		writeModelDebugResult(c, started, requestPreview, vector, callErr, observations)
 	case types.ModelTypeRerank:
-		if strings.TrimSpace(input) == "" || len(documents) == 0 {
-			c.Error(errors.NewBadRequestError("query and documents cannot be empty"))
+		if strings.TrimSpace(input) == "" || (len(documents) == 0 && len(fileBytes) == 0) {
+			_ = c.Error(errors.NewBadRequestError("query and documents cannot be empty"))
 			return
 		}
 		instance, callErr := h.service.GetRerankModel(ctx, id)
 		if callErr != nil {
 			writeModelDebugResult(c, started, requestPreview, nil, callErr, observations)
+			return
+		}
+		if len(fileBytes) > 0 {
+			if len(documents) > 0 {
+				_ = c.Error(errors.NewBadRequestError("test either text documents or an image for reranking"))
+				return
+			}
+			imageModel, ok := rerank.AsImageReranker(instance)
+			if !ok {
+				_ = c.Error(errors.NewBadRequestError(rerank.ErrImagesUnsupported.Error()))
+				return
+			}
+			prepared, prepErr := imageprep.Prepare(fileBytes, imageModel.ImageLimits())
+			if prepErr != nil {
+				_ = c.Error(errors.NewBadRequestError(prepErr.Error()))
+				return
+			}
+			results, callErr := imageModel.RerankImages(ctx, input, []rerank.Image{prepared})
+			observations["result_count"] = len(results)
+			writeModelDebugResult(c, started, requestPreview, results, callErr, observations)
 			return
 		}
 		results, callErr := instance.Rerank(ctx, input, documents)

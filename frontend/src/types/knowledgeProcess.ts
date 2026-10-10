@@ -76,6 +76,8 @@ export interface KnowledgeProcessOverrides {
   // Per-upload override of the knowledge base's attribute-observed image
   // pipeline switch.
   image_attrs_enabled?: boolean
+  // Controls indexing for this document, without changing KB retrieval.
+  image_vector_enabled?: boolean
   // Per-task attribute -> work table; merged per action key on top of the
   // knowledge base's table.
   image_actions?: ImageActionsConfig

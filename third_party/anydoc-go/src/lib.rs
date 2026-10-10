@@ -47,6 +47,8 @@ pub const ERR_PDF_NO_MODEL: c_int = 7;
 pub const ERR_INVALID_ARG: c_int = 8;
 /// Unknown format name passed to the ABI.
 pub const ERR_UNKNOWN_FORMAT: c_int = 9;
+/// `ConvertError::NeedsOcr`; page numbers are retained in the error detail.
+pub const ERR_NEEDS_OCR: c_int = 10;
 
 thread_local! {
     static LAST_ERROR: std::cell::RefCell<Option<CString>> = const { std::cell::RefCell::new(None) };
@@ -60,6 +62,7 @@ fn set_last_error(msg: &str) {
 fn error_code(err: &ConvertError) -> c_int {
     match err {
         ConvertError::Unsupported(_) => ERR_UNSUPPORTED,
+        ConvertError::NeedsOcr { .. } => ERR_NEEDS_OCR,
         ConvertError::Malformed { .. } => ERR_MALFORMED,
         ConvertError::Encrypted => ERR_ENCRYPTED,
         ConvertError::ResourceLimit { .. } => ERR_RESOURCE_LIMIT,
@@ -439,6 +442,31 @@ pub unsafe extern "C" fn anydoc_to_document(
     out_buf: *mut *mut u8,
     out_len: *mut usize,
 ) -> c_int {
+    unsafe { document_output(bytes, len, format_tag, out_buf, out_len, false) }
+}
+
+/// Parse once and return the original document model followed by asset-linked
+/// Markdown in a single flat buffer. Free it with `anydoc_buffer_free`.
+/// PDF has no document model and returns `ERR_PDF_NO_MODEL`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn anydoc_to_document_with_asset_links(
+    bytes: *const u8,
+    len: usize,
+    format_tag: c_int,
+    out_buf: *mut *mut u8,
+    out_len: *mut usize,
+) -> c_int {
+    unsafe { document_output(bytes, len, format_tag, out_buf, out_len, true) }
+}
+
+unsafe fn document_output(
+    bytes: *const u8,
+    len: usize,
+    format_tag: c_int,
+    out_buf: *mut *mut u8,
+    out_len: *mut usize,
+    with_markdown: bool,
+) -> c_int {
     if bytes.is_null() || out_buf.is_null() {
         set_last_error("anydoc: null pointer passed to anydoc_to_document");
         return ERR_INVALID_ARG;
@@ -475,13 +503,21 @@ pub unsafe extern "C" fn anydoc_to_document(
         );
         return ERR_PDF_NO_MODEL;
     }
-    let document = match guarded("anydoc_to_document", || anydoc::to_document(slice, resolved)) {
-        Ok(d) => d,
+    let body = match guarded("anydoc_to_document", || {
+        let mut document = anydoc::to_document(slice, resolved)?;
+        let mut encoder = model::Encoder::new();
+        // Encode before rewriting: Go needs the original asset IDs for image
+        // placement and section metadata, while Markdown needs external URLs.
+        model::write_document(&mut encoder, &document);
+        if with_markdown {
+            asset_links::rewrite_asset_images(&mut document);
+            encoder.str(&document_to_markdown(&document));
+        }
+        Ok(encoder.into_vec())
+    }) {
+        Ok(body) => body,
         Err(e) => return fail(e),
     };
-    let mut encoder = model::Encoder::new();
-    model::write_document(&mut encoder, &document);
-    let body = encoder.into_vec();
     let len = body.len();
     // Layout: [usize len][usize cap][u8 data..len]. The caller receives a
     // pointer to the data area and the length; `anydoc_buffer_free` walks back

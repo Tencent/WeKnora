@@ -444,6 +444,35 @@
                         </div>
                         <div v-if="uiState.multimodalConfig.enabled" class="setting-row">
                           <div class="setting-info">
+                            <label>{{ t('uploadConfirm.imageEmbeddingModel') }}</label>
+                            <p class="desc">{{ t('uploadConfirm.imageIndexInherited') }}</p>
+                            <p v-if="uiState.imageVectorEnabled && !embeddingTakesImages" class="warn">
+                              {{ t('knowledgeEditor.advanced.multimodal.imageVectorModelUnsupported') }}
+                            </p>
+                          </div>
+                          <div class="setting-control">
+                            <ModelSelector
+                              model-type="Embedding"
+                              :selected-model-id="kbInfo?.embedding_model_id || ''"
+                              :all-models="allModels"
+                              disabled
+                              :placeholder="t('uploadConfirm.notSet')"
+                            />
+                          </div>
+                        </div>
+                        <div v-if="uiState.multimodalConfig.enabled" class="setting-row">
+                          <div class="setting-info">
+                            <label>{{ t('uploadConfirm.imageVectorIndex') }}</label>
+                            <p class="desc">{{ t('uploadConfirm.imageVectorIndexHint') }}</p>
+                            <p v-if="!kbInfo?.indexing_strategy?.vector_enabled" class="warn">{{ t('uploadConfirm.imageVectorRequiresIndex') }}</p>
+                          </div>
+                          <div class="setting-control">
+                            <t-switch v-model="uiState.imageVectorEnabled" :disabled="!kbInfo?.indexing_strategy?.vector_enabled" size="medium" />
+                          </div>
+                        </div>
+
+                        <div v-if="uiState.multimodalConfig.enabled" class="setting-row">
+                          <div class="setting-info">
                             <label>{{ t('knowledgeEditor.advanced.multimodal.imageAttrsLabel') }}</label>
                             <p class="desc">{{ t('knowledgeEditor.advanced.multimodal.imageAttrsDescription') }}</p>
                           </div>
@@ -728,6 +757,7 @@ interface UploadUIState {
   chunkingConfig: ChunkingUIConfig
   multimodalConfig: { enabled: boolean; vllmModelId: string; descriptionLanguage?: string; customInstructions?: string }
   imageAttrsEnabled: boolean
+  imageVectorEnabled: boolean
   imageActions: ImageActionsConfig
   asrConfig: { enabled: boolean; modelId: string; language: string }
   questionGenerationConfig: { enabled: boolean; questionCount: number; customInstructions?: string }
@@ -798,6 +828,11 @@ const editorResources = useEditorResourcesStore()
 const uiStore = useUIStore()
 
 const allModels = ref<any[]>([])
+const embeddingTakesImages = computed(() => {
+  const model = allModels.value.find(m => m.id === props.kbInfo?.embedding_model_id)
+  // A shared model may be absent from the model list; the backend resolves it.
+  return !model || !!model.capabilities?.input?.includes('image')
+})
 const localFiles = ref<File[]>([])
 const localUrls = ref<string[]>([])
 const availableTags = ref<Array<{ id: string; name: string }>>([])
@@ -1231,6 +1266,7 @@ function createDefaultUIState(): UploadUIState {
     },
     multimodalConfig: { enabled: false, vllmModelId: '', descriptionLanguage: '', customInstructions: '' },
     imageAttrsEnabled: false,
+    imageVectorEnabled: false,
     imageActions: mergeImageActions(),
     asrConfig: { enabled: false, modelId: '', language: '' },
     questionGenerationConfig: { enabled: true, questionCount: 3, customInstructions: '' },
@@ -1286,6 +1322,7 @@ function initFromKbInfo(kb: any) {
     },
     // 默认跟随知识库的图片属性观察设置；用户可对本次任务单独覆盖。
     imageAttrsEnabled: !!kb.image_processing_config?.image_attrs_enabled,
+    imageVectorEnabled: !!kb.image_processing_config?.image_vector_enabled,
     imageActions: mergeImageActions(kb.image_processing_config?.image_actions),
     asrConfig: {
       enabled: !!kb.asr_config?.enabled,
@@ -1341,6 +1378,7 @@ function buildProcessOverrides(): KnowledgeProcessOverrides {
     },
     enable_multimodel: state.multimodalConfig.enabled,
     image_attrs_enabled: state.imageAttrsEnabled,
+    image_vector_enabled: state.imageVectorEnabled,
     image_actions: {
       ocr: {
         // The KB's own conditions (mergeImageActions keeps a custom list), so
@@ -1412,6 +1450,7 @@ function applyOverridesToState(o?: KnowledgeProcessOverrides | null) {
   if (o.parser_engine_rules) s.chunkingConfig.parserEngineRules = o.parser_engine_rules
   if (o.enable_multimodel != null) s.multimodalConfig.enabled = o.enable_multimodel
   if (o.image_attrs_enabled != null) s.imageAttrsEnabled = o.image_attrs_enabled
+  if (o.image_vector_enabled != null) s.imageVectorEnabled = o.image_vector_enabled
   if (o.image_actions) s.imageActions = mergeImageActions(o.image_actions)
   if (o.vlm_config) {
     if (o.vlm_config.enabled != null) s.multimodalConfig.enabled = o.vlm_config.enabled

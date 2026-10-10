@@ -152,6 +152,28 @@ func TestSteerMessageQueuesWhenLiveRunIsVerified(t *testing.T) {
 	assert.Equal(t, "assist-1", body["assistant_message_id"])
 }
 
+func TestSteerMessageStripsNUL(t *testing.T) {
+	mgr := stream.NewMemoryStreamManager()
+	require.NoError(t, mgr.SetLiveRun(t.Context(), "sess-1", "assist-1", "req-1"))
+	h := &Handler{
+		sessionService: &steerOwnedSessionStub{},
+		messageService: &steerMessageLookupStub{
+			msg: &types.Message{ID: "assist-1", SessionID: "sess-1", IsCompleted: false},
+		},
+		streamManager: mgr,
+	}
+	w := postSteer(t, newSteerLiveRunRouter(h), `{"query":"keep\u0000 going","delivery":"inject"}`)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+	events, _, err := mgr.GetSteerEvents(t.Context(), "sess-1", "assist-1", 0)
+	require.NoError(t, err)
+	require.Len(t, events, 1)
+	assert.Equal(t, "keep going", events[0].Content)
+
+	w = postSteer(t, newSteerLiveRunRouter(h), `{"query":"\u0000","delivery":"inject"}`)
+	assert.Equal(t, http.StatusBadRequest, w.Code, "a NUL-only query is empty")
+}
+
 func TestPromoteAndListLiveRunLookupFailureReturns503(t *testing.T) {
 	h := &Handler{
 		sessionService: &steerOwnedSessionStub{},
@@ -249,6 +271,7 @@ func TestSteerFollowUpHandoffKeepsSessionLiveAcrossPreviousClear(t *testing.T) {
 	require.True(t, ok)
 	require.NotNil(t, followUp)
 	assert.Equal(t, "do this next", followUp.query)
+	assert.Equal(t, "do this next", msgs.byID[followUp.userMessageID].Content)
 	require.NotEmpty(t, followUp.assistantMessage.ID)
 	assert.NotEqual(t, "assist-A", followUp.assistantMessage.ID)
 	assert.Empty(t, followUp.steerCarryOver, "carry-over must already sit on the new run's list")

@@ -214,7 +214,7 @@ func splitParentChild(text string, parentCfg, childCfg SplitterConfig, withDiagn
 	var children []ChildChunk
 	childSeq := 0
 	for _, parent := range parents {
-		subs := Split(parent.Content, childCfg)
+		subs := mapChildrenToSource(parent, Split(parent.Content, childCfg))
 
 		parentIndex := -1
 		if len(subs) > 1 || (len(subs) == 1 && subs[0].Content != parent.Content) {
@@ -223,8 +223,6 @@ func splitParentChild(text string, parentCfg, childCfg SplitterConfig, withDiagn
 		}
 		for _, sub := range subs {
 			sub.Seq = childSeq
-			sub.Start += parent.Start
-			sub.End += parent.Start
 			sub.ContextHeader = mergeBreadcrumbs(parent.ContextHeader, sub.ContextHeader)
 			children = append(children, ChildChunk{Chunk: sub, ParentIndex: parentIndex})
 			childSeq++

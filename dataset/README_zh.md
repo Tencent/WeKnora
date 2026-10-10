@@ -73,6 +73,8 @@ python dataset/qa_dataset.py generate \
   --output_dir ./dataset/samples
 ```
 
+脚本默认使用 `gpt-5.6-sol`。
+
 ### 3. 查看结果
 
 展示生成的问答对及其上下文：

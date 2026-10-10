@@ -28,10 +28,13 @@ function deferred<T>() {
 type Result = { available: boolean; message?: string; dimension?: number }
 async function fixture(options: {
   type?: string
+  initialType?: string
   edit?: boolean
   check?: (payload: any) => Promise<Result>
   save?: (payload: any) => Promise<void>
   providers?: any[]
+  providersByType?: Record<string, any[]>
+  loadProviders?: (type?: string) => Promise<void>
   resolve?: (params: any) => Promise<any>
 } = {}) {
   const requests: any[] = []
@@ -39,9 +42,18 @@ async function fixture(options: {
   const resolves: any[] = []
   const providers: any[] = options.providers || []
   const catalogEvents: string[] = []
+  const catalogRequests: Array<{ type?: string; force?: boolean }> = []
+  const loadedProviders = reactive<Record<string, any[]>>({})
   const providersStore = {
-    ensureLoaded: async (_type?: string, force?: boolean) => { catalogEvents.push(force ? 'refresh' : 'load'); return providers },
-    providersFor: () => providers,
+    ensureLoaded: async (type?: string, force?: boolean) => {
+      catalogEvents.push(force ? 'refresh' : 'load')
+      catalogRequests.push({ type, force })
+      const entries = options.providersByType?.[type || ''] ?? providers
+      await options.loadProviders?.(type)
+      loadedProviders[type || ''] = entries
+      return entries
+    },
+    providersFor: (type?: string) => options.providersByType ? loadedProviders[type || ''] || [] : providers,
     isLoading: () => false,
     providerById: (id: string) => providers.find((p) => p.value === id),
     iconFor: () => '',
@@ -52,7 +64,7 @@ async function fixture(options: {
   const visibility: boolean[] = []
   const props = reactive<{ visible: boolean; modelType: string; modelData: any }>({
     visible: false,
-    modelType: options.type || 'chat',
+    modelType: options.initialType || options.type || 'chat',
     modelData: options.edit ? {
       id: 'saved-model', modelName: 'old-model', name: '', source: 'remote',
       baseUrl: 'https://example.com/v1', provider: 'generic', isDefault: false,
@@ -109,14 +121,177 @@ async function fixture(options: {
     }),
   })
   app.mount({})
+  props.modelType = options.type || 'chat'
   props.visible = true
   await nextTick()
   await nextTick()
   Object.assign(vm.formData, { modelName: 'draft-model', baseUrl: 'https://example.com/v1', apiKey: options.edit ? '' : 'draft-key' })
   vm.formRef = { validate: async () => true }
   await nextTick()
-  return { vm, props, requests, saves, toasts, visibility, resolves, catalogEvents, close: () => app.unmount() }
+  return { vm, props, requests, saves, toasts, visibility, resolves, catalogEvents, catalogRequests, close: () => app.unmount() }
 }
+
+for (const type of ['embedding', 'rerank', 'vllm', 'asr']) {
+  test(`${type}: opening from its settings tab loads the matching providers and models`, async () => {
+    const provider = {
+      value: 'vendor', label: 'Vendor', modelTypes: [type],
+      models: [{ id: `${type}-model`, type: type === 'vllm' ? 'chat' : type }],
+    }
+    const f = await fixture({ initialType: 'chat', type, providersByType: { [type]: [provider] } })
+    try {
+      assert.deepEqual(f.catalogRequests, [{ type, force: true }])
+      assert.equal(f.vm.activeModelType, type)
+      assert.deepEqual(Array.from(f.vm.providerOptions, (p: any) => p.value), ['vendor'])
+      f.vm.formData.provider = 'vendor'
+      f.vm.formData.modelName = ''
+      assert.deepEqual(Array.from(f.vm.catalogModelOptions, (m: any) => m.value), [`${type}-model`])
+    } finally { f.close() }
+  })
+}
+
+test('reopening after changing the draft type refreshes the newly selected settings tab', async () => {
+  const f = await fixture()
+  try {
+    await f.vm.selectModelType('rerank')
+    f.props.visible = false
+    await nextTick()
+    f.catalogRequests.length = 0
+    f.props.modelType = 'embedding'
+    f.props.visible = true
+    await nextTick()
+    assert.deepEqual(f.catalogRequests, [{ type: 'embedding', force: true }])
+    assert.equal(f.vm.activeModelType, 'embedding')
+  } finally { f.close() }
+})
+
+for (const type of ['chat', 'embedding', 'rerank', 'vllm', 'asr']) {
+  test(`${type}: changing type resets the whole connection form and its results`, async () => {
+    const f = await fixture({ type: type === 'chat' ? 'rerank' : 'chat', providers: [{
+      value: 'vendor', modelTypes: ['chat', 'embedding', 'rerank', 'vllm', 'asr'], models: [],
+    }] })
+    try {
+      Object.assign(f.vm.formData, {
+        source: 'local', provider: 'vendor', modelName: 'old-model', displayName: 'Old display',
+        baseUrl: 'https://example.com/rerank', apiKey: 'old-key', appSecret: 'old-secret',
+        customHeaders: [{ key: 'X-Old', value: 'old' }], extraConfig: { api: 'old-api', remote_model_name: 'old-name' },
+        dimension: 1024, supportsDimensionOverride: true, supportsVision: true, interfaceType: 'ollama',
+        contextWindow: 64000, maxOutputTokens: 4096, maxConcurrency: 8, isDefault: true,
+        thinkingControl: 'old-thinking', spec: { context_window: 64000 }, specCompat: '{"old":true}',
+      })
+      await nextTick()
+      f.vm.remoteChecked = true
+      f.vm.remoteAvailable = true
+      f.vm.remoteMessage = 'old result'
+      f.vm.dimensionChecked = true
+      f.vm.dimensionSuccess = true
+      f.vm.dimensionMessage = 'old dimension'
+      f.vm.modelChecked = true
+      f.vm.modelAvailable = true
+      f.vm.catalogFilled = { contextWindow: 64000 }
+      f.vm.advancedOpen = true
+      f.vm.saveError = 'old error'
+      let cleared = 0
+      f.vm.formRef = { clearValidate: () => { cleared++ } }
+
+      await f.vm.selectModelType(type)
+      await nextTick()
+      assert.equal(f.vm.activeModelType, type)
+      assert.equal(f.vm.formData.source, 'remote')
+      assert.equal(f.vm.formData.provider, 'generic')
+      for (const field of ['modelName', 'displayName', 'baseUrl', 'apiKey', 'appSecret', 'thinkingControl', 'specCompat']) {
+        assert.equal(f.vm.formData[field], '', field)
+      }
+      for (const field of ['dimension', 'interfaceType', 'contextWindow', 'maxOutputTokens', 'maxConcurrency']) {
+        assert.equal(f.vm.formData[field], undefined, field)
+      }
+      for (const field of ['supportsDimensionOverride', 'supportsVision', 'isDefault']) {
+        assert.equal(f.vm.formData[field], false, field)
+      }
+      assert.equal(f.vm.formData.spec, null)
+      assert.equal(f.vm.formData.customHeaders.length, 0)
+      assert.equal(Object.keys(f.vm.formData.extraConfig).length, 0)
+      assert.equal(Object.keys(f.vm.catalogFilled).length, 0)
+      for (const field of ['remoteChecked', 'remoteAvailable', 'remoteStale', 'dimensionChecked', 'dimensionSuccess', 'modelChecked', 'modelAvailable', 'advancedOpen']) {
+        assert.equal(f.vm[field], false, field)
+      }
+      for (const field of ['remoteMessage', 'dimensionMessage', 'saveError']) assert.equal(f.vm[field], '', field)
+      assert.ok(cleared > 0)
+    } finally { f.close() }
+  })
+}
+
+test('a delayed type catalog cannot rewrite a newer connection draft', async () => {
+  const pending = deferred<void>()
+  const f = await fixture({
+    loadProviders: type => type === 'embedding' ? pending.promise : Promise.resolve(),
+    providersByType: { asr: [{ value: 'vendor', defaultUrls: { asr: 'https://default.example.com' }, models: [] }] },
+  })
+  try {
+    const earlier = f.vm.selectModelType('embedding')
+    assert.equal(f.vm.formData.apiKey, '', 'reset must not wait for the catalog')
+    await f.vm.selectModelType('asr')
+    f.vm.formData.provider = 'vendor'
+    f.vm.formData.baseUrl = 'https://custom.example.com'
+    f.vm.formData.extraConfig = { region: 'custom' }
+    pending.resolve()
+    await earlier
+    assert.equal(f.vm.activeModelType, 'asr')
+    assert.equal(f.vm.formData.baseUrl, 'https://custom.example.com')
+    assert.equal(f.vm.formData.extraConfig.region, 'custom')
+  } finally { pending.resolve(); f.close() }
+})
+
+test('same-type reopening keeps the draft, but another settings tab starts a fresh form', async () => {
+  const f = await fixture()
+  try {
+    f.props.visible = false
+    await nextTick()
+    f.props.visible = true
+    await nextTick()
+    assert.equal(f.vm.formData.modelName, 'draft-model')
+    f.props.visible = false
+    await nextTick()
+    f.props.modelType = 'embedding'
+    f.props.visible = true
+    await nextTick()
+    assert.equal(f.vm.formData.modelName, '')
+    assert.equal(f.vm.formData.apiKey, '')
+    assert.equal(f.vm.formData.baseUrl, '')
+  } finally { f.close() }
+})
+
+test('type reset discards pending connection and catalog diagnosis results', async () => {
+  const connection = deferred<Result>()
+  const diagnosis = deferred<any>()
+  const f = await fixture({ check: () => connection.promise, resolve: () => diagnosis.promise })
+  try {
+    const checking = f.vm.checkRemoteAPI()
+    const resolving = f.vm.runResolve()
+    await f.vm.selectModelType('asr')
+    connection.resolve({ available: true })
+    diagnosis.resolve({ cataloged: true, model: { id: 'old-model' } })
+    await Promise.all([checking, resolving])
+    assert.equal(f.vm.remoteChecked, false)
+    assert.equal(f.vm.remoteStale, false)
+    assert.equal(f.vm.checking, false)
+    assert.equal(f.vm.resolved, null)
+    assert.equal(f.vm.resolving, false)
+  } finally { f.close() }
+})
+
+test('selecting the current type, editing, or saving does not reset the draft', async () => {
+  for (const state of ['same-type', 'editing', 'saving']) {
+    const f = await fixture({ edit: state === 'editing' })
+    try {
+      const original = JSON.stringify(f.vm.formData)
+      const requests = f.catalogRequests.length
+      if (state === 'saving') f.vm.saving = true
+      await f.vm.selectModelType(state === 'same-type' ? 'chat' : 'asr')
+      assert.equal(JSON.stringify(f.vm.formData), original, state)
+      assert.equal(f.catalogRequests.length, requests, state)
+    } finally { f.close() }
+  }
+})
 
 for (const type of ['chat', 'embedding', 'rerank', 'vllm', 'asr']) {
   test(`${type}: connection tests use unsaved form values without saving`, async () => {
@@ -427,6 +602,49 @@ test('picking a catalog model fills blank capability fields only', async () => {
     f.vm.handleCatalogModelCreate(' my-custom-model ')
     assert.equal(f.vm.formData.modelName, 'my-custom-model')
     assert.equal(f.vm.catalogModelOptions[0].value, 'my-custom-model', 'free text stays selectable')
+  } finally { f.close() }
+})
+
+const embeddingProviders = [{
+  value: 'volcengine', label: 'Volcengine', description: '', order: 1, icon: '',
+  defaultUrls: { embedding: 'https://ark.cn-beijing.volces.com/api/v3' },
+  modelTypes: ['embedding'],
+  models: [
+    { id: 'doubao-embedding-vision-251215', name: 'Doubao Embedding Vision', type: 'embedding', input: ['text', 'image', 'video'], dimension: 2048 },
+    { id: 'doubao-embedding-text', name: 'Doubao Embedding Text', type: 'embedding', dimension: 2048 },
+  ],
+}]
+
+test('embedding image input follows the catalog and stores only a differing declaration', async () => {
+  const f = await fixture({ type: 'embedding', providers: embeddingProviders })
+  try {
+    f.vm.formData.provider = 'volcengine'
+    f.vm.formData.modelName = 'doubao-embedding-vision-251215'
+    f.vm.handleCatalogModelChange('doubao-embedding-vision-251215')
+    await nextTick()
+    assert.equal(f.vm.embeddingAcceptsImages, true, 'catalogued multimodal model')
+    assert.equal(f.vm.formData.spec, null, 'the catalog answer is not copied into the row')
+
+    f.vm.embeddingAcceptsImages = false
+    assert.deepEqual(plain(f.vm.formData.spec), { input: ['text'] }, 'narrowing the catalog is a declaration')
+    f.vm.embeddingAcceptsImages = true
+    assert.equal(f.vm.formData.spec, null, 'back to the catalog answer drops it again')
+
+    // A custom model has nothing in the catalog; declaring image input sticks
+    // next to whatever else spec already carries.
+    f.vm.formData.spec = { compat: { encoding_format: 'float' } }
+    f.vm.handleCatalogModelCreate('my-clip')
+    await nextTick()
+    assert.equal(f.vm.embeddingAcceptsImages, false)
+    f.vm.embeddingAcceptsImages = true
+    assert.deepEqual(plain(f.vm.formData.spec), { compat: { encoding_format: 'float' }, input: ['text', 'image'] })
+
+    // Picking a catalogued model discards a declaration made for another one.
+    f.vm.formData.modelName = 'doubao-embedding-text'
+    f.vm.handleCatalogModelChange('doubao-embedding-text')
+    await nextTick()
+    assert.equal(f.vm.embeddingAcceptsImages, false)
+    assert.deepEqual(plain(f.vm.formData.spec), { compat: { encoding_format: 'float' } })
   } finally { f.close() }
 })
 
@@ -748,6 +966,54 @@ test('switching vendor clears a connection result that described the old one', a
   } finally { f.close() }
 })
 
+test('ASR vendor changes replace the previous URL and show the selected catalog model as the hint', async () => {
+  const f = await fixture({ type: 'asr', providers: [
+    { value: 'openai', defaultUrls: { asr: 'https://api.openai.com/v1' }, models: [{ id: 'whisper-1', type: 'asr' }] },
+    { value: 'zhipu', defaultUrls: { asr: 'https://open.bigmodel.cn/api/paas/v4' }, models: [{ id: 'glm-asr-2512', type: 'asr' }] },
+    { value: 'generic', models: [] },
+  ] })
+  try {
+    for (const [vendor, url, hint] of [
+      ['openai', 'https://api.openai.com/v1', 'whisper-1'],
+      ['zhipu', 'https://open.bigmodel.cn/api/paas/v4', 'glm-asr-2512'],
+      ['generic', '', 'model.editor.modelNamePlaceholder.remoteAsr'],
+    ]) {
+      f.vm.formData.provider = vendor
+      f.vm.handleProviderChange(vendor)
+      assert.equal(f.vm.formData.baseUrl, url, vendor)
+      assert.equal(f.vm.getModelNamePlaceholder(), hint, vendor)
+    }
+  } finally { f.close() }
+})
+
+test('ASR inherits the vendor chat base URL from older catalog responses', async () => {
+  const f = await fixture({ type: 'asr', providers: [
+    { value: 'mimo', defaultUrls: { chat: 'https://api.xiaomimimo.com/v1' }, models: [{ id: 'mimo-v2.5-asr', type: 'asr' }] },
+    { value: 'zhipu', defaultUrls: { chat: 'https://open.bigmodel.cn/api/paas/v4' }, models: [] },
+    { value: 'custom', defaultUrls: { chat: 'https://chat.example.com', asr: 'https://speech.example.com' }, models: [] },
+  ] })
+  try {
+    for (const [vendor, url] of [
+      ['mimo', 'https://api.xiaomimimo.com/v1'],
+      ['zhipu', 'https://open.bigmodel.cn/api/paas/v4'],
+      ['custom', 'https://speech.example.com'],
+    ]) {
+      f.vm.formData.provider = vendor
+      f.vm.handleProviderChange(vendor)
+      assert.equal(f.vm.formData.baseUrl, url, vendor)
+    }
+  } finally { f.close() }
+})
+
+test('an explicitly empty type URL clears the old endpoint without inheriting the chat URL', async () => {
+  const f = await fixture({ type: 'asr', providers: [{ value: 'custom', defaultUrls: { chat: 'https://chat.example.com', asr: '' } }] })
+  try {
+    f.vm.formData.provider = 'custom'
+    f.vm.handleProviderChange('custom')
+    assert.equal(f.vm.formData.baseUrl, '')
+  } finally { f.close() }
+})
+
 // A VLM entry is a chat model that accepts images, so the backend — which
 // already scopes the provider list to the requested model type — returns it
 // typed "chat". Re-filtering on that type in the editor emptied the picker
@@ -801,7 +1067,7 @@ for (const [type, modelName] of [['chat', 'chat'], ['embedding', 'embedding'], [
   })
 }
 
-test('switching WeKnora Cloud model types updates the managed choices', async () => {
+test('reselecting WeKnora Cloud after a type reset offers the new managed choices', async () => {
   const f = await fixture({ providers: [cloudProvider] })
   try {
     f.vm.formData.provider = 'weknoracloud'
@@ -810,6 +1076,9 @@ test('switching WeKnora Cloud model types updates the managed choices', async ()
     f.vm.formData.modelName = 'chat'
     await f.vm.selectModelType('vllm')
     assert.equal(f.vm.formData.modelName, '')
+    assert.equal(f.vm.formData.provider, 'generic')
+    f.vm.formData.provider = 'weknoracloud'
+    f.vm.handleProviderChange('weknoracloud')
     assert.deepEqual(Array.from(f.vm.catalogModelOptions, (o: any) => o.value), ['vlm'])
   } finally { f.close() }
 })

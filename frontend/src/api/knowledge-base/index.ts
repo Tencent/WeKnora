@@ -213,13 +213,17 @@ export async function fetchImageAttrSchema(kbId: string): Promise<ImageAttrSchem
 }
 
 // Mirrors backend types.ImageProcessingConfig (snake_case JSON). The UI edits
-// the attribute-observation switch and the on_unobserved toggle; saving sends
-// the snapshot back with those fields updated so API-side settings survive a
-// UI edit.
+// the attribute-observation switch, the on_unobserved toggle and the
+// image-vector switch; saving sends the snapshot back with those fields
+// updated so API-side settings survive a UI edit.
 export interface ImageProcessingConfig {
   model_id?: string;
   image_actions?: ImageActionsConfig;
   image_attrs_enabled?: boolean;
+  // Index and recall images by their own vectors. Off unless the knowledge
+  // base opts in, and only takes effect with an embedding model that takes
+  // images.
+  image_vector_enabled?: boolean;
 }
 
 export type VectorStoreSource = 'env' | 'user' | 'shared' | 'unavailable';
