@@ -151,7 +151,7 @@ func retrieveGroup(ctx context.Context, g *storeGroup) ([]*types.RetrieveResult,
 		if rr != nil {
 			out := summarizeImagePool(rr, g)
 			out["retriever"], out["kb_ids"] = rr.RetrieverType, g.KBIDs
-			recordImageRecallDecision(ctx, "filter", nil, out)
+			recordImageRecallDecision(ctx, "filter_decision", rr.RetrieverType, out)
 		}
 	}
 	filterImageHits(res, g)
