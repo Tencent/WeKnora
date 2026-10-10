@@ -151,7 +151,7 @@ func (c *Client) Embed(
 	ctx context.Context, texts []string, kind api.EmbedInputType,
 ) ([][]float32, error) {
 	if c.cfg.Settings.TextAsMessages {
-		return c.postEach(ctx, len(texts), func(i int) map[string]any {
+		return c.postMessages(ctx, len(texts), kind, func(i int) map[string]any {
 			return c.BuildTextMessageBody(texts[i], kind)
 		})
 	}
@@ -171,16 +171,30 @@ func (c *Client) EmbedImages(
 	case api.EmbeddingImageObject:
 		return c.post(ctx, c.BuildImageRequestBody(images, kind), len(images))
 	case api.EmbeddingImageMessages:
-		return c.postEach(ctx, len(images), func(i int) map[string]any {
+		return c.postMessages(ctx, len(images), kind, func(i int) map[string]any {
 			return c.BuildImageMessageBody(images[i], kind)
 		})
 	}
 	return nil, fmt.Errorf("this embedding endpoint declares no image input")
 }
 
-// postEach sends one request per input, for the messages format where a
-// conversation yields exactly one vector.
-func (c *Client) postEach(ctx context.Context, n int, body func(int) map[string]any) ([][]float32, error) {
+// postMessages preserves each input's chat template while batching independent
+// conversations on servers that support EmbeddingBatchChatRequest:
+// https://github.com/vllm-project/vllm/blob/v0.29.0/vllm/entrypoints/pooling/embed/protocol.py
+func (c *Client) postMessages(
+	ctx context.Context, n int, kind api.EmbedInputType, body func(int) map[string]any,
+) ([][]float32, error) {
+	if n == 0 {
+		return nil, nil
+	}
+	if c.cfg.Settings.BatchMessages && n > 1 {
+		conversations := make([]any, n)
+		for i := range n {
+			conversations[i] = body(i)["messages"]
+		}
+		return c.post(ctx, c.body("messages", conversations, kind), n)
+	}
+	// A single input and older endpoints keep the original flat messages.
 	out := make([][]float32, n)
 	for i := range n {
 		vectors, err := c.post(ctx, body(i), 1)

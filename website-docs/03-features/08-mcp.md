@@ -402,6 +402,16 @@ flowchart LR
 
 ### 内置 MCP Server 参考 {#第二部分-weknora-作为-mcp-server}
 
+#### 协议兼容
+
+内置 `/mcp/:endpoint_id` 同时支持 `2026-07-28` 与 `2025-11-25` 客户端，沿用同一个 URL、Bearer 令牌、工具白名单和知识库作用域。新版客户端通过 `server/discover` 发现能力，每个请求携带协议元数据与对应 HTTP 头；旧版客户端继续使用 `initialize`。浏览器预检允许 `Mcp-Method`、`Mcp-Name` 等协议请求头。新版发现及清单响应默认使用 `cacheScope=private`、`ttlMs=0`，不共享缓存受权限限制的目录。
+
+调用白名单以外的工具返回 JSON-RPC `-32602`，工具不会执行；这与旧 SDK 返回工具结果 `isError=true` 的错误形状不同。知识库越权仍由原有作用域检查拒绝。
+
+WeKnora 调用外部 MCP 服务时，由 `mcp-go v1.1.1` 按每个对端独立自动协商：先尝试新版发现，失败后尝试 legacy 初始化。忽略发现请求的旧服务最多增加约 5 秒探测等待；401/503 等探测失败也会尝试 legacy 初始化，两次失败则返回初始化错误。父请求取消或超时不会被标记为初始化成功。该协商不取决于调用 WeKnora 的客户端所用版本。
+
+外部工具目录保留完整 JSON Schema；新版工具调用会按 schema 的 `x-mcp-header` 标注生成 `Mcp-Param-*` 请求头。目录刷新失败时不会用部分结果替换上一次完整目录的参数头定义，断开连接时清除这些定义。
+
 #### 数据模型与管理 API
 
 `mcp_endpoints` 表（PostgreSQL 迁移 `000102_mcp_endpoints`，SQLite `000022_mcp_endpoints`）每行一个端点：`tenant_id`、`name`、`description`、`enabled`、`token_hash`（SHA-256）、`token_hint`（前缀展示用）、`knowledge_base_ids`（空数组表示空间内全部）、`tools`（白名单）、`default_agent_id`（空为内置快速问答）、`rate_limit_per_minute`（默认 60，上限 6000）、`last_used_at`。类型定义在 `internal/types/mcp_endpoint.go`，工具目录在 `internal/types/mcp_endpoint_tools.go`。

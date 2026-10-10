@@ -30,7 +30,52 @@ test('Tab indents a list line and Shift+Tab takes it back out', () => {
   assert.deepEqual(indented, { value: '  - item', start: 8, end: 8 })
 
   const outdented = indentOnTab(caret('  - item', 8), true)
-  assert.equal(outdented?.value, '- item')
+  assert.deepEqual(outdented, { value: '- item', start: 6, end: 6 })
+})
+
+for (const { name, value, at, expectedValue, expectedAt } of [
+  { name: 'inside the item', value: '  - item', at: 6, expectedValue: '- item', expectedAt: 4 },
+  { name: 'at the line start', value: '  - item', at: 0, expectedValue: '- item', expectedAt: 0 },
+  { name: 'inside removed indentation', value: '  - item', at: 1, expectedValue: '- item', expectedAt: 0 },
+  { name: 'after removed indentation', value: '  - item', at: 2, expectedValue: '- item', expectedAt: 0 },
+  { name: 'with one space', value: ' - item', at: 7, expectedValue: '- item', expectedAt: 6 },
+  { name: 'with a tab', value: '\t- item', at: 7, expectedValue: '- item', expectedAt: 6 },
+  { name: 'with deeper indentation', value: '    - item', at: 10, expectedValue: '  - item', expectedAt: 8 },
+  { name: 'without indentation', value: '- item', at: 6, expectedValue: '- item', expectedAt: 6 },
+  { name: 'after another line', value: 'before\n  - item\nafter', at: 8, expectedValue: 'before\n- item\nafter', expectedAt: 7 },
+]) {
+  test(`Shift+Tab keeps a collapsed caret ${name}`, () => {
+    assert.deepEqual(indentOnTab(caret(value, at), true), {
+      value: expectedValue,
+      start: expectedAt,
+      end: expectedAt,
+    })
+  })
+}
+
+test('typing after outdenting inserts at the caret instead of replacing the item', () => {
+  const patch = indentOnTab(caret('  - item', 8), true)
+  assert.ok(patch)
+  const typed = patch.value.slice(0, patch.start) + ' next' + patch.value.slice(patch.end)
+  assert.equal(typed, '- item next')
+})
+
+test('Shift+Tab keeps explicitly selected lines selected', () => {
+  assert.deepEqual(indentOnTab({ value: '  - item', start: 4, end: 6 }, true), {
+    value: '- item', start: 0, end: 6,
+  })
+  assert.deepEqual(indentOnTab({ value: '  - first\n\t- second', start: 2, end: 19 }, true), {
+    value: '- first\n- second', start: 0, end: 16,
+  })
+})
+
+test('Tab continues to preserve a caret or selection within a list item', () => {
+  assert.deepEqual(indentOnTab(caret('- item', 4), false), {
+    value: '  - item', start: 6, end: 6,
+  })
+  assert.deepEqual(indentOnTab({ value: '- item', start: 2, end: 4 }, false), {
+    value: '  - item', start: 4, end: 6,
+  })
 })
 
 test('Tab indents every line of a multi-line selection but skips blank ones', () => {

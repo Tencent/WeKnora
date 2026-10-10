@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -303,18 +304,22 @@ func (t *MCPTool) Execute(ctx context.Context, args json.RawMessage) (*types.Too
 		}, nil
 	}
 
-	// Check if result indicates error
+	// Extract text content and image data URIs from result
+	var output string
+	var images []string
+	var skipped int
 	if result.IsError {
-		errorMsg := extractContentText(result.Content)
-		logger.GetLogger(ctx).Warnf("MCP tool returned error: %s", errorMsg)
+		output = extractContentText(result.Content)
+	} else {
+		output, images, skipped = extractContentAndImages(result.Content)
+	}
+	output, err = appendMCPStructuredContent(output, result.Content, result.StructuredContent)
+	if err != nil {
 		return &types.ToolResult{
 			Success: false,
-			Error:   errorMsg,
+			Error:   fmt.Sprintf("Failed to serialize MCP structured result: %v", err),
 		}, nil
 	}
-
-	// Extract text content and image data URIs from result
-	output, images, skipped := extractContentAndImages(result.Content)
 	if skipped > 0 {
 		logger.GetLogger(ctx).Warnf("MCP tool %s: %d image(s) skipped (exceeded count/size/MIME limits)", t.mcpTool.Name, skipped)
 	}
@@ -328,6 +333,14 @@ func (t *MCPTool) Execute(ctx context.Context, args json.RawMessage) (*types.Too
 	// double storage in memory and accidental exposure in logs/SSE.
 	data := make(map[string]interface{})
 	data["content_items"] = redactImageData(result.Content)
+	if result.StructuredContent != nil {
+		data["structured_content"] = result.StructuredContent
+	}
+
+	if result.IsError {
+		logger.GetLogger(ctx).Warnf("MCP tool returned error: %s", output)
+		return &types.ToolResult{Success: false, Error: output, Data: data}, nil
+	}
 
 	logger.GetLogger(ctx).Infof("MCP tool executed successfully: %s (images: %d)", t.mcpTool.Name, len(images))
 
@@ -337,6 +350,41 @@ func (t *MCPTool) Execute(ctx context.Context, args json.RawMessage) (*types.Too
 		Data:    data,
 		Images:  images,
 	}, nil
+}
+
+// appendMCPStructuredContent makes structured results visible to the model,
+// whose tool messages consume Output/Error rather than the Data map. Servers
+// may also return serialized JSON as a compatibility text block; keep that
+// block without appending the same payload a second time.
+func appendMCPStructuredContent(output string, content []mcp.ContentItem, structured any) (string, error) {
+	if structured == nil {
+		return output, nil
+	}
+	payload, err := json.Marshal(structured)
+	if err != nil {
+		return "", err
+	}
+	for _, item := range content {
+		if item.Type != "text" {
+			continue
+		}
+		var fallback any
+		if json.Unmarshal([]byte(item.Text), &fallback) == nil {
+			canonical, _ := json.Marshal(fallback)
+			if bytes.Equal(canonical, payload) {
+				return output, nil
+			}
+		}
+	}
+	// The legacy extractor substitutes a success placeholder for empty content.
+	// Structured-only results have real output, so omit that placeholder.
+	if len(content) == 0 {
+		output = ""
+	}
+	if output != "" {
+		output += "\n\n"
+	}
+	return output + "Structured content:\n" + string(payload), nil
 }
 
 const (

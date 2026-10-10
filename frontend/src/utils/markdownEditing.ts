@@ -94,7 +94,12 @@ export function indentOnTab(state: EditorState, outdent: boolean): EditorPatch {
   if (!multiLine && !inList) return null
 
   if (outdent) {
-    return mapSelectedLines(state, (line) => line.replace(/^(?: {1,2}|\t)/, ''))
+    const outdented = mapSelectedLines(state, (line) => line.replace(/^(?: {1,2}|\t)/, ''))
+    if (start !== end) return outdented
+    // A caret must stay collapsed so the next keystroke does not replace the item.
+    const removedIndent = value.length - outdented.value.length
+    const caret = Math.max(lineStart, start - removedIndent)
+    return { ...outdented, start: caret, end: caret }
   }
   if (multiLine) {
     return mapSelectedLines(state, (line) => (line.trim() ? INDENT + line : line))
