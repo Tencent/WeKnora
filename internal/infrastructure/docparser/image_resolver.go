@@ -552,13 +552,13 @@ func markdownCodeLiteralRanges(markdown string) []markdownCodeLiteralRange {
 		for i+runLength < len(markdown) && markdown[i+runLength] == '`' {
 			runLength++
 		}
-		close := findInlineCodeLiteralClose(markdown, ranges, i+runLength, runLength)
-		if close < 0 {
+		closePos := findInlineCodeLiteralClose(markdown, ranges, i+runLength, runLength)
+		if closePos < 0 {
 			i += runLength
 			continue
 		}
-		ranges = append(ranges, markdownCodeLiteralRange{start: i, end: close + runLength})
-		i = close + runLength
+		ranges = append(ranges, markdownCodeLiteralRange{start: i, end: closePos + runLength})
+		i = closePos + runLength
 	}
 	return ranges
 }
