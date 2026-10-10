@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/http/httptrace"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -31,15 +32,46 @@ import (
 
 func newTestClient(t *testing.T, url string) *osapi.Client {
 	t.Helper()
+	// httptest.Server.Close touches http.DefaultTransport. Give each client
+	// its own pool so parallel server cleanup cannot interrupt its requests.
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	t.Cleanup(transport.CloseIdleConnections)
 	c, err := osapi.NewClient(osapi.Config{
 		Client: opensearch.Config{
 			Addresses: []string{url},
+			Transport: transport,
 		},
 	})
 	if err != nil {
 		t.Fatalf("newTestClient: %v", err)
 	}
 	return c
+}
+
+// Closing any httptest server also closes idle connections on the global
+// transport. A sibling test must not be able to disrupt this client's pool.
+func TestNewTestClient_IsolatesTransportFromOtherServers(t *testing.T) {
+	t.Parallel()
+	ts := httptest.NewServer(versionHandler("opensearch", "3.3.2"))
+	defer ts.Close()
+	client := newTestClient(t, ts.URL)
+	if err := probeVersion(context.Background(), client); err != nil {
+		t.Fatal(err)
+	}
+
+	sibling := httptest.NewServer(http.NotFoundHandler())
+	sibling.Close()
+
+	var reused bool
+	ctx := httptrace.WithClientTrace(context.Background(), &httptrace.ClientTrace{
+		GotConn: func(info httptrace.GotConnInfo) { reused = info.Reused },
+	})
+	if err := probeVersion(ctx, client); err != nil {
+		t.Fatal(err)
+	}
+	if !reused {
+		t.Fatal("closing another test server discarded this client's idle connection")
+	}
 }
 
 // newTestRepo builds a Repository directly (bypassing NewRepository's probe

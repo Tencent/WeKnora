@@ -487,6 +487,11 @@ func resolveEmbeddings(
 		protocol = settings.API
 	}
 	settings.API = protocol
+	if !settings.ImageFormat.Known() {
+		return nil, fmt.Errorf(
+			"catalog: unknown embedding image_format %q on %s/%s (expected %q or %q)",
+			settings.ImageFormat, vendor.ID, spec.ID, api.EmbeddingImageObject, api.EmbeddingImageMessages)
+	}
 
 	out := &Resolved{
 		Vendor:       configcopy.Clone(vendor.Definition),
