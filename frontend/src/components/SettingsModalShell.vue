@@ -67,7 +67,7 @@ const mobileDetail = ref(false)
 const dialogElement = ref<HTMLElement>()
 let previousFocus: HTMLElement | null = null
 function onDialogKeydown(event: KeyboardEvent) {
-  if (event.key !== 'Tab') return
+  if (!isMobile.value || event.key !== 'Tab') return
   const nodes = [...(dialogElement.value?.querySelectorAll<HTMLElement>('button, input, textarea, select, a[href], [tabindex="0"]') || [])]
     .filter(node => node.getClientRects().length && !node.hasAttribute('disabled'))
   const first = nodes[0], last = nodes[nodes.length - 1]
@@ -150,12 +150,13 @@ const props = withDefaults(
 watch(() => props.visible, visible => {
   mobileDetail.value = false
   mobileNavItem = null
+  if (!isMobile.value) return
   if (visible) {
     previousFocus = document.activeElement as HTMLElement
     nextTick(() => dialogElement.value?.querySelector<HTMLButtonElement>('.close-btn')?.focus())
   } else previousFocus?.focus()
 })
-onMounted(() => { if (props.visible) nextTick(() => dialogElement.value?.querySelector<HTMLButtonElement>('.close-btn')?.focus()) })
+onMounted(() => { if (props.visible && isMobile.value) nextTick(() => dialogElement.value?.querySelector<HTMLButtonElement>('.close-btn')?.focus()) })
 
 const emit = defineEmits<{
   (e: 'update:modelValue', key: string): void
