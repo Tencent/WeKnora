@@ -1,4 +1,5 @@
 import { normalizeFolderPath } from '../views/knowledge/folderTree.ts'
+import { isSafePreviewImageHref } from './documentPreviewMarkdown.ts'
 
 /** Knowledge list pages used to find a sibling image. The public list API is queried at this size. */
 export const PREVIEW_IMAGE_PAGE_SIZE = 100
@@ -140,6 +141,13 @@ export async function rewriteKnowledgeMarkdownImages(
     try {
       const blob = await deps.loadPreview(id)
       const url = createObjectURL(blob)
+      // The preview sanitizer is what actually emits <img src>. A URL it
+      // would drop must not be spliced into the markdown, or the scan and
+      // the rendered page disagree about whether the image is safe.
+      if (!isSafePreviewImageHref(url)) {
+        if (url.startsWith('blob:')) URL.revokeObjectURL(url)
+        continue
+      }
       objectUrls.push(url)
       hrefToUrl.set(span.href, url)
     } catch {

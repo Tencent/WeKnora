@@ -104,6 +104,20 @@ test('rewrite uses exact folder_path and file_name, including a later list page'
   assert.doesNotMatch(html, /src="images\/image_001\.jpg"/)
 })
 
+test('rewrite leaves the href alone when the object URL fails the preview sanitizer', async () => {
+  const deps = fakeDeps({
+    folderPath: 'notes',
+    listFiles: async () => ({
+      rows: [{ id: 'shot', fileName: 'shot.jpg', folderPath: 'notes' }],
+      total: 1,
+    }),
+  })
+  deps.createObjectURL = () => 'javascript:alert(1)'
+  const rewritten = await rewriteKnowledgeMarkdownImages('![](shot.jpg)', 'doc', deps)
+  assert.equal(rewritten.markdown, '![](shot.jpg)')
+  assert.deepEqual(rewritten.objectUrls, [])
+})
+
 test('rewrite does not guess a root file from a relative directory', async () => {
   let listed = false
   const deps = fakeDeps({
