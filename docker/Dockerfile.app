@@ -3,7 +3,13 @@ FROM --platform=$TARGETPLATFORM node:24-bookworm-slim@sha256:ba849c60be29959425b
 WORKDIR /build
 # Use the same optional Debian mirror as the Go builder and runtime stages.
 ARG APK_MIRROR_ARG
+# This base image has no CA certificates. Install them from the original HTTP
+# Debian source before swapping in a mirror: mirrors.tencent.com redirects
+# apt to HTTPS, and that handshake fails without a trust store.
 RUN if [ -n "$APK_MIRROR_ARG" ]; then \
+        apt-get update && \
+        apt-get install -y --no-install-recommends ca-certificates && \
+        rm -rf /var/lib/apt/lists/* && \
         sed -i "s@deb.debian.org@${APK_MIRROR_ARG}@g" /etc/apt/sources.list.d/debian.sources; \
     fi && \
     apt-get update && \
