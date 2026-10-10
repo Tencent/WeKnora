@@ -44,7 +44,15 @@
                 </transition>
             </div>
             <div v-if="creatingSession || createdSessionId" class="new-chat-conversation" role="log" aria-live="polite">
-                <div class="new-chat-question">{{ pendingQuestion }}</div>
+                <div class="new-chat-question">
+                    <span>{{ pendingQuestion }}</span>
+                    <div v-if="pendingImages.length" class="new-chat-images">
+                        <img v-for="image in pendingImages" :key="image.url" :src="image.url" :alt="image.name" />
+                    </div>
+                    <div v-if="pendingAttachments.length" class="new-chat-attachments">
+                        <span v-for="file in pendingAttachments" :key="file.name"><t-icon name="file" />{{ file.name }}</span>
+                    </div>
+                </div>
                 <div v-if="creatingSession" class="new-chat-progress" role="status"><t-loading size="small" /><span>{{ $t('common.loading') }}</span></div>
             </div>
             <div class="create-chat-composer" @input.capture="!createdSessionId && (creationError = false)">
@@ -76,7 +84,7 @@
         @update:visible="(val) => val ? null : uiStore.closeKBEditor()" @success="handleKBEditorSuccess" />
 </template>
 <script setup lang="ts">
-import { ref, watch, onMounted, nextTick, computed } from 'vue';
+import { ref, watch, onMounted, onUnmounted, nextTick, computed } from 'vue';
 import ContextualGuide from '@/components/ContextualGuide.vue';
 import InputField from '@/components/Input-field.vue';
 import { createSessions } from "@/api/chat/index";
@@ -228,6 +236,13 @@ const creatingSession = ref(false);
 const pendingQuestion = ref('');
 const creationError = ref(false);
 const createdSessionId = ref('');
+const pendingImages = ref<Array<{ name: string; url: string }>>([]);
+const pendingAttachments = ref<Array<{ name: string }>>([]);
+function clearPendingPreviews() {
+    pendingImages.value.forEach(image => URL.revokeObjectURL(image.url));
+    pendingImages.value = [];
+}
+onUnmounted(clearPendingPreviews);
 let pendingOptions: SendMessageOptions = {};
 let leavingPage = false;
 
@@ -248,6 +263,9 @@ async function createNewSession(value: string, modelId: string, mentionedItems: 
     options = options.questionOrigin ? options : value === pendingQuestion.value ? pendingOptions : options;
     pendingOptions = options;
     pendingQuestion.value = value;
+    clearPendingPreviews();
+    pendingImages.value = imageFiles.map(file => ({ name: file.name, url: URL.createObjectURL(file) }));
+    pendingAttachments.value = attachmentFiles.map(file => ({ name: file.name }));
     const selectedKbs = settingsStore.settings.selectedKnowledgeBases || [];
     const selectedFiles = settingsStore.settings.selectedFiles || [];
 
@@ -391,6 +409,21 @@ async function openProjectDir() {
     color: var(--td-text-color-primary);
     white-space: pre-wrap;
     overflow-wrap: anywhere;
+}
+.new-chat-images {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 8px;
+    img { width: 72px; height: 72px; object-fit: cover; border-radius: var(--app-radius-md); }
+}
+.new-chat-attachments {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-top: 8px;
+    overflow-wrap: anywhere;
+    span { display: flex; align-items: center; gap: 6px; }
 }
 .new-chat-progress {
     display: flex;

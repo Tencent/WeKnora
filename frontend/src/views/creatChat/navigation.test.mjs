@@ -58,3 +58,22 @@ test('Send cannot create another session while an existing one is awaiting retry
   await create('question', 'model')
   assert.equal(created, false)
 })
+
+test('failed creation keeps the full pending media metadata and unlocks the preserved draft', async () => {
+  const code = source.slice(source.indexOf('async function createNewSession('), source.indexOf('const navigateToSession ='))
+  const pendingImages = { value: [] }, pendingAttachments = { value: [] }
+  const creationError = { value: false }, creatingSession = { value: false }
+  const create = vm.runInNewContext(ts.transpile(`${code}\ncreateNewSession`), {
+    creatingSession, createdSessionId: { value: '' }, creationError, pendingImages, pendingAttachments,
+    pendingQuestion: { value: '' }, pendingOptions: {}, leavingPage: false, clearPendingPreviews() {},
+    URL: { createObjectURL: () => 'blob:photo' }, settingsStore: { settings: {}, agentConfig: {} },
+    selectedProjectDir: { value: '' }, withOptionalProjectDir: data => data,
+    createSessions: async () => { throw new Error('Unavailable') }, console: { error() {} },
+  })
+  await create('question', 'model', [{ id: 'mention' }], [{ name: 'photo.png' }], [{ name: 'book.pdf', documentId: 'attachment' }])
+  assert.equal(creationError.value, true)
+  assert.equal(creatingSession.value, false)
+  assert.equal(pendingImages.value[0].name, 'photo.png')
+  assert.equal(pendingImages.value[0].url, 'blob:photo')
+  assert.equal(pendingAttachments.value[0].name, 'book.pdf')
+})
