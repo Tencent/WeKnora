@@ -20,6 +20,7 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -399,7 +400,6 @@ func (r *ImageResolver) ResolveHTMLDataURIImages(
 		return markdown, nil, nil
 	}
 
-	processed := 0
 	for i := len(matches) - 1; i >= 0; i-- {
 		m := matches[i]
 		dataURI := markdown[m[2]:m[3]]
@@ -433,15 +433,14 @@ func (r *ImageResolver) ResolveHTMLDataURIImages(
 			return markdown, images, fmt.Errorf("save HTML data URI image: %w", saveErr)
 		}
 		images = append(images, StoredImage{
-			OriginalRef:    "html-img-data-uri",
-			ServingURL:     servingURL,
-			MimeType:       mimeType,
-			Inline:         true,
-			SkipMultimodal: processed >= maxInlineImagesForMultimodal,
+			OriginalRef: "html-img-data-uri",
+			ServingURL:  servingURL,
+			MimeType:    mimeType,
+			Inline:      true,
 		})
 		markdown = markdown[:m[0]] + fmt.Sprintf("![image](%s)", servingURL) + markdown[m[1]:]
-		processed++
 	}
+	applyMultimodalBudget(images)
 	return markdown, images, nil
 }
 
@@ -604,7 +603,6 @@ func (r *ImageResolver) resolveBareDataURIs(
 	}
 
 	var images []StoredImage
-	processed := 0
 	for i := len(matches) - 1; i >= 0; i-- {
 		m := matches[i]
 		// Check context: skip HTML src attributes, but handle broken markdown refs
@@ -648,11 +646,10 @@ func (r *ImageResolver) resolveBareDataURIs(
 			return markdown, images, fmt.Errorf("save bare data URI image: %w", saveErr)
 		}
 		images = append(images, StoredImage{
-			OriginalRef:    "bare-data-uri",
-			ServingURL:     servingURL,
-			MimeType:       mimeType,
-			Inline:         true,
-			SkipMultimodal: processed >= maxInlineImagesForMultimodal,
+			OriginalRef: "bare-data-uri",
+			ServingURL:  servingURL,
+			MimeType:    mimeType,
+			Inline:      true,
 		})
 		if insideWrapper {
 			// Inside a broken markdown ref like ![weird]alt](data:...) — replace data URI only
@@ -660,8 +657,8 @@ func (r *ImageResolver) resolveBareDataURIs(
 		} else {
 			markdown = markdown[:m[0]] + fmt.Sprintf("![image](%s)", servingURL) + markdown[m[1]:]
 		}
-		processed++
 	}
+	applyMultimodalBudget(images)
 	return markdown, images, nil
 }
 
@@ -677,7 +674,6 @@ func (r *ImageResolver) resolveBareBase64Prefix(
 	}
 
 	var images []StoredImage
-	processed := 0
 	for i := len(matches) - 1; i >= 0; i-- {
 		m := matches[i]
 		// Skip if preceded by ';' — this is part of a data URI handled above
@@ -714,15 +710,14 @@ func (r *ImageResolver) resolveBareBase64Prefix(
 			return markdown, images, fmt.Errorf("save bare base64 image: %w", saveErr)
 		}
 		images = append(images, StoredImage{
-			OriginalRef:    "bare-base64",
-			ServingURL:     servingURL,
-			MimeType:       mimeType,
-			Inline:         true,
-			SkipMultimodal: processed >= maxInlineImagesForMultimodal,
+			OriginalRef: "bare-base64",
+			ServingURL:  servingURL,
+			MimeType:    mimeType,
+			Inline:      true,
 		})
 		markdown = markdown[:m[0]] + fmt.Sprintf("![image](%s)", servingURL) + markdown[m[1]:]
-		processed++
 	}
+	applyMultimodalBudget(images)
 	return markdown, images, nil
 }
 
@@ -742,6 +737,18 @@ const (
 	// remoteImageFetchTimeout is the per-image HTTP request timeout.
 	remoteImageFetchTimeout = 15 * time.Second
 )
+
+// applyMultimodalBudget restores document order — the inline resolvers walk
+// their matches back to front so each in-place markdown rewrite stays
+// index-valid — and flags the images beyond the per-syntax multimodal quota:
+// the document's leading maxInlineImagesForMultimodal go to AI understanding,
+// the rest stay stored and bound but skip OCR/caption fan-out.
+func applyMultimodalBudget(images []StoredImage) {
+	slices.Reverse(images)
+	for i := range images {
+		images[i].SkipMultimodal = i >= maxInlineImagesForMultimodal
+	}
+}
 
 // reLinkedImage matches the nested [![alt](img_url)](link_url) pattern where
 // an image is wrapped inside a Markdown link. We unwrap it to just ![alt](img_url)
@@ -810,7 +817,6 @@ func (r *ImageResolver) ResolveDataURIImages(
 		return markdown, nil, nil
 	}
 
-	processed := 0
 	for i := len(matches) - 1; i >= 0; i-- {
 		m := matches[i]
 		if len(m) < 6 {
@@ -848,15 +854,14 @@ func (r *ImageResolver) ResolveDataURIImages(
 			return markdown, images, fmt.Errorf("save data URI image: %w", saveErr)
 		}
 		images = append(images, StoredImage{
-			OriginalRef:    dataURI,
-			ServingURL:     servingURL,
-			MimeType:       mimeType,
-			Inline:         true,
-			SkipMultimodal: processed >= maxInlineImagesForMultimodal,
+			OriginalRef: dataURI,
+			ServingURL:  servingURL,
+			MimeType:    mimeType,
+			Inline:      true,
 		})
 		markdown = markdown[:m[4]] + servingURL + markdown[m[5]:]
-		processed++
 	}
+	applyMultimodalBudget(images)
 	return markdown, images, nil
 }
 

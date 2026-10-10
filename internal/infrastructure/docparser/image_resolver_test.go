@@ -207,7 +207,32 @@ func TestResolveHTMLDataURIImages(t *testing.T) {
 	}
 }
 
-func TestInlineImageStorageKeepsLegacyMultimodalBudget(t *testing.T) {
+// assertLeadingImagesWinBudget verifies the inline resolver contract: images
+// come back in document order, every URL is substituted into the markdown,
+// and the leading maxInlineImagesForMultimodal join AI understanding while
+// the rest are stored but skipped.
+func assertLeadingImagesWinBudget(t *testing.T, out string, images []StoredImage) {
+	t.Helper()
+	prevPos := -1
+	for i, stored := range images {
+		pos := strings.Index(out, stored.ServingURL)
+		if pos < 0 {
+			t.Fatalf("stored URL %q missing from markdown", stored.ServingURL)
+		}
+		if pos <= prevPos {
+			t.Fatalf(
+				"stored URL %q is out of document order (pos %d after %d)",
+				stored.ServingURL, pos, prevPos,
+			)
+		}
+		prevPos = pos
+		if wantSkip := i >= maxInlineImagesForMultimodal; stored.SkipMultimodal != wantSkip {
+			t.Fatalf("image %d SkipMultimodal=%v, want %v", i, stored.SkipMultimodal, wantSkip)
+		}
+	}
+}
+
+func TestInlineImageStorageAppliesMultimodalBudgetInDocumentOrder(t *testing.T) {
 	b64 := base64.StdEncoding.EncodeToString(createTestPNG(200, 150))
 	image := `<img src="data:image/png;base64,` + b64 + `">`
 	for _, count := range []int{30, 31, 81} {
@@ -233,21 +258,12 @@ func TestInlineImageStorageKeepsLegacyMultimodalBudget(t *testing.T) {
 					len(uniqueStrings(imgServingURLs(images))), count,
 				)
 			}
-			skipped := 0
 			for _, stored := range images {
 				if !stored.Inline {
 					t.Fatal("HTML data URI image was not marked inline")
 				}
-				if !strings.Contains(out, stored.ServingURL) {
-					t.Fatalf("stored URL %q was not substituted into markdown", stored.ServingURL)
-				}
-				if stored.SkipMultimodal {
-					skipped++
-				}
 			}
-			if want := max(0, count-maxInlineImagesForMultimodal); skipped != want {
-				t.Fatalf("skipped multimodal=%d, want %d", skipped, want)
-			}
+			assertLeadingImagesWinBudget(t, out, images)
 		})
 	}
 }
@@ -275,20 +291,57 @@ func TestResolveAndStoreKeepsMarkdownAndHTMLImageBudgetsIndependent(t *testing.T
 		t.Fatal("inline image payload remained after ResolveAndStore")
 	}
 	markdownEligible, htmlEligible := 0, 0
+	var markdownImages, htmlImages []StoredImage
 	for _, stored := range images {
+		if stored.OriginalRef == "html-img-data-uri" {
+			htmlImages = append(htmlImages, stored)
+		} else {
+			markdownImages = append(markdownImages, stored)
+		}
 		if stored.SkipMultimodal {
 			continue
 		}
-		switch stored.OriginalRef {
-		case "html-img-data-uri":
+		if stored.OriginalRef == "html-img-data-uri" {
 			htmlEligible++
-		default:
+		} else {
 			markdownEligible++
 		}
 	}
 	if markdownEligible != 30 || htmlEligible != 30 {
 		t.Fatalf("multimodal eligible: markdown=%d html=%d, want 30 each", markdownEligible, htmlEligible)
 	}
+	// Each syntax's images come back in document order and hand their own
+	// budget to their own leading images.
+	assertLeadingImagesWinBudget(t, updated, markdownImages)
+	assertLeadingImagesWinBudget(t, updated, htmlImages)
+}
+
+func TestResolveBareBase64ContentBudgetGoesToLeadingImages(t *testing.T) {
+	b64 := base64.StdEncoding.EncodeToString(createTestPNG(200, 150))
+	svc := &captureSaveBytes{}
+	out, images, err := NewImageResolver().ResolveBareBase64Content(
+		context.Background(), strings.Repeat("data:image/png;base64,"+b64+"\n", 81), svc, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(images) != 81 || len(svc.saved) != 81 {
+		t.Fatalf("images=%d saved=%d, want 81 each", len(images), len(svc.saved))
+	}
+	assertLeadingImagesWinBudget(t, out, images)
+}
+
+func TestResolveBareBase64PrefixBudgetGoesToLeadingImages(t *testing.T) {
+	b64 := base64.StdEncoding.EncodeToString(createTestPNG(200, 150))
+	svc := &captureSaveBytes{}
+	out, images, err := NewImageResolver().ResolveBareBase64Content(
+		context.Background(), strings.Repeat("base64,"+b64+"\n", 81), svc, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(images) != 81 || len(svc.saved) != 81 {
+		t.Fatalf("images=%d saved=%d, want 81 each", len(images), len(svc.saved))
+	}
+	assertLeadingImagesWinBudget(t, out, images)
 }
 
 type failAfterInlineSave struct {

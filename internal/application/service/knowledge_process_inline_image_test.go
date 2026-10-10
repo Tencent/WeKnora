@@ -418,12 +418,9 @@ func TestProcessDocumentInlineImageTasksCompleteKnowledge(t *testing.T) {
 		types.TypeDocumentProcess, mustMarshalDocumentPayload(t, payload))))
 	require.Len(t, storage.saved, 81)
 	require.Len(t, catalog.binds, 81)
-	// The inline resolvers walk the document back to front, so the 30 images
-	// that win the per-syntax multimodal budget are the document's trailing 30.
-	// The selection order is kept from the legacy pre-budget implementation.
 	require.Len(
 		t, queue.imageTasks, 30,
-		"only the trailing 30 HTML inline images should run through multimodal processing",
+		"only the first 30 HTML inline images in document order should run through multimodal processing",
 	)
 	require.Equal(t, types.ParseStatusProcessing, knowledge.ParseStatus,
 		"knowledge must stay processing while image tasks are queued")
