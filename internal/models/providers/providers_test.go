@@ -63,26 +63,32 @@ func TestMinimaxOfficialDefaultURLs(t *testing.T) {
 	}
 }
 
-func TestGenericExposesQwenToolCallCompatibility(t *testing.T) {
+func TestGenericAutoNegotiatesToolCallArgumentsWithoutUserSetting(t *testing.T) {
 	vendor, ok := modelruntime.Get(providers.GenericID)
 	if !ok {
 		t.Fatal("generic provider missing")
 	}
 	for _, field := range vendor.ExtraFields {
-		if field.Key != models.ExtraQwenToolCallCompat {
-			continue
+		if field.Key == "qwen_tool_call_compat" {
+			t.Fatalf("generic provider exposes protocol workaround to users: %+v", field)
 		}
-		if field.Type != "boolean" || field.Required {
-			t.Fatalf("Qwen compatibility field = %+v, want optional boolean", field)
-		}
-		if len(field.ModelTypes) != 2 ||
-			field.ModelTypes[0] != types.ModelTypeKnowledgeQA ||
-			field.ModelTypes[1] != types.ModelTypeVLLM {
-			t.Fatalf("Qwen compatibility field model types = %v", field.ModelTypes)
-		}
-		return
 	}
-	t.Fatal("generic provider does not expose the Qwen compatibility field")
+	resolved, err := modelruntime.Resolve(modelruntime.Ref{
+		Provider: providers.GenericID, Model: "Qwen3.5-2B", BaseURL: "http://localhost:9997/v1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !resolved.OpenAICompletions.AutoToolCallArgumentsObject {
+		t.Fatal("generic provider does not enable automatic tool-call argument negotiation")
+	}
+	standard, err := modelruntime.Resolve(modelruntime.Ref{Provider: providers.OpenaiID, Model: "gpt-4o"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if standard.OpenAICompletions.AutoToolCallArgumentsObject {
+		t.Fatal("standard OpenAI provider must not enable tool-call argument negotiation")
+	}
 }
 
 func TestBuiltinDefaultURLsAcrossModelTypes(t *testing.T) {

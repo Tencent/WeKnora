@@ -172,19 +172,6 @@ func resolveWithVendor(ref Ref, vendor *Provider) (*Resolved, error) {
 	legacyThinkingControlApplied := applyLegacyThinkingControl(
 		&completions, ref.Extra[models.ExtraThinkingControl],
 	)
-	if vendor.ID == providers.GenericID {
-		raw := strings.TrimSpace(ref.Extra[models.ExtraQwenToolCallCompat])
-		if raw != "" {
-			enabled, err := strconv.ParseBool(raw)
-			if err != nil {
-				return nil, fmt.Errorf(
-					"catalog: invalid %s in extra_config: %q (expected true or false)",
-					models.ExtraQwenToolCallCompat, raw,
-				)
-			}
-			completions.ToolCallArgumentsAsObject = enabled
-		}
-	}
 	out.OpenAICompletions = completions
 
 	responses := api.DefaultOpenAIResponses()

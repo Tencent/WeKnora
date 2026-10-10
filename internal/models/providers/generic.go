@@ -21,6 +21,9 @@
 //     whatever the hop count;
 //   - no default base URL: the operator must supply one (Validate enforces
 //     it) and a key is optional because local deployments run without one;
+//   - replayed tool calls start with OpenAI's string-valued arguments. If a
+//     backend returns the known Jinja mapping-type error, the protocol client
+//     retries once with object-valued arguments and remembers that result;
 //   - no URL patterns: DetectByURL falls back to this vendor when nothing
 //     else matches.
 //
@@ -65,18 +68,6 @@ func newGenericProvider() *Definition {
 			types.ModelTypeASR,
 		},
 		ExtraFields: []ExtraField{{
-			Key:    models.ExtraQwenToolCallCompat,
-			Label:  "Qwen tool-call argument object mode",
-			Labels: map[string]string{"zh-CN": "Qwen 工具调用参数对象模式"},
-			Type:   "boolean",
-			Placeholder: "Enable only when the Qwen backend requires argument mappings; " +
-				"strict OpenAI-compatible endpoints require strings",
-			Placeholders: map[string]string{
-				"zh-CN": "仅当 Qwen 后端要求参数为对象映射时启用；严格兼容 OpenAI 的端点要求字符串",
-			},
-			Required:   false,
-			ModelTypes: []types.ModelType{types.ModelTypeKnowledgeQA, types.ModelTypeVLLM},
-		}, {
 			Key:    models.ExtraScoreScale,
 			Label:  "Rerank score scale",
 			Labels: map[string]string{"zh-CN": "Rerank 分数标度"},
@@ -145,8 +136,9 @@ func newGenericProvider() *Definition {
 				AcceptsTruncatePromptTokens: api.Ptr(true),
 			},
 			OpenAICompletions: api.OpenAICompletionsCompat{
-				MaxTokensField: api.Ptr("max_tokens"),
-				ThinkingFormat: api.Ptr(api.ThinkingFormatChatTemplateKwargs),
+				MaxTokensField:              api.Ptr("max_tokens"),
+				ThinkingFormat:              api.Ptr(api.ThinkingFormatChatTemplateKwargs),
+				AutoToolCallArgumentsObject: api.Ptr(true),
 			},
 		},
 		Validate: func(cfg *Config) error {

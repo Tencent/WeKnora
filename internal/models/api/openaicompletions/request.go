@@ -79,7 +79,7 @@ type wireImageURL struct {
 }
 
 // convertMessages maps neutral messages onto Chat Completions messages.
-func (c *Client) convertMessages(messages []api.Message) ([]wireMessage, error) {
+func (c *Client) convertMessages(messages []api.Message, toolCallArgumentsAsObject bool) ([]wireMessage, error) {
 	s := c.cfg.Settings
 	instructionRole := "system"
 	if c.cfg.Reasoning && s.SupportsDeveloperRole {
@@ -139,7 +139,7 @@ func (c *Client) convertMessages(messages []api.Message) ([]wireMessage, error) 
 			wm.ToolCalls = make([]wireToolCall, 0, len(msg.ToolCalls))
 			for _, tc := range msg.ToolCalls {
 				arguments := any(tc.Function.Arguments)
-				if s.ToolCallArgumentsAsObject {
+				if toolCallArgumentsAsObject {
 					var err error
 					arguments, err = qwenToolCallArguments(tc)
 					if err != nil {
@@ -231,9 +231,11 @@ const metadataReasoningDetails = "reasoning_details"
 // buildBody assembles the request body. It returns a map so vendor-specific
 // top-level fields can be added without a struct per vendor; key order in
 // the encoded JSON is alphabetical, which keeps golden tests stable.
-func (c *Client) buildBody(messages []api.Message, opts *api.Options, stream bool) (map[string]any, error) {
+func (c *Client) buildBody(
+	messages []api.Message, opts *api.Options, stream, toolCallArgumentsAsObject bool,
+) (map[string]any, error) {
 	s := c.cfg.Settings
-	wireMessages, err := c.convertMessages(messages)
+	wireMessages, err := c.convertMessages(messages, toolCallArgumentsAsObject)
 	if err != nil {
 		return nil, err
 	}
@@ -486,7 +488,13 @@ func (c *Client) finalizeBody(body map[string]any, opts *api.Options) (map[strin
 // BuildRequestBody is the golden-test entry point: it returns the exact
 // JSON object that would be sent for the given inputs.
 func (c *Client) BuildRequestBody(messages []api.Message, opts *api.Options, stream bool) (map[string]any, error) {
-	body, err := c.buildBody(messages, opts, stream)
+	return c.buildRequestBody(messages, opts, stream, c.toolCallArgumentsAsObject.Load())
+}
+
+func (c *Client) buildRequestBody(
+	messages []api.Message, opts *api.Options, stream, toolCallArgumentsAsObject bool,
+) (map[string]any, error) {
+	body, err := c.buildBody(messages, opts, stream, toolCallArgumentsAsObject)
 	if err != nil {
 		return nil, err
 	}

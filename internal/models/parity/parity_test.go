@@ -122,19 +122,14 @@ func TestQwenToolCallArgumentCompatibility(t *testing.T) {
 		Provider:  providers.GenericID,
 		ModelName: "Qwen3.5-2B",
 		BaseURL:   "http://127.0.0.1:9/v1",
-		ExtraConfig: map[string]string{
-			models.ExtraQwenToolCallCompat: "true",
-		},
 	}, messages, nil, false)
-	assert.Equal(t, map[string]any{"city": "Paris"}, arguments(t, generic))
+	assert.Equal(t, `{"city":"Paris"}`, arguments(t, generic),
+		"generic starts with the standard wire format and negotiates only after a backend signal")
 
 	standard := buildBodyWithMessages(t, &chat.ChatConfig{
 		Provider:  "openai",
 		ModelName: "gpt-4o",
 		BaseURL:   "http://127.0.0.1:9/v1",
-		ExtraConfig: map[string]string{
-			models.ExtraQwenToolCallCompat: "true",
-		},
 	}, messages, nil, false)
 	assert.Equal(t, `{"city":"Paris"}`, arguments(t, standard),
 		"the standard OpenAI provider must keep string arguments")
