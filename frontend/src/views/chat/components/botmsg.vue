@@ -52,6 +52,10 @@
                 <div class="ai-markdown-template markdown-content" v-stable-html="renderedHTML">
                 </div>
             </div>
+            <p v-if="isPartialTruncatedAnswer(session)" class="answer-truncated-notice">
+                <t-icon name="info-circle" aria-hidden="true" />
+                <span>{{ $t('chat.truncatedHint') }}</span>
+            </p>
             <!-- 复制和添加到知识库按钮 - 非 Agent 模式下显示 -->
             <div v-if="answerFullyRendered && (content || session.content)" class="answer-toolbar">
                 <t-tooltip v-if="canFork" :content="forkTooltip">
@@ -105,12 +109,6 @@
                         <t-icon name="info-circle" />
                     </t-button>
                 </t-tooltip>
-                <!-- 输出被单次上限截断的提示 -->
-                <t-tooltip v-if="session.truncated" :content="$t('chat.truncatedHint')" placement="top">
-                    <t-button size="small" variant="outline" shape="round" class="fallback-icon-btn">
-                        <t-icon name="info-circle" />
-                    </t-button>
-                </t-tooltip>
                 <ChatRequestInfoButton v-if="showRequestInfo" :session="session" :session-id="sessionId" />
                 <transition name="follow-up-toolbar-loading">
                     <span v-if="followUpLoading" class="answer-toolbar__follow-up-loading" role="status"
@@ -123,10 +121,6 @@
             <div v-if="isImgLoading" class="img_loading"><t-loading size="small"></t-loading><span>{{
                 $t('common.loading') }}</span></div>
         </div>
-        <p v-if="session.truncated" class="answer-truncated-notice" role="status">
-            <t-icon name="info-circle" aria-hidden="true" />
-            <span>{{ $t('chat.truncatedHint') }}</span>
-        </p>
         <picturePreview :reviewImg="reviewImg" :reviewUrl="reviewUrl" @closePreImg="closePreImg"></picturePreview>
         <Teleport to="body">
             <ChatCitationFloat :float="citationFloat" :on-enter="cancelCitationClose"
@@ -143,6 +137,7 @@
     </div>
 </template>
 <script setup>
+import { isPartialTruncatedAnswer } from '@/utils/truncatedAnswer';
 import { onMounted, onBeforeUnmount, watch, computed, ref, reactive, nextTick, onUpdated } from 'vue';
 import 'katex/dist/katex.min.css';
 import docInfo from './docInfo.vue';
@@ -534,10 +529,10 @@ onBeforeUnmount(() => {
     align-items: flex-start;
     gap: 8px;
     margin: 12px 0;
-    color: var(--td-warning-color);
+    color: var(--td-text-color-secondary);
     font-size: var(--td-font-size-body-medium);
     line-height: 1.6;
-    .t-icon { flex-shrink: 0; margin-top: 4px; }
+    .t-icon { flex-shrink: 0; margin-top: 4px; color: var(--td-warning-color); }
 }
 
 @import '../../../components/css/chat-markdown.less';

@@ -434,11 +434,10 @@
                     <t-icon name="info-circle" />
                   </t-button>
                 </t-tooltip>
-                <t-tooltip v-if="event.truncated" :content="$t('chat.truncatedHint')" placement="top">
-                  <t-button size="small" variant="outline" shape="round" class="fallback-icon-btn">
-                    <t-icon name="info-circle" />
-                  </t-button>
-                </t-tooltip>
+                <p v-if="event === lastAnswerEvent && isPartialTruncatedAnswer(event)" class="answer-truncated-notice">
+                  <t-icon name="info-circle" aria-hidden="true" />
+                  <span>{{ $t('chat.truncatedHint') }}</span>
+                </p>
                 <ChatRequestInfoButton v-if="showRequestInfo && isConversationDone" :session="session"
                   :session-id="sessionId" />
                 <transition name="follow-up-toolbar-loading">
@@ -628,6 +627,7 @@
 </template>
 
 <script setup lang="ts">
+import { isPartialTruncatedAnswer } from '@/utils/truncatedAnswer';
 import { readDocumentReferences } from '@/utils/readDocumentReferences';
 import { isAssistantTurnComplete } from '@/utils/steerStreamFork';
 import { ref, computed, watch, onMounted, onBeforeUnmount, onUpdated, nextTick } from 'vue';
@@ -1002,6 +1002,8 @@ const emit = defineEmits<{
   (event: 'fork', messageId: string): void;
   (event: 'rewind', messageId: string): void;
 }>();
+
+const lastAnswerEvent = computed(() => props.session.agentEventStream?.filter((event: any) => event.type === 'answer' && !event.superseded).at(-1));
 
 const canFork = computed(() => props.canFork === true && !props.embeddedMode)
 const canRewind = computed(() => props.canRewind === true && !props.embeddedMode)
@@ -3118,6 +3120,14 @@ const handleAddToKnowledge = (answerEvent: any) => {
 </script>
 
 <style lang="less" scoped>
+.answer-truncated-notice {
+  color: var(--td-text-color-secondary);
+  display: flex;
+  gap: 8px;
+  line-height: 1.6;
+  .t-icon { color: var(--td-warning-color); flex-shrink: 0; }
+}
+
 @import '../../../components/css/chat-markdown.less';
 @import '../../../components/css/chat-message-shared.less';
 @import '../../../components/css/chat-citations.less';
