@@ -266,7 +266,16 @@ func TestValidateOCRTextRejectsDegenerateOutput(t *testing.T) {
 		{"markdown skeleton", "| --- | --- |\n| | |", "no_readable_content"},
 		{"repeated phrase", strings.Repeat("传球按钮 ", 200), "repetitive_content"},
 		{"repeated suffix after real text", "传球\n" + strings.Repeat("|  ", 2500), "repetitive_content"},
+		{
+			"split delimiter loops", strings.Repeat("|  ", 1250) + "传球\n" + strings.Repeat("|  ", 1250),
+			"repetitive_content",
+		},
+		{
+			"different repeated periods", strings.Repeat("| ", 600) + "传球\n" + strings.Repeat("取消施法 ", 240),
+			"repetitive_content",
+		},
 		{"repeated wrapped lines", strings.Repeat("开始\n锁定目标\n", 100), "repetitive_content"},
+		{"empty HTML skeleton", "<html><body><div><img/></div></body></html>", "empty_content"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			text, err := validateOCRText(tt.input)
@@ -290,13 +299,21 @@ func TestValidateOCRTextPreservesRealContent(t *testing.T) {
 	for _, input := range []string{
 		"A", "3", "传球", "A\nB\nL1\nL2\n传球\n传球", "0:0\n58.29\n取消施法", "±", "$x^2 + y^2 = z^2$",
 		table.String(), strings.Repeat("同一个按钮\n", 5),
+		// A run matches many periods; its overlapping ranges must count once.
+		table.String() + strings.Repeat("X", 600),
 	} {
 		got, err := validateOCRText(input)
 		if err != nil || got != strings.TrimSpace(input) {
 			t.Fatalf("valid OCR rejected or changed: input=%q got=%q err=%v", input, got, err)
 		}
 	}
-	for _, input := range []string{"No text content.", "无文字内容", "```\nNo text content.\n```"} {
+	for _, input := range []string{
+		"No text content.", "无文字内容", "```\nNo text content.\n```",
+		"<p>No text content.</p>", "<html><body>No text content.</body></html>",
+		"<p><strong>No text content.</strong></p>",
+		"```html\n<p>No text content.</p>\n```", "<p>无文字内容</p>",
+		"<p>empty</p>", "<p>no text</p>", "<p>No text content&#46;</p>",
+	} {
 		if got, err := validateOCRText(input); err != nil || got != "" {
 			t.Fatalf("explicit no-text answer should succeed without text: %q %v", got, err)
 		}

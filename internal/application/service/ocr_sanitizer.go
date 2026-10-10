@@ -42,10 +42,10 @@ func (e *ocrValidationError) Error() string { return fmt.Sprintf("invalid OCR ou
 // output. Reject the entire response, rather than indexing a plausible prefix
 // followed by hallucinated repetition.
 func validateOCRText(raw string) (string, error) {
-	if isKnownEmptyReply(stripMarkdownCodeBlock(strings.TrimSpace(raw))) {
+	text := normalizeOCRText(raw)
+	if isKnownEmptyReply(text) {
 		return "", nil
 	}
-	text := normalizeOCRText(raw)
 	if text == "" {
 		return "", &ocrValidationError{reason: "empty_content"}
 	}
@@ -66,26 +66,45 @@ func validateOCRText(raw string) (string, error) {
 	return text, nil
 }
 
-// Require a long, dominant periodic run to avoid rejecting ordinary repeated
-// labels, table separators, or short numeric values. Normalize whitespace so
-// line wrapping does not hide a decoding loop. Work is bounded by 64*n.
+// Count the union of long periodic runs, including runs with different periods
+// separated by readable text. Short repetitions (labels, table separators,
+// numeric values) do not contribute. Normalize whitespace so line wrapping
+// cannot hide a decoding loop. Work is bounded by 64*n, with O(n) storage.
 func hasOCRRepetition(text string) bool {
 	runes := []rune(strings.Join(strings.Fields(text), " "))
+	if len(runes) < 512 {
+		return false
+	}
+	// Range deltas avoid counting the same characters multiple times when a
+	// run matches several periods, and keep interval recording constant-time.
+	coverage := make([]int, len(runes)+1)
 	for period := 1; period <= 64 && period <= len(runes)/32; period++ {
 		matched := 0
+		recordRun := func(end int) {
+			span := matched + period
+			if span >= 512 && span >= period*32 {
+				coverage[end-span]++
+				coverage[end]--
+			}
+		}
 		for i := period; i < len(runes); i++ {
 			if runes[i] == runes[i-period] {
 				matched++
 			} else {
+				recordRun(i)
 				matched = 0
 			}
-			span := matched + period
-			if span >= 512 && span >= period*32 && span*5 >= len(runes)*4 {
-				return true
-			}
+		}
+		recordRun(len(runes))
+	}
+	active, repeated := 0, 0
+	for i := range runes {
+		active += coverage[i]
+		if active > 0 {
+			repeated++
 		}
 	}
-	return false
+	return repeated*5 >= len(runes)*4
 }
 
 func normalizeOCRText(raw string) string {
@@ -99,8 +118,15 @@ func normalizeOCRText(raw string) string {
 	// If stripping HTML tags leaves almost no text, the response is useless
 	// (e.g. "<html><body><div class="image"><img/></div></body></html>").
 	plainText := strings.TrimSpace(htmlTagPattern.ReplaceAllString(text, ""))
-	if len(plainText) < 10 && htmlTagPattern.MatchString(text) {
-		return ""
+	if htmlTagPattern.MatchString(text) {
+		// Preserve no-text answers before a short response is discarded or
+		// inline tags become Markdown emphasis around the sentinel.
+		if isKnownEmptyReply(plainText) {
+			return plainText
+		}
+		if len(plainText) < 10 {
+			return ""
+		}
 	}
 
 	if looksLikeHTML(text) {
@@ -117,10 +143,6 @@ func normalizeOCRText(raw string) string {
 	// starts with a tag nor is dominated by tag characters), yet leaving the
 	// raw markup in place makes the chunker split inside table rows.
 	text = docparser.NormalizeHTMLTables(text)
-
-	if isKnownEmptyReply(text) {
-		return ""
-	}
 
 	text = multipleNewlines.ReplaceAllString(text, "\n\n")
 	return strings.TrimSpace(text)
