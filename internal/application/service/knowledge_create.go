@@ -16,6 +16,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/google/uuid"
 	"github.com/hibiken/asynq"
@@ -1321,14 +1322,33 @@ func (s *knowledgeService) triggerManualProcessing(ctx context.Context,
 	// Resolve embedded data:base64 images and remote http(s) images → storage, replace URLs.
 	// Runs before chunking so chunks contain stable provider:// URLs.
 	var resolvedImages []docparser.StoredImage
+	var fileSvc interfaces.FileService
 	if s.imageResolver != nil {
-		fileSvc := s.resolveFileService(ctx, kb)
-		afterDataURI, fromDataURI, _ := s.imageResolver.ResolveDataURIImages(ctx, clean, fileSvc, knowledge.TenantID)
-		if len(fromDataURI) > 0 {
-			logger.Infof(ctx, "Resolved %d data-URI images for manual knowledge %s", len(fromDataURI), knowledge.ID)
-			clean = afterDataURI
-			resolvedImages = append(resolvedImages, fromDataURI...)
+		fileSvc = s.resolveFileService(ctx, kb)
+		updatedMarkdown, inlineImages, resolveErr := s.imageResolver.ResolveAndStore(ctx,
+			&types.ReadResult{MarkdownContent: clean}, fileSvc, knowledge.TenantID)
+		if resolveErr != nil {
+			retryCount, _ := asynq.GetRetryCount(ctx)
+			maxRetry, _ := asynq.GetMaxRetry(ctx)
+			if retried, limit, ok := types.TaskRetryMetadataFromContext(ctx); ok {
+				retryCount, maxRetry = retried, limit
+			}
+			if retryCount >= maxRetry {
+				knowledge.ParseStatus = types.ParseStatusFailed
+				knowledge.ErrorMessage = fmt.Sprintf("store manual inline image: %v", resolveErr)
+				knowledge.UpdatedAt = time.Now()
+				if updateErr := s.updateKnowledgeUnlessSourceReplaced(ctx, knowledge); updateErr != nil {
+					logger.Errorf(ctx,
+						"Failed to persist manual inline image failure for %s: %v", knowledge.ID, updateErr)
+				}
+			}
+			return fmt.Errorf("store manual inline image: %w", resolveErr)
 		}
+		if len(inlineImages) > 0 {
+			logger.Infof(ctx, "Resolved %d inline images for manual knowledge %s", len(inlineImages), knowledge.ID)
+		}
+		clean = updatedMarkdown
+		resolvedImages = append(resolvedImages, inlineImages...)
 		updatedContent, storedImages, resolveErr := s.imageResolver.ResolveRemoteImages(ctx, clean, fileSvc, knowledge.TenantID)
 		if resolveErr != nil {
 			logger.Warnf(ctx, "Remote image resolution partially failed: %v", resolveErr)
@@ -1338,6 +1358,17 @@ func (s *knowledgeService) triggerManualProcessing(ctx context.Context,
 			clean = updatedContent
 			resolvedImages = append(resolvedImages, storedImages...)
 		}
+	}
+	if docparser.HasUnresolvedInlineImagePayload(clean) {
+		const message = "unresolved inline image base64 payload remains before manual chunking"
+		cleanupUnboundInlineImages(ctx, fileSvc, resolvedImages)
+		knowledge.ParseStatus = types.ParseStatusFailed
+		knowledge.ErrorMessage = message
+		knowledge.UpdatedAt = time.Now()
+		if err := s.updateKnowledgeUnlessSourceReplaced(ctx, knowledge); err != nil {
+			return fmt.Errorf("%w: persist manual inline image failure: %v", asynq.SkipRetry, err)
+		}
+		return fmt.Errorf("%s: %w", message, asynq.SkipRetry)
 	}
 
 	// Re-claim the body's stored files. This runs after cleanupKnowledgeResources
@@ -1365,9 +1396,10 @@ func (s *knowledgeService) triggerManualProcessing(ctx context.Context,
 	chunkCfg := buildSplitterConfigFromChunking(eff.ChunkingConfig)
 
 	var parsed []types.ParsedChunk
+	multimodalImages := imagesForMultimodal(resolvedImages)
 	opts := ProcessChunksOptions{
-		EnableMultimodel: eff.EnableMultimodel && len(resolvedImages) > 0,
-		StoredImages:     resolvedImages,
+		EnableMultimodel: eff.EnableMultimodel && len(multimodalImages) > 0,
+		StoredImages:     multimodalImages,
 	}
 	if eff.QuestionGenerationConfig.Enabled {
 		opts.EnableQuestionGeneration = true

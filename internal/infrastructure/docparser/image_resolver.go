@@ -20,6 +20,7 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -38,6 +39,9 @@ const (
 	// minImageBytes is the minimum file size in bytes; very small images are
 	// almost certainly icons or decorative elements.
 	minImageBytes = 512 // 512 bytes
+	// inlineImageRollbackTimeout bounds cleanup even if the request context was
+	// cancelled while one of the inline image saves was failing.
+	inlineImageRollbackTimeout = 5 * time.Second
 )
 
 // isIconImage returns true if the image data looks like a small icon or
@@ -60,6 +64,13 @@ type StoredImage struct {
 	OriginalRef string // reference in the original markdown
 	ServingURL  string // provider:// URL (e.g. local://images/xxx.png, minio://bucket/key)
 	MimeType    string
+	// Inline marks Base64 images stored from inline document content, so only
+	// resources created by this resolver are eligible for partial-save cleanup.
+	Inline bool
+	// SkipMultimodal keeps a saved inline image out of OCR/caption fan-out once
+	// its syntax-specific legacy budget is exhausted. The image still remains in
+	// the document and resource bindings.
+	SkipMultimodal bool
 	// SourceLocators place the image in the original file (e.g. the scanned
 	// page it was rendered from). Filled by ingestion after resolution.
 	SourceLocators types.SourceLocators
@@ -86,18 +97,44 @@ func (r *ImageResolver) ResolveAndStore(
 	fileSvc interfaces.FileService,
 	tenantID uint64,
 ) (updatedMarkdown string, images []StoredImage, err error) {
+	var inlineImages []StoredImage
+	defer func() {
+		if err == nil || fileSvc == nil {
+			return
+		}
+		rollbackCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), inlineImageRollbackTimeout)
+		defer cancel()
+		for _, image := range inlineImages {
+			if deleteErr := fileSvc.DeleteFile(rollbackCtx, image.ServingURL); deleteErr != nil {
+				log.Printf("WARN: failed to rollback inline image %s: %v", image.ServingURL, deleteErr)
+			}
+		}
+	}()
+
 	markdown := UnwrapLinkedImages(result.MarkdownContent)
-	md2, imgDataURIs, _ := r.ResolveDataURIImages(ctx, markdown, fileSvc, tenantID)
-	markdown = md2
+	md2, imgDataURIs, err := r.ResolveDataURIImages(ctx, markdown, fileSvc, tenantID)
+	inlineImages = append(inlineImages, imgDataURIs...)
 	images = append(images, imgDataURIs...)
+	if err != nil {
+		return markdown, images, err
+	}
+	markdown = md2
 
-	md3, imgHTML, _ := r.ResolveHTMLDataURIImages(ctx, markdown, fileSvc, tenantID)
-	markdown = md3
+	md3, imgHTML, err := r.ResolveHTMLDataURIImages(ctx, markdown, fileSvc, tenantID)
+	inlineImages = append(inlineImages, imgHTML...)
 	images = append(images, imgHTML...)
+	if err != nil {
+		return markdown, images, err
+	}
+	markdown = md3
 
-	md4, imgBare, _ := r.ResolveBareBase64Content(ctx, markdown, fileSvc, tenantID)
-	markdown = md4
+	md4, imgBare, err := r.ResolveBareBase64Content(ctx, markdown, fileSvc, tenantID)
+	inlineImages = append(inlineImages, imgBare...)
 	images = append(images, imgBare...)
+	if err != nil {
+		return markdown, images, err
+	}
+	markdown = md4
 
 	if len(result.ImageRefs) == 0 {
 		return markdown, images, nil
@@ -362,13 +399,13 @@ func (r *ImageResolver) ResolveHTMLDataURIImages(
 	if len(matches) == 0 {
 		return markdown, nil, nil
 	}
+	codeRanges := markdownCodeLiteralRanges(markdown)
 
-	processed := 0
 	for i := len(matches) - 1; i >= 0; i-- {
-		if processed >= maxRemoteImages {
-			break
-		}
 		m := matches[i]
+		if _, ok := codeLiteralRangeAt(codeRanges, m[0]); ok {
+			continue
+		}
 		dataURI := markdown[m[2]:m[3]]
 		mimeType, payload, ok := parseImageDataURI(dataURI)
 		if !ok {
@@ -397,17 +434,17 @@ func (r *ImageResolver) ResolveHTMLDataURIImages(
 		fileName := uuid.New().String() + ext
 		servingURL, saveErr := fileSvc.SaveBytes(ctx, data, tenantID, fileName, false)
 		if saveErr != nil {
-			log.Printf("WARN: failed to save HTML img data URI image: %v", saveErr)
-			continue
+			return markdown, images, fmt.Errorf("save HTML data URI image: %w", saveErr)
 		}
 		images = append(images, StoredImage{
 			OriginalRef: "html-img-data-uri",
 			ServingURL:  servingURL,
 			MimeType:    mimeType,
+			Inline:      true,
 		})
 		markdown = markdown[:m[0]] + fmt.Sprintf("![image](%s)", servingURL) + markdown[m[1]:]
-		processed++
 	}
+	applyMultimodalBudget(images)
 	return markdown, images, nil
 }
 
@@ -460,6 +497,169 @@ var bareBase64CommaPrefixed = regexp.MustCompile(
 	`base64,([A-Za-z0-9+/=]{200,})`,
 )
 
+// HasUnresolvedInlineImagePayload guards the chunking boundary against data
+// URIs that a parser could not recognize or resolve. It deliberately ignores
+// ordinary prose mentioning base64 and non-image base64 examples.
+func HasUnresolvedInlineImagePayload(markdown string) bool {
+	markdown = withoutMarkdownCodeLiterals(markdown)
+	if unresolvedImageDataURI.MatchString(markdown) {
+		return true
+	}
+	for _, match := range unresolvedBareBase64Image.FindAllStringSubmatch(markdown, -1) {
+		if looksLikeImageBase64(match[1]) {
+			return true
+		}
+	}
+	return false
+}
+
+type markdownCodeLiteralRange struct {
+	start int
+	end   int
+}
+
+// withoutMarkdownCodeLiterals masks fenced and inline code while preserving
+// byte offsets. The image resolver uses the same ranges before replacing a
+// match, so documentation snippets cannot be either uploaded or rejected.
+func withoutMarkdownCodeLiterals(markdown string) string {
+	ranges := markdownCodeLiteralRanges(markdown)
+	if len(ranges) == 0 {
+		return markdown
+	}
+	masked := []byte(markdown)
+	for _, r := range ranges {
+		for i := r.start; i < r.end; i++ {
+			if masked[i] != '\n' {
+				masked[i] = ' '
+			}
+		}
+	}
+	return string(masked)
+}
+
+func markdownCodeLiteralRanges(markdown string) []markdownCodeLiteralRange {
+	ranges := fencedCodeLiteralRanges(markdown)
+	for i := 0; i < len(markdown); {
+		if end, ok := codeLiteralRangeAt(ranges, i); ok {
+			i = end
+			continue
+		}
+		if markdown[i] != '`' {
+			i++
+			continue
+		}
+		runLength := 1
+		for i+runLength < len(markdown) && markdown[i+runLength] == '`' {
+			runLength++
+		}
+		closePos := findInlineCodeLiteralClose(markdown, ranges, i+runLength, runLength)
+		if closePos < 0 {
+			i += runLength
+			continue
+		}
+		ranges = append(ranges, markdownCodeLiteralRange{start: i, end: closePos + runLength})
+		i = closePos + runLength
+	}
+	return ranges
+}
+
+func fencedCodeLiteralRanges(markdown string) []markdownCodeLiteralRange {
+	var ranges []markdownCodeLiteralRange
+	var fence byte
+	var fenceLength, fenceStart int
+
+	for lineStart := 0; lineStart < len(markdown); {
+		lineEnd := strings.IndexByte(markdown[lineStart:], '\n')
+		if lineEnd < 0 {
+			lineEnd = len(markdown)
+		} else {
+			lineEnd += lineStart
+		}
+		line := markdown[lineStart:lineEnd]
+		trimmed := strings.TrimLeft(line, " \t")
+		if fence == 0 {
+			if marker, length := codeFence(trimmed); length > 0 {
+				fence, fenceLength, fenceStart = marker, length, lineStart
+			}
+		} else if marker, length := codeFence(trimmed); marker == fence && length >= fenceLength &&
+			strings.TrimSpace(trimmed[length:]) == "" {
+			end := lineEnd
+			if end < len(markdown) {
+				end++
+			}
+			ranges = append(ranges, markdownCodeLiteralRange{start: fenceStart, end: end})
+			fence, fenceLength = 0, 0
+		}
+		if lineEnd == len(markdown) {
+			break
+		}
+		lineStart = lineEnd + 1
+	}
+	if fence != 0 {
+		ranges = append(ranges, markdownCodeLiteralRange{start: fenceStart, end: len(markdown)})
+	}
+	return ranges
+}
+
+func codeLiteralRangeAt(ranges []markdownCodeLiteralRange, offset int) (int, bool) {
+	for _, r := range ranges {
+		if offset >= r.start && offset < r.end {
+			return r.end, true
+		}
+	}
+	return 0, false
+}
+
+func findInlineCodeLiteralClose(markdown string, ranges []markdownCodeLiteralRange, start, runLength int) int {
+	for i := start; i < len(markdown); {
+		if end, ok := codeLiteralRangeAt(ranges, i); ok {
+			i = end
+			continue
+		}
+		if markdown[i] != '`' {
+			i++
+			continue
+		}
+		end := i
+		for end < len(markdown) && markdown[end] == '`' {
+			end++
+		}
+		if end-i == runLength {
+			return i
+		}
+		i = end
+	}
+	return -1
+}
+
+func codeFence(line string) (byte, int) {
+	if len(line) < 3 || (line[0] != '`' && line[0] != '~') {
+		return 0, 0
+	}
+	marker := line[0]
+	length := 0
+	for length < len(line) && line[length] == marker {
+		length++
+	}
+	if length < 3 {
+		return 0, 0
+	}
+	return marker, length
+}
+
+func looksLikeImageBase64(payload string) bool {
+	if len(payload) > 64 {
+		payload = payload[:64]
+	}
+	data, err := decodeBase64Flexible(payload)
+	return err == nil && sniffImageMime(data) != ""
+}
+
+var (
+	unresolvedImageDataURI    = regexp.MustCompile(`(?i)data:image/[^;\s"'<>)]*;base64,\s*[^\s"'<>)]{1,}`)
+	unresolvedBareBase64Image = regexp.MustCompile(`(?i)base64,([A-Za-z0-9+/_=-]{200,})`)
+)
+
 // ResolveBareBase64Content finds remaining bare data URIs and base64 image content
 // in the markdown text, decodes and stores them, and replaces with image references.
 // This acts as a catch-all after the standard markdown and HTML resolvers.
@@ -469,13 +669,19 @@ func (r *ImageResolver) ResolveBareBase64Content(
 	fileSvc interfaces.FileService,
 	tenantID uint64,
 ) (updatedMarkdown string, images []StoredImage, err error) {
-	md, imgs1 := r.resolveBareDataURIs(ctx, markdown, fileSvc, tenantID)
-	markdown = md
+	md, imgs1, err := r.resolveBareDataURIs(ctx, markdown, fileSvc, tenantID, markdownCodeLiteralRanges(markdown))
 	images = append(images, imgs1...)
+	if err != nil {
+		return markdown, images, err
+	}
+	markdown = md
 
-	md2, imgs2 := r.resolveBareBase64Prefix(ctx, markdown, fileSvc, tenantID)
-	markdown = md2
+	md2, imgs2, err := r.resolveBareBase64Prefix(ctx, markdown, fileSvc, tenantID, markdownCodeLiteralRanges(markdown))
 	images = append(images, imgs2...)
+	if err != nil {
+		return markdown, images, err
+	}
+	markdown = md2
 
 	return markdown, images, nil
 }
@@ -485,19 +691,19 @@ func (r *ImageResolver) resolveBareDataURIs(
 	markdown string,
 	fileSvc interfaces.FileService,
 	tenantID uint64,
-) (string, []StoredImage) {
+	codeRanges []markdownCodeLiteralRange,
+) (string, []StoredImage, error) {
 	matches := bareDataURIPattern.FindAllStringSubmatchIndex(markdown, -1)
 	if len(matches) == 0 {
-		return markdown, nil
+		return markdown, nil, nil
 	}
 
 	var images []StoredImage
-	processed := 0
 	for i := len(matches) - 1; i >= 0; i-- {
-		if processed >= maxRemoteImages {
-			break
-		}
 		m := matches[i]
+		if _, ok := codeLiteralRangeAt(codeRanges, m[0]); ok {
+			continue
+		}
 		// Check context: skip HTML src attributes, but handle broken markdown refs
 		insideWrapper := false
 		if m[0] > 0 {
@@ -536,13 +742,13 @@ func (r *ImageResolver) resolveBareDataURIs(
 		fileName := uuid.New().String() + ext
 		servingURL, saveErr := fileSvc.SaveBytes(ctx, data, tenantID, fileName, false)
 		if saveErr != nil {
-			log.Printf("WARN: failed to save bare data URI image: %v", saveErr)
-			continue
+			return markdown, images, fmt.Errorf("save bare data URI image: %w", saveErr)
 		}
 		images = append(images, StoredImage{
 			OriginalRef: "bare-data-uri",
 			ServingURL:  servingURL,
 			MimeType:    mimeType,
+			Inline:      true,
 		})
 		if insideWrapper {
 			// Inside a broken markdown ref like ![weird]alt](data:...) — replace data URI only
@@ -550,9 +756,9 @@ func (r *ImageResolver) resolveBareDataURIs(
 		} else {
 			markdown = markdown[:m[0]] + fmt.Sprintf("![image](%s)", servingURL) + markdown[m[1]:]
 		}
-		processed++
 	}
-	return markdown, images
+	applyMultimodalBudget(images)
+	return markdown, images, nil
 }
 
 func (r *ImageResolver) resolveBareBase64Prefix(
@@ -560,19 +766,19 @@ func (r *ImageResolver) resolveBareBase64Prefix(
 	markdown string,
 	fileSvc interfaces.FileService,
 	tenantID uint64,
-) (string, []StoredImage) {
+	codeRanges []markdownCodeLiteralRange,
+) (string, []StoredImage, error) {
 	matches := bareBase64CommaPrefixed.FindAllStringSubmatchIndex(markdown, -1)
 	if len(matches) == 0 {
-		return markdown, nil
+		return markdown, nil, nil
 	}
 
 	var images []StoredImage
-	processed := 0
 	for i := len(matches) - 1; i >= 0; i-- {
-		if processed >= maxRemoteImages {
-			break
-		}
 		m := matches[i]
+		if _, ok := codeLiteralRangeAt(codeRanges, m[0]); ok {
+			continue
+		}
 		// Skip if preceded by ';' — this is part of a data URI handled above
 		if m[0] > 0 && markdown[m[0]-1] == ';' {
 			continue
@@ -604,18 +810,18 @@ func (r *ImageResolver) resolveBareBase64Prefix(
 		fileName := uuid.New().String() + ext
 		servingURL, saveErr := fileSvc.SaveBytes(ctx, data, tenantID, fileName, false)
 		if saveErr != nil {
-			log.Printf("WARN: failed to save bare base64 image: %v", saveErr)
-			continue
+			return markdown, images, fmt.Errorf("save bare base64 image: %w", saveErr)
 		}
 		images = append(images, StoredImage{
 			OriginalRef: "bare-base64",
 			ServingURL:  servingURL,
 			MimeType:    mimeType,
+			Inline:      true,
 		})
 		markdown = markdown[:m[0]] + fmt.Sprintf("![image](%s)", servingURL) + markdown[m[1]:]
-		processed++
 	}
-	return markdown, images
+	applyMultimodalBudget(images)
+	return markdown, images, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -627,9 +833,25 @@ const (
 	maxRemoteImageSize = 10 * 1024 * 1024 // 10 MB
 	// maxRemoteImages is the maximum number of remote images to process per document.
 	maxRemoteImages = 30
+	// maxInlineImagesForMultimodal is the legacy per-syntax number of inline
+	// images that reach image understanding. Additional inline images are saved
+	// and bound, but do not fan out OCR/caption work.
+	maxInlineImagesForMultimodal = 30
 	// remoteImageFetchTimeout is the per-image HTTP request timeout.
 	remoteImageFetchTimeout = 15 * time.Second
 )
+
+// applyMultimodalBudget restores document order — the inline resolvers walk
+// their matches back to front so each in-place markdown rewrite stays
+// index-valid — and flags the images beyond the per-syntax multimodal quota:
+// the document's leading maxInlineImagesForMultimodal go to AI understanding,
+// the rest stay stored and bound but skip OCR/caption fan-out.
+func applyMultimodalBudget(images []StoredImage) {
+	slices.Reverse(images)
+	for i := range images {
+		images[i].SkipMultimodal = i >= maxInlineImagesForMultimodal
+	}
+}
 
 // reLinkedImage matches the nested [![alt](img_url)](link_url) pattern where
 // an image is wrapped inside a Markdown link. We unwrap it to just ![alt](img_url)
@@ -684,8 +906,8 @@ func parseImageDataURI(dataURI string) (mimeType string, b64Payload string, ok b
 }
 
 // ResolveDataURIImages finds embedded data:image/*;base64 images in markdown,
-// decodes them, stores via fileSvc, and replaces each reference with the returned
-// provider URL (same limits as remote images: count and decoded size).
+// decodes and stores each valid image, and replaces each reference with the
+// returned provider URL. A per-image decoded-size limit still applies.
 func (r *ImageResolver) ResolveDataURIImages(
 	ctx context.Context,
 	markdown string,
@@ -697,14 +919,14 @@ func (r *ImageResolver) ResolveDataURIImages(
 	if len(matches) == 0 {
 		return markdown, nil, nil
 	}
+	codeRanges := markdownCodeLiteralRanges(markdown)
 
-	processed := 0
 	for i := len(matches) - 1; i >= 0; i-- {
-		if processed >= maxRemoteImages {
-			break
-		}
 		m := matches[i]
 		if len(m) < 6 {
+			continue
+		}
+		if _, ok := codeLiteralRangeAt(codeRanges, m[0]); ok {
 			continue
 		}
 		dataURI := markdown[m[4]:m[5]]
@@ -736,17 +958,17 @@ func (r *ImageResolver) ResolveDataURIImages(
 		fileName := uuid.New().String() + ext
 		servingURL, saveErr := fileSvc.SaveBytes(ctx, data, tenantID, fileName, false)
 		if saveErr != nil {
-			log.Printf("WARN: failed to save data URI image: %v", saveErr)
-			continue
+			return markdown, images, fmt.Errorf("save data URI image: %w", saveErr)
 		}
 		images = append(images, StoredImage{
 			OriginalRef: dataURI,
 			ServingURL:  servingURL,
 			MimeType:    mimeType,
+			Inline:      true,
 		})
 		markdown = markdown[:m[4]] + servingURL + markdown[m[5]:]
-		processed++
 	}
+	applyMultimodalBudget(images)
 	return markdown, images, nil
 }
 
