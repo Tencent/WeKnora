@@ -1,6 +1,7 @@
 package session
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -60,6 +61,10 @@ func TestTerminalErrorFrame(t *testing.T) {
 
 	code, _ = terminalErrorFrame(sandbox.ErrSandboxPaused)
 	require.Equal(t, terminalErrPaused, code)
+
+	code, _ = terminalErrorFrame(fmt.Errorf("open: %w", sandbox.ErrSandboxStopped))
+	require.Equal(t, terminalErrStopped, code,
+		"Docker's not-running case must not be reported as a wakeable pause")
 
 	code, _ = terminalErrorFrame(service.ErrTerminalUnsupported)
 	require.Equal(t, terminalErrUnsupported, code)

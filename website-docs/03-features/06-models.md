@@ -46,6 +46,7 @@
 | 向量维度 / 自定义输出维度 | 向量 | 维度需与索引一致。只有确认模型支持指定维度时才开启「自定义输出维度」 |
 | 上下文窗口 | 对话、视觉 | 留空使用默认 200000。按厂商文档填写真实值；填得过大会导致智能体历史压缩不触发，上游直接拒绝请求 |
 | 支持视觉/多模态 | 对话 | 模型是否接受图片输入 |
+| 图片输入 | 向量 | 模型能否把图片编码到与文本相同的向量空间。开启且厂商协议支持传图时，**开启了「图片向量检索」的知识库**在生成图片描述之后还会为每张图片存一条图片向量，按图片内容召回描述没写到的信息（扫描件 PDF 页除外）；知识库的这个开关默认关闭，只声明模型能力不会改变已有知识库的行为。目录中的模型自动识别，只在与目录不一致时才保存到该模型；目录里没有的模型需手动声明 |
 | 最大输出 tokens | 对话、视觉 | 单次回复的输出上限，留空沿用目录中该模型的默认值 |
 | 后台并发上限 | 对话、视觉、向量 | 限制文档入库、富化等后台任务对该模型的并发数；0 或留空使用全局默认，不影响交互式对话 |
 | 高级 → 协议覆盖 | 对话、视觉 | 强制使用某种请求协议，一般保持「自动」 |
@@ -88,6 +89,9 @@
 | 需要附带厂商私有参数，如阿里云联网搜索 | `{"extra_body": {"enable_search": true}}` |
 | 多轮对话回传思考内容时报错 | `{"replay_reasoning_content": false}` |
 | 自建向量服务一次请求只接受 16 条 | `{"max_batch_size": 16}` |
+| vLLM 部署的多模态向量模型（VLM2Vec、GME 等） | 打开「图片输入」即可，自定义厂商默认按 vLLM 的 `messages` 格式发图片；模板需要指令时加 `{"image_prompt": "Represent the given image."}`；文本也必须经过对话模板才和图片同空间时加 `{"text_as_messages": true}` |
+| vLLM 部署的 Qwen3-VL-Embedding | 无需填写：自定义厂商下模型名含 `qwen3-vl-embedding` 时已内置图片输入与 `{"text_as_messages": true, "extra_body": {"add_special_tokens": true}}`。文本走普通 `input` 会绕过对话模板，与图片不在同一空间；不加 `add_special_tokens` 时末尾缺少模型取向量用的 `<\|endoftext\|>`，与[模型卡](https://huggingface.co/Qwen/Qwen3-VL-Embedding-8B)结果不符。已用该模型建立的索引需重建向量 |
+| SGLang 部署的多模态向量模型 | 打开「图片输入」，并填 `{"image_format": "object", "image_field": "image"}` |
 | 向量或重排服务响应慢，需要更长的超时 | `{"request_timeout_seconds": 120}` |
 | 自建重排服务返回的是未归一化分数（logit） | `{"score_scale": "logit"}` |
 
@@ -190,6 +194,13 @@
 | `accepts_truncate_prompt_tokens` | bool | false | 服务是否支持 vLLM 的 `truncate_prompt_tokens` |
 | `request_timeout_seconds` | int | 60 | 单次请求超时（秒） |
 | `extra_body` | object | 空 | 附加到每次请求的字段 |
+| `image_field` | string | 空 | 仅 `openai-embeddings`：`input` 里承载图片的对象键名（Jina、SGLang 为 `image`）。留空且 `image_format` 不是 `messages` 时表示该端点不收图片 |
+| `image_format` | string | 空（自定义厂商为 `messages`） | 仅 `openai-embeddings`：图片的发送方式。`object` 把 `{image_field: 图片}` 放进 `input`；`messages` 把图片作为一轮对话放进 `messages`（vLLM 的多模态向量接口），每张图一个请求。留空时有 `image_field` 即按 `object` 处理 |
+| `image_prompt` | string | 空 | 仅 `messages` 格式：随图片一起发送的文字，部分模型的对话模板需要（如 VLM2Vec 的 `Represent the given image.`） |
+| `text_as_messages` | bool | false | 仅 `openai-embeddings`：文本也按 `messages` 格式发送，每条一个请求。适用于必须经过对话模板、文本和图片才在同一向量空间的模型（自定义厂商下的 Qwen3-VL-Embedding 已内置）；已有索引的模型改动后需要重建向量 |
+| `max_image_batch_size` | int | 1 | 单次请求的最大图片数，超出自动分批 |
+| `max_image_bytes` | int | 0（不限） | 单张图片的字节上限，超出的图片直接拒绝、不发请求 |
+| `image_mime_types` | array | 空（不限） | 厂商接受的图片格式，如 `["image/png", "image/jpeg"]` |
 
 **重排模型**
 
@@ -200,11 +211,20 @@
 | `send_return_documents` | bool | false | 是否要求服务端回传文档原文 |
 | `score_scale` | string | `probability` | 分数含义：`probability`（0～1）或 `logit`（未归一化）。填错会让相关度阈值失效 |
 | `truncate` | string | 空 | 服务端截断设置（如 NIM 的 `END`） |
-| `max_documents` / `max_query_chars` / `max_document_chars` / `max_request_chars` | int | 0（不限） | 单次请求的文档数、查询长度、单篇长度与总长度上限，超出自动分批 |
+| `max_documents` | int | 0（不限） | 单次请求的文档数上限，超出自动分批 |
+| `max_query_chars` | int | 0（不限） | 查询长度上限，超出按调用失败处理（查询在每个请求里都会重复，拆分文档无法让它变短） |
+| `max_document_chars` | int | 0（不限） | 单篇文档长度上限，超出按调用失败处理 |
+| `max_request_chars` | int | 0（不限） | 单次请求（查询 + 全部文档）的总长度上限，超出自动分批，与 `max_documents` 同时生效，哪个先到就按哪个拆；单篇文档加上查询就已超出时按调用失败处理 |
 | `max_concurrency` | int | 0（使用默认） | 分批后同时发出的请求数 |
 | `accepts_truncate_prompt_tokens` | bool | false | 服务是否支持 vLLM 的 `truncate_prompt_tokens` |
 | `request_timeout_seconds` | int | 0（默认 60 秒） | 单次请求超时（秒）；超时按调用失败处理，检索回退为召回顺序 |
 | `extra_body` | object | 空 | 附加到每次请求的字段 |
+| `image_field` | string | 空 | 仅 `cohere-rerank`：图片文档对象的键名（Jina 为 `image`）。留空表示该端点只收文本。NIM 协议的图片段落格式由协议固定，不需要填 |
+| `max_image_batch_size` | int | 1 | 单次请求的最大图片数；图片与文本分开请求，超出自动分批 |
+| `max_image_bytes` | int | 0（不限） | 单张图片的字节上限，超出的图片直接拒绝、不发请求 |
+| `image_mime_types` | array | 空（不限） | 厂商接受的图片格式 |
+
+只有模型能力 `input` 含 `image` 的重排模型（目录里是 `jina-reranker-m0` 与 `nvidia/llama-nemotron-rerank-vl-1b-v2`）会收到图片文档。
 
 **语音识别模型**
 
@@ -220,7 +240,7 @@
 
 ## 内置厂商
 
-内置 27 个厂商，另可通过 Ollama 接入本地模型。各厂商支持的模型类型如下（✓ 表示支持）：
+内置 29 个厂商，另可通过 Ollama 接入本地模型。各厂商支持的模型类型如下（✓ 表示支持）：
 
 | 厂商 | ID | 对话 | 向量 | 重排 | 视觉 | 语音 |
 | --- | --- | :-: | :-: | :-: | :-: | :-: |
@@ -251,6 +271,8 @@
 | NVIDIA | `nvidia` | ✓ | ✓ | ✓ | ✓ | |
 | Novita AI | `novita` | ✓ | ✓ | ✓ | ✓ | |
 | GPUStack | `gpustack` | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Hugging Face TEI | `huggingface_tei` | | | ✓ | | |
+| Pinecone | `pinecone` | | | ✓ | | |
 
 表中的「视觉」指可在视觉模型类型下选择该厂商；对话模型本身是否接受图片，以模型目录和「支持视觉/多模态」开关为准。WeKnora 云服务需先在设置中保存云服务凭证，模型名称可选 `chat`、`embedding`、`rerank`、`vlm`。
 

@@ -992,6 +992,12 @@ export default {
       paths: '디렉터리', pathsPlaceholder: '한 줄에 하나씩 입력하세요. 비워 두면 전체 프로젝트를 동기화합니다',
       addProject: '프로젝트 추가', projectRequired: 'GitLab 프로젝트를 하나 이상 추가하세요',
     },
+    seafile: {
+      baseUrl: 'Seafile URL', apiToken: 'API 토큰',
+      apiTokenHint: 'Seafile의 \'설정 → Web API 토큰\'에서 생성하세요. 계정에 선택한 라이브러리의 읽기 권한만 있으면 되며 토큰은 파일 다운로드 요청에 전송되지 않습니다.',
+      singleLibraryOnly: '데이터 소스 하나는 라이브러리 하나만 동기화합니다. 다른 라이브러리를 선택하기 전에 현재 선택을 해제하세요.',
+      selectionRequired: '라이브러리, 폴더 또는 파일을 하나 이상 선택하세요',
+    },
     resourceHint: '동기화할 공간/폴더를 선택하세요',
     untitled: '제목 없음',
     resourceLoadFailed: '리소스 목록 로드 실패',
@@ -1005,6 +1011,10 @@ export default {
     guideStep1_notion: 'Notion에서 동기화하려는 페이지나 데이터베이스를 엽니다',
     guideStep2_notion: '오른쪽 상단의 \'···\' 메뉴를 클릭하고 \'Connect to\' 또는 \'Add connections\'를 선택합니다',
     guideStep3_notion: 'Integration 앱을 검색하여 선택한 후, 돌아와서 다시 시도를 클릭하세요',
+    noResourcesDesc_seafile: '이 토큰으로 접근할 수 있는 라이브러리가 없거나 모두 암호화 라이브러리입니다(암호화 라이브러리는 동기화할 수 없음)',
+    guideStep1_seafile: 'Seafile에 로그인하여 계정이 암호화되지 않은 라이브러리를 하나 이상 읽을 수 있는지 확인하세요',
+    guideStep2_seafile: '\'설정 → Web API 토큰\'에서 토큰을 생성하거나 다시 생성하세요',
+    guideStep3_seafile: '여기로 돌아와 새 토큰을 입력하고 다시 시도를 클릭하세요',
     permissionDocLink: '페이슈 위키 권한 설정 문서 보기',
     syncScheduleLabel: '동기화 주기',
     conflictLabel: '충돌 전략',
@@ -1059,6 +1069,9 @@ export default {
     yuqueFolderModeHint: 'Yuque 목차 계층에 따라 문서를 배치합니다. 참고: 이후 지식베이스에서 직접 옮긴 폴더는 해당 문서가 다음에 동기화될 때 Yuque 구조로 덮어써집니다.',
     yuqueTOCOnly: 'Yuque 목차에 표시되는 문서만 동기화',
     yuqueTOCOnlyHint: '"Yuque 목차대로 계층 구성"을 선택해야 동작합니다. 이미 지식베이스에 있는 문서는 그대로 유지되며, Yuque 목차에 없는 문서는 새로 추가되지 않을 뿐 삭제되지 않습니다.',
+    dingtalkIngestLabel: 'DingTalk 수집 범위',
+    dingtalkIncludeUploadedFiles: '업로드 파일(docx / pptx / xlsx / pdf) 수집',
+    dingtalkIncludeUploadedFilesHint: '기본값은 꺼짐입니다. 켜면 선택한 범위에 업로드된 Word / PowerPoint / Excel / PDF 파일을 내려받아 파싱해 지식베이스에 넣습니다(파일당 최대 64 MiB). 본문은 저장소와 임베딩 비용에 포함됩니다. 꺼져 있으면 해당 파일은 건너뛰고 동기화 로그에 스위치가 꺼져 있다고 기록되며, 이미 지식베이스에 있는 사본은 삭제되지 않습니다.',
     prereqBarText_dingtalk: '처음 사용하시나요? 클릭하여 DingTalk 앱 설정 가이드를 확인하세요',
     prereqStep1Brief_dingtalk: '기업 내부 앱 생성',
     prereqStep1Desc_dingtalk: 'DingTalk Open Platform에서 기업 내부 앱을 생성하고 Client ID와 Client Secret을 복사하세요.',
@@ -1097,7 +1110,8 @@ export default {
     resourceType: {
       wikiSpace: '위키 공간',
       docCategory: '문서 태그',
-      book: 'Yuque 지식베이스'
+      book: 'Yuque 지식베이스',
+      library: 'Seafile 라이브러리'
     },
     scheduleHuman: {
       '30min': '30분마다',
@@ -1145,7 +1159,8 @@ export default {
       dingtalk: 'DingTalk 지식베이스의 온라인 문서 동기화',
       ima: 'Tencent IMA 지식베이스에서 문서, 노트 및 파일 동기화 (AI 세션과 동영상 분석은 지원되지 않음)',
       rss: 'RSS / Atom 피드에서 글 동기화',
-      gitlab: 'GitLab 프로젝트의 파일 동기화'
+      gitlab: 'GitLab 프로젝트의 파일 동기화',
+      seafile: 'Seafile 라이브러리의 폴더와 파일 동기화'
     },
     connector: {
       feishu: '페이슈 (Feishu)',
@@ -1158,7 +1173,8 @@ export default {
       dingtalk: 'DingTalk 문서',
       ima: 'Tencent IMA',
       rss: 'RSS / Atom 피드',
-      gitlab: 'GitLab'
+      gitlab: 'GitLab',
+      seafile: 'Seafile'
     },
     logDetail: {
       startTime: '시작 시간',
@@ -1222,7 +1238,15 @@ export default {
       dingtalk_resource_failed: 'DingTalk 리소스를 사용할 수 없습니다. 접근 권한과 선택한 리소스를 확인한 후 다시 시도하세요.',
       deletion_lookup_failed: '삭제 전 항목 조회에 실패했습니다. 서버 로그를 확인하세요',
       deletion_failed: '삭제에 실패했습니다. 서버 로그를 확인하세요',
-      ingest_failed: '가져오기에 실패했습니다. 서버 로그를 확인하세요'
+      ingest_failed: '가져오기에 실패했습니다. 서버 로그를 확인하세요',
+      seafile_permission_denied: 'Seafile 파일에 접근할 수 없습니다. 토큰 소유자의 라이브러리 권한을 확인하세요.',
+      seafile_not_found: 'Seafile 파일이 존재하지 않거나 이동되었습니다. 다음 동기화에서 다시 시도합니다.',
+      seafile_file_too_large: 'Seafile 파일이 크기 제한을 초과합니다. MAX_FILE_SIZE_MB를 늘리거나 파일을 줄이세요.',
+      seafile_empty_file: 'Seafile 파일이 비어 있어 건너뛰었습니다.',
+      seafile_source_changed: '가져오는 동안 Seafile 파일이 변경되었습니다. 다음 동기화에서 다시 시도합니다.',
+      seafile_invalid_response: 'Seafile이 해석할 수 없는 응답을 반환했습니다. 서버 버전과 리버스 프록시 설정을 확인하세요.',
+      seafile_ssrf_blocked: 'Seafile 다운로드 URL이 SSRF 정책에 의해 차단되었습니다. fileserver 호스트를 SSRF_WHITELIST에 추가하세요.',
+      seafile_fetch_failed: 'Seafile에서 파일을 가져오지 못했습니다. 다음 동기화에서 다시 시도합니다.'
     },
   },
   ollama: {
@@ -2571,6 +2595,14 @@ export default {
       documentsPlaceholder: '후보 문서를 한 줄에 하나씩 입력하세요',
       documentsHint: '비어 있지 않은 각 줄은 ReRank 모델에 별도 문서로 전송됩니다',
       imageFile: '이미지 파일',
+      similarityMode: '유사도',
+      similarityQuery: '쿼리',
+      similarityQueryPlaceholder: '쿼리를 입력하세요. 예: 잔디 위를 달리는 개',
+      similarityCandidates: '후보 텍스트',
+      similarityCandidatesPlaceholder: '한 줄에 하나의 후보 텍스트를 입력하세요',
+      similarityHint: '쿼리는 검색 쿼리로, 후보는 문서로 벡터화됩니다(실제 검색과 동일). 결과는 코사인 유사도가 높은 순으로 정렬됩니다',
+      similarityImage: '후보 이미지(선택)',
+      similarityImageCandidate: '이미지',
       audioFile: '오디오 파일',
       chooseFile: '파일 선택',
       parameters: '요청 매개변수',
@@ -2921,6 +2953,7 @@ export default {
   },
   language: {
     zhCN: '简体中文',
+    zhTW: '번체 중국어',
     enUS: 'English',
     ruRU: 'Русский',
     koKR: '한국어',
@@ -3047,6 +3080,8 @@ export default {
       dimensionOverrideDesc: '제공자 문서에서 이 모델이 dimensions 매개변수를 지원한다고 확인한 경우에만 켜세요.',
       supportsVisionLabel: '비전/멀티모달 지원',
       supportsVisionDesc: '모델의 이미지 등 멀티모달 입력 지원 여부',
+      embeddingImageInputLabel: '이미지 입력',
+      embeddingImageInputDesc: '모델이 이미지를 텍스트와 같은 벡터 공간에 임베딩할 수 있는지 여부. 카탈로그 모델은 자동으로 인식되며, 사용자 정의 모델은 직접 선언합니다',
       contextWindowLabel: '컨텍스트 창',
       contextWindowPlaceholder: '기본값 {value}',
       contextWindowDesc: '모델이 한 요청에 수용할 수 있는 토큰 수입니다. 에이전트 대화 압축이 이 한도를 사용합니다. 비워 두면 기본값 200000(200K)을 사용합니다. 공급자 문서의 실제 값을 입력하세요. 더 크게 설정하면 압축이 발생하지 않고 요청이 거부될 수 있습니다.',
@@ -3412,7 +3447,8 @@ export default {
           },
           registration_mode: {
             self_serve: '셀프 가입 (누구나 가입 가능)',
-            invite_only: '초대 전용 (공개 가입 비활성)'
+            invite_register: '초대 가입 (유효한 링크 필요)',
+            invite_only: '가입 금지 (기존 계정은 초대 수락 가능)'
           }
         }
       },
@@ -3442,7 +3478,7 @@ export default {
           docker_enabled: 'Docker 샌드박스 백엔드를 허용할지 설정합니다. 로컬 docker.sock은 호스트 root와 같으므로 기본값은 꺼짐입니다. 시스템 관리자만 켤 수 있으며 저장 즉시 적용됩니다. 데몬 소켓을 마운트했거나 TLS가 있는 원격 tcp:// 를 쓰는 프라이빗 단일 노드에서만 켜세요.'
         },
         auth: {
-          registration_mode: '셀프 가입 모드입니다. self_serve = 누구나 계정을 만들 수 있음; invite_only = 공개 가입을 끄고 Owner/Admin만 초대 가능. 저장 즉시 적용되며, self_serve는 스팸 가입이 들어올 수 있으니 신중히 사용하세요.',
+          registration_mode: '가입 모드입니다. 공개 가입은 누구나 계정을 만들 수 있고, 초대 가입은 유효한 초대 링크가 필요합니다. 가입 금지 상태에서도 기존 계정은 초대를 수락할 수 있습니다. 저장 즉시 적용됩니다.',
           default_tenant_mode: '공개 가입 후 공간 초기화 정책입니다. create_personal은 개인 공간을 만들고 Owner를 부여하며, tenantless는 초대 수락 또는 직접 공간 생성 전까지 계정만 만듭니다.',
           complex_password_enabled: '복잡한 비밀번호를 사용할지 여부입니다. 활성화하면 비밀번호에 대문자, 소문자, 숫자 및 특수 문자가 포함되어야 합니다. 변경 사항은 즉시 적용되며, 새로 가입하는 사용자 또는 비밀번호를 새로 변경하거나 재설정하는 경우에만 적용됩니다. 특수 문자는 다음을 포함합니다: {specialChars}'
         }
@@ -3473,7 +3509,7 @@ export default {
           docker_enabled: 'Docker 샌드박스 사용'
         },
         auth: {
-          registration_mode: '셀프 가입 모드',
+          registration_mode: '가입 모드',
           default_tenant_mode: '기본 공간 프로비저닝',
           complex_password_enabled: '복잡한 비밀번호 사용'
         }
@@ -3916,6 +3952,7 @@ export default {
         desktopRetry: 'Reconnect',
         notStarted: '터미널이 아직 실행되지 않았습니다. 시작하면 이 대화의 샌드박스에 연결하며, 샌드박스가 없거나 일시 중지된 경우 생성하거나 다시 시작합니다.',
         paused: '이 대화의 샌드박스가 일시 중지되었습니다. 터미널을 시작하면 다시 시작됩니다.',
+        stopped: '이 대화의 샌드박스가 실행 중이 아닙니다. 중지되었거나 오랫동안 유휴 상태여서 회수되었을 수 있습니다. 터미널을 시작하면 다시 시작되며, 이미 회수된 경우 새 샌드박스가 만들어지고 이전 파일과 설치한 소프트웨어는 유지되지 않습니다.',
         start: '터미널 시작',
         connecting: '샌드박스에 연결하는 중…',
         needsProvision: '이 대화에는 실행 중인 샌드박스가 없습니다. 생성하고 시작하면 새 샌드박스가 만들어지며 워크스페이스 설정에 따라 요금이 부과됩니다.',
@@ -3926,6 +3963,8 @@ export default {
         retry: '다시 연결',
         sessionEnded: '터미널 세션이 종료되었습니다',
         idleDisconnected: '터미널이 유휴 상태로 연결이 끊어졌습니다. 샌드박스는 TTL에 따라 일시 중지됩니다. 다시 연결할 수 있습니다.',
+        idleDisconnectedNewShell: '터미널이 유휴 상태로 연결이 끊어져 셸이 종료되었습니다(nohup으로 시작한 백그라운드 작업은 영향을 받지 않습니다). 다시 연결하면 새 셸이 열립니다.',
+        disconnectedNewShell: '연결이 끊어져 터미널의 셸이 종료되었습니다(nohup으로 시작한 백그라운드 작업은 영향을 받지 않습니다). 다시 연결하면 새 셸이 열립니다.',
         authRevoked: '로그인 상태가 더 이상 유효하지 않아 터미널 연결이 끊어졌습니다. 다시 로그인한 뒤 재연결하세요.',
     },
     questionMinimapTitle: '질문',
@@ -4098,6 +4137,9 @@ export default {
         customInstructionsPlaceholder: '예: 명판, 모델 번호, 경고 코드 및 표 단위를 중점적으로 인식…',
         imageAttrsLabel: '이미지 속성 관찰',
         imageAttrsDescription: '켜면 각 이미지를 먼저 속성 관찰+설명한 뒤, 속성에 따라 이미지 내 텍스트에 OCR을 실행할지 결정합니다. 끄면 기본 모드: 모든 이미지를 하나씩 설명하고 모두 OCR합니다',
+        imageVectorLabel: '이미지 벡터 검색',
+        imageVectorDescription: '켜면 이미지 설명을 생성한 뒤 임베딩 모델로 이미지 자체도 인코딩하여, 설명에 없는 내용으로도 이미지를 검색할 수 있습니다. 이미지 입력을 지원하는 임베딩 모델이 필요하며, 이미지마다 임베딩 호출이 한 번 늘고 벡터 검색 후보 범위도 넓어집니다. 이후 수집하거나 다시 파싱한 문서에만 적용되며, 스캔 PDF 페이지는 제외됩니다',
+        imageVectorModelUnsupported: '현재 임베딩 모델은 이미지 입력을 선언하지 않아 이미지 벡터가 생성되거나 검색되지 않습니다',
         imageAttrsSchemaLabel: '관찰 가능한 이미지 속성',
         imageAttrsSchemaDescription: '모델은 아래 속성(백엔드 레지스트리 정의)을 관찰해 OCR 정책을 결정합니다',
         imageAttrsOcrConditions: '관찰된 속성 조건에 따라 OCR 실행',
@@ -4503,11 +4545,11 @@ export default {
         imageLoadError: '이미지를 불러오지 못했습니다',
         noCaption: '설명 없음',
         noOcr: '인식된 텍스트 없음',
-        caption: '설명',
-        ocr: '이미지 속 텍스트(OCR)',
-        attributes: '속성',
+        caption: '이미지 설명',
+        ocr: '이미지 속 텍스트',
+        attributes: '이미지 속성',
         source: '원본 문서',
-        details: '상세 정보',
+        details: '기본 정보',
         dimensions: '크기',
         status: '상태',
         openSource: '원본 문서 열기',
@@ -5375,7 +5417,7 @@ export default {
     usernameRequired: '사용자명을 입력해주세요',
     usernameMinLength: '사용자명은 최소 2자여야 합니다',
     usernameMaxLength: '사용자명은 20자를 초과할 수 없습니다',
-    usernameInvalid: '사용자명은 문자, 숫자, 밑줄, 한글만 포함할 수 있습니다',
+    usernameInvalid: '사용자명은 영문자, 숫자, 밑줄(_), 한자만 포함할 수 있습니다',
     confirmPasswordRequired: '비밀번호를 확인해주세요',
     passwordMismatch: '두 비밀번호가 일치하지 않습니다',
     loginError: '로그인 오류, 이메일 또는 비밀번호를 확인해주세요',
@@ -6981,6 +7023,11 @@ export default {
     }
   },
   uploadConfirm: {
+    imageEmbeddingModel: "이미지 인덱싱 Embedding 모델",
+    imageIndexInherited: "이미지 인덱싱에는 지식 베이스에 연결된 Embedding 모델을 사용합니다. 변경하려면 지식 베이스 설정으로 이동하세요.",
+    imageVectorIndex: "이번 가져오기의 이미지 벡터 인덱싱",
+    imageVectorIndexHint: "이번 업로드 또는 재분석에서 이미지 벡터를 생성하며 지식 베이스 기본 설정은 변경하지 않습니다. 검색 사용 여부는 지식 베이스의 이미지 벡터 검색 설정을 따릅니다.",
+    imageVectorRequiresIndex: "먼저 지식 베이스 설정에서 벡터 인덱싱을 활성화하세요.",
     documentSummary: "문서 요약",
     documentSummaryDescription: "이번에 가져오는 문서의 요약을 자동으로 생성할지 선택합니다.",
     generateSummary: "문서 요약 생성",
@@ -7166,6 +7213,7 @@ export default {
     channelConfluence: 'Confluence',
     channelYuque: 'Yuque',
     channelGitLab: 'GitLab',
+    channelSeafile: 'Seafile',
     channelIma: 'Tencent IMA',
     channelUpload: '업로드',
     channelManual: '수동',
@@ -7328,8 +7376,8 @@ export default {
     statusDraft: '초안',
     noDescription: '설명 없음',
     emptyKnowledgeDragDrop: '지식이 비어 있음, 드래그 앤 드롭으로 업로드',
-    pdfDocFormat: 'pdf, doc 형식 파일, 최대 10MB',
-    textMarkdownFormat: 'text, markdown 형식 파일, 최대 200KB',
+    pdfDocFormat: 'pdf, doc 형식 파일, 최대 {size}MB',
+    textMarkdownFormat: 'text, markdown 형식 파일, 최대 {size}MB',
     dragFileNotText: '텍스트나 링크가 아닌 파일을 드래그하세요',
     searchPlaceholder: '지식베이스 검색...',
     docSearchPlaceholder: '문서 이름 검색...',

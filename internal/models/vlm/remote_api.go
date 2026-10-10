@@ -119,15 +119,10 @@ func (v *RemoteAPIVLM) Predict(ctx context.Context, imgBytesList [][]byte, promp
 		return "", fmt.Errorf("VLM request: %w", err)
 	}
 	content := resp.Content
-	if strings.TrimSpace(content) == "" && resp.FinishReason == "length" {
-		// Reasoning models spend the completion budget on reasoning before any
-		// visible output, so an exhausted budget yields an empty message rather
-		// than an API error. Returning "" here would be recorded as
-		// "no_extracted_content" and look identical to an image with no text.
-		return "", fmt.Errorf(
-			"VLM returned no content: completion truncated at %d tokens (finish_reason=length)",
-			defaultMaxToks,
-		)
+	if resp.FinishReason == "length" {
+		// Non-empty partial output is still incomplete and must not be indexed
+		// as successful OCR. Returning an error also marks the model trace failed.
+		return "", fmt.Errorf("%w at %d tokens (finish_reason=length)", ErrTruncatedCompletion, defaultMaxToks)
 	}
 	logger.Infof(ctx, "[VLM] response received, len=%d", len(content))
 	return content, nil

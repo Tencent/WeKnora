@@ -102,7 +102,7 @@ flowchart TD
 {"query":"Rust release notes","country":"DE","freshness":"pw","content":true}
 ```
 
-- `count` 指定结果数量，范围是 1 到当前 Agent 配置的最大结果数（最多 20）；省略时沿用现有 Agent 默认值。
+- `count` 指定结果数量，范围是 1 到当前 Agent 配置的最大结果数（最多 20）；省略时沿用现有 Agent 默认值。超出上限时截断到上限，并在模型可见的输出里附一句纠正提示，不会让整轮调用失败；小于 1 的取值返回参数错误。
 - `country` / `freshness` 通过 Brave 与 Serply 提供商生效。地区接受两字母代码或 `ALL`，时效接受 `pd` / `pw` / `pm` / `py` 或 `YYYY-MM-DDtoYYYY-MM-DD`。省略 `country` 时不向 Brave 传该参数（Brave 自身默认 US）；显式 `ALL` 表示全球结果。Serply 的 `country` 映射为 Google 的 `gl`（省略或 `ALL` 时不传 `gl`，由 Google 决定地区），`freshness` 只接受 `pd` / `pw` / `pm` / `py`。其它提供商暂不支持这些过滤，显式传入时返回错误，不会静默忽略。参数取值参见 [Brave 官方 API 文档](https://api-dashboard.search.brave.com/api-reference/web/search/get)。
 - `content` 默认关闭。设为 `true` 时，并行抓取前 3 条结果的正文（整批 15 秒预算，每页最多 5,000 字符摘录）；其余结果保留搜索摘要，需用 `web_fetch` 继续读页。抓取失败仍保留摘要；完整正文地址通过 `full_output_path` 返回。搜索和独立 `web_fetch` 共用本轮快照，短超时不会取消正在进行的共享抓取。
 - Brave 的相对 `age` 原样保留，避免把“2 days ago”伪造为精确发布日期。

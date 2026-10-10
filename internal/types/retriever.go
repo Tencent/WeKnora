@@ -92,6 +92,11 @@ type IndexWithScore struct {
 	TagID string
 	// Score
 	Score float64
+	// VectorScore is a vector hit's similarity as its engine reported it.
+	// Fusion replaces Score with a rank-based one; this keeps the evidence of
+	// how close the vector actually was, which reranking weighs for images.
+	// Zero for keyword hits.
+	VectorScore float64
 	// Match type
 	MatchType MatchType
 	// IsEnabled
@@ -108,5 +113,12 @@ type RetrieveResult struct {
 	Results             []*IndexWithScore   // Retrieval results
 	RetrieverEngineType RetrieverEngineType // Retrieval source type
 	RetrieverType       RetrieverType       // Retrieval type
-	Error               error               // Retrieval error
+	// Error reports a partial failure of this result set: Results holds what
+	// answered, Error says what did not. It is nil for a complete retrieval,
+	// including a genuine zero-hit search. A store-level failure is still
+	// returned as the call's error with no result set at all.
+	// CompositeRetrieveEngine surfaces a non-nil Error as an error alongside the
+	// results, so a caller that reads the results must not ignore the error
+	// without at least logging that the answer is incomplete.
+	Error error // Retrieval error
 }

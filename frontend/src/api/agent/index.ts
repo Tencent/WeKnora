@@ -316,7 +316,7 @@ export interface IMChannel {
   enabled: boolean;
   mode: 'webhook' | 'websocket' | 'longpoll';
   output_mode: 'stream' | 'full';
-  locale?: '' | 'zh-CN' | 'en-US' | 'ko-KR' | 'ja-JP' | 'ru-RU';
+  locale?: '' | 'zh-CN' | 'zh-TW' | 'en-US' | 'ko-KR' | 'ja-JP' | 'ru-RU';
   language_mode?: 'fixed' | 'follow_user';
   session_mode?: 'user' | 'thread';
   knowledge_base_id?: string;

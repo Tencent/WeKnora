@@ -120,6 +120,13 @@ func (p *PluginMerge) selectInputResults(ctx context.Context, chatManage *types.
 				kept = append(kept, r)
 			}
 		}
+		// This cut already hides candidates from the prompt, so record it
+		// here: with rerank skipped there is nothing left for FILTER_TOP_K to
+		// cut, and without the record the model would read a subset as the
+		// complete result set.
+		if len(kept) < len(result) {
+			chatManage.RecordRetrievalCut(types.RetrievalStageMerge, len(result))
+		}
 		result = kept
 	}
 	pipelineWarn(ctx, "Merge", "fallback", map[string]interface{}{
@@ -282,7 +289,7 @@ func (p *PluginMerge) resolveParentChunks(
 	// without using editable StartAt/EndAt coordinates.
 	imageTextParentIDs := make(map[string]struct{})
 	for _, r := range results {
-		if r.ChunkType == string(types.ChunkTypeImageOCR) || r.ChunkType == string(types.ChunkTypeImageCaption) {
+		if types.IsImageChildChunkType(r.ChunkType) {
 			imageTextParentIDs[r.ParentChunkID] = struct{}{}
 		}
 	}
@@ -328,6 +335,7 @@ func (p *PluginMerge) resolveParentChunks(
 	}
 
 	for _, r := range results {
+		searchutil.CaptureImageEvidence(r)
 		if r.ParentChunkID == "" {
 			continue
 		}
@@ -356,7 +364,7 @@ func (p *PluginMerge) resolveParentChunks(
 				r.SubChunkID = append(r.SubChunkID, r.ID)
 			}
 
-		case string(types.ChunkTypeImageOCR), string(types.ChunkTypeImageCaption):
+		case string(types.ChunkTypeImageOCR), string(types.ChunkTypeImageCaption), string(types.ChunkTypeImageVector):
 			textParent, ok := parentMap[r.ParentChunkID]
 			if !ok || textParent.Content == "" || textParent.ChunkType != types.ChunkTypeText {
 				continue
@@ -436,7 +444,7 @@ func collectScopedTextChildIDs(
 			}
 			seen[r.ID] = struct{}{}
 			ids = append(ids, r.ID)
-		case string(types.ChunkTypeImageOCR), string(types.ChunkTypeImageCaption):
+		case string(types.ChunkTypeImageOCR), string(types.ChunkTypeImageCaption), string(types.ChunkTypeImageVector):
 			if _, ok := seen[r.ParentChunkID]; ok {
 				continue
 			}

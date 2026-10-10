@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, useId, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { ImageAsset } from '@/api/image-gallery'
 import { copyWithToast } from '@/utils/clipboard'
+import { renderDocumentPreviewMarkdown } from '@/utils/documentPreviewMarkdown'
 
 export interface GalleryAttrRow {
   key: string
@@ -270,6 +271,15 @@ function toggleInfo(): void {
 }
 
 const attrs = computed(() => (current.value ? props.attrRows(current.value) : []))
+const captionHtml = computed(() => renderDocumentPreviewMarkdown(current.value?.caption || ''))
+const ocrHtml = computed(() => renderDocumentPreviewMarkdown(current.value?.ocr_text || ''))
+const sectionId = useId()
+const captionExpanded = ref(true)
+const ocrExpanded = ref(true)
+watch(() => current.value?.id, () => {
+  captionExpanded.value = true
+  ocrExpanded.value = true
+})
 
 function formatTime(iso: string): string {
   if (!iso) return ''
@@ -430,37 +440,67 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
       </div>
 
       <aside v-if="showInfo && current" class="igv-info">
-        <section class="igv-section">
-          <div class="igv-section__head">
-            <h3>{{ t(`${NS}.caption`) }}</h3>
-            <button v-if="current.caption" type="button" class="igv-copy" @click="copyText(current.caption)">
-              <t-icon name="file-copy" size="14px" />{{ t(`${NS}.copy`) }}
-            </button>
-          </div>
-          <p class="igv-text" :class="{ 'is-muted': !current.caption }">{{ current.caption || t(`${NS}.noCaption`) }}</p>
-        </section>
+        <div class="igv-info__content">
+          <section class="igv-section" :class="{ 'is-collapsed': !captionExpanded }">
+            <div class="igv-section__head">
+              <h3>
+                <button
+                  type="button"
+                  class="igv-section__toggle"
+                  :aria-expanded="captionExpanded"
+                  :aria-controls="`${sectionId}-caption`"
+                  @click="captionExpanded = !captionExpanded"
+                >
+                  <span>{{ t(`${NS}.caption`) }}</span>
+                  <t-icon :name="captionExpanded ? 'chevron-down' : 'chevron-right'" size="14px" aria-hidden="true" />
+                </button>
+              </h3>
+              <button v-if="current.caption" type="button" class="igv-copy" :title="t(`${NS}.copy`)" :aria-label="`${t(`${NS}.copy`)} ${t(`${NS}.caption`)}`" @click="copyText(current.caption)">
+                <t-icon name="file-copy" size="14px" aria-hidden="true" />
+              </button>
+            </div>
+            <div v-show="captionExpanded" :id="`${sectionId}-caption`">
+              <div v-if="current.caption" class="igv-markdown" v-html="captionHtml" />
+              <p v-else class="igv-text is-muted">{{ t(`${NS}.noCaption`) }}</p>
+            </div>
+          </section>
 
-        <section class="igv-section">
-          <div class="igv-section__head">
-            <h3>{{ t(`${NS}.ocr`) }}</h3>
-            <button v-if="current.ocr_text" type="button" class="igv-copy" @click="copyText(current.ocr_text)">
-              <t-icon name="file-copy" size="14px" />{{ t(`${NS}.copy`) }}
-            </button>
-          </div>
-          <p class="igv-text" :class="{ 'is-muted': !current.ocr_text }">{{ current.ocr_text || t(`${NS}.noOcr`) }}</p>
-        </section>
+          <section class="igv-section" :class="{ 'is-collapsed': !ocrExpanded }">
+            <div class="igv-section__head">
+              <h3>
+                <button
+                  type="button"
+                  class="igv-section__toggle"
+                  :aria-expanded="ocrExpanded"
+                  :aria-controls="`${sectionId}-ocr`"
+                  @click="ocrExpanded = !ocrExpanded"
+                >
+                  <span>{{ t(`${NS}.ocr`) }}</span>
+                  <t-icon :name="ocrExpanded ? 'chevron-down' : 'chevron-right'" size="14px" aria-hidden="true" />
+                </button>
+              </h3>
+              <button v-if="current.ocr_text" type="button" class="igv-copy" :title="t(`${NS}.copy`)" :aria-label="`${t(`${NS}.copy`)} ${t(`${NS}.ocr`)}`" @click="copyText(current.ocr_text)">
+                <t-icon name="file-copy" size="14px" aria-hidden="true" />
+              </button>
+            </div>
+            <div v-show="ocrExpanded" :id="`${sectionId}-ocr`">
+              <div v-if="current.ocr_text" class="igv-markdown" v-html="ocrHtml" />
+              <p v-else class="igv-text is-muted">{{ t(`${NS}.noOcr`) }}</p>
+            </div>
+          </section>
 
-        <section v-if="attrs.length" class="igv-section">
-          <div class="igv-section__head"><h3>{{ t(`${NS}.attributes`) }}</h3></div>
-          <dl class="igv-props">
-            <template v-for="a in attrs" :key="a.key">
-              <dt>{{ a.label }}</dt>
-              <dd>{{ a.value }}</dd>
-            </template>
-          </dl>
-        </section>
+          <section v-if="attrs.length" class="igv-section">
+            <div class="igv-section__head"><h3>{{ t(`${NS}.attributes`) }}</h3></div>
+            <dl class="igv-props">
+              <template v-for="a in attrs" :key="a.key">
+                <dt>{{ a.label }}</dt>
+                <dd>{{ a.value }}</dd>
+              </template>
+            </dl>
+          </section>
+        </div>
 
-        <section class="igv-section">
+        <section class="igv-section igv-info__details">
           <div class="igv-section__head"><h3>{{ t(`${NS}.details`) }}</h3></div>
           <dl class="igv-props">
             <dt>{{ t(`${NS}.source`) }}</dt>
@@ -709,12 +749,47 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
 }
 
 .igv-info {
+  --igv-info-padding-x: 16px;
+
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
   min-height: 0;
-  overflow-y: auto;
-  padding: 20px;
+  overflow: hidden;
   background: var(--td-bg-color-container);
   color: var(--td-text-color-primary);
   border-left: 1px solid var(--td-component-stroke);
+  text-align: left;
+
+  &__content {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 0 var(--igv-info-padding-x) 20px;
+    scrollbar-width: thin;
+
+    > .igv-section + .igv-section { padding-top: 0; }
+
+    // Each section bounds its sticky header, so the next title takes over.
+    > .igv-section > .igv-section__head {
+      position: sticky;
+      top: 0;
+      z-index: 1;
+      margin: 0 calc(-1 * var(--igv-info-padding-x));
+      padding: 16px var(--igv-info-padding-x) 12px;
+      background: var(--td-bg-color-container);
+    }
+  }
+
+  &__details {
+    flex: 0 0 auto;
+    box-sizing: border-box;
+    max-height: 50%;
+    overflow-y: auto;
+    padding: 16px var(--igv-info-padding-x) 20px;
+    border-top: 1px solid var(--td-component-stroke);
+    scrollbar-width: thin;
+  }
 }
 
 .igv-section {
@@ -729,22 +804,65 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
     align-items: center;
     justify-content: space-between;
     gap: 8px;
-    margin-bottom: 8px;
+    min-height: 24px;
+    margin-bottom: 12px;
 
     h3 {
+      display: flex;
+      align-items: center;
+      flex: 1;
+      min-width: 0;
+      gap: 8px;
       margin: 0;
+      padding: 0;
       font-size: var(--app-text-md);
       font-weight: 600;
-      color: var(--td-text-color-secondary);
+      line-height: 24px;
+      color: var(--td-text-color-primary);
+
+      &::before {
+        content: '';
+        flex-shrink: 0;
+        width: 3px;
+        height: 14px;
+        border-radius: 2px;
+        background: var(--td-brand-color);
+      }
     }
+  }
+
+  &.is-collapsed > &__head { margin-bottom: 0; }
+
+  &__toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex: 1;
+    min-width: 0;
+    gap: 8px;
+    padding: 0;
+    border: 0;
+    border-radius: var(--app-radius-xs);
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+
+    .t-icon { flex-shrink: 0; color: var(--td-text-color-secondary); }
+    &:hover { color: var(--td-brand-color); }
+    &:focus-visible { outline: 2px solid var(--app-focus-border); outline-offset: 2px; }
   }
 }
 
 .igv-copy {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 2px 6px;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  padding: 0;
   border: 0;
   border-radius: var(--app-radius-xs);
   background: transparent;
@@ -757,31 +875,80 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
     color: var(--td-brand-color);
     background: var(--td-bg-color-container-hover);
   }
+
+  &:focus-visible { outline: 2px solid var(--app-focus-border); outline-offset: 2px; }
 }
 
 .igv-text {
   margin: 0;
-  font-size: var(--app-text-base);
-  line-height: 1.65;
+  font-size: var(--app-text-md);
+  line-height: 1.7;
   white-space: pre-wrap;
   word-break: break-word;
 
   &.is-muted { color: var(--td-text-color-placeholder); }
 }
 
+.igv-markdown {
+  font-size: var(--app-text-md);
+  line-height: 1.75;
+  overflow-wrap: anywhere;
+
+  :deep(> :first-child) { margin-top: 0; }
+  :deep(> :last-child) { margin-bottom: 0; }
+  :deep(p) { margin: 0 0 10px; }
+  :deep(h1), :deep(h2), :deep(h3), :deep(h4), :deep(h5), :deep(h6) {
+    margin: 16px 0 8px;
+    font-size: inherit;
+    font-weight: 600;
+    line-height: 1.5;
+  }
+  :deep(ul), :deep(ol) { margin: 8px 0 12px; padding-left: 20px; }
+  :deep(li) { margin: 4px 0; }
+  :deep(li > p) { margin: 0 0 4px; }
+  :deep(li > ul), :deep(li > ol) { margin: 4px 0; }
+  :deep(strong) { font-weight: 600; }
+  :deep(a) { color: var(--td-brand-color); text-decoration: underline; }
+  :deep(blockquote) {
+    margin: 10px 0;
+    padding-left: 12px;
+    border-left: 3px solid var(--td-component-stroke);
+    color: var(--td-text-color-secondary);
+  }
+  :deep(code) {
+    padding: 2px 4px;
+    border-radius: var(--app-radius-xs);
+    background: var(--td-bg-color-secondarycontainer);
+    font-size: 0.9em;
+  }
+  :deep(pre) {
+    margin: 10px 0;
+    padding: 10px;
+    overflow-x: auto;
+    border-radius: var(--app-radius-sm);
+    background: var(--td-bg-color-secondarycontainer);
+    line-height: 1.6;
+  }
+  :deep(pre code) { padding: 0; background: transparent; }
+  :deep(img) { max-width: 100%; height: auto; }
+  :deep(table) { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; }
+  :deep(th), :deep(td) { padding: 6px 8px; border: 1px solid var(--td-component-stroke); }
+  :deep(hr) { margin: 16px 0; border: 0; border-top: 1px solid var(--td-component-stroke); }
+}
+
 .igv-props {
   display: grid;
-  grid-template-columns: max-content minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
   gap: 8px 16px;
   margin: 0;
   font-size: var(--app-text-md);
   line-height: 22px;
 
-  dt { color: var(--td-text-color-secondary); }
+  dt { color: var(--td-text-color-secondary); overflow-wrap: anywhere; }
   dd {
     margin: 0;
     min-width: 0;
-    text-align: right;
+    text-align: left;
     word-break: break-word;
   }
 }

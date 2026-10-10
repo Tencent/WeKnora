@@ -81,7 +81,7 @@ func (h *MCPServiceHandler) mcpServiceResponses(
 func (h *MCPServiceHandler) CreateMCPService(c *gin.Context) {
 	ctx := c.Request.Context()
 
-	var service types.MCPService
+	service := types.MCPService{Enabled: true}
 	if err := c.ShouldBindJSON(&service); err != nil {
 		logger.Error(ctx, "Failed to parse MCP service request", err)
 		c.Error(errors.NewBadRequestError(err.Error()))

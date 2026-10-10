@@ -448,6 +448,7 @@ func (l *remoteSessionLifecycle) createAndBind(
 		}
 		if strings.TrimSpace(override) != "" {
 			request.TemplateID = override
+			request.FromSnapshot = true
 			usedOverride = true
 		}
 	}

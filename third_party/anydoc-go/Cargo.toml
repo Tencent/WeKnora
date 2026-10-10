@@ -5,7 +5,7 @@
 # symbols from, not a loadable shared object.
 [package]
 name = "anydoc-go"
-version = "0.1.9"
+version = "0.2.4"
 edition = "2024"
 description = "Go bindings (C ABI) for anydoc"
 license = "MIT"
@@ -19,7 +19,7 @@ crate-type = ["staticlib"]
 # workspace, so it takes the published crate rather than a path dependency.
 # Pinned exactly: the C ABI mirrors this version's error and format enums.
 [dependencies]
-anydoc = "=0.1.9"
+anydoc = "=0.2.4"
 
 [build-dependencies]
 cbindgen = "0.29"

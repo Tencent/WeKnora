@@ -17,7 +17,9 @@ import (
 // itself: splitting a candidate set that exceeds the documented per-request
 // ceilings, and putting the returned scores on one scale.
 type protocolReranker struct {
-	inner     api.Reranker
+	inner api.Reranker
+	// images is nil unless the model and the endpoint both take images.
+	images    api.ImageReranker
 	settings  api.RerankSettings
 	endpoint  string
 	modelName string

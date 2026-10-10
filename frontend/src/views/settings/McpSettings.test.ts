@@ -7,12 +7,13 @@ import test from 'node:test'
 import { compileScript, parse } from '@vue/compiler-sfc'
 import ts from 'typescript'
 import { createRenderer, nextTick, reactive } from 'vue'
+import { matchesResourceQuery } from '../../utils/resourceListSearch'
 
 const require = createRequire(import.meta.url)
 const filename = fileURLToPath(new URL('./McpSettings.vue', import.meta.url))
 const { descriptor } = parse(readFileSync(filename, 'utf8'), { filename })
 const script = compileScript(descriptor, { id: 'mcp-settings-test' }).content
-  .replace('__expose();', '')
+  .replace(/__expose\([^;]*\);/g, '')
   .replace('return __returned__', '__expose(__returned__); return __returned__')
 const compiled = ts.transpileModule(script, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
 
@@ -25,6 +26,7 @@ async function fixture(update: () => Promise<void> = async () => {}, admin = tru
   runInNewContext(compiled, {
     exports, console: { error() {} },
     require(name: string) {
+      if (name === '@/utils/resourceListSearch') return { matchesResourceQuery }
       if (name === 'vue') return require('vue')
       if (name === 'vue-i18n') return { useI18n: () => ({ t: (key: string) => key }) }
       if (name === '@/stores/auth') return { useAuthStore: () => ({ hasRole: () => admin }) }
@@ -46,6 +48,7 @@ async function fixture(update: () => Promise<void> = async () => {}, admin = tru
   })
   const app = renderer.createApp(component)
   const vm: any = app.mount({})
+  await new Promise<void>(resolve => setImmediate(resolve))
   await nextTick()
   return { vm, service, calls, errors, deletes, close: () => app.unmount() }
 }
@@ -110,4 +113,59 @@ test('viewer controls and builtin mutations cannot update services', async () =>
     assert.equal(builtin.calls.length, 0)
     assert.equal(builtin.deletes.length, 0)
   } finally { viewer.close(); builtin.close() }
+})
+
+const rows = () => [
+  { id: 'builtin', name: 'Knowledge', description: 'Search docs', enabled: false, is_builtin: true, transport_type: 'http-streamable' },
+  { id: 'logs', name: '日志 Logs', description: 'hidden legacy text', usage_instructions: 'Audit REPORT', enabled: true, transport_type: 'sse', headers: { Authorization: 'secret-fixture' } },
+  { id: 'local', name: 'Local', description: '', enabled: false, transport_type: 'stdio' },
+]
+const ids = (vm: any) => Array.from(vm.filteredServices, (row: any) => row.id)
+
+test('MCP search matches visible metadata and clearing restores every service', async () => {
+  const f = await fixture()
+  try {
+    f.vm.services = rows()
+    f.vm.query = ' 日志   report '
+    assert.deepEqual(ids(f.vm), ['logs'])
+    f.vm.query = 'knowledge docs'
+    assert.deepEqual(ids(f.vm), ['builtin'])
+    for (const query of ['secret-fixture', 'hidden legacy', 'missing']) {
+      f.vm.query = query
+      assert.deepEqual(ids(f.vm), [])
+    }
+    f.vm.query = '  '
+    assert.deepEqual(ids(f.vm), ['builtin', 'logs', 'local'])
+  } finally { f.close() }
+})
+
+test('search results keep service identity for editing and toggling', async () => {
+  const f = await fixture()
+  try {
+    f.vm.services = rows()
+    f.vm.query = 'logs'
+    const service = f.vm.filteredServices[0]
+    assert.equal(service, f.vm.services[1])
+    f.vm.handleEdit(service)
+    assert.equal(f.vm.currentService.id, 'logs')
+    await f.vm.handleToggleEnabled(service)
+    assert.equal(f.calls[0]?.id, 'logs')
+    assert.equal(service.enabled, false)
+    assert.deepEqual(ids(f.vm), ['logs'])
+    assert.equal(f.vm.services.length, 3)
+    service.name = 'Renamed'
+    assert.deepEqual(ids(f.vm), [])
+  } finally { f.close() }
+})
+
+test('a failed MCP save keeps the row in the search results', async () => {
+  const f = await fixture(async () => { throw new Error('unavailable') })
+  try {
+    f.vm.services = rows()
+    f.vm.query = 'logs'
+    await f.vm.handleToggleEnabled(f.vm.filteredServices[0])
+    assert.deepEqual(ids(f.vm), ['logs'])
+    assert.equal(f.vm.filteredServices[0].enabled, true)
+    assert.deepEqual(f.errors, ['mcpSettings.toasts.updateStateFailed'])
+  } finally { f.close() }
 })

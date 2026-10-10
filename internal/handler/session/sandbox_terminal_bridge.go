@@ -56,10 +56,13 @@ func (b *terminalBridge) teardownWith(reason string) {
 }
 
 func (b *terminalBridge) run() {
+	pid := b.terminal.Session.PID()
+	reattachable := pid > 0
 	b.sendControl(terminalControlFrame{
-		Type:    "ready",
-		PID:     b.terminal.Session.PID(),
-		Backend: b.terminal.Backend,
+		Type:         "ready",
+		PID:          pid,
+		Backend:      b.terminal.Backend,
+		Reattachable: &reattachable,
 	})
 
 	// Liveness defaults; the read loop also refreshes on every frame.
@@ -328,8 +331,8 @@ func (b *terminalBridge) heartbeat(done chan struct{}) {
 // session slot. Callers must go through teardownWith so the reason is logged.
 func (b *terminalBridge) teardownLocked() {
 	b.cancel()
-	// Close only disconnects WeKnora from the PTY; the shell keeps running in
-	// the sandbox and can be reattached provider-side.
+	// On Cube/E2B Close only disconnects WeKnora from the PTY and the shell
+	// stays reattachable; Docker cannot reattach, so its Close ends the shell.
 	if err := b.terminal.Session.Close(); err != nil {
 		logger.Debugf(b.ctx, "[sandbox-terminal] close failed session=%s: %v",
 			b.session, err)
