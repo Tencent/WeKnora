@@ -670,8 +670,9 @@ services:
     volumes:
       - memgraph-data:/var/lib/memgraph
     ports:
-      - "7687:7687"
-      - "7444:7444"
+      # 与 neo4j 服务同为 7687；两个 profile 同时起时用这两个变量错开宿主端口。
+      - "${MEMGRAPH_BOLT_PORT:-7687}:7687"
+      - "${MEMGRAPH_LAB_PORT:-7444}:7444"
     restart: always
     networks:
       - WeKnora-network
