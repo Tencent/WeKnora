@@ -103,6 +103,15 @@ func NewVLM(config *Config, ollamaService *ollama.OllamaService) (VLM, error) {
 		v = &debugVLM{inner: v}
 	}
 	v, err = wrapVLMLangfuse(v, nil)
+	// Outside the trace layers (debug / Langfuse record the payload they are
+	// handed, so normalising further in would leave the trace showing bytes the
+	// model never received), and inside the per-model gate below, which only
+	// covers background calls: the decode and re-encode of a 600 DPI page is
+	// bounded by the process-wide rotation budget instead (see the
+	// acquireOrientationSlot gate). Models read the pixel matrix and ignore the
+	// EXIF orientation tag that browsers honour, so the pixels are turned
+	// upright here.
+	v, _ = wrapVLMImageOrientation(v, nil)
 	// Outermost: hold the per-model concurrency slot only around the real
 	// provider round-trip, so the wait is excluded from debug/langfuse timing.
 	return wrapVLMConcurrency(v, config.MaxConcurrency, err)
