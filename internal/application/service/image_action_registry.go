@@ -278,14 +278,16 @@ func (r *runContext) ParamSnapshot(keys ...string) types.JSONMap {
 // passes "image_caption", the attribute-observing caption passes
 // "image_observation".
 func (r *runContext) predictCaption(ctx context.Context, prompt, purpose string) (string, error) {
-	return r.think(types.WithLLMCallMetadata(ctx, purpose, ""), prompt, r.captionThinkingKey)
+	return r.think(types.WithLLMCallMetadata(ctx, purpose, ""), prompt,
+		r.captionThinkingKey, imageFieldKeyCaptionThinking)
 }
 
 // predictOCR transcribes text from an image, with the tunable the current
 // pipeline offers for it. The image_ocr purpose labels the VLM call in the
 // usage log so it can be told apart from the observation step.
 func (r *runContext) predictOCR(ctx context.Context, prompt string) (string, error) {
-	return r.think(types.WithLLMCallMetadata(ctx, "image_ocr", ""), prompt, r.ocrThinkingKey)
+	return r.think(types.WithLLMCallMetadata(ctx, "image_ocr", ""), prompt,
+		r.ocrThinkingKey, imageFieldKeyOCRThinking)
 }
 
 // think asks the model with the thinking switch the pipeline wired to this
@@ -294,10 +296,14 @@ func (r *runContext) predictOCR(ctx context.Context, prompt string) (string, err
 // caller cannot tell that empty answer from an image that genuinely carries no
 // text — which is exactly how an OCR result comes to be discarded as invalid.
 // Turning it on costs a longer run and is what a dense or degraded image wants,
-// so the switch is per action, and the value reaches the trace as used.
-func (r *runContext) think(ctx context.Context, prompt, fieldKey string) (string, error) {
-	on := r.BoolParamOr(fieldKey, false)
-	r.out[fieldKey] = on
+// so the switch is per action. The effective value reaches the trace under the
+// SHARED action-level key, never under the pipeline's own field key: pipelines
+// own private param keys (per-pipeline storage isolation — one pipeline's
+// stored switch must not drive another's run), but a run's trace names the
+// same switch the same way whichever pipeline served it.
+func (r *runContext) think(ctx context.Context, prompt, paramKey, traceKey string) (string, error) {
+	on := r.BoolParamOr(paramKey, false)
+	r.out[traceKey] = on
 	return r.model.PredictWithOptions(ctx, [][]byte{r.imageBytes}, prompt,
 		&vlm.PredictOptions{Thinking: &on})
 }

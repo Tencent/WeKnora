@@ -324,8 +324,8 @@ func TestSmartPipelineDeclaresNoRules(t *testing.T) {
 		t.Errorf("smartocr declares %d rules; it switches its own actions on and off", len(pipeline.Rules()))
 	}
 	if err := pipeline.Validate(map[string]any{
-		smartFieldKeyDescribeThinking: false,
-		smartFieldKeyTextThinking:     false,
+		imageFieldKeyCaptionThinking: false,
+		imageFieldKeyOCRThinking:     false,
 	}); err != nil {
 		t.Errorf("smartocr with both thinking switches off = %v, want nil", err)
 	}

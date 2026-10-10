@@ -135,16 +135,22 @@ func TestThinkingFollowsTheStoredSwitch(t *testing.T) {
 	}
 }
 
-// TestObservationPipelineThinkingKeys pins that the observed pipeline carries
-// its own thinking keys. Sharing the default pipeline's names would make one
-// pipeline's panel switch another pipeline's run — and would trip the
-// no-overlapping-fields contract.
+// TestObservationPipelineThinkingKeys pins the two-layer key design. The
+// pipeline reads its OWN param keys (describe_thinking / text_thinking) — the
+// default pipeline's stored switches must not drive its run, which is the
+// no-overlapping-fields contract — while the TRACE records the effective
+// values under the shared action-level names, so runs stay comparable across
+// pipelines.
 func TestObservationPipelineThinkingKeys(t *testing.T) {
 	r, model := runThinkingPipeline(t, true, map[string]any{
 		smartFieldKeyCaptureCaption:   true,
 		smartFieldKeyAllowOCR:         true,
 		smartFieldKeyDescribeThinking: true,
 		smartFieldKeyTextThinking:     true,
+		// The default pipeline's stored switches: present, but they must have
+		// no effect on this run — isolation, not inheritance.
+		imageFieldKeyCaptionThinking: false,
+		imageFieldKeyOCRThinking:     false,
 	})
 	if len(model.calls) != 2 {
 		t.Fatalf("VLM calls = %d (%v), want 2", len(model.calls), model.calls)
@@ -155,7 +161,21 @@ func TestObservationPipelineThinkingKeys(t *testing.T) {
 	if !model.calls[1].thinking {
 		t.Error("the OCR call ran with thinking off; text_thinking=true was ignored")
 	}
-	if _, ok := r.out[imageFieldKeyCaptionThinking]; ok {
-		t.Error("smartocr must not write the default pipeline's thinking key into its trace")
+	// The trace names the switch after the ACTION, whichever pipeline served
+	// the run, so a reader compares like with like.
+	if got := r.out[imageFieldKeyCaptionThinking]; got != true {
+		t.Errorf(`out[%q] = %v, want true (the trace must use the shared action-level key)`,
+			imageFieldKeyCaptionThinking, got)
+	}
+	if got := r.out[imageFieldKeyOCRThinking]; got != true {
+		t.Errorf(`out[%q] = %v, want true (the trace must use the shared action-level key)`,
+			imageFieldKeyOCRThinking, got)
+	}
+	// The pipeline's private param keys must not leak into the trace.
+	if _, ok := r.out[smartFieldKeyDescribeThinking]; ok {
+		t.Error("smartocr's private param key must not appear in the trace")
+	}
+	if _, ok := r.out[smartFieldKeyTextThinking]; ok {
+		t.Error("smartocr's private param key must not appear in the trace")
 	}
 }

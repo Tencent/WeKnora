@@ -25,18 +25,16 @@ func (smartOcrPipeline) Description() string {
 }
 
 // Field keys of this pipeline. They deliberately do not reuse the names of
-// the default pipeline's switches: this pipeline answers "may OCR be spent at
-// all",
-// which is a ceiling on the policy rather than a step to run, and folding the
-// two into one field would make an image's fate depend on which pipeline it
-// happened to be handled by.
+// the default pipeline's switches: the knowledge base stores params per
+// pipeline, and a shared key would make one pipeline's stored switch drive
+// another pipeline's run. The thinking switches follow the same rule — named
+// after what this pipeline asks the model for (the observation call writes
+// the description *and* reports the attributes) — while the TRACE records
+// them under the shared action-level names (see think), so runs stay
+// comparable across pipelines.
 const (
-	smartFieldKeyAllowOCR       = "allow_ocr"
-	smartFieldKeyCaptureCaption = "capture_caption"
-	// This pipeline names the two thinking switches after what it asks the
-	// model for — the observation call writes the description *and* reports
-	// the attributes — rather than after the shared action names, because a
-	// key may be declared by one pipeline only.
+	smartFieldKeyAllowOCR         = "allow_ocr"
+	smartFieldKeyCaptureCaption   = "capture_caption"
 	smartFieldKeyDescribeThinking = "describe_thinking"
 	smartFieldKeyTextThinking     = "text_thinking"
 )
