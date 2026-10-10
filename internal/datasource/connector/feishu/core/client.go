@@ -165,6 +165,30 @@ func (c *Client) GetTenantAccessToken(ctx context.Context) (string, error) {
 	return c.tokenCache, nil
 }
 
+// waitForRequestToken authenticates before pacing and rechecks the cached token
+// afterwards. A refresh must happen before rejoining the gate, otherwise requests
+// that have already been paced can pile up behind tokenMu and then burst together.
+func (c *Client) waitForRequestToken(ctx context.Context, gate *feishuRequestGate) (string, error) {
+	for {
+		token, err := c.GetTenantAccessToken(ctx)
+		if err != nil {
+			return "", err
+		}
+		if err := gate.wait(ctx); err != nil {
+			return "", err
+		}
+		// Never wait on a token refresh after the gate has granted a request slot.
+		if !c.tokenMu.TryLock() {
+			continue
+		}
+		valid := token == c.tokenCache && time.Now().Before(c.tokenExpAt)
+		c.tokenMu.Unlock()
+		if valid {
+			return token, nil
+		}
+	}
+}
+
 // Retry policy shared by DoRequest (JSON API calls) and downloadRawBytes (file
 // downloads): rate limits honour Feishu's reset header / Retry-After, 5xx
 // retries once, transport errors back off.
@@ -198,7 +222,7 @@ func (c *Client) DoRequest(ctx context.Context, method, path string, body interf
 	)
 	backoff := feishuRetryBackoff
 
-	token, err := c.GetTenantAccessToken(ctx)
+	_, err := c.GetTenantAccessToken(ctx)
 	if err != nil {
 		return err
 	}
@@ -216,7 +240,8 @@ func (c *Client) DoRequest(ctx context.Context, method, path string, body interf
 	gate := c.requestGate(method, path)
 
 	for attempt := 0; attempt <= maxRetries; attempt++ {
-		if err := gate.wait(ctx); err != nil {
+		token, err := c.waitForRequestToken(ctx, gate)
+		if err != nil {
 			return err
 		}
 		var bodyReader io.Reader
@@ -634,10 +659,15 @@ func (c *Client) downloadExportFile(ctx context.Context, fileToken string) ([]by
 	return c.downloadRawBytes(ctx, path)
 }
 
+// errExportPollsExhausted keeps the error classification independent of the
+// message's poll count and ticket details, including when connectors wrap it.
+var errExportPollsExhausted = errors.New("export task still processing")
+
 // ExportAndDownload is a high-level helper that creates an export task, polls until
 // completion, and downloads the resulting file. Returns (fileBytes, fileName, error).
 //
-// Timeout: 60 seconds. Poll interval: 2 seconds.
+// Poll count and interval are configurable. Pacing/cooldown waits do not consume
+// the poll budget; the caller's context still bounds the entire operation.
 func (c *Client) ExportAndDownload(ctx context.Context, objToken, objType string) ([]byte, string, error) {
 	// Determine export format
 	fileExt, ok := ObjTypeToExportFileExtension[objType]
@@ -656,11 +686,13 @@ func (c *Client) ExportAndDownload(ctx context.Context, objToken, objType string
 		return nil, "", err
 	}
 
-	// Step 2: poll until ready (max 60s, every 2s)
-	deadline := time.Now().Add(60 * time.Second)
+	// Step 2: retain the same ticket while waiting on shared API limits. A wall
+	// clock deadline here would turn other documents' cooldowns into false failures.
+	maxPolls := feishuExportMaxPolls()
+	pollInterval := feishuConfiguredDuration("FEISHU_EXPORT_POLL_INTERVAL", defaultFeishuExportPollInterval)
 	var fileToken, fileName string
 
-	for time.Now().Before(deadline) {
+	for poll := 0; poll < maxPolls; poll++ {
 		fileToken, fileName, err = c.getExportTaskStatus(ctx, ticket, objToken)
 		if err != nil {
 			return nil, "", err
@@ -668,15 +700,15 @@ func (c *Client) ExportAndDownload(ctx context.Context, objToken, objType string
 		if fileToken != "" {
 			break // export ready
 		}
-		select {
-		case <-ctx.Done():
-			return nil, "", ctx.Err()
-		case <-time.After(2 * time.Second):
+		if poll+1 < maxPolls {
+			if err := sleepCtx(ctx, pollInterval); err != nil {
+				return nil, "", err
+			}
 		}
 	}
 
 	if fileToken == "" {
-		return nil, "", fmt.Errorf("export task timed out after 60s (ticket=%s)", ticket)
+		return nil, "", fmt.Errorf("%w after %d polls (ticket=%s)", errExportPollsExhausted, maxPolls, ticket)
 	}
 
 	// Step 3: download file using file_token (NOT ticket)
@@ -715,7 +747,7 @@ func (c *Client) downloadMediaFile(ctx context.Context, fileToken string) ([]byt
 
 // downloadRawBytes performs an authenticated GET and returns the raw response body.
 func (c *Client) downloadRawBytes(ctx context.Context, path string) ([]byte, error) {
-	token, err := c.GetTenantAccessToken(ctx)
+	_, err := c.GetTenantAccessToken(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -725,7 +757,8 @@ func (c *Client) downloadRawBytes(ctx context.Context, path string) ([]byte, err
 	gate := c.requestGate(http.MethodGet, path)
 
 	for attempt := 0; attempt <= feishuMaxRetries; attempt++ {
-		if err := gate.wait(ctx); err != nil {
+		token, err := c.waitForRequestToken(ctx, gate)
+		if err != nil {
 			return nil, err
 		}
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
