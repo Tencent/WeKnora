@@ -306,21 +306,15 @@ func inlineTable(ctx context.Context, client sheetReader, token, kind string) st
 	if err != nil {
 		return fmt.Sprintf("> [无法读取%s]", noun)
 	}
-	// markdownTable returns "" when there is nothing renderable (no rows, or a
-	// header with no columns). Skip the truncation note too in that case, since it
-	// would otherwise dangle without a table above it.
 	table := markdownTable(rows)
-	if table == "" {
-		return ""
-	}
 	if truncated {
-		if kind == "sheet" {
-			// A sheet's allocated grid can extend beyond populated cells.
-			// Describe the read boundary without claiming content was omitted.
-			table += fmt.Sprintf("\n\n> 仅读取前 %d 行范围（含表头）", maxTableRows)
-		} else {
-			table += fmt.Sprintf("\n\n> 表格已截断（仅显示前 %d 行）", maxTableRows)
+		// A byte budget or incomplete pagination can stop before the row cap,
+		// including before the first row. Never hide that behind an empty table.
+		note := fmt.Sprintf("> [%s未完整读取，已保留可读取内容]", noun)
+		if table == "" {
+			return note
 		}
+		return table + "\n\n" + note
 	}
 	return table
 }

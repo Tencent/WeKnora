@@ -442,7 +442,7 @@ func TestReadBitableRecords_Exactly500NotTruncated(t *testing.T) {
 
 // TestReadBitableRecords_EmptyRecordPageTerminates guards the pagination
 // zero-progress error: a malformed page (empty items but has_more=true and a
-// non-empty page_token) must fail instead of looping until the task
+// non-empty page_token) must preserve partial content and stop before the task
 // deadline. A short context deadline is a safety net so a regression fails fast
 // rather than hanging the suite.
 func TestReadBitableRecords_EmptyRecordPageTerminates(t *testing.T) {
@@ -467,15 +467,15 @@ func TestReadBitableRecords_EmptyRecordPageTerminates(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	c := &Client{baseURL: srv.URL, appID: "a", appSecret: "s", httpClient: srv.Client()}
-	rows, _, err := c.readBitableRecords(ctx, "bascabc_tblxyz")
-	if err == nil || !strings.Contains(err.Error(), "empty page") {
-		t.Fatalf("empty-page pagination must fail explicitly, got err: %v", err)
+	rows, truncated, err := c.readBitableRecords(ctx, "bascabc_tblxyz")
+	if err != nil || !truncated {
+		t.Fatalf("empty-page pagination must report truncation: truncated=%v err=%v", truncated, err)
 	}
 	if recordCalls != 1 {
 		t.Errorf("records endpoint called %d times, want 1 (loop must break on the empty page)", recordCalls)
 	}
-	if rows != nil {
-		t.Errorf("invalid pagination returned partial rows: %v", rows)
+	if len(rows) != 1 || len(rows[0]) != 1 || rows[0][0] != "col" {
+		t.Errorf("header lost after empty record page: %v", rows)
 	}
 }
 

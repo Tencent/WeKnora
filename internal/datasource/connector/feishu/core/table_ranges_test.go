@@ -13,7 +13,6 @@ import (
 )
 
 func TestReadSheetRange_BoundsResponseBeforeReading(t *testing.T) {
-	const totalRows = 1000
 	const responseLimit = 80 << 10
 	cell := strings.Repeat("x", 128)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -23,14 +22,12 @@ func TestReadSheetRange_BoundsResponseBeforeReading(t *testing.T) {
 		case r.URL.Path == "/open-apis/sheets/v3/spreadsheets/sht_abc/sheets/0":
 			_, _ = fmt.Fprint(w, `{"code":0,"data":{"sheet":{"grid_properties":{"row_count":1000,"column_count":28}}}}`)
 		case strings.HasPrefix(r.URL.Path, "/open-apis/sheets/v2/spreadsheets/sht_abc/values/"):
-			end := totalRows
+			var end int
 			rangeName := strings.TrimPrefix(r.URL.Path, "/open-apis/sheets/v2/spreadsheets/sht_abc/values/")
-			if rangeName != "0" {
-				if _, err := fmt.Sscanf(rangeName, "0!A1:AB%d", &end); err != nil || end > maxTableRows {
-					t.Errorf("unexpected range %q", rangeName)
-					http.Error(w, "invalid range", http.StatusBadRequest)
-					return
-				}
+			if _, err := fmt.Sscanf(rangeName, "0!A1:AB%d", &end); err != nil || end > maxTableRows {
+				t.Errorf("unexpected range %q", rangeName)
+				http.Error(w, "invalid range", http.StatusBadRequest)
+				return
 			}
 			values := make([][]any, end)
 			for i := range values {
@@ -257,6 +254,73 @@ func TestReadBitableRecords_BoundsResponsesAndPreservesRows(t *testing.T) {
 				if row[0] != strconv.Itoa(i) || row[1] != cell {
 					t.Fatalf("record %d was changed or reordered", i)
 				}
+			}
+		})
+	}
+}
+
+func TestAppendTableRow_BudgetMatchesRenderedContent(t *testing.T) {
+	want := [][]string{{"列|名", "value"}, {"中\n文|", ""}}
+	// The builder accounts for the final newline, trimmed by markdownTable.
+	budget := len(markdownTable(want)) + 1
+	for _, delta := range []int{-1, 0, 1} {
+		t.Run(strconv.Itoa(delta), func(t *testing.T) {
+			remaining := budget + delta
+			var rows [][]string
+			if !appendTableRow(&rows, want[0], 2, &remaining) {
+				t.Fatal("header did not fit")
+			}
+			accepted := appendTableRow(&rows, want[1][:1], 2, &remaining)
+			if accepted != (delta >= 0) || remaining < 0 {
+				t.Fatalf("accepted=%v remaining=%d", accepted, remaining)
+			}
+			if accepted && markdownTable(rows) != markdownTable(want) {
+				t.Fatal("padding or escaping changed the table")
+			}
+		})
+	}
+}
+
+func TestEmbeddedTable_UnrenderableBudgetStillShowsNote(t *testing.T) {
+	for _, mode := range []string{"wide grid", "escaped first row", "bitable header"} {
+		t.Run(mode, func(t *testing.T) {
+			recordCalls := 0
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case strings.HasSuffix(r.URL.Path, "/tenant_access_token/internal"):
+					_, _ = fmt.Fprint(w, `{"tenant_access_token":"t","expire":7200}`)
+				case strings.Contains(r.URL.Path, "/sheets/v3/"):
+					columns := 1
+					if mode == "wide grid" {
+						columns = maxTableBytes
+					}
+					_, _ = fmt.Fprintf(w,
+						`{"data":{"sheet":{"grid_properties":{"row_count":1,"column_count":%d}}}}`, columns)
+				case strings.HasSuffix(r.URL.Path, "/fields"):
+					_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{
+						"items": []any{map[string]any{"field_name": strings.Repeat("|", maxTableBytes/2)}},
+					}})
+				case strings.HasSuffix(r.URL.Path, "/records/search"):
+					recordCalls++
+				default:
+					cell := "value"
+					if mode == "escaped first row" {
+						cell = strings.Repeat("|", maxTableBytes/2)
+					}
+					_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{
+						"valueRange": map[string]any{"values": [][]string{{cell}}},
+					}})
+				}
+			}))
+			defer srv.Close()
+			c := &Client{baseURL: srv.URL, httpClient: srv.Client()}
+			kind := "sheet"
+			if mode == "bitable header" {
+				kind = "bitable"
+			}
+			got := inlineTable(context.Background(), c, "token_0", kind)
+			if !strings.Contains(got, "未完整读取") || len(got) > 200 || recordCalls != 0 {
+				t.Fatalf("missing budget note or continued reading: bytes=%d records=%d", len(got), recordCalls)
 			}
 		})
 	}
