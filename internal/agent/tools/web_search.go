@@ -48,7 +48,7 @@ var webSearchTool = BaseTool{
 // WebSearchInput defines the input parameters for web search tool
 type WebSearchInput struct {
 	Query     string `json:"query" jsonschema:"Search query string"`
-	Count     *int   `json:"count,omitempty" jsonschema:"1 to configured maximum (at most 20)"`
+	Count     *int   `json:"count,omitempty" jsonschema:"Number of results to return (1 to the configured maximum)"`
 	Country   string `json:"country,omitempty" jsonschema:"Two-letter code or ALL (Brave, Serply); omit for default"`
 	Freshness string `json:"freshness,omitempty" jsonschema:"pd/pw/pm/py; Brave also accepts YYYY-MM-DDtoYYYY-MM-DD"`
 	Content   bool   `json:"content,omitempty" jsonschema:"Fetch page excerpts; default false"`
@@ -75,6 +75,8 @@ func NewWebSearchTool(
 	}
 	maxResults = min(maxResults, 20)
 	tool.description = fmt.Sprintf(tool.description, maxResults)
+	// The static schema cannot express the configured maximum; rewrite the count description.
+	tool.schema = patchWebSearchCountSchema(tool.schema, maxResults)
 
 	return &WebSearchTool{
 		BaseTool:         tool,
@@ -83,6 +85,31 @@ func NewWebSearchTool(
 		maxResults:       maxResults,
 		providerID:       providerID,
 	}
+}
+
+// patchWebSearchCountSchema rewrites the count description with the effective
+// maximum. Any parse failure returns the schema unchanged.
+func patchWebSearchCountSchema(raw json.RawMessage, maxResults int) json.RawMessage {
+	var schema map[string]any
+	if err := json.Unmarshal(raw, &schema); err != nil {
+		return raw
+	}
+	props, ok := schema["properties"].(map[string]any)
+	if !ok {
+		return raw
+	}
+	count, ok := props["count"].(map[string]any)
+	if !ok {
+		return raw
+	}
+	count["description"] = fmt.Sprintf(
+		"Number of results to return, 1 to %d (the configured maximum). Omit to use the maximum.",
+		maxResults)
+	patched, err := json.Marshal(schema)
+	if err != nil {
+		return raw
+	}
+	return patched
 }
 
 // WithPageReader shares page snapshots and full-output storage with web_fetch.
@@ -106,13 +133,32 @@ func (t *WebSearchTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 	}
 
 	maxResults := t.maxResults
+	countClamped := false
+	countRequested := 0
 	if input.Count != nil {
-		if *input.Count < 1 || *input.Count > maxResults {
+		requested := *input.Count
+		switch {
+		case requested < 1:
+			logger.Warnf(ctx, "[Tool][WebSearch] count %d is below the minimum 1", requested)
 			return &types.ToolResult{
 				Success: false, Error: fmt.Sprintf("count must be between 1 and %d", maxResults),
 			}, nil
+		case requested > maxResults:
+			countClamped = true
+			countRequested = requested
+			logger.Warnf(ctx, "[Tool][WebSearch] count %d exceeds the configured maximum %d; clamped",
+				requested, maxResults)
+		default:
+			maxResults = requested
 		}
-		maxResults = *input.Count
+	}
+	// A clamped count is stated twice on purpose: Output serves the UI, logs and the
+	// zero-result fallback, while Data reaches the model through the rendered
+	// retrieval block (sourceOutput tools never see Output once there is a row).
+	clampNote := ""
+	if countClamped {
+		clampNote = fmt.Sprintf("Note: requested count %d is outside 1-%d and was clamped to %d.\n",
+			countRequested, t.maxResults, maxResults)
 	}
 	filters := types.WebSearchFilters{
 		Country: strings.ToUpper(strings.TrimSpace(input.Country)), Freshness: strings.TrimSpace(input.Freshness),
@@ -211,14 +257,18 @@ func (t *WebSearchTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 
 	// Format output
 	if len(webResults) == 0 {
+		output := fmt.Sprintf("No web search results found for query: %s", query)
+		if clampNote != "" {
+			output += "\n" + clampNote
+		}
 		return &types.ToolResult{
 			Success: true,
-			Output:  fmt.Sprintf("No web search results found for query: %s", query),
-			Data: map[string]interface{}{
+			Output:  output,
+			Data: t.countClampData(map[string]interface{}{
 				"query":   query,
 				"results": []interface{}{},
 				"count":   0,
-			},
+			}, countClamped, countRequested),
 		}, nil
 	}
 
@@ -230,7 +280,11 @@ func (t *WebSearchTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 	// Build output text
 	output := "=== Web Search Results ===\n"
 	output += fmt.Sprintf("Query: %s\n", query)
-	output += fmt.Sprintf("Found %d result(s)\n\n", len(webResults))
+	output += fmt.Sprintf("Found %d result(s)\n", len(webResults))
+	if countClamped {
+		output += clampNote
+	}
+	output += "\n"
 
 	// Format results
 	formattedResults := make([]map[string]interface{}, 0, len(webResults))
@@ -290,13 +344,28 @@ func (t *WebSearchTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 	return &types.ToolResult{
 		Success: true,
 		Output:  output,
-		Data: map[string]interface{}{
+		Data: t.countClampData(map[string]interface{}{
 			"query":        query,
 			"results":      formattedResults,
 			"count":        len(webResults),
 			"display_type": "web_search_results",
-		},
+		}, countClamped, countRequested),
 	}, nil
+}
+
+// countClampData records a clamped count in Data so the model-side renderer can
+// restate it inside the retrieval block. Tools with sourceOutput enabled never
+// expose ToolResult.Output to the model once there is at least one row.
+func (t *WebSearchTool) countClampData(
+	data map[string]interface{}, clamped bool, requested int,
+) map[string]interface{} {
+	if !clamped {
+		return data
+	}
+	data["count_clamped"] = true
+	data["count_requested"] = requested
+	data["count_maximum"] = t.maxResults
+	return data
 }
 
 func (t *WebSearchTool) fetchLeadingPages(ctx context.Context, results []*types.WebSearchResult) []*webFetchItemResult {

@@ -122,8 +122,10 @@ func isMissingCollectionErr(err error) bool {
 // following write (ensureCollection) will recreate the collection instead of
 // skipping create and failing the upsert.
 func (q *qdrantRepository) deletePoints(ctx context.Context, dimension int, collectionName string, points *qdrant.PointsSelector) error {
+	wait := true
 	_, err := q.client.Delete(ctx, &qdrant.DeletePoints{
 		CollectionName: collectionName,
+		Wait:           &wait,
 		Points:         points,
 	})
 	if err == nil {
@@ -270,8 +272,10 @@ func (q *qdrantRepository) Save(ctx context.Context,
 		Payload: createPayload(embeddingDB),
 	}
 
+	wait := true
 	_, err := q.client.Upsert(ctx, &qdrant.UpsertPoints{
 		CollectionName: collectionName,
+		Wait:           &wait,
 		Points:         []*qdrant.PointStruct{point},
 	})
 	if err != nil {
@@ -337,8 +341,10 @@ func (q *qdrantRepository) BatchSave(ctx context.Context,
 			}
 			batch := points[i:end]
 
+			wait := true
 			_, err := q.client.Upsert(ctx, &qdrant.UpsertPoints{
 				CollectionName: collectionName,
+				Wait:           &wait,
 				Points:         batch,
 			})
 			if err != nil {
@@ -504,8 +510,10 @@ func (q *qdrantRepository) BatchUpdateChunkEnabledStatus(ctx context.Context, ch
 			if err := ctx.Err(); err != nil {
 				return errors.Join(updateErr, err)
 			}
+			wait := true
 			_, err := q.client.SetPayload(ctx, &qdrant.SetPayloadPoints{
 				CollectionName: collectionName,
+				Wait:           &wait,
 				Payload:        newQdrantValueMap(map[string]any{fieldIsEnabled: true}),
 				PointsSelector: qdrant.NewPointsSelectorFilter(&qdrant.Filter{
 					Must: []*qdrant.Condition{
@@ -524,8 +532,10 @@ func (q *qdrantRepository) BatchUpdateChunkEnabledStatus(ctx context.Context, ch
 			if err := ctx.Err(); err != nil {
 				return errors.Join(updateErr, err)
 			}
+			wait := true
 			_, err := q.client.SetPayload(ctx, &qdrant.SetPayloadPoints{
 				CollectionName: collectionName,
+				Wait:           &wait,
 				Payload:        newQdrantValueMap(map[string]any{fieldIsEnabled: false}),
 				PointsSelector: qdrant.NewPointsSelectorFilter(&qdrant.Filter{
 					Must: []*qdrant.Condition{
@@ -589,8 +599,10 @@ func (q *qdrantRepository) BatchUpdateChunkTagID(ctx context.Context, chunkTagMa
 			if err := ctx.Err(); err != nil {
 				return errors.Join(updateErr, err)
 			}
+			wait := true
 			_, err := q.client.SetPayload(ctx, &qdrant.SetPayloadPoints{
 				CollectionName: collectionName,
+				Wait:           &wait,
 				Payload:        newQdrantValueMap(map[string]any{fieldTagID: tagID}),
 				PointsSelector: qdrant.NewPointsSelectorFilter(&qdrant.Filter{
 					Must: []*qdrant.Condition{
@@ -1043,8 +1055,10 @@ func (q *qdrantRepository) CopyIndices(ctx context.Context,
 		}
 
 		if len(targetPoints) > 0 {
+			wait := true
 			_, err := q.client.Upsert(ctx, &qdrant.UpsertPoints{
 				CollectionName: collectionName,
+				Wait:           &wait,
 				Points:         targetPoints,
 			})
 			if err != nil {

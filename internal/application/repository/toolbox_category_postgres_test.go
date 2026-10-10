@@ -37,7 +37,7 @@ func newToolboxCategoryPostgresRepository(t *testing.T) *toolboxCategoryReposito
 	require.NoError(t, db.Exec("CREATE SCHEMA "+schema).Error)
 	require.NoError(t, db.Exec("CREATE TABLE tenant_skill_catalog (id VARCHAR(36) PRIMARY KEY)").Error)
 	require.NoError(t, db.Exec("CREATE TABLE mcp_services (id VARCHAR(36) PRIMARY KEY)").Error)
-	migration, err := os.ReadFile("../../../migrations/versioned/000115_toolbox_categories.up.sql")
+	migration, err := os.ReadFile("../../../migrations/versioned/000116_toolbox_categories.up.sql")
 	require.NoError(t, err)
 	require.NoError(t, db.Exec(string(migration)).Error)
 	return &toolboxCategoryRepository{db: db}

@@ -108,7 +108,7 @@ Skills 与 MCP 页面共用标签接口和交互组件：
 
 ## 迁移与兼容性
 
-PostgreSQL 与 SQLite 各增加同构迁移。现有 Skill 和 MCP 服务默认没有标签；迁移不改写现有资源，也不创建预设标签。
+PostgreSQL `000116_toolbox_categories` 与 SQLite `000036_toolbox_categories` 提供同构迁移。现有 Skill 和 MCP 服务默认没有标签；迁移不改写现有资源，也不创建预设标签。
 
 旧客户端会忽略列表响应新增的 `categories` 字段。现有搜索、排序和卡片操作保持原语义；新客户端的工具箱页签数量按所选标签统计，全部标签时仍显示总数。
 
@@ -116,7 +116,8 @@ PostgreSQL 与 SQLite 各增加同构迁移。现有 Skill 和 MCP 服务默认�
 
 实现已通过以下宿主机验证：
 
-- SQLite 实际迁移测试覆盖版本 34 及三张新增表，PostgreSQL 与 SQLite 迁移文件保持同构；
+- SQLite 实际迁移测试覆盖版本 36 及三张新增表，PostgreSQL 与 SQLite 迁移文件保持同构；
+- SQLite v34 升级测试验证已有 MCP 使用说明和工具元数据保持不变，并检查重复启动后标签关联仍然存在；
 - Repository/Service 测试覆盖名称唯一、Skill/MCP 共用标签、多对多关联、跨工作区 ID 原子拒绝、内置 MCP 标签隔离和软删除关系清理；
 - 使用实际 PostgreSQL 标签迁移验证空/非空原关联与相同/不同目标标签的并发替换，覆盖 Skills/MCP 共八个竞争场景，以及同名写入冲突和内置 MCP 跨工作区独立写入；设置 `WEKNORA_REPOSITORY_TEST_POSTGRES_DSN` 可启用对应仓储集成测试；
 - Handler、路由和 API Key 权限回归通过；

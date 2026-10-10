@@ -210,6 +210,12 @@ OCR 决策是代码纯函数 `DecideOCR`（`internal/application/service/image_a
 
 管线与观察结果记录在每张图的处理轨迹子 span 上，便于核对与排查：input `pipeline` = `observation_driven`（本开关开启）或 `caption_ocr`（关闭，历史行为）；output `attr_policy`（本轮 OCR 决策）、`image_attrs`（观察到的属性）、`ocr_skipped`（`attr_policy`＝被策略跳过 / `disabled`＝OCR 总开关关闭）、`observation_failed`（未形成有效观察）、`chunks_created`。
 
+OCR 会在入库前拒绝空响应、只有分隔符的内容，以及占据输出主体的长串重复内容；正常短标签、数字和表格仍可保留。OpenAI 兼容 VLM 返回 `finish_reason=length` 时，非空的截断输出也按失败处理。普通图片提示词按可见文字转录，截图中的按钮和标签逐行输出，仅真实表格使用 Markdown 表格；扫描 PDF 使用专用文档布局提示词。
+
+每次执行 OCR 都有独立的 `multimodal.image[i].ocr` 处理子 span；Langfuse 中对应 `image.ocr`，包含模型调用和输出校验。失败时记录 `ocr_status=failed`、`ocr_error_code`（`OCR_INVALID_OUTPUT` / `OCR_TRUNCATED` / `OCR_REQUEST_FAILED`）和错误原因，不创建或索引该次 OCR 分块。正常的图片描述仍可保留，整张图的 output 用 `outcome=partial_failure` 表明部分失败，不因无效 OCR 重试整个图片任务。明确回答没有文字时记为 `ocr_status=no_text`，与异常区分；正常提取记为 `succeeded`。已有异常分块不会被自动清除，需要重新解析相应文档。
+
+可通过 `WEKNORA_OCR_TEST_FIXTURE` 指定本地 JSON 文件（`{"model": <模型配置>, "image_paths": [<本地图片路径>]}`），运行 `go test ./internal/application/service -run '^TestLiveImageOCRValidation$' -v -count=1` 验证实际模型。私有端点需配置 `SSRF_WHITELIST`。该测试使用内存分块仓库，不写业务数据库；带凭证的配置和原图应放在版本控制之外。
+
 单次上传 / 重新解析可在请求体的 `process_config`（`KnowledgeProcessOverrides`）里按文档覆盖 `image_attrs_enabled` 与 `image_actions`；未传的项沿用知识库设置。`image_actions` 按 action key 合并（`on` 整体替换）。接口字段见[知识库 API](../04-api/02-api-knowledge.md)，管线细节见[文档解析](03-document-parsing.md)。
 
 **图片向量（`image_vector_enabled`）**：默认关闭，升级后已有知识库也保持关闭（库里存的配置没有这个键，读出来就是 false），需要在知识库设置「图像处理配置 → 图片向量检索」里（开启多模态后出现）或通过 API 显式开启。只有**开关打开且向量模型能处理图片**时才生效，两者缺一则入库不生成图片向量、检索也不召回图片向量。之所以不随模型能力自动开启：能处理图片的向量模型常常只是被用来编码文本，自动开启会给这些知识库凭空增加每张图片一次的向量调用，并改变检索行为——开启后文档向量检索的候选池放大 1.5 倍，图片命中按 `min(VectorThreshold, 0.1)` 的单独阈值过滤。

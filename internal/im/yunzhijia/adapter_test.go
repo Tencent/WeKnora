@@ -4,12 +4,15 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"testing/iotest"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -338,7 +341,9 @@ func TestDownloadFile(t *testing.T) {
 	}()
 
 	adapter := NewAdapter("https://www.yunzhijia.com/send", "", "app-id", "app-secret", 10, "yunzhijia.com")
-	adapter.httpClient = server.Client()
+	client := server.Client()
+	client.Timeout = adapter.httpClient.Timeout
+	adapter.httpClient = client
 	reader, fileName, err := adapter.DownloadFile(context.Background(), &im.IncomingMessage{
 		FileKey:  "file-1",
 		FileName: "message.png",
@@ -353,6 +358,132 @@ func TestDownloadFile(t *testing.T) {
 	}
 	if string(body) != "image-bytes" || fileName != "message.png" {
 		t.Fatalf("body=%q fileName=%q", string(body), fileName)
+	}
+}
+
+func TestDownloadFileRetriesTimeout(t *testing.T) {
+	for _, timeoutSeconds := range []int{10, 30} {
+		for _, bodyTimeout := range []bool{false, true} {
+			name := "headers"
+			if bodyTimeout {
+				name = "body"
+			}
+			t.Run(fmt.Sprintf("%ds/%s", timeoutSeconds, name), func(t *testing.T) {
+				adapter := NewAdapter(
+					"https://www.yunzhijia.com/send", "", "app-id", "app-secret", timeoutSeconds, "yunzhijia.com",
+				)
+				adapter.accessToken = "token-1"
+				adapter.accessTokenExpiresAt = time.Now().Add(time.Hour)
+				attempts := 0
+				adapter.httpClient.Transport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+					attempts++
+					if req.Header.Get("Authorization") != "Bearer token-1" {
+						t.Errorf("Authorization = %q", req.Header.Get("Authorization"))
+					}
+					deadline, ok := req.Context().Deadline()
+					wantTimeout := time.Duration(timeoutSeconds) * time.Second
+					remaining := time.Until(deadline)
+					if !ok || remaining > wantTimeout || remaining < wantTimeout-time.Second {
+						t.Errorf("attempt %d remaining deadline = %s, want about %s", attempts, remaining, wantTimeout)
+					}
+					if attempts == 1 && !bodyTimeout {
+						return nil, context.DeadlineExceeded
+					}
+					body := io.NopCloser(strings.NewReader("image-bytes"))
+					if attempts == 1 {
+						body = io.NopCloser(iotest.ErrReader(context.DeadlineExceeded))
+					}
+					return &http.Response{
+						StatusCode: http.StatusOK,
+						Header:     http.Header{"Content-Type": []string{"image/png"}},
+						Body:       body,
+						Request:    req,
+					}, nil
+				})
+
+				reader, _, err := adapter.DownloadFile(context.Background(), &im.IncomingMessage{FileKey: "file-1"})
+				if err != nil {
+					t.Fatalf("DownloadFile() error = %v", err)
+				}
+				defer func() {
+					if closeErr := reader.Close(); closeErr != nil {
+						t.Errorf("close download reader: %v", closeErr)
+					}
+				}()
+				body, err := io.ReadAll(reader)
+				if err != nil || string(body) != "image-bytes" {
+					t.Fatalf("body = %q, err = %v", body, err)
+				}
+				if attempts != attachmentDownloadAttempts {
+					t.Fatalf("attempts = %d, want %d", attempts, attachmentDownloadAttempts)
+				}
+				if adapter.httpClient.Timeout != time.Duration(timeoutSeconds)*time.Second {
+					t.Fatalf("regular client timeout = %s, want %ds", adapter.httpClient.Timeout, timeoutSeconds)
+				}
+			})
+		}
+	}
+}
+
+func TestDownloadFileTimeoutExhausted(t *testing.T) {
+	adapter := NewAdapter("https://www.yunzhijia.com/send", "", "app-id", "app-secret", 10, "yunzhijia.com")
+	adapter.accessToken = "token-1"
+	adapter.accessTokenExpiresAt = time.Now().Add(time.Hour)
+	attempts := 0
+	adapter.httpClient.Transport = roundTripFunc(func(_ *http.Request) (*http.Response, error) {
+		attempts++
+		return nil, context.DeadlineExceeded
+	})
+
+	_, _, err := adapter.DownloadFile(context.Background(), &im.IncomingMessage{FileKey: "file-1"})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("DownloadFile() error = %v, want deadline exceeded", err)
+	}
+	if attempts != attachmentDownloadAttempts {
+		t.Fatalf("attempts = %d, want %d", attempts, attachmentDownloadAttempts)
+	}
+}
+
+func TestDownloadFileParentContextStopsRetry(t *testing.T) {
+	for _, deadline := range []bool{false, true} {
+		name := "canceled"
+		if deadline {
+			name = "deadline"
+		}
+		t.Run(name, func(t *testing.T) {
+			adapter := NewAdapter("https://www.yunzhijia.com/send", "", "app-id", "app-secret", 10, "yunzhijia.com")
+			adapter.accessToken = "token-1"
+			adapter.accessTokenExpiresAt = time.Now().Add(time.Hour)
+			attempts := 0
+
+			var ctx context.Context
+			var cancel context.CancelFunc
+			if deadline {
+				ctx, cancel = context.WithTimeout(context.Background(), 50*time.Millisecond)
+			} else {
+				ctx, cancel = context.WithCancel(context.Background())
+			}
+			defer cancel()
+			adapter.httpClient.Transport = roundTripFunc(func(_ *http.Request) (*http.Response, error) {
+				attempts++
+				if !deadline {
+					cancel()
+				}
+				return nil, context.DeadlineExceeded
+			})
+
+			_, _, err := adapter.DownloadFile(ctx, &im.IncomingMessage{FileKey: "file-1"})
+			if deadline {
+				if !errors.Is(err, context.DeadlineExceeded) {
+					t.Fatalf("DownloadFile() error = %v, want deadline exceeded", err)
+				}
+			} else if !errors.Is(err, context.Canceled) {
+				t.Fatalf("DownloadFile() error = %v, want canceled", err)
+			}
+			if attempts != 1 {
+				t.Fatalf("attempts = %d, want 1", attempts)
+			}
+		})
 	}
 }
 
@@ -390,7 +521,9 @@ func TestDownloadFileFollowsSingleRedirect(t *testing.T) {
 	}()
 
 	adapter := NewAdapter("https://www.yunzhijia.com/send", "", "app-id", "app-secret", 10, "yunzhijia.com")
-	adapter.httpClient = noRedirectClient(server)
+	client := noRedirectClient(server)
+	client.Timeout = adapter.httpClient.Timeout
+	adapter.httpClient = client
 	reader, _, err := adapter.DownloadFile(context.Background(), &im.IncomingMessage{FileKey: "file-1", FileName: "message.png"})
 	if err != nil {
 		t.Fatalf("DownloadFile() error = %v", err)
@@ -449,7 +582,9 @@ func TestDownloadFileRejectsRedirectOffAllowedHost(t *testing.T) {
 	}()
 
 	adapter := NewAdapter("https://www.yunzhijia.com/send", "", "app-id", "app-secret", 10, "yunzhijia.com")
-	adapter.httpClient = noRedirectClient(server)
+	client := noRedirectClient(server)
+	client.Timeout = adapter.httpClient.Timeout
+	adapter.httpClient = client
 	_, _, err := adapter.DownloadFile(context.Background(), &im.IncomingMessage{FileKey: "file-1"})
 	if err == nil || !strings.Contains(err.Error(), "redirect rejected") {
 		t.Fatalf("DownloadFile() error = %v, want redirect rejected", err)

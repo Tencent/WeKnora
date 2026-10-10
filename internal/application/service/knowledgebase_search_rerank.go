@@ -136,7 +136,8 @@ func (s *knowledgeBaseService) HybridSearchWithRerank(ctx context.Context,
 	}
 	diag.CandidateCount = len(candidates)
 
-	final := s.rerankCandidates(modelCtx, modelID, params.QueryText, candidates, threshold, topK, diag)
+	final := s.rerankCandidates(modelCtx, modelID, params.QueryText, candidates, threshold, topK,
+		reranking.ImageKeepScoreFor(params.VectorThreshold), diag)
 	diag.ResultCount = len(final)
 	logger.Infof(ctx, "Hybrid search rerank: kb=%s model=%s(%s) outcome=%s candidates=%d results=%d",
 		secutils.SanitizeForLog(id), modelID, modelSource, diag.Outcome, len(candidates), len(final))
@@ -161,6 +162,7 @@ func (s *knowledgeBaseService) rerankCandidates(
 	candidates []*types.SearchResult,
 	threshold float64,
 	topK int,
+	imageKeepScore float64,
 	diag *types.RerankDiagnostics,
 ) []*types.SearchResult {
 	retrievalOrder := candidates[:min(len(candidates), topK)]
@@ -184,6 +186,8 @@ func (s *knowledgeBaseService) rerankCandidates(
 		Threshold:        threshold,
 		TopK:             topK,
 		FallbackMinScore: reranking.DefaultFallbackMinScore,
+		LoadImage:        s.ReadChunkImage,
+		ImageKeepScore:   imageKeepScore,
 	})
 	modelSource := diag.ModelSource
 	*diag = res.Diagnostics

@@ -227,6 +227,19 @@ const yuqueTOCOnly = computed({
   },
 })
 
+// DingTalk ingestion of uploaded Office/PDF files. Like the Yuque switches the
+// key lives in the raw settings bag, and a data source created before this
+// control existed carries no key at all — the getter therefore reports the
+// connector default (off) instead of rendering the checkbox blank, and nothing
+// is written back until the user toggles it, so merely opening an existing
+// source never changes what it syncs.
+const dingtalkIncludeUploadedFiles = computed({
+  get: () => form.value.config.settings?.include_uploaded_files === true,
+  set: (on: boolean) => {
+    form.value.config.settings = { ...form.value.config.settings, include_uploaded_files: on }
+  },
+})
+
 // Step 2: Resources
 const resources = ref<Resource[]>([])
 const loadingResources = ref(false)
@@ -1989,6 +2002,17 @@ const drawerConfirmText = computed(() => {
         <div class="form-item form-item--flat">
           <t-checkbox v-model="form.sync_deletions">{{ t('datasource.syncDeletions') }}</t-checkbox>
         </div>
+      </section>
+
+      <!-- DingTalk only: which extra node types the connector may ingest. -->
+      <section v-if="form.type === 'dingtalk'" class="setting-drawer__section">
+        <h4 class="setting-drawer__section-title">{{ t('datasource.dingtalkIngestLabel') }}</h4>
+        <div class="form-item form-item--flat">
+          <t-checkbox v-model="dingtalkIncludeUploadedFiles">
+            {{ t('datasource.dingtalkIncludeUploadedFiles') }}
+          </t-checkbox>
+        </div>
+        <p class="form-desc">{{ t('datasource.dingtalkIncludeUploadedFilesHint') }}</p>
       </section>
 
       <!-- Yuque only: how synced documents are laid out, and what may be admitted. -->

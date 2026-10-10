@@ -109,7 +109,7 @@ func TestRerankCandidates_reranksAndKeepsModelSource(t *testing.T) {
 	s := &knowledgeBaseService{modelService: models}
 	diag := &types.RerankDiagnostics{ModelSource: types.RerankModelSourceRequest}
 
-	got := s.rerankCandidates(context.Background(), "rr-1", "q", rerankTestCandidates(), 0.3, 2, diag)
+	got := s.rerankCandidates(context.Background(), "rr-1", "q", rerankTestCandidates(), 0.3, 2, 0, diag)
 
 	require.Len(t, got, 2)
 	assert.Equal(t, "c2", got[0].ID)
@@ -147,7 +147,7 @@ func TestRerankCandidates_degradesToRetrievalOrder(t *testing.T) {
 			s := &knowledgeBaseService{modelService: models}
 			diag := &types.RerankDiagnostics{}
 
-			got := s.rerankCandidates(context.Background(), tt.modelID, "q", rerankTestCandidates(), 0.3, 2, diag)
+			got := s.rerankCandidates(context.Background(), tt.modelID, "q", rerankTestCandidates(), 0.3, 2, 0, diag)
 
 			require.Len(t, got, 2)
 			assert.Equal(t, "c1", got[0].ID)

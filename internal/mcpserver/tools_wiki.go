@@ -29,7 +29,7 @@ func wikiSearchTool() mcp.Tool {
 		mcp.WithArray("knowledge_base_ids", mcp.WithStringItems(),
 			mcp.Description("Optional knowledge base ids or names to restrict the search")),
 		mcp.WithNumber("limit", mcp.Description("Maximum pages to return, default 10, max 50")),
-		mcp.WithReadOnlyHintAnnotation(true),
+		readOnlyEndpointAnnotations(),
 	)
 }
 
@@ -40,7 +40,7 @@ func wikiReadPageTool() mcp.Tool {
 			"concept/rag")),
 		mcp.WithString("knowledge_base_id", mcp.Description("Knowledge base id or name, required only when the same "+
 			"slug exists in several wikis")),
-		mcp.WithReadOnlyHintAnnotation(true),
+		readOnlyEndpointAnnotations(),
 	)
 }
 
@@ -50,7 +50,7 @@ func wikiIndexTool() mcp.Tool {
 			"grouped by type (summary, entity, concept, ...)."),
 		mcp.WithString("knowledge_base_id", mcp.Required(), mcp.Description("Knowledge base id or exact name")),
 		mcp.WithNumber("limit", mcp.Description("Maximum entries per page type, default 50, max 200")),
-		mcp.WithReadOnlyHintAnnotation(true),
+		readOnlyEndpointAnnotations(),
 	)
 }
 
