@@ -271,6 +271,7 @@ services:
       - OLLAMA_OPTIONAL=${OLLAMA_OPTIONAL:-true}
       # 批量 embedding 大小
       - BATCH_EMBED_SIZE=${BATCH_EMBED_SIZE:-}
+      - WEKNORA_EMBEDDING_TPM=${WEKNORA_EMBEDDING_TPM:-}
       # VLM 单次 HTTP 请求超时（秒，默认 180）
       - VLM_HTTP_TIMEOUT_SECONDS=${VLM_HTTP_TIMEOUT_SECONDS:-}
       # LLM 流原始转储（排查上下文问题；1 启用，默认目录 ~/.weknora/investigate/llm-stream）
