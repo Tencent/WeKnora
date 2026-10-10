@@ -2,14 +2,21 @@ package retriever
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"math/rand/v2"
+	"net"
+	"net/http"
+	"os"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/models/api"
 	"github.com/Tencent/WeKnora/internal/models/embedding"
 	"github.com/Tencent/WeKnora/internal/models/utils"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -24,12 +31,34 @@ import (
 // kicks in for genuinely pathological inputs.
 const safetyMaxChars = 20000
 
-// embedRetryAttempts and embedRetryBaseDelay control the exponential backoff
-// applied to BatchEmbedWithPool calls.
+// Retry only a failed sub-batch, allowing provider rate-limit windows to reset.
 const (
-	embedRetryAttempts  = 5
-	embedRetryBaseDelay = 200 * time.Millisecond
+	embedRetryAttempts  = 6
+	embedRetryBaseDelay = 5 * time.Second
+	embedRetryMaxDelay  = time.Minute
 )
+
+// envInt reads an integer from the environment, returning defaultVal when the
+// variable is unset, empty, or not a valid positive integer.
+func envInt(key string, defaultVal int) int {
+	v := os.Getenv(key)
+	if v == "" {
+		return defaultVal
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n <= 0 {
+		return defaultVal
+	}
+	return n
+}
+
+func embeddingDelay(key string, fallback time.Duration) time.Duration {
+	ms := envInt(key, int(fallback/time.Millisecond))
+	if int64(ms) > int64((1<<63-1)/time.Millisecond) {
+		return fallback
+	}
+	return time.Duration(ms) * time.Millisecond
+}
 
 var embeddingImagePayloadPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?is)<img\b[^>]*\bsrc=["']\s*data:image/[a-z0-9.+-]+;base64,[^"']+["'][^>]*>`),
@@ -97,7 +126,7 @@ func (v *KeywordsVectorHybridRetrieveEngineService) BatchIndex(ctx context.Conte
 		for _, indexInfo := range indexInfoList {
 			contentList = append(contentList, sanitizeForEmbedding(ctx, indexInfo.Content))
 		}
-		embeddings, err := batchEmbedWithBackoff(ctx, embedder, contentList)
+		embeddings, err := batchEmbedSequentially(ctx, embedder, contentList)
 		if err != nil {
 			return err
 		}
@@ -126,31 +155,107 @@ func (v *KeywordsVectorHybridRetrieveEngineService) BatchIndex(ctx context.Conte
 	return v.boundedConcurrentBatchSaveNoEmbedding(ctx, chunks, maxConcurrency)
 }
 
-// batchEmbedWithBackoff calls BatchEmbedWithPool with exponential backoff on
-// transient failures (200 / 400 / 800 / 1600 / 3200 ms). It returns the last
-// embedding result on success or the last error if every attempt failed.
-func batchEmbedWithBackoff(ctx context.Context, embedder embedding.Embedder, contentList []string) ([][]float32, error) {
-	delay := embedRetryBaseDelay
-	var (
-		embeddings [][]float32
-		err        error
-	)
-	for attempt := 0; attempt < embedRetryAttempts; attempt++ {
-		embeddings, err = embedder.BatchEmbedWithPool(ctx, embedder, contentList)
+// batchEmbedWithBackoff retries transient failures for this sub-batch only.
+// Permanent provider rejections are returned immediately. Retry-After is a
+// lower bound on the wait; otherwise use capped exponential backoff with jitter.
+func batchEmbedWithBackoff(
+	ctx context.Context, embedder embedding.Embedder, contentList []string,
+) ([][]float32, error) {
+	attempts := envInt("EMBED_RETRY_ATTEMPTS", embedRetryAttempts)
+	delay := embeddingDelay("EMBED_RETRY_BASE_DELAY_MS", embedRetryBaseDelay)
+	maxDelay := embeddingDelay("EMBED_RETRY_MAX_DELAY_MS", embedRetryMaxDelay)
+	delay = min(delay, maxDelay)
+	var lastErr error
+	for attempt := 0; attempt < attempts; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		embeddings, err := embedder.BatchEmbedWithPool(ctx, embedder, contentList)
 		if err == nil {
+			if len(embeddings) != len(contentList) {
+				return nil, fmt.Errorf("embedding model returned %d embeddings for %d inputs",
+					len(embeddings), len(contentList))
+			}
 			return embeddings, nil
 		}
-		logger.Errorf(ctx, "BatchEmbedWithPool attempt %d/%d failed: %v", attempt+1, embedRetryAttempts, err)
-		if attempt+1 < embedRetryAttempts {
-			select {
-			case <-time.After(delay):
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			}
-			delay *= 2
+		lastErr = err
+		if !retryableEmbeddingError(err) || attempt+1 == attempts {
+			return nil, err
 		}
+		jitter := time.Duration(rand.Int64N(int64(delay/4) + 1))
+		wait := delay + min(jitter, maxDelay-delay)
+		var httpErr *api.HTTPError
+		if errors.As(err, &httpErr) {
+			wait = max(wait, httpErr.RetryAfter())
+		}
+		logger.Warnf(ctx, "Embedding batch attempt %d/%d failed; retrying in %v: %v", attempt+1, attempts, wait, err)
+		if err := waitForEmbedding(ctx, wait); err != nil {
+			return nil, err
+		}
+		// Avoid overflow when doubling a configured delay.
+		delay += min(delay, maxDelay-delay)
 	}
-	return embeddings, err
+	return nil, lastErr
+}
+
+func retryableEmbeddingError(err error) bool {
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return false
+	}
+	var httpErr *api.HTTPError
+	if errors.As(err, &httpErr) {
+		return httpErr.StatusCode == http.StatusTooManyRequests ||
+			(httpErr.StatusCode >= 500 && httpErr.StatusCode < 600)
+	}
+	var transportErr *api.TransportError
+	var netErr net.Error
+	return errors.As(err, &transportErr) || errors.As(err, &netErr)
+}
+
+func waitForEmbedding(ctx context.Context, delay time.Duration) error {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return ctx.Err()
+	}
+}
+
+// Embed sequential sub-batches, retaining successful results during retries.
+// Batch size defaults to the pooler's default of 5; provider-specific ceilings
+// remain enforced by the protocol client. Pacing is per BatchIndex invocation.
+func batchEmbedSequentially(
+	ctx context.Context, embedder embedding.Embedder, contentList []string,
+) ([][]float32, error) {
+	// Precomputed image vectors belong to the full row list and never call a
+	// provider. Splitting their positional adapter would lose that alignment.
+	if precomputed, ok := embedder.(*precomputedEmbedder); ok {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		return precomputed.take(len(contentList))
+	}
+	batchSize := envInt("BATCH_EMBED_SIZE", 5)
+	interval := embeddingDelay("EMBED_BATCH_INTERVAL_MS", 0)
+
+	results := make([][]float32, len(contentList))
+	batches := utils.ChunkSlice(contentList, batchSize)
+	for i, batch := range batches {
+		if i > 0 && interval > 0 {
+			if err := waitForEmbedding(ctx, interval); err != nil {
+				return nil, err
+			}
+		}
+		vecs, err := batchEmbedWithBackoff(ctx, embedder, batch)
+		if err != nil {
+			return nil, fmt.Errorf("embedding batch %d/%d: %w", i+1, len(batches), err)
+		}
+		offset := i * batchSize
+		copy(results[offset:], vecs)
+	}
+	return results, nil
 }
 
 // sanitizeForEmbedding caps content length at safetyMaxChars characters so
