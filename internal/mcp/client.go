@@ -571,27 +571,52 @@ func (c *mcpGoClient) ListResources(ctx context.Context) ([]*types.MCPResource, 
 		return nil, ErrNotConnected
 	}
 
-	req := mcp.ListResourcesRequest{}
-	result, err := oauthCall(ctx, c, func() (*mcp.ListResourcesResult, error) {
-		return c.client.ListResources(ctx, req)
+	resources, err := oauthCall(ctx, c, func() ([]*types.MCPResource, error) {
+		return c.listResourcePages(ctx)
 	})
 	if err != nil {
 		c.checkErrorAndDisconnectIfNeeded(err)
 		return nil, fmt.Errorf("failed to list resources: %w", err)
 	}
 
-	// Convert to our types
-	resources := make([]*types.MCPResource, len(result.Resources))
-	for i, resource := range result.Resources {
-		resources[i] = &types.MCPResource{
-			URI:         resource.URI,
-			Name:        resource.Name,
-			Description: resource.Description,
-			MimeType:    resource.MIMEType,
-		}
-	}
-
 	return resources, nil
+}
+
+// Like tools/list, resources/list must not keep fetching a looping directory.
+// The SDK's all-pages helper checks cancellation but does not bound page count
+// or reject repeated cursors, so use its single-page operation here.
+const maxResourceListPages = 100
+
+func (c *mcpGoClient) listResourcePages(ctx context.Context) ([]*types.MCPResource, error) {
+	resources := make([]*types.MCPResource, 0)
+	req := mcp.ListResourcesRequest{}
+	seen := make(map[mcp.Cursor]bool)
+	for pages := 0; ; pages++ {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		if pages >= maxResourceListPages {
+			return nil, fmt.Errorf("resources/list exceeded %d pages", maxResourceListPages)
+		}
+		result, err := c.client.ListResourcesByPage(ctx, req)
+		if err != nil {
+			return nil, err
+		}
+		for _, resource := range result.Resources {
+			resources = append(resources, &types.MCPResource{
+				URI: resource.URI, Name: resource.Name,
+				Description: resource.Description, MimeType: resource.MIMEType,
+			})
+		}
+		if result.NextCursor == "" {
+			return resources, nil
+		}
+		if seen[result.NextCursor] {
+			return nil, fmt.Errorf("resources/list returned a repeated cursor")
+		}
+		seen[result.NextCursor] = true
+		req.Params.Cursor = result.NextCursor
+	}
 }
 
 // CallTool calls a tool on the MCP service
