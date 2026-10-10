@@ -337,6 +337,12 @@ func (m *managerVLM) handleFailure(rt *modelRuntime, innerErr error) {
 		// is what turns "this one request died" into "the whole endpoint is
 		// declared down for every other caller".
 		rt.cbRecordFailure()
+	case KindCancelled:
+		// The caller walked away; the endpoint said nothing. There is nothing
+		// to learn about provider health here: no shedding, no cooldown, and no
+		// circuit-breaker accounting (otherwise repeated user cancellations
+		// could open the shared breaker against a healthy endpoint). Explicit
+		// case so a future default branch cannot start punishing cancellations.
 	}
 }
 
@@ -383,9 +389,10 @@ func (m *managerVLM) retryInPlace(
 // hard-down (dead endpoint) is not either: a refused connection will not start
 // answering if we simply try again, and once the circuit breaker trips it
 // already fails the other requests fast, so an in-place retry here would just
-// add latency to the one request that arrived before the trip.
+// add latency to the one request that arrived before the trip. A caller
+// cancellation is not either — its context is already gone.
 func isRetryable(kind ErrorKind) bool {
-	return kind != KindPermanent && kind != KindHardDown
+	return kind != KindPermanent && kind != KindHardDown && kind != KindCancelled
 }
 
 // retryWait returns how long to wait before the next in-place retry, honouring

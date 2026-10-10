@@ -210,8 +210,20 @@ func (rt *modelRuntime) loop() {
 		rt.refillRPM()
 		limit := int(rt.effectiveLimit.Load())
 		rpmLimit := int(rt.effectiveRPM.Load())
+		// When the token bucket is dry the queue can only progress once the
+		// shortfall has refilled. Tokens accrue linearly at rpmLimit per
+		// minute, so the wait for the next full token is proportional to how
+		// much is missing. Arming a wakeup for that moment is what keeps a
+		// LOW-only queue — no fail-open deadline of its own, no incoming
+		// admission/release/cancel event — from sleeping through the refill
+		// until its requests die on their own context deadlines.
+		var rpmWake time.Duration
+		hasRpmWake := false
 		for rt.inFlight < limit && (len(rt.highQ) > 0 || len(rt.lowQ) > 0) {
 			if rpmLimit > 0 && rt.rpmTokens < 1 {
+				need := 1 - rt.rpmTokens
+				rpmWake = time.Duration(need * 60.0 / float64(rpmLimit) * float64(time.Second))
+				hasRpmWake = true
 				break
 			}
 			var w *waiter
@@ -226,9 +238,16 @@ func (rt *modelRuntime) loop() {
 			rt.admitWaiter(w, false)
 		}
 
-		// Arm a timer for the earliest HIGH fail-open deadline.
+		// Arm a timer for whichever wake-up comes first: the earliest HIGH
+		// fail-open deadline, or the next RPM token. On an RPM wake the
+		// failOpenEarliest sweep below finds no expired HIGH waiter and is a
+		// no-op; the real work happens when the loop restarts from the top
+		// and refills the bucket.
 		var nextWait time.Duration
-		hasTimeout := false
+		hasTimeout := hasRpmWake
+		if hasRpmWake {
+			nextWait = rpmWake
+		}
 		now := time.Now()
 		for _, w := range rt.highQ {
 			if w.failOpenWait > 0 {

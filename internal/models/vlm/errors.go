@@ -79,6 +79,10 @@ const (
 	// answer with), a hard-down endpoint cannot serve ANY request, so it is
 	// permanent for the retry window and trips the per-model circuit breaker.
 	KindHardDown
+	// KindCancelled is the caller walking away (context.Canceled). The endpoint
+	// said nothing, so it carries no signal about provider health at all: no
+	// retry, no load shedding, no circuit-breaker accounting.
+	KindCancelled
 )
 
 // ErrServerDown is returned by the per-model circuit breaker when the endpoint
@@ -107,6 +111,8 @@ func (k ErrorKind) String() string {
 		return "permanent"
 	case KindHardDown:
 		return "hard_down"
+	case KindCancelled:
+		return "cancelled"
 	default:
 		return "unknown"
 	}
@@ -124,6 +130,22 @@ type PhaseInfo struct {
 // the original error is passed through unchanged (see wrapVerdict, which only
 // annotates it with a typed sentinel for the caller's retry policy).
 func classifyError(err error) (ErrorKind, time.Duration, bool) {
+	// Caller-side lifecycle errors must be classified BEFORE the transport
+	// branch below: the HTTP client wraps a cancelled or timed-out request's
+	// context error in api.TransportError{Op: "send request"}, so a purely
+	// phase-based lookup would count every user cancellation — and every
+	// vlmHTTPTimeout deadline — as endpoint downtime, letting repeated
+	// caller-side aborts trip the shared breaker against a healthy endpoint.
+	// A dial timeout (net's own "i/o timeout", os.ErrDeadlineExceeded) is NOT
+	// context.DeadlineExceeded and still falls through to the hard-down
+	// classification, so black-holed endpoints keep tripping the breaker.
+	if errors.Is(err, context.Canceled) {
+		return KindCancelled, 0, false
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return KindTimeout, 0, false
+	}
+
 	var httpErr *api.HTTPError
 	if errors.As(err, &httpErr) {
 		switch {

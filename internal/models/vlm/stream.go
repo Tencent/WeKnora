@@ -89,25 +89,36 @@ func (v *RemoteAPIVLM) PredictStream(
 				logger.Infof(ctx, "[VLM] stream ended, len=%d, err=%s", totalLen, resp.Content)
 				return
 			}
-			totalLen += len(resp.Content)
-			out <- StreamChunk{
-				Text:  resp.Content,
-				Done:  resp.Done,
-				Usage: resp.Usage,
-				Err:   nil,
+			if resp.ResponseType == types.ResponseTypeThinking {
+				// Reasoning content is not the answer. The assembler emits
+				// thinking chunks while reasoning and then closes that phase
+				// with a {ResponseTypeThinking, Done: true} marker; treating
+				// that marker as a terminal answer event would return the
+				// reasoning text and discard the answer that follows it. Drop
+				// thinking entirely: the caller's accumulated answer stays
+				// clean, and first-token / TTFT observation anchors to the
+				// first ANSWER token instead of reasoning output.
+				continue
 			}
+			// Everything else (answer chunks, and untyped events from vendors
+			// that leave ResponseType empty) belongs to the answer.
 			if resp.Done {
+				// The terminal event may carry a finish reason. An incomplete
+				// one (the stream was cut by a proxy) must surface as an
+				// error — and it must be the ONLY chunk emitted for that
+				// termination, because the consumer treats a Done chunk as
+				// success and would never read past it to see the error.
+				if resp.FinishReason == types.FinishReasonIncomplete {
+					out <- StreamChunk{Err: fmt.Errorf("%s", types.StreamEndedEarlyError)}
+					logger.Infof(ctx, "[VLM] stream ended, len=%d, err=%s", totalLen, types.StreamEndedEarlyError)
+					return
+				}
+				out <- StreamChunk{Done: true, Usage: resp.Usage}
 				logger.Infof(ctx, "[VLM] response received, len=%d", totalLen)
 				return
 			}
-			if resp.FinishReason == types.FinishReasonIncomplete {
-				// Provider cut the stream without a finish reason: the
-				// accumulated text is partial; report it as a transport error
-				// so the caller retries rather than recording a half answer.
-				out <- StreamChunk{Err: fmt.Errorf("%s", types.StreamEndedEarlyError)}
-				logger.Infof(ctx, "[VLM] stream ended, len=%d, err=%s", totalLen, types.StreamEndedEarlyError)
-				return
-			}
+			totalLen += len(resp.Content)
+			out <- StreamChunk{Text: resp.Content, Usage: resp.Usage}
 		}
 		// Channel closed with no terminal chunk: treat as incomplete.
 		out <- StreamChunk{Err: fmt.Errorf("%s", types.StreamEndedEarlyError)}

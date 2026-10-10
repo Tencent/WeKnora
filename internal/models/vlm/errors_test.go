@@ -77,14 +77,19 @@ func TestClassifyErrorHTTPStatus(t *testing.T) {
 }
 
 func TestClassifyErrorContextTimeout(t *testing.T) {
-	for _, err := range []error{context.DeadlineExceeded, context.Canceled} {
-		if kind, _, _ := classifyError(err); kind != KindTimeout {
-			t.Errorf("err=%v -> kind=%v, want KindTimeout", err, kind)
-		}
+	// A deadline is our own request timeout: slow-endpoint signal, sheds load.
+	if kind, _, _ := classifyError(context.DeadlineExceeded); kind != KindTimeout {
+		t.Errorf("err=%v -> kind=%v, want KindTimeout", context.DeadlineExceeded, kind)
 	}
 	wrapped := fmt.Errorf("wrapped: %w", context.DeadlineExceeded)
 	if kind, _, _ := classifyError(wrapped); kind != KindTimeout {
 		t.Errorf("wrapped deadline -> kind=%v, want KindTimeout", kind)
+	}
+	// A cancellation is the caller walking away: no endpoint signal at all, so
+	// it gets its own kind and must never be lumped in with timeouts (which
+	// shed load) or transport outages (which trip the breaker).
+	if kind, _, _ := classifyError(context.Canceled); kind != KindCancelled {
+		t.Errorf("err=%v -> kind=%v, want KindCancelled", context.Canceled, kind)
 	}
 }
 
