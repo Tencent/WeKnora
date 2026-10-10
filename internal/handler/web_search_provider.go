@@ -355,13 +355,19 @@ func (h *WebSearchProviderHandler) TestProviderByID(c *gin.Context) {
 		return
 	}
 
-	if err := h.doTestSearch(ctx, string(provider.Provider), provider.Parameters); err != nil {
+	results, err := h.doTestSearch(ctx, string(provider.Provider), provider.Parameters)
+	if err != nil {
 		logger.Warnf(ctx, "Web search provider test failed: %v", err)
 		c.JSON(http.StatusOK, gin.H{"success": false, "error": err.Error()})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"success": true})
+	resp := gin.H{"success": true}
+	if len(results) > 0 {
+		resp["result_title"] = results[0].Title
+		resp["result_url"] = results[0].URL
+	}
+	c.JSON(http.StatusOK, resp)
 }
 
 // TestProviderRequest defines the body for testing raw credentials
@@ -393,13 +399,19 @@ func (h *WebSearchProviderHandler) TestProviderRaw(c *gin.Context) {
 		return
 	}
 
-	if err := h.doTestSearch(ctx, req.Provider, req.Parameters); err != nil {
+	rawResults, err := h.doTestSearch(ctx, req.Provider, req.Parameters)
+	if err != nil {
 		logger.Warnf(ctx, "Web search provider test failed: %v", err)
 		c.JSON(http.StatusOK, gin.H{"success": false, "error": err.Error()})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"success": true})
+	resp := gin.H{"success": true}
+	if len(rawResults) > 0 {
+		resp["result_title"] = rawResults[0].Title
+		resp["result_url"] = rawResults[0].URL
+	}
+	c.JSON(http.StatusOK, resp)
 }
 
 // doTestSearch creates a temporary provider and runs a simple test query.
@@ -409,23 +421,28 @@ func (h *WebSearchProviderHandler) TestProviderRaw(c *gin.Context) {
 // confusing error). Reject it up front with an actionable message so the
 // user knows they should type a real key or test against the saved config
 // via /test instead.
-func (h *WebSearchProviderHandler) doTestSearch(ctx context.Context, providerType string, params types.WebSearchProviderParameters) error {
+// testSearchQuery is the canned query used by the connectivity test. A
+// Chinese word hits Chinese-oriented providers (Bocha/Doubao/Baidu);
+// "test" returned empty on them and read as a failure (WSL2 P4).
+const testSearchQuery = "人工智能"
+
+func (h *WebSearchProviderHandler) doTestSearch(ctx context.Context, providerType string, params types.WebSearchProviderParameters) ([]*types.WebSearchResult, error) {
 	logger.Infof(ctx, "[WebSearch][Test] testing provider type=%s", providerType)
 	searchProvider, err := h.registry.CreateProvider(providerType, params)
 	if err != nil {
 		logger.Warnf(ctx, "[WebSearch][Test] failed to create provider: %v", err)
-		return fmt.Errorf("failed to create provider: %w", err)
+		return nil, fmt.Errorf("failed to create provider: %w", err)
 	}
-	results, err := searchProvider.Search(ctx, "test", 1, false)
+	results, err := searchProvider.Search(ctx, testSearchQuery, 2, false)
 	if err != nil {
 		logger.Warnf(ctx, "[WebSearch][Test] search failed: %v", err)
-		return err
+		return nil, err
 	}
 	if len(results) == 0 {
 		err := infra_web_search.EmptyTestResultsError(providerType, searchProvider)
 		logger.Warnf(ctx, "[WebSearch][Test] %v", err)
-		return err
+		return nil, err
 	}
 	logger.Infof(ctx, "[WebSearch][Test] succeeded: type=%s, results=%d", providerType, len(results))
-	return nil
+	return results, nil
 }
