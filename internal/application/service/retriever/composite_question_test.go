@@ -52,6 +52,21 @@ func TestSetGeneratedQuestionEnabledRejectsMixedEngineCoverage(t *testing.T) {
 	require.Equal(t, 2, keyword.calls, "a completed engine stays safe to retry")
 }
 
+func TestSetGeneratedQuestionEnabledKeepsAHardEngineError(t *testing.T) {
+	keyword := &questionToggleEngine{engineType: types.PostgresRetrieverEngineType, rows: 2}
+	vector := &questionToggleEngine{
+		engineType: types.QdrantRetrieverEngineType,
+		err:        context.DeadlineExceeded,
+	}
+	composite := &CompositeRetrieveEngine{engineInfos: []*engineInfo{
+		{retrieveEngine: keyword},
+		{retrieveEngine: vector},
+	}}
+	_, err := composite.SetGeneratedQuestionEnabled(context.Background(), "kb-off", false)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	require.NotErrorIs(t, err, ErrGeneratedQuestionIndexPartial)
+}
+
 func TestSetGeneratedQuestionEnabledUnsupportedWhenNoEngineCanUpdate(t *testing.T) {
 	composite := &CompositeRetrieveEngine{engineInfos: []*engineInfo{
 		{retrieveEngine: &cannedEngine{engineType: types.QdrantRetrieverEngineType}},

@@ -14,6 +14,28 @@ type generatedQuestionMetadataStore interface {
 	SetGeneratedQuestionsInactive(ctx context.Context, kbID string, inactive bool) (int64, error)
 }
 
+// questionIndexStatusOnly reports whether err is only the partial or
+// unsupported alignment status, with no separate engine failure inside it.
+func questionIndexStatusOnly(err error) bool {
+	if err == nil {
+		return true
+	}
+	if joined, ok := err.(interface{ Unwrap() []error }); ok {
+		parts := joined.Unwrap()
+		if len(parts) == 0 {
+			return false
+		}
+		for _, part := range parts {
+			if !questionIndexStatusOnly(part) {
+				return false
+			}
+		}
+		return true
+	}
+	return errors.Is(err, retriever.ErrGeneratedQuestionIndexPartial) ||
+		errors.Is(err, retriever.ErrGeneratedQuestionIndexUnsupported)
+}
+
 // markSkipGeneratedQuestions sets SkipGeneratedQuestions from the live switch
 // so rerank passages omit historical questions before metadata is aligned.
 // A lookup failure leaves the flag unset.
@@ -68,20 +90,21 @@ func (s *knowledgeBaseService) AlignGeneratedQuestions(
 		return out, err
 	}
 	n, err := engine.SetGeneratedQuestionEnabled(ctx, kb.ID, active)
-	if errors.Is(err, retriever.ErrGeneratedQuestionIndexPartial) {
-		out.IndexRows = n
-		logger.Warnf(ctx, "Generated-question alignment was partial for knowledge base %s", kb.ID)
-		return out, apperrors.NewBadRequestError(
-			"部分检索引擎不能按行停用或恢复预生成问题，问句向量仍会参与召回",
-		).WithDetails("generated_question_index_partial")
-	}
-	if errors.Is(err, retriever.ErrGeneratedQuestionIndexUnsupported) {
-		logger.Warnf(ctx, "Retrieve engine cannot update generated-question rows for knowledge base %s", kb.ID)
-		return out, apperrors.NewBadRequestError(
-			"当前检索引擎不能按行停用或恢复预生成问题，问句向量仍会参与召回",
-		).WithDetails("generated_question_index_unsupported")
-	}
 	if err != nil {
+		out.IndexRows = n
+		out.IndexUpdated = false
+		if questionIndexStatusOnly(err) && errors.Is(err, retriever.ErrGeneratedQuestionIndexPartial) {
+			logger.Warnf(ctx, "Generated-question alignment was partial for knowledge base %s: %v", kb.ID, err)
+			return out, apperrors.NewBadRequestError(
+				"部分检索引擎不能按行停用或恢复预生成问题，问句向量仍会参与召回",
+			).WithDetails("generated_question_index_partial")
+		}
+		if questionIndexStatusOnly(err) && errors.Is(err, retriever.ErrGeneratedQuestionIndexUnsupported) {
+			logger.Warnf(ctx, "Retrieve engine cannot update generated-question rows for knowledge base %s", kb.ID)
+			return out, apperrors.NewBadRequestError(
+				"当前检索引擎不能按行停用或恢复预生成问题，问句向量仍会参与召回",
+			).WithDetails("generated_question_index_unsupported")
+		}
 		return nil, err
 	}
 	out.IndexRows = n
