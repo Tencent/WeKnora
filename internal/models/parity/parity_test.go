@@ -73,6 +73,12 @@ var userTurn = []api.Message{{Role: "user", Content: "hi"}}
 // protocol client -> request body, then round-trips through JSON so the
 // assertions see the real wire types.
 func buildBody(t *testing.T, cfg *chat.ChatConfig, opts *api.Options, stream bool) map[string]any {
+	return buildBodyWithMessages(t, cfg, userTurn, opts, stream)
+}
+
+func buildBodyWithMessages(
+	t *testing.T, cfg *chat.ChatConfig, messages []api.Message, opts *api.Options, stream bool,
+) map[string]any {
 	t.Helper()
 	if cfg.Source == "" {
 		cfg.Source = types.ModelSourceRemote
@@ -85,13 +91,53 @@ func buildBody(t *testing.T, cfg *chat.ChatConfig, opts *api.Options, stream boo
 	require.NoError(t, err, "NewRemoteChat(%s/%s)", cfg.Provider, cfg.ModelName)
 	builder, ok := client.(bodyBuilder)
 	require.True(t, ok, "%s/%s: protocol client does not expose BuildRequestBody", cfg.Provider, cfg.ModelName)
-	body, err := builder.BuildRequestBody(userTurn, opts, stream)
+	body, err := builder.BuildRequestBody(messages, opts, stream)
 	require.NoError(t, err)
 	raw, err := json.Marshal(body)
 	require.NoError(t, err)
 	var out map[string]any
 	require.NoError(t, json.Unmarshal(raw, &out))
 	return out
+}
+
+func TestQwenToolCallArgumentCompatibility(t *testing.T) {
+	messages := []api.Message{{
+		Role: "assistant",
+		ToolCalls: []api.ToolCall{{
+			ID: "call_weather",
+			Function: api.FunctionCall{
+				Name:      "get_weather",
+				Arguments: `{"city":"Paris"}`,
+			},
+		}},
+	}}
+	arguments := func(t *testing.T, body map[string]any) any {
+		t.Helper()
+		message := body["messages"].([]any)[0].(map[string]any)
+		toolCall := message["tool_calls"].([]any)[0].(map[string]any)
+		return toolCall["function"].(map[string]any)["arguments"]
+	}
+
+	generic := buildBodyWithMessages(t, &chat.ChatConfig{
+		Provider:  providers.GenericID,
+		ModelName: "Qwen3.5-2B",
+		BaseURL:   "http://127.0.0.1:9/v1",
+		ExtraConfig: map[string]string{
+			models.ExtraQwenToolCallCompat: "true",
+		},
+	}, messages, nil, false)
+	assert.Equal(t, map[string]any{"city": "Paris"}, arguments(t, generic))
+
+	standard := buildBodyWithMessages(t, &chat.ChatConfig{
+		Provider:  "openai",
+		ModelName: "gpt-4o",
+		BaseURL:   "http://127.0.0.1:9/v1",
+		ExtraConfig: map[string]string{
+			models.ExtraQwenToolCallCompat: "true",
+		},
+	}, messages, nil, false)
+	assert.Equal(t, `{"city":"Paris"}`, arguments(t, standard),
+		"the standard OpenAI provider must keep string arguments")
 }
 
 func resolve(t *testing.T, provider, model string) *modelruntime.Resolved {

@@ -63,6 +63,28 @@ func TestMinimaxOfficialDefaultURLs(t *testing.T) {
 	}
 }
 
+func TestGenericExposesQwenToolCallCompatibility(t *testing.T) {
+	vendor, ok := modelruntime.Get(providers.GenericID)
+	if !ok {
+		t.Fatal("generic provider missing")
+	}
+	for _, field := range vendor.ExtraFields {
+		if field.Key != models.ExtraQwenToolCallCompat {
+			continue
+		}
+		if field.Type != "boolean" || field.Required {
+			t.Fatalf("Qwen compatibility field = %+v, want optional boolean", field)
+		}
+		if len(field.ModelTypes) != 2 ||
+			field.ModelTypes[0] != types.ModelTypeKnowledgeQA ||
+			field.ModelTypes[1] != types.ModelTypeVLLM {
+			t.Fatalf("Qwen compatibility field model types = %v", field.ModelTypes)
+		}
+		return
+	}
+	t.Fatal("generic provider does not expose the Qwen compatibility field")
+}
+
 func TestBuiltinDefaultURLsAcrossModelTypes(t *testing.T) {
 	for _, vendor := range modelruntime.List() {
 		for _, kind := range vendor.ModelTypes {

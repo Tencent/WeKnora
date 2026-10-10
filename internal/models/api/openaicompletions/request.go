@@ -33,7 +33,7 @@ type wireToolCall struct {
 
 type wireFunctionCall struct {
 	Name      string `json:"name"`
-	Arguments string `json:"arguments"`
+	Arguments any    `json:"arguments"`
 }
 
 // MarshalJSON appends opaque vendor fields (Gemini extra_content) next to
@@ -79,7 +79,7 @@ type wireImageURL struct {
 }
 
 // convertMessages maps neutral messages onto Chat Completions messages.
-func (c *Client) convertMessages(messages []api.Message) []wireMessage {
+func (c *Client) convertMessages(messages []api.Message) ([]wireMessage, error) {
 	s := c.cfg.Settings
 	instructionRole := "system"
 	if c.cfg.Reasoning && s.SupportsDeveloperRole {
@@ -138,10 +138,18 @@ func (c *Client) convertMessages(messages []api.Message) []wireMessage {
 		if len(msg.ToolCalls) > 0 {
 			wm.ToolCalls = make([]wireToolCall, 0, len(msg.ToolCalls))
 			for _, tc := range msg.ToolCalls {
+				arguments := any(tc.Function.Arguments)
+				if s.ToolCallArgumentsAsObject {
+					var err error
+					arguments, err = qwenToolCallArguments(tc)
+					if err != nil {
+						return nil, err
+					}
+				}
 				wtc := wireToolCall{
 					ID:       tc.ID,
 					Type:     orDefault(tc.Type, "function"),
-					Function: wireFunctionCall{Name: tc.Function.Name, Arguments: tc.Function.Arguments},
+					Function: wireFunctionCall{Name: tc.Function.Name, Arguments: arguments},
 				}
 				for _, key := range s.ToolCallExtraFields {
 					if raw, ok := tc.ProviderMetadata[key]; ok && len(raw) > 0 {
@@ -173,7 +181,34 @@ func (c *Client) convertMessages(messages []api.Message) []wireMessage {
 		}
 		out = append(out, wm)
 	}
-	return out
+	return out, nil
+}
+
+func qwenToolCallArguments(tc api.ToolCall) (map[string]any, error) {
+	raw := strings.TrimSpace(tc.Function.Arguments)
+	if raw == "" {
+		return nil, fmt.Errorf(
+			"tool call %q arguments are empty in Qwen compatibility mode", tc.ID,
+		)
+	}
+	if !json.Valid([]byte(raw)) {
+		return nil, fmt.Errorf(
+			"tool call %q arguments are invalid JSON in Qwen compatibility mode", tc.ID,
+		)
+	}
+	var decoded any
+	if err := json.Unmarshal([]byte(raw), &decoded); err != nil {
+		return nil, fmt.Errorf(
+			"tool call %q arguments are invalid JSON in Qwen compatibility mode: %w", tc.ID, err,
+		)
+	}
+	object, ok := decoded.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf(
+			"tool call %q arguments must decode to a JSON object in Qwen compatibility mode", tc.ID,
+		)
+	}
+	return object, nil
 }
 
 // contentParts flattens rich content to plain text for vendors that only
@@ -198,9 +233,13 @@ const metadataReasoningDetails = "reasoning_details"
 // the encoded JSON is alphabetical, which keeps golden tests stable.
 func (c *Client) buildBody(messages []api.Message, opts *api.Options, stream bool) (map[string]any, error) {
 	s := c.cfg.Settings
+	wireMessages, err := c.convertMessages(messages)
+	if err != nil {
+		return nil, err
+	}
 	body := map[string]any{
 		"model":    c.cfg.Endpoint.Model,
-		"messages": c.convertMessages(messages),
+		"messages": wireMessages,
 	}
 	if stream {
 		body["stream"] = true

@@ -65,6 +65,18 @@ func newGenericProvider() *Definition {
 			types.ModelTypeASR,
 		},
 		ExtraFields: []ExtraField{{
+			Key:    models.ExtraQwenToolCallCompat,
+			Label:  "Qwen tool-call argument object mode",
+			Labels: map[string]string{"zh-CN": "Qwen 工具调用参数对象模式"},
+			Type:   "boolean",
+			Placeholder: "Enable only when the Qwen backend requires argument mappings; " +
+				"strict OpenAI-compatible endpoints require strings",
+			Placeholders: map[string]string{
+				"zh-CN": "仅当 Qwen 后端要求参数为对象映射时启用；严格兼容 OpenAI 的端点要求字符串",
+			},
+			Required:   false,
+			ModelTypes: []types.ModelType{types.ModelTypeKnowledgeQA, types.ModelTypeVLLM},
+		}, {
 			Key:    models.ExtraScoreScale,
 			Label:  "Rerank score scale",
 			Labels: map[string]string{"zh-CN": "Rerank 分数标度"},

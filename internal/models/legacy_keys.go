@@ -1,7 +1,6 @@
 package models
 
-// Extra-config keys honoured by Resolve. They predate the catalog and stay
-// supported so existing model rows keep working unchanged.
+// Extra-config keys honoured by Resolve.
 const (
 	// ExtraAPI forces a protocol ("openai-responses", "anthropic-messages", ...).
 	ExtraAPI = "api"
@@ -12,6 +11,11 @@ const (
 	// ExtraThinkingControl is the legacy thinking encoding selector written
 	// by older UIs: none | enable_thinking | thinking_type | chat_template_kwargs.
 	ExtraThinkingControl = "thinking_control"
+	// ExtraQwenToolCallCompat enables object-valued arguments when replaying
+	// assistant tool calls to Qwen templates that cannot consume the OpenAI
+	// protocol's JSON string. It is opt-in on the generic provider because
+	// conforming OpenAI-compatible endpoints require the string form.
+	ExtraQwenToolCallCompat = "qwen_tool_call_compat"
 	// ExtraTruncatePromptTokens is the vLLM-only server-side truncation
 	// budget for rerank, opt-in per row. It is never sent unless the operator
 	// set it: vendors that do not implement it reject the unknown field.

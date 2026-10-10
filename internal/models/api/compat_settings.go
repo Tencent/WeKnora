@@ -110,6 +110,9 @@ type OpenAICompletionsSettings struct {
 	// ToolCallExtraFields lists tool_call keys to round-trip opaquely
 	// (Gemini-through-OpenAI "extra_content").
 	ToolCallExtraFields []string
+	// ToolCallArgumentsAsObject decodes replayed tool-call arguments into a
+	// JSON object for Qwen templates that reject the OpenAI string form.
+	ToolCallArgumentsAsObject bool `json:",omitempty"`
 	// ExtraBody is merged into every request body (vendor knobs such as
 	// enable_search, sampling defaults).
 	ExtraBody map[string]any

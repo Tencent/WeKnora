@@ -113,6 +113,20 @@ func TestFindModel_ExactAliasAndGlob(t *testing.T) {
 	assert.False(t, ok)
 }
 
+func TestResolve_QwenToolCallCompatibilityRejectsInvalidFlag(t *testing.T) {
+	registerTestVendors(t)
+	_, err := modelruntime.Resolve(modelruntime.Ref{
+		Provider: providers.GenericID,
+		Model:    "Qwen3.5-2B",
+		BaseURL:  "http://localhost:9997/v1",
+		Extra: map[string]string{
+			models.ExtraQwenToolCallCompat: "sometimes",
+		},
+	})
+	require.Error(t, err)
+	assert.ErrorContains(t, err, models.ExtraQwenToolCallCompat)
+}
+
 // A lookup only sees entries of the row's own type. A VLM row is a chat
 // model that accepts images, so it sees the chat entries.
 func TestFindModel_IsTyped(t *testing.T) {
