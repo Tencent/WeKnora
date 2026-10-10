@@ -1615,6 +1615,7 @@ func sameChannelRuntimeConfig(cached, fresh *IMChannel) bool {
 		cached.Mode == fresh.Mode &&
 		cached.OutputMode == fresh.OutputMode &&
 		cached.Locale == fresh.Locale &&
+		cached.LanguageMode == fresh.LanguageMode &&
 		cached.KnowledgeBaseID == fresh.KnowledgeBaseID &&
 		cached.SessionMode == fresh.SessionMode &&
 		equalChannelCredentials(cached.Credentials, fresh.Credentials)
@@ -1830,6 +1831,13 @@ func (s *Service) HandleMessage(ctx context.Context, msg *IncomingMessage, chann
 		} else {
 			return fmt.Errorf("get session: %w", err)
 		}
+	}
+
+	// Resolve the reply language only after the mapping is known to be live.
+	// /clear soft-deletes that mapping, so a new conversation starts without
+	// inheriting its last detected language.
+	if channel.LanguageMode == "follow_user" {
+		sessionCtx = s.withIMReplyLanguage(sessionCtx, channelSession, msg)
 	}
 
 	// Title an untitled IM session from its first text message, like web chats.
@@ -3167,20 +3175,21 @@ func (s *Service) ListChannelsByAgent(agentID string, tenantID uint64) ([]IMChan
 // tenant-scoped list endpoint; callers that need credentials must use the
 // per-agent endpoint which enforces the same tenant scope anyway.
 type ChannelWithAgent struct {
-	ID          string    `json:"id"`
-	TenantID    uint64    `json:"tenant_id"`
-	AgentID     string    `json:"agent_id"`
-	AgentName   string    `json:"agent_name"`
-	Platform    string    `json:"platform"`
-	Name        string    `json:"name"`
-	Enabled     bool      `json:"enabled"`
-	Mode        string    `json:"mode"`
-	OutputMode  string    `json:"output_mode"`
-	Locale      string    `json:"locale"`
-	SessionMode string    `json:"session_mode"`
-	BotIdentity string    `json:"bot_identity"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID           string    `json:"id"`
+	TenantID     uint64    `json:"tenant_id"`
+	AgentID      string    `json:"agent_id"`
+	AgentName    string    `json:"agent_name"`
+	Platform     string    `json:"platform"`
+	Name         string    `json:"name"`
+	Enabled      bool      `json:"enabled"`
+	Mode         string    `json:"mode"`
+	OutputMode   string    `json:"output_mode"`
+	Locale       string    `json:"locale"`
+	LanguageMode string    `json:"language_mode"`
+	SessionMode  string    `json:"session_mode"`
+	BotIdentity  string    `json:"bot_identity"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
 }
 
 // ListChannelsByTenant returns all non-deleted IM channels in the given tenant,
@@ -3194,7 +3203,7 @@ func (s *Service) ListChannelsByTenant(ctx context.Context, tenantID uint64) ([]
 	q := s.db.Table("im_channels AS c").
 		Select(`c.id, c.tenant_id, c.agent_id,
                 COALESCE(a.name, '') AS agent_name,
-                c.platform, c.name, c.enabled, c.mode, c.output_mode, c.locale,
+                c.platform, c.name, c.enabled, c.mode, c.output_mode, c.locale, c.language_mode,
                 c.session_mode, c.bot_identity, c.created_at, c.updated_at`).
 		Joins(`LEFT JOIN custom_agents AS a
                ON a.id = c.agent_id AND a.tenant_id = c.tenant_id AND a.deleted_at IS NULL`).
