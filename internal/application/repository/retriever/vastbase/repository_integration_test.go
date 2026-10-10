@@ -371,3 +371,137 @@ func TestVastbaseGraphIndexPerformance(t *testing.T) {
 		t.Fatalf("average latency %s too high — Graph_Index likely not used", avg)
 	}
 }
+
+// TestVastbaseCopyIndicesKeysetPaging pins the paging contract of CopyIndices:
+// more than one 500-row page of mapped source data must be copied exactly once
+// each, while rows that are not in the knowledge mapping (same source KB) or
+// that live in another KB are left alone. Offset-based paging without ORDER BY
+// can skip or repeat rows here, which this test would catch as a missing or
+// duplicated target row.
+func TestVastbaseCopyIndicesKeysetPaging(t *testing.T) {
+	db := itDB(t)
+	ctx := context.Background()
+
+	repoIface, err := NewVastbaseRetrieveEngineRepository(db, ConfigFromEnv())
+	if err != nil {
+		t.Fatalf("init repository: %v", err)
+	}
+	repo := repoIface.(*vastbaseRepository)
+
+	const dim = 8
+	rng := rand.New(rand.NewSource(7))
+
+	build := func(kbID, knowledgeID, prefix string, n int) ([]*types.IndexInfo, map[string][]float32) {
+		infos := make([]*types.IndexInfo, n)
+		embs := make(map[string][]float32, n)
+		for i := 0; i < n; i++ {
+			id := fmt.Sprintf("%s-%d", prefix, i)
+			v := make([]float32, dim)
+			for j := range v {
+				v[j] = rng.Float32()
+			}
+			infos[i] = &types.IndexInfo{
+				Content:         "content " + id,
+				SourceID:        id,
+				SourceType:      0,
+				ChunkID:         "chunk-" + id,
+				KnowledgeID:     knowledgeID,
+				KnowledgeBaseID: kbID,
+				IsEnabled:       true,
+			}
+			embs[id] = v
+		}
+		return infos, embs
+	}
+
+	// 600 mapped rows: two pages of the 500-row batch loop.
+	mapped, embs := build("kb-src", "know-a", "a", 600)
+	// Unrelated knowledge inside the same source KB: excluded by the
+	// knowledge_id filter.
+	unrelated, unrelatedEmbs := build("kb-src", "know-other", "other", 120)
+	// Mapped knowledge id in a different KB: excluded by the KB filter. The
+	// knowledge id is deliberately reused here (it does not happen in
+	// production, where a knowledge belongs to one KB) so that the test fails
+	// if the source knowledge-base filter is ever dropped.
+	elsewhere, elsewhereEmbs := build("kb-elsewhere", "know-a", "else", 30)
+
+	all := append(append([]*types.IndexInfo{}, mapped...), append(unrelated, elsewhere...)...)
+	for k, v := range unrelatedEmbs {
+		embs[k] = v
+	}
+	for k, v := range elsewhereEmbs {
+		embs[k] = v
+	}
+	if err := repo.BatchSave(ctx, all, map[string]any{"embedding": embs}); err != nil {
+		t.Fatalf("batch save: %v", err)
+	}
+
+	chunkMap := make(map[string]string, len(mapped))
+	for _, info := range mapped {
+		chunkMap[info.ChunkID] = "dst-" + info.ChunkID
+	}
+	if err := repo.CopyIndices(ctx, "kb-src", map[string]string{"know-a": "know-dst"},
+		chunkMap, "kb-dst", dim, ""); err != nil {
+		t.Fatalf("copy indices: %v", err)
+	}
+
+	var rows []struct {
+		ChunkID     string
+		KnowledgeID string
+		N           int
+	}
+	if err := db.Table("embeddings").
+		Select("chunk_id, knowledge_id, count(*) as n").
+		Where("knowledge_base_id = ?", "kb-dst").
+		Group("chunk_id, knowledge_id").
+		Scan(&rows).Error; err != nil {
+		t.Fatalf("query target rows: %v", err)
+	}
+
+	copied := make(map[string]int, len(rows))
+	for _, row := range rows {
+		if row.KnowledgeID != "know-dst" {
+			t.Errorf("target row %s has knowledge id %s, want know-dst", row.ChunkID, row.KnowledgeID)
+		}
+		if row.N != 1 {
+			t.Errorf("target chunk %s copied %d times, want exactly 1", row.ChunkID, row.N)
+		}
+		copied[row.ChunkID] += row.N
+	}
+	if len(copied) != len(mapped) {
+		t.Errorf("copied %d distinct chunks, want %d", len(copied), len(mapped))
+	}
+	for _, info := range mapped {
+		want := "dst-" + info.ChunkID
+		if _, ok := copied[want]; !ok {
+			t.Errorf("target chunk %s was not copied", want)
+		}
+	}
+
+	var total int64
+	db.Table("embeddings").Where("knowledge_base_id = ?", "kb-dst").Count(&total)
+	if total != int64(len(mapped)) {
+		t.Errorf("target row count = %d, want %d", total, len(mapped))
+	}
+
+	// Source data untouched: the unmapped rows must not have moved or been
+	// consumed by the copy.
+	db.Table("embeddings").
+		Where("knowledge_base_id = ? AND knowledge_id = ?", "kb-src", "know-other").Count(&total)
+	if total != int64(len(unrelated)) {
+		t.Errorf("unmapped source rows = %d, want %d", total, len(unrelated))
+	}
+	db.Table("embeddings").Where("knowledge_base_id = ?", "kb-elsewhere").Count(&total)
+	if total != int64(len(elsewhere)) {
+		t.Errorf("other-KB rows = %d, want %d", total, len(elsewhere))
+	}
+
+	// Copied content is the source content, not a re-embedding artifact.
+	var content string
+	db.Table("embeddings").
+		Where("knowledge_base_id = ? AND chunk_id = ?", "kb-dst", "dst-chunk-a-599").
+		Pluck("content", &content)
+	if content != "content a-599" {
+		t.Errorf("copied content = %q, want %q", content, "content a-599")
+	}
+}

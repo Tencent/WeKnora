@@ -574,18 +574,28 @@ func (r *vastbaseRepository) CopyIndices(ctx context.Context,
 		return nil
 	}
 
+	// Only the mapped knowledge is copied (callers clone one document at a
+	// time), so filter on it instead of paging the whole source knowledge
+	// base. Keyset pagination on id keeps pages stable; OFFSET without an
+	// ORDER BY could skip or repeat rows.
+	sourceKnowledgeIDs := make([]string, 0, len(sourceToTargetKBIDMap))
+	for sourceKnowledgeID := range sourceToTargetKBIDMap {
+		sourceKnowledgeIDs = append(sourceKnowledgeIDs, sourceKnowledgeID)
+	}
+
 	// Batch processing parameters
 	batchSize := 500 // Number of records to process per batch
-	offset := 0      // Offset for pagination
+	var lastID uint  // Keyset cursor
 	totalCopied := 0 // Total number of copied records
 
 	for {
 		// Paginated query for source data
 		var sourceVectors []*vbVector
 		if err := r.db.WithContext(ctx).
-			Where("knowledge_base_id = ?", sourceKnowledgeBaseID).
+			Where("knowledge_base_id = ? AND knowledge_id IN ? AND id > ?",
+				sourceKnowledgeBaseID, sourceKnowledgeIDs, lastID).
+			Order("id").
 			Limit(batchSize).
-			Offset(offset).
 			Find(&sourceVectors).Error; err != nil {
 			logger.GetLogger(ctx).Errorf("[Vastbase] Failed to query source index data: %v", err)
 			return err
@@ -593,7 +603,7 @@ func (r *vastbaseRepository) CopyIndices(ctx context.Context,
 
 		// If no more data, exit the loop
 		if len(sourceVectors) == 0 {
-			if offset == 0 {
+			if lastID == 0 {
 				logger.GetLogger(ctx).Warnf("[Vastbase] No source index data found")
 			}
 			break
@@ -601,8 +611,8 @@ func (r *vastbaseRepository) CopyIndices(ctx context.Context,
 
 		batchCount := len(sourceVectors)
 		logger.GetLogger(ctx).Infof(
-			"[Vastbase] Found %d source index data, batch start position: %d",
-			batchCount, offset,
+			"[Vastbase] Found %d source index data, batch start after id: %d",
+			batchCount, lastID,
 		)
 
 		// Create target vector index
@@ -679,7 +689,7 @@ func (r *vastbaseRepository) CopyIndices(ctx context.Context,
 		}
 
 		// Move to the next batch
-		offset += batchCount
+		lastID = sourceVectors[batchCount-1].ID
 
 		// If the number of returned records is less than the requested size, it means the last page has been reached
 		if batchCount < batchSize {
