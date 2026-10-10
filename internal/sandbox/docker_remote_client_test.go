@@ -1223,11 +1223,72 @@ func TestDockerExecObservesBothOutputStreamsWithoutChangingResult(t *testing.T) 
 	require.Equal(t, result.Stderr, observed["stderr"])
 }
 
-// The idle sweeper can delete a container between ensureRunning's inspect
-// gate and the exec's completion (#3942 mechanism A): the exec dies with a
-// non-zero exit and an empty stderr. The filesystem ops must reclassify
-// that collision as NotFound so CanReplaceRemoteBinding lets the rebinding
-// self-heal run instead of surfacing InvalidRequest to the user.
+// A filesystem op killed by the in-container `timeout -s KILL` wrapper (issue
+// #3910) leaves no stderr: it must classify as Timeout with the evidence in
+// the message, not as invalid_request with a dangling colon.
+func TestDockerFileOpKilledByTimeoutClassifiesAsTimeout(t *testing.T) {
+	engine := newFakeDockerEngine()
+	engine.execExit = 137
+	engine.execStderr = ""
+	// The container must survive the re-inspect: a confirmed-missing
+	// container classifies ahead of the killed exit code.
+	engine.inspect["c"] = container.InspectResponse{
+		ID:    "c",
+		State: &container.State{Status: "running"},
+	}
+	docker := newTestDockerClient(t, engine)
+
+	err := docker.MakeDir(context.Background(), testHandle("c"), "/workspace/input/94088e061da2")
+	require.Error(t, err)
+	require.True(t, IsRemoteTimeout(err), "killed op must be Timeout: %q", err.Error())
+	require.False(t, IsRemoteInvalidRequest(err), "killed op is not the caller's fault")
+	require.Contains(t, err.Error(), "killed after")
+	require.Contains(t, err.Error(), "exit=137")
+	require.Contains(t, err.Error(), "no output")
+	// The budget is evidence, not a verdict: the message must present it as
+	// a configured budget instead of asserting the wrapper fired.
+	require.Contains(t, err.Error(), "filesystem-op exec budget")
+	require.NotContains(t, err.Error(), "filesystem-op timeout)", "must not assert the cause of the kill")
+	require.NotRegexp(t, `: $`, err.Error(), "no dangling colon: %q", err.Error())
+}
+
+// A genuine tool failure keeps its stderr complaint, and a failure with no
+// stderr at least carries the exit code instead of ending in a bare colon.
+func TestDockerFileOpExitErrorsCarryEvidence(t *testing.T) {
+	denied := newFakeDockerEngine()
+	denied.execExit = 1
+	denied.execStderr = "mkdir: /workspace/input: Permission denied"
+	denied.inspect["c"] = container.InspectResponse{
+		ID:    "c",
+		State: &container.State{Status: "running"},
+	}
+	docker := newTestDockerClient(t, denied)
+
+	err := docker.MakeDir(context.Background(), testHandle("c"), "/workspace/input/x")
+	require.Error(t, err)
+	require.True(t, IsRemoteInvalidRequest(err))
+	require.Contains(t, err.Error(), "Permission denied")
+
+	silent := newFakeDockerEngine()
+	silent.execExit = 1
+	silent.execStderr = ""
+	silent.inspect["c"] = container.InspectResponse{
+		ID:    "c",
+		State: &container.State{Status: "running"},
+	}
+	docker = newTestDockerClient(t, silent)
+
+	err = docker.MakeDir(context.Background(), testHandle("c"), "/workspace/input/x")
+	require.Error(t, err)
+	require.True(t, IsRemoteInvalidRequest(err))
+	require.Contains(t, err.Error(), "(exit=1, no stderr)",
+		"silent failure must say so instead of a dangling colon: %q", err.Error())
+}
+
+// A filesystem op that raced the idle sweeper's delete (#3942 mechanism A)
+// surfaces as a non-zero exit with an empty stderr; the re-inspect confirms
+// the container is gone and reclassifies the failure as NotFound so the
+// rebinding self-heal CanReplaceRemoteBinding unlocks.
 func TestFileOpAgainstVanishedContainerRebinds(t *testing.T) {
 	engine := newFakeDockerEngine()
 	engine.execExit = 1
@@ -1258,4 +1319,64 @@ func TestFileOpGenuineFailureKeepsBinding(t *testing.T) {
 	err := docker.MakeDir(context.Background(), testHandle("container-1"), "/data/out")
 	require.True(t, IsRemoteInvalidRequest(err), "got %+v", err)
 	require.False(t, CanReplaceRemoteBinding(err))
+}
+
+// The classification order is fixed: a killed exit code does not outrank a
+// re-inspect that confirms the container is gone. exit=137 with the container
+// vanished is NotFound (so the rebinding self-heal can take over), not
+// Timeout — for MakeDir and ListDir alike.
+func TestDockerFileOpKilledWithVanishedContainerIsNotFound(t *testing.T) {
+	engine := newFakeDockerEngine()
+	engine.execExit = 137
+	engine.execStderr = ""
+	docker := newTestDockerClient(t, engine)
+
+	err := docker.MakeDir(context.Background(), testHandle("swept-away"), "/workspace/input/x")
+	require.Error(t, err)
+	require.True(t, IsRemoteNotFound(err), "got %+v", err)
+	require.False(t, IsRemoteTimeout(err),
+		"a confirmed-missing container classifies ahead of the killed exit: %q", err.Error())
+	require.True(t, CanReplaceRemoteBinding(err))
+
+	_, err = docker.ListDir(context.Background(), testHandle("swept-away"), "/workspace/input")
+	require.Error(t, err)
+	require.True(t, IsRemoteNotFound(err), "got %+v", err)
+	require.False(t, IsRemoteTimeout(err),
+		"ListDir must follow the same order: %q", err.Error())
+	require.True(t, CanReplaceRemoteBinding(err))
+}
+
+// A killed ListDir with the container still alive maps to Timeout like every
+// other filesystem op, while a genuine find failure keeps ListDir's
+// historical Internal classification.
+func TestDockerListDirKilledIsTimeoutButGenuineFailureStaysInternal(t *testing.T) {
+	killed := newFakeDockerEngine()
+	killed.execExit = 137
+	killed.execStderr = ""
+	killed.inspect["c"] = container.InspectResponse{
+		ID:    "c",
+		State: &container.State{Status: "running"},
+	}
+	docker := newTestDockerClient(t, killed)
+
+	_, err := docker.ListDir(context.Background(), testHandle("c"), "/workspace/output")
+	require.Error(t, err)
+	require.True(t, IsRemoteTimeout(err), "got %+v", err)
+	require.False(t, CanReplaceRemoteBinding(err), "the container is alive: the binding must stay")
+
+	genuine := newFakeDockerEngine()
+	genuine.execExit = 2
+	genuine.execStderr = "find: unrecognized option"
+	genuine.inspect["c"] = container.InspectResponse{
+		ID:    "c",
+		State: &container.State{Status: "running"},
+	}
+	docker = newTestDockerClient(t, genuine)
+
+	_, err = docker.ListDir(context.Background(), testHandle("c"), "/workspace/output")
+	require.Error(t, err)
+	var remote *RemoteError
+	require.True(t, errors.As(err, &remote), "got %+v", err)
+	require.Equal(t, RemoteErrorKindInternal, remote.Kind,
+		"ListDir's genuine failures keep their historical classification: %q", err.Error())
 }

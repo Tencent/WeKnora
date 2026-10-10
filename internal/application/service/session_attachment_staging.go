@@ -8,6 +8,7 @@ import (
 	"path"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/sandbox"
@@ -142,6 +143,7 @@ func (s *agentService) stageSessionAttachments(
 
 	desired := make(map[string]struct{}, len(attachments))
 	staged := make([]stagedSessionAttachment, 0, len(attachments))
+	inputs := make([]stagedInput, 0, len(attachments))
 	maxBytes := int64(secutils.GetMaxFileSizeMB()) * 1024 * 1024
 	for _, attachment := range attachments {
 		remotePath, pathErr := sandboxAttachmentPath(attachment, layout.InputDir)
@@ -152,25 +154,40 @@ func (s *agentService) stageSessionAttachments(
 
 		entry, present := existing[remotePath]
 		if !present || attachment.FileSize <= 0 || entry.Size != attachment.FileSize {
-			reader, getErr := s.fileService.GetFile(ctx, attachment.URL)
-			if getErr != nil {
-				return nil, fmt.Errorf("open attachment %q: %w", attachment.FileName, getErr)
-			}
-			content, readErr := io.ReadAll(io.LimitReader(reader, maxBytes+1))
-			closeErr := reader.Close()
+			content, readErr := s.readAttachmentContent(ctx, attachment, maxBytes)
 			if readErr != nil {
-				return nil, fmt.Errorf("read attachment %q: %w", attachment.FileName, readErr)
+				return nil, readErr
 			}
-			if closeErr != nil {
-				return nil, fmt.Errorf("close attachment %q: %w", attachment.FileName, closeErr)
-			}
-			if int64(len(content)) > maxBytes {
-				return nil, fmt.Errorf("attachment %q exceeds sandbox staging limit of %d bytes", attachment.FileName, maxBytes)
-			}
-			if writeErr := store.WriteSessionInputFile(ctx, sessionID, remotePath, content); writeErr != nil {
+			rebound, writeErr := writeSessionInputWithRetry(ctx, store, sessionID, remotePath, content)
+			if writeErr != nil {
 				return nil, fmt.Errorf("stage attachment %q: %w", attachment.FileName, writeErr)
 			}
 			attachment.FileSize = int64(len(content))
+			inputs = append(inputs, stagedInput{
+				remotePath: remotePath,
+				name:       attachment.FileName,
+				url:        attachment.URL,
+				content:    content,
+				size:       attachment.FileSize,
+			})
+			if rebound {
+				// The retry re-resolved the session, which may have
+				// rebound it onto a fresh container: everything staged
+				// before this attachment lived in the old one.
+				if restoreErr := s.reestablishStagedInputs(ctx, store, sessionID, layout.InputDir, inputs, maxBytes); restoreErr != nil {
+					return nil, restoreErr
+				}
+			}
+		} else {
+			// Reused from the previous pass: no content kept in memory,
+			// but the rebinding recovery must still be able to
+			// re-create it from durable storage.
+			inputs = append(inputs, stagedInput{
+				remotePath: remotePath,
+				name:       attachment.FileName,
+				url:        attachment.URL,
+				size:       attachment.FileSize,
+			})
 		}
 
 		staged = append(staged, stagedSessionAttachment{
@@ -197,6 +214,149 @@ func (s *agentService) stageSessionAttachments(
 
 	sort.SliceStable(staged, func(i, j int) bool { return staged[i].Path < staged[j].Path })
 	return staged, nil
+}
+
+// sandboxStagingRetryDelay separates the two attempts a transient sandbox
+// filesystem stall gets before staging fails the turn.
+const sandboxStagingRetryDelay = 2 * time.Second
+
+// sandboxStagingRebindPasses bounds how many times the rebinding recovery
+// below re-verifies the input set after a retry landed on yet another fresh
+// container. A session whose inputs keep getting killed this many times is
+// not going to heal; the error says so instead of looping forever.
+const sandboxStagingRebindPasses = 3
+
+// stagedInput tracks one attachment staged during this pass so the rebinding
+// recovery can re-establish what an earlier container already held. content
+// is nil for inputs reused from the previous pass; those re-read from
+// durable storage when the recovery needs to rewrite them.
+type stagedInput struct {
+	remotePath string
+	name       string
+	url        string
+	content    []byte
+	size       int64
+}
+
+// readAttachmentContent reads one attachment from durable storage, bounded by
+// the sandbox staging limit.
+func (s *agentService) readAttachmentContent(
+	ctx context.Context,
+	attachment types.MessageAttachment,
+	maxBytes int64,
+) ([]byte, error) {
+	reader, getErr := s.fileService.GetFile(ctx, attachment.URL)
+	if getErr != nil {
+		return nil, fmt.Errorf("open attachment %q: %w", attachment.FileName, getErr)
+	}
+	content, readErr := io.ReadAll(io.LimitReader(reader, maxBytes+1))
+	closeErr := reader.Close()
+	if readErr != nil {
+		return nil, fmt.Errorf("read attachment %q: %w", attachment.FileName, readErr)
+	}
+	if closeErr != nil {
+		return nil, fmt.Errorf("close attachment %q: %w", attachment.FileName, closeErr)
+	}
+	if int64(len(content)) > maxBytes {
+		return nil, fmt.Errorf("attachment %q exceeds sandbox staging limit of %d bytes", attachment.FileName, maxBytes)
+	}
+	return content, nil
+}
+
+// reestablishStagedInputs re-writes staged inputs that went missing after a
+// timeout retry rebound the session onto a fresh container: the retry's
+// WriteSessionInputFile re-resolves the session, and the new container's
+// input directory does not carry anything the old one held. Without this
+// pass, staging would report success while the sandbox only has the one
+// attachment whose retry happened to land.
+//
+// Each pass re-lists the input directory and rewrites whatever is missing or
+// has the wrong size. A rewrite that itself only succeeds after a timeout
+// retry may have rebound onto yet another container, so the pass repeats
+// until a full pass lands without a rebind (or the pass budget runs out).
+func (s *agentService) reestablishStagedInputs(
+	ctx context.Context,
+	store sandbox.SessionFileStore,
+	sessionID, inputDir string,
+	inputs []stagedInput,
+	maxBytes int64,
+) error {
+	for pass := 0; pass < sandboxStagingRebindPasses; pass++ {
+		entries, listErr := store.ListSessionFiles(ctx, sessionID, inputDir)
+		if listErr != nil {
+			return fmt.Errorf("relist staged session inputs after filesystem-op timeout: %w", listErr)
+		}
+		present := make(map[string]int64, len(entries))
+		for _, entry := range entries {
+			present[path.Clean(entry.Path)] = entry.Size
+		}
+		reboundAgain := false
+		for _, input := range inputs {
+			if size, ok := present[input.remotePath]; ok && size == input.size {
+				continue
+			}
+			content := input.content
+			if content == nil {
+				var readErr error
+				content, readErr = s.readAttachmentContent(ctx, types.MessageAttachment{
+					URL:      input.url,
+					FileName: input.name,
+				}, maxBytes)
+				if readErr != nil {
+					return fmt.Errorf("re-stage attachment %q: %w", input.name, readErr)
+				}
+				if int64(len(content)) != input.size {
+					return fmt.Errorf(
+						"re-stage attachment %q: durable content is %d bytes, expected %d",
+						input.name, len(content), input.size)
+				}
+			}
+			rebound, writeErr := writeSessionInputWithRetry(ctx, store, sessionID, input.remotePath, content)
+			if writeErr != nil {
+				return fmt.Errorf("re-stage attachment %q after filesystem-op timeout: %w", input.name, writeErr)
+			}
+			reboundAgain = reboundAgain || rebound
+		}
+		if !reboundAgain {
+			return nil
+		}
+	}
+	return fmt.Errorf(
+		"session inputs kept getting killed past the filesystem-op timeout across %d rebinding passes",
+		sandboxStagingRebindPasses)
+}
+
+// writeSessionInputWithRetry retries once when the sandbox killed the write
+// past its filesystem-op timeout (issue #3910): a killed op means the
+// container filesystem stalled — the request itself was valid, and such
+// stalls are usually transient. Any other failure surfaces immediately. When
+// the retry also times out, both failures stay attached to the returned error
+// so the log shows it was not a one-off.
+//
+// The returned rebound flag reports that the write only succeeded on the
+// retry: WriteSessionInputFile re-resolves the session, so the second attempt
+// may have landed in a fresh container. Callers staging more than one input
+// must treat a rebound as "everything staged before this write may be gone"
+// and re-establish it.
+func writeSessionInputWithRetry(
+	ctx context.Context,
+	store sandbox.SessionFileStore,
+	sessionID, remotePath string,
+	content []byte,
+) (bool, error) {
+	err := store.WriteSessionInputFile(ctx, sessionID, remotePath, content)
+	if !sandbox.IsRemoteTimeout(err) {
+		return false, err
+	}
+	select {
+	case <-ctx.Done():
+		return false, err
+	case <-time.After(sandboxStagingRetryDelay):
+	}
+	if retryErr := store.WriteSessionInputFile(ctx, sessionID, remotePath, content); retryErr != nil {
+		return false, fmt.Errorf("%w (retry after filesystem-op timeout failed: %v)", err, retryErr)
+	}
+	return true, nil
 }
 
 // resolveSessionAttachmentURLs fills in the storage handle for attachments

@@ -841,9 +841,13 @@ func dockerExecUser(user string) string {
 	return DefaultSandboxExecUser
 }
 
-// dockerExecWasKilled reports whether an exit code means the wrapper killed
-// the process. 137 is SIGKILL (timeout -s KILL), 124 is timeout(1) reporting
-// that it had to intervene.
+// dockerExecWasKilled reports whether an exit code means the process died to
+// a KILL-class signal: 137 is SIGKILL (which the in-container `timeout -s
+// KILL` wrapper sends, but so does an OOM kill), 124 is timeout(1) reporting
+// that it had to intervene. It is a fact about the process, not a verdict on
+// the cause — and it says nothing about the container: a re-inspect that
+// confirms the container is gone classifies ahead of it in
+// dockerFileOpFailure.
 func dockerExecWasKilled(exitCode int) bool {
 	return exitCode == 137 || exitCode == 124
 }
@@ -892,7 +896,7 @@ func (c *DockerRemoteClient) WriteFile(
 		return dockerError("WriteFile", err)
 	}
 	if result.ExitCode != 0 {
-		return c.dockerFileOpFailed(ctx, id, "WriteFile", clean, result.Stderr, result.ExitCode)
+		return c.dockerFileOpFailure(ctx, id, "WriteFile", clean, result, RemoteErrorKindInvalidRequest)
 	}
 	return nil
 }
@@ -927,7 +931,7 @@ func (c *DockerRemoteClient) ReadFile(
 		return nil, dockerError("ReadFile", err)
 	}
 	if result.ExitCode != 0 {
-		return nil, c.dockerFileOpFailed(ctx, id, "ReadFile", clean, result.Stderr, result.ExitCode)
+		return nil, c.dockerFileOpFailure(ctx, id, "ReadFile", clean, result, RemoteErrorKindInvalidRequest)
 	}
 	return []byte(result.Stdout), nil
 }
@@ -971,7 +975,7 @@ func (c *DockerRemoteClient) Stat(
 		return nil, dockerError("Stat", err)
 	}
 	if result.ExitCode != 0 {
-		return nil, c.dockerFileOpFailed(ctx, id, "Stat", clean, result.Stderr, result.ExitCode)
+		return nil, c.dockerFileOpFailure(ctx, id, "Stat", clean, result, RemoteErrorKindInvalidRequest)
 	}
 	entries := parseDockerFindOutput(result.Stdout)
 	if len(entries) == 0 {
@@ -990,23 +994,26 @@ func (c *DockerRemoteClient) Stat(
 	}, nil
 }
 
-// dockerFileOpError classifies a failed filesystem helper. A missing path is
-// NotFound so callers can treat it as "nothing there"; everything else,
-// permission denials included, is an invalid request carrying the tool's own
-// complaint rather than a synthesised one.
-// dockerFileOpFailed classifies a filesystem op's non-zero exec exit. The
-// message carries the exit code — with an empty stderr it used to be the
-// only missing clue (issue #3942). When the exec raced the idle sweeper's
-// delete (ensureRunning's inspect passes, the sweep removes the container,
-// the exec dies mid-flight), the failure surfaces as exit != 0 with an
-// empty stderr; the re-inspect reclassifies it as NotFound so
-// CanReplaceRemoteBinding lets the rebinding self-heal take over — making
-// the sweeper's "deleting needs no coordination with the binding store"
-// premise hold for this window too (issue #3942, mechanism A).
-func (c *DockerRemoteClient) dockerFileOpFailed(
-	ctx context.Context, id, op, clean, stderr string, exitCode int,
+// dockerFileOpFailure classifies a filesystem op whose exec ran but exited
+// non-zero. The full result goes in so every filesystem op shares one fixed
+// classification order:
+//
+//  1. the tool's own missing-path complaint → NotFound;
+//  2. a re-inspect confirming the container is gone → NotFound, so the
+//     rebinding self-heal CanReplaceRemoteBinding unlocks — the exec raced
+//     the idle sweeper's delete (issue #3942, mechanism A);
+//  3. a killed exit (137 = SIGKILL, 124 = timeout(1) reporting) → Timeout
+//     (retryable, binding preserved): a killed op means the sandbox
+//     filesystem stalled, not that the caller asked for something invalid
+//     (issue #3910);
+//  4. anything else → fallbackKind, carrying the exit code and the tool's
+//     own complaint. ListDir passes Internal to keep its historical
+//     classification; the other ops pass InvalidRequest.
+func (c *DockerRemoteClient) dockerFileOpFailure(
+	ctx context.Context, id, op, clean string,
+	result *RemoteExecResult, fallbackKind RemoteErrorKind,
 ) error {
-	if strings.Contains(stderr, "No such file or directory") {
+	if strings.Contains(result.Stderr, "No such file or directory") {
 		return &RemoteError{
 			Kind:     RemoteErrorKindNotFound,
 			Provider: SandboxTypeDocker,
@@ -1020,14 +1027,55 @@ func (c *DockerRemoteClient) dockerFileOpFailed(
 			Provider: SandboxTypeDocker,
 			Op:       op,
 			Message: fmt.Sprintf("%s %s: exit=%d: container vanished mid-op (likely idle sweep)",
-				op, clean, exitCode),
+				op, clean, result.ExitCode),
 		}
 	}
+	if result.Killed {
+		return dockerKilledOpFailure(op, clean, result)
+	}
+	detail := fmt.Sprintf("%s %s", op, clean)
+	if line := firstNonEmptyLine(result.Stderr); line != "" {
+		detail += fmt.Sprintf(": exit=%d: %s", result.ExitCode, line)
+	} else if line := firstNonEmptyLine(result.Stdout); line != "" {
+		detail += fmt.Sprintf(": exit=%d, stdout: %s", result.ExitCode, line)
+	} else {
+		// A tool that died without writing to stderr used to leave a
+		// dangling colon; say so and keep the exit code attributable.
+		detail += fmt.Sprintf(" (exit=%d, no stderr)", result.ExitCode)
+	}
 	return &RemoteError{
-		Kind:     RemoteErrorKindInvalidRequest,
+		Kind:     fallbackKind,
 		Provider: SandboxTypeDocker,
 		Op:       op,
-		Message:  fmt.Sprintf("%s %s: exit=%d: %s", op, clean, exitCode, firstNonEmptyLine(stderr)),
+		Message:  detail,
+	}
+}
+
+// dockerKilledOpFailure builds the Timeout error for a killed filesystem op.
+//
+// The exit code only says the process died to a KILL-class signal — 137 is
+// SIGKILL (which the in-container `timeout -s KILL` wrapper sends, but OOM
+// and other kills do too) and 124 is timeout(1) reporting that it
+// intervened — so the message reports the facts (exit code, elapsed, output)
+// and names the configured budget without asserting it as the cause: an
+// elapsed close to the budget is a clue, not a verdict.
+func dockerKilledOpFailure(op, clean string, result *RemoteExecResult) error {
+	detail := fmt.Sprintf(
+		"%s %s: killed after %s, exit=%d (filesystem-op exec budget %s; a near-budget elapsed points at the timeout wrapper, but the exit code alone cannot prove the cause)",
+		op, clean, result.Duration.Round(time.Millisecond), result.ExitCode, dockerFilesystemOpTimeout,
+	)
+	if line := firstNonEmptyLine(result.Stderr); line != "" {
+		detail += ", stderr: " + line
+	} else if line := firstNonEmptyLine(result.Stdout); line != "" {
+		detail += ", stdout: " + line
+	} else {
+		detail += ", no output"
+	}
+	return &RemoteError{
+		Kind:     RemoteErrorKindTimeout,
+		Provider: SandboxTypeDocker,
+		Op:       op,
+		Message:  detail,
 	}
 }
 
@@ -1068,7 +1116,7 @@ func (c *DockerRemoteClient) makeDir(ctx context.Context, id, dir, op string) er
 		return dockerError(op, err)
 	}
 	if result.ExitCode != 0 {
-		return c.dockerFileOpFailed(ctx, id, op, dir, result.Stderr, result.ExitCode)
+		return c.dockerFileOpFailure(ctx, id, op, dir, result, RemoteErrorKindInvalidRequest)
 	}
 	return nil
 }
@@ -1100,7 +1148,7 @@ func (c *DockerRemoteClient) Remove(
 		return dockerError("Remove", err)
 	}
 	if result.ExitCode != 0 {
-		return c.dockerFileOpFailed(ctx, id, "Remove", clean, result.Stderr, result.ExitCode)
+		return c.dockerFileOpFailure(ctx, id, "Remove", clean, result, RemoteErrorKindInvalidRequest)
 	}
 	return nil
 }
@@ -1136,29 +1184,10 @@ func (c *DockerRemoteClient) ListDir(
 		return nil, dockerError("ListDir", err)
 	}
 	if result.ExitCode != 0 {
-		if strings.Contains(result.Stderr, "No such file or directory") {
-			return nil, &RemoteError{
-				Kind:     RemoteErrorKindNotFound,
-				Provider: SandboxTypeDocker,
-				Op:       "ListDir",
-				Message:  clean + " does not exist",
-			}
-		}
-		if c.containerVanished(ctx, id, "ListDir") {
-			return nil, &RemoteError{
-				Kind:     RemoteErrorKindNotFound,
-				Provider: SandboxTypeDocker,
-				Op:       "ListDir",
-				Message: fmt.Sprintf("ListDir %s: exit=%d: container vanished mid-op (likely idle sweep)",
-					clean, result.ExitCode),
-			}
-		}
-		return nil, &RemoteError{
-			Kind:     RemoteErrorKindInternal,
-			Provider: SandboxTypeDocker,
-			Op:       "ListDir",
-			Message:  fmt.Sprintf("find %s: %s", clean, firstNonEmptyLine(result.Stderr)),
-		}
+		// The shared classifier keeps ListDir's historical Internal
+		// classification for genuine find failures; killed ops still map
+		// to Timeout like every other filesystem op.
+		return nil, c.dockerFileOpFailure(ctx, id, "ListDir", clean, result, RemoteErrorKindInternal)
 	}
 	return parseDockerFindOutput(result.Stdout), nil
 }
