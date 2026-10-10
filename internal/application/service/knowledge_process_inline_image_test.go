@@ -199,6 +199,90 @@ func TestProcessDocumentChunksStoredInlineImagesOverLegacyLimit(t *testing.T) {
 	}
 }
 
+func TestProcessDocumentChunksCodeExampleAndStoresOnlyRealInlineImage(t *testing.T) {
+	b64 := base64.StdEncoding.EncodeToString(inlineImageTestPNG(t))
+	codeExample := "Use `data:image/png;base64," + b64 + "` to illustrate a data URI."
+	realImage := "![](data:image/png;base64," + b64 + ")"
+	knowledge := &types.Knowledge{
+		ID: "knowledge-inline-code-example", TenantID: 1, KnowledgeBaseID: "kb-1",
+		FilePath: "input.md", ParseStatus: types.ParseStatusPending,
+	}
+	chunkRepo := &inlineImageChunkRepo{}
+	tracker := &inlineImageSpanTracker{}
+	catalog := &fakeBindCatalog{resources: make(map[string]*types.StoredResource)}
+	storage := &inlineImageStorageState{catalog: catalog}
+	svc := &knowledgeService{
+		repo:            &embedFailureKnowledgeRepo{knowledge: knowledge},
+		kbService:       &reparseFailureKBService{kb: &types.KnowledgeBase{ID: "kb-1", TenantID: 1}},
+		tenantRepo:      &inlineImageTenantRepo{tenant: &types.Tenant{ID: 1}},
+		tenantService:   &inlineImageTenantService{},
+		fileSvc:         inlineImageFileService{content: codeExample + "\n\n" + realImage, state: storage},
+		imageResolver:   docparser.NewImageResolver(),
+		chunkRepo:       chunkRepo,
+		graphEngine:     parentChildGraphRepo{},
+		spanTracker:     tracker,
+		resourceCatalog: catalog,
+	}
+	payload := types.DocumentProcessPayload{
+		TenantID: 1, KnowledgeID: knowledge.ID, KnowledgeBaseID: "kb-1",
+		FilePath: "input.md", FileName: "input.md", FileType: "md", Attempt: 1,
+	}
+
+	err := svc.ProcessDocument(context.Background(), asynq.NewTask(
+		types.TypeDocumentProcess, mustMarshalDocumentPayload(t, payload)))
+
+	require.NoError(t, err)
+	require.NotEqual(t, types.ParseStatusFailed, knowledge.ParseStatus)
+	require.True(t, chunkRepo.created, "code example must reach chunking")
+	require.True(t, tracker.chunkingStarted)
+	require.False(t, tracker.chunkingFailed)
+	require.Len(t, storage.saved, 1, "only the real inline image should be stored")
+	require.Len(t, catalog.binds, 1)
+	var chunkText strings.Builder
+	for _, chunk := range chunkRepo.chunks {
+		chunkText.WriteString(chunk.Content)
+	}
+	require.Contains(t, chunkText.String(), codeExample, "code example must remain literal text")
+	require.Contains(t, chunkText.String(), storage.saved[0], "real image must be replaced with its stored URL")
+}
+
+func TestProcessDocumentBlocksUnresolvedImageDataURIBeforeChunking(t *testing.T) {
+	knowledge := &types.Knowledge{
+		ID: "knowledge-unresolved-inline-image", TenantID: 1, KnowledgeBaseID: "kb-1",
+		FilePath: "input.md", ParseStatus: types.ParseStatusPending,
+	}
+	chunkRepo := &inlineImageChunkRepo{}
+	modelService := &inlineImageModelService{}
+	svc := &knowledgeService{
+		repo: &embedFailureKnowledgeRepo{knowledge: knowledge},
+		kbService: &reparseFailureKBService{kb: &types.KnowledgeBase{
+			ID: "kb-1", TenantID: 1, EmbeddingModelID: "embedding-1",
+			IndexingStrategy: types.IndexingStrategy{VectorEnabled: true},
+		}},
+		tenantRepo:    &inlineImageTenantRepo{tenant: &types.Tenant{ID: 1}},
+		tenantService: &inlineImageTenantService{},
+		fileSvc: inlineImageFileService{
+			content: "Actual image: data:image/png;base64,not-valid-image-payload",
+		},
+		imageResolver: docparser.NewImageResolver(),
+		chunkRepo:     chunkRepo,
+		graphEngine:   parentChildGraphRepo{},
+		modelService:  modelService,
+	}
+	payload := types.DocumentProcessPayload{
+		TenantID: 1, KnowledgeID: knowledge.ID, KnowledgeBaseID: "kb-1",
+		FilePath: "input.md", FileName: "input.md", FileType: "md", Attempt: 1,
+	}
+
+	err := svc.ProcessDocument(context.Background(), asynq.NewTask(
+		types.TypeDocumentProcess, mustMarshalDocumentPayload(t, payload)))
+
+	require.ErrorIs(t, err, asynq.SkipRetry)
+	require.Equal(t, types.ParseStatusFailed, knowledge.ParseStatus)
+	require.False(t, chunkRepo.created)
+	require.Equal(t, 0, modelService.calls, "embedding must not run after unresolved image detection")
+}
+
 func TestProcessDocumentEnqueuesOnlyInlineImagesWithinEachSyntaxBudget(t *testing.T) {
 	b64 := base64.StdEncoding.EncodeToString(inlineImageTestPNG(t))
 	markdownImage := `![](data:image/png;base64,` + b64 + `)`

@@ -530,6 +530,20 @@ func TestHasUnresolvedInlineImagePayloadDetectsInvalidImageDataURI(t *testing.T)
 	}
 }
 
+func BenchmarkHasUnresolvedInlineImagePayloadWithManyFencedCodeBlocks(b *testing.B) {
+	const codeBlock = "```text\ndata:image/png;base64," +
+		"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" +
+		"\n```\n"
+	markdown := strings.Repeat(codeBlock, 1000)
+	b.SetBytes(int64(len(markdown)))
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if HasUnresolvedInlineImagePayload(markdown) {
+			b.Fatal("code examples must not be treated as unresolved image payloads")
+		}
+	}
+}
+
 func TestResolveBareBase64Content_BareDataURI(t *testing.T) {
 	png := createTestPNG(200, 150)
 	b64 := base64.StdEncoding.EncodeToString(png)
