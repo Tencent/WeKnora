@@ -8,6 +8,47 @@ const source = readFileSync(new URL('./Input-field.vue', import.meta.url), 'utf8
 const focusCode = source.slice(source.indexOf('const focusInput ='), source.indexOf('const onInput ='))
 const sendCode = source.slice(source.indexOf('const createSession ='), source.indexOf('const updateAgentModeDropdownPosition ='))
 
+for (const remote of [false, true]) {
+  test(`not-ready ${remote ? 'shared' : 'local'} agent preserves draft, then clears error on success`, async () => {
+    const effects = []
+    const submissionIssue = { value: '' }
+    let ready = false
+    const helperCode = source.slice(source.indexOf('const buildAgentNotReadyText ='), source.indexOf('watch(currentAgentConfig'))
+    const context = {
+      submissionIssue, props: {}, uploadedAttachments: { value: [] }, uploadedImages: { value: [] },
+      allSelectedItems: { value: [] }, selectedModelId: { value: 'model' },
+      selectedAgent: { value: { name: 'Agent', config: {} } }, settingsStore: { selectedAgentSourceTenantId: remote ? 'remote' : undefined },
+      chatResources: { isLoaded: () => true }, collectAgentNotReadyReasons: () => ({ keys: ['summary_model'], labels: ready ? [] : ['Model'] }),
+      locale: { value: 'en-US' }, formatLocalizedList: values => values.join(', '),
+      canLocallyConfigureAgent: tenant => !tenant, t: key => key,
+      showAgentNotReadyMessage: (agent, reasons, keys, tenant) => { submissionIssue.value = context.buildText(agent, reasons, tenant) },
+      attachmentUploadRef: { value: null }, emit: name => effects.push(name), clearvalue: () => effects.push('clear'), focusInput: () => {},
+    }
+    context.buildText = vm.runInNewContext(ts.transpile(`${helperCode}\nbuildAgentNotReadyText`), context)
+    const send = vm.runInNewContext(ts.transpile(`${sendCode}\ncreateSession`), context)
+    await send('keep my draft')
+    assert.equal(submissionIssue.value, remote ? 'input.sharedAgentNotReadyDetail' : 'input.agentNotReadyDetail')
+    assert.deepEqual(effects, [])
+    ready = true
+    await send('keep my draft')
+    assert.equal(submissionIssue.value, '')
+    assert.deepEqual(effects, ['send-msg', 'clear'])
+  })
+}
+
+test('changing agent or source tenant clears the old inline error', async () => {
+  const start = source.indexOf('watch([selectedAgentId, () => settingsStore.selectedAgentSourceTenantId]')
+  const code = source.slice(start, source.indexOf('// 智能体是否启用了网络搜索', start))
+  let callback
+  const submissionIssue = { value: 'old agent' }
+  vm.runInNewContext(ts.transpile(code), {
+    watch: (deps, fn) => { callback = fn }, selectedAgentId: {}, settingsStore: {}, submissionIssue,
+    sharedAgentKbList: { value: [] },
+  })
+  await callback(['ready-agent', undefined])
+  assert.equal(submissionIssue.value, '')
+})
+
 for (const mode of ['normal', 'embedded', 'after', 'inject']) {
   test(`${mode} send clears the draft and restores focus after the DOM update`, async () => {
     const effects = [], ticks = []
@@ -17,6 +58,7 @@ for (const mode of ['normal', 'embedded', 'after', 'inject']) {
       blur: () => { throw new Error('sending must not blur the textarea') },
     }
     const context = {
+      submissionIssue: { value: "" },
       props: { isReplying: ['after', 'inject'].includes(mode), canSteer: true, embeddedMode: mode === 'embedded' },
       uploadedAttachments: { value: [] }, uploadedImages: { value: [] },
       allSelectedItems: { value: [] }, selectedModelId: { value: 'model' },
