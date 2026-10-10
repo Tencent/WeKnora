@@ -5,6 +5,7 @@ package sandbox
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 )
 
@@ -165,6 +166,14 @@ var (
 	// again; the UI must get an explicit click first. Distinct from
 	// ErrNoLiveSessionSandbox, which means there is no binding to resume.
 	ErrSandboxPaused = errors.New("session sandbox is paused")
+	// ErrSandboxStopped is ErrSandboxPaused for a backend that never pauses
+	// (Docker): a bound sandbox that is not running is either a stopped
+	// container, which a resume restarts with its files intact, or one the
+	// idle sweep already deleted, which a resume replaces with a fresh one.
+	// The UI cannot promise "wake it up" there. It wraps ErrSandboxPaused, so
+	// every caller that only distinguishes "needs a confirmed click" keeps
+	// working unchanged.
+	ErrSandboxStopped = fmt.Errorf("%w: sandbox is stopped or was reclaimed", ErrSandboxPaused)
 	// ErrSessionRewindLocked means another rewind already holds the session.
 	ErrSessionRewindLocked = errors.New("sandbox: session rewind already in progress")
 	// ErrSessionTurnActive means a chat turn already holds the session lease,
