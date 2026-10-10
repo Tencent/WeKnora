@@ -25,7 +25,9 @@ type protocolTestTransport struct {
 	send func(context.Context, transport.JSONRPCRequest) (*transport.JSONRPCResponse, error)
 }
 
-func (t *protocolTestTransport) SendRequest(ctx context.Context, request transport.JSONRPCRequest) (*transport.JSONRPCResponse, error) {
+func (t *protocolTestTransport) SendRequest(
+	ctx context.Context, request transport.JSONRPCRequest,
+) (*transport.JSONRPCResponse, error) {
 	return t.send(ctx, request)
 }
 
@@ -37,7 +39,11 @@ func (*protocolTestTransport) SendNotification(context.Context, sdk.JSONRPCNotif
 	return nil
 }
 
-func newProtocolTestClient(t *testing.T, timeout int, send func(context.Context, transport.JSONRPCRequest) (*transport.JSONRPCResponse, error)) *mcpGoClient {
+func newProtocolTestClient(
+	t *testing.T,
+	timeout int,
+	send func(context.Context, transport.JSONRPCRequest) (*transport.JSONRPCResponse, error),
+) *mcpGoClient {
 	t.Helper()
 	utils.SetSSRFWhitelistFromRaw("127.0.0.1")
 	t.Cleanup(utils.ResetSSRFWhitelistForTest)
@@ -55,12 +61,17 @@ func newProtocolTestClient(t *testing.T, timeout int, send func(context.Context,
 }
 
 func TestProtocolDiscoveryRetry(t *testing.T) {
-	for _, mode := range []string{"method-not-found", "transient-unavailable", "transient-unauthorized", "transient-timeout", "silent-legacy", "unavailable", "cancelled", "cancelled-after-handshake"} {
+	for _, mode := range []string{
+		"method-not-found", "transient-unavailable", "transient-unauthorized", "transient-timeout",
+		"silent-legacy", "unavailable", "cancelled", "cancelled-after-handshake",
+	} {
 		t.Run(mode, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 			defer cancel()
 			discoverCount, initializeCount := 0, 0
-			c := newProtocolTestClient(t, 1, func(ctx context.Context, request transport.JSONRPCRequest) (*transport.JSONRPCResponse, error) {
+			c := newProtocolTestClient(t, 1, func(
+				ctx context.Context, request transport.JSONRPCRequest,
+			) (*transport.JSONRPCResponse, error) {
 				if err := ctx.Err(); err != nil {
 					return nil, err
 				}
@@ -71,7 +82,9 @@ func TestProtocolDiscoveryRetry(t *testing.T) {
 				case "server/discover":
 					discoverCount++
 					if mode == "method-not-found" {
-						return &transport.JSONRPCResponse{Error: &sdk.JSONRPCErrorDetails{Code: -32601, Message: "Method not found"}}, nil
+						return &transport.JSONRPCResponse{Error: &sdk.JSONRPCErrorDetails{
+							Code: -32601, Message: "Method not found",
+						}}, nil
 					}
 					if mode == "silent-legacy" || (mode == "transient-timeout" && discoverCount == 1) {
 						<-ctx.Done()
@@ -96,9 +109,11 @@ func TestProtocolDiscoveryRetry(t *testing.T) {
 					if mode == "cancelled-after-handshake" {
 						cancel()
 					}
-					return result(`{"protocolVersion":"2025-11-25","capabilities":{"tools":{}},"serverInfo":{"name":"peer","version":"1"}}`)
+					return result(`{"protocolVersion":"2025-11-25","capabilities":{"tools":{}},` +
+						`"serverInfo":{"name":"peer","version":"1"}}`)
 				case "tools/list":
-					return result(`{"tools":[{"name":"echo","inputSchema":{"type":"object","properties":{"x":{"type":"string","x-mcp-header":"Value"}}}}]}`)
+					return result(`{"tools":[{"name":"echo","inputSchema":{"type":"object",` +
+						`"properties":{"x":{"type":"string","x-mcp-header":"Value"}}}}]}`)
 				case "tools/call":
 					wantHeader := "value"
 					if mode == "silent-legacy" || mode == "method-not-found" {
@@ -159,7 +174,9 @@ func TestProtocolDiscoveryRetryKeepsLegacySuccess(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), timeout)
 			defer cancel()
 			discoverCount, initializeCount := 0, 0
-			c := newProtocolTestClient(t, 1, func(ctx context.Context, request transport.JSONRPCRequest) (*transport.JSONRPCResponse, error) {
+			c := newProtocolTestClient(t, 1, func(
+				ctx context.Context, request transport.JSONRPCRequest,
+			) (*transport.JSONRPCResponse, error) {
 				if err := ctx.Err(); err != nil {
 					return nil, err
 				}
@@ -183,9 +200,14 @@ func TestProtocolDiscoveryRetryKeepsLegacySuccess(t *testing.T) {
 							return nil, ctx.Err()
 						}
 					}
-					return &transport.JSONRPCResponse{Result: json.RawMessage(`{"protocolVersion":"2025-11-25","capabilities":{"tools":{}},"serverInfo":{"name":"peer","version":"1"}}`)}, nil
+					return &transport.JSONRPCResponse{Result: json.RawMessage(
+						`{"protocolVersion":"2025-11-25","capabilities":{"tools":{}},` +
+							`"serverInfo":{"name":"peer","version":"1"}}`,
+					)}, nil
 				case "tools/list":
-					return &transport.JSONRPCResponse{Result: json.RawMessage(`{"tools":[{"name":"echo","inputSchema":{"type":"object"}}]}`)}, nil
+					return &transport.JSONRPCResponse{Result: json.RawMessage(
+						`{"tools":[{"name":"echo","inputSchema":{"type":"object"}}]}`,
+					)}, nil
 				default:
 					t.Fatalf("unexpected method %s", request.Method)
 					return nil, nil
@@ -218,9 +240,13 @@ func TestProtocolDiscoveryRetryKeepsLegacySuccess(t *testing.T) {
 func TestOutboundProtocolNegotiation(t *testing.T) {
 	utils.SetSSRFWhitelistFromRaw("127.0.0.1")
 	t.Cleanup(utils.ResetSSRFWhitelistForTest)
-	for _, mode := range []string{"modern", "legacy", "silent-legacy", "transient-unavailable", "transient-unauthorized", "transient-timeout", "unauthorized", "unavailable", "cancelled"} {
+	for _, mode := range []string{
+		"modern", "legacy", "silent-legacy", "transient-unavailable", "transient-unauthorized",
+		"transient-timeout", "unauthorized", "unavailable", "cancelled",
+	} {
 		t.Run(mode, func(t *testing.T) {
-			wantModern := mode == "modern" || mode == "transient-unavailable" || mode == "transient-unauthorized" || mode == "transient-timeout"
+			wantModern := mode == "modern" || mode == "transient-unavailable" ||
+				mode == "transient-unauthorized" || mode == "transient-timeout"
 			s := server.NewMCPServer("peer", "1", server.WithPaginationLimit(1))
 			schema := json.RawMessage(`{
 				"type":"object", "oneOf":[{"required":["x"]},{"required":["y"]}],
@@ -394,7 +420,9 @@ func TestOutboundProtocolNegotiation(t *testing.T) {
 func TestOutboundSSEProtocolNegotiation(t *testing.T) {
 	utils.SetSSRFWhitelistFromRaw("127.0.0.1")
 	t.Cleanup(utils.ResetSSRFWhitelistForTest)
-	for _, mode := range []string{"modern", "transient-unavailable", "transient-unauthorized", "transient-timeout", "silent-legacy"} {
+	for _, mode := range []string{
+		"modern", "transient-unavailable", "transient-unauthorized", "transient-timeout", "silent-legacy",
+	} {
 		t.Run(mode, func(t *testing.T) {
 			s := server.NewMCPServer("sse-peer", "1")
 			s.AddTool(sdk.Tool{Name: "echo", RawInputSchema: json.RawMessage(`{
@@ -442,7 +470,8 @@ func TestOutboundSSEProtocolNegotiation(t *testing.T) {
 							return
 						}
 					}
-					if request.Method == "tools/call" && mode != "silent-legacy" && r.Header.Get("Mcp-Param-Value") != "value" {
+					if request.Method == "tools/call" && mode != "silent-legacy" &&
+						r.Header.Get("Mcp-Param-Value") != "value" {
 						t.Error("modern SSE call missing Mcp-Param-Value")
 					}
 				}

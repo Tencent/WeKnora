@@ -32,16 +32,25 @@ func TestMCPClientProtocolSessionErrors(t *testing.T) {
 		{"legacy-session-gone", transport.ErrSessionTerminated, false, true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			c := newProtocolTestClient(t, 3, func(_ context.Context, request transport.JSONRPCRequest) (*transport.JSONRPCResponse, error) {
+			c := newProtocolTestClient(t, 3, func(
+				_ context.Context, request transport.JSONRPCRequest,
+			) (*transport.JSONRPCResponse, error) {
 				if test.legacy {
 					if request.Method == "server/discover" {
-						return &transport.JSONRPCResponse{Error: &sdk.JSONRPCErrorDetails{Code: -32601, Message: "Method not found"}}, nil
+						return &transport.JSONRPCResponse{Error: &sdk.JSONRPCErrorDetails{
+							Code: -32601, Message: "Method not found",
+						}}, nil
 					}
 					require.Equal(t, "initialize", request.Method)
-					return &transport.JSONRPCResponse{Result: json.RawMessage(`{"protocolVersion":"2025-11-25","capabilities":{},"serverInfo":{"name":"peer","version":"1"}}`)}, nil
+					return &transport.JSONRPCResponse{Result: json.RawMessage(
+						`{"protocolVersion":"2025-11-25","capabilities":{},` +
+							`"serverInfo":{"name":"peer","version":"1"}}`,
+					)}, nil
 				}
 				require.Equal(t, "server/discover", request.Method)
-				return &transport.JSONRPCResponse{Result: json.RawMessage(`{"capabilities":{},"protocolVersions":["2026-07-28"]}`)}, nil
+				return &transport.JSONRPCResponse{Result: json.RawMessage(
+					`{"capabilities":{},"protocolVersions":["2026-07-28"]}`,
+				)}, nil
 			})
 			result, err := c.Initialize(context.Background())
 			require.NoError(t, err)

@@ -86,7 +86,9 @@ type discoverTransport struct {
 	failed atomic.Bool
 }
 
-func (t *discoverTransport) SendRequest(ctx context.Context, request transport.JSONRPCRequest) (*transport.JSONRPCResponse, error) {
+func (t *discoverTransport) SendRequest(
+	ctx context.Context, request transport.JSONRPCRequest,
+) (*transport.JSONRPCResponse, error) {
 	response, err := t.HTTPConnection.SendRequest(ctx, request)
 	if request.Method == string(mcp.MethodServerDiscover) {
 		// JSON-RPC errors, including method-not-found, are valid peer answers
