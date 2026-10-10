@@ -239,6 +239,18 @@ func defaultIndexKB() *types.KnowledgeBase {
 
 func newIdxHarness(t *testing.T, backend *idxEngineRepo, kb *types.KnowledgeBase) *idxHarness {
 	t.Helper()
+	h := newIdxHarnessWithEngine(t, retriever.NewKVHybridRetrieveEngine(backend, idxEngineType), kb)
+	h.backend = backend
+	return h
+}
+
+// newIdxHarnessWithEngine is newIdxHarness for an engine that is not the
+// idxEngineRepo double: a real repository, so the chain from its wire contract
+// down to the replacement invariant is exercised without a service mock.
+func newIdxHarnessWithEngine(
+	t *testing.T, engine interfaces.RetrieveEngineService, kb *types.KnowledgeBase,
+) *idxHarness {
+	t.Helper()
 	imgPath := filepath.Join(t.TempDir(), "index-test.png")
 	if err := os.WriteFile(imgPath, []byte("image-bytes"), 0o600); err != nil {
 		t.Fatal(err)
@@ -257,10 +269,9 @@ func newIdxHarness(t *testing.T, backend *idxEngineRepo, kb *types.KnowledgeBase
 			modelService:   &idxModelService{embedder: idxEmbedder{}},
 			kbService:      &idxKBService{kb: kb},
 			tenantRepo:     &idxTenantRepo{tenant: tenant},
-			retrieveEngine: &idxRegistry{engine: retriever.NewKVHybridRetrieveEngine(backend, idxEngineType)},
+			retrieveEngine: &idxRegistry{engine: engine},
 		},
-		repo:    repo,
-		backend: backend,
+		repo: repo,
 		payload: &types.ImageMultimodalPayload{
 			TenantID:        1,
 			KnowledgeID:     "k-1",
