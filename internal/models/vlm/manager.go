@@ -283,6 +283,23 @@ func (m *managerVLM) consumeStream(
 			if chunk.Usage != nil {
 				usage = chunk.Usage
 			}
+			if chunk.Thinking {
+				// A reasoning token: server progress for TTFT / watchdog
+				// purposes, but never part of the answer — not buffered, not
+				// forwarded to OnChunk. First token of ANY kind starts the
+				// answer-phase clock; every reasoning token keeps the
+				// generation watchdog alive through a long thinking phase.
+				if chunk.Text != "" {
+					if !firstToken {
+						firstToken = true
+						seen = true
+						rt.markFirstToken(time.Since(genStart))
+						m.status(ctx, opts, PhaseFirstToken, PhaseInfo{Dwell: time.Since(genStart)})
+					}
+					armGenWatchdog()
+				}
+				continue
+			}
 			if chunk.Text != "" {
 				if !firstToken {
 					firstToken = true

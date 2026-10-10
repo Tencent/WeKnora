@@ -19,6 +19,11 @@ type StreamChunk struct {
 	Done  bool
 	Err   error
 	Usage *types.TokenUsage
+	// Thinking marks a reasoning-phase chunk. Reasoning is real server
+	// progress — the manager anchors TTFT and the generation watchdog to the
+	// first token of ANY kind — but it never enters the answer buffer and is
+	// never forwarded to OnChunk.
+	Thinking bool
 }
 
 // StreamingVLM is implemented by VLMs that can stream tokens to the manager.
@@ -90,14 +95,18 @@ func (v *RemoteAPIVLM) PredictStream(
 				return
 			}
 			if resp.ResponseType == types.ResponseTypeThinking {
-				// Reasoning content is not the answer. The assembler emits
-				// thinking chunks while reasoning and then closes that phase
-				// with a {ResponseTypeThinking, Done: true} marker; treating
-				// that marker as a terminal answer event would return the
-				// reasoning text and discard the answer that follows it. Drop
-				// thinking entirely: the caller's accumulated answer stays
-				// clean, and first-token / TTFT observation anchors to the
-				// first ANSWER token instead of reasoning output.
+				// Reasoning content is not the answer, but it IS server
+				// progress. The manager anchors TTFT and the generation
+				// watchdog to the first token of ANY kind, so a reasoning
+				// phase must keep feeding them instead of looking like a
+				// long prefill stall. Forward reasoning chunks flagged; the
+				// consumer never lets them into the answer buffer or
+				// OnChunk. The {ResponseTypeThinking, Done: true} phase
+				// marker is not a terminal event and is dropped.
+				if resp.Done {
+					continue
+				}
+				out <- StreamChunk{Text: resp.Content, Thinking: true}
 				continue
 			}
 			// Everything else (answer chunks, and untyped events from vendors
@@ -111,6 +120,21 @@ func (v *RemoteAPIVLM) PredictStream(
 				if resp.FinishReason == types.FinishReasonIncomplete {
 					out <- StreamChunk{Err: fmt.Errorf("%s", types.StreamEndedEarlyError)}
 					logger.Infof(ctx, "[VLM] stream ended, len=%d, err=%s", totalLen, types.StreamEndedEarlyError)
+					return
+				}
+				if totalLen == 0 && resp.FinishReason == "length" {
+					// Reasoning models can spend the whole completion budget
+					// on thinking before any visible output: the assembler
+					// still emits a clean answer-done event, but with empty
+					// text. Surfacing "" as a success would classify the
+					// image as "no text" — indistinguishable from a genuinely
+					// blank image and hiding the real fault. Same explicit
+					// error the buffered path raises in PredictWithOptions.
+					out <- StreamChunk{Err: fmt.Errorf(
+						"VLM returned no content: completion truncated at %d tokens (finish_reason=length)",
+						defaultMaxToks,
+					)}
+					logger.Infof(ctx, "[VLM] stream ended, len=%d, finish_reason=length, no answer content", totalLen)
 					return
 				}
 				out <- StreamChunk{Done: true, Usage: resp.Usage}
