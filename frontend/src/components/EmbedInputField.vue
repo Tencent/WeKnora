@@ -26,6 +26,7 @@
       :placeholder="t('input.placeholder')"
       :autosize="{ minRows: 2, maxRows: 6 }"
       @keydown="onKeydown"
+      @paste="onPaste"
       @compositionstart="isComposing = true"
       @compositionend="isComposing = false"
     />
@@ -199,6 +200,23 @@ const handleImageSelect = (event: Event) => {
   if (!input.files) return
   addImageFiles(Array.from(input.files))
   input.value = ''
+}
+
+const onPaste = (event: ClipboardEvent) => {
+  if (!props.showFileUploadToggle) return
+  const items = event.clipboardData?.items
+  if (!items) return
+  const imageFiles: File[] = []
+  for (const item of items) {
+    if (item.type.startsWith('image/')) {
+      const file = item.getAsFile()
+      if (file) imageFiles.push(file)
+    }
+  }
+  if (imageFiles.length > 0) {
+    event.preventDefault()
+    addImageFiles(imageFiles)
+  }
 }
 
 const addAttachmentFiles = (files: File[]) => {

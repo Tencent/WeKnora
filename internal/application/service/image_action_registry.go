@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -208,6 +209,13 @@ type runContext struct {
 	// executes anything.
 	captionThinkingKey string
 	ocrThinkingKey     string
+	// tracker and imgSpan carry the per-image trace plumbing so the OCR
+	// action can raise and resolve its own subspan ("multimodal.image[n].ocr")
+	// at the exact spot it runs — a failed OCR fails that subspan and the
+	// outcome summary without failing or retrying the whole image. Both are
+	// nil when the attempt has no parent span to hang a subspan on.
+	tracker SpanTracker
+	imgSpan *Span
 }
 
 // Param reads one private tunable, falling back to the default the pipeline
@@ -370,7 +378,41 @@ func runObservationCaptionAction(ctx context.Context, r *runContext) error {
 // runOCRAction extracts the text the image carries. It is a plain function
 // rather than a method because the OCR prompt is system-owned (knowledge base
 // custom instructions must never reach it) and no service state is involved.
+//
+// Failure semantics (the #4132 contract): an OCR failure is RECORDED — status,
+// a stable error code, the raw message, and a failed ".ocr" subspan — but it
+// does not fail the image. Retrying the whole image would re-run a caption
+// that already succeeded and duplicate its chunk, so the outcome summary (not
+// the task retry) is what surfaces the failure.
 func runOCRAction(ctx context.Context, r *runContext) error {
+	// The OCR subspan rides on the image span; without a parent span there is
+	// nothing to hang it on and the outcome fields carry the signal alone.
+	var ocrSpan *Span
+	if r.tracker != nil && r.imgSpan != nil {
+		ocrSpan = r.tracker.BeginSubSpan(ctx, r.imgSpan, r.imgSpan.Name+".ocr",
+			types.SpanKindGeneration, nil)
+	}
+	resolve := func(code string) {
+		if ocrSpan == nil {
+			return
+		}
+		if code != "" {
+			message, _ := r.out["ocr_error"].(string)
+			r.tracker.FailSpan(ctx, ocrSpan, code, message, nil)
+			return
+		}
+		r.tracker.EndSpan(ctx, ocrSpan, types.JSONMap{
+			"status": r.out["ocr_status"], "chars": r.out["ocr_chars"],
+		})
+	}
+	// A failed extraction must never leave text from a previous attempt behind.
+	r.imageInfo.OCRText = ""
+	r.out["ocr_chars"] = 0
+
+	// The OCR prompt is system-owned: knowledge base custom instructions must
+	// never reach it, or free-form business rules compete with the "No text
+	// content" contract and poison image_ocr chunks. buildVLMOCRPrompt picks
+	// the scanned-PDF or default prompt and ignores vlmCfg on purpose.
 	prompt := buildVLMOCRPrompt(r.payload.ImageSourceType, r.vlmCfg)
 	if r.payload.ImageSourceType == "scanned_pdf" {
 		logger.Infof(ctx, "[ImageMultimodal] Using scanned PDF prompt for OCR: %s", r.payload.ImageURL)
@@ -381,27 +423,45 @@ func runOCRAction(ctx context.Context, r *runContext) error {
 
 	ocrText, err := r.predictOCR(ctx, prompt)
 	if err != nil {
-		// A model-side failure is not "this image carries no text". Any non-2xx
-		// answer — 429, 5xx, a timeout, a transport reset, and the 4xx the
-		// endpoint may reject a request with (400/413/431) — arrives here as one
-		// error, and the caller deliberately does not classify it. Swallowing it
-		// is what let a failed OCR be recorded as a finished image with no
-		// content, the loss #4064 describes. Return it so the pipeline fails and
-		// the task retries; transport-level retry is the manager's job, and an
-		// image that genuinely carries nothing stays the empty branch below.
+		// A model-side failure is not "this image carries no text" (the loss
+		// #4064 describes), but retrying the whole image is not the answer
+		// either — the caption may already be valid. Record the failure with
+		// a stable code and let the outcome summary classify the image.
 		logger.Warnf(ctx, "[ImageMultimodal] OCR failed for %s: %v", r.payload.ImageURL, err)
+		r.out["ocr_status"] = "failed"
+		r.out["ocr_error_code"] = "OCR_REQUEST_FAILED"
+		if errors.Is(err, vlm.ErrTruncatedCompletion) {
+			r.out["ocr_error_code"] = "OCR_TRUNCATED"
+		}
 		r.out["ocr_error"] = err.Error()
-		return err
-	}
-	ocrText = sanitizeOCRText(ocrText)
-	if ocrText != "" {
-		r.imageInfo.OCRText = ocrText
-		r.out["ocr_chars"] = len([]rune(ocrText))
-		r.out["ocr_preview"] = previewText(ocrText, 200)
+		resolve("OCR_REQUEST_FAILED")
 		return nil
 	}
-	logger.Warnf(ctx, "[ImageMultimodal] OCR returned empty/invalid content for %s, discarded", r.payload.ImageURL)
-	r.out["ocr_chars"] = 0
-	r.out["ocr_skipped"] = "empty_or_invalid"
+	r.out["ocr_raw_chars"] = len([]rune(ocrText))
+	ocrText, vErr := validateOCRText(ocrText)
+	if vErr != nil {
+		logger.Warnf(ctx, "[ImageMultimodal] OCR rejected for %s: %v", r.payload.ImageURL, vErr)
+		r.out["ocr_status"] = "failed"
+		r.out["ocr_error_code"] = "OCR_INVALID_OUTPUT"
+		r.out["ocr_error"] = vErr.Error()
+		var invalid *ocrValidationError
+		if errors.As(vErr, &invalid) {
+			r.out["ocr_rejection_reason"] = invalid.reason
+		}
+		resolve("OCR_INVALID_OUTPUT")
+		return nil
+	}
+	if ocrText != "" {
+		r.imageInfo.OCRText = ocrText
+		r.out["ocr_status"] = "succeeded"
+		r.out["ocr_chars"] = len([]rune(ocrText))
+		r.out["ocr_preview"] = previewText(ocrText, 200)
+		resolve("")
+		return nil
+	}
+	logger.Warnf(ctx, "[ImageMultimodal] OCR returned no text for %s", r.payload.ImageURL)
+	r.out["ocr_status"] = "no_text"
+	r.out["ocr_skipped"] = "no_text"
+	resolve("")
 	return nil
 }

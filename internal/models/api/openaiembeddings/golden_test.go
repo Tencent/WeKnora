@@ -160,8 +160,8 @@ func TestImageFormatDecidesWhetherImagesAreAccepted(t *testing.T) {
 	assert.True(t, newClient("u", api.EmbeddingsSettings{ImageFormat: api.EmbeddingImageMessages}, 0).AcceptsImages())
 }
 
-// A conversation yields one vector, so a batch is one request per item, and
-// texts follow images into `messages` only when the row asks.
+// Endpoints without batch_messages keep one request per conversation, and
+// texts follow images into messages only when the row asks.
 func TestMessagesFormatSendsOneRequestPerItem(t *testing.T) {
 	t.Setenv("SSRF_WHITELIST", "127.0.0.1")
 	var bodies []map[string]any
@@ -208,6 +208,78 @@ func TestMessagesFormatSendsOneRequestPerItem(t *testing.T) {
 	assert.Equal(t, []any{map[string]any{"role": "user", "content": []any{
 		map[string]any{"type": "text", "text": "a"},
 	}}}, bodies[0]["messages"])
+}
+
+func TestBatchMessagesPreservesInputsAndRequestSettings(t *testing.T) {
+	for _, images := range []bool{false, true} {
+		t.Run(fmt.Sprintf("images=%v", images), func(t *testing.T) {
+			var bodies []map[string]any
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var body map[string]any
+				require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+				bodies = append(bodies, body)
+				_, _ = w.Write([]byte(`{"data":[{"index":1,"embedding":[2]},{"index":0,"embedding":[1]}]}`))
+			}))
+			defer server.Close()
+			c := newClient(server.URL+"/v1", api.EmbeddingsSettings{
+				BatchMessages: true, TextAsMessages: true, ImageFormat: api.EmbeddingImageMessages,
+				ImagePrompt: "Represent the image.", SendEncodingFormat: true,
+				InputTypeField: "input_type", InputTypeValues: map[string]string{"query": "query"},
+				ExtraBody: map[string]any{"add_special_tokens": true},
+			}, 0)
+			var got [][]float32
+			var err error
+			if images {
+				got, err = c.EmbedImages(context.Background(), []api.EmbedImage{
+					{Data: []byte{1}, MIMEType: "image/png"}, {Data: []byte{2}, MIMEType: "image/png"},
+				}, api.EmbedQuery)
+			} else {
+				got, err = c.Embed(context.Background(), []string{"a", "b"}, api.EmbedQuery)
+			}
+			require.NoError(t, err)
+			assert.Equal(t, [][]float32{{1}, {2}}, got, "response indices restore input order")
+			require.Len(t, bodies, 1)
+			body := bodies[0]
+			assert.NotContains(t, body, "input")
+			assert.Equal(t, true, body["add_special_tokens"])
+			assert.Equal(t, "float", body["encoding_format"])
+			assert.Equal(t, "query", body["input_type"])
+			conversations := body["messages"].([]any)
+			require.Len(t, conversations, 2)
+			for i, conv := range conversations {
+				messages := conv.([]any)
+				require.Len(t, messages, 1)
+				turn := messages[0].(map[string]any)
+				assert.Equal(t, "user", turn["role"])
+				content := turn["content"].([]any)
+				if images {
+					require.Len(t, content, 2)
+					assert.Equal(t, api.EmbedImage{Data: []byte{byte(i + 1)}, MIMEType: "image/png"}.DataURI(),
+						content[0].(map[string]any)["image_url"].(map[string]any)["url"])
+					assert.Equal(t, "Represent the image.", content[1].(map[string]any)["text"])
+				} else {
+					require.Len(t, content, 1)
+					assert.Equal(t, []string{"a", "b"}[i], content[0].(map[string]any)["text"])
+				}
+			}
+		})
+	}
+}
+
+func TestBatchMessagesEmptySingletonAndInvalidResponses(t *testing.T) {
+	server, _, body := serve(t, `{"data":[{"index":0,"embedding":[1]}]}`)
+	defer server.Close()
+	c := newClient(server.URL, api.EmbeddingsSettings{TextAsMessages: true, BatchMessages: true}, 0)
+	got, err := c.Embed(context.Background(), nil, api.EmbedDocument)
+	require.NoError(t, err)
+	assert.Nil(t, got)
+	assert.Nil(t, *body, "empty input sends no request")
+	_, err = c.Embed(context.Background(), []string{"a"}, api.EmbedDocument)
+	require.NoError(t, err)
+	assert.IsType(t, map[string]any{}, (*body)["messages"].([]any)[0], "singleton keeps a flat conversation")
+	_, err = c.Embed(context.Background(), []string{"a", "b"}, api.EmbedDocument)
+	require.ErrorContains(t, err, "no embedding returned for input 1",
+		"never accept a fused or incomplete batch response")
 }
 
 func TestDecodesArkTextResponse(t *testing.T) {

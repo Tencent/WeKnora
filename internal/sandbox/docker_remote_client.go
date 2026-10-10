@@ -216,7 +216,9 @@ func (c *DockerRemoteClient) Provider() RemoteProvider { return SandboxTypeDocke
 // refresh: idle reclamation is WeKnora's own sweep, not a provider feature.
 // SupportsVolumes is false until the volume-mount surface is mapped onto
 // Docker named volumes; advertising it early would let a workspace configure
-// a mount that silently never appears.
+// a mount that silently never appears. SupportsDesktop stays false: the
+// desktop needs a way to reach the container's websockify port, which this
+// backend has no gateway for yet.
 func (c *DockerRemoteClient) Capabilities() RemoteSandboxCapabilities {
 	return RemoteSandboxCapabilities{
 		SupportsReconnect:             true,
@@ -230,6 +232,8 @@ func (c *DockerRemoteClient) Capabilities() RemoteSandboxCapabilities {
 		// filesystem-only (no memory) and lives on this daemon.
 		SupportsSnapshots: true,
 		SupportsVolumes:   false,
+		// The terminal is a hijacked TTY exec; see docker_terminal.go.
+		SupportsTerminals: true,
 	}
 }
 

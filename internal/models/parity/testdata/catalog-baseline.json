@@ -101,7 +101,7 @@
   "gemini/KnowledgeQA/gemini-3.7-flash": "570b30391590c3fa380e98e8323bf2187635d18db427eae3d75f9e63def26c8d",
   "gemini/KnowledgeQA/gemini-3.8-flash": "6d40802ed8d3b310e1e91c186f769a4f8a298138538853cf623ad43e59c29140",
   "gemini/KnowledgeQA/gemini-3snapshot": "c5931f2304774b718637f47540e78b66cbf855b4a4189c9fc0cea2040a12951d",
-  "generic/Embedding/snapshotqwen3-vl-embeddingsnapshot": "5b7394b420438753d8a7c4ad58af94ceab910f1e3497c0ccef357ca357f96626",
+  "generic/Embedding/snapshotqwen3-vl-embeddingsnapshot": "a1dedaaddb23ad1449d1aef38f0f032d7bcd834bdf079c511c65ec03cccfffe4",
   "generic/KnowledgeQA/gpt-5snapshot": "3e3712264316db008c1465a2d7c395072d85942d0352196e456342cef0b14eb0",
   "generic/KnowledgeQA/o1snapshot": "52340886b4160a0cb9342ae33a7c81304c9dad5d22c2d1c1ce073f89860a30b1",
   "generic/KnowledgeQA/o3snapshot": "782e836769e56c43d9c954ab2d563df7d2f476ae4fb4d588bb8bf3c88ae42ce6",

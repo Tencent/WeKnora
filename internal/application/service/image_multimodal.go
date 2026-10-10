@@ -28,17 +28,17 @@ import (
 )
 
 const (
-	vlmOCRPrompt = "<system_prompt>\n" +
-		"You are an OCR assistant. Your task is to extract all body text content from this document image and output in pure Markdown format.\n" +
-		"</system_prompt>\n\n" +
-		"<instructions>\n" +
-		"1. Ignore headers and footers.\n" +
-		"2. Use Markdown table syntax for tables.\n" +
-		"3. Use LaTeX format for formulas (wrapped with $ or $$).\n" +
-		"4. Organize content in the original reading order.\n" +
-		"5. Output ONLY the extracted text content. Do NOT include any HTML tags, reasoning, or unrelated comments.\n" +
-		"6. If there is absolutely no recognizable text content in the image, reply ONLY with: No text content.\n" +
-		"</instructions>"
+	vlmOCRPrompt = "You are an OCR assistant. Transcribe only text that is visibly present in the image, " +
+		"preserving its original language.\n" +
+		"The image may be a screenshot, photograph, diagram, or document. For scattered labels, " +
+		"buttons, scores, and other UI text, output plain text in reading order, one item per line. " +
+		"Do not force this content into a table.\n" +
+		"Use Markdown tables only when the image contains a real table with readable cells. Never " +
+		"output empty table cells, invented layout, repeated filler, or descriptions of the image.\n" +
+		"Preserve readable numbers and symbols. Do not guess unreadable text. Stop after all visible " +
+		"text has been transcribed; repeat text only when it visibly appears more than once.\n" +
+		"Output only the extracted text, without explanations, HTML tags, or code fences. If no text " +
+		"is recognizable, reply only: No text content."
 	vlmOCRScannedPDFPrompt = "<system_prompt>\n" +
 		"You are an OCR and document layout extraction assistant. The input image is a page from a scanned PDF document.\n" +
 		"Your task is to carefully extract all text and layout structure from the image, and output the result in pure Markdown format.\n" +
@@ -345,7 +345,10 @@ func (s *ImageMultimodalService) processImage(
 
 	// The pipeline runs to completion, including the decision it makes about
 	// OCR. Nothing below re-reads its result except the chunk building that
-	// follows.
+	// follows. The tracker and the image span travel with the run context so
+	// the OCR action can raise and resolve its own subspan exactly like the
+	// action-loop layout did (a failed OCR fails the .ocr subspan and the
+	// outcome summary, without failing or retrying the whole image).
 	if err := pipeline.Run(ctx, &runContext{
 		payload:    payload,
 		params:     payload.ImagePipelineParams,
@@ -355,6 +358,8 @@ func (s *ImageMultimodalService) processImage(
 		vlmCfg:     vlmCfg,
 		imageInfo:  &imageInfo,
 		out:        out,
+		tracker:    tracker,
+		imgSpan:    imgSpan,
 	}); err != nil {
 		// Surface the pipeline failure on this image's span instead of
 		// letting the deferred finalize misread it as success. Without
@@ -406,10 +411,19 @@ func (s *ImageMultimodalService) processImage(
 		})
 	}
 	out["chunks_created"] = len(newChunks)
+	if out["ocr_status"] == "failed" {
+		out["outcome"] = "partial_failure"
+		if len(newChunks) == 0 {
+			out["outcome"] = "failed"
+		}
+	}
 
 	if len(newChunks) == 0 {
 		// Deferred finalize will count this image on success.
 		out["skipped"] = "no_extracted_content"
+		if out["ocr_status"] == "failed" {
+			out["skipped"] = "ocr_failed"
+		}
 		return nil
 	}
 

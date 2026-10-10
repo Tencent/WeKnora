@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"math"
+	"slices"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/types"
@@ -155,4 +156,79 @@ func TestRescaleUnboundedScores_IgnoresNonFiniteWhenFindingMax(t *testing.T) {
 	require.Equal(t, 0.0, hits[0].Score)
 	require.InDelta(t, 1.0, hits[1].Score, 1e-9)
 	require.InDelta(t, 0.5, hits[2].Score, 1e-9)
+}
+
+// The retrievers run concurrently and their lists are appended in goroutine
+// completion order; the order of the hits inside a list is whatever the engine
+// returned. Neither may influence a chunk's rank: ranks are per-list and read
+// after sorting by score (#3796, fixed by #3687).
+func TestBestRanks_IsOrderInvariant(t *testing.T) {
+	t.Parallel()
+
+	rankLists := func(reversed bool) [][]*types.IndexWithScore {
+		docList := []*types.IndexWithScore{
+			{ChunkID: "doc-1", Score: 0.81},
+			{ChunkID: "doc-2", Score: 0.80},
+			{ChunkID: "doc-3", Score: 0.79},
+		}
+		faqList := []*types.IndexWithScore{
+			{ChunkID: "faq-1", Score: 0.93},
+			{ChunkID: "faq-2", Score: 0.70},
+		}
+		keywordList := []*types.IndexWithScore{
+			{ChunkID: "faq-1", Score: 7},
+			{ChunkID: "doc-3", Score: 3},
+		}
+		if reversed {
+			slices.Reverse(docList)
+			slices.Reverse(faqList)
+			slices.Reverse(keywordList)
+			return [][]*types.IndexWithScore{keywordList, faqList, docList}
+		}
+		return [][]*types.IndexWithScore{docList, faqList, keywordList}
+	}
+
+	// faq-1 tops both of its lists. doc-3 holds rank 2 in the keyword list and
+	// rank 3 in the document list, so its best rank is 2.
+	want := map[string]int{"doc-1": 1, "doc-2": 2, "doc-3": 2, "faq-1": 1, "faq-2": 2}
+	require.Equal(t, want, bestRanks(rankLists(false)))
+	require.Equal(t, want, bestRanks(rankLists(true)),
+		"shuffling the lists must not change the ranks")
+}
+
+// The same property end to end: the list that finishes last must not push its
+// best hit behind every hit of the list that finished first.
+func TestFuseOrDeduplicate_HybridIgnoresArrivalOrder(t *testing.T) {
+	t.Parallel()
+
+	fuse := func(reversed bool) map[string]float64 {
+		t.Helper()
+		docList := []*types.IndexWithScore{
+			{ChunkID: "doc-1", Score: 0.81},
+			{ChunkID: "doc-2", Score: 0.80},
+		}
+		faqList := []*types.IndexWithScore{
+			{ChunkID: "faq-1", Score: 0.93},
+			{ChunkID: "faq-2", Score: 0.70},
+		}
+		keywordList := []*types.IndexWithScore{{ChunkID: "faq-1", Score: 7}}
+
+		vectorLists := [][]*types.IndexWithScore{docList, faqList}
+		if reversed {
+			slices.Reverse(docList)
+			slices.Reverse(faqList)
+			// The FAQ list is the one that arrives first here.
+			vectorLists = [][]*types.IndexWithScore{faqList, docList}
+		}
+		scores := map[string]float64{}
+		for _, hit := range fuseOrDeduplicate(context.Background(), vectorLists,
+			[][]*types.IndexWithScore{keywordList}, nil) {
+			scores[hit.ChunkID] = hit.Score
+		}
+		return scores
+	}
+
+	// fuseOrDeduplicate writes its RRF scores into the input hits, so each call
+	// builds its own fixtures.
+	require.Equal(t, fuse(false), fuse(true))
 }

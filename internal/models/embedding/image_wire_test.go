@@ -197,8 +197,9 @@ func TestSelfHostedQwen3VLEmbeddingSendsTextAndImagesThroughTheTemplate(t *testi
 	got, err := e.BatchEmbed(types.WithEmbedQuery(context.Background()), []string{"ab", "c"})
 	require.NoError(t, err)
 	assert.Equal(t, [][]float32{{2}, {1}}, got)
-	_, err = ie.BatchEmbedImages(context.Background(), pngs(1))
+	images, err := ie.BatchEmbedImages(context.Background(), pngs(6))
 	require.NoError(t, err)
+	assert.Equal(t, [][]float32{{1}, {2}, {3}, {4}, {5}, {6}}, images)
 
 	message := func(part map[string]any) map[string]any {
 		return map[string]any{
@@ -207,12 +208,35 @@ func TestSelfHostedQwen3VLEmbeddingSendsTextAndImagesThroughTheTemplate(t *testi
 			"messages": []any{map[string]any{"role": "user", "content": []any{part}}},
 		}
 	}
-	require.Len(t, up.requests, 3, "the messages format carries one input per request")
-	assert.Equal(t, message(map[string]any{"type": "text", "text": "ab"}), up.requests[0].body)
-	assert.Equal(t, message(map[string]any{"type": "text", "text": "c"}), up.requests[1].body)
-	assert.Equal(t, message(map[string]any{
-		"type": "image_url", "image_url": map[string]any{"url": "data:image/png;base64,iQ=="},
-	}), up.requests[2].body)
+	textBatch := message(nil)
+	textBatch["messages"] = []any{
+		message(map[string]any{"type": "text", "text": "ab"})["messages"],
+		message(map[string]any{"type": "text", "text": "c"})["messages"],
+	}
+	imageMessage := func(img Image) map[string]any {
+		return message(map[string]any{"type": "image_url", "image_url": map[string]any{"url": img.DataURI()}})
+	}
+	imageBatch := message(nil)
+	conversations := make([]any, 5)
+	for i, img := range pngs(5) {
+		conversations[i] = imageMessage(img)["messages"]
+	}
+	imageBatch["messages"] = conversations
+	require.Len(t, up.requests, 3, "one text batch and image batches of five and one")
+	assert.Equal(t, textBatch, up.requests[0].body)
+	assert.Equal(t, imageBatch, up.requests[1].body)
+	assert.Equal(t, imageMessage(pngs(6)[5]), up.requests[2].body)
+}
+
+func TestSelfHostedQwenMessagesBatchCanBeDisabledForOlderServers(t *testing.T) {
+	up := newUpstream(t)
+	e := imageEmbedder(t, up, "generic", "Qwen/Qwen3-VL-Embedding-8B", "/v1",
+		&types.ModelSpecOverride{Compat: map[string]any{"batch_messages": false}})
+	got, err := e.BatchEmbed(context.Background(), []string{"ab", "c"})
+	require.NoError(t, err)
+	assert.Equal(t, [][]float32{{2}, {1}}, got)
+	require.Len(t, up.requests, 2)
+	assert.IsType(t, map[string]any{}, up.requests[0].body["messages"].([]any)[0])
 }
 
 func TestImageEmbeddingRefusesWhatTheVendorDocumentsItWillNotTake(t *testing.T) {

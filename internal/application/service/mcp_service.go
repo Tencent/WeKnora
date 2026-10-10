@@ -430,6 +430,8 @@ func (s *mcpServiceService) TestMCPService(
 		}
 		logger.GetLogger(ctx).Warnf("Failed to list tools: %v", err)
 		tools = []*types.MCPTool{}
+	} else if s.mcpManager != nil {
+		s.mcpManager.InvalidateToolSchemas(service.ID, client)
 	}
 
 	resources, err := client.ListResources(testCtx)
