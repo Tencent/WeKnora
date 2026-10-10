@@ -450,7 +450,7 @@
                           </div>
                         </div>
 
-                        <div v-if="uiState.multimodalConfig.enabled" class="setting-row">
+                        <div v-if="uiState.multimodalConfig.enabled" class="setting-row setting-row-vertical">
                           <div class="setting-info">
                             <label>{{ t('knowledgeEditor.advanced.multimodal.imagePipelineSectionLabel') }}</label>
                             <p class="desc">{{ t('knowledgeEditor.advanced.multimodal.imagePipelineSectionDescription') }}</p>
