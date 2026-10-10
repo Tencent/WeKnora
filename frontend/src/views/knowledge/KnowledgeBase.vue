@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { isKnowledgeBaseReady } from '@/utils/knowledgeBaseReady';
 import { ref, onMounted, onUnmounted, watch, reactive, computed, nextTick } from "vue";
 import { MessagePlugin } from "tdesign-vue-next";
 import DocContent from "@/components/doc-content.vue";
@@ -1633,14 +1634,7 @@ const ensureDocumentKbReady = () => {
     MessagePlugin.warning(t('knowledgeEditor.messages.missingId'));
     return false;
   }
-  if (!kbInfo.value || !kbInfo.value.summary_model_id) {
-    MessagePlugin.warning(t('knowledgeBase.notInitialized'));
-    return false;
-  }
-  // Embedding model only required when RAG indexing is enabled
-  const strategy = (kbInfo.value as any).indexing_strategy
-  const needsEmbedding = !strategy || strategy.vector_enabled || strategy.keyword_enabled
-  if (needsEmbedding && !kbInfo.value.embedding_model_id) {
+  if (!isKnowledgeBaseReady(kbInfo.value)) {
     MessagePlugin.warning(t('knowledgeBase.notInitialized'));
     return false;
   }
@@ -2313,6 +2307,11 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
               </t-tooltip>
             </div>
           </div>
+          <t-alert v-if="kbInfo && canManage && !isKnowledgeBaseReady(kbInfo)" theme="warning" :message="$t('knowledgeBase.notInitialized')">
+            <template #operation>
+              <t-button variant="text" @click="handleOpenKBSettings">{{ $t('knowledgeBase.settings') }}</t-button>
+            </template>
+          </t-alert>
           <p v-if="kbInfo?.description" class="document-subtitle">{{ kbInfo.description }}</p>
           <p v-if="unsupportedFileTypes.length" class="parser-hint" @click="goToParserSettings">
             <t-icon name="info-circle" class="parser-hint-icon" />
