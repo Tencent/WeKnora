@@ -119,6 +119,15 @@ flowchart TD
 `internal/application/repository/retriever/postgres/repository.go`。数据与业务库同库（`embeddings` 表，GORM 管理）。
 
 - **向量检索**：pgvector `halfvec`（半精度，2 字节/维）。`embedding` 列不定维，HNSW 索引建在表达式 `(embedding::halfvec(dim)) halfvec_cosine_ops` 上——**ORDER BY 表达式必须与索引表达式完全一致**（两侧显式 cast），否则退化为顺序扫描（源码注释引 pgvector issue [#702](https://github.com/pgvector/pgvector/issues/702)/[#835](https://github.com/pgvector/pgvector/issues/835)）。查询用子查询先取 `expandedTopK`（TopK*2，夹在 [100,200]，避免大 LIMIT 拖垮 HNSW）个候选算 `distance = embedding <=> query`，再按 `distance <= 1-threshold` 过滤，`score = 1 - distance`。事务内 `SET LOCAL hnsw.ef_search`（≥40）与 `SET LOCAL hnsw.iterative_scan = strict_order`（pgvector ≥ 0.8，选择性过滤下持续补召回），老版本 GUC 不存在时自动降级重试。
+- **按维度自动建 HNSW 索引**：迁移只为 3584 / 798 / 1024 维建好了索引，其它维度过去每次向量检索都是顺序扫描。现在某个维度**第一次写入或检索**时，会在后台用 `CREATE INDEX CONCURRENTLY` 建部分索引 `embeddings_embedding_idx_<dim>`（`WHERE dimension = <dim>`），请求本身不等待，也不会因此失败。已有同表达式的**有效** HNSW 索引（不论名字）会跳过；上次没建完留下的同名无效索引会先删再建；超过 4000 维（pgvector 对 `halfvec` 的上限）不建；`AUTO_MIGRATE=false` 时不建。多副本之间用会话级 advisory lock 轮流，不会删掉彼此正在建的索引。建索引的那个会话会把 `statement_timeout` 临时设为 0、结束后复原，避免角色或库级超时把长时间的构建取消、留下无效索引。
+
+  > **升级影响**：升级后该维度的**第一次检索**就会触发（不需要有新写入），在生产库上后台建索引。已有大量该维度数据时，构建会持续占用较多 CPU / I/O，耗时与 `maintenance_work_mem` 强相关——HNSW 图放不进内存时会明显变慢。建议在低峰期升级，或提前手动建好，语句与自动构建一致：
+  >
+  > ```sql
+  > CREATE INDEX CONCURRENTLY IF NOT EXISTS embeddings_embedding_idx_<dim> ON embeddings
+  >   USING hnsw ((embedding::halfvec(<dim>)) halfvec_cosine_ops)
+  >   WITH (m = 16, ef_construction = 64) WHERE (dimension = <dim>);
+  > ```
 - **关键词检索**：ParadeDB `pg_search` BM25——`content ||| query`（任意 token 匹配）+ `paradedb.score(id) as score`。
 - **过滤**：`knowledge_base_id` / `knowledge_id` / `tag_id` IN 过滤（AND 语义），`is_enabled` 为 NULL 或 true。
 - **建索引**：`BatchSave` + `ON CONFLICT DO NOTHING`；删除按 chunk/source/knowledge ID 物理删除。
