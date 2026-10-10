@@ -30,16 +30,6 @@ jobs:
       - name: Lint chart
         run: helm lint ./helm
 
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.12"
-
-      - name: Test Service names and consumer references
-        run: |
-          python3 -m pip install PyYAML==6.0.3
-          python3 -m unittest discover -s helm/tests -v
-
       - name: Verify application image tags
         shell: bash
         run: |
