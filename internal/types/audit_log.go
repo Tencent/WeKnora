@@ -132,6 +132,19 @@ const (
 	AuditActionSystemAPIKeyCreated AuditAction = "system.api_key_created"
 	AuditActionSystemAPIKeyRevoked AuditAction = "system.api_key_revoked"
 
+	// Account lifecycle actions driven from Settings → 系统管理 → 用户管理 →
+	// 本地用户. TenantID=0 (system-scope); TargetType="user" and TargetID is
+	// the affected account. Details carry {target_email, target_username}.
+	AuditActionSystemUserDisabled AuditAction = "system.user_disabled"
+	AuditActionSystemUserEnabled  AuditAction = "system.user_enabled"
+	AuditActionSystemUserDeleted  AuditAction = "system.user_deleted"
+
+	// AuditActionSystemAuthProviderUpdated fires when a SystemAdmin saves the
+	// OIDC or LDAP provider configuration. Details carry {provider: oidc|ldap,
+	// enabled, secret_changed}. The credential itself is never recorded.
+	// TenantID=0 (system-scope).
+	AuditActionSystemAuthProviderUpdated AuditAction = "system.auth_provider_updated"
+
 	// Runtime queue mutations are privileged SystemAdmin actions. Retrying an
 	// archived task can repeat its original side effects; deleting one removes
 	// the Redis failure record. Both must leave a platform audit trail.

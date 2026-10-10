@@ -103,6 +103,24 @@ type UserService interface {
 	// preferences blob (PATCH semantics: only keys present in `patch`
 	// overwrite existing values). Returns the updated, persisted prefs.
 	UpdateUserPreferences(ctx context.Context, userID string, patch types.UserPreferences) (types.UserPreferences, error)
+
+	// ---- Settings → 系统管理 → 用户管理 → 本地用户 ----------------------
+
+	// ListManagedUsers pages the whole users table for the SystemAdmin
+	// 用户管理 screen. `keyword` is an optional substring filter over
+	// username/email; the returned count matches the same filter.
+	ListManagedUsers(
+		ctx context.Context, keyword string, offset, limit int,
+	) ([]*types.User, int64, error)
+	// ManagedUserStats returns the header counters for 用户管理.
+	ManagedUserStats(ctx context.Context) (*types.ManagedUserStats, error)
+	// SetManagedUserActive enables or disables an account. Disabling revokes
+	// the user's outstanding sessions so the change takes effect immediately.
+	SetManagedUserActive(ctx context.Context, userID string, active bool) (*types.User, error)
+	// SoftDeleteManagedUser tombstones an account (soft delete), revokes its
+	// sessions and frees its unique email/username so the same identity can be
+	// re-provisioned later. Callers enforce the self/last-admin guards.
+	SoftDeleteManagedUser(ctx context.Context, userID string) (*types.User, error)
 }
 
 // UserRepository defines the user repository interface
@@ -134,6 +152,20 @@ type UserRepository interface {
 	// RevokeSystemAdmin removes system-admin privileges with the
 	// last-admin/self-revoke checks performed atomically.
 	RevokeSystemAdmin(ctx context.Context, userID, actorID string) (*types.User, error)
+	// ListManagedUsers pages the whole users table for the SystemAdmin
+	// 用户管理 screen. `keyword` is an optional substring filter over
+	// username/email; the returned count matches the same filter.
+	ListManagedUsers(
+		ctx context.Context, keyword string, offset, limit int,
+	) ([]*types.User, int64, error)
+	// ManagedUserStats returns the header counters for 用户管理.
+	ManagedUserStats(ctx context.Context) (*types.ManagedUserStats, error)
+	// SetManagedUserActive enables or disables an account.
+	SetManagedUserActive(ctx context.Context, userID string, active bool) (*types.User, error)
+	// SoftDeleteManagedUser tombstones an account (soft delete), revokes its
+	// sessions and frees its unique email/username so the same identity can be
+	// re-provisioned later.
+	SoftDeleteManagedUser(ctx context.Context, userID string) (*types.User, error)
 	// SearchUsers searches users by username or email
 	SearchUsers(ctx context.Context, query string, limit int) ([]*types.User, error)
 }

@@ -48,4 +48,10 @@ export const SYSTEM_ADMIN_SETTINGS_SECTIONS = new Set([
   'runtime-queues',
   'platform-api-keys',
   'system-audit-log',
+  // 用户管理 manages deployment-wide login sources (local accounts, the
+  // generic OIDC provider, LDAP) and mirrors the server-side
+  // g.SystemAdmin() guard on /system/admin/*. Deliberately NOT filed under
+  // the 账户 group: it acts on every account in the deployment, not on the
+  // signed-in user's own profile.
+  'user-management',
 ])

@@ -34,6 +34,17 @@ test('personal skill environment variables are visible to every member', () => {
 test('system administration settings stay explicitly system-admin-only', () => {
   assert.deepEqual(
     [...SYSTEM_ADMIN_SETTINGS_SECTIONS],
-    ['system-global', 'runtime-queues', 'platform-api-keys', 'system-audit-log'],
+    ['system-global', 'runtime-queues', 'platform-api-keys', 'system-audit-log', 'user-management'],
+  )
+})
+
+test('user management is a system-admin section, not an account section', () => {
+  assert.equal(SYSTEM_ADMIN_SETTINGS_SECTIONS.has('user-management'), true)
+  // It manages every account in the deployment, so it must not fall back to
+  // the viewer-level floor used by the 账户 pages.
+  assert.equal(SETTINGS_SECTION_MIN_ROLE['user-management'], undefined)
+  assert.equal(
+    Object.prototype.hasOwnProperty.call(SETTINGS_MANAGEMENT_SHORTCUT_MIN_ROLE, 'user-management'),
+    false,
   )
 })

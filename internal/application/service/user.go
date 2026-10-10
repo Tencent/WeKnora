@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,6 +14,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -104,6 +106,11 @@ type userService struct {
 	memberService    interfaces.TenantMemberService
 	config           *config.Config
 	systemSettingSvc interfaces.SystemSettingService
+	// authProviderSvc supplies the platform-level OIDC / LDAP configuration
+	// managed in Settings → 系统管理 → 用户管理. Optional: a nil value keeps
+	// the historical behaviour (environment-only OIDC, no directory login),
+	// which is what partially-wired unit tests get.
+	authProviderSvc interfaces.PlatformAuthProviderService
 }
 
 // NewUserService creates a new user service instance
@@ -114,6 +121,7 @@ func NewUserService(
 	tenantService interfaces.TenantService,
 	memberService interfaces.TenantMemberService,
 	systemSettingSvc interfaces.SystemSettingService,
+	authProviderSvc interfaces.PlatformAuthProviderService,
 ) interfaces.UserService {
 	return &userService{
 		userRepo:         userRepo,
@@ -122,6 +130,7 @@ func NewUserService(
 		memberService:    memberService,
 		config:           configInfo,
 		systemSettingSvc: systemSettingSvc,
+		authProviderSvc:  authProviderSvc,
 	}
 }
 
@@ -225,27 +234,48 @@ func (s *userService) Register(ctx context.Context, req *types.RegisterRequest) 
 	return user, nil
 }
 
-// Login authenticates a user and returns tokens
+// loginRejected builds the single failure response every rejected login gets.
+// One message for "no such account", "wrong password" and "directory said no"
+// keeps the endpoint from doubling as an account-enumeration oracle.
+func loginRejected() *types.LoginResponse {
+	return &types.LoginResponse{
+		Success: false,
+		Message: "Invalid email or password",
+	}
+}
+
+// hasUsableLocalPassword moved to types.User.HasUsableLocalPassword so the
+// HTTP layer can use the same rule when labelling the 用户管理 list.
+
+// Login authenticates a user and returns tokens.
+//
+// Three credential paths, tried in a deliberate order:
+//
+//  1. Local bcrypt password — the normal path.
+//  2. Directory (LDAP/AD) login for an existing account that has no usable
+//     local password (auto-provisioned by OIDC/LDAP, or hashless).
+//  3. Directory login for an identifier with no local account at all,
+//     followed by just-in-time provisioning.
+//
+// The ordering in (2) is the security-relevant part: the supplied password is
+// only ever forwarded to the directory when the local account cannot itself
+// have a user-known password, so a local account cannot be used to relay
+// password guesses into the corporate directory.
 func (s *userService) Login(ctx context.Context, req *types.LoginRequest) (*types.LoginResponse, error) {
 	logger.Info(ctx, "Start user login")
-	// Get user by email
+
 	user, err := s.userRepo.GetUserByEmail(ctx, req.Email)
-	if err != nil {
-		logger.Errorf(ctx, "Failed to get user by email: %v", err)
-		return &types.LoginResponse{
-			Success: false,
-			Message: "Invalid email or password",
-		}, nil
-	}
-	if user == nil {
+	if err != nil || user == nil {
+		// No local account. Give the directory a chance to authenticate the
+		// identifier and, if it does and JIT provisioning is on, create the
+		// local account on the spot.
+		if provisioned, ldapErr := s.loginViaLDAPProvisioning(ctx, req); provisioned != nil || ldapErr != nil {
+			return provisioned, ldapErr
+		}
 		logger.Warn(ctx, "User not found for email")
-		return &types.LoginResponse{
-			Success: false,
-			Message: "Invalid email or password",
-		}, nil
+		return loginRejected(), nil
 	}
 
-	// Check if user is active
 	if !user.IsActive {
 		logger.Warn(ctx, "User account is disabled")
 		return &types.LoginResponse{
@@ -254,21 +284,31 @@ func (s *userService) Login(ctx context.Context, req *types.LoginRequest) (*type
 		}, nil
 	}
 
-	// Verify password
-	err = bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.Password))
-	if err != nil {
+	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.Password)); err != nil {
+		// Local password miss. Only reach for the directory when this account
+		// has no user-known local password of its own.
+		if !user.HasUsableLocalPassword() && s.authProviderSvc != nil {
+			info, ldapErr := s.authProviderSvc.AuthenticateLDAP(ctx, req.Email, req.Password)
+			if ldapErr != nil {
+				logger.Warnf(ctx, "LDAP authentication error: %v", ldapErr)
+			}
+			if info != nil {
+				logger.Infof(ctx, "User %s authenticated via LDAP fallback", user.ID)
+				return s.completeLogin(ctx, user), nil
+			}
+		}
 		logger.Warn(ctx, "Password verification failed")
-		return &types.LoginResponse{
-			Success: false,
-			Message: "Invalid email or password",
-		}, nil
+		return loginRejected(), nil
 	}
 	logger.Info(ctx, "Password verification successful")
 
-	// Generate tokens. Resolve the target tenant once so the JWT claim
-	// and the tenant we return below agree — otherwise an honoured
-	// "last active tenant" preference would mint a token for tenant N
-	// but tell the client they're in their home tenant.
+	return s.completeLogin(ctx, user), nil
+}
+
+// completeLogin issues the tenant-scoped token pair and assembles the login
+// response. Shared by every credential path so the JWT claim and the returned
+// active tenant always agree.
+func (s *userService) completeLogin(ctx context.Context, user *types.User) *types.LoginResponse {
 	logger.Info(ctx, "Generating tokens")
 	resolvedTenantID := s.resolveLoginTenantID(ctx, user)
 	accessToken, refreshToken, err := s.generateTokensForTenant(ctx, user, resolvedTenantID)
@@ -277,12 +317,11 @@ func (s *userService) Login(ctx context.Context, req *types.LoginRequest) (*type
 		return &types.LoginResponse{
 			Success: false,
 			Message: "Login failed",
-		}, nil
+		}
 	}
 	logger.Info(ctx, "Tokens generated successfully")
 
-	// Get tenant information. A zero resolved ID is a valid tenantless
-	// identity, not a failed tenant lookup.
+	// A zero resolved ID is a valid tenantless identity, not a failed lookup.
 	var tenant *types.Tenant
 	if resolvedTenantID > 0 {
 		tenant, err = s.tenantService.GetTenantByID(ctx, resolvedTenantID)
@@ -304,7 +343,117 @@ func (s *userService) Login(ctx context.Context, req *types.LoginRequest) (*type
 		Memberships:  memberships,
 		Token:        accessToken,
 		RefreshToken: refreshToken,
-	}, nil
+	}
+}
+
+// loginViaLDAPProvisioning handles the "no local account yet" path. It returns
+// (nil, nil) when the directory is not configured, does not know the user, or
+// auto-provisioning is switched off — in every one of those cases the caller
+// falls back to the generic invalid-credentials response.
+func (s *userService) loginViaLDAPProvisioning(
+	ctx context.Context, req *types.LoginRequest,
+) (*types.LoginResponse, error) {
+	if s.authProviderSvc == nil {
+		return nil, nil
+	}
+	ldapCfg := s.authProviderSvc.ResolveLDAPConfig(ctx)
+	if ldapCfg == nil || !ldapCfg.AutoCreateUser {
+		return nil, nil
+	}
+
+	info, err := s.authProviderSvc.AuthenticateLDAP(ctx, req.Email, req.Password)
+	if err != nil {
+		logger.Warnf(ctx, "LDAP authentication error: %v", err)
+		return nil, nil
+	}
+	if info == nil {
+		return nil, nil
+	}
+
+	email := strings.TrimSpace(info.Email)
+	if email == "" {
+		// Without an email we cannot form a stable local identity; the login
+		// form is email-keyed, so a directory entry that exposes no mail
+		// attribute cannot be supported.
+		logger.Warn(ctx, "LDAP entry has no email attribute; auto-provisioning skipped")
+		return nil, nil
+	}
+
+	// Another request may have provisioned the account while we were talking
+	// to the directory — reuse it rather than racing into a duplicate error.
+	if existing, lookupErr := s.userRepo.GetUserByEmail(ctx, email); lookupErr == nil && existing != nil {
+		if !existing.IsActive {
+			return &types.LoginResponse{Success: false, Message: "Account is disabled"}, nil
+		}
+		return s.completeLogin(ctx, existing), nil
+	}
+
+	provisioning := types.TenantProvisioningMode(ldapCfg.DefaultTenantMode)
+	if !provisioning.IsValid() {
+		// Empty is Register's own "follow the deployment default" signal.
+		provisioning = ""
+	}
+
+	username := strings.TrimSpace(info.Username)
+	if username == "" {
+		username = strings.Split(email, "@")[0]
+	}
+	randomPassword, err := generateRandomString(32)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate password for LDAP user: %w", err)
+	}
+
+	user, err := s.Register(ctx, &types.RegisterRequest{
+		Username:           username,
+		Email:              email,
+		Password:           randomPassword,
+		TenantProvisioning: provisioning,
+	})
+	if err == nil && user != nil {
+		// Mark the account as externally managed: the random local hash is
+		// not a credential the user holds, so the profile page hides password
+		// rotation and future logins keep flowing through the directory.
+		externalOnly := true
+		user.Preferences.OidcOnlyLogin = &externalOnly
+		user.AuthSource = types.AccountAuthSourceLDAP
+		user.UpdatedAt = time.Now()
+		if updateErr := s.userRepo.UpdateUser(ctx, user); updateErr != nil {
+			logger.Warnf(ctx, "Failed to mark LDAP-provisioned account: %v", updateErr)
+		}
+		logger.Infof(ctx, "Auto-provisioned local account %s from LDAP", user.ID)
+		return s.completeLogin(ctx, user), nil
+	}
+	if err != nil {
+		// Username collision on a directory-supplied name: retry once with a
+		// generated suffix rather than failing the login outright.
+		if errors.Is(err, ErrUserUsernameExists) || errors.Is(err, ErrUserIdentityConflict) {
+			if retried, retryErr := s.Register(ctx, &types.RegisterRequest{
+				Username:           username + "-" + shortIDSuffix(),
+				Email:              email,
+				Password:           randomPassword,
+				TenantProvisioning: provisioning,
+			}); retryErr == nil && retried != nil {
+				externalOnly := true
+				retried.Preferences.OidcOnlyLogin = &externalOnly
+				retried.AuthSource = types.AccountAuthSourceLDAP
+				retried.UpdatedAt = time.Now()
+				_ = s.userRepo.UpdateUser(ctx, retried)
+				logger.Infof(ctx, "Auto-provisioned local account %s from LDAP (username retried)", retried.ID)
+				return s.completeLogin(ctx, retried), nil
+			}
+		}
+		logger.Errorf(ctx, "Failed to auto-provision LDAP user: %v", err)
+	}
+	return nil, nil
+}
+
+// shortIDSuffix returns a short random suffix for username collision retries.
+func shortIDSuffix() string {
+	buf := make([]byte, 4)
+	if _, err := rand.Read(buf); err != nil {
+		return fmt.Sprintf("%d", time.Now().UnixNano()%100000)
+	}
+	return hex.EncodeToString(buf)
 }
 
 // buildMembershipsForUser returns the user's tenant memberships projected
@@ -509,6 +658,12 @@ func (s *userService) LoginWithOIDC(
 		return nil, err
 	}
 	if strings.TrimSpace(userInfo.Email) == "" {
+		// Log the claim names the IdP actually sent (never the values) so a
+		// mis-mapped email_claim can be corrected from the log alone.
+		logger.Warnf(ctx,
+			"OIDC login rejected: no email claim resolved (configured email_claim=%q); "+
+				"claims returned by the IdP: %s",
+			cfg.UserInfoMapping.Email, strings.Join(sortedClaimKeys(userInfo.Claims, 24), ", "))
 		return nil, errors.New("OIDC provider did not return email")
 	}
 
@@ -608,6 +763,56 @@ func (s *userService) ListSystemAdmins(
 // the final administrator.
 func (s *userService) RevokeSystemAdmin(ctx context.Context, userID, actorID string) (*types.User, error) {
 	return s.userRepo.RevokeSystemAdmin(ctx, userID, actorID)
+}
+
+// ---------------------------------------------------------------------------
+// Settings → 系统管理 → 用户管理 → 本地用户
+//
+// The four methods below back the SystemAdmin user table. Role checks live at
+// the HTTP boundary; the service owns the invariants that must hold no matter
+// which caller is in play (setActive must revoke sessions, delete must not
+// orphan the last administrator, etc.).
+// ---------------------------------------------------------------------------
+
+// ListManagedUsers pages the users table for the management screen.
+func (s *userService) ListManagedUsers(
+	ctx context.Context, keyword string, offset, limit int,
+) ([]*types.User, int64, error) {
+	return s.userRepo.ListManagedUsers(ctx, keyword, offset, limit)
+}
+
+// ManagedUserStats returns the header counters for the management screen.
+func (s *userService) ManagedUserStats(ctx context.Context) (*types.ManagedUserStats, error) {
+	return s.userRepo.ManagedUserStats(ctx)
+}
+
+// SetManagedUserActive enables or disables an account.
+//
+// Disabling revokes every outstanding session: without that, an already-logged-in
+// user would keep working until their access token expired, which makes the
+// "disable" button look broken to the operator who just pressed it.
+func (s *userService) SetManagedUserActive(
+	ctx context.Context, userID string, active bool,
+) (*types.User, error) {
+	user, err := s.userRepo.SetManagedUserActive(ctx, userID, active)
+	if err != nil {
+		return nil, err
+	}
+	if !active {
+		if err := s.tokenRepo.RevokeTokensByUserID(ctx, userID); err != nil {
+			logger.Warnf(ctx, "Failed to revoke sessions for disabled user %s: %v", userID, err)
+		}
+	}
+	return user, nil
+}
+
+// SoftDeleteManagedUser tombstones an account.
+//
+// The self-delete and last-administrator guards are enforced at the HTTP
+// boundary because they need the caller's identity; this method owns the
+// persistence plus the session revocation that must accompany it.
+func (s *userService) SoftDeleteManagedUser(ctx context.Context, userID string) (*types.User, error) {
+	return s.userRepo.SoftDeleteManagedUser(ctx, userID)
 }
 
 // UpdateUserPreferences applies a partial update over the user's
@@ -734,6 +939,15 @@ func (s *userService) AdminResetPassword(ctx context.Context, userID, newPasswor
 
 	user.PasswordHash = string(hashedPassword)
 	user.UpdatedAt = time.Now()
+	// An admin-set password becomes a credential the user actually holds, so
+	// the account graduates from "externally managed" to a normal local
+	// account: the profile page regains the change-password form and future
+	// logins stop falling through to the directory.
+	if user.Preferences.OidcOnlyLogin != nil && *user.Preferences.OidcOnlyLogin {
+		cleared := false
+		user.Preferences.OidcOnlyLogin = &cleared
+	}
+	user.AuthSource = types.AccountAuthSourceLocal
 	if err := s.userRepo.UpdateUser(ctx, user); err != nil {
 		return err
 	}
@@ -1516,18 +1730,73 @@ func validateOIDCEndpoints(cfg *config.OIDCAuthConfig) error {
 	return nil
 }
 
+// getOIDCConfig resolves the effective OIDC configuration.
+//
+// Settings → 系统管理 → 用户管理 → 通用OIDC is the source of truth; when the
+// operator has never saved that screen, the platform auth provider service
+// falls back to the legacy OIDC_AUTH_* environment variables, so an existing
+// deployment behaves exactly as before and every OIDC flow (authorization URL,
+// callback, discovery) picks up a UI edit without a restart.
 func (s *userService) getOIDCConfig(ctx context.Context) (*config.OIDCAuthConfig, error) {
-	if s.config == nil || s.config.OIDCAuth == nil || !s.config.OIDCAuth.Enable {
-		return nil, errors.New("OIDC login is disabled")
+	var cfg *config.OIDCAuthConfig
+	if s.authProviderSvc != nil {
+		resolved := s.authProviderSvc.ResolveOIDCConfig(ctx)
+		if resolved == nil {
+			return nil, errors.New("OIDC login is disabled")
+		}
+		cfg = resolvedOIDCToConfig(resolved)
+	} else {
+		// Fallback used by partially-wired unit tests: environment only.
+		if s.config == nil || s.config.OIDCAuth == nil || !s.config.OIDCAuth.Enable {
+			return nil, errors.New("OIDC login is disabled")
+		}
+		stored := *s.config.OIDCAuth
+		cfg = &stored
+		if cfg.UserInfoMapping == nil {
+			cfg.UserInfoMapping = &config.OIDCUserInfoMapping{Username: "name", Email: "email"}
+		}
 	}
-	cfg := *s.config.OIDCAuth
-	if cfg.UserInfoMapping == nil {
-		cfg.UserInfoMapping = &config.OIDCUserInfoMapping{Username: "name", Email: "email"}
-	}
-	if err := s.populateOIDCEndpoints(ctx, &cfg); err != nil {
+	// Complete (and SSRF-check) the endpoint set — the operator may have
+	// configured only an issuer or discovery URL.
+	if err := s.populateOIDCEndpoints(ctx, cfg); err != nil {
 		return nil, err
 	}
-	return &cfg, nil
+	return cfg, nil
+}
+
+// resolvedOIDCToConfig projects the provider service's resolved view onto the
+// config struct the OIDC code paths already consume.
+func resolvedOIDCToConfig(resolved *types.ResolvedOIDCConfig) *config.OIDCAuthConfig {
+	cfg := &config.OIDCAuthConfig{
+		Enable:                resolved.Enabled,
+		IssuerURL:             resolved.IssuerURL,
+		DiscoveryURL:          resolved.DiscoveryURL,
+		ProviderDisplayName:   resolved.ProviderDisplayName,
+		ClientID:              resolved.ClientID,
+		ClientSecret:          resolved.ClientSecret,
+		AuthorizationEndpoint: resolved.AuthorizationEndpoint,
+		TokenEndpoint:         resolved.TokenEndpoint,
+		UserInfoEndpoint:      resolved.UserInfoEndpoint,
+		JwksURI:               resolved.JwksURI,
+		Scopes:                resolved.Scopes,
+		UserInfoMapping: &config.OIDCUserInfoMapping{
+			Username: resolved.UsernameClaim,
+			Email:    resolved.EmailClaim,
+		},
+	}
+	if cfg.ProviderDisplayName == "" {
+		cfg.ProviderDisplayName = "OIDC"
+	}
+	if len(cfg.Scopes) == 0 {
+		cfg.Scopes = []string{"openid", "profile", "email"}
+	}
+	if cfg.UserInfoMapping.Username == "" {
+		cfg.UserInfoMapping.Username = "name"
+	}
+	if cfg.UserInfoMapping.Email == "" {
+		cfg.UserInfoMapping.Email = "email"
+	}
+	return cfg
 }
 
 func oidcNeedsDiscovery(cfg *config.OIDCAuthConfig) bool {
@@ -1679,7 +1948,14 @@ func (s *userService) resolveOIDCUserInfo(ctx context.Context, cfg *config.OIDCA
 		info.Subject = sub
 	}
 	info.Username = extractClaimAsString(claims, cfg.UserInfoMapping.Username)
-	info.Email = extractClaimAsString(claims, cfg.UserInfoMapping.Email)
+	var emailSource string
+	info.Email, emailSource = resolveOIDCEmailClaim(claims, cfg.UserInfoMapping.Email)
+	if info.Email != "" &&
+		!strings.EqualFold(emailSource, strings.TrimSpace(cfg.UserInfoMapping.Email)) {
+		logger.Warnf(ctx,
+			"OIDC email claim %q is absent from the IdP response; resolved the address from %q instead",
+			cfg.UserInfoMapping.Email, emailSource)
+	}
 	if info.Username == "" {
 		info.Username = extractClaimAsString(claims, "preferred_username")
 	}
@@ -1750,6 +2026,7 @@ func (s *userService) provisionOIDCUser(
 
 	oidcOnly := true
 	user.Preferences.OidcOnlyLogin = &oidcOnly
+	user.AuthSource = types.AccountAuthSourceOIDC
 	user.UpdatedAt = time.Now()
 	if err := s.userRepo.UpdateUser(ctx, user); err != nil {
 		return nil, fmt.Errorf("failed to mark OIDC-only login preference: %w", err)
@@ -2052,6 +2329,51 @@ func extractClaimAsString(claims map[string]interface{}, key string) string {
 	default:
 		return strings.TrimSpace(fmt.Sprint(v))
 	}
+}
+
+// oidcEmailClaimFallbacks lists the claims consulted, in order, when the
+// operator-configured email claim is absent from the IdP response.
+//
+// Azure AD (v2.0) does not reliably put `email` in the id_token for
+// work/school accounts - the sign-in address travels in `preferred_username`
+// (the UPN) - while Google, Keycloak, Okta and GitLab do return `email`. The
+// username claim already falls back this way, so requiring one specific email
+// claim makes an identical saved configuration work on one provider and
+// hard-fail on another.
+var oidcEmailClaimFallbacks = []string{"email", "preferred_username", "upn", "unique_name", "mail"}
+
+// resolveOIDCEmailClaim returns the account address found in the IdP claim
+// set, together with the claim name it came from. The configured claim wins
+// whenever it is present; otherwise the standard fallbacks are tried in order.
+// Both return values are empty when no usable address was found, leaving the
+// caller to log the claim names that were present and fail the login.
+func resolveOIDCEmailClaim(claims map[string]interface{}, configured string) (string, string) {
+	if value := extractClaimAsString(claims, configured); value != "" {
+		return value, strings.TrimSpace(configured)
+	}
+	for _, key := range oidcEmailClaimFallbacks {
+		if strings.EqualFold(strings.TrimSpace(configured), key) {
+			continue
+		}
+		if value := extractClaimAsString(claims, key); value != "" {
+			return value, key
+		}
+	}
+	return "", ""
+}
+
+// sortedClaimKeys returns the top-level claim names, sorted and capped, so a
+// failed login can log what the IdP actually sent without leaking any value.
+func sortedClaimKeys(claims map[string]interface{}, limit int) []string {
+	keys := make([]string, 0, len(claims))
+	for key := range claims {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	if limit > 0 && len(keys) > limit {
+		keys = append(keys[:limit], "...")
+	}
+	return keys
 }
 
 func sanitizeUsernameCandidate(value string) string {

@@ -42,11 +42,29 @@ type AuthHandler struct {
 	tenantService    interfaces.TenantService
 	configInfo       *config.Config
 	systemSettingSvc interfaces.SystemSettingService
+	// authProviderSvc resolves the platform-level OIDC / LDAP configuration
+	// saved in Settings → 系统管理 → 用户管理. Optional: a nil value falls back
+	// to the OIDC_AUTH_* environment variables so the login page still renders
+	// an SSO button on a deployment that has not been migrated to the UI yet.
+	authProviderSvc interfaces.PlatformAuthProviderService
 	// invitationSvc is required for the share-link registration path
 	// (POST /auth/register-by-invite). When nil — e.g. legacy test
 	// fixtures — the share-link endpoints respond 503 rather than
 	// blocking the rest of the auth surface.
 	invitationSvc interfaces.TenantInvitationService
+}
+
+// crossTenantEnabled reports whether the deployment-wide switch that makes
+// users.can_access_all_tenants effective is on.
+//
+// Every endpoint that serialises a raw users row funnels the flag through
+// dto.MaskCrossTenantFlag using this value, so login / switch-workspace /
+// auto-setup / register-by-invite / OIDC callback / validate all agree with
+// GET /auth/me instead of leaking the un-honoured column.
+func (h *AuthHandler) crossTenantEnabled() bool {
+	return h.configInfo != nil &&
+		h.configInfo.Tenant != nil &&
+		h.configInfo.Tenant.EnableCrossTenantAccess
 }
 
 // NewAuthHandler creates a new auth handler instance with the provided services
@@ -65,6 +83,7 @@ func NewAuthHandler(configInfo *config.Config,
 	userService interfaces.UserService, tenantService interfaces.TenantService,
 	systemSettingSvc interfaces.SystemSettingService,
 	invitationSvc interfaces.TenantInvitationService,
+	authProviderSvc interfaces.PlatformAuthProviderService,
 ) *AuthHandler {
 	// Boot-time guard: a nil-or-empty Auth section silently disables the
 	// invite_only gate (see Register below). Emit a loud one-shot log
@@ -82,6 +101,7 @@ func NewAuthHandler(configInfo *config.Config,
 		tenantService:    tenantService,
 		systemSettingSvc: systemSettingSvc,
 		invitationSvc:    invitationSvc,
+		authProviderSvc:  authProviderSvc,
 	}
 }
 
@@ -295,14 +315,14 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	// Check if login was successful
 	if !response.Success {
 		logger.Warnf(ctx, "Login failed: %s", response.Message)
-		c.JSON(http.StatusUnauthorized, dto.NewAuthLoginResponse(response))
+		c.JSON(http.StatusUnauthorized, dto.NewAuthLoginResponse(response, h.crossTenantEnabled()))
 		return
 	}
 
 	// User is already in the correct format from service
 
 	logger.Infof(ctx, "User logged in successfully, email: %s", email)
-	c.JSON(http.StatusOK, dto.NewAuthLoginResponse(response))
+	c.JSON(http.StatusOK, dto.NewAuthLoginResponse(response, h.crossTenantEnabled()))
 }
 
 // GetOIDCAuthorizationURL godoc
@@ -393,12 +413,28 @@ func (h *AuthHandler) OIDCStart(c *gin.Context) {
 // @Success      200  {object}  types.OIDCConfigResponse
 // @Router       /auth/oidc/config [get]
 func (h *AuthHandler) GetOIDCConfig(c *gin.Context) {
+	ctx := c.Request.Context()
 	providerDisplayName := ""
 	enabled := false
 
-	if h.configInfo != nil && h.configInfo.OIDCAuth != nil {
+	// The 通用OIDC screen is the source of truth; the platform auth provider
+	// service falls back to the OIDC_AUTH_* environment variables when the
+	// operator has not saved anything, so this endpoint keeps reporting the
+	// pre-migration state until the first save.
+	if h.authProviderSvc != nil {
+		if view, err := h.authProviderSvc.GetOIDCProvider(ctx); err == nil && view != nil {
+			enabled = view.Enabled
+			providerDisplayName = strings.TrimSpace(view.ProviderDisplayName)
+		} else if err != nil {
+			logger.Warnf(ctx, "Failed to resolve OIDC provider config: %v", err)
+		}
+	} else if h.configInfo != nil && h.configInfo.OIDCAuth != nil {
 		enabled = h.configInfo.OIDCAuth.Enable
 		providerDisplayName = strings.TrimSpace(h.configInfo.OIDCAuth.ProviderDisplayName)
+	}
+
+	if providerDisplayName == "" {
+		providerDisplayName = "OIDC"
 	}
 
 	c.JSON(http.StatusOK, &types.OIDCConfigResponse{
@@ -459,7 +495,7 @@ func (h *AuthHandler) OIDCRedirectCallback(c *gin.Context) {
 		return
 	}
 
-	payload, err := encodeOIDCCallbackPayload(resp)
+	payload, err := encodeOIDCCallbackPayload(resp, h.crossTenantEnabled())
 	if err != nil {
 		logger.Errorf(ctx, "Failed to encode OIDC callback payload: %v", err)
 		c.Redirect(http.StatusFound, frontendRedirectURI+"#oidc_error="+urlQueryEscape("payload_encode_failed"))
@@ -469,8 +505,11 @@ func (h *AuthHandler) OIDCRedirectCallback(c *gin.Context) {
 	c.Redirect(http.StatusFound, frontendRedirectURI+"#oidc_result="+urlQueryEscape(payload))
 }
 
-func encodeOIDCCallbackPayload(resp *types.OIDCCallbackResponse) (string, error) {
-	payload, err := json.Marshal(dto.NewAuthOIDCCallbackResponse(resp))
+// encodeOIDCCallbackPayload serialises the callback result into the URL
+// fragment the SPA picks up. crossTenantEnabled is forwarded so the payload
+// masks can_access_all_tenants exactly like every other auth response.
+func encodeOIDCCallbackPayload(resp *types.OIDCCallbackResponse, crossTenantEnabled bool) (string, error) {
+	payload, err := json.Marshal(dto.NewAuthOIDCCallbackResponse(resp, crossTenantEnabled))
 	if err != nil {
 		return "", err
 	}
@@ -652,8 +691,10 @@ func (h *AuthHandler) GetCurrentUser(c *gin.Context) {
 			// Don't fail the request if tenant info is not available
 		}
 	}
-	userInfo := user.ToUserInfo()
-	userInfo.CanAccessAllTenants = user.CanAccessAllTenants && h.configInfo.Tenant.EnableCrossTenantAccess
+	// Same gate as every other endpoint that hands out a users row (see
+	// dto.MaskCrossTenantFlag): the column is a permission and the
+	// deployment-wide switch decides whether it is honoured.
+	userInfo := dto.MaskCrossTenantFlag(user, h.crossTenantEnabled()).ToUserInfo()
 	// 同步返回当前用户的 memberships，让前端在页面刷新（仅命中 /auth/me）
 	// 后也能恢复 currentTenantRole，避免角色信息只在 login 那一刻可用。
 	memberships := h.userService.BuildLoginMemberships(ctx, user, tenant)
@@ -830,17 +871,35 @@ func (h *AuthHandler) ChangePassword(c *gin.Context) {
 func (h *AuthHandler) GetAuthConfig(c *gin.Context) {
 	// Same source-of-truth as Register's gate, so the UI hide-the-button
 	// signal can never disagree with the API enforcement signal.
-	mode := h.resolveRegistrationMode(c.Request.Context())
+	ctx := c.Request.Context()
+	mode := h.resolveRegistrationMode(ctx)
 
 	complexPasswordEnabled := service.ResolveComplexPasswordEnabled(
-		c.Request.Context(),
+		ctx,
 		h.configInfo,
 		h.systemSettingSvc,
 	)
+
+	// The login page always renders one e-mail + password form; what it
+	// cannot infer on its own is whether that form also doubles as the
+	// corporate directory (LDAP/AD) entry point, in which case the user
+	// must type a FULL work e-mail rather than a short account name.
+	// Only the boolean travels: GetLDAPProvider returns no bind password
+	// and nothing here echoes host / DN / filter values.
+	ldapEnabled := false
+	if h.authProviderSvc != nil {
+		if view, err := h.authProviderSvc.GetLDAPProvider(ctx); err == nil && view != nil {
+			ldapEnabled = view.Enabled
+		} else if err != nil {
+			logger.Warnf(ctx, "Failed to resolve LDAP provider config: %v", err)
+		}
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"success":                  true,
 		"registration_mode":        mode,
 		"complex_password_enabled": complexPasswordEnabled,
+		"ldap_enabled":             ldapEnabled,
 	})
 }
 
@@ -890,7 +949,7 @@ func (h *AuthHandler) SwitchTenant(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, dto.NewAuthLoginResponse(resp))
+	c.JSON(http.StatusOK, dto.NewAuthLoginResponse(resp, h.crossTenantEnabled()))
 }
 
 // @Summary      自动初始化（Lite 桌面版）
@@ -973,7 +1032,7 @@ func (h *AuthHandler) AutoSetup(c *gin.Context) {
 		}},
 		Token:        accessToken,
 		RefreshToken: refreshToken,
-	}))
+	}, h.crossTenantEnabled()))
 }
 
 // tenantNameOrEmpty returns t.Name when t is non-nil, "" otherwise.
@@ -1034,6 +1093,6 @@ func (h *AuthHandler) ValidateToken(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "Token is valid",
-		"user":    user.ToUserInfo(),
+		"user":    dto.MaskCrossTenantFlag(user, h.crossTenantEnabled()).ToUserInfo(),
 	})
 }

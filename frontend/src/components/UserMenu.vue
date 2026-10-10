@@ -53,6 +53,7 @@
           </div>
         </div>
 
+        <template v-if="isAdmin">
         <div v-if="userName && !authStore.isLiteMode" ref="tenantMenuItemRef" class="dropdown-tenant-panel" :class="{
           'is-open': tenantSubmenuOpen,
           'is-clickable': showTenantSwitcher,
@@ -135,6 +136,7 @@
             <t-icon name="logout" class="menu-icon" />
             <span>{{ $t('auth.logout') }}</span>
           </div>
+        </template>
         </template>
       </div>
     </Transition>
@@ -244,6 +246,17 @@ const showTenantIdentityLine = computed(() => {
   if (authStore.canAccessAllTenants) return true
   return (authStore.memberships ?? []).length > 1
 })
+
+// 管理类菜单项（工作区切换、设置、系统管理 …）的可见性开关。
+//
+// isSystemAdmin 必须参与：该标记是平台级的（users.is_system_admin），而
+// hasRole('admin') 只看"当前空间角色"。若只按空间角色判断，一个系统管理员
+// 在角色为 viewer/contributor 的空间里会连「全部设置」和「系统管理」入口
+// 一起被隐藏 —— 而后者正是通往用户管理页（/platform/settings →
+// user-management）的唯一入口，等于把唯一有权使用它的账号挡在门外。
+const isAdmin = computed(
+  () => authStore.isSystemAdmin || authStore.hasRole('admin') || authStore.canAccessAllTenants
+)
 
 // 快捷入口使用“管理能力”而不是页面最低可见角色：成员名册和模型列表允许
 // viewer 浏览，但头像菜单里的“管理”入口只服务实际能执行管理操作的角色。

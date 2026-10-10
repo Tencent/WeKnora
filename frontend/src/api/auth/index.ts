@@ -264,6 +264,9 @@ export interface AuthConfigResponse {
   success: boolean
   registration_mode: 'self_serve' | 'invite_only' | string
   complex_password_enabled: boolean
+  // True when an LDAP/AD provider is enabled: the login page then shows a
+  // hint telling corporate users to sign in with this same form.
+  ldap_enabled?: boolean
 }
 
 export async function getAuthConfig(): Promise<AuthConfigResponse> {

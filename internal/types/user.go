@@ -4,6 +4,7 @@ import (
 	"database/sql/driver"
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -102,6 +103,11 @@ type User struct {
 	CanAccessAllTenants bool `json:"can_access_all_tenants" gorm:"default:false"`
 	// Whether the user is a system administrator (independent of workspace roles)
 	IsSystemAdmin bool `json:"is_system_admin" gorm:"default:false;index"`
+	// AuthSource records how this account authenticates: "local" (password set
+	// by the user or an admin), "oidc" (auto-provisioned by the OIDC callback)
+	// or "ldap" (auto-provisioned by the directory login fallback). It drives
+	// the badge and the "reset password" affordance in 用户管理 → 本地用户.
+	AuthSource AccountAuthSource `json:"auth_source" gorm:"type:varchar(16);not null;default:'local'"`
 	// Per-user UI/feature preferences.
 	// Stored as JSON (jsonb on Postgres, TEXT on SQLite) via the
 	// driver.Valuer / sql.Scanner methods on UserPreferences.
@@ -269,6 +275,25 @@ type UserInfo struct {
 	Preferences         UserPreferences `json:"preferences"`
 	CreatedAt           time.Time       `json:"created_at"`
 	UpdatedAt           time.Time       `json:"updated_at"`
+}
+
+// HasUsableLocalPassword reports whether the account carries a password the
+// user actually knows.
+//
+// Accounts auto-provisioned by OIDC or LDAP are created with a random hash
+// nobody has seen, flagged by preferences.oidc_only_login. The login path uses
+// this to decide whether a failed local password may fall through to the
+// directory (it must not for a real local account — otherwise a mistyped local
+// password would be relayed into the corporate directory), and the 用户管理
+// screen uses it to label the account and gate the password-reset affordance.
+func (u *User) HasUsableLocalPassword() bool {
+	if u == nil || strings.TrimSpace(u.PasswordHash) == "" {
+		return false
+	}
+	if u.Preferences.OidcOnlyLogin != nil && *u.Preferences.OidcOnlyLogin {
+		return false
+	}
+	return true
 }
 
 // ToUserInfo converts User to UserInfo (without sensitive data)

@@ -161,6 +161,12 @@
           <SystemAuditLog />
         </div>
 
+        <!-- 用户管理：本地用户 / 通用OIDC / LDAP。仅系统管理员可见，
+             与后端 /system/admin/* 的 g.SystemAdmin() 守卫一致。 -->
+        <div v-if="currentSection === 'user-management'" class="section">
+          <UserManagement />
+        </div>
+
         <!-- 用户信息（账户基础信息：ID / 用户名 / 邮箱 / 注册时间）。
            用户的基本信息不该跟 owner 权限绑定。 -->
         <div v-if="currentSection === 'userprofile'" class="section">
@@ -218,6 +224,7 @@ import SystemSettings from '@/views/system/SystemSettings.vue'
 import RuntimeQueues from '@/views/system/RuntimeQueues.vue'
 import PlatformAPIKeys from '@/views/system/PlatformAPIKeys.vue'
 import SystemAuditLog from '@/views/system/SystemAuditLog.vue'
+import UserManagement from '@/views/system/UserManagement.vue'
 import IntegrationSettingsSection from '@/views/integrations/IntegrationSettingsSection.vue'
 import {
   INTEGRATION_PREVIEW_ITEMS,
@@ -348,6 +355,7 @@ const navItems = computed(() => {
     { key: 'runtime-queues', icon: 'queue', label: t('settings.taskQueue') },
     { key: 'platform-api-keys', icon: 'secured', label: t('platformApiKeys.title') },
     { key: 'system-audit-log', icon: 'history', label: t('system.globalSettings.audit.tabLabel') },
+    { key: 'user-management', icon: 'usergroup', label: t('userManagement.title') },
     { key: 'userprofile', icon: 'user', label: t('userProfile.title') },
     { key: 'mymemory', icon: 'bookmark', label: t('memorySettings.title') },
     { key: 'envvars', icon: 'key', label: t('envVarSettings.title') },
@@ -358,7 +366,15 @@ const navItems = computed(() => {
   // currentTenantRole 为空表示「membership 还没加载」—— 比起渲染整套
   // viewer 入口然后角色一返回又消失，先卡住不渲染更稳，跟原先 members
   // 入口的策略一致。
-  if (!authStore.currentTenantRole && !authStore.canAccessAllTenants) {
+  // isSystemAdmin is the platform-wide flag (users.is_system_admin), not a
+  // tenant role: a system admin with no resolved role in the active tenant
+  // must still reach the SystemAdmin-only sections instead of an empty nav.
+  // Same root cause as the router / menu store / UserMenu gates.
+  if (
+    !authStore.currentTenantRole &&
+    !authStore.canAccessAllTenants &&
+    !authStore.isSystemAdmin
+  ) {
     return [] as NavItem[]
   }
   return all.filter((it) => canSeeSection(it.key) && isSectionSupported(it.key))
@@ -406,7 +422,16 @@ const navGroups = computed<NavGroup[]>(() => {
     {
       key: 'system_administration',
       label: t('settings.navGroups.systemAdministration'),
-      items: pickItems(['system-global', 'runtime-queues', 'platform-api-keys', 'system-audit-log']),
+      // 用户管理 sits first among the system-administration entries: account
+      // and login-source management is the entry most admins reach for, while
+      // the rest are one-off runtime/credential tasks.
+      items: pickItems([
+        'user-management',
+        'system-global',
+        'runtime-queues',
+        'platform-api-keys',
+        'system-audit-log',
+      ]),
     },
     {
       key: 'platform',
@@ -466,7 +491,16 @@ const handleClose = () => {
   // 如果当前路由是设置页，返回上一页
   if (route.path === '/platform/settings') {
     const sec = route.query.section
-    if (sec === 'system-global' || sec === 'runtime-queues' || sec === 'platform-api-keys' || sec === 'system-audit-log') {
+    // System-administration sections live under /platform/knowledge-bases'
+    // settings route; stepping "back" out of them would land on the previous
+    // history entry, which for a deep link may be nowhere useful.
+    if (
+      sec === 'system-global' ||
+      sec === 'runtime-queues' ||
+      sec === 'platform-api-keys' ||
+      sec === 'system-audit-log' ||
+      sec === 'user-management'
+    ) {
       router.push('/platform/knowledge-bases')
     } else {
       router.back()

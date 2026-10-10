@@ -235,6 +235,12 @@
               </t-button>
             </t-form>
 
+            <!-- LDAP/AD 部署：目录登录复用上方同一个邮箱+密码表单（没有单独
+                 的按钮），所以这里只把要求讲清楚——邮箱必须填完整企业邮箱。 -->
+            <div v-if="ldapEnabled" class="ldap-hint">
+              {{ $t('auth.ldapLoginHint') }}
+            </div>
+
             <!-- Features list -->
             <div class="login-features">
               <div class="feature-item">
@@ -415,6 +421,9 @@ const oidcLoading = ref(false)
 const isRegisterMode = ref(false)
 const showLanguageMenu = ref(false)
 const oidcEnabled = ref(false)
+// LDAP/AD 复用同一个邮箱+密码表单（没有单独按钮），所以这个标记只用来
+// 控制一条说明性提示的显隐。
+const ldapEnabled = ref(false)
 const oidcProviderName = ref('')
 // registrationEnabled defaults to true so that on first paint the Register
 // link is visible; the actual mode is fetched from /auth/config in onMounted.
@@ -620,9 +629,11 @@ const loadAuthConfig = async () => {
     const response = await getAuthConfig()
     registrationEnabled.value = response.registration_mode !== 'invite_only'
     complexPasswordEnabled.value = response.complex_password_enabled
+    ldapEnabled.value = !!response.ldap_enabled
   } catch {
     registrationEnabled.value = true
     complexPasswordEnabled.value = false
+    ldapEnabled.value = false
   }
 }
 
@@ -1414,6 +1425,18 @@ onMounted(async () => {
   border-radius: var(--app-radius-md);
   background: var(--td-success-color-light);
   color: var(--td-brand-color-active);
+  font-size: 12.5px;
+  line-height: 1.5;
+  font-family: var(--app-font-family);
+}
+
+/* LDAP/AD：没有独立按钮，用这条提示把「用完整企业邮箱」说清楚。 */
+.ldap-hint {
+  margin: 14px 0 0;
+  padding: 8px 12px;
+  border-radius: var(--app-radius-md);
+  background: var(--td-warning-color-light, var(--td-bg-color-container-hover));
+  color: var(--td-text-color-primary);
   font-size: 12.5px;
   line-height: 1.5;
   font-family: var(--app-font-family);

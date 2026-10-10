@@ -440,6 +440,33 @@ router.beforeEach(async (to, from, next) => {
     }
   }
 
+  // 终端用户路由限制：非管理员只能访问指定路由。
+  //
+  // isSystemAdmin 是平台级标记（users.is_system_admin），不是"当前空间角色"，
+  // 必须在这里短路：否则一个系统管理员只要当前空间里的角色是
+  // viewer/contributor，就会被归为终端用户并被赶出 /platform/settings ——
+  // 而系统管理专属的分区（系统管理 / 用户管理）恰恰只对系统管理员开放，
+  // 等于把唯一有权使用它们的账号挡在门外。
+  // 注意 hasRole('admin') 读的是"当前空间角色"，不能代替平台级标记。
+  const endUserAllowedPaths = [
+    '/platform/creatChat',
+    '/platform/agents',
+    '/platform/organizations',
+    '/platform/chat/',
+    '/platform/knowledge-bases',
+  ]
+  const isEndUser =
+    !authStore.isSystemAdmin &&
+    !authStore.hasRole('admin') &&
+    !authStore.canAccessAllTenants
+  if (isEndUser && to.path.startsWith('/platform')) {
+    const isAllowed = endUserAllowedPaths.some(p => to.path.startsWith(p))
+    if (!isAllowed) {
+      next('/platform/knowledge-bases')
+      return
+    }
+  }
+
   next()
 })
 

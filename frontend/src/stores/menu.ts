@@ -67,6 +67,20 @@ export const useMenuStore = defineStore('menuStore', () => {
   )
 
   const liteHiddenPaths = new Set(['logout', 'organizations'])
+  const endUserHiddenPaths = new Set(['settings', 'logout'])
+
+  // 终端用户过滤：非管理员只保留新对话、智能体、共享空间。
+  //
+  // isSystemAdmin 是平台级标记（users.is_system_admin），必须在这里短路：
+  // 否则一个系统管理员只要当前空间里的角色是 viewer/contributor，就会被
+  // 当成"终端用户"，侧栏连「设置」入口都不再渲染 —— 而系统管理专属的
+  // 页面（系统管理 / 用户管理）恰恰只对系统管理员开放，等于把唯一有权
+  // 使用它们的账号挡在门外。hasRole('admin') 读的是"当前空间角色"，
+  // 不能代替平台级标记。
+  const isEndUser = (authStore: ReturnType<typeof useAuthStore>) =>
+    !authStore.isSystemAdmin &&
+    !authStore.hasRole('admin') &&
+    !authStore.canAccessAllTenants
 
   // 共享空间 (organizations) 仅对当前空间的 admin / owner 暴露入口。
   // viewer / contributor 即便在共享空间里拥有资源，也无需自行管理共享关系，
@@ -76,6 +90,9 @@ export const useMenuStore = defineStore('menuStore', () => {
     const deploymentCapabilities = useDeploymentCapabilitiesStore()
     return menuArr.filter(item => {
       if (authStore.isLiteMode && liteHiddenPaths.has(item.path)) {
+        return false
+      }
+      if (isEndUser(authStore) && endUserHiddenPaths.has(item.path)) {
         return false
       }
       if (item.path === 'organizations' && !authStore.hasRole('admin')) {

@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"strings"
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -152,8 +153,7 @@ func (r *userRepository) ListUsers(ctx context.Context, offset, limit int) ([]*t
 	return users, nil
 }
 
-// ListSystemAdmins lists users where is_system_admin = true.
-//
+// ListSystemAdmins lists users where is_system_admin = true.//
 // Walks idx_users_is_system_admin (created in migration 000052), so the
 // query stays cheap even on a large users table — only the small subset
 // of system admins is scanned. Returns total count alongside the page so
@@ -276,6 +276,169 @@ func (r *userRepository) SearchUsers(ctx context.Context, query string, limit in
 		return nil, err
 	}
 	return users, nil
+}
+
+// ListManagedUsers is the paged backend for Settings → 用户管理 → 本地用户.
+//
+// `keyword` is a case-insensitive substring match over username and email;
+// an empty keyword lists everything. Results are newest-first with the id as a
+// tiebreaker so paging stays deterministic. Returns the page plus the total
+// row count matching the same filter (for the pagination control).
+func (r *userRepository) ListManagedUsers(
+	ctx context.Context, keyword string, offset, limit int,
+) ([]*types.User, int64, error) {
+	var users []*types.User
+	var total int64
+
+	base := r.db.WithContext(ctx).Model(&types.User{})
+	if kw := strings.TrimSpace(keyword); kw != "" {
+		pattern := "%" + escapeLikePattern(kw) + "%"
+		base = base.Where("username ILIKE ? ESCAPE '\\' OR email ILIKE ? ESCAPE '\\'", pattern, pattern)
+	}
+	if err := base.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	query := base.Order("created_at DESC, id ASC")
+	if limit > 0 {
+		query = query.Limit(limit)
+	}
+	if offset > 0 {
+		query = query.Offset(offset)
+	}
+	if err := query.Find(&users).Error; err != nil {
+		return nil, 0, err
+	}
+	return users, total, nil
+}
+
+// escapeLikePattern lives in wiki_page.go and is shared by every ILIKE search
+// in this package, so the management-user search reuses it rather than
+// introducing a second, drifting copy.
+
+// ManagedUserStats aggregates the counters shown above the 本地用户 table.
+// Counted over the whole table (not the current page) so the header stays
+// stable while the operator pages through.
+func (r *userRepository) ManagedUserStats(ctx context.Context) (*types.ManagedUserStats, error) {
+	stats := &types.ManagedUserStats{}
+	db := r.db.WithContext(ctx).Model(&types.User{})
+
+	if err := db.Count(&stats.Total).Error; err != nil {
+		return nil, err
+	}
+	if err := r.db.WithContext(ctx).Model(&types.User{}).
+		Where("is_active = ?", true).Count(&stats.Active).Error; err != nil {
+		return nil, err
+	}
+	if err := r.db.WithContext(ctx).Model(&types.User{}).
+		Where("is_active = ?", false).Count(&stats.Disabled).Error; err != nil {
+		return nil, err
+	}
+	if err := r.db.WithContext(ctx).Model(&types.User{}).
+		Where("is_system_admin = ?", true).Count(&stats.Admins).Error; err != nil {
+		return nil, err
+	}
+	if err := r.db.WithContext(ctx).Model(&types.User{}).
+		Where("auth_source = ?", string(types.AccountAuthSourceLDAP)).
+		Count(&stats.LDAPUsers).Error; err != nil {
+		return nil, err
+	}
+	if err := r.db.WithContext(ctx).Model(&types.User{}).
+		Where("auth_source = ?", string(types.AccountAuthSourceOIDC)).
+		Count(&stats.OIDCUsers).Error; err != nil {
+		return nil, err
+	}
+	stats.Disabled = stats.Total - stats.Active
+	return stats, nil
+}
+
+// SetManagedUserActive flips users.is_active. Returns ErrUserNotFound when the
+// id does not resolve to a live row so the handler can answer 404 instead of
+// reporting a successful no-op.
+func (r *userRepository) SetManagedUserActive(
+	ctx context.Context, userID string, active bool,
+) (*types.User, error) {
+	var user types.User
+	if err := r.db.WithContext(ctx).Where("id = ?", userID).First(&user).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrUserNotFound
+		}
+		return nil, err
+	}
+	user.IsActive = active
+	if err := r.db.WithContext(ctx).Model(&types.User{}).
+		Where("id = ?", userID).Update("is_active", active).Error; err != nil {
+		return nil, err
+	}
+	return &user, nil
+}
+
+// SoftDeleteManagedUser tombstones the account and frees its unique identity.
+//
+// WeKnora keeps a hard UNIQUE constraint on users.email / users.username (not a
+// partial index on deleted_at), so a plain soft delete would permanently block
+// re-creating the same person later. The row is therefore soft-deleted and the
+// two unique columns are suffixed with a tombstone marker that still contains
+// the original value, keeping the audit trail readable while releasing the
+// identifiers. Everything else about the account (id, tenant membership,
+// authored content) is left untouched.
+func (r *userRepository) SoftDeleteManagedUser(ctx context.Context, userID string) (*types.User, error) {
+	var deleted *types.User
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var user types.User
+		if err := tx.Where("id = ?", userID).First(&user).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrUserNotFound
+			}
+			return err
+		}
+		suffix := "#deleted-" + shortTombstone(user.ID)
+
+		// Revoke every outstanding session first — a tombstoned account must
+		// not keep a working access token.
+		if err := tx.Model(&types.AuthToken{}).
+			Where("user_id = ?", user.ID).
+			Update("is_revoked", true).Error; err != nil {
+			return err
+		}
+
+		updates := map[string]any{
+			"email":     user.Email + suffix,
+			"username":  user.Username + suffix,
+			"is_active": false,
+			"tenant_id": nil,
+		}
+		if err := tx.Model(&types.User{}).Where("id = ?", user.ID).Updates(updates).Error; err != nil {
+			return err
+		}
+		// GORM's soft delete writes deleted_at with the dialect-correct
+		// expression, so Postgres and SQLite both behave the same.
+		if err := tx.Delete(&types.User{}, "id = ?", user.ID).Error; err != nil {
+			return err
+		}
+
+		user.Email += suffix
+		user.Username += suffix
+		user.IsActive = false
+		deleted = &user
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return deleted, nil
+}
+
+// shortTombstone derives a short, collision-resistant suffix from a user id.
+func shortTombstone(id string) string {
+	clean := strings.ReplaceAll(id, "-", "")
+	if len(clean) > 8 {
+		clean = clean[:8]
+	}
+	if clean == "" {
+		clean = "unknown"
+	}
+	return clean
 }
 
 // authTokenRepository implements auth token repository interface
