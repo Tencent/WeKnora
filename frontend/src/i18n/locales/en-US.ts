@@ -880,6 +880,10 @@ export default {
     noGeneratedQuestions: 'No retrieval questions',
     notInitialized: 'Knowledge base is not initialized. Please configure models in settings before uploading files',
     missingStorageEngine: 'This knowledge base has no storage engine selected. Please configure a storage engine in settings before uploading content.',
+    agentSidebar: {
+      title: 'Sidebar Assistant',
+      sessionError: 'Failed to start the sidebar session. Please try again.',
+    },
     missingStorageEngineUpload: 'Please configure a storage engine before uploading content',
     goToStorageSettings: 'Go to Settings',
     getInfoFailed: 'Failed to get knowledge base information, file upload is not possible',

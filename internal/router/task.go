@@ -12,6 +12,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/common"
+	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/middleware/asynqdl"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
@@ -450,6 +451,16 @@ func newDeadLetterKnowledgeFailer(ks interfaces.KnowledgeService, tracker servic
 			tracker.FinalizeAttempt(ctx, probe.KnowledgeID, probe.Attempt,
 				types.SpanStatusFailed, nil, "TASK_TIMEOUT", errMsg)
 		}
+		// Agent inbox signal (agent-sidebar-inbox): the parse just exhausted
+		// its retries. Best-effort — inbox delivery must not affect the
+		// dead-letter path.
+		_ = event.Emit(ctx, event.NewEvent(event.EventKnowledgeParseFailed,
+			event.KnowledgeParseEventData{
+				TenantID:        probe.TenantID,
+				KnowledgeID:     probe.KnowledgeID,
+				KnowledgeBaseID: probe.KnowledgeBaseID,
+				Error:           errMsg,
+			}))
 		logger.Infof(ctx, "dead-letter callback: marked knowledge %s as failed (task=%s)", probe.KnowledgeID, t.Type())
 	}
 }

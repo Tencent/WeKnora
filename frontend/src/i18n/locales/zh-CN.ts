@@ -7299,6 +7299,10 @@ export default {
     noGeneratedQuestions: '暂无辅助召回问题',
     notInitialized: '该知识库尚未完成初始化配置，请先前往设置页面配置模型信息后再上传文件',
     missingStorageEngine: '该知识库尚未选择存储引擎，请先前往设置页面配置存储引擎后再上传内容。',
+    agentSidebar: {
+      title: '侧边栏助手',
+      sessionError: '侧边栏会话创建失败，请重试。',
+    },
     missingStorageEngineUpload: '请先配置存储引擎后再上传内容',
     goToStorageSettings: '前往配置',
     getInfoFailed: '获取知识库信息失败，无法上传文件',

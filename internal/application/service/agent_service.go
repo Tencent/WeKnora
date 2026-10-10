@@ -112,6 +112,7 @@ type agentService struct {
 	tenantService         interfaces.TenantService
 	messageService        interfaces.MessageService
 	memoryService         interfaces.MemoryService
+	inboxService          interfaces.AgentInboxService
 	storageResolver       interfaces.StorageBackendResolver
 	toolApprovalGate      approval.MCPApproval
 	sandboxMgr            sandbox.Manager
@@ -143,6 +144,7 @@ func NewAgentService(
 	tenantService interfaces.TenantService,
 	messageService interfaces.MessageService,
 	memoryService interfaces.MemoryService,
+	inboxService interfaces.AgentInboxService,
 	storageResolver interfaces.StorageBackendResolver,
 	toolApprovalGate approval.MCPApproval,
 	sandboxMgr sandbox.Manager,
@@ -174,6 +176,7 @@ func NewAgentService(
 		tenantService:        tenantService,
 		messageService:       messageService,
 		memoryService:        memoryService,
+		inboxService:         inboxService,
 		storageResolver:      storageResolver,
 		toolApprovalGate:     toolApprovalGate,
 		sandboxMgr:           sandboxMgr,
@@ -1087,15 +1090,17 @@ func (s *agentService) registerTools(
 			tools.ToolDataAnalysis:        true,
 			tools.ToolDataSchema:          true,
 			// Wiki tools also require at least one KB in scope.
-			tools.ToolWikiReadPage:    true,
-			tools.ToolWikiSearch:      true,
-			tools.ToolWikiFlagIssue:   true,
-			tools.ToolWikiWritePage:   true,
-			tools.ToolWikiReplaceText: true,
-			tools.ToolWikiRenamePage:  true,
-			tools.ToolWikiDeletePage:  true,
-			tools.ToolWikiReadIssue:   true,
-			tools.ToolWikiUpdateIssue: true,
+			tools.ToolWikiReadPage:       true,
+			tools.ToolWikiSearch:         true,
+			tools.ToolWikiFlagIssue:      true,
+			tools.ToolWikiWritePage:      true,
+			tools.ToolWikiReplaceText:    true,
+			tools.ToolWikiRenamePage:     true,
+			tools.ToolWikiDeletePage:     true,
+			tools.ToolWikiReadIssue:      true,
+			tools.ToolWikiUpdateIssue:    true,
+			tools.ToolWikiGetCurrentPage: true,
+			tools.ToolWikiGetPageTrail:   true,
 		}
 
 		// If no knowledge and no web search, also disable todo_write (not useful for simple chat)
@@ -1166,6 +1171,9 @@ func (s *agentService) registerTools(
 		tools.ToolWikiDeletePage:  true,
 		tools.ToolWikiReadIssue:   true,
 		tools.ToolWikiUpdateIssue: true,
+		// The view tools read wiki pages, so they follow the wiki capability.
+		tools.ToolWikiGetCurrentPage: true,
+		tools.ToolWikiGetPageTrail:   true,
 	}
 
 	// Hard safety nets: drop tools whose runtime prerequisite is missing.
@@ -1305,6 +1313,17 @@ func (s *agentService) registerTools(
 			toolToRegister = tools.NewWikiRenamePageTool(s.wikiPageService, writableWikiKBIDs, wikiRoutes)
 		case tools.ToolWikiDeletePage:
 			toolToRegister = tools.NewWikiDeletePageTool(s.wikiPageService, writableWikiKBIDs, wikiRoutes)
+
+		// Agent inbox tools (agent-sidebar-inbox). check_inbox survives a
+		// KB-less scope (tenant+owner scoped); the view tools are wiki-gated
+		// via allWikiToolSet above.
+		case tools.ToolCheckInbox:
+			toolToRegister = tools.NewCheckInboxTool(s.inboxService, scopedWikiKBIDs)
+		case tools.ToolWikiGetCurrentPage:
+			toolToRegister = tools.NewWikiGetCurrentPageTool(
+				s.inboxService, s.wikiPageService, s.knowledgeService, wikiKBIDs)
+		case tools.ToolWikiGetPageTrail:
+			toolToRegister = tools.NewWikiGetPageTrailTool(s.inboxService, wikiKBIDs)
 
 		case tools.ToolShellExec, tools.ToolReadFile, tools.LegacyToolReadSkill, tools.LegacyToolExecuteSkillScript,
 			tools.ToolListSandboxFiles, tools.LegacyToolReadSandboxFile, tools.ToolWriteSandboxFile,

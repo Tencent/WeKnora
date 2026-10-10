@@ -337,6 +337,12 @@ func BuildContainer(container *dig.Container) *dig.Container {
 		cleaner.RegisterWithName("BrowserSkill", func() error { manager.Close(); return nil })
 		return manager, nil
 	}))
+	// Agent inbox (agent-sidebar-inbox): durable event stream read by the
+	// check_inbox tool family. Provided before NewAgentService so dig wires
+	// it into the agent service constructor.
+	must(container.Provide(repository.NewAgentInboxRepository))
+	must(container.Provide(service.NewAgentInboxService))
+	must(container.Provide(handler.NewAgentInboxHandler))
 	must(container.Provide(service.NewAgentService))
 
 	// Session service (depends on agent service)

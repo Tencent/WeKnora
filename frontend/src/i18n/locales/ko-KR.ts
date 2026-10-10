@@ -7297,6 +7297,10 @@ export default {
     noGeneratedQuestions: '검색 보조 질문 없음',
     notInitialized: '이 지식베이스는 아직 초기화되지 않았습니다. 설정 페이지에서 모델 정보를 먼저 구성한 후 파일을 업로드하세요',
     missingStorageEngine: '이 지식베이스에 스토리지 엔진이 선택되지 않았습니다. 콘텐츠를 업로드하기 전에 설정 페이지에서 스토리지 엔진을 구성하세요.',
+    agentSidebar: {
+      title: '사이드바 어시스턴트',
+      sessionError: '사이드바 세션 생성에 실패했습니다. 다시 시도해 주세요.',
+    },
     missingStorageEngineUpload: '콘텐츠를 업로드하기 전에 스토리지 엔진을 구성하세요',
     goToStorageSettings: '설정으로 이동',
     getInfoFailed: '지식베이스 정보를 가져오는 데 실패하여 파일을 업로드할 수 없습니다',

@@ -86,6 +86,14 @@ var ToolCapabilityRequirements = map[string]ToolRequirement{
 	"wiki_read_issue":      {AllOf: []KBCapability{CapWiki}},
 	"wiki_update_issue":    {AllOf: []KBCapability{CapWiki}},
 
+	// ---- Agent inbox (agent-sidebar-inbox) ----
+	// check_inbox has no KB capability dependency: it scopes to whatever KBs
+	// the session already targets (and falls back to tenant+owner scope when
+	// none). The view tools need a wiki KB because they read wiki pages.
+	"check_inbox":           {},
+	"wiki_get_current_page": {AllOf: []KBCapability{CapWiki}},
+	"wiki_get_page_trail":   {AllOf: []KBCapability{CapWiki}},
+
 	// ---- Data analysis (reads table summary/column chunks from RAG ingest) ----
 	"data_analysis": {AnyOf: []KBCapability{CapVector, CapKeyword}, ConsumesFiles: true},
 	"data_schema":   {AnyOf: []KBCapability{CapVector, CapKeyword}, ConsumesFiles: true},

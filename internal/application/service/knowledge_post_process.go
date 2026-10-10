@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/application/access"
+	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/infrastructure/docparser"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
@@ -312,6 +313,15 @@ func (s *KnowledgePostProcessService) Handle(ctx context.Context, task *asynq.Ta
 			s.tracker().FinalizeAttempt(ctx, payload.KnowledgeID, attempt, types.SpanStatusDone, output, "", "")
 			return nil
 		}
+		// Agent inbox signal (agent-sidebar-inbox): the row just completed
+		// without enrichment subtasks, so the repo-level FinalizeSubtask
+		// emit never fires for this path. Best-effort.
+		_ = event.Emit(ctx, event.NewEvent(event.EventKnowledgeParseCompleted,
+			event.KnowledgeParseEventData{
+				TenantID:        payload.TenantID,
+				KnowledgeID:     payload.KnowledgeID,
+				KnowledgeBaseID: payload.KnowledgeBaseID,
+			}))
 	default:
 		// Flip processing to finalizing before fan-out so a parallel
 		// cancel/delete cannot race us into completed.

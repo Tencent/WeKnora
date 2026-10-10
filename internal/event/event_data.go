@@ -321,3 +321,15 @@ type CommandOutputData struct {
 	Output     string    `json:"output"`
 	Done       bool      `json:"done"`
 }
+
+// KnowledgeParseEventData carries the parse lifecycle signal for the agent
+// inbox (see service.NewAgentInboxService subscriber). Title is optional —
+// fill it when the caller already has the row at hand; the inbox payload
+// only needs enough for the agent to follow up (ids + error text).
+type KnowledgeParseEventData struct {
+	TenantID        uint64 `json:"tenant_id"`
+	KnowledgeID     string `json:"knowledge_id"`
+	KnowledgeBaseID string `json:"knowledge_base_id"`
+	Title           string `json:"title,omitempty"`
+	Error           string `json:"error,omitempty"`
+}

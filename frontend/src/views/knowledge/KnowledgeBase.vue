@@ -55,6 +55,8 @@ import { useUploadConfirmStore, type UploadConfirmResult } from '@/stores/upload
 import { useUploadTasksStore } from '@/stores/uploadTasks';
 import WikiBrowser from './wiki/WikiBrowser.vue';
 import ImageGallery from './gallery/ImageGallery.vue';
+import AgentSidebarDrawer from './components/AgentSidebarDrawer.vue';
+import { postUIEvent } from '@/api/agent-inbox';
 import { getWikiStats } from '@/api/wiki';
 import {
   isKnowledgeParseInFlight,
@@ -1129,7 +1131,14 @@ watch(activeKbTab, (tab) => {
     query.tab = tab
   }
   router.replace({ query })
+  // Agent inbox signal (agent-sidebar-inbox): the agent needs the tab
+  // switch to know where the user is looking. Best-effort, debounced
+  // server-side by policy.
+  postUIEvent(kbId.value, 'user.switched_tab', { tab })
 })
+
+// ── Agent sidebar (agent-sidebar-inbox P1) ──────────────────────────────
+const showAgentSidebar = ref(false);
 
 watch(() => kbId.value, (newKbId, oldKbId) => {
   if (!newKbId) {
@@ -2306,6 +2315,13 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
             <div class="kb-title-actions">
               <KBInfoPopover v-if="kbInfo && !authStore.isLiteMode" :kb-info="kbInfo"
                 :supported-file-types="[...supportedFileTypes]" />
+              <t-tooltip :content="$t('knowledgeBase.agentSidebar.title')" placement="top">
+                <button type="button" class="kb-settings-button"
+                  :aria-label="$t('knowledgeBase.agentSidebar.title')" :disabled="!kbId"
+                  @click="showAgentSidebar = !showAgentSidebar">
+                  <t-icon name="chat" size="16px" />
+                </button>
+              </t-tooltip>
               <t-tooltip v-if="canManage" :content="$t('knowledgeBase.settings')" placement="top">
                 <button type="button" class="kb-settings-button" :aria-label="$t('knowledgeBase.settings')" :disabled="!kbId" @click="handleOpenKBSettings">
                   <t-icon name="setting" size="16px" />
@@ -2329,6 +2345,10 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
           </p>
         </div>
       </div>
+
+      <!-- Agent sidebar drawer (agent-sidebar-inbox): mounted at layout
+           level so it survives tab switches; one session per KB. -->
+      <AgentSidebarDrawer v-if="kbId" v-model="showAgentSidebar" :kb-id="kbId" />
 
       <!-- Wiki Browser / Graph (shown when wiki or graph tab is active) -->
       <div v-if="isWiki && (activeKbTab === 'wiki' || activeKbTab === 'graph')" class="wiki-main-area">

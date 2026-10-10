@@ -841,6 +841,7 @@ import { resolveWikiBacklinkTitle } from './wikiBacklinkTitles'
 import { buildGraphLayout, graphNodeRadius, stepGraphLayout, visibleGraphLabels, graphPointBounds, initialGraphViewport, graphClusterOutline, graphLandmarkTitle, type GraphBounds, type GraphCluster } from './wikiGraphLayout'
 import { getKnowledgeDetails } from '@/api/knowledge-base'
 import { createSessions } from '@/api/chat'
+import { postUIEvent } from '@/api/agent-inbox'
 import ChatView from '@/views/chat/index.vue'
 import {
   listWikiPages,
@@ -901,6 +902,18 @@ const kbFileAccess = computed<ProtectedFileAccessContext>(() => ({
 }))
 const pages = ref<WikiPage[]>([])
 const selectedPage = ref<WikiPage | null>(null)
+
+// Agent inbox signal (agent-sidebar-inbox): every page the user opens is
+// the "current page" pointer for the sidebar agent. Watcher covers all
+// assignment sites (list click, route restore, edit save, revert).
+watch(selectedPage, (page) => {
+  if (page && page.slug) {
+    postUIEvent(props.knowledgeBaseId, 'user.viewed_page', {
+      slug: page.slug,
+      title: page.title || '',
+    })
+  }
+})
 
 // Per-type pagination state for the sidebar. 4万-page wikis used to load
 // the entire page list into `pages.value` at startup (50 pages of 500 =

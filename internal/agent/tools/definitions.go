@@ -73,6 +73,12 @@ const (
 	ToolWikiFlagIssue   = "wiki_flag_issue"
 	ToolWikiReadIssue   = "wiki_read_issue"
 	ToolWikiUpdateIssue = "wiki_update_issue"
+	// Agent inbox tools (agent-sidebar-inbox): check_inbox works on any KB
+	// scope; the current-page/trail pair resolves the user's live view of a
+	// wiki KB. See internal/agent/tools/inbox_tools.go.
+	ToolCheckInbox         = "check_inbox"
+	ToolWikiGetCurrentPage = "wiki_get_current_page"
+	ToolWikiGetPageTrail   = "wiki_get_page_trail"
 )
 
 // AvailableTool defines a simple tool metadata used by settings APIs.
@@ -109,6 +115,9 @@ func AvailableToolDefinitions() []AvailableTool {
 		{Name: ToolWikiDeletePage, Label: "删除Wiki", Description: "删除Wiki页面并自动清理关联死链"},
 		{Name: ToolWikiReadIssue, Label: "查看Wiki问题", Description: "查看特定的Wiki页面问题详情"},
 		{Name: ToolWikiUpdateIssue, Label: "更新Wiki问题状态", Description: "更新特定的Wiki页面问题状态"},
+		{Name: ToolCheckInbox, Label: "查看态势收件箱", Description: "读取用户操作、知识库事件与Agent动作回执的情境收件箱"},
+		{Name: ToolWikiGetCurrentPage, Label: "读取当前页面", Description: "识别用户正在查看的Wiki页面并按需读取其内容与段落大纲"},
+		{Name: ToolWikiGetPageTrail, Label: "查看页面轨迹", Description: "列出用户最近浏览的Wiki页面，用于解析『刚才那页』等指代"},
 	}
 }
 

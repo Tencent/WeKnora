@@ -880,6 +880,10 @@ export default {
     noGeneratedQuestions: '検索用質問はありません',
     notInitialized: 'ナレッジベースが初期化されていません。ファイルをアップロードする前に、設定でモデルを設定してください',
     missingStorageEngine: 'このナレッジベースにはストレージエンジンが選択されていません。コンテンツをアップロードする前に、設定でストレージエンジンを設定してください。',
+    agentSidebar: {
+      title: 'サイドバーアシスタント',
+      sessionError: 'サイドバーセッションの作成に失敗しました。もう一度お試しください。',
+    },
     missingStorageEngineUpload: 'コンテンツをアップロードする前にストレージエンジンを設定してください',
     goToStorageSettings: '設定を開く',
     getInfoFailed: 'ナレッジベース情報の取得に失敗したため、ファイルをアップロードできません',

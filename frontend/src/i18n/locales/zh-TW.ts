@@ -7299,6 +7299,10 @@ export default {
     noGeneratedQuestions: '暫無輔助召回問題',
     notInitialized: '該知識庫尚未完成初始化設定，請先前往設定頁面設定模型資訊後再上傳檔案',
     missingStorageEngine: '該知識庫尚未選擇存儲引擎，請先前往設定頁面設定存儲引擎後再上傳內容。',
+    agentSidebar: {
+      title: '側邊欄助手',
+      sessionError: '側邊欄會話建立失敗，請重試。',
+    },
     missingStorageEngineUpload: '請先設定存儲引擎後再上傳內容',
     goToStorageSettings: '前往設定',
     getInfoFailed: '獲取知識庫資訊失敗，無法上傳檔案',

@@ -87,6 +87,11 @@ export const TOOL_CAPABILITY_REQUIREMENTS: Record<string, ToolRequirement> = {
   wiki_read_issue:      { allOf: ['wiki'] },
   wiki_update_issue:    { allOf: ['wiki'] },
 
+  // ---- Agent inbox (agent-sidebar-inbox) — mirrors tools/capabilities.go ----
+  check_inbox:           {},
+  wiki_get_current_page: { allOf: ['wiki'] },
+  wiki_get_page_trail:   { allOf: ['wiki'] },
+
   // ---- Data analysis (reads table summary/column chunks produced by RAG ingest) ----
   data_analysis: { anyOf: ['vector', 'keyword'], consumesFiles: true },
   data_schema:   { anyOf: ['vector', 'keyword'], consumesFiles: true },

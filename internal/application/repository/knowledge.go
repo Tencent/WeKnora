@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/common"
+	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"gorm.io/gorm"
@@ -690,12 +691,26 @@ func (r *knowledgeRepository) FinalizeSubtask(
 	//    to decide whether to promote (see finalizeSubtask). A read failure here does
 	//    not affect correctness, so we don't propagate it as an error.
 	var snap struct {
-		PendingSubtasksCount int `gorm:"column:pending_subtasks_count"`
+		PendingSubtasksCount int    `gorm:"column:pending_subtasks_count"`
+		TenantID             uint64 `gorm:"column:tenant_id"`
+		KnowledgeBaseID      string `gorm:"column:knowledge_base_id"`
 	}
 	if err := r.db.WithContext(ctx).Model(&types.Knowledge{}).
-		Select("pending_subtasks_count").
+		Select("pending_subtasks_count", "tenant_id", "knowledge_base_id").
 		Where("id = ?", id).Take(&snap).Error; err != nil {
 		return 0, promoted, nil
+	}
+	if promoted {
+		// The row just flipped finalizing→completed: announce it for the
+		// agent inbox (agent-sidebar-inbox). Best-effort — handler lookup
+		// failures are logged inside the bus, never propagated to the parse
+		// finalizer.
+		_ = event.Emit(ctx, event.NewEvent(event.EventKnowledgeParseCompleted,
+			event.KnowledgeParseEventData{
+				TenantID:        snap.TenantID,
+				KnowledgeID:     id,
+				KnowledgeBaseID: snap.KnowledgeBaseID,
+			}))
 	}
 	return snap.PendingSubtasksCount, promoted, nil
 }

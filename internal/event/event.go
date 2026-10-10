@@ -87,6 +87,11 @@ const (
 	// Session events
 	EventSessionTitle EventType = "session_title" // 会话标题更新
 
+	// EventKnowledgeParseCompleted and EventKnowledgeParseFailed mark the
+	// knowledge parse lifecycle (agent inbox source: parse.completed/failed).
+	EventKnowledgeParseCompleted EventType = "knowledge.parse.completed" // 文档解析成功收尾
+	EventKnowledgeParseFailed    EventType = "knowledge.parse.failed"    // 文档解析重试耗尽
+
 	// Control events
 	EventStop EventType = "stop" // 停止对话生成
 )
