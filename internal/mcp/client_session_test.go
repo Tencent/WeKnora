@@ -3,6 +3,8 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -11,8 +13,55 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/types"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
+	"github.com/mark3labs/mcp-go/client/transport"
+	sdk "github.com/mark3labs/mcp-go/mcp"
 	"github.com/stretchr/testify/require"
 )
+
+func TestMCPClientProtocolSessionErrors(t *testing.T) {
+	for _, test := range []struct {
+		name          string
+		err           error
+		wantConnected bool
+		legacy        bool
+	}{
+		{"method-not-found", transport.ErrSessionTerminated, true, false},
+		{"wrapped-method-not-found", fmt.Errorf("request: %w", transport.ErrSessionTerminated), true, false},
+		{"expired-session", errors.New("request failed with status 400: Invalid session ID"), false, false},
+		{"missing-connection", errors.New("No active connection"), false, false},
+		{"legacy-session-gone", transport.ErrSessionTerminated, false, true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			c := newProtocolTestClient(t, 3, func(_ context.Context, request transport.JSONRPCRequest) (*transport.JSONRPCResponse, error) {
+				if test.legacy {
+					if request.Method == "server/discover" {
+						return &transport.JSONRPCResponse{Error: &sdk.JSONRPCErrorDetails{Code: -32601, Message: "Method not found"}}, nil
+					}
+					require.Equal(t, "initialize", request.Method)
+					return &transport.JSONRPCResponse{Result: json.RawMessage(`{"protocolVersion":"2025-11-25","capabilities":{},"serverInfo":{"name":"peer","version":"1"}}`)}, nil
+				}
+				require.Equal(t, "server/discover", request.Method)
+				return &transport.JSONRPCResponse{Result: json.RawMessage(`{"capabilities":{},"protocolVersions":["2026-07-28"]}`)}, nil
+			})
+			result, err := c.Initialize(context.Background())
+			require.NoError(t, err)
+			wantVersion := sdk.LATEST_PROTOCOL_VERSION
+			if test.legacy {
+				wantVersion = sdk.LATEST_LEGACY_PROTOCOL_VERSION
+			}
+			require.Equal(t, wantVersion, result.ProtocolVersion)
+			c.toolSchemas = map[string]json.RawMessage{"echo": json.RawMessage(`{"type":"object"}`)}
+			c.checkErrorAndDisconnectIfNeeded(transport.NewError(test.err))
+			require.Equal(t, test.wantConnected, c.IsConnected())
+			require.Equal(t, test.wantConnected, c.initialized.Load())
+			if test.wantConnected {
+				require.Contains(t, c.toolSchemas, "echo")
+			} else {
+				require.Nil(t, c.toolSchemas)
+			}
+		})
+	}
+}
 
 // expiringSessionServer is a Streamable HTTP MCP server on a session-based
 // protocol version that forgets the session after initialization: the next

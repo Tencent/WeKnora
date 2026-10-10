@@ -70,12 +70,47 @@ type ClientConfig struct {
 type mcpGoClient struct {
 	service      *types.MCPService
 	client       *client.Client
+	discovery    *discoverTransport
 	oauth        *oauthRuntime
 	connected    atomic.Bool
 	initialized  atomic.Bool
 	metadataMu   sync.RWMutex
 	instructions string
 	toolSchemas  map[string]json.RawMessage
+}
+
+// The SDK hides probe failures when the legacy handshake succeeds. Observe
+// transport failures so a temporary outage does not permanently select legacy.
+type discoverTransport struct {
+	transport.HTTPConnection
+	failed atomic.Bool
+}
+
+func (t *discoverTransport) SendRequest(ctx context.Context, request transport.JSONRPCRequest) (*transport.JSONRPCResponse, error) {
+	response, err := t.HTTPConnection.SendRequest(ctx, request)
+	if request.Method == string(mcp.MethodServerDiscover) {
+		// JSON-RPC errors, including method-not-found, are valid peer answers
+		// and must remain under the SDK's protocol negotiation policy.
+		t.failed.Store(err != nil)
+	}
+	return response, err
+}
+
+func (t *discoverTransport) SetRequestHandler(handler transport.RequestHandler) {
+	if bidirectional, ok := t.HTTPConnection.(transport.BidirectionalInterface); ok {
+		bidirectional.SetRequestHandler(handler)
+	}
+}
+
+func (t *discoverTransport) SetConnectionLostHandler(handler func(error)) {
+	if setter, ok := t.HTTPConnection.(interface{ SetConnectionLostHandler(func(error)) }); ok {
+		setter.SetConnectionLostHandler(handler)
+	}
+}
+
+func (t *discoverTransport) RequiresLegacyProtocol() bool {
+	legacy, ok := t.HTTPConnection.(interface{ RequiresLegacyProtocol() bool })
+	return ok && legacy.RequiresLegacyProtocol()
 }
 
 // applyAuthHeaders injects the auth header for the SELECTED strategy only —
@@ -162,10 +197,7 @@ func NewMCPClient(config *ClientConfig) (MCPClient, error) {
 	}
 
 	// Create HTTP client with timeout
-	timeout := 30 * time.Second
-	if config.Service.AdvancedConfig != nil && config.Service.AdvancedConfig.Timeout > 0 {
-		timeout = time.Duration(config.Service.AdvancedConfig.Timeout) * time.Second
-	}
+	timeout := serviceTimeout(config.Service)
 
 	clientCfg := secutils.DefaultSSRFSafeHTTPClientConfig()
 	clientCfg.SameOriginRedirectsOnly = true
@@ -189,23 +221,20 @@ func NewMCPClient(config *ClientConfig) (MCPClient, error) {
 	}
 
 	// Create client based on transport type
-	var mcpClient *client.Client
+	var connection transport.HTTPConnection
 	switch config.Service.TransportType {
 	case types.MCPTransportSSE:
 		if config.Service.URL == nil || *config.Service.URL == "" {
 			return nil, fmt.Errorf("URL is required for SSE transport")
 		}
-		if useOAuth {
-			mcpClient, err = client.NewOAuthSSEClient(*config.Service.URL, oauthConfig,
-				transport.WithHTTPClient(httpClient),
-				transport.WithHeaders(headers),
-			)
-		} else {
-			mcpClient, err = client.NewSSEMCPClient(*config.Service.URL,
-				client.WithHTTPClient(httpClient),
-				client.WithHeaders(headers),
-			)
+		options := []transport.ClientOption{
+			transport.WithHTTPClient(httpClient),
+			transport.WithHeaders(headers),
 		}
+		if useOAuth {
+			options = append(options, transport.WithOAuth(oauthConfig))
+		}
+		connection, err = transport.NewSSE(*config.Service.URL, options...)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create SSE client: %w", err)
 		}
@@ -213,18 +242,14 @@ func NewMCPClient(config *ClientConfig) (MCPClient, error) {
 		if config.Service.URL == nil || *config.Service.URL == "" {
 			return nil, fmt.Errorf("URL is required for HTTP Streamable transport")
 		}
-		if useOAuth {
-			mcpClient, err = client.NewOAuthStreamableHttpClient(*config.Service.URL, oauthConfig,
-				transport.WithHTTPBasicClient(httpClient),
-				transport.WithHTTPHeaders(headers),
-			)
-		} else {
-			// For HTTP streamable, we need to use transport options
-			mcpClient, err = client.NewStreamableHttpClient(*config.Service.URL,
-				transport.WithHTTPBasicClient(httpClient),
-				transport.WithHTTPHeaders(headers),
-			)
+		options := []transport.StreamableHTTPCOption{
+			transport.WithHTTPBasicClient(httpClient),
+			transport.WithHTTPHeaders(headers),
 		}
+		if useOAuth {
+			options = append(options, transport.WithHTTPOAuth(oauthConfig))
+		}
+		connection, err = transport.NewStreamableHTTP(*config.Service.URL, options...)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create HTTP streamable client: %w", err)
 		}
@@ -235,9 +260,12 @@ func NewMCPClient(config *ClientConfig) (MCPClient, error) {
 		return nil, ErrUnsupportedTransport
 	}
 
+	discovery := &discoverTransport{HTTPConnection: connection}
+	mcpClient := client.NewClient(discovery, client.WithDiscoverTimeout(discoverProbeTimeout(config.Service)))
 	instance := &mcpGoClient{
-		service: config.Service,
-		client:  mcpClient,
+		service:   config.Service,
+		client:    mcpClient,
+		discovery: discovery,
 	}
 	if useOAuth {
 		instance.oauth = newOAuthRuntime(
@@ -251,6 +279,20 @@ func NewMCPClient(config *ClientConfig) (MCPClient, error) {
 	}
 	mcpClient.OnConnectionLost(instance.onConnectionLost)
 	return instance, nil
+}
+
+func serviceTimeout(service *types.MCPService) time.Duration {
+	if service.AdvancedConfig != nil && service.AdvancedConfig.Timeout > 0 {
+		return time.Duration(service.AdvancedConfig.Timeout) * time.Second
+	}
+	return 30 * time.Second
+}
+
+// Each of at most two probes gets a quarter of the service timeout, capped at
+// 2.5s: together they use at most half the budget and 5s, leaving time for
+// legacy handshakes even with a 1s service timeout.
+func discoverProbeTimeout(service *types.MCPService) time.Duration {
+	return min(serviceTimeout(service)/4, 2500*time.Millisecond)
 }
 
 // buildOAuthConfig returns the OAuth configuration for an OAuth-enabled MCP
@@ -298,10 +340,11 @@ func (c *mcpGoClient) onConnectionLost(err error) {
 // checkErrorAndDisconnectIfNeeded checks for transport errors that indicate the
 // session is no longer valid and proactively disconnects the client so that
 // subsequent GetOrCreateClient calls will establish a fresh connection.
-// Legacy connections use server-assigned sessions that can expire. Modern
-// connections are stateless, so a method-level 404 is not session loss.
+// Modern Streamable HTTP maps method-level 404s to session termination too,
+// but modern SSE can still lose its transport session.
 func (c *mcpGoClient) checkErrorAndDisconnectIfNeeded(err error) {
-	if c.client != nil && mcp.IsModernProtocol(c.client.ProtocolVersion()) {
+	if c.client != nil && mcp.IsModernProtocol(c.client.ProtocolVersion()) &&
+		errors.Is(err, transport.ErrSessionTerminated) {
 		return
 	}
 	var transportErr *transport.Error
@@ -404,7 +447,24 @@ func (c *mcpGoClient) Initialize(ctx context.Context) (*InitializeResult, error)
 	}
 
 	result, err := oauthCall(ctx, c, func() (*mcp.InitializeResult, error) {
-		return c.client.Initialize(ctx, req)
+		result, err := c.client.Initialize(ctx, req)
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		if err != nil || mcp.IsModernProtocol(result.ProtocolVersion) ||
+			c.discovery == nil || !c.discovery.failed.Load() {
+			return result, err
+		}
+		if deadline, ok := ctx.Deadline(); ok && time.Until(deadline) < discoverProbeTimeout(c.service) {
+			return result, nil
+		}
+		// Retry negotiation once before the manager caches a legacy client.
+		// The working legacy session is kept unless the retry turns modern.
+		retry, retryErr := c.client.Initialize(ctx, req)
+		if retryErr == nil && mcp.IsModernProtocol(retry.ProtocolVersion) {
+			return retry, nil
+		}
+		return result, nil
 	})
 	if err != nil {
 		c.checkErrorAndDisconnectIfNeeded(err)
