@@ -154,6 +154,9 @@ type sqlValidator struct {
 // SearchScope describes one allowed knowledge scope for SQL query injection.
 // Empty KnowledgeIDs and TagIDs means the whole KB is in scope.
 type SearchScope struct {
+	// TenantID is the authorized owner of this KB. Zero uses the caller tenant
+	// when tenant isolation is enabled. Scopes must be authorized by the caller.
+	TenantID        uint64
 	KnowledgeBaseID string
 	KnowledgeIDs    []string
 	TagIDs          []string
@@ -653,7 +656,9 @@ func WithSearchScopeFilter(kbIDs []string, knowledgeIDs []string) SQLValidationO
 }
 
 // WithSearchScopes restricts queries using structured OR scopes. Each scope can
-// represent a full KB, specific documents, or a tag-constrained KB.
+// represent a full KB, specific documents, or a tag-constrained KB. Nonzero
+// TenantID values grant access to that owner within that scope, so scopes must
+// come from server-side authorization, never directly from untrusted input.
 func WithSearchScopes(scopes []SearchScope) SQLValidationOption {
 	return func(v *sqlValidator) {
 		if len(scopes) == 0 {
@@ -1059,6 +1064,12 @@ func (v *sqlValidator) injectTenantConditions(sql string, tablesInQuery map[stri
 	var conditions []string
 	for tableName, alias := range tablesInQuery {
 		if v.tablesWithTenantID[tableName] {
+			// Structured scopes bind each owner to its own KB and document/tag
+			// restrictions below. A global caller filter would reject shared KBs.
+			if v.enableSearchScopeFilter && len(v.searchScopes) > 0 &&
+				(tableName == "knowledge_bases" || tableName == "knowledges" || tableName == "chunks") {
+				continue
+			}
 			if tableName == "tenants" {
 				conditions = append(conditions, fmt.Sprintf("%s.id = %d", alias, v.tenantID))
 			} else {
@@ -1168,17 +1179,17 @@ func (v *sqlValidator) injectStructuredSearchScopeConditions(sql string, tablesI
 	var conditions []string
 
 	if alias, ok := tablesInQuery["knowledge_bases"]; ok {
-		if cond := buildKnowledgeBaseScopeCondition(alias, v.searchScopes); cond != "" {
+		if cond := v.buildKnowledgeBaseScopeCondition(alias, v.searchScopes); cond != "" {
 			conditions = append(conditions, cond)
 		}
 	}
 	if alias, ok := tablesInQuery["knowledges"]; ok {
-		if cond := buildKnowledgeScopeCondition(alias, v.searchScopes); cond != "" {
+		if cond := v.buildKnowledgeScopeCondition(alias, v.searchScopes); cond != "" {
 			conditions = append(conditions, cond)
 		}
 	}
 	if alias, ok := tablesInQuery["chunks"]; ok {
-		if cond := buildChunkScopeCondition(alias, v.searchScopes); cond != "" {
+		if cond := v.buildChunkScopeCondition(alias, v.searchScopes); cond != "" {
 			conditions = append(conditions, cond)
 		}
 	}
@@ -1189,19 +1200,29 @@ func (v *sqlValidator) injectStructuredSearchScopeConditions(sql string, tablesI
 	return InjectAndConditions(sql, strings.Join(conditions, " AND "))
 }
 
-func buildKnowledgeBaseScopeCondition(alias string, scopes []SearchScope) string {
-	kbIDs := uniqueScopeKBIDs(scopes)
-	if len(kbIDs) == 0 {
-		return ""
+func (v *sqlValidator) buildKnowledgeBaseScopeCondition(alias string, scopes []SearchScope) string {
+	clauses := make([]string, 0, len(scopes))
+	for _, scope := range scopes {
+		if scope.KnowledgeBaseID == "" {
+			continue
+		}
+		clause := fmt.Sprintf("%s.id = %s", alias, quoteString(scope.KnowledgeBaseID))
+		if tenant := v.scopeTenantCondition(alias, scope); tenant != "" {
+			clause = "(" + clause + " AND " + tenant + ")"
+		}
+		clauses = append(clauses, clause)
 	}
-	return fmt.Sprintf("%s.id IN (%s)", alias, strings.Join(quoteStringSlice(kbIDs), ", "))
+	if len(clauses) == 0 {
+		return "false"
+	}
+	return joinOrClauses(clauses)
 }
 
 // buildScopeClause renders one scope. A scope's document whitelist and tag
 // filter are ANDed: each is an independent narrowing of the same KB, so
 // applying only one of them would admit rows the other excludes. Scopes are
 // ORed against each other by joinOrClauses because they are alternatives.
-func buildScopeClause(alias, knowledgeIDColumn string, scope SearchScope) string {
+func (v *sqlValidator) buildScopeClause(alias, knowledgeIDColumn string, scope SearchScope) string {
 	if scope.KnowledgeBaseID == "" {
 		return ""
 	}
@@ -1220,43 +1241,52 @@ func buildScopeClause(alias, knowledgeIDColumn string, scope SearchScope) string
 			alias, knowledgeIDColumn, strings.Join(quoteStringSlice(scope.TagIDs), ", "),
 		))
 	}
+	if tenant := v.scopeTenantCondition(alias, scope); tenant != "" {
+		conditions = append(conditions, tenant)
+	}
 	if len(conditions) == 1 {
 		return conditions[0]
 	}
 	return "(" + strings.Join(conditions, " AND ") + ")"
 }
 
-func buildKnowledgeScopeCondition(alias string, scopes []SearchScope) string {
+func (v *sqlValidator) buildKnowledgeScopeCondition(alias string, scopes []SearchScope) string {
 	clauses := make([]string, 0, len(scopes))
 	for _, scope := range scopes {
-		if clause := buildScopeClause(alias, "id", scope); clause != "" {
+		if clause := v.buildScopeClause(alias, "id", scope); clause != "" {
 			clauses = append(clauses, clause)
 		}
+	}
+	if len(clauses) == 0 {
+		return "false"
 	}
 	return joinOrClauses(clauses)
 }
 
-func buildChunkScopeCondition(alias string, scopes []SearchScope) string {
+func (v *sqlValidator) buildChunkScopeCondition(alias string, scopes []SearchScope) string {
 	clauses := make([]string, 0, len(scopes))
 	for _, scope := range scopes {
-		if clause := buildScopeClause(alias, "knowledge_id", scope); clause != "" {
+		if clause := v.buildScopeClause(alias, "knowledge_id", scope); clause != "" {
 			clauses = append(clauses, clause)
 		}
+	}
+	if len(clauses) == 0 {
+		return "false"
 	}
 	return joinOrClauses(clauses)
 }
 
-func uniqueScopeKBIDs(scopes []SearchScope) []string {
-	seen := make(map[string]bool, len(scopes))
-	out := make([]string, 0, len(scopes))
-	for _, scope := range scopes {
-		if scope.KnowledgeBaseID == "" || seen[scope.KnowledgeBaseID] {
-			continue
+// scopeTenantCondition keeps ownership in the same OR branch as the KB and
+// document/tag restrictions. Missing ownership retains caller-only isolation.
+func (v *sqlValidator) scopeTenantCondition(alias string, scope SearchScope) string {
+	tenantID := scope.TenantID
+	if tenantID == 0 {
+		if !v.enableTenantInjection {
+			return ""
 		}
-		seen[scope.KnowledgeBaseID] = true
-		out = append(out, scope.KnowledgeBaseID)
+		tenantID = v.tenantID
 	}
-	return out
+	return fmt.Sprintf("%s.tenant_id = %d", alias, tenantID)
 }
 
 func joinOrClauses(clauses []string) string {
