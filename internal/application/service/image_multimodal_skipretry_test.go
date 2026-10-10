@@ -31,11 +31,21 @@ func TestIsPermanentVLMFailure(t *testing.T) {
 		{"408 retryable", &api.HTTPError{StatusCode: 408}, false},
 		{"500 retryable", &api.HTTPError{StatusCode: 500}, false},
 		{"503 retryable", &api.HTTPError{StatusCode: 503}, false},
-		{"transport send-request down", &api.TransportError{Op: "send request", Err: errors.New("connection refused")}, true},
-		{"transport read-response transient", &api.TransportError{Op: "read response", Err: errors.New("unexpected EOF")}, false},
+		{
+			"transport send-request down",
+			&api.TransportError{Op: "send request", Err: errors.New("connection refused")}, true,
+		},
+		{
+			"transport read-response transient",
+			&api.TransportError{Op: "read response", Err: errors.New("unexpected EOF")}, false,
+		},
 		// The manager wraps the original api error with %w, so the underlying
 		// api error must still be detectable.
-		{"wrapped send-request", fmt.Errorf("endpoint down: %w", &api.TransportError{Op: "send request", Err: errors.New("i/o timeout")}), true},
+		{
+			"wrapped send-request",
+			fmt.Errorf("endpoint down: %w", &api.TransportError{Op: "send request", Err: errors.New("i/o timeout")}),
+			true,
+		},
 		{"wrapped 401", fmt.Errorf("verdict: %w", &api.HTTPError{StatusCode: 401}), true},
 		{"wrapped 500", fmt.Errorf("verdict: %w", &api.HTTPError{StatusCode: 500}), false},
 	}
