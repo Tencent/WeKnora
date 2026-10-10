@@ -5118,6 +5118,7 @@ export default {
     }
   },
   input: {
+    more: '추가 작업',
     addModel: '모델 추가',
     placeholder: '질문이나 작업 내용을 입력하세요…',
     agentMode: 'Agent 모드',

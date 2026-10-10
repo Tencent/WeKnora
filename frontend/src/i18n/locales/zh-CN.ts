@@ -5120,6 +5120,7 @@ export default {
     }
   },
   input: {
+    more: '更多操作',
     addModel: '添加模型',
     placeholder: '输入问题或描述任务…',
     agentMode: '智能推理',

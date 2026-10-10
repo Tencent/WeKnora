@@ -2913,6 +2913,7 @@ export default {
     }
   },
   input: {
+    more: 'More actions',
     addModel: 'Add Model',
     placeholder: 'Ask a question or describe a task…',
     agentMode: 'Smart Reasoning',

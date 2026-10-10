@@ -2913,6 +2913,7 @@ export default {
     }
   },
   input: {
+    more: 'その他の操作',
     addModel: 'モデルを追加',
     placeholder: '質問や依頼内容を入力…',
     agentMode: 'スマート推論',
