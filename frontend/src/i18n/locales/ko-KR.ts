@@ -5114,6 +5114,7 @@ export default {
     pickFailed: '선택한 경로를 열 수 없습니다',
     messages: {
       createFailed: '세션 생성 실패',
+      navigationError: '대화가 생성되었지만 페이지를 열지 못했습니다. 다시 시도해 주세요.',
       createError: '세션 생성 실패, 나중에 다시 시도해주세요'
     }
   },

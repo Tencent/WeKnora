@@ -524,6 +524,7 @@ const props = defineProps({
     type: Boolean,
     required: false
   },
+  preserveDraftUntilNavigation: { type: Boolean, default: false },
   composerLocked: {
     type: Boolean,
     default: false
@@ -1957,6 +1958,7 @@ onBeforeUnmount(() => {
   // Let TDesign handle blur while its textarea is still attached to the DOM.
   const textarea = getTextareaEl();
   if (textarea?.isConnected && document.activeElement === textarea) textarea.blur();
+  if (props.preserveDraftUntilNavigation) clearPendingUploads();
 });
 
 onUnmounted(() => {
@@ -2138,6 +2140,8 @@ const createSession = async (
   const attachmentFiles = uploadedAttachments.value;
 
   emit('send-msg', val, selectedModelId.value, mentionedItems, imageFiles, attachmentFiles, options);
+
+  if (props.preserveDraftUntilNavigation) return;
 
   // Clean up image previews
   uploadedImages.value.forEach(img => URL.revokeObjectURL(img.preview));
@@ -2753,7 +2757,7 @@ defineExpose({
       </div>
 
       <!-- 实际输入框 -->
-      <t-textarea ref="textareaRef" v-model="query" :placeholder="t('input.placeholder')" name="description" :autosize="true"
+      <t-textarea ref="textareaRef" v-model="query" :readonly="composerLocked" :placeholder="t('input.placeholder')" name="description" :autosize="true"
         @keydown="onKeydown" @input="onInput" @compositionstart="onCompositionStart" @compositionend="onCompositionEnd"
         @paste="onPaste" />
 

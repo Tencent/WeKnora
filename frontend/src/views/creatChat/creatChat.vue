@@ -1,11 +1,11 @@
 <template>
     <div class="dialogue-wrap">
-        <div class="dialogue-answers">
-            <div class="dialogue-title" style="--wails-draggable: drag">
+        <div class="dialogue-answers" :class="{ 'is-submitting': creatingSession }">
+            <div v-if="!creatingSession && !createdSessionId" class="dialogue-title" style="--wails-draggable: drag">
                 <span style="--wails-draggable: drag">{{ $t('createChat.title') }}</span>
             </div>
             <!-- 推荐问题 -->
-            <div ref="sqContainerRef" class="suggested-questions-container">
+            <div v-show="!creatingSession && !createdSessionId" ref="sqContainerRef" class="suggested-questions-container">
                 <!-- 骨架屏占位 -->
                 <div v-if="sqLoading && suggestedQuestions.length === 0" class="suggested-questions-inner">
                     <div class="suggested-questions-title"><t-skeleton animation="gradient"
@@ -43,7 +43,19 @@
                     </div>
                 </transition>
             </div>
-            <div class="create-chat-composer">
+            <div v-if="creatingSession || createdSessionId" class="new-chat-conversation" role="log" aria-live="polite">
+                <div class="new-chat-question">
+                    <span>{{ pendingQuestion }}</span>
+                    <div v-if="pendingImages.length" class="new-chat-images">
+                        <img v-for="image in pendingImages" :key="image.url" :src="image.url" :alt="image.name" />
+                    </div>
+                    <div v-if="pendingAttachments.length" class="new-chat-attachments">
+                        <span v-for="file in pendingAttachments" :key="file.name"><t-icon name="file" />{{ file.name }}</span>
+                    </div>
+                </div>
+                <div v-if="creatingSession" class="new-chat-progress" role="status"><t-loading size="small" /><span>{{ $t('common.loading') }}</span></div>
+            </div>
+            <div class="create-chat-composer" @input.capture="!createdSessionId && (creationError = false)">
                 <div v-if="hostSandboxEnabled" class="project-dir-bar">
                     <button type="button" class="project-dir-bar__btn"
                         :class="{ 'is-bound': !!selectedProjectDir, 'is-picking': pickingProjectDir }"
@@ -57,7 +69,9 @@
                     <button v-if="selectedProjectDir" type="button" class="project-dir-bar__clear"
                         :aria-label="$t('createChat.clearProject')" @click="clearProjectDir">×</button>
                 </div>
-                <InputField ref="inputFieldRef" @send-msg="sendMsg"></InputField>
+                <p v-if="creationError" class="composer-submission-error" role="alert">{{ $t(createdSessionId ? 'createChat.messages.navigationError' : 'createChat.messages.createError') }}</p>
+                <t-button v-if="creationError && createdSessionId" variant="outline" @click="retryNavigation">{{ $t('common.retry') }}</t-button>
+                <InputField ref="inputFieldRef" :inert="creatingSession || !!createdSessionId" :composer-locked="creatingSession || !!createdSessionId" preserve-draft-until-navigation @send-msg="sendMsg"></InputField>
             </div>
         </div>
     </div>
@@ -70,7 +84,7 @@
         @update:visible="(val) => val ? null : uiStore.closeKBEditor()" @success="handleKBEditorSuccess" />
 </template>
 <script setup lang="ts">
-import { ref, watch, onMounted, nextTick, computed } from 'vue';
+import { ref, watch, onMounted, onUnmounted, nextTick, computed } from 'vue';
 import ContextualGuide from '@/components/ContextualGuide.vue';
 import InputField from '@/components/Input-field.vue';
 import { createSessions } from "@/api/chat/index";
@@ -83,7 +97,7 @@ import { useMenuStore } from '@/stores/menu';
 import { useSettingsStore } from '@/stores/settings';
 import { useUIStore } from '@/stores/ui';
 import { useDeploymentCapabilitiesStore } from '@/stores/deploymentCapabilities';
-import { useRoute, useRouter, onBeforeRouteLeave } from 'vue-router';
+import { useRoute, useRouter, onBeforeRouteLeave, isNavigationFailure, NavigationFailureType } from 'vue-router';
 import { MessagePlugin } from 'tdesign-vue-next';
 import { useI18n } from 'vue-i18n';
 import KnowledgeBaseEditorModal from '@/views/knowledge/KnowledgeBaseEditorModal.vue';
@@ -96,7 +110,10 @@ const settingsStore = useSettingsStore();
 onBeforeRouteLeave((to) => {
     // The first send carries the draft into its new session; abandoning the
     // composer must not make this a default for the next conversation.
-    if (!to.path.startsWith('/platform/chat/') || !usemenuStore.isFirstSession) {
+    if (to.path !== `/platform/chat/${createdSessionId.value}` || !usemenuStore.isFirstSession) {
+        leavingPage = true;
+        usemenuStore.changeFirstQuery('', [], '', [], []);
+        usemenuStore.changeIsFirstSession(false);
         settingsStore.reasoningEffortOverride = '';
     }
 });
@@ -215,6 +232,19 @@ onMounted(() => {
 });
 
 const inputFieldRef = ref();
+const creatingSession = ref(false);
+const pendingQuestion = ref('');
+const creationError = ref(false);
+const createdSessionId = ref('');
+const pendingImages = ref<Array<{ name: string; url: string }>>([]);
+const pendingAttachments = ref<Array<{ name: string }>>([]);
+function clearPendingPreviews() {
+    pendingImages.value.forEach(image => URL.revokeObjectURL(image.url));
+    pendingImages.value = [];
+}
+onUnmounted(clearPendingPreviews);
+let pendingOptions: SendMessageOptions = {};
+let leavingPage = false;
 
 // The suggestion's source rides with this send to the new session's first
 // request, so the agent searches it before answering.
@@ -227,6 +257,15 @@ const sendMsg = (value: string, modelId: string, mentionedItems: any[], imageFil
 }
 
 async function createNewSession(value: string, modelId: string, mentionedItems: any[] = [], imageFiles: any[] = [], attachmentFiles: any[] = [], options: SendMessageOptions = {}) {
+    if (creatingSession.value || createdSessionId.value) return;
+    creatingSession.value = true;
+    creationError.value = false;
+    options = options.questionOrigin ? options : value === pendingQuestion.value ? pendingOptions : options;
+    pendingOptions = options;
+    pendingQuestion.value = value;
+    clearPendingPreviews();
+    pendingImages.value = imageFiles.map(file => ({ name: file.name, url: URL.createObjectURL(file) }));
+    pendingAttachments.value = attachmentFiles.map(file => ({ name: file.name }));
     const selectedKbs = settingsStore.settings.selectedKnowledgeBases || [];
     const selectedFiles = settingsStore.settings.selectedFiles || [];
 
@@ -245,15 +284,20 @@ async function createNewSession(value: string, modelId: string, mentionedItems: 
 
     try {
         const res = await createSessions(withOptionalProjectDir(sessionData, selectedProjectDir.value));
+        if (leavingPage) return;
         if (res.data && res.data.id) {
+            createdSessionId.value = res.data.id;
             await navigateToSession(res.data.id, value, modelId, mentionedItems, imageFiles, attachmentFiles, options);
         } else {
+            creationError.value = true;
             console.error('[createChat] Failed to create session');
-            MessagePlugin.error(t('createChat.messages.createFailed'));
+
         }
     } catch (error) {
+        if (!leavingPage) creationError.value = true;
         console.error('[createChat] Create session error:', error);
-        MessagePlugin.error(t('createChat.messages.createError'));
+    } finally {
+        creatingSession.value = false;
     }
 }
 
@@ -271,7 +315,47 @@ const navigateToSession = async (sessionId: string, value: string, modelId: stri
     usemenuStore.updataMenuChildren(obj);
     usemenuStore.changeIsFirstSession(true);
     usemenuStore.changeFirstQuery(value, mentionedItems, modelId, imageFiles, attachmentFiles, options.questionOrigin ?? null);
-    router.push(`/platform/chat/${sessionId}`);
+    await openCreatedSession(sessionId);
+}
+
+async function openCreatedSession(sessionId: string) {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let timedOut = false;
+    const sourcePath = route.fullPath;
+    try {
+        const failure = await Promise.race([
+            router.push(`/platform/chat/${sessionId}`),
+            new Promise<never>((_, reject) => {
+                timer = setTimeout(() => {
+                    timedOut = true;
+                    reject(new Error('Chat navigation timed out'));
+                }, 30_000);
+            }),
+        ]);
+        if (isNavigationFailure(failure, NavigationFailureType.cancelled) || leavingPage) return;
+        if (failure) throw failure;
+    } catch (error) {
+        // A newer user navigation owns the route; only cancel our own timed-out load.
+        if (timedOut && !leavingPage && route.fullPath === sourcePath) {
+            await router.replace(sourcePath).catch(() => {});
+        }
+        if (!leavingPage) throw error;
+    } finally {
+        clearTimeout(timer);
+    }
+}
+
+async function retryNavigation() {
+    if (creatingSession.value || !createdSessionId.value) return;
+    creatingSession.value = true;
+    creationError.value = false;
+    try {
+        await openCreatedSession(createdSessionId.value);
+    } catch {
+        creationError.value = true;
+    } finally {
+        creatingSession.value = false;
+    }
 }
 
 const handleKBEditorSuccess = (kbId: string) => {
@@ -297,6 +381,59 @@ async function openProjectDir() {
 
 </script>
 <style lang="less" scoped>
+.composer-submission-error {
+    margin: 8px 14px;
+    color: var(--td-error-color);
+}
+.dialogue-answers.is-submitting {
+    align-self: stretch;
+    justify-content: flex-start;
+    height: 100%;
+    min-height: 0;
+}
+.new-chat-conversation {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    width: 100%;
+    padding: 16px;
+    box-sizing: border-box;
+}
+.new-chat-question {
+    margin-left: auto;
+    width: fit-content;
+    max-width: 85%;
+    padding: 12px 16px;
+    border-radius: var(--app-radius-lg);
+    background: var(--td-bg-color-secondarycontainer);
+    color: var(--td-text-color-primary);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+.new-chat-images {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 8px;
+    img { width: 72px; height: 72px; object-fit: cover; border-radius: var(--app-radius-md); }
+}
+.new-chat-attachments {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-top: 8px;
+    overflow-wrap: anywhere;
+    span { display: flex; align-items: center; gap: 6px; }
+}
+.new-chat-progress {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 24px;
+    color: var(--td-text-color-secondary);
+}
+
+
 .dialogue-wrap {
     flex: 1;
     display: flex;

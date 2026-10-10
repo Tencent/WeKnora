@@ -5116,6 +5116,7 @@ export default {
     pickFailed: '無法打開所選路徑',
     messages: {
       createFailed: '建立會話失敗',
+      navigationError: '會話已建立，但對話頁面未能開啟。請重試。',
       createError: '建立會話失敗，請稍後重試'
     }
   },
