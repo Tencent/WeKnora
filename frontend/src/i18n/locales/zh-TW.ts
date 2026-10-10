@@ -4210,6 +4210,11 @@ export default {
       separatorsLabel: '分隔符',
       separatorsDescription: '切分時優先使用的字符或字符串。優先級高的分隔符先嘗試；預設順序優先段落 → 句子 → 標點。',
       separatorsPlaceholder: '選擇或自定義分隔符',
+      customSeparatorLabel: '自定義分塊分隔符（預分塊文件）',
+      customSeparatorDescription: '適用於上游 AI / 工程鏈路已完成分塊的文件：各分塊以特殊標記（如 ====== 或 <|chunk|>）拼接。需先在分塊策略中選擇「指定分隔符」；分塊時自動刪除標記本身，避免影響 RAG。開啟「僅識別該分隔符」後一段一塊（超過尺寸預算的段仍會二次切分以適配嵌入模型）。',
+      customSeparatorPlaceholder: '輸入預分塊標記，如 ======',
+      customSeparatorOnlyOn: '僅識別該分隔符',
+      customSeparatorOnlyOff: '僅識別該分隔符',
       parentChildLabel: '父子切塊',
       parentChildDescription: '兩級切塊：小的子塊用於向量比對（精準命中），大的父塊返回給 LLM（更豐富脈絡）。建議用於長文件（>10 頁）；短 FAQ 可關閉以節省存儲。',
       parentChunkSizeLabel: '父塊大小',
@@ -4267,6 +4272,10 @@ export default {
         legacy: {
           label: '按長度切分',
           tooltip: '忽略結構，僅按字符數和分隔符遞迴切分──原始行為。當上述策略對你的內容效果不佳時使用。'
+        },
+        custom: {
+          label: '指定分隔符',
+          tooltip: '適用於分塊已在上游完成的文件（AI / 工程鏈路產出，各塊以特殊標記拼接）。選擇本策略後在下方設定該標記，分塊時自動刪除標記本身；超過尺寸預算的段會自動二次切分。'
         },
         heuristic: {
           label: '結構感知',

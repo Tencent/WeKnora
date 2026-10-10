@@ -141,6 +141,10 @@ export interface KBModelConfigRequest {
         tokenLimit?: number
         // Language hints for heuristic patterns. Empty array = auto-detect.
         languages?: string[]
+        // Pre-chunked document marker; only honored by the backend when
+        // strategy === 'custom_separator'. Empty string clears it.
+        customSeparator?: string
+        customSeparatorOnly?: boolean
         tableMetadataInstructions?: string
     }
     multimodal: {

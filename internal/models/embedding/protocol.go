@@ -213,3 +213,27 @@ func (e *protocolEmbedder) BatchEmbedImages(ctx context.Context, images []Image)
 	}
 	return out, nil
 }
+
+// InputCharLimit resolves the effective per-input character limit declared
+// by the vendor catalog and the model row's spec overlay for the given
+// config. It mirrors the resolution newRemoteEmbedder performs, without
+// building a client, so ingestion can size chunks to the embedding budget
+// before any request is sent. 0 means "no declared limit".
+func InputCharLimit(config Config) int {
+	if strings.TrimSpace(config.ModelName) == "" {
+		return 0
+	}
+	resolved, err := modelruntime.Resolve(modelruntime.Ref{
+		Provider:             config.Provider,
+		Model:                config.ModelName,
+		BaseURL:              config.BaseURL,
+		ModelType:            types.ModelTypeEmbedding,
+		Extra:                config.ExtraConfig,
+		Override:             config.Spec,
+		TruncatePromptTokens: config.TruncatePromptTokens,
+	})
+	if err != nil {
+		return 0
+	}
+	return resolved.Embeddings.MaxInputChars
+}

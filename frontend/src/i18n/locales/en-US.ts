@@ -3815,6 +3815,11 @@ export default {
       separatorsLabel: 'Separators',
       separatorsDescription: 'Characters or strings the splitter prefers when cutting. Higher-priority separators are tried first; the default order favors paragraph → sentence → punctuation breaks.',
       separatorsPlaceholder: 'Select or customize separators',
+      customSeparatorLabel: 'Custom chunk separator (pre-chunked docs)',
+      customSeparatorDescription: 'For documents already chunked upstream (AI pipeline / engineering tooling), with chunks joined by a special marker such as "======" or "<|chunk|>". When set, the marker takes precedence over every strategy and separator, and it is stripped from chunk content so it never reaches RAG. Enable "Marker only" for one segment = one chunk with no further splitting.',
+      customSeparatorPlaceholder: 'Enter the pre-chunk marker, e.g. ======',
+      customSeparatorOnlyOn: 'Marker only',
+      customSeparatorOnlyOff: 'Marker only',
       separators: {
         doubleNewline: 'Double newline ()',
         singleNewline: 'Single newline ()',
@@ -3850,6 +3855,10 @@ export default {
         legacy: {
           label: 'Length-based',
           tooltip: 'Ignores structure; splits recursively by character count and separators — the original behavior. Use when the structure-aware strategies misbehave on your content.'
+        },
+        custom: {
+          label: 'Custom separator',
+          tooltip: 'For documents whose chunks were decided upstream (AI / engineering pipelines joining chunks with a special marker). Select this strategy, set the marker below, and it is stripped from chunk content; segments over the size budget are split further automatically.'
         }
       },
       overlapWarning: 'Overlap is large compared to chunk size — chunks will share most of their content.',

@@ -83,8 +83,8 @@
         </div>
       </div>
 
-      <!-- Separators -->
-      <div class="setting-row setting-row--separators">
+      <!-- Separators (hidden in custom-separator mode: the marker replaces them) -->
+      <div v-if="!isCustomStrategy" class="setting-row setting-row--separators">
         <div class="setting-info">
           <label>{{ $t('knowledgeEditor.chunking.separatorsLabel') }}</label>
           <p class="desc">{{ $t('knowledgeEditor.chunking.separatorsDescription') }}</p>
@@ -103,8 +103,33 @@
         </div>
       </div>
 
-      <!-- Parent-Child Chunking -->
-      <div class="setting-row setting-row--toggle">
+      <!-- Custom Separator (pre-chunked documents), shown when the strategy
+           "指定分隔符" is selected -->
+      <div v-if="isCustomStrategy" class="setting-row setting-row--separators">
+        <div class="setting-info">
+          <label>{{ $t('knowledgeEditor.chunking.customSeparatorLabel') }}</label>
+          <p class="desc">{{ $t('knowledgeEditor.chunking.customSeparatorDescription') }}</p>
+        </div>
+        <div class="setting-control">
+          <t-input
+            v-model="localCustomSeparator"
+            :placeholder="$t('knowledgeEditor.chunking.customSeparatorPlaceholder')"
+            clearable
+            @change="handleCustomSeparatorChange"
+            :style="selectStyle"
+          />
+          <t-switch
+            v-model="localCustomSeparatorOnly"
+            :disabled="!localCustomSeparator"
+            @change="handleCustomSeparatorChange"
+          />
+          <span class="custom-separator-only-label">{{ $t('knowledgeEditor.chunking.customSeparatorOnlyOn') }}</span>
+        </div>
+      </div>
+
+      <!-- Parent-Child Chunking (hidden in pre-chunked mode: the marker
+           decides every boundary, a parent/child split would fight it) -->
+      <div v-if="!isCustomStrategy" class="setting-row setting-row--toggle">
         <div class="setting-info">
           <label>{{ $t('knowledgeEditor.chunking.parentChildLabel') }}</label>
           <p class="desc">{{ $t('knowledgeEditor.chunking.parentChildDescription') }}</p>
@@ -250,6 +275,12 @@ interface ChunkingConfig {
   tokenLimit?: number
   // Language hints for heuristic patterns (de/en/zh).
   languages?: string[]
+  // Pre-chunked documents: literal marker joining upstream-made chunks.
+  // Takes precedence over strategies and separators; stripped from content.
+  customSeparator?: string
+  // Restrict splitting to customSeparator alone (no size cap, no other
+  // separators). Requires customSeparator to be set.
+  customSeparatorOnly?: boolean
 }
 
 interface Props {
@@ -281,9 +312,15 @@ const localSeparators = ref([...props.config.separators])
 const localEnableParentChild = ref(props.config.enableParentChild ?? false)
 const localParentChunkSize = ref(props.config.parentChunkSize || 4096)
 const localChildChunkSize = ref(props.config.childChunkSize || 384)
-const localStrategy = ref(props.config.strategy ?? '')
+const localStrategy = ref(
+  props.config.customSeparator && !props.config.strategy
+    ? 'custom_separator'
+    : (props.config.strategy ?? '')
+)
 const localTokenLimit = ref(props.config.tokenLimit ?? 0)
 const localLanguages = ref<string[]>([...(props.config.languages ?? [])])
+const localCustomSeparator = ref(props.config.customSeparator ?? '')
+const localCustomSeparatorOnly = ref(props.config.customSeparatorOnly ?? false)
 const advancedOpen = ref(false)
 
 const strategyOptions = computed(() => [
@@ -306,8 +343,18 @@ const strategyOptions = computed(() => [
     label: t('knowledgeEditor.chunking.strategies.legacy.label'),
     value: 'legacy',
     tooltip: t('knowledgeEditor.chunking.strategies.legacy.tooltip')
+  },
+  {
+    label: t('knowledgeEditor.chunking.strategies.custom.label'),
+    value: 'custom_separator',
+    tooltip: t('knowledgeEditor.chunking.strategies.custom.tooltip')
   }
 ])
+
+// The "custom_separator" strategy value maps 1:1 to the backend: it selects
+// the pre-chunked document mode driven by custom_separator (see
+// internal/infrastructure/chunker/custom_separator.go).
+const isCustomStrategy = computed(() => localStrategy.value === 'custom_separator')
 
 const currentStrategyInfo = computed(() => {
   if (!localStrategy.value) {
@@ -333,7 +380,9 @@ const debugConfig = computed(() => ({
   childChunkSize: localChildChunkSize.value,
   strategy: localStrategy.value,
   tokenLimit: localTokenLimit.value,
-  languages: localLanguages.value
+  languages: localLanguages.value,
+  customSeparator: isCustomStrategy.value ? localCustomSeparator.value.trim() : '',
+  customSeparatorOnly: isCustomStrategy.value && localCustomSeparatorOnly.value
 }))
 
 const languageOptions = computed(() => [
@@ -353,16 +402,32 @@ const separatorOptions = computed(() => [
   { label: t('knowledgeEditor.chunking.separators.space'), value: ' ' }
 ])
 
+// Echo suppression: emitUpdate sends the strategy verbatim
+// ("custom_separator" included), and the parent echoes the merged config
+// right back via the deep watch below — which would otherwise reset
+// localStrategy and collapse the custom-separator form.
+// The first watch firing after each emit is that echo; skip it.
+let pendingEchoes = 0
+
 watch(() => props.config, (newConfig) => {
+  if (pendingEchoes > 0) {
+    pendingEchoes--
+    return
+  }
   localChunkSize.value = newConfig.chunkSize
   localChunkOverlap.value = newConfig.chunkOverlap
   localSeparators.value = [...newConfig.separators]
   localEnableParentChild.value = newConfig.enableParentChild ?? false
   localParentChunkSize.value = newConfig.parentChunkSize || 4096
   localChildChunkSize.value = newConfig.childChunkSize || 384
-  localStrategy.value = newConfig.strategy ?? ''
+  localStrategy.value =
+    newConfig.customSeparator && !newConfig.strategy
+      ? 'custom_separator'
+      : (newConfig.strategy ?? '')
   localTokenLimit.value = newConfig.tokenLimit ?? 0
   localLanguages.value = [...(newConfig.languages ?? [])]
+  localCustomSeparator.value = newConfig.customSeparator ?? ''
+  localCustomSeparatorOnly.value = newConfig.customSeparatorOnly ?? false
 }, { deep: true })
 
 const handleChunkSizeChange = () => { emitUpdate() }
@@ -371,25 +436,36 @@ const handleSeparatorsChange = () => { emitUpdate() }
 const handleParentChildChange = () => { emitUpdate() }
 const handleParentChunkSizeChange = () => { emitUpdate() }
 const handleChildChunkSizeChange = () => { emitUpdate() }
-const handleStrategyChange = () => { emitUpdate() }
+const handleStrategyChange = () => {
+  // Pre-chunked mode flattens parent-child: the marker decides every
+  // boundary, a parent/child split would fight it.
+  if (isCustomStrategy.value) localEnableParentChild.value = false
+  emitUpdate()
+}
 const handleTokenLimitChange = () => { emitUpdate() }
 const handleLanguagesChange = () => { emitUpdate() }
+const handleCustomSeparatorChange = () => { emitUpdate() }
 
 const emitUpdate = () => {
   // Spread arrays so the parent gets its own copy. Mutating the emitted
   // arrays from outside must not leak back into our reactive state and
   // cause two-way ref drift between the form and the editor model.
+  pendingEchoes++
   emit('update:config', {
     chunkSize: localChunkSize.value,
     chunkOverlap: localChunkOverlap.value,
     separators: [...localSeparators.value],
     parserEngineRules: props.config.parserEngineRules,
-    enableParentChild: localEnableParentChild.value,
+    enableParentChild: isCustomStrategy.value ? false : localEnableParentChild.value,
     parentChunkSize: localParentChunkSize.value,
     childChunkSize: localChildChunkSize.value,
+    // The strategy travels verbatim; the backend only honors the marker
+    // fields under strategy "custom_separator".
     strategy: localStrategy.value,
     tokenLimit: localTokenLimit.value,
-    languages: [...localLanguages.value]
+    languages: [...localLanguages.value],
+    customSeparator: isCustomStrategy.value ? localCustomSeparator.value.trim() : '',
+    customSeparatorOnly: isCustomStrategy.value && localCustomSeparator.value.trim() !== '' && localCustomSeparatorOnly.value
   })
 }
 </script>
@@ -512,6 +588,20 @@ const emitUpdate = () => {
   display: flex;
   justify-content: flex-end;
   align-items: center;
+}
+
+// Custom-separator row: the marker input on top, then the "marker only"
+// switch with a plain label span beneath it (t-switch's built-in label
+// renders white-on-white in this theme, so the caption lives outside).
+.setting-row--separators .setting-control:has(.custom-separator-only-label) {
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.custom-separator-only-label {
+  font-size: 12px;
+  color: var(--td-text-color-secondary, rgba(0, 0, 0, 0.6));
 }
 
 // Strategy row stacks the picker above the test trigger so the action has
