@@ -138,27 +138,14 @@ func NewFileServiceFromStorageConfig(
 		return svc, p, err
 
 	case "oss":
-		if sec == nil || sec.OSS == nil || sec.OSS.Endpoint == "" || sec.OSS.Region == "" || sec.OSS.AccessKey == "" || sec.OSS.SecretKey == "" || sec.OSS.BucketName == "" {
-			return nil, p, fmt.Errorf("incomplete oss config")
+		if sec == nil || sec.OSS == nil {
+			return nil, p, fmt.Errorf("missing oss config")
 		}
-		pathPrefix := strings.TrimSpace(sec.OSS.PathPrefix)
-		if pathPrefix == "" {
-			pathPrefix = "weknora/"
+		config := *sec.OSS
+		if strings.TrimSpace(config.PathPrefix) == "" {
+			config.PathPrefix = "weknora/"
 		}
-		var svc interfaces.FileService
-		var err error
-		if sec.OSS.UseTempBucket && sec.OSS.TempBucketName != "" {
-			svc, err = NewOssFileServiceWithTempBucket(
-				sec.OSS.Endpoint, sec.OSS.Region, sec.OSS.AccessKey, sec.OSS.SecretKey,
-				sec.OSS.BucketName, pathPrefix,
-				sec.OSS.TempBucketName, sec.OSS.TempRegion,
-			)
-		} else {
-			svc, err = NewOssFileService(
-				sec.OSS.Endpoint, sec.OSS.Region, sec.OSS.AccessKey, sec.OSS.SecretKey,
-				sec.OSS.BucketName, pathPrefix,
-			)
-		}
+		svc, err := NewOssFileServiceWithConfig(config)
 		return svc, p, err
 
 	case "ks3":

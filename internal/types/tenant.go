@@ -576,6 +576,8 @@ type S3EngineConfig struct {
 
 // OSSEngineConfig is for Alibaba Cloud OSS (对象存储服务).
 type OSSEngineConfig struct {
+	AuthType       string `json:"auth_type,omitempty"`
+	RoleName       string `json:"role_name,omitempty"`
 	Endpoint       string `json:"endpoint"`
 	Region         string `json:"region"`
 	AccessKey      string `json:"access_key"`
