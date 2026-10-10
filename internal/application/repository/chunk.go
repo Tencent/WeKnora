@@ -1421,7 +1421,8 @@ func (r *chunkRepository) SetGeneratedQuestionsInactive(
 			WHERE knowledge_base_id = ?
 				AND jsonb_typeof(COALESCE(metadata::jsonb, '{}'::jsonb)->'generated_questions') = 'array'
 				AND jsonb_array_length(COALESCE(metadata::jsonb, '{}'::jsonb)->'generated_questions') > 0
-		`, flag, kbID)
+				AND COALESCE(metadata::jsonb->>'generated_questions_inactive', 'false') <> ?
+		`, flag, kbID, flag)
 	case "mysql":
 		result = r.db.WithContext(ctx).Exec(`
 			UPDATE chunks
@@ -1432,13 +1433,19 @@ func (r *chunkRepository) SetGeneratedQuestionsInactive(
 			)
 			WHERE knowledge_base_id = ?
 				AND JSON_LENGTH(JSON_EXTRACT(metadata, '$.generated_questions')) > 0
-		`, flag, kbID)
+				AND COALESCE(JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.generated_questions_inactive')), 'false') <> ?
+		`, flag, kbID, flag)
 	default:
+		already := "json_extract(metadata, '$.generated_questions_inactive') = 1"
+		if inactive {
+			already = "COALESCE(json_extract(metadata, '$.generated_questions_inactive'), 0) = 0"
+		}
 		result = r.db.WithContext(ctx).Exec(`
 			UPDATE chunks
 			SET metadata = json_set(COALESCE(metadata, '{}'), '$.generated_questions_inactive', json(?))
 			WHERE knowledge_base_id = ?
 				AND json_array_length(json_extract(metadata, '$.generated_questions')) > 0
+				AND `+already+`
 		`, flag, kbID)
 	}
 	if result.Error != nil {

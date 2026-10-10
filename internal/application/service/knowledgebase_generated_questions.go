@@ -14,6 +14,22 @@ type generatedQuestionMetadataStore interface {
 	SetGeneratedQuestionsInactive(ctx context.Context, kbID string, inactive bool) (int64, error)
 }
 
+// markSkipGeneratedQuestions sets SkipGeneratedQuestions from the live switch
+// so rerank passages omit historical questions before metadata is aligned.
+// A lookup failure leaves the flag unset.
+func (s *knowledgeBaseService) markSkipGeneratedQuestions(ctx context.Context, results []*types.SearchResult) {
+	ids := types.SearchResultKnowledgeBaseIDs(results)
+	if len(ids) == 0 {
+		return
+	}
+	kbs, err := s.repo.GetKnowledgeBaseByIDs(ctx, ids)
+	if err != nil {
+		logger.Warnf(ctx, "Failed to read question generation config for rerank: %v", err)
+		return
+	}
+	types.ApplySkipGeneratedQuestions(results, types.QuestionGenerationOffIDs(kbs))
+}
+
 // AlignGeneratedQuestions makes generated-question index rows and chunk
 // metadata follow the current switch. Disable sets is_enabled=false and marks
 // the questions inactive. Enable flips both back, so the existing vectors and
@@ -53,8 +69,10 @@ func (s *knowledgeBaseService) AlignGeneratedQuestions(
 	}
 	n, err := engine.SetGeneratedQuestionEnabled(ctx, kb.ID, active)
 	if errors.Is(err, retriever.ErrGeneratedQuestionIndexUnsupported) {
-		logger.Warnf(ctx, "Retrieve engine cannot disable generated-question rows for knowledge base %s", kb.ID)
-		return out, nil
+		logger.Warnf(ctx, "Retrieve engine cannot update generated-question rows for knowledge base %s", kb.ID)
+		return out, apperrors.NewBadRequestError(
+			"当前检索引擎不能按行停用或恢复预生成问题，问句向量仍会参与召回",
+		).WithDetails("generated_question_index_unsupported")
 	}
 	if err != nil {
 		return nil, err

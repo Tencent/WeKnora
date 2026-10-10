@@ -643,6 +643,10 @@ type QuestionGenerationConfig struct {
 	// CustomInstructions describes the intended audience or question style.
 	// It is appended to the stable system question-generation template.
 	CustomInstructions string `yaml:"custom_instructions,omitempty" json:"custom_instructions,omitempty"`
+	// IndexAligned is true after index rows and chunk metadata match Enabled.
+	// A failed align leaves it false so the next settings save retries.
+	// Older rows omit it and still need one align.
+	IndexAligned bool `yaml:"index_aligned,omitempty" json:"index_aligned,omitempty"`
 }
 
 // Value implements the driver.Valuer interface

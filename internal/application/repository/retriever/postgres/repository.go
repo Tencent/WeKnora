@@ -783,12 +783,15 @@ func (r *pgRepository) SetGeneratedQuestionEnabled(
 	query := r.db.WithContext(ctx).Model(&pgVector{}).
 		Where("knowledge_base_id = ? AND "+types.GeneratedQuestionRowPredicate(""), knowledgeBaseID)
 	if enabled {
+		query = query.Where("(is_enabled IS NULL OR is_enabled = ?)", false)
 		// A disabled chunk turns every index row off together. Turning question
 		// generation back on must not resurrect questions for those chunks.
 		query = query.Where(`chunk_id IN (
 			SELECT body.chunk_id FROM embeddings AS body
 			WHERE body.knowledge_base_id = ? AND `+types.EnabledChunkBodySQL("body")+`)`,
 			knowledgeBaseID, true)
+	} else {
+		query = query.Where("(is_enabled IS NULL OR is_enabled = ?)", true)
 	}
 	result := query.Update("is_enabled", enabled)
 	if result.Error != nil {

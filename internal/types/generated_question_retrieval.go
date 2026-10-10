@@ -71,6 +71,50 @@ func EnabledChunkBodySQL(alias string) string {
 	)
 }
 
+// SearchResultKnowledgeBaseIDs returns the distinct knowledge base IDs on results.
+func SearchResultKnowledgeBaseIDs(results []*SearchResult) []string {
+	seen := make(map[string]struct{}, len(results))
+	ids := make([]string, 0, len(results))
+	for _, result := range results {
+		if result == nil || result.KnowledgeBaseID == "" {
+			continue
+		}
+		if _, ok := seen[result.KnowledgeBaseID]; ok {
+			continue
+		}
+		seen[result.KnowledgeBaseID] = struct{}{}
+		ids = append(ids, result.KnowledgeBaseID)
+	}
+	return ids
+}
+
+// QuestionGenerationOffIDs returns document knowledge bases whose generated
+// questions must stay out of rerank passages.
+func QuestionGenerationOffIDs(kbs []*KnowledgeBase) map[string]struct{} {
+	disabled := make(map[string]struct{})
+	for _, kb := range kbs {
+		if QuestionGenerationDisabled(kb) {
+			disabled[kb.ID] = struct{}{}
+		}
+	}
+	return disabled
+}
+
+// NeedsGeneratedQuestionAlign reports whether saving this knowledge base
+// should rewrite question rows. A switch change always aligns. An existing
+// config that is not yet aligned aligns once, including a retry after a
+// failed open. A knowledge base that never had the config, and whose switch
+// stays off, does not.
+func NeedsGeneratedQuestionAlign(kbType string, hadConfig, wasActive, nowActive, indexAligned bool) bool {
+	if kbType == KnowledgeBaseTypeFAQ {
+		return false
+	}
+	if wasActive != nowActive {
+		return true
+	}
+	return hadConfig && !indexAligned
+}
+
 // ApplySkipGeneratedQuestions marks rerank passages whose knowledge base has
 // question generation turned off. disabled maps knowledge base IDs.
 func ApplySkipGeneratedQuestions(results []*SearchResult, disabled map[string]struct{}) {

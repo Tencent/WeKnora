@@ -418,6 +418,8 @@ func (h *InitializationHandler) UpdateKBConfig(c *gin.Context) {
 	}
 
 	// 更新问题生成配置
+	hadQuestionConfig := kb.QuestionGenerationConfig != nil
+	questionIndexAligned := hadQuestionConfig && kb.QuestionGenerationConfig.IndexAligned
 	questionGenerationWasActive := types.QuestionGenerationActive(kb)
 	if req.QuestionGeneration.Enabled {
 		questionCount := req.QuestionGeneration.QuestionCount
@@ -438,6 +440,13 @@ func (h *InitializationHandler) UpdateKBConfig(c *gin.Context) {
 			CustomInstructions: strings.TrimSpace(req.QuestionGeneration.CustomInstructions),
 		}
 	}
+	questionGenerationNowActive := types.QuestionGenerationActive(kb)
+	alignQuestions := types.NeedsGeneratedQuestionAlign(
+		kb.Type, hadQuestionConfig, questionGenerationWasActive, questionGenerationNowActive, questionIndexAligned,
+	)
+	if !alignQuestions {
+		kb.QuestionGenerationConfig.IndexAligned = questionIndexAligned
+	}
 	types.NormalizeKnowledgeBasePromptInstructions(kb)
 	if err := validateKnowledgeBasePromptInstructions(kb); err != nil {
 		c.Error(err)
@@ -450,14 +459,38 @@ func (h *InitializationHandler) UpdateKBConfig(c *gin.Context) {
 		c.Error(errors.NewInternalServerError("更新知识库失败: " + err.Error()))
 		return
 	}
-	questionGenerationNowActive := types.QuestionGenerationActive(kb)
-	// Saving while the switch is off also cleans knowledge bases that were
-	// already off: a true→false edge never fires for those rows.
-	if kb.Type != types.KnowledgeBaseTypeFAQ &&
-		(questionGenerationWasActive != questionGenerationNowActive || !questionGenerationNowActive) {
+	if alignQuestions {
 		if aligner, ok := h.kbService.(interfaces.GeneratedQuestionAligner); ok {
 			if _, err := aligner.AlignGeneratedQuestions(ctx, kb.ID); err != nil {
 				logger.Errorf(ctx, "Failed to align generated questions for knowledge base %s: %v", kb.ID, err)
+				if appErr, ok := errors.IsAppError(err); ok {
+					// An engine that cannot update rows cannot clean an
+					// already-off knowledge base. Remember that and let a
+					// later settings save succeed. Turning the switch still
+					// returns the error.
+					if appErr.Details == "generated_question_index_unsupported" &&
+						questionGenerationWasActive == questionGenerationNowActive {
+						kb.QuestionGenerationConfig.IndexAligned = true
+						if err := h.kbRepository.UpdateKnowledgeBase(ctx, kb); err != nil {
+							logger.Error(ctx, "Failed to record question alignment", err)
+							_ = c.Error(errors.NewInternalServerError("更新知识库失败: " + err.Error()))
+							return
+						}
+					} else {
+						_ = c.Error(appErr)
+						return
+					}
+				} else {
+					_ = c.Error(errors.NewInternalServerError("对齐预生成问题失败: " + err.Error()))
+					return
+				}
+			} else {
+				kb.QuestionGenerationConfig.IndexAligned = true
+				if err := h.kbRepository.UpdateKnowledgeBase(ctx, kb); err != nil {
+					logger.Error(ctx, "Failed to record question alignment", err)
+					_ = c.Error(errors.NewInternalServerError("更新知识库失败: " + err.Error()))
+					return
+				}
 			}
 		}
 	}

@@ -62,6 +62,10 @@ func TestSetGeneratedQuestionsInactiveKeepsTheQuestionText(t *testing.T) {
 	require.Len(t, meta.GeneratedQuestions, 1)
 	assert.Equal(t, "how does closing work", meta.GeneratedQuestions[0].Question)
 
+	affected, err = repo.SetGeneratedQuestionsInactive(ctx, "kb-1", true)
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), affected)
+
 	affected, err = repo.SetGeneratedQuestionsInactive(ctx, "kb-1", false)
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), affected)

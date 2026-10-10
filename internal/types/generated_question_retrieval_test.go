@@ -35,6 +35,46 @@ func TestIsGeneratedQuestionSource(t *testing.T) {
 	}
 }
 
+func TestNeedsGeneratedQuestionAlign(t *testing.T) {
+	const doc = KnowledgeBaseTypeDocument
+	if NeedsGeneratedQuestionAlign(KnowledgeBaseTypeFAQ, true, true, false, false) {
+		t.Fatal("FAQ must not align")
+	}
+	if NeedsGeneratedQuestionAlign(doc, false, false, false, false) {
+		t.Fatal("a knowledge base that never had the config stays off without a rewrite")
+	}
+	if !NeedsGeneratedQuestionAlign(doc, true, false, false, false) {
+		t.Fatal("an existing closed knowledge base still needs one cleanup")
+	}
+	if NeedsGeneratedQuestionAlign(doc, true, false, false, true) {
+		t.Fatal("an aligned closed knowledge base must not rewrite on every save")
+	}
+	if !NeedsGeneratedQuestionAlign(doc, true, true, false, true) {
+		t.Fatal("turning the switch off must align")
+	}
+	if !NeedsGeneratedQuestionAlign(doc, true, true, true, false) {
+		t.Fatal("a failed open must retry while the switch stays on")
+	}
+	if NeedsGeneratedQuestionAlign(doc, true, true, true, true) {
+		t.Fatal("an aligned open knowledge base must not rewrite on every save")
+	}
+}
+
+func TestQuestionGenerationOffIDs(t *testing.T) {
+	off := &KnowledgeBase{ID: "off", Type: KnowledgeBaseTypeDocument}
+	on := &KnowledgeBase{
+		ID: "on", Type: KnowledgeBaseTypeDocument,
+		QuestionGenerationConfig: &QuestionGenerationConfig{Enabled: true},
+	}
+	got := QuestionGenerationOffIDs([]*KnowledgeBase{off, on, nil})
+	if _, ok := got["off"]; !ok {
+		t.Fatal("closed document knowledge base was not marked")
+	}
+	if _, ok := got["on"]; ok {
+		t.Fatal("enabled knowledge base was marked off")
+	}
+}
+
 func TestQuestionGenerationDisabledLeavesFAQAlone(t *testing.T) {
 	faq := &KnowledgeBase{Type: KnowledgeBaseTypeFAQ}
 	if QuestionGenerationDisabled(faq) {

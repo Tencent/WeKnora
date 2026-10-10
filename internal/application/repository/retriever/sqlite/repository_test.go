@@ -165,6 +165,9 @@ func TestSetGeneratedQuestionEnabledLeavesTheChunkBody(t *testing.T) {
 	affected, err := repository.SetGeneratedQuestionEnabled(context.Background(), "kb-off", false)
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), affected)
+	affected, err = repository.SetGeneratedQuestionEnabled(context.Background(), "kb-off", false)
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), affected)
 
 	var enabled []bool
 	require.NoError(t, repository.db.Raw(
