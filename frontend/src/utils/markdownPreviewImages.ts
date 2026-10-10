@@ -144,7 +144,9 @@ export async function rewriteKnowledgeMarkdownImages(
       // The preview sanitizer is what actually emits <img src>. A URL it
       // would drop must not be spliced into the markdown, or the scan and
       // the rendered page disagree about whether the image is safe.
-      if (!isSafePreviewImageHref(url)) {
+      // acceptsPreviewImageURL returns boolean so a string url is not narrowed
+      // to never on the failure branch.
+      if (!acceptsPreviewImageURL(url)) {
         if (url.startsWith('blob:')) URL.revokeObjectURL(url)
         continue
       }
@@ -164,6 +166,10 @@ export async function rewriteKnowledgeMarkdownImages(
     rewritten = rewritten.slice(0, span.start) + url + rewritten.slice(span.end)
   }
   return { markdown: rewritten, objectUrls }
+}
+
+function acceptsPreviewImageURL(url: string): boolean {
+  return isSafePreviewImageHref(url)
 }
 
 function locationKey(location: PreviewImageLocation): string {
@@ -320,6 +326,13 @@ function hiddenSpans(markdown: string): Array<[number, number]> {
     spans.push([index, index + match[0].length])
   }
   for (const match of markdown.matchAll(/`+[^`\n]*`+/g)) {
+    const index = match.index ?? 0
+    if (spans.some(([start, end]) => index >= start && index < end)) continue
+    spans.push([index, index + match[0].length])
+  }
+  // CommonMark indented code: a line of four spaces or a tab. Fenced blocks
+  // are already hidden, so this only catches the literal code they do not.
+  for (const match of markdown.matchAll(/^(?: {4}|\t).*$/gm)) {
     const index = match.index ?? 0
     if (spans.some(([start, end]) => index >= start && index < end)) continue
     spans.push([index, index + match[0].length])

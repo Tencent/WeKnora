@@ -104,6 +104,25 @@ test('rewrite uses exact folder_path and file_name, including a later list page'
   assert.doesNotMatch(html, /src="images\/image_001\.jpg"/)
 })
 
+test('neutralize and rewrite leave indented code images unchanged', async () => {
+  const markdown = ['    ![example](images/a.png)', '\t![example](images/b.png)', '![real](images/a.png)'].join('\n')
+  const hidden = neutralizeRelativePreviewImages(markdown)
+  assert.match(hidden, /    !\[example\]\(images\/a\.png\)/)
+  assert.match(hidden, /\t!\[example\]\(images\/b\.png\)/)
+  assert.equal(hidden.includes('![real](images/a.png)'), false)
+
+  const deps = fakeDeps({
+    folderPath: '',
+    listFiles: async () => ({
+      rows: [{ id: 'img', fileName: 'a.png', folderPath: 'images' }],
+      total: 1,
+    }),
+  })
+  const rewritten = await rewriteKnowledgeMarkdownImages(markdown, 'doc', deps)
+  assert.match(rewritten.markdown, /    !\[example\]\(images\/a\.png\)/)
+  assert.match(rewritten.markdown, /\t!\[example\]\(images\/b\.png\)/)
+})
+
 test('rewrite leaves the href alone when the object URL fails the preview sanitizer', async () => {
   const deps = fakeDeps({
     folderPath: 'notes',

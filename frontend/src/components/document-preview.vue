@@ -111,7 +111,7 @@ const imageNaturalWidth = ref(0);
 const imageNaturalHeight = ref(0);
 let loadedForId = '';
 let markdownImageGeneration = 0;
-let markdownImageUrls = [];
+let markdownImageUrls: string[] = [];
 
 function revokeMarkdownImageUrls() {
   for (const url of markdownImageUrls) URL.revokeObjectURL(url);
@@ -375,7 +375,7 @@ async function renderMarkdown(blob: Blob) {
           const rows = Array.isArray(res?.data) ? res.data : [];
           return {
             total: Number(res?.total ?? rows.length),
-            rows: rows.map((row) => ({
+            rows: rows.map((row: { id?: string; file_name?: string; folder_path?: string }) => ({
               id: String(row?.id || ''),
               fileName: String(row?.file_name || ''),
               folderPath: row?.folder_path || '',
