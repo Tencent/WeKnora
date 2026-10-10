@@ -1540,6 +1540,194 @@
         "source": "https://cloud.tencent.com/document/product/1729/111007"
       }
     ],
+    "iflytek": [
+      {
+        "id": "spark-x2.5",
+        "name": "Spark-X2.5",
+        "reasoning": true,
+        "input": [
+          "text"
+        ],
+        "context_window": 256000,
+        "source": "https://www.xfyun.cn/doc/spark/TokenPlan.html"
+      },
+      {
+        "id": "xsparkx2flash",
+        "name": "Spark-X2-Flash",
+        "reasoning": true,
+        "input": [
+          "text"
+        ],
+        "context_window": 256000,
+        "source": "https://www.xfyun.cn/doc/spark/TokenPlan.html"
+      },
+      {
+        "id": "xopglm52",
+        "name": "GLM-5.2",
+        "reasoning": true,
+        "input": [
+          "text"
+        ],
+        "context_window": 1000000,
+        "source": "https://www.xfyun.cn/doc/spark/TokenPlan.html"
+      },
+      {
+        "id": "xopglm51",
+        "name": "GLM-5.1",
+        "reasoning": true,
+        "input": [
+          "text"
+        ],
+        "context_window": 200000,
+        "source": "https://www.xfyun.cn/doc/spark/TokenPlan.html"
+      },
+      {
+        "id": "xopglm5",
+        "name": "GLM-5",
+        "reasoning": true,
+        "input": [
+          "text"
+        ],
+        "context_window": 200000,
+        "source": "https://www.xfyun.cn/doc/spark/TokenPlan.html"
+      },
+      {
+        "id": "xopdeepseekv4pro",
+        "name": "DeepSeek-V4-Pro",
+        "reasoning": true,
+        "input": [
+          "text"
+        ],
+        "context_window": 1000000,
+        "source": "https://www.xfyun.cn/doc/spark/TokenPlan.html"
+      },
+      {
+        "id": "xopdeepseekv4flash",
+        "name": "DeepSeek-V4-Flash",
+        "reasoning": true,
+        "input": [
+          "text"
+        ],
+        "context_window": 1000000,
+        "source": "https://www.xfyun.cn/doc/spark/TokenPlan.html"
+      },
+      {
+        "id": "xopdeepseekv32",
+        "name": "DeepSeek-V3.2",
+        "reasoning": true,
+        "input": [
+          "text"
+        ],
+        "context_window": 128000,
+        "source": "https://www.xfyun.cn/doc/spark/TokenPlan.html"
+      },
+      {
+        "id": "xopkimik26",
+        "name": "Kimi-K2.6",
+        "reasoning": true,
+        "input": [
+          "text",
+          "image"
+        ],
+        "context_window": 256000,
+        "source": "https://www.xfyun.cn/doc/spark/TokenPlan.html"
+      },
+      {
+        "id": "xopkimik25",
+        "name": "Kimi-K2.5",
+        "reasoning": true,
+        "input": [
+          "text"
+        ],
+        "context_window": 128000,
+        "source": "https://www.xfyun.cn/doc/spark/TokenPlan.html"
+      },
+      {
+        "id": "xminimaxm25",
+        "name": "MiniMax-M2.5",
+        "reasoning": true,
+        "input": [
+          "text"
+        ],
+        "context_window": 128000,
+        "source": "https://www.xfyun.cn/doc/spark/TokenPlan.html"
+      },
+      {
+        "id": "xopqwen35397b",
+        "name": "Qwen3.5-397B-A17B",
+        "reasoning": true,
+        "input": [
+          "text",
+          "image"
+        ],
+        "context_window": 256000,
+        "source": "https://www.xfyun.cn/doc/spark/TokenPlan.html"
+      },
+      {
+        "id": "xopqwen36v35b",
+        "name": "Qwen3.6-35B-A3B",
+        "reasoning": true,
+        "input": [
+          "text",
+          "image"
+        ],
+        "context_window": 128000,
+        "source": "https://www.xfyun.cn/doc/spark/TokenPlan.html"
+      },
+      {
+        "id": "xopqwen35v35b",
+        "name": "Qwen3.5-35B-A3B",
+        "reasoning": true,
+        "input": [
+          "text",
+          "image"
+        ],
+        "context_window": 128000,
+        "source": "https://www.xfyun.cn/doc/spark/TokenPlan.html"
+      },
+      {
+        "id": "xop3qwencodernext",
+        "name": "Qwen3-Coder-Next-FP8",
+        "reasoning": false,
+        "input": [
+          "text"
+        ],
+        "context_window": 256000,
+        "source": "https://www.xfyun.cn/doc/spark/TokenPlan.html"
+      },
+      {
+        "id": "xopglmv47flash",
+        "name": "GLM-4.7-Flash",
+        "reasoning": true,
+        "input": [
+          "text"
+        ],
+        "context_window": 128000,
+        "source": "https://www.xfyun.cn/doc/spark/TokenPlan.html"
+      },
+      {
+        "id": "xsparkx2agent",
+        "name": "Spark-X2-Agent (retired)",
+        "deprecated": true,
+        "reasoning": true,
+        "input": [
+          "text"
+        ],
+        "context_window": 256000,
+        "source": "https://www.xfyun.cn/doc/spark/TokenPlan.html"
+      },
+      {
+        "id": "xsparkx2",
+        "name": "Spark-X2 (retired)",
+        "deprecated": true,
+        "reasoning": true,
+        "input": [
+          "text"
+        ],
+        "context_window": 192000,
+        "source": "https://www.xfyun.cn/doc/spark/TokenPlan.html"
+      }
+    ],
     "jina": [
       {
         "id": "jina-embeddings-v5-omni-small",

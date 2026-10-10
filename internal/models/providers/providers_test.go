@@ -17,6 +17,7 @@ var expectedIDs = []string{
 	"generic", "weknoracloud", "huggingface_tei",
 	"aliyun", "zhipu", "volcengine", "hunyuan", "siliconflow", "deepseek",
 	"minimax", "moonshot", "mimo", "modelscope", "qianfan", "qiniu", "longcat", "lkeap",
+	"iflytek",
 	"openai", "azure_openai", "anthropic", "gemini",
 	"openrouter", "litellm", "requesty", "pinecone",
 	"jina", "nvidia", "novita", "gpustack",
@@ -82,8 +83,8 @@ func TestBuiltinDefaultURLsAcrossModelTypes(t *testing.T) {
 }
 
 func TestAllVendorsRegistered(t *testing.T) {
-	if len(expectedIDs) != 29 {
-		t.Fatalf("expected 29 vendor ids in the spec, got %d", len(expectedIDs))
+	if len(expectedIDs) != 30 {
+		t.Fatalf("expected 30 vendor ids in the spec, got %d", len(expectedIDs))
 	}
 	for _, id := range expectedIDs {
 		v, ok := modelruntime.Get(id)
@@ -422,6 +423,27 @@ func TestFamilyExpectations(t *testing.T) {
 	}
 	if r := resolve(t, "aliyun", "qwen3-max"); r.OpenAICompletions.ThinkingBudgetExcludesEffort {
 		t.Error("aliyun/qwen3-max has no effort to conflict with and should keep the budget")
+	}
+	if r := resolve(t, "iflytek", "spark-x2.5"); r.OpenAICompletions.MaxTokensField != "max_tokens" ||
+		r.OpenAICompletions.ThinkingFormat != api.ThinkingFormatEnableThinking {
+		t.Error("iflytek should send max_tokens and a top-level enable_thinking")
+	}
+	// Spark answers tool_choice required in plain text, so it must not be sent.
+	if r := resolve(t, "iflytek", "spark-x2.5"); r.OpenAICompletions.AllowsToolChoice("required") {
+		t.Error("iflytek/spark-x2.5 should not send tool_choice required")
+	}
+	if r := resolve(t, "iflytek", "xopglm52"); !r.OpenAICompletions.SupportsReasoningEffort ||
+		r.ThinkingLevels.Value(api.ReasoningMedium) != "high" || r.ThinkingLevels.Value(api.ReasoningXHigh) != "max" {
+		t.Error("iflytek GLM-5.2 should grade effort high/max")
+	}
+	if r := resolve(t, "iflytek", "xopqwen35397b"); !r.Spec.AcceptsImages() {
+		t.Error("iflytek/xopqwen35397b should accept images")
+	}
+	if got := modelruntime.DetectByURL("https://maas-api.cn-huabei-1.xf-yun.com/v2"); got != "iflytek" {
+		t.Errorf("pay-as-you-go Astron MaaS detected as %q", got)
+	}
+	if got := modelruntime.DetectByURL("https://spark-api-open.xf-yun.com/v1"); got == "iflytek" {
+		t.Error("the Spark HTTP API has a different request shape and must not match iflytek")
 	}
 }
 
