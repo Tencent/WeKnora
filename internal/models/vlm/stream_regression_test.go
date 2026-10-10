@@ -173,7 +173,8 @@ func TestStreamExhaustedBudgetIsAnError(t *testing.T) {
 
 	_, _, _, err := m.runInner(context.Background(), nil, "p", nil, time.Now())
 	if err == nil {
-		t.Fatal("empty answer with finish_reason=length accepted as success; budget exhaustion would masquerade as skipped")
+		t.Fatal("empty answer with finish_reason=length accepted as success; " +
+			"budget exhaustion would masquerade as skipped")
 	}
 	if !strings.Contains(err.Error(), "finish_reason=length") {
 		t.Errorf("err = %v, want it to mention finish_reason=length", err)
