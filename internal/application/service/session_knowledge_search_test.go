@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -56,6 +57,9 @@ func (f *fakeRetrieval) OnEvent(
 			return chatpipeline.ErrSearchNothing
 		}
 		cm.SearchResult = f.results
+		if cm.EmbeddingTopK > 0 && len(cm.SearchResult) > cm.EmbeddingTopK {
+			cm.SearchResult = cm.SearchResult[:cm.EmbeddingTopK]
+		}
 	case types.CHUNK_MERGE:
 		cm.MergeResult = cm.RerankResult
 		if len(cm.MergeResult) == 0 {
@@ -178,4 +182,70 @@ func TestSearchKnowledge_rejectsUnknownRequestedModel(t *testing.T) {
 	_, err := svc.SearchKnowledge(searchKnowledgeCtx(), []string{"kb-1"}, nil, nil, "q",
 		&types.KnowledgeSearchOptions{Rerank: &types.RerankOptions{ModelID: "missing"}})
 	require.Error(t, err)
+}
+
+func TestSearchKnowledge_IndependentRecallDepth(t *testing.T) {
+	zero, small, deep := 0, 20, 100
+	for _, tt := range []struct {
+		name        string
+		tenantDepth int
+		depth       *int
+		matchCount  int
+		rerankTopK  int
+		disabled    bool
+		wantDepth   int
+		wantResults int
+	}{
+		{name: "omitted uses tenant", tenantDepth: 80, wantDepth: 80, wantResults: 10},
+		{name: "omitted uses default", wantDepth: 50, wantResults: 10},
+		{name: "deeper recall only", tenantDepth: 50, depth: &deep, wantDepth: 100, wantResults: 10},
+		{name: "shallower recall", tenantDepth: 80, depth: &small, wantDepth: 20, wantResults: 10},
+		{name: "zero uses default", tenantDepth: 80, depth: &zero, wantDepth: 50, wantResults: 10},
+		{name: "result count is recall floor", depth: &small, matchCount: 60, wantDepth: 60, wantResults: 60},
+		{name: "rerank count wins", depth: &small, matchCount: 60, rerankTopK: 30, wantDepth: 30, wantResults: 30},
+		{name: "zero respects result floor", depth: &zero, matchCount: 60, wantDepth: 60, wantResults: 60},
+		{
+			name: "deeper recall with rerank count", depth: &deep, matchCount: 30, rerankTopK: 10,
+			wantDepth: 100, wantResults: 10,
+		},
+		{name: "rerank disabled", depth: &deep, matchCount: 10, disabled: true, wantDepth: 100, wantResults: 10},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			models := newRerankModelService()
+			scores := make([]float64, 100)
+			hits := make([]*types.SearchResult, 100)
+			for i := range hits {
+				scores[i] = 0.5 + float64(i)/200
+				hits[i] = &types.SearchResult{
+					ID: fmt.Sprintf("chunk-%d", i), KnowledgeID: fmt.Sprintf("doc-%d", i),
+					Content: fmt.Sprintf("passage %d", i), Score: 0.8,
+				}
+			}
+			models.reranker = &scoredReranker{scores: scores}
+			rc := &types.RetrievalConfig{EmbeddingTopK: tt.tenantDepth, RerankTopK: 10, RerankModelID: "rr-1"}
+			before := *rc
+			retrieval := &fakeRetrieval{results: hits}
+			svc := newSearchKnowledgeService(t, rc, models, retrieval)
+			enabled := !tt.disabled
+			opts := &types.KnowledgeSearchOptions{
+				EmbeddingTopK: tt.depth, MatchCount: tt.matchCount,
+				Rerank: &types.RerankOptions{Enabled: &enabled, TopK: tt.rerankTopK},
+			}
+
+			got, err := svc.SearchKnowledge(searchKnowledgeCtx(), []string{"kb-1", "kb-2"}, nil, nil, "q", opts)
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantDepth, retrieval.seen.EmbeddingTopK)
+			require.Len(t, got.Results, tt.wantResults)
+			if !tt.disabled {
+				assert.Equal(t, fmt.Sprintf("chunk-%d", tt.wantDepth-1), got.Results[0].ID,
+					"reranking must see the best candidate at the requested recall depth")
+			}
+			assert.Equal(t, before, *rc, "overrides must not mutate tenant configuration")
+
+			_, err = svc.SearchKnowledge(searchKnowledgeCtx(), []string{"kb-1"}, nil, nil, "q", nil)
+			require.NoError(t, err)
+			assert.Equal(t, rc.GetEffectiveEmbeddingTopK(), retrieval.seen.EmbeddingTopK,
+				"a subsequent request must use tenant configuration")
+		})
+	}
 }

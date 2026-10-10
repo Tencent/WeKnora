@@ -483,6 +483,8 @@ type SearchKnowledgeRequest struct {
 	MentionedItems   []MentionedItem `json:"mentioned_items,omitempty"`    // Optional scoped tag mentions
 
 	// Optional overrides of the tenant retrieval config.
+	// Recall depth (0–200); nil keeps tenant config, 0 uses 50, raised to at least the result count.
+	EmbeddingTopK        *int           `json:"embedding_top_k,omitempty"`
 	VectorThreshold      *float64       `json:"vector_threshold,omitempty"`       // Minimum vector similarity
 	KeywordThreshold     *float64       `json:"keyword_threshold,omitempty"`      // Minimum keyword score
 	MatchCount           int            `json:"match_count,omitempty"`            // Number of results to return

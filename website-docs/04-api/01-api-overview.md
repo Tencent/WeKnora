@@ -241,6 +241,7 @@ X-Accel-Buffering: no
 | 同时搜多个知识库，且它们用的 embedding 模型不同 | `knowledge-search` | `knowledge_base_ids` |
 | 只在某几个文档或标签里搜 | `knowledge-search` | `knowledge_ids` / `tag_ids` |
 | 调整返回条数或召回阈值，但仍然要 rerank | `knowledge-search` | `match_count`、`vector_threshold`、`keyword_threshold` |
+| 加大召回深度，保持最终返回条数 | `knowledge-search` | `embedding_top_k` + `match_count`（例如 100 + 10） |
 | 换一个 rerank 模型，或改 rerank 阈值 | `knowledge-search` | `rerank.model_id`、`rerank.threshold` |
 | 不要 rerank，直接拿召回结果 | `knowledge-search` 或 `hybrid-search` | 前者传 `"rerank":{"enabled":false}`；后者不传 `rerank` |
 | 结果为空，想知道原因 | `knowledge-search` | 看响应里的 `meta.rerank.outcome` |
@@ -261,6 +262,8 @@ X-Accel-Buffering: no
 | `meta.rerank` | 每次都返回 | 带了 `rerank` 才返回 |
 
 两个接口的召回参数（`vector_threshold`、`keyword_threshold`、`match_count`、`disable_keywords_match`、`disable_vector_match`）和 `rerank` 对象含义相同；`knowledge-search` 省略的参数沿用空间的检索配置（`GET /tenants/kv/retrieval-config`）。
+
+`knowledge-search` 还支持独立的 `embedding_top_k`（0–200），仅覆盖本次请求的召回深度。省略或 `null` 时沿用空间配置，显式传 `0` 时用默认深度 50；实际深度至少等于最终返回条数上限。`hybrid-search` 不支持此字段。
 
 ### rerank 对象
 
