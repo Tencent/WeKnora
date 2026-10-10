@@ -6,9 +6,8 @@ import (
 )
 
 // TestOutboundDialTimeoutDefault verifies the package default is 5s.
+// Keep these tests serial: they read and mutate the same process-wide timeout.
 func TestOutboundDialTimeoutDefault(t *testing.T) {
-	t.Parallel()
-
 	if got := OutboundDialTimeout(); got != 5*time.Second {
 		t.Fatalf("default dial timeout = %v, want %v", got, 5*time.Second)
 	}
@@ -17,8 +16,6 @@ func TestOutboundDialTimeoutDefault(t *testing.T) {
 // TestSetOutboundDialTimeout verifies the setter is reflected by the getter and
 // that non-positive values are ignored.
 func TestSetOutboundDialTimeout(t *testing.T) {
-	t.Parallel()
-
 	original := OutboundDialTimeout()
 	t.Cleanup(func() { SetOutboundDialTimeout(original) })
 
