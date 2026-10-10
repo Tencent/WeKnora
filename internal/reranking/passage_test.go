@@ -29,6 +29,48 @@ func TestGetEnrichedPassageKeepsQuestionsFromEarlierRevision(t *testing.T) {
 	}
 }
 
+func TestEnrichedPassageOmitsQuestionsWhenGenerationIsOff(t *testing.T) {
+	metadata, err := json.Marshal(types.DocumentChunkMetadata{
+		GeneratedQuestions: []types.GeneratedQuestion{{
+			ID: "q1", Question: "stale generated question",
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := &types.SearchResult{
+		Content:                "chunk body",
+		ChunkMetadata:          types.JSON(metadata),
+		SkipGeneratedQuestions: true,
+	}
+	passage := EnrichedPassage(context.Background(), result)
+	if strings.Contains(passage, "stale generated question") {
+		t.Fatalf("disabled knowledge base still put the question in the passage: %q", passage)
+	}
+	if !strings.Contains(passage, "chunk body") {
+		t.Fatalf("passage dropped the chunk body: %q", passage)
+	}
+}
+
+func TestEnrichedPassageOmitsInactiveQuestions(t *testing.T) {
+	metadata, err := json.Marshal(types.DocumentChunkMetadata{
+		GeneratedQuestionsInactive: true,
+		GeneratedQuestions: []types.GeneratedQuestion{{
+			ID: "q1", Question: "inactive generated question",
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	passage := EnrichedPassage(context.Background(), &types.SearchResult{
+		Content:       "chunk body",
+		ChunkMetadata: types.JSON(metadata),
+	})
+	if strings.Contains(passage, "inactive generated question") {
+		t.Fatalf("inactive questions were still appended: %q", passage)
+	}
+}
+
 func TestGetEnrichedPassageKeepsCodeAndMathCandidates(t *testing.T) {
 	tests := []struct {
 		name    string

@@ -2,6 +2,7 @@ package retriever
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"regexp"
 	"slices"
@@ -63,6 +64,36 @@ func (v *KeywordsVectorHybridRetrieveEngineService) Retrieve(ctx context.Context
 	params types.RetrieveParams,
 ) ([]*types.RetrieveResult, error) {
 	return v.indexRepository.Retrieve(ctx, params)
+}
+
+// ErrGeneratedQuestionIndexUnsupported means this engine cannot flip
+// generated-question rows without also changing the parent chunk.
+var ErrGeneratedQuestionIndexUnsupported = errors.New(
+	"generated question index update is not supported",
+)
+
+// ErrGeneratedQuestionIndexPartial means at least one engine updated question
+// rows and another participating engine did not. The index is not aligned.
+// Retrying is safe: an engine that already applied the change only touches
+// rows that are not yet in the requested state.
+var ErrGeneratedQuestionIndexPartial = errors.New(
+	"generated question index update was only partially applied",
+)
+
+// SetGeneratedQuestionEnabled delegates to an index repository that can
+// address generated-question rows by source id. Engines without that update
+// leave the rows alone; retrieval still drops them when the SQL filter or the
+// post-filter runs.
+func (v *KeywordsVectorHybridRetrieveEngineService) SetGeneratedQuestionEnabled(
+	ctx context.Context, knowledgeBaseID string, enabled bool,
+) (int64, error) {
+	setter, ok := v.indexRepository.(interface {
+		SetGeneratedQuestionEnabled(context.Context, string, bool) (int64, error)
+	})
+	if !ok {
+		return 0, ErrGeneratedQuestionIndexUnsupported
+	}
+	return setter.SetGeneratedQuestionEnabled(ctx, knowledgeBaseID, enabled)
 }
 
 // Index creates embeddings for the content and saves it to the repository

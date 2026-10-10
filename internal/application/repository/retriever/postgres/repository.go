@@ -231,6 +231,9 @@ func (g *pgRepository) KeywordsRetrieve(ctx context.Context,
 		SQL:  "(is_enabled IS NULL OR is_enabled = ?)",
 		Vars: []interface{}{true},
 	})
+	if exclusion := generatedQuestionExclusionClause(params.ExcludeGeneratedQuestionKBIDs); exclusion != nil {
+		conds = append(conds, exclusion)
+	}
 	conds = append(conds, clause.OrderBy{Columns: []clause.OrderByColumn{
 		{Column: clause.Column{Name: "score"}, Desc: true},
 	}})
@@ -359,6 +362,19 @@ func (g *pgRepository) VectorRetrieve(ctx context.Context,
 	// is_enabled filter
 	whereParts = append(whereParts, fmt.Sprintf("(is_enabled IS NULL OR is_enabled = $%d)", len(allVars)+1))
 	allVars = append(allVars, true)
+	if len(params.ExcludeGeneratedQuestionKBIDs) > 0 {
+		placeholders := make([]string, len(params.ExcludeGeneratedQuestionKBIDs))
+		paramStart := len(allVars) + 1
+		for i, id := range params.ExcludeGeneratedQuestionKBIDs {
+			placeholders[i] = fmt.Sprintf("$%d", paramStart+i)
+			allVars = append(allVars, id)
+		}
+		whereParts = append(whereParts, fmt.Sprintf(
+			"NOT (knowledge_base_id IN (%s) AND %s)",
+			strings.Join(placeholders, ", "),
+			types.GeneratedQuestionRowPredicate(""),
+		))
+	}
 
 	// Build WHERE clause string
 	whereClause := ""
@@ -733,4 +749,53 @@ func (g *pgRepository) BatchUpdateChunkTagID(ctx context.Context, chunkTagMap ma
 
 	logger.GetLogger(ctx).Infof("[Postgres] Successfully batch updated chunk tag ID")
 	return nil
+}
+
+func generatedQuestionExclusionClause(kbIDs []string) clause.Expression {
+	if len(kbIDs) == 0 {
+		return nil
+	}
+	placeholders := make([]string, len(kbIDs))
+	vars := make([]interface{}, len(kbIDs))
+	for i, id := range kbIDs {
+		placeholders[i] = "?"
+		vars[i] = id
+	}
+	return clause.Expr{
+		SQL: fmt.Sprintf(
+			"NOT (knowledge_base_id IN (%s) AND %s)",
+			strings.Join(placeholders, ", "),
+			types.GeneratedQuestionRowPredicate(""),
+		),
+		Vars: vars,
+	}
+}
+
+// SetGeneratedQuestionEnabled turns generated-question index rows for one
+// knowledge base on or off without touching the parent chunk row. Disabling
+// is reversible: the vectors stay, and a later enable flips is_enabled back.
+func (r *pgRepository) SetGeneratedQuestionEnabled(
+	ctx context.Context, knowledgeBaseID string, enabled bool,
+) (int64, error) {
+	if knowledgeBaseID == "" {
+		return 0, nil
+	}
+	query := r.db.WithContext(ctx).Model(&pgVector{}).
+		Where("knowledge_base_id = ? AND "+types.GeneratedQuestionRowPredicate(""), knowledgeBaseID)
+	if enabled {
+		query = query.Where("(is_enabled IS NULL OR is_enabled = ?)", false)
+		// A disabled chunk turns every index row off together. Turning question
+		// generation back on must not resurrect questions for those chunks.
+		query = query.Where(`chunk_id IN (
+			SELECT body.chunk_id FROM embeddings AS body
+			WHERE body.knowledge_base_id = ? AND `+types.EnabledChunkBodySQL("body")+`)`,
+			knowledgeBaseID, true)
+	} else {
+		query = query.Where("(is_enabled IS NULL OR is_enabled = ?)", true)
+	}
+	result := query.Update("is_enabled", enabled)
+	if result.Error != nil {
+		return 0, result.Error
+	}
+	return result.RowsAffected, nil
 }

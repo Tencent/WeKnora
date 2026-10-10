@@ -34,6 +34,49 @@ func makeChunk(kbID, knowledgeID string, chunkType string) *types.Chunk {
 	}
 }
 
+func TestSetGeneratedQuestionsInactiveKeepsTheQuestionText(t *testing.T) {
+	db := setupChunkTestDB(t)
+	repo, ok := NewChunkRepository(db).(*chunkRepository)
+	require.True(t, ok)
+	ctx := context.Background()
+
+	chunk := makeChunk("kb-1", "knowledge-1", string(types.ChunkTypeText))
+	require.NoError(t, chunk.SetDocumentMetadata(&types.DocumentChunkMetadata{
+		GeneratedQuestions: []types.GeneratedQuestion{{ID: "q1", Question: "how does closing work"}},
+	}))
+	require.NoError(t, repo.CreateChunks(ctx, []*types.Chunk{chunk}))
+
+	plain := makeChunk("kb-1", "knowledge-1", string(types.ChunkTypeText))
+	require.NoError(t, repo.CreateChunks(ctx, []*types.Chunk{plain}))
+
+	affected, err := repo.SetGeneratedQuestionsInactive(ctx, "kb-1", true)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), affected)
+
+	stored, err := repo.GetChunkByID(ctx, 1, chunk.ID)
+	require.NoError(t, err)
+	meta, err := stored.DocumentMetadata()
+	require.NoError(t, err)
+	require.NotNil(t, meta)
+	assert.True(t, meta.GeneratedQuestionsInactive)
+	require.Len(t, meta.GeneratedQuestions, 1)
+	assert.Equal(t, "how does closing work", meta.GeneratedQuestions[0].Question)
+
+	affected, err = repo.SetGeneratedQuestionsInactive(ctx, "kb-1", true)
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), affected)
+
+	affected, err = repo.SetGeneratedQuestionsInactive(ctx, "kb-1", false)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), affected)
+	stored, err = repo.GetChunkByID(ctx, 1, chunk.ID)
+	require.NoError(t, err)
+	meta, err = stored.DocumentMetadata()
+	require.NoError(t, err)
+	assert.False(t, meta.GeneratedQuestionsInactive)
+	assert.Equal(t, "how does closing work", meta.GeneratedQuestions[0].Question)
+}
+
 func TestCreateChunks_SQLite_SeqIDAutoAssigned(t *testing.T) {
 	db := setupChunkTestDB(t)
 	repo := NewChunkRepository(db)

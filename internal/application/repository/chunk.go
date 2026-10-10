@@ -1394,6 +1394,66 @@ func (r *chunkRepository) ListRecentDocumentChunksWithQuestions(
 	return chunks, nil
 }
 
+// SetGeneratedQuestionsInactive marks or clears generated_questions_inactive
+// on chunks in a knowledge base that already store generated questions. The
+// question text stays, so turning the switch back on does not need a new LLM run.
+func (r *chunkRepository) SetGeneratedQuestionsInactive(
+	ctx context.Context, kbID string, inactive bool,
+) (int64, error) {
+	if kbID == "" {
+		return 0, nil
+	}
+	flag := "false"
+	if inactive {
+		flag = "true"
+	}
+	var result *gorm.DB
+	switch r.db.Name() {
+	case "postgres":
+		result = r.db.WithContext(ctx).Exec(`
+			UPDATE chunks
+			SET metadata = jsonb_set(
+				COALESCE(metadata::jsonb, '{}'::jsonb),
+				'{generated_questions_inactive}',
+				CAST(? AS jsonb),
+				true
+			)
+			WHERE knowledge_base_id = ?
+				AND jsonb_typeof(COALESCE(metadata::jsonb, '{}'::jsonb)->'generated_questions') = 'array'
+				AND jsonb_array_length(COALESCE(metadata::jsonb, '{}'::jsonb)->'generated_questions') > 0
+				AND COALESCE(metadata::jsonb->>'generated_questions_inactive', 'false') <> ?
+		`, flag, kbID, flag)
+	case "mysql":
+		result = r.db.WithContext(ctx).Exec(`
+			UPDATE chunks
+			SET metadata = JSON_SET(
+				COALESCE(metadata, JSON_OBJECT()),
+				'$.generated_questions_inactive',
+				CAST(? AS JSON)
+			)
+			WHERE knowledge_base_id = ?
+				AND JSON_LENGTH(JSON_EXTRACT(metadata, '$.generated_questions')) > 0
+				AND COALESCE(JSON_UNQUOTE(JSON_EXTRACT(metadata, '$.generated_questions_inactive')), 'false') <> ?
+		`, flag, kbID, flag)
+	default:
+		already := "json_extract(metadata, '$.generated_questions_inactive') = 1"
+		if inactive {
+			already = "COALESCE(json_extract(metadata, '$.generated_questions_inactive'), 0) = 0"
+		}
+		result = r.db.WithContext(ctx).Exec(`
+			UPDATE chunks
+			SET metadata = json_set(COALESCE(metadata, '{}'), '$.generated_questions_inactive', json(?))
+			WHERE knowledge_base_id = ?
+				AND json_array_length(json_extract(metadata, '$.generated_questions')) > 0
+				AND `+already+`
+		`, flag, kbID)
+	}
+	if result.Error != nil {
+		return 0, result.Error
+	}
+	return result.RowsAffected, nil
+}
+
 func (r *chunkRepository) ListAllChunksByKnowledgeID(
 	ctx context.Context,
 	tenantID uint64,

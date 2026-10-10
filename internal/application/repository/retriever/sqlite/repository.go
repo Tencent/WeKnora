@@ -506,6 +506,34 @@ func (r *sqliteRepository) BatchUpdateChunkEnabledStatus(ctx context.Context, ch
 	return errors.Join(updateErrs...)
 }
 
+// SetGeneratedQuestionEnabled turns generated-question index rows for one
+// knowledge base on or off without touching the parent chunk row.
+func (r *sqliteRepository) SetGeneratedQuestionEnabled(
+	ctx context.Context, knowledgeBaseID string, enabled bool,
+) (int64, error) {
+	if knowledgeBaseID == "" {
+		return 0, nil
+	}
+	query := r.db.WithContext(ctx).Model(&sqliteEmbedding{}).
+		Where("knowledge_base_id = ? AND "+types.GeneratedQuestionRowPredicate(""), knowledgeBaseID)
+	if enabled {
+		query = query.Where("(is_enabled IS NULL OR is_enabled = ?)", false)
+		// A disabled chunk turns every index row off together. Turning question
+		// generation back on must not resurrect questions for those chunks.
+		query = query.Where(`chunk_id IN (
+			SELECT body.chunk_id FROM lite_embeddings AS body
+			WHERE body.knowledge_base_id = ? AND `+types.EnabledChunkBodySQL("body")+`)`,
+			knowledgeBaseID, true)
+	} else {
+		query = query.Where("(is_enabled IS NULL OR is_enabled = ?)", true)
+	}
+	result := query.Update("is_enabled", enabled)
+	if result.Error != nil {
+		return 0, result.Error
+	}
+	return result.RowsAffected, nil
+}
+
 func (r *sqliteRepository) BatchUpdateChunkTagID(ctx context.Context, chunkTagMap map[string]string) error {
 	var updateErrs []error
 	for chunkID, tagID := range chunkTagMap {
@@ -887,6 +915,17 @@ func buildFilterWhere(params types.RetrieveParams, tableAlias string) []whereCla
 		parts = append(parts, whereClause{
 			clause: tableAlias + ".tag_id IN (" + placeholders(len(params.TagIDs)) + ")",
 			args:   toInterfaceSlice(params.TagIDs),
+		})
+	}
+	if len(params.ExcludeGeneratedQuestionKBIDs) > 0 {
+		parts = append(parts, whereClause{
+			clause: fmt.Sprintf(
+				"NOT (%s.knowledge_base_id IN (%s) AND %s)",
+				tableAlias,
+				placeholders(len(params.ExcludeGeneratedQuestionKBIDs)),
+				types.GeneratedQuestionRowPredicate(tableAlias),
+			),
+			args: toInterfaceSlice(params.ExcludeGeneratedQuestionKBIDs),
 		})
 	}
 	return parts

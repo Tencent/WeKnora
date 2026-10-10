@@ -117,6 +117,8 @@ func CleanPassage(text string) string {
 // EnrichedPassage is the cleaned chunk body plus the image captions, OCR text
 // and generated questions attached to it. MMR compares candidates on this
 // text, so chunks of one document are not made similar by a shared title.
+// Generated questions are omitted when the knowledge base has turned question
+// generation off, or when the chunk metadata marks them inactive.
 func EnrichedPassage(ctx context.Context, result *types.SearchResult) string {
 	combinedText := CleanPassage(result.Content)
 	var enrichments []string
@@ -145,8 +147,10 @@ func EnrichedPassage(ctx context.Context, result *types.SearchResult) string {
 		var docMeta types.DocumentChunkMetadata
 		if err := json.Unmarshal(result.ChunkMetadata, &docMeta); err != nil {
 			logger.Warnf(ctx, "[Rerank] Failed to parse chunk metadata of chunk %s: %v", result.ID, err)
-		} else if questionStrings := docMeta.GetQuestionStrings(); len(questionStrings) > 0 {
-			enrichments = append(enrichments, strings.Join(questionStrings, "; "))
+		} else if includeGeneratedQuestions(result, &docMeta) {
+			if questionStrings := docMeta.GetQuestionStrings(); len(questionStrings) > 0 {
+				enrichments = append(enrichments, strings.Join(questionStrings, "; "))
+			}
 		}
 	}
 
@@ -157,6 +161,13 @@ func EnrichedPassage(ctx context.Context, result *types.SearchResult) string {
 		combinedText += "\n\n"
 	}
 	return combinedText + strings.Join(enrichments, "\n")
+}
+
+func includeGeneratedQuestions(result *types.SearchResult, meta *types.DocumentChunkMetadata) bool {
+	if result != nil && result.SkipGeneratedQuestions {
+		return false
+	}
+	return meta == nil || !meta.GeneratedQuestionsInactive
 }
 
 // ModelPassage is the text the rerank model scores: the document title

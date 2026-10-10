@@ -126,6 +126,51 @@ func (c *CompositeRetrieveEngine) SupportRetriever(r types.RetrieverType) bool {
 	return false
 }
 
+type generatedQuestionSetter interface {
+	SetGeneratedQuestionEnabled(ctx context.Context, knowledgeBaseID string, enabled bool) (int64, error)
+}
+
+// SetGeneratedQuestionEnabled flips generated-question rows on every
+// participating engine. A mix of an engine that updated rows and an engine
+// that cannot is ErrGeneratedQuestionIndexPartial: the caller must not record
+// the index as aligned. When no engine can update rows, it returns
+// ErrGeneratedQuestionIndexUnsupported.
+func (c *CompositeRetrieveEngine) SetGeneratedQuestionEnabled(
+	ctx context.Context, knowledgeBaseID string, enabled bool,
+) (int64, error) {
+	var total int64
+	var updated, skipped int
+	var errs []error
+	for _, engineInfo := range c.engineInfos {
+		if engineInfo == nil {
+			continue
+		}
+		setter, ok := engineInfo.retrieveEngine.(generatedQuestionSetter)
+		if !ok {
+			skipped++
+			continue
+		}
+		n, err := setter.SetGeneratedQuestionEnabled(ctx, knowledgeBaseID, enabled)
+		if errors.Is(err, ErrGeneratedQuestionIndexUnsupported) {
+			skipped++
+			continue
+		}
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		updated++
+		total += n
+	}
+	if updated > 0 && skipped > 0 {
+		errs = append(errs, ErrGeneratedQuestionIndexPartial)
+	}
+	if updated == 0 && len(errs) == 0 {
+		return 0, ErrGeneratedQuestionIndexUnsupported
+	}
+	return total, errors.Join(errs...)
+}
+
 // BatchUpdateChunkEnabledStatus updates the enabled status of chunks in batch
 func (c *CompositeRetrieveEngine) BatchUpdateChunkEnabledStatus(
 	ctx context.Context,
