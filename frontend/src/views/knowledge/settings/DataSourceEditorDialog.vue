@@ -761,6 +761,20 @@ const connectorDefs = computed<ConnectorDef[]>(() => [
       { key: 'api_token', labelKey: 'datasource.seafile.apiToken', placeholder: '', secret: true, hintKey: 'datasource.seafile.apiTokenHint' },
     ],
   },
+  {
+    // Outline (getoutline.com). API token auth; base_url is only needed for a
+    // self-hosted instance and defaults to the public cloud when left empty.
+    type: 'outline',
+    available: true,
+    docUrl: 'https://www.getoutline.com/developers',
+    permissionDocUrl: 'https://www.getoutline.com/developers',
+    permissionPageUrl: '',
+    requiredPermissions: [],
+    fields: [
+      { key: 'api_token', labelKey: 'datasource.field.apiToken', placeholder: '', secret: true },
+      { key: 'base_url', labelKey: 'datasource.field.baseUrl', placeholder: 'https://app.getoutline.com', optional: true, hintKey: 'datasource.field.baseUrlHint' },
+    ],
+  },
 ])
 
 
@@ -1356,6 +1370,7 @@ const resourceTypeLabelMap: Record<string, string> = {
   doc_category: 'datasource.resourceType.docCategory',
   book: 'datasource.resourceType.book',
   library: 'datasource.resourceType.library',
+  collection: 'datasource.resourceType.collection',
 }
 
 function resourceTypeLabel(type: string): string {

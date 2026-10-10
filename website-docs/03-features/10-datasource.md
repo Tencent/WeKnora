@@ -33,6 +33,7 @@
 | 语雀 | `yuque` | 知识库文档 |
 | 钉钉文档 | `dingtalk` | 知识库、文件夹与在线文档 |
 | 腾讯 IMA | `ima` | 知识库中的文件与笔记 |
+| Outline | `outline` | 集合（collection）中的文档，含嵌套文档 |
 | GitLab | `gitlab` | 仓库指定分支/标签下的目录 |
 | Seafile | `seafile` | 资料库中的目录与文件 |
 | RSS / Atom | `rss` | 订阅源文章 |
@@ -49,19 +50,19 @@
 
 #### 连接器能力对比
 
-| | Feishu / Lark | Notion | Yuque（语雀） | RSS / Atom |
-| --- | --- | --- | --- | --- |
-| 源码目录 | `internal/datasource/connector/feishu/wiki/`（共享 `feishu/core/`） | `connector/notion/` | `connector/yuque/` | `connector/rss/` |
-| 类型标识 | `feishu` / `lark` | `notion` | `yuque` | `rss` |
-| 认证方式 | 企业自建应用 `app_id` + `app_secret`（tenant_access_token） | Internal Integration Token（`api_key`） | 个人/团队 Token（`api_token`，`X-Auth-Token` 头） | 无认证或自定义请求头（`auth_headers`） |
-| 凭据字段 | `app_id`、`app_secret`、`base_url`（可选覆盖） | `api_key`（`base_url` 走 Settings） | `api_token`、`base_url`（私有化部署可选） | `auth_headers`（可选，属凭据）；`feed_urls` 属 Settings |
-| 资源模型 | Wiki 空间 → 节点树（懒加载，`spaceID:nodeToken` 复合 ID） | 页面/数据库全量树（一次返回带 parent 关系） | 知识库（book/repo）扁平列表 | 每个 feed URL 一个资源（扁平） |
-| 内容格式 | 导出 API → `.docx`/`.xlsx` 文件；drive 文件原样下载 | Block → Markdown；数据库转 Markdown 表格；附件下载 | `body` Markdown 原文（`.md`） | Readability 全文抽取 → HTML→Markdown |
-| 增量机制 | 按内容 `obj_edit_time` 比对（cursor: `SpaceNodeTimes`） | 按页面/记录 `last_edited_time` 比对（cursor: `PageEditTimes`） | 按文档 `content_updated_at` 比对（cursor: `BookDocTimes`） | feed 信号指纹 + 内容 SHA-256 指纹双层比对 |
-| 删除检测 | 支持（游标中有、当前树没有 → `IsDeleted`；部分列举失败时跳过删除检测） | 支持（区分"源端已删"与"用户取消勾选"，后者不报删除） | 支持 | 不支持（feed 天然滚动淘汰旧条目） |
-| 流式可恢复同步 | 是（`StreamingConnector`，每 50 节点或 30 秒 checkpoint） | 否 | 否 | 否 |
-| 限流应对 | 429 读 `Retry-After` + 指数退避（2s/4s/8s，最多 3 次重试）；5xx 重试 | — | 每次 `GetDocDetail` 间隔 300ms（个人 token 约 100 req/5min） | — |
-| 部分失败 | 单文档失败生成带错误 metadata 的占位条目，继续同步 | 单页失败记日志跳过 | 单文档失败生成占位条目 | 单 feed 失败 → `PartialFetchError`；全部失败才算 fail |
+| | Feishu / Lark | Notion | Yuque（语雀） | RSS / Atom | Outline |
+| --- | --- | --- | --- | --- | --- |
+| 源码目录 | `internal/datasource/connector/feishu/wiki/`（共享 `feishu/core/`） | `connector/notion/` | `connector/yuque/` | `connector/rss/` | `connector/outline/` |
+| 类型标识 | `feishu` / `lark` | `notion` | `yuque` | `rss` | `outline` |
+| 认证方式 | 企业自建应用 `app_id` + `app_secret`（tenant_access_token） | Internal Integration Token（`api_key`） | 个人/团队 Token（`api_token`，`X-Auth-Token` 头） | 无认证或自定义请求头（`auth_headers`） | API Token（`api_token`，`Authorization: Bearer` 头） |
+| 凭据字段 | `app_id`、`app_secret`、`base_url`（可选覆盖） | `api_key`（`base_url` 走 Settings） | `api_token`、`base_url`（私有化部署可选） | `auth_headers`（可选，属凭据）；`feed_urls` 属 Settings | `api_token`、`base_url`（私有化部署必填，公有云留空） |
+| 资源模型 | Wiki 空间 → 节点树（懒加载，`spaceID:nodeToken` 复合 ID） | 页面/数据库全量树（一次返回带 parent 关系） | 知识库（book/repo）扁平列表 | 每个 feed URL 一个资源（扁平） | 集合（collection）扁平列表；集合内嵌套文档一并同步，并按父子关系生成 `<集合>/<父文档>/…` 目录 |
+| 内容格式 | 导出 API → `.docx`/`.xlsx` 文件；drive 文件原样下载 | Block → Markdown；数据库转 Markdown 表格；附件下载 | `body` Markdown 原文（`.md`） | Readability 全文抽取 → HTML→Markdown | `documents.list` 直接返回 `text` Markdown 原文；附件图片转 base64 data URI 内联 |
+| 增量机制 | 按内容 `obj_edit_time` 比对（cursor: `SpaceNodeTimes`） | 按页面/记录 `last_edited_time` 比对（cursor: `PageEditTimes`） | 按文档 `content_updated_at` 比对（cursor: `BookDocTimes`） | feed 信号指纹 + 内容 SHA-256 指纹双层比对 | 按文档 `revision` 比对（cursor: `CollectionDocRevisions`） |
+| 删除检测 | 支持（游标中有、当前树没有 → `IsDeleted`；部分列举失败时跳过删除检测） | 支持（区分"源端已删"与"用户取消勾选"，后者不报删除） | 支持 | 不支持（feed 天然滚动淘汰旧条目） | 支持（游标中有、所有已选集合都没有 → `IsDeleted`；回收站与归档文档同样不在列表中；全量同步经 `FetchAllFromCursor` 同样检测删除） |
+| 流式可恢复同步 | 是（`StreamingConnector`，每 50 节点或 30 秒 checkpoint） | 否 | 否 | 否 | 否 |
+| 限流应对 | 429 读 `Retry-After` + 指数退避（2s/4s/8s，最多 3 次重试）；5xx 重试 | — | 每次 `GetDocDetail` 间隔 300ms（个人 token 约 100 req/5min） | — | 429 读 `Retry-After` + 指数退避（2s/4s/8s，最多 3 次重试）；5xx 重试一次 |
+| 部分失败 | 单文档失败生成带错误 metadata 的占位条目，继续同步 | 单页失败记日志跳过 | 单文档失败生成占位条目 | 单 feed 失败 → `PartialFetchError`；全部失败才算 fail | 单张图片下载失败保留原链接并告警，文档正文照常入库 |
 
 #### Feishu / Lark（`connector/feishu/wiki/`）
 
@@ -181,6 +182,21 @@
 - **校验**：测试连接会列出知识库、探测根节点列表，并在根下存在在线文档时试读 Blocks；对已开启摄取的上传文件只解析存储位置并申请下载 URL，不下载正文，以便尽早发现缺少 `Wiki.Node.Read` / `Storage.File.Read`，同时让校验对多兆字节文件保持廉价。
 - **失败与恢复**：资源失效不阻断其他范围；失败范围和正文失败文档保留旧版本以便重试。任一范围无法完整扫描时暂缓删除，并保留待核对记录。失效的单独选择需要检查权限或重新选择。
 - **删除开关**：开启同步删除才移除确认在源端删除的本地知识；不可访问的资源不会直接视为已删除。
+
+#### Outline（`connector/outline/`）
+
+Outline（getoutline.com，支持公有云与私有化部署）以集合（collection）为同步单位，集合内的嵌套文档一并同步。
+
+- **认证**：`Authorization: Bearer <api_token>`，令牌在 Outline 的 Settings → API Tokens 创建。所有 RPC 端点均为 POST JSON。私有化部署需填写 `base_url`，该值经 `ValidateConnectorBaseURL` 做 SSRF 校验。
+- **资源列举**：`POST /api/collections.list` 返回扁平集合列表，无层级，因此 `ResolveResourceAncestors` 返回空。
+- **内容抓取**：`POST /api/documents.list` 的响应里已包含每篇文档的完整 Markdown（`text` 字段），所以一轮分页既完成列举也完成取文，无需逐篇调用 `documents.info`。
+- **图片**：这是本连接器与其他连接器差别最大的一处。Outline 的附件地址 `/api/attachments.redirect?id=<uuid>` **需要 API Token** 才能访问，而入库侧的 `ImageResolver.ResolveRemoteImages` 是**匿名**下载 http(s) 图片的（不带鉴权头），因此把原链接直接透传过去必然 401，图片静默丢失。连接器改为：用 Token 下载附件，转成 `data:image/...;base64,...` 内联进 Markdown，交给 `ResolveDataURIImages` 落存储并改写为 `resource://<handle>`。选择内联而非把图片拆成独立知识条目，是为了让图片继续通过 `parent_chunk_id` 归属于原文档——这正是飞书连接器放弃 blocks 拆分路径、默认改走导出 `.docx` 的原因（见 `connector/feishu/core/shared.go` 中 `FEISHU_DOCX_PARSE_MODE` 的注释）。
+- **图片相关约束**：单篇最多内联 30 张（对齐 `ImageResolver.maxRemoteImages`），单张上限 9MB（低于 `maxRemoteImageSize` 的 10MB，下载时最多读取上限 +1 字节，超大附件不会整块读入内存），单篇内联的 data URI 合计不超过 50MB（与 Confluence 连接器的单页预算一致）；同一附件在一篇文档内只下载一次，但每次出现都计入上述两个限额。超限或下载失败的图片保留原链接并打告警，不会删除正文。仅当目标知识库启用了多模态（`DataSourceConfig.MultimodalEnabled`）时才下载图片——未启用时图片无法入库，下载只会白白膨胀上传体积。另外，重写出的 Markdown 必须是 `![alt](data:...)` 且 data URI 后不能再跟 `"title"`：`imgMarkdownDataURI` 会把右括号前的内容全部当作 payload，残留的标题会让 base64 解码失败、图片被丢弃，因此 Outline 的链接标题被提升为 alt 文本。
+- **目录结构**：文档按 `<集合名>/<祖先文档标题>/…/<标题>.md` 写入 `FileName`，入库时目录部分成为知识的 `folder_path`（层级与长度上限由服务端统一截断）。Outline 的父文档本身也是一篇文档，因此它既是一个 `.md` 条目，也是其子文档所在的目录。标题中的 `/` 会被替换为 `_`，不会额外产生一层目录；父文档不在列表中（已归档或在回收站）时，路径停在已知的最后一层。与语雀不同，这里没有 `folder_mode` 开关：该连接器首次发布即带目录结构，不存在需要保持平铺行为的存量数据源。目录由连接器托管，在知识库中手动移动过的文档会在下次同步该文档时回到 Outline 的结构。
+- **增量逻辑**：游标 `outlineCursor.CollectionDocRevisions`（`collectionID → documentID → revision`）与 `CollectionDocFolders`（`collectionID → documentID → 目录路径`）。Outline 的 `revision` 只在正文或标题变更时递增，比 `updatedAt` 更贴近"内容是否变了"；但移动文档或重命名祖先文档不会改变 `revision`，所以目录路径也参与比对。`revision` 未变而路径变了的文档以 `FetchedItem.MoveOnly` 发出，不带正文：服务端找到已有知识后只改 `folder_path`，分块与向量原样保留，不会重新解析和向量化——重命名一篇有大量子文档的父文档时，只是一次元数据更新；该文档此前从未入库（或已在知识库中被手动删除）时计为跳过。正文与路径同时变化、或文档跨集合移动（上次的 `revision` 记在原集合下）时，仍按常规重新入库。删除检测：游标里有、且所有已选集合的当前列表中都没有 → `IsDeleted`；回收站与归档中的文档同样不出现在列表里，因此两种情况都能覆盖。判断跨集合进行：文档在两个已选集合之间移动时仍然存在，而服务端按 `external_id` 删除，按单个集合判断会把另一个集合刚重新入库的副本删掉。全量同步（`ForceFull` 或 `sync_mode=full`）走 `FetchAllFromCursor`：重新拉取全部文档，同时对照上次游标检测删除，并写回新游标。
+- **版本兼容**：按 Outline 源码逐个核对了 v0.80.0、v1.0.0、v1.5.0、v1.7.1、v1.10.1 这几个标签：连接器用到的 `auth.info`、`collections.list`、`documents.list`、`attachments.redirect` 在这些版本中都存在；不带 `x-api-version` 请求头时 `documents.list` 始终返回 Markdown `text`，`revision`、`parentDocumentId`、`templateId` 字段也都在。模板的存储方式在 v1.6.0 发生变化：v1.5.0 及以前模板是 `template: true` 的文档，v1.6.0 起改为独立的 `Template` 模型（上游 #11027），`documents.list` 不再返回模板，并新增 `templates.list`。两种形态连接器都能正确处理。v0.80.0 之前的版本未核对；Outline 云端始终是最新版。实际联调使用的是 v1.7.1 的自托管实例。
+- **跳过的内容**：模板本身（`template: true`；新版 Outline 把模板存在独立的 `Template` 模型中，`documents.list` 不会返回）、已删除与已归档文档。基于模板创建的文档带有 `templateId`（指向来源模板），属于普通内容，照常同步。
+- **文本清理**：Outline 序列化空段落/硬换行时会留下整行只有 `\` 或字面量 `\n` 的噪声（在一个 1123 篇文档的实例上测得 687 行与 1463 个 token，分布在 15 个集合中的 13 个）。连接器只在**整行仅由这些 token 组成**时删除该行，并跳过 fenced code block 内部，因此行内的合法转义（`\[`、`\]`、`\*`）与代码示例不受影响。标题层级与正文结构保持原样，不做任何美化改写。
 
 #### RSS / Atom（`connector/rss/`）
 
@@ -410,9 +426,10 @@ registry.Register(imaConnector.NewConnector())                      // ima
 registry.Register(rssConnector.NewConnector())                      // rss
 registry.Register(gitlabConnector.NewConnector())                   // gitlab
 registry.Register(seafileConnector.NewConnector())                  // seafile
+registry.Register(outlineConnector.NewConnector())                  // outline
 ```
 
-> 注意：`connector.go` 中的 `ConnectorMetadataRegistry` 仍包含尚未实现的连接器（GitHub、Google Drive、OneDrive、Web Crawler、Slack、IMAP 等）。当前实际注册可用的类型为：`feishu`、`lark`、`feishu_drive`、`lark_drive`、`notion`、`confluence`、`yuque`、`dingtalk`、`ima`、`rss`、`gitlab`、`seafile`。未注册类型在创建数据源时会被 `connectorRegistry.Get()` 以 `ErrConnectorNotFound` 拒绝。
+> 注意：`connector.go` 中的 `ConnectorMetadataRegistry` 仍包含尚未实现的连接器（GitHub、Google Drive、OneDrive、Web Crawler、Slack、IMAP 等）。当前实际注册可用的类型为：`feishu`、`lark`、`feishu_drive`、`lark_drive`、`notion`、`confluence`、`yuque`、`dingtalk`、`ima`、`rss`、`gitlab`、`seafile`、`outline`。未注册类型在创建数据源时会被 `connectorRegistry.Get()` 以 `ErrConnectorNotFound` 拒绝。
 
 ### 数据模型（internal/types/datasource.go）
 

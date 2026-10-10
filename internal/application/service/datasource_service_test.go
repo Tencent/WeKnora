@@ -681,6 +681,47 @@ func TestApplyFetchedItem_SyncDeletionScopedPerDataSource(t *testing.T) {
 	assert.NotContains(t, ks.deleted, "knowledge-b")
 }
 
+type refileRepo struct {
+	scopedDeletionRepo
+	movedIDs []string
+	movedTo  string
+}
+
+func (r *refileRepo) UpdateKnowledgeFolderPath(
+	_ context.Context, _ uint64, _ string, ids []string, folderPath string,
+) (int64, error) {
+	r.movedIDs, r.movedTo = ids, folderPath
+	return int64(len(ids)), nil
+}
+
+// A MoveOnly item re-files the existing knowledge without deleting or
+// re-creating it, and is skipped when there is nothing to move.
+func TestApplyFetchedItem_MoveOnlyRefilesWithoutReingest(t *testing.T) {
+	repo := &refileRepo{scopedDeletionRepo: scopedDeletionRepo{live: map[string]*types.Knowledge{
+		"ds-a|doc-c": {ID: "knowledge-c"},
+	}}}
+	ks := &sweepFakeKS{repo: repo}
+	svc := &DataSourceService{knowledgeService: ks}
+	ds := &types.DataSource{ID: "ds-a", TenantID: 1, KnowledgeBaseID: "kb-1"}
+
+	result := &types.SyncResult{}
+	svc.applyFetchedItem(context.Background(), ds, &types.FetchedItem{
+		ExternalID: "doc-c", FileName: "Handbook/Parent/Child.md", MoveOnly: true,
+	}, nil, result)
+
+	assert.Equal(t, 1, result.Updated)
+	assert.Equal(t, []string{"knowledge-c"}, repo.movedIDs)
+	assert.Equal(t, "Handbook/Parent", repo.movedTo)
+	assert.Empty(t, ks.events, "a move must not delete or re-create the knowledge")
+
+	result = &types.SyncResult{}
+	svc.applyFetchedItem(context.Background(), ds, &types.FetchedItem{
+		ExternalID: "doc-never-ingested", FileName: "Handbook/X.md", MoveOnly: true,
+	}, nil, result)
+	assert.Equal(t, 1, result.Skipped)
+	assert.Equal(t, 0, result.Failed)
+}
+
 type mixedSyncConnector struct{}
 
 func (mixedSyncConnector) Type() string { return "test-sync-mixed" }

@@ -1058,6 +1058,12 @@ export default {
     prereqStep3Brief_dingtalk: '填寫操作人 Union ID',
     prereqStep3Desc_dingtalk: '填寫有權存取目標知識庫的釘釘使用者 Union ID',
     prereqOpenConsole_dingtalk: '前往釘釘開放平台設定',
+    prereqBarText_outline: '首次使用？點擊查看 Outline Token 設定指引',
+    prereqStep1Brief_outline: '建立 Outline API Token',
+    prereqStep1Desc_outline: '打開 Outline → Settings → API Tokens → New token，建立後僅顯示一次，請立即複製',
+    prereqStep2Brief_outline: '（可選）私有化部署請填寫 Base URL',
+    prereqStep2Desc_outline: '公有雲留空即可；私有化部署填寫實例地址，例如 https://docs.example.com',
+    prereqOpenConsole_outline: '打開 Outline API Token 設定',
     prereqBarText_ima: '首次使用？點擊查看騰訊 IMA OpenAPI 授權指引',
     prereqStep1Brief_ima: '開通 IMA 智慧代理接入',
     prereqStep1Desc_ima: '登入 https://ima.qq.com/agent-interface 並申請 OpenAPI 接入',
@@ -1113,7 +1119,8 @@ export default {
       wikiSpace: '知識庫空間',
       docCategory: '文件標籤',
       book: '語雀知識庫',
-      library: 'Seafile 資料庫'
+      library: 'Seafile 資料庫',
+      collection: 'Outline 集合'
     },
     scheduleHuman: {
       '30min': '每 30 分鐘',
@@ -1162,7 +1169,8 @@ export default {
       ima: '同步騰訊 IMA 知識庫中的文件、筆記與檔案（暫不支持 AI 會話與影片解析）',
       rss: '同步 RSS / Atom 訂閱源中的文章',
       gitlab: '同步 GitLab 專案中的檔案',
-      seafile: '同步 Seafile 資料庫中的目錄與檔案'
+      seafile: '同步 Seafile 資料庫中的目錄與檔案',
+      outline: '同步 Outline 集合中的文件（雲端或私有化部署）'
     },
     connector: {
       feishu: '飛書',
@@ -1176,7 +1184,8 @@ export default {
       ima: '騰訊 IMA',
       rss: 'RSS / Atom 訂閱',
       gitlab: 'GitLab',
-      seafile: 'Seafile'
+      seafile: 'Seafile',
+      outline: 'Outline'
     },
     logDetail: {
       startTime: '開始時間',
@@ -1248,7 +1257,8 @@ export default {
       seafile_source_changed: 'Seafile 檔案在獲取過程中發生變化，下次同步將重試。',
       seafile_invalid_response: 'Seafile 回傳了無法解析的回應，請檢查伺服器版本與反向代理設定。',
       seafile_ssrf_blocked: 'Seafile 檔案下載地址被 SSRF 策略攔截，請將 fileserver 網域加入 SSRF_WHITELIST。',
-      seafile_fetch_failed: '從 Seafile 獲取檔案失敗，下次同步將重試。'
+      seafile_fetch_failed: '從 Seafile 獲取檔案失敗，下次同步將重試。',
+      move_failed: '移動到新目錄失敗，請查看伺服器日誌'
     },
   },
   ollama: {
@@ -7198,6 +7208,7 @@ export default {
     channelGitLab: 'GitLab',
     channelSeafile: 'Seafile',
     channelIma: '騰訊 IMA',
+    channelOutline: 'Outline',
     channelUpload: '上傳',
     channelManual: '手動',
     channelUrl: '網頁',

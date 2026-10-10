@@ -812,6 +812,7 @@ export default {
     channelGitLab: 'GitLab',
     channelSeafile: 'Seafile',
     channelIma: 'Tencent IMA',
+    channelOutline: 'Outline',
     channelUpload: 'Upload',
     channelManual: 'Manual',
     channelUrl: 'Web',
@@ -6958,7 +6959,8 @@ export default {
       rss: 'RSS / Atom Feed',
       ima: 'Tencent IMA',
       gitlab: 'GitLab',
-      seafile: 'Seafile'
+      seafile: 'Seafile',
+      outline: 'Outline',
     },
     connectorDesc: {
       feishu: 'Sync documents, spreadsheets and files from Feishu Wiki',
@@ -6972,7 +6974,8 @@ export default {
       rss: 'Sync articles from RSS / Atom feeds',
       ima: 'Sync documents, notes and files from Tencent IMA knowledge bases (AI sessions and video parses are not supported)',
       gitlab: 'Sync files from GitLab projects',
-      seafile: 'Sync folders and files from Seafile libraries'
+      seafile: 'Sync folders and files from Seafile libraries',
+      outline: 'Sync documents from Outline collections (cloud or self-hosted)',
     },
     drive: {
       folderTokenLabel: 'Drive folder token',
@@ -7068,6 +7071,12 @@ export default {
     prereqStep3Brief_dingtalk: 'Enter the operator Union ID',
     prereqStep3Desc_dingtalk: 'Enter the Union ID of a DingTalk user who can access the target knowledge bases.',
     prereqOpenConsole_dingtalk: 'Open DingTalk Developer Console',
+    prereqBarText_outline: 'First time? Click to see the Outline token setup guide',
+    prereqStep1Brief_outline: 'Create an Outline API token',
+    prereqStep1Desc_outline: 'Open Outline -> Settings -> API Tokens -> New token, and copy it once: it is shown only at creation',
+    prereqStep2Brief_outline: '(Optional) Enter the Base URL for a self-hosted instance',
+    prereqStep2Desc_outline: 'Leave empty for the public cloud; for a self-hosted instance enter its origin, e.g. https://docs.example.com',
+    prereqOpenConsole_outline: 'Open Outline API token settings',
     prereqBarText_ima: 'First time? Click to see the Tencent IMA OpenAPI setup guide',
     prereqStep1Brief_ima: 'Enable IMA agent OpenAPI access',
     prereqStep1Desc_ima: 'Sign in to https://ima.qq.com/agent-interface and apply for OpenAPI access',
@@ -7101,7 +7110,8 @@ export default {
       wikiSpace: 'Wiki Space',
       docCategory: 'Document Tag',
       book: 'Yuque Book',
-      library: 'Seafile Library'
+      library: 'Seafile Library',
+      collection: 'Outline Collection'
     },
     neverSynced: 'Never synced',
     justNow: 'Just now',
@@ -7121,7 +7131,8 @@ export default {
       seafile_source_changed: 'The Seafile file changed while it was being fetched; the next sync retries it.',
       seafile_invalid_response: 'Seafile returned a response that could not be parsed; check the server version and reverse proxy.',
       seafile_ssrf_blocked: 'The Seafile download URL was blocked by the SSRF policy; add the fileserver host to SSRF_WHITELIST.',
-      seafile_fetch_failed: 'Failed to fetch the file from Seafile; the next sync retries it.'
+      seafile_fetch_failed: 'Failed to fetch the file from Seafile; the next sync retries it.',
+      move_failed: 'Moving the item to its new folder failed; see server logs'
     }
   },
   integrations: {

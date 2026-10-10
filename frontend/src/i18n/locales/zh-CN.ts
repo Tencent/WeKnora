@@ -1058,6 +1058,12 @@ export default {
     prereqStep3Brief_dingtalk: '填写操作人 Union ID',
     prereqStep3Desc_dingtalk: '填写有权访问目标知识库的钉钉用户 Union ID',
     prereqOpenConsole_dingtalk: '前往钉钉开放平台配置',
+    prereqBarText_outline: '首次使用？点击查看 Outline Token 配置指引',
+    prereqStep1Brief_outline: '创建 Outline API Token',
+    prereqStep1Desc_outline: '打开 Outline → Settings → API Tokens → New token，创建后仅显示一次，请立即复制',
+    prereqStep2Brief_outline: '（可选）私有化部署请填写 Base URL',
+    prereqStep2Desc_outline: '公有云留空即可；私有化部署填写实例地址，例如 https://docs.example.com',
+    prereqOpenConsole_outline: '打开 Outline API Token 设置',
     prereqBarText_ima: '首次使用？点击查看腾讯 IMA OpenAPI 授权指引',
     prereqStep1Brief_ima: '开通 IMA 智能体接入',
     prereqStep1Desc_ima: '登录 https://ima.qq.com/agent-interface 并申请 OpenAPI 接入',
@@ -1113,7 +1119,8 @@ export default {
       wikiSpace: '知识库空间',
       docCategory: '文档标签',
       book: '语雀知识库',
-      library: 'Seafile 资料库'
+      library: 'Seafile 资料库',
+      collection: 'Outline 集合'
     },
     scheduleHuman: {
       '30min': '每 30 分钟',
@@ -1162,7 +1169,8 @@ export default {
       ima: '同步腾讯 IMA 知识库中的文档、笔记与文件（暂不支持 AI 会话与视频解析）',
       rss: '同步 RSS / Atom 订阅源中的文章',
       gitlab: '同步 GitLab 项目中的文件',
-      seafile: '同步 Seafile 资料库中的目录与文件'
+      seafile: '同步 Seafile 资料库中的目录与文件',
+      outline: '同步 Outline 集合中的文档（云端或私有化部署）',
     },
     connector: {
       feishu: '飞书',
@@ -1176,7 +1184,8 @@ export default {
       ima: '腾讯 IMA',
       rss: 'RSS / Atom 订阅',
       gitlab: 'GitLab',
-      seafile: 'Seafile'
+      seafile: 'Seafile',
+      outline: 'Outline',
     },
     logDetail: {
       startTime: '开始时间',
@@ -1248,7 +1257,8 @@ export default {
       seafile_source_changed: 'Seafile 文件在获取过程中发生变化，下次同步将重试。',
       seafile_invalid_response: 'Seafile 返回了无法解析的响应，请检查服务器版本与反向代理配置。',
       seafile_ssrf_blocked: 'Seafile 文件下载地址被 SSRF 策略拦截，请将 fileserver 域名加入 SSRF_WHITELIST。',
-      seafile_fetch_failed: '从 Seafile 获取文件失败，下次同步将重试。'
+      seafile_fetch_failed: '从 Seafile 获取文件失败，下次同步将重试。',
+      move_failed: '移动到新目录失败，请查看服务器日志'
     },
   },
   ollama: {
@@ -7198,6 +7208,7 @@ export default {
     channelGitLab: 'GitLab',
     channelSeafile: 'Seafile',
     channelIma: '腾讯 IMA',
+    channelOutline: 'Outline',
     channelUpload: '上传',
     channelManual: '手动',
     channelUrl: '网页',

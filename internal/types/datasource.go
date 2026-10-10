@@ -39,6 +39,8 @@ const (
 	ConnectorTypeGitLab      = "gitlab"
 	ConnectorTypeIMA         = "ima"
 	ConnectorTypeSeafile     = "seafile"
+	// ConnectorTypeOutline is Outline (getoutline.com), cloud or self-hosted.
+	ConnectorTypeOutline = "outline"
 
 	// Sync modes
 	SyncModeIncremental = "incremental"
@@ -344,6 +346,14 @@ type FetchedItem struct {
 
 	// Source resource ID (e.g., folder ID this document belongs to)
 	SourceResourceID string `json:"source_resource_id"`
+
+	// MoveOnly says the item's content is unchanged since the last sync and only
+	// its folder (the directory part of FileName) changed — e.g. the source
+	// document was moved or an ancestor renamed. Ingestion re-files the existing
+	// knowledge in place instead of re-parsing and re-embedding it, so Content
+	// may be empty. An item that was never ingested is skipped, as an unchanged
+	// one would be.
+	MoveOnly bool `json:"move_only,omitempty"`
 
 	// ReplacesSubtree, when true, tells ingestion to reconcile this item's
 	// sub-items: after the parent is (re)ingested, every existing knowledge item

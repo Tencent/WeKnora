@@ -1056,6 +1056,12 @@ export default {
     prereqStep3Brief_dingtalk: 'Укажите Union ID оператора',
     prereqStep3Desc_dingtalk: 'Укажите Union ID пользователя DingTalk, у которого есть доступ к целевым базам знаний.',
     prereqOpenConsole_dingtalk: 'Открыть консоль разработчика DingTalk',
+    prereqBarText_outline: 'Первый раз? Откройте инструкцию по настройке токена Outline',
+    prereqStep1Brief_outline: 'Создайте API-токен Outline',
+    prereqStep1Desc_outline: 'Outline → Settings → API Tokens → New token. Токен показывается только при создании — скопируйте его сразу',
+    prereqStep2Brief_outline: '(Необязательно) Укажите Base URL для self-hosted',
+    prereqStep2Desc_outline: 'Для облака оставьте пустым; для self-hosted укажите адрес экземпляра, например https://docs.example.com',
+    prereqOpenConsole_outline: 'Открыть настройки API-токенов Outline',
     prereqBarText_ima: 'В первый раз? Нажмите, чтобы увидеть руководство по настройке Tencent IMA OpenAPI',
     prereqStep1Brief_ima: 'Включите доступ к IMA agent OpenAPI',
     prereqStep1Desc_ima: 'Войдите на https://ima.qq.com/agent-interface и подайте заявку на доступ к OpenAPI',
@@ -1111,7 +1117,8 @@ export default {
       wikiSpace: 'Пространство вики',
       docCategory: 'Тег документа',
       book: 'База знаний Yuque',
-      library: 'Библиотека Seafile'
+      library: 'Библиотека Seafile',
+      collection: 'Коллекция Outline'
     },
     scheduleHuman: {
       '30min': 'Каждые 30 мин',
@@ -1160,7 +1167,8 @@ export default {
       ima: 'Синхронизация документов, заметок и файлов из баз знаний Tencent IMA (ИИ-сессии и разбор видео не поддерживаются)',
       rss: 'Синхронизация статей из лент RSS / Atom',
       gitlab: 'Синхронизация файлов из проектов GitLab',
-      seafile: 'Синхронизация папок и файлов из библиотек Seafile'
+      seafile: 'Синхронизация папок и файлов из библиотек Seafile',
+      outline: 'Синхронизация документов из коллекций Outline (облако или self-hosted)',
     },
     connector: {
       feishu: 'Feishu (Фэйшу)',
@@ -1174,7 +1182,8 @@ export default {
       ima: 'Tencent IMA',
       rss: 'RSS / Atom лента',
       gitlab: 'GitLab',
-      seafile: 'Seafile'
+      seafile: 'Seafile',
+      outline: 'Outline',
     },
     logDetail: {
       startTime: 'Время начала',
@@ -1246,7 +1255,8 @@ export default {
       seafile_source_changed: 'Файл Seafile изменился во время получения; при следующей синхронизации попытка повторится.',
       seafile_invalid_response: 'Seafile вернул ответ, который не удалось разобрать. Проверьте версию сервера и обратный прокси.',
       seafile_ssrf_blocked: 'URL скачивания Seafile заблокирован политикой SSRF. Добавьте хост fileserver в SSRF_WHITELIST.',
-      seafile_fetch_failed: 'Не удалось получить файл из Seafile; при следующей синхронизации попытка повторится.'
+      seafile_fetch_failed: 'Не удалось получить файл из Seafile; при следующей синхронизации попытка повторится.',
+      move_failed: 'Не удалось переместить элемент в новую папку; подробности в журнале сервера'
     },
   },
   ollama: {
@@ -7196,6 +7206,7 @@ export default {
     channelGitLab: 'GitLab',
     channelSeafile: 'Seafile',
     channelIma: 'Tencent IMA',
+    channelOutline: 'Outline',
     channelUpload: 'Загрузка',
     channelManual: 'Вручную',
     channelUrl: 'Веб',
