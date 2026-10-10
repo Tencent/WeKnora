@@ -343,10 +343,10 @@ func TestManagerStreamingFirstTokenAndOnChunk(t *testing.T) {
 
 func TestIsRetryable(t *testing.T) {
 	cases := map[ErrorKind]bool{
-		KindRateLimited: true,
-		KindUnavailable: true,
-		KindTimeout:     true,
-		KindPermanent:   false,
+		KindRateLimited:       true,
+		KindServerError:       true,
+		KindStreamInterrupted: true,
+		KindClientError:       false,
 	}
 	for kind, want := range cases {
 		if got := isRetryable(kind); got != want {

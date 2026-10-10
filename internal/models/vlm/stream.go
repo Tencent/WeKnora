@@ -122,19 +122,17 @@ func (v *RemoteAPIVLM) PredictStream(
 					logger.Infof(ctx, "[VLM] stream ended, len=%d, err=%s", totalLen, types.StreamEndedEarlyError)
 					return
 				}
-				if totalLen == 0 && resp.FinishReason == "length" {
-					// Reasoning models can spend the whole completion budget
-					// on thinking before any visible output: the assembler
-					// still emits a clean answer-done event, but with empty
-					// text. Surfacing "" as a success would classify the
-					// image as "no text" — indistinguishable from a genuinely
-					// blank image and hiding the real fault. Same explicit
-					// error the buffered path raises in PredictWithOptions.
+				if resp.FinishReason == "length" {
+					// The model exhausted its completion budget. Whether any
+					// reasoning/answer text made it out, the output is
+					// incomplete and must not be indexed as successful OCR —
+					// same verdict the buffered path raises. The sentinel
+					// keeps the truncated class inspectable end-to-end.
 					out <- StreamChunk{Err: fmt.Errorf(
-						"VLM returned no content: completion truncated at %d tokens (finish_reason=length)",
-						defaultMaxToks,
+						"%w at %d tokens (finish_reason=length)",
+						ErrTruncatedCompletion, defaultMaxToks,
 					)}
-					logger.Infof(ctx, "[VLM] stream ended, len=%d, finish_reason=length, no answer content", totalLen)
+					logger.Infof(ctx, "[VLM] stream ended, len=%d, finish_reason=length", totalLen)
 					return
 				}
 				out <- StreamChunk{Done: true, Usage: resp.Usage}

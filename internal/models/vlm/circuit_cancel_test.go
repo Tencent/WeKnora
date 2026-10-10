@@ -22,7 +22,7 @@ func TestCancellationIsNotEndpointDowntime(t *testing.T) {
 	cancelled := fmt.Errorf("Post %q: %w", "http://ep/v1/chat/completions",
 		&api.TransportError{Op: "send request", Err: context.Canceled})
 
-	kind, _, _ := classifyError(cancelled)
+	kind, _, _ := classifyError(cancelled, false)
 	if kind != KindCancelled {
 		t.Fatalf("classifyError(canceled transport) = %v, want KindCancelled", kind)
 	}
@@ -30,7 +30,7 @@ func TestCancellationIsNotEndpointDowntime(t *testing.T) {
 	// Trip-threshold many cancellations in a row must leave the breaker closed
 	// and the hard-down counter untouched.
 	for i := 0; i < cbTripThreshold; i++ {
-		m.handleFailure(rt, cancelled)
+		m.handleFailure(rt, cancelled, false)
 	}
 	if state := rt.cbState.Load(); state != cbServerUp {
 		t.Errorf("circuit state = %d, want cbServerUp: caller cancellations tripped the breaker", state)
@@ -43,24 +43,24 @@ func TestCancellationIsNotEndpointDowntime(t *testing.T) {
 	}
 }
 
-// TestOwnDeadlineIsTimeoutNotHardDown pins the sibling case: OUR request
+// TestOwnDeadlineIsFirstTokenTimeout pins the sibling case: OUR request
 // deadline (vlmHTTPTimeout) expiring is a slow-endpoint signal that sheds
 // load, not a dead-endpoint signal that trips the breaker. The deadline error
 // arrives wrapped in the same "send request" transport shell.
-func TestOwnDeadlineIsTimeoutNotHardDown(t *testing.T) {
+func TestOwnDeadlineIsFirstTokenTimeout(t *testing.T) {
 	rt := newTestRuntime(t, 10, 0)
 	m := &managerVLM{modelID: rt.modelID}
 
 	deadline := fmt.Errorf("Post %q: %w", "http://ep/v1/chat/completions",
 		&api.TransportError{Op: "send request", Err: context.DeadlineExceeded})
 
-	kind, _, _ := classifyError(deadline)
-	if kind != KindTimeout {
-		t.Fatalf("classifyError(deadline transport) = %v, want KindTimeout", kind)
+	kind, _, _ := classifyError(deadline, false)
+	if kind != KindFirstTokenTimeout {
+		t.Fatalf("classifyError(deadline transport) = %v, want KindFirstTokenTimeout", kind)
 	}
 
 	for i := 0; i < cbTripThreshold; i++ {
-		m.handleFailure(rt, deadline)
+		m.handleFailure(rt, deadline, false)
 	}
 	if state := rt.cbState.Load(); state != cbServerUp {
 		t.Errorf("circuit state = %d, want cbServerUp: our own request deadline must not trip the breaker", state)
@@ -79,7 +79,7 @@ func TestDialTimeoutStaysHardDown(t *testing.T) {
 	// yields a plain error, not context.DeadlineExceeded.
 	dialTimeout := errors.New(`Post "http://ep/v1/chat/completions": dial tcp 10.0.0.1:8080: i/o timeout`)
 
-	kind, _, _ := classifyError(dialTimeout)
+	kind, _, _ := classifyError(dialTimeout, false)
 	if kind != KindHardDown {
 		t.Fatalf("classifyError(dial i/o timeout) = %v, want KindHardDown", kind)
 	}

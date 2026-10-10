@@ -132,7 +132,7 @@ func (m *managerVLM) call(
 	budget := m.retryBudget(prio)
 	for attempt := 0; ; attempt++ {
 		genStart := time.Now()
-		text, usage, _, innerErr := m.runInner(ctx, imgBytes, prompt, opts, genStart)
+		text, usage, firstTokenSeen, innerErr := m.runInner(ctx, imgBytes, prompt, opts, genStart)
 
 		if innerErr != nil {
 			// Drive the adaptive controller and the circuit breaker on EVERY
@@ -141,9 +141,9 @@ func (m *managerVLM) call(
 			// surface a typed verdict (dead endpoint / permanent client fault)
 			// so the caller can stop spending its own retry budget on a lost
 			// cause. The raw error survives via wrapping.
-			m.handleFailure(rt, innerErr)
-			kind, _, _ := classifyError(innerErr)
-			if !m.retryInPlace(ctx, rt, innerErr, attempt, budget) {
+			m.handleFailure(rt, innerErr, firstTokenSeen)
+			kind, _, _ := classifyError(innerErr, firstTokenSeen)
+			if !m.retryInPlace(ctx, rt, innerErr, firstTokenSeen, attempt, budget) {
 				return "", wrapVerdict(innerErr, kind)
 			}
 			continue
@@ -331,20 +331,33 @@ func (m *managerVLM) consumeStream(
 
 // handleFailure classifies an inner error and drives the adaptive controller.
 // It does NOT change what the caller receives: the raw error is passed through
-// by call(). This is the manager's internal reaction (shed load on 429 / 5xx /
-// timeout) only.
-func (m *managerVLM) handleFailure(rt *modelRuntime, innerErr error) {
-	kind, retryAfter, is5xx := classifyError(innerErr)
+// by call(). This is the manager's internal reaction (shed load on throttles /
+// server errors / timeouts) only. firstTokenSeen separates a first-token
+// timeout from a mid-stream interruption, which share the same raw deadline
+// error.
+func (m *managerVLM) handleFailure(rt *modelRuntime, innerErr error, firstTokenSeen bool) {
+	kind, retryAfter, is5xx := classifyError(innerErr, firstTokenSeen)
 	switch kind {
 	case KindRateLimited:
 		rt.onRateLimited(retryAfter)
-	case KindUnavailable:
+	case KindServerError:
 		rt.onServerError(is5xx)
-	case KindTimeout:
-		// Reaching here means admission already succeeded, so any timeout is
-		// observed after admission — shed load like a transport error.
+	case KindFirstTokenTimeout:
+		// Reaching here means admission already succeeded, so the deadline hit
+		// while the server was holding a slot without producing a token —
+		// shed load like a transport error.
 		rt.onTimeout(true)
-	case KindPermanent:
+	case KindStreamInterrupted:
+		// Tokens were flowing (or the body was being read) and the stream
+		// died: shed load like a server error, then retry in place.
+		rt.onServerError(is5xx)
+	case KindTruncated:
+		// The output budget ran out on a HEALTHY endpoint: record it, keep the
+		// capacity — shedding concurrency cannot make the answer fit the
+		// budget. One in-place retry is still worth it (a retry can produce a
+		// shorter reasoning tail).
+		rt.onClientError()
+	case KindClientError:
 		// A client-side fault (bad key / oversized image / bad request): record
 		// it but do NOT shed load or cool down.
 		rt.onClientError()
@@ -380,12 +393,12 @@ func (m *managerVLM) retryBudget(prio priority) int {
 // file): holding it is the intended backpressure, and it keeps a HIGH retry
 // from re-entering admit's fail-open path.
 func (m *managerVLM) retryInPlace(
-	ctx context.Context, rt *modelRuntime, err error, attempt, budget int,
+	ctx context.Context, rt *modelRuntime, err error, firstTokenSeen bool, attempt, budget int,
 ) bool {
 	if ctx.Err() != nil {
 		return false // the caller's context is gone; nothing to wait for
 	}
-	kind, retryAfter, _ := classifyError(err)
+	kind, retryAfter, _ := classifyError(err, firstTokenSeen)
 	if !isRetryable(kind) || attempt >= budget {
 		return false
 	}
@@ -400,16 +413,23 @@ func (m *managerVLM) retryInPlace(
 	return sleepCtx(ctx, retryWait(retryAfter, attempt))
 }
 
-// isRetryable reports whether an error class is worth retrying in place. A
-// permanent client fault (bad key, oversized image, unsupported request) is
-// not — repeating it only burns budget and bills the provider again. A
-// hard-down (dead endpoint) is not either: a refused connection will not start
-// answering if we simply try again, and once the circuit breaker trips it
-// already fails the other requests fast, so an in-place retry here would just
-// add latency to the one request that arrived before the trip. A caller
-// cancellation is not either — its context is already gone.
+// isRetryable reports whether an error class is worth retrying in place.
+// Throttles, server errors, mid-stream interruptions and budget truncations
+// are transient; a permanent client fault (bad key, oversized image,
+// unsupported request) is not — repeating it only burns budget and bills the
+// provider again. A hard-down (dead endpoint) is not either: a refused
+// connection will not start answering if we simply try again, and once the
+// circuit breaker trips it already fails the other requests fast, so an
+// in-place retry here would just add latency to the one request that arrived
+// before the trip. A first-token timeout means the caller's own deadline is
+// already gone; a caller cancellation likewise.
 func isRetryable(kind ErrorKind) bool {
-	return kind != KindPermanent && kind != KindHardDown && kind != KindCancelled
+	switch kind {
+	case KindRateLimited, KindServerError, KindStreamInterrupted, KindTruncated:
+		return true
+	default:
+		return false
+	}
 }
 
 // retryWait returns how long to wait before the next in-place retry, honouring
