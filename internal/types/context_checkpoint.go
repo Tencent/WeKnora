@@ -22,7 +22,13 @@ type ContextCheckpoint struct {
 	// Degraded marks a raw archive kept because the summarizer failed. The
 	// next compaction folds it in as the previous summary.
 	Degraded bool `json:"degraded,omitempty"`
+	// SourceDeletedCount is captured before history is loaded and checked when
+	// saving. It is write metadata, not part of the persisted summary.
+	SourceDeletedCount int64 `json:"-"`
 }
+
+// ErrStaleContextCheckpoint rejects summaries built from history preceding a deletion.
+var ErrStaleContextCheckpoint = errors.New("conversation history changed while compacting")
 
 // Value implements the driver.Valuer interface for database serialization.
 func (c ContextCheckpoint) Value() (driver.Value, error) {

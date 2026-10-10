@@ -129,6 +129,9 @@ type MessageRepository interface {
 	// session that carries a context checkpoint, projected to the columns
 	// history loading needs, or nil when there is none.
 	GetLatestContextCheckpoint(ctx context.Context, sessionID string) (*types.Message, error)
+	// CountDeletedMessagesBySession snapshots the session's retained deletion
+	// tombstones before loading history, to fence stale compaction writes.
+	CountDeletedMessagesBySession(ctx context.Context, sessionID string) (int64, error)
 	// DeleteMessage deletes a message
 	DeleteMessage(ctx context.Context, sessionID string, id string) error
 	// DeleteMessagesFrom deletes every message at or after the

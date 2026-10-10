@@ -2,7 +2,6 @@ package repository
 
 import (
 	"context"
-	"fmt"
 	"slices"
 	"time"
 
@@ -264,7 +263,7 @@ func (r *messageRepository) UpdateMessage(ctx context.Context, message *types.Me
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Model(&types.Message{}).Where(
 			"id = ? AND session_id = ?", message.ID, message.SessionID,
-		).Updates(message).Error; err != nil {
+		).Omit("context_checkpoint").Updates(message).Error; err != nil {
 			return err
 		}
 		return writeMessageArtifacts(tx, message)
@@ -305,19 +304,15 @@ func (r *messageRepository) DeleteMessagesFrom(
 		if len(deleted) == 0 {
 			return nil
 		}
+		if err := invalidateDependentCheckpoints(tx, deleted[0]); err != nil {
+			return err
+		}
 		return scope().Delete(&types.Message{}).Error
 	})
 	if err != nil {
 		return nil, err
 	}
 	return deleted, nil
-}
-
-// DeleteMessage deletes a message
-func (r *messageRepository) DeleteMessage(ctx context.Context, sessionID string, messageID string) error {
-	return r.db.WithContext(ctx).Where(
-		"id = ? AND session_id = ?", messageID, sessionID,
-	).Delete(&types.Message{}).Error
 }
 
 // GetFirstMessageOfUser retrieves the first message from a user in a session
@@ -513,26 +508,6 @@ func (r *messageRepository) UpdateMessageRenderedContent(ctx context.Context, se
 		Model(&types.Message{}).
 		Where("id = ? AND session_id = ?", messageID, sessionID).
 		Update("rendered_content", renderedContent).Error
-}
-
-// UpdateMessageContextCheckpoint updates only the context_checkpoint column, so
-// it cannot race a full-row write of the same message. A write that matches no
-// row (the turn was deleted, or the ID is not this session's assistant
-// message) is an error rather than a silent success.
-func (r *messageRepository) UpdateMessageContextCheckpoint(
-	ctx context.Context, sessionID, messageID string, checkpoint *types.ContextCheckpoint,
-) error {
-	result := r.db.WithContext(ctx).
-		Model(&types.Message{}).
-		Where("id = ? AND session_id = ? AND role = 'assistant'", messageID, sessionID).
-		Update("context_checkpoint", checkpoint)
-	if result.Error != nil {
-		return result.Error
-	}
-	if result.RowsAffected == 0 {
-		return fmt.Errorf("no assistant message %s in session %s", messageID, sessionID)
-	}
-	return nil
 }
 
 // GetLatestContextCheckpoint returns the newest checkpointed assistant message.

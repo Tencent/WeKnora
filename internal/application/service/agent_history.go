@@ -401,14 +401,20 @@ func turnsAfterCheckpoint(turns []*agentHistoryTurn, checkpoint *types.Message) 
 // messageCheckpointSink persists the engine's compaction checkpoints onto the
 // session's assistant messages, where LoadAgentHistory reads them back.
 type messageCheckpointSink struct {
-	repo      interfaces.MessageRepository
-	sessionID string
+	repo               interfaces.MessageRepository
+	sessionID          string
+	sourceDeletedCount int64
 }
 
 func (s messageCheckpointSink) SaveContextCheckpoint(
 	ctx context.Context, turnMessageID string, checkpoint *types.ContextCheckpoint,
 ) error {
-	return s.repo.UpdateMessageContextCheckpoint(ctx, s.sessionID, turnMessageID, checkpoint)
+	if checkpoint == nil {
+		return nil
+	}
+	pending := *checkpoint
+	pending.SourceDeletedCount = s.sourceDeletedCount
+	return s.repo.UpdateMessageContextCheckpoint(ctx, s.sessionID, turnMessageID, &pending)
 }
 
 // buildTurnBodyMessages replays one turn's assistant work with any mid-run

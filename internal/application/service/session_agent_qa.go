@@ -150,7 +150,18 @@ func (s *sessionService) AgentQA(
 	// canonical assistant message. History is sized by the window, not by a
 	// turn count: compaction and its persisted checkpoints keep it in bounds.
 	var llmContext []chat.Message
+	var checkpointSink types.ContextCheckpointSink
 	if agentConfig.MultiTurnEnabled {
+		// Capture before any history read, not after the model has summarized
+		// it. Failure disables checkpoint writes, while the turn can continue.
+		deletedCount, snapshotErr := s.messageRepo.CountDeletedMessagesBySession(ctx, sessionID)
+		if snapshotErr != nil {
+			logger.Warnf(ctx, "Failed to snapshot history deletions: %v", snapshotErr)
+		} else {
+			checkpointSink = messageCheckpointSink{
+				repo: s.messageRepo, sessionID: sessionID, sourceDeletedCount: deletedCount,
+			}
+		}
 		budget := agent.HistoryTokenBudget(agentConfig)
 		llmContext, agentConfig.ContextTokenScale, err = LoadAgentHistory(
 			ctx, s.messageRepo, sessionID, budget, agentConfig.RetainRetrievalHistory,
@@ -158,6 +169,7 @@ func (s *sessionService) AgentQA(
 		if err != nil {
 			logger.Warnf(ctx, "Failed to load agent history from DB: %v, continuing without history", err)
 			llmContext = []chat.Message{}
+			checkpointSink = nil
 		}
 		logger.Infof(ctx, "Loaded %d history messages from DB (budget=%d tokens, token scale=%.2f)",
 			len(llmContext), budget, agentConfig.ContextTokenScale)
@@ -262,8 +274,8 @@ func (s *sessionService) AgentQA(
 	// A compaction that ends on a stored turn is written back onto it, so the
 	// next turn loads the summary instead of summarizing the same history
 	// again. Without multi-turn there is no stored history to end on.
-	if agentConfig.MultiTurnEnabled {
-		engine.SetContextCheckpointSink(messageCheckpointSink{repo: s.messageRepo, sessionID: sessionID})
+	if checkpointSink != nil {
+		engine.SetContextCheckpointSink(checkpointSink)
 	}
 
 	agentQuery := req.Query
