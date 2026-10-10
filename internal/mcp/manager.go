@@ -75,9 +75,15 @@ func NewMCPManager(oauthRepo interfaces.MCPOAuthRepository) *MCPManager {
 // services share a single connection per service ID.
 func cacheKey(service *types.MCPService, principal types.Principal) string {
 	if service.AuthConfig.IsOAuth() {
-		return service.ID + "\x00" + principal.Normalize().StorageID()
+		return principalCacheKey(service.ID, principal)
 	}
 	return service.ID
+}
+
+// principalCacheKey is the cache key of one principal's connection to an
+// OAuth service.
+func principalCacheKey(serviceID string, principal types.Principal) string {
+	return serviceID + "\x00" + principal.StorageID()
 }
 
 // GetOrCreateClient gets an existing client or creates a new one
@@ -263,6 +269,139 @@ func (m *MCPManager) CloseClient(serviceID string) error {
 		logger.GetLogger(m.ctx).Infof("MCP client closed: %s", key)
 	}
 	return nil
+}
+
+// CloseClientForPrincipal closes the connection one principal holds to an
+// OAuth service and retires that principal's connection attempt if one is
+// still in flight. Connections of other principals stay open, so the requests
+// they have in flight are not canceled. A service without OAuth shares one
+// connection that carries no per-user credential; it is left alone.
+func (m *MCPManager) CloseClientForPrincipal(serviceID string, principal types.Principal) error {
+	if serviceID == "" || !principal.Valid() {
+		return nil
+	}
+	detached := make(map[string]MCPClient)
+	m.clientsMu.Lock()
+	m.detachLocked(principalCacheKey(serviceID, principal), detached)
+	m.clientsMu.Unlock()
+	m.disconnectDetached(serviceID, detached)
+	return nil
+}
+
+// CloseClientsAfterAuthorization recycles the cached connections that a
+// completed OAuth authorization of principal leaves outdated:
+//
+//   - The principal's own connection. The server may have tied its MCP
+//     session, and the tools it advertised, to the account that authorized
+//     it, and the new authorization may be for another account. An SSE event
+//     stream also keeps the credentials it was opened with.
+//   - Connections of the service in the same tenant that were built with an
+//     OAuth client ID other than the registration stored now. The registration
+//     is shared by every principal of the service and may have been replaced,
+//     in this process or in another replica. A connection still holding the
+//     old client ID can fail its next token refresh with invalid_client, and
+//     handling that failure deletes the stored registration, which by then is
+//     the replacement.
+//
+// Other connections stay open: each one reads its principal's token from the
+// store on every request, and closing a connection cancels the requests it has
+// in flight. Only connections cached by this process are examined, and
+// connection attempts of other principals that are still in flight are not.
+// If the stored registration cannot be read, every connection of the service
+// is closed, unless ctx has ended, in which case only the principal's own
+// connection is: a caller that went away must not cancel other principals'
+// requests.
+func (m *MCPManager) CloseClientsAfterAuthorization(
+	ctx context.Context, tenantID uint64, serviceID string, principal types.Principal,
+) error {
+	if serviceID == "" {
+		return nil
+	}
+	if m.oauthRepo == nil {
+		// Without the repository no OAuth connection can be built, so there is
+		// no registration to compare against.
+		return m.CloseClientForPrincipal(serviceID, principal)
+	}
+	registration, err := m.oauthRepo.GetClient(ctx, tenantID, serviceID)
+	if err != nil && ctx.Err() != nil {
+		logger.GetLogger(ctx).Warnf(
+			"Failed to read MCP OAuth client registration service=%s, closing only principal=%s: %v",
+			serviceID, principal.StorageID(), err,
+		)
+		return m.CloseClientForPrincipal(serviceID, principal)
+	}
+	if err != nil {
+		logger.GetLogger(ctx).Warnf(
+			"Failed to read MCP OAuth client registration service=%s, closing all its connections: %v", serviceID, err,
+		)
+		return m.CloseClient(serviceID)
+	}
+	currentClientID := ""
+	if registration != nil {
+		currentClientID = registration.ClientID
+	}
+
+	detached := make(map[string]MCPClient)
+	m.clientsMu.Lock()
+	if principal.Valid() {
+		m.detachLocked(principalCacheKey(serviceID, principal), detached)
+	}
+	for key, client := range m.clients {
+		if !strings.HasPrefix(key, serviceID+"\x00") {
+			continue
+		}
+		connTenantID, clientID, ok := oauthClientRegistrationOf(client)
+		if ok && connTenantID == tenantID && clientID != currentClientID {
+			m.detachLocked(key, detached)
+		}
+	}
+	m.clientsMu.Unlock()
+	m.disconnectDetached(serviceID, detached)
+	return nil
+}
+
+// oauthClientRegistrationOf reports the tenant and OAuth client ID a cached
+// connection was built with; ok is false for a connection without OAuth.
+func oauthClientRegistrationOf(client MCPClient) (tenantID uint64, clientID string, ok bool) {
+	if managed, owned := client.(*managedMCPClient); owned {
+		client = managed.MCPClient
+	}
+	registered, ok := client.(interface {
+		oauthClientRegistration() (uint64, string, bool)
+	})
+	if !ok {
+		return 0, "", false
+	}
+	return registered.oauthClientRegistration()
+}
+
+// detachLocked removes key's connection and in-flight connection attempt from
+// the manager, cancelling the attempt and adding the connection to detached.
+// The caller holds clientsMu and disconnects the detached connections once it
+// has released the lock, since closing a transport may wait on the server.
+func (m *MCPManager) detachLocked(key string, detached map[string]MCPClient) {
+	if pending, ok := m.connecting[key]; ok {
+		pending.cancel()
+		delete(m.connecting, key)
+	}
+	if client, ok := m.clients[key]; ok {
+		detached[key] = client
+		delete(m.clients, key)
+	}
+}
+
+// disconnectDetached disconnects connections of serviceID that detachLocked
+// removed from the manager.
+func (m *MCPManager) disconnectDetached(serviceID string, detached map[string]MCPClient) {
+	for key, client := range detached {
+		principal := strings.TrimPrefix(key, serviceID+"\x00")
+		if err := client.Disconnect(); err != nil {
+			logger.GetLogger(m.ctx).Errorf(
+				"Failed to disconnect MCP client service=%s principal=%s: %v", serviceID, principal, err,
+			)
+		}
+		logger.GetLogger(m.ctx).Infof("MCP client closed: service=%s principal=%s", serviceID, principal)
+	}
 }
 
 // InvalidateToolSchemas drops the header-schema caches of every cached
