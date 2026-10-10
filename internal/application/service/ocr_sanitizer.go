@@ -1,8 +1,10 @@
 package service
 
 import (
+	"fmt"
 	"regexp"
 	"strings"
+	"unicode"
 
 	htmltomd "github.com/JohannesKaufmann/html-to-markdown/v2"
 	"github.com/Tencent/WeKnora/internal/infrastructure/docparser"
@@ -28,6 +30,84 @@ var (
 // sanitizeOCRText cleans up VLM OCR output by stripping HTML wrappers,
 // converting HTML to markdown, and filtering out useless responses.
 func sanitizeOCRText(raw string) string {
+	text, _ := validateOCRText(raw)
+	return text
+}
+
+type ocrValidationError struct{ reason string }
+
+func (e *ocrValidationError) Error() string { return fmt.Sprintf("invalid OCR output: %s", e.reason) }
+
+// validateOCRText distinguishes an explicit no-text answer from unusable model
+// output. Reject the entire response, rather than indexing a plausible prefix
+// followed by hallucinated repetition.
+func validateOCRText(raw string) (string, error) {
+	text := normalizeOCRText(raw)
+	if isKnownEmptyReply(text) {
+		return "", nil
+	}
+	if text == "" {
+		return "", &ocrValidationError{reason: "empty_content"}
+	}
+	readable := false
+	for _, r := range text {
+		if unicode.IsLetter(r) || unicode.IsNumber(r) ||
+			(unicode.IsSymbol(r) && !strings.ContainsRune("|~`", r)) {
+			readable = true
+			break
+		}
+	}
+	if !readable {
+		return "", &ocrValidationError{reason: "no_readable_content"}
+	}
+	if hasOCRRepetition(text) {
+		return "", &ocrValidationError{reason: "repetitive_content"}
+	}
+	return text, nil
+}
+
+// Count the union of long periodic runs, including runs with different periods
+// separated by readable text. Short repetitions (labels, table separators,
+// numeric values) do not contribute. Normalize whitespace so line wrapping
+// cannot hide a decoding loop. Work is bounded by 64*n, with O(n) storage.
+func hasOCRRepetition(text string) bool {
+	runes := []rune(strings.Join(strings.Fields(text), " "))
+	if len(runes) < 512 {
+		return false
+	}
+	// Range deltas avoid counting the same characters multiple times when a
+	// run matches several periods, and keep interval recording constant-time.
+	coverage := make([]int, len(runes)+1)
+	for period := 1; period <= 64 && period <= len(runes)/32; period++ {
+		matched := 0
+		recordRun := func(end int) {
+			span := matched + period
+			if span >= 512 && span >= period*32 {
+				coverage[end-span]++
+				coverage[end]--
+			}
+		}
+		for i := period; i < len(runes); i++ {
+			if runes[i] == runes[i-period] {
+				matched++
+			} else {
+				recordRun(i)
+				matched = 0
+			}
+		}
+		recordRun(len(runes))
+	}
+	active, repeated := 0, 0
+	for i := range runes {
+		active += coverage[i]
+		if active > 0 {
+			repeated++
+		}
+	}
+	return repeated*5 >= len(runes)*4
+}
+
+func normalizeOCRText(raw string) string {
 	text := strings.TrimSpace(raw)
 	if text == "" {
 		return ""
@@ -38,8 +118,15 @@ func sanitizeOCRText(raw string) string {
 	// If stripping HTML tags leaves almost no text, the response is useless
 	// (e.g. "<html><body><div class="image"><img/></div></body></html>").
 	plainText := strings.TrimSpace(htmlTagPattern.ReplaceAllString(text, ""))
-	if len(plainText) < 10 && htmlTagPattern.MatchString(text) {
-		return ""
+	if htmlTagPattern.MatchString(text) {
+		// Preserve no-text answers before a short response is discarded or
+		// inline tags become Markdown emphasis around the sentinel.
+		if isKnownEmptyReply(plainText) {
+			return plainText
+		}
+		if len(plainText) < 10 {
+			return ""
+		}
 	}
 
 	if looksLikeHTML(text) {
@@ -56,10 +143,6 @@ func sanitizeOCRText(raw string) string {
 	// starts with a tag nor is dominated by tag characters), yet leaving the
 	// raw markup in place makes the chunker split inside table rows.
 	text = docparser.NormalizeHTMLTables(text)
-
-	if isKnownEmptyReply(text) {
-		return ""
-	}
 
 	text = multipleNewlines.ReplaceAllString(text, "\n\n")
 	return strings.TrimSpace(text)

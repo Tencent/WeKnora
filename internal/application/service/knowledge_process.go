@@ -98,7 +98,9 @@ func (s *knowledgeService) cloneKnowledge(
 		}
 		srcSvc := s.resolveFileServiceForPath(ctx, srcKB, src.FilePath)
 		dstSvc := s.resolveFileService(ctx, targetKB)
-		newPath, copyErr := copyOwnedObject(ctx, srcSvc, dstSvc, src.FilePath, targetKB.TenantID, dst.ID)
+		newPath, copyErr := copyOwnedObject(
+			ctx, srcSvc, dstSvc, src.FilePath, targetKB.TenantID, dst.ID,
+			s.resourceCatalog, types.ResourceRelationSourceFile)
 		if copyErr != nil {
 			return fmt.Errorf("clone knowledge file copy failed: %w", copyErr)
 		}
@@ -337,6 +339,16 @@ func buildSplitterConfigFromChunking(cc types.ChunkingConfig) chunker.SplitterCo
 // ContextHeader breadcrumbs regardless of the configured strategy.
 func buildParentChildConfigs(cc types.ChunkingConfig, base chunker.SplitterConfig) (parent, child chunker.SplitterConfig) {
 	return chunker.DeriveParentChildConfigs(base, cc.ParentChunkSize, cc.ChildChunkSize)
+}
+
+// deleteUnindexedChunks drops the chunks processChunks wrote for a knowledge
+// that failed before BatchIndex ran. Nothing reached the vector store yet, so
+// only the chunk rows need removing; left alone they would stay active under a
+// failed knowledge, the same leftovers the BatchIndex failure path cleans up.
+func (s *knowledgeService) deleteUnindexedChunks(ctx context.Context, knowledge *types.Knowledge) {
+	if err := s.chunkRepo.DeleteChunksByKnowledgeID(ctx, knowledge.TenantID, knowledge.ID); err != nil {
+		logger.Errorf(ctx, "Delete chunks failed: %v", err)
+	}
 }
 
 // processChunks processes chunks and creates embeddings for knowledge content
@@ -693,6 +705,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 				knowledge.ErrorMessage = err.Error()
 				knowledge.UpdatedAt = time.Now()
 				s.repo.UpdateKnowledge(ctx, knowledge)
+				s.deleteUnindexedChunks(ctx, knowledge)
 				return nil
 			}
 			// Check if there's enough storage quota available
@@ -701,6 +714,7 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 				knowledge.ErrorMessage = "存储空间不足"
 				knowledge.UpdatedAt = time.Now()
 				s.repo.UpdateKnowledge(ctx, knowledge)
+				s.deleteUnindexedChunks(ctx, knowledge)
 				return nil
 			}
 		}
@@ -3246,6 +3260,11 @@ func (s *knowledgeService) updateChunkVector(ctx context.Context, kbID string, c
 			logger.Warnf(ctx, "Knowledge base ID mismatch: %s != %s", chunk.KnowledgeBaseID, kbID)
 			continue
 		}
+		// Its index row holds the image's own vector, which re-embedding
+		// Content here would replace with a text vector of the caption.
+		if chunk.ChunkType == types.ChunkTypeImageVector {
+			continue
+		}
 		ids = append(ids, chunk.ID)
 		if !chunk.IsEnabled || chunk.ChunkType == types.ChunkTypeParentText {
 			continue
@@ -3396,6 +3415,15 @@ func (s *knowledgeService) UpdateImageInfo(
 			// Update OCR if it has changed
 			if image.OCRText != cImageInfo[0].OCRText {
 				child.Content = image.OCRText
+				child.ImageInfo = imageInfo
+				updateChunk = append(updateChunk, chunkChildren[i])
+			}
+		case types.ChunkTypeImageVector:
+			// The image's vector does not change with its caption, only the
+			// text shown and reranked for it; updateChunkVector leaves the
+			// vector alone.
+			if image.Caption != "" && image.Caption != child.Content {
+				child.Content = image.Caption
 				child.ImageInfo = imageInfo
 				updateChunk = append(updateChunk, chunkChildren[i])
 			}
@@ -4415,20 +4443,21 @@ func (s *knowledgeService) enqueueImageMultimodalTasks(
 		}
 
 		payload := types.ImageMultimodalPayload{
-			TenantID:          knowledge.TenantID,
-			KnowledgeID:       knowledge.ID,
-			KnowledgeBaseID:   kb.ID,
-			ChunkID:           chunkID,
-			ImageURL:          img.ServingURL,
-			EnableOCR:         true,
-			EnableCaption:     true,
-			ImageAttrsEnabled: eff.ImageAttrsEnabled,
-			ImageActions:      eff.ImageActions,
-			Language:          lang,
-			ImageSourceType:   metadata["image_source_type"],
-			Attempt:           attempt,
-			ImageIndex:        idx,
-			SourceLocators:    img.SourceLocators,
+			TenantID:           knowledge.TenantID,
+			KnowledgeID:        knowledge.ID,
+			KnowledgeBaseID:    kb.ID,
+			ChunkID:            chunkID,
+			ImageURL:           img.ServingURL,
+			EnableOCR:          true,
+			EnableCaption:      true,
+			ImageAttrsEnabled:  eff.ImageAttrsEnabled,
+			ImageVectorEnabled: &eff.ImageVectorEnabled,
+			ImageActions:       eff.ImageActions,
+			Language:           lang,
+			ImageSourceType:    metadata["image_source_type"],
+			Attempt:            attempt,
+			ImageIndex:         idx,
+			SourceLocators:     img.SourceLocators,
 		}
 
 		langfuse.InjectTracing(ctx, &payload)

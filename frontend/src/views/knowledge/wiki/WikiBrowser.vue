@@ -797,6 +797,7 @@ import { useMenuStore } from '@/stores/menu'
 import { useSettingsStore } from '@/stores/settings'
 import { useI18n } from 'vue-i18n'
 import { marked } from 'marked'
+import { ensureLiteralSingleTildeOnGlobalMarked } from '@/utils/markedLiteralTilde'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { RecycleScroller } from 'vue-virtual-scroller'
 import { hydrateProtectedFileImages, sanitizeMarkdownHTML } from '@/utils/security'
@@ -808,6 +809,7 @@ import {
   expandedWikiDirectoryPaths,
   expandWikiDirectoryPath,
 } from './wikiDirectoryState'
+import { resolveWikiBacklinkTitle } from './wikiBacklinkTitles'
 import { getKnowledgeDetails } from '@/api/knowledge-base'
 import { createSessions } from '@/api/chat'
 import ChatView from '@/views/chat/index.vue'
@@ -841,6 +843,8 @@ const router = useRouter()
 const route = useRoute()
 const menuStore = useMenuStore()
 const settingsStore = useSettingsStore()
+
+ensureLiteralSingleTildeOnGlobalMarked()
 
 const { t } = useI18n()
 
@@ -2944,7 +2948,8 @@ async function savePageEdit(versionOverride?: number) {
       version: versionOverride ?? editBaseVersion.value,
     })
     const updated = ((res as any).data || res) as WikiPage
-    selectedPage.value = updated
+    // Updates omit the display-only titles; retain the current detail map.
+    selectedPage.value = { ...selectedPage.value, ...updated }
     editingPage.value = false
     editConflictVersion.value = null
     updateSidebarPageTitle(slug, updated.title)
@@ -3696,12 +3701,7 @@ function formatDate(dateStr: string) {
 
 // Convert slug like "entity/acme-corp" to a readable label "acme-corp"
 function slugDisplayName(slug: string): string {
-  // Find the page title if loaded
-  const page = pages.value.find(p => p.slug === slug)
-  if (page) return page.title
-  // Fallback: strip type prefix, replace hyphens
-  const parts = slug.split('/')
-  return parts.length > 1 ? parts.slice(1).join('/') : slug
+  return resolveWikiBacklinkTitle(slug, selectedPage.value?.in_link_titles ?? {}, pages.value)
 }
 
 // ─── Graph Rendering (interactive SVG force-directed graph) ───

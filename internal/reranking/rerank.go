@@ -70,6 +70,17 @@ type Options struct {
 	// the cap are ordered by their pre-boost score. Compare absolute
 	// thresholds against PreBoostScore.
 	FAQScoreBoost float64
+	// LoadImage reads the image an image_vector hit shows. With it, a model
+	// that reads images scores those hits by their image; without it they
+	// are scored by their text like any other row.
+	LoadImage func(ctx context.Context, r *types.SearchResult) ([]byte, error)
+	// ImageKeepScore, when positive, keeps a pictorial image_vector hit a
+	// text reranker rejected if its VectorScore reaches this, at most
+	// maxKeptImages of them, after the ranked results and marked with
+	// types.MetadataKeptBy. A text reranker cannot judge what a caption leaves
+	// out; the vector can. Callers pass the text vector threshold or more.
+	// Kept results ride outside TopK; see types.MetadataKeptBy.
+	ImageKeepScore float64
 }
 
 // Result is the outcome of a rerank run.
@@ -111,6 +122,9 @@ func Rerank(
 		},
 	}
 
+	var scoredAsImage map[int]bool
+	defer func() { recordSelection(ctx, results, res, opts, scoredAsImage) }()
+
 	keep := topByScore(results, opts.MaxCandidates)
 	candidateIdx := make([]int, 0, len(results))
 	for i, r := range results {
@@ -132,7 +146,9 @@ func Rerank(
 	}
 	fitPassages(ctx, res.Passages, rerank.MaxPassageRunes(model, query))
 
-	scores, err := model.Rerank(ctx, query, res.Passages)
+	imagePositions, images := imageCandidates(ctx, model, res.Candidates, opts)
+	scores, scoredAsImage, err := scoreCandidates(ctx, model, query, res.Passages, imagePositions, images)
+	res.Diagnostics.ImagesScored = len(scoredAsImage)
 	if err != nil {
 		logger.Warnf(ctx, "[Rerank] Model call failed, keeping retrieval order: %v", err)
 		res.Diagnostics.Outcome = types.RerankOutcomeModelError
@@ -200,6 +216,13 @@ func Rerank(
 	for _, p := range picks {
 		res.Results = append(res.Results, res.Scored[p])
 		res.Indices = append(res.Indices, sortedIdx[p])
+	}
+	for _, k := range keptImages(ctx, res.Candidates, valid, passing, scoredAsImage, opts) {
+		kept := scoredCopy(res.Candidates[k.Index], k.RelevanceScore, opts.FAQScoreBoost)
+		kept.Metadata[types.MetadataKeptBy] = types.KeptByImageVector
+		res.Results = append(res.Results, kept)
+		res.Indices = append(res.Indices, candidateIdx[k.Index])
+		res.Diagnostics.ImagesKept++
 	}
 	res.Diagnostics.ResultCount = len(res.Results)
 

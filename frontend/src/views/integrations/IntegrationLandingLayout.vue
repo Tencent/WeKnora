@@ -1,15 +1,15 @@
 <template>
   <div class="integration-landing" :class="{ 'integration-landing--claw': variant === 'claw' }">
-    <header class="landing-hero" :class="{ 'landing-hero--claw': variant === 'claw' }">
+    <header class="landing-hero">
       <div class="landing-hero__content">
         <h2 class="landing-hero__title">{{ title }}</h2>
         <p v-if="subtitle" class="landing-hero__subtitle">{{ subtitle }}</p>
         <div v-if="$slots.tags" class="landing-hero__tags">
           <slot name="tags" />
         </div>
-        <div v-if="$slots.actions" class="landing-hero__actions">
-          <slot name="actions" />
-        </div>
+      </div>
+      <div v-if="$slots.actions" class="landing-hero__actions">
+        <slot name="actions" />
       </div>
     </header>
 

@@ -27,6 +27,8 @@ export interface WikiPage {
   sort_order?: number;
   source_refs: string[];
   in_links: string[];
+  // Present on page detail responses; list and mutation responses omit it.
+  in_link_titles?: Record<string, string>;
   out_links: string[];
   page_metadata: Record<string, any>;
   version: number;

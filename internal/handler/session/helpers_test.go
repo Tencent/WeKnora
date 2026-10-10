@@ -62,23 +62,29 @@ func TestValidateUnscopedTagIDs(t *testing.T) {
 // survive.
 func TestSearchResultFromMap_RoundTrip(t *testing.T) {
 	original := &types.SearchResult{
-		ID:                   "chunk-1",
-		Content:              "first part\nsecond part",
-		KnowledgeID:          "knowledge-1",
-		ChunkIndex:           3,
-		KnowledgeTitle:       "title",
-		StartAt:              10,
-		EndAt:                20,
-		Seq:                  2,
-		Score:                4.5,
-		ChunkType:            "text",
-		ParentChunkID:        "parent-1",
-		ImageInfo:            `[{"url":"cdn.example.com"}]`,
-		KnowledgeFilename:    "doc.txt",
-		KnowledgeSource:      "upload",
-		KnowledgeDescription: "desc",
-		KnowledgeBaseID:      "kb-1",
-		Metadata:             map[string]string{"page": "3"},
+		ID:                      "chunk-1",
+		Content:                 "first part\nsecond part",
+		KnowledgeID:             "knowledge-1",
+		ChunkIndex:              3,
+		KnowledgeTitle:          "title",
+		StartAt:                 10,
+		EndAt:                   20,
+		Seq:                     2,
+		Score:                   4.5,
+		ChunkType:               "text",
+		ParentChunkID:           "parent-1",
+		ImageInfo:               `[{"url":"cdn.example.com"}]`,
+		KnowledgeFilename:       "doc.txt",
+		KnowledgeSource:         "upload",
+		KnowledgeChannel:        "api",
+		KnowledgeDescription:    "desc",
+		KnowledgeCustomMetadata: "course_url: https://example.com/course\nlesson_url: https://example.com/lesson",
+		MatchedContent:          "matched question",
+		KnowledgeBaseID:         "kb-1",
+		Metadata:                map[string]string{"page": "3"},
+		MatchedImages: []types.MatchedImage{
+			{ChunkID: "image-1", KnowledgeBaseID: "kb-1", URL: "resource://image"},
+		},
 		SourceLocators: types.SourceLocators{
 			{Type: types.SourceLocatorPDF, Page: 4, BBox: []float64{0.1, 0.2, 0.9, 0.3}, Quote: "q"},
 		},
@@ -103,9 +109,13 @@ func TestSearchResultFromMap_RoundTrip(t *testing.T) {
 	assert.Equal(t, original.ChunkType, got.ChunkType)
 	assert.Equal(t, original.ParentChunkID, got.ParentChunkID)
 	assert.Equal(t, original.ImageInfo, got.ImageInfo)
+	assert.Equal(t, original.MatchedImages, got.MatchedImages)
 	assert.Equal(t, original.KnowledgeFilename, got.KnowledgeFilename)
 	assert.Equal(t, original.KnowledgeSource, got.KnowledgeSource)
 	assert.Equal(t, original.KnowledgeDescription, got.KnowledgeDescription)
+	assert.Equal(t, original.KnowledgeChannel, got.KnowledgeChannel)
+	assert.Equal(t, original.KnowledgeCustomMetadata, got.KnowledgeCustomMetadata)
+	assert.Equal(t, original.MatchedContent, got.MatchedContent)
 	assert.Equal(t, original.KnowledgeBaseID, got.KnowledgeBaseID)
 	assert.Equal(t, original.Metadata, got.Metadata)
 	assert.Equal(t, original.SourceLocators, got.SourceLocators)

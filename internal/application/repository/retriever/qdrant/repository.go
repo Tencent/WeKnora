@@ -122,8 +122,10 @@ func isMissingCollectionErr(err error) bool {
 // following write (ensureCollection) will recreate the collection instead of
 // skipping create and failing the upsert.
 func (q *qdrantRepository) deletePoints(ctx context.Context, dimension int, collectionName string, points *qdrant.PointsSelector) error {
+	wait := true
 	_, err := q.client.Delete(ctx, &qdrant.DeletePoints{
 		CollectionName: collectionName,
+		Wait:           &wait,
 		Points:         points,
 	})
 	if err == nil {
@@ -278,8 +280,10 @@ func (q *qdrantRepository) Save(ctx context.Context,
 		Payload: createPayload(embeddingDB),
 	}
 
+	wait := true
 	_, err := q.client.Upsert(ctx, &qdrant.UpsertPoints{
 		CollectionName: collectionName,
+		Wait:           &wait,
 		Points:         []*qdrant.PointStruct{point},
 	})
 	if err != nil {
@@ -345,8 +349,10 @@ func (q *qdrantRepository) BatchSave(ctx context.Context,
 			}
 			batch := points[i:end]
 
+			wait := true
 			_, err := q.client.Upsert(ctx, &qdrant.UpsertPoints{
 				CollectionName: collectionName,
+				Wait:           &wait,
 				Points:         batch,
 			})
 			if err != nil {
@@ -512,8 +518,10 @@ func (q *qdrantRepository) BatchUpdateChunkEnabledStatus(ctx context.Context, ch
 			if err := ctx.Err(); err != nil {
 				return errors.Join(updateErr, err)
 			}
+			wait := true
 			_, err := q.client.SetPayload(ctx, &qdrant.SetPayloadPoints{
 				CollectionName: collectionName,
+				Wait:           &wait,
 				Payload:        newQdrantValueMap(map[string]any{fieldIsEnabled: true}),
 				PointsSelector: qdrant.NewPointsSelectorFilter(&qdrant.Filter{
 					Must: []*qdrant.Condition{
@@ -532,8 +540,10 @@ func (q *qdrantRepository) BatchUpdateChunkEnabledStatus(ctx context.Context, ch
 			if err := ctx.Err(); err != nil {
 				return errors.Join(updateErr, err)
 			}
+			wait := true
 			_, err := q.client.SetPayload(ctx, &qdrant.SetPayloadPoints{
 				CollectionName: collectionName,
+				Wait:           &wait,
 				Payload:        newQdrantValueMap(map[string]any{fieldIsEnabled: false}),
 				PointsSelector: qdrant.NewPointsSelectorFilter(&qdrant.Filter{
 					Must: []*qdrant.Condition{
@@ -597,8 +607,10 @@ func (q *qdrantRepository) BatchUpdateChunkTagID(ctx context.Context, chunkTagMa
 			if err := ctx.Err(); err != nil {
 				return errors.Join(updateErr, err)
 			}
+			wait := true
 			_, err := q.client.SetPayload(ctx, &qdrant.SetPayloadPoints{
 				CollectionName: collectionName,
+				Wait:           &wait,
 				Payload:        newQdrantValueMap(map[string]any{fieldTagID: tagID}),
 				PointsSelector: qdrant.NewPointsSelectorFilter(&qdrant.Filter{
 					Must: []*qdrant.Condition{
@@ -938,9 +950,10 @@ func (q *qdrantRepository) CopyIndices(ctx context.Context,
 	batchSize := uint32(64)
 	var offset *qdrant.PointId = nil
 	totalCopied := 0
+	seenCursors := make(map[string]struct{})
 
 	for {
-		scrollResult, err := q.client.Scroll(ctx, &qdrant.ScrollPoints{
+		scrollResult, nextOffset, err := q.client.ScrollAndOffset(ctx, &qdrant.ScrollPoints{
 			CollectionName: collectionName,
 			Filter: &qdrant.Filter{
 				Must: []*qdrant.Condition{
@@ -960,6 +973,19 @@ func (q *qdrantRepository) CopyIndices(ctx context.Context,
 		pointsCount := len(scrollResult)
 		if pointsCount == 0 {
 			break
+		}
+
+		// The cursor for the next request is the one the server hands back.
+		// Qdrant's offset is inclusive, so deriving it from the last point of
+		// the page makes the next page start at that point again and copy it
+		// into the target a second time. A cursor that comes back a second time
+		// means the walk can never finish, which is a failure, not an end.
+		if nextOffset != nil {
+			cursor := nextOffset.String()
+			if _, repeated := seenCursors[cursor]; repeated {
+				return fmt.Errorf("qdrant: copy indices made no progress at cursor %s", nextOffset)
+			}
+			seenCursors[cursor] = struct{}{}
 		}
 
 		log.Infof("[Qdrant] Found %d source points in batch", pointsCount)
@@ -1037,8 +1063,10 @@ func (q *qdrantRepository) CopyIndices(ctx context.Context,
 		}
 
 		if len(targetPoints) > 0 {
+			wait := true
 			_, err := q.client.Upsert(ctx, &qdrant.UpsertPoints{
 				CollectionName: collectionName,
+				Wait:           &wait,
 				Points:         targetPoints,
 			})
 			if err != nil {
@@ -1051,13 +1079,10 @@ func (q *qdrantRepository) CopyIndices(ctx context.Context,
 				len(targetPoints), totalCopied)
 		}
 
-		if pointsCount > 0 {
-			offset = scrollResult[pointsCount-1].Id
-		}
-
-		if pointsCount < int(batchSize) {
+		if nextOffset == nil {
 			break
 		}
+		offset = nextOffset
 	}
 
 	log.Infof("[Qdrant] Index copy completed, total copied: %d", totalCopied)
