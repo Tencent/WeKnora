@@ -26,6 +26,7 @@ type MCPServiceHandler struct {
 	mcpToolApprovalService interfaces.MCPToolApprovalService
 	toolApprovalGate       *approval.Gate
 	modelService           interfaces.ModelService
+	categories             interfaces.ToolboxCategoryService
 	// agents resolves a shared agent so the @MCP picker can list the services
 	// that agent can actually reach, which live in ITS OWNER's workspace.
 	agents access.SharedAgentLookup
@@ -38,6 +39,7 @@ func NewMCPServiceHandler(
 	toolApprovalGate *approval.Gate,
 	modelService interfaces.ModelService,
 	agents access.SharedAgentLookup,
+	categories interfaces.ToolboxCategoryService,
 ) *MCPServiceHandler {
 	return &MCPServiceHandler{
 		mcpServiceService:      mcpServiceService,
@@ -45,6 +47,7 @@ func NewMCPServiceHandler(
 		toolApprovalGate:       toolApprovalGate,
 		modelService:           modelService,
 		agents:                 agents,
+		categories:             categories,
 	}
 }
 
@@ -52,18 +55,39 @@ func (h *MCPServiceHandler) mcpServiceResponses(
 	ctx context.Context,
 	tenantID uint64,
 	services []*types.MCPService,
-) []*dto.MCPServiceResponse {
+) ([]*dto.MCPServiceResponse, error) {
 	resp := dto.NewMCPServiceResponses(ctx, services)
 	if len(services) == 0 {
-		return resp
+		return resp, nil
 	}
 	summaries, err := h.mcpServiceService.ListMCPMetadataSummaries(ctx, tenantID, services)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{"tenant_id": tenantID})
-		return resp
+	} else {
+		dto.AttachMCPCatalogs(resp, services, summaries)
 	}
-	dto.AttachMCPCatalogs(resp, services, summaries)
-	return resp
+	// Attach tags independently of the existing best-effort metadata lookup.
+	if h.categories != nil {
+		ids := make([]string, 0, len(services))
+		for _, service := range services {
+			if service != nil {
+				ids = append(ids, service.ID)
+			}
+		}
+		byResource, err := h.categories.ListByResourceIDs(
+			ctx, tenantID, types.ToolboxResourceMCPService, ids,
+		)
+		if err != nil {
+			return nil, err
+		}
+		for i, service := range services {
+			if service != nil {
+				categories := byResource[service.ID]
+				resp[i].Categories = &categories
+			}
+		}
+	}
+	return resp, nil
 }
 
 // CreateMCPService godoc
@@ -169,9 +193,15 @@ func (h *MCPServiceHandler) ListMCPServices(c *gin.Context) {
 		return
 	}
 
+	response, err := h.mcpServiceResponses(ctx, tenantID, services)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{"tenant_id": tenantID})
+		_ = c.Error(errors.NewInternalServerError("Failed to load MCP service details: " + err.Error()))
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data":    h.mcpServiceResponses(ctx, tenantID, services),
+		"data":    response,
 	})
 }
 
@@ -250,9 +280,14 @@ func (h *MCPServiceHandler) GetMCPService(c *gin.Context) {
 	// dto.NewMCPServiceResponse omits secret fields and additionally strips
 	// transport details (URL/Headers/EnvVars/StdioConfig) for builtin services
 	// so the cross-tenant builtin list does not leak per-tenant config.
+	response, err := h.mcpServiceResponses(ctx, tenantID, []*types.MCPService{service})
+	if err != nil {
+		_ = c.Error(errors.NewInternalServerError("Failed to load MCP service details: " + err.Error()))
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data":    h.mcpServiceResponses(ctx, tenantID, []*types.MCPService{service})[0],
+		"data":    response[0],
 	})
 }
 
@@ -461,9 +496,14 @@ func (h *MCPServiceHandler) UpdateMCPService(c *gin.Context) {
 		c.Error(errors.NewInternalServerError("Failed to fetch updated MCP service: " + err.Error()))
 		return
 	}
+	response, err := h.mcpServiceResponses(ctx, tenantID, []*types.MCPService{stored})
+	if err != nil {
+		_ = c.Error(errors.NewInternalServerError("Failed to load MCP service details: " + err.Error()))
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data":    h.mcpServiceResponses(ctx, tenantID, []*types.MCPService{stored})[0],
+		"data":    response[0],
 	})
 }
 

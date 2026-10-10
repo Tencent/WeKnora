@@ -71,7 +71,7 @@ func TestListSkillsReadsASharedAgentsOwnWorkspace(t *testing.T) {
 		{Name: "xlsx", Description: "spreadsheets"},
 	}}
 	agents := &scopedAgentStub{agent: sharedSkillAgent("all")}
-	router := newPickerSkillRouter(NewSkillHandler(lister, nil, agents))
+	router := newPickerSkillRouter(NewSkillHandler(lister, nil, agents, nil))
 
 	code, body := getSkills(t, router, "?agent_id=agent-1&agent_source_tenant_id=84")
 
@@ -91,7 +91,7 @@ func TestListSkillsReadsASharedAgentsOwnWorkspace(t *testing.T) {
 func TestListSkillsIgnoresTheQueryConfigForASharedAgent(t *testing.T) {
 	lister := &fakeUsableSkillLister{skills: []*types.TenantSkillEntity{{Name: "ppt-generator"}}}
 	agents := &scopedAgentStub{agent: sharedSkillAgent("all")}
-	router := newPickerSkillRouter(NewSkillHandler(lister, nil, agents))
+	router := newPickerSkillRouter(NewSkillHandler(lister, nil, agents, nil))
 
 	code, _ := getSkills(t, router,
 		"?agent_id=agent-1&agent_source_tenant_id=84&sandbox_config_id=cfg-somebody-elses")
@@ -105,7 +105,7 @@ func TestListSkillsNarrowsToASharedAgentsSelection(t *testing.T) {
 		{Name: "ppt-generator"}, {Name: "xlsx"}, {Name: "internal-only"},
 	}}
 	agents := &scopedAgentStub{agent: sharedSkillAgent("selected", "xlsx")}
-	router := newPickerSkillRouter(NewSkillHandler(lister, nil, agents))
+	router := newPickerSkillRouter(NewSkillHandler(lister, nil, agents, nil))
 
 	code, body := getSkills(t, router, "?agent_id=agent-1&agent_source_tenant_id=84")
 
@@ -121,7 +121,7 @@ func TestListSkillsStaysEmptyWhenASharedAgentDisabledSkills(t *testing.T) {
 	for _, mode := range []string{"", "none", "nonsense"} {
 		lister := &fakeUsableSkillLister{skills: []*types.TenantSkillEntity{{Name: "ppt-generator"}}}
 		agents := &scopedAgentStub{agent: sharedSkillAgent(mode)}
-		router := newPickerSkillRouter(NewSkillHandler(lister, nil, agents))
+		router := newPickerSkillRouter(NewSkillHandler(lister, nil, agents, nil))
 
 		code, body := getSkills(t, router, "?agent_id=agent-1&agent_source_tenant_id=84")
 
@@ -137,7 +137,7 @@ func TestListSkillsStaysEmptyWhenASharedAgentDisabledSkills(t *testing.T) {
 func TestListSkillsKeepsTheOwnWorkspacePathUnchanged(t *testing.T) {
 	lister := &fakeUsableSkillLister{skills: []*types.TenantSkillEntity{{Name: "ppt-generator"}}}
 	agents := &scopedAgentStub{agent: sharedSkillAgent("all")}
-	router := newPickerSkillRouter(NewSkillHandler(lister, nil, agents))
+	router := newPickerSkillRouter(NewSkillHandler(lister, nil, agents, nil))
 
 	code, body := getSkills(t, router, "?agent_id=agent-1&sandbox_config_id=cfg-mine")
 
@@ -151,7 +151,7 @@ func TestListSkillsKeepsTheOwnWorkspacePathUnchanged(t *testing.T) {
 func TestListSkillsRefusesAnUnreachableShare(t *testing.T) {
 	lister := &fakeUsableSkillLister{skills: []*types.TenantSkillEntity{{Name: "ppt-generator"}}}
 	agents := &scopedAgentStub{agent: nil}
-	router := newPickerSkillRouter(NewSkillHandler(lister, nil, agents))
+	router := newPickerSkillRouter(NewSkillHandler(lister, nil, agents, nil))
 
 	code, _ := getSkills(t, router, "?agent_id=agent-1&agent_source_tenant_id=84")
 
@@ -244,7 +244,7 @@ func TestListMCPServicesServesASharedAgentsPresetFromItsOwnWorkspace(t *testing.
 		lenderService("svc-b", "Lender B"),
 	}}
 	agents := &scopedAgentStub{agent: sharedMCPAgent("selected", "svc-b")}
-	router := newPickerMCPRouter(NewMCPServiceHandler(mcp, nil, nil, nil, agents))
+	router := newPickerMCPRouter(NewMCPServiceHandler(mcp, nil, nil, nil, agents, nil))
 
 	code, data, raw := getMCP(t, router, "?agent_id=agent-1&agent_source_tenant_id=84")
 
@@ -275,7 +275,7 @@ func TestListMCPServicesOffersNothingOutsideASharedAgentsPreset(t *testing.T) {
 	for _, mode := range []string{"all", "none", ""} {
 		mcp := &pickerMCPStub{services: []*types.MCPService{lenderService("svc-a", "Lender A")}}
 		agents := &scopedAgentStub{agent: sharedMCPAgent(mode, "svc-a")}
-		router := newPickerMCPRouter(NewMCPServiceHandler(mcp, nil, nil, nil, agents))
+		router := newPickerMCPRouter(NewMCPServiceHandler(mcp, nil, nil, nil, agents, nil))
 
 		code, data, _ := getMCP(t, router, "?agent_id=agent-1&agent_source_tenant_id=84")
 
@@ -290,7 +290,7 @@ func TestListMCPServicesSkipsADisabledSharedService(t *testing.T) {
 	disabled.Enabled = false
 	mcp := &pickerMCPStub{services: []*types.MCPService{disabled}}
 	agents := &scopedAgentStub{agent: sharedMCPAgent("selected", "svc-a")}
-	router := newPickerMCPRouter(NewMCPServiceHandler(mcp, nil, nil, nil, agents))
+	router := newPickerMCPRouter(NewMCPServiceHandler(mcp, nil, nil, nil, agents, nil))
 
 	code, data, _ := getMCP(t, router, "?agent_id=agent-1&agent_source_tenant_id=84")
 
@@ -303,7 +303,7 @@ func TestListMCPServicesKeepsTheOwnWorkspacePathUnchanged(t *testing.T) {
 	own.TenantID = testSkillTenantID
 	mcp := &pickerMCPStub{services: []*types.MCPService{own}}
 	agents := &scopedAgentStub{agent: sharedMCPAgent("selected", "svc-b")}
-	router := newPickerMCPRouter(NewMCPServiceHandler(mcp, nil, nil, nil, agents))
+	router := newPickerMCPRouter(NewMCPServiceHandler(mcp, nil, nil, nil, agents, nil))
 
 	code, data, _ := getMCP(t, router, "?agent_id=agent-1")
 
@@ -323,7 +323,7 @@ func TestListMCPServicesKeepsTheOwnWorkspacePathUnchanged(t *testing.T) {
 func TestListMCPServicesNeverRevealsOwnerConfigToAnAdminBorrower(t *testing.T) {
 	mcp := &pickerMCPStub{services: []*types.MCPService{lenderService("svc-a", "Lender A")}}
 	agents := &scopedAgentStub{agent: sharedMCPAgent("selected", "svc-a")}
-	h := NewMCPServiceHandler(mcp, nil, nil, nil, agents)
+	h := NewMCPServiceHandler(mcp, nil, nil, nil, agents, nil)
 
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
@@ -350,7 +350,7 @@ func TestListMCPServicesNeverRevealsOwnerConfigToAnAdminBorrower(t *testing.T) {
 func TestListMCPServicesRefusesAnUnreachableShare(t *testing.T) {
 	mcp := &pickerMCPStub{services: []*types.MCPService{lenderService("svc-a", "Lender A")}}
 	agents := &scopedAgentStub{agent: nil}
-	router := newPickerMCPRouter(NewMCPServiceHandler(mcp, nil, nil, nil, agents))
+	router := newPickerMCPRouter(NewMCPServiceHandler(mcp, nil, nil, nil, agents, nil))
 
 	code, _, _ := getMCP(t, router, "?agent_id=agent-1&agent_source_tenant_id=84")
 

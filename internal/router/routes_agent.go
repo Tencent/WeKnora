@@ -93,6 +93,29 @@ func RegisterSkillRoutes(r *gin.RouterGroup, skillHandler *handler.SkillHandler,
 	}
 }
 
+// RegisterToolboxCategoryRoutes registers the workspace business domains used
+// to organize Skills and MCP services. Reads are visible to every workspace
+// member; mutations follow the Admin floor of both resource settings pages.
+func RegisterToolboxCategoryRoutes(
+	r *gin.RouterGroup, h *handler.ToolboxCategoryHandler, g *rbacGuards,
+) {
+	categories := g.apiKeyGroup(r.Group("/toolbox-categories"), apiKeyFullAccess())
+	{
+		categories.GET("", g.Viewer(), h.List)
+		categories.POST("", g.Admin(), h.Create)
+		categories.PUT("/:id", g.Admin(), h.Update)
+		categories.DELETE("/:id", g.Admin(), h.Delete)
+	}
+	g.apiKeyRoute(
+		r, http.MethodPut, "/skills/catalog/:id/categories",
+		apiKeyFullAccess(), g.Admin(), h.ReplaceSkillCategories,
+	)
+	g.apiKeyRoute(
+		r, http.MethodPut, "/mcp-services/:id/categories",
+		apiKeyManageMCPServices(apiKeyFullAccess()), g.Admin(), h.ReplaceMCPServiceCategories,
+	)
+}
+
 // RegisterOrganizationRoutes registers organization and sharing routes
 func RegisterOrganizationRoutes(r *gin.RouterGroup, orgHandler *handler.OrganizationHandler, g *rbacGuards) {
 	// Organization routes

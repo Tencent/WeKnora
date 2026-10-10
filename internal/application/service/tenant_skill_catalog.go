@@ -61,6 +61,7 @@ type SkillCatalogView struct {
 	CreatedAt     time.Time                 `json:"created_at"`
 	UpdatedAt     time.Time                 `json:"updated_at"`
 	Installations []SkillCatalogInstallView `json:"installations"`
+	Categories    []types.ToolboxCategory   `json:"categories"`
 }
 
 // ListCatalog returns every workspace skill definition and which sandbox

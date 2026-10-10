@@ -5,7 +5,8 @@
     class="mcp-drawer"
     icon="tools"
     :confirm-loading="submitting"
-    :confirm-disabled="metadataBusy || generatingUsage || (step === 1 && !toolsSynced)"
+    :cancel-disabled="submitting || creatingCategory"
+    :confirm-disabled="creatingCategory || metadataBusy || generatingUsage || (step === 1 && !toolsSynced)"
     :confirm-text="t(step === 0 ? 'mcpMetadata.saveNext' : 'common.save')"
     width="680px"
     :min-width="560"
@@ -85,6 +86,12 @@
         <div class="form-item">
           <label class="form-label required">{{ t('mcpServiceDialog.name') }}</label>
           <t-input v-model="formData.name" :placeholder="t('mcpServiceDialog.namePlaceholder')" />
+        </div>
+
+        <div class="form-item">
+          <label class="form-label">{{ t('toolboxCategories.label') }}</label>
+          <ToolboxCategoryPicker v-if="visible" v-model="selectedCategoryIds" :categories="categories"
+            :disabled="submitting" @busy="creatingCategory = $event" @created="emit('categoryCreated', $event)" />
         </div>
 
         <div class="form-item">
@@ -375,6 +382,8 @@ import {
   type MCPOAuthTokenState,
 } from '@/api/mcp-service'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
+import ToolboxCategoryPicker from '@/components/toolbox/ToolboxCategoryPicker.vue'
+import { replaceMCPServiceCategories, type ToolboxCategory } from '@/api/toolbox-category'
 import McpMetadataPanel from './McpMetadataPanel.vue'
 import CredentialResource, {
   type CredentialFieldDef,
@@ -386,6 +395,8 @@ interface Props {
   service: MCPService | null
   mode: 'add' | 'edit'
   initialStep?: 0 | 1
+  categories: ToolboxCategory[]
+  initialCategoryIds?: string[]
 }
 
 interface Emits {
@@ -394,6 +405,7 @@ interface Emits {
   // Emitted after a successful create; carries the newly created service so
   // the parent can transition the drawer to edit mode without closing it.
   (e: 'created', service: MCPService): void
+  (e: 'categoryCreated', category: ToolboxCategory): void
 }
 
 const props = defineProps<Props>()
@@ -408,6 +420,8 @@ const generatingUsage = ref(false)
 let usageGeneration = 0
 const formRef = ref<FormInstanceFunctions>()
 const submitting = ref(false)
+const creatingCategory = ref(false)
+const selectedCategoryIds = ref<string[]>([])
 const { t, locale } = useI18n()
 const codeImportPlaceholder = `{
   "mcpServers": {
@@ -760,7 +774,7 @@ const rules: Record<string, FormRule[]> = {
 
 const dialogVisible = computed({
   get: () => props.visible,
-  set: (value) => emit('update:visible', value),
+  set: (value) => { if (!submitting.value && !creatingCategory.value) emit('update:visible', value) },
 })
 
 // ---- Advanced numeric inputs (text-bound proxies) ----
@@ -835,6 +849,9 @@ watch(
     usageGeneration++
     generatingUsage.value = false
     savedService.value = service
+    selectedCategoryIds.value = service
+      ? (service.categories || []).map(({ id }) => id)
+      : [...(props.initialCategoryIds || [])]
     step.value = service?.id ? (props.initialStep ?? 0) : 0
     toolsSynced.value = false
     // 同时重置代码导入区域，避免上一个服务残留的粘贴内容/报错漂到新表单
@@ -926,17 +943,32 @@ function buildPayload(asCreate: boolean): Partial<MCPService> {
 }
 
 async function saveConnection(): Promise<MCPService | null> {
-  if (submitting.value) return null
+  if (submitting.value || creatingCategory.value) return null
   const valid = await formRef.value?.validate()
   if (valid !== true) return null
+  if (submitting.value || creatingCategory.value) return null
   if (!formData.value.name.trim()) { MessagePlugin.warning(t('mcpServiceDialog.rules.nameRequired')); return null }
   try { const url = new URL(formData.value.url); if (!['https:', 'http:'].includes(url.protocol)) throw new Error('url') }
   catch { MessagePlugin.warning(t('mcpServiceDialog.rules.urlInvalid')); return null }
   submitting.value = true
   try {
     const id = currentService.value?.id
+    const previousCategories = currentService.value?.categories || []
+    const previousIds = previousCategories.map(({ id }) => id)
     const saved = id ? await updateMCPService(id, buildPayload(false)) : await createMCPService(buildPayload(true))
+    saved.categories = previousCategories
     savedService.value = saved
+    if (previousIds.length !== selectedCategoryIds.value.length
+      || selectedCategoryIds.value.some((id) => !previousIds.includes(id))) {
+      try {
+        saved.categories = await replaceMCPServiceCategories(saved.id, selectedCategoryIds.value)
+      } catch (error: any) {
+        // Keep the persisted ID: retrying must update this service, never create another.
+        emit('created', saved)
+        MessagePlugin.error(t('toolboxCategories.resourceSavedAssignmentFailed', { reason: error?.message || t('toolboxCategories.saveFailed') }))
+        return null
+      }
+    }
     emit('created', saved)
     return saved
   } catch (error) {

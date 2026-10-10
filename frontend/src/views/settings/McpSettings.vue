@@ -12,17 +12,21 @@
     </div>
 
     <template v-else>
-      <t-input v-if="services.length > 0" v-model="query" class="list-search" :placeholder="$t('menu.search')"
-        :aria-label="$t('menu.search')" clearable>
-        <template #prefix-icon><t-icon name="search" size="16px" /></template>
-      </t-input>
+      <div class="list-toolbar">
+        <t-input v-model="query" class="list-search" :placeholder="$t('menu.search')"
+          :aria-label="$t('menu.search')" clearable>
+          <template #prefix-icon><t-icon name="search" size="16px" /></template>
+        </t-input>
+        <ToolboxCategoryControl v-model="selectedCategoryId" :categories="categories"
+          :can-manage="authStore.hasRole('admin')" @changed="loadCategories" />
+      </div>
       <div v-if="services.length === 0 && !authStore.hasRole('admin')" class="empty-state">
         <t-empty :description="$t('mcpSettings.empty')" />
       </div>
 
       <div v-else-if="services.length > 0 && filteredServices.length === 0" class="empty-state">
         <t-empty :description="$t('common.noResult')" />
-        <t-button variant="outline" @click="query = ''">{{ $t('common.clear') }}</t-button>
+        <t-button variant="outline" @click="clearFilters">{{ $t('common.clear') }}</t-button>
         <t-button v-if="authStore.hasRole('admin')" variant="text" @click="handleAdd">
           {{ $t('mcpSettings.addService') }}
         </t-button>
@@ -59,6 +63,16 @@
                   {{ $t('mcpSettings.addUsageInstructions') }}
                 </button>
                 <span v-else>{{ $t('mcpSettings.noUsageInstructions') }}</span>
+              </div>
+              <div v-if="service.categories?.length || authStore.hasRole('admin')" class="service-card__categories">
+                <ToolboxCategoryTags v-if="service.categories?.length" class="service-card__category-list"
+                  :categories="service.categories" />
+                <button v-if="authStore.hasRole('admin')" type="button" class="service-card__category-edit"
+                  :aria-label="$t('toolboxCategories.assignTitle', { name: service.name })"
+                  @click="openCategoryAssignment(service)">
+                  <t-icon name="edit" size="13px" />
+                  {{ $t('toolboxCategories.assign') }}
+                </button>
               </div>
               <div class="service-card__footer">
                 <div class="service-card__metadata">
@@ -113,14 +127,21 @@
       :service="currentService"
       :mode="dialogMode"
       :initial-step="dialogInitialStep"
+      :categories="categories"
+      :initial-category-ids="initialCategoryIds"
+      @category-created="categories.push($event)"
       @success="handleDialogSuccess"
       @created="handleDialogCreated"
     />
+    <ToolboxCategoryAssignmentDialog v-model:visible="categoryDialogVisible"
+      :resource-name="categoryResource?.name || ''" :category-ids="categoryResource?.categories?.map(({ id }) => id) || []"
+      :categories="categories" :saving="categorySaving" @save="saveCategoryAssignment"
+      @created="categories.push($event)" />
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, ref, onMounted } from 'vue'
+import { computed, ref, onMounted, watch } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { AddIcon } from 'tdesign-icons-vue-next'
 import { useI18n } from 'vue-i18n'
@@ -130,17 +151,27 @@ import {
   deleteMCPService,
   type MCPService
 } from '@/api/mcp-service'
+import {
+  listToolboxCategories,
+  replaceMCPServiceCategories,
+  type ToolboxCategory,
+} from '@/api/toolbox-category'
 import McpServiceDialog from './components/McpServiceDialog.vue'
+import ToolboxCategoryControl from '@/components/toolbox/ToolboxCategoryControl.vue'
+import ToolboxCategoryTags from '@/components/toolbox/ToolboxCategoryTags.vue'
+import ToolboxCategoryAssignmentDialog from '@/components/toolbox/ToolboxCategoryAssignmentDialog.vue'
 import { useConfirmDelete } from '@/components/settings/useConfirmDelete'
 import { useAuthStore } from '@/stores/auth'
 import { matchesResourceQuery } from '@/utils/resourceListSearch'
+import { countResourcesByCategory, hasToolboxCategory } from '@/utils/toolboxCategories'
 
-const emit = defineEmits<{ count: [value: number] }>()
+const emit = defineEmits<{ 'category-counts': [value: Record<string, number>] }>()
 const { t } = useI18n()
 const authStore = useAuthStore()
 const confirmDelete = useConfirmDelete()
 
 const services = ref<MCPService[]>([])
+watch(() => countResourcesByCategory(services.value), counts => emit('category-counts', counts))
 const loading = ref(false)
 const dialogVisible = ref(false)
 const dialogMode = ref<'add' | 'edit'>('add')
@@ -149,30 +180,81 @@ const dialogInitialStep = ref<0 | 1>(0)
 const togglingIds = ref(new Set<string>())
 const serviceUsage = (service: MCPService) => service.usage_instructions?.trim() || service.description?.trim() || ''
 const query = ref('')
+const categories = ref<ToolboxCategory[]>([])
+const selectedCategoryId = defineModel<string>('categoryId', { default: '' })
+const initialCategoryIds = ref<string[]>([])
+const categoryDialogVisible = ref(false)
+const categoryResource = ref<MCPService | null>(null)
+const categorySaving = ref(false)
 const filteredServices = computed(() => services.value.filter((service) =>
-  matchesResourceQuery({ name: service.name, description: serviceUsage(service) }, query.value),
+  matchesResourceQuery({ name: service.name, description: serviceUsage(service) }, query.value)
+  && hasToolboxCategory(service.categories, selectedCategoryId.value),
 ))
 
-// Load MCP services
-const loadServices = async () => {
-  loading.value = true
+const loadCategories = async () => {
   try {
-    services.value = await listMCPServices()
-    emit('count', services.value.length)
+    categories.value = await listToolboxCategories()
+    await loadServices(true)
+  } catch (error) {
+    MessagePlugin.error(t('toolboxCategories.loadFailed'))
+    console.error('Failed to load toolbox categories:', error)
+  }
+}
+
+function clearFilters() {
+  query.value = ''
+  selectedCategoryId.value = ''
+}
+
+// Load MCP services
+let servicesRevision = 0
+let appliedServicesRevision = 0
+const loadServices = async (silent = false) => {
+  const revision = ++servicesRevision
+  if (!silent) loading.value = true
+  try {
+    const loaded = await listMCPServices()
+    if (revision < appliedServicesRevision) return
+    appliedServicesRevision = revision
+    services.value = loaded
   } catch (error) {
     MessagePlugin.error(t('mcpSettings.toasts.loadFailed'))
     console.error('Failed to load MCP services:', error)
   } finally {
-    loading.value = false
+    if (!silent) loading.value = false
   }
 }
 
 // Handle add button click
 const handleAdd = () => {
+  initialCategoryIds.value = selectedCategoryId.value ? [selectedCategoryId.value] : []
   currentService.value = null
   dialogMode.value = 'add'
   dialogInitialStep.value = 0
   dialogVisible.value = true
+}
+
+function openCategoryAssignment(service: MCPService) {
+  categoryResource.value = service
+  categoryDialogVisible.value = true
+}
+
+async function saveCategoryAssignment(categoryIds: string[]) {
+  if (!categoryResource.value || categorySaving.value) return
+  categorySaving.value = true
+  try {
+    const id = categoryResource.value.id
+    const assigned = await replaceMCPServiceCategories(id, categoryIds)
+    appliedServicesRevision = ++servicesRevision
+    const current = services.value.find(service => service.id === id)
+    if (current) current.categories = assigned
+    categoryDialogVisible.value = false
+    MessagePlugin.success(t('toolboxCategories.assignmentSaved'))
+  } catch (error: any) {
+    MessagePlugin.error(error?.message || t('toolboxCategories.saveFailed'))
+  } finally {
+    categorySaving.value = false
+  }
 }
 
 // Explicit buttons keep selecting card text separate from editing a service.
@@ -198,6 +280,8 @@ const handleDialogSuccess = () => {
 const handleDialogCreated = async (created: MCPService) => {
   await loadServices()
   const full = services.value.find((s) => s.id === created.id) || created
+  query.value = ''
+  if (!hasToolboxCategory(full.categories, selectedCategoryId.value)) selectedCategoryId.value = ''
   currentService.value = { ...full }
   dialogMode.value = 'edit'
 }
@@ -253,8 +337,17 @@ const getTransportTypeLabel = (transportType: string) => {
 }
 
 onMounted(() => {
-  loadServices()
+  void Promise.all([loadServices(), loadToolboxCategoryOptions()])
 })
+
+async function loadToolboxCategoryOptions() {
+  try {
+    categories.value = await listToolboxCategories()
+  } catch (error) {
+    MessagePlugin.error(t('toolboxCategories.loadFailed'))
+    console.error('Failed to load toolbox categories:', error)
+  }
+}
 
 defineExpose({ openAdd: handleAdd })
 </script>
@@ -272,8 +365,16 @@ defineExpose({ openAdd: handleAdd })
   .settings-section-header();
 }
 
-.list-search {
+.list-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   margin-bottom: 20px;
+}
+
+.list-search {
+  flex: 1;
+  min-width: 180px;
 }
 
 .loading-container {
@@ -380,6 +481,44 @@ defineExpose({ openAdd: handleAdd })
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+.service-card__categories {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.service-card__category-list {
+  flex: 1;
+  min-width: 0;
+}
+
+.service-card__category-edit {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 5px;
+  border: 0;
+  background: transparent;
+  color: var(--td-text-color-secondary);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--app-text-sm);
+
+  &:hover,
+  &:focus-visible {
+    color: var(--td-brand-color);
+  }
+}
+
+@media (max-width: 640px) {
+  .list-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
 }
 
 .service-card__header {

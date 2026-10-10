@@ -47,6 +47,34 @@ func TestConversationRoutesDeclareChatCapability(t *testing.T) {
 	}
 }
 
+func TestToolboxCategoryRoutesKeepResourceCapabilityBoundaries(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	g := &rbacGuards{}
+	v1 := gin.New().Group("/api/v1")
+	RegisterToolboxCategoryRoutes(v1, &handler.ToolboxCategoryHandler{}, g)
+
+	for _, route := range []struct {
+		method string
+		path   string
+	}{
+		{http.MethodGet, "/api/v1/toolbox-categories"},
+		{http.MethodPost, "/api/v1/toolbox-categories"},
+		{http.MethodPut, "/api/v1/toolbox-categories/:id"},
+		{http.MethodDelete, "/api/v1/toolbox-categories/:id"},
+		{http.MethodPut, "/api/v1/skills/catalog/:id/categories"},
+	} {
+		policy := mustLookupAPIKeyPolicy(t, g, route.method, route.path)
+		if !policy.RequireFullAccess {
+			t.Fatalf("%s %s should require a full-access API key", route.method, route.path)
+		}
+	}
+
+	mcpPolicy := mustLookupAPIKeyPolicy(t, g, http.MethodPut, "/api/v1/mcp-services/:id/categories")
+	if !policyHasCapability(mcpPolicy, types.APIKeyCapabilityManageMCPServices) {
+		t.Fatalf("MCP category assignment capabilities = %#v, want manage_mcp_services", mcpPolicy.Capabilities)
+	}
+}
+
 func TestPlatformControlPlaneRoutesDeclarePlatformCapabilities(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	g := &rbacGuards{}
