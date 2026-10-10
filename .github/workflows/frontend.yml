@@ -50,6 +50,15 @@ jobs:
       - name: Run tests
         run: npm test
 
+      - name: Type-check browser tests
+        run: npm run type-check:e2e
+
+      - name: Install browser
+        run: npx playwright install --with-deps chromium
+
+      - name: Browser regressions
+        run: npm run test:e2e
+
       - name: Type-check
         run: npm run type-check
 
