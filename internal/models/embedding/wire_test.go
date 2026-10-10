@@ -119,9 +119,17 @@ func answer(path string, body map[string]any) string {
 		n := itemLen(body["input"].([]any)[0])
 		return fmt.Sprintf(`{"data":{"embedding":[%d],"object":"embedding"}}`, n)
 	case body["messages"] != nil:
-		turn := body["messages"].([]any)[0].(map[string]any)
-		n := itemLen(turn["content"].([]any)[0])
-		return fmt.Sprintf(`{"data":[{"index":0,"embedding":[%d]}]}`, n)
+		messages := body["messages"].([]any)
+		conversations := []any{messages}
+		if _, batched := messages[0].([]any); batched {
+			conversations = messages
+		}
+		for i := len(conversations) - 1; i >= 0; i-- {
+			turn := conversations[i].([]any)[0].(map[string]any)
+			n := itemLen(turn["content"].([]any)[0])
+			parts = append(parts, fmt.Sprintf(`{"index":%d,"embedding":[%d]}`, i, n))
+		}
+		return `{"data":[` + strings.Join(parts, ",") + `]}`
 	default:
 		input := body["input"].([]any)
 		for i := len(input) - 1; i >= 0; i-- {
