@@ -131,6 +131,21 @@ for (const mode of ['ordinary', 'quick-timeline', 'agent'] as const) {
     assert.equal(h.message.artifacts[0].file_name, 'chart.png')
   })
 
+  test(`${mode}: a generic error before any answer replaces content and reports the error`, async t => {
+    const h = setup(t, mode)
+    // No answer is streamed — the model call fails immediately.
+    h.send('error', 'create chat completion stream: Post "https://api.deepseek.com": i/o timeout', true, {
+      stage: 'knowledge_qa_execution',
+    })
+    await h.flush()
+    assert.equal(h.message.content, 'create chat completion stream: Post "https://api.deepseek.com": i/o timeout')
+    assert.equal(h.message.is_completed, true)
+    assert.equal(h.message.isAgentMode, false, 'error must switch to non-agent rendering path')
+    assert.equal(h.isReplying.value, false)
+    assert.deepEqual(h.errors, ['create chat completion stream: Post "https://api.deepseek.com": i/o timeout'])
+    assert.equal(h.turns.length, 0, 'a generic error must not trigger follow-up requests')
+  })
+
   test(`${mode}: persistence failure preserves the streamed answer and timeline`, async t => {
     const h = setup(t, mode)
     h.send('answer', h.answer, false, { event_id: 'answer' })

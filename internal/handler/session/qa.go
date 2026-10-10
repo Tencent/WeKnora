@@ -1493,12 +1493,25 @@ func (h *Handler) executeQA(reqCtx *qaRequestContext, mode qaMode, generateTitle
 				streamCtx.eventBus.Emit(streamCtx.asyncCtx, event.Event{
 					Type:      event.EventError,
 					SessionID: sessionID,
+					ID:        reqCtx.requestID,
 					Data: event.ErrorData{
 						Error:     serviceErr.Error(),
 						Stage:     stageName,
 						SessionID: sessionID,
 					},
 				})
+
+				// Persist the assistant message so the error is visible on page
+				// refresh.  Use WithoutCancel so a client disconnect doesn't
+				// drop the write.  completeQuickAnswerTurn is NOT called here
+				// because releaseTurn was already released above (normal mode)
+				// and artifact collection is not needed for an error response.
+				updateCtx := context.WithValue(
+					context.WithoutCancel(streamCtx.asyncCtx),
+					types.TenantIDContextKey, reqCtx.session.TenantID,
+				)
+				streamCtx.assistantMessage.Content = serviceErr.Error()
+				_ = h.completeAssistantMessage(updateCtx, streamCtx.assistantMessage, reqCtx.query, reqCtx.userMessageID)
 			}
 		}
 	}()
