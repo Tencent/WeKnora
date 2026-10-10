@@ -1348,7 +1348,7 @@ definitions:
           type: string
         type: array
       id:
-        description: ID 可选，用于数据迁移时指定 seq_id（必须小于自增起始值 100000000）
+        description: "ID 可选，用于数据迁移/导出回灌时指定 seq_id。保留与重分配规则：\n低于 100000000（ChunkSeqIDSequenceStart，PG 序列 chunks_seq_id_seq 的起始值）\n且未被占用 → 原样保留；PG 上 ≥ 100000000 → 重新分配（该区间归数据库序列\n所有，显式写入的值会被后续 nextval 再次发出，撞 chunks.seq_id 唯一索引）；\n已被占用（含只被软删行占用）→ 重新分配。\n重新分配由 PG 序列 / SQLite 的 MAX(seq_id)+1 取号，导入后的 id 可能不等于请求\n的 id，请以实际查询到的 seq_id 为准；重分配条数见 FAQImportProgress.SeqIDRemappedCount。"
         type: integer
       is_enabled:
         type: boolean
