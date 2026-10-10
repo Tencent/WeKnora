@@ -1260,8 +1260,6 @@ export default {
   mermaid: {
     diagram: '图表',
     expand: '全屏查看',
-    zoomIn: '放大',
-    zoomOut: '缩小',
     reset: '重置',
     download: '下载图片',
     close: '关闭',
@@ -5296,10 +5294,14 @@ export default {
     belongsToOrg: '所属空间：',
     noCompatibleKbForAgent: '当前智能体的工具与作用域内知识库的能力不匹配，暂无可引用的知识库。'
   },
+  wikiMobile: {
+    contents: '目录',
+    zoomIn: '放大',
+    zoomOut: '缩小',
+  },
   common: {
     zoomIn: '放大',
     zoomOut: '缩小',
-    contents: '目录',
     add: '添加',
     me: '我',
     confirm: '确认',

@@ -2,7 +2,7 @@
   <div class="wiki-browser" :class="{ 'mobile-directory-open': mobileDirectoryOpen }">
     <button v-if="isMobile && view !== 'graph'" type="button" ref="directoryButton" class="mobile-wiki-directory"
       :aria-expanded="mobileDirectoryOpen" @click="mobileDirectoryOpen = !mobileDirectoryOpen">
-      <t-icon :name="mobileDirectoryOpen ? 'close' : 'menu'" />{{ $t('common.contents') }}
+      <t-icon :name="mobileDirectoryOpen ? 'close' : 'menu'" />{{ $t('wikiMobile.contents') }}
     </button>
     <!-- Graph view (full screen) -->
     <template v-if="view === 'graph'">
@@ -52,10 +52,11 @@
 
         <!-- Legend Overlay -->
         <div v-if="graphReady && isMobile" class="mobile-graph-zoom">
-          <button type="button" class="mobile-icon-button" :aria-label="$t('common.zoomIn')" @click="zoomGraph(1.25)"><t-icon name="add" /></button>
-          <button type="button" class="mobile-icon-button" :aria-label="$t('common.zoomOut')" @click="zoomGraph(0.8)"><t-icon name="minus" /></button>
+          <button type="button" class="mobile-icon-button" :aria-label="$t('wikiMobile.zoomIn')" @click="zoomGraph(1.25)"><t-icon name="add" /></button>
+          <button type="button" class="mobile-icon-button" :aria-label="$t('wikiMobile.zoomOut')" @click="zoomGraph(0.8)"><t-icon name="minus" /></button>
         </div>
-        <div v-if="graphReady" class="wiki-graph-legend" :class="{ 'legend-shifted': graphDrawerVisible }">
+        <button v-if="graphReady && isMobile" type="button" class="mobile-graph-legend-toggle" :aria-expanded="mobileLegendOpen" @click="mobileLegendOpen = !mobileLegendOpen">{{ $t('knowledgeEditor.wikiBrowser.filterConcept') }}<t-icon :name="mobileLegendOpen ? 'chevron-down' : 'chevron-up'" /></button>
+        <div v-if="graphReady && (!isMobile || mobileLegendOpen)" class="wiki-graph-legend" :class="{ 'legend-shifted': graphDrawerVisible }">
           <div class="legend-items">
             <div class="legend-item clickable" :class="{ disabled: !graphFilterTypes.has('summary') }"
               @click="toggleGraphFilterType('summary')">
@@ -801,9 +802,6 @@
 <script setup lang="ts">
 import '@/assets/mobile-wiki.less'
 import { useResponsive } from '@/composables/useResponsive'
-const { isMobile } = useResponsive()
-const mobileDirectoryOpen = ref(false)
-const directoryButton = ref<HTMLButtonElement>()
 
 import { ref, computed, reactive, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
@@ -852,6 +850,11 @@ import {
   type WikiIndexGroup,
   type WikiIndexEntryDTO,
 } from '@/api/wiki'
+
+const { isMobile } = useResponsive()
+const mobileDirectoryOpen = ref(false)
+const mobileLegendOpen = ref(false)
+const directoryButton = ref<HTMLButtonElement>()
 
 const router = useRouter()
 const route = useRoute()
@@ -3992,7 +3995,7 @@ function renderGraph(opts: RenderGraphOpts = {}) {
     const g = document.createElementNS('http://www.w3.org/2000/svg', 'g')
     g.style.cursor = 'pointer'
     g.setAttribute('role', 'button')
-    g.setAttribute('tabindex', '0')
+    if (isMobile.value) g.setAttribute('tabindex', '0')
     g.setAttribute('aria-label', n.title)
     g.addEventListener('keydown', event => {
       if (event.key === 'Enter' || event.key === ' ') {

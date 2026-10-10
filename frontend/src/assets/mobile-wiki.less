@@ -1,5 +1,5 @@
 .mobile-wiki-directory, .mobile-graph-zoom { display: none; }
-@media (max-width: 767px) { :root body .main:has(.wiki-browser) { min-width: 0; } :root body .mobile-graph-zoom { position: absolute; display: flex; flex-direction: column; border: 1px solid var(--td-component-stroke); border-radius: var(--app-radius-md); background: var(--td-bg-color-container); } :root body .mobile-graph-zoom button { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; border: 0; color: var(--td-text-color-primary); background: transparent; } }
+@media (max-width: 767px) { :root body .mobile-graph-zoom { position: absolute; display: flex; flex-direction: column; border: 1px solid var(--td-component-stroke); border-radius: var(--app-radius-md); background: var(--td-bg-color-container); } :root body .mobile-graph-zoom button { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; border: 0; color: var(--td-text-color-primary); background: transparent; } }
 @media (max-width: 767px) {
 :root body .wiki-reader-body pre { max-width: 100%; overflow-x: auto; }
 :root body .wiki-browser { position: relative; flex-direction: column; }
@@ -35,4 +35,18 @@
 }
 @media (max-width: 767px) and (max-height: 500px) {
 :root body .wiki-main-area { flex-shrink: 0; min-height: 60dvh; }
+}
+
+@media (max-width: 767px) {
+  :root body .mobile-graph-legend-toggle {
+    position: absolute;
+    left: 8px;
+    bottom: 8px;
+    min-height: 44px;
+    border: 1px solid var(--td-component-stroke);
+    border-radius: var(--app-radius-md);
+    background: var(--td-bg-color-container);
+    color: var(--td-text-color-primary);
+  }
+  :root body .wiki-graph-legend { bottom: 60px; }
 }

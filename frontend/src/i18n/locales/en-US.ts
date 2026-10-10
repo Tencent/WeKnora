@@ -2729,10 +2729,12 @@ export default {
       parseCurrentKnowledgeBaseFailed: 'Failed to parse current knowledge base'
     }
   },
-  common: {
+  wikiMobile: {
+    contents: 'Contents',
     zoomIn: 'Zoom in',
     zoomOut: 'Zoom out',
-    contents: 'Contents',
+  },
+  common: {
     add: 'Add',
     me: 'Me',
     confirm: 'Confirm',

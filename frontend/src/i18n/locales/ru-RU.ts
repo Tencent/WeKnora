@@ -1258,8 +1258,6 @@ export default {
   mermaid: {
     diagram: 'Диаграмма',
     expand: 'На весь экран',
-    zoomIn: 'Увеличить',
-    zoomOut: 'Уменьшить',
     reset: 'Сброс',
     download: 'Скачать изображение',
     close: 'Закрыть',
@@ -5294,10 +5292,14 @@ export default {
     belongsToOrg: 'Пространство: ',
     noCompatibleKbForAgent: 'Инструменты текущего агента не соответствуют возможностям ни одной базы знаний в области видимости — нечего упомянуть.'
   },
+  wikiMobile: {
+    contents: 'Содержание',
+    zoomIn: 'Увеличить',
+    zoomOut: 'Уменьшить',
+  },
   common: {
     zoomIn: 'Увеличить',
     zoomOut: 'Уменьшить',
-    contents: 'Содержание',
     add: 'Добавить',
     me: 'Я',
     confirm: 'Подтвердить',

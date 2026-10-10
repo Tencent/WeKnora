@@ -2729,10 +2729,12 @@ export default {
       parseCurrentKnowledgeBaseFailed: '現在のナレッジベースの解析に失敗しました'
     }
   },
-  common: {
+  wikiMobile: {
+    contents: '目次',
     zoomIn: '拡大',
     zoomOut: '縮小',
-    contents: '目次',
+  },
+  common: {
     add: '追加',
     me: '自分',
     confirm: '確認',
