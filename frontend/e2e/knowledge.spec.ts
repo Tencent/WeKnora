@@ -1,9 +1,9 @@
 import { test, expect } from '@playwright/test'
 import { mockApp, fitsViewport } from './fixtures'
-test.use({ hasTouch: true })
+// Phone projects use isMobile:true; desktop cases run in a separate project.
 
 for (const width of [360, 390, 430]) {
-  test(`document heading and secondary controls collapse at ${width}px`, async ({ page }) => {
+  test(`document heading and secondary controls collapse at ${width}px${width === 1440 ? ' @desktop' : ''}`, async ({ page }) => {
     await page.setViewportSize({ width, height: 700 })
     await mockApp(page)
     await page.route('**/api/v1/knowledge-bases/mobile-kb', route => route.fulfill({ json: { success: true, data: {
@@ -40,6 +40,8 @@ for (const width of [360, 390, 430]) {
     await more.click()
     await expect(page.locator('.doc-view-toggle-btn').last()).toHaveAttribute('aria-pressed', 'true')
     await more.click()
+    const filename = page.locator('.row-file-name').first()
+    expect((await filename.boundingBox())!.width).toBeGreaterThan(180)
     await list.evaluate(node => { node.scrollTop = 150 })
     await page.locator('.mobile-description-toggle').click()
     await page.locator('.mobile-description-toggle').click()
@@ -50,7 +52,7 @@ for (const width of [360, 390, 430]) {
   })
 }
 
-test('desktop retains the description and full toolbar', async ({ page }) => {
+test('@desktop desktop retains the description and full toolbar', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
   await mockApp(page)
   await page.goto('/platform/knowledge-bases/mobile-kb')
@@ -78,7 +80,7 @@ test('FAQ secondary actions expand and collapse on phones', async ({ page }) => 
 })
 
 for (const width of [360, 430, 1440]) {
- test(`knowledge home cards remain visible and fit ${width}px`, async ({ page }) => {
+ test(`knowledge home cards remain visible and fit ${width}px${width === 1440 ? ' @desktop' : ''}`, async ({ page }) => {
   await mockApp(page); await page.setViewportSize({ width, height: 844 })
   await page.goto('/platform/knowledge-bases')
   await expect(page.locator('.kb-card').first()).toBeVisible()
@@ -101,4 +103,22 @@ test('file selection, confirmation and upload panel survive navigation', async (
   await fitsViewport(page)
   await page.evaluate(() => (document.querySelector('#app') as any).__vue_app__.config.globalProperties.$router.push('/platform/creatChat'))
   await expect(page.locator('.upload-tasks-panel')).toBeVisible()
+})
+
+test('global upload confirmation fits a phone before any knowledge route is visited', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await mockApp(page)
+  await page.goto('/platform/creatChat')
+  await expect(page.locator('[data-guide="chat-input"]')).toBeVisible()
+  // Drive the public queue entry point; no knowledge page or its CSS is loaded.
+  await page.evaluate(async () => {
+    const storeModule = '/src/stores/uploadConfirm.ts'
+    const { useUploadConfirmStore } = await import(storeModule)
+    void useUploadConfirmStore().open({ mode: 'file', kbInfo: { id: 'mobile-kb', name: '庄子' }, files: [new File(['北冥有鱼'], '庄子.txt', { type: 'text/plain' })] }).catch(() => {})
+  })
+  const dialog = page.locator('.upload-confirm-modal')
+  await expect(dialog).toBeVisible()
+  expect((await dialog.boundingBox())!.width).toBeLessThanOrEqual(390)
+  await expect(dialog.locator('.modal-footer button').last()).toBeInViewport()
+  await fitsViewport(page)
 })

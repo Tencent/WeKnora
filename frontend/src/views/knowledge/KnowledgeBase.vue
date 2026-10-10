@@ -2,7 +2,6 @@
 import '@/assets/mobile-knowledge.less'
 import ResponsiveToolbarGroup from '@/components/ResponsiveToolbarGroup.vue'
 import { useResponsive } from '@/composables/useResponsive'
-const mobileHeaderExpanded = ref(false)
 
 import { ref, onMounted, onUnmounted, watch, reactive, computed, nextTick } from "vue";
 import { MessagePlugin } from "tdesign-vue-next";
@@ -91,6 +90,7 @@ import type { ParserEngineInfo } from '@/api/system';
 
 const { isMobile } = useResponsive()
 const mobileFolderOpen = ref(false)
+const mobileHeaderExpanded = ref(false)
 const route = useRoute();
 const { t } = useI18n();
 const kbId = computed(() => (route.params as any).kbId as string || '');
