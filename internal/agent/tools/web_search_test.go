@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/Tencent/WeKnora/internal/modelcontext"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/stretchr/testify/assert"
@@ -98,12 +99,9 @@ func TestAgentWebSearchContentFetchesLeadingPagesOnly(t *testing.T) {
 	assert.Equal(t, "d", rows[3]["snippet"])
 }
 
-// TestAgentWebSearchClampsCountToConfiguredMaximum count 超出上限时截断，而不是整轮失败。
-//
-// count 只是"要几条"的基数提示，不是带身份的目标集合。硬拒绝并不比截断更安全
-// ——两条路都受同一个上限约束——却会让模型白丢一轮，并把"模型填错参数"混进真正
-// 的失败信号里（调用方把 Success=false 一律记为 span error）。
-// 同类标量 search_knowledge.limit / search_memory.limit 走的也是截断。
+// TestAgentWebSearchClampsCountToConfiguredMaximum an over-maximum count is
+// clamped to the configured maximum instead of failing the whole call, and the
+// correction reaches both the UI-facing output and the rendered model view.
 func TestAgentWebSearchClampsCountToConfiguredMaximum(t *testing.T) {
 	svc := &searchOnlyWebService{results: []*types.WebSearchResult{
 		{URL: "https://example.com/a"},
@@ -113,19 +111,58 @@ func TestAgentWebSearchClampsCountToConfiguredMaximum(t *testing.T) {
 	tool := NewWebSearchTool(svc, 2, "provider-1")
 	ctx := context.WithValue(t.Context(), types.TenantIDContextKey, uint64(1))
 
-	for _, count := range []int{-1, 0, 3} {
+	result, err := tool.Execute(ctx, json.RawMessage(`{"query":"q","count":3}`))
+	require.NoError(t, err)
+	require.True(t, result.Success)
+	require.Equal(t, 1, svc.calls, "the search must still run")
+	require.Equal(t, 2, svc.config.MaxResults, "count must clamp to the maximum")
+	require.Contains(t, result.Output, "requested count 3 is outside 1-2 and was clamped to 2.")
+	require.Equal(t, true, result.Data["count_clamped"])
+	require.Equal(t, 3, result.Data["count_requested"])
+	require.Equal(t, 2, result.Data["count_maximum"])
+
+	// The model reads the rendered retrieval block, not Output, once a row exists.
+	model := modelcontext.NewRegistry(true).ModelToolResultForTool(ToolWebSearch, result)
+	require.Contains(t, model, `<count_clamped requested="3" maximum="2">`)
+}
+
+// TestAgentWebSearchRejectsNonPositiveCount a count below 1 is a malformed
+// argument, not a near miss: it fails before the provider is called.
+func TestAgentWebSearchRejectsNonPositiveCount(t *testing.T) {
+	svc := &searchOnlyWebService{results: []*types.WebSearchResult{{URL: "https://example.com/a"}}}
+	tool := NewWebSearchTool(svc, 2, "provider-1")
+	ctx := context.WithValue(t.Context(), types.TenantIDContextKey, uint64(1))
+
+	for _, count := range []int{-1, 0} {
 		svc.calls = 0
 		result, err := tool.Execute(ctx, json.RawMessage(fmt.Sprintf(`{"query":"q","count":%d}`, count)))
 		require.NoError(t, err)
-		require.True(t, result.Success, "count=%d must not fail the call", count)
-		require.Equal(t, 1, svc.calls, "count=%d must still run the search", count)
-		require.Equal(t, 2, svc.config.MaxResults, "count=%d must clamp to the maximum", count)
-		require.Contains(t, result.Output,
-			fmt.Sprintf("requested count %d is outside 1-2 and was clamped to 2.", count))
+		require.False(t, result.Success, "count=%d must fail", count)
+		require.Contains(t, result.Error, "count must be between 1 and 2")
+		require.Equal(t, 0, svc.calls, "count=%d must not reach the provider", count)
 	}
 }
 
-// TestAgentWebSearchCountWithinRangeIsHonoured 范围内的 count 仍按原样生效，且不加提示。
+// TestAgentWebSearchClampNoteSurvivesEmptyResults the zero-result early return
+// must carry the same correction as the normal path.
+func TestAgentWebSearchClampNoteSurvivesEmptyResults(t *testing.T) {
+	svc := &searchOnlyWebService{}
+	tool := NewWebSearchTool(svc, 2, "provider-1")
+	ctx := context.WithValue(t.Context(), types.TenantIDContextKey, uint64(1))
+
+	result, err := tool.Execute(ctx, json.RawMessage(`{"query":"q","count":5}`))
+	require.NoError(t, err)
+	require.True(t, result.Success)
+	require.Equal(t, 1, svc.calls)
+	require.Equal(t, 2, svc.config.MaxResults)
+	require.Contains(t, result.Output, "was clamped to 2.")
+	require.Equal(t, true, result.Data["count_clamped"])
+
+	model := modelcontext.NewRegistry(true).ModelToolResultForTool(ToolWebSearch, result)
+	require.Contains(t, model, "was clamped to 2.")
+}
+
+// TestAgentWebSearchCountWithinRangeIsHonoured an in-range count is honoured as given, with no note.
 func TestAgentWebSearchCountWithinRangeIsHonoured(t *testing.T) {
 	svc := &searchOnlyWebService{results: []*types.WebSearchResult{
 		{URL: "https://example.com/a"},
@@ -141,8 +178,8 @@ func TestAgentWebSearchCountWithinRangeIsHonoured(t *testing.T) {
 	require.NotContains(t, result.Output, "was clamped")
 }
 
-// TestPatchWebSearchCountSchema 动态上限必须写进 schema，且任何异常输入都不能
-// 影响工具可用性——最坏情况只是描述保持原样。
+// TestPatchWebSearchCountSchema the effective maximum must reach the schema, and
+// any malformed input leaves the schema unchanged rather than breaking the tool.
 func TestPatchWebSearchCountSchema(t *testing.T) {
 	raw := json.RawMessage(`{"type":"object","properties":{` +
 		`"query":{"type":"string"},"count":{"type":"integer","description":"old"}},"required":["query"]}`)

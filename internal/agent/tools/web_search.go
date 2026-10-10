@@ -75,8 +75,7 @@ func NewWebSearchTool(
 	}
 	maxResults = min(maxResults, 20)
 	tool.description = fmt.Sprintf(tool.description, maxResults)
-	// 静态 struct tag 无法表达"当前配置的上限"（不同 agent 可能是 7、20…），
-	// 这里按实际生效的 maxResults 重写 count 的描述，避免模型按写死的 20 填值被拒。
+	// The static schema cannot express the configured maximum; rewrite the count description.
 	tool.schema = patchWebSearchCountSchema(tool.schema, maxResults)
 
 	return &WebSearchTool{
@@ -88,8 +87,8 @@ func NewWebSearchTool(
 	}
 }
 
-// patchWebSearchCountSchema 把 count 字段的描述改写为实际生效的上限。
-// 解析失败时原样返回，不影响工具可用性。
+// patchWebSearchCountSchema rewrites the count description with the effective
+// maximum. Any parse failure returns the schema unchanged.
 func patchWebSearchCountSchema(raw json.RawMessage, maxResults int) json.RawMessage {
 	var schema map[string]any
 	if err := json.Unmarshal(raw, &schema); err != nil {
@@ -134,25 +133,32 @@ func (t *WebSearchTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 	}
 
 	maxResults := t.maxResults
-	// count 只是"要几条"的基数提示，不是带身份的目标集合：超出上限就截断到上限，
-	// 而不是让整轮调用失败。同类的 search_knowledge.limit / search_memory.limit
-	// 走的也是截断。硬拒绝没有额外保护——两条路都受同一个上限约束——却会让模型
-	// 白丢一轮，并把"填错参数"混进真正的失败信号里。
 	countClamped := false
+	countRequested := 0
 	if input.Count != nil {
 		requested := *input.Count
 		switch {
+		case requested < 1:
+			logger.Warnf(ctx, "[Tool][WebSearch] count %d is below the minimum 1", requested)
+			return &types.ToolResult{
+				Success: false, Error: fmt.Sprintf("count must be between 1 and %d", maxResults),
+			}, nil
 		case requested > maxResults:
 			countClamped = true
+			countRequested = requested
 			logger.Warnf(ctx, "[Tool][WebSearch] count %d exceeds the configured maximum %d; clamped",
 				requested, maxResults)
-		case requested >= 1:
-			maxResults = requested
 		default:
-			countClamped = true
-			logger.Warnf(ctx, "[Tool][WebSearch] count %d is not a positive number; using %d",
-				requested, maxResults)
+			maxResults = requested
 		}
+	}
+	// A clamped count is stated twice on purpose: Output serves the UI, logs and the
+	// zero-result fallback, while Data reaches the model through the rendered
+	// retrieval block (sourceOutput tools never see Output once there is a row).
+	clampNote := ""
+	if countClamped {
+		clampNote = fmt.Sprintf("Note: requested count %d is outside 1-%d and was clamped to %d.\n",
+			countRequested, t.maxResults, maxResults)
 	}
 	filters := types.WebSearchFilters{
 		Country: strings.ToUpper(strings.TrimSpace(input.Country)), Freshness: strings.TrimSpace(input.Freshness),
@@ -251,14 +257,18 @@ func (t *WebSearchTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 
 	// Format output
 	if len(webResults) == 0 {
+		output := fmt.Sprintf("No web search results found for query: %s", query)
+		if clampNote != "" {
+			output += "\n" + clampNote
+		}
 		return &types.ToolResult{
 			Success: true,
-			Output:  fmt.Sprintf("No web search results found for query: %s", query),
-			Data: map[string]interface{}{
+			Output:  output,
+			Data: t.countClampData(map[string]interface{}{
 				"query":   query,
 				"results": []interface{}{},
 				"count":   0,
-			},
+			}, countClamped, countRequested),
 		}, nil
 	}
 
@@ -272,9 +282,7 @@ func (t *WebSearchTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 	output += fmt.Sprintf("Query: %s\n", query)
 	output += fmt.Sprintf("Found %d result(s)\n", len(webResults))
 	if countClamped {
-		// 把纠正信号交给模型，而不是静默截断：它既拿到结果，也知道自己的取值被改过。
-		output += fmt.Sprintf("Note: requested count %d is outside 1-%d and was clamped to %d.\n",
-			*input.Count, t.maxResults, maxResults)
+		output += clampNote
 	}
 	output += "\n"
 
@@ -336,13 +344,28 @@ func (t *WebSearchTool) Execute(ctx context.Context, args json.RawMessage) (*typ
 	return &types.ToolResult{
 		Success: true,
 		Output:  output,
-		Data: map[string]interface{}{
+		Data: t.countClampData(map[string]interface{}{
 			"query":        query,
 			"results":      formattedResults,
 			"count":        len(webResults),
 			"display_type": "web_search_results",
-		},
+		}, countClamped, countRequested),
 	}, nil
+}
+
+// countClampData records a clamped count in Data so the model-side renderer can
+// restate it inside the retrieval block. Tools with sourceOutput enabled never
+// expose ToolResult.Output to the model once there is at least one row.
+func (t *WebSearchTool) countClampData(
+	data map[string]interface{}, clamped bool, requested int,
+) map[string]interface{} {
+	if !clamped {
+		return data
+	}
+	data["count_clamped"] = true
+	data["count_requested"] = requested
+	data["count_maximum"] = t.maxResults
+	return data
 }
 
 func (t *WebSearchTool) fetchLeadingPages(ctx context.Context, results []*types.WebSearchResult) []*webFetchItemResult {

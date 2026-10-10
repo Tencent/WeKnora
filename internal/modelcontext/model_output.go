@@ -58,7 +58,8 @@ func (r *sourceRegistry) ModelOutput(result *types.ToolResult) string {
 		return annotateGraphResult(
 			r.modelKnowledgeOutput("graph", mapsValue(result.Data["results"]), result.Output), result.Data)
 	case "web_search_results":
-		return r.modelWebSearchOutput(mapsValue(result.Data["results"]), result.Output)
+		return annotateWebSearchNotes(
+			r.modelWebSearchOutput(mapsValue(result.Data["results"]), result.Output), result.Data)
 	case "database_query":
 		return r.modelDatabaseQueryOutput(mapsValue(result.Data["rows"]), result.Output)
 	default:
@@ -416,6 +417,25 @@ func annotateSearchNotes(output string, data map[string]interface{}) string {
 			escapeText(failure))
 	}
 	return strings.TrimSuffix(output, "</retrieval>") + b.String() + "</retrieval>"
+}
+
+// annotateWebSearchNotes restates a clamped count inside the retrieval block.
+// web_search also writes the note into ToolResult.Output, but once there is at
+// least one row the model only sees this rendered view, so the note has to
+// travel in Data — the same reason annotateSearchNotes reads Data, not Output.
+func annotateWebSearchNotes(output string, data map[string]interface{}) string {
+	if !boolValue(data, "count_clamped") || !strings.HasSuffix(output, "</retrieval>") {
+		return output
+	}
+	requested := intValue(data, "count_requested")
+	maximum := intValue(data, "count_maximum")
+	if requested < 1 || maximum < 1 {
+		return output
+	}
+	note := fmt.Sprintf("  <count_clamped requested=\"%d\" maximum=\"%d\">The requested count is "+
+		"outside 1-%d and was clamped to %d. Ask for a value in range, or omit count to use the "+
+		"maximum.</count_clamped>\n", requested, maximum, maximum, maximum)
+	return strings.TrimSuffix(output, "</retrieval>") + note + "</retrieval>"
 }
 
 func viewForRow(row map[string]interface{}, mode string) string {
