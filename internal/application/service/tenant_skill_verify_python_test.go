@@ -36,10 +36,9 @@ func TestSkillPythonVerifier(t *testing.T) {
 		// wantProblem is a substring of the expected stderr. Empty means the
 		// tree must verify cleanly.
 		wantProblem string
-		// wantExit is the code a failing tree must exit with: 2 when installing
-		// a package would satisfy everything found, 1 when it would not. The
-		// install flow reads it to decide whether another installer round is
-		// worth its minutes.
+		// wantExit is the code a failing tree must exit with: 2 when every
+		// finding is a missing declared package, 1 otherwise. Both refuse the
+		// snapshot; the code only classifies the finding.
 		wantExit int
 		// wantNote is a substring of a stdout note - something the checker
 		// reported without refusing the install.
@@ -62,9 +61,8 @@ func TestSkillPythonVerifier(t *testing.T) {
 		wantProblem: "scripts/helper.py has a syntax error",
 		wantExit:    1,
 	}, {
-		// The exit code is the whole verdict, so one unfixable finding among
-		// fixable ones has to sink the batch: sending the installer back for a
-		// package it can install would only delay a failure it cannot.
+		// A syntax error among missing packages still exits 1: the batch is
+		// classified by the finding installing a package cannot fix.
 		name: "a syntax error alongside a missing requirement",
 		files: map[string]string{
 			"requirements.txt": "pandas==3.0.1\n",
@@ -162,8 +160,7 @@ func TestSkillPythonVerifier(t *testing.T) {
 				require.Error(t, err, "this skill is broken and must not reach a snapshot")
 				require.Contains(t, stderr, tc.wantProblem)
 				require.Equal(t, tc.wantExit, verifierExitCode(t, err),
-					"the exit code is what decides whether an installer round can fix this; "+
-						"stderr: %s", stderr)
+					"stderr: %s", stderr)
 			}
 			if tc.wantNote != "" {
 				require.Contains(t, stdout, "note: ",
@@ -398,4 +395,46 @@ func runSkillPythonVerifier(
 	cmd.Stderr = &stderr
 	runErr := cmd.Run()
 	return stdout.String(), stderr.String(), runErr
+}
+
+func TestSkillPythonVerifierRejectsVersionDrift(t *testing.T) {
+	python, err := exec.LookPath("python3")
+	require.NoError(t, err)
+	for _, tc := range []struct {
+		name, requirement, lock string
+		wantError               bool
+	}{
+		{"exact drift", "weknora-pin==1.0\n", "", true},
+		{"compatible range", "weknora-pin>=1,<3\n", "", false},
+		{"matching pin", "weknora-pin==2.0\n", "", false},
+		{"transitive lock drift", "", "weknora-pin==1.0 \\\n    --hash=sha256:abcd\n", true},
+		{"inactive marker", "weknora-pin==1.0; extra == 'unused'\n", "", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := writeSkillTree(t, map[string]string{
+				"requirements.txt": tc.requirement, "requirements.lock": tc.lock,
+				"weknora_pin-2.0.dist-info/METADATA": "Metadata-Version: 2.1\nName: weknora-pin\nVersion: 2.0\n",
+			})
+			cmd := exec.Command(python, "-", root)
+			cmd.Dir = root
+			cmd.Stdin = strings.NewReader(skillPythonVerifier)
+			output, err := cmd.CombinedOutput()
+			if tc.wantError {
+				require.Error(t, err)
+				require.Equal(t, 2, err.(*exec.ExitError).ExitCode())
+				require.Contains(t, string(output), "installed version is 2.0")
+			} else {
+				require.NoError(t, err, string(output))
+			}
+		})
+	}
+}
+
+func TestSkillPythonVerifierRejectsRewrittenLock(t *testing.T) {
+	root := writeSkillTree(t, map[string]string{"requirements.lock": "# weakened lock\n"})
+	bundle := &SkillBundle{Files: map[string][]byte{"requirements.lock": []byte("weknora-pin==1.0\n")}}
+	cmd := exec.Command("bash", "-c", skillPythonVerifyCommand(root, nil, nil, bundle))
+	output, err := cmd.CombinedOutput()
+	require.Error(t, err)
+	require.Contains(t, string(output), "requirements.lock changed during installation")
 }

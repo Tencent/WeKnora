@@ -307,12 +307,11 @@ func TestInstallTranscriptCreateOpensTheLogWithThePrompt(t *testing.T) {
 	require.Equal(t, "install pdf-tools", streams.events[0].Content)
 }
 
-// An install may run a second installer round, because verification happens
-// after the agent stops and a dependency it names is something the agent can
-// still fix. The engine reports "complete" at the end of every turn, so the
-// transcript must not treat the first one as the end of the install — a console
-// that saw it would stop following before the repair round began.
-func TestInstallTranscriptStaysOpenAcrossInstallerRounds(t *testing.T) {
+// The engine reports "complete" at the end of every turn, including a
+// continuation for administrator guidance. The transcript must not treat the
+// first one as the end of the install — a console that saw it would stop
+// following before the run actually finished.
+func TestInstallTranscriptStaysOpenAcrossInstallerTurns(t *testing.T) {
 	tr, bus, streams, messages := newTranscriptForTest(t)
 	ctx := context.Background()
 
@@ -326,7 +325,7 @@ func TestInstallTranscriptStaysOpenAcrossInstallerRounds(t *testing.T) {
 	}
 
 	finishRound(3, 1000)
-	tr.RecordPrompt("Verification failed. Install defusedxml into the venv.")
+	tr.RecordPrompt("Check the external CLI too.")
 	finishRound(2, 500)
 	tr.Finish(ctx, nil)
 
@@ -334,12 +333,12 @@ func TestInstallTranscriptStaysOpenAcrossInstallerRounds(t *testing.T) {
 	require.Equal(t, []types.ResponseType{
 		types.ResponseTypeInstallPrompt,
 		types.ResponseTypeComplete,
-	}, kinds, "the repair instruction has to be in the log, and the install ends once")
-	require.Contains(t, streams.events[0].Content, "Install defusedxml")
+	}, kinds, "a mid-run instruction has to be in the log, and the install ends once")
+	require.Contains(t, streams.events[0].Content, "Check the external CLI")
 
 	terminal := streams.events[len(streams.events)-1]
 	require.EqualValues(t, 5, terminal.Data["total_steps"],
-		"an install that needed a repair round cost both turns")
+		"an install that continued for guidance cost both turns")
 	require.EqualValues(t, 1500, terminal.Data["total_duration_ms"])
 	require.Len(t, messages.updated, 1)
 }
@@ -426,8 +425,8 @@ func TestInstallTranscriptPublishesActivityProgressOnToolCalls(t *testing.T) {
 	require.Equal(t, 3, got[2].steps)
 	require.Less(t, len([]rune(got[2].lastCmd)), 90, "a long command is truncated to one line")
 
-	// A repair round must not drag the bar back below the stage anchors, so
-	// muting after the first round ends the activity publishes for good.
+	// After the agent phase ends, muting stops further activity publishes
+	// from dragging the bar back below the 80 stage anchor.
 	tr.muteActivityProgress()
 	emitCall("c-4", event.AgentToolCallData{
 		ToolName: "shell_exec", Arguments: map[string]any{"command": "uv pip install defusedxml"},

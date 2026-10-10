@@ -50,11 +50,10 @@ func (s *TenantSkillService) verifyRuntimePrerequisites(
 	mgr sandbox.Manager,
 	sessionID, skillDir string,
 ) error {
-	fail := func(problem string, repairable bool) error {
+	fail := func(problem string) error {
 		return &skillVerificationError{
-			Language:   "runtime prerequisites",
-			Repairable: repairable,
-			Problems:   []string{problem},
+			Language: "runtime prerequisites",
+			Problems: []string{problem},
 		}
 	}
 	reader, ok := mgr.(sandbox.SessionFileReader)
@@ -64,32 +63,31 @@ func (s *TenantSkillService) verifyRuntimePrerequisites(
 	raw, err := reader.ReadSessionFile(ctx, sessionID, path.Join(skillDir, ".weknora", "install-report.json"))
 	if err != nil {
 		return fail(
-			"Write .weknora/install-report.json after assessing CLI and external runtime prerequisites: "+err.Error(),
-			true,
+			"Write .weknora/install-report.json after assessing CLI and external runtime prerequisites: " + err.Error(),
 		)
 	}
 	var report skillRuntimeReport
 	if len(raw) > 64*1024 {
-		return fail("install-report.json exceeds 64 KiB", true)
+		return fail("install-report.json exceeds 64 KiB")
 	}
 	if err := json.Unmarshal(raw, &report); err != nil || report.Commands == nil || report.Blockers == nil {
-		return fail(`Write a valid .weknora/install-report.json with commands and blockers arrays of strings`, true)
+		return fail(`Write a valid .weknora/install-report.json with commands and blockers arrays of strings`)
 	}
 	if len(report.Commands) > 100 || len(report.Blockers) > 100 {
-		return fail("install report has too many entries", true)
+		return fail("install report has too many entries")
 	}
 	for _, name := range report.Commands {
 		if !skillRuntimeCommandName.MatchString(name) || len(name) > 128 {
-			return fail("commands must contain bare executable names, without paths or arguments", true)
+			return fail("commands must contain bare executable names, without paths or arguments")
 		}
 	}
 	for _, blocker := range report.Blockers {
 		if strings.TrimSpace(blocker) == "" {
-			return fail("blockers must contain non-empty explanations", true)
+			return fail("blockers must contain non-empty explanations")
 		}
 	}
 	if len(report.Blockers) > 0 {
-		return fail("Unresolved runtime prerequisites: "+strings.Join(report.Blockers, "; "), false)
+		return fail("Unresolved runtime prerequisites: " + strings.Join(report.Blockers, "; "))
 	}
 	if len(report.Commands) == 0 {
 		return nil
