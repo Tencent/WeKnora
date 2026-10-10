@@ -241,8 +241,10 @@ func MergeStorageEngineConfigForUpdate(incoming, existing *StorageEngineConfig) 
 		if existing != nil && existing.OSS != nil {
 			prev = *existing.OSS
 		}
-		oss.AccessKey = PreserveIfRedacted(oss.AccessKey, prev.AccessKey)
-		oss.SecretKey = PreserveIfRedacted(oss.SecretKey, prev.SecretKey)
+		if oss.AuthType != OSSAuthECSRAMRole {
+			oss.AccessKey = PreserveIfRedacted(oss.AccessKey, prev.AccessKey)
+			oss.SecretKey = PreserveIfRedacted(oss.SecretKey, prev.SecretKey)
+		}
 		out.OSS = &oss
 	}
 	if out.KS3 != nil {

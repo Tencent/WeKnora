@@ -32,7 +32,9 @@
 | --- | --- | --- | --- |
 | `endpoint` | string | 空 | 服务地址。`minio`（`mode=remote`）、`tos`、`s3`、`oss`、`ks3`、`obs` 必填；`cos` 不需要。保存时做 SSRF 校验，内网地址需加入 `SSRF_WHITELIST` |
 | `region` | string | 空 | 地域。`cos`、`tos`、`s3`、`oss`、`ks3`、`obs` 必填 |
-| `access_key_id` / `secret_access_key` | string | 空 | 访问密钥；COS 对应 SecretId / SecretKey。`local` 与 `mode=docker` 的 MinIO 不需要 |
+| `access_key_id` / `secret_access_key` | string | 空 | 访问密钥；COS 对应 SecretId / SecretKey。`local`、`mode=docker` 的 MinIO 和 `auth_type=ecs_ram_role` 的 OSS 不需要；OSS 角色模式必须留空 |
+| `auth_type` | string | `access_key` | 仅 OSS：`access_key` 使用固定 AK/SK；`ecs_ram_role` 使用 ECS 实例绑定的 RAM 角色 |
+| `role_name` | string | 空 | 仅 OSS 角色认证：可选 RAM 角色名；留空时通过实例元数据自动发现 |
 | `bucket_name` | string | 空 | 存储桶，除 `local` 外必填 |
 | `path_prefix` | string | 空 | 对象键前缀，必须是相对路径，不能以 `/` 开头或包含 `..` |
 | `mode` | string | `remote` | 仅 MinIO：`docker` 使用部署自带的 MinIO（地址与密钥读取 `MINIO_ENDPOINT` 等环境变量），`remote` 连接外部 MinIO |
@@ -84,3 +86,43 @@ API Key 需要 `manage_storage_backends` 能力或 full-access。
 | `legacy_alias` | 见下 |
 
 `legacy_alias` 用于兼容环境变量配置的历史存储。升级时创建别名记录，使已有文件路径继续可解析，无需搬迁数据。同一空间、同一 provider 只允许一条别名记录，手动注册的实例独立保存。
+
+## OSS ECS RAM 角色认证
+
+在「设置 → 存储」添加阿里云 OSS 实例，将认证方式选为「ECS RAM 角色」。此模式不填写、也不保存固定 AK/SK；切换到该模式时表单会清空密钥。未指定认证方式的旧配置继续使用固定 AK/SK，不会自动回退到实例角色。
+
+例如使用 Bucket `sig-zhongtai`、Region `cn-beijing`、内网 Endpoint `https://oss-cn-beijing-internal.aliyuncs.com`，以及角色 `zhongtaiOSS`。新版存储后端 API 的 `config` 示例：
+
+```json
+{
+  "endpoint": "https://oss-cn-beijing-internal.aliyuncs.com",
+  "region": "cn-beijing",
+  "bucket_name": "sig-zhongtai",
+  "auth_type": "ecs_ram_role",
+  "role_name": "zhongtaiOSS",
+  "path_prefix": "weknora/"
+}
+```
+
+环境变量部署使用：
+
+```dotenv
+STORAGE_TYPE=oss
+OSS_ENDPOINT=https://oss-cn-beijing-internal.aliyuncs.com
+OSS_REGION=cn-beijing
+OSS_BUCKET_NAME=sig-zhongtai
+OSS_AUTH_TYPE=ecs_ram_role
+OSS_ROLE_NAME=zhongtaiOSS
+OSS_PATH_PREFIX=weknora/
+SSRF_WHITELIST_EXTRA=oss-cn-beijing-internal.aliyuncs.com,*.oss-cn-beijing-internal.aliyuncs.com
+```
+
+移除或清空 `OSS_ACCESS_KEY`、`OSS_SECRET_KEY`；`OSS_ROLE_NAME` 可省略。环境变量存储实例为只读，更改部署环境后需要重启服务；启动时会刷新相应的环境变量配置快照。旧版租户 `storage_engine_config.oss` 也支持 `auth_type` / `role_name`。
+
+ECS 实例必须绑定该 RAM 角色，角色必须拥有目标 Bucket 的实际读写权限。连接测试和初始化会检查 Bucket 是否存在；初始化在 Bucket 缺失时会尝试创建，因此推荐提前建好 Bucket 并授予检查权限。使用临时桶时，也需授予临时桶权限。主桶和临时桶共享 SDK 的凭据缓存与自动刷新机制，SecurityToken 参与请求签名，临时凭据不会写入存储配置。
+
+进程或容器需要能够访问实例元数据服务 `http://100.100.100.200`，以及 OSS 内网 Endpoint。当前使用的 OSS Go SDK v2（v1.5.1）通过 IMDSv1 获取角色凭据；如果实例强制要求 IMDSv2 Token，此版本的凭据提供器不可用。仅配置角色名不会为普通本地机器或未绑定角色的 ECS 提供认证能力。
+
+SSRF 校验仍保护 OSS 请求：将内网服务域名和虚拟主机形式的 Bucket 子域名加入「设置 → 安全策略」中的白名单，或加入有效的 `SSRF_WHITELIST` / `SSRF_WHITELIST_EXTRA`。上例使用地域域名及其子域名范围；无需将元数据地址加入用户可配置 Endpoint 的白名单。
+
+编辑已有存储实例时，连接测试会使用表单中的当前配置，并通过实例 ID 合并被遮蔽的已保存密钥，不会保存测试配置。

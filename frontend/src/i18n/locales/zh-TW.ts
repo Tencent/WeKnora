@@ -6447,6 +6447,11 @@ export default {
       requestFailed: '請求失敗'
     },
     storageBackend: {
+      ossAuthTypeLabel: "認證方式",
+      ossAuthAccessKey: "固定 AccessKey / SecretKey",
+      ossAuthEcsRamRole: "ECS RAM 角色",
+      ossRoleNameLabel: "RAM 角色名稱（選填）",
+      ossRoleHelp: "留空時自動探索執行個體角色。ECS 需綁定角色並授予 OSS 權限；無需填寫固定 AK/SK，臨時憑證會自動取得及更新。",
       description: '管理檔案與圖片使用的存儲實例；同一種類型可以設定多個實例。',
       empty: '尚未設定存儲實例',
       defaultTag: '預設',

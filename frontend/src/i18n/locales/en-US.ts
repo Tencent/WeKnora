@@ -2114,6 +2114,11 @@ export default {
       paddleocrVlCloudTokenPlaceholder: 'PaddleOCR-VL AI Studio Token'
     },
     storageBackend: {
+      ossAuthTypeLabel: "Authentication",
+      ossAuthAccessKey: "Static AccessKey / SecretKey",
+      ossAuthEcsRamRole: "ECS RAM role",
+      ossRoleNameLabel: "RAM role name (optional)",
+      ossRoleHelp: "Leave empty to discover the instance role. Attach a role with OSS permissions to ECS. Temporary credentials are fetched and refreshed automatically; no static AK/SK is needed.",
       description: 'Manage the storage instances used for files and images; multiple instances of the same type can be configured.',
       empty: 'No storage instances configured yet',
       defaultTag: 'Default',

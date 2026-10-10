@@ -170,6 +170,18 @@
             <label class="form-label required">Region</label>
             <t-input v-model="form.config.region" :disabled="!!editing" clearable />
           </div>
+          <div v-if="form.provider === 'oss'" class="form-item">
+            <label class="form-label">{{ t('settings.storageBackend.ossAuthTypeLabel') }}</label>
+            <t-select :value="form.config.auth_type || 'access_key'" @change="changeOSSAuthType">
+              <t-option value="access_key" :label="t('settings.storageBackend.ossAuthAccessKey')" />
+              <t-option value="ecs_ram_role" :label="t('settings.storageBackend.ossAuthEcsRamRole')" />
+            </t-select>
+          </div>
+          <div v-if="form.provider === 'oss' && form.config.auth_type === 'ecs_ram_role'" class="form-item">
+            <label class="form-label">{{ t('settings.storageBackend.ossRoleNameLabel') }}</label>
+            <t-input v-model="form.config.role_name" placeholder="zhongtaiOSS" clearable />
+            <p class="form-desc">{{ t('settings.storageBackend.ossRoleHelp') }}</p>
+          </div>
           <template v-if="needsCredentials">
             <div class="form-item">
               <label class="form-label required">Access Key / Secret ID</label>
@@ -268,7 +280,22 @@ const blankConfig = (): StorageBackendConfig => ({ mode: 'remote', endpoint: '',
 const form = reactive<{ name: string; provider: string; config: StorageBackendConfig }>({ name: '', provider: 'local', config: blankConfig() })
 const needsEndpoint = computed(() => !['local', 'cos'].includes(form.provider) && !(form.provider === 'minio' && form.config.mode === 'docker'))
 const needsRegion = computed(() => !['local', 'minio'].includes(form.provider))
-const needsCredentials = computed(() => form.provider !== 'local' && !(form.provider === 'minio' && form.config.mode === 'docker'))
+const needsCredentials = computed(() =>
+  form.provider !== 'local'
+  && !(form.provider === 'minio' && form.config.mode === 'docker')
+  && !(form.provider === 'oss' && form.config.auth_type === 'ecs_ram_role'),
+)
+
+function changeOSSAuthType(value: unknown) {
+  form.config.auth_type = value === 'ecs_ram_role' ? 'ecs_ram_role' : 'access_key'
+  if (form.config.auth_type === 'ecs_ram_role') {
+    form.config.access_key_id = ''
+    form.config.secret_access_key = ''
+  } else {
+    form.config.role_name = ''
+  }
+  rawTestResult.value = null
+}
 
 const resolveLogo = (provider: string) => providerLogo('storage', provider)
 const providerInitial = (provider: string) => (provider || '?').trim().charAt(0).toUpperCase() || '?'
@@ -339,7 +366,7 @@ async function testRaw() {
   testing.value = true
   rawTestResult.value = null
   try {
-    const r: any = editing.value ? await testStorageBackendByID(editing.value.id) : await testStorageBackend(form)
+    const r: any = await testStorageBackend({ ...form, id: editing.value?.id })
     if (r.success) { rawTestResult.value = 'ok'; MessagePlugin.success(t('settings.storageBackend.testSuccess')) }
     else { rawTestResult.value = 'error'; MessagePlugin.error(r.error || t('settings.storageBackend.testFailed')) }
   } finally { testing.value = false }
