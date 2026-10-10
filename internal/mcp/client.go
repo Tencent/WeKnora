@@ -238,17 +238,25 @@ func NewMCPClient(config *ClientConfig) (MCPClient, error) {
 		if config.Service.URL == nil || *config.Service.URL == "" {
 			return nil, fmt.Errorf("URL is required for SSE transport")
 		}
+		// SSE keeps its GET response body open for the connection lifetime.
+		// OAuth retains the bounded HTTP client; SSE bounds startup and RPCs
+		// separately without putting an expiration on the event stream.
+		sseHTTPClient := *httpClient
+		sseHTTPClient.Timeout = 0
 		options := []transport.ClientOption{
-			transport.WithHTTPClient(httpClient),
+			transport.WithHTTPClient(&sseHTTPClient),
 			transport.WithHeaders(headers),
+			transport.WithEndpointTimeout(timeout),
+			transport.WithResponseTimeout(timeout),
 		}
 		if useOAuth {
 			options = append(options, transport.WithOAuth(oauthConfig))
 		}
-		connection, err = transport.NewSSE(*config.Service.URL, options...)
+		sse, err := transport.NewSSE(*config.Service.URL, options...)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create SSE client: %w", err)
 		}
+		connection = &boundedSSEConnection{SSE: sse, timeout: timeout}
 	case types.MCPTransportHTTPStreamable:
 		if config.Service.URL == nil || *config.Service.URL == "" {
 			return nil, fmt.Errorf("URL is required for HTTP Streamable transport")
