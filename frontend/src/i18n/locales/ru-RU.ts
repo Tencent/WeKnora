@@ -984,6 +984,12 @@ export default {
     connectionFailed: 'Подключение не удалось',
     isRequired: 'обязательно для заполнения',
     credentialsLabel: 'учётные данные',
+    localFolder: {
+      title: 'Локальная папка', rootPath: 'Путь к папке',
+      rootPathHint: 'Абсолютный путь на сервере WeKnora или в его контейнере (не на вашем компьютере) внутри каталога из WEKNORA_LOCAL_FOLDER_ROOTS (например, хранилище Obsidian, смонтированное только для чтения).',
+      include: 'Шаблоны включения', exclude: 'Шаблоны исключения',
+      patternsHint: 'По одному glob-шаблону в строке относительно папки (** соответствует любой глубине каталогов). Оставьте пустым для значений по умолчанию: распространённые форматы документов (Markdown, текст, PDF, Office, CSV, HTML, EPUB). Изображения и аудио требуют VLM/ASR, поэтому шаблоны для них добавляются явно. Форматы, которые WeKnora не может импортировать, пропускаются.',
+    },
     gitlab: {
       baseUrl: 'URL GitLab', accessToken: 'Персональный токен доступа', projects: 'Проекты GitLab',
       projectsHint: 'Укажите ID проекта или путь в пространстве имён (например group/project), а также при необходимости ветку и каталоги.',
@@ -1160,7 +1166,8 @@ export default {
       ima: 'Синхронизация документов, заметок и файлов из баз знаний Tencent IMA (ИИ-сессии и разбор видео не поддерживаются)',
       rss: 'Синхронизация статей из лент RSS / Atom',
       gitlab: 'Синхронизация файлов из проектов GitLab',
-      seafile: 'Синхронизация папок и файлов из библиотек Seafile'
+      seafile: 'Синхронизация папок и файлов из библиотек Seafile',
+      local_folder: 'Синхронизация файлов из папки на сервере, например смонтированного хранилища Obsidian'
     },
     connector: {
       feishu: 'Feishu (Фэйшу)',
@@ -1174,7 +1181,8 @@ export default {
       ima: 'Tencent IMA',
       rss: 'RSS / Atom лента',
       gitlab: 'GitLab',
-      seafile: 'Seafile'
+      seafile: 'Seafile',
+      local_folder: 'Локальная папка'
     },
     logDetail: {
       startTime: 'Время начала',
@@ -7212,6 +7220,7 @@ export default {
     channelGitLab: 'GitLab',
     channelSeafile: 'Seafile',
     channelIma: 'Tencent IMA',
+    channelLocalFolder: 'Локальная папка',
     channelUpload: 'Загрузка',
     channelManual: 'Вручную',
     channelUrl: 'Веб',

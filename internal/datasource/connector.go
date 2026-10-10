@@ -318,6 +318,14 @@ var ConnectorMetadataRegistry = map[string]ConnectorMetadata{
 		AuthType:     "token",
 		Capabilities: []string{"incremental", "hierarchical", "deletion_sync"},
 	},
+	types.ConnectorTypeLocalFolder: {
+		Type:         types.ConnectorTypeLocalFolder,
+		Name:         "Local Folder",
+		Description:  "Sync files from a server folder allowed by WEKNORA_LOCAL_FOLDER_ROOTS",
+		Priority:     14,
+		AuthType:     "none",
+		Capabilities: []string{"incremental", "deletion_sync"},
+	},
 }
 
 // ListAvailableConnectors returns all available connector metadata
