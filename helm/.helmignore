@@ -6,3 +6,4 @@
 *.orig
 *~
 .DS_Store
+tests/
