@@ -183,61 +183,78 @@ func (m *OAuthManager) StartAuthorizationForService(
 	return authURL, err
 }
 
+// OAuthAuthorizationResult describes the authorization attempt a provider
+// callback belonged to.
+type OAuthAuthorizationResult struct {
+	// FrontendRedirect is where the browser is sent next. It is set even when
+	// the callback fails, as soon as the attempt's state has been read.
+	FrontendRedirect string
+	// TenantID and ServiceID identify the service the attempt authorized.
+	TenantID  uint64
+	ServiceID string
+	// Principal is the identity the token was issued for.
+	Principal types.Principal
+}
+
 // CompleteAuthorization handles the provider callback: it validates state,
 // exchanges the code for tokens (PKCE), and persists the per-user token.
-// Returns the frontend redirect URL and service ID recorded at
-// StartAuthorization time so the caller can recycle any cached transport that
-// still carries the previous OAuth client registration.
+// The result identifies the authorized service and principal so the caller can
+// recycle the cached connections the new authorization leaves outdated.
 func (m *OAuthManager) CompleteAuthorization(
 	ctx context.Context, state, code string,
-) (frontendRedirect, serviceID string, err error) {
+) (OAuthAuthorizationResult, error) {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), oauthCallbackTimeout)
 	defer cancel()
 
 	st, err := m.states.Take(ctx, state)
 	if err != nil {
-		return "", "", err
+		return OAuthAuthorizationResult{}, err
 	}
-	frontendRedirect, err = validateFrontendRedirect(st.FrontendRedirect)
+	frontendRedirect, err := validateFrontendRedirect(st.FrontendRedirect)
 	if err != nil {
-		return "/", "", err
+		return OAuthAuthorizationResult{FrontendRedirect: "/"}, err
 	}
-	serviceID = st.ServiceID
+	result := OAuthAuthorizationResult{
+		FrontendRedirect: frontendRedirect,
+		TenantID:         st.TenantID,
+		ServiceID:        st.ServiceID,
+	}
 	principal := st.Principal.Normalize()
 	if !principal.Valid() && st.UserID != "" {
 		principal = types.Principal{Type: types.PrincipalWebUser, ID: st.UserID}.Normalize()
 	}
 	if !principal.Valid() {
-		return frontendRedirect, serviceID, fmt.Errorf("principal context is missing from OAuth state")
+		return result, fmt.Errorf("principal context is missing from OAuth state")
 	}
+	result.Principal = principal
 
 	service, err := m.serviceRepo.GetByID(ctx, st.TenantID, st.ServiceID)
 	if err != nil {
-		return frontendRedirect, serviceID, fmt.Errorf("failed to load MCP service: %w", err)
+		return result, fmt.Errorf("failed to load MCP service: %w", err)
 	}
 	if service == nil {
-		return frontendRedirect, serviceID, fmt.Errorf("MCP service not found")
+		return result, fmt.Errorf("MCP service not found")
 	}
 
 	h, err := m.newHandler(ctx, service, st.TenantID, principal, st.RedirectURI)
 	if err != nil {
-		return frontendRedirect, serviceID, err
+		return result, err
 	}
 	// Re-prime the expected state so the library's CSRF check passes after
 	// reconstructing the handler in this separate request.
 	h.SetExpectedState(state)
 
 	if err := h.ProcessAuthorizationResponse(ctx, code, state, st.CodeVerifier); err != nil {
-		return frontendRedirect, serviceID, fmt.Errorf("token exchange failed: %w", err)
+		return result, fmt.Errorf("token exchange failed: %w", err)
 	}
 	if err := m.states.CompleteAttempt(ctx, state); err != nil {
-		return frontendRedirect, serviceID, fmt.Errorf("failed to record authorization completion: %w", err)
+		return result, fmt.Errorf("failed to record authorization completion: %w", err)
 	}
 	// ProcessAuthorizationResponse persists the token via the TokenStore.
 	logger.GetLogger(ctx).Infof(
 		"MCP OAuth authorized: service=%s principal=%s", st.ServiceID, principal.StorageID(),
 	)
-	return frontendRedirect, serviceID, nil
+	return result, nil
 }
 
 // IsAuthorizationAttemptComplete reports whether this exact authorization
