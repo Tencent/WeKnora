@@ -1,15 +1,19 @@
 package qdrant
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 	"unicode/utf8"
 
+	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/qdrant/go-client/qdrant"
 	"google.golang.org/grpc"
@@ -570,6 +574,364 @@ func TestDeleteTreatsStaleCacheMissingCollectionAsNoOp(t *testing.T) {
 			}
 			if _, ok := harness.repo.initializedCollections.Load(1024); ok {
 				t.Fatal("missing collection must drop the initialized cache so the following write can recreate it")
+			}
+		})
+	}
+}
+
+// errKeywordScroll makes every Scroll RPC fail the way an unreachable or
+// overloaded Qdrant does.
+var errKeywordScroll = errors.New("qdrant scroll unavailable")
+
+type keywordsTestHarness struct {
+	repo    *qdrantRepository
+	scrolls []string
+}
+
+// newKeywordsTestHarness wires KeywordsRetrieve to a fake Qdrant server. The
+// collection list and the per-collection Scroll outcome are the only inputs the
+// search loop has, so both are controlled here instead of stubbing the
+// repository.
+func newKeywordsTestHarness(t *testing.T, collections []string,
+	scroll func(collectionName string) ([]*qdrant.RetrievedPoint, error),
+) *keywordsTestHarness {
+	t.Helper()
+	harness := &keywordsTestHarness{}
+	client := newInterceptedQdrantClient(t, func(
+		_ context.Context, method string, req, reply any, _ *grpc.ClientConn,
+		_ grpc.UnaryInvoker, _ ...grpc.CallOption,
+	) error {
+		switch request := req.(type) {
+		case *qdrant.ListCollectionsRequest:
+			response := reply.(*qdrant.ListCollectionsResponse)
+			for _, name := range collections {
+				response.Collections = append(response.Collections, &qdrant.CollectionDescription{Name: name})
+			}
+			return nil
+		case *qdrant.ScrollPoints:
+			name := request.GetCollectionName()
+			harness.scrolls = append(harness.scrolls, name)
+			points, err := scroll(name)
+			if err != nil {
+				return err
+			}
+			reply.(*qdrant.ScrollResponse).Result = points
+			return nil
+		default:
+			return fmt.Errorf("unexpected RPC %s", method)
+		}
+	})
+	harness.repo = &qdrantRepository{client: client, collectionBaseName: "vectors"}
+	return harness
+}
+
+func keywordsRetrieveParams() types.RetrieveParams {
+	return types.RetrieveParams{
+		Query:            "invoice total",
+		TopK:             10,
+		KnowledgeBaseIDs: []string{"kb-1"},
+	}
+}
+
+func keywordHitPoint(id, content string) *qdrant.RetrievedPoint {
+	return &qdrant.RetrievedPoint{
+		Id: &qdrant.PointId{PointIdOptions: &qdrant.PointId_Uuid{Uuid: id}},
+		Payload: map[string]*qdrant.Value{
+			fieldContent:    qdrant.NewValueString(content),
+			fieldChunkID:    qdrant.NewValueString(id),
+			fieldSourceID:   qdrant.NewValueString("source-1"),
+			fieldSourceType: qdrant.NewValueInt(2),
+		},
+	}
+}
+
+// captureLogs redirects the package logger for one test. The conclusion
+// "No keyword matches found" is only legitimate when nothing failed, so the
+// tests assert on the rendered log rather than on the counters alone.
+func captureLogs(t *testing.T) *bytes.Buffer {
+	t.Helper()
+	var buf bytes.Buffer
+	logger.SetOutput(&buf)
+	t.Cleanup(func() { logger.SetOutput(os.Stdout) })
+	return &buf
+}
+
+// A batch in which every matching collection fails must reach the caller as an
+// error. Returning an empty result set with a nil error is indistinguishable
+// from a genuine zero-hit search, and the QA pipeline answers "no relevant
+// content" on top of it (#3835).
+func TestKeywordsRetrieveFailsWhenEveryMatchedCollectionFails(t *testing.T) {
+	logs := captureLogs(t)
+	harness := newKeywordsTestHarness(t,
+		[]string{"vectors_1024", "vectors_1536", "other_2048"},
+		func(string) ([]*qdrant.RetrievedPoint, error) {
+			return nil, errKeywordScroll
+		},
+	)
+
+	results, err := harness.repo.KeywordsRetrieve(context.Background(), keywordsRetrieveParams())
+
+	if !errors.Is(err, errKeywordScroll) {
+		t.Fatalf("all-collections failure must surface as an error, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "all 2 matched collections") {
+		t.Fatalf("error must state how many collections failed, got %q", err)
+	}
+	if results != nil {
+		t.Fatalf("no result set may accompany the error, got %d sets", len(results))
+	}
+	if want := []string{"vectors_1024", "vectors_1536"}; !slices.Equal(harness.scrolls, want) {
+		t.Fatalf("scroll attempts = %v, want %v: only base-name collections are searched", harness.scrolls, want)
+	}
+	if strings.Contains(logs.String(), "No keyword matches found") {
+		t.Fatal("a failed batch must not be logged as a search that found no matches")
+	}
+}
+
+// One failing collection must not fail the batch as long as another one
+// answered: partial results are still results. The failure must travel with
+// them though (RetrieveResult.Error) — otherwise callers treat the incomplete
+// answer as a complete one (#3835).
+func TestKeywordsRetrieveKeepsResultsWhenOnlySomeCollectionsFail(t *testing.T) {
+	logs := captureLogs(t)
+	harness := newKeywordsTestHarness(t, []string{"vectors_1024", "vectors_1536"},
+		func(name string) ([]*qdrant.RetrievedPoint, error) {
+			if name == "vectors_1024" {
+				return nil, errKeywordScroll
+			}
+			return []*qdrant.RetrievedPoint{keywordHitPoint("chunk-1", "invoice total 42")}, nil
+		},
+	)
+
+	results, err := harness.repo.KeywordsRetrieve(context.Background(), keywordsRetrieveParams())
+	if err != nil {
+		t.Fatalf("a partially failed batch must not fail the caller, got %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected one result set, got %d", len(results))
+	}
+	if results[0].Error == nil {
+		t.Fatal("a partially failed batch must mark its result set with the failure")
+	}
+	if !errors.Is(results[0].Error, errKeywordScroll) {
+		t.Fatalf("partial error must keep the underlying cause, got %v", results[0].Error)
+	}
+	if !strings.Contains(results[0].Error.Error(), "1 of 2 matched collections") {
+		t.Fatalf("partial error must state what failed, got %q", results[0].Error)
+	}
+	if len(results[0].Results) != 1 {
+		t.Fatalf("expected the surviving collection's hit, got %d results", len(results[0].Results))
+	}
+	if got := results[0].Results[0].ChunkID; got != "chunk-1" {
+		t.Fatalf("unexpected chunk id %q", got)
+	}
+	if results[0].RetrieverType != types.KeywordsRetrieverType {
+		t.Fatalf("expected keywords retriever type, got %v", results[0].RetrieverType)
+	}
+	if strings.Contains(logs.String(), "No keyword matches found") {
+		t.Fatal("a partially failed batch must not be logged as a search that found no matches")
+	}
+}
+
+// The genuine zero-hit outcome keeps its old shape: every collection answered,
+// no token matched, so an empty result with a nil error is correct and the
+// conclusion log still fires.
+func TestKeywordsRetrieveReportsNoMatchesWhenNothingFailed(t *testing.T) {
+	logs := captureLogs(t)
+	harness := newKeywordsTestHarness(t, []string{"vectors_1024"},
+		func(string) ([]*qdrant.RetrievedPoint, error) {
+			return nil, nil
+		},
+	)
+
+	results, err := harness.repo.KeywordsRetrieve(context.Background(), keywordsRetrieveParams())
+	if err != nil {
+		t.Fatalf("a successful search without matches must not error, got %v", err)
+	}
+	if len(results) != 1 || len(results[0].Results) != 0 {
+		t.Fatalf("expected one empty result set, got %#v", results)
+	}
+	if results[0].Error != nil {
+		t.Fatalf("a complete zero-hit search must not mark an error, got %v", results[0].Error)
+	}
+	if !strings.Contains(logs.String(), "No keyword matches found") {
+		t.Fatal("a successful zero-hit search must still be logged as such")
+	}
+}
+
+// A partial failure with zero hits is still a partial failure: the result set
+// stays empty but must carry the error, and the conclusion log must stay off.
+func TestKeywordsRetrieveMarksPartialFailureWhenNothingHit(t *testing.T) {
+	logs := captureLogs(t)
+	harness := newKeywordsTestHarness(t, []string{"vectors_1024", "vectors_1536"},
+		func(name string) ([]*qdrant.RetrievedPoint, error) {
+			if name == "vectors_1024" {
+				return nil, errKeywordScroll
+			}
+			return nil, nil
+		},
+	)
+
+	results, err := harness.repo.KeywordsRetrieve(context.Background(), keywordsRetrieveParams())
+	if err != nil {
+		t.Fatalf("a partially failed batch must not fail the caller, got %v", err)
+	}
+	if len(results) != 1 || len(results[0].Results) != 0 {
+		t.Fatalf("expected one empty result set, got %#v", results)
+	}
+	if !errors.Is(results[0].Error, errKeywordScroll) {
+		t.Fatalf("partial failure with zero hits must still be marked, got %v", results[0].Error)
+	}
+	if strings.Contains(logs.String(), "No keyword matches found") {
+		t.Fatal("a partially failed batch must not be logged as a search that found no matches")
+	}
+}
+
+// No collection carries the repository's base name: nothing was searched at
+// all, which must be distinguishable from a search that ran and hit nothing.
+func TestKeywordsRetrieveWarnsWhenNoCollectionMatchesBaseName(t *testing.T) {
+	logs := captureLogs(t)
+	harness := newKeywordsTestHarness(t, []string{"other_1024"},
+		func(string) ([]*qdrant.RetrievedPoint, error) {
+			return nil, nil
+		},
+	)
+
+	results, err := harness.repo.KeywordsRetrieve(context.Background(), keywordsRetrieveParams())
+	if err != nil {
+		t.Fatalf("an empty collection list must not error, got %v", err)
+	}
+	if len(results) != 1 || len(results[0].Results) != 0 {
+		t.Fatalf("expected one empty result set, got %#v", results)
+	}
+	if results[0].Error != nil {
+		t.Fatalf("no matching collection is not a partial failure, got %v", results[0].Error)
+	}
+	if len(harness.scrolls) != 0 {
+		t.Fatalf("no Scroll may be issued without a matching collection, got %v", harness.scrolls)
+	}
+	if !strings.Contains(logs.String(), "No collection matched base name") {
+		t.Fatal("a search that never ran must be logged as such")
+	}
+	if strings.Contains(logs.String(), "No keyword matches found") {
+		t.Fatal("a search that never ran must not be logged as a search that found no matches")
+	}
+}
+
+func TestPointWritesWaitForApplication(t *testing.T) {
+	indices := make([]*types.IndexInfo, 101)
+	embeddings := make(map[string][]float32, len(indices))
+	for i := range indices {
+		id := fmt.Sprintf("chunk-%d", i)
+		indices[i] = &types.IndexInfo{SourceID: id, ChunkID: id, IsEnabled: true}
+		embeddings[id] = []float32{0.1, 0.2, 0.3, 0.4}
+	}
+	params := map[string]any{fieldEmbedding: embeddings}
+	chunkMap := make(map[string]string, 65)
+	for i := range 65 {
+		chunkMap[fmt.Sprintf("chunk-%d", i)] = fmt.Sprintf("target-%d", i)
+	}
+	operations := []struct {
+		name   string
+		writes int
+		run    func(context.Context, *qdrantRepository) error
+	}{
+		{"save", 1, func(ctx context.Context, repo *qdrantRepository) error {
+			return repo.Save(ctx, indices[0], params)
+		}},
+		{"batch save", 2, func(ctx context.Context, repo *qdrantRepository) error {
+			return repo.BatchSave(ctx, indices, params)
+		}},
+		{"copy", 2, func(ctx context.Context, repo *qdrantRepository) error {
+			return repo.CopyIndices(ctx, "kb-src", map[string]string{"know-1": "know-2"},
+				chunkMap, "kb-dst", 4, types.KnowledgeBaseTypeDocument)
+		}},
+		{"enable and disable", 2, func(ctx context.Context, repo *qdrantRepository) error {
+			return repo.BatchUpdateChunkEnabledStatus(ctx, map[string]bool{"on": true, "off": false})
+		}},
+		{"tags", 2, func(ctx context.Context, repo *qdrantRepository) error {
+			return repo.BatchUpdateChunkTagID(ctx, map[string]string{"one": "tag-a", "two": "tag-b"})
+		}},
+		{"move", 1, func(ctx context.Context, repo *qdrantRepository) error {
+			return repo.MoveKnowledgeIndices(ctx, "kb-src", "kb-dst", "know-1", nil, 4, "doc")
+		}},
+	}
+	for _, operation := range deleteOperations() {
+		operations = append(operations, struct {
+			name   string
+			writes int
+			run    func(context.Context, *qdrantRepository) error
+		}{operation.name, 1, operation.run})
+	}
+	for _, operation := range operations {
+		t.Run(operation.name, func(t *testing.T) {
+			for _, outcome := range []struct {
+				name string
+				err  error
+			}{
+				{"completed", nil},
+				{"application failure", status.Error(codes.Internal, "failed to apply write")},
+				{"timeout", context.DeadlineExceeded},
+			} {
+				t.Run(outcome.name, func(t *testing.T) {
+					server := &copyTestServer{}
+					for i := range 65 {
+						server.source = append(server.source, copyTestSourcePoint(i))
+					}
+					applied, acknowledged := 0, 0
+					client := newInterceptedQdrantClient(t, func(
+						_ context.Context, method string, req, reply any, _ *grpc.ClientConn,
+						_ grpc.UnaryInvoker, _ ...grpc.CallOption,
+					) error {
+						var wait bool
+						switch request := req.(type) {
+						case *qdrant.ListCollectionsRequest:
+							reply.(*qdrant.ListCollectionsResponse).Collections = []*qdrant.CollectionDescription{
+								{Name: "vectors_4"},
+							}
+							return nil
+						case *qdrant.ScrollPoints:
+							response := reply.(*qdrant.ScrollResponse)
+							response.Result, response.NextPageOffset = server.page(request)
+							return nil
+						case *qdrant.UpsertPoints:
+							wait = request.GetWait()
+						case *qdrant.DeletePoints:
+							wait = request.GetWait()
+						case *qdrant.SetPayloadPoints:
+							wait = request.GetWait()
+						default:
+							return fmt.Errorf("unexpected RPC %s", method)
+						}
+						// An asynchronous write can be acknowledged before it is applied,
+						// even if application will fail. Only waiting exposes that failure.
+						response := reply.(*qdrant.PointsOperationResponse)
+						if !wait {
+							acknowledged++
+							response.Result = &qdrant.UpdateResult{Status: qdrant.UpdateStatus_Acknowledged}
+							return nil
+						}
+						if outcome.err != nil {
+							return outcome.err
+						}
+						applied++
+						response.Result = &qdrant.UpdateResult{Status: qdrant.UpdateStatus_Completed}
+						return nil
+					})
+					repo := &qdrantRepository{client: client, collectionBaseName: "vectors"}
+					repo.initializedCollections.Store(4, true)
+					repo.initializedCollections.Store(1024, true)
+					err := operation.run(context.Background(), repo)
+					if !errors.Is(err, outcome.err) {
+						t.Fatalf("got error %v, want %v", err, outcome.err)
+					}
+					if acknowledged != 0 {
+						t.Fatalf("returned with %d writes acknowledged but not applied", acknowledged)
+					}
+					if outcome.err == nil && applied != operation.writes {
+						t.Fatalf("applied %d writes before return, want %d", applied, operation.writes)
+					}
+				})
 			}
 		})
 	}

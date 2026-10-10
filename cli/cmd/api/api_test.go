@@ -12,9 +12,12 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/spf13/cobra"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
@@ -388,6 +391,109 @@ func asTypedError(err error, dst **cmdutil.Error) bool {
 		e = u.Unwrap()
 	}
 	return false
+}
+
+func TestAPI_PaginateTruncatedHTTPBody(t *testing.T) {
+	for _, mode := range []cmdutil.FormatMode{cmdutil.FormatJSON, cmdutil.FormatText} {
+		t.Run(string(mode), func(t *testing.T) {
+			out, _ := iostreams.SetForTest(t)
+			var calls atomic.Int32
+			cli, stop := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
+				calls.Add(1)
+				body := `{"data":[{"id":"1"}`
+				w.Header().Set("Content-Type", "application/json")
+				w.Header().Set("Content-Length", fmt.Sprint(len(body)+1))
+				_, _ = io.WriteString(w, body)
+			})
+			defer stop()
+
+			fopts := &cmdutil.FormatOptions{Mode: mode}
+			err := runAPI(context.Background(), &Options{}, fopts, cli, "GET", "/api/v1/items", true)
+			require.ErrorIs(t, err, io.ErrUnexpectedEOF, "stdout: %q", out.String())
+			var ce *cmdutil.Error
+			require.ErrorAs(t, err, &ce)
+			assert.Equal(t, cmdutil.CodeNetworkError, ce.Code)
+			assert.Empty(t, out.String(), "stdout must be empty on a failed transfer")
+			assert.Equal(t, int32(1), calls.Load())
+		})
+	}
+}
+
+type apiResponseBody struct {
+	data       string
+	err        error
+	closeCalls int
+}
+
+func (b *apiResponseBody) Read(p []byte) (int, error) {
+	n := copy(p, b.data)
+	b.data = b.data[n:]
+	if len(b.data) == 0 {
+		return n, b.err
+	}
+	return n, nil
+}
+
+func (b *apiResponseBody) Close() error {
+	b.closeCalls++
+	return nil
+}
+
+func TestAPI_PaginateReadError(t *testing.T) {
+	readErr := errors.New("response body read failed")
+	for _, tt := range []struct {
+		name       string
+		failedPage int
+		body       string
+		status     int
+	}{
+		{"first complete page", 1, `{"data":[{"id":"1"}],"total":1,"page_size":1}`, http.StatusOK},
+		{"first non-paginated response", 1, `{"hello":"world"}`, http.StatusOK},
+		{"later complete page", 2, `{"data":[{"id":"2"}],"total":2,"page_size":1}`, http.StatusOK},
+		{"later truncated page", 2, `{"data":[`, http.StatusOK},
+		{"later page with more results", 2, `{"data":[{"id":"2"}],"total":3,"page_size":1}`, http.StatusOK},
+		{"error status", 1, `{"error":"unavailable"}`, http.StatusBadGateway},
+	} {
+		for _, mode := range []cmdutil.FormatMode{cmdutil.FormatJSON, cmdutil.FormatText} {
+			t.Run(tt.name+"/"+string(mode), func(t *testing.T) {
+				out, _ := iostreams.SetForTest(t)
+				var bodies []*apiResponseBody
+				calls := 0
+				svc := &fakeAPISvc{do: func(_, _ string, _ any) (*http.Response, error) {
+					calls++
+					if calls > tt.failedPage {
+						return nil, errors.New("requested another page after a failed read")
+					}
+					for i, body := range bodies {
+						assert.Equal(t, 1, body.closeCalls, "page %d must close before the next request", i+1)
+					}
+					body := &apiResponseBody{
+						data: `{"data":[{"id":"1"}],"total":3,"page_size":1}`,
+						err:  io.EOF,
+					}
+					status := http.StatusOK
+					if calls == tt.failedPage {
+						body.data, body.err, status = tt.body, readErr, tt.status
+					}
+					bodies = append(bodies, body)
+					return &http.Response{StatusCode: status, Body: body, Header: make(http.Header)}, nil
+				}}
+
+				fopts := &cmdutil.FormatOptions{Mode: mode}
+				err := runAPI(context.Background(), &Options{}, fopts, svc, "GET", "/api/v1/items", true)
+				require.ErrorIs(t, err, readErr, "stdout: %q; requests: %d", out.String(), calls)
+				var ce *cmdutil.Error
+				require.ErrorAs(t, err, &ce)
+				assert.Equal(t, cmdutil.CodeNetworkError, ce.Code)
+				assert.Equal(t, "read response body", ce.Message)
+				assert.Empty(t, out.String(), "stdout must not contain partial results")
+				assert.Equal(t, tt.failedPage, calls)
+				for i, body := range bodies {
+					assert.Equal(t, 1, body.closeCalls, "page %d body must close exactly once", i+1)
+				}
+			})
+		}
+	}
 }
 
 func TestAPI_PaginateMergesPages(t *testing.T) {

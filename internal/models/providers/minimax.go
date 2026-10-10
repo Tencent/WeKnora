@@ -15,9 +15,10 @@
 //   - the only credential is a bearer API key: the GroupId that the legacy
 //     /v1/text/chatcompletion_v2 endpoint required is not used here, so this
 //     vendor needs no ExtraFields;
-//   - the mainland endpoint is https://api.minimaxi.com/v1 and the global one
+//   - the mainland endpoint is https://api.minimax.cn/v1 and the global one
 //     https://api.minimax.io/v1; keys are region-bound (mainland keys to
-//     minimaxi.com, global keys to minimax.io).
+//     minimax.cn, global keys to minimax.io). Mainland endpoint reference:
+//     https://platform.minimax.cn/docs/api-reference/text-openai-api.
 //
 // Second protocol: an Anthropic Messages facade lives at
 // https://api.minimax.io/anthropic (mainland form in MinimaxAnthropicBaseURL), and
@@ -40,10 +41,8 @@
 // unverified: max output caps. The model table publishes context windows but
 // no per-model output cap, so the max_output_tokens in models.json are
 // carried over unconfirmed;
-// unverified: only the global https://api.minimax.io/anthropic form of the
-// Anthropic facade is spelled out in the docs; the mainland
-// https://api.minimaxi.com/anthropic that MinimaxAnthropicBaseURL holds is inferred
-// from the region split of the /v1 hosts.
+// The mainland Anthropic facade is documented at
+// https://platform.minimax.cn/docs/api-reference/text-anthropic-api.
 package providers
 
 import (
@@ -60,13 +59,13 @@ var minimaxIcon []byte
 const MinimaxID = "minimax"
 
 // MinimaxBaseURL is the mainland-China OpenAI-compatible endpoint.
-const MinimaxBaseURL = "https://api.minimaxi.com/v1"
+const MinimaxBaseURL = "https://api.minimax.cn/v1"
 
 // MinimaxGlobalBaseURL is the international endpoint.
 const MinimaxGlobalBaseURL = "https://api.minimax.io/v1"
 
 // MinimaxAnthropicBaseURL is the Anthropic Messages compatibility facade.
-const MinimaxAnthropicBaseURL = "https://api.minimaxi.com/anthropic"
+const MinimaxAnthropicBaseURL = "https://api.minimax.cn/anthropic"
 
 func newMinimaxProvider() *Definition {
 	return &Definition{
@@ -79,13 +78,14 @@ func newMinimaxProvider() *Definition {
 			"zh-CN": "MiniMax-M3, MiniMax-M2.7, MiniMax-M2.7-highspeed 等。国际版 " +
 				MinimaxGlobalBaseURL + "；Anthropic 兼容接口 " + MinimaxAnthropicBaseURL,
 		},
-		Website:      "https://platform.minimaxi.com",
+		Website:      "https://platform.minimax.cn",
 		Icon:         minimaxIcon,
 		API:          api.APIOpenAICompletions,
 		Order:        16,
 		RequiresAuth: true,
 		Auth:         AuthBearer,
-		URLPatterns:  []string{"minimax.io", "minimaxi.com"},
+		// Retain inference for saved rows using the previous mainland domain.
+		URLPatterns: []string{"minimax.cn", "minimax.io", "minimaxi.com"},
 		DefaultBaseURLs: map[types.ModelType]string{
 			types.ModelTypeKnowledgeQA: MinimaxBaseURL,
 		},

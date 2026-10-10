@@ -472,3 +472,72 @@ func TestTableSummaryCleanupDoesNotFollowMovedDocument(t *testing.T) {
 	require.Equal(t, "other", current.KnowledgeBaseID)
 	require.Equal(t, row.ParseStatus, current.ParseStatus)
 }
+
+// cloneCopyEngine records the chunk mapping CloneChunk hands to CopyIndices.
+type cloneCopyEngine struct {
+	parentChildRetrieveEngine
+	copied map[string]string
+}
+
+func (e *cloneCopyEngine) Support() []types.RetrieverType {
+	return []types.RetrieverType{types.VectorRetrieverType, types.KeywordsRetrieverType}
+}
+
+func (e *cloneCopyEngine) CopyIndices(
+	_ context.Context, _ string, _, chunks map[string]string, _ string, _ int, _ string,
+) error {
+	e.copied = chunks
+	return nil
+}
+
+func TestCloneCopiesImageVectorsOnlyIntoKBsThatTakeThem(t *testing.T) {
+	for _, targetOn := range []bool{false, true} {
+		t.Run(map[bool]string{false: "target off", true: "target on"}[targetOn], func(t *testing.T) {
+			t.Setenv("RETRIEVE_DRIVER", "postgres")
+			f := transferFixture(t, access.KBTransferClone)
+			require.NoError(t, f.db.Create(&types.Chunk{
+				ID: "image-vector", TenantID: 7, KnowledgeID: "doc", KnowledgeBaseID: "kb",
+				ChunkType: types.ChunkTypeImageVector, ParentChunkID: "chunk", Content: "caption",
+			}).Error)
+			engine := &cloneCopyEngine{}
+			f.svc.retrieveEngine = parentChildRetrieveRegistry{engine: engine}
+			f.svc.modelService = parentChildModelService{embedder: parentChildEmbedder{}}
+			for _, kb := range []*types.KnowledgeBase{f.kbs.values["kb"], f.kbs.values["other"]} {
+				kb.EmbeddingModelID = "model"
+				kb.IndexingStrategy.VectorEnabled = true
+			}
+			f.kbs.values["kb"].ImageProcessingConfig.ImageVectorEnabled = true
+			f.kbs.values["other"].ImageProcessingConfig.ImageVectorEnabled = targetOn
+
+			src, err := f.repo.GetKnowledgeByID(f.ctx, 7, "doc")
+			require.NoError(t, err)
+			require.NoError(t, f.svc.cloneKnowledge(f.ctx, src, f.kbs.values["other"]))
+
+			rows, err := f.repo.ListKnowledgeByKnowledgeBaseID(f.ctx, 7, "other")
+			require.NoError(t, err)
+			var dst *types.Knowledge
+			for _, row := range rows {
+				if row.ID != "other-doc" {
+					dst = row
+				}
+			}
+			require.NotNil(t, dst)
+			chunks, err := f.chunkRepo.ListAllChunksByKnowledgeID(f.ctx, 7, dst.ID)
+			require.NoError(t, err)
+			var kinds []types.ChunkType
+			for _, c := range chunks {
+				kinds = append(kinds, c.ChunkType)
+			}
+			require.Contains(t, engine.copied, "chunk")
+			if targetOn {
+				require.ElementsMatch(t, []types.ChunkType{types.ChunkTypeText, types.ChunkTypeImageVector}, kinds)
+				require.Contains(t, engine.copied, "image-vector")
+				return
+			}
+			require.Equal(t, []types.ChunkType{types.ChunkTypeText}, kinds,
+				"a knowledge base that did not opt in gets no image vector chunk")
+			require.NotContains(t, engine.copied, "image-vector",
+				"nor its index row: CopyIndices copies only the rows of mapped chunks")
+		})
+	}
+}

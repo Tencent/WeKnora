@@ -15,6 +15,9 @@ type KnowledgeProcessOverrides struct {
 	// pipeline switch for this one document. nil keeps the knowledge base's
 	// setting.
 	ImageAttrsEnabled *bool `json:"image_attrs_enabled,omitempty"`
+	// ImageVectorEnabled overrides image vector indexing for this document.
+	// It does not change the KB-wide retrieval setting or embedding model.
+	ImageVectorEnabled *bool `json:"image_vector_enabled,omitempty"`
 	// ImageActions overrides rows of the attribute->work table for this document
 	// (merged per action key on top of the knowledge base's table).
 	// nil keeps the knowledge base's setting.
@@ -36,6 +39,7 @@ type EffectiveProcessConfig struct {
 	QuestionGenerationConfig QuestionGenerationConfig
 	GraphEnabled             bool
 	ImageAttrsEnabled        bool
+	ImageVectorEnabled       bool
 	ImageActions             ImageActionsConfig
 	ExtractConfig            ExtractConfig
 }

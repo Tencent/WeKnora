@@ -19,9 +19,37 @@ type EmbeddingsCompat struct {
 	MaxInputChars      *int              `json:"max_input_chars,omitempty"`
 	// AcceptsTruncatePromptTokens marks a vLLM-class runtime, the only kind
 	// that implements the `truncate_prompt_tokens` extension.
-	AcceptsTruncatePromptTokens *bool          `json:"accepts_truncate_prompt_tokens,omitempty"`
-	RequestTimeout              *int           `json:"request_timeout_seconds,omitempty"`
-	ExtraBody                   map[string]any `json:"extra_body,omitempty"`
+	AcceptsTruncatePromptTokens *bool                 `json:"accepts_truncate_prompt_tokens,omitempty"`
+	RequestTimeout              *int                  `json:"request_timeout_seconds,omitempty"`
+	ExtraBody                   map[string]any        `json:"extra_body,omitempty"`
+	ImageField                  *string               `json:"image_field,omitempty"`
+	MaxImageBatchSize           *int                  `json:"max_image_batch_size,omitempty"`
+	MaxImageBytes               *int                  `json:"max_image_bytes,omitempty"`
+	ImageMIMETypes              []string              `json:"image_mime_types,omitempty"`
+	ImageFormat                 *EmbeddingImageFormat `json:"image_format,omitempty"`
+	ImagePrompt                 *string               `json:"image_prompt,omitempty"`
+	TextAsMessages              *bool                 `json:"text_as_messages,omitempty"`
+	BatchMessages               *bool                 `json:"batch_messages,omitempty"`
+}
+
+// EmbeddingImageFormat is how an image travels on the OpenAI embedding
+// shape, which has no standard image input of its own.
+type EmbeddingImageFormat string
+
+const (
+	// EmbeddingImageObject puts {ImageField: data URI} in `input`, as Jina
+	// and SGLang document.
+	EmbeddingImageObject EmbeddingImageFormat = "object"
+	// EmbeddingImageMessages sends a chat conversation in `messages` instead
+	// of `input`, which is how vLLM serves multimodal embedding models
+	// (https://docs.vllm.ai/en/latest/models/pooling_models/embed/). Each
+	// conversation yields one vector; BatchMessages can batch conversations.
+	EmbeddingImageMessages EmbeddingImageFormat = "messages"
+)
+
+// Known reports whether f is a format this build can send; empty is known.
+func (f EmbeddingImageFormat) Known() bool {
+	return f == "" || f == EmbeddingImageObject || f == EmbeddingImageMessages
 }
 
 // EmbeddingsSettings is the resolved (fully defaulted) form.
@@ -67,6 +95,38 @@ type EmbeddingsSettings struct {
 	// without its own deadline and lets the caller's context govern.
 	RequestTimeout int
 	ExtraBody      map[string]any
+	// ImageInput is how this endpoint takes images: on the OpenAI shape, the
+	// key of the input object that carries one ("image" on Jina; that shape
+	// has no standard image input, so an endpoint that names none takes no
+	// images), plus the documented per-request and per-image limits.
+	ImageInput
+	// ImageFormat chooses between ImageField's object in `input` and a chat
+	// conversation in `messages`. Empty means object when ImageField is set.
+	ImageFormat EmbeddingImageFormat `json:",omitempty"`
+	// ImagePrompt is the text sent beside each image in the messages format;
+	// some chat templates (VLM2Vec's) expect an instruction there. Empty
+	// sends the image alone.
+	ImagePrompt string `json:",omitempty"`
+	// TextAsMessages sends texts in the messages format too. A model whose
+	// chat template frames its inputs only places text and images in the same
+	// space when both pass through it; a plain `input` skips the template.
+	TextAsMessages bool `json:",omitempty"`
+	// BatchMessages enables independent conversations in a two-dimensional
+	// messages array (vLLM 0.29 supports this). False preserves the one-input
+	// request shape for older servers. Single inputs always keep that shape.
+	BatchMessages bool `json:",omitempty"`
+}
+
+// OpenAIImageFormat is the effective image format on the OpenAI shape, empty
+// when the endpoint takes no images there.
+func (s EmbeddingsSettings) OpenAIImageFormat() EmbeddingImageFormat {
+	switch {
+	case s.ImageFormat == EmbeddingImageMessages:
+		return EmbeddingImageMessages
+	case s.ImageField != "":
+		return EmbeddingImageObject
+	}
+	return ""
 }
 
 // BatchLimits renders the documented ceilings for SplitBatches.

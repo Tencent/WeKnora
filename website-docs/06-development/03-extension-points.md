@@ -341,7 +341,7 @@ type Transcriber interface {
 
 ### 现有实现
 
-- **厂商**：`internal/models/providers/` 下 27 个文件，一个厂商一份（`aliyun.go`、`deepseek.go`、`generic.go`、`weknoracloud.go` 等），由 `builtin.go` 的 `Builtins()` 显式列出；图标在 `providers/assets/<id>.svg`。
+- **厂商**：`internal/models/providers/` 下 29 个文件，一个厂商一份（`aliyun.go`、`deepseek.go`、`generic.go`、`weknoracloud.go` 等），由 `builtin.go` 的 `Builtins()` 显式列出；图标在 `providers/assets/<id>.svg`。
 - **协议**：`internal/models/api/<protocol>`。对话 `openaicompletions`、`openairesponses`、`anthropicmessages`、`googlegenai`；向量 `openaiembeddings`、`dashscopeembeddings`、`arkembeddings`、`googleembeddings`；重排 `cohererank`、`dashscoperank`、`nimrerank`、`tencentlkeap`、`volcengineknowledge`；语音 `openaitranscriptions`、`openaichataudio`。
 - **模型目录**：`internal/models/catalog/data/seed.json`（模型元数据）+ `overrides.json`（协议、思考映射与 compat 修正）→ 由脚本生成 `models.generated.json`，编译时嵌入。
 - **运行时**：`internal/models/runtime` 组合厂商定义与目录（`New()`），应用部署叠加 `config/models.json`，并为每个模型行解析出协议、端点和兼容设置。
@@ -496,6 +496,7 @@ type StreamingConnector interface {
 | `ima` | `internal/datasource/connector/ima/` | 腾讯 ima 知识库 |
 | `rss` | `internal/datasource/connector/rss/` | RSS 订阅 |
 | `gitlab` | `internal/datasource/connector/gitlab/` | GitLab 仓库 |
+| `seafile` | `internal/datasource/connector/seafile/` | 资料库目录与文件 |
 
 `internal/types/datasource.go` 中还有 `github`、`google_drive` 等尚未注册实现的类型常量。
 
