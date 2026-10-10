@@ -166,26 +166,40 @@ func refuseIfExists(path string, clobber bool) error {
 	}
 }
 
-// streamToFile copies body into a newly-created file at path. On any
-// streaming error the partial file is removed so callers don't see a
-// truncated artifact at the user-visible path.
+// streamToFile stages body beside path and replaces the destination only after
+// a successful copy and close. Failed downloads preserve an existing file.
 //
 // On success: if fopts.WantsJSON(), emits a downloadResult envelope to
 // stdout instead of the "✓ Saved" text.
 func streamToFile(body io.Reader, path string, fopts *cmdutil.FormatOptions) error {
-	f, err := os.Create(path)
+	destination, err := resolveDownloadPath(path)
+	if err != nil {
+		return cmdutil.Wrapf(cmdutil.CodeLocalFileIO, err, "resolve %s", path)
+	}
+	f, err := os.CreateTemp(filepath.Dir(destination), "."+filepath.Base(destination)+"-*.part")
 	if err != nil {
 		return cmdutil.Wrapf(cmdutil.CodeLocalFileIO, err, "create %s", path)
 	}
+	tempPath := f.Name()
+	defer func() { _ = os.Remove(tempPath) }()
+	if info, statErr := os.Stat(path); statErr == nil {
+		if err := f.Chmod(info.Mode().Perm()); err != nil {
+			_ = f.Close()
+			return cmdutil.Wrapf(cmdutil.CodeLocalFileIO, err, "chmod %s", path)
+		}
+	}
+
 	n, copyErr := io.Copy(f, body)
 	if copyErr != nil {
 		_ = f.Close()
-		_ = os.Remove(path)
 		return cmdutil.Wrapf(cmdutil.CodeLocalFileIO, copyErr, "write %s", path)
 	}
 	if err := f.Close(); err != nil {
-		_ = os.Remove(path)
 		return cmdutil.Wrapf(cmdutil.CodeLocalFileIO, err, "close %s", path)
+	}
+
+	if err := os.Rename(tempPath, destination); err != nil {
+		return cmdutil.Wrapf(cmdutil.CodeLocalFileIO, err, "replace %s", path)
 	}
 
 	if fopts.WantsJSON() {
@@ -197,4 +211,37 @@ func streamToFile(body io.Reader, path string, fopts *cmdutil.FormatOptions) err
 	}
 	fmt.Fprintf(iostreams.IO.Err, "✓ Saved %s\n", path)
 	return nil
+}
+
+// resolveDownloadPath follows destination links, including links to a new file.
+func resolveDownloadPath(path string) (string, error) {
+	resolved, err := filepath.EvalSymlinks(path)
+	if err == nil {
+		return resolved, nil
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		return "", err
+	}
+	parent, err := filepath.EvalSymlinks(filepath.Dir(path))
+	if err != nil {
+		return "", err
+	}
+	info, err := os.Lstat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return filepath.Join(parent, filepath.Base(path)), nil
+	}
+	if err != nil {
+		return "", err
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		return filepath.Join(parent, filepath.Base(path)), nil
+	}
+	target, err := os.Readlink(path)
+	if err != nil {
+		return "", err
+	}
+	if !filepath.IsAbs(target) {
+		target = filepath.Join(parent, target)
+	}
+	return resolveDownloadPath(target)
 }
