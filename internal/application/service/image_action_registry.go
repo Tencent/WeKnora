@@ -372,7 +372,7 @@ func runCaptionAction(ctx context.Context, r *runContext) error {
 func runObservationCaptionAction(ctx context.Context, r *runContext) error {
 	var obsSpan *Span
 	if r.tracker != nil && r.imgSpan != nil {
-		obsSpan = r.tracker.BeginSubSpan(ctx, r.imgSpan, r.imgSpan.Name+".observation",
+		obsSpan = r.tracker.BeginSubSpan(ctx, r.imgSpan, r.imgSpan.Name+".observe_caption",
 			types.SpanKindGeneration, nil)
 	}
 	resolve := func(failed bool) {
