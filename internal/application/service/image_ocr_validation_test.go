@@ -41,6 +41,10 @@ func TestImageOCRRejectsInvalidContentBeforePersistence(t *testing.T) {
 	}{
 		{name: "recorded empty cells", raw: strings.Repeat("|  ", 2500), status: "failed", code: "OCR_INVALID_OUTPUT"},
 		{name: "repeated words", raw: strings.Repeat("传球按钮 ", 200), status: "failed", code: "OCR_INVALID_OUTPUT"},
+		{
+			name: "split delimiter loops", raw: strings.Repeat("|  ", 1250) + "传球\n" + strings.Repeat("|  ", 1250),
+			status: "failed", code: "OCR_INVALID_OUTPUT",
+		},
 		{name: "empty model output", status: "failed", code: "OCR_INVALID_OUTPUT"},
 		{
 			name: "truncated output", status: "failed", code: "OCR_TRUNCATED",
@@ -48,6 +52,10 @@ func TestImageOCRRejectsInvalidContentBeforePersistence(t *testing.T) {
 		},
 		{name: "request failure", status: "failed", code: "OCR_REQUEST_FAILED", err: errors.New("model unavailable")},
 		{name: "no text", raw: "No text content.", status: "no_text"},
+		{name: "HTML no text", raw: "<p>No text content.</p>", status: "no_text"},
+		{name: "HTML short no text", raw: "<p>empty</p>", status: "no_text"},
+		{name: "HTML emphasized no text", raw: "<p><strong>No text content.</strong></p>", status: "no_text"},
+		{name: "empty HTML", raw: "<html><body></body></html>", status: "failed", code: "OCR_INVALID_OUTPUT"},
 	} {
 		for _, caption := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/caption=%v", tc.name, caption), func(t *testing.T) {
@@ -80,7 +88,10 @@ func TestImageOCRRejectsInvalidContentBeforePersistence(t *testing.T) {
 						require.Equal(t, "failed", out["outcome"])
 					}
 				} else {
+					require.Empty(t, tracker.failed)
 					require.NotContains(t, out, "ocr_error")
+					require.NotContains(t, out, "ocr_error_code")
+					require.NotContains(t, out, "outcome")
 					require.Equal(t, "no_text", tracker.outputs["multimodal.image[0].ocr"]["status"])
 				}
 				if caption {
