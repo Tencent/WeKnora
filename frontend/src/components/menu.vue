@@ -539,7 +539,7 @@ usemenuStore.$onAction(({ name, args, after }) => {
 watch(
     () => {
         const id = pendingForkRevealId.value;
-        return id && !sidebarCollapsed && currentSecondpath.value === `chat/${id}`
+        return id && !sidebarCollapsed.value && currentSecondpath.value === `chat/${id}`
             && filteredGroupedSessions.value.some((group) => group.items.some((item) => item.id === id))
             ? id : '';
     },
@@ -1244,7 +1244,7 @@ const startSidebarResize = () => {
     uiStore.sidebarResizing = true
 }
 const resizeSidebar = (delta: number, keyboard: boolean) => {
-    if (keyboard && sidebarCollapsed && delta > 0) {
+    if (keyboard && sidebarCollapsed.value && delta > 0) {
         uiStore.expandSidebar()
     } else if (keyboard && uiStore.sidebarWidth === SIDEBAR_MIN_WIDTH && delta < 0) {
         uiStore.collapseSidebar()
