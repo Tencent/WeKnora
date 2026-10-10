@@ -51,7 +51,14 @@ type dockerEngineAPI interface {
 		ctx context.Context, containerID string, options client.ExecCreateOptions,
 	) (client.ExecCreateResult, error)
 	ExecAttach(ctx context.Context, execID string, options client.ExecAttachOptions) (client.ExecAttachResult, error)
+	// ExecStart starts an already-created exec. The terminal path uses it,
+	// detached, to run a best-effort teardown of a shell it is abandoning:
+	// a Docker exec can neither be re-attached nor stopped any other way.
+	ExecStart(ctx context.Context, execID string, options client.ExecStartOptions) (client.ExecStartResult, error)
 	ExecInspect(ctx context.Context, execID string, options client.ExecInspectOptions) (client.ExecInspectResult, error)
+	// ExecResize resizes the TTY of a running exec, which is what backs the
+	// interactive terminal's window-size changes.
+	ExecResize(ctx context.Context, execID string, options client.ExecResizeOptions) (client.ExecResizeResult, error)
 
 	// ContainerStatPath is the one archive endpoint this adapter uses, and only
 	// against the activity marker's fixed path. The copy endpoints are
