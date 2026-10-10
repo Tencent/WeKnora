@@ -319,7 +319,7 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
 
   const agentStepsAreTruncated = (agentSteps: unknown[] | undefined) =>
     Array.isArray(agentSteps) &&
-    agentSteps.some((step) => (step as ChatMessage | undefined)?.truncated === true)
+    (agentSteps.at(-1) as ChatMessage | undefined)?.truncated === true
 
   const reconstructEventStreamFromSteps = (
     agentSteps: unknown[],
@@ -949,8 +949,8 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
         // streamed live only learns of the cap at the close.
         if (dataPayload?.truncated) {
           answerEvent.truncated = true
-          message.truncated = true
         }
+        message.truncated = stream.filter((event) => event.type === 'answer' && !event.superseded).at(-1)?.truncated === true
         if (data.done && !answerEvent.done) {
           answerEvent.done = true
           onAgentAnswerDone?.(message)

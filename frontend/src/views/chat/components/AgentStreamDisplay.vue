@@ -382,6 +382,10 @@
                 <div v-stable-html="renderAnswerContent(event === activeAnswerEventRef ? typedAnswer : event.content)">
                 </div>
               </div>
+              <p v-if="answerFullyRendered && event.done && isFinalPartialTruncatedAnswer(event, session.agentEventStream)" class="answer-truncated-notice">
+                <t-icon name="info-circle" aria-hidden="true" />
+                <span>{{ $t('chat.truncatedHint') }}</span>
+              </p>
               <div v-if="answerFullyRendered && event.done && event.content && event.content.trim() && !embeddedMode"
                 class="answer-toolbar">
                 <t-tooltip v-if="canFork" :content="forkTooltip">
@@ -430,11 +434,6 @@
                   <span v-if="hasArtifacts" class="answer-toolbar__artifact-count" aria-hidden="true">{{ artifactCount }}</span>
                 </span>
                 <t-tooltip v-if="event.is_fallback" :content="$t('chat.fallbackHint')" placement="top">
-                  <t-button size="small" variant="outline" shape="round" class="fallback-icon-btn">
-                    <t-icon name="info-circle" />
-                  </t-button>
-                </t-tooltip>
-                <t-tooltip v-if="event.truncated" :content="$t('chat.truncatedHint')" placement="top">
                   <t-button size="small" variant="outline" shape="round" class="fallback-icon-btn">
                     <t-icon name="info-circle" />
                   </t-button>
@@ -628,6 +627,7 @@
 </template>
 
 <script setup lang="ts">
+import { isFinalPartialTruncatedAnswer } from '@/utils/truncatedAnswer';
 import { readDocumentReferences } from '@/utils/readDocumentReferences';
 import { isAssistantTurnComplete } from '@/utils/steerStreamFork';
 import { ref, computed, watch, onMounted, onBeforeUnmount, onUpdated, nextTick } from 'vue';
@@ -3118,6 +3118,14 @@ const handleAddToKnowledge = (answerEvent: any) => {
 </script>
 
 <style lang="less" scoped>
+.answer-truncated-notice {
+  color: var(--td-text-color-secondary);
+  display: flex;
+  gap: 8px;
+  line-height: 1.6;
+  .t-icon { color: var(--td-warning-color); flex-shrink: 0; }
+}
+
 @import '../../../components/css/chat-markdown.less';
 @import '../../../components/css/chat-message-shared.less';
 @import '../../../components/css/chat-citations.less';
