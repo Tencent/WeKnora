@@ -45,7 +45,8 @@ func TestRPMRefillWakesLowQueue(t *testing.T) {
 	select {
 	case e := <-done:
 		if e != nil {
-			t.Fatalf("LOW request starved until its context deadline (%v); the scheduler never woke for the refilled token", e)
+			t.Fatalf("LOW request starved until its context deadline (%v); "+
+				"the scheduler never woke for the refilled token", e)
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("LOW request neither admitted nor cancelled within 2s")

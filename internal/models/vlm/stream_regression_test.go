@@ -20,13 +20,13 @@ type fakeStreamChat struct {
 }
 
 func (f *fakeStreamChat) Chat(
-	ctx context.Context, messages []chat.Message, opts *chat.ChatOptions,
+	_ context.Context, _ []chat.Message, _ *chat.ChatOptions,
 ) (*types.ChatResponse, error) {
 	return nil, errors.New("fakeStreamChat: buffered Chat not used by these tests")
 }
 
 func (f *fakeStreamChat) ChatStream(
-	ctx context.Context, messages []chat.Message, opts *chat.ChatOptions,
+	_ context.Context, _ []chat.Message, _ *chat.ChatOptions,
 ) (<-chan types.StreamResponse, error) {
 	ch := make(chan types.StreamResponse, len(f.events))
 	for _, e := range f.events {
@@ -79,7 +79,7 @@ func TestStreamThinkingIsNotTheAnswer(t *testing.T) {
 	firstTokenAtFirstAnswer := false
 	sawFirstToken := false
 	opts := &PredictOptions{
-		OnChunk: func(text string, done bool, err error) {
+		OnChunk: func(text string, done bool, _ error) {
 			if done {
 				doneText = text
 				return
@@ -91,7 +91,7 @@ func TestStreamThinkingIsNotTheAnswer(t *testing.T) {
 			}
 			chunks = append(chunks, text)
 		},
-		StatusSink: func(phase Phase, info PhaseInfo) {
+		StatusSink: func(phase Phase, _ PhaseInfo) {
 			if phase == PhaseFirstToken {
 				sawFirstToken = true
 			}
@@ -103,16 +103,20 @@ func TestStreamThinkingIsNotTheAnswer(t *testing.T) {
 		t.Fatalf("runInner: %v", err)
 	}
 	if text != "ACTUAL OCR" {
-		t.Errorf("answer = %q, want %q (thinking content leaked into the answer)", text, "ACTUAL OCR")
+		t.Errorf("answer = %q, want %q (thinking content leaked into the answer)",
+			text, "ACTUAL OCR")
 	}
 	if strings.Join(chunks, "|") != "ACTUAL| OCR" {
-		t.Errorf("OnChunk incremental calls received %q, want [ACTUAL OCR] (reasoning text must not be forwarded)", chunks)
+		t.Errorf("OnChunk incremental calls received %q, want [ACTUAL OCR] "+
+			"(reasoning text must not be forwarded)", chunks)
 	}
 	if doneText != "ACTUAL OCR" {
-		t.Errorf("OnChunk done summary = %q, want %q (thinking must not enter the buffered answer either)", doneText, "ACTUAL OCR")
+		t.Errorf("OnChunk done summary = %q, want %q (thinking must not enter the answer)",
+			doneText, "ACTUAL OCR")
 	}
 	if !firstTokenAtFirstAnswer {
-		t.Error("PhaseFirstToken did not fire during the reasoning phase; TTFT was anchored to the answer instead of the first server token")
+		t.Error("PhaseFirstToken did not fire during the reasoning phase; " +
+			"TTFT was anchored to the answer instead of the first server token")
 	}
 }
 

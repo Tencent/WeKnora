@@ -392,11 +392,14 @@ func runOCRAction(ctx context.Context, r *runContext) error {
 		ocrSpan = r.tracker.BeginSubSpan(ctx, r.imgSpan, r.imgSpan.Name+".ocr",
 			types.SpanKindGeneration, nil)
 	}
-	resolve := func(code string) {
+	resolve := func() {
 		if ocrSpan == nil {
 			return
 		}
-		if code != "" {
+		// The code reads back from out so the span always matches what the
+		// outcome summary sees — the caller may have refined it (e.g. a
+		// request failure re-coded as OCR_TRUNCATED) after the initial set.
+		if code, _ := r.out["ocr_error_code"].(string); code != "" {
 			message, _ := r.out["ocr_error"].(string)
 			r.tracker.FailSpan(ctx, ocrSpan, code, message, nil)
 			return
@@ -434,7 +437,7 @@ func runOCRAction(ctx context.Context, r *runContext) error {
 			r.out["ocr_error_code"] = "OCR_TRUNCATED"
 		}
 		r.out["ocr_error"] = err.Error()
-		resolve("OCR_REQUEST_FAILED")
+		resolve()
 		return nil
 	}
 	r.out["ocr_raw_chars"] = len([]rune(ocrText))
@@ -448,7 +451,7 @@ func runOCRAction(ctx context.Context, r *runContext) error {
 		if errors.As(vErr, &invalid) {
 			r.out["ocr_rejection_reason"] = invalid.reason
 		}
-		resolve("OCR_INVALID_OUTPUT")
+		resolve()
 		return nil
 	}
 	if ocrText != "" {
@@ -456,12 +459,12 @@ func runOCRAction(ctx context.Context, r *runContext) error {
 		r.out["ocr_status"] = "succeeded"
 		r.out["ocr_chars"] = len([]rune(ocrText))
 		r.out["ocr_preview"] = previewText(ocrText, 200)
-		resolve("")
+		resolve()
 		return nil
 	}
 	logger.Warnf(ctx, "[ImageMultimodal] OCR returned no text for %s", r.payload.ImageURL)
 	r.out["ocr_status"] = "no_text"
 	r.out["ocr_skipped"] = "no_text"
-	resolve("")
+	resolve()
 	return nil
 }
