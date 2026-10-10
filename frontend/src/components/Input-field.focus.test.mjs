@@ -8,7 +8,7 @@ const source = readFileSync(new URL('./Input-field.vue', import.meta.url), 'utf8
 const focusCode = source.slice(source.indexOf('const focusInput ='), source.indexOf('const onInput ='))
 const sendCode = source.slice(source.indexOf('const createSession ='), source.indexOf('const updateAgentModeDropdownPosition ='))
 
-for (const mode of ['normal', 'embedded', 'after', 'inject']) {
+for (const mode of ['normal', 'embedded', 'after', 'inject', 'pending-session']) {
   test(`${mode} send clears the draft and restores focus after the DOM update`, async () => {
     const effects = [], ticks = []
     const textarea = {
@@ -17,7 +17,7 @@ for (const mode of ['normal', 'embedded', 'after', 'inject']) {
       blur: () => { throw new Error('sending must not blur the textarea') },
     }
     const context = {
-      props: { isReplying: ['after', 'inject'].includes(mode), canSteer: true, embeddedMode: mode === 'embedded' },
+      props: { preserveDraftUntilNavigation: mode === 'pending-session', isReplying: ['after', 'inject'].includes(mode), canSteer: true, embeddedMode: mode === 'embedded' },
       uploadedAttachments: { value: [] }, uploadedImages: { value: [] },
       allSelectedItems: { value: [] }, selectedModelId: { value: 'model' },
       selectedAgent: { value: { config: {} } },
@@ -31,10 +31,10 @@ for (const mode of ['normal', 'embedded', 'after', 'inject']) {
     }
     const send = vm.runInNewContext(ts.transpile(`${focusCode}\n${sendCode}\ncreateSession`), context)
     await send('hello', mode === 'inject' ? 'inject' : 'after')
-    assert.deepEqual(effects, [[context.props.isReplying ? 'steer-msg' : 'send-msg'], ['clear']])
+    assert.deepEqual(effects, mode === 'pending-session' ? [['send-msg']] : [[context.props.isReplying ? 'steer-msg' : 'send-msg'], ['clear']])
     for (const resolve of ticks) resolve()
     await new Promise(setImmediate)
-    assert.deepEqual(effects.at(-1), ['focus', true])
+    if (mode !== 'pending-session') assert.deepEqual(effects.at(-1), ['focus', true])
   })
 }
 
