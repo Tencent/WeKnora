@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"image"
 	"image/color"
@@ -203,6 +204,219 @@ func TestResolveHTMLDataURIImages(t *testing.T) {
 	}
 	if !strings.Contains(out, "![image](local://test/") {
 		t.Fatalf("expected markdown image replacement, got: %s", out[:min(200, len(out))])
+	}
+}
+
+func TestInlineImageStorageKeepsLegacyMultimodalBudget(t *testing.T) {
+	b64 := base64.StdEncoding.EncodeToString(createTestPNG(200, 150))
+	image := `<img src="data:image/png;base64,` + b64 + `">`
+	for _, count := range []int{30, 31, 81} {
+		t.Run(fmt.Sprintf("%d images", count), func(t *testing.T) {
+			svc := &captureSaveBytes{}
+			out, images, err := NewImageResolver().ResolveHTMLDataURIImages(
+				context.Background(), strings.Repeat(image+"\n", count), svc, 1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(images) != count || len(svc.saved) != count {
+				t.Fatalf("images=%d saved=%d, want %d", len(images), len(svc.saved), count)
+			}
+			if HasUnresolvedInlineImagePayload(out) {
+				t.Fatal("inline image payload remained after storage")
+			}
+			if got := strings.Count(out, "local://test/"); got != count {
+				t.Fatalf("stored URL count=%d, want %d", got, count)
+			}
+			if len(uniqueStrings(imgServingURLs(images))) != count {
+				t.Fatalf(
+					"stored URLs are not unique: got %d, want %d",
+					len(uniqueStrings(imgServingURLs(images))), count,
+				)
+			}
+			skipped := 0
+			for _, stored := range images {
+				if !stored.Inline {
+					t.Fatal("HTML data URI image was not marked inline")
+				}
+				if !strings.Contains(out, stored.ServingURL) {
+					t.Fatalf("stored URL %q was not substituted into markdown", stored.ServingURL)
+				}
+				if stored.SkipMultimodal {
+					skipped++
+				}
+			}
+			if want := max(0, count-maxInlineImagesForMultimodal); skipped != want {
+				t.Fatalf("skipped multimodal=%d, want %d", skipped, want)
+			}
+		})
+	}
+}
+
+func TestResolveAndStoreKeepsMarkdownAndHTMLImageBudgetsIndependent(t *testing.T) {
+	b64 := base64.StdEncoding.EncodeToString(createTestPNG(200, 150))
+	markdownImage := `![](data:image/png;base64,` + b64 + `)`
+	htmlImage := `<img src="data:image/png;base64,` + b64 + `">`
+	content := strings.Repeat(markdownImage+"\n", 31) + strings.Repeat(htmlImage+"\n", 31)
+	svc := &captureSaveBytes{}
+
+	updated, images, err := NewImageResolver().ResolveAndStore(
+		context.Background(),
+		&types.ReadResult{MarkdownContent: content},
+		svc,
+		1,
+	)
+	if err != nil {
+		t.Fatalf("ResolveAndStore: %v", err)
+	}
+	if len(images) != 62 || len(svc.saved) != 62 {
+		t.Fatalf("images=%d saved=%d, want 62 each", len(images), len(svc.saved))
+	}
+	if HasUnresolvedInlineImagePayload(updated) {
+		t.Fatal("inline image payload remained after ResolveAndStore")
+	}
+	markdownEligible, htmlEligible := 0, 0
+	for _, stored := range images {
+		if stored.SkipMultimodal {
+			continue
+		}
+		switch stored.OriginalRef {
+		case "html-img-data-uri":
+			htmlEligible++
+		default:
+			markdownEligible++
+		}
+	}
+	if markdownEligible != 30 || htmlEligible != 30 {
+		t.Fatalf("multimodal eligible: markdown=%d html=%d, want 30 each", markdownEligible, htmlEligible)
+	}
+}
+
+type failAfterInlineSave struct {
+	captureSaveBytes
+	failAt             int
+	calls              int
+	deleted            []string
+	deleteContextError error
+	deleteHasDeadline  bool
+	cancelOnFailure    context.CancelFunc
+}
+
+func (f *failAfterInlineSave) SaveBytes(
+	ctx context.Context, data []byte, tenantID uint64, fileName string, temp bool,
+) (string, error) {
+	f.calls++
+	if f.calls == f.failAt {
+		if f.cancelOnFailure != nil {
+			f.cancelOnFailure()
+		}
+		return "", errors.New("temporary storage failure")
+	}
+	return f.captureSaveBytes.SaveBytes(ctx, data, tenantID, fileName, temp)
+}
+
+func (f *failAfterInlineSave) DeleteFile(ctx context.Context, path string) error {
+	f.deleted = append(f.deleted, path)
+	f.deleteContextError = ctx.Err()
+	_, f.deleteHasDeadline = ctx.Deadline()
+	return nil
+}
+
+func TestResolveAndStoreRollsBackPartialInlineImageSaves(t *testing.T) {
+	b64 := base64.StdEncoding.EncodeToString(createTestPNG(200, 150))
+	image := `<img src="data:image/png;base64,` + b64 + `">`
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	svc := &failAfterInlineSave{failAt: 3, cancelOnFailure: cancel}
+
+	_, images, err := NewImageResolver().ResolveAndStore(
+		ctx,
+		&types.ReadResult{MarkdownContent: strings.Repeat(image+"\n", 4)},
+		svc,
+		1,
+	)
+
+	if err == nil || !strings.Contains(err.Error(), "temporary storage failure") {
+		t.Fatalf("err=%v, want temporary storage failure", err)
+	}
+	if len(images) != 2 || len(svc.saved) != 2 {
+		t.Fatalf("returned images=%d saved=%d, want two successful partial saves", len(images), len(svc.saved))
+	}
+	if len(svc.deleted) != 2 {
+		t.Fatalf("deleted=%v, want exactly the two objects saved during this attempt", svc.deleted)
+	}
+	if svc.deleteContextError != nil {
+		t.Errorf("rollback context error = %v, want nil after request cancellation", svc.deleteContextError)
+	}
+	if !svc.deleteHasDeadline {
+		t.Error("rollback context has no timeout deadline")
+	}
+	for _, savedURL := range svc.urls {
+		if !containsString(svc.deleted, savedURL) {
+			t.Errorf("newly saved object %q was not rolled back", savedURL)
+		}
+	}
+}
+
+func imgServingURLs(images []StoredImage) []string {
+	urls := make([]string, 0, len(images))
+	for _, img := range images {
+		urls = append(urls, img.ServingURL)
+	}
+	return urls
+}
+
+func uniqueStrings(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	unique := make([]string, 0, len(values))
+	for _, value := range values {
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		unique = append(unique, value)
+	}
+	return unique
+}
+
+func containsString(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
+}
+
+type failingInlineImageSave struct{ captureSaveBytes }
+
+func (f *failingInlineImageSave) SaveBytes(context.Context, []byte, uint64, string, bool) (string, error) {
+	return "", errors.New("temporary storage failure")
+}
+
+func TestResolveHTMLDataURIImagesReturnsStorageFailure(t *testing.T) {
+	b64 := base64.StdEncoding.EncodeToString(createTestPNG(200, 150))
+	markdown := `<img src="data:image/png;base64,` + b64 + `">`
+	out, _, err := NewImageResolver().ResolveHTMLDataURIImages(
+		context.Background(), markdown, &failingInlineImageSave{}, 1)
+	if err == nil || !strings.Contains(err.Error(), "temporary storage failure") {
+		t.Fatalf("err=%v, want storage failure", err)
+	}
+	if !HasUnresolvedInlineImagePayload(out) {
+		t.Fatal("storage failure removed the payload before retry")
+	}
+}
+
+func TestHasUnresolvedInlineImagePayloadIgnoresOrdinaryBase64(t *testing.T) {
+	if HasUnresolvedInlineImagePayload("How does base64 work? Try base64,SGVsbG8= as an example.") {
+		t.Fatal("ordinary base64 text was treated as an image")
+	}
+}
+
+func TestHasUnresolvedInlineImagePayloadIgnoresFencedCodeExamples(t *testing.T) {
+	b64 := base64.StdEncoding.EncodeToString(createTestPNG(200, 150))
+	markdown := "```html\n<img src=\"data:image/png;base64," + b64 + "\">\n```"
+	if HasUnresolvedInlineImagePayload(markdown) {
+		t.Fatal("fenced code example was treated as an unresolved image")
 	}
 }
 

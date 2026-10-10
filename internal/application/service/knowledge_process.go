@@ -211,6 +211,32 @@ type ProcessChunksOptions struct {
 	Metadata     map[string]string
 }
 
+func imagesForMultimodal(images []docparser.StoredImage) []docparser.StoredImage {
+	selected := make([]docparser.StoredImage, 0, len(images))
+	for _, image := range images {
+		if !image.SkipMultimodal {
+			selected = append(selected, image)
+		}
+	}
+	return selected
+}
+
+func cleanupUnboundInlineImages(
+	ctx context.Context, fileSvc interfaces.FileService, images []docparser.StoredImage,
+) {
+	if fileSvc == nil {
+		return
+	}
+	for _, image := range images {
+		if !image.Inline || image.ServingURL == "" {
+			continue
+		}
+		if err := fileSvc.DeleteFile(ctx, image.ServingURL); err != nil {
+			logger.Warnf(ctx, "Failed to clean up unbound inline image %s: %v", image.ServingURL, err)
+		}
+	}
+}
+
 // finalizeIndexedKnowledgeState makes a document retrievable as soon as chunks
 // and indexes are persisted (enable_status=enabled), but it deliberately does
 // NOT mark the row completed when enrichment is still expected. Whenever the
@@ -4033,13 +4059,16 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 
 	// Step 2: Store images and update markdown references
 	var storedImages []docparser.StoredImage
+	var imageFileSvc interfaces.FileService
 
 	if s.imageResolver != nil && convertResult != nil {
-		fileSvc := s.resolveFileService(ctx, kb)
+		imageFileSvc = s.resolveFileService(ctx, kb)
 		tenantID, _ := ctx.Value(types.TenantIDContextKey).(uint64)
-		updatedMarkdown, images, resolveErr := s.imageResolver.ResolveAndStore(ctx, convertResult, fileSvc, tenantID)
+		updatedMarkdown, images, resolveErr := s.imageResolver.ResolveAndStore(
+			ctx, convertResult, imageFileSvc, tenantID)
 		if resolveErr != nil {
-			logger.Warnf(ctx, "Image resolution partially failed: %v", resolveErr)
+			_, err := s.failKnowledge(ctx, knowledge, isLastRetry, "store inline image: %v", resolveErr)
+			return err
 		}
 		if updatedMarkdown != "" {
 			convertResult.MarkdownContent = updatedMarkdown
@@ -4048,7 +4077,8 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 
 		// Resolve remote http(s) images (e.g. markdown external URLs) → download + upload to storage.
 		// ResolveAndStore handles inline bytes and base64; ResolveRemoteImages handles http/https URLs.
-		updatedContent, remoteImages, remoteErr := s.imageResolver.ResolveRemoteImages(ctx, convertResult.MarkdownContent, fileSvc, tenantID)
+		updatedContent, remoteImages, remoteErr := s.imageResolver.ResolveRemoteImages(
+			ctx, convertResult.MarkdownContent, imageFileSvc, tenantID)
 		if remoteErr != nil {
 			logger.Warnf(ctx, "Remote image resolution partially failed: %v", remoteErr)
 		}
@@ -4059,6 +4089,20 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 		}
 
 		logger.Infof(ctx, "Resolved %d total images for knowledge %s", len(storedImages), knowledge.ID)
+	}
+	if convertResult != nil && docparser.HasUnresolvedInlineImagePayload(convertResult.MarkdownContent) {
+		const message = "unresolved inline image base64 payload remains before chunking"
+		logger.Errorf(ctx, "Knowledge %s: %s", knowledge.ID, message)
+		cleanupUnboundInlineImages(ctx, imageFileSvc, storedImages)
+		knowledge.ParseStatus = types.ParseStatusFailed
+		knowledge.ErrorMessage = message
+		knowledge.UpdatedAt = time.Now()
+		s.beginStage(ctx, knowledge.ID, types.StageChunking, nil)
+		s.failStage(ctx, knowledge.ID, types.StageChunking, werrors.ErrCodeChunkingFailed, message, nil)
+		if err := s.updateKnowledgeUnlessSourceReplaced(ctx, knowledge); err != nil {
+			return fmt.Errorf("%w: persist inline image processing failure: %v", asynq.SkipRetry, err)
+		}
+		return fmt.Errorf("%s: %w", message, asynq.SkipRetry)
 	}
 
 	// Claim the stored images for this document before chunking proceeds:
@@ -4075,11 +4119,12 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 	// HTML tables were normalized before image resolution above.
 	chunkCfg := buildSplitterConfigFromChunking(eff.ChunkingConfig)
 
+	multimodalImages := imagesForMultimodal(storedImages)
 	processOpts := ProcessChunksOptions{
 		EnableQuestionGeneration: payload.EnableQuestionGeneration,
 		QuestionCount:            payload.QuestionCount,
 		EnableMultimodel:         payload.EnableMultimodel,
-		StoredImages:             storedImages,
+		StoredImages:             multimodalImages,
 	}
 
 	if convertResult != nil {
