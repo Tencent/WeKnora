@@ -16,6 +16,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/agent"
 	apprepo "github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/models/api"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/searchutil"
 	"github.com/Tencent/WeKnora/internal/tracing/langfuse"
@@ -2998,6 +2999,20 @@ func isTransientLLMError(ctx context.Context, err error) bool {
 	}
 
 	msg := err.Error()
+	lower := strings.ToLower(msg)
+
+	// A chunk that reached the client but would not decode is transport-level
+	// damage, not a rejected request: the bytes arrived and the same request
+	// can come back whole. Only the non-streaming tool-call decode reaches
+	// this classifier that way (openaicompletions.decodeToolCalls), and it is
+	// the same failure the agent retries — the same sentinel, and the same
+	// marker text for a provider that flattened the error into its message, so
+	// the two classifiers cannot drift apart.
+	if errors.Is(err, api.ErrCorruptStreamChunk) ||
+		strings.Contains(lower, strings.ToLower(types.StreamChunkCorruptError)) {
+		return true
+	}
+
 	// Providers that bubble HTTP status up formatted as
 	// "API request failed with status NNN: ..." — match that first.
 	for _, s := range []string{
@@ -3010,7 +3025,6 @@ func isTransientLLMError(ctx context.Context, err error) bool {
 		}
 	}
 
-	lower := strings.ToLower(msg)
 	// Some gateways report QPM/QPS throttling as HTTP 403 instead of 429
 	// (e.g. a MaaS gateway returning code 0x04030020, message
 	// "调用频率（qpm）超限"). A plain 403 is usually an authorization

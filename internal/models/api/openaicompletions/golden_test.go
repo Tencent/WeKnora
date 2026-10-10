@@ -659,6 +659,9 @@ func TestChatStream_UndecodableChunkFailsTheStream(t *testing.T) {
 		if chunk.ResponseType == types.ResponseTypeError {
 			sawError = true
 			assert.Contains(t, chunk.Content, "decode stream chunk")
+			assert.Contains(t, chunk.Content, types.StreamChunkCorruptError,
+				"the marker has to survive the flattening into the error chunk: "+
+					"it is what the retry classifier reads")
 			continue
 		}
 		answer.WriteString(chunk.Content)
@@ -686,6 +689,8 @@ func TestChat_MalformedToolCallIsAnError(t *testing.T) {
 	_, err := c.Chat(context.Background(), []api.Message{{Role: "user", Content: "hi"}}, nil)
 	require.Error(t, err, "a tool call that will not decode must not pass as a plain answer")
 	assert.Contains(t, err.Error(), "decode tool call")
+	require.ErrorIs(t, err, api.ErrCorruptStreamChunk,
+		"the non-streaming path keeps the error value, so callers can classify it without matching text")
 }
 
 // The streaming counterpart: the round must end as an error rather than as a
@@ -715,6 +720,7 @@ func TestChatStream_MalformedToolCallFailsTheStream(t *testing.T) {
 		if chunk.ResponseType == types.ResponseTypeError {
 			sawError = true
 			assert.Contains(t, chunk.Content, "decode tool call")
+			assert.Contains(t, chunk.Content, types.StreamChunkCorruptError)
 			continue
 		}
 		answer.WriteString(chunk.Content)

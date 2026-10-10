@@ -226,6 +226,16 @@ type ChatResponse struct {
 	// chunks were streamed, so the natural-stop branch can close the same
 	// stream with a Done marker. Empty when AnswerStreamed is false.
 	AnswerEventID string `json:"-"`
+	// EmittedAnything reports whether the attempt had already pushed at least
+	// one event to the client (thought, answer, or tool-call) when it ended.
+	// A retry streams the round over from the start and the client appends
+	// what it receives, so a re-send after this is true renders the same
+	// output twice; the retry loop uses it to keep a failed round from being
+	// re-sent over output the user can already see, whatever the transient
+	// failure was. Meaningful on a failed attempt too — the agent sets it on
+	// the partial result that comes back alongside the error — and every other
+	// field is zero there. Transient, never persisted.
+	EmittedAnything bool `json:"-"`
 }
 
 // Response type
@@ -314,6 +324,21 @@ const FinishReasonIncomplete = "incomplete"
 // with FinishReasonIncomplete: the stream stopped before the provider said the
 // message was finished, most often because a proxy cut the connection.
 const StreamEndedEarlyError = "the model's response ended before it finished (connection interrupted)"
+
+// StreamChunkCorruptError is what a consumer reports for an answer that carried
+// a chunk nobody could decode: a truncated frame, an HTML error page from a
+// proxy, malformed JSON. It is the other way a stream breaks, and it must not
+// be confused with StreamEndedEarlyError: the connection may be perfectly
+// healthy and the same request can come back whole, which is why the retry
+// classifier treats it as transient.
+//
+// The text is both the error reported and the classifier's handle on it. The
+// streaming path flattens errors into text before anything can inspect their
+// type (api.StreamAssembler.Fail puts err.Error() into StreamResponse.Content
+// and the agent rebuilds an error from that string), so a sentence survives
+// where a type does not. api.ErrCorruptStreamChunk wraps this same constant, so
+// the typed and the flattened form can never drift apart.
+const StreamChunkCorruptError = "the model's response was corrupted in transit"
 
 type StreamResponse struct {
 	ID                  string                 `json:"id"`

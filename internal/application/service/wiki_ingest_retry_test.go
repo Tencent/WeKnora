@@ -3,7 +3,11 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
+
+	"github.com/Tencent/WeKnora/internal/models/api"
+	"github.com/Tencent/WeKnora/internal/types"
 )
 
 // TestIsTransientLLMError_HTTPStatuses covers the status codes we know
@@ -86,6 +90,52 @@ func TestIsTransientLLMError_AbortsWhenParentCtxDone(t *testing.T) {
 	err := errors.New("API request failed with status 504: Remote error")
 	if isTransientLLMError(ctx, err) {
 		t.Fatal("cancelled ctx should short-circuit to non-transient")
+	}
+}
+
+// TestIsTransientLLMError_CorruptStreamChunk pins the second classifier to the
+// agent's: a chunk that reached the client but would not decode is transport
+// damage, so the wiki round is worth one more attempt instead of failing on the
+// spot. The non-streaming path reaches this state through the tool-call decode,
+// which wraps api.ErrCorruptStreamChunk; the marker text covers the shape where
+// something flattened the error into a message. A plain decode failure stays
+// permanent, which is what keeps the marker doing the work.
+func TestIsTransientLLMError_CorruptStreamChunk(t *testing.T) {
+	ctx := context.Background()
+	corrupt := fmt.Errorf("create chat completion: decode tool call 0: %w: %w",
+		api.ErrCorruptStreamChunk, errors.New("unexpected end of JSON input"))
+
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{
+			name: "typed: the error value still carries the sentinel",
+			err:  corrupt,
+			want: true,
+		},
+		{
+			name: "flattened: only the marker text made it through",
+			err: errors.New("LLM call failed: decode tool call 0: " +
+				types.StreamChunkCorruptError + ": unexpected end of JSON input"),
+			want: true,
+		},
+		{
+			// The exact shape this failure had before the marker existed: it
+			// names a decode failure but nothing says the request is worth
+			// sending again.
+			name: "no marker: an undecorated decode failure",
+			err:  errors.New("create chat completion: decode tool call 0: unexpected end of JSON input"),
+			want: false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isTransientLLMError(ctx, tc.err); got != tc.want {
+				t.Errorf("isTransientLLMError(%v) = %v, want %v", tc.err, got, tc.want)
+			}
+		})
 	}
 }
 

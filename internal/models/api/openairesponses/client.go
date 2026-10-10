@@ -415,8 +415,10 @@ func (c *Client) processStream(
 			// not: it is a truncated frame or a gateway error page, i.e. a
 			// hole in the answer. Skipping it runs the loop to EOF, which the
 			// caller cannot tell from a complete reply and then stores as the
-			// model's answer. Fail, as the Completions loop does.
-			assembler.Fail(ch, fmt.Errorf("decode stream chunk: %w", err))
+			// model's answer. Fail, as the Completions loop does, and tag it so
+			// the caller can retry a transport-level corruption.
+			assembler.Fail(ch, fmt.Errorf("decode stream chunk: %w: %w",
+				api.ErrCorruptStreamChunk, err))
 			return
 		}
 

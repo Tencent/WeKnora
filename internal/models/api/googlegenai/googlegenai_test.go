@@ -603,6 +603,52 @@ func TestChatStreamDecodesSSE(t *testing.T) {
 	}
 }
 
+// A frame that is not JSON at all is a hole in the answer — a truncated packet
+// or a gateway error page — not an unknown event to skip. Skipping it ran the
+// loop to EOF, which the caller read as a complete reply. Failing stays the
+// behaviour; the frame is tagged so the agent can retry the transport damage
+// instead of ending the turn.
+func TestChatStreamUndecodableChunkFailsTheStream(t *testing.T) {
+	t.Setenv("SSRF_WHITELIST", "127.0.0.1")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(
+			"data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"Hel\"}]}}]}\n\n" +
+				"data: <html>502 Bad Gateway</html>\n\n" +
+				"data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"lo\"}]}," +
+				"\"finishReason\":\"STOP\"}]}\n\n"))
+	}))
+	defer srv.Close()
+
+	client := newTestClient(t, srv.URL, nil)
+	ch, err := client.ChatStream(context.Background(),
+		[]api.Message{{Role: "user", Content: "hi"}}, nil)
+	if err != nil {
+		t.Fatalf("ChatStream: %v", err)
+	}
+	var answer string
+	var sawError bool
+	for ev := range ch {
+		if ev.ResponseType == types.ResponseTypeError {
+			sawError = true
+			if !strings.Contains(ev.Content, "decode stream chunk") {
+				t.Errorf("error content = %q", ev.Content)
+			}
+			if !strings.Contains(ev.Content, types.StreamChunkCorruptError) {
+				t.Errorf("error content %q lost the retryable marker", ev.Content)
+			}
+			continue
+		}
+		answer += ev.Content
+	}
+	if !sawError {
+		t.Error("a truncated stream must surface as an error, not as a short answer")
+	}
+	if answer != "Hel" {
+		t.Errorf("answer = %q, decoding must stop at the bad frame", answer)
+	}
+}
+
 func TestChatStreamErrorPayload(t *testing.T) {
 	t.Setenv("SSRF_WHITELIST", "127.0.0.1")
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

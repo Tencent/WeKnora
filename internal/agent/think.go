@@ -458,7 +458,15 @@ func (e *AgentEngine) streamThinkingToEventBus(
 	)
 	if err != nil {
 		logger.Errorf(ctx, "[Agent][Thinking] Iteration-%d failed: %v", iteration+1, err)
-		return nil, err
+		// The failure still has to tell the caller what already reached the
+		// client: whether anything was emitted is what decides if re-sending
+		// the round would duplicate it (see callLLMWithRetry). llmResult is
+		// nil only when the request never started, i.e. nothing could have
+		// been emitted.
+		if llmResult == nil {
+			return nil, err
+		}
+		return &types.ChatResponse{EmittedAnything: len(emittedEventTypes) > 0}, err
 	}
 
 	// Emit diagnostics: helps identify when answer content went to "thought" vs "final_answer" events
@@ -483,6 +491,7 @@ func (e *AgentEngine) streamThinkingToEventBus(
 		ToolCalls:          llmResult.ToolCalls,
 		FinishReason:       finishReason,
 		AnswerStreamed:     answerStreamed,
+		EmittedAnything:    len(emittedEventTypes) > 0,
 	}
 	if answerStreamed {
 		resp.AnswerEventID = answerID
@@ -572,8 +581,25 @@ func (e *AgentEngine) callLLMWithRetry(
 	}
 
 	if err != nil && isTransientError(err) {
-		// Retry transient errors (timeout, rate limit, server errors) up to maxLLMRetries times
+		// Retry transient errors (timeout, rate limit, server errors) up to
+		// maxLLMRetries times. The retry is only worth it while the failed
+		// attempt stayed invisible: a re-send streams the round from the start
+		// again, and the client appends whatever arrives, so retrying after
+		// part of it already reached the user renders the answer twice — the
+		// partial one, then the whole one ("Hel" followed by "Hello world"
+		// reads as "HelHello world"). EmittedAnything is derived from the
+		// events the attempt actually pushed (thought, answer, tool call), so
+		// it is exactly "the user has seen something", and every transient
+		// failure is gated on it: mangled frame, stream ended early, stall,
+		// timeout, 429, 5xx alike. Once it is true the round ends the ordinary
+		// way — degrade with whatever tool results are at hand, or fail.
 		for retry := 1; retry <= maxLLMRetries; retry++ {
+			if response != nil && response.EmittedAnything {
+				logger.Warnf(ctx, "[Agent][Round-%d] Not retrying the transient LLM failure: "+
+					"this attempt already streamed content to the client, and a re-send would "+
+					"show the same answer twice; ending the round instead: %v", round, err)
+				break
+			}
 			retryDelay := llmRetryDelay(err, retry)
 			logger.Warnf(ctx, "[Agent][Round-%d] LLM transient error (attempt %d/%d), retrying in %v: %v",
 				round, retry, maxLLMRetries, retryDelay, err)
