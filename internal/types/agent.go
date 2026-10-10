@@ -375,6 +375,12 @@ type ToolResult struct {
 	Data        map[string]interface{} `json:"data,omitempty"`   // Structured data for programmatic use
 	Error       string                 `json:"error,omitempty"`  // Error message if execution failed
 	Images      []string               `json:"images,omitempty"` // Base64 data URIs from tool (e.g. MCP image content)
+
+	// KnowledgeRefs carries the retrieval hits behind this result so the turn
+	// can cite them. Like OutputFiles it is live-only: `json:"-"` keeps the
+	// chunks out of SSE replay and agent_steps storage, where they would
+	// duplicate what the assistant message already persists.
+	KnowledgeRefs []*SearchResult `json:"-"`
 }
 
 // ToolCall represents a single tool invocation within an agent step
