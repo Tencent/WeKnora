@@ -608,6 +608,7 @@ export default {
           desc: 'Click {\'@\'} to pick one or more knowledge bases or files. Answers use only the selection; otherwise the current agent settings apply.'
         },
         input: {
+    more: 'More actions',
           title: 'Type your question',
           desc: 'Describe what you want to know, or click a suggested question above to get started quickly.'
         },
@@ -2730,7 +2731,6 @@ export default {
     }
   },
   common: {
-    more: 'More actions',
     add: 'Add',
     me: 'Me',
     confirm: 'Confirm',

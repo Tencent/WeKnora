@@ -194,6 +194,8 @@
         @artifact-deleted="handleArtifactDeleted" />
 </template>
 <script setup>
+import { useAppViewport } from '@/composables/useAppViewport';
+useAppViewport();
 import { makeSteerClientId } from '@/utils/steerId';
 import { storeToRefs } from 'pinia';
 import { ref, onMounted, onBeforeMount, onUnmounted, nextTick, watch, reactive, computed } from 'vue';

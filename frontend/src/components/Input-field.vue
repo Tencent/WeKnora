@@ -2770,7 +2770,7 @@ defineExpose({
           :aria-label="$t('input.knowledgeBase')" :disabled="isMentionDisabled || composerLocked"
           @mousedown.prevent @click.stop="triggerMention"><span aria-hidden="true">@</span></button>
         <button v-if="!embeddedMode" type="button" class="mobile-composer-more mobile-icon-button"
-          :aria-label="$t('common.more')" :aria-expanded="mobileToolsOpen" @click="mobileToolsOpen = !mobileToolsOpen">
+          :aria-label="$t('input.more')" :aria-expanded="mobileToolsOpen" @click="mobileToolsOpen = !mobileToolsOpen">
           <t-icon :name="mobileToolsOpen ? 'chevron-down' : 'ellipsis'" />
         </button>
         <div class="control-left" v-if="!embeddedMode">

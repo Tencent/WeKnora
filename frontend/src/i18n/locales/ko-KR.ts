@@ -5115,6 +5115,7 @@ export default {
     }
   },
   input: {
+    more: '추가 작업',
     addModel: '모델 추가',
     placeholder: '질문이나 작업 내용을 입력하세요…',
     agentMode: 'Agent 모드',
@@ -5295,7 +5296,6 @@ export default {
     noCompatibleKbForAgent: '현재 에이전트의 도구와 범위 내 지식베이스의 기능이 일치하지 않아 참조할 수 있는 지식베이스가 없습니다.'
   },
   common: {
-    more: '추가 작업',
     add: '추가',
     me: '나',
     confirm: '확인',

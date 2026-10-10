@@ -1,5 +1,5 @@
 .mobile-composer-more, .mobile-composer-quick { display: none; }
-@media (max-width: 767px) { :root body .main:has(.dialogue-wrap), :root body .main:has(.chat) { min-width: 0; } :root body .chat { min-width: 0; } :root body .control-bar button.mobile-icon-button { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; border: 0; border-radius: var(--app-radius-md); color: var(--td-text-color-primary); background: transparent; } }
+@media (max-width: 767px) { :root body .chat { min-width: 0; } :root body .control-bar button.mobile-icon-button { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; border: 0; border-radius: var(--app-radius-md); color: var(--td-text-color-primary); background: transparent; } }
 @media (max-width: 767px) {
 :root body .dialogue-wrap { min-width: 0; width: 100%; }
 :root body .dialogue-title { font-size: var(--app-text-4xl); padding: 16px; }
@@ -9,14 +9,13 @@
 :root body .control-bar { flex-wrap: wrap; gap: 4px; }
 :root body .control-bar .mobile-composer-more { display: inline-flex; }
 :root body .control-bar .control-left { display: none; }
-:root body .control-bar.mobile-tools-open .control-left { display: flex; order: -1; width: 100%; flex-wrap: wrap; padding-bottom: 8px; border-bottom: 1px solid var(--td-component-stroke); }
 :root body .control-bar .control-btn { min-width: 44px; min-height: 44px; }
 :root body .control-bar .model-selector-trigger { min-height: 44px; max-width: 100%; }
 :root body .control-bar .control-right { margin-left: auto; }
 :root body .control-bar .model-selector-name { max-width: 120px; }
 :root body .control-bar .model-selector-ctx { display: none; }
-:root body .markdown-content pre { max-width: 100%; overflow-x: auto; }
-:root body .markdown-content table { display: block; max-width: 100%; overflow-x: auto; }
+:root body .chat .markdown-content pre { max-width: 100%; overflow-x: auto; }
+:root body .chat .markdown-content table { display: block; max-width: 100%; overflow-x: auto; }
 :root body .chat-references-drawer { width: 100%; max-width: 100%; }
 }
 @media (max-width: 767px) {
@@ -48,12 +47,10 @@
 :root body .control-left .model-display { min-width: 0; max-width: 100%; }
 :root body .control-left .agent-mode-btn { max-width: 100%; min-width: 0; }
 :root body .control-left .agent-mode-text { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-:root body .suggested-questions-grid { display: flex; flex-wrap: nowrap; overflow-x: auto; justify-content: flex-start; }
-:root body .suggested-questions-grid > * { flex: 0 0 auto; max-width: 80vw; }
 }
 @media (max-width: 767px) {
-:root body .suggested-questions-container { height: auto !important; max-height: 128px; padding: 0 0 12px; overflow: hidden; }
-:root body .suggested-question-card { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+:root body .suggested-questions-container { height: auto !important; padding: 0 0 12px; }
+:root body .suggested-question-card {  }
 :root body .suggested-questions-refresh { width: 44px; height: 44px; }
 }
 @media (max-width: 767px) {
@@ -73,12 +70,9 @@
 }
 @media (max-width: 767px) {
 :root body .suggested-question-card:active { transform: translateY(1px); border-color: var(--td-brand-color); }
-:root body .chat .msg-item-wrapper { animation: chat-message-arrive var(--app-motion-base) cubic-bezier(0.16, 1, 0.3, 1); }
 }
 
-@media (max-width: 767px) { :root body .main:has(.dialogue-wrap) { height: var(--app-viewport-height, 100dvh); } :root body .chat { min-width: 0; } }
+@media (max-width: 767px) { :root body .chat { min-width: 0; } }
 @keyframes composer-tools-reveal { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
-@keyframes chat-message-arrive { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
-@media (max-width: 767px) and (prefers-reduced-motion: reduce) { :root body .rich-input-container, :root body .rich-input-container .t-textarea__inner { transition: none; } :root body .control-bar.mobile-tools-open .control-left, :root body .chat .msg-item-wrapper { animation: none; } }
 
 @media (max-width: 767px) { :root body .create-chat-composer { margin-top: auto; flex-shrink: 0; padding-bottom: max(8px, env(safe-area-inset-bottom)); } }

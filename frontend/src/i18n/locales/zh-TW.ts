@@ -5117,6 +5117,7 @@ export default {
     }
   },
   input: {
+    more: '更多操作',
     addModel: '新增模型',
     placeholder: '輸入問題或描述任務…',
     agentMode: '智慧推論',
@@ -5297,7 +5298,6 @@ export default {
     noCompatibleKbForAgent: '當前智慧代理的工具與作用域內知識庫的能力不比對，暫無可引用的知識庫。'
   },
   common: {
-    more: '更多操作',
     add: '新增',
     me: '我',
     confirm: '確認',
