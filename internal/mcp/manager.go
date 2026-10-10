@@ -245,6 +245,32 @@ func (m *MCPManager) CloseClient(serviceID string) error {
 	return nil
 }
 
+// InvalidateToolSchemas drops the header-schema caches of every cached
+// connection for a service after listedBy completed a newer directory read.
+// Connections stay open; their next modern CallTool reloads the directory.
+// listedBy's own cache is current and is kept.
+func (m *MCPManager) InvalidateToolSchemas(serviceID string, listedBy MCPClient) {
+	m.clientsMu.RLock()
+	defer m.clientsMu.RUnlock()
+	for key, client := range m.clients {
+		if key != serviceID && !strings.HasPrefix(key, serviceID+"\x00") {
+			continue
+		}
+		if client == listedBy {
+			continue
+		}
+		if managed, ok := client.(*managedMCPClient); ok {
+			if managed.MCPClient == listedBy {
+				continue
+			}
+			client = managed.MCPClient
+		}
+		if cached, ok := client.(interface{ invalidateToolSchemas() }); ok {
+			cached.invalidateToolSchemas()
+		}
+	}
+}
+
 // closeAllTimeout bounds CloseAll. Disconnecting a remote transport can mean
 // a request to the server, and one that stopped answering must not hold up
 // process exit.
