@@ -1,5 +1,9 @@
 <template>
-  <div class="wiki-browser">
+  <div class="wiki-browser" :class="{ 'mobile-directory-open': mobileDirectoryOpen }">
+    <button v-if="isMobile && view !== 'graph'" type="button" ref="directoryButton" class="mobile-wiki-directory"
+      :aria-expanded="mobileDirectoryOpen" @click="mobileDirectoryOpen = !mobileDirectoryOpen">
+      <t-icon :name="mobileDirectoryOpen ? 'close' : 'menu'" />{{ $t('wikiMobile.contents') }}
+    </button>
     <!-- Graph view (full screen) -->
     <template v-if="view === 'graph'">
       <div class="wiki-graph">
@@ -47,7 +51,12 @@
         </div>
 
         <!-- Legend Overlay -->
-        <div v-if="graphReady" class="wiki-graph-legend" :class="{ 'legend-shifted': graphDrawerVisible }">
+        <div v-if="graphReady && isMobile" class="mobile-graph-zoom">
+          <button type="button" class="mobile-icon-button" :aria-label="$t('wikiMobile.zoomIn')" @click="zoomGraph(1.25)"><t-icon name="add" /></button>
+          <button type="button" class="mobile-icon-button" :aria-label="$t('wikiMobile.zoomOut')" @click="zoomGraph(0.8)"><t-icon name="minus" /></button>
+        </div>
+        <button v-if="graphReady && isMobile" type="button" class="mobile-graph-legend-toggle" :aria-expanded="mobileLegendOpen" @click="mobileLegendOpen = !mobileLegendOpen">{{ $t('wikiMobile.legend') }}<t-icon :name="mobileLegendOpen ? 'chevron-down' : 'chevron-up'" /></button>
+        <div v-if="graphReady && (!isMobile || mobileLegendOpen)" class="wiki-graph-legend" :class="{ 'legend-shifted': graphDrawerVisible }">
           <div class="legend-items">
             <div class="legend-item clickable" :class="{ disabled: !graphFilterTypes.has('summary') }"
               @click="toggleGraphFilterType('summary')">
@@ -127,7 +136,7 @@
         </div>
 
         <!-- Graph page detail drawer -->
-        <t-drawer v-model:visible="graphDrawerVisible" :header="graphDrawerPage?.title || ''" size="480px"
+        <t-drawer v-model:visible="graphDrawerVisible" :header="graphDrawerPage?.title || ''" :size="isMobile ? '100%' : '480px'"
           :footer="false" placement="right" :show-overlay="false" :close-btn="true" destroy-on-close
           class="wiki-graph-drawer">
           <template v-if="graphDrawerPage">
@@ -670,7 +679,7 @@
 
     <!-- Global Issues Drawer -->
     <t-drawer v-model:visible="showGlobalIssuesDrawer" :header="$t('knowledgeEditor.wikiBrowser.globalIssuesTitle')"
-      size="480px" :footer="false" class="wiki-global-issues-drawer">
+      :size="isMobile ? '100%' : '480px'" :footer="false" class="wiki-global-issues-drawer">
       <div class="wiki-issue-popup-list">
         <div v-for="issue in globalIssues" :key="issue.id" class="wiki-issue-popup-item">
           <div class="wiki-issue-popup-main">
@@ -791,6 +800,9 @@
 </template>
 
 <script setup lang="ts">
+import '@/assets/mobile-wiki.less'
+import { useResponsive } from '@/composables/useResponsive'
+
 import { ref, computed, reactive, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useMenuStore } from '@/stores/menu'
@@ -838,6 +850,11 @@ import {
   type WikiIndexGroup,
   type WikiIndexEntryDTO,
 } from '@/api/wiki'
+
+const { isMobile } = useResponsive()
+const mobileDirectoryOpen = ref(false)
+const mobileLegendOpen = ref(false)
+const directoryButton = ref<HTMLButtonElement>()
 
 const router = useRouter()
 const route = useRoute()
@@ -991,6 +1008,14 @@ const graphData = ref<WikiGraphData | null>(null)
 const searchQuery = ref('')
 const graphSearchValue = ref('')
 const graphRef = ref<HTMLElement | null>(null)
+watch(isMobile, mobile => {
+  graphRef.value?.querySelectorAll<SVGGElement>('g[role="button"]').forEach(node => {
+    if (mobile) node.setAttribute('tabindex', '0')
+    else node.removeAttribute('tabindex')
+  })
+  if (!mobile) mobileLegendOpen.value = false
+})
+
 const readerBodyRef = ref<HTMLElement | null>(null)
 const drawerBodyRef = ref<HTMLElement | null>(null)
 const loading = ref(false)
@@ -3541,6 +3566,10 @@ async function loadPageIssues(slug: string) {
 }
 
 async function selectPage(page: WikiPage) {
+  if (isMobile.value) {
+    mobileDirectoryOpen.value = false
+    nextTick(() => directoryButton.value?.focus())
+  }
   try {
     if (selectedPage.value && selectedPage.value.id !== page.id) {
       navHistory.value.push(selectedPage.value)
@@ -3728,7 +3757,8 @@ let graphPanZoomRef: {
   setTranslate: (x: number, y: number) => void,
   apply: () => void,
   flyTo: (x: number, y: number, s?: number, duration?: number) => void,
-  getScale: () => number
+  getScale: () => number,
+  zoomBy: (factor: number) => void
 } | null = null
 
 const graphHighlightSlug = ref<string | null>(null)
@@ -3972,6 +4002,15 @@ function renderGraph(opts: RenderGraphOpts = {}) {
   for (const n of graphNodes) {
     const g = document.createElementNS('http://www.w3.org/2000/svg', 'g')
     g.style.cursor = 'pointer'
+    g.setAttribute('role', 'button')
+    if (isMobile.value) g.setAttribute('tabindex', '0')
+    g.setAttribute('aria-label', n.title)
+    g.addEventListener('keydown', event => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault()
+        g.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+      }
+    })
 
     const r = nodeRadius(n)
 
@@ -4206,7 +4245,7 @@ function renderGraph(opts: RenderGraphOpts = {}) {
             const width = container.clientWidth
             const height = container.clientHeight
             graphPanZoomRef.flyTo(
-              width / 2 - n.x * graphPanZoomRef.getScale() - 240,
+              width / 2 - n.x * graphPanZoomRef.getScale() - (isMobile.value ? 0 : 240),
               height / 2 - n.y * graphPanZoomRef.getScale()
             )
           }
@@ -4435,6 +4474,8 @@ function setupDrag(
   g.addEventListener('mousedown', onStart)
 }
 
+function zoomGraph(factor: number) { graphPanZoomRef?.zoomBy(factor) }
+
 // ─── Pan & Zoom ───
 function setupPanZoom(svg: SVGSVGElement, rootG: SVGGElement) {
   let scale = 1
@@ -4479,6 +4520,14 @@ function setupPanZoom(svg: SVGSVGElement, rootG: SVGGElement) {
     setTranslate: (x: number, y: number) => { translateX = x; translateY = y },
     apply: applyTransform,
     getScale: () => scale,
+    zoomBy: factor => {
+      const rect = svg.getBoundingClientRect()
+      const next = Math.max(0.2, Math.min(5, scale * factor))
+      translateX = rect.width / 2 - (rect.width / 2 - translateX) * next / scale
+      translateY = rect.height / 2 - (rect.height / 2 - translateY) * next / scale
+      scale = next
+      applyTransform()
+    },
     flyTo: (tx: number, ty: number, s?: number, duration = 400) => {
       cancelAnimationFrame(animId)
       const startX = translateX, startY = translateY, startScale = scale
@@ -4497,6 +4546,45 @@ function setupPanZoom(svg: SVGSVGElement, rootG: SVGGElement) {
       animId = requestAnimationFrame(animate)
     }
   }
+
+  // Touch gestures share the existing graph transform and preserve node taps.
+  svg.style.touchAction = 'none'
+  let touchStart: { x: number; y: number; distance: number } | null = null
+  let touchMoved = false
+  const touchPosition = (touches: TouchList) => {
+    const a = touches[0], b = touches[1] || a
+    const rect = svg.getBoundingClientRect()
+    return { x: (a.clientX + b.clientX) / 2 - rect.left,
+      y: (a.clientY + b.clientY) / 2 - rect.top,
+      distance: Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY) }
+  }
+  svg.addEventListener('touchstart', e => {
+    cancelAnimationFrame(animId)
+    touchStart = touchPosition(e.touches)
+    touchMoved = false
+  }, { passive: true })
+  svg.addEventListener('touchmove', e => {
+    if (!touchStart || !e.touches.length) return
+    const point = touchPosition(e.touches)
+    const dx = point.x - touchStart.x, dy = point.y - touchStart.y
+    if (!touchMoved && Math.hypot(dx, dy) < 5 && e.touches.length === 1) return
+    e.preventDefault()
+    touchMoved = true
+    const nextScale = touchStart.distance > 0 && point.distance > 0
+      ? Math.max(0.2, Math.min(5, scale * point.distance / touchStart.distance)) : scale
+    translateX = point.x - (touchStart.x - translateX) * nextScale / scale
+    translateY = point.y - (touchStart.y - translateY) * nextScale / scale
+    scale = nextScale
+    touchStart = point
+    applyTransform()
+  }, { passive: false })
+  svg.addEventListener('touchend', e => {
+    touchStart = e.touches.length ? touchPosition(e.touches) : null
+  })
+  svg.addEventListener('touchcancel', () => { touchStart = null; touchMoved = false })
+  svg.addEventListener('click', e => {
+    if (touchMoved) { e.preventDefault(); e.stopImmediatePropagation(); touchMoved = false }
+  }, true)
 
   // Zoom with mouse wheel
   svg.addEventListener('wheel', (e) => {

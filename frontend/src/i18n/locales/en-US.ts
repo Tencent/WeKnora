@@ -2729,6 +2729,12 @@ export default {
       parseCurrentKnowledgeBaseFailed: 'Failed to parse current knowledge base'
     }
   },
+  wikiMobile: {
+    legend: 'Legend and controls',
+    contents: 'Contents',
+    zoomIn: 'Zoom in',
+    zoomOut: 'Zoom out',
+  },
   common: {
     add: 'Add',
     me: 'Me',

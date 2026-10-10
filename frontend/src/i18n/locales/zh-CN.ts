@@ -5299,6 +5299,12 @@ export default {
     belongsToOrg: '所属空间：',
     noCompatibleKbForAgent: '当前智能体的工具与作用域内知识库的能力不匹配，暂无可引用的知识库。'
   },
+  wikiMobile: {
+    legend: '图例与操作',
+    contents: '目录',
+    zoomIn: '放大',
+    zoomOut: '缩小',
+  },
   common: {
     add: '添加',
     me: '我',

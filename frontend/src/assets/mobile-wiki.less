@@ -1,0 +1,52 @@
+.mobile-wiki-directory, .mobile-graph-zoom { display: none; }
+@media (max-width: 767px) { :root body .mobile-graph-zoom { position: absolute; display: flex; flex-direction: column; border: 1px solid var(--td-component-stroke); border-radius: var(--app-radius-md); background: var(--td-bg-color-container); } :root body .mobile-graph-zoom button { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; border: 0; color: var(--td-text-color-primary); background: transparent; } }
+@media (max-width: 767px) {
+:root body .wiki-reader-body pre { max-width: 100%; overflow-x: auto; }
+:root body .wiki-browser { position: relative; flex-direction: column; }
+:root body .mobile-wiki-directory { display: flex; flex-shrink: 0; align-items: center; gap: 8px; padding: 8px 12px; min-height: 44px; border: 0; background: var(--td-bg-color-container); color: var(--td-text-color-primary); }
+:root body .wiki-browser .wiki-sidebar { display: none; }
+:root body .wiki-browser.mobile-directory-open .wiki-sidebar { display: flex; width: 100%; min-width: 0; flex: 1; overflow-y: auto; }
+:root body .wiki-browser.mobile-directory-open .wiki-reader { display: none; }
+:root body .wiki-reader { min-width: 0; width: 100%; }
+:root body .wiki-reader-header, :root body .wiki-reader-body { padding: 16px; }
+:root body .wiki-reader-header { flex-wrap: wrap; }
+:root body .wiki-reader-title { overflow-wrap: anywhere; }
+:root body .wiki-page-item, :root body .wiki-tree-row { min-height: 44px; }
+:root body .wiki-graph-search-container { left: 8px; right: 8px; width: auto; }
+:root body .wiki-graph-legend { left: 8px; bottom: 8px; max-width: calc(100% - 16px); max-height: 32%; overflow-y: auto; }
+:root body .wiki-graph-legend.legend-shifted { right: auto; }
+:root body .wiki-graph-legend .legend-action { min-height: 44px; }
+:root body .wiki-graph-search-input { width: 100%; }
+}
+@media (max-width: 767px) {
+:root body .wiki-browser.mobile-directory-open .wiki-content { display: none; }
+:root body .wiki-reader { padding: 0 0 16px; }
+}
+@media (max-width: 767px) {
+:root body .wiki-graph-legend { top: auto; right: auto; }
+:root body .mobile-graph-zoom { top: 72px; right: 12px; bottom: auto; left: auto; z-index: 4; }
+:root body .wiki-rev-layout { flex-direction: column; }
+:root body .wiki-rev-list { width: 100%; max-height: 28dvh; flex-shrink: 0; border-right: 0; }
+:root body .wiki-rev-detail { min-width: 0; }
+}
+@media (max-width: 767px) {
+:root body .wiki-graph-help-trigger { width: 44px; height: 44px; }
+:root body .wiki-reader-title-row, :root body .wiki-reader-toolbar { flex-wrap: wrap; }
+}
+@media (max-width: 767px) and (max-height: 500px) {
+:root body .wiki-main-area { flex-shrink: 0; min-height: 60dvh; }
+}
+
+@media (max-width: 767px) {
+  :root body .mobile-graph-legend-toggle {
+    position: absolute;
+    left: 8px;
+    bottom: 8px;
+    min-height: 44px;
+    border: 1px solid var(--td-component-stroke);
+    border-radius: var(--app-radius-md);
+    background: var(--td-bg-color-container);
+    color: var(--td-text-color-primary);
+  }
+  :root body .wiki-graph-legend { bottom: 60px; }
+}
