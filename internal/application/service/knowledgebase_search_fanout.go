@@ -141,12 +141,19 @@ func (s *knowledgeBaseService) retrieveFromStores(
 // (refillPastDroppedImages).
 func retrieveGroup(ctx context.Context, g *storeGroup) ([]*types.RetrieveResult, error) {
 	params := paramsWithTopK(g)
-	res, err := g.Engine.Retrieve(ctx, params)
+	res, err := retrieveObservedImagePool(ctx, g, params, "initial")
 	res, err = retainPartialResults(ctx, g, res, err)
 	if err != nil {
 		return nil, err
 	}
 	refillPastDroppedImages(ctx, g, params, res)
+	for _, rr := range res {
+		if rr != nil {
+			out := summarizeImagePool(rr, g)
+			out["retriever"], out["kb_ids"] = rr.RetrieverType, g.KBIDs
+			recordImageRecallDecision(ctx, "filter", nil, out)
+		}
+	}
 	filterImageHits(res, g)
 	return res, nil
 }

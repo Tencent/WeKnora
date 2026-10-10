@@ -30,7 +30,7 @@ const (
 	// imageLoadConcurrency bounds image reads from storage.
 	imageLoadConcurrency = 4
 	// MinImageKeepScore is the least vector similarity that keeps a pictorial
-	// image hit over a text reranker. It sits above the 0.1 image recall
+	// image hit over a text reranker. It sits above the 0.2 image recall
 	// threshold: recall only lets an image compete, keeping it needs more.
 	// Empirical, on the cosine scale most engines report.
 	MinImageKeepScore = 0.25

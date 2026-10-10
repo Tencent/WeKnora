@@ -399,7 +399,7 @@ func normalizeE2BTemplateBuildStatus(status string) string {
 	switch strings.ToLower(strings.TrimSpace(status)) {
 	case "ready", "success", "succeeded", "complete", "completed":
 		return "ready"
-	case "building", "processing":
+	case "building", "processing", "in_progress":
 		return "building"
 	case "waiting", "queued", "pending", "uploaded":
 		return "waiting"

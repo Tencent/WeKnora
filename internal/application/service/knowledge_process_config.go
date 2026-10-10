@@ -49,6 +49,7 @@ func ResolveProcessConfig(kb *types.KnowledgeBase, overrides *types.KnowledgePro
 		GraphEnabled:             kb.IsGraphEnabled(),
 		ExtractConfig:            derefExtractConfig(kb.ExtractConfig),
 		ImageAttrsEnabled:        imageCfg.ImageAttrsEnabled,
+		ImageVectorEnabled:       imageCfg.ImageVectorEnabled,
 		ImageActions:             types.ResolveImageActions(imageCfg.ImageActions),
 		ImagePipelineID:          types.ResolveImagePipelineID(&imageCfg),
 		ImagePipelineParams:      imageCfg.ImagePipelineParams,
@@ -104,6 +105,9 @@ func ResolveProcessConfig(kb *types.KnowledgeBase, overrides *types.KnowledgePro
 		// The explicit pick also decides the legacy switch, so the fallback
 		// path and the run agree on which pipeline this document asked for.
 		eff.ImageAttrsEnabled = eff.ImagePipelineID == types.ImagePipelineSmartOCR
+	}
+	if overrides.ImageVectorEnabled != nil {
+		eff.ImageVectorEnabled = *overrides.ImageVectorEnabled
 	}
 	if overrides.ImageActions != nil {
 		base := eff.ImageActions

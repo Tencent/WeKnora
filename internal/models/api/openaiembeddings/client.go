@@ -10,7 +10,9 @@
 //   - `encoding_format` is absent from Zhipu's reference;
 //   - the parameter that separates a search query from an indexed document is
 //     `input_type` on NIM, `task` on Jina and `taskType` on Gemini, and most
-//     vendors have none.
+//     vendors have none;
+//   - images have no standard place: Jina and SGLang take an object in
+//     `input`, vLLM takes a chat conversation in `messages`.
 //
 // This package contains no vendor names.
 package openaiembeddings
@@ -75,7 +77,7 @@ type response struct {
 // BuildRequestBody is the golden-test entry point: it returns the exact JSON
 // object that would be sent.
 func (c *Client) BuildRequestBody(texts []string, kind api.EmbedInputType) map[string]any {
-	return c.body(texts, kind)
+	return c.body("input", texts, kind)
 }
 
 // BuildImageRequestBody is the golden-test entry point for images. The shape
@@ -87,14 +89,35 @@ func (c *Client) BuildImageRequestBody(images []api.EmbedImage, kind api.EmbedIn
 	for _, img := range images {
 		input = append(input, map[string]any{c.cfg.Settings.ImageField: img.DataURI()})
 	}
-	return c.body(input, kind)
+	return c.body("input", input, kind)
 }
 
-func (c *Client) body(input any, kind api.EmbedInputType) map[string]any {
+// BuildImageMessageBody is the golden-test entry point for the messages
+// format: one user turn carrying the image, then the configured prompt, as
+// in vLLM's multimodal embedding example.
+func (c *Client) BuildImageMessageBody(img api.EmbedImage, kind api.EmbedInputType) map[string]any {
+	content := []any{map[string]any{"type": "image_url", "image_url": map[string]any{"url": img.DataURI()}}}
+	if prompt := c.cfg.Settings.ImagePrompt; prompt != "" {
+		content = append(content, map[string]any{"type": "text", "text": prompt})
+	}
+	return c.messageBody(content, kind)
+}
+
+// BuildTextMessageBody is the golden-test entry point for a text sent in the
+// messages format.
+func (c *Client) BuildTextMessageBody(text string, kind api.EmbedInputType) map[string]any {
+	return c.messageBody([]any{map[string]any{"type": "text", "text": text}}, kind)
+}
+
+func (c *Client) messageBody(content []any, kind api.EmbedInputType) map[string]any {
+	return c.body("messages", []any{map[string]any{"role": "user", "content": content}}, kind)
+}
+
+func (c *Client) body(key string, input any, kind api.EmbedInputType) map[string]any {
 	s := c.cfg.Settings
 	body := map[string]any{
 		"model": c.cfg.Endpoint.Model,
-		"input": input,
+		key:     input,
 	}
 	if s.SendEncodingFormat {
 		body["encoding_format"] = "float"
@@ -127,22 +150,46 @@ func (c *Client) body(input any, kind api.EmbedInputType) map[string]any {
 func (c *Client) Embed(
 	ctx context.Context, texts []string, kind api.EmbedInputType,
 ) ([][]float32, error) {
+	if c.cfg.Settings.TextAsMessages {
+		return c.postEach(ctx, len(texts), func(i int) map[string]any {
+			return c.BuildTextMessageBody(texts[i], kind)
+		})
+	}
 	return c.post(ctx, c.BuildRequestBody(texts, kind), len(texts))
 }
 
-// AcceptsImages reports whether the vendor names an image field. Without
-// one a plain OpenAI-compatible server would read the objects as malformed
-// text input.
-func (c *Client) AcceptsImages() bool { return c.cfg.Settings.ImageField != "" }
+// AcceptsImages reports whether the vendor declares an image format. Without
+// one a plain OpenAI-compatible server would read image objects as
+// malformed text input.
+func (c *Client) AcceptsImages() bool { return c.cfg.Settings.OpenAIImageFormat() != "" }
 
 // EmbedImages vectorizes one batch of images, in the order it was given.
 func (c *Client) EmbedImages(
 	ctx context.Context, images []api.EmbedImage, kind api.EmbedInputType,
 ) ([][]float32, error) {
-	if !c.AcceptsImages() {
-		return nil, fmt.Errorf("this embedding endpoint declares no image input")
+	switch c.cfg.Settings.OpenAIImageFormat() {
+	case api.EmbeddingImageObject:
+		return c.post(ctx, c.BuildImageRequestBody(images, kind), len(images))
+	case api.EmbeddingImageMessages:
+		return c.postEach(ctx, len(images), func(i int) map[string]any {
+			return c.BuildImageMessageBody(images[i], kind)
+		})
 	}
-	return c.post(ctx, c.BuildImageRequestBody(images, kind), len(images))
+	return nil, fmt.Errorf("this embedding endpoint declares no image input")
+}
+
+// postEach sends one request per input, for the messages format where a
+// conversation yields exactly one vector.
+func (c *Client) postEach(ctx context.Context, n int, body func(int) map[string]any) ([][]float32, error) {
+	out := make([][]float32, n)
+	for i := range n {
+		vectors, err := c.post(ctx, body(i), 1)
+		if err != nil {
+			return nil, err
+		}
+		out[i] = vectors[0]
+	}
+	return out, nil
 }
 
 func (c *Client) post(ctx context.Context, body map[string]any, want int) ([][]float32, error) {

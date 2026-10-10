@@ -499,6 +499,60 @@ func TestE2BRemoteClientListSnapshotsPagesAllResults(t *testing.T) {
 	require.Equal(t, "1", mock.snapshotQueries[1].Get("nextToken"))
 }
 
+func TestE2BRemoteClientListTemplatesInProgress(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		buildID      string
+		buildStatus  string
+		wantStatus   string
+		wantRequests int32
+	}{
+		{"no build reference", "00000000-0000-0000-0000-000000000000", "", "building", 0},
+		{"build in progress", "build-current", "in_progress", "building", 1},
+		{"build ready", "build-current", "ready", "ready", 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var statusRequests atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/templates":
+					writeJSON(w, http.StatusOK, []map[string]any{{
+						"templateID":  "template-weagentbox",
+						"buildID":     tc.buildID,
+						"names":       []string{"project/weknora"},
+						"buildStatus": "in_progress",
+					}})
+				case "/templates/template-weagentbox/builds/" + tc.buildID + "/status":
+					statusRequests.Add(1)
+					writeJSON(w, http.StatusOK, map[string]any{
+						"templateID": "template-weagentbox",
+						"buildID":    tc.buildID,
+						"status":     tc.buildStatus,
+					})
+				default:
+					http.NotFound(w, r)
+				}
+			}))
+			t.Cleanup(server.Close)
+			client, err := NewE2BRemoteClient(&Config{
+				E2BAPIKey:     "key-test",
+				E2BAPIURL:     server.URL,
+				E2BSandboxTTL: time.Minute,
+			})
+			require.NoError(t, err)
+
+			templates, err := client.ListTemplates(context.Background())
+			require.NoError(t, err)
+			require.Len(t, templates, 1)
+			require.True(t, templates[0].Standard)
+			require.Equal(t, tc.wantStatus, templates[0].Status)
+			require.Equal(t, tc.wantRequests, statusRequests.Load())
+			require.Equal(t, tc.wantStatus == "building", isE2BTemplateBuildPending(templates[0].Status))
+			require.Equal(t, tc.wantStatus == "ready", IsTemplateReady(templates[0].Status))
+		})
+	}
+}
+
 func TestE2BRemoteClientListTemplatesReconcilesStandardTemplateBuildStatus(t *testing.T) {
 	var statusRequests atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -948,13 +1002,15 @@ func TestE2BEnsureDesktopTemplateBuildsDesktopImage(t *testing.T) {
 
 func TestNormalizeE2BTemplateBuildStatus(t *testing.T) {
 	tests := map[string]string{
-		"READY":      "ready",
-		"success":    "ready",
-		"completed":  "ready",
-		"processing": "building",
-		"uploaded":   "waiting",
-		"failed":     "error",
-		"custom":     "custom",
+		"READY":         "ready",
+		"success":       "ready",
+		"completed":     "ready",
+		"processing":    "building",
+		"in_progress":   "building",
+		" IN_PROGRESS ": "building",
+		"uploaded":      "waiting",
+		"failed":        "error",
+		"custom":        "custom",
 	}
 	for raw, want := range tests {
 		require.Equalf(t, want, normalizeE2BTemplateBuildStatus(raw), "status %q", raw)

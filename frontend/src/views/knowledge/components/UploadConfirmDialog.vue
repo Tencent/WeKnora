@@ -423,10 +423,37 @@
                         </div>
                         <div v-if="uiState.multimodalConfig.enabled" class="setting-row setting-row-vertical">
                           <div class="setting-info">
-                            <label>{{ t('knowledgeEditor.advanced.multimodal.imagePipelineSectionLabel') }}</label>
-                            <p class="desc">
-                              {{ t('knowledgeEditor.advanced.multimodal.imagePipelineSectionDescription') }}
+                            <label>{{ t('uploadConfirm.imageEmbeddingModel') }}</label>
+                            <p class="desc">{{ t('uploadConfirm.imageIndexInherited') }}</p>
+                            <p v-if="uiState.imageVectorEnabled && !embeddingTakesImages" class="warn">
+                              {{ t('knowledgeEditor.advanced.multimodal.imageVectorModelUnsupported') }}
                             </p>
+                          </div>
+                          <div class="setting-control">
+                            <ModelSelector
+                              model-type="Embedding"
+                              :selected-model-id="kbInfo?.embedding_model_id || ''"
+                              :all-models="allModels"
+                              disabled
+                              :placeholder="t('uploadConfirm.notSet')"
+                            />
+                          </div>
+                        </div>
+                        <div v-if="uiState.multimodalConfig.enabled" class="setting-row">
+                          <div class="setting-info">
+                            <label>{{ t('uploadConfirm.imageVectorIndex') }}</label>
+                            <p class="desc">{{ t('uploadConfirm.imageVectorIndexHint') }}</p>
+                            <p v-if="!kbInfo?.indexing_strategy?.vector_enabled" class="warn">{{ t('uploadConfirm.imageVectorRequiresIndex') }}</p>
+                          </div>
+                          <div class="setting-control">
+                            <t-switch v-model="uiState.imageVectorEnabled" :disabled="!kbInfo?.indexing_strategy?.vector_enabled" size="medium" />
+                          </div>
+                        </div>
+
+                        <div v-if="uiState.multimodalConfig.enabled" class="setting-row">
+                          <div class="setting-info">
+                            <label>{{ t('knowledgeEditor.advanced.multimodal.imagePipelineSectionLabel') }}</label>
+                            <p class="desc">{{ t('knowledgeEditor.advanced.multimodal.imagePipelineSectionDescription') }}</p>
                           </div>
                           <!-- 与知识库编辑器同款：方案与私有参数由注册表驱动，前端
                                不写死任何方案名。选中智能模式时下方展开属性面板。 -->
@@ -726,6 +753,7 @@ interface UploadUIState {
   // derived at write time rather than stored.
   imagePipeline: string
   imagePipelineParams: Record<string, unknown>
+  imageVectorEnabled: boolean
   imageActions: ImageActionsConfig
   asrConfig: { enabled: boolean; modelId: string; language: string }
   questionGenerationConfig: { enabled: boolean; questionCount: number; customInstructions?: string }
@@ -796,6 +824,11 @@ const editorResources = useEditorResourcesStore()
 const uiStore = useUIStore()
 
 const allModels = ref<any[]>([])
+const embeddingTakesImages = computed(() => {
+  const model = allModels.value.find(m => m.id === props.kbInfo?.embedding_model_id)
+  // A shared model may be absent from the model list; the backend resolves it.
+  return !model || !!model.capabilities?.input?.includes('image')
+})
 const localFiles = ref<File[]>([])
 const localUrls = ref<string[]>([])
 const availableTags = ref<Array<{ id: string; name: string }>>([])
@@ -1219,6 +1252,7 @@ function createDefaultUIState(): UploadUIState {
     multimodalConfig: { enabled: false, vllmModelId: '', descriptionLanguage: '', customInstructions: '' },
     imagePipeline: IMAGE_PIPELINE_DEFAULT,
     imagePipelineParams: {},
+    imageVectorEnabled: false,
     imageActions: mergeImageActions(),
     asrConfig: { enabled: false, modelId: '', language: '' },
     questionGenerationConfig: { enabled: true, questionCount: 3, customInstructions: '' },
@@ -1267,6 +1301,7 @@ function initFromKbInfo(kb: any) {
     imagePipeline: resolveImagePipelineFromKb(kb),
     imagePipelineParams:
       (kb.image_processing_config?.image_pipeline_params as Record<string, unknown>) ?? {},
+    imageVectorEnabled: !!kb.image_processing_config?.image_vector_enabled,
     imageActions: mergeImageActions(kb.image_processing_config?.image_actions),
     asrConfig: {
       enabled: !!kb.asr_config?.enabled,
@@ -1319,6 +1354,7 @@ function buildProcessOverrides(): KnowledgeProcessOverrides {
     // 旧观察开关跟随选中的方案（只有智能模式点亮它），与后端
     // EffectiveProcessConfig 的派生规则一致；方案的显式选择随行下发。
     image_attrs_enabled: state.imagePipeline === IMAGE_PIPELINE_SMARTOCR,
+    image_vector_enabled: state.imageVectorEnabled,
     image_actions: {
       ocr: {
         // The KB's own conditions (mergeImageActions keeps a custom list), so
@@ -1406,6 +1442,7 @@ function applyOverridesToState(o?: KnowledgeProcessOverrides | null) {
     // 旧版覆盖只带观察开关：按同一规则还原出方案选择。
     s.imagePipeline = o.image_attrs_enabled ? IMAGE_PIPELINE_SMARTOCR : IMAGE_PIPELINE_DEFAULT
   }
+  if (o.image_vector_enabled != null) s.imageVectorEnabled = o.image_vector_enabled
   if (o.image_actions) s.imageActions = mergeImageActions(o.image_actions)
   if (o.vlm_config) {
     if (o.vlm_config.enabled != null) s.multimodalConfig.enabled = o.vlm_config.enabled

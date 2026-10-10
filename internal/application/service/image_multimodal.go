@@ -650,8 +650,8 @@ func (s *ImageMultimodalService) indexChunks(
 // indexImageVector embeds the image itself with a multimodal embedding model
 // and stores the vector under an image_vector chunk, so a query can find the
 // image by what it shows even where the caption left that out. It returns a
-// short status for the trace, "" when the knowledge base has not opted in
-// (ImageProcessingConfig.ImageVectorEnabled) or the model takes no images.
+// short status for the trace, "" when image indexing is disabled for this
+// document (falling back to the KB setting) or the model takes no images.
 //
 // The caption and OCR chunks are already indexed, so a failure here only
 // loses the extra recall and never fails the task.
@@ -659,9 +659,13 @@ func (s *ImageMultimodalService) indexImageVector(
 	ctx context.Context, kb *types.KnowledgeBase, payload types.ImageMultimodalPayload, img []byte,
 	chunks []*types.Chunk, model embedding.Embedder, engine *retriever.CompositeRetrieveEngine,
 ) string {
-	// Off unless the knowledge base asked for it: a model that takes images
-	// is often chosen for text alone, and this costs a call per image.
-	if !kb.IsImageVectorEnabled() {
+	// The task's explicit choice wins over the KB default, including false.
+	// A vector index is still required; old tasks inherit the KB setting.
+	enabled := kb.IsImageVectorEnabled()
+	if payload.ImageVectorEnabled != nil {
+		enabled = kb.IsVectorEnabled() && *payload.ImageVectorEnabled
+	}
+	if !enabled {
 		return ""
 	}
 	imageModel, ok := embedding.AsImageEmbedder(model)

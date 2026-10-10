@@ -4457,6 +4457,7 @@ func (s *knowledgeService) enqueueImageMultimodalTasks(
 			Attempt:             attempt,
 			ImageIndex:          idx,
 			SourceLocators:      img.SourceLocators,
+			ImageVectorEnabled:  &eff.ImageVectorEnabled,
 		}
 
 		langfuse.InjectTracing(ctx, &payload)

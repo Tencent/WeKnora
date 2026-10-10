@@ -132,6 +132,7 @@ func TestURLResolution(t *testing.T) {
 		"https://api.anthropic.com":              "https://api.anthropic.com/v1/messages",
 		"https://api.anthropic.com/v1":           "https://api.anthropic.com/v1/messages",
 		"https://api.minimaxi.com/anthropic":     "https://api.minimaxi.com/anthropic/v1/messages",
+		"https://api.minimax.cn/anthropic":       "https://api.minimax.cn/anthropic/v1/messages",
 		"https://open.bigmodel.cn/api/anthropic": "https://open.bigmodel.cn/api/anthropic/v1/messages",
 		"https://proxy.example.com/v1/messages":  "https://proxy.example.com/v1/messages",
 	}

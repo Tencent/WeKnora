@@ -79,6 +79,8 @@ export interface KnowledgeProcessOverrides {
   // derives image_attrs_enabled from it.
   image_pipeline?: string
   image_pipeline_params?: Record<string, unknown>
+  // Controls indexing for this document, without changing KB retrieval.
+  image_vector_enabled?: boolean
   // Per-task attribute -> work table; merged per action key on top of the
   // knowledge base's table.
   image_actions?: ImageActionsConfig

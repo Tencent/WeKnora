@@ -122,6 +122,9 @@ func Rerank(
 		},
 	}
 
+	var scoredAsImage map[int]bool
+	defer func() { recordSelection(ctx, results, res, opts, scoredAsImage) }()
+
 	keep := topByScore(results, opts.MaxCandidates)
 	candidateIdx := make([]int, 0, len(results))
 	for i, r := range results {
