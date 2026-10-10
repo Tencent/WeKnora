@@ -1,8 +1,10 @@
 package service
 
 import (
+	"fmt"
 	"regexp"
 	"strings"
+	"unicode"
 
 	htmltomd "github.com/JohannesKaufmann/html-to-markdown/v2"
 	"github.com/Tencent/WeKnora/internal/infrastructure/docparser"
@@ -28,6 +30,65 @@ var (
 // sanitizeOCRText cleans up VLM OCR output by stripping HTML wrappers,
 // converting HTML to markdown, and filtering out useless responses.
 func sanitizeOCRText(raw string) string {
+	text, _ := validateOCRText(raw)
+	return text
+}
+
+type ocrValidationError struct{ reason string }
+
+func (e *ocrValidationError) Error() string { return fmt.Sprintf("invalid OCR output: %s", e.reason) }
+
+// validateOCRText distinguishes an explicit no-text answer from unusable model
+// output. Reject the entire response, rather than indexing a plausible prefix
+// followed by hallucinated repetition.
+func validateOCRText(raw string) (string, error) {
+	if isKnownEmptyReply(stripMarkdownCodeBlock(strings.TrimSpace(raw))) {
+		return "", nil
+	}
+	text := normalizeOCRText(raw)
+	if text == "" {
+		return "", &ocrValidationError{reason: "empty_content"}
+	}
+	readable := false
+	for _, r := range text {
+		if unicode.IsLetter(r) || unicode.IsNumber(r) ||
+			(unicode.IsSymbol(r) && !strings.ContainsRune("|~`", r)) {
+			readable = true
+			break
+		}
+	}
+	if !readable {
+		return "", &ocrValidationError{reason: "no_readable_content"}
+	}
+	if hasOCRRepetition(text) {
+		return "", &ocrValidationError{reason: "repetitive_content"}
+	}
+	return text, nil
+}
+
+// Require a long, dominant periodic run to avoid rejecting ordinary repeated
+// labels, table separators, or short numeric values. Normalize whitespace so
+// line wrapping does not hide a decoding loop. Work is bounded by 64*n.
+func hasOCRRepetition(text string) bool {
+	runes := []rune(strings.Join(strings.Fields(text), " "))
+	for period := 1; period <= 64 && period <= len(runes)/32; period++ {
+		matched := 0
+		for i := period; i < len(runes); i++ {
+			if runes[i] == runes[i-period] {
+				matched++
+			} else {
+				matched = 0
+			}
+			span := matched + period
+			if span >= 512 && span >= period*32 && span*5 >= len(runes)*4 {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func normalizeOCRText(raw string) string {
 	text := strings.TrimSpace(raw)
 	if text == "" {
 		return ""

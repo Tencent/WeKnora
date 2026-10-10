@@ -1,6 +1,7 @@
 package service
 
 import (
+	"fmt"
 	"regexp"
 	"strings"
 	"testing"
@@ -253,5 +254,51 @@ func TestIsKnownEmptyReply(t *testing.T) {
 				t.Errorf("isKnownEmptyReply(%q) = %v, want %v", tt.input, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestValidateOCRTextRejectsDegenerateOutput(t *testing.T) {
+	for _, tt := range []struct {
+		name, input, reason string
+	}{
+		{"recorded empty cells", strings.Repeat("|  ", 2500), "no_readable_content"},
+		{"empty response", " \n\t", "empty_content"},
+		{"markdown skeleton", "| --- | --- |\n| | |", "no_readable_content"},
+		{"repeated phrase", strings.Repeat("传球按钮 ", 200), "repetitive_content"},
+		{"repeated suffix after real text", "传球\n" + strings.Repeat("|  ", 2500), "repetitive_content"},
+		{"repeated wrapped lines", strings.Repeat("开始\n锁定目标\n", 100), "repetitive_content"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			text, err := validateOCRText(tt.input)
+			invalid, ok := err.(*ocrValidationError)
+			if text != "" || !ok || invalid.reason != tt.reason {
+				t.Fatalf("text=%q error=%v; want rejection %s", text, err, tt.reason)
+			}
+			if got := sanitizeOCRText(tt.input); got != "" {
+				t.Fatal("shared sanitizer must also discard rejected OCR")
+			}
+		})
+	}
+}
+
+func TestValidateOCRTextPreservesRealContent(t *testing.T) {
+	var table strings.Builder
+	table.WriteString("| 项目 | 数值 |\n| --- | --- |\n")
+	for i := 0; i < 100; i++ {
+		fmt.Fprintf(&table, "| 项目%d | %d |\n", i, i)
+	}
+	for _, input := range []string{
+		"A", "3", "传球", "A\nB\nL1\nL2\n传球\n传球", "0:0\n58.29\n取消施法", "±", "$x^2 + y^2 = z^2$",
+		table.String(), strings.Repeat("同一个按钮\n", 5),
+	} {
+		got, err := validateOCRText(input)
+		if err != nil || got != strings.TrimSpace(input) {
+			t.Fatalf("valid OCR rejected or changed: input=%q got=%q err=%v", input, got, err)
+		}
+	}
+	for _, input := range []string{"No text content.", "无文字内容", "```\nNo text content.\n```"} {
+		if got, err := validateOCRText(input); err != nil || got != "" {
+			t.Fatalf("explicit no-text answer should succeed without text: %q %v", got, err)
+		}
 	}
 }
