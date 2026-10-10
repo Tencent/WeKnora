@@ -1091,11 +1091,40 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
 
     // Persistence can fail after the entire answer has streamed. Surface the
     // failure separately; the generic error path replaces the answer content.
-    if (data.response_type === 'error' && (data.data as ChatMessage | undefined)?.stage === 'message_persistence') {
-      const message = resolveActiveAssistantMessage(data)
+    if (data.response_type === 'error') {
+      const isMsgPersistenceError = (data.data as ChatMessage | undefined)?.stage === 'message_persistence'
+      let message = resolveActiveAssistantMessage(data)
       const errorMsg = String(data.content || t('chat.processError'))
+      if (!message) {
+        // No active assistant message found — create one so the error is visible.
+        const rowId = (data.id as string | undefined) || currentAssistantMessageId.value || `err-${Date.now()}`
+        message = {
+          id: rowId,
+          request_id: rowId,
+          role: 'assistant',
+          content: '',
+          showThink: false,
+          is_completed: false,
+          isAgentMode: false,
+        }
+        messagesList.push(message)
+        emitMessageCreated(message)
+      }
       if (message) {
-        message.persistence_error = errorMsg
+        if (isMsgPersistenceError) {
+          // Persistence errors happen after content was already streamed;
+          // preserve the original content and mark the error separately.
+          message.persistence_error = errorMsg
+        } else {
+          // Generic errors (model call timeout, pipeline failure, etc.)
+          // replace the (empty or partial) answer content.
+          message.content = errorMsg
+          // Switch to non-agent rendering path so botmsg.vue displays the
+          // error content via the traditional markdown bubble. The agent
+          // query handler sets isAgentMode:true by default, which routes
+          // to AgentStreamDisplay that may not render plain content.
+          message.isAgentMode = false
+        }
         message.is_completed = true
         message.thinking = false
         message.artifactsCollecting = false
