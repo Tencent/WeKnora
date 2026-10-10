@@ -44,7 +44,7 @@ const expanded = ref(false)
 .toolbox-category-tags :deep(.t-popup) { flex-shrink: 0; }
 .toolbox-category-tags__more {
   border: 0;
-  border-radius: 3px;
+  border-radius: var(--app-radius-xs);
   padding: 0 7px;
   height: 22px;
   background: var(--td-bg-color-secondarycontainer);
