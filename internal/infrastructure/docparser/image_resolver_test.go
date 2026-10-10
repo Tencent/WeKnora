@@ -473,6 +473,63 @@ func TestHasUnresolvedInlineImagePayloadIgnoresFencedCodeExamples(t *testing.T) 
 	}
 }
 
+func TestInlineImageCodeExamplesAreNeitherResolvedNorDetected(t *testing.T) {
+	b64 := base64.StdEncoding.EncodeToString(createTestPNG(200, 150))
+	for name, markdown := range map[string]string{
+		"single-backtick inline code": "Use `data:image/png;base64," + b64 + "` as an example.",
+		"multi-backtick inline code":  "Use ``data:image/png;base64," + b64 + "`` as an example.",
+		"fenced code":                 "```text\ndata:image/png;base64," + b64 + "\n```",
+	} {
+		t.Run(name, func(t *testing.T) {
+			svc := &captureSaveBytes{}
+			out, images, err := NewImageResolver().ResolveBareBase64Content(
+				context.Background(), markdown, svc, 1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(images) != 0 || len(svc.saved) != 0 {
+				t.Fatalf("code example saved images=%d, saves=%d", len(images), len(svc.saved))
+			}
+			if out != markdown {
+				t.Fatalf("code example was rewritten: %q", out)
+			}
+			if HasUnresolvedInlineImagePayload(out) {
+				t.Fatal("code example was treated as an unresolved image")
+			}
+		})
+	}
+}
+
+func TestResolveAndStoreSkipsImageSyntaxInsideCodeExamples(t *testing.T) {
+	b64 := base64.StdEncoding.EncodeToString(createTestPNG(200, 150))
+	markdown := strings.Join([]string{
+		"`![](data:image/png;base64," + b64 + ")`",
+		"```html\n<img src=\"data:image/png;base64," + b64 + "\">\n```",
+	}, "\n\n")
+	svc := &captureSaveBytes{}
+	out, images, err := NewImageResolver().ResolveAndStore(
+		context.Background(), &types.ReadResult{MarkdownContent: markdown}, svc, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(images) != 0 || len(svc.saved) != 0 {
+		t.Fatalf("code examples saved images=%d, saves=%d", len(images), len(svc.saved))
+	}
+	if out != markdown {
+		t.Fatalf("code examples were rewritten: %q", out)
+	}
+	if HasUnresolvedInlineImagePayload(out) {
+		t.Fatal("code example was treated as an unresolved image")
+	}
+}
+
+func TestHasUnresolvedInlineImagePayloadDetectsInvalidImageDataURI(t *testing.T) {
+	markdown := "Actual image: data:image/png;base64,not-valid-image-payload"
+	if !HasUnresolvedInlineImagePayload(markdown) {
+		t.Fatal("unresolved image data URI was not detected")
+	}
+}
+
 func TestResolveBareBase64Content_BareDataURI(t *testing.T) {
 	png := createTestPNG(200, 150)
 	b64 := base64.StdEncoding.EncodeToString(png)

@@ -399,9 +399,13 @@ func (r *ImageResolver) ResolveHTMLDataURIImages(
 	if len(matches) == 0 {
 		return markdown, nil, nil
 	}
+	codeRanges := markdownCodeLiteralRanges(markdown)
 
 	for i := len(matches) - 1; i >= 0; i-- {
 		m := matches[i]
+		if _, ok := codeLiteralRangeAt(codeRanges, m[0]); ok {
+			continue
+		}
 		dataURI := markdown[m[2]:m[3]]
 		mimeType, payload, ok := parseImageDataURI(dataURI)
 		if !ok {
@@ -497,7 +501,7 @@ var bareBase64CommaPrefixed = regexp.MustCompile(
 // URIs that a parser could not recognize or resolve. It deliberately ignores
 // ordinary prose mentioning base64 and non-image base64 examples.
 func HasUnresolvedInlineImagePayload(markdown string) bool {
-	markdown = withoutFencedCodeBlocks(markdown)
+	markdown = withoutMarkdownCodeLiterals(markdown)
 	if unresolvedImageDataURI.MatchString(markdown) {
 		return true
 	}
@@ -509,32 +513,123 @@ func HasUnresolvedInlineImagePayload(markdown string) bool {
 	return false
 }
 
-func withoutFencedCodeBlocks(markdown string) string {
-	var out strings.Builder
-	out.Grow(len(markdown))
-	var fence byte
-	var fenceLength int
+type markdownCodeLiteralRange struct {
+	start int
+	end   int
+}
 
-	for _, line := range strings.SplitAfter(markdown, "\n") {
+// withoutMarkdownCodeLiterals masks fenced and inline code while preserving
+// byte offsets. The image resolver uses the same ranges before replacing a
+// match, so documentation snippets cannot be either uploaded or rejected.
+func withoutMarkdownCodeLiterals(markdown string) string {
+	ranges := markdownCodeLiteralRanges(markdown)
+	if len(ranges) == 0 {
+		return markdown
+	}
+	masked := []byte(markdown)
+	for _, r := range ranges {
+		for i := r.start; i < r.end; i++ {
+			if masked[i] != '\n' {
+				masked[i] = ' '
+			}
+		}
+	}
+	return string(masked)
+}
+
+func markdownCodeLiteralRanges(markdown string) []markdownCodeLiteralRange {
+	ranges := fencedCodeLiteralRanges(markdown)
+	for i := 0; i < len(markdown); {
+		if end, ok := codeLiteralRangeAt(ranges, i); ok {
+			i = end
+			continue
+		}
+		if markdown[i] != '`' {
+			i++
+			continue
+		}
+		runLength := 1
+		for i+runLength < len(markdown) && markdown[i+runLength] == '`' {
+			runLength++
+		}
+		close := findInlineCodeLiteralClose(markdown, ranges, i+runLength, runLength)
+		if close < 0 {
+			i += runLength
+			continue
+		}
+		ranges = append(ranges, markdownCodeLiteralRange{start: i, end: close + runLength})
+		i = close + runLength
+	}
+	return ranges
+}
+
+func fencedCodeLiteralRanges(markdown string) []markdownCodeLiteralRange {
+	var ranges []markdownCodeLiteralRange
+	var fence byte
+	var fenceLength, fenceStart int
+
+	for lineStart := 0; lineStart < len(markdown); {
+		lineEnd := strings.IndexByte(markdown[lineStart:], '\n')
+		if lineEnd < 0 {
+			lineEnd = len(markdown)
+		} else {
+			lineEnd += lineStart
+		}
+		line := markdown[lineStart:lineEnd]
 		trimmed := strings.TrimLeft(line, " \t")
 		if fence == 0 {
 			if marker, length := codeFence(trimmed); length > 0 {
-				fence, fenceLength = marker, length
-				out.WriteByte('\n')
-				continue
+				fence, fenceLength, fenceStart = marker, length, lineStart
 			}
-			out.WriteString(line)
-			continue
-		}
-
-		if marker, length := codeFence(trimmed); marker == fence && length >= fenceLength &&
+		} else if marker, length := codeFence(trimmed); marker == fence && length >= fenceLength &&
 			strings.TrimSpace(trimmed[length:]) == "" {
+			end := lineEnd
+			if end < len(markdown) {
+				end++
+			}
+			ranges = append(ranges, markdownCodeLiteralRange{start: fenceStart, end: end})
 			fence, fenceLength = 0, 0
 		}
-		out.WriteByte('\n')
+		if lineEnd == len(markdown) {
+			break
+		}
+		lineStart = lineEnd + 1
 	}
+	if fence != 0 {
+		ranges = append(ranges, markdownCodeLiteralRange{start: fenceStart, end: len(markdown)})
+	}
+	return ranges
+}
 
-	return out.String()
+func codeLiteralRangeAt(ranges []markdownCodeLiteralRange, offset int) (int, bool) {
+	for _, r := range ranges {
+		if offset >= r.start && offset < r.end {
+			return r.end, true
+		}
+	}
+	return 0, false
+}
+
+func findInlineCodeLiteralClose(markdown string, ranges []markdownCodeLiteralRange, start, runLength int) int {
+	for i := start; i < len(markdown); {
+		if end, ok := codeLiteralRangeAt(ranges, i); ok {
+			i = end
+			continue
+		}
+		if markdown[i] != '`' {
+			i++
+			continue
+		}
+		end := i
+		for end < len(markdown) && markdown[end] == '`' {
+			end++
+		}
+		if end-i == runLength {
+			return i
+		}
+		i = end
+	}
+	return -1
 }
 
 func codeFence(line string) (byte, int) {
@@ -574,14 +669,14 @@ func (r *ImageResolver) ResolveBareBase64Content(
 	fileSvc interfaces.FileService,
 	tenantID uint64,
 ) (updatedMarkdown string, images []StoredImage, err error) {
-	md, imgs1, err := r.resolveBareDataURIs(ctx, markdown, fileSvc, tenantID)
+	md, imgs1, err := r.resolveBareDataURIs(ctx, markdown, fileSvc, tenantID, markdownCodeLiteralRanges(markdown))
 	images = append(images, imgs1...)
 	if err != nil {
 		return markdown, images, err
 	}
 	markdown = md
 
-	md2, imgs2, err := r.resolveBareBase64Prefix(ctx, markdown, fileSvc, tenantID)
+	md2, imgs2, err := r.resolveBareBase64Prefix(ctx, markdown, fileSvc, tenantID, markdownCodeLiteralRanges(markdown))
 	images = append(images, imgs2...)
 	if err != nil {
 		return markdown, images, err
@@ -596,6 +691,7 @@ func (r *ImageResolver) resolveBareDataURIs(
 	markdown string,
 	fileSvc interfaces.FileService,
 	tenantID uint64,
+	codeRanges []markdownCodeLiteralRange,
 ) (string, []StoredImage, error) {
 	matches := bareDataURIPattern.FindAllStringSubmatchIndex(markdown, -1)
 	if len(matches) == 0 {
@@ -605,6 +701,9 @@ func (r *ImageResolver) resolveBareDataURIs(
 	var images []StoredImage
 	for i := len(matches) - 1; i >= 0; i-- {
 		m := matches[i]
+		if _, ok := codeLiteralRangeAt(codeRanges, m[0]); ok {
+			continue
+		}
 		// Check context: skip HTML src attributes, but handle broken markdown refs
 		insideWrapper := false
 		if m[0] > 0 {
@@ -667,6 +766,7 @@ func (r *ImageResolver) resolveBareBase64Prefix(
 	markdown string,
 	fileSvc interfaces.FileService,
 	tenantID uint64,
+	codeRanges []markdownCodeLiteralRange,
 ) (string, []StoredImage, error) {
 	matches := bareBase64CommaPrefixed.FindAllStringSubmatchIndex(markdown, -1)
 	if len(matches) == 0 {
@@ -676,6 +776,9 @@ func (r *ImageResolver) resolveBareBase64Prefix(
 	var images []StoredImage
 	for i := len(matches) - 1; i >= 0; i-- {
 		m := matches[i]
+		if _, ok := codeLiteralRangeAt(codeRanges, m[0]); ok {
+			continue
+		}
 		// Skip if preceded by ';' — this is part of a data URI handled above
 		if m[0] > 0 && markdown[m[0]-1] == ';' {
 			continue
@@ -816,10 +919,14 @@ func (r *ImageResolver) ResolveDataURIImages(
 	if len(matches) == 0 {
 		return markdown, nil, nil
 	}
+	codeRanges := markdownCodeLiteralRanges(markdown)
 
 	for i := len(matches) - 1; i >= 0; i-- {
 		m := matches[i]
 		if len(m) < 6 {
+			continue
+		}
+		if _, ok := codeLiteralRangeAt(codeRanges, m[0]); ok {
 			continue
 		}
 		dataURI := markdown[m[4]:m[5]]
