@@ -225,6 +225,9 @@ func emitMCPOAuthRequiredNotice(
 // oauthAwareConnectError turns a low-level MCP connect/call error into a
 // message the agent (and ultimately the user) can act on.
 func oauthAwareConnectError(service *types.MCPService, err error) string {
+	if errors.Is(err, mcp.ErrToolCallOutcomeUnknown) {
+		return fmt.Sprintf("MCP tool call failed: %v", err)
+	}
 	if service.AuthConfig.IsOAuth() && isAuthorizationRequired(err) {
 		return fmt.Sprintf(
 			"MCP service %q requires OAuth authorization. Please open the service settings "+

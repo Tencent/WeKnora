@@ -607,11 +607,22 @@ func (c *mcpGoClient) CallTool(ctx context.Context, name string, args map[string
 		},
 	}
 
+	var callErr error
 	result, err := oauthCall(ctx, c, func() (*mcp.CallToolResult, error) {
-		return c.client.CallTool(ctx, req)
+		result, err := c.client.CallTool(ctx, req)
+		callErr = err
+		return result, err
 	})
 	if err != nil {
 		c.checkErrorAndDisconnectIfNeeded(err)
+		// Inspect the actual call error, not a preflight/refresh error from
+		// oauthCall. A rejected authorization did not execute the tool.
+		if callErr != nil && !IsToolCallRetrySafe(callErr) {
+			return nil, fmt.Errorf(
+				"%w; it may already have completed. Verify the remote outcome before retrying: %w",
+				ErrToolCallOutcomeUnknown, err,
+			)
+		}
 		return nil, fmt.Errorf("failed to call tool: %w", err)
 	}
 
