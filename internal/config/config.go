@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/utils"
 	"github.com/go-viper/mapstructure/v2"
 	"github.com/spf13/viper"
 	"gopkg.in/yaml.v3"
@@ -590,6 +591,7 @@ func LoadConfig() (*Config, error) {
 	applyOIDCEnvOverrides(&cfg)
 	applyAgentEnvOverrides(&cfg)
 	applyKnowledgeBaseEnvOverrides(&cfg)
+	applyNetworkEnvOverrides()
 	applyAuthAndTenantDefaults(&cfg)
 	applyAuditDefaults(&cfg)
 
@@ -781,6 +783,21 @@ func applyKnowledgeBaseEnvOverrides(cfg *Config) {
 			cfg.KnowledgeBase.DocReaderCallTimeout = d
 		}
 	}
+}
+
+// applyNetworkEnvOverrides configures global network timeouts that are not
+// scoped to a single config section. The outbound (SSRF-safe) dial timeout
+// governs how quickly an unreachable model/connector endpoint fails; it
+// defaults to 5s and can be raised via WEKNORA_OUTBOUND_DIAL_TIMEOUT for
+// slow-to-connect serverless endpoints.
+func applyNetworkEnvOverrides() {
+	dialTimeout := 5 * time.Second
+	if value := strings.TrimSpace(os.Getenv("WEKNORA_OUTBOUND_DIAL_TIMEOUT")); value != "" {
+		if d, err := time.ParseDuration(value); err == nil && d > 0 {
+			dialTimeout = d
+		}
+	}
+	utils.SetOutboundDialTimeout(dialTimeout)
 }
 
 func applyAgentEnvOverrides(cfg *Config) {
