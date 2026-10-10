@@ -146,6 +146,21 @@ func (r *chunkRepository) ListChunksByIDOnly(ctx context.Context, ids []string) 
 	return chunks, nil
 }
 
+// ListChunkEvidenceByIDOnly validates graph references without loading content.
+// Find retains Chunk's default soft-delete scope; the caller checks KB access.
+func (r *chunkRepository) ListChunkEvidenceByIDOnly(ctx context.Context, ids []string) ([]*types.Chunk, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	var chunks []*types.Chunk
+	if err := r.db.WithContext(ctx).
+		Select("id, knowledge_base_id, knowledge_id, is_enabled").
+		Where("id IN ?", ids).Find(&chunks).Error; err != nil {
+		return nil, err
+	}
+	return chunks, nil
+}
+
 // ListChunksBySeqID retrieves multiple chunks by their seq_ids
 func (r *chunkRepository) ListChunksBySeqID(
 	ctx context.Context, tenantID uint64, seqIDs []int64,

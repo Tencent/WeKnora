@@ -74,3 +74,61 @@ func TestModelOutputOmitsGraphTruncationMarkerWhenComplete(t *testing.T) {
 	require.Contains(t, output, `<relation source="Kubernetes" type="orchestrates" target="Docker" />`)
 	require.NotContains(t, output, "graph_truncated")
 }
+
+func TestModelOutputMarksGraphValidationLimitIncludingZeroEvidence(t *testing.T) {
+	for _, valid := range []int{0, 7, 512} {
+		t.Run(fmt.Sprint(valid), func(t *testing.T) {
+			data := graphQueryResultData(nil, map[string]interface{}{
+				"graph_validation_truncated":        true,
+				"graph_candidates_validated_total":  512,
+				"graph_validation_limit_per_kb":     512,
+				"graph_chunks_total":                valid,
+				"graph_chunks_omitted":              max(0, valid-10),
+				"graph_chunks_total_is_lower_bound": true,
+				"relations_total":                   0,
+				"relations_omitted":                 0,
+				"relations_total_is_lower_bound":    true,
+			})
+			// The row may be a text fallback when graph validation found nothing.
+			output := newSourceRegistry().ModelOutput(&types.ToolResult{
+				Success: true, Output: "legacy output is replaced", Data: data,
+			})
+			require.Contains(t, output, `validation_stopped="true" candidates_validated_total="512" `+
+				`validation_limit_per_kb="512"`)
+			require.Contains(t, output, `relations_total_at_least="0"`)
+			require.Contains(t, output, fmt.Sprintf(`chunks_total_at_least="%d"`, valid))
+			require.Contains(t, output, "some candidate evidence was not checked")
+			require.Contains(t, output, fmt.Sprintf("at least %d valid in-scope evidence chunks", valid))
+			require.NotContains(t, output, `chunks_total="`)
+			require.NotContains(t, output, `relations_total="`)
+		})
+	}
+}
+
+func TestModelOutputPreservesValidationWarningOnEmptyGraphResult(t *testing.T) {
+	warning := "No relevant graph information found. Graph evidence validation stopped after 512 candidates. " +
+		"Some candidate evidence was not checked. Found at least 0 valid in-scope evidence chunks."
+	data := graphQueryResultData(nil, map[string]interface{}{
+		"graph_validation_truncated":       true,
+		"graph_validation_limit_per_kb":    512,
+		"graph_candidates_validated_total": 512,
+	})
+	data["results"] = []map[string]interface{}{}
+	output := newSourceRegistry().ModelOutput(&types.ToolResult{Success: true, Output: warning, Data: data})
+	require.Contains(t, output, "validation stopped")
+	require.Contains(t, output, "Some candidate evidence was not checked")
+	require.Contains(t, output, "at least 0")
+}
+
+func TestModelOutputLabelsCandidateTotalSeparatelyFromPerKBLimit(t *testing.T) {
+	data := graphQueryResultData(nil, map[string]interface{}{
+		"graph_validation_truncated":        true,
+		"graph_validation_limit_per_kb":     512,
+		"graph_candidates_validated_total":  1024,
+		"graph_chunks_total_is_lower_bound": true,
+		"relations_total_is_lower_bound":    true,
+	})
+	output := newSourceRegistry().ModelOutput(&types.ToolResult{Success: true, Data: data})
+	require.Contains(t, output, `candidates_validated_total="1024" validation_limit_per_kb="512"`)
+	require.Contains(t, output, "512 candidates per knowledge base")
+}
