@@ -135,47 +135,43 @@ func TestThinkingFollowsTheStoredSwitch(t *testing.T) {
 	}
 }
 
-// TestObservationPipelineThinkingKeys pins the two-layer key design. The
-// pipeline reads its OWN param keys (describe_thinking / text_thinking) — the
-// default pipeline's stored switches must not drive its run, which is the
-// no-overlapping-fields contract — while the TRACE records the effective
-// values under the shared action-level names, so runs stay comparable across
-// pipelines.
+// TestObservationPipelineThinkingKeys pins that the thinking switches are
+// ACTION-level keys shared with the default pipeline: caption.thinking /
+// ocr.thinking drive the calls, the pre-unification private keys
+// (describe_thinking / text_thinking) are stale and ignored, and the trace
+// records the same action keys.
 func TestObservationPipelineThinkingKeys(t *testing.T) {
 	r, model := runThinkingPipeline(t, true, map[string]any{
-		smartFieldKeyCaptureCaption:   true,
-		smartFieldKeyAllowOCR:         true,
-		smartFieldKeyDescribeThinking: true,
-		smartFieldKeyTextThinking:     true,
-		// The default pipeline's stored switches: present, but they must have
-		// no effect on this run — isolation, not inheritance.
+		smartFieldKeyCaptureCaption: true,
+		smartFieldKeyAllowOCR:       true,
+		// Stale keys from before the action-level unification: present in a
+		// stored config, honoured by nothing.
+		"describe_thinking": true,
+		"text_thinking":     true,
+		// The action-level switches this pipeline declares.
 		imageFieldKeyCaptionThinking: false,
-		imageFieldKeyOCRThinking:     false,
+		imageFieldKeyOCRThinking:     true,
 	})
 	if len(model.calls) != 2 {
 		t.Fatalf("VLM calls = %d (%v), want 2", len(model.calls), model.calls)
 	}
-	if !model.calls[0].thinking {
-		t.Error("the observation call ran with thinking off; describe_thinking=true was ignored")
+	if model.calls[0].thinking {
+		t.Error("the observation call ran with thinking on; caption.thinking=false was ignored")
 	}
 	if !model.calls[1].thinking {
-		t.Error("the OCR call ran with thinking off; text_thinking=true was ignored")
+		t.Error("the OCR call ran with thinking off; ocr.thinking=true was ignored")
 	}
-	// The trace names the switch after the ACTION, whichever pipeline served
-	// the run, so a reader compares like with like.
-	if got := r.out[imageFieldKeyCaptionThinking]; got != true {
-		t.Errorf(`out[%q] = %v, want true (the trace must use the shared action-level key)`,
-			imageFieldKeyCaptionThinking, got)
+	if got := r.out[imageFieldKeyCaptionThinking]; got != false {
+		t.Errorf(`out[%q] = %v, want false`, imageFieldKeyCaptionThinking, got)
 	}
 	if got := r.out[imageFieldKeyOCRThinking]; got != true {
-		t.Errorf(`out[%q] = %v, want true (the trace must use the shared action-level key)`,
-			imageFieldKeyOCRThinking, got)
+		t.Errorf(`out[%q] = %v, want true`, imageFieldKeyOCRThinking, got)
 	}
-	// The pipeline's private param keys must not leak into the trace.
-	if _, ok := r.out[smartFieldKeyDescribeThinking]; ok {
-		t.Error("smartocr's private param key must not appear in the trace")
+	// The stale private keys must not leak into the trace.
+	if _, ok := r.out["describe_thinking"]; ok {
+		t.Error("the stale describe_thinking key must not appear in the trace")
 	}
-	if _, ok := r.out[smartFieldKeyTextThinking]; ok {
-		t.Error("smartocr's private param key must not appear in the trace")
+	if _, ok := r.out["text_thinking"]; ok {
+		t.Error("the stale text_thinking key must not appear in the trace")
 	}
 }

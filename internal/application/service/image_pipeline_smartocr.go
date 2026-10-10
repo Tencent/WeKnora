@@ -24,19 +24,16 @@ func (smartOcrPipeline) Description() string {
 		"from the attributes whether OCR is worth a pass, saving model calls."
 }
 
-// Field keys of this pipeline. They deliberately do not reuse the names of
-// the default pipeline's switches: the knowledge base stores params per
-// pipeline, and a shared key would make one pipeline's stored switch drive
-// another pipeline's run. The thinking switches follow the same rule — named
-// after what this pipeline asks the model for (the observation call writes
-// the description *and* reports the attributes) — while the TRACE records
-// them under the shared action-level names (see think), so runs stay
-// comparable across pipelines.
+// Field keys of this pipeline. allow_ocr and capture_caption are
+// PIPELINE-private keys (this pipeline answers "may OCR be spent at all",
+// which is a ceiling on the policy rather than a step to run) and deliberately
+// do not reuse the default pipeline's step switches. The thinking switches are
+// ACTION-level keys (caption.thinking / ocr.thinking) shared with the default
+// pipeline: the same action means the same tunable wherever it runs, so there
+// is nothing to isolate and no reason to invent per-pipeline names.
 const (
-	smartFieldKeyAllowOCR         = "allow_ocr"
-	smartFieldKeyCaptureCaption   = "capture_caption"
-	smartFieldKeyDescribeThinking = "describe_thinking"
-	smartFieldKeyTextThinking     = "text_thinking"
+	smartFieldKeyAllowOCR       = "allow_ocr"
+	smartFieldKeyCaptureCaption = "capture_caption"
 )
 
 // Fields declares this pipeline's panel controls. The model decides from the
@@ -51,27 +48,10 @@ const (
 // base that never touched these switches still behaves as it always did.
 func (smartOcrPipeline) Fields() []types.ImageFieldDef {
 	return []types.ImageFieldDef{
-		{
-			Key:   smartFieldKeyDescribeThinking,
-			Type:  types.ImageFieldTypeBool,
-			Label: "Describe with thinking",
-			// Warning, not recommendation: on some models long reasoning can
-			// crowd out the answer itself and leave the description empty.
-			Description: "Let the model think before it describes the image " +
-				"and reports its attributes. Rarely needed: it costs latency, " +
-				"and on some models long reasoning truncates the description. " +
-				"Enable only when necessary.",
-			Default: false,
-		},
-		{
-			Key:   smartFieldKeyTextThinking,
-			Type:  types.ImageFieldTypeBool,
-			Label: "Text recognition with thinking",
-			Description: "Let the model think before transcribing. " +
-				"Rarely needed: it costs latency, and on some models long " +
-				"reasoning truncates the text. Enable only when necessary.",
-			Default: false,
-		},
+		// The thinking switches are action-level fields, declared once at the
+		// action layer and carried in here.
+		imageActionThinkingFields[0],
+		imageActionThinkingFields[1],
 	}
 }
 
@@ -91,9 +71,10 @@ func (smartOcrPipeline) Validate(_ map[string]any) error {
 
 func (smartOcrPipeline) Run(ctx context.Context, r *runContext) error {
 	// The keys the shared actions read, set before the observation runs so the
-	// OCR branch below leaves them filled in either way.
-	r.captionThinkingKey = smartFieldKeyDescribeThinking
-	r.ocrThinkingKey = smartFieldKeyTextThinking
+	// OCR branch below leaves them filled in either way. The thinking switches
+	// are action-level keys shared with the default pipeline.
+	r.captionThinkingKey = imageFieldKeyCaptionThinking
+	r.ocrThinkingKey = imageFieldKeyOCRThinking
 
 	// One request fills both the attribute slots and the caption slot, so there
 	// is no separate caption action to schedule here. The allow_ocr and

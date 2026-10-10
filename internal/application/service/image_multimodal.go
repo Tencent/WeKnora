@@ -351,6 +351,7 @@ func (s *ImageMultimodalService) processImage(
 	// outcome summary, without failing or retrying the whole image).
 	if err := pipeline.Run(ctx, &runContext{
 		payload:    payload,
+		pipelineID: string(payload.ImagePipelineID),
 		params:     payload.ImagePipelineParams,
 		declared:   pipeline.Fields(),
 		model:      vlmModel,

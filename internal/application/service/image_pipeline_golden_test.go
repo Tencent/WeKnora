@@ -160,10 +160,12 @@ func TestImagePipelineActionSequences(t *testing.T) {
 	}
 }
 
-// TestPipelineFieldsArePrivate is the contract the settings panel rests on: no
-// two pipelines may declare the same field key, because the knowledge base
-// stores them per pipeline and a collision would make one pipeline's panel
-// control another's run.
+// TestPipelineFieldsArePrivate is the contract the settings panel rests on:
+// PIPELINE-private keys must not overlap, because the knowledge base stores
+// them flat and a collision would make one pipeline's panel control another's
+// run. ACTION-level keys ("action.key" — the thinking switches) are the
+// deliberate exception: they mean the same tunable wherever the action runs,
+// so every pipeline declares the same pair.
 func TestPipelineFieldsArePrivate(t *testing.T) {
 	seen := make(map[string]types.ImagePipelineID)
 	for _, spec := range ListImagePipelines() {
@@ -187,6 +189,9 @@ func TestPipelineFieldsArePrivate(t *testing.T) {
 				t.Errorf("field %q of pipeline %q has an unknown type %q", field.Key, spec.ID, field.Type)
 			}
 			if other, dup := seen[field.Key]; dup && other != spec.ID {
+				if field.Key == imageFieldKeyCaptionThinking || field.Key == imageFieldKeyOCRThinking {
+					continue // action-level keys are shared by design
+				}
 				t.Errorf("field %q is declared by both %q and %q; pipeline fields must not overlap",
 					field.Key, other, spec.ID)
 			}
@@ -463,5 +468,29 @@ func TestExecuteSkipsUnimplementedAction(t *testing.T) {
 	}
 	if got := r.out["action_skipped"]; got != "not_registered" {
 		t.Errorf(`out["action_skipped"] = %v, want "not_registered"`, got)
+	}
+}
+
+// TestParamPrefersPipelineNamespace pins the future-proofing in Param: a
+// pipeline-private key stored under the running pipeline's namespace
+// ("<pipeline>.<key>") wins over a bare key, and another pipeline never reads
+// a namespace that is not its own. Writes are bare today — no two pipelines
+// declare the same private key — so this only guards the day one appears.
+func TestParamPrefersPipelineNamespace(t *testing.T) {
+	r := &runContext{
+		out:        types.JSONMap{},
+		imageInfo:  &types.ImageInfo{},
+		pipelineID: "smartocr",
+		params: map[string]any{
+			"smartocr.allow_ocr": false,
+			"allow_ocr":          true,
+		},
+	}
+	if got := r.BoolParamOr(smartFieldKeyAllowOCR, true); got != false {
+		t.Errorf("the namespaced key lost to the bare legacy key: allow_ocr = %v, want false", got)
+	}
+	r.pipelineID = "default"
+	if got := r.BoolParamOr(smartFieldKeyAllowOCR, true); got != true {
+		t.Errorf("another pipeline read smartocr's namespace: allow_ocr = %v, want true (bare legacy)", got)
 	}
 }

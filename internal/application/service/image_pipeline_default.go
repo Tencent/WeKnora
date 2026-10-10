@@ -55,30 +55,11 @@ func (defaultPipeline) Fields() []types.ImageFieldDef {
 			Default:       true,
 			DecidesAction: true,
 		},
-		{
-			Key:   imageFieldKeyCaptionThinking,
-			Type:  types.ImageFieldTypeBool,
-			Label: "Caption with thinking",
-			// Warning, not recommendation: on some models long reasoning can
-			// crowd out the answer itself and leave the caption empty.
-			Description: "Let the model think before writing the caption. " +
-				"Rarely needed: it costs latency, and on some models long " +
-				"reasoning truncates the caption. Enable only when necessary.",
-			Default: false,
-			// No DecidesAction: an image is still captioned with thinking off,
-			// just faster and with less care, so this switch cannot be the one
-			// that leaves the pipeline with nothing to do.
-		},
-		{
-			Key:   imageFieldKeyOCRThinking,
-			Type:  types.ImageFieldTypeBool,
-			Label: "OCR with thinking",
-			Description: "Let the model think before transcribing. " +
-				"Rarely needed: it costs latency, and on some models long " +
-				"reasoning truncates the text. Enable only when necessary.",
-			Default: false,
-			// Same reasoning as above: an image with no text still yields no OCR.
-		},
+		// The thinking switches are action-level fields, declared once at the
+		// action layer and carried in here — a pipeline does not re-declare
+		// an action's tunable.
+		imageActionThinkingFields[0],
+		imageActionThinkingFields[1],
 	}
 }
 

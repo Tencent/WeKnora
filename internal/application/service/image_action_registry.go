@@ -167,16 +167,52 @@ func init() {
 	}
 }
 
-// Thinking-switch keys of the shared actions. An action may want the model to
-// reason — a dense scanned page or a chart that has to be read before it can be
-// transcribed — and must not pay for it on the simple majority, so the switch
-// belongs to the action rather than to the model. Both pipelines read the same
-// pair of keys with the same meaning, which is why they live here rather than
-// beside the field declarations of either pipeline.
+// Thinking-switch keys of the shared actions, in the action's own namespace
+// ("action.key"). An action may want the model to reason — a dense scanned
+// page or a chart that has to be read before it can be transcribed — and must
+// not pay for it on the simple majority, so the switch belongs to the ACTION,
+// not to the model and not to any pipeline: whichever pipeline schedules the
+// caption or the OCR, the tunable means the same thing and reads the same
+// stored key. Pipelines declare these same keys in their Fields() so the
+// panel renders them; the keys never collide with pipeline-private ones
+// because the action namespace is distinct.
 const (
-	imageFieldKeyCaptionThinking = "caption_thinking"
-	imageFieldKeyOCRThinking     = "ocr_thinking"
+	imageFieldKeyCaptionThinking = "caption.thinking"
+	imageFieldKeyOCRThinking     = "ocr.thinking"
 )
+
+// imageActionThinkingFields are the thinking switches DECLARED ONCE here, at
+// the action layer, and carried into every pipeline's Fields() by reference —
+// a pipeline does not re-declare or re-name an action's tunable, it only
+// offers it on its panel. The keys are namespaced by action ("action.key"),
+// so the same tunable reads the same stored value whichever pipeline
+// schedules the action.
+var imageActionThinkingFields = []types.ImageFieldDef{
+	{
+		Key:   imageFieldKeyCaptionThinking,
+		Type:  types.ImageFieldTypeBool,
+		Label: "Caption with thinking",
+		// Warning, not recommendation: on some models long reasoning can
+		// crowd out the answer itself and leave the caption empty.
+		Description: "Let the model think before writing the caption. " +
+			"Rarely needed: it costs latency, and on some models long " +
+			"reasoning truncates the caption. Enable only when necessary.",
+		Default: false,
+		// No DecidesAction: an image is still captioned with thinking off,
+		// just faster and with less care, so this switch cannot be the one
+		// that leaves the pipeline with nothing to do.
+	},
+	{
+		Key:   imageFieldKeyOCRThinking,
+		Type:  types.ImageFieldTypeBool,
+		Label: "OCR with thinking",
+		Description: "Let the model think before transcribing. " +
+			"Rarely needed: it costs latency, and on some models long " +
+			"reasoning truncates the text. Enable only when necessary.",
+		Default: false,
+		// Same reasoning: an image with no text still yields no OCR.
+	},
+}
 
 // runContext is the only framework entry point a pipeline or an action gets. It
 // hands out no VLM handle: talking to a model is the action's business, reached
@@ -188,6 +224,10 @@ type runContext struct {
 	vlmCfg     types.VLMConfig
 	imageInfo  *types.ImageInfo
 	out        types.JSONMap
+	// pipelineID is the pipeline serving this run, used to namespace
+	// pipeline-private param lookups ("<pipeline>.<key>"). Empty in tests
+	// that build a runContext by hand, which then read bare keys only.
+	pipelineID string
 	// params is this pipeline's private tunables, as resolved from the
 	// knowledge base. Nothing else may read it: a key understood by one
 	// pipeline says nothing about another's, so the key only has to be
@@ -222,8 +262,19 @@ type runContext struct {
 // declared for it. A key the running pipeline never declared reads nil, which
 // is deliberate: a stored knowledge base may carry parameters for a pipeline
 // this build no longer has, and the run must not fail over a stale key.
+//
+// Pipeline-private keys are looked up under the running pipeline's namespace
+// first ("<pipeline>.<key>"), so two pipelines may one day declare the same
+// field key without one reading the other's stored value; a bare key still
+// answers, which keeps stored configs written before namespacing readable.
+// Action-level keys ("action.key") are stored bare and hit the exact lookup.
 func (r *runContext) Param(key string) any {
 	if r.params != nil {
+		if r.pipelineID != "" {
+			if v, ok := r.params[r.pipelineID+"."+key]; ok && v != nil {
+				return v
+			}
+		}
 		if v, ok := r.params[key]; ok && v != nil {
 			return v
 		}
