@@ -12,7 +12,6 @@ import (
 	"sync"
 	"time"
 
-	htmltomd "github.com/JohannesKaufmann/html-to-markdown/v2"
 	"github.com/Tencent/WeKnora/internal/datasource"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -600,7 +599,7 @@ func markdownItem(
 	// docparser image pipeline can persist them and rewrite to resource:// URLs.
 	// Best-effort: a failed image keeps its original src and never fails the page.
 	html = newAssetResolver(client).Resolve(ctx, html)
-	markdown, err := htmltomd.ConvertString(html)
+	markdown, err := convertConfluenceHTML(client.cfg.baseURL.String(), html)
 	if err != nil {
 		return types.FetchedItem{}, err
 	}
