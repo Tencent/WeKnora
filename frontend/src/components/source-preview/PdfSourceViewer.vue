@@ -548,7 +548,7 @@ defineExpose({ relocate: () => applyLocate(props.locate) })
 
 .pdf-source-mark {
   position: absolute;
-  border-radius: 2px;
+  border-radius: var(--app-radius-xs);
   background: var(--app-source-highlight-soft-bg);
 
   &--text.is-active {

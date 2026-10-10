@@ -1685,7 +1685,7 @@ html[theme-mode="dark"] {
 mark.source-locate-mark {
   background-color: var(--app-source-highlight-bg);
   color: inherit;
-  border-radius: 2px;
+  border-radius: var(--app-radius-xs);
   box-decoration-break: clone;
   -webkit-box-decoration-break: clone;
 }
