@@ -1,9 +1,11 @@
 <template>
   <Teleport to="body">
     <Transition name="settings-modal-shell">
-      <div v-if="visible" class="settings-modal-shell settings-overlay" :class="overlayClass" :style="{ zIndex }"
+      <div v-if="visible" class="settings-modal-shell settings-overlay" :class="[overlayClass, { 'mobile-settings-detail': mobileDetail }]" :style="{ zIndex }"
         @click.self="emit('close')">
-        <div class="settings-modal">
+        <div ref="dialogElement" class="settings-modal" @keydown="onDialogKeydown" role="dialog" aria-modal="true" :aria-label="title">
+          <button v-if="isMobile && mobileDetail" ref="mobileBackButton" type="button" class="mobile-settings-back"
+            @click="showMobileDirectory"><t-icon name="chevron-left" />{{ $t('common.back') }}</button>
           <div v-if="loading" class="editor-initializing" role="status" :aria-label="$t('common.loading')">
             <t-loading size="medium" :text="$t('common.loading')" />
           </div>
@@ -20,11 +22,11 @@
                 <h2 class="sidebar-title">{{ title }}</h2>
                 <slot name="sidebar-header-extra" />
               </div>
-              <nav class="settings-nav" :data-guide="navGuide || undefined">
+              <nav @keydown.capture="onNavKeydown" @click.capture="onMobileNavClick" class="settings-nav" :data-guide="navGuide || undefined">
                 <slot name="nav">
                   <template v-for="group in navGroups" :key="group.key">
                     <div class="nav-group-title">{{ group.label }}</div>
-                    <div v-for="item in group.items" :key="item.key" :class="['nav-item', { active: modelValue === item.key }]"
+                    <button type="button" v-for="item in group.items" :key="item.key" :class="['nav-item', { active: modelValue === item.key }]"
                       :data-guide="navItemGuidePrefix ? `${navItemGuidePrefix}-${item.key}` : undefined"
                       @click="emit('update:modelValue', item.key)">
                       <slot name="nav-icon" :item="item" :active="modelValue === item.key">
@@ -32,7 +34,7 @@
                       </slot>
                       <span class="nav-label">{{ item.label }}</span>
                       <span v-if="showBadge(item)" :class="['nav-badge', item.badgeClass]">{{ item.badge }}</span>
-                    </div>
+                    </button>
                   </template>
                 </slot>
               </nav>
@@ -57,6 +59,44 @@
 </template>
 
 <script setup lang="ts">
+import '@/assets/mobile-settings.less'
+import { ref, watch, nextTick, onMounted } from 'vue'
+import { useResponsive } from '@/composables/useResponsive'
+const { isMobile } = useResponsive()
+const mobileDetail = ref(false)
+const dialogElement = ref<HTMLElement>()
+let previousFocus: HTMLElement | null = null
+function onDialogKeydown(event: KeyboardEvent) {
+  if (!isMobile.value || event.key !== 'Tab') return
+  const nodes = [...(dialogElement.value?.querySelectorAll<HTMLElement>('button, input, textarea, select, a[href], [tabindex="0"]') || [])]
+    .filter(node => node.getClientRects().length && !node.hasAttribute('disabled'))
+  const first = nodes[0], last = nodes[nodes.length - 1]
+  if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus() }
+  else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus() }
+}
+function onNavKeydown(event: KeyboardEvent) {
+  if (event.key !== 'Enter' && event.key !== ' ') return
+  const item = (event.target as HTMLElement).closest<HTMLElement>('.nav-item, .submenu-item')
+  if (!item) return
+  event.preventDefault()
+  event.stopPropagation()
+  item.click()
+}
+const mobileBackButton = ref<HTMLButtonElement>()
+let mobileNavItem: HTMLElement | null = null
+function onMobileNavClick(event: MouseEvent) {
+  const target = (event.target as HTMLElement).closest<HTMLElement>('.nav-item, .submenu-item')
+  if (!isMobile.value || !target || target.classList.contains('disabled') || target.classList.contains('has-submenu')) return
+  target.tabIndex = 0
+  mobileNavItem = target
+  mobileDetail.value = true
+  nextTick(() => mobileBackButton.value?.focus())
+}
+function showMobileDirectory() {
+  mobileDetail.value = false
+  nextTick(() => mobileNavItem?.focus())
+}
+
 /**
  * 全屏"设置类"弹窗壳：遮罩 + 1080×780 面板 + 左侧分组导航 + 右侧内容 + 可选底栏。
  * 被 Settings / AgentEditorModal / OrganizationSettingsModal / KnowledgeBaseEditorModal 共用，
@@ -83,7 +123,7 @@ export interface SettingsModalNavGroup {
   items: SettingsModalNavItem[]
 }
 
-withDefaults(
+const props = withDefaults(
   defineProps<{
     visible: boolean
     title: string
@@ -106,6 +146,17 @@ withDefaults(
     navItemGuidePrefix: '',
   },
 )
+
+watch(() => props.visible, visible => {
+  mobileDetail.value = false
+  mobileNavItem = null
+  if (!isMobile.value) return
+  if (visible) {
+    previousFocus = document.activeElement as HTMLElement
+    nextTick(() => dialogElement.value?.querySelector<HTMLButtonElement>('.close-btn')?.focus())
+  } else previousFocus?.focus()
+})
+onMounted(() => { if (props.visible && isMobile.value) nextTick(() => dialogElement.value?.querySelector<HTMLButtonElement>('.close-btn')?.focus()) })
 
 const emit = defineEmits<{
   (e: 'update:modelValue', key: string): void
@@ -249,6 +300,11 @@ function showBadge(item: SettingsModalNavItem): boolean {
   }
 
   .nav-item {
+    border: 0;
+    background: transparent;
+    width: 100%;
+    font-family: inherit;
+    text-align: left;
     display: flex;
     align-items: center;
     padding: 6px 12px;
