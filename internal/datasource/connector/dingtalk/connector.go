@@ -116,9 +116,10 @@ const maxValidateProbes = 5
 //
 // The operator is not expected to reach every workspace in the tenant: app
 // credentials are valid as long as one reachable workspace yields one readable
-// document. Reading the first document of the first workspace and failing on it
-// rejects a working configuration whenever an unrelated workspace — one the
-// operator was never granted — happens to be listed first.
+// document. A failed probe does not condemn that workspace; the walk keeps
+// looking, inside the probe cap, for another document the operator can read.
+// When the cap itself stops a conclusive walk, the error says how many
+// documents were read.
 func (c *Connector) Validate(ctx context.Context, dataSourceConfig *types.DataSourceConfig) error {
 	cfg, err := parseConfig(dataSourceConfig)
 	if err != nil {
@@ -138,14 +139,16 @@ func (c *Connector) Validate(ctx context.Context, dataSourceConfig *types.DataSo
 		workspaceFail int
 		probes        int
 		listings      int
+		probeCapHit   bool
 	)
-	for _, item := range workspaces {
+	for i, item := range workspaces {
 		rootNodeID := strings.TrimSpace(item.RootNodeID)
 		if rootNodeID == "" {
 			continue
 		}
-		document, found, unexplored, err := firstValidateDocument(
-			ctx, api, rootNodeID, settings, &listings,
+		readable, unexplored, hitCap, err := sampleWorkspace(
+			ctx, api, item.Name, rootNodeID, settings,
+			&listings, &probes, &sawDocument, &lastErr,
 		)
 		if err != nil {
 			lastErr = fmt.Errorf("workspace %q: %w", item.Name, err)
@@ -157,29 +160,24 @@ func (c *Connector) Validate(ctx context.Context, dataSourceConfig *types.DataSo
 			workspaceFail++
 			continue
 		}
+		if readable {
+			return nil
+		}
 		if unexplored {
 			inconclusive = true
 		}
-		if !found {
-			continue
-		}
-		sawDocument = true
-		probes++
-		if err := verifyDocument(ctx, api, document); err != nil {
-			lastErr = fmt.Errorf("workspace %q document %q: %w", item.Name, document.Name, err)
-			if ctx.Err() != nil || isContextError(err) {
-				return fmt.Errorf("validate DingTalk data source: %w", lastErr)
-			}
-		} else {
-			return nil
-		}
+		// Once the cap is spent no further probe can succeed, so walking on
+		// could only find an unlistable folder and turn the failed probes
+		// into acceptance.
 		if probes >= maxValidateProbes {
+			probeCapHit = hitCap || i+1 < len(workspaces)
 			break
 		}
 	}
 	// Folders were left unexplored, because the listing budget ran out or a
 	// folder could not be listed, so an unreadable document elsewhere does not
-	// prove the data source is unusable.
+	// prove the data source is unusable. A probe cap hit in that situation
+	// stays quiet too: the walk cannot claim it sampled every visible document.
 	if inconclusive {
 		return nil
 	}
@@ -194,6 +192,12 @@ func (c *Connector) Validate(ctx context.Context, dataSourceConfig *types.DataSo
 	if lastErr == nil {
 		return nil
 	}
+	if probeCapHit {
+		return fmt.Errorf(
+			"validate DingTalk data source: %w; only the first %d documents were probed",
+			lastErr, maxValidateProbes,
+		)
+	}
 	return fmt.Errorf("validate DingTalk data source: %w", lastErr)
 }
 
@@ -205,45 +209,83 @@ func (c *Connector) Validate(ctx context.Context, dataSourceConfig *types.DataSo
 // client's retries of each).
 const maxValidateListings = 20
 
-// firstValidateDocument walks a workspace breadth-first, the way scanWorkspace
-// does, and returns the first document it finds. It requests one page at a
-// time instead of listing whole folders, so the budget bounds real requests.
-// unexplored reports that some nodes were never seen, because the budget ran
-// out or a folder could not be listed, so the walk cannot prove the workspace
-// holds no readable document.
+// sampleWorkspace walks one workspace breadth-first, the way scanWorkspace
+// does, and probes ingestible documents until one is readable, the probe cap
+// is spent, or the walk runs out of nodes. It requests one page at a time
+// instead of listing whole folders, so the budget bounds real requests.
+//
+// unexplored reports that some folder was never opened or could not be listed,
+// so a failed probe elsewhere must not reject the data source. readable reports
+// that a probe succeeded. The walk stops as soon as the failed probe that
+// spends maxValidateProbes returns, without another listing; capHit then
+// reports that nodes of this workspace were still left to visit. The caller
+// turns that into an error only when the walk is conclusive.
+//
+// A folder's later pages are held back once the listings still in the budget
+// are no longer enough to open every sibling already queued, so each of those
+// siblings still gets one page. The unread tail is not itself "unexplored"
+// when a document was probed after it was skipped: the reservation is what
+// made room for that probe. A tail skipped with no probe after it stays
+// inconclusive, because the only readable document may sit on a page the
+// sample never requested. A folder that receives no page at all, a subfolder
+// listing error, a repeated page token, or a tail with no sibling waiting all
+// stay inconclusive too.
+//
+// Any failed page of the workspace root is a hard error, matching listNodes
+// during sync. Subfolder listing errors stay inconclusive unless the request
+// was cancelled or timed out.
 //
 // The walk selects nodes with the same settings-aware predicate the picker and
 // the sync use, so a type the data source does not ingest is never probed.
-func firstValidateDocument(
+func sampleWorkspace(
 	ctx context.Context,
 	api dingTalkAPI,
+	workspaceName string,
 	rootNodeID string,
 	settings documentSettings,
 	listings *int,
-) (document node, found, unexplored bool, err error) {
+	probes *int,
+	sawDocument *bool,
+	lastErr *error,
+) (readable, unexplored, capHit bool, err error) {
 	queue := []string{rootNodeID}
 	visited := map[string]struct{}{rootNodeID: {}}
+	uncoveredSkip := false
 	for len(queue) > 0 {
 		parent := queue[0]
 		queue = queue[1:]
 		// Finish every page of a folder before descending, like listNodes
 		// does for scanWorkspace: a document on a later page of this folder
 		// must be found before the budget is spent on its subfolders.
+		// Siblings already on the queue stay ahead of those subfolders.
 		var subfolders []string
 		pageToken := ""
 		seenTokens := map[string]struct{}{}
 		for {
+			// Reserve one listing per sibling already queued before spending
+			// another page on this folder. The root's own pages have an empty
+			// queue here — its children are not queued until the root is
+			// finished — so a document on the root's next page is still read
+			// before the walk descends.
+			if pageToken != "" && *listings+len(queue) >= maxValidateListings {
+				if len(queue) == 0 {
+					unexplored = true
+				} else {
+					uncoveredSkip = true
+				}
+				break
+			}
 			rootPage := parent == rootNodeID && pageToken == ""
 			if !rootPage {
 				if *listings >= maxValidateListings {
-					return node{}, false, true, nil
+					return false, true, false, nil
 				}
 				*listings++
 			}
 			children, next, listErr := api.listNodesPage(ctx, parent, pageToken)
 			if listErr != nil {
-				if rootPage || ctx.Err() != nil || isContextError(listErr) {
-					return node{}, false, false, listErr
+				if parent == rootNodeID || ctx.Err() != nil || isContextError(listErr) {
+					return false, false, false, listErr
 				}
 				// The documents this operator can read may live in exactly
 				// this folder, so its failure leaves the walk inconclusive
@@ -251,9 +293,27 @@ func firstValidateDocument(
 				unexplored = true
 				break
 			}
-			for _, child := range children {
+			for i, child := range children {
 				if child.isIngestible(settings) {
-					return child, true, unexplored, nil
+					*probes++
+					*sawDocument = true
+					uncoveredSkip = false
+					probeErr := verifyDocument(ctx, api, child)
+					if probeErr != nil {
+						if ctx.Err() != nil || isContextError(probeErr) {
+							return false, false, false, fmt.Errorf("document %q: %w", child.Name, probeErr)
+						}
+						*lastErr = fmt.Errorf(
+							"workspace %q document %q: %w", workspaceName, child.Name, probeErr,
+						)
+						if *probes >= maxValidateProbes {
+							more := i+1 < len(children) || len(subfolders) > 0 ||
+								next != "" || len(queue) > 0
+							return false, unexplored, more, nil
+						}
+						continue
+					}
+					return true, false, false, nil
 				}
 				if child.isFolder() || child.HasChildren {
 					if _, seen := visited[child.ID]; seen {
@@ -277,7 +337,10 @@ func firstValidateDocument(
 		}
 		queue = append(queue, subfolders...)
 	}
-	return node{}, false, unexplored, nil
+	if uncoveredSkip {
+		unexplored = true
+	}
+	return false, unexplored, false, nil
 }
 
 // verifyDocument proves one visible document is readable. Native documents are
