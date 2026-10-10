@@ -2,6 +2,8 @@ package vlm
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"math"
 	"net/http"
 	"net/http/httptest"
@@ -129,40 +131,30 @@ func TestRemoteAPIVLMKeepsMaxTokensForNonReasoningModel(t *testing.T) {
 	}
 }
 
-// TestRemoteAPIVLMReportsTruncatedCompletion covers the other way a reasoning
-// model yields nothing: the completion budget also covers reasoning tokens, so
-// an exhausted budget returns an empty message with finish_reason=length
-// instead of an API error.
+// A completion stopped by the budget is not successful OCR, even when the
+// response has a non-empty prefix or a long run of repeated empty table cells.
 func TestRemoteAPIVLMReportsTruncatedCompletion(t *testing.T) {
 	withVLMSSRFWhitelist(t, "127.0.0.1")
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{
-			"id": "chatcmpl-test",
-			"object": "chat.completion",
-			"choices": [
-				{"index": 0, "message": {"role": "assistant", "content": ""}, "finish_reason": "length"}
-			]
-		}`))
-	}))
-	defer server.Close()
-
-	v, err := NewRemoteAPIVLM(&Config{
-		BaseURL:   server.URL,
-		ModelName: "gpt-5-nano",
-		APIKey:    "sk-test",
-		Provider:  "openai",
-	})
-	if err != nil {
-		t.Fatalf("NewRemoteAPIVLM: %v", err)
-	}
-
-	_, err = v.Predict(t.Context(), [][]byte{testPNG}, "extract the text")
-	if err == nil {
-		t.Fatal("Predict returned nil error for a truncated completion")
-	}
-	if !strings.Contains(err.Error(), "truncated") {
-		t.Errorf("error = %q, want it to mention truncation", err.Error())
+	for _, content := range []string{"", "partial extracted text", strings.Repeat("|  ", 2500)} {
+		t.Run(fmt.Sprintf("chars=%d", len(content)), func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"choices": []any{map[string]any{
+						"index": 0, "message": map[string]any{"role": "assistant", "content": content},
+						"finish_reason": "length",
+					}},
+				})
+			}))
+			defer server.Close()
+			v, err := NewRemoteAPIVLM(&Config{BaseURL: server.URL, ModelName: "generic-vision", Provider: "generic"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := v.Predict(t.Context(), [][]byte{testPNG}, "extract text")
+			if got != "" || !errors.Is(err, ErrTruncatedCompletion) {
+				t.Fatalf("content=%q error=%v", got, err)
+			}
+		})
 	}
 }

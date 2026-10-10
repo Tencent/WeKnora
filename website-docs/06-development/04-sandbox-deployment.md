@@ -69,7 +69,7 @@ Cube guest DNS 属于模板配置。更改 DNS/镜像后需重建模板才会进
 
 ## 交互终端与图形桌面
 
-对话侧栏的终端和桌面都通过 WebSocket 连接会话沙箱，仅 Cube/E2B 支持，Docker 后端不提供。浏览器不能在 WebSocket 握手里携带认证头，因此都先用已登录的 POST 换取两分钟有效的短期票据，再把票据放在握手 query 中：
+对话侧栏的终端和桌面都通过 WebSocket 连接会话沙箱。终端支持 Cube、E2B 和 Docker；桌面仅 Cube/E2B 支持。浏览器不能在 WebSocket 握手里携带认证头，因此都先用已登录的 POST 换取两分钟有效的短期票据，再把票据放在握手 query 中：
 
 | 能力 | 取票据 | WebSocket |
 | --- | --- | --- |
@@ -79,6 +79,13 @@ Cube guest DNS 属于模板配置。更改 DNS/镜像后需重建模板才会进
 入口代理必须为这两个路径转发 WebSocket Upgrade、放宽读超时，并避免在访问日志中记录 ticket query。标准 frontend Nginx 已为 `^/api/v1/sessions/[^/]+/sandbox/(terminal|desktop)$` 配置不含 query 的日志格式；自定义 Ingress 需自行处理。终端连上后，服务端大约每分钟复核一次登录状态、空间成员和会话归属，退出登录或被移出空间会断开终端。接口参数见[终端 API](../04-api/02-api-sandbox-skills.md#会话交互终端)与[桌面 API](../04-api/02-api-chat.md#sandbox-desktop)。
 
 终端和桌面在无操作时按配置的 `terminal_idle_disconnect_sec` 断开（默认 900 秒，最短 60 秒，最长 24 小时），之后沙箱按提供商 TTL 暂停。终端以键盘输入和 PTY 输出计活动，桌面以键鼠计活动。
+
+Docker 终端是一个 `TTY=true` 的 exec，Engine API 不支持重新附着，因此行为与 Cube/E2B 不同：
+
+- 终端打开期间会定期刷新空闲回收用的活动标记，容器不会因 `DockerIdleTTL` 被回收；关闭后按 `DockerIdleTTL` 正常回收。
+- 终端断开（关闭面板、空闲断开、网络中断）时，WeKnora 会像关闭终端窗口一样向该 Shell 及其子进程发送 SIGHUP，前台任务随之结束，`nohup` 启动的后台任务保留。
+- 前端不会对 Docker 终端自动重连，用户点「重新连接」会得到一个新 Shell。
+- 沙箱未运行时（容器已停止或已被空闲回收）提示「可能已被回收」，启动后若容器已被删除会新建沙箱，之前的文件不会保留。
 
 ### 图形桌面
 

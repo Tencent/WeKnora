@@ -12,6 +12,7 @@ import (
 	typesLocal "github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/elastic/go-elasticsearch/v8"
+	"github.com/elastic/go-elasticsearch/v8/typedapi/core/bulk"
 	"github.com/elastic/go-elasticsearch/v8/typedapi/core/search"
 	"github.com/elastic/go-elasticsearch/v8/typedapi/types"
 	"github.com/elastic/go-elasticsearch/v8/typedapi/types/enums/scriptlanguage"
@@ -205,15 +206,64 @@ func (e *elasticsearchRepository) BatchSave(ctx context.Context,
 		log.Debugf("[Elasticsearch] Added chunk ID %s to bulk request", embedding.ChunkID)
 	}
 
-	// Execute the bulk request
-	_, err := indexRequest.Do(ctx)
+	// Execute the bulk request. Elasticsearch answers an accepted _bulk call
+	// with HTTP 200 even when it rejects individual documents, so the
+	// per-item errors in the response body are the only failure signal.
+	resp, err := indexRequest.Do(ctx)
 	if err != nil {
 		log.Errorf("[Elasticsearch] Failed to execute bulk operation: %v", err)
 		return fmt.Errorf("failed to do bulk: %w", err)
 	}
+	if err := inspectBulkResponse(ctx, resp); err != nil {
+		return err
+	}
 
 	log.Infof("[Elasticsearch] Successfully batch saved %d indices", len(embeddingList))
 	return nil
+}
+
+// bulkErrorSummaryLimit caps how many per-item failures are described in the
+// returned error; the reported count always covers every failed item.
+const bulkErrorSummaryLimit = 5
+
+// inspectBulkResponse converts per-item _bulk failures into an error. A bulk
+// request that the server accepted answers HTTP 200, so a document rejected
+// for a mapping mismatch, a read-only index or an item-level rejection is
+// visible only in the response body.
+//
+// The error names the document _id and the bounded error.type of up to
+// bulkErrorSummaryLimit failed items. error.reason is deliberately excluded
+// because it can embed document content.
+func inspectBulkResponse(ctx context.Context, resp *bulk.Response) error {
+	if resp == nil || !resp.Errors {
+		return nil
+	}
+
+	log := logger.GetLogger(ctx)
+	msgs := make([]string, 0, bulkErrorSummaryLimit)
+	failed := 0
+	for _, item := range resp.Items {
+		for op, detail := range item {
+			if detail.Error == nil {
+				continue
+			}
+			failed++
+			id := ""
+			if detail.Id_ != nil {
+				id = *detail.Id_
+			}
+			log.Debugf("[Elasticsearch] Bulk item failed: op=%s id=%s type=%s",
+				op, id, detail.Error.Type)
+			if len(msgs) < bulkErrorSummaryLimit {
+				msgs = append(msgs, fmt.Sprintf("[%s %s] %s", op, id, detail.Error.Type))
+			}
+		}
+	}
+	if failed == 0 {
+		return fmt.Errorf("elasticsearch: bulk reported errors without per-item failure detail")
+	}
+	return fmt.Errorf("elasticsearch: bulk partial failure (%d/%d documents failed, first %d: %s)",
+		failed, len(resp.Items), len(msgs), strings.Join(msgs, "; "))
 }
 
 // DeleteByChunkIDList removes documents from the index based on chunk IDs

@@ -135,6 +135,9 @@ func (s *knowledgeBaseService) HybridSearch(ctx context.Context,
 		return nil, err
 	}
 
+	recordImageRecallDecision(ctx, "fusion.candidate_selection", "",
+		summarizeImageCandidateCut(chunks, params.MatchCount))
+
 	// Truncate to the primary-match cap. MatchCount is guaranteed positive by
 	// the normalization at the top of this function; the slice bound below
 	// depends on that.
@@ -256,6 +259,9 @@ func (s *knowledgeBaseService) hybridSearchCandidates(ctx context.Context,
 		logger.Infof(ctx, "No retrievable indexing pipelines across %d KBs", len(kbs))
 		return nil, nil
 	}
+
+	// Image vectors are recalled only for KBs that opted in to them.
+	s.applyImageRecall(ctx, kbs, groups, params)
 
 	// Execute retrieval with fan-out + score normalization (multi-store
 	// only) and a langfuse span around the entire retrieve step.

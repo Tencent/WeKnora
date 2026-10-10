@@ -235,6 +235,8 @@ export interface ModelDebugOptions {
   thinking?: boolean
   // Graded thinking level; takes precedence over the boolean when set.
   reasoning_effort?: ReasoningEffortLevel | string
+  // Embedding only: score `documents` (and the file) against `input` as a query.
+  similarity?: boolean
 }
 
 export interface ModelDebugResult {

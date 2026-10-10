@@ -649,3 +649,19 @@ test('collapseStandaloneCitationParagraphs merges citations across empty paragra
   assert.match(out, /Steps:.*citation-kb/s)
   assert.doesNotMatch(out, /<p><\/p>/)
 })
+
+test('renderChatMarkdown keeps ~~strikethrough~~ while leaving single tildes literal', () => {
+  const renderer = createChatMarkdownRenderer()
+  const options = {
+    renderer,
+    escapeMarkdown: (text: string) => text,
+    sanitizeHtml: (html: string) => html,
+    streaming: false,
+  }
+  const html = renderChatMarkdown('~~a~~ and ~b~ and 2020~2035, 8:00~12:00.', options)
+  assert.equal((html.match(/<del>/g) || []).length, 1)
+  assert.match(html, /<del>a<\/del>/)
+  assert.match(html, /~b~/)
+  assert.match(html, /2020~2035/)
+  assert.match(html, /8:00~12:00/)
+})
