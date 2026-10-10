@@ -98,13 +98,12 @@ func (smartOcrPipeline) Run(ctx context.Context, r *runContext) error {
 	r.ocrThinkingKey = smartFieldKeyTextThinking
 
 	// One request fills both the attribute slots and the caption slot, so there
-	// is no separate caption action to schedule here. The effective values are
-	// recorded before the branches below, not after: the skipped-OCR path is
-	// exactly the one where knowing which switches were in force matters most.
-	r.out["params"] = types.JSONMap{
-		smartFieldKeyAllowOCR:       r.BoolParamOr(smartFieldKeyAllowOCR, true),
-		smartFieldKeyCaptureCaption: r.BoolParamOr(smartFieldKeyCaptureCaption, true),
-	}
+	// is no separate caption action to schedule here. The allow_ocr and
+	// capture_caption ceilings are deliberately NOT recorded on the trace: the
+	// panel never declares them (only the two thinking switches), so they are
+	// always their defaults — recording them read as if a decision had been
+	// made ("allow_ocr=true" next to a declined OCR). The decision and the
+	// inputs that actually drove it are recorded on attr_policy below.
 	if err := r.execute(ctx, types.ImageActionObservationCaption); err != nil {
 		return err
 	}
@@ -112,10 +111,16 @@ func (smartOcrPipeline) Run(ctx context.Context, r *runContext) error {
 	// The policy reads the attributes the action above just wrote; the ceiling
 	// only says whether OCR is allowed at all. Both lines are recorded even
 	// when OCR is skipped, because the trace has to show the decision that was
-	// made rather than an OCR chunk that is simply missing.
+	// made rather than an OCR chunk that is simply missing. ocr_on_unobserved
+	// travels with the decision: it is the clause that decides when the
+	// observation failed or left attributes unanswered, and it is what tells
+	// "declined on data nobody produced" apart from a confident negative.
 	want := r.BoolParamOr(smartFieldKeyAllowOCR, true) &&
 		DecideOCR(r.imageInfo.Attrs, r.payload.ImageActions)
-	r.out["attr_policy"] = types.JSONMap{"ocr": want}
+	r.out["attr_policy"] = types.JSONMap{
+		"ocr":               want,
+		"ocr_on_unobserved": r.payload.ImageActions.OCR.OnUnobserved,
+	}
 	r.out["image_attrs"] = r.imageInfo.Attrs.Attrs
 	if !want {
 		// WHY the policy said no: a failed observation left no attributes to
