@@ -127,7 +127,7 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  (e: 'send-msg', query: string, imageFiles: File[], attachmentFiles: File[]): void
+  (e: 'send-msg', query: string, imageFiles: File[], attachmentFiles: File[], onPrepared: () => void): void
   (e: 'stop-generation'): void
   (e: 'update:webSearchEnabled', value: boolean): void
 }>()
@@ -235,16 +235,22 @@ const removeImage = (index: number) => {
 
 const submit = () => {
   if (props.isReplying || !canSend.value) return
+  const submittedQuery = query.value
+  const submittedImages = [...uploadedImages.value]
+  const submittedAttachments = [...uploadedAttachments.value]
   const val = query.value.trim()
-  const imageFiles = uploadedImages.value.map((img) => img.file)
-  const attachmentFiles = uploadedAttachments.value.map((att) => att.file)
+  const imageFiles = submittedImages.map((img) => img.file)
+  const attachmentFiles = submittedAttachments.map((att) => att.file)
   const textarea = getTextareaEl()
   if (textarea) textarea.blur()
-  emit('send-msg', val, imageFiles, attachmentFiles)
-  if (getTextareaEl()) query.value = ''
-  uploadedImages.value.forEach((img) => URL.revokeObjectURL(img.preview))
-  uploadedImages.value = []
-  uploadedAttachments.value = []
+  emit('send-msg', val, imageFiles, attachmentFiles, () => {
+    if (query.value === submittedQuery && getTextareaEl()) query.value = ''
+    for (const image of submittedImages) URL.revokeObjectURL(image.preview)
+    uploadedImages.value = uploadedImages.value.filter((image) => !submittedImages.includes(image))
+    uploadedAttachments.value = uploadedAttachments.value.filter(
+      (attachment) => !submittedAttachments.includes(attachment),
+    )
+  })
 }
 
 const onKeydown = (_val: string, ctx: { e: KeyboardEvent }) => {
