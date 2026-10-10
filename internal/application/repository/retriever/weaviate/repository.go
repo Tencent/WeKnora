@@ -535,11 +535,12 @@ func (w *weaviateRepository) getBaseFilter(params types.RetrieveParams) *filters
 			WithOperator(filters.ContainsAny).
 			WithValueText(params.TagIDs...))
 	}
-	if len(params.ExcludeKnowledgeIDs) > 0 {
+	// NotEqual takes a scalar value; multiple exclusions must be ANDed.
+	for _, knowledgeID := range params.ExcludeKnowledgeIDs {
 		operands = append(operands, filters.Where().
 			WithPath([]string{fieldKnowledgeID}).
 			WithOperator(filters.NotEqual).
-			WithValueText(params.ExcludeKnowledgeIDs...))
+			WithValueText(knowledgeID))
 	}
 	if len(params.ExcludeChunkIDs) > 0 {
 		operands = append(operands, filters.Where().

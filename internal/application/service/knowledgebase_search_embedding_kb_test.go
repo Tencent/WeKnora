@@ -44,3 +44,31 @@ func TestBuildRetrievalParamsEmbedsWithAVectorKB(t *testing.T) {
 	require.NotEmpty(t, params)
 	require.Len(t, params[0].Embedding, 768)
 }
+
+func TestBuildRetrievalParamsPreservesKnowledgeExclusions(t *testing.T) {
+	s := &knowledgeBaseService{}
+	engine := buildBoundComposite(t, &fakeRetrieveEngineService{
+		engineType: types.PostgresRetrieverEngineType,
+		support:    []types.RetrieverType{types.VectorRetrieverType, types.KeywordsRetrieverType},
+	})
+	docs := &types.KnowledgeBase{
+		ID: "docs", TenantID: 1, EmbeddingModelID: "embed",
+		IndexingStrategy: types.IndexingStrategy{VectorEnabled: true, KeywordEnabled: true},
+	}
+	faq := &types.KnowledgeBase{
+		ID: "faq", TenantID: 1, Type: types.KnowledgeBaseTypeFAQ, EmbeddingModelID: "embed",
+		IndexingStrategy: types.IndexingStrategy{VectorEnabled: true},
+	}
+	ctx := context.WithValue(t.Context(), types.TenantIDContextKey, uint64(1))
+	for _, excluded := range [][]string{nil, {"current-knowledge"}} {
+		params, err := s.buildRetrievalParams(ctx, engine, docs, []*types.KnowledgeBase{docs, faq}, types.SearchParams{
+			QueryText: "config", QueryEmbedding: []float32{1, 0}, ExcludeKnowledgeIDs: excluded,
+		}, 5)
+		require.NoError(t, err)
+		require.Len(t, params, 3)
+		for _, p := range params {
+			require.Equal(t, excluded, p.ExcludeKnowledgeIDs)
+			require.Equal(t, 5, p.TopK)
+		}
+	}
+}

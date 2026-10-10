@@ -262,9 +262,11 @@ type SearchParams struct {
 	DisableKeywordsMatch bool      `json:"disable_keywords_match"`
 	DisableVectorMatch   bool      `json:"disable_vector_match"`
 	KnowledgeIDs         []string  `json:"knowledge_ids"`
-	TagIDs               []string  `json:"tag_ids"` // Tag IDs for filtering (used for FAQ priority filtering)
-	ScopeTagIDs          []string  `json:"scope_tag_ids,omitempty"`
-	OnlyRecommended      bool      `json:"only_recommended"`
+	// ExcludeKnowledgeIDs is an internal retrieval filter applied before TopK.
+	ExcludeKnowledgeIDs []string `json:"-"`
+	TagIDs              []string `json:"tag_ids"` // Tag IDs for filtering (used for FAQ priority filtering)
+	ScopeTagIDs         []string `json:"scope_tag_ids,omitempty"`
+	OnlyRecommended     bool     `json:"only_recommended"`
 	// KnowledgeBaseIDs overrides the single KB ID passed to HybridSearch,
 	// allowing a single retrieval call to span multiple KBs that share the
 	// same embedding model. When empty, HybridSearch uses its own id parameter.

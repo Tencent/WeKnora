@@ -134,11 +134,11 @@ func (t *SearchConversationsTool) Execute(
 	}
 
 	result, err := t.messageService.SearchMessages(ctx, &types.MessageSearchParams{
-		Query: query,
-		Mode:  types.MessageSearchModeHybrid,
-		// Over-fetch so dropping the current session cannot empty the result.
-		Limit:   limit + 2,
-		OwnerID: t.ownerID,
+		Query:            query,
+		Mode:             types.MessageSearchModeHybrid,
+		Limit:            limit,
+		OwnerID:          t.ownerID,
+		ExcludeSessionID: t.currentSessionID,
 	})
 	if err != nil {
 		return &types.ToolResult{

@@ -211,6 +211,12 @@ func (g *pgRepository) KeywordsRetrieve(ctx context.Context,
 			Values: common.ToInterfaceSlice(params.KnowledgeIDs),
 		})
 	}
+	if len(params.ExcludeKnowledgeIDs) > 0 {
+		conds = append(conds, clause.Not(clause.IN{
+			Column: "knowledge_id",
+			Values: common.ToInterfaceSlice(params.ExcludeKnowledgeIDs),
+		}))
+	}
 	// Filter by tag IDs if specified
 	if len(params.TagIDs) > 0 {
 		logger.GetLogger(ctx).Debugf("[Postgres] Filtering by tag IDs: %v", params.TagIDs)
@@ -338,6 +344,16 @@ func (g *pgRepository) VectorRetrieve(ctx context.Context,
 			allVars = append(allVars, params.KnowledgeIDs[i])
 		}
 		whereParts = append(whereParts, fmt.Sprintf("knowledge_id IN (%s)",
+			strings.Join(placeholders, ", ")))
+	}
+	if len(params.ExcludeKnowledgeIDs) > 0 {
+		placeholders := make([]string, len(params.ExcludeKnowledgeIDs))
+		paramStart := len(allVars) + 1
+		for i, knowledgeID := range params.ExcludeKnowledgeIDs {
+			placeholders[i] = fmt.Sprintf("$%d", paramStart+i)
+			allVars = append(allVars, knowledgeID)
+		}
+		whereParts = append(whereParts, fmt.Sprintf("knowledge_id NOT IN (%s)",
 			strings.Join(placeholders, ", ")))
 	}
 	// Filter by tag IDs if specified

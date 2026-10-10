@@ -359,7 +359,8 @@ func (r *messageRepository) GetMessageByRequestID(
 
 // SearchMessagesByKeyword searches messages by keyword across sessions for a tenant
 func (r *messageRepository) SearchMessagesByKeyword(
-	ctx context.Context, tenantID uint64, ownerID, keyword string, sessionIDs []string, limit int,
+	ctx context.Context, tenantID uint64, ownerID, keyword string,
+	sessionIDs []string, limit int, excludedSessionIDs ...string,
 ) ([]*types.MessageWithSession, error) {
 	if limit <= 0 {
 		limit = 20
@@ -392,6 +393,10 @@ func (r *messageRepository) SearchMessagesByKeyword(
 
 	if len(sessionIDs) > 0 {
 		query = query.Where("messages.session_id IN ?", sessionIDs)
+	}
+
+	if len(excludedSessionIDs) > 0 {
+		query = query.Where("messages.session_id NOT IN ?", excludedSessionIDs)
 	}
 
 	if err := query.Order("messages.created_at DESC").Limit(limit).Find(&results).Error; err != nil {

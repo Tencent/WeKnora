@@ -473,15 +473,16 @@ func (s *knowledgeBaseService) buildRetrievalParams(
 
 		appendVectorParams := func(kbIDs []string, knowledgeType string) {
 			retrieveParams = append(retrieveParams, types.RetrieveParams{
-				Query:            params.QueryText,
-				Embedding:        queryEmbedding,
-				KnowledgeBaseIDs: kbIDs,
-				TopK:             matchCount,
-				Threshold:        params.VectorThreshold,
-				RetrieverType:    types.VectorRetrieverType,
-				KnowledgeIDs:     params.KnowledgeIDs,
-				TagIDs:           params.TagIDs,
-				KnowledgeType:    knowledgeType,
+				Query:               params.QueryText,
+				Embedding:           queryEmbedding,
+				KnowledgeBaseIDs:    kbIDs,
+				TopK:                matchCount,
+				Threshold:           params.VectorThreshold,
+				RetrieverType:       types.VectorRetrieverType,
+				KnowledgeIDs:        params.KnowledgeIDs,
+				ExcludeKnowledgeIDs: params.ExcludeKnowledgeIDs,
+				TagIDs:              params.TagIDs,
+				KnowledgeType:       knowledgeType,
 			})
 		}
 
@@ -503,13 +504,14 @@ func (s *knowledgeBaseService) buildRetrievalParams(
 		len(docKeywordKBIDs) > 0 {
 		logger.Info(ctx, "Keyword retrieval supported, preparing keyword retrieval parameters")
 		retrieveParams = append(retrieveParams, types.RetrieveParams{
-			Query:            params.QueryText,
-			KnowledgeBaseIDs: docKeywordKBIDs,
-			TopK:             matchCount,
-			Threshold:        params.KeywordThreshold,
-			RetrieverType:    types.KeywordsRetrieverType,
-			KnowledgeIDs:     params.KnowledgeIDs,
-			TagIDs:           params.TagIDs,
+			Query:               params.QueryText,
+			KnowledgeBaseIDs:    docKeywordKBIDs,
+			TopK:                matchCount,
+			Threshold:           params.KeywordThreshold,
+			RetrieverType:       types.KeywordsRetrieverType,
+			KnowledgeIDs:        params.KnowledgeIDs,
+			ExcludeKnowledgeIDs: params.ExcludeKnowledgeIDs,
+			TagIDs:              params.TagIDs,
 		})
 		logger.Info(ctx, "Keyword retrieval parameters setup completed")
 	}

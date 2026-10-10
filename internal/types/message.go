@@ -575,6 +575,9 @@ type MessageSearchParams struct {
 	Limit int `json:"limit"`
 	// Filter by specific session IDs (optional, empty means all sessions)
 	SessionIDs []string `json:"session_ids"`
+	// ExcludeSessionID removes the active conversation before retrieval limits.
+	// It is set by internal callers, not from the request body.
+	ExcludeSessionID string `json:"-"`
 	// OwnerID restricts results to sessions belonging to one person. It is set
 	// from the caller's identity rather than from the request body: conversation
 	// search must not be a way to read a colleague's private chats.

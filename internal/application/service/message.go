@@ -613,8 +613,12 @@ func (s *messageService) SearchMessages(ctx context.Context, params *types.Messa
 
 	// Step 1: Keyword search (dialect-aware LIKE in the repository)
 	if params.Mode == types.MessageSearchModeKeyword || params.Mode == types.MessageSearchModeHybrid {
+		var excludedSessionIDs []string
+		if params.ExcludeSessionID != "" {
+			excludedSessionIDs = []string{params.ExcludeSessionID}
+		}
 		keywordResults, err = s.messageRepo.SearchMessagesByKeyword(
-			ctx, tenantID, params.OwnerID, params.Query, params.SessionIDs, params.Limit*3)
+			ctx, tenantID, params.OwnerID, params.Query, params.SessionIDs, params.Limit*3, excludedSessionIDs...)
 		if err != nil {
 			logger.Errorf(ctx, "Keyword search failed: %v", err)
 			return nil, err
@@ -725,6 +729,16 @@ func (s *messageService) vectorSearchViaKB(ctx context.Context, params *types.Me
 		DisableKeywordsMatch: true, // We handle keyword search separately on the messages table
 	}
 
+	// Exclude the active session's indexed exchanges before the vector TopK
+	// (and reranking) can let them crowd out older conversations.
+	if params.ExcludeSessionID != "" {
+		ids, err := s.messageRepo.GetKnowledgeIDsBySessionID(ctx, params.ExcludeSessionID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get excluded session knowledge IDs: %w", err)
+		}
+		searchParams.ExcludeKnowledgeIDs = ids
+	}
+
 	kbResults, err := s.kbService.HybridSearch(ctx, cfg.KnowledgeBaseID, searchParams)
 	if err != nil {
 		return nil, fmt.Errorf("KB hybrid search failed: %w", err)
@@ -762,6 +776,9 @@ func (s *messageService) vectorSearchViaKB(ctx context.Context, params *types.Me
 
 	var results []*types.MessageSearchResultItem
 	for _, msg := range messages {
+		if params.ExcludeSessionID != "" && msg.SessionID == params.ExcludeSessionID {
+			continue
+		}
 		if len(sessionFilter) > 0 && !sessionFilter[msg.SessionID] {
 			continue
 		}

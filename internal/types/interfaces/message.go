@@ -145,7 +145,10 @@ type MessageRepository interface {
 	// SearchMessagesByKeyword searches messages by keyword across sessions for a tenant
 	// OwnedSessionIDs narrows a set of session ids to the ones this person owns.
 	OwnedSessionIDs(ctx context.Context, tenantID uint64, ownerID string, sessionIDs []string) (map[string]bool, error)
-	SearchMessagesByKeyword(ctx context.Context, tenantID uint64, ownerID, keyword string, sessionIDs []string, limit int) ([]*types.MessageWithSession, error)
+	SearchMessagesByKeyword(
+		ctx context.Context, tenantID uint64, ownerID, keyword string,
+		sessionIDs []string, limit int, excludedSessionIDs ...string,
+	) ([]*types.MessageWithSession, error)
 	// GetMessagesByKnowledgeIDs retrieves messages by their associated Knowledge IDs
 	GetMessagesByKnowledgeIDs(ctx context.Context, knowledgeIDs []string) ([]*types.MessageWithSession, error)
 	// GetMessagesByRequestIDs retrieves messages by request ID inside one session
