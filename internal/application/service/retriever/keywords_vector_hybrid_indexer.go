@@ -72,6 +72,14 @@ var ErrGeneratedQuestionIndexUnsupported = errors.New(
 	"generated question index update is not supported",
 )
 
+// ErrGeneratedQuestionIndexPartial means at least one engine updated question
+// rows and another participating engine did not. The index is not aligned.
+// Retrying is safe: an engine that already applied the change only touches
+// rows that are not yet in the requested state.
+var ErrGeneratedQuestionIndexPartial = errors.New(
+	"generated question index update was only partially applied",
+)
+
 // SetGeneratedQuestionEnabled delegates to an index repository that can
 // address generated-question rows by source id. Engines without that update
 // leave the rows alone; retrieval still drops them when the SQL filter or the

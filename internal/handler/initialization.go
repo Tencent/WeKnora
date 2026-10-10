@@ -464,10 +464,10 @@ func (h *InitializationHandler) UpdateKBConfig(c *gin.Context) {
 			if _, err := aligner.AlignGeneratedQuestions(ctx, kb.ID); err != nil {
 				logger.Errorf(ctx, "Failed to align generated questions for knowledge base %s: %v", kb.ID, err)
 				if appErr, ok := errors.IsAppError(err); ok {
-					// An engine that cannot update rows cannot clean an
-					// already-off knowledge base. Remember that and let a
-					// later settings save succeed. Turning the switch still
-					// returns the error.
+					// Every participating engine refused the update. Remember
+					// that and let a later settings save succeed. A partial
+					// update uses a different error and must stay unaligned.
+					// Turning the switch still returns the error.
 					if appErr.Details == "generated_question_index_unsupported" &&
 						questionGenerationWasActive == questionGenerationNowActive {
 						kb.QuestionGenerationConfig.IndexAligned = true

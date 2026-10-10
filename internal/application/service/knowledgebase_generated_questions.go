@@ -68,6 +68,13 @@ func (s *knowledgeBaseService) AlignGeneratedQuestions(
 		return out, err
 	}
 	n, err := engine.SetGeneratedQuestionEnabled(ctx, kb.ID, active)
+	if errors.Is(err, retriever.ErrGeneratedQuestionIndexPartial) {
+		out.IndexRows = n
+		logger.Warnf(ctx, "Generated-question alignment was partial for knowledge base %s", kb.ID)
+		return out, apperrors.NewBadRequestError(
+			"部分检索引擎不能按行停用或恢复预生成问题，问句向量仍会参与召回",
+		).WithDetails("generated_question_index_partial")
+	}
 	if errors.Is(err, retriever.ErrGeneratedQuestionIndexUnsupported) {
 		logger.Warnf(ctx, "Retrieve engine cannot update generated-question rows for knowledge base %s", kb.ID)
 		return out, apperrors.NewBadRequestError(
