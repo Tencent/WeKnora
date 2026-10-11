@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -11,12 +12,14 @@ import (
 )
 
 var (
-	ErrUserNotFound       = errors.New("user not found")
-	ErrUserAlreadyExists  = errors.New("user already exists")
-	ErrTokenNotFound      = errors.New("token not found")
-	ErrCannotRevokeSelf   = errors.New("cannot revoke your own system admin privileges")
-	ErrLastSystemAdmin    = errors.New("cannot revoke the last remaining system administrator")
-	ErrUserNotSystemAdmin = errors.New("user is not a system administrator")
+	ErrCannotDisableSelf      = errors.New("cannot disable your own account")
+	ErrCannotDisableLastAdmin = errors.New("cannot disable the last system administrator")
+	ErrUserNotFound           = errors.New("user not found")
+	ErrUserAlreadyExists      = errors.New("user already exists")
+	ErrTokenNotFound          = errors.New("token not found")
+	ErrCannotRevokeSelf       = errors.New("cannot revoke your own system admin privileges")
+	ErrLastSystemAdmin        = errors.New("cannot revoke the last remaining system administrator")
+	ErrUserNotSystemAdmin     = errors.New("user is not a system administrator")
 )
 
 // userRepository implements user repository interface
@@ -185,6 +188,85 @@ func (r *userRepository) ListSystemAdmins(ctx context.Context, offset, limit int
 	return users, total, nil
 }
 
+// lockSystemAdmins uses the same lock order for status changes and role
+// revocation: all admin rows by ID, then the target user. SQLite has no row
+// locks, so acquire its writer lock before reading the administrator set.
+func lockSystemAdmins(tx *gorm.DB) ([]types.User, error) {
+	if tx.Dialector.Name() == "sqlite" {
+		if err := tx.Model(&types.User{}).Where("is_system_admin = ?", true).
+			UpdateColumn("is_system_admin", true).Error; err != nil {
+			return nil, err
+		}
+	}
+	var admins []types.User
+	err := lockUserRows(tx).Where("is_system_admin = ?", true).Order("id ASC").Find(&admins).Error
+	return admins, err
+}
+
+func lockUserRows(tx *gorm.DB) *gorm.DB {
+	switch tx.Dialector.Name() {
+	case "postgres", "mysql":
+		return tx.Clauses(clause.Locking{Strength: "UPDATE"})
+	default:
+		return tx
+	}
+}
+
+func activeSystemAdminCount(admins []types.User) int {
+	n := 0
+	for _, admin := range admins {
+		if admin.IsActive {
+			n++
+		}
+	}
+	return n
+}
+
+// SetUserActive persists status and session revocation in one transaction.
+// Locking the admin set also serializes this operation with role revocation.
+func (r *userRepository) SetUserActive(ctx context.Context, userID, actorID string, active bool) (*types.User, error) {
+	var user types.User
+	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		admins, err := lockSystemAdmins(tx)
+		if err != nil {
+			return err
+		}
+		if err := lockUserRows(tx).Where("id = ?", userID).First(&user).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrUserNotFound
+			}
+			return err
+		}
+		if user.IsActive == active {
+			return nil
+		}
+		if !active {
+			if userID == actorID {
+				return ErrCannotDisableSelf
+			}
+			if user.IsSystemAdmin && activeSystemAdminCount(admins) <= 1 {
+				return ErrCannotDisableLastAdmin
+			}
+		}
+		user.IsActive = active
+		user.UpdatedAt = time.Now()
+		if err := tx.Model(&user).Updates(map[string]any{
+			"is_active": active, "updated_at": user.UpdatedAt,
+		}).Error; err != nil {
+			return err
+		}
+		if !active {
+			return tx.Model(&types.AuthToken{}).Where("user_id = ?", userID).
+				Update("is_revoked", true).Error
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &user, nil
+}
+
 // RevokeSystemAdmin revokes system-admin privileges inside a transaction.
 // It locks the current admin rows before counting so concurrent revokes
 // cannot both observe "two admins" and leave the platform with zero.
@@ -204,16 +286,12 @@ func (r *userRepository) RevokeSystemAdmin(ctx context.Context, userID, actorID 
 
 	var revoked *types.User
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		locking := func(db *gorm.DB) *gorm.DB {
-			switch tx.Dialector.Name() {
-			case "postgres", "mysql":
-				return db.Clauses(clause.Locking{Strength: "UPDATE"})
-			default:
-				return db
-			}
+		admins, err := lockSystemAdmins(tx)
+		if err != nil {
+			return err
 		}
 		var user types.User
-		if err := locking(tx).
+		if err := lockUserRows(tx).
 			Where("id = ?", userID).
 			First(&user).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -226,18 +304,12 @@ func (r *userRepository) RevokeSystemAdmin(ctx context.Context, userID, actorID 
 			return ErrUserNotSystemAdmin
 		}
 
-		var admins []types.User
-		if err := locking(tx).
-			Where("is_system_admin = ?", true).
-			Find(&admins).Error; err != nil {
-			return err
-		}
-		if len(admins) <= 1 {
+		if len(admins) <= 1 || (user.IsActive && activeSystemAdminCount(admins) <= 1) {
 			return ErrLastSystemAdmin
 		}
 
 		user.IsSystemAdmin = false
-		if err := tx.Save(&user).Error; err != nil {
+		if err := tx.Model(&user).Update("is_system_admin", false).Error; err != nil {
 			return err
 		}
 		revoked = &user

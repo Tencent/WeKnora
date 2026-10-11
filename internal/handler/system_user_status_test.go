@@ -4,8 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"github.com/Tencent/WeKnora/internal/application/repository"
+	"github.com/stretchr/testify/require"
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/application/service"
@@ -77,7 +82,13 @@ func TestSetUserStatus_GuardErrors400(t *testing.T) {
 }
 
 func TestSetUserStatus_NotFound404(t *testing.T) {
-	svc := &setUserStatusService{err: service.ErrUserNotFound}
+	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "users.db")), &gorm.Config{})
+	require.NoError(t, err)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
+	require.NoError(t, db.AutoMigrate(&types.User{}))
+	svc := service.NewUserService(nil, repository.NewUserRepository(db), nil, nil, nil, nil)
 	h := &SystemHandler{userSvc: svc}
 	r := statusRouter(h, "admin-1")
 	body, _ := json.Marshal(map[string]any{"user_id": "ghost", "is_active": true})
@@ -87,5 +98,20 @@ func TestSetUserStatus_NotFound404(t *testing.T) {
 	r.ServeHTTP(w, req)
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("expected 404 got %d", w.Code)
+	}
+}
+
+func TestSetUserStatus_RequiresExplicitStatus(t *testing.T) {
+	for _, body := range []string{`{"user_id":"u2"}`, `{"user_id":"u2","is_active":null}`, `{"user_id":"u2","is_active":"false"}`} {
+		t.Run(body, func(t *testing.T) {
+			svc := &setUserStatusService{}
+			r := statusRouter(&SystemHandler{userSvc: svc}, "admin-1")
+			req := httptest.NewRequest(http.MethodPost, "/system/admin/users/status", bytes.NewBufferString(body))
+			req.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, req)
+			require.Equal(t, http.StatusBadRequest, w.Code)
+			require.Empty(t, svc.gotID, "invalid requests must not change account status")
+		})
 	}
 }

@@ -86,7 +86,7 @@ type UserService interface {
 	SearchUsers(ctx context.Context, query string, limit int) ([]*types.User, error)
 	// SetUserActive enables or disables a user account (SystemAdmin action).
 	// Disabling also revokes all of that user's outstanding tokens. The
-	// service enforces self-disable and last-system-admin guards.
+	// repository enforces self-disable and last-system-admin guards.
 	SetUserActive(ctx context.Context, userID, actorID string, active bool) (*types.User, error)
 	// ListAllUsers lists every platform user (across tenants) newest-first.
 	// Returns the page plus a has_more flag so the system-admin user-list UI
@@ -131,6 +131,9 @@ type UserRepository interface {
 	GetUserByTenantID(ctx context.Context, tenantID uint64) (*types.User, error)
 	// UpdateUser updates a user
 	UpdateUser(ctx context.Context, user *types.User) error
+	// SetUserActive atomically changes status and revokes sessions on disable,
+	// preserving at least one active system administrator.
+	SetUserActive(ctx context.Context, userID, actorID string, active bool) (*types.User, error)
 	// DeleteUser deletes a user
 	DeleteUser(ctx context.Context, id string) error
 	// ListUsers lists users with pagination

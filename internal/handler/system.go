@@ -1587,7 +1587,7 @@ func (h *SystemHandler) ListUsers(c *gin.Context) {
 // SetUserStatusRequest toggles a user account enabled/disabled (SystemAdmin only).
 type SetUserStatusRequest struct {
 	UserID   string `json:"user_id" binding:"required"`
-	IsActive bool   `json:"is_active"`
+	IsActive *bool  `json:"is_active" binding:"required"`
 }
 
 // SetUserStatus godoc
@@ -1612,7 +1612,7 @@ func (h *SystemHandler) SetUserStatus(c *gin.Context) {
 	}
 
 	callerID, _ := types.UserIDFromContext(ctx)
-	user, err := h.userSvc.SetUserActive(ctx, strings.TrimSpace(req.UserID), callerID, req.IsActive)
+	user, err := h.userSvc.SetUserActive(ctx, strings.TrimSpace(req.UserID), callerID, *req.IsActive)
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrUserNotFound):
