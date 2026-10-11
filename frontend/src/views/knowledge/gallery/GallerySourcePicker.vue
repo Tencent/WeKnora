@@ -335,9 +335,9 @@ function formatTime(raw: string): string {
 .gsp-overflow-hint {
   padding: 6px 10px;
   border-radius: 6px;
-  background: var(--td-warning-color-1, rgba(236, 162, 0, 0.1));
-  color: var(--td-warning-color-7, #a2790a);
-  font-size: 12px;
+  background: var(--td-warning-color-1);
+  color: var(--td-warning-color-7);
+  font-size: var(--app-text-sm);
   line-height: 1.5;
 }
 
@@ -357,9 +357,9 @@ function formatTime(raw: string): string {
 
 .gsp-head {
   height: 36px;
-  border-bottom: 1px solid var(--td-component-stroke, var(--td-border-level-1-color, #e7e7e7));
+  border-bottom: 1px solid var(--td-component-stroke);
   color: var(--td-text-color-secondary);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
 }
 
 .gsp-head-cell {
@@ -394,11 +394,11 @@ function formatTime(raw: string): string {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 13px;
+  font-size: var(--app-text-md);
 }
 
 .gsp-col-time {
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   color: var(--td-text-color-secondary);
   font-variant-numeric: tabular-nums;
 }
