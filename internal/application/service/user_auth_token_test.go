@@ -423,7 +423,8 @@ func TestValidateTokenRejectsDisabledAccount(t *testing.T) {
 		t.Fatalf("active account rejected: %v", err)
 	}
 	user.IsActive = false
-	if _, _, err := svc.ValidateToken(context.Background(), access); err == nil || err.Error() != "account is disabled" {
+	_, _, err := svc.ValidateToken(context.Background(), access)
+	if err == nil || err.Error() != "account is disabled" {
 		t.Fatalf("disabled account with unrevoked token: got %v", err)
 	}
 }

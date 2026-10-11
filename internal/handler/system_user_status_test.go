@@ -4,20 +4,20 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"github.com/Tencent/WeKnora/internal/application/repository"
-	"github.com/stretchr/testify/require"
-	"gorm.io/driver/sqlite"
-	"gorm.io/gorm"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"testing"
 
+	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 
 	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/require"
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
 )
 
 type setUserStatusService struct {
@@ -29,7 +29,9 @@ type setUserStatusService struct {
 	gotActive  bool
 }
 
-func (s *setUserStatusService) SetUserActive(_ context.Context, userID, actorID string, active bool) (*types.User, error) {
+func (s *setUserStatusService) SetUserActive(
+	_ context.Context, userID, actorID string, active bool,
+) (*types.User, error) {
 	s.gotID, s.gotActor, s.gotActive = userID, actorID, active
 	return s.returnUser, s.err
 }
@@ -102,7 +104,11 @@ func TestSetUserStatus_NotFound404(t *testing.T) {
 }
 
 func TestSetUserStatus_RequiresExplicitStatus(t *testing.T) {
-	for _, body := range []string{`{"user_id":"u2"}`, `{"user_id":"u2","is_active":null}`, `{"user_id":"u2","is_active":"false"}`} {
+	for _, body := range []string{
+		`{"user_id":"u2"}`,
+		`{"user_id":"u2","is_active":null}`,
+		`{"user_id":"u2","is_active":"false"}`,
+	} {
 		t.Run(body, func(t *testing.T) {
 			svc := &setUserStatusService{}
 			r := statusRouter(&SystemHandler{userSvc: svc}, "admin-1")

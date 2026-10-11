@@ -63,7 +63,10 @@ func userStatusBackends(t *testing.T, fn func(*testing.T, *gorm.DB)) {
 
 func seedStatusUser(t *testing.T, db *gorm.DB, id string, admin, active bool) {
 	t.Helper()
-	user := &types.User{ID: id, Username: id, Email: id + "@example.com", PasswordHash: "hash", IsSystemAdmin: admin, IsActive: true}
+	user := &types.User{
+		ID: id, Username: id, Email: id + "@example.com",
+		PasswordHash: "hash", IsSystemAdmin: admin, IsActive: true,
+	}
 	require.NoError(t, NewUserRepository(db).CreateUser(context.Background(), user))
 	if !active {
 		require.NoError(t, db.Model(user).Update("is_active", false).Error)
@@ -78,7 +81,10 @@ func TestSetUserActiveGuardsAndSessions(t *testing.T) {
 		seedStatusUser(t, db, "disabled-admin", true, false)
 		seedStatusUser(t, db, "user", false, true)
 		for _, kind := range []string{"access_token", "refresh_token"} {
-			require.NoError(t, db.Create(&types.AuthToken{ID: kind, UserID: "user", Token: kind, TokenType: kind, ExpiresAt: time.Now().Add(time.Hour)}).Error)
+			require.NoError(t, db.Create(&types.AuthToken{
+				ID: kind, UserID: "user", Token: kind, TokenType: kind,
+				ExpiresAt: time.Now().Add(time.Hour),
+			}).Error)
 		}
 		_, err := repo.SetUserActive(ctx, "missing", "admin", false)
 		require.ErrorIs(t, err, ErrUserNotFound)
@@ -130,7 +136,9 @@ func TestConcurrentAdminChangesKeepOneActiveAdmin(t *testing.T) {
 				seedStatusUser(t, db, "a", true, true)
 				seedStatusUser(t, db, "b", true, true)
 				for i := 0; i < 20; i++ {
-					require.NoError(t, db.Model(&types.User{}).Where("id IN ?", []string{"a", "b"}).Updates(map[string]any{"is_active": true, "is_system_admin": true}).Error)
+					require.NoError(t, db.Model(&types.User{}).
+						Where("id IN ?", []string{"a", "b"}).
+						Updates(map[string]any{"is_active": true, "is_system_admin": true}).Error)
 					start := make(chan struct{})
 					results := make(chan error, 2)
 					for n, id := range []string{"a", "b"} {
@@ -159,12 +167,15 @@ func TestConcurrentAdminChangesKeepOneActiveAdmin(t *testing.T) {
 						if err == nil {
 							successes++
 						} else {
-							require.True(t, errors.Is(err, ErrCannotDisableLastAdmin) || errors.Is(err, ErrLastSystemAdmin), "unexpected error: %v", err)
+							require.True(t,
+								errors.Is(err, ErrCannotDisableLastAdmin) || errors.Is(err, ErrLastSystemAdmin),
+								"unexpected error: %v", err)
 						}
 					}
 					require.Equal(t, 1, successes)
 					var count int64
-					require.NoError(t, db.Model(&types.User{}).Where("is_system_admin = ? AND is_active = ?", true, true).Count(&count).Error)
+					require.NoError(t, db.Model(&types.User{}).
+						Where("is_system_admin = ? AND is_active = ?", true, true).Count(&count).Error)
 					require.EqualValues(t, 1, count)
 				}
 			})

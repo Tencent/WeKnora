@@ -12,14 +12,22 @@ import (
 )
 
 var (
-	ErrCannotDisableSelf      = errors.New("cannot disable your own account")
+	// ErrCannotDisableSelf prevents administrators from disabling their own account.
+	ErrCannotDisableSelf = errors.New("cannot disable your own account")
+	// ErrCannotDisableLastAdmin preserves at least one active system administrator.
 	ErrCannotDisableLastAdmin = errors.New("cannot disable the last system administrator")
-	ErrUserNotFound           = errors.New("user not found")
-	ErrUserAlreadyExists      = errors.New("user already exists")
-	ErrTokenNotFound          = errors.New("token not found")
-	ErrCannotRevokeSelf       = errors.New("cannot revoke your own system admin privileges")
-	ErrLastSystemAdmin        = errors.New("cannot revoke the last remaining system administrator")
-	ErrUserNotSystemAdmin     = errors.New("user is not a system administrator")
+	// ErrUserNotFound indicates that the requested user does not exist.
+	ErrUserNotFound = errors.New("user not found")
+	// ErrUserAlreadyExists indicates a duplicate user account.
+	ErrUserAlreadyExists = errors.New("user already exists")
+	// ErrTokenNotFound indicates that the requested token does not exist.
+	ErrTokenNotFound = errors.New("token not found")
+	// ErrCannotRevokeSelf prevents administrators from revoking their own role.
+	ErrCannotRevokeSelf = errors.New("cannot revoke your own system admin privileges")
+	// ErrLastSystemAdmin prevents revoking the last active system administrator's role.
+	ErrLastSystemAdmin = errors.New("cannot revoke the last remaining system administrator")
+	// ErrUserNotSystemAdmin indicates that the user has no system-admin role to revoke.
+	ErrUserNotSystemAdmin = errors.New("user is not a system administrator")
 )
 
 // userRepository implements user repository interface
@@ -192,7 +200,7 @@ func (r *userRepository) ListSystemAdmins(ctx context.Context, offset, limit int
 // revocation: all admin rows by ID, then the target user. SQLite has no row
 // locks, so acquire its writer lock before reading the administrator set.
 func lockSystemAdmins(tx *gorm.DB) ([]types.User, error) {
-	if tx.Dialector.Name() == "sqlite" {
+	if tx.Name() == "sqlite" {
 		if err := tx.Model(&types.User{}).Where("is_system_admin = ?", true).
 			UpdateColumn("is_system_admin", true).Error; err != nil {
 			return nil, err
@@ -204,7 +212,7 @@ func lockSystemAdmins(tx *gorm.DB) ([]types.User, error) {
 }
 
 func lockUserRows(tx *gorm.DB) *gorm.DB {
-	switch tx.Dialector.Name() {
+	switch tx.Name() {
 	case "postgres", "mysql":
 		return tx.Clauses(clause.Locking{Strength: "UPDATE"})
 	default:
