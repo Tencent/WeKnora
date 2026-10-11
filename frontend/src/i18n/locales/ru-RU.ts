@@ -4558,6 +4558,15 @@ export default {
         viewerClose: 'Закрыть (Esc)',
         prev: 'Назад (←)',
         next: 'Вперёд (→)',
+        sourceFilter: 'По документу',
+        sourceFilterTitle: 'Фильтр по исходному документу',
+        sourceFilterSearch: 'Поиск по названию документа',
+        sourceFilterEmpty: 'Подходящих документов нет',
+        sourceFilterConfirm: 'Применить',
+        sourceFilterConfirmWithCount: 'Показать изображения этих {count} документов',
+        sourceFilterCancel: 'Отмена',
+        sourceFilterClear: 'Сбросить выбор',
+        sourceFilterTooMany: 'Можно выбрать не более 50 документов',
         // Display names for the builtin attributes the gallery itself
         // declares. Attributes contributed by other sources fall back to the
         // pipeline's own wording (see the imageAttr namespace).

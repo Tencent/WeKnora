@@ -13,6 +13,7 @@ import { updateMyPreferences } from '@/api/auth'
 import EmptyState from '@/components/EmptyState.vue'
 import { galleryImageRequest } from './galleryImageSrc'
 import GalleryViewer, { type GalleryAttrRow } from './GalleryViewer.vue'
+import GallerySourcePicker from './GallerySourcePicker.vue'
 
 const props = defineProps<{
   knowledgeBaseId: string
@@ -49,6 +50,12 @@ const loadMoreEl = ref<HTMLElement | null>(null)
 const imageRatios = ref<Record<string, number>>({})
 let cardObserver: ResizeObserver | undefined
 let scrollObserver: ResizeObserver | undefined
+
+// Source-document restriction (the "filter by document" picker). An empty
+// array means every document of the KB; otherwise only images whose owning
+// document is listed are fetched. Committed by the picker dialog.
+const sourceDocIds = ref<string[]>([])
+const sourcePickerVisible = ref(false)
 
 // Attribute selections for free-text ("keywords") attributes: namespaced attr
 // id -> literal values (OR within the attribute, AND across attributes).
@@ -302,6 +309,7 @@ const activeFilterCount = computed(() => {
   let n = Object.keys(activeSelections.value).length
   for (const perValue of Object.values(activeRules.value)) n += Object.keys(perValue).length
   if (searchMode.value === 'custom') n += 1
+  if (sourceDocIds.value.length) n += 1
   return n
 })
 
@@ -309,7 +317,8 @@ const isNarrowed = computed(
   () =>
     !!keyword.value.trim() ||
     Object.keys(activeRules.value).length > 0 ||
-    Object.keys(activeSelections.value).length > 0,
+    Object.keys(activeSelections.value).length > 0 ||
+    sourceDocIds.value.length > 0,
 )
 
 function verdictOf(attrId: string, value: string): Verdict {
@@ -348,6 +357,7 @@ function keywordsInputValue(attrId: string): string {
 function clearFilters(): void {
   attrVerdicts.value = {}
   attrSelections.value = {}
+  sourceDocIds.value = []
   if (searchMode.value === 'custom') {
     searchMode.value = 'all'
     persistSearchPrefs()
@@ -359,6 +369,12 @@ function clearFilters(): void {
 function clearAll(): void {
   keyword.value = ''
   clearFilters()
+}
+
+/** Committed by the source picker: restrict the listing to these documents. */
+function onSourceDocsConfirm(ids: string[]): void {
+  sourceDocIds.value = ids
+  reload()
 }
 
 // ---------------------------------------------------------------------------
@@ -429,6 +445,7 @@ function buildParams(): ImageListParams {
     sortOrder: sortOrder.value,
     attrFilters: Object.keys(selections).length ? selections : undefined,
     attrRules: Object.keys(rules).length ? rules : undefined,
+    knowledgeIds: sourceDocIds.value.length ? sourceDocIds.value : undefined,
     pageSize,
   }
 }
@@ -655,6 +672,18 @@ watch(
         >
           <template #prefix-icon><t-icon name="search" size="16px" /></template>
         </t-input>
+
+        <button
+          type="button"
+          class="ig-tool-btn"
+          :class="{ active: sourceDocIds.length > 0 }"
+          :aria-label="t(`${NS}.sourceFilter`)"
+          @click="sourcePickerVisible = true"
+        >
+          <t-icon name="folder-open" size="16px" />
+          <span class="ig-sort-trigger__label">{{ t(`${NS}.sourceFilter`) }}</span>
+          <span v-if="sourceDocIds.length" class="ig-tool-btn__count">{{ sourceDocIds.length }}</span>
+        </button>
 
         <t-popup
           v-model:visible="filterPanelVisible"
@@ -892,6 +921,14 @@ watch(
       @load-more="onViewerLoadMore"
       @close="closeViewer"
       @open-source="onOpenSource"
+    />
+
+    <GallerySourcePicker
+      :kb-id="props.knowledgeBaseId"
+      :visible="sourcePickerVisible"
+      :selected="sourceDocIds"
+      @update:visible="(v: boolean) => (sourcePickerVisible = v)"
+      @confirm="onSourceDocsConfirm"
     />
   </div>
 </template>

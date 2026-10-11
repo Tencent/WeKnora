@@ -66,6 +66,11 @@ export interface ImageListParams {
   /** Restrict to chunks with this enabled state. Omit to include both. */
   isEnabled?: boolean;
   /**
+   * Source-document restriction: only images owned by these knowledge items
+   * are listed. Sent as one comma-joined `knowledge_ids` query param.
+   */
+  knowledgeIds?: string[];
+  /**
    * Attribute filters keyed by namespaced attribute id. Values within one
    * attribute are OR-ed; attributes are AND-ed. Sent as one `attr_filters`
    * JSON query param.
@@ -107,6 +112,9 @@ export async function listGalleryImages(
   if (params.sortOrder) query.set('sort_order', params.sortOrder);
   if (typeof params.isEnabled === 'boolean') {
     query.set('is_enabled', String(params.isEnabled));
+  }
+  if (params.knowledgeIds && params.knowledgeIds.length) {
+    query.set('knowledge_ids', params.knowledgeIds.join(','));
   }
   if (params.attrFilters && Object.keys(params.attrFilters).length) {
     query.set('attr_filters', JSON.stringify(params.attrFilters));

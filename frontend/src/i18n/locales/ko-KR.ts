@@ -4558,6 +4558,15 @@ export default {
         viewerClose: '닫기 (Esc)',
         prev: '이전 (←)',
         next: '다음 (→)',
+        sourceFilter: '문서별 필터',
+        sourceFilterTitle: '원본 문서로 필터',
+        sourceFilterSearch: '문서 이름 검색',
+        sourceFilterEmpty: '일치하는 문서가 없습니다',
+        sourceFilterConfirm: '적용',
+        sourceFilterConfirmWithCount: '선택한 {count}개 문서의 이미지 보기',
+        sourceFilterCancel: '취소',
+        sourceFilterClear: '선택 지우기',
+        sourceFilterTooMany: '최대 50개 문서까지 선택할 수 있습니다',
         // Display names for the builtin attributes the gallery itself
         // declares. Attributes contributed by other sources fall back to the
         // pipeline's own wording (see the imageAttr namespace).

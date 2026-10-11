@@ -4560,6 +4560,15 @@ export default {
         viewerClose: '关闭 (Esc)',
         prev: '上一张 (←)',
         next: '下一张 (→)',
+        sourceFilter: '按文档',
+        sourceFilterTitle: '按来源文档筛选',
+        sourceFilterSearch: '搜索文档名称',
+        sourceFilterEmpty: '没有匹配的文档',
+        sourceFilterConfirm: '确定',
+        sourceFilterConfirmWithCount: '查看这 {count} 个文档的图片',
+        sourceFilterCancel: '取消',
+        sourceFilterClear: '清空已选',
+        sourceFilterTooMany: '最多只能选择 50 个文档',
         // Display names for the builtin attributes the gallery itself
         // declares. Attributes contributed by other sources fall back to the
         // pipeline's own wording (see the imageAttr namespace).

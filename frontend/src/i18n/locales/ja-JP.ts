@@ -3527,6 +3527,15 @@ export default {
         viewerClose: '閉じる (Esc)',
         prev: '前へ (←)',
         next: '次へ (→)',
+        sourceFilter: 'ドキュメントで絞り込み',
+        sourceFilterTitle: 'ソースドキュメントで絞り込み',
+        sourceFilterSearch: 'ドキュメント名を検索',
+        sourceFilterEmpty: '一致するドキュメントがありません',
+        sourceFilterConfirm: '適用',
+        sourceFilterConfirmWithCount: 'この {count} 件のドキュメントの画像を表示',
+        sourceFilterCancel: 'キャンセル',
+        sourceFilterClear: '選択をクリア',
+        sourceFilterTooMany: '選択できるのは最大 50 件です',
         // Display names for the builtin attributes the gallery itself
         // declares. Attributes contributed by other sources fall back to the
         // pipeline's own wording (see the imageAttr namespace).

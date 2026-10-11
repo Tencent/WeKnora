@@ -53,6 +53,10 @@ type backlogProbe interface {
 // the frontend.
 const stallHintAfter = 20 * time.Minute
 
+// maxKnowledgeIDFilter caps how many source documents one gallery request may
+// restrict itself to via the knowledge_ids query parameter.
+const maxKnowledgeIDFilter = 50
+
 // stallVerdicts probes ids (all quiet past stallHintAfter) and returns each
 // one's StallState. Nil when the probe is unavailable or failed: an unknown
 // row gets no verdict rather than being called stuck.
@@ -1143,6 +1147,7 @@ func (h *KnowledgeHandler) ListKnowledge(c *gin.Context) {
 // @Param        sort_by     query     string  false "排序属性 ID；须为 in_sortfield=true，默认 created_at"
 // @Param        sort_order  query     string  false "排序方向：asc / desc，默认 desc"
 // @Param        is_enabled  query     bool    false "仅包含启用状态的图片"
+// @Param        knowledge_ids query  string  false "来源文档 ID 列表（逗号分隔，最多 50 个），仅返回这些文档的图片"
 // @Param        attr_filters query    string  false "属性筛选 JSON，同一属性多值 OR、属性间 AND"
 // @Param        attr_rules  query     string  false "属性逐值裁决 JSON（off 隐藏 / on 强制显示，on 优先）"
 // @Success      200  {object}  map[string]interface{}  "图片资产分页列表"
@@ -1173,6 +1178,23 @@ func (h *KnowledgeHandler) ListImages(c *gin.Context) {
 	if v := c.Query("is_enabled"); v != "" {
 		enabled := v == "true"
 		filter.IsEnabled = &enabled
+	}
+
+	// knowledge_ids: comma-separated knowledge item ids the gallery should
+	// restrict itself to (the "filter by source document" picker). Order is
+	// irrelevant; the cap keeps a hand-rolled caller from sending an
+	// unbounded IN clause.
+	if raw := strings.TrimSpace(c.Query("knowledge_ids")); raw != "" {
+		var ids []string
+		for _, id := range strings.Split(raw, ",") {
+			if id = strings.TrimSpace(id); id != "" {
+				ids = append(ids, id)
+			}
+			if len(ids) >= maxKnowledgeIDFilter {
+				break
+			}
+		}
+		filter.KnowledgeIDs = ids
 	}
 
 	// Every gallery attribute reference is validated against the resolved

@@ -98,6 +98,10 @@ func (d imageAssetDialect) where(
 		clauses = append(clauses, "i.is_enabled = ?")
 		args = append(args, *q.IsEnabled)
 	}
+	if len(q.KnowledgeIDs) > 0 {
+		clauses = append(clauses, "i.knowledge_id IN ?")
+		args = append(args, q.KnowledgeIDs)
+	}
 	if kw := strings.TrimSpace(q.Keyword); kw != "" {
 		pattern := "%" + escapeLikeKeyword(kw) + "%"
 		var matches []string

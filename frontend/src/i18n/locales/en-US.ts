@@ -3527,6 +3527,15 @@ export default {
         viewerClose: 'Close (Esc)',
         prev: 'Previous (←)',
         next: 'Next (→)',
+        sourceFilter: 'By document',
+        sourceFilterTitle: 'Filter by source document',
+        sourceFilterSearch: 'Search document names',
+        sourceFilterEmpty: 'No matching documents',
+        sourceFilterConfirm: 'Apply',
+        sourceFilterConfirmWithCount: 'Show images of these {count} documents',
+        sourceFilterCancel: 'Cancel',
+        sourceFilterClear: 'Clear selection',
+        sourceFilterTooMany: 'At most 50 documents can be selected',
         // Display names for the builtin attributes the gallery itself
         // declares. Attributes contributed by other sources fall back to the
         // pipeline's own wording (see the imageAttr namespace).
