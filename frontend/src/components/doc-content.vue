@@ -1573,7 +1573,8 @@ const handleChunkPageChange = (pageInfo: { current: number }) => {
 <template>
   <div class="doc_content" ref="mdContentWrap">
     <teleport to="body">
-      <div v-if="visible" class="doc-drawer-resize-handle" :style="{ right: `${mainDrawerWidth}px` }" role="separator"
+      <div v-if="visible" class="doc-drawer-resize-handle"
+        :style="{ right: `calc(${mainDrawerWidth}px + var(--agent-sidebar-w, 0px))` }" role="separator"
         aria-orientation="vertical" @mousedown.prevent="onMainDrawerResizeStart">
         <div class="doc-drawer-resize-line" />
       </div>
@@ -1619,7 +1620,7 @@ const handleChunkPageChange = (pageInfo: { current: number }) => {
       <!-- 二级抽屉：完整 Langfuse-style waterfall -->
       <teleport to="body">
         <div v-if="timelineDrawerVisible" class="trace-drawer-resize-handle"
-          :style="{ right: `${timelineDrawerWidth}px` }" role="separator" aria-orientation="vertical"
+          :style="{ right: `calc(${timelineDrawerWidth}px + var(--agent-sidebar-w, 0px))` }" role="separator" aria-orientation="vertical"
           :aria-label="$t('knowledgeStages.resizeDrawer')" :title="$t('knowledgeStages.resizeDrawer')"
           @mousedown.prevent="onTraceDrawerResizeStart">
           <div class="trace-drawer-resize-line" />
@@ -3325,5 +3326,15 @@ body:has(.t-drawer.kp-secondary-drawer--resizing) .trace-drawer-resize-line {
 
 .t-drawer.kp-secondary-drawer--resizing .t-drawer__content {
   transition: none !important;
+}
+
+/* agent-sidebar-inbox: while the KB agent sidebar is docked open, the doc
+   drawers (attach="body", fixed to the window's right edge) must not cover
+   the chat. The sidebar publishes its live width as --agent-sidebar-w on
+   <html>; both drawers and their resize handles shift left by that amount
+   so the reading pane slides over the folder tree instead. */
+.t-drawer.doc-main-drawer,
+.t-drawer.kp-secondary-drawer {
+  right: var(--agent-sidebar-w, 0px);
 }
 </style>

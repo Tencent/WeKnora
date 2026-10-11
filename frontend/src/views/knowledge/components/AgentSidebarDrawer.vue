@@ -94,6 +94,20 @@ const startResize = () => {
 };
 onBeforeUnmount(stopResize);
 
+// Publish the live dock width as a document-level CSS var so overlays that
+// teleport to <body> (the doc-content drawers) can keep clear of the chat:
+// they read var(--agent-sidebar-w) and shift left while the dock is open.
+const syncWidthVar = () => {
+  document.documentElement.style.setProperty(
+    '--agent-sidebar-w',
+    visible.value ? `${sidebarWidth.value}px` : '0px'
+  );
+};
+watch([visible, sidebarWidth], syncWidthVar, { immediate: true });
+onBeforeUnmount(() => {
+  document.documentElement.style.setProperty('--agent-sidebar-w', '0px');
+});
+
 watch(() => props.modelValue, (val) => { visible.value = val; });
 watch(visible, (val) => { emit('update:modelValue', val); });
 
