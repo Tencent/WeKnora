@@ -57,6 +57,55 @@ import { SKILL_ICON, type MentionItem, type MentionItemType, type MentionRequest
 import { toolboxLocation } from '@/config/toolbox';
 import { supportedLevels, levelLabelKey, levelFromLegacy, clampLevel, type ReasoningLevel } from '@/utils/reasoningEffort';
 
+const props = defineProps({
+  compact: {
+    type: Boolean,
+    default: false
+  },
+  autoFocus: {
+    type: Boolean,
+    default: false
+  },
+  isReplying: {
+    type: Boolean,
+    required: false
+  },
+  composerLocked: {
+    type: Boolean,
+    default: false
+  },
+  sessionId: {
+    type: String,
+    required: false
+  },
+  assistantMessageId: {
+    type: String,
+    required: false
+  },
+  // KB 侧边栏（embeddedMode）下宿主 ChatView 注入的绑定 agent ID：
+  // 控件可用性/提及过滤按它解析，而非全局 settingsStore 的选择。
+  agentId: {
+    type: String,
+    default: ''
+  },
+  embeddedMode: {
+    type: Boolean,
+    default: false
+  },
+  queuedSteers: {
+    type: Array as PropType<SteerQueueItem[]>,
+    default: () => []
+  },
+  // Only agent turns have a loop that can take a mid-run message. In a
+  // quick-answer session the composer keeps its old behaviour: Stop is the
+  // only action while a reply is streaming.
+  canSteer: {
+    type: Boolean,
+    default: false
+  }
+});
+
+
 const route = useRoute();
 const router = useRouter();
 const settingsStore = useSettingsStore();
@@ -519,53 +568,6 @@ const sharedAgentOrgName = computed(() => {
   return shared?.org_name || shared?.shared_by_username || '';
 });
 
-const props = defineProps({
-  compact: {
-    type: Boolean,
-    default: false
-  },
-  autoFocus: {
-    type: Boolean,
-    default: false
-  },
-  isReplying: {
-    type: Boolean,
-    required: false
-  },
-  composerLocked: {
-    type: Boolean,
-    default: false
-  },
-  sessionId: {
-    type: String,
-    required: false
-  },
-  assistantMessageId: {
-    type: String,
-    required: false
-  },
-  // KB 侧边栏（embeddedMode）下宿主 ChatView 注入的绑定 agent ID：
-  // 控件可用性/提及过滤按它解析，而非全局 settingsStore 的选择。
-  agentId: {
-    type: String,
-    default: ''
-  },
-  embeddedMode: {
-    type: Boolean,
-    default: false
-  },
-  queuedSteers: {
-    type: Array as PropType<SteerQueueItem[]>,
-    default: () => []
-  },
-  // Only agent turns have a loop that can take a mid-run message. In a
-  // quick-answer session the composer keeps its old behaviour: Stop is the
-  // only action while a reply is streaming.
-  canSteer: {
-    type: Boolean,
-    default: false
-  }
-});
 
 const isAgentEnabled = computed(() => settingsStore.isAgentEnabled);
 const isWebSearchEnabled = computed(() => settingsStore.isWebSearchEnabled);
