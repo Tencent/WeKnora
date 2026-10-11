@@ -57,7 +57,7 @@ func TestMCPCallRetryDoesNotRepeatAmbiguousExecution(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx, cancel := context.WithCancel(catalogTestContext())
 			t.Cleanup(cancel)
-			var requests, executed, initialized atomic.Int32
+			var requests, executed, handshakes atomic.Int32
 			server := sdkserver.NewMCPServer("Orders", "1", sdkserver.WithToolCapabilities(false))
 			server.AddTool(
 				sdkmcp.NewTool("create_order"),
@@ -89,8 +89,9 @@ func TestMCPCallRetryDoesNotRepeatAmbiguousExecution(t *testing.T) {
 					t.Errorf("decode request: %v", err)
 					return
 				}
-				if request.Method == "initialize" {
-					initialized.Add(1)
+				// Count the handshake selected by either the legacy or modern SDK.
+				if request.Method == "initialize" || request.Method == "server/discover" {
+					handshakes.Add(1)
 				}
 				if request.Method != "tools/call" {
 					transport.ServeHTTP(w, r)
@@ -170,7 +171,7 @@ func TestMCPCallRetryDoesNotRepeatAmbiguousExecution(t *testing.T) {
 				require.NotContains(t, visible, "outcome is unknown")
 			}
 			if tt.name == "expired_session" || tt.name == "repeated_expired_session" {
-				require.EqualValues(t, 2, initialized.Load(), "retain bounded recovery of rejected sessions")
+				require.EqualValues(t, 2, handshakes.Load(), "retain bounded recovery of rejected sessions")
 			}
 			if tt.wantUnknown && tt.name != "cancel_after_execution" {
 				// A subsequent deliberate call remains possible, with a new approval.

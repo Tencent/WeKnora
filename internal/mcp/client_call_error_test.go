@@ -14,6 +14,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/utils"
+	sdkmcp "github.com/mark3labs/mcp-go/mcp"
 	sdkserver "github.com/mark3labs/mcp-go/server"
 	"github.com/stretchr/testify/require"
 )
@@ -27,7 +28,7 @@ func TestCallToolOAuthRefreshFailureDoesNotClaimUnknownExecution(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			utils.SetSSRFWhitelistFromRaw("127.0.0.1")
 			t.Cleanup(utils.ResetSSRFWhitelistForTest)
-			runtime, repo, _, closeIssuer := newOAuthLifecycleFixture(t, http.StatusServiceUnavailable,
+			runtime, repo, refreshes, closeIssuer := newOAuthLifecycleFixture(t, http.StatusServiceUnavailable,
 				map[string]any{"error": "temporarily_unavailable"})
 			t.Cleanup(closeIssuer)
 			row := repo.tokens[fakeOAuthKey(7, runtime.principal, "svc-1")]
@@ -36,6 +37,12 @@ func TestCallToolOAuthRefreshFailureDoesNotClaimUnknownExecution(t *testing.T) {
 				row.ExpiresAt = time.Now().Add(-time.Minute)
 			}
 			server := sdkserver.NewMCPServer("orders", "1", sdkserver.WithToolCapabilities(false))
+			var executed atomic.Int32
+			server.AddTool(sdkmcp.NewTool("write"),
+				func(context.Context, sdkmcp.CallToolRequest) (*sdkmcp.CallToolResult, error) {
+					executed.Add(1)
+					return sdkmcp.NewToolResultText("write completed"), nil
+				})
 			transport := sdkserver.NewStreamableHTTPServer(server, sdkserver.WithDisableStreaming(true))
 			var calls atomic.Int32
 			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -64,8 +71,12 @@ func TestCallToolOAuthRefreshFailureDoesNotClaimUnknownExecution(t *testing.T) {
 			client.(*mcpGoClient).oauth = runtime
 			_, err = client.CallTool(context.Background(), "write", map[string]any{})
 			require.Error(t, err)
+			var temporary *OAuthRefreshTemporaryError
+			require.ErrorAs(t, err, &temporary)
+			require.EqualValues(t, 1, refreshes.Load(), "exercise the failed token refresh")
 			require.False(t, errors.Is(err, ErrToolCallOutcomeUnknown),
 				"token refresh failures are not evidence of an attempted write")
+			require.Zero(t, executed.Load(), "authorization rejects the request before the write handler")
 			if expired {
 				require.Zero(t, calls.Load())
 			} else {
