@@ -150,6 +150,7 @@
 | 字段 | 类型 | 协议默认 | 说明 |
 | --- | --- | --- | --- |
 | `thinking_mode` | string | `budget` | `budget` 按预算开启思考；`adaptive` 由模型自行决定，强度通过 `output_config.effort` 传递 |
+| `thinking_off_type` | string | `disabled` | `adaptive` 模式下关闭思考时发送的 `thinking.type`；Claude Sonnet 5.5 不接受 `disabled`，使用 `between_tools` |
 | `supports_effort` | bool | false | 是否发送思考强度 |
 | `thinking_budgets` | object | minimal 1024、low 2048、medium 8192、high 16384、xhigh 32768、max 63999 | 各思考强度对应的 `budget_tokens`，键为 `minimal`/`low`/`medium`/`high`/`xhigh`/`max` |
 | `default_max_tokens` | int | 4096 | 未设置输出上限时使用的 `max_tokens`（该协议必填） |
