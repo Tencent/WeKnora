@@ -243,5 +243,7 @@ export async function fetchGalleryConfig(kbId: string): Promise<GalleryConfig> {
     attributes: res.data.attributes ?? [],
     mode: res.data.mode === 'custom' ? 'custom' : 'all',
     status: res.data.status ?? {},
+    view_mode: res.data.view_mode === 'card' ? 'card' : 'waterfall',
+    thumb_width: res.data.thumb_width ?? 280,
   };
 }
