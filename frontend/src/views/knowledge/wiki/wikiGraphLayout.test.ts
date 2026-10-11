@@ -292,6 +292,33 @@ test('a summary names the document it dominates, but a nearly as central entity 
   assert.deepEqual(anchorsWhenSubjectLinks(9), ['subject'])
 })
 
+test('a component of several documents also names the page they share', () => {
+  const anchorsWithBridgeDetails = (details: number) => {
+    const slugs: string[] = ['bridge']
+    const adjacency = new Map<string, Set<string>>([['bridge', new Set()]])
+    const link = (a: string, b: string) => {
+      for (const s of [a, b]) if (!adjacency.has(s)) { adjacency.set(s, new Set()); slugs.push(s) }
+      adjacency.get(a)!.add(b); adjacency.get(b)!.add(a)
+    }
+    const pages = new Map<string, { page_type: string; title: string }>([['bridge', { page_type: 'concept', title: '强化学习' }]])
+    for (let d = 0; d < 3; d++) {
+      pages.set(`doc${d}`, { page_type: 'summary', title: `论文${d}.pdf - Summary` })
+      for (let i = 0; i < 8; i++) {
+        link(`doc${d}`, `d${d}-${i}`)
+        if (i > 0) link(`d${d}-${i}`, `d${d}-${i - 1}`)
+      }
+      link('bridge', `doc${d}`)
+      for (let i = 0; i < details; i++) link('bridge', `d${d}-${i}`)
+    }
+    return selectGraphAnchors(slugs, adjacency, pages)
+  }
+  const named = anchorsWithBridgeDetails(1)
+  assert.equal(named.at(-1), 'bridge')
+  assert.ok(named.slice(0, -1).every(slug => slug.startsWith('doc')), named.join())
+  // Shared by every document but barely linked: a detail, not what ties them.
+  assert.ok(!anchorsWithBridgeDetails(0).includes('bridge'))
+})
+
 test('an identifier-like file name does not name a theme over a readable page', () => {
   const slugs = ['summary', 'subject', ...Array.from({ length: 10 }, (_, i) => `detail${i}`)]
   const adjacency = new Map(slugs.map(slug => [slug, new Set<string>()]))

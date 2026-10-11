@@ -107,7 +107,8 @@ const anchorTypeQuality: Record<string, number> = {
  * at most one landmark, chosen by its links inside the theme and how well its
  * title reads as a name. Themes mostly linked to an existing landmark, and
  * pages that repeat one, get no extra name. Later picks favor larger themes
- * far from earlier labels so names spread instead of stacking up.
+ * far from earlier labels so names spread instead of stacking up. A component
+ * built from several documents also names the page most of them share.
  */
 export function selectGraphAnchors(
   slugs: string[], adjacency: ReadonlyMap<string, ReadonlySet<string>>,
@@ -201,6 +202,24 @@ export function selectGraphAnchors(
     open.delete(pick.theme)
     selected.push(pick.label)
     bfs(pick.label).forEach((d, i) => { nearest[i] = Math.min(nearest[i]!, d) })
+  }
+
+  // Themes mostly follow documents, so their names say which documents are
+  // here but not why they belong together. A page shared by most of them
+  // says that; it is added unless a label already is one.
+  const documents = new Set(order.flatMap((slug, i) => pages.get(slug)?.page_type === 'summary' ? [i] : []))
+  if (documents.size >= 2) {
+    const spans = (i: number) => documents.has(i) ? 0 : neighbors[i]!.filter(j => documents.has(j)).length
+    const needed = Math.max(2, Math.ceil(documents.size * 2 / 3))
+    if (!selected.some(s => spans(s) >= needed)) {
+      const weakest = Math.min(...selected.map(s => neighbors[s]!.length))
+      const prominence = (i: number) => (neighbors[i]!.length + 1) * quality(i)
+      const bridge = order.map((_, i) => i)
+        .filter(i => spans(i) >= needed && neighbors[i]!.length >= weakest * 0.6 && !redundant(i, selected))
+        .reduce<number | undefined>((top, i) => top === undefined || spans(i) > spans(top)
+          || (spans(i) === spans(top) && prominence(i) > prominence(top) + 1e-9) ? i : top, undefined)
+      if (bridge !== undefined) selected.push(bridge)
+    }
   }
   return selected.map(i => order[i]!)
 }
