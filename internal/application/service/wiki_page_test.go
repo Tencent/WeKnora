@@ -447,10 +447,14 @@ func TestComputeGraphSubset_OverviewTruncatesByLinkCount(t *testing.T) {
 
 func TestComputeGraphSubset_LinkCountCountsDistinctReachablePages(t *testing.T) {
 	pages := []*types.WikiPage{
-		{Slug: "p", PageType: types.WikiPageTypeEntity,
-			OutLinks: types.StringArray{"q", "q", "gone", "p", "idx"}, InLinks: types.StringArray{"q"}},
-		{Slug: "q", PageType: types.WikiPageTypeEntity,
-			OutLinks: types.StringArray{"p"}, InLinks: types.StringArray{"p"}},
+		{
+			Slug: "p", PageType: types.WikiPageTypeEntity,
+			OutLinks: types.StringArray{"q", "q", "gone", "p", "idx"}, InLinks: types.StringArray{"q"},
+		},
+		{
+			Slug: "q", PageType: types.WikiPageTypeEntity,
+			OutLinks: types.StringArray{"p"}, InLinks: types.StringArray{"p"},
+		},
 		{Slug: "idx", PageType: types.WikiPageTypeIndex, InLinks: types.StringArray{"p"}},
 	}
 	got, err := computeGraphSubset(pages, &types.WikiGraphRequest{
@@ -461,7 +465,8 @@ func TestComputeGraphSubset_LinkCountCountsDistinctReachablePages(t *testing.T) 
 	}
 	for _, n := range got.Nodes {
 		if n.LinkCount != 1 {
-			t.Errorf("%s link_count = %d, want 1 (reciprocal, duplicate, self, dead and filtered links excluded)", n.Slug, n.LinkCount)
+			t.Errorf("%s link_count = %d, want 1 (reciprocal, duplicate, self, dead and filtered links excluded)",
+				n.Slug, n.LinkCount)
 		}
 	}
 	if len(got.Edges) != 2 {
@@ -484,7 +489,9 @@ func TestComputeGraphSubset_LinkCountSurvivesStaleInLinks(t *testing.T) {
 		}
 	}
 
-	ego, err := computeGraphSubset(pages, &types.WikiGraphRequest{Mode: types.WikiGraphModeEgo, Center: "topic", Depth: 1})
+	ego, err := computeGraphSubset(pages, &types.WikiGraphRequest{
+		Mode: types.WikiGraphModeEgo, Center: "topic", Depth: 1,
+	})
 	if err != nil {
 		t.Fatalf("ego: %v", err)
 	}
@@ -495,10 +502,16 @@ func TestComputeGraphSubset_LinkCountSurvivesStaleInLinks(t *testing.T) {
 
 func TestComputeGraphSubset_ConnectsPagesToTheirDocumentSummary(t *testing.T) {
 	pages := []*types.WikiPage{
-		{Slug: "summary/ollama-tags", PageType: types.WikiPageTypeSummary, SourceRefs: types.StringArray{"doc-1|Ollama标签.md"}},
+		{
+			Slug: "summary/ollama-tags", PageType: types.WikiPageTypeSummary,
+			SourceRefs: types.StringArray{"doc-1|Ollama标签.md"},
+		},
 		{Slug: "entity/qwen", PageType: types.WikiPageTypeEntity, SourceRefs: types.StringArray{"doc-1"}},
 		{Slug: "concept/linked", PageType: types.WikiPageTypeConcept, SourceRefs: types.StringArray{"doc-1"}},
-		{Slug: "concept/other-doc", PageType: types.WikiPageTypeConcept, SourceRefs: types.StringArray{"doc-2"}},
+		{
+			Slug: "concept/other-doc", PageType: types.WikiPageTypeConcept,
+			SourceRefs: types.StringArray{"doc-2"},
+		},
 	}
 	pages[0].OutLinks = types.StringArray{"concept/linked"}
 
@@ -510,9 +523,9 @@ func TestComputeGraphSubset_ConnectsPagesToTheirDocumentSummary(t *testing.T) {
 	for _, e := range got.Edges {
 		edges[e.Source+"->"+e.Target] = true
 	}
-	want := map[string]bool{"summary/ollama-tags->concept/linked": true, "summary/ollama-tags->entity/qwen": true}
-	if len(edges) != len(want) || !edges["summary/ollama-tags->concept/linked"] || !edges["summary/ollama-tags->entity/qwen"] {
-		t.Errorf("edges = %v, want %v (one edge per pair, none for a page from a document without summary)", edges, want)
+	want := []string{"summary/ollama-tags->concept/linked", "summary/ollama-tags->entity/qwen"}
+	if len(edges) != len(want) || !edges[want[0]] || !edges[want[1]] {
+		t.Errorf("edges = %v, want %v (one edge per pair, none for a document without summary)", edges, want)
 	}
 	counts := map[string]int{}
 	for _, n := range got.Nodes {
@@ -535,7 +548,9 @@ func TestComputeGraphSubset_LeavesOutIndexUnlessRequested(t *testing.T) {
 	if nodeSlugs(got)["index"] || got.Meta.Total != 1 {
 		t.Errorf("overview must leave out the index page, got nodes %v total %d", nodeSlugs(got), got.Meta.Total)
 	}
-	got, err = computeGraphSubset(pages, &types.WikiGraphRequest{Mode: types.WikiGraphModeOverview, Types: []string{types.WikiPageTypeIndex}})
+	got, err = computeGraphSubset(pages, &types.WikiGraphRequest{
+		Mode: types.WikiGraphModeOverview, Types: []string{types.WikiPageTypeIndex},
+	})
 	if err != nil {
 		t.Fatalf("computeGraphSubset: %v", err)
 	}
@@ -546,7 +561,9 @@ func TestComputeGraphSubset_LeavesOutIndexUnlessRequested(t *testing.T) {
 
 func TestComputeGraphSubset_IsolatedEgoCenterHasEmptyEdgeList(t *testing.T) {
 	pages := []*types.WikiPage{{Slug: "alone", PageType: types.WikiPageTypeEntity}}
-	got, err := computeGraphSubset(pages, &types.WikiGraphRequest{Mode: types.WikiGraphModeEgo, Center: "alone", Depth: 1})
+	got, err := computeGraphSubset(pages, &types.WikiGraphRequest{
+		Mode: types.WikiGraphModeEgo, Center: "alone", Depth: 1,
+	})
 	if err != nil {
 		t.Fatalf("computeGraphSubset: %v", err)
 	}
@@ -566,8 +583,10 @@ func TestComputeGraphSubset_OverviewBreaksTiesBySignificance(t *testing.T) {
 		{Slug: "b-summary", PageType: types.WikiPageTypeSummary, UpdatedAt: now},
 		{Slug: "c-old", PageType: types.WikiPageTypeEntity, UpdatedAt: now.Add(-time.Hour)},
 		{Slug: "d-new", PageType: types.WikiPageTypeConcept, UpdatedAt: now},
-		{Slug: "e-familiar", PageType: types.WikiPageTypeSummary, UpdatedAt: now.Add(-2 * time.Hour),
-			SourceRefs: types.StringArray{"doc-1"}},
+		{
+			Slug: "e-familiar", PageType: types.WikiPageTypeSummary, UpdatedAt: now.Add(-2 * time.Hour),
+			SourceRefs: types.StringArray{"doc-1"},
+		},
 	}
 	got, err := computeGraphSubset(pages, &types.WikiGraphRequest{
 		Mode: types.WikiGraphModeOverview, Limit: 3, FamiliarKnowledgeIDs: []string{"doc-1"},

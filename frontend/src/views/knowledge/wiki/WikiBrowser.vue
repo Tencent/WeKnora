@@ -6332,10 +6332,10 @@ onUnmounted(() => {
   bottom: 16px;
   pointer-events: none;
   color: var(--td-text-color-placeholder);
-  font-size: 12px;
+  font-size: var(--app-text-sm);
   padding: 5px 9px;
   background: var(--td-bg-color-container);
-  border-radius: 4px;
+  border-radius: var(--app-radius-xs);
   z-index: 1;
 }
 
@@ -6351,12 +6351,12 @@ onUnmounted(() => {
   padding: 6px 6px 6px 14px;
   background: var(--td-bg-color-container);
   border: 1px solid var(--td-component-stroke);
-  border-radius: 999px;
+  border-radius: var(--app-radius-pill);
   box-shadow: var(--td-shadow-1);
-  font-size: 13px;
+  font-size: var(--app-text-md);
   color: var(--td-text-color-primary);
   z-index: 2;
-  transition: left 0.2s ease;
+  transition: left var(--app-motion-base) ease;
 
   &.focus-bar-shifted {
     left: calc(50% - 240px);
@@ -6371,7 +6371,7 @@ onUnmounted(() => {
   max-width: 100%;
   padding: 2px 6px;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--app-radius-sm);
   background: transparent;
   color: inherit;
   font: inherit;
@@ -6412,7 +6412,7 @@ span.graph-focus-name {
   gap: 6px;
   padding: 4px 10px;
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--app-radius-pill);
   background: var(--td-brand-color-light);
   color: var(--td-brand-color);
   font: inherit;
@@ -6430,9 +6430,9 @@ span.graph-focus-name {
   kbd {
     padding: 0 4px;
     border: 1px solid currentColor;
-    border-radius: 3px;
+    border-radius: var(--app-radius-xs);
     font: inherit;
-    font-size: 11px;
+    font-size: var(--app-text-xs);
     line-height: 16px;
     opacity: 0.7;
   }
@@ -6441,7 +6441,7 @@ span.graph-focus-name {
 .wiki-graph-canvas :deep(.graph-cluster-outline) {
   fill-opacity: 0.45;
   stroke-opacity: 0;
-  transition: fill-opacity 160ms ease, stroke-opacity 160ms ease, opacity 160ms ease;
+  transition: fill-opacity var(--app-motion-fast) ease, stroke-opacity var(--app-motion-fast) ease, opacity var(--app-motion-fast) ease;
 
   &.is-hovered {
     fill-opacity: 0.8;
@@ -6496,7 +6496,7 @@ span.graph-focus-name {
       fill: var(--td-bg-color-container);
       stroke: var(--td-component-border);
       stroke-width: 1px;
-      transition: stroke 120ms ease;
+      transition: stroke var(--app-motion-instant) ease;
     }
 
     text {
