@@ -229,8 +229,8 @@ export interface GalleryConfig {
   status: Record<string, string>;
   /** Gallery layout: "waterfall" (masonry, default) or "card" (3:2 grid). */
   view_mode: 'waterfall' | 'card';
-  /** Preferred thumbnail column width in px (server-clamped 120–360). */
-  thumb_width: number;
+  /** Preferred thumbnail column count; 0 = unset (client derives one). */
+  thumb_cols: number;
 }
 
 /** Fetch the gallery contract for a knowledge base. */
@@ -244,6 +244,6 @@ export async function fetchGalleryConfig(kbId: string): Promise<GalleryConfig> {
     mode: res.data.mode === 'custom' ? 'custom' : 'all',
     status: res.data.status ?? {},
     view_mode: res.data.view_mode === 'card' ? 'card' : 'waterfall',
-    thumb_width: res.data.thumb_width ?? 280,
+    thumb_cols: res.data.thumb_cols ?? 0,
   };
 }

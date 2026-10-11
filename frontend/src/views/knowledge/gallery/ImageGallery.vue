@@ -61,14 +61,14 @@ const sourcePickerVisible = ref(false)
 // id -> literal values (OR within the attribute, AND across attributes).
 const attrSelections = ref<Record<string, string[]>>({})
 
-// View preferences: the layout mode and the thumbnail column width. Both are
-// the user's own record — hydrated from the contract, persisted on change —
-// so the gallery looks the same on every device.
+// View preferences: the layout mode and the thumbnail column count. The
+// slider picks how many cards a row holds, with its stops derived live from
+// the layout width (min = floor(w/360), max = ceil(w/150)), so every stop
+// always changes the layout. 0 = never recorded (auto: ~280px columns).
 const viewMode = ref<'waterfall' | 'card'>('waterfall')
-const thumbWidth = ref(180)
-const THUMB_WIDTH_MIN = 120
-const THUMB_WIDTH_MAX = 360
-const THUMB_WIDTH_DEFAULT = 180
+const thumbCols = ref(0)
+const gridWidth = ref(0)
+const THUMB_AUTO_WIDTH = 280
 const viewPanelVisible = ref(false)
 
 // Per-value verdicts, namespaced attr id -> value -> "off" | "on". An absent
@@ -90,7 +90,7 @@ const config = ref<GalleryConfig>({
   mode: 'all',
   status: {},
   view_mode: 'waterfall',
-  thumb_width: THUMB_WIDTH_DEFAULT,
+  thumb_cols: 0,
 })
 const searchMode = ref<'all' | 'custom'>('all')
 // Per-attribute search toggle, keyed by namespaced attr id ("on"/"off").
@@ -199,6 +199,7 @@ function applyCardSpans(cards: HTMLElement[]) {
 }
 
 function observeCards() {
+  measureGrid()
   cardObserver?.disconnect()
   const cards = Array.from(gridEl.value?.querySelectorAll<HTMLElement>('.ig-card') ?? [])
   applyCardSpans(cards)
@@ -439,7 +440,7 @@ function isLastSearchField(attrId: string): boolean {
 }
 
 // ---------------------------------------------------------------------------
-// View prefs (layout mode + thumbnail column width, persisted like the
+// View prefs (layout mode + thumbnail column count, persisted like the
 // search prefs: debounced PATCH of the gallery block, view keys only)
 // ---------------------------------------------------------------------------
 let viewPrefsTimer: ReturnType<typeof setTimeout> | undefined
@@ -447,10 +448,57 @@ function persistViewPrefs() {
   if (!configLoaded.value) return
   if (viewPrefsTimer) clearTimeout(viewPrefsTimer)
   viewPrefsTimer = setTimeout(() => {
-    void updateMyPreferences({
-      gallery: { view_mode: viewMode.value, thumb_width: thumbWidth.value },
-    })
+    const gallery: { view_mode: 'waterfall' | 'card'; thumb_cols?: number } = {
+      view_mode: viewMode.value,
+    }
+    if (thumbCols.value > 0) gallery.thumb_cols = thumbCols.value
+    void updateMyPreferences({ gallery })
   }, 500)
+}
+
+// Slider stops live-track the layout width so every stop changes the grid:
+// as many columns as fit between ~150px and ~360px per card.
+const minCols = computed(() => Math.max(1, Math.floor(gridWidth.value / 360)))
+const maxCols = computed(() => Math.max(minCols.value, Math.ceil(gridWidth.value / 150)))
+const effCols = computed(() => {
+  const base = thumbCols.value > 0 ? thumbCols.value : Math.round(gridWidth.value / THUMB_AUTO_WIDTH)
+  return Math.min(maxCols.value, Math.max(minCols.value, base))
+})
+
+// The grid consumes the column count through a throttled mirror: the slider
+// updates its model on every pixel, and re-laying out hundreds of cards per
+// tick janks the page. Applied at most every ~80ms while dragging.
+const renderCols = ref(0)
+let colsApplyTimer: ReturnType<typeof setTimeout> | undefined
+function flushCols() {
+  colsApplyTimer = undefined
+  renderCols.value = effCols.value
+}
+watch(thumbCols, () => {
+  if (colsApplyTimer) return
+  colsApplyTimer = setTimeout(flushCols, 80)
+})
+watch([gridWidth, viewMode], () => {
+  // Width-driven changes re-layout anyway; follow without throttling.
+  if (colsApplyTimer) {
+    clearTimeout(colsApplyTimer)
+    colsApplyTimer = undefined
+  }
+  renderCols.value = effCols.value
+})
+const gridColsStyle = computed(() => ({ '--ig-cols': String(renderCols.value || effCols.value) }))
+
+function measureGrid() {
+  gridWidth.value = gridEl.value?.clientWidth ?? 0
+}
+
+function setThumbCols() {
+  if (colsApplyTimer) {
+    clearTimeout(colsApplyTimer)
+    colsApplyTimer = undefined
+  }
+  flushCols()
+  persistViewPrefs()
 }
 
 function selectViewMode(mode: 'waterfall' | 'card') {
@@ -460,12 +508,6 @@ function selectViewMode(mode: 'waterfall' | 'card') {
   void nextTick(() => {
     applyCardSpans(Array.from(gridEl.value?.querySelectorAll<HTMLElement>('.ig-card') ?? []))
   })
-}
-
-function setThumbWidth(w: number) {
-  if (thumbWidth.value === w) return
-  thumbWidth.value = w
-  persistViewPrefs()
 }
 
 // ---------------------------------------------------------------------------
@@ -639,6 +681,7 @@ onBeforeUnmount(() => {
   initToken++
   cardObserver?.disconnect()
   scrollObserver?.disconnect()
+  window.removeEventListener('resize', measureGrid)
   releaseBlobs()
 })
 
@@ -671,7 +714,7 @@ async function initGallery() {
     mode: 'all',
     status: {},
     view_mode: 'waterfall',
-    thumb_width: THUMB_WIDTH_DEFAULT,
+    thumb_cols: 0,
   }
   loading.value = true
   try {
@@ -681,7 +724,7 @@ async function initGallery() {
     searchMode.value = cfg.mode
     searchStatus.value = { ...cfg.status }
     viewMode.value = cfg.view_mode === 'card' ? 'card' : 'waterfall'
-    thumbWidth.value = cfg.thumb_width || THUMB_WIDTH_DEFAULT
+    thumbCols.value = cfg.thumb_cols > 0 ? cfg.thumb_cols : 0
     configLoaded.value = true
   } catch {
     if (token !== initToken) return
@@ -704,6 +747,8 @@ onMounted(() => {
   })
   scrollObserver = new ResizeObserver(checkLoadMore)
   if (scrollEl.value) scrollObserver.observe(scrollEl.value)
+  measureGrid()
+  window.addEventListener('resize', measureGrid, { passive: true })
   void initGallery()
 })
 
@@ -905,17 +950,16 @@ watch(
                 </div>
               </section>
               <section class="ig-sort-group">
-                <div class="ig-sort-group__label">
-                  {{ t(`${NS}.thumbSize`) }}
-                  <span class="ig-thumb-size__value">{{ thumbWidth }}px</span>
-                </div>
+                <div class="ig-sort-group__label">{{ t(`${NS}.thumbSize`) }}</div>
                 <div class="ig-thumb-slider">
                   <t-slider
-                    v-model="thumbWidth"
-                    :min="THUMB_WIDTH_MIN"
-                    :max="THUMB_WIDTH_MAX"
-                    :step="20"
-                    @change="setThumbWidth"
+                    v-model="thumbCols"
+                    :min="minCols"
+                    :max="maxCols"
+                    :step="1"
+                    :label="false"
+                    :disabled="minCols >= maxCols"
+                    @change="setThumbCols"
                   />
                 </div>
               </section>
@@ -1006,7 +1050,7 @@ watch(
           ref="gridEl"
           class="ig-grid"
           :class="{ 'is-card': viewMode === 'card' }"
-          :style="{ '--ig-col': `${thumbWidth}px` }"
+          :style="gridColsStyle"
         >
           <button
             v-for="(img, idx) in items"
@@ -1025,6 +1069,7 @@ watch(
                 :src="thumbUrls[img.id]"
                 :alt="img.caption"
                 loading="lazy"
+                decoding="async"
                 draggable="false"
                 @load="onThumbLoad(img.id, $event)"
                 @error="onThumbError(img.id)"
@@ -1424,7 +1469,9 @@ watch(
 
 .ig-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(var(--ig-col, 180px), 100%), 1fr));
+  // Fixed column count (the slider's stop), not auto-fill: every slider
+  // stop maps to a distinct grid, so dragging always changes the layout.
+  grid-template-columns: repeat(var(--ig-cols, 4), minmax(0, 1fr));
   grid-auto-rows: 1px;
   gap: 12px;
   align-items: start;
@@ -1482,6 +1529,9 @@ watch(
     align-items: center;
     justify-content: center;
     overflow: hidden;
+    // Layout+paint containment keeps each thumbnail's internal relayout
+    // local while the slider drags the whole grid through new sizes.
+    contain: layout paint;
     background: var(--td-bg-color-secondarycontainer);
 
     img {
@@ -1573,12 +1623,6 @@ watch(
   display: flex;
   align-items: center;
   justify-content: space-between;
-}
-
-.ig-thumb-size__value {
-  color: var(--td-text-color-placeholder);
-  font-size: var(--app-text-sm);
-  font-variant-numeric: tabular-nums;
 }
 
 .ig-thumb-slider {

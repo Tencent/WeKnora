@@ -17,17 +17,17 @@ func TestGalleryViewPreferencesPersistAndPartialMerge(t *testing.T) {
 	// Recording the view state persists both keys and survives the same
 	// JSON round-trip as the DB column.
 	prefs, err := users.UpdateUserPreferences(ctx, "alice", types.UserPreferences{
-		Gallery: &types.GalleryUserPrefs{ViewMode: types.GalleryViewCard, ThumbWidth: 300},
+		Gallery: &types.GalleryUserPrefs{ViewMode: types.GalleryViewCard, ThumbCols: 10},
 	})
 	require.NoError(t, err)
 	require.Equal(t, types.GalleryViewCard, prefs.Gallery.ViewMode)
-	require.Equal(t, 300, prefs.Gallery.ThumbWidth)
+	require.Equal(t, 10, prefs.Gallery.ThumbCols)
 	raw, err := prefs.Value()
 	require.NoError(t, err)
 	var decoded types.UserPreferences
 	require.NoError(t, decoded.Scan(raw))
 	require.Equal(t, types.GalleryViewCard, decoded.Gallery.ViewMode)
-	require.Equal(t, 300, decoded.Gallery.ThumbWidth)
+	require.Equal(t, 10, decoded.Gallery.ThumbCols)
 
 	// A search-prefs-only patch (what the filter panel sends) must leave
 	// the view state untouched: the gallery block merges key by key.
@@ -37,7 +37,7 @@ func TestGalleryViewPreferencesPersistAndPartialMerge(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, types.GalleryModeCustom, prefs.Gallery.Mode)
 	require.Equal(t, types.GalleryViewCard, prefs.Gallery.ViewMode, "view mode survives a search-only patch")
-	require.Equal(t, 300, prefs.Gallery.ThumbWidth, "thumb width survives a search-only patch")
+	require.Equal(t, 10, prefs.Gallery.ThumbCols, "thumb column count survives a search-only patch")
 
 	// A view-prefs-only patch must leave the search state untouched too.
 	prefs, err = users.UpdateUserPreferences(ctx, "alice", types.UserPreferences{
@@ -62,21 +62,21 @@ func TestGalleryViewPreferencesValidation(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, prefs.Gallery.ViewMode)
 
-	// Thumb width is clamped into the slider range on write; 0 means
-	// "not sent" and leaves the stored value alone.
+	// Thumb column count is clamped into the slider range on write; 0
+	// means "not sent" and leaves the stored value alone.
 	prefs, err = users.UpdateUserPreferences(ctx, "alice", types.UserPreferences{
-		Gallery: &types.GalleryUserPrefs{ThumbWidth: 9999},
+		Gallery: &types.GalleryUserPrefs{ThumbCols: 9999},
 	})
 	require.NoError(t, err)
-	require.Equal(t, types.GalleryThumbWidthMax, prefs.Gallery.ThumbWidth)
+	require.Equal(t, types.GalleryThumbColsMax, prefs.Gallery.ThumbCols)
 	prefs, err = users.UpdateUserPreferences(ctx, "alice", types.UserPreferences{
-		Gallery: &types.GalleryUserPrefs{ThumbWidth: 10},
+		Gallery: &types.GalleryUserPrefs{ThumbCols: 0},
 	})
 	require.NoError(t, err)
-	require.Equal(t, types.GalleryThumbWidthMin, prefs.Gallery.ThumbWidth)
+	require.Equal(t, 32, prefs.Gallery.ThumbCols, "0 means no key sent, so the stored count survives")
 	prefs, err = users.UpdateUserPreferences(ctx, "alice", types.UserPreferences{
-		Gallery: &types.GalleryUserPrefs{ThumbWidth: 0},
+		Gallery: &types.GalleryUserPrefs{ThumbCols: -3},
 	})
 	require.NoError(t, err)
-	require.Equal(t, types.GalleryThumbWidthMin, prefs.Gallery.ThumbWidth, "0 means no key sent, not a reset")
+	require.Equal(t, 1, prefs.Gallery.ThumbCols, "negative values clamp to the lowest stop")
 }

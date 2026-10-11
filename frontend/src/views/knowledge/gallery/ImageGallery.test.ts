@@ -13,7 +13,7 @@ const source = readFileSync(new URL('./ImageGallery.vue', import.meta.url), 'utf
 const compiled = ts.transpileModule(`${source}\nexport {
   items, page, total, loading, error, keyword, hasMore, viewerIndex, viewerOpen,
   reload, loadMore, openViewer, onViewerLoadMore, initGallery,
-  viewMode, thumbWidth, configLoaded, selectViewMode, setThumbWidth,
+  viewMode, thumbCols, configLoaded, selectViewMode, setThumbCols,
 }`, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
 
 function setup() {
@@ -21,7 +21,7 @@ function setup() {
     kb: string; params: ImageListParams
     resolve: (value: ImageListResult) => void; reject: (reason: Error) => void
   }> = []
-  const prefPatches: Array<{ gallery?: { view_mode?: string; thumb_width?: number } }> = []
+  const prefPatches: Array<{ gallery?: { view_mode?: string; thumb_cols?: number } }> = []
   const props = vue.reactive({ knowledgeBaseId: 'kb-1' })
   const modules: Record<string, unknown> = {
     vue: { ...vue, onMounted() {}, onBeforeUnmount() {}, watch() {} },
@@ -32,10 +32,10 @@ function setup() {
       }),
       fetchGalleryConfig: async () => ({
         attributes: [], attribute_sources: [], mode: 'all', status: {},
-        view_mode: 'card', thumb_width: 280,
+        view_mode: 'card', thumb_cols: 5,
       }),
     },
-    '@/api/auth': { updateMyPreferences: async (patch: { gallery?: { view_mode?: string; thumb_width?: number } }) => { prefPatches.push(patch) } },
+    '@/api/auth': { updateMyPreferences: async (patch: { gallery?: { view_mode?: string; thumb_cols?: number } }) => { prefPatches.push(patch) } },
     './galleryImageSrc': { galleryImageRequest: () => null },
   }
   const state: any = {}
@@ -160,7 +160,7 @@ test('view preferences hydrate from the contract and persist on change', async (
   await fresh
   // The saved record drives the initial layout...
   assert.equal(state.viewMode.value, 'card')
-  assert.equal(state.thumbWidth.value, 280)
+  assert.equal(state.thumbCols.value, 5)
   // ...and switching back to waterfall persists the new layout (debounced).
   state.selectViewMode('waterfall')
   assert.equal(state.viewMode.value, 'waterfall')
@@ -172,13 +172,14 @@ test('view preferences hydrate from the contract and persist on change', async (
   const layout = prefPatches[0]
   assert.ok(layout?.gallery, 'layout patch recorded')
   assert.equal(layout.gallery.view_mode, 'waterfall')
-  assert.equal(layout.gallery.thumb_width, 280)
+  assert.equal(layout.gallery.thumb_cols, 5)
   // The slider persists its own key with the layout left untouched.
-  state.setThumbWidth(240)
+  state.thumbCols.value = 3
+  state.setThumbCols()
   await new Promise((resolve) => setTimeout(resolve, 600))
   assert.equal(prefPatches.length, 2)
   const size = prefPatches[1]
   assert.ok(size?.gallery, 'slider patch recorded')
   assert.equal(size.gallery.view_mode, 'waterfall')
-  assert.equal(size.gallery.thumb_width, 240)
+  assert.equal(size.gallery.thumb_cols, 3)
 })
