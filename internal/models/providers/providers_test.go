@@ -304,6 +304,19 @@ func TestFamilyExpectations(t *testing.T) {
 	if r := resolve(t, "azure_openai", "gpt-5.4-prod"); r.OpenAICompletions.SupportsTemperature {
 		t.Error("azure gpt-5* deployment should not support temperature")
 	}
+	// Claude Opus 4.7 and later reject temperature/top_p/top_k with a 400, and
+	// Sonnet 5 rejects any non-default value, so the internal pipelines that set
+	// a fixed temperature must not send one to these models.
+	for _, model := range []string{
+		"claude-opus-4-7", "claude-opus-4-8", "claude-opus-5", "claude-sonnet-5", "claude-fable-5", "claude-fable-5-1",
+	} {
+		if r := resolve(t, "anthropic", model); r.AnthropicMessages.SupportsTemperature {
+			t.Errorf("anthropic/%s should not support temperature", model)
+		}
+	}
+	if r := resolve(t, "anthropic", "claude-sonnet-4-6"); !r.AnthropicMessages.SupportsTemperature {
+		t.Error("anthropic/claude-sonnet-4-6 should still support temperature")
+	}
 	// A deployment named exactly gpt-5 / gpt-5-mini / gpt-5-nano must agree
 	// with the openai vendor: the original GPT-5 trio rejects
 	// reasoning_effort "none", so the picker must not offer thinking off.
