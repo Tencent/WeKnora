@@ -2,6 +2,9 @@ package providers_test
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
+	"image/png"
 	"strings"
 	"testing"
 
@@ -14,12 +17,47 @@ import (
 
 // expectedIDs is every built-in vendor this package links.
 var expectedIDs = []string{
-	"generic", "weknoracloud", "huggingface_tei",
+	"generic", "weknoracloud", "huggingface_tei", "acedatacloud",
 	"aliyun", "zhipu", "volcengine", "hunyuan", "siliconflow", "deepseek",
 	"minimax", "moonshot", "mimo", "modelscope", "qianfan", "qiniu", "longcat", "lkeap",
 	"openai", "azure_openai", "anthropic", "gemini",
 	"openrouter", "litellm", "requesty", "pinecone",
 	"jina", "nvidia", "novita", "gpustack",
+}
+
+func TestAceDataCloudChatCatalog(t *testing.T) {
+	v, ok := modelruntime.Get(providers.AceDataCloudID)
+	if !ok {
+		t.Fatal("Ace Data Cloud provider missing")
+	}
+	if v.GetDefaultURL(types.ModelTypeKnowledgeQA) != providers.AceDataCloudBaseURL ||
+		v.GetDefaultURL(types.ModelTypeVLLM) != providers.AceDataCloudBaseURL {
+		t.Fatal("chat and vision must use the documented /v1 base URL")
+	}
+	if !v.RequiresAuth || v.Auth != providers.AuthBearer || v.API != api.APIOpenAICompletions {
+		t.Fatal("unexpected Ace Data Cloud authentication or chat protocol")
+	}
+	entries := v.Models()
+	if len(entries) != 88 {
+		t.Fatalf("want 88 pinned public Chat Completions models, got %d", len(entries))
+	}
+	for _, m := range entries {
+		switch m.ID {
+		case "gpt-4o-all", "gpt-4o-image", "gpt-5.1-all", "claude-opus-5-5", "claude-sonnet-5-5":
+			t.Errorf("non-Chat-Completions model %q must not be offered", m.ID)
+		}
+	}
+	resolved, err := modelruntime.Resolve(modelruntime.Ref{
+		Provider: providers.AceDataCloudID, Model: "gpt-4.1-mini",
+		ModelType: types.ModelTypeKnowledgeQA,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved.BaseURL != providers.AceDataCloudBaseURL ||
+		resolved.OpenAICompletions.MaxTokensField != "max_tokens" {
+		t.Fatalf("unexpected Ace Data Cloud request contract: %+v", resolved)
+	}
 }
 
 func TestMinimaxOfficialDefaultURLs(t *testing.T) {
@@ -82,8 +120,8 @@ func TestBuiltinDefaultURLsAcrossModelTypes(t *testing.T) {
 }
 
 func TestAllVendorsRegistered(t *testing.T) {
-	if len(expectedIDs) != 29 {
-		t.Fatalf("expected 29 vendor ids in the spec, got %d", len(expectedIDs))
+	if len(expectedIDs) != 30 {
+		t.Fatalf("expected 30 vendor ids in the spec, got %d", len(expectedIDs))
 	}
 	for _, id := range expectedIDs {
 		v, ok := modelruntime.Get(id)
@@ -97,11 +135,22 @@ func TestAllVendorsRegistered(t *testing.T) {
 		if v.Name == "" {
 			t.Errorf("vendor %q: empty Name", id)
 		}
-		if len(v.Icon) == 0 || !bytes.HasPrefix(bytes.TrimSpace(v.Icon), []byte("<svg")) {
-			t.Errorf("vendor %q: icon is empty or not an <svg> document", id)
-		}
-		if len(v.Icon) > 6*1024 {
-			t.Errorf("vendor %q: icon is %d bytes, over the 6 KB budget", id, len(v.Icon))
+		if id == providers.AceDataCloudID {
+			cfg, err := png.DecodeConfig(bytes.NewReader(v.Icon))
+			if err != nil || cfg.Width != 512 || cfg.Height != 512 {
+				t.Errorf("vendor %q: invalid official 512x512 PNG icon: %v", id, err)
+			}
+			sum := sha256.Sum256(v.Icon)
+			if hex.EncodeToString(sum[:]) != "3e2c6e2d1a61a549dae2374ec4444c77f4c2617c8f3772bdd4cd6e52bf20767e" {
+				t.Errorf("vendor %q: icon differs from the official brand asset", id)
+			}
+		} else {
+			if len(v.Icon) == 0 || !bytes.HasPrefix(bytes.TrimSpace(v.Icon), []byte("<svg")) {
+				t.Errorf("vendor %q: icon is empty or not an <svg> document", id)
+			}
+			if len(v.Icon) > 6*1024 {
+				t.Errorf("vendor %q: icon is %d bytes, over the 6 KB budget", id, len(v.Icon))
+			}
 		}
 		if v.RequiresAuth && v.Auth == "" {
 			t.Errorf("vendor %q: RequiresAuth without Auth style", id)

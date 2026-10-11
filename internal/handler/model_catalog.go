@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
@@ -89,11 +90,15 @@ func modelTypeToFrontend(mt types.ModelType) string {
 	}
 }
 
-func iconDataURI(svg []byte) string {
-	if len(svg) == 0 {
+func iconDataURI(icon []byte) string {
+	if len(icon) == 0 {
 		return ""
 	}
-	return "data:image/svg+xml;base64," + base64.StdEncoding.EncodeToString(svg)
+	mediaType := "image/svg+xml"
+	if bytes.HasPrefix(icon, []byte("\x89PNG\r\n\x1a\n")) {
+		mediaType = "image/png"
+	}
+	return "data:" + mediaType + ";base64," + base64.StdEncoding.EncodeToString(icon)
 }
 
 func providerDTO(v *modelruntime.Provider, modelType types.ModelType, includeModels bool) ModelProviderDTO {

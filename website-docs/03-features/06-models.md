@@ -240,11 +240,12 @@
 
 ## 内置厂商
 
-内置 29 个厂商，另可通过 Ollama 接入本地模型。各厂商支持的模型类型如下（✓ 表示支持）：
+内置 30 个厂商，另可通过 Ollama 接入本地模型。各厂商支持的模型类型如下（✓ 表示支持）：
 
 | 厂商 | ID | 对话 | 向量 | 重排 | 视觉 | 语音 |
 | --- | --- | :-: | :-: | :-: | :-: | :-: |
 | 自定义（OpenAI 兼容接口） | `generic` | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Ace Data Cloud | `acedatacloud` | ✓ | | | ✓ | |
 | WeKnora 云服务 | `weknoracloud` | ✓ | ✓ | ✓ | ✓ | |
 | 阿里云 DashScope | `aliyun` | ✓ | ✓ | ✓ | ✓ | ✓ |
 | 智谱 BigModel | `zhipu` | ✓ | ✓ | ✓ | ✓ | ✓ |
@@ -275,6 +276,8 @@
 | Pinecone | `pinecone` | | | ✓ | | |
 
 表中的「视觉」指可在视觉模型类型下选择该厂商；对话模型本身是否接受图片，以模型目录和「支持视觉/多模态」开关为准。WeKnora 云服务需先在设置中保存云服务凭证，模型名称可选 `chat`、`embedding`、`rerank`、`vlm`。
+
+选择 Ace Data Cloud 时，填写从 [Ace Data Cloud 控制台](https://platform.acedata.cloud)获得、具有 AI Chat 权限的 API Key；默认地址为 `https://api.acedata.cloud/v1`。模型目录固定收录其公开目录中支持 Chat Completions 的 88 个对话模型。图片生成模型与仅支持 Claude Messages 的 `claude-opus-5-5`、`claude-sonnet-5-5` 不在此对话目录中。目录列出的模型仍可能需要额外的账户权限；保存前请运行「测试连接」。向量与重排模型需选择其他已支持的厂商。
 
 厂商列表、默认地址和模型目录由服务端下发（`GET /api/v1/models/providers`），运维可以通过[部署叠加](#部署叠加-config-models-json)修改或新增厂商。
 
