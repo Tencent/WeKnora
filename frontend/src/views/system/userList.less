@@ -1,0 +1,45 @@
+.user-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+
+  &__toolbar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  &__search {
+    flex: 1;
+  }
+
+  &__pager {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+
+  &__count {
+    color: var(--td-text-color-secondary, rgba(0, 0, 0, 0.4));
+    font-size: 12px;
+    margin-right: auto;
+  }
+
+  &__page {
+    min-width: 28px;
+    text-align: center;
+    font-size: 13px;
+  }
+}
+
+.user-list__reset-hint {
+  margin: 0 0 12px;
+  color: var(--td-text-color-secondary, rgba(0, 0, 0, 0.6));
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.user-list__role-tag {
+  cursor: pointer;
+}

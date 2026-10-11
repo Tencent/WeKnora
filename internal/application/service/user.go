@@ -594,6 +594,103 @@ func (s *userService) UpdateUser(ctx context.Context, user *types.User) error {
 	return s.userRepo.UpdateUser(ctx, user)
 }
 
+// Sentinel errors for account-status operations so handlers can map to 400
+// without matching on error text.
+var (
+	ErrCannotDisableSelf      = errors.New("cannot disable your own account")
+	ErrCannotDisableLastAdmin = errors.New("cannot disable the last system administrator")
+	ErrUserNotFound           = errors.New("user not found")
+)
+
+// SetUserActive flips a user's active flag. Deactivation also revokes every
+// outstanding token for that user, so an already-issued JWT stops working
+// immediately (ValidateToken re-checks IsActive as defence in depth).
+func (s *userService) SetUserActive(
+	ctx context.Context, userID, actorID string, active bool,
+) (*types.User, error) {
+	user, err := s.userRepo.GetUserByID(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	if user == nil {
+		return nil, ErrUserNotFound
+	}
+
+	// No-op when the flag already matches — avoid pointless token revocation
+	// (e.g. re-enabling an already active account must not log anyone out).
+	if user.IsActive == active {
+		return user, nil
+	}
+
+	if !active {
+		if actorID != "" && user.ID == actorID {
+			return nil, ErrCannotDisableSelf
+		}
+		// Guard against locking everyone out of the platform.
+		if user.IsSystemAdmin {
+			_, total, err := s.userRepo.ListSystemAdmins(ctx, 0, 1)
+			if err != nil {
+				return nil, err
+			}
+			activeAdmins, err := s.countActiveSystemAdmins(ctx)
+			if err != nil {
+				return nil, err
+			}
+			_ = total
+			if activeAdmins <= 1 {
+				return nil, ErrCannotDisableLastAdmin
+			}
+		}
+	}
+
+	user.IsActive = active
+	user.UpdatedAt = time.Now()
+	if err := s.userRepo.UpdateUser(ctx, user); err != nil {
+		return nil, err
+	}
+
+	if !active {
+		if err := s.tokenRepo.RevokeTokensByUserID(ctx, user.ID); err != nil {
+			return nil, err
+		}
+	}
+	return user, nil
+}
+
+// countActiveSystemAdmins counts currently enabled system administrators.
+// ListSystemAdmins includes disabled ones, so filter in Go — the admin set is
+// always small enough that this stays cheap.
+func (s *userService) countActiveSystemAdmins(ctx context.Context) (int, error) {
+	admins, _, err := s.userRepo.ListSystemAdmins(ctx, 0, 0)
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, a := range admins {
+		if a.IsActive {
+			n++
+		}
+	}
+	return n, nil
+}
+
+// ListAllUsers lists every platform user newest-first for the system-admin
+// user-management UI. It fetches limit+1 rows to derive has_more without a
+// separate COUNT. Role gating is the handler's responsibility.
+func (s *userService) ListAllUsers(
+	ctx context.Context, offset, limit int,
+) ([]*types.User, bool, error) {
+	rows, err := s.userRepo.ListUsers(ctx, offset, limit+1)
+	if err != nil {
+		return nil, false, err
+	}
+	hasMore := len(rows) > limit
+	if hasMore {
+		rows = rows[:limit]
+	}
+	return rows, hasMore, nil
+}
+
 // ListSystemAdmins lists users with IsSystemAdmin=true. Thin pass-through
 // to the repository; the handler enforces SystemAdmin gating, so the
 // service does not duplicate the role check here.
@@ -1298,6 +1395,13 @@ func (s *userService) ValidateToken(ctx context.Context, tokenString string) (*t
 	user, err := s.userRepo.GetUserByID(ctx, userID)
 	if err != nil {
 		return nil, 0, err
+	}
+
+	// Defence in depth: a token minted before the account was disabled must
+	// stop working even if revocation missed it. Login also rejects disabled
+	// accounts, but long-lived access tokens are checked here per request.
+	if !user.IsActive {
+		return nil, 0, errors.New("account is disabled")
 	}
 
 	// Extract active tenant from the JWT. Anything missing or unparseable

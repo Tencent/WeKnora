@@ -84,6 +84,15 @@ type UserService interface {
 	GetCurrentUser(ctx context.Context) (*types.User, error)
 	// SearchUsers searches users by username or email
 	SearchUsers(ctx context.Context, query string, limit int) ([]*types.User, error)
+	// SetUserActive enables or disables a user account (SystemAdmin action).
+	// Disabling also revokes all of that user's outstanding tokens. The
+	// service enforces self-disable and last-system-admin guards.
+	SetUserActive(ctx context.Context, userID, actorID string, active bool) (*types.User, error)
+	// ListAllUsers lists every platform user (across tenants) newest-first.
+	// Returns the page plus a has_more flag so the system-admin user-list UI
+	// can paginate without a second count query. The handler enforces the
+	// SystemAdmin gate, so the service does not duplicate it here.
+	ListAllUsers(ctx context.Context, offset, limit int) ([]*types.User, bool, error)
 	// ListSystemAdmins lists users with IsSystemAdmin=true.
 	// Returns the page of admins plus the total count (for pagination UI);
 	// callers pass offset/limit to page through results. Used by the

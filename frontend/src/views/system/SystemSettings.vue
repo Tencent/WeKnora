@@ -172,6 +172,22 @@
             </div>
           </div>
 
+          <div v-if="activeSettingsSection === 'access'" class="setting-row setting-row--user-list">
+            <div class="setting-info">
+              <div class="setting-label">
+                <span>{{ t('system.globalSettings.userList.rowLabel') }}</span>
+              </div>
+              <p class="desc">{{ t('system.globalSettings.userList.rowDesc') }}</p>
+            </div>
+            <div class="setting-control">
+              <t-button theme="primary" variant="text" @click="userListVisible = true">
+                <template #icon><t-icon name="user-circle" /></template>
+                {{ t('system.globalSettings.userList.openBtn') }}
+              </t-button>
+              <UserListDialog v-model:visible="userListVisible" />
+            </div>
+          </div>
+
           <div v-for="item in activeSectionSettings" :key="item.key" class="setting-row">
             <div class="setting-info">
               <div class="setting-label">
@@ -339,6 +355,7 @@ import {
   type SystemSettingItem,
 } from '@/api/system'
 import CreateUserDialog from './CreateUserDialog.vue'
+import UserListDialog from './UserListDialog.vue'
 import ResetPasswordDialog from './ResetPasswordDialog.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useDeploymentCapabilitiesStore } from '@/stores/deploymentCapabilities'
@@ -562,6 +579,7 @@ const adminBusy = ref(false)
 // only their visibility is owned here.
 const passwordResetVisible = ref(false)
 const createUserVisible = ref(false)
+const userListVisible = ref(false)
 
 // Guards ssrf.whitelist while an async confirm roundtrip is in flight.
 const listConfirmBusyKey = ref<string | null>(null)
