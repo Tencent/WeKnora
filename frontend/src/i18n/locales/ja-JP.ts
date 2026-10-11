@@ -4390,35 +4390,26 @@ export default {
       },
       sections: {
         access: {
-          tab: 'アカウントとアクセス{count}',
-          title: 'アカウントとアクセス',
-          description: 'システム管理者、公開登録、ワークスペース作成のルールを管理します。'
+          title: '登録とアクセス',
+          description: '登録方法、パスワード要件、ワークスペース作成のルールを管理します。'
         },
         tenant: {
-          tab: 'ワークスペースのデフォルト値{count}',
           title: 'ワークスペースのデフォルト値',
           description: '既存のワークスペースを変更せずに、新規ワークスペースの初期クォータと互換動作を設定します。'
         },
         runtime: {
-          tab: 'ランタイムと並列実行{count}',
           title: 'ランタイムと並列実行',
           description: 'バックグラウンドのワーカプールとモデルサービスの並列実行数を設定します。',
           restartHint: 'ワーカ設定の変更には再起動が必要です'
         },
         security: {
-          tab: 'ネットワークセキュリティ{count}',
           title: 'ネットワークセキュリティ',
           description: 'SSRF許可リストと、Dockerサンドボックスの利用可否を管理します（ローカルのdocker.sockはホストのroot権限に相当します）。'
         },
         other: {
-          tab: 'その他{count}',
           title: 'その他の設定',
           description: 'このデプロイ環境に存在する、標準の製品グループに属さない設定です。'
         }
-      },
-      runtimeTable: {
-        setting: '設定と用途',
-        value: '現在の値'
       },
       runtime: {
         title: 'タスクキューのランタイム',
@@ -4738,40 +4729,17 @@ export default {
         success: 'デフォルト値にリセットしました',
         failed: 'リセットに失敗しました'
       },
-      admins: {
-        label: 'システム管理者',
-        description: 'プラットフォームレベルの権限を持つユーザです。メールアドレスを入力してEnterキーを押すと権限を付与でき、タグの×をクリックすると取り消せます。あなた自身も管理者ですが一覧には表示されず、自分の権限を取り消すことはできません。',
-        placeholder: 'ユーザのメールアドレスを入力してEnterキーを押してください',
-        loadFailed: 'システム管理者の読み込みに失敗しました',
-        saveSuccess: 'システム管理者を更新しました',
-        saveFailed: 'システム管理者の更新に失敗しました',
-        confirm: {
-          promote: {
-            header: 'システム管理者に昇格',
-            body: '{email}をシステム管理者に昇格しますか？このユーザはプラットフォームレベルの権限（すべてのワークスペース、システム設定、管理者一覧へのアクセス）を得ます。',
-            confirmBtn: '昇格'
-          },
-          revoke: {
-            header: 'システム管理者権限を解除',
-            body: '{email}のシステム管理者権限を解除しますか？すべてのシステムレベルの機能にアクセスできなくなります。',
-            confirmBtn: '解除'
-          }
-        }
-      },
       userList: {
         title: 'プラットフォームユーザー一覧',
-        rowLabel: 'ユーザー一覧',
+        rowLabel: 'ユーザー管理',
         rowDesc: 'ワークスペース横断の登録ユーザーを、ページ送りとユーザー名/メール絞り込み付きで表示します。',
-        openBtn: 'ユーザー一覧を表示',
         searchPlaceholder: 'ユーザー名またはメールで絞り込み（現在ページ）',
         refresh: '更新',
         active: '有効',
         inactive: '無効',
-        adminTag: 'システム管理者',
         colUsername: 'ユーザー名',
-        colEmail: 'メール',
         colStatus: '状態',
-        colRole: 'ロール（クリックで変更）',
+        colRole: 'ロール',
         colCreated: '作成日',
         colAction: '操作',
         prev: '前へ',
@@ -4795,21 +4763,11 @@ export default {
         revokedMsg: '{name} の管理者権限を取り消しました',
         promotedMsg: '{name} をシステム管理者に昇格しました',
         roleFailed: 'ロールの変更に失敗しました',
-        resetTitle: 'パスワードリセット · {name}',
-        resetHint: '対象アカウント：{email}。リセット後、このユーザーの全セッションが失効し、新しいパスワードでの再ログインが必要です。',
-        newPasswordPlaceholder: '新しいパスワードを入力（8文字以上）',
-        passwordTooShort: 'パスワードは8文字以上にしてください',
-        resetSuccess: '{name} のパスワードをリセットしました',
-        resetFailed: 'リセットに失敗しました',
       },
       passwordReset: {
-        label: 'ユーザのパスワードをリセット',
-        description: 'ログインできない他のユーザに新しいパスワードを設定します。リセットに成功すると、そのユーザの現在のセッションはすべて無効になり、新しいパスワードで再度ログインする必要があります。',
-        action: 'パスワードをリセット',
         dialogTitle: '他のユーザのパスワードをリセット',
         warning: 'これは高リスクの操作です。ユーザのメールアドレスをよく確認してください。ここで自分のパスワードをリセットすることはできません。',
         emailLabel: 'ユーザのメールアドレス',
-        emailPlaceholder: 'リセット対象ユーザのメールアドレスを入力してください',
         newPasswordLabel: '新しいパスワード',
         newPasswordPlaceholder: '新しいパスワードを入力してください',
         confirmPasswordLabel: '新しいパスワード（確認）',
@@ -4819,8 +4777,6 @@ export default {
         failed: 'パスワードのリセットに失敗しました',
       },
       createUser: {
-        label: 'ユーザを作成',
-        description: 'ローカルユーザアカウントを新規に作成します。プラットフォームのデフォルトのワークスペースモードが「個人ワークスペースを作成」の場合、自分で登録したユーザと同様に個人ワークスペースが作成されます。',
         action: 'ユーザを作成',
         dialogTitle: '新しいユーザを作成',
         warning: 'これは高リスクの操作です。ユーザ名とメールアドレスをよく確認してください。これらは新しいユーザのログインに使用されます。',
@@ -4843,10 +4799,6 @@ export default {
           usernameLength: 'ユーザ名は2〜50文字で入力してください',
           emailRequired: 'メールアドレスを入力してください',
           emailInvalid: '有効なメールアドレスを入力してください',
-          passwordRequired: '新しいパスワードを入力してください',
-          passwordLength: 'パスワードは8〜32文字で入力してください',
-          passwordLetter: 'パスワードには英字を含めてください',
-          passwordNumber: 'パスワードには数字を含めてください',
           confirmRequired: '新しいパスワードをもう一度入力してください',
           passwordMismatch: 'パスワードが一致しません'
         },

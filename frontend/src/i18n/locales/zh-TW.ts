@@ -3325,18 +3325,15 @@ export default {
       },
       userList: {
         title: '平台使用者列表',
-        rowLabel: '使用者列表',
+        rowLabel: '使用者管理',
         rowDesc: '檢視平台上的全部註冊使用者（跨空間），支援分頁與依使用者名稱/郵箱篩選。',
-        openBtn: '檢視使用者列表',
         searchPlaceholder: '依使用者名稱或郵箱篩選（目前頁面）',
         refresh: '重新整理',
         active: '正常',
         inactive: '已停用',
-        adminTag: '系統管理員',
         colUsername: '使用者名稱',
-        colEmail: '郵箱',
         colStatus: '狀態',
-        colRole: '角色（點擊切換）',
+        colRole: '角色',
         colCreated: '建立日期',
         colAction: '操作',
         prev: '上一頁',
@@ -3360,21 +3357,11 @@ export default {
         revokedMsg: '已撤銷 {name} 的管理員權限',
         promotedMsg: '已將 {name} 提升為系統管理員',
         roleFailed: '修改角色失敗',
-        resetTitle: '重設密碼 · {name}',
-        resetHint: '目標帳號：{email}。重設後將撤銷該使用者全部登入狀態，需用新密碼重新登入。',
-        newPasswordPlaceholder: '請輸入新密碼（至少 8 碼）',
-        passwordTooShort: '密碼至少 8 碼',
-        resetSuccess: '{name} 的密碼已重設',
-        resetFailed: '重設失敗',
       },
       passwordReset: {
-        label: '重設使用者密碼',
-        description: '為忘記密碼的其他使用者設定新密碼。重設成功後，該使用者當前所有登入會話都會失效，需要使用新密碼重新登入。',
-        action: '重設密碼',
         dialogTitle: '重設其他使用者的密碼',
         warning: '這是高風險操作。請核對使用者電子信箱；出於安全考慮，不能在這裡重設自己的密碼。',
         emailLabel: '使用者電子信箱',
-        emailPlaceholder: '輸入需要重設密碼的使用者電子信箱',
         newPasswordLabel: '新密碼',
         newPasswordPlaceholder: '請輸入新密碼',
         confirmPasswordLabel: '確認新密碼',
@@ -3384,8 +3371,6 @@ export default {
         failed: '重設密碼失敗',
       },
       createUser: {
-        label: '建立使用者',
-        description: '開通一個新的本地使用者帳號。如果平台的預設空間模式設定為「自動建立個人空間」，該使用者會像自助註冊的使用者一樣，同時獲得一個個人空間。',
         action: '建立使用者',
         dialogTitle: '建立新使用者',
         warning: '這是高風險操作。請仔細核對使用者名和電子信箱──它們將作為該使用者登入的唯一憑據。',
@@ -3408,10 +3393,6 @@ export default {
           usernameLength: '使用者名長度必須為 2-50 個字符',
           emailRequired: '請輸入電子信箱',
           emailInvalid: '請輸入有效的電子信箱地址',
-          passwordRequired: '請輸入新密碼',
-          passwordLength: '密碼長度必須為 8-32 個字符',
-          passwordLetter: '密碼必須包含字母',
-          passwordNumber: '密碼必須包含數字',
           confirmRequired: '請再次輸入新密碼',
           passwordMismatch: '兩次輸入的密碼不一致'
         },
@@ -3424,26 +3405,6 @@ export default {
           copyBtn: '複製帳號資訊',
           copySuccess: '帳號資訊已複製到剪貼簿',
           acknowledgeBtn: '我已儲存密碼'
-        }
-      },
-      admins: {
-        label: '系統管理員',
-        description: '擁有平台級權限的使用者。在右側輸入電子信箱並Enter即可提升使用者為管理員；點擊 × 即為撤銷其權限。當前你（自己）已是管理員，不在清單中顯示，也無法被自己撤銷。',
-        placeholder: '輸入使用者電子信箱並Enter',
-        loadFailed: '載入系統管理員失敗',
-        saveSuccess: '已更新系統管理員',
-        saveFailed: '更新系統管理員失敗',
-        confirm: {
-          revoke: {
-            header: '撤銷系統管理員',
-            body: '確認撤銷 {email} 的系統管理員權限？撤銷後該使用者將無法再存取任何系統級功能。',
-            confirmBtn: '撤銷'
-          },
-          promote: {
-            header: '提升為系統管理員',
-            body: '確認將 {email} 提升為系統管理員？該使用者將獲得平台級權限，可存取所有空間、修改系統設定、管理其他管理員。',
-            confirmBtn: '提升'
-          }
         }
       },
       reset: {
@@ -3764,36 +3725,27 @@ export default {
           generic: '獲取佇列狀態失敗'
         }
       },
-      runtimeTable: {
-        setting: '設定項與用途',
-        value: '當前值'
-      },
       sections: {
         other: {
-          tab: '其他 {count}',
           title: '其他設定',
           description: '當前部署中未歸入標準分組的設定項。'
         },
         security: {
-          tab: '網路安全 {count}',
           title: '網路安全',
           description: '管理 SSRF 白名單，以及是否允許 Docker 沙箱（本機 docker.sock 等同宿主機 root）。'
         },
         runtime: {
-          tab: '運行與併發 {count}',
           title: '運行與併發',
           description: '設定後台任務池與模型服務的併發容量。',
           restartHint: 'Worker 設定需重啟生效'
         },
         tenant: {
-          tab: '空間預設值 {count}',
           title: '空間預設值',
           description: '設定新空間的初始配額與相容性行為，不會自動改寫已有空間。'
         },
         access: {
-          tab: '帳戶與存取 {count}',
-          title: '帳戶與存取',
-          description: '管理系統管理員、公開註冊與使用者建立空間的規則。'
+          title: '註冊與存取',
+          description: '管理註冊方式、密碼要求及使用者建立空間的規則。'
         }
       },
       priorityHint: {

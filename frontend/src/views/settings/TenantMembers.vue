@@ -1468,6 +1468,7 @@ watch(
 
 <style lang="less" scoped>
 @import (reference) '@/components/css/settings-section.less';
+@import (reference) '@/components/css/settings-table.less';
 
 .tenant-members {
   width: 100%;
@@ -1695,21 +1696,7 @@ watch(
 }
 
 .data-table-shell {
-  overflow-x: auto;
-  border-radius: var(--app-radius-lg);
-  border: 1px solid var(--td-component-stroke);
-  background-color: var(--td-bg-color-container);
-
-  &:deep(thead th) {
-    font-weight: 600;
-    font-size: var(--app-text-md);
-  }
-
-  &:deep(.t-table td),
-  &:deep(.t-table th) {
-    padding-top: 12px;
-    padding-bottom: 12px;
-  }
+  .settings-data-table();
 
   /* 角色列：下拉收缩到内容宽度，不再撑满整格。原先 100% 在窄角色
      名（如"Owner"）下显得空荡且与其他列对不齐。 */

@@ -3323,18 +3323,15 @@ export default {
       },
       userList: {
         title: '플랫폼 사용자 목록',
-        rowLabel: '사용자 목록',
+        rowLabel: '사용자 관리',
         rowDesc: '워크스페이스 전체의 등록 사용자를 페이지네이션 및 사용자 이름/이메일 필터와 함께 표시합니다.',
-        openBtn: '사용자 목록 보기',
         searchPlaceholder: '사용자 이름 또는 이메일로 필터링(현재 페이지)',
         refresh: '새로고침',
         active: '활성',
         inactive: '비활성',
-        adminTag: '시스템 관리자',
         colUsername: '사용자 이름',
-        colEmail: '이메일',
         colStatus: '상태',
-        colRole: '역할(클릭하여 변경)',
+        colRole: '역할',
         colCreated: '생성일',
         colAction: '작업',
         prev: '이전',
@@ -3358,21 +3355,11 @@ export default {
         revokedMsg: '{name}의 관리자 권한을 취소했습니다',
         promotedMsg: '{name}을(를) 시스템 관리자로 승격했습니다',
         roleFailed: '역할 변경 실패',
-        resetTitle: '비밀번호 재설정 · {name}',
-        resetHint: '대상 계정: {email}. 재설정 후 해당 사용자의 모든 세션이 취소되며 새 비밀번호로 다시 로그인해야 합니다.',
-        newPasswordPlaceholder: '새 비밀번호 입력(최소 8자)',
-        passwordTooShort: '비밀번호는 최소 8자 이상이어야 합니다',
-        resetSuccess: '{name}의 비밀번호가 재설정되었습니다',
-        resetFailed: '재설정 실패',
       },
       passwordReset: {
-        label: '사용자 비밀번호 재설정',
-        description: '로그인할 수 없는 다른 사용자의 새 비밀번호를 설정합니다. 재설정하면 해당 사용자의 현재 로그인 세션이 모두 만료되며 새 비밀번호로 다시 로그인해야 합니다.',
-        action: '비밀번호 재설정',
         dialogTitle: '다른 사용자의 비밀번호 재설정',
         warning: '보안에 민감한 작업입니다. 사용자 이메일을 반드시 확인하세요. 여기서는 자신의 비밀번호를 재설정할 수 없습니다.',
         emailLabel: '사용자 이메일',
-        emailPlaceholder: '비밀번호를 재설정할 사용자의 이메일 입력',
         newPasswordLabel: '새 비밀번호',
         newPasswordPlaceholder: '새 비밀번호 입력',
         confirmPasswordLabel: '새 비밀번호 확인',
@@ -3382,8 +3369,6 @@ export default {
         failed: '비밀번호 재설정 실패',
       },
       createUser: {
-        label: '사용자 생성',
-        description: '새 로컬 사용자 계정을 개설합니다. 플랫폼의 기본 공간 모드가 "개인 공간 자동 생성"으로 설정된 경우, 스스로 가입한 사용자와 마찬가지로 개인 공간도 함께 만들어집니다.',
         action: '사용자 생성',
         dialogTitle: '새 사용자 생성',
         warning: '보안에 민감한 작업입니다. 새 사용자가 로그인할 때 사용할 사용자 이름과 이메일을 신중히 확인하세요.',
@@ -3406,10 +3391,6 @@ export default {
           usernameLength: '사용자 이름은 2~50자여야 합니다',
           emailRequired: '이메일을 입력하세요',
           emailInvalid: '올바른 이메일 주소를 입력하세요',
-          passwordRequired: '새 비밀번호를 입력하세요',
-          passwordLength: '비밀번호는 8~32자여야 합니다',
-          passwordLetter: '비밀번호에 문자가 포함되어야 합니다',
-          passwordNumber: '비밀번호에 숫자가 포함되어야 합니다',
           confirmRequired: '새 비밀번호를 다시 입력하세요',
           passwordMismatch: '비밀번호가 일치하지 않습니다'
         },
@@ -3422,26 +3403,6 @@ export default {
           copyBtn: '계정 정보 복사',
           copySuccess: '계정 정보가 클립보드에 복사되었습니다',
           acknowledgeBtn: '비밀번호를 저장했습니다'
-        }
-      },
-      admins: {
-        label: '시스템 관리자',
-        description: '플랫폼 수준 권한을 가진 사용자입니다. 오른쪽에 이메일을 입력하고 엔터를 누르면 해당 사용자를 관리자로 승격하고, 태그의 ×를 누르면 권한을 회수합니다. 본인은 관리자이지만 목록에 표시되지 않으며 자신의 권한을 회수할 수 없습니다.',
-        placeholder: '사용자 이메일을 입력하고 엔터를 누르세요',
-        loadFailed: '시스템 관리자 정보를 불러오지 못했습니다',
-        saveSuccess: '시스템 관리자가 업데이트되었습니다',
-        saveFailed: '시스템 관리자 업데이트 실패',
-        confirm: {
-          revoke: {
-            header: '시스템 관리자 권한 회수',
-            body: '{email} 사용자의 시스템 관리자 권한을 회수하시겠습니까? 회수 후에는 시스템 수준 기능에 더 이상 접근할 수 없습니다.',
-            confirmBtn: '회수 확인'
-          },
-          promote: {
-            header: '시스템 관리자로 승격',
-            body: '{email} 사용자를 시스템 관리자로 승격하시겠습니까? 이 사용자는 모든 워크스페이스 접근, 시스템 설정 변경, 관리자 명단 관리 등 플랫폼 수준의 권한을 갖게 됩니다.',
-            confirmBtn: '승격 확인'
-          }
         }
       },
       reset: {
@@ -3762,36 +3723,27 @@ export default {
           generic: '큐 상태를 불러오지 못했습니다'
         }
       },
-      runtimeTable: {
-        setting: '설정 및 용도',
-        value: '현재 값'
-      },
       sections: {
         other: {
-          tab: '기타 {count}',
           title: '기타 설정',
           description: '표준 제품 그룹에 포함되지 않은 현재 배포의 설정입니다.'
         },
         security: {
-          tab: '네트워크 보안 {count}',
           title: '네트워크 보안',
           description: 'SSRF 허용 목록과 Docker 샌드박스 허용 여부(로컬 docker.sock은 호스트 root와 같음)를 관리합니다.'
         },
         runtime: {
-          tab: '런타임 및 동시성 {count}',
           title: '런타임 및 동시성',
           description: '백그라운드 워커 풀과 모델 서비스의 동시 처리 용량을 설정합니다.',
           restartHint: '워커 설정은 재시작 후 적용'
         },
         tenant: {
-          tab: '워크스페이스 기본값 {count}',
           title: '워크스페이스 기본값',
           description: '기존 워크스페이스를 변경하지 않고 신규 워크스페이스의 초기 할당량과 호환 동작을 설정합니다.'
         },
         access: {
-          tab: '계정 및 액세스 {count}',
-          title: '계정 및 액세스',
-          description: '시스템 관리자, 공개 가입, 공간 생성 규칙을 관리합니다.'
+          title: '가입 및 액세스',
+          description: '가입 방식, 비밀번호 요구 사항, 공간 생성 규칙을 관리합니다.'
         }
       },
       priorityHint: {

@@ -4390,35 +4390,26 @@ export default {
       },
       sections: {
         access: {
-          tab: 'Accounts & access {count}',
-          title: 'Accounts & access',
-          description: 'Manage system administrators, public registration, and workspace-creation rules.'
+          title: 'Registration & access',
+          description: 'Manage registration, password requirements, and workspace-creation rules.'
         },
         tenant: {
-          tab: 'Workspace defaults {count}',
           title: 'Workspace defaults',
           description: 'Set initial quotas and compatibility behavior for new workspaces without rewriting existing workspaces.'
         },
         runtime: {
-          tab: 'Runtime & concurrency {count}',
           title: 'Runtime & concurrency',
           description: 'Configure concurrency capacity for background worker pools and model services.',
           restartHint: 'Worker settings require restart'
         },
         security: {
-          tab: 'Network security {count}',
           title: 'Network security',
           description: 'Manage the SSRF allowlist and whether the Docker sandbox is allowed (a local docker.sock is equivalent to root on the host).'
         },
         other: {
-          tab: 'Other {count}',
           title: 'Other settings',
           description: 'Settings in this deployment that are not part of a standard product group.'
         }
-      },
-      runtimeTable: {
-        setting: 'Setting and purpose',
-        value: 'Current value'
       },
       runtime: {
         title: 'Task Queue Runtime',
@@ -4738,40 +4729,17 @@ export default {
         success: 'Reset to default',
         failed: 'Reset failed'
       },
-      admins: {
-        label: 'System administrators',
-        description: 'Users with platform-level privileges. Type an email and press Enter to promote a user; click × on a tag to revoke. You (yourself) are an administrator and are not shown in the list — you cannot revoke your own access.',
-        placeholder: 'Type a user email and press Enter',
-        loadFailed: 'Failed to load system administrators',
-        saveSuccess: 'System administrators updated',
-        saveFailed: 'Failed to update system administrators',
-        confirm: {
-          promote: {
-            header: 'Promote to system administrator',
-            body: 'Promote {email} to system administrator? This user will gain platform-level privileges: access to every workspace, system settings, and the admin roster itself.',
-            confirmBtn: 'Promote'
-          },
-          revoke: {
-            header: 'Revoke system administrator',
-            body: 'Revoke system-administrator privileges from {email}? They will lose access to all system-level features.',
-            confirmBtn: 'Revoke'
-          }
-        }
-      },
       userList: {
         title: 'Platform users',
-        rowLabel: 'User list',
+        rowLabel: 'User management',
         rowDesc: 'View every registered user across workspaces, with pagination and username/email filtering.',
-        openBtn: 'View user list',
         searchPlaceholder: 'Filter by username or email (current page)',
         refresh: 'Refresh',
         active: 'Active',
         inactive: 'Disabled',
-        adminTag: 'System admin',
         colUsername: 'Username',
-        colEmail: 'Email',
         colStatus: 'Status',
-        colRole: 'Role (click to change)',
+        colRole: 'Role',
         colCreated: 'Created',
         colAction: 'Actions',
         prev: 'Previous',
@@ -4795,21 +4763,11 @@ export default {
         revokedMsg: 'Revoked admin privileges from {name}',
         promotedMsg: 'Promoted {name} to system administrator',
         roleFailed: 'Failed to change role',
-        resetTitle: 'Reset password · {name}',
-        resetHint: 'Target account: {email}. After resetting, all sessions for this user are revoked and they must sign in with the new password.',
-        newPasswordPlaceholder: 'Enter a new password (at least 8 characters)',
-        passwordTooShort: 'Password must be at least 8 characters',
-        resetSuccess: 'Password reset for {name}',
-        resetFailed: 'Reset failed',
       },
       passwordReset: {
-        label: 'Reset user password',
-        description: 'Set a new password for another user who cannot sign in. A successful reset invalidates all of that user\'s current sessions, so they must sign in again with the new password.',
-        action: 'Reset password',
         dialogTitle: 'Reset another user\'s password',
         warning: 'This is a high-risk action. Verify the user email carefully. You cannot reset your own password here.',
         emailLabel: 'User email',
-        emailPlaceholder: 'Enter the email of the user to reset',
         newPasswordLabel: 'New password',
         newPasswordPlaceholder: 'Enter new password',
         confirmPasswordLabel: 'Confirm new password',
@@ -4819,8 +4777,6 @@ export default {
         failed: 'Failed to reset password',
       },
       createUser: {
-        label: 'Create user',
-        description: 'Provision a new local user account. If the platform\'s default workspace mode is set to "create personal", the user gets a personal workspace just like a self-registered user would.',
         action: 'Create user',
         dialogTitle: 'Create a new user',
         warning: 'This is a high-risk action. Verify the username and email carefully — they are how the new user will sign in.',
@@ -4843,10 +4799,6 @@ export default {
           usernameLength: 'Username must be 2-50 characters',
           emailRequired: 'Enter an email address',
           emailInvalid: 'Enter a valid email address',
-          passwordRequired: 'Enter a new password',
-          passwordLength: 'Password must be 8-32 characters',
-          passwordLetter: 'Password must contain a letter',
-          passwordNumber: 'Password must contain a number',
           confirmRequired: 'Enter the new password again',
           passwordMismatch: 'The passwords do not match'
         },

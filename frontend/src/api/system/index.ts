@@ -292,24 +292,11 @@ export interface SystemAdminUser {
   updated_at: string
 }
 
-export interface PromoteUserRequest {
-  user_id: string
-}
-
-export interface RevokeSystemAdminRequest {
-  user_id: string
-}
-
-export interface ListSystemAdminsResponse {
-  total: number
-  admins: SystemAdminUser[]
-}
-
 /**
  * Promote a user to system administrator.
  *
  * Identify the target either by user_id (UUID, for API clients) or
- * email (the human-friendly path used by the SystemAdmin UI). Backend
+ * email (supported by the backend for API clients). Backend
  * accepts whichever is provided; user_id wins when both are set.
  *
  * Backend handler (system.go) returns the updated UserInfo directly as
@@ -344,24 +331,6 @@ export async function promoteUserToSystemAdmin(
 export async function revokeSystemAdmin(userId: string): Promise<SystemAdminUser> {
   const response = await post('/api/v1/system/admin/revoke', { user_id: userId })
   return response as unknown as SystemAdminUser
-}
-
-/**
- * List all system administrators (paginated).
- * Returns {total, admins[]} directly — no {data: ...} wrapping.
- */
-export async function listSystemAdmins(
-  params?: { offset?: number; limit?: number },
-): Promise<ListSystemAdminsResponse> {
-  // The shared `get` helper doesn't accept a config object, so we
-  // assemble the query string manually. Both params are optional;
-  // the server applies sane defaults (offset=0, limit=50, max=200).
-  const qs = new URLSearchParams()
-  if (params?.offset != null) qs.set('offset', String(params.offset))
-  if (params?.limit != null) qs.set('limit', String(params.limit))
-  const suffix = qs.toString() ? `?${qs.toString()}` : ''
-  const response = await get(`/api/v1/system/admin/list${suffix}`)
-  return response as unknown as ListSystemAdminsResponse
 }
 
 export interface SetUserStatusRequest {
