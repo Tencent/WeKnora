@@ -485,16 +485,32 @@ watch([gridWidth, viewMode], () => {
 })
 const gridColsStyle = computed(() => ({ '--ig-cols': String(renderCols.value || effCols.value) }))
 
+// Slider presentation runs small-on-left: its position mirrors the column
+// count inside [minCols, maxCols], so left = many small cards, right = few
+// large ones. The bound value is the clamped effCols — never the raw stored
+// count, which a narrower window can push past max (an out-of-range value
+// makes TDesign draw the filled track past its own rail). Marks dot every
+// available stop, and the :key remounts the slider when the range moves so
+// its internal geometry cannot go stale.
+const sliderCols = computed(() => minCols.value + maxCols.value - effCols.value)
+const colsMarks = computed(() => {
+  const marks: Record<number, string> = {}
+  for (let n = minCols.value; n <= maxCols.value; n += 1) marks[n] = ''
+  return marks
+})
+function onSliderCols(v: number | number[]) {
+  const pos = Array.isArray(v) ? v[0] : v
+  thumbCols.value = minCols.value + maxCols.value - pos
+  setThumbCols()
+}
+
 function measureGrid() {
   gridWidth.value = gridEl.value?.clientWidth ?? 0
 }
 
 function setThumbCols() {
-  if (colsApplyTimer) {
-    clearTimeout(colsApplyTimer)
-    colsApplyTimer = undefined
-  }
-  flushCols()
+  // The 80ms trailing mirror in the thumbCols watcher applies the layout;
+  // persisting here only records the user's choice.
   persistViewPrefs()
 }
 
@@ -932,13 +948,15 @@ watch(
                 <div class="ig-sort-group__label">{{ t(`${NS}.thumbSize`) }}</div>
                 <div class="ig-thumb-slider">
                   <t-slider
-                    v-model="thumbCols"
+                    :key="`${minCols}-${maxCols}`"
+                    :value="sliderCols"
                     :min="minCols"
                     :max="maxCols"
                     :step="1"
                     :label="false"
+                    :marks="colsMarks"
                     :disabled="minCols >= maxCols"
-                    @change="setThumbCols"
+                    @change="onSliderCols"
                   />
                 </div>
               </section>
