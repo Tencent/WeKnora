@@ -576,6 +576,38 @@ class ExcelParserTest(unittest.TestCase):
             ["Name: Alice,Name_2: Alias,C: Shenzhen"],
         )
 
+    def test_header_mode_avoids_collisions_with_generated_labels(self):
+        cases = (
+            (
+                ["Name", "Name", "Name_2"],
+                "Name: left,Name_2: middle,Name_2_2: right",
+            ),
+            (
+                ["Name", "Name_2", "Name"],
+                "Name: left,Name_2: middle,Name_3: right",
+            ),
+            (
+                ["B", None, "B_2"],
+                "B: left,B_2: middle,B_2_2: right",
+            ),
+        )
+        for headers, expected in cases:
+            with self.subTest(headers=headers):
+                content = self._workbook_bytes([headers, ["left", "middle", "right"]])
+
+                document = ExcelParser(
+                    file_name="headers.xlsx",
+                    file_type="xlsx",
+                    xlsx_first_row_as_header=True,
+                ).parse_into_text(content)
+
+                self.assertEqual(
+                    [chunk.content.strip() for chunk in document.chunks], [expected]
+                )
+                workbook = openpyxl.load_workbook(io.BytesIO(content))
+                self.assertEqual(next(workbook.active.values), tuple(headers))
+                workbook.close()
+
     def test_xlsx_explicit_false_override_keeps_first_row_as_data(self):
         content = self._workbook_bytes(
             [
