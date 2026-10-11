@@ -3828,6 +3828,11 @@ export default {
         sourceFilterSelectAll: 'すべて選択 / 選択解除（全ヒット対象）',
         sourceFilterOverflowRecent: 'ドキュメントが多いため、最新 {cap} 件のみ表示しています。キーワードで絞り込んでください',
         sourceFilterOverflowHits: '{total} 件がヒットしました。先頭 {cap} 件のみ表示中です。全選択前にキーワードを絞り込んでください',
+        viewOptions: '表示',
+        viewMode: 'レイアウト',
+        viewWaterfall: 'ウォーターフォール',
+        viewCard: 'カード',
+        thumbSize: 'サムネイルサイズ',
         // Display names for the builtin attributes the gallery itself
         // declares. Attributes contributed by other sources fall back to the
         // pipeline's own wording (see the imageAttr namespace).

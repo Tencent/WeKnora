@@ -5341,6 +5341,11 @@ export default {
         sourceFilterSelectAll: '전체 선택 / 해제 (모든 검색 결과 대상)',
         sourceFilterOverflowRecent: '문서가 많아 최근 {cap}개만 표시합니다. 키워드로 좁혀 주세요',
         sourceFilterOverflowHits: '{total}개 문서가 일치했습니다. 처음 {cap}개만 표시 중입니다. 전체 선택 전 키워드를 좁혀 주세요',
+        viewOptions: '보기',
+        viewMode: '레이아웃',
+        viewWaterfall: '워터폴',
+        viewCard: '카드',
+        thumbSize: '썸네일 크기',
         // Display names for the builtin attributes the gallery itself
         // declares. Attributes contributed by other sources fall back to the
         // pipeline's own wording (see the imageAttr namespace).
