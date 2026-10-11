@@ -18,7 +18,7 @@
           <!-- v-show (not v-if) so the conversation and scroll position stay
                alive while the panel is closed. -->
           <ChatView v-if="sessionId" v-show="visible" :session_id="sessionId" agentId="builtin-sidebar-assistant"
-            :kbIds="[props.kbId]" :embeddedMode="true" />
+            :kbIds="props.kbId ? [props.kbId] : []" :embeddedMode="true" />
           <div v-else-if="!sessionLoading" class="agent-sidebar-empty">
             {{ $t('knowledgeBase.agentSidebar.sessionError') }}
           </div>
@@ -36,7 +36,9 @@ import ChatView from '@/views/chat/index.vue';
 import { createSessions } from '@/api/chat';
 
 const props = defineProps<{
-  kbId: string;
+  // Absent on the KB list page: the sidebar then runs a global session not
+  // bound to any knowledge base (agent-sidebar-inbox design decision).
+  kbId?: string;
   modelValue: boolean;
 }>();
 
@@ -52,12 +54,12 @@ const sessionLoading = ref(false);
 watch(() => props.modelValue, (val) => { visible.value = val; });
 watch(visible, (val) => { emit('update:modelValue', val); });
 
-// One persistent session per KB: reopening the sidebar continues the same
-// conversation, and the menu store keeps it reachable like any chat.
-const sidebarSessionKey = (kbId: string) => `agentSidebarSession:${kbId}`;
+// One persistent session per binding: each KB keeps its own conversation,
+// and the KB list page (no kbId) shares one global session.
+const sidebarSessionKey = (kbId?: string) => kbId ? `agentSidebarSession:${kbId}` : 'agentSidebarSession:global';
 
 const ensureSession = async () => {
-  if (!props.kbId || sessionLoading.value) return;
+  if (sessionLoading.value) return;
   const stored = localStorage.getItem(sidebarSessionKey(props.kbId));
   if (stored) {
     sessionId.value = stored;
@@ -84,15 +86,15 @@ watch(() => props.kbId, () => {
   // KB switch: drop the previous session from the panel; the localStorage
   // binding survives so each KB keeps its own conversation.
   sessionId.value = '';
-  if (props.kbId && visible.value) ensureSession();
+  if (visible.value) ensureSession();
 }, { immediate: false });
 
 watch(visible, (val) => {
-  if (val && props.kbId && !sessionId.value) ensureSession();
+  if (val && !sessionId.value) ensureSession();
 });
 
 // Create the session eagerly so the panel is ready before the first open.
-if (props.kbId) ensureSession();
+ensureSession();
 </script>
 
 <style scoped>
@@ -105,12 +107,12 @@ if (props.kbId) ensureSession();
 }
 
 .agent-sidebar-dock.is-open {
-  width: 420px;
+  width: 260px;
 }
 
 .agent-sidebar-panel {
   /* Fixed inner width: the collapsing dock must not reflow the chat. */
-  width: 420px;
+  width: 260px;
   height: 100%;
   display: flex;
   flex-direction: column;
@@ -130,7 +132,7 @@ if (props.kbId) ensureSession();
 }
 
 .agent-sidebar-title {
-  font-size: 14px;
+  font-size: var(--app-text-md);
   font-weight: 600;
   color: var(--td-text-color-primary);
 }

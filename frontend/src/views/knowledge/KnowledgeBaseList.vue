@@ -716,6 +716,15 @@
     </Teleport>
 
     <ContextualGuide tour="kbList" :when="showKbListContextualGuide" />
+
+    <!-- Agent sidebar (agent-sidebar-inbox): the KB list page binds the
+         global session (no kbId) and docks the same 260px panel. -->
+    <button v-if="!showAgentSidebar" type="button" class="agent-sidebar-fab"
+      :aria-label="$t('knowledgeBase.agentSidebar.title')" :title="$t('knowledgeBase.agentSidebar.title')"
+      @click="showAgentSidebar = true">
+      <t-icon name="chat" size="16px" />
+    </button>
+    <AgentSidebarDrawer v-model="showAgentSidebar" />
   </div>
 </template>
 
@@ -735,6 +744,7 @@ import { useOrganizationStore } from '@/stores/organization'
 import { listOrganizationSharedKnowledgeBases, type SharedKnowledgeBase, type OrganizationSharedKnowledgeBaseItem, type SourceFromAgentInfo } from '@/api/organization'
 import { mergeAllScopeKnowledgeBases, type OwnedKnowledgeBase, type SharedKnowledgeBaseLike } from './kbListMerge'
 import KnowledgeBaseEditorModal from './KnowledgeBaseEditorModal.vue'
+import AgentSidebarDrawer from './components/AgentSidebarDrawer.vue'
 import KbWikiBadge from './components/KbWikiBadge.vue'
 import KbTypeAvatar from './components/KbTypeAvatar.vue'
 import ResourceListToolbar from '@/components/ResourceListToolbar.vue'
@@ -761,6 +771,9 @@ const route = useRoute()
 const uiStore = useUIStore()
 const authStore = useAuthStore()
 const { loaded: modelsReadyLoaded, isReadyForDocumentKb } = useTenantModelReadiness()
+
+// Agent sidebar (agent-sidebar-inbox): one global session on the list page.
+const showAgentSidebar = ref(false)
 const orgStore = useOrganizationStore()
 const chatResources = useChatResourcesStore()
 const { t } = useI18n()
@@ -1574,6 +1587,30 @@ watch(keyword, () => { collapsedKbSections.value = new Set() })
   min-height: 0;
   height: 100%;
   display: flex;
+  position: relative;
+}
+
+// Same right-edge invoke handle as the KB detail page (agent-sidebar-inbox).
+.agent-sidebar-fab {
+  position: absolute;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 26px;
+  height: 72px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: var(--app-radius-lg) 0 0 var(--app-radius-lg);
+  background: var(--td-brand-color);
+  color: var(--td-text-color-anti);
+  cursor: pointer;
+  z-index: 32;
+
+  &:hover {
+    background: var(--td-brand-color-hover);
+  }
 }
 
 .kb-list-content { .resource-list-content(); }

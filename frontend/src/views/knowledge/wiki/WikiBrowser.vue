@@ -5157,13 +5157,16 @@ onUnmounted(() => {
 }
 
 // ── Left Sidebar ──
-.wiki-sidebar {
+ .wiki-sidebar {
   width: 280px;
-  min-width: 240px;
+  /* Agent-sidebar-inbox width contract: the wiki reader keeps 650px, so
+     the page tree yields width first (down to 200px) before the body row
+     falls back to its horizontal scrollbar. */
+  min-width: 200px;
   border-right: 1px solid var(--td-component-stroke);
   display: flex;
   flex-direction: column;
-  flex-shrink: 0;
+  flex-shrink: 1;
   background: var(--td-bg-color-container);
 }
 
@@ -5702,11 +5705,13 @@ onUnmounted(() => {
 }
 
 // ── Right Content ──
-.wiki-content {
+ .wiki-content {
   flex: 1;
   display: flex;
   flex-direction: column;
-  min-width: 0;
+  /* Agent-sidebar-inbox width contract: the reader never drops below
+     650px; the tree shrinks first and the body row scrolls last. */
+  min-width: 650px;
   overflow: hidden;
 }
 

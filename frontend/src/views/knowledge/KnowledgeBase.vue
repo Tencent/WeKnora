@@ -968,6 +968,13 @@ const handleFolderRename = async ({ from, to }: { from: string; to: string }) =>
 
 const handleFolderTreeCollapsedChange = (value: boolean) => {
   folderTreeCollapsed.value = value;
+  // A manual expand while the auto-collapse holds means the user prefers
+  // the tree over the width contract: stop fighting them until the sidebar
+  // closes or the space recovers.
+  if (!value && treeAutoHidden.value) {
+    treeAutoHidden.value = false;
+    treeAutoOverride.value = true;
+  }
   writeStoredFlag(FOLDER_TREE_COLLAPSED_KEY, value);
 };
 
@@ -1139,6 +1146,49 @@ watch(activeKbTab, (tab) => {
 
 // ── Agent sidebar (agent-sidebar-inbox P1) ──────────────────────────────
 const showAgentSidebar = ref(false);
+
+// Width contract (agent-sidebar-inbox): the sidebar is a fixed 260px dock
+// and the main content never shrinks below 650px. When both cannot fit, the
+// folder tree yields first (auto-collapse); only when even the bare content
+// cannot fit does the body row scroll horizontally. A manual re-expand of
+// the tree wins over the auto-collapse for the rest of the open cycle.
+const AGENT_SIDEBAR_WIDTH = 260;
+const CONTENT_MIN_WIDTH = 650;
+const FOLDER_TREE_WIDTH_ALLOWANCE = 236;
+const kbBodyRowRef = ref<HTMLElement | null>(null);
+const treeAutoHidden = ref(false);
+const treeAutoOverride = ref(false);
+let treeStateBeforeAutoHide = false;
+
+const syncTreeForSidebarSpace = () => {
+  if (!showAgentSidebar.value) {
+    if (treeAutoHidden.value) {
+      treeAutoHidden.value = false;
+      folderTreeCollapsed.value = treeStateBeforeAutoHide;
+    }
+    treeAutoOverride.value = false;
+    return;
+  }
+  const rowWidth = kbBodyRowRef.value?.clientWidth ?? window.innerWidth;
+  const contentWidth = rowWidth - AGENT_SIDEBAR_WIDTH - 16;
+  const tight = contentWidth - FOLDER_TREE_WIDTH_ALLOWANCE < CONTENT_MIN_WIDTH;
+  if (tight && !folderTreeCollapsed.value && showFolderTree.value && !treeAutoOverride.value) {
+    treeStateBeforeAutoHide = folderTreeCollapsed.value;
+    treeAutoHidden.value = true;
+    folderTreeCollapsed.value = true;
+  } else if (!tight && treeAutoHidden.value) {
+    treeAutoHidden.value = false;
+    folderTreeCollapsed.value = treeStateBeforeAutoHide;
+  }
+};
+
+let sidebarSpaceObserver: ResizeObserver | null = null;
+
+watch(showAgentSidebar, () => {
+  treeAutoOverride.value = false;
+  syncTreeForSidebarSpace();
+});
+
 
 watch(() => kbId.value, (newKbId, oldKbId) => {
   if (!newKbId) {
@@ -1339,6 +1389,13 @@ onMounted(() => {
   window.addEventListener('openURLImportDialog', handleOpenURLImportDialog as EventListener);
   window.addEventListener('weknora:knowledge-file-drop', handleKnowledgeFileDrop as EventListener);
   window.addEventListener('weknora:open-knowledge', handleOpenKnowledgeEvent as EventListener);
+
+  // The body row resizes with the window and with the sidebar dock
+  // animation, so a ResizeObserver drives the tree auto-collapse.
+  if (kbBodyRowRef.value && typeof ResizeObserver !== 'undefined') {
+    sidebarSpaceObserver = new ResizeObserver(() => syncTreeForSidebarSpace());
+    sidebarSpaceObserver.observe(kbBodyRowRef.value);
+  }
 });
 
 onUnmounted(() => {
@@ -1346,6 +1403,8 @@ onUnmounted(() => {
   window.removeEventListener('openURLImportDialog', handleOpenURLImportDialog as EventListener);
   window.removeEventListener('weknora:knowledge-file-drop', handleKnowledgeFileDrop as EventListener);
   window.removeEventListener('weknora:open-knowledge', handleOpenKnowledgeEvent as EventListener);
+  sidebarSpaceObserver?.disconnect();
+  sidebarSpaceObserver = null;
   stopMovePoll();
   if (timeout !== null) {
     clearTimeout(timeout);
@@ -2269,7 +2328,15 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
 
 <template>
   <template v-if="!isFAQ">
-    <div class="knowledge-layout">
+     <div class="knowledge-layout">
+      <!-- Agent sidebar invoke handle: docked to the right edge of the KB
+           module, shown on every KB page; hidden while the sidebar is open
+           (the drawer's own close button takes over). -->
+      <button v-if="!showAgentSidebar" type="button" class="agent-sidebar-fab"
+        :aria-label="$t('knowledgeBase.agentSidebar.title')" :title="$t('knowledgeBase.agentSidebar.title')"
+        @click="showAgentSidebar = true">
+        <t-icon name="chat" size="16px" />
+      </button>
       <div class="document-header">
         <div class="document-header-title">
           <div class="document-title-row">
@@ -2315,13 +2382,6 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
             <div class="kb-title-actions">
               <KBInfoPopover v-if="kbInfo && !authStore.isLiteMode" :kb-info="kbInfo"
                 :supported-file-types="[...supportedFileTypes]" />
-              <t-tooltip :content="$t('knowledgeBase.agentSidebar.title')" placement="top">
-                <button type="button" class="kb-settings-button"
-                  :aria-label="$t('knowledgeBase.agentSidebar.title')" :disabled="!kbId"
-                  @click="showAgentSidebar = !showAgentSidebar">
-                  <t-icon name="chat" size="16px" />
-                </button>
-              </t-tooltip>
               <t-tooltip v-if="canManage" :content="$t('knowledgeBase.settings')" placement="top">
                 <button type="button" class="kb-settings-button" :aria-label="$t('knowledgeBase.settings')" :disabled="!kbId" @click="handleOpenKBSettings">
                   <t-icon name="setting" size="16px" />
@@ -2349,7 +2409,7 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
       <!-- Main body row: tab content and the persistent agent sidebar share
            one flex row (agent-sidebar-inbox); the sidebar collapses to zero
            width when closed so content regains the full line. -->
-      <div class="kb-body-row">
+      <div ref="kbBodyRowRef" class="kb-body-row">
       <!-- Wiki Browser / Graph (shown when wiki or graph tab is active) -->
       <div v-if="isWiki && (activeKbTab === 'wiki' || activeKbTab === 'graph')" class="wiki-main-area">
         <WikiBrowser v-if="kbId" :knowledge-base-id="kbId" :view="activeKbTab === 'graph' ? 'graph' : 'browser'"
@@ -2682,6 +2742,31 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
   min-width: 0;
   padding: 20px 28px 0;
   box-sizing: border-box;
+  position: relative;
+}
+
+// Right-edge invoke handle for the agent sidebar (agent-sidebar-inbox):
+// docked to the module's right border, vertically centered.
+.agent-sidebar-fab {
+  position: absolute;
+  right: -16px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 26px;
+  height: 72px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: var(--app-radius-lg) 0 0 var(--app-radius-lg);
+  background: var(--td-brand-color);
+  color: var(--td-text-color-anti);
+  cursor: pointer;
+  z-index: 32;
+
+  &:hover {
+    background: var(--td-brand-color-hover);
+  }
 }
 
 // View switch (文档 / Wiki / 图谱 / 画廊): a segmented control after the
@@ -2738,6 +2823,8 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
 }
 
 // Tab content and the persistent agent sidebar share one flex row.
+// The row scrolls horizontally once content min-widths no longer fit
+// (agent-sidebar-inbox width contract: scrollbar is the last resort).
 .kb-body-row {
   display: flex;
   gap: 16px;
@@ -2745,6 +2832,7 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
   min-height: 0;
   min-width: 0;
   align-items: stretch;
+  overflow-x: auto;
 }
 
 .kb-body-row > * {
@@ -2752,15 +2840,21 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
 }
 
 // Every direct child except the sidebar dock takes the remaining width; the
-// dock manages its own width collapse/expand inside the component.
+// dock manages its own width collapse/expand inside the component. Content
+// never shrinks below 650px — tighter windows collapse the folder tree
+// first, then fall back to the row's horizontal scrollbar.
 .kb-body-row > :not(.agent-sidebar-dock) {
   flex: 1 1 0;
+  min-width: 650px;
 }
 
 .wiki-main-area {
   flex: 1;
   min-height: 0;
-  overflow: hidden;
+  /* Width contract: tree+reader can exceed the allotted width on tight
+     windows; scroll instead of clipping the reader. */
+  overflow-x: auto;
+  overflow-y: hidden;
 }
 
 // Directory navigation and the document content share the available width.
@@ -2770,6 +2864,10 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
   min-height: 0;
   background: transparent;
   border: none;
+  /* Width contract: tree(220)+list(650) can exceed the allotted width when
+     the user re-expands the tree on a tight window; scroll, don't clip. */
+  overflow-x: auto;
+  overflow-y: hidden;
 }
 
 @media (max-width: 1000px) {
@@ -2789,9 +2887,11 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
 
 // 标签筛选浮层：点击工具栏入口展开，不占文档列表横向空间
 
-.tag-content {
+ .tag-content {
   flex: 1;
-  min-width: 0;
+  /* Width contract: the document list keeps 650px; a manually re-expanded
+     folder tree overflows into the row scrollbar instead of squeezing it. */
+  min-width: 650px;
   display: flex;
   flex-direction: column;
   min-height: 0;
