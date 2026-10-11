@@ -134,6 +134,9 @@ func (p *AttachmentProcessor) isTextFile(ext string) bool {
 // processTextFile reads plain-text content line by line, truncating at maxTextFileLines.
 func (p *AttachmentProcessor) processTextFile(ctx context.Context, data []byte, attachment *types.MessageAttachment) error {
 	scanner := bufio.NewScanner(bytes.NewReader(data))
+	// A line can be as long as the file (minified JSON, one-line logs); the default
+	// 64 KiB token limit would fail the whole attachment with "token too long".
+	scanner.Buffer(make([]byte, 0, bufio.MaxScanTokenSize), len(data)+1)
 	var lines []string
 	lineCount := 0
 
