@@ -7381,7 +7381,7 @@ export default {
     statusFailed: '실패',
     statusCancelled: '취소됨',
     statusDraft: '초안',
-    noDescription: '설명 없음',
+    noDescription: '아직 설명이 없습니다',
     emptyKnowledgeDragDrop: '지식이 비어 있음, 드래그 앤 드롭으로 업로드',
     pdfDocFormat: 'pdf, doc 형식 파일, 최대 {size}MB',
     textMarkdownFormat: 'text, markdown 형식 파일, 최대 {size}MB',

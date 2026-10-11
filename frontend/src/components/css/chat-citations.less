@@ -47,39 +47,23 @@
     text-overflow: ellipsis;
   }
 
-  :deep(.citation-kb) {
-    background: color-mix(in srgb, var(--td-text-color-primary) 4%, transparent);
-    color: color-mix(in srgb, var(--td-text-color-primary) 86%, var(--td-text-color-primary));
-    border: 0;
-    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--td-text-color-primary) 10%, transparent);
-    cursor: pointer;
-    white-space: nowrap;
-    position: relative;
-    transition: background var(--app-motion-fast) ease, box-shadow var(--app-motion-fast) ease, color var(--app-motion-fast) ease;
-  }
-
-  :deep(.citation-kb:hover) {
-    background: color-mix(in srgb, var(--td-text-color-primary) 7%, transparent);
-    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--td-text-color-primary) 18%, transparent);
-    color: var(--td-text-color-primary);
-  }
-
+  // 引用标签只用浅底色区分，不加描边，避免像按钮一样抢正文
+  :deep(.citation-kb),
   :deep(.citation-web) {
-    background: color-mix(in srgb, var(--td-brand-color) 6%, transparent);
-    color: color-mix(in srgb, var(--td-brand-color) 72%, var(--td-text-color-secondary));
+    background: color-mix(in srgb, var(--td-text-color-primary) 6%, transparent);
+    color: var(--td-text-color-secondary);
     border: 0;
-    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--td-brand-color) 17%, transparent);
     cursor: pointer;
     white-space: nowrap;
     position: relative;
     text-decoration: none;
-    transition: background var(--app-motion-fast) ease, box-shadow var(--app-motion-fast) ease, color var(--app-motion-fast) ease;
+    transition: background var(--app-motion-fast) ease, color var(--app-motion-fast) ease;
   }
 
+  :deep(.citation-kb:hover),
   :deep(.citation-web:hover) {
-    background: color-mix(in srgb, var(--td-brand-color) 10%, transparent);
-    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--td-brand-color) 28%, transparent);
-    color: color-mix(in srgb, var(--td-brand-color) 82%, var(--td-text-color-primary));
+    background: color-mix(in srgb, var(--td-text-color-primary) 10%, transparent);
+    color: var(--td-text-color-primary);
   }
 
   :deep(.citation-web:focus-visible),
@@ -115,73 +99,112 @@
 .chat-citation-float {
   position: absolute;
   z-index: 10000;
-  max-width: 320px;
-  padding: 10px 12px;
-  border-radius: var(--app-radius-md);
+  box-sizing: border-box;
+  width: 300px;
+  max-width: calc(100vw - 32px);
+  padding: 10px 12px 12px;
+  border: 0.5px solid var(--td-component-stroke);
+  border-radius: var(--app-radius-lg);
   background: var(--td-bg-color-container);
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.04), 0 6px 20px rgba(0, 0, 0, 0.08);
+  font-family: var(--app-font-family);
   font-size: var(--app-text-sm);
-  line-height: 1.5;
+  line-height: 1.6;
   color: var(--td-text-color-primary);
+  overflow-wrap: anywhere;
+  animation: chat-citation-float-in var(--app-motion-fast) ease-out both;
+
+  &__header {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    padding-bottom: 8px;
+    margin-bottom: 8px;
+    border-bottom: 1px solid var(--td-component-stroke);
+  }
+
+  &__icon {
+    flex-shrink: 0;
+    width: 14px;
+    height: 14px;
+    margin-top: 3px;
+    background-color: var(--td-text-color-placeholder);
+    mask-size: contain;
+    mask-repeat: no-repeat;
+    mask-position: center;
+    -webkit-mask-size: contain;
+    -webkit-mask-repeat: no-repeat;
+    -webkit-mask-position: center;
+
+    &--book {
+      mask-image: url('@/assets/img/ziliao.svg');
+      -webkit-mask-image: url('@/assets/img/ziliao.svg');
+    }
+
+    &--web {
+      mask-image: url('@/assets/img/websearch-globe.svg');
+      -webkit-mask-image: url('@/assets/img/websearch-globe.svg');
+    }
+  }
 
   &__title {
-    font-weight: 600;
-    color: var(--td-brand-color);
-    margin-bottom: 4px;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    overflow: hidden;
+    font-size: var(--app-text-md);
+    font-weight: 500;
+    line-height: 20px;
+    color: var(--td-text-color-primary);
   }
 
   &__link {
-    color: var(--td-brand-color);
-    word-break: break-all;
-  }
-
-  &__body {
-    max-height: 200px;
-    overflow-y: auto;
-    white-space: pre-wrap;
-  }
-
-  &__muted,
-  &__error {
+    display: block;
+    overflow: hidden;
     color: var(--td-text-color-secondary);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    text-decoration: none;
+
+    &:hover {
+      color: var(--td-brand-color);
+    }
+  }
+
+  // 摘录只展示前几行，完整内容点击引用后在侧栏查看
+  &__body {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 7;
+    line-clamp: 7;
+    overflow: hidden;
+    white-space: pre-line;
+    color: var(--td-text-color-secondary);
+  }
+
+  &__muted {
+    color: var(--td-text-color-placeholder);
   }
 
   &__error {
     color: var(--td-error-color);
   }
 
-  &--kb {
-    box-sizing: border-box;
-    width: 264px;
-    max-width: calc(100vw - 32px);
-    padding: 12px 14px;
-    border: 0.5px solid var(--td-component-stroke);
-    border-radius: var(--app-radius-lg);
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.04), 0 6px 20px rgba(0, 0, 0, 0.08);
-    font-family: var(--app-font-family);
-    font-size: var(--app-text-md);
-    line-height: 1.6;
-    overflow-wrap: anywhere;
-    transition: background-color var(--app-motion-fast) ease;
+  &--web &__header {
+    margin-bottom: 6px;
+  }
+}
 
-    &:hover {
-      background: var(--td-bg-color-container-hover);
-    }
-
-    .chat-citation-float__title {
-      margin-bottom: 6px;
-      font-weight: 500;
-      color: var(--td-text-color-primary);
-    }
-
-    .chat-citation-float__body {
-      color: var(--td-text-color-secondary);
-    }
+@keyframes chat-citation-float-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .chat-citation-float--kb {
-    transition: none;
+  .chat-citation-float {
+    animation: none;
   }
 }

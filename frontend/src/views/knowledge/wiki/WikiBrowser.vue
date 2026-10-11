@@ -6520,6 +6520,8 @@ span.graph-focus-name {
 }
 
 .graph-unlinked-toggle {
+  margin: 0;
+  padding: 0;
   border: 0;
   background: transparent;
   font: inherit;

@@ -7383,7 +7383,7 @@ export default {
     statusFailed: '失敗',
     statusCancelled: '已取消',
     statusDraft: '草稿',
-    noDescription: '無描述',
+    noDescription: '暫無描述',
     emptyKnowledgeDragDrop: '知識為空，拖放上傳',
     pdfDocFormat: 'pdf、doc 格式檔案，不超過{size}M',
     textMarkdownFormat: 'text、markdown格式檔案，不超過{size}M',
