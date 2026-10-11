@@ -1287,15 +1287,23 @@ const resizeSidebar = (delta: number, keyboard: boolean) => {
         transition: none;
     }
 
-    &--collapsed {
-        min-width: 60px;
-        width: 60px;
-        padding: 8px 3px 6px;
+    &.aside_box--collapsed {
+        min-width: 48px;
+        width: 48px;
+        padding: 8px 0;
         overflow: visible;
+
+        .menu_box {
+            align-items: center;
+        }
 
         .menu_item {
             justify-content: center;
-            padding: 7px 0;
+            width: 32px;
+            height: 32px;
+            padding: 0;
+            margin: 0 auto 6px;
+            border-radius: var(--app-radius-sm);
 
             .menu_item-box {
                 justify-content: center;
@@ -1304,7 +1312,12 @@ const resizeSidebar = (delta: number, keyboard: boolean) => {
 
             .menu_icon {
                 margin-right: 0;
+                justify-content: center;
             }
+        }
+
+        .menu_item_active {
+            border-radius: var(--app-radius-sm);
         }
 
         .menu_bottom {
