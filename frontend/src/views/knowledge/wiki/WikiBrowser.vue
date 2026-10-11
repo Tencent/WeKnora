@@ -9,8 +9,27 @@
           {{ $t('knowledgeEditor.wikiBrowser.graphNavigationHint') }}
         </div>
 
+        <div v-if="graphReady && graphFocusGroup" class="graph-focus-bar"
+          :class="{ 'focus-bar-shifted': graphDrawerVisible }">
+          <t-dropdown v-if="graphGroupMenu.length" :options="graphGroupMenu" trigger="click" placement="top"
+            attach="body" :max-height="320" @click="(item: any) => focusGraphGroup(String(item.value))">
+            <button type="button" class="graph-focus-name" :title="$t('knowledgeEditor.wikiBrowser.focusGroupSwitch')">
+              <span>{{ $t('knowledgeEditor.wikiBrowser.focusGroupViewing', { name: graphFocusGroup.name }) }}</span>
+              <t-icon name="chevron-up" />
+            </button>
+          </t-dropdown>
+          <span v-else class="graph-focus-name" :title="graphFocusGroup.name">
+            {{ $t('knowledgeEditor.wikiBrowser.focusGroupViewing', { name: graphFocusGroup.name }) }}
+          </span>
+          <button type="button" class="graph-focus-back" @click="exitGraphFocus">
+            <t-icon name="rollback" />
+            <span>{{ $t('knowledgeEditor.wikiBrowser.focusGroupBack') }}</span>
+            <kbd>Esc</kbd>
+          </button>
+        </div>
+
         <!-- Graph Search Overlay -->
-        <div v-if="graphReady" class="wiki-graph-search-container">
+        <div v-if="graphControlsVisible" class="wiki-graph-search-container">
           <div class="wiki-graph-search-row">
             <div class="wiki-graph-search">
               <t-select v-model="graphSearchValue" filterable :options="graphSearchEffectiveOptions"
@@ -51,7 +70,7 @@
         </div>
 
         <!-- Legend Overlay -->
-        <div v-if="graphReady" class="wiki-graph-legend" :class="{ 'legend-shifted': graphDrawerVisible }">
+        <div v-if="graphControlsVisible" class="wiki-graph-legend" :class="{ 'legend-shifted': graphDrawerVisible }">
           <div class="legend-items">
             <div class="legend-item clickable" :class="{ disabled: !graphFilterTypes.has('summary') }"
               @click="toggleGraphFilterType('summary')">
@@ -819,7 +838,7 @@ import {
   expandWikiDirectoryPath,
 } from './wikiDirectoryState'
 import { resolveWikiBacklinkTitle } from './wikiBacklinkTitles'
-import { buildGraphLayout, graphNodeRadius, stepGraphLayout, visibleGraphLabels, graphPointBounds, initialGraphViewport, graphClusterOutline, type GraphBounds, type GraphCluster } from './wikiGraphLayout'
+import { buildGraphLayout, graphNodeRadius, stepGraphLayout, visibleGraphLabels, graphPointBounds, initialGraphViewport, graphClusterOutline, graphLandmarkTitle, type GraphBounds, type GraphCluster } from './wikiGraphLayout'
 import { getKnowledgeDetails } from '@/api/knowledge-base'
 import { createSessions } from '@/api/chat'
 import ChatView from '@/views/chat/index.vue'
@@ -1006,6 +1025,9 @@ const drawerBodyRef = ref<HTMLElement | null>(null)
 const loading = ref(false)
 const graphLoading = ref(false)
 const graphReady = ref(false)
+// Search and type filters must survive an empty or failed render, otherwise
+// the user has no way to leave that state.
+const graphControlsVisible = computed(() => graphReady.value || (!graphLoading.value && graphData.value !== null))
 const showArrows = ref(true)
 const showUnlinkedNodes = ref(true)
 const graphUnlinkedSlugs = computed(() => {
@@ -1117,9 +1139,36 @@ function applyGraphFilters() {
   // node/edge membership when the allow-list changes.
 }
 
+// Group focus is entered from a landmark caption. Leaving it restores the
+// viewport the user had before the first focus, not a fit-to-view.
+const graphFocusGroup = ref<{ key: string; name: string } | null>(null)
+let graphFocusReturnViewport: { scale: number; x: number; y: number } | null = null
+// Every focusable group, so the focus bar can switch to groups off screen.
+const graphGroups = ref<{ key: string; name: string; count: number }[]>([])
+let graphGroupFocusers = new Map<string, () => void>()
+const graphGroupMenu = computed(() => graphGroups.value
+  .filter(group => group.key !== graphFocusGroup.value?.key)
+  .map(group => ({ value: group.key, content: `${group.name} · ${group.count}` })))
+
+function focusGraphGroup(key: string) {
+  graphGroupFocusers.get(key)?.()
+}
+
+function exitGraphFocus() {
+  if (!graphFocusGroup.value) return
+  graphFocusedSlugs.clear()
+  graphFocusGroup.value = null
+  const back = graphFocusReturnViewport
+  graphFocusReturnViewport = null
+  clearHighlight(graphNodeElsRef, graphEdgeElsRef)
+  if (back && graphPanZoomRef) graphPanZoomRef.flyTo(back.x, back.y, back.scale, 500)
+}
+
 // Fit graph to view
 function fitGraphToView() {
   graphFocusedSlugs.clear()
+  graphFocusGroup.value = null
+  graphFocusReturnViewport = null
   if (!graphReady.value || !graphPanZoomRef || !graphRef.value || graphNodes.length === 0) return
   clearHighlight(graphNodeElsRef, graphEdgeElsRef)
 
@@ -3286,6 +3335,9 @@ async function loadEgoGraph(slug: string, depth = GRAPH_EGO_DEFAULT_DEPTH) {
     renderGraph()
   } catch (e) {
     console.error(`Failed to load ego graph for ${slug}:`, e)
+    // Keep showing the previous graph; the caller still opens the page.
+    await nextTick()
+    renderGraph()
   } finally {
     graphLoading.value = false
   }
@@ -3731,6 +3783,7 @@ function toggleArrows() {
       e.line.removeAttribute('marker-start')
     }
   }
+  refreshGraphLabels()
 }
 
 function formatDate(dateStr: string) {
@@ -3768,6 +3821,7 @@ let graphHoverSuppressedUntil = 0
 let graphSvg: SVGSVGElement | null = null
 let graphAnimFrame = 0
 let refreshGraphLabels = () => {}
+let graphEdgeMarkersVisible = true
 let disposeGraphPanZoom = () => {}
 // Shared timer for debouncing node mouseleave -> mouseenter transitions.
 // Prevents flickering when the pointer quickly moves between adjacent nodes.
@@ -3791,6 +3845,9 @@ const nodeColorMap: Record<string, string> = {
   summary: '#0052d9', entity: '#2ba471', concept: '#e37318',
   synthesis: '#0594fa', comparison: '#d54941', index: '#8c8c8c',
 }
+const graphEdgeColor = '#aeb5c0'
+const graphEdgeWidth = '0.8'
+const graphEdgeOpacity = '0.42'
 
 // Incremental expansion preserves existing positions and the viewport.
 interface RenderGraphOpts {
@@ -3814,6 +3871,10 @@ function renderGraph(opts: RenderGraphOpts = {}) {
   graphContourEls = []
   graphSectionEls = []
   graphFocusedSlugs.clear()
+  graphFocusGroup.value = null
+  graphFocusReturnViewport = null
+  graphGroups.value = []
+  graphGroupFocusers = new Map()
   graphReady.value = false
   if (!data || !data.nodes?.length) {
     container.innerHTML = ''
@@ -3926,6 +3987,10 @@ function renderGraph(opts: RenderGraphOpts = {}) {
       if (cluster.slugs.length < 5) continue
       const focus = () => {
         if (!graphPanZoomRef) return
+        if (graphFocusGroup.value?.key === cluster.representative) { exitGraphFocus(); return }
+        if (!graphFocusGroup.value) graphFocusReturnViewport = { scale: graphPanZoomRef.getScale(), ...graphPanZoomRef.getTranslate() }
+        graphFocusGroup.value = { key: cluster.representative,
+          name: graphLandmarkTitle(pageBySlug.get(cluster.anchors[0]!)!.title) }
         graphFocusedSlugs = new Set(cluster.slugs)
         graphSelectedSlug.value = null
         graphHighlightSlug.value = null
@@ -3942,7 +4007,7 @@ function renderGraph(opts: RenderGraphOpts = {}) {
           height / 2 - (bounds.top + bounds.bottom) / 2 * scale, scale)
       }
       const addCaption = (anchorSlug: string, rank: number) => {
-        const label = pageBySlug.get(anchorSlug)!.title
+        const label = graphLandmarkTitle(pageBySlug.get(anchorSlug)!.title)
         const caption = document.createElementNS('http://www.w3.org/2000/svg', 'g')
         caption.classList.add('graph-cluster-caption')
         caption.setAttribute('data-representative', anchorSlug)
@@ -3955,10 +4020,19 @@ function renderGraph(opts: RenderGraphOpts = {}) {
         title.setAttribute('font-size', '13')
         title.setAttribute('font-weight', '600')
         title.setAttribute('fill', 'var(--td-text-color-primary)')
-        caption.append(title)
+        // Pill shown while another group is focused, so names read as targets.
+        const pill = document.createElementNS('http://www.w3.org/2000/svg', 'rect')
+        pill.classList.add('graph-caption-pill')
+        caption.append(pill, title)
         rootG.appendChild(caption)
+        const textWidth = title.getComputedTextLength() || title.textContent.length * 13
+        pill.setAttribute('x', String(-textWidth / 2 - 12))
+        pill.setAttribute('y', '-17')
+        pill.setAttribute('width', String(textWidth + 24))
+        pill.setAttribute('height', '24')
+        pill.setAttribute('rx', '12')
         graphClusterEls.push({ group: caption, cluster, anchorSlug,
-          labelWidth: title.textContent.length * 13,
+          labelWidth: textWidth + 24,
           priority: 100000 + cluster.slugs.length - rank })
         caption.addEventListener('click', e => { e.stopPropagation(); focus() })
         caption.addEventListener('keydown', e => {
@@ -3966,6 +4040,9 @@ function renderGraph(opts: RenderGraphOpts = {}) {
         })
       }
       cluster.anchors.forEach((slug, rank) => addCaption(slug, rank))
+      graphGroupFocusers.set(cluster.representative, focus)
+      graphGroups.value.push({ key: cluster.representative, count: cluster.slugs.length,
+        name: graphLandmarkTitle(pageBySlug.get(cluster.anchors[0]!)!.title) })
     }
   }
   // Section captions describe why these pages have no visible neighbors.
@@ -4013,7 +4090,7 @@ function renderGraph(opts: RenderGraphOpts = {}) {
   markerEnd.setAttribute('orient', 'auto')
   const arrowPath = document.createElementNS('http://www.w3.org/2000/svg', 'path')
   arrowPath.setAttribute('d', 'M0,0 L10,3 L0,6 L2,3 Z')
-  arrowPath.setAttribute('fill', '#c0c4cc')
+  arrowPath.setAttribute('fill', graphEdgeColor)
   markerEnd.appendChild(arrowPath)
   defs.appendChild(markerEnd)
 
@@ -4028,7 +4105,7 @@ function renderGraph(opts: RenderGraphOpts = {}) {
   markerStart.setAttribute('orient', 'auto')
   const arrowPathStart = document.createElementNS('http://www.w3.org/2000/svg', 'path')
   arrowPathStart.setAttribute('d', 'M10,0 L0,3 L10,6 L8,3 Z')
-  arrowPathStart.setAttribute('fill', '#c0c4cc')
+  arrowPathStart.setAttribute('fill', graphEdgeColor)
   markerStart.appendChild(arrowPathStart)
   defs.appendChild(markerStart)
 
@@ -4080,12 +4157,13 @@ function renderGraph(opts: RenderGraphOpts = {}) {
     const bidir = edgePairSet.has(`${edge.target}→${edge.source}`)
 
     const line = document.createElementNS('http://www.w3.org/2000/svg', 'line')
-    line.setAttribute('stroke', '#c0c4cc')
-    line.setAttribute('stroke-width', '1.2')
-    line.setAttribute('stroke-opacity', '0.24')
-    line.setAttribute('marker-end', 'url(#arrow-end)')
+    line.setAttribute('stroke', graphEdgeColor)
+    line.setAttribute('stroke-width', graphEdgeWidth)
+    line.setAttribute('stroke-opacity', graphEdgeOpacity)
+    line.setAttribute('stroke-linecap', 'round')
+    if (showArrows.value) line.setAttribute('marker-end', 'url(#arrow-end)')
     line.style.transition = 'stroke 0.2s, stroke-width 0.2s, stroke-opacity 0.2s'
-    if (bidir) {
+    if (bidir && showArrows.value) {
       line.setAttribute('marker-start', 'url(#arrow-start)')
     }
     edgeG.appendChild(line)
@@ -4119,7 +4197,9 @@ function renderGraph(opts: RenderGraphOpts = {}) {
     const visibleNeighbors = adjacency.get(n.slug)?.size ?? 0
     const hiddenNeighbors = Math.max(0, n.linkCount - visibleNeighbors)
     const isEgoCenter = graph.meta?.mode === 'ego' && graph.meta.center === n.slug
-    const showExpansionRing = hiddenNeighbors > 0 && !isEgoCenter
+    // In the overview nearly every page has neighbors beyond the top-N
+    // slice, so the ring would only add noise; it guides ego exploration.
+    const showExpansionRing = graph.meta?.mode === 'ego' && hiddenNeighbors > 0 && !isEgoCenter
     const expansionRing = document.createElementNS('http://www.w3.org/2000/svg', 'circle')
     expansionRing.setAttribute('r', String(r + 3))
     expansionRing.setAttribute('fill', 'none')
@@ -4162,7 +4242,8 @@ function renderGraph(opts: RenderGraphOpts = {}) {
     circle.setAttribute('r', String(r))
     circle.setAttribute('fill', nodeColorMap[n.type] || '#8c8c8c')
     circle.setAttribute('stroke', '#fff')
-    circle.setAttribute('stroke-width', '2')
+    circle.setAttribute('stroke-width', '1.5')
+    circle.classList.add('node-circle')
     // circle.setAttribute('filter', 'url(#node-shadow)')
     circle.style.transition = 'r 0.2s, stroke-width 0.2s, opacity 0.2s'
     g.appendChild(circle)
@@ -4427,9 +4508,11 @@ function setEdgePositions(line: SVGLineElement, s: GNode, t: GNode, nodeRadius: 
   const ux = dx / dist
   const uy = dy / dist
 
-  // Shorten each end by the node radius + arrow margin
-  const rS = nodeRadius(s) + 4
-  const rT = nodeRadius(t) + 4
+  // Shorten each end by the node radius, plus a margin only while arrowheads
+  // are drawn; otherwise the gaps form a ring of line ends around every node.
+  const margin = graphEdgeMarkersVisible ? 4 : 0
+  const rS = nodeRadius(s) + margin
+  const rT = nodeRadius(t) + margin
 
   line.setAttribute('x1', String(s.x + ux * rS))
   line.setAttribute('y1', String(s.y + uy * rS))
@@ -4473,8 +4556,8 @@ function setupDrag(
     const p = getPoint(e)
     startX = p.x - node.x
     startY = p.y - node.y
-    g.querySelector('circle')?.setAttribute('stroke', nodeColorMap[node.type] || '#8c8c8c')
-    g.querySelector('circle')?.setAttribute('stroke-width', '3')
+    g.querySelector('.node-circle')?.setAttribute('stroke', nodeColorMap[node.type] || '#8c8c8c')
+    g.querySelector('.node-circle')?.setAttribute('stroke-width', '2.5')
     window.addEventListener('mousemove', onMove)
     window.addEventListener('mouseup', onEnd)
   }
@@ -4501,8 +4584,8 @@ function setupDrag(
   function onEnd() {
     dragging = false
     // Keep pinned after drag so the node stays where user placed it
-    g.querySelector('circle')?.setAttribute('stroke', '#fff')
-    g.querySelector('circle')?.setAttribute('stroke-width', '2')
+    g.querySelector('.node-circle')?.setAttribute('stroke', '#fff')
+    g.querySelector('.node-circle')?.setAttribute('stroke-width', '1.5')
     window.removeEventListener('mousemove', onMove)
     window.removeEventListener('mouseup', onEnd)
   }
@@ -4527,6 +4610,17 @@ function setupPanZoom(svg: SVGSVGElement, rootG: SVGGElement, viewport?: { scale
   }
 
   function updateLabelsVisibility() {
+    // Arrowheads shrink to specks around every node when zoomed out.
+    rootG.classList.toggle('hide-edge-markers', scale < 0.8)
+    const markersVisible = showArrows.value && scale >= 0.8
+    if (markersVisible !== graphEdgeMarkersVisible) {
+      graphEdgeMarkersVisible = markersVisible
+      const bySlug = new Map(graphNodes.map(n => [n.slug, n]))
+      for (const e of graphEdgeElsRef) {
+        const s = bySlug.get(e.source), t = bySlug.get(e.target)
+        if (s && t) setEdgePositions(e.line, s, t, n => graphNodeRadius(n.linkCount))
+      }
+    }
     // Hide labels when zoomed out too much or hide less important labels
     // We only want to show labels for important nodes (high link count) when zoomed out
     for (const { text, top } of graphSectionEls) {
@@ -4545,11 +4639,15 @@ function setupPanZoom(svg: SVGSVGElement, rootG: SVGGElement, viewport?: { scale
         contour.scale = scale
         contour.positions = members.flatMap(n => [n.x, n.y])
       }
-      path.style.opacity = graphFocusedSlugs.size && !graphFocusedSlugs.has(cluster.representative) ? '0.25' : '1'
+      path.classList.toggle('is-dimmed', graphFocusedSlugs.size > 0 && !graphFocusedSlugs.has(cluster.representative))
     }
-    const groupLabels = graphClusterEls.flatMap(({ group, anchorSlug, labelWidth, priority }) => {
+    const groupLabels = graphClusterEls.flatMap(({ group, cluster, anchorSlug, labelWidth, priority }) => {
       const anchor = positionsBySlug.get(anchorSlug)
-      const shown = !!anchor && scale < 1.2
+      // While a group is focused, every other group keeps exactly its name,
+      // at any zoom, as the way to switch to it.
+      const outside = graphFocusedSlugs.size > 0 && !graphFocusedSlugs.has(cluster.representative)
+      group.classList.toggle('is-outside-focus', outside)
+      const shown = !!anchor && (outside ? anchorSlug === cluster.anchors[0] : scale < 1.2)
       group.style.display = shown ? '' : 'none'
       if (!shown || !anchor) return []
       const labelX = anchor.x
@@ -4557,7 +4655,7 @@ function setupPanZoom(svg: SVGSVGElement, rootG: SVGGElement, viewport?: { scale
       const x = labelX * scale, y = labelY * scale
       group.setAttribute('transform', `translate(${labelX},${labelY}) scale(${1 / scale})`)
       return [{ slug: `anchor:${anchorSlug}`, priority,
-        required: anchor.slug === graphSelectedSlug.value || anchor.slug === graphHighlightSlug.value,
+        required: outside || anchor.slug === graphSelectedSlug.value || anchor.slug === graphHighlightSlug.value,
         left: x - labelWidth / 2 - 8, right: x + labelWidth / 2 + 8, top: y - 16, bottom: y + 5 }]
     })
     const captionedSlugs = new Set(groupLabels.map(label => label.slug.slice('anchor:'.length)))
@@ -4582,10 +4680,9 @@ function setupPanZoom(svg: SVGSVGElement, rootG: SVGGElement, viewport?: { scale
         top: baseline - 15, bottom: baseline + 4 }]
     })
     const visible = visibleGraphLabels([...groupLabels, ...candidates])
-    for (const { group, cluster, anchorSlug } of graphClusterEls) {
+    for (const { group, anchorSlug } of graphClusterEls) {
       const shown = visible.has(`anchor:${anchorSlug}`)
       group.style.visibility = shown ? 'visible' : 'hidden'
-      group.style.opacity = graphFocusedSlugs.size && !graphFocusedSlugs.has(cluster.representative) ? '0.25' : '1'
       group.setAttribute('tabindex', shown ? '0' : '-1')
     }
     for (const { text, node } of graphNodeElsRef) text.style.opacity = visible.has(node.slug) ? '1' : '0'
@@ -4669,19 +4766,29 @@ function setupPanZoom(svg: SVGSVGElement, rootG: SVGGElement, viewport?: { scale
       const dy = e.clientY - dragStartY
       if (Math.abs(dx) < 5 && Math.abs(dy) < 5) {
         if (!(e.target as Element).closest('[data-graph-node], .graph-cluster-caption')) {
-          graphSelectedSlug.value = null
-          graphDrawerVisible.value = false
-          clearHighlight(graphNodeElsRef, graphEdgeElsRef)
+          // Clear the innermost state first: a selection, then the group focus.
+          if (graphSelectedSlug.value || graphDrawerVisible.value) {
+            graphSelectedSlug.value = null
+            graphDrawerVisible.value = false
+            clearHighlight(graphNodeElsRef, graphEdgeElsRef)
+          } else exitGraphFocus()
         }
       }
     }
   }
+  const onKeyDown = (e: KeyboardEvent) => {
+    if (e.key !== 'Escape' || !graphFocusGroup.value || graphDrawerVisible.value) return
+    if (e.target instanceof Element && e.target.closest('input, textarea, [contenteditable="true"]')) return
+    exitGraphFocus()
+  }
   window.addEventListener('mousemove', onMouseMove)
   window.addEventListener('mouseup', onMouseUp)
+  window.addEventListener('keydown', onKeyDown)
   disposeGraphPanZoom = () => {
     cancelAnimationFrame(animId)
     window.removeEventListener('mousemove', onMouseMove)
     window.removeEventListener('mouseup', onMouseUp)
+    window.removeEventListener('keydown', onKeyDown)
   }
   applyTransform()
 }
@@ -4705,19 +4812,19 @@ function applyHighlight(
     const r = getRadius(node)
     if (node.slug === slug) {
       circle.setAttribute('r', String(r + 3))
-      circle.setAttribute('stroke-width', '3')
+      circle.setAttribute('stroke-width', '2.5')
       g.style.opacity = '1'
     } else if (hoverSlug && node.slug === hoverSlug) {
       circle.setAttribute('r', String(r + 3))
-      circle.setAttribute('stroke-width', '3')
+      circle.setAttribute('stroke-width', '2.5')
       g.style.opacity = '1'
     } else if (neighbors.has(node.slug) || (hoverSlug && hoverNeighbors.has(node.slug))) {
       circle.setAttribute('r', String(r))
-      circle.setAttribute('stroke-width', '2')
+      circle.setAttribute('stroke-width', '1.5')
       g.style.opacity = '1'
     } else {
       circle.setAttribute('r', String(r))
-      circle.setAttribute('stroke-width', '2')
+      circle.setAttribute('stroke-width', '1.5')
       g.style.opacity = '0.2'
     }
 
@@ -4729,8 +4836,8 @@ function applyHighlight(
   }
   for (const e of edgeEls) {
     if (e.source === slug || e.target === slug || (hoverSlug && (e.source === hoverSlug || e.target === hoverSlug))) {
-      e.line.setAttribute('stroke-opacity', '0.9')
-      e.line.setAttribute('stroke-width', '2')
+      e.line.setAttribute('stroke-opacity', '0.85')
+      e.line.setAttribute('stroke-width', '1.5')
 
       // Determine which node is driving the highlight color
       const focusSlug = (hoverSlug && (e.source === hoverSlug || e.target === hoverSlug)) ? hoverSlug : slug
@@ -4739,16 +4846,25 @@ function applyHighlight(
       ] || '#0052d9'
 
       e.line.setAttribute('stroke', hlColor)
-      e.line.setAttribute('marker-end', 'url(#arrow-end-hl)')
-      if (e.bidir) e.line.setAttribute('marker-start', 'url(#arrow-start-hl)')
+      setEdgeMarkers(e, '-hl')
     } else {
+      e.line.setAttribute('stroke', graphEdgeColor)
       e.line.setAttribute('stroke-opacity', '0.08')
-      e.line.setAttribute('stroke-width', '1')
-      e.line.setAttribute('marker-end', 'url(#arrow-end)')
-      if (e.bidir) e.line.setAttribute('marker-start', 'url(#arrow-start)')
-      else e.line.removeAttribute('marker-start')
+      e.line.setAttribute('stroke-width', graphEdgeWidth)
+      setEdgeMarkers(e)
     }
   }
+}
+
+function setEdgeMarkers(e: { line: SVGLineElement; bidir: boolean }, suffix = '') {
+  if (!showArrows.value) {
+    e.line.removeAttribute('marker-end')
+    e.line.removeAttribute('marker-start')
+    return
+  }
+  e.line.setAttribute('marker-end', `url(#arrow-end${suffix})`)
+  if (e.bidir) e.line.setAttribute('marker-start', `url(#arrow-start${suffix})`)
+  else e.line.removeAttribute('marker-start')
 }
 
 function clearHighlight(
@@ -4765,18 +4881,16 @@ function clearHighlight(
 
   for (const { g, circle, activeRing, node } of nodeEls) {
     circle.setAttribute('r', String(getRadius(node)))
-    circle.setAttribute('stroke-width', '2')
+    circle.setAttribute('stroke-width', '1.5')
     g.style.opacity = graphFocusedSlugs.size && !graphFocusedSlugs.has(node.slug) ? '0.12' : '1'
     activeRing.style.opacity = '0'
   }
   for (const e of edgeEls) {
-    e.line.setAttribute('stroke', '#c0c4cc')
-    e.line.setAttribute('stroke-width', '1.2')
+    e.line.setAttribute('stroke', graphEdgeColor)
+    e.line.setAttribute('stroke-width', graphEdgeWidth)
     const outsideFocus = graphFocusedSlugs.size && (!graphFocusedSlugs.has(e.source) || !graphFocusedSlugs.has(e.target))
-    e.line.setAttribute('stroke-opacity', outsideFocus ? '0.035' : '0.24')
-    e.line.setAttribute('marker-end', 'url(#arrow-end)')
-    if (e.bidir) e.line.setAttribute('marker-start', 'url(#arrow-start)')
-    else e.line.removeAttribute('marker-start')
+    e.line.setAttribute('stroke-opacity', outsideFocus ? '0.05' : graphEdgeOpacity)
+    setEdgeMarkers(e)
   }
 }
 
@@ -6225,19 +6339,132 @@ onUnmounted(() => {
   z-index: 1;
 }
 
+.graph-focus-bar {
+  position: absolute;
+  left: 50%;
+  bottom: 16px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: calc(100% - 360px);
+  padding: 6px 6px 6px 14px;
+  background: var(--td-bg-color-container);
+  border: 1px solid var(--td-component-stroke);
+  border-radius: 999px;
+  box-shadow: var(--td-shadow-1);
+  font-size: 13px;
+  color: var(--td-text-color-primary);
+  z-index: 2;
+  transition: left 0.2s ease;
+
+  &.focus-bar-shifted {
+    left: calc(50% - 240px);
+  }
+}
+
+.graph-focus-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 2px 6px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+
+  span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  &:hover {
+    background: var(--td-bg-color-container-hover);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--td-brand-color);
+    outline-offset: 1px;
+  }
+}
+
+span.graph-focus-name {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: default;
+
+  &:hover {
+    background: transparent;
+  }
+}
+
+.graph-focus-back {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--td-brand-color-light);
+  color: var(--td-brand-color);
+  font: inherit;
+  cursor: pointer;
+
+  &:hover {
+    background: var(--td-brand-color-focus);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--td-brand-color);
+    outline-offset: 1px;
+  }
+
+  kbd {
+    padding: 0 4px;
+    border: 1px solid currentColor;
+    border-radius: 3px;
+    font: inherit;
+    font-size: 11px;
+    line-height: 16px;
+    opacity: 0.7;
+  }
+}
+
 .wiki-graph-canvas :deep(.graph-cluster-outline) {
-  fill-opacity: 0.28;
-  stroke-opacity: 0.65;
+  fill-opacity: 0.45;
+  stroke-opacity: 0;
   transition: fill-opacity 160ms ease, stroke-opacity 160ms ease, opacity 160ms ease;
 
   &.is-hovered {
-    fill-opacity: 0.6;
-    stroke-opacity: 1;
+    fill-opacity: 0.8;
+    stroke-opacity: 0.8;
+  }
+
+  &.is-dimmed {
+    opacity: 0.3;
+  }
+
+  // Previews the group a switch target leads to.
+  &.is-dimmed.is-hovered {
+    opacity: 1;
   }
 
   @media (prefers-reduced-motion: reduce) {
     transition: none;
   }
+}
+
+.wiki-graph-canvas :deep(.hide-edge-markers line) {
+  marker-start: none;
+  marker-end: none;
 }
 
 .wiki-graph-canvas :deep(.graph-cluster-caption) {
@@ -6251,10 +6478,44 @@ onUnmounted(() => {
     stroke-linejoin: round;
   }
 
-  &:hover text:first-child,
-  &:focus-visible text:first-child {
+  .graph-caption-pill {
+    display: none;
+  }
+
+  &:hover text,
+  &:focus-visible text {
     fill: var(--td-brand-color);
     text-decoration: underline;
+  }
+
+  &.is-outside-focus {
+    cursor: pointer;
+
+    .graph-caption-pill {
+      display: inline;
+      fill: var(--td-bg-color-container);
+      stroke: var(--td-component-border);
+      stroke-width: 1px;
+      transition: stroke 120ms ease;
+    }
+
+    text {
+      fill: var(--td-text-color-secondary);
+      font-weight: 500;
+      stroke: none;
+    }
+
+    &:hover,
+    &:focus-visible {
+      .graph-caption-pill {
+        stroke: var(--td-brand-color);
+      }
+
+      text {
+        fill: var(--td-brand-color);
+        text-decoration: none;
+      }
+    }
   }
 }
 

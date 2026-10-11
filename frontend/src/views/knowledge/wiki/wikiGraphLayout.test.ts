@@ -223,7 +223,7 @@ test('landmark budgets scale from small to large components with a maximum of fi
   }
 })
 
-test('a connected subject remains a landmark even when a configuration page adds more new neighbors', () => {
+test('the main subject leads, and a separate configuration theme is named instead of a second name for the same theme', () => {
   const names = ['platform', 'enterprise', 'configuration',
     ...Array.from({ length: 12 }, (_, i) => `shared${i}`),
     ...Array.from({ length: 10 }, (_, i) => `platformDetail${i}`),
@@ -241,8 +241,68 @@ test('a connected subject remains a landmark even when a configuration page adds
   const nodes = names.map(slug => ({ slug, link_count: adjacency.get(slug)!.size,
     page_type: ['platform', 'enterprise'].includes(slug) ? 'entity' : 'concept' }))
   const layout = buildGraphLayout(nodes, edges, 1200, 800)
-  assert.deepEqual(layout.clusters[0]!.anchors, ['platform', 'enterprise'])
+  // enterprise shares twelve neighbors with platform: one theme, one name.
+  assert.deepEqual(layout.clusters[0]!.anchors, ['platform', 'configuration'])
   assert.deepEqual(buildGraphLayout([...nodes].reverse(), [...edges].reverse(), 1200, 800).clusters[0]!.anchors, layout.clusters[0]!.anchors)
+})
+
+test('a subject linked to most pages of every theme names the component alone', () => {
+  const slugs = ['hub', ...Array.from({ length: 3 }, (_, g) => Array.from({ length: 10 }, (_, i) => `t${g}-${i}`)).flat()]
+  const adjacency = new Map(slugs.map(slug => [slug, new Set<string>()]))
+  const link = (a: string, b: string) => { adjacency.get(a)!.add(b); adjacency.get(b)!.add(a) }
+  for (let g = 0; g < 3; g++) {
+    for (let i = 0; i < 10; i++) for (let j = i + 1; j < 10; j++) link(`t${g}-${i}`, `t${g}-${j}`)
+    // One document: its subject links to nearly every page in each section.
+    for (let i = 0; i < 8; i++) link('hub', `t${g}-${i}`)
+  }
+  assert.deepEqual(selectGraphAnchors(slugs, adjacency), ['hub'])
+})
+
+test('a theme is not named again by a page whose title repeats an existing label', () => {
+  const sizes = [30, 20]
+  const slugs = sizes.flatMap((size, g) => Array.from({ length: size }, (_, i) => `r${g}-${i}`))
+  const adjacency = new Map(slugs.map(slug => [slug, new Set<string>()]))
+  const link = (a: string, b: string) => { adjacency.get(a)!.add(b); adjacency.get(b)!.add(a) }
+  sizes.forEach((size, g) => {
+    for (let i = 0; i < size; i++) for (let j = i + 1; j < size; j++) link(`r${g}-${i}`, `r${g}-${j}`)
+  })
+  link('r0-0', 'r1-0')
+  const pages = new Map([
+    ['r0-0', { page_type: 'concept', title: '第三代社保卡' }],
+    ['r1-0', { page_type: 'entity', title: '北京市第三代社保卡' }],
+    ['r1-1', { page_type: 'concept', title: '线上申领' }],
+  ])
+  assert.deepEqual(selectGraphAnchors(slugs, adjacency, pages), ['r0-0', 'r1-1'])
+})
+
+test('a summary names the document it dominates, but a nearly as central entity still wins', () => {
+  const pages = new Map([
+    ['summary', { page_type: 'summary', title: '初中63组语文古诗词高频考点(2).pdf - Summary' }],
+    ['subject', { page_type: 'entity', title: '范仲淹' }],
+  ])
+  const anchorsWhenSubjectLinks = (details: number) => {
+    const slugs = ['summary', 'subject', ...Array.from({ length: 10 }, (_, i) => `detail${i}`)]
+    const adjacency = new Map(slugs.map(slug => [slug, new Set<string>()]))
+    const link = (a: string, b: string) => { adjacency.get(a)!.add(b); adjacency.get(b)!.add(a) }
+    for (const slug of slugs.slice(1)) link('summary', slug)
+    for (let i = 0; i < details; i++) link('subject', `detail${i}`)
+    return selectGraphAnchors(slugs, adjacency, pages)
+  }
+  assert.deepEqual(anchorsWhenSubjectLinks(5), ['summary'])
+  assert.deepEqual(anchorsWhenSubjectLinks(9), ['subject'])
+})
+
+test('an identifier-like file name does not name a theme over a readable page', () => {
+  const slugs = ['summary', 'subject', ...Array.from({ length: 10 }, (_, i) => `detail${i}`)]
+  const adjacency = new Map(slugs.map(slug => [slug, new Set<string>()]))
+  const link = (a: string, b: string) => { adjacency.get(a)!.add(b); adjacency.get(b)!.add(a) }
+  for (const slug of slugs.slice(1)) link('summary', slug)
+  for (let i = 0; i < 5; i++) link('subject', `detail${i}`)
+  const pages = new Map([
+    ['summary', { page_type: 'summary', title: '2412.18925v1.pdf - Summary' }],
+    ['subject', { page_type: 'entity', title: '香港中文大学（深圳）' }],
+  ])
+  assert.deepEqual(selectGraphAnchors(slugs, adjacency, pages), ['subject'])
 })
 
 test('entity preference breaks a close ranking without displacing a substantially stronger concept', () => {

@@ -2,7 +2,7 @@
 // exercised without a browser. Coordinates are world units, not screen pixels.
 export interface GraphPoint { x: number; y: number }
 export interface GraphLink { source: string; target: string }
-export interface LayoutInput { slug: string; link_count: number; page_type?: string }
+export interface LayoutInput { slug: string; link_count: number; page_type?: string; title?: string }
 export interface GraphBounds { left: number; top: number; right: number; bottom: number }
 export interface LayoutPlacement extends GraphPoint {
   center: GraphPoint
@@ -20,61 +20,189 @@ export interface GraphSection extends GraphBounds {
 }
 
 export function graphNodeRadius(linkCount: number): number {
-  return Math.max(8, Math.min(24, 8 + Math.log(Math.max(0, linkCount) + 1) * 4))
+  // Square-root scaling keeps leaves small so hubs read as landmarks.
+  return Math.max(5, Math.min(20, 4 + Math.sqrt(Math.max(0, linkCount)) * 1.8))
 }
 
-/** Pick structural landmarks from different neighborhoods, not semantic titles.
- * A single hub or clique may need fewer labels than the size budget allows.
+/** Deterministic multi-level Louvain over an undirected, unweighted graph.
+ * Returns a community index per node; callers must pass nodes in a stable
+ * order because ties are resolved by index.
+ */
+export function graphCommunities(neighbors: readonly (readonly number[])[]): number[] {
+  const n = neighbors.length
+  let membership = Array.from({ length: n }, (_, i) => i)
+  // Level graph: weighted adjacency between super-nodes plus the weight of
+  // edges already collapsed inside each super-node.
+  let weights: Map<number, number>[] = neighbors.map(list => {
+    const row = new Map<number, number>()
+    for (const j of list) row.set(j, (row.get(j) ?? 0) + 1)
+    return row
+  })
+  let inner = new Array<number>(n).fill(0)
+  for (;;) {
+    const size = weights.length
+    const degree = weights.map((row, i) => [...row.values()].reduce((sum, w) => sum + w, 0) + 2 * inner[i]!)
+    const total = degree.reduce((sum, d) => sum + d, 0)
+    if (!total) break
+    const community = Array.from({ length: size }, (_, i) => i)
+    const tot = [...degree]
+    let movedAny = false
+    for (let pass = 0; pass < 32; pass++) {
+      let moved = false
+      for (let i = 0; i < size; i++) {
+        const own = community[i]!
+        const links = new Map<number, number>()
+        for (const [j, w] of weights[i]!) links.set(community[j]!, (links.get(community[j]!) ?? 0) + w)
+        tot[own] -= degree[i]!
+        let best = own, bestGain = (links.get(own) ?? 0) - tot[own]! * degree[i]! / total
+        for (const c of [...links.keys()].sort((a, b) => a - b)) {
+          const gain = links.get(c)! - tot[c]! * degree[i]! / total
+          if (gain > bestGain + 1e-9) { best = c; bestGain = gain }
+        }
+        tot[best] += degree[i]!
+        if (best !== own) { community[i] = best; moved = true; movedAny = true }
+      }
+      if (!moved) break
+    }
+    if (!movedAny) break
+    const renumber = new Map<number, number>()
+    for (const c of community) if (!renumber.has(c)) renumber.set(c, renumber.size)
+    const next = Array.from({ length: renumber.size }, () => new Map<number, number>())
+    const nextInner = new Array<number>(renumber.size).fill(0)
+    for (let i = 0; i < size; i++) {
+      const ci = renumber.get(community[i]!)!
+      nextInner[ci] += inner[i]!
+      for (const [j, w] of weights[i]!) {
+        const cj = renumber.get(community[j]!)!
+        // Each undirected edge appears in both rows; count it once inside.
+        if (ci === cj) nextInner[ci] += w / 2
+        else next[ci]!.set(cj, (next[ci]!.get(cj) ?? 0) + w)
+      }
+    }
+    membership = membership.map(c => renumber.get(community[c]!)!)
+    weights = next; inner = nextInner
+    if (renumber.size === size) break
+  }
+  return membership
+}
+
+/** Landmark caption text: summary pages carry their source file name. */
+export function graphLandmarkTitle(title: string): string {
+  const name = title.replace(/\s*-\s*Summary$/i, '')
+    .replace(/\.(pdf|docx?|pptx?|xlsx?|csv|md|txt|html?|json|ya?ml|xml|png|jpe?g)$/i, '')
+    .replace(/\s*[(（]\d+[)）]$/, '').trim()
+  return name || title
+}
+
+// A summary is named after its source file, which usually names the document
+// well, so it only yields near-ties to entities and concepts. Index pages are
+// navigation and a poor name for a region even when they link to all of it.
+const anchorTypeQuality: Record<string, number> = {
+  entity: 1.15, concept: 1, synthesis: 0.8, comparison: 0.8, summary: 0.9, index: 0.2,
+}
+
+/** Name a connected component and its distinct themes.
+ * The first landmark is the component's most prominent readable page, even
+ * when it bridges every theme. Communities are the themes; each contributes
+ * at most one landmark, chosen by its links inside the theme and how well its
+ * title reads as a name. Themes mostly linked to an existing landmark, and
+ * pages that repeat one, get no extra name. Later picks favor larger themes
+ * far from earlier labels so names spread instead of stacking up.
  */
 export function selectGraphAnchors(
   slugs: string[], adjacency: ReadonlyMap<string, ReadonlySet<string>>,
-  pages: ReadonlyMap<string, Pick<LayoutInput, 'page_type'>> = new Map(),
+  pages: ReadonlyMap<string, Pick<LayoutInput, 'page_type' | 'title'>> = new Map(),
 ): string[] {
   if (!slugs.length) return []
-  const members = new Set(slugs)
-  const neighbors = new Map(slugs.map(slug => [slug, [...(adjacency.get(slug) ?? [])].filter(n => members.has(n) && n !== slug)]))
-  const ranked = [...slugs].sort((a, b) => neighbors.get(b)!.length - neighbors.get(a)!.length || (a < b ? -1 : a > b ? 1 : 0))
-  const budget = slugs.length < 16 ? 1 : slugs.length < 50 ? 2 : slugs.length < 100 ? 3 : slugs.length < 200 ? 4 : 5
-  const selected: string[] = []
-  const covered = new Set<string>()
-  const nearest = new Map(slugs.map(slug => [slug, Infinity]))
-  while (selected.length < budget) {
-    let best: string | undefined, bestScore = -1, bestDistance = -1
-    for (const slug of ranked) {
-      if (selected.includes(slug)) continue
-      const neighborhood = [slug, ...neighbors.get(slug)!]
-      const gain = neighborhood.filter(n => !covered.has(n)).length
-      if (!gain) continue
-      // Overall prominence matters even when this subject shares neighbors
-      // with an earlier landmark. Marginal coverage alone favors peripheral
-      // configuration pages over a well-connected product/platform.
-      const novelty = gain / neighborhood.length
-      const separation = nearest.get(slug)!
-      const distance = Math.min(3, separation)
-      const entityPreference = pages.get(slug)?.page_type === 'entity' ? 1.15 : 1
-      const score = neighborhood.length * (0.4 + 0.6 * Math.sqrt(novelty))
-        * (1 + 0.15 * distance) * entityPreference
-      if (score > bestScore || (score === bestScore && separation > bestDistance)) {
-        best = slug; bestScore = score; bestDistance = separation
-      }
-    }
-    if (!best) break
-    selected.push(best)
-    for (const slug of [best, ...neighbors.get(best)!]) covered.add(slug)
-    // Distances to the nearest selected landmark discourage picking all
-    // labels from the same dense part of the connected component.
-    const queue = [best]
-    const distances = new Map([[best, 0]])
-    for (let i = 0; i < queue.length; i++) {
-      const slug = queue[i]!, distance = distances.get(slug)!
-      nearest.set(slug, Math.min(nearest.get(slug)!, distance))
-      for (const neighbor of neighbors.get(slug)!) {
-        if (distances.has(neighbor)) continue
-        distances.set(neighbor, distance + 1); queue.push(neighbor)
-      }
-    }
+  const order = [...new Set(slugs)].sort()
+  const index = new Map(order.map((slug, i) => [slug, i]))
+  const neighbors = order.map(slug => [...(adjacency.get(slug) ?? [])]
+    .flatMap(n => index.has(n) && n !== slug ? [index.get(n)!] : []).sort((a, b) => a - b))
+  const membership = graphCommunities(neighbors)
+  const groups = new Map<number, number[]>()
+  membership.forEach((c, i) => { const group = groups.get(c) ?? []; group.push(i); groups.set(c, group) })
+
+  const quality = (i: number) => {
+    const page = pages.get(order[i]!)
+    const title = graphLandmarkTitle(page?.title ?? '')
+    // An identifier such as an arXiv file name ("2412.18925v1") has no word to read.
+    const readable = /[\u4e00-\u9fff]{2}|[a-z]{3}/i.test(title) ? 1 : 0.3
+    return (anchorTypeQuality[page?.page_type ?? ''] ?? 1) * (title.length > 18 ? 0.6 : 1) * readable
   }
-  return selected
+  const best = (group: number[], score: (i: number) => number) => group.reduce((top, i) => {
+    const a = score(i), b = score(top)
+    return a > b + 1e-9 || (Math.abs(a - b) <= 1e-9 && neighbors[i]!.length > neighbors[top]!.length) ? i : top
+  })
+  // A theme is named by a page that lives in it; links elsewhere still count
+  // for some prominence.
+  const themes = [...groups.values()].map(group => {
+    const inside = new Set(group)
+    const score = (i: number) => {
+      const internal = neighbors[i]!.filter(j => inside.has(j)).length
+      return (internal + 0.5 * (neighbors[i]!.length - internal) + 1) * quality(i)
+    }
+    const ranked = [...group].sort((a, b) => score(b) - score(a) || neighbors[b]!.length - neighbors[a]!.length || a - b)
+    return { size: group.length, ranked, members: inside }
+  }).sort((a, b) => b.size - a.size || a.ranked[0]! - b.ranked[0]!)
+
+  const name = best(order.map((_, i) => i), i => (neighbors[i]!.length + 1) * quality(i))
+  const home = themes.find(theme => theme.members.has(name))!
+  // Fragments of a theme are not themes of their own.
+  const minimum = Math.max(3, themes[0]!.size * 0.3)
+  const candidates = themes.filter(theme => theme !== home && theme.size >= minimum)
+  // A second name for something already labeled: nearly the same
+  // neighborhood (an author next to their paper) or a title that contains
+  // the other ("北京市第三代社保卡" next to "第三代社保卡").
+  const closed = (i: number) => new Set([i, ...neighbors[i]!])
+  const normalized = (i: number) => graphLandmarkTitle(pages.get(order[i]!)?.title ?? '')
+    .toLowerCase().replace(/[\s《》“”"'‘’（）()·・]/g, '')
+  const redundant = (i: number, chosen: number[]) => chosen.some(s => {
+    const a = closed(i), b = closed(s)
+    const shared = [...a].filter(x => b.has(x)).length
+    if (shared / (a.size + b.size - shared) >= 0.5) return true
+    const x = normalized(i), y = normalized(s)
+    return !!x && !!y && (x.includes(y) || y.includes(x))
+  })
+  const budget = order.length < 16 ? 1 : order.length < 50 ? 2 : order.length < 100 ? 3 : order.length < 200 ? 4 : 5
+  const bfs = (start: number) => {
+    const distance = new Array<number>(order.length).fill(Infinity)
+    distance[start] = 0
+    const queue = [start]
+    for (let q = 0; q < queue.length; q++) {
+      for (const j of neighbors[queue[q]!]!) {
+        if (distance[j] !== Infinity) continue
+        distance[j] = distance[queue[q]!]! + 1; queue.push(j)
+      }
+    }
+    return distance
+  }
+  // Labels count as fully separated once they are a fair share of the
+  // component's diameter apart; closer than that, a larger theme still wins.
+  const nearest = bfs(name)
+  const far = nearest.reduce((top, d, i) => d !== Infinity && d > nearest[top]! ? i : top, name)
+  const diameter = Math.max(...bfs(far).filter(Number.isFinite))
+  const reach = Math.max(2, diameter / budget)
+  const selected = [name]
+  const open = new Set(candidates)
+  while (selected.length < budget && open.size) {
+    let pick: { theme: typeof candidates[number]; label: number } | undefined, bestScore = -1
+    for (const theme of open) {
+      // Most of the theme already hangs off an existing label (one document
+      // around its subject): another name would only be a detail page.
+      const covered = selected.some(s => neighbors[s]!.filter(j => theme.members.has(j)).length * 2 >= theme.size)
+      const label = covered ? undefined : theme.ranked.find(i => !redundant(i, selected))
+      if (label === undefined) { open.delete(theme); continue }
+      const score = Math.sqrt(theme.size) * Math.min(nearest[label]!, reach) / reach
+      if (score > bestScore + 1e-9 || (Math.abs(score - bestScore) <= 1e-9 && pick && nearest[label]! > nearest[pick.label]!)) {
+        pick = { theme, label }; bestScore = score
+      }
+    }
+    if (!pick) break
+    open.delete(pick.theme)
+    selected.push(pick.label)
+    bfs(pick.label).forEach((d, i) => { nearest[i] = Math.min(nearest[i]!, d) })
+  }
+  return selected.map(i => order[i]!)
 }
 
 /** Pack connected components separately; singletons get two explicit shelves.
@@ -385,24 +513,25 @@ export function initialGraphViewport(points: GraphPoint[], width: number, height
 }
 
 
-/** Rounded envelope of the node disks with a stable screen-space gutter.
- * Circular joins stay tangent to the edges. Long edges bow gently outwards;
- * neither smoothing step cuts into the enclosed nodes.
+/** Smooth envelope of the node disks with a stable screen-space gutter.
+ * The hull is taken over disks already grown by the gutter, then traced with
+ * a closed spline whose tangents are limited by the adjacent segment length,
+ * so it bows outwards from the hull without loops or cusps.
  */
 export function graphClusterOutline(points: (GraphPoint & { radius?: number })[], scale = 1): string {
   if (!points.length) return ''
   const zoom = Number.isFinite(scale) && scale > 0 ? scale : 1
-  const padding = 18 / zoom
-  const expanded = points.flatMap(p => p.radius && p.radius > 0
-    ? Array.from({ length: 16 }, (_, i) => ({
-      x: p.x + Math.cos(i * Math.PI / 8) * p.radius!,
-      y: p.y + Math.sin(i * Math.PI / 8) * p.radius!,
-    })) : [{ x: p.x, y: p.y }]).sort((a, b) => a.x - b.x || a.y - b.y)
+  // Capped in world units so far-out zoom levels do not merge separate groups.
+  const padding = Math.min(22 / zoom, 60)
+  const samples = 24
+  const expanded = points.flatMap(p => {
+    const radius = Math.max(0, p.radius ?? 0) + padding
+    return Array.from({ length: samples }, (_, i) => ({
+      x: p.x + Math.cos(i * 2 * Math.PI / samples) * radius,
+      y: p.y + Math.sin(i * 2 * Math.PI / samples) * radius,
+    }))
+  }).sort((a, b) => a.x - b.x || a.y - b.y)
   const unique = expanded.filter((p, i) => !i || p.x !== expanded[i - 1]!.x || p.y !== expanded[i - 1]!.y)
-  if (unique.length === 1) {
-    const p = unique[0]!
-    return `M${p.x - padding},${p.y} A${padding},${padding} 0 1 1 ${p.x + padding},${p.y} A${padding},${padding} 0 1 1 ${p.x - padding},${p.y} Z`
-  }
   const cross = (o: GraphPoint, a: GraphPoint, b: GraphPoint) => (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x)
   const half = (list: GraphPoint[]) => {
     const hull: GraphPoint[] = []
@@ -414,25 +543,18 @@ export function graphClusterOutline(points: (GraphPoint & { radius?: number })[]
     return hull
   }
   const hull = [...half(unique), ...half([...unique].reverse())]
-  const normals = hull.map((p, i) => {
-    const next = hull[(i + 1) % hull.length]!
-    const length = Math.hypot(next.x - p.x, next.y - p.y)
-    return { x: (next.y - p.y) / length, y: (p.x - next.x) / length }
-  })
-  const start = { x: hull[0]!.x + normals.at(-1)!.x * padding, y: hull[0]!.y + normals.at(-1)!.y * padding }
-  const path = [`M${start.x},${start.y}`]
+  const at = (i: number) => hull[(i + hull.length) % hull.length]!
+  const fmt = (p: GraphPoint) => `${Math.round(p.x * 10) / 10},${Math.round(p.y * 10) / 10}`
+  const tangent = (from: GraphPoint, to: GraphPoint, length: number) => {
+    const dx = to.x - from.x, dy = to.y - from.y, norm = Math.hypot(dx, dy) || 1
+    return { x: dx / norm * length, y: dy / norm * length }
+  }
+  const path = [`M${fmt(hull[0]!)}`]
   hull.forEach((p, i) => {
-    const n = normals[i]!, next = hull[(i + 1) % hull.length]!
-    const a = { x: p.x + n.x * padding, y: p.y + n.y * padding }
-    const b = { x: next.x + n.x * padding, y: next.y + n.y * padding }
-    path.push(`A${padding},${padding} 0 0 1 ${a.x},${a.y}`)
-    const dx = b.x - a.x, dy = b.y - a.y
-    if (Math.hypot(dx, dy) * zoom > 120) {
-      const bow = 4 / zoom
-      const mid = { x: (a.x + b.x) / 2 + n.x * bow, y: (a.y + b.y) / 2 + n.y * bow }
-      path.push(`C${a.x + dx / 6},${a.y + dy / 6} ${mid.x - dx / 6},${mid.y - dy / 6} ${mid.x},${mid.y}`)
-      path.push(`C${mid.x + dx / 6},${mid.y + dy / 6} ${b.x - dx / 6},${b.y - dy / 6} ${b.x},${b.y}`)
-    } else path.push(`L${b.x},${b.y}`)
+    const next = at(i + 1)
+    const reach = Math.hypot(next.x - p.x, next.y - p.y) * 0.36
+    const out = tangent(at(i - 1), next, reach), into = tangent(p, at(i + 2), reach)
+    path.push(`C${fmt({ x: p.x + out.x, y: p.y + out.y })} ${fmt({ x: next.x - into.x, y: next.y - into.y })} ${fmt(next)}`)
   })
   return path.join(' ') + ' Z'
 }
