@@ -3333,7 +3333,7 @@ const getImgSrc = (url: string) => {
 /* 控制栏 */
 .control-bar {
   position: relative;
-  margin: 0 16px 12px;
+  margin: 0 12px 12px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -3369,7 +3369,7 @@ const getImgSrc = (url: string) => {
 .control-left {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 4px;
   flex: 1;
   flex-wrap: wrap;
   min-width: 0;
@@ -3406,11 +3406,14 @@ const getImgSrc = (url: string) => {
 
 .agent-mode-btn {
   height: 28px;
-  padding: 0 10px;
+  padding: 0 8px 0 10px;
+  margin-right: 4px;
+  box-sizing: border-box;
   min-width: auto;
   font-weight: 500;
   position: relative;
-  border: .5px solid var(--td-component-border);
+  border-radius: var(--app-radius-pill);
+  background: var(--td-bg-color-secondarycontainer);
 }
 
 .agent-icon {
@@ -3435,7 +3438,7 @@ const getImgSrc = (url: string) => {
   color: var(--td-text-color-secondary);
   font-weight: 500;
   white-space: nowrap;
-  margin: 0 4px;
+  margin: 0 2px;
 }
 
 .control-icon {
@@ -3537,8 +3540,8 @@ const getImgSrc = (url: string) => {
     position: absolute;
     top: -2px;
     right: -2px;
-    background: #07C05F;
-    color: #fff;
+    background: var(--td-brand-color);
+    color: var(--td-text-color-anti);
     font-size: var(--app-text-2xs);
     width: 14px;
     height: 14px;
@@ -3576,8 +3579,8 @@ const getImgSrc = (url: string) => {
     position: absolute;
     top: -2px;
     right: -2px;
-    background: #07C05F;
-    color: #fff;
+    background: var(--td-brand-color);
+    color: var(--td-text-color-anti);
     font-size: var(--app-text-2xs);
     width: 14px;
     height: 14px;
@@ -3772,6 +3775,7 @@ const getImgSrc = (url: string) => {
   width: 28px;
   height: 28px;
   padding: 0;
+  border-radius: 50%;
   box-sizing: border-box;
   font-size: var(--app-text-xl);
   line-height: 1;
@@ -3791,7 +3795,13 @@ const getImgSrc = (url: string) => {
   }
 
   &.disabled {
-    background-color: var(--td-success-color-light);
+    opacity: 1;
+    background-color: var(--td-bg-color-component);
+    color: var(--td-text-color-placeholder);
+
+    &:hover {
+      background-color: var(--td-bg-color-component);
+    }
   }
 
   img {
@@ -3804,7 +3814,6 @@ const getImgSrc = (url: string) => {
 .model-selector-trigger.reasoning-effort-trigger {
   flex-shrink: 0;
   min-width: 0;
-  box-sizing: content-box;
   background: transparent;
   font: inherit;
 }
@@ -3871,11 +3880,11 @@ const getImgSrc = (url: string) => {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 2px 8px;
-  min-width: 100px;
-  height: 22px;
+  padding: 0 8px;
+  height: 28px;
+  box-sizing: border-box;
+  border: 0;
   border-radius: var(--app-radius-sm);
-  border: .5px solid var(--td-component-border);
   transition: background var(--app-motion-instant), border-color var(--app-motion-instant);
   cursor: pointer;
 
