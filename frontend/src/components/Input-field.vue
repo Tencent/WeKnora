@@ -2761,6 +2761,31 @@ defineExpose({
 
       <!-- 控制栏按文档流排列，换行时自动撑开容器 -->
       <div class="control-bar" :class="{ 'is-embedded': embeddedMode }">
+        <!-- 嵌入式（KB 侧边栏等）：保留模型选择（embedded 下 modelId 照常
+             随 startStream 提交），其余模式/知识库/上传控制仍归宿主页面。 -->
+        <div v-if="embeddedMode" class="control-left">
+          <!-- 模型显示 -->
+          <t-tooltip :content="isModelLockedByAgent ? $t('input.modelLockedByAgent') : ''"
+            :disabled="!isModelLockedByAgent">
+            <div class="model-display" :class="{ 'agent-controlled': isModelLockedByAgent }">
+              <div ref="modelButtonRef" class="model-selector-trigger" @click.stop="toggleModelSelector">
+                <span class="model-selector-name">
+                  {{ selectedModelDisplayName }}
+                </span>
+                <span
+                  v-if="selectedModelContextLabel"
+                  class="model-selector-ctx"
+                  :class="{ 'is-default': selectedModelContextIsDefault }"
+                  :title="selectedModelContextTitle"
+                >{{ selectedModelContextLabel }}</span>
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor" class="model-dropdown-arrow"
+                  :class="{ 'rotate': showModelSelector }">
+                  <path d="M2.5 4.5L6 8L9.5 4.5H2.5Z" />
+                </svg>
+              </div>
+            </div>
+          </t-tooltip>
+        </div>
         <!-- 左侧控制按钮 -->
         <div class="control-left" v-if="!embeddedMode">
           <!-- Agent 模式切换按钮 -->

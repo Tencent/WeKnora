@@ -2346,10 +2346,10 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
         </div>
       </div>
 
-      <!-- Agent sidebar drawer (agent-sidebar-inbox): mounted at layout
-           level so it survives tab switches; one session per KB. -->
-      <AgentSidebarDrawer v-if="kbId" v-model="showAgentSidebar" :kb-id="kbId" />
-
+      <!-- Main body row: tab content and the persistent agent sidebar share
+           one flex row (agent-sidebar-inbox); the sidebar collapses to zero
+           width when closed so content regains the full line. -->
+      <div class="kb-body-row">
       <!-- Wiki Browser / Graph (shown when wiki or graph tab is active) -->
       <div v-if="isWiki && (activeKbTab === 'wiki' || activeKbTab === 'graph')" class="wiki-main-area">
         <WikiBrowser v-if="kbId" :knowledge-base-id="kbId" :view="activeKbTab === 'graph' ? 'graph' : 'browser'"
@@ -2628,6 +2628,11 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
         </div>
       </template>
 
+        <!-- Agent sidebar: persistent docked panel; mounted inside the body
+             row so it survives tab switches (one session per KB). -->
+        <AgentSidebarDrawer v-if="kbId" v-model="showAgentSidebar" :kb-id="kbId" />
+      </div>
+
       <!-- DocContent drawer (shared by documents tab and wiki source refs) -->
       <DocContent ref="docContentRef" :visible="isCardDetails" :details="details" :canEditKB="canEdit"
         :canDownloadKB="canDownloadKnowledge" :kbId="kbId"
@@ -2730,6 +2735,26 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
     display: inline-flex;
     color: var(--td-brand-color);
   }
+}
+
+// Tab content and the persistent agent sidebar share one flex row.
+.kb-body-row {
+  display: flex;
+  gap: 16px;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  align-items: stretch;
+}
+
+.kb-body-row > * {
+  min-width: 0;
+}
+
+// Every direct child except the sidebar dock takes the remaining width; the
+// dock manages its own width collapse/expand inside the component.
+.kb-body-row > :not(.agent-sidebar-dock) {
+  flex: 1 1 0;
 }
 
 .wiki-main-area {

@@ -1,20 +1,31 @@
 <template>
   <!-- Agent sidebar (agent-sidebar-inbox P1): a persistent chat panel bound
-       to the KB view, styled after the existing wiki fix drawer so the UI
-       language stays identical. Mounted at the KnowledgeBase layout level —
-       it survives tab switches by construction. -->
-  <t-drawer v-model:visible="visible" :header="$t('knowledgeBase.agentSidebar.title')" size="700px" :footer="false"
-    class="agent-sidebar-drawer" :close-btn="true">
-    <div class="agent-sidebar-body">
-      <t-loading :loading="sessionLoading" text="" size="small" show-overlay>
-        <ChatView v-if="sessionId && visible" :session_id="sessionId" agentId="builtin-sidebar-assistant"
-          :kbIds="[props.kbId]" :embeddedMode="true" />
-        <div v-else-if="!sessionLoading" class="agent-sidebar-empty">
-          {{ $t('knowledgeBase.agentSidebar.sessionError') }}
-        </div>
-      </t-loading>
+       to the KB view. Docked inside the KB body row — opening it narrows the
+       main content instead of covering it, and it survives tab switches by
+       construction. Collapsed state is width:0 + hidden, so the panel keeps
+       its DOM (and the chat scrollback) across toggles. -->
+  <aside class="agent-sidebar-dock" :class="{ 'is-open': visible }" :aria-hidden="!visible">
+    <div class="agent-sidebar-panel">
+      <header class="agent-sidebar-header">
+        <span class="agent-sidebar-title">{{ $t('knowledgeBase.agentSidebar.title') }}</span>
+        <button type="button" class="kb-settings-button" :aria-label="$t('knowledgeBase.agentSidebar.title')"
+          @click="visible = false">
+          <t-icon name="close" size="16px" />
+        </button>
+      </header>
+      <div class="agent-sidebar-body">
+        <t-loading :loading="sessionLoading" text="" size="small" show-overlay>
+          <!-- v-show (not v-if) so the conversation and scroll position stay
+               alive while the panel is closed. -->
+          <ChatView v-if="sessionId" v-show="visible" :session_id="sessionId" agentId="builtin-sidebar-assistant"
+            :kbIds="[props.kbId]" :embeddedMode="true" />
+          <div v-else-if="!sessionLoading" class="agent-sidebar-empty">
+            {{ $t('knowledgeBase.agentSidebar.sessionError') }}
+          </div>
+        </t-loading>
+      </div>
     </div>
-  </t-drawer>
+  </aside>
 </template>
 
 <script setup lang="ts">
@@ -80,13 +91,55 @@ watch(visible, (val) => {
   if (val && props.kbId && !sessionId.value) ensureSession();
 });
 
-// First open when the parent mounts with visible=true.
-if (props.modelValue && props.kbId) ensureSession();
+// Create the session eagerly so the panel is ready before the first open.
+if (props.kbId) ensureSession();
 </script>
 
 <style scoped>
-.agent-sidebar-body {
+.agent-sidebar-dock {
+  flex: 0 0 auto;
+  width: 0;
   height: 100%;
+  overflow: hidden;
+  transition: width var(--app-motion-slow, 0.22s) ease;
+}
+
+.agent-sidebar-dock.is-open {
+  width: 420px;
+}
+
+.agent-sidebar-panel {
+  /* Fixed inner width: the collapsing dock must not reflow the chat. */
+  width: 420px;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--td-component-border);
+  background: var(--td-bg-color-container);
+  border-radius: var(--app-radius-lg, 12px) 0 0 var(--app-radius-lg, 12px);
+  overflow: hidden;
+}
+
+.agent-sidebar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px 10px 16px;
+  border-bottom: 1px solid var(--td-component-stroke);
+  flex-shrink: 0;
+}
+
+.agent-sidebar-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--td-text-color-primary);
+}
+
+.agent-sidebar-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 .agent-sidebar-empty {
@@ -98,13 +151,15 @@ if (props.modelValue && props.kbId) ensureSession();
 
 <style>
 /* Same chat canvas sizing as .wiki-fix-drawer so the embedded ChatView
-   fills the drawer identically. */
-.agent-sidebar-drawer .t-drawer__content-wrapper {
+   fills the panel identically. */
+.agent-sidebar-dock .t-loading__parent {
+  height: 100%;
   display: flex;
   flex-direction: column;
 }
 
-.agent-sidebar-drawer .t-loading__parent {
-  height: 100%;
+.agent-sidebar-dock .t-loading__parent > * {
+  flex: 1;
+  min-height: 0;
 }
 </style>
