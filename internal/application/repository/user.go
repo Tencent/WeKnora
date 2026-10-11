@@ -121,14 +121,16 @@ func (r *userRepository) GetUserByTenantID(ctx context.Context, tenantID uint64)
 	return &user, nil
 }
 
-// UpdateUser updates a user
+// UpdateUser updates user data while preserving account status. Status changes
+// must go through SetUserActive so stale profile/password writes cannot undo
+// an administrator's enable/disable action.
 func (r *userRepository) UpdateUser(ctx context.Context, user *types.User) error {
 	if user != nil && user.TenantID == 0 {
 		return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-			// Preserve Save's all-fields behaviour while keeping the nullable
-			// tenant column out of the struct write, then explicitly store NULL.
+			// Keep status and the nullable tenant column out of the struct
+			// write, then explicitly store NULL for the tenant.
 			// Writing uint64(0) would violate the PostgreSQL tenant FK.
-			if err := tx.Omit("tenant_id").Save(user).Error; err != nil {
+			if err := tx.Omit("tenant_id", "is_active").Save(user).Error; err != nil {
 				return err
 			}
 			return tx.Model(&types.User{}).
@@ -136,7 +138,7 @@ func (r *userRepository) UpdateUser(ctx context.Context, user *types.User) error
 				UpdateColumn("tenant_id", nil).Error
 		})
 	}
-	return r.db.WithContext(ctx).Save(user).Error
+	return r.db.WithContext(ctx).Omit("is_active").Save(user).Error
 }
 
 // DeleteUser deletes a user

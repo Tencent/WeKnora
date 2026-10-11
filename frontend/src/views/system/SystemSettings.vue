@@ -30,7 +30,7 @@
   <div class="system-settings">
     <div class="section-header">
       <div class="section-header__titlewrap">
-        <h2><t-icon name="setting" size="24px" />{{ t('system.globalSettings.title') }}</h2>
+        <h2>{{ t('system.globalSettings.title') }}</h2>
         <div id="system-users-actions" />
       </div>
       <div class="section-description">
@@ -913,23 +913,9 @@ onUnmounted(() => {
   container-type: inline-size;
 }
 
-// Match the current outer Toolbox header and tabbar within the settings shell.
+// Use the same title styling as the other settings pages.
 .section-header {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  margin-bottom: 12px;
-
-  h2 {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin: 0;
-    font-family: var(--app-font-family);
-    font-size: var(--app-text-4xl);
-    font-weight: 600;
-    line-height: 32px;
-  }
+  .settings-section-header();
 }
 
 .section-header__titlewrap {

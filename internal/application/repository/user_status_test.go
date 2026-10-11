@@ -129,6 +129,57 @@ func TestSetUserActiveRollsBackWhenRevocationFails(t *testing.T) {
 	})
 }
 
+func TestUserUpdatePreservesAccountStatus(t *testing.T) {
+	for _, scope := range []struct {
+		name     string
+		tenantID uint64
+	}{
+		{name: "tenantless"},
+		{name: "with-tenant", tenantID: 1},
+	} {
+		t.Run(scope.name, func(t *testing.T) {
+			for _, change := range []struct {
+				name   string
+				active bool
+			}{
+				{name: "disable"},
+				{name: "enable", active: true},
+			} {
+				t.Run(change.name, func(t *testing.T) {
+					userStatusBackends(t, func(t *testing.T, db *gorm.DB) {
+						ctx := context.Background()
+						repo := NewUserRepository(db)
+						seedStatusUser(t, db, "user", false, !change.active)
+						if scope.tenantID != 0 {
+							require.NoError(t, db.Model(&types.User{}).Where("id = ?", "user").
+								UpdateColumn("tenant_id", scope.tenantID).Error)
+						}
+
+						// Pause an ordinary update after its read, then commit an admin
+						// status change before the stale user object is written back.
+						stale, err := repo.GetUserByID(ctx, "user")
+						require.NoError(t, err)
+						_, err = repo.SetUserActive(ctx, "user", "admin", change.active)
+						require.NoError(t, err)
+						instructions := "updated preference"
+						stale.Preferences.BrowserSearchInstructions = &instructions
+						stale.PasswordHash = "updated hash"
+						require.NoError(t, repo.UpdateUser(ctx, stale))
+
+						stored, err := repo.GetUserByID(ctx, "user")
+						require.NoError(t, err)
+						require.Equal(t, change.active, stored.IsActive,
+							"ordinary updates must preserve account status")
+						require.Equal(t, scope.tenantID, stored.TenantID)
+						require.Equal(t, "updated hash", stored.PasswordHash)
+						require.Equal(t, &instructions, stored.Preferences.BrowserSearchInstructions)
+					})
+				})
+			}
+		})
+	}
+}
+
 func TestConcurrentAdminChangesKeepOneActiveAdmin(t *testing.T) {
 	for _, mode := range []string{"disable-disable", "disable-revoke", "revoke-revoke"} {
 		t.Run(mode, func(t *testing.T) {

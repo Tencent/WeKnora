@@ -31,7 +31,7 @@ type UserService interface {
 	GetUserByUsername(ctx context.Context, username string) (*types.User, error)
 	// GetUserByTenantID gets the first user (owner) of a tenant
 	GetUserByTenantID(ctx context.Context, tenantID uint64) (*types.User, error)
-	// UpdateUser updates user information
+	// UpdateUser updates user data without changing account status; use SetUserActive for that.
 	UpdateUser(ctx context.Context, user *types.User) error
 	// DeleteUser deletes a user
 	DeleteUser(ctx context.Context, id string) error
@@ -129,7 +129,7 @@ type UserRepository interface {
 	GetUserByUsername(ctx context.Context, username string) (*types.User, error)
 	// GetUserByTenantID gets the first user (owner) of a tenant
 	GetUserByTenantID(ctx context.Context, tenantID uint64) (*types.User, error)
-	// UpdateUser updates a user
+	// UpdateUser updates user data without changing account status; use SetUserActive for that.
 	UpdateUser(ctx context.Context, user *types.User) error
 	// SetUserActive atomically changes status and revokes sessions on disable,
 	// preserving at least one active system administrator.
