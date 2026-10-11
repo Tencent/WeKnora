@@ -1334,9 +1334,9 @@ const resizeSidebar = (delta: number, keyboard: boolean) => {
         display: flex;
         align-items: center;
         justify-content: space-between;
-        // 抵消 .aside_box 顶部内边距，使行中线与主区 .chat-header 标题中线（距顶 19.5px）齐平
+        // 保留侧栏顶部留白，让 Logo 和操作按钮与窗口顶边保持舒适间距
         height: 39px;
-        margin: -8px 0 4px;
+        margin: 0 0 4px;
         flex-shrink: 0;
         padding: 0 2px 0 var(--sidebar-inset-x);
     }
