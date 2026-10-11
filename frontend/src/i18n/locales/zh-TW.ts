@@ -4573,6 +4573,11 @@ export default {
         sourceFilterSelectAll: '全選 / 全不選（含全部命中結果）',
         sourceFilterOverflowRecent: '文件較多，僅顯示最近 {cap} 條，請輸入關鍵字精確定位',
         sourceFilterOverflowHits: '命中 {total} 個文件，僅顯示前 {cap} 條，請細化關鍵字後再全選',
+        viewOptions: '檢視',
+        viewMode: '佈局',
+        viewWaterfall: '瀑布流',
+        viewCard: '卡片',
+        thumbSize: '縮圖大小',
         // Display names for the builtin attributes the gallery itself
         // declares. Attributes contributed by other sources fall back to the
         // pipeline's own wording (see the imageAttr namespace).

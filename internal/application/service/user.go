@@ -706,6 +706,20 @@ func (s *userService) UpdateUserPreferences(
 			}
 			g.Status = status
 		}
+		if patch.Gallery.ViewMode == types.GalleryViewWaterfall ||
+			patch.Gallery.ViewMode == types.GalleryViewCard {
+			g.ViewMode = patch.Gallery.ViewMode
+		}
+		if patch.Gallery.ThumbWidth != 0 {
+			w := patch.Gallery.ThumbWidth
+			if w < types.GalleryThumbWidthMin {
+				w = types.GalleryThumbWidthMin
+			}
+			if w > types.GalleryThumbWidthMax {
+				w = types.GalleryThumbWidthMax
+			}
+			g.ThumbWidth = w
+		}
 		merged.Gallery = g
 	}
 

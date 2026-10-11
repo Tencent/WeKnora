@@ -72,6 +72,12 @@ type GalleryUserPrefs struct {
 	// off. Source-declared on/off does not exist — activation is always
 	// the user's own record.
 	Status map[string]string `json:"status,omitempty"`
+	// ViewMode is the gallery layout the user picked: "waterfall"
+	// (default) or "card". Empty = never recorded.
+	ViewMode string `json:"view_mode,omitempty"`
+	// ThumbWidth is the preferred thumbnail column width in px recorded
+	// by the view slider. 0 = never recorded.
+	ThumbWidth int `json:"thumb_width,omitempty"`
 }
 
 // Value implements driver.Valuer so GORM persists UserPreferences as

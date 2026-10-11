@@ -227,6 +227,10 @@ export interface GalleryConfig {
   mode: 'all' | 'custom';
   /** Per-attribute search toggles ("on"/"off"); consulted in custom mode. */
   status: Record<string, string>;
+  /** Gallery layout: "waterfall" (masonry, default) or "card" (3:2 grid). */
+  view_mode: 'waterfall' | 'card';
+  /** Preferred thumbnail column width in px (server-clamped 120–360). */
+  thumb_width: number;
 }
 
 /** Fetch the gallery contract for a knowledge base. */
