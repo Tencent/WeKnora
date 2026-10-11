@@ -7,29 +7,30 @@ import (
 )
 
 func TestResolveGalleryConfigViewDefaults(t *testing.T) {
-	// No user tier: waterfall layout at the default column width.
+	// No user tier: waterfall layout and no recorded column count — the
+	// client derives a count from its own layout width.
 	res := ResolveGalleryConfig("kb-1", nil, nil, nil)
 	require.Equal(t, GalleryViewWaterfall, res.ViewMode)
-	require.Equal(t, GalleryThumbWidthDefault, res.ThumbWidth)
+	require.Equal(t, 0, res.ThumbCols)
 }
 
 func TestResolveGalleryConfigViewUserTier(t *testing.T) {
 	// Recorded user state is served back verbatim.
 	res := ResolveGalleryConfig("kb-1", nil, nil, &GalleryPolicyTier{
-		ViewMode:   GalleryViewCard,
-		ThumbWidth: 280,
+		ViewMode:  GalleryViewCard,
+		ThumbCols: 6,
 	})
 	require.Equal(t, GalleryViewCard, res.ViewMode)
-	require.Equal(t, 280, res.ThumbWidth)
+	require.Equal(t, 6, res.ThumbCols)
 }
 
 func TestResolveGalleryConfigViewInvalidFallback(t *testing.T) {
-	// Unknown layout and out-of-range width fall back to the defaults so
-	// a stale or hand-edited record cannot break rendering.
+	// Unknown layout and out-of-range column counts fall back to the
+	// defaults so a stale or hand-edited record cannot break rendering.
 	res := ResolveGalleryConfig("kb-1", nil, nil, &GalleryPolicyTier{
-		ViewMode:   "grid",
-		ThumbWidth: 9999,
+		ViewMode:  "grid",
+		ThumbCols: 9999,
 	})
 	require.Equal(t, GalleryViewWaterfall, res.ViewMode)
-	require.Equal(t, GalleryThumbWidthDefault, res.ThumbWidth)
+	require.Equal(t, 0, res.ThumbCols)
 }

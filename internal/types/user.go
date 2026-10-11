@@ -75,9 +75,9 @@ type GalleryUserPrefs struct {
 	// ViewMode is the gallery layout the user picked: "waterfall"
 	// (default) or "card". Empty = never recorded.
 	ViewMode string `json:"view_mode,omitempty"`
-	// ThumbWidth is the preferred thumbnail column width in px recorded
-	// by the view slider. 0 = never recorded.
-	ThumbWidth int `json:"thumb_width,omitempty"`
+	// ThumbCols is the preferred thumbnail column count recorded by the
+	// view slider. 0 = never recorded (client derives one from its width).
+	ThumbCols int `json:"thumb_cols,omitempty"`
 }
 
 // Value implements driver.Valuer so GORM persists UserPreferences as

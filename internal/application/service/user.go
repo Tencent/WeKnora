@@ -710,15 +710,15 @@ func (s *userService) UpdateUserPreferences(
 			patch.Gallery.ViewMode == types.GalleryViewCard {
 			g.ViewMode = patch.Gallery.ViewMode
 		}
-		if patch.Gallery.ThumbWidth != 0 {
-			w := patch.Gallery.ThumbWidth
-			if w < types.GalleryThumbWidthMin {
-				w = types.GalleryThumbWidthMin
+		if patch.Gallery.ThumbCols != 0 {
+			w := patch.Gallery.ThumbCols
+			if w < 1 {
+				w = 1
 			}
-			if w > types.GalleryThumbWidthMax {
-				w = types.GalleryThumbWidthMax
+			if w > types.GalleryThumbColsMax {
+				w = types.GalleryThumbColsMax
 			}
-			g.ThumbWidth = w
+			g.ThumbCols = w
 		}
 		merged.Gallery = g
 	}
