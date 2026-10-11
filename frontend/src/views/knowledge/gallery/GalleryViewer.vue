@@ -12,14 +12,14 @@ export interface GalleryAttrRow {
 }
 
 const props = defineProps<{
-  /** The images of the page on screen; the viewer walks them in order. */
+  /** The loaded images; the viewer walks them in order. */
   items: ImageAsset[]
   index: number
   /** Position of items[0] in the whole result set, so the counter and the
    *  prev/next bounds speak about every image, not just this page. */
   offset: number
   total: number
-  /** A neighbouring page is being fetched; navigation waits for it. */
+  /** More images are being fetched; navigation waits for them. */
   loading: boolean
   thumbUrls: Record<string, string>
   resolveSrc: (url: string) => Promise<string>
@@ -29,7 +29,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'close'): void
   (e: 'select', index: number): void
-  /** Step past the page edge; the gallery loads the neighbouring page. */
+  /** Step past the loaded edge; the gallery loads more images. */
   (e: 'step', delta: 1 | -1): void
   (e: 'open-source', knowledgeId: string): void
 }>()

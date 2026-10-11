@@ -32,8 +32,10 @@ const loading = ref(false)
 const error = ref('')
 const items = ref<ImageAsset[]>([])
 const total = ref(0)
-const page = ref(1)
-const pageSize = ref(24)
+const page = ref(0)
+const pageSize = 24
+const exhausted = ref(false)
+const hasMore = computed(() => !exhausted.value && page.value * pageSize < total.value)
 
 const keyword = ref('')
 const sortBy = ref('')
@@ -42,6 +44,11 @@ const sortOrder = ref<'asc' | 'desc'>('desc')
 const filterPanelVisible = ref(false)
 const sortPanelVisible = ref(false)
 const scrollEl = ref<HTMLElement | null>(null)
+const gridEl = ref<HTMLElement | null>(null)
+const loadMoreEl = ref<HTMLElement | null>(null)
+const imageRatios = ref<Record<string, number>>({})
+let cardObserver: ResizeObserver | undefined
+let scrollObserver: ResizeObserver | undefined
 
 // Attribute selections for free-text ("keywords") attributes: namespaced attr
 // id -> literal values (OR within the attribute, AND across attributes).
@@ -135,19 +142,42 @@ function resolveImageSrc(rawUrl: string): Promise<string> {
   return pending
 }
 
-async function resolveThumbnails(token: number) {
-  const imgs = items.value
-  const urls = await Promise.all(imgs.map((img) => resolveImageSrc(img.url)))
-  // A newer listing owns the grid now; its own pass maps the thumbnails.
-  if (token !== listToken) return
-  const next: Record<string, string> = {}
-  imgs.forEach((img, i) => {
-    next[img.id] = urls[i]
+async function resolveThumbnails(imgs: ImageAsset[], token: number) {
+  await Promise.all(imgs.map(async (img) => {
+    const url = await resolveImageSrc(img.url)
+    if (token !== listToken) return
+    thumbUrls.value[img.id] = url
+  }))
+  if (token === listToken) releaseBlobs(new Set(items.value.map((img) => img.url)))
+}
+
+function onThumbLoad(id: string, event: Event) {
+  const image = event.target as HTMLImageElement
+  if (image.naturalWidth && image.naturalHeight) {
+    imageRatios.value[id] = image.naturalWidth / image.naturalHeight
+  }
+}
+
+// Keep DOM order (and keyboard/viewer order) while cards span only the rows
+// their natural image height needs. Existing cards stay put when appending.
+function observeCards() {
+  cardObserver?.disconnect()
+  const cards = Array.from(gridEl.value?.querySelectorAll<HTMLElement>('.ig-card') ?? [])
+  const spans = cards.map((card) => Math.ceil((card.getBoundingClientRect().height + 12) / 13))
+  cards.forEach((card, index) => {
+    card.style.gridRowEnd = `span ${spans[index]}`
+    cardObserver?.observe(card)
   })
-  // Revoke blob URLs that are no longer on screen to avoid leaks.
-  releaseBlobs(new Set(imgs.map((img) => img.url)))
-  thumbUrls.value = next
-  thumbBroken.value = {}
+}
+
+function checkLoadMore() {
+  if (loading.value || error.value || viewerOpen.value || !hasMore.value) return
+  const scroll = scrollEl.value
+  const sentinel = loadMoreEl.value
+  if (scroll && sentinel && scroll.clientHeight > 0 &&
+      sentinel.getBoundingClientRect().top <= scroll.getBoundingClientRect().bottom + 300) {
+    void loadMore()
+  }
 }
 
 function onThumbError(id: string) {
@@ -395,49 +425,63 @@ function buildParams(): ImageListParams {
     sortOrder: sortOrder.value,
     attrFilters: Object.keys(selections).length ? selections : undefined,
     attrRules: Object.keys(rules).length ? rules : undefined,
-    page: page.value,
-    pageSize: pageSize.value,
+    page: 1,
+    pageSize,
   }
 }
 
-// Bumped by every listing, so a slower earlier response (a debounced search
-// overtaken by a page change) cannot overwrite the grid of a newer query.
+// A query owns all of its appended pages; stale responses cannot replace it.
 let listToken = 0
+let queryParams: ImageListParams = {}
 
-/**
- * Fetch the current page. `focus` is where the viewer lands on the new page
- * when it walked past a page edge; it is applied together with the new items
- * so the viewer never renders a stale index against them.
- */
-async function reload(focus?: 'first' | 'last') {
-  if (!props.knowledgeBaseId) return
-  const token = ++listToken
+async function fetchPage(append: boolean): Promise<boolean> {
+  if (!props.knowledgeBaseId) return false
+  const token = listToken
+  const nextPage = append ? page.value + 1 : 1
   loading.value = true
   error.value = ''
   try {
-    const res = await listGalleryImages(props.knowledgeBaseId, buildParams())
-    if (token !== listToken) return
-    items.value = res.items
+    const res = await listGalleryImages(props.knowledgeBaseId, { ...queryParams, page: nextPage })
+    if (token !== listToken) return false
+    const existing = new Set(items.value.map((img) => img.id))
+    const incoming = res.items.filter((img) => !existing.has(img.id))
+    items.value = append ? [...items.value, ...incoming] : res.items
+    page.value = nextPage
     total.value = res.total
-    if (focus && res.items.length) viewerIndex.value = focus === 'first' ? 0 : res.items.length - 1
-    else if (viewerOpen.value && viewerIndex.value >= res.items.length) closeViewer()
-    void resolveThumbnails(token)
+    exhausted.value = res.items.length === 0
+    void resolveThumbnails(append ? incoming : res.items, token)
+    await nextTick()
+    observeCards()
+    return true
   } catch (e) {
-    if (token !== listToken) return
-    error.value = e instanceof Error ? e.message : String(e)
-    items.value = []
-    total.value = 0
-    thumbUrls.value = {}
-    closeViewer()
+    if (token === listToken) error.value = e instanceof Error ? e.message : String(e)
+    return false
   } finally {
-    if (token === listToken) loading.value = false
+    if (token === listToken) {
+      loading.value = false
+      void nextTick(checkLoadMore)
+    }
   }
 }
 
+function loadMore(): Promise<boolean> {
+  if (loading.value || !hasMore.value) return Promise.resolve(false)
+  return fetchPage(true)
+}
+
 function resetPageAndReload() {
-  page.value = 1
+  listToken++
+  viewerOpen.value = false
+  items.value = []
+  total.value = 0
+  page.value = 0
+  exhausted.value = false
+  thumbUrls.value = {}
+  thumbBroken.value = {}
+  imageRatios.value = {}
+  queryParams = buildParams()
   scrollGridToTop()
-  reload()
+  return fetchPage(false)
 }
 
 function scrollGridToTop() {
@@ -455,12 +499,6 @@ function onSearchNow() {
   resetPageAndReload()
 }
 
-function onPageChange(next: number) {
-  page.value = next
-  scrollGridToTop()
-  reload()
-}
-
 // ---------------------------------------------------------------------------
 // Viewer
 // ---------------------------------------------------------------------------
@@ -475,7 +513,7 @@ function openViewer(index: number) {
 function closeViewer() {
   if (!viewerOpen.value) return
   viewerOpen.value = false
-  // The viewer may have walked onto another image, or another page; bring
+  // The viewer may have walked onto another image; bring
   // the card it stopped on into view so the grid picks up where it left off.
   const index = viewerIndex.value
   void nextTick(() => {
@@ -485,12 +523,14 @@ function closeViewer() {
   })
 }
 
-/** The viewer walked past the edge of this page: load the neighbour. */
+/** At the loaded edge, append the next batch and keep the viewer continuous. */
 async function onViewerStep(delta: 1 | -1) {
-  const target = page.value + delta
-  if (target < 1 || (target - 1) * pageSize.value >= total.value) return
-  page.value = target
-  await reload(delta > 0 ? 'first' : 'last')
+  if (delta < 0) return
+  const token = listToken
+  const nextIndex = items.value.length
+  if (await loadMore() && token === listToken && viewerOpen.value && items.value.length > nextIndex) {
+    viewerIndex.value = nextIndex
+  }
 }
 
 function onOpenSource(knowledgeId: string) {
@@ -520,6 +560,9 @@ onBeforeUnmount(() => {
   if (searchTimer) clearTimeout(searchTimer)
   // Orphan any in-flight listing so it cannot map new blobs after unmount.
   listToken++
+  initToken++
+  cardObserver?.disconnect()
+  scrollObserver?.disconnect()
   releaseBlobs()
 })
 
@@ -534,10 +577,13 @@ let initToken = 0
 // everything scoped to the previous knowledge base is dropped first.
 async function initGallery() {
   const token = ++initToken
+  listToken++
+  if (searchTimer) clearTimeout(searchTimer)
+  error.value = ''
   viewerOpen.value = false
   items.value = []
   total.value = 0
-  page.value = 1
+  page.value = 0
   keyword.value = ''
   sortBy.value = ''
   attrSelections.value = {}
@@ -563,10 +609,26 @@ async function initGallery() {
   if (!sortBy.value && sortAttrs.value.length) {
     sortBy.value = sortAttrs.value.find((a) => a.id === DEFAULT_SORT_ID)?.id ?? sortAttrs.value[0].id
   }
-  await reload()
+  await resetPageAndReload()
 }
 
-onMounted(initGallery)
+onMounted(() => {
+  cardObserver = new ResizeObserver((entries) => {
+    for (const entry of entries) {
+      const card = entry.target as HTMLElement
+      const height = card.getBoundingClientRect().height
+      card.style.gridRowEnd = `span ${Math.ceil((height + 12) / 13)}`
+    }
+    void nextTick(checkLoadMore)
+  })
+  scrollObserver = new ResizeObserver(checkLoadMore)
+  if (scrollEl.value) scrollObserver.observe(scrollEl.value)
+  void initGallery()
+})
+
+watch(viewerOpen, (open) => {
+  if (!open) void nextTick(checkLoadMore)
+})
 
 watch(
   () => props.knowledgeBaseId,
@@ -759,9 +821,12 @@ watch(
       </div>
     </div>
 
-    <div ref="scrollEl" class="ig-scroll" :class="{ 'is-empty': !items.length }">
-      <t-loading :loading="loading" size="small" class="ig-loading">
-        <div v-if="error" class="ig-error">{{ error }}</div>
+    <div ref="scrollEl" class="ig-scroll" :class="{ 'is-empty': !items.length }" @scroll.passive="checkLoadMore">
+      <t-loading :loading="loading && !items.length" size="small" class="ig-loading">
+        <div v-if="error && !items.length" class="ig-error" role="alert">
+          {{ error }}
+          <t-button variant="text" @click="resetPageAndReload">{{ t('common.retry') }}</t-button>
+        </div>
 
         <EmptyState
           v-else-if="!items.length && !loading"
@@ -772,7 +837,7 @@ watch(
           <t-button v-if="isNarrowed" variant="outline" @click="clearAll">{{ t(`${NS}.clearFilters`) }}</t-button>
         </EmptyState>
 
-        <div v-else class="ig-grid">
+        <div v-else ref="gridEl" class="ig-grid">
           <button
             v-for="(img, idx) in items"
             :key="img.id"
@@ -781,13 +846,14 @@ watch(
             :class="{ 'is-disabled': !img.is_enabled }"
             @click="openViewer(idx)"
           >
-            <div class="ig-card__thumb">
+            <div class="ig-card__thumb" :style="{ aspectRatio: imageRatios[img.id] || 4 / 3 }">
               <img
                 v-if="thumbUrls[img.id] && !thumbBroken[img.id]"
                 :src="thumbUrls[img.id]"
                 :alt="img.caption"
                 loading="lazy"
                 draggable="false"
+                @load="onThumbLoad(img.id, $event)"
                 @error="onThumbError(img.id)"
               />
               <div v-else-if="thumbBroken[img.id]" class="ig-card__broken">
@@ -810,25 +876,22 @@ watch(
           </button>
         </div>
       </t-loading>
-    </div>
-
-    <div v-if="total > pageSize" class="ig-footer">
-      <t-pagination
-        :total="total"
-        :page-size="pageSize"
-        :current="page"
-        :show-page-size="false"
-        :total-content="false"
-        size="small"
-        @current-change="onPageChange"
-      />
+      <div v-if="items.length" ref="loadMoreEl" class="ig-load-more" aria-live="polite">
+        <template v-if="error">
+          <span class="ig-error" role="alert">{{ error }}</span>
+          <t-button variant="text" @click="loadMore">{{ t('common.retry') }}</t-button>
+        </template>
+        <t-loading v-else-if="loading" size="small" :text="t('common.loading')" />
+        <t-button v-else-if="hasMore" variant="text" @click="loadMore">{{ t('common.loadMore') }}</t-button>
+        <span v-else>{{ t('common.noMoreData') }}</span>
+      </div>
     </div>
 
     <GalleryViewer
       v-if="viewerOpen && items.length"
       :items="items"
       :index="viewerIndex"
-      :offset="(page - 1) * pageSize"
+      :offset="0"
       :total="total"
       :loading="loading"
       :thumb-urls="thumbUrls"
@@ -1176,9 +1239,10 @@ watch(
 }
 
 .ig-loading {
-  min-height: 100%;
   display: flex;
   flex-direction: column;
+
+  .is-empty & { min-height: 100%; }
 }
 
 .ig-error {
@@ -1189,7 +1253,9 @@ watch(
 .ig-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(min(180px, 100%), 1fr));
+  grid-auto-rows: 1px;
   gap: 12px;
+  align-items: start;
   align-content: start;
 }
 
@@ -1225,7 +1291,7 @@ watch(
 
   &__thumb {
     position: relative;
-    aspect-ratio: 4 / 3;
+    width: 100%;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -1235,7 +1301,7 @@ watch(
     img {
       width: 100%;
       height: 100%;
-      object-fit: cover;
+      object-fit: contain;
       transition: transform var(--app-motion-slow) ease;
     }
   }
@@ -1300,12 +1366,15 @@ watch(
   }
 }
 
-.ig-footer {
+.ig-load-more {
   display: flex;
-  justify-content: flex-end;
-  flex-shrink: 0;
-  padding: 12px 0 16px;
-  border-top: 1px solid var(--td-component-stroke);
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 56px;
+  padding: 16px 0;
+  color: var(--td-text-color-placeholder);
+  font-size: var(--app-text-sm);
 }
 
 @container image-gallery (max-width: 780px) {
