@@ -12,7 +12,7 @@ const source = readFileSync(new URL('./ImageGallery.vue', import.meta.url), 'utf
   .split('<script setup lang="ts">')[1].split('</script>')[0]
 const compiled = ts.transpileModule(`${source}\nexport {
   items, page, total, loading, error, keyword, hasMore, viewerIndex, viewerOpen,
-  resetPageAndReload, loadMore, openViewer, onViewerStep, initGallery,
+  reload, loadMore, openViewer, onViewerLoadMore, initGallery,
 }`, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
 
 function setup() {
@@ -52,7 +52,7 @@ function setup() {
 
 test('scroll appends unique images, serializes requests, and stops at the total', async () => {
   const { state, calls, respond, ids } = setup()
-  const first = state.resetPageAndReload()
+  const first = state.reload()
   respond(0, ['a', 'b'])
   await first
   const next = state.loadMore()
@@ -68,7 +68,7 @@ test('scroll appends unique images, serializes requests, and stops at the total'
 
 test('append failures retain cards and retry the same page', async () => {
   const { state, calls, respond, ids } = setup()
-  const first = state.resetPageAndReload()
+  const first = state.reload()
   respond(0, ['a'])
   await first
   const next = state.loadMore()
@@ -87,13 +87,13 @@ test('append failures retain cards and retry the same page', async () => {
 
 test('a new search discards an older append and resets the viewer', async () => {
   const { state, calls, respond, ids } = setup()
-  const first = state.resetPageAndReload()
+  const first = state.reload()
   respond(0, ['a'])
   await first
   state.openViewer(0)
-  const older = state.onViewerStep(1)
+  const older = state.onViewerLoadMore()
   state.keyword.value = 'new search'
-  const fresh = state.resetPageAndReload()
+  const fresh = state.reload()
   assert.equal(state.viewerOpen.value, false)
   assert.equal(calls[2].params.keyword, 'new search')
   respond(2, ['new'], 1)
@@ -106,11 +106,11 @@ test('a new search discards an older append and resets the viewer', async () => 
 
 test('viewer loads past the last card without dropping previous images', async () => {
   const { state, respond, ids } = setup()
-  const first = state.resetPageAndReload()
+  const first = state.reload()
   respond(0, ['a', 'b'])
   await first
   state.openViewer(1)
-  const step = state.onViewerStep(1)
+  const step = state.onViewerLoadMore()
   respond(1, ['c', 'd'])
   await step
   assert.deepEqual(ids(), ['a', 'b', 'c', 'd'])
@@ -120,7 +120,7 @@ test('viewer loads past the last card without dropping previous images', async (
 
 test('switching knowledge bases invalidates the previous request immediately', async () => {
   const { state, props, calls, respond, ids } = setup()
-  const old = state.resetPageAndReload()
+  const old = state.reload()
   props.knowledgeBaseId = 'kb-2'
   const fresh = state.initGallery()
   respond(0, ['old'])
@@ -133,10 +133,9 @@ test('switching knowledge bases invalidates the previous request immediately', a
   assert.deepEqual(ids(), ['new'])
 })
 
-
 test('an empty batch stops automatic loading even if the total is stale', async () => {
   const { state, respond, calls } = setup()
-  const first = state.resetPageAndReload()
+  const first = state.reload()
   respond(0, ['a'])
   await first
   const next = state.loadMore()

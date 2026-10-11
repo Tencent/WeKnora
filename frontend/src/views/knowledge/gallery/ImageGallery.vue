@@ -160,14 +160,18 @@ function onThumbLoad(id: string, event: Event) {
 
 // Keep DOM order (and keyboard/viewer order) while cards span only the rows
 // their natural image height needs. Existing cards stay put when appending.
-function observeCards() {
-  cardObserver?.disconnect()
-  const cards = Array.from(gridEl.value?.querySelectorAll<HTMLElement>('.ig-card') ?? [])
+function sizeCards(cards: HTMLElement[]) {
   const spans = cards.map((card) => Math.ceil((card.getBoundingClientRect().height + 12) / 13))
   cards.forEach((card, index) => {
     card.style.gridRowEnd = `span ${spans[index]}`
-    cardObserver?.observe(card)
   })
+}
+
+function observeCards() {
+  cardObserver?.disconnect()
+  const cards = Array.from(gridEl.value?.querySelectorAll<HTMLElement>('.ig-card') ?? [])
+  sizeCards(cards)
+  cards.forEach((card) => cardObserver?.observe(card))
 }
 
 function checkLoadMore() {
@@ -318,7 +322,7 @@ function setVerdict(attrId: string, value: string, verdict: Verdict): void {
   if (verdict === 'default') delete perValue[value]
   else perValue[value] = verdict
   attrVerdicts.value = { ...attrVerdicts.value, [attrId]: perValue }
-  resetPageAndReload()
+  reload()
 }
 
 function verdictLabel(v: Verdict): string {
@@ -333,7 +337,7 @@ function onKeywordsInput(attrId: string, raw: string) {
     .map((s) => s.trim())
     .filter(Boolean)
   attrSelections.value = { ...attrSelections.value, [attrId]: values }
-  resetPageAndReload()
+  reload()
 }
 
 function keywordsInputValue(attrId: string): string {
@@ -348,7 +352,7 @@ function clearFilters(): void {
     searchMode.value = 'all'
     persistSearchPrefs()
   }
-  resetPageAndReload()
+  reload()
 }
 
 /** The empty state's way back: forget the keyword as well. */
@@ -384,7 +388,7 @@ function onSearchFieldToggle(attrId: string, checked: boolean) {
   searchStatus.value = next
   searchMode.value = on.size === searchAttrs.value.length ? 'all' : 'custom'
   persistSearchPrefs()
-  if (keyword.value.trim()) resetPageAndReload()
+  if (keyword.value.trim()) reload()
 }
 
 function isLastSearchField(attrId: string): boolean {
@@ -403,13 +407,13 @@ const sortFieldLabel = computed(() => {
 function selectSortField(id: string): void {
   if (sortBy.value === id) return
   sortBy.value = id
-  resetPageAndReload()
+  reload()
 }
 
 function selectSortOrder(order: 'asc' | 'desc'): void {
   if (sortOrder.value === order) return
   sortOrder.value = order
-  resetPageAndReload()
+  reload()
 }
 
 // ---------------------------------------------------------------------------
@@ -425,7 +429,6 @@ function buildParams(): ImageListParams {
     sortOrder: sortOrder.value,
     attrFilters: Object.keys(selections).length ? selections : undefined,
     attrRules: Object.keys(rules).length ? rules : undefined,
-    page: 1,
     pageSize,
   }
 }
@@ -434,10 +437,10 @@ function buildParams(): ImageListParams {
 let listToken = 0
 let queryParams: ImageListParams = {}
 
-async function fetchPage(append: boolean): Promise<boolean> {
+async function fetchNextPage(): Promise<boolean> {
   if (!props.knowledgeBaseId) return false
   const token = listToken
-  const nextPage = append ? page.value + 1 : 1
+  const nextPage = page.value + 1
   loading.value = true
   error.value = ''
   try {
@@ -445,11 +448,11 @@ async function fetchPage(append: boolean): Promise<boolean> {
     if (token !== listToken) return false
     const existing = new Set(items.value.map((img) => img.id))
     const incoming = res.items.filter((img) => !existing.has(img.id))
-    items.value = append ? [...items.value, ...incoming] : res.items
+    items.value.push(...incoming)
     page.value = nextPage
     total.value = res.total
     exhausted.value = res.items.length === 0
-    void resolveThumbnails(append ? incoming : res.items, token)
+    void resolveThumbnails(incoming, token)
     await nextTick()
     observeCards()
     return true
@@ -466,10 +469,10 @@ async function fetchPage(append: boolean): Promise<boolean> {
 
 function loadMore(): Promise<boolean> {
   if (loading.value || !hasMore.value) return Promise.resolve(false)
-  return fetchPage(true)
+  return fetchNextPage()
 }
 
-function resetPageAndReload() {
+function resetResults() {
   listToken++
   viewerOpen.value = false
   items.value = []
@@ -479,24 +482,24 @@ function resetPageAndReload() {
   thumbUrls.value = {}
   thumbBroken.value = {}
   imageRatios.value = {}
-  queryParams = buildParams()
-  scrollGridToTop()
-  return fetchPage(false)
+  scrollEl.value?.scrollTo({ top: 0 })
 }
 
-function scrollGridToTop() {
-  scrollEl.value?.scrollTo({ top: 0 })
+function reload() {
+  resetResults()
+  queryParams = buildParams()
+  return fetchNextPage()
 }
 
 let searchTimer: ReturnType<typeof setTimeout> | undefined
 function onSearchInput() {
   if (searchTimer) clearTimeout(searchTimer)
-  searchTimer = setTimeout(() => resetPageAndReload(), 350)
+  searchTimer = setTimeout(() => reload(), 350)
 }
 
 function onSearchNow() {
   if (searchTimer) clearTimeout(searchTimer)
-  resetPageAndReload()
+  reload()
 }
 
 // ---------------------------------------------------------------------------
@@ -524,8 +527,7 @@ function closeViewer() {
 }
 
 /** At the loaded edge, append the next batch and keep the viewer continuous. */
-async function onViewerStep(delta: 1 | -1) {
-  if (delta < 0) return
+async function onViewerLoadMore() {
   const token = listToken
   const nextIndex = items.value.length
   if (await loadMore() && token === listToken && viewerOpen.value && items.value.length > nextIndex) {
@@ -577,19 +579,13 @@ let initToken = 0
 // everything scoped to the previous knowledge base is dropped first.
 async function initGallery() {
   const token = ++initToken
-  listToken++
+  resetResults()
   if (searchTimer) clearTimeout(searchTimer)
   error.value = ''
-  viewerOpen.value = false
-  items.value = []
-  total.value = 0
-  page.value = 0
   keyword.value = ''
   sortBy.value = ''
   attrSelections.value = {}
   attrVerdicts.value = {}
-  thumbUrls.value = {}
-  thumbBroken.value = {}
   releaseBlobs()
   configLoaded.value = false
   config.value = { attribute_sources: [], attributes: [], mode: 'all', status: {} }
@@ -609,16 +605,12 @@ async function initGallery() {
   if (!sortBy.value && sortAttrs.value.length) {
     sortBy.value = sortAttrs.value.find((a) => a.id === DEFAULT_SORT_ID)?.id ?? sortAttrs.value[0].id
   }
-  await resetPageAndReload()
+  await reload()
 }
 
 onMounted(() => {
   cardObserver = new ResizeObserver((entries) => {
-    for (const entry of entries) {
-      const card = entry.target as HTMLElement
-      const height = card.getBoundingClientRect().height
-      card.style.gridRowEnd = `span ${Math.ceil((height + 12) / 13)}`
-    }
+    sizeCards(entries.map((entry) => entry.target as HTMLElement))
     void nextTick(checkLoadMore)
   })
   scrollObserver = new ResizeObserver(checkLoadMore)
@@ -825,7 +817,7 @@ watch(
       <t-loading :loading="loading && !items.length" size="small" class="ig-loading">
         <div v-if="error && !items.length" class="ig-error" role="alert">
           {{ error }}
-          <t-button variant="text" @click="resetPageAndReload">{{ t('common.retry') }}</t-button>
+          <t-button variant="text" @click="reload">{{ t('common.retry') }}</t-button>
         </div>
 
         <EmptyState
@@ -891,14 +883,13 @@ watch(
       v-if="viewerOpen && items.length"
       :items="items"
       :index="viewerIndex"
-      :offset="0"
       :total="total"
       :loading="loading"
       :thumb-urls="thumbUrls"
       :resolve-src="resolveImageSrc"
       :attr-rows="attrRows"
       @select="(i: number) => (viewerIndex = i)"
-      @step="onViewerStep"
+      @load-more="onViewerLoadMore"
       @close="closeViewer"
       @open-source="onOpenSource"
     />
