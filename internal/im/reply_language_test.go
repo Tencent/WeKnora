@@ -73,7 +73,10 @@ func TestFollowUserLanguagePersistsLocaleCode(t *testing.T) {
 	if persisted != "zh-CN" {
 		t.Fatalf("persisted language = %q, want zh-CN", persisted)
 	}
-	ctx := s.withIMReplyLanguage(context.Background(), cs, &IncomingMessage{MessageType: MessageTypeText, Content: "ok"})
+	ctx := s.withIMReplyLanguage(context.Background(), cs, &IncomingMessage{
+		MessageType: MessageTypeText,
+		Content:     "ok",
+	})
 	if got, _ := types.LanguageFromContext(ctx); got != "zh-CN" {
 		t.Fatalf("remembered language = %q, want zh-CN", got)
 	}
