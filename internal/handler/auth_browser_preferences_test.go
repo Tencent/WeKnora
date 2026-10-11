@@ -73,3 +73,22 @@ func TestBrowserPreferenceAPIExposesDefaultAndUpdatesCurrentUser(t *testing.T) {
 	require.NotEmpty(t, c.Errors)
 	require.Empty(t, users.updatedUser, "invalid input must not reach the preference service")
 }
+
+func TestUpdateMyPreferencesPassesGalleryBlockThrough(t *testing.T) {
+	// The gallery block (search activation + view prefs) must survive the
+	// request whitelist: a regression here silently drops every gallery
+	// PATCH while the API still answers 200.
+	users := &browserPreferencesUserService{}
+	h := &AuthHandler{userService: users, configInfo: &config.Config{Tenant: &config.TenantConfig{}}}
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("PUT", "/auth/me/preferences", strings.NewReader(
+		`{"gallery":{"view_mode":"card","thumb_cols":6}}`,
+	))
+	c.Request.Header.Set("Content-Type", "application/json")
+	h.UpdateMyPreferences(c)
+	require.Equal(t, 200, w.Code)
+	require.NotNil(t, users.patch.Gallery, "gallery block must reach the preference service")
+	require.Equal(t, types.GalleryViewCard, users.patch.Gallery.ViewMode)
+	require.Equal(t, 6, users.patch.Gallery.ThumbCols)
+}
