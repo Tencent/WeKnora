@@ -3535,7 +3535,12 @@ export default {
         sourceFilterConfirmWithCount: 'Show images of these {count} documents',
         sourceFilterCancel: 'Cancel',
         sourceFilterClear: 'Clear selection',
-        sourceFilterTooMany: 'At most 50 documents can be selected',
+        sourceFilterTooMany: 'At most 1000 documents can be selected',
+        sourceFilterColName: 'File name',
+        sourceFilterColTime: 'Uploaded',
+        sourceFilterSelectAll: 'Select all / none (across every hit)',
+        sourceFilterOverflowRecent: 'Many documents: showing only the most recent {cap}. Refine with a keyword.',
+        sourceFilterOverflowHits: '{total} documents hit; showing the first {cap}. Narrow the keyword before selecting all.',
         // Display names for the builtin attributes the gallery itself
         // declares. Attributes contributed by other sources fall back to the
         // pipeline's own wording (see the imageAttr namespace).

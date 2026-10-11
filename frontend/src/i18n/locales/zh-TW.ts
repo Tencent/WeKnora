@@ -4568,7 +4568,12 @@ export default {
         sourceFilterConfirmWithCount: '查看這 {count} 個文件的圖片',
         sourceFilterCancel: '取消',
         sourceFilterClear: '清空已選',
-        sourceFilterTooMany: '最多只能選擇 50 個文件',
+        sourceFilterTooMany: '最多只能選擇 1000 個文件',
+        sourceFilterColName: '文件名稱',
+        sourceFilterColTime: '上傳時間',
+        sourceFilterSelectAll: '全選 / 全不選（含全部命中結果）',
+        sourceFilterOverflowRecent: '文件較多，僅顯示最近 {cap} 條，請輸入關鍵字精確定位',
+        sourceFilterOverflowHits: '命中 {total} 個文件，僅顯示前 {cap} 條，請細化關鍵字後再全選',
         // Display names for the builtin attributes the gallery itself
         // declares. Attributes contributed by other sources fall back to the
         // pipeline's own wording (see the imageAttr namespace).

@@ -90,6 +90,10 @@ func RegisterKnowledgeRoutes(r *gin.RouterGroup, handler *handler.KnowledgeHandl
 	kbImagesRead := kbImages.With(apiKeyRetrieve(apiKeyFullAccess()))
 	{
 		kbImagesRead.GET("/images", g.Viewer(), g.KBAccessRead("id"), handler.ListImages)
+		// Same listing with the filter as a JSON body: knowledge_ids escapes
+		// the URL-length cap, so the source picker's select-all can name
+		// every document of a large KB.
+		kbImagesRead.POST("/images", g.Viewer(), g.KBAccessRead("id"), handler.ListImagesPost)
 		// Self-describing gallery contract: live attribute sources, the
 		// resolved attribute list (definitions + merged usage) and the
 		// caller's search activation state. Per-KB because KB-defined
