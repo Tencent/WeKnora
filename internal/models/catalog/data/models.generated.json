@@ -1034,6 +1034,7 @@
         "api": "anthropic-messages",
         "compat": {
           "supports_temperature": false,
+          "supports_top_p": false,
           "thinking_mode": "adaptive",
           "supports_effort": true
         },
@@ -1067,6 +1068,7 @@
         "api": "anthropic-messages",
         "compat": {
           "supports_temperature": false,
+          "supports_top_p": false,
           "thinking_mode": "adaptive",
           "supports_effort": true
         },
@@ -1099,6 +1101,7 @@
         "api": "anthropic-messages",
         "compat": {
           "supports_temperature": false,
+          "supports_top_p": false,
           "thinking_mode": "adaptive",
           "supports_effort": true
         },
@@ -1131,6 +1134,7 @@
         "api": "anthropic-messages",
         "compat": {
           "supports_temperature": false,
+          "supports_top_p": false,
           "thinking_mode": "adaptive",
           "supports_effort": true
         },
@@ -1164,6 +1168,7 @@
         "api": "anthropic-messages",
         "compat": {
           "supports_temperature": false,
+          "supports_top_p": false,
           "thinking_mode": "adaptive",
           "supports_effort": true
         },
@@ -1196,6 +1201,7 @@
         "api": "anthropic-messages",
         "compat": {
           "supports_temperature": false,
+          "supports_top_p": false,
           "thinking_mode": "adaptive",
           "supports_effort": true
         },

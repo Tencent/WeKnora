@@ -7,6 +7,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/models"
 	"github.com/Tencent/WeKnora/internal/models/api"
+	"github.com/Tencent/WeKnora/internal/models/api/anthropicmessages"
 	"github.com/Tencent/WeKnora/internal/models/providers"
 	modelruntime "github.com/Tencent/WeKnora/internal/models/runtime"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -282,6 +283,11 @@ func TestOpenAIProtocolSelection(t *testing.T) {
 	}
 }
 
+// claudeNoSamplingModels reject non-default temperature/top_p/top_k values.
+var claudeNoSamplingModels = []string{
+	"claude-opus-4-7", "claude-opus-4-8", "claude-opus-5", "claude-sonnet-5", "claude-fable-5", "claude-fable-5-1",
+}
+
 func resolve(t *testing.T, provider, model string) *modelruntime.Resolved {
 	t.Helper()
 	r, err := modelruntime.Resolve(modelruntime.Ref{Provider: provider, Model: model})
@@ -304,14 +310,16 @@ func TestFamilyExpectations(t *testing.T) {
 	if r := resolve(t, "azure_openai", "gpt-5.4-prod"); r.OpenAICompletions.SupportsTemperature {
 		t.Error("azure gpt-5* deployment should not support temperature")
 	}
-	// Claude Opus 4.7 and later reject temperature/top_p/top_k with a 400, and
-	// Sonnet 5 rejects any non-default value, so the internal pipelines that set
-	// a fixed temperature must not send one to these models.
-	for _, model := range []string{
-		"claude-opus-4-7", "claude-opus-4-8", "claude-opus-5", "claude-sonnet-5", "claude-fable-5", "claude-fable-5-1",
-	} {
-		if r := resolve(t, "anthropic", model); r.AnthropicMessages.SupportsTemperature {
+	// Claude Opus 4.7 and later and Sonnet 5 reject non-default sampling
+	// values, so the internal pipelines that set a fixed temperature must not
+	// send temperature or top_p to these models.
+	for _, model := range claudeNoSamplingModels {
+		r := resolve(t, "anthropic", model)
+		if r.AnthropicMessages.SupportsTemperature {
 			t.Errorf("anthropic/%s should not support temperature", model)
+		}
+		if r.AnthropicMessages.SupportsTopP {
+			t.Errorf("anthropic/%s should not support top_p", model)
 		}
 	}
 	if r := resolve(t, "anthropic", "claude-sonnet-4-6"); !r.AnthropicMessages.SupportsTemperature {
@@ -565,5 +573,50 @@ func TestSignedRerankCredentialLabels(t *testing.T) {
 				t.Errorf("chat should keep the generic API-key wording, got %q", other.Label)
 			}
 		})
+	}
+}
+
+// TestClaudeNoSamplingRequestBody builds the request body the way NewRemoteChat
+// does, from the resolved catalog entry. With thinking off, the anthropic
+// adapter sends top_p when temperature is not supported, so both flags have to
+// be off for these models to receive neither field.
+func TestClaudeNoSamplingRequestBody(t *testing.T) {
+	build := func(t *testing.T, model string, effort api.ReasoningEffort) map[string]any {
+		t.Helper()
+		r := resolve(t, "anthropic", model)
+		c := anthropicmessages.New(anthropicmessages.Config{
+			Endpoint:       api.Endpoint{Model: r.RemoteModel},
+			Settings:       r.AnthropicMessages,
+			ThinkingLevels: r.ThinkingLevels,
+			Reasoning:      r.Spec.Reasoning,
+		})
+		body, err := c.BuildRequestBody(
+			[]api.Message{{Role: "user", Content: "Hi"}},
+			&api.Options{Temperature: 1, TopP: 0.9, ReasoningEffort: effort},
+			false,
+		)
+		if err != nil {
+			t.Fatalf("build %s: %v", model, err)
+		}
+		return body
+	}
+
+	for _, model := range claudeNoSamplingModels {
+		efforts := []api.ReasoningEffort{""}
+		if r := resolve(t, "anthropic", model); r.ThinkingLevels.Supports(api.ReasoningOff) {
+			efforts = append(efforts, api.ReasoningOff)
+		}
+		for _, effort := range efforts {
+			body := build(t, model, effort)
+			for _, field := range []string{"temperature", "top_p", "top_k"} {
+				if _, ok := body[field]; ok {
+					t.Errorf("anthropic/%s (reasoning %q) sent %s", model, effort, field)
+				}
+			}
+		}
+	}
+
+	if body := build(t, "claude-sonnet-4-6", api.ReasoningOff); body["temperature"] != 1.0 {
+		t.Errorf("anthropic/claude-sonnet-4-6 should still send temperature, got %v", body["temperature"])
 	}
 }
