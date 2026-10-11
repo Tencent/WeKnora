@@ -718,12 +718,16 @@
     <ContextualGuide tour="kbList" :when="showKbListContextualGuide" />
 
     <!-- Agent sidebar (agent-sidebar-inbox): the KB list page binds the
-         global session (no kbId) and docks the same 260px panel. -->
-    <button v-if="!showAgentSidebar" type="button" class="agent-sidebar-fab"
-      :aria-label="$t('knowledgeBase.agentSidebar.title')" :title="$t('knowledgeBase.agentSidebar.title')"
-      @click="showAgentSidebar = true">
-      <t-icon name="chat" size="16px" />
-    </button>
+         global session (no kbId); the handle is fixed to the viewport's
+         right edge (teleported to <body>, above the doc drawers) so it
+         stays reachable while any full-screen drawer is open. -->
+    <Teleport to="body">
+      <button v-if="!showAgentSidebar" type="button" class="agent-sidebar-fab"
+        :aria-label="$t('knowledgeBase.agentSidebar.title')" :title="$t('knowledgeBase.agentSidebar.title')"
+        @click="showAgentSidebar = true">
+        <t-icon name="chat" size="16px" />
+      </button>
+    </Teleport>
     <AgentSidebarDrawer v-model="showAgentSidebar" />
   </div>
 </template>
@@ -1590,9 +1594,10 @@ watch(keyword, () => { collapsedKbSections.value = new Set() })
   position: relative;
 }
 
-// Same right-edge invoke handle as the KB detail page (agent-sidebar-inbox).
+// Same right-edge invoke handle as the KB detail page (agent-sidebar-inbox):
+// fixed to the viewport's right edge, one layer above the doc drawers.
 .agent-sidebar-fab {
-  position: absolute;
+  position: fixed;
   right: 0;
   top: 50%;
   transform: translateY(-50%);
@@ -1606,11 +1611,19 @@ watch(keyword, () => { collapsedKbSections.value = new Set() })
   background: var(--td-brand-color);
   color: var(--td-text-color-anti);
   cursor: pointer;
-  z-index: 32;
+  z-index: 2001;
 
   &:hover {
     background: var(--td-brand-color-hover);
   }
+}
+
+// The dock teleports to <body> and is fixed to the viewport's right edge;
+// the list content reserves the dock's live width so opening the chat
+// still narrows the list instead of covering it. (Higher specificity than
+// the resource-list-content mixin, whose margin would otherwise win.)
+.kb-list-container > .kb-list-content {
+  margin-right: calc(16px + var(--agent-sidebar-w, 0px));
 }
 
 .kb-list-content { .resource-list-content(); }

@@ -2334,14 +2334,18 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
 <template>
   <template v-if="!isFAQ">
      <div class="knowledge-layout">
-      <!-- Agent sidebar invoke handle: docked to the right edge of the KB
-           module, shown on every KB page; hidden while the sidebar is open
-           (the drawer's own close button takes over). -->
-      <button v-if="!showAgentSidebar" type="button" class="agent-sidebar-fab"
-        :aria-label="$t('knowledgeBase.agentSidebar.title')" :title="$t('knowledgeBase.agentSidebar.title')"
-        @click="showAgentSidebar = true">
-        <t-icon name="chat" size="16px" />
-      </button>
+      <!-- Agent sidebar invoke handle: fixed to the viewport's right edge
+           (teleported to <body>, above the doc drawers' z-index) so it stays
+           reachable even while the full-screen document drawer is open;
+           hidden while the sidebar is open (the drawer's own close button
+           takes over). -->
+      <Teleport to="body">
+        <button v-if="!showAgentSidebar" type="button" class="agent-sidebar-fab"
+          :aria-label="$t('knowledgeBase.agentSidebar.title')" :title="$t('knowledgeBase.agentSidebar.title')"
+          @click="showAgentSidebar = true">
+          <t-icon name="chat" size="16px" />
+        </button>
+      </Teleport>
       <div class="document-header">
         <div class="document-header-title">
           <div class="document-title-row">
@@ -2751,10 +2755,11 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
 }
 
 // Right-edge invoke handle for the agent sidebar (agent-sidebar-inbox):
-// docked to the module's right border, vertically centered.
+// fixed to the viewport's right edge, one layer above the body-attached
+// doc drawers so summoning the chat stays possible while reading.
 .agent-sidebar-fab {
-  position: absolute;
-  right: -16px;
+  position: fixed;
+  right: 0;
   top: 50%;
   transform: translateY(-50%);
   width: 26px;
@@ -2767,7 +2772,7 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
   background: var(--td-brand-color);
   color: var(--td-text-color-anti);
   cursor: pointer;
-  z-index: 32;
+  z-index: 2001;
 
   &:hover {
     background: var(--td-brand-color-hover);
@@ -2840,17 +2845,16 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
   overflow-x: auto;
 }
 
+// The sidebar dock teleports to <body> and is fixed to the viewport's right
+// edge, so each tab pane reserves the dock's live width here instead: the
+// content still narrows when the chat opens, and never shrinks below 650px
+// — tighter windows collapse the folder tree first, then fall back to the
+// row's horizontal scrollbar (content simply scrolls beneath the dock).
 .kb-body-row > * {
-  min-width: 0;
-}
-
-// Every direct child except the sidebar dock takes the remaining width; the
-// dock manages its own width collapse/expand inside the component. Content
-// never shrinks below 650px — tighter windows collapse the folder tree
-// first, then fall back to the row's horizontal scrollbar.
-.kb-body-row > :not(.agent-sidebar-dock) {
   flex: 1 1 0;
   min-width: 650px;
+  min-height: 0;
+  margin-right: var(--agent-sidebar-w, 0px);
 }
 
 .wiki-main-area {

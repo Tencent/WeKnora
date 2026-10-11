@@ -1,35 +1,39 @@
 <template>
   <!-- Agent sidebar (agent-sidebar-inbox P1): a persistent chat panel bound
-       to the KB view. Docked inside the KB body row — opening it narrows the
-       main content instead of covering it, and it survives tab switches by
-       construction. Collapsed state is width:0 + hidden, so the panel keeps
-       its DOM (and the chat scrollback) across toggles. -->
-  <aside class="agent-sidebar-dock" :class="{ 'is-open': visible, 'is-resizing': resizing }"
-    :aria-hidden="!visible" :style="visible ? { width: `${sidebarWidth}px` } : undefined">
-    <!-- 左缘拖拽条：按住左右拖动调宽（260–640），松手持久化 -->
-    <div v-if="visible" class="agent-sidebar-resizer" role="separator" aria-orientation="vertical"
-      :aria-label="$t('knowledgeBase.agentSidebar.title')" @mousedown.prevent="startResize"></div>
-    <div class="agent-sidebar-panel" :style="{ width: `${sidebarWidth}px` }">
-      <header class="agent-sidebar-header">
-        <span class="agent-sidebar-title">{{ $t('knowledgeBase.agentSidebar.title') }}</span>
-        <button type="button" class="kb-settings-button" :aria-label="$t('knowledgeBase.agentSidebar.title')"
-          @click="visible = false">
-          <t-icon name="close" size="16px" />
-        </button>
-      </header>
-      <div class="agent-sidebar-body">
-        <t-loading :loading="sessionLoading" text="" size="small" show-overlay>
-          <!-- v-show (not v-if) so the conversation and scroll position stay
-               alive while the panel is closed. -->
-          <ChatView v-if="sessionId" v-show="visible" :session_id="sessionId" agentId="builtin-sidebar-assistant"
-            :kbIds="props.kbId ? [props.kbId] : []" :embeddedMode="true" />
-          <div v-else-if="!sessionLoading" class="agent-sidebar-empty">
-            {{ $t('knowledgeBase.agentSidebar.sessionError') }}
-          </div>
-        </t-loading>
+       to the KB view. Teleported to <body> and fixed to the viewport's right
+       edge — the same coordinate system as the body-attached doc drawers —
+       so the two always tile seamlessly, even when the page content
+       overflows horizontally (scrollbar fallback). The page reserves the
+       dock's live width via margin-right: var(--agent-sidebar-w), so
+       opening it still narrows the main content instead of covering it. -->
+  <teleport to="body">
+    <aside class="agent-sidebar-dock" :class="{ 'is-open': visible, 'is-resizing': resizing }"
+      :aria-hidden="!visible" :style="visible ? { width: `${sidebarWidth}px` } : undefined">
+      <!-- 左缘拖拽条：按住左右拖动调宽（260–640），松手持久化 -->
+      <div v-if="visible" class="agent-sidebar-resizer" role="separator" aria-orientation="vertical"
+        :aria-label="$t('knowledgeBase.agentSidebar.title')" @mousedown.prevent="startResize"></div>
+      <div class="agent-sidebar-panel" :style="{ width: `${sidebarWidth}px` }">
+        <header class="agent-sidebar-header">
+          <span class="agent-sidebar-title">{{ $t('knowledgeBase.agentSidebar.title') }}</span>
+          <button type="button" class="kb-settings-button" :aria-label="$t('knowledgeBase.agentSidebar.title')"
+            @click="visible = false">
+            <t-icon name="close" size="16px" />
+          </button>
+        </header>
+        <div class="agent-sidebar-body">
+          <t-loading :loading="sessionLoading" text="" size="small" show-overlay>
+            <!-- v-show (not v-if) so the conversation and scroll position stay
+                 alive while the panel is closed. -->
+            <ChatView v-if="sessionId" v-show="visible" :session_id="sessionId" agentId="builtin-sidebar-assistant"
+              :kbIds="props.kbId ? [props.kbId] : []" :embeddedMode="true" />
+            <div v-else-if="!sessionLoading" class="agent-sidebar-empty">
+              {{ $t('knowledgeBase.agentSidebar.sessionError') }}
+            </div>
+          </t-loading>
+        </div>
       </div>
-    </div>
-  </aside>
+    </aside>
+  </teleport>
 </template>
 
 <script setup lang="ts">
@@ -156,10 +160,16 @@ ensureSession();
 
 <style scoped>
 .agent-sidebar-dock {
-  position: relative;
-  flex: 0 0 auto;
+  /* Fixed to the viewport's right edge, one layer above the body-attached
+     doc drawers (z 2000): the reading pane and the chat then tile the
+     window edge-to-edge (drawer right == dock left) with no masked page
+     showing through, regardless of horizontal overflow. */
+  position: fixed;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  z-index: 2002;
   width: 0;
-  height: 100%;
   overflow: hidden;
   transition: width var(--app-motion-slow, 0.22s) ease;
 }
