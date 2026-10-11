@@ -1300,6 +1300,13 @@ func (s *userService) ValidateToken(ctx context.Context, tokenString string) (*t
 		return nil, 0, err
 	}
 
+	// A token minted before the account was disabled must not be honoured.
+	// Login already rejects disabled users, but long-lived access tokens are
+	// validated here on every request.
+	if !user.IsActive {
+		return nil, 0, errors.New("account is disabled")
+	}
+
 	// Extract active tenant from the JWT. Anything missing or unparseable
 	// falls back to the user's home tenant so old tokens (and tokens issued
 	// by code paths that don't yet set the claim) keep working.
