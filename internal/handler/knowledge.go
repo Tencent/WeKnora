@@ -1535,6 +1535,8 @@ func (h *KnowledgeHandler) GetGalleryConfig(c *gin.Context) {
 			"attributes":        resolved.Attributes,
 			"mode":              resolved.Mode,
 			"status":            status,
+			"view_mode":         resolved.ViewMode,
+			"thumb_cols":        resolved.ThumbCols,
 		},
 	})
 }
