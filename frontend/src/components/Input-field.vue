@@ -165,8 +165,16 @@ const agentModeButtonRef = ref<HTMLElement>();
 const agentModeDropdownStyle = ref<Record<string, string>>({});
 
 const selectedAgentId = computed({
-  get: () => settingsStore.selectedAgentId || BUILTIN_QUICK_ANSWER_ID,
-  set: (val: string) => settingsStore.selectAgent(val)
+  // KB 侧边栏（embeddedMode）的会话固定绑定宿主注入的 agent，读写都
+  // 不走全局设置：读保证按钮可用性/提及过滤按侧栏 agent 的配置解析，
+  // 写避免侧栏里的操作污染主会话的 agent 选择。
+  get: () => (props.embeddedMode && props.agentId)
+    ? props.agentId
+    : (settingsStore.selectedAgentId || BUILTIN_QUICK_ANSWER_ID),
+  set: (val: string) => {
+    if (props.embeddedMode) return;
+    settingsStore.selectAgent(val);
+  }
 });
 const selectedAgent = computed(() => {
   // When a shared-agent source tenant is set, resolve from sharedAgents FIRST.
@@ -535,6 +543,12 @@ const props = defineProps({
   assistantMessageId: {
     type: String,
     required: false
+  },
+  // KB 侧边栏（embeddedMode）下宿主 ChatView 注入的绑定 agent ID：
+  // 控件可用性/提及过滤按它解析，而非全局 settingsStore 的选择。
+  agentId: {
+    type: String,
+    default: ''
   },
   embeddedMode: {
     type: Boolean,
@@ -1886,9 +1900,11 @@ let scrollHandler: (() => void) | null = null;
 
 onMounted(() => {
   if (props.autoFocus) void focusInput();
-  // Embed 渠道由宿主注入 agent/KB，勿拉取需 JWT 的平台资源
-  if (props.embeddedMode) return;
-
+  // KB 侧边栏（embeddedMode）运行在已登录 SPA 内，输入区控件需要共享的
+  // 平台资源（agents/KB 列表/浏览器状态）；只有模型选择初始化仍跳过——
+  // 会话的模型由宿主 ChatView 决定。真正的公开 Embed 渠道走独立的
+  // EmbedInputField，不经此分支。
+  if (!props.embeddedMode) initChatModelSelection();
   browserConnection.watchStatus();
 
   // 并行拉取；若 platform 已预取且缓存未过期则直接复用
@@ -2761,35 +2777,13 @@ defineExpose({
 
       <!-- 控制栏按文档流排列，换行时自动撑开容器 -->
       <div class="control-bar" :class="{ 'is-embedded': embeddedMode }">
-        <!-- 嵌入式（KB 侧边栏等）：保留模型选择（embedded 下 modelId 照常
-             随 startStream 提交），其余模式/知识库/上传控制仍归宿主页面。 -->
-        <div v-if="embeddedMode" class="control-left">
-          <!-- 模型显示 -->
-          <t-tooltip :content="isModelLockedByAgent ? $t('input.modelLockedByAgent') : ''"
-            :disabled="!isModelLockedByAgent">
-            <div class="model-display" :class="{ 'agent-controlled': isModelLockedByAgent }">
-              <div ref="modelButtonRef" class="model-selector-trigger" @click.stop="toggleModelSelector">
-                <span class="model-selector-name">
-                  {{ selectedModelDisplayName }}
-                </span>
-                <span
-                  v-if="selectedModelContextLabel"
-                  class="model-selector-ctx"
-                  :class="{ 'is-default': selectedModelContextIsDefault }"
-                  :title="selectedModelContextTitle"
-                >{{ selectedModelContextLabel }}</span>
-                <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor" class="model-dropdown-arrow"
-                  :class="{ 'rotate': showModelSelector }">
-                  <path d="M2.5 4.5L6 8L9.5 4.5H2.5Z" />
-                </svg>
-              </div>
-            </div>
-          </t-tooltip>
-        </div>
-        <!-- 左侧控制按钮 -->
-        <div class="control-left" v-if="!embeddedMode">
+        <!-- 左侧控制按钮。KB 侧边栏（embeddedMode）与主会话同款控件；
+             仅智能体下拉（侧栏会话固定绑定 builtin-sidebar-assistant，
+             下拉会造成可切换的假象）与 reasoning 档位（embedded 发送链路
+             强制 undefined）不渲染。 -->
+        <div class="control-left">
           <!-- Agent 模式切换按钮 -->
-          <div ref="agentModeButtonRef" class="control-btn agent-mode-btn" :class="{
+          <div v-if="!embeddedMode" ref="agentModeButtonRef" class="control-btn agent-mode-btn" :class="{
             'is-normal': !isCustomAgent && !isAgentEnabled,
             'is-agent': !isCustomAgent && isAgentEnabled,
             'is-custom': isCustomAgent
@@ -2804,7 +2798,7 @@ defineExpose({
           </div>
 
           <!-- Agent 选择器下拉菜单 -->
-          <AgentSelector :visible="showAgentModeSelector" :anchorEl="agentModeButtonRef"
+          <AgentSelector v-if="!embeddedMode" :visible="showAgentModeSelector" :anchorEl="agentModeButtonRef"
             :currentAgentId="selectedAgentId" :agents="enabledAgents" :all-models="allModels"
             @close="closeAgentModeSelector" @select="handleSelectAgent" @not-ready="handleAgentNotReady" />
 
@@ -2948,7 +2942,7 @@ defineExpose({
               </div>
             </div>
           </t-tooltip>
-          <t-popup v-if="reasoningLevels.length > 0" v-model:visible="showReasoningSelector"
+          <t-popup v-if="!embeddedMode && reasoningLevels.length > 0" v-model:visible="showReasoningSelector"
             trigger="click" placement="top-right" :disabled="composerLocked"
             :overlay-inner-style="{ padding: '4px', borderRadius: 'var(--app-radius-lg)' }"
             @visible-change="handleReasoningVisibleChange">

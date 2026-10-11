@@ -1147,12 +1147,13 @@ watch(activeKbTab, (tab) => {
 // ── Agent sidebar (agent-sidebar-inbox P1) ──────────────────────────────
 const showAgentSidebar = ref(false);
 
-// Width contract (agent-sidebar-inbox): the sidebar is a fixed 260px dock
-// and the main content never shrinks below 650px. When both cannot fit, the
-// folder tree yields first (auto-collapse); only when even the bare content
-// cannot fit does the body row scroll horizontally. A manual re-expand of
-// the tree wins over the auto-collapse for the rest of the open cycle.
-const AGENT_SIDEBAR_WIDTH = 260;
+// Width contract (agent-sidebar-inbox): the sidebar is a draggable dock
+// (default 420px, min 260) and the main content never shrinks below 650px.
+// When both cannot fit, the folder tree yields first (auto-collapse); only
+// when even the bare content cannot fit does the body row scroll
+// horizontally. A manual re-expand of the tree wins over the auto-collapse
+// for the rest of the open cycle.
+const AGENT_SIDEBAR_WIDTH = 420;
 const CONTENT_MIN_WIDTH = 650;
 const FOLDER_TREE_WIDTH_ALLOWANCE = 236;
 const kbBodyRowRef = ref<HTMLElement | null>(null);
@@ -1170,7 +1171,11 @@ const syncTreeForSidebarSpace = () => {
     return;
   }
   const rowWidth = kbBodyRowRef.value?.clientWidth ?? window.innerWidth;
-  const contentWidth = rowWidth - AGENT_SIDEBAR_WIDTH - 16;
+  // Measure the live dock width (the sidebar is draggable, so the constant
+  // is only a fallback) so the auto-collapse math tracks the real layout.
+  const dockWidth = document.querySelector('.agent-sidebar-dock')?.getBoundingClientRect().width
+    || AGENT_SIDEBAR_WIDTH;
+  const contentWidth = rowWidth - dockWidth - 16;
   const tight = contentWidth - FOLDER_TREE_WIDTH_ALLOWANCE < CONTENT_MIN_WIDTH;
   if (tight && !folderTreeCollapsed.value && showFolderTree.value && !treeAutoOverride.value) {
     treeStateBeforeAutoHide = folderTreeCollapsed.value;

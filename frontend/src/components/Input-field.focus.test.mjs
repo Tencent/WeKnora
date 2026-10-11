@@ -70,10 +70,13 @@ test('new-session focus survives consumption of the first query and runs on chil
   const autoFocus = vm.runInNewContext(`${snapshot}\nfirstQuery.value = ''; focusComposerOnMount`, { firstQuery })
   assert.equal(autoFocus, true)
   assert.match(page, /:auto-focus="focusComposerOnMount"/)
-  const mountStart = source.slice(source.indexOf('onMounted(() => {'), source.indexOf('// Embed 渠道'))
+  // 切片到 watchStatus 行：onMounted 里 autoFocus 分支在其之前，且
+  // embedded 分支的 initChatModelSelection 调用需要桩。
+  const mountStart = source.slice(source.indexOf('onMounted(() => {'), source.indexOf('browserConnection.watchStatus()'))
   let mounted, focused = false
   vm.runInNewContext(`${mountStart}\n});`, {
     props: { autoFocus }, onMounted: fn => { mounted = fn }, focusInput: () => { focused = true },
+    initChatModelSelection: () => {},
   })
   assert.equal(focused, false)
   mounted()
