@@ -402,12 +402,8 @@ func (s *sessionService) buildAgentConfig(
 	agentConfig.KnowledgeBases = kbIDs
 	agentConfig.KnowledgeIDs = knowledgeIDs
 
-	// Use custom agent's allowed tools if specified, otherwise use defaults
-	if len(customAgent.Config.AllowedTools) > 0 {
-		agentConfig.AllowedTools = customAgent.Config.AllowedTools
-	} else {
-		agentConfig.AllowedTools = tools.DefaultAllowedTools()
-	}
+	// An unset list selects the default tools; an empty one means none.
+	agentConfig.AllowedTools = tools.EffectiveAllowedTools(customAgent.Config.AllowedTools)
 	// Apply per-turn @Skill / @MCP scope. Each helper narrows the agent's
 	// whitelist to the mentioned items and records the pinned set used for the
 	// <must_use> hint, keeping all scope logic in one place per resource type.

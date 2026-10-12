@@ -75,40 +75,109 @@ const (
 	ToolWikiUpdateIssue = "wiki_update_issue"
 )
 
-// AvailableTool defines a simple tool metadata used by settings APIs.
+// Tool groups the agent editor sections its checkboxes by.
+const (
+	ToolGroupBase      = "base"
+	ToolGroupRAG       = "rag"
+	ToolGroupWikiRead  = "wiki_read"
+	ToolGroupWikiEdit  = "wiki_edit"
+	ToolGroupWikiIssue = "wiki_issue"
+	ToolGroupData      = "data"
+)
+
+// AvailableTool describes a tool an agent's allowed_tools list may select.
+// The agent editor renders its tool checkboxes from these definitions.
 type AvailableTool struct {
 	Name        string `json:"name"`
 	Label       string `json:"label"`
 	Description string `json:"description"`
+	Group       string `json:"group"`
+	// Danger marks tools that modify content, which the editor highlights.
+	Danger bool `json:"danger,omitempty"`
 }
 
-// AvailableToolDefinitions returns the list of tools exposed to the UI.
-// Keep this in sync with registered tools in this package.
+// AvailableToolDefinitions returns the tools an agent's allowed_tools list
+// may select, in the order the agent editor shows them. Keep this in sync
+// with registered tools in this package.
 func AvailableToolDefinitions() []AvailableTool {
 	return []AvailableTool{
-		{Name: ToolThinking, Label: "思考", Description: "动态和反思性的问题解决思考工具"},
-		{Name: ToolTodoWrite, Label: "制定计划", Description: "创建结构化的研究计划"},
-		{Name: ToolSearchKnowledge, Label: "检索知识库", Description: "语义、关键词或混合检索知识库分块"},
-		{Name: ToolReadDocument, Label: "阅读文档", Description: "读取文档元数据与分块内容，支持分页和文内查找"},
-		{Name: ToolListDocuments, Label: "浏览文档列表", Description: "分页列出知识库中的文档"},
-		{Name: ToolQueryKnowledgeGraph, Label: "查询知识图谱", Description: "从知识图谱中查询关系"},
+		{Name: ToolThinking, Label: "思考", Description: "动态和反思性的问题解决思考工具", Group: ToolGroupBase},
+		{Name: ToolTodoWrite, Label: "制定计划", Description: "创建结构化的研究计划", Group: ToolGroupBase},
 		{
 			Name:        ToolSearchConversations,
 			Label:       "回顾历史对话",
 			Description: "在用户自己的历史会话中查找之前聊过的内容",
+			Group:       ToolGroupBase,
 		},
-		{Name: ToolDatabaseQuery, Label: "查询数据库", Description: "查询数据库中的信息"},
-		{Name: ToolDataAnalysis, Label: "数据分析", Description: "理解数据文件并进行数据分析"},
-		{Name: ToolDataSchema, Label: "查看数据元信息", Description: "获取表格文件的元信息"},
-		{Name: ToolWikiReadPage, Label: "读取Wiki页面", Description: "读取指定的Wiki页面内容"},
-		{Name: ToolWikiSearch, Label: "搜索Wiki", Description: "在Wiki中搜索页面"},
-		{Name: ToolWikiFlagIssue, Label: "标记Wiki问题", Description: "标记页面中存在的事实错误或合并冲突问题"},
-		{Name: ToolWikiWritePage, Label: "创建/覆盖Wiki", Description: "创建新页面或完全覆盖已有页面"},
-		{Name: ToolWikiReplaceText, Label: "局部替换Wiki", Description: "替换Wiki页面中的特定文本"},
-		{Name: ToolWikiRenamePage, Label: "重命名Wiki", Description: "重命名Wiki页面并自动更新关联链接"},
-		{Name: ToolWikiDeletePage, Label: "删除Wiki", Description: "删除Wiki页面并自动清理关联死链"},
-		{Name: ToolWikiReadIssue, Label: "查看Wiki问题", Description: "查看特定的Wiki页面问题详情"},
-		{Name: ToolWikiUpdateIssue, Label: "更新Wiki问题状态", Description: "更新特定的Wiki页面问题状态"},
+		{Name: ToolSearchKnowledge, Label: "检索知识库", Description: "语义、关键词或混合检索知识库分块", Group: ToolGroupRAG},
+		{Name: ToolReadDocument, Label: "阅读文档", Description: "读取文档元数据与分块内容，支持分页和文内查找", Group: ToolGroupRAG},
+		{Name: ToolListDocuments, Label: "浏览文档列表", Description: "分页列出知识库中的文档", Group: ToolGroupRAG},
+		{Name: ToolQueryKnowledgeGraph, Label: "查询知识图谱", Description: "从知识图谱中查询关系", Group: ToolGroupRAG},
+		{Name: ToolDatabaseQuery, Label: "查询数据库", Description: "查询数据库中的信息", Group: ToolGroupRAG},
+		{Name: ToolWikiSearch, Label: "搜索Wiki", Description: "在Wiki中搜索页面", Group: ToolGroupWikiRead},
+		{Name: ToolWikiReadPage, Label: "读取Wiki页面", Description: "读取指定的Wiki页面内容", Group: ToolGroupWikiRead},
+		{
+			Name:        ToolWikiFlagIssue,
+			Label:       "标记Wiki问题",
+			Description: "标记页面中存在的事实错误或合并冲突问题",
+			Group:       ToolGroupWikiRead,
+		},
+		{
+			Name:        ToolWikiWritePage,
+			Label:       "创建/覆盖Wiki",
+			Description: "创建新页面或完全覆盖已有页面",
+			Group:       ToolGroupWikiEdit,
+			Danger:      true,
+		},
+		{
+			Name:        ToolWikiReplaceText,
+			Label:       "局部替换Wiki",
+			Description: "替换Wiki页面中的特定文本",
+			Group:       ToolGroupWikiEdit,
+			Danger:      true,
+		},
+		{
+			Name:        ToolWikiRenamePage,
+			Label:       "重命名Wiki",
+			Description: "重命名Wiki页面并自动更新关联链接",
+			Group:       ToolGroupWikiEdit,
+			Danger:      true,
+		},
+		{
+			Name:        ToolWikiDeletePage,
+			Label:       "删除Wiki",
+			Description: "删除Wiki页面并自动清理关联死链",
+			Group:       ToolGroupWikiEdit,
+			Danger:      true,
+		},
+		{Name: ToolWikiReadIssue, Label: "查看Wiki问题", Description: "查看特定的Wiki页面问题详情", Group: ToolGroupWikiIssue},
+		{Name: ToolWikiUpdateIssue, Label: "更新Wiki问题状态", Description: "更新特定的Wiki页面问题状态", Group: ToolGroupWikiIssue},
+		{Name: ToolDataAnalysis, Label: "数据分析", Description: "理解数据文件并进行数据分析", Group: ToolGroupData},
+		{Name: ToolDataSchema, Label: "查看数据元信息", Description: "获取表格文件的元信息", Group: ToolGroupData},
+	}
+}
+
+// SwitchManagedTools returns the tools an allowed_tools entry does not
+// register: other agent settings register or withhold them, such as the web search,
+// memory, skills, sandbox and MCP settings, or the built-in skill installer.
+// registerTools either strips them from the list and re-adds them from their
+// switch, or skips them and leaves them to the code that owns them. The agent
+// editor uses this list to explain such stored entries instead of offering
+// them as checkboxes.
+func SwitchManagedTools() []string {
+	return []string{
+		ToolWebSearch,
+		ToolWebFetch,
+		ToolSearchMemory,
+		ToolShellExec,
+		ToolReadFile,
+		ToolListSandboxFiles,
+		ToolWriteSandboxFile,
+		ToolEditSandboxFile,
+		ToolWriteSkillFile,
+		ToolEditSkillFile,
+		ToolDiscoverMCPTools,
+		ToolCallMCPTool,
 	}
 }
 

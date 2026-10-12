@@ -6614,6 +6614,13 @@ export default {
       kbMetricRag: 'RAG KBs',
       kbMetricWiki: 'Wiki KBs',
       statusInactive: '{count} ticked tool(s) cannot take effect with the current config',
+      searchConversations: 'Search past conversations',
+      searchConversationsDesc: 'Look up what was discussed in this user\'s own earlier conversations',
+      groupStored: 'Stored, not offered here',
+      switchManagedDesc: 'Controlled by other settings of this agent, not by this list, so ticking it here does not turn it on. Untick it to remove it.',
+      unrecognizedDesc: 'Not a tool this version offers, so the agent cannot call it. Untick it to remove it.',
+      keptUnknownWarning: 'Saved. These stored tools are not offered by this version and were kept, but the agent cannot call them: {names}',
+      droppedWarning: 'Saved. These tools are controlled by other settings of this agent and were removed from the tool list: {names}',
       effectiveLabel: 'Effective Tools',
       effectiveDesc: 'Computed from the current config — these are the tools the agent will actually be able to call',
       effectiveEmpty: 'No tool available — the agent will fall back to plain model chat'

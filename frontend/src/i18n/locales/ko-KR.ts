@@ -1556,6 +1556,13 @@ export default {
       kbMetricRag: 'RAG 지식베이스',
       kbMetricWiki: 'Wiki 지식베이스',
       statusInactive: '{count}개의 체크된 도구가 현재 설정에서는 작동하지 않습니다',
+      searchConversations: '이전 대화 검색',
+      searchConversationsDesc: '사용자 본인의 이전 대화에서 나눴던 내용을 찾습니다',
+      groupStored: '저장되었지만 여기서 제공하지 않는 도구',
+      switchManagedDesc: '이 목록이 아니라 에이전트의 다른 설정으로 제어되는 도구라, 여기서 체크해도 켜지지 않습니다. 체크를 해제하면 삭제됩니다.',
+      unrecognizedDesc: '이 버전에 없는 도구라 에이전트가 호출할 수 없습니다. 체크를 해제하면 삭제됩니다.',
+      keptUnknownWarning: '저장했습니다. 다음 도구는 이 버전에 없어 그대로 남겨 두었지만, 에이전트가 호출할 수 없습니다: {names}',
+      droppedWarning: '저장했습니다. 다음 도구는 에이전트의 다른 설정으로 제어되므로 도구 목록에서 뺐습니다: {names}',
       effectiveLabel: '최종 활성 도구',
       effectiveDesc: '현재 설정 기준 저장 시 에이전트가 실제 호출할 수 있는 도구 집합',
       effectiveEmpty: '사용 가능한 도구가 없어 일반 모델 대화로 동작합니다'
