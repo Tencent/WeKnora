@@ -2622,6 +2622,8 @@ export default {
     extractFailed: 'Entity-relationship extraction failed',
     exampleLoaded: 'Example loaded',
     exampleCleared: 'Example cleared',
+    checkingAvailability: 'Checking knowledge graph availability…',
+    checkAvailabilityFailed: 'Unable to check knowledge graph availability. Please retry.',
     disabledWarning: 'Knowledge graph database is not enabled, entity-relationship extraction will not be available',
     howToEnable: 'How to enable knowledge graph?'
   },

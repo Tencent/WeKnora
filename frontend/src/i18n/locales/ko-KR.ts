@@ -5520,6 +5520,8 @@ export default {
     extractFailed: '엔티티 관계 추출 실패',
     exampleLoaded: '예시가 로드되었습니다',
     exampleCleared: '예시가 지워졌습니다',
+    checkingAvailability: '지식 그래프 사용 가능 여부를 확인하는 중…',
+    checkAvailabilityFailed: '지식 그래프 사용 가능 여부를 확인할 수 없습니다. 다시 시도해 주세요.',
     disabledWarning: '지식 그래프 데이터베이스가 활성화되지 않아 엔티티 관계 추출 기능을 사용할 수 없습니다',
     howToEnable: '지식 그래프를 활성화하는 방법?'
   },

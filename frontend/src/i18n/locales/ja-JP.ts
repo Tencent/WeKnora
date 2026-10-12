@@ -2622,6 +2622,8 @@ export default {
     extractFailed: 'エンティティとリレーションの抽出に失敗しました',
     exampleLoaded: '例を読み込みました',
     exampleCleared: '例をクリアしました',
+    checkingAvailability: 'ナレッジグラフの利用状況を確認中…',
+    checkAvailabilityFailed: 'ナレッジグラフの利用状況を確認できませんでした。再試行してください。',
     disabledWarning: 'ナレッジグラフのデータベースが有効になっていないため、エンティティとリレーションの抽出は利用できません',
     howToEnable: 'ナレッジグラフを有効にするには？'
   },
