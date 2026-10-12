@@ -168,7 +168,7 @@ const maxTableRows = 500
 // maxTableBytes bounds accumulated Markdown content per embedded table, including
 // escaping and empty cells. The response cap separately bounds each decoded page.
 // This is a content budget, not a bound on the Go heap or the whole document.
-const maxTableBytes = 16 << 20
+const maxTableBytes = maxJSONResponseBytes
 
 // appendTableRow checks the rendered size before retaining a row or allocating
 // padding. Rows remain unescaped here; markdownTable escapes them exactly once.
@@ -229,25 +229,30 @@ type sheetMetadataResponse struct {
 // readSheetRange reads the cell values of an embedded spreadsheet block.
 // embedToken is the block's sheet.token, formatted "spreadsheetToken_sheetId".
 // Cells are stringified (display value) for RAG text retrieval. Rows are capped
-// at maxTableRows and maxTableBytes; truncated also covers an unread grid tail.
-func (c *Client) readSheetRange(ctx context.Context, embedToken string) ([][]string, bool, error) {
+// at maxTableRows and the smaller of maxBytes and maxTableBytes; truncated also
+// covers an unread grid tail.
+func (c *Client) readSheetRange(
+	ctx context.Context, embedToken string, maxBytes int,
+) ([][]string, bool, bool, error) {
 	idx := strings.LastIndex(embedToken, "_")
 	if idx < 0 {
-		return nil, false, fmt.Errorf("invalid sheet embed token: %q", embedToken)
+		return nil, false, false, fmt.Errorf("invalid sheet embed token: %q", embedToken)
 	}
 	spreadsheetToken, sheetID := embedToken[:idx], embedToken[idx+1:]
 	metadataPath := fmt.Sprintf("/open-apis/sheets/v3/spreadsheets/%s/sheets/%s",
 		url.PathEscape(spreadsheetToken), url.PathEscape(sheetID))
 	var metadata sheetMetadataResponse
 	if err := c.DoRequest(ctx, http.MethodGet, metadataPath, nil, &metadata); err != nil {
-		return nil, false, fmt.Errorf("read sheet metadata: %w", err)
+		return nil, false, false, fmt.Errorf("read sheet metadata: %w", err)
 	}
 	if metadata.Code != 0 {
-		return nil, false, fmt.Errorf("read sheet metadata error: code=%d msg=%s", metadata.Code, metadata.Msg)
+		return nil, false, false, fmt.Errorf("read sheet metadata error: code=%d msg=%s", metadata.Code, metadata.Msg)
 	}
 	grid := metadata.Data.Sheet.GridProperties
 	if grid.RowCount <= 0 || grid.ColumnCount <= 0 {
-		return nil, false, fmt.Errorf("invalid sheet dimensions: rows=%d columns=%d", grid.RowCount, grid.ColumnCount)
+		return nil, false, false, fmt.Errorf(
+			"invalid sheet dimensions: rows=%d columns=%d", grid.RowCount, grid.ColumnCount,
+		)
 	}
 	// Bound the range before reading. Use grid dimensions for truncation:
 	// a sparse response may omit empty rows before data outside the range.
@@ -258,7 +263,7 @@ func (c *Client) readSheetRange(ctx context.Context, embedToken string) ([][]str
 	endRow := min(grid.RowCount, maxTableRows)
 	pageRows := endRow
 	var rows [][]string
-	remaining := maxTableBytes
+	remaining := min(maxBytes, maxTableBytes)
 	truncated := grid.RowCount > maxTableRows
 	for start := 1; start <= endRow; {
 		end := min(start+pageRows-1, endRow)
@@ -281,14 +286,14 @@ func (c *Client) readSheetRange(ctx context.Context, embedToken string) ([][]str
 					pageRows)
 				continue
 			}
-			return nil, false, fmt.Errorf("read sheet range: %w", err)
+			return nil, false, false, fmt.Errorf("read sheet range: %w", err)
 		}
 		if len(resp.Data.ValueRange.Values) > 0 {
 			// Feishu omits trailing empty rows. Charge padding before allocating
 			// it, including an empty first range that becomes the table header.
 			for len(rows) < start-1 {
 				if !appendTableRow(&rows, nil, grid.ColumnCount, &remaining) {
-					return rows, true, nil
+					return rows, true, true, nil
 				}
 			}
 			for _, values := range resp.Data.ValueRange.Values {
@@ -301,7 +306,7 @@ func (c *Client) readSheetRange(ctx context.Context, embedToken string) ([][]str
 					row[i] = cellToString(values[i])
 				}
 				if !appendTableRow(&rows, row, grid.ColumnCount, &remaining) {
-					return rows, true, nil
+					return rows, true, true, nil
 				}
 			}
 		}
@@ -313,7 +318,7 @@ func (c *Client) readSheetRange(ctx context.Context, embedToken string) ([][]str
 	for len(rows) > 0 && !slices.ContainsFunc(rows[len(rows)-1], func(cell string) bool { return cell != "" }) {
 		rows = rows[:len(rows)-1]
 	}
-	return rows, truncated, nil
+	return rows, truncated, false, nil
 }
 
 // cellToString renders a single JSON cell value to a string; nil → "".
@@ -465,14 +470,18 @@ type bitableRecordsResponse struct {
 // readBitableRecords reads an embedded bitable block as a table: a header row of
 // field names followed by one row per record. embedToken is the block's
 // bitable.token, formatted "appToken_tableId". Record rows are capped at
-// maxTableRows and maxTableBytes; incomplete pagination also marks truncation.
-func (c *Client) readBitableRecords(ctx context.Context, embedToken string) ([][]string, bool, error) {
+// maxTableRows and the smaller of maxBytes and maxTableBytes; incomplete
+// pagination also marks truncation.
+func (c *Client) readBitableRecords(
+	ctx context.Context, embedToken string, maxBytes int,
+) ([][]string, bool, bool, error) {
 	idx := strings.LastIndex(embedToken, "_")
 	if idx < 0 {
-		return nil, false, fmt.Errorf("invalid bitable embed token: %q", embedToken)
+		return nil, false, false, fmt.Errorf("invalid bitable embed token: %q", embedToken)
 	}
 	appToken, tableID := embedToken[:idx], embedToken[idx+1:]
 
+	maxBytes = min(maxBytes, maxTableBytes)
 	var cols []bitableColumn
 	headerBytes := 4
 	baseFPath := fmt.Sprintf("/open-apis/bitable/v1/apps/%s/tables/%s/fields?page_size=%d",
@@ -486,10 +495,12 @@ func (c *Client) readBitableRecords(ctx context.Context, embedToken string) ([][
 		}
 		var fieldsResp bitableFieldsResponse
 		if err := c.DoRequest(ctx, http.MethodGet, fpath, nil, &fieldsResp); err != nil {
-			return nil, false, fmt.Errorf("read bitable fields: %w", err)
+			return nil, false, false, fmt.Errorf("read bitable fields: %w", err)
 		}
 		if fieldsResp.Code != 0 {
-			return nil, false, fmt.Errorf("read bitable fields error: code=%d msg=%s", fieldsResp.Code, fieldsResp.Msg)
+			return nil, false, false, fmt.Errorf(
+				"read bitable fields error: code=%d msg=%s", fieldsResp.Code, fieldsResp.Msg,
+			)
 		}
 		for _, f := range fieldsResp.Data.Items {
 			formatter := ""
@@ -497,9 +508,9 @@ func (c *Client) readBitableRecords(ctx context.Context, embedToken string) ([][
 				formatter = f.Property.DateFormatter
 			}
 			headerBytes += len(f.FieldName) + strings.Count(f.FieldName, "|") + len(formatter) + 9
-			if headerBytes > maxTableBytes {
+			if headerBytes > maxBytes {
 				logger.Warnf(ctx, "[Feishu] embedded bitable header exceeded content budget; truncating")
-				return nil, true, nil
+				return nil, true, true, nil
 			}
 			cols = append(cols, bitableColumn{name: f.FieldName, fieldType: f.Type, dateFormatter: formatter})
 		}
@@ -520,7 +531,7 @@ func (c *Client) readBitableRecords(ctx context.Context, embedToken string) ([][
 		// already read; without this the loop would re-append the same fields
 		// until the task deadline (same guard as the wiki/drive pagination).
 		if _, exists := seenFieldPageTokens[fieldsResp.Data.PageToken]; exists {
-			return nil, false, fmt.Errorf("feishu bitable field pagination repeated page token %q",
+			return nil, false, false, fmt.Errorf("feishu bitable field pagination repeated page token %q",
 				fieldsResp.Data.PageToken)
 		}
 		seenFieldPageTokens[fieldsResp.Data.PageToken] = struct{}{}
@@ -534,9 +545,9 @@ func (c *Client) readBitableRecords(ctx context.Context, embedToken string) ([][
 	loc := c.tz()
 
 	var rows [][]string
-	remaining := maxTableBytes
+	remaining := maxBytes
 	if !appendTableRow(&rows, header, len(cols), &remaining) {
-		return nil, true, nil
+		return nil, true, true, nil
 	}
 	truncated := false
 	// Use the Search-records endpoint (POST .../records/search). The legacy
@@ -563,10 +574,10 @@ func (c *Client) readBitableRecords(ctx context.Context, embedToken string) ([][
 					pageSize)
 				continue
 			}
-			return nil, false, fmt.Errorf("search bitable records: %w", err)
+			return nil, false, false, fmt.Errorf("search bitable records: %w", err)
 		}
 		if rec.Code != 0 {
-			return nil, false, fmt.Errorf("read bitable records error: code=%d msg=%s", rec.Code, rec.Msg)
+			return nil, false, false, fmt.Errorf("read bitable records error: code=%d msg=%s", rec.Code, rec.Msg)
 		}
 		for _, item := range rec.Data.Items {
 			if len(rows)-1 >= maxTableRows {
@@ -578,12 +589,12 @@ func (c *Client) readBitableRecords(ctx context.Context, embedToken string) ([][
 				row[i] = bitableFieldCell(item.Fields[col.name], col, loc)
 			}
 			if !appendTableRow(&rows, row, len(cols), &remaining) {
-				return rows, true, nil
+				return rows, true, true, nil
 			}
 		}
 		if len(rec.Data.Items) == 0 && rec.Data.HasMore {
 			logger.Warnf(ctx, "[Feishu] bitable record pagination returned an empty page; truncating")
-			return rows, true, nil
+			return rows, true, false, nil
 		}
 		if len(rows)-1 >= maxTableRows {
 			if rec.Data.HasMore {
@@ -596,14 +607,14 @@ func (c *Client) readBitableRecords(ctx context.Context, embedToken string) ([][
 		}
 		if rec.Data.PageToken == "" {
 			logger.Warnf(ctx, "[Feishu] bitable record pagination missing page token with has_more=true; truncating")
-			return rows, true, nil
+			return rows, true, false, nil
 		}
 		if _, exists := seenRecordPageTokens[rec.Data.PageToken]; exists {
-			return nil, false, fmt.Errorf("feishu bitable record pagination repeated page token")
+			return nil, false, false, fmt.Errorf("feishu bitable record pagination repeated page token")
 		}
 		seenRecordPageTokens[rec.Data.PageToken] = struct{}{}
 		pageToken = rec.Data.PageToken
 		pageSize = min(pageSize*2, bitableRecordPageSize)
 	}
-	return rows, truncated, nil
+	return rows, truncated, false, nil
 }

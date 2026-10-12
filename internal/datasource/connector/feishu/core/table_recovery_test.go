@@ -72,7 +72,7 @@ func TestReadSheetRange_SplitsOversizedRanges(t *testing.T) {
 				baseURL: srv.URL, httpClient: srv.Client(), tokenCache: "t",
 				tokenExpAt: time.Now().Add(time.Hour), jsonLimit: 2048,
 			}
-			rows, truncated, err := c.readSheetRange(context.Background(), "sht_0")
+			rows, truncated, _, err := c.readSheetRange(context.Background(), "sht_0", maxTableBytes)
 			if err != nil || truncated || len(rows) != len(want) {
 				t.Fatalf("rows=%d truncated=%v err=%v", len(rows), truncated, err)
 			}
@@ -120,7 +120,7 @@ func TestReadBitableRecords_ShrinksOversizedLaterPage(t *testing.T) {
 		baseURL: srv.URL, httpClient: srv.Client(), tokenCache: "t",
 		tokenExpAt: time.Now().Add(time.Hour), jsonLimit: 8192,
 	}
-	rows, truncated, err := c.readBitableRecords(context.Background(), "app_table")
+	rows, truncated, _, err := c.readBitableRecords(context.Background(), "app_table", maxTableBytes)
 	if err != nil || truncated || len(rows) != total+1 {
 		t.Fatalf("rows=%d truncated=%v err=%v", len(rows), truncated, err)
 	}
@@ -164,9 +164,9 @@ func TestEmbeddedTable_SingleItemTooLarge(t *testing.T) {
 			var rows [][]string
 			var err error
 			if kind == "sheet" {
-				rows, _, err = c.readSheetRange(context.Background(), "sht_0")
+				rows, _, _, err = c.readSheetRange(context.Background(), "sht_0", maxTableBytes)
 			} else {
-				rows, _, err = c.readBitableRecords(context.Background(), "app_table")
+				rows, _, _, err = c.readBitableRecords(context.Background(), "app_table", maxTableBytes)
 			}
 			if !errors.Is(err, errResponseTooLarge) || rows != nil {
 				t.Fatalf("rows=%d err=%v", len(rows), err)
@@ -210,7 +210,7 @@ func TestReadBitableRecords_RejectsBrokenPagination(t *testing.T) {
 			c := &Client{
 				baseURL: srv.URL, httpClient: srv.Client(), tokenCache: "t", tokenExpAt: time.Now().Add(time.Hour),
 			}
-			rows, truncated, err := c.readBitableRecords(context.Background(), "app_table")
+			rows, truncated, _, err := c.readBitableRecords(context.Background(), "app_table", maxTableBytes)
 			if mode == "empty" || mode == "missing" {
 				if err != nil || !truncated || len(rows) != 2 || rows[1][0] != "1" {
 					t.Fatalf("lost partial records: rows=%v truncated=%v err=%v", rows, truncated, err)
@@ -239,7 +239,7 @@ func TestReadSheetRange_TrimsOnlyEmptyTail(t *testing.T) {
 	c := &Client{
 		baseURL: srv.URL, httpClient: srv.Client(), tokenCache: "t", tokenExpAt: time.Now().Add(time.Hour),
 	}
-	rows, limited, err := c.readSheetRange(context.Background(), "sht_0")
+	rows, limited, _, err := c.readSheetRange(context.Background(), "sht_0", maxTableBytes)
 	if err != nil || !limited || len(rows) != 3 {
 		t.Fatalf("rows=%d limited=%v err=%v", len(rows), limited, err)
 	}
@@ -270,7 +270,10 @@ func TestReadSheetRange_EmptyFirstPageRendersLaterRows(t *testing.T) {
 	c := &Client{
 		baseURL: srv.URL, httpClient: srv.Client(), tokenCache: "t", tokenExpAt: time.Now().Add(time.Hour),
 	}
-	got := inlineTable(context.Background(), c, "sht_0", "sheet")
+	got, exhausted := inlineTable(context.Background(), c, "sht_0", "sheet", maxTableBytes)
+	if exhausted {
+		t.Fatal("full table budget was reported as exhausted")
+	}
 	if !strings.Contains(got, "| later | value |") || strings.Count(got, "\n") != 3 {
 		t.Fatalf("later rows disappeared or moved: %q", got)
 	}
@@ -325,9 +328,9 @@ func TestEmbeddedTable_CumulativeContentBudget(t *testing.T) {
 			var truncated bool
 			var err error
 			if kind == "sheet" {
-				rows, truncated, err = c.readSheetRange(ctx, "sht_0")
+				rows, truncated, _, err = c.readSheetRange(ctx, "sht_0", maxTableBytes)
 			} else {
-				rows, truncated, err = c.readBitableRecords(ctx, "app_table")
+				rows, truncated, _, err = c.readBitableRecords(ctx, "app_table", maxTableBytes)
 			}
 			if err != nil || !truncated || len(rows) < 1 {
 				t.Fatalf("rows=%d truncated=%v err=%v", len(rows), truncated, err)
@@ -408,9 +411,9 @@ func TestEmbeddedTable_PageSizeRecoversAfterLargeItem(t *testing.T) {
 			var truncated bool
 			var err error
 			if kind == "sheet" {
-				rows, truncated, err = c.readSheetRange(context.Background(), "sht_0")
+				rows, truncated, _, err = c.readSheetRange(context.Background(), "sht_0", maxTableBytes)
 			} else {
-				rows, truncated, err = c.readBitableRecords(context.Background(), "app_table")
+				rows, truncated, _, err = c.readBitableRecords(context.Background(), "app_table", maxTableBytes)
 				if len(rows) > 0 {
 					rows = rows[1:]
 				}

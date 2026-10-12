@@ -9,9 +9,16 @@ import (
 // sheetReader is the subset of *Client that blocksToMarkdown needs, so the
 // converter can be unit-tested with a fake or nil client.
 type sheetReader interface {
-	readSheetRange(ctx context.Context, embedToken string) ([][]string, bool, error)
-	readBitableRecords(ctx context.Context, embedToken string) ([][]string, bool, error)
+	readSheetRange(ctx context.Context, embedToken string, maxBytes int) ([][]string, bool, bool, error)
+	readBitableRecords(ctx context.Context, embedToken string, maxBytes int) ([][]string, bool, bool, error)
 }
+
+// maxDocumentMarkdownBytes bounds the complete rendered document, including
+// ordinary blocks, native tables, and all embedded tables. Keeping this equal
+// to the response-body cap restores a single-document boundary after paging.
+const maxDocumentMarkdownBytes = maxJSONResponseBytes
+
+const documentTruncatedNote = "> [文档内容未完整读取，已保留可读取内容]"
 
 // pendingAttachment is an embedded file block awaiting a download decision by
 // the connector (whitelist/size filtering happens there, not here).
@@ -24,6 +31,18 @@ type pendingAttachment struct {
 // embedded spreadsheet/bitable tables (Task 5) and collecting downloadable
 // attachments. client may be nil when the block set has no downdrill blocks.
 func blocksToMarkdown(ctx context.Context, client sheetReader, blocks []DocxBlock) ([]byte, []pendingAttachment, error) {
+	return blocksToMarkdownWithin(ctx, client, blocks, maxDocumentMarkdownBytes)
+}
+
+func blocksToMarkdownWithin(
+	ctx context.Context, client sheetReader, blocks []DocxBlock, maxBytes int,
+) ([]byte, []pendingAttachment, error) {
+	// Reserve the final note before rendering so an over-limit document can never
+	// consume the bytes needed to explain why its tail is absent.
+	contentLimit := maxBytes - len(documentTruncatedNote) - 2
+	if contentLimit <= 0 {
+		return nil, nil, fmt.Errorf("document Markdown budget %d is too small", maxBytes)
+	}
 	byID := make(map[string]DocxBlock, len(blocks))
 	for _, b := range blocks {
 		byID[b.BlockID] = b
@@ -35,52 +54,71 @@ func blocksToMarkdown(ctx context.Context, client sheetReader, blocks []DocxBloc
 
 	var sb strings.Builder
 	var atts []pendingAttachment
+	truncated := false
 	for _, b := range blocks {
 		if consumed[b.BlockID] {
 			continue
 		}
+		// Attachments are separate fetched items. Preserve their existing collection
+		// semantics even when the main Markdown body has reached its byte budget.
+		if b.BlockType == BlockTypeFile && b.File != nil {
+			atts = append(atts, pendingAttachment{FileToken: b.File.Token, Name: b.File.Name})
+		}
+		if truncated {
+			continue
+		}
+
+		var paragraph string
 		switch b.BlockType {
 		case BlockTypePage:
 			continue // root container, no text of its own
 		case BlockTypeText:
-			writePara(&sb, plainText(textBearingField(b)))
+			paragraph = plainText(textBearingField(b))
 		case BlockTypeBullet:
-			writePara(&sb, "- "+plainText(textBearingField(b)))
+			paragraph = "- " + plainText(textBearingField(b))
 		case BlockTypeOrdered:
-			writePara(&sb, "1. "+plainText(textBearingField(b)))
+			paragraph = "1. " + plainText(textBearingField(b))
 		case BlockTypeCode:
-			writePara(&sb, "```\n"+plainText(textBearingField(b))+"\n```")
+			paragraph = "```\n" + plainText(textBearingField(b)) + "\n```"
 		case BlockTypeQuote:
-			writePara(&sb, "> "+plainText(textBearingField(b)))
+			paragraph = "> " + plainText(textBearingField(b))
 		case BlockTypeDivider:
-			writePara(&sb, "---")
+			paragraph = "---"
 		case BlockTypeTable:
-			writePara(&sb, renderNativeTable(b, byID))
+			paragraph = renderNativeTable(b, byID)
 		case BlockTypeTableCell:
 			continue // rendered by its parent table (also covered by `consumed`)
 		case BlockTypeSheet:
 			if b.Sheet != nil {
-				writePara(&sb, inlineTable(ctx, client, b.Sheet.Token, "sheet"))
+				var exhausted bool
+				paragraph, exhausted = inlineTable(ctx, client, b.Sheet.Token, "sheet", contentLimit-sb.Len()-2)
+				if exhausted {
+					truncated = true
+				}
 			}
 		case BlockTypeBitable:
 			if b.Bitable != nil {
-				writePara(&sb, inlineTable(ctx, client, b.Bitable.Token, "bitable"))
+				var exhausted bool
+				paragraph, exhausted = inlineTable(ctx, client, b.Bitable.Token, "bitable", contentLimit-sb.Len()-2)
+				if exhausted {
+					truncated = true
+				}
 			}
 		case BlockTypeImage:
 			// Emit a token-free placeholder: images carry no retrievable text, and
 			// leaking the internal media token would pollute embeddings. A neutral
 			// marker preserves surrounding context (e.g. "如下图所示").
-			writePara(&sb, "![图片]()")
+			paragraph = "![图片]()"
 		case BlockTypeTodo:
 			if t := plainText(textBearingField(b)); t != "" {
-				writePara(&sb, "- [ ] "+t)
+				paragraph = "- [ ] " + t
 			}
 		case BlockTypeCallout:
 			// Callout is a container; its body is usually in child blocks (rendered
 			// separately). Emit its own text only if it carries direct inline text,
 			// so the container case is a safe no-op.
 			if t := plainText(textBearingField(b)); t != "" {
-				writePara(&sb, "> "+t)
+				paragraph = "> " + t
 			}
 		case BlockTypeFile:
 			if b.File != nil {
@@ -88,15 +126,20 @@ func blocksToMarkdown(ctx context.Context, client sheetReader, blocks []DocxBloc
 				if name == "" {
 					name = b.File.Token
 				}
-				writePara(&sb, "📎 附件："+name)
-				atts = append(atts, pendingAttachment{FileToken: b.File.Token, Name: b.File.Name})
+				paragraph = "📎 附件：" + name
 			}
 		default:
 			if b.BlockType >= BlockTypeHeading1 && b.BlockType <= blockTypeHeading9 {
 				level := b.BlockType - BlockTypeHeading1 + 1
-				writePara(&sb, strings.Repeat("#", level)+" "+plainText(textBearingField(b)))
+				paragraph = strings.Repeat("#", level) + " " + plainText(textBearingField(b))
 			}
 		}
+		if !writeParaWithin(&sb, paragraph, contentLimit) {
+			truncated = true
+		}
+	}
+	if truncated {
+		writePara(&sb, documentTruncatedNote)
 	}
 
 	out := strings.TrimRight(sb.String(), "\n")
@@ -104,6 +147,17 @@ func blocksToMarkdown(ctx context.Context, client sheetReader, blocks []DocxBloc
 		out += "\n"
 	}
 	return []byte(out), atts, nil
+}
+
+func writeParaWithin(sb *strings.Builder, s string, maxBytes int) bool {
+	if s == "" {
+		return true
+	}
+	if len(s)+2 > maxBytes-sb.Len() {
+		return false
+	}
+	writePara(sb, s)
+	return true
 }
 
 // writePara appends a block of text followed by a blank line; empty text is skipped.
@@ -286,35 +340,59 @@ func escapePipes(row []string) []string {
 // table. Read/permission errors degrade to an inline note rather than failing
 // the whole document (partial content beats no content). A reader-reported
 // truncation appends a note.
-func inlineTable(ctx context.Context, client sheetReader, token, kind string) string {
+func inlineTable(ctx context.Context, client sheetReader, token, kind string, maxBytes int) (string, bool) {
 	if client == nil {
-		return ""
+		return "", false
 	}
 	var (
 		rows      [][]string
 		truncated bool
+		exhausted bool
 		err       error
 		noun      string
 	)
 	if kind == "sheet" {
-		rows, truncated, err = client.readSheetRange(ctx, token)
 		noun = "内嵌电子表格"
 	} else {
-		rows, truncated, err = client.readBitableRecords(ctx, token)
 		noun = "内嵌多维表格"
 	}
+	note := fmt.Sprintf("> [%s未完整读取，已保留可读取内容]", noun)
+	if maxBytes < len(note) {
+		return "", true
+	}
+	// Reserve room for a table-level truncation note. The reader can then stop
+	// before retaining rows that the complete document cannot accommodate.
+	readerBudget := min(maxTableBytes, maxBytes-len(note)-2)
+	if readerBudget <= 0 {
+		return note, false
+	}
+	if kind == "sheet" {
+		rows, truncated, exhausted, err = client.readSheetRange(ctx, token, readerBudget)
+	} else {
+		rows, truncated, exhausted, err = client.readBitableRecords(ctx, token, readerBudget)
+	}
 	if err != nil {
-		return fmt.Sprintf("> [无法读取%s]", noun)
+		failure := fmt.Sprintf("> [无法读取%s]", noun)
+		if len(failure) <= maxBytes {
+			return failure, false
+		}
+		return "", true
 	}
 	table := markdownTable(rows)
 	if truncated {
 		// A byte budget or incomplete pagination can stop before the row cap,
 		// including before the first row. Never hide that behind an empty table.
-		note := fmt.Sprintf("> [%s未完整读取，已保留可读取内容]", noun)
 		if table == "" {
-			return note
+			return note, exhausted
 		}
-		return table + "\n\n" + note
+		result := table + "\n\n" + note
+		if len(result) <= maxBytes {
+			return result, exhausted
+		}
+		return note, exhausted
 	}
-	return table
+	if len(table) > maxBytes {
+		return note, false
+	}
+	return table, false
 }

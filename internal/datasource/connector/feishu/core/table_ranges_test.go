@@ -7,9 +7,11 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestReadSheetRange_BoundsResponseBeforeReading(t *testing.T) {
@@ -43,7 +45,7 @@ func TestReadSheetRange_BoundsResponseBeforeReading(t *testing.T) {
 	}))
 	defer srv.Close()
 	c := &Client{baseURL: srv.URL, appID: "a", appSecret: "s", httpClient: srv.Client(), jsonLimit: responseLimit}
-	rows, truncated, err := c.readSheetRange(context.Background(), "sht_abc_0")
+	rows, truncated, _, err := c.readSheetRange(context.Background(), "sht_abc_0", maxTableBytes)
 	if err != nil {
 		t.Fatalf("bounded sheet read failed: %v", err)
 	}
@@ -99,7 +101,7 @@ func TestReadSheetRange_DimensionsAndTruncation(t *testing.T) {
 			}))
 			defer srv.Close()
 			c := &Client{baseURL: srv.URL, appID: "a", appSecret: "s", httpClient: srv.Client()}
-			rows, truncated, err := c.readSheetRange(context.Background(), "sht_0")
+			rows, truncated, _, err := c.readSheetRange(context.Background(), "sht_0", maxTableBytes)
 			if err != nil || len(rows) != min(tt.values, maxTableRows) || truncated != (tt.gridRows > maxTableRows) {
 				t.Fatalf("rows=%d truncated=%v err=%v", len(rows), truncated, err)
 			}
@@ -143,7 +145,7 @@ func TestReadSheetRange_PropagatesErrors(t *testing.T) {
 			}))
 			defer srv.Close()
 			c := &Client{baseURL: srv.URL, appID: "a", appSecret: "s", httpClient: srv.Client(), jsonLimit: 2048}
-			rows, truncated, err := c.readSheetRange(context.Background(), "sht_0")
+			rows, truncated, _, err := c.readSheetRange(context.Background(), "sht_0", maxTableBytes)
 			if err == nil || !strings.Contains(err.Error(), tt.want) || rows != nil || truncated {
 				t.Fatalf("rows=%v truncated=%v err=%v, want error containing %q", rows, truncated, err, tt.want)
 			}
@@ -177,7 +179,7 @@ func TestReadBitableRecords_LaterPageError(t *testing.T) {
 			}))
 			defer srv.Close()
 			c := &Client{baseURL: srv.URL, appID: "a", appSecret: "s", httpClient: srv.Client(), jsonLimit: 2048}
-			rows, truncated, err := c.readBitableRecords(context.Background(), "app_table")
+			rows, truncated, _, err := c.readBitableRecords(context.Background(), "app_table", maxTableBytes)
 			if err == nil || rows != nil || truncated {
 				t.Fatalf("later page failure returned partial success: rows=%v truncated=%v err=%v",
 					rows, truncated, err)
@@ -238,7 +240,7 @@ func TestReadBitableRecords_BoundsResponsesAndPreservesRows(t *testing.T) {
 			c := &Client{
 				baseURL: srv.URL, appID: "a", appSecret: "s", httpClient: srv.Client(), jsonLimit: responseLimit,
 			}
-			rows, truncated, err := c.readBitableRecords(context.Background(), "bascabc_tblxyz")
+			rows, truncated, _, err := c.readBitableRecords(context.Background(), "bascabc_tblxyz", maxTableBytes)
 			if err != nil {
 				t.Fatalf("bounded bitable read failed: %v", err)
 			}
@@ -281,6 +283,55 @@ func TestAppendTableRow_BudgetMatchesRenderedContent(t *testing.T) {
 	}
 }
 
+func TestEmbeddedTableReaders_RespectDocumentRemainder(t *testing.T) {
+	want := [][]string{{"h"}, {"aaaa"}}
+	budget := len(markdownTable(want)) + 1
+
+	for _, kind := range []string{"sheet", "bitable"} {
+		t.Run(kind, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case strings.Contains(r.URL.Path, "/sheets/v3/"):
+					_, _ = fmt.Fprint(w,
+						`{"data":{"sheet":{"grid_properties":{"row_count":3,"column_count":1}}}}`)
+				case strings.Contains(r.URL.Path, "/sheets/v2/"):
+					_, _ = fmt.Fprint(w, `{"data":{"valueRange":{"values":[["h"],["aaaa"],["bbbbb"]]}}}`)
+				case strings.HasSuffix(r.URL.Path, "/fields"):
+					_, _ = fmt.Fprint(w, `{"data":{"items":[{"field_name":"h"}]}}`)
+				case strings.HasSuffix(r.URL.Path, "/records/search"):
+					_, _ = fmt.Fprint(w,
+						`{"data":{"items":[{"fields":{"h":"aaaa"}},{"fields":{"h":"bbbbb"}}]}}`)
+				default:
+					t.Errorf("unexpected request: %s", r.URL.Path)
+					http.NotFound(w, r)
+				}
+			}))
+			defer srv.Close()
+			c := &Client{
+				baseURL: srv.URL, httpClient: srv.Client(), tokenCache: "t",
+				tokenExpAt: time.Now().Add(time.Hour),
+			}
+
+			var rows [][]string
+			var truncated bool
+			var exhausted bool
+			var err error
+			if kind == "sheet" {
+				rows, truncated, exhausted, err = c.readSheetRange(context.Background(), "sht_0", budget)
+			} else {
+				rows, truncated, exhausted, err = c.readBitableRecords(context.Background(), "app_table", budget)
+			}
+			if err != nil || !truncated || !exhausted || !slices.EqualFunc(rows, want, slices.Equal) {
+				t.Fatalf("rows=%v truncated=%v exhausted=%v err=%v, want %v and budget exhaustion",
+					rows, truncated, exhausted, err, want)
+			}
+			if got := len(markdownTable(rows)); got > budget {
+				t.Fatalf("rendered table = %d bytes, want <= %d", got, budget)
+			}
+		})
+	}
+}
+
 func TestEmbeddedTable_UnrenderableBudgetStillShowsNote(t *testing.T) {
 	for _, mode := range []string{"wide grid", "escaped first row", "bitable header"} {
 		t.Run(mode, func(t *testing.T) {
@@ -318,7 +369,10 @@ func TestEmbeddedTable_UnrenderableBudgetStillShowsNote(t *testing.T) {
 			if mode == "bitable header" {
 				kind = "bitable"
 			}
-			got := inlineTable(context.Background(), c, "token_0", kind)
+			got, exhausted := inlineTable(context.Background(), c, "token_0", kind, maxTableBytes)
+			if !exhausted {
+				t.Fatal("unrenderable table budget was not reported as exhausted")
+			}
 			if !strings.Contains(got, "未完整读取") || len(got) > 200 || recordCalls != 0 {
 				t.Fatalf("missing budget note or continued reading: bytes=%d records=%d", len(got), recordCalls)
 			}

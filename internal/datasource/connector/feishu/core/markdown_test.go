@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -19,14 +20,26 @@ type fakeReader struct {
 	bitable          [][]string
 	bitableTruncated bool
 	bitableErr       error
+	sheetExhausted   bool
+	bitableExhausted bool
+	sheetBudgets     *[]int
+	bitableBudgets   *[]int
 }
 
-func (f fakeReader) readSheetRange(_ context.Context, _ string) ([][]string, bool, error) {
-	return f.sheet, f.sheetTruncated, f.sheetErr
+func (f fakeReader) readSheetRange(_ context.Context, _ string, maxBytes int) ([][]string, bool, bool, error) {
+	if f.sheetBudgets != nil {
+		*f.sheetBudgets = append(*f.sheetBudgets, maxBytes)
+	}
+	return f.sheet, f.sheetTruncated, f.sheetExhausted, f.sheetErr
 }
 
-func (f fakeReader) readBitableRecords(_ context.Context, _ string) ([][]string, bool, error) {
-	return f.bitable, f.bitableTruncated, f.bitableErr
+func (f fakeReader) readBitableRecords(
+	_ context.Context, _ string, maxBytes int,
+) ([][]string, bool, bool, error) {
+	if f.bitableBudgets != nil {
+		*f.bitableBudgets = append(*f.bitableBudgets, maxBytes)
+	}
+	return f.bitable, f.bitableTruncated, f.bitableExhausted, f.bitableErr
 }
 
 func TestBlocksToMarkdown_EmbeddedSheetAndFile(t *testing.T) {
@@ -297,9 +310,189 @@ func TestBlocksToMarkdown_CalloutContainerNoOp(t *testing.T) {
 func TestInlineTable_TruncationBeforeFirstRowIsVisible(t *testing.T) {
 	for _, kind := range []string{"sheet", "bitable"} {
 		reader := fakeReader{sheetTruncated: true, bitableTruncated: true}
-		got := inlineTable(context.Background(), reader, "token", kind)
+		got, exhausted := inlineTable(context.Background(), reader, "token", kind, maxTableBytes)
+		if exhausted {
+			t.Fatal("full table budget was reported as exhausted")
+		}
 		if !strings.Contains(got, "未完整读取") || strings.Contains(got, "500") {
 			t.Fatalf("lost incomplete-table note: %q", got)
+		}
+	}
+}
+
+func TestBlocksToMarkdown_DocumentBudgetStopsFurtherTableReads(t *testing.T) {
+	const budget = 256
+	var sheetBudgets, bitableBudgets []int
+	reader := fakeReader{
+		sheet:          [][]string{{"header"}, {"kept row"}},
+		bitable:        [][]string{{"header"}, {"must not be fetched"}},
+		sheetBudgets:   &sheetBudgets,
+		bitableBudgets: &bitableBudgets,
+	}
+	blocks := []DocxBlock{
+		{BlockID: "root", BlockType: BlockTypePage},
+		{BlockID: "before", BlockType: BlockTypeText, Text: txt("kept prefix")},
+		{BlockID: "sheet", BlockType: BlockTypeSheet, Sheet: &BlockTokenRef{Token: "sht_a_0"}},
+		{BlockID: "large", BlockType: BlockTypeText, Text: txt(strings.Repeat("x", budget))},
+		{BlockID: "bitable", BlockType: BlockTypeBitable, Bitable: &BlockTokenRef{Token: "app_table"}},
+		{BlockID: "file", BlockType: BlockTypeFile, File: &BlockFileRef{Token: "file_t", Name: "report.pdf"}},
+	}
+
+	md, atts, err := blocksToMarkdownWithin(context.Background(), reader, blocks, budget)
+	if err != nil {
+		t.Fatalf("blocksToMarkdownWithin: %v", err)
+	}
+	if len(md) > budget {
+		t.Fatalf("document length = %d, want <= %d", len(md), budget)
+	}
+	if !strings.Contains(string(md), "kept prefix") || !strings.Contains(string(md), documentTruncatedNote) {
+		t.Fatalf("document must preserve the prefix and mark truncation:\n%s", md)
+	}
+	if strings.Contains(string(md), "must not be fetched") || len(bitableBudgets) != 0 {
+		t.Fatalf("later embedded tables must not be fetched after exhaustion: budgets=%v\n%s", bitableBudgets, md)
+	}
+	if len(sheetBudgets) != 1 || sheetBudgets[0] >= budget {
+		t.Fatalf("sheet budget = %v, want one remaining-document budget below %d", sheetBudgets, budget)
+	}
+	if len(atts) != 1 || atts[0].FileToken != "file_t" {
+		t.Fatalf("attachments after the Markdown boundary must still be collected: %+v", atts)
+	}
+}
+
+func TestBlocksToMarkdown_DocumentBudgetBoundary(t *testing.T) {
+	const budget = 256
+	contentLimit := budget - len(documentTruncatedNote) - 2
+	for _, delta := range []int{0, 1} {
+		t.Run(fmt.Sprintf("over-by-%d", delta), func(t *testing.T) {
+			textBytes := contentLimit - 2 + delta
+			blocks := []DocxBlock{
+				{BlockID: "root", BlockType: BlockTypePage},
+				{BlockID: "text", BlockType: BlockTypeText, Text: txt(strings.Repeat("x", textBytes))},
+			}
+
+			md, _, err := blocksToMarkdownWithin(context.Background(), nil, blocks, budget)
+			if err != nil {
+				t.Fatalf("blocksToMarkdownWithin: %v", err)
+			}
+			if len(md) > budget {
+				t.Fatalf("document length = %d, want <= %d", len(md), budget)
+			}
+			truncated := strings.Contains(string(md), documentTruncatedNote)
+			if truncated != (delta == 1) {
+				t.Fatalf("truncated=%v for delta=%d, output=%q", truncated, delta, md)
+			}
+		})
+	}
+}
+
+func TestBlocksToMarkdown_EmbeddedTablesShareDocumentBudget(t *testing.T) {
+	const budget = 512
+	var sheetBudgets, bitableBudgets []int
+	reader := fakeReader{
+		sheet:          [][]string{{"sheet"}, {"first"}},
+		bitable:        [][]string{{"bitable"}, {"second"}},
+		sheetBudgets:   &sheetBudgets,
+		bitableBudgets: &bitableBudgets,
+	}
+	blocks := []DocxBlock{
+		{BlockID: "root", BlockType: BlockTypePage},
+		{BlockID: "sheet", BlockType: BlockTypeSheet, Sheet: &BlockTokenRef{Token: "sht_0"}},
+		{BlockID: "bitable", BlockType: BlockTypeBitable, Bitable: &BlockTokenRef{Token: "app_table"}},
+	}
+
+	md, _, err := blocksToMarkdownWithin(context.Background(), reader, blocks, budget)
+	if err != nil {
+		t.Fatalf("blocksToMarkdownWithin: %v", err)
+	}
+	if len(sheetBudgets) != 1 || len(bitableBudgets) != 1 {
+		t.Fatalf("reader budgets: sheet=%v bitable=%v", sheetBudgets, bitableBudgets)
+	}
+	if bitableBudgets[0] >= sheetBudgets[0] {
+		t.Fatalf("second table budget = %d, want less than first table budget %d",
+			bitableBudgets[0], sheetBudgets[0])
+	}
+	if !strings.Contains(string(md), "first") || !strings.Contains(string(md), "second") || len(md) > budget {
+		t.Fatalf("tables were not rendered within their shared document budget:\n%s", md)
+	}
+}
+
+func TestBlocksToMarkdown_NoRoomForTableNoteMarksDocumentTruncated(t *testing.T) {
+	const budget = 256
+	tableNote := fmt.Sprintf("> [%s未完整读取，已保留可读取内容]", "内嵌电子表格")
+	contentLimit := budget - len(documentTruncatedNote) - 2
+	prefixBytes := contentLimit - 4 - (len(tableNote) - 1)
+	var sheetBudgets []int
+	reader := fakeReader{sheetBudgets: &sheetBudgets}
+	blocks := []DocxBlock{
+		{BlockID: "root", BlockType: BlockTypePage},
+		{BlockID: "prefix", BlockType: BlockTypeText, Text: txt(strings.Repeat("x", prefixBytes))},
+		{BlockID: "sheet", BlockType: BlockTypeSheet, Sheet: &BlockTokenRef{Token: "sht_0"}},
+	}
+
+	md, _, err := blocksToMarkdownWithin(context.Background(), reader, blocks, budget)
+	if err != nil {
+		t.Fatalf("blocksToMarkdownWithin: %v", err)
+	}
+	if len(sheetBudgets) != 0 {
+		t.Fatalf("table reader was called without room for its status note: %v", sheetBudgets)
+	}
+	if len(md) > budget || !strings.Contains(string(md), documentTruncatedNote) {
+		t.Fatalf("document did not expose budget exhaustion: bytes=%d output=%q", len(md), md)
+	}
+}
+
+func TestBlocksToMarkdown_TableBudgetExhaustionMarksDocumentTruncated(t *testing.T) {
+	reader := fakeReader{
+		sheet:          [][]string{{"header"}, {"kept row"}},
+		sheetTruncated: true,
+		sheetExhausted: true,
+	}
+	blocks := []DocxBlock{
+		{BlockID: "root", BlockType: BlockTypePage},
+		{BlockID: "sheet", BlockType: BlockTypeSheet, Sheet: &BlockTokenRef{Token: "sht_0"}},
+		{BlockID: "later", BlockType: BlockTypeText, Text: txt("must not render")},
+	}
+
+	md, _, err := blocksToMarkdownWithin(context.Background(), reader, blocks, 512)
+	if err != nil {
+		t.Fatalf("blocksToMarkdownWithin: %v", err)
+	}
+	if !strings.Contains(string(md), "kept row") || !strings.Contains(string(md), documentTruncatedNote) {
+		t.Fatalf("budget-limited table must retain rows and mark the document incomplete:\n%s", md)
+	}
+	if strings.Contains(string(md), "must not render") {
+		t.Fatalf("blocks after document exhaustion must not render:\n%s", md)
+	}
+}
+
+func TestBlocksToMarkdown_DocumentBudgetsAreIndependent(t *testing.T) {
+	const (
+		budget    = 256
+		documents = 16
+	)
+	blocks := []DocxBlock{
+		{BlockID: "root", BlockType: BlockTypePage},
+		{BlockID: "text", BlockType: BlockTypeText, Text: txt(strings.Repeat("x", budget))},
+	}
+	results := make([][]byte, documents)
+	errs := make([]error, documents)
+	var wg sync.WaitGroup
+	for i := range documents {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			results[i], _, errs[i] = blocksToMarkdownWithin(context.Background(), nil, blocks, budget)
+		}()
+	}
+	wg.Wait()
+
+	for i := range documents {
+		if errs[i] != nil {
+			t.Fatalf("document %d: %v", i, errs[i])
+		}
+		if len(results[i]) > budget || !strings.Contains(string(results[i]), documentTruncatedNote) {
+			t.Fatalf("document %d crossed or lost its independent budget: bytes=%d output=%q",
+				i, len(results[i]), results[i])
 		}
 	}
 }
