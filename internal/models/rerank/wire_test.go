@@ -214,6 +214,16 @@ func TestRerankWireFormatPerVendor(t *testing.T) {
 			wantBody: cohere("jina-reranker-v3", three, map[string]any{"return_documents": true}),
 		},
 		{
+			name: "cohere v2", provider: "cohere", model: "rerank-v4.0-pro", base: "/v2",
+			wantPath: "/v2/rerank", wantAuth: [2]string{"Authorization", "Bearer k"},
+			wantBody: cohere("rerank-v4.0-pro", three, nil),
+		},
+		{
+			name: "cohere full endpoint", provider: "cohere", model: "rerank-v3.5", base: "/v2/rerank",
+			wantPath: "/v2/rerank", wantAuth: [2]string{"Authorization", "Bearer k"},
+			wantBody: cohere("rerank-v3.5", three, nil),
+		},
+		{
 			name: "zhipu on its full rerank URL", provider: "zhipu", model: "rerank", base: "/api/paas/v4/rerank",
 			wantPath: "/api/paas/v4/rerank", wantAuth: [2]string{"Authorization", "Bearer k"},
 			wantBody: cohere("rerank", three, map[string]any{"return_documents": true}),

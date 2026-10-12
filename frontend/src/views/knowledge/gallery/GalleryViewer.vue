@@ -12,14 +12,11 @@ export interface GalleryAttrRow {
 }
 
 const props = defineProps<{
-  /** The images of the page on screen; the viewer walks them in order. */
+  /** The loaded images; the viewer walks them in order. */
   items: ImageAsset[]
   index: number
-  /** Position of items[0] in the whole result set, so the counter and the
-   *  prev/next bounds speak about every image, not just this page. */
-  offset: number
   total: number
-  /** A neighbouring page is being fetched; navigation waits for it. */
+  /** More images are being fetched; navigation waits for them. */
   loading: boolean
   thumbUrls: Record<string, string>
   resolveSrc: (url: string) => Promise<string>
@@ -29,8 +26,8 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'close'): void
   (e: 'select', index: number): void
-  /** Step past the page edge; the gallery loads the neighbouring page. */
-  (e: 'step', delta: 1 | -1): void
+  /** Step past the loaded edge; the gallery loads more images. */
+  (e: 'load-more'): void
   (e: 'open-source', knowledgeId: string): void
 }>()
 
@@ -38,20 +35,19 @@ const NS = 'knowledgeEditor.wikiBrowser.gallery'
 const { t, locale } = useI18n()
 
 const current = computed<ImageAsset | null>(() => props.items[props.index] ?? null)
-const position = computed(() => props.offset + props.index + 1)
+const position = computed(() => props.index + 1)
 const hasPrev = computed(() => position.value > 1)
 const hasNext = computed(() => position.value < props.total)
 
 function prev(): void {
   if (props.loading || !hasPrev.value) return
-  if (props.index > 0) emit('select', props.index - 1)
-  else emit('step', -1)
+  emit('select', props.index - 1)
 }
 
 function next(): void {
   if (props.loading || !hasNext.value) return
   if (props.index < props.items.length - 1) emit('select', props.index + 1)
-  else emit('step', 1)
+  else emit('load-more')
 }
 
 // ---------------------------------------------------------------------------
@@ -431,7 +427,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
             type="button"
             class="igv-strip__item"
             :class="{ 'is-current': i === index }"
-            :aria-label="img.caption || String(offset + i + 1)"
+            :aria-label="img.caption || String(i + 1)"
             @click="emit('select', i)"
           >
             <img v-if="thumbUrls[img.id]" :src="thumbUrls[img.id]" alt="" draggable="false" />

@@ -27,7 +27,12 @@
 //   - Claude Opus 4.5 is the one extended-thinking-only model that also
 //     accepts `output_config.effort`, so it carries supports_effort with
 //     budget mode;
-//   - temperature and top_p cannot be sent alongside thinking; prompt
+//   - temperature and top_p cannot be sent alongside thinking, and Claude
+//     Opus 4.7 and later (Opus 4.8, Opus 5, Fable 5 / 5.1) and Sonnet 5
+//     reject non-default sampling values, so those entries carry
+//     supports_temperature: false and supports_top_p: false and send no
+//     sampling field at all
+//     (https://platform.claude.com/docs/en/docs/about-claude/model-deprecations); prompt
 //     caching uses `cache_control` breakpoints (including on tools), offers
 //     a 1h TTL and reports cache usage;
 //   - interleaved thinking still uses the `interleaved-thinking-2025-05-14`

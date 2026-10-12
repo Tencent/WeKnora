@@ -1186,7 +1186,7 @@ const updateModelDropdownPosition = () => {
     height: rect.height
   });
 
-  const dropdownWidth = 280;
+  const dropdownWidth = 320;
   const offsetY = 8;
   const { width: vw, height: vh } = cssViewportSize(zoom);
 
@@ -1847,6 +1847,8 @@ const toggleModelSelector = () => {
         updateModelDropdownPosition();
         setTimeout(() => {
           updateModelDropdownPosition();
+          document.querySelector('.model-selector-content .model-option.selected')
+            ?.scrollIntoView({ block: 'nearest' });
         }, 50);
       });
     });
@@ -2897,7 +2899,6 @@ defineExpose({
                   d="M13.5 10V11.5C13.5 12.163 13.7634 12.7989 14.2322 13.2678C14.7011 13.7366 15.337 14 16 14C16.663 14 17.2989 13.7366 17.7678 13.2678C18.2366 12.7989 18.5 12.163 18.5 11.5V10C18.5 7.74566 17.6045 5.58365 16.0104 3.98959C14.4163 2.39553 12.2543 1.5 10 1.5C7.74566 1.5 5.58365 2.39553 3.98959 3.98959C2.39553 5.58365 1.5 7.74566 1.5 10C1.5 12.2543 2.39553 14.4163 3.98959 16.0104C5.58365 17.6045 7.74566 18.5 10 18.5H12"
                   stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
               </svg>
-              <span v-if="allSelectedItems.length > 0" class="kb-count">{{ allSelectedItems.length }}</span>
             </div>
           </t-tooltip>
 
@@ -2966,9 +2967,6 @@ defineExpose({
                 <div v-for="model in availableModels" :key="model.id" class="model-option"
                   :class="{ selected: model.id === selectedModelId }" @click="handleModelChange(model.id || '')">
                   <div class="model-option-left">
-                    <div class="model-option-icon">
-                      <t-icon name="chat" size="14px" />
-                    </div>
                     <div class="model-option-name-wrap">
                       <span class="model-option-name">{{ modelDisplayName(model) }}</span>
                       <span v-if="model.display_name" class="model-option-raw-name">{{ model.name }}</span>
@@ -2979,6 +2977,9 @@ defineExpose({
                     :class="{ 'is-default': isDefaultContextWindow(model.parameters?.context_window) }"
                     :title="contextWindowTitle(model.parameters?.context_window)"
                   >{{ formatContextWindow(model.parameters?.context_window) }}</span>
+                  <span class="model-option-check">
+                    <t-icon v-if="model.id === selectedModelId" name="check" size="14px" />
+                  </span>
                 </div>
                 <div v-if="availableModels.length === 0" class="model-option empty">
                   {{ $t('input.noModel') }}
@@ -3139,12 +3140,15 @@ const getImgSrc = (url: string) => {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 5px;
-  padding: 6px 12px 6px;
-  border-bottom: 1px solid var(--td-component-stroke);
+  gap: 6px;
+  padding: 12px 16px 0;
   background: var(--td-bg-color-container);
   border-radius: 11px 11px 0 0;
   /* 与 .rich-input-container 内缘上边圆角一致（12px - 1px 边框） */
+}
+
+.rich-input-container:has(.selected-tags-inline) :deep(.t-textarea__inner) {
+  padding-top: 8px;
 }
 
 .mention-chip {
@@ -3333,7 +3337,7 @@ const getImgSrc = (url: string) => {
 /* 控制栏 */
 .control-bar {
   position: relative;
-  margin: 0 16px 12px;
+  margin: 0 12px 12px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -3369,7 +3373,7 @@ const getImgSrc = (url: string) => {
 .control-left {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 4px;
   flex: 1;
   flex-wrap: wrap;
   min-width: 0;
@@ -3406,11 +3410,14 @@ const getImgSrc = (url: string) => {
 
 .agent-mode-btn {
   height: 28px;
-  padding: 0 10px;
+  padding: 0 8px 0 10px;
+  margin-right: 4px;
+  box-sizing: border-box;
   min-width: auto;
   font-weight: 500;
   position: relative;
-  border: .5px solid var(--td-component-border);
+  border-radius: var(--app-radius-pill);
+  background: var(--td-bg-color-secondarycontainer);
 }
 
 .agent-icon {
@@ -3435,7 +3442,7 @@ const getImgSrc = (url: string) => {
   color: var(--td-text-color-secondary);
   font-weight: 500;
   white-space: nowrap;
-  margin: 0 4px;
+  margin: 0 2px;
 }
 
 .control-icon {
@@ -3478,28 +3485,6 @@ const getImgSrc = (url: string) => {
   }
 }
 
-.kb-count {
-  position: absolute;
-  top: -2px;
-  right: -2px;
-  z-index: 1;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  box-sizing: border-box;
-  min-width: 14px;
-  height: 14px;
-  padding: 0 3px;
-  border-radius: 7px;
-  background: var(--td-brand-color);
-  color: var(--td-text-color-anti);
-  font-size: var(--app-text-2xs);
-  font-weight: 600;
-  line-height: 1;
-  font-variant-numeric: tabular-nums;
-  pointer-events: none;
-}
-
 .kb-btn-text {
   font-size: var(--app-text-md);
   color: var(--td-text-color-secondary);
@@ -3537,8 +3522,8 @@ const getImgSrc = (url: string) => {
     position: absolute;
     top: -2px;
     right: -2px;
-    background: #07C05F;
-    color: #fff;
+    background: var(--td-brand-color);
+    color: var(--td-text-color-anti);
     font-size: var(--app-text-2xs);
     width: 14px;
     height: 14px;
@@ -3576,8 +3561,8 @@ const getImgSrc = (url: string) => {
     position: absolute;
     top: -2px;
     right: -2px;
-    background: #07C05F;
-    color: #fff;
+    background: var(--td-brand-color);
+    color: var(--td-text-color-anti);
     font-size: var(--app-text-2xs);
     width: 14px;
     height: 14px;
@@ -3772,6 +3757,7 @@ const getImgSrc = (url: string) => {
   width: 28px;
   height: 28px;
   padding: 0;
+  border-radius: 50%;
   box-sizing: border-box;
   font-size: var(--app-text-xl);
   line-height: 1;
@@ -3791,7 +3777,13 @@ const getImgSrc = (url: string) => {
   }
 
   &.disabled {
-    background-color: var(--td-success-color-light);
+    opacity: 1;
+    background-color: var(--td-bg-color-component);
+    color: var(--td-text-color-placeholder);
+
+    &:hover {
+      background-color: var(--td-bg-color-component);
+    }
   }
 
   img {
@@ -3804,7 +3796,6 @@ const getImgSrc = (url: string) => {
 .model-selector-trigger.reasoning-effort-trigger {
   flex-shrink: 0;
   min-width: 0;
-  box-sizing: content-box;
   background: transparent;
   font: inherit;
 }
@@ -3871,11 +3862,11 @@ const getImgSrc = (url: string) => {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 2px 8px;
-  min-width: 100px;
-  height: 22px;
+  padding: 0 8px;
+  height: 28px;
+  box-sizing: border-box;
+  border: 0;
   border-radius: var(--app-radius-sm);
-  border: .5px solid var(--td-component-border);
   transition: background var(--app-motion-instant), border-color var(--app-motion-instant);
   cursor: pointer;
 
@@ -3972,7 +3963,7 @@ const getImgSrc = (url: string) => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 8px 10px;
+  padding: 8px 8px 8px 16px;
   border-bottom: .5px solid var(--td-component-stroke);
   background: var(--td-bg-color-container);
   font-size: var(--app-text-sm);
@@ -4025,15 +4016,20 @@ const getImgSrc = (url: string) => {
   cursor: pointer;
   transition: background var(--app-motion-instant);
   border-radius: var(--app-radius-sm);
-  margin-bottom: 4px;
+  margin-bottom: 2px;
 
   &:last-child {
     margin-bottom: 0;
   }
 
-  &:hover,
-  &.selected {
+  &:hover {
     background: var(--td-bg-color-secondarycontainer);
+  }
+
+  &.selected .model-option-name,
+  &.selected .model-option-check {
+    color: var(--td-brand-color);
+    font-weight: 500;
   }
 
   &.empty {
@@ -4056,14 +4052,13 @@ const getImgSrc = (url: string) => {
   flex: 1;
 }
 
-.model-option-icon {
-  width: 16px;
-  height: 16px;
+.model-option-check {
+  width: 14px;
+  height: 14px;
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  color: var(--td-text-color-secondary);
 }
 
 .model-option-name-wrap {
@@ -4093,10 +4088,7 @@ const getImgSrc = (url: string) => {
   flex-shrink: 0;
   font-size: var(--app-text-xs);
   font-variant-numeric: tabular-nums;
-  color: var(--td-text-color-secondary);
-  background: var(--td-bg-color-secondarycontainer);
-  padding: 0 6px;
-  border-radius: var(--app-radius-xs);
+  color: var(--td-text-color-placeholder);
   line-height: 18px;
 
   &.is-default {

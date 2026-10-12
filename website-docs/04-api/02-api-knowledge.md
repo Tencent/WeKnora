@@ -247,7 +247,7 @@ multipart/form-data 字段：
 | 字段 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
 | `file` | file | 是 | 上传文件 |
-| `fileName` | string | 否 | 覆盖显示名 |
+| `fileName` | string | 否 | 自定义文件名或包含目录的相对路径，如 `docs/spec/design.md`；目录部分用于归类，最后一段作为文件名 |
 | `metadata` | JSON 字符串 | 否 | 自定义元数据 |
 | `enable_multimodel` | bool | 否 | 多模态处理开关 |
 | `tag_ids` | string | 否 | 逗号分隔标签 ID |
@@ -272,6 +272,21 @@ multipart/form-data 字段：
 curl -X POST $BASE/api/v1/knowledge-bases/kb-1/knowledge/file \
   -H "X-API-Key: $API_KEY" -F 'file=@./manual.pdf' -F 'enable_multimodel=true'
 ```
+
+**上传到指定文件夹：** 在 `fileName` 中传入相对于知识库根目录的路径，使用 `/` 分隔目录，并保留文件名及扩展名。上传接口不单独接收 `folder_path` 字段。
+
+```bash
+curl -X POST "$BASE/api/v1/knowledge-bases/kb-1/knowledge/file" \
+  -H "X-API-Key: $API_KEY" \
+  -F 'file=@./design.md' \
+  -F 'fileName=docs/spec/design.md'
+```
+
+上述请求将文档归类到 `docs/spec`，返回的 Knowledge 中 `folder_path` 为 `docs/spec`、`file_name` 为 `design.md`。`file=@./design.md` 指定本地文件，`fileName` 指定知识库中的归类路径。省略 `fileName` 或仅传文件名时，文档位于知识库根目录。
+
+文档知识库的目录由文档的 `folder_path` 推导，无需预先创建：上传到新路径后，目录及其中间层级会出现在目录树中。当前不支持独立创建、保留没有任何文档或子目录文档的空文件夹。Wiki 的创建目录接口管理的是 Wiki 目录，不用于文档知识库。
+
+上传后可用本页的 `GET /api/v1/knowledge-bases/:id/knowledge/folders` 查看目录树。已有文档可通过 `POST /api/v1/knowledge/folder` 移到新路径，无需重新上传；该移动接口才使用 `folder_path` 请求字段。
 
 ### POST /api/v1/knowledge-bases/:id/knowledge/url
 
@@ -367,7 +382,33 @@ curl -X POST $BASE/api/v1/knowledge-bases/kb-1/knowledge/batch-download \
 
 用途：获取知识库的文件夹目录树。整目录上传时目录结构会被保留（migration `000079` 起存在 `knowledges.folder_path` 列，历史 `file_name` 中的路径已回填到该字段）。权限：Viewer+ + KBAccessRead。
 
-响应：200 `{"success":true,"data":[{FolderNode}]}`
+目录树由知识条目的 `folder_path` 汇总生成；没有直接文档但包含子目录文档的中间目录也会返回。目录下最后一份文档及所有子目录文档移走后，该目录不再出现在树中。
+
+响应：200。示例（仅有上述上传的 `docs/spec/design.md`）：
+
+```json
+{
+  "success": true,
+  "data": {
+    "root_document_count": 0,
+    "total_document_count": 1,
+    "folders": [{
+      "path": "docs",
+      "name": "docs",
+      "document_count": 0,
+      "total_count": 1,
+      "children": [{
+        "path": "docs/spec",
+        "name": "spec",
+        "document_count": 1,
+        "total_count": 1
+      }]
+    }]
+  }
+}
+```
+
+`root_document_count` 为知识库根目录中的文档数，`total_document_count` 为知识库总文档数；目录节点的 `document_count` 仅统计直接文档，`total_count` 包含所有子目录文档。
 
 ```bash
 curl $BASE/api/v1/knowledge-bases/kb-1/knowledge/folders -H "Authorization: Bearer $TOKEN"
@@ -631,7 +672,7 @@ curl -X POST $BASE/api/v1/knowledge/batch-delete -H "Authorization: Bearer $TOKE
 | --- | --- | --- | --- |
 | `kb_id` | string | 是 | 知识库 ID |
 | `knowledge_ids` | []string | 是 | 待移动的文档 |
-| `folder_path` | string | 否 | 目标文件夹；空字符串表示移回知识库根目录 |
+| `folder_path` | string | 否 | 相对于知识库根目录的目标文件夹路径，如 `docs/spec`；新路径无需预先创建，空字符串表示移回知识库根目录 |
 
 响应：200 `{"success":true}`
 

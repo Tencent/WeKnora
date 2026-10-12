@@ -12,10 +12,12 @@
     </div>
 
     <template v-else>
-      <t-input v-if="services.length > 0" v-model="query" class="list-search" :placeholder="$t('menu.search')"
-        :aria-label="$t('menu.search')" clearable>
-        <template #prefix-icon><t-icon name="search" size="16px" /></template>
-      </t-input>
+      <Teleport to="#toolbox-toolbar" defer>
+        <t-input v-if="services.length > 0" v-model="query" class="list-search" :placeholder="$t('menu.search')"
+          :aria-label="$t('menu.search')" clearable>
+          <template #prefix-icon><t-icon name="search" size="16px" /></template>
+        </t-input>
+      </Teleport>
       <div v-if="services.length === 0 && !authStore.hasRole('admin')" class="empty-state">
         <t-empty :description="$t('mcpSettings.empty')" />
       </div>
@@ -272,10 +274,6 @@ defineExpose({ openAdd: handleAdd })
   .settings-section-header();
 }
 
-.list-search {
-  margin-bottom: 20px;
-}
-
 .loading-container {
   padding: 40px 0;
   text-align: center;
@@ -307,8 +305,14 @@ defineExpose({ openAdd: handleAdd })
   padding: 0;
   overflow: hidden;
   border: 1px solid var(--td-component-stroke);
-  border-radius: var(--app-radius-lg);
+  border-radius: var(--app-radius-md);
   background: var(--td-bg-color-container);
+  transition: border-color 0.18s ease, box-shadow 0.18s ease;
+
+  &:hover:not(.service-card--add) {
+    border-color: color-mix(in srgb, var(--td-brand-color) 40%, var(--td-component-stroke));
+    box-shadow: 0 3px 12px color-mix(in srgb, var(--td-text-color-primary) 6%, transparent);
+  }
 
   &--add {
     align-items: center;
@@ -365,7 +369,7 @@ defineExpose({ openAdd: handleAdd })
 }
 
 .service-card__badge {
-  .provider-card-badge(26px, 7px);
+  .provider-card-badge(28px, 8px);
   font-size: var(--app-text-md);
 
   :deep(.t-icon) {

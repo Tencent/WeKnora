@@ -65,6 +65,7 @@ type oauthRuntime struct {
 	tenantID      uint64
 	principal     types.Principal
 	serviceID     string
+	clientID      string
 	handler       *transport.OAuthHandler
 	leaseDuration time.Duration
 }
@@ -87,6 +88,7 @@ func newOAuthRuntime(
 		tenantID:      tenantID,
 		principal:     principal.Normalize(),
 		serviceID:     serviceID,
+		clientID:      cfg.ClientID,
 		handler:       h,
 		leaseDuration: leaseDuration,
 	}
