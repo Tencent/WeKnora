@@ -163,3 +163,8 @@ func DeleteSegments(command, homeDir string) []CommandSegment {
 func DeleteTargets(command, homeDir string) []string {
 	return core.DeleteTargets(command, homeDir)
 }
+
+// DeletesStayBelow reports whether every visible delete stays strictly inside cwd.
+func DeletesStayBelow(command, cwd, homeDir string) bool {
+	return core.DeletesStayBelow(command, cwd, homeDir)
+}

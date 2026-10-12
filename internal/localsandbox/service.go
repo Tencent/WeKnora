@@ -213,8 +213,9 @@ func (s *Service) approveDelete(
 	// The session remembers the shape of each delete, like a Codex prefix
 	// rule, so the model may name other files or reorder options. Every
 	// delete in the command must be covered. An opaque command hides a
-	// delete no rule can name, so it is asked every time.
-	rememberable := !dangerous && !opaque
+	// delete no rule can name, so it is asked every time. Rules ignore
+	// operands, so a delete that reaches past cwd or empties it is too.
+	rememberable := !dangerous && !opaque && DeletesStayBelow(review, cwd, s.builder.HomeDir())
 	proposed, needsDir := s.deleteGrant(policy, review, cwd)
 	if rememberable && !needsDir && s.sessions.rulesCover(req.SessionID, cwd, rules) {
 		return policy, nil
