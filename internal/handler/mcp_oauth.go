@@ -1,9 +1,11 @@
 package handler
 
 import (
+	"context"
 	stderrors "errors"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/agent/approval"
 	"github.com/Tencent/WeKnora/internal/errors"
@@ -14,6 +16,10 @@ import (
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 	"github.com/gin-gonic/gin"
 )
+
+// oauthConnectionCleanupTimeout bounds reading the OAuth client registration
+// when the callback recycles cached connections.
+const oauthConnectionCleanupTimeout = 5 * time.Second
 
 // MCPOAuthHandler exposes the per-user MCP OAuth2 authorization-code flow:
 // kicking off authorization (discovery + dynamic client registration + PKCE),
@@ -151,7 +157,8 @@ func (h *MCPOAuthHandler) Callback(c *gin.Context) {
 		return
 	}
 
-	frontendRedirect, serviceID, err := h.oauth.CompleteAuthorization(ctx, state, code)
+	result, err := h.oauth.CompleteAuthorization(ctx, state, code)
+	frontendRedirect := result.FrontendRedirect
 	if frontendRedirect == "" {
 		frontendRedirect = fallbackRedirect
 	}
@@ -160,11 +167,16 @@ func (h *MCPOAuthHandler) Callback(c *gin.Context) {
 		c.Redirect(http.StatusFound, frontendRedirect+"#mcp_oauth_error="+urlQueryEscape("authorization_failed"))
 		return
 	}
-	// The old transport may have been created with an OAuth client registration
-	// that was invalidated together with the refresh token. Recreate it against
-	// the freshly persisted token/client on next use.
-	if h.mcpManager != nil && serviceID != "" {
-		_ = h.mcpManager.CloseClient(serviceID)
+	// Recycle the authorizing user's connection and any connection built with
+	// a replaced OAuth client registration. Other users' connections, and the
+	// tool calls in flight on them, are left alone. The browser may leave as
+	// soon as it is redirected, which must not cut this short.
+	if h.mcpManager != nil {
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), oauthConnectionCleanupTimeout)
+		_ = h.mcpManager.CloseClientsAfterAuthorization(
+			cleanupCtx, result.TenantID, result.ServiceID, result.Principal,
+		)
+		cancel()
 	}
 	c.Redirect(http.StatusFound, frontendRedirect+"#mcp_oauth_result=success")
 }
@@ -219,7 +231,7 @@ func (h *MCPOAuthHandler) Status(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": status})
 }
 
-// Revoke removes the current user's stored token and recycles connections.
+// Revoke removes the current user's stored token and recycles their connection.
 //
 // Revoke godoc
 // @Summary      撤销 MCP OAuth 授权
@@ -244,8 +256,11 @@ func (h *MCPOAuthHandler) Revoke(c *gin.Context) {
 		c.Error(errors.NewInternalServerError("failed to revoke authorization: " + err.Error()))
 		return
 	}
-	// Recycle any cached connections so a subsequent call re-authorizes.
-	_ = h.mcpManager.CloseClient(serviceID)
+	// Recycle this user's cached connection so a subsequent call re-authorizes.
+	// Other users' connections do not use the revoked token and stay open.
+	if h.mcpManager != nil {
+		_ = h.mcpManager.CloseClientForPrincipal(serviceID, principal)
+	}
 	c.Status(http.StatusNoContent)
 }
 
