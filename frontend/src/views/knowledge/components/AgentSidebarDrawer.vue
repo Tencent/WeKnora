@@ -544,7 +544,9 @@ const formatInboxTime = (v?: string) => {
   flex-direction: column;
   border-left: 1px solid var(--td-component-border);
   background: var(--td-bg-color-container);
-  border-radius: var(--app-radius-lg, 12px) 0 0 var(--app-radius-lg, 12px);
+  /* Square left edge: the dock is a flush app-wide panel pinned to the
+     viewport, not a floating drawer. */
+  border-radius: 0;
   overflow: hidden;
   /* 收件箱贴底面板的定位参照。 */
   position: relative;
@@ -754,6 +756,29 @@ const formatInboxTime = (v?: string) => {
    dock's unified body size too. */
 .agent-sidebar-panel .agent-sidebar-body :deep(.t-textarea__inner::placeholder) {
   font-size: var(--app-text-base);
+}
+
+/* Composer metrics mirror the main chat's compact input so both composers
+   read as the same component. The dock's ChatView runs embeddedMode=true,
+   which lands on Input-field's non-compact sizing (72px textarea,
+   8px/12px control-bar spacing); the main chat uses the compact tier
+   (56px, 4px/8px). (0,4,0) beats Input-field's own rules even though its
+   styles inject later. */
+.agent-sidebar-panel .agent-sidebar-body :deep(.t-textarea__inner) {
+  min-height: 56px !important;
+}
+
+.agent-sidebar-panel .agent-sidebar-body :deep(.control-bar) {
+  margin: 0 12px 8px;
+  padding-top: 4px;
+}
+
+/* Main chat leaves max(8px, safe-area) below the composer box; embedded
+   mode zeroes .chat_composer padding, which sits the input flush against
+   the panel bottom. Same-specificity scoped rules from ChatView inject
+   later, so keep the (0,4,0) prefix here. */
+.agent-sidebar-panel .agent-sidebar-body :deep(.chat_composer) {
+  padding-bottom: max(8px, env(safe-area-inset-bottom));
 }
 
 .agent-sidebar-empty {
