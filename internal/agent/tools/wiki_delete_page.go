@@ -37,7 +37,7 @@ func NewWikiDeletePageTool(
 					},
 					"knowledge_base_id": {
 						"type": "string",
-						"description": "Optional: owning KB ID; disambiguates a slug shared by several KBs."
+						"description": "Optional bN knowledge-base handle; disambiguates a slug shared by several KBs."
 					}
 				},
 				"required": ["slug"]

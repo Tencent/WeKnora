@@ -138,13 +138,13 @@ var toolHandlePolicies = map[string]toolHandlePolicy{
 		sourceOutput: true,
 	},
 	"wiki_write_page": {
-		sourceIDKeys: map[string]struct{}{"source_refs": {}},
+		sourceIDKeys: map[string]struct{}{"source_refs": {}, "knowledge_base_id": {}},
 	},
 	"wiki_replace_text": {
-		sourceIDKeys: map[string]struct{}{"source_refs": {}},
+		sourceIDKeys: map[string]struct{}{"source_refs": {}, "knowledge_base_id": {}},
 	},
 	"wiki_flag_issue": {
-		sourceIDKeys: map[string]struct{}{"suspected_knowledge_ids": {}},
+		sourceIDKeys: map[string]struct{}{"suspected_knowledge_ids": {}, "knowledge_base_id": {}},
 	},
 	"wiki_search": {
 		sourceIDKeys: map[string]struct{}{"knowledge_base_id": {}, "knowledge_base_ids": {}},
@@ -161,12 +161,15 @@ var toolHandlePolicies = map[string]toolHandlePolicy{
 		encodeKnownIssueIDs: true,
 	},
 	// Mutation tools echo the slug they acted on and surface validation errors
-	// that can quote a durable KB or document ID. They own no source arguments,
-	// but their output must still be compacted before the model sees it.
+	// that can quote a durable KB or document ID. Their optional
+	// knowledge_base_id disambiguator accepts the bN handle the model already
+	// sees, so output must still be compacted before the model sees it.
 	"wiki_rename_page": {
+		sourceIDKeys: map[string]struct{}{"knowledge_base_id": {}},
 		sourceOutput: true,
 	},
 	"wiki_delete_page": {
+		sourceIDKeys: map[string]struct{}{"knowledge_base_id": {}},
 		sourceOutput: true,
 	},
 	// Agent-private bookkeeping tools echo model-authored text. They need

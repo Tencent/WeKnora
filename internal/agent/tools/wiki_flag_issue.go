@@ -40,7 +40,7 @@ This will log an issue for human review or automated maintenance.`,
     },
     "knowledge_base_id": {
       "type": "string",
-      "description": "Optional: owning KB ID; disambiguates a slug shared by several KBs."
+      "description": "Optional bN knowledge-base handle; disambiguates a slug shared by several KBs."
     },
     "issue_type": {
       "type": "string",

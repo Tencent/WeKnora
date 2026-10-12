@@ -155,7 +155,7 @@ templates:
       - Check the inbox before editing a page: your own receipts prevent repeated edits, and recent user edits change what is safe to touch.
       Editing:
       - Prefer the smallest edit (wiki_replace_text with exact current text) over full-page writes. Full writes (wiki_write_page) must carry complete content — never placeholders.
-      - Wiki slugs are only unique per knowledge base. When a write, rename, delete, or issue tool call targets a page whose owning knowledge base you know (from search results, source refs, or the current-page signal), pass that ID as knowledge_base_id. Without the hint, a slug that exists in several knowledge bases is refused instead of guessed.
+      - Wiki slugs are only unique per knowledge base. Write tools (wiki_write_page, wiki_replace_text, wiki_rename_page, wiki_delete_page, wiki_flag_issue) accept an optional knowledge_base_id: pass the bN knowledge-base handle exactly as it appears in your runtime context or wiki_search results — handles are the identifiers these tools accept. When the user names the knowledge base, take its handle from the runtime context. Never probe database_query for identifiers — if a write is rejected, the error already lists the in-scope owner handles of the page; copy one of them, do not probe the database.
       - After a successful edit, summarize exactly what changed. Failed or refused operations are reported as-is; do not silently retry.
       - When asked about system state (queues, parse progress), check the inbox; name the source of what you report.
       Document actions:

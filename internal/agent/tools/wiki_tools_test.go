@@ -478,12 +478,33 @@ func TestResolveUniqueWikiPageHintOutsideScopeRejected(t *testing.T) {
 	slug := "concept/shared"
 	service := &fakeWikiPageService{pages: map[string]*types.WikiPage{
 		wikiPageKey("kb-1", slug): newTestWikiPage("kb-1", slug),
+		wikiPageKey("kb-2", slug): newTestWikiPage("kb-2", slug),
 	}}
+	_, _, err := resolveUniqueWikiPage(
+		context.Background(), service, slug, []string{"kb-1", "kb-2"}, NewWikiRouteResolver(), "kb-9",
+	)
+	if err == nil || !strings.Contains(err.Error(), "bN knowledge-base handle") {
+		t.Fatalf("hint outside the allowed scope must explain the handle requirement, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "kb-1") || !strings.Contains(err.Error(), "kb-2") {
+		t.Fatalf("guidance error must list the in-scope owners of the slug, got %v", err)
+	}
+	if strings.Contains(err.Error(), "kb-9") {
+		t.Fatalf("guidance error must not echo the rejected hint value, got %v", err)
+	}
+}
+
+func TestResolveUniqueWikiPageInvalidHintWhenSlugAbsent(t *testing.T) {
+	slug := "concept/missing"
+	service := &fakeWikiPageService{pages: map[string]*types.WikiPage{}}
 	_, _, err := resolveUniqueWikiPage(
 		context.Background(), service, slug, []string{"kb-1"}, NewWikiRouteResolver(), "kb-9",
 	)
-	if err == nil || !strings.Contains(err.Error(), "not within the current wiki scope") {
-		t.Fatalf("hint outside the allowed scope must be rejected, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "bN knowledge-base handle") {
+		t.Fatalf("invalid hint with an absent slug must still explain the handle requirement, got %v", err)
+	}
+	if strings.Contains(err.Error(), "exists in") {
+		t.Fatalf("absent slug must not produce an owner list, got %v", err)
 	}
 }
 

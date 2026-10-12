@@ -17,6 +17,15 @@ var (
 	errWikiPageAmbiguous       = errors.New("wiki page exists in multiple knowledge bases")
 )
 
+// wikiHintUsageError is shared by mutation tools when the model-supplied
+// knowledge_base_id is not an in-scope KB ID. It never quotes the rejected
+// value: the model may have invented any shorthand, and echoing one wrong
+// guess does not help the next one. It points at the handle sources the
+// model already sees instead.
+const wikiHintUsageError = "knowledge_base_id must be the bN knowledge-base handle of an in-scope knowledge base; " +
+	"take it from your runtime context, wiki_read_page metadata (<knowledge_base_id>), wiki_search results, " +
+	"or inbox events (user.switched_kb carries kb_id)"
+
 // WikiRouteResolver stores request-local provenance for wiki slugs. It is
 // server-side routing state, not a model-handle registry: only KBs already in
 // the current WikiScope can ever be returned.
@@ -116,7 +125,11 @@ func scopesOutsideKBs(scopes []WikiScope, excluded []WikiScope) []WikiScope {
 // resolution to that single KB. The hint must already be inside the allowed
 // scope, and a miss inside the hinted KB is reported as-is instead of
 // falling back to the other KBs — a fallback would silently mutate a
-// different KB than the one the model named.
+// different KB than the one the model named. A hint that is not an allowed
+// scope ID is rejected with a generic usage error that lists the in-scope
+// owners of the slug (if any); the rejected value itself is never quoted,
+// because echoing one invented shorthand does not help the model's next
+// guess — the handle sources the model already sees do.
 func resolveUniqueWikiPage(
 	ctx context.Context,
 	service interfaces.WikiPageService,
@@ -130,18 +143,16 @@ func resolveUniqueWikiPage(
 		return nil, "", fmt.Errorf("slug is required")
 	}
 	kbHint = strings.TrimSpace(kbHint)
+	hintAllowed := false
 	if kbHint != "" {
-		hintAllowed := false
 		for _, id := range dedupNonEmptyStrings(kbIDs) {
 			if id == kbHint {
 				hintAllowed = true
 				break
 			}
 		}
-		if !hintAllowed {
-			return nil, "", fmt.Errorf(
-				"knowledge base %s is not within the current wiki scope", kbHint)
-		}
+	}
+	if kbHint != "" && hintAllowed {
 		page, err := service.GetPageBySlug(ctx, kbHint, slug)
 		if err != nil && !errors.Is(err, repository.ErrWikiPageNotFound) {
 			return nil, "", fmt.Errorf(
@@ -164,37 +175,25 @@ func resolveUniqueWikiPage(
 		routes.rememberPage(page, kbHint)
 		return page, kbHint, nil
 	}
-	scopes := NewWikiScopesFromKBIDs(kbIDs)
-	preferred := routes.scopesForSlug(slug, scopes)
-	ordered := append(append([]WikiScope(nil), preferred...), scopesOutsideKBs(scopes, preferred)...)
-	type hit struct {
-		page *types.WikiPage
-		kbID string
+	hits, err := scanWikiPageOwners(ctx, service, slug, kbIDs, routes)
+	if err != nil {
+		return nil, "", err
 	}
-	var hits []hit
-	for _, scope := range ordered {
-		page, err := service.GetPageBySlug(ctx, scope.KnowledgeBaseID, slug)
-		if err != nil {
-			if errors.Is(err, repository.ErrWikiPageNotFound) {
-				continue
-			}
+	if kbHint != "" {
+		owners := make([]string, 0, len(hits))
+		for _, item := range hits {
+			owners = append(owners, item.kbID)
+		}
+		if len(owners) == 0 {
 			return nil, "", fmt.Errorf(
-				"failed to resolve wiki page %s in knowledge base %s: %w",
-				slug, scope.KnowledgeBaseID, err,
+				"%s; page %s was not found in the current wiki scope either",
+				wikiHintUsageError, slug,
 			)
 		}
-		if page == nil {
-			continue
-		}
-		if page.KnowledgeBaseID != "" && page.KnowledgeBaseID != scope.KnowledgeBaseID {
-			return nil, "", fmt.Errorf(
-				"wiki page %s returned knowledge base %s while resolving allowed scope %s",
-				slug, page.KnowledgeBaseID, scope.KnowledgeBaseID,
-			)
-		}
-		kbID := scope.KnowledgeBaseID
-		hits = append(hits, hit{page: page, kbID: kbID})
-		routes.rememberPage(page, kbID)
+		return nil, "", fmt.Errorf(
+			"%s; page %s exists in: %s — pass one of these IDs",
+			wikiHintUsageError, slug, strings.Join(owners, ", "),
+		)
 	}
 	switch len(hits) {
 	case 0:
@@ -208,6 +207,51 @@ func resolveUniqueWikiPage(
 		}
 		return nil, "", fmt.Errorf("%w: slug %s belongs to %s", errWikiPageAmbiguous, slug, strings.Join(owners, ", "))
 	}
+}
+
+// wikiPageHit pairs a found page with the scope KB it was served from.
+type wikiPageHit struct {
+	page *types.WikiPage
+	kbID string
+}
+
+// scanWikiPageOwners searches every allowed scope for the slug, preferring
+// KBs that the request-scoped route cache already associates with it.
+func scanWikiPageOwners(
+	ctx context.Context,
+	service interfaces.WikiPageService,
+	slug string,
+	kbIDs []string,
+	routes *WikiRouteResolver,
+) ([]wikiPageHit, error) {
+	scopes := NewWikiScopesFromKBIDs(kbIDs)
+	preferred := routes.scopesForSlug(slug, scopes)
+	ordered := append(append([]WikiScope(nil), preferred...), scopesOutsideKBs(scopes, preferred)...)
+	hits := make([]wikiPageHit, 0, len(scopes))
+	for _, scope := range ordered {
+		page, err := service.GetPageBySlug(ctx, scope.KnowledgeBaseID, slug)
+		if err != nil {
+			if errors.Is(err, repository.ErrWikiPageNotFound) {
+				continue
+			}
+			return nil, fmt.Errorf(
+				"failed to resolve wiki page %s in knowledge base %s: %w",
+				slug, scope.KnowledgeBaseID, err,
+			)
+		}
+		if page == nil {
+			continue
+		}
+		if page.KnowledgeBaseID != "" && page.KnowledgeBaseID != scope.KnowledgeBaseID {
+			return nil, fmt.Errorf(
+				"wiki page %s returned knowledge base %s while resolving allowed scope %s",
+				slug, page.KnowledgeBaseID, scope.KnowledgeBaseID,
+			)
+		}
+		hits = append(hits, wikiPageHit{page: page, kbID: scope.KnowledgeBaseID})
+		routes.rememberPage(page, scope.KnowledgeBaseID)
+	}
+	return hits, nil
 }
 
 // resolveWikiCreateKB selects a creation target only when server-side context
