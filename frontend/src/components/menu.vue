@@ -224,6 +224,8 @@ import PanelResizeHandle from './PanelResizeHandle.vue';
 import { SIDEBAR_COLLAPSED_WIDTH, SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH } from '@/utils/sidebarWidth';
 import {
     clearSession,
+    notifySessionMutation,
+    notifySessionsAllRemoved,
     removeSession,
     renameSession,
     SESSION_MUTATION_EVENT,
@@ -640,13 +642,23 @@ const handleInlineBatchDelete = () => {
                         usemenuStore.clearMenuArr();
                         total.value = 0;
                         await getMessageList();
+                        // One broadcast instead of per-id events: the agent
+                        // chat dock must drop its localStorage binding when
+                        // every session of the user is gone.
+                        notifySessionsAllRemoved();
                     } else {
+                        const removedIds = [...batchSelectedIds.value];
                         let next = sessionBuckets.value;
-                        for (const id of batchSelectedIds.value) {
+                        for (const id of removedIds) {
                             next = removeSessionFromBuckets(next, id);
                         }
                         sessionBuckets.value = next;
                         syncMenuStoreFromBuckets();
+                        // Same removal signal the single-delete path sends,
+                        // so the agent chat dock rebinds if its session died.
+                        for (const id of removedIds) {
+                            notifySessionMutation({ sessionId: id, removed: true });
+                        }
                     }
                     const currentChatId = route.params.chatid as string;
                     if (currentChatId && (isDeleteAll || batchSelectedIds.value.includes(currentChatId))) {
@@ -1034,6 +1046,25 @@ const handleSessionMutation = (event: Event) => {
     const detail = (event as CustomEvent<SessionMutationDetail>).detail;
     if (!detail?.sessionId) return;
     if (detail.removed || detail.messagesCleared) sessionActivity.update(detail.sessionId, false);
+    if (detail.created && detail.session?.id) {
+        // A session created outside this sidebar (agent chat dock, wiki fix
+        // drawer) — prepend it to the web bucket so it shows up without a
+        // refetch, matching the dock's own header list.
+        const row: SessionForGrouping = {
+            id: detail.session.id,
+            title: detail.session.title || '',
+            created_at: detail.session.updated_at,
+            updated_at: detail.session.updated_at || new Date().toISOString(),
+        };
+        const webBucket = sessionBuckets.value[DEFAULT_SESSION_BUCKET_KEY];
+        if (webBucket) {
+            sessionBuckets.value = {
+                ...sessionBuckets.value,
+                [DEFAULT_SESSION_BUCKET_KEY]: prependSessionToWebBucket(webBucket, row),
+            };
+            syncMenuStoreFromBuckets();
+        }
+    }
     if (detail.patch) {
         updateSessionInBuckets(detail.sessionId, {
             ...detail.patch,

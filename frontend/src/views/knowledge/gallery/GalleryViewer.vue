@@ -540,9 +540,11 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
   top: 0;
   left: 0;
   bottom: 0;
-  right: 0;
-  /* Fixed inside #app (transform ancestor), so the App.vue shell shift keeps
-     this clear of the agent sidebar dock with no extra offset here. */
+  /* Teleported to <body>, so the #app shell shift does NOT confine this
+     fixed overlay — yield to the agent sidebar dock explicitly (same
+     contract as the doc drawers and the gallery page container; the
+     variable is 0px while the dock is closed). */
+  right: var(--agent-sidebar-w, 0px);
   z-index: var(--z-drawer);
   display: grid;
   grid-template-columns: minmax(0, 1fr);

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { MessagePlugin, NotifyPlugin } from 'tdesign-vue-next'
 import ProtectedResourcePreview from '@/components/ProtectedResourcePreview.vue'
@@ -26,8 +26,18 @@ import zhTWConfig from 'tdesign-vue-next/esm/locale/zh_TW'
 const { locale, t, tm } = useI18n()
 const { formatRole, roleIcon } = useRoleLabel()
 const router = useRouter()
+const route = useRoute()
 const authStore = useAuthStore()
 const settingsStore = useSettingsStore()
+
+// The chat dock is app-wide for authenticated pages only. Beyond the login
+// gate, public routes (meta.requiresAuth === false — /login, /register
+// share-link landing, future public pages) must not host the dock: a
+// logged-in user can open those URLs directly and the router does not
+// bounce them, so isLoggedIn alone would leak the dock onto the login UI.
+const dockAllowed = computed(
+  () => authStore.isLoggedIn && route.meta.requiresAuth !== false,
+)
 
 const tdLocaleMap: Record<string, object> = {
   'en-US': enUSConfig,
@@ -285,7 +295,7 @@ onUnmounted(() => {
            on any authenticated page (settings, chat, KB views, ...) and no
            future page-level overlay can bury it (dock z 5000 > dialogs).
            Login/embed are covered by the isLoggedIn gate. -->
-      <AgentSidebarDrawer v-if="authStore.isLoggedIn" />
+      <AgentSidebarDrawer v-if="dockAllowed" />
       <ManualKnowledgeEditor />
       <ProtectedResourcePreview />
       <UploadConfirmHost />

@@ -141,12 +141,17 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { MessagePlugin } from 'tdesign-vue-next';
 import { useI18n } from 'vue-i18n';
 import ChatView from '@/views/chat/index.vue';
-import { createSessions, getSessionsList } from '@/api/chat';
+import { createSessions, getSession, getSessionsList } from '@/api/chat';
+import {
+  SESSION_MUTATION_EVENT,
+  notifySessionCreated,
+  type SessionMutationDetail,
+} from '@/components/sessionMutations';
 import {
   fetchInboxEvents,
   markInboxRead,
@@ -229,11 +234,45 @@ onBeforeUnmount(() => {
 // dropdown and the new-chat button.
 const SIDEBAR_SESSION_KEY = 'agentSidebarSession:global';
 
+// The dock binds to a single global session (localStorage-backed). Sessions
+// deleted elsewhere (main sidebar batch delete / delete-all) must reset
+// this binding, otherwise the dock keeps chatting into a deleted session
+// (send fails with an HTTP error and the dropdown lists ghost rows).
+const resetDockSession = () => {
+  localStorage.removeItem(SIDEBAR_SESSION_KEY);
+  sessionId.value = '';
+  activeTitle.value = '';
+  // A fresh session is only materialized when the dock is actually open —
+  // closed docks stay lightweight and bind on their next open.
+  if (visible.value) void ensureSession();
+};
+
+const onSessionMutation = (event: Event) => {
+  const detail = (event as CustomEvent<SessionMutationDetail>).detail;
+  if (!detail) return;
+  if (detail.allRemoved) {
+    resetDockSession();
+    return;
+  }
+  if (detail.removed && detail.sessionId && detail.sessionId === sessionId.value) {
+    resetDockSession();
+  }
+};
+
+onMounted(() => window.addEventListener(SESSION_MUTATION_EVENT, onSessionMutation));
+onBeforeUnmount(() => window.removeEventListener(SESSION_MUTATION_EVENT, onSessionMutation));
+
 const ensureSession = async () => {
   if (sessionLoading.value) return;
   const stored = localStorage.getItem(SIDEBAR_SESSION_KEY);
   if (stored) {
     sessionId.value = stored;
+    // Stale-binding guard: the stored session may have been deleted while
+    // the dock was closed (batch delete / delete-all elsewhere). One cheap
+    // GET; a 404 rebinds to a fresh session instead of leaving the user
+    // chatting into a deleted one (send fails with an HTTP error and the
+    // transcript looks empty).
+    getSession(stored).catch(() => resetDockSession());
     return;
   }
   sessionLoading.value = true;
@@ -243,6 +282,9 @@ const ensureSession = async () => {
     if (id) {
       sessionId.value = id;
       localStorage.setItem(SIDEBAR_SESSION_KEY, id);
+      // Surface the new session in the main sidebar's history without a
+      // refetch (batch delete may have emptied it just before this).
+      notifySessionCreated({ id });
     } else {
       MessagePlugin.error(t('knowledgeBase.agentSidebar.sessionError'));
     }
@@ -254,7 +296,17 @@ const ensureSession = async () => {
 };
 
 watch(visible, (val) => {
-  if (val && !sessionId.value) ensureSession();
+  if (!val) return;
+  if (!sessionId.value) {
+    ensureSession();
+    return;
+  }
+  // Stale-binding guard: the stored session may have been deleted while the
+  // dock was closed (batch delete from another page, previous bulk delete).
+  // One cheap GET on open; a 404 rebinds to a fresh session instead of
+  // letting the user chat into a deleted one (send would fail with an HTTP
+  // error and the transcript would look empty).
+  getSession(sessionId.value).catch(() => resetDockSession());
 });
 
 // ── Session switcher (sidebar header v2) ────────────────────────────────
@@ -303,6 +355,7 @@ const newSession = async () => {
     if (!id) throw new Error('no session id');
     bindSession(id);
     recentSessions.value = recentSessions.value.filter((s) => s.id !== id);
+    notifySessionCreated({ id });
   } catch (_) {
     MessagePlugin.error(t('knowledgeBase.agentSidebar.sessionError'));
   }
@@ -319,9 +372,10 @@ const formatSessionTime = (v?: string) => {
   return sameDay ? hm : `${d.getMonth() + 1}-${d.getDate()}`;
 };
 
-// Create the session eagerly so the panel is ready before the first open,
-// and load the recency list once so the header title resolves immediately.
-ensureSession();
+// No eager session creation at mount: the dock only materializes a session
+// when it is actually opened (watch above). Eager creation used to leak one
+// empty session per page scope into the history list — the "ghost rows"
+// that survived a batch delete of every real conversation.
 loadRecentSessions();
 
 // ── 收件箱贴底面板（agent-sidebar-inbox Phase 3）─────────────────────────

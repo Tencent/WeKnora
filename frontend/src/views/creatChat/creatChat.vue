@@ -302,7 +302,10 @@ async function openProjectDir() {
     display: flex;
     justify-content: center;
     align-items: center;
-    // position: relative;
+    // 两侧永远保留呼吸留白（对齐会话页 --chat-content-inset 的 20px 档）：
+    // 主区窄于 960 上限时（窗口收窄或侧边栏 dock 打开），输入框不再贴边。
+    padding: 0 20px;
+    box-sizing: border-box;
 }
 
 .dialogue-answers {

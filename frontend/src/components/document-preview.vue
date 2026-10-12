@@ -1123,7 +1123,9 @@ onUnmounted(() => {
   position: fixed;
   top: 0;
   left: 0;
-  right: 0;
+  /* Keep clear of the agent sidebar dock (same contract as the doc drawers
+     and the gallery viewer): the variable is 0px while the dock is closed. */
+  right: var(--agent-sidebar-w, 0px);
   bottom: 0;
   z-index: 2001;
   background: var(--td-bg-color-container);

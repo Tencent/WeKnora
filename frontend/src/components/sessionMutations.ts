@@ -19,11 +19,36 @@ export interface SessionMutationDetail {
   patch?: SessionMutationPatch
   messagesCleared?: boolean
   removed?: boolean
+  // Batch "delete all" has no per-id list the UI can enumerate — one event
+  // tells listeners (e.g. the agent chat dock) that every session of the
+  // user is gone. Carries no sessionId on purpose.
+  allRemoved?: boolean
+  // A session was created outside the main sidebar (agent chat dock, wiki
+  // fix drawer, ...). Carries a minimal row so the sidebar can prepend it
+  // to the web bucket without refetching.
+  created?: boolean
+  session?: {
+    id: string
+    title?: string
+    updated_at?: string
+  }
 }
 
 export function notifySessionMutation(detail: SessionMutationDetail): void {
   if (typeof window === 'undefined') return
   window.dispatchEvent(new CustomEvent<SessionMutationDetail>(SESSION_MUTATION_EVENT, { detail }))
+}
+
+export function notifySessionsAllRemoved(): void {
+  notifySessionMutation({ sessionId: '', allRemoved: true })
+}
+
+export function notifySessionCreated(session: {
+  id: string
+  title?: string
+  updated_at?: string
+}): void {
+  notifySessionMutation({ sessionId: session.id, created: true, session })
 }
 
 function ensureSuccess(response: any): any {
