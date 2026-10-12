@@ -636,14 +636,29 @@ const formatInboxTime = (v?: string) => {
    .msg_list.is-embedded, because the main chat page supplies the gutter
    itself. Inside a 260-640px panel that reads oversized and flush against
    both edges, so normalize here instead of touching the shared chat
-   components (main chat keeps its current metrics). */
+   components (main chat keeps its current metrics). The dock unifies all
+   chat body copy at --app-text-base (14px) — the same size as the user
+   bubbles in the transcript, so input box, answers, and history read as
+   one scale. Selector specificity (0,4,0 via .agent-sidebar-panel) must
+   beat the embedded chat components' own 16px rules —
+   .answer-content.markdown-content (AgentStreamDisplay) and
+   :deep(.t-textarea__inner) (Input-field) — whose styles inject later
+   than this component's. */
 .agent-sidebar-body :deep(.msg_list.is-embedded) {
   padding: 4px 16px 16px;
 }
 
-.agent-sidebar-body :deep(.bot_msg),
-.agent-sidebar-body :deep(.user_msg),
-.agent-sidebar-body :deep(.markdown-content) {
+.agent-sidebar-panel .agent-sidebar-body :deep(.bot_msg),
+.agent-sidebar-panel .agent-sidebar-body :deep(.user_msg),
+.agent-sidebar-panel .agent-sidebar-body :deep(.markdown-content),
+.agent-sidebar-panel .agent-sidebar-body :deep(.answer-content.markdown-content),
+.agent-sidebar-panel .agent-sidebar-body :deep(.t-textarea__inner) {
+  font-size: var(--app-text-base);
+}
+
+/* Input-field hardcodes the placeholder at --app-text-xl; keep it on the
+   dock's unified body size too. */
+.agent-sidebar-panel .agent-sidebar-body :deep(.t-textarea__inner::placeholder) {
   font-size: var(--app-text-base);
 }
 
