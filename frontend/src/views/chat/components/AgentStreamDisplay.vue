@@ -732,6 +732,7 @@ const TOOL_NAME_KEYS: Record<string, string> = {
   call_mcp_tool: 'agentStream.mcp.callTool',
   search_knowledge: 'agentStream.tools.searchKnowledge',
   read_document: 'agentStream.tools.readDocument',
+  read_attachment: 'agentStream.tools.readAttachment',
   list_documents: 'agentStream.tools.listDocuments',
   // Retired names still present in stored chat history
   knowledge_search: 'agentStream.tools.searchKnowledge',

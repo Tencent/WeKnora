@@ -129,6 +129,9 @@ type AgentConfig struct {
 	// in-conversation OAuth authorization before skipping. <=0 falls back to
 	// the gate's configured timeout. The wait is always bounded (no leak).
 	MCPAuthWaitTimeout int `json:"mcp_auth_wait_timeout,omitempty"`
+	// AttachmentParseWaitTimeoutSec bounds how long read_attachment waits for
+	// a file that is still being parsed. <=0 uses the server default.
+	AttachmentParseWaitTimeoutSec int `json:"-"`
 	// Whether to enable thinking mode (for models that support extended thinking)
 	Thinking *bool `json:"thinking"`
 	// ReasoningEffort is the graded thinking level; empty falls back to Thinking.

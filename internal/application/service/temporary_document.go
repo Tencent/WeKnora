@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/common"
 	"github.com/Tencent/WeKnora/internal/infrastructure/chunker"
@@ -31,6 +32,11 @@ const (
 	temporaryDocumentInlineTokens   = 12000
 	temporaryDocumentPromptBudget   = 12000
 	temporaryDocumentMaxPromptParts = 16
+	// agentAttachmentInlineBudget caps the tokens of small attachments an
+	// agent turn inlines in total; the rest stay on demand.
+	agentAttachmentInlineBudget         = 6000
+	temporaryDocumentOutlineMaxHeadings = 30
+	temporaryDocumentOutlineMaxRunes    = 1500
 	// defaultTemporaryDocumentImageOCRMaxPages caps how many page images a
 	// scanned / image-only document may send to the VLM, bounding OCR latency.
 	// Override via WEKNORA_CHAT_ATTACHMENT_OCR_MAX_PAGES.
@@ -708,6 +714,79 @@ func (s *temporaryDocumentService) ResolveForPrompt(ctx context.Context, tenantI
 		}
 	}
 	return result, nil
+}
+
+// DescribeForAgent returns a manifest view of the given documents for an
+// agent turn. Unlike ResolveForPrompt it neither waits for parsing nor
+// selects content by the question: the agent reads what it needs through
+// read_attachment, so only small, ready documents are inlined in full.
+func (s *temporaryDocumentService) DescribeForAgent(ctx context.Context, tenantID uint64, sessionID string, documentIDs []string) (*types.TemporaryDocumentPromptResult, error) {
+	result := &types.TemporaryDocumentPromptResult{}
+	if len(documentIDs) > types.MaxTemporaryAttachmentsPerMessage {
+		return nil, fmt.Errorf("a message can use at most %d attachments", types.MaxTemporaryAttachmentsPerMessage)
+	}
+	inlineBudget := agentAttachmentInlineBudget
+	seen := make(map[string]struct{}, len(documentIDs))
+	for _, documentID := range documentIDs {
+		if _, duplicate := seen[documentID]; duplicate {
+			continue
+		}
+		seen[documentID] = struct{}{}
+		document, err := s.resolveInSession(ctx, tenantID, sessionID, documentID)
+		if err != nil {
+			return nil, err
+		}
+		if document == nil {
+			continue
+		}
+		attachment := types.MessageAttachment{
+			ID: document.ID, URL: document.ResourceRef, FileName: document.FileName,
+			FileType: document.FileType, FileSize: document.FileSize,
+			Status: document.Status, ContentMode: types.AttachmentContentModeOnDemand,
+		}
+		if document.Status == types.TemporaryDocumentStatusReady {
+			attachment.TokenCount = document.TokenCount
+			attachment.TotalChunks = document.ChunkCount
+			attachment.Outline = temporaryDocumentOutline(document.Content)
+			if document.TokenCount <= types.AgentAttachmentInlineTokens && document.TokenCount <= inlineBudget {
+				attachment.Content = document.Content
+				attachment.ContentMode = types.AttachmentContentModeFull
+				attachment.SelectedChunks = document.ChunkCount
+				inlineBudget -= document.TokenCount
+			}
+			if docparser.IsImageFormat(document.FileType) {
+				for _, image := range temporaryDocumentImageRefs(document.ImageRefs) {
+					if image.URL != "" && len(result.ImageURLs) < 4 {
+						result.ImageURLs = append(result.ImageURLs, image.URL)
+					}
+				}
+			}
+		}
+		result.Attachments = append(result.Attachments, attachment)
+	}
+	return result, nil
+}
+
+var markdownHeadingPattern = regexp.MustCompile(`^#{1,4}\s+\S`)
+
+// temporaryDocumentOutline lists the document's leading markdown headings so
+// the agent can decide where to read before fetching any content.
+func temporaryDocumentOutline(content string) string {
+	var lines []string
+	runes := 0
+	for _, line := range strings.Split(content, "\n") {
+		line = strings.TrimSpace(line)
+		if !markdownHeadingPattern.MatchString(line) {
+			continue
+		}
+		runes += utf8.RuneCountInString(line)
+		if len(lines) >= temporaryDocumentOutlineMaxHeadings || runes > temporaryDocumentOutlineMaxRunes {
+			lines = append(lines, "…")
+			break
+		}
+		lines = append(lines, line)
+	}
+	return strings.Join(lines, "\n")
 }
 
 func selectTemporaryDocumentContent(document *types.TemporaryDocument, query string) (string, int, int) {

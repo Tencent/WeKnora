@@ -6276,6 +6276,7 @@ export default {
       getDocumentContent: 'Get Document Content',
       wikiReadSourceDoc: 'Deep-read Source Doc',
       readDocument: 'Read document',
+      readAttachment: 'Read attachment',
       listDocuments: 'List documents',
       todoWrite: 'Plan Management',
       knowledgeGraphExtract: 'Knowledge Graph Extraction',

@@ -33,6 +33,7 @@ var imToolNameLabels = map[string]string{
 	"knowledge_search":        "知识库检索",
 	"grep_chunks":             "搜索关键词",
 	"read_document":           "阅读文档",
+	"read_attachment":         "阅读附件",
 	"list_documents":          "浏览文档列表",
 	"web_search":              "网络搜索",
 	"web_fetch":               "网页抓取",

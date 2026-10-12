@@ -1807,6 +1807,7 @@ export default {
       getDocumentContent: 'Получение содержимого документа',
       wikiReadSourceDoc: 'Читать исходный документ',
       readDocument: 'Чтение документа',
+      readAttachment: 'Чтение вложения',
       listDocuments: 'Список документов',
       todoWrite: 'Управление планами',
       knowledgeGraphExtract: 'Извлечение графа знаний',

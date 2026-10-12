@@ -26,6 +26,12 @@ const (
 	ToolDataSchema          = "data_schema"
 	ToolWebSearch           = "web_search"
 	ToolWebFetch            = "web_fetch"
+	// ToolReadAttachment reads files the user attached to the conversation.
+	// Like search_memory it is absent from AvailableToolDefinitions and
+	// DefaultAllowedTools: it is registered whenever the session has stored
+	// attachments, because a file the user just sent is not something an
+	// allowlist should be able to hide from the agent.
+	ToolReadAttachment = "read_attachment"
 	// Unified reading: workspace access follows sandbox file capability;
 	// skill resources follow SkillsEnabled and do not require a sandbox.
 	ToolReadFile = "read_file"

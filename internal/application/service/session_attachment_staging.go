@@ -20,7 +20,13 @@ type stagedSessionAttachment struct {
 	FileType string
 	Size     int64
 	Path     string
+	// ParsedPath is the Markdown text extracted from a binary attachment,
+	// staged beside it so a shell does not have to parse the file again.
+	ParsedPath string
 }
+
+// parsedSidecarSuffix names the staged Markdown beside a binary attachment.
+const parsedSidecarSuffix = ".parsed.md"
 
 // sessionSandboxFileStore returns the manager's effective session filesystem
 // capability, or nil when the backend cannot support it. Centralised so
@@ -126,7 +132,7 @@ func (s *agentService) stageSessionAttachments(
 		return nil, fmt.Errorf("file service is unavailable for session input staging")
 	}
 
-	resolved, err := s.resolveSessionAttachmentURLs(ctx, tenantID, sessionID, attachments)
+	resolved, parsed, err := s.resolveSessionAttachmentURLs(ctx, tenantID, sessionID, attachments)
 	if err != nil {
 		return nil, err
 	}
@@ -173,11 +179,23 @@ func (s *agentService) stageSessionAttachments(
 			attachment.FileSize = int64(len(content))
 		}
 
+		parsedPath := ""
+		if text, ok := parsed[strings.TrimSpace(attachment.URL)]; ok {
+			parsedPath = remotePath + parsedSidecarSuffix
+			desired[parsedPath] = struct{}{}
+			if entry, present := existing[parsedPath]; !present || entry.Size != int64(len(text)) {
+				if writeErr := store.WriteSessionInputFile(ctx, sessionID, parsedPath, []byte(text)); writeErr != nil {
+					return nil, fmt.Errorf("stage parsed text of %q: %w", attachment.FileName, writeErr)
+				}
+			}
+		}
+
 		staged = append(staged, stagedSessionAttachment{
-			Name:     attachment.FileName,
-			FileType: attachment.FileType,
-			Size:     attachment.FileSize,
-			Path:     remotePath,
+			Name:       attachment.FileName,
+			FileType:   attachment.FileType,
+			Size:       attachment.FileSize,
+			Path:       remotePath,
+			ParsedPath: parsedPath,
 		})
 	}
 
@@ -208,17 +226,21 @@ func (s *agentService) stageSessionAttachments(
 // stage attachments whose temporary_documents row remains on the parent.
 // Attachments that already carry a URL, or that have no temporary-document ID,
 // pass through unchanged so callers with other attachment sources keep working.
+//
+// The second result maps a storage URL to the parsed Markdown of a ready,
+// non-plain-text document, for staging beside the original file.
 func (s *agentService) resolveSessionAttachmentURLs(
 	ctx context.Context,
 	tenantID uint64,
 	_ string,
 	attachments types.MessageAttachments,
-) (types.MessageAttachments, error) {
+) (types.MessageAttachments, map[string]string, error) {
 	if len(attachments) == 0 || s == nil || s.db == nil {
-		return attachments, nil
+		return attachments, nil, nil
 	}
 	repo := repository.NewTemporaryDocumentRepository(s.db)
 	out := make(types.MessageAttachments, 0, len(attachments))
+	parsed := make(map[string]string)
 	for _, attachment := range attachments {
 		if strings.TrimSpace(attachment.URL) != "" || strings.TrimSpace(attachment.ID) == "" {
 			out = append(out, attachment)
@@ -226,7 +248,7 @@ func (s *agentService) resolveSessionAttachmentURLs(
 		}
 		document, err := repo.GetByID(ctx, tenantID, attachment.ID)
 		if err != nil {
-			return nil, fmt.Errorf("resolve attachment %q storage reference: %w", attachment.FileName, err)
+			return nil, nil, fmt.Errorf("resolve attachment %q storage reference: %w", attachment.FileName, err)
 		}
 		if document == nil || strings.TrimSpace(document.ResourceRef) == "" {
 			// Expired or already-deleted temporary document: leave the URL
@@ -236,8 +258,12 @@ func (s *agentService) resolveSessionAttachmentURLs(
 		}
 		attachment.URL = document.ResourceRef
 		out = append(out, attachment)
+		if _, plainText := temporaryTextExtensions[strings.ToLower(document.FileType)]; !plainText &&
+			document.Status == types.TemporaryDocumentStatusReady && strings.TrimSpace(document.Content) != "" {
+			parsed[strings.TrimSpace(document.ResourceRef)] = document.Content
+		}
 	}
-	return out, nil
+	return out, parsed, nil
 }
 
 func deduplicateSessionAttachments(attachments types.MessageAttachments) types.MessageAttachments {
@@ -282,14 +308,21 @@ func buildSandboxAttachmentsPrompt(attachments []stagedSessionAttachment, layout
 	workspace := strings.TrimSpace(layout.Root)
 	var b strings.Builder
 	fmt.Fprintf(&b, "\n\n<sandbox_attachments root=\"%s\">\n", escapeAttachmentXML(inputDir))
+	hasParsed := false
 	for _, attachment := range attachments {
+		parsed := ""
+		if attachment.ParsedPath != "" {
+			hasParsed = true
+			parsed = fmt.Sprintf(" parsed_text_path=\"%s\"", escapeAttachmentXML(attachment.ParsedPath))
+		}
 		fmt.Fprintf(
 			&b,
-			"  <file name=\"%s\" type=\"%s\" size_bytes=\"%d\" path=\"%s\" />\n",
+			"  <file name=\"%s\" type=\"%s\" size_bytes=\"%d\" path=\"%s\"%s />\n",
 			escapeAttachmentXML(attachment.Name),
 			escapeAttachmentXML(attachment.FileType),
 			attachment.Size,
 			escapeAttachmentXML(attachment.Path),
+			parsed,
 		)
 	}
 	// The instruction body carries the same host-chosen paths as the
@@ -301,6 +334,10 @@ func buildSandboxAttachmentsPrompt(attachments []stagedSessionAttachment, layout
 		"or with shell_exec (ls/find) when a shell is available. " +
 		"Create generated files with write_sandbox_file " +
 		"and patch existing ones with edit_sandbox_file.")
+	if hasParsed {
+		b.WriteString(" parsed_text_path holds the text already extracted from that file as Markdown; " +
+			"read it instead of parsing the original again unless you need its exact layout or binary data.")
+	}
 	if layout.IsHost() {
 		if workspace != "" {
 			b.WriteString(" Edit files in place under " + escapeAttachmentXML(workspace) + ".")

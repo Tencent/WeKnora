@@ -1809,6 +1809,7 @@ export default {
       getDocumentContent: '獲取文件內容',
       wikiReadSourceDoc: '精讀源文件',
       readDocument: '閱讀文件',
+      readAttachment: '閱讀附件',
       listDocuments: '瀏覽文件清單',
       todoWrite: '計劃管理',
       knowledgeGraphExtract: '知識圖譜抽取',

@@ -107,6 +107,9 @@ var toolHandlePolicies = map[string]toolHandlePolicy{
 	// document IDs of their own, and the memory item IDs never leave the
 	// service, so there is nothing here for the model to hold a handle on.
 	"search_memory": {},
+	// Attachments are addressed by att_ handles derived server-side; the
+	// parsed file text is user-supplied and carries no knowledge identifiers.
+	"read_attachment": {},
 	"query_knowledge_graph": {
 		sourceIDKeys: map[string]struct{}{"knowledge_base_ids": {}},
 		sourceOutput: true,

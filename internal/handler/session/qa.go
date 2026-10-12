@@ -18,6 +18,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/application/access"
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/event"
+	"github.com/Tencent/WeKnora/internal/infrastructure/docparser"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/api"
 	"github.com/Tencent/WeKnora/internal/sandbox"
@@ -1460,7 +1461,11 @@ func (h *Handler) executeQA(reqCtx *qaRequestContext, mode qaMode, generateTitle
 
 		// Resolve pre-uploaded attachments (may still be parsing): waits with a
 		// timeline step so the send is not blocked, then injects content/images.
-		h.resolveTemporaryAttachments(streamCtx, reqCtx)
+		if mode == qaModeAgent {
+			h.describeTemporaryAttachmentsForAgent(streamCtx, reqCtx)
+		} else {
+			h.resolveTemporaryAttachments(streamCtx, reqCtx)
+		}
 
 		// Run VLM image analysis if applicable
 		h.runVLMAnalysisIfNeeded(streamCtx, reqCtx, mode)
@@ -1677,6 +1682,92 @@ func (h *Handler) resolveTemporaryAttachments(streamCtx *sseStreamContext, reqCt
 		return
 	}
 
+	h.applyTemporaryAttachments(ctx, reqCtx, temporaryResult)
+}
+
+// describeTemporaryAttachmentsForAgent hands an agent turn a manifest of the
+// pre-uploaded documents without waiting for parsing to finish or choosing
+// content by the question. The agent reads attachments itself through
+// read_attachment, which waits for a document that is still parsing only
+// when the agent actually needs it.
+func (h *Handler) describeTemporaryAttachmentsForAgent(streamCtx *sseStreamContext, reqCtx *qaRequestContext) {
+	if len(reqCtx.attachmentIDs) == 0 {
+		return
+	}
+	ctx := streamCtx.asyncCtx
+	h.awaitImageAttachmentsForAgent(streamCtx, reqCtx)
+	result, err := h.temporaryDocuments.DescribeForAgent(
+		ctx, reqCtx.session.TenantID, reqCtx.sessionID, reqCtx.attachmentIDs,
+	)
+	if err != nil || result == nil {
+		if err != nil {
+			logger.Warnf(ctx, "temporary attachment manifest failed for session %s: %v", reqCtx.sessionID, err)
+		}
+		return
+	}
+	h.applyTemporaryAttachments(ctx, reqCtx, result)
+}
+
+// awaitImageAttachmentsForAgent waits for pending image uploads when the
+// agent passes images to its model. An image has no servable URL until it is
+// parsed, and a vision model has to receive it with the question rather than
+// through a later tool call.
+func (h *Handler) awaitImageAttachmentsForAgent(streamCtx *sseStreamContext, reqCtx *qaRequestContext) {
+	if reqCtx.customAgent == nil || !reqCtx.customAgent.Config.ImageUploadEnabled {
+		return
+	}
+	var imageIDs []string
+	for _, meta := range reqCtx.attachmentMetas {
+		if meta.ID != "" && docparser.IsImageFormat(meta.FileType) {
+			imageIDs = append(imageIDs, meta.ID)
+		}
+	}
+	ctx := streamCtx.asyncCtx
+	tenantID := reqCtx.session.TenantID
+	if len(imageIDs) == 0 || !h.hasPendingAttachments(ctx, tenantID, reqCtx.sessionID, imageIDs) {
+		return
+	}
+	start := time.Now()
+	toolCallID := uuid.New().String()
+	streamCtx.eventBus.Emit(ctx, event.Event{
+		Type:      event.EventAgentToolCall,
+		SessionID: reqCtx.sessionID,
+		Data:      event.AgentToolCallData{ToolCallID: toolCallID, ToolName: "attachment_parsing"},
+	})
+	waitTimeout := attachmentParseWaitTimeout()
+	if reqCtx.customAgent.Config.AttachmentParseWaitTimeoutSec > 0 {
+		waitTimeout = time.Duration(reqCtx.customAgent.Config.AttachmentParseWaitTimeoutSec) * time.Second
+	}
+	h.waitForAttachments(ctx, tenantID, reqCtx.sessionID, imageIDs, waitTimeout)
+	ready, skipped := h.partitionReadyAttachments(ctx, tenantID, reqCtx.sessionID, imageIDs)
+	output := fmt.Sprintf("已解析 %d 个附件", len(ready))
+	if skipped > 0 {
+		output += fmt.Sprintf("，%d 个未完成已跳过", skipped)
+	}
+	streamCtx.eventBus.Emit(ctx, event.Event{
+		Type:      event.EventAgentToolResult,
+		SessionID: reqCtx.sessionID,
+		Data: event.AgentToolResultData{
+			ToolCallID: toolCallID,
+			ToolName:   "attachment_parsing",
+			Output:     output,
+			Success:    true,
+			Duration:   time.Since(start).Milliseconds(),
+			Data: map[string]interface{}{
+				"display_type":  "attachment_parsing",
+				"parsed_count":  len(ready),
+				"skipped_count": skipped,
+			},
+		},
+	})
+}
+
+// applyTemporaryAttachments filters resolved attachments by the agent's
+// supported file types, adds them (and their images) to the turn, and stores
+// the selected content on the user message for later history replay.
+func (h *Handler) applyTemporaryAttachments(
+	ctx context.Context, reqCtx *qaRequestContext, temporaryResult *types.TemporaryDocumentPromptResult,
+) {
 	attachments := temporaryResult.Attachments
 	if reqCtx.customAgent != nil && len(reqCtx.customAgent.Config.SupportedFileTypes) > 0 {
 		filtered := attachments[:0]

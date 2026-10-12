@@ -1807,6 +1807,7 @@ export default {
       getDocumentContent: '문서 내용 가져오기',
       wikiReadSourceDoc: '원본 문서 읽기',
       readDocument: '문서 읽기',
+      readAttachment: '첨부 파일 읽기',
       listDocuments: '문서 목록 보기',
       todoWrite: '계획 관리',
       knowledgeGraphExtract: '지식 그래프 추출',

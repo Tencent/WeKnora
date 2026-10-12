@@ -185,6 +185,7 @@ var toolDisplayNames = map[string]string{
 	agenttools.LegacyToolExecuteSkillScript:  "执行技能脚本",
 	agenttools.LegacyToolReadSkill:           "读取技能",
 	agenttools.ToolReadFile:                  "读取文件",
+	agenttools.ToolReadAttachment:            "阅读附件",
 	agenttools.ToolListSandboxFiles:          "列出沙箱文件",
 	agenttools.LegacyToolReadSandboxFile:     "读取沙箱文件",
 	agenttools.ToolWriteSandboxFile:          "写入沙箱文件",

@@ -6276,6 +6276,7 @@ export default {
       getDocumentContent: 'ドキュメント内容を取得',
       wikiReadSourceDoc: 'ソースドキュメントを精読',
       readDocument: 'ドキュメントを読む',
+      readAttachment: '添付ファイルを読む',
       listDocuments: 'ドキュメント一覧',
       todoWrite: '計画管理',
       knowledgeGraphExtract: 'ナレッジグラフ抽出',

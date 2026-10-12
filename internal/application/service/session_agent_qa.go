@@ -278,11 +278,10 @@ func (s *sessionService) AgentQA(
 	if req.QuotedContext != "" {
 		agentQuery += "\n\n" + req.QuotedContext
 	}
-	// Inject attachment content (documents, audio transcripts, etc.) so the agent
-	// can see uploaded files. Mirrors the behavior of the KnowledgeQA pipeline
-	// (see chat_pipeline/into_chat_message.go).
+	// Stored documents are listed for read_attachment rather than pasted in;
+	// inline uploads without a stored document still carry their content.
 	if len(req.Attachments) > 0 {
-		agentQuery += req.Attachments.BuildPrompt()
+		agentQuery += req.Attachments.BuildAgentPrompt()
 		logger.Infof(ctx, "Appended %d attachment(s) to agent query", len(req.Attachments))
 	}
 	if manifest := buildSandboxAttachmentsPrompt(stagedAttachments, layout); manifest != "" {
@@ -324,25 +323,26 @@ func (s *sessionService) buildAgentConfig(
 ) (*types.AgentConfig, error) {
 	customAgent := req.CustomAgent
 	agentConfig := &types.AgentConfig{
-		MaxIterations:               customAgent.Config.MaxIterations,
-		Temperature:                 customAgent.Config.Temperature,
-		WebSearchEnabled:            customAgent.Config.WebSearchEnabled && req.WebSearchEnabled,
-		LocalBrowserEnabled:         req.LocalBrowserEnabled,
-		WebSearchMaxResults:         customAgent.Config.WebSearchMaxResults,
-		WebSearchProviderID:         customAgent.Config.WebSearchProviderID,
-		MultiTurnEnabled:            customAgent.Config.MultiTurnEnabled,
-		MemoryEnabled:               customAgent.Config.MemoryEnabled,
-		MCPSelectionMode:            customAgent.Config.MCPSelectionMode,
-		MCPServices:                 customAgent.Config.MCPServices,
-		MCPAuthWaitTimeout:          customAgent.Config.MCPAuthWaitTimeout,
-		Thinking:                    customAgent.Config.Thinking,
-		ReasoningEffort:             customAgent.Config.ReasoningEffort,
-		CitationEnabled:             customAgent.Config.CitationEnabled,
-		RetrieveKBOnlyWhenMentioned: customAgent.Config.RetrieveKBOnlyWhenMentioned,
-		LLMCallTimeout:              customAgent.Config.LLMCallTimeout,
-		MaxCompletionTokens:         customAgent.Config.MaxCompletionTokens,
-		RetainRetrievalHistory:      customAgent.Config.RetainRetrievalHistory,
-		SharedAgentReadOnly:         req.SharedAgentReadOnly,
+		MaxIterations:                 customAgent.Config.MaxIterations,
+		Temperature:                   customAgent.Config.Temperature,
+		WebSearchEnabled:              customAgent.Config.WebSearchEnabled && req.WebSearchEnabled,
+		LocalBrowserEnabled:           req.LocalBrowserEnabled,
+		WebSearchMaxResults:           customAgent.Config.WebSearchMaxResults,
+		WebSearchProviderID:           customAgent.Config.WebSearchProviderID,
+		MultiTurnEnabled:              customAgent.Config.MultiTurnEnabled,
+		MemoryEnabled:                 customAgent.Config.MemoryEnabled,
+		MCPSelectionMode:              customAgent.Config.MCPSelectionMode,
+		MCPServices:                   customAgent.Config.MCPServices,
+		MCPAuthWaitTimeout:            customAgent.Config.MCPAuthWaitTimeout,
+		AttachmentParseWaitTimeoutSec: customAgent.Config.AttachmentParseWaitTimeoutSec,
+		Thinking:                      customAgent.Config.Thinking,
+		ReasoningEffort:               customAgent.Config.ReasoningEffort,
+		CitationEnabled:               customAgent.Config.CitationEnabled,
+		RetrieveKBOnlyWhenMentioned:   customAgent.Config.RetrieveKBOnlyWhenMentioned,
+		LLMCallTimeout:                customAgent.Config.LLMCallTimeout,
+		MaxCompletionTokens:           customAgent.Config.MaxCompletionTokens,
+		RetainRetrievalHistory:        customAgent.Config.RetainRetrievalHistory,
+		SharedAgentReadOnly:           req.SharedAgentReadOnly,
 		// The model is always told it may call tools in parallel; without
 		// this the engine still ran them one by one, so three searches in
 		// one reply cost three sequential embed/retrieve/rerank rounds.
