@@ -704,11 +704,13 @@ func (s *temporaryDocumentService) ResolveForPrompt(ctx context.Context, tenantI
 			ContentMode: map[bool]string{true: "full", false: "selected_chunks"}[selected == total],
 			TokenCount:  document.TokenCount, SelectedChunks: selected, TotalChunks: total,
 		})
-		// Quick Answer has no attachment-reading tool. Offer bounded visual
-		// context alongside the text; the handler applies ImageUploadEnabled.
-		for _, image := range temporaryDocumentImageRefs(document.ImageRefs) {
-			if image.URL != "" && len(result.ImageURLs) < 4 {
-				result.ImageURLs = append(result.ImageURLs, image.URL)
+		// Only standalone image attachments automatically enter Quick Answer's
+		// visual context. Document figures are read on demand in Agent mode.
+		if docparser.IsImageFormat(document.FileType) {
+			for _, image := range temporaryDocumentImageRefs(document.ImageRefs) {
+				if image.URL != "" && len(result.ImageURLs) < 4 {
+					result.ImageURLs = append(result.ImageURLs, image.URL)
+				}
 			}
 		}
 	}

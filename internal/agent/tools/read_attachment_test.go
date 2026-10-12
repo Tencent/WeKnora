@@ -292,3 +292,46 @@ func TestReadAttachmentCancellationDoesNotReportConfiguredWaitAsElapsed(t *testi
 	require.False(t, result.Success)
 	assert.NotContains(t, result.Error, "after waiting")
 }
+
+func TestReadAttachmentImagesKeepPartialSuccessAndAdvancePastFailures(t *testing.T) {
+	document := chunkedDocument(t, "report", "text")
+	document.ImageRefs = types.JSON(`[
+		{"url":"good-0"},{"url":"missing-1"},{"url":"invalid-2"},{"url":"good-3"},
+		{"url":"missing-4"},{"url":"invalid-5"},{"url":"good-6"}
+	]`)
+	store := &fakeAttachmentStore{
+		attachments: types.MessageAttachments{{ID: "report"}},
+		documents:   map[string]*types.TemporaryDocument{"report": document},
+	}
+	var pngData bytes.Buffer
+	require.NoError(t, png.Encode(&pngData, image.NewRGBA(image.Rect(0, 0, 2, 2))))
+	tool := NewReadAttachmentTool(store, 0).WithImageReader(func(_ context.Context, ref string) ([]byte, error) {
+		switch ref {
+		case "missing-1", "missing-4":
+			return nil, fmt.Errorf("object not found")
+		case "invalid-2", "invalid-5":
+			return []byte("not an image"), nil
+		default:
+			return pngData.Bytes(), nil
+		}
+	})
+	first := runReadAttachment(t, tool, ReadAttachmentInput{Attachment: "report", Images: true})
+	require.True(t, first.Success, first.Error)
+	require.Len(t, first.Images, 2)
+	assert.Equal(t, 2, first.Data["returned"])
+	assert.Equal(t, []int{0, 3}, first.Data["image_indexes"])
+	assert.Equal(t, 4, first.Data["next_offset"])
+	assert.Contains(t, first.Output, "failed to read attachment image 1")
+	assert.Contains(t, first.Output, "failed to prepare attachment image 2")
+	failed := runReadAttachment(t, tool, ReadAttachmentInput{Attachment: "report", Images: true, Offset: 4, Limit: 2})
+	require.False(t, failed.Success)
+	assert.Empty(t, failed.Images)
+	assert.Equal(t, 0, failed.Data["returned"])
+	assert.Equal(t, 6, failed.Data["next_offset"], "all-failed pages must still allow reading later images")
+	assert.Contains(t, failed.Error, "offset=6")
+	last := runReadAttachment(t, tool, ReadAttachmentInput{Attachment: "report", Images: true, Offset: 6})
+	require.True(t, last.Success, last.Error)
+	require.Len(t, last.Images, 1)
+	assert.Equal(t, []int{6}, last.Data["image_indexes"])
+	assert.NotContains(t, last.Data, "next_offset")
+}

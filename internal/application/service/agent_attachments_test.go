@@ -202,13 +202,19 @@ func TestAttachmentImageDeliveryDoesNotDependOnQuestionKeywords(t *testing.T) {
 	for _, query := range []string{"解释图表", "summarize", "この資料を説明して", ""} {
 		got, err := svc.ResolveForPrompt(context.Background(), 7, "session-1", []string{document.ID}, query)
 		require.NoError(t, err)
-		assert.Equal(t, []string{"local://chart.png", "local://page.png"}, got.ImageURLs)
+		assert.Empty(t, got.ImageURLs, "Quick Answer must not automatically attach document figures")
+		assert.NotEmpty(t, got.Attachments[0].Content)
 	}
 	manifest, err := svc.DescribeForAgent(context.Background(), 7, "session-1", []string{document.ID})
 	require.NoError(t, err)
 	assert.Empty(t, manifest.ImageURLs, "agent document images are requested through read_attachment")
 	assert.Empty(t, manifest.Attachments[0].Content)
 	document.FileType = ".png"
+	for _, query := range []string{"解释图表", "summarize", "この資料を説明して", ""} {
+		got, err := svc.ResolveForPrompt(context.Background(), 7, "session-1", []string{document.ID}, query)
+		require.NoError(t, err)
+		assert.Equal(t, []string{"local://chart.png", "local://page.png"}, got.ImageURLs)
+	}
 	manifest, err = svc.DescribeForAgent(context.Background(), 7, "session-1", []string{document.ID})
 	require.NoError(t, err)
 	assert.Len(t, manifest.ImageURLs, 2, "standalone images still enter the initial vision input")
