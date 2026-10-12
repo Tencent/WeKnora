@@ -65,6 +65,14 @@ func TestHostApprovalContextAsksThroughGate(t *testing.T) {
 	require.Equal(t, []string{"rm"}, req.Host.SessionRules)
 }
 
+func TestHostApprovalContextKeepsTheOutputBudget(t *testing.T) {
+	tool := NewShellExecTool(nil, nil).WithHostApproval(&fakeHostGate{})
+	_, toolCtx := hostExecContext(t)
+
+	ctx := tool.hostApprovalContext(WithOutputBudget(toolCtx, 1234), "rm a.txt", "")
+	require.Equal(t, 1234, OutputBudget(ctx))
+}
+
 func TestHostApprovalSessionScopeNeedsPermission(t *testing.T) {
 	gate := &fakeHostGate{decision: approval.Decision{Approved: true, Scope: "session"}}
 	tool := NewShellExecTool(nil, nil).WithHostApproval(gate)
