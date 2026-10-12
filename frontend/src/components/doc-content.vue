@@ -19,6 +19,7 @@ import { sanitizeHTML, safeMarkdownToHTML, createSafeImage, isValidImageURL, hyd
 import { normalizeSpuriousTablePrefixes } from '@/utils/markdownTableNormalize';
 import { ensureLiteralSingleTildeOnGlobalMarked } from '@/utils/markedLiteralTilde';
 import { openMermaidFullscreen } from '@/utils/mermaidViewer';
+import { postUIEvent } from '@/api/agent-inbox';
 import { diffWikiLines, type WikiDiffLine } from '@/utils/wikiLineDiff';
 import { useI18n } from 'vue-i18n';
 import { useAuthStore } from '@/stores/auth';
@@ -309,6 +310,21 @@ watch(
   { immediate: true },
 );
 watch(() => props.details?.id, syncMetadataDraft, { immediate: true });
+
+// Agent inbox view signal (agent-sidebar-inbox): report which document the
+// user opened in the reader, so the sidebar agent can anchor on it. The
+// dedup_key debounces consecutive re-opens; failures are swallowed by the
+// API helper (best-effort by design).
+watch(() => [props.visible, props.details?.id] as const, ([visible, id]) => {
+  if (visible && id && props.kbId) {
+    postUIEvent(props.kbId, 'user.viewed_document', {
+      id,
+      title: props.details?.title,
+      knowledge_type: props.knowledgeType,
+      dedup_key: `doc:${id}`,
+    });
+  }
+});
 
 const hasTimelineSpans = ref(false);
 const timelineDrawerVisible = ref(false);

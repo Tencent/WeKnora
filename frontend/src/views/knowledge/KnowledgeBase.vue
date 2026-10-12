@@ -1144,6 +1144,20 @@ watch(activeKbTab, (tab) => {
   postUIEvent(kbId.value, 'user.switched_tab', { tab })
 })
 
+// Agent inbox signal (agent-sidebar-inbox): report which knowledge base the
+// user opened or switched to, so a full-scope (kb_selection_mode "all")
+// sidebar agent still knows where the user is working. Fires once per KB
+// once its info has loaded; debounced server-side by policy.
+watch([kbId, kbInfo], ([id, info]) => {
+  if (id && info?.name) {
+    postUIEvent(id, 'user.switched_kb', {
+      kb_id: id,
+      kb_name: info.name,
+      dedup_key: `kb:${id}`,
+    });
+  }
+})
+
 // ── Agent sidebar (agent-sidebar-inbox P1) ──────────────────────────────
 const showAgentSidebar = ref(false);
 

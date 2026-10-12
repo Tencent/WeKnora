@@ -60,9 +60,12 @@ type inboxUIEventRequest struct {
 // allowedUIEventTypes bounds what the UI can inject. Anything else is
 // rejected — the inbox is curated, not a client-side free-for-all.
 var allowedUIEventTypes = map[string]bool{
-	types.InboxTypeUserViewedPage:  true,
-	types.InboxTypeUserSwitchedTab: true,
-	types.InboxTypeUserErrorToast:  true,
+	types.InboxTypeUserViewedPage:     true,
+	types.InboxTypeUserSwitchedTab:    true,
+	types.InboxTypeUserErrorToast:     true,
+	types.InboxTypeUserViewedDocument: true,
+	types.InboxTypeUserViewedImage:    true,
+	types.InboxTypeUserSwitchedKB:     true,
 }
 
 // PostUIEvent godoc

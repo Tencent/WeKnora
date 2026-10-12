@@ -7,6 +7,8 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"gorm.io/gorm"
+
+	"github.com/google/uuid"
 )
 
 // agentInboxRepository persists agent inbox events (table agent_inbox,
@@ -22,8 +24,13 @@ func NewAgentInboxRepository(db *gorm.DB) interfaces.AgentInboxRepository {
 	return &agentInboxRepository{db: db}
 }
 
-// Insert persists one event row.
+// Insert persists one event row. The caller may leave ID empty (the UI-event
+// handler does): the primary key is a plain varchar(36), so an empty ID would
+// insert once as ” and then collide with every subsequent insert.
 func (r *agentInboxRepository) Insert(ctx context.Context, evt *types.AgentInboxEvent) error {
+	if evt.ID == "" {
+		evt.ID = uuid.New().String()
+	}
 	return r.db.WithContext(ctx).Create(evt).Error
 }
 

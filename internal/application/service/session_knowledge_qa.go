@@ -6,7 +6,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Tencent/WeKnora/internal/agent/tools"
 	chatpipeline "github.com/Tencent/WeKnora/internal/application/service/chat_pipeline"
 	"github.com/Tencent/WeKnora/internal/common"
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
@@ -366,33 +365,20 @@ func (s *sessionService) resolveKnowledgeBasesFromAgent(
 
 	switch customAgent.Config.KBSelectionMode {
 	case "all":
-		// Authoritative capability filter for the runtime path. The frontend
-		// editor and @mention dropdown apply the same filter, but we don't
-		// trust the client here: a stale session payload or API caller could
-		// still ask us to retrieve against an incompatible KB and we'd rather
-		// just drop it (and log) than feed it to tools that would no-op.
-		capFilter := tools.DeriveKBFilterForAgent(customAgent.Config.AgentMode, customAgent.Config.AllowedTools)
-		accept := func(kb *types.KnowledgeBase) bool {
-			if kb == nil {
-				return false
-			}
-			if capFilter.IsEmpty() {
-				return true
-			}
-			return tools.KBSatisfiesAgentRequirements(kb.Capabilities(), customAgent.Config.AgentMode, customAgent.Config.AllowedTools)
-		}
-
-		// Get own knowledge bases (uses ctx TenantID = agent's tenant)
+		// Bind the full tenant scope. Tools degrade gracefully per KB —
+		// chunk retrieval returns no hits on un-indexed KBs and wiki tools
+		// answer errNoWikiInScope — so a tool-capability mismatch must not
+		// evict KBs here: evicting silently hid the KB the user is currently
+		// browsing from mixed-tool agents like the sidebar assistant (wiki
+		// tools plus document readers).
 		allKBs, err := s.knowledgeBaseService.ListKnowledgeBases(ctx)
 		if err != nil {
 			logger.Warnf(ctx, "Failed to list all knowledge bases: %v", err)
 		}
 		kbIDSet := make(map[string]bool)
 		kbIDs := make([]string, 0, len(allKBs))
-		ownSkipped := 0
 		for _, kb := range allKBs {
-			if !accept(kb) {
-				ownSkipped++
+			if kb == nil {
 				continue
 			}
 			kbIDs = append(kbIDs, kb.ID)
@@ -403,7 +389,6 @@ func (s *sessionService) resolveKnowledgeBasesFromAgent(
 		// tenant's own KBs. Including the current user's shared KBs would leak
 		// unrelated KBs from other organisations into the agent's retrieval scope.
 		isSharedAgent := sessionTenantID != 0 && sessionTenantID != customAgent.TenantID
-		sharedSkipped := 0
 		if !isSharedAgent {
 			tenantID := types.MustTenantIDFromContext(ctx)
 			userIDVal := ctx.Value(types.UserIDContextKey)
@@ -418,10 +403,6 @@ func (s *sessionService) resolveKnowledgeBasesFromAgent(
 							if info == nil || info.KnowledgeBase == nil || kbIDSet[info.KnowledgeBase.ID] {
 								continue
 							}
-							if !accept(info.KnowledgeBase) {
-								sharedSkipped++
-								continue
-							}
 							kbIDs = append(kbIDs, info.KnowledgeBase.ID)
 							kbIDSet[info.KnowledgeBase.ID] = true
 						}
@@ -433,11 +414,6 @@ func (s *sessionService) resolveKnowledgeBasesFromAgent(
 				sessionTenantID, customAgent.TenantID)
 		}
 
-		if ownSkipped+sharedSkipped > 0 {
-			logger.Infof(ctx,
-				"KBSelectionMode=all: tool-capability filter removed %d own + %d shared KBs (agent=%s, tools=%v)",
-				ownSkipped, sharedSkipped, customAgent.ID, customAgent.Config.AllowedTools)
-		}
 		logger.Infof(ctx, "KBSelectionMode=all: loaded %d knowledge bases (own + shared)", len(kbIDs))
 		return kbIDs
 	case "selected":

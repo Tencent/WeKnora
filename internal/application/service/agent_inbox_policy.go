@@ -60,7 +60,25 @@ func defaultInboxPolicy() *inboxPolicy {
 				Debounce:  2 * time.Minute,
 				Enabled:   true,
 			},
+			types.InboxTypeUserViewedDocument: {
+				Priority:  types.InboxPriorityP2,
+				Retention: 24 * time.Hour,
+				Debounce:  time.Minute,
+				Enabled:   true,
+			},
+			types.InboxTypeUserViewedImage: {
+				Priority:  types.InboxPriorityP2,
+				Retention: 24 * time.Hour,
+				Debounce:  time.Minute,
+				Enabled:   true,
+			},
 			types.InboxTypeUserSwitchedTab: {
+				Priority:  types.InboxPriorityP2,
+				Retention: 24 * time.Hour,
+				Debounce:  time.Minute,
+				Enabled:   true,
+			},
+			types.InboxTypeUserSwitchedKB: {
 				Priority:  types.InboxPriorityP2,
 				Retention: 24 * time.Hour,
 				Debounce:  time.Minute,

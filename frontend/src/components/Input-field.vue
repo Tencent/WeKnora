@@ -27,7 +27,7 @@ import {
   isDefaultContextWindow,
   effectiveContextWindow,
 } from '@/utils/contextWindow';
-import { type CustomAgent, BUILTIN_QUICK_ANSWER_ID, BUILTIN_SMART_REASONING_ID } from '@/api/agent';
+import { type CustomAgent, BUILTIN_QUICK_ANSWER_ID, BUILTIN_SMART_REASONING_ID, BUILTIN_SIDEBAR_ASSISTANT_ID } from '@/api/agent';
 import { useChatResourcesStore } from '@/stores/chatResources';
 import { useEditorResourcesStore } from '@/stores/editorResources';
 import { useDeploymentCapabilitiesStore } from '@/stores/deploymentCapabilities';
@@ -487,10 +487,18 @@ const agentMode = computed(() => {
   return currentAgentConfig.value?.agent_mode || '';
 });
 
+// 侧边栏助手不做 @ 兼容性过滤：它的 @ 列表与无智能体时完全一致（恢复系统
+// 默认 @ 行为，2026-10-12）。它跨 wiki/文档两类工具，工具派生的 capability
+// 过滤（wiki primary）会把文档类 KB 剔空；其上下文锚定走收件箱视图信号而非
+// @ 范围。侧边栏 embedded 编排器同理不过滤。
+const mentionUnfiltered = computed(() =>
+  props.embeddedMode || selectedAgentId.value === BUILTIN_SIDEBAR_ASSISTANT_ID
+);
+
 // "all" 模式 + 智能体工具有 KB 依赖时的兼容性过滤；'selected'/'none' 不在这里二次过滤
 // （selected 由编辑器负责，none 已经空表）。
 const isKbCompatibleWithAgent = (kb: any): boolean => {
-  if (!hasAgentConfig.value) return true;
+  if (!hasAgentConfig.value || mentionUnfiltered.value) return true;
   if (agentKBSelectionMode.value !== 'all') return true;
   return kbSatisfiesAgentRequirements(kbToScopeCaps(kb), agentMode.value, agentAllowedTools.value);
 };

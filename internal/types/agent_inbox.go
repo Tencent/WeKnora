@@ -32,6 +32,17 @@ const (
 	InboxTypeUserEditedWiki  = "user.edited_wiki"  // wiki page edit (middleware)
 	InboxTypeUserEditChunk   = "user.edited_chunk" // chunk edit (middleware)
 
+	// Sidebar view tracking beyond wiki pages: the document reader and the
+	// gallery image viewer report what the user is looking at, so the agent
+	// can anchor on it. Payload carries id/title/kind; debounced by
+	// frontend-supplied dedup_key.
+	InboxTypeUserViewedDocument = "user.viewed_document"
+	InboxTypeUserViewedImage    = "user.viewed_image"
+	// Emitted when the user opens or switches knowledge base in the main
+	// view. With kb_selection_mode "all" this is the only signal telling the
+	// agent which KB the user is currently working in.
+	InboxTypeUserSwitchedKB = "user.switched_kb"
+
 	// KB backend lifecycle events.
 	InboxTypeParseCompleted = "parse.completed" // document parse finished successfully
 	InboxTypeParseFailed    = "parse.failed"    // document parse exhausted retries
@@ -46,6 +57,7 @@ var InboxEventTypes = []string{
 	InboxTypeUserViewedPage, InboxTypeUserSwitchedTab, InboxTypeUserErrorToast,
 	InboxTypeUserUploadedDoc, InboxTypeUserDeletedDoc, InboxTypeUserReparseDoc,
 	InboxTypeUserEditedWiki, InboxTypeUserEditChunk,
+	InboxTypeUserViewedDocument, InboxTypeUserViewedImage, InboxTypeUserSwitchedKB,
 	InboxTypeParseCompleted, InboxTypeParseFailed,
 	InboxTypeAgentWikiWrite,
 }

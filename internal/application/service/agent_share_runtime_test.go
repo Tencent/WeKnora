@@ -93,10 +93,12 @@ func TestFilterSharedAgentWriteTools(t *testing.T) {
 
 func TestFilterSharedAgentWriteToolsCoversAllWikiMutations(t *testing.T) {
 	readOnlyWikiTools := map[string]bool{
-		tools.ToolWikiReadPage:  true,
-		tools.ToolWikiSearch:    true,
-		tools.ToolReadDocument:  true,
-		tools.ToolWikiReadIssue: true,
+		tools.ToolWikiReadPage:       true,
+		tools.ToolWikiSearch:         true,
+		tools.ToolReadDocument:       true,
+		tools.ToolWikiReadIssue:      true,
+		tools.ToolWikiGetCurrentPage: true,
+		tools.ToolWikiGetPageTrail:   true,
 	}
 
 	for _, definition := range tools.AvailableToolDefinitions() {

@@ -12,6 +12,7 @@ import {
 import { updateMyPreferences } from '@/api/auth'
 import EmptyState from '@/components/EmptyState.vue'
 import { galleryImageRequest } from './galleryImageSrc'
+import { postUIEvent } from '@/api/agent-inbox'
 import GalleryViewer, { type GalleryAttrRow } from './GalleryViewer.vue'
 import GallerySourcePicker from './GallerySourcePicker.vue'
 
@@ -526,6 +527,21 @@ function onSearchNow() {
 // ---------------------------------------------------------------------------
 const viewerOpen = ref(false)
 const viewerIndex = ref(0)
+
+// Agent inbox view signal (agent-sidebar-inbox): report which image the
+// user is looking at in the fullscreen viewer (open and prev/next walks).
+// dedup_key debounces re-views of the same image; best-effort by design.
+watch([viewerOpen, viewerIndex], ([open, index]) => {
+  if (!open || !props.knowledgeBaseId) return
+  const img = items.value[index]
+  if (!img?.id) return
+  void postUIEvent(props.knowledgeBaseId, 'user.viewed_image', {
+    id: img.id,
+    name: img.source_name,
+    knowledge_id: img.knowledge_id,
+    dedup_key: `img:${img.id}`,
+  })
+})
 
 function openViewer(index: number) {
   viewerIndex.value = index

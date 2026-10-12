@@ -6,7 +6,10 @@ import { post } from "../../utils/request";
 
 export type AgentInboxUIEventType =
   | 'user.viewed_page'
+  | 'user.viewed_document'
+  | 'user.viewed_image'
   | 'user.switched_tab'
+  | 'user.switched_kb'
   | 'user.error_toast';
 
 export interface AgentInboxUIDetail {
