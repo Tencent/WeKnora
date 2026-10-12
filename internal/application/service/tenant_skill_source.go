@@ -657,7 +657,8 @@ func fetchSkillSourceBytes(
 		if src.Kind == skillSourceSkillsSh && errors.As(err, &statusErr) &&
 			statusErr.statusCode == http.StatusNotFound {
 			return fetchedSkillSource{}, fmt.Errorf(
-				"%w: this skills.sh listing is not available through ClawHub federation (HTTP 404: %s); import it using the GitHub folder URL shown by skills.sh",
+				"%w: this skills.sh listing is not available through ClawHub federation "+
+					"(HTTP 404: %s); import it using the GitHub folder URL shown by skills.sh",
 				ErrSkillSourceInvalid, statusErr.message)
 		}
 		return fetchedSkillSource{}, err
