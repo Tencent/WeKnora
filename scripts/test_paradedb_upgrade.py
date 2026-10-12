@@ -1,7 +1,7 @@
 """Verify a ParadeDB patch upgrade using disposable Docker volumes and real migrations.
 
 Requires Python 3 and Docker; no database credentials or running WeKnora needed.
-Run: python3 scripts/test_paradedb_upgrade.py
+Run: python3 scripts/test_paradedb_upgrade.py [--to 0.25.11|0.22.6]
 Artifacts (snapshots, plans, logs and a synthetic-data backup) are kept in /tmp.
 """
 import argparse
@@ -17,6 +17,12 @@ import uuid
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 OUT = None
 CONTAINER = 'weknora-pdb-upgrade-' + uuid.uuid4().hex[:12]
+# target pg_search version -> (image, expected vector version or None if unchanged)
+TARGETS = {
+    '0.22.6': ('paradedb/paradedb:v0.22.6-pg17', None),
+    '0.25.11': ('paradedb/paradedb:v0.25.11-pg17', '0.8.4'),
+}
+UPGRADES = ['000099_pg_search_0226.up.sql', '000115_pg_search_02511.up.sql']
 
 def sql(query, db='weknora'):
     p = subprocess.run(['docker', 'exec', '-i', CONTAINER, 'psql', '-X', '-qAt', '-U', 'postgres', '-d', db, '-v', 'ON_ERROR_STOP=1'], input=query, text=True, capture_output=True)
@@ -126,7 +132,9 @@ def migrate(db, paths, label):
     with (OUT/(label+'.log')).open('w') as log:
         for path in paths:
             log.write(path.name+'\n')
-            sql('BEGIN;\n'+path.read_text()+'\nCOMMIT;', db)
+            text = path.read_text()
+            # CONCURRENTLY cannot run in a transaction block; golang-migrate does not add one either.
+            sql(text if 'CONCURRENTLY' in text else 'BEGIN;\n'+text+'\nCOMMIT;', db)
     print(f'{label}: {len(paths)} SQL migrations passed', flush=True)
 
 
@@ -149,6 +157,7 @@ def main():
     global OUT
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output-dir', type=pathlib.Path)
+    parser.add_argument('--to', choices=sorted(TARGETS), default='0.25.11', help='target pg_search version')
     args = parser.parse_args()
     OUT = args.output_dir or pathlib.Path(tempfile.mkdtemp(prefix='weknora-pdb-upgrade-'))
     OUT.mkdir(parents=True, exist_ok=True)
@@ -156,19 +165,26 @@ def main():
         raise RuntimeError('Use an empty output directory')
     print('Evidence: '+str(OUT), flush=True)
     volume = CONTAINER+'-data'
-    old, new = 'paradedb/paradedb:v0.22.2-pg17', 'paradedb/paradedb:v0.22.6-pg17'
+    old = 'paradedb/paradedb:v0.22.2-pg17'
+    target = args.to
+    new, vector_target = TARGETS[target]
     paths = sorted((ROOT/'migrations/versioned').glob('*.up.sql'))
     baseline = [p for p in paths if int(p.name.split('_')[0]) < 99]
-    upgrade = ROOT/'migrations/versioned/000099_pg_search_0226.up.sql'
+    upgrade = [ROOT/'migrations/versioned'/name for name in UPGRADES]
+    upgrade_sql = '\n'.join(p.read_text() for p in upgrade)
+    search_version = "SELECT extversion FROM pg_extension WHERE extname='pg_search'"
+    vector_version = "SELECT extversion FROM pg_extension WHERE extname='vector'"
     # Only resources created by this invocation are ever removed.
     docker('volume', 'create', volume)
     try:
         start(old, volume)
         migrate('weknora', baseline, 'old-migrations')
-        assert sql("SELECT extversion FROM pg_extension WHERE extname='pg_search'") == '0.22.2'
+        assert sql(search_version) == '0.22.2'
+        old_vector = sql(vector_version)
         # Older external servers without the target package must remain usable.
-        migrate('weknora', [upgrade], 'unavailable-target')
-        assert sql("SELECT extversion FROM pg_extension WHERE extname='pg_search'") == '0.22.2'
+        migrate('weknora', upgrade, 'unavailable-target')
+        assert sql(search_version) == '0.22.2'
+        assert sql(vector_version) == old_vector
         seed()
         snapshot('before')
         with (OUT/'before.dump').open('wb') as backup:
@@ -177,12 +193,14 @@ def main():
         docker('rm', CONTAINER)
         start(new, volume)
         # Replacing the image alone leaves the SQL catalog at the old version.
-        assert sql("SELECT extversion FROM pg_extension WHERE extname='pg_search'") == '0.22.2'
-        sql("BEGIN; SET LOCAL app.skip_embedding='true';\n"+upgrade.read_text()+"\nCOMMIT;")
-        assert sql("SELECT extversion FROM pg_extension WHERE extname='pg_search'") == '0.22.2'
-        migrate('weknora', [upgrade, upgrade], 'extension-upgrade-and-idempotence')
-        assert sql("SELECT extversion FROM pg_extension WHERE extname='pg_search'") == '0.22.6'
-        assert sql('SELECT version FROM paradedb.version_info()') == '0.22.6'
+        assert sql(search_version) == '0.22.2'
+        sql("BEGIN; SET LOCAL app.skip_embedding='true';\n"+upgrade_sql+"\nCOMMIT;")
+        assert sql(search_version) == '0.22.2'
+        migrate('weknora', upgrade + upgrade, 'extension-upgrade-and-idempotence')
+        assert sql(search_version) == target
+        assert sql(vector_version) == (vector_target or old_vector)
+        # Calls into the shared library crash the server if the catalog lags behind it.
+        assert sql('SELECT version FROM paradedb.version_info()') == target
         snapshot('after')
         docker('restart', '-t', '60', CONTAINER)
         for _ in range(60):
@@ -195,10 +213,10 @@ def main():
         check_writes()
         sql('CREATE DATABASE upgrade_fresh TEMPLATE template0')
         # The new migration must not install pg_search on non-search databases.
-        migrate('upgrade_fresh', [upgrade], 'absent-extension')
-        assert sql("SELECT count(*) FROM pg_extension WHERE extname='pg_search'", 'upgrade_fresh') == '0'
+        migrate('upgrade_fresh', upgrade, 'absent-extension')
+        assert sql("SELECT count(*) FROM pg_extension WHERE extname IN ('pg_search','vector')", 'upgrade_fresh') == '0'
         migrate('upgrade_fresh', paths, 'fresh-migrations')
-        assert sql("SELECT extversion FROM pg_extension WHERE extname='pg_search'", 'upgrade_fresh') == '0.22.6'
+        assert sql(search_version, 'upgrade_fresh') == target
         sql("INSERT INTO embeddings(source_id,source_type,content,dimension) VALUES ('fresh',0,'新安装检索',1024)", 'upgrade_fresh')
         assert sql("SELECT count(*) FROM embeddings WHERE content ||| '检索'", 'upgrade_fresh') == '1'
         print('PASS: fresh install and Chinese BM25 query', flush=True)

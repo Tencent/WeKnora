@@ -99,6 +99,8 @@ services:
       # Docker 沙箱默认关闭：本机 docker.sock 等同宿主机 root。
       # 系统管理员也可在「设置 → 系统设置」打开（立即生效）。未落库时读本变量。
       - WEKNORA_SANDBOX_DOCKER_ENABLED=${WEKNORA_SANDBOX_DOCKER_ENABLED:-false}
+      # 出站拨号超时（Go duration，默认 5s）：模型、连接器等外部端点在此时间内连不上即失败。留空使用默认值。
+      - WEKNORA_OUTBOUND_DIAL_TIMEOUT=${WEKNORA_OUTBOUND_DIAL_TIMEOUT:-}
       # gin 信任的代理 CIDR（逗号分隔）；显式设为空字符串则禁用代理信任。
       # 默认信任 loopback + 私网段（容器网络内 nginx 已覆盖）
       # - WEKNORA_TRUSTED_PROXIES=${WEKNORA_TRUSTED_PROXIES:-}
@@ -539,7 +541,7 @@ services:
 
   # 修改的PostgreSQL配置
   postgres:
-    image: paradedb/paradedb:v0.22.6-pg17
+    image: paradedb/paradedb:v0.25.11-pg17
     container_name: WeKnora-postgres
     environment:
       - POSTGRES_USER=${DB_USER}
@@ -817,7 +819,7 @@ services:
   # 一次性初始化脚本：在已有的 WeKnora-postgres 里创建 langfuse 数据库（幂等，数据库已存在则跳过）
   # 复用 WeKnora-postgres 的 ParadeDB 镜像，避免多拉一个 postgres 镜像
   langfuse-db-init:
-    image: paradedb/paradedb:v0.22.6-pg17
+    image: paradedb/paradedb:v0.25.11-pg17
     container_name: WeKnora-langfuse-db-init
     depends_on:
       postgres:

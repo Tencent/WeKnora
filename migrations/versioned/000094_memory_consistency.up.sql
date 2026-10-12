@@ -3,7 +3,7 @@ ALTER TABLE memory_subjects ADD COLUMN extraction_state JSONB;
 ALTER TABLE memory_items ADD COLUMN replaces_id VARCHAR(36) NOT NULL DEFAULT '';
 
 -- Progress is an indexed row per conversation; subject rows only hold a lease.
-CREATE TABLE memory_extraction_sessions (
+CREATE TABLE IF NOT EXISTS memory_extraction_sessions (
  tenant_id BIGINT NOT NULL,
  subject_id VARCHAR(512) NOT NULL,
  session_id VARCHAR(36) NOT NULL,
@@ -17,8 +17,8 @@ CREATE TABLE memory_extraction_sessions (
  failed_at TIMESTAMP WITH TIME ZONE, updated_at TIMESTAMP WITH TIME ZONE NOT NULL,
  PRIMARY KEY (tenant_id, subject_id, session_id)
 );
-CREATE INDEX idx_memory_extraction_pending ON memory_extraction_sessions (tenant_id, subject_id, pending, updated_at, session_id);
-CREATE INDEX idx_memory_replaces ON memory_items (tenant_id, subject_id, replaces_id, status);
+CREATE INDEX IF NOT EXISTS idx_memory_extraction_pending ON memory_extraction_sessions (tenant_id, subject_id, pending, updated_at, session_id);
+CREATE INDEX IF NOT EXISTS idx_memory_replaces ON memory_items (tenant_id, subject_id, replaces_id, status);
 
 -- Recover the old active record when a legacy pending inference prematurely
 -- superseded it. Keep an explicit target so confirmation can still replace it.

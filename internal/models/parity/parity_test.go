@@ -491,7 +491,8 @@ func TestCatalogInvariants(t *testing.T) {
 				assert.NoError(t, err, "invalid built-in PNG icon")
 				assert.LessOrEqual(t, len(v.Icon), 128*1024, "PNG icon over the 128 KB budget")
 			} else {
-				assert.True(t, strings.HasPrefix(strings.TrimSpace(string(v.Icon)), "<svg"), "icon must be an SVG or PNG")
+				assert.True(t, strings.HasPrefix(strings.TrimSpace(string(v.Icon)), "<svg"),
+					"icon must be an SVG or PNG")
 				assert.LessOrEqual(t, len(v.Icon), 6*1024, "SVG icon over the 6 KB budget")
 			}
 			if v.RequiresAuth {

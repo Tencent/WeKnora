@@ -894,6 +894,15 @@ func (c *mcpGoClient) IsConnected() bool {
 	return c.connected.Load()
 }
 
+// oauthClientRegistration reports the tenant and OAuth client ID the
+// connection was built with; ok is false for a connection without OAuth.
+func (c *mcpGoClient) oauthClientRegistration() (tenantID uint64, clientID string, ok bool) {
+	if c.oauth == nil {
+		return 0, "", false
+	}
+	return c.oauth.tenantID, c.oauth.clientID, true
+}
+
 // GetServiceID returns the service ID
 func (c *mcpGoClient) GetServiceID() string {
 	return c.service.ID

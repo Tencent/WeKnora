@@ -2,6 +2,7 @@
   <IntegrationLandingLayout
     :title="$t('integrations.cli.title')"
     :subtitle="$t('integrations.cli.subtitle')"
+    variant="cli"
   >
     <template #actions>
       <IntegrationExternalCta

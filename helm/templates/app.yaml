@@ -57,7 +57,7 @@ spec:
             - name: DB_DRIVER
               value: "postgres"
             - name: DB_HOST
-              value: "postgres"
+              value: {{ include "weknora.serviceName" (dict "component" "postgresql" "context" .) | quote }}
             - name: DB_PORT
               value: "5432"
             - name: DB_USER
@@ -77,7 +77,7 @@ spec:
                   key: DB_NAME
             # Redis configuration
             - name: REDIS_ADDR
-              value: "redis:6379"
+              value: {{ printf "%s:6379" (include "weknora.serviceName" (dict "component" "redis" "context" .)) | quote }}
             - name: REDIS_USERNAME
               valueFrom:
                 secretKeyRef:
@@ -115,7 +115,7 @@ spec:
               value: {{ .Values.app.env.LOCAL_STORAGE_BASE_DIR | quote }}
             # Document reader
             - name: DOCREADER_ADDR
-              value: "docreader:50051"
+              value: {{ printf "%s:50051" (include "weknora.serviceName" (dict "component" "docreader" "context" .)) | quote }}
             # Processing
             - name: AUTO_RECOVER_DIRTY
               value: {{ .Values.app.env.AUTO_RECOVER_DIRTY | quote }}
@@ -133,7 +133,7 @@ spec:
             - name: NEO4J_ENABLE
               value: "true"
             - name: NEO4J_URI
-              value: "bolt://neo4j:7687"
+              value: {{ printf "bolt://%s:7687" (include "weknora.serviceName" (dict "component" "neo4j" "context" .)) | quote }}
             - name: NEO4J_USERNAME
               valueFrom:
                 secretKeyRef:
@@ -186,8 +186,7 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  # Service name must be "app" - frontend nginx config hardcodes this
-  name: app
+  name: {{ include "weknora.serviceName" (dict "component" "app" "context" .) | quote }}
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "weknora.componentLabels" (dict "component" "app" "context" .) | nindent 4 }}

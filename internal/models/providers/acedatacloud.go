@@ -23,7 +23,10 @@ import (
 //go:embed assets/acedatacloud.png
 var aceDataCloudIcon []byte
 
+// AceDataCloudID identifies Ace Data Cloud in the provider registry.
 const AceDataCloudID = "acedatacloud"
+
+// AceDataCloudBaseURL is the documented Chat Completions API base.
 const AceDataCloudBaseURL = "https://api.acedata.cloud/v1"
 
 func newAceDataCloudProvider() *Definition {

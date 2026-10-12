@@ -142,6 +142,43 @@ helm install weknora ./helm \
 
 ## Configuration
 
+### Service names
+
+Optional Service name overrides preserve the following defaults:
+
+| Parameter | Default when omitted or empty |
+|-----------|-------------------------------|
+| `app.service.name` | `app` |
+| `frontend.service.name` | `frontend` |
+| `postgresql.service.name` | `postgres` |
+| `redis.service.name` | `redis` |
+| `docreader.service.name` | `docreader` |
+| `neo4j.service.name` | `neo4j` (when enabled) |
+
+For example, save this as `service-names.yaml`:
+
+```yaml
+app:        {service: {name: weknora-app}}
+frontend:   {service: {name: weknora-frontend}}
+postgresql: {service: {name: weknora-postgres}}
+redis:      {service: {name: weknora-redis}}
+docreader:  {service: {name: weknora-docreader}}
+neo4j:      {service: {name: weknora-neo4j}}
+```
+
+Pass `-f service-names.yaml` alongside your other values. Names must be valid
+Kubernetes Service names. Services, backend addresses, Ingress and installation
+notes use these names consistently. Frontend's `APP_HOST` follows the App Service
+unless `frontend.appHost` is explicitly set.
+
+For multiple releases in one namespace, use distinct names for every enabled
+Service (for example, `alpha-app` and `beta-app`). Defaults are not release-prefixed
+and still collide. Configure separate Ingress hosts when needed.
+
+Omitted or empty overrides preserve Service names on upgrade. Changing a name on
+an existing installation requires a DNS/consumer cutover plan; matching a
+pre-existing Service name does not automatically transfer its ownership to Helm.
+
 ### Global Parameters
 
 | Parameter | Description | Default |

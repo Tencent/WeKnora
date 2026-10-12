@@ -5,9 +5,9 @@
         <div class="section-header__main">
           <div class="section-header__titlewrap">
             <h2>{{ t('modelCatalog.title') }}</h2>
-            <t-popup placement="bottom-start" trigger="hover" :overlay-inner-style="{ maxWidth: '420px' }">
+            <t-popup placement="bottom-left" trigger="hover" show-arrow :overlay-inner-style="{ maxWidth: 'min(420px, calc(100vw - 64px))' }">
               <button type="button" class="hint-trigger" :aria-label="t('modelCatalog.howItWorks')">
-                <t-icon name="info-circle" size="16px" />
+                <t-icon name="help-circle" size="16px" />
               </button>
               <template #content>
                 <div class="hint-popover">
@@ -22,7 +22,6 @@
               </template>
             </t-popup>
           </div>
-          <p class="section-description">{{ t('modelCatalog.description') }}</p>
         </div>
         <div class="section-header__actions">
           <t-button theme="primary" variant="text" class="header-action" :disabled="!state" @click="openAdd">
@@ -39,6 +38,7 @@
           <input ref="fileInput" type="file" accept=".json,application/json" hidden @change="importOverlay" />
         </div>
       </div>
+      <p class="section-description">{{ t('modelCatalog.description') }}</p>
     </header>
 
     <t-alert v-if="state?.deployment_error" theme="warning" class="catalog-alert"
@@ -422,7 +422,7 @@ const capabilities = (model: CatalogModel) => [
 const rowClassName = ({ row }: { row: CatalogRow }) => (row.model.deprecated ? 'catalog-row--hidden' : '')
 
 const columns = computed<TableProps['columns']>(() => [
-  { colKey: 'model', title: t('modelCatalog.columns.model') },
+  { colKey: 'model', title: t('modelCatalog.columns.model'), minWidth: 240 },
   { colKey: 'type', title: t('modelCatalog.columns.type'), width: 100 },
   { colKey: 'tokens', title: t('modelCatalog.columns.tokens'), width: 124, align: 'right' },
   { colKey: 'capabilities', title: t('modelCatalog.columns.capabilities'), width: 148 },
@@ -782,13 +782,22 @@ onMounted(load)
 
 <style lang="less" scoped>
 @import (reference) '@/components/css/settings-section.less';
+@import (reference) '@/components/css/settings-table.less';
 
 .model-catalog {
-  width: 100%;
+  .settings-list-page();
 }
 
 .section-header {
   .settings-section-header();
+  flex-shrink: 0;
+  margin-bottom: 12px;
+  padding-right: 32px;
+}
+
+.section-header__top {
+  flex-wrap: wrap;
+  margin-bottom: 8px;
 }
 
 .section-header__main {
@@ -805,48 +814,19 @@ onMounted(load)
   }
 }
 
-.section-header__titlewrap + .section-description {
-  margin-top: 8px;
-}
-
 .section-header__actions {
   display: flex;
   align-items: center;
-  gap: 16px;
-  flex-shrink: 0;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
-.header-action {
-  --td-bg-color-container-hover: transparent;
-  padding-left: 0;
-  padding-right: 0;
-  font-weight: 600;
-}
-
-.header-action--muted {
-  color: var(--td-text-color-secondary);
-
-  &:hover:not(:disabled) {
-    color: var(--td-brand-color);
-  }
+.header-action.t-button {
+  .settings-list-action();
 }
 
 .hint-trigger {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 2px;
-  border: none;
-  border-radius: var(--app-radius-xs);
-  background: transparent;
-  color: var(--td-text-color-placeholder);
-  cursor: help;
-  line-height: 1;
-
-  &:hover,
-  &:focus-visible {
-    color: var(--td-brand-color);
-  }
+  .settings-title-help();
 }
 
 .hint-popover {
@@ -889,15 +869,20 @@ onMounted(load)
 }
 
 .catalog-toolbar {
+  flex-shrink: 0;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 12px;
+  padding-bottom: 12px;
   margin-bottom: 16px;
+  border-bottom: 1px solid var(--td-component-stroke);
+
+  :deep(.t-input), :deep(.t-select) { border-radius: var(--app-radius-sm); }
 }
 
 .catalog-toolbar__search {
-  width: 200px;
+  width: 240px;
 }
 
 .catalog-toolbar__select {
@@ -954,30 +939,28 @@ onMounted(load)
 }
 
 .data-table-shell {
-  overflow-x: auto;
-  border: 1px solid var(--td-component-stroke);
-  border-radius: var(--app-radius-lg);
-  background-color: var(--td-bg-color-container);
+  .settings-data-table();
+  min-height: 0;
+  overflow: auto;
+  margin-bottom: 32px;
 
-  &:deep(thead th) {
-    background-color: var(--td-bg-color-secondarycontainer);
-    font-size: var(--app-text-md);
-    font-weight: 600;
+  :deep(thead th) {
+    background: var(--td-bg-color-secondarycontainer);
+    color: var(--td-text-color-secondary);
+    font-weight: 500;
   }
 
-  &:deep(.t-table td),
-  &:deep(.t-table th) {
-    padding-top: 12px;
-    padding-bottom: 12px;
-    vertical-align: middle;
-  }
-
-  &:deep(.t-table__pagination) {
-    padding: 12px 16px;
+  :deep(.t-table td), :deep(.t-table th) { vertical-align: middle; }
+  :deep(.t-table tbody tr:last-child td) { border-bottom: 0; }
+  :deep(.t-table__pagination) {
+    padding: 10px 16px;
+    border-top: 1px solid var(--td-component-stroke);
   }
 }
 
 .catalog-table-shell {
+  :deep(.t-table__content > table) { min-width: 840px; }
+
   &:deep(.t-table tbody tr) {
     cursor: pointer;
   }
