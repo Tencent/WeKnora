@@ -37,6 +37,10 @@ const steerDataConsumed = "consumed"
 // consumed flag so a retried drain can reuse the row instead of inserting again.
 const steerDataUserMessageID = "user_message_id"
 
+// steerDataDropped marks a consumed steer event that never reached the model
+// because its user row could not be written.
+const steerDataDropped = "dropped"
+
 // SteerMessageRequest is the payload of POST /sessions/:session_id/steer.
 type SteerMessageRequest struct {
 	// Optional for older clients. New clients pin delivery to the run they see
@@ -57,6 +61,11 @@ const (
 	maxSteerQueueDepth   = 10
 	maxSteerQueryLength  = 10000
 	steerDrainBatchLimit = 20
+	// maxSteerPersistAttempts bounds how often one steer's user row may fail
+	// to insert. The engine stops at the first failure to keep order, so an
+	// unwritable message would otherwise hold back every later one for the
+	// rest of the run and then fail the follow-up handoff as its query.
+	maxSteerPersistAttempts = 3
 )
 
 // steerSink implements types.SteerSink on the handler side: it reads the
@@ -75,6 +84,7 @@ type steerSink struct {
 	lastUserMessageID string
 	drainedOffset     int
 	injectedIDs       map[string]struct{}
+	persistFailures   map[string]int
 }
 
 func newSteerSink(
@@ -103,7 +113,8 @@ func (s *steerSink) PollSteer(
 ) ([]map[string]interface{}, int, error) {
 	// Always read from the start so an after→inject promote of an already
 	// skipped event is visible on the next drain. Consumed injects are
-	// filtered by injectedIDs rather than offset.
+	// filtered by injectedIDs rather than offset. Polling does not consume:
+	// the engine may stop a batch early when persistence fails.
 	_ = lastOffset
 	events, total, err := s.streamManager.GetSteerEvents(ctx, sessionID, messageID, 0)
 	if err != nil {
@@ -120,7 +131,6 @@ func (s *steerSink) PollSteer(
 		if len(out) >= steerDrainBatchLimit {
 			break
 		}
-		s.markInjected(evt.ID)
 		out = append(out, steerEventToRaw(evt))
 	}
 	s.mu.Lock()
@@ -151,15 +161,6 @@ func (s *steerSink) markInjected(id string) {
 		s.injectedIDs = make(map[string]struct{})
 	}
 	s.injectedIDs[id] = struct{}{}
-}
-
-func (s *steerSink) unmarkInjected(id string) {
-	if id == "" {
-		return
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	delete(s.injectedIDs, id)
 }
 
 // InjectedIDs is a copy of steer event IDs the engine has already consumed.
@@ -214,10 +215,10 @@ func (s *steerSink) PersistSteerMessage(
 	channel string,
 ) string {
 	if s.messageService == nil {
-		s.unmarkInjected(steerID)
 		return ""
 	}
 	if existing := s.persistedUserMessageID(ctx, sessionID, messageID, steerID); existing != "" {
+		s.markInjected(steerID)
 		s.mu.Lock()
 		s.lastUserMessageID = existing
 		s.mu.Unlock()
@@ -241,7 +242,7 @@ func (s *steerSink) PersistSteerMessage(
 			"session_id": sessionID,
 			"steer_id":   steerID,
 		})
-		s.unmarkInjected(steerID)
+		s.recordPersistFailure(ctx, sessionID, messageID, steerID)
 		return ""
 	}
 	updated, err := s.streamManager.UpdateSteerEventData(ctx, sessionID, messageID, steerID,
@@ -260,8 +261,8 @@ func (s *steerSink) PersistSteerMessage(
 			logger.Warnf(ctx, "steer persist rollback failed for session %s message %s: %v",
 				sessionID, msg.ID, delErr)
 		}
-		s.unmarkInjected(steerID)
 		if existing := s.persistedUserMessageID(ctx, sessionID, messageID, steerID); existing != "" {
+			s.markInjected(steerID)
 			s.mu.Lock()
 			s.lastUserMessageID = existing
 			s.mu.Unlock()
@@ -269,10 +270,38 @@ func (s *steerSink) PersistSteerMessage(
 		}
 		return ""
 	}
+	s.markInjected(steerID)
 	s.mu.Lock()
 	s.lastUserMessageID = msg.ID
 	s.mu.Unlock()
 	return msg.ID
+}
+
+// recordPersistFailure counts a failed user-row insert and, once the bound is
+// reached, retires the event so the messages queued behind it can proceed in
+// order. Only insert failures count: stream-store CAS failures say nothing
+// about the message itself.
+func (s *steerSink) recordPersistFailure(ctx context.Context, sessionID, messageID, steerID string) {
+	if steerID == "" {
+		return
+	}
+	s.mu.Lock()
+	if s.persistFailures == nil {
+		s.persistFailures = make(map[string]int)
+	}
+	s.persistFailures[steerID]++
+	attempts := s.persistFailures[steerID]
+	s.mu.Unlock()
+	if attempts < maxSteerPersistAttempts {
+		return
+	}
+	if _, err := s.streamManager.UpdateSteerEventData(ctx, sessionID, messageID, steerID,
+		map[string]interface{}{steerDataConsumed: true, steerDataDropped: true}); err != nil {
+		logger.Warnf(ctx, "steer drop flag failed for session %s steer %s: %v", sessionID, steerID, err)
+	}
+	s.markInjected(steerID)
+	logger.Errorf(ctx, "steer %s dropped after %d failed persist attempts, session=%s message=%s",
+		steerID, attempts, sessionID, messageID)
 }
 
 func (s *steerSink) persistedUserMessageID(ctx context.Context, sessionID, messageID, steerID string) string {
@@ -401,8 +430,8 @@ func steerEventConsumed(evt interfaces.StreamEvent) bool {
 // yet consumed as an inject. After events (never consumed) and inject events
 // that arrived too late both belong here; consumed events do not.
 //
-// injectedIDs is the in-flight run's own view, which can be a beat ahead of
-// the durable flag; both are checked so a message is never injected twice.
+// injectedIDs is the in-flight run's own view of successful consumption;
+// both it and the durable flag are checked so a message is never injected twice.
 func selectSteerBacklog(events []interfaces.StreamEvent, injectedIDs map[string]struct{}) []interfaces.StreamEvent {
 	out := make([]interfaces.StreamEvent, 0)
 	for _, evt := range events {
@@ -419,7 +448,7 @@ func selectSteerBacklog(events []interfaces.StreamEvent, injectedIDs map[string]
 
 // pendingSteerQueueItems is the overlay restore payload: every steer event
 // the live run has not yet consumed as an inject. After events always appear;
-// inject events drop out once PollSteer marked them.
+// inject events drop out once PersistSteerMessage marked them.
 func pendingSteerQueueItems(events []interfaces.StreamEvent, injectedIDs map[string]struct{}) []map[string]interface{} {
 	pending := selectSteerBacklog(events, injectedIDs)
 	out := make([]map[string]interface{}, 0, len(pending))
@@ -472,7 +501,9 @@ func (h *Handler) SteerMessage(c *gin.Context) {
 		_ = c.Error(errors.NewBadRequestError(err.Error()))
 		return
 	}
-	query := strings.TrimSpace(req.Query)
+	// PostgreSQL text columns reject NUL, so a NUL-bearing steer could never
+	// be persisted.
+	query := strings.TrimSpace(strings.ReplaceAll(req.Query, "\x00", ""))
 	if query == "" {
 		_ = c.Error(errors.NewBadRequestError("query must not be empty"))
 		return
@@ -918,6 +949,7 @@ func (h *Handler) claimNextSteerFollowUp(
 	followUp := *prevReqCtx
 	followUp.ctx = ctx
 	followUp.query = first.Content
+	followUp.userInput = first.Content
 	followUp.requestID = uuid.New().String()
 	followUp.channel = getString(first.Data, "channel")
 	if followUp.channel == "" {

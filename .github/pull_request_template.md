@@ -35,7 +35,7 @@ exact command and failure here.
 - [ ] Full-repository checks were run, or any unrelated/environment-dependent failures are documented above
 - [ ] Self-reviewed the code
 - [ ] Added/updated tests covering the change
-- [ ] Updated related documentation (README, `docs/`, Swagger annotations, etc.)
+- [ ] Updated related documentation (README, `website-docs/`, Swagger annotations, etc.)
 - [ ] Breaking changes are clearly called out in the description above
 
 ## Screenshots / Recordings

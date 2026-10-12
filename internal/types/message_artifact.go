@@ -25,6 +25,12 @@ type MessageArtifactRecord struct {
 	// PostgreSQL timestamps would truncate to microseconds. Empty means zero.
 	ModTime   string    `gorm:"column:mod_time"`
 	CreatedAt time.Time `gorm:"column:created_at"`
+	// DeletedAt is set when the user deleted the file. The row is a tombstone
+	// from then on: it holds position (the download address) and keeps the
+	// collector from re-attaching the sandbox file, while the blob itself has
+	// been reclaimed. URL is left in place so a later GC can retry a reclaim
+	// that failed.
+	DeletedAt *time.Time `gorm:"column:deleted_at"`
 }
 
 // TableName implements gorm's tabler.
@@ -60,6 +66,7 @@ func NewMessageArtifactRecords(sessionID, messageID string, list MessageArtifact
 			SourcePath:  a.SourcePath,
 			ModTime:     FormatArtifactModTime(a.ModTime),
 			CreatedAt:   created,
+			DeletedAt:   a.DeletedAt,
 		})
 	}
 	return rows
@@ -97,6 +104,7 @@ func (r MessageArtifactRecord) Artifact() MessageArtifact {
 		SourcePath:  r.SourcePath,
 		ModTime:     ParseArtifactModTime(r.ModTime),
 		CreatedAt:   r.CreatedAt,
+		DeletedAt:   r.DeletedAt,
 	}
 }
 
@@ -129,4 +137,52 @@ type ArtifactLibraryItem struct {
 	SourcePath   string    `json:"source_path"   gorm:"column:source_path"`
 	CreatedAt    time.Time `json:"created_at"    gorm:"column:created_at"`
 	VersionCount int       `json:"version_count" gorm:"column:version_count"`
+}
+
+// ArtifactRef addresses one artifact row by its business key. The primary key
+// is not usable for this: writeMessageArtifacts rewrites a message's rows with
+// fresh UUIDs whenever the message is updated, while (message, position) is
+// stable for the life of the artifact.
+type ArtifactRef struct {
+	MessageID string
+	Position  int
+}
+
+// ArtifactDeleteRequest addresses the artifact a user asked to delete.
+// SessionID/MessageID/Index are the same coordinates the download endpoint
+// takes, so a client deletes exactly what it was showing.
+type ArtifactDeleteRequest struct {
+	SessionID string
+	MessageID string
+	Index     int
+	// AllVersions extends the delete to every regeneration of the same sandbox
+	// file in this session. The artifact library shows one row per file with a
+	// version count, so deleting from there sets this; the in-chat panel lists
+	// each version separately and leaves it false.
+	AllVersions bool
+}
+
+// ArtifactBlobRef is one stored object the delete orphaned. The caller resolves
+// the owning tenant's file service and releases the resource binding before
+// removing the bytes, so a blob another message or knowledge entry still claims
+// survives.
+//
+// MessageIDs is every deleted message that owned this object: a later answer
+// that re-attaches an earlier file stores its own row and its own binding, so
+// one delete can retire several claims on the same bytes and all of them have
+// to be released before the object counts as unreferenced.
+type ArtifactBlobRef struct {
+	URL        string
+	MessageIDs []string
+}
+
+// ArtifactDeleteResult reports what a delete tombstoned.
+type ArtifactDeleteResult struct {
+	// FileName of the artifact the request addressed, for the response body.
+	FileName string
+	// Deleted counts the rows this call tombstoned. Zero means another caller
+	// got there first; the blobs are then theirs to reclaim, not ours.
+	Deleted int
+	// Reclaim lists the distinct blobs whose bytes may now be removed.
+	Reclaim []ArtifactBlobRef
 }

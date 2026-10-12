@@ -1,0 +1,22 @@
+=== RUN   TestConcurrentConversionStress
+    stress_linked_test.go:85: workers=8 conversions=306252 elapsed=30.003928708s throughput=10207.1 docs/s p50=358.792µs p95=5.490542ms p99=6.842708ms GoHeapAlloc=9018048 GoTotalAlloc=4384020160
+--- PASS: TestConcurrentConversionStress (30.04s)
+PASS
+       30.04 real       255.23 user        34.26 sys
+            66420736  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+                4413  page reclaims
+                  32  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+               11824  signals received
+                1459  voluntary context switches
+             4500950  involuntary context switches
+       3742707465228  instructions retired
+       1062875391967  cycles elapsed
+            57263016  peak memory footprint

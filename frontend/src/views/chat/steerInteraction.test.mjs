@@ -19,6 +19,7 @@ function harness(overrides = {}) {
   const state = {
     session_id: { value: 'session' }, currentAssistantMessageId: { value: 'assistant' },
     isReplying: { value: true }, isStreaming: { value: true },
+    composerLocked: { value: false },
     steerQueue: { value: [] }, messagesList: reactive([]), crypto: webcrypto, makeSteerClientId,
     previewSteerMessage, discardSteerPreview, reconcileSteerMessageId,
     scrollToBottom() {}, sendMsg() { throw new Error('must not start a second run') },
@@ -28,6 +29,17 @@ function harness(overrides = {}) {
   const actions = vm.runInNewContext(`${handlers}\n({ handleSteerMsg, handlePromoteSteer, handleRetrySteer, handleRemoveSteer })`, state)
   return { ...actions, state }
 }
+
+test('locked composer drops a steer without touching the queue', async () => {
+  let called = 0
+  const h = harness({
+    composerLocked: { value: true },
+    steerSession: async () => { called += 1; return { status: 'queued' } },
+  })
+  await h.handleSteerMsg('queued')
+  assert.equal(called, 0)
+  assert.equal(h.state.steerQueue.value.length, 0)
+})
 
 test('default after stays below; promotion immediately moves it into the transcript', async () => {
   const request = deferred(), promote = deferred()

@@ -29,19 +29,30 @@ func browserRecoveryHint(method string, err *browserskill.RPCError) string {
 		Effect string `json:"effect_state"`
 	}
 	_ = json.Unmarshal(err.Data, &data)
+	if method == "tab_borrow" && data.Reason == "confirmation_ui_unavailable" {
+		return "Ask the user to open an HTTP(S) page in a regular browser window so BrowserSkill can " +
+			"display the borrow confirmation, then request tab_borrow again. Task windows, separate " +
+			"popups and extension settings cannot host that confirmation. Do not retry until a page is available."
+	}
+	if method == "tab_borrow" && err.Code == "invalid_params" &&
+		strings.Contains(err.Message, "not authorized and already lives in the Agent Window") {
+		return "Ask the user to move this unowned tab to a regular browser window before calling " +
+			"tab_borrow again. If its live state is unnecessary, navigate in an owned task tab instead. " +
+			"Being inside the Agent Window does not authorize access."
+	}
 	if method == "tab_borrow" && (data.Reason == "confirmation_timeout" ||
 		err.Code == "timeout" || err.Code == "cancelled" || err.Code == "user_aborted") {
 		return "Stop browser actions: tab borrowing was not approved. The confirmation is no longer pending. " +
 			"Ask the user to click Continue operation in the conversation preview " +
 			"before continuing in this same conversation. " +
 			"Continue operation only resumes the task; it does not grant tab access. After explicit resume, " +
-			"request tab_borrow once again and wait for Allow in the target page's BrowserSkill confirmation. " +
+			"request tab_borrow once again and wait for Allow in the browser's BrowserSkill confirmation. " +
 			"Do not call request_help on the unapproved tab or reconnect/pair again."
 	}
 	if err.Code == "permission_denied" && (strings.Contains(err.Message, "borrow this tab before") ||
 		strings.Contains(err.Message, "Authorize this tab with tab_borrow")) {
 		return "This tab is not authorized for the current task. If its existing page state is needed, " +
-			"call tab_borrow once and wait for the user's approval in the target page. " +
+			"call tab_borrow once and follow the extension's browser-controlled approval flow. " +
 			"Do not retry tab_select/read/close or call request_help before borrowing succeeds. " +
 			"For an ordinary website lookup that does not need this tab's state, navigate in the task's own tab."
 	}
@@ -72,6 +83,11 @@ func browserRecoveryHint(method string, err *browserskill.RPCError) string {
 	case "target_not_select", "option_not_found", "single_select_value_count":
 		return "select requires a native select and its option values. Inspect current options; " +
 			"use click/observe for a custom dropdown."
+	case "renderer_read_timeout":
+		return "A browser read is unavailable and further reads may be refused while it is still pending. " +
+			"Do not repeat snapshot/observe on this tab. Navigation alone does not clear the pending read; " +
+			"it must settle or its debugger session detach. Switch to another tab, or finish the turn " +
+			"and report the unavailable read."
 	case "agent_window_scope", "borrow_conflict":
 		return "List actual user tabs and respect tab ownership. Borrow the intended available tab " +
 			"through extension confirmation; never guess its ID."

@@ -20,16 +20,40 @@ func init() {
 type stubAuthTokenRepo struct {
 	tokens         map[string]*types.AuthToken
 	revokedUserIDs []string
+	// getErr, when set, is returned by every GetTokenByValue call, standing in
+	// for a database error rather than for a missing row.
+	getErr error
+	// createErrs, when non-empty, is returned by the matching CreateToken call
+	// (1-based); calls past the end succeed. A nil entry means "this one
+	// succeeds", so a test can fail only the refresh-token write.
+	createErrs  []error
+	createCalls int
 }
 
-func (s *stubAuthTokenRepo) CreateToken(context.Context, *types.AuthToken) error { return nil }
+func (s *stubAuthTokenRepo) CreateToken(_ context.Context, token *types.AuthToken) error {
+	s.createCalls++
+	if s.createCalls <= len(s.createErrs) {
+		if err := s.createErrs[s.createCalls-1]; err != nil {
+			return err
+		}
+	}
+	if s.tokens != nil && token != nil {
+		s.tokens[token.Token] = token
+	}
+	return nil
+}
+
 func (s *stubAuthTokenRepo) GetTokenByValue(_ context.Context, tokenValue string) (*types.AuthToken, error) {
+	if s.getErr != nil {
+		return nil, s.getErr
+	}
 	token, ok := s.tokens[tokenValue]
 	if !ok {
 		return nil, errors.New("token not found")
 	}
 	return token, nil
 }
+
 func (s *stubAuthTokenRepo) GetTokenByID(_ context.Context, id string) (*types.AuthToken, error) {
 	for _, token := range s.tokens {
 		if token != nil && token.ID == id {
@@ -65,9 +89,15 @@ func (s *stubUserRepoForAuth) GetUserByID(_ context.Context, id string) (*types.
 func (s *stubUserRepoForAuth) GetUsersByIDs(context.Context, []string) (map[string]*types.User, error) {
 	return nil, nil
 }
-func (s *stubUserRepoForAuth) GetUserByEmail(context.Context, string) (*types.User, error) {
-	return nil, nil
+func (s *stubUserRepoForAuth) GetUserByEmail(_ context.Context, email string) (*types.User, error) {
+	for _, user := range s.users {
+		if user != nil && user.Email == email {
+			return user, nil
+		}
+	}
+	return nil, errors.New("user not found")
 }
+
 func (s *stubUserRepoForAuth) GetUserByUsername(context.Context, string) (*types.User, error) {
 	return nil, nil
 }
@@ -96,7 +126,7 @@ func newAuthTestUserService(tokenRepo *stubAuthTokenRepo) *userService {
 	return &userService{
 		userRepo: &stubUserRepoForAuth{
 			users: map[string]*types.User{
-				"user-1": {ID: "user-1", TenantID: 1},
+				"user-1": {ID: "user-1", TenantID: 1, IsActive: true},
 			},
 		},
 		tokenRepo: tokenRepo,
@@ -376,5 +406,25 @@ func TestGetAccessTokenLookupsRedactJWT(t *testing.T) {
 	}
 	if byID.ID != "tok-1" || byID.Token != "" {
 		t.Fatalf("GetAccessTokenByID = %+v, want id tok-1 with redacted token", byID)
+	}
+}
+
+func (s *stubUserRepoForAuth) SetUserActive(context.Context, string, string, bool) (*types.User, error) {
+	panic("unexpected SetUserActive call")
+}
+
+func TestValidateTokenRejectsDisabledAccount(t *testing.T) {
+	tokenRepo := &stubAuthTokenRepo{tokens: map[string]*types.AuthToken{}}
+	svc := newAuthTestUserService(tokenRepo)
+	user := svc.userRepo.(*stubUserRepoForAuth).users["user-1"]
+	access := signTestJWT(jwt.MapClaims{"user_id": user.ID, "type": "access", "exp": time.Now().Add(time.Hour).Unix()})
+	tokenRepo.tokens[access] = &types.AuthToken{UserID: user.ID, Token: access, TokenType: "access_token"}
+	if _, _, err := svc.ValidateToken(context.Background(), access); err != nil {
+		t.Fatalf("active account rejected: %v", err)
+	}
+	user.IsActive = false
+	_, _, err := svc.ValidateToken(context.Background(), access)
+	if err == nil || err.Error() != "account is disabled" {
+		t.Fatalf("disabled account with unrevoked token: got %v", err)
 	}
 }

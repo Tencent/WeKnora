@@ -505,6 +505,21 @@ func TestBuildSessionCreateRequestCarriesNetworkPolicy(t *testing.T) {
 	}
 }
 
+func TestBuildSessionCreateRequestMarksSkillSnapshot(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Type = SandboxTypeE2B
+	cfg.E2BTemplate = "snap-1"
+	cfg.TemplateFromSnapshot = true
+	cfg.EnvVars = map[string]string{"HF_TOKEN": "secret"}
+
+	request, err := buildSessionCreateRequest(SandboxTypeE2B, cfg)
+
+	require.NoError(t, err)
+	require.True(t, request.FromSnapshot)
+	require.Equal(t, "secret", request.EnvVars["HF_TOKEN"])
+	require.NotEmpty(t, request.EnvVars["WEKNORA_SKILL_OUTPUT_DIR"])
+}
+
 func newSessionManagerExecTestHarness(t *testing.T) (*SessionBoundManager, *fakeRemoteClient) {
 	t.Helper()
 
@@ -622,6 +637,74 @@ func TestHasActiveTurnReportsLeaseState(t *testing.T) {
 	busy, err = mgr.HasActiveTurn(ctx, "sess-1")
 	require.NoError(t, err)
 	require.True(t, busy)
+}
+
+func TestTryLockRewindIsExclusive(t *testing.T) {
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(10000))
+	store := NewMemorySessionSandboxBindingStore()
+	cfg := DefaultConfig()
+	cfg.CubeTemplate = "tpl-test"
+	mgr, err := NewSessionBoundManager(SessionBoundManagerConfig{
+		Config:          cfg,
+		Client:          newFakeRemoteClient(SandboxTypeCube),
+		Store:           store,
+		Checker:         &fakeSessionExistenceChecker{exists: true},
+		SkipHealthProbe: true,
+	})
+	require.NoError(t, err)
+
+	unlock, err := mgr.TryLockRewind(ctx, "sess-1")
+	require.NoError(t, err)
+	_, err = mgr.TryLockRewind(ctx, "sess-1")
+	require.ErrorIs(t, err, ErrSessionRewindLocked)
+	unlock()
+}
+
+func TestBeginSessionTurnFailsWhenRewindLocked(t *testing.T) {
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(10000))
+	store := NewMemorySessionSandboxBindingStore()
+	cfg := DefaultConfig()
+	cfg.CubeTemplate = "tpl-test"
+	mgr, err := NewSessionBoundManager(SessionBoundManagerConfig{
+		Config:          cfg,
+		Client:          newFakeRemoteClient(SandboxTypeCube),
+		Store:           store,
+		Checker:         &fakeSessionExistenceChecker{exists: true},
+		SkipHealthProbe: true,
+	})
+	require.NoError(t, err)
+
+	unlock, err := mgr.TryLockRewind(ctx, "sess-1")
+	require.NoError(t, err)
+	held, err := mgr.HasRewindLock(ctx, "sess-1")
+	require.NoError(t, err)
+	require.True(t, held)
+	require.ErrorIs(t, mgr.BeginSessionTurn(ctx, "sess-1"), ErrSessionRewindLocked)
+	unlock()
+	require.NoError(t, mgr.BeginSessionTurn(ctx, "sess-1"))
+}
+
+func TestTryLockRewindFailsWhenTurnActive(t *testing.T) {
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(10000))
+	store := NewMemorySessionSandboxBindingStore()
+	cfg := DefaultConfig()
+	cfg.CubeTemplate = "tpl-test"
+	mgr, err := NewSessionBoundManager(SessionBoundManagerConfig{
+		Config:          cfg,
+		Client:          newFakeRemoteClient(SandboxTypeCube),
+		Store:           store,
+		Checker:         &fakeSessionExistenceChecker{exists: true},
+		SkipHealthProbe: true,
+	})
+	require.NoError(t, err)
+
+	require.NoError(t, mgr.BeginSessionTurn(ctx, "sess-1"))
+	_, err = mgr.TryLockRewind(ctx, "sess-1")
+	require.ErrorIs(t, err, ErrSessionTurnActive)
+	require.NoError(t, mgr.EndSessionTurn(ctx, "sess-1"))
+	unlock, err := mgr.TryLockRewind(ctx, "sess-1")
+	require.NoError(t, err)
+	unlock()
 }
 
 func TestHasActiveTurnWithoutLeaseStoreIsNotBusy(t *testing.T) {

@@ -8,13 +8,16 @@
               <ResourceIcon type="knowledge" :size="24" />
               {{ $t('knowledgeBase.title') }}
             </h2>
-            <t-tooltip v-if="authStore.hasRole('contributor')" :content="$t('knowledgeList.create')" placement="bottom">
-              <t-button variant="text" theme="default" size="small" class="header-action-btn"
-                data-guide="kb-list-create" style="--wails-draggable: no-drag" @click="handleCreateKnowledgeBase">
-                <template #icon><t-icon name="folder-add" size="16px" /></template>
-              {{ $t('knowledgeList.create') }}
-              </t-button>
-            </t-tooltip>
+            <div class="header-actions" style="--wails-draggable: no-drag">
+              <ResourceSortControl v-model="selectedResourceSort" />
+              <t-tooltip v-if="authStore.hasRole('contributor')" :content="$t('knowledgeList.create')" placement="bottom">
+                 <t-button variant="text" theme="default" size="small" class="header-action-btn"
+                   data-guide="kb-list-create" style="--wails-draggable: no-drag" @click="handleCreateKnowledgeBase">
+                   <template #icon><t-icon name="folder-add" size="16px" /></template>
+                  {{ $t('knowledgeList.create') }}
+                 </t-button>
+               </t-tooltip>
+             </div>
           </div>
           <p class="header-subtitle" style="--wails-draggable: drag">{{ $t('knowledgeList.subtitle') }}</p>
         </div>
@@ -162,8 +165,8 @@
               </button>
               <!-- 卡片头部 -->
               <div class="card-header">
+                <KbTypeAvatar :type="kb.type" />
                 <span class="card-title" :title="kb.name">
-                  <KbWikiBadge v-if="isWikiKb(kb)" />
                   <span class="card-title-text">{{ kb.name }}</span>
                 </span>
                 <!-- The card menu always exists when the card is visible: pin
@@ -203,7 +206,7 @@
 
               <!-- 卡片内容 -->
               <div class="card-content">
-                <div class="card-description" :title="kb.description || $t('knowledgeBase.noDescription')">
+                <div class="card-description" :class="{ 'is-empty': !kb.description }" :title="kb.description || $t('knowledgeBase.noDescription')">
                   {{ kb.description || $t('knowledgeBase.noDescription') }}
                 </div>
               </div>
@@ -217,12 +220,15 @@
                       placement="top">
                       <div class="feature-badge"
                         :class="{ 'type-document': (kb.type || 'document') === 'document', 'type-faq': kb.type === 'faq' }">
-                        <t-icon :name="kb.type === 'faq' ? 'chat-bubble-help' : 'folder'" size="14px" />
+                        <t-icon :name="kb.type === 'faq' ? 'chat-bubble-help' : 'file'" size="14px" />
                         <span class="badge-count">{{ kb.type === 'faq' ? (kb.chunk_count || 0) : (kb.knowledge_count ||
                           0) }}</span>
                         <t-icon v-if="kb.isProcessing" name="loading" size="12px" class="processing-icon" />
                       </div>
                     </t-tooltip>
+                    <div v-if="isWikiKb(kb)" class="feature-badge wiki">
+                      <KbWikiBadge />
+                    </div>
                     <t-tooltip v-if="kb.extract_config?.enabled" :content="$t('knowledgeList.features.knowledgeGraph')"
                       placement="top">
                       <div class="feature-badge kg">
@@ -266,8 +272,8 @@
               </button>
               <!-- 卡片头部 -->
               <div class="card-header">
+                <KbTypeAvatar :type="kb.type" />
                 <span class="card-title" :title="kb.name">
-                  <KbWikiBadge v-if="isWikiKb(kb)" />
                   <span class="card-title-text">{{ kb.name }}</span>
                 </span>
                 <t-tooltip :content="$t('knowledgeList.menu.viewDetails')" placement="top">
@@ -280,7 +286,7 @@
 
               <!-- 卡片内容 -->
               <div class="card-content">
-                <div class="card-description" :title="kb.description || $t('knowledgeBase.noDescription')">
+                <div class="card-description" :class="{ 'is-empty': !kb.description }" :title="kb.description || $t('knowledgeBase.noDescription')">
                   {{ kb.description || $t('knowledgeBase.noDescription') }}
                 </div>
               </div>
@@ -294,12 +300,15 @@
                       placement="top">
                       <div class="feature-badge"
                         :class="{ 'type-document': (kb.type || 'document') === 'document', 'type-faq': kb.type === 'faq' }">
-                        <t-icon :name="kb.type === 'faq' ? 'chat-bubble-help' : 'folder'" size="14px" />
+                        <t-icon :name="kb.type === 'faq' ? 'chat-bubble-help' : 'file'" size="14px" />
                         <span class="badge-count">{{ kb.type === 'faq' ? (kb.chunk_count || '-') : (kb.knowledge_count
                           || '-')
                         }}</span>
                       </div>
                     </t-tooltip>
+                    <div v-if="isWikiKb(kb)" class="feature-badge wiki">
+                      <KbWikiBadge />
+                    </div>
                     <t-tooltip v-if="kb.extract_config?.enabled" :content="$t('knowledgeList.features.knowledgeGraph')"
                       placement="top">
                       <div class="feature-badge kg">
@@ -395,8 +404,8 @@
               </button>
               <!-- 卡片头部 -->
               <div class="card-header">
+                <KbTypeAvatar :type="kb.type" />
                 <span class="card-title" :title="kb.name">
-                  <KbWikiBadge v-if="isWikiKb(kb)" />
                   <span class="card-title-text">{{ kb.name }}</span>
                 </span>
                 <!-- See the matching block in the "all" tab template for why
@@ -434,7 +443,7 @@
 
               <!-- 卡片内容 -->
               <div class="card-content">
-                <div class="card-description" :title="kb.description || $t('knowledgeBase.noDescription')">
+                <div class="card-description" :class="{ 'is-empty': !kb.description }" :title="kb.description || $t('knowledgeBase.noDescription')">
                   {{ kb.description || $t('knowledgeBase.noDescription') }}
                 </div>
               </div>
@@ -448,12 +457,15 @@
                       placement="top">
                       <div class="feature-badge"
                         :class="{ 'type-document': (kb.type || 'document') === 'document', 'type-faq': kb.type === 'faq' }">
-                        <t-icon :name="kb.type === 'faq' ? 'chat-bubble-help' : 'folder'" size="14px" />
+                        <t-icon :name="kb.type === 'faq' ? 'chat-bubble-help' : 'file'" size="14px" />
                         <span class="badge-count">{{ kb.type === 'faq' ? (kb.chunk_count || 0) : (kb.knowledge_count ||
                           0) }}</span>
                         <t-icon v-if="kb.isProcessing" name="loading" size="12px" class="processing-icon" />
                       </div>
                     </t-tooltip>
+                    <div v-if="isWikiKb(kb)" class="feature-badge wiki">
+                      <KbWikiBadge />
+                    </div>
                     <t-tooltip v-if="kb.extract_config?.enabled" :content="$t('knowledgeList.features.knowledgeGraph')"
                       placement="top">
                       <div class="feature-badge kg">
@@ -546,8 +558,8 @@
             }" role="link" tabindex="0" @keydown.enter.self.prevent="handleSharedKbClick(shared)" @keydown.space.self.prevent="handleSharedKbClick(shared)" @click="handleSharedKbClick(shared)">
               <!-- 卡片头部 -->
               <div class="card-header">
+                <KbTypeAvatar :type="shared.knowledge_base.type" />
                 <span class="card-title" :title="shared.knowledge_base.name">
-                  <KbWikiBadge v-if="isWikiKb(shared.knowledge_base)" />
                   <span class="card-title-text">{{ shared.knowledge_base.name }}</span>
                 </span>
                 <t-tooltip v-if="!shared.is_mine" :content="$t('knowledgeList.menu.viewDetails')" placement="top">
@@ -560,7 +572,7 @@
 
               <!-- 卡片内容 -->
               <div class="card-content">
-                <div class="card-description" :title="shared.knowledge_base.description || $t('knowledgeBase.noDescription')">
+                <div class="card-description" :class="{ 'is-empty': !shared.knowledge_base.description }" :title="shared.knowledge_base.description || $t('knowledgeBase.noDescription')">
                   {{ shared.knowledge_base.description || $t('knowledgeBase.noDescription') }}
                 </div>
               </div>
@@ -574,13 +586,16 @@
                       placement="top">
                       <div class="feature-badge"
                         :class="{ 'type-document': (shared.knowledge_base.type || 'document') === 'document', 'type-faq': shared.knowledge_base.type === 'faq' }">
-                        <t-icon :name="shared.knowledge_base.type === 'faq' ? 'chat-bubble-help' : 'folder'"
+                        <t-icon :name="shared.knowledge_base.type === 'faq' ? 'chat-bubble-help' : 'file'"
                           size="14px" />
                         <span class="badge-count">{{ shared.knowledge_base.type === 'faq' ?
                           (shared.knowledge_base.chunk_count ??
                             '-') : (shared.knowledge_base.knowledge_count ?? '-') }}</span>
                       </div>
                     </t-tooltip>
+                    <div v-if="isWikiKb(shared.knowledge_base)" class="feature-badge wiki">
+                      <KbWikiBadge />
+                    </div>
                   </div>
                 </div>
               </div>
@@ -721,16 +736,25 @@ import { listOrganizationSharedKnowledgeBases, type SharedKnowledgeBase, type Or
 import { mergeAllScopeKnowledgeBases, type OwnedKnowledgeBase, type SharedKnowledgeBaseLike } from './kbListMerge'
 import KnowledgeBaseEditorModal from './KnowledgeBaseEditorModal.vue'
 import KbWikiBadge from './components/KbWikiBadge.vue'
+import KbTypeAvatar from './components/KbTypeAvatar.vue'
 import ResourceListToolbar from '@/components/ResourceListToolbar.vue'
 import { matchesResourceQuery } from '@/utils/resourceListSearch'
 import ResourceOriginBadge from '@/components/ResourceOriginBadge.vue'
 import { shouldShowResourceOriginBadge } from '@/utils/card-list-badge'
+import { permissionCanManageKB } from '@/utils/kbPermission'
 import ContextualGuide from '@/components/ContextualGuide.vue'
+import ResourceSortControl from '@/components/ResourceSortControl.vue'
 import { isContextualGuideDone, markContextualGuideDone } from '@/config/contextualGuides'
 import { useTenantModelReadiness } from '@/composables/useTenantModelReadiness'
 import { useI18n } from 'vue-i18n'
 import { useListUrlState } from '@/composables/useListUrlState'
 import { useResourcePins } from '@/composables/useResourcePins'
+import {
+  DEFAULT_RESOURCE_SORT,
+  sortResourcesWithinGroups,
+  type ResourceSortAccessors,
+  type ResourceSortValue,
+} from '@/utils/resourceSorting'
 
 const router = useRouter()
 const route = useRoute()
@@ -740,6 +764,7 @@ const { loaded: modelsReadyLoaded, isReadyForDocumentKb } = useTenantModelReadin
 const orgStore = useOrganizationStore()
 const chatResources = useChatResourcesStore()
 const { t } = useI18n()
+const selectedResourceSort = ref<ResourceSortValue>(DEFAULT_RESOURCE_SORT)
 
 // 左侧空间选择：默认根据当前角色决定。
 // Viewer 在该空间里通常 0 KB owned，"我的"会显示空状态、又把共享 KB 藏起来，
@@ -796,6 +821,18 @@ interface KB {
   creator_name?: string;
 }
 
+const flatKnowledgeBaseSortAccessors: ResourceSortAccessors<any> = {
+  getName: item => item?.name,
+  getUpdatedAt: item => item?.updated_at ?? item?.shared_at,
+  getCreatedAt: item => item?.created_at ?? item?.shared_at,
+}
+
+const sharedKnowledgeBaseSortAccessors: ResourceSortAccessors<OrganizationSharedKnowledgeBaseItem> = {
+  getName: item => item.knowledge_base?.name,
+  getUpdatedAt: item => item.knowledge_base?.updated_at ?? item.shared_at,
+  getCreatedAt: item => item.knowledge_base?.created_at ?? item.shared_at,
+}
+
 const kbs = ref<KB[]>([])
 const loading = ref(false)
 const confirmDelete = useConfirmDelete()
@@ -827,50 +864,29 @@ const spaceSelectionOrgId = computed(() => {
 const spaceKbsList = ref<OrganizationSharedKnowledgeBaseItem[]>([])
 const spaceKbsLoading = ref(false)
 
-// 「工作空间」视图下的稳定排序：本空间内「我创建」在前、「同事创建」在后；
-// 子段内保留服务端的置顶优先顺序。给 contributor 视图把「本空间 · 仅查看」
-// 分组标题正好插在过渡处；其他角色看不到标题，纯排序变化也无害。
-// Ordering for the 「本空间」 tab:
-//   1. pinned KBs (mine or teammate), newest pin first
-//   2. my non-pinned KBs
-//   3. teammate non-pinned KBs (rendered under the「本空间 · 仅查看」header)
-//
-// Pin is per-user as of migration 000050, so a teammate-created KB that
-// the caller has personally pinned must float into the pinned section
-// even though it would otherwise live in the teammate sub-group. The
-// previous version only bucketed by isMyKb and silently demoted these
-// pinned-but-teammate KBs.
+// 「工作空间」固定保持“置顶 → 我创建 → 同事创建”，用户选择只影响组内顺序。
 const unsearchedSortedMineKbs = computed<KB[]>(() => {
-  return [...kbs.value].sort((a, b) => {
-    const ap = a.is_pinned ? 0 : 1
-    const bp = b.is_pinned ? 0 : 1
-    if (ap !== bp) return ap - bp
-    if (a.is_pinned && b.is_pinned) {
-      const at = a.pinned_at ? Date.parse(a.pinned_at as string) : 0
-      const bt = b.pinned_at ? Date.parse(b.pinned_at as string) : 0
-      if (at !== bt) return bt - at
-    }
-    const am = isMyKb(a) ? 0 : 1
-    const bm = isMyKb(b) ? 0 : 1
-    if (am !== bm) return am - bm
-    const ac = a.created_at ? Date.parse(a.created_at as string) : 0
-    const bc = b.created_at ? Date.parse(b.created_at as string) : 0
-    return bc - ac
-  })
+  return sortResourcesWithinGroups(
+    kbs.value,
+    selectedResourceSort.value,
+    kb => kb.is_pinned ? 'pinned' : isMyKb(kb) ? 'mine' : 'tenantOthers',
+    ['pinned', 'mine', 'tenantOthers'],
+    flatKnowledgeBaseSortAccessors,
+  )
 })
 const sortedMineKbs = computed(() => unsearchedSortedMineKbs.value.filter(item => matchesResourceQuery(item, keyword.value)))
 
-// 空间视角下的稳定排序：我创建的（is_mine）放在前面，剩下的共享部分再按
-// 可编辑 / 仅查看 排序——这样空间列表跟「全部」视图的视觉顺序一致。
+// 空间视角固定保持“我共享的 → 可编辑 → 仅查看”，用户选择只影响组内顺序。
 const unsearchedSortedSpaceKbsList = computed(() => {
-  return [...spaceKbsList.value].sort((a, b) => {
-    const aMine = a.is_mine ? 0 : 1
-    const bMine = b.is_mine ? 0 : 1
-    if (aMine !== bMine) return aMine - bMine
-    const aE = isSharedKbEditable(a.permission) ? 0 : 1
-    const bE = isSharedKbEditable(b.permission) ? 0 : 1
-    return aE - bE
-  })
+  return sortResourcesWithinGroups(
+    spaceKbsList.value,
+    selectedResourceSort.value,
+    item => item.is_mine
+      ? 'sharedByMe'
+      : isSharedKbEditable(item.permission) ? 'sharedEditable' : 'sharedReadonly',
+    ['sharedByMe', 'sharedEditable', 'sharedReadonly'],
+    sharedKnowledgeBaseSortAccessors,
+  )
 })
 const sortedSpaceKbsList = computed(() => unsearchedSortedSpaceKbsList.value.filter(item => matchesResourceQuery(item.knowledge_base, keyword.value)))
 const spaceCountByOrg = ref<Record<string, number>>({})
@@ -1053,21 +1069,28 @@ const spaceKbSectionCounts = computed<Record<KbSectionKey, number>>(() => {
   return c
 })
 
-// Filtered knowledge bases: 全部 = 我的 + 全部共享；我的 = 仅我的
-//
-// Favorites / Recents reuse the same render path as `all` — they're just
-// pre-filtered, pre-ordered slices, so the existing kb-card / shared
-// kb-card templates render them with zero extra markup. Order is
-// preserved via the upstream array (pins order is ts-desc).
+// 收藏、最近、全部和工作空间都使用同一排序选项，同时保持原有分组顺序。
 const unsearchedFilteredKnowledgeBases = computed(() => {
   if (spaceSelection.value === 'favorites') {
-    return favoritesList.value
+    return sortResourcesWithinGroups(
+      favoritesList.value,
+      selectedResourceSort.value,
+      kbSectionOf,
+      ['pinned', 'mine', 'tenantOthers', 'sharedEditable', 'sharedReadonly'],
+      flatKnowledgeBaseSortAccessors,
+    )
   }
   if (spaceSelection.value === 'recents') {
-    return recentsList.value
+    return sortResourcesWithinGroups(
+      recentsList.value,
+      selectedResourceSort.value,
+      kbSectionOf,
+      ['pinned', 'mine', 'tenantOthers', 'sharedEditable', 'sharedReadonly'],
+      flatKnowledgeBaseSortAccessors,
+    )
   }
   if (spaceSelection.value === 'mine') {
-    return kbs.value.map(kb => ({ ...kb, isMine: true as const }))
+    return sortedMineKbs.value.map(kb => ({ ...kb, isMine: true as const }))
   }
   if (spaceSelection.value !== 'all') {
     return []
@@ -1079,11 +1102,18 @@ const unsearchedFilteredKnowledgeBases = computed(() => {
   // ≥2 entries (#795). mergeAllScopeKnowledgeBases de-duplicates by KB id
   // (owned wins; most-privileged share kept) while preserving the existing
   // pinned → mine → teammate → shared(editable-first) ordering.
-  return mergeAllScopeKnowledgeBases(
+  const merged = mergeAllScopeKnowledgeBases(
     kbs.value as unknown as OwnedKnowledgeBase[],
     sharedKbs.value as unknown as SharedKnowledgeBaseLike[],
     authStore.user?.id,
   ) as unknown as Array<(KB & { isMine: true }) | (SharedKnowledgeBase['knowledge_base'] & { isMine: false; permission: string; shared_at: string; share_id: string } & any)>
+  return sortResourcesWithinGroups(
+    merged,
+    selectedResourceSort.value,
+    kbSectionOf,
+    ['pinned', 'mine', 'tenantOthers', 'sharedEditable', 'sharedReadonly'],
+    flatKnowledgeBaseSortAccessors,
+  )
 })
 const filteredKnowledgeBases = computed(() => unsearchedFilteredKnowledgeBases.value.filter(item => matchesResourceQuery(item, keyword.value)))
 
@@ -1229,6 +1259,17 @@ const handleSettings = (kb: KB) => {
 // those as tenant-owned (Admin+ may manage) so existing KBs aren't
 // suddenly unmanageable for everyone.
 function canManageKBCard(kb: KB): boolean {
+  // Shared-space cards carry the org-share permission; when it exists it is
+  // the only signal that counts. A read-only (viewer) or editor share must
+  // not surface Settings/Delete even when the browsing user is an admin of
+  // their own personal workspace — the backend 3-D permission cap would 403
+  // the call anyway (#3098).
+  const sharePermission = (kb as any).permission as string | undefined
+  if (sharePermission) return permissionCanManageKB(sharePermission)
+  // Shared-card shapes that lost their permission field (pin/recents merges)
+  // are marked isMine === false; they must not fall through to the local
+  // admin/creator fallbacks either.
+  if ((kb as any).isMine === false) return false
   const userId = authStore.user?.id || ''
   if (kb.creator_id && userId && kb.creator_id === userId) return true
   return authStore.hasRole('admin')
@@ -1590,6 +1631,13 @@ watch(keyword, () => { collapsedKbSections.value = new Set() })
   line-height: 20px;
 }
 
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
 .header-action-btn {
   padding: 0;
   min-width: 28px;
@@ -1774,40 +1822,15 @@ watch(keyword, () => { collapsedKbSections.value = new Set() })
     }
   }
 
-  &.kg {
-    background: color-mix(in srgb, var(--app-accent-purple) 8%, transparent);
-    color: var(--td-brand-color);
+  &.kg { color: var(--app-accent-purple); }
+  &.multimodal { color: var(--td-warning-color); }
+  &.question { color: var(--app-accent-blue); }
+  &.shared { color: var(--td-brand-color); }
+  &.wiki :deep(.kb-wiki-badge) { color: var(--app-accent-teal); }
 
-    &:hover {
-      background: color-mix(in srgb, var(--app-accent-purple) 12%, transparent);
-    }
-  }
-
-  &.multimodal {
-    background: color-mix(in srgb, var(--td-warning-color) 8%, transparent);
-    color: var(--td-warning-color);
-
-    &:hover {
-      background: color-mix(in srgb, var(--td-warning-color) 12%, transparent);
-    }
-  }
-
-  &.question {
-    background: color-mix(in srgb, var(--td-success-color) 8%, transparent);
-    color: var(--td-success-color);
-
-    &:hover {
-      background: color-mix(in srgb, var(--td-success-color) 12%, transparent);
-    }
-  }
-
-  &.shared {
-    background: color-mix(in srgb, var(--td-brand-color) 8%, transparent);
-    color: var(--td-brand-color);
-
-    &:hover {
-      background: color-mix(in srgb, var(--td-brand-color) 12%, transparent);
-    }
+  :deep(.kb-wiki-badge svg) {
+    width: 14px;
+    height: 14px;
   }
 
   &.role-admin {

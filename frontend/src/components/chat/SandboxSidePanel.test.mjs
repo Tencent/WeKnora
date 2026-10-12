@@ -29,3 +29,10 @@ test('desktop tab is omitted unless the selected agent sandbox has desktop_enabl
   assert.match(panel, /if \(desktopTabVisible\.value\)/)
   assert.match(panel, /desktopMounted && desktopTabVisible/)
 })
+
+test('panel slide-in is clipped to the viewport so it cannot create a document scrollbar', () => {
+  assert.match(panel, /chat-sandbox-panel-clip/)
+  assert.match(panel, /sandbox-panel-enter-from \.chat-sandbox-panel/)
+  assert.match(panel, /translateX\(100%\)/)
+  assert.match(panel, /:duration/)
+})

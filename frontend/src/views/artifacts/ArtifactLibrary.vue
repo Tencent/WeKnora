@@ -115,6 +115,18 @@
               >
                 <template #icon><t-icon name="download" size="16px" /></template>
               </t-button>
+              <t-button
+                class="row-action row-action--danger"
+                variant="text"
+                shape="square"
+                size="small"
+                :title="$t('artifactLibrary.delete')"
+                :aria-label="$t('artifactLibrary.delete')"
+                :loading="isDeleting(item)"
+                @click.stop="handleDelete(item)"
+              >
+                <template #icon><t-icon name="delete" size="16px" /></template>
+              </t-button>
             </li>
           </ul>
         </section>
@@ -163,6 +175,18 @@
             <template #icon><t-icon name="download" size="16px" /></template>
           </t-button>
           <t-button
+            class="row-action row-action--danger"
+            variant="text"
+            shape="square"
+            size="small"
+            :title="$t('artifactLibrary.delete')"
+            :aria-label="$t('artifactLibrary.delete')"
+            :loading="isDeleting(previewItem)"
+            @click="handleDelete(previewItem)"
+          >
+            <template #icon><t-icon name="delete" size="16px" /></template>
+          </t-button>
+          <t-button
             class="row-action"
             variant="text"
             shape="square"
@@ -198,7 +222,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { downloadArtifact } from '@/api/chat'
-import { listArtifactLibrary, type ArtifactLibraryItem } from '@/api/artifacts'
+import { deleteArtifactLibraryItem, listArtifactLibrary, type ArtifactLibraryItem } from '@/api/artifacts'
 import {
   ARTIFACT_CATEGORIES,
   artifactCategoryExtensions,
@@ -208,6 +232,7 @@ import {
 } from '@/utils/artifactLibrary'
 import { formatArtifactDateTime, formatArtifactSize } from '@/utils/sessionArtifacts'
 import { resolveFilePreviewExt } from '@/utils/filePreview'
+import { useConfirmDelete } from '@/components/settings/useConfirmDelete'
 import EmptyState from '@/components/EmptyState.vue'
 import ResourceIcon from '@/components/icons/ResourceIcon.vue'
 import DocumentPreview from '@/components/document-preview.vue'
@@ -219,6 +244,7 @@ const SEARCH_DEBOUNCE_MS = 300
 const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
+const confirmDelete = useConfirmDelete()
 
 const category = ref<ArtifactCategory>(parseArtifactCategory(route.query.type))
 const keyword = ref(typeof route.query.q === 'string' ? route.query.q : '')
@@ -228,6 +254,7 @@ const page = ref(0)
 const loading = ref(false)
 const loadError = ref(false)
 const downloading = reactive<Record<string, boolean>>({})
+const deleting = reactive<Record<string, boolean>>({})
 const previewItem = ref<ArtifactLibraryItem | null>(null)
 const previewVisible = ref(false)
 const previewActions = ref<HTMLElement | null>(null)
@@ -259,7 +286,15 @@ async function fetchPage(nextPage: number) {
     })
     if (mine !== ticket) return
     const rows = Array.isArray(res?.data) ? res.data : []
-    items.value = nextPage === 1 ? rows : [...items.value, ...rows]
+    // Deleting a row shifts every later row one page-offset earlier, so an
+    // appended page can overlap what is already shown. Drop the repeats rather
+    // than rendering an item twice under the same key.
+    if (nextPage === 1) {
+      items.value = rows
+    } else {
+      const shown = new Set(items.value.map(itemKey))
+      items.value = [...items.value, ...rows.filter((row) => !shown.has(itemKey(row)))]
+    }
     total.value = typeof res?.total === 'number' ? res.total : items.value.length
     page.value = nextPage
   } catch (err) {
@@ -281,7 +316,9 @@ function reload() {
 
 function loadMore() {
   if (loading.value || !hasMore.value) return
-  void fetchPage(page.value + 1)
+  // Page from how many rows are actually shown, not from the last page number:
+  // after a delete those differ, and paging by number would skip a row.
+  void fetchPage(Math.floor(items.value.length / PAGE_SIZE) + 1)
 }
 
 function syncQuery() {
@@ -328,16 +365,16 @@ function openSession(item: ArtifactLibraryItem) {
   void router.push(`/platform/chat/${item.session_id}`)
 }
 
-function downloadKey(item: ArtifactLibraryItem) {
+function itemKey(item: ArtifactLibraryItem) {
   return `${item.message_id}:${item.index}`
 }
 
 function isDownloading(item: ArtifactLibraryItem) {
-  return !!downloading[downloadKey(item)]
+  return !!downloading[itemKey(item)]
 }
 
 async function handleDownload(item: ArtifactLibraryItem) {
-  const key = downloadKey(item)
+  const key = itemKey(item)
   if (downloading[key]) return
   downloading[key] = true
   try {
@@ -355,6 +392,48 @@ async function handleDownload(item: ArtifactLibraryItem) {
     MessagePlugin.error(t('artifactLibrary.downloadFailed'))
   } finally {
     downloading[key] = false
+  }
+}
+
+function isDeleting(item: ArtifactLibraryItem) {
+  return !!deleting[itemKey(item)]
+}
+
+// A library row is the file, not one regeneration of it, so the confirmation
+// says how many versions go with it. The bytes are reclaimed server side, which
+// is why this asks at all.
+function handleDelete(item: ArtifactLibraryItem) {
+  if (isDeleting(item)) return
+  confirmDelete({
+    title: t('artifactLibrary.deleteTitle'),
+    body:
+      item.version_count > 1
+        ? t('artifactLibrary.deleteConfirmVersions', { name: item.file_name, count: item.version_count })
+        : t('artifactLibrary.deleteConfirm', { name: item.file_name }),
+    onConfirm: () => performDelete(item),
+  })
+}
+
+async function performDelete(item: ArtifactLibraryItem) {
+  const key = itemKey(item)
+  if (deleting[key]) return
+  deleting[key] = true
+  try {
+    await deleteArtifactLibraryItem(item)
+    // Splice the row out instead of reloading: this is an infinite list, and a
+    // reload would throw away everything the user has scrolled past.
+    const at = items.value.findIndex((row) => itemKey(row) === key)
+    if (at >= 0) {
+      items.value.splice(at, 1)
+      total.value = Math.max(0, total.value - 1)
+    }
+    if (previewItem.value && itemKey(previewItem.value) === key) previewVisible.value = false
+    MessagePlugin.success(t('artifactLibrary.deleted'))
+  } catch (err) {
+    console.error('[ArtifactLibrary] delete failed:', err)
+    MessagePlugin.error(t('artifactLibrary.deleteFailed'))
+  } finally {
+    deleting[key] = false
   }
 }
 
@@ -388,17 +467,9 @@ onBeforeUnmount(() => {
 
 <style scoped lang="less">
 @import '@/components/css/artifact-filter-tabs.less';
+@import (reference) '@/components/css/resource-card.less';
 
-.artifact-library {
-  flex: 1;
-  min-width: 0;
-  height: 100%;
-  box-sizing: border-box;
-  display: flex;
-  flex-direction: column;
-  margin: 0 16px 0 0;
-  padding: 20px 28px 0;
-}
+.artifact-library { .resource-list-content(); }
 
 .header {
   display: flex;
@@ -444,13 +515,16 @@ onBeforeUnmount(() => {
   border-bottom: 1px solid var(--td-component-stroke);
 }
 
+// 与右侧 32px 的搜索框同高：3px 内边距 × 2 + 26px 按钮
 .category-tabs {
   .artifact-filter-tabs();
+  button { display: inline-flex; align-items: center; height: 26px; padding: 0 12px; }
 }
 
 .search-input {
   width: 260px;
   max-width: 100%;
+  :deep(.t-input) { border-radius: var(--app-radius-sm); }
 }
 
 .library-main {
@@ -627,6 +701,11 @@ onBeforeUnmount(() => {
 
   :deep(.t-button__icon) {
     margin: 0;
+  }
+
+  &--danger:not(.t-is-disabled):not(.t-is-loading):hover {
+    background: var(--td-error-color-1);
+    color: var(--td-error-color);
   }
 }
 

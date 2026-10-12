@@ -62,6 +62,27 @@ builtin_models: []
 #       api_key: ${RERANK_API_KEY}
 #       provider: ${RERANK_PROVIDER}
 #
+# ----- Example: one local Ollama for embedding and generation ---------------
+# source: local uses OLLAMA_BASE_URL only. Embedding and chat share that
+# process; a second Ollama is not required. ${EMBEDDING_MODEL_NAME} is read
+# only because this file references it (see .env.example section D2).
+# dimension is a literal and must match the pulled model (the CLI example
+# nomic-embed-text uses 768). Uncomment this list on its own — do not also
+# uncomment the remote embedding entry above, or you will register two defaults.
+#
+# builtin_models:
+#   - id: builtin-ollama-chat
+#     type: KnowledgeQA
+#     source: local
+#     name: ${LLM_MODEL_NAME}            # Ollama chat model, e.g. qwen2.5:7b
+#   - id: builtin-ollama-embedding
+#     type: Embedding
+#     source: local
+#     name: ${EMBEDDING_MODEL_NAME}      # Ollama embedding model name
+#     parameters:
+#       embedding_parameters:
+#         dimension: 768
+#
 # ----- Example: literal values (no env indirection) -------------------------
 #
 # builtin_models:
@@ -75,3 +96,15 @@ builtin_models: []
 #       api_key: ${OPENAI_API_KEY}
 #       provider: openai
 #       context_window: 200000     # optional; omit to use the 200K default
+#       # Optional catalog overrides for chat models. `api` forces the wire
+#       # protocol; `compat` is the flat protocol object documented in
+#       # website-docs/03-features/06-models.md (协议兼容覆盖 compat JSON);
+#       # `thinking_levels` maps the
+#       # off/auto/minimal/low/medium/high/xhigh/max ladder to vendor values.
+#       # spec:
+#       #   api: openai-completions
+#       #   compat:
+#       #     max_tokens_field: max_tokens
+#       #     thinking_format: thinking-type
+#       #   thinking_levels:
+#       #     xhigh: high

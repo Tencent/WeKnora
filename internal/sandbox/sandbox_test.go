@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestDefaultConfig(t *testing.T) {
@@ -144,4 +146,17 @@ func TestExecuteResultHelpers(t *testing.T) {
 	if killedResult.IsSuccess() {
 		t.Error("Expected IsSuccess() to return false when killed")
 	}
+}
+
+// host has no remote instance, so the session must never be pinned to it:
+// a pin would record a binding that artifact collection and teardown then try
+// to resolve against a sandbox that never existed. Keeping host out of the
+// named-backend set is what delivers that today — see the task notes before
+// changing this expectation.
+func TestHostIsNotANamedBackend(t *testing.T) {
+	require.False(t, IsNamedSandboxBackendType(string(SandboxTypeHost)))
+}
+
+func TestValidateConfigAcceptsHost(t *testing.T) {
+	require.NoError(t, ValidateConfig(&Config{Type: SandboxTypeHost}))
 }

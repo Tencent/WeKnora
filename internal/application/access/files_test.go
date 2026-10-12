@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/require"
@@ -159,4 +160,67 @@ func (artifactFileCatalog) GetMessageFileBindings(
 	_, messageID string,
 ) (*types.MessageFileBindings, error) {
 	return &types.MessageFileBindings{MessageArtifact: messageID == "message"}, nil
+}
+
+// Deleting a generated file does not rewrite the answer that produced it, so
+// its handle stays in message.Content. The message-scoped file proxy must not
+// treat that leftover text as permission to keep serving the file — including
+// when the bytes survived because a knowledge entry still holds them, and
+// including for a shared-agent visitor who never had delete rights.
+func TestDeletedArtifactIsNotServedFromTheAnswerText(t *testing.T) {
+	const ref = "resource://AbCdEfGhIjKlMnOpQrStUv"
+	deletedAt := time.Now()
+	messages := &fileMessages{message: &types.Message{
+		ID: "message", AgentID: "agent", AgentTenantID: 2, Role: "assistant",
+		Content:   "![report](" + ref + ")",
+		Artifacts: types.MessageArtifacts{{URL: ref, FileName: "report.pdf"}},
+	}}
+	agents := &agentLookup{agent: &types.CustomAgent{ID: "agent", TenantID: 2}}
+	catalog := artifactFileCatalog{
+		fileCatalog{&types.StoredResource{TenantID: 2, PhysicalPath: "local://2/exports/report.pdf"}},
+	}
+	ctx := types.WithExecutionTenant(callerContext(), 2)
+
+	_, err := ResolveMessageFile(ctx, "session", "message", ref, messages, agents, catalog, MessageKBShareAuthorizer{})
+	require.NoError(t, err, "a live artifact is served as before")
+
+	messages.message.Artifacts[0].DeletedAt = &deletedAt
+	_, err = ResolveMessageFile(ctx, "session", "message", ref, messages, agents, catalog, MessageKBShareAuthorizer{})
+	require.ErrorIs(t, err, ErrForbidden, "the handle left in the answer text must not re-authorize a deleted file")
+
+	// The index-addressed artifact download agrees.
+	_, err = ResolveMessageArtifact(ctx, messages.message, 0, agents, catalog, MessageKBShareAuthorizer{})
+	require.ErrorIs(t, err, ErrNotFound)
+}
+
+// The same file can be attached twice at different positions. One of them
+// still being live means the message really does still offer it.
+func TestOneLiveCopyKeepsTheFileServable(t *testing.T) {
+	const ref = "resource://AbCdEfGhIjKlMnOpQrStUv"
+	deletedAt := time.Now()
+	message := &types.Message{
+		ID: "message", AgentTenantID: 1, Role: "assistant",
+		Content: "![report](" + ref + ")",
+		Artifacts: types.MessageArtifacts{
+			{URL: ref, FileName: "report.pdf", DeletedAt: &deletedAt},
+			{URL: ref, FileName: "report.pdf"},
+		},
+	}
+	require.True(t, MessageReferencesFile(message, ref))
+
+	message.Artifacts[1].DeletedAt = &deletedAt
+	require.False(t, MessageReferencesFile(message, ref), "with every copy deleted the message no longer offers it")
+}
+
+// A reference the message never produced as an artifact keeps its old path:
+// knowledge-base images and user attachments are authorized by the text.
+func TestNonArtifactReferencesStillAuthorizeFromContent(t *testing.T) {
+	const kbImage = "resource://ZzZzZzZzZzZzZzZzZzZzZz"
+	deletedAt := time.Now()
+	message := &types.Message{
+		ID: "message", AgentTenantID: 1, Role: "assistant",
+		Content:   "![kb](" + kbImage + ")",
+		Artifacts: types.MessageArtifacts{{URL: "resource://AbCdEfGhIjKlMnOpQrStUv", DeletedAt: &deletedAt}},
+	}
+	require.True(t, MessageReferencesFile(message, kbImage))
 }

@@ -20,7 +20,6 @@ package service
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -45,11 +44,6 @@ type forkBootstrapSessionStore interface {
 type forkBootstrapMessageStore interface {
 	RewriteSandboxCheckpoints(ctx context.Context, sessionID, oldSandboxID, newSandboxID string) error
 }
-
-// forkResetTimeout bounds the git rollback. clean -fdx may delete a large
-// untracked tree, and gc --prune=now walks leftover objects from later turns,
-// so this is more generous than the per-turn checkpoint.
-const forkResetTimeout = 90 * time.Second
 
 // ForkBootstrapper provisions forked sessions' first sandbox.
 type ForkBootstrapper struct {
@@ -223,76 +217,35 @@ func (b *ForkBootstrapper) snapshotStillShared(ctx context.Context, sessionID, s
 	return b.sessions.HasOtherUnconsumedForkSnapshot(ctx, snapshotID, sessionID)
 }
 
-func forkResetScript(workspace, sha string) (string, error) {
-	if !gitSHAPattern.MatchString(sha) {
-		return "", fmt.Errorf("fork bootstrap: invalid commit sha %q", truncateForLog(sha))
-	}
-	ws := shellSingleQuote(workspace)
-	return fmt.Sprintf(`set -e
-git config --global safe.directory %[1]s
-git -C %[1]s reset --hard %[2]s
-current=$(git -C %[1]s symbolic-ref -q HEAD || true)
-for ref in $(git -C %[1]s for-each-ref --format='%%(refname)'); do
-  [ -z "$ref" ] && continue
-  [ "$ref" = "$current" ] && continue
-  git -C %[1]s update-ref -d "$ref"
-done
-rm -f %[1]s/.git/ORIG_HEAD %[1]s/.git/FETCH_HEAD
-git -C %[1]s reflog expire --expire=now --all
-git -C %[1]s gc --prune=now
-git -C %[1]s clean -fdx`, ws, sha), nil
-}
-
-func shellSingleQuote(s string) string {
-	return "'" + strings.ReplaceAll(s, `'`, `'"'"'`) + "'"
-}
-
-func gitResetFailure(sha, stderr string) error {
-	return fmt.Errorf("fork bootstrap: git reset to %s failed: %s", sha, stderr)
-}
-
 // resetWorkspace rolls /workspace back to sha.
 //
-// reset --hard restores tracked files (including input/ and output/). Other
-// refs, ORIG_HEAD, and reflogs still name later-turn commits from the live
-// snapshot, so those are deleted and gc'd before clean -fdx; otherwise the
-// working tree would look right while `git checkout` could resurrect later
-// files. -x then drops leftover untracked files that are not in that commit.
+// AfterCreate runs under the session lifecycle lock and already holds the
+// handle Create returned, so the client path execs directly rather than going
+// through the runner, which would Resolve. Deployments without a client fall
+// back to the shared runner helper.
 func (b *ForkBootstrapper) resetWorkspace(
 	ctx context.Context, sessionID, sha string, handle sandbox.RemoteSandboxHandle,
 ) error {
-	script, err := forkResetScript(sandbox.SessionWorkspaceRoot, strings.TrimSpace(sha))
+	sha = strings.TrimSpace(sha)
+	if b.client == nil || handle == nil {
+		expectedID := ""
+		if handle != nil {
+			expectedID = handle.ID()
+		}
+		return resetWorkspaceToCommit(ctx, b.runner, sessionID, sha, expectedID)
+	}
+
+	script, err := workspaceResetScript(sandbox.SessionWorkspaceRoot, sandbox.SessionGitDir, sha)
 	if err != nil {
 		return err
 	}
-
-	if b.client != nil && handle != nil {
-		result, err := b.client.Exec(ctx, handle, sandbox.RemoteExecRequest{
-			Command: script,
-			Shell:   true,
-			WorkDir: sandbox.SessionWorkspaceRoot,
-			Timeout: forkResetTimeout,
-			User:    sandbox.DefaultSandboxExecUser,
-		})
-		if err != nil {
-			return fmt.Errorf("fork bootstrap: git reset exec: %w", err)
-		}
-		if result == nil || result.ExitCode != 0 {
-			stderr := ""
-			if result != nil {
-				stderr = result.Stderr
-			}
-			return gitResetFailure(sha, stderr)
-		}
-		return nil
-	}
-
-	if b.runner == nil {
-		return errors.New("fork bootstrap: no shell runner wired")
-	}
-	result, err := b.runner.ExecShellCommand(
-		ctx, sessionID, script, sandbox.SessionWorkspaceRoot, forkResetTimeout, nil,
-	)
+	result, err := b.client.Exec(ctx, handle, sandbox.RemoteExecRequest{
+		Command: script,
+		Shell:   true,
+		WorkDir: sandbox.SessionWorkspaceRoot,
+		Timeout: workspaceResetTimeout,
+		User:    sandbox.DefaultSandboxExecUser,
+	})
 	if err != nil {
 		return fmt.Errorf("fork bootstrap: git reset exec: %w", err)
 	}

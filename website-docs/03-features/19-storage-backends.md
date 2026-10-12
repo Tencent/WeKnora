@@ -17,12 +17,33 @@
 
 空间 Admin 可在「设置 → 存储」注册和管理实例：
 
-1. 新建后端，选 provider（`local` / `minio` / `cos` / `oss` / `s3` / `tos` / `obs` 等，与[文档入库流程](../02-architecture/03-document-pipeline.md)里的存储 provider 一致），填连接参数；
+1. 新建后端，选 provider（`local` / `minio` / `cos` / `tos` / `s3` / `oss` / `ks3` / `obs`，与[文档入库流程](../02-architecture/03-document-pipeline.md)里的存储 provider 一致），填连接参数（见下表）。可选列表受环境变量 `STORAGE_ALLOW_LIST` 限制，留空表示全部可选；
 2. **测试连接**：测试会实际读写存储，验证端点、存储桶和凭据；
 3. 将实例设为空间默认。新建知识库未指定实例时使用该默认值；
 4. 需要单独指定时，在知识库编辑弹窗的「存储」页签选择实例。
 
 知识库为空时可修改存储后端；已有文件时，界面会禁用选择并提示迁移。文件路径依赖入库时的后端，直接更换会影响原文件访问。需要更换时，应新建知识库并迁移内容。
+
+## 连接参数 {#连接参数}
+
+各 provider 共用一组配置字段，`access_key_id` / `secret_access_key` 加密保存，接口响应中掩码显示。
+
+| 名称 | 类型 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `endpoint` | string | 空 | 服务地址。`minio`（`mode=remote`）、`tos`、`s3`、`oss`、`ks3`、`obs` 必填；`cos` 不需要。保存时做 SSRF 校验，内网地址需加入 `SSRF_WHITELIST` |
+| `region` | string | 空 | 地域。`cos`、`tos`、`s3`、`oss`、`ks3`、`obs` 必填 |
+| `access_key_id` / `secret_access_key` | string | 空 | 访问密钥；COS 对应 SecretId / SecretKey。`local` 与 `mode=docker` 的 MinIO 不需要 |
+| `bucket_name` | string | 空 | 存储桶，除 `local` 外必填 |
+| `path_prefix` | string | 空 | 对象键前缀，必须是相对路径，不能以 `/` 开头或包含 `..` |
+| `mode` | string | `remote` | 仅 MinIO：`docker` 使用部署自带的 MinIO（地址与密钥读取 `MINIO_ENDPOINT` 等环境变量），`remote` 连接外部 MinIO |
+| `use_ssl` | bool | false | MinIO、S3、OBS 是否使用 HTTPS |
+| `force_path_style` | bool | false | 仅 S3：使用 path-style 寻址，多数 S3 兼容服务需要开启 |
+| `app_id` | string | 空 | 仅 COS：腾讯云 AppID |
+| `temp_bucket_name` / `temp_region` | string | 空 | 仅 COS、TOS、OSS：临时文件使用的存储桶与地域；OSS 另需 `use_temp_bucket=true` 启用 |
+
+- **OBS**：endpoint 为域名时使用虚拟主机寻址（`<bucket>.<endpoint>`），华为云自 2023-12-30 起拒绝域名 endpoint 的 path-style 请求；endpoint 为 IP 时仍用 path-style。未配置代理域名时，文件 URL 形如 `<scheme>://<bucket>.<endpoint-host>/<key>`。
+- **传输超时**：S3、COS、KS3、OBS、OSS 的单次上传/下载不再受 30 秒整体超时限制，改为单次传输最长 30 分钟；建连、TLS 握手和等待响应头仍有各自的超时，对端失联时会较快失败。
+- **KS3 重定向**：跟随重定向时逐跳做 SSRF 校验，不再把请求签名转发到重定向目标主机。
 
 ## 与向量存储的区别
 
@@ -39,7 +60,7 @@
 
 | 方法 | 路径 | 权限 |
 | --- | --- | --- |
-| GET | `/storage-backends/types` | Viewer+，返回支持的 provider 及其字段定义 |
+| GET | `/storage-backends/types` | Viewer+，返回 `STORAGE_ALLOW_LIST` 允许的 provider 名称列表 |
 | GET | `/storage-backends`、`/storage-backends/:id` | Viewer+ |
 | POST | `/storage-backends` | Admin+ |
 | PUT / DELETE | `/storage-backends/:id` | Admin+ |
@@ -58,8 +79,8 @@ API Key 需要 `manage_storage_backends` 能力或 full-access。
 | `name` | 空间内唯一（软删除下的部分唯一索引） |
 | `provider` | 存储类型 |
 | `config` | JSONB，含加密后的密钥 |
-| `source` | `user`（界面注册）/ 其它（系统生成） |
-| `status` | `active` / 停用 |
+| `source` | `user`（界面或 API 注册）/ `env`（由环境变量配置生成） |
+| `status` | `active` / `disabled` |
 | `legacy_alias` | 见下 |
 
 `legacy_alias` 用于兼容环境变量配置的历史存储。升级时创建别名记录，使已有文件路径继续可解析，无需搬迁数据。同一空间、同一 provider 只允许一条别名记录，手动注册的实例独立保存。

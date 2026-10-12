@@ -32,6 +32,34 @@ func (d *debugEmbedder) BatchEmbedWithPool(ctx context.Context, model Embedder, 
 	return d.inner.BatchEmbedWithPool(ctx, d, texts)
 }
 
+func (d *debugEmbedder) AcceptsImages() bool {
+	_, ok := AsImageEmbedder(d.inner)
+	return ok
+}
+
+func (d *debugEmbedder) ImageLimits() ImageLimits { return imageLimitsOf(d.inner) }
+
+func (d *debugEmbedder) BatchEmbedImages(ctx context.Context, images []Image) ([][]float32, error) {
+	inner, err := imageSide(d.inner)
+	if err != nil {
+		return nil, err
+	}
+	start := time.Now()
+	result, err := inner.BatchEmbedImages(ctx, images)
+	logEmbeddingDebug(ctx, d.inner.GetModelName(), describeImages(images), result, err, time.Since(start))
+	return result, err
+}
+
+// describeImages stands in for the images in logs and traces, which must not
+// carry their bytes.
+func describeImages(images []Image) []string {
+	out := make([]string, len(images))
+	for i, img := range images {
+		out[i] = fmt.Sprintf("<%s, %d bytes>", img.MIMEType, len(img.Data))
+	}
+	return out
+}
+
 func (d *debugEmbedder) GetModelName() string { return d.inner.GetModelName() }
 func (d *debugEmbedder) GetDimensions() int   { return d.inner.GetDimensions() }
 func (d *debugEmbedder) GetModelID() string   { return d.inner.GetModelID() }

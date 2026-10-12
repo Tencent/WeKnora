@@ -106,7 +106,7 @@ return &lumberjack.Logger{
 
 #### 导出器（`exporter.go`） {#_3-2-导出器-exporter-go}
 
-OTLP/HTTP exporter，`Authorization: Basic base64(public:secret)`；`x-langfuse-ingestion-version: 4` 是 Langfuse v3/LiteFuse OTel 直写路径的必需门槛头（缺失会返回 400），`x-langfuse-sdk-name/version` 为兼容标记。`Manager`（`manager.go`）持有独立的 `TracerProvider`（`service.name=weknora` resource），不调用 `otel.SetTextMapPropagator` 等全局 OTel 变更，避免影响进程内其他 OTel 埋点；W3C `TraceContext` propagator 为包级私有值。
+OTLP/HTTP exporter，`Authorization: Basic base64(public:secret)`；该 exporter 使用自己的 HTTP 客户端，不经过 SSRF 防护，开启 `SSRF_DNS_WHITELIST_ONLY` 后也不受白名单约束；`x-langfuse-ingestion-version: 4` 是 Langfuse v3/LiteFuse OTel 直写路径的必需门槛头（缺失会返回 400），`x-langfuse-sdk-name/version` 为兼容标记。`Manager`（`manager.go`）持有独立的 `TracerProvider`（`service.name=weknora` resource），不调用 `otel.SetTextMapPropagator` 等全局 OTel 变更，避免影响进程内其他 OTel 埋点；W3C `TraceContext` propagator 为包级私有值。
 
 #### 观测模型与埋点点位 {#_3-3-观测模型与埋点点位}
 
@@ -136,6 +136,23 @@ flowchart LR
     G --> H["Generation: embedding / vlm / chat"]
 ```
 
+#### 检索调用与诊断记录
+
+`embedding.embed`、`retrieve`、`rerank` 分别记录 query 向量计算、实际检索阶段和重排模型调用的耗时。以 `diagnostics.` 开头的节点只记录已有结果的统计和筛选判定，不会额外发起检索或模型请求，也不应当作独立调用统计。
+
+| 诊断节点 | 含义 |
+| --- | --- |
+| `diagnostics.retrieval.vector.result_pool.initial` | 向量检索首次返回的结果池 |
+| `diagnostics.retrieval.keywords.result_pool.initial` | 关键词检索首次返回的结果池 |
+| `diagnostics.retrieval.<vector/keywords>.result_pool.refill` | 补充检索返回的结果池，仅在实际发生补充检索时出现 |
+| `diagnostics.retrieval.<vector/keywords>.filter_decision` | 应用过滤前的结果池及保留/淘汰判定 |
+| `diagnostics.retrieval.fusion.candidate_selection` | 融合后按候选数量上限截断的判定 |
+| `diagnostics.rerank.selection` | 重排后的保留/淘汰判定 |
+
+这些结果池包含文本、摘要、图片描述、OCR 和原图向量等符合查询范围的记录，并非只检索图片。总数统计覆盖全部候选，`image_samples` 只抽样展示原图向量命中；metadata 中用 `observation_kind=diagnostic` 和 `sample_scope=image_vectors` 标明用途。没有补充检索时，`result_pool.initial` 和 `filter_decision` 的样本可能相同，表示同一批数据在两个阶段被观察。
+
+命名调整只影响新产生的追踪；历史记录保留原来的 `retrieval.image_*` 和 `rerank.selection` 名称。按节点名称过滤的仪表盘或查询需同步调整。
+
 #### 每轮用量、调用用途与缓存
 
 每次模型调用继续生成独立 Generation；消息的 usage 保存本轮聚合 Token 用量，Agent 完成事件通过 turn_usage 返回，重开历史消息仍可读取。prompt_tokens、completion_tokens、total_tokens 为总计；cached_tokens 是 cache_read_tokens 的兼容别名，cache_read/write/miss 是输入 Token 的细分，不能再加到 prompt_tokens 上。
@@ -144,7 +161,7 @@ cache_reported 与 cache_status 区分 hit、miss、unreported、unsupported，�
 
 Prompt 组装将稳定说明放在前部，动态会话内容放在后部；支持的提供商使用 cache marker。命中仍取决于提供商协议、模型及请求前缀，不保证每次请求都有缓存。排查时先对比调用用途、前缀指纹与模型，再看上报状态。
 
-沙箱调用也有 Langfuse span，可把实例操作和工具执行耗时串到当前 trace，区分等待沙箱与等待模型。追踪开关未启用时不会向 Langfuse 导出。
+沙箱调用也有 Langfuse span，可把实例操作和工具执行耗时串到当前 trace，区分等待沙箱与等待模型。沙箱后台维护（如会话回收）只在已有父 trace 时记录子 span，不会单独生成 trace；技能安装、删除与维护任务会自行开启 trace。追踪开关未启用时不会向 Langfuse 导出。
 
 ### 审计日志 {#_4-审计日志}
 
@@ -172,7 +189,7 @@ Prompt 组装将稳定说明放在前部，动态会话内容放在后部；支�
 | RBAC / 成员 | `rbac.member_added`、`rbac.member_removed`、`rbac.member_role_changed`、`rbac.member_left`、`rbac.access_denied`、`rbac.invitation_sent`、`rbac.invitation_accepted`、`rbac.invitation_declined`、`rbac.invitation_revoked`、`rbac.invitation_expired` |
 | 向量库 | `vector_store.created`、`vector_store.updated`、`vector_store.deleted` |
 | OpenSearch 派生资源 | `opensearch.index_created`、`opensearch.index_deleted`、`opensearch.reindex_executed` |
-| 系统管理（tenant_id=0） | `system.setting_changed`、`system.admin_promoted`、`system.admin_revoked`、`system.user_password_reset`、`system.api_key_created`、`system.api_key_revoked` |
+| 系统管理（tenant_id=0） | `system.setting_changed`、`system.admin_promoted`、`system.admin_revoked`、`system.user_created`、`system.user_password_reset`、`system.api_key_created`、`system.api_key_revoked` |
 | 运行时队列操作（tenant_id=0） | `system.queue_task_retried`、`system.queue_task_deleted`、`system.queue_task_run_now`、`system.queue_task_cancelled`、`system.queue_archived_purged` |
 | 知识库 | `kb.created`、`kb.updated`、`kb.deleted`、`kb.duplicated`、`kb.clone_started`、`kb.clone_completed`、`kb.clone_failed`、`kb.share_added`、`kb.share_permission_changed`、`kb.share_removed` |
 | 知识 | `knowledge.created`、`knowledge.updated`、`knowledge.deleted`、`knowledge.batch_deleted`、`knowledge.reparse_started`、`knowledge.parse_canceled`、`knowledge.move_started`、`knowledge.move_completed`、`knowledge.move_failed` |
@@ -217,9 +234,10 @@ Prompt 组装将稳定说明放在前部，动态会话内容放在后部；支�
 
 该文件提供的是**模型引用（usage-by-reference）查询**，即回答"哪些资源正在使用某个模型"，用于删除模型前的依赖保护，而非 token 用量计费：
 
-- `scopeKnowledgeBasesByModelID`：匹配 `knowledge_bases` 中任一模型绑定字段 —— `embedding_model_id`、`summary_model_id`、`image_processing_config.model_id`、`vlm_config.model_id`、`asr_config.model_id`、`wiki_config.synthesis_model_id`（Postgres 用 `->>` JSON 操作符，SQLite 用 `json_extract`，双方言等价）。
+- `scopeKnowledgeBasesByModelID`：匹配 `knowledge_bases` 中任一模型绑定字段 —— `embedding_model_id`、`summary_model_id`、`image_processing_config.model_id`、`vlm_config.model_id`、`asr_config.model_id`、`wiki_config.synthesis_model_id`、`auto_tag_config.model_id`（Postgres 用 `->>` JSON 操作符，SQLite 用 `json_extract`，双方言等价）。
 - `scopeCustomAgentsByModelID`：匹配 `custom_agents.config` 中的 `model_id`、`rerank_model_id`、`vlm_model_id`、`asr_model_id`、`query_understand_model_id`、`question_suggestions.follow_ups.model_id`。
-- 消费方：`knowledgebase.go` / `custom_agent.go` 仓储的 `ListModelUsages` 复用上述 scope，返回租户内活动对象的最小投影（`id`、`name`、合并后的 `bindings`），条数上限为 `ModelUsageListLimit`（50）。`internal/application/service/model.go` 的删除守卫以 `CountByModelID` 得到的 `knowledge_base_total` / `agent_total` 为是否拦截的依据，并在 HTTP 400 的 `error.details` 中同时返回截断列表和总数。
+- 空间长期记忆配置：`memory_config` 的 `extract_model_id` 与 `embedding_model_id` 也算引用，出现在 `long_term_memory.bindings` 中。
+- 消费方：`knowledgebase.go` / `custom_agent.go` 仓储的 `ListModelUsages` 复用上述 scope，返回租户内活动对象的最小投影（`id`、`name`、合并后的 `bindings`），条数上限为 `ModelUsageListLimit`（50）。`internal/application/service/model.go` 的删除守卫以 `knowledge_base_total` / `agent_total` 与长期记忆绑定为是否拦截的依据，并在 HTTP 400 的 `error.details` 中同时返回截断列表、总数和 `long_term_memory`。
 
 token 级别的模型用量则由 Langfuse Generation 的 `usage_details`（`TokenUsage`：input/output/total/cache_*）上报，在 Langfuse UI 中按模型 / 用户（`tenant:<id>`）/ 会话聚合查看。
 

@@ -55,12 +55,17 @@ const (
 	// distinct key from SessionTenantIDContextKey, which also re-scopes
 	// session/message repository lookups. See SandboxTenantIDFromContext.
 	SandboxTenantIDContextKey ContextKey = "SandboxTenantID"
-	// EmbedQueryContextKey is the context key for embedding query text
+	// EmbedQueryContextKey marks an embedding call as a search query; see
+	// WithEmbedQuery.
 	EmbedQueryContextKey ContextKey = "EmbedQuery"
 	// WikiEditSourceContextKey carries who is authoring the current wiki
 	// page write (user / agent / revert). Absent means the wiki ingest
 	// pipeline. See types.WithWikiEditSource.
 	WikiEditSourceContextKey ContextKey = "WikiEditSource"
+	// WikiShrinkAllowedContextKey marks one wiki page write as allowed to
+	// remove table rows the stored page still has; see
+	// types.WithWikiShrinkAllowed.
+	WikiShrinkAllowedContextKey ContextKey = "WikiShrinkAllowed"
 	// LanguageContextKey is the context key for user language preference (e.g. "zh-CN", "en-US")
 	LanguageContextKey ContextKey = "Language"
 	// EmbedVisitorContextKey is the anonymous visitor id for embed OAuth isolation.

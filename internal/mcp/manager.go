@@ -30,6 +30,7 @@ type pendingMCPConnection struct {
 	client  MCPClient
 	err     error
 	version time.Time
+	retired MCPClient // closed by the connection worker before opening its replacement
 }
 
 type managedMCPClient struct {
@@ -111,6 +112,7 @@ func (m *MCPManager) GetOrCreateClient(ctx context.Context, service *types.MCPSe
 	}
 	key := cacheKey(service, principal)
 
+	var retired MCPClient
 	m.clientsMu.Lock()
 	if err := m.ctx.Err(); err != nil {
 		m.clientsMu.Unlock()
@@ -122,7 +124,7 @@ func (m *MCPManager) GetOrCreateClient(ctx context.Context, service *types.MCPSe
 			m.clientsMu.Unlock()
 			return client, nil
 		}
-		_ = client.Disconnect()
+		retired = client
 		delete(m.clients, key)
 	}
 	pending := m.connecting[key]
@@ -133,7 +135,9 @@ func (m *MCPManager) GetOrCreateClient(ctx context.Context, service *types.MCPSe
 	}
 	if pending == nil {
 		lifeCtx, cancel := context.WithCancel(m.ctx)
-		pending = &pendingMCPConnection{done: make(chan struct{}), cancel: cancel, version: service.UpdatedAt}
+		pending = &pendingMCPConnection{
+			done: make(chan struct{}), cancel: cancel, version: service.UpdatedAt, retired: retired,
+		}
 		m.connecting[key] = pending
 		config := &ClientConfig{Service: service, TenantID: tenantID, Principal: principal, OAuthRepo: m.oauthRepo}
 		go m.connectClient(lifeCtx, key, config, pending)
@@ -150,7 +154,16 @@ func (m *MCPManager) GetOrCreateClient(ctx context.Context, service *types.MCPSe
 func (m *MCPManager) connectClient(
 	ctx context.Context, key string, config *ClientConfig, pending *pendingMCPConnection,
 ) {
-	client, err := NewMCPClient(config)
+	// Closing a session can issue a remote DELETE. Keep it off the manager
+	// lock and the caller's goroutine, while preserving replacement order.
+	if pending.retired != nil {
+		_ = pending.retired.Disconnect()
+	}
+	var client MCPClient
+	err := ctx.Err()
+	if err == nil {
+		client, err = NewMCPClient(config)
+	}
 	if err == nil {
 		// SSE needs the connection lifetime, not the requesting turn's deadline.
 		err = client.Connect(ctx)
@@ -171,15 +184,15 @@ func (m *MCPManager) connectClient(
 	} else {
 		pending.err = err
 		pending.cancel()
-		if client != nil {
-			_ = client.Disconnect()
-		}
 	}
 	if m.connecting[key] == pending {
 		delete(m.connecting, key)
 	}
 	close(pending.done)
 	m.clientsMu.Unlock()
+	if err != nil && client != nil {
+		_ = client.Disconnect()
+	}
 }
 
 // initializeClient handles the shared initialization flow with timeout enforcement.
@@ -222,7 +235,6 @@ func (m *MCPManager) GetClient(serviceID string) (MCPClient, bool) {
 // the service ID).
 func (m *MCPManager) CloseClient(serviceID string) error {
 	m.clientsMu.Lock()
-	defer m.clientsMu.Unlock()
 	for key, pending := range m.connecting {
 		if key == serviceID || strings.HasPrefix(key, serviceID+"\x00") {
 			pending.cancel()
@@ -230,38 +242,95 @@ func (m *MCPManager) CloseClient(serviceID string) error {
 		}
 	}
 
+	retired := make(map[string]MCPClient)
 	for key, client := range m.clients {
 		// Match the plain service-ID key as well as per-principal OAuth keys
 		// ("<serviceID>\x00<principal>").
 		if key != serviceID && !strings.HasPrefix(key, serviceID+"\x00") {
 			continue
 		}
+		retired[key] = client
+		delete(m.clients, key)
+	}
+	m.clientsMu.Unlock()
+
+	// Remove only the captured clients. A replacement may be installed while
+	// a remote server is still acknowledging the old session's closure.
+	for key, client := range retired {
 		if err := client.Disconnect(); err != nil {
 			logger.GetLogger(m.ctx).Errorf("Failed to disconnect MCP client %s: %v", key, err)
 		}
-		delete(m.clients, key)
 		logger.GetLogger(m.ctx).Infof("MCP client closed: %s", key)
 	}
 	return nil
 }
 
-// CloseAll closes all clients
+// InvalidateToolSchemas drops the header-schema caches of every cached
+// connection for a service after listedBy completed a newer directory read.
+// Connections stay open; their next modern CallTool reloads the directory.
+// listedBy's own cache is current and is kept.
+func (m *MCPManager) InvalidateToolSchemas(serviceID string, listedBy MCPClient) {
+	m.clientsMu.RLock()
+	defer m.clientsMu.RUnlock()
+	for key, client := range m.clients {
+		if key != serviceID && !strings.HasPrefix(key, serviceID+"\x00") {
+			continue
+		}
+		if client == listedBy {
+			continue
+		}
+		if managed, ok := client.(*managedMCPClient); ok {
+			if managed.MCPClient == listedBy {
+				continue
+			}
+			client = managed.MCPClient
+		}
+		if cached, ok := client.(interface{ invalidateToolSchemas() }); ok {
+			cached.invalidateToolSchemas()
+		}
+	}
+}
+
+// closeAllTimeout bounds CloseAll. Disconnecting a remote transport can mean
+// a request to the server, and one that stopped answering must not hold up
+// process exit.
+var closeAllTimeout = 5 * time.Second
+
+// CloseAll closes all clients. The clients are detached under the lock and
+// disconnected concurrently outside it, so one slow server neither serializes
+// the rest nor blocks callers waiting on the lock; whatever has not finished
+// within closeAllTimeout is abandoned.
 func (m *MCPManager) CloseAll() {
 	m.clientsMu.Lock()
-	defer m.clientsMu.Unlock()
 	for key, pending := range m.connecting {
 		pending.cancel()
 		delete(m.connecting, key)
 	}
-
-	for serviceID, client := range m.clients {
-		if err := client.Disconnect(); err != nil {
-			logger.GetLogger(m.ctx).Errorf("Failed to disconnect MCP client %s: %v", serviceID, err)
-		}
-	}
-
+	clients := m.clients
 	m.clients = make(map[string]MCPClient)
-	logger.GetLogger(m.ctx).Info("All MCP clients closed")
+	m.clientsMu.Unlock()
+
+	var wg sync.WaitGroup
+	for key, client := range clients {
+		wg.Add(1)
+		go func(key string, client MCPClient) {
+			defer wg.Done()
+			if err := client.Disconnect(); err != nil {
+				logger.GetLogger(m.ctx).Errorf("Failed to disconnect MCP client %s: %v", key, err)
+			}
+		}(key, client)
+	}
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		logger.GetLogger(m.ctx).Info("All MCP clients closed")
+	case <-time.After(closeAllTimeout):
+		logger.GetLogger(m.ctx).Warnf("MCP clients still disconnecting after %s; abandoning them", closeAllTimeout)
+	}
 }
 
 // Shutdown gracefully shuts down the manager

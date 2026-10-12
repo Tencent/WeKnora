@@ -30,7 +30,7 @@ type MCPService struct {
 	TenantID       uint64             `json:"tenant_id"              gorm:"uniqueIndex:idx_tenant_name"`
 	Name           string             `json:"name"                   gorm:"type:varchar(255);not null;uniqueIndex:idx_tenant_name"`
 	Description    string             `json:"description"            gorm:"type:text"`
-	Enabled        bool               `json:"enabled"                gorm:"default:true;index"`
+	Enabled        bool               `json:"enabled"                gorm:"index"`
 	TransportType  MCPTransportType   `json:"transport_type"         gorm:"type:varchar(50);not null"`
 	URL            *string            `json:"url,omitempty"          gorm:"type:varchar(512)"` // Optional: required for SSE/HTTP Streamable
 	Headers        MCPHeaders         `json:"headers"                gorm:"type:json"`

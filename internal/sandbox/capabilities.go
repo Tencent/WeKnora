@@ -92,9 +92,17 @@ type SessionCapabilityProvider interface {
 	SessionFileStore() SessionFileStore
 }
 
+// SessionWorkspaceLayoutProvider is implemented by managers that can describe
+// their session workspace. Tools resolve it once per Execute from the
+// session sandbox, not from a tool-instance field.
+type SessionWorkspaceLayoutProvider interface {
+	SessionWorkspaceLayout(ctx context.Context, sessionID string) (WorkspaceLayout, error)
+}
+
 // SessionInstallShellExecutor runs install/maintenance shell commands with
 // their own bootstrap and working-directory scope. Ordinary shell execution
-// stays inside its session sandbox but is not limited to /workspace.
+// stays inside its session sandbox: anywhere in a remote container, and the
+// layout's writable roots on a host workspace.
 type SessionInstallShellExecutor interface {
 	ExecShellCommandWithOptions(
 		ctx context.Context,

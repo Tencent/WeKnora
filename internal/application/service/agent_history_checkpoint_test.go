@@ -132,6 +132,21 @@ func TestLoadAgentHistoryTagsEveryMessageWithItsTurn(t *testing.T) {
 	}
 }
 
+// A turn sent as only an image has no stored text. Replaying it empty lets the
+// sanitizer drop the user message and merge the two answers around it.
+func TestLoadAgentHistoryAsksTheUploadOnlyQuestionForAnImageOnlyTurn(t *testing.T) {
+	rows := storedTurns(2)
+	rows[0].Content = ""
+	rows[0].Images = types.MessageImages{{URL: "resource://img"}}
+	repo := &historyRepo{rows: rows}
+	ctx := context.WithValue(context.Background(), types.LanguageContextKey, "en-US")
+
+	got, _, err := LoadAgentHistory(ctx, repo, "s1", unlimitedBudget, false)
+	require.NoError(t, err)
+
+	require.Equal(t, []string{types.UploadOnlyQuestion("en-US"), "question 2"}, questions(got))
+}
+
 // The turn count no longer bounds history: every turn that fits the budget is
 // replayed, however many there are.
 func TestLoadAgentHistoryIsNotCappedByTurnCount(t *testing.T) {

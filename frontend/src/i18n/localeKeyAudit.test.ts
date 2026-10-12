@@ -205,6 +205,7 @@ test('prune rebuild restores registered audit keys from baked-in English default
   const emptyBundles = {
     'en-US': {},
     'zh-CN': {},
+    'zh-TW': {},
     'ko-KR': {},
     'ja-JP': {},
     'ru-RU': {},
@@ -290,6 +291,28 @@ test('locale messages compile with vue-i18n syntax rules', () => {
     (failure) => `${failure.path}: ${failure.message}\n  ${failure.value}`,
   )
   assert.deepEqual(summary, [], summary.slice(0, 20).join('\n'))
+})
+
+test('Seafile picker texts and sync error codes remain localized after pruning', () => {
+  const seafileErrors = [
+    'permission_denied', 'not_found', 'file_too_large', 'empty_file',
+    'source_changed', 'invalid_response', 'ssrf_blocked', 'fetch_failed',
+  ]
+  const keys = [
+    'connector.seafile', 'connectorDesc.seafile',
+    'seafile.baseUrl', 'seafile.apiToken', 'seafile.apiTokenHint',
+    'seafile.singleLibraryOnly', 'seafile.selectionRequired',
+    'resourceType.library', 'noResourcesDesc_seafile',
+    ...[1, 2, 3].map(step => `guideStep${step}_seafile`),
+    ...seafileErrors.map(code => `syncError.seafile_${code}`),
+  ].map(key => `datasource.${key}`)
+  keys.push('knowledgeBase.channelSeafile')
+  for (const key of keys) {
+    assert.ok(referencedKeys.has(key), `pruning would remove ${key}`)
+    for (const [locale, bundle] of Object.entries(LOCALE_BUNDLES)) {
+      assert.equal(typeof getLocaleValueAtPath(bundle, key), 'string', `${locale}: missing ${key}`)
+    }
+  }
 })
 
 test('DingTalk configuration and sync failures remain localized after pruning', () => {

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 	"sync"
 	"testing"
@@ -13,7 +14,9 @@ import (
 	agenttools "github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/modelcontext"
+	"github.com/Tencent/WeKnora/internal/models/api"
 	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/sandbox"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -704,6 +707,21 @@ func TestBuildSystemPromptUsesInternalCitationSetting(t *testing.T) {
 	require.NotContains(t, prompt, "Source citations are enabled")
 }
 
+func TestBuildSystemPromptUsesHostWorkspace(t *testing.T) {
+	engine := newTestEngine(t, nil)
+	registry := agenttools.NewToolRegistry()
+	registry.RegisterTool(newCountingTool("shell_exec"))
+	engine.toolRegistry = registry
+	engine.SetWorkspaceLayout(sandbox.WorkspaceLayout{
+		Origin: sandbox.WorkspaceOriginHost,
+		Root:   "/Users/dev/My Project",
+	})
+	prompt := engine.buildSystemPrompt(context.Background())
+	require.Contains(t, prompt, "/Users/dev/My Project")
+	require.NotContains(t, prompt, "Session workspace: /workspace")
+	require.NotContains(t, prompt, "There is no /workspace")
+}
+
 func newTestEngine(t *testing.T, chatModel chat.Chat, opts ...testEngineOption) *AgentEngine {
 	t.Helper()
 	cfg := &types.AgentConfig{
@@ -1097,4 +1115,43 @@ func TestStreamFinalAnswerToEventBus_EmitsDoneWhenProviderEndsWithEmptyChunk(t *
 	assert.Equal(t, "final answer", finalAnswerEvents[0].Content+finalAnswerEvents[1].Content,
 		"a decoder may hold a short suffix until Done to rule out a split model handle")
 	assert.Equal(t, "final answer", state.FinalAnswer)
+}
+
+func TestIsTransientErrorClassification(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"rate limited", &api.HTTPError{StatusCode: 429}, true},
+		{"server error", fmt.Errorf("chat: %w", &api.HTTPError{StatusCode: 503}), true},
+		{
+			"bad request mentioning a status",
+			&api.HTTPError{StatusCode: 400, Body: "max_tokens 5000 > 500 timeout"}, false,
+		},
+		{"transport", &api.TransportError{Op: "send request", Err: errors.New("dial tcp: refused")}, true},
+		{"unexpected eof", fmt.Errorf("read: %w", io.ErrUnexpectedEOF), true},
+		{"user stop", fmt.Errorf("round: %w", context.Canceled), false},
+		{"stream text with status", errors.New("LLM stream error: upstream returned 502"), true},
+		{"stream text with longer number", errors.New("LLM stream error: max_tokens must be <= 5000"), false},
+		{"stream ended early", fmt.Errorf("LLM stream error: %s", types.StreamEndedEarlyError), true},
+		{"invalid key", errors.New("LLM stream error: invalid api key"), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, isTransientError(tc.err))
+		})
+	}
+}
+
+func TestStreamLLMIncompleteFinishIsAStreamError(t *testing.T) {
+	model := &mockChat{responses: []mockResponse{{chunks: []types.StreamResponse{
+		{ResponseType: types.ResponseTypeAnswer, Content: "partial"},
+		{ResponseType: types.ResponseTypeAnswer, Done: true, FinishReason: types.FinishReasonIncomplete},
+	}}}}
+	engine := newTestEngine(t, model)
+
+	_, err := engine.streamLLMToEventBus(context.Background(), nil, nil, nil)
+
+	require.Error(t, err, "a stream cut before its finish reason is not a completed turn")
+	require.True(t, isTransientError(err))
 }

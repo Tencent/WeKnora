@@ -139,10 +139,10 @@ var registry = map[string]settingSpec{
 		Type:     "string",
 		EnvName:  "", // No env fallback — handler passes cfg.Auth.RegistrationMode as default
 		Default:  "self_serve",
-		Enum:     []string{"self_serve", "invite_only"},
+		Enum:     []string{"self_serve", "invite_register", "invite_only"},
 		Category: "auth",
-		Description: "自助注册模式。self_serve = 任何人可注册账号；invite_only = 关闭公网注册，" +
-			"仅 Owner/Admin 可邀请。修改后立即生效，但谨慎对待 self_serve（公网会接受 spam）。",
+		Description: "注册模式。self_serve = 开放注册；invite_register = 仅持有效邀请链接的新用户可注册；" +
+			"invite_only = 禁止注册，邀请仅供已有账号加入空间。保存后立即生效。",
 	},
 	"auth.default_tenant_mode": {
 		Type:     "string",
@@ -160,6 +160,24 @@ var registry = map[string]settingSpec{
 		Category: "auth",
 		Description: "是否启用复杂密码。开启后密码必须包含大小写字母、数字和特殊字符。" +
 			"修改后立即生效，只影响新注册用户或新密码修改/重置操作。特殊字符包含：!@#$%^&*()_+-=[]{}|;:,.<>?",
+	},
+	// gallery.policy is the platform-wide image-gallery attribute policy:
+	// a JSON document (types.GalleryPolicyTier) that can toggle attribute
+	// sources and override per-attribute usage flags (in_filter /
+	// in_searchfield / in_sortfield) on top of what the sources declare.
+	// Read on every gallery request — edits take effect on the next gallery
+	// page load, no restart. Empty string = no overrides (use source
+	// declarations as-is). See types.ResolveGalleryConfig for the merge
+	// semantics (user > KB > system > source).
+	"gallery.policy": {
+		Type:     "string",
+		EnvName:  "",
+		Default:  "",
+		Category: "gallery",
+		Description: "图库属性策略（JSON，可选）。可启停属性来源（sources）或按属性 ID 覆盖用法" +
+			"（overrides，字段级：in_filter / in_searchfield / in_sortfield），例如：" +
+			"{\"overrides\":{\"system:contain.text\":{\"in_searchfield\":true}}}。" +
+			"留空 = 完全使用来源端声明。修改后立即生效，刷新图库页可见。",
 	},
 	// tenant.max_owned_per_user caps how many tenants a single non-superuser
 	// can create (and Own) via self-service POST /tenants. Read on every

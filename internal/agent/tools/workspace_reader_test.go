@@ -527,8 +527,8 @@ func TestListSandboxFilesDefaultsToOutput(t *testing.T) {
 
 	require.NoError(t, err)
 	require.True(t, result.Success)
-	assert.Equal(t, sandboxInspectableRoots()[0], source.listedDir)
-	assert.Equal(t, sandboxInspectableRoots()[0], result.Data["path"])
+	assert.Equal(t, sandbox.RemoteWorkspaceLayout().OutputDir, source.listedDir)
+	assert.Equal(t, sandbox.RemoteWorkspaceLayout().OutputDir, result.Data["path"])
 }
 
 func TestListSandboxFilesAllowsSessionInput(t *testing.T) {

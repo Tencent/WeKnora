@@ -298,7 +298,9 @@ func (r *sourceRegistry) EncodeMessagesWithPolicies(
 		processToolResult := out[i].Role == "tool" && (resultPolicy == nil || resultPolicy(out[i].Name))
 		if out[i].Role == "assistant" || processToolResult {
 			out[i].Content = r.CompactPublicCitations(out[i].Content, false)
+			reasoningBefore := out[i].ReasoningContent
 			out[i].ReasoningContent = r.CompactPublicCitations(out[i].ReasoningContent, false)
+			dropStaleReasoningSignature(&out[i], reasoningBefore)
 		}
 		if len(out[i].MultiContent) > 0 {
 			out[i].MultiContent = append([]chat.MessageContentPart(nil), out[i].MultiContent...)

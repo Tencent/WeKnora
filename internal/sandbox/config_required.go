@@ -42,6 +42,8 @@ func MissingRequiredFields(cfg *Config) []string {
 			missing = append(missing, field)
 		}
 	}
+	// host and disabled have no provider fields to require: host runs locally
+	// with no endpoint or credential, so they fall through and return empty.
 	switch cfg.Type {
 	case SandboxTypeCube:
 		require("api_url", cfg.CubeAPIURL)

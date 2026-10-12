@@ -209,7 +209,7 @@ func (s *Service) vectorSearch(
 	if !ok {
 		return nil, "vector_disabled"
 	}
-	queryVector := s.embedText(ctx, modelID, query, embedTimeout)
+	queryVector := s.embedText(types.WithEmbedQuery(ctx), modelID, query, embedTimeout)
 	if len(queryVector) == 0 {
 		return nil, "embed_failed"
 	}

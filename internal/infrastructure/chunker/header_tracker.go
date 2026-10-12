@@ -226,7 +226,7 @@ func tableRowColumnCount(line string) int {
 	if !strings.HasPrefix(line, "|") {
 		return 0
 	}
-	parts := strings.Split(line, "|")
+	parts := splitTableCells(line)
 	if len(parts) > 0 && strings.TrimSpace(parts[0]) == "" {
 		parts = parts[1:]
 	}
@@ -234,6 +234,28 @@ func tableRowColumnCount(line string) int {
 		parts = parts[:len(parts)-1]
 	}
 	return len(parts)
+}
+
+// splitTableCells splits a table row at its cell delimiters. As in GFM, a pipe
+// escaped as `\|` is text inside a cell, so a row whose cell holds one still
+// matches the width of its header.
+func splitTableCells(line string) []string {
+	var parts []string
+	start, backslashes := 0, 0
+	for i := 0; i < len(line); i++ {
+		switch line[i] {
+		case '\\':
+			backslashes++
+			continue
+		case '|':
+			if backslashes%2 == 0 {
+				parts = append(parts, line[start:i])
+				start = i + 1
+			}
+		}
+		backslashes = 0
+	}
+	return append(parts, line[start:])
 }
 
 func firstTableRowColumnCount(text string) int {

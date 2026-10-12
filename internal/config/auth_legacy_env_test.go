@@ -7,8 +7,8 @@ import "testing"
 // DISABLE_REGISTRATION=true would block /auth/register at the handler layer
 // but leave /auth/config reporting self_serve, so the frontend would keep
 // showing the (broken) Register entry. Coercing registration_mode here keeps
-// both gates in sync, and matches the docs/RBAC说明.md "env always wins over
-// YAML" rule.
+// both gates in sync and preserves the environment-over-YAML precedence
+// documented in website-docs/03-features/01-tenant-auth.md.
 func TestApplyAuthAndTenantDefaults_DisableRegistrationDrivesRegistrationMode(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -23,6 +23,14 @@ func TestApplyAuthAndTenantDefaults_DisableRegistrationDrivesRegistrationMode(t 
 		{"false leaves YAML untouched", "false", AuthRegistrationModeSelfServe, AuthRegistrationModeSelfServe},
 		{"unset falls back to default self_serve", "", "", AuthRegistrationModeSelfServe},
 		{"unset keeps explicit invite_only YAML", "", AuthRegistrationModeInviteOnly, AuthRegistrationModeInviteOnly},
+		{
+			"unset keeps invitation registration", "",
+			AuthRegistrationModeInviteRegister, AuthRegistrationModeInviteRegister,
+		},
+		{
+			"legacy disable overrides invitation registration", "true",
+			AuthRegistrationModeInviteRegister, AuthRegistrationModeInviteOnly,
+		},
 	}
 
 	for _, tc := range cases {
@@ -180,4 +188,11 @@ func TestApplyAuthAndTenantDefaults_ComplexPasswordEnabledEnv(t *testing.T) {
 			t.Fatal("empty env should leave YAML complex-password flag untouched")
 		}
 	})
+}
+
+func TestValidateInvitationRegistrationMode(t *testing.T) {
+	cfg := &Config{Auth: &AuthConfig{RegistrationMode: AuthRegistrationModeInviteRegister}}
+	if err := ValidateConfig(cfg); err != nil {
+		t.Fatalf("invitation registration mode rejected: %v", err)
+	}
 }

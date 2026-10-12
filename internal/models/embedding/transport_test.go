@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/types"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
 
@@ -56,16 +57,14 @@ func TestValidateEmbeddingBaseURL_AllowsEmpty(t *testing.T) {
 	}
 }
 
-func TestNewOpenAIEmbedder_RejectsPrivateBaseURL(t *testing.T) {
-	_, err := NewOpenAIEmbedder(
-		"test-key",
-		"http://169.254.169.254/latest/meta-data",
-		"text-embedding-3-small",
-		511,
-		256,
-		"model-id",
-		nil,
-	)
+func TestNewEmbedder_RejectsPrivateBaseURL(t *testing.T) {
+	_, err := NewEmbedder(Config{
+		Source:    types.ModelSourceRemote,
+		Provider:  "openai",
+		BaseURL:   "http://169.254.169.254/latest/meta-data",
+		ModelName: "text-embedding-3-small",
+		APIKey:    "test-key",
+	}, nil, nil)
 	if err == nil {
 		t.Fatal("expected SSRF rejection for link-local metadata URL")
 	}

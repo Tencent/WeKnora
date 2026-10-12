@@ -51,6 +51,9 @@ type Server struct {
 	agentService     interfaces.CustomAgentService
 	kbShareService   interfaces.KBShareService
 	tenantService    interfaces.TenantService
+	resourceCatalog  interfaces.ResourceCatalog
+	fileService      interfaces.FileService
+	storageResolver  interfaces.StorageBackendResolver
 	endpointRepo     interfaces.MCPEndpointRepository
 	db               *gorm.DB
 	cfg              *config.Config
@@ -77,6 +80,9 @@ func NewServer(
 	db *gorm.DB,
 	cfg *config.Config,
 	redisClient *redis.Client,
+	resourceCatalog interfaces.ResourceCatalog,
+	fileService interfaces.FileService,
+	storageResolver interfaces.StorageBackendResolver,
 ) *Server {
 	s := &Server{
 		kbService:        kbService,
@@ -91,6 +97,9 @@ func NewServer(
 		endpointRepo:     endpointRepo,
 		db:               db,
 		cfg:              cfg,
+		resourceCatalog:  resourceCatalog,
+		fileService:      fileService,
+		storageResolver:  storageResolver,
 		limiter:          ratelimit.New(redisClient, rateLimitKeyPrefix, time.Minute, ""),
 	}
 	// The local fallback map only grows without periodic eviction; the server
@@ -164,7 +173,11 @@ func (s *Server) guardTool(next server.ToolHandlerFunc) server.ToolHandlerFunc {
 			return mcp.NewToolResultError("rate limit exceeded for this endpoint, retry shortly"), nil
 		}
 		s.touchLastUsed(ctx, ep.ID)
-		return next(ctx, req)
+		result, err := next(ctx, req)
+		if err != nil {
+			return result, err
+		}
+		return s.rewriteResourceURLs(ctx, ep, result), nil
 	}
 }
 

@@ -43,6 +43,7 @@ type SystemHandler struct {
 	documentReader   interfaces.DocumentReader
 	tenantSvc        interfaces.TenantService
 	userSvc          interfaces.UserService
+	modelCatalogSvc  *service.ModelCatalogService
 	systemSettingSvc interfaces.SystemSettingService
 	apiKeySvc        interfaces.TenantAPIKeyService
 	// auditSvc is optional — when nil, emitAdminAudit no-ops so unit
@@ -75,6 +76,7 @@ func NewSystemHandler(cfg *config.Config,
 	tenantSvc interfaces.TenantService,
 	userSvc interfaces.UserService,
 	systemSettingSvc interfaces.SystemSettingService,
+	modelCatalogSvc *service.ModelCatalogService,
 	apiKeySvc interfaces.TenantAPIKeyService,
 	auditSvc interfaces.AuditLogService,
 	taskInspector interfaces.TaskInspector,
@@ -89,6 +91,7 @@ func NewSystemHandler(cfg *config.Config,
 		tenantSvc:          tenantSvc,
 		userSvc:            userSvc,
 		systemSettingSvc:   systemSettingSvc,
+		modelCatalogSvc:    modelCatalogSvc,
 		apiKeySvc:          apiKeySvc,
 		auditSvc:           auditSvc,
 		taskInspector:      taskInspector,
@@ -1517,6 +1520,117 @@ func (h *SystemHandler) ListSystemAdmins(c *gin.Context) {
 	c.JSON(http.StatusOK, ListSystemAdminsResponse{
 		Total:  total,
 		Admins: infos,
+	})
+}
+
+// ListAllUsersResponse is the paginated payload for the platform user list.
+// Unlike the system-admin list there is no total COUNT; HasMore tells the UI
+// whether a next page exists (derived by fetching limit+1 rows).
+type ListAllUsersResponse struct {
+	Users   []*types.UserInfo `json:"users"`
+	Offset  int               `json:"offset"`
+	Limit   int               `json:"limit"`
+	HasMore bool              `json:"has_more"`
+}
+
+// ListUsers godoc
+// @Summary      List all platform users
+// @Description  Retrieve a paginated list of every user across tenants (SystemAdmin only).
+// @Description  Supports `offset` (default 0) and `limit` (default 50, max 200).
+// @Description  Password/hashes are never serialised — only the redacted UserInfo shape.
+// @Tags         System Admin
+// @Produce      json
+// @Param        offset query int false "Page offset" default(0)
+// @Param        limit  query int false "Page size (max 200)" default(50)
+// @Success      200  {object}  ListAllUsersResponse  "Users retrieved successfully"
+// @Failure      403  {object}  map[string]interface{}  "Forbidden: not a system admin"
+// @Router       /system/admin/users [get]
+func (h *SystemHandler) ListUsers(c *gin.Context) {
+	ctx := logger.CloneContext(c.Request.Context())
+
+	offset := 0
+	limit := 50
+	if v := c.Query("offset"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			offset = n
+		}
+	}
+	if v := c.Query("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			limit = n
+		}
+	}
+	if limit > 200 {
+		limit = 200
+	}
+
+	users, hasMore, err := h.userSvc.ListAllUsers(ctx, offset, limit)
+	if err != nil {
+		logger.Errorf(ctx, "Error listing users: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to list users"})
+		return
+	}
+
+	infos := make([]*types.UserInfo, 0, len(users))
+	for _, u := range users {
+		infos = append(infos, u.ToUserInfo())
+	}
+
+	c.JSON(http.StatusOK, ListAllUsersResponse{
+		Users:   infos,
+		Offset:  offset,
+		Limit:   limit,
+		HasMore: hasMore,
+	})
+}
+
+// SetUserStatusRequest toggles a user account enabled/disabled (SystemAdmin only).
+type SetUserStatusRequest struct {
+	UserID   string `json:"user_id" binding:"required"`
+	IsActive *bool  `json:"is_active" binding:"required"`
+}
+
+// SetUserStatus godoc
+// @Summary      Enable or disable a user account
+// @Description  Disable revokes the target's active sessions immediately.
+// @Description  Self-disable and disabling the last active system administrator are rejected.
+// @Tags         System Admin
+// @Accept       json
+// @Produce      json
+// @Param        request body SetUserStatusRequest true "Account status request"
+// @Success      200  {object}  map[string]interface{}  "Status updated"
+// @Failure      400  {object}  map[string]interface{}  "Self-disable / last-admin guard"
+// @Failure      404  {object}  map[string]interface{}  "User not found"
+// @Router       /system/admin/users/status [post]
+func (h *SystemHandler) SetUserStatus(c *gin.Context) {
+	ctx := logger.CloneContext(c.Request.Context())
+
+	var req SetUserStatusRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
+		return
+	}
+
+	callerID, _ := types.UserIDFromContext(ctx)
+	user, err := h.userSvc.SetUserActive(ctx, strings.TrimSpace(req.UserID), callerID, *req.IsActive)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrUserNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+		case errors.Is(err, service.ErrCannotDisableSelf),
+			errors.Is(err, service.ErrCannotDisableLastAdmin):
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		default:
+			logger.Errorf(ctx, "Error setting user status: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update user status"})
+		}
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":   "User status updated",
+		"user":      user.ToUserInfo(),
+		"is_active": user.IsActive,
 	})
 }
 

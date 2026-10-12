@@ -23,8 +23,8 @@ func BuildContentSignature(content string) string {
 	return hex.EncodeToString(hash[:])
 }
 
-// containsChinese checks whether text contains any CJK unified ideographs.
-func containsChinese(text string) bool {
+// ContainsChinese reports whether text contains any CJK unified ideographs.
+func ContainsChinese(text string) bool {
 	for _, r := range text {
 		if unicode.Is(unicode.Han, r) {
 			return true
@@ -44,7 +44,7 @@ func TokenizeSimple(text string) map[string]struct{} {
 	}
 
 	var words []string
-	if containsChinese(text) {
+	if ContainsChinese(text) {
 		// Use jieba for Chinese text segmentation (search mode for finer granularity)
 		words = types.Jieba.CutForSearch(text, true)
 	} else {
@@ -130,8 +130,12 @@ func IsContentContained(normalizedShort, normalizedLong string) bool {
 // Returns a value in [0, 1] where 1 means the smaller set is fully contained
 // in the larger set.
 func ContentOverlapRatio(a, b string) float64 {
-	tokA := TokenizeSimple(a)
-	tokB := TokenizeSimple(b)
+	return TokenOverlapRatio(TokenizeSimple(a), TokenizeSimple(b))
+}
+
+// TokenOverlapRatio is ContentOverlapRatio over token sets already built with
+// TokenizeSimple, for callers comparing one text against many.
+func TokenOverlapRatio(tokA, tokB map[string]struct{}) float64 {
 	if len(tokA) == 0 || len(tokB) == 0 {
 		return 0
 	}

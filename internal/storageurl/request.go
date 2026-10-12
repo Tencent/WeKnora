@@ -3,6 +3,7 @@ package storageurl
 import (
 	"context"
 	"encoding/json"
+	"slices"
 
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -102,6 +103,10 @@ func (w *Rewriter) CopyReferences(ctx context.Context, refs []*types.SearchResul
 		rewritten.Content = w.String(ctx, ref.Content)
 		rewritten.MatchedContent = w.String(ctx, ref.MatchedContent)
 		rewritten.ImageInfo = w.String(ctx, ref.ImageInfo)
+		rewritten.MatchedImages = slices.Clone(ref.MatchedImages)
+		for j := range rewritten.MatchedImages {
+			rewritten.MatchedImages[j].URL = w.Ref(ctx, ref.MatchedImages[j].URL)
+		}
 		out[i] = &rewritten
 	}
 	return out
@@ -120,6 +125,16 @@ func (w *Rewriter) CopyData(ctx context.Context, data map[string]interface{}) ma
 	}
 	out, _ := rewritten.(map[string]interface{})
 	return out
+}
+
+// CopyValue is CopyData for a decoded JSON value of any shape (object, array
+// or scalar). Unchanged values are returned as-is.
+func (w *Rewriter) CopyValue(ctx context.Context, value interface{}) interface{} {
+	if !w.Enabled() {
+		return value
+	}
+	rewritten, _ := w.copyValue(ctx, value, 0)
+	return rewritten
 }
 
 // maxDataDepth bounds recursion into tool-defined metadata. Renderable content

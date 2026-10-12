@@ -127,8 +127,9 @@ func SanitizeAgentStepsForStorage(steps []types.AgentStep) []types.AgentStep {
 				continue
 			}
 			result := *tc.Result
-			if tc.Name == "local_browser" {
-				// Screenshot bytes already live in Data for the result card.
+			if tc.Name == "local_browser" || tc.Name == ToolSearchKnowledge {
+				// Screenshot bytes already live in Data for the result card;
+				// retrieved knowledge images are read again from storage.
 				result.Images = nil
 			}
 			if isSandboxContentTool(tc.Name) {

@@ -1,12 +1,15 @@
 package router
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
+	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/handler"
+	"github.com/Tencent/WeKnora/internal/sandbox"
 	"github.com/gin-gonic/gin"
 )
 
@@ -78,6 +81,29 @@ func TestBuildDeploymentCapabilitiesReflectsMissingRoutes(t *testing.T) {
 		t.Fatal("an available route should remain supported")
 	}
 }
+
+func TestDeploymentCapabilitiesExposeHostWhenManagerPresent(t *testing.T) {
+	params := RouterParams{SandboxConfigHandler: &handler.SandboxConfigHandler{}}
+	hostOff := deploymentCapabilitiesFromRouter(params).Capabilities["settings.sandbox.host"]
+	if hostOff.Supported {
+		t.Fatal("host capability must stay off when no host manager is provided")
+	}
+
+	params.HostSandbox = service.HostSandboxManager{Manager: stubHostCapabilityManager{}}
+	hostOn := deploymentCapabilitiesFromRouter(params).Capabilities["settings.sandbox.host"]
+	if !hostOn.Supported {
+		t.Fatal("host capability must be on when the host manager is non-nil")
+	}
+}
+
+type stubHostCapabilityManager struct{}
+
+func (stubHostCapabilityManager) Execute(context.Context, *sandbox.ExecuteConfig) (*sandbox.ExecuteResult, error) {
+	return nil, nil
+}
+func (stubHostCapabilityManager) Cleanup(context.Context) error { return nil }
+func (stubHostCapabilityManager) GetSandbox() sandbox.Sandbox   { return nil }
+func (stubHostCapabilityManager) GetType() sandbox.SandboxType  { return sandbox.SandboxTypeHost }
 
 func TestGetDeploymentCapabilitiesHandlerReturnsSnapshot(t *testing.T) {
 	gin.SetMode(gin.TestMode)

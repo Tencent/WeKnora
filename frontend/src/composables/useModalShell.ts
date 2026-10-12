@@ -23,6 +23,8 @@ export interface ModalShellOptions {
   close: () => void
   /** 参与 dirty 比较的数据；不传则不做未保存提示 */
   snapshot?: () => unknown
+  /** 加载期间表单不可编辑，初始化赋值不算未保存修改 */
+  loading?: () => boolean
   /** 返回 true 时跳过 Esc（例如组件内部自绘的弹层正打开） */
   ignoreEscape?: () => boolean
 }
@@ -58,14 +60,20 @@ export function useModalShell(options: ModalShellOptions) {
   }
 
   const isDirty = () => {
-    if (!options.snapshot) return false
+    if (!options.snapshot || options.loading?.()) return false
     return serialize(options.snapshot()) !== cleanSnapshot
   }
 
-  const requestClose = () => {
+  // Template handlers pass the DOM event as the first argument, so only call
+  // afterClose when it really is a callback.
+  const requestClose = (afterClose?: unknown) => {
     if (!options.visible() || confirming) return
-    if (!isDirty()) {
+    const close = () => {
       options.close()
+      if (typeof afterClose === 'function') afterClose()
+    }
+    if (!isDirty()) {
+      close()
       return
     }
     confirming = true
@@ -78,7 +86,7 @@ export function useModalShell(options: ModalShellOptions) {
       onConfirm: () => {
         confirming = false
         dialog.destroy()
-        options.close()
+        close()
       },
       onClose: () => {
         confirming = false

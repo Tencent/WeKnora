@@ -104,6 +104,9 @@ kb, err := apiClient.GetKnowledgeBase(ctx, kbID)
 | `Login` | 邮箱密码登录，返回 JWT access/refresh token |
 | `GetCurrentUser` | 获取当前登录主体与租户信息（`GET /api/v1/auth/me`） |
 | `RefreshToken` | 用 refresh token 换取新 access token |
+| `SwitchTenant` | 切换到指定空间并重新签发 token 对，同时记为下次登录的默认空间（`POST /api/v1/auth/switch-tenant`） |
+| `ChangePassword` | 修改当前用户密码；成功后服务端吊销该用户所有会话，调用方应丢弃本地 token |
+| `GetAuthConfig` | 读取公开认证配置：注册模式、是否启用复杂密码（`GET /api/v1/auth/config`，无需认证） |
 
 ### 知识库 KnowledgeBase — `client/knowledgebase.go`
 
@@ -131,10 +134,12 @@ kb, err := apiClient.GetKnowledgeBase(ctx, kbID)
 | `GetKnowledge` | 获取知识详情 |
 | `GetKnowledgeBatch` | 批量获取知识 |
 | `ListKnowledge` | 分页列出知识 |
-| `ListKnowledgeWithFilter` | 带过滤条件列出知识 |
+| `ListKnowledgeWithFilter` | 带过滤条件列出知识（`KnowledgeListFilter`：标签、关键词、文件类型、解析状态、来源、时间范围、文件夹） |
 | `DeleteKnowledge` | 删除知识 |
 | `DownloadKnowledgeFile` | 下载知识原始文件到本地路径 |
 | `OpenKnowledgeFile` | 以流方式打开知识原始文件（返回文件名 + `io.ReadCloser`） |
+| `DownloadKnowledgeFiles` / `OpenKnowledgeFilesArchive` | 把同一知识库内多个文档的原始文件打包为 ZIP 下载到本地 / 以流方式读取（`POST /api/v1/knowledge-bases/{id}/knowledge/batch-download`；单次最多 200 个 ID、合计 512 MiB；需要 Contributor 及该知识库写权限）；走流式 HTTP 客户端，不受 30 秒默认超时限制 |
+| `ListKnowledgeFolders` / `MoveKnowledgeToFolder` / `RenameKnowledgeFolder` | 知识库文件夹树、把文档移入文件夹（`FolderPath` 为空表示移回根目录）、重命名文件夹及其全部子路径 |
 | `UpdateKnowledge` | 更新知识 |
 | `ReparseKnowledge` | 重新解析知识 |
 | `CancelKnowledgeParse` | 取消解析任务 |
@@ -147,6 +152,8 @@ kb, err := apiClient.GetKnowledgeBase(ctx, kbID)
 | `GetKnowledgeMoveProgress` | 查询迁移任务进度 |
 | `PreviewKnowledgeFile` | 预览知识文件（返回原始 `*http.Response`） |
 | `BatchUpdateKnowledgeTags` | 批量更新知识标签 |
+
+服务端的知识列表接口自 v0.8.2 起支持 `sort_by`（`updated_at` / `created_at` / `file_name`）与 `sort_order`（`asc` / `desc`）参数，默认仍为 `created_at desc`；`KnowledgeListFilter` 暂未提供对应字段，需要自定义排序时可用 `Raw` 调用，参数说明见[知识 API](../04-api/02-api-knowledge.md)。
 
 ### 分块 Chunk — `client/chunk.go`
 
@@ -210,6 +217,11 @@ kb, err := apiClient.GetKnowledgeBase(ctx, kbID)
 | `GetAgentPlaceholders` | 获取 Agent 配置占位符 |
 | `GetSuggestedQuestions` | 获取 Agent 建议问题 |
 
+v0.8.2 起的两处请求字段变化：
+
+- `UpdateAgentRequest.Avatar` 由 `string` 改为 `*string`：为 `nil` 时不下发该字段，保留原头像；指向空字符串表示清除头像。升级 SDK 后需调整赋值代码（例如 `Avatar: &avatar`）。
+- 推荐问题 `SuggestedQuestion` 新增 `KnowledgeID`（来源文档）。用户点选推荐问题提问时，可在 `KnowledgeQARequest` / `AgentQARequest` 的 `QuestionOrigin`（`KnowledgeBaseID`、`KnowledgeID`）中回传来源，服务端会在回答前优先检索该来源；它只作为提示，不会扩大请求本身的检索范围。
+
 ### 模型 Model — `client/model.go`
 
 | 方法 | 说明 |
@@ -248,12 +260,14 @@ kb, err := apiClient.GetKnowledgeBase(ctx, kbID)
 | `CreateOrganization` / `ListMyOrganizations` / `GetOrganization` / `UpdateOrganization` / `DeleteOrganization` | 组织 CRUD |
 | `SearchOrganizations` / `PreviewOrganizationByInviteCode` | 搜索/邀请码预览组织 |
 | `JoinOrganizationByInviteCode` / `SubmitJoinRequest` / `JoinByOrganizationID` / `LeaveOrganization` / `RequestRoleUpgrade` | 加入/退出/升级角色 |
-| `GenerateInviteCode` / `SearchUsersForInvite` / `InviteMember` | 邀请成员 |
+| `GenerateInviteCode` / `SearchUsersForInvite` / `InviteMember` | 邀请成员（`SearchUsersForInvite` 的限制见下方说明） |
 | `ListOrgMembers` / `UpdateMemberRole` / `RemoveMember` | 成员管理 |
 | `ListJoinRequests` / `ReviewJoinRequest` | 加入申请审批 |
 | `ShareKnowledgeBase` / `ListKBShares` / `UpdateSharePermission` / `RemoveKBShare` | 知识库共享 |
 | `ShareAgent` / `ListAgentShares` / `RemoveAgentShare` | Agent 共享 |
 | `ListOrgShares` / `ListOrgAgentShares` / `ListSharedKnowledgeBases` / `ListSharedAgents` | 共享资源查询 |
+
+自 v0.8.2 起，服务端邀请候选只按**完整空间 ID** 精确解析（`GET /api/v1/organizations/{id}/search-tenants?q=<空间ID>`），不再按空间名、用户名或邮箱搜索。`SearchUsersForInvite` 调用的是已废弃的 `search-users` 别名，并以 `keyword` 参数传值，服务端读取的是 `q`，因此该方法目前拿不到候选。需要查找候选时，请用 `Raw` 直接调用 `search-tenants`。
 
 ### FAQ — `client/faq.go`
 
@@ -289,7 +303,11 @@ kb, err := apiClient.GetKnowledgeBase(ctx, kbID)
 | `CreateMCPService` / `ListMCPServices` / `GetMCPService` / `UpdateMCPService` / `DeleteMCPService` | MCP 服务 CRUD |
 | `TestMCPService` | 连通性测试 |
 | `GetMCPServiceTools` / `GetMCPServiceResources` | 列出 MCP 工具/资源 |
+| `GetMCPMetadata` | 读取已保存的工具目录，不连接上游；从未同步过返回 `nil`，`Stale=true` 表示保存的连接与当前配置不一致 |
+| `RefreshMCPMetadata` | 连接上游并整体替换已保存的工具目录；OAuth 服务按调用者保存快照（Viewer+），静态认证服务写空间级快照（需 Admin 或可管理 MCP 服务的 API Key） |
 | `ResolveToolApproval` | 处理工具调用审批 |
+
+`MCPService` 列表项带 `Catalog`（工具数、是否过期、同步时间）和 `UsageInstructions` 字段。
 
 ### MCP 端点（WeKnora 作为 MCP Server）— `client/mcp_endpoint.go`
 
@@ -314,6 +332,7 @@ kb, err := apiClient.GetKnowledgeBase(ctx, kbID)
 | 方法 | 说明 |
 |---|---|
 | `GetSystemInfo` | 获取系统信息（版本等） |
+| `GetDeploymentCapabilities` | 获取部署能力快照（`GET /api/v1/system/capabilities`，edition 与各能力的 supported / reason） |
 | `ListParserEngines` / `CheckParserEngines` | 文档解析引擎列表/检测 |
 | `ReconnectDocReader` | 重连 DocReader 服务 |
 | `GetStorageEngineStatus` / `CheckStorageEngine` | 存储引擎状态/检测 |
@@ -327,7 +346,7 @@ kb, err := apiClient.GetKnowledgeBase(ctx, kbID)
 | `GetWebSearchProviders` | 列出可用 Web 搜索提供商 | `client/web_search.go` |
 | `Raw` | 原始 HTTP 逃生舱（Experimental） | `client/client.go` |
 
-合计约 170 个公开方法，覆盖约 20 类资源。
+合计 220 余个公开方法，覆盖 20 余类资源。
 
 ### 记忆、沙箱技能与个人变量
 

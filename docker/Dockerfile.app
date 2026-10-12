@@ -1,14 +1,24 @@
 # Build extension and daemon from the same pinned source on the runtime architecture.
 FROM --platform=$TARGETPLATFORM node:24-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e AS browserskill
 WORKDIR /build
-RUN apt-get update && \
+# Use the same optional Debian mirror as the Go builder and runtime stages.
+ARG APK_MIRROR_ARG
+# This base image has no CA certificates. Install them from the original HTTP
+# Debian source before swapping in a mirror: mirrors.tencent.com redirects
+# apt to HTTPS, and that handshake fails without a trust store.
+RUN if [ -n "$APK_MIRROR_ARG" ]; then \
+        apt-get update && \
+        apt-get install -y --no-install-recommends ca-certificates && \
+        rm -rf /var/lib/apt/lists/* && \
+        sed -i "s@deb.debian.org@${APK_MIRROR_ARG}@g" /etc/apt/sources.list.d/debian.sources; \
+    fi && \
+    apt-get update && \
     apt-get install -y --no-install-recommends git python3 ca-certificates curl build-essential cmake pkg-config && \
     rm -rf /var/lib/apt/lists/*
 ENV RUSTUP_HOME=/usr/local/rustup CARGO_HOME=/usr/local/cargo
 ENV PATH=/usr/local/cargo/bin:$PATH
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable
 COPY scripts/build_browserskill.sh scripts/browserskill-release.json ./scripts/
-COPY patches/browserskill ./patches/browserskill
 ARG TARGETOS
 ARG TARGETARCH
 RUN bash scripts/build_browserskill.sh /opt/weknora/browserskill "${TARGETOS}/${TARGETARCH}"
@@ -91,10 +101,13 @@ FROM debian:12.12-slim
 WORKDIR /app
 
 ARG APK_MIRROR_ARG
+# Pinned so two builds of the same commit ship the same yt-dlp (and deno).
+# Bump it per release, or override with --build-arg YTDLP_VERSION=<version>.
+ARG YTDLP_VERSION=2026.8.19
 
 # Pairing derives the gateway URL from the user's page origin by default.
 ENV BROWSERSKILL_BINARY=/opt/weknora/browserskill/bsk \
-    BROWSERSKILL_EXTENSION_PATH=/opt/weknora/browserskill/browser-skill-weknora-0.3.0.zip
+    BROWSERSKILL_EXTENSION_PATH=/opt/weknora/browserskill/browser-skill-weknora-0.3.1.zip
 COPY --from=browserskill /opt/weknora/browserskill /opt/weknora/browserskill
 
 # Create a non-root user first
@@ -119,9 +132,9 @@ RUN if [ -n "$APK_MIRROR_ARG" ]; then \
         ffmpeg && \
     python3 -m pip install --break-system-packages --upgrade pip setuptools wheel && \
     # yt-dlp powers YouTube knowledge import; the deno extra provides the JS
-    # runtime YouTube extraction needs. Rebuild regularly: YouTube changes break
-    # old yt-dlp releases.
-    python3 -m pip install --break-system-packages --upgrade "yt-dlp[default,deno]" && \
+    # runtime YouTube extraction needs. YouTube changes break old yt-dlp
+    # releases, so bump YTDLP_VERSION when imports start failing.
+    python3 -m pip install --break-system-packages "yt-dlp[default,deno]==${YTDLP_VERSION}" && \
     mkdir -p /home/appuser/.local/bin && \
     curl -LsSf https://astral.sh/uv/install.sh | CARGO_HOME=/home/appuser/.cargo UV_INSTALL_DIR=/home/appuser/.local/bin sh && \
     chown -R appuser:appuser /home/appuser && \

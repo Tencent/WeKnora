@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/Tencent/WeKnora/internal/models/api"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -99,7 +100,9 @@ func (r *resourceRegistry) EncodeMessages(messages []chat.Message) []chat.Messag
 	copy(encoded, messages)
 	for i := range encoded {
 		encoded[i].Content = r.EncodeText(encoded[i].Content)
+		reasoningBefore := encoded[i].ReasoningContent
 		encoded[i].ReasoningContent = r.EncodeText(encoded[i].ReasoningContent)
+		dropStaleReasoningSignature(&encoded[i], reasoningBefore)
 		if len(encoded[i].MultiContent) > 0 {
 			encoded[i].MultiContent = append([]chat.MessageContentPart(nil), encoded[i].MultiContent...)
 			for j := range encoded[i].MultiContent {
@@ -154,4 +157,28 @@ func (r *resourceRegistry) handles() []string {
 		handles = append(handles, item.handle)
 	}
 	return handles
+}
+
+// dropStaleReasoningSignature clears a reasoning signature this registry just
+// invalidated by rewriting the text it covers.
+//
+// It applies only to Anthropic. Claude signs the exact thinking text, so a
+// block replayed with rewritten text and its original signature fails
+// verification. Gemini is deliberately excluded: its thought signatures ride
+// on the answer text and on each tool call's metadata, neither of which this
+// registry touches, so dropping one there would throw away a signature
+// Gemini 3 requires back.
+//
+// This is a safety net for assistant turns stored before
+// anthropicmessages.MetadataThinkingBlocks existed. Current turns replay from
+// that metadata, which carries the signed bytes verbatim and is opaque to
+// every rewrite here, so they do not depend on this at all.
+func dropStaleReasoningSignature(msg *chat.Message, before string) {
+	if msg.ReasoningContent == before {
+		return
+	}
+	if api.SignatureFor(api.APIAnthropicMessages, msg.ReasoningSignature) == "" {
+		return
+	}
+	msg.ReasoningSignature = ""
 }

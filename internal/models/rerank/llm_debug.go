@@ -24,6 +24,9 @@ func (d *debugReranker) Rerank(ctx context.Context, query string, documents []st
 func (d *debugReranker) GetModelName() string { return d.inner.GetModelName() }
 func (d *debugReranker) GetModelID() string   { return d.inner.GetModelID() }
 
+// MaxPassageRunes forwards the wrapped reranker's limit.
+func (d *debugReranker) MaxPassageRunes(query string) int { return MaxPassageRunes(d.inner, query) }
+
 func logRerankDebug(ctx context.Context, model string, query string, documents []string, results []RankResult, callErr error, dur time.Duration) {
 	if !logger.LLMDebugEnabled() {
 		return

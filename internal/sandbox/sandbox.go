@@ -5,6 +5,7 @@ package sandbox
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 )
 
@@ -24,13 +25,20 @@ const (
 	SandboxTypeCube SandboxType = "cube"
 	// SandboxTypeE2B uses E2B's hosted MicroVM sandbox service.
 	SandboxTypeE2B SandboxType = "e2b"
+	// SandboxTypeHost runs commands on the user's own machine under
+	// OS-enforced restrictions (macOS Seatbelt, Windows restricted token).
+	// It is deliberately not named "local": the removed Local backend ran
+	// bare host processes with no isolation at all, and reusing that name
+	// would misrepresent this one.
+	SandboxTypeHost SandboxType = "host"
 	// SandboxTypeDisabled means script execution is disabled
 	SandboxTypeDisabled SandboxType = "disabled"
 )
 
-// IsNamedSandboxBackendType reports whether raw can be stored as a user-facing
-// named sandbox backend. Cube, E2B and Docker are all session-persistent and
-// share the same workspace configuration surface.
+// IsNamedSandboxBackendType reports whether raw is a user-facing named sandbox
+// backend. Host is absent because it has no session-scoped instance to pin:
+// each command is a fresh local process. The same predicate is used by
+// resolveSandboxForExecution.
 func IsNamedSandboxBackendType(raw string) bool {
 	switch SandboxType(raw) {
 	case SandboxTypeCube, SandboxTypeE2B, SandboxTypeDocker:
@@ -69,7 +77,7 @@ const (
 	DefaultDesktopDockerImage = "wechatopenai/weknora-sandbox:main-desktop"
 
 	// DefaultCubeDesktopTemplateImage is DefaultDesktopDockerImage plus Cube
-	// envd (target "desktop-cube"). amd64 only, same reason as the cube target.
+	// envd (target "desktop-cube").
 	DefaultCubeDesktopTemplateImage = "wechatopenai/weknora-sandbox:main-desktop-cube"
 
 	// DesktopWebsockifyPort is websockify inside the sandbox. WeKnora dials
@@ -158,6 +166,19 @@ var (
 	// again; the UI must get an explicit click first. Distinct from
 	// ErrNoLiveSessionSandbox, which means there is no binding to resume.
 	ErrSandboxPaused = errors.New("session sandbox is paused")
+	// ErrSandboxStopped is ErrSandboxPaused for a backend that never pauses
+	// (Docker): a bound sandbox that is not running is either a stopped
+	// container, which a resume restarts with its files intact, or one the
+	// idle sweep already deleted, which a resume replaces with a fresh one.
+	// The UI cannot promise "wake it up" there. It wraps ErrSandboxPaused, so
+	// every caller that only distinguishes "needs a confirmed click" keeps
+	// working unchanged.
+	ErrSandboxStopped = fmt.Errorf("%w: sandbox is stopped or was reclaimed", ErrSandboxPaused)
+	// ErrSessionRewindLocked means another rewind already holds the session.
+	ErrSessionRewindLocked = errors.New("sandbox: session rewind already in progress")
+	// ErrSessionTurnActive means a chat turn already holds the session lease,
+	// so rewind must not take the exclusive lock or reset the workspace.
+	ErrSessionTurnActive = errors.New("sandbox: session turn is active")
 	// ErrTerminalUnsupported is returned when the active backend cannot
 	// stream PTYs (Docker, a disabled manager). Distinct from
 	// ErrNoLiveSessionSandbox: the session may well have a live sandbox,
@@ -410,6 +431,13 @@ type Config struct {
 	// E2BTemplate is the E2B template ID used at sandbox creation.
 	E2BTemplate string
 
+	// TemplateFromSnapshot reports that the boot target (E2BTemplate or
+	// CubeTemplate) was replaced by a skill snapshot. The env baked into that
+	// snapshot must not be sent again: Aliyun Agent Sandbox returns 400
+	// "creating from a snapshot does not allow envVars or function config
+	// overrides".
+	TemplateFromSnapshot bool
+
 	// E2BSandboxTTL is the E2B-side idle timeout hint.
 	E2BSandboxTTL time.Duration
 
@@ -443,7 +471,7 @@ func ValidateConfig(config *Config) error {
 	}
 
 	switch config.Type {
-	case SandboxTypeDocker, SandboxTypeCube, SandboxTypeE2B, SandboxTypeDisabled:
+	case SandboxTypeDocker, SandboxTypeCube, SandboxTypeE2B, SandboxTypeHost, SandboxTypeDisabled:
 		// Valid types
 	default:
 		return errors.New("invalid sandbox type")

@@ -185,10 +185,17 @@ func MCPOAuthPrincipalFromContext(ctx context.Context) Principal {
 // caller. API external users and embed chat sessions use principal-derived IDs;
 // tenant API keys are isolated per key id; MCP OAuth token storage uses
 // MCPOAuthPrincipalFromContext (visitor-level for embed).
+//
+// PrincipalMCPEndpoint must resolve to StorageID() too: the MCP `ask` tool
+// creates its session with `MCPEndpointPrincipal(...).StorageID()` and then
+// looks it up through this function. Without the case below the lookup falls
+// through to the raw user id ("mcp-<endpointID>"), which never matches the
+// stored owner ("mcp_endpoint:<tenantID>:<endpointID>"), so every ask call
+// failed with "failed to create user message: session not found".
 func SessionOwnerIDFromContext(ctx context.Context) string {
 	if p, ok := PrincipalFromContext(ctx); ok {
 		switch p.Type {
-		case PrincipalAPIExternalUser, PrincipalEmbedSession:
+		case PrincipalAPIExternalUser, PrincipalEmbedSession, PrincipalMCPEndpoint:
 			return p.StorageID()
 		case PrincipalAPITenant:
 			if scope, ok := TenantAPIKeyScopeFromContext(ctx); ok && scope.KeyID > 0 {

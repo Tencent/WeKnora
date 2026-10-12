@@ -125,6 +125,11 @@ func TestSyncEditedChunkImagesDisablesAndRestoresImageChildren(t *testing.T) {
 		ID: "image", TenantID: 1, KnowledgeBaseID: "kb", ParentChunkID: "text",
 		ChunkType: types.ChunkTypeImageOCR, ImageInfo: string(imageInfo),
 		IsEnabled: true, IndexStatus: "ready",
+	}, {
+		// The image's own vector follows the image like its OCR text does.
+		ID: "image-vector", TenantID: 1, KnowledgeBaseID: "kb", ParentChunkID: "text",
+		ChunkType: types.ChunkTypeImageVector, ImageInfo: string(imageInfo),
+		IsEnabled: true, IndexStatus: "ready",
 	}}}
 	service := &chunkService{chunkRepository: repo, kbRepository: editableChunkKBRepo{}}
 	parent := &types.Chunk{ID: "text", TenantID: 1, IsEnabled: true, Content: "image removed"}
@@ -132,16 +137,20 @@ func TestSyncEditedChunkImagesDisablesAndRestoresImageChildren(t *testing.T) {
 	if err := service.syncEditedChunkImages(context.Background(), parent); err != nil {
 		t.Fatalf("disable removed image child: %v", err)
 	}
-	if repo.children[0].IsEnabled || repo.children[0].IndexStatus != "ready" {
-		t.Fatalf("removed image child was not disabled cleanly: %+v", repo.children[0])
+	for _, child := range repo.children {
+		if child.IsEnabled || child.IndexStatus != "ready" {
+			t.Fatalf("removed image child was not disabled cleanly: %+v", child)
+		}
 	}
 
 	parent.Content = "image restored\n![one](resource://one)"
 	if err := service.syncEditedChunkImages(context.Background(), parent); err != nil {
 		t.Fatalf("restore image child: %v", err)
 	}
-	if !repo.children[0].IsEnabled || repo.children[0].IndexStatus != "ready" {
-		t.Fatalf("restored image child was not re-enabled: %+v", repo.children[0])
+	for _, child := range repo.children {
+		if !child.IsEnabled || child.IndexStatus != "ready" {
+			t.Fatalf("restored image child was not re-enabled: %+v", child)
+		}
 	}
 }
 
@@ -157,7 +166,8 @@ func TestUpdateDocumentChunkPreservesGeneratedQuestionsAcrossRevision(t *testing
 	repo := &editableChunkRepo{chunk: &types.Chunk{
 		ID: "chunk", TenantID: 1, KnowledgeID: "knowledge", KnowledgeBaseID: "kb",
 		Content: "old body", SourceContent: "old body", ContentRevision: 0,
-		ChunkType: types.ChunkTypeText, IsEnabled: true, IndexStatus: "ready", Metadata: metadataJSON,
+		SourceLocators: types.SourceLocators{{Type: "pdf", Page: 1, Mapping: "exact", Quote: "old body"}},
+		ChunkType:      types.ChunkTypeText, IsEnabled: true, IndexStatus: "ready", Metadata: metadataJSON,
 	}}
 	service := &chunkService{
 		chunkRepository: repo,
@@ -181,6 +191,9 @@ func TestUpdateDocumentChunkPreservesGeneratedQuestionsAcrossRevision(t *testing
 	updated, err := service.UpdateDocumentChunk(ctx, "chunk", &newContent, nil, nil)
 	if err != nil {
 		t.Fatalf("update chunk: %v", err)
+	}
+	if len(updated.SourceLocators) != 0 {
+		t.Fatal("edited content retained source positions from the original")
 	}
 	updatedMetadata, err := updated.DocumentMetadata()
 	if err != nil {
@@ -219,6 +232,7 @@ func TestRebuildParentContentPreservesConflictingEdits(t *testing.T) {
 		parent: &types.Chunk{
 			ID: "parent", TenantID: 1, ChunkType: types.ChunkTypeParentText,
 			SourceContent: "abcdefghij", Content: "abcdefghij", StartAt: 0, EndAt: 10,
+			SourceLocators: types.SourceLocators{{Type: "pdf", Page: 1}},
 		},
 		children: []*types.Chunk{
 			{
@@ -239,6 +253,9 @@ func TestRebuildParentContentPreservesConflictingEdits(t *testing.T) {
 	}
 	if repo.updated == nil {
 		t.Fatal("parent was not updated")
+	}
+	if len(repo.updated.SourceLocators) != 0 {
+		t.Fatal("rebuilt parent retained stale source positions")
 	}
 	for _, want := range []string{"OLDER EDIT BODY", "NEWER EDIT BODY"} {
 		if !strings.Contains(repo.updated.Content, want) {

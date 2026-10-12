@@ -207,8 +207,10 @@ func leaseForkSnapshotOnDelete(
 		return
 	}
 	lease := &types.ForkSnapshotLease{
-		SnapshotID:      snapshotID,
-		TenantID:        session.TenantID,
+		SnapshotID: snapshotID,
+		// Pairs with SandboxConfigID: the workspace that owns the config, not
+		// necessarily the one that owns the session (shared agents).
+		TenantID:        session.SandboxConfigOwner(),
 		SandboxConfigID: session.SandboxConfigID,
 		CreatedAt:       time.Now().UTC(),
 	}
@@ -297,7 +299,8 @@ func deleteForkSnapshot(
 	var err error
 	if session != nil {
 		if scoped, ok := snapshots.(forkSessionSnapshotDeleter); ok {
-			err = scoped.DeleteForkSnapshot(ctx, session.TenantID, session.SandboxConfigID, snapshotID)
+			err = scoped.DeleteForkSnapshot(
+				ctx, session.SandboxConfigOwner(), session.SandboxConfigID, snapshotID)
 		} else {
 			err = snapshots.DeleteSnapshot(ctx, snapshotID)
 		}

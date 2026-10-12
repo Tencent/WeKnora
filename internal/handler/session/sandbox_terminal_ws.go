@@ -71,6 +71,7 @@ var terminalAuthRecheckInterval = time.Minute
 const (
 	terminalErrNotBound    = "SANDBOX_NOT_BOUND"
 	terminalErrPaused      = "SANDBOX_PAUSED"
+	terminalErrStopped     = "SANDBOX_STOPPED"
 	terminalErrUnsupported = "TERMINAL_UNSUPPORTED"
 	terminalErrInternal    = "INTERNAL"
 	terminalErrIdle        = "IDLE_DISCONNECTED"
@@ -133,6 +134,10 @@ type terminalControlFrame struct {
 	PID uint32 `json:"pty_id,omitempty"`
 	// Backend names the sandbox provider on ready frames.
 	Backend string `json:"backend,omitempty"`
+	// Reattachable tells the browser, on ready frames, whether reconnecting
+	// with pty_id resumes this shell. False (Docker) means a reconnect gets a
+	// fresh shell, so the client must not redial silently.
+	Reattachable *bool `json:"reattachable,omitempty"`
 	// ExitCode is set on exited frames (-1 when the provider didn't say).
 	ExitCode *int `json:"exit_code,omitempty"`
 	// Cols/Rows carry resize requests.
@@ -202,7 +207,7 @@ func (h *Handler) SandboxTerminalWS(c *gin.Context) {
 	// missing one reports SANDBOX_NOT_BOUND. Only a confirmed click sets
 	// provision=1, which may create or resume.
 	allowProvision := terminalFlagParam(c.Query("provision"))
-	sandboxConfigID := h.terminalProvisionConfigID(ctx, c, allowProvision)
+	provision := h.terminalProvisionPin(ctx, c, allowProvision)
 
 	// Geometry from the query string; the frontend resizes right after
 	// ready anyway, so defaults only shape the first paint.
@@ -215,7 +220,7 @@ func (h *Handler) SandboxTerminalWS(c *gin.Context) {
 	// The connection outlives the HTTP exchange, so the terminal lifetime is
 	// governed by this derived context, cancelled in cleanup().
 	termCtx, cancelTerm := context.WithCancel(context.WithoutCancel(ctx))
-	terminal, err := h.openTerminal(termCtx, sessionID, sandboxConfigID, allowProvision, opts)
+	terminal, err := h.openTerminal(termCtx, sessionID, provision, allowProvision, opts)
 	if err != nil {
 		code, detail := terminalErrorFrame(err)
 		logger.Warnf(ctx, "[sandbox-terminal] open failed session=%s provision=%t code=%s: %v",
@@ -252,33 +257,47 @@ func (h *Handler) SandboxTerminalWS(c *gin.Context) {
 // action may create infrastructure.
 func (h *Handler) openTerminal(
 	ctx context.Context,
-	sessionID, sandboxConfigID string,
+	sessionID string,
+	provision service.SandboxPin,
 	allowProvision bool,
 	opts sandbox.RemoteTerminalOptions,
 ) (*service.SessionTerminal, error) {
 	if allowProvision {
-		return h.terminalService.EnsureSessionTerminal(ctx, sessionID, sandboxConfigID, opts)
+		return h.terminalService.EnsureSessionTerminal(ctx, sessionID, provision, opts)
 	}
 	return h.terminalService.OpenSessionTerminal(ctx, sessionID, opts)
 }
 
-// terminalProvisionConfigID resolves the sandbox config a confirmed create
-// should use. It goes through resolveAgent so a shared agent from another
-// workspace provisions the same way a chat turn would, instead of looking the
-// agent up only in the current tenant.
-func (h *Handler) terminalProvisionConfigID(ctx context.Context, c *gin.Context, allowProvision bool) string {
+// terminalProvisionPin resolves the sandbox backend a confirmed create should
+// use. It goes through resolveAgent so a shared agent from another workspace
+// provisions the same way a chat turn would, instead of looking the agent up
+// only in the current tenant.
+//
+// The agent's workspace travels with its config id. Sandbox configs are keyed
+// by (tenant, id), so a shared agent's config simply does not exist in the
+// caller's own workspace — passing the id alone resolved to "config not found"
+// and the panel died with a bare INTERNAL frame.
+func (h *Handler) terminalProvisionPin(
+	ctx context.Context, c *gin.Context, allowProvision bool,
+) service.SandboxPin {
 	if !allowProvision || h == nil || c == nil {
-		return ""
+		return service.SandboxPin{}
 	}
 	agentID := strings.TrimSpace(c.Query("agent_id"))
 	if agentID == "" {
-		return ""
+		return service.SandboxPin{}
 	}
-	agent, _, _ := h.resolveAgent(ctx, c, agentID, terminalTenantParam(c.Query("agent_source_tenant_id")))
+	agent, agentTenantID, _ := h.resolveAgent(
+		ctx, c, agentID, terminalTenantParam(c.Query("agent_source_tenant_id")))
 	if agent == nil {
-		return ""
+		return service.SandboxPin{}
 	}
-	return strings.TrimSpace(agent.Config.SandboxConfigID)
+	// resolveAgent reports 0 for the caller's own agent, which is exactly the
+	// "use the request workspace" fallback SandboxPin.TenantOr applies.
+	return service.SandboxPin{
+		ConfigID: strings.TrimSpace(agent.Config.SandboxConfigID),
+		TenantID: agentTenantID,
+	}
 }
 
 func terminalTenantParam(raw string) uint64 {
@@ -385,6 +404,9 @@ func terminalErrorFrame(err error) (code, message string) {
 	switch {
 	case stderrors.Is(err, sandbox.ErrNoLiveSessionSandbox):
 		return terminalErrNotBound, "session has no live sandbox"
+	// Before ErrSandboxPaused, which it wraps.
+	case stderrors.Is(err, sandbox.ErrSandboxStopped):
+		return terminalErrStopped, "session sandbox is stopped or was reclaimed"
 	case stderrors.Is(err, sandbox.ErrSandboxPaused):
 		return terminalErrPaused, "session sandbox is paused"
 	case stderrors.Is(err, service.ErrTerminalUnsupported):

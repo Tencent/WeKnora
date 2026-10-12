@@ -17,6 +17,7 @@ import {
 import { MessagePlugin } from "tdesign-vue-next";
 import { sanitizeHTML, safeMarkdownToHTML, createSafeImage, isValidImageURL, hydrateProtectedFileImages, isValidURL } from '@/utils/security';
 import { normalizeSpuriousTablePrefixes } from '@/utils/markdownTableNormalize';
+import { ensureLiteralSingleTildeOnGlobalMarked } from '@/utils/markedLiteralTilde';
 import { openMermaidFullscreen } from '@/utils/mermaidViewer';
 import { diffWikiLines, type WikiDiffLine } from '@/utils/wikiLineDiff';
 import { useI18n } from 'vue-i18n';
@@ -514,6 +515,7 @@ marked.use({
   gfm: true,         // 启用 GitHub Flavored Markdown
 });
 marked.use(markedKatex({ throwOnError: false, nonStandard: true }));
+ensureLiteralSingleTildeOnGlobalMarked();
 
 const preprocessMathDelimiters = (rawText: string): string => {
   if (!rawText || typeof rawText !== 'string') {
@@ -964,6 +966,7 @@ const channelLabelMap: Record<string, string> = {
   wecom: 'knowledgeBase.channelWecom',
   feishu: 'knowledgeBase.channelFeishu',
   gitlab: 'knowledgeBase.channelGitLab',
+  seafile: 'knowledgeBase.channelSeafile',
   confluence: 'knowledgeBase.channelConfluence',
   // Drive (云盘) connectors get their own channel so Drive docs show
   // "飞书云盘" / "Lark 云盘", distinct from the wiki connector's "飞书".

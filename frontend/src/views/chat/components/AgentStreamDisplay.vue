@@ -389,6 +389,22 @@
                     <t-icon name="git-branch" />
                   </t-button>
                 </t-tooltip>
+                <t-popconfirm
+                  v-if="canRewind"
+                  :content="t('chat.rewind.confirmBody')"
+                  :confirm-btn="{ content: t('chat.rewind.confirmButton'), theme: 'danger' }"
+                  :cancel-btn="{ content: t('chat.rewind.cancelButton') }"
+                  theme="warning"
+                  placement="top"
+                  overlay-class-name="chat-rewind-popconfirm"
+                  @confirm="emitRewind"
+                >
+                  <t-tooltip :content="rewindTooltip">
+                    <t-button size="small" variant="outline" shape="round" @click.stop>
+                      <t-icon name="rollback" />
+                    </t-button>
+                  </t-tooltip>
+                </t-popconfirm>
                 <t-button size="small" variant="outline" shape="round" @click.stop="handleCopyAnswer(event)"
                   :title="$t('agent.copy')">
                   <t-icon name="copy" />
@@ -414,6 +430,11 @@
                   <span v-if="hasArtifacts" class="answer-toolbar__artifact-count" aria-hidden="true">{{ artifactCount }}</span>
                 </span>
                 <t-tooltip v-if="event.is_fallback" :content="$t('chat.fallbackHint')" placement="top">
+                  <t-button size="small" variant="outline" shape="round" class="fallback-icon-btn">
+                    <t-icon name="info-circle" />
+                  </t-button>
+                </t-tooltip>
+                <t-tooltip v-if="event.truncated" :content="$t('chat.truncatedHint')" placement="top">
                   <t-button size="small" variant="outline" shape="round" class="fallback-icon-btn">
                     <t-icon name="info-circle" />
                   </t-button>
@@ -601,12 +622,13 @@
     v-model:visible="showArtifactDrawer"
     :session-id="sessionIdForArtifacts"
     :message-id="messageIdForArtifacts"
-    :artifacts="artifactList"
+    :artifacts="liveArtifacts"
     :preview-index="artifactPreviewIndex"
   />
 </template>
 
 <script setup lang="ts">
+import { readDocumentReferences } from '@/utils/readDocumentReferences';
 import { isAssistantTurnComplete } from '@/utils/steerStreamFork';
 import { ref, computed, watch, onMounted, onBeforeUnmount, onUpdated, nextTick } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
@@ -631,8 +653,9 @@ import { getKnowledgeChunksSummaryHtml } from '@/utils/knowledgeChunksDisplay';
 import { getAttachmentParsingSummaryHtml } from '@/utils/attachmentParsingDisplay';
 import { useChatCitationPopover } from '@/composables/useChatCitationPopover';
 import { useChatReferencesDrawer } from '@/composables/useChatReferencesDrawer';
-import type { KnowledgeReferenceLike, ReferenceHighlightTarget } from '@/utils/referenceSources';
+import { mergeDocumentReferences, type KnowledgeReferenceLike, type ReferenceHighlightTarget } from '@/utils/referenceSources';
 import { resolveCitationChunkId } from '@/utils/citationMarkdown';
+import { citationAnchorText } from '@/utils/citationAnchor';
 import { getWikiPage, type WikiPage } from '@/api/wiki';
 import { MessagePlugin } from 'tdesign-vue-next';
 import { useUIStore } from '@/stores/ui';
@@ -640,7 +663,8 @@ import { useSettingsStore } from '@/stores/settings';
 import { useAuthStore } from '@/stores/auth';
 import { useI18n } from 'vue-i18n';
 import i18n from '@/i18n';
-import { hydrateProtectedFileImages, clearProtectedFileFailureCache, sanitizeMarkdownHTML } from '@/utils/security';
+import { hydrateProtectedFileImages, sanitizeMarkdownHTML } from '@/utils/security';
+import { useProtectedImageRecovery } from '@/composables/useProtectedImageRecovery';
 import {
   artifactIndexFromEventTarget,
   hydrateArtifactImages,
@@ -970,18 +994,26 @@ const props = defineProps<{
   ragMode?: boolean;
   followUpLoading?: boolean;
   canFork?: boolean;
+  canRewind?: boolean;
 }>();
 
 const emit = defineEmits<{
   (event: 'render-complete-change', ready: boolean): void;
   (event: 'fork', messageId: string): void;
+  (event: 'rewind', messageId: string): void;
 }>();
 
 const canFork = computed(() => props.canFork === true && !props.embeddedMode)
+const canRewind = computed(() => props.canRewind === true && !props.embeddedMode)
 const forkTooltip = '从这条回答继续分叉'
+const rewindTooltip = computed(() => t('chat.rewind.tooltip'))
 const emitFork = () => {
   const messageId = persistedAssistantId(props.session) || String(props.session?.id || '')
   if (messageId) emit('fork', messageId)
+}
+const emitRewind = () => {
+  const messageId = persistedAssistantId(props.session) || String(props.session?.id || '')
+  if (messageId) emit('rewind', messageId)
 }
 
 const embedAuthProps = computed(() => ({
@@ -1024,25 +1056,6 @@ const protectedFileAccess = computed<ProtectedFileAccessContext | undefined>(() 
   return undefined;
 });
 
-// Re-hydrate when the message authorization anchor becomes available or is
-// corrected (e.g. request_id → persisted assistant_message_id after agent_query).
-watch(
-  () => {
-    const access = protectedFileAccess.value;
-    if (access?.mode === 'message') {
-      return `${access.sessionId}\0${access.messageId}`;
-    }
-    return '';
-  },
-  (scopeKey, previousScopeKey) => {
-    if (!scopeKey || scopeKey === previousScopeKey) return;
-    clearProtectedFileFailureCache();
-    nextTick(async () => {
-      await hydrateProtectedFileImages(rootElement.value, protectedFileAccess.value);
-    });
-  },
-);
-
 // -----------------------------------------------------------------------------
 // Skill artifact download drawer (Agent path)
 // -----------------------------------------------------------------------------
@@ -1055,8 +1068,13 @@ const artifactList = computed(() => {
   const list = ((props.session?.artifacts as any[]) || []);
   return list.map((a, i) => ({ index: i, ...a }));
 });
-const hasArtifacts = computed(() => artifactList.value.length > 0);
-const artifactCount = computed(() => artifactList.value.length);
+// Deleted files stay in artifactList on purpose: the inline renderer needs the
+// tombstone to tell "you deleted this" apart from "this handle belongs to some
+// other message", and its position is still the download address of the files
+// after it. Everything that counts or lists files uses the live view.
+const liveArtifacts = computed(() => artifactList.value.filter((a) => !a.deleted_at));
+const hasArtifacts = computed(() => liveArtifacts.value.length > 0);
+const artifactCount = computed(() => liveArtifacts.value.length);
 const { artifactArrived, onArtifactArriveEnd } = useArtifactArriveMotion(artifactCount);
 const artifactsCollecting = computed(() => isCollectingSkillArtifacts(props.session as any));
 const artifactButtonCollecting = computed(() => artifactsCollecting.value && !hasArtifacts.value);
@@ -1094,6 +1112,7 @@ const artifactRefContext = computed(() => {
 const artifactRefLabels = computed(() => ({
   previewHint: t('agent.artifactDrawer.inlinePreviewHint'),
   missingHint: t('agent.artifactDrawer.inlineMissing'),
+  deletedHint: t('agent.artifactDrawer.inlineDeleted'),
 }));
 
 const {
@@ -1141,35 +1160,6 @@ const openReferencesDrawer = (
   })
   return true
 }
-
-const mergeDocumentReferences = (refs: KnowledgeReferenceLike[]): KnowledgeReferenceLike[] => {
-  const merged = new Map<string, KnowledgeReferenceLike & { contentParts?: string[] }>();
-
-  for (const ref of refs) {
-    if (ref.chunk_type === 'web_search') continue;
-    const key = ref.knowledge_id || ref.knowledge_title || ref.id;
-    if (!key) continue;
-
-    const existing = merged.get(key);
-    const content = String(ref.content || '').trim();
-    if (!existing) {
-      merged.set(key, {
-        ...ref,
-        id: ref.knowledge_id || ref.id || key,
-        content,
-        contentParts: content ? [content] : [],
-      });
-      continue;
-    }
-
-    if (content && !existing.contentParts?.includes(content)) {
-      existing.contentParts = [...(existing.contentParts || []), content];
-      existing.content = existing.contentParts.slice(0, 3).join('\n\n');
-    }
-  }
-
-  return Array.from(merged.values()).map(({ contentParts, ...ref }) => ref);
-};
 
 const cleanToolOutputContent = (output: unknown): string => {
   const raw = typeof output === 'string' ? output : '';
@@ -1425,31 +1415,7 @@ function getToolReferenceItems(event: any): KnowledgeReferenceLike[] {
   }
 
   if (toolName === 'read_document' || toolName === 'list_knowledge_chunks' || toolName === 'wiki_read_source_doc') {
-    const chunks = Array.isArray(toolData.chunks) ? toolData.chunks : [];
-    if (chunks.length) {
-      return mergeDocumentReferences(chunks
-        .filter((item: any) => item?.content)
-        .map((item: any, index: number) => ({
-          id: item.chunk_id || item.id || `${toolData.knowledge_id || 'doc'}-${index + 1}`,
-          knowledge_id: item.knowledge_id || toolData.knowledge_id,
-          knowledge_title: toolData.faq_question || toolData.knowledge_title || toolData.knowledge_id,
-          knowledge_base_id: item.knowledge_base_id || toolData.knowledge_base_id,
-          chunk_index: item.chunk_index ?? item.index ?? index + 1,
-          chunk_type: item.chunk_type || (toolData.faq_question ? 'faq' : undefined),
-          content: item.content || '',
-        })));
-    }
-
-    const output = cleanToolOutputContent(event.output);
-    if (!output) return [];
-    return [{
-      id: toolData.faq_id || toolData.knowledge_id || event.tool_call_id,
-      knowledge_id: toolData.knowledge_id,
-      knowledge_title: toolData.faq_question || toolData.knowledge_title || toolData.knowledge_id || getToolDescription(event),
-      knowledge_base_id: toolData.knowledge_base_id,
-      chunk_type: toolData.faq_question ? 'faq' : undefined,
-      content: output,
-    }];
+    return readDocumentReferences(toolData, cleanToolOutputContent(event.output), getToolDescription(event));
   }
 
   return [];
@@ -1675,15 +1641,12 @@ const answerFullyRendered = computed(
     isSegmentDone.value &&
     typedAnswer.value.length >= activeAnswerMarkdown.value.length,
 );
+useProtectedImageRecovery(() => rootElement.value, () => protectedFileAccess.value,
+  () => !props.session?.persistence_error && answerFullyRendered.value);
 watch(answerFullyRendered, (ready) => {
   emit('render-complete-change', ready);
   if (!ready) return;
-  // Clear before this reactive update renders, so a source that returned 404
-  // mid-stream gets one real final-attempt <img> node instead of remaining
-  // suppressed by the missing-source cache.
-  clearProtectedFileFailureCache();
   nextTick(async () => {
-    await hydrateProtectedFileImages(rootElement.value, protectedFileAccess.value);
     await enhanceMarkdownContainer(rootElement.value);
   });
 }, { immediate: true });
@@ -2389,6 +2352,8 @@ const onRootClick = (e: Event) => {
       chunkId,
       documentTitle: title,
       knowledgeBaseId: kbId,
+      anchorText: citationAnchorText(kbEl),
+      openSource: !props.embeddedMode,
     })) {
       return;
     }
@@ -2474,6 +2439,8 @@ const onRootKeydown = (e: KeyboardEvent) => {
         chunkId,
         documentTitle: title,
         knowledgeBaseId: kbId,
+        anchorText: citationAnchorText(kbEl),
+        openSource: !props.embeddedMode,
       })) {
         return;
       }
@@ -3996,4 +3963,10 @@ const handleAddToKnowledge = (answerEvent: any) => {
 }
 </style>
 
-<style lang="less" src="@/components/css/wiki-graph-drawer.less"></style>
+<!-- Inlined @import instead of <style src>: plugin-vue 6.0.6 keys unscoped
+     src-style descriptors by the imported file path, so two SFCs sharing the
+     same src style (this file and WikiBrowser.vue) overwrite each other's
+     descriptor during the build and crash with "reading 'scoped'". -->
+<style lang="less">
+@import "@/components/css/wiki-graph-drawer.less";
+</style>

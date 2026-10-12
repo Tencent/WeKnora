@@ -266,8 +266,10 @@ func (r *repository) VectorRetrieve(ctx context.Context, params types.RetrievePa
 		limit = 10
 	}
 	searchParams := &tcvectordb.SearchDocumentParams{
-		Filter:         r.baseFilter(params),
-		Params:         &tcvectordb.SearchDocParams{Ef: 100},
+		Filter: r.baseFilter(params),
+		// HNSW returns at most ef candidates; a fixed 100 capped recall
+		// below TopK, which reaches 500.
+		Params:         &tcvectordb.SearchDocParams{Ef: uint32(max(limit, 100))},
 		RetrieveVector: false,
 		OutputFields:   outputFields(),
 		Limit:          limit,

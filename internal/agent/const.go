@@ -1,13 +1,19 @@
 package agent
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
+	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/agent/compaction"
 	"github.com/Tencent/WeKnora/internal/browserskill"
+	"github.com/Tencent/WeKnora/internal/models/api"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/google/uuid"
 )
@@ -51,8 +57,30 @@ const (
 	// where the LLM returns identical content without any tool calls before
 	// the loop is forcibly terminated. This catches stuck loops caused by
 	// unhandled finish reasons (e.g., content_filter not caught elsewhere).
+	// "Identical" includes an identical lack of content: consecutive empty
+	// rounds are the clearest stuck loop there is.
 	maxRepeatedResponseRounds = 2
+
+	// maxConsecutiveLengthRounds is how many rounds in a row may be cut off at
+	// the completion-token cap before the loop gives up. A truncated answer
+	// already ends the turn (analyzeResponse Case 2), so reaching this limit
+	// means round after round is truncating inside tool-call arguments: the
+	// model is told to re-issue the call, writes an even longer one, and hits
+	// the cap again. Without this the turn burns its whole round budget.
+	maxConsecutiveLengthRounds = 3
 )
+
+// truncatedAnswerFallback is delivered when every attempt at this turn was cut
+// off at the completion cap and none of them produced answer text — there is
+// nothing partial to hand over, so say what happened instead of finishing with
+// an empty message.
+const truncatedAnswerFallback = "Sorry, this answer kept hitting the model's per-response output limit " +
+	"before any text was produced. Try narrowing the question, or raise the agent's " +
+	"max_completion_tokens setting."
+
+// stalledAnswerFallback is delivered when a no-progress guard stopped the turn
+// and the round that tripped it produced no text.
+const stalledAnswerFallback = "I'm sorry, I was unable to generate a response. Please try again."
 
 func toolExecutionTimeout(toolName string, arguments ...string) time.Duration {
 	if toolName == "local_browser" && len(arguments) > 0 {
@@ -69,30 +97,73 @@ func toolExecutionTimeout(toolName string, arguments ...string) time.Duration {
 	return defaultToolExecTimeout
 }
 
-// transientErrorMarkers are substrings that indicate a transient (retryable) error.
+// transientErrorMarkers are substrings that indicate a transient (retryable)
+// error in a message that lost its type on the way here: stream failures reach
+// the agent as text carried on an error chunk.
 var transientErrorMarkers = []string{
-	"429", "rate limit",
-	"500", "502", "503", "504",
+	"rate limit",
 	"overloaded", "timeout", "timed out",
 	"connection", "server error", "temporarily unavailable",
 	// A broken or silent stream is worth one more attempt: the round produced
 	// no usable turn, and the alternative is ending the conversation on a
 	// partial response.
-	"deadline exceeded", "stalled",
+	"deadline exceeded", "stalled", "unexpected eof",
+	strings.ToLower(types.StreamEndedEarlyError),
 }
+
+// transientStatusPattern matches a retryable HTTP status as a whole number, so
+// "max_tokens 5000" or a request id with 429 inside it does not read as one.
+var transientStatusPattern = regexp.MustCompile(`\b(408|429|500|502|503|504|529)\b`)
 
 // isTransientError checks whether an error is likely transient and worth retrying.
 func isTransientError(err error) bool {
-	if err == nil {
+	if err == nil || errors.Is(err, context.Canceled) {
 		return false
 	}
+	// Typed errors decide on their own: a 400 whose body happens to mention
+	// "timeout" or "500" is still the same bad request on every retry.
+	var httpErr *api.HTTPError
+	if errors.As(err, &httpErr) {
+		code := httpErr.StatusCode
+		return code == http.StatusRequestTimeout || code == http.StatusTooManyRequests ||
+			code >= http.StatusInternalServerError
+	}
+	var transportErr *api.TransportError
+	if errors.As(err, &transportErr) || errors.Is(err, context.DeadlineExceeded) ||
+		errors.Is(err, io.ErrUnexpectedEOF) {
+		return true
+	}
 	errStr := strings.ToLower(err.Error())
+	if transientStatusPattern.MatchString(errStr) {
+		return true
+	}
 	for _, marker := range transientErrorMarkers {
 		if strings.Contains(errStr, marker) {
 			return true
 		}
 	}
 	return false
+}
+
+// maxLLMRetryAfter caps how long a vendor's Retry-After may hold a turn
+// between two attempts. A longer wait is not worth keeping the user on a
+// silent turn for; the retry then goes out at the cap and, if the vendor is
+// still limiting, the turn fails the usual way.
+const maxLLMRetryAfter = 30 * time.Second
+
+// llmRetryDelay is the wait before retry number attempt (1-based). It is the
+// linear backoff, raised to the vendor's Retry-After when a 429/503 reply
+// carried one, so a rate-limited request is not re-sent before the provider
+// said it would accept it.
+func llmRetryDelay(err error, attempt int) time.Duration {
+	delay := time.Duration(attempt) * time.Second
+	var httpErr *api.HTTPError
+	if errors.As(err, &httpErr) {
+		if wait := min(httpErr.RetryAfter(), maxLLMRetryAfter); wait > delay {
+			delay = wait
+		}
+	}
+	return delay
 }
 
 // getLLMStallTimeout returns how long an LLM stream may go silent before it is

@@ -948,6 +948,69 @@ func TestHeaderTracker_ColumnMismatchEndsTable(t *testing.T) {
 	}
 }
 
+func TestTableRowColumnCount_EscapedPipeIsCellText(t *testing.T) {
+	cases := []struct {
+		row  string
+		want int
+	}{
+		{"| a | b | c |", 3},
+		{`| a \| b | c |`, 2},
+		{"| `x \\| y` | c |", 2},
+		{`| a \\| b | c |`, 3}, // an escaped backslash leaves the pipe a delimiter
+		{`| a \\\| b | c |`, 2},
+		{`| C:\temp\x | c |`, 2}, // a backslash before another character escapes nothing
+	}
+	for _, tc := range cases {
+		if got := tableRowColumnCount(tc.row); got != tc.want {
+			t.Errorf("tableRowColumnCount(%q) = %d, want %d", tc.row, got, tc.want)
+		}
+	}
+}
+
+func TestHeaderTracker_EscapedPipeRowKeepsTableHeader(t *testing.T) {
+	ht := newHeaderTracker()
+	ht.update("| Name | Note | City |\n| --- | --- | --- |\n")
+	ht.update("| Lee | x \\| y | Shanghai |\n")
+	if ht.getHeaders() == "" {
+		t.Fatal("a 3-col row with an escaped pipe in a cell ended the 3-col table header")
+	}
+}
+
+func TestSplitText_EscapedPipeRowKeepsTableHeaderInLaterChunks(t *testing.T) {
+	text := "" +
+		"前面的文字\n\n" +
+		"| 姓名 | 备注 | 城市 |\n" +
+		"| --- | --- | --- |\n" +
+		"| 张三 | a | 北京 |\n" +
+		"| 李四 | x \\| y | 上海 |\n" +
+		"| 王五 | b | 广州 |\n" +
+		"| 赵六 | c | 深圳 |\n" +
+		"| 孙七 | d | 杭州 |\n" +
+		"| 周八 | e | 成都 |\n" +
+		"\n后面的文字"
+	tableHeader := "| 姓名 | 备注 | 城市 |\n| --- | --- | --- |\n"
+
+	cfg := SplitterConfig{ChunkSize: 60, ChunkOverlap: 5, Separators: []string{"\n\n", "\n"}}
+	chunks := SplitText(text, cfg)
+
+	checked := 0
+	for _, c := range chunks {
+		for _, row := range []string{"| 王五", "| 赵六", "| 孙七", "| 周八"} {
+			if strings.Contains(c.Content, row) {
+				checked++
+				if !strings.HasPrefix(c.Content, tableHeader) {
+					t.Errorf("chunk (seq=%d) with rows after the escaped-pipe row is missing the header:\n%s",
+						c.Seq, c.Content)
+				}
+				break
+			}
+		}
+	}
+	if checked == 0 {
+		t.Fatal("expected chunks holding the rows after the escaped-pipe row")
+	}
+}
+
 func TestHeaderTracker_ParagraphBreakEndsOnNextUnit(t *testing.T) {
 	ht := newHeaderTracker()
 	ht.update("| Name | Game | Fame | Blame |\n| --- | --- | --- | --- |\n")

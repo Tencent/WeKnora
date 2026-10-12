@@ -21,14 +21,17 @@
 package sandbox
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net"
 	"net/url"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/Tencent/WeKnora/internal/ipclass"
+	"github.com/Tencent/WeKnora/internal/utils"
 )
 
 // ErrUnsafeOutboundURL is returned for any endpoint that uses an unsupported
@@ -93,6 +96,11 @@ func (p OutboundURLPolicy) Validate(raw string) error {
 	if host == "" {
 		return fmt.Errorf("%w: missing host", ErrUnsafeOutboundURL)
 	}
+	// Whitelist-only mode refuses a host outside the whitelist before any
+	// lookup, IP literals and the loopback opt-in included (#3378).
+	if err := utils.CheckSSRFWhitelistOnly(host); err != nil {
+		return fmt.Errorf("%w: %w", ErrUnsafeOutboundURL, err)
+	}
 	// ".local" is mDNS; "localhost" is only acceptable under the opt-in.
 	lower := strings.ToLower(host)
 	if strings.HasSuffix(lower, ".local") {
@@ -123,6 +131,28 @@ func (p OutboundURLPolicy) Validate(raw string) error {
 		}
 	}
 	return nil
+}
+
+// GuardedDialContext is the DialContext every guarded transport uses: in
+// whitelist-only mode a non-whitelisted hostname is refused before the dialer
+// resolves it (#3378), and the policy's Control hook then judges the address
+// the kernel is about to connect to.
+func GuardedDialContext(policy OutboundURLPolicy) func(context.Context, string, string) (net.Conn, error) {
+	dialer := &net.Dialer{
+		Timeout:   10 * time.Second,
+		KeepAlive: 30 * time.Second,
+		Control:   SafeDialControlForPolicy(policy),
+	}
+	return func(ctx context.Context, network, addr string) (net.Conn, error) {
+		host := addr
+		if h, _, err := net.SplitHostPort(addr); err == nil {
+			host = h
+		}
+		if err := utils.CheckDialWhitelistOnly(host); err != nil {
+			return nil, fmt.Errorf("%w: %w", ErrUnsafeOutboundURL, err)
+		}
+		return dialer.DialContext(ctx, network, addr)
+	}
 }
 
 // DialControl refuses connections to forbidden addresses. It inspects the

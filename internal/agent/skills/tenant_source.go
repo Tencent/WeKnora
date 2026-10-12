@@ -53,6 +53,10 @@ const (
 // individual resource files come from the uploaded archive. Execution uses
 // neither - the files are already in the image.
 type TenantSkillSource struct {
+	// root is the absolute directory that holds installed skill dirs
+	// (image root on remote sandboxes, ~/.weknora/skills on Lite).
+	root string
+
 	byName map[string]*types.TenantSkillEntity
 	// order preserves the repository's ordering so the system prompt is stable
 	// between turns.
@@ -82,7 +86,16 @@ type cachedBundle struct {
 func NewTenantSkillSource(
 	rows []*types.TenantSkillEntity, loadBundle func(row *types.TenantSkillEntity) ([]byte, error),
 ) *TenantSkillSource {
+	return NewTenantSkillSourceAt(sandbox.SkillsImageRoot, rows, loadBundle)
+}
+
+// NewTenantSkillSourceAt serves skills installed under root: the image root
+// on remote sandboxes, ~/.weknora/skills on Lite.
+func NewTenantSkillSourceAt(
+	root string, rows []*types.TenantSkillEntity, loadBundle func(row *types.TenantSkillEntity) ([]byte, error),
+) *TenantSkillSource {
 	src := &TenantSkillSource{
+		root:       root,
 		byName:     make(map[string]*types.TenantSkillEntity, len(rows)),
 		loadBundle: loadBundle,
 	}
@@ -99,18 +112,22 @@ func NewTenantSkillSource(
 	return src
 }
 
+func (s *TenantSkillSource) skillDir(name string) (string, error) {
+	return sandbox.SkillDirUnder(s.root, name)
+}
+
 // usableSkillRow is the one place "the agent can actually run this" is decided
 // for a single row. A row that is still installing, failed, or was disabled by
 // an administrator is invisible: telling the model about a skill it cannot
 // invoke costs it turns and gains nothing.
 //
 // The name guard is not defensive: every path this source hands out is
-// SkillDirFor(row.Name), which joins the name under the skills root. A name
+// skillDir(row.Name), which joins the name under the skills root. A name
 // that is not a single path segment yields a path outside the skill, or outside
 // the root entirely, and those paths reach the model in discovery metadata and
 // in SkillFile.Path even though execution would refuse them. Filtering the row
 // out here is what keeps them from ever being spoken. sandbox.IsValidSkillName
-// is the same rule SkillDirFor enforces, so this cannot disagree with it.
+// is the same rule SkillDirUnder enforces, so this cannot disagree with it.
 func usableSkillRow(row *types.TenantSkillEntity) bool {
 	return row != nil &&
 		row.Enabled &&
@@ -123,7 +140,7 @@ func (s *TenantSkillSource) DiscoverSkills() ([]*SkillMetadata, error) {
 	metadata := make([]*SkillMetadata, 0, len(s.order))
 	for _, name := range s.order {
 		row := s.byName[name]
-		basePath, err := sandbox.SkillDirFor(row.Name)
+		basePath, err := s.skillDir(row.Name)
 		if err != nil {
 			return nil, err
 		}
@@ -142,7 +159,7 @@ func (s *TenantSkillSource) LoadSkillInstructions(name string) (*Skill, error) {
 	if err != nil {
 		return nil, err
 	}
-	basePath, err := sandbox.SkillDirFor(row.Name)
+	basePath, err := s.skillDir(row.Name)
 	if err != nil {
 		return nil, err
 	}
@@ -186,7 +203,7 @@ func (s *TenantSkillSource) LoadSkillFile(name, relativePath string) (*SkillFile
 	if err != nil {
 		return nil, err
 	}
-	basePath, err := sandbox.SkillDirFor(row.Name)
+	basePath, err := s.skillDir(row.Name)
 	if err != nil {
 		return nil, err
 	}
@@ -229,7 +246,7 @@ func (s *TenantSkillSource) GetSkillBasePath(name string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return sandbox.SkillDirFor(row.Name)
+	return s.skillDir(row.Name)
 }
 
 // RemoteScriptPath returns the absolute in-image path of one script. It is
@@ -247,7 +264,7 @@ func (s *TenantSkillSource) RemoteScriptPath(name, relativePath string) (string,
 	if err != nil {
 		return "", err
 	}
-	basePath, err := sandbox.SkillDirFor(row.Name)
+	basePath, err := s.skillDir(row.Name)
 	if err != nil {
 		return "", err
 	}

@@ -1,0 +1,13 @@
+    Fetching advisory database from `https://github.com/RustSec/advisory-db.git`
+      Loaded 1273 security advisories (from /Users/wizard/.cargo/advisory-db)
+    Updating crates.io index
+    Scanning third_party/anydoc-go/Cargo.lock for vulnerabilities (162 crate dependencies)
+Crate:     ttf-parser
+Version:   0.25.1
+Warning:   unmaintained
+Title:     `ttf-parser` is unmaintained
+Date:      2026-06-28
+ID:        RUSTSEC-2026-0192
+URL:       https://rustsec.org/advisories/RUSTSEC-2026-0192
+
+warning: 1 allowed warning found

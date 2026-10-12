@@ -6,6 +6,7 @@ import {
   collectSessionArtifacts,
   formatArtifactDateTime,
   formatArtifactSize,
+  markSessionArtifactDeleted,
 } from './sessionArtifacts.ts'
 
 test('collectSessionArtifacts keeps per-message download indexes', () => {
@@ -96,4 +97,46 @@ test('both answer renderers resolve the persisted artifact owner for inline prev
     assert.ok(start >= 0 && end > start)
     assert.match(source.slice(start, end), /persistedAssistantId\(props\.session\)/)
   }
+})
+
+test('collectSessionArtifacts hides deleted files but leaves the indexes after them alone', () => {
+  const items = collectSessionArtifacts([
+    {
+      role: 'assistant',
+      id: 'a1',
+      artifacts: [
+        { file_name: 'first.csv' },
+        { file_name: 'gone.pptx', deleted_at: '2026-09-20T02:00:00Z' },
+        { file_name: 'third.png' },
+      ],
+    },
+  ])
+  assert.deepEqual(
+    items.map((item) => ({ index: item.index, file_name: item.file_name })),
+    [
+      { index: 0, file_name: 'first.csv' },
+      // 2, not 1: the index is the download address, and the server keeps the
+      // deleted entry in place precisely so this one does not move.
+      { index: 2, file_name: 'third.png' },
+    ],
+  )
+})
+
+test('markSessionArtifactDeleted flags the row so the list drops it without a refetch', () => {
+  const deleted = { file_name: 'b.csv' } as { file_name: string; deleted_at?: string }
+  const messages = [
+    { role: 'user', id: 'u1', content: 'hi' },
+    { role: 'assistant', id: 'a1', artifacts: [{ file_name: 'a.csv' }, deleted] },
+  ]
+  assert.equal(markSessionArtifactDeleted(messages, 'a1', 1), true)
+  assert.ok(deleted.deleted_at)
+  assert.deepEqual(
+    collectSessionArtifacts(messages).map((item) => item.file_name),
+    ['a.csv'],
+  )
+
+  // Already flagged, unknown message, out-of-range index: all no-ops.
+  assert.equal(markSessionArtifactDeleted(messages, 'a1', 1), false)
+  assert.equal(markSessionArtifactDeleted(messages, 'nope', 0), false)
+  assert.equal(markSessionArtifactDeleted(messages, 'a1', 9), false)
 })

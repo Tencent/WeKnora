@@ -310,19 +310,11 @@ async function loadEngines(force = false) {
     parserEngines.value = []
   } finally {
     loading.value = false
-    ensureCompleteRules()
   }
 }
 
-function ensureCompleteRules() {
-  if (!parserEngines.value.length) return
-  const complete = buildCompleteRules()
-  if (complete.length && complete.length > localEngineRules.value.length) {
-    localEngineRules.value = complete
-    emit('update:parserEngineRules', complete)
-  }
-}
-
+// Missing rules display getDefaultEngine() without turning a read-only visit
+// into a form edit. Only explicit user changes emit the completed rules.
 onMounted(loadEngines)
 
 const { showSettingsModal } = storeToRefs(uiStore)

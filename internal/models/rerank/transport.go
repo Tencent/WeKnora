@@ -26,11 +26,20 @@ var sharedRerankHTTPTransport = secutils.NewSSRFSafeTransport(
 	secutils.DefaultSSRFSafeHTTPClientConfig(),
 )
 
+// defaultRerankRequestTimeout caps one rerank request when the catalog sets
+// no timeout. Chat and agent contexts carry no deadline of their own, so a
+// stalled self-hosted rerank server used to hold the turn open until the
+// client disconnected. A failed call degrades to retrieval order.
+const defaultRerankRequestTimeout = 60 * time.Second
+
 // newRerankHTTPClient returns an HTTP client with connection-level SSRF
 // protection and redirect validation. All clients share
 // sharedRerankHTTPTransport so keep-alive connections are pooled globally,
 // while each keeps its own timeout.
 func newRerankHTTPClient(timeout time.Duration) *http.Client {
+	if timeout <= 0 {
+		timeout = defaultRerankRequestTimeout
+	}
 	cfg := secutils.DefaultSSRFSafeHTTPClientConfig()
 	cfg.Timeout = timeout
 	return secutils.NewSSRFSafeHTTPClientWithTransport(cfg, sharedRerankHTTPTransport)

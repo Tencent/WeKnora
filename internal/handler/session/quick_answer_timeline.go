@@ -128,3 +128,7 @@ func appendQuickAnswerToolCall(msg *types.Message, call types.ToolCall) {
 	}
 	step.ToolCalls = append(step.ToolCalls, call)
 }
+
+func markQuickAnswerTruncated(msg *types.Message) {
+	ensureQuickAnswerStep(msg).Truncated = true
+}

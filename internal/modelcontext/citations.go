@@ -22,6 +22,11 @@ const citationEnabledProtocolPrompt = `
 - Source citations are enabled for this answer. Cite a knowledge chunk with exactly <ref id="cN"/> and a web page with exactly <ref id="wN"/>.
 - Cite only cN/wN handles backed by tool results for the current task, and only when that source supports the adjacent
   claim. Never cite dN/bN.
+- Each cN covers only its own supplied text or image evidence, not every chunk of the same document.
+  For a direct quotation, verify that the quoted words occur in the cited cN. Use the later chunk's handle
+  when the words occur there; never reuse a document's first handle for unrelated passages.
+- OCR watermarks, timestamps and image captions are observations of an image. Do not turn a watermark slogan
+  into a verified service commitment or a caption into a factual document statement without supporting text.
 - Handles in historical answers, tool arguments, or the bound knowledge-base directory are for navigation, not current
   evidence. Retrieve the relevant source before citing it.
 - MCP results are external sources. Use the wN handle for the matching URL in the system-provided

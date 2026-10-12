@@ -59,7 +59,7 @@ try {
   assert.match(await page.locator('.VPDoc h1').innerText(), /快速上手/);
   assert.equal(await page.getByRole('link', { name: '文档首页', exact: true }).count(), 0);
   assert.deepEqual((await headerGeometry(page)).controls, masthead.controls);
-  assert.deepEqual((await headerGeometry(page)).links.map(link => link[0]), ['快速开始', '架构', '功能', 'API', '客户端', '开发', 'GitHub']);
+  assert.deepEqual((await headerGeometry(page)).links.map(link => link[0]), ['快速开始', '架构', '功能', 'API', '客户端', '开发', '版本', 'GitHub']);
   assert.equal(await page.locator('.wk-header').evaluate(el => el.getBoundingClientRect().height), 64);
   assert.equal(context.pages().length, 1);
   // Switching distant sections must reveal the selected sidebar item in both directions.
@@ -91,10 +91,11 @@ try {
   await expectTheme(page, false);
   assert.equal(context.pages().length, 1);
 
-  // Navigation to new v0.8.0 docs, returning through the explicit home link.
+  // Navigation to new v0.8.2 docs, returning through the explicit home link.
   await page.locator('#release').getByRole('link', { name: '了解更多', exact: true }).last().click();
   await page.waitForSelector('.VPDoc h1');
-  assert.match(await page.locator('.VPDoc h1').innerText(), /记忆/);
+  assert.equal(new URL(page.url()).pathname, '/docs/03-features/18-chat-experience.html');
+  assert.match(await page.locator('.VPDoc h1').innerText(), /会话与对话体验/);
   await page.locator('.wk-brand').click();
   await homepage();
   assert.equal(context.pages().length, 1);
@@ -178,7 +179,7 @@ try {
         const image = document.querySelector('.wk-brand img');
         return image?.complete && image.naturalWidth === 945 && image.naturalHeight === 650;
       });
-      assert.equal(await page.locator('.wk-brand img').getAttribute('src'), '/brand/weknora-original.png');
+      assert.equal(await page.locator('.wk-brand img').getAttribute('src'), '/docs/_home/brand/weknora-original.png');
       await checkVisibleControl(page, '.wk-theme-toggle');
     }
   }

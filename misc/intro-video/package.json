@@ -1,0 +1,13 @@
+{
+  "name": "weknora-intro-video",
+  "private": true,
+  "type": "module",
+  "description": "Source for the WeKnora intro video: an HTML animation rendered frame by frame to MP4.",
+  "scripts": {
+    "render": "node render.mjs video",
+    "stills": "node render.mjs stills"
+  },
+  "dependencies": {
+    "playwright-core": "1.49.1"
+  }
+}

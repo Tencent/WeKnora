@@ -44,7 +44,7 @@ func newTestEngineWithRepo(t *testing.T, ep *types.MCPEndpoint) (*gin.Engine, *r
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	repo := &recordingEndpointRepo{touched: make(chan string, 8)}
-	srv := NewServer(nil, nil, nil, nil, nil, nil, nil, nil, nil, repo, nil, nil, nil)
+	srv := NewServer(nil, nil, nil, nil, nil, nil, nil, nil, nil, repo, nil, nil, nil, nil, nil, nil)
 	r := gin.New()
 	inject := func(c *gin.Context) {
 		if ep != nil {
@@ -155,14 +155,10 @@ func TestCallHiddenToolIsRefused(t *testing.T) {
 		"name":      types.MCPEndpointToolDeleteDocument,
 		"arguments": map[string]any{"knowledge_id": "k-1"},
 	})
-	result, _ := resp["result"].(map[string]any)
-	if isErr, _ := result["isError"].(bool); !isErr {
-		t.Fatalf("expected tool error, got %v", resp)
-	}
-	content, _ := result["content"].([]any)
-	first, _ := content[0].(map[string]any)
-	if !strings.Contains(first["text"].(string), "not enabled") {
-		t.Fatalf("unexpected error text: %v", first["text"])
+	// Filtered tools are unavailable at SDK dispatch, before a handler runs.
+	err, _ := resp["error"].(map[string]any)
+	if err["code"] != float64(-32602) || resp["result"] != nil {
+		t.Fatalf("expected invalid-params protocol error, got %v", resp)
 	}
 }
 

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/utils"
 	"github.com/go-viper/mapstructure/v2"
 	"github.com/spf13/viper"
 	"gopkg.in/yaml.v3"
@@ -273,13 +274,14 @@ type AuditConfig struct {
 
 // AuthConfig governs the user authentication entry points.
 type AuthConfig struct {
-	// RegistrationMode controls who may call POST /auth/register.
+	// RegistrationMode controls public and invitation password registration.
 	//   "self_serve" (default) — anyone may register; a new tenant is
 	//                            auto-created and the registrant becomes
 	//                            its Owner. Preserves existing behaviour.
-	//   "invite_only"          — public registration is rejected; new
-	//                            users only enter through the invitation
-	//                            flow added in PR 3.
+	//   "invite_register"      — new users need a valid invitation link.
+	//   "invite_only"          — no password registration; invitations can
+	//                            only be accepted by existing accounts.
+	//                            Kept as the legacy disabled mode.
 	RegistrationMode string `yaml:"registration_mode" json:"registration_mode"`
 	// DefaultTenantMode controls public password-registration provisioning.
 	// create_personal preserves the historical one-user-one-workspace default;
@@ -293,14 +295,13 @@ type AuthConfig struct {
 const (
 	AuthRegistrationModeSelfServe       = "self_serve"
 	AuthRegistrationModeInviteOnly      = "invite_only"
+	AuthRegistrationModeInviteRegister  = "invite_register"
 	AuthDefaultTenantModeCreatePersonal = "create_personal"
 	AuthDefaultTenantModeTenantless     = "tenantless"
 )
 
-// IsInviteOnly returns true when registration is gated behind invitations.
-// Treats nil receiver and empty/unknown values as "not invite-only" so the
-// default keeps current behaviour even if the section is missing from the
-// config file.
+// IsInviteOnly identifies the legacy disabled-registration mode.
+// It does not identify the invite_register mode, which permits new accounts.
 func (c *AuthConfig) IsInviteOnly() bool {
 	if c == nil {
 		return false
@@ -590,6 +591,7 @@ func LoadConfig() (*Config, error) {
 	applyOIDCEnvOverrides(&cfg)
 	applyAgentEnvOverrides(&cfg)
 	applyKnowledgeBaseEnvOverrides(&cfg)
+	applyNetworkEnvOverrides()
 	applyAuthAndTenantDefaults(&cfg)
 	applyAuditDefaults(&cfg)
 
@@ -638,9 +640,11 @@ func ValidateConfig(cfg *Config) error {
 
 	if cfg.Auth != nil {
 		mode := strings.TrimSpace(cfg.Auth.RegistrationMode)
-		if mode != "" && mode != AuthRegistrationModeSelfServe && mode != AuthRegistrationModeInviteOnly {
-			errs = append(errs, fmt.Sprintf("auth.registration_mode must be %q or %q, got %q",
-				AuthRegistrationModeSelfServe, AuthRegistrationModeInviteOnly, mode))
+		if mode != "" && mode != AuthRegistrationModeSelfServe &&
+			mode != AuthRegistrationModeInviteOnly && mode != AuthRegistrationModeInviteRegister {
+			errs = append(errs, fmt.Sprintf("auth.registration_mode must be %q, %q or %q, got %q",
+				AuthRegistrationModeSelfServe, AuthRegistrationModeInviteOnly,
+				AuthRegistrationModeInviteRegister, mode))
 		}
 
 		tenantMode := strings.TrimSpace(cfg.Auth.DefaultTenantMode)
@@ -779,6 +783,21 @@ func applyKnowledgeBaseEnvOverrides(cfg *Config) {
 			cfg.KnowledgeBase.DocReaderCallTimeout = d
 		}
 	}
+}
+
+// applyNetworkEnvOverrides configures global network timeouts that are not
+// scoped to a single config section. The outbound (SSRF-safe) dial timeout
+// governs how quickly an unreachable model/connector endpoint fails; it
+// defaults to 5s and can be raised via WEKNORA_OUTBOUND_DIAL_TIMEOUT for
+// slow-to-connect serverless endpoints.
+func applyNetworkEnvOverrides() {
+	dialTimeout := 5 * time.Second
+	if value := strings.TrimSpace(os.Getenv("WEKNORA_OUTBOUND_DIAL_TIMEOUT")); value != "" {
+		if d, err := time.ParseDuration(value); err == nil && d > 0 {
+			dialTimeout = d
+		}
+	}
+	utils.SetOutboundDialTimeout(dialTimeout)
 }
 
 func applyAgentEnvOverrides(cfg *Config) {

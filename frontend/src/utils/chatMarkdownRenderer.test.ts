@@ -84,6 +84,23 @@ test('renderChatMarkdown safely renders an image with fullwidth parentheses', ()
   assert.doesNotMatch(html, /（|）/)
 })
 
+test('renderChatMarkdown skips an image with an empty destination', () => {
+  const renderer = createChatMarkdownRenderer({
+    imageRenderer: ({ href, text }) => `<img src="${href}" alt="${text}">`,
+    invalidImageHtml: () => '<p>invalid</p>',
+    isValidImageUrl: (href) => Boolean(href),
+  })
+  const html = renderChatMarkdown('![根目录示例文件]()', {
+    renderer,
+    escapeMarkdown: (text) => text,
+    sanitizeHtml: (value) => value,
+    streaming: false,
+  })
+
+  assert.doesNotMatch(html, /<img/)
+  assert.doesNotMatch(html, /invalid/)
+})
+
 test('renderChatMarkdown hides an unfinished fullwidth-parenthesis image while streaming', () => {
   const renderer = createChatMarkdownRenderer()
   const html = renderChatMarkdown('before ![流程图]（resource://yB7V7wE1gls7h9WonCDq5Q', {
@@ -631,4 +648,20 @@ test('collapseStandaloneCitationParagraphs merges citations across empty paragra
   const out = collapseStandaloneCitationParagraphs(html)
   assert.match(out, /Steps:.*citation-kb/s)
   assert.doesNotMatch(out, /<p><\/p>/)
+})
+
+test('renderChatMarkdown keeps ~~strikethrough~~ while leaving single tildes literal', () => {
+  const renderer = createChatMarkdownRenderer()
+  const options = {
+    renderer,
+    escapeMarkdown: (text: string) => text,
+    sanitizeHtml: (html: string) => html,
+    streaming: false,
+  }
+  const html = renderChatMarkdown('~~a~~ and ~b~ and 2020~2035, 8:00~12:00.', options)
+  assert.equal((html.match(/<del>/g) || []).length, 1)
+  assert.match(html, /<del>a<\/del>/)
+  assert.match(html, /~b~/)
+  assert.match(html, /2020~2035/)
+  assert.match(html, /8:00~12:00/)
 })

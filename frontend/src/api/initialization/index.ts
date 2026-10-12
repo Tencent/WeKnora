@@ -1,5 +1,6 @@
 import { get, post, put } from '../../utils/request';
 import i18n from '@/i18n'
+import type { ModelCapabilities, ModelSpecOverride, ReasoningEffortLevel } from '../model'
 
 const t = (key: string) => i18n.global.t(key)
 
@@ -304,6 +305,7 @@ export function getCurrentConfigByKB(kbId: string): Promise<InitializationConfig
 // customHeaders / extraConfig / interfaceType 对应后端 ModelTestRequest 里的同名字段，
 // 会被透传给真正的模型装配流程，保证测试连接与生产调用走完全相同的路径。
 interface BaseModelTestPayload {
+    spec?: ModelSpecOverride;
     customHeaders?: Record<string, string>;
     extraConfig?: Record<string, string>;
     interfaceType?: string;
@@ -579,28 +581,160 @@ export function fabriTag(request: FabriTagRequest): Promise<FabriTagResponse> {
     });
 }
 
-// 模型厂商信息类型
-export interface ModelProviderOption {
-    value: string;        // provider 标识符
-    label: string;        // 显示名称
-    description: string;  // 描述
-    defaultUrls: Record<string, string>;  // 按模型类型区分的默认 URL
-    modelTypes: string[]; // 支持的模型类型
+// 厂商额外配置字段（Azure api_version、LKEAP secret_key 等）。
+// Mirrors internal/models/catalog.ExtraField.
+export interface ModelProviderExtraFieldOption {
+    label: string;
+    labels?: Record<string, string>;
+    value: string;
 }
 
-// 获取模型厂商列表
+/**
+ * Renames the primary credential input for vendors whose API does not take a
+ * plain API key. LKEAP and Volcengine sign their rerank requests with a
+ * CAM / IAM key pair, so the first field is a SecretId / Access Key ID.
+ * The vendor declares the wording so the editor needs no vendor table.
+ */
+export interface ModelProviderCredentialLabel {
+    label: string;
+    labels?: Record<string, string>;
+    placeholder?: string;
+    placeholders?: Record<string, string>;
+    hint?: string;
+    hints?: Record<string, string>;
+    // Backend model types ("KnowledgeQA", "Rerank", ...); empty = all.
+    model_types?: string[];
+    required?: boolean;
+}
+
+export interface ModelProviderExtraField {
+    key: string;
+    label: string;
+    labels?: Record<string, string>;
+    type: 'string' | 'number' | 'boolean' | 'select' | 'password' | string;
+    required?: boolean;
+    default?: string;
+    placeholder?: string;
+    placeholders?: Record<string, string>;
+    options?: ModelProviderExtraFieldOption[];
+    // Backend model types ("KnowledgeQA", "Embedding", "Rerank", "VLLM", "ASR"); empty = all.
+    model_types?: string[];
+    // Secret values are never echoed back; they are stored as the app_secret credential.
+    secret?: boolean;
+}
+
+// 厂商内置模型目录条目。Mirrors handler.ModelCatalogEntryDTO.
+export interface ModelCatalogEntry {
+    id: string;
+    name: string;
+    type: string;
+    api?: string;
+    reasoning?: boolean;
+    input?: string[];
+    context_window?: number;
+    max_output_tokens?: number;
+    dimension?: number;
+    thinking_levels?: ReasoningEffortLevel[];
+    cost?: Record<string, unknown>;
+    // Vendor page these facts came from, for the "read the docs" link.
+    source?: string;
+}
+
+export interface ModelProviderThinking {
+    format: string;
+    levels: ReasoningEffortLevel[];
+}
+
+// 模型厂商信息类型。Mirrors handler.ModelProviderDTO — the frontend keeps no
+// vendor table of its own; everything rendered for a vendor comes from here.
+export interface ModelProviderOption {
+    value: string;        // provider 标识符
+    label: string;        // 显示名称（英文 / 默认）
+    labels?: Record<string, string>;  // 按 locale 的显示名称
+    description: string;  // 描述
+    descriptions?: Record<string, string>;
+    website?: string;
+    icon?: string;        // data:image/svg+xml;base64,... 可直接用于 <img src>
+    api?: string;
+    auth?: string;
+    requiresAuth?: boolean;
+    defaultUrls: Record<string, string>;  // 按模型类型区分的默认 URL
+    modelTypes: string[]; // 支持的模型类型
+    extraFields?: ModelProviderExtraField[];
+    credentialLabels?: ModelProviderCredentialLabel[];
+    models?: ModelCatalogEntry[];
+    thinking?: ModelProviderThinking;
+    order?: number;
+}
+
+// 获取模型厂商列表。
+//
+// 失败时 reject（不再吞成空数组）：唯一的调用方 stores/modelProviders 需要
+// 区分「后端真的没有厂商」和「这次请求挂了」——把失败当成空列表缓存下来，
+// 会让厂商下拉在整个会话里一直空着，直到用户刷新页面。
 export function listModelProviders(modelType?: string): Promise<ModelProviderOption[]> {
+    const url = modelType
+        ? `/api/v1/models/providers?model_type=${encodeURIComponent(modelType)}`
+        : '/api/v1/models/providers';
+    return get(url).then((response: any) => {
+        const data = response?.data;
+        // Reject rather than coerce: the store distinguishes "this vendor list
+        // is genuinely empty" (cacheable) from "the request did not produce a
+        // list" (retry on the next mount). Returning [] here would make a
+        // malformed 200 look like the former and blank the vendor dropdown and
+        // every card icon for the rest of the session.
+        if (!Array.isArray(data)) {
+            return Promise.reject(new Error('model providers response is not a list'));
+        }
+        return data as ModelProviderOption[];
+    });
+}
+
+export interface ResolveModelCatalogParams {
+    spec?: ModelSpecOverride;
+    provider: string;
+    model?: string;
+    base_url?: string;
+    model_type?: string;
+    api?: string;
+    thinking_control?: string;
+    remote_model_name?: string;
+    // Vendor-declared non-secret extra fields (Azure api_version, ...) are
+    // forwarded by key so the preview resolves the same request the runtime
+    // will make. The backend only accepts keys the vendor declares.
+    [extraField: string]: string | ModelSpecOverride | undefined;
+}
+
+// 目录解析结果。Mirrors handler.ResolveModelCatalog response data.
+export interface ResolvedModelCatalog {
+    provider: string;
+    api: string;
+    // base_url and url are only returned to callers who may configure
+    // integrations; a viewer gets the capability answer without the endpoint.
+    base_url?: string;
+    // url is the endpoint the row will actually call, and only vendors that
+    // compute their own URL report one (Azure, whose api_version picks
+    // between the v1 data plane and the dated deployments path).
+    url?: string;
+    remote_model: string;
+    cataloged: boolean;
+    model: Record<string, unknown>;
+    capabilities: ModelCapabilities;
+}
+
+// 解析模型的有效接入配置（协议、思考等级、上下文窗口等），供编辑器实时展示。
+export function resolveModelCatalog(params: ResolveModelCatalogParams): Promise<ResolvedModelCatalog> {
     return new Promise((resolve, reject) => {
-        const url = modelType
-            ? `/api/v1/models/providers?model_type=${encodeURIComponent(modelType)}`
-            : '/api/v1/models/providers';
-        get(url)
+        post(`/api/v1/models/catalog/resolve`, params)
             .then((response: any) => {
-                resolve(response.data || []);
+                if (response?.success && response?.data) {
+                    resolve(response.data as ResolvedModelCatalog);
+                } else {
+                    reject(new Error(response?.message || 'resolve failed'));
+                }
             })
             .catch((error: any) => {
-                console.error('Failed to list model providers:', error);
-                resolve([]); // 失败时返回空数组，前端可以回退到默认值
+                reject(error?.error || error);
             });
     });
 }

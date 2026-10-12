@@ -101,21 +101,16 @@ func ProfileDocument(text string) *DocProfile {
 
 	// First pass: per-line markers and length stats
 	var lengths []float64
-	inFence := false
+	var fence markdownFence
 	codeChars := 0
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
 
-		// Toggle fenced-code state. We use a 3-backtick prefix detector here
-		// rather than a full regex so we don't have to fight with the
-		// protected-pattern logic later.
-		if strings.HasPrefix(trimmed, "```") {
-			inFence = !inFence
+		if code, delimiter := fence.consume(line); code {
 			p.HasCode = true
-			continue
-		}
-		if inFence {
-			codeChars += len([]rune(line))
+			if !delimiter {
+				codeChars += len([]rune(line))
+			}
 			continue
 		}
 

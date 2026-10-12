@@ -2,6 +2,7 @@ package docparser
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strconv"
@@ -16,6 +17,26 @@ const defaultJSONChunkSize = 1536
 // when the current chunk has reached at least this size.
 var minJSONChunkSize = defaultJSONChunkSize - 200
 
+// Errors returned by ValidateJSONContent.
+var (
+	ErrEmptyJSONContent   = errors.New("empty JSON content")
+	ErrInvalidJSONContent = errors.New("invalid JSON content")
+)
+
+// ValidateJSONContent reports whether data is well-formed JSON after stripping
+// a leading UTF-8 BOM. Upload paths call this before enqueueing parse work so
+// JSONC / truncated payloads fail immediately instead of after async retries.
+func ValidateJSONContent(data []byte) error {
+	data = trimBOM(data)
+	if len(data) == 0 {
+		return ErrEmptyJSONContent
+	}
+	if !json.Valid(data) {
+		return ErrInvalidJSONContent
+	}
+	return nil
+}
+
 // jsonToMarkdown converts raw JSON bytes into markdown text
 //
 // Key properties:
@@ -26,13 +47,10 @@ var minJSONChunkSize = defaultJSONChunkSize - 200
 //   - The output is a series of fenced ```json code blocks separated by \n\n,
 //     which the downstream text chunker can split at block boundaries.
 func jsonToMarkdown(data []byte) (string, error) {
+	if err := ValidateJSONContent(data); err != nil {
+		return "", err
+	}
 	data = trimBOM(data)
-	if len(data) == 0 {
-		return "", fmt.Errorf("empty JSON content")
-	}
-	if !json.Valid(data) {
-		return "", fmt.Errorf("invalid JSON content")
-	}
 
 	var parsed interface{}
 	if err := json.Unmarshal(data, &parsed); err != nil {

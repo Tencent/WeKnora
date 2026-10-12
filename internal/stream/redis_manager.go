@@ -496,6 +496,40 @@ func (r *RedisStreamManager) ClearLiveRun(
 	return nil
 }
 
+// DropMessageStreams removes event and steer lists for deleted messages, and
+// clears a live-run marker that still names one of them.
+func (r *RedisStreamManager) DropMessageStreams(
+	ctx context.Context, sessionID string, messageIDs []string,
+) error {
+	if sessionID == "" || len(messageIDs) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(messageIDs)*2+1)
+	wantLive := make(map[string]struct{}, len(messageIDs))
+	for _, messageID := range messageIDs {
+		if messageID == "" {
+			continue
+		}
+		wantLive[messageID] = struct{}{}
+		keys = append(keys, r.buildKey(sessionID, messageID), r.buildSteerKey(sessionID, messageID))
+	}
+	if len(keys) > 0 {
+		if err := r.client.Del(ctx, keys...).Err(); err != nil {
+			return fmt.Errorf("failed to drop message streams in Redis: %w", err)
+		}
+	}
+	liveID, _, err := r.GetLiveRun(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	if _, ok := wantLive[liveID]; ok {
+		if err := r.ClearLiveRun(ctx, sessionID, liveID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // Close closes the Redis connection
 func (r *RedisStreamManager) Close() error {
 	return r.client.Close()

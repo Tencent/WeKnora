@@ -106,6 +106,9 @@ type Manager struct {
 	skillDirs     []string
 	allowedSkills []string // Empty means all skills are allowed
 	enabled       bool
+	// skillsRoot overrides the installed-skill root used for discovery and
+	// shell env. Empty means the remote image root.
+	skillsRoot string
 
 	// Cache
 	metadataCache []*SkillMetadata
@@ -150,6 +153,20 @@ func (m *Manager) IsEnabled() bool {
 func (m *Manager) WithTenantSource(source SkillSource) *Manager {
 	m.tenantSource = source
 	return m
+}
+
+// WithSkillsRoot points installed-skill execution at root. Unset means the
+// remote image root.
+func (m *Manager) WithSkillsRoot(root string) *Manager {
+	m.skillsRoot = strings.TrimSpace(root)
+	return m
+}
+
+func (m *Manager) installedSkillsRoot() string {
+	if m.skillsRoot != "" {
+		return m.skillsRoot
+	}
+	return sandbox.SkillsImageRoot
 }
 
 // resolveSource decides which source owns one skill name. An installed image

@@ -259,8 +259,8 @@ func TestSandboxDesktopWSLookupIsOptInProvision(t *testing.T) {
 	require.NoError(t, err)
 	text := string(src)
 	require.Contains(t, text, `allowProvision := terminalFlagParam(c.Query("provision"))`)
-	require.Contains(t, text, `h.terminalProvisionConfigID(ensureCtx, c, allowProvision)`)
-	require.NotContains(t, text, `terminalProvisionConfigID(ctx, c, true)`)
+	require.Contains(t, text, `h.terminalProvisionPin(ensureCtx, c, allowProvision)`)
+	require.NotContains(t, text, `terminalProvisionPin(ctx, c, true)`)
 	// The JS WebSocket API never exposes a failed handshake's HTTP status.
 	// Overlay states (not bound / paused) have to ride a close reason after
 	// upgrade, or the panel shows a generic error instead of the confirm card.

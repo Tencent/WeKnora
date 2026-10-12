@@ -83,7 +83,8 @@ var markdownImagePattern = regexp.MustCompile(`!\[[^\]]*\]\([^)]*\)`)
 
 var temporaryDocumentExtensions = map[string]struct{}{
 	".docx": {}, ".doc": {}, ".pdf": {}, ".ppt": {}, ".pptx": {}, ".epub": {}, ".mhtml": {},
-	".xlsx": {}, ".xls": {},
+	".xmind": {},
+	".xlsx":  {}, ".xls": {},
 	".md": {}, ".markdown": {}, ".txt": {}, ".csv": {}, ".json": {}, ".xml": {}, ".yaml": {}, ".yml": {}, ".log": {}, ".html": {},
 	".jpg": {}, ".jpeg": {}, ".png": {}, ".gif": {}, ".bmp": {}, ".tiff": {}, ".webp": {},
 	".mp3": {}, ".wav": {}, ".m4a": {}, ".flac": {}, ".ogg": {}, ".aac": {},
@@ -601,7 +602,10 @@ func (s *temporaryDocumentService) understandImagesWithVLM(
 				logger.Warnf(ctx, "temporary document VLM OCR failed on image %d: %v", idx, ocrErr)
 				return
 			}
-			ocrResults[idx] = sanitizeOCRText(ocrText)
+			ocrResults[idx], ocrErr = validateOCRText(ocrText)
+			if ocrErr != nil {
+				logger.Warnf(ctx, "temporary document VLM OCR rejected on image %d: %v", idx, ocrErr)
+			}
 		}(idx, img)
 	}
 	wg.Wait()

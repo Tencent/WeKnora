@@ -96,10 +96,11 @@ func (p *PluginWebFetch) OnEvent(
 		if fr.content == "" {
 			continue
 		}
-		// Truncate to reasonable size for LLM context
+		// Truncate to reasonable size for LLM context. Cut on a rune
+		// boundary: slicing bytes split multi-byte characters.
 		content := fr.content
-		if len(content) > 8000 {
-			content = content[:8000] + "\n...(truncated)"
+		if runes := []rune(content); len(runes) > webFetchMaxRunes {
+			content = string(runes[:webFetchMaxRunes]) + "\n...(truncated)"
 		}
 		webResults[fr.idx].Content = content
 		fetchedCount++
@@ -111,3 +112,6 @@ func (p *PluginWebFetch) OnEvent(
 	})
 	return next()
 }
+
+// webFetchMaxRunes caps the fetched page text kept per web result.
+const webFetchMaxRunes = 8000

@@ -61,3 +61,23 @@ func TestRegistryNormalizesMissingAndContradictoryResults(t *testing.T) {
 		require.NotEmpty(t, result.Error)
 	}
 }
+
+type panickingTool struct{ BaseTool }
+
+func (t *panickingTool) Execute(context.Context, json.RawMessage) (*types.ToolResult, error) {
+	var items []int
+	_ = items[len(items)] // index out of range: a runtime panic like a buggy tool would raise
+	return nil, nil
+}
+
+func TestRegistryRecoversToolPanic(t *testing.T) {
+	registry := NewToolRegistry()
+	registry.RegisterTool(&panickingTool{BaseTool: NewBaseTool("crashy", "", json.RawMessage(`{"type":"object"}`))})
+
+	result, err := registry.ExecuteTool(context.Background(), "crashy", json.RawMessage(`{}`))
+	require.Error(t, err)
+	require.NotNil(t, result)
+	require.False(t, result.Success)
+	require.Equal(t, "tool crashy failed with an internal error", result.Error)
+	require.NotContains(t, result.Error, "index out of range")
+}

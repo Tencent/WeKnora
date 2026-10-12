@@ -305,7 +305,7 @@ func (h *KnowledgeBaseHandler) resolveKBStoreView(
 
 // HybridSearch godoc
 // @Summary      混合搜索
-// @Description  在知识库中执行向量和关键词混合搜索。推荐使用 POST；GET 携带 JSON 请求体仍受支持（兼容旧客户端）。
+// @Description  底层召回：向量+关键词混合检索，默认不 rerank（可用 rerank 字段开启）；一般检索请用 /knowledge-search。推荐 POST，GET 带 JSON 体仅兼容旧客户端。
 // @Tags         知识库
 // @Accept       json
 // @Produce      json
@@ -342,6 +342,15 @@ func (h *KnowledgeBaseHandler) HybridSearch(c *gin.Context) {
 		_ = c.Error(apperrors.NewBadRequestError("query_text is required"))
 		return
 	}
+	if err := req.Rerank.Validate(); err != nil {
+		_ = c.Error(apperrors.NewBadRequestError(err.Error()))
+		return
+	}
+	if req.Rerank.IsEnabled() && strings.TrimSpace(req.QueryText) == "" {
+		// The rerank model scores passages against the query text.
+		_ = c.Error(apperrors.NewBadRequestError("query_text is required when rerank is enabled"))
+		return
+	}
 
 	logger.Infof(ctx, "Executing hybrid search, knowledge base ID: %s, query: %s, effectiveTenantID: %d",
 		secutils.SanitizeForLog(id), secutils.SanitizeForLog(req.QueryText), effectiveTenantID)
@@ -354,9 +363,17 @@ func (h *KnowledgeBaseHandler) HybridSearch(c *gin.Context) {
 		return
 	}
 
-	// Execute hybrid search with default search parameters
+	// Execute hybrid search. Without a rerank object this is the raw recall
+	// primitive it has always been; with one, the response carries meta.
 	// Note: For shared KBs, the service uses effectiveTenantID internally via context
-	results, err := h.service.HybridSearch(c.Request.Context(), id, req)
+	var retrieval *types.RetrievalResult
+	if req.Rerank != nil {
+		retrieval, err = h.service.HybridSearchWithRerank(c.Request.Context(), id, req)
+	} else {
+		var results []*types.SearchResult
+		results, err = h.service.HybridSearch(c.Request.Context(), id, req)
+		retrieval = &types.RetrievalResult{Results: results}
+	}
 	if err != nil {
 		// Service-layer typed AppErrors (e.g. ErrVectorStoreBindingInvalid,
 		// ErrVectorStoreUnavailable, BadRequest from multi-store fan-out)
@@ -373,11 +390,15 @@ func (h *KnowledgeBaseHandler) HybridSearch(c *gin.Context) {
 	}
 
 	logger.Infof(ctx, "Hybrid search completed, knowledge base ID: %s, result count: %d",
-		secutils.SanitizeForLog(id), len(results))
-	c.JSON(http.StatusOK, gin.H{
+		secutils.SanitizeForLog(id), len(retrieval.Results))
+	response := gin.H{
 		"success": true,
-		"data":    rewriter.CopyReferences(ctx, results),
-	})
+		"data":    rewriter.CopyReferences(ctx, retrieval.Results),
+	}
+	if retrieval.Meta.Rerank != nil {
+		response["meta"] = retrieval.Meta
+	}
+	c.JSON(http.StatusOK, response)
 }
 
 // CreateKnowledgeBase godoc
@@ -716,6 +737,10 @@ type UpdateKnowledgeBaseRequest struct {
 	Name        string                     `json:"name"        binding:"required"`
 	Description string                     `json:"description"`
 	Config      *types.KnowledgeBaseConfig `json:"config"`
+	// VLMConfig updates the knowledge base's multimodal (vision) config.
+	// Optional: nil means "no change", mirroring how CreateKnowledgeBase
+	// accepts a top-level vlm_config.
+	VLMConfig *types.VLMConfig `json:"vlm_config"`
 }
 
 // UpdateKnowledgeBase godoc
@@ -736,7 +761,7 @@ func (h *KnowledgeBaseHandler) UpdateKnowledgeBase(c *gin.Context) {
 	logger.Info(ctx, "Start updating knowledge base")
 
 	// Validate and get the knowledge base
-	_, id, _, permission, err := h.validateAndGetKnowledgeBase(c)
+	currentKB, id, _, permission, err := h.validateAndGetKnowledgeBase(c)
 	if err != nil {
 		c.Error(err)
 		return
@@ -755,12 +780,22 @@ func (h *KnowledgeBaseHandler) UpdateKnowledgeBase(c *gin.Context) {
 		c.Error(apperrors.NewBadRequestError("Invalid request parameters").WithDetails(err.Error()))
 		return
 	}
+	// The VLM model is a KB setting: like PUT /initialization/config, only the
+	// owner workspace or an admin share may change it, not a share editor.
+	if req.VLMConfig != nil {
+		if _, err := kbSettingsAccess(c, currentKB); err != nil {
+			_ = c.Error(err)
+			return
+		}
+	}
 	if req.Config != nil {
 		probe := &types.KnowledgeBase{
-			ChunkingConfig:        req.Config.ChunkingConfig,
-			ImageProcessingConfig: req.Config.ImageProcessingConfig,
-			WikiConfig:            req.Config.WikiConfig,
-			ProfileConfig:         req.Config.ProfileConfig,
+			ChunkingConfig: req.Config.ChunkingConfig,
+			WikiConfig:     req.Config.WikiConfig,
+			ProfileConfig:  req.Config.ProfileConfig,
+		}
+		if req.Config.ImageProcessingConfig != nil {
+			probe.ImageProcessingConfig = *req.Config.ImageProcessingConfig
 		}
 		if err := validateKnowledgeBasePromptInstructions(probe); err != nil {
 			c.Error(err)
@@ -772,8 +807,13 @@ func (h *KnowledgeBaseHandler) UpdateKnowledgeBase(c *gin.Context) {
 		secutils.SanitizeForLog(id), secutils.SanitizeForLog(req.Name))
 
 	// Update the knowledge base
-	kb, err := h.service.UpdateKnowledgeBase(ctx, id, req.Name, req.Description, req.Config)
+	kb, err := h.service.UpdateKnowledgeBase(ctx, id, req.Name, req.Description, req.Config, req.VLMConfig)
 	if err != nil {
+		// A rejected vlm_config is the caller's mistake, not a server failure.
+		if appErr, ok := apperrors.IsAppError(err); ok {
+			_ = c.Error(appErr)
+			return
+		}
 		logger.ErrorWithFields(ctx, err, nil)
 		c.Error(apperrors.NewInternalServerError(err.Error()))
 		return
@@ -1308,5 +1348,24 @@ func (h *KnowledgeBaseHandler) ListMoveTargets(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data":    targets,
+	})
+}
+
+// GetImageAttrsSchema returns the canonical image-attribute registry for this
+// release. It is the single source of truth that drives the frontend attribute
+// panel — both the attributes and their display text (label, description, the
+// meaning of each value) — so adding an attribute later is a backend-only
+// change (one registry row) and the UI follows automatically. Read-only; the
+// registry is global, not per-KB, so it carries no KB id and only the Viewer
+// role is required.
+func (h *KnowledgeBaseHandler) GetImageAttrsSchema(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data": gin.H{
+			"version":         types.ImageAttrSchemaVersion,
+			"prompt":          types.ImageAttrPromptVersion,
+			"attributes":      types.ImageAttrRegistry,
+			"default_actions": types.DefaultImageActions(),
+		},
 	})
 }

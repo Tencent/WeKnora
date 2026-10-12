@@ -672,6 +672,7 @@ func TestResolveEffectiveConfigUsesSkillSnapshotAsE2BTemplate(t *testing.T) {
 
 		require.NoError(t, err)
 		require.Equal(t, "snap-1", eff.E2BTemplate)
+		require.True(t, eff.TemplateFromSnapshot)
 	})
 
 	t.Run("fingerprint mismatch falls back to the base template", func(t *testing.T) {
@@ -685,6 +686,7 @@ func TestResolveEffectiveConfigUsesSkillSnapshotAsE2BTemplate(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, "tpl-base", eff.E2BTemplate,
 			"a snapshot whose fingerprint was computed for cube must not override e2b; the session must still boot")
+		require.False(t, eff.TemplateFromSnapshot)
 	})
 
 	t.Run("empty snapshot keeps the base template", func(t *testing.T) {
@@ -914,4 +916,15 @@ func TestSkillImageFingerprintIsStableAndDiscriminating(t *testing.T) {
 	require.Equal(t, a, SkillImageFingerprint("cube", "key-1", "https://a.example.com"))
 	require.NotEqual(t, a, SkillImageFingerprint("cube", "key-2", "https://a.example.com"))
 	require.NotEqual(t, a, SkillImageFingerprint("e2b", "key-1", "https://a.example.com"))
+}
+
+func TestParseSandboxTypeAcceptsHost(t *testing.T) {
+	got, err := ParseSandboxType("host")
+	require.NoError(t, err)
+	require.Equal(t, SandboxTypeHost, got)
+}
+
+// host carries no endpoint or credential, so a bare config is complete.
+func TestHostConfigNeedsNoProviderFields(t *testing.T) {
+	require.Empty(t, MissingRequiredFields(&Config{Type: SandboxTypeHost}))
 }
