@@ -162,6 +162,68 @@ func TestDeleteSegmentsTreatsSubstitutionsAndOtherShellsAsOpaque(t *testing.T) {
 	}
 }
 
+// The shell assembles the program at run time, so the text cannot name it.
+func TestDeleteSegmentsTreatsAnExpandedProgramAsOpaque(t *testing.T) {
+	for _, command := range []string{
+		"${RM:-rm} -rf build",
+		"x=rm; $x -rf build",
+		"$(printf rm) -rf build",
+		"`echo rm` -rf build",
+		"sudo $DEL_BIN unlink-me",
+	} {
+		got := DeleteSegments(command, "/Users/dev")
+		require.Len(t, got, 1, command)
+		require.True(t, got[0].Opaque, command)
+		require.Nil(t, DeleteTargets(command, "/Users/dev"), command)
+	}
+	require.Empty(t, DeleteSegments("$PYTHON build.py", "/Users/dev"))
+}
+
+// A session rule ignores operands, so it may only cover deletes that stay
+// strictly inside the cwd it was approved in.
+func TestDeletesStayBelow(t *testing.T) {
+	const home = "/Users/dev"
+	const cwd = "/Users/dev/proj"
+	cases := []struct {
+		command string
+		below   bool
+	}{
+		{"rm a.txt", true},
+		{"rm -rf build dist/cache", true},
+		{"rm -f *.log", true},
+		{"rm -rf */node_modules", true},
+		{"rm -rf /Users/dev/proj/build", true},
+		{"ls | xargs rm -f", true},
+		{"find . -name '*.tmp' -delete", true},
+		{"find -name '*.tmp' -delete", true},
+		{"find src -type f -exec rm {} +", true},
+		{"git clean -fdx", true},
+		{"git -C sub rm a.txt", true},
+		{"echo hi", true},
+		{"rm -rf .", false},
+		{"rm -rf ./", false},
+		{"rm -rf *", false},
+		{"rm -rf .*", false},
+		{"rm -rf ./*", false},
+		{"rm -rf ..", false},
+		{"rm -rf ../other", false},
+		{"rm -rf build/../..", false},
+		{"rm -rf /Users/dev/proj", false},
+		{"rm -rf /Users/dev/Desktop/a", false},
+		{"rm -rf ~/Desktop/*", false},
+		{"rm -rf $DIR", false},
+		{"rm a.txt && rm -rf ../x", false},
+		{"find .. -delete", false},
+		{"find /tmp -name x -delete", false},
+		{"git -C .. clean -fdx", false},
+		{"bash -c 'rm a.txt'", false},
+	}
+	for _, tc := range cases {
+		require.Equal(t, tc.below, DeletesStayBelow(tc.command, cwd, home), tc.command)
+	}
+	require.False(t, DeletesStayBelow("rm a.txt", "", home))
+}
+
 func TestClassifyCommandProgramCaseFollowsTheFilesystem(t *testing.T) {
 	const home = "/Users/dev"
 	want := caseInsensitivePaths()
