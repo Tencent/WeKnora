@@ -23,8 +23,10 @@ import (
 //
 // Why an env var (vs a CLI subcommand)?
 //   - Zero-friction in docker-compose / k8s deploys: set it once in the
-//     manifest and the very first user account that signs up with that
-//     email is auto-promoted, with no extra ops step.
+//     manifest. Startup promotes that user when the account already exists
+//     and the deployment has no system administrator. When public
+//     registration is closed, POST /auth/register accepts one sign-up of
+//     this email and promotes that account immediately.
 //   - Idempotent: if the user is already a system admin, bootstrapping is
 //     a no-op.
 //   - Safe to leave set: once at least one system admin exists, the env
@@ -74,8 +76,11 @@ func runStartupBootstrap(c *dig.Container) {
 // The bootstrap intentionally does NOT create a user when the email is
 // not yet registered: account creation is a workflow with side effects
 // (password hashing, tenant assignment, audit) that we don't want to
-// short-circuit. Operators should sign up normally first, then set the
-// env var on the next restart.
+// short-circuit from startup. When registration is closed, that one-time
+// sign-up is AuthHandler.Register, which inserts the user as a system
+// administrator. This hook still promotes an account that already exists,
+// using the trimmed env value as an exact email match. It does not see a
+// row that differs only by case.
 func bootstrapSystemAdmin(ctx context.Context, userSvc interfaces.UserService, email string) {
 	user, err := userSvc.GetUserByEmail(ctx, email)
 	if err != nil {

@@ -16,7 +16,7 @@
 | `email` | string | 是 | 邮箱 |
 | `password` | string | 是 | 密码（8–32 位，字母+数字；复杂模式另需大小写和特殊字符） |
 
-是否自动创建个人空间由服务端的 `auth.default_tenant_mode` 决定，请求体不能指定。`invite_register`（仅限邀请注册）和 `invite_only`（禁止注册）模式下返回 403。
+是否自动创建个人空间由服务端的 `auth.default_tenant_mode` 决定，请求体不能指定。`invite_register`（仅限邀请注册）和 `invite_only`（禁止注册）模式下，密码不符合策略时所有邮箱返回相同的 400；请求体无法解析、超过大小限制或其他邮箱的合法注册返回 403，响应不带出引导邮箱。若 `WEKNORA_BOOTSTRAP_SYSTEM_ADMIN_EMAIL` 已设置、请求邮箱与它一致（忽略大小写、去掉首尾空白）且部署还没有系统管理员，该请求仍可成功，新账号在插入时就是系统管理员。已有账号若 `LOWER(email)` 相同（含停用、仅大小写不同）则不创建、不覆盖、也不提升。已有系统管理员后例外关闭。本接口与 `register-by-invite` 共用每 IP 每分钟 30 次的限流。
 
 响应：201 `{"success":true,"message":"...","user":{User}}`
 

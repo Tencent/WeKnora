@@ -181,11 +181,12 @@ func (h *AuthHandler) Register(c *gin.Context) {
 
 	logger.Info(ctx, "Start user registration")
 
-	// Only self_serve permits registration without an invitation. Resolve
-	// each request so system-settings changes take effect immediately.
+	// Only self_serve permits ordinary registration without an invitation.
+	// Resolve each request so system-settings changes take effect immediately.
+	// When registration is closed, one configured email may still sign up
+	// and is stored as the system administrator. See registerWhenClosed.
 	if h.resolveRegistrationMode(ctx) != config.AuthRegistrationModeSelfServe {
-		logger.Warn(ctx, "Public registration rejected by auth.registration_mode")
-		_ = c.Error(errors.NewForbiddenError("Public registration is disabled"))
+		h.registerWhenClosed(c)
 		return
 	}
 

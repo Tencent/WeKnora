@@ -221,6 +221,12 @@ type RegisterRequest struct {
 	// own tenancy semantics. Empty preserves the historical behaviour and is
 	// treated as create_personal by UserService.Register.
 	TenantProvisioning TenantProvisioningMode `json:"-"`
+
+	// BootstrapSystemAdmin is set only by the closed-registration handler
+	// for the one allowed initial system administrator. It is excluded from
+	// JSON so a caller cannot promote itself. UserService.Register copies it
+	// onto the row before insert.
+	BootstrapSystemAdmin bool `json:"-"`
 }
 
 // AdminCreateUserRequest is the payload for a SystemAdmin provisioning a

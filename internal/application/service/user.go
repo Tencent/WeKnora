@@ -183,14 +183,15 @@ func (s *userService) Register(ctx context.Context, req *types.RegisterRequest) 
 
 	// Create user
 	user := &types.User{
-		ID:           uuid.New().String(),
-		Username:     req.Username,
-		Email:        req.Email,
-		PasswordHash: string(hashedPassword),
-		TenantID:     0,
-		IsActive:     true,
-		CreatedAt:    time.Now(),
-		UpdatedAt:    time.Now(),
+		ID:            uuid.New().String(),
+		Username:      req.Username,
+		Email:         req.Email,
+		PasswordHash:  string(hashedPassword),
+		TenantID:      0,
+		IsActive:      true,
+		IsSystemAdmin: req.BootstrapSystemAdmin,
+		CreatedAt:     time.Now(),
+		UpdatedAt:     time.Now(),
 	}
 	if createdTenant != nil {
 		user.TenantID = createdTenant.ID
@@ -576,6 +577,11 @@ func (s *userService) GetUsersByIDs(ctx context.Context, ids []string) (map[stri
 // GetUserByEmail gets a user by email
 func (s *userService) GetUserByEmail(ctx context.Context, email string) (*types.User, error) {
 	return s.userRepo.GetUserByEmail(ctx, email)
+}
+
+// GetUserByEmailCaseInsensitive delegates the LOWER(email) lookup.
+func (s *userService) GetUserByEmailCaseInsensitive(ctx context.Context, email string) (*types.User, error) {
+	return s.userRepo.GetUserByEmailCaseInsensitive(ctx, email)
 }
 
 // GetUserByUsername gets a user by username

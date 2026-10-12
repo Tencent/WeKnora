@@ -281,6 +281,10 @@ func (r *cleanupUserRepo) GetUsersByIDs(context.Context, []string) (map[string]*
 func (r *cleanupUserRepo) GetUserByEmail(context.Context, string) (*types.User, error) {
 	return nil, nil
 }
+func (r *cleanupUserRepo) GetUserByEmailCaseInsensitive(ctx context.Context, email string) (*types.User, error) {
+	return r.GetUserByEmail(ctx, email)
+}
+
 func (r *cleanupUserRepo) GetUserByUsername(context.Context, string) (*types.User, error) {
 	return nil, nil
 }

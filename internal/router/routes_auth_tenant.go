@@ -204,13 +204,12 @@ func RegisterMyEnvVarRoutes(r *gin.RouterGroup, h *handler.MeEnvVarHandler) {
 
 // RegisterAuthRoutes registers authentication routes
 func RegisterAuthRoutes(r *gin.RouterGroup, handler *handler.AuthHandler, g *rbacGuards) {
-	r.POST("/auth/register", handler.Register)
-	// Share-link surfaces are unauthenticated and accept a plaintext
-	// token from the caller; rate-limit by IP to bound brute-force /
-	// enumeration / abuse traffic. Limiter is shared across both
-	// endpoints (see middleware/auth_public_ratelimit.go) so total
-	// budget per IP is intuitive.
+	// /auth/register joins the same per-IP budget as the share-link
+	// routes. Closed registration can otherwise be probed for the
+	// bootstrap email. One process-local limiter, 30 requests per minute
+	// across these three routes (see middleware/auth_public_ratelimit.go).
 	publicAuthRL := middleware.PublicAuthRateLimit()
+	r.POST("/auth/register", publicAuthRL, handler.Register)
 	r.POST("/auth/register-by-invite", publicAuthRL, handler.RegisterByInvite)
 	r.POST("/auth/invitations/lookup", publicAuthRL, handler.LookupInvitationByToken)
 	r.POST("/auth/login", handler.Login)

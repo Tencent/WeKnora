@@ -89,6 +89,10 @@ func (s *stubUserRepoForAuth) GetUserByID(_ context.Context, id string) (*types.
 func (s *stubUserRepoForAuth) GetUsersByIDs(context.Context, []string) (map[string]*types.User, error) {
 	return nil, nil
 }
+func (s *stubUserRepoForAuth) GetUserByEmailCaseInsensitive(ctx context.Context, email string) (*types.User, error) {
+	return s.GetUserByEmail(ctx, email)
+}
+
 func (s *stubUserRepoForAuth) GetUserByEmail(_ context.Context, email string) (*types.User, error) {
 	for _, user := range s.users {
 		if user != nil && user.Email == email {
