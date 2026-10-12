@@ -733,3 +733,93 @@ func TestColumnNameCoversSheetsWiderThanColumnZ(t *testing.T) {
 		}
 	}
 }
+
+// A folder can hold an uploaded file and a native spreadsheet side by side.
+// With both switches on, each node has to travel its own read path: the
+// workbook through the workbooks API, the upload through the 钉盘 download API.
+// The dispatch is what keeps an axls node out of the default binary branch —
+// adding axls to isDocument() alone would send a workbook to downloadDocument,
+// which DingTalk does not serve for a native workbook — and the probe has to
+// follow the same split, because reading a workbook through the blocks API
+// reports a readable selection as broken.
+func TestUploadAndWorkbookInOneFolderTakeTheirOwnReadPaths(t *testing.T) {
+	upload := binaryNode("policy", "Policy.pdf", "pdf")
+	workbook := sheetNode("book-1", "Checklist.axls")
+	api := workbookFixture(upload)
+	api.nodes["root"] = []node{upload, workbook}
+	api.downloads = map[string][]byte{"policy": []byte("%PDF-1.7-policy-bytes")}
+	api.sheets = map[string][]sheet{"book-1": {{ID: "sheet-1", Name: "Data"}}}
+	api.sheetInfos = map[string]sheet{
+		sheetKey("book-1", "sheet-1"): {
+			ID: "sheet-1", Name: "Data", LastNonEmptyRow: 1, LastNonEmptyColumn: 1,
+		},
+	}
+	api.sheetValues = map[string][][]string{
+		sheetRangeKey("book-1", "sheet-1", "A1:A1"): {{"value"}},
+	}
+	cfg := testConfig("space")
+	cfg.Settings = map[string]interface{}{"include_uploaded_files": true, "include_sheets": true}
+
+	// Validation probes each node through its own read API. The upload is made
+	// unreadable so one Validate call has to fall through to the workbook and
+	// exercises both probes; neither may transfer a body.
+	api.verifyErrors = map[string]error{"policy": errors.New("storage denied")}
+	if err := testConnector(api).Validate(context.Background(), cfg); err != nil {
+		t.Fatalf("Validate() error = %v", err)
+	}
+	if api.verifyCalls["policy"] != 1 {
+		t.Fatalf("upload probes = %#v, want the download-location lookup", api.verifyCalls)
+	}
+	if api.sheetListCalls["book-1"] != 1 {
+		t.Fatalf("workbook probes = %#v, want one listSheets probe", api.sheetListCalls)
+	}
+	if len(api.blockCalls) != 0 || len(api.dlCalls) != 0 {
+		t.Fatalf("block calls = %#v, download calls = %#v, want no body transfer while validating",
+			api.blockCalls, api.dlCalls)
+	}
+
+	// The sync that follows reads each node the way it was probed: the workbook
+	// is rendered from its worksheets, the upload is handed over byte-for-byte.
+	items, err := testConnector(api).FetchAll(context.Background(), cfg, []string{"space"})
+	if err != nil {
+		t.Fatalf("FetchAll() error = %v", err)
+	}
+	byID := make(map[string]types.FetchedItem, len(items))
+	for _, item := range items {
+		byID[item.ExternalID] = item
+	}
+
+	uploaded, ok := byID["policy"]
+	if !ok {
+		t.Fatalf("uploaded file missing from %#v", items)
+	}
+	if string(uploaded.Content) != "%PDF-1.7-policy-bytes" ||
+		uploaded.ContentType != "application/pdf" || uploaded.FileName != "Policy.pdf" {
+		t.Fatalf("uploaded file took the wrong path: %#v", uploaded)
+	}
+
+	rendered, ok := byID["book-1"]
+	if !ok {
+		t.Fatalf("workbook missing from %#v", items)
+	}
+	if rendered.ContentType != "text/markdown" || rendered.FileName != "Checklist.axls.md" ||
+		!strings.Contains(string(rendered.Content), "value") {
+		t.Fatalf("workbook took the wrong path: %#v", rendered)
+	}
+
+	// Neither node may be read through the other one's API: the workbook is
+	// never downloaded, and the upload is never listed or ranged as a sheet.
+	if api.dlCalls["book-1"] != 0 || api.sheetListCalls["policy"] != 0 {
+		t.Fatalf("a node was read through the other one's API: downloads = %#v, sheet lists = %#v",
+			api.dlCalls, api.sheetListCalls)
+	}
+	if api.dlCalls["policy"] != 1 {
+		t.Fatalf("upload download calls = %#v, want exactly one", api.dlCalls)
+	}
+	if len(api.sheetRangeCalls) == 0 {
+		t.Fatalf("workbook cells were never read: %#v", api.sheetRangeCalls)
+	}
+	if len(api.blockCalls) != 0 {
+		t.Fatalf("block calls = %#v, want none: neither node is an adoc", api.blockCalls)
+	}
+}
