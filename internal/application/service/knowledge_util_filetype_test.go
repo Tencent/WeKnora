@@ -66,7 +66,7 @@ func TestIsSupportedImportExtension(t *testing.T) {
 func TestImportExtensionSetIsSharedAcrossPaths(t *testing.T) {
 	want := []string{
 		"csv", "doc", "docx", "epub", "flac", "gif", "htm", "html", "jpeg", "jpg",
-		"json", "m4a", "markdown", "md", "mhtml", "mp3", "ogg", "pdf", "png", "ppt",
+		"json", "m4a", "markdown", "md", "mdx", "mhtml", "mp3", "ogg", "pdf", "png", "ppt",
 		"pptx", "txt", "wav", "xls", "xlsx", "xmind",
 	}
 	exts := secutils.SupportedImportExtensions()

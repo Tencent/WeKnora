@@ -268,13 +268,13 @@ func TestSyncRecursiveScopeAndMetadata(t *testing.T) {
 	f.addFile(testRepoID, "/docs/产品/需求: v2.docx", []byte("body"), 7)
 	f.addFile(testRepoID, "/docs/map.xmind", []byte("map"), 1)
 	f.addFile(testRepoID, "/docs/skip.zip", []byte("zip"), 1)
-	f.addFile(testRepoID, "/docs/skip.mdx", []byte("mdx"), 1)
+	f.addFile(testRepoID, "/docs/skip.exe", []byte("exe"), 1)
 	f.addFile(testRepoID, "/docs-sibling/secret.pdf", []byte("secret"), 1)
 	cur, h := mustRun(t, c, cfg, nil, false)
 	assertPaths(t, h.contentItems(), "/docs/产品/需求: v2.docx", "/docs/map.xmind")
 	if len(h.errorItems()) != 0 || len(filesOf(cur)) != 2 || f.count("dir:/docs/产品") != 1 ||
 		f.count("dir:/docs-sibling") != 0 || f.count("file:/docs/skip.zip") != 0 ||
-		f.count("file:/docs/skip.mdx") != 0 {
+		f.count("file:/docs/skip.exe") != 0 {
 		t.Fatalf("scope traversal: counts=%v, files=%v", f.counts(), filesOf(cur))
 	}
 	for _, item := range h.contentItems() {
