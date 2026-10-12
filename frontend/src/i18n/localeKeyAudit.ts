@@ -69,7 +69,6 @@ const TM_KEY_PATTERNS = [
 
 const EXTRA_PREFIXES = [
   'system.globalSettings.listConfirm.',
-  'system.globalSettings.admins.confirm.',
   'system.globalSettings.keyLabels.',
   'system.globalSettings.keyDescriptions.',
   'system.globalSettings.enumLabels.',

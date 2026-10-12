@@ -12,14 +12,16 @@
     </div>
 
     <template v-else>
-      <div class="list-toolbar">
-        <t-input v-model="query" class="list-search" :placeholder="$t('menu.search')"
-          :aria-label="$t('menu.search')" clearable>
-          <template #prefix-icon><t-icon name="search" size="16px" /></template>
-        </t-input>
-        <ToolboxCategoryControl v-model="selectedCategoryId" :categories="categories"
-          :can-manage="authStore.hasRole('admin')" @changed="loadCategories" />
-      </div>
+      <Teleport to="#toolbox-toolbar" defer>
+        <div class="list-toolbar">
+          <t-input v-if="services.length > 0" v-model="query" class="list-search"
+            :placeholder="$t('menu.search')" :aria-label="$t('menu.search')" clearable>
+            <template #prefix-icon><t-icon name="search" size="16px" /></template>
+          </t-input>
+          <ToolboxCategoryControl v-model="selectedCategoryId" :categories="categories"
+            :can-manage="authStore.hasRole('admin')" @changed="loadCategories" />
+        </div>
+      </Teleport>
       <div v-if="services.length === 0 && !authStore.hasRole('admin')" class="empty-state">
         <t-empty :description="$t('mcpSettings.empty')" />
       </div>
@@ -369,7 +371,6 @@ defineExpose({ openAdd: handleAdd })
   display: flex;
   align-items: center;
   gap: 10px;
-  margin-bottom: 20px;
 }
 
 .list-search {
@@ -408,8 +409,14 @@ defineExpose({ openAdd: handleAdd })
   padding: 0;
   overflow: hidden;
   border: 1px solid var(--td-component-stroke);
-  border-radius: var(--app-radius-lg);
+  border-radius: var(--app-radius-md);
   background: var(--td-bg-color-container);
+  transition: border-color 0.18s ease, box-shadow 0.18s ease;
+
+  &:hover:not(.service-card--add) {
+    border-color: color-mix(in srgb, var(--td-brand-color) 40%, var(--td-component-stroke));
+    box-shadow: 0 3px 12px color-mix(in srgb, var(--td-text-color-primary) 6%, transparent);
+  }
 
   &--add {
     align-items: center;
@@ -466,7 +473,7 @@ defineExpose({ openAdd: handleAdd })
 }
 
 .service-card__badge {
-  .provider-card-badge(26px, 7px);
+  .provider-card-badge(28px, 8px);
   font-size: var(--app-text-md);
 
   :deep(.t-icon) {
@@ -516,6 +523,7 @@ defineExpose({ openAdd: handleAdd })
 
 @media (max-width: 640px) {
   .list-toolbar {
+    width: 100%;
     align-items: stretch;
     flex-direction: column;
   }

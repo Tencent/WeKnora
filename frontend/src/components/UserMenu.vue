@@ -566,8 +566,12 @@ onUnmounted(() => {
   &--collapsed {
     .user-button {
       justify-content: center;
-      padding: 6px 3px;
+      width: 32px;
+      height: 32px;
+      margin: 0 auto;
+      padding: 0;
       gap: 0;
+      border-radius: var(--app-radius-sm);
     }
 
     .user-dropdown {

@@ -24,14 +24,16 @@
     </div>
 
     <template v-else>
-      <div class="list-toolbar">
-        <t-input v-model="query" class="list-search" :placeholder="$t('menu.search')"
-          :aria-label="$t('menu.search')" clearable>
-          <template #prefix-icon><t-icon name="search" size="16px" /></template>
-        </t-input>
-        <ToolboxCategoryControl v-model="selectedCategoryId" :categories="categories"
-          :can-manage="authStore.hasRole('admin')" @changed="reloadCategories" />
-      </div>
+      <Teleport to="#toolbox-toolbar" defer>
+        <div class="list-toolbar">
+          <t-input v-if="catalog.length > 0" v-model="query" class="list-search"
+            :placeholder="$t('menu.search')" :aria-label="$t('menu.search')" clearable>
+            <template #prefix-icon><t-icon name="search" size="16px" /></template>
+          </t-input>
+          <ToolboxCategoryControl v-model="selectedCategoryId" :categories="categories"
+            :can-manage="authStore.hasRole('admin')" @changed="reloadCategories" />
+        </div>
+      </Teleport>
       <div v-if="catalog.length === 0" class="empty-state">
         <t-empty :description="skillText('emptyDesc')" />
         <p v-if="skillConfigs.length === 0" class="empty-hint">
@@ -805,8 +807,8 @@ function installChipStatus(item: SkillCatalogItem, inst: SkillCatalogInstall): s
 }
 
 function installChipStatusIcon(item: SkillCatalogItem, inst: SkillCatalogInstall): string {
-  if (inst.status === 'failed') return 'close-circle'
-  if (inst.status === 'ready' && inst.enabled && installOutdated(item, inst)) return 'error-circle'
+  if (inst.status === 'failed') return 'close-circle-filled'
+  if (inst.status === 'ready' && inst.enabled && installOutdated(item, inst)) return 'error-circle-filled'
   if (inst.status === 'ready' && inst.enabled) return 'check-circle-filled'
   return ''
 }
@@ -1447,7 +1449,6 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 10px;
-  margin-bottom: 20px;
 }
 
 .list-search {
@@ -1509,7 +1510,7 @@ onUnmounted(() => {
 
 :global(.skill-install-panel-overlay .t-popup__content) {
   padding: 0 !important;
-  border-radius: var(--app-radius-sm) !important;
+  border-radius: var(--app-radius-md) !important;
   border: 1px solid var(--td-component-stroke) !important;
   background: var(--td-bg-color-container) !important;
   box-shadow: var(--td-shadow-2) !important;
@@ -1557,11 +1558,16 @@ onUnmounted(() => {
   padding: 0;
   overflow: hidden;
   border: 1px solid var(--td-component-stroke);
-  border-radius: var(--app-radius-lg);
+  border-radius: var(--app-radius-md);
   background: var(--td-bg-color-container);
   transition: border-color 0.18s ease, box-shadow 0.18s ease;
   min-width: 0;
   height: 100%;
+
+  &:hover:not(.skill-card--add, .skill-card--focused) {
+    border-color: color-mix(in srgb, var(--td-brand-color) 40%, var(--td-component-stroke));
+    box-shadow: 0 3px 12px color-mix(in srgb, var(--td-text-color-primary) 6%, transparent);
+  }
 
   &--focused {
     border-color: var(--td-brand-color);
@@ -1630,7 +1636,7 @@ onUnmounted(() => {
 }
 
 .skill-card__badge {
-  .provider-card-badge(26px, 7px);
+  .provider-card-badge(28px, 8px);
   font-size: var(--app-text-md);
 
   :deep(.t-icon) {
@@ -1742,6 +1748,7 @@ onUnmounted(() => {
 
 @media (max-width: 640px) {
   .list-toolbar {
+    width: 100%;
     align-items: stretch;
     flex-direction: column;
   }
@@ -1816,8 +1823,18 @@ onUnmounted(() => {
     color: var(--td-success-color);
   }
 
+  // 异常状态只用前置圆点着色，避免整排卡片铺满红黄底色
+  &.skill-card__entry--stale::before,
+  &.skill-card__entry--failed::before {
+    content: '';
+    flex-shrink: 0;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+  }
+
   &.skill-card__entry--stale {
-    background: color-mix(in srgb, var(--td-warning-color) 10%, transparent);
+    &::before { background: var(--td-warning-color); }
 
     .skill-card__entry-status {
       color: var(--td-warning-color);
@@ -1825,7 +1842,7 @@ onUnmounted(() => {
   }
 
   &.skill-card__entry--failed {
-    background: color-mix(in srgb, var(--td-error-color) 10%, transparent);
+    &::before { background: var(--td-error-color); }
 
     .skill-card__entry-status {
       color: var(--td-error-color);
@@ -1882,14 +1899,15 @@ onUnmounted(() => {
   max-width: calc(100vw - 32px);
   max-height: min(360px, 70vh);
   overflow-y: auto;
-  padding: 4px 0;
+  padding: 4px;
+  box-sizing: border-box;
 }
 
 .skill-install-panel__group {
   margin: 0;
-  padding: 6px 12px 4px;
-  font-size: var(--app-text-sm);
-  line-height: 20px;
+  padding: 6px 8px 2px;
+  font-size: var(--app-text-xs);
+  line-height: 18px;
   color: var(--td-text-color-placeholder);
 }
 
@@ -1899,10 +1917,10 @@ onUnmounted(() => {
   gap: 8px;
   width: 100%;
   height: 32px;
-  margin: 0;
-  padding: 0 12px;
+  margin: 0 0 2px;
+  padding: 0 8px;
   border: 0;
-  border-radius: 0;
+  border-radius: var(--app-radius-sm);
   background: none;
   color: var(--td-text-color-primary);
   cursor: pointer;
@@ -1947,16 +1965,23 @@ onUnmounted(() => {
 
 .skill-install-panel__add {
   flex-shrink: 0;
-  color: var(--td-text-color-placeholder);
+  color: var(--td-brand-color);
+  opacity: 0;
+  transition: opacity var(--app-motion-fast) ease;
 }
 
-.skill-install-panel__item--available:hover .skill-install-panel__add {
-  color: var(--td-brand-color);
+.skill-install-panel__item--available:hover .skill-install-panel__add,
+.skill-install-panel__item--available:focus-visible .skill-install-panel__add {
+  opacity: 1;
+}
+
+.skill-install-panel__item--available:hover {
+  color: var(--td-text-color-primary);
 }
 
 .skill-install-panel__split {
   height: 1px;
-  margin: 4px 0;
+  margin: 4px -4px;
   background: var(--td-component-stroke);
 }
 

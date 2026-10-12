@@ -1,7 +1,7 @@
 <!--
-  CreateUserDialog: SystemAdmin "Create user" in-place popup (Access row).
+  CreateUserDialog: SystemAdmin "Create user" in-place popup.
 
-  Anchors to the row action via the default slot, matching TenantMembers
+  Anchors to the page action via the default slot, matching TenantMembers
   invite and UserProfile password popups. Form (username + email +
   auto-generate toggle) and, when the server mints a one-time password, a
   reveal view that must be acknowledged before the popup can close. Esc is
@@ -14,7 +14,7 @@
   region can relay it. Shared popup chrome comes from systemAdminDialog.less.
 -->
 <template>
-  <t-popup :visible="visible" trigger="click" placement="left-top" :destroy-on-close="!locked"
+  <t-popup :visible="visible && active" trigger="click" placement="left-top" :destroy-on-close="!locked"
     overlay-class-name="wk-popover wk-popover--form system-admin-action-popup-overlay" @visible-change="onVisibleChange">
     <span class="system-admin-action-popup-anchor">
       <slot />
@@ -125,10 +125,11 @@ import {
   type CreateUserReveal,
 } from './createUserDialogState'
 
-const props = defineProps<{ visible: boolean }>()
+const props = defineProps<{ visible: boolean; active: boolean }>()
 const emit = defineEmits<{
   'update:visible': [boolean]
   announced: [string]
+  created: []
 }>()
 
 const { t } = useI18n()
@@ -240,6 +241,7 @@ async function submit() {
       payload.password = form.newPassword
     }
     const response = await createSystemUser(payload)
+    emit('created')
     const view = resolveCreateUserView(
       response,
       { username: payload.username, email: payload.email },

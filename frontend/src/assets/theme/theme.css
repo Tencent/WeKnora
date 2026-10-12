@@ -212,9 +212,13 @@ select:-webkit-autofill {
 /* 应用级强调色：智能体 / 图谱等「非品牌但反复出现」的语义色，透明叠加请用 color-mix */
 :root {
     --app-accent-purple: #7c4dff;
+    --app-accent-blue: #2f6bff;
+    --app-accent-teal: #0f8f83;
 }
 :root[theme-mode="dark"] {
     --app-accent-purple: #9d7cff;
+    --app-accent-blue: #6f9bff;
+    --app-accent-teal: #3cc4b4;
 }
 
 /* 引用原文定位：纸面荧光笔色，文字与整块区域使用不同强度。 */

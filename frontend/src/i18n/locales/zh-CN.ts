@@ -3346,14 +3346,45 @@ export default {
         success: '已将 {count} 个空间的存储配额更新为 {gb} GB',
         failed: '应用到所有空间失败'
       },
+      userList: {
+        title: '平台用户列表',
+        rowLabel: '用户管理',
+        rowDesc: '查看平台上的全部注册用户（跨空间），支持分页与按用户名/邮箱筛选。',
+        searchPlaceholder: '按用户名或邮箱筛选（当前页）',
+        refresh: '刷新',
+        active: '正常',
+        inactive: '已停用',
+        colUsername: '用户名',
+        colStatus: '状态',
+        colRole: '角色',
+        colCreated: '创建日期',
+        colAction: '操作',
+        prev: '上一页',
+        next: '下一页',
+        pageCount: '{shown} 条 / 本页 {total}',
+        enable: '启用',
+        disable: '停用',
+        resetPassword: '重置密码',
+        confirmDisable: '确定停用账号 {name} 吗？将立即吊销其登录状态。',
+        confirmEnable: '确定启用账号 {name} 吗？',
+        enabledMsg: '已启用 {name}',
+        disabledMsg: '已停用 {name}',
+        actionFailed: '操作失败',
+        loadFailed: '加载用户列表失败',
+        roleAdmin: '系统管理员',
+        roleUser: '普通用户',
+        confirmRevoke: '确定撤销 {name} 的系统管理员权限吗？',
+        confirmPromote: '确定将 {name} 提升为系统管理员吗？',
+        revokeBtn: '撤销',
+        promoteBtn: '提升',
+        revokedMsg: '已撤销 {name} 的管理员权限',
+        promotedMsg: '已将 {name} 提升为系统管理员',
+        roleFailed: '修改角色失败',
+      },
       passwordReset: {
-        label: '重置用户密码',
-        description: '为忘记密码的其他用户设置新密码。重置成功后，该用户当前所有登录会话都会失效，需要使用新密码重新登录。',
-        action: '重置密码',
         dialogTitle: '重置其他用户的密码',
         warning: '这是高风险操作。请核对用户邮箱；出于安全考虑，不能在这里重置自己的密码。',
         emailLabel: '用户邮箱',
-        emailPlaceholder: '输入需要重置密码的用户邮箱',
         newPasswordLabel: '新密码',
         newPasswordPlaceholder: '请输入新密码',
         confirmPasswordLabel: '确认新密码',
@@ -3363,8 +3394,6 @@ export default {
         failed: '重置密码失败',
       },
       createUser: {
-        label: '创建用户',
-        description: '开通一个新的本地用户账号。如果平台的默认空间模式设置为「自动创建个人空间」，该用户会像自助注册的用户一样，同时获得一个个人空间。',
         action: '创建用户',
         dialogTitle: '创建新用户',
         warning: '这是高风险操作。请仔细核对用户名和邮箱——它们将作为该用户登录的唯一凭据。',
@@ -3387,10 +3416,6 @@ export default {
           usernameLength: '用户名长度必须为 2-50 个字符',
           emailRequired: '请输入邮箱',
           emailInvalid: '请输入有效的邮箱地址',
-          passwordRequired: '请输入新密码',
-          passwordLength: '密码长度必须为 8-32 个字符',
-          passwordLetter: '密码必须包含字母',
-          passwordNumber: '密码必须包含数字',
           confirmRequired: '请再次输入新密码',
           passwordMismatch: '两次输入的密码不一致'
         },
@@ -3403,26 +3428,6 @@ export default {
           copyBtn: '复制账号信息',
           copySuccess: '账号信息已复制到剪贴板',
           acknowledgeBtn: '我已保存密码'
-        }
-      },
-      admins: {
-        label: '系统管理员',
-        description: '拥有平台级权限的用户。在右侧输入邮箱并回车即可提升用户为管理员；点击 × 即为撤销其权限。当前你（自己）已是管理员，不在列表中显示，也无法被自己撤销。',
-        placeholder: '输入用户邮箱并回车',
-        loadFailed: '加载系统管理员失败',
-        saveSuccess: '已更新系统管理员',
-        saveFailed: '更新系统管理员失败',
-        confirm: {
-          revoke: {
-            header: '撤销系统管理员',
-            body: '确认撤销 {email} 的系统管理员权限？撤销后该用户将无法再访问任何系统级功能。',
-            confirmBtn: '撤销'
-          },
-          promote: {
-            header: '提升为系统管理员',
-            body: '确认将 {email} 提升为系统管理员？该用户将获得平台级权限，可访问所有空间、修改系统设置、管理其他管理员。',
-            confirmBtn: '提升'
-          }
         }
       },
       reset: {
@@ -3743,36 +3748,27 @@ export default {
           generic: '获取队列状态失败'
         }
       },
-      runtimeTable: {
-        setting: '配置项与用途',
-        value: '当前值'
-      },
       sections: {
         other: {
-          tab: '其他 {count}',
           title: '其他配置',
           description: '当前部署中未归入标准分组的配置项。'
         },
         security: {
-          tab: '网络安全 {count}',
           title: '网络安全',
           description: '管理 SSRF 白名单，以及是否允许 Docker 沙箱（本机 docker.sock 等同宿主机 root）。'
         },
         runtime: {
-          tab: '运行与并发 {count}',
           title: '运行与并发',
           description: '配置后台任务池与模型服务的并发容量。',
           restartHint: 'Worker 配置需重启生效'
         },
         tenant: {
-          tab: '空间默认值 {count}',
           title: '空间默认值',
           description: '设置新空间的初始配额与兼容性行为，不会自动改写已有空间。'
         },
         access: {
-          tab: '账户与访问 {count}',
-          title: '账户与访问',
-          description: '管理系统管理员、公开注册与用户创建空间的规则。'
+          title: '注册与访问',
+          description: '管理注册方式、密码要求和用户创建空间的规则。'
         }
       },
       priorityHint: {
@@ -4686,6 +4682,16 @@ export default {
       helpZoomDesc: '缩放画布',
       neighborsProgress: '已显示邻居 {visible}/{total}（还有 {hidden} 个未加载）',
       neighborsAllShown: '全部 {total} 个邻居已在图中（可点"展开邻居"聚焦到该节点子图）',
+      graphNavigationHint: '拖拽空白处移动 · 滚轮缩放',
+      focusGroup: '聚焦这组页面',
+      focusGroupViewing: '正在查看：{name}',
+      focusGroupBack: '返回全图',
+      focusGroupSwitch: '切换到其他分组',
+      unlinkedHidden: '已隐藏 {count} 个无关联页面',
+      unlinkedSection: '无关联页面 · {count}',
+      offscreenSection: '当前视图无连线（存在链接）· {count}',
+      hideUnlinked: '隐藏无关联页面（{count}）',
+      showUnlinked: '显示无关联页面（{count}）',
       neighborsNone: '该节点没有链接邻居',
       neighborsCenterUnreachable: '已显示邻居 {visible}/{total}（还有 {hidden} 个无法连通：可能是死链、被过滤或已删除）',
       neighborsOverviewHidden: '已显示邻居 {visible}/{total}（{hidden} 个不在概览范围，点"展开邻居"以此为中心查看）',
@@ -7396,7 +7402,7 @@ export default {
     statusFailed: '失败',
     statusCancelled: '已取消',
     statusDraft: '草稿',
-    noDescription: '无描述',
+    noDescription: '暂无描述',
     emptyKnowledgeDragDrop: '知识为空，拖放上传',
     pdfDocFormat: 'pdf、doc 格式文件，不超过{size}M',
     textMarkdownFormat: 'text、markdown格式文件，不超过{size}M',

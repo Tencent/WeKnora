@@ -2,18 +2,37 @@
   <div class="model-settings">
     <div class="section-header">
       <div class="section-header__top">
-        <div>
+        <div class="model-title">
           <h2>{{ $t('modelSettings.title') }}</h2>
-          <p class="section-description">{{ $t('modelSettings.description') }}</p>
+          <t-popup placement="bottom-left" trigger="hover" show-arrow>
+            <button type="button" class="model-title-help" :aria-label="$t('modelSettings.builtinModels.title')">
+              <t-icon name="help-circle" size="16px" />
+            </button>
+            <template #content>
+              <div class="builtin-models-hint" role="note">
+                <p class="builtin-hint-label">{{ $t('modelSettings.builtinModels.title') }}</p>
+                <p class="builtin-hint-text">
+                  {{ $t(authStore.isSystemAdmin
+                    ? 'modelSettings.builtinModels.descriptionAdmin'
+                    : 'modelSettings.builtinModels.description') }}
+                </p>
+                <a class="doc-link" :href="docsUrl('models')" target="_blank"
+                  rel="noopener noreferrer">
+                  {{ $t('modelSettings.builtinModels.viewGuide') }}
+                  <t-icon name="link" class="link-icon" />
+                </a>
+              </div>
+            </template>
+          </t-popup>
         </div>
         <div class="model-header-actions">
           <t-button
             v-if="authStore.isSystemAdmin"
             type="button"
-            theme="primary"
+            theme="default"
             variant="text"
-            size="medium"
-            class="model-test-trigger"
+            size="small"
+            class="model-header-action"
             @click="uiStore.openSettings('model-catalog')"
           >
             <template #icon><t-icon name="control-platform" /></template>
@@ -22,141 +41,147 @@
           <t-button
             v-if="authStore.hasRole('admin')"
             type="button"
-            theme="primary"
+            theme="default"
             variant="text"
-            size="medium"
-            class="model-test-trigger"
+            size="small"
+            class="model-header-action"
             @click="showDebugDrawer = true"
           >
             <template #icon><play-circle-icon /></template>
             {{ $t('modelSettings.actions.debugModel') }}
           </t-button>
+          <t-button v-if="authStore.hasRole('admin')" theme="default" variant="text" size="small"
+            class="model-header-action" @click="openAddDialog">
+            <template #icon><add-icon /></template>
+            {{ $t('modelSettings.actions.addModel') }}
+          </t-button>
         </div>
       </div>
-
-      <div class="builtin-models-hint" role="note">
-        <p class="builtin-hint-label">{{ $t('modelSettings.builtinModels.title') }}</p>
-        <p class="builtin-hint-text">
-          {{ $t(authStore.isSystemAdmin
-            ? 'modelSettings.builtinModels.descriptionAdmin'
-            : 'modelSettings.builtinModels.description') }}
-        </p>
-        <a class="doc-link" :href="docsUrl('models')" target="_blank"
-          rel="noopener noreferrer">
-          {{ $t('modelSettings.builtinModels.viewGuide') }}
-          <t-icon name="link" class="link-icon" />
-        </a>
-      </div>
+      <p class="section-description">{{ $t('modelSettings.description') }}</p>
     </div>
 
-    <t-tabs v-model="activeTypeFilter" class="model-type-tabs" data-guide="settings-models">
-      <t-tab-panel value="all" :label="`${$t('common.all')}(${allLegacyModels.length})`" />
-      <t-tab-panel value="chat" :label="`${$t('modelSettings.typeShort.chat')}(${countByType('chat')})`" />
-      <t-tab-panel value="embedding"
-        :label="`${$t('modelSettings.typeShort.embedding')}(${countByType('embedding')})`" />
-      <t-tab-panel value="rerank" :label="`${$t('modelSettings.typeShort.rerank')}(${countByType('rerank')})`" />
-      <t-tab-panel value="vllm" :label="`${$t('modelSettings.typeShort.vllm')}(${countByType('vllm')})`" />
-      <t-tab-panel value="asr" :label="`${$t('modelSettings.typeShort.asr')}(${countByType('asr')})`" />
-    </t-tabs>
+    <div class="model-tabbar" data-guide="settings-models">
+      <t-tabs v-model="activeTypeFilter" class="model-type-tabs">
+        <t-tab-panel v-for="tab in modelTypeTabs" :key="tab.value" :value="tab.value">
+          <template #label>
+            <span class="model-type-tab">
+              <t-icon :name="tab.icon" size="16px" />
+              <span>{{ tab.label }}</span>
+              <span class="model-tab-count">{{ tab.count }}</span>
+            </span>
+          </template>
+        </t-tab-panel>
+      </t-tabs>
+      <t-input v-model="modelQuery" class="model-search" :placeholder="$t('menu.search')"
+        :aria-label="$t('menu.search')" clearable>
+        <template #prefix-icon><t-icon name="search" size="16px" /></template>
+      </t-input>
+    </div>
 
-    <t-loading :loading="loading" size="small" class="model-list-loading">
-      <div v-if="!loading && filteredModels.length === 0 && !authStore.hasRole('admin')" class="empty-state">
-        <t-empty :description="emptyHint" />
-      </div>
-      <div v-else-if="!loading" class="model-grid">
-        <div v-for="model in filteredModels" :key="`${model._modelType}-${model.id}`" class="model-card" :class="[
-          `model-card--${model._modelType}`,
-          {
-            'model-card--builtin': model.isBuiltin,
-            'model-card--clickable': isModelCardClickable(model),
-          },
-        ]" :role="isModelCardClickable(model) ? 'button' : undefined"
-          :tabindex="isModelCardClickable(model) ? 0 : undefined"
-          @click="onModelCardClick($event, model._modelType, model)"
-          @keydown.enter="onModelCardClick($event, model._modelType, model)">
-          <div class="model-card__badge" :aria-label="typeLabel(model._modelType)">
-            <t-icon :name="typeIcon(model._modelType)" size="18px" />
-          </div>
-          <div class="model-card__body">
-            <div class="model-card__header">
-              <h3 class="model-card__title">{{ modelDisplayName(model) }}</h3>
-              <span v-if="model.isBuiltin" class="model-card__lock" :title="$t('modelSettings.builtinTag')"
-                :aria-label="$t('modelSettings.builtinTag')">
-                <t-icon :name="authStore.isSystemAdmin ? 'edit-1' : 'lock-on'" />
-              </span>
-              <div v-if="canManageModel(model)" class="model-card__actions" @click.stop>
-                <t-dropdown :options="getModelOptions(model._modelType, model)" placement="bottom-right" attach="body"
-                  trigger="click"
-                  @click="(data: any) => handleMenuAction({ value: data.value }, model._modelType, model)">
-                  <t-button variant="text" shape="square" size="small" class="model-card__action-btn model-card__more">
-                    <t-icon name="ellipsis" />
-                  </t-button>
-                </t-dropdown>
-                <t-popconfirm
-                  v-if="canDeleteModel(model)"
-                  :content="$t('modelSettings.confirmDelete', { name: modelDisplayName(model) })"
-                  :confirm-btn="{ content: $t('common.delete'), theme: 'danger' }"
-                  :cancel-btn="{ content: $t('common.cancel') }"
-                  placement="bottom-right"
-                  @confirm="deleteModel(model._modelType, model.id)"
-                >
-                  <t-tooltip :content="$t('common.delete')" placement="top">
-                    <t-button
-                      theme="danger"
-                      shape="square"
-                      variant="text"
-                      size="small"
-                      class="model-card__action-btn model-card__delete"
-                      @click.stop
-                    >
-                      <template #icon><t-icon name="delete" /></template>
-                    </t-button>
-                  </t-tooltip>
-                </t-popconfirm>
-              </div>
-            </div>
-            <p class="model-card__subtitle">
-              <span class="model-card__vendor">
-                <img v-if="vendorIcon(model)" :src="vendorIcon(model)" class="model-card__vendor-icon" alt="" />
-                <span>{{ vendorLabel(model) }}</span>
-              </span>
-              <template v-if="model._modelType === 'embedding' && model.dimension">
-                <span class="model-card__sep">·</span>
-                <span>{{ $t('model.editor.dimensionLabel') }} {{ model.dimension }}</span>
-              </template>
-              <template v-if="model._modelType === 'chat' || model._modelType === 'vllm'">
-                <span class="model-card__sep">·</span>
-                <span
-                  class="model-card__ctx"
-                  :class="{ 'model-card__ctx--default': isDefaultContextWindow(model.contextWindow) }"
-                  :title="contextWindowTitle(model.contextWindow)"
-                >{{ formatContextWindow(model.contextWindow) }}</span>
-              </template>
-              <template v-if="(model._modelType === 'chat' && model.supportsVision)
-                || (model._modelType === 'embedding' && model.capabilities?.input?.includes('image'))">
-                <span class="model-card__sep">·</span>
-                <span class="model-card__vision" :title="$t('model.editor.supportsVisionLabel')"
-                  :aria-label="$t('model.editor.supportsVisionLabel')">
-                  <t-icon name="image" size="12px" />
-                </span>
-              </template>
-            </p>
-          </div>
+    <div class="model-list">
+      <t-loading :loading="loading" size="small" class="model-list-loading">
+        <div v-if="!loading && filteredModels.length === 0 && modelQuery.trim()" class="empty-state">
+          <t-empty :description="$t('common.noResult')" />
+          <t-button variant="outline" @click="modelQuery = ''">{{ $t('common.clear') }}</t-button>
         </div>
-        <button
-          v-if="authStore.hasRole('admin')"
-          type="button"
-          class="model-card model-card--add"
-          data-guide="settings-add-model"
-          @click="openAddDialog"
-        >
-          <span class="model-card--add__icon" aria-hidden="true">
-            <add-icon />
-          </span>
-          <span class="model-card--add__label">{{ $t('modelSettings.actions.addModel') }}</span>
-        </button>
-      </div>
-    </t-loading>
+        <div v-else-if="!loading && filteredModels.length === 0 && !authStore.hasRole('admin')" class="empty-state">
+          <t-empty :description="emptyHint" />
+        </div>
+        <div v-else-if="!loading" class="model-grid">
+          <div v-for="model in filteredModels" :key="`${model._modelType}-${model.id}`" class="model-card" :class="[
+            `model-card--${model._modelType}`,
+            {
+              'model-card--builtin': model.isBuiltin,
+              'model-card--clickable': isModelCardClickable(model),
+            },
+          ]" :role="isModelCardClickable(model) ? 'button' : undefined"
+            :tabindex="isModelCardClickable(model) ? 0 : undefined"
+            @click="onModelCardClick($event, model._modelType, model)"
+            @keydown.enter="onModelCardClick($event, model._modelType, model)">
+            <div class="model-card__badge" :aria-label="typeLabel(model._modelType)">
+              <t-icon :name="typeIcon(model._modelType)" size="16px" />
+            </div>
+            <div class="model-card__body">
+              <div class="model-card__header">
+                <h3 class="model-card__title" :title="modelDisplayName(model)">{{ modelDisplayName(model) }}</h3>
+                <span v-if="model.isBuiltin" class="model-card__lock" :title="$t('modelSettings.builtinTag')"
+                  :aria-label="$t('modelSettings.builtinTag')">
+                  <t-icon :name="authStore.isSystemAdmin ? 'edit-1' : 'lock-on'" />
+                </span>
+                <div v-if="canManageModel(model)" class="model-card__actions" @click.stop>
+                  <t-dropdown :options="getModelOptions(model._modelType, model)" placement="bottom-right" attach="body"
+                    trigger="click"
+                    @click="(data: any) => handleMenuAction({ value: data.value }, model._modelType, model)">
+                    <t-button variant="text" shape="square" size="small" class="model-card__action-btn model-card__more">
+                      <t-icon name="ellipsis" />
+                    </t-button>
+                  </t-dropdown>
+                  <t-popconfirm
+                    v-if="canDeleteModel(model)"
+                    :content="$t('modelSettings.confirmDelete', { name: modelDisplayName(model) })"
+                    :confirm-btn="{ content: $t('common.delete'), theme: 'danger' }"
+                    :cancel-btn="{ content: $t('common.cancel') }"
+                    placement="bottom-right"
+                    @confirm="deleteModel(model._modelType, model.id)"
+                  >
+                    <t-tooltip :content="$t('common.delete')" placement="top">
+                      <t-button
+                        theme="danger"
+                        shape="square"
+                        variant="text"
+                        size="small"
+                        class="model-card__action-btn model-card__delete"
+                        @click.stop
+                      >
+                        <template #icon><t-icon name="delete" /></template>
+                      </t-button>
+                    </t-tooltip>
+                  </t-popconfirm>
+                </div>
+              </div>
+              <p class="model-card__subtitle">
+                <span class="model-card__vendor">
+                  <img v-if="vendorIcon(model)" :src="vendorIcon(model)" class="model-card__vendor-icon" alt="" />
+                  <span>{{ vendorLabel(model) }}</span>
+                </span>
+                <template v-if="model._modelType === 'embedding' && model.dimension">
+                  <span class="model-card__sep">·</span>
+                  <span>{{ $t('model.editor.dimensionLabel') }} {{ model.dimension }}</span>
+                </template>
+                <template v-if="model._modelType === 'chat' || model._modelType === 'vllm'">
+                  <span class="model-card__sep">·</span>
+                  <span
+                    class="model-card__ctx"
+                    :class="{ 'model-card__ctx--default': isDefaultContextWindow(model.contextWindow) }"
+                    :title="contextWindowTitle(model.contextWindow)"
+                  >{{ formatContextWindow(model.contextWindow) }}</span>
+                </template>
+                <template v-if="(model._modelType === 'chat' && model.supportsVision)
+                  || (model._modelType === 'embedding' && model.capabilities?.input?.includes('image'))">
+                  <span class="model-card__sep">·</span>
+                  <span class="model-card__vision" :title="$t('model.editor.supportsVisionLabel')"
+                    :aria-label="$t('model.editor.supportsVisionLabel')">
+                    <t-icon name="image" size="12px" />
+                  </span>
+                </template>
+              </p>
+            </div>
+          </div>
+          <button
+            v-if="authStore.hasRole('admin')"
+            type="button"
+            class="model-card model-card--add"
+            data-guide="settings-add-model"
+            @click="openAddDialog"
+          >
+            <span class="model-card--add__icon" aria-hidden="true">
+              <add-icon />
+            </span>
+            <span class="model-card--add__label">{{ $t('modelSettings.actions.addModel') }}</span>
+          </button>
+        </div>
+      </t-loading>
+    </div>
 
     <t-dialog
       v-model:visible="showUsageDialog"
@@ -315,6 +340,7 @@ import { focusKbEditorSection } from '@/config/contextualGuides'
 import { useChatResourcesStore } from '@/stores/chatResources'
 import { useModelProvidersStore } from '@/stores/modelProviders'
 import { docsUrl } from '@/utils/docsUrl'
+import { matchesResourceQuery } from '@/utils/resourceListSearch'
 import {
   formatContextWindow,
   isDefaultContextWindow,
@@ -339,8 +365,9 @@ const currentModelType = ref<ModelType>('chat')
 const editingModel = ref<any>(null)
 const loading = ref(true)
 const activeTypeFilter = ref<FilterType>('all')
+const modelQuery = ref('')
 
-const MODEL_TAB_TYPES: FilterType[] = ['chat', 'embedding', 'rerank', 'vllm', 'asr']
+const MODEL_TAB_TYPES: ModelType[] = ['chat', 'embedding', 'rerank', 'vllm', 'asr']
 const KNOWLEDGE_BASE_EDITOR_HOST_ROUTES = new Set([
   'home',
   'knowledgeBaseList',
@@ -352,7 +379,7 @@ const KNOWLEDGE_BASE_EDITOR_HOST_ROUTES = new Set([
 watch(
   () => uiStore.settingsInitialSubSection,
   (sub) => {
-    if (sub && MODEL_TAB_TYPES.includes(sub as FilterType)) {
+    if (sub && MODEL_TAB_TYPES.includes(sub as ModelType)) {
       activeTypeFilter.value = sub as FilterType
     }
   },
@@ -413,10 +440,15 @@ function convertToLegacyFormat(model: ModelConfig) {
 
 // 平铺 + 过滤
 const allLegacyModels = computed(() => allModels.value.map(convertToLegacyFormat))
-const filteredModels = computed(() => {
-  if (activeTypeFilter.value === 'all') return allLegacyModels.value
-  return allLegacyModels.value.filter(m => m._modelType === activeTypeFilter.value)
-})
+const filteredModels = computed(() => allLegacyModels.value.filter(model =>
+  (activeTypeFilter.value === 'all' || model._modelType === activeTypeFilter.value)
+  && matchesResourceQuery({ name: modelDisplayName(model), description: vendorLabel(model) }, modelQuery.value),
+))
+
+const modelTypeTabs = computed(() => [
+  { value: 'all', label: t('common.all'), icon: 'view-module', count: allLegacyModels.value.length },
+  ...MODEL_TAB_TYPES.map(value => ({ value, label: typeLabel(value), icon: typeIcon(value), count: countByType(value) })),
+])
 
 const countByType = (type: ModelType) => allLegacyModels.value.filter(m => m._modelType === type).length
 
@@ -886,130 +918,246 @@ onMounted(() => {
 
 <style lang="less" scoped>
 @import (reference) '@/components/css/provider-card.less';
-
 @import (reference) '@/components/css/settings-section.less';
 
 .model-settings {
   width: 100%;
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  color: var(--td-text-color-primary);
+  container-type: inline-size;
 }
 
 .section-header {
   .settings-section-header();
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 12px;
+  flex-shrink: 0;
+
+  &__top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+    // 为设置弹窗右上角的关闭按钮留出空间。
+    padding-right: 32px;
+  }
+
+  h2 {
+    margin: 0;
+  }
+
+}
+
+.model-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.model-title-help {
+  .settings-title-help();
 }
 
 .model-header-actions {
   display: flex;
   align-items: center;
-  gap: 20px;
-  flex-shrink: 0;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
-.model-test-trigger {
-  --td-bg-color-container-hover: transparent;
+.model-header-action.t-button {
   flex-shrink: 0;
-  padding-left: 0;
-  padding-right: 0;
-  font-weight: 600;
+  min-height: 32px;
+  padding: 0 12px;
+  gap: 6px;
+  border: 1px solid var(--td-component-stroke);
+  border-radius: var(--app-radius-sm);
+  background: var(--td-bg-color-container);
+  color: var(--td-text-color-primary);
+  font-size: var(--app-text-md);
 
-  &:hover,
-  &:focus,
-  &.t-is-active,
-  &:active {
-    background-color: transparent !important;
-    color: var(--td-brand-color-hover);
+  &:hover:not(:disabled) {
+    background: var(--td-bg-color-container-hover);
   }
 
-  &:active {
-    color: var(--td-brand-color-active);
+  &:focus-visible {
+    outline: 2px solid var(--td-brand-color);
+    outline-offset: 2px;
+  }
+
+  :deep(.t-icon) {
+    color: var(--td-brand-color);
   }
 }
 
 .builtin-models-hint {
-  margin-top: 12px;
-  padding: 10px 12px;
-  background: var(--td-bg-color-secondarycontainer);
-  border: 1px solid var(--td-component-stroke);
-  border-radius: var(--app-radius-sm);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: min(320px, calc(100vw - 64px));
+  padding: 4px;
+  color: var(--td-text-color-secondary);
+  font-size: var(--app-text-sm);
+  line-height: 20px;
 }
 
 .builtin-hint-label {
-  margin: 0 0 4px 0;
-  font-size: var(--app-text-sm);
+  margin: 0;
+  color: var(--td-text-color-primary);
   font-weight: 500;
-  color: var(--td-text-color-placeholder);
-  letter-spacing: 0.02em;
 }
 
 .builtin-hint-text {
-  margin: 0 0 6px 0;
-  font-size: var(--app-text-md);
-  line-height: 1.55;
-  color: var(--td-text-color-secondary);
+  margin: 0;
 }
 
 .builtin-models-hint .doc-link {
-  font-size: var(--app-text-md);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--td-brand-color);
+  text-decoration: none;
+
+  &:hover { text-decoration: underline; }
 }
 
-.model-list-loading {
-  min-height: 120px;
+.model-tabbar {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  border-bottom: 1px solid var(--td-component-stroke);
 }
 
 .model-type-tabs {
-  margin-bottom: 16px;
+  flex: 1;
+  min-width: 0;
+  background: transparent;
 
+  :deep(.t-tabs__nav-container) { background: transparent; }
+  :deep(.t-tabs__nav-container.t-is-top::after) { display: none; }
   :deep(.t-tabs__nav-item) {
-    font-size: var(--app-text-md);
-  }
+    height: 44px;
+    padding: 0;
+    margin-right: 24px;
+    font-size: var(--app-text-base);
+    font-weight: 500;
+    color: var(--td-text-color-secondary);
 
-  :deep(.t-tabs__nav-item-wrapper) {
-    padding: 0 12px;
-    margin: 0;
+    &:last-child { margin-right: 0; }
+    &:hover { background: transparent; color: var(--td-text-color-primary); }
   }
-
-  :deep(.t-tabs__operations) {
-    display: none;
+  :deep(.t-tabs__nav-item-wrapper) { padding: 0 2px; margin: 0; }
+  :deep(.t-tabs__nav-item:not(.t-is-disabled):hover .t-tabs__nav-item-wrapper) { background: transparent; }
+  :deep(.t-tabs__bar) { display: none; }
+  :deep(.t-tabs__nav-item.t-is-active) {
+    color: var(--td-text-color-primary);
+    text-shadow: none;
+    &::after {
+      content: '';
+      position: absolute;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      height: 2px;
+      border-radius: var(--app-radius-pill);
+      background: var(--td-brand-color);
+    }
+    .t-icon { color: var(--td-brand-color); }
+    .model-tab-count {
+      background: var(--td-brand-color-light);
+      color: var(--td-brand-color);
+    }
   }
-
+  :deep(.t-tabs__operations) { display: none; }
   :deep(.t-tabs__nav-scroll) {
     overflow-x: auto;
     scrollbar-width: none;
-
-    &::-webkit-scrollbar {
-      display: none;
-    }
+    &::-webkit-scrollbar { display: none; }
   }
+  :deep(.t-tabs__content) { display: none; }
+}
 
-  :deep(.t-tabs__content) {
-    display: none;
-  }
+.model-type-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.model-tab-count {
+  min-width: 20px;
+  height: 20px;
+  box-sizing: border-box;
+  padding: 0 6px;
+  border-radius: var(--app-radius-pill);
+  background: var(--td-bg-color-secondarycontainer);
+  color: var(--td-text-color-secondary);
+  font-size: var(--app-text-xs);
+  font-weight: 500;
+  line-height: 20px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.model-search {
+  flex: 0 0 240px;
+  width: 240px;
+  :deep(.t-input) { border-radius: var(--app-radius-sm); }
+}
+
+.model-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: var(--app-space-4) 0 var(--app-space-8);
+}
+
+.model-list-loading {
+  display: block;
+  min-height: 120px;
 }
 
 .model-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr));
+  gap: 10px;
+  align-items: stretch;
 
-  .model-card--add {
-    width: 100%;
-    height: 100%;
-  }
+  .model-card--add { width: 100%; height: 100%; }
 }
 
-// 模型卡片 —— 可选类型徽章（仅「全部」Tab）+ 标题 + 一行副标题
+@container (max-width: 900px) {
+  .model-tabbar { flex-wrap: wrap; gap: 0; }
+  .model-type-tabs { flex-basis: 100%; }
+  .model-search { flex: 1 1 100%; width: 100%; margin: 8px 0; }
+}
+
+// 模型卡片沿用工具箱的紧凑间距、圆角和悬浮反馈。
 .model-card {
   .provider-card();
-  .provider-card-interactive();
+  align-items: center;
+  min-height: 88px;
+  padding: 12px;
+  gap: 10px;
+  box-sizing: border-box;
+  border-radius: var(--app-radius-md);
 
   &--add {
     .provider-card-add();
+    min-height: 88px;
+    gap: 6px;
 
     &:hover,
     &:focus-visible {
       box-shadow: none;
     }
-
-
 
     &__icon {
       display: flex;
@@ -1018,8 +1166,8 @@ onMounted(() => {
       width: 32px;
       height: 32px;
       border-radius: var(--app-radius-md);
-      background: color-mix(in srgb, var(--td-brand-color) 10%, transparent);
-      color: var(--td-brand-color);
+      background: var(--td-bg-color-secondarycontainer);
+      color: var(--td-text-color-secondary);
       font-size: var(--app-text-2xl);
     }
 
@@ -1030,24 +1178,18 @@ onMounted(() => {
     }
   }
 
-  &--builtin {
-    background: var(--td-bg-color-secondarycontainer);
-
-    &:hover {
-      box-shadow: none;
-      border-color: var(--td-component-stroke);
-    }
-  }
-
   &--clickable {
     .provider-card-interactive();
 
-
+    &:hover {
+      border-color: color-mix(in srgb, var(--td-brand-color) 40%, var(--td-component-stroke));
+      box-shadow: 0 3px 12px color-mix(in srgb, var(--td-text-color-primary) 6%, transparent);
+    }
   }
 }
 
 .model-card__badge {
-  .provider-card-badge();
+  .provider-card-badge(28px, 8px);
   .provider-card-badge-color(#0052d9);
 }
 

@@ -1033,6 +1033,8 @@
         "source": "https://docs.anthropic.com/en/docs/about-claude/models",
         "api": "anthropic-messages",
         "compat": {
+          "supports_temperature": false,
+          "supports_top_p": false,
           "thinking_mode": "adaptive",
           "supports_effort": true
         },
@@ -1065,6 +1067,8 @@
         "source": "https://platform.claude.com/docs/en/build-with-claude/thinking-troubleshooting#supported-models",
         "api": "anthropic-messages",
         "compat": {
+          "supports_temperature": false,
+          "supports_top_p": false,
           "thinking_mode": "adaptive",
           "supports_effort": true
         },
@@ -1096,6 +1100,8 @@
         "source": "https://docs.anthropic.com/en/docs/about-claude/models",
         "api": "anthropic-messages",
         "compat": {
+          "supports_temperature": false,
+          "supports_top_p": false,
           "thinking_mode": "adaptive",
           "supports_effort": true
         },
@@ -1127,6 +1133,8 @@
         "source": "https://docs.anthropic.com/en/docs/about-claude/models",
         "api": "anthropic-messages",
         "compat": {
+          "supports_temperature": false,
+          "supports_top_p": false,
           "thinking_mode": "adaptive",
           "supports_effort": true
         },
@@ -1159,6 +1167,8 @@
         "source": "https://platform.claude.com/docs/en/build-with-claude/thinking-troubleshooting#supported-models",
         "api": "anthropic-messages",
         "compat": {
+          "supports_temperature": false,
+          "supports_top_p": false,
           "thinking_mode": "adaptive",
           "supports_effort": true
         },
@@ -1190,6 +1200,8 @@
         "source": "https://platform.claude.com/docs/en/build-with-claude/thinking-troubleshooting#supported-models",
         "api": "anthropic-messages",
         "compat": {
+          "supports_temperature": false,
+          "supports_top_p": false,
           "thinking_mode": "adaptive",
           "supports_effort": true
         },
