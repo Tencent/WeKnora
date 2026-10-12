@@ -3535,8 +3535,6 @@ export default {
         sourceFilterSelected: '{count} 件のドキュメントを選択中',
         sourceFilterClear: '選択をクリア',
         sourceFilterTooMany: '選択できるのは最大 1000 件です',
-        sourceFilterColName: 'ファイル名',
-        sourceFilterColTime: 'アップロード日時',
         sourceFilterSelectAll: 'すべて選択 / 選択解除（全ヒット対象）',
         sourceFilterOverflowRecent: 'ドキュメントが多いため、最新 {cap} 件のみ表示しています。キーワードで絞り込んでください',
         sourceFilterOverflowHits: '{total} 件がヒットしました。先頭 {cap} 件のみ表示中です。全選択前にキーワードを絞り込んでください',

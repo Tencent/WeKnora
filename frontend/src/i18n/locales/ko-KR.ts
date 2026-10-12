@@ -4566,8 +4566,6 @@ export default {
         sourceFilterSelected: '{count}개 문서 선택됨',
         sourceFilterClear: '선택 지우기',
         sourceFilterTooMany: '최대 1000개 문서까지 선택할 수 있습니다',
-        sourceFilterColName: '파일 이름',
-        sourceFilterColTime: '업로드 시간',
         sourceFilterSelectAll: '전체 선택 / 해제 (모든 검색 결과 대상)',
         sourceFilterOverflowRecent: '문서가 많아 최근 {cap}개만 표시합니다. 키워드로 좁혀 주세요',
         sourceFilterOverflowHits: '{total}개 문서가 일치했습니다. 처음 {cap}개만 표시 중입니다. 전체 선택 전 키워드를 좁혀 주세요',

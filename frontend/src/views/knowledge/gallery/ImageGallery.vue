@@ -53,7 +53,7 @@ let scrollObserver: ResizeObserver | undefined
 
 // Source-document restriction (the "filter by document" picker). An empty
 // array means every document of the KB; otherwise only images whose owning
-// document is listed are fetched. Committed by the picker dialog.
+// document is listed are fetched. Edited from the toolbar's source panel.
 const sourceDocIds = ref<string[]>([])
 const sourcePickerVisible = ref(false)
 
@@ -365,15 +365,18 @@ function clearFilters(): void {
 
 /** The empty state's way back: forget the keyword and source documents as well. */
 function clearAll(): void {
+  if (sourceTimer) clearTimeout(sourceTimer)
   keyword.value = ''
   sourceDocIds.value = []
   clearFilters()
 }
 
-/** Committed by the source picker: restrict the listing to these documents. */
-function onSourceDocsConfirm(ids: string[]): void {
+/** Ticked in the source panel: restrict the listing to these documents. */
+let sourceTimer: ReturnType<typeof setTimeout> | undefined
+function onSourceDocsChange(ids: string[]): void {
   sourceDocIds.value = ids
-  reload()
+  if (sourceTimer) clearTimeout(sourceTimer)
+  sourceTimer = setTimeout(() => reload(), 300)
 }
 
 // ---------------------------------------------------------------------------
@@ -576,6 +579,7 @@ function sourceLabel(img: ImageAsset): string {
 // ---------------------------------------------------------------------------
 onBeforeUnmount(() => {
   if (searchTimer) clearTimeout(searchTimer)
+  if (sourceTimer) clearTimeout(sourceTimer)
   // Orphan any in-flight listing so it cannot map new blobs after unmount.
   listToken++
   initToken++
@@ -597,6 +601,7 @@ async function initGallery() {
   const token = ++initToken
   resetResults()
   if (searchTimer) clearTimeout(searchTimer)
+  if (sourceTimer) clearTimeout(sourceTimer)
   error.value = ''
   keyword.value = ''
   sortBy.value = ''
@@ -674,16 +679,32 @@ watch(
           <template #prefix-icon><t-icon name="search" size="16px" /></template>
         </t-input>
 
-        <button
-          type="button"
-          class="ig-tool-btn"
-          :class="{ active: sourcePickerVisible || sourceDocIds.length > 0 }"
-          @click="sourcePickerVisible = true"
+        <t-popup
+          v-model:visible="sourcePickerVisible"
+          trigger="click"
+          placement="bottom-right"
+          overlay-class-name="gallery-toolbar-popup"
+          :overlay-inner-style="{ padding: 0 }"
         >
-          <t-icon name="file" size="16px" />
-          {{ t(`${NS}.sourceFilter`) }}
-          <span v-if="sourceDocIds.length" class="ig-tool-btn__count">{{ sourceDocIds.length }}</span>
-        </button>
+          <button
+            type="button"
+            class="ig-tool-btn"
+            :class="{ active: sourcePickerVisible || sourceDocIds.length > 0 }"
+            :aria-expanded="sourcePickerVisible"
+          >
+            <t-icon name="file" size="16px" />
+            {{ t(`${NS}.sourceFilter`) }}
+            <span v-if="sourceDocIds.length" class="ig-tool-btn__count">{{ sourceDocIds.length }}</span>
+          </button>
+          <template #content>
+            <GallerySourcePicker
+              :kb-id="props.knowledgeBaseId"
+              :visible="sourcePickerVisible"
+              :selected="sourceDocIds"
+              @update:selected="onSourceDocsChange"
+            />
+          </template>
+        </t-popup>
 
         <t-popup
           v-model:visible="filterPanelVisible"
@@ -890,7 +911,7 @@ watch(
                 {{ img.caption || t(`${NS}.noCaption`) }}
               </div>
               <div class="ig-card__source" :title="sourceLabel(img)">
-                <t-icon name="file" size="12px" />
+                <t-icon name="file" size="14px" />
                 <span>{{ sourceLabel(img) }}</span>
               </div>
             </div>
@@ -921,14 +942,6 @@ watch(
       @load-more="onViewerLoadMore"
       @close="closeViewer"
       @open-source="onOpenSource"
-    />
-
-    <GallerySourcePicker
-      :kb-id="props.knowledgeBaseId"
-      :visible="sourcePickerVisible"
-      :selected="sourceDocIds"
-      @update:visible="(v: boolean) => (sourcePickerVisible = v)"
-      @confirm="onSourceDocsConfirm"
     />
   </div>
 </template>
@@ -1384,6 +1397,8 @@ watch(
     min-width: 0;
     color: var(--td-text-color-placeholder);
     font-size: var(--app-text-sm);
+
+    .t-icon { flex-shrink: 0; }
 
     span {
       min-width: 0;

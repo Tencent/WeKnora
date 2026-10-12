@@ -4566,8 +4566,6 @@ export default {
         sourceFilterSelected: 'Выбрано документов: {count}',
         sourceFilterClear: 'Сбросить выбор',
         sourceFilterTooMany: 'Можно выбрать не более 1000 документов',
-        sourceFilterColName: 'Имя файла',
-        sourceFilterColTime: 'Время загрузки',
         sourceFilterSelectAll: 'Выбрать все / снять выделение (по всем совпадениям)',
         sourceFilterOverflowRecent: 'Документов много: показаны только последние {cap}. Уточните запрос ключевым словом',
         sourceFilterOverflowHits: 'Найдено {total} документов; показаны первые {cap}. Сузьте ключевое слово перед выбором всех',

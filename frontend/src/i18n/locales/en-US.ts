@@ -3535,8 +3535,6 @@ export default {
         sourceFilterSelected: '{count} documents selected',
         sourceFilterClear: 'Clear selection',
         sourceFilterTooMany: 'At most 1000 documents can be selected',
-        sourceFilterColName: 'File name',
-        sourceFilterColTime: 'Uploaded',
         sourceFilterSelectAll: 'Select all / none (across every hit)',
         sourceFilterOverflowRecent: 'Many documents: showing only the most recent {cap}. Refine with a keyword.',
         sourceFilterOverflowHits: '{total} documents hit; showing the first {cap}. Narrow the keyword before selecting all.',
