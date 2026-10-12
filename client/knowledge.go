@@ -252,6 +252,7 @@ func (c *Client) CreateKnowledgeFromURL(
 	if err != nil {
 		return nil, err
 	}
+	defer func() { _ = resp.Body.Close() }()
 
 	var response KnowledgeResponse
 	if resp.StatusCode == http.StatusConflict {
