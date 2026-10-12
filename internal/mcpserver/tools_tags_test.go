@@ -59,11 +59,14 @@ func TestHandleListTagsResolvesScopeAndPaginates(t *testing.T) {
 	kb := &types.KnowledgeBase{ID: "kb-1", TenantID: 1, Name: "Product Docs"}
 	srv := newScopeTestServer(kb)
 	srv.kbShareService = &stubKBShareService{}
-	tags := &stubTagService{result: types.NewPageResult(2, &types.Pagination{Page: 1, PageSize: 20},
-		[]*types.KnowledgeTagWithStats{
-			{KnowledgeTag: types.KnowledgeTag{ID: "tag-1", Name: "华东", Color: "#fff"}, KnowledgeCount: 3, ChunkCount: 12},
-			{KnowledgeTag: types.KnowledgeTag{ID: "tag-2", Name: "华南"}},
-		})}
+	tagRows := []*types.KnowledgeTagWithStats{
+		{
+			KnowledgeTag:   types.KnowledgeTag{ID: "tag-1", Name: "华东", Color: "#fff"},
+			KnowledgeCount: 3, ChunkCount: 12,
+		},
+		{KnowledgeTag: types.KnowledgeTag{ID: "tag-2", Name: "华南"}},
+	}
+	tags := &stubTagService{result: types.NewPageResult(2, &types.Pagination{Page: 1, PageSize: 20}, tagRows)}
 	srv.tagService = tags
 	ep := &types.MCPEndpoint{ID: "ep", TenantID: 1}
 	ctx := mcpCallContext(1, ep)
