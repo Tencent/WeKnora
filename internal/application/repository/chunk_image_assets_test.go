@@ -20,7 +20,7 @@ import (
 // both spellings need the same assertions. For example:
 //
 //	docker run -d --rm -e POSTGRES_PASSWORD=pg -e POSTGRES_DB=weknora -p 55432:5432 \
-//	  paradedb/paradedb:v0.22.6-pg17
+//	  paradedb/paradedb:v0.25.11-pg17
 //	WEKNORA_REPOSITORY_TEST_POSTGRES_DSN=postgres://postgres:pg@localhost:55432/weknora?sslmode=disable
 //
 // Both runs apply the real chunk_images migration, so the triggers and the
