@@ -103,6 +103,7 @@ func TestSharedExecutionFiltersDocumentsChunksAndSearchScope(t *testing.T) {
 			ids,
 			nil,
 			[]types.TagScope{{KnowledgeBaseID: "private", TagIDs: []string{"tag"}}},
+			scopeUnion,
 		)
 		require.NoError(t, err)
 		require.Len(t, targets, 2, "denied KBs must not become search or tag targets")

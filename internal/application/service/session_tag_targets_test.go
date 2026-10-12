@@ -160,6 +160,7 @@ func TestBuildSearchTargets_DocumentTagScopeResolvesKnowledgeIDs(t *testing.T) {
 		[]string{"doc-kb"},
 		nil,
 		[]types.TagScope{{KnowledgeBaseID: "doc-kb", TagIDs: []string{"tag-a"}}},
+		scopeUnion,
 	)
 
 	require.NoError(t, err)
@@ -181,6 +182,7 @@ func TestBuildSearchTargets_ExplicitKnowledgeScopeDisablesRecallThresholds(t *te
 		nil,
 		[]string{"doc-1"},
 		nil,
+		scopeUnion,
 	)
 
 	require.NoError(t, err)
@@ -199,6 +201,7 @@ func TestBuildSearchTargets_DocumentTagScopeIntersectsExplicitKnowledgeIDs(t *te
 		[]string{"doc-kb"},
 		[]string{"doc-2", "doc-3"},
 		[]types.TagScope{{KnowledgeBaseID: "doc-kb", TagIDs: []string{"tag-a"}}},
+		scopeUnion,
 	)
 
 	require.NoError(t, err)
@@ -218,6 +221,7 @@ func TestBuildSearchTargets_FAQTagScopeKeepsIndexTagFilter(t *testing.T) {
 		[]string{"faq-kb"},
 		nil,
 		[]types.TagScope{{KnowledgeBaseID: "faq-kb", TagIDs: []string{"tag-a", "tag-b"}}},
+		scopeUnion,
 	)
 
 	require.NoError(t, err)
@@ -238,6 +242,7 @@ func TestBuildSearchTargets_FullKBWithTagScopeSkipsFullKBTarget(t *testing.T) {
 		[]string{"doc-kb"},
 		nil,
 		[]types.TagScope{{KnowledgeBaseID: "doc-kb", TagIDs: []string{"tag-a"}}},
+		scopeUnion,
 	)
 
 	require.NoError(t, err)
@@ -267,6 +272,7 @@ func TestBuildSearchTargets_DocumentTagScopeWithMissingKBMetadata(t *testing.T) 
 		[]string{"doc-kb"},
 		nil,
 		[]types.TagScope{{KnowledgeBaseID: "doc-kb", TagIDs: []string{"tag-a"}}},
+		scopeUnion,
 	)
 
 	require.NoError(t, err)
@@ -323,6 +329,159 @@ func TestBuildSearchTargets_DocumentTagScopeResolutionError(t *testing.T) {
 		[]string{"doc-kb"},
 		nil,
 		[]types.TagScope{{KnowledgeBaseID: "doc-kb", TagIDs: []string{"tag-a"}}},
+		scopeUnion,
+	)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "database unavailable")
+}
+
+func TestBuildSearchTargets_NarrowKnowledgeIDsReplaceFullKBTarget(t *testing.T) {
+	svc := newTagTargetSessionService()
+
+	targets, err := svc.buildSearchTargets(
+		tagTargetContext(),
+		100,
+		[]string{"doc-kb"},
+		[]string{"doc-1"},
+		nil,
+		scopeNarrow,
+	)
+
+	require.NoError(t, err)
+	require.Len(t, targets, 1)
+	assert.Equal(t, types.SearchTargetTypeKnowledge, targets[0].Type)
+	assert.Equal(t, "doc-kb", targets[0].KnowledgeBaseID)
+	assert.Equal(t, []string{"doc-1"}, targets[0].KnowledgeIDs)
+	assert.True(t, targets[0].DisableRecallThresholds)
+}
+
+func TestBuildSearchTargets_NarrowDropsOutOfScopeKnowledge(t *testing.T) {
+	svc := &sessionService{
+		knowledgeBaseService: &tagTargetKnowledgeBaseService{kbs: map[string]*types.KnowledgeBase{
+			"doc-kb": {ID: "doc-kb", TenantID: 100, Type: types.KnowledgeBaseTypeDocument},
+		}},
+		knowledgeService: &tagTargetKnowledgeService{
+			knowledges: []*types.Knowledge{
+				{ID: "doc-x", TenantID: 100, KnowledgeBaseID: "other-kb"},
+			},
+		},
+	}
+
+	targets, err := svc.buildSearchTargets(
+		tagTargetContext(),
+		100,
+		[]string{"doc-kb"},
+		[]string{"doc-x"},
+		nil,
+		scopeNarrow,
+	)
+
+	require.NoError(t, err)
+	assert.Empty(t, targets, "files outside the requested KBs must not widen the search scope")
+}
+
+func TestBuildSearchTargets_NarrowUnresolvableKnowledgeFailsClosed(t *testing.T) {
+	svc := newTagTargetSessionService()
+
+	targets, err := svc.buildSearchTargets(
+		tagTargetContext(),
+		100,
+		[]string{"doc-kb"},
+		[]string{"doc-missing"},
+		nil,
+		scopeNarrow,
+	)
+
+	require.NoError(t, err)
+	assert.Empty(t, targets, "unresolvable knowledge IDs must yield an empty scope, not a whole-KB search")
+}
+
+func TestBuildSearchTargets_NarrowKnowledgeOnlyUnchanged(t *testing.T) {
+	svc := newTagTargetSessionService()
+
+	targets, err := svc.buildSearchTargets(
+		tagTargetContext(),
+		100,
+		nil,
+		[]string{"doc-1"},
+		nil,
+		scopeNarrow,
+	)
+
+	require.NoError(t, err)
+	require.Len(t, targets, 1)
+	assert.Equal(t, types.SearchTargetTypeKnowledge, targets[0].Type)
+	assert.Equal(t, []string{"doc-1"}, targets[0].KnowledgeIDs)
+}
+
+func TestBuildSearchTargets_NarrowKBOnlyUnchanged(t *testing.T) {
+	svc := newTagTargetSessionService()
+
+	targets, err := svc.buildSearchTargets(
+		tagTargetContext(),
+		100,
+		[]string{"doc-kb"},
+		nil,
+		nil,
+		scopeNarrow,
+	)
+
+	require.NoError(t, err)
+	require.Len(t, targets, 1)
+	assert.Equal(t, types.SearchTargetTypeKnowledgeBase, targets[0].Type)
+	assert.Equal(t, "doc-kb", targets[0].KnowledgeBaseID)
+}
+
+func TestBuildSearchTargets_UnionKBPlusSameKBDocPreserved(t *testing.T) {
+	svc := newTagTargetSessionService()
+
+	targets, err := svc.buildSearchTargets(
+		tagTargetContext(),
+		100,
+		[]string{"doc-kb"},
+		[]string{"doc-1"},
+		nil,
+		scopeUnion,
+	)
+
+	require.NoError(t, err)
+	require.Len(t, targets, 1, "chat @-mentions keep union semantics: whole KB plus the file is just the KB")
+	assert.Equal(t, types.SearchTargetTypeKnowledgeBase, targets[0].Type)
+	assert.Equal(t, "doc-kb", targets[0].KnowledgeBaseID)
+	assert.Empty(t, targets[0].KnowledgeIDs)
+}
+
+type tagTargetKnowledgeServiceWithBatchError struct {
+	tagTargetKnowledgeService
+	batchErr error
+}
+
+func (s *tagTargetKnowledgeServiceWithBatchError) GetKnowledgeBatchWithSharedAccess(
+	ctx context.Context,
+	tenantID uint64,
+	ids []string,
+) ([]*types.Knowledge, error) {
+	if s.batchErr != nil {
+		return nil, s.batchErr
+	}
+	return s.tagTargetKnowledgeService.GetKnowledgeBatchWithSharedAccess(ctx, tenantID, ids)
+}
+
+func TestBuildSearchTargets_NarrowKnowledgeFetchFailsClosed(t *testing.T) {
+	base := newTagTargetSessionService()
+	base.knowledgeService = &tagTargetKnowledgeServiceWithBatchError{
+		tagTargetKnowledgeService: *base.knowledgeService.(*tagTargetKnowledgeService),
+		batchErr:                  fmt.Errorf("database unavailable"),
+	}
+
+	_, err := base.buildSearchTargets(
+		tagTargetContext(),
+		100,
+		[]string{"doc-kb"},
+		[]string{"doc-1"},
+		nil,
+		scopeNarrow,
 	)
 
 	require.Error(t, err)

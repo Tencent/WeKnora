@@ -107,7 +107,9 @@ func (s *sessionService) KnowledgeQA(
 	retrievalTenantID := s.resolveRetrievalTenantID(ctx, req)
 
 	// Build unified search targets (computed once, used throughout pipeline)
-	searchTargets, err := s.buildSearchTargets(ctx, retrievalTenantID, knowledgeBaseIDs, knowledgeIDs, req.TagScopes)
+	searchTargets, err := s.buildSearchTargets(
+		ctx, retrievalTenantID, knowledgeBaseIDs, knowledgeIDs, req.TagScopes, scopeUnion,
+	)
 	if err != nil {
 		return fmt.Errorf("build search targets: %w", err)
 	}
@@ -455,6 +457,19 @@ func (s *sessionService) resolveKnowledgeBasesFromAgent(
 	}
 }
 
+// targetScopeMode selects how knowledgeBaseIDs and knowledgeIDs combine in buildSearchTargets.
+type targetScopeMode int
+
+const (
+	// scopeUnion is chat @-mention semantics (KnowledgeQA/AgentQA): every selected KB is
+	// searched as a whole; knowledge IDs inside an already-selected KB are redundant and skipped.
+	scopeUnion targetScopeMode = iota
+	// scopeNarrow is knowledge-search API semantics: when knowledge IDs are given, only those
+	// files are searched; knowledgeBaseIDs then just bounds which KBs the files may belong to,
+	// and files outside the selected KBs are dropped instead of widening the search to whole KBs.
+	scopeNarrow
+)
+
 // buildSearchTargets computes the unified search targets from knowledgeBaseIDs and knowledgeIDs.
 // tenantID is the retrieval scope: session.TenantID or effective tenant from shared agent (set by handler).
 // This is called once at the request entry point to avoid repeated queries later in the pipeline.
@@ -467,6 +482,7 @@ func (s *sessionService) buildSearchTargets(
 	knowledgeBaseIDs []string,
 	knowledgeIDs []string,
 	tagScopes []types.TagScope,
+	scopeMode targetScopeMode,
 ) (types.SearchTargets, error) {
 	caller := types.CallerFromContext(ctx)
 	var targets types.SearchTargets
@@ -523,6 +539,11 @@ func (s *sessionService) buildSearchTargets(
 			if len(tagIDsByKB[kbID]) > 0 {
 				continue
 			}
+			// In narrow mode the caller picked explicit files, so the KB scope is
+			// enforced by the per-file targets below instead of a whole-KB target.
+			if scopeMode == scopeNarrow && len(knowledgeIDs) > 0 {
+				continue
+			}
 			targets = append(targets, &types.SearchTarget{
 				Type:            types.SearchTargetTypeKnowledgeBase,
 				KnowledgeBaseID: kbID,
@@ -537,6 +558,11 @@ func (s *sessionService) buildSearchTargets(
 	if len(knowledgeIDs) > 0 {
 		knowledgeList, err := s.knowledgeService.GetKnowledgeBatchWithSharedAccess(ctx, tenantID, knowledgeIDs)
 		if err != nil {
+			if scopeMode == scopeNarrow {
+				// Narrow mode must fail closed: degrading here would silently search
+				// a wider scope than the explicit files the caller asked for.
+				return nil, fmt.Errorf("resolve knowledge ids for search targets: %w", err)
+			}
 			logger.Warnf(ctx, "Failed to get knowledge batch for search targets: %v", err)
 			return targets, nil // Return what we have, don't fail
 		}
@@ -551,8 +577,20 @@ func (s *sessionService) buildSearchTargets(
 			if kbTenantMap[k.KnowledgeBaseID] == 0 {
 				kbTenantMap[k.KnowledgeBaseID] = k.TenantID
 			}
-			// Skip if this KB is already fully searched without a tag scope.
-			if fullKBSet[k.KnowledgeBaseID] && len(tagIDsByKB[k.KnowledgeBaseID]) == 0 {
+			if scopeMode == scopeNarrow {
+				// Drop files outside the requested KBs (or tag scopes) instead of
+				// letting them widen the search beyond the caller's scope.
+				outOfScope := len(knowledgeBaseIDs) > 0 && !fullKBSet[k.KnowledgeBaseID] &&
+					len(tagIDsByKB[k.KnowledgeBaseID]) == 0
+				if outOfScope {
+					logger.Warnf(ctx,
+						"Dropping out-of-scope knowledge %s (kb=%s) from search targets",
+						k.ID, k.KnowledgeBaseID,
+					)
+					continue
+				}
+			} else if fullKBSet[k.KnowledgeBaseID] && len(tagIDsByKB[k.KnowledgeBaseID]) == 0 {
+				// Skip if this KB is already fully searched without a tag scope.
 				continue
 			}
 			kbToKnowledgeIDs[k.KnowledgeBaseID] = append(kbToKnowledgeIDs[k.KnowledgeBaseID], k.ID)
@@ -631,8 +669,14 @@ func (s *sessionService) buildSearchTargets(
 		targets = append(targets, target)
 	}
 
+	fullKBTargets := 0
+	for _, target := range targets {
+		if target.Type == types.SearchTargetTypeKnowledgeBase {
+			fullKBTargets++
+		}
+	}
 	logger.Infof(ctx, "Built %d search targets: %d full KB, %d partial/tag KB, kbTenantMap=%v",
-		len(targets), len(knowledgeBaseIDs), len(targets)-len(knowledgeBaseIDs), kbTenantMap)
+		len(targets), fullKBTargets, len(targets)-fullKBTargets, kbTenantMap)
 
 	return targets, nil
 }
@@ -891,7 +935,7 @@ func (s *sessionService) SearchKnowledge(ctx context.Context,
 	}
 
 	// Build unified search targets (computed once, used throughout pipeline)
-	searchTargets, err := s.buildSearchTargets(ctx, tenantID, knowledgeBaseIDs, knowledgeIDs, tagScopes)
+	searchTargets, err := s.buildSearchTargets(ctx, tenantID, knowledgeBaseIDs, knowledgeIDs, tagScopes, scopeNarrow)
 	if err != nil {
 		return nil, fmt.Errorf("build search targets: %w", err)
 	}
