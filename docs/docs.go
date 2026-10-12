@@ -21247,6 +21247,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "auth_type": {
+                    "description": "ecs_ram_role is reserved for deployment environment config; tenant updates reject it.",
                     "type": "string"
                 },
                 "bucket_name": {
@@ -22474,6 +22475,7 @@ const docTemplate = `{
                     "type": "string"
                 },
                 "auth_type": {
+                    "description": "OSS only. ecs_ram_role is restricted to environment-owned, read-only backends.",
                     "type": "string"
                 },
                 "bucket_name": {
@@ -26209,7 +26211,7 @@ const docTemplate = `{
                     "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.StorageBackendConfig"
                 },
                 "id": {
-                    "description": "Optional saved backend whose masked credentials should be preserved during testing.",
+                    "description": "Optional user-owned backend whose masked credentials should be preserved during testing.",
                     "type": "string"
                 },
                 "name": {

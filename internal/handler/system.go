@@ -729,7 +729,7 @@ func (h *SystemHandler) isOSSConfigured(c *gin.Context) bool {
 	if v, exists := c.Get(types.TenantInfoContextKey.String()); exists {
 		if tenant, ok := v.(*types.Tenant); ok && tenant != nil && tenant.StorageEngineConfig != nil && tenant.StorageEngineConfig.OSS != nil {
 			ossConf := tenant.StorageEngineConfig.OSS
-			return ossConf.Validate() == nil
+			return ossConf.AuthType != types.OSSAuthECSRAMRole && ossConf.Validate() == nil
 		}
 	}
 	return false
@@ -1127,6 +1127,12 @@ func (h *SystemHandler) checkS3(c *gin.Context, ctx context.Context, cfg *types.
 func (h *SystemHandler) checkOSS(c *gin.Context, ctx context.Context, cfg *types.OSSEngineConfig) {
 	if cfg == nil {
 		c.JSON(200, gin.H{"code": 0, "data": StorageCheckResponse{OK: false, Message: "未提供 OSS 配置"}})
+		return
+	}
+	if cfg.AuthType == types.OSSAuthECSRAMRole {
+		c.JSON(200, gin.H{"code": 0, "data": StorageCheckResponse{
+			OK: false, Message: types.ErrOSSRoleRequiresEnvironment.Message,
+		}})
 		return
 	}
 

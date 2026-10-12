@@ -6445,11 +6445,7 @@ export default {
       requestFailed: '요청 실패'
     },
     storageBackend: {
-      ossAuthTypeLabel: "인증 방식",
-      ossAuthAccessKey: "고정 AccessKey / SecretKey",
-      ossAuthEcsRamRole: "ECS RAM 역할",
-      ossRoleNameLabel: "RAM 역할 이름 (선택 사항)",
-      ossRoleHelp: "비워 두면 인스턴스 역할을 자동 검색합니다. OSS 권한이 있는 역할을 ECS에 연결하세요. 임시 자격 증명을 자동으로 가져오고 갱신하므로 고정 AK/SK가 필요하지 않습니다.",
+      ossRoleEnvOnlyHelp: 'ECS RAM 역할 인증은 배포 환경 변수로 구성한 읽기 전용 스토리지에서만 사용할 수 있습니다. 직접 추가하는 OSS에는 AK/SK가 필요합니다.',
       description: '파일과 이미지에 사용하는 스토리지 인스턴스를 관리합니다. 같은 유형의 인스턴스를 여러 개 구성할 수 있습니다.',
       empty: '아직 구성된 스토리지 인스턴스가 없습니다',
       defaultTag: '기본',

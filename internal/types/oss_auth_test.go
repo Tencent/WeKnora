@@ -76,7 +76,7 @@ func TestOSSRoleConfigurationRoundTrip(t *testing.T) {
 	static.AuthType, static.RoleName, static.AccessKeyID, static.SecretAccessKey = OSSAuthAccessKey, "", "ak", "sk"
 	assert.Equal(t, static.LocationKey("oss"), config.LocationKey("oss"),
 		"switching authentication must not change object identity")
-	assert.Empty(t, config.MergeSecrets(static).AccessKeyID,
+	assert.Empty(t, config.MergeSecrets("oss", static).AccessKeyID,
 		"cleared keys must not be restored when switching to a role")
 	merged := MergeStorageEngineConfigForUpdate(
 		backend.ToStorageEngineConfig(), (&StorageBackend{Provider: "oss", Config: static}).ToStorageEngineConfig(),
@@ -98,4 +98,29 @@ func TestOSSRoleConfigurationFromEnvironment(t *testing.T) {
 	require.NoError(t, backend.Validate())
 	assert.Equal(t, OSSAuthECSRAMRole, backend.Config.AuthType)
 	assert.Equal(t, "zhongtaiOSS", backend.ToStorageEngineConfig().OSS.RoleName)
+}
+
+func TestOSSRoleAuthenticationRequiresEnvironmentSource(t *testing.T) {
+	for _, source := range []string{"", StorageBackendSourceUser, StorageBackendSourceEnv} {
+		backend := StorageBackend{
+			Provider: "oss", Source: source, Config: StorageBackendConfig{AuthType: OSSAuthECSRAMRole},
+		}
+		if source == StorageBackendSourceEnv {
+			require.NoError(t, backend.ValidateAuthSource())
+		} else {
+			require.ErrorIs(t, backend.ValidateAuthSource(), ErrOSSRoleRequiresEnvironment)
+		}
+	}
+}
+
+func TestOSSAuthFieldsRejectedForOtherProviders(t *testing.T) {
+	stored := StorageBackendConfig{AccessKeyID: "stored-ak", SecretAccessKey: "stored-sk"}
+	for _, provider := range []string{"local", "minio", "cos", "tos", "s3", "ks3", "obs"} {
+		for _, incoming := range []StorageBackendConfig{{AuthType: OSSAuthECSRAMRole}, {RoleName: "role"}} {
+			merged := incoming.MergeSecrets(provider, stored)
+			require.Equal(t, stored.AccessKeyID, merged.AccessKeyID)
+			require.Equal(t, stored.SecretAccessKey, merged.SecretAccessKey)
+			require.ErrorContains(t, merged.ValidateForProvider(provider), "only supported for OSS")
+		}
+	}
 }

@@ -27,6 +27,7 @@ func (f ossMetadataTransport) RoundTrip(req *http.Request) (*http.Response, erro
 
 // The SDK uses the default transport for its fixed ECS metadata endpoint.
 // Intercept it so these tests never contact real instance metadata or OSS.
+// These tests must remain sequential: they temporarily replace a process-wide transport.
 func mockOSSMetadata(t *testing.T, respond func(*http.Request) (int, string)) {
 	t.Helper()
 	previous := http.DefaultTransport
@@ -122,7 +123,9 @@ func TestOSSRoleMainAndTempBucketRequests(t *testing.T) {
 		TempBucketName: "temp-bucket",
 		TempRegion:     "cn-shanghai",
 	}
-	service, _, err := NewFileServiceFromStorageConfig("oss", &types.StorageEngineConfig{OSS: &config}, "")
+	backend := types.StorageBackendFromLegacy(7, "oss", &types.StorageEngineConfig{OSS: &config})
+	backend.Source = types.StorageBackendSourceEnv // Server-owned snapshot, never a tenant request.
+	service, _, err := NewFileServiceFromStorageBackend(backend, "")
 	require.NoError(t, err)
 	svc := service.(*ossFileService)
 	require.NotNil(t, svc.tempClient)
@@ -208,4 +211,57 @@ func TestOSSRoleStillRejectsUnsafeEndpoint(t *testing.T) {
 		AuthType: types.OSSAuthECSRAMRole,
 	})
 	require.ErrorContains(t, err, "unsafe OSS endpoint")
+}
+
+func TestOSSRoleMetadataTimeoutIsBoundedAndNotCached(t *testing.T) {
+	whitelistOSSTestEndpoint(t, "oss.example.com")
+	previous := http.DefaultTransport
+	t.Cleanup(func() { http.DefaultTransport = previous })
+	attempts, available := 0, false
+	http.DefaultTransport = ossMetadataTransport(func(req *http.Request) (*http.Response, error) {
+		attempts++
+		if !available {
+			<-req.Context().Done()
+			return nil, req.Context().Err()
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK, Header: http.Header{}, Request: req,
+			Body: io.NopCloser(strings.NewReader(ossMetadataCredentials(time.Now().Add(time.Hour), 1))),
+		}, nil
+	})
+	config, err := newOSSConfig(types.OSSEngineConfig{
+		Endpoint: "https://oss.example.com", Region: "cn-beijing", AuthType: types.OSSAuthECSRAMRole, RoleName: "role",
+	})
+	require.NoError(t, err)
+	started := time.Now()
+	_, err = config.CredentialsProvider.GetCredentials(context.Background())
+	require.ErrorContains(t, err, "credentials unavailable")
+	require.Less(t, time.Since(started), 3*time.Second, "metadata must fail quickly instead of retrying for 30 seconds")
+	require.Equal(t, 1, attempts)
+	available = true
+	value, err := config.CredentialsProvider.GetCredentials(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, "role-ak-1", value.AccessKeyID)
+	require.Equal(t, 2, attempts, "a failed lookup must not prevent recovery")
+}
+
+func TestOSSRoleTenantConfigNeverFallsBackToGlobalIdentity(t *testing.T) {
+	t.Setenv("STORAGE_TYPE", "oss")
+	// The global service is deliberately unusable: resolution must not select it.
+	global := NewUnavailableFileService(fmt.Errorf("global identity must not be used"))
+	tenant := &types.Tenant{ID: 7, StorageEngineConfig: &types.StorageEngineConfig{
+		DefaultProvider: "oss", OSS: &types.OSSEngineConfig{AuthType: types.OSSAuthECSRAMRole},
+	}}
+	svc, _, err := NewFileServiceFromStorageConfig("oss", tenant.StorageEngineConfig, "")
+	require.ErrorIs(t, err, types.ErrOSSRoleRequiresEnvironment)
+	require.Nil(t, svc)
+	svc, _, ok := ResolveTenantFileServiceWithFallback(
+		context.Background(), "role-test", tenant, "", "oss", "", nil, global)
+	require.False(t, ok)
+	require.Nil(t, svc)
+	backend := &types.StorageBackend{
+		Provider: "oss", Config: types.StorageBackendConfig{AuthType: types.OSSAuthECSRAMRole},
+	}
+	_, _, err = NewFileServiceFromStorageBackend(backend, "")
+	require.ErrorIs(t, err, types.ErrOSSRoleRequiresEnvironment)
 }

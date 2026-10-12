@@ -3,12 +3,14 @@ package file
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -57,10 +59,18 @@ func newOSSConfig(config types.OSSEngineConfig) (*oss.Config, error) {
 	}
 	var creds credentials.CredentialsProvider
 	if config.AuthType == types.OSSAuthECSRAMRole {
-		roleProvider := credentials.NewEcsRoleCredentialsProvider(credentials.EcsRamRole(config.RoleName))
+		roleProvider := credentials.NewEcsRoleCredentialsProvider(
+			credentials.EcsRamRole(config.RoleName),
+			func(options *credentials.EcsRoleCredentialsProviderOptions) {
+				options.Timeout = time.Second
+				options.Retries = 1
+			},
+		)
 		creds = credentials.CredentialsProviderFunc(func(ctx context.Context) (credentials.Credentials, error) {
 			value, err := roleProvider.GetCredentials(ctx)
 			if err != nil {
+				logger.Warnf(ctx, "OSS ECS metadata credentials unavailable: category=%s",
+					ossMetadataErrorCategory(err))
 				// SDK metadata errors may include the response body and credentials.
 				return credentials.Credentials{}, errors.New(
 					"OSS ECS RAM role credentials unavailable: " +
@@ -80,6 +90,32 @@ func newOSSConfig(config types.OSSEngineConfig) (*oss.Config, error) {
 		WithHttpClient(objectStorageHTTPClient())
 
 	return cfg, nil
+}
+
+// Classify SDK errors without logging response bodies, role names or credentials.
+func ossMetadataErrorCategory(err error) string {
+	var timeout interface{ Timeout() bool }
+	var syntax *json.SyntaxError
+	var fieldType *json.UnmarshalTypeError
+	switch {
+	case errors.Is(err, context.Canceled):
+		return "canceled"
+	case errors.Is(err, context.DeadlineExceeded), errors.As(err, &timeout) && timeout.Timeout():
+		return "timeout"
+	case errors.As(err, &syntax), errors.As(err, &fieldType):
+		return "invalid_json"
+	case strings.HasPrefix(err.Error(), "failed to fetch ecs role name, resp.StatusCode:"):
+		statusText := strings.TrimPrefix(err.Error(), "failed to fetch ecs role name, resp.StatusCode:")
+		status, parseErr := strconv.Atoi(statusText)
+		if parseErr == nil && status >= 100 && status <= 599 {
+			return fmt.Sprintf("http_status_%d", status)
+		}
+		return "http_status"
+	case err.Error() == "ecs role name is empty":
+		return "missing_role"
+	default:
+		return "metadata_response_or_connection"
+	}
 }
 
 // ossEnsureBucket checks if the bucket exists and creates it if missing.
@@ -150,7 +186,8 @@ func NewOssFileServiceWithConfig(config types.OSSEngineConfig) (interfaces.FileS
 			tempRegion = config.Region
 		}
 		// Reuse the provider so both buckets share cached, refreshable credentials.
-		tempClient = oss.NewClient(clientConfig.WithRegion(tempRegion))
+		tempConfig := *clientConfig
+		tempClient = oss.NewClient(tempConfig.WithRegion(tempRegion))
 		if err := ossEnsureBucket(tempClient, tempBucketName); err != nil {
 			return nil, err
 		}

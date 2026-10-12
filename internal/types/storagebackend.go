@@ -76,6 +76,9 @@ func (b *StorageBackend) Validate() error {
 	if b.Status != StorageBackendStatusActive && b.Status != StorageBackendStatusDisabled {
 		return errors.NewValidationError("status must be active or disabled")
 	}
+	if err := b.ValidateAuthSource(); err != nil {
+		return err
+	}
 	return b.Config.ValidateForProvider(b.Provider)
 }
 
@@ -92,6 +95,7 @@ func isSupportedStorageBackendProvider(provider string) bool {
 // settings. AccessKeyID/SecretAccessKey map to COS SecretID/SecretKey and to
 // the access/secret key pair used by S3-compatible providers.
 type StorageBackendConfig struct {
+	// OSS only. ecs_ram_role is restricted to environment-owned, read-only backends.
 	AuthType        string `json:"auth_type,omitempty"`
 	RoleName        string `json:"role_name,omitempty"`
 	Mode            string `json:"mode,omitempty"`
@@ -160,8 +164,9 @@ func (c StorageBackendConfig) MaskSensitiveFields() StorageBackendConfig {
 	return out
 }
 
-func (c StorageBackendConfig) MergeSecrets(existing StorageBackendConfig) StorageBackendConfig {
-	if c.AuthType == OSSAuthECSRAMRole {
+// MergeSecrets preserves redacted keys except when OSS explicitly selects role auth.
+func (c StorageBackendConfig) MergeSecrets(provider string, existing StorageBackendConfig) StorageBackendConfig {
+	if provider == "oss" && c.AuthType == OSSAuthECSRAMRole {
 		return c // Empty keys intentionally clear static credentials when selecting a role.
 	}
 	c.AccessKeyID = PreserveIfRedacted(c.AccessKeyID, existing.AccessKeyID)
@@ -170,6 +175,9 @@ func (c StorageBackendConfig) MergeSecrets(existing StorageBackendConfig) Storag
 }
 
 func (c StorageBackendConfig) ValidateForProvider(provider string) error {
+	if provider != "oss" && (c.AuthType != "" || c.RoleName != "") {
+		return errors.NewValidationError("auth_type and role_name are only supported for OSS")
+	}
 	prefix := strings.ReplaceAll(strings.TrimSpace(c.PathPrefix), "\\", "/")
 	cleanPrefix := path.Clean(prefix)
 	if strings.HasPrefix(prefix, "/") || cleanPrefix == ".." || strings.HasPrefix(cleanPrefix, "../") {
@@ -231,6 +239,14 @@ func (c StorageBackendConfig) LocationKey(provider string) string {
 		mode = "remote"
 	}
 	return strings.Join([]string{provider, mode, strings.TrimSpace(c.Endpoint), strings.TrimSpace(c.Region), strings.TrimSpace(c.BucketName), strings.Trim(strings.TrimSpace(c.PathPrefix), "/")}, "|")
+}
+
+// SameTestDestination also checks provider-specific options that can change the
+// credential recipient, without changing the identity of existing stored objects.
+func (c StorageBackendConfig) SameTestDestination(provider string, existing StorageBackendConfig) bool {
+	return c.LocationKey(provider) == existing.LocationKey(provider) &&
+		(provider != "cos" || c.AppID == existing.AppID) &&
+		(provider != "minio" || c.UseSSL == existing.UseSSL)
 }
 
 // ToStorageEngineConfig adapts the instance model to the existing provider

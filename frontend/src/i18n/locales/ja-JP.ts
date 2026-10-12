@@ -2114,11 +2114,7 @@ export default {
       paddleocrVlCloudTokenPlaceholder: 'PaddleOCR-VL AI Studio Token'
     },
     storageBackend: {
-      ossAuthTypeLabel: "認証方式",
-      ossAuthAccessKey: "固定 AccessKey / SecretKey",
-      ossAuthEcsRamRole: "ECS RAM ロール",
-      ossRoleNameLabel: "RAM ロール名（任意）",
-      ossRoleHelp: "空欄の場合はインスタンスのロールを自動検出します。OSS 権限を持つロールを ECS に割り当ててください。一時認証情報は自動取得・更新され、固定 AK/SK は不要です。",
+      ossRoleEnvOnlyHelp: 'ECS RAM ロール認証は、デプロイ環境変数で設定された読み取り専用ストレージでのみ利用できます。手動で追加する OSS には AK/SK が必要です。',
       description: 'ファイルと画像に使用するストレージインスタンスを管理します。同じ種類のインスタンスを複数設定できます。',
       empty: 'ストレージインスタンスがまだ設定されていません',
       defaultTag: 'デフォルト',

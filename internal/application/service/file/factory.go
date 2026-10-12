@@ -18,6 +18,26 @@ func NewFileServiceFromStorageConfig(
 	sec *types.StorageEngineConfig,
 	localBaseDir string,
 ) (interfaces.FileService, string, error) {
+	if err := types.ValidateTenantOSSAuth(sec); err != nil {
+		return nil, provider, err
+	}
+	return newFileServiceFromStorageConfig(provider, sec, localBaseDir)
+}
+
+// NewFileServiceFromStorageBackend accepts server-owned environment snapshots;
+// tenant backends must never obtain credentials from the instance metadata service.
+func NewFileServiceFromStorageBackend(
+	backend *types.StorageBackend, localBaseDir string,
+) (interfaces.FileService, string, error) {
+	if err := backend.ValidateAuthSource(); err != nil {
+		return nil, backend.Provider, err
+	}
+	return newFileServiceFromStorageConfig(backend.Provider, backend.ToStorageEngineConfig(), localBaseDir)
+}
+
+func newFileServiceFromStorageConfig(
+	provider string, sec *types.StorageEngineConfig, localBaseDir string,
+) (interfaces.FileService, string, error) {
 	p := strings.ToLower(strings.TrimSpace(provider))
 	if p == "" && sec != nil {
 		p = strings.ToLower(strings.TrimSpace(sec.DefaultProvider))
