@@ -107,7 +107,11 @@ func (r *ImageResolver) ResolveAndStore(
 ) (updatedMarkdown string, images []StoredImage, err error) {
 	var inlineImages []StoredImage
 	defer func() {
-		if err == nil || fileSvc == nil {
+		if err == nil {
+			return
+		}
+		updatedMarkdown = result.MarkdownContent
+		if fileSvc == nil {
 			return
 		}
 		rollbackCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), inlineImageRollbackTimeout)
@@ -620,17 +624,17 @@ const wrappedBase64LineLength = 76
 
 // wrappedBase64PayloadEnd extends a payload over Base64 fragments separated by newlines.
 // Width is not a boundary: encoding syntax and a complete image determine the end.
-// Without a complete image, only the first line is omitted. Subsequent lines
-// cannot be distinguished from prose, even when they contain digits or padding.
+// On failure the returned end stays on the first line. Callers must reject an
+// ambiguous continuation rather than erase its prefix and allow the tail through.
 // Decoded data never grows beyond the existing single-image cap.
 func wrappedBase64PayloadEnd(markdown string, payloadStart, payloadEnd int) (int, bool) {
 	// Sentence punctuation belongs to the document, including after damaged tokens.
 	firstLine := strings.TrimRight(markdown[payloadStart:payloadEnd], ".,;")
 	payloadEnd = payloadStart + len(firstLine)
-	if len(firstLine) < 32 || !isStrictBase64Line(firstLine) {
+	if len(firstLine) < 32 && !looksLikeImageBase64(firstLine) {
 		return payloadEnd, true
 	}
-	if oversizedInlinePayload(firstLine) {
+	if !isStrictBase64Line(firstLine) || oversizedInlinePayload(firstLine) {
 		return payloadEnd, false
 	}
 	// Keep partial encoding groups across line breaks, which need not align
@@ -638,7 +642,7 @@ func wrappedBase64PayloadEnd(markdown string, payloadStart, payloadEnd int) (int
 	pending := firstLine[len(firstLine)/4*4:]
 	imageData, err := decodeBase64Flexible(firstLine[:len(firstLine)/4*4])
 	if err != nil {
-		return payloadEnd, true
+		return payloadEnd, false
 	}
 	completeImage := func() bool {
 		data := imageData
@@ -738,6 +742,20 @@ func wrappedBase64PayloadEnd(markdown string, payloadStart, payloadEnd int) (int
 	}
 }
 
+// ErrAmbiguousInlineImage means the image cannot be separated from following
+// lines without guessing. Callers should keep the source and stop ingestion.
+var ErrAmbiguousInlineImage = errors.New(
+	"cannot determine the end of a malformed multiline inline image; repair or remove the image")
+
+func hasInlineImageContinuation(markdown string, end int) bool {
+	rest := strings.TrimLeft(markdown[end:], " \t\r")
+	if !strings.HasPrefix(rest, "\n") {
+		return false
+	}
+	line, _, _ := strings.Cut(rest[1:], "\n")
+	return strings.TrimSpace(line) != ""
+}
+
 func isStrictBase64Line(line string) bool {
 	for i := 0; i < len(line); i++ {
 		c := line[i]
@@ -751,7 +769,7 @@ func isStrictBase64Line(line string) bool {
 }
 
 const (
-	// Bound optional full validation, not which images may be stored.
+	// Images outside these decode budgets are omitted, not assumed valid.
 	maxInlineImagePixels = 16 * 1024 * 1024
 	maxInlineGIFPixels   = 32 * 1024 * 1024
 	maxInlineGIFFrames   = 256
@@ -766,10 +784,8 @@ func isCompleteInlineImage(data []byte, mimeType string) bool {
 	return isCompleteWrappedImageData(data)
 }
 
-// isCompleteWrappedImageData fully decodes raster images only within the pixel
-// and frame budgets. Larger images receive header/container boundary checks;
-// their compressed pixel data may still be corrupt (or absent). This bounds
-// validation memory without making image dimensions a storage restriction.
+// isCompleteWrappedImageData validates raster images within bounded pixel/frame
+// budgets. A header and end marker alone never establish that an image is valid.
 func isCompleteWrappedImageData(data []byte) bool {
 	mimeType := sniffImageMime(data)
 	// Header checks allocate decoder buffers too: run them only once an image
@@ -792,23 +808,17 @@ func isCompleteWrappedImageData(data []byte) bool {
 			return false
 		}
 		cfg, _, err := image.DecodeConfig(bytes.NewReader(data))
-		if err != nil || cfg.Width <= 0 || cfg.Height <= 0 {
+		if err != nil || cfg.Width <= 0 || cfg.Height <= 0 ||
+			uint64(cfg.Width) > maxInlineImagePixels/uint64(cfg.Height) {
 			return false
 		}
-		withinBudget := uint64(cfg.Width) <= maxInlineImagePixels/uint64(cfg.Height)
 		if mimeType == "image/gif" {
 			valid, framesWithinBudget := gifDecodeBudget(data)
-			if !valid {
+			if !valid || !framesWithinBudget {
 				return false
-			}
-			if !withinBudget || !framesWithinBudget {
-				return true
 			}
 			_, err := gif.DecodeAll(bytes.NewReader(data))
 			return err == nil
-		}
-		if !withinBudget {
-			return true
 		}
 		_, _, err = image.Decode(bytes.NewReader(data))
 		return err == nil
@@ -842,8 +852,7 @@ func isCompleteWrappedImageData(data []byte) bool {
 	}
 }
 
-// gifDecodeBudget checks the frame envelope and bounds optional LZW validation.
-// Larger animations can still be stored without allocating all their frames.
+// gifDecodeBudget checks the frame envelope before bounded LZW validation.
 func gifDecodeBudget(data []byte) (valid, withinBudget bool) {
 	if len(data) < 13 {
 		return false, false
@@ -1220,20 +1229,21 @@ func (r *ImageResolver) ResolveBareBase64Content(
 	fileSvc interfaces.FileService,
 	tenantID uint64,
 ) (updatedMarkdown string, images []StoredImage, err error) {
+	originalMarkdown := markdown
 	if _, ok := ctx.Value(inlineQuotaKey{}).(*inlineQuota); !ok {
 		ctx = context.WithValue(ctx, inlineQuotaKey{}, &inlineQuota{})
 	}
 	md, imgs1, err := r.resolveBareDataURIs(ctx, markdown, fileSvc, tenantID, markdownCodeLiteralRanges(markdown))
 	images = append(images, imgs1...)
 	if err != nil {
-		return markdown, images, err
+		return originalMarkdown, images, err
 	}
 	markdown = md
 
 	md2, imgs2, err := r.resolveBareBase64Prefix(ctx, markdown, fileSvc, tenantID, markdownCodeLiteralRanges(markdown))
 	images = append(images, imgs2...)
 	if err != nil {
-		return markdown, images, err
+		return originalMarkdown, images, err
 	}
 	markdown = md2
 
@@ -1276,6 +1286,9 @@ func (r *ImageResolver) resolveBareDataURIs(
 			payloadEnd, complete = wrappedBase64PayloadEnd(markdown, m[4], m[5])
 		}
 		if !complete {
+			if hasInlineImageContinuation(markdown, payloadEnd) {
+				return markdown, images, ErrAmbiguousInlineImage
+			}
 			rewrites = append(rewrites, inlineRewrite{m[0], payloadEnd, inlineImageOmitted})
 			continue
 		}
@@ -1371,6 +1384,10 @@ func (r *ImageResolver) resolveBareBase64Prefix(
 			continue
 		}
 		payloadEnd, complete := wrappedBase64PayloadEnd(markdown, m[2], m[3])
+		if !complete && hasInlineImageContinuation(markdown, payloadEnd) &&
+			looksLikeImageBase64(markdown[m[2]:m[3]]) {
+			return markdown, images, ErrAmbiguousInlineImage
+		}
 		m[1], m[3] = payloadEnd, payloadEnd
 		payload := markdown[m[2]:m[3]]
 		payload = cleanBase64Payload(payload)

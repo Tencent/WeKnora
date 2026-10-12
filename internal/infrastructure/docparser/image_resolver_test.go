@@ -633,7 +633,7 @@ func TestBareDataURIKeepsFollowingEnglishParagraphs(t *testing.T) {
 	}
 }
 
-func TestTruncatedWrappedImageIsOmittedWithoutLosingProse(t *testing.T) {
+func TestTruncatedWrappedImageReturnsErrorWithoutLosingProse(t *testing.T) {
 	payload := base64.StdEncoding.EncodeToString(createTestPNG(200, 150))
 	for _, prefix := range []string{"data:image/png;base64,", "base64,"} {
 		for _, length := range []int{76, 152} {
@@ -644,18 +644,33 @@ func TestTruncatedWrappedImageIsOmittedWithoutLosingProse(t *testing.T) {
 			input := prefix + encoded + "\nDocumentation\nAnotherParagraph"
 			out, images, err := NewImageResolver().ResolveAndStore(context.Background(),
 				&types.ReadResult{MarkdownContent: input}, &captureSaveBytes{}, 1)
-			if err != nil {
-				t.Fatal(err)
+			if !errors.Is(err, ErrAmbiguousInlineImage) || len(images) != 0 || out != input {
+				t.Fatalf("ambiguous image must return an error with original text: images=%d err=%v", len(images), err)
 			}
-			remaining := ""
-			if length > 76 {
-				remaining = "\n" + payload[76:length]
+		}
+	}
+}
+
+func TestMalformedMultilineInlineImagePreservesOriginal(t *testing.T) {
+	encoded := base64.StdEncoding.EncodeToString(createTestPNG(200, 150))
+	for _, prefix := range []string{"data:image/png;base64,", "base64,"} {
+		for _, firstLine := range []string{
+			encoded[:76], encoded[:76] + "\r", encoded[:76] + " \t", encoded[:64] + "!" + encoded[64:76],
+		} {
+			input := "[![](data:image/png;base64," + encoded + ")](https://example.com)\n\n" +
+				prefix + firstLine + "\n" + encoded[76:152] + "\n" + encoded[152:228] + "\n" + encoded[228:304] +
+				"\nPayment terms are net 30 days."
+			svc := &failAfterInlineSave{}
+			result := &types.ReadResult{MarkdownContent: input}
+			out, _, err := NewImageResolver().ResolveAndStore(context.Background(), result, svc, 1)
+			if !errors.Is(err, ErrAmbiguousInlineImage) {
+				t.Fatalf("expected explicit parse error, got %v", err)
 			}
-			if len(images) != 0 || out != inlineImageOmitted+remaining+"\nDocumentation\nAnotherParagraph" {
-				t.Fatalf("truncated image must be omitted with prose intact: %q (%d images)", out, len(images))
+			if out != input || result.MarkdownContent != input {
+				t.Fatal("parse failure changed the original content")
 			}
-			if HasUnresolvedInlineImagePayload(out) {
-				t.Fatal("truncated image must not fail the chunking guard")
+			if len(svc.saved) != 1 || len(svc.deleted) != 1 || svc.deleted[0] != svc.urls[0] {
+				t.Fatalf("partial upload was not rolled back: saved=%d deleted=%d", len(svc.saved), len(svc.deleted))
 			}
 		}
 	}
@@ -693,19 +708,15 @@ func TestWrappedSVGIsStoredWithoutLeakingPayload(t *testing.T) {
 	}
 }
 
-func TestOversizedTruncatedWrappedImageIsOmitted(t *testing.T) {
+func TestOversizedTruncatedWrappedImagePreservesOriginal(t *testing.T) {
 	payload := base64.StdEncoding.EncodeToString(createTestPNG(200, 150))[:76]
 	rows := maxRemoteImageSize/57 + 2 // Each full 76-character row decodes to 57 bytes.
 	input := "data:image/png;base64," + payload +
 		strings.Repeat("\n"+strings.Repeat("A", 76), rows) + "\nDocumentation"
 	out, images, err := NewImageResolver().ResolveAndStore(context.Background(),
 		&types.ReadResult{MarkdownContent: input}, &captureSaveBytes{}, 1)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(images) != 0 || out != inlineImageOmitted+input[len("data:image/png;base64,")+len(payload):] {
-		t.Fatalf("oversized bare image must preserve uncertain continuation lines: images=%d, output length=%d",
-			len(images), len(out))
+	if !errors.Is(err, ErrAmbiguousInlineImage) || len(images) != 0 || out != input {
+		t.Fatalf("oversized ambiguous image must preserve original text: images=%d err=%v", len(images), err)
 	}
 }
 
@@ -1348,31 +1359,31 @@ func TestInlineImageIntegrityAndProse(t *testing.T) {
 						}
 					}
 					svc := &captureSaveBytes{}
+					input := prefix + strings.Join(lines, "\n") + prose
 					out, images, err := NewImageResolver().ResolveAndStore(context.Background(),
-						&types.ReadResult{MarkdownContent: prefix + strings.Join(lines, "\n") + prose}, svc, 1)
+						&types.ReadResult{MarkdownContent: input}, svc, 1)
+					if !tc.valid {
+						// An XML preamble without a visible SVG root cannot identify
+						// a bare Base64 fragment as an image; leave it wholly untouched.
+						unknownImage := tc.name == "svg-truncated" && prefix == "base64," && width > 0
+						if (unknownImage && err != nil) || (!unknownImage && !errors.Is(err, ErrAmbiguousInlineImage)) {
+							t.Fatalf("unexpected parse result: %v", err)
+						}
+						if out != input || len(images) != 0 || len(svc.saved) != 0 {
+							t.Fatal("ambiguous image was modified or uploaded")
+						}
+						return
+					}
 					if err != nil {
 						t.Fatal(err)
 					}
-					replacement := inlineImageOmitted
-					if tc.valid {
-						if len(images) != 1 || len(svc.saved) != 1 {
-							t.Fatalf("images=%d saves=%d", len(images), len(svc.saved))
-						}
-						if !bytes.Equal(svc.saved[0], tc.data) {
-							t.Fatal("stored bytes differ from original")
-						}
-						replacement = "![image](" + images[0].ServingURL + ")"
-					} else if len(images) != 0 || len(svc.saved) != 0 {
-						t.Fatal("damaged image uploaded")
+					if len(images) != 1 || len(svc.saved) != 1 {
+						t.Fatalf("images=%d saves=%d", len(images), len(svc.saved))
 					}
-					if !tc.valid && len(lines) > 1 {
-						// An XML preamble without a visible SVG root is not enough
-						// to identify a bare base64 fragment as image data.
-						if tc.name == "svg-truncated" && prefix == "base64," {
-							replacement = prefix + lines[0]
-						}
-						replacement += "\n" + strings.Join(lines[1:], "\n")
+					if !bytes.Equal(svc.saved[0], tc.data) {
+						t.Fatal("stored bytes differ from original")
 					}
+					replacement := "![image](" + images[0].ServingURL + ")"
 					if out != replacement+prose {
 						t.Fatalf("unexpected payload boundary or prose changed: %q", out)
 					}
@@ -1391,8 +1402,15 @@ func TestBrokenMarkdownImagePreservesBusinessProse(t *testing.T) {
 		t.Run(fmt.Sprint(length), func(t *testing.T) {
 			prose := "\nThis business rule is essential.\n\nPayment terms are net 30 (days)."
 			svc := &captureSaveBytes{}
+			input := "![](data:image/png;base64," + payload[:length] + prose
 			out, _, err := NewImageResolver().ResolveAndStore(context.Background(),
-				&types.ReadResult{MarkdownContent: "![](data:image/png;base64," + payload[:length] + prose}, svc, 1)
+				&types.ReadResult{MarkdownContent: input}, svc, 1)
+			if length == 64 {
+				if !errors.Is(err, ErrAmbiguousInlineImage) || out != input || len(svc.saved) != 0 {
+					t.Fatalf("ambiguous image must fail without changing prose: %v", err)
+				}
+				return
+			}
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -1483,13 +1501,11 @@ func TestTruncatedImagePreservesAmbiguousFullWidthProse(t *testing.T) {
 				prose := "\n" + strings.Repeat("Business", width/8) + strings.Repeat("X", width%8) +
 					"\nDocumentation\nAnotherParagraph"
 				svc := &captureSaveBytes{}
+				input := prefix + payload[:width] + prose
 				out, _, err := NewImageResolver().ResolveAndStore(context.Background(),
-					&types.ReadResult{MarkdownContent: prefix + payload[:width] + prose}, svc, 1)
-				if err != nil {
-					t.Fatal(err)
-				}
-				if out != inlineImageOmitted+prose || len(svc.saved) != 0 {
-					t.Fatalf("ambiguous prose was consumed: %q", out)
+					&types.ReadResult{MarkdownContent: input}, svc, 1)
+				if !errors.Is(err, ErrAmbiguousInlineImage) || out != input || len(svc.saved) != 0 {
+					t.Fatalf("ambiguous prose must be preserved with a parse error: %v", err)
 				}
 			})
 		}
@@ -1536,8 +1552,16 @@ func TestBareImageTrailingPunctuation(t *testing.T) {
 						encoded = damaged
 					}
 					svc := &captureSaveBytes{}
+					input := prefix + encoded + punctuation + prose
 					out, images, err := NewImageResolver().ResolveAndStore(context.Background(),
-						&types.ReadResult{MarkdownContent: prefix + encoded + punctuation + prose}, svc, 1)
+						&types.ReadResult{MarkdownContent: input}, svc, 1)
+					if broken && punctuation == "" {
+						if !errors.Is(err, ErrAmbiguousInlineImage) || out != input ||
+							len(svc.saved) != 0 || len(images) != 0 {
+							t.Fatalf("unbounded damaged image must preserve original text: %v", err)
+						}
+						return
+					}
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -1599,9 +1623,9 @@ func TestInlineImageDecodeResourceLimits(t *testing.T) {
 		data       []byte
 		valid      bool
 	}{
-		{"pixel-budget", "png", largePNG.Bytes(), true},
-		{"animation-budget", "gif", animation.Bytes(), true},
-		{"frame-budget", "gif", tooManyFrames.Bytes(), true},
+		{"pixel-budget", "png", largePNG.Bytes(), false},
+		{"animation-budget", "gif", animation.Bytes(), false},
+		{"frame-budget", "gif", tooManyFrames.Bytes(), false},
 		{"valid-animation", "gif", smallAnimation.Bytes(), true},
 		{"broken-animation", "gif", brokenAnimation, false},
 	} {
@@ -1614,7 +1638,7 @@ func TestInlineImageDecodeResourceLimits(t *testing.T) {
 				if syntax == "html" {
 					source = `<img src="` + source + `">`
 				}
-				prose := "\nDocumentation\nAnotherParagraph"
+				prose := "\n\nDocumentation\nAnotherParagraph"
 				svc := &captureSaveBytes{}
 				out, images, err := NewImageResolver().ResolveAndStore(context.Background(),
 					&types.ReadResult{MarkdownContent: source + prose}, svc, 1)
@@ -1624,14 +1648,14 @@ func TestInlineImageDecodeResourceLimits(t *testing.T) {
 				replacement := inlineImageOmitted
 				if tc.valid {
 					if len(images) != 1 || len(svc.saved) != 1 || !bytes.Equal(svc.saved[0], tc.data) {
-						t.Fatal("validation budget must not discard a valid image")
+						t.Fatal("image within the validation budget was not preserved")
 					}
 					replacement = "![image](" + images[0].ServingURL + ")"
 					if syntax == "markdown" {
 						replacement = "![](" + images[0].ServingURL + ")"
 					}
 				} else if len(images) != 0 || len(svc.saved) != 0 {
-					t.Fatal("invalid animation was stored")
+					t.Fatal("invalid or unverifiable image was stored")
 				}
 				if out != replacement+prose {
 					t.Fatal("resource filtering left payload or changed prose")
@@ -1683,16 +1707,11 @@ func TestTruncatedWrappedSVGPreservesAlphabeticProse(t *testing.T) {
 	prose := "\nAABB\nDocumentation\nAnotherParagraph"
 	for _, prefix := range []string{"data:image/svg+xml;base64,", "base64,"} {
 		svc := &captureSaveBytes{}
+		input := prefix + payload + prose
 		out, images, err := NewImageResolver().ResolveAndStore(context.Background(),
-			&types.ReadResult{MarkdownContent: prefix + payload + prose}, svc, 1)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if out != inlineImageOmitted+prose || len(images) != 0 || len(svc.saved) != 0 {
-			t.Fatalf("alphabetic prose changed: %q", out)
-		}
-		if HasUnresolvedInlineImagePayload(out) {
-			t.Fatal("degraded SVG triggered guard")
+			&types.ReadResult{MarkdownContent: input}, svc, 1)
+		if !errors.Is(err, ErrAmbiguousInlineImage) || out != input || len(images) != 0 || len(svc.saved) != 0 {
+			t.Fatalf("ambiguous SVG must preserve original text: %v", err)
 		}
 	}
 }
@@ -1704,8 +1723,7 @@ func TestDamagedInlineImageBoundaries(t *testing.T) {
 			input := prefix + truncated + suffix
 			out, images, err := NewImageResolver().ResolveAndStore(context.Background(),
 				&types.ReadResult{MarkdownContent: input}, &captureSaveBytes{}, 1)
-			if err != nil || len(images) != 0 || out != inlineImageOmitted+suffix ||
-				HasUnresolvedInlineImagePayload(out) {
+			if !errors.Is(err, ErrAmbiguousInlineImage) || len(images) != 0 || out != input {
 				t.Fatalf("damaged image consumed prose: out=%q images=%d err=%v", out, len(images), err)
 			}
 		}
@@ -1721,7 +1739,7 @@ func TestDamagedInlineImageBoundaries(t *testing.T) {
 	}
 }
 
-func TestLargeInlinePNGUsesStructuralValidation(t *testing.T) {
+func TestInlinePNGWithoutPixelDataIsOmitted(t *testing.T) {
 	original := createTestPNG(200, 150)
 	for _, width := range []uint32{200, 4097} {
 		data := append([]byte(nil), original[:33]...)
@@ -1738,13 +1756,8 @@ func TestLargeInlinePNGUsesStructuralValidation(t *testing.T) {
 			t.Fatalf("unexpected failure: %v", err)
 		}
 		want := inlineImageOmitted + "\n正文"
-		if width == 4097 {
-			if len(images) != 1 || len(svc.saved) != 1 {
-				t.Fatal("large image must use bounded structural validation")
-			}
-			want = "![](" + images[0].ServingURL + ")\n正文"
-		} else if len(images) != 0 {
-			t.Fatal("small image must fail full decoding")
+		if len(images) != 0 || len(svc.saved) != 0 {
+			t.Fatalf("PNG without pixel data was stored at width %d", width)
 		}
 		if out != want {
 			t.Fatalf("out=%q want=%q", out, want)

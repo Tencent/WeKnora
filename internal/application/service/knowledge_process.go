@@ -4067,13 +4067,17 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 	// Step 2: Store images and update markdown references
 	var storedImages []docparser.StoredImage
 	var imageFileSvc interfaces.FileService
+	var inlineParseErr error
 
 	if s.imageResolver != nil && convertResult != nil {
 		imageFileSvc = s.resolveFileService(ctx, kb)
 		tenantID, _ := ctx.Value(types.TenantIDContextKey).(uint64)
 		updatedMarkdown, images, resolveErr := s.imageResolver.ResolveAndStore(
 			ctx, convertResult, imageFileSvc, tenantID)
-		if resolveErr != nil {
+		if errors.Is(resolveErr, docparser.ErrAmbiguousInlineImage) {
+			inlineParseErr = resolveErr
+			images = nil // ResolveAndStore already rolled back this attempt's uploads.
+		} else if resolveErr != nil {
 			_, err := s.failKnowledge(ctx, knowledge, isLastRetry, "store inline image: %v", resolveErr)
 			return err
 		}
@@ -4081,8 +4085,12 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 		storedImages = images
 
 	}
-	if convertResult != nil && docparser.HasUnresolvedInlineImagePayload(convertResult.MarkdownContent) {
-		const message = "unresolved inline image base64 payload remains before chunking"
+	if inlineParseErr != nil ||
+		(convertResult != nil && docparser.HasUnresolvedInlineImagePayload(convertResult.MarkdownContent)) {
+		message := "unresolved inline image base64 payload remains before chunking"
+		if inlineParseErr != nil {
+			message = inlineParseErr.Error()
+		}
 		logger.Errorf(ctx, "Knowledge %s: %s", knowledge.ID, message)
 		cleanupUnboundInlineImages(ctx, imageFileSvc, storedImages)
 		knowledge.ParseStatus = types.ParseStatusFailed

@@ -261,8 +261,8 @@ func TestProcessDocumentOmitsMalformedImageAndKeepsValidImage(t *testing.T) {
 	content := "Relevant documentation text.\n" +
 		`<img src="data:image/png;base64,` + validPayload[:64] + ">\nPreserved HTML suffix\n" +
 		"![](data:image/png;base64,not-valid-payload)\n" +
-		"data:image/png;base64," + corrupted + "\n" +
-		"data:image/png;base64," + validPayload[:76] + "\nDocumentation\nAnotherParagraph\n" +
+		"data:image/png;base64," + corrupted + "\n\n" +
+		"data:image/png;base64," + validPayload[:76] + "\n\nDocumentation\nAnotherParagraph\n" +
 		"data:image/svg+xml;base64," + wrappedSVG.String() + "\n" +
 		"![](data:image/png;base64,\n" + validPayload + "\nPayment terms are net 30 days)."
 	knowledge := &types.Knowledge{
@@ -769,6 +769,60 @@ func TestImagesForMultimodalKeepsOtherImageSourcesUnchanged(t *testing.T) {
 	require.Len(t, selected, 110)
 	for _, image := range selected {
 		require.False(t, image.SkipMultimodal)
+	}
+}
+
+func TestAmbiguousInlineImageStopsIngestionAndRollsBack(t *testing.T) {
+	b64 := base64.StdEncoding.EncodeToString(inlineImageTestPNG(t))
+	for _, manual := range []bool{false, true} {
+		for _, prefix := range []string{"data:image/png;base64,", "base64,"} {
+			t.Run(fmt.Sprintf("manual=%t/%s", manual, prefix), func(t *testing.T) {
+				content := "![](data:image/png;base64," + b64 + ")\n\n" +
+					prefix + b64[:76] + "\n" + b64[76:152] + "\nPayment terms are net 30 days."
+				knowledge := &types.Knowledge{
+					ID: "ambiguous-inline", TenantID: 1, KnowledgeBaseID: "kb-1",
+					FilePath: "input.md", ParseStatus: types.ParseStatusProcessing,
+				}
+				kb := &types.KnowledgeBase{ID: "kb-1", TenantID: 1}
+				catalog := &fakeBindCatalog{resources: make(map[string]*types.StoredResource)}
+				storage := &inlineImageStorageState{catalog: catalog}
+				chunks := &inlineImageChunkRepo{}
+				model := &inlineImageModelService{}
+				tracker := &inlineImageSpanTracker{}
+				svc := &knowledgeService{
+					repo:          &embedFailureKnowledgeRepo{knowledge: knowledge},
+					kbService:     &reparseFailureKBService{kb: kb},
+					fileSvc:       inlineImageFileService{content: content, state: storage},
+					imageResolver: docparser.NewImageResolver(), resourceCatalog: catalog,
+					chunkRepo: chunks, modelService: model, spanTracker: tracker,
+					tenantRepo:    &inlineImageTenantRepo{tenant: &types.Tenant{ID: 1}},
+					tenantService: &inlineImageTenantService{}, graphEngine: parentChildGraphRepo{},
+				}
+				ctx := context.WithValue(context.Background(), types.TenantInfoContextKey, &types.Tenant{ID: 1})
+				ctx = types.WithTaskRetryMetadata(ctx, 0, 3)
+				ctx = withAttempt(ctx, 1)
+				var err error
+				if manual {
+					err = svc.triggerManualProcessing(ctx, kb, knowledge, content, true)
+				} else {
+					payload := types.DocumentProcessPayload{
+						TenantID: 1, KnowledgeID: knowledge.ID, KnowledgeBaseID: kb.ID,
+						FilePath: "input.md", FileName: "input.md", FileType: "md", Attempt: 1,
+					}
+					err = svc.ProcessDocument(ctx, asynq.NewTask(
+						types.TypeDocumentProcess, mustMarshalDocumentPayload(t, payload)))
+				}
+				require.ErrorIs(t, err, asynq.SkipRetry, "malformed content must fail on the first attempt")
+				require.Contains(t, knowledge.ErrorMessage, "malformed multiline inline image")
+				require.Equal(t, types.ParseStatusFailed, knowledge.ParseStatus)
+				require.True(t, tracker.chunkingFailed)
+				require.False(t, chunks.created)
+				require.Zero(t, model.calls)
+				require.Empty(t, catalog.binds)
+				require.Len(t, storage.saved, 1)
+				require.Equal(t, storage.saved, storage.deleted, "each partial upload must be deleted once")
+			})
+		}
 	}
 }
 

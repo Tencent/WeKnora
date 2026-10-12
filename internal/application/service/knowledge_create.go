@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"mime/multipart"
 	"net/url"
@@ -1323,11 +1324,15 @@ func (s *knowledgeService) triggerManualProcessing(ctx context.Context,
 	// Runs before chunking so chunks contain stable provider:// URLs.
 	var resolvedImages []docparser.StoredImage
 	var fileSvc interfaces.FileService
+	var inlineParseErr error
 	if s.imageResolver != nil {
 		fileSvc = s.resolveFileService(ctx, kb)
 		updatedMarkdown, inlineImages, resolveErr := s.imageResolver.ResolveAndStore(ctx,
 			&types.ReadResult{MarkdownContent: clean}, fileSvc, knowledge.TenantID)
-		if resolveErr != nil {
+		if errors.Is(resolveErr, docparser.ErrAmbiguousInlineImage) {
+			inlineParseErr = resolveErr
+			inlineImages = nil // ResolveAndStore already rolled back this attempt's uploads.
+		} else if resolveErr != nil {
 			retryCount, _ := asynq.GetRetryCount(ctx)
 			maxRetry, _ := asynq.GetMaxRetry(ctx)
 			if retried, limit, ok := types.TaskRetryMetadataFromContext(ctx); ok {
@@ -1350,8 +1355,11 @@ func (s *knowledgeService) triggerManualProcessing(ctx context.Context,
 		clean = updatedMarkdown
 		resolvedImages = append(resolvedImages, inlineImages...)
 	}
-	if docparser.HasUnresolvedInlineImagePayload(clean) {
-		const message = "unresolved inline image base64 payload remains before manual chunking"
+	if inlineParseErr != nil || docparser.HasUnresolvedInlineImagePayload(clean) {
+		message := "unresolved inline image base64 payload remains before manual chunking"
+		if inlineParseErr != nil {
+			message = inlineParseErr.Error()
+		}
 		cleanupUnboundInlineImages(ctx, fileSvc, resolvedImages)
 		knowledge.ParseStatus = types.ParseStatusFailed
 		knowledge.ErrorMessage = message
