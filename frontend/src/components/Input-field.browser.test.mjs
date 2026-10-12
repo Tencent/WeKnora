@@ -19,14 +19,6 @@ test('composer browser button is disabled and opens settings when the extension 
   assert.match(inputField, /\$t\('localBrowser\.reconnectHint'\)|\$t\(browserSourceUnavailableHint\)/)
 })
 
-test('mention button matches icon controls and leaves the count to the selected chips', () => {
-  const css = inputField.slice(inputField.indexOf('.kb-btn {'), inputField.indexOf('.kb-btn-text'))
-  assert.match(css, /width: 28px/)
-  assert.match(css, /&:hover:not\(\.disabled\):not\(\.active\)/)
-  assert.doesNotMatch(css, /box-shadow: inset/)
-  assert.doesNotMatch(inputField, /class="kb-count"/)
-})
-
 test('a selected browser source keeps brand color on hover', () => {
   const css = inputField.slice(inputField.indexOf('.browser-source-btn {'))
   assert.match(css, /&:hover:not\(\.disabled\):not\(\.active\)/)

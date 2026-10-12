@@ -16,7 +16,6 @@ import { stopSession } from '@/api/chat';
 import type { SteerQueueItem } from '@/api/chat/steer';
 import { chatSubmitShortcut } from '@/utils/chatSubmitShortcut';
 import { useOrganizationStore } from '@/stores/organization';
-import KnowledgeBaseSelector from './KnowledgeBaseSelector.vue';
 import MentionSelector from './MentionSelector.vue';
 import AgentSelector from './AgentSelector.vue';
 import { getCaretCoordinates } from '@/utils/caret';
@@ -126,7 +125,6 @@ const {
 const { t, locale } = useI18n();
 
 let query = ref("");
-const showKbSelector = ref(false);
 
 // Image upload state
 const uploadedImages = ref<Array<{ file: File; preview: string }>>([]);
@@ -208,7 +206,6 @@ const removeImage = (index: number) => {
 const triggerImageUpload = () => {
   imageInputRef.value?.click();
 };
-const atButtonRef = ref<HTMLElement>();
 const showAgentModeSelector = ref(false);
 const agentModeButtonRef = ref<HTMLElement>();
 const agentModeDropdownStyle = ref<Record<string, string>>({});
@@ -555,7 +552,6 @@ const textareaRef = ref<any>(null); // Ref to t-textarea component
 const mentionSelectorRef = ref<any>(null);
 const mentionStartPos = ref(0);
 const isComposing = ref(false);
-const isMentionTriggeredByButton = ref(false);
 const mentionHasMore = ref(false);
 const mentionGroupCounts = ref<Partial<Record<MentionItemType, number>>>({});
 // 当前 @ 会话可见的 KB ID 集合（含工具兼容性过滤），分页加载文件时复用，
@@ -1631,24 +1627,20 @@ const onInput = (val: string | InputEvent) => {
   console.log('[Mention] onInput called', { inputVal, cursor, textBeforeCursor, showMention: showMention.value });
 
   if (showMention.value) {
-    // 如果不是按钮触发的，检查 @ 符号
-    if (!isMentionTriggeredByButton.value) {
-      if (!inputVal || inputVal.length <= mentionStartPos.value || inputVal.charAt(mentionStartPos.value) !== '@') {
-        showMention.value = false;
-        return;
-      }
+    // 浮层由键入 @ 触发：mentionStartPos 必须仍指向 '@'，否则（内容被删改）关闭
+    if (!inputVal || inputVal.length <= mentionStartPos.value || inputVal.charAt(mentionStartPos.value) !== '@') {
+      showMention.value = false;
+      return;
     }
 
-    // 如果是按钮触发的，mentionStartPos 指向的是光标位置（即虚拟的 @ 位置前），所以实际上不应该往左删
-    // 但如果用户删除了前面的内容导致长度变短，也需要处理
+    // 用户删除了 @ 之前的内容导致光标越界，也关闭
     if (cursor < mentionStartPos.value) {
       showMention.value = false;
       return;
     }
 
-    // Get query
-    // 如果是按钮触发，mentionStartPos 是起始位置，不需要 +1 跳过 @
-    const start = isMentionTriggeredByButton.value ? mentionStartPos.value : mentionStartPos.value + 1;
+    // Get query（+1 跳过 '@'）
+    const start = mentionStartPos.value + 1;
     const q = inputVal.slice(start, cursor);
 
     if (q.includes(' ')) {
@@ -1668,7 +1660,6 @@ const onInput = (val: string | InputEvent) => {
       }
 
       console.log('[Mention] @ detected, opening menu');
-      isMentionTriggeredByButton.value = false;
       mentionStartPos.value = cursor - 1;
       showMention.value = true;
       mentionQuery.value = "";
@@ -1731,58 +1722,6 @@ const onCompositionEnd = (e: CompositionEvent) => {
   });
 };
 
-const triggerMention = () => {
-  // 如果当前没有任何可提及资源，不允许打开选择器
-  if (isMentionDisabled.value) {
-    const msgKey = isKnowledgeBaseDisabledByAgent.value ? 'input.kbDisabledByAgent' : 'input.kbLockedByAgent';
-    MessagePlugin.warning(t(msgKey));
-    return;
-  }
-
-  const textarea = getTextareaEl();
-  if (!textarea) return;
-
-  // 关闭其他选择器
-  showAgentModeSelector.value = false;
-  showModelSelector.value = false;
-
-  textarea.focus();
-
-  // 直接显示菜单，不插入 @
-  showMention.value = true;
-  isMentionTriggeredByButton.value = true;
-  mentionQuery.value = "";
-  mentionStartPos.value = textarea.selectionStart;
-
-  // Normalize coordinates to CSS pixels (root <html> may carry `zoom`).
-  const zoom = getRootZoom();
-  const rect = rectToCssPx(textarea.getBoundingClientRect(), zoom);
-  const { height: vh } = cssViewportSize(zoom);
-  const menuHeight = 320;
-
-  // 判断输入框上方空间
-  const spaceAbove = rect.top;
-  const spaceBelow = vh - rect.bottom;
-
-  // 优先显示在上方，除非上方空间不足且下方空间充足
-  if (spaceAbove > menuHeight || spaceAbove > spaceBelow) {
-    // Show above textarea
-    mentionStyle.value = {
-      left: `${rect.left}px`,
-      bottom: `${vh - rect.top + 8}px`, // 8px padding
-      top: 'auto'
-    };
-  } else {
-    // Show below textarea
-    mentionStyle.value = {
-      left: `${rect.left}px`,
-      top: `${rect.bottom + 8}px`,
-      bottom: 'auto'
-    };
-  }
-
-  loadMentionItems("");
-};
 
 const onMentionSelect = (item: any) => {
   if (item.type === 'kb') {
@@ -1809,34 +1748,16 @@ const onMentionSelect = (item: any) => {
 
   const textarea = getTextareaEl();
   if (textarea) {
-    // 如果是通过输入 @ 触发的，需要删除 @ 和后面的查询文字
-    if (!isMentionTriggeredByButton.value) {
-      const cursor = textarea.selectionStart;
-      const textBeforeAt = query.value.slice(0, mentionStartPos.value);
-      const textAfterCursor = query.value.slice(cursor);
-      query.value = textBeforeAt + textAfterCursor;
+    // 键入 @ 触发的：删除 @ 和后面的查询文字
+    const cursor = textarea.selectionStart;
+    const textBeforeAt = query.value.slice(0, mentionStartPos.value);
+    const textAfterCursor = query.value.slice(cursor);
+    query.value = textBeforeAt + textAfterCursor;
 
-      nextTick(() => {
-        textarea.selectionStart = textarea.selectionEnd = mentionStartPos.value;
-        textarea.focus();
-      });
-    } else {
-      // 通过按钮触发的，如果用户输入了查询词，需要删除查询词
-      const cursor = textarea.selectionStart;
-      if (cursor > mentionStartPos.value) {
-        const textBeforeStart = query.value.slice(0, mentionStartPos.value);
-        const textAfterCursor = query.value.slice(cursor);
-        query.value = textBeforeStart + textAfterCursor;
-
-        nextTick(() => {
-          textarea.selectionStart = textarea.selectionEnd = mentionStartPos.value;
-          textarea.focus();
-        });
-      } else {
-        // 直接聚焦
-        textarea.focus();
-      }
-    }
+    nextTick(() => {
+      textarea.selectionStart = textarea.selectionEnd = mentionStartPos.value;
+      textarea.focus();
+    });
   }
 
   showMention.value = false;
@@ -2654,10 +2575,6 @@ const toggleWebSearch = () => {
   MessagePlugin.success(newValue ? t('input.messages.webSearchEnabled') : t('input.messages.webSearchDisabled'));
 };
 
-const toggleKbSelector = () => {
-  showKbSelector.value = !showKbSelector.value;
-}
-
 const removeKb = (kbId: string) => {
   settingsStore.removeKnowledgeBase(kbId);
 }
@@ -2906,32 +2823,8 @@ defineExpose({
             </div>
           </t-tooltip>
 
-          <!-- @ 知识库/文件选择按钮 -->
-          <t-tooltip placement="top" theme="light" :popupProps="{ overlayClassName: 'input-field-tooltip' }">
-            <template #content>
-              <div v-if="isMentionDisabled && isKnowledgeBaseDisabledByAgent" class="tooltip-with-link">
-                <span>{{ $t('input.kbDisabledByAgent') }}</span>
-                <a href="#" @click.prevent="handleGoToAgentSettings('knowledge')">{{ $t('input.goToAgentSettings')
-                }}</a>
-              </div>
-              <span v-else>{{ allSelectedItems.length > 0 ? $t('input.knowledgeBaseWithCount', {
-                count:
-                  allSelectedItems.length
-              }) : $t('input.knowledgeBase') }}</span>
-            </template>
-            <div ref="atButtonRef" class="control-btn kb-btn" data-guide="chat-kb-mention" :class="{
-              'active': allSelectedItems.length > 0,
-              'disabled': isMentionDisabled
-            }" @click.stop @mousedown.prevent="triggerMention">
-              <svg width="18" height="18" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"
-                class="control-icon at-icon">
-                <circle cx="10" cy="10" r="3.5" stroke="currentColor" stroke-width="1.8" />
-                <path
-                  d="M13.5 10V11.5C13.5 12.163 13.7634 12.7989 14.2322 13.2678C14.7011 13.7366 15.337 14 16 14C16.663 14 17.2989 13.7366 17.7678 13.2678C18.2366 12.7989 18.5 12.163 18.5 11.5V10C18.5 7.74566 17.6045 5.58365 16.0104 3.98959C14.4163 2.39553 12.2543 1.5 10 1.5C7.74566 1.5 5.58365 2.39553 3.98959 3.98959C2.39553 5.58365 1.5 7.74566 1.5 10C1.5 12.2543 2.39553 14.4163 3.98959 16.0104C5.58365 17.6045 7.74566 18.5 10 18.5H12"
-                  stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
-              </svg>
-            </div>
-          </t-tooltip>
+          <!-- @ 知识库/文件选择按钮已移除：与 WorkBuddy 行为统一，直接在输入框
+               键入 @ 即可唤起提及选择浮层（onInput 的 '@' 检测分支）。 -->
 
           <!-- 模型显示 -->
           <t-tooltip :content="isModelLockedByAgent ? $t('input.modelLockedByAgent') : ''"
@@ -3043,11 +2936,6 @@ defineExpose({
       <MentionSelector ref="mentionSelectorRef" :visible="showMention" :style="mentionStyle" :items="mentionItems" :hasMore="mentionHasMore"
         :loading="mentionLoading" :emptyHint="mentionEmptyHint" :query="mentionQuery" :group-counts="mentionGroupCounts" v-model:activeIndex="mentionActiveIndex"
         @select="onMentionSelect" @loadMore="loadMoreMentionItems" />
-    </Teleport>
-
-    <!-- 知识库选择下拉（使用 Teleport 传送到 body，避免父容器定位影响） -->
-    <Teleport to="body">
-      <KnowledgeBaseSelector v-model:visible="showKbSelector" :anchorEl="atButtonRef" @close="showKbSelector = false" />
     </Teleport>
   </div>
 </template>
@@ -3479,52 +3367,6 @@ const getImgSrc = (url: string) => {
 .control-icon {
   width: 18px;
   height: 18px;
-}
-
-.kb-btn {
-  height: 28px;
-  width: 28px;
-  padding: 0;
-  min-width: auto;
-  position: relative;
-
-  &:hover:not(.disabled):not(.active) {
-    color: var(--td-text-color-primary);
-  }
-
-  &.active {
-    background: var(--td-bg-color-secondarycontainer);
-    color: var(--td-brand-color);
-
-    &:hover {
-      color: var(--td-brand-color);
-      background: var(--td-bg-color-secondarycontainer);
-    }
-  }
-
-  &.agent-controlled {
-    cursor: not-allowed;
-    opacity: 0.85;
-
-    &:hover {
-      background: var(--td-bg-color-secondarycontainer);
-    }
-
-    &.active:hover {
-      background: var(--td-bg-color-secondarycontainer);
-    }
-  }
-}
-
-.kb-btn-text {
-  font-size: var(--app-text-md);
-  color: var(--td-text-color-secondary);
-  font-weight: 500;
-  white-space: nowrap;
-}
-
-.kb-btn.active .kb-btn-text {
-  color: var(--td-brand-color);
 }
 
 /* Image upload */

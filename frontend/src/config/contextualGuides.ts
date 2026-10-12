@@ -94,12 +94,7 @@ export const CONTEXTUAL_GUIDE_TOURS: Record<ContextualGuideTourId, ContextualGui
     openDelayMs: 800,
     steps: [
       {
-        key: 'kb',
-        target: '[data-guide="chat-kb-mention"]',
-        placement: 'top',
-        optional: true,
-      },
-      {
+        // @ 按钮已移除（键入 @ 唤起提及浮层），原 'kb' 步骤一并删除。
         key: 'input',
         target: '[data-guide="chat-input"]',
         placement: 'top',
