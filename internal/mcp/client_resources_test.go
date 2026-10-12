@@ -20,13 +20,21 @@ type resourceListTransport struct {
 func (t *resourceListTransport) SendRequest(
 	ctx context.Context, request transport.JSONRPCRequest,
 ) (*transport.JSONRPCResponse, error) {
-	if request.Method == "initialize" {
+	switch request.Method {
+	case "server/discover":
+		// mcp-go probes the stateless protocol before the legacy handshake.
+		// These tests count only resources/list pages on the handshake path.
+		return &transport.JSONRPCResponse{Error: &sdkmcp.JSONRPCErrorDetails{
+			Code: -32601, Message: "Method not found",
+		}}, nil
+	case "initialize":
 		return &transport.JSONRPCResponse{Result: json.RawMessage(`{
 			"protocolVersion":"2025-06-18", "capabilities":{"resources":{}},
 			"serverInfo":{"name":"resources-test","version":"1"}
 		}`)}, nil
+	default:
+		return t.send(ctx, request)
 	}
-	return t.send(ctx, request)
 }
 
 func (*resourceListTransport) SendNotification(context.Context, sdkmcp.JSONRPCNotification) error {
