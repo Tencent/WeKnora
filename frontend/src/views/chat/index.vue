@@ -228,6 +228,7 @@ import FollowUpSuggestions from '@/components/chat/FollowUpSuggestions.vue';
 import MessageTimestamp from '@/components/chat/MessageTimestamp.vue';
 import ChatQuestionMinimap from '@/components/chat/ChatQuestionMinimap.vue';
 import { shouldShowConversationTimestamp } from '@/utils/messageTimestamp';
+import { historyHasMoreAfterAttempt } from '@/utils/historyPagination';
 import ChatHeader from '@/components/ChatHeader.vue';
 import {
     notifySessionMutation,
@@ -1033,7 +1034,12 @@ const getmsgList = (data, isScrollType = false, scrollHeight) => {
         const batch = res?.data;
         if (!batch?.length) {
             if (isScrollType) {
-                hasMoreHistory.value = false;
+                hasMoreHistory.value = historyHasMoreAfterAttempt(hasMoreHistory.value, {
+                    status: 'loaded',
+                    itemCount: 0,
+                    pageSize: limit.value,
+                    cursorAdvanced: false,
+                });
             }
             return;
         }
@@ -1041,19 +1047,24 @@ const getmsgList = (data, isScrollType = false, scrollHeight) => {
             cancelSuggestedQuestionsFetch();
         }
         const nextCursor = batch[0].created_at;
-        if (isScrollType && created_at.value && nextCursor === created_at.value) {
-            hasMoreHistory.value = false;
+        const cursorAdvanced = !(isScrollType && created_at.value && nextCursor === created_at.value);
+        hasMoreHistory.value = historyHasMoreAfterAttempt(hasMoreHistory.value, {
+            status: 'loaded',
+            itemCount: batch.length,
+            pageSize: limit.value,
+            cursorAdvanced,
+        });
+        if (!cursorAdvanced) {
             return;
-        }
-        if (batch.length < limit.value) {
-            hasMoreHistory.value = false;
         }
         created_at.value = nextCursor;
         await handleMsgList(batch, isScrollType, scrollHeight);
     }).catch((err) => {
         console.error('Failed to load messages:', err);
         if (isScrollType) {
-            hasMoreHistory.value = false;
+            hasMoreHistory.value = historyHasMoreAfterAttempt(hasMoreHistory.value, {
+                status: 'failed',
+            });
         }
     }).finally(() => {
         historyLoading.value = false;
