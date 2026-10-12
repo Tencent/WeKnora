@@ -248,6 +248,8 @@ func TestProcessDocumentChunksCodeExampleAndStoresOnlyRealInlineImage(t *testing
 
 func TestProcessDocumentOmitsMalformedImageAndKeepsValidImage(t *testing.T) {
 	validPayload := base64.StdEncoding.EncodeToString(inlineImageTestPNG(t))
+	var largePNG bytes.Buffer
+	require.NoError(t, png.Encode(&largePNG, image.NewGray(image.Rect(0, 0, 6000, 4000))))
 	corrupted := validPayload[:128] + "!" + validPayload[128:] + strings.Repeat("A", 512)
 	svg := `<svg xmlns="http://www.w3.org/2000/svg"><!--` + strings.Repeat("example ", 80) + `--></svg>`
 	svgPayload := base64.RawStdEncoding.EncodeToString([]byte(svg))
@@ -259,10 +261,12 @@ func TestProcessDocumentOmitsMalformedImageAndKeepsValidImage(t *testing.T) {
 		wrappedSVG.WriteString(svgPayload[i:min(i+76, len(svgPayload))])
 	}
 	content := "Relevant documentation text.\n" +
+		"data:image/png;base64," + base64.StdEncoding.EncodeToString(largePNG.Bytes()) +
+		"\nPayment terms are net 30 days.\n" +
 		`<img src="data:image/png;base64,` + validPayload[:64] + ">\nPreserved HTML suffix\n" +
 		"![](data:image/png;base64,not-valid-payload)\n" +
-		"data:image/png;base64," + corrupted + "\n\n" +
-		"data:image/png;base64," + validPayload[:76] + "\n\nDocumentation\nAnotherParagraph\n" +
+		"data:image/png;base64," + corrupted + "\n这里是商品管理的重要业务说明。\n" +
+		"data:image/png;base64," + validPayload[:76] + "\n这是下一段正常正文。\nDocumentation\nAnotherParagraph\n" +
 		"data:image/svg+xml;base64," + wrappedSVG.String() + "\n" +
 		"![](data:image/png;base64,\n" + validPayload + "\nPayment terms are net 30 days)."
 	knowledge := &types.Knowledge{
@@ -302,6 +306,8 @@ func TestProcessDocumentOmitsMalformedImageAndKeepsValidImage(t *testing.T) {
 	}
 	require.Contains(t, body.String(), "Relevant documentation text.")
 	require.Contains(t, body.String(), "Preserved HTML suffix")
+	require.Contains(t, body.String(), "这里是商品管理的重要业务说明。")
+	require.Contains(t, body.String(), "这是下一段正常正文。")
 	require.Contains(t, body.String(), "[image omitted]")
 	require.Contains(t, body.String(), storage.saved[0])
 	require.Contains(t, body.String(), storage.saved[1])
@@ -309,6 +315,8 @@ func TestProcessDocumentOmitsMalformedImageAndKeepsValidImage(t *testing.T) {
 	require.Contains(t, body.String(), "AnotherParagraph")
 	require.Contains(t, body.String(), "Payment terms are net 30 days).")
 	require.NotContains(t, body.String(), "base64,")
+	require.NotContains(t, body.String(), validPayload[:76])
+	require.NotContains(t, body.String(), base64.StdEncoding.EncodeToString(largePNG.Bytes())[:76])
 }
 
 func TestProcessDocumentAllowsShortDataURIProseExample(t *testing.T) {
@@ -664,6 +672,7 @@ func TestTriggerManualProcessingStoresAndLimitsInlineImages(t *testing.T) {
 	image := `<img src="data:image/png;base64,` + b64 + `">`
 	codeExample := "`[![](data:image/png;base64," + b64 + ")](https://example.com)`"
 	content := `<img src="data:image/png;base64,` + b64[:64] + ">\nPreserved manual suffix\n" +
+		"base64," + b64[:76] + "\n这里是手动录入的业务说明。\n" +
 		codeExample + "\n\n" + strings.Repeat(image+"\n", 80) +
 		"data:image/png;base64,\n" + b64
 	knowledge := &types.Knowledge{
@@ -708,9 +717,11 @@ func TestTriggerManualProcessingStoresAndLimitsInlineImages(t *testing.T) {
 	}
 	require.Contains(t, chunkText.String(), codeExample)
 	require.Contains(t, chunkText.String(), "Preserved manual suffix")
+	require.Contains(t, chunkText.String(), "这里是手动录入的业务说明。")
 	resolvedText := strings.ReplaceAll(chunkText.String(), codeExample, "")
 	require.NotContains(t, resolvedText, "data:image")
 	require.NotContains(t, resolvedText, "base64,")
+	require.NotContains(t, resolvedText, b64[:76])
 	for _, servingURL := range storage.saved {
 		require.Contains(t, chunkText.String(), servingURL)
 	}

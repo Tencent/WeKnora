@@ -676,6 +676,66 @@ func TestMalformedMultilineInlineImagePreservesOriginal(t *testing.T) {
 	}
 }
 
+func TestTruncatedInlineImageBeforeProse(t *testing.T) {
+	encoded := base64.StdEncoding.EncodeToString(createTestPNG(200, 150))
+	for _, prefix := range []string{"data:image/png;base64,", "base64,"} {
+		for _, nextLine := range []string{
+			"这里是商品管理的重要业务说明。", "# Product management", encoded[76:152],
+			encoded[76:152] + " 这里是业务正文", encoded[76:120] + "!" + encoded[120:152],
+			"!" + encoded[76:152], "Documentation",
+		} {
+			input := prefix + encoded[:76] + "\n" + nextLine + "\n这是下一段正常正文。"
+			svc := &captureSaveBytes{}
+			out, images, err := NewImageResolver().ResolveAndStore(context.Background(),
+				&types.ReadResult{MarkdownContent: input}, svc, 1)
+			if strings.HasPrefix(nextLine, "这里") || strings.HasPrefix(nextLine, "#") {
+				if err != nil || out != inlineImageOmitted+"\n"+nextLine+"\n这是下一段正常正文。" ||
+					HasUnresolvedInlineImagePayload(out) {
+					t.Fatalf("clear prose must survive image omission: out=%q err=%v", out, err)
+				}
+			} else if !errors.Is(err, ErrAmbiguousInlineImage) || out != input {
+				t.Fatalf("possible encoding must stop ingestion with original text: err=%v", err)
+			}
+			if len(images) != 0 || len(svc.saved) != 0 {
+				t.Fatal("truncated image uploaded")
+			}
+		}
+	}
+}
+
+func TestUnknownInlineImageFormat(t *testing.T) {
+	for _, syntax := range []string{"bare", "markdown", "html"} {
+		for _, valid := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/%t", syntax, valid), func(t *testing.T) {
+				data := bytes.Repeat([]byte{0, 1, 2, 3}, 256)
+				if valid {
+					data = createTestPNG(200, 150)
+				}
+				input := "data:image/fake;base64," + base64.StdEncoding.EncodeToString(data)
+				switch syntax {
+				case "markdown":
+					input = "![](" + input + ")"
+				case "html":
+					input = `<img src="` + input + `">`
+				}
+				svc := &captureSaveBytes{}
+				out, images, err := NewImageResolver().ResolveAndStore(context.Background(),
+					&types.ReadResult{MarkdownContent: input}, svc, 1)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if valid {
+					if len(images) != 1 || len(svc.saved) != 1 || !bytes.Equal(svc.saved[0], data) {
+						t.Fatal("recognized valid image must remain supported")
+					}
+				} else if out != inlineImageOmitted || len(images) != 0 || len(svc.saved) != 0 {
+					t.Fatal("unrecognized binary content was accepted as an image")
+				}
+			})
+		}
+	}
+}
+
 func TestWrappedSVGIsStoredWithoutLeakingPayload(t *testing.T) {
 	svg := `<svg xmlns="http://www.w3.org/2000/svg" width="200" height="150"><!--` +
 		strings.Repeat("illustration ", 80) + `--><rect width="200" height="150"/></svg>`
@@ -729,7 +789,7 @@ func BenchmarkWrappedPayloadBeyondSizeLimit(b *testing.B) {
 			b.SetBytes(int64(len(input)))
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
-				end, complete := wrappedBase64PayloadEnd(input, 0, 76)
+				end, complete, _ := wrappedBase64PayloadEnd(input, 0, 76)
 				if complete || end != 76 {
 					b.Fatal("oversized truncated payload must not consume uncertain continuation lines")
 				}
@@ -1590,7 +1650,8 @@ func TestBareImageTrailingPunctuation(t *testing.T) {
 
 func TestInlineImageDecodeResourceLimits(t *testing.T) {
 	var largePNG bytes.Buffer
-	if err := png.Encode(&largePNG, image.NewGray(image.Rect(0, 0, 5000, 4000))); err != nil {
+	// A valid, compact 24 MP PNG is outside the fixed inline decoding support limit.
+	if err := png.Encode(&largePNG, image.NewGray(image.Rect(0, 0, 6000, 4000))); err != nil {
 		t.Fatal(err)
 	}
 	frame := image.NewPaletted(image.Rect(0, 0, 512, 512), color.Palette{color.Black, color.White})
@@ -1621,32 +1682,52 @@ func TestInlineImageDecodeResourceLimits(t *testing.T) {
 	for _, tc := range []struct {
 		name, mime string
 		data       []byte
-		valid      bool
+		supported  bool
 	}{
 		{"pixel-budget", "png", largePNG.Bytes(), false},
+		{"broken-pixel-budget", "png", largePNG.Bytes()[:largePNG.Len()-12], false},
 		{"animation-budget", "gif", animation.Bytes(), false},
 		{"frame-budget", "gif", tooManyFrames.Bytes(), false},
 		{"valid-animation", "gif", smallAnimation.Bytes(), true},
 		{"broken-animation", "gif", brokenAnimation, false},
 	} {
-		for _, syntax := range []string{"bare", "markdown", "html"} {
+		for _, syntax := range []string{
+			"bare", "bare-base64", "bare-wrapped", "bare-base64-wrapped", "markdown", "html",
+		} {
 			t.Run(tc.name+"/"+syntax, func(t *testing.T) {
-				source := "data:image/" + tc.mime + ";base64," + base64.StdEncoding.EncodeToString(tc.data)
+				encoded := base64.StdEncoding.EncodeToString(tc.data)
+				if strings.HasSuffix(syntax, "wrapped") {
+					var lines []string
+					for i := 0; i < len(encoded); i += 76 {
+						lines = append(lines, encoded[i:min(i+76, len(encoded))])
+					}
+					encoded = strings.Join(lines, "\n")
+				}
+				source := "data:image/" + tc.mime + ";base64," + encoded
+				if strings.HasPrefix(syntax, "bare-base64") {
+					source = "base64," + encoded
+				}
 				if syntax == "markdown" {
 					source = "![](" + source + ")"
 				}
 				if syntax == "html" {
 					source = `<img src="` + source + `">`
 				}
-				prose := "\n\nDocumentation\nAnotherParagraph"
+				prose := "\nDocumentation\nAnotherParagraph"
 				svc := &captureSaveBytes{}
 				out, images, err := NewImageResolver().ResolveAndStore(context.Background(),
 					&types.ReadResult{MarkdownContent: source + prose}, svc, 1)
+				if strings.HasPrefix(tc.name, "broken-") && strings.HasPrefix(syntax, "bare") {
+					if !errors.Is(err, ErrAmbiguousInlineImage) || out != source+prose || len(svc.saved) != 0 {
+						t.Fatal("a decode limit must not excuse an incomplete image boundary")
+					}
+					return
+				}
 				if err != nil {
 					t.Fatal(err)
 				}
 				replacement := inlineImageOmitted
-				if tc.valid {
+				if tc.supported {
 					if len(images) != 1 || len(svc.saved) != 1 || !bytes.Equal(svc.saved[0], tc.data) {
 						t.Fatal("image within the validation budget was not preserved")
 					}
