@@ -7212,8 +7212,8 @@ export default {
         list_documentsDesc: 'Page through the documents of one knowledge base',
         read_document: 'Read document',
         read_documentDesc: 'Read a document\'s metadata and its chunks in order',
-        list_tags: 'List tags'
-        list_tagsDesc: 'List the tags under one knowledge base; tag ids can constrain ask retrieval'
+        list_tags: 'List tags',
+        list_tagsDesc: 'List the tags under one knowledge base; tag ids can constrain ask retrieval',
         ask: 'Ask',
         askDesc: 'Run the agent configured on this endpoint and return a cited answer; supports follow-up turns',
         wiki_search: 'Search wiki',
