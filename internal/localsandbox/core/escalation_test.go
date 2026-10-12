@@ -86,12 +86,33 @@ func TestProposeGrantResolvesRelativePathFromCwd(t *testing.T) {
 	require.Equal(t, env.other, g.Path)
 }
 
-func TestProposeGrantOffersWriteForReadableDir(t *testing.T) {
+// Toolchains, shell and git config under a home dot entry run outside the
+// sandbox the next time the user uses them, so none of them is offered.
+func TestProposeGrantRejectsHomeDotDirectories(t *testing.T) {
 	env := proposeFixture(t)
-	nvm := filepath.Join(env.home, ".nvm")
-	g, ok := env.b.ProposeGrant(env.p, denialAt(filepath.Join(nvm, "x")), env.root)
+	dirs := []string{
+		filepath.Join(env.home, ".nvm"),
+		filepath.Join(env.home, ".local", "bin"),
+		filepath.Join(env.home, ".cargo", "bin"),
+		filepath.Join(env.home, ".config", "git"),
+		filepath.Join(env.home, ".config", "fish"),
+	}
+	for _, dir := range dirs {
+		require.NoError(t, os.MkdirAll(dir, 0o755))
+		_, ok := env.b.ProposeGrant(env.p, denialAt(filepath.Join(dir, "x")), env.root)
+		require.False(t, ok, dir)
+		for _, access := range []Access{AccessWrite, AccessRead} {
+			_, err := env.b.Relax(env.p, Grant{Path: dir, Access: access})
+			require.ErrorIs(t, err, ErrWorkspaceTooBroad, dir)
+		}
+	}
+
+	// A dot directory below an ordinary folder is the user's own data.
+	project := filepath.Join(env.home, "Desktop", "site", ".vitepress")
+	require.NoError(t, os.MkdirAll(project, 0o755))
+	g, ok := env.b.ProposeGrant(env.p, denialAt(filepath.Join(project, "config.ts")), env.root)
 	require.True(t, ok)
-	require.Equal(t, Grant{Path: nvm, Access: AccessWrite}, g)
+	require.Equal(t, project, g.Path)
 }
 
 // Allowed by the policy means the failure was not the sandbox.
