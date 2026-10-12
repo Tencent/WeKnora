@@ -11,7 +11,8 @@ test('composer browser button is disabled and opens settings when the extension 
     inputField.indexOf('<BrowserIcon class="control-icon" />'),
   )
   assert.match(button, /disabled: browserConnection\.knownOffline/)
-  assert.match(button, /active: settingsStore\.isLocalBrowserEnabled && browserConnection\.online/)
+  assert.match(button, /active: browserSourceActive && browserConnection\.online/)
+  assert.match(inputField, /const browserSourceActive = computed\(\(\) =>\s*props\.embeddedMode \? settingsStore\.isSidebarLocalBrowserEnabled : settingsStore\.isLocalBrowserEnabled/)
   assert.match(button, /:aria-disabled="browserConnection\.knownOffline"/)
   assert.match(inputField, /if \(browserConnection\.knownOffline\) \{\s*openBrowserConnectionSettings\(\)/)
   assert.match(inputField, /router\.push\(toolboxLocation\('browserconnection'\)\)/)
@@ -27,8 +28,12 @@ test('a selected browser source keeps brand color on hover', () => {
 })
 
 test('a chat turn does not request the local browser while the extension is known offline', () => {
+  // The browser source is scoped per host: the KB sidebar (embeddedMode)
+  // sends its own sidebarLocalBrowserEnabled flag, the main chat the global
+  // one — neither may be silently dropped by an embeddedMode exclusion.
   assert.match(
     chatPage,
-    /local_browser_enabled:\s*!props\.embeddedMode && agentEnabled && useSettingsStoreInstance\.isLocalBrowserEnabled && !useBrowserConnectionStore\(\)\.knownOffline/,
+    /local_browser_enabled:\s*agentEnabled && \(props\.embeddedMode\s*\? useSettingsStoreInstance\.isSidebarLocalBrowserEnabled\s*: useSettingsStoreInstance\.isLocalBrowserEnabled\) && !useBrowserConnectionStore\(\)\.knownOffline/,
   )
+  assert.doesNotMatch(chatPage, /local_browser_enabled:\s*!props\.embeddedMode/)
 })

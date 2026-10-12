@@ -1544,7 +1544,11 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
         agent_id: selectedAgentId,
         agent_source_tenant_id: selectedAgentSourceTenantId,
         web_search_enabled: webSearchEnabled,
-        local_browser_enabled: !props.embeddedMode && agentEnabled && useSettingsStoreInstance.isLocalBrowserEnabled && !useBrowserConnectionStore().knownOffline,
+        // 浏览器来源按宿主分域：KB 侧栏（embeddedMode）用独立开关位，
+        // 主对话沿用全局 localBrowserEnabled，两侧互不影响。
+        local_browser_enabled: agentEnabled && (props.embeddedMode
+          ? useSettingsStoreInstance.isSidebarLocalBrowserEnabled
+          : useSettingsStoreInstance.isLocalBrowserEnabled) && !useBrowserConnectionStore().knownOffline,
         summary_model_id: modelId,
         reasoning_effort: reasoningEffort,
         mcp_service_ids: requestMcpServiceIds,

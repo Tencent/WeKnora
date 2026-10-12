@@ -23,6 +23,7 @@ interface Settings {
   modelConfig: ModelConfig;  // 模型配置
   ollamaConfig: OllamaConfig;  // Ollama配置
   localBrowserEnabled: boolean; // Explicit source preference; composer activates it only while the extension is online
+  sidebarLocalBrowserEnabled: boolean; // Same preference, scoped to the KB sidebar composer so the two never touch each other
   webSearchEnabled: boolean;  // 网络搜索是否启用
   conversationModels: ConversationModels;
   selectedAgentId: string;  // 当前选中的智能体ID
@@ -100,6 +101,7 @@ const defaultSettings: Settings = {
     enabled: true
   },
   localBrowserEnabled: false,
+  sidebarLocalBrowserEnabled: false,
   webSearchEnabled: false,  // 默认关闭网络搜索
   conversationModels: {
     summaryModelId: "",
@@ -171,6 +173,7 @@ export const useSettingsStore = defineStore("settings", {
     
     // 本轮查询来源
     isLocalBrowserEnabled: (state) => state.settings.localBrowserEnabled === true,
+    isSidebarLocalBrowserEnabled: (state) => state.settings.sidebarLocalBrowserEnabled === true,
     isWebSearchEnabled: (state) => state.settings.webSearchEnabled || false,
     
     // 是否自动检查并下载更新
@@ -331,6 +334,13 @@ export const useSettingsStore = defineStore("settings", {
     // 本机浏览器与联网搜索可独立选择。
     toggleLocalBrowser(enabled: boolean) {
       this.settings.localBrowserEnabled = enabled;
+      localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
+    },
+
+    // KB 侧栏（embeddedMode）的独立开关：与主对话的 localBrowserEnabled
+    // 互不影响——侧栏开关不影响主会话本轮是否带浏览器，反之亦然。
+    toggleSidebarLocalBrowser(enabled: boolean) {
+      this.settings.sidebarLocalBrowserEnabled = enabled;
       localStorage.setItem("WeKnora_settings", JSON.stringify(this.settings));
     },
 

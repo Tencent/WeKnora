@@ -912,6 +912,12 @@ const browserSourceUnavailableHint = computed(() => {
   return 'localBrowser.settingsHint';
 });
 
+// 浏览器来源开关按宿主分域：KB 侧栏（embeddedMode）用自己的开关位，
+// 与主对话的 localBrowserEnabled 互不读写，缩小相互影响的爆炸半径。
+const browserSourceActive = computed(() =>
+  props.embeddedMode ? settingsStore.isSidebarLocalBrowserEnabled : settingsStore.isLocalBrowserEnabled
+);
+
 const openBrowserConnectionSettings = () => {
   void router.push(toolboxLocation('browserconnection'));
 };
@@ -922,6 +928,10 @@ const toggleBrowserSource = () => {
   showAgentModeSelector.value = false;
   if (browserConnection.knownOffline) {
     openBrowserConnectionSettings();
+    return;
+  }
+  if (props.embeddedMode) {
+    settingsStore.toggleSidebarLocalBrowser(!settingsStore.isSidebarLocalBrowserEnabled);
     return;
   }
   settingsStore.toggleLocalBrowser(!settingsStore.isLocalBrowserEnabled);
@@ -2772,10 +2782,10 @@ defineExpose({
             </template>
             <button type="button" class="control-btn browser-source-btn"
               :class="{
-                active: settingsStore.isLocalBrowserEnabled && browserConnection.online,
+                active: browserSourceActive && browserConnection.online,
                 disabled: browserConnection.knownOffline,
               }"
-              :aria-pressed="settingsStore.isLocalBrowserEnabled && browserConnection.online"
+              :aria-pressed="browserSourceActive && browserConnection.online"
               :aria-disabled="browserConnection.knownOffline"
               :aria-label="$t('localBrowser.local')"
               @click.stop="toggleBrowserSource">
