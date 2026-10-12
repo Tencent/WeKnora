@@ -41,6 +41,22 @@ func (f *fakeWikiPageService) GetPageBySlug(_ context.Context, kbID, slug string
 	return f.pages[wikiPageKey(kbID, slug)], nil
 }
 
+// UpdatePage stores a copy keyed by the page's owning KB + slug so mutation
+// tests can assert which KB's page actually changed.
+func (f *fakeWikiPageService) UpdatePage(_ context.Context, page *types.WikiPage) (*types.WikiPage, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if page == nil {
+		return nil, nil
+	}
+	copied := *page
+	if page.KnowledgeBaseID != "" && page.Slug != "" {
+		f.pages[wikiPageKey(page.KnowledgeBaseID, page.Slug)] = &copied
+	}
+	returnCopy := copied
+	return &returnCopy, nil
+}
+
 func (f *fakeWikiPageService) SearchPages(_ context.Context, kbID, query string, _ int) ([]*types.WikiPage, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -385,7 +401,7 @@ func TestResolveUniqueWikiPageRejectsAmbiguousMutationTarget(t *testing.T) {
 		wikiPageKey("kb-2", slug): newTestWikiPage("kb-2", slug),
 	}}
 	_, _, err := resolveUniqueWikiPage(
-		context.Background(), service, slug, []string{"kb-1", "kb-2"}, NewWikiRouteResolver(),
+		context.Background(), service, slug, []string{"kb-1", "kb-2"}, NewWikiRouteResolver(), "",
 	)
 	if err == nil || !strings.Contains(err.Error(), "multiple knowledge bases") {
 		t.Fatalf("expected ambiguous target rejection, got %v", err)
@@ -398,7 +414,7 @@ func TestResolveUniqueWikiPageUsesActualOwnerWithoutModelKBArgument(t *testing.T
 		wikiPageKey("kb-2", slug): newTestWikiPage("kb-2", slug),
 	}}
 	page, kbID, err := resolveUniqueWikiPage(
-		context.Background(), service, slug, []string{"kb-1", "kb-2"}, NewWikiRouteResolver(),
+		context.Background(), service, slug, []string{"kb-1", "kb-2"}, NewWikiRouteResolver(), "",
 	)
 	if err != nil || page == nil || kbID != "kb-2" {
 		t.Fatalf("target resolution failed: page=%+v kb=%s err=%v", page, kbID, err)
@@ -416,7 +432,7 @@ func TestResolveUniqueWikiPageSkipsOnlyNotFoundErrors(t *testing.T) {
 		},
 	}
 	page, kbID, err := resolveUniqueWikiPage(
-		context.Background(), service, slug, []string{"kb-1", "kb-2"}, NewWikiRouteResolver(),
+		context.Background(), service, slug, []string{"kb-1", "kb-2"}, NewWikiRouteResolver(), "",
 	)
 	if err != nil || page == nil || kbID != "kb-2" {
 		t.Fatalf("not-found should continue to other allowed scopes: page=%+v kb=%s err=%v", page, kbID, err)
@@ -424,7 +440,7 @@ func TestResolveUniqueWikiPageSkipsOnlyNotFoundErrors(t *testing.T) {
 
 	service.getErrors[wikiPageKey("kb-1", slug)] = errors.New("database unavailable")
 	_, _, err = resolveUniqueWikiPage(
-		context.Background(), service, slug, []string{"kb-1", "kb-2"}, NewWikiRouteResolver(),
+		context.Background(), service, slug, []string{"kb-1", "kb-2"}, NewWikiRouteResolver(), "",
 	)
 	if err == nil || !strings.Contains(err.Error(), "database unavailable") {
 		t.Fatalf("non-not-found lookup errors must fail closed, got %v", err)
@@ -437,10 +453,111 @@ func TestResolveUniqueWikiPageRejectsMismatchedServiceOwner(t *testing.T) {
 		wikiPageKey("kb-1", slug): newTestWikiPage("kb-outside", slug),
 	}}
 	_, _, err := resolveUniqueWikiPage(
-		context.Background(), service, slug, []string{"kb-1"}, NewWikiRouteResolver(),
+		context.Background(), service, slug, []string{"kb-1"}, NewWikiRouteResolver(), "",
 	)
 	if err == nil || !strings.Contains(err.Error(), "returned knowledge base kb-outside") {
 		t.Fatalf("mismatched service owner must be rejected, got %v", err)
+	}
+}
+
+func TestResolveUniqueWikiPageHintDisambiguatesAcrossKBs(t *testing.T) {
+	slug := "concept/shared"
+	service := &fakeWikiPageService{pages: map[string]*types.WikiPage{
+		wikiPageKey("kb-1", slug): newTestWikiPage("kb-1", slug),
+		wikiPageKey("kb-2", slug): newTestWikiPage("kb-2", slug),
+	}}
+	page, kbID, err := resolveUniqueWikiPage(
+		context.Background(), service, slug, []string{"kb-1", "kb-2"}, NewWikiRouteResolver(), "kb-2",
+	)
+	if err != nil || page == nil || kbID != "kb-2" {
+		t.Fatalf("hint must disambiguate an ambiguous slug: page=%+v kb=%s err=%v", page, kbID, err)
+	}
+}
+
+func TestResolveUniqueWikiPageHintOutsideScopeRejected(t *testing.T) {
+	slug := "concept/shared"
+	service := &fakeWikiPageService{pages: map[string]*types.WikiPage{
+		wikiPageKey("kb-1", slug): newTestWikiPage("kb-1", slug),
+	}}
+	_, _, err := resolveUniqueWikiPage(
+		context.Background(), service, slug, []string{"kb-1"}, NewWikiRouteResolver(), "kb-9",
+	)
+	if err == nil || !strings.Contains(err.Error(), "not within the current wiki scope") {
+		t.Fatalf("hint outside the allowed scope must be rejected, got %v", err)
+	}
+}
+
+func TestResolveUniqueWikiPageHintMissDoesNotFallBack(t *testing.T) {
+	slug := "concept/shared"
+	service := &fakeWikiPageService{pages: map[string]*types.WikiPage{
+		wikiPageKey("kb-1", slug): newTestWikiPage("kb-1", slug),
+	}}
+	_, _, err := resolveUniqueWikiPage(
+		context.Background(), service, slug, []string{"kb-1", "kb-2"}, NewWikiRouteResolver(), "kb-2",
+	)
+	if err == nil || !strings.Contains(err.Error(), "wiki page not found in current scope") {
+		t.Fatalf("a miss inside the hinted KB must not fall back to other KBs, got %v", err)
+	}
+}
+
+func TestWikiReplaceTextHintTargetsSpecificKBAcrossDuplicateSlugs(t *testing.T) {
+	slug := "index"
+	service := &fakeWikiPageService{
+		pages: map[string]*types.WikiPage{
+			wikiPageKey("kb-1", slug): newTestWikiPage("kb-1", slug),
+			wikiPageKey("kb-2", slug): newTestWikiPage("kb-2", slug),
+		},
+	}
+	tool := NewWikiReplaceTextTool(service, []string{"kb-1", "kb-2"}, nil, NewWikiRouteResolver())
+	args, err := json.Marshal(map[string]string{
+		"slug":              slug,
+		"knowledge_base_id": "kb-2",
+		"old_text":          "content",
+		"new_text":          "replacement",
+	})
+	if err != nil {
+		t.Fatalf("marshal args: %v", err)
+	}
+	result, err := tool.Execute(context.Background(), args)
+	if err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	if !result.Success {
+		t.Fatalf("hinted replace failed: %+v", result)
+	}
+	updated := service.pages[wikiPageKey("kb-2", slug)]
+	if updated == nil || !strings.Contains(updated.Content, "replacement") {
+		t.Fatalf("hinted KB page must be the one updated, got %+v", updated)
+	}
+	untouched := service.pages[wikiPageKey("kb-1", slug)]
+	if untouched == nil || strings.Contains(untouched.Content, "replacement") {
+		t.Fatalf("sibling KB page must stay untouched, got %+v", untouched)
+	}
+}
+
+func TestWikiReplaceTextAmbiguousSlugWithoutHintStillRefused(t *testing.T) {
+	slug := "index"
+	service := &fakeWikiPageService{
+		pages: map[string]*types.WikiPage{
+			wikiPageKey("kb-1", slug): newTestWikiPage("kb-1", slug),
+			wikiPageKey("kb-2", slug): newTestWikiPage("kb-2", slug),
+		},
+	}
+	tool := NewWikiReplaceTextTool(service, []string{"kb-1", "kb-2"}, nil, NewWikiRouteResolver())
+	args, err := json.Marshal(map[string]string{
+		"slug":     slug,
+		"old_text": "content",
+		"new_text": "replacement",
+	})
+	if err != nil {
+		t.Fatalf("marshal args: %v", err)
+	}
+	result, err := tool.Execute(context.Background(), args)
+	if err != nil {
+		t.Fatalf("Execute returned error: %v", err)
+	}
+	if result.Success || !strings.Contains(result.Error, "multiple knowledge bases") {
+		t.Fatalf("ambiguous slug without hint must stay refused, got %+v", result)
 	}
 }
 

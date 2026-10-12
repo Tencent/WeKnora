@@ -39,6 +39,10 @@ func NewWikiWritePageTool(
 						"type": "string",
 						"description": "The slug of the Wiki page (e.g. 'entity/hunyuan-damoxing')"
 					},
+					"knowledge_base_id": {
+						"type": "string",
+						"description": "Optional: owning KB ID; disambiguates a slug shared by several KBs."
+					},
 					"title": {
 						"type": "string",
 						"description": "The title of the page"
@@ -89,13 +93,14 @@ func (t *wikiWritePageTool) Execute(ctx context.Context, args json.RawMessage) (
 	// revision history distinguishes agent edits from pipeline/user ones.
 	ctx = types.WithWikiEditSource(ctx, types.WikiEditSourceAgent)
 	var params struct {
-		Slug       string    `json:"slug"`
-		Title      string    `json:"title"`
-		Summary    string    `json:"summary"`
-		Content    string    `json:"content"`
-		PageType   string    `json:"page_type"`
-		Aliases    *[]string `json:"aliases"`
-		SourceRefs *[]string `json:"source_refs"`
+		Slug            string    `json:"slug"`
+		KnowledgeBaseID string    `json:"knowledge_base_id"`
+		Title           string    `json:"title"`
+		Summary         string    `json:"summary"`
+		Content         string    `json:"content"`
+		PageType        string    `json:"page_type"`
+		Aliases         *[]string `json:"aliases"`
+		SourceRefs      *[]string `json:"source_refs"`
 	}
 
 	if err := json.Unmarshal(args, &params); err != nil {
@@ -135,13 +140,19 @@ func (t *wikiWritePageTool) Execute(ctx context.Context, args json.RawMessage) (
 	}
 	// Resolve existing pages across every legal Wiki KB. Cached provenance only
 	// influences lookup order; ambiguous slugs are never silently written to
-	// the first KB. New pages require one unambiguous creation target.
-	existingPage, kbID, err := resolveUniqueWikiPage(ctx, t.wikiPageService, params.Slug, t.kbIDs, t.routes)
+	// the first KB. New pages require one unambiguous creation target. A
+	// model-supplied knowledge_base_id pins resolution and creation to that KB.
+	existingPage, kbID, err := resolveUniqueWikiPage(
+		ctx, t.wikiPageService, params.Slug, t.kbIDs, t.routes, params.KnowledgeBaseID,
+	)
 	if errors.Is(err, errWikiPageNotFoundInScope) {
 		existingPage = nil
 		sourceKBHints, sourceErr := wikiKnowledgeBasesForSourceDocuments(sourceDocs, t.kbIDs)
 		if sourceErr != nil {
 			return &types.ToolResult{Success: false, Error: "Failed to resolve source_refs routing: " + sourceErr.Error()}, nil
+		}
+		if hint := strings.TrimSpace(params.KnowledgeBaseID); hint != "" {
+			sourceKBHints = append(sourceKBHints, hint)
 		}
 		kbID, err = resolveWikiCreateKB(params.Slug, t.kbIDs, t.routes, sourceKBHints...)
 	}

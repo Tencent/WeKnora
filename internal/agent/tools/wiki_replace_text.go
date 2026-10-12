@@ -38,6 +38,10 @@ func NewWikiReplaceTextTool(
 						"type": "string",
 						"description": "The slug of the Wiki page"
 					},
+					"knowledge_base_id": {
+						"type": "string",
+						"description": "Optional: owning KB ID; disambiguates a slug shared by several KBs."
+					},
 					"old_text": {
 						"type": "string",
 						"description": "The exact text to find and replace"
@@ -80,10 +84,11 @@ func (t *wikiReplaceTextTool) Execute(ctx context.Context, args json.RawMessage)
 	// NOT marked: there a shorter body is how truncation shows up.
 	ctx = types.WithWikiShrinkAllowed(ctx)
 	var params struct {
-		Slug       string    `json:"slug"`
-		OldText    string    `json:"old_text"`
-		NewText    string    `json:"new_text"`
-		SourceRefs *[]string `json:"source_refs"`
+		Slug            string    `json:"slug"`
+		KnowledgeBaseID string    `json:"knowledge_base_id"`
+		OldText         string    `json:"old_text"`
+		NewText         string    `json:"new_text"`
+		SourceRefs      *[]string `json:"source_refs"`
 	}
 
 	if err := json.Unmarshal(args, &params); err != nil {
@@ -103,7 +108,9 @@ func (t *wikiReplaceTextTool) Execute(ctx context.Context, args json.RawMessage)
 	params.Slug = normalizedSlug
 
 	// Get the existing page
-	existingPage, _, err := resolveUniqueWikiPage(ctx, t.wikiPageService, params.Slug, t.kbIDs, t.routes)
+	existingPage, _, err := resolveUniqueWikiPage(
+		ctx, t.wikiPageService, params.Slug, t.kbIDs, t.routes, params.KnowledgeBaseID,
+	)
 	if err != nil {
 		return &types.ToolResult{Success: false, Error: fmt.Sprintf("Failed to fetch page %s: %v", params.Slug, err)}, nil
 	}

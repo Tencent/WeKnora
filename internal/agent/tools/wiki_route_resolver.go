@@ -111,16 +111,58 @@ func scopesOutsideKBs(scopes []WikiScope, excluded []WikiScope) []WikiScope {
 // resolveUniqueWikiPage is the shared mutation/issue routing boundary. It
 // checks every allowed KB (cached provenance only affects order) and refuses
 // ambiguous slugs instead of silently mutating the first KB.
+//
+// A non-empty kbHint (the model-supplied knowledge_base_id) restricts
+// resolution to that single KB. The hint must already be inside the allowed
+// scope, and a miss inside the hinted KB is reported as-is instead of
+// falling back to the other KBs — a fallback would silently mutate a
+// different KB than the one the model named.
 func resolveUniqueWikiPage(
 	ctx context.Context,
 	service interfaces.WikiPageService,
 	slug string,
 	kbIDs []string,
 	routes *WikiRouteResolver,
+	kbHint string,
 ) (*types.WikiPage, string, error) {
 	slug = strings.TrimSpace(slug)
 	if slug == "" {
 		return nil, "", fmt.Errorf("slug is required")
+	}
+	kbHint = strings.TrimSpace(kbHint)
+	if kbHint != "" {
+		hintAllowed := false
+		for _, id := range dedupNonEmptyStrings(kbIDs) {
+			if id == kbHint {
+				hintAllowed = true
+				break
+			}
+		}
+		if !hintAllowed {
+			return nil, "", fmt.Errorf(
+				"knowledge base %s is not within the current wiki scope", kbHint)
+		}
+		page, err := service.GetPageBySlug(ctx, kbHint, slug)
+		if err != nil && !errors.Is(err, repository.ErrWikiPageNotFound) {
+			return nil, "", fmt.Errorf(
+				"failed to resolve wiki page %s in knowledge base %s: %w",
+				slug, kbHint, err,
+			)
+		}
+		if err != nil || page == nil {
+			return nil, "", fmt.Errorf(
+				"%w: %s (in knowledge base %s)",
+				errWikiPageNotFoundInScope, slug, kbHint,
+			)
+		}
+		if page.KnowledgeBaseID != "" && page.KnowledgeBaseID != kbHint {
+			return nil, "", fmt.Errorf(
+				"wiki page %s returned knowledge base %s while resolving allowed scope %s",
+				slug, page.KnowledgeBaseID, kbHint,
+			)
+		}
+		routes.rememberPage(page, kbHint)
+		return page, kbHint, nil
 	}
 	scopes := NewWikiScopesFromKBIDs(kbIDs)
 	preferred := routes.scopesForSlug(slug, scopes)

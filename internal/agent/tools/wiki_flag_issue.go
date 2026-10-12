@@ -38,6 +38,10 @@ This will log an issue for human review or automated maintenance.`,
       "type": "string",
       "description": "The slug of the wiki page that has an issue (e.g. 'entity/hunyuan-damoxing')"
     },
+    "knowledge_base_id": {
+      "type": "string",
+      "description": "Optional: owning KB ID; disambiguates a slug shared by several KBs."
+    },
     "issue_type": {
       "type": "string",
       "enum": ["mixed_entities", "contradictory_facts", "out_of_date", "other"],
@@ -75,6 +79,7 @@ func (t *wikiFlagIssueTool) WithKnowledgeScope(
 func (t *wikiFlagIssueTool) Execute(ctx context.Context, args json.RawMessage) (*types.ToolResult, error) {
 	var params struct {
 		Slug                  string   `json:"slug"`
+		KnowledgeBaseID       string   `json:"knowledge_base_id"`
 		IssueType             string   `json:"issue_type"`
 		Description           string   `json:"description"`
 		SuspectedKnowledgeIDs []string `json:"suspected_knowledge_ids"`
@@ -94,7 +99,7 @@ func (t *wikiFlagIssueTool) Execute(ctx context.Context, args json.RawMessage) (
 		return &types.ToolResult{Success: false, Error: "No knowledge bases available for issue tracking"}, nil
 	}
 
-	page, kbID, err := resolveUniqueWikiPage(ctx, t.wikiService, slug, t.kbIDs, t.routes)
+	page, kbID, err := resolveUniqueWikiPage(ctx, t.wikiService, slug, t.kbIDs, t.routes, params.KnowledgeBaseID)
 	if err != nil {
 		return &types.ToolResult{Success: false, Error: err.Error()}, nil
 	}
