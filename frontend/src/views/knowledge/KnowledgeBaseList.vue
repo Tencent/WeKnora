@@ -717,18 +717,8 @@
 
     <ContextualGuide tour="kbList" :when="showKbListContextualGuide" />
 
-    <!-- Agent sidebar (agent-sidebar-inbox): the KB list page binds the
-         global session (no kbId); the handle is fixed to the viewport's
-         right edge (teleported to <body>, above the doc drawers) so it
-         stays reachable while any full-screen drawer is open. -->
-    <Teleport to="body">
-      <button v-if="!showAgentSidebar" type="button" class="agent-sidebar-fab"
-        :aria-label="$t('knowledgeBase.agentSidebar.title')" :title="$t('knowledgeBase.agentSidebar.title')"
-        @click="showAgentSidebar = true">
-        <t-icon name="chat" size="16px" />
-      </button>
-    </Teleport>
-    <AgentSidebarDrawer v-model="showAgentSidebar" />
+    <!-- The agent sidebar went app-wide (App.vue mounts the dock and its
+         FAB); this page needs no local instance. -->
   </div>
 </template>
 
@@ -748,7 +738,6 @@ import { useOrganizationStore } from '@/stores/organization'
 import { listOrganizationSharedKnowledgeBases, type SharedKnowledgeBase, type OrganizationSharedKnowledgeBaseItem, type SourceFromAgentInfo } from '@/api/organization'
 import { mergeAllScopeKnowledgeBases, type OwnedKnowledgeBase, type SharedKnowledgeBaseLike } from './kbListMerge'
 import KnowledgeBaseEditorModal from './KnowledgeBaseEditorModal.vue'
-import AgentSidebarDrawer from './components/AgentSidebarDrawer.vue'
 import KbWikiBadge from './components/KbWikiBadge.vue'
 import KbTypeAvatar from './components/KbTypeAvatar.vue'
 import ResourceListToolbar from '@/components/ResourceListToolbar.vue'
@@ -776,8 +765,8 @@ const uiStore = useUIStore()
 const authStore = useAuthStore()
 const { loaded: modelsReadyLoaded, isReadyForDocumentKb } = useTenantModelReadiness()
 
-// Agent sidebar (agent-sidebar-inbox): one global session on the list page.
-const showAgentSidebar = ref(false)
+// The agent sidebar went app-wide (App.vue): its open state lives in the
+// shared store; the list page only reserves the dock's width via CSS.
 const orgStore = useOrganizationStore()
 const chatResources = useChatResourcesStore()
 const { t } = useI18n()
@@ -1594,33 +1583,10 @@ watch(keyword, () => { collapsedKbSections.value = new Set() })
   position: relative;
 }
 
-// Same right-edge invoke handle as the KB detail page (agent-sidebar-inbox):
-// fixed to the viewport's right edge, one layer above the doc drawers.
-.agent-sidebar-fab {
-  position: fixed;
-  right: 0;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 26px;
-  height: 72px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: none;
-  border-radius: var(--app-radius-lg) 0 0 var(--app-radius-lg);
-  background: var(--td-brand-color);
-  color: var(--td-text-color-anti);
-  cursor: pointer;
-  z-index: 2001;
-
-  &:hover {
-    background: var(--td-brand-color-hover);
-  }
-}
-
-// The dock teleports to <body> and is fixed to the viewport's right edge;
-// the list content reserves the dock's live width so opening the chat
-// still narrows the list instead of covering it. (Higher specificity than
+// The dock (mounted by App.vue) teleports to <body> and is fixed to the
+// viewport's right edge; the list content reserves the dock's live width
+// so opening the chat still narrows the list instead of covering it.
+// (Higher specificity than
 // the resource-list-content mixin, whose margin would otherwise win.)
 .kb-list-container > .kb-list-content {
   margin-right: calc(16px + var(--agent-sidebar-w, 0px));

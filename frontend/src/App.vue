@@ -6,6 +6,7 @@ import { MessagePlugin, NotifyPlugin } from 'tdesign-vue-next'
 import ProtectedResourcePreview from '@/components/ProtectedResourcePreview.vue'
 import ManualKnowledgeEditor from '@/components/manual-knowledge-editor.vue'
 import UploadConfirmHost from '@/components/UploadConfirmHost.vue'
+import AgentSidebarDrawer from '@/views/knowledge/components/AgentSidebarDrawer.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useSettingsStore } from '@/stores/settings'
 import { getCurrentUser, userInfoFromApi } from '@/api/auth'
@@ -279,6 +280,12 @@ onUnmounted(() => {
   <t-config-provider :globalConfig="tdGlobalConfig">
     <div id="app">
       <RouterView />
+      <!-- Agent sidebar: app-wide dock (agent-sidebar-inbox). Mounted at
+           the root, outside every page component, so the chat is reachable
+           on any authenticated page (settings, chat, KB views, ...) and no
+           future page-level overlay can bury it (dock z 5000 > dialogs).
+           Login/embed are covered by the isLoggedIn gate. -->
+      <AgentSidebarDrawer v-if="authStore.isLoggedIn" />
       <ManualKnowledgeEditor />
       <ProtectedResourcePreview />
       <UploadConfirmHost />

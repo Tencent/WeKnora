@@ -918,6 +918,13 @@ const browserSourceActive = computed(() =>
   props.embeddedMode ? settingsStore.isSidebarLocalBrowserEnabled : settingsStore.isLocalBrowserEnabled
 );
 
+// 开关显隐：主对话跟随全局 agent 选择（快速问答无流式管线，不渲染）。
+// KB 侧栏的 assistant 是固定注入的 agent，与主对话 last selected 的
+// agent 无关——否则主会话停在快速问答模式时侧栏开关会整颗消失。
+const showBrowserSourceToggle = computed(() =>
+  props.embeddedMode || settingsStore.isAgentStreamMode
+);
+
 const openBrowserConnectionSettings = () => {
   void router.push(toolboxLocation('browserconnection'));
 };
@@ -2768,7 +2775,7 @@ defineExpose({
             :currentAgentId="selectedAgentId" :agents="enabledAgents" :all-models="allModels"
             @close="closeAgentModeSelector" @select="handleSelectAgent" @not-ready="handleAgentNotReady" />
 
-          <t-tooltip v-if="settingsStore.isAgentStreamMode" placement="top" theme="light"
+          <t-tooltip v-if="showBrowserSourceToggle" placement="top" theme="light"
             :popupProps="{ overlayClassName: 'input-field-tooltip' }">
             <template #content>
               <div v-if="!browserConnection.knownOffline" class="browser-source-tooltip">

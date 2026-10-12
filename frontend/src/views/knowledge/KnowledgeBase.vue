@@ -55,7 +55,7 @@ import { useUploadConfirmStore, type UploadConfirmResult } from '@/stores/upload
 import { useUploadTasksStore } from '@/stores/uploadTasks';
 import WikiBrowser from './wiki/WikiBrowser.vue';
 import ImageGallery from './gallery/ImageGallery.vue';
-import AgentSidebarDrawer from './components/AgentSidebarDrawer.vue';
+import { agentSidebarVisible as showAgentSidebar } from '@/stores/agentSidebar';
 import { postUIEvent } from '@/api/agent-inbox';
 import { getWikiStats } from '@/api/wiki';
 import {
@@ -1159,7 +1159,9 @@ watch([kbId, kbInfo], ([id, info]) => {
 })
 
 // ── Agent sidebar (agent-sidebar-inbox P1) ──────────────────────────────
-const showAgentSidebar = ref(false);
+// The dock went app-wide (mounted by App.vue); its open state lives in the
+// shared store (imported above as showAgentSidebar). Only the space
+// negotiation below stays page-local.
 
 // Width contract (agent-sidebar-inbox): the sidebar is a draggable dock
 // (default 420px, min 260) and the main content never shrinks below 650px.
@@ -2348,18 +2350,6 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
 <template>
   <template v-if="!isFAQ">
      <div class="knowledge-layout">
-      <!-- Agent sidebar invoke handle: fixed to the viewport's right edge
-           (teleported to <body>, above the doc drawers' z-index) so it stays
-           reachable even while the full-screen document drawer is open;
-           hidden while the sidebar is open (the drawer's own close button
-           takes over). -->
-      <Teleport to="body">
-        <button v-if="!showAgentSidebar" type="button" class="agent-sidebar-fab"
-          :aria-label="$t('knowledgeBase.agentSidebar.title')" :title="$t('knowledgeBase.agentSidebar.title')"
-          @click="showAgentSidebar = true">
-          <t-icon name="chat" size="16px" />
-        </button>
-      </Teleport>
       <div class="document-header">
         <div class="document-header-title">
           <div class="document-title-row">
@@ -2710,10 +2700,6 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
           </div>
         </div>
       </template>
-
-        <!-- Agent sidebar: persistent docked panel; mounted inside the body
-             row so it survives tab switches (one session per KB). -->
-        <AgentSidebarDrawer v-if="kbId" v-model="showAgentSidebar" :kb-id="kbId" />
       </div>
 
       <!-- DocContent drawer (shared by documents tab and wiki source refs) -->
@@ -2766,31 +2752,6 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
   padding: 20px 28px 0;
   box-sizing: border-box;
   position: relative;
-}
-
-// Right-edge invoke handle for the agent sidebar (agent-sidebar-inbox):
-// fixed to the viewport's right edge, one layer above the body-attached
-// doc drawers so summoning the chat stays possible while reading.
-.agent-sidebar-fab {
-  position: fixed;
-  right: 0;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 26px;
-  height: 72px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: none;
-  border-radius: var(--app-radius-lg) 0 0 var(--app-radius-lg);
-  background: var(--td-brand-color);
-  color: var(--td-text-color-anti);
-  cursor: pointer;
-  z-index: 2001;
-
-  &:hover {
-    background: var(--td-brand-color-hover);
-  }
 }
 
 // View switch (文档 / Wiki / 图谱 / 画廊): a segmented control after the

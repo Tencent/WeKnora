@@ -1,12 +1,25 @@
 <template>
-  <!-- Agent sidebar (agent-sidebar-inbox P1): a persistent chat panel bound
-       to the KB view. Teleported to <body> and fixed to the viewport's right
-       edge — the same coordinate system as the body-attached doc drawers —
-       so the two always tile seamlessly, even when the page content
-       overflows horizontally (scrollbar fallback). The page reserves the
-       dock's live width via margin-right: var(--agent-sidebar-w), so
-       opening it still narrows the main content instead of covering it. -->
+  <!-- Agent sidebar (agent-sidebar-inbox P1): an app-wide persistent chat
+       panel, mounted by App.vue outside any page component. Teleported to
+       <body> and fixed to the viewport's right edge — the same coordinate
+       system as the body-attached doc drawers — so the two always tile
+       seamlessly, even when the page content overflows horizontally
+       (scrollbar fallback). The dock sits above dialogs and popups
+       (z 5000 vs TDesign's 2500-based counter) so no future overlay can
+       bury the chat. Participating pages reserve the dock's live width via
+       margin-right: var(--agent-sidebar-w), so opening it still narrows
+       them instead of covering them. The KB binding is derived from the
+       route (absent off the KB detail page: the sidebar then runs a global
+       session not bound to any knowledge base). -->
   <teleport to="body">
+    <!-- Right-edge invoke handle: fixed to the viewport's right edge so
+         summoning the chat stays possible on any page; hidden while the
+         dock is open (the dock's own close button takes over). -->
+    <button v-if="!visible" type="button" class="agent-sidebar-fab"
+      :aria-label="$t('knowledgeBase.agentSidebar.title')" :title="$t('knowledgeBase.agentSidebar.title')"
+      @click="visible = true">
+      <t-icon name="chat" size="16px" />
+    </button>
     <aside class="agent-sidebar-dock" :class="{ 'is-open': visible, 'is-resizing': resizing }"
       :aria-hidden="!visible" :style="visible ? { width: `${sidebarWidth}px` } : undefined">
       <!-- 左缘拖拽条：按住左右拖动调宽（260–640），松手持久化 -->
@@ -17,7 +30,10 @@
           <!-- Row 1: session switcher (click the title for recent chats) and
                the panel close button, sharing the full width. -->
           <div class="agent-sidebar-header-row">
-            <t-popup trigger="click" placement="bottom-left" attach="body" @show="loadRecentSessions">
+            <!-- attach="body" escapes the dock's stacking context, so it
+                 needs an explicit zIndex above the dock's own (5000) or the
+                 menu would render underneath the panel it belongs to. -->
+            <t-popup trigger="click" placement="bottom-left" attach="body" :z-index="5100" @show="loadRecentSessions">
               <button type="button" class="agent-sidebar-session-trigger" :title="currentSessionTitle">
                 <span class="agent-sidebar-title">{{ currentSessionTitle }}</span>
                 <t-icon name="chevron-down" size="14px" />
@@ -73,7 +89,7 @@
             <!-- v-show (not v-if) so the conversation and scroll position stay
                  alive while the panel is closed. -->
             <ChatView v-if="sessionId" v-show="visible" :key="sessionId" :session_id="sessionId"
-              agentId="builtin-sidebar-assistant" :kbIds="props.kbId ? [props.kbId] : []" :embeddedMode="true" />
+              agentId="builtin-sidebar-assistant" :kbIds="kbId ? [kbId] : []" :embeddedMode="true" />
             <div v-else-if="!sessionLoading" class="agent-sidebar-empty">
               {{ $t('knowledgeBase.agentSidebar.sessionError') }}
             </div>
@@ -126,6 +142,7 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
+import { useRoute } from 'vue-router';
 import { MessagePlugin } from 'tdesign-vue-next';
 import { useI18n } from 'vue-i18n';
 import ChatView from '@/views/chat/index.vue';
@@ -135,20 +152,20 @@ import {
   markInboxRead,
   type AgentInboxDigest,
 } from '@/api/agent-inbox';
+import { agentSidebarVisible } from '@/stores/agentSidebar';
 
-const props = defineProps<{
-  // Absent on the KB list page: the sidebar then runs a global session not
-  // bound to any knowledge base (agent-sidebar-inbox design decision).
-  kbId?: string;
-  modelValue: boolean;
-}>();
+// App-wide mount (App.vue): no page-owned v-model. The open/closed flag is
+// the shared store ref so pages (e.g. the KB folder-tree auto-collapse)
+// can react to the dock without prop plumbing.
+const visible = agentSidebarVisible;
 
-const emit = defineEmits<{
-  (e: 'update:modelValue', value: boolean): void;
-}>();
+// KB binding follows the route: present on the KB detail page
+// (/platform/knowledge-bases/:kbId), undefined everywhere else — the
+// sidebar then runs a global session not bound to any knowledge base.
+const route = useRoute();
+const kbId = computed(() => (route.params.kbId as string) || undefined);
 
 const { t } = useI18n();
-const visible = ref(props.modelValue);
 const sessionId = ref('');
 const sessionLoading = ref(false);
 
@@ -204,9 +221,6 @@ watch([visible, sidebarWidth], syncWidthVar, { immediate: true });
 onBeforeUnmount(() => {
   document.documentElement.style.setProperty('--agent-sidebar-w', '0px');
 });
-
-watch(() => props.modelValue, (val) => { visible.value = val; });
-watch(visible, (val) => { emit('update:modelValue', val); });
 
 // One persistent session for the whole sidebar (global binding): switching
 // KBs only changes the surrounding view — the conversation keeps running
@@ -408,18 +422,44 @@ const formatInboxTime = (v?: string) => {
 
 <style scoped>
 .agent-sidebar-dock {
-  /* Fixed to the viewport's right edge, one layer above the body-attached
-     doc drawers (z 2000): the reading pane and the chat then tile the
-     window edge-to-edge (drawer right == dock left) with no masked page
-     showing through, regardless of horizontal overflow. */
+  /* Fixed to the viewport's right edge, above every overlay in the app
+     (TDesign dialogs/popups run a 2500-based counter): the online-edit
+     dialog, doc drawers (z 2000) and any future full-screen panel then
+     can never bury the chat. Body-attached popups owned by the dock (the
+     session menu) opt up to 5100 to stay above their own panel. */
   position: fixed;
   right: 0;
   top: 0;
   bottom: 0;
-  z-index: 2002;
+  z-index: 5000;
   width: 0;
   overflow: hidden;
   transition: width var(--app-motion-slow, 0.22s) ease;
+}
+
+/* Right-edge invoke handle (moved from KnowledgeBase.vue when the dock
+   went app-wide): fixed to the viewport's right edge, same top layer as
+   the dock, so summoning the chat stays possible on any page. */
+.agent-sidebar-fab {
+  position: fixed;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 26px;
+  height: 72px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: var(--app-radius-lg) 0 0 var(--app-radius-lg);
+  background: var(--td-brand-color);
+  color: var(--td-text-color-anti);
+  cursor: pointer;
+  z-index: 5000;
+
+  &:hover {
+    background: var(--td-brand-color-hover);
+  }
 }
 
 /* Open width comes from an inline style (draggable); the class only
