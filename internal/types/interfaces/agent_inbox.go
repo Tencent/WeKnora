@@ -25,6 +25,12 @@ type AgentInboxRepository interface {
 // AgentInboxService is the agent-facing situational inbox: it ingests
 // curated events (policy-gated) and serves them to the check_inbox tool.
 type AgentInboxService interface {
+	// Emit is the one-line fire-and-forget helper for feature code: it
+	// fills the boilerplate (tenant from ctx, dedup key, IDs) and applies
+	// the per-type policy exactly like Ingest. This is the default entry
+	// point for new event sources — reach for Ingest only when you need
+	// debounce/coalesce control Emit does not expose.
+	Emit(ctx context.Context, evtType string, kbID, userID string, payload types.JSONMap)
 	// Ingest applies the event policy (enabled? priority? debounce/coalesce)
 	// and persists the event. Failures are logged, never propagated — inbox
 	// availability must not break the originating flow.
@@ -38,6 +44,9 @@ type AgentInboxService interface {
 	// Trail returns the most recent view events (the "page trail" used to
 	// resolve references like "the page I was on before").
 	Trail(ctx context.Context, f types.InboxQueryFilters, limit int) ([]*types.AgentInboxEvent, error)
+	// MarkRead stamps read_at on the given event IDs (tenant from ctx).
+	// Used by the user-facing inbox panel, not by the agent tool.
+	MarkRead(ctx context.Context, ids []string) error
 	// StartRetentionSweeper launches the background cleanup loop (no-op
 	// when called multiple times).
 	StartRetentionSweeper(ctx context.Context)

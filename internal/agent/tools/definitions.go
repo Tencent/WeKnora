@@ -79,6 +79,10 @@ const (
 	ToolCheckInbox         = "check_inbox"
 	ToolWikiGetCurrentPage = "wiki_get_current_page"
 	ToolWikiGetPageTrail   = "wiki_get_page_trail"
+	// Document lifecycle actions (Phase 3 skill pack v1): reversible
+	// operations only (reparse / cancel-parse); deletion waits for an
+	// explicit HITL confirmation design. Scoped to config.WritableKBIDs.
+	ToolManageDocument = "manage_document"
 )
 
 // AvailableTool defines a simple tool metadata used by settings APIs.
@@ -118,6 +122,7 @@ func AvailableToolDefinitions() []AvailableTool {
 		{Name: ToolCheckInbox, Label: "查看态势收件箱", Description: "读取用户操作、知识库事件与Agent动作回执的情境收件箱"},
 		{Name: ToolWikiGetCurrentPage, Label: "读取当前页面", Description: "识别用户正在查看的Wiki页面并按需读取其内容与段落大纲"},
 		{Name: ToolWikiGetPageTrail, Label: "查看页面轨迹", Description: "列出用户最近浏览的Wiki页面，用于解析『刚才那页』等指代"},
+		{Name: ToolManageDocument, Label: "管理文档解析", Description: "对你可编辑的知识库文档触发重新解析或停止解析（可逆操作）"},
 	}
 }
 

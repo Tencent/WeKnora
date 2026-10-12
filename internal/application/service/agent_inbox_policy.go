@@ -114,6 +114,31 @@ func defaultInboxPolicy() *inboxPolicy {
 				Retention: 7 * 24 * time.Hour,
 				Enabled:   true,
 			},
+			types.InboxTypeUserUpdatedDoc: {
+				Priority:  types.InboxPriorityP1,
+				Retention: 7 * 24 * time.Hour,
+				Enabled:   true,
+			},
+			types.InboxTypeUserCancelledParse: {
+				Priority:  types.InboxPriorityP1,
+				Retention: 7 * 24 * time.Hour,
+				Enabled:   true,
+			},
+			types.InboxTypeUserUpdatedKB: {
+				Priority:  types.InboxPriorityP1,
+				Retention: 7 * 24 * time.Hour,
+				Enabled:   true,
+			},
+			types.InboxTypeUserDeletedKB: {
+				Priority:  types.InboxPriorityP0,
+				Retention: 7 * 24 * time.Hour,
+				Enabled:   true,
+			},
+			types.InboxTypeUserEditedFAQ: {
+				Priority:  types.InboxPriorityP1,
+				Retention: 7 * 24 * time.Hour,
+				Enabled:   true,
+			},
 			types.InboxTypeParseCompleted: {
 				Priority:  types.InboxPriorityP2,
 				Retention: 24 * time.Hour,
@@ -125,6 +150,16 @@ func defaultInboxPolicy() *inboxPolicy {
 				Enabled:   true,
 			},
 			types.InboxTypeAgentWikiWrite: {
+				Priority:  types.InboxPriorityP1,
+				Retention: 7 * 24 * time.Hour,
+				Enabled:   true,
+			},
+			types.InboxTypeAgentDocReparse: {
+				Priority:  types.InboxPriorityP1,
+				Retention: 7 * 24 * time.Hour,
+				Enabled:   true,
+			},
+			types.InboxTypeAgentDocCancelParse: {
 				Priority:  types.InboxPriorityP1,
 				Retention: 7 * 24 * time.Hour,
 				Enabled:   true,

@@ -190,6 +190,25 @@ var toolHandlePolicies = map[string]toolHandlePolicy{
 	// caveat: they echo paths and byte counts, never knowledge identifiers.
 	"write_skill_file": {},
 	"edit_skill_file":  {},
+	// Agent inbox tools echo event digests: payloads may quote document and
+	// KB ids that were already registered as handles when first surfaced, so
+	// compact known IDs and render sources, but the tools take no ID-bearing
+	// arguments themselves (view tools read the store directly).
+	"check_inbox": {
+		sourceOutput: true,
+	},
+	"wiki_get_current_page": {
+		sourceOutput: true,
+	},
+	"wiki_get_page_trail": {
+		sourceOutput: true,
+	},
+	// manage_document takes a knowledge_id argument and echoes titles and
+	// parse-status prose.
+	"manage_document": {
+		sourceIDKeys: map[string]struct{}{"knowledge_id": {}},
+		sourceOutput: true,
+	},
 }
 
 // HasToolPolicy reports whether a tool has an explicit model-handle policy.

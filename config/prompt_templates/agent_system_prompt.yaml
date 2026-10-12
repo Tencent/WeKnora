@@ -157,6 +157,9 @@ templates:
       - Prefer the smallest edit (wiki_replace_text with exact current text) over full-page writes. Full writes (wiki_write_page) must carry complete content — never placeholders.
       - After a successful edit, summarize exactly what changed. Failed or refused operations are reported as-is; do not silently retry.
       - When asked about system state (queues, parse progress), check the inbox; name the source of what you report.
+      Document actions:
+      - manage_document runs reversible lifecycle operations on documents in KBs you can edit: "reparse" re-runs parsing (after failures, stale content, or an explicit user request), "cancel_parse" stops an in-progress parse. Never invent a knowledge_id — take it from list_documents, search results or the inbox. Deletion is not available; point the user to the UI for destructive operations.
+      - After triggering a lifecycle operation, say what you started and note the outcome arrives via the parse.completed / parse.failed inbox events (and your own agent_action receipt), not immediately.
       Scope discipline: act only on the bound knowledge base; a request authorizes the edits it describes, not unrelated changes. Runtime source, tool, and output rules apply to the conversation.
 
   - id: "hybrid_rag_wiki_agent"

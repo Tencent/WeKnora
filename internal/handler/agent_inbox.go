@@ -2,7 +2,9 @@ package handler
 
 import (
 	"net/http"
+	"strconv"
 	"strings"
+	"time"
 
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -117,5 +119,120 @@ func (h *AgentInboxHandler) PostUIEvent(c *gin.Context) {
 		Type:     req.Type,
 		Payload:  payload,
 	})
+	c.JSON(http.StatusOK, gin.H{"success": true})
+}
+
+// inboxMarkReadRequest is the mark-read body.
+type inboxMarkReadRequest struct {
+	IDs []string `json:"ids"`
+}
+
+// inboxCallerUserID extracts the caller's user id; the panel shows their
+// own user-scoped events plus tenant-wide ones (user_id=”).
+func inboxCallerUserID(c *gin.Context) string {
+	v, _ := c.Get(types.UserIDContextKey.String())
+	s, _ := v.(string)
+	return s
+}
+
+// parseQueryInt reads an int query param with a fallback default.
+func parseQueryInt(c *gin.Context, key string, def int) int {
+	raw := c.Query(key)
+	if raw == "" {
+		return def
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil {
+		return def
+	}
+	return n
+}
+
+// splitCSVQuery splits a comma-separated query param into trimmed non-empty parts.
+func splitCSVQuery(c *gin.Context, key string) []string {
+	raw := c.Query(key)
+	if raw == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// ListInboxEvents godoc
+// @Summary      Read the agent inbox (user-facing panel)
+// @Description  Returns recent events visible to the caller: their own
+// @Description  user-scoped events plus tenant-wide ones (parse lifecycle,
+// @Description  external ingest). Read-only — nothing is marked read.
+// @Tags         AgentInbox
+// @Param        since_minutes  query  int    false  "Lookback window minutes (default 1440, max 10080)"
+// @Param        types          query  string false  "Comma-separated event type filter"
+// @Param        kb_ids         query  string false  "Comma-separated KB scope filter"
+// @Param        unread_only    query  bool   false  "Only unread events"
+// @Param        limit          query  int    false  "Max events (default 50, max 100)"
+// @Success      200  {object}  map[string]interface{}
+// @Router       /agent-inbox/events [get]
+func (h *AgentInboxHandler) ListInboxEvents(c *gin.Context) {
+	_, tenantID, ok := inboxUIContext(c)
+	if !ok {
+		return
+	}
+
+	sinceMinutes := parseQueryInt(c, "since_minutes", 24*60)
+	if sinceMinutes <= 0 || sinceMinutes > 7*24*60 {
+		sinceMinutes = 24 * 60
+	}
+	limit := parseQueryInt(c, "limit", 50)
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	since := time.Now().Add(-time.Duration(sinceMinutes) * time.Minute)
+
+	f := types.InboxQueryFilters{
+		TenantID:   tenantID,
+		UserID:     inboxCallerUserID(c),
+		Types:      splitCSVQuery(c, "types"),
+		KBIDs:      splitCSVQuery(c, "kb_ids"),
+		Since:      &since,
+		Limit:      limit,
+		UnreadOnly: c.Query("unread_only") == "true",
+	}
+	// markRead=false: the panel is read-only; marking happens through the
+	// explicit /read endpoint so a refresh never silently consumes unread.
+	digests, unread, err := h.inbox.Check(c.Request.Context(), f, false)
+	if err != nil {
+		_ = c.Error(err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "events": digests, "unread": unread})
+}
+
+// MarkInboxRead godoc
+// @Summary      Mark inbox events as read
+// @Tags         AgentInbox
+// @Param        body  body  handler.inboxMarkReadRequest true "Event IDs"
+// @Success      200   {object}  map[string]interface{}
+// @Router       /agent-inbox/events/read [post]
+func (h *AgentInboxHandler) MarkInboxRead(c *gin.Context) {
+	if _, _, ok := inboxUIContext(c); !ok {
+		return
+	}
+	var req inboxMarkReadRequest
+	if err := c.ShouldBindJSON(&req); err != nil || len(req.IDs) == 0 {
+		_ = c.Error(apperrors.NewBadRequestError("ids is required"))
+		return
+	}
+	if err := h.inbox.MarkRead(c.Request.Context(), req.IDs); err != nil {
+		_ = c.Error(err)
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{"success": true})
 }

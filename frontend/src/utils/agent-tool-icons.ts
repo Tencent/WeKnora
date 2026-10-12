@@ -16,6 +16,9 @@ export function getAgentToolIconName(
   if (toolName === 'wiki_search') {
     return 'search'
   }
+  if (toolName === 'manage_document') {
+    return 'refresh'
+  }
   if (toolName === 'grep_chunks') {
     return 'search'
   }

@@ -44,7 +44,12 @@ func applyInboxFilters(tx *gorm.DB, f types.InboxQueryFilters) *gorm.DB {
 		tx = tx.Where("kb_id IN ?", f.KBIDs)
 	}
 	if f.UserID != "" {
-		tx = tx.Where("user_id = ?", f.UserID)
+		// User-scoped events are private to their actor, but tenant-wide
+		// events (parse lifecycle, KB-level mutations — user_id='') must
+		// stay visible to every member querying the same KB scope. Filtering
+		// user_id = ? alone hid parse.completed/failed from check_inbox
+		// forever, which is exactly the black hole this fixes.
+		tx = tx.Where("user_id = ? OR user_id = ''", f.UserID)
 	}
 	if len(f.Types) > 0 {
 		tx = tx.Where("type IN ?", f.Types)

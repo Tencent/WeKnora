@@ -52,6 +52,15 @@
               <t-icon name="usergroup" size="14px" />
               <span class="agent-sidebar-agent-name">{{ t('knowledgeBase.agentSidebar.title') }}</span>
             </span>
+            <!-- 收件箱入口：贴底面板开关，徽标为未读数（共享已读语义）。 -->
+            <button type="button" class="agent-sidebar-inbox-btn"
+              :class="{ 'has-unread': inboxUnread > 0 }"
+              :title="t('knowledgeBase.agentSidebar.inbox.title')" @click="toggleInbox">
+              <t-icon name="notification" size="14px" />
+              <span v-if="inboxUnread > 0" class="agent-sidebar-inbox-count">
+                {{ inboxUnread > 99 ? '99+' : inboxUnread }}
+              </span>
+            </button>
             <button type="button" class="agent-sidebar-new-session"
               :title="t('knowledgeBase.agentSidebar.newSession')" @click="newSession">
               <t-icon name="add" size="14px" />
@@ -70,6 +79,46 @@
             </div>
           </t-loading>
         </div>
+        <!-- 收件箱贴底面板（Phase 3）：覆盖在聊天区下方的滑出层，
+             关闭时聊天保持原位。事件 = 用户行为 + 解析生命周期 + agent 回执。 -->
+        <section v-if="inboxOpen" class="agent-inbox-sheet">
+          <header class="agent-inbox-sheet-header">
+            <span class="agent-inbox-sheet-title">{{ t('knowledgeBase.agentSidebar.inbox.title') }}</span>
+            <div class="agent-inbox-sheet-actions">
+              <button type="button" class="agent-inbox-action" :disabled="!hasUnreadInbox"
+                @click="markAllInboxRead">
+                {{ t('knowledgeBase.agentSidebar.inbox.markAllRead') }}
+              </button>
+              <button type="button" class="agent-inbox-icon-action"
+                :title="t('knowledgeBase.agentSidebar.inbox.refresh')" @click="loadInbox">
+                <t-icon name="refresh" size="14px" />
+              </button>
+              <button type="button" class="agent-inbox-icon-action"
+                :title="t('knowledgeBase.agentSidebar.inbox.collapse')" @click="inboxOpen = false">
+                <t-icon name="chevron-down" size="14px" />
+              </button>
+            </div>
+          </header>
+          <div class="agent-inbox-list">
+            <div v-if="!inboxEvents.length" class="agent-inbox-empty">
+              {{ t('knowledgeBase.agentSidebar.inbox.empty') }}
+            </div>
+            <div v-for="e in inboxEvents" :key="e.id" class="agent-inbox-item"
+              :class="{ 'is-unread': !e.read }">
+              <span v-if="!e.read" class="agent-inbox-unread-dot"></span>
+              <div class="agent-inbox-item-main">
+                <div class="agent-inbox-item-row1">
+                  <span class="agent-inbox-item-type">{{ inboxTypeLabel(e.type) }}</span>
+                  <span class="agent-inbox-item-priority" :class="`prio-${(e.priority || 'p2').toLowerCase()}`">
+                    {{ e.priority }}
+                  </span>
+                  <span class="agent-inbox-item-time">{{ formatInboxTime(e.time) }}</span>
+                </div>
+                <div v-if="inboxSummary(e)" class="agent-inbox-item-summary">{{ inboxSummary(e) }}</div>
+              </div>
+            </div>
+          </div>
+        </section>
       </div>
     </aside>
   </teleport>
@@ -81,6 +130,11 @@ import { MessagePlugin } from 'tdesign-vue-next';
 import { useI18n } from 'vue-i18n';
 import ChatView from '@/views/chat/index.vue';
 import { createSessions, getSessionsList } from '@/api/chat';
+import {
+  fetchInboxEvents,
+  markInboxRead,
+  type AgentInboxDigest,
+} from '@/api/agent-inbox';
 
 const props = defineProps<{
   // Absent on the KB list page: the sidebar then runs a global session not
@@ -255,6 +309,101 @@ const formatSessionTime = (v?: string) => {
 // and load the recency list once so the header title resolves immediately.
 ensureSession();
 loadRecentSessions();
+
+// ── 收件箱贴底面板（agent-sidebar-inbox Phase 3）─────────────────────────
+// 读取走 GET /agent-inbox/events（只读，身份取自登录态）；已读是共享状态
+// （行级 read_at），agent 的 check_inbox 也会消费未读，徽标是尽力而为的
+// 提示而非精确状态。显示范围 = 自己的 user.* 事件 + 租户级事件。
+const inboxOpen = ref(false);
+const inboxEvents = ref<AgentInboxDigest[]>([]);
+const inboxUnread = ref(0);
+const inboxLoading = ref(false);
+const hasUnreadInbox = computed(() => inboxEvents.value.some((e) => !e.read));
+
+const loadInbox = async () => {
+  inboxLoading.value = true;
+  try {
+    const res = await fetchInboxEvents({ limit: 50 });
+    inboxEvents.value = res.events;
+    inboxUnread.value = res.unread;
+  } catch (_) {
+    /* 保留旧列表——面板是尽力而为的态势展示 */
+  } finally {
+    inboxLoading.value = false;
+  }
+};
+
+const toggleInbox = () => {
+  inboxOpen.value = !inboxOpen.value;
+  if (inboxOpen.value) void loadInbox();
+};
+
+const markAllInboxRead = async () => {
+  const ids = inboxEvents.value.filter((e) => !e.read).map((e) => e.id);
+  if (!ids.length) return;
+  try {
+    await markInboxRead(ids);
+    await loadInbox();
+  } catch (_) {
+    /* ignore — best-effort */
+  }
+};
+
+// 抽屉打开时若面板已展开则刷新一次，保证事件新鲜。
+watch(visible, (val) => {
+  if (val && inboxOpen.value) void loadInbox();
+});
+
+// 类型 → i18n key 映射；未收录的类型原样展示（新类型无需改前端即可出现）。
+const INBOX_TYPE_LABEL_KEYS: Record<string, string> = {
+  'user.viewed_document': 'viewedDoc',
+  'user.viewed_image': 'viewedImage',
+  'user.switched_kb': 'switchedKb',
+  'user.switched_tab': 'switchedTab',
+  'user.viewed_page': 'viewedPage',
+  'user.uploaded_doc': 'uploadedDoc',
+  'user.deleted_doc': 'deletedDoc',
+  'user.reparse_doc': 'reparseDoc',
+  'user.cancelled_parse': 'cancelledParse',
+  'user.updated_doc': 'updatedDoc',
+  'user.edited_wiki': 'editedWiki',
+  'user.edited_chunk': 'editedChunk',
+  'user.edited_faq': 'editedFaq',
+  'user.updated_kb': 'updatedKb',
+  'user.deleted_kb': 'deletedKb',
+  'user.error_toast': 'errorToast',
+  'parse.completed': 'parseCompleted',
+  'parse.failed': 'parseFailed',
+  'agent_action.wiki_write': 'agentWikiWrite',
+};
+
+const inboxTypeLabel = (type: string): string => {
+  const key = INBOX_TYPE_LABEL_KEYS[type];
+  if (!key) return type;
+  return t(`knowledgeBase.agentSidebar.inbox.types.${key}`);
+};
+
+// 摘要行：取 payload 里最有信息量的字段（标题优先，id 兜底）。
+const inboxSummary = (e: AgentInboxDigest): string => {
+  const p = e.payload || {};
+  const candidates = ['title', 'message', 'name', 'slug', 'knowledge_id', 'error'];
+  for (const k of candidates) {
+    const v = p[k];
+    if (typeof v === 'string' && v.trim()) return v.trim();
+  }
+  return '';
+};
+
+const formatInboxTime = (v?: string) => {
+  if (!v) return '';
+  const d = new Date(v);
+  if (Number.isNaN(d.getTime())) return '';
+  const now = new Date();
+  const hm = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  const sameDay = d.getFullYear() === now.getFullYear()
+    && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
+  return sameDay ? hm : `${d.getMonth() + 1}-${d.getDate()} ${hm}`;
+};
 </script>
 
 <style scoped>
@@ -303,6 +452,8 @@ loadRecentSessions();
   background: var(--td-bg-color-container);
   border-radius: var(--app-radius-lg, 12px) 0 0 var(--app-radius-lg, 12px);
   overflow: hidden;
+  /* 收件箱贴底面板的定位参照。 */
+  position: relative;
 }
 
 .agent-sidebar-header {
@@ -500,6 +651,226 @@ loadRecentSessions();
   padding: 40px;
   text-align: center;
   color: var(--td-text-color-placeholder);
+}
+
+/* ── 收件箱入口按钮（header row 2）────────────────────────────────── */
+.agent-sidebar-inbox-btn {
+  position: relative;
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: var(--app-radius-md);
+  background: transparent;
+  color: var(--td-text-color-secondary);
+  cursor: pointer;
+
+  &:hover {
+    background: var(--td-bg-color-secondarycontainer);
+    color: var(--td-brand-color);
+  }
+
+  &.has-unread {
+    color: var(--td-brand-color);
+  }
+}
+
+.agent-sidebar-inbox-count {
+  position: absolute;
+  top: -3px;
+  right: -5px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  border-radius: 7px;
+  background: var(--td-error-color);
+  color: #fff;
+  font-size: 10px;
+  line-height: 14px;
+  text-align: center;
+  font-weight: 600;
+}
+
+/* ── 收件箱贴底面板 ───────────────────────────────────────────────── */
+.agent-inbox-sheet {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: min(55%, 420px);
+  display: flex;
+  flex-direction: column;
+  background: var(--td-bg-color-container);
+  border-top: 1px solid var(--td-component-stroke);
+  box-shadow: 0 -6px 18px rgba(0, 0, 0, 0.08);
+  z-index: 10;
+}
+
+.agent-inbox-sheet-header {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--td-component-stroke);
+}
+
+.agent-inbox-sheet-title {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--app-text-md);
+  font-weight: 600;
+  color: var(--td-text-color-primary);
+}
+
+.agent-inbox-sheet-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.agent-inbox-action {
+  border: none;
+  border-radius: var(--app-radius-md);
+  background: transparent;
+  color: var(--td-text-color-secondary);
+  font-size: var(--app-text-sm);
+  padding: 3px 8px;
+  cursor: pointer;
+
+  &:hover:not(:disabled) {
+    background: var(--td-bg-color-secondarycontainer);
+    color: var(--td-brand-color);
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+}
+
+.agent-inbox-icon-action {
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: var(--app-radius-md);
+  background: transparent;
+  color: var(--td-text-color-secondary);
+  cursor: pointer;
+
+  &:hover {
+    background: var(--td-bg-color-secondarycontainer);
+    color: var(--td-brand-color);
+  }
+}
+
+.agent-inbox-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 4px 8px 8px;
+}
+
+.agent-inbox-empty {
+  padding: 28px 12px;
+  text-align: center;
+  color: var(--td-text-color-placeholder);
+  font-size: var(--app-text-sm);
+}
+
+.agent-inbox-item {
+  position: relative;
+  display: flex;
+  gap: 8px;
+  padding: 7px 8px 7px 14px;
+  border-radius: var(--app-radius-md);
+
+  &:hover {
+    background: var(--td-bg-color-secondarycontainer);
+  }
+
+  &.is-unread .agent-inbox-item-type {
+    font-weight: 600;
+  }
+}
+
+.agent-inbox-unread-dot {
+  position: absolute;
+  left: 4px;
+  top: 13px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--td-brand-color);
+}
+
+.agent-inbox-item-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.agent-inbox-item-row1 {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+
+.agent-inbox-item-type {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--app-text-sm);
+  color: var(--td-text-color-primary);
+}
+
+.agent-inbox-item-priority {
+  flex-shrink: 0;
+  font-size: 10px;
+  line-height: 16px;
+  padding: 0 5px;
+  border-radius: 4px;
+  font-weight: 600;
+
+  &.prio-p0 {
+    background: var(--td-error-color-2, rgba(226, 60, 68, 0.12));
+    color: var(--td-error-color);
+  }
+
+  &.prio-p1 {
+    background: var(--td-warning-color-2, rgba(237, 123, 47, 0.12));
+    color: var(--td-warning-color);
+  }
+
+  &.prio-p2 {
+    background: var(--td-bg-color-secondarycontainer);
+    color: var(--td-text-color-placeholder);
+  }
+}
+
+.agent-inbox-item-time {
+  flex-shrink: 0;
+  font-size: var(--app-text-sm);
+  color: var(--td-text-color-placeholder);
+}
+
+.agent-inbox-item-summary {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--app-text-sm);
+  color: var(--td-text-color-secondary);
 }
 </style>
 

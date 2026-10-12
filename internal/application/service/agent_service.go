@@ -1325,6 +1325,11 @@ func (s *agentService) registerTools(
 		case tools.ToolWikiGetPageTrail:
 			toolToRegister = tools.NewWikiGetPageTrailTool(s.inboxService, wikiKBIDs)
 
+		case tools.ToolManageDocument:
+			// Reversible document lifecycle ops, bounded to KBs the calling
+			// user may edit; the knowledge service re-checks the grant.
+			toolToRegister = tools.NewManageDocumentTool(s.knowledgeService, s.inboxService, config.WritableKBIDs)
+
 		case tools.ToolShellExec, tools.ToolReadFile, tools.LegacyToolReadSkill, tools.LegacyToolExecuteSkillScript,
 			tools.ToolListSandboxFiles, tools.LegacyToolReadSandboxFile, tools.ToolWriteSandboxFile,
 			tools.ToolEditSandboxFile:

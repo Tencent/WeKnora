@@ -258,6 +258,13 @@ func NewRouter(params RouterParams) *gin.Engine {
 		// so that sub-groups inherit it.
 		v1.Use(rbacGuards.apiKeyAuthorizer.Middleware())
 
+		// Agent inbox FIRST (before any mutation route it must observe):
+		// its capture middleware is installed with v1.Use, and gin only
+		// applies a middleware to routes registered after the Use — a later
+		// mount silently disabled the whole route catalog once.
+		RegisterAgentInboxRoutes(
+			v1, params.AgentInboxHandler, params.AgentInboxService, params.KnowledgeService, rbacGuards)
+
 		RegisterAuthRoutes(v1, params.AuthHandler, rbacGuards)
 		RegisterTenantRoutes(v1, params.TenantHandler, params.TenantMemberHandler, params.TenantInvitationHandler, params.AuditLogHandler, rbacGuards)
 		RegisterMyInvitationRoutes(v1, params.TenantInvitationHandler)
@@ -319,7 +326,6 @@ func NewRouter(params RouterParams) *gin.Engine {
 		RegisterStorageBackendRoutes(v1, params.StorageBackendHandler, rbacGuards)
 		RegisterCustomAgentRoutes(v1, params.CustomAgentHandler, rbacGuards)
 		RegisterUserFavoriteRoutes(v1, params.UserFavoriteHandler, rbacGuards)
-		RegisterAgentInboxRoutes(v1, params.AgentInboxHandler, params.AgentInboxService, rbacGuards)
 		RegisterSkillRoutes(v1, params.SkillHandler, rbacGuards)
 		RegisterOrganizationRoutes(v1, params.OrganizationHandler, rbacGuards)
 		RegisterIMChannelRoutes(v1, params.IMHandler, rbacGuards)

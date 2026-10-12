@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
@@ -103,6 +104,30 @@ func (s *agentInboxService) Ingest(ctx context.Context, evt *types.AgentInboxEve
 	}
 }
 
+// Emit is the one-line ingestion helper for feature code (see the interface
+// comment): tenant comes from the execution context, the rest of the
+// boilerplate is filled here, and the per-type policy decides enablement,
+// priority and retention exactly as Ingest would. Mutations pass a non-empty
+// payload with whatever identifiers the agent needs to follow up.
+func (s *agentInboxService) Emit(
+	ctx context.Context, evtType string, kbID, userID string, payload types.JSONMap,
+) {
+	tenantID, ok := types.TenantIDFromContext(ctx)
+	if !ok || tenantID == 0 {
+		// Ingest-path callers without execution tenant (bus handlers) must
+		// spell out the full event via Ingest instead.
+		logger.Warnf(ctx, "agent inbox: emit %s without tenant context, dropped", evtType)
+		return
+	}
+	s.Ingest(ctx, &types.AgentInboxEvent{
+		TenantID: tenantID,
+		KBID:     kbID,
+		UserID:   userID,
+		Type:     evtType,
+		Payload:  payload,
+	})
+}
+
 // Check returns the digest of matching events and optionally marks them read.
 func (s *agentInboxService) Check(
 	ctx context.Context, f types.InboxQueryFilters, markRead bool,
@@ -120,6 +145,7 @@ func (s *agentInboxService) Check(
 			Priority: row.Priority,
 			Time:     row.CreatedAt.Format(time.RFC3339),
 			Payload:  row.Payload,
+			Read:     row.ReadAt != nil,
 		})
 		ids = append(ids, row.ID)
 	}
@@ -172,6 +198,16 @@ func (s *agentInboxService) Trail(
 		rows[i], rows[j] = rows[j], rows[i]
 	}
 	return rows, nil
+}
+
+// MarkRead stamps read_at on the given IDs, scoped to the execution tenant.
+// Malformed or foreign IDs simply match nothing — no error, no leak.
+func (s *agentInboxService) MarkRead(ctx context.Context, ids []string) error {
+	tenantID, ok := types.TenantIDFromContext(ctx)
+	if !ok || tenantID == 0 {
+		return fmt.Errorf("agent inbox: mark read without tenant context")
+	}
+	return s.repo.MarkRead(ctx, tenantID, ids, time.Now())
 }
 
 // StartRetentionSweeper launches the hourly cleanup loop (once).

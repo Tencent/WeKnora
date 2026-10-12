@@ -31,6 +31,13 @@ const (
 	InboxTypeUserReparseDoc  = "user.reparse_doc"  // reparse request (middleware)
 	InboxTypeUserEditedWiki  = "user.edited_wiki"  // wiki page edit (middleware)
 	InboxTypeUserEditChunk   = "user.edited_chunk" // chunk edit (middleware)
+	// Document/KB mutations captured by the write-op middleware (second
+	// batch — routes whose semantics did not fit the MVP five).
+	InboxTypeUserUpdatedDoc     = "user.updated_doc"     // document metadata/content update
+	InboxTypeUserCancelledParse = "user.cancelled_parse" // parse cancellation request
+	InboxTypeUserUpdatedKB      = "user.updated_kb"      // knowledge base settings update
+	InboxTypeUserDeletedKB      = "user.deleted_kb"      // knowledge base deletion
+	InboxTypeUserEditedFAQ      = "user.edited_faq"      // FAQ entry create/update/delete
 
 	// Sidebar view tracking beyond wiki pages: the document reader and the
 	// gallery image viewer report what the user is looking at, so the agent
@@ -49,6 +56,9 @@ const (
 
 	// Agent action receipts (write operations performed by the agent).
 	InboxTypeAgentWikiWrite = "agent_action.wiki_write"
+	// Document-lifecycle receipts from the manage_document tool.
+	InboxTypeAgentDocReparse     = "agent_action.doc_reparse"
+	InboxTypeAgentDocCancelParse = "agent_action.doc_cancel_parse"
 )
 
 // InboxEventTypes lists every event type the inbox recognizes. The policy
@@ -57,9 +67,11 @@ var InboxEventTypes = []string{
 	InboxTypeUserViewedPage, InboxTypeUserSwitchedTab, InboxTypeUserErrorToast,
 	InboxTypeUserUploadedDoc, InboxTypeUserDeletedDoc, InboxTypeUserReparseDoc,
 	InboxTypeUserEditedWiki, InboxTypeUserEditChunk,
+	InboxTypeUserUpdatedDoc, InboxTypeUserCancelledParse,
+	InboxTypeUserUpdatedKB, InboxTypeUserDeletedKB, InboxTypeUserEditedFAQ,
 	InboxTypeUserViewedDocument, InboxTypeUserViewedImage, InboxTypeUserSwitchedKB,
 	InboxTypeParseCompleted, InboxTypeParseFailed,
-	InboxTypeAgentWikiWrite,
+	InboxTypeAgentWikiWrite, InboxTypeAgentDocReparse, InboxTypeAgentDocCancelParse,
 }
 
 // AgentInboxEvent is one persisted inbox entry.
@@ -96,4 +108,8 @@ type InboxDigest struct {
 	Priority string  `json:"priority"`
 	Time     string  `json:"time"`
 	Payload  JSONMap `json:"payload,omitempty"`
+	// Read mirrors read_at != nil for the user-facing panel. Note the
+	// shared-read semantics: the field is row-level, so the agent's
+	// check_inbox (mark_read=true) consumes unread state for everyone.
+	Read bool `json:"read"`
 }
