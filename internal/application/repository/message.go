@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"fmt"
 	"slices"
 	"time"
 
@@ -315,6 +316,13 @@ func (r *messageRepository) DeleteMessagesFrom(
 	return deleted, nil
 }
 
+// DeleteMessage deletes a message
+func (r *messageRepository) DeleteMessage(ctx context.Context, sessionID string, messageID string) error {
+	return r.db.WithContext(ctx).Where(
+		"id = ? AND session_id = ?", messageID, sessionID,
+	).Delete(&types.Message{}).Error
+}
+
 // GetFirstMessageOfUser retrieves the first message from a user in a session
 func (r *messageRepository) GetFirstMessageOfUser(ctx context.Context, sessionID string) (*types.Message, error) {
 	var message types.Message
@@ -508,6 +516,26 @@ func (r *messageRepository) UpdateMessageRenderedContent(ctx context.Context, se
 		Model(&types.Message{}).
 		Where("id = ? AND session_id = ?", messageID, sessionID).
 		Update("rendered_content", renderedContent).Error
+}
+
+// UpdateMessageContextCheckpoint updates only the context_checkpoint column, so
+// it cannot race a full-row write of the same message. A write that matches no
+// row (the turn was deleted, or the ID is not this session's assistant
+// message) is an error rather than a silent success.
+func (r *messageRepository) UpdateMessageContextCheckpoint(
+	ctx context.Context, sessionID, messageID string, checkpoint *types.ContextCheckpoint,
+) error {
+	result := r.db.WithContext(ctx).
+		Model(&types.Message{}).
+		Where("id = ? AND session_id = ? AND role = 'assistant'", messageID, sessionID).
+		Update("context_checkpoint", checkpoint)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("no assistant message %s in session %s", messageID, sessionID)
+	}
+	return nil
 }
 
 // GetLatestContextCheckpoint returns the newest checkpointed assistant message.
