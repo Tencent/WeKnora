@@ -71,7 +71,25 @@ func (r *temporaryDocumentRepository) DeleteScoped(ctx context.Context, tenantID
 }
 
 func (r *temporaryDocumentRepository) ListExpired(ctx context.Context, before time.Time, limit int) ([]*types.TemporaryDocument, error) {
+	// Sending an attachment makes it part of durable conversation history.
+	// Keep the parsed document and source while any live session references it,
+	// including forks whose document row still belongs to the original session.
+	// Filter before LIMIT so retained uploads cannot starve the cleanup queue.
+	containsAttachment := "EXISTS (SELECT 1 FROM json_each(CAST(m.attachments AS TEXT)) a " +
+		"WHERE json_extract(a.value, '$.id') = temporary_documents.id)"
+	switch r.db.Name() {
+	case "postgres":
+		containsAttachment = "m.attachments @> jsonb_build_array(jsonb_build_object('id', temporary_documents.id))"
+	case "mysql":
+		containsAttachment = "JSON_CONTAINS(m.attachments, JSON_OBJECT('id', temporary_documents.id))"
+	}
+	referenced := r.db.Table("messages m").Select("1").
+		Joins("JOIN sessions s ON s.id = m.session_id").
+		Where("s.tenant_id = temporary_documents.tenant_id AND s.deleted_at IS NULL AND m.deleted_at IS NULL").
+		Where(containsAttachment)
 	var documents []*types.TemporaryDocument
-	err := r.db.WithContext(ctx).Where("expires_at <= ?", before).Order("expires_at ASC").Limit(limit).Find(&documents).Error
+	err := r.db.WithContext(ctx).Where("expires_at <= ?", before).
+		Where("NOT EXISTS (?)", referenced).
+		Order("expires_at ASC").Limit(limit).Find(&documents).Error
 	return documents, err
 }

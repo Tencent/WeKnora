@@ -40,7 +40,10 @@ func TestBuildAgentPromptInlinesOnlySmallFullContent(t *testing.T) {
 	prompt := MessageAttachments{
 		{ID: "small", FileName: "a.md", ContentMode: AttachmentContentModeFull, TokenCount: 100, Content: "small body"},
 		{ID: "excerpt", FileName: "b.pdf", ContentMode: "selected_chunks", TokenCount: 100, Content: "old excerpt"},
-		{ID: "big", FileName: "c.pdf", ContentMode: AttachmentContentModeFull, TokenCount: AgentAttachmentInlineTokens + 1, Content: "big body"},
+		{
+			ID: "big", FileName: "c.pdf", ContentMode: AttachmentContentModeFull,
+			TokenCount: AgentAttachmentInlineTokens + 1, Content: "big body",
+		},
 	}.BuildAgentPrompt()
 
 	assert.Contains(t, prompt, "<content>\nsmall body\n</content>")

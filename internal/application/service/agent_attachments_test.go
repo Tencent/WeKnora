@@ -1,14 +1,22 @@
 package service
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"image"
+	"image/png"
+	"io"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/agent/tools"
+	"github.com/Tencent/WeKnora/internal/application/repository"
+	"github.com/Tencent/WeKnora/internal/infrastructure/docparser"
 	"github.com/Tencent/WeKnora/internal/sandbox"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -23,7 +31,8 @@ func sessionDocument(id, fileType, status string, tokens int, content string) *t
 
 func TestDescribeForAgentInlinesOnlySmallReadyDocuments(t *testing.T) {
 	small := sessionDocument("small", ".md", types.TemporaryDocumentStatusReady, 300, "# Title\nsmall body")
-	large := sessionDocument("large", ".pdf", types.TemporaryDocumentStatusReady, 50000, "# Part 1\nlong\n## Part 2\nlonger")
+	large := sessionDocument("large", ".pdf", types.TemporaryDocumentStatusReady, 50000,
+		"# Part 1\nlong\n## Part 2\nlonger")
 	parsing := sessionDocument("parsing", ".pdf", types.TemporaryDocumentStatusProcessing, 0, "")
 	svc := &temporaryDocumentService{
 		repo: &forkAccessDocRepo{docs: []*types.TemporaryDocument{small, large, parsing}},
@@ -104,7 +113,11 @@ func TestStageSessionAttachmentsWritesParsedTextBesideBinary(t *testing.T) {
 	}
 	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(7))
 	layout := sandbox.RemoteWorkspaceLayout()
-	attachments := types.MessageAttachments{{ID: "doc-1", FileName: "report.pdf", FileType: ".pdf", FileSize: 7}}
+	// Normal sends persist the storage URL before the agent stages inputs.
+	attachments := types.MessageAttachments{{
+		ID: "doc-1", URL: resourceRef, FileName: "report.pdf",
+		FileType: ".pdf", FileSize: 7,
+	}}
 
 	staged, err := service.stageSessionAttachments(ctx, "session-1", "cfg-remote", 7, attachments, layout)
 
@@ -120,6 +133,144 @@ func TestStageSessionAttachmentsWritesParsedTextBesideBinary(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, manager.writes)
 	assert.Empty(t, manager.removes)
+}
+
+func TestSentAttachmentRemainsReadableAfterExpiryAndFork(t *testing.T) {
+	db := stagingTempDocDB(t)
+	require.NoError(t, db.AutoMigrate(&types.Session{}, &types.Message{}))
+	parent := &types.Session{TenantID: 7}
+	fork := &types.Session{TenantID: 7}
+	require.NoError(t, db.Create(parent).Error)
+	require.NoError(t, db.Create(fork).Error)
+	document := sessionDocument("retained", ".pdf", types.TemporaryDocumentStatusReady, 50000, "complete retained body")
+	document.SessionID = parent.ID
+	document.ExpiresAt = time.Now().Add(-time.Hour)
+	document.ImageRefs = types.JSON(`[{"url":"/files/retained-chart.png"}]`)
+	require.NoError(t, db.Create(document).Error)
+	unused := sessionDocument("unused", ".pdf", types.TemporaryDocumentStatusReady, 50000, "unused body")
+	unused.SessionID, unused.ExpiresAt = parent.ID, document.ExpiresAt
+	require.NoError(t, db.Create(unused).Error)
+	repo := repository.NewTemporaryDocumentRepository(db)
+	messages := repository.NewMessageRepository(db)
+	svc := &temporaryDocumentService{repo: repo, fileService: &stagingFileService{}, sessionAttachments: messages}
+	manifest, err := svc.DescribeForAgent(context.Background(), 7, parent.ID, []string{document.ID})
+	require.NoError(t, err)
+	require.Empty(t, manifest.Attachments[0].Content)
+	// Forks copy the attachment manifest, not the parent's temporary document.
+	for _, session := range []*types.Session{parent, fork} {
+		require.NoError(t, db.Create(&types.Message{
+			SessionID: session.ID, Role: "user", Attachments: manifest.Attachments,
+		}).Error)
+	}
+	require.NoError(t, db.Delete(parent).Error)
+	require.NoError(t, svc.CleanupExpired(context.Background()))
+	removed, err := repo.GetByID(context.Background(), 7, unused.ID)
+	require.NoError(t, err)
+	require.Nil(t, removed, "unused uploads must still expire")
+	store := &agentSessionAttachments{messages: messages, documents: repo, tenantID: 7, sessionID: fork.ID}
+	reader := tools.NewReadAttachmentTool(store, 0)
+	args, err := json.Marshal(tools.ReadAttachmentInput{Attachment: types.AttachmentHandle(document.ID)})
+	require.NoError(t, err)
+	result, err := reader.Execute(context.Background(), args)
+	require.NoError(t, err)
+	require.True(t, result.Success, result.Error)
+	assert.Contains(t, result.Output, document.Content)
+	retained, err := repo.GetByID(context.Background(), 7, document.ID)
+	require.NoError(t, err)
+	require.NotNil(t, retained)
+	assert.JSONEq(t, string(document.ImageRefs), string(retained.ImageRefs))
+	// After the final live conversation is deleted the same cleanup reclaims it.
+	require.NoError(t, db.Delete(fork).Error)
+	require.NoError(t, svc.CleanupExpired(context.Background()))
+	removed, err = repo.GetByID(context.Background(), 7, document.ID)
+	require.NoError(t, err)
+	assert.Nil(t, removed)
+}
+
+func TestAgentAttachmentParseWaitConfiguration(t *testing.T) {
+	t.Setenv("WEKNORA_CHAT_ATTACHMENT_WAIT_TIMEOUT_SEC", "90")
+	assert.Equal(t, 90*time.Second, agentAttachmentParseWait(&types.AgentConfig{}))
+	assert.Equal(t, 120*time.Second, agentAttachmentParseWait(&types.AgentConfig{AttachmentParseWaitTimeoutSec: 120}))
+	t.Setenv("WEKNORA_CHAT_ATTACHMENT_WAIT_TIMEOUT_SEC", "invalid")
+	assert.Equal(t, defaultAgentAttachmentParseWait, agentAttachmentParseWait(nil))
+}
+
+func TestAttachmentImageDeliveryDoesNotDependOnQuestionKeywords(t *testing.T) {
+	document := sessionDocument("report", ".pdf", types.TemporaryDocumentStatusReady, 50000, "# Report\ntext")
+	document.ImageRefs = types.JSON(`[{"url":"local://chart.png"},{"url":"local://page.png"}]`)
+	svc := &temporaryDocumentService{repo: &forkAccessDocRepo{docs: []*types.TemporaryDocument{document}}}
+	for _, query := range []string{"解释图表", "summarize", "この資料を説明して", ""} {
+		got, err := svc.ResolveForPrompt(context.Background(), 7, "session-1", []string{document.ID}, query)
+		require.NoError(t, err)
+		assert.Equal(t, []string{"local://chart.png", "local://page.png"}, got.ImageURLs)
+	}
+	manifest, err := svc.DescribeForAgent(context.Background(), 7, "session-1", []string{document.ID})
+	require.NoError(t, err)
+	assert.Empty(t, manifest.ImageURLs, "agent document images are requested through read_attachment")
+	assert.Empty(t, manifest.Attachments[0].Content)
+	document.FileType = ".png"
+	manifest, err = svc.DescribeForAgent(context.Background(), 7, "session-1", []string{document.ID})
+	require.NoError(t, err)
+	assert.Len(t, manifest.ImageURLs, 2, "standalone images still enter the initial vision input")
+}
+
+type attachmentStorageFiles struct {
+	stagingFileService
+	temporary  []bool
+	readTenant uint64
+}
+
+func (f *attachmentStorageFiles) SaveBytes(
+	_ context.Context, data []byte, _ uint64, name string, temporary bool,
+) (string, error) {
+	f.temporary = append(f.temporary, temporary)
+	ref := "local://" + name
+	f.files[ref] = append([]byte(nil), data...)
+	return ref, nil
+}
+
+func (f *attachmentStorageFiles) GetFile(ctx context.Context, ref string) (io.ReadCloser, error) {
+	f.readTenant, _ = types.TenantIDFromContext(ctx)
+	return f.stagingFileService.GetFile(ctx, ref)
+}
+
+type attachmentDocumentReader struct {
+	interfaces.DocumentReader
+	result *types.ReadResult
+}
+
+func (r *attachmentDocumentReader) Read(context.Context, *types.ReadRequest) (*types.ReadResult, error) {
+	return r.result, nil
+}
+
+func TestAttachmentSourceAndImagesAvoidProviderExpiry(t *testing.T) {
+	db := stagingTempDocDB(t)
+	files := &attachmentStorageFiles{stagingFileService: stagingFileService{files: map[string][]byte{}}}
+	var pngData bytes.Buffer
+	require.NoError(t, png.Encode(&pngData, image.NewRGBA(image.Rect(0, 0, 2, 2))))
+	svc := &temporaryDocumentService{
+		repo: repository.NewTemporaryDocumentRepository(db), fileService: files,
+		taskEnqueuer: &createKnowledgeTaskEnqueuerStub{}, imageResolver: docparser.NewImageResolver(),
+		documentReader: &attachmentDocumentReader{result: &types.ReadResult{
+			MarkdownContent: "![chart](chart.png)",
+			ImageRefs: []types.ImageRef{{
+				OriginalRef: "chart.png", ImageData: pngData.Bytes(), IsOriginal: true, MimeType: "image/png",
+			}},
+		}},
+	}
+	document, err := svc.Create(context.Background(), 7, "session", "report.pdf", "application/pdf", 4,
+		strings.NewReader("data"), types.TemporaryDocumentCreateOptions{})
+	require.NoError(t, err)
+	_, images, _, err := svc.parse(context.Background(), document)
+	require.NoError(t, err)
+	require.Len(t, images, 1)
+	assert.Equal(t, []bool{false, false}, files.temporary, "retained files must not use provider TTL")
+	store := &agentSessionAttachments{files: files, tenantID: 7}
+	sharedAgentCtx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(99))
+	data, err := store.ReadImage(sharedAgentCtx, images[0].URL)
+	require.NoError(t, err)
+	assert.Equal(t, pngData.Bytes(), data)
+	assert.Equal(t, uint64(7), files.readTenant, "image reads use the session owner, not the shared agent tenant")
 }
 
 func TestStageSessionAttachmentsSkipsParsedTextForPlainText(t *testing.T) {

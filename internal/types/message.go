@@ -152,6 +152,7 @@ type MessageAttachment struct {
 	Outline string `json:"-"`
 }
 
+// Attachment content modes distinguish complete inline text from a manifest.
 const (
 	AttachmentContentModeFull     = "full"
 	AttachmentContentModeOnDemand = "on_demand"

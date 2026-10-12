@@ -1,9 +1,12 @@
 package tools
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"image"
+	"image/png"
 	"sync"
 	"testing"
 	"time"
@@ -100,7 +103,9 @@ func TestReadAttachmentSearchesWithinDocument(t *testing.T) {
 	}
 	tool := NewReadAttachmentTool(store, time.Second)
 
-	result := runReadAttachment(t, tool, ReadAttachmentInput{Attachment: types.AttachmentHandle("doc-1"), Query: "revenue q3"})
+	result := runReadAttachment(t, tool, ReadAttachmentInput{
+		Attachment: types.AttachmentHandle("doc-1"), Query: "revenue q3",
+	})
 
 	require.True(t, result.Success, result.Error)
 	assert.Contains(t, result.Output, "Revenue fell in Q3")
@@ -210,4 +215,80 @@ func TestReadAttachmentReportsParseFailure(t *testing.T) {
 
 	assert.False(t, result.Success)
 	assert.Contains(t, result.Error, "encrypted PDF")
+}
+
+func TestReadAttachmentPagesThroughDocumentImagesOnDemand(t *testing.T) {
+	document := chunkedDocument(t, "report", "report text")
+	var refs []types.TemporaryDocumentImage
+	for i := 0; i < 6; i++ {
+		refs = append(refs, types.TemporaryDocumentImage{URL: fmt.Sprintf("local://chart-%d.png", i)})
+	}
+	raw, err := json.Marshal(refs)
+	require.NoError(t, err)
+	document.ImageRefs = types.JSON(raw)
+	store := &fakeAttachmentStore{
+		attachments: types.MessageAttachments{{ID: document.ID, FileName: document.FileName}},
+		documents:   map[string]*types.TemporaryDocument{document.ID: document},
+	}
+	var pngData bytes.Buffer
+	require.NoError(t, png.Encode(&pngData, image.NewRGBA(image.Rect(0, 0, 2, 2))))
+	var reads []string
+	tool := NewReadAttachmentTool(store, 0).WithImageReader(func(_ context.Context, ref string) ([]byte, error) {
+		reads = append(reads, ref)
+		return pngData.Bytes(), nil
+	})
+	for _, input := range []ReadAttachmentInput{{}, {Attachment: "report"}, {Attachment: "report", Query: "text"}} {
+		result := runReadAttachment(t, tool, input)
+		require.True(t, result.Success, result.Error)
+		assert.Contains(t, result.Output, `total_images="6"`)
+		assert.Empty(t, result.Images)
+	}
+	require.Empty(t, reads, "listing and text reads must not fetch images")
+	first := runReadAttachment(t, tool, ReadAttachmentInput{Attachment: "report", Images: true, Limit: 30})
+	require.True(t, first.Success, first.Error)
+	require.Len(t, first.Images, 4, "image batches are capped independently of the text limit")
+	assert.Equal(t, []string{refs[0].URL, refs[1].URL, refs[2].URL, refs[3].URL}, reads)
+	assert.Contains(t, first.Images[0], "data:image/png;base64,")
+	assert.Equal(t, 4, first.Data["next_offset"])
+	last := runReadAttachment(t, tool, ReadAttachmentInput{Attachment: "report", Images: true, Offset: 4})
+	require.True(t, last.Success, last.Error)
+	require.Len(t, last.Images, 2)
+	assert.NotContains(t, last.Data, "next_offset")
+	outOfRange := runReadAttachment(t, tool, ReadAttachmentInput{Attachment: "report", Images: true, Offset: 6})
+	assert.False(t, outOfRange.Success)
+	assert.False(t, runReadAttachment(t, tool, ReadAttachmentInput{Attachment: "other-session", Images: true}).Success)
+	assert.Len(t, reads, 6, "invalid positions and unauthorized documents cannot read storage")
+}
+
+func TestReadAttachmentImageErrorsAreReported(t *testing.T) {
+	document := chunkedDocument(t, "report", "text")
+	store := &fakeAttachmentStore{
+		attachments: types.MessageAttachments{{ID: "report"}},
+		documents:   map[string]*types.TemporaryDocument{"report": document},
+	}
+	tool := NewReadAttachmentTool(store, 0)
+	input := ReadAttachmentInput{Attachment: "report", Images: true}
+	assert.Contains(t, runReadAttachment(t, tool, input).Error, "no extracted images")
+	document.ImageRefs = types.JSON(`[{"url":"local://chart.png"}]`)
+	assert.Contains(t, runReadAttachment(t, tool, input).Error, "storage is unavailable")
+	tool.WithImageReader(func(context.Context, string) ([]byte, error) { return nil, fmt.Errorf("missing image") })
+	assert.Contains(t, runReadAttachment(t, tool, input).Error, "missing image")
+	tool.WithImageReader(func(context.Context, string) ([]byte, error) { return []byte("not an image"), nil })
+	assert.Contains(t, runReadAttachment(t, tool, input).Error, "failed to prepare")
+}
+
+func TestReadAttachmentCancellationDoesNotReportConfiguredWaitAsElapsed(t *testing.T) {
+	document := chunkedDocument(t, "report", "text")
+	document.Status = types.TemporaryDocumentStatusProcessing
+	store := &fakeAttachmentStore{
+		attachments: types.MessageAttachments{{ID: "report"}},
+		documents:   map[string]*types.TemporaryDocument{"report": document},
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	tool := NewReadAttachmentTool(store, 120*time.Second)
+	result, err := tool.Execute(ctx, json.RawMessage(`{"attachment":"report"}`))
+	require.ErrorIs(t, err, context.Canceled)
+	require.False(t, result.Success)
+	assert.NotContains(t, result.Error, "after waiting")
 }

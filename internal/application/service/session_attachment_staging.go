@@ -224,8 +224,9 @@ func (s *agentService) stageSessionAttachments(
 // attachment.ID is the authoritative source of the storage reference.
 // Lookup is tenant+id (not session-scoped) so a forked session can still
 // stage attachments whose temporary_documents row remains on the parent.
-// Attachments that already carry a URL, or that have no temporary-document ID,
-// pass through unchanged so callers with other attachment sources keep working.
+// Attachments without a temporary-document ID pass through unchanged. A stored
+// document is also loaded when its URL is already on the message, so its parsed
+// text is available on normal sends as well as restored history.
 //
 // The second result maps a storage URL to the parsed Markdown of a ready,
 // non-plain-text document, for staging beside the original file.
@@ -242,7 +243,7 @@ func (s *agentService) resolveSessionAttachmentURLs(
 	out := make(types.MessageAttachments, 0, len(attachments))
 	parsed := make(map[string]string)
 	for _, attachment := range attachments {
-		if strings.TrimSpace(attachment.URL) != "" || strings.TrimSpace(attachment.ID) == "" {
+		if strings.TrimSpace(attachment.ID) == "" {
 			out = append(out, attachment)
 			continue
 		}
@@ -251,15 +252,20 @@ func (s *agentService) resolveSessionAttachmentURLs(
 			return nil, nil, fmt.Errorf("resolve attachment %q storage reference: %w", attachment.FileName, err)
 		}
 		if document == nil || strings.TrimSpace(document.ResourceRef) == "" {
-			// Expired or already-deleted temporary document: leave the URL
-			// empty so deduplicateSessionAttachments skips it instead of
-			// failing the whole staging pass.
+			if strings.TrimSpace(attachment.URL) != "" {
+				out = append(out, attachment)
+			}
+			// Keep an existing storage reference when its document is gone;
+			// without one there is no file left to stage.
 			continue
 		}
-		attachment.URL = document.ResourceRef
+		if strings.TrimSpace(attachment.URL) == "" {
+			attachment.URL = document.ResourceRef
+		}
 		out = append(out, attachment)
 		if _, plainText := temporaryTextExtensions[strings.ToLower(document.FileType)]; !plainText &&
-			document.Status == types.TemporaryDocumentStatusReady && strings.TrimSpace(document.Content) != "" {
+			document.Status == types.TemporaryDocumentStatusReady && strings.TrimSpace(document.Content) != "" &&
+			strings.TrimSpace(attachment.URL) == strings.TrimSpace(document.ResourceRef) {
 			parsed[strings.TrimSpace(document.ResourceRef)] = document.Content
 		}
 	}

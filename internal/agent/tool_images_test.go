@@ -112,3 +112,29 @@ func TestKnowledgeImageSourcesReachFinalModelMessage(t *testing.T) {
 		require.Contains(t, string(wire), "Image 2: chunk c1.")
 	}
 }
+
+func TestAttachmentImagesReachVisionOrVLMWithoutPersistingBytes(t *testing.T) {
+	step := types.AgentStep{ToolCalls: []types.ToolCall{{
+		ID: "attachment-images", Name: tools.ToolReadAttachment,
+		Result: &types.ToolResult{
+			Success: true, Output: "Attachment images 0..0",
+			Images: []string{"data:image/png;base64,YQ=="},
+			Data:   map[string]interface{}{"display_type": "attachment_read", "total_images": 1},
+		},
+	}}}
+	engine := &AgentEngine{config: &types.AgentConfig{ChatModelSupportsVision: true}}
+	messages := engine.appendToolImages(t.Context(), engine.appendToolResults(nil, step), step)
+	require.Len(t, messages, 3)
+	require.Equal(t, step.ToolCalls[0].Result.Images, messages[2].Images)
+	engine.config.ChatModelSupportsVision = false
+	engine.SetImageDescriber(func(_ context.Context, data []byte, _ string) (string, error) {
+		require.Equal(t, []byte("a"), data)
+		return "A rising revenue chart", nil
+	})
+	messages = engine.appendToolImages(t.Context(), engine.appendToolResults(nil, step), step)
+	require.Len(t, messages, 2)
+	require.Contains(t, messages[1].Content, "A rising revenue chart")
+	stored := tools.SanitizeAgentStepsForStorage([]types.AgentStep{step})
+	require.Empty(t, stored[0].ToolCalls[0].Result.Images)
+	require.NotEmpty(t, step.ToolCalls[0].Result.Images, "storage sanitization must not mutate live input")
+}

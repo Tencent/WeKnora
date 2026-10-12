@@ -191,7 +191,9 @@ func (s *temporaryDocumentService) Create(
 	}
 
 	storageName := fmt.Sprintf("chat_attachment_%s%s", uuid.NewString()[:12], ext)
-	resourceRef, err := s.fileService.SaveBytes(ctx, data, tenantID, storageName, true)
+	// CleanupExpired owns the lifetime. A provider's auto-expiring bucket
+	// cannot distinguish an abandoned upload from a sent conversation file.
+	resourceRef, err := s.fileService.SaveBytes(ctx, data, tenantID, storageName, false)
 	if err != nil {
 		return nil, fmt.Errorf("save attachment: %w", err)
 	}
@@ -486,7 +488,7 @@ func (s *temporaryDocumentService) parse(ctx context.Context, document *types.Te
 	images := make([]types.TemporaryDocumentImage, 0)
 	if s.imageResolver != nil {
 		updated, stored, resolveErr := s.imageResolver.ResolveAndStore(
-			ctx, result, temporarySaveFileService{s.fileService}, document.TenantID,
+			ctx, result, s.fileService, document.TenantID,
 		)
 		if resolveErr != nil {
 			logger.Warnf(ctx, "temporary document image resolution failed: %v", resolveErr)
@@ -702,14 +704,11 @@ func (s *temporaryDocumentService) ResolveForPrompt(ctx context.Context, tenantI
 			ContentMode: map[bool]string{true: "full", false: "selected_chunks"}[selected == total],
 			TokenCount:  document.TokenCount, SelectedChunks: selected, TotalChunks: total,
 		})
-		// Image-type attachments always expose their image so vision models can
-		// see it directly; text documents only attach extracted images when the
-		// question is visual, to avoid gratuitous multimodal latency.
-		if docparser.IsImageFormat(document.FileType) || isVisualDocumentQuery(query) {
-			for _, image := range temporaryDocumentImageRefs(document.ImageRefs) {
-				if image.URL != "" && len(result.ImageURLs) < 4 {
-					result.ImageURLs = append(result.ImageURLs, image.URL)
-				}
+		// Quick Answer has no attachment-reading tool. Offer bounded visual
+		// context alongside the text; the handler applies ImageUploadEnabled.
+		for _, image := range temporaryDocumentImageRefs(document.ImageRefs) {
+			if image.URL != "" && len(result.ImageURLs) < 4 {
+				result.ImageURLs = append(result.ImageURLs, image.URL)
 			}
 		}
 	}
@@ -720,7 +719,9 @@ func (s *temporaryDocumentService) ResolveForPrompt(ctx context.Context, tenantI
 // agent turn. Unlike ResolveForPrompt it neither waits for parsing nor
 // selects content by the question: the agent reads what it needs through
 // read_attachment, so only small, ready documents are inlined in full.
-func (s *temporaryDocumentService) DescribeForAgent(ctx context.Context, tenantID uint64, sessionID string, documentIDs []string) (*types.TemporaryDocumentPromptResult, error) {
+func (s *temporaryDocumentService) DescribeForAgent(
+	ctx context.Context, tenantID uint64, sessionID string, documentIDs []string,
+) (*types.TemporaryDocumentPromptResult, error) {
 	result := &types.TemporaryDocumentPromptResult{}
 	if len(documentIDs) > types.MaxTemporaryAttachmentsPerMessage {
 		return nil, fmt.Errorf("a message can use at most %d attachments", types.MaxTemporaryAttachmentsPerMessage)
@@ -849,15 +850,6 @@ func selectTemporaryDocumentContentWithBudget(document *types.TemporaryDocument,
 	return builder.String(), len(selected), len(chunks)
 }
 
-// temporarySaveFileService makes images extracted from an expiring chat
-// document use temporary storage without changing the shared ImageResolver API.
-// Embedded interface methods forward to the original service.
-type temporarySaveFileService struct{ interfaces.FileService }
-
-func (s temporarySaveFileService) SaveBytes(ctx context.Context, data []byte, tenantID uint64, fileName string, _ bool) (string, error) {
-	return s.FileService.SaveBytes(ctx, data, tenantID, fileName, true)
-}
-
 func temporaryDocumentQueryTerms(query string) []string {
 	query = strings.ToLower(strings.TrimSpace(query))
 	seen := make(map[string]struct{})
@@ -882,16 +874,6 @@ func temporaryDocumentQueryTerms(query string) []string {
 		}
 	}
 	return terms
-}
-
-func isVisualDocumentQuery(query string) bool {
-	lower := strings.ToLower(query)
-	for _, marker := range []string{"图", "表格", "截图", "页面", "排版", "chart", "figure", "diagram", "image", "layout"} {
-		if strings.Contains(lower, marker) {
-			return true
-		}
-	}
-	return false
 }
 
 func temporaryDocumentImageRefs(raw types.JSON) []types.TemporaryDocumentImage {

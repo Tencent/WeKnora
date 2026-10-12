@@ -558,6 +558,11 @@ func (e *AgentEngine) runToolCall(
 
 	principal, _ := types.PrincipalFromContext(ctx)
 	execTimeout := toolExecutionTimeout(tc.Function.Name, tc.Function.Arguments)
+	if tool, lookupErr := e.toolRegistry.GetTool(tc.Function.Name); lookupErr == nil {
+		if timed, ok := tool.(interface{ ExecutionTimeout() time.Duration }); ok {
+			execTimeout = max(execTimeout, timed.ExecutionTimeout())
+		}
+	}
 	toolExecCtx := agenttools.WithToolExecContext(toolCtx, &agenttools.ToolExecContext{
 		SessionID:          sessionID,
 		AssistantMessageID: assistantMessageID,

@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"fmt"
+	"io"
 	"os"
 	"strconv"
 	"strings"
@@ -23,6 +25,7 @@ const defaultAgentAttachmentParseWait = 60 * time.Second
 type agentSessionAttachments struct {
 	messages  interfaces.MessageRepository
 	documents interfaces.TemporaryDocumentRepository
+	files     interfaces.FileService
 	tenantID  uint64
 	sessionID string
 }
@@ -31,8 +34,33 @@ func (a *agentSessionAttachments) SessionAttachments(ctx context.Context) (types
 	return a.messages.GetSessionAttachments(ctx, a.sessionID)
 }
 
-func (a *agentSessionAttachments) TemporaryDocument(ctx context.Context, documentID string) (*types.TemporaryDocument, error) {
+func (a *agentSessionAttachments) TemporaryDocument(
+	ctx context.Context, documentID string,
+) (*types.TemporaryDocument, error) {
 	return a.documents.GetByID(ctx, a.tenantID, documentID)
+}
+
+func (a *agentSessionAttachments) ReadImage(ctx context.Context, ref string) ([]byte, error) {
+	if a.files == nil {
+		return nil, fmt.Errorf("attachment image storage is unavailable")
+	}
+	// Shared agents execute with their source tenant in the model context;
+	// attachment storage belongs to the conversation owner instead.
+	ctx = context.WithValue(ctx, types.TenantIDContextKey, a.tenantID)
+	file, err := a.files.GetFile(ctx, ref)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = file.Close() }()
+	const maxAttachmentImageBytes = 32 << 20
+	data, err := io.ReadAll(io.LimitReader(file, maxAttachmentImageBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > maxAttachmentImageBytes {
+		return nil, fmt.Errorf("attachment image exceeds %d bytes", maxAttachmentImageBytes)
+	}
+	return data, nil
 }
 
 // agentAttachmentParseWait honours the agent's own timeout, then
@@ -67,6 +95,7 @@ func (s *agentService) registerAttachmentReader(
 	store := &agentSessionAttachments{
 		messages:  repository.NewMessageRepository(s.db),
 		documents: repository.NewTemporaryDocumentRepository(s.db),
+		files:     s.fileService,
 		tenantID:  tenantID,
 		sessionID: sessionID,
 	}
@@ -77,7 +106,9 @@ func (s *agentService) registerAttachmentReader(
 	}
 	for _, attachment := range attachments {
 		if strings.TrimSpace(attachment.ID) != "" {
-			registry.RegisterTool(tools.NewReadAttachmentTool(store, agentAttachmentParseWait(config)))
+			reader := tools.NewReadAttachmentTool(store, agentAttachmentParseWait(config)).
+				WithImageReader(store.ReadImage)
+			registry.RegisterTool(reader)
 			return
 		}
 	}

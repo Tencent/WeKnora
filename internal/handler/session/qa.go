@@ -1708,10 +1708,8 @@ func (h *Handler) describeTemporaryAttachmentsForAgent(streamCtx *sseStreamConte
 	h.applyTemporaryAttachments(ctx, reqCtx, result)
 }
 
-// awaitImageAttachmentsForAgent waits for pending image uploads when the
-// agent passes images to its model. An image has no servable URL until it is
-// parsed, and a vision model has to receive it with the question rather than
-// through a later tool call.
+// awaitImageAttachmentsForAgent waits for standalone image uploads. Document
+// images are read on demand through read_attachment.
 func (h *Handler) awaitImageAttachmentsForAgent(streamCtx *sseStreamContext, reqCtx *qaRequestContext) {
 	if reqCtx.customAgent == nil || !reqCtx.customAgent.Config.ImageUploadEnabled {
 		return
@@ -1729,7 +1727,7 @@ func (h *Handler) awaitImageAttachmentsForAgent(streamCtx *sseStreamContext, req
 	}
 	start := time.Now()
 	toolCallID := uuid.New().String()
-	streamCtx.eventBus.Emit(ctx, event.Event{
+	_ = streamCtx.eventBus.Emit(ctx, event.Event{
 		Type:      event.EventAgentToolCall,
 		SessionID: reqCtx.sessionID,
 		Data:      event.AgentToolCallData{ToolCallID: toolCallID, ToolName: "attachment_parsing"},
@@ -1744,7 +1742,7 @@ func (h *Handler) awaitImageAttachmentsForAgent(streamCtx *sseStreamContext, req
 	if skipped > 0 {
 		output += fmt.Sprintf("，%d 个未完成已跳过", skipped)
 	}
-	streamCtx.eventBus.Emit(ctx, event.Event{
+	_ = streamCtx.eventBus.Emit(ctx, event.Event{
 		Type:      event.EventAgentToolResult,
 		SessionID: reqCtx.sessionID,
 		Data: event.AgentToolResultData{
