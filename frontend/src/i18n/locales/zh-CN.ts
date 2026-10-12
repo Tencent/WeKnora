@@ -7302,6 +7302,8 @@ export default {
     agentSidebar: {
       title: '侧边栏助手',
       sessionError: '侧边栏会话创建失败，请重试。',
+      newSession: '新会话',
+      noHistory: '暂无历史会话',
     },
     missingStorageEngineUpload: '请先配置存储引擎后再上传内容',
     goToStorageSettings: '前往配置',

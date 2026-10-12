@@ -883,6 +883,8 @@ export default {
     agentSidebar: {
       title: 'Sidebar Assistant',
       sessionError: 'Failed to start the sidebar session. Please try again.',
+      newSession: 'New chat',
+      noHistory: 'No recent chats yet',
     },
     missingStorageEngineUpload: 'Please configure a storage engine before uploading content',
     goToStorageSettings: 'Go to Settings',

@@ -7302,6 +7302,8 @@ export default {
     agentSidebar: {
       title: '側邊欄助手',
       sessionError: '側邊欄會話建立失敗，請重試。',
+      newSession: '新會話',
+      noHistory: '暫無歷史會話',
     },
     missingStorageEngineUpload: '請先設定存儲引擎後再上傳內容',
     goToStorageSettings: '前往設定',

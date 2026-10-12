@@ -154,7 +154,13 @@ func (s *sessionService) resolveChatModelID(
 
 	if customAgent != nil {
 		configuredAgentModelID = strings.TrimSpace(customAgent.Config.ModelID)
-		if configuredAgentModelID == "" && customAgent.ID != types.BuiltinWikiFixerID {
+		// The wiki fixer and the KB sidebar assistant are internal agents:
+		// neither is exposed in the agent-management UI, so neither can
+		// receive a user-configured model_id. An empty model_id falls back
+		// to the KB / system model selection below instead of failing.
+		emptyModelFallback := customAgent.ID == types.BuiltinWikiFixerID ||
+			customAgent.ID == types.BuiltinSidebarAssistantID
+		if configuredAgentModelID == "" && !emptyModelFallback {
 			return "", fmt.Errorf("chat model is not configured: please set model_id on agent %s", customAgent.ID)
 		}
 		if configuredAgentModelID != "" {
@@ -163,11 +169,7 @@ func (s *sessionService) resolveChatModelID(
 				return "", fmt.Errorf("configured chat model %s is unavailable for agent %s", configuredAgentModelID, customAgent.ID)
 			}
 		} else {
-			// The wiki fixer is an internal agent and is intentionally omitted
-			// from the agent-management list. It therefore cannot receive a
-			// user-configured model_id; resolve it from the current Wiki KB or
-			// the normal system KnowledgeQA fallback below instead.
-			logger.Infof(ctx, "No model_id configured for internal wiki fixer %s, using KB/system fallback", customAgent.ID)
+			logger.Infof(ctx, "No model_id configured for internal agent %s, using KB/system fallback", customAgent.ID)
 		}
 	}
 

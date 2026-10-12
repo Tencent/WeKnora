@@ -7300,6 +7300,8 @@ export default {
     agentSidebar: {
       title: '사이드바 어시스턴트',
       sessionError: '사이드바 세션 생성에 실패했습니다. 다시 시도해 주세요.',
+      newSession: '새 채팅',
+      noHistory: '최근 대화가 없습니다',
     },
     missingStorageEngineUpload: '콘텐츠를 업로드하기 전에 스토리지 엔진을 구성하세요',
     goToStorageSettings: '설정으로 이동',

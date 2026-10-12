@@ -7300,6 +7300,8 @@ export default {
     agentSidebar: {
       title: 'Боковой ассистент',
       sessionError: 'Не удалось создать сессию боковой панели. Пожалуйста, попробуйте снова.',
+      newSession: 'Новый чат',
+      noHistory: 'Недавних чатов пока нет',
     },
     missingStorageEngineUpload: 'Пожалуйста, настройте хранилище перед загрузкой содержимого',
     goToStorageSettings: 'Перейти к настройкам',

@@ -14,18 +14,57 @@
         :aria-label="$t('knowledgeBase.agentSidebar.title')" @mousedown.prevent="startResize"></div>
       <div class="agent-sidebar-panel" :style="{ width: `${sidebarWidth}px` }">
         <header class="agent-sidebar-header">
-          <span class="agent-sidebar-title">{{ $t('knowledgeBase.agentSidebar.title') }}</span>
-          <button type="button" class="kb-settings-button" :aria-label="$t('knowledgeBase.agentSidebar.title')"
-            @click="visible = false">
-            <t-icon name="close" size="16px" />
-          </button>
+          <!-- Row 1: session switcher (click the title for recent chats) and
+               the panel close button, sharing the full width. -->
+          <div class="agent-sidebar-header-row">
+            <t-popup trigger="click" placement="bottom-left" attach="body" @show="loadRecentSessions">
+              <button type="button" class="agent-sidebar-session-trigger" :title="currentSessionTitle">
+                <span class="agent-sidebar-title">{{ currentSessionTitle }}</span>
+                <t-icon name="chevron-down" size="14px" />
+              </button>
+              <template #content>
+                <div class="agent-sidebar-session-menu">
+                  <button v-for="s in recentSessions" :key="s.id" type="button" class="agent-sidebar-session-item"
+                    :class="{ 'is-active': s.id === sessionId }" @click="switchSession(s)">
+                    <span class="agent-sidebar-session-item-title">
+                      {{ s.title || t('knowledgeBase.agentSidebar.newSession') }}
+                    </span>
+                    <span class="agent-sidebar-session-item-time">{{ formatSessionTime(s.updated_at) }}</span>
+                  </button>
+                  <div v-if="!recentSessions.length" class="agent-sidebar-session-empty">
+                    {{ t('knowledgeBase.agentSidebar.noHistory') }}
+                  </div>
+                </div>
+              </template>
+            </t-popup>
+            <button type="button" class="agent-sidebar-close" :aria-label="$t('knowledgeBase.agentSidebar.title')"
+              @click="visible = false">
+              <t-icon name="close" size="16px" />
+            </button>
+          </div>
+          <!-- Row 2: fixed assistant badge (the dock is locked to the
+               dedicated sidebar agent — v2 decision, 2026-10-12) plus the
+               new-chat action. History sessions loaded from the menu below
+               keep their transcript; the sidebar agent takes over from the
+               next turn, same as switching agents mid-chat in the main view. -->
+          <div class="agent-sidebar-header-row agent-sidebar-header-tools">
+            <span class="agent-sidebar-agent-badge">
+              <t-icon name="usergroup" size="14px" />
+              <span class="agent-sidebar-agent-name">{{ t('knowledgeBase.agentSidebar.title') }}</span>
+            </span>
+            <button type="button" class="agent-sidebar-new-session"
+              :title="t('knowledgeBase.agentSidebar.newSession')" @click="newSession">
+              <t-icon name="add" size="14px" />
+              <span>{{ t('knowledgeBase.agentSidebar.newSession') }}</span>
+            </button>
+          </div>
         </header>
         <div class="agent-sidebar-body">
           <t-loading :loading="sessionLoading" text="" size="small" show-overlay>
             <!-- v-show (not v-if) so the conversation and scroll position stay
                  alive while the panel is closed. -->
-            <ChatView v-if="sessionId" v-show="visible" :session_id="sessionId" agentId="builtin-sidebar-assistant"
-              :kbIds="props.kbId ? [props.kbId] : []" :embeddedMode="true" />
+            <ChatView v-if="sessionId" v-show="visible" :key="sessionId" :session_id="sessionId"
+              agentId="builtin-sidebar-assistant" :kbIds="props.kbId ? [props.kbId] : []" :embeddedMode="true" />
             <div v-else-if="!sessionLoading" class="agent-sidebar-empty">
               {{ $t('knowledgeBase.agentSidebar.sessionError') }}
             </div>
@@ -37,11 +76,11 @@
 </template>
 
 <script setup lang="ts">
-import { onBeforeUnmount, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { MessagePlugin } from 'tdesign-vue-next';
 import { useI18n } from 'vue-i18n';
 import ChatView from '@/views/chat/index.vue';
-import { createSessions } from '@/api/chat';
+import { createSessions, getSessionsList } from '@/api/chat';
 
 const props = defineProps<{
   // Absent on the KB list page: the sidebar then runs a global session not
@@ -154,8 +193,72 @@ watch(visible, (val) => {
   if (val && !sessionId.value) ensureSession();
 });
 
-// Create the session eagerly so the panel is ready before the first open.
+// ── Session switcher (sidebar header v2) ────────────────────────────────
+// Row 1 shows the current session title; clicking it opens the recent-chat
+// list (same source as the main sidebar's history, plain recency order —
+// agreed semantics, 2026-10-12). Picking one rebinds this dock to it; the
+// loaded conversation keeps its transcript and the fixed sidebar agent
+// answers from the next turn (main-view agent-switch semantics).
+interface RecentSession {
+  id: string;
+  title: string;
+  updated_at?: string;
+}
+
+const recentSessions = ref<RecentSession[]>([]);
+// Title of the bound session as last seen in the menu — covers sessions
+// picked before the list loaded or renamed elsewhere.
+const activeTitle = ref('');
+const currentSessionTitle = computed(() => {
+  const found = recentSessions.value.find((s) => s.id === sessionId.value);
+  return found?.title || activeTitle.value || t('knowledgeBase.agentSidebar.newSession');
+});
+const loadRecentSessions = async () => {
+  try {
+    const res: any = await getSessionsList(1, 20);
+    recentSessions.value = res?.data || [];
+  } catch (_) {
+    recentSessions.value = [];
+  }
+};
+
+// Every mutation of the panel's session goes through here so the per-KB
+// localStorage binding and the panel state stay in sync.
+const bindSession = (id: string, title = '') => {
+  sessionId.value = id;
+  activeTitle.value = title;
+  localStorage.setItem(sidebarSessionKey(props.kbId), id);
+};
+const switchSession = (s: RecentSession) => {
+  if (s.id && s.id !== sessionId.value) bindSession(s.id, s.title);
+};
+const newSession = async () => {
+  try {
+    const res: any = await createSessions({});
+    const id = res && res.data && res.data.id;
+    if (!id) throw new Error('no session id');
+    bindSession(id);
+    recentSessions.value = recentSessions.value.filter((s) => s.id !== id);
+  } catch (_) {
+    MessagePlugin.error(t('knowledgeBase.agentSidebar.sessionError'));
+  }
+};
+
+const formatSessionTime = (v?: string) => {
+  if (!v) return '';
+  const d = new Date(v);
+  if (Number.isNaN(d.getTime())) return '';
+  const now = new Date();
+  const hm = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  const sameDay = d.getFullYear() === now.getFullYear()
+    && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
+  return sameDay ? hm : `${d.getMonth() + 1}-${d.getDate()}`;
+};
+
+// Create the session eagerly so the panel is ready before the first open,
+// and load the recency list once so the header title resolves immediately.
 ensureSession();
+loadRecentSessions();
 </script>
 
 <style scoped>
@@ -208,17 +311,170 @@ ensureSession();
 
 .agent-sidebar-header {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 10px 12px 10px 16px;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px 8px 12px;
   border-bottom: 1px solid var(--td-component-stroke);
   flex-shrink: 0;
 }
 
+.agent-sidebar-header-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* Row 1: the session switcher takes the remaining width; the title
+   truncates with an ellipsis when long. */
+.agent-sidebar-session-trigger {
+  flex: 1;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border: none;
+  border-radius: var(--app-radius-md);
+  background: transparent;
+  color: var(--td-text-color-primary);
+  cursor: pointer;
+  text-align: left;
+
+  &:hover {
+    background: var(--td-bg-color-secondarycontainer);
+  }
+}
+
 .agent-sidebar-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: var(--app-text-md);
   font-weight: 600;
   color: var(--td-text-color-primary);
+}
+
+/* Same round ghost icon button as the KB page's kb-settings-button (the
+   class itself is scoped elsewhere, so restyle it locally). */
+.agent-sidebar-close {
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
+  border: none;
+  border-radius: 50%;
+  background: var(--td-bg-color-secondarycontainer);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--td-text-color-secondary);
+  cursor: pointer;
+
+  &:hover {
+    background: var(--td-bg-color-container);
+    color: var(--td-text-color-primary);
+  }
+}
+
+/* Row 2: fixed assistant badge + new chat, compact ghost visuals. */
+.agent-sidebar-header-tools {
+  gap: 4px;
+}
+
+.agent-sidebar-agent-badge {
+  flex: 1;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: var(--app-radius-md);
+  color: var(--td-text-color-secondary);
+  font-size: var(--app-text-sm);
+  background: var(--td-bg-color-secondarycontainer);
+}
+
+.agent-sidebar-agent-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-sidebar-new-session {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px 8px;
+  border: none;
+  border-radius: var(--app-radius-md);
+  background: transparent;
+  color: var(--td-text-color-secondary);
+  font-size: var(--app-text-sm);
+  cursor: pointer;
+
+  &:hover {
+    background: var(--td-bg-color-secondarycontainer);
+    color: var(--td-brand-color);
+  }
+}
+
+/* Recent-chat menu (teleported to <body> by t-popup). */
+.agent-sidebar-session-menu {
+  width: 300px;
+  max-height: 360px;
+  overflow-y: auto;
+  padding: 4px;
+}
+
+.agent-sidebar-session-item {
+  width: 100%;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border: none;
+  border-radius: var(--app-radius-md);
+  background: transparent;
+  color: var(--td-text-color-primary);
+  cursor: pointer;
+  text-align: left;
+
+  &:hover {
+    background: var(--td-bg-color-secondarycontainer);
+  }
+
+  &.is-active {
+    background: var(--td-brand-color-light);
+    color: var(--td-brand-color);
+  }
+}
+
+.agent-sidebar-session-item-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--app-text-sm);
+}
+
+.agent-sidebar-session-item-time {
+  flex-shrink: 0;
+  font-size: var(--app-text-sm);
+  color: var(--td-text-color-placeholder);
+}
+
+.agent-sidebar-session-empty {
+  padding: 20px 10px;
+  text-align: center;
+  color: var(--td-text-color-placeholder);
+  font-size: var(--app-text-sm);
 }
 
 .agent-sidebar-body {

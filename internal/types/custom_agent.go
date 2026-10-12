@@ -28,6 +28,8 @@ const (
 	BuiltinWikiResearcherID = "builtin-wiki-researcher"
 	// BuiltinWikiFixerID is the ID for the built-in wiki fixer agent
 	BuiltinWikiFixerID = "builtin-wiki-fixer"
+	// BuiltinSidebarAssistantID is the ID for the built-in KB sidebar assistant
+	BuiltinSidebarAssistantID = "builtin-sidebar-assistant"
 	// BuiltinSkillInstallerID is the ID for the built-in skill installer agent
 	BuiltinSkillInstallerID = "builtin-skill-installer"
 )
@@ -656,6 +658,7 @@ var BuiltinAgentRegistry = map[string]func(uint64) *CustomAgent{}
 var builtinAgentIDsOrdered = []string{
 	BuiltinQuickAnswerID,
 	BuiltinSmartReasoningID,
+	BuiltinSidebarAssistantID,
 	BuiltinWikiResearcherID,
 	BuiltinDeepResearcherID,
 	BuiltinDataAnalystID,

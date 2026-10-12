@@ -883,6 +883,8 @@ export default {
     agentSidebar: {
       title: 'サイドバーアシスタント',
       sessionError: 'サイドバーセッションの作成に失敗しました。もう一度お試しください。',
+      newSession: '新規チャット',
+      noHistory: '最近のチャットはまだありません',
     },
     missingStorageEngineUpload: 'コンテンツをアップロードする前にストレージエンジンを設定してください',
     goToStorageSettings: '設定を開く',
