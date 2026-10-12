@@ -81,9 +81,11 @@ export async function fetchInboxEvents(
   if (params.limit) qs.set('limit', String(params.limit));
   const suffix = qs.toString() ? `?${qs.toString()}` : '';
   const res: any = await get(`/api/v1/agent-inbox/events${suffix}`);
+  // Handler returns a flat body: { success, events, unread } (request.ts
+  // unwraps the axios envelope, so res IS the body — no res.data hop).
   return {
-    events: res?.data?.events || [],
-    unread: Number(res?.data?.unread) || 0,
+    events: res?.events || [],
+    unread: Number(res?.unread) || 0,
   };
 }
 

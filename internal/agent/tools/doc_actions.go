@@ -29,6 +29,12 @@ type ManageDocumentTool struct {
 	knowledge interfaces.KnowledgeService
 	inbox     interfaces.AgentInboxService
 	writable  []string
+	// authorize mints the KB write grant the knowledge service requires
+	// (RequireKBWrite checks context grants, not caller ownership alone).
+	// The registration site wires it to access.ResolveKB with the session's
+	// share lookups, so the same editor-permission gate the HTTP handler
+	// applies is enforced here.
+	authorize func(context.Context, *types.KnowledgeBase) (context.Context, error)
 }
 
 // NewManageDocumentTool creates manage_document scoped to writable KBs.
@@ -36,6 +42,7 @@ func NewManageDocumentTool(
 	knowledge interfaces.KnowledgeService,
 	inbox interfaces.AgentInboxService,
 	writableKBIDs []string,
+	authorize func(context.Context, *types.KnowledgeBase) (context.Context, error),
 ) *ManageDocumentTool {
 	return &ManageDocumentTool{
 		BaseTool: NewBaseTool(
@@ -64,6 +71,7 @@ func NewManageDocumentTool(
 		knowledge: knowledge,
 		inbox:     inbox,
 		writable:  writableKBIDs,
+		authorize: authorize,
 	}
 }
 
@@ -95,6 +103,23 @@ func (t *ManageDocumentTool) Execute(ctx context.Context, args json.RawMessage) 
 			Error:   "You do not have edit access to the knowledge base this document belongs to.",
 		}, nil
 	}
+	if t.authorize == nil {
+		return &types.ToolResult{
+			Success: false,
+			Error:   "document management is not authorized in this session",
+		}, nil
+	}
+	effCtx, authErr := t.authorize(ctx, &types.KnowledgeBase{
+		ID:       doc.KnowledgeBaseID,
+		TenantID: doc.TenantID,
+	})
+	if authErr != nil {
+		return &types.ToolResult{
+			Success: false,
+			Error:   "You do not have edit access to the knowledge base this document belongs to.",
+		}, nil
+	}
+	ctx = effCtx
 
 	title := doc.Title
 	switch params.Operation {

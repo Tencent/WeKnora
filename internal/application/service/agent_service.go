@@ -12,6 +12,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/agent/approval"
 	"github.com/Tencent/WeKnora/internal/agent/skills"
 	"github.com/Tencent/WeKnora/internal/agent/tools"
+	"github.com/Tencent/WeKnora/internal/application/access"
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/browserskill"
 	"github.com/Tencent/WeKnora/internal/config"
@@ -1327,8 +1328,13 @@ func (s *agentService) registerTools(
 
 		case tools.ToolManageDocument:
 			// Reversible document lifecycle ops, bounded to KBs the calling
-			// user may edit; the knowledge service re-checks the grant.
-			toolToRegister = tools.NewManageDocumentTool(s.knowledgeService, s.inboxService, config.WritableKBIDs)
+			// user may edit. The tool mints the same editor-permission grant
+			// the HTTP handler does (access.ResolveKB) before touching the
+			// knowledge service, whose requireKBWrite re-checks it.
+			toolToRegister = tools.NewManageDocumentTool(
+				s.knowledgeService, s.inboxService, config.WritableKBIDs,
+				s.docWriteAuthorizer(),
+			)
 
 		case tools.ToolShellExec, tools.ToolReadFile, tools.LegacyToolReadSkill, tools.LegacyToolExecuteSkillScript,
 			tools.ToolListSandboxFiles, tools.LegacyToolReadSandboxFile, tools.ToolWriteSandboxFile,
@@ -1353,6 +1359,27 @@ func (s *agentService) registerTools(
 
 	logger.Infof(ctx, "Registered %d tools", len(registry.ListTools()))
 	return nil
+}
+
+// docWriteAuthorizer returns the grant-minting callback manage_document uses
+// before touching the knowledge service. It resolves the same editor
+// permission the HTTP handler applies (access.ResolveKB); same-tenant KBs are
+// granted directly, while cross-tenant shared KBs are refused here because
+// the agent engine has no share lookups wired (fail-closed, matching the
+// shared-agent read-only contract). The knowledge service's requireKBWrite
+// re-checks the minted grant anyway.
+func (s *agentService) docWriteAuthorizer() func(context.Context, *types.KnowledgeBase) (context.Context, error) {
+	return func(ctx context.Context, kb *types.KnowledgeBase) (context.Context, error) {
+		if kb == nil || kb.ID == "" {
+			return ctx, errors.New("knowledge base is required")
+		}
+		request := access.KBRequest{Caller: types.CallerFromContext(ctx)}
+		grant, err := access.ResolveKB(ctx, request, kb, types.OrgRoleEditor, nil, nil)
+		if err != nil {
+			return ctx, err
+		}
+		return grant.Context(ctx), nil
+	}
 }
 
 // withoutWikiWriteTools drops the tools that write Wiki state. They execute
