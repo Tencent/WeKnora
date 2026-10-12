@@ -68,6 +68,9 @@ func (b *PolicyBuilder) rejectGrantPath(p Policy, path string) error {
 	if err := b.rejectAppOwnedPath(path); err != nil {
 		return err
 	}
+	if err := b.rejectHomeDotPath(path); err != nil {
+		return err
+	}
 	if err := rejectGitMetadata(p, path); err != nil {
 		return err
 	}
@@ -107,6 +110,32 @@ func (b *PolicyBuilder) rejectAppOwnedPath(path string) error {
 		}
 		if PathUnder(path, root) || PathUnder(path, resolved) || PathUnder(root, path) || PathUnder(resolved, path) {
 			return fmt.Errorf("%w: %q belongs to the application", ErrWorkspaceTooBroad, path)
+		}
+	}
+	return nil
+}
+
+// rejectHomeDotPath refuses anything under a dot entry of the home directory.
+// Toolchain bins (~/.local/bin, ~/.cargo/bin), shell and git config
+// (~/.config/fish, ~/.config/git) and version managers (~/.nvm) live there,
+// and the user runs what they hold outside the sandbox: a write grant on one
+// of them is a persistent escape, and a read grant exposes tokens and state.
+func (b *PolicyBuilder) rejectHomeDotPath(path string) error {
+	if b.homeDir == "" || isFilesystemRoot(filepath.Clean(b.homeDir)) {
+		return nil
+	}
+	homes := []string{filepath.Clean(b.homeDir)}
+	if resolved, err := resolveExistingPrefix(homes[0]); err == nil && resolved != homes[0] {
+		homes = append(homes, resolved)
+	}
+	parts := strings.Split(filepath.ToSlash(path), "/")
+	for _, home := range homes {
+		if !PathUnder(path, home) || samePath(path, home) {
+			continue
+		}
+		depth := len(strings.Split(filepath.ToSlash(home), "/"))
+		if depth < len(parts) && strings.HasPrefix(parts[depth], ".") {
+			return fmt.Errorf("%w: %q is a hidden directory in home", ErrWorkspaceTooBroad, path)
 		}
 	}
 	return nil
