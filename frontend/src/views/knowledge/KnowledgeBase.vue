@@ -2820,16 +2820,14 @@ const handleKBEditorSuccess = (kbIdValue: string) => {
   overflow-x: auto;
 }
 
-// The sidebar dock teleports to <body> and is fixed to the viewport's right
-// edge, so each tab pane reserves the dock's live width here instead: the
-// content still narrows when the chat opens, and never shrinks below 650px
-// — tighter windows collapse the folder tree first, then fall back to the
-// row's horizontal scrollbar (content simply scrolls beneath the dock).
+// The docked chat no longer needs a per-pane reservation here: App.vue
+// shifts the whole #app shell left by the dock's live width, so the panes
+// narrow with the shell. The floor still applies — tighter windows collapse
+// the folder tree first, then fall back to the row's horizontal scrollbar.
 .kb-body-row > * {
   flex: 1 1 0;
   min-width: 650px;
   min-height: 0;
-  margin-right: var(--agent-sidebar-w, 0px);
 }
 
 .wiki-main-area {

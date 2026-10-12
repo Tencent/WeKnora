@@ -2,7 +2,10 @@
   <teleport to="body">
     <div v-if="drawerVisible && resizable && !maximized" class="setting-drawer-resize-handle"
       :class="{ 'setting-drawer-resize-handle--active': drawerResizing }"
-      :style="{ right: `${drawerWidthPx}px`, '--setting-drawer-travel': `${drawerWidthPx}px` }"
+      :style="{
+        right: `calc(${drawerWidthPx}px + var(--agent-sidebar-w, 0px))`,
+        '--setting-drawer-travel': `calc(${drawerWidthPx}px + var(--agent-sidebar-w, 0px))`,
+      }"
       role="separator" aria-orientation="vertical" @mousedown.prevent="onResizeStart">
       <div class="setting-drawer-resize-line" />
     </div>
@@ -89,6 +92,7 @@ export const SETTING_DRAWER_HEADER_ACTIONS_ID: InjectionKey<string> = Symbol('se
 <script setup lang="ts">
 import { ref, computed, provide, useAttrs, useId, onMounted, onUnmounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { agentSidebarInset } from '@/stores/agentSidebar'
 
 interface Props {
   visible: boolean
@@ -184,8 +188,16 @@ const viewportWidth = ref(
   typeof window === 'undefined' ? props.maxWidth : window.innerWidth,
 )
 
+// agent-sidebar-inbox: the drawer attaches to <body>, so the #app shell
+// shift cannot narrow it — the width math here must yield the dock's live
+// width itself (0 while the dock is closed). The App.vue global rule shifts
+// the drawer's right edge by the same amount.
+const availableViewportWidth = computed(() =>
+  Math.max(0, viewportWidth.value - agentSidebarInset.value)
+)
+
 const clampWidth = (n: number) => {
-  const cap = Math.min(props.maxWidth, viewportWidth.value)
+  const cap = Math.min(props.maxWidth, availableViewportWidth.value)
   const floor = Math.min(props.minWidth, cap)
   return Math.max(floor, Math.min(cap, Math.round(n)))
 }
@@ -225,7 +237,9 @@ watch(drawerVisible, (val) => {
 })
 
 const effectiveWidth = computed(() =>
-  maximized.value ? `${viewportWidth.value}px` : `${drawerWidthPx.value}px`,
+  maximized.value
+    ? `${availableViewportWidth.value}px`
+    : `${drawerWidthPx.value}px`,
 )
 
 const persistWidth = (width: number) => {

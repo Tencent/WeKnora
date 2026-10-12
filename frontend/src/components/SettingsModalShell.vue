@@ -132,6 +132,17 @@ function showBadge(item: SettingsModalNavItem): boolean {
   overscroll-behavior: none;
 }
 
+/* agent-sidebar-inbox: the shell teleports to <body>, so the #app shell
+   shift cannot reach it. While the dock is open the centered panel yields
+   the dock's live width on the right and recenters in the remaining space;
+   the mask itself stays full-viewport (the opaque dock simply covers its
+   right strip). `body` prefix outranks the base rule regardless of
+   injection order; the var is 0px while the dock is closed. Shared by
+   Settings / AgentEditor / OrganizationSettings / KB editor modals. */
+body .settings-modal-shell.settings-overlay {
+  padding-right: calc(20px + var(--agent-sidebar-w, 0px));
+}
+
 .settings-modal-shell {
   .settings-modal {
     position: relative;

@@ -152,7 +152,7 @@ import {
   markInboxRead,
   type AgentInboxDigest,
 } from '@/api/agent-inbox';
-import { agentSidebarVisible } from '@/stores/agentSidebar';
+import { agentSidebarVisible, agentSidebarWidth } from '@/stores/agentSidebar';
 
 // App-wide mount (App.vue): no page-owned v-model. The open/closed flag is
 // the shared store ref so pages (e.g. the KB folder-tree auto-collapse)
@@ -212,10 +212,10 @@ onBeforeUnmount(stopResize);
 // teleport to <body> (the doc-content drawers) can keep clear of the chat:
 // they read var(--agent-sidebar-w) and shift left while the dock is open.
 const syncWidthVar = () => {
-  document.documentElement.style.setProperty(
-    '--agent-sidebar-w',
-    visible.value ? `${sidebarWidth.value}px` : '0px'
-  );
+  const px = visible.value ? sidebarWidth.value : 0;
+  document.documentElement.style.setProperty('--agent-sidebar-w', `${px}px`);
+  // Same value into the store for JS consumers (SettingDrawer width math).
+  agentSidebarWidth.value = px;
 };
 watch([visible, sidebarWidth], syncWidthVar, { immediate: true });
 onBeforeUnmount(() => {

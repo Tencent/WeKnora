@@ -540,9 +540,9 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
   top: 0;
   left: 0;
   bottom: 0;
-  /* Keep clear of the agent sidebar dock (same contract as the doc
-     drawers): the variable is 0px while the sidebar is closed. */
-  right: var(--agent-sidebar-w, 0px);
+  right: 0;
+  /* Fixed inside #app (transform ancestor), so the App.vue shell shift keeps
+     this clear of the agent sidebar dock with no extra offset here. */
   z-index: var(--z-drawer);
   display: grid;
   grid-template-columns: minmax(0, 1fr);

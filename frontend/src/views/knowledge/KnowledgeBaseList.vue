@@ -1583,15 +1583,8 @@ watch(keyword, () => { collapsedKbSections.value = new Set() })
   position: relative;
 }
 
-// The dock (mounted by App.vue) teleports to <body> and is fixed to the
-// viewport's right edge; the list content reserves the dock's live width
-// so opening the chat still narrows the list instead of covering it.
-// (Higher specificity than
-// the resource-list-content mixin, whose margin would otherwise win.)
-.kb-list-container > .kb-list-content {
-  margin-right: calc(16px + var(--agent-sidebar-w, 0px));
-}
-
+// The docked chat narrows the list through the #app shell shift (App.vue);
+// the 16px gutter here is just the resource-list-content mixin's own margin.
 .kb-list-content { .resource-list-content(); }
 
 .header {

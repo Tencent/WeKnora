@@ -796,6 +796,11 @@ const getUserQuery = (index) => {
 };
 
 watch([() => route.params], async (newvalue) => {
+    // Prop-driven hosts (agent sidebar dock, wiki fix drawer) own their
+    // session explicitly and re-key this component on change. They must not
+    // follow the main chat route, or switching a session in the main app's
+    // sidebar would drag every embedded chat along with it.
+    if (props.session_id) return;
     isFirstEnter.value = true;
     if (newvalue[0].chatid) {
         if (!firstQuery.value) {

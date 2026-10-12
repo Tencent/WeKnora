@@ -319,4 +319,31 @@ html,
   transform: translateZ(0);
   backface-visibility: hidden;
 }
+
+/* agent-sidebar-inbox: the chat dock teleports to <body> and is fixed to
+   the viewport's right edge above everything. While it is open the whole
+   app shell — every route page plus its fixed descendants (the transform
+   on #app makes it their containing block) — shifts left by the dock's
+   live width, so no page module ever sits underneath it. The var is 0px
+   while the dock is closed. Scoped to `body > #app` because the DOM has
+   TWO nested #app nodes (index.html's mount target + the App.vue template
+   root); an unscoped `#app` rule would shift both and double the inset.
+   width:auto lets the margin actually narrow the box (width:100% would
+   over-constrain and cancel the margin instead). */
+body > #app {
+  width: auto;
+  margin-right: var(--agent-sidebar-w, 0px);
+}
+
+/* agent-sidebar-inbox: right-hand TDesign drawers all attach to <body>
+   (doc drawers, SettingDrawer panels, artifact/wiki/attachment drawers, ...),
+   fixed to the viewport edge — the #app shift above cannot reach them.
+   While the dock is open they slide left by the dock's live width, so they
+   sit flush against the chat instead of under it. Higher specificity than
+   TDesign's own `.t-drawer--right { right: 0 }` so injection order cannot
+   win; the value is 0px while the dock is closed. Placement-left/top/bottom
+   drawers are untouched. */
+.t-drawer.t-drawer--right {
+  right: var(--agent-sidebar-w, 0px);
+}
 </style>
