@@ -321,7 +321,7 @@ func wholeCommand(command string) string {
 func visibleDeleteSegments(command, homeDir string) []CommandSegment {
 	var out []CommandSegment
 	for _, segment := range commandSeparators.Split(command, -1) {
-		words := commandWords(segment)
+		words := shellWords(segment)
 		deletes, dangerous := classifySegment(words, homeDir)
 		if !deletes {
 			continue
@@ -400,7 +400,7 @@ func scriptsDelete(scripts []string, homeDir string, depth int) bool {
 func hiddenScripts(command string) []string {
 	var scripts []string
 	for _, segment := range commandSeparators.Split(command, -1) {
-		if script, ok := segmentScript(commandWords(segment)); ok && script != "" {
+		if script, ok := segmentScript(shellWords(segment)); ok && script != "" {
 			scripts = append(scripts, script)
 		}
 	}
@@ -450,7 +450,7 @@ func hidesDelete(command string) bool {
 		}
 	}
 	for _, segment := range commandSeparators.Split(command, -1) {
-		if _, ok := segmentScript(commandWords(segment)); ok {
+		if _, ok := segmentScript(shellWords(segment)); ok {
 			return true
 		}
 	}
@@ -481,16 +481,6 @@ func apparentCommand(words []string) string {
 	words = append([]string(nil), words[i:]...)
 	words[0] = programName(words[0])
 	return strings.Join(words, " ")
-}
-
-func commandWords(segment string) []string {
-	var words []string
-	for _, w := range strings.Fields(segment) {
-		if w = strings.Trim(w, `"'(){}`); w != "" {
-			words = append(words, w)
-		}
-	}
-	return words
 }
 
 func programIndex(words []string) int {

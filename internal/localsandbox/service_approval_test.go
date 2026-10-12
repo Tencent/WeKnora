@@ -61,6 +61,28 @@ func TestRunAsksBeforeDelete(t *testing.T) {
 	require.Nil(t, req.Proposed, "a delete inside the workspace needs no directory")
 }
 
+// A quoted or escaped path after git -C must not hide the delete from the
+// approval gate: the classifier still has to ask.
+func TestRunAsksBeforeQuotedGitClean(t *testing.T) {
+	backend := &fakeBackend{}
+	svc, root, _ := approvalFixture(t, backend)
+
+	for _, command := range []string{`git -C "my repo" clean -fd`, `git -C my\ repo clean -fd`} {
+		backend.prepared = nil
+		approver := &fakeApprover{decisions: []ApprovalDecision{{Approved: true}}}
+		res, err := svc.Run(context.Background(), RunRequest{SessionID: "s1", Command: command, Approver: approver})
+		require.NoError(t, err, command)
+		require.Equal(t, 0, res.Exit.Code, command)
+		require.Len(t, approver.requests, 1, command)
+		require.Len(t, backend.prepared, 1, "the delete must spawn only after approval: %s", command)
+		req := approver.requests[0]
+		require.Equal(t, ReasonDelete, req.Reason, command)
+		require.Equal(t, command, req.Command)
+		require.Equal(t, root, req.Cwd)
+		require.True(t, req.AllowSession, command)
+	}
+}
+
 func TestRunRefusesDeleteWithoutApprover(t *testing.T) {
 	backend := &fakeBackend{}
 	svc, _, _ := approvalFixture(t, backend)
