@@ -2108,6 +2108,20 @@
         "source": "https://platform.minimax.io/docs/api-reference/speech-to-text"
       }
     ],
+    "mixedbread": [
+      {
+        "id": "mixedbread-ai/mxbai-rerank-large-v2",
+        "name": "Mxbai Rerank Large v2",
+        "type": "Rerank",
+        "source": "https://huggingface.co/mixedbread-ai/mxbai-rerank-large-v2"
+      },
+      {
+        "id": "mixedbread-ai/mxbai-rerank-base-v2",
+        "name": "Mxbai Rerank Base v2",
+        "type": "Rerank",
+        "source": "https://huggingface.co/mixedbread-ai/mxbai-rerank-base-v2"
+      }
+    ],
     "modelscope": [
       {
         "id": "ZhipuAI/GLM-4.6",
