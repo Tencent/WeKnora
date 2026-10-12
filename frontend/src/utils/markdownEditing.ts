@@ -70,12 +70,16 @@ function mapSelectedLines(
   transform: (line: string) => string,
 ): EditorState {
   const blockStart = lineStartAt(value, start)
-  const blockEnd = lineEndAt(value, end)
+  // Textarea selections exclude `end`: a selection ending just after a
+  // newline does not include the following line. Keep that newline selected
+  // after rewriting so another Tab still operates on the same block.
+  const endsAtLineStart = end > start && value[end - 1] === '\n'
+  const blockEnd = lineEndAt(value, endsAtLineStart ? end - 1 : end)
   const rewritten = value.slice(blockStart, blockEnd).split('\n').map(transform).join('\n')
   return {
     value: value.slice(0, blockStart) + rewritten + value.slice(blockEnd),
     start: blockStart,
-    end: blockStart + rewritten.length,
+    end: blockStart + rewritten.length + (endsAtLineStart ? 1 : 0),
   }
 }
 
