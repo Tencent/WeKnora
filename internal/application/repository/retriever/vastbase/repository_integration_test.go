@@ -6,6 +6,7 @@ import (
 	"math/rand"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -372,17 +373,47 @@ func TestVastbaseGraphIndexPerformance(t *testing.T) {
 	}
 }
 
+// sqlRecorder captures the SQL that GORM logs so a test can pin query shape.
+type sqlRecorder struct {
+	mu    sync.Mutex
+	stmts []string
+}
+
+func (r *sqlRecorder) Printf(format string, args ...any) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.stmts = append(r.stmts, fmt.Sprintf(format, args...))
+}
+
+// matching returns the logged statements whose upper-cased text contains substr.
+func (r *sqlRecorder) matching(substr string) []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var out []string
+	for _, stmt := range r.stmts {
+		if strings.Contains(strings.ToUpper(stmt), substr) {
+			out = append(out, stmt)
+		}
+	}
+	return out
+}
+
 // TestVastbaseCopyIndicesKeysetPaging pins the paging contract of CopyIndices:
 // more than one 500-row page of mapped source data must be copied exactly once
 // each, while rows that are not in the knowledge mapping (same source KB) or
-// that live in another KB are left alone. Offset-based paging without ORDER BY
-// can skip or repeat rows here, which this test would catch as a missing or
-// duplicated target row.
+// that live in another KB are left alone. The page queries are also asserted to
+// be keyset (id > lastID ORDER BY id, no OFFSET): offset paging over an
+// unordered scan can skip or repeat rows when the physical order differs
+// between pages, which is not observable on freshly inserted test data.
 func TestVastbaseCopyIndicesKeysetPaging(t *testing.T) {
 	db := itDB(t)
 	ctx := context.Background()
 
-	repoIface, err := NewVastbaseRetrieveEngineRepository(db, ConfigFromEnv())
+	rec := &sqlRecorder{}
+	repoIface, err := NewVastbaseRetrieveEngineRepository(
+		db.Session(&gorm.Session{Logger: gormlogger.New(rec, gormlogger.Config{LogLevel: gormlogger.Info})}),
+		ConfigFromEnv(),
+	)
 	if err != nil {
 		t.Fatalf("init repository: %v", err)
 	}
@@ -443,6 +474,28 @@ func TestVastbaseCopyIndicesKeysetPaging(t *testing.T) {
 	if err := repo.CopyIndices(ctx, "kb-src", map[string]string{"know-a": "know-dst"},
 		chunkMap, "kb-dst", dim, ""); err != nil {
 		t.Fatalf("copy indices: %v", err)
+	}
+
+	// The 600 mapped rows must be read in exactly two keyset pages of 500.
+	var pageQueries []string
+	for _, stmt := range rec.matching("KNOWLEDGE_BASE_ID") {
+		if strings.Contains(strings.ToUpper(stmt), "SELECT") {
+			pageQueries = append(pageQueries, stmt)
+		}
+	}
+	if len(pageQueries) != 2 {
+		t.Fatalf("copy issued %d page queries, want 2: %v", len(pageQueries), pageQueries)
+	}
+	for i, stmt := range pageQueries {
+		upper := strings.ToUpper(stmt)
+		for _, want := range []string{"ID >", "ORDER BY", "KNOWLEDGE_ID IN"} {
+			if !strings.Contains(upper, want) {
+				t.Errorf("page query %d lacks %q: %s", i, want, stmt)
+			}
+		}
+		if strings.Contains(upper, "OFFSET") {
+			t.Errorf("page query %d pages by OFFSET: %s", i, stmt)
+		}
 	}
 
 	var rows []struct {
