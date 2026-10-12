@@ -318,6 +318,39 @@ func TestListImageAssets_KnowledgeIDFilter(t *testing.T) {
 	})
 }
 
+func TestListImageAssets_KnowledgeIDFilterKeepsSharedImage(t *testing.T) {
+	imageAssetBackends(t, func(t *testing.T, db *gorm.DB) {
+		fx := newImageFixture(t, db)
+		shared := `[{"url":"https://example.com/logo.png","original_url":"","caption":"logo","ocr_text":""}]`
+		older := fx.addRaw("text", 0, shared)
+		// The same image on a newer chunk of another document wins the
+		// knowledge-base-wide de-duplication.
+		newer := &types.Chunk{
+			ID:              uuid.NewString(),
+			TenantID:        1,
+			KnowledgeBaseID: fx.kbID,
+			KnowledgeID:     "doc-newer-" + fx.kbID[:8],
+			Content:         "x",
+			ChunkType:       "text",
+			IsEnabled:       true,
+			ImageInfo:       shared,
+			CreatedAt:       fx.base.Add(5 * time.Minute),
+			UpdatedAt:       fx.base.Add(5 * time.Minute),
+		}
+		require.NoError(t, db.Create(newer).Error)
+
+		rows, total := fx.list(types.ImageAssetQuery{KnowledgeIDs: []string{older.KnowledgeID}})
+		require.EqualValues(t, 1, total, "the older document still lists its copy")
+		require.Len(t, rows, 1)
+		require.Equal(t, older.ID, rows[0].ChunkID)
+
+		rows, total = fx.list(types.ImageAssetQuery{KnowledgeIDs: []string{older.KnowledgeID, newer.KnowledgeID}})
+		require.EqualValues(t, 1, total, "copies inside the scope still de-duplicate")
+		require.Len(t, rows, 1)
+		require.Equal(t, newer.ID, rows[0].ChunkID)
+	})
+}
+
 func TestListImageAssets_SortsByAttribute(t *testing.T) {
 	imageAssetBackends(t, func(t *testing.T, db *gorm.DB) {
 		fx := newImageFixture(t, db)

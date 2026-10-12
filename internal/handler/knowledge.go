@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	goerrors "errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -1262,7 +1263,10 @@ func (h *KnowledgeHandler) constrainGalleryFilter(ctx context.Context, kbID stri
 				kept[id] = values
 			}
 		}
-		filter.AttrFilters = kept // nil when nothing survived
+		filter.AttrFilters = nil
+		if len(kept) > 0 {
+			filter.AttrFilters = kept
+		}
 	}
 	if len(filter.AttrRules) > 0 {
 		kept := make(map[string]map[string]string, len(filter.AttrRules))
@@ -1281,7 +1285,10 @@ func (h *KnowledgeHandler) constrainGalleryFilter(ctx context.Context, kbID stri
 				kept[id] = clean
 			}
 		}
-		filter.AttrRules = kept // nil when nothing survived
+		filter.AttrRules = nil
+		if len(kept) > 0 {
+			filter.AttrRules = kept
+		}
 	}
 	if len(filter.SearchIn) > 0 {
 		kept := make([]string, 0, len(filter.SearchIn))
@@ -1339,7 +1346,7 @@ func (h *KnowledgeHandler) ListImagesPost(c *gin.Context) {
 	ctx := types.WithExecutionTenant(c.Request.Context(), effectiveTenantID)
 
 	var body imageListRequestBody
-	if err := c.ShouldBindJSON(&body); err != nil {
+	if err := c.ShouldBindJSON(&body); err != nil && !goerrors.Is(err, io.EOF) {
 		logger.Error(ctx, "Failed to parse image list body", err)
 		_ = c.Error(errors.NewBadRequestError(err.Error()))
 		return

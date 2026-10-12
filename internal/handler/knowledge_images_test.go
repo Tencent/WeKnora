@@ -101,6 +101,23 @@ func TestListImagesPost_KnowledgeIDBody(t *testing.T) {
 	}
 }
 
+func TestListImagesPost_EmptyBody(t *testing.T) {
+	svc := &stubGalleryChunkService{}
+	router := newImagesRouter(svc)
+	req := httptest.NewRequest(http.MethodPost, "/knowledge-bases/kb-1/images", nil)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+	if len(svc.gotIDs) != 0 {
+		t.Fatalf("got %d knowledge ids, want none", len(svc.gotIDs))
+	}
+}
+
 func TestListImagesGet_KnowledgeIDCap(t *testing.T) {
 	svc := &stubGalleryChunkService{}
 	router := newImagesRouter(svc)

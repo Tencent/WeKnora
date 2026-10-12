@@ -145,9 +145,6 @@ export async function listGalleryImages(
   if (typeof params.isEnabled === 'boolean') {
     query.set('is_enabled', String(params.isEnabled));
   }
-  if (params.knowledgeIds && params.knowledgeIds.length) {
-    query.set('knowledge_ids', params.knowledgeIds.join(','));
-  }
   if (params.attrFilters && Object.keys(params.attrFilters).length) {
     query.set('attr_filters', JSON.stringify(params.attrFilters));
   }

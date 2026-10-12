@@ -309,7 +309,6 @@ const activeFilterCount = computed(() => {
   let n = Object.keys(activeSelections.value).length
   for (const perValue of Object.values(activeRules.value)) n += Object.keys(perValue).length
   if (searchMode.value === 'custom') n += 1
-  if (sourceDocIds.value.length) n += 1
   return n
 })
 
@@ -357,7 +356,6 @@ function keywordsInputValue(attrId: string): string {
 function clearFilters(): void {
   attrVerdicts.value = {}
   attrSelections.value = {}
-  sourceDocIds.value = []
   if (searchMode.value === 'custom') {
     searchMode.value = 'all'
     persistSearchPrefs()
@@ -365,9 +363,10 @@ function clearFilters(): void {
   reload()
 }
 
-/** The empty state's way back: forget the keyword as well. */
+/** The empty state's way back: forget the keyword and source documents as well. */
 function clearAll(): void {
   keyword.value = ''
+  sourceDocIds.value = []
   clearFilters()
 }
 
@@ -603,6 +602,8 @@ async function initGallery() {
   sortBy.value = ''
   attrSelections.value = {}
   attrVerdicts.value = {}
+  sourceDocIds.value = []
+  sourcePickerVisible.value = false
   releaseBlobs()
   configLoaded.value = false
   config.value = { attribute_sources: [], attributes: [], mode: 'all', status: {} }
@@ -676,12 +677,11 @@ watch(
         <button
           type="button"
           class="ig-tool-btn"
-          :class="{ active: sourceDocIds.length > 0 }"
-          :aria-label="t(`${NS}.sourceFilter`)"
+          :class="{ active: sourcePickerVisible || sourceDocIds.length > 0 }"
           @click="sourcePickerVisible = true"
         >
-          <t-icon name="folder-open" size="16px" />
-          <span class="ig-sort-trigger__label">{{ t(`${NS}.sourceFilter`) }}</span>
+          <t-icon name="file" size="16px" />
+          {{ t(`${NS}.sourceFilter`) }}
           <span v-if="sourceDocIds.length" class="ig-tool-btn__count">{{ sourceDocIds.length }}</span>
         </button>
 
