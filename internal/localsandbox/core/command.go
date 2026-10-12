@@ -185,7 +185,8 @@ func ClassifyCommand(command, homeDir string) CommandVerdict {
 // is classified again, so find -delete and git clean inside it still count.
 func DeleteSegments(command, homeDir string) []CommandSegment {
 	out := visibleDeleteSegments(command, homeDir)
-	hidden := quotedOrEscapedDelete(command) || nestedScriptDeletes(command, homeDir)
+	hidden := quotedOrEscapedDelete(command) || nestedScriptDeletes(command, homeDir) ||
+		expandedDeleteProgram(command)
 	if hidden && len(out) == 0 {
 		if text := wholeCommand(command); text != "" {
 			out = append(out, CommandSegment{
@@ -231,23 +232,118 @@ func DeleteTargets(command, homeDir string) []string {
 		default:
 			continue
 		}
-		operands := false
-		for _, arg := range words[i+1:] {
-			if !operands {
-				if arg == "--" {
-					operands = true
-					continue
-				}
-				if strings.HasPrefix(arg, "-") && len(arg) > 1 {
-					continue
-				}
-			}
+		for _, arg := range deleteOperands(words[i+1:]) {
 			if target, ok := expandHome(arg, homeDir); ok {
 				out = append(out, target)
 			}
 		}
 	}
 	return out
+}
+
+// DeletesStayBelow reports whether every visible delete in command names
+// only entries strictly inside cwd. A session approval keys its rules by
+// cwd and ignores operands, so it may only cover deletes that cannot reach
+// past cwd or empty it at once: ., *, .*, .., an absolute path elsewhere, a
+// ~ path, or an operand built from a variable all fail. find and git -C may
+// start at cwd itself; their filters and subcommand narrow what they remove.
+func DeletesStayBelow(command, cwd, homeDir string) bool {
+	if hidesDelete(command) || cwd == "" {
+		return false
+	}
+	for _, segment := range commandSeparators.Split(command, -1) {
+		words := shellWords(segment)
+		i := programIndex(words)
+		if i >= len(words) {
+			continue
+		}
+		args := words[i+1:]
+		switch programName(words[i]) {
+		case "rm", "rmdir", "unlink":
+			for _, arg := range deleteOperands(args) {
+				if !operandBelow(arg, cwd, homeDir, false) {
+					return false
+				}
+			}
+		case "find":
+			if len(findActions(args)) == 0 {
+				continue
+			}
+			for _, root := range findRoots(args) {
+				if !operandBelow(root, cwd, homeDir, true) {
+					return false
+				}
+			}
+		case "git":
+			if sub, _ := gitSubcommandArgs(args); sub != "rm" && sub != "clean" {
+				continue
+			}
+			for j := 0; j+1 < len(args); j++ {
+				if args[j] == "-C" && !operandBelow(args[j+1], cwd, homeDir, true) {
+					return false
+				}
+			}
+		}
+	}
+	return true
+}
+
+func deleteOperands(args []string) []string {
+	var out []string
+	operands := false
+	for _, arg := range args {
+		if !operands {
+			if arg == "--" {
+				operands = true
+				continue
+			}
+			if strings.HasPrefix(arg, "-") && len(arg) > 1 {
+				continue
+			}
+		}
+		out = append(out, arg)
+	}
+	return out
+}
+
+// findRoots are the start paths before find's first expression; none means ".".
+func findRoots(args []string) []string {
+	var roots []string
+	for _, arg := range args {
+		if strings.HasPrefix(arg, "-") || arg == "(" || arg == "!" {
+			break
+		}
+		roots = append(roots, arg)
+	}
+	if len(roots) == 0 {
+		return []string{"."}
+	}
+	return roots
+}
+
+// operandBelow reports whether arg names an entry strictly inside cwd, or
+// cwd itself when allowCwd is set.
+func operandBelow(arg, cwd, homeDir string, allowCwd bool) bool {
+	target, ok := expandHome(arg, homeDir)
+	if !ok {
+		return false
+	}
+	if filepath.IsAbs(target) {
+		rel, err := filepath.Rel(filepath.Clean(cwd), filepath.Clean(target))
+		if err != nil {
+			return false
+		}
+		target = rel
+	}
+	target = filepath.Clean(target)
+	if target == "." {
+		return allowCwd
+	}
+	if target == ".." || strings.HasPrefix(target, "../") {
+		return false
+	}
+	first, _, _ := strings.Cut(filepath.ToSlash(target), "/")
+	return strings.Trim(first, "*.") != "" || strings.Contains(target, "/")
 }
 
 func expandHome(arg, homeDir string) (string, bool) {
@@ -337,6 +433,33 @@ func visibleDeleteSegments(command, homeDir string) []CommandSegment {
 		})
 	}
 	return out
+}
+
+// deleteProgramText finds a delete program name anywhere in the text, so an
+// expansion that assembles one (${RM:-rm}, x=rm; $x, $(printf rm)) is caught.
+var (
+	deleteProgramText       = regexp.MustCompile(`rm|unlink`)
+	deleteProgramTextFolded = regexp.MustCompile(`(?i)rm|unlink`)
+)
+
+// expandedDeleteProgram reports a segment whose program is itself an
+// expansion while the command mentions a delete program. The real program
+// is only known when the shell runs it, so it is treated as a hidden delete.
+func expandedDeleteProgram(command string) bool {
+	text := deleteProgramText
+	if caseInsensitivePaths() {
+		text = deleteProgramTextFolded
+	}
+	if !text.MatchString(command) {
+		return false
+	}
+	for _, segment := range commandSeparators.Split(command, -1) {
+		words := shellWords(segment)
+		if i := programIndex(words); i < len(words) && strings.ContainsAny(words[i], "$`") {
+			return true
+		}
+	}
+	return false
 }
 
 func quotedOrEscapedDelete(command string) bool {
@@ -441,7 +564,7 @@ func segmentDangerous(segments []CommandSegment) bool {
 // hidesDelete reports scripts, substitutions, and escapes whose real command
 // is not the segment the splitter classified.
 func hidesDelete(command string) bool {
-	if escapedDeletePattern().MatchString(command) {
+	if escapedDeletePattern().MatchString(command) || expandedDeleteProgram(command) {
 		return true
 	}
 	for _, marker := range substitutionMarkers {

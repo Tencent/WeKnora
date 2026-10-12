@@ -348,16 +348,50 @@ func TestRunOutsideDeleteAsksOnceWithTheDirectory(t *testing.T) {
 	require.Empty(t, svc.SessionGrants("s1"), "a one-time approval must not stick")
 }
 
-func TestRunOutsideDeleteSessionApprovalCoversTheNextFile(t *testing.T) {
+// A session rule is keyed by cwd and ignores operands, so a delete outside
+// cwd is asked every time and does not leave its directory open.
+func TestRunOutsideDeleteCannotBeRememberedForTheSession(t *testing.T) {
 	backend := &fakeBackend{}
 	svc, _, other := approvalFixture(t, backend)
-	approver := &fakeApprover{decisions: []ApprovalDecision{{Approved: true, Session: true}}}
+	approver := &fakeApprover{decisions: []ApprovalDecision{{Approved: true, Session: true}, {Approved: true}}}
 
 	runAll(t, svc, approver, "rm "+filepath.Join(other, "a.txt"), "rm "+filepath.Join(other, "b.txt"))
 
-	require.Len(t, approver.requests, 1)
-	require.Equal(t, []Grant{{Path: other, Access: AccessWrite}}, svc.SessionGrants("s1"))
+	require.Len(t, approver.requests, 2)
+	require.False(t, approver.requests[0].AllowSession)
+	require.Empty(t, approver.requests[0].SessionRules)
+	require.Empty(t, svc.SessionGrants("s1"))
 	require.Len(t, backend.prepared, 2)
+}
+
+// A rule approved for one delete must not cover one that empties cwd or
+// reaches a directory the session opened for something else.
+func TestRunSessionDeleteRuleStaysBelowCwd(t *testing.T) {
+	backend := &fakeBackend{}
+	svc, _, other := approvalFixture(t, backend)
+	deniedOnce(backend, "touch: "+filepath.Join(other, "a")+": Operation not permitted")
+	approver := &fakeApprover{decisions: []ApprovalDecision{
+		{Approved: true, Session: true},
+		{Approved: true, Session: true},
+	}}
+
+	runAll(t, svc, approver, "touch "+filepath.Join(other, "a"))
+	require.Equal(t, []Grant{{Path: other, Access: AccessWrite}}, svc.SessionGrants("s1"))
+	runAll(t, svc, approver, "rm -rf build")
+	require.Len(t, approver.requests, 2)
+
+	for _, command := range []string{
+		"rm -rf " + filepath.Join(other, "x"),
+		"rm -rf *",
+		"rm -rf .",
+		"rm -rf ../proj",
+	} {
+		before := len(approver.requests)
+		approver.decisions = []ApprovalDecision{{Approved: false}}
+		runAll(t, svc, approver, command)
+		require.Len(t, approver.requests, before+1, command)
+		require.False(t, approver.requests[before].AllowSession, command)
+	}
 }
 
 // Removing a directory writes its parent; a grant on the directory itself
@@ -400,7 +434,11 @@ func TestRunOutsideDeleteCannotBeNarrowedToRead(t *testing.T) {
 
 	runAll(t, svc, approver, "rm "+filepath.Join(other, "a.txt"))
 
-	require.Equal(t, []Grant{{Path: other, Access: AccessWrite}}, svc.SessionGrants("s1"))
+	_, base, err := svc.workspaceFor(context.Background(), "s1")
+	require.NoError(t, err)
+	want, err := svc.builder.Relax(base, Grant{Path: other, Access: AccessWrite})
+	require.NoError(t, err)
+	require.Equal(t, []string{want.Fingerprint()}, backend.prepared)
 }
 
 func TestRunDeleteOfAnUngrantableTargetOffersNoDirectory(t *testing.T) {
