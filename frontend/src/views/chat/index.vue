@@ -1504,7 +1504,10 @@ const sendMsg = async (value, modelId = '', mentionedItems = [], imageFiles = []
 
     // Get knowledge_base_ids from settings store (selected by user via KnowledgeBaseSelector)
     // Merge @mentioned KB/file IDs so retrieval uses the same targets user @mentioned (including shared KBs)
-    const sidebarKbIds = props.embeddedMode ? props.kbIds : (useSettingsStoreInstance.settings.selectedKnowledgeBases || []);
+    // Embedded (agent sidebar): nothing is auto-injected — the retrieval
+    // scope is exactly what the user @mentions, and an empty set means the
+    // agent works tool-first across the workspace (agreed 2026-10-12).
+    const sidebarKbIds = props.embeddedMode ? [] : (useSettingsStoreInstance.settings.selectedKnowledgeBases || []);
     const sidebarFileIds = props.embeddedMode ? [] : (useSettingsStoreInstance.settings.selectedFiles || []);
     const kbIdSet = new Set(sidebarKbIds);
     const fileIdSet = new Set(sidebarFileIds);
@@ -1675,7 +1678,11 @@ onBeforeMount(async () => {
         useSettingsStoreInstance.selectAgent(agentIdFromQuery, null);
     }
 
-    if (props.kbIds && props.kbIds.length > 0) {
+    // Embedded (agent sidebar) never touches the global KB selection: the
+    // sidebar's retrieval scope is user-controlled via @ mentions only
+    // (agreed 2026-10-12), and auto-seeding the store here would clobber
+    // the main chat's selection.
+    if (!props.embeddedMode && props.kbIds && props.kbIds.length > 0) {
         useSettingsStoreInstance.selectKnowledgeBases(props.kbIds);
     }
 

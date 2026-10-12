@@ -2750,8 +2750,10 @@ defineExpose({
         :agent-source-tenant-id="settingsStore.selectedAgentSourceTenantId ?? undefined"
         @update:files="uploadedAttachments = $event" />
 
-      <!-- 选中的知识库和文件标签（显示在输入框内顶部） -->
-      <div v-if="allSelectedItems.length > 0" class="selected-tags-inline">
+      <!-- 选中的知识库和文件标签（显示在输入框内顶部）。
+           侧边栏（embeddedMode）不显示：检索范围只由 @ 提及决定，
+           这里的 store 驱动选择属于主会话状态，展示出来会误导。 -->
+      <div v-if="!embeddedMode && allSelectedItems.length > 0" class="selected-tags-inline">
         <span v-for="item in allSelectedItems" :key="`${item.type}:${item.id}`" class="mention-chip" :class="[
           getMentionChipClass(item),
           { 'mention-chip--agent': item.isAgentConfigured }

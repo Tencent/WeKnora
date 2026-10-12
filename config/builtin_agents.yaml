@@ -254,7 +254,7 @@ builtin_agents:
       temperature: 0.7
       max_completion_tokens: 0
       max_iterations: 30
-      kb_selection_mode: "selected"
+      kb_selection_mode: "all"
       retrieve_kb_only_when_mentioned: false
       retain_retrieval_history: true
       allowed_tools:

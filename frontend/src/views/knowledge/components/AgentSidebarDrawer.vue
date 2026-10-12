@@ -154,13 +154,16 @@ onBeforeUnmount(() => {
 watch(() => props.modelValue, (val) => { visible.value = val; });
 watch(visible, (val) => { emit('update:modelValue', val); });
 
-// One persistent session per binding: each KB keeps its own conversation,
-// and the KB list page (no kbId) shares one global session.
-const sidebarSessionKey = (kbId?: string) => kbId ? `agentSidebarSession:${kbId}` : 'agentSidebarSession:global';
+// One persistent session for the whole sidebar (global binding): switching
+// KBs only changes the surrounding view — the conversation keeps running
+// (agreed 2026-10-12; per-KB sessions felt like the chat "disappeared" on
+// every KB switch). Separate conversations remain available via the header
+// dropdown and the new-chat button.
+const SIDEBAR_SESSION_KEY = 'agentSidebarSession:global';
 
 const ensureSession = async () => {
   if (sessionLoading.value) return;
-  const stored = localStorage.getItem(sidebarSessionKey(props.kbId));
+  const stored = localStorage.getItem(SIDEBAR_SESSION_KEY);
   if (stored) {
     sessionId.value = stored;
     return;
@@ -171,7 +174,7 @@ const ensureSession = async () => {
     const id = res && res.data && res.data.id;
     if (id) {
       sessionId.value = id;
-      localStorage.setItem(sidebarSessionKey(props.kbId), id);
+      localStorage.setItem(SIDEBAR_SESSION_KEY, id);
     } else {
       MessagePlugin.error(t('knowledgeBase.agentSidebar.sessionError'));
     }
@@ -181,13 +184,6 @@ const ensureSession = async () => {
     sessionLoading.value = false;
   }
 };
-
-watch(() => props.kbId, () => {
-  // KB switch: drop the previous session from the panel; the localStorage
-  // binding survives so each KB keeps its own conversation.
-  sessionId.value = '';
-  if (visible.value) ensureSession();
-}, { immediate: false });
 
 watch(visible, (val) => {
   if (val && !sessionId.value) ensureSession();
@@ -227,7 +223,7 @@ const loadRecentSessions = async () => {
 const bindSession = (id: string, title = '') => {
   sessionId.value = id;
   activeTitle.value = title;
-  localStorage.setItem(sidebarSessionKey(props.kbId), id);
+  localStorage.setItem(SIDEBAR_SESSION_KEY, id);
 };
 const switchSession = (s: RecentSession) => {
   if (s.id && s.id !== sessionId.value) bindSession(s.id, s.title);

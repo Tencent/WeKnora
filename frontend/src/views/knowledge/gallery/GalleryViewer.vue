@@ -537,7 +537,12 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
   --igv-chrome-hover: rgb(255 255 255 / 12%);
 
   position: fixed;
-  inset: 0;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  /* Keep clear of the agent sidebar dock (same contract as the doc
+     drawers): the variable is 0px while the sidebar is closed. */
+  right: var(--agent-sidebar-w, 0px);
   z-index: var(--z-drawer);
   display: grid;
   grid-template-columns: minmax(0, 1fr);
