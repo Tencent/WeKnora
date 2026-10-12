@@ -229,25 +229,18 @@ func (p *PluginRerank) skipDisabledGeneratedQuestions(ctx context.Context, resul
 	if p.kbService == nil || len(results) == 0 {
 		return
 	}
-	seen := make(map[string]struct{})
-	disabled := make(map[string]struct{})
-	for _, result := range results {
-		if result == nil || result.KnowledgeBaseID == "" {
-			continue
-		}
-		if _, ok := seen[result.KnowledgeBaseID]; ok {
-			continue
-		}
-		seen[result.KnowledgeBaseID] = struct{}{}
-		kb, err := p.kbService.GetKnowledgeBaseByIDOnly(ctx, result.KnowledgeBaseID)
-		if err != nil || kb == nil {
-			continue
-		}
-		if types.QuestionGenerationDisabled(kb) {
-			disabled[kb.ID] = struct{}{}
-		}
+	ids := types.SearchResultKnowledgeBaseIDs(results)
+	if len(ids) == 0 {
+		return
 	}
-	types.ApplySkipGeneratedQuestions(results, disabled)
+	kbs, err := p.kbService.GetKnowledgeBasesByIDsOnly(ctx, ids)
+	if err != nil {
+		pipelineWarn(ctx, "Rerank", "question_generation_lookup", map[string]interface{}{
+			"error": err.Error(),
+		})
+		return
+	}
+	types.ApplySkipGeneratedQuestions(results, types.QuestionGenerationOffIDs(kbs))
 }
 
 func logRerankInputScoreSample(ctx context.Context, results []*types.SearchResult) {

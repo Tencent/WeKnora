@@ -770,32 +770,3 @@ func generatedQuestionExclusionClause(kbIDs []string) clause.Expression {
 		Vars: vars,
 	}
 }
-
-// SetGeneratedQuestionEnabled turns generated-question index rows for one
-// knowledge base on or off without touching the parent chunk row. Disabling
-// is reversible: the vectors stay, and a later enable flips is_enabled back.
-func (r *pgRepository) SetGeneratedQuestionEnabled(
-	ctx context.Context, knowledgeBaseID string, enabled bool,
-) (int64, error) {
-	if knowledgeBaseID == "" {
-		return 0, nil
-	}
-	query := r.db.WithContext(ctx).Model(&pgVector{}).
-		Where("knowledge_base_id = ? AND "+types.GeneratedQuestionRowPredicate(""), knowledgeBaseID)
-	if enabled {
-		query = query.Where("(is_enabled IS NULL OR is_enabled = ?)", false)
-		// A disabled chunk turns every index row off together. Turning question
-		// generation back on must not resurrect questions for those chunks.
-		query = query.Where(`chunk_id IN (
-			SELECT body.chunk_id FROM embeddings AS body
-			WHERE body.knowledge_base_id = ? AND `+types.EnabledChunkBodySQL("body")+`)`,
-			knowledgeBaseID, true)
-	} else {
-		query = query.Where("(is_enabled IS NULL OR is_enabled = ?)", true)
-	}
-	result := query.Update("is_enabled", enabled)
-	if result.Error != nil {
-		return 0, result.Error
-	}
-	return result.RowsAffected, nil
-}

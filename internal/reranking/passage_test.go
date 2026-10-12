@@ -52,25 +52,6 @@ func TestEnrichedPassageOmitsQuestionsWhenGenerationIsOff(t *testing.T) {
 	}
 }
 
-func TestEnrichedPassageOmitsInactiveQuestions(t *testing.T) {
-	metadata, err := json.Marshal(types.DocumentChunkMetadata{
-		GeneratedQuestionsInactive: true,
-		GeneratedQuestions: []types.GeneratedQuestion{{
-			ID: "q1", Question: "inactive generated question",
-		}},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	passage := EnrichedPassage(context.Background(), &types.SearchResult{
-		Content:       "chunk body",
-		ChunkMetadata: types.JSON(metadata),
-	})
-	if strings.Contains(passage, "inactive generated question") {
-		t.Fatalf("inactive questions were still appended: %q", passage)
-	}
-}
-
 func TestGetEnrichedPassageKeepsCodeAndMathCandidates(t *testing.T) {
 	tests := []struct {
 		name    string

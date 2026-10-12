@@ -417,10 +417,7 @@ func (h *InitializationHandler) UpdateKBConfig(c *gin.Context) {
 		return
 	}
 
-	// 更新问题生成配置
-	hadQuestionConfig := kb.QuestionGenerationConfig != nil
-	questionIndexAligned := hadQuestionConfig && kb.QuestionGenerationConfig.IndexAligned
-	questionGenerationWasActive := types.QuestionGenerationActive(kb)
+	// 更新问题生成配置。检索是否使用问句由查询时的开关决定，保存设置不改索引。
 	if req.QuestionGeneration.Enabled {
 		questionCount := req.QuestionGeneration.QuestionCount
 		if questionCount <= 0 {
@@ -440,13 +437,6 @@ func (h *InitializationHandler) UpdateKBConfig(c *gin.Context) {
 			CustomInstructions: strings.TrimSpace(req.QuestionGeneration.CustomInstructions),
 		}
 	}
-	questionGenerationNowActive := types.QuestionGenerationActive(kb)
-	alignQuestions := types.NeedsGeneratedQuestionAlign(
-		kb.Type, hadQuestionConfig, questionGenerationWasActive, questionGenerationNowActive, questionIndexAligned,
-	)
-	if !alignQuestions {
-		kb.QuestionGenerationConfig.IndexAligned = questionIndexAligned
-	}
 	types.NormalizeKnowledgeBasePromptInstructions(kb)
 	if err := validateKnowledgeBasePromptInstructions(kb); err != nil {
 		c.Error(err)
@@ -458,30 +448,6 @@ func (h *InitializationHandler) UpdateKBConfig(c *gin.Context) {
 		logger.Error(ctx, "Failed to update knowledge base", err)
 		c.Error(errors.NewInternalServerError("更新知识库失败: " + err.Error()))
 		return
-	}
-	if alignQuestions {
-		if aligner, ok := h.kbService.(interfaces.GeneratedQuestionAligner); ok {
-			if _, err := aligner.AlignGeneratedQuestions(ctx, kb.ID); err != nil {
-				logger.Errorf(ctx, "Failed to align generated questions for knowledge base %s: %v", kb.ID, err)
-				if appErr, ok := errors.IsAppError(err); ok {
-					// Partial and unsupported results stay unaligned so the
-					// next save retries. A skipped engine must not be reported
-					// as a finished update.
-					_ = c.Error(appErr)
-					return
-				} else {
-					_ = c.Error(errors.NewInternalServerError("对齐预生成问题失败: " + err.Error()))
-					return
-				}
-			} else {
-				kb.QuestionGenerationConfig.IndexAligned = true
-				if err := h.kbRepository.UpdateKnowledgeBase(ctx, kb); err != nil {
-					logger.Error(ctx, "Failed to record question alignment", err)
-					_ = c.Error(errors.NewInternalServerError("更新知识库失败: " + err.Error()))
-					return
-				}
-			}
-		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{

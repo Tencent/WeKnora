@@ -52,25 +52,6 @@ func GeneratedQuestionRowPredicate(alias string) string {
 	)
 }
 
-// EnabledChunkBodySQL matches a parent chunk body that retrieval still treats
-// as enabled. NULL is_enabled is historical data and counts as on. The caller
-// binds one boolean argument for is_enabled.
-func EnabledChunkBodySQL(alias string) string {
-	col := func(name string) string {
-		if alias == "" {
-			return name
-		}
-		return alias + "." + name
-	}
-	return fmt.Sprintf(
-		"%s = %d AND %s <> '' AND %s = %s AND (%s IS NULL OR %s = ?)",
-		col("source_type"), int(ChunkSourceType),
-		col("chunk_id"),
-		col("source_id"), col("chunk_id"),
-		col("is_enabled"), col("is_enabled"),
-	)
-}
-
 // SearchResultKnowledgeBaseIDs returns the distinct knowledge base IDs on results.
 func SearchResultKnowledgeBaseIDs(results []*SearchResult) []string {
 	seen := make(map[string]struct{}, len(results))
@@ -100,21 +81,6 @@ func QuestionGenerationOffIDs(kbs []*KnowledgeBase) map[string]struct{} {
 	return disabled
 }
 
-// NeedsGeneratedQuestionAlign reports whether saving this knowledge base
-// should rewrite question rows. A switch change always aligns. An existing
-// config that is not yet aligned aligns once, including a retry after a
-// failed open. A knowledge base that never had the config, and whose switch
-// stays off, does not.
-func NeedsGeneratedQuestionAlign(kbType string, hadConfig, wasActive, nowActive, indexAligned bool) bool {
-	if kbType == KnowledgeBaseTypeFAQ {
-		return false
-	}
-	if wasActive != nowActive {
-		return true
-	}
-	return hadConfig && !indexAligned
-}
-
 // ApplySkipGeneratedQuestions marks rerank passages whose knowledge base has
 // question generation turned off. disabled maps knowledge base IDs.
 func ApplySkipGeneratedQuestions(results []*SearchResult, disabled map[string]struct{}) {
@@ -129,13 +95,4 @@ func ApplySkipGeneratedQuestions(results []*SearchResult, disabled map[string]st
 			result.SkipGeneratedQuestions = true
 		}
 	}
-}
-
-// GeneratedQuestionAlignResult is what aligning the index and chunk metadata
-// to the current question-generation switch changed.
-type GeneratedQuestionAlignResult struct {
-	Enabled        bool  `json:"enabled"`
-	IndexRows      int64 `json:"index_rows"`
-	MetadataChunks int64 `json:"metadata_chunks"`
-	IndexUpdated   bool  `json:"index_updated"`
 }
