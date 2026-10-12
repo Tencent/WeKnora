@@ -292,8 +292,8 @@ func (c *Client) DoRequest(ctx context.Context, method, path string, body interf
 		if isFeishuRateLimited(resp.StatusCode, respBody) {
 			wait := feishuRateLimitWait(resp.Header, time.Now())
 			gate.cooldown(wait)
-			logger.Warnf(ctx, "[Feishu] rate limited: method=%s wait=%s attempt=%d/%d",
-				method, wait, attempt, maxRetries)
+			logger.Warnf(ctx, "[Feishu] rate limited: api=%q wait=%s attempt=%d/%d",
+				gate.api, wait, attempt, maxRetries)
 			lastErr = fmt.Errorf("feishu rate limited: status=%d body=%s",
 				resp.StatusCode, truncate(string(respBody), 500))
 			if attempt < maxRetries {
@@ -789,12 +789,15 @@ func (c *Client) downloadRawBytes(ctx context.Context, path string) ([]byte, err
 			body, _ := io.ReadAll(io.LimitReader(resp.Body, maxFeishuErrorPreviewBytes))
 			resp.Body.Close()
 			if !isFeishuRateLimited(resp.StatusCode, body) {
+				logger.Errorf(ctx, "[Feishu] download GET %s → status=%d body=%s",
+					path, resp.StatusCode, truncate(string(body), 500))
 				return nil, fmt.Errorf("download failed: status=%d body=%s",
 					resp.StatusCode, truncate(string(body), 500))
 			}
 			wait := feishuRateLimitWait(resp.Header, time.Now())
 			gate.cooldown(wait)
-			logger.Warnf(ctx, "[Feishu] download rate limited: wait=%s attempt=%d/%d", wait, attempt, feishuMaxRetries)
+			logger.Warnf(ctx, "[Feishu] download rate limited: api=%q wait=%s attempt=%d/%d",
+				gate.api, wait, attempt, feishuMaxRetries)
 			lastErr = fmt.Errorf("download rate limited: status=%d body=%s",
 				resp.StatusCode, truncate(string(body), 500))
 			if attempt < feishuMaxRetries {

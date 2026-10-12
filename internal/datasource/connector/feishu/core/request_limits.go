@@ -41,6 +41,7 @@ type feishuRequestGateKey struct {
 }
 
 type feishuRequestGate struct {
+	api          string
 	mu           sync.Mutex
 	interval     time.Duration
 	nextRequest  time.Time
@@ -128,7 +129,7 @@ func (c *Client) requestGate(method, path string) *feishuRequestGate {
 	if existing, ok := feishuRequestGates.Load(key); ok {
 		return existing.(*feishuRequestGate)
 	}
-	gate := &feishuRequestGate{}
+	gate := &feishuRequestGate{api: api}
 	if paced {
 		gate.interval = feishuRequestInterval()
 	}
@@ -136,6 +137,11 @@ func (c *Client) requestGate(method, path string) *feishuRequestGate {
 	return actual.(*feishuRequestGate)
 }
 
+// wait reserves the next free slot before sleeping, so callers are granted in
+// arrival order instead of racing for each slot after a shared wake-up. A
+// cooldown imposed while sleeping invalidates the reservation; the caller waits
+// it out and reserves again. Cancelled reservations are not reused, which only
+// errs towards sending fewer requests.
 func (g *feishuRequestGate) wait(ctx context.Context) error {
 	for {
 		if err := ctx.Err(); err != nil {
@@ -143,19 +149,27 @@ func (g *feishuRequestGate) wait(ctx context.Context) error {
 		}
 		g.mu.Lock()
 		now := time.Now()
-		readyAt := g.nextRequest
-		if g.blockedUntil.After(readyAt) {
-			readyAt = g.blockedUntil
-		}
-		wait := readyAt.Sub(now)
-		if wait <= 0 {
-			g.nextRequest = now.Add(g.interval)
+		if blocked := g.blockedUntil.Sub(now); blocked > 0 {
 			g.mu.Unlock()
-			return nil
+			if err := sleepCtx(ctx, blocked); err != nil {
+				return err
+			}
+			continue
 		}
+		slot := now
+		if g.nextRequest.After(slot) {
+			slot = g.nextRequest
+		}
+		g.nextRequest = slot.Add(g.interval)
 		g.mu.Unlock()
-		if err := sleepCtx(ctx, wait); err != nil {
+		if err := sleepCtx(ctx, slot.Sub(now)); err != nil {
 			return err
+		}
+		g.mu.Lock()
+		blocked := g.blockedUntil.After(time.Now())
+		g.mu.Unlock()
+		if !blocked {
+			return nil
 		}
 	}
 }

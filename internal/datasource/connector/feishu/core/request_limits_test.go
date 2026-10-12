@@ -496,3 +496,35 @@ func TestFeishuRefreshesTokenAfterCooldown(t *testing.T) {
 		})
 	}
 }
+
+func TestFeishuGateGrantsInArrivalOrder(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		gate := &feishuRequestGate{interval: time.Second}
+		start := time.Now()
+		var mu sync.Mutex
+		var order []int
+		var grants []time.Duration
+		var wg sync.WaitGroup
+		for i := range 5 {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				if err := gate.wait(context.Background()); err != nil {
+					t.Error(err)
+					return
+				}
+				mu.Lock()
+				order = append(order, i)
+				grants = append(grants, time.Since(start))
+				mu.Unlock()
+			}()
+			synctest.Wait()
+		}
+		wg.Wait()
+		for i := range 5 {
+			if order[i] != i || grants[i] != time.Duration(i)*time.Second {
+				t.Fatalf("grants out of arrival order or pace: order=%v grants=%v", order, grants)
+			}
+		}
+	})
+}
