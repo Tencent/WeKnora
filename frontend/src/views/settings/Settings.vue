@@ -61,6 +61,7 @@
     </template>
     <div class="content-wrapper" :class="{
       'content-wrapper--wide': currentSection === 'members',
+      'content-wrapper--resource-list': ['models', 'mymemory', 'platform-api-keys', 'model-catalog', 'members', 'sandbox'].includes(currentSection),
       'content-wrapper--full': SYSTEM_ADMIN_SECTIONS.has(currentSection) || isIntegrationSection(currentSection),
     }">
       <!-- 角色不允许访问当前 section（deep-link 进来 / 跨空间切换后角色降级）—— 优先于具体 section 渲染。
@@ -712,6 +713,24 @@ onUnmounted(() => {
 
   &--full {
     padding: 30px 34px 40px;
+  }
+
+  &--resource-list {
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    padding: 20px 28px 0;
+
+    > .section {
+      flex: 1;
+      min-height: 0;
+    }
+
+    @media (max-width: 720px) {
+      padding: 16px 16px 0;
+    }
   }
 }
 

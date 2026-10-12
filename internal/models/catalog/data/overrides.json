@@ -481,6 +481,8 @@
         "id": "claude-fable-5-1",
         "api": "anthropic-messages",
         "compat": {
+          "supports_temperature": false,
+          "supports_top_p": false,
           "thinking_mode": "adaptive",
           "supports_effort": true
         },
@@ -498,6 +500,8 @@
         "id": "claude-opus-5",
         "api": "anthropic-messages",
         "compat": {
+          "supports_temperature": false,
+          "supports_top_p": false,
           "thinking_mode": "adaptive",
           "supports_effort": true
         },
@@ -514,6 +518,8 @@
         "id": "claude-sonnet-5",
         "api": "anthropic-messages",
         "compat": {
+          "supports_temperature": false,
+          "supports_top_p": false,
           "thinking_mode": "adaptive",
           "supports_effort": true
         },
@@ -530,6 +536,8 @@
         "id": "claude-fable-5",
         "api": "anthropic-messages",
         "compat": {
+          "supports_temperature": false,
+          "supports_top_p": false,
           "thinking_mode": "adaptive",
           "supports_effort": true
         },
@@ -547,6 +555,8 @@
         "id": "claude-opus-4-8",
         "api": "anthropic-messages",
         "compat": {
+          "supports_temperature": false,
+          "supports_top_p": false,
           "thinking_mode": "adaptive",
           "supports_effort": true
         },
@@ -563,6 +573,8 @@
         "id": "claude-opus-4-7",
         "api": "anthropic-messages",
         "compat": {
+          "supports_temperature": false,
+          "supports_top_p": false,
           "thinking_mode": "adaptive",
           "supports_effort": true
         },

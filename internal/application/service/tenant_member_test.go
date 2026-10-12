@@ -646,3 +646,7 @@ func TestTenantRole_HasPermission(t *testing.T) {
 		}
 	}
 }
+
+func (r *cleanupUserRepo) SetUserActive(context.Context, string, string, bool) (*types.User, error) {
+	panic("unexpected SetUserActive call")
+}
