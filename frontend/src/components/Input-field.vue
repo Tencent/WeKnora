@@ -561,6 +561,25 @@ const mentionLoading = ref(false);
 const mentionOffset = ref(0);
 const MENTION_PAGE_SIZE = 20;
 
+// Embedded (agent sidebar) @ mentions: selecting from the picker keeps the
+// "@name" text in the composer and records the item here instead of the
+// global binding store — the send payload carries the implicit IDs (see the
+// embedded branch in handleSend/steer), so sidebar and main chat never leak
+// selections into each other. Entries whose "@name" no longer appears in
+// the composer text at send time are dropped.
+const embeddedMentions = ref<MentionRequestItem[]>([]);
+
+const toMentionRequestItem = (item: any): MentionRequestItem => ({
+  id: item.id,
+  name: item.name,
+  type: item.type,
+  kb_type: item.type === 'kb' ? (item.kbType || 'document') : undefined,
+  kb_id: item.kbId,
+  kb_name: item.kbName,
+  service_id: item.serviceId,
+  skill_name: item.skillName,
+});
+
 // 共享智能体时用于标识「共享空间」的展示名（组织名或共享者），供 @ 列表与已选标签显示角标
 const sharedAgentOrgName = computed(() => {
   const sourceTenantId = settingsStore.selectedAgentSourceTenantId;
@@ -1724,7 +1743,14 @@ const onCompositionEnd = (e: CompositionEvent) => {
 
 
 const onMentionSelect = (item: any) => {
-  if (item.type === 'kb') {
+  if (props.embeddedMode) {
+    // 侧边栏语义：@ 是对某个知识库/文档的「点名」。选中的名称作为可见
+    // 文本留在输入框并随消息一起发给 agent；ID 隐式记录在
+    // embeddedMentions，发送时并入 mentioned_items。不写全局绑定 store。
+    if (!embeddedMentions.value.some(m => m.type === item.type && m.id === item.id)) {
+      embeddedMentions.value.push(toMentionRequestItem(item));
+    }
+  } else if (item.type === 'kb') {
     settingsStore.addKnowledgeBase(item.id);
   } else if (item.type === 'file') {
     settingsStore.addFile(item.id);
@@ -1748,16 +1774,27 @@ const onMentionSelect = (item: any) => {
 
   const textarea = getTextareaEl();
   if (textarea) {
-    // 键入 @ 触发的：删除 @ 和后面的查询文字
     const cursor = textarea.selectionStart;
     const textBeforeAt = query.value.slice(0, mentionStartPos.value);
     const textAfterCursor = query.value.slice(cursor);
-    query.value = textBeforeAt + textAfterCursor;
+    if (props.embeddedMode) {
+      // 保留提及：把 "@query" 替换成完整 "@名称 "，随消息正文一起发出。
+      const mentionText = `@${item.name} `;
+      query.value = textBeforeAt + mentionText + textAfterCursor;
+      nextTick(() => {
+        const caret = mentionStartPos.value + mentionText.length;
+        textarea.selectionStart = textarea.selectionEnd = caret;
+        textarea.focus();
+      });
+    } else {
+      // 键入 @ 触发的：删除 @ 和后面的查询文字
+      query.value = textBeforeAt + textAfterCursor;
 
-    nextTick(() => {
-      textarea.selectionStart = textarea.selectionEnd = mentionStartPos.value;
-      textarea.focus();
-    });
+      nextTick(() => {
+        textarea.selectionStart = textarea.selectionEnd = mentionStartPos.value;
+        textarea.focus();
+      });
+    }
   }
 
   showMention.value = false;
@@ -1990,16 +2027,9 @@ const createSession = async (
       MessagePlugin.warning(t('input.messages.steerHasAttachments'));
       return;
     }
-    const steerMentions: MentionRequestItem[] = allSelectedItems.value.map(item => ({
-      id: item.id,
-      name: item.name,
-      type: item.type,
-      kb_type: item.type === 'kb' ? (item.kbType || 'document') : undefined,
-      kb_id: item.kbId,
-      kb_name: item.kbName,
-      service_id: item.serviceId,
-      skill_name: item.skillName,
-    }));
+    const steerMentions: MentionRequestItem[] = props.embeddedMode
+      ? embeddedMentions.value.filter(m => val.includes(`@${m.name}`))
+      : allSelectedItems.value.map(item => toMentionRequestItem(item));
     emit('steer-msg', val.trim(), steerMentions, delivery);
     clearvalue();
     void focusInput();
@@ -2023,7 +2053,9 @@ const createSession = async (
 
   // Embed 渠道由后端绑定 agent/KB，勿走平台侧 agent 列表与就绪校验
   if (props.embeddedMode) {
-    emit('send-msg', val, selectedModelId.value || '', [], [], [], options);
+    // @ 提及的 ID 随消息隐式传递；文本里已删掉 "@名称" 的提及不再带上。
+    const mentionedItems = embeddedMentions.value.filter(m => val.includes(`@${m.name}`));
+    emit('send-msg', val, selectedModelId.value || '', mentionedItems, [], [], options);
     clearvalue();
     void focusInput();
     return;
@@ -2073,16 +2105,9 @@ const createSession = async (
     return;
   }
   // 获取@提及的知识库和文件信息
-  const mentionedItems: MentionRequestItem[] = allSelectedItems.value.map(item => ({
-    id: item.id,
-    name: item.name,
-    type: item.type,
-    kb_type: item.type === 'kb' ? (item.kbType || 'document') : undefined,
-    kb_id: item.kbId,
-    kb_name: item.kbName,
-    service_id: item.serviceId,
-    skill_name: item.skillName,
-  }));
+  const mentionedItems: MentionRequestItem[] = allSelectedItems.value.map(item =>
+    toMentionRequestItem(item)
+  );
   const imageFiles = uploadedImages.value.map(img => img.file);
   const attachmentFiles = uploadedAttachments.value;
 
@@ -2304,6 +2329,8 @@ const handleSelectAgent = async (agent: CustomAgent, sourceTenantId?: string) =>
 }
 
 const clearvalue = () => {
+  // 侧边栏的 @ 提及随消息发出后即完成使命；下次 @ 重新记录。
+  embeddedMentions.value = [];
   // Guard: only clear when the textarea DOM element is still mounted,
   // otherwise TDesign's autosize will call getComputedStyle on a non-Element.
   if (!getTextareaEl()) return;

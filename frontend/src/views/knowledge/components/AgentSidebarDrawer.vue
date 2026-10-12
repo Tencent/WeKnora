@@ -480,6 +480,22 @@ loadRecentSessions();
   flex-direction: column;
 }
 
+/* Chat metrics inside the dock (sidebar-scope overrides): ChatView ships
+   main-chat sizing — 16px body text and no horizontal inset on
+   .msg_list.is-embedded, because the main chat page supplies the gutter
+   itself. Inside a 260-640px panel that reads oversized and flush against
+   both edges, so normalize here instead of touching the shared chat
+   components (main chat keeps its current metrics). */
+.agent-sidebar-body :deep(.msg_list.is-embedded) {
+  padding: 4px 16px 16px;
+}
+
+.agent-sidebar-body :deep(.bot_msg),
+.agent-sidebar-body :deep(.user_msg),
+.agent-sidebar-body :deep(.markdown-content) {
+  font-size: var(--app-text-base);
+}
+
 .agent-sidebar-empty {
   padding: 40px;
   text-align: center;
