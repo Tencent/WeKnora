@@ -89,7 +89,7 @@ func (t *ShellExecTool) hostApprovalContext(ctx context.Context, command, stdin 
 	port.Approver = hostCommandApprover{gate: t.hostApproval, meta: meta, tenantID: tenantID}
 	base := ctx
 	if meta.ApprovalCtx != nil {
-		base = WithToolExecContext(meta.ApprovalCtx, meta)
+		base = WithToolExecContext(WithOutputBudget(meta.ApprovalCtx, OutputBudget(ctx)), meta)
 	}
 	return sandbox.WithCommandApproval(base, port)
 }
