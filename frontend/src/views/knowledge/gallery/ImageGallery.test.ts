@@ -31,6 +31,7 @@ function setup() {
       fetchGalleryConfig: async () => ({ attributes: [], attribute_sources: [], mode: 'all', status: {} }),
     },
     '@/api/auth': { updateMyPreferences: async () => {} },
+    '@/api/agent-inbox': { postUIEvent: async () => {} },
     './galleryImageSrc': { galleryImageRequest: () => null },
   }
   const state: any = {}

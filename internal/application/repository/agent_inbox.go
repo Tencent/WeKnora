@@ -12,7 +12,7 @@ import (
 )
 
 // agentInboxRepository persists agent inbox events (table agent_inbox,
-// migrations versioned/000115 + sqlite/000034). Plain SQL only — the
+// migrations versioned/000116 + sqlite/000035). Plain SQL only — the
 // schema is deliberately free of JSONB expressions so the same code
 // serves PostgreSQL and SQLite.
 type agentInboxRepository struct {
