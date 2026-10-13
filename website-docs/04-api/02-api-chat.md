@@ -578,6 +578,8 @@ curl -X DELETE "$BASE/api/v1/artifacts?session_id=session-1&message_id=message-1
 
 消息返回持久化的 usage，Agent 完成事件携带 turn_usage；包含本轮各用途模型调用聚合结果。工具调用自身并不都产生 Token，用量以提供商返回或后端已采集的记录为准。字段见[可观测性](../03-features/16-observability.md)。
 
+智能体模式的完成事件在 `data.model_id` 中携带本轮实际运行的对话模型 ID（产生本轮用量的模型），可据此通过模型接口取得模型信息、按单价换算用量。消息记录中的 `model_id` 是请求时绑定的模型，请求指定的模型无效而回退到智能体模型时两者不同。快速问答的完成事件暂不携带该字段。
+
 ## 实现参考
 
 路由注册：`internal/router/routes_chat.go` 的 `RegisterSessionRoutes`、`RegisterChatRoutes`、`RegisterMessageRoutes`（由 `internal/router/router.go` 调用）。Handler：`internal/handler/session/`（handler.go、qa.go、stream.go、title.go、temporary_document.go、fork.go、rewind.go、steer.go、artifact_*.go）、`internal/handler/message.go`、`internal/handler/message_suggestion.go`。
