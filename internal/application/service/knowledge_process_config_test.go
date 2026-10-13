@@ -664,6 +664,25 @@ func TestCompactProcessOverridesKeepsAnExplicitQuestionGenerationChoice(t *testi
 	require.False(t, ResolveProcessConfig(kb, got).QuestionGenerationConfig.Enabled)
 }
 
+func TestCompactProcessOverridesKeepsGraphTogetherWithExtract(t *testing.T) {
+	t.Parallel()
+
+	kb := &types.KnowledgeBase{}
+	got := compactProcessOverrides(kb, &types.KnowledgeProcessOverrides{
+		GraphEnabled:  processConfigBoolPtr(true),
+		ExtractConfig: &types.ExtractConfig{Enabled: true, Text: "people"},
+	})
+	require.NotNil(t, got)
+	require.NotNil(t, got.GraphEnabled)
+	require.True(t, *got.GraphEnabled)
+	require.NotNil(t, got.ExtractConfig)
+	require.True(t, got.ExtractConfig.Enabled)
+
+	eff := ResolveProcessConfig(kb, got)
+	require.True(t, eff.ExtractConfig.Enabled)
+	require.True(t, eff.GraphEnabled, "graph stays on only when the extract override stays too")
+}
+
 func TestCompactProcessOverridesTreatsDefaultQuestionCountAsUnchanged(t *testing.T) {
 	t.Parallel()
 
