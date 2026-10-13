@@ -21,6 +21,21 @@ func TestSanitizeMessages(t *testing.T) {
 		assert.Len(t, result, 3)
 	})
 
+	t.Run("merged user messages keep every image", func(t *testing.T) {
+		first := []string{"data:image/png;base64,MQ=="}
+		messages := []chat.Message{
+			{Role: "user", Content: "image one", Images: first},
+			{Role: "user", Content: "image two", Images: []string{"data:image/png;base64,Mg=="}},
+			{Role: "user", Images: []string{"data:image/png;base64,Mw=="}},
+		}
+		result := SanitizeMessages(messages)
+		require.Len(t, result, 1)
+		assert.Equal(t, []string{
+			"data:image/png;base64,MQ==", "data:image/png;base64,Mg==", "data:image/png;base64,Mw==",
+		}, result[0].Images)
+		assert.Len(t, first, 1, "merging must not append into the caller's slice")
+	})
+
 	t.Run("consecutive user messages merged", func(t *testing.T) {
 		messages := []chat.Message{
 			{Role: "system", Content: "You are helpful"},

@@ -28,6 +28,8 @@ type TemporaryDocumentService interface {
 	List(ctx context.Context, tenantID uint64, sessionID string) ([]*types.TemporaryDocument, error)
 	Delete(ctx context.Context, tenantID uint64, sessionID, documentID string) error
 	ResolveForPrompt(ctx context.Context, tenantID uint64, sessionID string, documentIDs []string, query string) (*types.TemporaryDocumentPromptResult, error)
+	DescribeForAgent(ctx context.Context, tenantID uint64, sessionID string,
+		documentIDs []string) (*types.TemporaryDocumentPromptResult, error)
 	Process(ctx context.Context, task *asynq.Task) error
 	CleanupExpired(ctx context.Context) error
 }

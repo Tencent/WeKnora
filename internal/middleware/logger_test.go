@@ -69,6 +69,11 @@ func TestSanitizeBody(t *testing.T) {
 			want: `{"apiKey":"***"}`,
 		},
 		{
+			name: "MCP OAuth JWT bearer assertion",
+			in:   `{"assertion":"eyJhbGciOiJFUzI1NiJ9.payload.signature","redirect_uri":"https://example.com/cb"}`,
+			want: `{"assertion":"***","redirect_uri":"https://example.com/cb"}`,
+		},
+		{
 			name: "non sensitive fields untouched",
 			in:   `{"baseUrl":"https://example.com","modelName":"gpt"}`,
 			want: `{"baseUrl":"https://example.com","modelName":"gpt"}`,

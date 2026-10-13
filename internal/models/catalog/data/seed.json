@@ -740,6 +740,60 @@
         "source": "https://docs.anthropic.com/en/docs/about-claude/models"
       },
       {
+        "id": "claude-opus-5-5",
+        "name": "Claude Opus 5.5",
+        "reasoning": true,
+        "input": [
+          "text",
+          "image"
+        ],
+        "context_window": 1000000,
+        "max_output_tokens": 128000,
+        "cost": {
+          "input": 4,
+          "output": 20,
+          "cache_read": 0.2,
+          "cache_write": 5
+        },
+        "source": "https://platform.claude.com/docs/en/models/overview"
+      },
+      {
+        "id": "claude-sonnet-5-5",
+        "name": "Claude Sonnet 5.5",
+        "reasoning": true,
+        "input": [
+          "text",
+          "image"
+        ],
+        "context_window": 1000000,
+        "max_output_tokens": 128000,
+        "cost": {
+          "input": 2,
+          "output": 10,
+          "cache_read": 0.1,
+          "cache_write": 2.5
+        },
+        "source": "https://platform.claude.com/docs/en/models/overview"
+      },
+      {
+        "id": "claude-haiku-5-5",
+        "name": "Claude Haiku 5.5",
+        "reasoning": true,
+        "input": [
+          "text",
+          "image"
+        ],
+        "context_window": 1000000,
+        "max_output_tokens": 128000,
+        "cost": {
+          "input": 0.1,
+          "output": 0.5,
+          "cache_read": 0.01,
+          "cache_write": 0.125
+        },
+        "source": "https://platform.claude.com/docs/en/models/overview"
+      },
+      {
         "id": "claude-opus-5",
         "name": "Claude Opus 5",
         "reasoning": true,
@@ -4662,6 +4716,38 @@
         "name": "GLM-ASR-2512 (at most 30 s per file)",
         "type": "ASR",
         "source": "https://docs.bigmodel.cn/api-reference/模型-api/语音转文本"
+      }
+    ],
+    "cohere": [
+      {
+        "id": "rerank-v4.0-pro",
+        "name": "rerank-v4.0-pro",
+        "type": "Rerank",
+        "input": [
+          "text"
+        ],
+        "context_window": 32768,
+        "source": "https://docs.cohere.com/docs/models#rerank"
+      },
+      {
+        "id": "rerank-v4.0-fast",
+        "name": "rerank-v4.0-fast",
+        "type": "Rerank",
+        "input": [
+          "text"
+        ],
+        "context_window": 32768,
+        "source": "https://docs.cohere.com/docs/models#rerank"
+      },
+      {
+        "id": "rerank-v3.5",
+        "name": "rerank-v3.5",
+        "type": "Rerank",
+        "input": [
+          "text"
+        ],
+        "context_window": 4096,
+        "source": "https://docs.cohere.com/docs/models#rerank"
       }
     ]
   }

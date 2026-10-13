@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"net/http"
@@ -105,7 +106,8 @@ func feishuFailure(err error) (code, codeValue, fallback string) {
 		return "feishu_auth_or_permission", "", "Authentication or permission error; check credentials and app scopes"
 	case strings.Contains(s, "rate limited"), strings.Contains(s, "status=429"):
 		return "feishu_rate_limited", "", "Feishu API rate limited; will retry on the next sync"
-	case strings.Contains(s, "timed out"),
+	case errors.Is(err, errExportPollsExhausted),
+		strings.Contains(s, "timed out"),
 		strings.Contains(s, "timeout"),
 		strings.Contains(s, "deadline exceeded"):
 		return "feishu_timeout", "", "Export or request timed out; will retry on the next sync"

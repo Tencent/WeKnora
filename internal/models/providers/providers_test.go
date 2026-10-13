@@ -2,6 +2,7 @@ package providers_test
 
 import (
 	"bytes"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -20,7 +21,7 @@ var expectedIDs = []string{
 	"minimax", "moonshot", "mimo", "modelscope", "qianfan", "qiniu", "longcat", "lkeap",
 	"openai", "azure_openai", "anthropic", "gemini",
 	"openrouter", "litellm", "requesty", "pinecone",
-	"jina", "nvidia", "novita", "gpustack",
+	"jina", "nvidia", "novita", "gpustack", "cohere",
 }
 
 func TestMinimaxOfficialDefaultURLs(t *testing.T) {
@@ -83,8 +84,8 @@ func TestBuiltinDefaultURLsAcrossModelTypes(t *testing.T) {
 }
 
 func TestAllVendorsRegistered(t *testing.T) {
-	if len(expectedIDs) != 29 {
-		t.Fatalf("expected 29 vendor ids in the spec, got %d", len(expectedIDs))
+	if len(expectedIDs) != 30 {
+		t.Fatalf("expected 30 vendor ids in the spec, got %d", len(expectedIDs))
 	}
 	for _, id := range expectedIDs {
 		v, ok := modelruntime.Get(id)
@@ -618,5 +619,72 @@ func TestClaudeNoSamplingRequestBody(t *testing.T) {
 
 	if body := build(t, "claude-sonnet-4-6", api.ReasoningOff); body["temperature"] != 1.0 {
 		t.Errorf("anthropic/claude-sonnet-4-6 should still send temperature, got %v", body["temperature"])
+	}
+}
+
+// TestClaude55Models pins how the Claude 5.5 entries turn thinking off and
+// that none of them receives sampling parameters or budget_tokens: Opus 5.5
+// cannot turn thinking off, Sonnet 5.5 turns up-front thinking off with
+// "between_tools" (it rejects "disabled"), and Haiku 5.5 accepts "disabled".
+func TestClaude55Models(t *testing.T) {
+	build := func(t *testing.T, model string, effort api.ReasoningEffort) map[string]any {
+		t.Helper()
+		r := resolve(t, "anthropic", model)
+		c := anthropicmessages.New(anthropicmessages.Config{
+			Endpoint:       api.Endpoint{Model: r.RemoteModel},
+			Settings:       r.AnthropicMessages,
+			ThinkingLevels: r.ThinkingLevels,
+			Reasoning:      r.Spec.Reasoning,
+		})
+		body, err := c.BuildRequestBody(
+			[]api.Message{{Role: "user", Content: "Hi"}},
+			&api.Options{Temperature: 0.3, TopP: 0.9, ReasoningEffort: effort},
+			false,
+		)
+		if err != nil {
+			t.Fatalf("build %s: %v", model, err)
+		}
+		return body
+	}
+
+	offBody := map[string]any{
+		"claude-opus-5-5":   nil,
+		"claude-sonnet-5-5": map[string]any{"type": "between_tools"},
+		"claude-haiku-5-5":  map[string]any{"type": "disabled"},
+	}
+	for model, wantOff := range offBody {
+		r := resolve(t, "anthropic", model)
+		if !r.Cataloged {
+			t.Fatalf("anthropic/%s should be in the catalog", model)
+		}
+		if r.AnthropicMessages.ThinkingMode != api.AnthropicThinkingAdaptive {
+			t.Errorf("anthropic/%s should use adaptive thinking", model)
+		}
+		if got := r.ThinkingLevels.Supports(api.ReasoningOff); got != (wantOff != nil) {
+			t.Errorf("anthropic/%s supports thinking off = %v", model, got)
+		}
+		for _, level := range []api.ReasoningEffort{api.ReasoningXHigh, api.ReasoningMax} {
+			if !r.ThinkingLevels.Supports(level) {
+				t.Errorf("anthropic/%s should support %s effort", model, level)
+			}
+		}
+
+		for _, effort := range []api.ReasoningEffort{"", api.ReasoningOff, api.ReasoningHigh} {
+			body := build(t, model, effort)
+			for _, field := range []string{"temperature", "top_p", "top_k"} {
+				if _, ok := body[field]; ok {
+					t.Errorf("anthropic/%s (reasoning %q) sent %s", model, effort, field)
+				}
+			}
+			if thinking, ok := body["thinking"].(map[string]any); ok && thinking["type"] == "enabled" {
+				t.Errorf("anthropic/%s (reasoning %q) sent budget thinking", model, effort)
+			}
+		}
+		if wantOff != nil {
+			body := build(t, model, api.ReasoningOff)
+			if fmt.Sprint(body["thinking"]) != fmt.Sprint(wantOff) {
+				t.Errorf("anthropic/%s thinking off sent %v, want %v", model, body["thinking"], wantOff)
+			}
+		}
 	}
 }

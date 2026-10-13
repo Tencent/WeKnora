@@ -1558,6 +1558,13 @@ export default {
       kbMetricRag: 'RAG 知识库',
       kbMetricWiki: 'Wiki 知识库',
       statusInactive: '有 {count} 个已勾选工具在当前配置下无法生效',
+      searchConversations: '回顾历史对话',
+      searchConversationsDesc: '在用户自己的历史会话中查找之前聊过的内容',
+      groupStored: '已保存但未提供的工具',
+      switchManagedDesc: '由智能体的其他设置控制，而不是由此列表决定，在此勾选不会启用它。取消勾选即可移除。',
+      unrecognizedDesc: '当前版本不提供该工具，智能体无法调用它。取消勾选即可移除。',
+      keptUnknownWarning: '已保存。以下已保存的工具在当前版本中不提供，已保留，但智能体无法调用：{names}',
+      droppedWarning: '已保存。以下工具由智能体的其他设置控制，已从工具列表中移除：{names}',
       effectiveLabel: '最终启用的工具',
       effectiveDesc: '根据当前配置计算，这是智能体保存后实际能调用的工具集合',
       effectiveEmpty: '当前没有可用工具，智能体将退化为纯模型问答'
@@ -1826,6 +1833,22 @@ export default {
       heading: '技能文件',
       script: '脚本',
       instructions: '技能说明'
+    },
+    attachmentTarget: {
+      list: '全部附件',
+      file: '附件',
+      images: '{name} 中的图片',
+      imagesUnnamed: '附件中的图片',
+      image: '{name} 第 {n} 张图片',
+      imageUnnamed: '附件第 {n} 张图片'
+    },
+    imageView: {
+      summary: '已查看「{file}」第 {numbers} 张图片，共 {total} 张',
+      single: '已查看图片「{file}」',
+      descriptionsHeading: '视觉模型的图片描述',
+      imageLabel: '图片 #{n}',
+      noDescription: '未能生成描述',
+      remaining: '还有 {count} 张未查看'
     },
     sandboxFiles: {
       found: '找到 {count} 个文件',
@@ -2443,6 +2466,9 @@ export default {
     authTypeApiKey: 'API Key / Token',
     authTypeOAuth: 'OAuth 2.0（首次连接授权）',
     oauthScopes: 'Scopes（可选，空格分隔）',
+    oauthClientId: 'Client ID（可选）',
+    oauthClientIdDesc: '填写在授权服务器预先注册的客户端；留空则自动进行动态客户端注册。更换 Client ID 时请同时更新 Client Secret。',
+    oauthClientSecret: 'Client Secret（可选）',
     oauthAuthorization: '授权状态',
     oauthAuthorized: '已授权',
     oauthRefreshable: 'Token 已过期，将在下次使用时自动刷新',
@@ -4583,6 +4609,17 @@ export default {
         viewerClose: '关闭 (Esc)',
         prev: '上一张 (←)',
         next: '下一张 (→)',
+        sourceFilter: '按文档',
+        sourceFilterTitle: '按来源文档筛选',
+        sourceFilterSearch: '搜索文档名称',
+        sourceFilterEmpty: '没有匹配的文档',
+        sourceFilterSubtitle: '画廊仅展示所选文档中的图片，便于逐个核对摘要与 OCR 结果',
+        sourceFilterSelected: '已选 {count} 个文档',
+        sourceFilterClear: '清空已选',
+        sourceFilterTooMany: '最多只能选择 1000 个文档',
+        sourceFilterSelectAll: '全选 / 全不选（含全部命中结果）',
+        sourceFilterOverflowRecent: '文档较多，仅显示最近 {cap} 条，请输入关键字精确定位',
+        sourceFilterOverflowHits: '命中 {total} 个文档，仅显示前 {cap} 条，请细化关键字后再全选',
         // Display names for the builtin attributes the gallery itself
         // declares. Attributes contributed by other sources fall back to the
         // pipeline's own wording (see the imageAttr namespace).

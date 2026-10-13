@@ -497,6 +497,62 @@
         }
       },
       {
+        "id": "claude-opus-5-5",
+        "api": "anthropic-messages",
+        "compat": {
+          "supports_temperature": false,
+          "supports_top_p": false,
+          "thinking_mode": "adaptive",
+          "supports_effort": true
+        },
+        "thinking_levels": {
+          "off": null,
+          "minimal": "low",
+          "low": "low",
+          "medium": "medium",
+          "high": "high",
+          "xhigh": "xhigh",
+          "max": "max"
+        }
+      },
+      {
+        "id": "claude-sonnet-5-5",
+        "api": "anthropic-messages",
+        "compat": {
+          "supports_temperature": false,
+          "supports_top_p": false,
+          "thinking_mode": "adaptive",
+          "supports_effort": true,
+          "thinking_off_type": "between_tools"
+        },
+        "thinking_levels": {
+          "minimal": "low",
+          "low": "low",
+          "medium": "medium",
+          "high": "high",
+          "xhigh": "xhigh",
+          "max": "max"
+        }
+      },
+      {
+        "id": "claude-haiku-5-5",
+        "api": "anthropic-messages",
+        "compat": {
+          "supports_temperature": false,
+          "supports_top_p": false,
+          "thinking_mode": "adaptive",
+          "supports_effort": true
+        },
+        "thinking_levels": {
+          "minimal": "low",
+          "low": "low",
+          "medium": "medium",
+          "high": "high",
+          "xhigh": "xhigh",
+          "max": "max"
+        }
+      },
+      {
         "id": "claude-opus-5",
         "api": "anthropic-messages",
         "compat": {

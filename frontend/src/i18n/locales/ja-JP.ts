@@ -3527,6 +3527,17 @@ export default {
         viewerClose: '閉じる (Esc)',
         prev: '前へ (←)',
         next: '次へ (→)',
+        sourceFilter: 'ドキュメントで絞り込み',
+        sourceFilterTitle: 'ソースドキュメントで絞り込み',
+        sourceFilterSearch: 'ドキュメント名を検索',
+        sourceFilterEmpty: '一致するドキュメントがありません',
+        sourceFilterSubtitle: '選択したドキュメントの画像のみを表示し、キャプションと OCR 結果を一つずつ確認できます',
+        sourceFilterSelected: '{count} 件のドキュメントを選択中',
+        sourceFilterClear: '選択をクリア',
+        sourceFilterTooMany: '選択できるのは最大 1000 件です',
+        sourceFilterSelectAll: 'すべて選択 / 選択解除（全ヒット対象）',
+        sourceFilterOverflowRecent: 'ドキュメントが多いため、最新 {cap} 件のみ表示しています。キーワードで絞り込んでください',
+        sourceFilterOverflowHits: '{total} 件がヒットしました。先頭 {cap} 件のみ表示中です。全選択前にキーワードを絞り込んでください',
         // Display names for the builtin attributes the gallery itself
         // declares. Attributes contributed by other sources fall back to the
         // pipeline's own wording (see the imageAttr namespace).
@@ -5696,6 +5707,9 @@ export default {
     authTypeApiKey: 'APIキー／トークン',
     authTypeOAuth: 'OAuth 2.0（初回接続時に認可）',
     oauthScopes: 'スコープ（任意、スペース区切り）',
+    oauthClientId: 'クライアント ID（任意）',
+    oauthClientIdDesc: '認可サーバーに事前登録したクライアントを指定します。空欄の場合は動的クライアント登録で自動登録します。クライアント ID を変更する場合はシークレットも更新してください。',
+    oauthClientSecret: 'クライアントシークレット（任意）',
     oauthAuthorization: '認可状態',
     oauthAuthorized: '認可済み',
     oauthRefreshable: 'トークンの有効期限が切れています。次回利用時に自動的に更新されます',
@@ -6313,6 +6327,22 @@ export default {
       script: 'スクリプト',
       instructions: 'スキル説明'
     },
+    attachmentTarget: {
+      list: 'すべての添付ファイル',
+      file: '添付ファイル',
+      images: '{name} の画像',
+      imagesUnnamed: '添付ファイルの画像',
+      image: '{name} の画像 {n}',
+      imageUnnamed: '添付ファイルの画像 {n}'
+    },
+    imageView: {
+      summary: '「{file}」の画像 {numbers} を確認しました（全 {total} 枚）',
+      single: '画像「{file}」を確認しました',
+      descriptionsHeading: 'ビジョンモデルによる画像の説明',
+      imageLabel: '画像 #{n}',
+      noDescription: '説明を生成できませんでした',
+      remaining: '未確認の画像があと {count} 枚あります'
+    },
     sandboxFiles: {
       found: '{count}件のファイルが見つかりました',
       empty: 'ファイルなし',
@@ -6626,6 +6656,13 @@ export default {
       kbMetricRag: 'RAGナレッジベース',
       kbMetricWiki: 'Wikiナレッジベース',
       statusInactive: '選択済みの{count}個のツールは、現在の設定では有効になりません',
+      searchConversations: '過去の会話を検索',
+      searchConversationsDesc: 'ユーザー自身の過去の会話から以前話した内容を探します',
+      groupStored: '保存済み（ここでは提供されていません）',
+      switchManagedDesc: 'このリストではなくエージェントの他の設定で制御されるため、ここでチェックしても有効になりません。チェックを外すと削除されます。',
+      unrecognizedDesc: 'このバージョンにはないツールのため、エージェントは呼び出せません。チェックを外すと削除されます。',
+      keptUnknownWarning: '保存しました。次の保存済みツールはこのバージョンにはないため残しましたが、エージェントは呼び出せません：{names}',
+      droppedWarning: '保存しました。次のツールはエージェントの他の設定で制御されるため、ツールリストから削除しました：{names}',
       effectiveLabel: '有効なツール',
       effectiveDesc: '現在の設定から算出された、エージェントが実際に呼び出せるツールです',
       effectiveEmpty: '利用可能なツールがありません。エージェントは通常のモデル対話にフォールバックします'

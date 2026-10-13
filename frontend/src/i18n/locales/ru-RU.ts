@@ -1556,6 +1556,13 @@ export default {
       kbMetricRag: 'RAG баз',
       kbMetricWiki: 'Wiki баз',
       statusInactive: '{count} отмеченных инструментов не смогут работать при текущей конфигурации',
+      searchConversations: 'Поиск по прошлым диалогам',
+      searchConversationsDesc: 'Ищет то, что обсуждалось в прежних диалогах этого пользователя',
+      groupStored: 'Сохранены, но здесь не предлагаются',
+      switchManagedDesc: 'Управляется другими настройками агента, а не этим списком, поэтому отметка здесь его не включает. Снимите отметку, чтобы удалить запись.',
+      unrecognizedDesc: 'Этого инструмента нет в текущей версии, агент не может его вызвать. Снимите отметку, чтобы удалить запись.',
+      keptUnknownWarning: 'Сохранено. Этих сохранённых инструментов нет в текущей версии; они оставлены, но агент не может их вызвать: {names}',
+      droppedWarning: 'Сохранено. Эти инструменты управляются другими настройками агента и удалены из списка инструментов: {names}',
       effectiveLabel: 'Итоговые активные инструменты',
       effectiveDesc: 'Рассчитано на основе текущей конфигурации — это набор инструментов, которые агент сможет вызывать после сохранения',
       effectiveEmpty: 'Нет доступных инструментов — агент перейдёт к простому чату с моделью'
@@ -1824,6 +1831,22 @@ export default {
       heading: 'Файлы навыка',
       script: 'скрипт',
       instructions: 'Инструкции навыка'
+    },
+    attachmentTarget: {
+      list: 'все вложения',
+      file: 'вложение',
+      images: 'изображения в {name}',
+      imagesUnnamed: 'изображения вложения',
+      image: 'изображение {n} в {name}',
+      imageUnnamed: 'изображение вложения {n}'
+    },
+    imageView: {
+      summary: 'Просмотрены изображения {numbers} из {total} в «{file}»',
+      single: 'Просмотрено изображение «{file}»',
+      descriptionsHeading: 'Описания от модели компьютерного зрения',
+      imageLabel: 'Изображение #{n}',
+      noDescription: 'Не удалось описать',
+      remaining: 'Ещё не просмотрено: {count}'
     },
     sandboxFiles: {
       found: 'Найдено файлов: {count}',
@@ -2441,6 +2464,9 @@ export default {
     authTypeApiKey: 'API Key / Token',
     authTypeOAuth: 'OAuth 2.0 (авторизация при первом подключении)',
     oauthScopes: 'Области (необязательно, через пробел)',
+    oauthClientId: 'Client ID (необязательно)',
+    oauthClientIdDesc: 'Клиент, заранее зарегистрированный на сервере авторизации. Оставьте пустым, чтобы зарегистрировать клиента автоматически (динамическая регистрация). При смене Client ID обновите и Client Secret.',
+    oauthClientSecret: 'Client Secret (необязательно)',
     oauthAuthorization: 'Статус авторизации',
     oauthAuthorized: 'Авторизовано',
     oauthRefreshable: 'Срок действия токена истёк; он будет автоматически обновлён при следующем использовании',
@@ -4581,6 +4607,17 @@ export default {
         viewerClose: 'Закрыть (Esc)',
         prev: 'Назад (←)',
         next: 'Вперёд (→)',
+        sourceFilter: 'По документу',
+        sourceFilterTitle: 'Фильтр по исходному документу',
+        sourceFilterSearch: 'Поиск по названию документа',
+        sourceFilterEmpty: 'Подходящих документов нет',
+        sourceFilterSubtitle: 'Галерея покажет только изображения из выбранных документов, чтобы проверить подписи и OCR по одному',
+        sourceFilterSelected: 'Выбрано документов: {count}',
+        sourceFilterClear: 'Сбросить выбор',
+        sourceFilterTooMany: 'Можно выбрать не более 1000 документов',
+        sourceFilterSelectAll: 'Выбрать все / снять выделение (по всем совпадениям)',
+        sourceFilterOverflowRecent: 'Документов много: показаны только последние {cap}. Уточните запрос ключевым словом',
+        sourceFilterOverflowHits: 'Найдено {total} документов; показаны первые {cap}. Сузьте ключевое слово перед выбором всех',
         // Display names for the builtin attributes the gallery itself
         // declares. Attributes contributed by other sources fall back to the
         // pipeline's own wording (see the imageAttr namespace).

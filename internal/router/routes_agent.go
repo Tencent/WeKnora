@@ -34,6 +34,8 @@ func RegisterCustomAgentRoutes(r *gin.RouterGroup, agentHandler *handler.CustomA
 		agentsRead.GET("/placeholders", g.Viewer(), agentHandler.GetPlaceholders)
 		// List smart-reasoning agent type presets (rag-qa / wiki-qa / hybrid / custom) — Viewer+
 		agentsRead.GET("/type-presets", g.Viewer(), agentHandler.GetAgentTypePresets)
+		// List the built-in tools an agent may select — Viewer+
+		agentsRead.GET("/tools", g.Viewer(), agentHandler.GetAgentTools)
 		// Create custom agent — Contributor+
 		agentsWrite.POST("", g.Contributor(), agentHandler.CreateAgent)
 		// List all agents (including built-in) — Viewer+

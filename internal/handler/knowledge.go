@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	goerrors "errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -52,6 +53,14 @@ type backlogProbe interface {
 // it gets a stall verdict; keep in step with PROCESSING_STALL_THRESHOLD_MS in
 // the frontend.
 const stallHintAfter = 20 * time.Minute
+
+// maxKnowledgeIDFilter caps how many source documents one gallery request may
+// restrict itself to via the knowledge_ids query parameter.
+const maxKnowledgeIDFilter = 50
+
+// maxKnowledgeIDFilterBody is the same cap for the POST /images body variant:
+// without URL length limits a generous guard against abuse is enough.
+const maxKnowledgeIDFilterBody = 1000
 
 // stallVerdicts probes ids (all quiet past stallHintAfter) and returns each
 // one's StallState. Nil when the probe is unavailable or failed: an unknown
@@ -1143,6 +1152,7 @@ func (h *KnowledgeHandler) ListKnowledge(c *gin.Context) {
 // @Param        sort_by     query     string  false "排序属性 ID；须为 in_sortfield=true，默认 created_at"
 // @Param        sort_order  query     string  false "排序方向：asc / desc，默认 desc"
 // @Param        is_enabled  query     bool    false "仅包含启用状态的图片"
+// @Param        knowledge_ids query  string  false "来源文档 ID 列表（逗号分隔，最多 50 个），仅返回这些文档的图片"
 // @Param        attr_filters query    string  false "属性筛选 JSON，同一属性多值 OR、属性间 AND"
 // @Param        attr_rules  query     string  false "属性逐值裁决 JSON（off 隐藏 / on 强制显示，on 优先）"
 // @Success      200  {object}  map[string]interface{}  "图片资产分页列表"
@@ -1175,58 +1185,36 @@ func (h *KnowledgeHandler) ListImages(c *gin.Context) {
 		filter.IsEnabled = &enabled
 	}
 
-	// Every gallery attribute reference is validated against the resolved
-	// contract: a client may only search / sort / filter on fields whose
-	// usage flags allow it, so stale or hand-rolled callers cannot smuggle
-	// in fields the configuration no longer serves.
-	resolved := h.resolveGalleryConfig(ctx, kbID)
-	filterable, searchable, sortable := galleryEligibility(resolved)
+	// knowledge_ids: comma-separated knowledge item ids the gallery should
+	// restrict itself to (the "filter by source document" picker). Order is
+	// irrelevant; the cap keeps a hand-rolled caller from sending an
+	// unbounded URL. The POST variant lifts the cap via a JSON body.
+	if raw := strings.TrimSpace(c.Query("knowledge_ids")); raw != "" {
+		var ids []string
+		for _, id := range strings.Split(raw, ",") {
+			if id = strings.TrimSpace(id); id != "" {
+				ids = append(ids, id)
+			}
+			if len(ids) >= maxKnowledgeIDFilter {
+				break
+			}
+		}
+		filter.KnowledgeIDs = ids
+	}
 
-	// Attribute filters arrive as one JSON object keyed by namespaced
-	// attribute id ({"system:contain.text":["block"]}); values within one
-	// attribute are OR-ed, attributes are AND-ed.
+	// Attribute filters / rules / search fields arrive as raw JSON objects
+	// keyed by namespaced attribute id; eligibility against the resolved
+	// contract is enforced by constrainGalleryFilter below.
 	if raw := c.Query("attr_filters"); raw != "" {
 		var attrFilters map[string][]string
 		if err := json.Unmarshal([]byte(raw), &attrFilters); err == nil && len(attrFilters) > 0 {
-			kept := make(map[string][]string, len(attrFilters))
-			for id, values := range attrFilters {
-				if filterable[id] && len(values) > 0 {
-					kept[id] = values
-				}
-			}
-			if len(kept) > 0 {
-				filter.AttrFilters = kept
-			}
+			filter.AttrFilters = attrFilters
 		}
 	}
-
-	// Attribute rules arrive as one JSON object keyed by namespaced
-	// attribute id, each holding a verdict per value
-	// ({"system:contain.text":{"block":"on","none":"off"}}). Only values
-	// the image actually carries take part; see AttrRules for the
-	// precedence between "on" and "off".
 	if raw := c.Query("attr_rules"); raw != "" {
 		var attrRules map[string]map[string]string
 		if err := json.Unmarshal([]byte(raw), &attrRules); err == nil && len(attrRules) > 0 {
-			kept := make(map[string]map[string]string, len(attrRules))
-			for id, verdicts := range attrRules {
-				if !filterable[id] || len(verdicts) == 0 {
-					continue
-				}
-				clean := make(map[string]string, len(verdicts))
-				for value, verdict := range verdicts {
-					switch verdict {
-					case "off", "on":
-						clean[value] = verdict
-					}
-				}
-				if len(clean) > 0 {
-					kept[id] = clean
-				}
-			}
-			if len(kept) > 0 {
-				filter.AttrRules = kept
-			}
+			filter.AttrRules = attrRules
 		}
 	}
 
@@ -1234,23 +1222,165 @@ func (h *KnowledgeHandler) ListImages(c *gin.Context) {
 	// are dropped, and an empty remainder falls back to the service default
 	// (builtin caption + ocr_text).
 	if raw := strings.TrimSpace(c.Query("search_in")); raw != "" {
-		var searchIn []string
 		for _, id := range strings.Split(raw, ",") {
-			id = strings.TrimSpace(id)
-			if id != "" && searchable[id] {
-				searchIn = append(searchIn, id)
+			if id = strings.TrimSpace(id); id != "" {
+				filter.SearchIn = append(filter.SearchIn, id)
 			}
 		}
-		filter.SearchIn = searchIn
 	}
 
-	// sort_by must be sort-eligible; anything else falls back to the
-	// service default (builtin created_at, descending).
+	h.constrainGalleryFilter(ctx, kbID, filter)
+
+	result, err := h.chunkService.ListImagesByKnowledgeBaseID(ctx, kbID, &pagination, filter)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{"kb_id": kbID})
+		_ = c.Error(errors.NewInternalServerError(err.Error()))
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success":   true,
+		"data":      result.Data,
+		"total":     result.Total,
+		"page":      result.Page,
+		"page_size": result.PageSize,
+	})
+}
+
+// constrainGalleryFilter prunes a client-supplied gallery filter to the KB's
+// resolved contract: a client may only search / sort / filter on fields whose
+// usage flags allow it, so stale or hand-rolled callers cannot smuggle in
+// fields the configuration no longer serves. The GET (query params) and POST
+// (JSON body) handlers share it; the filter carries raw values on entry.
+func (h *KnowledgeHandler) constrainGalleryFilter(ctx context.Context, kbID string, filter *types.ImageListFilter) {
+	resolved := h.resolveGalleryConfig(ctx, kbID)
+	filterable, searchable, sortable := galleryEligibility(resolved)
+
+	if len(filter.AttrFilters) > 0 {
+		kept := make(map[string][]string, len(filter.AttrFilters))
+		for id, values := range filter.AttrFilters {
+			if filterable[id] && len(values) > 0 {
+				kept[id] = values
+			}
+		}
+		filter.AttrFilters = nil
+		if len(kept) > 0 {
+			filter.AttrFilters = kept
+		}
+	}
+	if len(filter.AttrRules) > 0 {
+		kept := make(map[string]map[string]string, len(filter.AttrRules))
+		for id, verdicts := range filter.AttrRules {
+			if !filterable[id] || len(verdicts) == 0 {
+				continue
+			}
+			clean := make(map[string]string, len(verdicts))
+			for value, verdict := range verdicts {
+				switch verdict {
+				case "off", "on":
+					clean[value] = verdict
+				}
+			}
+			if len(clean) > 0 {
+				kept[id] = clean
+			}
+		}
+		filter.AttrRules = nil
+		if len(kept) > 0 {
+			filter.AttrRules = kept
+		}
+	}
+	if len(filter.SearchIn) > 0 {
+		kept := make([]string, 0, len(filter.SearchIn))
+		for _, id := range filter.SearchIn {
+			if searchable[id] {
+				kept = append(kept, id)
+			}
+		}
+		filter.SearchIn = kept // empty falls back to the service default
+	}
+	// An ineligible sort falls back to the service default (builtin
+	// created_at, descending).
 	if filter.SortBy != "" && !sortable[filter.SortBy] {
 		filter.SortBy = ""
 	}
+}
 
-	result, err := h.chunkService.ListImagesByKnowledgeBaseID(ctx, kbID, &pagination, filter)
+// imageListRequestBody carries the same parameters as the GET /images query,
+// as JSON. knowledge_ids moved into the body lifts the URL-length cap that
+// keeps the GET variant to a handful of documents, so the source picker's
+// select-all can name every document of a large KB.
+type imageListRequestBody struct {
+	types.Pagination
+	Keyword      string                       `json:"keyword"`
+	SearchIn     []string                     `json:"search_in"`
+	SortBy       string                       `json:"sort_by"`
+	SortOrder    string                       `json:"sort_order"`
+	IsEnabled    *bool                        `json:"is_enabled"`
+	KnowledgeIDs []string                     `json:"knowledge_ids"`
+	AttrFilters  map[string][]string          `json:"attr_filters"`
+	AttrRules    map[string]map[string]string `json:"attr_rules"`
+}
+
+// ListImagesPost lists image assets like ListImages, with the filter arriving
+// as a JSON body.
+//
+// @Summary      列出知识库图片资产（body 版）
+// @Description  与 GET /images 同义，筛选参数改经 JSON body 传递：knowledge_ids 不再受 URL 长度限制（上限 1000），供来源文档全选使用。
+// @Tags         knowledge
+// @Accept       json
+// @Produce      json
+// @Param        id    path      string              true  "知识库 ID"
+// @Param        body  body      imageListRequestBody false "筛选参数（与 GET /images 同名参数同义）"
+// @Success      200  {object}  map[string]interface{}  "图片资产分页列表"
+// @Failure      400  {object}  errors.AppError         "请求参数错误"
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /knowledge-bases/{id}/images [post]
+func (h *KnowledgeHandler) ListImagesPost(c *gin.Context) {
+	_, kbID, effectiveTenantID, _, err := h.validateKnowledgeBaseAccess(c)
+	if err != nil {
+		_ = c.Error(err)
+		return
+	}
+	ctx := types.WithExecutionTenant(c.Request.Context(), effectiveTenantID)
+
+	var body imageListRequestBody
+	if err := c.ShouldBindJSON(&body); err != nil && !goerrors.Is(err, io.EOF) {
+		logger.Error(ctx, "Failed to parse image list body", err)
+		_ = c.Error(errors.NewBadRequestError(err.Error()))
+		return
+	}
+	if len(body.KnowledgeIDs) > maxKnowledgeIDFilterBody {
+		_ = c.Error(errors.NewBadRequestError(
+			fmt.Sprintf("knowledge_ids exceeds the cap of %d", maxKnowledgeIDFilterBody)))
+		return
+	}
+
+	ids := make([]string, 0, len(body.KnowledgeIDs))
+	for _, id := range body.KnowledgeIDs {
+		if id = strings.TrimSpace(id); id != "" {
+			ids = append(ids, id)
+		}
+	}
+	sortOrder := body.SortOrder
+	if sortOrder == "" {
+		sortOrder = "desc"
+	}
+	filter := &types.ImageListFilter{
+		Keyword:      strings.TrimSpace(body.Keyword),
+		SearchIn:     body.SearchIn,
+		SortBy:       strings.TrimSpace(body.SortBy),
+		SortOrder:    sortOrder,
+		IsEnabled:    body.IsEnabled,
+		KnowledgeIDs: ids,
+		AttrFilters:  body.AttrFilters,
+		AttrRules:    body.AttrRules,
+	}
+
+	h.constrainGalleryFilter(ctx, kbID, filter)
+
+	result, err := h.chunkService.ListImagesByKnowledgeBaseID(ctx, kbID, &body.Pagination, filter)
 	if err != nil {
 		logger.ErrorWithFields(ctx, err, map[string]interface{}{"kb_id": kbID})
 		_ = c.Error(errors.NewInternalServerError(err.Error()))

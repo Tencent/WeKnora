@@ -1,6 +1,11 @@
 # ParadeDB 存量库升级
 
-仓库的生产与开发 Compose 使用 `paradedb/paradedb:v0.22.6-pg17`。本文处理 **0.22.2 → 0.22.6、PostgreSQL 主版本保持 17** 的升级；不适用于 PostgreSQL 跨主版本升级，也不代表 Helm 中其他旧版本可以直接套用。
+仓库的生产与开发 Compose 使用 `paradedb/paradedb:v0.25.11-pg17`。本文处理 **0.22.x → 0.25.11、PostgreSQL 主版本保持 17** 的升级；不适用于 PostgreSQL 跨主版本升级，也不代表 Helm 中其他旧版本可以直接套用。
+
+该版本线相对 `v0.22.6-pg17` 带来 PostgreSQL 17.9 → 17.11、pgvector 0.8.1 → 0.8.4（修复并行 HNSW 构建缓冲区溢出与 HNSW vacuum 期间的索引损坏）以及 pg_search 基于 WAL 的崩溃恢复（0.24.0 起，见 paradedb#4901）。
+
+> [!WARNING]
+> 替换镜像后**必须**把扩展 catalog 升级到与镜像一致的版本。catalog 停留在旧版本时，部分扩展 SQL 函数（例如 `paradedb.version_info()`）会因签名与新二进制不匹配而触发段错误，导致整个 PostgreSQL 实例崩溃并进入恢复。也**不要**在新镜像上执行 `ALTER EXTENSION pg_search UPDATE TO '0.22.6'`，它同样会造成上述不匹配。
 
 ## 升级步骤
 
@@ -31,35 +36,39 @@
    docker compose up -d --no-deps --wait postgres
    ```
 
-4. 完成扩展的 SQL 升级。仅替换镜像不会更新已有数据库内的 `pg_extension` 版本。
+4. 完成扩展的 SQL 升级。仅替换镜像不会更新已有数据库内的 `pg_extension` 版本。新镜像自带 0.22.x 起的完整升级脚本链，任意 0.22.x 都可以一步升级到镜像默认版本：
 
    ```bash
    docker compose exec -T postgres sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1' <<'SQL'
-   ALTER EXTENSION pg_search UPDATE TO '0.22.6';
+   ALTER EXTENSION pg_search UPDATE;
+   ALTER EXTENSION vector UPDATE;
    SELECT extname, extversion FROM pg_extension WHERE extname IN ('pg_search', 'vector');
    SELECT * FROM paradedb.version_info();
    SQL
    ```
 
-   在**其他已安装 `pg_search` 的数据库**中同样执行，包括安装过该扩展的 `postgres`、模板库或 Langfuse 库。不要为了升级而向原本不需要的数据库安装扩展。catalog 与 `paradedb.version_info()` 应均报告 0.22.6。
+   在**其他已安装 `pg_search` 或 `vector` 的数据库**中同样执行，包括安装过该扩展的 `postgres`、模板库或 Langfuse 库。不要为了升级而向原本不需要的数据库安装扩展。`pg_search` 的 catalog 与 `paradedb.version_info()` 应均报告 0.25.11，`vector` 应为 0.8.4。
 
-5. 恢复原先运行的写入服务，确认数据库迁移状态，执行有代表性的关键词与向量检索。这个补丁升级无需专门重建全部索引或重新导入文档；保留备份直到验证完成。
+5. 恢复原先运行的写入服务，确认数据库迁移状态，执行有代表性的关键词与向量检索。已有的 BM25 与 HNSW 索引在新版本下可继续读写，无需专门重建全部索引或重新导入文档；如遇异常可 `REINDEX`。保留备份直到验证完成。
 
 ## 自动迁移的范围
 
-迁移 `000099` 仅在 WeKnora 数据库内执行扩展升级：已安装版本须为 0.22.2–0.22.5，且服务器提供 0.22.6 扩展包。它遵守 `app.skip_embedding`，不安装缺失的扩展，也不处理其他版本线。
+WeKnora 启动时的迁移只在 WeKnora 数据库内升级扩展，遵守 `app.skip_embedding`，不安装缺失的扩展，也不降级或处理其他版本线：
 
-如果这条迁移在替换数据库镜像**之前**已经执行，安装新镜像后不会自动再跑一次，需要手动执行上面的 SQL。没有 `000099` 的旧应用也需手工升级。其他数据库的扩展不能靠 WeKnora 的迁移代管。
+- `000115`：已安装的 `pg_search` 为 0.22.0–0.25.10 且服务器提供 0.25.11 时，升级到 0.25.11；已安装的 `vector` 为 0.8.0–0.8.3 且服务器提供 0.8.4 时，升级到 0.8.4。
+- `000099`：历史迁移，仅在服务器提供 0.22.6 扩展包（即仍使用 `v0.22.6-pg17` 镜像）时把 0.22.2–0.22.5 升级到 0.22.6；新镜像上会跳过，交给 `000115`。
+
+如果这些迁移在替换数据库镜像**之前**已经执行，安装新镜像后不会自动再跑一次，需要手动执行上面的 SQL。没有对应迁移的旧应用也需手工升级。其他数据库的扩展不能靠 WeKnora 的迁移代管。
 
 ## 回滚与复现验证
 
-回滚需要将升级前备份/快照恢复到独立数据卷，配合旧镜像使用。仅把镜像标签改回旧版不会撤销扩展 SQL 变更，`000099` 的 down 文件也不会尝试降级扩展。
+回滚只能将升级前备份/快照恢复到独立数据卷，配合旧镜像使用。仅把镜像标签改回旧版不会撤销扩展 SQL 变更；而且 pg_search 0.24 起会向 WAL 写入自定义资源管理器记录，旧镜像无法重放这些记录。迁移的 down 文件也不会尝试降级扩展。
 
-仓库提供隔离验证脚本：
+仓库提供隔离验证脚本，默认验证 0.22.2 → 0.25.11，也可用 `--to 0.22.6` 验证历史补丁升级：
 
 ```bash
 docker pull paradedb/paradedb:v0.22.2-pg17
-docker pull paradedb/paradedb:v0.22.6-pg17
+docker pull paradedb/paradedb:v0.25.11-pg17
 python3 scripts/test_paradedb_upgrade.py
 ```
 
