@@ -21,6 +21,8 @@ for (const mode of ['normal', 'embedded', 'after', 'inject']) {
       uploadedAttachments: { value: [] }, uploadedImages: { value: [] },
       allSelectedItems: { value: [] }, selectedModelId: { value: 'model' },
       selectedAgent: { value: { config: {} } },
+      // Embed 渠道发送会按文本过滤提及列表，测试里保持为空即可。
+      embeddedMentions: { value: [] },
       settingsStore: {}, chatResources: { isLoaded: () => true },
       collectAgentNotReadyReasons: () => ({ keys: [], labels: [] }),
       attachmentUploadRef: { value: null },

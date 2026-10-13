@@ -822,7 +822,7 @@ const formatInboxTime = (v?: string) => {
   border-radius: 7px;
   background: var(--td-error-color);
   color: #fff;
-  font-size: 10px;
+  font-size: var(--app-text-2xs);
   line-height: 14px;
   text-align: center;
   font-weight: 600;
@@ -971,19 +971,19 @@ const formatInboxTime = (v?: string) => {
 
 .agent-inbox-item-priority {
   flex-shrink: 0;
-  font-size: 10px;
+  font-size: var(--app-text-2xs);
   line-height: 16px;
   padding: 0 5px;
   border-radius: 4px;
   font-weight: 600;
 
   &.prio-p0 {
-    background: var(--td-error-color-2, rgba(226, 60, 68, 0.12));
+    background: var(--td-error-color-2);
     color: var(--td-error-color);
   }
 
   &.prio-p1 {
-    background: var(--td-warning-color-2, rgba(237, 123, 47, 0.12));
+    background: var(--td-warning-color-2);
     color: var(--td-warning-color);
   }
 
