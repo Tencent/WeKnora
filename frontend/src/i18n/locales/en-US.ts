@@ -1828,6 +1828,7 @@ export default {
       skillTranscriptLive: 'Install log',
       skillTranscriptLiveHint: 'Installing — click to watch',
       skillTranscriptTitle: 'Install run',
+      skillTranscriptPrompt: 'Install instructions',
       skillTranscriptHide: 'Hide install run',
       skillGuidance: {
         placeholder: 'Add installation guidance, such as required CLIs, setup documentation, or environment constraints',
@@ -1946,6 +1947,7 @@ export default {
       installedCount: 'Installed on {count} sandboxes',
       installPanelGroup: 'Installed',
       installPanelAvailable: 'Not installed',
+      installAction: 'Install',
       viewInstallProgress: 'View progress',
       manageOnSandbox: 'Manage this skill on “{name}”',
       manageDrawerDesc: 'Manage enablement, variables, and uninstall on sandbox “{name}”.',

@@ -6259,6 +6259,7 @@ export default {
       skillTranscriptLive: '설치 과정',
       skillTranscriptLiveHint: '설치 중입니다. 클릭해서 과정을 보세요',
       skillTranscriptTitle: '설치 과정',
+      skillTranscriptPrompt: '설치 지시',
       skillTranscriptHide: 'Hide install run',
       skillGuidance: {
         placeholder: '필요한 CLI, 설치 문서, 환경 제약 등 설치 안내를 추가하세요',
@@ -6377,6 +6378,7 @@ export default {
       installedCount: '{count}개 샌드박스에 설치됨',
       installPanelGroup: '설치됨',
       installPanelAvailable: '미설치',
+      installAction: '설치',
       viewInstallProgress: '진행 상황',
       manageOnSandbox: '「{name}」 샌드박스에서 관리',
       manageDrawerDesc: '샌드박스 「{name}」에서 사용 여부, 변수, 제거를 관리합니다.',

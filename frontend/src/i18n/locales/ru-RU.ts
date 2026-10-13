@@ -6259,6 +6259,7 @@ export default {
       skillTranscriptLive: 'Ход установки',
       skillTranscriptLiveHint: 'Идёт установка — нажмите, чтобы смотреть',
       skillTranscriptTitle: 'Ход установки',
+      skillTranscriptPrompt: 'Инструкции по установке',
       skillTranscriptHide: 'Hide install run',
       skillGuidance: {
         placeholder: 'Добавьте указания по установке: нужные CLI, документацию или ограничения среды',
@@ -6377,6 +6378,7 @@ export default {
       installedCount: 'Установлен в {count} песочницах',
       installPanelGroup: 'Установлено',
       installPanelAvailable: 'Не установлено',
+      installAction: 'Установить',
       viewInstallProgress: 'Смотреть ход',
       manageOnSandbox: 'Управление в песочнице «{name}»',
       manageDrawerDesc: 'В песочнице «{name}» можно включать навык, править переменные и удалять установку.',
