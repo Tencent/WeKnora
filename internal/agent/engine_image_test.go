@@ -84,6 +84,11 @@ func TestDescribeImages_WithDescriber(t *testing.T) {
 	if descriptions[0] != "A red square image" {
 		t.Errorf("unexpected description: %s", descriptions[0])
 	}
+
+	exported := engine.DescribeDataURIImages(context.Background(), []string{dataURI})
+	if len(exported) != 1 || exported[0] != "A red square image" {
+		t.Fatalf("exported description = %v", exported)
+	}
 }
 
 func TestDescribeImages_VLMFailure(t *testing.T) {

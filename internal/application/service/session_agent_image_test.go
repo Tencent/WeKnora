@@ -4,7 +4,12 @@ import (
 	"context"
 	"strings"
 	"testing"
+
+	"github.com/Tencent/WeKnora/internal/agent"
 )
+
+// The QA path type-asserts the engine. This fails the build if that method moves.
+var _ dataURIImageDescriber = (*agent.AgentEngine)(nil)
 
 func TestComposeAgentImageQueryPassesImagesToAVisionModel(t *testing.T) {
 	query, images := composeAgentImageQuery(context.Background(), "看这张图", "", true,
