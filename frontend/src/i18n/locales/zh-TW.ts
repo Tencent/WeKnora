@@ -1834,6 +1834,14 @@ export default {
       script: '指令碼',
       instructions: '技能說明'
     },
+    attachmentTarget: {
+      list: '全部附件',
+      file: '附件',
+      images: '{name} 中的圖片',
+      imagesUnnamed: '附件中的圖片',
+      image: '{name} 第 {n} 張圖片',
+      imageUnnamed: '附件第 {n} 張圖片'
+    },
     imageView: {
       summary: '已查看「{file}」第 {numbers} 張圖片，共 {total} 張',
       single: '已查看圖片「{file}」',

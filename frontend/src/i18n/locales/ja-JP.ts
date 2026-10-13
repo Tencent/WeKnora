@@ -6301,6 +6301,14 @@ export default {
       script: 'スクリプト',
       instructions: 'スキル説明'
     },
+    attachmentTarget: {
+      list: 'すべての添付ファイル',
+      file: '添付ファイル',
+      images: '{name} の画像',
+      imagesUnnamed: '添付ファイルの画像',
+      image: '{name} の画像 {n}',
+      imageUnnamed: '添付ファイルの画像 {n}'
+    },
     imageView: {
       summary: '「{file}」の画像 {numbers} を確認しました（全 {total} 枚）',
       single: '画像「{file}」を確認しました',

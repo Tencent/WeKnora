@@ -1832,6 +1832,14 @@ export default {
       script: 'скрипт',
       instructions: 'Инструкции навыка'
     },
+    attachmentTarget: {
+      list: 'все вложения',
+      file: 'вложение',
+      images: 'изображения в {name}',
+      imagesUnnamed: 'изображения вложения',
+      image: 'изображение {n} в {name}',
+      imageUnnamed: 'изображение вложения {n}'
+    },
     imageView: {
       summary: 'Просмотрены изображения {numbers} из {total} в «{file}»',
       single: 'Просмотрено изображение «{file}»',

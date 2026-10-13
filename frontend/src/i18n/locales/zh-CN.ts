@@ -1834,6 +1834,14 @@ export default {
       script: '脚本',
       instructions: '技能说明'
     },
+    attachmentTarget: {
+      list: '全部附件',
+      file: '附件',
+      images: '{name} 中的图片',
+      imagesUnnamed: '附件中的图片',
+      image: '{name} 第 {n} 张图片',
+      imageUnnamed: '附件第 {n} 张图片'
+    },
     imageView: {
       summary: '已查看「{file}」第 {numbers} 张图片，共 {total} 张',
       single: '已查看图片「{file}」',

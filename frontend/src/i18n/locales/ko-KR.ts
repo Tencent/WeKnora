@@ -1832,6 +1832,14 @@ export default {
       script: '스크립트',
       instructions: '스킬 안내'
     },
+    attachmentTarget: {
+      list: '모든 첨부 파일',
+      file: '첨부 파일',
+      images: '{name}의 이미지',
+      imagesUnnamed: '첨부 파일 이미지',
+      image: '{name}의 이미지 {n}',
+      imageUnnamed: '첨부 파일 이미지 {n}'
+    },
     imageView: {
       summary: '"{file}"의 이미지 {numbers}을(를) 확인했습니다 (총 {total}장)',
       single: '이미지 "{file}"을(를) 확인했습니다',
