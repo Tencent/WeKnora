@@ -68,6 +68,22 @@ test('search returns ranked passages carrying their knowledge_id', async () => {
   assert.match(text, /knowledge_id: doc-retrieval-pipeline/)
 })
 
+test('search projects image_info as answer-ready Markdown', async () => {
+  const { byName } = await toolset({
+    knowledgeBaseIds: ['kb-product'],
+    resourceUrls: 'public',
+  })
+  const { value, text } = await call(byName.get('weknora_search'), { query: 'WeKnora 的混合检索' })
+  const imageHit = value.results.find(hit => hit.images.length > 0)
+  assert.ok(imageHit)
+  assert.deepEqual(imageHit.images, [{
+    url: 'https://cdn.example.com/retrieval-diagram.png',
+    caption: '检索流程图',
+    ocr_text: '向量召回 → 关键词召回 → rerank',
+  }])
+  assert.match(text, /!\[检索流程图\]\(https:\/\/cdn\.example\.com\/retrieval-diagram\.png\)/)
+})
+
 test('search respects max_results and the configured ceiling', async () => {
   const { byName } = await toolset({ maxResults: 2, knowledgeBaseIds: ['kb-product'] })
   const wide = await call(byName.get('weknora_search'), { query: '检索 部署 向量 阈值' })
@@ -193,6 +209,24 @@ test('read_document reassembles passages in order and reports paging', async () 
   assert.equal(second.value.has_more, false)
 })
 
+test('read_document preserves page images as answer-ready Markdown', async () => {
+  const { byName } = await toolset({
+    maxChunkChars: 4000,
+    resourceUrls: 'public',
+  })
+  const { value, text } = await call(byName.get('weknora_read_document'), {
+    knowledge_id: 'doc-retrieval-pipeline',
+    page: 1,
+    page_size: 2,
+  })
+  assert.deepEqual(value.images, [{
+    url: 'https://cdn.example.com/retrieval-diagram.png',
+    caption: '检索流程图',
+    ocr_text: '向量召回 → 关键词召回 → rerank',
+  }])
+  assert.match(text, /Images:\n!\[检索流程图\]\(https:\/\/cdn\.example\.com\/retrieval-diagram\.png\)/)
+})
+
 // A long document costs many pages to identify from its passages alone, so
 // page 1 carries the title and WeKnora's generated summary.
 test('read_document leads with the document title and summary', async () => {
@@ -260,6 +294,17 @@ test('ask returns the composed answer, citations and a resumable session', async
   assert.match(text, /Citations:/)
   assert.match(text, /pass session_id to ask a follow-up/)
   assert.equal(mock.requests.some(request => request.path === '/api/v1/sessions'), true)
+})
+
+test('ask preserves citation images for the harness renderer', async () => {
+  const { byName } = await toolset({
+    knowledgeBaseIds: ['kb-product'],
+    resourceUrls: 'public',
+  })
+  const { value, text } = await call(byName.get('weknora_ask'), { query: 'WeKnora 的混合检索' })
+  const imageReference = value.references.find(reference => reference.images.length > 0)
+  assert.ok(imageReference)
+  assert.match(text, /!\[检索流程图\]\(https:\/\/cdn\.example\.com\/retrieval-diagram\.png\)/)
 })
 
 test('ask reuses a given session instead of creating one', async () => {

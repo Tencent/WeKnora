@@ -166,6 +166,7 @@ func TestResponseFieldsThePluginReadsStillExist(t *testing.T) {
 			ChunkIndex:        3,
 			KnowledgeTitle:    "检索流程.md",
 			KnowledgeFilename: "检索流程.md",
+			ImageInfo:         `[{"url":"https://cdn.example.com/diagram.png","caption":"检索流程图"}]`,
 			Score:             0.83,
 		},
 		"types.Knowledge": types.Knowledge{
@@ -181,6 +182,7 @@ func TestResponseFieldsThePluginReadsStillExist(t *testing.T) {
 			Content:     "默认的 vector_threshold 是 0.5",
 			ChunkIndex:  3,
 			KnowledgeID: "doc-1",
+			ImageInfo:   `[{"url":"https://cdn.example.com/diagram.png","caption":"检索流程图"}]`,
 		},
 		"types.StreamResponse": types.StreamResponse{
 			ID:                  "event-1",

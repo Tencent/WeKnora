@@ -15,6 +15,14 @@ interface SearchHit {
   score: number
   content: string
   truncated: boolean
+  images: ImageReference[]
+}
+
+/** One image the model can preserve as Markdown in its answer. */
+interface ImageReference {
+  url: string
+  caption: string
+  ocr_text: string
 }
 
 /** A document whose name matched, which passage retrieval alone would miss. */
@@ -49,6 +57,7 @@ interface DocumentValue {
   has_more: boolean
   truncated: boolean
   content: string
+  images: ImageReference[]
 }
 
 interface AskValue {
@@ -56,12 +65,32 @@ interface AskValue {
   session_id: string
   pipeline: 'rag' | 'agent'
   tool_calls: string[]
-  references: { knowledge_id: string, document: string, chunk_index: number, content: string }[]
+  references: {
+    knowledge_id: string
+    document: string
+    chunk_index: number
+    content: string
+    images: ImageReference[]
+  }[]
 }
 
 const text = (value: string): TextContentBlock[] => [{ type: 'text', text: value }]
 
 const STRING_ARRAY: JsonSchemaNode = { type: 'array', items: { type: 'string' } }
+
+const IMAGE_ARRAY: JsonSchemaNode = {
+  type: 'array',
+  items: {
+    type: 'object',
+    properties: {
+      url: { type: 'string' },
+      caption: { type: 'string' },
+      ocr_text: { type: 'string' },
+    },
+    required: ['url', 'caption', 'ocr_text'],
+    additionalProperties: false,
+  },
+}
 
 /** Read an argument the harness passes as `unknown` without trusting its shape. */
 function argRecord(args: unknown): Record<string, unknown> {
@@ -102,6 +131,71 @@ function documentLabel(result: SearchResult): string {
   return typeof result.knowledge_id === 'string' && result.knowledge_id !== '' ? result.knowledge_id : '(untitled)'
 }
 
+/**
+ * Decode the JSON string used by WeKnora's `image_info` field. Invalid or
+ * incomplete metadata is ignored so one malformed image cannot hide a passage.
+ */
+function projectImages(raw: unknown): ImageReference[] {
+  let value: unknown = raw
+  if (typeof raw === 'string') {
+    if (raw.trim() === '') return []
+    try {
+      value = JSON.parse(raw) as unknown
+    } catch {
+      return []
+    }
+  }
+  if (!Array.isArray(value)) return []
+
+  const seen = new Set<string>()
+  const images: ImageReference[] = []
+  for (const item of value) {
+    if (typeof item !== 'object' || item === null || Array.isArray(item)) continue
+    const record = item as Record<string, unknown>
+    const url = typeof record.url === 'string' && record.url.trim() !== ''
+      ? record.url.trim()
+      : typeof record.original_url === 'string' ? record.original_url.trim() : ''
+    if (url === '' || seen.has(url)) continue
+    seen.add(url)
+    images.push({
+      url,
+      caption: typeof record.caption === 'string' ? record.caption.trim() : '',
+      ocr_text: typeof record.ocr_text === 'string' ? record.ocr_text.trim() : '',
+    })
+  }
+  return images
+}
+
+/** Keep captions safe inside the alt-text part of a Markdown image. */
+function markdownAltText(value: string): string {
+  const normalized = value.replace(/[\r\n]+/g, ' ').replace(/[\\[\]]/g, ' ').trim()
+  return normalized === '' ? 'WeKnora image' : normalized
+}
+
+/** Render image metadata as answer-ready Markdown for the DSH model. */
+function renderImages(images: ImageReference[] | undefined): string {
+  return (images ?? []).map(image => `![${markdownAltText(image.caption)}](${image.url})`).join('\n')
+}
+
+/** Collect page images once, preserving the first occurrence's order. */
+function projectDocumentImages(chunks: ChunkRecord[]): ImageReference[] {
+  const byUrl = new Map<string, ImageReference>()
+  for (const chunk of chunks) {
+    for (const image of projectImages(chunk.image_info)) {
+      const existing = byUrl.get(image.url)
+      if (existing === undefined) {
+        byUrl.set(image.url, image)
+        continue
+      }
+      // A caption and OCR result can be stored on separate child chunks;
+      // retain whichever copy has the richer metadata.
+      if (existing.caption === '' && image.caption !== '') existing.caption = image.caption
+      if (existing.ocr_text === '' && image.ocr_text !== '') existing.ocr_text = image.ocr_text
+    }
+  }
+  return [...byUrl.values()]
+}
+
 function projectHit(result: SearchResult, rank: number, maxChunkChars: number): SearchHit {
   const clipped = clip(typeof result.content === 'string' ? result.content : '', maxChunkChars)
   return {
@@ -114,6 +208,7 @@ function projectHit(result: SearchResult, rank: number, maxChunkChars: number): 
     score: typeof result.score === 'number' && Number.isFinite(result.score) ? result.score : 0,
     content: clipped.text,
     truncated: clipped.truncated,
+    images: projectImages(result.image_info),
   }
 }
 
@@ -281,8 +376,11 @@ export function createTools(client: WeknoraClient, config: ResolvedConfig): Tool
                   score: { type: 'number' },
                   content: { type: 'string' },
                   truncated: { type: 'boolean' },
+                  images: IMAGE_ARRAY,
                 },
-                required: ['rank', 'chunk_id', 'knowledge_id', 'document', 'chunk_index', 'score', 'content', 'truncated'],
+                required: [
+                  'rank', 'chunk_id', 'knowledge_id', 'document', 'chunk_index', 'score', 'content', 'truncated', 'images',
+                ],
                 additionalProperties: false,
               },
             },
@@ -319,9 +417,12 @@ export function createTools(client: WeknoraClient, config: ResolvedConfig): Tool
             }
             return text(`No passage matched "${result.query}", but its name matches document(s).${named}`)
           }
-          const blocks = result.results.map(hit =>
-            `[${hit.rank}] ${hit.document} · score ${formatScore(hit.score)} · chunk ${hit.chunk_index} `
-            + `· knowledge_id: ${hit.knowledge_id}\n${hit.content}${hit.truncated ? '\n(passage truncated)' : ''}`)
+          const blocks = result.results.map(hit => {
+            const images = renderImages(hit.images)
+            return `[${hit.rank}] ${hit.document} · score ${formatScore(hit.score)} · chunk ${hit.chunk_index} `
+              + `· knowledge_id: ${hit.knowledge_id}\n${hit.content}${hit.truncated ? '\n(passage truncated)' : ''}`
+              + (images === '' ? '' : `\n${images}`)
+          })
           return text(`${result.count} passage(s) for "${result.query}" `
             + `(searched: ${describeScope(result.knowledge_base_ids)}):\n\n${blocks.join('\n\n')}${named}`)
         },
@@ -391,10 +492,11 @@ export function createTools(client: WeknoraClient, config: ResolvedConfig): Tool
             has_more: { type: 'boolean' },
             truncated: { type: 'boolean' },
             content: { type: 'string' },
+            images: IMAGE_ARRAY,
           },
           required: [
             'knowledge_id', 'title', 'summary', 'page', 'page_size',
-            'total_chunks', 'returned_chunks', 'has_more', 'truncated', 'content',
+            'total_chunks', 'returned_chunks', 'has_more', 'truncated', 'content', 'images',
           ],
           additionalProperties: false,
         },
@@ -410,8 +512,10 @@ export function createTools(client: WeknoraClient, config: ResolvedConfig): Tool
           const summary = result.summary === '' ? '' : `\n\nSummary: ${result.summary}`
           const more = result.has_more ? `\n\n(more passages available: request page ${result.page + 1})` : ''
           const cut = result.truncated ? '\n(content truncated)' : ''
+          const images = renderImages(result.images)
+          const imageBlock = images === '' ? '' : `\n\nImages:\n${images}`
           return text(`Document ${label}, passages ${result.returned_chunks} of ${result.total_chunks} `
-            + `(page ${result.page}):${summary}\n\n${result.content}${cut}${more}`)
+            + `(page ${result.page}):${summary}\n\n${result.content}${cut}${imageBlock}${more}`)
         },
       },
       async execute(args, exec): Promise<DocumentValue> {
@@ -446,6 +550,7 @@ export function createTools(client: WeknoraClient, config: ResolvedConfig): Tool
           has_more: result.page * result.pageSize < result.total,
           truncated: clipped.truncated,
           content: clipped.text,
+          images: projectDocumentImages(ordered),
         }
       },
     })
@@ -490,8 +595,9 @@ export function createTools(client: WeknoraClient, config: ResolvedConfig): Tool
                   document: { type: 'string' },
                   chunk_index: { type: 'integer' },
                   content: { type: 'string' },
+                  images: IMAGE_ARRAY,
                 },
-                required: ['knowledge_id', 'document', 'chunk_index', 'content'],
+                required: ['knowledge_id', 'document', 'chunk_index', 'content', 'images'],
                 additionalProperties: false,
               },
             },
@@ -506,8 +612,11 @@ export function createTools(client: WeknoraClient, config: ResolvedConfig): Tool
             ? 'WeKnora returned an empty answer. Retry with a more specific question, or retrieve passages instead.'
             : result.answer)
           if (result.references.length > 0) {
-            const cited = result.references.map((reference, index) =>
-              `[${index + 1}] ${reference.document} · chunk ${reference.chunk_index} · knowledge_id: ${reference.knowledge_id}`)
+            const cited = result.references.map((reference, index) => {
+              const images = renderImages(reference.images)
+              return `[${index + 1}] ${reference.document} · chunk ${reference.chunk_index} · knowledge_id: ${reference.knowledge_id}`
+                + (images === '' ? '' : `\n${images}`)
+            })
             parts.push(`Citations:\n${cited.join('\n')}`)
           }
           if (result.tool_calls.length > 0) parts.push(`WeKnora tools used: ${result.tool_calls.join(', ')}`)
@@ -545,6 +654,7 @@ export function createTools(client: WeknoraClient, config: ResolvedConfig): Tool
             document: documentLabel(reference),
             chunk_index: typeof reference.chunk_index === 'number' ? reference.chunk_index : -1,
             content: clip(typeof reference.content === 'string' ? reference.content : '', config.maxChunkChars).text,
+            images: projectImages(reference.image_info),
           })),
         }
       },
