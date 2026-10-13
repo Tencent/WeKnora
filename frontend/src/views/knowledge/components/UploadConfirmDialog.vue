@@ -1734,7 +1734,14 @@ const handleConfirm = () => {
 
 .upload-confirm-overlay {
   position: fixed;
-  inset: 0;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  /* This dialog teleports to <body>, outside the app shell's yield margin,
+     so it must clear the agent sidebar dock itself (same contract as the
+     doc drawers and the gallery viewer; the variable is 0px while the dock
+     is closed). */
+  right: var(--agent-sidebar-w, 0px);
   z-index: 3000;
   display: flex;
   align-items: center;
