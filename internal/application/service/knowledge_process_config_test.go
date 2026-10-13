@@ -603,6 +603,81 @@ func TestResolveProcessConfig_ImageActionsOverride(t *testing.T) {
 	require.False(t, eff.ImageAttrsEnabled)
 }
 
+func TestCompactProcessOverridesDropsKnowledgeBaseSnapshot(t *testing.T) {
+	t.Parallel()
+
+	kb := &types.KnowledgeBase{
+		ChunkingConfig: types.ChunkingConfig{ChunkSize: 512, ChunkOverlap: 80, EnableParentChild: false},
+		QuestionGenerationConfig: &types.QuestionGenerationConfig{
+			Enabled: true, QuestionCount: 3,
+		},
+		VLMConfig: types.VLMConfig{Enabled: true, ModelID: "vlm-1"},
+	}
+	snapshot := &types.KnowledgeProcessOverrides{
+		SummaryEnabled:   processConfigBoolPtr(true),
+		ChunkingConfig:   &types.ChunkingConfig{ChunkSize: 512, ChunkOverlap: 80},
+		EnableMultimodel: processConfigBoolPtr(true),
+		VLMConfig:        &types.VLMConfig{Enabled: true, ModelID: "vlm-1"},
+		QuestionGenerationConfig: &types.QuestionGenerationConfig{
+			Enabled: true, QuestionCount: 3,
+		},
+		ParserEngineOverrides: map[string]string{"pdf_force_scanned": "true"},
+	}
+
+	got := compactProcessOverrides(kb, snapshot)
+	require.NotNil(t, got)
+	require.Nil(t, got.SummaryEnabled)
+	require.Nil(t, got.ChunkingConfig)
+	require.Nil(t, got.EnableMultimodel)
+	require.Nil(t, got.VLMConfig)
+	require.Nil(t, got.QuestionGenerationConfig)
+	require.Equal(t, map[string]string{"pdf_force_scanned": "true"}, got.ParserEngineOverrides)
+
+	kb.QuestionGenerationConfig.Enabled = false
+	eff := ResolveProcessConfig(kb, got)
+	require.False(t, eff.QuestionGenerationConfig.Enabled,
+		"a dropped question-generation snapshot must follow the knowledge base")
+	require.Equal(t, "vlm-1", eff.VLMConfig.ModelID)
+}
+
+func TestCompactProcessOverridesKeepsAnExplicitQuestionGenerationChoice(t *testing.T) {
+	t.Parallel()
+
+	kb := &types.KnowledgeBase{
+		ChunkingConfig: types.ChunkingConfig{ChunkSize: 512},
+		QuestionGenerationConfig: &types.QuestionGenerationConfig{
+			Enabled: true, QuestionCount: 3,
+		},
+	}
+	got := compactProcessOverrides(kb, &types.KnowledgeProcessOverrides{
+		ChunkingConfig: &types.ChunkingConfig{ChunkSize: 512},
+		QuestionGenerationConfig: &types.QuestionGenerationConfig{
+			Enabled: false, QuestionCount: 3,
+		},
+	})
+	require.NotNil(t, got)
+	require.Nil(t, got.ChunkingConfig)
+	require.NotNil(t, got.QuestionGenerationConfig)
+	require.False(t, got.QuestionGenerationConfig.Enabled)
+
+	kb.QuestionGenerationConfig.Enabled = true
+	require.False(t, ResolveProcessConfig(kb, got).QuestionGenerationConfig.Enabled)
+}
+
+func TestCompactProcessOverridesTreatsDefaultQuestionCountAsUnchanged(t *testing.T) {
+	t.Parallel()
+
+	kb := &types.KnowledgeBase{
+		QuestionGenerationConfig: &types.QuestionGenerationConfig{Enabled: true},
+	}
+	got := compactProcessOverrides(kb, &types.KnowledgeProcessOverrides{
+		QuestionGenerationConfig: &types.QuestionGenerationConfig{
+			Enabled: true, QuestionCount: 3,
+		},
+	})
+	require.Nil(t, got)
+}
+
 func TestResolveProcessConfig_SummaryEnabled(t *testing.T) {
 	kb := &types.KnowledgeBase{}
 	require.True(t, ResolveProcessConfig(kb, nil).SummaryEnabled)
