@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
 	"time"
 )
@@ -506,8 +507,8 @@ func (c *Client) DeleteKnowledge(ctx context.Context, knowledgeID string) error 
 }
 
 // DownloadKnowledgeFile downloads a knowledge file to the specified local path.
-// On any error after the file is opened, the partial file is removed so a
-// failed download doesn't leave a corrupt artifact at destPath.
+// The destination is replaced only after the download completes successfully.
+// Failed downloads preserve an existing file and remove temporary data.
 //
 // Callers wanting more control (stream to stdout, validate filename before
 // touching disk) should use OpenKnowledgeFile and io.Copy directly.
@@ -518,16 +519,7 @@ func (c *Client) DownloadKnowledgeFile(ctx context.Context, knowledgeID string, 
 	}
 	defer body.Close()
 
-	out, err := os.Create(destPath)
-	if err != nil {
-		return fmt.Errorf("failed to create file: %w", err)
-	}
-	if _, err := io.Copy(out, body); err != nil {
-		_ = out.Close()
-		_ = os.Remove(destPath)
-		return fmt.Errorf("failed to copy response body: %w", err)
-	}
-	return out.Close()
+	return saveDownloadedFile(body, destPath)
 }
 
 // OpenKnowledgeFile starts a download for the given knowledge entry and
@@ -560,8 +552,8 @@ type BatchDownloadKnowledgeRequest struct {
 }
 
 // DownloadKnowledgeFiles downloads a ZIP of original files for the given
-// knowledge IDs to destPath. On any error after the file is opened, the
-// partial file is removed.
+// knowledge IDs to destPath. Failed downloads preserve an existing file and
+// remove temporary data.
 func (c *Client) DownloadKnowledgeFiles(ctx context.Context, knowledgeBaseID string, ids []string, destPath string) error {
 	_, body, err := c.OpenKnowledgeFilesArchive(ctx, knowledgeBaseID, ids)
 	if err != nil {
@@ -569,16 +561,7 @@ func (c *Client) DownloadKnowledgeFiles(ctx context.Context, knowledgeBaseID str
 	}
 	defer body.Close()
 
-	out, err := os.Create(destPath)
-	if err != nil {
-		return fmt.Errorf("failed to create file: %w", err)
-	}
-	if _, err := io.Copy(out, body); err != nil {
-		_ = out.Close()
-		_ = os.Remove(destPath)
-		return fmt.Errorf("failed to copy response body: %w", err)
-	}
-	return out.Close()
+	return saveDownloadedFile(body, destPath)
 }
 
 // OpenKnowledgeFilesArchive starts a batch download and returns the
@@ -1017,4 +1000,65 @@ func (c *Client) BatchUpdateKnowledgeTags(ctx context.Context, updates map[strin
 	}
 
 	return parseResponse(resp, &batchResponse)
+}
+
+// saveDownloadedFile replaces destPath only after a complete copy and close.
+func saveDownloadedFile(body io.Reader, destPath string) error {
+	destination, err := resolveDownloadPath(destPath)
+	if err != nil {
+		return fmt.Errorf("failed to resolve destination: %w", err)
+	}
+	out, err := os.CreateTemp(filepath.Dir(destination), "."+filepath.Base(destination)+"-*.part")
+	if err != nil {
+		return fmt.Errorf("failed to create file: %w", err)
+	}
+	tempPath := out.Name()
+	defer func() { _ = os.Remove(tempPath) }()
+	if info, statErr := os.Stat(destPath); statErr == nil {
+		if err := out.Chmod(info.Mode().Perm()); err != nil {
+			_ = out.Close()
+			return fmt.Errorf("failed to preserve file permissions: %w", err)
+		}
+	}
+	if _, err := io.Copy(out, body); err != nil {
+		_ = out.Close()
+		return fmt.Errorf("failed to copy response body: %w", err)
+	}
+	if err := out.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tempPath, destination)
+}
+
+// resolveDownloadPath follows destination links, including links to a new file.
+func resolveDownloadPath(path string) (string, error) {
+	resolved, err := filepath.EvalSymlinks(path)
+	if err == nil {
+		return resolved, nil
+	}
+	if !errors.Is(err, os.ErrNotExist) {
+		return "", err
+	}
+	parent, err := filepath.EvalSymlinks(filepath.Dir(path))
+	if err != nil {
+		return "", err
+	}
+	info, err := os.Lstat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return filepath.Join(parent, filepath.Base(path)), nil
+	}
+	if err != nil {
+		return "", err
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		return filepath.Join(parent, filepath.Base(path)), nil
+	}
+	target, err := os.Readlink(path)
+	if err != nil {
+		return "", err
+	}
+	if !filepath.IsAbs(target) {
+		target = filepath.Join(parent, target)
+	}
+	return resolveDownloadPath(target)
 }
