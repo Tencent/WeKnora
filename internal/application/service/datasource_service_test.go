@@ -536,7 +536,7 @@ func TestIngestItem_URLCreationAttachesDataSourceMetadata(t *testing.T) {
 	ks := &sweepFakeKS{repo: repo, createURLKnowledge: &types.Knowledge{ID: "url-knowledge-1"}}
 	svc := &DataSourceService{knowledgeService: ks}
 
-	isUpdate, err := svc.ingestItem(context.Background(), ds, &types.FetchedItem{
+	isUpdate, _, err := svc.ingestItem(context.Background(), ds, &types.FetchedItem{
 		ExternalID: "url:1",
 		URL:        "https://example.com/doc",
 	}, nil)
@@ -558,7 +558,7 @@ func TestIngestItem_PersistsSourceUpdatedAt(t *testing.T) {
 	ks := &sweepFakeKS{repo: repo, createURLKnowledge: &types.Knowledge{ID: "url-knowledge-1"}}
 	svc := &DataSourceService{knowledgeService: ks}
 	created := time.Date(2021, 1, 2, 3, 4, 5, 0, time.UTC)
-	_, err := svc.ingestItem(context.Background(), ds, &types.FetchedItem{
+	_, _, err := svc.ingestItem(context.Background(), ds, &types.FetchedItem{
 		ExternalID: "url:1",
 		URL:        "https://example.com/doc",
 		UpdatedAt:  edited,
@@ -572,7 +572,7 @@ func TestIngestItem_PersistsSourceUpdatedAt(t *testing.T) {
 	repo = &deletionLookupKnowledgeRepo{}
 	ks = &sweepFakeKS{repo: repo, createURLKnowledge: &types.Knowledge{ID: "url-knowledge-2"}}
 	svc = &DataSourceService{knowledgeService: ks}
-	_, err = svc.ingestItem(context.Background(), ds, &types.FetchedItem{
+	_, _, err = svc.ingestItem(context.Background(), ds, &types.FetchedItem{
 		ExternalID: "url:2",
 		URL:        "https://example.com/doc2",
 	}, nil)
@@ -781,7 +781,7 @@ func TestIngestItem_URLCreationMetadataAttachFailure(t *testing.T) {
 	ks := &sweepFakeKS{repo: repo, createURLKnowledge: &types.Knowledge{ID: "url-knowledge-1"}}
 	svc := &DataSourceService{knowledgeService: ks}
 
-	_, err := svc.ingestItem(context.Background(), ds, &types.FetchedItem{
+	_, _, err := svc.ingestItem(context.Background(), ds, &types.FetchedItem{
 		ExternalID: "url:1",
 		URL:        "https://example.com/doc",
 	}, nil)

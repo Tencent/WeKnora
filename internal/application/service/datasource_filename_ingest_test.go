@@ -36,7 +36,7 @@ func TestIngestItem_QuotedFilename(t *testing.T) {
 	}
 	svc := &DataSourceService{knowledgeService: ks}
 	ctx := newCreateKnowledgeFileContext()
-	isUpdate, err := svc.ingestItem(ctx, ds, item, nil)
+	isUpdate, _, err := svc.ingestItem(ctx, ds, item, nil)
 	if err != nil {
 		t.Fatalf("ingestItem: %v", err)
 	}
