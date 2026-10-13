@@ -37,7 +37,7 @@ func TestAttachmentToolExecutionHonorsParseWaitAndParentDeadline(t *testing.T) {
 			engine := newTestEngine(t, &mockChat{})
 			engine.toolRegistry = tools.NewToolRegistry()
 			store := &attachmentDeadlineStore{}
-			engine.toolRegistry.RegisterTool(tools.NewReadAttachmentTool(store, tc.wait))
+			engine.toolRegistry.RegisterTool(tools.NewReadFileTool(nil).WithAttachments(store, tc.wait, nil))
 			ctx := context.Background()
 			if tc.parent > 0 {
 				var cancel context.CancelFunc
@@ -46,7 +46,7 @@ func TestAttachmentToolExecutionHonorsParseWaitAndParentDeadline(t *testing.T) {
 			}
 			start := time.Now()
 			call := engine.runToolCall(ctx, types.LLMToolCall{ID: "read", Function: types.FunctionCall{
-				Name: tools.ToolReadAttachment, Arguments: `{"attachment":"report"}`,
+				Name: tools.ToolReadFile, Arguments: `{"path":"attachment://report"}`,
 			}}, 0, 0, 0, "session", "message")
 			require.NotNil(t, call.Result)
 			require.True(t, call.Result.Success, call.Result.Error)

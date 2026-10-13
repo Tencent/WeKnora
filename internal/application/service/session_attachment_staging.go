@@ -23,6 +23,8 @@ type stagedSessionAttachment struct {
 	// ParsedPath is the Markdown text extracted from a binary attachment,
 	// staged beside it so a shell does not have to parse the file again.
 	ParsedPath string
+	// AttachmentPath is the read_file address of the same stored attachment.
+	AttachmentPath string
 }
 
 // parsedSidecarSuffix names the staged Markdown beside a binary attachment.
@@ -191,11 +193,12 @@ func (s *agentService) stageSessionAttachments(
 		}
 
 		staged = append(staged, stagedSessionAttachment{
-			Name:       attachment.FileName,
-			FileType:   attachment.FileType,
-			Size:       attachment.FileSize,
-			Path:       remotePath,
-			ParsedPath: parsedPath,
+			Name:           attachment.FileName,
+			FileType:       attachment.FileType,
+			Size:           attachment.FileSize,
+			Path:           remotePath,
+			ParsedPath:     parsedPath,
+			AttachmentPath: types.AttachmentPath(attachment.ID),
 		})
 	}
 
@@ -266,7 +269,8 @@ func (s *agentService) resolveSessionAttachmentURLs(
 		if _, plainText := temporaryTextExtensions[strings.ToLower(document.FileType)]; !plainText &&
 			document.Status == types.TemporaryDocumentStatusReady && strings.TrimSpace(document.Content) != "" &&
 			strings.TrimSpace(attachment.URL) == strings.TrimSpace(document.ResourceRef) {
-			parsed[strings.TrimSpace(document.ResourceRef)] = document.Content
+			parsed[strings.TrimSpace(document.ResourceRef)] = types.NumberAttachmentImages(
+				document.Content, document.ViewableImages())
 		}
 	}
 	return out, parsed, nil
@@ -314,12 +318,16 @@ func buildSandboxAttachmentsPrompt(attachments []stagedSessionAttachment, layout
 	workspace := strings.TrimSpace(layout.Root)
 	var b strings.Builder
 	fmt.Fprintf(&b, "\n\n<sandbox_attachments root=\"%s\">\n", escapeAttachmentXML(inputDir))
-	hasParsed := false
+	hasParsed, hasStored := false, false
 	for _, attachment := range attachments {
 		parsed := ""
 		if attachment.ParsedPath != "" {
 			hasParsed = true
 			parsed = fmt.Sprintf(" parsed_text_path=\"%s\"", escapeAttachmentXML(attachment.ParsedPath))
+		}
+		if attachment.AttachmentPath != "" {
+			hasStored = true
+			parsed += fmt.Sprintf(" attachment_path=\"%s\"", escapeAttachmentXML(attachment.AttachmentPath))
 		}
 		fmt.Fprintf(
 			&b,
@@ -335,15 +343,20 @@ func buildSandboxAttachmentsPrompt(attachments []stagedSessionAttachment, layout
 	// attributes above, so it gets the same escaping: on a host layout these
 	// are directory names the user picked, and unescaped markup in one would
 	// close the element and read as instructions.
-	b.WriteString("  <instruction>These are the user's files: read them at the absolute paths above " +
-		"and do not write into " + escapeAttachmentXML(inputDir) + ". Inspect them with read_file, " +
-		"or with shell_exec (ls/find) when a shell is available. " +
+	b.WriteString("  <instruction>These are the user's files at the absolute paths above; " +
+		"do not write into " + escapeAttachmentXML(inputDir) + ".")
+	if hasStored {
+		b.WriteString(" To read a file that has attachment_path, call read_file at that attachment_path: it " +
+			"returns the text already parsed from the file, waiting briefly if parsing is still running, and " +
+			"<attachment_path>/images/N shows you image N of it. Never install parsers or OCR, or unpack the " +
+			"original, to read or view such a file. Use its path only when a program needs the original bytes.")
+	}
+	if hasParsed {
+		b.WriteString(" parsed_text_path is the same parsed text as a sandbox file for shell programs.")
+	}
+	b.WriteString(" Inspect other files with read_file, or with shell_exec (ls/find) when a shell is available. " +
 		"Create generated files with write_sandbox_file " +
 		"and patch existing ones with edit_sandbox_file.")
-	if hasParsed {
-		b.WriteString(" parsed_text_path holds the text already extracted from that file as Markdown; " +
-			"read it instead of parsing the original again unless you need its exact layout or binary data.")
-	}
 	if layout.IsHost() {
 		if workspace != "" {
 			b.WriteString(" Edit files in place under " + escapeAttachmentXML(workspace) + ".")

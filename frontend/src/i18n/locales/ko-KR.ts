@@ -1807,7 +1807,6 @@ export default {
       getDocumentContent: '문서 내용 가져오기',
       wikiReadSourceDoc: '원본 문서 읽기',
       readDocument: '문서 읽기',
-      readAttachment: '첨부 파일 읽기',
       listDocuments: '문서 목록 보기',
       todoWrite: '계획 관리',
       knowledgeGraphExtract: '지식 그래프 추출',
@@ -1832,6 +1831,14 @@ export default {
       heading: '스킬 파일',
       script: '스크립트',
       instructions: '스킬 안내'
+    },
+    imageView: {
+      summary: '"{file}"의 이미지 {numbers}을(를) 확인했습니다 (총 {total}장)',
+      single: '이미지 "{file}"을(를) 확인했습니다',
+      descriptionsHeading: '비전 모델의 이미지 설명',
+      imageLabel: '이미지 #{n}',
+      noDescription: '설명을 생성하지 못했습니다',
+      remaining: '확인하지 않은 이미지 {count}장 남음'
     },
     sandboxFiles: {
       found: '파일 {count}개 발견',

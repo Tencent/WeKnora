@@ -22,15 +22,17 @@ func TestBuildAgentPromptListsStoredDocumentsWithoutContent(t *testing.T) {
 	prompt := MessageAttachments{{
 		ID: "doc-large", FileName: "report.pdf", FileType: ".pdf", FileSize: 2048,
 		Status: TemporaryDocumentStatusReady, ContentMode: AttachmentContentModeOnDemand,
-		TokenCount: 40000, TotalChunks: 60, Outline: "# Intro\n## Results",
+		TokenCount: 40000, TotalChunks: 60, Outline: "# Intro\n## Results", ImageCount: 3,
 	}}.BuildAgentPrompt()
 
 	assert.Contains(t, prompt, `<attachments delivery="on_demand">`)
-	assert.Contains(t, prompt, `handle="`+AttachmentHandle("doc-large")+`"`)
+	assert.Contains(t, prompt, `path="attachment://`+AttachmentHandle("doc-large")+`"`)
 	assert.Contains(t, prompt, `status="ready"`)
 	assert.Contains(t, prompt, `tokens="40000"`)
-	assert.Contains(t, prompt, `chunks="60"`)
-	assert.Contains(t, prompt, "read_attachment")
+	assert.Contains(t, prompt, `images="3"`)
+	assert.Contains(t, prompt, "read_file")
+	assert.Contains(t, prompt, "<path>/images/N")
+	assert.Contains(t, prompt, "do not run OCR")
 	assert.Contains(t, prompt, "<outline>\n# Intro\n## Results\n</outline>")
 	assert.NotContains(t, prompt, "<content>\n")
 	assert.NotContains(t, prompt, "doc-large", "the durable document ID must not reach the model")
@@ -69,6 +71,28 @@ func TestBuildAgentPromptEscapesAttachmentText(t *testing.T) {
 
 	assert.NotContains(t, prompt, `x"><evil>`)
 	assert.Equal(t, 1, strings.Count(prompt, "</attachments>"))
+}
+
+func TestNumberAttachmentImagesMarksStoredImagesOnly(t *testing.T) {
+	images := []TemporaryDocumentImage{{URL: "/files/a.png"}, {URL: "/files/b.png"}}
+	content := "intro ![](/files/b.png)\n![step 1](</files/a.png> \"title\") and ![x](https://elsewhere/c.png)"
+
+	got := NumberAttachmentImages(content, images)
+
+	assert.Equal(t, "intro ![](/files/b.png) [image #2]\n![step 1](</files/a.png> \"title\") [image #1] "+
+		"and ![x](https://elsewhere/c.png)", got)
+	assert.Equal(t, content, NumberAttachmentImages(content, nil))
+}
+
+func TestViewableImagesFallsBackToTheImageUpload(t *testing.T) {
+	document := &TemporaryDocument{ImageRefs: JSON(`[{"url":""},{"url":"/files/a.png"}]`)}
+	assert.Equal(t, []TemporaryDocumentImage{{URL: "/files/a.png"}}, document.ViewableImages())
+
+	upload := &TemporaryDocument{ImageRefs: JSON(`[]`), MimeType: "image/png", ResourceRef: "local://shot.png"}
+	assert.Equal(t, []TemporaryDocumentImage{{URL: "local://shot.png", MimeType: "image/png"}}, upload.ViewableImages())
+
+	pdf := &TemporaryDocument{ImageRefs: JSON(`[]`), MimeType: "application/pdf", ResourceRef: "local://a.pdf"}
+	assert.Empty(t, pdf.ViewableImages())
 }
 
 func TestBuildPromptNotesDocumentWithoutInlinedContent(t *testing.T) {

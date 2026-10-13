@@ -6276,7 +6276,6 @@ export default {
       getDocumentContent: 'Get Document Content',
       wikiReadSourceDoc: 'Deep-read Source Doc',
       readDocument: 'Read document',
-      readAttachment: 'Read attachment',
       listDocuments: 'List documents',
       todoWrite: 'Plan Management',
       knowledgeGraphExtract: 'Knowledge Graph Extraction',
@@ -6301,6 +6300,14 @@ export default {
       heading: 'Skill files',
       script: 'script',
       instructions: 'Instructions'
+    },
+    imageView: {
+      summary: 'Viewed image {numbers} of {total} in "{file}"',
+      single: 'Viewed image "{file}"',
+      descriptionsHeading: 'Descriptions from the vision model',
+      imageLabel: 'Image #{n}',
+      noDescription: 'Could not be described',
+      remaining: '{count} more not viewed'
     },
     sandboxFiles: {
       found: 'Found {count} file(s)',

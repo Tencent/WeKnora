@@ -6276,7 +6276,6 @@ export default {
       getDocumentContent: 'ドキュメント内容を取得',
       wikiReadSourceDoc: 'ソースドキュメントを精読',
       readDocument: 'ドキュメントを読む',
-      readAttachment: '添付ファイルを読む',
       listDocuments: 'ドキュメント一覧',
       todoWrite: '計画管理',
       knowledgeGraphExtract: 'ナレッジグラフ抽出',
@@ -6301,6 +6300,14 @@ export default {
       heading: 'スキルファイル',
       script: 'スクリプト',
       instructions: 'スキル説明'
+    },
+    imageView: {
+      summary: '「{file}」の画像 {numbers} を確認しました（全 {total} 枚）',
+      single: '画像「{file}」を確認しました',
+      descriptionsHeading: 'ビジョンモデルによる画像の説明',
+      imageLabel: '画像 #{n}',
+      noDescription: '説明を生成できませんでした',
+      remaining: '未確認の画像があと {count} 枚あります'
     },
     sandboxFiles: {
       found: '{count}件のファイルが見つかりました',

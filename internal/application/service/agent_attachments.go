@@ -18,8 +18,8 @@ import (
 
 const defaultAgentAttachmentParseWait = 60 * time.Second
 
-// agentSessionAttachments is read_attachment's view of one session. Documents
-// are looked up by tenant and ID only after the tool has matched them against
+// agentSessionAttachments is attachment://'s view of one session. Documents
+// are looked up by tenant and ID only after read_file has matched them against
 // the session's own message attachments, so a forked session can still read
 // files whose temporary_documents row stays on the parent.
 type agentSessionAttachments struct {
@@ -77,9 +77,9 @@ func agentAttachmentParseWait(config *types.AgentConfig) time.Duration {
 	return defaultAgentAttachmentParseWait
 }
 
-// registerAttachmentReader offers read_attachment when the session has at
-// least one stored attachment. It follows the session's content rather than
-// the tool allowlist: a file the user sent must stay readable.
+// registerAttachmentReader adds attachment:// to read_file when the session
+// has at least one stored attachment. It follows the session's content rather
+// than the tool allowlist: a file the user sent must stay readable.
 func (s *agentService) registerAttachmentReader(
 	ctx context.Context, registry *tools.ToolRegistry, config *types.AgentConfig, sessionID string,
 ) {
@@ -101,15 +101,29 @@ func (s *agentService) registerAttachmentReader(
 	}
 	attachments, err := store.SessionAttachments(ctx)
 	if err != nil {
-		logger.Warnf(ctx, "read_attachment not registered: load session attachments: %v", err)
+		logger.Warnf(ctx, "attachment:// not offered: load session attachments: %v", err)
 		return
 	}
+	stored := false
 	for _, attachment := range attachments {
 		if strings.TrimSpace(attachment.ID) != "" {
-			reader := tools.NewReadAttachmentTool(store, agentAttachmentParseWait(config)).
-				WithImageReader(store.ReadImage)
-			registry.RegisterTool(reader)
-			return
+			stored = true
+			break
 		}
 	}
+	if !stored {
+		return
+	}
+	var reader *tools.ReadFileTool
+	if existing, err := registry.GetTool(tools.ToolReadFile); err == nil {
+		if reader, _ = existing.(*tools.ReadFileTool); reader == nil {
+			logger.Warnf(ctx, "Cannot attach conversation attachments: read_file is registered by another tool")
+			return
+		}
+	} else {
+		reader = tools.NewReadFileTool(nil)
+		registry.RegisterTool(reader)
+	}
+	reader.WithAttachments(store, agentAttachmentParseWait(config), store.ReadImage).
+		WithAttachmentCopies(config.AttachmentSandboxCopies)
 }

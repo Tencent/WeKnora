@@ -4,6 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/agent/tools"
@@ -113,13 +116,118 @@ func TestKnowledgeImageSourcesReachFinalModelMessage(t *testing.T) {
 	}
 }
 
+func TestParallelToolImagesShareOneLabelledMessage(t *testing.T) {
+	var calls []types.ToolCall
+	for i := 1; i <= 3; i++ {
+		calls = append(calls, types.ToolCall{
+			ID: fmt.Sprintf("img-%d", i), Name: tools.ToolReadFile,
+			Result: &types.ToolResult{Success: true, Output: "image", Images: []string{fmt.Sprintf("data:image/png;base64,%d", i)}},
+		})
+	}
+	step := types.AgentStep{ToolCalls: calls}
+	engine := &AgentEngine{config: &types.AgentConfig{ChatModelSupportsVision: true}}
+
+	messages := tools.SanitizeMessages(engine.appendToolImages(t.Context(), engine.appendToolResults(nil, step), step))
+
+	last := messages[len(messages)-1]
+	require.Equal(t, "user", last.Role)
+	require.Equal(t, []string{"data:image/png;base64,1", "data:image/png;base64,2", "data:image/png;base64,3"}, last.Images)
+	require.Contains(t, last.Content, "[attached images 2-2] Images returned by tool read_file (call img-2)")
+}
+
+func TestParallelToolImagesAreDescribedTogetherWithImageNumbers(t *testing.T) {
+	step := types.AgentStep{ToolCalls: []types.ToolCall{
+		{ID: "pair", Name: tools.ToolReadFile, Result: &types.ToolResult{
+			Success: true, Output: "images 3-4",
+			Images: []string{"data:image/png;base64,Mw==", "data:image/png;base64,NA=="},
+			Data:   map[string]interface{}{"image_numbers": []int{3, 4}},
+		}},
+		{ID: "single", Name: tools.ToolReadFile, Result: &types.ToolResult{
+			Success: true, Output: "image 7",
+			Images: []string{"data:image/png;base64,Nw=="},
+			Data:   map[string]interface{}{"image_numbers": []int{7}},
+		}},
+	}}
+	var described atomic.Int32
+	engine := &AgentEngine{config: &types.AgentConfig{}}
+	engine.SetImageDescriber(func(_ context.Context, data []byte, _ string) (string, error) {
+		described.Add(1)
+		if string(data) == "4" {
+			return "", errors.New("vlm timeout")
+		}
+		return "figure " + string(data), nil
+	})
+
+	messages := engine.appendToolImages(t.Context(), engine.appendToolResults(nil, step), step)
+	require.Len(t, messages, 3)
+	require.EqualValues(t, 3, described.Load())
+	require.Contains(t, messages[1].Content, "[image #3] figure 3\n[image #4] could not be described")
+	require.Contains(t, messages[2].Content, "[image #7] figure 7")
+
+	engine.SetImageDescriber(func(context.Context, []byte, string) (string, error) {
+		return "", errors.New("down")
+	})
+	messages = engine.appendToolImages(t.Context(), engine.appendToolResults(nil, step), step)
+	require.Contains(t, messages[1].Content, "cannot view")
+	require.Contains(t, messages[2].Content, "cannot view")
+}
+
+func TestToolImagesDescribedDuringCallAreReusedAndShown(t *testing.T) {
+	result := &types.ToolResult{
+		Success: true, Output: "image 2",
+		Images: []string{"data:image/png;base64,Mg=="},
+		Data:   map[string]interface{}{"display_type": "image_view", "image_numbers": []int{2}},
+	}
+	var described atomic.Int32
+	engine := &AgentEngine{config: &types.AgentConfig{}}
+	engine.SetImageDescriber(func(context.Context, []byte, string) (string, error) {
+		described.Add(1)
+		return "a bar chart", nil
+	})
+
+	engine.describeToolImages(t.Context(), result)
+	require.Equal(t, []string{"a bar chart"}, result.Data["image_descriptions"])
+	step := types.AgentStep{ToolCalls: []types.ToolCall{{ID: "img", Name: tools.ToolReadFile, Result: result}}}
+	messages := engine.appendToolImages(t.Context(), engine.appendToolResults(nil, step), step)
+	require.Contains(t, messages[1].Content, "[image #2] a bar chart")
+	require.EqualValues(t, 1, described.Load(), "descriptions from the tool call must not be regenerated")
+
+	visionResult := &types.ToolResult{Success: true, Images: result.Images, Data: map[string]interface{}{}}
+	engine.config.ChatModelSupportsVision = true
+	engine.describeToolImages(t.Context(), visionResult)
+	require.Nil(t, visionResult.ImageDescriptions)
+	require.NotContains(t, visionResult.Data, "image_descriptions")
+}
+
+func TestToolImagePromptFollowsRequestedDetailAndFocus(t *testing.T) {
+	var prompts []string
+	engine := &AgentEngine{config: &types.AgentConfig{}}
+	engine.SetImageDescriber(func(_ context.Context, _ []byte, prompt string) (string, error) {
+		prompts = append(prompts, prompt)
+		return "ok", nil
+	})
+	image := []string{"data:image/png;base64,YQ=="}
+
+	engine.describeToolImages(t.Context(), &types.ToolResult{Success: true, Images: image})
+	engine.describeToolImages(t.Context(), &types.ToolResult{
+		Success: true, Images: image, ImageDetail: types.ImageDetailFull, ImageFocus: "the Q3 revenue",
+	})
+	require.Len(t, prompts, 2)
+	require.Equal(t, toolImageBriefPrompt, prompts[0])
+	require.True(t, strings.HasPrefix(prompts[1], toolImageFullPrompt))
+	require.Contains(t, prompts[1], "looking for: the Q3 revenue")
+	require.Len(t, []rune(toolImagePrompt("", strings.Repeat("x", 1000))),
+		len([]rune(toolImageBriefPrompt))+len("\nThe assistant is looking for: ")+toolImageFocusRunes+
+			len("\nAddress that first, saying plainly if the image does not show it."))
+}
+
 func TestAttachmentImagesReachVisionOrVLMWithoutPersistingBytes(t *testing.T) {
 	step := types.AgentStep{ToolCalls: []types.ToolCall{{
-		ID: "attachment-images", Name: tools.ToolReadAttachment,
+		ID: "attachment-images", Name: tools.ToolReadFile,
 		Result: &types.ToolResult{
-			Success: true, Output: "Attachment images 0..0",
+			Success: true, Output: "Attachment images 1-1",
 			Images: []string{"data:image/png;base64,YQ=="},
-			Data:   map[string]interface{}{"display_type": "attachment_read", "total_images": 1},
+			Data:   map[string]interface{}{"path": "attachment://att_1/images/1", "total_images": 1},
 		},
 	}}}
 	engine := &AgentEngine{config: &types.AgentConfig{ChatModelSupportsVision: true}}

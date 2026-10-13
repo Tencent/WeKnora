@@ -720,7 +720,7 @@ func (s *temporaryDocumentService) ResolveForPrompt(ctx context.Context, tenantI
 // DescribeForAgent returns a manifest view of the given documents for an
 // agent turn. Unlike ResolveForPrompt it neither waits for parsing nor
 // selects content by the question: the agent reads what it needs through
-// read_attachment, so only small, ready documents are inlined in full.
+// read_file, so only small, ready documents are inlined in full.
 func (s *temporaryDocumentService) DescribeForAgent(
 	ctx context.Context, tenantID uint64, sessionID string, documentIDs []string,
 ) (*types.TemporaryDocumentPromptResult, error) {
@@ -748,11 +748,13 @@ func (s *temporaryDocumentService) DescribeForAgent(
 			Status: document.Status, ContentMode: types.AttachmentContentModeOnDemand,
 		}
 		if document.Status == types.TemporaryDocumentStatusReady {
+			images := document.ViewableImages()
 			attachment.TokenCount = document.TokenCount
 			attachment.TotalChunks = document.ChunkCount
+			attachment.ImageCount = len(images)
 			attachment.Outline = temporaryDocumentOutline(document.Content)
 			if document.TokenCount <= types.AgentAttachmentInlineTokens && document.TokenCount <= inlineBudget {
-				attachment.Content = document.Content
+				attachment.Content = types.NumberAttachmentImages(document.Content, images)
 				attachment.ContentMode = types.AttachmentContentModeFull
 				attachment.SelectedChunks = document.ChunkCount
 				inlineBudget -= document.TokenCount

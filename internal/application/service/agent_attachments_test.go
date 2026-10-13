@@ -21,6 +21,20 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+type stagingSessionFileStore struct{}
+
+func (stagingSessionFileStore) ListSessionFiles(context.Context, string, string) ([]sandbox.RemoteDirEntry, error) {
+	return nil, nil
+}
+
+func (stagingSessionFileStore) StatSessionFile(context.Context, string, string) (*sandbox.RemoteStatEntry, error) {
+	return nil, nil
+}
+
+func (stagingSessionFileStore) ReadSessionFile(context.Context, string, string) ([]byte, error) {
+	return nil, nil
+}
+
 func sessionDocument(id, fileType, status string, tokens int, content string) *types.TemporaryDocument {
 	return &types.TemporaryDocument{
 		ID: id, TenantID: 7, SessionID: "session-1", ResourceRef: "local://tenant/" + id,
@@ -125,7 +139,10 @@ func TestStageSessionAttachmentsWritesParsedTextBesideBinary(t *testing.T) {
 	require.Len(t, staged, 1)
 	require.Equal(t, staged[0].Path+parsedSidecarSuffix, staged[0].ParsedPath)
 	assert.Equal(t, "# Report\nparsed text", string(manager.files[staged[0].ParsedPath]))
-	assert.Contains(t, buildSandboxAttachmentsPrompt(staged, layout), `parsed_text_path="`+staged[0].ParsedPath+`"`)
+	prompt := buildSandboxAttachmentsPrompt(staged, layout)
+	assert.Contains(t, prompt, `parsed_text_path="`+staged[0].ParsedPath+`"`)
+	assert.Contains(t, prompt, `attachment_path="`+types.AttachmentPath("doc-1")+`"`)
+	assert.Contains(t, prompt, "Never install parsers or OCR")
 
 	// A second pass keeps the sidecar instead of deleting it as stale.
 	manager.writes = nil
@@ -168,8 +185,8 @@ func TestSentAttachmentRemainsReadableAfterExpiryAndFork(t *testing.T) {
 	require.NoError(t, err)
 	require.Nil(t, removed, "unused uploads must still expire")
 	store := &agentSessionAttachments{messages: messages, documents: repo, tenantID: 7, sessionID: fork.ID}
-	reader := tools.NewReadAttachmentTool(store, 0)
-	args, err := json.Marshal(tools.ReadAttachmentInput{Attachment: types.AttachmentHandle(document.ID)})
+	reader := tools.NewReadFileTool(nil).WithAttachments(store, 0, nil)
+	args, err := json.Marshal(tools.ReadFileInput{Path: types.AttachmentPath(document.ID)})
 	require.NoError(t, err)
 	result, err := reader.Execute(context.Background(), args)
 	require.NoError(t, err)
@@ -207,8 +224,9 @@ func TestAttachmentImageDeliveryDoesNotDependOnQuestionKeywords(t *testing.T) {
 	}
 	manifest, err := svc.DescribeForAgent(context.Background(), 7, "session-1", []string{document.ID})
 	require.NoError(t, err)
-	assert.Empty(t, manifest.ImageURLs, "agent document images are requested through read_attachment")
+	assert.Empty(t, manifest.ImageURLs, "agent document images are requested through read_file")
 	assert.Empty(t, manifest.Attachments[0].Content)
+	assert.Equal(t, 2, manifest.Attachments[0].ImageCount)
 	document.FileType = ".png"
 	for _, query := range []string{"解释图表", "summarize", "この資料を説明して", ""} {
 		got, err := svc.ResolveForPrompt(context.Background(), 7, "session-1", []string{document.ID}, query)
@@ -279,6 +297,39 @@ func TestAttachmentSourceAndImagesAvoidProviderExpiry(t *testing.T) {
 	assert.Equal(t, uint64(7), files.readTenant, "image reads use the session owner, not the shared agent tenant")
 }
 
+// A document still parsing at turn start has no parsed sidecar yet, but the
+// prompt must still route reading through the attachment, not the raw bytes.
+func TestStageSessionAttachmentsRoutesUnparsedDocumentsToAttachmentPath(t *testing.T) {
+	db := stagingTempDocDB(t)
+	resourceRef := "local://tenant/fresh"
+	require.NoError(t, db.Create(&types.TemporaryDocument{
+		ID: "doc-1", TenantID: 7, SessionID: "session-1", ResourceRef: resourceRef,
+		FileName: "brief.docx", FileType: ".docx", FileSize: 4,
+		Status: types.TemporaryDocumentStatusProcessing, ExpiresAt: time.Now().Add(time.Hour),
+	}).Error)
+	manager := &stagingSandboxManager{sandboxType: sandbox.SandboxTypeCube}
+	service := &agentService{
+		db:              db,
+		sandboxMgr:      manager,
+		fileService:     &stagingFileService{files: map[string][]byte{resourceRef: []byte("PK\x03\x04")}},
+		sandboxResolver: stubSandboxResolver{mgr: manager},
+	}
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(7))
+	layout := sandbox.RemoteWorkspaceLayout()
+
+	staged, err := service.stageSessionAttachments(ctx, "session-1", "cfg-remote", 7,
+		types.MessageAttachments{{ID: "doc-1", FileName: "brief.docx", FileType: ".docx", FileSize: 4}}, layout)
+
+	require.NoError(t, err)
+	require.Len(t, staged, 1)
+	assert.Empty(t, staged[0].ParsedPath)
+	assert.Equal(t, types.AttachmentPath("doc-1"), staged[0].AttachmentPath)
+	prompt := buildSandboxAttachmentsPrompt(staged, layout)
+	assert.Contains(t, prompt, `attachment_path="`+types.AttachmentPath("doc-1")+`"`)
+	assert.Contains(t, prompt, "call read_file at that attachment_path")
+	assert.NotContains(t, prompt, "parsed_text_path")
+}
+
 func TestStageSessionAttachmentsSkipsParsedTextForPlainText(t *testing.T) {
 	db := stagingTempDocDB(t)
 	resourceRef := "local://tenant/notes"
@@ -314,8 +365,8 @@ func TestRegisterAttachmentReaderFollowsSessionAttachments(t *testing.T) {
 
 	empty := tools.NewToolRegistry()
 	service.registerAttachmentReader(ctx, empty, config, "session-1")
-	_, err := empty.GetTool(tools.ToolReadAttachment)
-	assert.Error(t, err, "a session without stored attachments must not offer read_attachment")
+	_, err := empty.GetTool(tools.ToolReadFile)
+	assert.Error(t, err, "a session without stored attachments must not offer attachment://")
 
 	require.NoError(t, db.Create(&types.Message{
 		ID: "m1", SessionID: "session-1", Role: "user", Content: "see file",
@@ -323,6 +374,35 @@ func TestRegisterAttachmentReaderFollowsSessionAttachments(t *testing.T) {
 	}).Error)
 	registry := tools.NewToolRegistry()
 	service.registerAttachmentReader(ctx, registry, config, "session-1")
-	_, err = registry.GetTool(tools.ToolReadAttachment)
-	assert.NoError(t, err)
+	tool, err := registry.GetTool(tools.ToolReadFile)
+	require.NoError(t, err)
+	assert.Contains(t, tool.Description(), "attachment://")
+
+	// A sandbox read_file registered first gains attachments instead of being replaced.
+	withSandbox := tools.NewToolRegistry()
+	sandboxReader := tools.NewReadFileTool(&stagingSessionFileStore{})
+	withSandbox.RegisterTool(sandboxReader)
+	service.registerAttachmentReader(ctx, withSandbox, config, "session-1")
+	tool, err = withSandbox.GetTool(tools.ToolReadFile)
+	require.NoError(t, err)
+	assert.Same(t, sandboxReader, tool)
+	assert.Contains(t, tool.Description(), "attachment://")
+	assert.Contains(t, tool.Description(), "Sandbox files")
+}
+
+func TestDescribeForAgentNumbersImagesInInlinedContent(t *testing.T) {
+	document := sessionDocument("guide", ".docx", types.TemporaryDocumentStatusReady, 100,
+		"Open settings ![](local://step-1.png)\nSave ![](local://step-2.png)")
+	document.ImageRefs = types.JSON(`[{"url":"local://step-1.png"},{"url":"local://step-2.png"}]`)
+	svc := &temporaryDocumentService{repo: &forkAccessDocRepo{docs: []*types.TemporaryDocument{document}}}
+
+	manifest, err := svc.DescribeForAgent(context.Background(), 7, "session-1", []string{document.ID})
+
+	require.NoError(t, err)
+	attachment := manifest.Attachments[0]
+	assert.Equal(t, 2, attachment.ImageCount)
+	assert.Contains(t, attachment.Content, "![](local://step-2.png) [image #2]")
+	prompt := manifest.Attachments.BuildAgentPrompt()
+	assert.Contains(t, prompt, `images="2"`)
+	assert.Contains(t, prompt, "[image #1]")
 }

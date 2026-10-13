@@ -1688,8 +1688,8 @@ func (h *Handler) resolveTemporaryAttachments(streamCtx *sseStreamContext, reqCt
 // describeTemporaryAttachmentsForAgent hands an agent turn a manifest of the
 // pre-uploaded documents without waiting for parsing to finish or choosing
 // content by the question. The agent reads attachments itself through
-// read_attachment, which waits for a document that is still parsing only
-// when the agent actually needs it.
+// read_file's attachment:// paths, which wait for a document that is still
+// parsing only when the agent actually needs it.
 func (h *Handler) describeTemporaryAttachmentsForAgent(streamCtx *sseStreamContext, reqCtx *qaRequestContext) {
 	if len(reqCtx.attachmentIDs) == 0 {
 		return
@@ -1709,7 +1709,7 @@ func (h *Handler) describeTemporaryAttachmentsForAgent(streamCtx *sseStreamConte
 }
 
 // awaitImageAttachmentsForAgent waits for standalone image uploads. Document
-// images are read on demand through read_attachment.
+// images are read on demand through read_file.
 func (h *Handler) awaitImageAttachmentsForAgent(streamCtx *sseStreamContext, reqCtx *qaRequestContext) {
 	if reqCtx.customAgent == nil || !reqCtx.customAgent.Config.ImageUploadEnabled {
 		return

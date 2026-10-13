@@ -1809,7 +1809,6 @@ export default {
       getDocumentContent: '获取文档内容',
       wikiReadSourceDoc: '精读源文档',
       readDocument: '阅读文档',
-      readAttachment: '阅读附件',
       listDocuments: '浏览文档列表',
       todoWrite: '计划管理',
       knowledgeGraphExtract: '知识图谱抽取',
@@ -1834,6 +1833,14 @@ export default {
       heading: '技能文件',
       script: '脚本',
       instructions: '技能说明'
+    },
+    imageView: {
+      summary: '已查看「{file}」第 {numbers} 张图片，共 {total} 张',
+      single: '已查看图片「{file}」',
+      descriptionsHeading: '视觉模型的图片描述',
+      imageLabel: '图片 #{n}',
+      noDescription: '未能生成描述',
+      remaining: '还有 {count} 张未查看'
     },
     sandboxFiles: {
       found: '找到 {count} 个文件',

@@ -215,6 +215,15 @@ func (s *sessionService) AgentQA(
 		if err != nil {
 			return fmt.Errorf("restore session attachments into sandbox: %w", err)
 		}
+		for _, staged := range stagedAttachments {
+			if staged.AttachmentPath == "" {
+				continue
+			}
+			if agentConfig.AttachmentSandboxCopies == nil {
+				agentConfig.AttachmentSandboxCopies = make(map[string]string, len(stagedAttachments))
+			}
+			agentConfig.AttachmentSandboxCopies[staged.Path] = staged.AttachmentPath
+		}
 	}
 
 	// Create agent engine with EventBus
@@ -278,7 +287,7 @@ func (s *sessionService) AgentQA(
 	if req.QuotedContext != "" {
 		agentQuery += "\n\n" + req.QuotedContext
 	}
-	// Stored documents are listed for read_attachment rather than pasted in;
+	// Stored documents are listed for read_file rather than pasted in;
 	// inline uploads without a stored document still carry their content.
 	if len(req.Attachments) > 0 {
 		agentQuery += req.Attachments.BuildAgentPrompt()
