@@ -266,6 +266,36 @@ func TestSessionRepositoryQueryPagedWebExcludesAPIKeySessions(t *testing.T) {
 		"web must keep legacy tenant rows but exclude API-key sessions")
 }
 
+func TestSessionRepositoryQueryPagedFiltersWebSessionsByAgentID(t *testing.T) {
+	repo, db := newSessionRepositoryForTest(t)
+	require.NoError(t, db.AutoMigrate(&testIMChannelSession{}))
+	ctx := context.Background()
+
+	matching := createSessionForTest(t, db, 1, "alice")
+	otherAgent := createSessionForTest(t, db, 1, "alice")
+	otherTenant := createSessionForTest(t, db, 2, "alice")
+
+	_, err := repo.UpdateLastRequestState(ctx, 1, "alice", matching.ID, &types.SessionLastRequestState{
+		AgentID: "agent-target",
+	})
+	require.NoError(t, err)
+	_, err = repo.UpdateLastRequestState(ctx, 1, "alice", otherAgent.ID, &types.SessionLastRequestState{
+		AgentID: "agent-other",
+	})
+	require.NoError(t, err)
+	_, err = repo.UpdateLastRequestState(ctx, 2, "alice", otherTenant.ID, &types.SessionLastRequestState{
+		AgentID: "agent-target",
+	})
+	require.NoError(t, err)
+
+	items, total, err := repo.QueryPaged(ctx, &types.SessionListQuery{
+		TenantID: 1, UserID: "alice", Source: "web", AgentID: "agent-target", Page: 1, PageSize: 50,
+	})
+	require.NoError(t, err)
+	require.EqualValues(t, 1, total)
+	require.Equal(t, []string{matching.ID}, listItemIDsForTest(items))
+}
+
 func TestSessionRepositoryGetIMPlatform(t *testing.T) {
 	repo, db := newSessionRepositoryForTest(t)
 	require.NoError(t, db.AutoMigrate(&testIMChannelSession{}))
