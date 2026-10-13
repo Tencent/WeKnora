@@ -12,7 +12,7 @@
           {{ t('mcpMetadata.columnTool') }}
           <t-tooltip v-if="serviceId" :content="t('mcpMetadata.policyHint')" placement="top"
             :overlay-inner-style="{ maxWidth: '280px', whiteSpace: 'normal' }">
-            <t-icon name="help-circle" class="tools-list__help" />
+            <t-icon name="help-circle" size="14px" class="tools-list__help" />
           </t-tooltip>
         </span>
         <template v-if="serviceId">
@@ -207,7 +207,7 @@ onBeforeUnmount(() => { generation++; emit('busy', false) })
 }
 .tools-list__header-tool { display: inline-flex; align-items: center; gap: 4px; }
 .tools-list__header-col { text-align: center; white-space: nowrap; }
-.tools-list__help { font-size: var(--app-text-base); color: var(--td-text-color-placeholder); cursor: help; }
+.tools-list__help { color: var(--td-text-color-placeholder); cursor: help; }
 .tool-row { padding-top: 12px; padding-bottom: 12px; min-width: 0; border-bottom: 1px solid var(--td-component-stroke); }
 .tool-row:last-child { border-bottom: 0; }
 .tool-main { min-width: 0; }
