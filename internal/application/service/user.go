@@ -594,6 +594,36 @@ func (s *userService) UpdateUser(ctx context.Context, user *types.User) error {
 	return s.userRepo.UpdateUser(ctx, user)
 }
 
+// Account-status errors share repository identity for errors.Is at the HTTP boundary.
+var (
+	ErrCannotDisableSelf      = apprepo.ErrCannotDisableSelf
+	ErrCannotDisableLastAdmin = apprepo.ErrCannotDisableLastAdmin
+	ErrUserNotFound           = apprepo.ErrUserNotFound
+)
+
+// SetUserActive changes status and revokes sessions atomically with the
+// repository's self-disable and last-active-admin guards.
+func (s *userService) SetUserActive(ctx context.Context, userID, actorID string, active bool) (*types.User, error) {
+	return s.userRepo.SetUserActive(ctx, userID, actorID, active)
+}
+
+// ListAllUsers lists every platform user newest-first for the system-admin
+// user-management UI. It fetches limit+1 rows to derive has_more without a
+// separate COUNT. Role gating is the handler's responsibility.
+func (s *userService) ListAllUsers(
+	ctx context.Context, offset, limit int,
+) ([]*types.User, bool, error) {
+	rows, err := s.userRepo.ListUsers(ctx, offset, limit+1)
+	if err != nil {
+		return nil, false, err
+	}
+	hasMore := len(rows) > limit
+	if hasMore {
+		rows = rows[:limit]
+	}
+	return rows, hasMore, nil
+}
+
 // ListSystemAdmins lists users with IsSystemAdmin=true. Thin pass-through
 // to the repository; the handler enforces SystemAdmin gating, so the
 // service does not duplicate the role check here.
@@ -1298,6 +1328,13 @@ func (s *userService) ValidateToken(ctx context.Context, tokenString string) (*t
 	user, err := s.userRepo.GetUserByID(ctx, userID)
 	if err != nil {
 		return nil, 0, err
+	}
+
+	// Defence in depth: a token minted before the account was disabled must
+	// stop working even if revocation missed it. Login also rejects disabled
+	// accounts, but long-lived access tokens are checked here per request.
+	if !user.IsActive {
+		return nil, 0, errors.New("account is disabled")
 	}
 
 	// Extract active tenant from the JWT. Anything missing or unparseable

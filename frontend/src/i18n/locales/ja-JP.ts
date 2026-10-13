@@ -324,6 +324,7 @@ export default {
   },
   menu: {
     sessionInProgress: '会話中',
+    sessionUnread: '新しい回答',
     knowledgeBase: 'ナレッジベース',
     agents: 'エージェント',
     artifacts: '成果物',
@@ -1828,6 +1829,7 @@ export default {
       skillTranscriptLive: 'インストールログ',
       skillTranscriptLiveHint: 'インストール中 — クリックで表示',
       skillTranscriptTitle: 'インストールの実行内容',
+      skillTranscriptPrompt: 'インストール指示',
       skillTranscriptHide: 'インストールの実行内容を非表示',
       skillGuidance: {
         placeholder: '必要な CLI、インストール手順、環境の制約などを入力',
@@ -1946,6 +1948,7 @@ export default {
       installedCount: '{count}個のサンドボックスにインストール済み',
       installPanelGroup: 'インストール済み',
       installPanelAvailable: '未インストール',
+      installAction: 'インストール',
       viewInstallProgress: '進捗を表示',
       manageOnSandbox: 'サンドボックス「{name}」でこのスキルを管理',
       manageDrawerDesc: 'サンドボックス「{name}」での有効化、変数、アンインストールを管理します。',
@@ -2805,7 +2808,13 @@ export default {
     mcpStale: '再同期が必要',
     belongsToKb: 'ナレッジベース: ',
     belongsToOrg: '共有スペース: ',
-    noCompatibleKbForAgent: 'このエージェントのツールはスコープ内のナレッジベースの機能と一致しないため、参照できるナレッジベースがありません。'
+    noCompatibleKbForAgent: 'このエージェントのツールはスコープ内のナレッジベースの機能と一致しないため、参照できるナレッジベースがありません。',
+    tag: 'タグ',
+    searchPlaceholder: 'ナレッジ・ファイル等を検索',
+    searchInGroup: '{group}内を検索…',
+    typeToSearch: "{'@'} の後に入力して検索…",
+    viewAll: 'すべて表示',
+    back: '戻る'
   },
   file: {
     upload: 'ファイルをアップロード'
@@ -3528,6 +3537,17 @@ export default {
         viewerClose: '閉じる (Esc)',
         prev: '前へ (←)',
         next: '次へ (→)',
+        sourceFilter: 'ドキュメントで絞り込み',
+        sourceFilterTitle: 'ソースドキュメントで絞り込み',
+        sourceFilterSearch: 'ドキュメント名を検索',
+        sourceFilterEmpty: '一致するドキュメントがありません',
+        sourceFilterSubtitle: '選択したドキュメントの画像のみを表示し、キャプションと OCR 結果を一つずつ確認できます',
+        sourceFilterSelected: '{count} 件のドキュメントを選択中',
+        sourceFilterClear: '選択をクリア',
+        sourceFilterTooMany: '選択できるのは最大 1000 件です',
+        sourceFilterSelectAll: 'すべて選択 / 選択解除（全ヒット対象）',
+        sourceFilterOverflowRecent: 'ドキュメントが多いため、最新 {cap} 件のみ表示しています。キーワードで絞り込んでください',
+        sourceFilterOverflowHits: '{total} 件がヒットしました。先頭 {cap} 件のみ表示中です。全選択前にキーワードを絞り込んでください',
         // Display names for the builtin attributes the gallery itself
         // declares. Attributes contributed by other sources fall back to the
         // pipeline's own wording (see the imageAttr namespace).
@@ -3627,6 +3647,16 @@ export default {
       helpZoomDesc: 'キャンバスを拡大・縮小',
       neighborsProgress: '{total}個の隣接ノードのうち{visible}個を表示中（{hidden}個は未読み込み）',
       neighborsAllShown: '{total}個の隣接ノードはすべてキャンバス上にあります（「隣接ノードを展開」でこのノードのサブグラフに焦点を当てられます）',
+      graphNavigationHint: '背景をドラッグして移動 · スクロールでズーム',
+      focusGroup: 'このグループを表示',
+      focusGroupViewing: '表示中：{name}',
+      focusGroupBack: '全体に戻る',
+      focusGroupSwitch: '別のグループに切り替え',
+      unlinkedHidden: 'リンクのないページを {count} 件非表示',
+      unlinkedSection: 'リンクのないページ · {count}',
+      offscreenSection: '現在の表示内に接続なし（リンクあり）· {count}',
+      hideUnlinked: 'リンクのないページを非表示（{count}）',
+      showUnlinked: 'リンクのないページを表示（{count}）',
       neighborsNone: 'このページにリンクされた隣接ノードはありません',
       neighborsCenterUnreachable: '{total}個の隣接ノードのうち{visible}個を表示中（{hidden}個は到達不可: リンク切れ、フィルタ対象外、または削除済み）',
       neighborsOverviewHidden: '{total}個の隣接ノードのうち{visible}個を表示中（{hidden}個は概要の範囲外です。「展開」をクリックするとここを起点に表示できます）',
@@ -4065,6 +4095,7 @@ export default {
     truncatedHint: 'モデルの1回あたりの出力上限で回答が途中で打ち切られました。上記は打ち切り前に生成された内容です。',
     rewind: {
       tooltip: 'ここに巻き戻す',
+      confirmTitle: 'ここに巻き戻しますか？',
       confirmBody: 'これより後の会話を削除します。質問から巻き戻すとその質問自体も消え、入力欄に戻します。チェックポイントがあればワークスペースも戻します。この操作は元に戻せません。',
       confirmButton: '巻き戻す',
       cancelButton: 'キャンセル',
@@ -4394,35 +4425,26 @@ export default {
       },
       sections: {
         access: {
-          tab: 'アカウントとアクセス{count}',
-          title: 'アカウントとアクセス',
-          description: 'システム管理者、公開登録、ワークスペース作成のルールを管理します。'
+          title: '登録とアクセス',
+          description: '登録方法、パスワード要件、ワークスペース作成のルールを管理します。'
         },
         tenant: {
-          tab: 'ワークスペースのデフォルト値{count}',
           title: 'ワークスペースのデフォルト値',
           description: '既存のワークスペースを変更せずに、新規ワークスペースの初期クォータと互換動作を設定します。'
         },
         runtime: {
-          tab: 'ランタイムと並列実行{count}',
           title: 'ランタイムと並列実行',
           description: 'バックグラウンドのワーカプールとモデルサービスの並列実行数を設定します。',
           restartHint: 'ワーカ設定の変更には再起動が必要です'
         },
         security: {
-          tab: 'ネットワークセキュリティ{count}',
           title: 'ネットワークセキュリティ',
           description: 'SSRF許可リストと、Dockerサンドボックスの利用可否を管理します（ローカルのdocker.sockはホストのroot権限に相当します）。'
         },
         other: {
-          tab: 'その他{count}',
           title: 'その他の設定',
           description: 'このデプロイ環境に存在する、標準の製品グループに属さない設定です。'
         }
-      },
-      runtimeTable: {
-        setting: '設定と用途',
-        value: '現在の値'
       },
       runtime: {
         title: 'タスクキューのランタイム',
@@ -4742,34 +4764,45 @@ export default {
         success: 'デフォルト値にリセットしました',
         failed: 'リセットに失敗しました'
       },
-      admins: {
-        label: 'システム管理者',
-        description: 'プラットフォームレベルの権限を持つユーザです。メールアドレスを入力してEnterキーを押すと権限を付与でき、タグの×をクリックすると取り消せます。あなた自身も管理者ですが一覧には表示されず、自分の権限を取り消すことはできません。',
-        placeholder: 'ユーザのメールアドレスを入力してEnterキーを押してください',
-        loadFailed: 'システム管理者の読み込みに失敗しました',
-        saveSuccess: 'システム管理者を更新しました',
-        saveFailed: 'システム管理者の更新に失敗しました',
-        confirm: {
-          promote: {
-            header: 'システム管理者に昇格',
-            body: '{email}をシステム管理者に昇格しますか？このユーザはプラットフォームレベルの権限（すべてのワークスペース、システム設定、管理者一覧へのアクセス）を得ます。',
-            confirmBtn: '昇格'
-          },
-          revoke: {
-            header: 'システム管理者権限を解除',
-            body: '{email}のシステム管理者権限を解除しますか？すべてのシステムレベルの機能にアクセスできなくなります。',
-            confirmBtn: '解除'
-          }
-        }
+      userList: {
+        title: 'プラットフォームユーザー一覧',
+        rowLabel: 'ユーザー管理',
+        rowDesc: 'ワークスペース横断の登録ユーザーを、ページ送りとユーザー名/メール絞り込み付きで表示します。',
+        searchPlaceholder: 'ユーザー名またはメールで絞り込み（現在ページ）',
+        refresh: '更新',
+        active: '有効',
+        inactive: '無効',
+        colUsername: 'ユーザー名',
+        colStatus: '状態',
+        colRole: 'ロール',
+        colCreated: '作成日',
+        colAction: '操作',
+        prev: '前へ',
+        next: '次へ',
+        pageCount: '{shown} 件表示 / ページ内 {total}',
+        enable: '有効化',
+        disable: '無効化',
+        resetPassword: 'パスワードリセット',
+        confirmDisable: 'アカウント {name} を無効化しますか？有効なセッションは即時に失効します。',
+        confirmEnable: 'アカウント {name} を有効化しますか？',
+        enabledMsg: '{name} を有効化しました',
+        disabledMsg: '{name} を無効化しました',
+        actionFailed: '操作に失敗しました',
+        loadFailed: 'ユーザー一覧の読み込みに失敗しました',
+        roleAdmin: 'システム管理者',
+        roleUser: '一般ユーザー',
+        confirmRevoke: '{name} のシステム管理者権限を取り消しますか？',
+        confirmPromote: '{name} をシステム管理者に昇格させますか？',
+        revokeBtn: '取り消す',
+        promoteBtn: '昇格',
+        revokedMsg: '{name} の管理者権限を取り消しました',
+        promotedMsg: '{name} をシステム管理者に昇格しました',
+        roleFailed: 'ロールの変更に失敗しました',
       },
       passwordReset: {
-        label: 'ユーザのパスワードをリセット',
-        description: 'ログインできない他のユーザに新しいパスワードを設定します。リセットに成功すると、そのユーザの現在のセッションはすべて無効になり、新しいパスワードで再度ログインする必要があります。',
-        action: 'パスワードをリセット',
         dialogTitle: '他のユーザのパスワードをリセット',
         warning: 'これは高リスクの操作です。ユーザのメールアドレスをよく確認してください。ここで自分のパスワードをリセットすることはできません。',
         emailLabel: 'ユーザのメールアドレス',
-        emailPlaceholder: 'リセット対象ユーザのメールアドレスを入力してください',
         newPasswordLabel: '新しいパスワード',
         newPasswordPlaceholder: '新しいパスワードを入力してください',
         confirmPasswordLabel: '新しいパスワード（確認）',
@@ -4779,8 +4812,6 @@ export default {
         failed: 'パスワードのリセットに失敗しました',
       },
       createUser: {
-        label: 'ユーザを作成',
-        description: 'ローカルユーザアカウントを新規に作成します。プラットフォームのデフォルトのワークスペースモードが「個人ワークスペースを作成」の場合、自分で登録したユーザと同様に個人ワークスペースが作成されます。',
         action: 'ユーザを作成',
         dialogTitle: '新しいユーザを作成',
         warning: 'これは高リスクの操作です。ユーザ名とメールアドレスをよく確認してください。これらは新しいユーザのログインに使用されます。',
@@ -4803,10 +4834,6 @@ export default {
           usernameLength: 'ユーザ名は2〜50文字で入力してください',
           emailRequired: 'メールアドレスを入力してください',
           emailInvalid: '有効なメールアドレスを入力してください',
-          passwordRequired: '新しいパスワードを入力してください',
-          passwordLength: 'パスワードは8〜32文字で入力してください',
-          passwordLetter: 'パスワードには英字を含めてください',
-          passwordNumber: 'パスワードには数字を含めてください',
           confirmRequired: '新しいパスワードをもう一度入力してください',
           passwordMismatch: 'パスワードが一致しません'
         },
@@ -5626,6 +5653,9 @@ export default {
     "serverDocumentation": "サーバーの元の説明",
     "noServerDocumentation": "この MCP サーバーの initialize に instructions / serverInfo.description はありません（どちらも任意）。ツールの説明は下の各 description にあります。",
     "policyHint": "ツールの有効化と承認設定は即時保存され、一覧の更新後も維持されます。",
+    "columnTool": "ツール",
+    "columnEnabled": "有効",
+    "columnApproval": "承認",
     "failed": "ツール一覧を読み込めませんでした",
     "setupProgress": "MCP 設定の手順",
     "connection": "接続設定",
@@ -5668,6 +5698,9 @@ export default {
     authTypeApiKey: 'APIキー／トークン',
     authTypeOAuth: 'OAuth 2.0（初回接続時に認可）',
     oauthScopes: 'スコープ（任意、スペース区切り）',
+    oauthClientId: 'クライアント ID（任意）',
+    oauthClientIdDesc: '認可サーバーに事前登録したクライアントを指定します。空欄の場合は動的クライアント登録で自動登録します。クライアント ID を変更する場合はシークレットも更新してください。',
+    oauthClientSecret: 'クライアントシークレット（任意）',
     oauthAuthorization: '認可状態',
     oauthAuthorized: '認可済み',
     oauthRefreshable: 'トークンの有効期限が切れています。次回利用時に自動的に更新されます',
@@ -6285,6 +6318,22 @@ export default {
       script: 'スクリプト',
       instructions: 'スキル説明'
     },
+    attachmentTarget: {
+      list: 'すべての添付ファイル',
+      file: '添付ファイル',
+      images: '{name} の画像',
+      imagesUnnamed: '添付ファイルの画像',
+      image: '{name} の画像 {n}',
+      imageUnnamed: '添付ファイルの画像 {n}'
+    },
+    imageView: {
+      summary: '「{file}」の画像 {numbers} を確認しました（全 {total} 枚）',
+      single: '画像「{file}」を確認しました',
+      descriptionsHeading: 'ビジョンモデルによる画像の説明',
+      imageLabel: '画像 #{n}',
+      noDescription: '説明を生成できませんでした',
+      remaining: '未確認の画像があと {count} 枚あります'
+    },
     sandboxFiles: {
       found: '{count}件のファイルが見つかりました',
       empty: 'ファイルなし',
@@ -6598,6 +6647,13 @@ export default {
       kbMetricRag: 'RAGナレッジベース',
       kbMetricWiki: 'Wikiナレッジベース',
       statusInactive: '選択済みの{count}個のツールは、現在の設定では有効になりません',
+      searchConversations: '過去の会話を検索',
+      searchConversationsDesc: 'ユーザー自身の過去の会話から以前話した内容を探します',
+      groupStored: '保存済み（ここでは提供されていません）',
+      switchManagedDesc: 'このリストではなくエージェントの他の設定で制御されるため、ここでチェックしても有効になりません。チェックを外すと削除されます。',
+      unrecognizedDesc: 'このバージョンにはないツールのため、エージェントは呼び出せません。チェックを外すと削除されます。',
+      keptUnknownWarning: '保存しました。次の保存済みツールはこのバージョンにはないため残しましたが、エージェントは呼び出せません：{names}',
+      droppedWarning: '保存しました。次のツールはエージェントの他の設定で制御されるため、ツールリストから削除しました：{names}',
       effectiveLabel: '有効なツール',
       effectiveDesc: '現在の設定から算出された、エージェントが実際に呼び出せるツールです',
       effectiveEmpty: '利用可能なツールがありません。エージェントは通常のモデル対話にフォールバックします'

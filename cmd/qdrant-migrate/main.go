@@ -24,7 +24,7 @@ func main() {
 	host := flag.String("host", cc.Host, "Qdrant host")
 	port := flag.Int("port", cc.Port, "Qdrant gRPC port")
 	tls := flag.Bool("tls", cc.UseTLS, "Use TLS")
-	resume := flag.Bool("resume", false, "Resume this migration into its existing destination")
+	resume := flag.Bool("resume", false, "Retry into the existing destination from the beginning (no saved cursor)")
 	timeout := flag.Duration("timeout", time.Hour, "Maximum migration duration")
 	flag.Parse()
 	if *target == "" || *source == *target || *timeout <= 0 {

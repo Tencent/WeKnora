@@ -14,11 +14,13 @@ import (
 	"github.com/qdrant/go-client/qdrant"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 func TestBM25SearchFailures(t *testing.T) {
 	cause := errors.New("query unavailable")
-	for _, failures := range []int{0, 1, 2} {
+	for _, failures := range []int{0, 1, 3} {
 		t.Run(fmt.Sprintf("%d failed collections", failures), func(t *testing.T) {
 			queries := 0
 			client := newInterceptedQdrantClient(t, func(
@@ -28,7 +30,7 @@ func TestBM25SearchFailures(t *testing.T) {
 				switch request := req.(type) {
 				case *qdrant.ListCollectionsRequest:
 					reply.(*qdrant.ListCollectionsResponse).Collections = []*qdrant.CollectionDescription{
-						{Name: "vectors_4"}, {Name: "vectors_backup_4"}, {Name: "vectors_8"},
+						{Name: "vectors_4"}, {Name: "vectors_backup_4"}, {Name: "vectors_8"}, {Name: "vectors_16"},
 					}
 				case *qdrant.QueryPoints:
 					queries++
@@ -47,19 +49,22 @@ func TestBM25SearchFailures(t *testing.T) {
 			})
 			repo := &qdrantRepository{client: client, collectionBaseName: "vectors", bm25: true}
 			got, err := repo.KeywordsRetrieve(context.Background(), keywordsRetrieveParams())
-			require.Equal(t, 2, queries, "backup collections must not be queried")
-			if failures == 2 {
+			require.Equal(t, 3, queries, "backup collections must not be queried")
+			if failures == 3 {
 				require.ErrorIs(t, err, cause)
 				require.Empty(t, got)
 				return
 			}
 			require.NoError(t, err)
-			require.Len(t, got, 2-failures)
+			require.Len(t, got, 3-failures)
 			require.Equal(t, 4.5, got[0].Results[0].Score)
 			if failures == 1 {
 				require.ErrorIs(t, got[0].Error, cause)
 			} else {
 				require.NoError(t, got[0].Error)
+			}
+			for _, result := range got[1:] {
+				require.NoError(t, result.Error, "partial failure must be reported only once")
 			}
 			canceled, cancel := context.WithCancel(context.Background())
 			cancel()
@@ -73,7 +78,7 @@ func TestBM25SearchFailures(t *testing.T) {
 			params.TopK = -1
 			_, err = repo.KeywordsRetrieve(context.Background(), params)
 			require.Error(t, err)
-			require.Equal(t, 2, queries, "invalid, blank or canceled queries must not search")
+			require.Equal(t, 3, queries, "invalid, blank or canceled queries must not search")
 		})
 	}
 }
@@ -202,6 +207,9 @@ func TestBM25Integration(t *testing.T) {
 		IsEnabled: true, TagID: "tag",
 	}
 	embeddings := map[string]any{fieldEmbedding: map[string][]float32{"new": {1, 0, 0, 0}}}
+	textWriter := &qdrantRepository{client: client, collectionBaseName: ranked.collectionBaseName}
+	require.ErrorContains(t, textWriter.Save(ctx, index, embeddings), "requires BM25 writes")
+	require.ErrorContains(t, textWriter.BatchSave(ctx, []*types.IndexInfo{index}, embeddings), "requires BM25 writes")
 	require.NoError(t, ranked.Save(ctx, index, embeddings))
 	require.NoError(t, ranked.CopyIndices(ctx, "kb", map[string]string{"doc": "copy-doc"},
 		map[string]string{"new": "copy"}, "copy-kb", 4, "doc"))
@@ -229,4 +237,55 @@ func TestBM25Integration(t *testing.T) {
 		require.Len(t, list.Results, 1)
 		require.NoError(t, list.Error)
 	}
+}
+
+func TestTextWriterRejectsBM25Collection(t *testing.T) {
+	for _, concurrent := range []bool{false, true} {
+		for _, operation := range []string{"save", "batch", "copy"} {
+			t.Run(fmt.Sprintf("%s/concurrent=%v", operation, concurrent), func(t *testing.T) {
+				client := newInterceptedQdrantClient(t, func(
+					_ context.Context, method string, req, reply any, _ *grpc.ClientConn,
+					_ grpc.UnaryInvoker, _ ...grpc.CallOption,
+				) error {
+					switch req.(type) {
+					case *qdrant.CollectionExistsRequest:
+						reply.(*qdrant.CollectionExistsResponse).Result = &qdrant.CollectionExists{Exists: !concurrent}
+					case *qdrant.CreateCollection:
+						return status.Error(codes.AlreadyExists, "created by another writer")
+					case *qdrant.CreateFieldIndexCollection:
+					case *qdrant.GetCollectionInfoRequest:
+						reply.(*qdrant.GetCollectionInfoResponse).Result = &qdrant.CollectionInfo{
+							Config: &qdrant.CollectionConfig{Params: &qdrant.CollectionParams{
+								SparseVectorsConfig: bm25Config(),
+							}},
+						}
+					default:
+						t.Errorf("must reject before reading or writing points: %s", method)
+						return fmt.Errorf("unexpected RPC %s", method)
+					}
+					return nil
+				})
+				repo := &qdrantRepository{client: client, collectionBaseName: "vectors"}
+				index := &types.IndexInfo{SourceID: "chunk", ChunkID: "chunk", Content: "searchable"}
+				embeddings := map[string]any{fieldEmbedding: map[string][]float32{"chunk": {1, 0, 0, 0}}}
+				var err error
+				switch operation {
+				case "save":
+					err = repo.Save(context.Background(), index, embeddings)
+				case "batch":
+					err = repo.BatchSave(context.Background(), []*types.IndexInfo{index}, embeddings)
+				case "copy":
+					err = repo.CopyIndices(context.Background(), "kb", map[string]string{"doc": "copy-doc"},
+						map[string]string{"chunk": "copy-chunk"}, "copy-kb", 4, "doc")
+				}
+				require.ErrorContains(t, err, "requires BM25 writes")
+				_, cached := repo.initializedCollections.Load(4)
+				require.False(t, cached, "incompatible collections must not be cached")
+			})
+		}
+	}
+}
+
+func TestBM25DocumentCleansText(t *testing.T) {
+	require.Equal(t, "hello世界", bm25Document("hello\x00\xff世界").Text)
 }

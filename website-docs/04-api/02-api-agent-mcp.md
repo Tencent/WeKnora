@@ -131,11 +131,11 @@ curl "$BASE/api/v1/agents/agent-1/suggested-questions?limit=6" -H "X-API-Key: $A
 | `transport_type` | string | 是 | `sse` / `http-streamable`；`stdio` 出于安全原因被拒绝 |
 | `url` | *string | 否 | 服务 URL（SSE/HTTP） |
 | `headers` | map[string]string | 否 | HTTP 头 |
-| `auth_config` | object | 否 | `auth_type`(`api_key/bearer/oauth`)、`api_key_header`、`custom_headers`、`scopes`、`auth_server_metadata_url`（密钥走 credentials 子资源） |
+| `auth_config` | object | 否 | `auth_type`(`api_key/bearer/oauth`)、`api_key_header`、`custom_headers`、`scopes`、`auth_server_metadata_url`、`client_id`（OAuth 预注册客户端，留空则动态客户端注册；空字符串清除）（密钥与 `client_secret` 走 credentials 子资源，创建时可随请求体提交） |
 | `advanced_config` | object | 否 | `{timeout,retry_count,retry_delay}`，默认 30 秒 / 3 次 / 1 秒；`timeout` 大于 60 秒时也会延长 Agent 单次调用该服务工具的等待窗口 |
 | `stdio_config` / `env_vars` | object | 否 | 仅为兼容旧数据保留；stdio 已禁用，不生效 |
 
-响应：200 `{"success":true,"data":{MCPServiceResponse}}`（含 `credentials:{api_key:{configured},token:{configured}}`；已同步工具目录的服务还带 `catalog:{tool_count,stale,synced_at}`）
+响应：200 `{"success":true,"data":{MCPServiceResponse}}`（含 `credentials:{api_key:{configured},token:{configured},client_secret:{configured}}`；已同步工具目录的服务还带 `catalog:{tool_count,stale,synced_at}`）
 
 ```bash
 curl -X POST $BASE/api/v1/mcp-services -H "Authorization: Bearer $TOKEN" \
@@ -242,9 +242,9 @@ curl $BASE/api/v1/mcp-services/mcp-1/resources -H "Authorization: Bearer $TOKEN"
 
 ### PUT /api/v1/mcp-services/:id/credentials
 
-用途：设置密钥（`api_key`/`token`，指针字段，省略保留）。权限：Admin+。Handler: `internal/handler/mcp_credentials.go`
+用途：设置密钥（`api_key`/`token`/`client_secret`，指针字段，省略保留）。权限：Admin+。Handler: `internal/handler/mcp_credentials.go`
 
-响应：200 `{"success":true,"data":{"fields":{"api_key":{"configured"},"token":{"configured"}}}}`
+响应：200 `{"success":true,"data":{"fields":{"api_key":{"configured"},"token":{"configured"},"client_secret":{"configured"}}}}`
 
 ```bash
 curl -X PUT $BASE/api/v1/mcp-services/mcp-1/credentials -H "Authorization: Bearer $TOKEN" \
@@ -253,7 +253,7 @@ curl -X PUT $BASE/api/v1/mcp-services/mcp-1/credentials -H "Authorization: Beare
 
 ### DELETE /api/v1/mcp-services/:id/credentials/:field
 
-用途：删除凭证字段（`api_key` 或 `token`）。权限：Admin+。响应：204。
+用途：删除凭证字段（`api_key`、`token` 或 `client_secret`）。权限：Admin+。响应：204。
 
 ```bash
 curl -X DELETE $BASE/api/v1/mcp-services/mcp-1/credentials/token -H "Authorization: Bearer $TOKEN"
@@ -306,6 +306,21 @@ curl -i "$BASE/api/v1/mcp-oauth/callback?code=xxx&state=yyy"
 ```bash
 curl -X POST $BASE/api/v1/mcp-services/mcp-1/oauth/authorize-url -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' -d '{"redirect_uri":"'$BASE'/api/v1/mcp-oauth/callback"}'
+```
+
+### POST /api/v1/mcp-services/:id/oauth/assertion
+
+用途：以 JWT Bearer 授权（RFC 7523）为本人获取 OAuth token，无需浏览器跳转。适用于 WeKnora 部署在其他应用之后、由该应用负责登录并代用户调用 WeKnora 的场景：该应用签发代表当前用户的断言（如 MCP Enterprise-Managed Authorization 使用的 ID-JAG），WeKnora 原样提交给授权服务器，由授权服务器校验。使用该服务已注册的 OAuth 客户端（不会进行动态客户端注册；尚无客户端时返回 400）。获得的 token 与授权回调保存的 token 相同，后续刷新、状态查询与吊销不变。权限：Viewer+。
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `assertion` | string | 是 | 提交给授权服务器的 JWT 断言（请求体上限 16 KiB） |
+
+响应：200，`data` 与 `oauth/status` 相同。授权服务器拒绝断言（4xx，或 2xx 响应体含 OAuth `error`）时返回 400 并附 OAuth 错误码；授权服务器 5xx 或网络错误返回 500。
+
+```bash
+curl -X POST $BASE/api/v1/mcp-services/mcp-1/oauth/assertion -H "X-API-Key: $API_KEY" \
+  -H "X-External-User-ID: user-1" -H 'Content-Type: application/json' -d '{"assertion":"'$ASSERTION'"}'
 ```
 
 ### GET /api/v1/mcp-services/:id/oauth/status

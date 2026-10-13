@@ -142,6 +142,7 @@ type AgentCompleteData struct {
 	KnowledgeRefs   []interface{}          `json:"knowledge_refs,omitempty"` // []*types.SearchResult
 	AgentSteps      interface{}            `json:"agent_steps,omitempty"`    // []types.AgentStep - detailed execution steps
 	Usage           interface{}            `json:"usage,omitempty"`          // *types.TokenUsage - LLM token usage aggregated over the turn
+	ModelID         string                 `json:"model_id,omitempty"`       // Chat model whose calls produced Usage
 	TotalDurationMs int64                  `json:"total_duration_ms"`
 	MessageID       string                 `json:"message_id,omitempty"` // Assistant message ID
 	RequestID       string                 `json:"request_id,omitempty"`

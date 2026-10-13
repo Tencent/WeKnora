@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/Tencent/WeKnora/internal/common"
+	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/qdrant/go-client/qdrant"
 )
@@ -22,7 +24,7 @@ func bm25Config() *qdrant.SparseVectorConfig {
 
 func bm25Document(text string) *qdrant.Document {
 	return &qdrant.Document{
-		Text:  newQdrantValueMap(map[string]any{fieldContent: text})[fieldContent].GetStringValue(),
+		Text:  common.CleanInvalidUTF8(text),
 		Model: "Qdrant/bm25",
 		Options: qdrant.NewValueMap(map[string]any{
 			"tokenizer": "multilingual",
@@ -78,6 +80,8 @@ func (q *qdrantRepository) checkBM25Collection(ctx context.Context, name string,
 func (q *qdrantRepository) bm25Retrieve(
 	ctx context.Context, params types.RetrieveParams,
 ) ([]*types.RetrieveResult, error) {
+	log := logger.GetLogger(ctx)
+	log.Debugf("[Qdrant] BM25 search: query=%s, topK=%d", params.Query, params.TopK)
 	if params.TopK <= 0 {
 		return nil, fmt.Errorf("BM25 topK must be positive")
 	}
@@ -86,6 +90,7 @@ func (q *qdrantRepository) bm25Retrieve(
 	}
 	collections, err := q.client.ListCollections(ctx)
 	if err != nil {
+		log.Errorf("[Qdrant] Failed to list BM25 collections: %v", err)
 		return nil, fmt.Errorf("list BM25 collections: %w", err)
 	}
 	var retrieved []*types.RetrieveResult
@@ -108,10 +113,12 @@ func (q *qdrantRepository) bm25Retrieve(
 			WithPayload:    qdrant.NewWithPayload(true),
 		})
 		if err != nil {
+			log.Warnf("[Qdrant] BM25 search failed in %s: %v", name, err)
 			searchErr = errors.Join(searchErr,
 				fmt.Errorf("BM25 search in %s (requires a migrated collection): %w", name, err))
 			continue
 		}
+		log.Debugf("[Qdrant] BM25 search in %s returned %d hits", name, len(points))
 		results := make([]*types.IndexWithScore, 0, len(points))
 		for _, point := range points {
 			payload := point.Payload
@@ -142,8 +149,9 @@ func (q *qdrantRepository) bm25Retrieve(
 		}
 		return buildRetrieveResult(nil, types.KeywordsRetrieverType), nil
 	}
-	for _, result := range retrieved {
-		result.Error = searchErr
+	if searchErr != nil {
+		log.Warnf("[Qdrant] BM25 search returned partial results: %v", searchErr)
+		retrieved[0].Error = searchErr
 	}
 	return retrieved, nil
 }

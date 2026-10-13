@@ -173,7 +173,11 @@ func (q *qdrantRepository) ensureCollection(ctx context.Context, dimension int) 
 			collection.SparseVectorsConfig = bm25Config()
 		}
 		err = q.client.CreateCollection(ctx, collection)
-		if err != nil {
+		// Another worker may have created the collection after the existence probe.
+		if status.Code(err) == codes.AlreadyExists {
+			exists = true
+			log.Infof("[Qdrant] Collection %s was created concurrently", collectionName)
+		} else if err != nil {
 			log.Errorf("[Qdrant] Failed to create collection: %v", err)
 			return fmt.Errorf("failed to create collection: %w", err)
 		}
@@ -224,13 +228,21 @@ func (q *qdrantRepository) ensureCollection(ctx context.Context, dimension int) 
 			log.Warnf("[Qdrant] Failed to create text index for content: %v", err)
 		}
 
-		log.Infof("[Qdrant] Successfully created collection %s", collectionName)
+		log.Infof("[Qdrant] Collection %s is ready", collectionName)
 	}
 
 	// Mark as initialized
 	if q.bm25 {
 		if err := q.checkBM25Collection(ctx, collectionName, dimension); err != nil {
 			return err
+		}
+	} else if exists {
+		info, err := q.client.GetCollectionInfo(ctx, collectionName)
+		if err != nil {
+			return fmt.Errorf("inspect collection %s before writing: %w", collectionName, err)
+		}
+		if info.GetConfig().GetParams().GetSparseVectorsConfig().GetMap()[bm25VectorName] != nil {
+			return fmt.Errorf("collection %s requires BM25 writes; set qdrant_keyword_search to bm25", collectionName)
 		}
 	}
 	q.initializedCollections.Store(dimension, true)

@@ -278,6 +278,42 @@ func TestResolveAndStore_MultipleFormats(t *testing.T) {
 	}
 }
 
+func TestResolveAndStoreReturnsImagesInDocumentOrder(t *testing.T) {
+	png := createTestPNG(200, 150)
+	b64 := base64.StdEncoding.EncodeToString(png)
+	var refs []types.ImageRef
+	for _, name := range []string{"a.png", "b.png", "c.png"} {
+		refs = append(refs, types.ImageRef{
+			Filename: name, OriginalRef: "images/" + name, MimeType: "image/png", ImageData: png,
+		})
+	}
+	result := &types.ReadResult{
+		MarkdownContent: strings.Join([]string{
+			`![](images/a.png)`, `![](data:image/png;base64,` + b64 + `)`, `![](images/b.png)`, `![](images/c.png)`,
+		}, "\n\n"),
+		ImageRefs: refs,
+	}
+	out, imgs, err := NewImageResolver().ResolveAndStore(context.Background(), result, &captureSaveBytes{}, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(imgs) != 4 {
+		t.Fatalf("expected 4 images but got %d", len(imgs))
+	}
+	if imgs[0].OriginalRef != "images/a.png" || imgs[2].OriginalRef != "images/b.png" ||
+		imgs[3].OriginalRef != "images/c.png" {
+		t.Fatalf("images are not in document order: %+v", imgs)
+	}
+	last := -1
+	for _, img := range imgs {
+		pos := strings.Index(out, img.ServingURL)
+		if pos <= last {
+			t.Fatalf("image %s at %d does not follow %d", img.ServingURL, pos, last)
+		}
+		last = pos
+	}
+}
+
 func TestResolveAndStoreMarkdownImageWithTitle(t *testing.T) {
 	png := createTestPNG(200, 150)
 	result := &types.ReadResult{

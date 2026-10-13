@@ -391,14 +391,18 @@
                 </t-tooltip>
                 <t-popconfirm
                   v-if="canRewind"
-                  :content="t('chat.rewind.confirmBody')"
-                  :confirm-btn="{ content: t('chat.rewind.confirmButton'), theme: 'danger' }"
-                  :cancel-btn="{ content: t('chat.rewind.cancelButton') }"
+                  :confirm-btn="{ content: t('chat.rewind.confirmButton'), theme: 'danger', size: 'small' }"
+                  :cancel-btn="{ content: t('chat.rewind.cancelButton'), size: 'small' }"
                   theme="warning"
                   placement="top"
-                  overlay-class-name="chat-rewind-popconfirm"
+                  :show-arrow="false"
+                  overlay-class-name="wk-popover chat-rewind-popconfirm"
                   @confirm="emitRewind"
                 >
+                  <template #content>
+                    <div class="chat-rewind-confirm__title">{{ t('chat.rewind.confirmTitle') }}</div>
+                    <div class="chat-rewind-confirm__body">{{ t('chat.rewind.confirmBody') }}</div>
+                  </template>
                   <t-tooltip :content="rewindTooltip">
                     <t-button size="small" variant="outline" shape="round" @click.stop>
                       <t-icon name="rollback" />
@@ -681,6 +685,7 @@ import {
   getReadSkillTarget,
   getSandboxDiffStat,
   getSandboxFilePreview,
+  getAttachmentReadTarget,
   getSandboxToolPath,
   sandboxPreviewRemaining,
   skillScriptTitleCommand,
@@ -2803,6 +2808,26 @@ const getAttachmentParsingSummary = (event: any): string => {
   return getAttachmentParsingSummaryHtml(t, event);
 };
 
+// Attachment IDs in attachment:// paths mean nothing to users; name the file.
+const getSandboxToolDetail = (event: any): string => {
+  const target = getAttachmentReadTarget(event);
+  if (!target) return getSandboxToolPath(event);
+  switch (target.kind) {
+    case 'list':
+      return t('agentStream.attachmentTarget.list');
+    case 'file':
+      return target.name || t('agentStream.attachmentTarget.file');
+    case 'images':
+      return target.name
+        ? t('agentStream.attachmentTarget.images', { name: target.name })
+        : t('agentStream.attachmentTarget.imagesUnnamed');
+    case 'image':
+      return target.name
+        ? t('agentStream.attachmentTarget.image', { name: target.name, n: target.number })
+        : t('agentStream.attachmentTarget.imageUnnamed', { n: target.number });
+  }
+};
+
 // Get tool title - prefer summary over description, add query for search tools
 const getToolTitle = (event: any): string => {
   if (event.tool_name === 'local_browser') return browserToolTitle(t, event);
@@ -2828,7 +2853,7 @@ const getToolTitle = (event: any): string => {
     }
     if (event.tool_name === 'list_sandbox_files' || event.tool_name === 'read_file' || event.tool_name === 'read_sandbox_file' || event.tool_name === 'write_sandbox_file' || event.tool_name === 'edit_sandbox_file') {
       const name = getLocalizedToolName(event.tool_name);
-      return `${formatToolTitleWithDetail(name, getSandboxToolPath(event))}...`;
+      return `${formatToolTitleWithDetail(name, getSandboxToolDetail(event))}...`;
     }
     if (event.tool_name === 'shell_exec') {
       return t('agentStream.toolStatus.shellExecRunning');
@@ -2933,7 +2958,7 @@ const getToolTitle = (event: any): string => {
   }
 
   if (toolName === 'list_sandbox_files' || toolName === 'read_file' || toolName === 'read_sandbox_file' || toolName === 'write_sandbox_file' || toolName === 'edit_sandbox_file') {
-    return formatToolTitleWithDetail(getToolDescription(event), getSandboxToolPath(event));
+    return formatToolTitleWithDetail(getToolDescription(event), getSandboxToolDetail(event));
   }
 
   if (toolName === 'execute_skill_script') {
@@ -2990,7 +3015,7 @@ const getToolDescription = (event: any): string => {
     }
     if (event.tool_name === 'list_sandbox_files' || event.tool_name === 'read_file' || event.tool_name === 'read_sandbox_file' || event.tool_name === 'write_sandbox_file' || event.tool_name === 'edit_sandbox_file') {
       const name = getLocalizedToolName(event.tool_name);
-      return `${formatToolTitleWithDetail(name, getSandboxToolPath(event))}...`;
+      return `${formatToolTitleWithDetail(name, getSandboxToolDetail(event))}...`;
     }
     if (event.tool_name === 'shell_exec') {
       return t('agentStream.toolStatus.shellExecRunning');

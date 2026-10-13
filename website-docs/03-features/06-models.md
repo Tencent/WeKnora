@@ -95,6 +95,46 @@
 | 向量或重排服务响应慢，需要更长的超时 | `{"request_timeout_seconds": 120}` |
 | 自建重排服务返回的是未归一化分数（logit） | `{"score_scale": "logit"}` |
 
+#### WeMM-Embedding
+
+自定义厂商（`generic`）的向量模型列表已内置以下预设，选择后会自动识别图片输入和原生向量维度：
+
+| 模型名称 | 原生维度 |
+| --- | --- |
+| `tencent/WeMM-Embedding-2B` | 2048 |
+| `tencent/WeMM-Embedding-4B` | 2560 |
+| `tencent/WeMM-Embedding-9B` | 4096 |
+
+可选择官方 vLLM 部署，或使用本仓库的 [Transformers 部署脚本](../06-development/06-wemm-transformers.md)在 CUDA、MPS 或 CPU 上提供同一 Embedding 接口。MPS 是可选计算设备，服务也可以部署在独立服务器上。
+
+按[官方部署说明](https://github.com/Tencent/WeMM-Embedding#serving)使用 vLLM `0.27.0`，并加载模型目录中的 `embedding_chat_template.jinja`。例如部署 2B，并通过 `--served-model-name` 让服务名称与预设一致：
+
+```bash
+MODEL_PATH=/path/to/WeMM-Embedding-2B
+vllm serve "$MODEL_PATH" \
+  --runner pooling \
+  --chat-template "$MODEL_PATH/embedding_chat_template.jinja" \
+  --served-model-name tencent/WeMM-Embedding-2B
+```
+
+4B、9B 分别替换模型路径与服务名称。在 WeKnora 中选择「自定义」厂商，Base URL 填写服务的 `http://主机:端口/v1`，选择对应向量模型，初次接入保持「自定义输出维度」关闭。若服务没有设置 `--served-model-name`，模型名称须填写服务实际返回的本地路径；短名称 `WeMM-Embedding-2B` 及以 `/WeMM-Embedding-2B` 结尾的路径也能识别预设，4B、9B 同理。任意自定义别名需要另行配置模型能力和协议覆盖。
+
+预设让文本和图片都通过 `messages` 进入模型模板，由模板追加取向量所需的 `<embedding>` 标记；启用 `batch_messages`，将同一批内的独立 conversations 合并请求，每条仍返回各自的向量。图片批量调用最多每批 5 张，超出自动拆分；这是 WeKnora 选择的批量大小，与现有 Qwen3-VL 预设一致，不代表模型或 vLLM 的官方上限，可用 `max_image_batch_size` 按服务承载能力调整。当前知识库图片索引任务仍逐张调用，不会因该配置自动合并多个任务。不发送历史默认的 `truncate_prompt_tokens: 511`；超出服务上下文上限时由服务报错，不会静默截断。无需额外填写兼容 JSON 或图片提示词。若此前用普通文本 `input` 为该模型建立过索引，需要重建向量。
+
+WeMM 的模板已经包含所需特殊 token，保留 vLLM 的 `add_special_tokens: false`、`add_generation_prompt: false` 默认行为，不要照搬 Qwen3-VL 预设的 `add_special_tokens: true`。vLLM 的 Embedding 默认使用末尾 token 并做 L2 归一化，无需额外发送 `normalize` 或关闭 `use_activation`。
+
+需要降维时，开启「自定义输出维度」并选择模型配置中的合法维度，WeKnora 会给文本和图片请求发送相同的 `dimensions`；vLLM 会先截取对应维度，再归一化：
+
+| 模型 | 可选维度 |
+| --- | --- |
+| 2B | 64、128、256、512、1024、2048 |
+| 4B | 64、128、256、512、1024、2560 |
+| 9B | 64、128、256、512、1024、2048、4096 |
+
+这些值来自[官方模型配置与说明](https://github.com/Tencent/WeMM-Embedding#model-zoo)，vLLM 会拒绝列表之外的维度。更换输出维度后需重建已有向量索引。超时、并发与图片大小限制保持现有默认值，按实际服务性能调整。
+
+知识库还需开启图片向量索引才能直接检索图片内容。当前预设接入文本和图片；视频、任意图文交错输入及扫描 PDF 整页向量化不在当前业务链路的支持范围内。
+
 #### 字段参考
 
 下表的「协议默认」是没有任何厂商、目录或覆盖时的取值；具体厂商的实际值以「实际调用方式」面板为准。
@@ -150,6 +190,7 @@
 | 字段 | 类型 | 协议默认 | 说明 |
 | --- | --- | --- | --- |
 | `thinking_mode` | string | `budget` | `budget` 按预算开启思考；`adaptive` 由模型自行决定，强度通过 `output_config.effort` 传递 |
+| `thinking_off_type` | string | `disabled` | `adaptive` 模式下关闭思考时发送的 `thinking.type`；Claude Sonnet 5.5 不接受 `disabled`，使用 `between_tools` |
 | `supports_effort` | bool | false | 是否发送思考强度 |
 | `thinking_budgets` | object | minimal 1024、low 2048、medium 8192、high 16384、xhigh 32768、max 63999 | 各思考强度对应的 `budget_tokens`，键为 `minimal`/`low`/`medium`/`high`/`xhigh`/`max` |
 | `default_max_tokens` | int | 4096 | 未设置输出上限时使用的 `max_tokens`（该协议必填） |
@@ -273,10 +314,37 @@
 | GPUStack | `gpustack` | ✓ | ✓ | ✓ | ✓ | ✓ |
 | Hugging Face TEI | `huggingface_tei` | | | ✓ | | |
 | Pinecone | `pinecone` | | | ✓ | | |
+| Cohere | `cohere` | | | ✓ | | |
 
 表中的「视觉」指可在视觉模型类型下选择该厂商；对话模型本身是否接受图片，以模型目录和「支持视觉/多模态」开关为准。WeKnora 云服务需先在设置中保存云服务凭证，模型名称可选 `chat`、`embedding`、`rerank`、`vlm`。
 
 厂商列表、默认地址和模型目录由服务端下发（`GET /api/v1/models/providers`），运维可以通过[部署叠加](#部署叠加-config-models-json)修改或新增厂商。
+
+### Cohere 重排
+
+新增远程重排模型时，选择 **Cohere**，填写 Cohere API Key，并选择
+`rerank-v4.0-pro`、`rerank-v4.0-fast` 或 `rerank-v3.5`。默认地址为
+`https://api.cohere.com/v2`，也可填写完整的 `/v2/rerank` 地址。
+
+通过 `POST /api/v1/models` 创建时，请求体示例：
+
+```json
+{
+  "name": "rerank-v4.0-pro",
+  "type": "Rerank",
+  "source": "remote",
+  "parameters": {
+    "provider": "cohere",
+    "base_url": "https://api.cohere.com/v2",
+    "api_key": "your-cohere-api-key"
+  }
+}
+```
+
+请求仅发送文本查询和文档，按响应索引恢复原文。WeKnora 遵循
+[Cohere API 建议](https://docs.cohere.com/v2/reference/rerank)，将超过 1000 篇的候选集
+拆成多个请求；1000 是采用的推荐批次大小。省略 `top_n` 以获取全部候选的分数，
+超长文档沿用服务端默认截断行为。本接入仅提供 Cohere 文本重排。
 
 ## 查看引用与调整配置
 

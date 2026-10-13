@@ -38,7 +38,7 @@ spec:
             pathType: Prefix
             backend:
               service:
-                name: app
+                name: {{ include "weknora.serviceName" (dict "component" "app" "context" .) | quote }}
                 port:
                   name: http
           # Frontend routes - catch-all
@@ -46,7 +46,7 @@ spec:
             pathType: Prefix
             backend:
               service:
-                name: frontend
+                name: {{ include "weknora.serviceName" (dict "component" "frontend" "context" .) | quote }}
                 port:
                   name: http
 {{- end }}

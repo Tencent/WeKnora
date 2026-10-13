@@ -1,7 +1,9 @@
 package types
 
 import (
+	"bytes"
 	"encoding/json"
+	"log/slog"
 	"strings"
 	"testing"
 
@@ -1481,4 +1483,63 @@ func TestOpenSearchRetrieverEngineType_DistinctFromExisting(t *testing.T) {
 		assert.NotEqual(t, e, OpenSearchRetrieverEngineType,
 			"OpenSearch wire value must not collide with %s", e)
 	}
+}
+
+func TestQdrantKeywordSearchNormalization(t *testing.T) {
+	for _, tc := range []struct{ input, want string }{
+		{"", ""}, {"text", "text"}, {" TEXT ", "text"}, {"bm25", "bm25"}, {" BM25 ", "bm25"},
+	} {
+		t.Run(tc.input, func(t *testing.T) {
+			stores := BuildEnvVectorStores("qdrant", func(key string) string {
+				if key == "QDRANT_KEYWORD_SEARCH" {
+					return tc.input
+				}
+				return ""
+			})
+			require.Len(t, stores, 1)
+			require.Equal(t, tc.want, stores[0].IndexConfig.QdrantKeywordSearch)
+			store := VectorStore{
+				Name: "test", TenantID: 1, EngineType: QdrantRetrieverEngineType,
+				IndexConfig: IndexConfig{QdrantKeywordSearch: tc.input},
+			}
+			require.NoError(t, store.Validate())
+			require.Equal(t, tc.want, store.IndexConfig.QdrantKeywordSearch)
+		})
+	}
+}
+
+func TestInvalidEnvQdrantKeywordSearchWarns(t *testing.T) {
+	var output bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&output, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+	stores := BuildEnvVectorStores("qdrant", func(key string) string {
+		if key == "QDRANT_KEYWORD_SEARCH" {
+			return "typo"
+		}
+		return ""
+	})
+	require.Len(t, stores, 1)
+	require.Equal(t, "text", stores[0].IndexConfig.QdrantKeywordSearch)
+	require.Contains(t, output.String(), "WARN")
+	require.Contains(t, output.String(), "Invalid QDRANT_KEYWORD_SEARCH; using text mode")
+}
+
+func TestVectorStoreRejectsMisplacedKeywordSearch(t *testing.T) {
+	for engine := range validEngineTypes {
+		store := VectorStore{
+			Name: "test", TenantID: 1, EngineType: engine,
+			IndexConfig: IndexConfig{QdrantKeywordSearch: "bm25"},
+		}
+		if engine == QdrantRetrieverEngineType {
+			require.NoError(t, store.Validate())
+		} else {
+			require.ErrorContains(t, store.Validate(), "only supported by Qdrant")
+		}
+	}
+	store := VectorStore{
+		Name: "test", TenantID: 1, EngineType: QdrantRetrieverEngineType,
+		IndexConfig: IndexConfig{QdrantKeywordSearch: "typo"},
+	}
+	require.Error(t, store.Validate())
 }

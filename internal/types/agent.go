@@ -129,6 +129,12 @@ type AgentConfig struct {
 	// in-conversation OAuth authorization before skipping. <=0 falls back to
 	// the gate's configured timeout. The wait is always bounded (no leak).
 	MCPAuthWaitTimeout int `json:"mcp_auth_wait_timeout,omitempty"`
+	// AttachmentParseWaitTimeoutSec bounds how long reading an attachment waits for
+	// a file that is still being parsed. <=0 uses the server default.
+	AttachmentParseWaitTimeoutSec int `json:"-"`
+	// AttachmentSandboxCopies maps a sandbox path staged for this turn to the
+	// attachment:// path of the same stored attachment.
+	AttachmentSandboxCopies map[string]string `json:"-"`
 	// Whether to enable thinking mode (for models that support extended thinking)
 	Thinking *bool `json:"thinking"`
 	// ReasoningEffort is the graded thinking level; empty falls back to Thinking.
@@ -375,7 +381,21 @@ type ToolResult struct {
 	Data        map[string]interface{} `json:"data,omitempty"`   // Structured data for programmatic use
 	Error       string                 `json:"error,omitempty"`  // Error message if execution failed
 	Images      []string               `json:"images,omitempty"` // Base64 data URIs from tool (e.g. MCP image content)
+	// ImageDescriptions is aligned with Images and holds a vision model's
+	// description of each for a chat model that cannot view them ("" when an
+	// image could not be described). Live only.
+	ImageDescriptions []string `json:"-"`
+	// ImageDetail ("brief" or "full") and ImageFocus carry how closely the
+	// model asked to read Images when it cannot view them. Live only.
+	ImageDetail string `json:"-"`
+	ImageFocus  string `json:"-"`
 }
+
+// Image description detail levels requested by a file read.
+const (
+	ImageDetailBrief = "brief"
+	ImageDetailFull  = "full"
+)
 
 // ToolCall represents a single tool invocation within an agent step
 type ToolCall struct {

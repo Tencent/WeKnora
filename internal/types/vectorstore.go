@@ -4,6 +4,7 @@ import (
 	"database/sql/driver"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"regexp"
 	"strconv"
@@ -107,6 +108,14 @@ func (v *VectorStore) Validate() error {
 	if !validEngineTypes[v.EngineType] {
 		return errors.NewValidationError(fmt.Sprintf("unsupported engine type: %s", v.EngineType))
 	}
+	mode, err := NormalizeQdrantKeywordSearch(v.IndexConfig.QdrantKeywordSearch)
+	if err != nil {
+		return err
+	}
+	if mode != "" && v.EngineType != QdrantRetrieverEngineType {
+		return errors.NewValidationError("qdrant_keyword_search is only supported by Qdrant")
+	}
+	v.IndexConfig.QdrantKeywordSearch = mode
 	if v.TenantID == 0 {
 		return errors.NewValidationError("tenant_id is required")
 	}
@@ -472,11 +481,20 @@ const (
 // Must start with a letter, followed by alphanumeric, underscore, or hyphen. Max 128 chars.
 var validIndexNamePattern = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9_-]{0,127}$`)
 
+// NormalizeQdrantKeywordSearch accepts case and surrounding whitespace, but rejects unknown modes.
+func NormalizeQdrantKeywordSearch(value string) (string, error) {
+	mode := strings.ToLower(strings.TrimSpace(value))
+	if mode != "" && mode != "text" && mode != "bm25" {
+		return "", errors.NewValidationError("qdrant_keyword_search must be text or bm25")
+	}
+	return mode, nil
+}
+
 // ValidateIndexConfig checks IndexConfig fields for safe values.
 // Call this from the service layer before persisting a VectorStore.
 func ValidateIndexConfig(ic IndexConfig) error {
-	if ic.QdrantKeywordSearch != "" && ic.QdrantKeywordSearch != "text" && ic.QdrantKeywordSearch != "bm25" {
-		return errors.NewValidationError("qdrant_keyword_search must be text or bm25")
+	if _, err := NormalizeQdrantKeywordSearch(ic.QdrantKeywordSearch); err != nil {
+		return err
 	}
 	// Validate string fields (index/collection names)
 	if ic.IndexName != "" && !validIndexNamePattern.MatchString(ic.IndexName) {
@@ -902,6 +920,11 @@ func buildEnvStoreForDriver(driver string, envLookup EnvLookupFunc) *VectorStore
 			},
 		}
 	case "qdrant":
+		mode, err := NormalizeQdrantKeywordSearch(envLookup("QDRANT_KEYWORD_SEARCH"))
+		if err != nil {
+			slog.Warn("Invalid QDRANT_KEYWORD_SEARCH; using text mode", "error", err)
+			mode = "text"
+		}
 		host := envLookup("QDRANT_HOST")
 		if host == "" {
 			host = "localhost"
@@ -928,7 +951,7 @@ func buildEnvStoreForDriver(driver string, envLookup EnvLookupFunc) *VectorStore
 			},
 			IndexConfig: IndexConfig{
 				CollectionPrefix:    envLookup("QDRANT_COLLECTION"),
-				QdrantKeywordSearch: envLookup("QDRANT_KEYWORD_SEARCH"),
+				QdrantKeywordSearch: mode,
 			},
 		}
 	case "milvus":

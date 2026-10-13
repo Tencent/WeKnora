@@ -12,7 +12,9 @@ the settings below.
 
 Qdrant keyword search defaults to `text`, the existing payload-text filter. Set
 `QDRANT_KEYWORD_SEARCH=bm25` to rank keyword candidates using Qdrant's native BM25
-model. Dense retrieval and WeKnora's existing result fusion remain in use; no
+model. Values are trimmed and lowercased; an unknown environment value logs a
+warning and uses `text`. Database-backed stores reject unknown values.
+Dense retrieval and WeKnora's existing result fusion remain in use; no
 external embedding model or additional service is needed for BM25.
 
 This path is tested with Qdrant **1.16.2**, the version shipped in Docker Compose.
@@ -33,7 +35,8 @@ New collections get both the unnamed dense vector and a sparse BM25 vector.
 For a new database-backed vector store, select `bm25` under **Keyword Search**
 in its advanced settings, or set `index_config.qdrant_keyword_search` to `bm25`
 through the existing vector-store API. Use the same mode on every writer to a
-collection; a writer configured for `text` does not maintain BM25 vectors.
+collection; a writer configured for `text` refuses writes to a BM25 collection
+to prevent saving points that BM25 search cannot find.
 
 ## Existing Qdrant data: enable ranked keyword search
 
@@ -70,6 +73,11 @@ embedding model or modify the source collections.
    stopped and rerun the same command with `--resume`. It upserts the original
    IDs, so repeating completed pages does not create duplicate points. Use
    `--resume` only for this migration's destination, never an unrelated collection.
+   Resume does not save a cursor: each run starts every collection from the
+   beginning, including collections already copied. The timeout covers the whole
+   run. If it cannot finish in the default hour, increase `--timeout` (for example,
+   `--resume --timeout 4h`). Repeating the same short timeout will not make progress
+   past that limit.
 5. Change `QDRANT_COLLECTION` to `ranked_embeddings` and
    `QDRANT_KEYWORD_SEARCH` to `bm25` on every app instance. Restart with the new
    settings and check representative searches before allowing writes again.
@@ -115,7 +123,7 @@ Start a disposable Qdrant 1.16.2 server, then run:
 
 ```sh
 QDRANT_TEST_PORT=6334 go test ./internal/application/repository/retriever/qdrant -count=1
-go test ./internal/types ./cmd/qdrant-migrate
+go test ./internal/types
 ```
 
 The integration test connects only to localhost and creates/deletes random test

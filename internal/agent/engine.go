@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/agent/compaction"
@@ -49,6 +50,7 @@ type AgentEngine struct {
 	skillsManager        *skills.Manager         // Skills manager for Progressive Disclosure (optional)
 	appConfig            *appconfig.Config       // Application config for prompt template resolution (optional)
 	imageDescriber       ImageDescriberFunc      // VLM function for describing images in tool results (optional)
+	imageDescribeSlots   chan struct{}           // Bounds VLM calls across parallel tool calls
 	tokenEstimator       *agenttoken.Estimator   // Token estimator for context window management, calibrated
 	rawEstimator         *agenttoken.Estimator   // Same tokenizer at scale 1, for measuring the calibration
 	compactor            *compaction.Compactor   // Summarizes older history to fit the context window (nil = disabled)
@@ -241,11 +243,28 @@ func (e *AgentEngine) SetAppConfig(cfg *appconfig.Config) {
 }
 
 // SetImageDescriber sets the VLM function for generating text descriptions of images
-// in tool results. When set, MCP tool result images are automatically analyzed and
-// their descriptions are appended to the tool message content.
-// This follows the same pattern as Handler.analyzeImageAttachments() in the handler layer.
+// in tool results. When set and the chat model cannot view images, tool result
+// images are described while their tool call runs and the descriptions are
+// appended to the tool message content.
 func (e *AgentEngine) SetImageDescriber(fn ImageDescriberFunc) {
 	e.imageDescriber = fn
+	e.imageDescribeSlots = make(chan struct{}, toolImageDescribeConcurrency)
+}
+
+// describeToolImages runs inside the tool call, so the UI keeps showing the
+// call as running while the vision model works and the description lands in
+// the tool result the user sees.
+func (e *AgentEngine) describeToolImages(ctx context.Context, result *types.ToolResult) {
+	if result == nil || !result.Success || len(result.Images) == 0 || e.imageDescriber == nil ||
+		(e.config != nil && e.config.ChatModelSupportsVision) {
+		return
+	}
+	if len(result.ImageDescriptions) != len(result.Images) {
+		result.ImageDescriptions = e.describeImages(ctx, result.Images, toolImagePrompts(result))
+	}
+	if result.Data != nil {
+		result.Data["image_descriptions"] = result.ImageDescriptions
+	}
 }
 
 // SetSkillsManager sets the skills manager for the engine
@@ -1065,38 +1084,77 @@ func (o iterOutcome) String() string {
 // Tool result image VLM description helpers
 // ---------------------------------------------------------------------------
 
-const toolImageAnalysisPrompt = "Describe the content of this image in detail. " +
-	"If it contains text, extract all readable text. " +
-	"If it contains charts or diagrams, describe the data and structure."
+const (
+	toolImageBriefPrompt = types.ImageReadBriefPrompt
+	toolImageFullPrompt  = types.ImageReadFullPrompt
+	toolImageFocusRunes  = types.ImageReadFocusRunes
+)
 
-// describeImages generates text descriptions for tool result images using the
-// configured imageDescriber (VLM). Each image is decoded from a data URI and
-// analyzed independently. Failures are logged and skipped gracefully.
-// This follows the same pattern as Handler.analyzeImageAttachments().
-func (e *AgentEngine) describeImages(ctx context.Context, imageDataURIs []string) []string {
-	if e.imageDescriber == nil {
-		return nil
+func toolImagePrompt(detail, focus string) string { return types.ImageReadPrompt(detail, focus) }
+func toolImagePrompts(result *types.ToolResult) []string {
+	prompt := toolImagePrompt(result.ImageDetail, result.ImageFocus)
+	prompts := make([]string, len(result.Images))
+	for i := range prompts {
+		prompts[i] = prompt
 	}
-	var descriptions []string
+	return prompts
+}
+
+const (
+	toolImageDescribeConcurrency = 4
+	toolImageDescribeTimeout     = 120 * time.Second
+)
+
+// describeImages asks the configured VLM to describe tool result images, a
+// few at a time, each under its own timeout so a slow image cannot starve the
+// rest. prompts is aligned with the images (nil means a brief description for
+// each). The result is aligned with the input; an image that could not be
+// described is left empty.
+func (e *AgentEngine) describeImages(ctx context.Context, imageDataURIs, prompts []string) []string {
+	descriptions := make([]string, len(imageDataURIs))
+	if e.imageDescriber == nil {
+		return descriptions
+	}
+	sem := e.imageDescribeSlots
+	if sem == nil {
+		sem = make(chan struct{}, toolImageDescribeConcurrency)
+	}
+	var wg sync.WaitGroup
 	for i, dataURI := range imageDataURIs {
+		if ctx.Err() == nil {
+			select {
+			case sem <- struct{}{}:
+			case <-ctx.Done():
+			}
+		}
 		if ctx.Err() != nil {
 			logger.Warnf(ctx, "[Agent] Context cancelled, skipping remaining %d tool result images", len(imageDataURIs)-i)
 			break
 		}
-		imgBytes, err := decodeDataURIBytes(dataURI)
-		if err != nil {
-			logger.Warnf(ctx, "[Agent] Failed to decode tool result image %d: %v", i, err)
-			continue
-		}
-		desc, err := e.imageDescriber(ctx, imgBytes, toolImageAnalysisPrompt)
-		if err != nil {
-			logger.Warnf(ctx, "[Agent] VLM analysis failed for tool result image %d: %v", i, err)
-			continue
-		}
-		if desc = strings.TrimSpace(desc); desc != "" {
-			descriptions = append(descriptions, desc)
-		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			defer func() { <-sem }()
+			imgBytes, err := decodeDataURIBytes(dataURI)
+			if err != nil {
+				logger.Warnf(ctx, "[Agent] Failed to decode tool result image %d: %v", i, err)
+				return
+			}
+			imageCtx, cancel := context.WithTimeout(ctx, toolImageDescribeTimeout)
+			defer cancel()
+			prompt := toolImageBriefPrompt
+			if i < len(prompts) {
+				prompt = prompts[i]
+			}
+			desc, err := e.imageDescriber(imageCtx, imgBytes, prompt)
+			if err != nil {
+				logger.Warnf(ctx, "[Agent] VLM analysis failed for tool result image %d: %v", i, err)
+				return
+			}
+			descriptions[i] = strings.TrimSpace(desc)
+		}()
 	}
+	wg.Wait()
 	return descriptions
 }
 

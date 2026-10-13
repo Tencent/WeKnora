@@ -1558,6 +1558,13 @@ export default {
       kbMetricRag: 'RAG 知識庫',
       kbMetricWiki: 'Wiki 知識庫',
       statusInactive: '有 {count} 個已勾選工具在當前設定下無法生效',
+      searchConversations: '回顧歷史對話',
+      searchConversationsDesc: '在使用者自己的歷史會話中查找之前聊過的內容',
+      groupStored: '已儲存但未提供的工具',
+      switchManagedDesc: '由智慧體的其他設定控制，而不是由此列表決定，在此勾選不會啟用它。取消勾選即可移除。',
+      unrecognizedDesc: '目前版本不提供此工具，智慧體無法呼叫它。取消勾選即可移除。',
+      keptUnknownWarning: '已儲存。以下已儲存的工具在目前版本中不提供，已保留，但智慧體無法呼叫：{names}',
+      droppedWarning: '已儲存。以下工具由智慧體的其他設定控制，已從工具列表中移除：{names}',
       effectiveLabel: '最終啟用的工具',
       effectiveDesc: '根據當前設定計算，這是智慧代理儲存後實際能呼叫的工具集合',
       effectiveEmpty: '當前沒有可用工具，智慧代理將退化為純模型問答'
@@ -1826,6 +1833,22 @@ export default {
       heading: '技能檔案',
       script: '指令碼',
       instructions: '技能說明'
+    },
+    attachmentTarget: {
+      list: '全部附件',
+      file: '附件',
+      images: '{name} 中的圖片',
+      imagesUnnamed: '附件中的圖片',
+      image: '{name} 第 {n} 張圖片',
+      imageUnnamed: '附件第 {n} 張圖片'
+    },
+    imageView: {
+      summary: '已查看「{file}」第 {numbers} 張圖片，共 {total} 張',
+      single: '已查看圖片「{file}」',
+      descriptionsHeading: '視覺模型的圖片描述',
+      imageLabel: '圖片 #{n}',
+      noDescription: '未能生成描述',
+      remaining: '還有 {count} 張未查看'
     },
     sandboxFiles: {
       found: '找到 {count} 個檔案',
@@ -2401,6 +2424,9 @@ export default {
     "serverDocumentation": "伺服器端原始說明",
     "noServerDocumentation": "該 MCP Server 的 initialize 未返回 instructions / serverInfo.description（均為可選欄位）。工具說明在下方各工具的 description 裡。",
     "policyHint": "工具開關與審批設定即時儲存；重新整理目錄不會覆蓋這些設定。",
+    "columnTool": "工具",
+    "columnEnabled": "啟用",
+    "columnApproval": "需審批",
     "failed": "工具目錄讀取失敗",
     "setupProgress": "MCP 設定步驟",
     "connection": "連結設定",
@@ -2443,6 +2469,9 @@ export default {
     authTypeApiKey: 'API Key / Token',
     authTypeOAuth: 'OAuth 2.0（首次連結授權）',
     oauthScopes: 'Scopes（可選，空格分隔）',
+    oauthClientId: 'Client ID（可選）',
+    oauthClientIdDesc: '填寫在授權伺服器預先註冊的用戶端；留空則自動進行動態用戶端註冊。更換 Client ID 時請同時更新 Client Secret。',
+    oauthClientSecret: 'Client Secret（可選）',
     oauthAuthorization: '授權狀態',
     oauthAuthorized: '已授權',
     oauthRefreshable: 'Token 已過期，將在下次使用時自動重新整理',
@@ -3323,14 +3352,45 @@ export default {
         success: '已將 {count} 個空間的存儲配額更新為 {gb} GB',
         failed: '應用到所有空間失敗'
       },
+      userList: {
+        title: '平台使用者列表',
+        rowLabel: '使用者管理',
+        rowDesc: '檢視平台上的全部註冊使用者（跨空間），支援分頁與依使用者名稱/郵箱篩選。',
+        searchPlaceholder: '依使用者名稱或郵箱篩選（目前頁面）',
+        refresh: '重新整理',
+        active: '正常',
+        inactive: '已停用',
+        colUsername: '使用者名稱',
+        colStatus: '狀態',
+        colRole: '角色',
+        colCreated: '建立日期',
+        colAction: '操作',
+        prev: '上一頁',
+        next: '下一頁',
+        pageCount: '{shown} 筆 / 本頁 {total}',
+        enable: '啟用',
+        disable: '停用',
+        resetPassword: '重設密碼',
+        confirmDisable: '確定停用帳號 {name} 嗎？將立即撤銷其登入狀態。',
+        confirmEnable: '確定啟用帳號 {name} 嗎？',
+        enabledMsg: '已啟用 {name}',
+        disabledMsg: '已停用 {name}',
+        actionFailed: '操作失敗',
+        loadFailed: '載入使用者列表失敗',
+        roleAdmin: '系統管理員',
+        roleUser: '一般使用者',
+        confirmRevoke: '確定撤銷 {name} 的系統管理員權限嗎？',
+        confirmPromote: '確定將 {name} 提升為系統管理員嗎？',
+        revokeBtn: '撤銷',
+        promoteBtn: '提升',
+        revokedMsg: '已撤銷 {name} 的管理員權限',
+        promotedMsg: '已將 {name} 提升為系統管理員',
+        roleFailed: '修改角色失敗',
+      },
       passwordReset: {
-        label: '重設使用者密碼',
-        description: '為忘記密碼的其他使用者設定新密碼。重設成功後，該使用者當前所有登入會話都會失效，需要使用新密碼重新登入。',
-        action: '重設密碼',
         dialogTitle: '重設其他使用者的密碼',
         warning: '這是高風險操作。請核對使用者電子信箱；出於安全考慮，不能在這裡重設自己的密碼。',
         emailLabel: '使用者電子信箱',
-        emailPlaceholder: '輸入需要重設密碼的使用者電子信箱',
         newPasswordLabel: '新密碼',
         newPasswordPlaceholder: '請輸入新密碼',
         confirmPasswordLabel: '確認新密碼',
@@ -3340,8 +3400,6 @@ export default {
         failed: '重設密碼失敗',
       },
       createUser: {
-        label: '建立使用者',
-        description: '開通一個新的本地使用者帳號。如果平台的預設空間模式設定為「自動建立個人空間」，該使用者會像自助註冊的使用者一樣，同時獲得一個個人空間。',
         action: '建立使用者',
         dialogTitle: '建立新使用者',
         warning: '這是高風險操作。請仔細核對使用者名和電子信箱──它們將作為該使用者登入的唯一憑據。',
@@ -3364,10 +3422,6 @@ export default {
           usernameLength: '使用者名長度必須為 2-50 個字符',
           emailRequired: '請輸入電子信箱',
           emailInvalid: '請輸入有效的電子信箱地址',
-          passwordRequired: '請輸入新密碼',
-          passwordLength: '密碼長度必須為 8-32 個字符',
-          passwordLetter: '密碼必須包含字母',
-          passwordNumber: '密碼必須包含數字',
           confirmRequired: '請再次輸入新密碼',
           passwordMismatch: '兩次輸入的密碼不一致'
         },
@@ -3380,26 +3434,6 @@ export default {
           copyBtn: '複製帳號資訊',
           copySuccess: '帳號資訊已複製到剪貼簿',
           acknowledgeBtn: '我已儲存密碼'
-        }
-      },
-      admins: {
-        label: '系統管理員',
-        description: '擁有平台級權限的使用者。在右側輸入電子信箱並Enter即可提升使用者為管理員；點擊 × 即為撤銷其權限。當前你（自己）已是管理員，不在清單中顯示，也無法被自己撤銷。',
-        placeholder: '輸入使用者電子信箱並Enter',
-        loadFailed: '載入系統管理員失敗',
-        saveSuccess: '已更新系統管理員',
-        saveFailed: '更新系統管理員失敗',
-        confirm: {
-          revoke: {
-            header: '撤銷系統管理員',
-            body: '確認撤銷 {email} 的系統管理員權限？撤銷後該使用者將無法再存取任何系統級功能。',
-            confirmBtn: '撤銷'
-          },
-          promote: {
-            header: '提升為系統管理員',
-            body: '確認將 {email} 提升為系統管理員？該使用者將獲得平台級權限，可存取所有空間、修改系統設定、管理其他管理員。',
-            confirmBtn: '提升'
-          }
         }
       },
       reset: {
@@ -3720,36 +3754,27 @@ export default {
           generic: '獲取佇列狀態失敗'
         }
       },
-      runtimeTable: {
-        setting: '設定項與用途',
-        value: '當前值'
-      },
       sections: {
         other: {
-          tab: '其他 {count}',
           title: '其他設定',
           description: '當前部署中未歸入標準分組的設定項。'
         },
         security: {
-          tab: '網路安全 {count}',
           title: '網路安全',
           description: '管理 SSRF 白名單，以及是否允許 Docker 沙箱（本機 docker.sock 等同宿主機 root）。'
         },
         runtime: {
-          tab: '運行與併發 {count}',
           title: '運行與併發',
           description: '設定後台任務池與模型服務的併發容量。',
           restartHint: 'Worker 設定需重啟生效'
         },
         tenant: {
-          tab: '空間預設值 {count}',
           title: '空間預設值',
           description: '設定新空間的初始配額與相容性行為，不會自動改寫已有空間。'
         },
         access: {
-          tab: '帳戶與存取 {count}',
-          title: '帳戶與存取',
-          description: '管理系統管理員、公開註冊與使用者建立空間的規則。'
+          title: '註冊與存取',
+          description: '管理註冊方式、密碼要求及使用者建立空間的規則。'
         }
       },
       priorityHint: {
@@ -3975,7 +4000,8 @@ export default {
     truncatedHint: '回答在模型單次輸出上限處被截斷，以上為截斷前已生成的內容',
     rewind: {
       tooltip: '回滾到這裡',
-      confirmBody: '將刪除此條之後的對話。從使用者訊息回滾時會刪掉該問題本身，並填回輸入框。若有可用檢查點，工作區會一併回退。此操作不可復原。',
+      confirmTitle: '回滾到這裡？',
+      confirmBody: '此條之後的對話將被刪除；從提問回滾時，該問題會填回輸入框。有檢查點時工作區也會一併回退，操作不可復原。',
       confirmButton: '回滾',
       cancelButton: '取消',
       success: '已回滾',
@@ -4564,6 +4590,17 @@ export default {
         viewerClose: '關閉 (Esc)',
         prev: '上一張 (←)',
         next: '下一張 (→)',
+        sourceFilter: '按文件',
+        sourceFilterTitle: '按來源文件篩選',
+        sourceFilterSearch: '搜尋文件名稱',
+        sourceFilterEmpty: '沒有符合的文件',
+        sourceFilterSubtitle: '圖庫僅顯示所選文件中的圖片，方便逐一核對摘要與 OCR 結果',
+        sourceFilterSelected: '已選 {count} 個文件',
+        sourceFilterClear: '清空已選',
+        sourceFilterTooMany: '最多只能選擇 1000 個文件',
+        sourceFilterSelectAll: '全選 / 全不選（含全部命中結果）',
+        sourceFilterOverflowRecent: '文件較多，僅顯示最近 {cap} 條，請輸入關鍵字精確定位',
+        sourceFilterOverflowHits: '命中 {total} 個文件，僅顯示前 {cap} 條，請細化關鍵字後再全選',
         // Display names for the builtin attributes the gallery itself
         // declares. Attributes contributed by other sources fall back to the
         // pipeline's own wording (see the imageAttr namespace).
@@ -4663,6 +4700,16 @@ export default {
       helpZoomDesc: '縮放畫布',
       neighborsProgress: '已顯示鄰居 {visible}/{total}（還有 {hidden} 個未載入）',
       neighborsAllShown: '全部 {total} 個鄰居已在圖中（可點"展開鄰居"聚焦到該節點子圖）',
+      graphNavigationHint: '拖曳空白處移動 · 滾輪縮放',
+      focusGroup: '聚焦這組頁面',
+      focusGroupViewing: '正在查看：{name}',
+      focusGroupBack: '返回全圖',
+      focusGroupSwitch: '切換到其他分組',
+      unlinkedHidden: '已隱藏 {count} 個無關聯頁面',
+      unlinkedSection: '無關聯頁面 · {count}',
+      offscreenSection: '目前視圖無連線（存在連結）· {count}',
+      hideUnlinked: '隱藏無關聯頁面（{count}）',
+      showUnlinked: '顯示無關聯頁面（{count}）',
       neighborsNone: '該節點沒有連結鄰居',
       neighborsCenterUnreachable: '已顯示鄰居 {visible}/{total}（還有 {hidden} 個無法連通：可能是死鏈、被篩選或已刪除）',
       neighborsOverviewHidden: '已顯示鄰居 {visible}/{total}（{hidden} 個不在概覽範圍，點"展開鄰居"以此為中心查看）',
@@ -5297,7 +5344,13 @@ export default {
     mcpStale: '需重新同步',
     belongsToKb: '所屬知識庫：',
     belongsToOrg: '所屬空間：',
-    noCompatibleKbForAgent: '當前智慧代理的工具與作用域內知識庫的能力不比對，暫無可引用的知識庫。'
+    noCompatibleKbForAgent: '當前智慧代理的工具與作用域內知識庫的能力不比對，暫無可引用的知識庫。',
+    tag: '標籤',
+    searchPlaceholder: '搜尋知識庫、檔案、技能等',
+    searchInGroup: '在{group}中搜尋…',
+    typeToSearch: "在 {'@'} 後繼續輸入以搜尋…",
+    viewAll: '檢視全部',
+    back: '返回'
   },
   common: {
     add: '新增',
@@ -6219,6 +6272,7 @@ export default {
       skillTranscriptLive: '安裝過程',
       skillTranscriptLiveHint: '正在安裝，點擊查看過程',
       skillTranscriptTitle: '安裝過程',
+      skillTranscriptPrompt: '安裝指令',
       skillTranscriptHide: '收起安裝過程',
       skillGuidance: {
         placeholder: '補充安裝說明，例如需要安裝的 CLI、安裝文件或環境限制',
@@ -6337,6 +6391,7 @@ export default {
       installedCount: '已安裝到 {count} 個沙箱',
       installPanelGroup: '已安裝',
       installPanelAvailable: '未安裝',
+      installAction: '安裝',
       viewInstallProgress: '查看進度',
       manageOnSandbox: '管理沙箱「{name}」上的安裝',
       manageDrawerDesc: '在沙箱「{name}」上管理啟用、變數和解除安裝。',
@@ -7374,7 +7429,7 @@ export default {
     statusFailed: '失敗',
     statusCancelled: '已取消',
     statusDraft: '草稿',
-    noDescription: '無描述',
+    noDescription: '暫無描述',
     emptyKnowledgeDragDrop: '知識為空，拖放上傳',
     pdfDocFormat: 'pdf、doc 格式檔案，不超過{size}M',
     textMarkdownFormat: 'text、markdown格式檔案，不超過{size}M',
@@ -7793,6 +7848,7 @@ export default {
   },
   menu: {
     sessionInProgress: '會話進行中',
+    sessionUnread: '有新回覆',
     knowledgeBase: '知識庫',
     agents: '智慧代理',
     artifacts: '產物',
