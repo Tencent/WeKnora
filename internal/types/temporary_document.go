@@ -53,6 +53,33 @@ type TemporaryDocument struct {
 
 func (TemporaryDocument) TableName() string { return "temporary_documents" }
 
+// TemporaryDocumentImageDescriptionsKey is the metadata key under which
+// vision-model descriptions of the document's images are cached.
+const TemporaryDocumentImageDescriptionsKey = "attachment_image_descriptions"
+
+// ForClient returns a copy without server-side caches in Metadata, for API
+// responses. The receiver is not modified.
+func (d *TemporaryDocument) ForClient() *TemporaryDocument {
+	if d == nil {
+		return nil
+	}
+	out := *d
+	var metadata map[string]json.RawMessage
+	if len(d.Metadata) == 0 || json.Unmarshal(d.Metadata, &metadata) != nil {
+		return &out
+	}
+	if _, ok := metadata[TemporaryDocumentImageDescriptionsKey]; !ok {
+		return &out
+	}
+	delete(metadata, TemporaryDocumentImageDescriptionsKey)
+	encoded, err := json.Marshal(metadata)
+	if err != nil {
+		return &out
+	}
+	out.Metadata = JSON(encoded)
+	return &out
+}
+
 func (d *TemporaryDocument) BeforeCreate(_ *gorm.DB) error {
 	if d.ID == "" {
 		d.ID = uuid.NewString()

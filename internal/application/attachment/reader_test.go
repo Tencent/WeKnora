@@ -73,6 +73,16 @@ func imageFixture(t *testing.T) (*testStore, []byte) {
 	}}, b.Bytes()
 }
 
+func readOne(
+	ctx context.Context, reader *Reader, number int, detail, focus string,
+) (*interfaces.AttachmentImage, error) {
+	reads, err := reader.ReadImages(ctx, "document", []int{number}, detail, focus)
+	if err != nil {
+		return nil, err
+	}
+	return reads[0].Image, reads[0].Err
+}
+
 func TestReaderAuthorizesBeforeDocumentImageOrCacheAccess(t *testing.T) {
 	store, data := imageFixture(t)
 	store.allowed = false
@@ -80,7 +90,7 @@ func TestReaderAuthorizesBeforeDocumentImageOrCacheAccess(t *testing.T) {
 		t.Fatal("unauthorized file access")
 		return data, nil
 	})
-	_, err := reader.ReadImage(context.Background(), "document", 1, "brief", "")
+	_, err := readOne(context.Background(), reader, 1, "brief", "")
 	require.ErrorIs(t, err, interfaces.ErrAttachmentNotFound)
 	require.Zero(t, store.loads)
 }
@@ -97,29 +107,29 @@ func TestDescriptionsSurviveReadersAndSeparateReadingRequirements(t *testing.T) 
 				calls++
 				deadline, ok := ctx.Deadline()
 				require.True(t, ok)
-				require.LessOrEqual(t, time.Until(deadline), 30*time.Second)
+				require.LessOrEqual(t, time.Until(deadline), imageDescribeFullTimeout)
 				return prompt, nil
 			},
 		}
 		return reader
 	}
 	ctx := context.Background()
-	first, err := makeReader("vision-a").ReadImage(ctx, "document", 1, "", " axes ")
+	first, err := readOne(ctx, makeReader("vision-a"), 1, "", " axes ")
 	require.NoError(t, err)
 	require.NotNil(t, first.Description)
-	again, err := makeReader("vision-a").ReadImage(ctx, "document", 1, "brief", "axes")
+	again, err := readOne(ctx, makeReader("vision-a"), 1, "brief", "axes")
 	require.NoError(t, err)
 	require.Equal(t, first.Description, again.Description)
 	require.Equal(t, 1, calls)
 	for _, tc := range []struct{ model, detail, focus string }{
 		{"vision-a", "brief", "legend"}, {"vision-a", "full", "axes"}, {"vision-b", "brief", "axes"},
 	} {
-		_, err = makeReader(tc.model).ReadImage(ctx, "document", 1, tc.detail, tc.focus)
+		_, err = readOne(ctx, makeReader(tc.model), 1, tc.detail, tc.focus)
 		require.NoError(t, err)
 	}
 	require.Equal(t, 4, calls)
 	data = append(data, 0) // Different source bytes cannot reuse the observation.
-	_, err = makeReader("vision-a").ReadImage(ctx, "document", 1, "brief", "axes")
+	_, err = readOne(ctx, makeReader("vision-a"), 1, "brief", "axes")
 	require.NoError(t, err)
 	require.Equal(t, 5, calls)
 }
@@ -136,16 +146,16 @@ func TestFailedDescriptionsAreRetriedAndCacheFailureDoesNotLoseResult(t *testing
 		}
 		return "chart", nil
 	}}
-	first, err := reader.ReadImage(context.Background(), "document", 1, "brief", "")
+	first, err := readOne(context.Background(), reader, 1, "brief", "")
 	require.NoError(t, err)
 	require.NotEmpty(t, first.Warning)
 	require.Empty(t, *first.Description)
-	second, err := reader.ReadImage(context.Background(), "document", 1, "brief", "")
+	second, err := readOne(context.Background(), reader, 1, "brief", "")
 	require.NoError(t, err)
 	require.Equal(t, "chart", *second.Description)
 	require.Equal(t, 2, calls)
 	cache.fail = true
-	third, err := reader.ReadImage(context.Background(), "document", 1, "brief", "new focus")
+	third, err := readOne(context.Background(), reader, 1, "brief", "new focus")
 	require.NoError(t, err)
 	require.Equal(t, "chart", *third.Description)
 	require.Contains(t, third.Warning, "save description")
@@ -173,7 +183,7 @@ func TestNativeVisionAndUnavailableSandboxDoNotRequireDescription(t *testing.T) 
 	require.NoError(t, err)
 	require.NotNil(t, document.Document)
 	require.Contains(t, document.Warning, "sandbox offline")
-	view, err := reader.ReadImage(context.Background(), "document", 1, "brief", "")
+	view, err := readOne(context.Background(), reader, 1, "brief", "")
 	require.NoError(t, err)
 	require.NotEmpty(t, view.DataURI)
 	require.Nil(t, view.Description)
@@ -199,5 +209,93 @@ func TestConcurrentDescriptionRequestsShareOneCall(t *testing.T) {
 		}()
 	}
 	wg.Wait()
+	require.Equal(t, int32(1), calls.Load())
+}
+
+func TestReadImagesAuthorizesOnceAndDescribesConcurrently(t *testing.T) {
+	store, data := imageFixture(t)
+	store.doc.MimeType = "application/pdf"
+	store.doc.ImageRefs = types.JSON(`[{"url":"a"},{"url":"b"},{"url":"c"}]`)
+	reader := NewReader(store, 0, func(_ context.Context, url string) ([]byte, error) {
+		return append(append([]byte(nil), data...), url...), nil
+	})
+	var inside sync.WaitGroup
+	inside.Add(3)
+	reader.Images = &ImageReader{Describe: func(ctx context.Context, _ []byte, _ string) (string, error) {
+		inside.Done()
+		// Every description has to be in flight at once to get past here.
+		inside.Wait()
+		return "chart", nil
+	}}
+	done := make(chan []interfaces.AttachmentImageRead)
+	go func() {
+		reads, err := reader.ReadImages(context.Background(), "document", []int{1, 2, 3, 9}, "brief", "")
+		require.NoError(t, err)
+		done <- reads
+	}()
+	select {
+	case reads := <-done:
+		require.Len(t, reads, 4)
+		for i, read := range reads[:3] {
+			require.Equal(t, i+1, read.Number)
+			require.NoError(t, read.Err)
+			require.Equal(t, "chart", *read.Image.Description)
+		}
+		require.Equal(t, 9, reads[3].Number)
+		require.Error(t, reads[3].Err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("images were described one at a time")
+	}
+	require.Equal(t, 1, store.loads)
+}
+
+func TestDescriptionDeadlineStartsAfterQueueing(t *testing.T) {
+	reader := &ImageReader{}
+	reader.slotsOnce.Do(func() { reader.slots = make(chan struct{}, 1) })
+	reader.slots <- struct{}{}
+	const queued = 200 * time.Millisecond
+	time.AfterFunc(queued, func() { <-reader.slots })
+	var remaining time.Duration
+	reader.Describe = func(ctx context.Context, _ []byte, _ string) (string, error) {
+		deadline, ok := ctx.Deadline()
+		require.True(t, ok)
+		remaining = time.Until(deadline)
+		return "chart", nil
+	}
+	_, _, err := reader.describe(context.Background(), "document", []byte("image"), "brief", "")
+	require.NoError(t, err)
+	require.Greater(t, remaining, imageDescribeTimeout-queued/2)
+}
+
+func TestCancelledCallerDoesNotFailSharedDescription(t *testing.T) {
+	var calls atomic.Int32
+	started, release := make(chan struct{}), make(chan struct{})
+	reader := &ImageReader{Describe: func(ctx context.Context, _ []byte, _ string) (string, error) {
+		calls.Add(1)
+		close(started)
+		<-release
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
+		return "chart", nil
+	}}
+	firstCtx, cancel := context.WithCancel(context.Background())
+	firstErr := make(chan error, 1)
+	go func() {
+		_, _, err := reader.describe(firstCtx, "document", []byte("image"), "brief", "")
+		firstErr <- err
+	}()
+	<-started
+	second := make(chan *Description, 1)
+	go func() {
+		value, _, err := reader.describe(context.Background(), "document", []byte("image"), "brief", "")
+		require.NoError(t, err)
+		second <- value
+	}()
+	time.Sleep(50 * time.Millisecond) // let the second caller join the in-flight call
+	cancel()
+	require.ErrorIs(t, <-firstErr, context.Canceled)
+	close(release)
+	require.Equal(t, "chart", (<-second).Text)
 	require.Equal(t, int32(1), calls.Load())
 }

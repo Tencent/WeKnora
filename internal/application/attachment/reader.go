@@ -34,11 +34,12 @@ func NewReader(store Store, wait time.Duration, readImage func(context.Context, 
 	return &Reader{store: store, parseWait: wait, readImage: readImage}
 }
 
-// WaitTimeout bounds parsing and the largest supported image batch together.
+// WaitTimeout bounds parsing plus one image batch: the batch is described
+// concurrently, with room for one queue round behind other reads.
 func (r *Reader) WaitTimeout() time.Duration {
 	wait := r.parseWait
 	if r.Images != nil && r.Images.Describe != nil {
-		wait += 4 * imageDescribeTimeout
+		wait += imageDescribeFullTimeout + imageDescribeTimeout
 	}
 	return wait
 }

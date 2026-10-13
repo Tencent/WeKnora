@@ -16,7 +16,13 @@ import (
 	"golang.org/x/sync/singleflight"
 )
 
-const imageDescribeTimeout = 30 * time.Second
+const (
+	// Deadlines start once a VLM slot is held, so queueing behind other reads
+	// does not eat into the model's time. Full transcriptions run longer.
+	imageDescribeTimeout     = 60 * time.Second
+	imageDescribeFullTimeout = 150 * time.Second
+	imageDescribeSlots       = 4
+)
 
 // Description records the scope of an observation; it is never merged into
 // parsed document text or treated as a complete reading of the image.
@@ -54,10 +60,11 @@ type ImageReader struct {
 	slots     chan struct{}
 }
 
-// ReadImage authorizes, prepares and optionally describes and projects one image.
-func (r *Reader) ReadImage(
-	ctx context.Context, documentID string, number int, detail, focus string,
-) (*interfaces.AttachmentImage, error) {
+// ReadImages authorizes the document once, then prepares, describes and
+// projects the requested images concurrently.
+func (r *Reader) ReadImages(
+	ctx context.Context, documentID string, numbers []int, detail, focus string,
+) ([]interfaces.AttachmentImageRead, error) {
 	resolved, err := r.Resolve(ctx, documentID, false)
 	if err != nil {
 		return nil, err
@@ -66,14 +73,32 @@ func (r *Reader) ReadImage(
 	if doc == nil || doc.Status != types.TemporaryDocumentStatusReady {
 		return nil, fmt.Errorf("attachment is not ready")
 	}
-	images := doc.ViewableImages()
-	if number < 1 || number > len(images) {
-		return nil, fmt.Errorf("image number out of range")
-	}
 	if r.readImage == nil {
 		return nil, fmt.Errorf("attachment image storage is unavailable")
 	}
-	data, err := r.readImage(ctx, images[number-1].URL)
+	images := doc.ViewableImages()
+	reads := make([]interfaces.AttachmentImageRead, len(numbers))
+	var wg sync.WaitGroup
+	for i, number := range numbers {
+		reads[i].Number = number
+		if number < 1 || number > len(images) {
+			reads[i].Err = fmt.Errorf("image number out of range")
+			continue
+		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			reads[i].Image, reads[i].Err = r.readImageAt(ctx, doc, number, images[number-1].URL, detail, focus)
+		}()
+	}
+	wg.Wait()
+	return reads, nil
+}
+
+func (r *Reader) readImageAt(
+	ctx context.Context, doc *types.TemporaryDocument, number int, url, detail, focus string,
+) (*interfaces.AttachmentImage, error) {
+	data, err := r.readImage(ctx, url)
 	if err != nil {
 		return nil, err
 	}
@@ -111,24 +136,27 @@ func (r *ImageReader) describe(
 	prompt := types.ImageReadPrompt(detail, focus)
 	identity, _ := json.Marshal([]string{r.Model, prompt, fmt.Sprintf("%x", sha256.Sum256(data))})
 	key := fmt.Sprintf("%x", sha256.Sum256(identity))
+	timeout := imageDescribeTimeout
+	if detail == types.ImageDetailFull {
+		timeout = imageDescribeFullTimeout
+	}
 	// Coalesce duplicate reads in one engine; the durable cache also serves
 	// subsequent turns and forked sessions after their own authorization.
+	// The shared call is detached from whichever caller started it, so one
+	// caller giving up cannot fail the others waiting on the same image.
+	shared := context.WithoutCancel(ctx)
 	result := r.calls.DoChan(documentID+":"+key, func() (interface{}, error) {
 		if r.Cache != nil {
-			cached, err := r.Cache.Get(ctx, documentID, key)
+			cached, err := r.Cache.Get(shared, documentID, key)
 			if err == nil && cached != nil {
 				return cached, nil
 			}
 		}
-		imageCtx, cancel := context.WithTimeout(ctx, imageDescribeTimeout)
+		r.slotsOnce.Do(func() { r.slots = make(chan struct{}, imageDescribeSlots) })
+		r.slots <- struct{}{}
+		defer func() { <-r.slots }()
+		imageCtx, cancel := context.WithTimeout(shared, timeout)
 		defer cancel()
-		r.slotsOnce.Do(func() { r.slots = make(chan struct{}, 4) })
-		select {
-		case r.slots <- struct{}{}:
-			defer func() { <-r.slots }()
-		case <-imageCtx.Done():
-			return nil, imageCtx.Err()
-		}
 		text, err := r.Describe(imageCtx, data, prompt)
 		if err != nil {
 			return nil, err
@@ -139,7 +167,7 @@ func (r *ImageReader) describe(
 		}
 		value := &Description{Text: text, Detail: detail, Focus: focus, Model: r.Model, CreatedAt: time.Now().UTC()}
 		if r.Cache != nil {
-			if err := r.Cache.Put(ctx, documentID, key, *value); err != nil {
+			if err := r.Cache.Put(shared, documentID, key, *value); err != nil {
 				return value, fmt.Errorf("save description: %w", err)
 			}
 		}

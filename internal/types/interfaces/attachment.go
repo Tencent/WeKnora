@@ -16,8 +16,18 @@ var ErrAttachmentNotFound = errors.New("attachment is not in this conversation")
 type AttachmentReader interface {
 	List(context.Context) ([]AttachmentDocument, error)
 	Resolve(ctx context.Context, ref string, wait bool) (*AttachmentDocument, error)
-	ReadImage(ctx context.Context, documentID string, number int, detail, focus string) (*AttachmentImage, error)
+	// ReadImages authorizes the document once and reads the numbered images
+	// concurrently. The error covers the whole batch; per-image failures are
+	// reported in the aligned results.
+	ReadImages(ctx context.Context, documentID string, numbers []int, detail, focus string) ([]AttachmentImageRead, error)
 	WaitTimeout() time.Duration
+}
+
+// AttachmentImageRead is the outcome for one requested image number.
+type AttachmentImageRead struct {
+	Number int
+	Image  *AttachmentImage
+	Err    error
 }
 
 // AttachmentDocument contains a durable result and any successfully materialized text path.

@@ -9,6 +9,7 @@ import (
 	"image/png"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 	"unicode/utf8"
@@ -236,9 +237,14 @@ func TestReadFileAttachmentNumbersImagesAndReadsThemOnDemand(t *testing.T) {
 	require.NoError(t, err)
 	document.ImageRefs = types.JSON(raw)
 	data := pngBytes(t)
-	var reads []string
+	var (
+		mu    sync.Mutex
+		reads []string
+	)
 	tool := NewReadFileTool(nil).WithAttachments(attachment.NewReader(singleAttachmentStore(document), 0,
 		func(_ context.Context, ref string) ([]byte, error) {
+			mu.Lock()
+			defer mu.Unlock()
 			reads = append(reads, ref)
 			return data, nil
 		}))
@@ -256,7 +262,7 @@ func TestReadFileAttachmentNumbersImagesAndReadsThemOnDemand(t *testing.T) {
 	batch := runReadFile(t, tool, ReadFileInput{Path: path + "/images", Limit: 30})
 	require.True(t, batch.Success, batch.Error)
 	require.Len(t, batch.Images, 4, "image batches are capped independently of the text limit")
-	assert.Equal(t, []string{refs[0].URL, refs[1].URL, refs[2].URL, refs[3].URL}, reads)
+	assert.ElementsMatch(t, []string{refs[0].URL, refs[1].URL, refs[2].URL, refs[3].URL}, reads)
 	assert.Contains(t, batch.Images[0], "data:image/png;base64,")
 	assert.Equal(t, path+"/images/5", batch.Data["next_path"])
 
@@ -402,10 +408,10 @@ func TestAttachmentImageReadsDefaultToOneAndLimitFullReads(t *testing.T) {
 		{name: "full stays single", detail: "full", limit: 3, want: 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			reads := 0
+			var reads atomic.Int32
 			tool := NewReadFileTool(nil).WithAttachments(attachment.NewReader(singleAttachmentStore(document), 0,
 				func(context.Context, string) ([]byte, error) {
-					reads++
+					reads.Add(1)
 					return data, nil
 				}))
 			result := runReadFile(t, tool, ReadFileInput{
@@ -414,7 +420,7 @@ func TestAttachmentImageReadsDefaultToOneAndLimitFullReads(t *testing.T) {
 			})
 			require.True(t, result.Success, result.Error)
 			assert.Len(t, result.Images, tc.want)
-			assert.Equal(t, tc.want, reads)
+			assert.Equal(t, int32(tc.want), reads.Load())
 			assert.Equal(t, "Q3 revenue", result.ImageFocus)
 			if tc.want == 1 {
 				assert.Equal(t, types.AttachmentPath(document.ID)+"/images/2", result.Data["next_path"])

@@ -1092,9 +1092,10 @@ const (
 
 func toolImagePrompt(detail, focus string) string { return types.ImageReadPrompt(detail, focus) }
 func toolImagePrompts(result *types.ToolResult) []string {
+	prompt := toolImagePrompt(result.ImageDetail, result.ImageFocus)
 	prompts := make([]string, len(result.Images))
 	for i := range prompts {
-		prompts[i] = toolImagePrompt(result.ImageDetail, result.ImageFocus)
+		prompts[i] = prompt
 	}
 	return prompts
 }

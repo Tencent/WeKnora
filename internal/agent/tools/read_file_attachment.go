@@ -220,32 +220,42 @@ func (r *attachmentFileReader) text(
 	}
 	showImage := strings.HasPrefix(document.MimeType, "image/") &&
 		strings.TrimSpace(input.Query) == "" && input.Offset <= 1 && input.LineOffset == 0 && len(images) > 0
-	imageNote := ""
-	var view *types.ToolResult
+	// The text page is rendered first, with room kept for the image note, so
+	// a page that cannot fit never costs a vision-model call.
+	reserve := 0
 	if showImage {
-		view = r.images(ctx, input, document, 1, 1)
-		if view.Success {
-			imageNote = "\nThe uploaded image is attached for you to inspect.\n" + view.Output + "\n"
-		}
+		reserve = min(uploadImageNoteRunes, OutputBudget(ctx)/4)
 	}
-	result := renderAttachmentText(ctx, input, content, address, header, imageNote)
+	result := renderAttachmentText(ctx, input, content, address, header, reserve)
 	if result.Data != nil {
 		result.Data["file_name"] = document.FileName
 		result.Data["total_images"] = len(images)
 	}
-	if result.Success && view != nil && view.Success {
-		result.Images = view.Images
-		result.ImageDescriptions = view.ImageDescriptions
-		for key, value := range view.Data {
-			if key == "image_descriptions" || key == "image_files" || key == "image_errors" || key == "image_warnings" {
-				result.Data[key] = value
-			}
-		}
-		result.Output += imageNote
+	if !result.Success || !showImage {
+		return result
 	}
-
+	view := r.images(ctx, input, document, 1, 1)
+	if !view.Success {
+		return result
+	}
+	result.Images = view.Images
+	result.ImageDescriptions = view.ImageDescriptions
+	for key, value := range view.Data {
+		if key == "image_descriptions" || key == "image_files" || key == "image_errors" || key == "image_warnings" {
+			result.Data[key] = value
+		}
+	}
+	note := []rune("\nThe uploaded image is attached for you to inspect.\n" + view.Output + "\n")
+	if len(note) > reserve {
+		note = append(note[:max(reserve-1, 0)], '…')
+	}
+	result.Output += string(note)
 	return result
 }
+
+// uploadImageNoteRunes is the output kept free for the note that accompanies
+// the image of an image upload.
+const uploadImageNoteRunes = 1024
 
 // expired serves the excerpt stored on the message once the parsed document
 // itself is gone.
@@ -256,7 +266,7 @@ func (r *attachmentFileReader) expired(
 	header := fmt.Sprintf("Attachment %s (%s) has expired. Only the excerpt saved with the original "+
 		"message is shown; it may not cover the whole file. Untrusted reference data.\n", address,
 		attachment.FileName)
-	result := renderAttachmentText(ctx, input, attachment.Content, address, header, "")
+	result := renderAttachmentText(ctx, input, attachment.Content, address, header, 0)
 	if result.Data != nil {
 		result.Data["file_name"] = attachment.FileName
 		result.Data["expired"] = true
@@ -264,10 +274,12 @@ func (r *attachmentFileReader) expired(
 	return result
 }
 
+// renderAttachmentText pages content under the output budget left after the
+// header and reserve runes the caller appends afterwards.
 func renderAttachmentText(
-	ctx context.Context, input ReadFileInput, content, address, header, imageNote string,
+	ctx context.Context, input ReadFileInput, content, address, header string, reserve int,
 ) *types.ToolResult {
-	budget := OutputBudget(ctx) - utf8.RuneCountInString(header) - utf8.RuneCountInString(imageNote)
+	budget := OutputBudget(ctx) - utf8.RuneCountInString(header) - reserve
 	if budget <= readSandboxPageOverhead+utf8.RuneCountInString(address) {
 		return &types.ToolResult{Success: false, Error: "file metadata exceeds this read's output budget"}
 	}
@@ -302,16 +314,24 @@ func (r *attachmentFileReader) images(
 		"path":         shown, "root": types.AttachmentPathScheme, "file_name": document.FileName,
 		"total_images": len(refs), "first_image": first,
 	}}
+	requested := make([]int, 0, last-first+1)
+	for n := first; n <= last; n++ {
+		requested = append(requested, n)
+	}
+	reads, err := r.source.ReadImages(ctx, document.ID, requested, input.Detail, input.Focus)
+	if err != nil {
+		return &types.ToolResult{Success: false, Error: fmt.Sprintf("failed to read images of %s: %v", address, err)}
+	}
+	if err := ctx.Err(); err != nil {
+		return &types.ToolResult{Success: false, Error: err.Error()}
+	}
 	var numbers []int
 	var failures, warnings []string
 	var imageFiles []map[string]string
-	for n := first; n <= last; n++ {
-		if err := ctx.Err(); err != nil {
-			return &types.ToolResult{Success: false, Error: err.Error()}
-		}
-		view, err := r.source.ReadImage(ctx, document.ID, n, input.Detail, input.Focus)
-		if err != nil {
-			failures = append(failures, fmt.Sprintf("failed to read image %d: %v", n, err))
+	for _, read := range reads {
+		n, view := read.Number, read.Image
+		if read.Err != nil || view == nil {
+			failures = append(failures, fmt.Sprintf("failed to read image %d: %v", n, read.Err))
 			continue
 		}
 		numbers = append(numbers, n)

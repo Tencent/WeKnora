@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	descriptionMetadataKey   = "attachment_image_descriptions"
+	descriptionMetadataKey   = types.TemporaryDocumentImageDescriptionsKey
 	maxDocumentDescriptions  = 64
 	maxDescriptionCacheBytes = 1 << 20
 )
