@@ -20,11 +20,15 @@
             {{ $t('agentStream.toolApproval.approve') }}
           </button>
         </span>
-        <template v-if="!resolved && secondsLeft >= 0">
+        <template v-if="!resolved && !parked && secondsLeft >= 0">
           <span class="inline-dot">·</span>
           <span class="action-timer" :class="timerClass">
             {{ formatCountdown(secondsLeft) }}
           </span>
+        </template>
+        <template v-if="!resolved && parked">
+          <span class="inline-dot">·</span>
+          <span class="action-timer">{{ parkedLine }}</span>
         </template>
       </div>
     </div>
@@ -70,11 +74,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, inject, onMounted, onBeforeUnmount } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
 import { resolveToolApproval } from '@/api/mcp-service'
 import { resolveEmbedToolApproval } from '@/api/embed'
+import { resumeSuspendedRunKey } from '@/utils/suspendedRun'
 
 const props = defineProps<{
   pendingId: string
@@ -87,6 +92,13 @@ const props = defineProps<{
   resolved?: boolean
   approved?: boolean
   resolveReason?: string
+  // suspendable: past hotWaitSeconds the run is suspended rather than failed,
+  // and the prompt stays answerable until expiresAt.
+  suspendable?: boolean
+  hotWaitSeconds?: number
+  suspended?: boolean
+  expiresAt?: string
+  abandoned?: boolean
   embeddedMode?: boolean
   embedChannelId?: string
   embedToken?: string
@@ -103,7 +115,8 @@ const useEmbedApproval = () =>
   && props.embedSessionSig
   && props.embedVisitorId
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
+const resumeSuspendedRun = inject(resumeSuspendedRunKey, undefined)
 
 function formatJson(raw: string): string {
   try {
@@ -136,8 +149,20 @@ const argsDirty = computed(() => argsText.value.trim() !== initialArgs.trim())
 
 const deadline = computed(() => {
   const base = (props.requestedAt || 0) * 1000
-  const add = (props.timeoutSeconds || 600) * 1000
-  return base + add
+  const wait = props.suspendable ? props.hotWaitSeconds || props.timeoutSeconds : props.timeoutSeconds
+  return base + (wait || 600) * 1000
+})
+
+// Parked: the run no longer waits in memory; answering later resumes it.
+const parked = computed(() => props.suspended || (props.suspendable && now.value >= deadline.value))
+
+const parkedLine = computed(() => {
+  const expires = props.expiresAt ? new Date(props.expiresAt) : null
+  if (!expires || Number.isNaN(expires.getTime())) return t('agentStream.toolApproval.parked')
+  const time = expires.toLocaleString(locale.value, {
+    month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit',
+  })
+  return t('agentStream.toolApproval.parkedUntil', { time })
 })
 
 const secondsLeft = computed(() => {
@@ -153,6 +178,7 @@ const timerClass = computed(() => {
 
 const headerIcon = computed(() => {
   if (!props.resolved) return 'secured'
+  if (props.abandoned) return 'minus-circle'
   if (props.approved) return 'check-circle'
   return 'close-circle'
 })
@@ -176,6 +202,7 @@ const mainTitle = computed(() => {
 
 const statusLine = computed(() => {
   if (!props.resolved) return t('agentStream.toolApproval.waitingStatus')
+  if (props.abandoned) return t('agentStream.toolApproval.abandonedTag')
   if (props.approved) return t('agentStream.toolApproval.approvedTag')
   return t('agentStream.toolApproval.rejectedTag')
 })
@@ -215,7 +242,7 @@ const submit = async (decision: 'approve' | 'reject') => {
         return
       }
     }
-    await (useEmbedApproval()
+    const { resumed } = await (useEmbedApproval()
       ? resolveEmbedToolApproval(
         props.embedChannelId!,
         props.embedToken!,
@@ -235,6 +262,7 @@ const submit = async (decision: 'approve' | 'reject') => {
         reason: decision === 'reject' ? t('agentStream.toolApproval.userRejected') : undefined,
       }))
     MessagePlugin.success(t('agentStream.toolApproval.submitted'))
+    if (resumed) resumeSuspendedRun?.(props.pendingId)
   } catch (e: any) {
     const msg = e?.response?.data?.error?.message || e?.message || t('agentStream.toolApproval.submitFailed')
     MessagePlugin.error(msg)

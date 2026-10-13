@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	stderrors "errors"
 	"net/http"
 	"strconv"
@@ -28,6 +29,9 @@ type MessageHandler struct {
 	// handle mode is available.
 	FileService     interfaces.FileService
 	StorageResolver interfaces.StorageBackendResolver
+	// Prompts supplies the pending prompt of messages awaiting input. May be
+	// nil, in which case such messages carry none.
+	Prompts interfaces.AgentPromptRepository
 }
 
 // NewMessageHandler creates a new message handler instance with the required service
@@ -41,11 +45,52 @@ func NewMessageHandler(
 	messageService interfaces.MessageService,
 	fileService interfaces.FileService,
 	storageResolver interfaces.StorageBackendResolver,
+	prompts interfaces.AgentPromptRepository,
 ) *MessageHandler {
 	return &MessageHandler{
 		MessageService:  messageService,
 		FileService:     fileService,
 		StorageResolver: storageResolver,
+		Prompts:         prompts,
+	}
+}
+
+// attachPendingPrompts sets PendingPrompt on messages awaiting input. Only
+// prompts raised for the caller are shown; the messages themselves were
+// already scoped to the caller's session.
+func (h *MessageHandler) attachPendingPrompts(ctx context.Context, sessionID string, messages []*types.Message) {
+	if h.Prompts == nil {
+		return
+	}
+	awaiting := false
+	for _, m := range messages {
+		awaiting = awaiting || m.RunState == types.MessageRunStateAwaitingInput
+	}
+	if !awaiting {
+		return
+	}
+	rows, err := h.Prompts.ListBySession(ctx, sessionID, []string{types.AgentPromptSuspended})
+	if err != nil {
+		logger.Warnf(ctx, "list pending prompts of session %s: %v", sessionID, err)
+		return
+	}
+	principal, _ := types.PrincipalFromContext(ctx)
+	caller := principal.StorageID()
+	byMessage := make(map[string]*types.AgentPrompt, len(rows))
+	for _, p := range rows {
+		if p.UserID == "" || p.UserID == caller {
+			byMessage[p.AssistantMessageID] = p
+		}
+	}
+	for _, m := range messages {
+		p := byMessage[m.ID]
+		if p == nil || m.RunState != types.MessageRunStateAwaitingInput {
+			continue
+		}
+		m.PendingPrompt = &types.PendingPromptView{
+			ID: p.ID, Kind: p.Kind, ToolCallID: p.ToolCallID,
+			Request: p.Request, ExpiresAt: p.ExpiresAt, CreatedAt: p.CreatedAt,
+		}
 	}
 }
 
@@ -131,6 +176,7 @@ func (h *MessageHandler) LoadMessages(c *gin.Context) {
 			"Successfully retrieved recent messages, session ID: %s, message count: %d",
 			sessionID, len(messages),
 		)
+		h.attachPendingPrompts(ctx, sessionID, messages)
 		c.JSON(http.StatusOK, gin.H{
 			"success": true,
 			"data":    rewriter.RewriteMessagesResponse(ctx, messages),
@@ -171,6 +217,7 @@ func (h *MessageHandler) LoadMessages(c *gin.Context) {
 		"Successfully retrieved messages before time, session ID: %s, message count: %d",
 		sessionID, len(messages),
 	)
+	h.attachPendingPrompts(ctx, sessionID, messages)
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"data":    rewriter.RewriteMessagesResponse(ctx, messages),

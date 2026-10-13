@@ -122,6 +122,17 @@ type PromptSuspension struct {
 	ExpiresAt *time.Time `json:"expires_at,omitempty"`
 }
 
+// PendingPromptView is what a client needs to render and answer a suspended
+// prompt when it reloads the conversation.
+type PendingPromptView struct {
+	ID         string     `json:"id"`
+	Kind       string     `json:"kind"`
+	ToolCallID string     `json:"tool_call_id"`
+	Request    JSON       `json:"request,omitempty"`
+	ExpiresAt  *time.Time `json:"expires_at,omitempty"`
+	CreatedAt  time.Time  `json:"created_at"`
+}
+
 // ResumableAgentRequest is the part of a QARequest needed to rebuild the run
 // on another replica. It holds durable identifiers only.
 type ResumableAgentRequest struct {

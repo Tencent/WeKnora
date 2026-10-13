@@ -407,12 +407,13 @@ export async function resolveEmbedToolApproval(
   visitorId: string,
   pendingId: string,
   body: { decision: 'approve' | 'reject'; modified_args?: Record<string, unknown>; reason?: string },
-): Promise<void> {
-  await post(
+): Promise<{ resumed: boolean }> {
+  const res: any = await post(
     `/api/v1/embed/${channelId}/sessions/${encodeURIComponent(sessionId)}/tool-approvals/${encodeURIComponent(pendingId)}`,
     body,
     { headers: embedSessionHeaders(token, sessionSig, visitorId) },
   )
+  return { resumed: Boolean(res?.resumed) }
 }
 
 export async function getEmbedMessageList(

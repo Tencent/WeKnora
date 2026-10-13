@@ -130,6 +130,7 @@ import EmbedUserMessage from '@/views/embed/EmbedUserMessage.vue'
 import ChatReferencesDrawer from '@/components/ChatReferencesDrawer.vue'
 import { provideChatReferencesDrawer } from '@/composables/useChatReferencesDrawer'
 import { useEmbedChatSession } from '@/composables/useEmbedChatSession'
+import { isAwaitingInput } from '@/composables/useChatStreamHandler'
 import FollowUpSuggestions from '@/components/chat/FollowUpSuggestions.vue'
 import MessageTimestamp from '@/components/chat/MessageTimestamp.vue'
 import { shouldShowConversationTimestamp } from '@/utils/messageTimestamp'
@@ -179,6 +180,7 @@ const loadFollowUpSuggestions = async (
   const messageId = String(message.id || message.assistant_message_id || '')
   const targetSessionId = props.sessionId
   if (!props.showSuggestedQuestions || !messageId || !targetSessionId || message.suggestionsDismissed) return
+  if (isAwaitingInput(message)) return
   message.suggestionLoading = true
   try {
     let response = ensure

@@ -52,8 +52,8 @@ type AgentConfig struct {
 	ToolApprovalTimeoutSeconds int `yaml:"tool_approval_timeout_seconds" json:"tool_approval_timeout_seconds"`
 	// PromptSuspendEnabled lets a run that waits on a suspendable prompt (tool
 	// approval) end after PromptHotWaitSeconds and persist its state instead of
-	// blocking up to ToolApprovalTimeoutSeconds.
-	PromptSuspendEnabled bool `yaml:"prompt_suspend_enabled" json:"prompt_suspend_enabled"`
+	// blocking up to ToolApprovalTimeoutSeconds. Unset means enabled.
+	PromptSuspendEnabled *bool `yaml:"prompt_suspend_enabled" json:"prompt_suspend_enabled"`
 	// PromptHotWaitSeconds is how long a suspendable prompt waits in memory
 	// before the run is suspended. 0 means default 120.
 	PromptHotWaitSeconds int `yaml:"prompt_hot_wait_seconds" json:"prompt_hot_wait_seconds"`
@@ -67,6 +67,11 @@ const (
 	DefaultPromptHotWait = 120 * time.Second
 	DefaultPromptExpire  = 7 * 24 * time.Hour
 )
+
+// PromptSuspend reports whether suspendable prompts may suspend their run.
+func (c *AgentConfig) PromptSuspend() bool {
+	return c == nil || c.PromptSuspendEnabled == nil || *c.PromptSuspendEnabled
+}
 
 // PromptHotWait returns the in-memory wait before a run is suspended.
 func (c *AgentConfig) PromptHotWait() time.Duration {
@@ -859,7 +864,8 @@ func applyAgentEnvOverrides(cfg *Config) {
 		}
 	}
 	if value := strings.TrimSpace(os.Getenv("WEKNORA_AGENT_PROMPT_SUSPEND")); value != "" {
-		cfg.Agent.PromptSuspendEnabled = strings.EqualFold(value, "true")
+		enabled := strings.EqualFold(value, "true")
+		cfg.Agent.PromptSuspendEnabled = &enabled
 	}
 }
 

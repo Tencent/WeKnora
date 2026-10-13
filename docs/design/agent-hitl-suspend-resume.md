@@ -227,7 +227,7 @@ P1 已实现第 2 至 6 步中除快照与挂起以外的部分：超时一律�
 
 ### 5.2 用户回答（任意副本）
 
-现有接口 `POST /agent/tool-approvals/{pending_id}` 与 MCP OAuth 回调保留，内部都走 `Broker.Resolve`；P4 新增通用接口 `POST /agent/prompts/{id}`（请求体为该类型的 `response`），前端切换完成后旧接口作为兼容层保留。`Broker.Resolve` 的步骤：
+现有接口 `POST /agent/tool-approvals/{pending_id}` 与 MCP OAuth 回调保留，内部都走 `Broker.Resolve`。通用接口 `POST /agent/prompts/{id}`（请求体为该类型的 `response`）随 P4.5 的 `ask_user` 一起提供，届时旧接口作为兼容层保留。`Broker.Resolve` 的步骤：
 
 1. 按 id 读取记录。`kind` 与接口声明的类型不符、`session_id` 与路由中的会话不符时，一律返回 `not_found`，不暴露记录存在与否。再校验 `tenant_id` 和 `user_id`（调用方 userID 为空视为不匹配）。嵌入页接口额外校验 channel 与 session 的归属。
 2. 调用该类型注册的校验函数。工具审批：`modified_args` 只在批准时生效，必须是 JSON 对象；P2 起再按工具的 InputSchema 校验，工具定义取自 MCP 元数据快照，取不到就拒绝请求。提问：按问题的 schema 校验。校验失败返回 400。
@@ -401,7 +401,7 @@ API 文档、Swagger、`client/` SDK 同步更新（按 `weknora-api-docs-sync` 
 
 | 配置项 | 默认值 | 说明 |
 |---|---|---|
-| `agent.prompt_suspend_enabled` | `false`（P4 起改为 `true`） | 关闭后恢复为纯阻塞式（仍写数据库记录）；对所有可挂起类型生效。环境变量 `WEKNORA_AGENT_PROMPT_SUSPEND=true` 可覆盖 |
+| `agent.prompt_suspend_enabled` | 未配置时为 `true`（P4 起） | 设为 `false` 恢复为纯阻塞式（仍写数据库记录）；对所有可挂起类型生效。环境变量 `WEKNORA_AGENT_PROMPT_SUSPEND=true/false` 可覆盖 |
 | `agent.prompt_hot_wait_seconds` | `120` | 短等待时长；`0` 取默认值 |
 | `agent.prompt_expire_seconds` | `604800`（7 天） | 挂起后的过期时间；`0` 取默认值，负数表示不过期 |
 | `agent.tool_approval_timeout_seconds` | `600` | 保留；仅在关闭挂起时作为阻塞上限 |
@@ -437,8 +437,8 @@ Agent 需要用户补充信息或做选择时调用，作为 P4 之后的单独�
 | P1 | 两张新表与 `messages.run_state` 迁移（Postgres 000119、SQLite 000037）；通用核心 `hitl.Broker`（持久化、租约、轮询兜底、Pub/Sub 唤醒、按 kind 校验回答）；工具审批与 OAuth 改为其上的适配层；Resolve 绑定 session 与 kind | 无，仍是阻塞式 |
 | P2（已实现） | 引擎 `roundProgress`、快照、`Suspend` 信号；handler 挂起收尾；`run_suspended` 事件；回收任务第 1 条 | 超过短等待后挂起，但暂时无法恢复（功能开关默认关闭） |
 | P3（已实现） | `engine.Resume`、进程内恢复与租约、`ResetEvents`、`run_resumed`；8.1 新消息与回溯取代；回收任务第 2、3 条；`SuspendedRunService` 统一收尾 | 后端功能完整（功能开关默认关闭，前端未适配） |
-| P4 | 通用事件与 `POST /agent/prompts/{id}`；前端按 kind 渲染卡片；i18n | 功能开关默认打开 |
-| P4.5 | `ask_user` 内置工具（第 12 节）及其表单卡片 | Agent 可以向用户提问 |
+| P4（已实现） | 功能开关默认打开；消息列表为 `awaiting_input` 消息附带 `pending_prompt`（只对发起人可见，含卡片字段与 `expires_at`）；前端处理 `run_suspended` / `run_resumed`，挂起卡片显示“已转入后台等待”与截止时间，回答返回 `resumed: true` 后 Web 端经 continue-stream 重新接上同一条消息（短暂重试等待恢复流出现），嵌入页无 continue-stream，改为轮询消息列表、结束后重新加载；发送新消息时挂起卡片显示“已放弃”；i18n | 工具审批可长时间挂起并在任意副本恢复 |
+| P4.5 | `ask_user` 内置工具（第 12 节）及其表单卡片；通用接口 `POST /agent/prompts/{id}`（含嵌入页）；MCP OAuth 接入挂起 | Agent 可以向用户提问 |
 | P5 | 文档、Swagger、SDK | |
 
 ## 14. 测试要点

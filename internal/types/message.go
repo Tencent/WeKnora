@@ -502,6 +502,9 @@ type Message struct {
 	// repository loads it with every message it returns and writes it whenever it
 	// is non-nil on create or update. A nil slice leaves the stored rows alone.
 	Artifacts MessageArtifacts `json:"artifacts,omitempty" gorm:"-"`
+	// PendingPrompt is the prompt an awaiting_input message waits on. The
+	// message list fills it in for the prompt's owner; it is never stored.
+	PendingPrompt *PendingPromptView `json:"pending_prompt,omitempty" gorm:"-"`
 	// Whether message generation is complete
 	IsCompleted bool `json:"is_completed"`
 	// RunState refines an incomplete message: MessageRunStateAwaitingInput

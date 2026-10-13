@@ -117,7 +117,9 @@
                   :mcp-tool-name="event.mcp_tool_name || ''" :description="event.description"
                   :args-json="event.args_json" :timeout-seconds="event.timeout_seconds"
                   :requested-at="event.requested_at" :resolved="event.resolved" :approved="event.approved"
-                  :resolve-reason="event.resolve_reason" v-bind="embedAuthProps" />
+                  :resolve-reason="event.resolve_reason" :suspendable="event.suspendable"
+                  :hot-wait-seconds="event.hot_wait_seconds" :suspended="event.suspended"
+                  :expires-at="event.expires_at" :abandoned="event.abandoned" v-bind="embedAuthProps" />
               </div>
 
               <!-- MCP OAuth in-conversation authorization prompt -->
@@ -341,7 +343,9 @@
               <ToolApprovalCard :pending-id="event.pending_id" :service-name="event.service_name || ''"
                 :mcp-tool-name="event.mcp_tool_name || ''" :description="event.description" :args-json="event.args_json"
                 :timeout-seconds="event.timeout_seconds" :requested-at="event.requested_at" :resolved="event.resolved"
-                :approved="event.approved" :resolve-reason="event.resolve_reason" v-bind="embedAuthProps" />
+                :approved="event.approved" :resolve-reason="event.resolve_reason" :suspendable="event.suspendable"
+                :hot-wait-seconds="event.hot_wait_seconds" :suspended="event.suspended" :expires-at="event.expires_at"
+                :abandoned="event.abandoned" v-bind="embedAuthProps" />
             </div>
 
             <!-- MCP OAuth in-conversation authorization prompt -->
