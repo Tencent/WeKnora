@@ -1,4 +1,4 @@
-DO $$ BEGIN RAISE NOTICE '[Migration 000117] Converting MCP OAuth timestamps to timestamptz...'; END $$;
+DO $$ BEGIN RAISE NOTICE '[Migration 000118] Converting MCP OAuth timestamps to timestamptz...'; END $$;
 
 -- Naive TIMESTAMP values were read through a GORM session with TimeZone=UTC.
 -- Treat existing literals as UTC when promoting to timestamptz. Rows written
@@ -24,4 +24,4 @@ ALTER TABLE mcp_oauth_clients
     ALTER COLUMN updated_at TYPE TIMESTAMP WITH TIME ZONE
         USING updated_at AT TIME ZONE 'UTC';
 
-DO $$ BEGIN RAISE NOTICE '[Migration 000117] MCP OAuth timestamps converted'; END $$;
+DO $$ BEGIN RAISE NOTICE '[Migration 000118] MCP OAuth timestamps converted'; END $$;

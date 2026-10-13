@@ -104,7 +104,7 @@ func (r *mcpOAuthRepository) SaveTokenForPrincipal(ctx context.Context, token *t
 	// Callers compute the expiry from the process clock, which may not be UTC.
 	// Normalize it so the value is also stored as the right instant while the
 	// columns are still naive TIMESTAMP, for example with AUTO_MIGRATE=false
-	// before migration 000117 is applied.
+	// before migration 000118 is applied.
 	token.ExpiresAt = token.ExpiresAt.UTC()
 	token.UpdatedAt = time.Now().UTC()
 	return r.db.WithContext(ctx).
