@@ -56,6 +56,7 @@ async function fixture() {
       if (name === '@/stores/menu') return { useMenuStore: () => ({}) }
       if (name === '@/stores/settings') return { useSettingsStore: () => ({}) }
       if (name === '@/api/wiki') return api
+      if (name === '@/api/agent-inbox') return { postUIEvent: async () => {} }
       if (name === 'tdesign-vue-next') return { MessagePlugin: { success() {}, error() {} } }
       // DOM sanitization has separate tests; this fixture exercises the actual
       // component's title resolution and Markdown caller before that boundary.
