@@ -389,6 +389,9 @@ type ToolResult struct {
 	// model asked to read Images when it cannot view them. Live only.
 	ImageDetail string `json:"-"`
 	ImageFocus  string `json:"-"`
+	// Suspend, when set, means the call did not run: it is waiting on a user
+	// prompt and the run must end so it can be resumed later. Live only.
+	Suspend *PromptSuspension `json:"-"`
 }
 
 // Image description detail levels requested by a file read.
@@ -503,6 +506,11 @@ type AgentState struct {
 	FinalAnswer          string          `json:"final_answer"`   // The final answer to the query
 	KnowledgeRefs        []*SearchResult `json:"knowledge_refs"` // Collected knowledge references
 	TurnUsage            TokenUsage      `json:"turn_usage"`     // LLM usage accumulated across this turn
+	// Suspended is set when the run ended waiting on a user prompt.
+	// SuspendedStep is the interrupted round: its thought and the calls
+	// that finished before the blocked one, kept for display.
+	Suspended     *PromptSuspension `json:"-"`
+	SuspendedStep *AgentStep        `json:"-"`
 }
 
 // FunctionDefinition represents a function definition for LLM function calling

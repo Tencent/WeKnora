@@ -2,6 +2,7 @@ package interfaces
 
 import (
 	"context"
+	"encoding/json"
 
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/models/chat"
@@ -43,6 +44,11 @@ type AgentEngine interface {
 	// end on a stored turn, so later turns start from them. Nil (default)
 	// keeps compaction local to the turn. Must be called before Execute.
 	SetContextCheckpointSink(sink types.ContextCheckpointSink)
+
+	// EnableSuspension lets a user prompt end the run so it can be resumed
+	// later instead of blocking. request is the caller's
+	// types.ResumableAgentRequest. Must be called before Execute.
+	EnableSuspension(request json.RawMessage)
 }
 
 // AgentService defines the interface for agent-related operations

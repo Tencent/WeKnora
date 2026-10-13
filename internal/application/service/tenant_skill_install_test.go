@@ -3226,6 +3226,8 @@ func (e *installAgentEngine) SetMemoryPrompt(string)                            
 func (e *installAgentEngine) SetSteerSink(sink types.SteerSink)                    { e.sink = sink }
 func (e *installAgentEngine) SetContextCheckpointSink(types.ContextCheckpointSink) {}
 
+func (e *installAgentEngine) EnableSuspension(json.RawMessage) {}
+
 type installSessionService struct {
 	fx *installFixture
 }

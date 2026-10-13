@@ -185,7 +185,19 @@ func (t *MCPTool) Execute(ctx context.Context, args json.RawMessage) (*types.Too
 				if meta.ApprovalCtx != nil {
 					waitCtx = meta.ApprovalCtx
 				}
+				var snapshot []byte
+				var snapshotVersion int
+				if meta.Snapshot != nil {
+					var snapErr error
+					if snapshot, snapshotVersion, snapErr = meta.Snapshot(); snapErr != nil {
+						// Without run state the approval can still block in memory.
+						logger.Warnf(ctx, "[Tool][MCPTool] capture run state for approval: %v", snapErr)
+						snapshot = nil
+					}
+				}
 				decision, waitErr := t.gate.RequestAndWait(waitCtx, approval.PendingRequest{
+					Snapshot:           snapshot,
+					SnapshotVersion:    snapshotVersion,
 					TenantID:           tenantID,
 					UserID:             meta.UserID,
 					SessionID:          meta.SessionID,
@@ -204,6 +216,13 @@ func (t *MCPTool) Execute(ctx context.Context, args json.RawMessage) (*types.Too
 					return &types.ToolResult{
 						Success: false,
 						Error:   fmt.Sprintf("Tool approval failed: %v", waitErr),
+					}, nil
+				}
+				if decision.Suspended != nil {
+					return &types.ToolResult{
+						Success: false,
+						Error:   "waiting for the user to approve this tool call",
+						Suspend: decision.Suspended,
 					}, nil
 				}
 				if !decision.Approved {

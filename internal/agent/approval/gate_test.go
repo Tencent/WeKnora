@@ -314,3 +314,39 @@ func TestAdapter_IsEnabled(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, enabled)
 }
+
+func TestGate_RequestAndWait_SuspendsAfterHotWait(t *testing.T) {
+	bus := event.NewEventBus()
+	g := NewGate(&config.Config{Agent: &config.AgentConfig{
+		ToolApprovalTimeoutSeconds: 60, PromptHotWaitSeconds: 1,
+	}}, &stubChecker{required: true}, nil)
+
+	var required event.ToolApprovalRequiredData
+	bus.On(event.EventToolApprovalRequired, func(_ context.Context, evt event.Event) error {
+		required = evt.Data.(event.ToolApprovalRequiredData)
+		return nil
+	})
+	resolved := false
+	bus.On(event.EventToolApprovalResolved, func(context.Context, event.Event) error {
+		resolved = true
+		return nil
+	})
+
+	d, err := g.RequestAndWait(context.Background(), PendingRequest{
+		TenantID: 1, SessionID: "s1", AssistantMessageID: "m1", EventBus: bus,
+		ServiceID: "svc", ServiceName: "svcname", MCPToolName: "t", RegisteredToolName: "mcp_svcname_t",
+		Args: json.RawMessage(`{}`), ToolCallID: "tc1",
+		Snapshot: []byte(`{"version":1}`), SnapshotVersion: 1,
+	})
+	require.NoError(t, err)
+	require.False(t, d.Approved)
+	require.False(t, d.TimedOut)
+	require.NotNil(t, d.Suspended)
+	require.Equal(t, d.PendingID, d.Suspended.PromptID)
+	require.Equal(t, types.AgentPromptKindToolApproval, d.Suspended.Kind)
+	require.NotNil(t, d.Suspended.ExpiresAt)
+
+	require.True(t, required.Suspendable)
+	require.Equal(t, 1, required.HotWaitSeconds)
+	require.False(t, resolved, "a suspended approval is still open")
+}

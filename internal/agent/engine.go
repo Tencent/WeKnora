@@ -82,6 +82,11 @@ type AgentEngine struct {
 	allowSteerOverrun bool // one extra ReAct round after a loop-end inject past MaxIterations
 	steerOverruns     int  // how many times this turn has already used the extra round
 	workspaceLayout   sandbox.WorkspaceLayout
+	// suspendable lets a user prompt end the run so it can be resumed later;
+	// suspendRequest is saved with the run for that (see EnableSuspension).
+	suspendable    bool
+	suspendRequest []byte
+	progress       turnProgress
 }
 
 // maxSteerOverruns caps loop-end injects past MaxIterations. One extra round
@@ -399,6 +404,7 @@ func (e *AgentEngine) Execute(
 	if len(imageURLs) > 0 {
 		imgs = imageURLs[0]
 	}
+	e.beginTurn(query, imgs, state)
 	messages := e.buildMessagesWithLLMContext(systemPrompt, query, sessionID, llmContext, imgs)
 	if e.toolRegistry != nil {
 		e.toolRegistry.RememberMCPHistory(messages)
@@ -688,7 +694,9 @@ loop:
 	// state.FinalAnswer to the generic "Sorry, I was unable to generate a
 	// complete answer." message, which then leaks to the UI as the final
 	// answer for a conversation the user deliberately stopped.
-	if !state.IsComplete && ctx.Err() == nil {
+	// A suspended run has not finished either; it resumes once the user
+	// answers, so no answer is synthesized for it.
+	if !state.IsComplete && ctx.Err() == nil && state.Suspended == nil {
 		e.handleMaxIterations(ctx, query, state, sessionID, messages)
 	}
 
@@ -1049,8 +1057,18 @@ func (e *AgentEngine) runReActIteration(
 	// Thought.
 
 	// 3. Act: Execute tool calls
-	e.executeToolCalls(ctx, response, &step, state.CurrentRound, sessionID, assistantMessageID)
+	e.beginRound(step, response.ToolCalls)
+	suspended := e.executeToolCalls(ctx, response, &step, state.CurrentRound, sessionID, assistantMessageID)
+	e.endRound()
 	toolCallCount = len(step.ToolCalls)
+	if suspended != nil {
+		// The blocked call and the ones after it have not run, so the round
+		// is not part of the transcript yet; it is completed on resume.
+		logger.Infof(ctx, "[Agent][Round-%d] Suspended waiting on prompt %s", round, suspended.PromptID)
+		state.Suspended = suspended
+		state.SuspendedStep = &step
+		return iterOutcomeBreak, nil
+	}
 
 	// 4. Observe: Add tool results to messages and write to context
 	state.RoundSteps = append(state.RoundSteps, step)

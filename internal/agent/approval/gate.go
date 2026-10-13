@@ -37,6 +37,9 @@ type Decision struct {
 	Reason          string
 	TimedOut        bool
 	ContextCanceled bool
+	// Suspended is set when no decision arrived during the in-memory wait
+	// and the prompt now outlives the run; the call must not execute.
+	Suspended *types.PromptSuspension
 }
 
 // PendingRequest carries everything needed to block and notify the UI.
@@ -54,6 +57,10 @@ type PendingRequest struct {
 	Description        string
 	Args               json.RawMessage
 	ToolCallID         string
+	// Snapshot, when set, is the run state to resume from: the wait is cut
+	// to the hot-wait window and then suspends instead of timing out.
+	Snapshot        []byte
+	SnapshotVersion int
 }
 
 // MCPApproval is the surface used by MCPTool (mockable in tests).
@@ -103,6 +110,7 @@ var _ MCPApproval = (*Gate)(nil)
 type Gate struct {
 	checker   Checker
 	timeout   time.Duration
+	hotWait   time.Duration // in-memory wait before a suspendable approval suspends the run
 	broker    *hitl.Broker
 	failClose bool // when true, NeedsApproval errors block (require approval) instead of skip
 }
@@ -120,8 +128,12 @@ var (
 // (defaults apply). broker may be nil (process-local prompts, single replica).
 func NewGate(cfg *config.Config, checker Checker, broker *hitl.Broker) *Gate {
 	timeout := 10 * time.Minute
-	if cfg != nil && cfg.Agent != nil && cfg.Agent.ToolApprovalTimeoutSeconds > 0 {
-		timeout = time.Duration(cfg.Agent.ToolApprovalTimeoutSeconds) * time.Second
+	hotWait := config.DefaultPromptHotWait
+	if cfg != nil && cfg.Agent != nil {
+		if cfg.Agent.ToolApprovalTimeoutSeconds > 0 {
+			timeout = time.Duration(cfg.Agent.ToolApprovalTimeoutSeconds) * time.Second
+		}
+		hotWait = cfg.Agent.PromptHotWait()
 	}
 	if broker == nil {
 		broker = hitl.NewBroker(nil, nil)
@@ -131,7 +143,7 @@ func NewGate(cfg *config.Config, checker Checker, broker *hitl.Broker) *Gate {
 	// Default fail-close: if the checker errors, require approval (safer for a
 	// HITL feature). Set WEKNORA_AGENT_TOOL_APPROVAL_FAIL_OPEN=true to revert.
 	failClose := !strings.EqualFold(strings.TrimSpace(os.Getenv("WEKNORA_AGENT_TOOL_APPROVAL_FAIL_OPEN")), "true")
-	return &Gate{checker: checker, timeout: timeout, broker: broker, failClose: failClose}
+	return &Gate{checker: checker, timeout: timeout, hotWait: hotWait, broker: broker, failClose: failClose}
 }
 
 // NeedsApproval returns whether execution should pause for human confirmation.
@@ -195,9 +207,16 @@ func (g *Gate) RequestAndWait(ctx context.Context, req PendingRequest) (Decision
 	if len(req.Args) > 0 {
 		_ = json.Unmarshal(req.Args, &argsObj)
 	}
-	timeoutSec := max(int(g.timeout/time.Second), 1)
+	wait := g.timeout
+	var suspend *hitl.SuspendSpec
+	if req.Snapshot != nil {
+		wait = g.hotWait
+		suspend = &hitl.SuspendSpec{Snapshot: req.Snapshot, SnapshotVersion: req.SnapshotVersion}
+	}
+	timeoutSec := max(int(wait/time.Second), 1)
 
 	out, err := g.broker.Await(ctx, hitl.Spec{
+		Suspend: suspend,
 		Prompt: &types.AgentPrompt{
 			TenantID:           req.TenantID,
 			UserID:             req.UserID,
@@ -208,7 +227,7 @@ func (g *Gate) RequestAndWait(ctx context.Context, req PendingRequest) (Decision
 			ToolCallID:         req.ToolCallID,
 			Request:            types.JSON(request),
 		},
-		Timeout:       g.timeout,
+		Timeout:       wait,
 		TimeoutReason: "approval timeout",
 		Emit: func(ctx context.Context, p *types.AgentPrompt) error {
 			return req.EventBus.Emit(ctx, event.Event{
@@ -228,6 +247,8 @@ func (g *Gate) RequestAndWait(ctx context.Context, req PendingRequest) (Decision
 					Args:               argsObj,
 					ArgsJSON:           string(req.Args),
 					TimeoutSeconds:     timeoutSec,
+					HotWaitSeconds:     timeoutSec,
+					Suspendable:        suspend != nil,
 					RequestedAtUnix:    time.Now().Unix(),
 					ToolCallID:         req.ToolCallID,
 					RequestID:          req.RequestID,
@@ -242,6 +263,17 @@ func (g *Gate) RequestAndWait(ctx context.Context, req PendingRequest) (Decision
 	})
 	if err != nil {
 		return Decision{}, fmt.Errorf("tool approval: %w", err)
+	}
+	if out.Suspended {
+		// Still open: the run ends here and the decision resumes it later.
+		return Decision{
+			PendingID: out.Prompt.ID,
+			Suspended: &types.PromptSuspension{
+				PromptID:  out.Prompt.ID,
+				Kind:      types.AgentPromptKindToolApproval,
+				ExpiresAt: out.ExpiresAt,
+			},
+		}, nil
 	}
 
 	d := toolApprovalDecision(out)

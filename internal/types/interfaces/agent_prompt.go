@@ -18,4 +18,19 @@ type AgentPromptRepository interface {
 	Transition(ctx context.Context, id string, t types.AgentPromptTransition) (bool, error)
 	// RenewLease extends a pending row's lease while owner still holds it.
 	RenewLease(ctx context.Context, id, owner string, until time.Time) (bool, error)
+	// ListStaleLeases returns up to limit pending rows whose lease ended
+	// before t: their owner replica is gone.
+	ListStaleLeases(ctx context.Context, before time.Time, limit int) ([]*types.AgentPrompt, error)
+}
+
+// AgentRunSuspensionRepository persists the state of runs blocked on a
+// prompt, one row per assistant message.
+type AgentRunSuspensionRepository interface {
+	// Save inserts or replaces the row for row.AssistantMessageID.
+	Save(ctx context.Context, row *types.AgentRunSuspension) error
+	// Get returns nil, nil when the message has no saved state.
+	Get(ctx context.Context, assistantMessageID string) (*types.AgentRunSuspension, error)
+	// Delete removes the row only while it still belongs to promptID, so a
+	// newer prompt's state is never dropped by a stale caller.
+	Delete(ctx context.Context, assistantMessageID, promptID string) error
 }

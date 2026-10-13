@@ -19,6 +19,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/google/uuid"
@@ -67,7 +68,11 @@ type Outcome struct {
 	Answered bool
 	TimedOut bool
 	Canceled bool
-	Reason   string
+	// Suspended means the prompt outlived the in-memory wait: the run must
+	// end now and be resumed once the prompt is answered.
+	Suspended bool
+	ExpiresAt *time.Time
+	Reason    string
 }
 
 // Spec describes a prompt to raise and wait on.
@@ -80,6 +85,17 @@ type Spec struct {
 	// Emit notifies the UI. It runs after the row is persisted and the
 	// waiter is registered, so an immediate answer is never missed.
 	Emit func(ctx context.Context, prompt *types.AgentPrompt) error
+	// Suspend makes the prompt suspendable: when Timeout elapses the run is
+	// suspended instead of the prompt expiring. Nil keeps a plain wait.
+	Suspend *SuspendSpec
+}
+
+// SuspendSpec carries the run state saved with a suspendable prompt. It is
+// written before the prompt is raised, so a replica that dies while waiting
+// still leaves a resumable run behind.
+type SuspendSpec struct {
+	Snapshot        []byte
+	SnapshotVersion int
 }
 
 // ResolveRequest is a user answer to a prompt. SessionID and Kind, when set,
@@ -96,8 +112,9 @@ type ResolveRequest struct {
 
 // Broker raises, awaits and resolves prompts.
 type Broker struct {
-	store Store
-	rdb   *redis.Client
+	store       Store
+	suspensions SuspensionStore
+	rdb         *redis.Client
 
 	mu         sync.Mutex
 	waiters    map[string]chan struct{}
@@ -106,6 +123,9 @@ type Broker struct {
 	pollInterval  time.Duration
 	leaseTTL      time.Duration
 	renewInterval time.Duration
+	// suspendExpiry bounds how long a suspended prompt stays answerable;
+	// zero never expires.
+	suspendExpiry time.Duration
 }
 
 // Option customizes a Broker.
@@ -120,6 +140,26 @@ func WithPollInterval(d time.Duration) Option {
 	}
 }
 
+// WithSuspensionStore sets where suspendable prompts save their run state.
+func WithSuspensionStore(s SuspensionStore) Option {
+	return func(b *Broker) {
+		if s != nil {
+			b.suspensions = s
+		}
+	}
+}
+
+// WithSuspendExpiry sets how long a suspended prompt stays answerable; zero
+// never expires.
+func WithSuspendExpiry(d time.Duration) Option {
+	return func(b *Broker) { b.suspendExpiry = d }
+}
+
+// withLease shortens lease timing for tests.
+func withLease(ttl, renew time.Duration) Option {
+	return func(b *Broker) { b.leaseTTL, b.renewInterval = ttl, renew }
+}
+
 // NewBroker builds a broker. store may be nil (process memory; single
 // replica only). rdb may be nil (no cross-instance wake-ups; waiters still
 // observe answers by polling the store).
@@ -129,12 +169,14 @@ func NewBroker(store Store, rdb *redis.Client, opts ...Option) *Broker {
 	}
 	b := &Broker{
 		store:         store,
+		suspensions:   NewMemorySuspensionStore(),
 		rdb:           rdb,
 		waiters:       make(map[string]chan struct{}),
 		validators:    make(map[string]ResponseValidator),
 		pollInterval:  defaultPollInterval,
 		leaseTTL:      defaultLeaseTTL,
 		renewInterval: defaultRenewInterval,
+		suspendExpiry: config.DefaultPromptExpire,
 	}
 	for _, opt := range opts {
 		opt(b)
@@ -148,6 +190,9 @@ func NewBroker(store Store, rdb *redis.Client, opts ...Option) *Broker {
 // Store exposes the backing store to kind adapters and tests.
 func (b *Broker) Store() Store { return b.store }
 
+// Suspensions exposes the run-state store.
+func (b *Broker) Suspensions() SuspensionStore { return b.suspensions }
+
 // RegisterKind installs the answer validator for kind. Resolve rejects
 // answers to kinds without a validator.
 func (b *Broker) RegisterKind(kind string, validate ResponseValidator) {
@@ -160,7 +205,10 @@ func (b *Broker) RegisterKind(kind string, validate ResponseValidator) {
 // and blocks until it is answered, the timeout elapses, or ctx ends. The
 // outcome always reflects the row's final state, so an answer that lands
 // concurrently with a timeout or cancellation is never lost.
-func (b *Broker) Await(ctx context.Context, spec Spec) (Outcome, error) {
+//
+// A suspendable prompt's run state is kept only while the run may still be
+// resumed from it: it is dropped when the prompt ends any other way.
+func (b *Broker) Await(ctx context.Context, spec Spec) (out Outcome, err error) {
 	p := spec.Prompt
 	if p == nil {
 		return Outcome{}, errors.New("agent prompt: nil prompt")
@@ -169,6 +217,27 @@ func (b *Broker) Await(ctx context.Context, spec Spec) (Outcome, error) {
 		p.ID = uuid.New().String()
 	}
 	dbCtx := context.WithoutCancel(ctx)
+	if spec.Suspend != nil {
+		if p.AssistantMessageID == "" {
+			return Outcome{}, errors.New("agent prompt: a suspendable prompt needs an assistant message")
+		}
+		p.Suspendable = true
+		if err := b.suspensions.Save(dbCtx, &types.AgentRunSuspension{
+			AssistantMessageID: p.AssistantMessageID,
+			TenantID:           p.TenantID,
+			SessionID:          p.SessionID,
+			PromptID:           p.ID,
+			SnapshotVersion:    spec.Suspend.SnapshotVersion,
+			Snapshot:           types.JSON(spec.Suspend.Snapshot),
+		}); err != nil {
+			return Outcome{}, fmt.Errorf("persist run state: %w", err)
+		}
+		defer func() {
+			if !out.Suspended {
+				b.dropSnapshot(dbCtx, p.AssistantMessageID, p.ID)
+			}
+		}()
+	}
 	lease := time.Now().Add(b.leaseTTL)
 	p.Status = types.AgentPromptPending
 	p.OwnerInstance = instanceID
@@ -209,10 +278,54 @@ func (b *Broker) Await(ctx context.Context, spec Spec) (Outcome, error) {
 				logger.GetLogger(ctx).Warnf("renew agent prompt lease %s: %v", p.ID, err)
 			}
 		case <-timer.C:
+			if spec.Suspend != nil {
+				return b.suspend(dbCtx, p.ID), nil
+			}
 			return b.closeAsOwner(dbCtx, p.ID, types.AgentPromptExpired, spec.TimeoutReason), nil
 		case <-ctx.Done():
 			return b.closeAsOwner(dbCtx, p.ID, types.AgentPromptCanceled, "request canceled"), nil
 		}
+	}
+}
+
+// suspend moves a pending prompt to suspended. When an answer won the race,
+// that answer is returned instead.
+func (b *Broker) suspend(ctx context.Context, id string) Outcome {
+	expiresAt := b.expiresAt(time.Now())
+	ok, err := b.store.Transition(ctx, id, types.AgentPromptTransition{
+		From:      []string{types.AgentPromptPending},
+		To:        types.AgentPromptSuspended,
+		ExpiresAt: expiresAt,
+	})
+	if err != nil {
+		logger.GetLogger(ctx).Warnf("suspend agent prompt %s: %v", id, err)
+	}
+	if !ok {
+		if out, closed := b.closed(ctx, id); closed {
+			return out
+		}
+		// The row could not be read or moved; fail the prompt rather than
+		// leave a run suspended on state nobody can confirm.
+		return b.closeAsOwner(ctx, id, types.AgentPromptExpired, "prompt could not be suspended")
+	}
+	return Outcome{
+		Prompt:    &types.AgentPrompt{ID: id, Status: types.AgentPromptSuspended, ExpiresAt: expiresAt},
+		Suspended: true,
+		ExpiresAt: expiresAt,
+	}
+}
+
+func (b *Broker) expiresAt(now time.Time) *time.Time {
+	if b.suspendExpiry <= 0 {
+		return nil
+	}
+	at := now.Add(b.suspendExpiry)
+	return &at
+}
+
+func (b *Broker) dropSnapshot(ctx context.Context, messageID, promptID string) {
+	if err := b.suspensions.Delete(ctx, messageID, promptID); err != nil {
+		logger.GetLogger(ctx).Warnf("drop run state of message %s: %v", messageID, err)
 	}
 }
 
@@ -240,15 +353,20 @@ func (b *Broker) closeAsOwner(ctx context.Context, id, status, reason string) Ou
 	}
 }
 
-// closed reads the row and reports its outcome once it no longer waits.
+// closed reads the row and reports its outcome once the owner should stop
+// waiting: the prompt ended, or another replica suspended it after this
+// owner's lease lapsed.
 func (b *Broker) closed(ctx context.Context, id string) (Outcome, bool) {
 	row, err := b.store.Get(ctx, id)
 	if err != nil {
 		logger.GetLogger(ctx).Warnf("read agent prompt %s: %v", id, err)
 		return Outcome{}, false
 	}
-	if row == nil || row.IsOpen() {
+	if row == nil || row.Status == types.AgentPromptPending {
 		return Outcome{}, false
+	}
+	if row.Status == types.AgentPromptSuspended {
+		return Outcome{Prompt: row, Suspended: true, ExpiresAt: row.ExpiresAt}, true
 	}
 	return Outcome{
 		Prompt:   row,

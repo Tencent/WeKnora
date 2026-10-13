@@ -92,6 +92,48 @@ type AgentPromptTransition struct {
 	ExpiresAt   *time.Time
 }
 
+// AgentRunSuspension is the persisted state of a run blocked on a prompt, so
+// any replica can resume it once the prompt is answered. Snapshot is opaque
+// outside the agent engine and versioned by SnapshotVersion.
+type AgentRunSuspension struct {
+	AssistantMessageID string    `json:"assistant_message_id" gorm:"type:varchar(36);primaryKey"`
+	TenantID           uint64    `json:"tenant_id"            gorm:"not null"`
+	SessionID          string    `json:"session_id"           gorm:"type:varchar(36);not null"`
+	PromptID           string    `json:"prompt_id"            gorm:"type:varchar(36);not null"`
+	SnapshotVersion    int       `json:"snapshot_version"     gorm:"not null"`
+	Snapshot           JSON      `json:"snapshot"             gorm:"not null"`
+	CreatedAt          time.Time `json:"created_at"`
+	UpdatedAt          time.Time `json:"updated_at"`
+}
+
+// TableName pins the table name.
+func (AgentRunSuspension) TableName() string { return "agent_run_suspensions" }
+
+// PromptSuspension describes a run that ended waiting on a prompt.
+type PromptSuspension struct {
+	PromptID  string     `json:"pending_id"`
+	Kind      string     `json:"kind"`
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
+}
+
+// ResumableAgentRequest is the part of a QARequest needed to rebuild the run
+// on another replica. It holds durable identifiers only.
+type ResumableAgentRequest struct {
+	AgentID             string          `json:"agent_id"`
+	SummaryModelID      string          `json:"summary_model_id,omitempty"`
+	ReasoningEffort     string          `json:"reasoning_effort,omitempty"`
+	SharedAgentReadOnly bool            `json:"shared_agent_read_only,omitempty"`
+	KnowledgeBaseIDs    []string        `json:"knowledge_base_ids,omitempty"`
+	KnowledgeIDs        []string        `json:"knowledge_ids,omitempty"`
+	TagScopes           []TagScope      `json:"tag_scopes,omitempty"`
+	MCPServiceIDs       []string        `json:"mcp_service_ids,omitempty"`
+	SkillNames          []string        `json:"skill_names,omitempty"`
+	WebSearchEnabled    bool            `json:"web_search_enabled,omitempty"`
+	QuestionOrigin      *QuestionOrigin `json:"question_origin,omitempty"`
+	UserMessageID       string          `json:"user_message_id,omitempty"`
+	Language            string          `json:"language,omitempty"`
+}
+
 // ToolApprovalPromptRequest is the Request of an AgentPromptKindToolApproval.
 type ToolApprovalPromptRequest struct {
 	ServiceID          string          `json:"service_id"`

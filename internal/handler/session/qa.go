@@ -127,6 +127,9 @@ func (rc *qaRequestContext) buildQARequest() *types.QARequest {
 		Attachments:         rc.attachments,
 		QuestionOrigin:      rc.questionOrigin,
 		TurnLeaseHeld:       rc.turnLeaseHeld,
+		// The HTTP stream (web, embed, API) renders a suspended message and
+		// can answer its prompt later.
+		Suspendable: true,
 	}
 	if rc.steerSink != nil {
 		req.SteerSink = rc.steerSink
@@ -2013,7 +2016,18 @@ func (h *Handler) sessionTenantInfoContext(ctx context.Context) (context.Context
 func (h *Handler) completeStreamAssistantMessage(
 	ctx context.Context, streamCtx *sseStreamContext, query, userMessageID string,
 ) {
-	if err := h.completeAssistantMessage(ctx, streamCtx.assistantMessage, query, userMessageID); err != nil {
+	persist := func() error {
+		return h.completeAssistantMessage(ctx, streamCtx.assistantMessage, query, userMessageID)
+	}
+	if streamCtx.streamHandler != nil && streamCtx.streamHandler.Suspension() != nil {
+		// The turn is not over: indexing, memory and follow-ups run when the
+		// resumed run completes.
+		persist = func() error {
+			streamCtx.assistantMessage.UpdatedAt = time.Now()
+			return h.messageService.UpdateMessage(ctx, streamCtx.assistantMessage)
+		}
+	}
+	if err := persist(); err != nil {
 		if streamCtx.streamHandler != nil {
 			_ = streamCtx.streamHandler.handleError(ctx, event.Event{
 				ID: uuid.New().String(), Type: event.EventError, SessionID: streamCtx.assistantMessage.SessionID,

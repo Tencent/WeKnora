@@ -36,8 +36,10 @@ import (
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 
+	"github.com/Tencent/WeKnora/internal/agent"
 	"github.com/Tencent/WeKnora/internal/agent/approval"
 	"github.com/Tencent/WeKnora/internal/agent/hitl"
+	agenttools "github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	dorisRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/doris"
 	elasticsearchRepoV7 "github.com/Tencent/WeKnora/internal/application/repository/retriever/elasticsearch/v7"
@@ -180,6 +182,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(repository.NewMCPServiceRepository))
 	must(container.Provide(repository.NewMCPToolApprovalRepository))
 	must(container.Provide(repository.NewAgentPromptRepository))
+	must(container.Provide(repository.NewAgentRunSuspensionRepository))
 	must(container.Provide(repository.NewMCPOAuthRepository))
 	must(container.Provide(repository.NewTenantSandboxConfigRepository))
 	must(container.Provide(repository.NewTenantSkillRepository))
@@ -326,9 +329,19 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	logger.Debugf(ctx, "[Container] Registering event bus and agent service...")
 	must(container.Provide(event.NewEventBus))
 	must(container.Provide(service.NewSessionSandboxPinner))
-	must(container.Provide(func(prompts interfaces.AgentPromptRepository, rdb *redis.Client) *hitl.Broker {
-		return hitl.NewBroker(prompts, rdb)
+	must(container.Provide(func(
+		cfg *config.Config,
+		prompts interfaces.AgentPromptRepository,
+		suspensions interfaces.AgentRunSuspensionRepository,
+		rdb *redis.Client,
+	) *hitl.Broker {
+		opts := []hitl.Option{hitl.WithSuspensionStore(suspensions)}
+		if cfg != nil && cfg.Agent != nil {
+			opts = append(opts, hitl.WithSuspendExpiry(cfg.Agent.PromptExpiry()))
+		}
+		return hitl.NewBroker(prompts, rdb, opts...)
 	}))
+	must(container.Invoke(startAgentPromptReaper))
 	must(container.Provide(func(cfg *config.Config, s interfaces.MCPToolApprovalService, broker *hitl.Broker) *approval.Gate {
 		return approval.NewGate(cfg, &approval.Adapter{Svc: s}, broker)
 	}))
@@ -1977,6 +1990,58 @@ func startForkSnapshotReaper(reaper *service.ForkSnapshotReaper, cleaner interfa
 		close(stop)
 		return nil
 	})
+}
+
+// startAgentPromptReaper takes over prompts whose waiting replica stopped
+// renewing its lease, so a crash never leaves a prompt pending forever.
+func startAgentPromptReaper(
+	broker *hitl.Broker, messages interfaces.MessageRepository, cleaner interfaces.ResourceCleaner,
+) {
+	onSuspended := func(ctx context.Context, prompt *types.AgentPrompt, state *types.AgentRunSuspension) error {
+		return markRunAwaitingInput(ctx, messages, prompt, state)
+	}
+	stop := make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(time.Minute)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				if _, err := broker.ReapStaleLeases(context.Background(), time.Now(), onSuspended); err != nil {
+					logger.Warnf(context.Background(), "[AgentPromptReaper] reap failed: %v", err)
+				}
+			case <-stop:
+				return
+			}
+		}
+	}()
+	cleaner.RegisterWithName("AgentPromptReaper", func() error {
+		close(stop)
+		return nil
+	})
+}
+
+// markRunAwaitingInput shows a run suspended on its owner's behalf the way a
+// self-suspended run looks: the saved steps, waiting on the prompt.
+func markRunAwaitingInput(
+	ctx context.Context, messages interfaces.MessageRepository,
+	prompt *types.AgentPrompt, state *types.AgentRunSuspension,
+) error {
+	snapshot, err := agent.DecodeRunSnapshot(state.Snapshot)
+	if err != nil {
+		return err
+	}
+	msg, err := messages.GetMessage(ctx, prompt.SessionID, prompt.AssistantMessageID)
+	if err != nil {
+		return err
+	}
+	if msg == nil || msg.IsCompleted {
+		return nil
+	}
+	msg.AgentSteps = agenttools.SanitizeAgentStepsForStorage(snapshot.DisplaySteps())
+	msg.RunState = types.MessageRunStateAwaitingInput
+	msg.UpdatedAt = time.Now()
+	return messages.UpdateMessage(ctx, msg)
 }
 
 // startTemporaryDocumentCleanup removes expired session attachments and their

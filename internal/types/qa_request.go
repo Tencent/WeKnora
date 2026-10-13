@@ -94,4 +94,9 @@ type QARequest struct {
 	// IM/MCP, which call the QA services directly, do not and leave this
 	// false so the service takes the lease itself.
 	TurnLeaseHeld bool
+	// Suspendable lets the run end while it waits on a user prompt and be
+	// resumed later. Set by callers whose client can render a suspended
+	// message and answer it afterwards (web, embed, API); IM and MCP callers
+	// wait synchronously.
+	Suspendable bool
 }

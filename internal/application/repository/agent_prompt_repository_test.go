@@ -86,3 +86,70 @@ func TestAgentPromptRepositoryRenewLeaseRequiresPendingOwner(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, ok, "a closed row has no lease to renew")
 }
+
+func TestAgentPromptRepositoryListStaleLeasesOnlyPendingAndLapsed(t *testing.T) {
+	ctx := context.Background()
+	repo := newAgentPromptTestRepo(t)
+	now := time.Now()
+	lease := func(d time.Duration) *time.Time { at := now.Add(d); return &at }
+	for _, row := range []*types.AgentPrompt{
+		{ID: "older", Status: types.AgentPromptPending, LeaseUntil: lease(-2 * time.Minute)},
+		{ID: "old", Status: types.AgentPromptPending, LeaseUntil: lease(-time.Minute)},
+		{ID: "alive", Status: types.AgentPromptPending, LeaseUntil: lease(time.Minute)},
+		{ID: "closed", Status: types.AgentPromptSuspended, LeaseUntil: lease(-time.Minute)},
+	} {
+		row.TenantID, row.SessionID, row.Kind = 7, "s1", types.AgentPromptKindToolApproval
+		require.NoError(t, repo.Create(ctx, row))
+	}
+
+	rows, err := repo.ListStaleLeases(ctx, now, 10)
+	require.NoError(t, err)
+	require.Len(t, rows, 2)
+	require.Equal(t, "older", rows[0].ID)
+	require.Equal(t, "old", rows[1].ID)
+
+	rows, err = repo.ListStaleLeases(ctx, now, 1)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+}
+
+func TestAgentRunSuspensionRepositorySaveReplacesAndDeleteIsConditional(t *testing.T) {
+	ctx := context.Background()
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	sqlDB, err := db.DB()
+	require.NoError(t, err)
+	sqlDB.SetMaxOpenConns(1)
+	t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
+	require.NoError(t, db.AutoMigrate(&types.AgentRunSuspension{}))
+	repo := NewAgentRunSuspensionRepository(db)
+
+	missing, err := repo.Get(ctx, "m1")
+	require.NoError(t, err)
+	require.Nil(t, missing)
+
+	require.NoError(t, repo.Save(ctx, &types.AgentRunSuspension{
+		AssistantMessageID: "m1", TenantID: 7, SessionID: "s1", PromptID: "p1",
+		SnapshotVersion: 1, Snapshot: types.JSON(`{"round":1}`),
+	}))
+	require.NoError(t, repo.Save(ctx, &types.AgentRunSuspension{
+		AssistantMessageID: "m1", TenantID: 7, SessionID: "s1", PromptID: "p2",
+		SnapshotVersion: 1, Snapshot: types.JSON(`{"round":2}`),
+	}))
+	row, err := repo.Get(ctx, "m1")
+	require.NoError(t, err)
+	require.Equal(t, "p2", row.PromptID)
+	require.JSONEq(t, `{"round":2}`, string(row.Snapshot))
+
+	require.NoError(t, repo.Delete(ctx, "m1", "p1"))
+	row, err = repo.Get(ctx, "m1")
+	require.NoError(t, err)
+	require.NotNil(t, row, "an older prompt must not drop a newer prompt's state")
+
+	require.NoError(t, repo.Delete(ctx, "m1", "p2"))
+	row, err = repo.Get(ctx, "m1")
+	require.NoError(t, err)
+	require.Nil(t, row)
+
+	require.Error(t, repo.Save(ctx, &types.AgentRunSuspension{}))
+}

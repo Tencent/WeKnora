@@ -97,3 +97,69 @@ func (s *memoryStore) RenewLease(_ context.Context, id, owner string, until time
 	s.rows[id] = row
 	return true, nil
 }
+
+func (s *memoryStore) ListStaleLeases(_ context.Context, before time.Time, limit int) ([]*types.AgentPrompt, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []*types.AgentPrompt
+	for _, row := range s.rows {
+		if len(out) >= limit {
+			break
+		}
+		if row.Status == types.AgentPromptPending && row.LeaseUntil != nil && row.LeaseUntil.Before(before) {
+			r := row
+			out = append(out, &r)
+		}
+	}
+	return out, nil
+}
+
+// SuspensionStore persists the state of runs blocked on a prompt.
+type SuspensionStore = interfaces.AgentRunSuspensionRepository
+
+// memorySuspensionStore is a process-local SuspensionStore.
+type memorySuspensionStore struct {
+	mu   sync.Mutex
+	rows map[string]types.AgentRunSuspension
+}
+
+// NewMemorySuspensionStore returns a process-local SuspensionStore.
+func NewMemorySuspensionStore() SuspensionStore {
+	return &memorySuspensionStore{rows: make(map[string]types.AgentRunSuspension)}
+}
+
+func (s *memorySuspensionStore) Save(_ context.Context, row *types.AgentRunSuspension) error {
+	if row == nil || row.AssistantMessageID == "" {
+		return errors.New("agent run suspension requires an assistant message id")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	stored := *row
+	stored.UpdatedAt = time.Now()
+	if prev, ok := s.rows[row.AssistantMessageID]; ok {
+		stored.CreatedAt = prev.CreatedAt
+	} else {
+		stored.CreatedAt = stored.UpdatedAt
+	}
+	s.rows[row.AssistantMessageID] = stored
+	return nil
+}
+
+func (s *memorySuspensionStore) Get(_ context.Context, assistantMessageID string) (*types.AgentRunSuspension, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	row, ok := s.rows[assistantMessageID]
+	if !ok {
+		return nil, nil
+	}
+	return &row, nil
+}
+
+func (s *memorySuspensionStore) Delete(_ context.Context, assistantMessageID, promptID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if row, ok := s.rows[assistantMessageID]; ok && row.PromptID == promptID {
+		delete(s.rows, assistantMessageID)
+	}
+	return nil
+}

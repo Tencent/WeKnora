@@ -26,6 +26,10 @@ type ToolExecContext struct {
 	// approval) can re-derive a fresh timeout from ApprovalCtx using this
 	// value instead of hard-coding a duration. Zero means "fallback to 60s".
 	ExecTimeout time.Duration
+	// Snapshot, when set, captures the run so it can be resumed from this
+	// call. A tool that raises a suspendable prompt passes the result along;
+	// nil means the run cannot be suspended and prompts wait synchronously.
+	Snapshot func() (data []byte, version int, err error)
 }
 
 // WithToolExecContext returns ctx that carries ToolExecContext for MCP approval and similar features.

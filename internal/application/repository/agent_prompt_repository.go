@@ -9,6 +9,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // AgentPromptRepository implements interfaces.AgentPromptRepository.
@@ -92,4 +93,78 @@ func (r *AgentPromptRepository) RenewLease(
 		return false, fmt.Errorf("renew agent prompt lease: %w", res.Error)
 	}
 	return res.RowsAffected == 1, nil
+}
+
+// ListStaleLeases returns pending rows whose owner stopped renewing.
+func (r *AgentPromptRepository) ListStaleLeases(
+	ctx context.Context, before time.Time, limit int,
+) ([]*types.AgentPrompt, error) {
+	var rows []*types.AgentPrompt
+	err := r.db.WithContext(ctx).
+		Where("status = ? AND lease_until < ?", types.AgentPromptPending, before).
+		Order("lease_until").
+		Limit(limit).
+		Find(&rows).Error
+	if err != nil {
+		return nil, fmt.Errorf("list stale agent prompts: %w", err)
+	}
+	return rows, nil
+}
+
+// AgentRunSuspensionRepository implements interfaces.AgentRunSuspensionRepository.
+type AgentRunSuspensionRepository struct {
+	db *gorm.DB
+}
+
+// NewAgentRunSuspensionRepository creates a repository backed by GORM.
+func NewAgentRunSuspensionRepository(db *gorm.DB) interfaces.AgentRunSuspensionRepository {
+	return &AgentRunSuspensionRepository{db: db}
+}
+
+// Save inserts or replaces the run state of a message.
+func (r *AgentRunSuspensionRepository) Save(ctx context.Context, row *types.AgentRunSuspension) error {
+	if row == nil || row.AssistantMessageID == "" {
+		return errors.New("agent run suspension requires an assistant message id")
+	}
+	now := time.Now()
+	if row.CreatedAt.IsZero() {
+		row.CreatedAt = now
+	}
+	row.UpdatedAt = now
+	err := r.db.WithContext(ctx).Clauses(clause.OnConflict{
+		Columns: []clause.Column{{Name: "assistant_message_id"}},
+		DoUpdates: clause.AssignmentColumns([]string{
+			"tenant_id", "session_id", "prompt_id", "snapshot_version", "snapshot", "updated_at",
+		}),
+	}).Create(row).Error
+	if err != nil {
+		return fmt.Errorf("save agent run suspension: %w", err)
+	}
+	return nil
+}
+
+// Get returns the run state of a message, or nil when there is none.
+func (r *AgentRunSuspensionRepository) Get(
+	ctx context.Context, assistantMessageID string,
+) (*types.AgentRunSuspension, error) {
+	var row types.AgentRunSuspension
+	err := r.db.WithContext(ctx).Where("assistant_message_id = ?", assistantMessageID).First(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get agent run suspension: %w", err)
+	}
+	return &row, nil
+}
+
+// Delete removes the run state while it still belongs to promptID.
+func (r *AgentRunSuspensionRepository) Delete(ctx context.Context, assistantMessageID, promptID string) error {
+	err := r.db.WithContext(ctx).
+		Where("assistant_message_id = ? AND prompt_id = ?", assistantMessageID, promptID).
+		Delete(&types.AgentRunSuspension{}).Error
+	if err != nil {
+		return fmt.Errorf("delete agent run suspension: %w", err)
+	}
+	return nil
 }

@@ -147,6 +147,9 @@ type AgentCompleteData struct {
 	MessageID       string                 `json:"message_id,omitempty"` // Assistant message ID
 	RequestID       string                 `json:"request_id,omitempty"`
 	Extra           map[string]interface{} `json:"extra,omitempty"`
+	// Suspended is set (*types.PromptSuspension) when the run ended waiting
+	// on a user prompt; the message is then not complete.
+	Suspended interface{} `json:"suspended,omitempty"`
 }
 
 // === Streaming Event Data Structures ===
@@ -271,9 +274,13 @@ type ToolApprovalRequiredData struct {
 	Args               interface{} `json:"args,omitempty"`
 	ArgsJSON           string      `json:"args_json,omitempty"`
 	TimeoutSeconds     int         `json:"timeout_seconds"`
-	RequestedAtUnix    int64       `json:"requested_at"`
-	ToolCallID         string      `json:"tool_call_id"`
-	RequestID          string      `json:"request_id,omitempty"`
+	// HotWaitSeconds equals TimeoutSeconds; when Suspendable, the run is
+	// suspended rather than rejected once it elapses.
+	HotWaitSeconds  int    `json:"hot_wait_seconds"`
+	Suspendable     bool   `json:"suspendable"`
+	RequestedAtUnix int64  `json:"requested_at"`
+	ToolCallID      string `json:"tool_call_id"`
+	RequestID       string `json:"request_id,omitempty"`
 }
 
 // ToolApprovalResolvedData confirms the user decision (or timeout/cancel).
