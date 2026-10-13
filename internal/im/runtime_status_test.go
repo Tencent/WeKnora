@@ -19,7 +19,8 @@ func TestRuntimeStatusReportsLocalQueue(t *testing.T) {
 	q.totalRejected.Store(7)
 	q.totalTimeout.Store(11)
 	status := (&Service{qaQueue: q}).RuntimeStatus()
-	if !status.Available || status.Workers != 5 || status.QueueLimit != 50 || status.Pending != 2 || status.Active != 3 || status.Rejected != 7 || status.TimedOut != 11 {
+	if !status.Available || status.Workers != 5 || status.QueueLimit != 50 || status.Pending != 2 ||
+		status.Active != 3 || status.Rejected != 7 || status.TimedOut != 11 {
 		t.Fatalf("unexpected local queue metrics: %+v", status)
 	}
 }
