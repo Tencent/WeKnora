@@ -144,6 +144,16 @@ const (
 	// detail payload records the queue and how many records were removed.
 	AuditActionSystemQueueArchivedPurged AuditAction = "system.queue_archived_purged"
 
+	// AuditActionSystemBackupExported records a SystemAdmin full-instance
+	// export. Details never include archive bytes or decrypted credentials.
+	AuditActionSystemBackupExported AuditAction = "system.backup_exported"
+	// AuditActionSystemBackupSnapshotCreated records storing a snapshot.
+	AuditActionSystemBackupSnapshotCreated AuditAction = "system.backup_snapshot_created"
+	// AuditActionSystemBackupSnapshotDeleted records deleting a snapshot.
+	AuditActionSystemBackupSnapshotDeleted AuditAction = "system.backup_snapshot_deleted"
+	// AuditActionSystemBackupRestored records a successful full restore.
+	AuditActionSystemBackupRestored AuditAction = "system.backup_restored"
+
 	// Knowledge-base activity actions. These rows use scope_type=knowledge_base
 	// and scope_id=<kb id>; TargetType/TargetID identify the concrete child
 	// resource when the operation is about a document, tag, data source, or share.
