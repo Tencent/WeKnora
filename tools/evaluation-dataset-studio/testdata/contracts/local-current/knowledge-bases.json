@@ -1,0 +1,12 @@
+{
+  "success": true,
+  "data": [
+    {
+      "id": "00000000-0000-4000-8000-000000000001",
+      "name": "example-knowledge-base",
+      "knowledge_count": 2,
+      "chunk_count": 4,
+      "processing_count": 0
+    }
+  ]
+}

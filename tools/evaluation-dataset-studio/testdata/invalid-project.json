@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "id": "invalid-eval",
+  "name": "",
+  "version": "",
+  "next_passage_id": 2,
+  "next_question_id": 2,
+  "passages": [
+    {"id": 1, "text": ""}
+  ],
+  "questions": [
+    {"id": 1, "text": "没有答案和有效语料", "answer": "", "relevant_passage_ids": [99]}
+  ]
+}

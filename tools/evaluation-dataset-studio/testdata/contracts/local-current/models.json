@@ -1,0 +1,26 @@
+{
+  "success": true,
+  "data": [
+    {
+      "id": "00000000-0000-4000-8000-000000000101",
+      "name": "example-chat-model",
+      "display_name": "Example Chat Model",
+      "type": "KnowledgeQA",
+      "status": "active"
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000102",
+      "name": "example-rerank-model",
+      "display_name": "Example Rerank Model",
+      "type": "Rerank",
+      "status": "active"
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000103",
+      "name": "example-unavailable-model",
+      "display_name": "Example Unavailable Model",
+      "type": "KnowledgeQA",
+      "status": "downloading"
+    }
+  ]
+}
