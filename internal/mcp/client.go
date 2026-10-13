@@ -316,9 +316,10 @@ func discoverProbeTimeout(service *types.MCPService) time.Duration {
 }
 
 // buildOAuthConfig returns the OAuth configuration for an OAuth-enabled MCP
-// service, or (_, false, nil) when the service does not use OAuth. It loads
-// the dynamically-registered client_id and wires a per-user token store so
-// the transport injects the invoking user's bearer token and refreshes it.
+// service, or (_, false, nil) when the service does not use OAuth. It uses the
+// pre-registered client or loads the dynamically-registered client_id, and
+// wires a per-user token store so the transport injects the invoking user's
+// bearer token and refreshes it.
 func buildOAuthConfig(config *ClientConfig, httpClient *http.Client) (transport.OAuthConfig, bool, error) {
 	svc := config.Service
 	if !svc.AuthConfig.IsOAuth() {
@@ -343,7 +344,11 @@ func buildOAuthConfig(config *ClientConfig, httpClient *http.Client) (transport.
 		AuthServerMetadataURL: svc.AuthConfig.AuthServerMetadataURL,
 		HTTPClient:            httpClient,
 	}
-	if regClient, err := config.OAuthRepo.GetClient(context.Background(), config.TenantID, svc.ID); err == nil && regClient != nil {
+	if clientID, clientSecret, ok := preRegisteredClient(svc); ok {
+		oauthCfg.ClientID, oauthCfg.ClientSecret = clientID, clientSecret
+	} else if regClient, err := config.OAuthRepo.GetClient(
+		context.Background(), config.TenantID, svc.ID,
+	); err == nil && regClient != nil {
 		oauthCfg.ClientID = regClient.ClientID
 		oauthCfg.ClientSecret = regClient.ClientSecret
 		oauthCfg.RedirectURI = regClient.RedirectURI
@@ -919,10 +924,16 @@ func (c *mcpGoClient) IsConnected() bool {
 	return c.connected.Load()
 }
 
-// oauthClientRegistration reports the tenant and OAuth client ID the
-// connection was built with; ok is false for a connection without OAuth.
+// oauthClientRegistration reports the tenant and dynamically registered OAuth
+// client ID the connection was built with; ok is false for a connection
+// without OAuth or with a pre-registered client. A pre-registered client is
+// service configuration, and changing it closes every connection of the
+// service, so such a connection never holds a replaced registration.
 func (c *mcpGoClient) oauthClientRegistration() (tenantID uint64, clientID string, ok bool) {
 	if c.oauth == nil {
+		return 0, "", false
+	}
+	if _, _, preRegistered := preRegisteredClient(c.service); preRegistered {
 		return 0, "", false
 	}
 	return c.oauth.tenantID, c.oauth.clientID, true

@@ -8957,7 +8957,7 @@ const docTemplate = `{
                         "required": true
                     },
                     {
-                        "description": "{api_key?: string, token?: string}",
+                        "description": "{api_key?, token?, client_secret?: string}",
                         "name": "request",
                         "in": "body",
                         "required": true,
@@ -9018,7 +9018,7 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "字段名（api_key | token）",
+                        "description": "字段名（api_key | token | client_secret）",
                         "name": "field",
                         "in": "path",
                         "required": true
@@ -9172,6 +9172,66 @@ const docTemplate = `{
                     },
                     "503": {
                         "description": "元数据存储不可用",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            }
+        },
+        "/mcp-services/{id}/oauth/assertion": {
+            "post": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "以 JWT Bearer 授权（RFC 7523）提交调用方签发的断言（如 ID-JAG），为当前用户获取并保存令牌，\n无需浏览器跳转。使用该服务已注册的 OAuth 客户端",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "MCP服务"
+                ],
+                "summary": "使用断言获取 MCP OAuth 令牌",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "MCP 服务 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "{assertion: string}",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "与 oauth/status 相同",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "断言无效或被授权服务器拒绝",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
                         "schema": {
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
@@ -20453,6 +20513,14 @@ const docTemplate = `{
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.MCPAuthType"
                         }
                     ]
+                },
+                "client_id": {
+                    "description": "ClientID optionally names an OAuth client registered with the\nauthorization server in advance. When set it is used instead of dynamic\nclient registration, for servers that offer no registration endpoint or\nallow grants only to clients an administrator registered. Non-secret.",
+                    "type": "string"
+                },
+                "client_secret": {
+                    "description": "ClientSecret is the secret of ClientID for a confidential client.\nSecret: encrypted at rest like APIKey and Token, never returned, and\nchanged only through the credentials subresource after creation.",
+                    "type": "string"
                 },
                 "custom_headers": {
                     "type": "object",

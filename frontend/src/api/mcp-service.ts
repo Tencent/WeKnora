@@ -29,6 +29,12 @@ export interface MCPService {
     // OAuth-only, non-secret configuration.
     scopes?: string[]
     auth_server_metadata_url?: string
+    // OAuth client registered with the authorization server ahead of time.
+    // Empty means dynamic client registration. Non-secret.
+    client_id?: string
+    // Secret of client_id. Like api_key it is never returned; edits go
+    // through the /credentials subresource.
+    client_secret?: string
   }
   advanced_config?: {
     timeout?: number
@@ -187,7 +193,7 @@ export async function setMCPToolEnabled(serviceId: string, toolName: string, ena
 // client reconnect server-side.
 // ----------------------------------------------------------------------------
 
-export type McpCredentialField = 'api_key' | 'token'
+export type McpCredentialField = 'api_key' | 'token' | 'client_secret'
 
 export interface CredentialFieldMetadata {
   configured: boolean

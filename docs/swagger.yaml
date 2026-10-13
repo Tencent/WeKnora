@@ -2020,6 +2020,19 @@ definitions:
         description: |-
           AuthType selects the authentication strategy. Empty ("") is treated as
           none for backward compatibility with rows that pre-date this field.
+      client_id:
+        description: |-
+          ClientID optionally names an OAuth client registered with the
+          authorization server in advance. When set it is used instead of dynamic
+          client registration, for servers that offer no registration endpoint or
+          allow grants only to clients an administrator registered. Non-secret.
+        type: string
+      client_secret:
+        description: |-
+          ClientSecret is the secret of ClientID for a confidential client.
+          Secret: encrypted at rest like APIKey and Token, never returned, and
+          changed only through the credentials subresource after creation.
+        type: string
       custom_headers:
         additionalProperties:
           type: string
@@ -12441,7 +12454,7 @@ paths:
         name: id
         required: true
         type: string
-      - description: '{api_key?: string, token?: string}'
+      - description: '{api_key?, token?, client_secret?: string}'
         in: body
         name: request
         required: true
@@ -12479,7 +12492,7 @@ paths:
         name: id
         required: true
         type: string
-      - description: 字段名（api_key | token）
+      - description: 字段名（api_key | token | client_secret）
         in: path
         name: field
         required: true
@@ -12588,6 +12601,47 @@ paths:
       - Bearer: []
       - ApiKeyAuth: []
       summary: 同步 MCP 工具目录
+      tags:
+      - MCP服务
+  /mcp-services/{id}/oauth/assertion:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        以 JWT Bearer 授权（RFC 7523）提交调用方签发的断言（如 ID-JAG），为当前用户获取并保存令牌，
+        无需浏览器跳转。使用该服务已注册的 OAuth 客户端
+      parameters:
+      - description: MCP 服务 ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: '{assertion: string}'
+        in: body
+        name: request
+        required: true
+        schema:
+          additionalProperties: true
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 与 oauth/status 相同
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 断言无效或被授权服务器拒绝
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      summary: 使用断言获取 MCP OAuth 令牌
       tags:
       - MCP服务
   /mcp-services/{id}/oauth/authorize-url:
