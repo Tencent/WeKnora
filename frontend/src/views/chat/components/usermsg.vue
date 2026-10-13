@@ -1,5 +1,5 @@
 <template>
-    <div class="user_msg_container" ref="containerRef" :class="{ 'is-embedded': embeddedMode }">
+    <div class="user_msg_container" ref="containerRef" :class="{ 'is-embedded': embeddedMode, 'is-actions-pinned': rewindConfirmOpen }">
         <!-- 显示@的知识库和文件 -->
         <div v-if="mentioned_items && mentioned_items.length > 0" class="mentioned_items">
             <span v-for="item in mentioned_items" :key="item.id" class="mentioned_tag" :class="[
@@ -50,16 +50,21 @@
                 </t-tooltip>
                 <t-popconfirm
                     v-if="canRewind"
-                    :content="t('chat.rewind.confirmBody')"
-                    :confirm-btn="{ content: t('chat.rewind.confirmButton'), theme: 'danger' }"
-                    :cancel-btn="{ content: t('chat.rewind.cancelButton') }"
+                    :confirm-btn="{ content: t('chat.rewind.confirmButton'), theme: 'danger', size: 'small' }"
+                    :cancel-btn="{ content: t('chat.rewind.cancelButton'), size: 'small' }"
                     theme="warning"
                     placement="top"
-                    overlay-class-name="chat-rewind-popconfirm"
+                    :show-arrow="false"
+                    overlay-class-name="wk-popover chat-rewind-popconfirm"
+                    @visible-change="(visible) => (rewindConfirmOpen = visible)"
                     @confirm="emit('rewind', messageId)"
                 >
+                    <template #content>
+                        <div class="chat-rewind-confirm__title">{{ t('chat.rewind.confirmTitle') }}</div>
+                        <div class="chat-rewind-confirm__body">{{ t('chat.rewind.confirmBody') }}</div>
+                    </template>
                     <t-tooltip :content="rewindTooltip">
-                        <button type="button" class="user_msg_action" :aria-label="rewindTooltip" @click.stop>
+                        <button type="button" class="user_msg_action" :class="{ 'is-active': rewindConfirmOpen }" :aria-label="rewindTooltip" @click.stop>
                             <t-icon name="rollback" />
                         </button>
                     </t-tooltip>
@@ -160,6 +165,7 @@ const timestamp = computed(() => getConversationTimestampModel(props.createdAt))
 const fullTimestamp = computed(() => formatMessageTimestamp(props.createdAt));
 const handleCopy = () => copyWithToast(props.content, 'common.copySuccess', 'common.copyFailed');
 const rewindTooltip = computed(() => t('chat.rewind.tooltip'));
+const rewindConfirmOpen = ref(false);
 
 const attachmentPreviewDrawer = useChatAttachmentPreviewDrawer();
 
@@ -425,7 +431,8 @@ html[theme-mode="dark"] {
 }
 
 .user_msg_container:hover .user_msg_meta,
-.user_msg_container:focus-within .user_msg_meta {
+.user_msg_container:focus-within .user_msg_meta,
+.user_msg_container.is-actions-pinned .user_msg_meta {
     opacity: 1;
     pointer-events: auto;
 }
@@ -445,7 +452,8 @@ html[theme-mode="dark"] {
     cursor: pointer;
 }
 
-.user_msg_action:hover {
+.user_msg_action:hover,
+.user_msg_action.is-active {
     color: var(--td-text-color-secondary);
     background: var(--td-bg-color-container-hover);
 }

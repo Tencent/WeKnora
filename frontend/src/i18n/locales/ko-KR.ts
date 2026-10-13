@@ -3995,6 +3995,7 @@ export default {
     truncatedHint: '모델의 응답당 출력 한도에서 답변이 잘렸습니다. 위 내용은 잘리기 전까지 생성된 부분입니다.',
     rewind: {
       tooltip: '여기로 되돌리기',
+      confirmTitle: '여기로 되돌릴까요?',
       confirmBody: '이 메시지 이후의 대화를 삭제합니다. 질문에서 되돌리면 해당 질문도 지워지고 입력창에 다시 채워집니다. 체크포인트가 있으면 작업 영역도 되돌립니다. 이 작업은 취소할 수 없습니다.',
       confirmButton: '되돌리기',
       cancelButton: '취소',
@@ -7835,6 +7836,7 @@ export default {
   },
   menu: {
     sessionInProgress: '대화 진행 중',
+    sessionUnread: '새 답변',
     knowledgeBase: '지식베이스',
     agents: '에이전트',
     artifacts: '산출물',

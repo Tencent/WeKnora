@@ -324,6 +324,7 @@ export default {
   },
   menu: {
     sessionInProgress: 'Conversation in progress',
+    sessionUnread: 'New reply',
     knowledgeBase: 'Knowledge Base',
     agents: 'Agents',
     artifacts: 'Artifacts',
@@ -4087,6 +4088,7 @@ export default {
     truncatedHint: 'This answer was cut off at the per-response output limit. Above is what the model produced before the cut.',
     rewind: {
       tooltip: 'Rewind to here',
+      confirmTitle: 'Rewind to here?',
       confirmBody: 'Later messages will be deleted. Rewinding from a question also removes that question and puts it back in the input. The workspace rolls back when a checkpoint is available. This cannot be undone.',
       confirmButton: 'Rewind',
       cancelButton: 'Cancel',
