@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -29,6 +30,41 @@ func TestPrepareExcelForDuckDBConvertsLegacyXLS(t *testing.T) {
 	stock, err := book.GetRows("库存")
 	require.NoError(t, err)
 	require.Equal(t, [][]string{{"sku"}, {"A-1"}}, stock)
+}
+
+func TestPrepareExcelForDuckDBRejectsNonOLEXls(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "not.xls")
+	require.NoError(t, os.WriteFile(path, []byte("PK\x03\x04not-an-xls"), 0o644))
+	_, cleanup, err := prepareExcelForDuckDB(path)
+	require.Error(t, err)
+	cleanup()
+}
+
+func TestPrepareExcelForDuckDBAcceptsUppercaseExtension(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("testdata", "legacy.xls"))
+	require.NoError(t, err)
+	path := filepath.Join(t.TempDir(), "LEGACY.XLS")
+	require.NoError(t, os.WriteFile(path, data, 0o644))
+
+	converted, cleanup, err := prepareExcelForDuckDB(path)
+	require.NoError(t, err)
+	t.Cleanup(cleanup)
+
+	book, err := excelize.OpenFile(converted)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = book.Close() })
+	rows, err := book.GetRows("销售")
+	require.NoError(t, err)
+	require.Equal(t, []string{"苹果", "3"}, rows[1])
+}
+
+func TestUniqueExcelSheetNameStripsReservedCharacters(t *testing.T) {
+	used := map[string]struct{}{}
+	first := uniqueExcelSheetName("a/b:c", 0, used)
+	second := uniqueExcelSheetName("a/b:c", 1, used)
+	require.Equal(t, "a_b_c", first)
+	require.NotEqual(t, first, second)
+	require.LessOrEqual(t, len([]rune(second)), 31)
 }
 
 func TestPrepareExcelForDuckDBLeavesXLSXAlone(t *testing.T) {
