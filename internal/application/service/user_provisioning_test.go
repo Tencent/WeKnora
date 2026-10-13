@@ -76,6 +76,29 @@ func TestUserServiceRegisterTenantlessSkipsTenantCreation(t *testing.T) {
 	if user.TenantID != 0 || repo.created == nil || repo.created.TenantID != 0 {
 		t.Fatalf("tenantless user persisted with tenant: user=%d created=%v", user.TenantID, repo.created)
 	}
+	if user.IsSystemAdmin || repo.created.IsSystemAdmin {
+		t.Fatalf("ordinary registration set system admin: user=%v created=%v",
+			user.IsSystemAdmin, repo.created.IsSystemAdmin)
+	}
+}
+
+func TestRegisterSetsSystemAdminFlagOnCreate(t *testing.T) {
+	repo := &provisioningUserRepo{}
+	svc := &userService{userRepo: repo, tenantService: nil, memberService: nil}
+
+	user, err := svc.Register(context.Background(), &types.RegisterRequest{
+		Username:             "alice",
+		Email:                "admin@example.com",
+		Password:             "supersecret1",
+		TenantProvisioning:   types.TenantProvisioningTenantless,
+		BootstrapSystemAdmin: true,
+	})
+	if err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	if user == nil || !user.IsSystemAdmin || repo.created == nil || !repo.created.IsSystemAdmin {
+		t.Fatalf("persisted admin flag: user=%+v created=%+v", user, repo.created)
+	}
 }
 
 func TestResolveLoginTenantIDRepairsTenantlessUserWithMembership(t *testing.T) {

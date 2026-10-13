@@ -10,8 +10,10 @@ import (
 )
 
 // auth_public_ratelimit.go — sliding-window IP rate limiter for the
-// unauthenticated share-link endpoints (/auth/invitations/lookup and
-// /auth/register-by-invite). Both surfaces accept a plaintext token
+// unauthenticated auth endpoints (/auth/register, /auth/invitations/lookup,
+// and /auth/register-by-invite). Register is included because closed
+// registration still accepts one bootstrap sign-up. The share-link
+// surfaces accept a plaintext token
 // from the request and either reveal tenant context (lookup) or
 // create an account (register-by-invite); without a limiter an
 // attacker can brute-force token guesses and hammer registration.
@@ -29,10 +31,10 @@ import (
 // publicAuthRateLimitWindow is the rolling window length per IP.
 const publicAuthRateLimitWindow = 60 * time.Second
 
-// publicAuthRateLimitMax is the request budget per IP per window for
-// each endpoint instance. 30/min comfortably covers a real user
-// retrying a failed registration while clamping enumeration
-// throughput to ~half a request per second.
+// publicAuthRateLimitMax is the shared request budget per IP per window
+// for every route that uses PublicAuthRateLimit. 30/min covers a real
+// user retrying a failed registration while clamping enumeration
+// throughput to about half a request per second.
 const publicAuthRateLimitMax = 30
 
 // publicAuthRateLimitCleanupInterval bounds map growth from one-off
@@ -105,19 +107,17 @@ func (l *ipRateLimiter) cleanupLoop() {
 	}
 }
 
-// publicAuthLimiter — package-singleton so each route registration
-// shares a single bucket map per process. Each route still gets its
-// own Gin handler that calls into this same limiter; per-route
-// isolation isn't important here (real users don't hit both
-// endpoints in the same window) but the shared state makes total
-// budget per IP intuitive: 30/min across all share-link surfaces.
+// publicAuthLimiter is one bucket map per process. Each route gets its
+// own Gin handler and they all call this limiter, so the budget is
+// 30/min per IP across /auth/register, /auth/register-by-invite, and
+// /auth/invitations/lookup.
 var publicAuthLimiter = newIPRateLimiter(
 	publicAuthRateLimitWindow, publicAuthRateLimitMax)
 
-// PublicAuthRateLimit returns a Gin middleware that rate-limits the
-// unauthenticated share-link endpoints by client IP. 429 is mapped
-// through the project's AppError type so it flows through the same
-// error middleware as the rest of the auth surface.
+// PublicAuthRateLimit returns a Gin middleware that rate-limits
+// unauthenticated auth endpoints by client IP. 429 is mapped through
+// the project's AppError type so it flows through the same error
+// middleware as the rest of the auth surface.
 func PublicAuthRateLimit() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		ip := c.ClientIP()

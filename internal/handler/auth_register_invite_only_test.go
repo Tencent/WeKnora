@@ -77,6 +77,9 @@ func validRegisterBody() map[string]string {
 }
 
 func TestRegister_InviteOnlyRejects(t *testing.T) {
+	// Keep the blanket rejection independent of a developer shell that has
+	// WEKNORA_BOOTSTRAP_SYSTEM_ADMIN_EMAIL set to this fixture's address.
+	t.Setenv(bootstrapSystemAdminEmailEnv, "")
 	// PR 3 (#1303): when auth.registration_mode=invite_only, Register
 	// must respond 403 BEFORE touching the user service. The frontend
 	// already hides the sign-up link via /auth/config; this is the
@@ -242,6 +245,7 @@ func (s *registrationModeSettings) GetBool(_ context.Context, _, _ string, fallb
 }
 
 func TestRegistrationModeChangesApplyImmediately(t *testing.T) {
+	t.Setenv(bootstrapSystemAdminEmailEnv, "")
 	settings := &registrationModeSettings{}
 	h := &AuthHandler{
 		configInfo: &config.Config{

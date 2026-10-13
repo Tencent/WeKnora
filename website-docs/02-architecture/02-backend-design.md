@@ -113,7 +113,7 @@ flowchart TD
     D --> E["container.BuildContainer(runtime.GetContainer())<br/>DI 装配: DB 迁移 / Redis / Asynq / Router..."]
     E --> F["runStartupBootstrap(c) — best-effort, 失败仅告警"]
     F --> F1["TenantAPIKeyService.BackfillMissingKeyHashes<br/>(迁移 000065 遗留 API Key 哈希回填)"]
-    F --> F2["bootstrapSystemAdmin<br/>WEKNORA_BOOTSTRAP_SYSTEM_ADMIN_EMAIL 指定的用户<br/>在无系统管理员时晋升为超管 (幂等)"]
+    F --> F2["bootstrapSystemAdmin<br/>WEKNORA_BOOTSTRAP_SYSTEM_ADMIN_EMAIL 指定的已有用户<br/>在无系统管理员时晋升为系统管理员 (幂等，不创建账号)"]
     F --> G["c.Invoke(cfg, router, resourceCleaner, systemSettingSvc)"]
     G --> H["listenWithRetry(addr, 10 次, 300ms 指数退避, 上限 3s)"]
     H --> I["systemSettingSvc.SubscribeRedis(ctx)<br/>订阅 system_settings 变更 (Lite 模式 no-op)"]
@@ -129,7 +129,7 @@ flowchart TD
 
 要点：
 
-- **引导失败不阻断启动**：`bootstrap.go` 对失败记录 `logger.Warnf`。系统管理员引导仅在部署尚无系统管理员时生效，重启不会恢复已撤销的权限；
+- **引导失败不阻断启动**：`bootstrap.go` 对失败记录 `logger.Warnf`。系统管理员引导仅在部署尚无系统管理员时生效，重启不会恢复已撤销的权限。启动钩子不创建账号。公开注册关闭时，`AuthHandler.Register` 允许 `WEKNORA_BOOTSTRAP_SYSTEM_ADMIN_EMAIL` 注册一次，并在同一条插入里写成系统管理员；该请求走已有的 `/auth/register`，不新增免认证路由；
 - **两段式优雅退出**：第一个 SIGTERM/SIGINT 调用 `server.Shutdown`（它会先关闭 listener，端口随即可被新进程绑定），在 `ShutdownTimeout` 里为资源清理预留 5s，其余时间排空存量连接。不要在 `Shutdown` 之前手动 `listener.Close()`：`Serve` 会返回 `use of closed network connection` 而不是 `ErrServerClosed`，`logger.Fatalf` 会在清理前把进程杀掉。第二个信号强制 `Close`；
 - **端口占用重试**：`listenWithRetry` 以 300ms 起步指数退避重试 10 次（滚动重启场景旧进程尚未释放端口时避免直接失败）。
 

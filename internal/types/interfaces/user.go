@@ -27,6 +27,10 @@ type UserService interface {
 	GetUsersByIDs(ctx context.Context, ids []string) (map[string]*types.User, error)
 	// GetUserByEmail gets a user by email
 	GetUserByEmail(ctx context.Context, email string) (*types.User, error)
+	// GetUserByEmailCaseInsensitive gets a user whose email matches
+	// LOWER(email) = LOWER(?). Active and inactive rows both match.
+	// Soft-deleted rows do not. This is not a case-insensitive unique index.
+	GetUserByEmailCaseInsensitive(ctx context.Context, email string) (*types.User, error)
 	// GetUserByUsername gets a user by username
 	GetUserByUsername(ctx context.Context, username string) (*types.User, error)
 	// GetUserByTenantID gets the first user (owner) of a tenant
@@ -125,6 +129,10 @@ type UserRepository interface {
 	GetUsersByIDs(ctx context.Context, ids []string) (map[string]*types.User, error)
 	// GetUserByEmail gets a user by email
 	GetUserByEmail(ctx context.Context, email string) (*types.User, error)
+	// GetUserByEmailCaseInsensitive gets a user whose email matches
+	// LOWER(email) = LOWER(?). Active and inactive rows both match.
+	// Soft-deleted rows do not. This is not a case-insensitive unique index.
+	GetUserByEmailCaseInsensitive(ctx context.Context, email string) (*types.User, error)
 	// GetUserByUsername gets a user by username
 	GetUserByUsername(ctx context.Context, username string) (*types.User, error)
 	// GetUserByTenantID gets the first user (owner) of a tenant

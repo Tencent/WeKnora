@@ -97,6 +97,19 @@ func (r *userRepository) GetUserByEmail(ctx context.Context, email string) (*typ
 	return &user, nil
 }
 
+// GetUserByEmailCaseInsensitive matches LOWER(email) = LOWER(?) on Postgres
+// and SQLite. It includes inactive rows and excludes soft-deleted rows.
+func (r *userRepository) GetUserByEmailCaseInsensitive(ctx context.Context, email string) (*types.User, error) {
+	var user types.User
+	if err := r.db.WithContext(ctx).Where("LOWER(email) = LOWER(?)", email).First(&user).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrUserNotFound
+		}
+		return nil, err
+	}
+	return &user, nil
+}
+
 // GetUserByUsername gets a user by username
 func (r *userRepository) GetUserByUsername(ctx context.Context, username string) (*types.User, error) {
 	var user types.User

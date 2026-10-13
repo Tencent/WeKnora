@@ -107,6 +107,8 @@ func (c *AuthConfig) IsInviteOnly() bool {
 
 `DISABLE_REGISTRATION=true` 仍映射到原有的 `invite_only`。需要让受邀的新用户注册时，将全局设置改为 `invite_register`。禁止注册时，`POST /auth/register-by-invite` 也返回 403，与登录页行为一致。
 
+唯一的公开注册例外：`registration_mode` 不是 `self_serve`、部署还没有系统管理员、且 `WEKNORA_BOOTSTRAP_SYSTEM_ADMIN_EMAIL` 已设置时，该邮箱可以调用一次 `POST /auth/register`，插入时即为系统管理员。密码不符合策略时所有邮箱返回相同的 400；其他合法注册仍然 403。详见[平台管理与系统管理员](20-platform-admin.md)。
+
 这些档位控制密码注册。**OIDC 首次登录**仍由 IdP 的应用可见性、用户组等策略控制；管理员创建账号也不受此设置影响。
 
 #### 密码注册 / 登录 {#_2-2-密码注册-登录}
