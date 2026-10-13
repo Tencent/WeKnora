@@ -41,9 +41,9 @@ var (
 // therefore don't need a rerank model configured, even when knowledge bases
 // are attached.
 //
-// When AllowedTools is empty the runtime falls back to
-// tools.DefaultAllowedTools(), which includes search_knowledge, so we treat
-// that case as requiring the reranker.
+// When AllowedTools was never set the runtime uses
+// tools.DefaultAllowedTools(), which includes search_knowledge, so that case
+// requires the reranker; an empty list registers no tool and does not.
 func agentRequiresRerankModel(agent *types.CustomAgent) bool {
 	if agent == nil {
 		return false
@@ -51,11 +51,7 @@ func agentRequiresRerankModel(agent *types.CustomAgent) bool {
 	if agent.Config.KBSelectionMode == "none" {
 		return false
 	}
-	allowed := agent.Config.AllowedTools
-	if len(allowed) == 0 {
-		allowed = tools.DefaultAllowedTools()
-	}
-	for _, t := range allowed {
+	for _, t := range tools.EffectiveAllowedTools(agent.Config.AllowedTools) {
 		if tools.SuccessorToolName(t) == tools.ToolSearchKnowledge {
 			return true
 		}

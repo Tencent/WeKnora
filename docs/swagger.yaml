@@ -7195,6 +7195,25 @@ paths:
       summary: 获取占位符定义
       tags:
       - 智能体
+  /agents/tools:
+    get:
+      consumes:
+      - application/json
+      description: 返回编辑器可勾选的内置工具（含分组和知识库能力要求）、工具列表未设置时生效的默认工具，以及由开关控制、写入工具列表也不生效的工具
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 工具目录
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 获取智能体可选工具
+      tags:
+      - 智能体
   /agents/type-presets:
     get:
       consumes:
