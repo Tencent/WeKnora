@@ -103,7 +103,8 @@ func (e *AgentEngine) appendToolImages(
 	})
 }
 
-const toolImagesUnviewableNote = "Images were captured, but this model cannot view them and no image description is available. " +
+const toolImagesUnviewableNote = "Images were captured, but this model cannot view them " +
+	"and no image description is available. " +
 	"Use page text or ask for a vision-capable model; do not claim to have inspected the image."
 
 // toolImageLabels names each image of a result: by the image numbers the tool

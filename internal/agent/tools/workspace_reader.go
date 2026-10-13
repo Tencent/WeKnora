@@ -231,7 +231,8 @@ func sandboxImageResult(ctx context.Context, data []byte, sessionID, clean, root
 	}
 	prepared, err := imageprep.Prepare(data, searchutil.VisionImageLimits)
 	if err != nil {
-		logger.Infof(ctx, "[Tool][ReadSandboxFile] image not attached: session=%s path=%s err=%v", sessionID, clean, err)
+		logger.Infof(ctx, "[Tool][ReadSandboxFile] image not attached: session=%s path=%s err=%v",
+			sessionID, clean, err)
 		return nil
 	}
 	logger.Infof(ctx, "[Tool][ReadSandboxFile] session=%s path=%s size=%d image=%s", sessionID, clean, len(data), mime)
@@ -301,13 +302,14 @@ func grepFilePage(
 	var b strings.Builder
 	fmt.Fprintf(&b, "=== File: %s ===\nquery=%q matches=%d (searched from line %d of %d)\n\n", clean, query,
 		matches, start, len(lines))
-	switch {
-	case matches == 0:
+	switch matches {
+	case 0:
 		b.WriteString("[No line matches the query. Try fewer or different words, or read the file in pages.]\n")
 	default:
 		b.WriteString("```\n" + body.String() + "```\n")
 		if next > 0 {
-			fmt.Fprintf(&b, "\n[More matches from line %d. Use offset=%d with the same query to continue.]\n", next, next)
+			fmt.Fprintf(&b, "\n[More matches from line %d. Use offset=%d with the same query to continue.]\n",
+				next, next)
 		}
 		b.WriteString("[Read around a match with offset=<line> and no query.]\n")
 	}
@@ -324,11 +326,6 @@ func grepFilePage(
 // renderFilePage is shared by workspace and skill resources. Content appears
 // only once, in Output, and pagination obeys the registry's output budget.
 func renderFilePage(ctx context.Context, input ReadFileInput, data []byte, sessionID, clean, rootDir string) *types.ToolResult {
-	maxBytes := input.MaxBytes
-	if maxBytes <= 0 {
-		maxBytes = defaultReadSandboxMaxBytes
-	}
-	maxBytes = min(maxBytes, maxReadSandboxMaxBytes)
 	total := int64(len(data))
 	// The file may have grown between Stat and Read.
 	if total > maxReadSandboxDownloadBytes {
@@ -336,7 +333,20 @@ func renderFilePage(ctx context.Context, input ReadFileInput, data []byte, sessi
 			sessionID, clean, total, maxReadSandboxDownloadBytes)
 		return oversizedSandboxFileResult(sessionID, clean, rootDir, total)
 	}
+	return renderFileContent(ctx, input, data, sessionID, clean, rootDir)
+}
 
+// renderFileContent pages already-loaded content. Attachment upload/parse limits
+// govern its total size; the sandbox download limit belongs to renderFilePage.
+func renderFileContent(
+	ctx context.Context, input ReadFileInput, data []byte, sessionID, clean, rootDir string,
+) *types.ToolResult {
+	maxBytes := input.MaxBytes
+	if maxBytes <= 0 {
+		maxBytes = defaultReadSandboxMaxBytes
+	}
+	maxBytes = min(maxBytes, maxReadSandboxMaxBytes)
+	total := int64(len(data))
 	binary := isBinaryShellOutput(string(data))
 
 	resultData := map[string]interface{}{
@@ -387,6 +397,10 @@ func renderFilePage(ctx context.Context, input ReadFileInput, data []byte, sessi
 		}
 	}
 	page := paginateSandboxFile(string(data), input.Offset, input.Limit, maxBytes, maxRunes)
+	if (page.lineTooLarge || input.LineOffset != 0) &&
+		(rootDir == types.AttachmentPathScheme || rootDir == "web://") {
+		return renderFileLinePage(input, string(data), clean, resultData, maxBytes, maxRunes)
+	}
 
 	// A line wider than the whole byte budget cannot be paged around: every
 	// retry would land on the same line and return the same nothing. Name the
@@ -443,6 +457,48 @@ func renderFilePage(ctx context.Context, input ReadFileInput, data []byte, sessi
 		sessionID, clean, total, page.startLine, page.endLine, page.totalLines, len(page.text))
 
 	return &types.ToolResult{Success: true, Output: b.String(), Data: resultData}
+}
+
+// renderFileLinePage uses a rune cursor so stored text can be read completely
+// even when a single line exceeds either the byte or tool-output budget.
+func renderFileLinePage(
+	input ReadFileInput, content, clean string, data map[string]interface{}, maxBytes int64, maxRunes int,
+) *types.ToolResult {
+	lines := strings.Split(strings.TrimSuffix(content, "\n"), "\n")
+	lineNumber := max(1, input.Offset)
+	if lineNumber > len(lines) {
+		return &types.ToolResult{Success: false, Error: "line offset is beyond the file"}
+	}
+	line := []rune(lines[lineNumber-1])
+	if input.LineOffset >= len(line) {
+		return &types.ToolResult{Success: false, Error: "line_offset is beyond the selected line"}
+	}
+	end, size := input.LineOffset, int64(0)
+	for end < len(line) && end-input.LineOffset < maxRunes {
+		next := int64(utf8.RuneLen(line[end]))
+		if size+next > maxBytes {
+			break
+		}
+		size += next
+		end++
+	}
+	if end == input.LineOffset {
+		return &types.ToolResult{Success: false, Error: "max_bytes is too small for the next character"}
+	}
+	data["total_lines"], data["start_line"], data["end_line"] = len(lines), lineNumber, lineNumber
+	data["line_offset"], data["returned_bytes"] = input.LineOffset, size
+	data["truncated"] = end < len(line) || lineNumber < len(lines)
+	result := &types.ToolResult{Success: true, Data: data}
+	result.Output = fmt.Sprintf("=== File: %s ===\nLine %d, characters %d-%d:\n\n```\n%s\n```\n",
+		clean, lineNumber, input.LineOffset, end, string(line[input.LineOffset:end]))
+	if end < len(line) {
+		data["next_offset"], data["next_line_offset"] = lineNumber, end
+		result.Output += fmt.Sprintf("Continue with offset=%d and line_offset=%d.\n", lineNumber, end)
+	} else if lineNumber < len(lines) {
+		data["next_offset"] = lineNumber + 1
+		result.Output += fmt.Sprintf("Continue with offset=%d and line_offset=0.\n", lineNumber+1)
+	}
+	return result
 }
 
 // sandboxFilePage is one window of a file's lines plus what the model needs to

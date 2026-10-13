@@ -391,6 +391,7 @@ type ToolResult struct {
 	ImageFocus  string `json:"-"`
 }
 
+// Image description detail levels requested by a file read.
 const (
 	ImageDetailBrief = "brief"
 	ImageDetailFull  = "full"

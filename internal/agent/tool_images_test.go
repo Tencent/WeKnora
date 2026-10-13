@@ -121,7 +121,9 @@ func TestParallelToolImagesShareOneLabelledMessage(t *testing.T) {
 	for i := 1; i <= 3; i++ {
 		calls = append(calls, types.ToolCall{
 			ID: fmt.Sprintf("img-%d", i), Name: tools.ToolReadFile,
-			Result: &types.ToolResult{Success: true, Output: "image", Images: []string{fmt.Sprintf("data:image/png;base64,%d", i)}},
+			Result: &types.ToolResult{
+				Success: true, Output: "image", Images: []string{fmt.Sprintf("data:image/png;base64,%d", i)},
+			},
 		})
 	}
 	step := types.AgentStep{ToolCalls: calls}
@@ -131,7 +133,8 @@ func TestParallelToolImagesShareOneLabelledMessage(t *testing.T) {
 
 	last := messages[len(messages)-1]
 	require.Equal(t, "user", last.Role)
-	require.Equal(t, []string{"data:image/png;base64,1", "data:image/png;base64,2", "data:image/png;base64,3"}, last.Images)
+	require.Equal(t,
+		[]string{"data:image/png;base64,1", "data:image/png;base64,2", "data:image/png;base64,3"}, last.Images)
 	require.Contains(t, last.Content, "[attached images 2-2] Images returned by tool read_file (call img-2)")
 }
 

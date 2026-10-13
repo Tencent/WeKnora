@@ -32,7 +32,6 @@ func TestBuildAgentPromptListsStoredDocumentsWithoutContent(t *testing.T) {
 	assert.Contains(t, prompt, `images="3"`)
 	assert.Contains(t, prompt, "read_file")
 	assert.Contains(t, prompt, "<path>/images/N")
-	assert.Contains(t, prompt, "do not run OCR")
 	assert.Contains(t, prompt, "<outline>\n# Intro\n## Results\n</outline>")
 	assert.NotContains(t, prompt, "<content>\n")
 	assert.NotContains(t, prompt, "doc-large", "the durable document ID must not reach the model")

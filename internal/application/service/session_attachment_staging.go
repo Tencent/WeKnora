@@ -346,10 +346,8 @@ func buildSandboxAttachmentsPrompt(attachments []stagedSessionAttachment, layout
 	b.WriteString("  <instruction>These are the user's files at the absolute paths above; " +
 		"do not write into " + escapeAttachmentXML(inputDir) + ".")
 	if hasStored {
-		b.WriteString(" To read a file that has attachment_path, call read_file at that attachment_path: it " +
-			"returns the text already parsed from the file, waiting briefly if parsing is still running, and " +
-			"<attachment_path>/images/N shows you image N of it. Never install parsers or OCR, or unpack the " +
-			"original, to read or view such a file. Use its path only when a program needs the original bytes.")
+		b.WriteString(" Use read_file at attachment_path for parsed text and images. " +
+			"Use path when a program needs the original bytes.")
 	}
 	if hasParsed {
 		b.WriteString(" parsed_text_path is the same parsed text as a sandbox file for shell programs.")

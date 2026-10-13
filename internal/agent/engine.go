@@ -1091,7 +1091,8 @@ const (
 		"for a diagram the main parts and how they connect; for a table its columns and key rows. " +
 		"Quote titles, labels and key numbers verbatim, but do not transcribe long passages of text. " +
 		"Plain text only: no preamble, headings or markdown."
-	toolImageFullPrompt = "Describe this image completely for an assistant that cannot see it and must work from your words alone. " +
+	toolImageFullPrompt = "Describe this image completely for an assistant that cannot see it " +
+		"and must work from your words alone. " +
 		"First say what kind of image it is. Transcribe all readable text in reading order; " +
 		"for a chart give the axes, units, legend and every labelled value; " +
 		"for a table reproduce every row and column; for a diagram name every element and each connection; " +

@@ -142,7 +142,7 @@ func TestStageSessionAttachmentsWritesParsedTextBesideBinary(t *testing.T) {
 	prompt := buildSandboxAttachmentsPrompt(staged, layout)
 	assert.Contains(t, prompt, `parsed_text_path="`+staged[0].ParsedPath+`"`)
 	assert.Contains(t, prompt, `attachment_path="`+types.AttachmentPath("doc-1")+`"`)
-	assert.Contains(t, prompt, "Never install parsers or OCR")
+	assert.Contains(t, prompt, "Use read_file at attachment_path")
 
 	// A second pass keeps the sidecar instead of deleting it as stale.
 	manager.writes = nil
@@ -326,7 +326,7 @@ func TestStageSessionAttachmentsRoutesUnparsedDocumentsToAttachmentPath(t *testi
 	assert.Equal(t, types.AttachmentPath("doc-1"), staged[0].AttachmentPath)
 	prompt := buildSandboxAttachmentsPrompt(staged, layout)
 	assert.Contains(t, prompt, `attachment_path="`+types.AttachmentPath("doc-1")+`"`)
-	assert.Contains(t, prompt, "call read_file at that attachment_path")
+	assert.Contains(t, prompt, "Use read_file at attachment_path")
 	assert.NotContains(t, prompt, "parsed_text_path")
 }
 

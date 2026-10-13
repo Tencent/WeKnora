@@ -11,6 +11,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/sandbox"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -155,7 +156,9 @@ func TestReadFileAttachmentRejectsDocumentsOutsideSession(t *testing.T) {
 	store.documents["other"] = readyDocument("other", "someone else's")
 	tool := NewReadFileTool(nil).WithAttachments(store, time.Second, nil)
 
-	for _, path := range []string{"attachment://other", types.AttachmentPath("other"), types.AttachmentPath("other") + "/images/1"} {
+	for _, path := range []string{
+		"attachment://other", types.AttachmentPath("other"), types.AttachmentPath("other") + "/images/1",
+	} {
 		result := runReadFile(t, tool, ReadFileInput{Path: path})
 		assert.False(t, result.Success)
 		assert.Contains(t, result.Error, "unknown attachment")
@@ -294,12 +297,13 @@ func TestReadFileStagedCopyReadsAsTheAttachment(t *testing.T) {
 	tool := NewReadFileTool(source).WithAttachments(store, 5*time.Second, nil).
 		WithAttachmentCopies(map[string]string{copyPath: types.AttachmentPath("brief")})
 
-	result, err := tool.Execute(sandboxFileTestContext(), json.RawMessage(`{"path":"/workspace/input/ab/./brief.docx"}`))
+	result, err := tool.Execute(sandboxFileTestContext(),
+		json.RawMessage(`{"path":"/workspace/input/ab/./brief.docx"}`))
 
 	require.NoError(t, err)
 	require.True(t, result.Success, result.Error)
 	assert.Contains(t, result.Output, "parsed docx body")
-	assert.Contains(t, result.Output, "sandbox copy of attachment "+types.AttachmentPath("brief"))
+	assert.Contains(t, result.Output, "showing parsed content from "+types.AttachmentPath("brief"))
 	assert.Zero(t, source.readCalls, "the binary original is not downloaded")
 
 	other, err := tool.Execute(sandboxFileTestContext(), json.RawMessage(`{"path":"/workspace/input/ab/other.docx"}`))
@@ -365,7 +369,7 @@ func TestReadFileAttachmentImagesKeepPartialSuccessAndAdvancePastFailures(t *tes
 		})
 	path := types.AttachmentPath("report")
 
-	first := runReadFile(t, tool, ReadFileInput{Path: path + "/images"})
+	first := runReadFile(t, tool, ReadFileInput{Path: path + "/images", Limit: 4})
 	require.True(t, first.Success, first.Error)
 	require.Len(t, first.Images, 2)
 	assert.Equal(t, []int{1, 4}, first.Data["image_numbers"])
@@ -378,6 +382,53 @@ func TestReadFileAttachmentImagesKeepPartialSuccessAndAdvancePastFailures(t *tes
 	assert.Empty(t, failed.Images)
 	assert.Equal(t, path+"/images/7", failed.Data["next_path"], "all-failed pages must still reach later images")
 	assert.Contains(t, failed.Error, path+"/images/7")
+}
+
+func TestAttachmentImageReadsDefaultToOneAndLimitFullReads(t *testing.T) {
+	document := readyDocument("figures", "text")
+	document.ImageRefs = types.JSON(`[{"url":"first"},{"url":"second"},{"url":"third"}]`)
+	data := pngBytes(t)
+	for _, tc := range []struct {
+		name   string
+		detail string
+		limit  int
+		want   int
+	}{
+		{name: "default brief", want: 1},
+		{name: "explicit brief batch", detail: "brief", limit: 3, want: 3},
+		{name: "full stays single", detail: "full", limit: 3, want: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			reads := 0
+			tool := NewReadFileTool(nil).WithAttachments(singleAttachmentStore(document), 0,
+				func(context.Context, string) ([]byte, error) {
+					reads++
+					return data, nil
+				})
+			result := runReadFile(t, tool, ReadFileInput{
+				Path: types.AttachmentPath(document.ID) + "/images", Detail: tc.detail, Limit: tc.limit,
+				Focus: "Q3 revenue",
+			})
+			require.True(t, result.Success, result.Error)
+			assert.Len(t, result.Images, tc.want)
+			assert.Equal(t, tc.want, reads)
+			assert.Equal(t, "Q3 revenue", result.ImageFocus)
+			if tc.want == 1 {
+				assert.Equal(t, types.AttachmentPath(document.ID)+"/images/2", result.Data["next_path"])
+			}
+		})
+	}
+}
+
+func TestAttachmentRejectsInvalidLineCursors(t *testing.T) {
+	tool := NewReadFileTool(nil).WithAttachments(singleAttachmentStore(readyDocument("text", "abc")), 0, nil)
+	for _, input := range []ReadFileInput{
+		{LineOffset: -1}, {LineOffset: 3}, {LineOffset: 1, Offset: 2}, {LineOffset: 1, Query: "abc"},
+	} {
+		input.Path = types.AttachmentPath("text")
+		result := runReadFile(t, tool, input)
+		assert.False(t, result.Success, "%+v", input)
+	}
 }
 
 func TestReadFileAttachmentCancellationIsNotReportedAsElapsedWait(t *testing.T) {
@@ -398,13 +449,15 @@ func TestReadFileExecutionTimeoutFollowsAttachmentWait(t *testing.T) {
 	assert.Zero(t, NewReadFileTool(nil).ExecutionTimeout())
 	tool := NewReadFileTool(nil).WithAttachments(&fakeAttachmentStore{}, 90*time.Second, nil)
 	assert.Equal(t, 95*time.Second, tool.ExecutionTimeout())
-	assert.Contains(t, tool.Description(), "attachment://<handle>/images/N")
+	assert.Contains(t, tool.Description(), "/images/N")
 }
 
 func TestReadFileWorkspaceReturnsImageFilesAsImages(t *testing.T) {
 	data := pngBytes(t)
 	source := &fakeSandboxFileSource{
-		stat: &sandbox.RemoteStatEntry{Path: "/workspace/input/shot.png", Type: sandbox.RemoteEntryFile, Size: int64(len(data))},
+		stat: &sandbox.RemoteStatEntry{
+			Path: "/workspace/input/shot.png", Type: sandbox.RemoteEntryFile, Size: int64(len(data)),
+		},
 		data: data,
 	}
 
@@ -424,7 +477,9 @@ func TestReadFileWorkspaceReturnsImageFilesAsImages(t *testing.T) {
 func TestReadFileWorkspaceQuerySearchesTextFiles(t *testing.T) {
 	data := []byte("alpha\nbeta gamma\nGamma delta\n")
 	source := &fakeSandboxFileSource{
-		stat: &sandbox.RemoteStatEntry{Path: "/workspace/output/notes.txt", Type: sandbox.RemoteEntryFile, Size: int64(len(data))},
+		stat: &sandbox.RemoteStatEntry{
+			Path: "/workspace/output/notes.txt", Type: sandbox.RemoteEntryFile, Size: int64(len(data)),
+		},
 		data: data,
 	}
 
@@ -436,4 +491,107 @@ func TestReadFileWorkspaceQuerySearchesTextFiles(t *testing.T) {
 	assert.Contains(t, result.Output, "3: Gamma delta")
 	assert.NotContains(t, result.Output, "2: beta gamma")
 	assert.Equal(t, 1, result.Data["match_count"])
+}
+
+func TestAttachmentReadsBeyondSandboxDownloadLimit(t *testing.T) {
+	body := strings.Repeat("row data\n", 1048577) + "last row needle\n"
+	document := readyDocument("large", body)
+	tool := NewReadFileTool(nil).WithAttachments(singleAttachmentStore(document), 0, nil)
+	address := types.AttachmentPath(document.ID)
+	page := runReadFile(t, tool, ReadFileInput{Path: address, Limit: 2})
+	require.True(t, page.Success, page.Error)
+	assert.Contains(t, page.Output, "row data\nrow data\n")
+	assert.Equal(t, 3, page.Data["next_offset"])
+	last := runReadFile(t, tool, ReadFileInput{Path: address, Offset: 1048578})
+	require.True(t, last.Success, last.Error)
+	assert.Contains(t, last.Output, "last row needle")
+	search := runReadFile(t, tool, ReadFileInput{Path: address, Query: "needle"})
+	require.True(t, search.Success, search.Error)
+	assert.Contains(t, search.Output, "1048578: last row needle")
+}
+
+func TestAttachmentLongLinesRoundTripThroughCursors(t *testing.T) {
+	for _, expired := range []bool{false, true} {
+		t.Run(fmt.Sprintf("expired=%v", expired), func(t *testing.T) {
+			line := strings.Repeat("中文🙂abc", 12000) + "needle at end"
+			document := readyDocument("long", line+"\nfinal line\n")
+			store := singleAttachmentStore(document)
+			if expired {
+				store.attachments[0].Content = document.Content
+				delete(store.documents, document.ID)
+			}
+			registry := NewToolRegistry()
+			registry.RegisterTool(NewReadFileTool(nil).WithAttachments(store, 0, nil))
+			input := ReadFileInput{Path: types.AttachmentPath(document.ID), Limit: 1, MaxBytes: 4096}
+			var recovered strings.Builder
+			for calls := 0; ; calls++ {
+				require.Less(t, calls, 100, "cursor must make progress")
+				args, err := json.Marshal(input)
+				require.NoError(t, err)
+				result, err := registry.ExecuteTool(context.Background(), ToolReadFile, args)
+				require.NoError(t, err)
+				require.True(t, result.Success, result.Error)
+				require.NotContains(t, result.Output, "output truncated")
+				require.True(t, utf8.ValidString(result.Output))
+				_, body, ok := strings.Cut(result.Output, "```\n")
+				require.True(t, ok)
+				body, _, ok = strings.Cut(body, "\n```\n")
+				require.True(t, ok)
+				recovered.WriteString(body)
+				next, continuing := result.Data["next_line_offset"].(int)
+				if !continuing {
+					assert.Equal(t, 2, result.Data["next_offset"])
+					break
+				}
+				require.Greater(t, next, input.LineOffset)
+				input.Offset = result.Data["next_offset"].(int)
+				input.LineOffset = next
+			}
+			assert.Equal(t, line, recovered.String())
+		})
+	}
+}
+
+func TestAttachmentPagesReserveAllOutputMetadata(t *testing.T) {
+	for _, copyPath := range []string{"", "/workspace/input/abcdef/report.pdf"} {
+		t.Run(copyPath, func(t *testing.T) {
+			lines := make([]string, 1000)
+			for i := range lines {
+				lines[i] = fmt.Sprintf("%04d-%s", i, strings.Repeat("x", 95))
+			}
+			document := readyDocument("budget", strings.Join(lines, "\n")+"\n")
+			document.FileName = strings.Repeat("f", 250) + ".pdf"
+			document.ImageRefs = types.JSON(`[{"url":"local://figure.png"}]`)
+			address := types.AttachmentPath(document.ID)
+			tool := NewReadFileTool(nil).WithAttachments(singleAttachmentStore(document), 0, nil)
+			if copyPath != "" {
+				tool.WithAttachmentCopies(map[string]string{copyPath: address})
+				address = copyPath
+			}
+			registry := NewToolRegistry()
+			registry.RegisterTool(tool)
+			var recovered strings.Builder
+			for offset := 1; ; {
+				args, err := json.Marshal(ReadFileInput{Path: address, Offset: offset})
+				require.NoError(t, err)
+				result, err := registry.ExecuteTool(context.Background(), ToolReadFile, args)
+				require.NoError(t, err)
+				require.True(t, result.Success, result.Error)
+				require.LessOrEqual(t, utf8.RuneCountInString(result.Output), DefaultMaxToolOutput)
+				require.NotContains(t, result.Output, "output truncated")
+				_, body, ok := strings.Cut(result.Output, "```\n")
+				require.True(t, ok)
+				body, _, ok = strings.Cut(body, "```\n")
+				require.True(t, ok)
+				recovered.WriteString(body)
+				next, more := result.Data["next_offset"].(int)
+				if !more {
+					break
+				}
+				require.Greater(t, next, offset)
+				offset = next
+			}
+			assert.Equal(t, document.Content, recovered.String())
+		})
+	}
 }

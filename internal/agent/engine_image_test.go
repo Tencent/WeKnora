@@ -180,7 +180,7 @@ func TestDescribeImages_RunsConcurrentlyWithPerImageTimeout(t *testing.T) {
 	var running, peak atomic.Int32
 	release := make(chan struct{})
 	engine := &AgentEngine{
-		imageDescriber: func(ctx context.Context, imgBytes []byte, prompt string) (string, error) {
+		imageDescriber: func(ctx context.Context, _ []byte, _ string) (string, error) {
 			n := running.Add(1)
 			defer running.Add(-1)
 			for {
