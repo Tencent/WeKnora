@@ -1069,6 +1069,13 @@ const toolImageAnalysisPrompt = "Describe the content of this image in detail. "
 	"If it contains text, extract all readable text. " +
 	"If it contains charts or diagrams, describe the data and structure."
 
+// DescribeDataURIImages turns user-uploaded data URIs into text with the
+// configured VLM. A chat model that cannot see images uses this instead of
+// dropping the upload.
+func (e *AgentEngine) DescribeDataURIImages(ctx context.Context, imageDataURIs []string) []string {
+	return e.describeImages(ctx, imageDataURIs)
+}
+
 // describeImages generates text descriptions for tool result images using the
 // configured imageDescriber (VLM). Each image is decoded from a data URI and
 // analyzed independently. Failures are logged and skipped gracefully.
