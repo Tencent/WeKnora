@@ -111,9 +111,10 @@ func TestMCPToolOffersOAuthPromptAfterApproval(t *testing.T) {
 	utils.SetSSRFWhitelistFromRaw("127.0.0.1")
 	t.Cleanup(utils.ResetSSRFWhitelistForTest)
 	mcpServer := sdkserver.NewMCPServer("test", "1")
-	mcpServer.AddTool(mcpgo.NewTool("echo"), func(context.Context, mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
-		return mcpgo.NewToolResultText("pong"), nil
-	})
+	mcpServer.AddTool(mcpgo.NewTool("echo"),
+		func(context.Context, mcpgo.CallToolRequest) (*mcpgo.CallToolResult, error) {
+			return mcpgo.NewToolResultText("pong"), nil
+		})
 	server := httptest.NewServer(sdkserver.NewStreamableHTTPServer(mcpServer, sdkserver.WithStateLess(true)))
 	t.Cleanup(server.Close)
 	service := &types.MCPService{
