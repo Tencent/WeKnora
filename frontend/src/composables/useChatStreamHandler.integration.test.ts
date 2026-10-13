@@ -164,6 +164,59 @@ for (const mode of ['ordinary', 'quick-timeline', 'agent'] as const) {
   })
 }
 
+for (const mode of ['quick-timeline', 'agent'] as const) {
+  test(`${mode}: generic error after a timeline keeps the steps and closes with an error entry`, async t => {
+    const h = setup(t, mode)
+    h.send('thinking', 'checking the docs', false, { event_id: 'th-1' })
+    h.send('tool_call', '', false, { tool_name: 'read_document', tool_call_id: 'tc-1' })
+    assert.ok(h.message.agentEventStream.length > 0, 'timeline should have steps before the error')
+    h.send('error', 'LLM call failed', true, { stage: 'knowledge_qa_execution' })
+    assert.equal(h.message.content, 'LLM call failed')
+    // The thinking/tool steps must stay visible: only error messages with no
+    // timeline content switch to the plain markdown render path.
+    assert.equal(h.message.isAgentMode, true)
+    assert.equal(h.message.is_completed, true)
+    const last = h.message.agentEventStream[h.message.agentEventStream.length - 1]
+    assert.equal(last.type, 'error')
+    assert.equal(last.content, 'LLM call failed')
+    assert.equal(last.done, true)
+    assert.deepEqual(h.errors, ['LLM call failed'])
+    assert.equal(h.turns.length, 0, 'a generic error must not trigger follow-up requests')
+  })
+}
+
+test('generic error with no assistant row creates a fallback bubble', async t => {
+  const effects = vue.effectScope()
+  t.after(() => effects.stop())
+  const loading = vue.ref(false), isReplying = vue.ref(false)
+  const currentAssistantMessageId = vue.ref(''), fullContent = vue.ref('')
+  const messagesList = vue.reactive<Record<string, any>>([])
+  const errors: string[] = []
+  const handler = useChatStreamHandler({
+    messagesList, loading, isReplying, currentAssistantMessageId, fullContent,
+    isAgentStreamSession: () => false, scrollToBottom() {},
+    onError: error => errors.push(error),
+  })
+  handler.processStreamChunk({
+    id: 'req-err', response_type: 'error', content: 'model unavailable', done: true,
+    data: { stage: 'knowledge_qa_execution' },
+  })
+  assert.equal(messagesList.length, 1)
+  const bubble = messagesList[0]
+  assert.equal(bubble.role, 'assistant')
+  assert.equal(bubble.content, 'model unavailable')
+  assert.equal(bubble.is_completed, true)
+  assert.equal(bubble.isAgentMode, false)
+  // The fallback mirrors the request ID onto request_id and
+  // assistant_message_id so a later correlated event matches it.
+  assert.equal(bubble.id, 'req-err')
+  assert.equal(bubble.request_id, 'req-err')
+  assert.equal(bubble.assistant_message_id, 'req-err')
+  assert.equal(isReplying.value, false)
+  assert.equal(loading.value, false)
+  assert.deepEqual(errors, ['model unavailable'])
+})
+
 test('ordinary completion waits for the buffered typewriter before recovering images', async t => {
   const h = setup(t, 'ordinary')
   h.revealed.value = 0
