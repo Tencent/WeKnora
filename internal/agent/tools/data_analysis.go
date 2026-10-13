@@ -32,14 +32,16 @@ const DataAnalysisTableName = "dataset"
 
 var dataAnalysisTool = BaseTool{
 	name: ToolDataAnalysis,
-	description: "Use this tool when the knowledge is CSV or Excel files. It loads the document into DuckDB " +
-		"and executes a read-only SQL query for data analysis. The selected document is always exposed as " +
-		"the single table \"" + DataAnalysisTableName + "\"; write SQL against that table name and never put " +
-		"the document ID inside the SQL. For Excel files with multiple sheets, non-empty sheets are loaded into " +
-		"the same table and the source sheet name is exposed as a '__sheet_name' column so you can " +
-		"filter/aggregate per sheet. Only the .xlsx container is readable: a legacy binary .xls must be " +
-		"re-saved as .xlsx (or exported as .csv) before it can be analysed. If the user's question requires " +
-		"data statistics, convert the question into SQL and execute it.",
+	description: "Use this tool when the document is a CSV or Excel file, including a spreadsheet uploaded " +
+		"in the chat. It loads the document into DuckDB and executes a read-only SQL query for data analysis. " +
+		"Pass the document's knowledge_id handle from runtime_context (chat_uploads for a chat upload, or a " +
+		"knowledge-base document). The selected document is always exposed as the single table \"" +
+		DataAnalysisTableName + "\"; write SQL against that table name and never put the document ID inside " +
+		"the SQL. For Excel files with multiple sheets, non-empty sheets are loaded into the same table and " +
+		"the source sheet name is exposed as a '__sheet_name' column so you can filter/aggregate per sheet. " +
+		"Only the .xlsx container is readable: a legacy binary .xls must be re-saved as .xlsx (or exported as " +
+		".csv) before it can be analysed. If the user's question requires data statistics, convert the " +
+		"question into SQL and execute it. Do not substitute a different document when the user uploaded a spreadsheet.",
 	schema: utils.GenerateSchema[DataAnalysisInput](),
 }
 
@@ -201,6 +203,10 @@ type DataAnalysisTool struct {
 	storageResolver interfaces.StorageBackendResolver
 	searchTargets   types.SearchTargets
 	scopeEnforced   bool
+	// chatAttachments is the server-built allowlist of chat-uploaded
+	// spreadsheets for this turn. Nil when the tool is used outside an agent
+	// turn (quick-answer data analysis keeps the knowledge-only path).
+	chatAttachments *ChatTabularAttachments
 }
 
 // WithSearchTargets enables the Agent-only authorization boundary. Other
@@ -212,6 +218,24 @@ func (t *DataAnalysisTool) WithSearchTargets(searchTargets types.SearchTargets) 
 	t.searchTargets = searchTargets
 	t.scopeEnforced = true
 	return t
+}
+
+// WithChatAttachments installs the per-turn allowlist of chat-uploaded
+// spreadsheets. The same pointer is shared with data_schema so a schema call
+// and a later query reuse one DuckDB table.
+func (t *DataAnalysisTool) WithChatAttachments(store *ChatTabularAttachments) *DataAnalysisTool {
+	if t != nil {
+		t.chatAttachments = store
+	}
+	return t
+}
+
+// ChatAttachments returns the allowlist bound to this tool, or nil.
+func (t *DataAnalysisTool) ChatAttachments() *ChatTabularAttachments {
+	if t == nil {
+		return nil
+	}
+	return t.chatAttachments
 }
 
 func NewDataAnalysisTool(
@@ -295,19 +319,35 @@ func (t *DataAnalysisTool) Execute(ctx context.Context, args json.RawMessage) (*
 			Error:   fmt.Sprintf("Failed to parse input args: %v", err),
 		}, err
 	}
-	if t.scopeEnforced {
-		if _, err := authorizeKnowledgeInSearchTargets(ctx, t.searchTargets, input.KnowledgeID, t.knowledgeService); err != nil {
-			return &types.ToolResult{Success: false, Error: err.Error()}, err
+	var schema *TableSchema
+	var err error
+	// Chat uploads are authorized by the server-built allowlist, not by
+	// knowledge-base search targets. Checking them first keeps a spreadsheet
+	// that was never ingested from being rejected as an unknown document, and
+	// keeps a knowledge-base PDF on the existing file-type check.
+	if attachment, ok := t.chatAttachment(input.KnowledgeID); ok {
+		schema, err = t.loadChatAttachment(ctx, attachment)
+		if err != nil {
+			logger.Errorf(ctx, "[Tool][DataAnalysis] Failed to load chat upload '%s': %v", input.KnowledgeID, err)
+			return &types.ToolResult{
+				Success: false,
+				Error:   fmt.Sprintf("Failed to load chat upload '%s': %v", attachment.FileName, err),
+			}, err
 		}
-	}
-
-	schema, err := t.LoadFromKnowledgeID(ctx, input.KnowledgeID)
-	if err != nil {
-		logger.Errorf(ctx, "[Tool][DataAnalysis] Failed to load knowledge ID '%s': %v", input.KnowledgeID, err)
-		return &types.ToolResult{
-			Success: false,
-			Error:   fmt.Sprintf("Failed to load knowledge ID '%s': %v", input.KnowledgeID, err),
-		}, err
+	} else {
+		if t.scopeEnforced {
+			if _, err = authorizeKnowledgeInSearchTargets(ctx, t.searchTargets, input.KnowledgeID, t.knowledgeService); err != nil {
+				return &types.ToolResult{Success: false, Error: err.Error()}, err
+			}
+		}
+		schema, err = t.LoadFromKnowledgeID(ctx, input.KnowledgeID)
+		if err != nil {
+			logger.Errorf(ctx, "[Tool][DataAnalysis] Failed to load knowledge ID '%s': %v", input.KnowledgeID, err)
+			return &types.ToolResult{
+				Success: false,
+				Error:   fmt.Sprintf("Failed to load knowledge ID '%s': %v", input.KnowledgeID, err),
+			}, err
+		}
 	}
 
 	if rewrittenSQL, fixes := reconcileSQLColumnsWithSchema(input.SQL, schema); len(fixes) > 0 {
@@ -793,40 +833,103 @@ func (t *DataAnalysisTool) materializeKnowledgeFile(ctx context.Context, knowled
 	}
 	defer reader.Close()
 
-	// Preserve the file extension so DuckDB's format auto-detection still
-	// works (e.g. the CSV reader expects .csv, xlsx reader expects .xlsx).
-	suffix := ""
-	if ext := strings.ToLower(strings.TrimSpace(knowledge.FileType)); ext != "" {
-		suffix = "." + ext
+	path, cleanup, err := materializeLocalCopy(ctx, reader, knowledge.FileType)
+	if err != nil {
+		return "", noop, fmt.Errorf("failed to copy knowledge '%s' to temp file: %w", knowledge.ID, err)
 	}
+	logger.Infof(ctx, "[Tool][DataAnalysis] Materialized knowledge '%s' to temp file %s for session %s",
+		knowledge.ID, path, t.sessionID)
+	return path, cleanup, nil
+}
 
-	tmp, err := os.CreateTemp("", "weknora-data-analysis-*"+suffix)
+// materializeLocalCopy writes reader to a temp file whose suffix matches
+// fileType, so DuckDB's csv/xlsx readers can detect the format. The cleanup
+// closure is always safe to call.
+func materializeLocalCopy(ctx context.Context, reader io.Reader, fileType string) (string, func(), error) {
+	noop := func() {}
+	tmp, err := os.CreateTemp("", "weknora-data-analysis-*"+fileTypeSuffix(fileType))
 	if err != nil {
 		return "", noop, fmt.Errorf("failed to create temp file: %w", err)
 	}
 	tmpPath := tmp.Name()
 	cleanup := func() {
-		// Best-effort cleanup; a missing file is fine, any other error is
-		// only logged to avoid masking the original operation's result.
 		if err := os.Remove(tmpPath); err != nil && !os.IsNotExist(err) {
 			logger.Warnf(ctx, "[Tool][DataAnalysis] Failed to remove temp file %s: %v", tmpPath, err)
 		}
 	}
-
 	if _, err := io.Copy(tmp, reader); err != nil {
 		_ = tmp.Close()
 		cleanup()
-		return "", noop, fmt.Errorf("failed to copy knowledge '%s' to temp file: %w", knowledge.ID, err)
+		return "", noop, err
 	}
 	if err := tmp.Close(); err != nil {
 		cleanup()
-		return "", noop, fmt.Errorf("failed to finalize temp file for knowledge '%s': %w", knowledge.ID, err)
+		return "", noop, err
 	}
-
-	logger.Infof(ctx, "[Tool][DataAnalysis] Materialized knowledge '%s' to temp file %s for session %s",
-		knowledge.ID, tmpPath, t.sessionID)
-
 	return tmpPath, cleanup, nil
+}
+
+func fileTypeSuffix(fileType string) string {
+	ext := strings.ToLower(strings.TrimSpace(fileType))
+	ext = strings.TrimPrefix(ext, ".")
+	if ext == "" {
+		return ""
+	}
+	for _, r := range ext {
+		if (r < 'a' || r > 'z') && (r < '0' || r > '9') {
+			return ""
+		}
+	}
+	return "." + ext
+}
+
+func (t *DataAnalysisTool) chatAttachment(id string) (ChatTabularAttachment, bool) {
+	if t == nil || t.chatAttachments == nil {
+		return ChatTabularAttachment{}, false
+	}
+	return t.chatAttachments.Get(id)
+}
+
+// loadChatAttachment loads a chat-uploaded spreadsheet the same way a
+// knowledge file is loaded: copy the bytes to a local temp file, then let
+// DuckDB read csv/xlsx. Chat uploads have no ChunkTypeTableSummary chunks, so
+// callers that need a schema use the DuckDB table description instead.
+func (t *DataAnalysisTool) loadChatAttachment(ctx context.Context, attachment ChatTabularAttachment) (*TableSchema, error) {
+	fileType := TabularFileType(attachment.FileType)
+	if fileType == "" {
+		return nil, fmt.Errorf("unsupported file type: %s (supported types: csv, xlsx, xls)", attachment.FileType)
+	}
+	// data_schema and data_analysis share this loader. The second call reuses
+	// the table instead of creating it again, and does not re-read the file.
+	tableName := chatAttachmentTableName(attachment.ID)
+	if t.loadedTables[tableName] {
+		return t.LoadFromTable(ctx, tableName)
+	}
+	if attachment.Open == nil {
+		return nil, fmt.Errorf("chat upload %s is not readable", attachment.FileName)
+	}
+	reader, err := attachment.Open(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open chat upload: %w", err)
+	}
+	defer reader.Close()
+
+	localPath, cleanup, err := materializeLocalCopy(ctx, reader, fileType)
+	if err != nil {
+		return nil, fmt.Errorf("failed to materialize chat upload: %w", err)
+	}
+	defer cleanup()
+
+	logger.Infof(ctx, "[Tool][DataAnalysis] Loading chat upload '%s' (type: %s) into table '%s' for session %s",
+		attachment.FileName, fileType, tableName, t.sessionID)
+	switch fileType {
+	case "csv":
+		return t.LoadFromCSV(ctx, localPath, tableName)
+	case "xlsx", "xls":
+		return t.LoadFromExcel(ctx, localPath, tableName)
+	default:
+		return nil, fmt.Errorf("unsupported file type: %s (supported types: csv, xlsx, xls)", fileType)
+	}
 }
 
 // LoadFromKnowledgeID loads data from a Knowledge ID into a DuckDB table and returns the table schema
