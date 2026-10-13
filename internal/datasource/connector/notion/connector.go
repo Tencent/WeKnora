@@ -148,7 +148,10 @@ func (c *Connector) FetchAll(ctx context.Context, config *types.DataSourceConfig
 	for _, resourceID := range resourceIDs {
 		page, err := client.GetPage(ctx, resourceID)
 		if err == nil {
-			pageItems, _ := c.fetchPage(ctx, client, page, visited)
+			pageItems, _, err := c.fetchPage(ctx, client, page, visited)
+			if err != nil {
+				return nil, err
+			}
 			allItems = append(allItems, pageItems...)
 			continue
 		}
@@ -268,7 +271,10 @@ func (c *Connector) FetchIncremental(ctx context.Context, config *types.DataSour
 				newEditTimes[rid] = rt
 			}
 		} else {
-			items, truncated := c.fetchPage(ctx, client, pg, fetchVisited)
+			items, truncated, err := c.fetchPage(ctx, client, pg, fetchVisited)
+			if err != nil {
+				return nil, nil, err
+			}
 			queryTruncated = queryTruncated || truncated
 			changedItems = append(changedItems, items...)
 		}
@@ -334,19 +340,20 @@ func buildCursor(editTimes map[string]time.Time) *types.SyncCursor {
 // If page is nil, it will be fetched from the API.
 // The second result reports whether any query issued for this page (including
 // child databases) was truncated at a vendor limit.
+// A page block fetch error aborts the round without acknowledging its edit time.
 func (c *Connector) fetchPage(
 	ctx context.Context, client *notionClient, page *notionPage, visited map[string]bool,
-) ([]types.FetchedItem, bool) {
+) ([]types.FetchedItem, bool, error) {
 	if page == nil {
-		return nil, false
+		return nil, false, nil
 	}
 	if visited[page.ID] {
-		return nil, false
+		return nil, false, nil
 	}
 	visited[page.ID] = true
 
 	if page.InTrash {
-		return nil, false
+		return nil, false, nil
 	}
 
 	// Database records store content in properties, not blocks — delegate to
@@ -362,15 +369,14 @@ func (c *Connector) fetchPage(
 		}
 		propNames := extractPropertySchema(*page)
 		if item := c.buildRecordItem(ctx, client, *page, propNames, dbTitle); item != nil {
-			return []types.FetchedItem{*item}, false
+			return []types.FetchedItem{*item}, false, nil
 		}
-		return nil, false
+		return nil, false, nil
 	}
 
 	blocks, err := client.GetBlockChildrenAll(ctx, page.ID)
 	if err != nil {
-		logger.Warnf(ctx, "[Notion] failed to get blocks for page %s: %v", page.ID, err)
-		return nil, false
+		return nil, false, fmt.Errorf("get blocks for notion page %s: %w", page.ID, err)
 	}
 
 	resolveFileUploads(ctx, client, blocks)
@@ -445,7 +451,10 @@ func (c *Connector) fetchPage(
 				logger.Warnf(ctx, "[Notion] failed to get child page %s: %v", block.ID, err)
 				continue
 			}
-			childItems, childTruncated := c.fetchPage(ctx, client, childPage, visited)
+			childItems, childTruncated, err := c.fetchPage(ctx, client, childPage, visited)
+			if err != nil {
+				return nil, truncated || childTruncated, err
+			}
 			truncated = truncated || childTruncated
 			items = append(items, childItems...)
 		case "child_database":
@@ -455,7 +464,7 @@ func (c *Connector) fetchPage(
 		}
 	}
 
-	return items, truncated
+	return items, truncated, nil
 }
 
 // fetchDatabase syncs each database record as an individual knowledge item (full sync).

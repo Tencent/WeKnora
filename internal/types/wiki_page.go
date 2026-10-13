@@ -273,6 +273,13 @@ type WikiPage struct {
 	DeletedAt gorm.DeletedAt `json:"deleted_at" gorm:"index"`
 }
 
+// WikiPageDetail adds display titles to the page detail response without
+// persisting them or loading backlink content.
+type WikiPageDetail struct {
+	*WikiPage
+	InLinkTitles map[string]string `json:"in_link_titles"`
+}
+
 // TableName specifies the database table name
 func (WikiPage) TableName() string {
 	return "wiki_pages"

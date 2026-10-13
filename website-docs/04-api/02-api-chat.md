@@ -424,7 +424,7 @@ curl -N -X POST $BASE/api/v1/agent-chat/s-1 -H "Authorization: Bearer $TOKEN" \
 | `query` | string | 是（`binding:"required"`） | 查询 |
 | `knowledge_base_id` | string | 否 | 单 KB（兼容旧版） |
 | `knowledge_base_ids` | []string | 否 | 多 KB |
-| `knowledge_ids` | []string | 否 | 限定文件 |
+| `knowledge_ids` | []string | 否 | 指定文件，与 `knowledge_base_id(s)` 取并集（见下方说明） |
 | `tag_ids` | []string | 否 | 标签过滤 |
 | `mentioned_items` | []object | 否 | 带 KB 范围的标签提及 |
 | `vector_threshold` / `keyword_threshold` | float | 否 | 召回阈值；省略时用空间检索配置（默认 0.15 / 0.3） |
@@ -434,6 +434,8 @@ curl -N -X POST $BASE/api/v1/agent-chat/s-1 -H "Authorization: Bearer $TOKEN" \
 | `rerank` | object | 否 | 覆盖 rerank 设置；`{"enabled":false}` 关闭 rerank。字段见 [rerank 对象](./01-api-overview.md#retrieval-api)。`rerank.top_k` 同时给出时优先于 `match_count` |
 
 省略的字段都沿用空间的检索配置（`GET /tenants/kv/retrieval-config`），不传任何新字段时行为和以前一样。
+
+检索范围是 `knowledge_base_id(s)` 与 `knowledge_ids` 的并集，与产品内 @ 提及的语义一致：每个知识库整库检索，`knowledge_ids` 中属于这些知识库的文件已被覆盖，不再单独限定；属于其他知识库的文件会额外加入检索。**只想在指定文件里搜时，只传 `knowledge_ids`，不要同时传它们所在的知识库**，否则会检索整个知识库。
 
 `embedding_top_k` 与返回条数独立：传 `"embedding_top_k":100,"match_count":10` 可将召回深度设为 100，最终最多返回 10 条。返回条数仍按 `rerank.top_k` > `match_count` > 空间 `rerank_top_k` 的顺序确定（前两项须大于 0）；实际召回深度取上述返回条数与有效 `embedding_top_k` 的较大值。覆盖仅作用于本次请求，不写回空间配置。`embedding_top_k` 越界或类型错误时返回 400。
 
@@ -452,6 +454,10 @@ curl -X POST $BASE/api/v1/knowledge-search -H "X-API-Key: $API_KEY" \
 curl -X POST $BASE/api/v1/knowledge-search -H "X-API-Key: $API_KEY" \
   -H 'Content-Type: application/json' \
   -d '{"query":"部署要求","knowledge_base_ids":["kb-1"],"disable_keywords_match":true,"match_count":5,"rerank":{"enabled":false}}'
+
+# 只在指定文件里搜（不传 knowledge_base_ids）
+curl -X POST $BASE/api/v1/knowledge-search -H "X-API-Key: $API_KEY" \
+  -H 'Content-Type: application/json' -d '{"query":"部署要求","knowledge_ids":["k-1","k-2"]}'
 ```
 
 ## 消息（/api/v1/messages）

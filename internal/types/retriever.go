@@ -92,6 +92,11 @@ type IndexWithScore struct {
 	TagID string
 	// Score
 	Score float64
+	// VectorScore is a vector hit's similarity as its engine reported it.
+	// Fusion replaces Score with a rank-based one; this keeps the evidence of
+	// how close the vector actually was, which reranking weighs for images.
+	// Zero for keyword hits.
+	VectorScore float64
 	// Match type
 	MatchType MatchType
 	// IsEnabled

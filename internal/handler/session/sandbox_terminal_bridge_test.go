@@ -22,15 +22,16 @@ import (
 // so a test controls exactly when the bridge ends.
 type fakeTerminalSession struct {
 	out    chan sandbox.RemoteTerminalEvent
+	pid    uint32
 	closes atomic.Int32
 }
 
 func newFakeTerminalSession() *fakeTerminalSession {
-	return &fakeTerminalSession{out: make(chan sandbox.RemoteTerminalEvent)}
+	return &fakeTerminalSession{out: make(chan sandbox.RemoteTerminalEvent), pid: 4321}
 }
 
 func (s *fakeTerminalSession) Output() <-chan sandbox.RemoteTerminalEvent { return s.out }
-func (s *fakeTerminalSession) PID() uint32                                { return 4321 }
+func (s *fakeTerminalSession) PID() uint32                                { return s.pid }
 func (s *fakeTerminalSession) Write(context.Context, []byte) error        { return nil }
 func (s *fakeTerminalSession) Resize(context.Context, uint32, uint32) error {
 	return nil
@@ -91,6 +92,28 @@ func readTerminalFrame(t *testing.T, conn *websocket.Conn) terminalControlFrame 
 	var frame terminalControlFrame
 	require.NoError(t, json.Unmarshal(payload, &frame))
 	return frame
+}
+
+func TestTerminalBridgeReadyAdvertisesReattachability(t *testing.T) {
+	for name, tc := range map[string]struct {
+		pid  uint32
+		want bool
+	}{
+		"envd PTY with a pid":       {pid: 4321, want: true},
+		"docker exec without a pid": {pid: 0, want: false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			pty := newFakeTerminalSession()
+			pty.pid = tc.pid
+			client := serveTerminalBridge(t, pty, nil)
+
+			ready := readTerminalFrame(t, client)
+			require.Equal(t, "ready", ready.Type)
+			require.NotNil(t, ready.Reattachable,
+				"ready must always say whether a reconnect resumes the shell")
+			require.Equal(t, tc.want, *ready.Reattachable)
+		})
+	}
 }
 
 func TestTerminalBridgeTearsDownWhenAuthIsRevoked(t *testing.T) {

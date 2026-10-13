@@ -232,10 +232,26 @@ func (c *Compactor) summarize(
 func (c *Compactor) streamSummary(
 	ctx context.Context, messages []chat.Message, opts *chat.ChatOptions,
 ) (content, finishReason string, err error) {
-	callCtx, cancel := context.WithCancel(types.WithLLMCallMetadata(ctx, llmCallLabel, ""))
-	defer cancel()
+	callCtx, cancel := context.WithCancelCause(types.WithLLMCallMetadata(ctx, llmCallLabel, ""))
+	defer cancel(nil)
+	// Arm before ChatStream: opening the connection and waiting for headers
+	// must not bypass the time-to-first-output budget.
+	timeout := c.settings.stallTimeout()
+	stall := time.AfterFunc(timeout, func() {
+		cancel(fmt.Errorf("summarization stalled: no output for %s", timeout))
+	})
+	defer stall.Stop()
+	callError := func() error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		return context.Cause(callCtx)
+	}
 	stream, err := c.chatModel.ChatStream(callCtx, messages, opts)
 	if err != nil {
+		if callCtx.Err() != nil {
+			return "", "", callError()
+		}
 		return "", "", err
 	}
 	if stream == nil {
@@ -253,19 +269,23 @@ func (c *Compactor) streamSummary(
 		}()
 	}()
 
-	timeout := c.settings.stallTimeout()
-	stall := time.NewTimer(timeout)
-	defer stall.Stop()
 	var sb strings.Builder
 	streamErr := ""
 	for {
+		// select picks at random among ready cases, and a provider closes its
+		// stream once the turn's context is cancelled, so a stopped turn could
+		// otherwise read as a completed (partial) summary.
+		if err := callError(); err != nil {
+			return "", "", err
+		}
 		select {
-		case <-ctx.Done():
-			return "", "", ctx.Err()
-		case <-stall.C:
-			return "", "", fmt.Errorf("summarization stalled: no output for %s", timeout)
+		case <-callCtx.Done():
+			return "", "", callError()
 		case chunk, ok := <-stream:
 			if !ok {
+				if err := callError(); err != nil {
+					return "", "", err
+				}
 				if streamErr != "" {
 					return "", finishReason, fmt.Errorf("summarization stream error: %s", streamErr)
 				}
@@ -274,7 +294,7 @@ func (c *Compactor) streamSummary(
 				// context here, and not only in the ctx.Done() arm above, also
 				// settles the race where a cancellation closes the stream while
 				// both arms are ready and select picks between them at random.
-				if err := ctx.Err(); err != nil {
+				if err := callError(); err != nil {
 					return "", finishReason, err
 				}
 				return sb.String(), finishReason, nil

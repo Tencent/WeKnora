@@ -228,7 +228,7 @@
                 </t-popup>
               </div>
               <div class="card-content">
-                <div class="card-description" :title="agent.description || $t('agent.noDescription')">
+                <div class="card-description" :class="{ 'is-empty': !agent.description }" :title="agent.description || $t('agent.noDescription')">
                   {{ agent.description || $t('agent.noDescription') }}</div>
               </div>
               <div class="card-bottom">
@@ -400,7 +400,7 @@
 
               <!-- 卡片内容 -->
               <div class="card-content">
-                <div class="card-description" :title="agent.description || $t('agent.noDescription')">
+                <div class="card-description" :class="{ 'is-empty': !agent.description }" :title="agent.description || $t('agent.noDescription')">
                   {{ agent.description || $t('agent.noDescription') }}
                 </div>
               </div>
@@ -539,7 +539,7 @@
                 </t-popup>
               </div>
               <div class="card-content">
-                <div class="card-description" :title="shared.agent?.description || $t('agent.noDescription')">
+                <div class="card-description" :class="{ 'is-empty': !shared.agent?.description }" :title="shared.agent?.description || $t('agent.noDescription')">
                   {{ shared.agent?.description || $t('agent.noDescription') }}</div>
               </div>
               <div class="card-bottom">
@@ -1737,62 +1737,16 @@ watch(keyword, () => { collapsedAgentSections.value = new Set() })
   gap: 8px;
 }
 
+// 底色统一浅灰，仅图标着色；同一能力在三个列表页使用同一颜色
 .feature-badge {
   .resource-feature-badge();
 
-  &.mode-normal {
-    background: color-mix(in srgb, var(--td-brand-color) 8%, transparent);
-    color: var(--td-brand-color-active);
-
-    &:hover {
-      background: color-mix(in srgb, var(--td-brand-color) 12%, transparent);
-    }
-  }
-
-  &.mode-agent {
-    background: color-mix(in srgb, var(--app-accent-purple) 8%, transparent);
-    color: var(--td-brand-color);
-
-    &:hover {
-      background: color-mix(in srgb, var(--app-accent-purple) 12%, transparent);
-    }
-  }
-
-  &.web-search {
-    background: color-mix(in srgb, var(--td-warning-color) 8%, transparent);
-    color: var(--td-warning-color);
-
-    &:hover {
-      background: color-mix(in srgb, var(--td-warning-color) 12%, transparent);
-    }
-  }
-
-  &.knowledge {
-    background: var(--td-bg-color-secondarycontainer);
-    color: var(--td-text-color-secondary);
-
-    &:hover {
-      background: var(--td-bg-color-container-hover);
-    }
-  }
-
-  &.mcp {
-    background: color-mix(in srgb, var(--td-error-color) 8%, transparent);
-    color: var(--td-error-color);
-
-    &:hover {
-      background: color-mix(in srgb, var(--td-error-color) 12%, transparent);
-    }
-  }
-
-  &.multi-turn {
-    background: color-mix(in srgb, var(--td-brand-color) 8%, transparent);
-    color: var(--td-brand-color);
-
-    &:hover {
-      background: color-mix(in srgb, var(--td-brand-color) 12%, transparent);
-    }
-  }
+  &.mode-normal,
+  &.multi-turn { color: var(--app-accent-blue); }
+  &.mode-agent { color: var(--app-accent-purple); }
+  &.web-search { color: var(--td-warning-color); }
+  &.knowledge { color: var(--td-brand-color); }
+  &.mcp { color: var(--app-accent-teal); }
 }
 
 // 删除确认对话框样式

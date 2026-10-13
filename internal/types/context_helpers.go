@@ -69,6 +69,25 @@ func WikiEditSourceFromContext(ctx context.Context) string {
 	return NormalizeWikiEditSource(v)
 }
 
+// WithWikiShrinkAllowed marks ctx so ONE wiki page write may drop table rows
+// the stored page still carries.
+//
+// UpdatePage refuses such a write by default, because a model asked to re-emit
+// a whole page silently returns it with rows missing and the page then shrinks
+// with no trace. Callers that are removing content on purpose — a retraction
+// after a source document was deleted, an exact-text replacement that deletes
+// rows — say so here, and only for the write that does it.
+func WithWikiShrinkAllowed(ctx context.Context) context.Context {
+	return context.WithValue(ctx, WikiShrinkAllowedContextKey, true)
+}
+
+// WikiShrinkAllowedFromContext reports whether ctx was marked with
+// WithWikiShrinkAllowed.
+func WikiShrinkAllowedFromContext(ctx context.Context) bool {
+	v, _ := ctx.Value(WikiShrinkAllowedContextKey).(bool)
+	return v
+}
+
 // WithEmbedQuery marks ctx as embedding a search query rather than content
 // being indexed. Asymmetric retrieval models encode the two sides differently
 // and lose accuracy when a query is embedded as a passage; the embedding

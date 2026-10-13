@@ -182,10 +182,11 @@ func RegisterMCPServiceRoutes(
 		// MCP tool human approval (issue #1173) — Viewer+ to read, Admin+ to set policy
 		mcpServices.GET("/:id/tool-approvals", g.Viewer(), handler.ListMCPToolApprovals)
 		mcpServices.PUT("/:id/tool-approvals/:tool_name", g.Admin(), handler.SetMCPToolApproval)
-		// Per-user OAuth authorization flow. Viewer+ may authorize/inspect/
-		// revoke their own token; the callback is the separate public route
-		// registered above.
+		// Per-user OAuth authorization. Viewer+ may authorize/inspect/revoke
+		// their own token, through the browser flow (authorize-url and the
+		// public callback registered above) or with an assertion.
 		mcpServices.POST("/:id/oauth/authorize-url", g.Viewer(), oauthHandler.AuthorizeURL)
+		mcpServices.POST("/:id/oauth/assertion", g.Viewer(), oauthHandler.AssertionGrant)
 		mcpServices.GET("/:id/oauth/status", g.Viewer(), oauthHandler.Status)
 		mcpServices.DELETE("/:id/oauth/token", g.Viewer(), oauthHandler.Revoke)
 	}

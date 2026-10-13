@@ -405,12 +405,12 @@ func (h *WikiPageHandler) recordManualWikiActivity(
 
 // GetPage godoc
 // @Summary      Get a wiki page by slug
-// @Description  Retrieve a wiki page by its slug
+// @Description  Retrieve a wiki page by its slug, including titles of existing backlinks
 // @Tags         Wiki
 // @Produce      json
 // @Param        kb_id  path  string  true  "Knowledge base ID"
 // @Param        slug   path  string  true  "Page slug"
-// @Success      200  {object}  types.WikiPage
+// @Success      200  {object}  types.WikiPageDetail
 // @Failure      404  {object}  errors.AppError
 // @Security     Bearer
 // @Router       /knowledgebase/{kb_id}/wiki/pages/{slug} [get]
@@ -437,7 +437,24 @@ func (h *WikiPageHandler) GetPage(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, page)
+	titles := make(map[string]string, len(page.InLinks))
+	// Bound SQL parameters while resolving every backlink, including pages
+	// outside the sidebar's paginated window.
+	const batchSize = 1000
+	for start := 0; start < len(page.InLinks); start += batchSize {
+		end := min(start+batchSize, len(page.InLinks))
+		pages, err := h.wikiService.ListBySlugs(c.Request.Context(), kbID, page.InLinks[start:end])
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		for slug, backlink := range pages {
+			if backlink != nil {
+				titles[slug] = backlink.Title
+			}
+		}
+	}
+	c.JSON(http.StatusOK, types.WikiPageDetail{WikiPage: page, InLinkTitles: titles})
 }
 
 // UpdatePage godoc

@@ -22,19 +22,23 @@
     </header>
 
     <template v-if="visibleItems.length">
-      <div class="toolbox-tabs" role="tablist" :aria-label="t('toolbox.title')">
-        <button v-for="item in visibleItems" :key="item.key" type="button" role="tab" class="toolbox-tab"
-          :aria-selected="selectedItem?.key === item.key" @click="select(item.key)">
-          <BrowserIcon v-if="item.key === 'browserconnection'" width="18" height="18" />
-          <t-icon v-else :name="item.icon" size="18px" />
-          <span>{{ t(item.title) }}</span>
-          <span v-if="item.key === 'browserconnection' && browserStatus" class="toolbox-tab-status"
-            :class="`is-${browserStatus}`">
-            <i aria-hidden="true" />{{ t(`localBrowser.${browserStatus}`) }}
-          </span>
-          <span v-else-if="item.key !== 'browserconnection' && counts[item.key] !== undefined"
-            class="toolbox-tab-count">{{ counts[item.key] }}</span>
-        </button>
+      <div class="toolbox-tabbar">
+        <div class="toolbox-tabs" role="tablist" :aria-label="t('toolbox.title')">
+          <button v-for="item in visibleItems" :key="item.key" type="button" role="tab" class="toolbox-tab"
+            :aria-selected="selectedItem?.key === item.key" @click="select(item.key)">
+            <BrowserIcon v-if="item.key === 'browserconnection'" width="16" height="16" />
+            <t-icon v-else :name="item.icon" size="16px" />
+            <span>{{ t(item.title) }}</span>
+            <span v-if="item.key === 'browserconnection' && browserStatus" class="toolbox-tab-status"
+              :class="`is-${browserStatus}`">
+              <i aria-hidden="true" />{{ t(`localBrowser.${browserStatus}`) }}
+            </span>
+            <span v-else-if="item.key !== 'browserconnection' && counts[item.key] !== undefined"
+              class="toolbox-tab-count">{{ counts[item.key] }}</span>
+          </button>
+        </div>
+        <!-- 面板通过 Teleport 把搜索框放到标签栏右侧 -->
+        <div id="toolbox-toolbar" class="toolbox-toolbar" />
       </div>
 
       <section v-if="selectedItem" class="toolbox-main" role="tabpanel">
@@ -123,15 +127,10 @@ watch(() => visibleItems.value.map((item) => item.key), (keys, previous = []) =>
 </script>
 
 <style scoped lang="less">
+@import (reference) '@/components/css/resource-card.less';
+
 .toolbox-page {
-  flex: 1;
-  min-width: 0;
-  height: 100%;
-  box-sizing: border-box;
-  display: flex;
-  flex-direction: column;
-  margin: 0 16px 0 0;
-  padding: 20px 28px 0;
+  .resource-list-content();
   color: var(--td-text-color-primary);
 }
 
@@ -170,6 +169,7 @@ watch(() => visibleItems.value.map((item) => item.key), (keys, previous = []) =>
   border-radius: var(--app-radius-sm);
   background: var(--td-bg-color-container);
   color: var(--td-text-color-primary);
+  font-size: var(--app-text-md);
   transition: background var(--app-motion-base);
 
   &:hover:not(:disabled) {
@@ -208,13 +208,35 @@ watch(() => visibleItems.value.map((item) => item.key), (keys, previous = []) =>
   }
 }
 
-.toolbox-tabs {
+.toolbox-tabbar {
   flex-shrink: 0;
   display: flex;
-  gap: 32px;
-  overflow-x: auto;
+  align-items: center;
+  gap: 16px;
   border-bottom: 1px solid var(--td-component-stroke);
+}
+
+.toolbox-tabs {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  gap: 24px;
+  overflow-x: auto;
   scrollbar-width: none;
+}
+
+.toolbox-toolbar {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+
+  :deep(.t-input__wrap) {
+    width: 240px;
+  }
+
+  :deep(.t-input) {
+    border-radius: var(--app-radius-sm);
+  }
 }
 
 .toolbox-tab {
@@ -222,14 +244,14 @@ watch(() => visibleItems.value.map((item) => item.key), (keys, previous = []) =>
   flex-shrink: 0;
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  height: 48px;
+  gap: 6px;
+  height: 44px;
   padding: 0 2px;
   border: 0;
   background: transparent;
   color: var(--td-text-color-secondary);
   font: inherit;
-  font-size: var(--app-text-lg);
+  font-size: var(--app-text-base);
   font-weight: 500;
   cursor: pointer;
   transition: color var(--app-motion-fast) ease;
@@ -318,7 +340,7 @@ watch(() => visibleItems.value.map((item) => item.key), (keys, previous = []) =>
   min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: var(--app-space-5) 0 var(--app-space-8);
+  padding: var(--app-space-4) 0 var(--app-space-8);
 }
 
 .toolbox-panel {
@@ -330,13 +352,26 @@ watch(() => visibleItems.value.map((item) => item.key), (keys, previous = []) =>
 }
 
 @media (max-width: 768px) {
-  .toolbox-page {
-    margin: 0;
-    padding: 16px 16px 0;
+  .toolbox-tabbar {
+    flex-wrap: wrap;
   }
 
   .toolbox-tabs {
+    flex-basis: 100%;
     gap: 20px;
+  }
+
+  .toolbox-toolbar {
+    width: 100%;
+    padding: 8px 0;
+
+    &:empty {
+      display: none;
+    }
+
+    :deep(.t-input__wrap) {
+      width: 100%;
+    }
   }
 }
 </style>

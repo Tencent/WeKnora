@@ -117,6 +117,19 @@ type SearchKnowledgeTool struct {
 	// It is not exposed to the model; the MCP grep_chunks endpoint uses it
 	// to keep grep semantics on top of index-backed retrieval.
 	patternFilter *regexp.Regexp
+	// contextImages attaches the images of results found by an image's own
+	// vector, for a model that can see them; see WithContextImages.
+	contextImages bool
+}
+
+// WithContextImages attaches to the result the images of the results that
+// rest on an image matched by its own vector, at most
+// searchutil.MaxContextImages. Enable it only for a vision model: the agent
+// describes tool images to a model that cannot see them, and these already
+// carry captions.
+func (t *SearchKnowledgeTool) WithContextImages(enabled bool) *SearchKnowledgeTool {
+	t.contextImages = enabled
+	return t
 }
 
 // WithPatternFilter restricts results to chunks whose text matches re. The
@@ -253,7 +266,7 @@ func (t *SearchKnowledgeTool) Execute(ctx context.Context, args json.RawMessage)
 		return &types.ToolResult{Success: false, Output: msg, Error: msg}, nil
 	}
 
-	deduplicated := t.deduplicateResults(allResults)
+	deduplicated := t.deduplicateResultsForRerank(allResults)
 
 	ranked := deduplicated
 	rerankRejected := 0
@@ -269,6 +282,10 @@ func (t *SearchKnowledgeTool) Execute(ctx context.Context, args json.RawMessage)
 		}
 	}
 
+	// Results the rerank stage kept outside its top-k (pictorial images a
+	// text reranker could not judge) skip MMR and the limit, and follow the
+	// ranked results.
+	ranked, keptOutside := splitKeptOutsideTopK(ranked)
 	if len(ranked) > 0 {
 		if selected := selectMMR(ctx, ranked, min(len(ranked), retrievalLimit)); len(selected) > 0 {
 			ranked = selected
@@ -283,16 +300,16 @@ func (t *SearchKnowledgeTool) Execute(ctx context.Context, args json.RawMessage)
 		return final[i].KnowledgeID < final[j].KnowledgeID
 	})
 	if t.patternFilter != nil {
-		matched := final[:0]
-		for _, r := range final {
-			if t.patternFilter.MatchString(t.getEnrichedPassage(ctx, r.SearchResult)) {
-				matched = append(matched, r)
-			}
-		}
-		final = matched
+		final = t.matchingPattern(ctx, final)
+		keptOutside = t.matchingPattern(ctx, keptOutside)
 	}
 	if len(final) > limit {
 		final = final[:limit]
+	}
+	if len(keptOutside) > 0 {
+		// A kept image whose caption hit made the list is a copy of it; the
+		// caption hit stays and takes the image along.
+		final = t.deduplicateResults(append(final, keptOutside...))
 	}
 
 	// Enrich image info for search results (lazy-loaded from child image chunks)
@@ -314,6 +331,7 @@ func (t *SearchKnowledgeTool) Execute(ctx context.Context, args json.RawMessage)
 	if omitted > 0 {
 		result.Data["omitted_for_budget"] = omitted
 	}
+	t.attachContextImages(ctx, result, final[:len(final)-omitted])
 	if len(searchFailures) > 0 {
 		result.Data["partial_failures"] = searchFailures
 	}
@@ -325,6 +343,61 @@ func (t *SearchKnowledgeTool) Execute(ctx context.Context, args json.RawMessage)
 		result.Output = emptySearchStatement(query, result.Data, len(kbIDs))
 	}
 	return result, nil
+}
+
+// splitKeptOutsideTopK separates the results kept outside the rerank top-k
+// from the ranked ones, each in input order.
+func splitKeptOutsideTopK(results []*searchResultWithMeta) (ranked, kept []*searchResultWithMeta) {
+	for _, r := range results {
+		if r != nil && searchutil.IsKeptOutsideTopK(r.SearchResult) {
+			kept = append(kept, r)
+		} else {
+			ranked = append(ranked, r)
+		}
+	}
+	return ranked, kept
+}
+
+// matchingPattern keeps the results whose text matches patternFilter.
+func (t *SearchKnowledgeTool) matchingPattern(
+	ctx context.Context, results []*searchResultWithMeta,
+) []*searchResultWithMeta {
+	matched := results[:0]
+	for _, r := range results {
+		if t.patternFilter.MatchString(t.getEnrichedPassage(ctx, r.SearchResult)) {
+			matched = append(matched, r)
+		}
+	}
+	return matched
+}
+
+// attachContextImages adds to result the images of the shown results that
+// rest on an image matched by its own vector, and names the chunks they
+// belong to.
+func (t *SearchKnowledgeTool) attachContextImages(
+	ctx context.Context, result *types.ToolResult, shown []*searchResultWithMeta,
+) {
+	if !t.contextImages || t.knowledgeBaseService == nil || len(shown) == 0 {
+		return
+	}
+	rows := make([]*types.SearchResult, len(shown))
+	for i, r := range shown {
+		rows[i] = r.SearchResult
+	}
+	images, positions := searchutil.ContextImages(ctx, rows, t.knowledgeBaseService.ReadChunkImage,
+		searchutil.MaxContextImages)
+	if len(images) == 0 {
+		return
+	}
+	ids := make([]string, len(positions))
+	for i, pos := range positions {
+		ids[i] = rows[pos].ID
+	}
+	result.Images = images
+	result.Data["context_images"] = ids
+	result.Output += fmt.Sprintf("\n\nAttached %d retrieved image(s), in order, for chunk_id %s. "+
+		"They were matched by what they show, which their captions may not describe.",
+		len(images), strings.Join(ids, ", "))
 }
 
 // formatWithinBudget renders results, dropping the lowest-ranked ones until
@@ -773,11 +846,17 @@ func (t *SearchKnowledgeTool) rerankResults(
 	if orderOnly {
 		threshold = math.Inf(-1)
 	}
-	res := reranking.Rerank(ctx, t.rerankModel, query, rows, reranking.Options{
+	_, vectorThreshold, _ := t.retrievalParams(0)
+	opts := reranking.Options{
 		Threshold:        threshold,
 		FallbackMinScore: reranking.FallbackMinScore(t.searchTargets.HasRecallThresholdOverride()),
 		MaxCandidates:    reranking.DefaultMaxCandidates,
-	})
+		ImageKeepScore:   reranking.ImageKeepScoreFor(vectorThreshold),
+	}
+	if t.knowledgeBaseService != nil {
+		opts.LoadImage = t.knowledgeBaseService.ReadChunkImage
+	}
+	res := reranking.Rerank(ctx, t.rerankModel, query, rows, opts)
 	if res.Diagnostics.Outcome == types.RerankOutcomeModelError {
 		logger.Warnf(ctx, "[Tool][SearchKnowledge] Rerank model failed, using raw retrieval results: %s",
 			res.Diagnostics.Error)
@@ -826,8 +905,20 @@ func (t *SearchKnowledgeTool) rerankThreshold() float64 {
 // image and FAQ chunks all carry chunk_index 0, so it collapsed every image
 // chunk of a document, and the document's first text chunk, into one row.
 func (t *SearchKnowledgeTool) deduplicateResults(results []*searchResultWithMeta) []*searchResultWithMeta {
+	return t.deduplicateResultsWithImageCandidates(results, false)
+}
+
+// Image vectors and captions can have identical text but must be judged
+// independently. Only collapse their text copies after reranking.
+func (t *SearchKnowledgeTool) deduplicateResultsForRerank(results []*searchResultWithMeta) []*searchResultWithMeta {
+	return t.deduplicateResultsWithImageCandidates(results, true)
+}
+
+func (t *SearchKnowledgeTool) deduplicateResultsWithImageCandidates(
+	results []*searchResultWithMeta, beforeRerank bool,
+) []*searchResultWithMeta {
 	seen := make(map[string]bool)
-	contentSig := make(map[string]bool)
+	contentSig := make(map[string]*searchResultWithMeta)
 	uniqueResults := make([]*searchResultWithMeta, 0, len(results))
 
 	ordered := make([]*searchResultWithMeta, 0, len(results))
@@ -855,11 +946,19 @@ func (t *SearchKnowledgeTool) deduplicateResults(results []*searchResultWithMeta
 			continue
 		}
 		sig := searchutil.BuildContentSignature(r.Content)
+		if beforeRerank && searchutil.IsImageEvidence(r.SearchResult) {
+			// Exact chunk-ID dedup above still applies. Distinct image hits
+			// must not collapse even when their captions are identical.
+			sig = ""
+		}
 		if sig != "" {
-			if contentSig[sig] {
+			if kept, ok := contentSig[sig]; ok {
+				// An image hit and its caption hit read the same once merged;
+				// the image goes with whichever copy stays.
+				searchutil.InheritImageEvidence(kept.SearchResult, r.SearchResult)
 				continue
 			}
-			contentSig[sig] = true
+			contentSig[sig] = r
 		}
 		for _, k := range keys {
 			seen[k] = true

@@ -2,6 +2,7 @@ package vlm
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -11,6 +12,9 @@ import (
 	"github.com/Tencent/WeKnora/internal/models/utils/ollama"
 	"github.com/Tencent/WeKnora/internal/types"
 )
+
+// ErrTruncatedCompletion means the model exhausted its output budget.
+var ErrTruncatedCompletion = errors.New("VLM completion truncated")
 
 // VLM defines the interface for Vision Language Model operations.
 type VLM interface {

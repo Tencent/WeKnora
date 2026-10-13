@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/searchutil"
@@ -114,5 +116,96 @@ func BenchmarkSelectMMR(b *testing.B) {
 	results := mmrTestCorpus(250)
 	for i := 0; i < b.N; i++ {
 		SelectMMR(ctx, results, 250, DefaultMMRLambda)
+	}
+}
+
+func TestSelectMMR_preservesDiversityAndTies(t *testing.T) {
+	results := []*types.SearchResult{
+		{Content: "hybrid retrieval combines semantic vectors and keyword search", Score: 0.9},
+		{Content: "**hybrid retrieval** combines semantic vectors and keyword search", Score: 0.88},
+		{Content: "wiki construction extracts entities concepts and source citations", Score: 0.83},
+	}
+	if got := SelectMMR(context.Background(), results, 3, DefaultMMRLambda); !slices.Equal(got, []int{0, 2, 1}) {
+		t.Fatalf("selection = %v, want relevant, diverse, then redundant", got)
+	}
+	for _, r := range results {
+		r.Content, r.Score = "", 0.5
+	}
+	if got := SelectMMR(context.Background(), results, 10, DefaultMMRLambda); !slices.Equal(got, []int{0, 1, 2}) {
+		t.Fatalf("empty tied passages = %v, want original order", got)
+	}
+}
+
+func TestSelectMMR_multilingualEnrichedPassages(t *testing.T) {
+	results := []*types.SearchResult{
+		{Content: "混合检索结合语义向量和关键词索引，提高知识库检索覆盖率。", Score: 0.9},
+		{Content: "混合检索结合语义向量和关键词索引，提高知识库检索覆盖率。", Score: 0.85},
+		{Content: "Wiki 构建从文档抽取实体和概念，保留事实引用与来源分块。", Score: 0.8},
+		{Content: "retrieval", ImageInfo: `[{"caption":"semantic vectors and keyword search"}]`, Score: 0.75},
+		{
+			Content: "sources", Score: 0.7,
+			ChunkMetadata: types.JSON(`{"generated_questions":[
+				{"id":"q1","question":"How does wiki construction preserve source citations?"}
+			]}`),
+		},
+		{Content: "", Score: 0.7},
+	}
+	for _, lambda := range []float64{0, 0.3, DefaultMMRLambda, 1} {
+		for _, k := range []int{1, 3, len(results), len(results) + 1} {
+			got := SelectMMR(context.Background(), results, k, lambda)
+			want := selectMMRNaive(context.Background(), results, k, lambda)
+			if !slices.Equal(got, want) {
+				t.Fatalf("k=%d lambda=%v: selection = %v, naive = %v", k, lambda, got, want)
+			}
+		}
+	}
+}
+
+// mmrPassageCorpus models a rerank pool with overlapping vocabulary across
+// documents and less overlap across topics. It is synthetic and deterministic;
+// the benchmarks measure MMR computation, not end-to-end retrieval quality.
+func mmrPassageCorpus(n, words int, chinese bool) []*types.SearchResult {
+	results := make([]*types.SearchResult, n)
+	terms := []string{"检索", "知识库", "向量", "索引", "语义", "文档", "引用", "实体", "概念", "构建", "答案", "模型"}
+	for i := range results {
+		var content strings.Builder
+		for j := 0; j < words; j++ {
+			if chinese {
+				fmt.Fprintf(&content, "%s ", terms[(i+j)%len(terms)])
+			}
+			// Different topics have disjoint bands; nearby documents within
+			// a topic share most of their vocabulary.
+			fmt.Fprintf(&content, "term%d ", (i%8)*1000+(j+i/8*7)%500)
+		}
+		results[i] = &types.SearchResult{
+			ID: fmt.Sprintf("chunk-%03d", i), Content: content.String(),
+			Score: 1 - float64(i%100)/200,
+		}
+	}
+	return results
+}
+
+func BenchmarkSelectMMRPassages(b *testing.B) {
+	ctx := context.Background()
+	for _, tc := range []struct {
+		name        string
+		n, words, k int
+		chinese     bool
+	}{
+		{name: "short", n: 50, words: 12, k: 10},
+		{name: "english_top10", n: 200, words: 200, k: 10},
+		{name: "english_top30", n: 200, words: 200, k: 30},
+		{name: "mixed_top10", n: 200, words: 200, k: 10, chinese: true},
+		{name: "mixed_top30", n: 200, words: 200, k: 30, chinese: true},
+		{name: "top1", n: 200, words: 200, k: 1},
+	} {
+		b.Run(tc.name, func(b *testing.B) {
+			results := mmrPassageCorpus(tc.n, tc.words, tc.chinese)
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				SelectMMR(ctx, results, tc.k, DefaultMMRLambda)
+			}
+		})
 	}
 }

@@ -367,6 +367,38 @@ const docTemplate = `{
                 }
             }
         },
+        "/agents/tools": {
+            "get": {
+                "security": [
+                    {
+                        "Bearer": []
+                    },
+                    {
+                        "ApiKeyAuth": []
+                    }
+                ],
+                "description": "返回编辑器可勾选的内置工具（含分组和知识库能力要求）、工具列表未设置时生效的默认工具，以及由开关控制、写入工具列表也不生效的工具",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "智能体"
+                ],
+                "summary": "获取智能体可选工具",
+                "responses": {
+                    "200": {
+                        "description": "工具目录",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                }
+            }
+        },
         "/agents/type-presets": {
             "get": {
                 "security": [
@@ -7938,7 +7970,7 @@ const docTemplate = `{
                         "Bearer": []
                     }
                 ],
-                "description": "Retrieve a wiki page by its slug",
+                "description": "Retrieve a wiki page by its slug, including titles of existing backlinks",
                 "produces": [
                     "application/json"
                 ],
@@ -7966,7 +7998,7 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WikiPage"
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WikiPageDetail"
                         }
                     },
                     "404": {
@@ -8925,7 +8957,7 @@ const docTemplate = `{
                         "required": true
                     },
                     {
-                        "description": "{api_key?: string, token?: string}",
+                        "description": "{api_key?, token?, client_secret?: string}",
                         "name": "request",
                         "in": "body",
                         "required": true,
@@ -8986,7 +9018,7 @@ const docTemplate = `{
                     },
                     {
                         "type": "string",
-                        "description": "字段名（api_key | token）",
+                        "description": "字段名（api_key | token | client_secret）",
                         "name": "field",
                         "in": "path",
                         "required": true
@@ -9140,6 +9172,66 @@ const docTemplate = `{
                     },
                     "503": {
                         "description": "元数据存储不可用",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    }
+                }
+            }
+        },
+        "/mcp-services/{id}/oauth/assertion": {
+            "post": {
+                "security": [
+                    {
+                        "Bearer": []
+                    }
+                ],
+                "description": "以 JWT Bearer 授权（RFC 7523）提交调用方签发的断言（如 ID-JAG），为当前用户获取并保存令牌，\n无需浏览器跳转。使用该服务已注册的 OAuth 客户端",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "MCP服务"
+                ],
+                "summary": "使用断言获取 MCP OAuth 令牌",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "MCP 服务 ID",
+                        "name": "id",
+                        "in": "path",
+                        "required": true
+                    },
+                    {
+                        "description": "{assertion: string}",
+                        "name": "request",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "与 oauth/status 相同",
+                        "schema": {
+                            "type": "object",
+                            "additionalProperties": true
+                        }
+                    },
+                    "400": {
+                        "description": "断言无效或被授权服务器拒绝",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "404": {
+                        "description": "Not Found",
                         "schema": {
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
@@ -20422,6 +20514,14 @@ const docTemplate = `{
                         }
                     ]
                 },
+                "client_id": {
+                    "description": "ClientID optionally names an OAuth client registered with the\nauthorization server in advance. When set it is used instead of dynamic\nclient registration, for servers that offer no registration endpoint or\nallow grants only to clients an administrator registered. Non-secret.",
+                    "type": "string"
+                },
+                "client_secret": {
+                    "description": "ClientSecret is the secret of ClientID for a confidential client.\nSecret: encrypted at rest like APIKey and Token, never returned, and\nchanged only through the credentials subresource after creation.",
+                    "type": "string"
+                },
                 "custom_headers": {
                     "type": "object",
                     "additionalProperties": {
@@ -23955,6 +24055,150 @@ const docTemplate = `{
                 "id": {
                     "description": "Unique identifier (UUID)",
                     "type": "string"
+                },
+                "in_links": {
+                    "description": "Slugs of pages that link TO this page (backlinks)",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "knowledge_base_id": {
+                    "description": "Knowledge base this page belongs to",
+                    "type": "string"
+                },
+                "last_edit_source": {
+                    "description": "LastEditSource records who authored the CURRENT version: pipeline |\nagent | user | revert. Empty for legacy rows (treated as pipeline).\nWhen the version is superseded this value travels into the revision\nsnapshot, so each historical version keeps its own author kind.",
+                    "type": "string"
+                },
+                "last_editor_id": {
+                    "description": "LastEditorID is the user id of the caller that produced the current\nversion (empty for background pipeline writes).",
+                    "type": "string"
+                },
+                "out_links": {
+                    "description": "Slugs of pages this page links to (outbound links)",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "page_metadata": {
+                    "description": "Arbitrary metadata (tags, categories, dates, etc.)",
+                    "type": "array",
+                    "items": {
+                        "type": "integer"
+                    }
+                },
+                "page_type": {
+                    "description": "Page type: summary, entity, concept, index, synthesis, comparison",
+                    "type": "string"
+                },
+                "parent_slug": {
+                    "description": "ParentSlug optionally points at the wiki page that should act as this\npage's semantic parent in the directory tree. The parent may be empty\nwhen the page is grouped only by FolderID.",
+                    "type": "string"
+                },
+                "slug": {
+                    "description": "URL-friendly slug for addressing, e.g. \"entity/acme-corp\", \"concept/rag\"\nUnique within a knowledge base",
+                    "type": "string"
+                },
+                "sort_order": {
+                    "description": "SortOrder allows generated or manually edited pages to control sibling\nordering before falling back to title.",
+                    "type": "integer"
+                },
+                "source_refs": {
+                    "description": "References to source knowledge IDs that contributed to this page.\nFormat matches the legacy \"\u003cknowledge_id\u003e|\u003cdoc_title\u003e\" convention used\nacross the ingest pipeline, so retract / display code can split on ` + "`" + `|` + "`" + `\nto recover the title. Document-level granularity.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "status": {
+                    "description": "Page status: draft, published, archived",
+                    "type": "string"
+                },
+                "summary": {
+                    "description": "One-line summary for index listing",
+                    "type": "string"
+                },
+                "tenant_id": {
+                    "description": "Workspace ID for multi-workspace isolation",
+                    "type": "integer"
+                },
+                "title": {
+                    "description": "Human-readable title",
+                    "type": "string"
+                },
+                "updated_at": {
+                    "description": "Last update time",
+                    "type": "string"
+                },
+                "version": {
+                    "description": "Version number. Incremented only when a user-visible content field\n(title, content, summary, page_type, status) actually changes; pure\nbookkeeping writes (link maintenance, same-content re-ingest, status\nsync from background jobs) leave it untouched so it can be used as a\nreal \"the page was edited\" signal.",
+                    "type": "integer"
+                },
+                "wiki_path": {
+                    "description": "WikiPath is a normalized, sortable path derived from page_type,\ncategory_path, and title. It keeps large directory listings cheap to sort.",
+                    "type": "string"
+                }
+            }
+        },
+        "github_com_Tencent_WeKnora_internal_types.WikiPageDetail": {
+            "type": "object",
+            "properties": {
+                "aliases": {
+                    "description": "Alternate names, abbreviations, acronyms or translated names",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "category_path": {
+                    "description": "CategoryPath is the directory breadcrumb that groups this page in the\nwiki browser, e.g. [\"AI\", \"LLM 应用\", \"RAG\"]. Derived cache of the\nfolder chain identified by FolderID.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "chunk_refs": {
+                    "description": "ChunkRefs records the specific source-document chunks this page was\nbuilt from — one UUID per cited chunk. Populated during ingest from\nthe chunk-citation pass; refreshed wholesale whenever the page is\nre-materialized. Empty for summary pages (they are document-level\nsynopses and don't carry chunk-level citations). Use this when you\nneed to surface the underlying evidence for a wiki page, or to\nretract citations when a source document is deleted.",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "content": {
+                    "description": "Full markdown content",
+                    "type": "string"
+                },
+                "created_at": {
+                    "description": "Creation time",
+                    "type": "string"
+                },
+                "deleted_at": {
+                    "description": "Soft delete",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/gorm.DeletedAt"
+                        }
+                    ]
+                },
+                "depth": {
+                    "description": "Depth is len(CategoryPath), cached for filtering / display.",
+                    "type": "integer"
+                },
+                "folder_id": {
+                    "description": "FolderID is the single source of truth for where this page sits in the\ndirectory tree — a reference to wiki_folders.id (\"\" = wiki root). The\nCategoryPath / WikiPath / Depth fields below are denormalized caches\nrecomputed from this folder's chain on every write so list/index/search\nqueries don't have to join wiki_folders.",
+                    "type": "string"
+                },
+                "id": {
+                    "description": "Unique identifier (UUID)",
+                    "type": "string"
+                },
+                "in_link_titles": {
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
                 },
                 "in_links": {
                     "description": "Slugs of pages that link TO this page (backlinks)",

@@ -1047,6 +1047,9 @@ export default {
     yuqueFolderModeHint: '按语雀的目录层级放置文档。注意：之后在知识库里手动调整的目录，会在该文档下次同步时被覆盖回语雀的结构。',
     yuqueTOCOnly: '只同步语雀目录中可见的文档',
     yuqueTOCOnlyHint: '需要先选择「按语雀目录分层」。已经同步进知识库的文档不受影响——语雀中不在目录里的文档只是不再新增，不会被删除。',
+    dingtalkIngestLabel: '钉钉摄取范围',
+    dingtalkIncludeUploadedFiles: '摄取知识库中的上传文件（docx / pptx / xlsx / pdf）',
+    dingtalkIncludeUploadedFilesHint: '默认关闭。开启后，所选范围内的 Word / PowerPoint / Excel / PDF 上传文件会被下载并解析入库，单个文件上限 64 MiB；这些文件的正文会计入存储与向量化成本。关闭时它们只是被跳过，同步日志会说明开关未开启，不会删除知识库中已有的副本。',
     prereqBarText_dingtalk: '首次使用？点击查看钉钉应用配置指引',
     prereqStep1Brief_dingtalk: '创建企业内部应用',
     prereqStep1Desc_dingtalk: '在钉钉开放平台创建企业内部应用，并获取 Client ID 和 Client Secret',
@@ -1555,6 +1558,13 @@ export default {
       kbMetricRag: 'RAG 知识库',
       kbMetricWiki: 'Wiki 知识库',
       statusInactive: '有 {count} 个已勾选工具在当前配置下无法生效',
+      searchConversations: '回顾历史对话',
+      searchConversationsDesc: '在用户自己的历史会话中查找之前聊过的内容',
+      groupStored: '已保存但未提供的工具',
+      switchManagedDesc: '由智能体的其他设置控制，而不是由此列表决定，在此勾选不会启用它。取消勾选即可移除。',
+      unrecognizedDesc: '当前版本不提供该工具，智能体无法调用它。取消勾选即可移除。',
+      keptUnknownWarning: '已保存。以下已保存的工具在当前版本中不提供，已保留，但智能体无法调用：{names}',
+      droppedWarning: '已保存。以下工具由智能体的其他设置控制，已从工具列表中移除：{names}',
       effectiveLabel: '最终启用的工具',
       effectiveDesc: '根据当前配置计算，这是智能体保存后实际能调用的工具集合',
       effectiveEmpty: '当前没有可用工具，智能体将退化为纯模型问答'
@@ -1823,6 +1833,22 @@ export default {
       heading: '技能文件',
       script: '脚本',
       instructions: '技能说明'
+    },
+    attachmentTarget: {
+      list: '全部附件',
+      file: '附件',
+      images: '{name} 中的图片',
+      imagesUnnamed: '附件中的图片',
+      image: '{name} 第 {n} 张图片',
+      imageUnnamed: '附件第 {n} 张图片'
+    },
+    imageView: {
+      summary: '已查看「{file}」第 {numbers} 张图片，共 {total} 张',
+      single: '已查看图片「{file}」',
+      descriptionsHeading: '视觉模型的图片描述',
+      imageLabel: '图片 #{n}',
+      noDescription: '未能生成描述',
+      remaining: '还有 {count} 张未查看'
     },
     sandboxFiles: {
       found: '找到 {count} 个文件',
@@ -2440,6 +2466,9 @@ export default {
     authTypeApiKey: 'API Key / Token',
     authTypeOAuth: 'OAuth 2.0（首次连接授权）',
     oauthScopes: 'Scopes（可选，空格分隔）',
+    oauthClientId: 'Client ID（可选）',
+    oauthClientIdDesc: '填写在授权服务器预先注册的客户端；留空则自动进行动态客户端注册。更换 Client ID 时请同时更新 Client Secret。',
+    oauthClientSecret: 'Client Secret（可选）',
     oauthAuthorization: '授权状态',
     oauthAuthorized: '已授权',
     oauthRefreshable: 'Token 已过期，将在下次使用时自动刷新',
@@ -2591,6 +2620,14 @@ export default {
       documentsPlaceholder: '每行输入一个候选文档',
       documentsHint: '每个非空行会作为一个独立文档发送给 ReRank 模型',
       imageFile: '图片文件',
+      similarityMode: '相似度',
+      similarityQuery: '查询文本',
+      similarityQueryPlaceholder: '输入一条查询，例如：草地上奔跑的狗',
+      similarityCandidates: '候选文本',
+      similarityCandidatesPlaceholder: '每行输入一个候选文本',
+      similarityHint: '查询按检索查询方式向量化，候选按文档方式向量化，与线上检索一致；结果按余弦相似度从高到低排列',
+      similarityImage: '候选图片（可选）',
+      similarityImageCandidate: '图片',
       audioFile: '音频文件',
       chooseFile: '选择文件',
       parameters: '请求参数',
@@ -3068,6 +3105,8 @@ export default {
       dimensionOverrideDesc: '仅在确认该模型支持 dimensions 参数时开启；默认只使用检测到的实际维度。',
       supportsVisionLabel: '支持视觉/多模态',
       supportsVisionDesc: '模型是否支持图片等多模态输入',
+      embeddingImageInputLabel: '图片输入',
+      embeddingImageInputDesc: '模型能把图片编码到与文本相同的向量空间。目录内的模型自动识别，自定义模型需手动声明',
       contextWindowLabel: '上下文窗口',
       contextWindowPlaceholder: '默认 {value}',
       contextWindowDesc: '该模型一次请求能容纳的 token 数。智能体压缩对话历史会按此上限工作。留空则使用默认 200000（200K）。请按厂商文档填写真实值，填大会导致压缩不触发、上游直接拒绝请求。',
@@ -3310,14 +3349,45 @@ export default {
         success: '已将 {count} 个空间的存储配额更新为 {gb} GB',
         failed: '应用到所有空间失败'
       },
+      userList: {
+        title: '平台用户列表',
+        rowLabel: '用户管理',
+        rowDesc: '查看平台上的全部注册用户（跨空间），支持分页与按用户名/邮箱筛选。',
+        searchPlaceholder: '按用户名或邮箱筛选（当前页）',
+        refresh: '刷新',
+        active: '正常',
+        inactive: '已停用',
+        colUsername: '用户名',
+        colStatus: '状态',
+        colRole: '角色',
+        colCreated: '创建日期',
+        colAction: '操作',
+        prev: '上一页',
+        next: '下一页',
+        pageCount: '{shown} 条 / 本页 {total}',
+        enable: '启用',
+        disable: '停用',
+        resetPassword: '重置密码',
+        confirmDisable: '确定停用账号 {name} 吗？将立即吊销其登录状态。',
+        confirmEnable: '确定启用账号 {name} 吗？',
+        enabledMsg: '已启用 {name}',
+        disabledMsg: '已停用 {name}',
+        actionFailed: '操作失败',
+        loadFailed: '加载用户列表失败',
+        roleAdmin: '系统管理员',
+        roleUser: '普通用户',
+        confirmRevoke: '确定撤销 {name} 的系统管理员权限吗？',
+        confirmPromote: '确定将 {name} 提升为系统管理员吗？',
+        revokeBtn: '撤销',
+        promoteBtn: '提升',
+        revokedMsg: '已撤销 {name} 的管理员权限',
+        promotedMsg: '已将 {name} 提升为系统管理员',
+        roleFailed: '修改角色失败',
+      },
       passwordReset: {
-        label: '重置用户密码',
-        description: '为忘记密码的其他用户设置新密码。重置成功后，该用户当前所有登录会话都会失效，需要使用新密码重新登录。',
-        action: '重置密码',
         dialogTitle: '重置其他用户的密码',
         warning: '这是高风险操作。请核对用户邮箱；出于安全考虑，不能在这里重置自己的密码。',
         emailLabel: '用户邮箱',
-        emailPlaceholder: '输入需要重置密码的用户邮箱',
         newPasswordLabel: '新密码',
         newPasswordPlaceholder: '请输入新密码',
         confirmPasswordLabel: '确认新密码',
@@ -3327,8 +3397,6 @@ export default {
         failed: '重置密码失败',
       },
       createUser: {
-        label: '创建用户',
-        description: '开通一个新的本地用户账号。如果平台的默认空间模式设置为「自动创建个人空间」，该用户会像自助注册的用户一样，同时获得一个个人空间。',
         action: '创建用户',
         dialogTitle: '创建新用户',
         warning: '这是高风险操作。请仔细核对用户名和邮箱——它们将作为该用户登录的唯一凭据。',
@@ -3351,10 +3419,6 @@ export default {
           usernameLength: '用户名长度必须为 2-50 个字符',
           emailRequired: '请输入邮箱',
           emailInvalid: '请输入有效的邮箱地址',
-          passwordRequired: '请输入新密码',
-          passwordLength: '密码长度必须为 8-32 个字符',
-          passwordLetter: '密码必须包含字母',
-          passwordNumber: '密码必须包含数字',
           confirmRequired: '请再次输入新密码',
           passwordMismatch: '两次输入的密码不一致'
         },
@@ -3367,26 +3431,6 @@ export default {
           copyBtn: '复制账号信息',
           copySuccess: '账号信息已复制到剪贴板',
           acknowledgeBtn: '我已保存密码'
-        }
-      },
-      admins: {
-        label: '系统管理员',
-        description: '拥有平台级权限的用户。在右侧输入邮箱并回车即可提升用户为管理员；点击 × 即为撤销其权限。当前你（自己）已是管理员，不在列表中显示，也无法被自己撤销。',
-        placeholder: '输入用户邮箱并回车',
-        loadFailed: '加载系统管理员失败',
-        saveSuccess: '已更新系统管理员',
-        saveFailed: '更新系统管理员失败',
-        confirm: {
-          revoke: {
-            header: '撤销系统管理员',
-            body: '确认撤销 {email} 的系统管理员权限？撤销后该用户将无法再访问任何系统级功能。',
-            confirmBtn: '撤销'
-          },
-          promote: {
-            header: '提升为系统管理员',
-            body: '确认将 {email} 提升为系统管理员？该用户将获得平台级权限，可访问所有空间、修改系统设置、管理其他管理员。',
-            confirmBtn: '提升'
-          }
         }
       },
       reset: {
@@ -3707,36 +3751,27 @@ export default {
           generic: '获取队列状态失败'
         }
       },
-      runtimeTable: {
-        setting: '配置项与用途',
-        value: '当前值'
-      },
       sections: {
         other: {
-          tab: '其他 {count}',
           title: '其他配置',
           description: '当前部署中未归入标准分组的配置项。'
         },
         security: {
-          tab: '网络安全 {count}',
           title: '网络安全',
           description: '管理 SSRF 白名单，以及是否允许 Docker 沙箱（本机 docker.sock 等同宿主机 root）。'
         },
         runtime: {
-          tab: '运行与并发 {count}',
           title: '运行与并发',
           description: '配置后台任务池与模型服务的并发容量。',
           restartHint: 'Worker 配置需重启生效'
         },
         tenant: {
-          tab: '空间默认值 {count}',
           title: '空间默认值',
           description: '设置新空间的初始配额与兼容性行为，不会自动改写已有空间。'
         },
         access: {
-          tab: '账户与访问 {count}',
-          title: '账户与访问',
-          description: '管理系统管理员、公开注册与用户创建空间的规则。'
+          title: '注册与访问',
+          description: '管理注册方式、密码要求和用户创建空间的规则。'
         }
       },
       priorityHint: {
@@ -3938,6 +3973,7 @@ export default {
         desktopRetry: '重新连接',
         notStarted: '终端尚未启动。启动后会连接本会话的沙箱环境；若沙箱不存在或已暂停，将为你创建或唤醒它。',
         paused: '本会话的沙箱已暂停。启动终端会唤醒它。',
+        stopped: '本会话的沙箱未在运行：可能已停止，或因长时间空闲已被回收。启动终端会重新启动它；若已被回收，则会新建一个沙箱，之前的文件和安装的软件不会保留。',
         start: '启动终端',
         connecting: '正在连接沙箱…',
         needsProvision: '本会话当前没有运行中的沙箱环境。创建并启动会新建一个沙箱，并按工作区配置计费。',
@@ -3948,6 +3984,8 @@ export default {
         retry: '重新连接',
         sessionEnded: '终端会话已结束',
         idleDisconnected: '终端空闲已断开，沙箱将按工作区 TTL 自行暂停。可重新连接。',
+        idleDisconnectedNewShell: '终端空闲已断开，其中的 shell 已结束（nohup 启动的后台任务不受影响）。重新连接会打开一个新的 shell。',
+        disconnectedNewShell: '连接已断开，终端中的 shell 已结束（nohup 启动的后台任务不受影响）。重新连接会打开一个新的 shell。',
         authRevoked: '登录状态已失效，终端已断开。请重新登录后再连接。',
     },
     questionMinimapTitle: '问答',
@@ -4120,6 +4158,9 @@ export default {
         customInstructionsPlaceholder: '例如：重点识别设备铭牌、型号、告警代码和表格中的单位…',
         imageAttrsLabel: '图片属性观察',
         imageAttrsDescription: '开启后，解析时对每张图片先「观察属性＋描述」，再按属性决定是否对图内文字再跑一轮 OCR；关闭则沿用基础模式：所有图片逐张描述并全部 OCR',
+        imageVectorLabel: '图片向量检索',
+        imageVectorDescription: '开启后，生成图片描述之后再用向量模型直接对图片编码，检索时按图片内容召回描述没写到的信息。需要向量模型支持图片输入；每张图片多一次向量调用，向量检索的候选范围也会放大。只对此后入库或重新解析的文档生效，扫描件 PDF 页不生成',
+        imageVectorModelUnsupported: '当前向量模型未声明图片输入，开启后不会生成或召回图片向量',
         imageAttrsSchemaLabel: '可观察的图片属性',
         imageAttrsSchemaDescription: '模型会观察以下属性（由后端注册表定义）以驱动 OCR 策略',
         imageAttrsOcrConditions: '根据观察到的属性条件触发 OCR',
@@ -4525,11 +4566,11 @@ export default {
         imageLoadError: '图片加载失败',
         noCaption: '暂无描述',
         noOcr: '未识别到文字',
-        caption: '描述',
-        ocr: '图中文字（OCR）',
-        attributes: '属性',
+        caption: '图片描述',
+        ocr: '图中文字',
+        attributes: '图片属性',
         source: '来源文档',
-        details: '详细信息',
+        details: '基本信息',
         dimensions: '尺寸',
         status: '状态',
         openSource: '打开来源文档',
@@ -4545,6 +4586,17 @@ export default {
         viewerClose: '关闭 (Esc)',
         prev: '上一张 (←)',
         next: '下一张 (→)',
+        sourceFilter: '按文档',
+        sourceFilterTitle: '按来源文档筛选',
+        sourceFilterSearch: '搜索文档名称',
+        sourceFilterEmpty: '没有匹配的文档',
+        sourceFilterSubtitle: '画廊仅展示所选文档中的图片，便于逐个核对摘要与 OCR 结果',
+        sourceFilterSelected: '已选 {count} 个文档',
+        sourceFilterClear: '清空已选',
+        sourceFilterTooMany: '最多只能选择 1000 个文档',
+        sourceFilterSelectAll: '全选 / 全不选（含全部命中结果）',
+        sourceFilterOverflowRecent: '文档较多，仅显示最近 {cap} 条，请输入关键字精确定位',
+        sourceFilterOverflowHits: '命中 {total} 个文档，仅显示前 {cap} 条，请细化关键字后再全选',
         // Display names for the builtin attributes the gallery itself
         // declares. Attributes contributed by other sources fall back to the
         // pipeline's own wording (see the imageAttr namespace).
@@ -4644,6 +4696,16 @@ export default {
       helpZoomDesc: '缩放画布',
       neighborsProgress: '已显示邻居 {visible}/{total}（还有 {hidden} 个未加载）',
       neighborsAllShown: '全部 {total} 个邻居已在图中（可点"展开邻居"聚焦到该节点子图）',
+      graphNavigationHint: '拖拽空白处移动 · 滚轮缩放',
+      focusGroup: '聚焦这组页面',
+      focusGroupViewing: '正在查看：{name}',
+      focusGroupBack: '返回全图',
+      focusGroupSwitch: '切换到其他分组',
+      unlinkedHidden: '已隐藏 {count} 个无关联页面',
+      unlinkedSection: '无关联页面 · {count}',
+      offscreenSection: '当前视图无连线（存在链接）· {count}',
+      hideUnlinked: '隐藏无关联页面（{count}）',
+      showUnlinked: '显示无关联页面（{count}）',
       neighborsNone: '该节点没有链接邻居',
       neighborsCenterUnreachable: '已显示邻居 {visible}/{total}（还有 {hidden} 个无法连通：可能是死链、被过滤或已删除）',
       neighborsOverviewHidden: '已显示邻居 {visible}/{total}（{hidden} 个不在概览范围，点"展开邻居"以此为中心查看）',
@@ -7003,6 +7065,11 @@ export default {
     }
   },
   uploadConfirm: {
+    imageEmbeddingModel: "图像索引 Embedding 模型",
+    imageIndexInherited: "图像索引使用知识库绑定的 Embedding 模型；如需更换，请前往知识库设置。",
+    imageVectorIndex: "本次图片向量索引",
+    imageVectorIndexHint: "为本次上传或重新解析的图片生成向量，不改变知识库默认配置。是否参与检索仍由知识库的“图片向量检索”开关决定。",
+    imageVectorRequiresIndex: "请先在知识库设置中开启向量索引。",
     documentSummary: "文档摘要",
     documentSummaryDescription: "为本次导入的文档选择是否自动生成摘要。",
     generateSummary: "生成文档摘要",
@@ -7349,10 +7416,10 @@ export default {
     statusFailed: '失败',
     statusCancelled: '已取消',
     statusDraft: '草稿',
-    noDescription: '无描述',
+    noDescription: '暂无描述',
     emptyKnowledgeDragDrop: '知识为空，拖放上传',
-    pdfDocFormat: 'pdf、doc 格式文件，不超过10M',
-    textMarkdownFormat: 'text、markdown格式文件，不超过200K',
+    pdfDocFormat: 'pdf、doc 格式文件，不超过{size}M',
+    textMarkdownFormat: 'text、markdown格式文件，不超过{size}M',
     dragFileNotText: '请拖拽文件而不是文本或链接',
     searchPlaceholder: '搜索知识库...',
     docSearchPlaceholder: '搜索文档名称...',

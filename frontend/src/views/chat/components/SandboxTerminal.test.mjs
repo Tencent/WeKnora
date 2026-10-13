@@ -71,6 +71,19 @@ test('panel open looks up a running sandbox and only provisions on an explicit c
   assert.doesNotMatch(terminal, /not_started/)
 })
 
+test('a non-reattachable (Docker) terminal never redials silently after ready', () => {
+  const composable = readFileSync(
+    new URL('../../../composables/useSandboxTerminal.ts', import.meta.url),
+    'utf8',
+  )
+  assert.match(composable, /reattachable\.value = frame\.reattachable !== false/)
+  assert.match(composable, /if \(readyReceived && !reattachable\.value\) return\s*scheduleReconnect\(\)/)
+  assert.match(composable, /code === 'SANDBOX_PAUSED' \|\| code === 'SANDBOX_STOPPED'/)
+  assert.match(terminal, /chat\.sandbox\.idleDisconnectedNewShell/)
+  assert.match(terminal, /chat\.sandbox\.disconnectedNewShell/)
+  assert.match(terminal, /chat\.sandbox\.stopped/)
+})
+
 test('interactive bash defines Debian-style ls aliases', () => {
   const out = execFileSync('bash', [
     '--norc',

@@ -2020,6 +2020,19 @@ definitions:
         description: |-
           AuthType selects the authentication strategy. Empty ("") is treated as
           none for backward compatibility with rows that pre-date this field.
+      client_id:
+        description: |-
+          ClientID optionally names an OAuth client registered with the
+          authorization server in advance. When set it is used instead of dynamic
+          client registration, for servers that offer no registration endpoint or
+          allow grants only to clients an administrator registered. Non-secret.
+        type: string
+      client_secret:
+        description: |-
+          ClientSecret is the secret of ClientID for a confidential client.
+          Secret: encrypted at rest like APIKey and Token, never returned, and
+          changed only through the credentials subresource after creation.
+        type: string
       custom_headers:
         additionalProperties:
           type: string
@@ -4919,6 +4932,148 @@ definitions:
           category_path, and title. It keeps large directory listings cheap to sort.
         type: string
     type: object
+  github_com_Tencent_WeKnora_internal_types.WikiPageDetail:
+    properties:
+      aliases:
+        description: Alternate names, abbreviations, acronyms or translated names
+        items:
+          type: string
+        type: array
+      category_path:
+        description: |-
+          CategoryPath is the directory breadcrumb that groups this page in the
+          wiki browser, e.g. ["AI", "LLM 应用", "RAG"]. Derived cache of the
+          folder chain identified by FolderID.
+        items:
+          type: string
+        type: array
+      chunk_refs:
+        description: |-
+          ChunkRefs records the specific source-document chunks this page was
+          built from — one UUID per cited chunk. Populated during ingest from
+          the chunk-citation pass; refreshed wholesale whenever the page is
+          re-materialized. Empty for summary pages (they are document-level
+          synopses and don't carry chunk-level citations). Use this when you
+          need to surface the underlying evidence for a wiki page, or to
+          retract citations when a source document is deleted.
+        items:
+          type: string
+        type: array
+      content:
+        description: Full markdown content
+        type: string
+      created_at:
+        description: Creation time
+        type: string
+      deleted_at:
+        allOf:
+        - $ref: '#/definitions/gorm.DeletedAt'
+        description: Soft delete
+      depth:
+        description: Depth is len(CategoryPath), cached for filtering / display.
+        type: integer
+      folder_id:
+        description: |-
+          FolderID is the single source of truth for where this page sits in the
+          directory tree — a reference to wiki_folders.id ("" = wiki root). The
+          CategoryPath / WikiPath / Depth fields below are denormalized caches
+          recomputed from this folder's chain on every write so list/index/search
+          queries don't have to join wiki_folders.
+        type: string
+      id:
+        description: Unique identifier (UUID)
+        type: string
+      in_link_titles:
+        additionalProperties:
+          type: string
+        type: object
+      in_links:
+        description: Slugs of pages that link TO this page (backlinks)
+        items:
+          type: string
+        type: array
+      knowledge_base_id:
+        description: Knowledge base this page belongs to
+        type: string
+      last_edit_source:
+        description: |-
+          LastEditSource records who authored the CURRENT version: pipeline |
+          agent | user | revert. Empty for legacy rows (treated as pipeline).
+          When the version is superseded this value travels into the revision
+          snapshot, so each historical version keeps its own author kind.
+        type: string
+      last_editor_id:
+        description: |-
+          LastEditorID is the user id of the caller that produced the current
+          version (empty for background pipeline writes).
+        type: string
+      out_links:
+        description: Slugs of pages this page links to (outbound links)
+        items:
+          type: string
+        type: array
+      page_metadata:
+        description: Arbitrary metadata (tags, categories, dates, etc.)
+        items:
+          type: integer
+        type: array
+      page_type:
+        description: 'Page type: summary, entity, concept, index, synthesis, comparison'
+        type: string
+      parent_slug:
+        description: |-
+          ParentSlug optionally points at the wiki page that should act as this
+          page's semantic parent in the directory tree. The parent may be empty
+          when the page is grouped only by FolderID.
+        type: string
+      slug:
+        description: |-
+          URL-friendly slug for addressing, e.g. "entity/acme-corp", "concept/rag"
+          Unique within a knowledge base
+        type: string
+      sort_order:
+        description: |-
+          SortOrder allows generated or manually edited pages to control sibling
+          ordering before falling back to title.
+        type: integer
+      source_refs:
+        description: |-
+          References to source knowledge IDs that contributed to this page.
+          Format matches the legacy "<knowledge_id>|<doc_title>" convention used
+          across the ingest pipeline, so retract / display code can split on `|`
+          to recover the title. Document-level granularity.
+        items:
+          type: string
+        type: array
+      status:
+        description: 'Page status: draft, published, archived'
+        type: string
+      summary:
+        description: One-line summary for index listing
+        type: string
+      tenant_id:
+        description: Workspace ID for multi-workspace isolation
+        type: integer
+      title:
+        description: Human-readable title
+        type: string
+      updated_at:
+        description: Last update time
+        type: string
+      version:
+        description: |-
+          Version number. Incremented only when a user-visible content field
+          (title, content, summary, page_type, status) actually changes; pure
+          bookkeeping writes (link maintenance, same-content re-ingest, status
+          sync from background jobs) leave it untouched so it can be used as a
+          real "the page was edited" signal.
+        type: integer
+      wiki_path:
+        description: |-
+          WikiPath is a normalized, sortable path derived from page_type,
+          category_path, and title. It keeps large directory listings cheap to sort.
+        type: string
+    type: object
   github_com_Tencent_WeKnora_internal_types.WikiPageIssue:
     properties:
       created_at:
@@ -7058,6 +7213,25 @@ paths:
       - Bearer: []
       - ApiKeyAuth: []
       summary: 获取占位符定义
+      tags:
+      - 智能体
+  /agents/tools:
+    get:
+      consumes:
+      - application/json
+      description: 返回编辑器可勾选的内置工具（含分组和知识库能力要求）、工具列表未设置时生效的默认工具，以及由开关控制、写入工具列表也不生效的工具
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 工具目录
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - Bearer: []
+      - ApiKeyAuth: []
+      summary: 获取智能体可选工具
       tags:
       - 智能体
   /agents/type-presets:
@@ -11707,7 +11881,8 @@ paths:
       tags:
       - Wiki
     get:
-      description: Retrieve a wiki page by its slug
+      description: Retrieve a wiki page by its slug, including titles of existing
+        backlinks
       parameters:
       - description: Knowledge base ID
         in: path
@@ -11725,7 +11900,7 @@ paths:
         "200":
           description: OK
           schema:
-            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WikiPage'
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WikiPageDetail'
         "404":
           description: Not Found
           schema:
@@ -12286,7 +12461,7 @@ paths:
         name: id
         required: true
         type: string
-      - description: '{api_key?: string, token?: string}'
+      - description: '{api_key?, token?, client_secret?: string}'
         in: body
         name: request
         required: true
@@ -12324,7 +12499,7 @@ paths:
         name: id
         required: true
         type: string
-      - description: 字段名（api_key | token）
+      - description: 字段名（api_key | token | client_secret）
         in: path
         name: field
         required: true
@@ -12433,6 +12608,47 @@ paths:
       - Bearer: []
       - ApiKeyAuth: []
       summary: 同步 MCP 工具目录
+      tags:
+      - MCP服务
+  /mcp-services/{id}/oauth/assertion:
+    post:
+      consumes:
+      - application/json
+      description: |-
+        以 JWT Bearer 授权（RFC 7523）提交调用方签发的断言（如 ID-JAG），为当前用户获取并保存令牌，
+        无需浏览器跳转。使用该服务已注册的 OAuth 客户端
+      parameters:
+      - description: MCP 服务 ID
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: '{assertion: string}'
+        in: body
+        name: request
+        required: true
+        schema:
+          additionalProperties: true
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: 与 oauth/status 相同
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: 断言无效或被授权服务器拒绝
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "404":
+          description: Not Found
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+      security:
+      - Bearer: []
+      summary: 使用断言获取 MCP OAuth 令牌
       tags:
       - MCP服务
   /mcp-services/{id}/oauth/authorize-url:

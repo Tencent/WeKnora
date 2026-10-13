@@ -341,6 +341,38 @@ test('an existing Yuque data source on the TOC layout reports it', async () => {
   } finally { f.close() }
 })
 
+test('a DingTalk data source reports the uploaded-file switch, defaulting to off', async () => {
+  const off = await fixture({ type: 'dingtalk', settings: {} })
+  try {
+    // The connector treats a missing key as false, so an existing source that
+    // predates this control must render as off — and stay untouched.
+    assert.equal(off.vm.dingtalkIncludeUploadedFiles, false)
+    assert.equal(off.vm.form.config.settings.include_uploaded_files, undefined)
+  } finally { off.close() }
+
+  const on = await fixture({ type: 'dingtalk', settings: { include_uploaded_files: true } })
+  try {
+    assert.equal(on.vm.dingtalkIncludeUploadedFiles, true)
+  } finally { on.close() }
+
+  const explicitOff = await fixture({ type: 'dingtalk', settings: { include_uploaded_files: false } })
+  try {
+    assert.equal(explicitOff.vm.dingtalkIncludeUploadedFiles, false)
+  } finally { explicitOff.close() }
+})
+
+test('toggling the DingTalk uploaded-file switch writes the settings key', async () => {
+  const f = await fixture({ type: 'dingtalk', settings: {} })
+  try {
+    f.vm.dingtalkIncludeUploadedFiles = true
+    assert.equal(f.vm.form.config.settings.include_uploaded_files, true)
+    f.vm.dingtalkIncludeUploadedFiles = false
+    assert.equal(f.vm.form.config.settings.include_uploaded_files, false)
+    // The switch is scoped to DingTalk: no other connector's key is written.
+    assert.equal(f.vm.form.config.settings.include_sheets, undefined)
+  } finally { f.close() }
+})
+
 test('Cloud hierarchy limitation stays visible after an empty space expansion', async () => {
   const f = await fixture()
   try {

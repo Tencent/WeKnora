@@ -125,6 +125,14 @@ func newNvidiaProvider() *Definition {
 				// an over-long passage instead of cutting it.
 				Truncate:     api.Ptr("END"),
 				MaxDocuments: api.Ptr(512),
+				// VLM reranking: "Images must be base64 data URLs"; "PNG, JPEG,
+				// WebP, GIF, BMP, and TIFF image bytes are recognized"; "A
+				// request can include up to 512 passages." No size limit is
+				// stated. https://docs.nvidia.com/nim/nemo-retriever/reranking/latest/use-the-api-openai.html
+				MaxImageBatchSize: api.Ptr(512),
+				ImageMIMETypes: []string{
+					"image/png", "image/jpeg", "image/webp", "image/gif", "image/bmp", "image/tiff",
+				},
 			},
 			OpenAICompletions: api.OpenAICompletionsCompat{
 				MaxTokensField: api.Ptr("max_tokens"),

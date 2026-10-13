@@ -75,8 +75,9 @@
                   <p class="indexing-check-desc">{{ $t('knowledgeEditor.indexing.wikiDesc') }}</p>
                 </div>
               </div>
-              <p v-if="isIndexingLocked" class="form-tip locked-tip">
-                {{ $t('knowledgeEditor.indexing.lockedTip') }}
+              <p v-if="isIndexingLocked" class="locked-tip">
+                <t-icon name="lock-on" class="locked-tip-icon" />
+                <span>{{ $t('knowledgeEditor.indexing.lockedTip') }}</span>
               </p>
             </div>
 
@@ -142,60 +143,83 @@
               />
             </div>
 
-                      <!-- AI 生成的知识库描述（仅编辑模式、文档型知识库） -->
-                      <div v-if="editorMode === 'edit' && !isFAQ" class="form-item">
-                        <label class="form-label">{{ $t('knowledgeEditor.basic.profile.title') }}</label>
-                        <p class="form-tip">{{ $t('knowledgeEditor.basic.profile.hint') }}</p>
-                        <div class="kb-profile-card">
-                          <template v-if="generatedProfileHasText">
-                            <p v-if="generatedProfile?.gist" class="kb-profile-gist">{{ generatedProfile.gist }}</p>
-                            <div v-if="generatedProfile?.topics?.length" class="kb-profile-topics">
-                              <t-tag
-                                v-for="topic in generatedProfile.topics"
-                                :key="topic"
-                                size="small"
-                                variant="light"
-                              >{{ topic }}</t-tag>
-                            </div>
-                            <div v-if="generatedProfile?.typical_questions?.length" class="kb-profile-questions">
-                              <p class="kb-profile-subtitle">{{ $t('knowledgeEditor.basic.profile.questions') }}</p>
-                              <ul>
-                                <li v-for="q in generatedProfile.typical_questions" :key="q">{{ q }}</li>
-                              </ul>
-                            </div>
-                          </template>
-                          <p v-else class="kb-profile-empty">
-                            {{ generatedProfile?.status === 'empty'
-                              ? $t('knowledgeEditor.basic.profile.noDocuments')
-                              : $t('knowledgeEditor.basic.profile.empty') }}
-                          </p>
-                          <p v-if="generatedProfile?.status === 'failed'" class="kb-profile-error">
-                            {{ $t('knowledgeEditor.basic.profile.failed', { error: generatedProfile.error || '' }) }}
-                          </p>
-                          <p v-if="generatedProfileMeta" class="kb-profile-meta">{{ generatedProfileMeta }}</p>
-                          <div class="kb-profile-actions">
-                            <t-button
-                              size="small"
-                              theme="primary"
-                              variant="outline"
-                              :loading="generatingProfile"
-                              @click="handleGenerateProfile"
-                            >
-                              {{ generatedProfileHasText
-                                ? $t('knowledgeEditor.basic.profile.regenerate')
-                                : $t('knowledgeEditor.basic.profile.generate') }}
-                            </t-button>
-                            <t-button
-                              v-if="generatedProfile?.gist"
-                              size="small"
-                              variant="text"
-                              @click="handleAdoptProfileGist"
-                            >
-                              {{ $t('knowledgeEditor.basic.profile.adopt') }}
-                            </t-button>
-                          </div>
-                        </div>
-                      </div>
+            <!-- AI 生成的知识库描述（仅编辑模式、文档型知识库） -->
+            <div v-if="editorMode === 'edit' && !isFAQ" class="form-item">
+              <label class="form-label">{{ $t('knowledgeEditor.basic.profile.title') }}</label>
+              <div class="kb-profile-card" :class="{ 'is-empty': !generatedProfileHasText }">
+                <template v-if="generatedProfileHasText">
+                  <p v-if="generatedProfile?.gist" class="kb-profile-gist">{{ generatedProfile.gist }}</p>
+                  <div v-if="generatedProfile?.topics?.length" class="kb-profile-topics">
+                    <t-tag
+                      v-for="topic in generatedProfile.topics"
+                      :key="topic"
+                      size="small"
+                      theme="primary"
+                      variant="light"
+                    >{{ topic }}</t-tag>
+                  </div>
+                  <div v-if="generatedProfile?.typical_questions?.length" class="kb-profile-questions">
+                    <p class="kb-profile-subtitle">{{ $t('knowledgeEditor.basic.profile.questions') }}</p>
+                    <ul>
+                      <li v-for="q in generatedProfile.typical_questions" :key="q">{{ q }}</li>
+                    </ul>
+                  </div>
+                  <p v-if="generatedProfile?.status === 'failed'" class="kb-profile-error">
+                    {{ $t('knowledgeEditor.basic.profile.failed', { error: generatedProfile.error || '' }) }}
+                  </p>
+                  <div class="kb-profile-footer">
+                    <span class="kb-profile-meta">{{ generatedProfileMeta }}</span>
+                    <div class="kb-profile-actions">
+                      <t-button
+                        v-if="generatedProfile?.gist"
+                        size="small"
+                        variant="text"
+                        theme="primary"
+                        @click="handleAdoptProfileGist"
+                      >
+                        <template #icon><t-icon name="enter" /></template>
+                        {{ $t('knowledgeEditor.basic.profile.adopt') }}
+                      </t-button>
+                      <t-button
+                        size="small"
+                        variant="text"
+                        :loading="generatingProfile"
+                        @click="handleGenerateProfile"
+                      >
+                        <template #icon><t-icon name="refresh" /></template>
+                        {{ $t('knowledgeEditor.basic.profile.regenerate') }}
+                      </t-button>
+                    </div>
+                  </div>
+                </template>
+                <template v-else>
+                  <div class="kb-profile-empty">
+                    <span class="kb-profile-empty-icon"><t-icon name="ai-edit-1" /></span>
+                    <div class="kb-profile-empty-text">
+                      <p>
+                        {{ generatedProfile?.status === 'empty'
+                          ? $t('knowledgeEditor.basic.profile.noDocuments')
+                          : $t('knowledgeEditor.basic.profile.empty') }}
+                      </p>
+                      <p v-if="generatedProfile?.status === 'failed'" class="kb-profile-error">
+                        {{ $t('knowledgeEditor.basic.profile.failed', { error: generatedProfile.error || '' }) }}
+                      </p>
+                    </div>
+                    <t-button
+                      size="small"
+                      theme="primary"
+                      variant="outline"
+                      :loading="generatingProfile"
+                      @click="handleGenerateProfile"
+                    >
+                      <template #icon><t-icon name="ai-edit-1" /></template>
+                      {{ $t('knowledgeEditor.basic.profile.generate') }}
+                    </t-button>
+                  </div>
+                </template>
+              </div>
+              <p class="form-tip">{{ $t('knowledgeEditor.basic.profile.hint') }}</p>
+            </div>
 
             <!-- Wiki 合成模型移至模型配置页 -->
           </div>
@@ -361,6 +385,20 @@
                 <t-textarea v-model="formData.multimodalConfig.customInstructions"
                   :placeholder="$t('knowledgeEditor.advanced.multimodal.customInstructionsPlaceholder')"
                   :maxlength="4000" :autosize="{ minRows: 3, maxRows: 8 }" />
+              </div>
+            </div>
+
+            <!-- 图片向量：默认关闭，显式开启才为图片单独编码、检索时召回 -->
+            <div v-if="formData.multimodalConfig.enabled" class="setting-row">
+              <div class="setting-info">
+                <label>{{ $t('knowledgeEditor.advanced.multimodal.imageVectorLabel') }}</label>
+                <p class="desc">{{ $t('knowledgeEditor.advanced.multimodal.imageVectorDescription') }}</p>
+                <p v-if="formData.imageVectorEnabled && !embeddingTakesImages" class="desc desc-warning">
+                  {{ $t('knowledgeEditor.advanced.multimodal.imageVectorModelUnsupported') }}
+                </p>
+              </div>
+              <div class="setting-control">
+                <t-switch v-model="formData.imageVectorEnabled" size="medium" />
               </div>
             </div>
 
@@ -828,6 +866,13 @@ const advancedSettingsRef = ref<InstanceType<typeof KBAdvancedSettings>>()
 
 // 表单数据
 const formData = ref<any>(null)
+// 图片向量只在向量模型能处理图片时生效；模型列表里查不到（未加载、跨租户共享）时
+// 不报警，后端会按实际模型判断。
+const embeddingTakesImages = computed(() => {
+  const id = formData.value?.modelConfig.embeddingModelId
+  const model = id ? allModels.value.find((m) => m.id === id) : undefined
+  return !model || !!model.capabilities?.input?.includes('image')
+})
 const isFAQ = computed(() => formData.value?.type === 'faq')
 
 const kbCreateNeedsEmbedding = computed(() => {
@@ -909,6 +954,8 @@ const initFormData = (type: 'document' | 'faq' = 'document') => {
     // 新建模式也必须用完整默认动作初始化——imageActions.ocr.on_unobserved
     // 直接被开关绑定，缺省会让打开开关的瞬间渲染崩溃。
     imageAttrsEnabled: false,
+    // 图片向量默认关闭：能处理图片的向量模型也常只用来编码文本。
+    imageVectorEnabled: false,
     imageActions: mergeImageActions(),
     imageProcessingConfigSnapshot: null as Record<string, unknown> | null,
     asrConfig: {
@@ -1062,6 +1109,8 @@ const loadKBData = async (
       },
       imageAttrsEnabled:
         !!(kb as Record<string, any>).image_processing_config?.image_attrs_enabled,
+      imageVectorEnabled:
+        !!(kb as Record<string, any>).image_processing_config?.image_vector_enabled,
       imageActions: mergeImageActions(
         (kb as Record<string, any>).image_processing_config?.image_actions,
       ),
@@ -1456,6 +1505,7 @@ const buildSubmitData = () => {
   {
     const built = buildImageProcessingConfig(formData.value.imageProcessingConfigSnapshot, {
       imageAttrsEnabled: formData.value.imageAttrsEnabled,
+      imageVectorEnabled: formData.value.imageVectorEnabled,
       onUnobserved: formData.value.imageActions.ocr.on_unobserved,
       defaultOn: displaySchema.value.default_actions.ocr.on,
     })
@@ -2107,14 +2157,19 @@ watch(() => chatResources.allModels, (list) => {
 
   &.is-disabled {
     cursor: not-allowed;
-    opacity: 0.7;
+    background: var(--td-bg-color-secondarycontainer);
 
     &:hover {
       border-color: var(--td-component-stroke);
     }
 
-    &.is-checked:hover {
-      border-color: var(--td-brand-color);
+    &.is-checked {
+      border-color: var(--td-brand-color-focus);
+      background: var(--td-brand-color-light);
+    }
+
+    &:not(.is-checked) {
+      opacity: 0.6;
     }
   }
 
@@ -2125,8 +2180,20 @@ watch(() => chatResources.allModels, (list) => {
 }
 
 .locked-tip {
-  color: var(--td-warning-color);
-  margin-top: 8px;
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 8px 0 0;
+  font-size: var(--app-text-sm);
+  line-height: 18px;
+  color: var(--td-text-color-secondary);
+
+  .locked-tip-icon {
+    flex-shrink: 0;
+    margin-top: 2px;
+    font-size: var(--app-text-base);
+    color: var(--td-text-color-placeholder);
+  }
 }
 
 // 禁用内部 checkbox 自身的点击事件，统一由卡片处理
@@ -2242,6 +2309,11 @@ watch(() => chatResources.allModels, (list) => {
       margin: 0;
       line-height: 1.5;
     }
+
+    .desc-warning {
+      margin-top: 4px;
+      color: var(--td-warning-color);
+    }
   }
 
   .setting-control {
@@ -2260,14 +2332,19 @@ watch(() => chatResources.allModels, (list) => {
 }
 
 .kb-profile-card {
-  margin-top: 8px;
-  padding: 12px 14px;
+  padding: 12px 14px 8px;
   border: 1px solid var(--td-component-stroke);
   border-radius: var(--app-radius-md);
-  background: var(--td-bg-color-secondarycontainer);
+  background: var(--td-bg-color-container);
+
+  &.is-empty {
+    padding: 12px 14px;
+    border-style: dashed;
+    background: var(--td-bg-color-secondarycontainer);
+  }
 
   .kb-profile-gist {
-    margin: 0 0 8px;
+    margin: 0 0 10px;
     font-size: var(--app-text-base);
     line-height: 1.6;
     color: var(--td-text-color-primary);
@@ -2277,45 +2354,85 @@ watch(() => chatResources.allModels, (list) => {
     display: flex;
     flex-wrap: wrap;
     gap: 6px;
-    margin-bottom: 8px;
+    margin-bottom: 10px;
   }
 
   .kb-profile-subtitle {
     margin: 0 0 4px;
     font-size: var(--app-text-sm);
+    font-weight: 500;
     color: var(--td-text-color-secondary);
   }
 
   .kb-profile-questions ul {
-    margin: 0 0 8px;
+    margin: 0 0 4px;
     padding-left: 18px;
     font-size: var(--app-text-md);
-    line-height: 1.6;
-    color: var(--td-text-color-primary);
-  }
-
-  .kb-profile-empty {
-    margin: 0 0 8px;
-    font-size: var(--app-text-md);
-    color: var(--td-text-color-placeholder);
+    line-height: 1.7;
+    color: var(--td-text-color-secondary);
   }
 
   .kb-profile-error {
-    margin: 0 0 8px;
+    margin: 4px 0 0;
     font-size: var(--app-text-sm);
     color: var(--td-error-color);
   }
 
+  .kb-profile-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid var(--td-component-stroke);
+  }
+
   .kb-profile-meta {
-    margin: 0 0 8px;
+    min-width: 0;
     font-size: var(--app-text-sm);
     color: var(--td-text-color-placeholder);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .kb-profile-actions {
     display: flex;
-    gap: 8px;
+    flex-shrink: 0;
+    gap: 4px;
     align-items: center;
+  }
+
+  .kb-profile-empty {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .kb-profile-empty-icon {
+    display: inline-flex;
+    flex-shrink: 0;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border-radius: var(--app-radius-md);
+    font-size: var(--app-text-2xl);
+    color: var(--td-brand-color);
+    background: var(--td-brand-color-light);
+  }
+
+  .kb-profile-empty-text {
+    flex: 1;
+    min-width: 0;
+
+    p {
+      margin: 0;
+      font-size: var(--app-text-md);
+      line-height: 1.5;
+      color: var(--td-text-color-secondary);
+    }
   }
 }
 </style>

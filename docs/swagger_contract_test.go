@@ -79,6 +79,47 @@ func TestFAQEnabledFilterContract(t *testing.T) {
 	}
 }
 
+func TestWikiPageBacklinkTitlesContract(t *testing.T) {
+	for _, tt := range swaggerDocuments() {
+		t.Run(tt.name, func(t *testing.T) {
+			var spec struct {
+				Paths map[string]map[string]struct {
+					Responses map[string]struct {
+						Schema struct {
+							Ref string `json:"$ref" yaml:"$ref"`
+						} `json:"schema" yaml:"schema"`
+					} `json:"responses" yaml:"responses"`
+				} `json:"paths" yaml:"paths"`
+				Definitions map[string]struct {
+					Properties map[string]map[string]any `json:"properties" yaml:"properties"`
+				} `json:"definitions" yaml:"definitions"`
+			}
+			if err := tt.parse(tt.loadSpec(t), &spec); err != nil {
+				t.Fatal(err)
+			}
+			const detail = "github_com_Tencent_WeKnora_internal_types.WikiPageDetail"
+			get := spec.Paths["/knowledgebase/{kb_id}/wiki/pages/{slug}"]["get"]
+			if get.Responses["200"].Schema.Ref != "#/definitions/"+detail {
+				t.Fatal("page detail response must expose backlink titles")
+			}
+			properties := spec.Definitions[detail].Properties
+			titles := properties["in_link_titles"]
+			values, ok := titles["additionalProperties"].(map[string]any)
+			if titles["type"] != "object" || !ok || values["type"] != "string" {
+				t.Fatal("in_link_titles must be a string-valued map")
+			}
+			for field := range spec.Definitions["github_com_Tencent_WeKnora_internal_types.WikiPage"].Properties {
+				if _, ok := properties[field]; !ok {
+					t.Errorf("page detail dropped existing field %s", field)
+				}
+			}
+			if _, ok := spec.Paths["/knowledgebase/{kb_id}/wiki/page-titles"]; ok {
+				t.Fatal("obsolete standalone title endpoint remains documented")
+			}
+		})
+	}
+}
+
 func readSwaggerFile(t *testing.T, name string) []byte {
 	t.Helper()
 	data, err := os.ReadFile(name)

@@ -104,6 +104,9 @@ func providerDTO(v *modelruntime.Provider, modelType types.ModelType, includeMod
 	modelTypes := make([]string, 0, len(v.ModelTypes))
 	for _, mt := range v.ModelTypes {
 		modelTypes = append(modelTypes, modelTypeToFrontend(mt))
+		// Use the same fallback as runtime resolution. Several ASR vendors
+		// share their chat base URL without declaring a separate ASR entry.
+		defaultURLs[modelTypeToFrontend(mt)] = v.GetDefaultURL(mt)
 	}
 	dto := ModelProviderDTO{
 		Value:        v.ID,

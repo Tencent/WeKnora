@@ -61,12 +61,22 @@ func prepareMessagesWithModelContext(
 	registry.RegisterSearchResults(knowledgeResults)
 	var contextParts []string
 	if len(knowledgeRows) > 0 {
+		data := map[string]interface{}{
+			"display_type": "search_results",
+			"results":      knowledgeRows,
+		}
+		// The ranked filter chain (rerank → merge → FILTER_TOP_K) may have
+		// dropped candidates before this view was built. Carry the recorded
+		// pool and the number of knowledge passages actually rendered, so the
+		// model context can say the passages are a subset without restating
+		// the pool as a knowledge-base match count.
+		if truncation := chatManage.Truncation; truncation != nil {
+			data["retrieval_shown"] = len(knowledgeRows)
+			data["retrieval_candidates"] = truncation.Candidates
+		}
 		contextParts = append(contextParts, registry.ModelToolResult(&types.ToolResult{
 			Success: true,
-			Data: map[string]interface{}{
-				"display_type": "search_results",
-				"results":      knowledgeRows,
-			},
+			Data:    data,
 		}))
 	}
 	if len(webRows) > 0 {
@@ -94,6 +104,11 @@ func prepareMessagesWithModelContext(
 	}
 	if !replaced {
 		messages[last].Content = modelContexts + "\n\n" + messages[last].Content
+	}
+	if chatManage.ChatModelSupportsVision && len(chatManage.ContextImages) > 0 {
+		count := min(len(chatManage.ContextImageChunkIDs), len(chatManage.ContextImages))
+		ids := chatManage.ContextImageChunkIDs[:count]
+		messages[last].Content += registry.ImageSourcesNote(ids, len(chatManage.Images))
 	}
 	return messages, registry
 }

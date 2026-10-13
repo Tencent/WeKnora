@@ -191,7 +191,7 @@ WebSocket 握手，不走普通认证中间件：
 | `cols` / `rows` | 否 | 初始终端尺寸 |
 | `pty_id` | 否 | 重新接上之前 `ready` 帧返回的 Shell 进程 |
 
-连接后，二进制帧双向传输终端输入输出；文本帧为 JSON 控制消息：服务端发送 `ready`（含 `pty_id`、`backend`）、`exited`（含 `exit_code`）和 `error`，客户端可发送 `{"type":"resize","cols":..,"rows":..}`。错误码包括 `SANDBOX_NOT_BOUND`、`SANDBOX_PAUSED`、`TERMINAL_UNSUPPORTED`、`IDLE_DISCONNECTED`、`AUTH_REVOKED`、`INTERNAL`。每个会话最多同时 5 个终端，超出返回 429。
+连接后，二进制帧双向传输终端输入输出；文本帧为 JSON 控制消息：服务端发送 `ready`（含 `pty_id`、`backend`、`reattachable`）、`exited`（含 `exit_code`）和 `error`，客户端可发送 `{"type":"resize","cols":..,"rows":..}`。`reattachable` 为 `false`（Docker）时没有 `pty_id`，断开即结束 Shell，客户端不应自动重连。错误码包括 `SANDBOX_NOT_BOUND`、`SANDBOX_PAUSED`、`SANDBOX_STOPPED`（不会暂停的 Docker 后端：容器已停止或已被空闲回收）、`TERMINAL_UNSUPPORTED`、`IDLE_DISCONNECTED`、`AUTH_REVOKED`、`INTERNAL`。每个会话最多同时 5 个终端，超出返回 429。
 
 ## Lite 本机项目目录
 

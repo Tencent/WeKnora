@@ -13,6 +13,7 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/application/access"
 	"github.com/Tencent/WeKnora/internal/application/repository"
+	"github.com/Tencent/WeKnora/internal/common"
 	apperrors "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -131,6 +132,92 @@ func (s *wikiPageService) UpdatePage(ctx context.Context, page *types.WikiPage) 
 		return nil, fmt.Errorf("get existing page: %w", err)
 	}
 	stripWikiPageInlineChunkCitations(page)
+
+	// ── Truncation choke point ────────────────
+	//
+	// Machine edits hand the *whole* page to a model and persist whatever comes
+	// back, and markdown tables are the shape it gets wrong most often: a
+	// hundred-row certificate ledger returns with thirty rows, finish_reason=
+	// stop, no provider error. That is not the completion-budget truncation
+	// handled on the ingest side (which continues and then refuses) — the answer
+	// is complete, it is simply short on rows. Storing it shrinks the page with
+	// no error, no failed addition, and a revision entry that reads like any
+	// other edit. Measured on a table-heavy knowledge base: a bulk ingest left a
+	// batch of untouched pages shorter than before it ran.
+	//
+	// The check lives here, on the one write path every caller shares, because a
+	// guard in the ingest caller only covers the ingest caller: the agent's
+	// whole-page writer hands its own model output to this same method.
+	//
+	// The two machine callers get different allowances:
+	//
+	//   - The agent's whole-page writer can be told to try again, so it is held
+	//     to "no stored row identity may vanish": its loss limit is zero and any
+	//     loss refuses the write, which the tool returns to the model so it can
+	//     re-emit the page (or switch to exact-text replacement).
+	//   - Ingest cannot retry cheaply — a refusal keeps the contributing
+	//     documents queued for another full Map and spends their retry budget —
+	//     and its editor prompt explicitly allows de-duplicating rows, so only a
+	//     loss STRICTLY above wikiWriteIngestRowIdentityLossLimit counts as
+	//     truncation. The ratio is computed over distinct identities (see
+	//     wikiWriteUniqueRowIdentityCount), never over row counts.
+	//
+	// Deliberate shrinkages are exempt: a human deleting rows through the wiki
+	// UI, a revert to an older (possibly shorter) revision, and any caller that
+	// knows it is removing content and says so with types.WithWikiShrinkAllowed
+	// (the ingest retract path and the agent's exact-text replacement do).
+	source := types.WikiEditSourceFromContext(ctx)
+	if source != types.WikiEditSourceUser && source != types.WikiEditSourceRevert &&
+		!types.WikiShrinkAllowedFromContext(ctx) {
+		if missing := wikiWriteMissingRowIdentities(existing.Content, page.Content); len(missing) > 0 {
+			storedIdentities := wikiWriteUniqueRowIdentityCount(existing.Content)
+			lossRatio := wikiWriteRowIdentityLossRatio(len(missing), storedIdentities)
+			lossLimit := wikiWriteIngestRowIdentityLossLimit
+			if source == types.WikiEditSourceAgent {
+				lossLimit = 0
+			}
+			if lossRatio > lossLimit {
+				examples := strings.Join(wikiWriteDroppedRowExamples(missing), ", ")
+				// Identities, not rows: several rows of the stored page may
+				// share one identity, and mixing the two counts would make the
+				// ratio unreadable.
+				logger.Warnf(ctx,
+					"wiki page write refused (rewrite dropped %d of %d distinct table row identities, "+
+						"ratio %.2f > limit %.2f): slug=%s source=%s content %d -> %d chars; "+
+						"keeping the stored version (e.g. %s)",
+					len(missing), storedIdentities, lossRatio, lossLimit, page.Slug, source,
+					len(existing.Content), len(page.Content), examples)
+				common.PipelineWarn(ctx, "WikiWrite", "page_write_dropped_table_rows", map[string]interface{}{
+					"slug":               page.Slug,
+					"source":             source,
+					"stored_identities":  storedIdentities,
+					"missing_identities": len(missing),
+					"loss_ratio":         lossRatio,
+					"loss_limit":         lossLimit,
+					"examples":           examples,
+				})
+				// The refusal is an explicit error, not "the stored page came
+				// back unchanged": a successful write that changes nothing
+				// user-visible leaves `version` alone too (see the version-bump
+				// policy above), so the version cannot tell a caller whether
+				// its write landed. Ingest maps this sentinel to a deferred
+				// update — the documents behind it are kept for a later batch
+				// instead of being trimmed — while the agent surfaces it to the
+				// model, which can re-emit the rows.
+				return nil, fmt.Errorf(
+					"%w: slug %s lost %d of %d table row identities (e.g. %s); the stored page is unchanged",
+					ErrWikiWriteDroppedTableRows, page.Slug, len(missing), storedIdentities, examples)
+			}
+			// Inside the ingest tolerance: the rewrite is written, and the loss
+			// is recorded for anyone tuning the limit. The identity is only the
+			// row's first non-empty cell, so a tolerated loss may be a merge of
+			// same-identity rows and says nothing about their other columns.
+			logger.Debugf(ctx,
+				"wiki page write kept a rewrite that dropped %d of %d distinct table row identities "+
+					"(ratio %.2f <= limit %.2f): slug=%s source=%s",
+				len(missing), storedIdentities, lossRatio, lossLimit, page.Slug, source)
+		}
+	}
 
 	oldOutLinks := existing.OutLinks
 
@@ -612,6 +699,18 @@ func computeGraphSubset(pages []*types.WikiPage, req *types.WikiGraphRequest) (*
 		}
 	}
 	hasTypeFilter := len(typeAllow) > 0
+	// The index page is navigation over the whole wiki, not a subject. Its
+	// directory is assembled on read, so it never carries links and would
+	// only ever sit on the canvas as a lone node.
+	if !typeAllow[types.WikiPageTypeIndex] {
+		subjects := make([]*types.WikiPage, 0, len(pages))
+		for _, p := range pages {
+			if p.PageType != types.WikiPageTypeIndex {
+				subjects = append(subjects, p)
+			}
+		}
+		pages = subjects
+	}
 
 	familiarSet := make(map[string]struct{}, len(req.FamiliarKnowledgeIDs))
 	for _, id := range req.FamiliarKnowledgeIDs {
@@ -621,10 +720,74 @@ func computeGraphSubset(pages []*types.WikiPage, req *types.WikiGraphRequest) (*
 	}
 
 	pageBySlug := make(map[string]*types.WikiPage, len(pages))
-	linkCount := make(map[string]int, len(pages))
 	for _, p := range pages {
 		pageBySlug[p.Slug] = p
-		linkCount[p.Slug] = len(p.InLinks) + len(p.OutLinks)
+	}
+	// link_count is the number of distinct pages this page can be connected
+	// to on the canvas: reciprocal links count once, and links to deleted or
+	// type-filtered pages are excluded. The frontend compares it with the
+	// visible degree to decide whether a page still has neighbors to load.
+	// in_links can lag behind other pages' out_links, so links are collected
+	// from both ends: edges are drawn from out_links, and a page someone links
+	// to must not report zero links.
+	neighbors := make(map[string]map[string]struct{}, len(pages))
+	connect := func(a, b string) bool {
+		pa, okA := pageBySlug[a]
+		pb, okB := pageBySlug[b]
+		if !okA || !okB || a == b {
+			return false
+		}
+		if hasTypeFilter && (!typeAllow[pa.PageType] || !typeAllow[pb.PageType]) {
+			return false
+		}
+		for _, pair := range [2][2]string{{a, b}, {b, a}} {
+			set := neighbors[pair[0]]
+			if set == nil {
+				set = make(map[string]struct{})
+				neighbors[pair[0]] = set
+			}
+			set[pair[1]] = struct{}{}
+		}
+		return true
+	}
+	for _, p := range pages {
+		for _, target := range p.OutLinks {
+			connect(p.Slug, target)
+		}
+		for _, source := range p.InLinks {
+			connect(source, p.Slug)
+		}
+	}
+	// A page extracted from a document belongs next to that document's
+	// summary even when the summary text never links it, e.g. a name the
+	// summary only writes as inline code, or a concept it never mentions by
+	// title. Summary slugs are not always derived from the document ID, so
+	// documents are matched through the summaries' own source_refs.
+	summaryOf := make(map[string]string)
+	for _, p := range pages {
+		if p.PageType != types.WikiPageTypeSummary {
+			continue
+		}
+		for _, id := range p.SourceKnowledgeIDs() {
+			if prev, ok := summaryOf[id]; !ok || p.Slug < prev {
+				summaryOf[id] = p.Slug
+			}
+		}
+	}
+	var sourceEdges [][2]string
+	for _, p := range pages {
+		if p.PageType == types.WikiPageTypeSummary {
+			continue
+		}
+		for _, id := range p.SourceKnowledgeIDs() {
+			if summary, ok := summaryOf[id]; ok && connect(summary, p.Slug) {
+				sourceEdges = append(sourceEdges, [2]string{summary, p.Slug})
+			}
+		}
+	}
+	linkCount := make(map[string]int, len(pages))
+	for slug, set := range neighbors {
+		linkCount[slug] = len(set)
 	}
 
 	// Select the node slug set for the requested slice.
@@ -641,7 +804,7 @@ func computeGraphSubset(pages []*types.WikiPage, req *types.WikiGraphRequest) (*
 		if depth < 1 {
 			depth = 1
 		}
-		selected = bfsEgoSlugs(pageBySlug, req.Center, depth, typeAllow, req.Limit)
+		selected = bfsEgoSlugs(pageBySlug, neighbors, req.Center, depth, typeAllow, req.Limit)
 	default:
 		// overview: keep only type-allowed candidates, sort by link_count desc, cap.
 		candidates := make([]*types.WikiPage, 0, len(pages))
@@ -651,14 +814,28 @@ func computeGraphSubset(pages []*types.WikiPage, req *types.WikiGraphRequest) (*
 			}
 			candidates = append(candidates, p)
 		}
+		// Many low-degree pages tie at the truncation boundary. Prefer pages
+		// this person relies on, then subject pages over navigation pages,
+		// then recently updated ones; slug keeps the API deterministic.
+		familiar := make(map[string]bool, len(candidates))
+		for _, p := range candidates {
+			familiar[p.Slug] = p.BuiltFrom(familiarSet)
+		}
 		sort.SliceStable(candidates, func(i, j int) bool {
-			li := linkCount[candidates[i].Slug]
-			lj := linkCount[candidates[j].Slug]
-			if li != lj {
-				return li > lj
+			a, b := candidates[i], candidates[j]
+			if la, lb := linkCount[a.Slug], linkCount[b.Slug]; la != lb {
+				return la > lb
 			}
-			// Stable tiebreaker keeps the API deterministic between calls.
-			return candidates[i].Slug < candidates[j].Slug
+			if familiar[a.Slug] != familiar[b.Slug] {
+				return familiar[a.Slug]
+			}
+			if ra, rb := graphOverviewTypeRank(a.PageType), graphOverviewTypeRank(b.PageType); ra != rb {
+				return ra < rb
+			}
+			if !a.UpdatedAt.Equal(b.UpdatedAt) {
+				return a.UpdatedAt.After(b.UpdatedAt)
+			}
+			return a.Slug < b.Slug
 		})
 		if req.Limit > 0 && len(candidates) > req.Limit {
 			candidates = candidates[:req.Limit]
@@ -690,20 +867,40 @@ func computeGraphSubset(pages []*types.WikiPage, req *types.WikiGraphRequest) (*
 	})
 
 	// Build edges, keeping only edges whose endpoints both survived selection.
-	var edges []types.WikiGraphEdge
+	// An isolated ego center still needs "edges": [], not null.
+	edges := []types.WikiGraphEdge{}
+	drawn := make(map[[2]string]struct{})
 	for _, p := range pages {
 		if _, ok := selected[p.Slug]; !ok {
 			continue
 		}
 		for _, target := range p.OutLinks {
-			if _, ok := selected[target]; !ok {
+			if _, ok := selected[target]; !ok || target == p.Slug {
 				continue
 			}
+			if _, dup := drawn[[2]string{p.Slug, target}]; dup {
+				continue
+			}
+			drawn[[2]string{p.Slug, target}] = struct{}{}
 			edges = append(edges, types.WikiGraphEdge{
 				Source: p.Slug,
 				Target: target,
 			})
 		}
+	}
+	for _, e := range sourceEdges {
+		_, okS := selected[e[0]]
+		_, okT := selected[e[1]]
+		if !okS || !okT {
+			continue
+		}
+		_, forward := drawn[e]
+		_, backward := drawn[[2]string{e[1], e[0]}]
+		if forward || backward {
+			continue
+		}
+		drawn[e] = struct{}{}
+		edges = append(edges, types.WikiGraphEdge{Source: e[0], Target: e[1]})
 	}
 
 	// total is the count of candidate nodes before truncation — i.e. the
@@ -747,6 +944,21 @@ func computeGraphSubset(pages []*types.WikiPage, req *types.WikiGraphRequest) (*
 	}, nil
 }
 
+// graphOverviewTypeRank orders page types for overview tie-breaks: subject
+// pages first, generated summaries next, navigation pages last.
+func graphOverviewTypeRank(pageType string) int {
+	switch pageType {
+	case types.WikiPageTypeEntity, types.WikiPageTypeConcept:
+		return 0
+	case types.WikiPageTypeSynthesis, types.WikiPageTypeComparison:
+		return 1
+	case types.WikiPageTypeSummary:
+		return 2
+	default:
+		return 3
+	}
+}
+
 // bfsEgoSlugs computes the undirected BFS neighborhood of `center` up to
 // `depth` hops using both inbound and outbound links. Type-filtered pages
 // are excluded from the result but are also NOT traversed through — so a
@@ -754,6 +966,7 @@ func computeGraphSubset(pages []*types.WikiPage, req *types.WikiGraphRequest) (*
 // index. The caller guarantees center exists in pageBySlug.
 func bfsEgoSlugs(
 	pageBySlug map[string]*types.WikiPage,
+	adjacency map[string]map[string]struct{},
 	center string,
 	depth int,
 	typeAllow map[string]bool,
@@ -779,13 +992,13 @@ func bfsEgoSlugs(
 		}
 		next := make([]string, 0, len(frontier))
 		for _, slug := range frontier {
-			p, ok := pageBySlug[slug]
-			if !ok {
-				continue
+			// Undirected adjacency built from every page's links, so a page
+			// with stale in_links still reaches the pages that link to it.
+			neighbors := make([]string, 0, len(adjacency[slug]))
+			for nb := range adjacency[slug] {
+				neighbors = append(neighbors, nb)
 			}
-			neighbors := make([]string, 0, len(p.OutLinks)+len(p.InLinks))
-			neighbors = append(neighbors, p.OutLinks...)
-			neighbors = append(neighbors, p.InLinks...)
+			sort.Strings(neighbors)
 			for _, nb := range neighbors {
 				if _, seen := visited[nb]; seen {
 					continue

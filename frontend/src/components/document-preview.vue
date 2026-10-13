@@ -1686,16 +1686,32 @@ mark.source-locate-mark {
   background-color: var(--app-source-highlight-bg);
   color: inherit;
   border-radius: var(--app-radius-xs);
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
 }
 
 .source-locate-block {
   background-color: var(--app-source-highlight-soft-bg) !important;
-  outline: 1px solid var(--app-source-highlight-border);
-  outline-offset: 2px;
-  border-radius: var(--app-radius-xs);
+  box-shadow: inset 3px 0 var(--app-source-highlight-border);
+}
+
+/* Cell backgrounds can obscure a row's marker. Paint each cell once and
+   keep the accent on the leading edge, without boxing every table row. */
+tr.source-locate-block {
+  background-color: transparent !important;
+  box-shadow: none;
 }
 
 tr.source-locate-block > td {
   background-color: var(--app-source-highlight-soft-bg) !important;
+}
+
+tr.source-locate-block > td:first-child {
+  box-shadow: inset 3px 0 var(--app-source-highlight-border);
+}
+
+img.source-locate-block {
+  outline: 1px solid var(--app-source-highlight-border);
+  outline-offset: 2px;
 }
 </style>

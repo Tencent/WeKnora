@@ -781,3 +781,29 @@ func TestValidInstallDirUsesTheHostVersionsRoot(t *testing.T) {
 	_, ok = noRoot.validInstallDir(host)
 	require.False(t, ok)
 }
+
+// TestSwitchManagedToolsIgnoreTheAllowlist pins tools.SwitchManagedTools to
+// what registerTools does: with every switch off, naming those tools in the
+// allowlist must not offer any of them. The agent editor relies on this list
+// to tell users that such stored entries have no effect. It covers the
+// allowlist path only: registering a listed tool from the allowlist, or no
+// longer stripping a web or memory tool, fails it. The code that registers
+// sandbox, skill and MCP tools from their own settings is tested elsewhere.
+func TestSwitchManagedToolsIgnoreTheAllowlist(t *testing.T) {
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(7))
+	allowed := []string{tools.ToolThinking}
+	allowed = append(allowed, tools.SwitchManagedTools()...)
+	chatModel := &fakeAgentChatModel{}
+	config := &types.AgentConfig{AllowedTools: allowed}
+
+	engine, err := (&agentService{}).CreateAgentEngine(ctx, config, chatModel, nil, nil, "sess-1", "msg-1")
+	require.NoError(t, err)
+	_, err = engine.Execute(ctx, "sess-1", "msg-1", "hello", nil)
+	require.NoError(t, err)
+
+	require.True(t, toolOffered(chatModel.lastToolNames, tools.ToolThinking), "the run must have offered tools at all")
+	for _, managed := range tools.SwitchManagedTools() {
+		require.False(t, toolOffered(chatModel.lastToolNames, managed),
+			"%s follows another agent setting, not the allowlist", managed)
+	}
+}

@@ -147,6 +147,14 @@ func (st SearchTargets) ContainsKB(kbID string) bool {
 	return false
 }
 
+// MatchedImage retains an image vector hit's identity before context expansion
+// replaces ImageInfo with all images in a surrounding text chunk.
+type MatchedImage struct {
+	ChunkID         string `json:"chunk_id"`
+	KnowledgeBaseID string `json:"knowledge_base_id"`
+	URL             string `json:"url"`
+}
+
 // SearchResult represents the search result
 type SearchResult struct {
 	// CitationSources retains independently citeable bodies after context expansion.
@@ -169,6 +177,10 @@ type SearchResult struct {
 	Seq int `gorm:"column:seq"             json:"seq"`
 	// Score
 	Score float64 `                              json:"score"`
+	// VectorScore is the engine's own similarity of a vector hit, before
+	// fusion replaced Score with a rank-based one; 0 for other hits. See
+	// IndexWithScore.VectorScore.
+	VectorScore float64 `json:"-"`
 	// Match type
 	MatchType MatchType `                              json:"match_type"`
 	// SubChunkIndex
@@ -182,6 +194,9 @@ type SearchResult struct {
 	ParentChunkID string `json:"parent_chunk_id"`
 	// 图片信息 (JSON 格式)
 	ImageInfo string `json:"image_info"`
+	// MatchedImages survives merging, deduplication and stored reference replay.
+	// It contains storage references, never image bytes.
+	MatchedImages []MatchedImage `json:"matched_images,omitempty" gorm:"-"`
 
 	// Knowledge file name
 	// Used for file type knowledge, contains the original file name
@@ -335,3 +350,19 @@ func NewPageResult(total int64, page *Pagination, data interface{}) *PageResult 
 		Data:     data,
 	}
 }
+
+// SearchResult metadata for results that rest on an image matched by its own
+// vector (an image_vector hit).
+const (
+	// MetadataKeptBy names why a result was kept other than by its rerank
+	// score. A kept result rides outside the ranked top-k: truncating to
+	// top-k must not drop it.
+	MetadataKeptBy = "kept_by"
+	// KeptByImageVector: a pictorial image hit a text reranker rejected and
+	// its vector still vouched for.
+	KeptByImageVector = "image_vector"
+	// MetadataImageVectorMatch marks a result that stands in for an
+	// image_vector hit de-duplication dropped as a copy of it, so the image
+	// still reaches a model that can see it.
+	MetadataImageVectorMatch = "image_vector_match"
+)
