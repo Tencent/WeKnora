@@ -2,6 +2,7 @@ package retriever
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"regexp"
 	"slices"
@@ -141,6 +142,11 @@ func batchEmbedWithBackoff(ctx context.Context, embedder embedding.Embedder, con
 			return embeddings, nil
 		}
 		logger.Errorf(ctx, "BatchEmbedWithPool attempt %d/%d failed: %v", attempt+1, embedRetryAttempts, err)
+		// The provider wrapper already waits and retries the failed sub-batch.
+		// Do not repeat successfully embedded chunks after quota recovery fails.
+		if errors.Is(err, embedding.ErrBudgetRetriesExhausted) {
+			return nil, err
+		}
 		if attempt+1 < embedRetryAttempts {
 			select {
 			case <-time.After(delay):
