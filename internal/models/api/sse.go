@@ -11,6 +11,10 @@ import (
 
 const maxSSEEventSize = 1024 * 1024
 
+// Bound prefix copies and JSON rescans, including empty data lines. Providers
+// exceeding this limit must emit less fragmented JSON events.
+const maxSSEDataLines = 128
+
 // SSEEvent 表示一个 Server-Sent Events 事件
 type SSEEvent struct {
 	Data []byte
@@ -57,6 +61,9 @@ func (r *SSEReader) ReadEvent() (*SSEEvent, error) {
 		}
 		if !strings.HasPrefix(line, "data:") {
 			continue
+		}
+		if len(data) >= maxSSEDataLines {
+			return nil, errors.New("SSE event exceeds 128 data lines")
 		}
 		payload := strings.TrimPrefix(line[len("data:"):], " ")
 		if len(data) > 0 {

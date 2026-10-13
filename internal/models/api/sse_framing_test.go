@@ -172,3 +172,19 @@ func TestSSEReaderPendingHealthyPacketDoesNotWait(t *testing.T) {
 		t.Fatal("healthy pending packet waited for another network frame")
 	}
 }
+
+func TestSSEReaderBoundsHighlyFragmentedPacketWork(t *testing.T) {
+	body := "data: [\n" + strings.Repeat("data: \n", 129) + "data: 1]\n"
+	event, err := NewSSEReader(strings.NewReader(body)).ReadEvent()
+	if err == nil || event != nil || !strings.Contains(err.Error(), "data lines") {
+		t.Fatalf("fragmented packet must be rejected: event=%#v, error=%v", event, err)
+	}
+}
+
+func TestSSEReaderAllowsBoundedFragmentedPacket(t *testing.T) {
+	body := "data: [\n" + strings.Repeat("data: \n", 126) + "data: 1]\n"
+	event, err := NewSSEReader(strings.NewReader(body)).ReadEvent()
+	if err != nil || event == nil || !strings.HasSuffix(string(event.Data), "1]") {
+		t.Fatalf("128-line packet should remain supported: event=%#v, error=%v", event, err)
+	}
+}
