@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/agent/tools"
+	"github.com/Tencent/WeKnora/internal/application/attachment"
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/infrastructure/docparser"
 	"github.com/Tencent/WeKnora/internal/sandbox"
@@ -185,7 +186,7 @@ func TestSentAttachmentRemainsReadableAfterExpiryAndFork(t *testing.T) {
 	require.NoError(t, err)
 	require.Nil(t, removed, "unused uploads must still expire")
 	store := &agentSessionAttachments{messages: messages, documents: repo, tenantID: 7, sessionID: fork.ID}
-	reader := tools.NewReadFileTool(nil).WithAttachments(store, 0, nil)
+	reader := tools.NewReadFileTool(nil).WithAttachments(attachment.NewReader(store, 0, nil))
 	args, err := json.Marshal(tools.ReadFileInput{Path: types.AttachmentPath(document.ID)})
 	require.NoError(t, err)
 	result, err := reader.Execute(context.Background(), args)
@@ -405,4 +406,86 @@ func TestDescribeForAgentNumbersImagesInInlinedContent(t *testing.T) {
 	prompt := manifest.Attachments.BuildAgentPrompt()
 	assert.Contains(t, prompt, `images="2"`)
 	assert.Contains(t, prompt, "[image #1]")
+}
+
+func TestAttachmentReadSyncsNewlyReadyTextAndReusesImageObservation(t *testing.T) {
+	db := stagingTempDocDB(t)
+	doc := sessionDocument("read-sync", ".pdf", types.TemporaryDocumentStatusProcessing, 0, "")
+	require.NoError(t, db.Create(doc).Error)
+	require.NoError(t, db.AutoMigrate(&types.Message{}))
+	items := types.MessageAttachments{{ID: doc.ID, FileName: doc.FileName, FileType: doc.FileType, FileSize: 7}}
+	require.NoError(t, db.Create(&types.Message{SessionID: "session-1", Role: "user", Attachments: items}).Error)
+	manager := &stagingSandboxManager{sandboxType: sandbox.SandboxTypeCube}
+	var pngData bytes.Buffer
+	require.NoError(t, png.Encode(&pngData, image.NewRGBA(image.Rect(0, 0, 2, 2))))
+	files := &stagingFileService{files: map[string][]byte{
+		doc.ResourceRef: []byte("%PDF-17"), "local://figure": pngData.Bytes(),
+	}}
+	svc := &agentService{
+		db: db, sandboxMgr: manager, fileService: files, sandboxResolver: stubSandboxResolver{mgr: manager},
+	}
+	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(7))
+	layout := sandbox.RemoteWorkspaceLayout()
+	staged, err := svc.stageSessionAttachments(ctx, "session-1", "cfg-remote", 7, items, layout)
+	require.NoError(t, err)
+	require.Len(t, staged, 1)
+	require.Empty(t, staged[0].ParsedPath)
+	// Parsing finishes after the turn-start staging snapshot.
+	images, _ := json.Marshal([]types.TemporaryDocumentImage{{URL: "local://figure", MimeType: "image/png"}})
+	require.NoError(t, repository.NewTemporaryDocumentRepository(db).MarkReady(ctx, 7, doc.ID,
+		"# Parsed report", types.JSON(`[]`), types.JSON(images), types.JSON(`{}`), 20, 1, time.Now()))
+	config := &types.AgentConfig{
+		SandboxConfigID:         "cfg-remote",
+		AttachmentSandboxCopies: map[string]string{staged[0].Path: types.AttachmentPath(doc.ID)},
+	}
+	cache := repository.NewAttachmentDescriptionRepository(db, 7)
+	calls := 0
+	newReader := func() *tools.ReadFileTool {
+		registry := tools.NewToolRegistry()
+		source := svc.registerAttachmentReader(ctx, registry, config, "session-1")
+		require.NotNil(t, source)
+		source.Images = &attachment.ImageReader{
+			Model: "vision-a", Cache: cache, Describe: func(context.Context, []byte, string) (string, error) {
+				calls++
+				return "Revenue rises", nil
+			},
+		}
+		tool, err := registry.GetTool(tools.ToolReadFile)
+		require.NoError(t, err)
+		return tool.(*tools.ReadFileTool)
+	}
+	reader := newReader()
+	parsed, err := reader.Execute(ctx, json.RawMessage(`{"path":"`+types.AttachmentPath(doc.ID)+`"}`))
+	require.NoError(t, err)
+	require.True(t, parsed.Success, parsed.Error)
+	require.Equal(t, "# Parsed report", string(manager.files[staged[0].Path+parsedSidecarSuffix]))
+	require.Contains(t, parsed.Output, staged[0].Path+parsedSidecarSuffix)
+	args := json.RawMessage(`{"path":"` + types.AttachmentPath(doc.ID) + `/images/1","focus":"trend"}`)
+	first, err := reader.Execute(ctx, args)
+	require.NoError(t, err)
+	require.True(t, first.Success, first.Error)
+	require.Equal(t, 1, calls)
+	require.Equal(t, []string{"Revenue rises"}, first.ImageDescriptions)
+	imageFiles := first.Data["image_files"].([]map[string]string)
+	require.Len(t, imageFiles, 1)
+	descriptionPath := imageFiles[0]["description_path"]
+	require.Contains(t, string(manager.files[descriptionPath]), "Focus: trend")
+	require.Equal(t, pngData.Bytes(), manager.files[imageFiles[0]["image_path"]])
+	// Normal reconciliation must keep on-demand observations on later turns.
+	_, err = svc.stageSessionAttachments(ctx, "session-1", "cfg-remote", 7, items, layout)
+	require.NoError(t, err)
+	require.Contains(t, manager.files, descriptionPath)
+	// A rebuilt sandbox is only a projection: the persisted cache restores it.
+	manager.files = nil
+	_, err = svc.stageSessionAttachments(ctx, "session-1", "cfg-remote", 7, items, layout)
+	require.NoError(t, err)
+	again, err := newReader().Execute(ctx, args)
+	require.NoError(t, err)
+	require.True(t, again.Success, again.Error)
+	require.Equal(t, 1, calls)
+	require.Contains(t, manager.files, descriptionPath)
+	// Removing the session attachment also removes its sandbox copies.
+	_, err = svc.stageSessionAttachments(ctx, "session-1", "cfg-remote", 7, nil, layout)
+	require.NoError(t, err)
+	require.Empty(t, manager.files)
 }

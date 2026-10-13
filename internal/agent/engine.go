@@ -259,7 +259,9 @@ func (e *AgentEngine) describeToolImages(ctx context.Context, result *types.Tool
 		(e.config != nil && e.config.ChatModelSupportsVision) {
 		return
 	}
-	result.ImageDescriptions = e.describeImages(ctx, result.Images, toolImagePrompts(result))
+	if len(result.ImageDescriptions) != len(result.Images) {
+		result.ImageDescriptions = e.describeImages(ctx, result.Images, toolImagePrompts(result))
+	}
 	if result.Data != nil {
 		result.Data["image_descriptions"] = result.ImageDescriptions
 	}
@@ -1082,50 +1084,19 @@ func (o iterOutcome) String() string {
 // Tool result image VLM description helpers
 // ---------------------------------------------------------------------------
 
-// The VLM fails a reply that runs into its token cap instead of truncating it,
-// so length is bounded by the prompt rather than by max_tokens.
 const (
-	toolImageBriefPrompt = "Describe this image for an assistant that cannot see it, in at most 120 words. " +
-		"First say what kind of image it is (chart, diagram, table, screenshot, photo, formula...). " +
-		"Then give the information it carries: for a chart the axes, series and notable values or trend; " +
-		"for a diagram the main parts and how they connect; for a table its columns and key rows. " +
-		"Quote titles, labels and key numbers verbatim, but do not transcribe long passages of text. " +
-		"Plain text only: no preamble, headings or markdown."
-	toolImageFullPrompt = "Describe this image completely for an assistant that cannot see it " +
-		"and must work from your words alone. " +
-		"First say what kind of image it is. Transcribe all readable text in reading order; " +
-		"for a chart give the axes, units, legend and every labelled value; " +
-		"for a table reproduce every row and column; for a diagram name every element and each connection; " +
-		"for a formula write it out exactly. Mark anything illegible as [illegible] rather than guessing. " +
-		"Plain text only: no preamble."
-	toolImageFocusRunes = 300
+	toolImageBriefPrompt = types.ImageReadBriefPrompt
+	toolImageFullPrompt  = types.ImageReadFullPrompt
+	toolImageFocusRunes  = types.ImageReadFocusRunes
 )
 
+func toolImagePrompt(detail, focus string) string { return types.ImageReadPrompt(detail, focus) }
 func toolImagePrompts(result *types.ToolResult) []string {
 	prompts := make([]string, len(result.Images))
-	prompt := toolImagePrompt(result.ImageDetail, result.ImageFocus)
 	for i := range prompts {
-		prompts[i] = prompt
+		prompts[i] = toolImagePrompt(result.ImageDetail, result.ImageFocus)
 	}
 	return prompts
-}
-
-// toolImagePrompt is the VLM prompt for the reading depth the chat model asked
-// for; focus is what it is looking for and is answered first.
-func toolImagePrompt(detail, focus string) string {
-	prompt := toolImageBriefPrompt
-	if detail == types.ImageDetailFull {
-		prompt = toolImageFullPrompt
-	}
-	focus = strings.TrimSpace(focus)
-	if focus == "" {
-		return prompt
-	}
-	if runes := []rune(focus); len(runes) > toolImageFocusRunes {
-		focus = string(runes[:toolImageFocusRunes])
-	}
-	return prompt + "\nThe assistant is looking for: " + focus +
-		"\nAddress that first, saying plainly if the image does not show it."
 }
 
 const (

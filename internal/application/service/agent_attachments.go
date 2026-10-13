@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/agent/tools"
+	"github.com/Tencent/WeKnora/internal/application/attachment"
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
@@ -19,7 +20,7 @@ import (
 const defaultAgentAttachmentParseWait = 60 * time.Second
 
 // agentSessionAttachments is attachment://'s view of one session. Documents
-// are looked up by tenant and ID only after read_file has matched them against
+// are looked up by tenant and ID only after the application reader matched them against
 // the session's own message attachments, so a forked session can still read
 // files whose temporary_documents row stays on the parent.
 type agentSessionAttachments struct {
@@ -82,15 +83,15 @@ func agentAttachmentParseWait(config *types.AgentConfig) time.Duration {
 // than the tool allowlist: a file the user sent must stay readable.
 func (s *agentService) registerAttachmentReader(
 	ctx context.Context, registry *tools.ToolRegistry, config *types.AgentConfig, sessionID string,
-) {
+) *attachment.Reader {
 	if s.db == nil || sessionID == "" || config.SkillInstallMode() {
-		return
+		return nil
 	}
 	// Attachments belong to the session owner, which differs from the agent's
 	// tenant when a shared agent runs in someone else's workspace.
 	tenantID, ok := types.SandboxTenantIDFromContext(ctx)
 	if !ok || tenantID == 0 {
-		return
+		return nil
 	}
 	store := &agentSessionAttachments{
 		messages:  repository.NewMessageRepository(s.db),
@@ -102,7 +103,7 @@ func (s *agentService) registerAttachmentReader(
 	attachments, err := store.SessionAttachments(ctx)
 	if err != nil {
 		logger.Warnf(ctx, "attachment:// not offered: load session attachments: %v", err)
-		return
+		return nil
 	}
 	stored := false
 	for _, attachment := range attachments {
@@ -112,18 +113,34 @@ func (s *agentService) registerAttachmentReader(
 		}
 	}
 	if !stored {
-		return
+		return nil
 	}
 	var reader *tools.ReadFileTool
 	if existing, err := registry.GetTool(tools.ToolReadFile); err == nil {
 		if reader, _ = existing.(*tools.ReadFileTool); reader == nil {
 			logger.Warnf(ctx, "Cannot attach conversation attachments: read_file is registered by another tool")
-			return
+			return nil
 		}
 	} else {
 		reader = tools.NewReadFileTool(nil)
 		registry.RegisterTool(reader)
 	}
-	reader.WithAttachments(store, agentAttachmentParseWait(config), store.ReadImage).
-		WithAttachmentCopies(config.AttachmentSandboxCopies)
+	source := attachment.NewReader(store, agentAttachmentParseWait(config), store.ReadImage)
+	if len(config.AttachmentSandboxCopies) > 0 {
+		ownerCtx := context.WithValue(ctx, types.TenantIDContextKey, tenantID)
+		inputStore, err := s.sessionSandboxInputStore(ownerCtx, sessionID, config.SandboxConfigID)
+		if err != nil {
+			logger.Warnf(ctx, "Attachment sandbox sync unavailable: %v", err)
+		} else if inputStore != nil {
+			originals := make(map[string]string, len(config.AttachmentSandboxCopies))
+			for original, address := range config.AttachmentSandboxCopies {
+				originals[address] = original
+			}
+			source.Projection = &attachmentSandboxProjection{
+				store: inputStore, sessionID: sessionID, originals: originals,
+			}
+		}
+	}
+	reader.WithAttachments(source).WithAttachmentCopies(config.AttachmentSandboxCopies)
+	return source
 }

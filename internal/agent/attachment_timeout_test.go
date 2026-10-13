@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/agent/tools"
+	"github.com/Tencent/WeKnora/internal/application/attachment"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/require"
 )
@@ -37,7 +38,8 @@ func TestAttachmentToolExecutionHonorsParseWaitAndParentDeadline(t *testing.T) {
 			engine := newTestEngine(t, &mockChat{})
 			engine.toolRegistry = tools.NewToolRegistry()
 			store := &attachmentDeadlineStore{}
-			engine.toolRegistry.RegisterTool(tools.NewReadFileTool(nil).WithAttachments(store, tc.wait, nil))
+			engine.toolRegistry.RegisterTool(
+				tools.NewReadFileTool(nil).WithAttachments(attachment.NewReader(store, tc.wait, nil)))
 			ctx := context.Background()
 			if tc.parent > 0 {
 				var cancel context.CancelFunc

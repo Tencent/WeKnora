@@ -149,6 +149,7 @@ func (s *agentService) stageSessionAttachments(
 	}
 
 	desired := make(map[string]struct{}, len(attachments))
+	var assets []string
 	staged := make([]stagedSessionAttachment, 0, len(attachments))
 	maxBytes := int64(secutils.GetMaxFileSizeMB()) * 1024 * 1024
 	for _, attachment := range attachments {
@@ -157,6 +158,7 @@ func (s *agentService) stageSessionAttachments(
 			return nil, pathErr
 		}
 		desired[remotePath] = struct{}{}
+		assets = append(assets, remotePath+attachmentAssetsSuffix)
 
 		entry, present := existing[remotePath]
 		if !present || attachment.FileSize <= 0 || entry.Size != attachment.FileSize {
@@ -210,6 +212,18 @@ func (s *agentService) stageSessionAttachments(
 	// files.
 	for filePath := range existing {
 		if _, keep := desired[filePath]; !keep {
+			// On-demand image copies and observations belong to the same original.
+			// Preserve them for live attachments; remove them with stale originals.
+			liveAsset := false
+			for _, root := range assets {
+				if filePath == root || strings.HasPrefix(filePath, root+"/") {
+					liveAsset = true
+					break
+				}
+			}
+			if liveAsset {
+				continue
+			}
 			if err := store.RemoveSessionInputPath(ctx, sessionID, filePath); err != nil {
 				return nil, fmt.Errorf("remove stale session input %s: %w", filePath, err)
 			}

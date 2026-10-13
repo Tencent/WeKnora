@@ -249,3 +249,20 @@ func TestAttachmentImagesReachVisionOrVLMWithoutPersistingBytes(t *testing.T) {
 	require.Empty(t, stored[0].ToolCalls[0].Result.Images)
 	require.NotEmpty(t, step.ToolCalls[0].Result.Images, "storage sanitization must not mutate live input")
 }
+
+func TestToolImagesReuseApplicationDescriptions(t *testing.T) {
+	engine := newTestEngine(t, &mockChat{})
+	engine.SetImageDescriber(func(context.Context, []byte, string) (string, error) {
+		t.Fatal("attachment description must not run twice")
+		return "", nil
+	})
+	result := &types.ToolResult{
+		Success: true, Images: []string{"data:image/png;base64,aGVsbG8="},
+		ImageDescriptions: []string{"saved observation"}, Data: map[string]interface{}{},
+	}
+	engine.describeToolImages(context.Background(), result)
+	require.Equal(t, []string{"saved observation"}, result.Data["image_descriptions"])
+	result.ImageDescriptions = []string{""} // A failed application attempt also must not double its timeout.
+	engine.describeToolImages(context.Background(), result)
+	require.Equal(t, []string{""}, result.Data["image_descriptions"])
+}

@@ -13,6 +13,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/Tencent/WeKnora/internal/application/attachment"
 	"github.com/Tencent/WeKnora/internal/sandbox"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/assert"
@@ -83,7 +84,8 @@ func TestReadFileAttachmentPagesThroughParsedText(t *testing.T) {
 		lines[i] = fmt.Sprintf("section %d text", i+1)
 	}
 	document := readyDocument("doc-1", strings.Join(lines, "\n"))
-	tool := NewReadFileTool(nil).WithAttachments(singleAttachmentStore(document), time.Second, nil)
+	tool := NewReadFileTool(nil).WithAttachments(
+		attachment.NewReader(singleAttachmentStore(document), time.Second, nil))
 	path := types.AttachmentPath("doc-1")
 
 	first := runReadFile(t, tool, ReadFileInput{Path: path, Limit: 5})
@@ -106,7 +108,8 @@ func TestReadFileAttachmentPagesThroughParsedText(t *testing.T) {
 
 func TestReadFileAttachmentQueryReturnsNumberedMatchingLines(t *testing.T) {
 	document := readyDocument("doc-1", "revenue grew in Q1\nheadcount was flat\nRevenue fell in Q3 due to churn")
-	tool := NewReadFileTool(nil).WithAttachments(singleAttachmentStore(document), time.Second, nil)
+	tool := NewReadFileTool(nil).WithAttachments(
+		attachment.NewReader(singleAttachmentStore(document), time.Second, nil))
 	path := types.AttachmentPath("doc-1")
 
 	result := runReadFile(t, tool, ReadFileInput{Path: path, Query: "revenue q3"})
@@ -132,7 +135,7 @@ func TestReadFileAttachmentWaitsForParsingDocument(t *testing.T) {
 	document.Status = types.TemporaryDocumentStatusProcessing
 	store := singleAttachmentStore(document)
 	store.readyAfter = map[string]int{"doc-1": 2}
-	tool := NewReadFileTool(nil).WithAttachments(store, 5*time.Second, nil)
+	tool := NewReadFileTool(nil).WithAttachments(attachment.NewReader(store, 5*time.Second, nil))
 
 	result := runReadFile(t, tool, ReadFileInput{Path: types.AttachmentPath("doc-1")})
 
@@ -143,7 +146,7 @@ func TestReadFileAttachmentWaitsForParsingDocument(t *testing.T) {
 func TestReadFileAttachmentReportsStillParsingAfterWait(t *testing.T) {
 	document := readyDocument("doc-1", "parsed body")
 	document.Status = types.TemporaryDocumentStatusProcessing
-	tool := NewReadFileTool(nil).WithAttachments(singleAttachmentStore(document), 0, nil)
+	tool := NewReadFileTool(nil).WithAttachments(attachment.NewReader(singleAttachmentStore(document), 0, nil))
 
 	result := runReadFile(t, tool, ReadFileInput{Path: types.AttachmentPath("doc-1")})
 
@@ -154,7 +157,7 @@ func TestReadFileAttachmentReportsStillParsingAfterWait(t *testing.T) {
 func TestReadFileAttachmentRejectsDocumentsOutsideSession(t *testing.T) {
 	store := singleAttachmentStore(readyDocument("doc-1", "mine"))
 	store.documents["other"] = readyDocument("other", "someone else's")
-	tool := NewReadFileTool(nil).WithAttachments(store, time.Second, nil)
+	tool := NewReadFileTool(nil).WithAttachments(attachment.NewReader(store, time.Second, nil))
 
 	for _, path := range []string{
 		"attachment://other", types.AttachmentPath("other"), types.AttachmentPath("other") + "/images/1",
@@ -176,7 +179,7 @@ func TestReadFileAttachmentFallsBackToStoredExcerptWhenExpired(t *testing.T) {
 		},
 		documents: map[string]*types.TemporaryDocument{},
 	}
-	tool := NewReadFileTool(nil).WithAttachments(store, time.Second, nil)
+	tool := NewReadFileTool(nil).WithAttachments(attachment.NewReader(store, time.Second, nil))
 
 	result := runReadFile(t, tool, ReadFileInput{Path: "attachment://brief.pdf"})
 
@@ -197,7 +200,7 @@ func TestReadFileAttachmentListsInventory(t *testing.T) {
 		},
 		documents: map[string]*types.TemporaryDocument{"doc-1": readyDocument("doc-1", "x"), "doc-2": pending},
 	}
-	tool := NewReadFileTool(nil).WithAttachments(store, time.Second, nil)
+	tool := NewReadFileTool(nil).WithAttachments(attachment.NewReader(store, time.Second, nil))
 
 	result := runReadFile(t, tool, ReadFileInput{Path: "attachment://"})
 
@@ -212,7 +215,7 @@ func TestReadFileAttachmentReportsParseFailure(t *testing.T) {
 	failed := readyDocument("doc-1", "")
 	failed.Status = types.TemporaryDocumentStatusFailed
 	failed.ErrorMessage = "encrypted PDF"
-	tool := NewReadFileTool(nil).WithAttachments(singleAttachmentStore(failed), time.Second, nil)
+	tool := NewReadFileTool(nil).WithAttachments(attachment.NewReader(singleAttachmentStore(failed), time.Second, nil))
 
 	result := runReadFile(t, tool, ReadFileInput{Path: types.AttachmentPath("doc-1")})
 
@@ -234,11 +237,11 @@ func TestReadFileAttachmentNumbersImagesAndReadsThemOnDemand(t *testing.T) {
 	document.ImageRefs = types.JSON(raw)
 	data := pngBytes(t)
 	var reads []string
-	tool := NewReadFileTool(nil).WithAttachments(singleAttachmentStore(document), 0,
+	tool := NewReadFileTool(nil).WithAttachments(attachment.NewReader(singleAttachmentStore(document), 0,
 		func(_ context.Context, ref string) ([]byte, error) {
 			reads = append(reads, ref)
 			return data, nil
-		})
+		}))
 	path := types.AttachmentPath("report")
 
 	text := runReadFile(t, tool, ReadFileInput{Path: path})
@@ -294,7 +297,7 @@ func TestReadFileStagedCopyReadsAsTheAttachment(t *testing.T) {
 		data: []byte("PK\x03\x04"),
 	}
 	copyPath := "/workspace/input/ab/brief.docx"
-	tool := NewReadFileTool(source).WithAttachments(store, 5*time.Second, nil).
+	tool := NewReadFileTool(source).WithAttachments(attachment.NewReader(store, 5*time.Second, nil)).
 		WithAttachmentCopies(map[string]string{copyPath: types.AttachmentPath("brief")})
 
 	result, err := tool.Execute(sandboxFileTestContext(),
@@ -320,11 +323,11 @@ func TestReadFileAttachmentImageUploadShowsTheImage(t *testing.T) {
 	}
 	data := pngBytes(t)
 	var reads []string
-	tool := NewReadFileTool(nil).WithAttachments(singleAttachmentStore(document), 0,
+	tool := NewReadFileTool(nil).WithAttachments(attachment.NewReader(singleAttachmentStore(document), 0,
 		func(_ context.Context, ref string) ([]byte, error) {
 			reads = append(reads, ref)
 			return data, nil
-		})
+		}))
 
 	result := runReadFile(t, tool, ReadFileInput{Path: types.AttachmentPath("shot")})
 
@@ -336,16 +339,16 @@ func TestReadFileAttachmentImageUploadShowsTheImage(t *testing.T) {
 
 func TestReadFileAttachmentImageErrorsAreReported(t *testing.T) {
 	document := readyDocument("report", "text")
-	tool := NewReadFileTool(nil).WithAttachments(singleAttachmentStore(document), 0, nil)
+	tool := NewReadFileTool(nil).WithAttachments(attachment.NewReader(singleAttachmentStore(document), 0, nil))
 	path := types.AttachmentPath("report") + "/images"
 	assert.Contains(t, runReadFile(t, tool, ReadFileInput{Path: path}).Error, "no stored images")
 	document.ImageRefs = types.JSON(`[{"url":"local://chart.png"}]`)
 	assert.Contains(t, runReadFile(t, tool, ReadFileInput{Path: path}).Error, "storage is unavailable")
-	tool.WithAttachments(singleAttachmentStore(document), 0,
-		func(context.Context, string) ([]byte, error) { return nil, fmt.Errorf("missing image") })
+	tool.WithAttachments(attachment.NewReader(singleAttachmentStore(document), 0,
+		func(context.Context, string) ([]byte, error) { return nil, fmt.Errorf("missing image") }))
 	assert.Contains(t, runReadFile(t, tool, ReadFileInput{Path: path}).Error, "missing image")
-	tool.WithAttachments(singleAttachmentStore(document), 0,
-		func(context.Context, string) ([]byte, error) { return []byte("not an image"), nil })
+	tool.WithAttachments(attachment.NewReader(singleAttachmentStore(document), 0,
+		func(context.Context, string) ([]byte, error) { return []byte("not an image"), nil }))
 	assert.Contains(t, runReadFile(t, tool, ReadFileInput{Path: path}).Error, "failed to prepare")
 }
 
@@ -356,7 +359,7 @@ func TestReadFileAttachmentImagesKeepPartialSuccessAndAdvancePastFailures(t *tes
 		{"url":"missing-5"},{"url":"invalid-6"},{"url":"good-7"}
 	]`)
 	data := pngBytes(t)
-	tool := NewReadFileTool(nil).WithAttachments(singleAttachmentStore(document), 0,
+	tool := NewReadFileTool(nil).WithAttachments(attachment.NewReader(singleAttachmentStore(document), 0,
 		func(_ context.Context, ref string) ([]byte, error) {
 			switch {
 			case strings.HasPrefix(ref, "missing"):
@@ -366,7 +369,7 @@ func TestReadFileAttachmentImagesKeepPartialSuccessAndAdvancePastFailures(t *tes
 			default:
 				return data, nil
 			}
-		})
+		}))
 	path := types.AttachmentPath("report")
 
 	first := runReadFile(t, tool, ReadFileInput{Path: path + "/images", Limit: 4})
@@ -400,11 +403,11 @@ func TestAttachmentImageReadsDefaultToOneAndLimitFullReads(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			reads := 0
-			tool := NewReadFileTool(nil).WithAttachments(singleAttachmentStore(document), 0,
+			tool := NewReadFileTool(nil).WithAttachments(attachment.NewReader(singleAttachmentStore(document), 0,
 				func(context.Context, string) ([]byte, error) {
 					reads++
 					return data, nil
-				})
+				}))
 			result := runReadFile(t, tool, ReadFileInput{
 				Path: types.AttachmentPath(document.ID) + "/images", Detail: tc.detail, Limit: tc.limit,
 				Focus: "Q3 revenue",
@@ -421,7 +424,8 @@ func TestAttachmentImageReadsDefaultToOneAndLimitFullReads(t *testing.T) {
 }
 
 func TestAttachmentRejectsInvalidLineCursors(t *testing.T) {
-	tool := NewReadFileTool(nil).WithAttachments(singleAttachmentStore(readyDocument("text", "abc")), 0, nil)
+	tool := NewReadFileTool(nil).WithAttachments(
+		attachment.NewReader(singleAttachmentStore(readyDocument("text", "abc")), 0, nil))
 	for _, input := range []ReadFileInput{
 		{LineOffset: -1}, {LineOffset: 3}, {LineOffset: 1, Offset: 2}, {LineOffset: 1, Query: "abc"},
 	} {
@@ -436,7 +440,8 @@ func TestReadFileAttachmentCancellationIsNotReportedAsElapsedWait(t *testing.T) 
 	document.Status = types.TemporaryDocumentStatusProcessing
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	tool := NewReadFileTool(nil).WithAttachments(singleAttachmentStore(document), 120*time.Second, nil)
+	tool := NewReadFileTool(nil).WithAttachments(
+		attachment.NewReader(singleAttachmentStore(document), 120*time.Second, nil))
 
 	result, err := tool.Execute(ctx, json.RawMessage(`{"path":"`+types.AttachmentPath("report")+`"}`))
 
@@ -447,7 +452,7 @@ func TestReadFileAttachmentCancellationIsNotReportedAsElapsedWait(t *testing.T) 
 
 func TestReadFileExecutionTimeoutFollowsAttachmentWait(t *testing.T) {
 	assert.Zero(t, NewReadFileTool(nil).ExecutionTimeout())
-	tool := NewReadFileTool(nil).WithAttachments(&fakeAttachmentStore{}, 90*time.Second, nil)
+	tool := NewReadFileTool(nil).WithAttachments(attachment.NewReader(&fakeAttachmentStore{}, 90*time.Second, nil))
 	assert.Equal(t, 95*time.Second, tool.ExecutionTimeout())
 	assert.Contains(t, tool.Description(), "/images/N")
 }
@@ -496,7 +501,7 @@ func TestReadFileWorkspaceQuerySearchesTextFiles(t *testing.T) {
 func TestAttachmentReadsBeyondSandboxDownloadLimit(t *testing.T) {
 	body := strings.Repeat("row data\n", 1048577) + "last row needle\n"
 	document := readyDocument("large", body)
-	tool := NewReadFileTool(nil).WithAttachments(singleAttachmentStore(document), 0, nil)
+	tool := NewReadFileTool(nil).WithAttachments(attachment.NewReader(singleAttachmentStore(document), 0, nil))
 	address := types.AttachmentPath(document.ID)
 	page := runReadFile(t, tool, ReadFileInput{Path: address, Limit: 2})
 	require.True(t, page.Success, page.Error)
@@ -521,7 +526,7 @@ func TestAttachmentLongLinesRoundTripThroughCursors(t *testing.T) {
 				delete(store.documents, document.ID)
 			}
 			registry := NewToolRegistry()
-			registry.RegisterTool(NewReadFileTool(nil).WithAttachments(store, 0, nil))
+			registry.RegisterTool(NewReadFileTool(nil).WithAttachments(attachment.NewReader(store, 0, nil)))
 			input := ReadFileInput{Path: types.AttachmentPath(document.ID), Limit: 1, MaxBytes: 4096}
 			var recovered strings.Builder
 			for calls := 0; ; calls++ {
@@ -563,7 +568,7 @@ func TestAttachmentPagesReserveAllOutputMetadata(t *testing.T) {
 			document.FileName = strings.Repeat("f", 250) + ".pdf"
 			document.ImageRefs = types.JSON(`[{"url":"local://figure.png"}]`)
 			address := types.AttachmentPath(document.ID)
-			tool := NewReadFileTool(nil).WithAttachments(singleAttachmentStore(document), 0, nil)
+			tool := NewReadFileTool(nil).WithAttachments(attachment.NewReader(singleAttachmentStore(document), 0, nil))
 			if copyPath != "" {
 				tool.WithAttachmentCopies(map[string]string{copyPath: address})
 				address = copyPath
