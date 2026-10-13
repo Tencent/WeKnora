@@ -2178,7 +2178,7 @@ onBeforeRouteUpdate((to, from, next) => {
         flex-shrink: 0;
         margin: 0;
         padding: 3px 0 0;
-        font-size: 16px;
+        font-size: var(--app-text-xl);
     }
 
     .t-popconfirm__inner {

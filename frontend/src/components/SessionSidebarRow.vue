@@ -305,8 +305,15 @@ const confirmDangerAction = (): void => {
 
 .submenu_item:not(.submenu_item_batch) {
   &:hover, &:focus-within, &.submenu_item--menu-open {
-    .session-row-badge { opacity: 0; }
     .session-row-menu-wrap--badge .menu-more-wrap { opacity: 1; }
+  }
+}
+
+@media (hover: hover) {
+  .submenu_item:not(.submenu_item_batch) {
+    &:hover, &:focus-within, &.submenu_item--menu-open {
+      .session-row-badge { opacity: 0; }
+    }
   }
 }
 
@@ -332,7 +339,6 @@ const confirmDangerAction = (): void => {
     position: static;
     flex: 0 0 16px;
     height: 24px;
-    opacity: 1 !important;
   }
 }
 
