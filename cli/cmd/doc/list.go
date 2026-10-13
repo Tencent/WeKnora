@@ -51,7 +51,7 @@ type ListOptions struct {
 // ?parse_status= query. Kept in sync manually since the SDK doesn't
 // re-export the enum.
 var docListStatusValues = []string{
-	"pending", "processing", "finalizing", "completed", "failed", "deleting", "cancelled",
+	"draft", "pending", "processing", "finalizing", "completed", "failed", "deleting", "cancelled",
 }
 
 // ListService is the narrow SDK surface this command depends on.
@@ -108,7 +108,7 @@ backend storage order is not guaranteed and varies between deployments.`,
 	cmd.Flags().IntVarP(&opts.Limit, "limit", "L", 30, "Maximum results to return — client-side cap; meta.has_more/total_count report the full size (1..10000)")
 	cmd.Flags().BoolVar(&opts.AllPages, "all-pages", false, "Walk all server pages until exhausted (or --limit hit)")
 	cmd.Flags().StringVar(&opts.Status, "status", "",
-		"Filter by parse status: pending | processing | finalizing | "+
+		"Filter by parse status: draft | pending | processing | finalizing | "+
 			"completed | failed | deleting | cancelled")
 	cmd.Flags().StringVar(&opts.Keyword, "keyword", "", "Server-side substring match against title / file_name (case-insensitive)")
 	cmd.Flags().StringVar(&opts.FileType, "file-type", "", `Filter by file extension (e.g. "pdf", "md")`)
