@@ -89,6 +89,14 @@ function isHttpUrl(value: string): boolean {
   return /^https?:\/\//i.test(value)
 }
 
+function markdownLinkDestination(value: string): string {
+  // Preserve existing percent escapes while keeping URL punctuation and
+  // whitespace from ending the Markdown destination early.
+  return value
+    .replace(/[\\()]/g, '\\$&')
+    .replace(/[\s<>]/g, character => encodeURIComponent(character))
+}
+
 function referenceLine(reference: SessionExportReference): string {
   const title = reference.knowledge_title
     || reference.knowledge_filename
@@ -99,7 +107,7 @@ function referenceLine(reference: SessionExportReference): string {
 
   const source = reference.metadata?.url || reference.knowledge_source || ''
   const safeTitle = markdownListText(title)
-  return isHttpUrl(source) ? `- [${safeTitle}](${source})` : `- ${safeTitle}`
+  return isHttpUrl(source) ? `- [${safeTitle}](${markdownLinkDestination(source)})` : `- ${safeTitle}`
 }
 
 export function buildSessionMarkdown(options: {

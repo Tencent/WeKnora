@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { marked } from 'marked'
 import { buildSessionMarkdown, collectAllSessionMessages } from './sessionMarkdown'
 
 const labels = {
@@ -61,3 +62,30 @@ test('buildSessionMarkdown exports visible conversation content without internal
   assert.doesNotMatch(markdown, /hidden system prompt/)
   assert.equal(markdown.match(/\[Notes\]/g)?.length, 1)
 })
+
+for (const [source, expectedHref] of [
+    ['https://example.com/report).pdf?mode=full#results', 'https://example.com/report).pdf?mode=full#results'],
+    ['https://example.com/report(draft.pdf', 'https://example.com/report(draft.pdf'],
+    ['https://example.com/report one.pdf', 'https://example.com/report%20one.pdf'],
+    ['https://example.com/report<draft>.pdf', 'https://example.com/report%3Cdraft%3E.pdf'],
+    ['https://example.com/report%20one.pdf', 'https://example.com/report%20one.pdf'],
+] as const) {
+  test(`exported reference destination survives Markdown parsing: ${source}`, () => {
+    const markdown = buildSessionMarkdown({
+      sessionId: 'session-links',
+      title: 'Reference export',
+      exportedAt: '2026-01-05T00:00:00Z',
+      labels,
+      messages: [{
+        role: 'assistant',
+        content: 'See the reference.',
+        knowledge_references: [{ knowledge_title: 'Reference [draft]', metadata: { url: source } }],
+      }],
+    })
+    const links: string[] = []
+    marked.walkTokens(marked.lexer(markdown), token => {
+      if (token.type === 'link') links.push(token.href)
+    })
+    assert.deepEqual(links, [expectedHref], source)
+  })
+}
