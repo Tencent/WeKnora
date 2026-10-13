@@ -1,0 +1,425 @@
+// Package hitl coordinates human-in-the-loop prompts raised by agent runs:
+// tool approvals, in-conversation authorizations, questions for the user.
+//
+// The prompt row in Store is the source of truth for every answer. The
+// replica that raised a prompt keeps an in-memory waiter only as a wake-up
+// hook: Resolve records the answer with a compare-and-set, then wakes the
+// waiter locally or over Redis pub/sub, and the waiter also polls the row in
+// case a wake-up is lost. Kind-specific behaviour (request/response shape and
+// validation) is registered per kind; the broker never interprets payloads.
+package hitl
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/google/uuid"
+	"github.com/redis/go-redis/v9"
+)
+
+// pubsubChannelBase is the Redis channel prefix used to wake the replica that
+// holds a waiter after another replica recorded the answer. The actual
+// channel is suffixed with WEKNORA_REDIS_NAMESPACE (when set) so multiple
+// deployments sharing the same Redis don't cross-talk.
+const pubsubChannelBase = "weknora:agent_prompt:wake"
+
+// instanceID identifies this process as the owner of in-memory waiters.
+var instanceID = uuid.New().String()
+
+// Timing of the owner-side wait loop. The poll covers lost pub/sub wake-ups;
+// the lease lets other replicas notice an owner that disappeared.
+const (
+	defaultPollInterval  = 3 * time.Second
+	defaultLeaseTTL      = 30 * time.Second
+	defaultRenewInterval = 10 * time.Second
+)
+
+var (
+	// ErrPromptNotFound is returned when Resolve targets an unknown prompt,
+	// or one outside the caller's session or kind.
+	ErrPromptNotFound = errors.New("agent prompt not found")
+	// ErrTenantMismatch is returned when the caller's tenant does not own the prompt.
+	ErrTenantMismatch = errors.New("workspace mismatch for agent prompt")
+	// ErrUserMismatch is returned when the caller does not own the session.
+	ErrUserMismatch = errors.New("user mismatch for agent prompt")
+	// ErrAlreadyResolved is returned when the prompt was already answered or
+	// ended by timeout / cancellation.
+	ErrAlreadyResolved = errors.New("agent prompt already resolved")
+	// ErrInvalidResponse wraps a kind validator's rejection of an answer.
+	ErrInvalidResponse = errors.New("invalid agent prompt response")
+)
+
+// ResponseValidator checks an answer against the prompt that asked for it.
+type ResponseValidator func(request, response json.RawMessage) error
+
+// Outcome is how an awaited prompt ended. Prompt is the row as last read.
+type Outcome struct {
+	Prompt *types.AgentPrompt
+	// Answered means the user responded; Prompt.Response holds the answer.
+	Answered bool
+	TimedOut bool
+	Canceled bool
+	Reason   string
+}
+
+// Spec describes a prompt to raise and wait on.
+type Spec struct {
+	// Prompt carries kind, scope and request. Status, ownership and lease are
+	// filled in by Await; an empty ID is generated.
+	Prompt        *types.AgentPrompt
+	Timeout       time.Duration
+	TimeoutReason string
+	// Emit notifies the UI. It runs after the row is persisted and the
+	// waiter is registered, so an immediate answer is never missed.
+	Emit func(ctx context.Context, prompt *types.AgentPrompt) error
+}
+
+// ResolveRequest is a user answer to a prompt. SessionID and Kind, when set,
+// must match the prompt; a mismatch reads as not found so callers cannot
+// probe prompts outside the session or surface they are authorized for.
+type ResolveRequest struct {
+	TenantID  uint64
+	UserID    string
+	SessionID string
+	Kind      string
+	PromptID  string
+	Response  json.RawMessage
+}
+
+// Broker raises, awaits and resolves prompts.
+type Broker struct {
+	store Store
+	rdb   *redis.Client
+
+	mu         sync.Mutex
+	waiters    map[string]chan struct{}
+	validators map[string]ResponseValidator
+
+	pollInterval  time.Duration
+	leaseTTL      time.Duration
+	renewInterval time.Duration
+}
+
+// Option customizes a Broker.
+type Option func(*Broker)
+
+// WithPollInterval overrides how often a waiter re-reads its row.
+func WithPollInterval(d time.Duration) Option {
+	return func(b *Broker) {
+		if d > 0 {
+			b.pollInterval = d
+		}
+	}
+}
+
+// NewBroker builds a broker. store may be nil (process memory; single
+// replica only). rdb may be nil (no cross-instance wake-ups; waiters still
+// observe answers by polling the store).
+func NewBroker(store Store, rdb *redis.Client, opts ...Option) *Broker {
+	if store == nil {
+		store = NewMemoryStore()
+	}
+	b := &Broker{
+		store:         store,
+		rdb:           rdb,
+		waiters:       make(map[string]chan struct{}),
+		validators:    make(map[string]ResponseValidator),
+		pollInterval:  defaultPollInterval,
+		leaseTTL:      defaultLeaseTTL,
+		renewInterval: defaultRenewInterval,
+	}
+	for _, opt := range opts {
+		opt(b)
+	}
+	if rdb != nil {
+		go b.runSubscriber()
+	}
+	return b
+}
+
+// Store exposes the backing store to kind adapters and tests.
+func (b *Broker) Store() Store { return b.store }
+
+// RegisterKind installs the answer validator for kind. Resolve rejects
+// answers to kinds without a validator.
+func (b *Broker) RegisterKind(kind string, validate ResponseValidator) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.validators[kind] = validate
+}
+
+// Await persists the prompt as pending and owned by this process, emits it,
+// and blocks until it is answered, the timeout elapses, or ctx ends. The
+// outcome always reflects the row's final state, so an answer that lands
+// concurrently with a timeout or cancellation is never lost.
+func (b *Broker) Await(ctx context.Context, spec Spec) (Outcome, error) {
+	p := spec.Prompt
+	if p == nil {
+		return Outcome{}, errors.New("agent prompt: nil prompt")
+	}
+	if p.ID == "" {
+		p.ID = uuid.New().String()
+	}
+	dbCtx := context.WithoutCancel(ctx)
+	lease := time.Now().Add(b.leaseTTL)
+	p.Status = types.AgentPromptPending
+	p.OwnerInstance = instanceID
+	p.LeaseUntil = &lease
+	if err := b.store.Create(dbCtx, p); err != nil {
+		return Outcome{}, fmt.Errorf("persist agent prompt: %w", err)
+	}
+
+	wake := b.register(p.ID)
+	defer b.unregister(p.ID)
+
+	if spec.Emit != nil {
+		if err := spec.Emit(ctx, p); err != nil {
+			b.closeAsOwner(dbCtx, p.ID, types.AgentPromptCanceled, "prompt could not be delivered")
+			return Outcome{}, fmt.Errorf("emit agent prompt: %w", err)
+		}
+	}
+
+	timer := time.NewTimer(spec.Timeout)
+	defer timer.Stop()
+	poll := time.NewTicker(b.pollInterval)
+	defer poll.Stop()
+	renew := time.NewTicker(b.renewInterval)
+	defer renew.Stop()
+
+	for {
+		select {
+		case <-wake:
+			if out, ok := b.closed(dbCtx, p.ID); ok {
+				return out, nil
+			}
+		case <-poll.C:
+			if out, ok := b.closed(dbCtx, p.ID); ok {
+				return out, nil
+			}
+		case <-renew.C:
+			if _, err := b.store.RenewLease(dbCtx, p.ID, instanceID, time.Now().Add(b.leaseTTL)); err != nil {
+				logger.GetLogger(ctx).Warnf("renew agent prompt lease %s: %v", p.ID, err)
+			}
+		case <-timer.C:
+			return b.closeAsOwner(dbCtx, p.ID, types.AgentPromptExpired, spec.TimeoutReason), nil
+		case <-ctx.Done():
+			return b.closeAsOwner(dbCtx, p.ID, types.AgentPromptCanceled, "request canceled"), nil
+		}
+	}
+}
+
+// closeAsOwner ends a pending prompt from the waiting side. When an answer
+// won the race, that answer is returned instead.
+func (b *Broker) closeAsOwner(ctx context.Context, id, status, reason string) Outcome {
+	ok, err := b.store.Transition(ctx, id, types.AgentPromptTransition{
+		From:        []string{types.AgentPromptPending},
+		To:          status,
+		CloseReason: &reason,
+	})
+	if err != nil {
+		logger.GetLogger(ctx).Warnf("close agent prompt %s as %s: %v", id, status, err)
+	}
+	if !ok {
+		if out, closed := b.closed(ctx, id); closed {
+			return out
+		}
+	}
+	return Outcome{
+		Prompt:   &types.AgentPrompt{ID: id, Status: status, CloseReason: reason},
+		TimedOut: status == types.AgentPromptExpired,
+		Canceled: status == types.AgentPromptCanceled,
+		Reason:   reason,
+	}
+}
+
+// closed reads the row and reports its outcome once it no longer waits.
+func (b *Broker) closed(ctx context.Context, id string) (Outcome, bool) {
+	row, err := b.store.Get(ctx, id)
+	if err != nil {
+		logger.GetLogger(ctx).Warnf("read agent prompt %s: %v", id, err)
+		return Outcome{}, false
+	}
+	if row == nil || row.IsOpen() {
+		return Outcome{}, false
+	}
+	return Outcome{
+		Prompt:   row,
+		Answered: row.Status == types.AgentPromptAnswered,
+		TimedOut: row.Status == types.AgentPromptExpired,
+		Canceled: row.Status == types.AgentPromptCanceled,
+		Reason:   row.CloseReason,
+	}, true
+}
+
+// Consume moves an answered prompt to `to` once the waiter has acted on it:
+// AgentPromptExecuting when the answer authorized a side effect still to run,
+// AgentPromptDone otherwise. Prompts closed by the system are left alone.
+func (b *Broker) Consume(ctx context.Context, id, to string) {
+	_, err := b.store.Transition(context.WithoutCancel(ctx), id, types.AgentPromptTransition{
+		From: []string{types.AgentPromptAnswered},
+		To:   to,
+	})
+	if err != nil {
+		logger.GetLogger(ctx).Warnf("consume agent prompt %s: %v", id, err)
+	}
+}
+
+// MarkExecuted records that the side effect an answer authorized has run.
+func (b *Broker) MarkExecuted(ctx context.Context, id string) {
+	if id == "" {
+		return
+	}
+	_, err := b.store.Transition(context.WithoutCancel(ctx), id, types.AgentPromptTransition{
+		From: []string{types.AgentPromptExecuting},
+		To:   types.AgentPromptDone,
+	})
+	if err != nil {
+		logger.GetLogger(ctx).Warnf("mark agent prompt %s executed: %v", id, err)
+	}
+}
+
+// Resolve records a user answer on an open prompt and wakes its waiter. The
+// tenant must match the prompt; when the prompt was registered with a user,
+// the caller must present that same non-empty user.
+func (b *Broker) Resolve(ctx context.Context, req ResolveRequest) error {
+	row, err := b.store.Get(ctx, req.PromptID)
+	if err != nil {
+		return err
+	}
+	if row == nil ||
+		(req.Kind != "" && row.Kind != req.Kind) ||
+		(req.SessionID != "" && row.SessionID != req.SessionID) {
+		return ErrPromptNotFound
+	}
+	if row.TenantID != req.TenantID {
+		return ErrTenantMismatch
+	}
+	// An empty caller userID is a mismatch (fail-close) so a missing auth
+	// middleware cannot bypass the per-user check.
+	if row.UserID != "" && row.UserID != req.UserID {
+		return ErrUserMismatch
+	}
+	if !row.IsOpen() {
+		return ErrAlreadyResolved
+	}
+
+	b.mu.Lock()
+	validate := b.validators[row.Kind]
+	b.mu.Unlock()
+	if validate == nil {
+		return fmt.Errorf("%w: unsupported prompt kind %q", ErrInvalidResponse, row.Kind)
+	}
+	if err := validate(json.RawMessage(row.Request), req.Response); err != nil {
+		return fmt.Errorf("%w: %v", ErrInvalidResponse, err)
+	}
+
+	now := time.Now()
+	resolvedBy := req.UserID
+	// Only pending prompts are answerable until suspended runs can resume.
+	ok, err := b.store.Transition(ctx, req.PromptID, types.AgentPromptTransition{
+		From:       []string{types.AgentPromptPending},
+		To:         types.AgentPromptAnswered,
+		Response:   types.JSON(req.Response),
+		ResolvedBy: &resolvedBy,
+		ResolvedAt: &now,
+	})
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return ErrAlreadyResolved
+	}
+	b.wake(ctx, req.PromptID)
+	return nil
+}
+
+func (b *Broker) register(id string) <-chan struct{} {
+	ch := make(chan struct{}, 1)
+	b.mu.Lock()
+	b.waiters[id] = ch
+	b.mu.Unlock()
+	return ch
+}
+
+func (b *Broker) unregister(id string) {
+	b.mu.Lock()
+	delete(b.waiters, id)
+	b.mu.Unlock()
+}
+
+// wakeLocal nudges a waiter on this process; it reports whether one exists.
+func (b *Broker) wakeLocal(id string) bool {
+	b.mu.Lock()
+	ch, ok := b.waiters[id]
+	b.mu.Unlock()
+	if !ok {
+		return false
+	}
+	select {
+	case ch <- struct{}{}:
+	default:
+	}
+	return true
+}
+
+type wakeMessage struct {
+	PromptID string `json:"prompt_id"`
+	OriginID string `json:"origin_id,omitempty"`
+}
+
+func pubsubChannel() string {
+	if ns := strings.TrimSpace(os.Getenv("WEKNORA_REDIS_NAMESPACE")); ns != "" {
+		return pubsubChannelBase + ":" + ns
+	}
+	return pubsubChannelBase
+}
+
+// wake nudges the waiter wherever it lives. Delivery is best-effort: the
+// waiter's poll observes the answer even if the pub/sub message is lost.
+func (b *Broker) wake(ctx context.Context, id string) {
+	if b.wakeLocal(id) || b.rdb == nil {
+		return
+	}
+	payload, err := json.Marshal(wakeMessage{PromptID: id, OriginID: instanceID})
+	if err != nil {
+		return
+	}
+	pubCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+	defer cancel()
+	if err := b.rdb.Publish(pubCtx, pubsubChannel(), payload).Err(); err != nil {
+		logger.GetLogger(ctx).Warnf("agent prompt pubsub wake: %v", err)
+	}
+}
+
+// runSubscriber listens for cross-instance wake-ups for the process lifetime.
+func (b *Broker) runSubscriber() {
+	ctx := context.Background()
+	channel := pubsubChannel()
+	backoff := time.Second
+	const maxBackoff = 30 * time.Second
+	for {
+		sub := b.rdb.Subscribe(ctx, channel)
+		backoff = time.Second
+		for msg := range sub.Channel() {
+			var m wakeMessage
+			if err := json.Unmarshal([]byte(msg.Payload), &m); err != nil {
+				logger.GetLogger(ctx).Warnf("agent prompt pubsub: bad payload: %v", err)
+				continue
+			}
+			if m.OriginID != instanceID {
+				b.wakeLocal(m.PromptID)
+			}
+		}
+		_ = sub.Close()
+		time.Sleep(backoff)
+		backoff = min(backoff*2, maxBackoff)
+	}
+}

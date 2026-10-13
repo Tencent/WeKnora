@@ -1,0 +1,480 @@
+# Agent 人工交互（HITL）：两段式挂起与恢复
+
+状态：草案（P1 已实现）　关联：issue #1173（MCP 工具人工审批）
+
+## 0. 范围：通用人工交互，而不只是工具审批
+
+“Agent 停下来等人”有多种形态，本设计把它们统一成一个模型：**交互请求（prompt）**。一条交互请求有类型（`kind`）、请求载荷（`request`）和用户回答（`response`），由通用核心 `internal/agent/hitl.Broker` 负责持久化、等待、跨副本投递和挂起恢复；各类型只提供载荷结构、回答校验和前端卡片。
+
+| kind | 场景 | 回答 | 可挂起（`suspendable`） |
+|---|---|---|---|
+| `tool_approval` | MCP 工具执行前审批 | 批准/拒绝、修改后的参数、理由 | 是 |
+| `mcp_oauth` | MCP 服务需要用户先完成 OAuth 授权 | 已授权/放弃 | 是 |
+| `ask_user`（规划） | Agent 主动向用户提问，弹窗或表单收集答案 | 按问题的 schema 填写 | 是 |
+| MCP elicitation（规划） | MCP 服务端在工具调用**进行中**向用户索取输入 | 按 elicitation schema | **否** |
+| 浏览器人工接手（规划） | 登录、验证码等需要人在浏览器里操作 | 完成/放弃 | **否** |
+
+**可挂起的边界**：交互发生在外部调用**之前**（审批、OAuth、提问），运行可以安全地落库结束，之后从快照恢复；交互发生在外部调用**进行中**（elicitation 期间 MCP 会话和工具调用都开着；浏览器接手依赖副本上的连接），运行状态无法序列化，只能在内存里短等待，超时即按失败处理。记录上的 `suspendable` 标记由发起方填写，Broker 据此决定短等待到期后是挂起还是关闭。
+
+下文以工具审批为主线描述流程，其他可挂起的类型走完全相同的路径，只是“恢复时如何把回答交给被阻塞的调用”不同（见 6.1 的 `PreDecided`）。
+
+## 1. 背景与目标
+
+当前 `approval.Gate.RequestAndWait` 是同步阻塞式审批：Agent 运行的 goroutine 原地等待，进程内存里保存着完整的 ReAct 状态，等待上限默认 10 分钟（`tool_approval_timeout_seconds`）。这带来四个限制：
+
+1. 超时只是防止 goroutine 泄漏的保险丝，无法支持“第二天再审批”。
+2. waiter 只在进程内存里，发版、OOM、Pod 调度后待审批状态全部丢失。
+3. `AgentSteps` 只在轮次结束时由 `handleComplete` 写库，等待期间进程崩溃会丢掉整轮已完成的步骤。
+4. 等待期间会话一直处于“运行中”。
+
+目标：
+
+- 用户就在旁边时体验不变：短时间内仍在内存里等待，零额外延迟。
+- 超过短等待阈值后，把运行状态持久化并结束本次运行，释放 goroutine 和会话占用。
+- 用户任意时间（在过期时间内）批准或拒绝后，由任意副本发起一次新的运行，接着执行被打断的那一轮，然后继续 ReAct 循环，输出写入**同一条**助手消息。
+- 多副本部署下正确：状态以数据库为准，Redis 只用于唤醒和事件流。
+
+不在本期范围：
+
+- 非阻塞的延迟审批模式（工具立即返回“待审批”）。它依赖本设计的基础设施，以后作为个别工具的可选模式单独设计。
+- 内置工具的审批（审批仍只接入 MCP 工具）。
+- MCP elicitation 与浏览器人工接手的具体接入（只保证模型能承载它们，见第 0 节）。
+
+## 2. 现状要点（设计依据）
+
+| 事实 | 位置 | 对设计的影响 |
+|---|---|---|
+| 引擎跨轮无状态，`Execute` 总是追加一条新 user 消息并从第 0 轮开始 | `internal/agent/engine.go:326` | 需要新增恢复入口，不能复用 `Execute` |
+| 本轮 user 内容经 `RenderUserTurnContent` 渲染（含 runtime context），不落库 | `internal/agent/observe.go:1032` | 快照必须保存渲染后的原文 |
+| step 在一轮工具全部结束后才 append；此前只在局部变量里 | `engine.go:1056` | 需要引擎显式跟踪“进行中的一轮” |
+| MCP 工具不在 `CanRunConcurrently` 白名单，是并行执行中的屏障 | `act.go:306-316` | 同一时刻一次运行最多只有一个待审批调用 |
+| `response.ToolCalls` 的参数含 cN/dN/res:// 等临时句柄，在 `runToolCall` 里才解码 | `act.go:418` 起、`internal/modelcontext/registry.go` | 未执行调用的参数必须在挂起时用当前 Registry 解码后再持久化 |
+| `LoadAgentHistory` 只回放 `IsCompleted=true` 的轮次 | `agent_history.go:237` | 挂起的轮次不会进入后续轮次的历史，恢复时由快照提供 |
+| `Message` 没有状态字段；仓储 `Updates(struct)` 跳过零值 | `internal/types/message.go`、`repository/message.go:263` | 新增 `run_state` 列和列级更新方法 |
+| 引用由 handler 在 `EventAgentReferences` 上累积；complete 时仅非空才覆盖 | `agent_stream_handler.go:712` 起 | 恢复时 handler 要以已持久化的引用为初值 |
+| live-run 标记在 StreamManager，`SetLiveRun` 是 SetNX，`ClearLiveRun` 是 CAS | `internal/stream/redis_manager.go:358-496` | 直接复用为会话级互斥 |
+| 事件流 key 为 `{prefix}:{session}:{message}`，TTL 1h；没有清空接口 | `interfaces/stream_manager.go` | 需要新增 `ResetEvents` |
+| asynq 仅在 `REDIS_ADDR` 非空时启用；否则为进程内 `SyncTaskExecutor`（不做 TaskID 去重） | `internal/container/container.go:442-473` | 去重不能只靠 TaskID，必须叠加数据库 CAS |
+| 沙箱绑定在 Redis，客户端为远程接口；每条退出路径都会给 `/workspace` 打检查点 | `internal/sandbox/session_binding_redis.go`、`agent_stream_handler.go:754` | 挂起路径同样打检查点，恢复时沙箱已回收则从检查点还原 |
+| 前端刷新后从 `agent_steps` 重建时间线，不会还原审批卡片；`is_completed=false` 会立即调用 `continue-stream` | `useChatStreamHandler.ts:324-472`、`chat/index.vue:949-984` | 前端需要识别新状态，并从持久化数据渲染卡片 |
+
+## 3. 总体方案
+
+一次交互经历两个阶段：
+
+- **短等待阶段（hot）**：与现在一致，运行 goroutine 在内存里等待，默认最长 120 秒。用户在此期间回答，结果直接投递给 waiter，运行原地继续。
+- **挂起阶段（suspended）**：超过短等待阈值后，可挂起的交互把运行状态落库，运行以 `awaiting_input` 结束。用户回答后，由恢复任务在任意副本上重建引擎，继续执行。不可挂起的交互在短等待到期后直接关闭为 `expired`。
+
+进入交互的那一刻（而不是超时时）就把完整快照写库。因此短等待阶段的进程崩溃也能被回收任务转成挂起状态，不丢步骤。
+
+```mermaid
+stateDiagram-v2
+    [*] --> pending: 进入交互，写快照，持有租约
+    pending --> answered: 用户回答（任意副本 CAS）
+    pending --> suspended: 短等待超时且可挂起（持有者 CAS）\n或租约过期（回收任务 CAS）
+    pending --> expired: 短等待超时且不可挂起
+    pending --> canceled: 用户停止运行
+    suspended --> answered: 用户回答
+    suspended --> superseded: 用户发新消息 / 回溯 / 删除会话
+    suspended --> expired: 超过过期时间（回收任务）
+    answered --> executing: 回答需要触发外部副作用（如批准的工具调用）
+    answered --> done: 回答已交给模型（拒绝、OAuth、提问）
+    executing --> done: 工具结果已持久化
+    executing --> failed: 执行中断，结果未知
+    done --> [*]
+    failed --> [*]
+    canceled --> [*]
+    superseded --> [*]
+    expired --> [*]
+```
+
+`answered` 只表示“用户已回答”，回答内容（批准还是拒绝、填了什么）在 `response` 里，与“由谁继续执行”无关：如果持有者 waiter 还活着，就由它在内存中继续；否则由恢复任务继续。系统侧关闭（超时、取消、取代）的原因写在 `close_reason`，与用户回答分开存放。
+
+## 4. 数据模型
+
+### 4.1 新表 `agent_prompts`
+
+一条记录对应一次交互请求（主键即现有前端字段 `pending_id`）。与类型相关的内容全部放在 `request` / `response` 两个 JSON 列里，新增类型不需要改表。
+
+| 列 | 类型 | 说明 |
+|---|---|---|
+| `id` | varchar(36) PK | 即 `pending_id` |
+| `tenant_id` | bigint | 发起运行的租户（执行租户） |
+| `user_id` | varchar | 会话所有者，Resolve 授权用；空值不允许（fail-close） |
+| `session_id` | varchar(36) | Resolve 时与路由中的会话比对 |
+| `assistant_message_id` | varchar(36) | |
+| `request_id` | varchar | 发起运行的 request id，用于追踪 |
+| `kind` | varchar(32) | `tool_approval`、`mcp_oauth`，后续 `ask_user` 等；Resolve 时与接口声明的类型比对 |
+| `tool_call_id` | varchar | 被阻塞的工具调用 |
+| `suspendable` | boolean | 见第 0 节 |
+| `request` | jsonb / text | 类型相关的请求载荷，例如审批的服务、工具名和**已解码**参数（不含临时句柄） |
+| `response` | jsonb / text | 用户回答，例如 `{approved, modified_args, reason}` |
+| `status` | varchar(32) | 见第 3 节状态机 |
+| `close_reason` | text | 系统侧关闭的原因（超时、取消、取代） |
+| `resolved_by` | varchar | 作答的用户 |
+| `resolved_at` | timestamptz | |
+| `owner_instance` | varchar | 短等待阶段持有 waiter 的实例 id |
+| `lease_until` | timestamptz | 持有者租约，持有者每 10s 续约 |
+| `expires_at` | timestamptz | 挂起后的过期时间；为空表示不过期 |
+| `created_at` / `updated_at` | timestamptz | |
+
+索引：
+
+- `(session_id, status)`：新消息到来时查找待处理的交互。
+- `(status, lease_until)`、`(status, expires_at)`：回收任务扫描。
+- `(assistant_message_id)`。
+
+各类型的载荷结构定义在 `internal/types/agent_prompt.go`（如 `ToolApprovalPromptRequest` / `ToolApprovalPromptResponse`），回答校验函数通过 `Broker.RegisterKind` 注册；未注册的类型一律拒绝回答。
+
+### 4.2 新表 `agent_run_suspensions`
+
+一条记录对应一条处于挂起或执行中的助手消息，保存恢复所需的全部运行状态。与交互表分开，原因是交互表承载“回答”，这张表承载“运行状态”，生命周期不同：恢复完成后快照即可删除，交互记录作为审计保留。
+
+| 列 | 类型 | 说明 |
+|---|---|---|
+| `assistant_message_id` | varchar(36) PK | |
+| `tenant_id` / `session_id` | | |
+| `prompt_id` | varchar(36) | 当前阻塞它的交互 |
+| `snapshot_version` | int | 快照格式版本，当前为 1 |
+| `snapshot` | jsonb / text | 见 4.4 |
+| `created_at` / `updated_at` | timestamptz | |
+
+### 4.3 `messages` 表新增列
+
+| 列 | 类型 | 说明 |
+|---|---|---|
+| `run_state` | varchar(32)，默认 `''` | `''` 表示沿用 `is_completed` 语义；`awaiting_input` 表示已挂起，等待用户回答 |
+
+挂起的消息：`is_completed=false`、`run_state='awaiting_input'`、`agent_steps` 为挂起前已完成的步骤（供展示）。
+
+新增仓储列级方法，避免 `Updates(struct)` 跳过零值：
+
+- `MarkMessageAwaitingInput(ctx, sessionID, messageID, steps, refs, usage, sandboxCheckpoint)`
+- `ClearMessageRunState(ctx, sessionID, messageID)`
+
+`SessionHasIncompleteAssistant`（回溯时判断会话是否忙碌）改为排除 `run_state='awaiting_input'`，由回溯流程先取代挂起再继续（见 8.3）。
+
+### 4.4 快照格式（版本 1）
+
+```go
+type RunSnapshot struct {
+    Version int `json:"version"`
+
+    // 重建引擎所需的请求参数（来自原 QARequest，只存持久标识）
+    Request ResumableRequest `json:"request"`
+
+    // 本轮渲染后的 user 消息原文（含 runtime context），保证恢复后提示词一致
+    UserTurn chat.Message `json:"user_turn"`
+
+    // 已完成的轮次，与将来写入 Message.AgentSteps 的内容一致
+    CompletedSteps []types.AgentStep `json:"completed_steps"`
+
+    // 被打断的那一轮
+    PendingRound PendingRound `json:"pending_round"`
+
+    CurrentRound int              `json:"current_round"`
+    TurnUsage    *types.TokenUsage `json:"turn_usage,omitempty"`
+
+    // 已注入本轮的 steer 事件 id，避免恢复后重复注入
+    InjectedSteerIDs []string `json:"injected_steer_ids,omitempty"`
+}
+
+type PendingRound struct {
+    Iteration          int             `json:"iteration"`
+    Thought            string          `json:"thought"`
+    ReasoningContent   string          `json:"reasoning_content,omitempty"`
+    ReasoningSignature string          `json:"reasoning_signature,omitempty"`
+    ReasoningMetadata  json.RawMessage `json:"reasoning_metadata,omitempty"`
+    // 模型在这一轮发出的全部调用，参数均为已解码的持久形式
+    Calls []PendingCall `json:"calls"`
+    // 被交互阻塞的调用下标
+    BlockedIndex int `json:"blocked_index"`
+}
+
+type PendingCall struct {
+    ID                string          `json:"id"`
+    Name              string          `json:"name"`
+    DecodedArgs       json.RawMessage `json:"decoded_args"`
+    UnresolvedHandles []string        `json:"unresolved_handles,omitempty"`
+    ProviderMetadata  json.RawMessage `json:"provider_metadata,omitempty"`
+    // 已完成的调用带结果；BlockedIndex 及之后为空
+    Result *types.ToolCall `json:"result,omitempty"`
+}
+
+type ResumableRequest struct {
+    AgentID             string   `json:"agent_id"`
+    ModelID             string   `json:"model_id,omitempty"`
+    KnowledgeBaseIDs    []string `json:"knowledge_base_ids,omitempty"`
+    KnowledgeIDs        []string `json:"knowledge_ids,omitempty"`
+    MentionedItems      json.RawMessage `json:"mentioned_items,omitempty"`
+    WebSearchEnabled    bool     `json:"web_search_enabled"`
+    ReasoningEffort     string   `json:"reasoning_effort,omitempty"`
+    Channel             string   `json:"channel,omitempty"`
+    Language            string   `json:"language,omitempty"`
+    // 本机浏览器连接绑定在某个副本的 WebSocket 上，恢复时一律视为不可用
+    LocalBrowserEnabled bool     `json:"local_browser_enabled"`
+}
+```
+
+`ResumableRequest` 的字段最终以 `parseQARequest` / `buildAgentConfig` 实际使用的输入为准，实现时逐项对照，原则是只存持久 ID，不存临时句柄和运行时对象。
+
+**临时句柄的处理（关键）**：`BlockedIndex` 之后尚未执行的调用，其原始参数里可能含有只在本次运行的 `modelcontext.Registry` 中有效的 cN/dN/res:// 句柄。恢复后 Registry 是新建的，编号可能不同。因此写快照时必须用当前 Registry 对这些调用执行 `DecodeToolCalls`，持久化解码后的参数和 `UnresolvedHandles`。恢复时直接使用解码后的参数，跳过解码步骤；`UnresolvedHandles` 非空的调用照旧在执行前失败。
+
+已完成步骤里的 thought、工具参数和结果本来就以解码后的形式存储（`modelcontext` 的约定是“模型输出在被工具、存储、UI 消费前先解码”）。恢复后每次调用 LLM 前 `EncodeMessages` 会重新编码，编号一致性由新 Registry 自己保证。
+
+## 5. 后端流程
+
+### 5.1 进入交互（持有者，短等待阶段）
+
+分两层：通用核心 `hitl.Broker.Await(ctx, Spec)` 负责持久化与等待；各类型的适配层负责构造载荷、发出类型专属事件、解释回答。工具审批的适配层是 `approval.Gate`，`MCPTool.Execute` 判断需要审批后调用 `Gate.RequestAndWait`，后者构造 `ToolApprovalPromptRequest` 再调用 `Broker.Await`。`Broker.Await` 的步骤：
+
+1. （P2）通过 `ToolExecContext` 上新增的 `RunSnapshotter` 取得当前运行快照（见 6.1）。
+2. 写 `agent_prompts`（`status=pending`、`owner_instance`、`lease_until=now+30s`）；P2 起在同一事务里写 `agent_run_suspensions`。
+3. 本地登记 waiter，调用适配层的 `Emit` 发出事件（工具审批仍是 `tool_approval_required`，新增字段 `hot_wait_seconds`；`timeout_seconds` 保留为同一值，兼容旧前端）。
+4. 等待以下任一事件：
+   - Pub/Sub 唤醒（频道 `weknora:agent_prompt:wake`）：从数据库读取回答，以数据库为准。
+   - 每 3 秒轮询一次数据库状态，兜底 Pub/Sub 丢消息。
+   - 短等待计时器到期：可挂起时执行 `pending → suspended` 的 CAS，同时写入 `expires_at`；不可挂起时执行 `pending → expired`。CAS 失败说明用户刚好回答，转为读取回答。
+   - ctx 取消（用户停止）：执行 `pending → canceled` 的 CAS。失败同样转为读取回答。
+5. 后台每 10 秒续约 `lease_until`，续约 CAS 条件为 `status='pending' AND owner_instance=self`。
+6. 拿到回答后由适配层 `Consume`：
+   - 需要外部副作用（批准的工具调用）：CAS `answered → executing`，执行工具，再 CAS `executing → done`（`MarkExecuted`），删除快照。
+   - 其他（拒绝、OAuth、提问）：CAS `answered → done`，把回答交给调用方，删除快照。
+   - 挂起：返回带 `Suspend` 标记的结果（见 6.2），引擎停止本轮并结束运行。
+
+关闭挂起功能时（`prompt_suspend_enabled=false`），第 4 步的短等待计时器使用原有的 `tool_approval_timeout_seconds`，到期后按现在的逻辑记为超时。数据库记录照样写，便于审计和跨实例 Resolve。
+
+P1 已实现第 2 至 6 步中除快照与挂起以外的部分：超时一律关闭为 `expired`。
+
+### 5.2 用户回答（任意副本）
+
+现有接口 `POST /agent/tool-approvals/{pending_id}` 与 MCP OAuth 回调保留，内部都走 `Broker.Resolve`；P4 新增通用接口 `POST /agent/prompts/{id}`（请求体为该类型的 `response`），前端切换完成后旧接口作为兼容层保留。`Broker.Resolve` 的步骤：
+
+1. 按 id 读取记录。`kind` 与接口声明的类型不符、`session_id` 与路由中的会话不符时，一律返回 `not_found`，不暴露记录存在与否。再校验 `tenant_id` 和 `user_id`（调用方 userID 为空视为不匹配）。嵌入页接口额外校验 channel 与 session 的归属。
+2. 调用该类型注册的校验函数。工具审批：`modified_args` 只在批准时生效，必须是 JSON 对象；P2 起再按工具的 InputSchema 校验，工具定义取自 MCP 元数据快照，取不到就拒绝请求。提问：按问题的 schema 校验。校验失败返回 400。
+3. 依次尝试两个 CAS，以区分之前的状态，同时兼容不支持 `RETURNING` 的场景：
+   - `UPDATE … SET status='answered', response=?, resolved_* WHERE id=? AND status='suspended' AND (expires_at IS NULL OR expires_at > now)`。成功则投递恢复任务（5.4）。（P3）
+   - `UPDATE … WHERE id=? AND status='pending'`。成功则通过 Pub/Sub 唤醒持有者，不等待 ack，因为持有者会轮询数据库兜底。（P1 已实现）
+   - 两者都失败：重新读取记录，返回 `already_resolved`、`expired` 或 `not_found`。
+4. 响应体新增 `resumed: bool`。为 `true` 时，前端需要重新接入该消息的事件流。
+
+原先基于 Pub/Sub ack 的跨实例投递已在 P1 移除，Pub/Sub 只保留唤醒职责。
+
+### 5.3 挂起并结束运行（持有者）
+
+引擎收到 `Suspend` 信号后（6.2）停止当前轮，跳过“合成最终答案”的路径，发出 `EventAgentComplete`，其中新增 `Suspended=true`、`SuspendedPromptID`。
+
+`AgentStreamHandler.handleComplete` 在 `Suspended` 时：
+
+- 不设置 `IsCompleted`，改为调用 `MarkMessageAwaitingInput`，写入已完成步骤、引用、用量。
+- 照常打沙箱检查点。
+- **不**收集产物（artifacts），留到恢复后真正完成时再收集。
+- 向事件流发布 `run_suspended` 事件（带 `pending_id`、`expires_at`），再发布 `complete`，让当前 SSE 正常结束。
+
+外层 defer：
+
+- 处理 steer 队列：未消费的 `after` 类消息照常触发 `kickNextRunFromSteerBacklog`。新一轮启动时会按 8.1 取代这次审批，语义与“用户发了新消息”一致。未消费的 `inject` 类消息按 `after` 处理。
+- `ClearLiveRun`。
+
+### 5.4 恢复运行（任意副本）
+
+任务类型 `agent:resume_run`，队列使用现有 core 队列，`TaskID = "agent-resume:" + prompt_id`，`MaxRetry(3)`，`Timeout` 与普通 Agent 运行一致。无 Redis 时由 `SyncTaskExecutor` 在本进程执行，单实例部署下语义不变。
+
+处理步骤：
+
+1. 读取交互记录和快照。状态不是 `answered` 时直接退出（幂等）。
+2. **会话互斥**：`SetLiveRun(session, assistant_message_id, new_request_id)`。返回 `ErrLiveRunExists` 说明用户已开始新的一轮，此时把交互 CAS 为 `superseded` 后退出（理论上 8.1 已经处理过，这里兜底）。
+3. 重建运行环境：
+   - 按会话所有者和会话的执行租户构造 ctx，与 `executeQA` 的 `CloneContext` 方式一致。
+   - 用 `ResumableRequest` 走 `buildAgentConfig` 的同一套逻辑。智能体已被删除、无权访问、模型不可用时，按“恢复失败”处理（5.5）。
+   - 本机浏览器强制关闭。
+   - 沙箱：调用 `BoundSandboxID`，不存在则从消息的 `SandboxCheckpoint` 还原；还原失败时不阻断运行，在系统提示里说明工作区已重置。
+4. `StreamManager.ResetEvents(session, message)` 清空旧事件流，然后发布 `run_resumed` 事件（带 `pending_id` 和决定）。
+5. 创建新的 EventBus 和 `AgentStreamHandler`，用消息现有的 `Content`、`KnowledgeReferences`、`Usage` 作为初值。
+6. 调用 `engine.Resume(ctx, sessionID, messageID, llmContext, snapshot, decision)`，其中 `llmContext` 来自正常的 `LoadAgentHistory`（不含挂起轮次本身）。
+7. 正常完成：`ClearMessageRunState` 并写入 `IsCompleted=true`，走现有的完成落库路径。如果再次挂起，就回到 5.3。
+8. 删除快照，`ClearLiveRun`。
+
+### 5.5 工具至多执行一次
+
+- 执行工具前 CAS `answered → executing`，拿到结果并随快照更新落库后再 CAS `executing → done`。
+- 恢复任务重试时如果发现状态已是 `executing`，**不再重放**，而是给模型一条结果：“工具执行被服务端中断，结果未知，请先确认外部状态再决定是否重试”。交互记录标记为 `failed`。
+- 恢复失败（智能体不可用等，发生在执行工具之前）：交互状态保持为 `answered`，asynq 重试；重试耗尽后由回收任务把消息收尾为已完成，结尾附说明文字，交互标记为 `failed`。
+
+### 5.6 回收任务
+
+复用 housekeeping 的 cron 方式，每分钟执行一次：
+
+1. `status='pending' AND lease_until < now`：持有者已失联。CAS 为 `suspended`（写入 `expires_at`），把消息标记为 `awaiting_input`。快照在进入审批时已经写入，此处直接可用。
+2. `status='answered' AND lease_until < now` 且消息仍未完成：持有者在拿到回答后失联，投递恢复任务。
+3. `status='suspended' AND expires_at < now`：CAS 为 `expired`，消息收尾为已完成（不调用 LLM）：被阻塞的调用结果写为“审批已过期”，正文附一行说明，删除快照。
+4. `status='executing'` 超过 Agent 运行超时且没有 live run：标记为 `failed`，按 5.5 收尾。
+
+租约和过期时间由应用侧时钟写入和比较（Postgres 与 SQLite 的时间表达式不通用）。部署要求各副本通过 NTP 校时；30 秒租约配合 10 秒续约，足以容忍常见的秒级时钟偏差。
+
+## 6. 引擎改动
+
+### 6.1 跟踪进行中的一轮
+
+`AgentEngine` 新增 `roundProgress`，用互斥锁保护：
+
+- 在 `executeToolCalls` 之前登记本轮的 thought、reasoning 和完整的 `response.ToolCalls`。
+- 顺序路径和并行路径在每个调用完成时写入结果。并行路径中 MCP 调用是屏障，执行到它时，之前的调用都已经完成（`g.Wait()`），所以快照是确定的。
+- `RunSnapshotter.Snapshot(blockedToolCallID)` 生成 `RunSnapshot`，同时用当前 Registry 解码未执行调用的参数（4.4）。
+
+`ToolExecContext` 新增两个字段：
+
+- `Snapshotter RunSnapshotter`
+- `PreAnswered *types.AgentPrompt`：恢复时传给被阻塞的那个调用（按 `tool_call_id` 匹配），即已回答的交互记录。发起交互的工具见到它就跳过等待，由各自的适配层把 `response` 解释为结果：`MCPTool.Execute` 解释为审批决定，但仍执行开头的 `IsEnabled` 校验，并重新判断该工具是否仍需审批（管理员在此期间把工具改成“禁用”时以禁用为准）；`ask_user` 直接把答案作为工具结果返回。
+
+能发起可挂起交互的工具都必须是并行执行中的屏障（MCP 工具已经是，`ask_user` 不进 `CanRunConcurrently` 白名单），这样一次运行同一时刻最多只有一个阻塞中的交互，快照才是确定的。
+
+### 6.2 挂起信号
+
+`types.ToolResult` 新增 `Suspend bool`（`json:"-"`）。
+
+- 顺序路径：调用返回 `Suspend` 后，后面的调用不再执行，`executeToolCalls` 返回 `suspended=true`。
+- 并行路径：在屏障调用返回后检查标记，同样停止。
+- `runReActIteration` 收到后不 append 本轮 step、不调用 LLM。`executeLoop` 设置 `state.Suspended=true` 后退出，跳过 `handleMaxIterations` 和用户停止时的“合成答案”分支。
+- `emitCompletionEvent` 在 `Suspended` 时只带已完成的 `RoundSteps`。
+
+### 6.3 恢复入口
+
+```go
+func (e *AgentEngine) Resume(
+    ctx context.Context,
+    sessionID, messageID string,
+    llmContext []chat.Message,
+    snap *RunSnapshot,
+    answered *types.AgentPrompt,
+) (*types.AgentState, error)
+```
+
+1. 消息列表：system（重新计算）+ `llmContext` + `snap.UserTurn` + 由 `snap.CompletedSteps` 经 `appendToolResults` 展开的消息。
+2. 在完整消息列表上调用 `RememberMCPHistory`，恢复本轮已经 describe 或调用过的 MCP 工具，再 `RefreshMCPTools`。
+3. `state` 初始化：`RoundSteps = snap.CompletedSteps`、`CurrentRound = snap.CurrentRound`、`TurnUsage = snap.TurnUsage`。
+4. 完成被打断的那一轮：
+   - 已有结果的调用直接沿用。
+   - 被阻塞的调用以 `PreAnswered=answered` 执行。
+   - 之后的调用使用解码后的参数按原顺序执行，保持并行和屏障规则。其中的调用可能再次发起交互乃至再次挂起，按 5.1 / 5.3 处理即可。
+   - 发出与正常执行相同的 tool_call / tool_result 事件，然后 append step。
+5. 进入正常的 `executeLoop`，从下一轮开始。
+
+`executeLoop` 抽出“以给定初始状态和消息列表运行”的内部函数，`Execute` 和 `Resume` 共用。
+
+## 7. 事件与接口变更
+
+| 变更 | 说明 |
+|---|---|
+| 新事件 `agent_prompt_required` / `agent_prompt_resolved` | 通用交互事件，`{pending_id, kind, request, suspendable, hot_wait_seconds, expires_at}` / `{pending_id, kind, status, response}`。`ask_user` 只用通用事件；工具审批与 OAuth 在前端切换完成前同时发旧事件 |
+| `tool_approval_required` 新增 `hot_wait_seconds`、`suspendable` | 前端倒计时归零时显示“已转入后台等待”，而不是“已超时” |
+| 新事件 `run_suspended` | `{pending_id, kind, expires_at}`，紧接着发 `complete` |
+| 新事件 `run_resumed` | `{pending_id, kind}`，恢复运行的第一条事件 |
+| `tool_approval_resolved` 新增 `superseded`、`expired` | |
+| 新接口 `POST /agent/prompts/{id}`（含嵌入页版本） | 请求体为该类型的 `response`，响应含 `resumed` |
+| `POST /agent/tool-approvals/{id}` 响应新增 `resumed` | 保留为兼容层；嵌入页接口同步 |
+| 消息列表接口：消息新增 `run_state`、`pending_prompt` | `pending_prompt` 只对会话所有者返回，包含卡片所需字段和 `expires_at` |
+| 新增 `StreamManager.ResetEvents` | Redis 实现为 `DEL` 事件列表；memory 实现为删除 map 项 |
+
+API 文档、Swagger、`client/` SDK 同步更新（按 `weknora-api-docs-sync` 流程处理）。
+
+## 8. 会话级语义
+
+### 8.1 挂起期间用户发新消息
+
+`executeQA` 在 `rejectIfOtherAgentRunLive` 之后、`LoadAgentHistory` 之前：
+
+1. 查找本会话 `status='suspended'` 的交互，CAS 为 `superseded`。
+2. 把对应消息收尾为已完成：被阻塞的调用及之后的调用结果写为“用户未回答并发送了新消息，未执行”，补成一个完整的 step，正文为空，然后删除快照。
+3. 这样新一轮的 `LoadAgentHistory` 能看到完整、合规的上一轮（每个 tool_call 都有对应的 tool 结果）。
+
+前端提示语明确说明“发送新消息会放弃待处理的操作”。`ask_user` 例外：卡片上可直接作答；如果用户选择在输入框回复，按普通新消息处理（取代该提问），模型在新一轮的历史里能看到问题和新消息。
+
+### 8.2 用户停止
+
+- 短等待阶段：与现在一致，按 `canceled` 处理。
+- 挂起阶段：没有运行中的任务，界面不显示停止按钮；用户可直接点拒绝。
+
+### 8.3 回溯、分叉、删除
+
+- 回溯 / 分叉：先按 8.1 取代挂起，再执行原有逻辑。
+- 删除消息或会话：同一事务内把相关交互 CAS 为 `superseded` 并删除快照。
+
+## 9. 前端改动
+
+1. `handleMsgList`：消息 `run_state==='awaiting_input'` 时：
+   - 从 `agent_steps` 重建时间线，并在末尾追加由 `pending_prompt` 构造的交互卡片（按 `kind` 渲染）；
+   - **不**调用 `continue-stream`，`isReplying=false`，输入框可用；
+   - 时间线不显示“进行中”的占位动画。
+2. 交互卡片按 `kind` 注册渲染组件（工具审批、OAuth 复用现有卡片，`ask_user` 为问题表单）：
+   - 短等待阶段的倒计时归零后，文案改为“已转入后台等待，可稍后处理”，按钮仍然可用；
+   - 挂起阶段显示过期时间。
+3. 作答后，如果响应 `resumed=true`：设置 `isReplying=true`，对该消息调用 `continue-stream`。恢复任务的投递有延迟，404 时按 500ms 间隔重试，最多重试 10 次。从 `run_resumed` 事件开始追加到现有时间线，不替换已重建的步骤。
+4. `run_suspended`：结束当前流，卡片切换为挂起样式，`isReplying=false`。
+5. 挂起状态下发送新消息：先弹出确认提示，发送成功后刷新消息列表，旧卡片显示“已放弃”。
+6. 侧栏会话列表：可选显示“待处理”角标（第二期）。
+7. i18n：新增文案，按 `i18n-locale-align` 流程同步到全部语言。
+
+## 10. 配置
+
+| 配置项 | 默认值 | 说明 |
+|---|---|---|
+| `agent.prompt_suspend_enabled` | `true` | 关闭后恢复为纯阻塞式（仍写数据库记录）；对所有可挂起类型生效 |
+| `agent.prompt_hot_wait_seconds` | `120` | 短等待时长；不可挂起类型也以此为上限 |
+| `agent.prompt_expire_seconds` | `604800`（7 天） | 挂起后的过期时间；`0` 表示不过期 |
+| `agent.tool_approval_timeout_seconds` | `600` | 保留；仅在关闭挂起时作为阻塞上限 |
+
+部署检查：进程无法自行判断是否有多个副本，因此只在启动时对 `STREAM_MANAGER_TYPE=memory` 且 `REDIS_ADDR` 非空的组合打警告。配了 Redis 通常意味着多副本部署，而这种组合下副本之间的事件流和 live-run 标记不共享。
+
+## 11. 安全
+
+- Resolve 按资源鉴权：路由中的会话与接口声明的类型必须与记录一致（不一致按不存在处理，防止跨会话或跨类型作答），租户、会话所有者都必须匹配；嵌入页额外校验 channel 与 session。
+- 回答必须通过该类型注册的校验函数，未注册的类型一律拒绝。
+- `pending_prompt` 与请求载荷只返回给会话所有者，与现有 SSE 可见范围一致。
+- `modified_args` 按 InputSchema 校验，校验通过后完整替换原参数，不保留旧键（与现有逻辑一致）。
+- `ask_user` 的答案是用户输入，交给模型时按不可信数据包裹（与工具结果同等对待），不拼进系统提示。
+- 恢复时重新校验：工具是否启用、是否仍需审批、智能体是否仍可访问、会话是否仍属于该用户。任何一项不满足都不执行工具。
+- 快照只存持久 ID 和已解码参数，不存凭据；MCP 凭据在执行时按现有方式解析。
+- 过期、取代、停止都会留下交互记录，满足审计需要。
+
+## 12. 内置提问工具 `ask_user`
+
+Agent 需要用户补充信息或做选择时调用，作为 P4 之后的单独一期。
+
+- 参数：`question`（必填），可选 `options`（单选或多选）、`fields`（简单表单，限定为文本、数字、单选、多选几种类型），以及 `allow_free_text`。参数 schema 严格限定，字段数与选项数设上限，防止模型生成超大表单。
+- 执行：构造 `kind='ask_user'`、`suspendable=true` 的交互，走 `Broker.Await`；回答校验按本次的 `fields` / `options` 检查必填项、类型与取值范围。
+- 结果：答案序列化后作为工具结果返回给模型；用户放弃、超时或被取代时，返回明确的“用户未回答”，由模型决定下一步。
+- 挂起与恢复：与工具审批相同，恢复时通过 `PreAnswered` 直接返回答案。
+- IM 渠道：没有卡片也无法挂起，降级为“把问题作为本轮回复发出，并结束本轮”；用户的下一条消息就是答案，模型在新一轮的历史里能看到问题和回答。
+- 开关：智能体配置中可关闭该工具；默认对 Web 与嵌入页渠道开启。
+
+## 13. 分期实施
+
+| 期 | 内容 | 对外行为变化 |
+|---|---|---|
+| P1 | 两张新表与 `messages.run_state` 迁移（Postgres 000119、SQLite 000037）；通用核心 `hitl.Broker`（持久化、租约、轮询兜底、Pub/Sub 唤醒、按 kind 校验回答）；工具审批与 OAuth 改为其上的适配层；Resolve 绑定 session 与 kind | 无，仍是阻塞式 |
+| P2 | 引擎 `roundProgress`、快照、`Suspend` 信号；handler 挂起收尾；`run_suspended` 事件；回收任务第 1 条 | 超过短等待后挂起，但暂时无法恢复（功能开关默认关闭） |
+| P3 | `engine.Resume`、`agent:resume_run` 任务、`ResetEvents`、`run_resumed`；8.1 / 8.3 会话语义；回收任务第 2 至 4 条 | 后端功能完整 |
+| P4 | 通用事件与 `POST /agent/prompts/{id}`；前端按 kind 渲染卡片；i18n | 功能开关默认打开 |
+| P4.5 | `ask_user` 内置工具（第 12 节）及其表单卡片 | Agent 可以向用户提问 |
+| P5 | 文档、Swagger、SDK | |
+
+## 14. 测试要点
+
+- 通用核心（P1 已覆盖）：跨副本作答经数据库送达持有者；会话、类型、租户、用户绑定；未注册类型被拒；回答校验失败；回答与超时同时发生时回答胜出；超时与取消留下记录；`executing → done`。
+- 状态机：每条 CAS 转换的成功与失败分支，包括并发 Resolve、Resolve 与短等待超时同时发生、Resolve 与用户停止同时发生。
+- 快照：顺序路径和并行路径下，阻塞调用位于一轮的开头、中间、末尾；未执行调用含临时句柄时，恢复后参数正确。
+- 恢复：恢复后发给 LLM 的消息序列与未挂起时逐条一致（以 golden 测试固定）；恢复中再次挂起；恢复时工具已被禁用；恢复时智能体已被删除。
+- 至多执行一次：在 `executing` 阶段模拟崩溃，重试时不重放。
+- 多副本：两个 Gate 实例共用一个数据库和 Redis，Resolve 打到非持有者；持有者在短等待阶段消失后，由回收任务转为挂起，再恢复。
+- 会话语义：挂起时发新消息、回溯、删除会话；历史重建结果合规。
+- 前端：刷新后卡片正确显示；批准后接入事件流；`run_suspended` / `run_resumed` 的渲染。
+
+## 15. 已确认的决定
+
+1. 短等待默认 120 秒，挂起后默认 7 天过期。
+2. 过期后不调用 LLM，直接收尾并附一行说明。
+3. 本期只对 Web、嵌入页、API 渠道开放挂起；IM 渠道（`Channel` 为 IM 类）保持阻塞式，不进入挂起分支（`ask_user` 在 IM 渠道的降级见第 12 节）。
+4. 挂起时 steer 队列里的消息按“新消息取代待处理的交互”处理。
+5. P1 直接做成通用的人工交互模型（`agent_prompts` + `hitl.Broker`），工具审批与 OAuth 是其上的适配层。
+6. `ask_user` 放进本次范围，作为前端一期之后的单独一期。

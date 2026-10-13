@@ -424,7 +424,7 @@ func (h *MCPOAuthHandler) ResolveMCPOAuth(c *gin.Context) {
 
 	switch decision {
 	case "cancel", "reject", "skip":
-		if err := h.gate.Resolve(tenantID, gateUserID, pendingID, approval.Decision{
+		if err := h.resolveOAuthPrompt(c, tenantID, gateUserID, pendingID, approval.Decision{
 			Approved: false,
 			Reason:   "user canceled",
 		}); err != nil {
@@ -466,7 +466,7 @@ func (h *MCPOAuthHandler) ResolveMCPOAuth(c *gin.Context) {
 		return
 	}
 
-	if err := h.gate.Resolve(tenantID, gateUserID, pendingID, approval.Decision{Approved: true}); err != nil {
+	if err := h.resolveOAuthPrompt(c, tenantID, gateUserID, pendingID, approval.Decision{Approved: true}); err != nil {
 		switch {
 		case stderrors.Is(err, approval.ErrPendingNotFound):
 			c.Error(errors.NewNotFoundError("pending authorization not found or already completed"))
@@ -514,7 +514,7 @@ func (h *MCPOAuthHandler) CancelMCPOAuth(c *gin.Context) {
 		return
 	}
 
-	if err := h.gate.Resolve(tenantID, gateUserID, pendingID, approval.Decision{
+	if err := h.resolveOAuthPrompt(c, tenantID, gateUserID, pendingID, approval.Decision{
 		Approved: false,
 		Reason:   "user canceled",
 	}); err != nil {
@@ -536,4 +536,19 @@ func (h *MCPOAuthHandler) CancelMCPOAuth(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true})
+}
+
+// resolveOAuthPrompt records a decision on an in-conversation OAuth prompt.
+// The embed routes carry session_id, which pins the prompt to that session.
+func (h *MCPOAuthHandler) resolveOAuthPrompt(
+	c *gin.Context, tenantID uint64, userID, pendingID string, d approval.Decision,
+) error {
+	return h.gate.Resolve(c.Request.Context(), approval.ResolveRequest{
+		TenantID:  tenantID,
+		UserID:    userID,
+		SessionID: c.Param("session_id"),
+		Kind:      types.AgentPromptKindMCPOAuth,
+		PendingID: pendingID,
+		Decision:  d,
+	})
 }

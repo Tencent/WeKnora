@@ -8,8 +8,15 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/config"
 	"github.com/Tencent/WeKnora/internal/event"
+	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/stretchr/testify/require"
 )
+
+func resolveFor(g *Gate, tenantID uint64, userID, pendingID string, d Decision) error {
+	return g.Resolve(context.Background(), ResolveRequest{
+		TenantID: tenantID, UserID: userID, PendingID: pendingID, Decision: d,
+	})
+}
 
 type stubChecker struct {
 	required   bool
@@ -56,7 +63,7 @@ func TestGate_RequestAndWait_Approve(t *testing.T) {
 		require.True(t, ok)
 		require.NotEmpty(t, data.PendingID)
 		go func() {
-			_ = g.Resolve(1, "", data.PendingID, Decision{Approved: true, ModifiedArgs: json.RawMessage(`{"a":2}`)})
+			_ = resolveFor(g, 1, "", data.PendingID, Decision{Approved: true, ModifiedArgs: json.RawMessage(`{"a":2}`)})
 		}()
 		return nil
 	})
@@ -94,7 +101,7 @@ func TestGate_NeedsApproval_NoChecker(t *testing.T) {
 
 func TestGate_Resolve_NotFound(t *testing.T) {
 	g := NewGate(&config.Config{Agent: &config.AgentConfig{ToolApprovalTimeoutSeconds: 1}}, &stubChecker{required: true}, nil)
-	err := g.Resolve(1, "", "no-such-id", Decision{Approved: true})
+	err := resolveFor(g, 1, "", "no-such-id", Decision{Approved: true})
 	require.ErrorIs(t, err, ErrPendingNotFound)
 }
 
@@ -108,8 +115,8 @@ func TestGate_Resolve_TenantMismatch(t *testing.T) {
 	bus.On(event.EventToolApprovalRequired, func(_ context.Context, evt event.Event) error {
 		data := evt.Data.(event.ToolApprovalRequiredData)
 		go func() {
-			require.ErrorIs(t, g.Resolve(999, "", data.PendingID, Decision{Approved: true}), ErrTenantMismatch)
-			_ = g.Resolve(1, "", data.PendingID, Decision{Approved: false, Reason: "no"})
+			require.ErrorIs(t, resolveFor(g, 999, "", data.PendingID, Decision{Approved: true}), ErrTenantMismatch)
+			_ = resolveFor(g, 1, "", data.PendingID, Decision{Approved: false, Reason: "no"})
 		}()
 		return nil
 	})
@@ -129,8 +136,8 @@ func TestGate_Resolve_UserMismatch(t *testing.T) {
 	bus.On(event.EventToolApprovalRequired, func(_ context.Context, evt event.Event) error {
 		data := evt.Data.(event.ToolApprovalRequiredData)
 		go func() {
-			require.ErrorIs(t, g.Resolve(1, "bob", data.PendingID, Decision{Approved: true}), ErrUserMismatch)
-			_ = g.Resolve(1, "alice", data.PendingID, Decision{Approved: true})
+			require.ErrorIs(t, resolveFor(g, 1, "bob", data.PendingID, Decision{Approved: true}), ErrUserMismatch)
+			_ = resolveFor(g, 1, "alice", data.PendingID, Decision{Approved: true})
 		}()
 		return nil
 	})
@@ -153,8 +160,8 @@ func TestGate_Resolve_EmptyUserIDRejectedWhenWaiterHasUser(t *testing.T) {
 	bus.On(event.EventToolApprovalRequired, func(_ context.Context, evt event.Event) error {
 		data := evt.Data.(event.ToolApprovalRequiredData)
 		go func() {
-			require.ErrorIs(t, g.Resolve(1, "", data.PendingID, Decision{Approved: true}), ErrUserMismatch)
-			_ = g.Resolve(1, "alice", data.PendingID, Decision{Approved: false, Reason: "no"})
+			require.ErrorIs(t, resolveFor(g, 1, "", data.PendingID, Decision{Approved: true}), ErrUserMismatch)
+			_ = resolveFor(g, 1, "alice", data.PendingID, Decision{Approved: false, Reason: "no"})
 		}()
 		return nil
 	})
@@ -175,16 +182,13 @@ func TestGate_Resolve_AlreadyResolvedAfterTimeout(t *testing.T) {
 		return nil
 	})
 
+	lateErr := make(chan error, 1)
 	go func() {
 		<-gotPending
-		// Wait until timeout has fired and the pending entry is still there
-		// (defer delete only happens after RequestAndWait returns).
-		// 1s timeout + small slack.
+		// 1s timeout + small slack: the prompt row outlives the wait and
+		// records the timeout, so a late decision cannot reopen it.
 		<-time.After(1500 * time.Millisecond)
-		require.ErrorIs(t,
-			g.Resolve(1, "", pendingID, Decision{Approved: true}),
-			ErrPendingNotFound, // entry already removed by RequestAndWait's defer
-		)
+		lateErr <- resolveFor(g, 1, "", pendingID, Decision{Approved: true})
 	}()
 
 	d, err := g.RequestAndWait(context.Background(), PendingRequest{
@@ -193,6 +197,49 @@ func TestGate_Resolve_AlreadyResolvedAfterTimeout(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.True(t, d.TimedOut)
+	require.ErrorIs(t, <-lateErr, ErrAlreadyResolved)
+
+	row, err := g.broker.Store().Get(context.Background(), pendingID)
+	require.NoError(t, err)
+	require.Equal(t, types.AgentPromptExpired, row.Status)
+}
+
+func TestGate_ApprovedCallStaysExecutingUntilMarked(t *testing.T) {
+	g := NewGate(&config.Config{Agent: &config.AgentConfig{ToolApprovalTimeoutSeconds: 5}}, &stubChecker{required: true}, nil)
+	bus := event.NewEventBus()
+	bus.On(event.EventToolApprovalRequired, func(_ context.Context, evt event.Event) error {
+		pendingID := evt.Data.(event.ToolApprovalRequiredData).PendingID
+		go func() {
+			require.ErrorIs(t,
+				resolveFor(g, 1, "", pendingID, Decision{Approved: true, ModifiedArgs: json.RawMessage(`[1]`)}),
+				ErrInvalidDecision)
+			require.ErrorIs(t, g.Resolve(context.Background(), ResolveRequest{
+				TenantID: 1, Kind: types.AgentPromptKindMCPOAuth, PendingID: pendingID,
+				Decision: Decision{Approved: true},
+			}), ErrPendingNotFound)
+			require.NoError(t, resolveFor(g, 1, "", pendingID, Decision{Approved: true}))
+		}()
+		return nil
+	})
+
+	d, err := g.RequestAndWait(context.Background(), PendingRequest{
+		TenantID: 1, EventBus: bus, SessionID: "s",
+		ServiceID: "svc", MCPToolName: "t", Args: json.RawMessage(`{}`),
+	})
+	require.NoError(t, err)
+	require.True(t, d.Approved)
+
+	row, err := g.broker.Store().Get(context.Background(), d.PendingID)
+	require.NoError(t, err)
+	require.Equal(t, types.AgentPromptExecuting, row.Status)
+	var request types.ToolApprovalPromptRequest
+	require.NoError(t, json.Unmarshal(row.Request, &request))
+	require.Equal(t, "svc", request.ServiceID)
+
+	g.MarkExecuted(context.Background(), d.PendingID)
+	row, err = g.broker.Store().Get(context.Background(), d.PendingID)
+	require.NoError(t, err)
+	require.Equal(t, types.AgentPromptDone, row.Status)
 }
 
 func TestGate_Resolve_RaceWinsAlreadyResolved(t *testing.T) {
@@ -208,8 +255,8 @@ func TestGate_Resolve_RaceWinsAlreadyResolved(t *testing.T) {
 	bus.On(event.EventToolApprovalRequired, func(_ context.Context, evt event.Event) error {
 		pendingID := evt.Data.(event.ToolApprovalRequiredData).PendingID
 		go func() {
-			err1 := g.Resolve(1, "", pendingID, Decision{Approved: true})
-			err2 := g.Resolve(1, "", pendingID, Decision{Approved: false})
+			err1 := resolveFor(g, 1, "", pendingID, Decision{Approved: true})
+			err2 := resolveFor(g, 1, "", pendingID, Decision{Approved: false})
 			resCh <- result{first: err1, second: err2}
 		}()
 		return nil
@@ -223,14 +270,7 @@ func TestGate_Resolve_RaceWinsAlreadyResolved(t *testing.T) {
 	require.True(t, d.Approved)
 	r := <-resCh
 	require.NoError(t, r.first)
-	// Second call must surface either AlreadyResolved or NotFound (depending
-	// on whether the defer-delete already ran).
-	require.True(t,
-		r.second == nil || // RequestAndWait removed the entry: NotFound is possible too
-			r.second.Error() == ErrAlreadyResolved.Error() ||
-			r.second.Error() == ErrPendingNotFound.Error(),
-		"unexpected error: %v", r.second,
-	)
+	require.ErrorIs(t, r.second, ErrAlreadyResolved)
 }
 
 func boolPtr(v bool) *bool { return &v }

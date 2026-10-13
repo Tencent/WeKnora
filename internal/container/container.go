@@ -37,6 +37,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/Tencent/WeKnora/internal/agent/approval"
+	"github.com/Tencent/WeKnora/internal/agent/hitl"
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	dorisRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/doris"
 	elasticsearchRepoV7 "github.com/Tencent/WeKnora/internal/application/repository/retriever/elasticsearch/v7"
@@ -178,6 +179,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	must(container.Provide(neo4jRepo.NewNeo4jRepository))
 	must(container.Provide(repository.NewMCPServiceRepository))
 	must(container.Provide(repository.NewMCPToolApprovalRepository))
+	must(container.Provide(repository.NewAgentPromptRepository))
 	must(container.Provide(repository.NewMCPOAuthRepository))
 	must(container.Provide(repository.NewTenantSandboxConfigRepository))
 	must(container.Provide(repository.NewTenantSkillRepository))
@@ -324,8 +326,11 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	logger.Debugf(ctx, "[Container] Registering event bus and agent service...")
 	must(container.Provide(event.NewEventBus))
 	must(container.Provide(service.NewSessionSandboxPinner))
-	must(container.Provide(func(cfg *config.Config, s interfaces.MCPToolApprovalService, rdb *redis.Client) *approval.Gate {
-		return approval.NewGate(cfg, &approval.Adapter{Svc: s}, rdb)
+	must(container.Provide(func(prompts interfaces.AgentPromptRepository, rdb *redis.Client) *hitl.Broker {
+		return hitl.NewBroker(prompts, rdb)
+	}))
+	must(container.Provide(func(cfg *config.Config, s interfaces.MCPToolApprovalService, broker *hitl.Broker) *approval.Gate {
+		return approval.NewGate(cfg, &approval.Adapter{Svc: s}, broker)
 	}))
 	// Expose Gate as MCPApproval interface so AgentService and others can depend on the abstraction.
 	must(container.Provide(func(g *approval.Gate) approval.MCPApproval { return g }))

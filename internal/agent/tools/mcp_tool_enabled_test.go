@@ -28,6 +28,8 @@ func (g staticPolicyGate) RequestAndWait(context.Context, approval.PendingReques
 	return approval.Decision{Approved: true}, nil
 }
 
+func (staticPolicyGate) MarkExecuted(context.Context, string) {}
+
 var _ approval.MCPApproval = staticPolicyGate{}
 
 func TestMCPToolExecuteDisabledByPolicy(t *testing.T) {

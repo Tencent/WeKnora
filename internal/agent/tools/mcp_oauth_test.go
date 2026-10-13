@@ -98,6 +98,8 @@ func (approvedOAuthGate) RequestAndWait(context.Context, approval.PendingRequest
 	return approval.Decision{Approved: true}, nil
 }
 
+func (approvedOAuthGate) MarkExecuted(context.Context, string) {}
+
 func (g approvedOAuthGate) RequestOAuthAndWait(
 	ctx context.Context, req approval.OAuthPendingRequest,
 ) (approval.Decision, error) {

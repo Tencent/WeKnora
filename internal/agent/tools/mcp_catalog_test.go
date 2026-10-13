@@ -28,6 +28,8 @@ func (*catalogPolicy) RequestAndWait(context.Context, approval.PendingRequest) (
 	return approval.Decision{Approved: true}, nil
 }
 
+func (*catalogPolicy) MarkExecuted(context.Context, string) {}
+
 func catalogTestContext() context.Context {
 	ctx := context.WithValue(context.Background(), types.TenantIDContextKey, uint64(7))
 	return types.WithPrincipal(ctx, types.Principal{Type: types.PrincipalWebUser, ID: "catalog-user"})

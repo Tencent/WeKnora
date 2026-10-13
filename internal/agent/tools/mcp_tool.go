@@ -216,6 +216,7 @@ func (t *MCPTool) Execute(ctx context.Context, args json.RawMessage) (*types.Too
 						Error:   msg,
 					}, nil
 				}
+				defer t.gate.MarkExecuted(ctx, decision.PendingID)
 				if len(decision.ModifiedArgs) > 0 {
 					args = decision.ModifiedArgs
 					if err := t.ValidateArguments(args); err != nil {

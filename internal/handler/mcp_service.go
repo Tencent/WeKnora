@@ -784,7 +784,16 @@ func (h *MCPServiceHandler) ResolveToolApproval(c *gin.Context) {
 		c.Error(errors.NewUnauthorizedError("authenticated user required to resolve tool approval"))
 		return
 	}
-	if err := h.toolApprovalGate.Resolve(tenantID, gateUserID, pendingID, dec); err != nil {
+	// The embed route carries session_id; binding it stops an embed visitor
+	// from resolving a prompt raised in another session.
+	if err := h.toolApprovalGate.Resolve(ctx, approval.ResolveRequest{
+		TenantID:  tenantID,
+		UserID:    gateUserID,
+		SessionID: c.Param("session_id"),
+		Kind:      types.AgentPromptKindToolApproval,
+		PendingID: pendingID,
+		Decision:  dec,
+	}); err != nil {
 		switch {
 		case stderrors.Is(err, approval.ErrPendingNotFound):
 			c.Error(errors.NewNotFoundError("pending approval not found or already completed"))
@@ -794,6 +803,8 @@ func (h *MCPServiceHandler) ResolveToolApproval(c *gin.Context) {
 			c.Error(errors.NewBadRequestError("workspace mismatch"))
 		case stderrors.Is(err, approval.ErrUserMismatch):
 			c.Error(errors.NewBadRequestError("user mismatch: only the session owner may resolve this approval"))
+		case stderrors.Is(err, approval.ErrInvalidDecision):
+			c.Error(errors.NewBadRequestError(err.Error()))
 		default:
 			logger.ErrorWithFields(ctx, err, map[string]interface{}{"pending_id": pendingID})
 			c.Error(errors.NewInternalServerError(err.Error()))

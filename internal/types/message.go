@@ -504,6 +504,10 @@ type Message struct {
 	Artifacts MessageArtifacts `json:"artifacts,omitempty" gorm:"-"`
 	// Whether message generation is complete
 	IsCompleted bool `json:"is_completed"`
+	// RunState refines an incomplete message: MessageRunStateAwaitingInput
+	// means the run ended suspended on a prompt instead of still generating.
+	// Empty means IsCompleted alone describes the message.
+	RunState string `json:"run_state,omitempty" gorm:"type:varchar(32);not null;default:''"`
 	// Whether this response is a fallback (no knowledge base match found)
 	IsFallback bool `json:"is_fallback,omitempty"`
 	// Agent total execution duration in milliseconds (from query start to answer start)
@@ -662,6 +666,10 @@ func (m *Message) BeforeCreate(tx *gorm.DB) (err error) {
 	}
 	return nil
 }
+
+// MessageRunStateAwaitingInput marks an assistant message whose run ended
+// suspended on an agent prompt and will resume once the user answers.
+const MessageRunStateAwaitingInput = "awaiting_input"
 
 // MessageSearchMode represents the search mode for message search
 type MessageSearchMode string
