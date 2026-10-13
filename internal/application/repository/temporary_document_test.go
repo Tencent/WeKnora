@@ -32,9 +32,9 @@ func TestExpiredDocumentsKeepLiveConversationReferences(t *testing.T) {
 			require.NoError(t, err)
 			t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
 			require.NoError(t, db.AutoMigrate(&types.Session{}, &types.Message{}, &types.TemporaryDocument{}))
-			migration := "../../../migrations/sqlite/000035_messages_attachment_lookup.up.sql"
+			migration := "../../../migrations/sqlite/000036_messages_attachment_lookup.up.sql"
 			if backend == "postgres" {
-				migration = "../../../migrations/versioned/000116_messages_attachment_lookup.up.sql"
+				migration = "../../../migrations/versioned/000117_messages_attachment_lookup.up.sql"
 			}
 			sql, err := os.ReadFile(migration)
 			require.NoError(t, err)

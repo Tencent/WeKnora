@@ -221,7 +221,7 @@ func TestReadImagesAuthorizesOnceAndDescribesConcurrently(t *testing.T) {
 	})
 	var inside sync.WaitGroup
 	inside.Add(3)
-	reader.Images = &ImageReader{Describe: func(ctx context.Context, _ []byte, _ string) (string, error) {
+	reader.Images = &ImageReader{Describe: func(_ context.Context, _ []byte, _ string) (string, error) {
 		inside.Done()
 		// Every description has to be in flight at once to get past here.
 		inside.Wait()

@@ -19,7 +19,9 @@ type AttachmentReader interface {
 	// ReadImages authorizes the document once and reads the numbered images
 	// concurrently. The error covers the whole batch; per-image failures are
 	// reported in the aligned results.
-	ReadImages(ctx context.Context, documentID string, numbers []int, detail, focus string) ([]AttachmentImageRead, error)
+	ReadImages(
+		ctx context.Context, documentID string, numbers []int, detail, focus string,
+	) ([]AttachmentImageRead, error)
 	WaitTimeout() time.Duration
 }
 
