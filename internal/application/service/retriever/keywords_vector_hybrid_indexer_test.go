@@ -113,9 +113,9 @@ type capturingBatchRepository struct {
 }
 
 func (r *capturingBatchRepository) BatchSave(
-	ctx context.Context,
+	_ context.Context,
 	indexInfoList []*types.IndexInfo,
-	params map[string]any,
+	_ map[string]any,
 ) error {
 	ids := make([]string, 0, len(indexInfoList))
 	for _, indexInfo := range indexInfoList {
