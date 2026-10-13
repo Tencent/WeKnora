@@ -342,8 +342,10 @@ const maxDocDownloadBytes = 1 << 20
 
 func addDocDownload(server *mcpsdk.Server, svc knowledgeService) {
 	mcpsdk.AddTool(server, &mcpsdk.Tool{
-		Name:        "doc_download",
-		Description: "Download a document's raw bytes by ID. Capped at 1 MiB per call - for larger documents, use search_chunks to find the relevant excerpts. is_base64 reports whether content was base64-encoded (invalid UTF-8 or presence of NUL byte in the first 512 bytes).",
+		Name: "doc_download",
+		Description: "Download a document's raw bytes by ID. Capped at 1 MiB per call - for larger documents, " +
+			"use search_chunks to find the relevant excerpts. is_base64 reports whether content was " +
+			"base64-encoded (invalid UTF-8 or presence of NUL byte in the first 512 bytes).",
 		Annotations: &mcpsdk.ToolAnnotations{
 			Title:           "Download Document",
 			DestructiveHint: bptr(false),
