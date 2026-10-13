@@ -81,7 +81,10 @@ func (s *TenantSkillService) verifyRuntimePrerequisites(
 		return nil, fail("install-report.json exceeds 64 KiB", true)
 	}
 	if err := json.Unmarshal(raw, &report); err != nil || report.Commands == nil || report.Blockers == nil {
-		return nil, fail(`Write a valid .weknora/install-report.json with commands and blockers arrays of strings`, true)
+		return nil, fail(
+			`Write a valid .weknora/install-report.json with commands and blockers arrays of strings`,
+			true,
+		)
 	}
 	if len(report.Commands) > 100 || len(report.Blockers) > 100 || len(report.Notes) > 100 {
 		return nil, fail("install report has too many entries", true)
