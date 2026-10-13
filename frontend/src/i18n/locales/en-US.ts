@@ -6335,6 +6335,22 @@ export default {
       script: 'script',
       instructions: 'Instructions'
     },
+    attachmentTarget: {
+      list: 'all attachments',
+      file: 'attachment',
+      images: 'images in {name}',
+      imagesUnnamed: 'attachment images',
+      image: 'image {n} of {name}',
+      imageUnnamed: 'attachment image {n}'
+    },
+    imageView: {
+      summary: 'Viewed image {numbers} of {total} in "{file}"',
+      single: 'Viewed image "{file}"',
+      descriptionsHeading: 'Descriptions from the vision model',
+      imageLabel: 'Image #{n}',
+      noDescription: 'Could not be described',
+      remaining: '{count} more not viewed'
+    },
     sandboxFiles: {
       found: 'Found {count} file(s)',
       empty: 'No files',

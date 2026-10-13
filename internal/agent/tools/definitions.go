@@ -28,6 +28,9 @@ const (
 	ToolWebFetch            = "web_fetch"
 	// Unified reading: workspace access follows sandbox file capability;
 	// skill resources follow SkillsEnabled and do not require a sandbox.
+	// attachment:// is added whenever the session has stored attachments,
+	// because a file the user just sent is not something an allowlist should
+	// be able to hide from the agent.
 	ToolReadFile = "read_file"
 	// Sandbox filesystem tools (only available when the sandbox backend
 	// supports per-session files — Cube, E2B, Docker). list/read inspect
