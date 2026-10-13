@@ -357,16 +357,18 @@
           <div class="form-item">
             <div class="usage-heading">
               <label class="form-label required">{{ t('mcpMetadata.usageInstructions') }}</label>
-              <t-button variant="text" theme="primary" size="small" :loading="generatingUsage"
-                :disabled="!toolsSynced || metadataBusy || submitting" @click="handleGenerateUsage">
-                <template #icon><t-icon name="lightbulb" /></template>
-                {{ t('mcpMetadata.generateUsage') }}
-              </t-button>
+              <t-tooltip :content="t('mcpMetadata.generateHint')" placement="top-right"
+                :overlay-inner-style="{ maxWidth: '300px', whiteSpace: 'normal' }">
+                <t-button variant="text" theme="primary" size="small" :loading="generatingUsage"
+                  :disabled="!toolsSynced || metadataBusy || submitting" @click="handleGenerateUsage">
+                  <template #icon><t-icon name="lightbulb" /></template>
+                  {{ t('mcpMetadata.generateUsage') }}
+                </t-button>
+              </t-tooltip>
             </div>
-            <t-textarea v-model="formData.usage_instructions" :maxlength="16000" :autosize="{ minRows: 3, maxRows: 8 }"
+            <t-textarea v-model="formData.usage_instructions" class="usage-textarea" :maxlength="16000" :autosize="{ minRows: 3, maxRows: 8 }"
               :disabled="generatingUsage || submitting"
               :placeholder="t('mcpMetadata.instructionsPlaceholder')" />
-            <p class="form-desc">{{ t('mcpMetadata.generateHint') }}</p>
           </div>
         </section>
         <McpMetadataPanel v-if="currentService?.id" :key="currentService.id" :service-id="currentService.id"
@@ -1046,6 +1048,20 @@ const handleClose = () => {
   gap: 12px;
 
   .form-label { margin-bottom: 0; }
+}
+
+.usage-textarea {
+  :deep(.t-textarea__inner) {
+    font-size: var(--app-text-md);
+    line-height: 1.65;
+    padding: 8px 10px;
+  }
+
+  :deep(.t-textarea__info_wrapper),
+  :deep(.t-textarea__limit) {
+    font-size: var(--app-text-xs);
+    color: var(--td-text-color-placeholder);
+  }
 }
 
 .mcp-steps {
