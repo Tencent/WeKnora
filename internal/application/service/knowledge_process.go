@@ -765,12 +765,15 @@ func (s *knowledgeService) processChunks(ctx context.Context,
 			}
 			// Map vector store / embedding rate-limit errors to a
 			// stable code so the UI can offer "retry later" hints.
+			// The stage message carries the underlying error (the span
+			// tracker caps it) so the trace view shows the real cause
+			// instead of an opaque "batch index failed" (#4199).
 			code := werrors.ErrCodeVectorStoreWriteFailed
 			if isLikelyRateLimitError(err) {
 				code = werrors.ErrCodeEmbeddingRateLimit
 			}
 			s.failStage(ctx, knowledge.ID, types.StageEmbedding,
-				code, "batch index failed", err)
+				code, fmt.Sprintf("batch index failed: %v", err), err)
 			if willRetry {
 				return fmt.Errorf("batch index: %w", err)
 			}

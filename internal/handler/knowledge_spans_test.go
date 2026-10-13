@@ -139,6 +139,31 @@ func TestKnowledgeSpansLastError_PrefersSpanFailure(t *testing.T) {
 	a.Equal("slow", got["error_message"])
 }
 
+// TestKnowledgeSpansLastError_IncludesErrorDetail records that the opt-in
+// error_detail field carries the underlying provider/database error: the
+// span message is often a generic wrapper ("batch index failed") that makes
+// the failure impossible to diagnose from the API alone (#4199).
+func TestKnowledgeSpansLastError_IncludesErrorDetail(t *testing.T) {
+	now := time.Now()
+	spanFail := &types.KnowledgeProcessingSpan{
+		Name:         types.StageEmbedding,
+		ErrorCode:    "VECTORSTORE_WRITE_FAILED",
+		ErrorMessage: "batch index failed: embedding model rejected 5 inputs",
+		ErrorDetail:  "OpenAI embedding: 400 This model's maximum context length is 8192 tokens",
+		FinishedAt:   &now,
+	}
+
+	got := knowledgeSpansLastError(2, 2, types.ParseStatusFailed, "", now, spanFail)
+	a := assert.New(t)
+	a.NotNil(got)
+	a.Equal("OpenAI embedding: 400 This model's maximum context length is 8192 tokens", got["error_detail"])
+
+	spanFail.ErrorDetail = "   "
+	got = knowledgeSpansLastError(2, 2, types.ParseStatusFailed, "", now, spanFail)
+	_, ok := got["error_detail"]
+	a.False(ok, "blank error_detail must be omitted instead of leaking whitespace")
+}
+
 func TestKnowledgeSpansLastError_RecoveryFallbackUsesKnowledgeMessage(t *testing.T) {
 	now := time.Now()
 	got := knowledgeSpansLastError(2, 2, types.ParseStatusFailed, "wiki ingest timed out", now, nil)

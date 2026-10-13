@@ -785,7 +785,7 @@ func knowledgeSpansLastError(
 	spanFailure *types.KnowledgeProcessingSpan,
 ) gin.H {
 	if spanFailure != nil {
-		return gin.H{
+		lastError := gin.H{
 			"stage":         spanFailure.Name,
 			"code":          spanFailure.ErrorCode,
 			"message":       spanFailure.ErrorMessage,
@@ -794,6 +794,14 @@ func knowledgeSpansLastError(
 			"error_message": spanFailure.ErrorMessage,
 			"finished_at":   spanFailure.FinishedAt,
 		}
+		// The message is often a generic wrapper ("batch index failed");
+		// the detail holds the underlying provider/database error that
+		// makes the failure diagnosable. Opt-in field: ErrorDetail stays
+		// json:"-" on the span row itself.
+		if strings.TrimSpace(spanFailure.ErrorDetail) != "" {
+			lastError["error_detail"] = spanFailure.ErrorDetail
+		}
+		return lastError
 	}
 	if currentAttempt != latestAttempt || parseStatus != types.ParseStatusFailed || knowledgeErrorMessage == "" {
 		return nil

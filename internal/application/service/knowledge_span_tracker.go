@@ -500,14 +500,9 @@ func (t *spanTracker) FailSpan(ctx context.Context, span *Span, errorCode, error
 	dur := durationSince(t, span, now)
 	detail := ""
 	if errorDetail != nil {
-		detail = errorDetail.Error()
-		if len(detail) > 8192 {
-			detail = detail[:8192]
-		}
+		detail = truncateRunes(errorDetail.Error(), 8192)
 	}
-	if len(errorMessage) > 1024 {
-		errorMessage = errorMessage[:1024]
-	}
+	errorMessage = truncateRunes(errorMessage, 1024)
 	row := &types.KnowledgeProcessingSpan{
 		KnowledgeID:  span.KnowledgeID,
 		Attempt:      span.Attempt,

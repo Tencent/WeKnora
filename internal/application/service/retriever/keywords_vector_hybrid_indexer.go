@@ -73,7 +73,13 @@ func (v *KeywordsVectorHybridRetrieveEngineService) Index(ctx context.Context,
 	params := make(map[string]any)
 	embeddingMap := make(map[string][]float32)
 	if slices.Contains(retrieverTypes, types.VectorRetrieverType) {
-		embedding, err := embedder.Embed(ctx, sanitizeForEmbedding(ctx, indexInfo.Content))
+		embeddingInput := sanitizeForEmbedding(ctx, indexInfo.Content)
+		if strings.TrimSpace(embeddingInput) == "" {
+			logger.Warnf(ctx, "skipping blank embedding input, source_id=%s chunk_id=%s",
+				indexInfo.SourceID, indexInfo.ChunkID)
+			return nil
+		}
+		embedding, err := embedder.Embed(ctx, embeddingInput)
 		if err != nil {
 			return err
 		}
@@ -93,6 +99,10 @@ func (v *KeywordsVectorHybridRetrieveEngineService) BatchIndex(ctx context.Conte
 	}
 
 	if slices.Contains(retrieverTypes, types.VectorRetrieverType) {
+		indexInfoList = filterEmbeddable(ctx, indexInfoList)
+		if len(indexInfoList) == 0 {
+			return nil
+		}
 		var contentList []string
 		for _, indexInfo := range indexInfoList {
 			contentList = append(contentList, sanitizeForEmbedding(ctx, indexInfo.Content))
@@ -124,6 +134,27 @@ func (v *KeywordsVectorHybridRetrieveEngineService) BatchIndex(ctx context.Conte
 		return v.concurrentBatchSaveNoEmbedding(ctx, chunks)
 	}
 	return v.boundedConcurrentBatchSaveNoEmbedding(ctx, chunks, maxConcurrency)
+}
+
+// filterEmbeddable drops chunks whose content is blank, because embedding
+// providers reject empty inputs or return fewer vectors for them, and one
+// blank chunk would fail the whole batch with an opaque write error. Blank
+// means whitespace-only text; a chunk that carried only an inline image
+// scrubs down to the "[image]" placeholder and is still embedded as text.
+func filterEmbeddable(ctx context.Context, indexInfoList []*types.IndexInfo) []*types.IndexInfo {
+	kept := make([]*types.IndexInfo, 0, len(indexInfoList))
+	for _, indexInfo := range indexInfoList {
+		if strings.TrimSpace(sanitizeForEmbedding(ctx, indexInfo.Content)) == "" {
+			logger.Debugf(ctx, "skipping blank embedding input, source_id=%s chunk_id=%s",
+				indexInfo.SourceID, indexInfo.ChunkID)
+			continue
+		}
+		kept = append(kept, indexInfo)
+	}
+	if dropped := len(indexInfoList) - len(kept); dropped > 0 {
+		logger.Warnf(ctx, "skipped %d/%d blank embedding inputs before batch embed", dropped, len(indexInfoList))
+	}
+	return kept
 }
 
 // batchEmbedWithBackoff calls BatchEmbedWithPool with exponential backoff on
