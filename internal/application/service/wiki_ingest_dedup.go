@@ -26,9 +26,9 @@ import (
 // external calls, and it only ever *removes* candidates from the prompt —
 // the downstream validMerge check still guards the final write.
 const (
-	// dedupCandidateTopK bounds how many trigram-similar existing pages
+	// dedupCandidateTopK bounds how many title/alias candidate pages
 	// each new item's similarity probe returns (the LIMIT passed to
-	// FindSimilarPages, applied per query term = name + each alias). Kept
+	// FindSimilarPagesBatch, applied per query term = name + each alias). Kept
 	// deliberately small: the DB already orders by similarity desc behind a
 	// pg_trgm threshold, so a genuine same-entity target is essentially
 	// always the top hit. A tight K keeps each item's <candidates> list in
@@ -50,6 +50,61 @@ const (
 	// real token savings.
 	dedupSmallCorpusBypass = 25
 )
+
+// collectBatchDedupCandidates probes each distinct normalized term once and
+// maps hits only to the items that supplied it. Keeping this association is
+// essential: the flattened prompt must not authorize a cross-item merge.
+func (s *wikiIngestService) collectBatchDedupCandidates(
+	ctx context.Context, kbID string, entities, concepts []extractedItem,
+) (map[string]*types.WikiPageLite, map[string]map[string]bool) {
+	pages := make(map[string]*types.WikiPageLite)
+	byItem := make(map[string]map[string]bool)
+	owners := make(map[string][]string)
+	terms := make([]string, 0)
+	for _, items := range [][]extractedItem{entities, concepts} {
+		for _, item := range items {
+			if byItem[item.Slug] == nil {
+				byItem[item.Slug] = make(map[string]bool)
+			}
+			seen := make(map[string]bool)
+			queries := append([]string{item.Name}, item.Aliases...)
+			for _, query := range queries {
+				term := strings.ToLower(strings.TrimSpace(query))
+				if term == "" || seen[term] {
+					continue
+				}
+				seen[term] = true
+				if _, exists := owners[term]; !exists {
+					terms = append(terms, term)
+				}
+				owners[term] = append(owners[term], item.Slug)
+			}
+		}
+	}
+	if len(terms) == 0 || s.wikiService == nil {
+		return pages, byItem
+	}
+	hits, err := s.wikiService.FindSimilarPagesBatch(ctx, kbID, terms,
+		[]string{types.WikiPageTypeEntity, types.WikiPageTypeConcept}, dedupCandidateTopK)
+	if err != nil {
+		logger.Warnf(ctx, "wiki ingest: batch candidate lookup failed: %v", err)
+		return pages, byItem
+	}
+	for _, term := range terms {
+		for _, page := range hits[term] {
+			if page == nil || page.Slug == "" {
+				continue
+			}
+			if _, exists := pages[page.Slug]; !exists {
+				pages[page.Slug] = page
+			}
+			for _, slug := range owners[term] {
+				byItem[slug][page.Slug] = true
+			}
+		}
+	}
+	return pages, byItem
+}
 
 // dedupSurface is the pre-computed similarity feature set for one side of
 // a (new item, existing page) comparison.

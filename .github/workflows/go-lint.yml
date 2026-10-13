@@ -99,6 +99,9 @@ jobs:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
+          # Judge the PR's own diff, not newer main changes in the merge ref.
+          # App CI still tests the merged tree for integration compatibility.
+          ref: ${{ github.event.pull_request.head.sha }}
 
       - uses: actions/setup-go@v6
         with:
