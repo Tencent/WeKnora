@@ -1,13 +1,12 @@
 <script setup lang="ts">
-import { useI18n } from 'vue-i18n'
-const { t } = useI18n()
+import { MAX_FILE_SIZE_MB } from '@/utils'
 </script>
 <template>
     <div class="empty">
         <img class="empty-img" src="@/assets/img/upload.svg" alt="">
         <span class="empty-txt">{{ $t('knowledgeBase.emptyKnowledgeDragDrop') }}</span>
-        <span class="empty-type-txt">{{ $t('knowledgeBase.pdfDocFormat') }}</span>
-        <span class="empty-type-txt">{{ $t('knowledgeBase.textMarkdownFormat') }}</span>
+        <span class="empty-type-txt">{{ $t('knowledgeBase.pdfDocFormat', { size: MAX_FILE_SIZE_MB }) }}</span>
+        <span class="empty-type-txt">{{ $t('knowledgeBase.textMarkdownFormat', { size: MAX_FILE_SIZE_MB }) }}</span>
     </div>
 </template>
 <style scoped lang="less">

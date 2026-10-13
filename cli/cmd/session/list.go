@@ -115,22 +115,38 @@ func runList(ctx context.Context, opts *ListOptions, fopts *cmdutil.FormatOption
 		since = d
 	}
 
+	threshold := time.Now().Add(-since)
+	filterSince := func(items []sdk.Session) []sdk.Session {
+		if since <= 0 {
+			return items
+		}
+		filtered := items[:0]
+		for _, session := range items {
+			updated, err := time.Parse(time.RFC3339, session.UpdatedAt)
+			if err == nil && updated.After(threshold) {
+				filtered = append(filtered, session)
+			}
+		}
+		return filtered
+	}
+
 	var items []sdk.Session
 	var serverTotal int
 	if opts.AllPages {
 		accum := make([]sdk.Session, 0)
+		scanned := 0
 		for page := 1; ; page++ {
 			chunk, total, err := svc.GetSessionsByTenant(ctx, page, opts.PageSize)
 			if err != nil {
 				return cmdutil.WrapHTTP(err, "list sessions")
 			}
 			serverTotal = total
-			accum = append(accum, chunk...)
-			if opts.Limit > 0 && len(accum) >= opts.Limit {
-				accum = accum[:opts.Limit]
+			scanned += len(chunk)
+			accum = append(accum, filterSince(chunk)...)
+			if opts.Limit > 0 && len(accum) > opts.Limit {
 				break
 			}
-			if len(accum) >= total || len(chunk) == 0 {
+			if scanned >= total || len(chunk) == 0 {
 				break
 			}
 		}
@@ -141,24 +157,10 @@ func runList(ctx context.Context, opts *ListOptions, fopts *cmdutil.FormatOption
 			return cmdutil.WrapHTTP(err, "list sessions")
 		}
 		serverTotal = total
-		items = chunk
+		items = filterSince(chunk)
 	}
 	if items == nil {
 		items = []sdk.Session{} // JSON [] not null
-	}
-	if since > 0 {
-		threshold := time.Now().Add(-since)
-		filtered := items[:0]
-		for _, s := range items {
-			t, err := time.Parse(time.RFC3339, s.UpdatedAt)
-			if err != nil {
-				continue // skip unparseable timestamps rather than guess
-			}
-			if t.After(threshold) {
-				filtered = append(filtered, s)
-			}
-		}
-		items = filtered
 	}
 	// --limit applies after --since so the cap reflects what the user sees.
 	truncated := false

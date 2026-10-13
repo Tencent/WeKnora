@@ -1321,8 +1321,8 @@ onUnmounted(() => {
   position: absolute;
   pointer-events: none;
   border-radius: var(--app-radius-xs);
-  background: color-mix(in srgb, var(--td-success-color) 22%, transparent);
-  outline: 1px solid color-mix(in srgb, var(--td-success-color) 50%, transparent);
+  background: var(--app-source-highlight-soft-bg);
+  outline: 1px solid var(--app-source-highlight-border);
 }
 
 .preview-image {
@@ -1414,7 +1414,7 @@ onUnmounted(() => {
     max-width: 480px;
     padding: 10px 12px;
     border-radius: @border-radius;
-    background: color-mix(in srgb, var(--td-success-color) 10%, transparent);
+    background: var(--app-source-highlight-soft-bg);
     color: @text-primary;
     &__time {
       font-size: var(--app-text-sm);
@@ -1679,22 +1679,39 @@ html[theme-mode="dark"] {
 /* Citation highlights live outside the scoped block: they apply to DOM that
    third-party renderers (docx-preview, pptx-preview, SheetJS) create. */
 ::highlight(source-locate) {
-  background-color: color-mix(in srgb, var(--app-source-highlight) 60%, transparent);
+  background-color: var(--app-source-highlight-bg);
 }
 
 mark.source-locate-mark {
-  background-color: color-mix(in srgb, var(--app-source-highlight) 60%, transparent);
+  background-color: var(--app-source-highlight-bg);
   color: inherit;
+  border-radius: var(--app-radius-xs);
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
 }
 
 .source-locate-block {
-  background-color: color-mix(in srgb, var(--app-source-highlight) 22%, transparent) !important;
-  outline: 1px solid var(--app-source-highlight);
-  outline-offset: 2px;
-  border-radius: var(--app-radius-xs);
+  background-color: var(--app-source-highlight-soft-bg) !important;
+  box-shadow: inset 3px 0 var(--app-source-highlight-border);
+}
+
+/* Cell backgrounds can obscure a row's marker. Paint each cell once and
+   keep the accent on the leading edge, without boxing every table row. */
+tr.source-locate-block {
+  background-color: transparent !important;
+  box-shadow: none;
 }
 
 tr.source-locate-block > td {
-  background-color: color-mix(in srgb, var(--app-source-highlight) 45%, transparent) !important;
+  background-color: var(--app-source-highlight-soft-bg) !important;
+}
+
+tr.source-locate-block > td:first-child {
+  box-shadow: inset 3px 0 var(--app-source-highlight-border);
+}
+
+img.source-locate-block {
+  outline: 1px solid var(--app-source-highlight-border);
+  outline-offset: 2px;
 }
 </style>

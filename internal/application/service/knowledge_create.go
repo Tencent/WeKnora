@@ -1168,7 +1168,7 @@ func (s *knowledgeService) markKnowledgeEnqueueFailed(ctx context.Context, knowl
 
 func usesSourceIdentityDuplicateCheck(channel string) bool {
 	switch channel {
-	case types.ConnectorTypeGitLab, types.ChannelConfluence:
+	case types.ConnectorTypeGitLab, types.ChannelConfluence, types.ChannelSeafile:
 		return true
 	default:
 		return false
@@ -1280,6 +1280,25 @@ func (s *knowledgeService) bindStoredImages(
 	if bound > 0 {
 		logger.Infof(ctx, "Bound %d/%d stored images to knowledge %s", bound, len(images), knowledge.ID)
 	}
+}
+
+func (s *knowledgeService) bindChunkResources(
+	ctx context.Context, tenantID uint64, knowledgeID string, chunks []*types.Chunk,
+) {
+	if len(chunks) == 0 {
+		return
+	}
+	var b strings.Builder
+	for _, chunk := range chunks {
+		if chunk == nil {
+			continue
+		}
+		b.WriteString(chunk.Content)
+		b.WriteByte('\n')
+		b.WriteString(chunk.ImageInfo)
+		b.WriteByte('\n')
+	}
+	s.bindContentResources(ctx, tenantID, knowledgeID, b.String())
 }
 
 func (s *knowledgeService) triggerManualProcessing(ctx context.Context,

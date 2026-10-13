@@ -628,6 +628,7 @@
 </template>
 
 <script setup lang="ts">
+import { readDocumentReferences } from '@/utils/readDocumentReferences';
 import { isAssistantTurnComplete } from '@/utils/steerStreamFork';
 import { ref, computed, watch, onMounted, onBeforeUnmount, onUpdated, nextTick } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
@@ -680,6 +681,7 @@ import {
   getReadSkillTarget,
   getSandboxDiffStat,
   getSandboxFilePreview,
+  getAttachmentReadTarget,
   getSandboxToolPath,
   sandboxPreviewRemaining,
   skillScriptTitleCommand,
@@ -1414,31 +1416,7 @@ function getToolReferenceItems(event: any): KnowledgeReferenceLike[] {
   }
 
   if (toolName === 'read_document' || toolName === 'list_knowledge_chunks' || toolName === 'wiki_read_source_doc') {
-    const chunks = Array.isArray(toolData.chunks) ? toolData.chunks : [];
-    if (chunks.length) {
-      return mergeDocumentReferences(chunks
-        .filter((item: any) => item?.content)
-        .map((item: any, index: number) => ({
-          id: item.chunk_id || item.id || `${toolData.knowledge_id || 'doc'}-${index + 1}`,
-          knowledge_id: item.knowledge_id || toolData.knowledge_id,
-          knowledge_title: toolData.faq_question || toolData.knowledge_title || toolData.knowledge_id,
-          knowledge_base_id: item.knowledge_base_id || toolData.knowledge_base_id,
-          chunk_index: item.chunk_index ?? item.index ?? index + 1,
-          chunk_type: item.chunk_type || (toolData.faq_question ? 'faq' : undefined),
-          content: item.content || '',
-        })));
-    }
-
-    const output = cleanToolOutputContent(event.output);
-    if (!output) return [];
-    return [{
-      id: toolData.faq_id || toolData.knowledge_id || event.tool_call_id,
-      knowledge_id: toolData.knowledge_id,
-      knowledge_title: toolData.faq_question || toolData.knowledge_title || toolData.knowledge_id || getToolDescription(event),
-      knowledge_base_id: toolData.knowledge_base_id,
-      chunk_type: toolData.faq_question ? 'faq' : undefined,
-      content: output,
-    }];
+    return readDocumentReferences(toolData, cleanToolOutputContent(event.output), getToolDescription(event));
   }
 
   return [];
@@ -2826,6 +2804,26 @@ const getAttachmentParsingSummary = (event: any): string => {
   return getAttachmentParsingSummaryHtml(t, event);
 };
 
+// Attachment IDs in attachment:// paths mean nothing to users; name the file.
+const getSandboxToolDetail = (event: any): string => {
+  const target = getAttachmentReadTarget(event);
+  if (!target) return getSandboxToolPath(event);
+  switch (target.kind) {
+    case 'list':
+      return t('agentStream.attachmentTarget.list');
+    case 'file':
+      return target.name || t('agentStream.attachmentTarget.file');
+    case 'images':
+      return target.name
+        ? t('agentStream.attachmentTarget.images', { name: target.name })
+        : t('agentStream.attachmentTarget.imagesUnnamed');
+    case 'image':
+      return target.name
+        ? t('agentStream.attachmentTarget.image', { name: target.name, n: target.number })
+        : t('agentStream.attachmentTarget.imageUnnamed', { n: target.number });
+  }
+};
+
 // Get tool title - prefer summary over description, add query for search tools
 const getToolTitle = (event: any): string => {
   if (event.tool_name === 'local_browser') return browserToolTitle(t, event);
@@ -2851,7 +2849,7 @@ const getToolTitle = (event: any): string => {
     }
     if (event.tool_name === 'list_sandbox_files' || event.tool_name === 'read_file' || event.tool_name === 'read_sandbox_file' || event.tool_name === 'write_sandbox_file' || event.tool_name === 'edit_sandbox_file') {
       const name = getLocalizedToolName(event.tool_name);
-      return `${formatToolTitleWithDetail(name, getSandboxToolPath(event))}...`;
+      return `${formatToolTitleWithDetail(name, getSandboxToolDetail(event))}...`;
     }
     if (event.tool_name === 'shell_exec') {
       return t('agentStream.toolStatus.shellExecRunning');
@@ -2956,7 +2954,7 @@ const getToolTitle = (event: any): string => {
   }
 
   if (toolName === 'list_sandbox_files' || toolName === 'read_file' || toolName === 'read_sandbox_file' || toolName === 'write_sandbox_file' || toolName === 'edit_sandbox_file') {
-    return formatToolTitleWithDetail(getToolDescription(event), getSandboxToolPath(event));
+    return formatToolTitleWithDetail(getToolDescription(event), getSandboxToolDetail(event));
   }
 
   if (toolName === 'execute_skill_script') {
@@ -3013,7 +3011,7 @@ const getToolDescription = (event: any): string => {
     }
     if (event.tool_name === 'list_sandbox_files' || event.tool_name === 'read_file' || event.tool_name === 'read_sandbox_file' || event.tool_name === 'write_sandbox_file' || event.tool_name === 'edit_sandbox_file') {
       const name = getLocalizedToolName(event.tool_name);
-      return `${formatToolTitleWithDetail(name, getSandboxToolPath(event))}...`;
+      return `${formatToolTitleWithDetail(name, getSandboxToolDetail(event))}...`;
     }
     if (event.tool_name === 'shell_exec') {
       return t('agentStream.toolStatus.shellExecRunning');

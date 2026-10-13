@@ -379,12 +379,15 @@ func TestValidateSameEmbeddingModel_LogInjection_Sanitized(t *testing.T) {
 // engine, or returns an error. Only Retrieve, EngineType, and Support are
 // exercised; the rest panic.
 type fakeRetrieveEngineService struct {
-	engineType    types.RetrieverEngineType
-	support       []types.RetrieverType
-	canned        []*types.IndexWithScore
-	cannedErr     error
-	sleep         time.Duration
-	retrieveCalls atomic.Int64
+	engineType types.RetrieverEngineType
+	support    []types.RetrieverType
+	canned     []*types.IndexWithScore
+	cannedErr  error
+	// cannedResultErr marks the returned result set as partially failed
+	// (RetrieveResult.Error) without failing the call itself.
+	cannedResultErr error
+	sleep           time.Duration
+	retrieveCalls   atomic.Int64
 }
 
 func (f *fakeRetrieveEngineService) EngineType() types.RetrieverEngineType {
@@ -409,6 +412,7 @@ func (f *fakeRetrieveEngineService) Retrieve(ctx context.Context, p types.Retrie
 		Results:             f.canned,
 		RetrieverEngineType: f.engineType,
 		RetrieverType:       p.RetrieverType,
+		Error:               f.cannedResultErr,
 	}}, nil
 }
 

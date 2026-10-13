@@ -3,29 +3,23 @@
     <div v-if="!embedded" class="section-header">
       <h2>{{ t('graphSettings.title') }}</h2>
       <p class="section-description">{{ t('graphSettings.description') }}</p>
-
-      <t-alert
-        v-if="!isGraphDatabaseEnabled"
-        theme="warning"
-        style="margin-top: 16px;"
-      >
-        <template #message>
-          <div>{{ t('graphSettings.disabledWarning') }}</div>
-          <t-link class="graph-guide-link" theme="primary" @click="handleOpenGraphGuide">
-            {{ t('graphSettings.howToEnable') }}
-          </t-link>
-        </template>
-      </t-alert>
     </div>
-    <t-alert
-      v-else-if="!isGraphDatabaseEnabled"
-      theme="warning"
-      class="embedded-graph-alert"
-    >
-      <template #message>
-        <div>{{ t('graphSettings.disabledWarning') }}</div>
-      </template>
-    </t-alert>
+    <div v-if="!isGraphDatabaseEnabled" class="graph-disabled">
+      <span class="graph-disabled-icon"><t-icon name="chart-bubble" /></span>
+      <div class="graph-disabled-text">
+        <p>{{ t('graphSettings.disabledWarning') }}</p>
+      </div>
+      <t-button
+        v-if="!embedded"
+        size="small"
+        theme="primary"
+        variant="outline"
+        @click="handleOpenGraphGuide"
+      >
+        <template #icon><t-icon name="help-circle" /></template>
+        {{ t('graphSettings.howToEnable') }}
+      </t-button>
+    </div>
 
     <div v-if="isGraphDatabaseEnabled" class="settings-group">
       <!-- 启用实体关系提取 -->
@@ -624,6 +618,41 @@ onMounted(async () => {
   }
 }
 
+.graph-disabled {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px dashed var(--td-component-stroke);
+  border-radius: var(--app-radius-md);
+  background: var(--td-bg-color-secondarycontainer);
+}
+
+.graph-disabled-icon {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--app-radius-md);
+  font-size: var(--app-text-2xl);
+  color: var(--td-warning-color);
+  background: var(--td-warning-color-light);
+}
+
+.graph-disabled-text {
+  flex: 1;
+  min-width: 0;
+
+  p {
+    margin: 0;
+    font-size: var(--app-text-md);
+    line-height: 1.5;
+    color: var(--td-text-color-secondary);
+  }
+}
+
 .settings-group {
   display: flex;
   flex-direction: column;
@@ -798,7 +827,7 @@ onMounted(async () => {
 }
 
 .graph-settings--embedded {
-  .embedded-graph-alert {
+  .graph-disabled {
     margin-bottom: 12px;
   }
 

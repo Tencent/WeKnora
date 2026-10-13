@@ -12,12 +12,25 @@
     </div>
 
     <template v-else>
+      <Teleport to="#toolbox-toolbar" defer>
+        <t-input v-if="services.length > 0" v-model="query" class="list-search" :placeholder="$t('menu.search')"
+          :aria-label="$t('menu.search')" clearable>
+          <template #prefix-icon><t-icon name="search" size="16px" /></template>
+        </t-input>
+      </Teleport>
       <div v-if="services.length === 0 && !authStore.hasRole('admin')" class="empty-state">
         <t-empty :description="$t('mcpSettings.empty')" />
       </div>
 
+      <div v-else-if="services.length > 0 && filteredServices.length === 0" class="empty-state">
+        <t-empty :description="$t('common.noResult')" />
+        <t-button variant="outline" @click="query = ''">{{ $t('common.clear') }}</t-button>
+        <t-button v-if="authStore.hasRole('admin')" variant="text" @click="handleAdd">
+          {{ $t('mcpSettings.addService') }}
+        </t-button>
+      </div>
       <div v-else class="services-grid">
-        <article v-for="service in services" :key="service.id" class="service-card">
+        <article v-for="service in filteredServices" :key="service.id" class="service-card">
           <div class="service-card__main">
             <div class="service-card__body">
               <div class="service-card__header">
@@ -109,7 +122,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { computed, ref, onMounted } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { AddIcon } from 'tdesign-icons-vue-next'
 import { useI18n } from 'vue-i18n'
@@ -122,6 +135,7 @@ import {
 import McpServiceDialog from './components/McpServiceDialog.vue'
 import { useConfirmDelete } from '@/components/settings/useConfirmDelete'
 import { useAuthStore } from '@/stores/auth'
+import { matchesResourceQuery } from '@/utils/resourceListSearch'
 
 const emit = defineEmits<{ count: [value: number] }>()
 const { t } = useI18n()
@@ -136,6 +150,10 @@ const currentService = ref<MCPService | null>(null)
 const dialogInitialStep = ref<0 | 1>(0)
 const togglingIds = ref(new Set<string>())
 const serviceUsage = (service: MCPService) => service.usage_instructions?.trim() || service.description?.trim() || ''
+const query = ref('')
+const filteredServices = computed(() => services.value.filter((service) =>
+  matchesResourceQuery({ name: service.name, description: serviceUsage(service) }, query.value),
+))
 
 // Load MCP services
 const loadServices = async () => {
@@ -287,8 +305,14 @@ defineExpose({ openAdd: handleAdd })
   padding: 0;
   overflow: hidden;
   border: 1px solid var(--td-component-stroke);
-  border-radius: var(--app-radius-lg);
+  border-radius: var(--app-radius-md);
   background: var(--td-bg-color-container);
+  transition: border-color 0.18s ease, box-shadow 0.18s ease;
+
+  &:hover:not(.service-card--add) {
+    border-color: color-mix(in srgb, var(--td-brand-color) 40%, var(--td-component-stroke));
+    box-shadow: 0 3px 12px color-mix(in srgb, var(--td-text-color-primary) 6%, transparent);
+  }
 
   &--add {
     align-items: center;
@@ -345,7 +369,7 @@ defineExpose({ openAdd: handleAdd })
 }
 
 .service-card__badge {
-  .provider-card-badge(26px, 7px);
+  .provider-card-badge(28px, 8px);
   font-size: var(--app-text-md);
 
   :deep(.t-icon) {

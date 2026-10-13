@@ -1401,6 +1401,20 @@ func TestSortedScriptPathsIsDeterministic(t *testing.T) {
 		"only files the runtime can execute are scripts")
 }
 
+func TestSortedScriptPathsSkipsVendoredTreesAtAnyDepth(t *testing.T) {
+	bundle := &SkillBundle{Files: map[string][]byte{
+		"scripts/main.py":                    []byte("x"),
+		".venv/lib/pkg/a.py":                 []byte("x"),
+		"node_modules/leftpad/index.js":      []byte("x"),
+		"tools/.venv/lib/otherpkg/b.py":      []byte("x"),
+		"sub/package/node_modules/pkg/c.mjs": []byte("x"),
+	}}
+
+	require.Equal(t, []string{"scripts/main.py"},
+		sortedScriptPaths(bundle, allScriptExtensions...),
+		"vendored trees are skipped at the bundle root and nested under subprojects")
+}
+
 type stubWorkspaceSandboxPolicy struct {
 	disabled bool
 }

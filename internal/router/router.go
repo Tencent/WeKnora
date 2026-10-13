@@ -127,7 +127,7 @@ func NewRouter(params RouterParams) *gin.Engine {
 			"X-Embed-Session", "X-External-User-ID", "X-External-User-Token", "X-WeKnora-Desktop-Token",
 			// Streamable HTTP MCP clients running in a browser send these on
 			// the /mcp/:endpoint_id surface.
-			"MCP-Protocol-Version", "Mcp-Session-Id", "Last-Event-ID",
+			"MCP-Protocol-Version", "Mcp-Method", "Mcp-Name", "Mcp-Session-Id", "Last-Event-ID",
 		},
 		ExposeHeaders:    []string{"Content-Length", "Access-Control-Allow-Origin", "Mcp-Session-Id"},
 		AllowCredentials: true,

@@ -10,7 +10,7 @@ type PdfDocument = Awaited<ReturnType<PdfJs['getDocument']>['promise']>
 type PdfPage = Awaited<ReturnType<PdfDocument['getPage']>>
 
 /** A highlight drawn on a page, in fractions of the page box. */
-type Mark = { left: number; top: number; width: number; height: number; kind: 'box' | 'text' | 'page' }
+type Mark = { left: number; top: number; width: number; height: number; kind: 'box' | 'text' | 'page'; target: number }
 
 export type PdfLocateResult = { found: boolean; precise: boolean; page?: number; granularity?: string; reason?: string }
 
@@ -277,7 +277,7 @@ async function pageText(pageNumber: number): Promise<string> {
 }
 
 /** Refine only within the recorded region, or at a verified text occurrence. */
-async function markTarget(target: PdfTarget, version: number): Promise<number | null> {
+async function markTarget(target: PdfTarget, version: number, targetIndex: number): Promise<number | null> {
   const pageNumber = target.page
   await renderPage(pageNumber)
   await rendered.get(pageNumber)?.done
@@ -305,7 +305,7 @@ async function markTarget(target: PdfTarget, version: number): Promise<number | 
   if (!lines?.length) return null
   let top = 1
   for (const r of lines) {
-    const mark: Mark = { kind: 'text', left: (r.left - pageBox.left) / pageBox.width,
+    const mark: Mark = { kind: 'text', target: targetIndex, left: (r.left - pageBox.left) / pageBox.width,
       top: (r.top - pageBox.top) / pageBox.height, width: r.width / pageBox.width, height: r.height / pageBox.height }
     addMark(pageNumber, mark)
     top = Math.min(top, mark.top)
@@ -317,6 +317,7 @@ async function applyLocate(request: SourceLocateRequest | null | undefined) {
   const version = ++locateVersion
   clearMarks()
   locatedTargets.value = []
+  selectedTarget.value = 0
   if (!request || !pdf.value) return
   try {
     const result = await resolvePdfSource(request, pageCount.value, pageText, () => version !== locateVersion)
@@ -324,18 +325,20 @@ async function applyLocate(request: SourceLocateRequest | null | undefined) {
     const destinations: Array<{ page: number; top: number }> = []
     const levels: string[] = []
     for (const target of result.targets) {
-      let top = await markTarget(target, version)
+      // Use the navigation index: unresolved targets do not get a stop.
+      const targetIndex = destinations.length
+      let top = await markTarget(target, version, targetIndex)
       if (version !== locateVersion) return
       if (top !== null) levels.push('text')
       else if (target.bbox) {
         const [x0, y0, x1, y1] = target.bbox
-        addMark(target.page, { kind: 'box', left: x0, top: y0, width: x1 - x0, height: y1 - y0 })
+        addMark(target.page, { kind: 'box', target: targetIndex, left: x0, top: y0, width: x1 - x0, height: y1 - y0 })
         top = y0
         levels.push('block')
       } else if (target.granularity === 'page') {
         top = 0
         levels.push('page')
-        addMark(target.page, { kind: 'page', left: 0, top: 0, width: 1, height: 1 })
+        addMark(target.page, { kind: 'page', target: targetIndex, left: 0, top: 0, width: 1, height: 1 })
       }
       if (top !== null) destinations.push({ page: target.page, top })
     }
@@ -445,7 +448,7 @@ defineExpose({ relocate: () => applyLocate(props.locate) })
             v-for="(mark, i) in marks[page] || []"
             :key="i"
             class="pdf-source-mark"
-            :class="`pdf-source-mark--${mark.kind}`"
+            :class="[`pdf-source-mark--${mark.kind}`, { 'is-active': mark.target === selectedTarget }]"
             :style="{
               left: `${mark.left * 100}%`,
               top: `${mark.top * 100}%`,
@@ -511,6 +514,11 @@ defineExpose({ relocate: () => applyLocate(props.locate) })
 
 .pdf-source-page {
   position: relative;
+  isolation: isolate;
+  // The PDF canvas stays white even when the surrounding app is dark.
+  --app-source-highlight-bg: rgba(250, 204, 75, 0.34);
+  --app-source-highlight-soft-bg: rgba(250, 204, 75, 0.09);
+  --app-source-highlight-border: rgba(183, 130, 22, 0.5);
   // Block flow with auto margins keeps zoomed pages scrollable to the left.
   margin: 0 auto 12px;
   max-width: none;
@@ -533,22 +541,35 @@ defineExpose({ relocate: () => applyLocate(props.locate) })
   inset: 0;
   z-index: 2;
   pointer-events: none;
+  // Blend the whole layer once, so overlapping glyph rectangles do not
+  // darken the printed text independently.
+  mix-blend-mode: multiply;
 }
 
 .pdf-source-mark {
   position: absolute;
   border-radius: var(--app-radius-xs);
-  background: color-mix(in srgb, var(--app-source-highlight) 55%, transparent);
-  mix-blend-mode: multiply;
+  background: var(--app-source-highlight-soft-bg);
+
+  &--text.is-active {
+    background: var(--app-source-highlight-bg);
+  }
 
   &--box {
-    outline: 1px solid var(--app-source-highlight);
+    outline: 1px solid var(--app-source-highlight-border);
+
+    &.is-active {
+      box-shadow: inset 3px 0 var(--app-source-highlight-border);
+    }
   }
 
   &--page {
     background: transparent;
-    outline: 2px solid var(--app-source-highlight);
-    mix-blend-mode: normal;
+    box-shadow: inset 0 0 0 1px var(--app-source-highlight-border);
+
+    &.is-active {
+      box-shadow: inset 3px 0 var(--app-source-highlight-border), inset 0 0 0 1px var(--app-source-highlight-border);
+    }
   }
 }
 

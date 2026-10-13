@@ -52,7 +52,7 @@ func TestUpdateKnowledgeBase_KeepsImageConfigWhenRequestOmitsIt(t *testing.T) {
 	// The whole config is present but the image section is absent — this is the
 	// shape every existing client sends.
 	updated, err := svc.UpdateKnowledgeBase(ctxWithTenant(1), stored.ID, "renamed", "desc",
-		&types.KnowledgeBaseConfig{})
+		&types.KnowledgeBaseConfig{}, nil)
 	require.NoError(t, err)
 
 	got := updated.ImageProcessingConfig
@@ -80,7 +80,7 @@ func TestUpdateKnowledgeBase_ReplacesImageConfigWhenRequestCarriesIt(t *testing.
 	updated, err := svc.UpdateKnowledgeBase(ctxWithTenant(1), stored.ID, stored.Name, stored.Description,
 		&types.KnowledgeBaseConfig{
 			ImageProcessingConfig: &types.ImageProcessingConfig{ModelID: "vlm-image-2"},
-		})
+		}, nil)
 	require.NoError(t, err)
 
 	got := updated.ImageProcessingConfig

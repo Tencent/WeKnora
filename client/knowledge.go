@@ -123,13 +123,6 @@ func (c *Client) CreateKnowledgeFromFile(ctx context.Context,
 		return nil, fmt.Errorf("failed to get file information: %w", err)
 	}
 
-	// Create the HTTP request
-	path := fmt.Sprintf("/api/v1/knowledge-bases/%s/knowledge/file", knowledgeBaseID)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-
 	// Create a multipart form writer
 	body := &bytes.Buffer{}
 	writer := multipart.NewWriter(body)
@@ -191,11 +184,15 @@ func (c *Client) CreateKnowledgeFromFile(ctx context.Context,
 		return nil, fmt.Errorf("failed to close writer: %w", err)
 	}
 
+	// Construct the request with its completed buffer so net/http can replay it
+	// after an authentication refresh or a redirect.
+	path := fmt.Sprintf("/api/v1/knowledge-bases/%s/knowledge/file", knowledgeBaseID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 	c.applyAuthHeaders(ctx, req)
-
-	// Set the request body
-	req.Body = io.NopCloser(body)
 
 	// Send the request
 	resp, err := c.httpClient.Do(req)

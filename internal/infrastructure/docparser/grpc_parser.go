@@ -15,7 +15,6 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/resolver"
 	"google.golang.org/grpc/status"
 )
 
@@ -61,8 +60,6 @@ func (p *GRPCDocumentReader) connect(addr string) error {
 			authConfig.TLSEnabled,
 		)
 	}
-
-	resolver.SetDefaultScheme("dns")
 
 	start := time.Now()
 	conn, err := grpc.Dial("dns:///"+addr, opts...)

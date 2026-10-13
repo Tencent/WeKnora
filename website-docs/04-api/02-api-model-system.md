@@ -57,6 +57,10 @@ curl "$BASE/api/v1/models/catalog/resolve?provider=deepseek&model=deepseek-v4-pr
 
 `parameters` 会按模型目录校验（未知协议、错误的 compat 键、非法思考等级返回 400），`base_url` 经过 SSRF 校验。
 
+自部署的 `generic` / `Qwen3-VL-Embedding` 默认通过二维 `messages` 批量提交独立输入（已验证 vLLM 0.29.0）；单条输入保留一维会话格式。文本沿用 `BATCH_EMBED_SIZE` 分批，图片批量调用的默认上限为 5 张，这是客户端的保守分批设置，可通过 `parameters.spec.compat.max_image_batch_size` 调整。上传解析仍按单张图片调度任务，不会跨任务合并图片。旧版服务若不支持二维 `messages`，可设置 `parameters.spec.compat.batch_messages=false` 恢复逐条请求；其他模型仅在显式启用该能力时使用会话批处理。
+
+批处理保持各输入的会话内容和向量索引映射，但不保证服务端跨批大小计算逐位相同。要求严格可复现时，应验证部署端的数值行为；vLLM 的 [Batch Invariance](https://docs.vllm.ai/en/v0.29.0/features/batch_invariance/) 模式需要在服务端启用，并针对实际模型验证。可设置 `WEKNORA_EMBEDDING_TEST_URL` 和 `WEKNORA_EMBEDDING_TEST_FIXTURE` 后运行 `go test ./internal/models/embedding -run '^TestLiveQwenMessagesBatchParity$' -v -count=1`：fixture 为 `{"texts":[...],"image_paths":[...]}`，文本和图片均至少两个；私有/IP 端点需配置 `SSRF_WHITELIST`，鉴权可使用 `WEKNORA_EMBEDDING_TEST_API_KEY`。该测试比较逐条、分批、倒序和重复逐条请求，记录最大绝对误差与最低余弦相似度，超过严格阈值会失败，不写入知识库。
+
 响应：201 `{"success":true,"data":{ModelResponse}}`（`id,name,type,source,parameters,is_default,is_builtin,status,credentials,capabilities,...`；响应不含密钥）
 
 ```bash

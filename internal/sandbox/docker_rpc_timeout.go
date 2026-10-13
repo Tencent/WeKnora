@@ -98,12 +98,28 @@ func (a *dockerRPCTimeoutAPI) ExecAttach(
 	return a.inner.ExecAttach(ctx, execID, options)
 }
 
+func (a *dockerRPCTimeoutAPI) ExecStart(
+	ctx context.Context, execID string, options client.ExecStartOptions,
+) (client.ExecStartResult, error) {
+	rpcCtx, cancel := a.rpcCtx(ctx)
+	defer cancel()
+	return a.inner.ExecStart(rpcCtx, execID, options)
+}
+
 func (a *dockerRPCTimeoutAPI) ExecInspect(
 	ctx context.Context, execID string, options client.ExecInspectOptions,
 ) (client.ExecInspectResult, error) {
 	rpcCtx, cancel := a.rpcCtx(ctx)
 	defer cancel()
 	return a.inner.ExecInspect(rpcCtx, execID, options)
+}
+
+func (a *dockerRPCTimeoutAPI) ExecResize(
+	ctx context.Context, execID string, options client.ExecResizeOptions,
+) (client.ExecResizeResult, error) {
+	rpcCtx, cancel := a.rpcCtx(ctx)
+	defer cancel()
+	return a.inner.ExecResize(rpcCtx, execID, options)
 }
 
 func (a *dockerRPCTimeoutAPI) ContainerStatPath(

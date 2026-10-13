@@ -20,10 +20,10 @@
                     </div>
                 </t-tooltip>
                 <div class="sidebar-toggle" @click="uiStore.toggleSidebar" :title="t('menu.collapseSidebar')">
-                    <svg viewBox="0 0 20 20" width="18" height="18" fill="none" xmlns="http://www.w3.org/2000/svg">
-                        <rect x="1.5" y="1.5" width="17" height="17" rx="3" stroke="currentColor" stroke-width="1.2" />
-                        <line x1="7.5" y1="1.5" x2="7.5" y2="18.5" stroke="currentColor" stroke-width="1.2" />
-                        <line x1="4" y1="7.5" x2="4" y2="12.5" stroke="currentColor" stroke-width="1.2"
+                    <svg viewBox="0 0 20 20" width="16" height="16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <rect x="1.5" y="1.5" width="17" height="17" rx="3" stroke="currentColor" stroke-width="1.5" />
+                        <line x1="7.5" y1="1.5" x2="7.5" y2="18.5" stroke="currentColor" stroke-width="1.5" />
+                        <line x1="4" y1="7.5" x2="4" y2="12.5" stroke="currentColor" stroke-width="1.5"
                             stroke-linecap="round" />
                     </svg>
                 </div>
@@ -34,14 +34,14 @@
             <div class="menu_item sidebar-toggle-item" @click="uiStore.toggleSidebar">
                 <div class="menu_item-box">
                     <div class="menu_icon">
-                        <svg class="icon" viewBox="0 0 20 20" width="20" height="20" fill="none"
+                        <svg class="icon icon--toggle" viewBox="0 0 20 20" width="16" height="16" fill="none"
                             xmlns="http://www.w3.org/2000/svg">
                             <rect x="1.5" y="1.5" width="17" height="17" rx="3" stroke="currentColor"
-                                stroke-width="1.2" />
-                            <line x1="7.5" y1="1.5" x2="7.5" y2="18.5" stroke="currentColor" stroke-width="1.2" />
-                            <line x1="5" y1="10" x2="3" y2="8" stroke="currentColor" stroke-width="1.2"
+                                stroke-width="1.5" />
+                            <line x1="7.5" y1="1.5" x2="7.5" y2="18.5" stroke="currentColor" stroke-width="1.5" />
+                            <line x1="5" y1="10" x2="3" y2="8" stroke="currentColor" stroke-width="1.5"
                                 stroke-linecap="round" />
-                            <line x1="5" y1="10" x2="3" y2="12" stroke="currentColor" stroke-width="1.2"
+                            <line x1="5" y1="10" x2="3" y2="12" stroke="currentColor" stroke-width="1.5"
                                 stroke-linecap="round" />
                         </svg>
                     </div>
@@ -85,7 +85,7 @@
                         @mouseleave="mouseleaveMenu(item.path)" :data-guide="`nav-${item.path}`"
                         :class="['menu_item', item.childrenPath && item.childrenPath == currentpath ? 'menu_item_c_active' : isMenuItemActive(item.path) ? 'menu_item_active' : '']">
                         <div class="menu_item-box">
-                            <div class="menu_icon">
+                            <div class="menu_icon" :class="`menu_icon--${item.icon}`">
                                 <img class="icon"
                                     :src="getImgSrc(item.icon == 'zhishiku' ? knowledgeIcon : item.icon == 'agent' ? agentIcon : item.icon == 'artifact' ? artifactIcon : item.icon == 'toolbox' ? toolboxIcon : item.icon == 'organization' ? organizationIcon : item.icon == 'logout' ? logoutIcon : item.icon == 'setting' ? settingIcon : prefixIcon)"
                                     alt="">
@@ -1253,16 +1253,16 @@ const resizeSidebar = (delta: number, keyboard: boolean) => {
 <style lang="less" scoped>
 .aside_box {
     // 侧栏水平栅格：图标列与文案列统一对齐（Logo / 菜单 / 会话分组 / 会话行）
-    --sidebar-inset-x: 14px;
+    --sidebar-inset-x: 10px;
     --sidebar-icon-size: 18px;
     --sidebar-channel-icon: 14px;
     --sidebar-icon-gap: 8px;
-    --sidebar-text-inset: calc(var(--sidebar-inset-x) + var(--sidebar-icon-size) + var(--sidebar-icon-gap)); // 40px
+    --sidebar-text-inset: calc(var(--sidebar-inset-x) + var(--sidebar-icon-size) + var(--sidebar-icon-gap)); // 36px
 
     min-width: 0;
     width: var(--sidebar-width, 260px);
     flex-shrink: 0;
-    padding: 8px 6px 6px;
+    padding: 8px 4px 6px;
     background: var(--td-bg-color-sidebar);
     box-sizing: border-box;
     /* Avoid 100vh because <html> carries a `zoom` multiplier for font-size
@@ -1287,15 +1287,23 @@ const resizeSidebar = (delta: number, keyboard: boolean) => {
         transition: none;
     }
 
-    &--collapsed {
-        min-width: 60px;
-        width: 60px;
-        padding: 8px 3px 6px;
+    &.aside_box--collapsed {
+        min-width: 48px;
+        width: 48px;
+        padding: 8px 0;
         overflow: visible;
+
+        .menu_box {
+            align-items: center;
+        }
 
         .menu_item {
             justify-content: center;
-            padding: 7px 0;
+            width: 32px;
+            height: 32px;
+            padding: 0;
+            margin: 0 auto 6px;
+            border-radius: var(--app-radius-sm);
 
             .menu_item-box {
                 justify-content: center;
@@ -1304,7 +1312,12 @@ const resizeSidebar = (delta: number, keyboard: boolean) => {
 
             .menu_icon {
                 margin-right: 0;
+                justify-content: center;
             }
+        }
+
+        .menu_item_active {
+            border-radius: var(--app-radius-sm);
         }
 
         .menu_bottom {
@@ -1321,17 +1334,19 @@ const resizeSidebar = (delta: number, keyboard: boolean) => {
         display: flex;
         align-items: center;
         justify-content: space-between;
-        height: 50px;
+        // 保留侧栏顶部留白，让 Logo 和操作按钮与窗口顶边保持舒适间距
+        height: 39px;
+        margin: 0 0 4px;
         flex-shrink: 0;
-        padding: 0 10px 0 var(--sidebar-inset-x);
+        padding: 0 2px 0 var(--sidebar-inset-x);
     }
 
     .sidebar-toggle {
         display: flex;
         align-items: center;
         justify-content: center;
-        width: 18px;
-        height: 18px;
+        width: 28px;
+        height: 28px;
         flex-shrink: 0;
         cursor: pointer;
         color: var(--td-text-color-secondary);
@@ -1353,7 +1368,7 @@ const resizeSidebar = (delta: number, keyboard: boolean) => {
         overflow: hidden;
 
         .logo {
-            width: 128px;
+            width: 108px;
             height: auto;
         }
 
@@ -1462,7 +1477,7 @@ const resizeSidebar = (delta: number, keyboard: boolean) => {
         align-items: center;
         justify-content: space-between;
         height: 34px;
-        padding: 6px 10px 6px var(--sidebar-inset-x);
+        padding: 6px 8px 6px var(--sidebar-inset-x);
         box-sizing: border-box;
         margin-bottom: 1px;
         border-radius: var(--app-radius-xs);
@@ -1486,8 +1501,11 @@ const resizeSidebar = (delta: number, keyboard: boolean) => {
 
     .menu_icon {
         display: flex;
+        align-items: center;
+        justify-content: center;
         flex: 0 0 var(--sidebar-icon-size);
         width: var(--sidebar-icon-size);
+        height: var(--sidebar-icon-size);
         margin-right: var(--sidebar-icon-gap);
         color: var(--td-text-color-secondary);
 
@@ -1495,6 +1513,14 @@ const resizeSidebar = (delta: number, keyboard: boolean) => {
             width: 18px;
             height: 18px;
             overflow: hidden;
+        }
+
+        // 图形几乎占满画布的图标缩小显示，否则会比其他图标大一圈
+        &.menu_icon--zhishiku .icon,
+        &.menu_icon--organization .icon,
+        .icon.icon--toggle {
+            width: 16px;
+            height: 16px;
         }
     }
 
@@ -1504,7 +1530,7 @@ const resizeSidebar = (delta: number, keyboard: boolean) => {
         font-family: var(--app-font-family);
         font-size: var(--app-text-base);
         font-style: normal;
-        font-weight: 600;
+        font-weight: 500;
         line-height: 20px;
         overflow: hidden;
         white-space: nowrap;
@@ -1554,7 +1580,7 @@ const resizeSidebar = (delta: number, keyboard: boolean) => {
         display: flex;
         align-items: center;
         gap: var(--sidebar-icon-gap);
-        padding: 0 10px 0 var(--sidebar-inset-x);
+        padding: 0 8px 0 var(--sidebar-inset-x);
         min-width: 0;
         box-sizing: border-box;
     }
@@ -1611,11 +1637,11 @@ const resizeSidebar = (delta: number, keyboard: boolean) => {
     .session-list-scope-header {
         position: absolute;
         top: 4px;
-        right: 10px;
+        right: 8px;
         z-index: 2;
         display: flex;
         justify-content: flex-end;
-        max-width: calc(100% - var(--sidebar-inset-x) - 10px);
+        max-width: calc(100% - var(--sidebar-inset-x) - 8px);
 
         :deep(.session-source-filter--inline) {
             flex: 0 1 auto;
@@ -1639,9 +1665,13 @@ const resizeSidebar = (delta: number, keyboard: boolean) => {
         min-width: 0;
         overflow: hidden;
 
+        &.session-chat-row {
+            margin-bottom: 1px;
+        }
+
         &.session-chat-row .session-list-row {
-            min-height: 30px;
-            padding-right: 6px;
+            height: 34px;
+            padding-right: 4px;
             border-radius: var(--app-radius-sm);
             transition: background var(--app-motion-fast) ease, color var(--app-motion-fast) ease;
         }
@@ -1687,7 +1717,7 @@ const resizeSidebar = (delta: number, keyboard: boolean) => {
         line-height: 20px;
         height: 100%;
         width: 100%;
-        padding: 6px 0;
+        padding: 0;
         position: relative;
         min-width: 0;
         background: transparent;
@@ -1787,7 +1817,7 @@ const resizeSidebar = (delta: number, keyboard: boolean) => {
 .logo_actions {
     display: flex;
     align-items: center;
-    gap: 4px;
+    gap: 2px;
     flex-shrink: 0;
 }
 
@@ -1795,8 +1825,8 @@ const resizeSidebar = (delta: number, keyboard: boolean) => {
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 26px;
-    height: 26px;
+    width: 28px;
+    height: 28px;
     flex-shrink: 0;
     cursor: pointer;
     border-radius: var(--app-radius-sm);

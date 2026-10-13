@@ -5,7 +5,9 @@ import (
 	"encoding/base64"
 	"errors"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func TestDecodeDataURIBytes_Valid(t *testing.T) {
@@ -77,7 +79,7 @@ func TestDescribeImages_WithDescriber(t *testing.T) {
 	raw := []byte{0x89, 0x50, 0x4E, 0x47} // fake PNG header
 	dataURI := "data:image/png;base64," + base64.StdEncoding.EncodeToString(raw)
 
-	descriptions := engine.describeImages(context.Background(), []string{dataURI})
+	descriptions := engine.describeImages(context.Background(), []string{dataURI}, nil)
 	if len(descriptions) != 1 {
 		t.Fatalf("expected 1 description, got %d", len(descriptions))
 	}
@@ -96,9 +98,9 @@ func TestDescribeImages_VLMFailure(t *testing.T) {
 	raw := []byte{0x89, 0x50}
 	dataURI := "data:image/png;base64," + base64.StdEncoding.EncodeToString(raw)
 
-	descriptions := engine.describeImages(context.Background(), []string{dataURI})
-	if len(descriptions) != 0 {
-		t.Errorf("expected 0 descriptions on VLM failure, got %d", len(descriptions))
+	descriptions := engine.describeImages(context.Background(), []string{dataURI}, nil)
+	if len(descriptions) != 1 || descriptions[0] != "" {
+		t.Errorf("expected one empty description on VLM failure, got %q", descriptions)
 	}
 }
 
@@ -110,17 +112,17 @@ func TestDescribeImages_InvalidDataURI(t *testing.T) {
 		},
 	}
 
-	descriptions := engine.describeImages(context.Background(), []string{"not-a-data-uri"})
-	if len(descriptions) != 0 {
-		t.Errorf("expected 0 descriptions for invalid URI, got %d", len(descriptions))
+	descriptions := engine.describeImages(context.Background(), []string{"not-a-data-uri"}, nil)
+	if len(descriptions) != 1 || descriptions[0] != "" {
+		t.Errorf("expected one empty description for invalid URI, got %q", descriptions)
 	}
 }
 
 func TestDescribeImages_ContextCancelled(t *testing.T) {
-	callCount := 0
+	var callCount atomic.Int32
 	engine := &AgentEngine{
 		imageDescriber: func(ctx context.Context, imgBytes []byte, prompt string) (string, error) {
-			callCount++
+			callCount.Add(1)
 			return "desc", nil
 		},
 	}
@@ -131,12 +133,12 @@ func TestDescribeImages_ContextCancelled(t *testing.T) {
 	raw := []byte{0x89}
 	dataURI := "data:image/png;base64," + base64.StdEncoding.EncodeToString(raw)
 
-	descriptions := engine.describeImages(ctx, []string{dataURI, dataURI, dataURI})
-	if callCount != 0 {
-		t.Errorf("expected 0 VLM calls with cancelled context, got %d", callCount)
+	descriptions := engine.describeImages(ctx, []string{dataURI, dataURI, dataURI}, nil)
+	if n := callCount.Load(); n != 0 {
+		t.Errorf("expected 0 VLM calls with cancelled context, got %d", n)
 	}
-	if len(descriptions) != 0 {
-		t.Errorf("expected 0 descriptions, got %d", len(descriptions))
+	if strings.Join(descriptions, "") != "" {
+		t.Errorf("expected no descriptions, got %q", descriptions)
 	}
 }
 
@@ -146,29 +148,78 @@ func TestDescribeImages_NilDescriber(t *testing.T) {
 	}
 
 	// Should not panic even with nil describer
-	descriptions := engine.describeImages(context.Background(), []string{"data:image/png;base64,AAAA"})
-	if len(descriptions) != 0 {
-		t.Errorf("expected 0 descriptions with nil describer, got %d", len(descriptions))
+	descriptions := engine.describeImages(context.Background(), []string{"data:image/png;base64,AAAA"}, nil)
+	if strings.Join(descriptions, "") != "" {
+		t.Errorf("expected no descriptions with nil describer, got %q", descriptions)
 	}
 }
 
-func TestDescribeImages_MixedSuccess(t *testing.T) {
-	callIdx := 0
+func TestDescribeImages_MixedSuccessStaysAligned(t *testing.T) {
 	engine := &AgentEngine{
 		imageDescriber: func(ctx context.Context, imgBytes []byte, prompt string) (string, error) {
-			callIdx++
-			if callIdx == 2 {
+			if string(imgBytes) == "2" {
 				return "", errors.New("fail on second")
 			}
+			return "desc " + string(imgBytes), nil
+		},
+	}
+	uris := []string{
+		"data:image/png;base64," + base64.StdEncoding.EncodeToString([]byte("1")),
+		"data:image/png;base64," + base64.StdEncoding.EncodeToString([]byte("2")),
+		"data:image/png;base64," + base64.StdEncoding.EncodeToString([]byte("3")),
+	}
+
+	descriptions := engine.describeImages(context.Background(), uris, nil)
+	want := []string{"desc 1", "", "desc 3"}
+	if strings.Join(descriptions, "|") != strings.Join(want, "|") {
+		t.Errorf("descriptions = %q; want %q", descriptions, want)
+	}
+}
+
+func TestDescribeImages_RunsConcurrentlyWithPerImageTimeout(t *testing.T) {
+	var running, peak atomic.Int32
+	release := make(chan struct{})
+	engine := &AgentEngine{
+		imageDescriber: func(ctx context.Context, _ []byte, _ string) (string, error) {
+			n := running.Add(1)
+			defer running.Add(-1)
+			for {
+				old := peak.Load()
+				if n <= old || peak.CompareAndSwap(old, n) {
+					break
+				}
+			}
+			if _, ok := ctx.Deadline(); !ok {
+				return "", errors.New("missing per-image deadline")
+			}
+			<-release
 			return "ok", nil
 		},
 	}
+	dataURI := "data:image/png;base64," + base64.StdEncoding.EncodeToString([]byte{0x89})
+	uris := make([]string, 6)
+	for i := range uris {
+		uris[i] = dataURI
+	}
 
-	raw := []byte{0x89}
-	dataURI := "data:image/png;base64," + base64.StdEncoding.EncodeToString(raw)
-
-	descriptions := engine.describeImages(context.Background(), []string{dataURI, dataURI, dataURI})
-	if len(descriptions) != 2 {
-		t.Errorf("expected 2 descriptions (1 failed), got %d", len(descriptions))
+	done := make(chan []string)
+	go func() { done <- engine.describeImages(context.Background(), uris, nil) }()
+	deadline := time.After(5 * time.Second)
+	for peak.Load() < toolImageDescribeConcurrency {
+		select {
+		case <-deadline:
+			t.Fatalf("peak concurrency = %d; want %d", peak.Load(), toolImageDescribeConcurrency)
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+	close(release)
+	descriptions := <-done
+	if peak.Load() != toolImageDescribeConcurrency {
+		t.Errorf("peak concurrency = %d; want %d", peak.Load(), toolImageDescribeConcurrency)
+	}
+	for i, desc := range descriptions {
+		if desc != "ok" {
+			t.Errorf("description %d = %q; want ok", i, desc)
+		}
 	}
 }

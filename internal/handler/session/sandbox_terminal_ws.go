@@ -71,6 +71,7 @@ var terminalAuthRecheckInterval = time.Minute
 const (
 	terminalErrNotBound    = "SANDBOX_NOT_BOUND"
 	terminalErrPaused      = "SANDBOX_PAUSED"
+	terminalErrStopped     = "SANDBOX_STOPPED"
 	terminalErrUnsupported = "TERMINAL_UNSUPPORTED"
 	terminalErrInternal    = "INTERNAL"
 	terminalErrIdle        = "IDLE_DISCONNECTED"
@@ -133,6 +134,10 @@ type terminalControlFrame struct {
 	PID uint32 `json:"pty_id,omitempty"`
 	// Backend names the sandbox provider on ready frames.
 	Backend string `json:"backend,omitempty"`
+	// Reattachable tells the browser, on ready frames, whether reconnecting
+	// with pty_id resumes this shell. False (Docker) means a reconnect gets a
+	// fresh shell, so the client must not redial silently.
+	Reattachable *bool `json:"reattachable,omitempty"`
 	// ExitCode is set on exited frames (-1 when the provider didn't say).
 	ExitCode *int `json:"exit_code,omitempty"`
 	// Cols/Rows carry resize requests.
@@ -399,6 +404,9 @@ func terminalErrorFrame(err error) (code, message string) {
 	switch {
 	case stderrors.Is(err, sandbox.ErrNoLiveSessionSandbox):
 		return terminalErrNotBound, "session has no live sandbox"
+	// Before ErrSandboxPaused, which it wraps.
+	case stderrors.Is(err, sandbox.ErrSandboxStopped):
+		return terminalErrStopped, "session sandbox is stopped or was reclaimed"
 	case stderrors.Is(err, sandbox.ErrSandboxPaused):
 		return terminalErrPaused, "session sandbox is paused"
 	case stderrors.Is(err, service.ErrTerminalUnsupported):

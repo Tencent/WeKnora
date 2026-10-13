@@ -194,37 +194,9 @@ func (n *Neo4jRepository) SearchNode(
 			return nil, fmt.Errorf("failed to run query: %v", err)
 		}
 
-		graphData := &types.GraphData{}
-		nodeSeen := make(map[string]bool)
-		for result.Next(ctx) {
-			record := result.Record()
-			node, _ := record.Get("n")
-			rel, _ := record.Get("r")
-			targetNode, _ := record.Get("m")
-
-			nodeData := node.(neo4j.Node)
-			targetNodeData := targetNode.(neo4j.Node)
-
-			// Convert node to types.Node
-			for _, n := range []neo4j.Node{nodeData, targetNodeData} {
-				nameStr := n.Props["name"].(string)
-				if _, ok := nodeSeen[nameStr]; !ok {
-					nodeSeen[nameStr] = true
-					graphData.Node = append(graphData.Node, &types.GraphNode{
-						Name:       nameStr,
-						Chunks:     listI2listS(n.Props["chunks"].([]interface{})),
-						Attributes: listI2listS(n.Props["attributes"].([]interface{})),
-					})
-				}
-			}
-
-			// Convert relationship to types.Relation
-			relData := rel.(neo4j.Relationship)
-			graphData.Relation = append(graphData.Relation, &types.GraphRelation{
-				Node1: nodeData.Props["name"].(string),
-				Node2: targetNodeData.Props["name"].(string),
-				Type:  relData.Type,
-			})
+		graphData, err := decodeGraphSearchResult(ctx, result)
+		if err != nil {
+			return nil, err
 		}
 		// Make truncation visible. A silent cap reads as "the graph has no more
 		// matches" when in fact candidates were dropped.
@@ -250,6 +222,84 @@ func (n *Neo4jRepository) SearchNode(
 	return result.(*types.GraphData), nil
 }
 
+// decodeGraphSearchResult keeps document instances distinct and restores the
+// stored direction even when the seed is the target of an undirected match.
+func decodeGraphSearchResult(ctx context.Context, result neo4j.Result) (*types.GraphData, error) {
+	graph := &types.GraphData{}
+	nodeSeen := make(map[string]*types.GraphNode)
+	relationSeen := make(map[string]bool)
+	for result.Next(ctx) {
+		record := result.Record()
+		if record == nil {
+			return nil, fmt.Errorf("graph query returned a nil record")
+		}
+		n, _, err := neo4j.GetRecordValue[neo4j.Node](record, "n")
+		if err != nil {
+			return nil, fmt.Errorf("failed to decode graph seed: %w", err)
+		}
+		m, _, err := neo4j.GetRecordValue[neo4j.Node](record, "m")
+		if err != nil {
+			return nil, fmt.Errorf("failed to decode graph neighbour: %w", err)
+		}
+		r, _, err := neo4j.GetRecordValue[neo4j.Relationship](record, "r")
+		if err != nil {
+			return nil, fmt.Errorf("failed to decode graph relationship: %w", err)
+		}
+		// Keep the matched seed first for evidence ranking, independently of direction.
+		for _, node := range []neo4j.Node{n, m} {
+			if nodeSeen[node.ElementId] != nil {
+				continue
+			}
+			decoded, err := decodeGraphNode(node)
+			if err != nil {
+				return nil, err
+			}
+			nodeSeen[node.ElementId] = decoded
+			graph.Node = append(graph.Node, decoded)
+		}
+		source, target := n, m
+		if r.StartElementId == m.ElementId && r.EndElementId == n.ElementId {
+			source, target = m, n
+		} else if r.StartElementId != n.ElementId || r.EndElementId != m.ElementId {
+			return nil, fmt.Errorf("graph relationship %q does not connect its returned endpoints", r.ElementId)
+		}
+		if r.ElementId == "" {
+			return nil, fmt.Errorf("graph relationship has no element identity")
+		}
+		if !relationSeen[r.ElementId] {
+			relationSeen[r.ElementId] = true
+			graph.Relation = append(graph.Relation, &types.GraphRelation{
+				Node1: nodeSeen[source.ElementId].Name, Node2: nodeSeen[target.ElementId].Name, Type: r.Type,
+				ID: r.ElementId, SourceID: source.ElementId, TargetID: target.ElementId,
+			})
+		}
+	}
+	if err := result.Err(); err != nil {
+		return nil, fmt.Errorf("failed to read graph query results: %w", err)
+	}
+	return graph, nil
+}
+
+func decodeGraphNode(node neo4j.Node) (*types.GraphNode, error) {
+	name, ok := node.Props["name"].(string)
+	if node.ElementId == "" || !ok || name == "" {
+		return nil, fmt.Errorf("graph node %q has no identity or name", node.ElementId)
+	}
+	chunks, ok := node.Props["chunks"].([]any)
+	if !ok && node.Props["chunks"] != nil {
+		return nil, fmt.Errorf("graph node %q has invalid chunks", node.ElementId)
+	}
+	attributes, ok := node.Props["attributes"].([]any)
+	if !ok && node.Props["attributes"] != nil {
+		return nil, fmt.Errorf("graph node %q has invalid attributes", node.ElementId)
+	}
+	knowledgeID, _ := node.Props["kg"].(string)
+	return &types.GraphNode{
+		Name: name, Chunks: listI2listS(chunks), Attributes: listI2listS(attributes),
+		ID: node.ElementId, KnowledgeID: knowledgeID,
+	}, nil
+}
+
 // graphSearchCypher builds the bounded graph-search query and its parameters
 // for one label expression and one set of entity names.
 //
@@ -265,9 +315,13 @@ func (n *Neo4jRepository) SearchNode(
 //   - Exact name matches rank first, then the shortest names, then alphabetical
 //     order. Ordering by name alone lets an entity whose name *is* the query
 //     fall outside the cap once the substring matches exceed it.
-//   - The same key is carried into both LIMITs, so a truncated result keeps the
+//   - The seed order is carried into the row LIMIT, so a truncated result keeps the
 //     neighbourhoods of the highest-ranked seeds rather than an arbitrary
 //     subset of the rows.
+//
+// Each edge is expanded only from its earliest seed, so duplicate endpoint
+// matches cannot consume the row cap. Only the bounded seed list is collected;
+// grouping every candidate relationship would require unbounded working memory.
 func graphSearchCypher(labelExpr string, nodes []string) (string, map[string]interface{}) {
 	query := `
 		MATCH (n:` + labelExpr + `)
@@ -277,11 +331,15 @@ func graphSearchCypher(labelExpr string, nodes []string) (string, map[string]int
 		     CASE WHEN n.name IN $nodes THEN 0 ELSE 1 END AS seed_rank,
 		     size(n.name) AS name_len,
 		     n.name AS name
-		ORDER BY seed_rank, name_len, name
+		ORDER BY seed_rank, name_len, name, n.kg, elementId(n)
 		LIMIT $maxSeedNodes
+		WITH collect(n) AS seeds
+		UNWIND range(0, size(seeds) - 1) AS seed_index
+		WITH seeds[seed_index] AS n, seeds[0..seed_index] AS earlier_seeds, seed_index
 		MATCH (n)-[r]-(m:` + labelExpr + `)
-		WITH n, r, m, seed_rank, name_len, name
-		ORDER BY seed_rank, name_len, name
+		WHERE NOT m IN earlier_seeds
+		WITH n, r, m, seed_index
+		ORDER BY seed_index, elementId(r)
 		LIMIT $maxRows
 		RETURN n, r, m
 	`

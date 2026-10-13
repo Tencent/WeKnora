@@ -64,7 +64,9 @@ func (e *AgentEngine) drainSteerMessages(
 			types.MentionedItemsFromRaw(evt["mentioned_items"]), getString(evt, "channel"))
 		if userMessageID == "" {
 			logger.Warnf(ctx, "[Agent] Steer persist failed for %s, leaving event pending", steerID)
-			continue
+			// Keep later corrections behind this instruction until persistence
+			// recovers. Unprocessed events stay pending for the next boundary.
+			break
 		}
 		*messagesPtr = append(*messagesPtr, chat.Message{Role: "user", Content: types.SteerMessageContent(content)})
 		state.PendingSteerMessages = append(state.PendingSteerMessages, userMessageID)

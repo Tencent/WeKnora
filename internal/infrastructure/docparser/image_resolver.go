@@ -20,6 +20,7 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -100,7 +101,7 @@ func (r *ImageResolver) ResolveAndStore(
 	images = append(images, imgBare...)
 
 	if len(result.ImageRefs) == 0 {
-		return markdown, images, nil
+		return markdown, sortImagesByPosition(markdown, images), nil
 	}
 
 	// Build a map of original_ref -> image ref for fast lookup
@@ -144,7 +145,24 @@ func (r *ImageResolver) ResolveAndStore(
 	markdown = md5
 	images = append(images, imgRelativeHTML...)
 
-	return markdown, images, nil
+	return markdown, sortImagesByPosition(markdown, images), nil
+}
+
+// sortImagesByPosition orders images by where they first appear in markdown,
+// since each resolution pass collects its own kind and references are
+// rewritten back to front. Callers number images by this order. Images not
+// found in markdown keep their relative order at the end.
+func sortImagesByPosition(markdown string, images []StoredImage) []StoredImage {
+	position := func(image StoredImage) int {
+		if i := strings.Index(markdown, image.ServingURL); image.ServingURL != "" && i >= 0 {
+			return i
+		}
+		return len(markdown)
+	}
+	sort.SliceStable(images, func(a, b int) bool {
+		return position(images[a]) < position(images[b])
+	})
+	return images
 }
 
 func appendStoredImage(images []StoredImage, stored StoredImage) []StoredImage {

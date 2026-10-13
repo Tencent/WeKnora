@@ -216,7 +216,11 @@ export function useStream() {
         },
 
         onclose: () => {
-          stopStream();
+          // A queued follow-up attaches via continue-stream while the previous
+          // POST may still be open waiting for the session title. Both share one
+          // controller, so only the current stream may stop it; otherwise the
+          // old connection closing cuts the follow-up off mid-answer.
+          if (myGeneration === streamGeneration) stopStream();
         },
       });
 
@@ -234,6 +238,9 @@ export function useStream() {
         reloginMessage: i18n.global.t('error.pleaseRelogin'),
       });
     } catch (err) {
+      // A superseded stream failing must not surface as the current error or
+      // abort the stream that replaced it (see onclose).
+      if (myGeneration !== streamGeneration) return
       error.value = err instanceof Error ? err.message : String(err)
       stopStream()
     }

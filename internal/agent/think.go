@@ -61,8 +61,16 @@ func (e *AgentEngine) streamLLMToEventBus(
 	reportModelContextLeaks(ctx, "Agent", e.modelContext, messages)
 	prefixFingerprint := chat.PromptPrefixFingerprint(messages, opts)
 	llmCtx = types.WithLLMCallMetadata(llmCtx, "agent_round", prefixFingerprint)
+	// ChatStream may wait for connection setup and response headers before
+	// returning a channel. Count that silence toward the same idle budget.
+	stallTimeout := e.getLLMStallTimeout()
+	stalled, stopWatchdog := watchStreamStall(ctx, llmCancel, stallTimeout, &lastChunkAt)
+	defer stopWatchdog()
 	stream, err := e.chatModel.ChatStream(llmCtx, messages, opts)
 	if err != nil {
+		if ctx.Err() == nil && stalled.Load() {
+			return nil, fmt.Errorf("LLM stream stalled: no output for %s", stallTimeout)
+		}
 		logger.Errorf(ctx, "[Agent][Stream] Failed to start LLM stream: %v", err)
 		return nil, err
 	}
@@ -73,10 +81,6 @@ func (e *AgentEngine) streamLLMToEventBus(
 	firstChunkTime := time.Time{}
 	answerDecoder := e.modelContext.StreamDecoder()
 	thinkingDecoder := e.modelContext.StreamDecoder()
-
-	stallTimeout := e.getLLMStallTimeout()
-	stalled, stopWatchdog := watchStreamStall(ctx, llmCancel, stallTimeout, &lastChunkAt)
-	defer stopWatchdog()
 
 	for chunk := range stream {
 		lastChunkAt.Store(time.Now().UnixNano())
@@ -227,7 +231,10 @@ func watchStreamStall(
 	stalled := &atomic.Bool{}
 	done := make(chan struct{})
 
-	go func() {
+	// This goroutine cancels a stream in flight: a panic here (a non-positive
+	// stall timeout reaches time.NewTicker) must not end the process, and no
+	// unit of work needs a failure recorded.
+	agenttools.GoRecovered(ctx, func() {
 		// Poll well inside the window so the detected gap stays close to the
 		// configured timeout instead of rounding up to twice it.
 		ticker := time.NewTicker(stallTimeout / 4)
@@ -249,7 +256,7 @@ func watchStreamStall(
 				return
 			}
 		}
-	}()
+	})
 
 	var once sync.Once
 	return stalled, func() { once.Do(func() { close(done) }) }

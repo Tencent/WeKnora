@@ -4,11 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -27,11 +27,40 @@ type Client struct {
 	location *time.Location
 
 	httpClient *http.Client
+	// jsonLimit caps each API response body; a field so tests can lower it
+	// without materialising the production limit.
+	jsonLimit int64
 
 	// Token cache (thread-safe)
 	tokenMu    sync.Mutex
 	tokenCache string
 	tokenExpAt time.Time
+}
+
+// maxJSONResponseBytes bounds every API response body. Document and wiki
+// payloads are small; a larger body means a broken or hostile server.
+const maxJSONResponseBytes = 16 << 20
+
+// errResponseTooLarge marks a body over the cap. It is deterministic: the same
+// request returns the same oversized body, so callers must not retry it.
+var errResponseTooLarge = errors.New("response exceeds maximum size")
+
+// readCapped reads a response body, refusing anything larger than limit instead
+// of buffering it. Oversized payloads are reported as an error: a truncated
+// body would be indexed as if it were the whole document. A non-positive limit
+// (e.g. a zero-value client built in tests) falls back to maxJSONResponseBytes.
+func readCapped(body io.Reader, limit int64) ([]byte, error) {
+	if limit <= 0 {
+		limit = maxJSONResponseBytes
+	}
+	data, err := io.ReadAll(io.LimitReader(body, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > limit {
+		return nil, fmt.Errorf("%w (%d bytes)", errResponseTooLarge, limit)
+	}
+	return data, nil
 }
 
 type WikiNodeListFailure struct {
@@ -71,6 +100,7 @@ func NewClient(config *Config) *Client {
 		appSecret:  config.AppSecret,
 		location:   resolveLocation(config.Timezone),
 		httpClient: datasource.NewConnectorHTTPClient(30 * time.Second),
+		jsonLimit:  maxJSONResponseBytes,
 	}
 }
 
@@ -102,8 +132,12 @@ func (c *Client) GetTenantAccessToken(ctx context.Context) (string, error) {
 	}
 	defer resp.Body.Close()
 
+	respBody, err := readCapped(resp.Body, c.jsonLimit)
+	if err != nil {
+		return "", fmt.Errorf("read token response: %w", err)
+	}
 	var result TokenResponse
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := json.Unmarshal(respBody, &result); err != nil {
 		return "", fmt.Errorf("decode token response: %w", err)
 	}
 	if result.Code != 0 {
@@ -131,13 +165,42 @@ func (c *Client) GetTenantAccessToken(ctx context.Context) (string, error) {
 	return c.tokenCache, nil
 }
 
+// waitForRequestToken authenticates before pacing and rechecks the cached token
+// afterwards. A refresh must happen before rejoining the gate, otherwise requests
+// that have already been paced can pile up behind tokenMu and then burst together.
+func (c *Client) waitForRequestToken(ctx context.Context, gate *feishuRequestGate) (string, error) {
+	for {
+		token, err := c.GetTenantAccessToken(ctx)
+		if err != nil {
+			return "", err
+		}
+		if err := gate.wait(ctx); err != nil {
+			return "", err
+		}
+		// Never wait on a token refresh after the gate has granted a request slot.
+		if !c.tokenMu.TryLock() {
+			continue
+		}
+		valid := token == c.tokenCache && time.Now().Before(c.tokenExpAt)
+		c.tokenMu.Unlock()
+		if valid {
+			return token, nil
+		}
+	}
+}
+
 // Retry policy shared by DoRequest (JSON API calls) and downloadRawBytes (file
-// downloads): 429 honours Retry-After, 5xx retries once, transport errors back off.
+// downloads): rate limits honour Feishu's reset header / Retry-After, 5xx
+// retries once, transport errors back off.
 const (
 	feishuMaxRetries    = 3
 	feishuMax5xxRetries = 1
 	feishuRetry5xxDelay = 2 * time.Second
 )
+
+// maxFeishuErrorPreviewBytes bounds how much of a failed download's body is
+// read for diagnostics; only the first 500 bytes are ever logged.
+const maxFeishuErrorPreviewBytes = 4 << 10
 
 // maxFeishuDownloadBytes bounds a single file download to protect the sync
 // worker from adversarial or pathological oversized responses.
@@ -149,8 +212,8 @@ var feishuRetryBackoff = []time.Duration{2 * time.Second, 4 * time.Second, 8 * t
 // retrying transient failures (transport errors, HTTP 429, 5xx). Feishu's drive
 // export/wiki APIs are aggressively rate limited, and a thousand-document sync
 // issues tens of thousands of calls; without backoff a single 429 burst used to
-// fail whole swathes of documents silently. 429 responses honour Retry-After;
-// 5xx is retried once; other non-2xx statuses fail fast (no point retrying 4xx).
+// fail whole swathes of documents silently. HTTP 400 with code 99991400 is
+// also a rate limit. Ordinary permission/validation errors still fail fast.
 func (c *Client) DoRequest(ctx context.Context, method, path string, body interface{}, result interface{}) error {
 	const (
 		maxRetries    = feishuMaxRetries
@@ -159,7 +222,7 @@ func (c *Client) DoRequest(ctx context.Context, method, path string, body interf
 	)
 	backoff := feishuRetryBackoff
 
-	token, err := c.GetTenantAccessToken(ctx)
+	_, err := c.GetTenantAccessToken(ctx)
 	if err != nil {
 		return err
 	}
@@ -174,8 +237,13 @@ func (c *Client) DoRequest(ctx context.Context, method, path string, body interf
 
 	url := c.baseURL + path
 	var lastErr error
+	gate := c.requestGate(method, path)
 
 	for attempt := 0; attempt <= maxRetries; attempt++ {
+		token, err := c.waitForRequestToken(ctx, gate)
+		if err != nil {
+			return err
+		}
 		var bodyReader io.Reader
 		if bodyBytes != nil {
 			bodyReader = bytes.NewReader(bodyBytes)
@@ -205,11 +273,11 @@ func (c *Client) DoRequest(ctx context.Context, method, path string, body interf
 			return lastErr
 		}
 
-		respBody, readErr := io.ReadAll(resp.Body)
+		respBody, readErr := readCapped(resp.Body, c.jsonLimit)
 		resp.Body.Close()
 		if readErr != nil {
 			lastErr = fmt.Errorf("read response body: %w", readErr)
-			if attempt < maxRetries {
+			if attempt < maxRetries && !errors.Is(readErr, errResponseTooLarge) {
 				if sErr := sleepCtx(ctx, backoff[attempt]); sErr != nil {
 					return sErr
 				}
@@ -221,13 +289,14 @@ func (c *Client) DoRequest(ctx context.Context, method, path string, body interf
 		logger.Infof(ctx, "[Feishu] %s %s → status=%d bodyLen=%d body=%s",
 			method, path, resp.StatusCode, len(respBody), truncate(string(respBody), 1000))
 
-		if resp.StatusCode == http.StatusTooManyRequests {
-			wait := parseRetryAfter(resp.Header.Get("Retry-After"), backoff[min(attempt, len(backoff)-1)])
-			lastErr = fmt.Errorf("feishu rate limited: status=429 body=%s", truncate(string(respBody), 500))
+		if isFeishuRateLimited(resp.StatusCode, respBody) {
+			wait := feishuRateLimitWait(resp.Header, time.Now())
+			gate.cooldown(wait)
+			logger.Warnf(ctx, "[Feishu] rate limited: api=%q wait=%s attempt=%d/%d",
+				gate.api, wait, attempt, maxRetries)
+			lastErr = fmt.Errorf("feishu rate limited: status=%d body=%s",
+				resp.StatusCode, truncate(string(respBody), 500))
 			if attempt < maxRetries {
-				if sErr := sleepCtx(ctx, wait); sErr != nil {
-					return sErr
-				}
 				continue
 			}
 			return lastErr
@@ -257,23 +326,6 @@ func (c *Client) DoRequest(ctx context.Context, method, path string, body interf
 	}
 
 	return lastErr
-}
-
-// parseRetryAfter interprets a Retry-After header value (seconds) into a wait
-// duration, coercing 0/negative to a short delay and falling back when absent
-// or unparseable.
-func parseRetryAfter(header string, fallback time.Duration) time.Duration {
-	if header == "" {
-		return fallback
-	}
-	secs, err := strconv.ParseFloat(strings.TrimSpace(header), 64)
-	if err != nil {
-		return fallback
-	}
-	if secs <= 0 {
-		return 100 * time.Millisecond
-	}
-	return time.Duration(secs * float64(time.Second))
 }
 
 // sleepCtx waits for d or until ctx is cancelled, returning ctx.Err() if the
@@ -607,10 +659,15 @@ func (c *Client) downloadExportFile(ctx context.Context, fileToken string) ([]by
 	return c.downloadRawBytes(ctx, path)
 }
 
+// errExportPollsExhausted keeps the error classification independent of the
+// message's poll count and ticket details, including when connectors wrap it.
+var errExportPollsExhausted = errors.New("export task still processing")
+
 // ExportAndDownload is a high-level helper that creates an export task, polls until
 // completion, and downloads the resulting file. Returns (fileBytes, fileName, error).
 //
-// Timeout: 60 seconds. Poll interval: 2 seconds.
+// Poll count and interval are configurable. Pacing/cooldown waits do not consume
+// the poll budget; the caller's context still bounds the entire operation.
 func (c *Client) ExportAndDownload(ctx context.Context, objToken, objType string) ([]byte, string, error) {
 	// Determine export format
 	fileExt, ok := ObjTypeToExportFileExtension[objType]
@@ -629,11 +686,13 @@ func (c *Client) ExportAndDownload(ctx context.Context, objToken, objType string
 		return nil, "", err
 	}
 
-	// Step 2: poll until ready (max 60s, every 2s)
-	deadline := time.Now().Add(60 * time.Second)
+	// Step 2: retain the same ticket while waiting on shared API limits. A wall
+	// clock deadline here would turn other documents' cooldowns into false failures.
+	maxPolls := feishuExportMaxPolls()
+	pollInterval := feishuConfiguredDuration("FEISHU_EXPORT_POLL_INTERVAL", defaultFeishuExportPollInterval)
 	var fileToken, fileName string
 
-	for time.Now().Before(deadline) {
+	for poll := 0; poll < maxPolls; poll++ {
 		fileToken, fileName, err = c.getExportTaskStatus(ctx, ticket, objToken)
 		if err != nil {
 			return nil, "", err
@@ -641,15 +700,15 @@ func (c *Client) ExportAndDownload(ctx context.Context, objToken, objType string
 		if fileToken != "" {
 			break // export ready
 		}
-		select {
-		case <-ctx.Done():
-			return nil, "", ctx.Err()
-		case <-time.After(2 * time.Second):
+		if poll+1 < maxPolls {
+			if err := sleepCtx(ctx, pollInterval); err != nil {
+				return nil, "", err
+			}
 		}
 	}
 
 	if fileToken == "" {
-		return nil, "", fmt.Errorf("export task timed out after 60s (ticket=%s)", ticket)
+		return nil, "", fmt.Errorf("%w after %d polls (ticket=%s)", errExportPollsExhausted, maxPolls, ticket)
 	}
 
 	// Step 3: download file using file_token (NOT ticket)
@@ -688,15 +747,20 @@ func (c *Client) downloadMediaFile(ctx context.Context, fileToken string) ([]byt
 
 // downloadRawBytes performs an authenticated GET and returns the raw response body.
 func (c *Client) downloadRawBytes(ctx context.Context, path string) ([]byte, error) {
-	token, err := c.GetTenantAccessToken(ctx)
+	_, err := c.GetTenantAccessToken(ctx)
 	if err != nil {
 		return nil, err
 	}
 
 	url := c.baseURL + path
 	var lastErr error
+	gate := c.requestGate(http.MethodGet, path)
 
 	for attempt := 0; attempt <= feishuMaxRetries; attempt++ {
+		token, err := c.waitForRequestToken(ctx, gate)
+		if err != nil {
+			return nil, err
+		}
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 		if err != nil {
 			return nil, fmt.Errorf("create download request: %w", err)
@@ -721,22 +785,29 @@ func (c *Client) downloadRawBytes(ctx context.Context, path string) ([]byte, err
 			return nil, lastErr
 		}
 
-		if resp.StatusCode == http.StatusTooManyRequests {
-			body, _ := io.ReadAll(resp.Body)
+		if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == http.StatusBadRequest {
+			body, _ := io.ReadAll(io.LimitReader(resp.Body, maxFeishuErrorPreviewBytes))
 			resp.Body.Close()
-			wait := parseRetryAfter(resp.Header.Get("Retry-After"), feishuRetryBackoff[min(attempt, len(feishuRetryBackoff)-1)])
-			lastErr = fmt.Errorf("download rate limited: status=429 body=%s", truncate(string(body), 500))
+			if !isFeishuRateLimited(resp.StatusCode, body) {
+				logger.Errorf(ctx, "[Feishu] download GET %s → status=%d body=%s",
+					path, resp.StatusCode, truncate(string(body), 500))
+				return nil, fmt.Errorf("download failed: status=%d body=%s",
+					resp.StatusCode, truncate(string(body), 500))
+			}
+			wait := feishuRateLimitWait(resp.Header, time.Now())
+			gate.cooldown(wait)
+			logger.Warnf(ctx, "[Feishu] download rate limited: api=%q wait=%s attempt=%d/%d",
+				gate.api, wait, attempt, feishuMaxRetries)
+			lastErr = fmt.Errorf("download rate limited: status=%d body=%s",
+				resp.StatusCode, truncate(string(body), 500))
 			if attempt < feishuMaxRetries {
-				if sErr := sleepCtx(ctx, wait); sErr != nil {
-					return nil, sErr
-				}
 				continue
 			}
 			return nil, lastErr
 		}
 
 		if resp.StatusCode >= 500 && resp.StatusCode < 600 {
-			body, _ := io.ReadAll(resp.Body)
+			body, _ := io.ReadAll(io.LimitReader(resp.Body, maxFeishuErrorPreviewBytes))
 			resp.Body.Close()
 			lastErr = fmt.Errorf("download server error: status=%d body=%s", resp.StatusCode, truncate(string(body), 500))
 			if attempt < feishuMax5xxRetries {
@@ -749,10 +820,10 @@ func (c *Client) downloadRawBytes(ctx context.Context, path string) ([]byte, err
 		}
 
 		if resp.StatusCode != http.StatusOK {
-			body, _ := io.ReadAll(resp.Body)
+			body, _ := io.ReadAll(io.LimitReader(resp.Body, maxFeishuErrorPreviewBytes))
 			resp.Body.Close()
 			logger.Errorf(ctx, "[Feishu] download GET %s → status=%d body=%s", path, resp.StatusCode, truncate(string(body), 500))
-			return nil, fmt.Errorf("download failed: status=%d body=%s", resp.StatusCode, string(body))
+			return nil, fmt.Errorf("download failed: status=%d body=%s", resp.StatusCode, truncate(string(body), 500))
 		}
 
 		data, readErr := io.ReadAll(io.LimitReader(resp.Body, maxFeishuDownloadBytes+1))

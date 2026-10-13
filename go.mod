@@ -34,7 +34,7 @@ require (
 	github.com/joho/godotenv v1.5.1
 	github.com/ks3sdklib/aws-sdk-go v1.11.0
 	github.com/larksuite/oapi-sdk-go/v3 v3.9.7
-	github.com/mark3labs/mcp-go v0.52.0
+	github.com/mark3labs/mcp-go v1.1.1
 	github.com/matiasinsaurralde/go-e2b v0.1.1-0.20260808041540-fdc08ceaa1c1
 	github.com/milvus-io/milvus/client/v2 v2.6.4
 	github.com/minio/minio-go/v7 v7.1.0
@@ -77,6 +77,7 @@ require (
 	go.opentelemetry.io/otel/trace v1.43.0
 	go.uber.org/dig v1.19.0
 	golang.org/x/crypto v0.53.0
+	golang.org/x/image v0.38.0
 	golang.org/x/mod v0.36.0
 	golang.org/x/net v0.56.0
 	golang.org/x/sync v0.21.0
@@ -239,7 +240,7 @@ require (
 	github.com/mattn/go-colorable v0.1.13 // indirect
 	github.com/mattn/go-isatty v0.0.22 // indirect
 	github.com/mattn/go-sqlite3 v1.14.24 // indirect
-	github.com/milvus-io/milvus-proto/go-api/v2 v2.6.15 // indirect
+	github.com/milvus-io/milvus-proto/go-api/v2 v2.6.15
 	github.com/milvus-io/milvus/pkg/v2 v2.6.7-0.20251201120310-af64f2acba38 // indirect
 	github.com/minio/crc64nvme v1.1.1 // indirect
 	github.com/minio/md5-simd v1.1.2 // indirect

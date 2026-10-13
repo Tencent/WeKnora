@@ -97,7 +97,7 @@ export default function Home() {
           <div className={s.ecosystemCore}><BrandLogo /><span>团队知识库与智能体</span><div>理解 · 检索 · 推理 · 行动</div></div>
           <div className={s.ecosystemColumn}><Icon name="channels" /><h3>在常用工具中访问</h3><p>支持 IM 问答、浏览器插件、MCP 客户端和开发工具集成。</p><div className={s.integrations}>{clients.map(item => <span key={item.name}><IntegrationMark item={item} /></span>)}</div><a className={s.textLink} href={guide("03-features/12-im-integration")}>客户端与渠道 <Icon name="arrow" /></a></div>
         </div>
-        <div className={s.models}><span>模型由你选择 · 内置 27 家厂商 <a className={s.textLink} href={guide("03-features/06-models")}>查看全部 <Icon name="arrow" /></a></span>{modelProviders.map(item => <p key={item.name}><IntegrationMark item={item} /></p>)}</div>
+        <div className={s.models}><span>模型由你选择 · 内置 29 家厂商 <a className={s.textLink} href={guide("03-features/06-models")}>查看全部 <Icon name="arrow" /></a></span>{modelProviders.map(item => <p key={item.name}><IntegrationMark item={item} /></p>)}</div>
       </section>
       <section id="enterprise" className={s.enterprise} aria-labelledby="enterprise-title"><div className={s.shell}>
         <div className={s.sectionHeading}><div><p className={s.eyebrow}>06 / BUILT FOR YOUR TEAM</p><h2 id="enterprise-title">私有化部署，<br />按团队需要管理权限。</h2></div><p>配置数据存储与成员权限，<br />查看操作记录和任务运行状态。</p></div>

@@ -1,0 +1,18 @@
+// Shared table frame for settings pages. Import as a reference in scoped styles.
+.settings-data-table() {
+  overflow-x: auto;
+  border-radius: var(--app-radius-lg);
+  border: 1px solid var(--td-component-stroke);
+  background-color: var(--td-bg-color-container);
+
+  &:deep(thead th) {
+    font-weight: 600;
+    font-size: var(--app-text-md);
+  }
+
+  &:deep(.t-table td),
+  &:deep(.t-table th) {
+    padding-top: 12px;
+    padding-bottom: 12px;
+  }
+}

@@ -93,6 +93,10 @@ const DOMPurifyConfig = {
     'mathvariant', 'encoding', 'aria-hidden'
   ],
   USE_PROFILES: { html: true, svg: true, mathMl: true },
+  // USE_PROFILES 会整体替换 ALLOWED_ATTR，而 html profile 默认不含 target，
+  // 导致 afterSanitizeElements hook 加上的 target="_blank" 在随后的
+  // _sanitizeAttributes 中被剥离。用 ADD_ATTR 在 profile 之上追加该属性。
+  ADD_ATTR: ['target'],
   ...domPurifySecurityOptions,
 };
 
@@ -129,9 +133,10 @@ export function applyDocumentPreviewImageAttributes(currentNode: Node): void {
   element.setAttribute('fetchpriority', 'low');
 }
 
-const documentPreviewDomPurifyConfig = {
+export const documentPreviewDomPurifyConfig = {
   ...DOMPurifyConfig,
-  ADD_ATTR: [...DOCUMENT_PREVIEW_IMAGE_ATTRS],
+  // 在基础 ADD_ATTR 上追加，而不是覆盖，否则链接的 target="_blank" 又会被剥掉。
+  ADD_ATTR: [...DOMPurifyConfig.ADD_ATTR, ...DOCUMENT_PREVIEW_IMAGE_ATTRS],
 };
 
 const documentPreviewSecurityHooks: SecurityHooks = {

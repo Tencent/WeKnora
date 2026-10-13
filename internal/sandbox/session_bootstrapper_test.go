@@ -52,6 +52,7 @@ func TestCreateAndBindUsesTemplateOverride(t *testing.T) {
 
 	require.NoError(t, err)
 	require.Equal(t, "snap-1", client.lastCreateRequest.TemplateID)
+	require.True(t, client.lastCreateRequest.FromSnapshot)
 }
 
 func TestCreateAndBindKeepsConfigTemplateWithoutOverride(t *testing.T) {
@@ -62,6 +63,7 @@ func TestCreateAndBindKeepsConfigTemplateWithoutOverride(t *testing.T) {
 
 	require.NoError(t, err)
 	require.Equal(t, lc.createRequest.TemplateID, client.lastCreateRequest.TemplateID)
+	require.False(t, client.lastCreateRequest.FromSnapshot)
 }
 
 // 最重要的一条：override 绝不能污染跨 session 复用的 l.createRequest。

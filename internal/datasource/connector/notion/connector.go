@@ -3,6 +3,7 @@ package notion
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -147,13 +148,17 @@ func (c *Connector) FetchAll(ctx context.Context, config *types.DataSourceConfig
 	for _, resourceID := range resourceIDs {
 		page, err := client.GetPage(ctx, resourceID)
 		if err == nil {
-			allItems = append(allItems, c.fetchPage(ctx, client, page, visited)...)
+			pageItems, _, err := c.fetchPage(ctx, client, page, visited)
+			if err != nil {
+				return nil, err
+			}
+			allItems = append(allItems, pageItems...)
 			continue
 		}
 		// Not a page — treat as database/data_source.
 		// fetchDatabase handles both data_source IDs (from search) and
 		// database container IDs (from child_database blocks).
-		items := c.fetchDatabase(ctx, client, resourceID, visited)
+		items, _ := c.fetchDatabase(ctx, client, resourceID, visited)
 		if len(items) == 0 {
 			logger.Warnf(ctx, "[Notion] failed to fetch resource %s as page or database", resourceID)
 		}
@@ -235,6 +240,10 @@ func (c *Connector) FetchIncremental(ctx context.Context, config *types.DataSour
 
 	var changedItems []types.FetchedItem
 	changedCount := 0
+	// queryTruncated records whether any query this round came back capped by a
+	// vendor limit. A capped query only reports a prefix of its records, so the
+	// deletion pass must be skipped for the whole round.
+	var queryTruncated bool
 
 	for pageID, newTime := range newEditTimes {
 		prevTime, existed := prevCursor.PageEditTimes[pageID]
@@ -253,14 +262,21 @@ func (c *Connector) FetchIncremental(ctx context.Context, config *types.DataSour
 		if pg.isDatabase() {
 			// Incremental database sync: query records, diff against cursor,
 			// only fetch blocks for records whose edit time actually changed.
-			items, recordEditTimes := c.fetchDatabaseIncremental(ctx, client, pg.ID, prevCursor.PageEditTimes, fetchVisited)
+			items, recordEditTimes, truncated := c.fetchDatabaseIncremental(
+				ctx, client, pg.ID, prevCursor.PageEditTimes, fetchVisited)
+			queryTruncated = queryTruncated || truncated
 			changedItems = append(changedItems, items...)
 			// Merge record-level edit times into the cursor
 			for rid, rt := range recordEditTimes {
 				newEditTimes[rid] = rt
 			}
 		} else {
-			changedItems = append(changedItems, c.fetchPage(ctx, client, pg, fetchVisited)...)
+			items, truncated, err := c.fetchPage(ctx, client, pg, fetchVisited)
+			if err != nil {
+				return nil, nil, err
+			}
+			queryTruncated = queryTruncated || truncated
+			changedItems = append(changedItems, items...)
 		}
 	}
 
@@ -269,21 +285,36 @@ func (c *Connector) FetchIncremental(ctx context.Context, config *types.DataSour
 	// are still visible but no longer reachable from any selected root (i.e. the
 	// user deselected their ancestor) live in fetchVisited as the "excluded" set
 	// returned by discoverAllResources, and must NOT be reported as deletions.
-	for pageID := range prevCursor.PageEditTimes {
-		if _, exists := newEditTimes[pageID]; exists {
-			continue
+	//
+	// A truncated query reports only a prefix of its records, so a record absent
+	// from it is not evidence of a source-side deletion. When any query this
+	// round hit a vendor limit, skip deletion detection entirely instead of
+	// deleting live documents (same direction as aborting incremental sync when
+	// resource discovery fails, #3682).
+	if queryTruncated {
+		logger.Warnf(ctx, "[Notion] skipping deletion detection: at least one query was truncated at the vendor limit")
+	} else {
+		for pageID := range prevCursor.PageEditTimes {
+			if _, exists := newEditTimes[pageID]; exists {
+				continue
+			}
+			if fetchVisited[pageID] {
+				continue
+			}
+			changedItems = append(changedItems, types.FetchedItem{
+				ExternalID: pageID,
+				IsDeleted:  true,
+				Metadata:   map[string]string{"channel": types.ChannelNotion},
+			})
 		}
-		if fetchVisited[pageID] {
-			continue
-		}
-		changedItems = append(changedItems, types.FetchedItem{
-			ExternalID: pageID,
-			IsDeleted:  true,
-			Metadata:   map[string]string{"channel": types.ChannelNotion},
-		})
 	}
 
-	logger.Infof(ctx, "[Notion] incremental: %d changed, %d total items", changedCount, len(changedItems))
+	if queryTruncated {
+		logger.Warnf(ctx, "[Notion] incremental: %d changed, %d total items, result set truncated by the vendor",
+			changedCount, len(changedItems))
+	} else {
+		logger.Infof(ctx, "[Notion] incremental: %d changed, %d total items", changedCount, len(changedItems))
+	}
 
 	return changedItems, buildCursor(newEditTimes), nil
 }
@@ -307,17 +338,22 @@ func buildCursor(editTimes map[string]time.Time) *types.SyncCursor {
 
 // fetchPage fetches a single page's content and attachments.
 // If page is nil, it will be fetched from the API.
-func (c *Connector) fetchPage(ctx context.Context, client *notionClient, page *notionPage, visited map[string]bool) []types.FetchedItem {
+// The second result reports whether any query issued for this page (including
+// child databases) was truncated at a vendor limit.
+// A page block fetch error aborts the round without acknowledging its edit time.
+func (c *Connector) fetchPage(
+	ctx context.Context, client *notionClient, page *notionPage, visited map[string]bool,
+) ([]types.FetchedItem, bool, error) {
 	if page == nil {
-		return nil
+		return nil, false, nil
 	}
 	if visited[page.ID] {
-		return nil
+		return nil, false, nil
 	}
 	visited[page.ID] = true
 
 	if page.InTrash {
-		return nil
+		return nil, false, nil
 	}
 
 	// Database records store content in properties, not blocks — delegate to
@@ -333,15 +369,14 @@ func (c *Connector) fetchPage(ctx context.Context, client *notionClient, page *n
 		}
 		propNames := extractPropertySchema(*page)
 		if item := c.buildRecordItem(ctx, client, *page, propNames, dbTitle); item != nil {
-			return []types.FetchedItem{*item}
+			return []types.FetchedItem{*item}, false, nil
 		}
-		return nil
+		return nil, false, nil
 	}
 
 	blocks, err := client.GetBlockChildrenAll(ctx, page.ID)
 	if err != nil {
-		logger.Warnf(ctx, "[Notion] failed to get blocks for page %s: %v", page.ID, err)
-		return nil
+		return nil, false, fmt.Errorf("get blocks for notion page %s: %w", page.ID, err)
 	}
 
 	resolveFileUploads(ctx, client, blocks)
@@ -407,6 +442,7 @@ func (c *Connector) fetchPage(ctx context.Context, client *notionClient, page *n
 		})
 	}
 
+	truncated := false
 	for _, block := range blocks {
 		switch block.Type {
 		case "child_page":
@@ -415,30 +451,43 @@ func (c *Connector) fetchPage(ctx context.Context, client *notionClient, page *n
 				logger.Warnf(ctx, "[Notion] failed to get child page %s: %v", block.ID, err)
 				continue
 			}
-			items = append(items, c.fetchPage(ctx, client, childPage, visited)...)
+			childItems, childTruncated, err := c.fetchPage(ctx, client, childPage, visited)
+			if err != nil {
+				return nil, truncated || childTruncated, err
+			}
+			truncated = truncated || childTruncated
+			items = append(items, childItems...)
 		case "child_database":
-			items = append(items, c.fetchDatabase(ctx, client, block.ID, visited)...)
+			dbItems, dbTruncated := c.fetchDatabase(ctx, client, block.ID, visited)
+			truncated = truncated || dbTruncated
+			items = append(items, dbItems...)
 		}
 	}
 
-	return items
+	return items, truncated, nil
 }
 
 // fetchDatabase syncs each database record as an individual knowledge item (full sync).
 // Accepts either a data_source_id (from search) or database_id (from child_database blocks).
-func (c *Connector) fetchDatabase(ctx context.Context, client *notionClient, id string, visited map[string]bool) []types.FetchedItem {
+// The second result reports whether the record query was truncated at a vendor limit.
+func (c *Connector) fetchDatabase(
+	ctx context.Context, client *notionClient, id string, visited map[string]bool,
+) ([]types.FetchedItem, bool) {
 	if visited[id] {
-		return nil
+		return nil, false
 	}
 	visited[id] = true
 
-	records, dbTitle, queryID, err := c.queryDatabaseRecords(ctx, client, id)
-	if err != nil || len(records) == 0 {
-		return nil
+	records, dbTitle, queryID, truncated, err := c.queryDatabaseRecords(ctx, client, id)
+	if err != nil {
+		return nil, false
+	}
+	if len(records) == 0 {
+		return nil, truncated
 	}
 	if queryID != "" && queryID != id {
 		if visited[queryID] {
-			return nil
+			return nil, truncated
 		}
 		visited[queryID] = true
 	}
@@ -447,28 +496,36 @@ func (c *Connector) fetchDatabase(ctx context.Context, client *notionClient, id 
 		visited[record.ID] = true // Mark records as visited to avoid duplicate fetchPage calls
 	}
 
+	if truncated {
+		logger.Warnf(ctx, "[Notion] database %s full sync used a truncated record set (%d records): "+
+			"records past the vendor query limit are missing from this run", id, len(records))
+	}
+
 	item := c.buildDatabaseItem(ctx, client, id, dbTitle, records)
 	if item != nil {
-		return []types.FetchedItem{*item}
+		return []types.FetchedItem{*item}, truncated
 	}
-	return nil
+	return nil, truncated
 }
 
 // fetchDatabaseIncremental syncs only changed records by comparing edit times against cursor.
-// Returns fetched items and a map of record_id → edit_time for cursor update.
-func (c *Connector) fetchDatabaseIncremental(ctx context.Context, client *notionClient, id string, prevEditTimes map[string]time.Time, visited map[string]bool) ([]types.FetchedItem, map[string]time.Time) {
+// Returns fetched items, a map of record_id → edit_time for cursor update, and whether the
+// record query was truncated at a vendor limit (in which case absence proves nothing).
+func (c *Connector) fetchDatabaseIncremental(
+	ctx context.Context, client *notionClient, id string, prevEditTimes map[string]time.Time, visited map[string]bool,
+) ([]types.FetchedItem, map[string]time.Time, bool) {
 	if visited[id] {
-		return nil, nil
+		return nil, nil, false
 	}
 	visited[id] = true
 
-	records, dbTitle, queryID, err := c.queryDatabaseRecords(ctx, client, id)
+	records, dbTitle, queryID, truncated, err := c.queryDatabaseRecords(ctx, client, id)
 	if err != nil {
-		return nil, nil
+		return nil, nil, false
 	}
 	if queryID != "" && queryID != id {
 		if visited[queryID] {
-			return nil, nil
+			return nil, nil, truncated
 		}
 		visited[queryID] = true
 	}
@@ -490,26 +547,41 @@ func (c *Connector) fetchDatabaseIncremental(ctx context.Context, client *notion
 		}
 	}
 
-	logger.Infof(ctx, "[Notion] database %s incremental: %d changed out of %d records", id, changedCount, len(records))
+	if truncated {
+		logger.Warnf(ctx, "[Notion] database %s incremental: %d changed out of %d records "+
+			"(truncated at the vendor query limit: result set incomplete)", id, changedCount, len(records))
+	} else {
+		logger.Infof(ctx, "[Notion] database %s incremental: %d changed out of %d records",
+			id, changedCount, len(records))
+	}
 
 	// Rebuild the entire database table if any record changed, or if we don't have previous times (first sync)
 	if changedCount > 0 || len(prevEditTimes) == 0 {
 		item := c.buildDatabaseItem(ctx, client, id, dbTitle, records)
 		if item != nil {
-			return []types.FetchedItem{*item}, recordEditTimes
+			return []types.FetchedItem{*item}, recordEditTimes, truncated
 		}
 	}
 
-	return nil, recordEditTimes
+	return nil, recordEditTimes, truncated
 }
 
 // queryDatabaseRecords resolves the database ID and queries all records.
-// Returns the records, the database title, and the canonical data_source_id used for the query.
-func (c *Connector) queryDatabaseRecords(ctx context.Context, client *notionClient, id string) ([]notionPage, string, string, error) {
+// Records are read through created_time windows, so a data source holding more
+// rows than one vendor query can return is still read in full.
+// Returns the records, the database title, the canonical data_source_id used for the
+// query, whether the result set is incomplete, and an error. An incomplete result
+// still returns the rows fetched so far, with truncated set and a nil error, because
+// the partial data remains usable as long as callers do not read absence as deletion.
+// Truncation is only reported when windowed reading cannot complete (see
+// notionClient.queryDataSourceAll).
+func (c *Connector) queryDatabaseRecords(
+	ctx context.Context, client *notionClient, id string,
+) ([]notionPage, string, string, bool, error) {
 	dbInfo, err := getDatabaseOrDataSourceInfo(ctx, client, id)
 	if err != nil {
 		logger.Warnf(ctx, "[Notion] failed to get database/data_source info %s: %v", id, err)
-		return nil, "", "", err
+		return nil, "", "", false, err
 	}
 
 	queryID := dbInfo.DataSourceID
@@ -517,13 +589,19 @@ func (c *Connector) queryDatabaseRecords(ctx context.Context, client *notionClie
 		queryID = id
 	}
 	records, err := client.QueryDatabaseAll(ctx, queryID)
-	if err != nil {
+	truncated := errors.Is(err, errQueryResultTruncated)
+	if err != nil && !truncated {
 		logger.Warnf(ctx, "[Notion] failed to query database %s: %v", id, err)
-		return nil, "", "", err
+		return nil, "", "", false, err
 	}
 
-	logger.Infof(ctx, "[Notion] database %s (%s): %d records", id, dbInfo.Page.Title, len(records))
-	return records, dbInfo.Page.Title, queryID, nil
+	if truncated {
+		logger.Warnf(ctx, "[Notion] database %s (%s): %d records, the vendor query limit was hit and the "+
+			"created_time window could not advance: result set incomplete", id, dbInfo.Page.Title, len(records))
+	} else {
+		logger.Infof(ctx, "[Notion] database %s (%s): %d records", id, dbInfo.Page.Title, len(records))
+	}
+	return records, dbInfo.Page.Title, queryID, truncated, nil
 }
 
 // buildRecordItem converts a single database record into a FetchedItem

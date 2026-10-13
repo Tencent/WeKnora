@@ -1,19 +1,13 @@
 <template>
   <div class="tenant-members">
-    <!-- Section header. The (i) permission speed-look popover lives
-         next to the title so it reads as meta-info about *this
-         section*. The audit-log entry sits on the right of the header
-         row — secondary navigation that opens the audit drawer; gated
-         to Admin+ so non-managers don't see a button they can't use. -->
     <div class="section-header">
       <div class="section-header-row">
         <div class="section-header-titlewrap">
           <h2>{{ $t('tenantMember.title') }}</h2>
-          <t-popup placement="bottom-start" trigger="hover" overlay-class-name="wk-popover permissions-popup-overlay"
+          <t-popup placement="bottom-left" trigger="hover" show-arrow overlay-class-name="wk-popover permissions-popup-overlay"
             :overlay-inner-style="permissionsPopupInnerStyle">
-            <button type="button" class="permissions-trigger-btn" :aria-label="$t('tenantMember.permissions.title')"
-              :title="$t('tenantMember.permissions.iconHint')">
-              <t-icon name="info-circle" size="16px" />
+            <button type="button" class="permissions-trigger-btn" :aria-label="$t('tenantMember.permissions.title')">
+              <t-icon name="help-circle" size="16px" />
             </button>
             <template #content>
               <div class="permissions-compact permissions-compact--popover">
@@ -40,14 +34,121 @@
               </div>
             </template>
           </t-popup>
-          <!-- Audit log entry sits inline with the title: title (i)
-               [审计日志]. Keeping all section-level affordances on the
-               left edge avoids the "lonely right-aligned button"
-               pattern in narrow settings panels. -->
+        </div>
+        <div class="members-header-actions">
           <t-button v-if="canViewAudit" variant="text" size="small" class="header-audit-btn" @click="openAuditDrawer">
             <template #icon><t-icon name="history" /></template>
             {{ $t('tenantMember.audit.tabLabel') }}
           </t-button>
+          <t-popup v-if="canManage" v-model="invitePopupVisible" trigger="click" placement="bottom-end"
+            destroy-on-close overlay-class-name="wk-popover wk-popover--form member-invite-popup-overlay">
+            <t-button theme="default" variant="text" size="small" class="members-list-add-btn"
+              :title="$t('tenantMember.add.button')" :aria-label="$t('tenantMember.add.button')">
+              <template #icon><t-icon name="user-add" /></template>
+              {{ $t('tenantMember.add.button') }}
+            </t-button>
+            <template #content>
+              <div class="member-invite-popup-inner" @click.stop>
+                <div class="member-invite-popup-title">
+                  {{
+                    addDialogStep === 'form'
+                      ? $t('tenantMember.add.dialogTitle')
+                      : $t('tenantInvitation.confirmInviteTitle')
+                  }}
+                </div>
+                <t-form v-if="addDialogStep === 'form'" ref="addFormRef" :data="addForm" :rules="addFormRules"
+                  :label-width="80" class="member-invite-form">
+                  <t-form-item :label="$t('tenantMember.add.emailLabel')" name="email">
+                    <t-input v-model="addForm.email" :placeholder="$t('tenantMember.add.emailPlaceholder')"
+                      clearable />
+                  </t-form-item>
+                  <t-form-item :label="$t('tenantMember.add.roleLabel')" name="role">
+                    <t-select v-model="addForm.role" :options="roleOptions" :popup-props="roleSelectPopupProps" />
+                  </t-form-item>
+                </t-form>
+                <div v-else class="invite-confirm-body">
+                  {{ $t('tenantInvitation.confirmInviteBody', {
+                    email: addConfirmEmail,
+                    role: addConfirmRoleLabel,
+                  }) }}
+                </div>
+                <div class="invite-popup-footer">
+                  <t-button v-if="addDialogStep === 'form'" variant="outline" :disabled="adding"
+                    @click="invitePopupVisible = false">
+                    {{ $t('common.cancel') }}
+                  </t-button>
+                  <t-button v-else variant="outline" :disabled="adding" @click="goBackToForm">
+                    {{ $t('common.back') }}
+                  </t-button>
+                  <t-button theme="primary" :loading="adding" @click="submitAdd">
+                    {{ dialogConfirmLabel }}
+                  </t-button>
+                </div>
+              </div>
+            </template>
+          </t-popup>
+          <!-- Share-link generator. Sits next to the invite-by-email
+               popup so the two flows live side-by-side: "I know who"
+               (email input) vs "I don't" (one link, group chat). -->
+          <t-popup v-if="canManage" v-model="shareLinkPopupVisible" trigger="click" placement="bottom-end"
+            destroy-on-close overlay-class-name="wk-popover wk-popover--form member-invite-popup-overlay">
+            <t-button theme="default" variant="text" size="small" class="members-list-add-btn"
+              :title="$t('tenantInvitation.shareLink.button')"
+              :aria-label="$t('tenantInvitation.shareLink.button')">
+              <template #icon><t-icon name="link" /></template>
+              {{ $t('tenantInvitation.shareLink.button') }}
+            </t-button>
+            <template #content>
+              <div class="member-invite-popup-inner" @click.stop>
+                <div class="member-invite-popup-title">
+                  {{
+                    shareLinkResult
+                      ? $t('tenantInvitation.shareLink.resultTitle')
+                      : $t('tenantInvitation.shareLink.dialogTitle')
+                  }}
+                </div>
+                <div v-if="!shareLinkResult" class="member-invite-form">
+                  <p class="invite-confirm-body">
+                    {{ $t('tenantInvitation.shareLink.description', { days: INVITATION_TTL_DAYS }) }}
+                  </p>
+                  <t-form :data="shareLinkForm" :label-width="80">
+                    <t-form-item :label="$t('tenantMember.add.roleLabel')" name="role">
+                      <t-select v-model="shareLinkForm.role" :options="roleOptions"
+                        :popup-props="roleSelectPopupProps" />
+                    </t-form-item>
+                  </t-form>
+                </div>
+                <div v-else class="share-link-result">
+                  <p class="invite-confirm-body">
+                    {{ $t('tenantInvitation.shareLink.resultBody') }}
+                  </p>
+                  <div class="share-link-row">
+                    <input class="share-link-row__input"
+                      :value="absoluteInviteURL(shareLinkResult.invite_url || '')"
+                      readonly @click="($event.target as HTMLInputElement).select()" />
+                    <t-button size="small" theme="primary" variant="outline"
+                      @click="copyText(absoluteInviteURL(shareLinkResult.invite_url || ''))">
+                      <template #icon><t-icon name="copy" /></template>
+                      {{ $t('tenantInvitation.copyLink') }}
+                    </t-button>
+                  </div>
+                </div>
+                <div class="invite-popup-footer">
+                  <t-button v-if="!shareLinkResult" variant="outline" :disabled="creatingShareLink"
+                    @click="shareLinkPopupVisible = false">
+                    {{ $t('common.cancel') }}
+                  </t-button>
+                  <t-button v-else variant="outline" @click="shareLinkPopupVisible = false">
+                    {{ $t('common.close') }}
+                  </t-button>
+                  <t-button v-if="!shareLinkResult" theme="primary" :loading="creatingShareLink"
+                    @click="submitShareLink">
+                    {{ $t('tenantInvitation.shareLink.generate') }}
+                  </t-button>
+                </div>
+              </div>
+            </template>
+          </t-popup>
         </div>
       </div>
       <p class="section-description">
@@ -64,26 +165,32 @@
       </p>
     </div>
 
-    <div class="members-tab-layout">
-      <!-- Toolbar 已被并入「空间成员」列表头：搜索框紧贴列表头右
-           侧，邀请按钮再往右一个图标位，所有「针对这张列表」的控
-           件聚到同一行，独立 toolbar 不复存在。 -->
-
-      <!-- Pending invitations. Shown only to managers because the
-               viewer/contributor roles don't have an action surface
-               here. Even when empty we still render the header so
-               operators get a stable "is there anything pending?"
-               affordance after they hit "Send invitation". -->
-      <div v-if="canManage" class="pending-invitations-section">
-        <div class="pending-invitations-header">
-          <div class="pending-invitations-titlewrap">
-            <span class="pending-invitations-title">
-              {{ $t('tenantInvitation.pendingSectionTitle') }}
+    <div class="members-tabbar">
+      <t-tabs v-model="activeListTab" class="members-tabs">
+        <t-tab-panel value="members">
+          <template #label>
+            <span class="members-tab-label"><t-icon name="usergroup" size="16px" />
+              {{ $t('tenantMember.listTitle') }}<span class="members-list-count-badge">{{ membersTotal }}</span>
             </span>
-            <!-- Same count-badge style as the «空间成员» list header
-                 so the two list titles read at parity. -->
-            <span class="members-list-count-badge">{{ invitationsTotal }}</span>
-          </div>
+          </template>
+        </t-tab-panel>
+        <t-tab-panel v-if="canManage" value="invitations">
+          <template #label>
+            <span class="members-tab-label"><t-icon name="mail" size="16px" />
+              {{ $t('tenantInvitation.pendingSectionTitle') }}<span class="members-list-count-badge">{{ invitationsTotal }}</span>
+            </span>
+          </template>
+        </t-tab-panel>
+      </t-tabs>
+      <t-input v-show="activeListTab === 'members'" v-model="searchQuery" class="members-list-search"
+        :placeholder="$t('tenantMember.searchPlaceholder')" :aria-label="$t('tenantMember.searchPlaceholder')" clearable>
+        <template #prefix-icon><t-icon name="search" size="16px" /></template>
+      </t-input>
+    </div>
+
+    <div class="members-tab-layout">
+      <div v-if="canManage" v-show="activeListTab === 'invitations'" class="pending-invitations-section">
+        <div class="pending-invitations-header">
           <span class="pending-invitations-desc">
             {{ $t('tenantInvitation.pendingSectionDesc', { days: INVITATION_TTL_DAYS }) }}
           </span>
@@ -176,136 +283,13 @@
           </div>
           <div v-if="invitationsTotal > 0" class="data-table-shell__pager">
             <t-pagination v-model="invitationsPage" v-model:page-size="invitationsPageSize" :total="invitationsTotal"
-              size="small" show-jumper show-page-number show-page-size
+              size="small" :show-jumper="false" show-page-number :show-page-size="invitationsTotal > 10"
               :page-size-options="INVITATIONS_PAGE_SIZE_OPTIONS" @change="onInvitationsPageChange" />
           </div>
         </div>
       </div>
 
-      <!-- Member list. 列表头（标题 / 计数 / 搜索框 / 邀请按钮）始终
-           渲染，loading / error / empty / 表格作为下方的内容状态切换。
-           这样搜索时输入框不会被卸载，避免焦点丢失与页面抖动。 -->
-      <div class="members-list-wrap">
-        <div class="members-list-header">
-          <div class="members-list-titlewrap">
-            <span class="members-list-title">{{ $t('tenantMember.listTitle') }}</span>
-            <span class="members-list-count-badge">{{ membersTotal }}</span>
-          </div>
-          <div class="members-list-actions">
-            <div class="members-list-search">
-              <t-input v-model="searchQuery" size="small" :placeholder="$t('tenantMember.searchPlaceholder')" clearable>
-                <template #prefix-icon><t-icon name="search" /></template>
-              </t-input>
-            </div>
-            <t-popup v-if="canManage" v-model="invitePopupVisible" trigger="click" placement="bottom-end"
-              destroy-on-close overlay-class-name="wk-popover wk-popover--form member-invite-popup-overlay">
-              <t-button theme="primary" variant="outline" shape="square" size="small" class="members-list-add-btn"
-                :title="$t('tenantMember.add.button')" :aria-label="$t('tenantMember.add.button')">
-                <template #icon><t-icon name="user-add" /></template>
-              </t-button>
-              <template #content>
-                <div class="member-invite-popup-inner" @click.stop>
-                  <div class="member-invite-popup-title">
-                    {{
-                      addDialogStep === 'form'
-                        ? $t('tenantMember.add.dialogTitle')
-                        : $t('tenantInvitation.confirmInviteTitle')
-                    }}
-                  </div>
-                  <t-form v-if="addDialogStep === 'form'" ref="addFormRef" :data="addForm" :rules="addFormRules"
-                    :label-width="80" class="member-invite-form">
-                    <t-form-item :label="$t('tenantMember.add.emailLabel')" name="email">
-                      <t-input v-model="addForm.email" :placeholder="$t('tenantMember.add.emailPlaceholder')"
-                        clearable />
-                    </t-form-item>
-                    <t-form-item :label="$t('tenantMember.add.roleLabel')" name="role">
-                      <t-select v-model="addForm.role" :options="roleOptions" :popup-props="roleSelectPopupProps" />
-                    </t-form-item>
-                  </t-form>
-                  <div v-else class="invite-confirm-body">
-                    {{ $t('tenantInvitation.confirmInviteBody', {
-                      email: addConfirmEmail,
-                      role: addConfirmRoleLabel,
-                    }) }}
-                  </div>
-                  <div class="invite-popup-footer">
-                    <t-button v-if="addDialogStep === 'form'" variant="outline" :disabled="adding"
-                      @click="invitePopupVisible = false">
-                      {{ $t('common.cancel') }}
-                    </t-button>
-                    <t-button v-else variant="outline" :disabled="adding" @click="goBackToForm">
-                      {{ $t('common.back') }}
-                    </t-button>
-                    <t-button theme="primary" :loading="adding" @click="submitAdd">
-                      {{ dialogConfirmLabel }}
-                    </t-button>
-                  </div>
-                </div>
-              </template>
-            </t-popup>
-            <!-- Share-link generator. Sits next to the invite-by-email
-                 popup so the two flows live side-by-side: "I know who"
-                 (email input) vs "I don't" (one link, group chat). -->
-            <t-popup v-if="canManage" v-model="shareLinkPopupVisible" trigger="click" placement="bottom-end"
-              destroy-on-close overlay-class-name="wk-popover wk-popover--form member-invite-popup-overlay">
-              <t-button theme="default" variant="outline" shape="square" size="small" class="members-list-add-btn"
-                :title="$t('tenantInvitation.shareLink.button')"
-                :aria-label="$t('tenantInvitation.shareLink.button')">
-                <template #icon><t-icon name="link" /></template>
-              </t-button>
-              <template #content>
-                <div class="member-invite-popup-inner" @click.stop>
-                  <div class="member-invite-popup-title">
-                    {{
-                      shareLinkResult
-                        ? $t('tenantInvitation.shareLink.resultTitle')
-                        : $t('tenantInvitation.shareLink.dialogTitle')
-                    }}
-                  </div>
-                  <div v-if="!shareLinkResult" class="member-invite-form">
-                    <p class="invite-confirm-body">
-                      {{ $t('tenantInvitation.shareLink.description', { days: INVITATION_TTL_DAYS }) }}
-                    </p>
-                    <t-form :data="shareLinkForm" :label-width="80">
-                      <t-form-item :label="$t('tenantMember.add.roleLabel')" name="role">
-                        <t-select v-model="shareLinkForm.role" :options="roleOptions"
-                          :popup-props="roleSelectPopupProps" />
-                      </t-form-item>
-                    </t-form>
-                  </div>
-                  <div v-else class="share-link-result">
-                    <p class="invite-confirm-body">
-                      {{ $t('tenantInvitation.shareLink.resultBody') }}
-                    </p>
-                    <div class="share-link-row">
-                      <input class="share-link-row__input"
-                        :value="absoluteInviteURL(shareLinkResult.invite_url || '')"
-                        readonly @click="($event.target as HTMLInputElement).select()" />
-                      <t-button size="small" theme="primary" variant="outline"
-                        @click="copyText(absoluteInviteURL(shareLinkResult.invite_url || ''))">
-                        <template #icon><t-icon name="copy" /></template>
-                        {{ $t('tenantInvitation.copyLink') }}
-                      </t-button>
-                    </div>
-                  </div>
-                  <div class="invite-popup-footer">
-                    <t-button v-if="!shareLinkResult" variant="outline" :disabled="creatingShareLink"
-                      @click="shareLinkPopupVisible = false">
-                      {{ $t('common.cancel') }}
-                    </t-button>
-                    <t-button v-else variant="outline" @click="shareLinkPopupVisible = false">
-                      {{ $t('common.close') }}
-                    </t-button>
-                    <t-button v-if="!shareLinkResult" theme="primary" :loading="creatingShareLink"
-                      @click="submitShareLink">
-                      {{ $t('tenantInvitation.shareLink.generate') }}
-                    </t-button>
-                  </div>
-                </div>
-              </template>
-            </t-popup>
-          </div>
-        </div>
+      <div v-show="activeListTab === 'members'" class="members-list-wrap">
         <div v-if="loading && members.length === 0" class="loading-inline">
           <t-loading size="small" />
           <span>{{ $t('tenantMember.loading') }}</span>
@@ -325,7 +309,7 @@
         </div>
         <div v-else class="data-table-shell data-table-shell--with-footer">
           <div class="data-table-shell__scroll">
-            <t-table row-key="user_id" :data="members" :columns="columns" size="medium" hover stripe :loading="loading">
+            <t-table row-key="user_id" :data="members" :columns="columns" size="medium" hover :loading="loading">
               <template #member="{ row }">
                 <div class="member-cell">
                   <span class="member-name">{{ memberPrimary(row) }}</span>
@@ -335,8 +319,10 @@
               <template #role="{ row }">
                 <div class="role-cell">
                   <t-select v-if="canManage && row.user_id !== currentUserId" :model-value="row.role"
-                    class="member-role-select" size="small" :popup-props="roleSelectPopupProps"
+                    class="member-role-select" :borderless="true" :popup-props="roleSelectPopupProps"
+                    :aria-label="`${memberPrimary(row)} · ${$t('tenantMember.columns.role')}`"
                     @change="(val: string) => onRoleChange(row, val)">
+                    <template #prefixIcon><t-icon :name="roleIcon(row.role)" size="14px" /></template>
                     <t-option v-for="opt in roleOptions" :key="opt.value" :value="opt.value" :label="opt.label">
                       <span class="role-option">
                         <t-icon :name="roleIcon(opt.value)" class="role-option-icon" />
@@ -344,9 +330,10 @@
                       </span>
                     </t-option>
                   </t-select>
-                  <t-tag v-else :theme="roleTagTheme(row.role)" size="small">
+                  <span v-else class="member-role-label">
+                    <t-icon :name="roleIcon(row.role)" size="14px" />
                     {{ $t('tenantMember.role.' + row.role) }}
-                  </t-tag>
+                  </span>
                 </div>
               </template>
               <template #joined_at="{ row }">{{ formatDate(row.joined_at) }}</template>
@@ -369,7 +356,7 @@
           </div>
           <div v-if="membersTotal > 0" class="data-table-shell__pager">
             <t-pagination v-model="membersPage" v-model:page-size="membersPageSize" :total="membersTotal" size="small"
-              show-jumper show-page-number show-page-size :page-size-options="MEMBERS_PAGE_SIZE_OPTIONS"
+              :show-jumper="false" show-page-number :show-page-size="membersTotal > 10" :page-size-options="MEMBERS_PAGE_SIZE_OPTIONS"
               @change="onMembersPageChange" />
           </div>
         </div>
@@ -575,6 +562,7 @@ const shareLinkResult = ref<TenantInvitation | null>(null)
 const addDialogStep = ref<'form' | 'confirm'>('form')
 const addFormRef = ref<any>(null)
 const searchQuery = ref('')
+const activeListTab = ref('members')
 /** 已应用到服务端筛选的检索词（相对输入框防抖） */
 const memberSearchQ = ref('')
 let memberSearchDebounceTimer: number | undefined
@@ -655,6 +643,10 @@ const canManage = computed(
 // Admin+ (and cross-tenant superusers) can view the audit log. Mirrors
 // the server's g.Admin() guard on /tenants/:id/audit-log so we don't
 // render a tab that would just 403.
+watch(canManage, (allowed) => {
+  if (!allowed) activeListTab.value = 'members'
+})
+
 const canViewAudit = computed(
   () =>
     currentRole.value === 'owner' ||
@@ -733,8 +725,8 @@ function roleMatrixIcon(role: TenantRole): string {
 }
 
 const columns = computed(() => [
-  { colKey: 'member', title: t('tenantMember.columns.member'), ellipsis: true, minWidth: 132 },
-  { colKey: 'role', title: t('tenantMember.columns.role'), width: 128 },
+  { colKey: 'member', title: t('tenantMember.columns.member'), ellipsis: true, minWidth: 230 },
+  { colKey: 'role', title: t('tenantMember.columns.role'), width: 168 },
   { colKey: 'joined_at', title: t('tenantMember.columns.joinedAt'), width: 154 },
   { colKey: 'actions', title: t('tenantMember.columns.operations'), width: 88, align: 'left' },
 ])
@@ -1468,9 +1460,11 @@ watch(
 
 <style lang="less" scoped>
 @import (reference) '@/components/css/settings-section.less';
+@import (reference) '@/components/css/settings-table.less';
 
 .tenant-members {
-  width: 100%;
+  .settings-list-page();
+  container-type: inline-size;
 }
 
 .member-cell {
@@ -1501,9 +1495,13 @@ watch(
 
 .section-header {
   .settings-section-header();
+  flex-shrink: 0;
+  margin-bottom: 12px;
+  padding-right: 32px;
 }
 
 .section-header-row {
+  margin-bottom: 8px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1514,24 +1512,31 @@ watch(
 .section-header-titlewrap {
   display: inline-flex;
   align-items: center;
-  gap: 2px;
+  gap: 6px;
   min-width: 0;
 
   h2 {
     margin: 0;
-    line-height: 1.25;
   }
 }
 
-/* 顶部右侧的「审计日志」入口。t-button variant="text" 自带颜色
-   交互；这里只调 flex 行为，避免在 wrap 时被挤压。 */
-.header-audit-btn {
-  flex-shrink: 0;
+.members-header-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.header-audit-btn.t-button,
+.members-list-add-btn.t-button {
+  .settings-list-action();
 }
 
 .members-tab-layout {
-  display: flex;
-  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 16px 0 32px;
 }
 
 /* 带子分页的卡片：仅在表格主体上横向滚动，页脚不参与滚动，避免分页条被卷入或对齐错位。
@@ -1570,149 +1575,128 @@ watch(
   background-color: transparent;
 }
 
-.permissions-trigger-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  width: 22px;
-  height: 22px;
-  margin: 0;
-  padding: 0;
-  border: none;
-  border-radius: var(--app-radius-sm);
-  background: transparent;
-  color: var(--td-text-color-secondary);
-  cursor: pointer;
-  line-height: 0;
-  transition: background-color var(--app-motion-base) ease, color var(--app-motion-base) ease;
+.permissions-trigger-btn { .settings-title-help(); }
 
-  :deep(.t-icon) {
-    display: block;
-  }
-
-  &:hover {
-    background-color: var(--td-bg-color-secondarycontainer);
-    color: var(--td-brand-color);
-  }
-
-  &:focus-visible {
-    outline: 2px solid var(--td-brand-color-focus);
-    outline-offset: 1px;
-  }
-}
-
-/* 列表上方的标题行：「空间成员 [N] · 筛选出 K」 左侧；右侧
-   是「搜索 + 邀请按钮」一组。视觉级别与「待接受邀请」一致。 */
 .members-list-wrap {
   display: flex;
   flex-direction: column;
   gap: 10px;
 }
 
-.members-list-header {
+.members-tabbar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 0 2px;
-  flex-wrap: wrap;
+  gap: 16px;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--td-component-stroke);
 }
 
-.members-list-titlewrap {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
+.members-tabs {
+  flex: 1;
   min-width: 0;
+  background: transparent;
+
+  :deep(.t-tabs__nav-item) { height: 44px; margin-right: 24px; font-size: var(--app-text-base); }
+  :deep(.t-tabs__nav-item-wrapper) { margin: 0; padding: 0 2px; }
+  :deep(.t-tabs__nav-item:not(.t-is-disabled):hover .t-tabs__nav-item-wrapper) { background: transparent; }
+  :deep(.t-tabs__nav-container.t-is-top::after),
+  :deep(.t-tabs__bar), :deep(.t-tabs__content), :deep(.t-tabs__operations) { display: none; }
+  :deep(.t-tabs__nav-scroll) { overflow-x: auto; scrollbar-width: none; }
+  :deep(.t-tabs__nav-item.t-is-active) {
+    color: var(--td-text-color-primary);
+    text-shadow: none;
+    .t-icon { color: var(--td-brand-color); }
+    .members-list-count-badge { color: var(--td-brand-color); background: var(--td-brand-color-light); }
+    &::after {
+      content: '';
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      height: 2px;
+      background: var(--td-brand-color);
+      border-radius: var(--app-radius-pill);
+    }
+  }
 }
 
-.members-list-title {
-  font-size: var(--app-text-base);
-  font-weight: 600;
-  color: var(--td-text-color-primary);
-}
+.members-tab-label { display: inline-flex; align-items: center; gap: 6px; }
 
-/* 数字外面套一个浅底圆角徽章，避免裸露的「成员 1」读起来像
-   排版残留。色阶与 td-tag default+light 看齐。 */
 .members-list-count-badge {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 22px;
+  min-width: 20px;
   height: 20px;
-  padding: 0 7px;
-  border-radius: var(--app-radius-lg);
-  background-color: var(--td-bg-color-secondarycontainer);
-  color: var(--td-text-color-primary);
-  font-size: var(--app-text-sm);
-  font-weight: 600;
-  line-height: 1;
-}
-
-.members-list-filter-hint {
-  font-size: var(--app-text-sm);
+  padding: 0 6px;
+  box-sizing: border-box;
+  border-radius: var(--app-radius-pill);
+  background: var(--td-bg-color-secondarycontainer);
   color: var(--td-text-color-secondary);
-}
-
-.members-list-actions {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  flex: 0 1 auto;
-  min-width: 0;
+  font-size: var(--app-text-xs);
+  line-height: 20px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
 }
 
 .members-list-search {
-  /* 用显式 width 锁定外层尺寸，避免 inline-flex 父容器下子项跟随
-     内容宽度变化（TDesign t-input 在 hover/focus 时会显示 clearable
-     的 × 图标、边框态切换），导致整行横向抖动。 */
-  flex: 0 0 14rem;
-  width: 14rem;
-  min-width: 0;
+  flex: 0 0 240px;
+  width: 240px;
+  :deep(.t-input) { border-radius: var(--app-radius-sm); }
+}
+
+@container (max-width: 700px) {
+  .members-tabbar { flex-wrap: wrap; gap: 0; }
+  .members-tabs { flex-basis: 100%; }
+  .members-list-search { flex: 1 1 100%; width: 100%; margin: 8px 0; }
+}
+
+.member-role-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  box-sizing: border-box;
+  width: 128px;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: var(--app-radius-sm);
+  background: var(--td-bg-color-secondarycontainer);
+  color: var(--td-text-color-primary);
+  font-size: var(--app-text-md);
+  line-height: 26px;
+
+  .t-icon { flex-shrink: 0; color: var(--td-text-color-secondary); }
+}
+
+.member-role-select {
+  width: 128px;
+  flex: 0 0 128px;
 
   :deep(.t-input) {
-    width: 100%;
-  }
-}
+    height: 28px;
+    min-height: 28px;
+    padding: 0 8px;
+    border: 1px solid transparent;
+    border-radius: var(--app-radius-sm);
+    background: var(--td-bg-color-secondarycontainer);
+    font-size: var(--app-text-md);
 
-/* 列表头的邀请按钮：outline + primary，自带外框，比裸 icon
-   有分量；shape="square" 让它仍然是个紧凑的图标按钮。 */
-.members-list-add-btn {
-  flex-shrink: 0;
-}
-
-@media (max-width: 560px) {
-  .members-list-actions {
-    width: 100%;
-    justify-content: flex-start;
+    &:hover { border-color: var(--td-component-stroke); }
+    &.t-is-focused { border-color: var(--td-brand-color); }
   }
-
-  .members-list-search {
-    flex: 1 1 auto;
-    width: auto;
-    max-width: none;
-  }
+  :deep(.t-input__prefix) { margin-right: 6px; color: var(--td-text-color-secondary); }
 }
 
 .data-table-shell {
-  overflow-x: auto;
-  border-radius: var(--app-radius-lg);
-  border: 1px solid var(--td-component-stroke);
-  background-color: var(--td-bg-color-container);
+  .settings-data-table();
 
-  &:deep(thead th) {
-    font-weight: 600;
-    font-size: var(--app-text-md);
+  :deep(thead th) {
+    background: var(--td-bg-color-secondarycontainer);
+    color: var(--td-text-color-secondary);
+    font-weight: 500;
   }
+  :deep(.t-table tbody tr:last-child td) { border-bottom: 0; }
+  :deep(.t-table__content > table) { min-width: 640px; }
 
-  &:deep(.t-table td),
-  &:deep(.t-table th) {
-    padding-top: 12px;
-    padding-bottom: 12px;
-  }
-
-  /* 角色列：下拉收缩到内容宽度，不再撑满整格。原先 100% 在窄角色
-     名（如"Owner"）下显得空荡且与其他列对不齐。 */
+  // 角色标签与下拉控件保持同宽，文字与图标沿同一列对齐。
   &:deep(.role-cell) {
     display: flex;
     align-items: center;
@@ -1720,9 +1704,6 @@ watch(
     box-sizing: border-box;
   }
 
-  &:deep(.member-role-select.t-select) {
-    width: 100%;
-  }
 }
 
 /* Audit drawer's data-table-shell variant: only used inside the audit
@@ -2015,28 +1996,9 @@ watch(
 }
 
 .pending-invitations-section {
-  margin-bottom: 24px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
-
-  .pending-invitations-header {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-  }
-
-  .pending-invitations-titlewrap {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-
-  .pending-invitations-title {
-    font-size: var(--app-text-base);
-    font-weight: 600;
-    color: var(--td-text-color-primary);
-  }
+  gap: 12px;
 
   .pending-invitations-desc {
     font-size: var(--app-text-sm);
@@ -2044,18 +2006,12 @@ watch(
   }
 
   .pending-invitations-empty {
-    padding: 10px 12px;
-    border: 1px dashed var(--td-component-stroke);
-    border-radius: var(--app-radius-md);
-    color: var(--td-text-color-secondary);
+    padding: 40px 16px;
+    border: 1px solid var(--td-component-stroke);
+    border-radius: var(--app-radius-lg);
+    text-align: center;
+    color: var(--td-text-color-placeholder);
     font-size: var(--app-text-md);
-    background: var(--td-bg-color-container);
-  }
-
-  /* Visually distinguish from members table so the eye doesn't fuse
-     "pending" rows with "actual member" rows. */
-  .pending-invitations-table {
-    background: var(--td-bg-color-secondarycontainer);
   }
 }
 

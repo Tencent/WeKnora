@@ -553,6 +553,13 @@ type ImageProcessingConfig struct {
 	// override it per document through
 	// KnowledgeProcessOverrides.ImageAttrsEnabled.
 	ImageAttrsEnabled bool `yaml:"image_attrs_enabled,omitempty" json:"image_attrs_enabled,omitempty"` //nolint:lll // one-line struct tag
+	// ImageVectorEnabled lets a knowledge base whose embedding model takes
+	// images index each image by its own vector and recall it with one. It
+	// is off by default on purpose: a model that takes images is also used
+	// for plain text, and turning this on costs an embedding call per image
+	// and widens vector recall. Existing knowledge bases stay off after an
+	// upgrade because the stored JSON has no such key.
+	ImageVectorEnabled bool `yaml:"image_vector_enabled,omitempty" json:"image_vector_enabled,omitempty"` //nolint:lll // one-line struct tag
 }
 
 // Value implements the driver.Valuer interface, used to convert ChunkingConfig to database value
@@ -897,6 +904,14 @@ func (kb *KnowledgeBase) IsMultimodalEnabled() bool {
 		return false
 	}
 	return kb.VLMConfig.IsEnabled()
+}
+
+// IsImageVectorEnabled reports whether the knowledge base opted in to
+// indexing and recalling images by their own vectors. The embedding model
+// must also take images; callers check that separately, since it needs the
+// model resolved.
+func (kb *KnowledgeBase) IsImageVectorEnabled() bool {
+	return kb.IsVectorEnabled() && kb.ImageProcessingConfig.ImageVectorEnabled
 }
 
 // HasVectorStore reports whether the KB is bound to a DB-managed VectorStore

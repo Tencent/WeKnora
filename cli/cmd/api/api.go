@@ -63,10 +63,12 @@ to POST. Use -X/--method to override (any non-empty method is accepted:
 DELETE / PUT / PATCH / HEAD / OPTIONS / TRACE / custom).
 
 Auth, tenant, and request-id headers are applied automatically from the
-active profile. In text mode (default) the raw server response body is written
-to stdout. In --format json the parsed server response is placed directly
+active profile. In --format text the raw server response body is written
+to stdout. In --format json (default) the parsed server response is placed directly
 under envelope.data — drill in with --jq '.data...' at the server's own depth
 (e.g. '.data.data[]' for a list endpoint). Only -X DELETE is confirmation-gated.
+With --paginate, text mode writes the merged {data, total} JSON object with a
+trailing newline and no envelope.
 
 Examples:
   weknora api /api/v1/knowledge-bases                                  # GET
@@ -162,7 +164,12 @@ Examples:
 			"weknora api -X DELETE /api/v1/knowledge-bases/kb_x -y",
 			"echo '{\"name\":\"foo\"}' | weknora api /api/v1/knowledge-bases --input -",
 		},
-		Output: "text mode (default): the raw server response body on stdout. json mode: the parsed server response is placed directly under envelope.data — project with --jq '.data...' at the server's own depth (e.g. '.data.data[]' for a list endpoint, '.data.data.id' for a created object). With --paginate, envelope.data is the merged {data, total}.",
+		Output: "text mode: the raw server response body on stdout. " +
+			"json mode (default): the parsed server response is placed directly under envelope.data - " +
+			"project with --jq '.data...' at the server's own depth " +
+			"(e.g. '.data.data[]' for a list endpoint, '.data.data.id' for a created object). " +
+			"With --paginate, envelope.data is the merged {data, total}; " +
+			"text mode writes that merged JSON object with a trailing newline and no envelope.",
 		Warnings: []string{
 			"-X DELETE is destructive-gated and -X PUT/PATCH are write-gated (exit 10 / input.confirmation_required unless -y), matching typed delete/update. -X POST (create-shaped) and GET are unguarded — you own the safety of creates made through this escape hatch.",
 			"Raw passthrough: the typed error envelope does NOT fully apply. The server's own response goes under envelope.data at its native depth; a non-2xx HTTP status surfaces via the exit code, not a typed error.type/retry_argv. Do not rely on error.type/retryable for `api` the way you do for typed subcommands.",
@@ -419,6 +426,9 @@ func emitRawBody(body []byte, fopts *cmdutil.FormatOptions) error {
 // response is passed through via passThroughFallback which respects the
 // --format envelope contract (same shape as runAPISingle's fallback path).
 func runAPIPaginated(ctx context.Context, opts *Options, fopts *cmdutil.FormatOptions, svc Service, path string) error {
+	if fopts.Mode == cmdutil.FormatText && fopts.JQ != "" {
+		return cmdutil.NewFlagError(fmt.Errorf("--jq requires --format json|ndjson"))
+	}
 	if !strings.HasPrefix(path, "/") {
 		return cmdutil.NewError(cmdutil.CodeInputInvalidArgument, fmt.Sprintf("path must start with /: %s", path))
 	}
@@ -438,8 +448,11 @@ func runAPIPaginated(ctx context.Context, opts *Options, fopts *cmdutil.FormatOp
 		if err != nil {
 			return cmdutil.WrapHTTP(err, "GET %s", curPath)
 		}
-		body, _ := io.ReadAll(resp.Body)
+		body, err := io.ReadAll(resp.Body)
 		resp.Body.Close()
+		if err != nil {
+			return cmdutil.Wrapf(cmdutil.CodeNetworkError, err, "read response body")
+		}
 
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 			code := cmdutil.ClassifyHTTPStatus(resp.StatusCode)
@@ -481,7 +494,13 @@ func runAPIPaginated(ctx context.Context, opts *Options, fopts *cmdutil.FormatOp
 		"data":  allData,
 		"total": lastTotal,
 	}
-	return fopts.Emit(iostreams.IO.Out, merged, nil)
+	if fopts.WantsJSON() {
+		return fopts.Emit(iostreams.IO.Out, merged, nil)
+	}
+	if err := json.NewEncoder(iostreams.IO.Out).Encode(merged); err != nil {
+		return cmdutil.Wrapf(cmdutil.CodeLocalFileIO, err, "write response body")
+	}
+	return nil
 }
 
 // extractPageSize parses the page_size query parameter from path, returning 0

@@ -62,6 +62,10 @@ const (
 	// page write (user / agent / revert). Absent means the wiki ingest
 	// pipeline. See types.WithWikiEditSource.
 	WikiEditSourceContextKey ContextKey = "WikiEditSource"
+	// WikiShrinkAllowedContextKey marks one wiki page write as allowed to
+	// remove table rows the stored page still has; see
+	// types.WithWikiShrinkAllowed.
+	WikiShrinkAllowedContextKey ContextKey = "WikiShrinkAllowed"
 	// LanguageContextKey is the context key for user language preference (e.g. "zh-CN", "en-US")
 	LanguageContextKey ContextKey = "Language"
 	// EmbedVisitorContextKey is the anonymous visitor id for embed OAuth isolation.

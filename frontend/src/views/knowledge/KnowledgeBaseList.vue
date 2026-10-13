@@ -165,8 +165,8 @@
               </button>
               <!-- 卡片头部 -->
               <div class="card-header">
+                <KbTypeAvatar :type="kb.type" />
                 <span class="card-title" :title="kb.name">
-                  <KbWikiBadge v-if="isWikiKb(kb)" />
                   <span class="card-title-text">{{ kb.name }}</span>
                 </span>
                 <!-- The card menu always exists when the card is visible: pin
@@ -206,7 +206,7 @@
 
               <!-- 卡片内容 -->
               <div class="card-content">
-                <div class="card-description" :title="kb.description || $t('knowledgeBase.noDescription')">
+                <div class="card-description" :class="{ 'is-empty': !kb.description }" :title="kb.description || $t('knowledgeBase.noDescription')">
                   {{ kb.description || $t('knowledgeBase.noDescription') }}
                 </div>
               </div>
@@ -226,6 +226,9 @@
                         <t-icon v-if="kb.isProcessing" name="loading" size="12px" class="processing-icon" />
                       </div>
                     </t-tooltip>
+                    <div v-if="isWikiKb(kb)" class="feature-badge wiki">
+                      <KbWikiBadge />
+                    </div>
                     <t-tooltip v-if="kb.extract_config?.enabled" :content="$t('knowledgeList.features.knowledgeGraph')"
                       placement="top">
                       <div class="feature-badge kg">
@@ -269,8 +272,8 @@
               </button>
               <!-- 卡片头部 -->
               <div class="card-header">
+                <KbTypeAvatar :type="kb.type" />
                 <span class="card-title" :title="kb.name">
-                  <KbWikiBadge v-if="isWikiKb(kb)" />
                   <span class="card-title-text">{{ kb.name }}</span>
                 </span>
                 <t-tooltip :content="$t('knowledgeList.menu.viewDetails')" placement="top">
@@ -283,7 +286,7 @@
 
               <!-- 卡片内容 -->
               <div class="card-content">
-                <div class="card-description" :title="kb.description || $t('knowledgeBase.noDescription')">
+                <div class="card-description" :class="{ 'is-empty': !kb.description }" :title="kb.description || $t('knowledgeBase.noDescription')">
                   {{ kb.description || $t('knowledgeBase.noDescription') }}
                 </div>
               </div>
@@ -303,6 +306,9 @@
                         }}</span>
                       </div>
                     </t-tooltip>
+                    <div v-if="isWikiKb(kb)" class="feature-badge wiki">
+                      <KbWikiBadge />
+                    </div>
                     <t-tooltip v-if="kb.extract_config?.enabled" :content="$t('knowledgeList.features.knowledgeGraph')"
                       placement="top">
                       <div class="feature-badge kg">
@@ -398,8 +404,8 @@
               </button>
               <!-- 卡片头部 -->
               <div class="card-header">
+                <KbTypeAvatar :type="kb.type" />
                 <span class="card-title" :title="kb.name">
-                  <KbWikiBadge v-if="isWikiKb(kb)" />
                   <span class="card-title-text">{{ kb.name }}</span>
                 </span>
                 <!-- See the matching block in the "all" tab template for why
@@ -437,7 +443,7 @@
 
               <!-- 卡片内容 -->
               <div class="card-content">
-                <div class="card-description" :title="kb.description || $t('knowledgeBase.noDescription')">
+                <div class="card-description" :class="{ 'is-empty': !kb.description }" :title="kb.description || $t('knowledgeBase.noDescription')">
                   {{ kb.description || $t('knowledgeBase.noDescription') }}
                 </div>
               </div>
@@ -457,6 +463,9 @@
                         <t-icon v-if="kb.isProcessing" name="loading" size="12px" class="processing-icon" />
                       </div>
                     </t-tooltip>
+                    <div v-if="isWikiKb(kb)" class="feature-badge wiki">
+                      <KbWikiBadge />
+                    </div>
                     <t-tooltip v-if="kb.extract_config?.enabled" :content="$t('knowledgeList.features.knowledgeGraph')"
                       placement="top">
                       <div class="feature-badge kg">
@@ -549,8 +558,8 @@
             }" role="link" tabindex="0" @keydown.enter.self.prevent="handleSharedKbClick(shared)" @keydown.space.self.prevent="handleSharedKbClick(shared)" @click="handleSharedKbClick(shared)">
               <!-- 卡片头部 -->
               <div class="card-header">
+                <KbTypeAvatar :type="shared.knowledge_base.type" />
                 <span class="card-title" :title="shared.knowledge_base.name">
-                  <KbWikiBadge v-if="isWikiKb(shared.knowledge_base)" />
                   <span class="card-title-text">{{ shared.knowledge_base.name }}</span>
                 </span>
                 <t-tooltip v-if="!shared.is_mine" :content="$t('knowledgeList.menu.viewDetails')" placement="top">
@@ -563,7 +572,7 @@
 
               <!-- 卡片内容 -->
               <div class="card-content">
-                <div class="card-description" :title="shared.knowledge_base.description || $t('knowledgeBase.noDescription')">
+                <div class="card-description" :class="{ 'is-empty': !shared.knowledge_base.description }" :title="shared.knowledge_base.description || $t('knowledgeBase.noDescription')">
                   {{ shared.knowledge_base.description || $t('knowledgeBase.noDescription') }}
                 </div>
               </div>
@@ -584,6 +593,9 @@
                             '-') : (shared.knowledge_base.knowledge_count ?? '-') }}</span>
                       </div>
                     </t-tooltip>
+                    <div v-if="isWikiKb(shared.knowledge_base)" class="feature-badge wiki">
+                      <KbWikiBadge />
+                    </div>
                   </div>
                 </div>
               </div>
@@ -724,6 +736,7 @@ import { listOrganizationSharedKnowledgeBases, type SharedKnowledgeBase, type Or
 import { mergeAllScopeKnowledgeBases, type OwnedKnowledgeBase, type SharedKnowledgeBaseLike } from './kbListMerge'
 import KnowledgeBaseEditorModal from './KnowledgeBaseEditorModal.vue'
 import KbWikiBadge from './components/KbWikiBadge.vue'
+import KbTypeAvatar from './components/KbTypeAvatar.vue'
 import ResourceListToolbar from '@/components/ResourceListToolbar.vue'
 import { matchesResourceQuery } from '@/utils/resourceListSearch'
 import ResourceOriginBadge from '@/components/ResourceOriginBadge.vue'
@@ -1809,40 +1822,15 @@ watch(keyword, () => { collapsedKbSections.value = new Set() })
     }
   }
 
-  &.kg {
-    background: color-mix(in srgb, var(--app-accent-purple) 8%, transparent);
-    color: var(--td-brand-color);
+  &.kg { color: var(--app-accent-purple); }
+  &.multimodal { color: var(--td-warning-color); }
+  &.question { color: var(--app-accent-blue); }
+  &.shared { color: var(--td-brand-color); }
+  &.wiki :deep(.kb-wiki-badge) { color: var(--app-accent-teal); }
 
-    &:hover {
-      background: color-mix(in srgb, var(--app-accent-purple) 12%, transparent);
-    }
-  }
-
-  &.multimodal {
-    background: color-mix(in srgb, var(--td-warning-color) 8%, transparent);
-    color: var(--td-warning-color);
-
-    &:hover {
-      background: color-mix(in srgb, var(--td-warning-color) 12%, transparent);
-    }
-  }
-
-  &.question {
-    background: color-mix(in srgb, var(--td-success-color) 8%, transparent);
-    color: var(--td-success-color);
-
-    &:hover {
-      background: color-mix(in srgb, var(--td-success-color) 12%, transparent);
-    }
-  }
-
-  &.shared {
-    background: color-mix(in srgb, var(--td-brand-color) 8%, transparent);
-    color: var(--td-brand-color);
-
-    &:hover {
-      background: color-mix(in srgb, var(--td-brand-color) 12%, transparent);
-    }
+  :deep(.kb-wiki-badge svg) {
+    width: 14px;
+    height: 14px;
   }
 
   &.role-admin {

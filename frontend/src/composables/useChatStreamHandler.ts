@@ -1117,7 +1117,12 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
       if (replay) replaySegments.set(String(data.id), replay)
       if (data.id) {
         const earlyMsg = getTrailingIncompleteAssistant()
-        if (earlyMsg) earlyMsg.request_id = data.id
+        // Only adopt a placeholder that has no request yet (or already this
+        // one). An earlier turn whose stream was cut stays incomplete;
+        // relabelling it would render this turn's answer in that earlier slot.
+        if (earlyMsg && (!earlyMsg.request_id || earlyMsg.request_id === data.id)) {
+          earlyMsg.request_id = data.id
+        }
       }
       if (data.assistant_message_id) {
         currentAssistantMessageId.value = data.assistant_message_id as string

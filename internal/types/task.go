@@ -536,6 +536,9 @@ type ImageMultimodalPayload struct {
 	// in the payload rather than being re-read from the knowledge base at handle
 	// time.
 	ImageAttrsEnabled bool `json:"image_attrs_enabled,omitempty"`
+	// ImageVectorEnabled is resolved at enqueue time. nil preserves the KB
+	// fallback for tasks queued before per-document indexing overrides existed.
+	ImageVectorEnabled *bool `json:"image_vector_enabled,omitempty"`
 	// ImageActions is the attribute→work table, resolved from the KB config at
 	// enqueue time. A task without it — one already in flight when attribute
 	// observation shipped — falls back to the conservative policy: run OCR.
