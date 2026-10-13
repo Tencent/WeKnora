@@ -2806,7 +2806,13 @@ export default {
     mcpStale: 'Needs resync',
     belongsToKb: 'Knowledge base: ',
     belongsToOrg: 'Space: ',
-    noCompatibleKbForAgent: 'This agent\'s tools don\'t match any knowledge base\'s capabilities in scope, so nothing can be referenced.'
+    noCompatibleKbForAgent: 'This agent\'s tools don\'t match any knowledge base\'s capabilities in scope, so nothing can be referenced.',
+    tag: 'Tags',
+    searchPlaceholder: 'Search KBs, files, skills…',
+    searchInGroup: 'Search in {group}…',
+    typeToSearch: "Keep typing after {'@'} to search…",
+    viewAll: 'View all',
+    back: 'Back'
   },
   file: {
     upload: 'Upload File'

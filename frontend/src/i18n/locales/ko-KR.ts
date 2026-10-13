@@ -5338,7 +5338,13 @@ export default {
     mcpStale: '다시 동기화 필요',
     belongsToKb: '지식베이스: ',
     belongsToOrg: '스페이스: ',
-    noCompatibleKbForAgent: '현재 에이전트의 도구와 범위 내 지식베이스의 기능이 일치하지 않아 참조할 수 있는 지식베이스가 없습니다.'
+    noCompatibleKbForAgent: '현재 에이전트의 도구와 범위 내 지식베이스의 기능이 일치하지 않아 참조할 수 있는 지식베이스가 없습니다.',
+    tag: '태그',
+    searchPlaceholder: '지식베이스, 파일 등 검색',
+    searchInGroup: '{group}에서 검색…',
+    typeToSearch: "{'@'} 뒤에 계속 입력하여 검색…",
+    viewAll: '모두 보기',
+    back: '뒤로'
   },
   common: {
     add: '추가',
