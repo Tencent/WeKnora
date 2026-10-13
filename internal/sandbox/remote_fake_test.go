@@ -97,6 +97,7 @@ type fakeRemoteClient struct {
 	makeDirPaths         []string
 	failMakeDirIfExists  bool
 	vanishOnFirstMakeDir bool
+	missingPathMakeDir   bool
 	execRequests         []RemoteExecRequest
 	writeFiles           []fakeRemoteWriteFile
 
@@ -364,6 +365,9 @@ func (c *fakeRemoteClient) ListDir(
 func (c *fakeRemoteClient) MakeDir(_ context.Context, handle RemoteSandboxHandle, path string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.missingPathMakeDir {
+		return NewRemoteError(c.provider, "MakeDir", RemoteErrorKindNotFound, path+" does not exist", nil)
+	}
 	if c.vanishOnFirstMakeDir {
 		c.vanishOnFirstMakeDir = false
 		if handle != nil {

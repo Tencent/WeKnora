@@ -532,7 +532,7 @@ func (m *SessionBoundManager) WriteSessionInputFile(
 			return err
 		}
 		err = m.writeSessionInputOnHandle(ctx, handle, clean, content)
-		if err == nil || attempt == 1 || !CanReplaceRemoteBinding(err) {
+		if err == nil || attempt == 1 || !sessionBindingLost(err) {
 			return err
 		}
 		// The idle sweep can delete the container after resolve and before
@@ -555,6 +555,20 @@ func (m *SessionBoundManager) writeSessionInputOnHandle(
 		return fmt.Errorf("sandbox: write session input %s: %w", clean, err)
 	}
 	return nil
+}
+
+// sessionBindingLost reports a sandbox that is gone. A missing path inside a
+// live container is also NotFound ("does not exist"); rebinding on that
+// would discard the session.
+func sessionBindingLost(err error) bool {
+	if !CanReplaceRemoteBinding(err) {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	if strings.Contains(msg, "does not exist") && !strings.Contains(msg, "vanished") {
+		return false
+	}
+	return true
 }
 
 func (m *SessionBoundManager) dropBoundSandbox(ctx context.Context, sessionID, sandboxID string) error {
