@@ -1134,6 +1134,39 @@ func (h *TenantHandler) DeleteTenant(c *gin.Context) {
 
 	logger.Infof(ctx, "Deleting tenant, ID: %d", id)
 
+	// Last-workspace guard: an ordinary user deleting their only remaining
+	// membership would strand the account on the tenantless onboarding screen
+	// (and, where self-service creation is disabled, leave no way back without
+	// an invitation). Cross-tenant superusers and platform API keys manage the
+	// tenant catalog and are exempt; deployments wired without a member service
+	// keep the previous behavior.
+	caller, err := h.userService.GetCurrentUser(ctx)
+	if err != nil || caller == nil {
+		c.Error(errors.NewUnauthorizedError("authentication required"))
+		return
+	}
+	apiKeyScope, hasAPIKeyScope := types.TenantAPIKeyScopeFromContext(ctx)
+	catalogManager := caller.CanAccessAllTenants || (hasAPIKeyScope && apiKeyScope.IsPlatform())
+	if !catalogManager && h.memberService != nil {
+		memberships, listErr := h.memberService.ListByUser(ctx, caller.ID)
+		if listErr != nil {
+			logger.ErrorWithFields(ctx, listErr, map[string]interface{}{"user_id": caller.ID})
+			c.Error(errors.NewInternalServerError("Failed to validate workspace membership").WithDetails(listErr.Error()))
+			return
+		}
+		remaining := 0
+		for _, m := range memberships {
+			if m != nil && m.Status == types.TenantMemberStatusActive && m.TenantID != id {
+				remaining++
+			}
+		}
+		if remaining == 0 {
+			logger.Warnf(ctx, "Denied last-workspace delete: user %s, tenant %d", caller.ID, id)
+			c.Error(errors.NewLastWorkspaceDeleteDeniedError())
+			return
+		}
+	}
+
 	if err := h.service.DeleteTenant(ctx, id); err != nil {
 		if appErr, ok := errors.IsAppError(err); ok {
 			logger.Error(ctx, "Failed to delete workspace: application error", appErr)
