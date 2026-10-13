@@ -52,6 +52,7 @@ type OpenAICompletionsCompat struct {
 	CacheControlFormat           *string         `json:"cache_control_format,omitempty"`
 	PromptCacheAccounting        *bool           `json:"prompt_cache_accounting,omitempty"`
 	ToolCallExtraFields          []string        `json:"tool_call_extra_fields,omitempty"`
+	AutoToolCallArgumentsObject  *bool           `json:"auto_tool_call_arguments_object,omitempty"`
 	ExtraBody                    map[string]any  `json:"extra_body,omitempty"`
 	ReasoningFields              []string        `json:"reasoning_fields,omitempty"`
 }
@@ -110,6 +111,13 @@ type OpenAICompletionsSettings struct {
 	// ToolCallExtraFields lists tool_call keys to round-trip opaquely
 	// (Gemini-through-OpenAI "extra_content").
 	ToolCallExtraFields []string
+	// ToolCallArgumentsAsObject decodes replayed tool-call arguments into a
+	// JSON object for endpoints known to reject the OpenAI string form.
+	ToolCallArgumentsAsObject bool `json:",omitempty"`
+	// AutoToolCallArgumentsObject starts with the standard string form and,
+	// only when the backend reports the known Jinja mapping-type failure,
+	// retries that request with object-valued arguments.
+	AutoToolCallArgumentsObject bool `json:",omitempty"`
 	// ExtraBody is merged into every request body (vendor knobs such as
 	// enable_search, sampling defaults).
 	ExtraBody map[string]any

@@ -1,7 +1,6 @@
 package models
 
-// Extra-config keys honoured by Resolve. They predate the catalog and stay
-// supported so existing model rows keep working unchanged.
+// Extra-config keys honoured by Resolve.
 const (
 	// ExtraAPI forces a protocol ("openai-responses", "anthropic-messages", ...).
 	ExtraAPI = "api"

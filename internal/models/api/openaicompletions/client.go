@@ -3,10 +3,12 @@ package openaicompletions
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
+	"sync/atomic"
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/models/api"
@@ -17,7 +19,8 @@ const defaultPath = "/chat/completions"
 
 // Client talks Chat Completions to one endpoint.
 type Client struct {
-	cfg Config
+	cfg                       Config
+	toolCallArgumentsAsObject atomic.Bool
 }
 
 // New creates a client. The endpoint must already carry auth and headers.
@@ -25,7 +28,9 @@ func New(cfg Config) *Client {
 	if cfg.ThinkingLevels == nil {
 		cfg.ThinkingLevels = api.ThinkingLevelMap{}
 	}
-	return &Client{cfg: cfg}
+	c := &Client{cfg: cfg}
+	c.toolCallArgumentsAsObject.Store(cfg.Settings.ToolCallArgumentsAsObject)
+	return c
 }
 
 // GetModelName returns the wire model name.
@@ -35,7 +40,11 @@ func (c *Client) GetModelName() string { return c.cfg.Endpoint.Model }
 func (c *Client) GetModelID() string { return c.cfg.Endpoint.ModelID }
 
 // Settings exposes the resolved settings (diagnostics, tests).
-func (c *Client) Settings() Config { return c.cfg }
+func (c *Client) Settings() Config {
+	cfg := c.cfg
+	cfg.Settings.ToolCallArgumentsAsObject = c.toolCallArgumentsAsObject.Load()
+	return cfg
+}
 
 func (c *Client) url() string { return c.cfg.Endpoint.Resolve(defaultPath) }
 
@@ -43,7 +52,28 @@ func (c *Client) send(
 	ctx context.Context, messages []api.Message, opts *api.Options, stream bool,
 ) (*http.Response, []byte, error) {
 	opts = api.WithSessionCacheKey(ctx, opts)
-	body, err := c.BuildRequestBody(messages, opts, stream)
+	asObject := c.toolCallArgumentsAsObject.Load()
+	resp, data, err := c.sendWithToolCallArgumentMode(ctx, messages, opts, stream, asObject)
+	if err == nil || asObject || !c.cfg.Settings.AutoToolCallArgumentsObject ||
+		!hasReplayedToolCall(messages) || !requiresToolCallArgumentMapping(err) {
+		return resp, data, err
+	}
+
+	logger.Warnf(ctx,
+		"[LLM Request] Model %s requires object-valued replayed tool-call arguments; "+
+			"retrying with negotiated format",
+		c.cfg.Endpoint.Model)
+	resp, data, err = c.sendWithToolCallArgumentMode(ctx, messages, opts, stream, true)
+	if err == nil {
+		c.toolCallArgumentsAsObject.Store(true)
+	}
+	return resp, data, err
+}
+
+func (c *Client) sendWithToolCallArgumentMode(
+	ctx context.Context, messages []api.Message, opts *api.Options, stream, asObject bool,
+) (*http.Response, []byte, error) {
+	body, err := c.buildRequestBody(messages, opts, stream, asObject)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -65,6 +95,22 @@ func (c *Client) send(
 		return nil, data, err
 	}
 	return resp, data, nil
+}
+
+func hasReplayedToolCall(messages []api.Message) bool {
+	for _, message := range messages {
+		if len(message.ToolCalls) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func requiresToolCallArgumentMapping(err error) bool {
+	var httpErr *api.HTTPError
+	return errors.As(err, &httpErr) && strings.Contains(
+		strings.ToLower(httpErr.Body), "can only get item pairs from a mapping",
+	)
 }
 
 // Chat performs a non-streaming completion.
