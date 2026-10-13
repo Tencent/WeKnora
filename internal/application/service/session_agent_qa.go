@@ -313,7 +313,12 @@ func (s *sessionService) AgentQA(
 	// Execute agent with streaming (asynchronously)
 	// Events will be emitted to EventBus and handled by the Handler layer
 	logger.Info(ctx, "Executing agent with streaming")
-	if _, err := engine.Execute(ctx, sessionID, req.AssistantMessageID, agentQuery, llmContext, agentImageURLs); err != nil {
+	if req.Resume != nil {
+		_, err = engine.Resume(ctx, sessionID, req.AssistantMessageID, llmContext, req.Resume.Snapshot, req.Resume.Prompt)
+	} else {
+		_, err = engine.Execute(ctx, sessionID, req.AssistantMessageID, agentQuery, llmContext, agentImageURLs)
+	}
+	if err != nil {
 		logger.Errorf(ctx, "Agent execution failed: %v", err)
 		// Emit error event to the EventBus used by this agent
 		eventBus.Emit(ctx, event.Event{
@@ -348,7 +353,7 @@ func resumableAgentRequest(ctx context.Context, req *types.QARequest) types.Resu
 		Language:            types.LanguageFromContextOrDefault(ctx),
 	}
 	if req.CustomAgent != nil {
-		r.AgentID = req.CustomAgent.ID
+		r.AgentID, r.AgentTenantID = req.CustomAgent.ID, req.CustomAgent.TenantID
 	}
 	return r
 }

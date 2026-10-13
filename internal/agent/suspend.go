@@ -77,6 +77,31 @@ func (s *RunSnapshot) DisplaySteps() []types.AgentStep {
 	return steps
 }
 
+// ClosedSteps returns the steps of a run that will never resume: the
+// interrupted round's unfinished calls are recorded as failed with reason, so
+// the transcript keeps one result per tool call the model issued.
+func (s *RunSnapshot) ClosedSteps(reason string) []types.AgentStep {
+	steps := append([]types.AgentStep(nil), s.CompletedSteps...)
+	p := s.PendingRound
+	step := p.Step
+	step.ToolCalls = append([]types.ToolCall(nil), p.Step.ToolCalls...)
+	for i := len(step.ToolCalls); i < len(p.Calls); i++ {
+		c := p.Calls[i]
+		var args map[string]any
+		if err := json.Unmarshal([]byte(c.Arguments), &args); err != nil {
+			args = map[string]any{"_raw": c.Arguments}
+		}
+		step.ToolCalls = append(step.ToolCalls, types.ToolCall{
+			ID:               c.ID,
+			Name:             c.Name,
+			Args:             args,
+			ProviderMetadata: c.ProviderMetadata,
+			Result:           &types.ToolResult{Success: false, Error: reason},
+		})
+	}
+	return append(steps, step)
+}
+
 // turnProgress tracks the turn so it can be captured mid-round. Tool calls
 // finish on errgroup goroutines, hence the lock.
 type turnProgress struct {

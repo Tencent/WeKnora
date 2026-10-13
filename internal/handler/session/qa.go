@@ -99,6 +99,9 @@ type qaRequestContext struct {
 	// turnLeaseHeld records that executeQA already took the send-side turn
 	// lease for this request, so the QA service does not take a second one.
 	turnLeaseHeld bool
+	// resume continues a suspended run on assistantMessage instead of
+	// starting a turn.
+	resume *types.AgentResume
 }
 
 // buildQARequest converts the qaRequestContext into a types.QARequest for service invocation.
@@ -130,6 +133,7 @@ func (rc *qaRequestContext) buildQARequest() *types.QARequest {
 		// The HTTP stream (web, embed, API) renders a suspended message and
 		// can answer its prompt later.
 		Suspendable: true,
+		Resume:      rc.resume,
 	}
 	if rc.steerSink != nil {
 		req.SteerSink = rc.steerSink
@@ -809,6 +813,9 @@ func (h *Handler) setupSSEStream(reqCtx *qaRequestContext, generateTitle bool, m
 		reqCtx.userCreatedAt,
 		reqCtx.assistantMessage,
 	)
+	if reqCtx.resume != nil {
+		h.writeRunResumedEvent(reqCtx.ctx, reqCtx.sessionID, reqCtx.assistantMessage.ID, reqCtx.resume.Prompt.ID)
+	}
 
 	// Setup stop event handler
 	h.setupStopEventHandler(eventBus, reqCtx.sessionID, reqCtx.session.TenantID, reqCtx.assistantMessage, cancel)
@@ -1240,7 +1247,9 @@ func (h *Handler) executeQA(reqCtx *qaRequestContext, mode qaMode, generateTitle
 	// This is a pure UI memo (no behavioural effect) and runs in a goroutine
 	// to avoid adding a DB round-trip to TTFB. Use WithoutCancel so a fast
 	// client disconnect doesn't drop the write.
-	go h.persistLastRequestState(ctx, reqCtx, mode)
+	if reqCtx.resume == nil {
+		go h.persistLastRequestState(ctx, reqCtx, mode)
+	}
 
 	if mode == qaModeAgent {
 		if err := h.rejectIfOtherAgentRunLive(ctx, reqCtx); err != nil {
@@ -1259,6 +1268,11 @@ func (h *Handler) executeQA(reqCtx *qaRequestContext, mode qaMode, generateTitle
 			logger.ErrorWithFields(ctx, err, map[string]interface{}{"session_id": sessionID})
 		}
 		return
+	}
+	// A new message moves on from any prompt still waiting for an answer.
+	// Its run is closed first so the history this turn loads is well formed.
+	if reqCtx.resume == nil {
+		h.supersedeSuspendedRuns(ctx, sessionID)
 	}
 
 	releaseQATurn, held := h.holdQATurn(ctx, reqCtx)

@@ -29,7 +29,19 @@ type MCPServiceHandler struct {
 	// agents resolves a shared agent so the @MCP picker can list the services
 	// that agent can actually reach, which live in ITS OWNER's workspace.
 	agents access.SharedAgentLookup
+	// runResumer continues a run suspended on an approval once it is
+	// answered. Nil leaves such answers to the reaper, which closes the run.
+	runResumer RunResumer
 }
+
+// RunResumer continues an agent run that ended suspended on prompt, now
+// answered by the request c. It must not block on the run.
+type RunResumer interface {
+	ResumeSuspendedRun(c *gin.Context, prompt *types.AgentPrompt)
+}
+
+// SetRunResumer wires the resumer of suspended runs.
+func (h *MCPServiceHandler) SetRunResumer(r RunResumer) { h.runResumer = r }
 
 // NewMCPServiceHandler creates a new MCP service handler
 func NewMCPServiceHandler(
@@ -786,14 +798,15 @@ func (h *MCPServiceHandler) ResolveToolApproval(c *gin.Context) {
 	}
 	// The embed route carries session_id; binding it stops an embed visitor
 	// from resolving a prompt raised in another session.
-	if err := h.toolApprovalGate.Resolve(ctx, approval.ResolveRequest{
+	res, err := h.toolApprovalGate.ResolveForResume(ctx, approval.ResolveRequest{
 		TenantID:  tenantID,
 		UserID:    gateUserID,
 		SessionID: c.Param("session_id"),
 		Kind:      types.AgentPromptKindToolApproval,
 		PendingID: pendingID,
 		Decision:  dec,
-	}); err != nil {
+	})
+	if err != nil {
 		switch {
 		case stderrors.Is(err, approval.ErrPendingNotFound):
 			c.Error(errors.NewNotFoundError("pending approval not found or already completed"))
@@ -811,5 +824,10 @@ func (h *MCPServiceHandler) ResolveToolApproval(c *gin.Context) {
 		}
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"success": true})
+	// A suspended run has ended; this replica now continues it.
+	resumed := res.Resume && h.runResumer != nil
+	if resumed {
+		h.runResumer.ResumeSuspendedRun(c, res.Prompt)
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "resumed": resumed})
 }

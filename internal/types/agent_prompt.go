@@ -90,6 +90,12 @@ type AgentPromptTransition struct {
 	ResolvedBy  *string
 	ResolvedAt  *time.Time
 	ExpiresAt   *time.Time
+	// Owner and LeaseUntil hand the row to a new owner replica.
+	Owner      *string
+	LeaseUntil *time.Time
+	// UnexpiredAt additionally requires the row not to have expired at that
+	// time (expires_at empty or later).
+	UnexpiredAt *time.Time
 }
 
 // AgentRunSuspension is the persisted state of a run blocked on a prompt, so
@@ -119,7 +125,10 @@ type PromptSuspension struct {
 // ResumableAgentRequest is the part of a QARequest needed to rebuild the run
 // on another replica. It holds durable identifiers only.
 type ResumableAgentRequest struct {
-	AgentID             string          `json:"agent_id"`
+	AgentID string `json:"agent_id"`
+	// AgentTenantID is the agent owner's workspace; it differs from the
+	// session's when the agent is shared.
+	AgentTenantID       uint64          `json:"agent_tenant_id,omitempty"`
 	SummaryModelID      string          `json:"summary_model_id,omitempty"`
 	ReasoningEffort     string          `json:"reasoning_effort,omitempty"`
 	SharedAgentReadOnly bool            `json:"shared_agent_read_only,omitempty"`

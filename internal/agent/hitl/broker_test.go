@@ -59,7 +59,7 @@ func TestBroker_AnswerOnOtherReplicaReachesOwnerThroughStore(t *testing.T) {
 
 	out, err := owner.Await(context.Background(), testSpec(5*time.Second,
 		func(_ context.Context, p *types.AgentPrompt) error {
-			go func() { require.NoError(t, other.Resolve(context.Background(), answer(p.ID, "blue"))) }()
+			go func() { require.NoError(t, resolveErr(other, context.Background(), answer(p.ID, "blue"))) }()
 			return nil
 		}))
 	require.NoError(t, err)
@@ -81,24 +81,24 @@ func TestBroker_ResolveChecksScopeOwnershipAndAnswer(t *testing.T) {
 				ctx := context.Background()
 				otherSession := answer(p.ID, "x")
 				otherSession.SessionID = "s2"
-				require.ErrorIs(t, b.Resolve(ctx, otherSession), ErrPromptNotFound)
+				require.ErrorIs(t, resolveErr(b, ctx, otherSession), ErrPromptNotFound)
 
 				otherKind := answer(p.ID, "x")
 				otherKind.Kind = "something_else"
-				require.ErrorIs(t, b.Resolve(ctx, otherKind), ErrPromptNotFound)
+				require.ErrorIs(t, resolveErr(b, ctx, otherKind), ErrPromptNotFound)
 
 				otherTenant := answer(p.ID, "x")
 				otherTenant.TenantID = 2
-				require.ErrorIs(t, b.Resolve(ctx, otherTenant), ErrTenantMismatch)
+				require.ErrorIs(t, resolveErr(b, ctx, otherTenant), ErrTenantMismatch)
 
 				anonymous := answer(p.ID, "x")
 				anonymous.UserID = ""
-				require.ErrorIs(t, b.Resolve(ctx, anonymous), ErrUserMismatch)
+				require.ErrorIs(t, resolveErr(b, ctx, anonymous), ErrUserMismatch)
 
-				require.ErrorIs(t, b.Resolve(ctx, answer(p.ID, "")), ErrInvalidResponse)
+				require.ErrorIs(t, resolveErr(b, ctx, answer(p.ID, "")), ErrInvalidResponse)
 
-				require.NoError(t, b.Resolve(ctx, answer(p.ID, "red")))
-				require.ErrorIs(t, b.Resolve(ctx, answer(p.ID, "green")), ErrAlreadyResolved)
+				require.NoError(t, resolveErr(b, ctx, answer(p.ID, "red")))
+				require.ErrorIs(t, resolveErr(b, ctx, answer(p.ID, "green")), ErrAlreadyResolved)
 			}()
 			return nil
 		}))
@@ -111,7 +111,7 @@ func TestBroker_UnregisteredKindIsRejected(t *testing.T) {
 	b := NewBroker(nil, nil, WithPollInterval(20*time.Millisecond))
 	out, err := b.Await(context.Background(), testSpec(200*time.Millisecond,
 		func(_ context.Context, p *types.AgentPrompt) error {
-			require.ErrorIs(t, b.Resolve(context.Background(), answer(p.ID, "x")), ErrInvalidResponse)
+			require.ErrorIs(t, resolveErr(b, context.Background(), answer(p.ID, "x")), ErrInvalidResponse)
 			return nil
 		}))
 	require.NoError(t, err)
@@ -144,7 +144,7 @@ func TestBroker_TimeoutAndCancelAreRecorded(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, out.TimedOut)
 	require.Equal(t, "no answer", out.Reason)
-	require.ErrorIs(t, b.Resolve(context.Background(), answer(timedOutID, "x")), ErrAlreadyResolved)
+	require.ErrorIs(t, resolveErr(b, context.Background(), answer(timedOutID, "x")), ErrAlreadyResolved)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	out, err = b.Await(ctx, testSpec(time.Minute,
@@ -160,7 +160,7 @@ func TestBroker_ExecutingUntilMarkedExecuted(t *testing.T) {
 	b := newTestBroker(NewMemoryStore())
 	out, err := b.Await(context.Background(), testSpec(5*time.Second,
 		func(_ context.Context, p *types.AgentPrompt) error {
-			go func() { require.NoError(t, b.Resolve(context.Background(), answer(p.ID, "go"))) }()
+			go func() { require.NoError(t, resolveErr(b, context.Background(), answer(p.ID, "go"))) }()
 			return nil
 		}))
 	require.NoError(t, err)
@@ -172,4 +172,9 @@ func TestBroker_ExecutingUntilMarkedExecuted(t *testing.T) {
 	b.MarkExecuted(context.Background(), out.Prompt.ID)
 	row, _ = b.Store().Get(context.Background(), out.Prompt.ID)
 	require.Equal(t, types.AgentPromptDone, row.Status)
+}
+
+func resolveErr(b *Broker, ctx context.Context, req ResolveRequest) error {
+	_, err := b.Resolve(ctx, req)
+	return err
 }

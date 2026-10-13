@@ -49,6 +49,12 @@ type AgentEngine interface {
 	// later instead of blocking. request is the caller's
 	// types.ResumableAgentRequest. Must be called before Execute.
 	EnableSuspension(request json.RawMessage)
+
+	// Resume continues a suspended run from its saved snapshot, delivering
+	// the answered prompt to the call it was blocked on. Use instead of
+	// Execute; EnableSuspension still applies.
+	Resume(ctx context.Context, sessionID, messageID string, llmContext []chat.Message,
+		snapshot []byte, answered *types.AgentPrompt) (*types.AgentState, error)
 }
 
 // AgentService defines the interface for agent-related operations

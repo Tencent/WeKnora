@@ -264,6 +264,10 @@ const (
 	// ResponseTypeRunSuspended precedes complete when the run ended waiting
 	// on a user prompt; the message stays incomplete until it is answered.
 	ResponseTypeRunSuspended ResponseType = "run_suspended"
+	// ResponseTypeRunResumed opens the stream of a suspended run resumed
+	// after its prompt was answered. Steps saved before the suspension are
+	// not replayed; the client keeps the ones it already shows.
+	ResponseTypeRunResumed ResponseType = "run_resumed"
 	// ToolApprovalRequired: MCP tool marked dangerous — UI must collect user approval before execution continues
 	ResponseTypeToolApprovalRequired ResponseType = "tool_approval_required"
 	// ToolApprovalResolved: user approved/rejected (or timeout); informational for UI replay

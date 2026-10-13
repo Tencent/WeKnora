@@ -36,10 +36,8 @@ import (
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 
-	"github.com/Tencent/WeKnora/internal/agent"
 	"github.com/Tencent/WeKnora/internal/agent/approval"
 	"github.com/Tencent/WeKnora/internal/agent/hitl"
-	agenttools "github.com/Tencent/WeKnora/internal/agent/tools"
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	dorisRepo "github.com/Tencent/WeKnora/internal/application/repository/retriever/doris"
 	elasticsearchRepoV7 "github.com/Tencent/WeKnora/internal/application/repository/retriever/elasticsearch/v7"
@@ -341,6 +339,7 @@ func BuildContainer(container *dig.Container) *dig.Container {
 		}
 		return hitl.NewBroker(prompts, rdb, opts...)
 	}))
+	must(container.Provide(service.NewSuspendedRunService))
 	must(container.Invoke(startAgentPromptReaper))
 	must(container.Provide(func(cfg *config.Config, s interfaces.MCPToolApprovalService, broker *hitl.Broker) *approval.Gate {
 		return approval.NewGate(cfg, &approval.Adapter{Svc: s}, broker)
@@ -581,6 +580,14 @@ func BuildContainer(container *dig.Container) *dig.Container {
 		agents interfaces.AgentShareService,
 	) *handler.MCPServiceHandler {
 		return handler.NewMCPServiceHandler(mcpService, toolApprovals, gate, models, agents)
+	}))
+	must(container.Invoke(func(
+		sessions *session.Handler, mcp *handler.MCPServiceHandler,
+		broker *hitl.Broker, runs *service.SuspendedRunService, rewind *service.SessionRewindService,
+	) {
+		rewind.SetSuspendedRuns(runs)
+		sessions.SetSuspendedRuns(broker, runs)
+		mcp.SetRunResumer(sessions)
 	}))
 	must(container.Provide(handler.NewMCPCredentialsHandler))
 	must(container.Provide(handler.NewMCPOAuthHandler))
@@ -1992,14 +1999,10 @@ func startForkSnapshotReaper(reaper *service.ForkSnapshotReaper, cleaner interfa
 	})
 }
 
-// startAgentPromptReaper takes over prompts whose waiting replica stopped
-// renewing its lease, so a crash never leaves a prompt pending forever.
-func startAgentPromptReaper(
-	broker *hitl.Broker, messages interfaces.MessageRepository, cleaner interfaces.ResourceCleaner,
-) {
-	onSuspended := func(ctx context.Context, prompt *types.AgentPrompt, state *types.AgentRunSuspension) error {
-		return markRunAwaitingInput(ctx, messages, prompt, state)
-	}
+// startAgentPromptReaper takes over prompts whose owner stopped renewing its
+// lease and suspended prompts past their expiry, so a crash never leaves a
+// prompt or its run open forever.
+func startAgentPromptReaper(runs *service.SuspendedRunService, cleaner interfaces.ResourceCleaner) {
 	stop := make(chan struct{})
 	go func() {
 		ticker := time.NewTicker(time.Minute)
@@ -2007,7 +2010,7 @@ func startAgentPromptReaper(
 		for {
 			select {
 			case <-ticker.C:
-				if _, err := broker.ReapStaleLeases(context.Background(), time.Now(), onSuspended); err != nil {
+				if _, err := runs.Reap(context.Background(), time.Now()); err != nil {
 					logger.Warnf(context.Background(), "[AgentPromptReaper] reap failed: %v", err)
 				}
 			case <-stop:
@@ -2019,29 +2022,6 @@ func startAgentPromptReaper(
 		close(stop)
 		return nil
 	})
-}
-
-// markRunAwaitingInput shows a run suspended on its owner's behalf the way a
-// self-suspended run looks: the saved steps, waiting on the prompt.
-func markRunAwaitingInput(
-	ctx context.Context, messages interfaces.MessageRepository,
-	prompt *types.AgentPrompt, state *types.AgentRunSuspension,
-) error {
-	snapshot, err := agent.DecodeRunSnapshot(state.Snapshot)
-	if err != nil {
-		return err
-	}
-	msg, err := messages.GetMessage(ctx, prompt.SessionID, prompt.AssistantMessageID)
-	if err != nil {
-		return err
-	}
-	if msg == nil || msg.IsCompleted {
-		return nil
-	}
-	msg.AgentSteps = agenttools.SanitizeAgentStepsForStorage(snapshot.DisplaySteps())
-	msg.RunState = types.MessageRunStateAwaitingInput
-	msg.UpdatedAt = time.Now()
-	return messages.UpdateMessage(ctx, msg)
 }
 
 // startTemporaryDocumentCleanup removes expired session attachments and their

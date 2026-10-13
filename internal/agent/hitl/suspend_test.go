@@ -51,7 +51,7 @@ func TestBroker_AnsweredInHotWaitDropsRunState(t *testing.T) {
 	b := newTestBroker(NewMemoryStore())
 	out, err := b.Await(context.Background(), suspendableSpec(5*time.Second,
 		func(_ context.Context, p *types.AgentPrompt) error {
-			go func() { require.NoError(t, b.Resolve(context.Background(), answer(p.ID, "blue"))) }()
+			go func() { require.NoError(t, resolveErr(b, context.Background(), answer(p.ID, "blue"))) }()
 			return nil
 		}))
 	require.NoError(t, err)
@@ -96,7 +96,7 @@ func TestBroker_OwnerSeesTakeoverAsSuspension(t *testing.T) {
 		func(context.Context, *types.AgentPrompt) error {
 			go func() {
 				time.Sleep(10 * time.Millisecond)
-				n, err := reaper.ReapStaleLeases(context.Background(), time.Now(), nil)
+				n, err := reaper.Reap(context.Background(), time.Now(), RunHooks{})
 				require.NoError(t, err)
 				require.Equal(t, 1, n)
 			}()
@@ -126,11 +126,11 @@ func TestBroker_ReapSuspendsOrphanedSuspendablePrompt(t *testing.T) {
 	}))
 
 	var hooked *types.AgentRunSuspension
-	n, err := b.ReapStaleLeases(ctx, time.Now(), func(_ context.Context, p *types.AgentPrompt, s *types.AgentRunSuspension) error {
+	n, err := b.Reap(ctx, time.Now(), RunHooks{Suspended: func(_ context.Context, p *types.AgentPrompt, s *types.AgentRunSuspension) error {
 		require.Equal(t, "p1", p.ID)
 		hooked = s
 		return nil
-	})
+	}})
 	require.NoError(t, err)
 	require.Equal(t, 1, n)
 	require.NotNil(t, hooked)
@@ -140,7 +140,7 @@ func TestBroker_ReapSuspendsOrphanedSuspendablePrompt(t *testing.T) {
 	require.Equal(t, types.AgentPromptSuspended, row.Status)
 	require.NotNil(t, row.ExpiresAt)
 
-	n, err = b.ReapStaleLeases(ctx, time.Now(), nil)
+	n, err = b.Reap(ctx, time.Now(), RunHooks{})
 	require.NoError(t, err)
 	require.Zero(t, n, "a suspended prompt is not reaped again")
 }
@@ -169,10 +169,10 @@ func TestBroker_ReapExpiresOrphanWithoutRunState(t *testing.T) {
 	}))
 
 	called := false
-	n, err := b.ReapStaleLeases(ctx, time.Now(), func(context.Context, *types.AgentPrompt, *types.AgentRunSuspension) error {
+	n, err := b.Reap(ctx, time.Now(), RunHooks{Suspended: func(context.Context, *types.AgentPrompt, *types.AgentRunSuspension) error {
 		called = true
 		return nil
-	})
+	}})
 	require.NoError(t, err)
 	require.Equal(t, 2, n)
 	require.False(t, called)

@@ -350,3 +350,45 @@ func TestGate_RequestAndWait_SuspendsAfterHotWait(t *testing.T) {
 	require.Equal(t, 1, required.HotWaitSeconds)
 	require.False(t, resolved, "a suspended approval is still open")
 }
+
+func TestGate_ResolveSuspendedThenResumeDecision(t *testing.T) {
+	bus := event.NewEventBus()
+	g := NewGate(&config.Config{Agent: &config.AgentConfig{
+		ToolApprovalTimeoutSeconds: 60, PromptHotWaitSeconds: 1,
+	}}, &stubChecker{required: true}, nil)
+	d, err := g.RequestAndWait(context.Background(), PendingRequest{
+		TenantID: 1, SessionID: "s1", AssistantMessageID: "m1", EventBus: bus,
+		ServiceID: "svc", ServiceName: "svcname", MCPToolName: "t", RegisteredToolName: "mcp_svcname_t",
+		Args: json.RawMessage(`{"a":1}`), ToolCallID: "tc1",
+		Snapshot: []byte(`{"version":1}`), SnapshotVersion: 1,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, d.Suspended)
+
+	res, err := g.ResolveForResume(context.Background(), ResolveRequest{
+		TenantID: 1, PendingID: d.PendingID,
+		Decision: Decision{Approved: true, ModifiedArgs: json.RawMessage(`{"a":2}`)},
+	})
+	require.NoError(t, err)
+	require.True(t, res.Resume)
+
+	var resolved event.ToolApprovalResolvedData
+	resumeBus := event.NewEventBus()
+	resumeBus.On(event.EventToolApprovalResolved, func(_ context.Context, evt event.Event) error {
+		resolved = evt.Data.(event.ToolApprovalResolvedData)
+		return nil
+	})
+	got := g.ResumeDecision(context.Background(), res.Prompt, resumeBus)
+	require.True(t, got.Approved)
+	require.JSONEq(t, `{"a":2}`, string(got.ModifiedArgs))
+	require.Equal(t, d.PendingID, resolved.PendingID)
+	require.True(t, resolved.Approved)
+
+	row, err := g.broker.Store().Get(context.Background(), d.PendingID)
+	require.NoError(t, err)
+	require.Equal(t, types.AgentPromptExecuting, row.Status)
+	g.MarkExecuted(context.Background(), d.PendingID)
+	row, err = g.broker.Store().Get(context.Background(), d.PendingID)
+	require.NoError(t, err)
+	require.Equal(t, types.AgentPromptDone, row.Status)
+}

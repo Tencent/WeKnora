@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/event"
+	"github.com/Tencent/WeKnora/internal/types"
 )
 
 type execCtxKey struct{}
@@ -30,6 +31,10 @@ type ToolExecContext struct {
 	// call. A tool that raises a suspendable prompt passes the result along;
 	// nil means the run cannot be suspended and prompts wait synchronously.
 	Snapshot func() (data []byte, version int, err error)
+	// Answered is set on the call a resumed run was suspended on: the prompt
+	// it raised, now answered. The tool acts on the answer instead of
+	// raising the prompt again.
+	Answered *types.AgentPrompt
 }
 
 // WithToolExecContext returns ctx that carries ToolExecContext for MCP approval and similar features.

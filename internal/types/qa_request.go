@@ -99,4 +99,14 @@ type QARequest struct {
 	// message and answer it afterwards (web, embed, API); IM and MCP callers
 	// wait synchronously.
 	Suspendable bool
+	// Resume, when set, continues a suspended run instead of starting one.
+	Resume *AgentResume
+}
+
+// AgentResume is what a resumed run continues from.
+type AgentResume struct {
+	// Snapshot is the run state saved when the run suspended.
+	Snapshot []byte
+	// Prompt is the answered prompt the run was suspended on.
+	Prompt *AgentPrompt
 }

@@ -404,59 +404,130 @@ func (b *Broker) MarkExecuted(ctx context.Context, id string) {
 	}
 }
 
-// Resolve records a user answer on an open prompt and wakes its waiter. The
-// tenant must match the prompt; when the prompt was registered with a user,
-// the caller must present that same non-empty user.
-func (b *Broker) Resolve(ctx context.Context, req ResolveRequest) error {
+// Resolution is the result of a recorded answer.
+type Resolution struct {
+	// Prompt is the answered row.
+	Prompt *types.AgentPrompt
+	// Resume means the prompt was suspended: its run has ended and the
+	// caller must resume it. This replica now holds the prompt's lease; see
+	// KeepLease.
+	Resume bool
+}
+
+// Resolve records a user answer on an open prompt. A pending prompt's waiter
+// is woken; a suspended prompt is handed to the caller to resume. The tenant
+// must match the prompt; when the prompt was registered with a user, the
+// caller must present that same non-empty user.
+func (b *Broker) Resolve(ctx context.Context, req ResolveRequest) (Resolution, error) {
 	row, err := b.store.Get(ctx, req.PromptID)
 	if err != nil {
-		return err
+		return Resolution{}, err
 	}
 	if row == nil ||
 		(req.Kind != "" && row.Kind != req.Kind) ||
 		(req.SessionID != "" && row.SessionID != req.SessionID) {
-		return ErrPromptNotFound
+		return Resolution{}, ErrPromptNotFound
 	}
 	if row.TenantID != req.TenantID {
-		return ErrTenantMismatch
+		return Resolution{}, ErrTenantMismatch
 	}
 	// An empty caller userID is a mismatch (fail-close) so a missing auth
 	// middleware cannot bypass the per-user check.
 	if row.UserID != "" && row.UserID != req.UserID {
-		return ErrUserMismatch
+		return Resolution{}, ErrUserMismatch
 	}
 	if !row.IsOpen() {
-		return ErrAlreadyResolved
+		return Resolution{}, ErrAlreadyResolved
 	}
 
 	b.mu.Lock()
 	validate := b.validators[row.Kind]
 	b.mu.Unlock()
 	if validate == nil {
-		return fmt.Errorf("%w: unsupported prompt kind %q", ErrInvalidResponse, row.Kind)
+		return Resolution{}, fmt.Errorf("%w: unsupported prompt kind %q", ErrInvalidResponse, row.Kind)
 	}
 	if err := validate(json.RawMessage(row.Request), req.Response); err != nil {
-		return fmt.Errorf("%w: %v", ErrInvalidResponse, err)
+		return Resolution{}, fmt.Errorf("%w: %v", ErrInvalidResponse, err)
 	}
 
 	now := time.Now()
 	resolvedBy := req.UserID
-	// Only pending prompts are answerable until suspended runs can resume.
-	ok, err := b.store.Transition(ctx, req.PromptID, types.AgentPromptTransition{
-		From:       []string{types.AgentPromptPending},
-		To:         types.AgentPromptAnswered,
-		Response:   types.JSON(req.Response),
-		ResolvedBy: &resolvedBy,
-		ResolvedAt: &now,
+	answer := func(t types.AgentPromptTransition) (bool, error) {
+		t.To = types.AgentPromptAnswered
+		t.Response = types.JSON(req.Response)
+		t.ResolvedBy = &resolvedBy
+		t.ResolvedAt = &now
+		return b.store.Transition(ctx, req.PromptID, t)
+	}
+
+	owner, lease := instanceID, now.Add(b.leaseTTL)
+	ok, err := answer(types.AgentPromptTransition{
+		From:        []string{types.AgentPromptSuspended},
+		UnexpiredAt: &now,
+		Owner:       &owner,
+		LeaseUntil:  &lease,
 	})
 	if err != nil {
-		return err
+		return Resolution{}, err
+	}
+	if ok {
+		row.Status, row.Response = types.AgentPromptAnswered, types.JSON(req.Response)
+		row.ResolvedBy, row.ResolvedAt = resolvedBy, &now
+		row.OwnerInstance, row.LeaseUntil = owner, &lease
+		return Resolution{Prompt: row, Resume: true}, nil
+	}
+
+	ok, err = answer(types.AgentPromptTransition{From: []string{types.AgentPromptPending}})
+	if err != nil {
+		return Resolution{}, err
 	}
 	if !ok {
-		return ErrAlreadyResolved
+		return Resolution{}, ErrAlreadyResolved
 	}
 	b.wake(ctx, req.PromptID)
-	return nil
+	row.Status, row.Response = types.AgentPromptAnswered, types.JSON(req.Response)
+	row.ResolvedBy, row.ResolvedAt = resolvedBy, &now
+	return Resolution{Prompt: row}, nil
+}
+
+// KeepLease renews this replica's lease on a prompt it resumes until stop is
+// called or the prompt leaves the leased states. Without it the reaper
+// treats the resumed run as abandoned.
+func (b *Broker) KeepLease(ctx context.Context, id string) (stop func()) {
+	ctx, cancel := context.WithCancel(context.WithoutCancel(ctx))
+	go func() {
+		ticker := time.NewTicker(b.renewInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				ok, err := b.store.RenewLease(ctx, id, instanceID, time.Now().Add(b.leaseTTL))
+				if err != nil {
+					logger.GetLogger(ctx).Warnf("renew agent prompt lease %s: %v", id, err)
+					continue
+				}
+				if !ok {
+					return
+				}
+			}
+		}
+	}()
+	return cancel
+}
+
+// Fail closes a prompt the caller holds (answered or executing) whose run
+// could not go on.
+func (b *Broker) Fail(ctx context.Context, id, reason string) {
+	_, err := b.store.Transition(context.WithoutCancel(ctx), id, types.AgentPromptTransition{
+		From:        []string{types.AgentPromptAnswered, types.AgentPromptExecuting},
+		To:          types.AgentPromptFailed,
+		CloseReason: &reason,
+	})
+	if err != nil {
+		logger.GetLogger(ctx).Warnf("fail agent prompt %s: %v", id, err)
+	}
 }
 
 func (b *Broker) register(id string) <-chan struct{} {

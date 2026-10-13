@@ -16,11 +16,16 @@ type AgentPromptRepository interface {
 	// Transition applies t only when the row is in one of t.From and reports
 	// whether this call won.
 	Transition(ctx context.Context, id string, t types.AgentPromptTransition) (bool, error)
-	// RenewLease extends a pending row's lease while owner still holds it.
+	// RenewLease extends the lease of a row that is pending, answered or
+	// executing, while owner still holds it.
 	RenewLease(ctx context.Context, id, owner string, until time.Time) (bool, error)
-	// ListStaleLeases returns up to limit pending rows whose lease ended
-	// before t: their owner replica is gone.
-	ListStaleLeases(ctx context.Context, before time.Time, limit int) ([]*types.AgentPrompt, error)
+	// ListStaleLeases returns up to limit rows in one of statuses whose lease
+	// ended before t: their owner replica is gone.
+	ListStaleLeases(ctx context.Context, statuses []string, before time.Time, limit int) ([]*types.AgentPrompt, error)
+	// ListExpired returns up to limit suspended rows that expired before t.
+	ListExpired(ctx context.Context, before time.Time, limit int) ([]*types.AgentPrompt, error)
+	// ListBySession returns the session's rows in one of statuses.
+	ListBySession(ctx context.Context, sessionID string, statuses []string) ([]*types.AgentPrompt, error)
 }
 
 // AgentRunSuspensionRepository persists the state of runs blocked on a

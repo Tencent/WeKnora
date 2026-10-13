@@ -98,6 +98,10 @@ func (approvedOAuthGate) RequestAndWait(context.Context, approval.PendingRequest
 	return approval.Decision{Approved: true}, nil
 }
 
+func (approvedOAuthGate) ResumeDecision(_ context.Context, p *types.AgentPrompt, _ *event.EventBus) approval.Decision {
+	return approval.Decision{PendingID: p.ID, Approved: true}
+}
+
 func (approvedOAuthGate) MarkExecuted(context.Context, string) {}
 
 func (g approvedOAuthGate) RequestOAuthAndWait(

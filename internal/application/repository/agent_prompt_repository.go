@@ -73,21 +73,33 @@ func (r *AgentPromptRepository) Transition(
 	if t.ExpiresAt != nil {
 		updates["expires_at"] = *t.ExpiresAt
 	}
-	res := r.db.WithContext(ctx).Model(&types.AgentPrompt{}).
-		Where("id = ? AND status IN ?", id, t.From).
-		Updates(updates)
+	if t.Owner != nil {
+		updates["owner_instance"] = *t.Owner
+	}
+	if t.LeaseUntil != nil {
+		updates["lease_until"] = *t.LeaseUntil
+	}
+	q := r.db.WithContext(ctx).Model(&types.AgentPrompt{}).
+		Where("id = ? AND status IN ?", id, t.From)
+	if t.UnexpiredAt != nil {
+		q = q.Where("expires_at IS NULL OR expires_at > ?", *t.UnexpiredAt)
+	}
+	res := q.Updates(updates)
 	if res.Error != nil {
 		return false, fmt.Errorf("transition agent prompt: %w", res.Error)
 	}
 	return res.RowsAffected == 1, nil
 }
 
-// RenewLease extends the lease of a pending row still held by owner.
+// leasedStatuses are the states whose row is held by an owner replica.
+var leasedStatuses = []string{types.AgentPromptPending, types.AgentPromptAnswered, types.AgentPromptExecuting}
+
+// RenewLease extends the lease of a leased row still held by owner.
 func (r *AgentPromptRepository) RenewLease(
 	ctx context.Context, id, owner string, until time.Time,
 ) (bool, error) {
 	res := r.db.WithContext(ctx).Model(&types.AgentPrompt{}).
-		Where("id = ? AND status = ? AND owner_instance = ?", id, types.AgentPromptPending, owner).
+		Where("id = ? AND status IN ? AND owner_instance = ?", id, leasedStatuses, owner).
 		Updates(map[string]interface{}{"lease_until": until, "updated_at": time.Now()})
 	if res.Error != nil {
 		return false, fmt.Errorf("renew agent prompt lease: %w", res.Error)
@@ -95,18 +107,49 @@ func (r *AgentPromptRepository) RenewLease(
 	return res.RowsAffected == 1, nil
 }
 
-// ListStaleLeases returns pending rows whose owner stopped renewing.
+// ListStaleLeases returns rows in statuses whose owner stopped renewing.
 func (r *AgentPromptRepository) ListStaleLeases(
-	ctx context.Context, before time.Time, limit int,
+	ctx context.Context, statuses []string, before time.Time, limit int,
 ) ([]*types.AgentPrompt, error) {
 	var rows []*types.AgentPrompt
 	err := r.db.WithContext(ctx).
-		Where("status = ? AND lease_until < ?", types.AgentPromptPending, before).
+		Where("status IN ? AND lease_until < ?", statuses, before).
 		Order("lease_until").
 		Limit(limit).
 		Find(&rows).Error
 	if err != nil {
 		return nil, fmt.Errorf("list stale agent prompts: %w", err)
+	}
+	return rows, nil
+}
+
+// ListExpired returns suspended rows past their expiry.
+func (r *AgentPromptRepository) ListExpired(
+	ctx context.Context, before time.Time, limit int,
+) ([]*types.AgentPrompt, error) {
+	var rows []*types.AgentPrompt
+	err := r.db.WithContext(ctx).
+		Where("status = ? AND expires_at < ?", types.AgentPromptSuspended, before).
+		Order("expires_at").
+		Limit(limit).
+		Find(&rows).Error
+	if err != nil {
+		return nil, fmt.Errorf("list expired agent prompts: %w", err)
+	}
+	return rows, nil
+}
+
+// ListBySession returns the session's rows in statuses.
+func (r *AgentPromptRepository) ListBySession(
+	ctx context.Context, sessionID string, statuses []string,
+) ([]*types.AgentPrompt, error) {
+	var rows []*types.AgentPrompt
+	err := r.db.WithContext(ctx).
+		Where("session_id = ? AND status IN ?", sessionID, statuses).
+		Order("created_at").
+		Find(&rows).Error
+	if err != nil {
+		return nil, fmt.Errorf("list session agent prompts: %w", err)
 	}
 	return rows, nil
 }

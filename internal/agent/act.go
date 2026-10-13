@@ -447,6 +447,15 @@ func (e *AgentEngine) runToolCall(
 	ctx context.Context, tc types.LLMToolCall, i int,
 	iteration, round int, sessionID, assistantMessageID string,
 ) types.ToolCall {
+	return e.runToolCallAnswered(ctx, tc, i, iteration, round, sessionID, assistantMessageID, nil)
+}
+
+// runToolCallAnswered is runToolCall for a call whose prompt may already be
+// answered (see ToolExecContext.Answered).
+func (e *AgentEngine) runToolCallAnswered(
+	ctx context.Context, tc types.LLMToolCall, i int,
+	iteration, round int, sessionID, assistantMessageID string, answered *types.AgentPrompt,
+) types.ToolCall {
 	tc.ID = agenttools.NormalizeToolCallID(tc.ID, tc.Function.Name, i)
 	total := "?" // unknown in isolation; callers log the batch size
 	toolTag := fmt.Sprintf("[Agent][Round-%d][Tool %s (%d/%s)]",
@@ -601,6 +610,7 @@ func (e *AgentEngine) runToolCall(
 		ApprovalCtx: toolCtx,
 		ExecTimeout: execTimeout,
 		Snapshot:    e.snapshotFunc(i),
+		Answered:    answered,
 	})
 
 	var result *types.ToolResult

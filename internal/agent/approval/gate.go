@@ -68,6 +68,9 @@ type MCPApproval interface {
 	NeedsApproval(ctx context.Context, tenantID uint64, serviceID, toolName string) bool
 	IsEnabled(ctx context.Context, tenantID uint64, serviceID, toolName string) (bool, error)
 	RequestAndWait(ctx context.Context, req PendingRequest) (Decision, error)
+	// ResumeDecision is the decision carried by the answered prompt a resumed
+	// run was suspended on.
+	ResumeDecision(ctx context.Context, prompt *types.AgentPrompt, bus *event.EventBus) Decision
 	// MarkExecuted records that an approved call has finished running, so an
 	// approval is never mistaken for one still in flight.
 	MarkExecuted(ctx context.Context, pendingID string)
@@ -277,16 +280,35 @@ func (g *Gate) RequestAndWait(ctx context.Context, req PendingRequest) (Decision
 	}
 
 	d := toolApprovalDecision(out)
+	g.consumeDecision(ctx, d, req.EventBus, req.SessionID, req.AssistantMessageID, req.RequestID)
+	return d, nil
+}
+
+// ResumeDecision turns the answered prompt a resumed run was suspended on
+// into the decision for its blocked call, as if RequestAndWait had just
+// returned it.
+func (g *Gate) ResumeDecision(ctx context.Context, prompt *types.AgentPrompt, bus *event.EventBus) Decision {
+	d := toolApprovalDecision(hitl.Outcome{Prompt: prompt, Answered: true})
+	g.consumeDecision(ctx, d, bus, prompt.SessionID, prompt.AssistantMessageID, prompt.RequestID)
+	return d
+}
+
+func (g *Gate) consumeDecision(
+	ctx context.Context, d Decision, bus *event.EventBus, sessionID, assistantMessageID, requestID string,
+) {
 	// An approved call stays "executing" until MarkExecuted.
 	consumeTo := types.AgentPromptDone
 	if d.Approved {
 		consumeTo = types.AgentPromptExecuting
 	}
 	g.broker.Consume(ctx, d.PendingID, consumeTo)
-	_ = req.EventBus.Emit(context.WithoutCancel(ctx), event.Event{
+	if bus == nil {
+		return
+	}
+	_ = bus.Emit(context.WithoutCancel(ctx), event.Event{
 		ID:        d.PendingID + "-approval-resolved",
 		Type:      event.EventToolApprovalResolved,
-		SessionID: req.SessionID,
+		SessionID: sessionID,
 		Data: event.ToolApprovalResolvedData{
 			PendingID: d.PendingID,
 			Approved:  d.Approved,
@@ -295,11 +317,10 @@ func (g *Gate) RequestAndWait(ctx context.Context, req PendingRequest) (Decision
 			Canceled:  d.ContextCanceled,
 		},
 		Metadata: map[string]interface{}{
-			"assistant_message_id": req.AssistantMessageID,
+			"assistant_message_id": assistantMessageID,
 		},
-		RequestID: req.RequestID,
+		RequestID: requestID,
 	})
-	return d, nil
 }
 
 // RequestOAuthAndWait emits an "MCP OAuth required" UI event, then blocks
@@ -405,9 +426,17 @@ func (g *Gate) MarkExecuted(ctx context.Context, pendingID string) {
 }
 
 // Resolve records a user decision on a pending prompt and wakes its waiter.
+// A suspended prompt answered this way is not resumed; use ResolveForResume.
 func (g *Gate) Resolve(ctx context.Context, req ResolveRequest) error {
+	_, err := g.ResolveForResume(ctx, req)
+	return err
+}
+
+// ResolveForResume records a user decision. When the prompt was suspended,
+// the returned resolution asks the caller to resume its run.
+func (g *Gate) ResolveForResume(ctx context.Context, req ResolveRequest) (hitl.Resolution, error) {
 	if g == nil {
-		return fmt.Errorf("gate is nil")
+		return hitl.Resolution{}, fmt.Errorf("gate is nil")
 	}
 	kind := req.Kind
 	if kind == "" {
@@ -424,11 +453,11 @@ func (g *Gate) Resolve(ctx context.Context, req ResolveRequest) error {
 	case types.AgentPromptKindMCPOAuth:
 		response = types.MCPOAuthPromptResponse{Authorized: req.Decision.Approved, Reason: req.Decision.Reason}
 	default:
-		return fmt.Errorf("%w: unsupported prompt kind %q", ErrInvalidDecision, kind)
+		return hitl.Resolution{}, fmt.Errorf("%w: unsupported prompt kind %q", ErrInvalidDecision, kind)
 	}
 	payload, err := json.Marshal(response)
 	if err != nil {
-		return err
+		return hitl.Resolution{}, err
 	}
 	return g.broker.Resolve(ctx, hitl.ResolveRequest{
 		TenantID:  req.TenantID,

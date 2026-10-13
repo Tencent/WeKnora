@@ -102,13 +102,13 @@ func TestAgentPromptRepositoryListStaleLeasesOnlyPendingAndLapsed(t *testing.T) 
 		require.NoError(t, repo.Create(ctx, row))
 	}
 
-	rows, err := repo.ListStaleLeases(ctx, now, 10)
+	rows, err := repo.ListStaleLeases(ctx, []string{types.AgentPromptPending}, now, 10)
 	require.NoError(t, err)
 	require.Len(t, rows, 2)
 	require.Equal(t, "older", rows[0].ID)
 	require.Equal(t, "old", rows[1].ID)
 
-	rows, err = repo.ListStaleLeases(ctx, now, 1)
+	rows, err = repo.ListStaleLeases(ctx, []string{types.AgentPromptPending}, now, 1)
 	require.NoError(t, err)
 	require.Len(t, rows, 1)
 }
@@ -152,4 +152,44 @@ func TestAgentRunSuspensionRepositorySaveReplacesAndDeleteIsConditional(t *testi
 	require.Nil(t, row)
 
 	require.Error(t, repo.Save(ctx, &types.AgentRunSuspension{}))
+}
+
+func TestAgentPromptRepositoryExpiryAndSessionQueries(t *testing.T) {
+	ctx := context.Background()
+	repo := newAgentPromptTestRepo(t)
+	now := time.Now()
+	at := func(d time.Duration) *time.Time { v := now.Add(d); return &v }
+	for _, row := range []*types.AgentPrompt{
+		{ID: "expired", SessionID: "s1", Status: types.AgentPromptSuspended, ExpiresAt: at(-time.Minute)},
+		{ID: "open", SessionID: "s1", Status: types.AgentPromptSuspended, ExpiresAt: at(time.Hour)},
+		{ID: "forever", SessionID: "s2", Status: types.AgentPromptSuspended},
+		{ID: "done", SessionID: "s1", Status: types.AgentPromptDone, ExpiresAt: at(-time.Minute)},
+	} {
+		row.TenantID, row.Kind = 7, types.AgentPromptKindToolApproval
+		require.NoError(t, repo.Create(ctx, row))
+	}
+
+	expired, err := repo.ListExpired(ctx, now, 10)
+	require.NoError(t, err)
+	require.Len(t, expired, 1)
+	require.Equal(t, "expired", expired[0].ID)
+
+	inSession, err := repo.ListBySession(ctx, "s1", []string{types.AgentPromptSuspended})
+	require.NoError(t, err)
+	ids := []string{}
+	for _, r := range inSession {
+		ids = append(ids, r.ID)
+	}
+	require.ElementsMatch(t, []string{"expired", "open"}, ids)
+
+	answer := func(id string) bool {
+		ok, err := repo.Transition(ctx, id, types.AgentPromptTransition{
+			From: []string{types.AgentPromptSuspended}, To: types.AgentPromptAnswered, UnexpiredAt: &now,
+		})
+		require.NoError(t, err)
+		return ok
+	}
+	require.False(t, answer("expired"), "an expired prompt cannot be answered")
+	require.True(t, answer("open"))
+	require.True(t, answer("forever"), "a prompt without expiry stays answerable")
 }

@@ -4,6 +4,7 @@ import (
 	stderrors "errors"
 	"net/http"
 
+	"github.com/Tencent/WeKnora/internal/agent/hitl"
 	"github.com/Tencent/WeKnora/internal/application/service"
 	"github.com/Tencent/WeKnora/internal/browserskill"
 	"github.com/Tencent/WeKnora/internal/config"
@@ -72,6 +73,10 @@ type Handler struct {
 	// validate CreateSession's optional project_dir. Nil means none are
 	// approved, so a non-empty project_dir is rejected.
 	approvedProjectDirs HostProjectDirsLoader
+	// promptBroker and suspendedRuns resume and supersede runs suspended on
+	// agent prompts. Nil leaves suspended prompts to the reaper.
+	promptBroker  *hitl.Broker
+	suspendedRuns *service.SuspendedRunService
 }
 
 // NewHandler creates a new instance of Handler with all necessary dependencies

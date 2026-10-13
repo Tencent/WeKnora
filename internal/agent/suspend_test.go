@@ -19,10 +19,15 @@ type suspendingTool struct {
 	tools.BaseTool
 	snapshot []byte
 	err      error
+	answered *types.AgentPrompt
 }
 
 func (t *suspendingTool) Execute(ctx context.Context, _ json.RawMessage) (*types.ToolResult, error) {
 	meta, ok := tools.ToolExecFromContext(ctx)
+	if ok && meta.Answered != nil {
+		t.answered = meta.Answered
+		return &types.ToolResult{Success: true, Output: "approved and ran"}, nil
+	}
 	if !ok || meta.Snapshot == nil {
 		return &types.ToolResult{Success: true, Output: "ran without suspension"}, nil
 	}

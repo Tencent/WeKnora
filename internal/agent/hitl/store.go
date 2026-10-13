@@ -62,6 +62,16 @@ func (s *memoryStore) Transition(_ context.Context, id string, t types.AgentProm
 	if !ok || !slices.Contains(t.From, row.Status) {
 		return false, nil
 	}
+	if t.UnexpiredAt != nil && row.ExpiresAt != nil && !row.ExpiresAt.After(*t.UnexpiredAt) {
+		return false, nil
+	}
+	if t.Owner != nil {
+		row.OwnerInstance = *t.Owner
+	}
+	if t.LeaseUntil != nil {
+		at := *t.LeaseUntil
+		row.LeaseUntil = &at
+	}
 	row.Status = t.To
 	row.UpdatedAt = time.Now()
 	if len(t.Response) > 0 {
@@ -89,7 +99,7 @@ func (s *memoryStore) RenewLease(_ context.Context, id, owner string, until time
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	row, ok := s.rows[id]
-	if !ok || row.Status != types.AgentPromptPending || row.OwnerInstance != owner {
+	if !ok || !slices.Contains(leasedStatuses, row.Status) || row.OwnerInstance != owner {
 		return false, nil
 	}
 	row.LeaseUntil = &until
@@ -98,20 +108,49 @@ func (s *memoryStore) RenewLease(_ context.Context, id, owner string, until time
 	return true, nil
 }
 
-func (s *memoryStore) ListStaleLeases(_ context.Context, before time.Time, limit int) ([]*types.AgentPrompt, error) {
+// leasedStatuses are the states whose row is held by an owner replica.
+var leasedStatuses = []string{types.AgentPromptPending, types.AgentPromptAnswered, types.AgentPromptExecuting}
+
+func (s *memoryStore) ListStaleLeases(
+	_ context.Context, statuses []string, before time.Time, limit int,
+) ([]*types.AgentPrompt, error) {
+	return s.list(limit, func(row types.AgentPrompt) bool {
+		return slices.Contains(statuses, row.Status) && row.LeaseUntil != nil && row.LeaseUntil.Before(before)
+	}, func(row types.AgentPrompt) time.Time { return *row.LeaseUntil }), nil
+}
+
+func (s *memoryStore) ListExpired(_ context.Context, before time.Time, limit int) ([]*types.AgentPrompt, error) {
+	return s.list(limit, func(row types.AgentPrompt) bool {
+		return row.Status == types.AgentPromptSuspended && row.ExpiresAt != nil && row.ExpiresAt.Before(before)
+	}, func(row types.AgentPrompt) time.Time { return *row.ExpiresAt }), nil
+}
+
+func (s *memoryStore) ListBySession(
+	_ context.Context, sessionID string, statuses []string,
+) ([]*types.AgentPrompt, error) {
+	return s.list(0, func(row types.AgentPrompt) bool {
+		return row.SessionID == sessionID && slices.Contains(statuses, row.Status)
+	}, func(row types.AgentPrompt) time.Time { return row.CreatedAt }), nil
+}
+
+// list returns matching rows ordered by key; limit 0 is unlimited.
+func (s *memoryStore) list(
+	limit int, match func(types.AgentPrompt) bool, key func(types.AgentPrompt) time.Time,
+) []*types.AgentPrompt {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var out []*types.AgentPrompt
 	for _, row := range s.rows {
-		if len(out) >= limit {
-			break
-		}
-		if row.Status == types.AgentPromptPending && row.LeaseUntil != nil && row.LeaseUntil.Before(before) {
+		if match(row) {
 			r := row
 			out = append(out, &r)
 		}
 	}
-	return out, nil
+	slices.SortFunc(out, func(a, b *types.AgentPrompt) int { return key(*a).Compare(key(*b)) })
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
+	return out
 }
 
 // SuspensionStore persists the state of runs blocked on a prompt.

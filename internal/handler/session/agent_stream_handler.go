@@ -731,6 +731,7 @@ func (h *AgentStreamHandler) handleComplete(ctx context.Context, evt event.Event
 		if suspended != nil {
 			h.assistantMessage.RunState = types.MessageRunStateAwaitingInput
 		} else {
+			h.assistantMessage.RunState = ""
 			h.assistantMessage.IsCompleted = true
 		}
 		h.assistantMessage.AgentDurationMs = data.TotalDurationMs
