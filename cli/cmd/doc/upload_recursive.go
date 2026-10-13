@@ -11,7 +11,6 @@ import (
 
 	"github.com/Tencent/WeKnora/cli/internal/cmdutil"
 	"github.com/Tencent/WeKnora/cli/internal/iostreams"
-	"github.com/Tencent/WeKnora/cli/internal/output"
 )
 
 // uploadedFile holds the server-side result for a successful per-file upload.
@@ -73,7 +72,7 @@ func runUploadRecursive(ctx context.Context, opts *UploadOptions, fopts *cmdutil
 	if len(matches) == 0 {
 		if fopts.WantsJSON() {
 			// Empty batch: emit an all-success envelope with zero items.
-			return output.WriteBatchEnvelope(iostreams.IO.Out, nil, fopts.TTY, cmdutil.GetProfile())
+			return cmdutil.EmitBatch(nil, fopts, iostreams.IO.Out, nil)
 		}
 		fmt.Fprintf(iostreams.IO.Out, "(no files matched %q under %s)\n", opts.Glob, dir)
 		return nil
