@@ -616,6 +616,7 @@ func buildRuntimeContextBlock(
 	origin *QuestionOriginInfo,
 	page *PageContextInfo,
 	assistantName string,
+	uploads []ChatUploadInfo,
 ) string {
 	var sb strings.Builder
 	sb.WriteString("<runtime_context scope=\"this_turn\">\n")
@@ -665,9 +666,38 @@ func buildRuntimeContextBlock(
 
 	writeQuestionOrigin(&sb, origin)
 	writePageContext(&sb, page)
+	writeChatUploads(&sb, uploads)
 
 	sb.WriteString("</runtime_context>")
 	return sb.String()
+}
+
+// writeChatUploads exposes chat-uploaded spreadsheets as documents. Their
+// durable IDs are registered before this block is compacted, so the model
+// receives a doc://N handle it can pass to data_schema and data_analysis.
+func writeChatUploads(sb *strings.Builder, uploads []ChatUploadInfo) {
+	docs := make([]ChatUploadInfo, 0, len(uploads))
+	for _, upload := range uploads {
+		if upload.DocumentID == "" {
+			continue
+		}
+		docs = append(docs, upload)
+	}
+	if len(docs) == 0 {
+		return
+	}
+	sb.WriteString("  <chat_uploads scope=\"this_turn\">\n")
+	for _, upload := range docs {
+		title := upload.Title
+		if title == "" {
+			title = upload.DocumentID
+		}
+		fmt.Fprintf(sb, "    <document knowledge_id=\"%s\" title=\"%s\" file_type=\"%s\" />\n",
+			escapeXMLAttr(upload.DocumentID), escapeXMLAttr(title), escapeXMLAttr(upload.FileType))
+	}
+	sb.WriteString("    <note>These CSV or Excel files were uploaded in the chat. They are not knowledge-base documents. " +
+		"Call data_schema and data_analysis with this knowledge_id. Do not substitute another document.</note>\n")
+	sb.WriteString("  </chat_uploads>\n")
 }
 
 // writeQuestionOrigin tells the model which source a picked suggested
@@ -943,7 +973,7 @@ func commonStringPrefix(a, b string) string {
 func (e *AgentEngine) RenderUserTurnContent(sessionID, query string) string {
 	e.registerRuntimeReferences()
 	runtimeCtx := buildRuntimeContextBlock(
-		sessionID, e.knowledgeBasesInfo, e.selectedDocs, e.questionOrigin, e.pageContext, e.assistantName)
+		sessionID, e.knowledgeBasesInfo, e.selectedDocs, e.questionOrigin, e.pageContext, e.assistantName, e.chatUploadInfos())
 	runtimeCtx = e.modelContext.EncodeKnownIssues(e.modelContext.CompactKnownText(runtimeCtx))
 	mustUse := buildMustUseBlock(e.pinnedMCPServices, e.pinnedSkills)
 	return composeUserTurnContent(runtimeCtx, mustUse, query)
@@ -1001,6 +1031,32 @@ func (e *AgentEngine) registerRuntimeReferences() {
 			}
 		}
 	}
+	for _, upload := range e.chatUploadInfos() {
+		e.modelContext.RegisterDocument(upload.DocumentID)
+	}
+}
+
+func (e *AgentEngine) chatUploadInfos() []ChatUploadInfo {
+	if e == nil || e.chatAttachments == nil {
+		return nil
+	}
+	items := e.chatAttachments.List()
+	if len(items) == 0 {
+		return nil
+	}
+	out := make([]ChatUploadInfo, 0, len(items))
+	for _, item := range items {
+		title := item.FileName
+		if title == "" {
+			title = item.ID
+		}
+		out = append(out, ChatUploadInfo{
+			DocumentID: item.ID,
+			Title:      title,
+			FileType:   item.FileType,
+		})
+	}
+	return out
 }
 
 func firstNonEmptyAgent(values ...string) string {
