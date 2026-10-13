@@ -1,4 +1,4 @@
--- Agent inbox (see versioned/000117 for the design note).
+-- Agent inbox (see versioned/000118 for the design note).
 CREATE TABLE IF NOT EXISTS agent_inbox (
     id          TEXT PRIMARY KEY,
     tenant_id   INTEGER NOT NULL,

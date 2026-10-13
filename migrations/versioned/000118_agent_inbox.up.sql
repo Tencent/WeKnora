@@ -1,4 +1,4 @@
--- Migration 000117: agent inbox — durable event stream for agent situational
+-- Migration 000118: agent inbox — durable event stream for agent situational
 -- awareness (agent-sidebar-inbox, P1 MVP).
 --
 -- One row = one event worth surfacing to the sidebar agent (user actions,
