@@ -163,6 +163,7 @@
                                     <div class="session-list-row__body">
                                         <SessionSidebarRow :item="subitem" :batch-mode="batchMode"
                                             :running="Boolean(sessionActivityEntries[subitem.id])"
+                                            :unread="Boolean(sessionUnread[subitem.id])"
                                             :active-path="currentSecondpath" :selected-ids="batchSelectedIds"
                                             :menu-options="buildSessionMenuOptions(subitem)"
                                             @navigate="gotopage(subitem.path)"
@@ -310,7 +311,7 @@ const platformLogo = (p: string): string => (p ? PLATFORM_LOGO[p] || '' : '');
 const { t } = useI18n();
 const usemenuStore = useMenuStore();
 const sessionActivity = useSessionActivityStore();
-const { entries: sessionActivityEntries } = storeToRefs(sessionActivity);
+const { entries: sessionActivityEntries, unread: sessionUnread } = storeToRefs(sessionActivity);
 let sessionActivityTimer: ReturnType<typeof setInterval> | undefined;
 const authStore = useAuthStore();
 const deploymentCapabilities = useDeploymentCapabilitiesStore();
@@ -1033,7 +1034,7 @@ const loadSessionOriginMeta = async () => {
 const handleSessionMutation = (event: Event) => {
     const detail = (event as CustomEvent<SessionMutationDetail>).detail;
     if (!detail?.sessionId) return;
-    if (detail.removed || detail.messagesCleared) sessionActivity.update(detail.sessionId, false);
+    if (detail.removed || detail.messagesCleared) sessionActivity.dismiss(detail.sessionId);
     if (detail.patch) {
         updateSessionInBuckets(detail.sessionId, {
             ...detail.patch,
@@ -1050,6 +1051,8 @@ const handleSessionMutation = (event: Event) => {
 };
 
 onMounted(async () => {
+    sessionActivity.restore();
+    void sessionActivity.refresh();
     sessionActivityTimer = setInterval(() => { void sessionActivity.refresh(); }, 5000);
     const routeName = typeof route.name === 'string' ? route.name : (route.name ? String(route.name) : '')
     currentpath.value = routeName;
@@ -1334,9 +1337,9 @@ const resizeSidebar = (delta: number, keyboard: boolean) => {
         display: flex;
         align-items: center;
         justify-content: space-between;
-        // 抵消 .aside_box 顶部内边距，使行中线与主区 .chat-header 标题中线（距顶 19.5px）齐平
+        // 保留侧栏顶部留白，让 Logo 和操作按钮与窗口顶边保持舒适间距
         height: 39px;
-        margin: -8px 0 4px;
+        margin: 0 0 4px;
         flex-shrink: 0;
         padding: 0 2px 0 var(--sidebar-inset-x);
     }
@@ -1728,11 +1731,6 @@ const resizeSidebar = (delta: number, keyboard: boolean) => {
             flex: 1 1 auto;
             min-width: 0;
             overflow: hidden;
-        }
-
-        .session-running-indicator {
-            flex: 0 0 16px;
-            flex-shrink: 0;
         }
 
         .submenu_title-text {

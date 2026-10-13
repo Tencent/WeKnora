@@ -424,7 +424,7 @@ curl -N -X POST $BASE/api/v1/agent-chat/s-1 -H "Authorization: Bearer $TOKEN" \
 | `query` | string | 是（`binding:"required"`） | 查询 |
 | `knowledge_base_id` | string | 否 | 单 KB（兼容旧版） |
 | `knowledge_base_ids` | []string | 否 | 多 KB |
-| `knowledge_ids` | []string | 否 | 限定文件 |
+| `knowledge_ids` | []string | 否 | 指定文件，与 `knowledge_base_id(s)` 取并集（见下方说明） |
 | `tag_ids` | []string | 否 | 标签过滤 |
 | `mentioned_items` | []object | 否 | 带 KB 范围的标签提及 |
 | `vector_threshold` / `keyword_threshold` | float | 否 | 召回阈值；省略时用空间检索配置（默认 0.15 / 0.3） |
@@ -433,6 +433,8 @@ curl -N -X POST $BASE/api/v1/agent-chat/s-1 -H "Authorization: Bearer $TOKEN" \
 | `rerank` | object | 否 | 覆盖 rerank 设置；`{"enabled":false}` 关闭 rerank。字段见 [rerank 对象](./01-api-overview.md#retrieval-api)。`rerank.top_k` 同时给出时优先于 `match_count` |
 
 省略的字段都沿用空间的检索配置（`GET /tenants/kv/retrieval-config`），不传任何新字段时行为和以前一样。
+
+检索范围是 `knowledge_base_id(s)` 与 `knowledge_ids` 的并集，与产品内 @ 提及的语义一致：每个知识库整库检索，`knowledge_ids` 中属于这些知识库的文件已被覆盖，不再单独限定；属于其他知识库的文件会额外加入检索。**只想在指定文件里搜时，只传 `knowledge_ids`，不要同时传它们所在的知识库**，否则会检索整个知识库。
 
 响应：200 `{"success":true,"data":[SearchResult],"meta":{"rerank":{...}}}`。`SearchResult` 含 `id,content,knowledge_id,knowledge_title,score,chunk_type,knowledge_base_id,...`；经过 rerank 的结果 `metadata` 带 `model_score` 和 `base_score`。`data` 为空时看 `meta.rerank.outcome` 判断原因，见 [meta.rerank 诊断](./01-api-overview.md#retrieval-api)。
 
@@ -444,6 +446,10 @@ curl -X POST $BASE/api/v1/knowledge-search -H "X-API-Key: $API_KEY" \
 curl -X POST $BASE/api/v1/knowledge-search -H "X-API-Key: $API_KEY" \
   -H 'Content-Type: application/json' \
   -d '{"query":"部署要求","knowledge_base_ids":["kb-1"],"disable_keywords_match":true,"match_count":5,"rerank":{"enabled":false}}'
+
+# 只在指定文件里搜（不传 knowledge_base_ids）
+curl -X POST $BASE/api/v1/knowledge-search -H "X-API-Key: $API_KEY" \
+  -H 'Content-Type: application/json' -d '{"query":"部署要求","knowledge_ids":["k-1","k-2"]}'
 ```
 
 ## 消息（/api/v1/messages）
@@ -571,6 +577,8 @@ curl -X DELETE "$BASE/api/v1/artifacts?session_id=session-1&message_id=message-1
 ### 每轮用量
 
 消息返回持久化的 usage，Agent 完成事件携带 turn_usage；包含本轮各用途模型调用聚合结果。工具调用自身并不都产生 Token，用量以提供商返回或后端已采集的记录为准。字段见[可观测性](../03-features/16-observability.md)。
+
+智能体模式的完成事件在 `data.model_id` 中携带本轮实际运行的对话模型 ID（产生本轮用量的模型），可据此通过模型接口取得模型信息、按单价换算用量。消息记录中的 `model_id` 是请求时绑定的模型，请求指定的模型无效而回退到智能体模型时两者不同。快速问答的完成事件暂不携带该字段。
 
 ## 实现参考
 

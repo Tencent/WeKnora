@@ -101,7 +101,9 @@ helm install weknora ./helm \
 
 ### Production Installation
 
-For production, use a values file:
+For production with the default local file storage, use a single App replica and
+an update strategy that releases the old Pod's volume before starting its
+replacement:
 
 ```yaml
 # values-production.yaml
@@ -109,7 +111,9 @@ global:
   storageClass: "fast-ssd"
 
 app:
-  replicaCount: 3
+  replicaCount: 1
+  strategy:
+    type: Recreate
   resources:
     requests:
       cpu: 500m
@@ -140,7 +144,89 @@ helm install weknora ./helm \
   -f values-production.yaml
 ```
 
+The chart-created data-files PVC uses `ReadWriteOnce` (RWO). RWO allows several
+Pods to mount the volume on the same node; it does not provide shared writable
+access across nodes. With a single-node-attach volume, the default rolling update
+(`maxSurge: 1`, `maxUnavailable: 0`) can leave a replacement Pod waiting for the
+old Pod's attachment to be released. `Recreate` terminates the old Pods before
+starting replacements during an upgrade, so **App upgrades have downtime**;
+volume detach/attach can still take time. This strategy does not make RWO storage
+suitable for multiple App replicas across nodes. See Kubernetes documentation on
+[access modes](https://kubernetes.io/docs/concepts/storage/persistent-volumes/#access-modes)
+and [Deployment strategies](https://kubernetes.io/docs/concepts/workloads/controllers/deployment/#strategy).
+
+For multiple App replicas using local storage, first provision and verify a
+shared filesystem PVC that supports `ReadWriteMany` (RWX) on the intended nodes.
+Apply the following override together with `values-production.yaml`:
+
+```yaml
+# values-shared-storage.yaml
+app:
+  replicaCount: 3
+  strategy:
+    type: RollingUpdate
+
+dataFiles:
+  persistence:
+    enabled: true
+    existingClaim: weknora-shared-files  # Pre-provisioned, verified RWX PVC
+```
+
+```bash
+helm install weknora ./helm \
+  --namespace weknora \
+  --create-namespace \
+  -f values-production.yaml \
+  -f values-shared-storage.yaml
+```
+
+The existing claim must be in the release namespace and allow the App containers
+to read and write `/data/files`. The chart references it without creating or
+validating its access mode. All App replicas must see the same files; disabling
+persistence or assigning independent local volumes does not provide shared
+storage. This override addresses App file storage only, not high availability
+for the chart's database or other components. Object storage is another option
+only after configuring the provider and checking that all paths needed by your
+deployment are accessible to every replica.
+
 ## Configuration
+
+### Service names
+
+Optional Service name overrides preserve the following defaults:
+
+| Parameter | Default when omitted or empty |
+|-----------|-------------------------------|
+| `app.service.name` | `app` |
+| `frontend.service.name` | `frontend` |
+| `postgresql.service.name` | `postgres` |
+| `redis.service.name` | `redis` |
+| `docreader.service.name` | `docreader` |
+| `neo4j.service.name` | `neo4j` (when enabled) |
+
+For example, save this as `service-names.yaml`:
+
+```yaml
+app:        {service: {name: weknora-app}}
+frontend:   {service: {name: weknora-frontend}}
+postgresql: {service: {name: weknora-postgres}}
+redis:      {service: {name: weknora-redis}}
+docreader:  {service: {name: weknora-docreader}}
+neo4j:      {service: {name: weknora-neo4j}}
+```
+
+Pass `-f service-names.yaml` alongside your other values. Names must be valid
+Kubernetes Service names. Services, backend addresses, Ingress and installation
+notes use these names consistently. Frontend's `APP_HOST` follows the App Service
+unless `frontend.appHost` is explicitly set.
+
+For multiple releases in one namespace, use distinct names for every enabled
+Service (for example, `alpha-app` and `beta-app`). Defaults are not release-prefixed
+and still collide. Configure separate Ingress hosts when needed.
+
+Omitted or empty overrides preserve Service names on upgrade. Changing a name on
+an existing installation requires a DNS/consumer cutover plan; matching a
+pre-existing Service name does not automatically transfer its ownership to Helm.
 
 ### Global Parameters
 
@@ -166,6 +252,9 @@ helm install weknora ./helm \
 |-----------|-------------|---------|
 | `app.enabled` | Enable backend | `true` |
 | `app.replicaCount` | Number of replicas | `1` |
+| `app.strategy.type` | App update strategy: `RollingUpdate` or `Recreate` | `RollingUpdate` |
+| `app.strategy.rollingUpdate.maxSurge` | Extra Pods during rolling updates (integer or percentage); ignored with `Recreate` | `1` |
+| `app.strategy.rollingUpdate.maxUnavailable` | Unavailable Pods during rolling updates (integer or percentage); ignored with `Recreate` | `0` |
 | `app.image.repository` | Image repository | `wechatopenai/weknora-app` |
 | `app.image.tag` | Image tag | `""` (uses appVersion) |
 | `app.resources` | Resource limits | See values.yaml |

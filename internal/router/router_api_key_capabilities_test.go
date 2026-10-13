@@ -158,6 +158,7 @@ func TestAgentReadRoutesDeclareReadAgentsCapability(t *testing.T) {
 	}{
 		{http.MethodGet, "/api/v1/agents/placeholders"},
 		{http.MethodGet, "/api/v1/agents/type-presets"},
+		{http.MethodGet, "/api/v1/agents/tools"},
 		{http.MethodGet, "/api/v1/agents"},
 		{http.MethodGet, "/api/v1/agents/:id"},
 		{http.MethodGet, "/api/v1/agents/:id/suggested-questions"},
@@ -371,6 +372,7 @@ func TestTenantInfrastructureRoutesDeclareSpecificCapabilities(t *testing.T) {
 			http.MethodPost, "/api/v1/mcp-services/:id/usage-instructions/generate",
 			types.APIKeyCapabilityManageMCPServices,
 		},
+		{http.MethodPost, "/api/v1/mcp-services/:id/oauth/assertion", types.APIKeyCapabilityManageMCPServices},
 		{http.MethodGet, "/api/v1/web-search-providers", types.APIKeyCapabilityManageWebSearch},
 		{http.MethodGet, "/api/v1/vector-stores", types.APIKeyCapabilityManageVectorStores},
 		{http.MethodGet, "/api/v1/storage-backends", types.APIKeyCapabilityManageStorageBackends},

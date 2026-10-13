@@ -62,6 +62,14 @@ app:
   # -- Number of replicas
   replicaCount: 1
 
+  # -- App update strategy. Use Recreate for single-replica, single-node-attach storage.
+  strategy:
+    type: RollingUpdate
+    # -- Only used with RollingUpdate; integers and percentages are supported.
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+
   image:
     # -- Image repository
     repository: wechatopenai/weknora-app
@@ -114,6 +122,8 @@ app:
 
   # -- Service configuration
   service:
+    # -- Service name override (empty keeps "app")
+    name: ""
     type: ClusterIP
     port: 8080
 
@@ -181,6 +191,8 @@ frontend:
 
   # -- Service configuration
   service:
+    # -- Service name override (empty keeps "frontend")
+    name: ""
     type: ClusterIP
     port: 80
 
@@ -231,6 +243,8 @@ docreader:
 
   # -- Service configuration
   service:
+    # -- Service name override (empty keeps "docreader")
+    name: ""
     type: ClusterIP
     port: 50051
 
@@ -249,6 +263,10 @@ docreader:
 postgresql:
   # -- Enable PostgreSQL
   enabled: true
+
+  service:
+    # -- Service name override (empty keeps "postgres")
+    name: ""
 
   image:
     # -- Image repository (ParadeDB for vector search)
@@ -295,6 +313,10 @@ postgresql:
 redis:
   # -- Enable Redis
   enabled: true
+
+  service:
+    # -- Service name override (empty keeps "redis")
+    name: ""
 
   image:
     # -- Image repository
@@ -445,6 +467,10 @@ minio:
 neo4j:
   # -- Enable Neo4j for GraphRAG
   enabled: false
+
+  service:
+    # -- Service name override (empty keeps "neo4j")
+    name: ""
 
   image:
     # -- Image repository

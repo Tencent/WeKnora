@@ -76,6 +76,10 @@ type ImageListFilter struct {
 	AttrRules map[string]map[string]string
 	// IsEnabled, when non-nil, restricts to chunks with that enabled state.
 	IsEnabled *bool
+	// KnowledgeIDs, when non-empty, restricts the listing to images whose
+	// owning document is one of these knowledge items. The handler caps the
+	// list so a caller cannot send an unbounded IN clause.
+	KnowledgeIDs []string
 }
 
 // ImageAssetField names one value of an image the gallery query can search,
@@ -113,10 +117,13 @@ type ImageAssetQuery struct {
 	OffRules []ImageAssetValueSet
 	// IsEnabled, when non-nil, restricts to chunks with that enabled state.
 	IsEnabled *bool
-	SortField ImageAssetField
-	SortDesc  bool
-	Offset    int
-	Limit     int
+	// KnowledgeIDs, when non-empty, restricts to images owned by these
+	// knowledge items.
+	KnowledgeIDs []string
+	SortField    ImageAssetField
+	SortDesc     bool
+	Offset       int
+	Limit        int
 }
 
 // ImageAssetRow is one de-duplicated image as the repository returns it: a

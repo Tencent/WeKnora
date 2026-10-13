@@ -576,6 +576,9 @@ watch([activitySessionId, isReplying, isImRecovering, currentAssistantMessageId]
     sessionActivity.update(activitySessionId.value, isReplying.value || isImRecovering.value, currentAssistantMessageId.value);
 }, { flush: 'sync' });
 const historyLoading = ref(true);
+watch(activitySessionId, (id) => {
+    if (!props.embeddedMode) sessionActivity.setViewing(id);
+}, { flush: 'sync' });
 const historyLoadingMore = ref(false);
 const hasMoreHistory = ref(true);
 
@@ -2160,13 +2163,54 @@ onBeforeRouteUpdate((to, from, next) => {
 
 <style lang="less">
 .chat-rewind-popconfirm {
-    max-width: 260px;
+    .t-popconfirm__content {
+        width: 280px;
+        max-width: calc(100vw - 24px);
+        padding: 14px 16px 12px;
+        box-sizing: border-box;
+    }
 
-    .t-popconfirm__content,
-    .t-popup__content {
-        max-width: 260px;
+    .t-popconfirm__body {
+        gap: 8px;
+    }
+
+    .t-popconfirm__body > .t-icon {
+        flex-shrink: 0;
+        margin: 0;
+        padding: 3px 0 0;
+        font-size: var(--app-text-xl);
+    }
+
+    .t-popconfirm__inner {
+        flex: 1;
+        min-width: 0;
+        max-width: none;
         white-space: normal;
-        line-height: 1.5;
+    }
+
+    .chat-rewind-confirm__title {
+        font-size: var(--app-text-base);
+        font-weight: 500;
+        line-height: 22px;
+        color: var(--td-text-color-primary);
+    }
+
+    .chat-rewind-confirm__body {
+        margin-top: 2px;
+        font-size: var(--app-text-md);
+        line-height: 20px;
+        color: var(--td-text-color-secondary);
+    }
+
+    .t-popconfirm__buttons {
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+        margin-top: 12px;
+
+        .t-popconfirm__confirm {
+            margin-left: 0;
+        }
     }
 }
 </style>

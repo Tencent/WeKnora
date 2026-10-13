@@ -77,6 +77,15 @@ const winnerClause = "NOT EXISTS (SELECT 1 FROM chunk_images o " +
 	"OR (o.updated_at = i.updated_at AND (o.chunk_id < i.chunk_id " +
 	"OR (o.chunk_id = i.chunk_id AND o.image_index < i.image_index)))))"
 
+// scopedWinnerClause is winnerClause restricted to copies inside the listed
+// documents: a copy outside them must not hide the image from a document that
+// carries it too.
+const scopedWinnerClause = "NOT EXISTS (SELECT 1 FROM chunk_images o " +
+	"WHERE o.knowledge_base_id = i.knowledge_base_id AND o.tenant_id = i.tenant_id " +
+	"AND o.image_key = i.image_key AND o.knowledge_id IN ? AND (o.updated_at > i.updated_at " +
+	"OR (o.updated_at = i.updated_at AND (o.chunk_id < i.chunk_id " +
+	"OR (o.chunk_id = i.chunk_id AND o.image_index < i.image_index)))))"
+
 // imageAssetDialect holds the expressions postgres and sqlite spell
 // differently: reading the attrs JSON and matching the keyword.
 type imageAssetDialect struct {
@@ -97,6 +106,10 @@ func (d imageAssetDialect) where(
 	if q.IsEnabled != nil {
 		clauses = append(clauses, "i.is_enabled = ?")
 		args = append(args, *q.IsEnabled)
+	}
+	if len(q.KnowledgeIDs) > 0 {
+		clauses = append(clauses, "i.knowledge_id IN ?")
+		args = append(args, q.KnowledgeIDs)
 	}
 	if kw := strings.TrimSpace(q.Keyword); kw != "" {
 		pattern := "%" + escapeLikeKeyword(kw) + "%"
@@ -143,7 +156,12 @@ func (d imageAssetDialect) where(
 		args = append(append(args, onArgs...), offArgs...)
 	}
 	filtered = len(clauses) > 2
-	return strings.Join(append(clauses, winnerClause), " AND "), args, filtered
+	winner := winnerClause
+	if len(q.KnowledgeIDs) > 0 {
+		winner = scopedWinnerClause
+		args = append(args, q.KnowledgeIDs)
+	}
+	return strings.Join(append(clauses, winner), " AND "), args, filtered
 }
 
 // anyCarries is true for an image carrying any of the sets' values. An image

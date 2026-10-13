@@ -324,6 +324,7 @@ export default {
   },
   menu: {
     sessionInProgress: 'Conversation in progress',
+    sessionUnread: 'New reply',
     knowledgeBase: 'Knowledge Base',
     agents: 'Agents',
     artifacts: 'Artifacts',
@@ -1828,6 +1829,7 @@ export default {
       skillTranscriptLive: 'Install log',
       skillTranscriptLiveHint: 'Installing — click to watch',
       skillTranscriptTitle: 'Install run',
+      skillTranscriptPrompt: 'Install instructions',
       skillTranscriptHide: 'Hide install run',
       skillGuidance: {
         placeholder: 'Add installation guidance, such as required CLIs, setup documentation, or environment constraints',
@@ -1946,6 +1948,7 @@ export default {
       installedCount: 'Installed on {count} sandboxes',
       installPanelGroup: 'Installed',
       installPanelAvailable: 'Not installed',
+      installAction: 'Install',
       viewInstallProgress: 'View progress',
       manageOnSandbox: 'Manage this skill on “{name}”',
       manageDrawerDesc: 'Manage enablement, variables, and uninstall on sandbox “{name}”.',
@@ -2804,7 +2807,13 @@ export default {
     mcpStale: 'Needs resync',
     belongsToKb: 'Knowledge base: ',
     belongsToOrg: 'Space: ',
-    noCompatibleKbForAgent: 'This agent\'s tools don\'t match any knowledge base\'s capabilities in scope, so nothing can be referenced.'
+    noCompatibleKbForAgent: 'This agent\'s tools don\'t match any knowledge base\'s capabilities in scope, so nothing can be referenced.',
+    tag: 'Tags',
+    searchPlaceholder: 'Search KBs, files, skills…',
+    searchInGroup: 'Search in {group}…',
+    typeToSearch: "Keep typing after {'@'} to search…",
+    viewAll: 'View all',
+    back: 'Back'
   },
   file: {
     upload: 'Upload File'
@@ -3527,6 +3536,17 @@ export default {
         viewerClose: 'Close (Esc)',
         prev: 'Previous (←)',
         next: 'Next (→)',
+        sourceFilter: 'By document',
+        sourceFilterTitle: 'Filter by source document',
+        sourceFilterSearch: 'Search document names',
+        sourceFilterEmpty: 'No matching documents',
+        sourceFilterSubtitle: 'The gallery shows only images from the selected documents, so captions and OCR can be checked one by one',
+        sourceFilterSelected: '{count} documents selected',
+        sourceFilterClear: 'Clear selection',
+        sourceFilterTooMany: 'At most 1000 documents can be selected',
+        sourceFilterSelectAll: 'Select all / none (across every hit)',
+        sourceFilterOverflowRecent: 'Many documents: showing only the most recent {cap}. Refine with a keyword.',
+        sourceFilterOverflowHits: '{total} documents hit; showing the first {cap}. Narrow the keyword before selecting all.',
         // Display names for the builtin attributes the gallery itself
         // declares. Attributes contributed by other sources fall back to the
         // pipeline's own wording (see the imageAttr namespace).
@@ -4074,6 +4094,7 @@ export default {
     truncatedHint: 'This answer was cut off at the per-response output limit. Above is what the model produced before the cut.',
     rewind: {
       tooltip: 'Rewind to here',
+      confirmTitle: 'Rewind to here?',
       confirmBody: 'Later messages will be deleted. Rewinding from a question also removes that question and puts it back in the input. The workspace rolls back when a checkpoint is available. This cannot be undone.',
       confirmButton: 'Rewind',
       cancelButton: 'Cancel',
@@ -5631,6 +5652,9 @@ export default {
     "serverDocumentation": "Original server documentation",
     "noServerDocumentation": "This MCP server's initialize result did not include instructions or serverInfo.description (both are optional). Tool text lives in each tool's description below.",
     "policyHint": "Tool and approval switches save immediately and survive directory refreshes.",
+    "columnTool": "Tool",
+    "columnEnabled": "Enabled",
+    "columnApproval": "Approval",
     "failed": "Could not load the tool directory",
     "setupProgress": "MCP setup steps",
     "connection": "Connection",
@@ -5673,6 +5697,9 @@ export default {
     authTypeApiKey: 'API Key / Token',
     authTypeOAuth: 'OAuth 2.0 (authorize on first connect)',
     oauthScopes: 'Scopes (optional, space-separated)',
+    oauthClientId: 'Client ID (optional)',
+    oauthClientIdDesc: 'A client registered with the authorization server in advance. Leave empty to register one automatically (dynamic client registration). When you change the Client ID, update the Client Secret too.',
+    oauthClientSecret: 'Client Secret (optional)',
     oauthAuthorization: 'Authorization Status',
     oauthAuthorized: 'Authorized',
     oauthRefreshable: 'Token expired; it will refresh automatically on next use',
@@ -6290,6 +6317,22 @@ export default {
       script: 'script',
       instructions: 'Instructions'
     },
+    attachmentTarget: {
+      list: 'all attachments',
+      file: 'attachment',
+      images: 'images in {name}',
+      imagesUnnamed: 'attachment images',
+      image: 'image {n} of {name}',
+      imageUnnamed: 'attachment image {n}'
+    },
+    imageView: {
+      summary: 'Viewed image {numbers} of {total} in "{file}"',
+      single: 'Viewed image "{file}"',
+      descriptionsHeading: 'Descriptions from the vision model',
+      imageLabel: 'Image #{n}',
+      noDescription: 'Could not be described',
+      remaining: '{count} more not viewed'
+    },
     sandboxFiles: {
       found: 'Found {count} file(s)',
       empty: 'No files',
@@ -6603,6 +6646,13 @@ export default {
       kbMetricRag: 'RAG KBs',
       kbMetricWiki: 'Wiki KBs',
       statusInactive: '{count} ticked tool(s) cannot take effect with the current config',
+      searchConversations: 'Search past conversations',
+      searchConversationsDesc: 'Look up what was discussed in this user\'s own earlier conversations',
+      groupStored: 'Stored, not offered here',
+      switchManagedDesc: 'Controlled by other settings of this agent, not by this list, so ticking it here does not turn it on. Untick it to remove it.',
+      unrecognizedDesc: 'Not a tool this version offers, so the agent cannot call it. Untick it to remove it.',
+      keptUnknownWarning: 'Saved. These stored tools are not offered by this version and were kept, but the agent cannot call them: {names}',
+      droppedWarning: 'Saved. These tools are controlled by other settings of this agent and were removed from the tool list: {names}',
       effectiveLabel: 'Effective Tools',
       effectiveDesc: 'Computed from the current config — these are the tools the agent will actually be able to call',
       effectiveEmpty: 'No tool available — the agent will fall back to plain model chat'
