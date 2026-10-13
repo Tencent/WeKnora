@@ -17,6 +17,7 @@ import (
 	"net/url"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -911,9 +912,7 @@ func (c *Client) FilterKnowledge(ctx context.Context, keyword string, offset, li
 	queryParams.Set("offset", strconv.Itoa(offset))
 	queryParams.Set("limit", strconv.Itoa(limit))
 	if len(fileTypes) > 0 {
-		for _, ft := range fileTypes {
-			queryParams.Add("file_types", ft)
-		}
+		queryParams.Set("file_types", strings.Join(fileTypes, ","))
 	}
 	if agentID != "" {
 		queryParams.Set("agent_id", agentID)
