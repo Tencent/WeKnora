@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/common"
+	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"gorm.io/gorm"
@@ -68,10 +69,27 @@ func (r *chunkRepository) CreateChunks(ctx context.Context, chunks []*types.Chun
 	}
 
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		// SQLite doesn't support autoIncrement on non-PK columns, so SeqIDs are
+		released, err := releaseTakenChunkSeqIDs(tx, chunks)
+		if err != nil {
+			return fmt.Errorf("failed to release chunk seq_ids: %w", err)
+		}
+		if released > 0 {
+			logger.Warnf(ctx,
+				"%d chunk(s) requested a seq_id that cannot be preserved (already taken, "+
+					"soft-deleted rows included, or inside the range the database sequence "+
+					"allocates from) and were reassigned", released)
+		}
+
+		// SQLite has no autoIncrement default on non-PK columns, so SeqIDs are
 		// pre-assigned from MAX(seq_id). Doing it inside the write transaction
 		// keeps the read and the insert on the same connection.
-		// PostgreSQL uses a DB sequence — skip to avoid duplicate key races.
+		//
+		// PostgreSQL must keep using the column DEFAULT
+		// nextval('chunks_seq_id_seq'): the sequence is the only authority for
+		// ids >= types.ChunkSeqIDSequenceStart, and a MAX(seq_id)+1 value is
+		// exactly what nextval hands out next, so writing it explicitly makes
+		// the following ordinary insert fail on idx_chunks_seq_id. Chunks
+		// released above (SeqID == 0) are therefore numbered by the sequence.
 		if tx.Name() == "sqlite" {
 			if err := types.AssignChunkSeqIDs(tx, chunks); err != nil {
 				return fmt.Errorf("failed to assign chunk seq_ids: %w", err)
@@ -83,6 +101,99 @@ func (r *chunkRepository) CreateChunks(ctx context.Context, chunks []*types.Chun
 		// SeqID=0 is skipped by GORM automatically (autoIncrement tag).
 		return tx.Select("*").CreateInBatches(chunks, createChunksBatchSize).Error
 	})
+}
+
+// releaseTakenChunkSeqIDs zeroes the SeqID of every chunk whose requested
+// seq_id cannot be preserved, so the insert allocates a fresh id instead of
+// failing the whole batch on the unique index. It returns how many ids were
+// released.
+//
+// A requested seq_id is released when any of these holds:
+//
+//   - it is already taken. chunks.seq_id is a global unique index and gorm soft
+//     deletes keep the row — and the value it occupies — in the table.
+//   - it appears twice inside the batch (the second occurrence cannot be
+//     inserted as-is).
+//   - the dialect is PostgreSQL and the id is >=
+//     types.ChunkSeqIDSequenceStart. Those ids belong to chunks_seq_id_seq; the
+//     sequence will hand the same value out again later, so keeping an
+//     imported one is a time bomb even when the value is currently free. This
+//     is the cross-instance import case ("export from A, import into an empty
+//     B"). SQLite has no such sequence and allocates from MAX(seq_id) instead,
+//     so it keeps high ids as-is.
+//
+// Low ids (< ChunkSeqIDSequenceStart) that are free are preserved on both
+// dialects: nextval never produces them, so they cannot collide with automatic
+// allocation. That is what keeps historical migration ids and ids exported
+// from SQLite stable across an import.
+//
+// Callers that carry a seq_id are migrating or round-tripping FAQ entries
+// ("export → edit → import"), and both routes collide as soon as the source
+// rows still exist somewhere in the table: appending to another knowledge base
+// hits the live originals, replacing in the same knowledge base hits its own
+// soft-deleted rows. Reassigning keeps the entries (a new id is observable on
+// chunks[i].SeqID) instead of dropping the whole batch.
+func releaseTakenChunkSeqIDs(tx *gorm.DB, chunks []*types.Chunk) (int, error) {
+	requested := make([]int64, 0, len(chunks))
+	seen := make(map[int64]struct{}, len(chunks))
+	for _, chunk := range chunks {
+		if chunk == nil || chunk.SeqID <= 0 {
+			continue
+		}
+		if _, ok := seen[chunk.SeqID]; ok {
+			continue
+		}
+		seen[chunk.SeqID] = struct{}{}
+		requested = append(requested, chunk.SeqID)
+	}
+	if len(requested) == 0 {
+		return 0, nil
+	}
+
+	// PostgreSQL releases the sequence's own range unconditionally (below), so
+	// only the low-range ids need the "is it occupied" lookup.
+	releaseSequenceRange := tx.Name() == "postgres"
+	probe := requested
+	if releaseSequenceRange {
+		probe = make([]int64, 0, len(requested))
+		for _, seqID := range requested {
+			if seqID < types.ChunkSeqIDSequenceStart {
+				probe = append(probe, seqID)
+			}
+		}
+	}
+
+	takenSet := make(map[int64]struct{}, len(probe))
+	if len(probe) > 0 {
+		var taken []int64
+		// Unscoped: soft-deleted rows still occupy their seq_id.
+		if err := tx.Unscoped().Model(&types.Chunk{}).
+			Where("seq_id IN ?", probe).
+			Pluck("seq_id", &taken).Error; err != nil {
+			return 0, err
+		}
+		for _, seqID := range taken {
+			takenSet[seqID] = struct{}{}
+		}
+	}
+
+	kept := make(map[int64]struct{}, len(requested))
+	released := 0
+	for _, chunk := range chunks {
+		if chunk == nil || chunk.SeqID <= 0 {
+			continue
+		}
+		_, isTaken := takenSet[chunk.SeqID]
+		_, isDuplicate := kept[chunk.SeqID]
+		inSequenceRange := releaseSequenceRange && chunk.SeqID >= types.ChunkSeqIDSequenceStart
+		if isTaken || isDuplicate || inSequenceRange {
+			chunk.SeqID = 0
+			released++
+			continue
+		}
+		kept[chunk.SeqID] = struct{}{}
+	}
+	return released, nil
 }
 
 // GetChunkByID retrieves a chunk by its ID and tenant ID
@@ -918,10 +1029,12 @@ func (r *chunkRepository) ListAllFAQChunksForExport(
 	for {
 		var batchChunks []*types.Chunk
 		if err := r.db.WithContext(ctx).
-			Select("id, metadata, tag_id, is_enabled, flags").
+			Select("id, seq_id, metadata, tag_id, is_enabled, flags").
 			Where("tenant_id = ? AND knowledge_id = ? AND chunk_type = ? AND status = ?",
 				tenantID, knowledgeID, types.ChunkTypeFAQ, types.ChunkStatusIndexed).
-			Order("created_at ASC").
+			// seq_id 是唯一 tiebreaker：批量导入的 FAQ 行 created_at 常同秒，
+			// 只按 created_at 翻页会漏行/重复行。
+			Order("created_at ASC, seq_id ASC").
 			Offset(offset).
 			Limit(batchSize).
 			Find(&batchChunks).Error; err != nil {

@@ -217,6 +217,26 @@ func TestCreateChunks_SQLite_SeqIDAfterSoftDelete(t *testing.T) {
 	assert.Equal(t, int64(5), saved[1].SeqID)
 }
 
+// SQLite has no chunks_seq_id_seq — it allocates from MAX(seq_id)+1 inside the
+// write transaction — so a free high-range id is harmless and must be kept
+// verbatim. The PostgreSQL-only release rule in releaseTakenChunkSeqIDs must
+// not fire on this dialect.
+func TestCreateChunks_SQLite_KeepsFreeHighSeqID(t *testing.T) {
+	db := setupChunkTestDB(t)
+	repo := NewChunkRepository(db)
+	ctx := context.Background()
+
+	high := makeChunk("kb-high", "k-high", types.ChunkTypeFAQ)
+	high.SeqID = 100000042
+	require.NoError(t, repo.CreateChunks(ctx, []*types.Chunk{high}))
+	assert.Equal(t, int64(100000042), high.SeqID,
+		"SQLite 没有序列，未被占用的高位 id 应原样保留")
+
+	next := makeChunk("kb-high", "k-high", types.ChunkTypeFAQ)
+	require.NoError(t, repo.CreateChunks(ctx, []*types.Chunk{next}))
+	assert.Equal(t, int64(100000043), next.SeqID, "SQLite 从 MAX(seq_id)+1 继续分配")
+}
+
 func TestUpdateChunk_SQLite_NoNOWError(t *testing.T) {
 	db := setupChunkTestDB(t)
 	ctx := context.Background()
