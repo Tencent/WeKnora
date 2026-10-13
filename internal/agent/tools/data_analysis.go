@@ -948,7 +948,8 @@ func (t *DataAnalysisTool) resolveFileServiceForKnowledge(ctx context.Context, k
 	if provider == "" && tenant != nil && tenant.StorageEngineConfig != nil {
 		provider = strings.ToLower(strings.TrimSpace(tenant.StorageEngineConfig.DefaultProvider))
 	}
-	if t.storageResolver != nil && tenant != nil && (backendID != "" || provider != "") {
+	// The resolver also handles workspace defaults without a legacy provider.
+	if t.storageResolver != nil && tenant != nil {
 		resolvedSvc, resolvedProvider, err := t.storageResolver.ResolveFileService(
 			ctx, tenant, backendID, provider, t.localBaseDir,
 		)

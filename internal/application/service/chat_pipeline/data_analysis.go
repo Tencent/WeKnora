@@ -24,6 +24,7 @@ type PluginDataAnalysis struct {
 	chunkRepo            interfaces.ChunkRepository
 	tenantService        interfaces.TenantService
 	db                   *sql.DB
+	storageResolver      interfaces.StorageBackendResolver
 }
 
 func NewPluginDataAnalysis(
@@ -35,6 +36,7 @@ func NewPluginDataAnalysis(
 	chunkRepo interfaces.ChunkRepository,
 	tenantService interfaces.TenantService,
 	db *sql.DB,
+	storageResolver interfaces.StorageBackendResolver,
 ) *PluginDataAnalysis {
 	p := &PluginDataAnalysis{
 		modelService:         modelService,
@@ -44,6 +46,7 @@ func NewPluginDataAnalysis(
 		chunkRepo:            chunkRepo,
 		tenantService:        tenantService,
 		db:                   db,
+		storageResolver:      storageResolver,
 	}
 	eventManager.Register(p)
 	return p
@@ -89,7 +92,10 @@ func (p *PluginDataAnalysis) OnEvent(
 	}
 
 	// Initialize DataAnalysisTool
-	tool := tools.NewDataAnalysisTool(p.knowledgeBaseService, p.knowledgeService, p.tenantService, p.fileService, p.db, chatManage.SessionID)
+	tool := tools.NewDataAnalysisTool(
+		p.knowledgeBaseService, p.knowledgeService, p.tenantService,
+		p.fileService, p.db, chatManage.SessionID, p.storageResolver,
+	)
 	defer tool.Cleanup(ctx)
 
 	// Load data into DuckDB
