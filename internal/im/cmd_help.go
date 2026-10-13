@@ -31,9 +31,13 @@ func (c *HelpCommand) Execute(_ context.Context, _ *CommandContext, args []strin
 				Content: fmt.Sprintf("未知指令 `%s`，发送 `/help` 查看所有可用指令。", args[0]),
 			}, nil
 		}
-		return &CommandResult{
-			Content: fmt.Sprintf("**/%s** — %s", cmd.Name(), cmd.Description()),
-		}, nil
+		content := fmt.Sprintf("**/%s** — %s", cmd.Name(), cmd.Description())
+		if u, ok := cmd.(interface{ Usage() string }); ok {
+			if usage := u.Usage(); usage != "" {
+				content += "\n" + usage
+			}
+		}
+		return &CommandResult{Content: content}, nil
 	}
 
 	// /help — list all commands sorted by name
