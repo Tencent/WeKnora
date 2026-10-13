@@ -550,6 +550,15 @@ func (t *DataAnalysisTool) LoadFromCSV(ctx context.Context, filename string, tab
 func (t *DataAnalysisTool) LoadFromExcel(ctx context.Context, filename string, tableName string) (*TableSchema, error) {
 	logger.Infof(ctx, "[Tool][DataAnalysis] Loading Excel file '%s' into table '%s' for session %s", filename, tableName, t.sessionID)
 
+	// DuckDB's read_xlsx only understands Office Open XML. Legacy .xls
+	// workbooks are converted to a temporary .xlsx first.
+	prepared, cleanup, err := prepareExcelForDuckDB(filename)
+	if err != nil {
+		return nil, fmt.Errorf("prepare excel file: %w", err)
+	}
+	defer cleanup()
+	filename = prepared
+
 	if !t.loadedTables[tableName] {
 		t.recordCreatedTable(tableName)
 		sheetNames, enumErr := t.listExcelSheets(ctx, filename)
