@@ -547,6 +547,17 @@ func (s *TenantSkillService) runInstall(
 		return err
 	}
 
+	// The reset provisioned the sandbox; from here on everything this install
+	// does lives in it. Holding it keeps a minutes-long command from outlasting
+	// the provider's idle TTL, and turns a reclaimed sandbox into a failed
+	// install instead of a fresh one booted from the previous image, which
+	// would otherwise be verified and snapshotted as if it carried this work.
+	ctx, releaseHold, err := holdInstallSandbox(ctx, mgr, sess.ID)
+	if err != nil {
+		return err
+	}
+	defer releaseHold()
+
 	// Locators must land before the file seed. A large skill is copied file by
 	// file over the sandbox API and can take minutes; the console attaches to
 	// the transcript as soon as the directory is ready, not after that copy.
@@ -1311,6 +1322,23 @@ func installExecutor(mgr sandbox.Manager) (sandbox.SessionInstallShellExecutor, 
 		return nil, errors.New("sandbox backend does not support install-mode shell")
 	}
 	return executor, nil
+}
+
+// holdInstallSandbox pins the install's sandbox when the backend can. Docker
+// has no provider TTL, and a manager without the capability keeps its old
+// behaviour rather than refusing to install.
+func holdInstallSandbox(
+	ctx context.Context, mgr sandbox.Manager, sessionID string,
+) (context.Context, func(), error) {
+	holder, ok := mgr.(sandbox.SessionSandboxHolder)
+	if !ok {
+		return ctx, func() {}, nil
+	}
+	held, release, err := holder.HoldSessionSandbox(ctx, sessionID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("hold install sandbox: %w", err)
+	}
+	return held, release, nil
 }
 
 // execInstall runs one command as root with the skills root allowed.

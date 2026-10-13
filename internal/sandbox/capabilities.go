@@ -126,6 +126,13 @@ type SessionDestroyer interface {
 	DestroySession(ctx context.Context, sessionID string) error
 }
 
+// SessionSandboxHolder pins a session's live sandbox for the lifetime of a
+// multi-command operation and keeps it from expiring meanwhile. See
+// SessionBoundManager.HoldSessionSandbox.
+type SessionSandboxHolder interface {
+	HoldSessionSandbox(ctx context.Context, sessionID string) (context.Context, func(), error)
+}
+
 // SessionInstallCapabilityProvider is implemented by managers that can run
 // install-mode shell commands. Like the other accessors it returns nil when
 // the current runtime cannot honour the capability.

@@ -827,21 +827,10 @@ func (m *SessionBoundManager) execShellCommandWithOutputSnapshot(
 		if keyErr != nil {
 			return nil, nil, keyErr
 		}
-		exists, checkErr := m.checker.SessionExists(ctx, key)
-		if checkErr != nil {
-			return nil, nil, checkErr
-		}
-		if !exists {
-			return nil, nil, ErrSandboxSessionDeleted
-		}
-		var found bool
 		// Maintenance must recheck the binding even inside a file-operation scope.
-		handle, found, err = m.lookupSessionHandleForKey(ctx, key, opts.ExpectedSandboxID)
+		handle, err = m.connectExpectedSandbox(ctx, key, opts.ExpectedSandboxID)
 		if err != nil {
 			return nil, nil, err
-		}
-		if !found || handle.ID() != opts.ExpectedSandboxID {
-			return nil, nil, errors.New("sandbox: bound sandbox changed before maintenance command")
 		}
 	} else {
 		handle, err = m.resolveSession(ctx, sessionID)
@@ -1270,6 +1259,9 @@ func (m *SessionBoundManager) resolveSession(
 	if err != nil {
 		return nil, err
 	}
+	if held := heldSandboxID(ctx, sessionID); held != "" {
+		return m.connectHeldSandbox(ctx, key, held)
+	}
 	return m.lifecycle.Resolve(ctx, key)
 }
 
@@ -1371,13 +1363,47 @@ func (m *SessionBoundManager) lookupSessionHandle(
 		if handle := scope.handles[cacheKey]; handle != nil {
 			return handle, true, nil
 		}
-		handle, found, err := m.lookupSessionHandleForKey(ctx, key, "")
+		handle, found, err := m.lookupBoundHandle(ctx, key)
 		if err == nil && found {
 			scope.handles[cacheKey] = handle
 		}
 		return handle, found, err
 	}
+	return m.lookupBoundHandle(ctx, key)
+}
+
+// lookupBoundHandle is the lookup-only path, except that a held sandbox may
+// not quietly read as "no sandbox": its loss is an error the holder must see.
+func (m *SessionBoundManager) lookupBoundHandle(
+	ctx context.Context, key SessionSandboxKey,
+) (RemoteSandboxHandle, bool, error) {
+	if held := heldSandboxID(ctx, key.SessionID); held != "" {
+		handle, err := m.connectHeldSandbox(ctx, key, held)
+		return handle, err == nil, err
+	}
 	return m.lookupSessionHandleForKey(ctx, key, "")
+}
+
+// connectExpectedSandbox connects to the session's sandbox only if it is
+// still expectedID. It never provisions, rebuilds or resumes a different one.
+func (m *SessionBoundManager) connectExpectedSandbox(
+	ctx context.Context, key SessionSandboxKey, expectedID string,
+) (RemoteSandboxHandle, error) {
+	exists, err := m.checker.SessionExists(ctx, key)
+	if err != nil {
+		return nil, err
+	}
+	if !exists {
+		return nil, ErrSandboxSessionDeleted
+	}
+	handle, found, err := m.lookupSessionHandleForKey(ctx, key, expectedID)
+	if err != nil {
+		return nil, err
+	}
+	if !found || handle.ID() != expectedID {
+		return nil, errBoundSandboxChanged
+	}
+	return handle, nil
 }
 
 func (m *SessionBoundManager) lookupSessionHandleForKey(
@@ -1391,7 +1417,7 @@ func (m *SessionBoundManager) lookupSessionHandleForKey(
 		return nil, false, nil
 	}
 	if expectedID != "" && binding.SandboxID != expectedID {
-		return nil, false, errors.New("sandbox: bound sandbox changed before maintenance command")
+		return nil, false, errBoundSandboxChanged
 	}
 	handle, err := m.client.Connect(ctx, RemoteConnectRequest{
 		SandboxID:          binding.SandboxID,

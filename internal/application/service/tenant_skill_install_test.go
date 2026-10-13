@@ -1955,6 +1955,7 @@ type installFixture struct {
 	configRepo *installConfigRepo
 	skillRepo  *installSkillRepo
 	sandboxMgr *installSandboxManager
+	agentCtx   context.Context
 	agentSvc   *installAgentService
 	modelSvc   *installModelService
 	// events are the coarse milestones the ordering tests read; commands is
@@ -3180,7 +3181,7 @@ type installAgentEngine struct {
 }
 
 func (e *installAgentEngine) Execute(
-	_ context.Context,
+	ctx context.Context,
 	_ string,
 	_ string,
 	prompt string,
@@ -3190,6 +3191,7 @@ func (e *installAgentEngine) Execute(
 	if e.fx.beforeExecute != nil {
 		e.fx.beforeExecute()
 	}
+	e.fx.agentCtx = ctx
 	e.fx.agentPrompts = append(e.fx.agentPrompts, prompt)
 	e.fx.record("agent-execute")
 	if e.sink != nil {
