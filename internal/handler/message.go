@@ -120,7 +120,7 @@ func (h *MessageHandler) resolveResourceRewriter(c *gin.Context) (*storageurl.Re
 // @Param        limit          query     int     false  "返回数量"  default(20)
 // @Param        before_time    query     string  false  "在此时间之前的消息（RFC3339Nano格式）"
 // @Param        resource_urls  query     string  false  "文件引用形式，public 返回可加载直链"  Enums(handle, public)  default(handle)
-// @Success      200            {object}  map[string]interface{}  "消息列表"
+// @Success      200            {object}  handler.DataResponse{data=[]types.Message}  "消息列表"
 // @Failure      400          {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth
@@ -232,7 +232,7 @@ func (h *MessageHandler) LoadMessages(c *gin.Context) {
 // @Produce      json
 // @Param        session_id  path      string  true  "会话ID"
 // @Param        id          path      string  true  "消息ID"
-// @Success      200         {object}  map[string]interface{}  "删除成功"
+// @Success      200         {object}  handler.MessageResponse  "删除成功"
 // @Failure      500         {object}  errors.AppError         "服务器错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth
@@ -286,7 +286,7 @@ func (h *MessageHandler) DeleteMessage(c *gin.Context) {
 // @Accept       json
 // @Produce      json
 // @Param        request  body      SearchMessagesRequest  true  "搜索请求"
-// @Success      200      {object}  map[string]interface{}  "搜索结果"
+// @Success      200      {object}  handler.DataResponse{data=types.MessageSearchResult}  "搜索结果"
 // @Failure      400      {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth
@@ -351,7 +351,7 @@ type SearchMessagesRequest struct {
 // @Tags         消息
 // @Accept       json
 // @Produce      json
-// @Success      200  {object}  map[string]interface{}  "统计信息"
+// @Success      200  {object}  handler.DataResponse{data=types.ChatHistoryKBStats}  "统计信息"
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /messages/chat-history-stats [get]

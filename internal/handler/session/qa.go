@@ -1005,7 +1005,7 @@ func knowledgeSearchOptions(request *SearchKnowledgeRequest) (*types.KnowledgeSe
 // @Param        session_id  path      string                   true  "会话ID"
 // @Param        request     body      CreateKnowledgeQARequest true  "问答请求"
 // @Param        resource_urls  query     string  false  "文件引用形式，public 返回可加载直链"  Enums(handle, public)  default(handle)
-// @Success      200         {object}  map[string]interface{}   "问答结果（SSE流）"
+// @Success      200         {string}  string  "SSE 事件流"
 // @Failure      400         {object}  errors.AppError          "请求参数错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth
@@ -1035,7 +1035,7 @@ func (h *Handler) KnowledgeQA(c *gin.Context) {
 // @Param        session_id  path      string                   true  "会话ID"
 // @Param        request     body      CreateKnowledgeQARequest true  "问答请求"
 // @Param        resource_urls  query     string  false  "文件引用形式，public 返回可加载直链"  Enums(handle, public)  default(handle)
-// @Success      200         {object}  map[string]interface{}   "问答结果（SSE流）"
+// @Success      200         {string}  string  "SSE 事件流"
 // @Failure      400         {object}  errors.AppError          "请求参数错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth
