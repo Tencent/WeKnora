@@ -3,6 +3,7 @@ package service
 import (
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 	"unicode"
 
@@ -38,6 +39,12 @@ type ocrValidationError struct{ reason string }
 
 func (e *ocrValidationError) Error() string { return fmt.Sprintf("invalid OCR output: %s", e.reason) }
 
+type captionValidationError struct{ reason string }
+
+func (e *captionValidationError) Error() string {
+	return fmt.Sprintf("invalid caption output: %s", e.reason)
+}
+
 // validateOCRText distinguishes an explicit no-text answer from unusable model
 // output. Reject the entire response, rather than indexing a plausible prefix
 // followed by hallucinated repetition.
@@ -60,17 +67,33 @@ func validateOCRText(raw string) (string, error) {
 	if !readable {
 		return "", &ocrValidationError{reason: "no_readable_content"}
 	}
-	if hasOCRRepetition(text) {
+	if hasImageTextRepetition(text) {
 		return "", &ocrValidationError{reason: "repetitive_content"}
 	}
 	return text, nil
 }
 
+// validateCaptionText rejects decoding loops before captions become searchable
+// chunks. Unlike OCR output, an empty caption is not an error: models may omit
+// a description when the image has no useful visual content.
+func validateCaptionText(raw string) (string, error) {
+	text := strings.TrimSpace(raw)
+	if text == "" {
+		return "", nil
+	}
+	if hasImageTextRepetition(text) {
+		return "", &captionValidationError{reason: "repetitive_content"}
+	}
+	return text, nil
+}
+
 // Count the union of long periodic runs, including runs with different periods
-// separated by readable text. Short repetitions (labels, table separators,
-// numeric values) do not contribute. Normalize whitespace so line wrapping
-// cannot hide a decoding loop. Work is bounded by 64*n, with O(n) storage.
-func hasOCRRepetition(text string) bool {
+// separated by readable text. Then catch two non-periodic loop shapes: repeated
+// windows interrupted by small changing fields, and a runaway counter paired
+// with one stuck value. Short repetitions (labels, table separators, numeric
+// values) do not contribute. Normalize whitespace so line wrapping cannot hide
+// a decoding loop. Work and storage remain linear in the response length.
+func hasImageTextRepetition(text string) bool {
 	runes := []rune(strings.Join(strings.Fields(text), " "))
 	if len(runes) < 512 {
 		return false
@@ -104,7 +127,80 @@ func hasOCRRepetition(text string) bool {
 			repeated++
 		}
 	}
+	if repeated*5 >= len(runes)*4 {
+		return true
+	}
+	return hasRepeatedWindowCoverage(runes) || hasAdvancingCounterLoop(text)
+}
+
+// hasRepeatedWindowCoverage catches a repeated sentence or clause even when a
+// row number, counter, or other small field changes between copies. A window
+// must occur at least 32 times, and qualifying windows must cover 80% of the
+// output, so recurring table syntax or a handful of repeated labels is kept.
+func hasRepeatedWindowCoverage(runes []rune) bool {
+	const (
+		windowRunes    = 16
+		minOccurrences = 32
+	)
+	if len(runes) < windowRunes*minOccurrences {
+		return false
+	}
+
+	counts := make(map[string]int, len(runes)-windowRunes+1)
+	for start := 0; start+windowRunes <= len(runes); start++ {
+		counts[string(runes[start:start+windowRunes])]++
+	}
+
+	coverage := make([]int, len(runes)+1)
+	for start := 0; start+windowRunes <= len(runes); start++ {
+		if counts[string(runes[start:start+windowRunes])] < minOccurrences {
+			continue
+		}
+		coverage[start]++
+		coverage[start+windowRunes]--
+	}
+
+	active, repeated := 0, 0
+	for i := range runes {
+		active += coverage[i]
+		if active > 0 {
+			repeated++
+		}
+	}
 	return repeated*5 >= len(runes)*4
+}
+
+// hasAdvancingCounterLoop recognizes the observed "1 value 2 value ..."
+// failure mode. Requiring at least 256 consecutive pairs and 80% token coverage
+// avoids treating ordinary numbered lists or short constant-valued tables as
+// model loops.
+func hasAdvancingCounterLoop(text string) bool {
+	const minPairs = 256
+	tokens := strings.Fields(text)
+	if len(tokens) < minPairs*2 {
+		return false
+	}
+
+	for offset := 0; offset < 2; offset++ {
+		pairs := 0
+		for i := offset; i+3 < len(tokens); i += 2 {
+			current, currentErr := strconv.ParseInt(tokens[i], 10, 64)
+			next, nextErr := strconv.ParseInt(tokens[i+2], 10, 64)
+			if currentErr == nil && nextErr == nil && next == current+1 && tokens[i+1] == tokens[i+3] {
+				if pairs == 0 {
+					pairs = 2
+				} else {
+					pairs++
+				}
+				if pairs >= minPairs && pairs*2*5 >= len(tokens)*4 {
+					return true
+				}
+				continue
+			}
+			pairs = 0
+		}
+	}
+	return false
 }
 
 func normalizeOCRText(raw string) string {

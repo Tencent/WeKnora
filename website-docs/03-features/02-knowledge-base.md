@@ -210,9 +210,9 @@ OCR 决策是代码纯函数 `DecideOCR`（`internal/application/service/image_a
 
 管线与观察结果记录在每张图的处理轨迹子 span 上，便于核对与排查：input `pipeline` = `observation_driven`（本开关开启）或 `caption_ocr`（关闭，历史行为）；output `attr_policy`（本轮 OCR 决策）、`image_attrs`（观察到的属性）、`ocr_skipped`（`attr_policy`＝被策略跳过 / `disabled`＝OCR 总开关关闭）、`observation_failed`（未形成有效观察）、`chunks_created`。
 
-OCR 会在入库前拒绝空响应、只有分隔符的内容，以及占据输出主体的长串重复内容；正常短标签、数字和表格仍可保留。OpenAI 兼容 VLM 返回 `finish_reason=length` 时，非空的截断输出也按失败处理。普通图片提示词按可见文字转录，截图中的按钮和标签逐行输出，仅真实表格使用 Markdown 表格；扫描 PDF 使用专用文档布局提示词。
+OCR 会在入库前拒绝空响应、只有分隔符的内容，以及占据输出主体的长串重复内容；正常短标签、数字和表格仍可保留。图片描述在创建 `image_caption` 分块前也会执行重复输出检查，避免模型循环内容进入索引。OpenAI 兼容 VLM 返回 `finish_reason=length` 时，非空的截断输出也按失败处理。普通图片提示词按可见文字转录，截图中的按钮和标签逐行输出，仅真实表格使用 Markdown 表格；扫描 PDF 使用专用文档布局提示词。
 
-每次执行 OCR 都有独立的 `multimodal.image[i].ocr` 处理子 span；Langfuse 中对应 `image.ocr`，包含模型调用和输出校验。失败时记录 `ocr_status=failed`、`ocr_error_code`（`OCR_INVALID_OUTPUT` / `OCR_TRUNCATED` / `OCR_REQUEST_FAILED`）和错误原因，不创建或索引该次 OCR 分块。正常的图片描述仍可保留，整张图的 output 用 `outcome=partial_failure` 表明部分失败，不因无效 OCR 重试整个图片任务。明确回答没有文字时记为 `ocr_status=no_text`，与异常区分；正常提取记为 `succeeded`。已有异常分块不会被自动清除，需要重新解析相应文档。
+每次执行 OCR 都有独立的 `multimodal.image[i].ocr` 处理子 span；Langfuse 中对应 `image.ocr`，包含模型调用和输出校验。失败时记录 `ocr_status=failed`、`ocr_error_code`（`OCR_INVALID_OUTPUT` / `OCR_TRUNCATED` / `OCR_REQUEST_FAILED`）和错误原因，不创建或索引该次 OCR 分块。图片描述重复时记录 `caption_error_code=CAPTION_INVALID_OUTPUT` 和拒绝原因，不创建对应的 caption 分块；同一图片的有效 OCR 结果仍可保留。正常的图片描述仍可保留，整张图的 output 用 `outcome=partial_failure` 表明 OCR 部分失败，不因无效 OCR 重试整个图片任务。明确回答没有文字时记为 `ocr_status=no_text`，与异常区分；正常提取记为 `succeeded`。已有异常分块不会被自动清除，需要重新解析相应文档。
 
 可通过 `WEKNORA_OCR_TEST_FIXTURE` 指定本地 JSON 文件（`{"model": <模型配置>, "image_paths": [<本地图片路径>]}`），运行 `go test ./internal/application/service -run '^TestLiveImageOCRValidation$' -v -count=1` 验证实际模型。私有端点需配置 `SSRF_WHITELIST`。该测试使用内存分块仓库，不写业务数据库；带凭证的配置和原图应放在版本控制之外。
 

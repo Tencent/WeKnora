@@ -274,6 +274,28 @@ func TestValidateOCRTextRejectsDegenerateOutput(t *testing.T) {
 			"different repeated periods", strings.Repeat("| ", 600) + "传球\n" + strings.Repeat("取消施法 ", 240),
 			"repetitive_content",
 		},
+		{
+			"repeated phrase interleaved with changing rows",
+			func() string {
+				var output strings.Builder
+				for row := 1; row <= 200; row++ {
+					fmt.Fprintf(&output, "**Input** - Input is a table of data from the image. Row %d\n", row)
+				}
+				return output.String()
+			}(),
+			"repetitive_content",
+		},
+		{
+			"advancing counter with stuck value",
+			func() string {
+				var output strings.Builder
+				for counter := 2017; counter < 2817; counter++ {
+					fmt.Fprintf(&output, "%d 13.6\n", counter)
+				}
+				return output.String()
+			}(),
+			"repetitive_content",
+		},
 		{"repeated wrapped lines", strings.Repeat("开始\n锁定目标\n", 100), "repetitive_content"},
 		{"empty HTML skeleton", "<html><body><div><img/></div></body></html>", "empty_content"},
 	} {
@@ -296,9 +318,18 @@ func TestValidateOCRTextPreservesRealContent(t *testing.T) {
 	for i := 0; i < 100; i++ {
 		fmt.Fprintf(&table, "| 项目%d | %d |\n", i, i)
 	}
+	var variedTable strings.Builder
+	variedTable.WriteString("| Department | Item | Value |\n| --- | --- | --- |\n")
+	for i := 0; i < 500; i++ {
+		fmt.Fprintf(&variedTable, "| Department | Item %d | %d |\n", i, i*i)
+	}
+	var constantSeries strings.Builder
+	for counter := 2017; counter < 2217; counter++ {
+		fmt.Fprintf(&constantSeries, "%d 13.6\n", counter)
+	}
 	for _, input := range []string{
 		"A", "3", "传球", "A\nB\nL1\nL2\n传球\n传球", "0:0\n58.29\n取消施法", "±", "$x^2 + y^2 = z^2$",
-		table.String(), strings.Repeat("同一个按钮\n", 5),
+		table.String(), variedTable.String(), constantSeries.String(), strings.Repeat("同一个按钮\n", 5),
 		// A run matches many periods; its overlapping ranges must count once.
 		table.String() + strings.Repeat("X", 600),
 	} {
