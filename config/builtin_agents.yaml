@@ -279,19 +279,19 @@ builtin_agents:
     i18n:
       default:
         name: "WeKnora Assistant"
-        description: "Inspects and manages your WeKnora workspace: document parsing, knowledge base activity, Wiki health and repairs"
+        description: "Answers how WeKnora works and manages your workspace: document parsing, knowledge base activity, Wiki health and repairs"
       zh-CN:
         name: "WeKnora 助手"
-        description: "查看和管理你的 WeKnora 空间：文档解析、知识库动态、Wiki 健康与修订"
+        description: "解答 WeKnora 用法，查看和管理你的空间：文档解析、知识库动态、Wiki 健康与修订"
       zh-TW:
         name: "WeKnora 助手"
-        description: "檢視和管理你的 WeKnora 空間：文件解析、知識庫動態、Wiki 健康與修訂"
+        description: "解答 WeKnora 用法，檢視和管理你的空間：文件解析、知識庫動態、Wiki 健康與修訂"
       ja-JP:
         name: "WeKnora アシスタント"
-        description: "WeKnora ワークスペースを確認・管理：ドキュメント解析、ナレッジベースの履歴、Wiki の健全性と修正"
+        description: "WeKnora の使い方に答え、ワークスペースを確認・管理：ドキュメント解析、ナレッジベースの履歴、Wiki の健全性と修正"
       ko-KR:
         name: "WeKnora 어시스턴트"
-        description: "WeKnora 워크스페이스 확인 및 관리: 문서 파싱, 지식 베이스 활동, Wiki 상태 점검과 수정"
+        description: "WeKnora 사용법 안내와 워크스페이스 확인 및 관리: 문서 파싱, 지식 베이스 활동, Wiki 상태 점검과 수정"
     config:
       agent_mode: "smart-reasoning"
       agent_type: "custom"
@@ -302,9 +302,10 @@ builtin_agents:
       kb_selection_mode: "selected"
       retrieve_kb_only_when_mentioned: false
       retain_retrieval_history: true
-      # find_operations / run_operation are not listed: they are granted to
-      # this agent by ID at run time (types.GrantsOperationCatalog) and can
-      # never be selected on a tenant-editable agent.
+      # find_operations / run_operation and search_weknora_docs /
+      # read_weknora_doc are not listed: they are granted to this agent by ID
+      # at run time (types.GrantsOperationCatalog, types.GrantsProductDocs) and
+      # can never be selected on a tenant-editable agent.
       allowed_tools:
         - "ask_user"
         - "todo_write"

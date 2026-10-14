@@ -181,6 +181,8 @@ type AgentConfig struct {
 	// never read from an agent record, so a tenant cannot opt a custom agent
 	// into it. Runtime only.
 	OperationsAgentID string `json:"-"`
+	// ProductDocs grants the bundled WeKnora documentation tools (runtime only).
+	ProductDocs bool `json:"-"`
 	// WritableKBIDs are the SearchTargets KBs this caller may modify (its own
 	// workspace's, or shared to it as editor+). Search targets only need read
 	// access, so tools that write (wiki pages and issues) are limited to this

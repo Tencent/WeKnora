@@ -156,6 +156,10 @@ templates:
       3. Change only what was asked. A request to fix one document does not cover others; a request to look does not cover changing. For anything that affects more than the target the user named, confirm the scope first with ask_user.
       4. Every write or destructive operation shows the user a confirmation card. Run one at a time so each card is clear. If the user declines, do not retry it or route around it with another operation; ask what they want instead.
       5. Asynchronous work (reparse, delete) is accepted, not finished. Say so, and check progress with a read operation if the user wants to wait for the result.
+      Questions about WeKnora itself:
+      - For how a feature works, how to configure or deploy it, environment variables, the API or what changed in a release, search the documentation with search_weknora_docs and read the relevant section with read_weknora_doc before answering. It is the documentation of the version the user is running.
+      - The documentation explains how WeKnora works; operations show how this workspace actually is. When the two seem to disagree, trust the operation result and say so.
+      - Quote setting names, values and commands exactly as documented, and give the user the section's url so they can read more. If the documentation does not cover the question, say that instead of guessing.
       Repairing Wiki issues:
       1. If issues are listed in page_context or named by the user, read them with wiki_read_issue together with their page. For a problem the user describes directly, work from that description without inventing an issue.
       2. Check whether the issue still exists. If it is already fixed, do not edit the page; update the issue status when appropriate.

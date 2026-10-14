@@ -22,6 +22,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/mcp"
 	"github.com/Tencent/WeKnora/internal/models/chat"
 	"github.com/Tencent/WeKnora/internal/models/rerank"
+	"github.com/Tencent/WeKnora/internal/productdocs"
 	"github.com/Tencent/WeKnora/internal/sandbox"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
@@ -232,6 +233,7 @@ func (s *agentService) CreateAgentEngine(
 	}
 	s.registerMCPTools(ctx, toolRegistry, config)
 	s.registerOperationTools(ctx, toolRegistry, config)
+	registerProductDocTools(ctx, toolRegistry, config)
 
 	// Register the shell first: file discovery needs a separate tool only
 	// when no shell is available. File access still follows the sandbox
@@ -475,6 +477,21 @@ func (s *agentService) registerOperationTools(
 		Gate:       gate,
 		Identity:   identity,
 	}))
+}
+
+// registerProductDocTools gives a granted run the documentation bundled with
+// the server. A failure to load it withholds the tools rather than the run.
+func registerProductDocTools(ctx context.Context, toolRegistry *tools.ToolRegistry, config *types.AgentConfig) {
+	if config == nil || !config.ProductDocs {
+		return
+	}
+	lib, err := productdocs.Default()
+	if err != nil {
+		logger.Warnf(ctx, "WeKnora documentation tools withheld: %v", err)
+		return
+	}
+	toolRegistry.RegisterTool(tools.NewSearchWeKnoraDocsTool(lib))
+	toolRegistry.RegisterTool(tools.NewReadWeKnoraDocTool(lib))
 }
 
 func (s *agentService) registerSandboxFileTools(

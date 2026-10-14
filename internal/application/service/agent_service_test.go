@@ -525,9 +525,31 @@ func TestWeKnoraAssistantIsAHiddenBuiltinWithOperations(t *testing.T) {
 		require.NotEqual(t, tools.ToolFindOperations, def.Name)
 	}
 
+	require.True(t, types.GrantsProductDocs(agent))
+	require.NotContains(t, agent.Config.AllowedTools, tools.ToolSearchWeKnoraDocs)
+	for _, def := range tools.AvailableToolDefinitions() {
+		require.NotEqual(t, tools.ToolSearchWeKnoraDocs, def.Name)
+		require.NotEqual(t, tools.ToolReadWeKnoraDoc, def.Name)
+	}
+
 	stored := *agent
 	stored.IsBuiltin = false
 	require.False(t, types.GrantsOperationCatalog(&stored))
+	require.False(t, types.GrantsProductDocs(&stored))
+}
+
+// The documentation is public, so the grant alone decides: no signed-in user
+// is needed, and a shared read-only run still gets it.
+func TestRegisterProductDocToolsFollowsTheGrant(t *testing.T) {
+	registered := func(cfg *types.AgentConfig) []string {
+		registry := tools.NewToolRegistry()
+		registerProductDocTools(context.Background(), registry, cfg)
+		return registry.ListTools()
+	}
+	require.ElementsMatch(t, []string{tools.ToolSearchWeKnoraDocs, tools.ToolReadWeKnoraDoc},
+		registered(&types.AgentConfig{ProductDocs: true, SharedAgentReadOnly: true}))
+	require.Empty(t, registered(&types.AgentConfig{}))
+	require.Empty(t, registered(nil))
 }
 
 func TestRegisterOperationToolsRequiresGrantAndWebUser(t *testing.T) {

@@ -160,6 +160,10 @@ var toolHandlePolicies = map[string]toolHandlePolicy{
 		decodedIssueIDKeys:  map[string]struct{}{"issue_id": {}},
 		encodeKnownIssueIDs: true,
 	},
+	// The bundled documentation is static text with public URLs; it carries no
+	// workspace identifiers.
+	"search_weknora_docs": {},
+	"read_weknora_doc":    {},
 	// The operation catalog names parameters and result fields with the
 	// canonical keys below, so handles decode inside params and returned IDs
 	// come back as handles. Catalog metadata itself carries no identifiers.

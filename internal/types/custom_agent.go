@@ -42,6 +42,13 @@ func GrantsOperationCatalog(agent *CustomAgent) bool {
 	return agent != nil && agent.IsBuiltin && agent.ID == BuiltinWeKnoraAssistantID
 }
 
+// GrantsProductDocs reports whether agent may read the WeKnora documentation
+// bundled with the server. The docs are public, so unlike operations this
+// needs no signed-in user; it is still limited to the built-in assistant.
+func GrantsProductDocs(agent *CustomAgent) bool {
+	return agent != nil && agent.IsBuiltin && agent.ID == BuiltinWeKnoraAssistantID
+}
+
 // UsesFallbackChatModel reports whether a built-in agent runs without its
 // own model_id. These agents are hidden from agent management, so a user
 // cannot configure one; the run resolves the model from its knowledge base

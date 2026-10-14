@@ -513,6 +513,7 @@ func (s *sessionService) buildAgentConfig(
 	}
 	agentConfig.QuestionOrigin = questionOriginInTargets(ctx, req.QuestionOrigin, searchTargets)
 	agentConfig.PageContext = pageContextInTargets(ctx, req.PageContext, searchTargets)
+	agentConfig.ProductDocs = types.GrantsProductDocs(req.CustomAgent)
 	// Document tags are stored in knowledge_tag_relations, so document-KB tag
 	// scopes are resolved to concrete knowledge IDs before retrieval. Preserve
 	// those resolved IDs as this turn's pinned documents as well: otherwise the
