@@ -137,10 +137,10 @@ func (h *Handler) ContinueStream(c *gin.Context) {
 	// Set headers for SSE
 	setSSEHeaders(c)
 
-	// Check if stream is already completed
+	// Check if the stream already ended.
 	streamCompleted := false
 	for _, evt := range events {
-		if evt.Type == "complete" {
+		if evt.Type == types.ResponseTypeComplete || (evt.Type == types.ResponseTypeError && evt.Done) {
 			streamCompleted = true
 			break
 		}
@@ -183,8 +183,8 @@ func (h *Handler) ContinueStream(c *gin.Context) {
 			// Send new events
 			streamCompletedNow := false
 			for _, evt := range newEvents {
-				// Check for completion event
-				if evt.Type == "complete" {
+				// Check for a terminal event.
+				if evt.Type == types.ResponseTypeComplete || (evt.Type == types.ResponseTypeError && evt.Done) {
 					streamCompletedNow = true
 				}
 
@@ -366,6 +366,7 @@ func (h *Handler) handleAgentEventsForSSE(
 			// Send any new events
 			streamCompleted := false
 			titleReceived := false
+			terminalError := false
 			for _, evt := range events {
 				// Check for stop event
 				if evt.Type == types.ResponseType(event.EventStop) {
@@ -401,9 +402,10 @@ func (h *Handler) handleAgentEventsForSSE(
 					return
 				}
 
-				// Check for completion event
-				if evt.Type == "complete" {
+				// Check for a terminal event.
+				if evt.Type == types.ResponseTypeComplete || (evt.Type == types.ResponseTypeError && evt.Done) {
 					streamCompleted = true
+					terminalError = terminalError || evt.Type == types.ResponseTypeError
 				}
 
 				// Check for title event
@@ -428,7 +430,7 @@ func (h *Handler) handleAgentEventsForSSE(
 
 			// Check if stream is completed - wait for title event only if needed and not already received
 			if streamCompleted {
-				if waitForTitle && !titleReceived {
+				if waitForTitle && !titleReceived && !terminalError {
 					log.Infof("Stream completed for session=%s, message=%s, waiting for title event", sessionID, assistantMessageID)
 					// Wait up to 3 seconds for title event after completion
 					titleTimeout := time.After(3 * time.Second)
