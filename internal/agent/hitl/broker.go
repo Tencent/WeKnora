@@ -88,6 +88,10 @@ type Spec struct {
 	// Suspend makes the prompt suspendable: when Timeout elapses the run is
 	// suspended instead of the prompt expiring. Nil keeps a plain wait.
 	Suspend *SuspendSpec
+	// FallbackTimeout, when set, turns a suspendable prompt whose run state
+	// cannot be saved into a plain wait of this length instead of failing.
+	// Emit sees the downgrade as Prompt.Suspendable == false.
+	FallbackTimeout time.Duration
 }
 
 // SuspendSpec carries the run state saved with a suspendable prompt. It is
@@ -126,6 +130,23 @@ type Broker struct {
 	// suspendExpiry bounds how long a suspended prompt stays answerable;
 	// zero never expires.
 	suspendExpiry time.Duration
+	// runHooks finish the message of a run Resolve takes over from an owner
+	// that stopped renewing its lease; see SetRunHooks.
+	runHooks RunHooks
+}
+
+// SetRunHooks installs the hooks Resolve uses when it suspends a prompt on
+// behalf of an owner that disappeared, as the reaper would.
+func (b *Broker) SetRunHooks(h RunHooks) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.runHooks = h
+}
+
+func (b *Broker) hooks() RunHooks {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.runHooks
 }
 
 // Option customizes a Broker.
@@ -222,21 +243,27 @@ func (b *Broker) Await(ctx context.Context, spec Spec) (out Outcome, err error) 
 			return Outcome{}, errors.New("agent prompt: a suspendable prompt needs an assistant message")
 		}
 		p.Suspendable = true
-		if err := b.suspensions.Save(dbCtx, &types.AgentRunSuspension{
+		err := b.suspensions.Save(dbCtx, &types.AgentRunSuspension{
 			AssistantMessageID: p.AssistantMessageID,
 			TenantID:           p.TenantID,
 			SessionID:          p.SessionID,
 			PromptID:           p.ID,
 			SnapshotVersion:    spec.Suspend.SnapshotVersion,
 			Snapshot:           types.JSON(spec.Suspend.Snapshot),
-		}); err != nil {
+		})
+		switch {
+		case err == nil:
+			defer func() {
+				if !out.Suspended {
+					b.dropSnapshot(dbCtx, p.AssistantMessageID, p.ID)
+				}
+			}()
+		case spec.FallbackTimeout > 0:
+			logger.GetLogger(ctx).Warnf("persist run state of prompt %s, waiting in memory instead: %v", p.ID, err)
+			spec.Suspend, spec.Timeout, p.Suspendable = nil, spec.FallbackTimeout, false
+		default:
 			return Outcome{}, fmt.Errorf("persist run state: %w", err)
 		}
-		defer func() {
-			if !out.Suspended {
-				b.dropSnapshot(dbCtx, p.AssistantMessageID, p.ID)
-			}
-		}()
 	}
 	lease := time.Now().Add(b.leaseTTL)
 	p.Status = types.AgentPromptPending
@@ -412,6 +439,11 @@ type Resolution struct {
 	// caller must resume it. This replica now holds the prompt's lease; see
 	// KeepLease.
 	Resume bool
+	// OwnerGone means the run was suspended on behalf of an owner that
+	// stopped renewing its lease, so nothing will tear down what that owner
+	// left behind (such as its live-run marker). Otherwise the owner suspended
+	// the run itself and may still be finishing it.
+	OwnerGone bool
 }
 
 // Resolve records a user answer on an open prompt. A pending prompt's waiter
@@ -451,6 +483,23 @@ func (b *Broker) Resolve(ctx context.Context, req ResolveRequest) (Resolution, e
 	}
 
 	now := time.Now()
+	// A pending prompt whose owner stopped renewing has no waiter left to
+	// wake. Suspend it as the reaper would, so the answer resumes the run
+	// instead of being recorded for nobody.
+	if row.Status == types.AgentPromptPending && row.Suspendable &&
+		row.LeaseUntil != nil && row.LeaseUntil.Before(now) {
+		b.reapPending(ctx, now, row, b.hooks())
+		if row, err = b.store.Get(ctx, req.PromptID); err != nil {
+			return Resolution{}, err
+		}
+		if row == nil {
+			return Resolution{}, ErrPromptNotFound
+		}
+		if !row.IsOpen() {
+			return Resolution{}, ErrAlreadyResolved
+		}
+	}
+	ownerGone := row.OwnerInstance == ""
 	resolvedBy := req.UserID
 	answer := func(t types.AgentPromptTransition) (bool, error) {
 		t.To = types.AgentPromptAnswered
@@ -474,7 +523,7 @@ func (b *Broker) Resolve(ctx context.Context, req ResolveRequest) (Resolution, e
 		row.Status, row.Response = types.AgentPromptAnswered, types.JSON(req.Response)
 		row.ResolvedBy, row.ResolvedAt = resolvedBy, &now
 		row.OwnerInstance, row.LeaseUntil = owner, &lease
-		return Resolution{Prompt: row, Resume: true}, nil
+		return Resolution{Prompt: row, Resume: true, OwnerGone: ownerGone}, nil
 	}
 
 	ok, err = answer(types.AgentPromptTransition{From: []string{types.AgentPromptPending}})

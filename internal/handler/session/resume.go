@@ -32,15 +32,34 @@ func (h *Handler) supersedeSuspendedRuns(ctx context.Context, sessionID string) 
 	}
 }
 
+// How long resuming waits for the run that suspended to finish tearing down,
+// and how often it looks. A run suspends its prompt before it has persisted
+// the message and released the session, so an answer can arrive first.
+var (
+	resumeSettleTimeout  = 15 * time.Second
+	resumeSettleInterval = 250 * time.Millisecond
+)
+
 // ResumeSuspendedRun continues the run suspended on prompt, which c has just
-// answered, on this replica. It returns at once; the run streams to the
-// message's event stream, where clients attach as they do to any live run.
-func (h *Handler) ResumeSuspendedRun(c *gin.Context, prompt *types.AgentPrompt) {
+// answered, on this replica. It returns once the run has started; the run
+// streams to the message's event stream, where clients attach as they do to
+// any live run. ownerGone is hitl.Resolution.OwnerGone.
+func (h *Handler) ResumeSuspendedRun(c *gin.Context, prompt *types.AgentPrompt, ownerGone bool) {
 	if h.promptBroker == nil || h.suspendedRuns == nil {
 		return
 	}
 	ctx := logger.CloneContext(context.WithoutCancel(c.Request.Context()))
 	stopLease := h.promptBroker.KeepLease(ctx, prompt.ID)
+	if err := h.awaitSuspendedRunSettled(ctx, prompt, ownerGone); err != nil {
+		stopLease()
+		logger.Errorf(ctx, "resume run of prompt %s: %v", prompt.ID, err)
+		state, _ := h.promptBroker.Suspensions().Get(ctx, prompt.AssistantMessageID)
+		if state != nil && state.PromptID != prompt.ID {
+			state = nil
+		}
+		h.abandonResume(ctx, prompt, state)
+		return
+	}
 	reqCtx, state, err := h.buildResumeRequest(ctx, c, prompt)
 	if err != nil {
 		stopLease()
@@ -58,6 +77,44 @@ func (h *Handler) ResumeSuspendedRun(c *gin.Context, prompt *types.AgentPrompt) 
 		}()
 		h.executeQA(reqCtx, qaModeAgent, false)
 	}()
+}
+
+// awaitSuspendedRunSettled waits until the run that suspended on prompt has
+// let go of its message: the message is persisted as awaiting input and the
+// session's live-run marker no longer names it. Resuming earlier would race
+// that run's teardown, which rewrites the message and clears the marker the
+// resumed run sets. A marker left by an owner that is gone is cleared here,
+// since nothing else will.
+func (h *Handler) awaitSuspendedRunSettled(ctx context.Context, prompt *types.AgentPrompt, ownerGone bool) error {
+	deadline := time.Now().Add(resumeSettleTimeout)
+	for {
+		msg, err := h.messageService.GetMessage(ctx, prompt.SessionID, prompt.AssistantMessageID)
+		if err != nil {
+			return fmt.Errorf("load assistant message: %w", err)
+		}
+		if msg == nil || msg.IsCompleted {
+			return fmt.Errorf("assistant message is no longer open")
+		}
+		if msg.RunState == types.MessageRunStateAwaitingInput {
+			liveID, _, err := h.streamManager.GetLiveRun(ctx, prompt.SessionID)
+			if err != nil {
+				return fmt.Errorf("look up live run: %w", err)
+			}
+			if liveID != msg.ID {
+				return nil
+			}
+			if ownerGone || time.Now().After(deadline) {
+				if err := h.streamManager.ClearLiveRun(ctx, prompt.SessionID, msg.ID); err != nil {
+					return fmt.Errorf("clear stale live run: %w", err)
+				}
+				return nil
+			}
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("the suspended run did not finish within %s", resumeSettleTimeout)
+		}
+		time.Sleep(resumeSettleInterval)
+	}
 }
 
 // buildResumeRequest rebuilds the request of the suspended run from what it
@@ -109,8 +166,9 @@ func (h *Handler) buildResumeRequest(
 
 	requestID := uuid.New().String()
 	return &qaRequestContext{
-		ctx:                 ctx,
-		c:                   c,
+		ctx: ctx,
+		// The run outlives this request, and gin recycles its context.
+		c:                   c.Copy(),
 		sessionID:           prompt.SessionID,
 		requestID:           requestID,
 		receivedAt:          time.Now(),
@@ -150,6 +208,12 @@ func sharedSourceTenant(session *types.Session, req types.ResumableAgentRequest)
 func (h *Handler) finishResume(ctx context.Context, prompt *types.AgentPrompt, state *types.AgentRunSuspension) {
 	row, err := h.promptBroker.Store().Get(ctx, prompt.ID)
 	if err == nil && row != nil && row.Status == types.AgentPromptAnswered {
+		// The message now belongs to the prompt the run suspended on again;
+		// closing it from the old state would complete it under that prompt.
+		if cur, _ := h.promptBroker.Suspensions().Get(ctx, prompt.AssistantMessageID); cur != nil && cur.PromptID != prompt.ID {
+			h.promptBroker.Fail(ctx, prompt.ID, hitl.ReasonResumeStopped)
+			return
+		}
 		h.abandonResume(ctx, prompt, state)
 		return
 	}

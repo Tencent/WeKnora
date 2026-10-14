@@ -6,6 +6,7 @@
 package approval
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -217,10 +218,9 @@ func (g *Gate) RequestAndWait(ctx context.Context, req PendingRequest) (Decision
 		wait = g.hotWait
 		suspend = &hitl.SuspendSpec{Snapshot: req.Snapshot, SnapshotVersion: req.SnapshotVersion}
 	}
-	timeoutSec := max(int(wait/time.Second), 1)
-
 	out, err := g.broker.Await(ctx, hitl.Spec{
-		Suspend: suspend,
+		Suspend:         suspend,
+		FallbackTimeout: g.timeout,
 		Prompt: &types.AgentPrompt{
 			TenantID:           req.TenantID,
 			UserID:             req.UserID,
@@ -234,6 +234,7 @@ func (g *Gate) RequestAndWait(ctx context.Context, req PendingRequest) (Decision
 		Timeout:       wait,
 		TimeoutReason: "approval timeout",
 		Emit: func(ctx context.Context, p *types.AgentPrompt) error {
+			timeoutSec := promptWaitSeconds(p, wait, g.timeout)
 			return req.EventBus.Emit(ctx, event.Event{
 				ID:        p.ID + "-approval-required",
 				Type:      event.EventToolApprovalRequired,
@@ -252,7 +253,7 @@ func (g *Gate) RequestAndWait(ctx context.Context, req PendingRequest) (Decision
 					ArgsJSON:           string(req.Args),
 					TimeoutSeconds:     timeoutSec,
 					HotWaitSeconds:     timeoutSec,
-					Suspendable:        suspend != nil,
+					Suspendable:        p.Suspendable,
 					RequestedAtUnix:    time.Now().Unix(),
 					ToolCallID:         req.ToolCallID,
 					RequestID:          req.RequestID,
@@ -283,6 +284,15 @@ func (g *Gate) RequestAndWait(ctx context.Context, req PendingRequest) (Decision
 	d := toolApprovalDecision(out)
 	g.consumeDecision(ctx, d, req.EventBus, req.SessionID, req.AssistantMessageID, req.RequestID)
 	return d, nil
+}
+
+// promptWaitSeconds is how long the UI should count down for p: the hot wait
+// while it can suspend, the full timeout once it fell back to a plain wait.
+func promptWaitSeconds(p *types.AgentPrompt, wait, fallback time.Duration) int {
+	if !p.Suspendable {
+		wait = fallback
+	}
+	return max(int(wait/time.Second), 1)
 }
 
 // ResumeDecision turns the answered prompt a resumed run was suspended on
@@ -532,15 +542,26 @@ func oauthDecision(out hitl.Outcome) Decision {
 }
 
 func validateToolApprovalResponse(_, response json.RawMessage) error {
-	var r types.ToolApprovalPromptResponse
-	if err := json.Unmarshal(response, &r); err != nil {
+	// Strict decoding with a required "approved": a misspelled or missing
+	// field must not read as a rejection.
+	var r struct {
+		Approved     *bool           `json:"approved"`
+		ModifiedArgs json.RawMessage `json:"modified_args,omitempty"`
+		Reason       string          `json:"reason,omitempty"`
+	}
+	dec := json.NewDecoder(bytes.NewReader(response))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&r); err != nil {
 		return err
+	}
+	if r.Approved == nil {
+		return errors.New(`"approved" is required`)
 	}
 	trimmed := strings.TrimSpace(string(r.ModifiedArgs))
 	if trimmed == "" {
 		return nil
 	}
-	if !r.Approved {
+	if !*r.Approved {
 		return errors.New("modified_args is only allowed on approval")
 	}
 	var probe map[string]any

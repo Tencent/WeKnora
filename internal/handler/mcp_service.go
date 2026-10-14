@@ -38,7 +38,7 @@ type MCPServiceHandler struct {
 // RunResumer continues an agent run that ended suspended on prompt, now
 // answered by the request c. It must not block on the run.
 type RunResumer interface {
-	ResumeSuspendedRun(c *gin.Context, prompt *types.AgentPrompt)
+	ResumeSuspendedRun(c *gin.Context, prompt *types.AgentPrompt, ownerGone bool)
 }
 
 // SetRunResumer wires the resumer of suspended runs.
@@ -835,7 +835,7 @@ func (h *MCPServiceHandler) finishResolve(c *gin.Context, pendingID string, res 
 	// A suspended run has ended; this replica now continues it.
 	resumed := res.Resume && h.runResumer != nil
 	if resumed {
-		h.runResumer.ResumeSuspendedRun(c, res.Prompt)
+		h.runResumer.ResumeSuspendedRun(c, res.Prompt, res.OwnerGone)
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true, "resumed": resumed})
 }
@@ -847,7 +847,7 @@ type resolveAgentPromptBody struct {
 
 // ResolveAgentPrompt godoc
 // @Summary      回答 Agent 的交互请求
-// @Description  回答 Agent 运行中发起的交互（ask_user 提问或工具审批）。kind 须与交互一致，response 为该类型的回答 JSON。返回 resumed=true 表示运行已挂起并在本次回答后恢复，客户端需重新接入该消息的事件流
+// @Description  回答 Agent 运行中发起的交互（ask_user 提问或工具审批）。kind 须与交互一致，response 为该类型的回答 JSON（不接受未知字段）：ask_user 为 {selected?, values?, text?, declined?}；tool_approval 为 {approved: bool, modified_args?: object, reason?: string}。返回 resumed=true 表示运行已挂起并在本次回答后恢复，客户端需重新接入该消息的事件流
 // @Tags         Agent
 // @Accept       json
 // @Produce      json

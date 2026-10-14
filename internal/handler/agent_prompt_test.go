@@ -20,7 +20,7 @@ import (
 
 type recordingResumer struct{ prompts []*types.AgentPrompt }
 
-func (r *recordingResumer) ResumeSuspendedRun(_ *gin.Context, p *types.AgentPrompt) {
+func (r *recordingResumer) ResumeSuspendedRun(_ *gin.Context, p *types.AgentPrompt, _ bool) {
 	r.prompts = append(r.prompts, p)
 }
 

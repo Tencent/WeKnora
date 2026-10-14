@@ -148,3 +148,16 @@ func TestRunWithoutSuspensionHasNoSnapshotHook(t *testing.T) {
 	require.Nil(t, f.blocked.snapshot)
 	require.Equal(t, 1, f.after.calls)
 }
+
+func TestStripJSONNUL(t *testing.T) {
+	data, err := json.Marshal(map[string]string{"a": "x\x00y", "b": `lit\u0000`})
+	require.NoError(t, err)
+	out := stripJSONNUL(data)
+	var got map[string]string
+	require.NoError(t, json.Unmarshal(out, &got))
+	require.Equal(t, "xy", got["a"])
+	require.Equal(t, `lit\u0000`, got["b"], "an escaped backslash is not a NUL escape")
+
+	clean := []byte(`{"a":"b"}`)
+	require.Equal(t, clean, stripJSONNUL(clean))
+}

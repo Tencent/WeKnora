@@ -140,10 +140,14 @@ func (b *Broker) reapPending(ctx context.Context, now time.Time, row *types.Agen
 	}
 
 	expiresAt := b.expiresAt(now)
+	// Clearing the owner records that the run was suspended for it, which
+	// Resolve reports as Resolution.OwnerGone.
+	noOwner := ""
 	ok, err := b.store.Transition(ctx, row.ID, types.AgentPromptTransition{
 		From:      []string{types.AgentPromptPending},
 		To:        types.AgentPromptSuspended,
 		ExpiresAt: expiresAt,
+		Owner:     &noOwner,
 	})
 	if err != nil {
 		log.Warnf("suspend orphaned agent prompt %s: %v", row.ID, err)
@@ -153,6 +157,7 @@ func (b *Broker) reapPending(ctx context.Context, now time.Time, row *types.Agen
 	}
 	row.Status = types.AgentPromptSuspended
 	row.ExpiresAt = expiresAt
+	row.OwnerInstance = ""
 	if hooks.Suspended != nil {
 		if err := hooks.Suspended(ctx, row, state); err != nil {
 			log.Warnf("finish suspended run of message %s: %v", row.AssistantMessageID, err)

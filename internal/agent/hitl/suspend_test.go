@@ -2,6 +2,7 @@ package hitl
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -186,4 +187,80 @@ func TestBroker_ReapExpiresOrphanWithoutRunState(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, want, row.Status, id)
 	}
+}
+
+// An answer to a pending prompt whose owner stopped renewing suspends it as
+// the reaper would and resumes the run, instead of waking nobody.
+func TestBroker_ResolveTakesOverPromptOfVanishedOwner(t *testing.T) {
+	ctx := context.Background()
+	store, suspensions := NewMemoryStore(), NewMemorySuspensionStore()
+	b := NewBroker(store, nil, WithSuspensionStore(suspensions), WithSuspendExpiry(time.Hour))
+	b.RegisterKind(testKind, validateTestAnswer)
+	var hooked bool
+	b.SetRunHooks(RunHooks{Suspended: func(context.Context, *types.AgentPrompt, *types.AgentRunSuspension) error {
+		hooked = true
+		return nil
+	}})
+
+	past := time.Now().Add(-time.Minute)
+	require.NoError(t, store.Create(ctx, &types.AgentPrompt{
+		ID: "p1", TenantID: 1, UserID: "alice", SessionID: "s1", AssistantMessageID: "m1", Kind: testKind,
+		Status: types.AgentPromptPending, Suspendable: true, LeaseUntil: &past, OwnerInstance: "dead",
+	}))
+	require.NoError(t, suspensions.Save(ctx, &types.AgentRunSuspension{
+		AssistantMessageID: "m1", TenantID: 1, SessionID: "s1", PromptID: "p1",
+		SnapshotVersion: 1, Snapshot: types.JSON(`{"version":1}`),
+	}))
+
+	res, err := b.Resolve(ctx, answer("p1", "blue"))
+	require.NoError(t, err)
+	require.True(t, res.Resume)
+	require.True(t, res.OwnerGone)
+	require.True(t, hooked, "the message must be shown as awaiting input before it resumes")
+
+	row, err := store.Get(ctx, "p1")
+	require.NoError(t, err)
+	require.Equal(t, types.AgentPromptAnswered, row.Status)
+	require.Equal(t, instanceID, row.OwnerInstance)
+}
+
+// A run that suspended itself still has an owner tearing it down.
+func TestBroker_ResolveOfSelfSuspendedPromptKeepsOwner(t *testing.T) {
+	b := NewBroker(nil, nil, WithPollInterval(20*time.Millisecond), WithSuspendExpiry(time.Hour))
+	b.RegisterKind(testKind, validateTestAnswer)
+	out, err := b.Await(context.Background(), suspendableSpec(50*time.Millisecond, nil))
+	require.NoError(t, err)
+	require.True(t, out.Suspended)
+
+	res, err := b.Resolve(context.Background(), answer(out.Prompt.ID, "blue"))
+	require.NoError(t, err)
+	require.True(t, res.Resume)
+	require.False(t, res.OwnerGone)
+}
+
+type failingSuspensionStore struct{ SuspensionStore }
+
+func (failingSuspensionStore) Save(context.Context, *types.AgentRunSuspension) error {
+	return errors.New("jsonb rejected the snapshot")
+}
+
+func TestBroker_UnsavableRunStateFallsBackToPlainWait(t *testing.T) {
+	b := NewBroker(nil, nil, WithPollInterval(20*time.Millisecond),
+		WithSuspensionStore(failingSuspensionStore{NewMemorySuspensionStore()}))
+	spec := suspendableSpec(10*time.Millisecond, func(_ context.Context, p *types.AgentPrompt) error {
+		require.False(t, p.Suspendable)
+		return nil
+	})
+	spec.FallbackTimeout = 80 * time.Millisecond
+
+	start := time.Now()
+	out, err := b.Await(context.Background(), spec)
+	require.NoError(t, err)
+	require.False(t, out.Suspended)
+	require.True(t, out.TimedOut)
+	require.GreaterOrEqual(t, time.Since(start), 80*time.Millisecond)
+
+	spec = suspendableSpec(10*time.Millisecond, nil)
+	_, err = b.Await(context.Background(), spec)
+	require.Error(t, err, "without a fallback the failure is reported")
 }

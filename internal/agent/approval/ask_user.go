@@ -67,10 +67,9 @@ func (g *Gate) AskUser(ctx context.Context, req AskRequest) (Answer, error) {
 		wait = g.hotWait
 		suspend = &hitl.SuspendSpec{Snapshot: req.Snapshot, SnapshotVersion: req.SnapshotVersion}
 	}
-	waitSec := max(int(wait/time.Second), 1)
-
 	out, err := g.broker.Await(ctx, hitl.Spec{
-		Suspend: suspend,
+		Suspend:         suspend,
+		FallbackTimeout: g.timeout,
 		Prompt: &types.AgentPrompt{
 			TenantID:           req.TenantID,
 			UserID:             req.UserID,
@@ -84,6 +83,7 @@ func (g *Gate) AskUser(ctx context.Context, req AskRequest) (Answer, error) {
 		Timeout:       wait,
 		TimeoutReason: "no answer in time",
 		Emit: func(ctx context.Context, p *types.AgentPrompt) error {
+			waitSec := promptWaitSeconds(p, wait, g.timeout)
 			return req.EventBus.Emit(ctx, event.Event{
 				ID:        p.ID + "-prompt-required",
 				Type:      event.EventAgentPromptRequired,
@@ -96,7 +96,7 @@ func (g *Gate) AskUser(ctx context.Context, req AskRequest) (Answer, error) {
 					Request:            request,
 					TimeoutSeconds:     waitSec,
 					HotWaitSeconds:     waitSec,
-					Suspendable:        suspend != nil,
+					Suspendable:        p.Suspendable,
 					RequestedAtUnix:    time.Now().Unix(),
 					ToolCallID:         req.ToolCallID,
 					RequestID:          req.RequestID,

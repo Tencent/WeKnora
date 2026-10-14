@@ -116,6 +116,7 @@ func calledWithAPIKey(ctx context.Context) bool {
 
 func (rc *qaRequestContext) buildQARequest() *types.QARequest {
 	imageURLs, imageDescription := extractImageURLsAndOCRText(rc.images)
+	interactive := !calledWithAPIKey(rc.ctx)
 	req := &types.QARequest{
 		Session:             rc.session,
 		Query:               rc.query,
@@ -137,10 +138,10 @@ func (rc *qaRequestContext) buildQARequest() *types.QARequest {
 		Attachments:         rc.attachments,
 		QuestionOrigin:      rc.questionOrigin,
 		TurnLeaseHeld:       rc.turnLeaseHeld,
-		// The HTTP stream (web, embed, API) renders a suspended message and
-		// can answer its prompt later.
-		Suspendable: true,
-		Interactive: !calledWithAPIKey(rc.ctx),
+		// Only a caller that can answer the prompt later may leave the run
+		// suspended; an API-key caller would get a turn with no answer.
+		Suspendable: interactive,
+		Interactive: interactive,
 		Resume:      rc.resume,
 	}
 	if rc.steerSink != nil {

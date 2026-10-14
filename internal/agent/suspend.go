@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -174,8 +175,33 @@ func (e *AgentEngine) snapshotFunc(i int) func() ([]byte, int, error) {
 		if err != nil {
 			return nil, 0, fmt.Errorf("encode run snapshot: %w", err)
 		}
-		return data, RunSnapshotVersion, nil
+		return stripJSONNUL(data), RunSnapshotVersion, nil
 	}
+}
+
+// stripJSONNUL drops \u0000 escapes from encoded JSON; PostgreSQL rejects
+// them in jsonb, and tool output (documents, web pages) can carry them.
+// Escape pairs are copied whole so an escaped backslash followed by the text
+// "u0000" is left alone.
+func stripJSONNUL(data []byte) []byte {
+	const nul = `\u0000`
+	if !bytes.Contains(data, []byte(nul)) {
+		return data
+	}
+	out := make([]byte, 0, len(data))
+	for i := 0; i < len(data); i++ {
+		if data[i] != '\\' || i+1 >= len(data) {
+			out = append(out, data[i])
+			continue
+		}
+		if bytes.HasPrefix(data[i:], []byte(nul)) {
+			i += len(nul) - 1
+			continue
+		}
+		out = append(out, data[i], data[i+1])
+		i++
+	}
+	return out
 }
 
 // snapshot captures the run as it stands while call blocked waits.

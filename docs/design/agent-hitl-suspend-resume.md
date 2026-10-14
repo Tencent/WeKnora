@@ -100,7 +100,7 @@ stateDiagram-v2
 |---|---|---|
 | `id` | varchar(36) PK | 即 `pending_id` |
 | `tenant_id` | bigint | 发起运行的租户（执行租户） |
-| `user_id` | varchar | 会话所有者，Resolve 授权用；空值不允许（fail-close） |
+| `user_id` | varchar | 会话所有者，Resolve 授权用；记录上有值时调用方必须是同一用户（调用方为空视为不匹配），记录上为空时只校验租户（与原审批行为一致） |
 | `session_id` | varchar(36) | Resolve 时与路由中的会话比对 |
 | `assistant_message_id` | varchar(36) | |
 | `request_id` | varchar | 发起运行的 request id，用于追踪 |
@@ -230,12 +230,13 @@ P1 已实现第 2 至 6 步中除快照与挂起以外的部分：超时一律�
 现有接口 `POST /agent/tool-approvals/{pending_id}` 与 MCP OAuth 回调保留，内部都走 `Broker.Resolve`。通用接口 `POST /agent/prompts/{prompt_id}`（嵌入页为 `POST /embed/.../sessions/{session_id}/prompts/{prompt_id}`）的请求体为 `{kind, response}`，`response` 是该类型的回答（P4.5 已实现）。它接受 `ask_user` 与 `tool_approval`；`mcp_oauth` 只能经 OAuth 回调完成，按 400 拒绝。旧接口作为兼容层保留。`Broker.Resolve` 的步骤：
 
 1. 按 id 读取记录。`kind` 与接口声明的类型不符、`session_id` 与路由中的会话不符时，一律返回 `not_found`，不暴露记录存在与否。再校验 `tenant_id` 和 `user_id`（调用方 userID 为空视为不匹配）。嵌入页接口额外校验 channel 与 session 的归属。
-2. 调用该类型注册的校验函数。工具审批：`modified_args` 只在批准时生效，必须是 JSON 对象；P2 起再按工具的 InputSchema 校验，工具定义取自 MCP 元数据快照，取不到就拒绝请求。提问：按问题的 schema 校验。校验失败返回 400。
-3. 依次尝试两个 CAS，以区分之前的状态，同时兼容不支持 `RETURNING` 的场景：
+2. 调用该类型注册的校验函数。两类回答都拒绝未知字段。工具审批：回答为 `{approved, modified_args?, reason?}`，`approved` 必填；`modified_args` 只在批准时生效，必须是 JSON 对象；P2 起再按工具的 InputSchema 校验，工具定义取自 MCP 元数据快照，取不到就拒绝请求。提问：按问题的 schema 校验。校验失败返回 400。
+3. 记录仍为 `pending` 但持有者租约已过期（持有者已退出、回收任务尚未扫到）时，先按回收任务的规则把它转为 `suspended`（清空 `owner_instance`，并把消息改为等待输入），再走下面的 CAS，使这次回答直接恢复运行，而不是记给一个已经不存在的 waiter。
+4. 依次尝试两个 CAS，以区分之前的状态，同时兼容不支持 `RETURNING` 的场景：
    - `UPDATE … SET status='answered', response=?, resolved_* WHERE id=? AND status='suspended' AND (expires_at IS NULL OR expires_at > now)`，同时把 `owner_instance` 和 `lease_until` 改为回答所在的副本。成功则由该副本恢复运行（5.4）。（P3 已实现）
    - `UPDATE … WHERE id=? AND status='pending'`。成功则通过 Pub/Sub 唤醒持有者，不等待 ack，因为持有者会轮询数据库兜底。（P1 已实现）
    - 两者都失败：重新读取记录，返回 `already_resolved`、`expired` 或 `not_found`。
-4. 响应体新增 `resumed: bool`。为 `true` 时，前端需要从偏移 0 重新接入该消息的事件流（旧事件已被清空）。（P3 已实现于 `POST /agent/tool-approvals/{id}`；MCP OAuth 回调不会挂起，忽略恢复结果。）
+5. 响应体新增 `resumed: bool`。为 `true` 时，前端需要从偏移 0 重新接入该消息的事件流（旧事件已被清空）。（P3 已实现于 `POST /agent/tool-approvals/{id}`；MCP OAuth 回调不会挂起，忽略恢复结果。）
 
 原先基于 Pub/Sub ack 的跨实例投递已在 P1 移除，Pub/Sub 只保留唤醒职责。
 

@@ -21,7 +21,9 @@ type SuspendedRunService struct {
 
 // NewSuspendedRunService builds the service.
 func NewSuspendedRunService(broker *hitl.Broker, messages interfaces.MessageRepository) *SuspendedRunService {
-	return &SuspendedRunService{broker: broker, messages: messages}
+	s := &SuspendedRunService{broker: broker, messages: messages}
+	broker.SetRunHooks(s.Hooks())
+	return s
 }
 
 // Hooks returns the message updates the broker runs as it takes prompts over.

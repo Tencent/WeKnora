@@ -302,7 +302,9 @@ func (c *Client) ResolveToolApproval(ctx context.Context, pendingID string, req 
 // ResolveAgentPromptRequest answers a prompt an agent run is waiting on. Kind
 // must match the prompt ("ask_user" or "tool_approval"); Response is the
 // kind's answer, e.g. {"text": "..."} or {"selected": ["..."]} for ask_user,
-// {"decision": "approve"} for tool_approval.
+// {"approved": true} or {"approved": false, "reason": "..."} for
+// tool_approval (approval may add "modified_args": {...}). Unknown fields are
+// rejected.
 type ResolveAgentPromptRequest struct {
 	Kind     string          `json:"kind"`
 	Response json.RawMessage `json:"response"`

@@ -392,3 +392,24 @@ func TestGate_ResolveSuspendedThenResumeDecision(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, types.AgentPromptDone, row.Status)
 }
+
+func TestValidateToolApprovalResponse_IsStrict(t *testing.T) {
+	for body, ok := range map[string]bool{
+		`{"approved":true}`:                               true,
+		`{"approved":false,"reason":"no"}`:                true,
+		`{"approved":true,"modified_args":{"q":"x"}}`:     true,
+		`{"decision":"approve"}`:                          false,
+		`{}`:                                              false,
+		`{"approved":true,"extra":1}`:                     false,
+		`{"approved":false,"modified_args":{"q":"x"}}`:    false,
+		`{"approved":true,"modified_args":null}`:          false,
+		`{"approved":true,"modified_args":["not","obj"]}`: false,
+	} {
+		err := validateToolApprovalResponse(nil, json.RawMessage(body))
+		if ok {
+			require.NoError(t, err, body)
+		} else {
+			require.Error(t, err, body)
+		}
+	}
+}
