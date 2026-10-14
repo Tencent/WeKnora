@@ -719,6 +719,47 @@ func (s *modelService) GetChatModel(ctx context.Context, modelId string) (chat.C
 	return chatModel, nil
 }
 
+// GetChatModelForTenant retrieves and initializes a chat model for a specific tenant.
+// Used for cross-tenant knowledge base sharing where the summary/chat model from
+// the source tenant must be used (mirrors GetEmbeddingModelForTenant).
+func (s *modelService) GetChatModelForTenant(ctx context.Context, modelId string, tenantID uint64) (chat.Chat, error) {
+	if modelId == "" {
+		logger.Error(ctx, "Model ID is empty")
+		return nil, errors.New("model ID cannot be empty")
+	}
+	if tenantID == 0 {
+		return s.GetChatModel(ctx, modelId)
+	}
+
+	model, err := s.repo.GetByID(ctx, tenantID, modelId)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{
+			"model_id":  modelId,
+			"tenant_id": tenantID,
+		})
+		return nil, err
+	}
+	if model == nil {
+		logger.Error(ctx, "Chat model not found for specified tenant")
+		return nil, ErrModelNotFound
+	}
+
+	logger.Infof(ctx, "Getting cross-tenant chat model: %s, source: %s, tenant: %d", model.Name, model.Source, tenantID)
+
+	appID, appSecret := s.resolveWeKnoraCloudCredentials(ctx, &model.Parameters)
+	chatModel, err := chat.NewChat(chat.ConfigFromModel(model, appID, appSecret), s.ollamaService)
+	if err != nil {
+		logger.ErrorWithFields(ctx, err, map[string]interface{}{
+			"model_id":   model.ID,
+			"model_name": model.Name,
+			"tenant_id":  tenantID,
+		})
+		return nil, err
+	}
+	logger.Info(ctx, "Cross-tenant chat model initialized successfully")
+	return chatModel, nil
+}
+
 // GetVLMModel retrieves and initializes a vision language model instance.
 func (s *modelService) GetVLMModel(ctx context.Context, modelId string) (vlm.VLM, error) {
 	if modelId == "" {

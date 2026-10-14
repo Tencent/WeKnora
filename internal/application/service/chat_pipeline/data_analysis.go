@@ -105,7 +105,7 @@ func (p *PluginDataAnalysis) OnEvent(
 		return next()
 	}
 
-	chatModel, err := p.modelService.GetChatModel(ctx, chatManage.ChatModelID)
+	chatModel, err := resolveChatModel(ctx, p.modelService, chatManage)
 	if err != nil {
 		return ErrGetChatModel.WithError(err)
 	}

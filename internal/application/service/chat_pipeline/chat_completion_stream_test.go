@@ -96,6 +96,9 @@ type stubModelService struct {
 func (s *stubModelService) GetChatModel(context.Context, string) (chat.Chat, error) {
 	return s.model, nil
 }
+func (s *stubModelService) GetChatModelForTenant(ctx context.Context, modelId string, _ uint64) (chat.Chat, error) {
+	return s.GetChatModel(ctx, modelId)
+}
 
 // TestStreamDropsIncompleteHandleOnCancel verifies that cancellation cannot
 // leak a model-context protocol fragment to the client.

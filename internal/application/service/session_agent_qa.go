@@ -80,7 +80,7 @@ func (s *sessionService) AgentQA(
 	}
 
 	// Resolve model ID using shared helper (AgentQA requires a model, so error if not found)
-	effectiveModelID, err := s.resolveChatModelID(ctx, req, agentConfig.KnowledgeBases, agentConfig.KnowledgeIDs)
+	effectiveModelID, _, err := s.resolveChatModelID(ctx, req, agentConfig.KnowledgeBases, agentConfig.KnowledgeIDs)
 	if err != nil {
 		return err
 	}

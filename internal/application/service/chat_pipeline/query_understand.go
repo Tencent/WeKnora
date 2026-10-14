@@ -234,7 +234,7 @@ func (p *PluginQueryUnderstand) loadHistory(ctx context.Context, chatManage *typ
 func (p *PluginQueryUnderstand) selectModel(ctx context.Context, chatManage *types.ChatManage, hasImages bool) (chat.Chat, bool) {
 	if hasImages {
 		if chatManage.ChatModelSupportsVision {
-			m, err := p.modelService.GetChatModel(ctx, chatManage.ChatModelID)
+			m, err := resolveChatModel(ctx, p.modelService, chatManage)
 			if err == nil {
 				return m, true
 			}
@@ -263,7 +263,13 @@ func (p *PluginQueryUnderstand) selectModel(ctx context.Context, chatManage *typ
 	if chatManage.QueryUnderstandModelID != "" {
 		textModelID = chatManage.QueryUnderstandModelID
 	}
-	m, err := p.modelService.GetChatModel(ctx, textModelID)
+	var m chat.Chat
+	var err error
+	if textModelID == chatManage.ChatModelID {
+		m, err = resolveChatModel(ctx, p.modelService, chatManage)
+	} else {
+		m, err = p.modelService.GetChatModel(ctx, textModelID)
+	}
 	if err != nil {
 		// Fall back to ChatModelID when a dedicated query-understand model was
 		// configured but cannot be resolved (e.g. deleted / disabled).
@@ -273,7 +279,7 @@ func (p *PluginQueryUnderstand) selectModel(ctx context.Context, chatManage *typ
 				"query_understand_model_id": chatManage.QueryUnderstandModelID,
 				"error":                     err.Error(),
 			})
-			if fallback, fbErr := p.modelService.GetChatModel(ctx, chatManage.ChatModelID); fbErr == nil {
+			if fallback, fbErr := resolveChatModel(ctx, p.modelService, chatManage); fbErr == nil {
 				return fallback, false
 			}
 		}

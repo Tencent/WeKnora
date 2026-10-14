@@ -165,6 +165,9 @@ type tableSummaryUnusedModels struct{ interfaces.ModelService }
 func (tableSummaryUnusedModels) GetChatModel(context.Context, string) (chat.Chat, error) {
 	return nil, nil
 }
+func (tableSummaryUnusedModels) GetChatModelForTenant(ctx context.Context, modelId string, _ uint64) (chat.Chat, error) {
+	return (tableSummaryUnusedModels{}).GetChatModel(ctx, modelId)
+}
 
 func (tableSummaryUnusedModels) GetEmbeddingModel(context.Context, string) (embedding.Embedder, error) {
 	return nil, nil

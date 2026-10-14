@@ -88,6 +88,9 @@ func (s *usageModelService) GetChatModel(_ context.Context, id string) (chat.Cha
 	s.selected = id
 	return s.chat, nil
 }
+func (s *usageModelService) GetChatModelForTenant(ctx context.Context, modelId string, _ uint64) (chat.Chat, error) {
+	return s.GetChatModel(ctx, modelId)
+}
 
 func usageHandlerFixture() (*MCPServiceHandler, *usageMCPService, *usageModelService) {
 	svc := &usageMCPService{

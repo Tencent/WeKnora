@@ -180,6 +180,9 @@ func (s *stubModelService) GetChatModel(_ context.Context, modelID string) (chat
 	s.mu.Unlock()
 	return &stubChatModel{owner: s}, nil
 }
+func (s *stubModelService) GetChatModelForTenant(ctx context.Context, modelId string, _ uint64) (chat.Chat, error) {
+	return s.GetChatModel(ctx, modelId)
+}
 
 // callCount is how many times the model has been asked anything.
 func (s *stubModelService) callCount() int {

@@ -32,7 +32,11 @@ type PipelineRequest struct {
 	RerankThreshold float64 `json:"rerank_threshold"`
 
 	// Chat model parameters
-	ChatModelID      string           `json:"chat_model_id"`
+	ChatModelID string `json:"chat_model_id"`
+	// ChatModelTenantID is the tenant that owns ChatModelID when it was
+	// resolved from a shared knowledge base (owner tenant). Zero means
+	// resolve against the caller's tenant in context (normal path).
+	ChatModelTenantID uint64 `json:"-"`
 	SummaryConfig    SummaryConfig    `json:"summary_config"`
 	FallbackStrategy FallbackStrategy `json:"fallback_strategy"`
 	FallbackResponse string           `json:"fallback_response"`
