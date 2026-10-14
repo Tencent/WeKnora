@@ -62,6 +62,8 @@
 
 <Screenshot src="/screenshots/kb-image-gallery.png" caption="知识库画廊：图片瀑布流与来源文档筛选" hint="展示画廊页签、搜索和来源文档筛选弹层，放入含照片、图表的多份文档；另一张详情可展示 OCR、描述与来源链接。" />
 
+<Screenshot src="/screenshots/kb-image-gallery-detail.png" caption="画廊详情：查看原图、图片描述、识别文字与来源文档" />
+
 ## 多模态 Embedding 与图片检索 {#multimodal-embedding}
 
 支持图片输入的 Embedding 模型将文本与原图编码到同一向量空间，使文字问题能够召回相关图片。已支持的模型包括腾讯 WeMM-Embedding、Qwen3-VL-Embedding 等，接入时需匹配图片输入能力与请求协议；WeMM 的服务部署与接入见[模型配置](06-models.md#wemm-embedding)。

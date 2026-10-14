@@ -306,3 +306,6 @@
 }
 
 .showcaseDetail p a { color: var(--wk-accent-text); text-decoration: underline; text-underline-offset: 3px; }
+
+.inlineRepoLink { display: inline-flex; align-items: center; gap: 4px; vertical-align: baseline; }
+.inlineRepoLink svg { width: 14px; height: 14px; align-self: center; }
