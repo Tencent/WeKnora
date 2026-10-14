@@ -10,6 +10,7 @@ import (
 	// resolves annotation types through the file's imports.
 	_ "github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/gin-gonic/gin"
 )
 
@@ -24,6 +25,7 @@ type usableSkillLister interface {
 type SkillHandler struct {
 	usableSkills usableSkillLister
 	catalog      skillCatalogService
+	categories   interfaces.ToolboxCategoryService
 	// agents resolves a shared agent so the @ picker can list the skills that
 	// agent can actually invoke, which live in ITS OWNER's workspace. Nil
 	// disables the shared-agent path (and with it the @Skill picker for shared
@@ -47,11 +49,13 @@ func NewSkillHandler(
 	usableSkills usableSkillLister,
 	catalog skillCatalogService,
 	agents access.SharedAgentLookup,
+	categories interfaces.ToolboxCategoryService,
 ) *SkillHandler {
 	return &SkillHandler{
 		usableSkills: usableSkills,
 		catalog:      catalog,
 		agents:       agents,
+		categories:   categories,
 	}
 }
 

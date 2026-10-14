@@ -47,6 +47,9 @@ type MCPServiceResponse struct {
 	// Catalog is the persisted tool-directory summary for list cards.
 	// Omitted when this principal has never synchronized the service.
 	Catalog *MCPCatalogSummary `json:"catalog,omitempty"`
+	// Categories are workspace-owned tags used only by the
+	// Toolbox list. They never affect tool registration or authorization.
+	Categories *[]types.ToolboxCategory `json:"categories,omitempty"`
 }
 
 // MCPCatalogSummary is the list-card view of a saved MCP directory.

@@ -1,5 +1,6 @@
 import { del, get, post, postUpload } from "../../utils/request";
 import type { ConfigSkillFileContent, ConfigSkillFileEntry } from "../system";
+import type { ToolboxCategory } from "../toolbox-category";
 
 // Skill信息
 export interface SkillInfo {
@@ -32,6 +33,7 @@ export interface SkillCatalogItem {
   created_at: string;
   updated_at: string;
   installations: SkillCatalogInstall[];
+  categories?: ToolboxCategory[];
 }
 
 export interface SkillCatalogRegisterResult {

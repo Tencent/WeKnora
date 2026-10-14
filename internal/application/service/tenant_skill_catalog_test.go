@@ -75,6 +75,7 @@ func catalogTestRepo(t *testing.T, dsn string) repository.TenantSkillRepository 
 	require.NoError(t, db.AutoMigrate(
 		&types.TenantSkillEntity{}, &types.TenantSkillCatalogEntity{},
 		&types.TenantSkillSnapshotEntity{}, &types.TenantUserEnvVar{},
+		&types.ToolboxCategory{}, &types.ToolboxCategorySkill{},
 	))
 	return repository.NewTenantSkillRepository(db)
 }

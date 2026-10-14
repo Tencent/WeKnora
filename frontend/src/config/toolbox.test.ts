@@ -96,5 +96,7 @@ test('settings no longer render moved panels, and old bookmarks reach toolbox', 
   assert.match(router, /toolboxLocation\(to\.query\.section/)
   const page = readFileSync(new URL('../views/toolbox/Toolbox.vue', import.meta.url), 'utf8')
   assert.match(page, /if \(!selectedItem\.value && fallback\) void router\.replace\(toolboxLocation\(fallback\.key\)\)/)
-  assert.match(page, /:key="sandboxId"\s+:initial-sandbox-id="sandboxId"/)
+  const skillsPanel = page.match(/<SkillSettings\b[^>]*>/)?.[0] || ''
+  assert.match(skillsPanel, /:key="sandboxId"/)
+  assert.match(skillsPanel, /:initial-sandbox-id="sandboxId"/)
 })

@@ -472,9 +472,17 @@ func (r *tenantSkillRepository) UpdateCatalog(ctx context.Context, e *types.Tena
 }
 
 func (r *tenantSkillRepository) DeleteCatalog(ctx context.Context, tenantID uint64, catalogID string) error {
-	return r.db.WithContext(ctx).
-		Where("tenant_id = ? AND id = ?", tenantID, catalogID).
-		Delete(&types.TenantSkillCatalogEntity{}).Error
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Exec(
+			"DELETE FROM toolbox_category_skills WHERE skill_catalog_id = ? AND "+
+				"category_id IN (SELECT id FROM toolbox_categories WHERE tenant_id = ?)",
+			catalogID, tenantID,
+		).Error; err != nil {
+			return err
+		}
+		return tx.Where("tenant_id = ? AND id = ?", tenantID, catalogID).
+			Delete(&types.TenantSkillCatalogEntity{}).Error
+	})
 }
 
 func (r *tenantSkillRepository) ListSkillsByCatalog(

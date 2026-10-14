@@ -141,7 +141,15 @@ func (r *mcpServiceRepository) Update(ctx context.Context, service *types.MCPSer
 
 // Delete deletes an MCP service (soft delete)
 func (r *mcpServiceRepository) Delete(ctx context.Context, tenantID uint64, id string) error {
-	return r.db.WithContext(ctx).
-		Where("id = ? AND tenant_id = ?", id, tenantID).
-		Delete(&types.MCPService{}).Error
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Exec(
+			"DELETE FROM toolbox_category_mcp_services WHERE mcp_service_id = ? AND "+
+				"category_id IN (SELECT id FROM toolbox_categories WHERE tenant_id = ?)",
+			id, tenantID,
+		).Error; err != nil {
+			return err
+		}
+		return tx.Where("id = ? AND tenant_id = ?", id, tenantID).
+			Delete(&types.MCPService{}).Error
+	})
 }

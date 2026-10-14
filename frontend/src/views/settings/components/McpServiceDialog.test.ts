@@ -16,22 +16,35 @@ const script = compileScript(descriptor, { id: 'mcp-dialog-test' }).content
   .replace('return __returned__', '__expose(__returned__); return __returned__')
 const compiled = ts.transpileModule(script, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
 
-function fixture(generate: () => Promise<string> = async () => 'Query logs by module and time.', initialStep: 0 | 1 = 0) {
+function fixture(generate: () => Promise<string> = async () => 'Query logs by module and time.', initialStep: 0 | 1 = 0,
+  options: { create?: boolean; assign?: () => Promise<void> } = {}) {
   const updates: Array<{ id: string; data: Record<string, unknown> }> = []
   const warnings: string[] = []
-  const props = reactive({ visible: true, service: { id: 'one', name: 'Logs', description: 'Legacy usage', transport_type: 'sse', url: 'https://example.com/mcp' }, mode: 'edit', initialStep })
+  const errors: string[] = []
+  const creates: unknown[] = []
+  const assignments: Array<{ id: string; ids: string[] }> = []
+  const props = reactive<any>({ visible: true, service: options.create ? null : { id: 'one', name: 'Logs', description: 'Legacy usage', transport_type: 'sse', url: 'https://example.com/mcp' }, mode: options.create ? 'add' : 'edit', initialStep,
+    categories: [{ id: 'contracts', name: 'Contracts' }, { id: 'crm', name: 'CRM' }], initialCategoryIds: options.create ? ['contracts'] : [] })
   const exports: any = {}
   runInNewContext(compiled, {
     exports,
     require(name: string) {
       if (name === 'vue') return require('vue')
       if (name === 'vue-i18n') return { useI18n: () => ({ t: (key: string) => key, locale: ref('zh-CN') }) }
-      if (name === 'tdesign-vue-next') return { MessagePlugin: { warning: (text: string) => warnings.push(text), success() {}, error() {} } }
+      if (name === 'tdesign-vue-next') return { MessagePlugin: { warning: (text: string) => warnings.push(text), success() {}, error: (text: string) => errors.push(text) } }
+      if (name === '@/api/toolbox-category') return {
+        replaceMCPServiceCategories: async (id: string, ids: string[]) => {
+          assignments.push({ id, ids: Array.from(ids) })
+          await options.assign?.()
+          return props.categories.filter((category: any) => ids.includes(category.id))
+        },
+      }
       if (name === '@/api/mcp-service') return {
+        createMCPService: async (data: unknown) => { creates.push(data); return { id: 'created', ...(data as object), categories: [] } },
         generateMCPUsageInstructions: generate,
         updateMCPService: async (id: string, data: Record<string, unknown>) => {
           updates.push({ id, data })
-          return { ...props.service, ...data }
+          return { ...props.service, id, ...data }
         },
       }
       return { default: {} }
@@ -48,8 +61,47 @@ function fixture(generate: () => Promise<string> = async () => 'Query logs by mo
   const instance = ref<any>()
   const app = renderer.createApp({ render: () => h(component, { ...props, ref: instance }) })
   app.mount({})
-  return { vm: instance.value, props, updates, warnings, close: () => app.unmount() }
+  return { vm: instance.value, props, updates, warnings, errors, creates, assignments, close: () => app.unmount() }
 }
+
+test('new MCP service preselects the tag and retries failed tag assignment without duplicate creation', async () => {
+  let fail = true
+  const f = fixture(undefined, 0, { create: true, assign: async () => { if (fail) throw new Error('unavailable') } })
+  try {
+    assert.deepEqual(Array.from(f.vm.selectedCategoryIds), ['contracts'])
+    f.vm.formRef = { validate: async () => true }
+    f.vm.formData.name = 'New tool'
+    f.vm.formData.url = 'https://example.com/mcp'
+    await f.vm.handleNext()
+    assert.equal(f.vm.step, 0)
+    assert.equal(f.vm.currentService.id, 'created')
+    assert.equal(f.creates.length, 1)
+    assert.deepEqual(f.errors, ['toolboxCategories.resourceSavedAssignmentFailed'])
+    fail = false
+    f.vm.selectedCategoryIds = ['contracts', 'crm']
+    await f.vm.handleNext()
+    assert.equal(f.vm.step, 1)
+    assert.equal(f.creates.length, 1)
+    assert.deepEqual(f.assignments.at(-1), { id: 'created', ids: ['contracts', 'crm'] })
+  } finally { f.close() }
+})
+
+test('new MCP tag selection is editable and pending tag creation blocks saving', async () => {
+  const f = fixture(undefined, 0, { create: true })
+  try {
+    f.vm.formRef = { validate: async () => true }
+    f.vm.formData.name = 'New tool'
+    f.vm.formData.url = 'https://example.com/mcp'
+    f.vm.creatingCategory = true
+    await f.vm.handleNext()
+    assert.equal(f.creates.length, 0)
+    f.vm.creatingCategory = false
+    f.vm.selectedCategoryIds = []
+    await Promise.all([f.vm.handleNext(), f.vm.handleNext()])
+    assert.equal(f.creates.length, 1)
+    assert.equal(f.assignments.length, 0)
+  } finally { f.close() }
+})
 
 test('tool shortcut opens the saved service directly without resaving its connection', () => {
   const f = fixture(undefined, 1)

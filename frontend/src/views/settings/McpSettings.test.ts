@@ -6,14 +6,15 @@ import { runInNewContext } from 'node:vm'
 import test from 'node:test'
 import { compileScript, parse } from '@vue/compiler-sfc'
 import ts from 'typescript'
-import { createRenderer, nextTick, reactive } from 'vue'
+import { createRenderer, nextTick, reactive, watch } from 'vue'
 import { matchesResourceQuery } from '../../utils/resourceListSearch'
+import { countResourcesByCategory, hasToolboxCategory } from '../../utils/toolboxCategories'
 
 const require = createRequire(import.meta.url)
 const filename = fileURLToPath(new URL('./McpSettings.vue', import.meta.url))
 const { descriptor } = parse(readFileSync(filename, 'utf8'), { filename })
 const script = compileScript(descriptor, { id: 'mcp-settings-test' }).content
-  .replace(/__expose\([^;]*\);/g, '')
+  .replace(/__expose\([^\n]*\)/g, '')
   .replace('return __returned__', '__expose(__returned__); return __returned__')
 const compiled = ts.transpileModule(script, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
 
@@ -21,20 +22,27 @@ async function fixture(update: () => Promise<void> = async () => {}, admin = tru
   const calls: Array<{ id: string; data: unknown }> = []
   const errors: string[] = []
   const deletes: unknown[] = []
+  const counts: Array<Record<string, number>> = []
   const service = reactive({ id: 'one', name: 'Logs', enabled: true, is_builtin: false })
+  let readServices = async (): Promise<any[]> => [service]
   const exports: any = {}
   runInNewContext(compiled, {
     exports, console: { error() {} },
     require(name: string) {
       if (name === '@/utils/resourceListSearch') return { matchesResourceQuery }
+      if (name === '@/utils/toolboxCategories') return { countResourcesByCategory, hasToolboxCategory }
       if (name === 'vue') return require('vue')
       if (name === 'vue-i18n') return { useI18n: () => ({ t: (key: string) => key }) }
       if (name === '@/stores/auth') return { useAuthStore: () => ({ hasRole: () => admin }) }
       if (name === '@/components/settings/useConfirmDelete') return { useConfirmDelete: () => (data: unknown) => deletes.push(data) }
       if (name === 'tdesign-vue-next') return { MessagePlugin: { success() {}, error: (message: string) => errors.push(message) } }
       if (name === '@/api/mcp-service') return {
-        listMCPServices: async () => [service],
+        listMCPServices: () => readServices(),
         updateMCPService: async (id: string, data: unknown) => { calls.push({ id, data }); await update() },
+      }
+      if (name === '@/api/toolbox-category') return {
+        listToolboxCategories: async () => [],
+        replaceMCPServiceCategories: async (_id: string, ids: string[]) => ids.map(id => ({ id, name: id })),
       }
       return { default: {} }
     },
@@ -46,12 +54,28 @@ async function fixture(update: () => Promise<void> = async () => {}, admin = tru
     insert() {}, remove() {}, setElementText() {}, setText() {}, patchProp() {},
     parentNode: () => null, nextSibling: () => null,
   })
-  const app = renderer.createApp(component)
+  const app = renderer.createApp(component, { 'onCategory-counts': (value: Record<string, number>) => counts.push(value) })
   const vm: any = app.mount({})
   await new Promise<void>(resolve => setImmediate(resolve))
   await nextTick()
-  return { vm, service, calls, errors, deletes, close: () => app.unmount() }
+  return { vm, service, calls, errors, deletes, counts, readWith: (read: typeof readServices) => { readServices = read }, close: () => app.unmount() }
 }
+
+test('MCP tab counts update after tag assignment and ignore keyword search', async () => {
+  const f = await fixture()
+  try {
+    assert.deepEqual(f.counts.at(-1), { '': 1 })
+    f.vm.openCategoryAssignment(f.vm.services[0])
+    await f.vm.saveCategoryAssignment(['contracts'])
+    await nextTick()
+    assert.deepEqual(f.counts.at(-1), { '': 1, contracts: 1 })
+    const emitted = f.counts.length
+    f.vm.query = 'no matches'
+    await nextTick()
+    assert.equal(f.vm.filteredServices.length, 0)
+    assert.equal(f.counts.length, emitted)
+  } finally { f.close() }
+})
 
 test('edit and tools buttons select the correct drawer step; add resets it', async () => {
   const f = await fixture()
@@ -66,6 +90,64 @@ test('edit and tools buttons select the correct drawer step; add resets it', asy
     assert.equal(f.vm.dialogInitialStep, 0)
     assert.equal(f.vm.currentService, null)
     assert.equal(f.calls.length, 0)
+  } finally { f.close() }
+})
+
+test('refreshing tags keeps the existing MCP panel mounted', async () => {
+  const f = await fixture()
+  const loadingStates: boolean[] = []
+  const stop = watch(() => f.vm.loading, value => loadingStates.push(value), { flush: 'sync' })
+  try {
+    await f.vm.loadCategories()
+    assert.deepEqual(loadingStates, [])
+    assert.deepEqual(ids(f.vm), ['one'])
+  } finally { stop(); f.close() }
+})
+
+test('saving tags targets the latest MCP row after list replacement', async () => {
+  const f = await fixture()
+  try {
+    f.vm.openCategoryAssignment(f.vm.services[0])
+    f.vm.services = [{ ...f.service, categories: [] }]
+    f.vm.selectedCategoryId = 'contracts'
+    await f.vm.saveCategoryAssignment(['contracts'])
+    assert.deepEqual(ids(f.vm), ['one'])
+    assert.equal(f.vm.categoryDialogVisible, false)
+  } finally { f.close() }
+})
+
+test('an older MCP list response cannot undo a successful tag assignment', async () => {
+  const f = await fixture()
+  let finishRead!: (value: any[]) => void
+  const stale = { ...f.service, categories: [] }
+  try {
+    f.readWith(() => new Promise(resolve => { finishRead = resolve }))
+    const reading = f.vm.loadServices(true)
+    f.vm.openCategoryAssignment(f.vm.services[0])
+    await f.vm.saveCategoryAssignment(['contracts'])
+    finishRead([stale])
+    await reading
+    f.vm.selectedCategoryId = 'contracts'
+    assert.deepEqual(ids(f.vm), ['one'])
+  } finally { f.close() }
+})
+
+test('adding in a tag preselects it; saving outside the filter reveals the resource', async () => {
+  const f = await fixture()
+  try {
+    f.vm.selectedCategoryId = 'contracts'
+    f.vm.query = 'no match'
+    f.vm.handleAdd()
+    assert.deepEqual(Array.from(f.vm.initialCategoryIds), ['contracts'])
+    Object.assign(f.service, { categories: [{ id: 'contracts', name: 'Contracts' }] })
+    await f.vm.handleDialogCreated(f.service)
+    assert.equal(f.vm.selectedCategoryId, 'contracts')
+    assert.equal(f.vm.query, '')
+    assert.deepEqual(ids(f.vm), ['one'])
+    Object.assign(f.service, { categories: [] })
+    await f.vm.handleDialogCreated(f.service)
+    assert.equal(f.vm.selectedCategoryId, '')
+    assert.deepEqual(ids(f.vm), ['one'])
   } finally { f.close() }
 })
 
@@ -135,6 +217,24 @@ test('MCP search matches visible metadata and clearing restores every service', 
       assert.deepEqual(ids(f.vm), [])
     }
     f.vm.query = '  '
+    assert.deepEqual(ids(f.vm), ['builtin', 'logs', 'local'])
+  } finally { f.close() }
+})
+
+test('MCP tag filter supports shared multi-tag assignments', async () => {
+  const f = await fixture()
+  try {
+    const services = rows()
+    Object.assign(services[0]!, { categories: [{ id: 'legal', name: 'Contracts' }, { id: 'crm', name: 'Customers' }] })
+    Object.assign(services[1]!, { categories: [{ id: 'crm', name: 'Customers' }] })
+    f.vm.services = services
+    f.vm.selectedCategoryId = 'legal'
+    assert.deepEqual(ids(f.vm), ['builtin'])
+    f.vm.selectedCategoryId = 'crm'
+    assert.deepEqual(ids(f.vm), ['builtin', 'logs'])
+    f.vm.query = 'logs'
+    assert.deepEqual(ids(f.vm), ['logs'])
+    f.vm.clearFilters()
     assert.deepEqual(ids(f.vm), ['builtin', 'logs', 'local'])
   } finally { f.close() }
 })

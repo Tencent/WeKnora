@@ -106,7 +106,7 @@ curl -X POST "$BASE/api/v1/system/sandbox-check" \
 
 | 方法 | 路径 | 请求 / 响应 |
 | --- | --- | --- |
-| GET | `/skills/catalog` | 200 `{success,data:[CatalogItem]}`；CatalogItem 含 `installations:[{sandbox_config_id,status,enabled,version,bundle_sha256,served?,...}]` |
+| GET | `/skills/catalog` | 200 `{success,data:[CatalogItem]}`；CatalogItem 含 `installations:[{sandbox_config_id,status,enabled,version,bundle_sha256,served?,...}]` 和 `categories:[Category]` |
 | POST | `/skills/catalog` | multipart `file` 或 JSON `{"source":"@owner/slug"}`；201 `{success,data:{id,name,version,description}}` |
 | POST | `/skills/catalog/:id/install` | `{"sandbox_config_ids":["cfg-1","cfg-2"]}`；202 `{success,data:{installs,errors?}}` |
 | GET | `/skills/catalog/:id/files` | 200 `{success,data:[FileEntry]}` |
@@ -124,6 +124,8 @@ curl -X POST "$BASE/api/v1/skills/catalog/catalog-1/install" \
 ```
 
 来源写法、匿名下载要求和 ZIP 限制见[技能来源](../03-features/22-skills-sandbox.md#支持的来源)。
+
+技能目录项可通过 `PUT /skills/catalog/:id/categories` 原子替换多个工作区标签。标签 CRUD、权限和 MCP 共用行为见 [Agent 与 MCP API 的工具箱标签](02-api-agent-mcp.md#toolbox-categories)。
 
 ## 沙箱内技能
 

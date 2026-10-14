@@ -25,10 +25,14 @@
 
     <template v-else>
       <Teleport to="#toolbox-toolbar" defer>
-        <t-input v-if="catalog.length > 0" v-model="query" class="list-search" :placeholder="$t('menu.search')"
-          :aria-label="$t('menu.search')" clearable>
-          <template #prefix-icon><t-icon name="search" size="16px" /></template>
-        </t-input>
+        <div class="list-toolbar">
+          <t-input v-if="catalog.length > 0" v-model="query" class="list-search"
+            :placeholder="$t('menu.search')" :aria-label="$t('menu.search')" clearable>
+            <template #prefix-icon><t-icon name="search" size="16px" /></template>
+          </t-input>
+          <ToolboxCategoryControl v-model="selectedCategoryId" :categories="categories"
+            :can-manage="authStore.hasRole('admin')" @changed="reloadCategories" />
+        </div>
       </Teleport>
       <div v-if="catalog.length === 0" class="empty-state">
         <t-empty :description="skillText('emptyDesc')" />
@@ -49,7 +53,7 @@
       <div v-else-if="filteredCatalog.length === 0" class="empty-state">
         <t-empty :description="$t('common.noResult')" />
         <div class="empty-actions">
-          <t-button variant="outline" @click="query = ''">{{ $t('common.clear') }}</t-button>
+          <t-button variant="outline" @click="clearFilters">{{ $t('common.clear') }}</t-button>
           <t-button variant="text" @click="openAdd">{{ $t('settings.skills.addSkill') }}</t-button>
         </div>
       </div>
@@ -74,6 +78,12 @@
                     :aria-label="$t('settings.sandbox.skillFiles')" @click="openCatalogFiles(item)">
                     <folder-icon size="14px" />
                   </button>
+                  <button v-if="authStore.hasRole('admin')" type="button" class="skill-card__icon-btn"
+                    :title="$t('toolboxCategories.assign')"
+                    :aria-label="$t('toolboxCategories.assignTitle', { name: item.name })"
+                    @click="openCategoryAssignment(item)">
+                    <t-icon name="discount" size="14px" />
+                  </button>
                   <button v-if="canDelete(item)" type="button" class="skill-card__icon-btn skill-card__icon-btn--danger"
                     :disabled="deletingId === item.id" :title="$t('settings.skills.deleteCatalog')"
                     :aria-label="$t('settings.skills.deleteCatalog')" @click="askDelete(item)">
@@ -84,6 +94,8 @@
               <p v-if="item.description" class="skill-card__desc" :title="item.description">
                 {{ compactText(item.description) }}
               </p>
+              <ToolboxCategoryTags v-if="item.categories?.length" class="skill-card__categories"
+                :categories="item.categories" />
               <div v-for="view in [installsView(item)]" :key="'installs'" class="skill-card__installs">
                 <span v-if="view.installs.length === 0 && !view.canAdd" class="skill-card__installs-label">
                   {{ skillText('noInstalls') }}
@@ -175,9 +187,11 @@
       </div>
     </template>
 
-    <SettingDrawer v-model:visible="showAdd" :title="$t('settings.skills.addSkill')" :description="addStepDescription"
+    <SettingDrawer :visible="showAdd" @update:visible="(value: boolean) => { if (!addBusy) showAdd = value }"
+      :title="$t('settings.skills.addSkill')" :description="addStepDescription"
       :icon="SKILL_ICON" width="680px" :min-width="560" :max-width="920"
       storage-key="setting-drawer:width:skill-catalog-add" :confirm-loading="addPrimaryLoading"
+      :cancel-disabled="addBusy"
       :confirm-disabled="addPrimaryDisabled" :confirm-text="addPrimaryText" @confirm="handleAddPrimary">
       <template #header-extra>
         <nav class="skill-add-steps" :aria-label="$t('settings.skills.addProgress')">
@@ -220,6 +234,12 @@
       </article>
 
       <template v-if="addStep === 0">
+        <section class="setting-drawer__section">
+          <h4 class="setting-drawer__section-title">{{ $t('toolboxCategories.label') }}</h4>
+          <ToolboxCategoryPicker v-model="addCategoryIds" :categories="categories"
+            :disabled="uploading || addingFromSource || savingRegistrationCategories"
+            @busy="creatingCategory = $event" @created="categories.push($event)" />
+        </section>
         <section class="setting-drawer__section">
           <h4 class="setting-drawer__section-title">{{ $t('settings.sandbox.skillSourceSection') }}</h4>
           <p class="installer-model-hint">{{ $t('settings.sandbox.skillSourceSectionHint', { size: maxSkillBundleMB })
@@ -379,6 +399,10 @@
 
     <SkillFilesDrawer v-model:visible="filesDrawerVisible" :catalog-id="filesCatalogId"
       :skill-name="filesCatalogName" />
+    <ToolboxCategoryAssignmentDialog v-model:visible="categoryDialogVisible"
+      :resource-name="categoryResource?.name || ''" :category-ids="categoryResource?.categories?.map(({ id }) => id) || []"
+      :categories="categories" :saving="categorySaving" @save="saveCategoryAssignment"
+      @created="categories.push($event)" />
   </div>
 </template>
 
@@ -391,6 +415,10 @@ import SandboxSkillsPanel from '@/components/SandboxSkillsPanel.vue'
 import SkillFilesDrawer from '@/components/SkillFilesDrawer.vue'
 import SandboxBackendBadge from '@/components/settings/SandboxBackendBadge.vue'
 import SettingDrawer from '@/components/settings/SettingDrawer.vue'
+import ToolboxCategoryControl from '@/components/toolbox/ToolboxCategoryControl.vue'
+import ToolboxCategoryTags from '@/components/toolbox/ToolboxCategoryTags.vue'
+import ToolboxCategoryAssignmentDialog from '@/components/toolbox/ToolboxCategoryAssignmentDialog.vue'
+import ToolboxCategoryPicker from '@/components/toolbox/ToolboxCategoryPicker.vue'
 import ModelSelector from '@/components/ModelSelector.vue'
 import { useConfirmDelete } from '@/components/settings/useConfirmDelete'
 import { useConfigSkillInstallProgress } from '@/composables/useConfigSkillInstallProgress'
@@ -398,7 +426,14 @@ import { matchesResourceQuery } from '@/utils/resourceListSearch'
 import { SKILL_ICON } from '@/types/mention'
 import { useUIStore } from '@/stores/ui'
 import { useDeploymentCapabilitiesStore } from '@/stores/deploymentCapabilities'
+import { useAuthStore } from '@/stores/auth'
 import { MAX_SKILL_BUNDLE_SIZE_BYTES, MAX_SKILL_BUNDLE_SIZE_MB } from '@/utils'
+import { countResourcesByCategory, hasToolboxCategory } from '@/utils/toolboxCategories'
+import {
+  listToolboxCategories,
+  replaceSkillCategories,
+  type ToolboxCategory,
+} from '@/api/toolbox-category'
 import {
   deleteSkillCatalog,
   installSkillCatalog,
@@ -427,10 +462,11 @@ import {
 const props = defineProps<{
   initialSandboxId?: string
 }>()
-const emit = defineEmits<{ count: [value: number] }>()
+const emit = defineEmits<{ 'category-counts': [value: Record<string, number>] }>()
 
 const { t, te, locale } = useI18n()
 const uiStore = useUIStore()
+const authStore = useAuthStore()
 const deploymentCapabilities = useDeploymentCapabilitiesStore()
 const confirmDelete = useConfirmDelete()
 const hostOnly = computed(() => hostSkillsOnly(
@@ -450,8 +486,16 @@ const records = ref<SandboxConfigRecord[]>([])
 const scriptsDisabled = ref(false)
 const policySaving = ref(false)
 const catalog = ref<SkillCatalogItem[]>([])
+watch(() => countResourcesByCategory(catalog.value), counts => emit('category-counts', counts))
 const query = ref('')
-const filteredCatalog = computed(() => catalog.value.filter((item) => matchesResourceQuery(item, query.value)))
+const categories = ref<ToolboxCategory[]>([])
+const selectedCategoryId = defineModel<string>('categoryId', { default: '' })
+const categoryDialogVisible = ref(false)
+const categoryResource = ref<SkillCatalogItem | null>(null)
+const categorySaving = ref(false)
+const filteredCatalog = computed(() => catalog.value.filter((item) =>
+  matchesResourceQuery(item, query.value) && hasToolboxCategory(item.categories, selectedCategoryId.value),
+))
 const focusedCatalogId = ref('')
 const deletingId = ref('')
 const showAdd = ref(false)
@@ -459,6 +503,9 @@ const showInstall = ref(false)
 const showManage = ref(false)
 const addStep = ref(0)
 const registeredCatalog = ref<SkillCatalogRegisterResult | null>(null)
+const addCategoryIds = ref<string[]>([])
+const creatingCategory = ref(false)
+const savingRegistrationCategories = ref(false)
 const pendingFile = ref<File | null>(null)
 const addTargetIds = ref<string[]>([])
 const addSessionIds = ref<string[]>([])
@@ -504,7 +551,7 @@ const skillConfigs = computed(() =>
     : records.value.filter((record) => isNamedSandboxBackend(record.sandbox_type)),
 )
 
-const addBusy = computed(() => uploading.value || addingFromSource.value)
+const addBusy = computed(() => uploading.value || addingFromSource.value || creatingCategory.value || savingRegistrationCategories.value)
 const maxSkillBundleMB = MAX_SKILL_BUNDLE_SIZE_MB
 
 const addSteps = computed(() => [
@@ -988,6 +1035,7 @@ function revealCatalog(id: string) {
 function resetAddWizard() {
   addStep.value = 0
   registeredCatalog.value = null
+  addCategoryIds.value = []
   pendingFile.value = null
   sourceInput.value = ''
   addTargetIds.value = []
@@ -998,17 +1046,23 @@ function resetAddWizard() {
 
 async function openAdd() {
   resetAddWizard()
+  addCategoryIds.value = selectedCategoryId.value ? [selectedCategoryId.value] : []
   await loadInstallerModel()
   showAdd.value = true
 }
 
 function canJumpAddStep(index: number) {
+  if (addBusy.value) return false
   if (index === addStep.value) return false
   return Boolean(registeredCatalog.value) || index < addStep.value
 }
 
 function goToAddStep(index: number) {
   if (!canJumpAddStep(index) && index !== addStep.value) return
+  if (index === 1 && addStep.value === 0) {
+    void registerThenAdvance()
+    return
+  }
   addStep.value = index
 }
 
@@ -1103,24 +1157,21 @@ function skillRegisterErrorMessage(err: any, fromFile: boolean): string {
 }
 
 async function registerThenAdvance() {
-  if (registeredCatalog.value) {
-    addTargetIds.value = defaultAddTargets()
-    addStep.value = 1
-    return
-  }
+  if (addBusy.value) return
   const source = sourceInput.value.trim()
-  if (!pendingFile.value && !source) return
+  if (!registeredCatalog.value && !pendingFile.value && !source) return
 
   try {
-    let registered: SkillCatalogRegisterResult | null = null
-    if (pendingFile.value) {
+    let registered = registeredCatalog.value
+    const alreadyRegistered = !!registered
+    if (!registered && pendingFile.value) {
       uploading.value = true
       uploadPercent.value = 0
       const res = await registerSkillCatalogFromFile(pendingFile.value, (percent) => {
         uploadPercent.value = percent
       })
       registered = catalogFromRegister(res?.data, pendingFile.value.name)
-    } else {
+    } else if (!registered) {
       addingFromSource.value = true
       const res = await registerSkillCatalogFromSource(source)
       registered = catalogFromRegister(res?.data, source)
@@ -1130,6 +1181,25 @@ async function registerThenAdvance() {
       return
     }
     registeredCatalog.value = registered
+    // Re-registering an existing catalog entry preserves its existing domains.
+    if (!alreadyRegistered) {
+      const existingIds = (catalogItemById(registered.id)?.categories || []).map(({ id }) => id)
+      addCategoryIds.value = [...new Set([...existingIds, ...addCategoryIds.value])]
+    }
+    const previousIds = (catalogItemById(registered.id)?.categories || []).map(({ id }) => id)
+    if (previousIds.length !== addCategoryIds.value.length || addCategoryIds.value.some((id) => !previousIds.includes(id))) {
+      savingRegistrationCategories.value = true
+      try {
+        await replaceSkillCategories(registered.id, addCategoryIds.value)
+      } catch (error: any) {
+        await loadCatalog()
+        clearFilters()
+        MessagePlugin.error(t('toolboxCategories.resourceSavedAssignmentFailed', { reason: error?.message || t('toolboxCategories.saveFailed') }))
+        return
+      }
+    }
+    query.value = ''
+    if (selectedCategoryId.value && !addCategoryIds.value.includes(selectedCategoryId.value)) selectedCategoryId.value = ''
     addTargetIds.value = defaultAddTargets()
     addStep.value = 1
     MessagePlugin.success(t('settings.skills.registerAccepted'))
@@ -1140,6 +1210,7 @@ async function registerThenAdvance() {
   } finally {
     uploading.value = false
     addingFromSource.value = false
+    savingRegistrationCategories.value = false
     uploadPercent.value = 0
     if (fileInputRef.value) fileInputRef.value.value = ''
   }
@@ -1270,15 +1341,61 @@ function ensurePoll() {
   }, 2500)
 }
 
+let catalogRevision = 0
+let appliedCatalogRevision = 0
+
 async function loadCatalog(silent = false) {
+  const revision = ++catalogRevision
   try {
     const res = await listSkillCatalog()
+    if (revision < appliedCatalogRevision) return
+    appliedCatalogRevision = revision
     catalog.value = res?.data || []
-    emit('count', catalog.value.length)
   } catch (e: any) {
     if (!silent) MessagePlugin.error(e?.message || t('settings.skills.loadFailed'))
   } finally {
     ensurePoll()
+  }
+}
+
+async function loadCategoryOptions() {
+  categories.value = await listToolboxCategories()
+}
+
+async function reloadCategories() {
+  try {
+    await Promise.all([loadCategoryOptions(), loadCatalog(true)])
+  } catch (e: any) {
+    MessagePlugin.error(e?.message || t('toolboxCategories.loadFailed'))
+  }
+}
+
+function clearFilters() {
+  query.value = ''
+  selectedCategoryId.value = ''
+}
+
+function openCategoryAssignment(item: SkillCatalogItem) {
+  categoryResource.value = item
+  categoryDialogVisible.value = true
+}
+
+async function saveCategoryAssignment(categoryIds: string[]) {
+  if (!categoryResource.value || categorySaving.value) return
+  categorySaving.value = true
+  try {
+    const id = categoryResource.value.id
+    const assigned = await replaceSkillCategories(id, categoryIds)
+    // Reads started before this save must not restore the previous tags.
+    appliedCatalogRevision = ++catalogRevision
+    const current = catalog.value.find(item => item.id === id)
+    if (current) current.categories = assigned
+    categoryDialogVisible.value = false
+    MessagePlugin.success(t('toolboxCategories.assignmentSaved'))
+  } catch (e: any) {
+    MessagePlugin.error(e?.message || t('toolboxCategories.saveFailed'))
+  } finally {
+    categorySaving.value = false
   }
 }
 
@@ -1287,7 +1404,7 @@ async function load() {
   try {
     await deploymentCapabilities.ensureLoaded()
     // Lite lists no configs but still reports the workspace script policy.
-    const [configRes] = await Promise.all([listSandboxConfigs(), loadCatalog()])
+    const [configRes] = await Promise.all([listSandboxConfigs(), loadCatalog(), loadCategoryOptions()])
     records.value = hostOnly.value ? [] : configRes?.data || []
     scriptsDisabled.value = configRes?.workspace_scripts_disabled === true
   } catch (e: any) {
@@ -1375,6 +1492,17 @@ onUnmounted(() => {
 @import (reference) '@/components/css/provider-card.less';
 
 @import (reference) '@/components/css/settings-section.less';
+
+.list-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.list-search {
+  flex: 1;
+  min-width: 180px;
+}
 
 .skill-settings {
   width: 100%;
@@ -1700,6 +1828,14 @@ onUnmounted(() => {
   line-height: 1.5;
   color: var(--td-text-color-secondary);
   overflow-wrap: anywhere;
+}
+
+@media (max-width: 640px) {
+  .list-toolbar {
+    width: 100%;
+    align-items: stretch;
+    flex-direction: column;
+  }
 }
 
 .skill-card__installs {

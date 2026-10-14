@@ -114,6 +114,23 @@ curl -X POST $BASE/api/v1/agents/agent-1/copy -H "Authorization: Bearer $TOKEN"
 curl "$BASE/api/v1/agents/agent-1/suggested-questions?limit=6" -H "X-API-Key: $API_KEY"
 ```
 
+## 工具箱标签（/api/v1/toolbox-categories） {#toolbox-categories}
+
+Skills 与 MCP 服务共用工作区标签。读取需要 Viewer+；创建、重命名、删除标签及为资源设置标签需要 Admin+。标签接口的 API Key 必须为 full-access；为 MCP 服务设置标签也接受 `manage_mcp_services`。
+
+| 方法 | 路径 | 请求 / 响应 |
+| --- | --- | --- |
+| GET | `/toolbox-categories` | 200 `{success,data:[{id,name,created_at,updated_at}]}`，按名称排序 |
+| POST | `/toolbox-categories` | `{"name":"合同管理"}`；201 `{success,data:Category}` |
+| PUT | `/toolbox-categories/:id` | `{"name":"合同与法务"}`；200 `{success,data:Category}` |
+| DELETE | `/toolbox-categories/:id` | 删除标签及其资源关系，不删除资源；200 `{success:true}` |
+| PUT | `/skills/catalog/:id/categories` | `{"category_ids":["category-1"]}`；200 `{success,data:[Category]}` |
+| PUT | `/mcp-services/:id/categories` | 同上 |
+
+标签名称去除首尾空白后必须包含可见字符，最长 64 个 Unicode 字符，不允许控制字符或内部换行；组合重音和 emoji 连接符可以保留。同一工作区内名称唯一，并发创建或重命名撞名也返回 409。`category_ids` 可以包含多个 ID，`[]` 表示清空；全部 ID 验证通过后才原子替换。同一工作区对同一资源的并发替换在数据库事务中串行执行，最终保留最后执行的完整集合。Skill 目录列表和普通 MCP 服务列表中的每个资源都带 `categories` 数组。共享 Agent 的 MCP 选择列表不携带调用方的标签，因为标签不参与运行时授权。
+
+完整设计见[工具箱标签设计](../02-architecture/06-toolbox-business-domains.md)。
+
 ## MCP 服务（/api/v1/mcp-services）
 
 空间级外部工具服务集成。读：Viewer+；写/测试/审批策略：Admin+。API key：`manage_mcp_services`/full。Handler: `internal/handler/mcp_service.go`
@@ -144,7 +161,7 @@ curl -X POST $BASE/api/v1/mcp-services -H "Authorization: Bearer $TOKEN" \
 
 ### GET /api/v1/mcp-services
 
-用途：MCP 服务列表。权限：Viewer+。响应：200 `{"success":true,"data":[MCPServiceResponse]}`
+用途：MCP 服务列表。权限：Viewer+。响应：200 `{"success":true,"data":[MCPServiceResponse]}`；普通工作区列表的每项含 `categories:[Category]`。
 
 | 查询参数 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
