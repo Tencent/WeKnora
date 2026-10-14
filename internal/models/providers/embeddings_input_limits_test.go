@@ -43,6 +43,43 @@ func TestEmbeddingCeilingVendorsDeclareInputLimits(t *testing.T) {
 	}
 }
 
+// The same rule binds one level down. Catalog rows carry their own
+// max_batch_size where one vendor-wide figure fits no model — aliyun's
+// text-embedding rows batch at 10 or 25, zhipu's embedding-3 at 64 — and
+// batch.go merges row compat over vendor compat, so a row that caps how
+// many texts a request carries must equally cap how long each text may be.
+// An unpaired row-level batch size left aliyun and zhipu resolving with
+// MaxItems set and MaxItemRunes zero: the precheck never fired for those
+// deployments and 7499-rune protected chunks reached the provider
+// unprechecked (Tencent/WeKnora#4236).
+func TestEmbeddingCatalogRowsDeclareInputLimits(t *testing.T) {
+	checked := 0
+	for _, v := range modelruntime.List() {
+		for _, m := range v.Models() {
+			if m.Type != types.ModelTypeEmbedding || len(m.Compat) == 0 {
+				continue
+			}
+			overlay := &api.EmbeddingsCompat{}
+			if err := modelruntime.DecodeCompat(m.Compat, overlay); err != nil {
+				t.Errorf("%s/%s%s: decode compat: %v", v.ID, m.ID, m.Match, err)
+				continue
+			}
+			if overlay.MaxBatchSize == nil {
+				continue
+			}
+			checked++
+			if overlay.MaxInputChars == nil || *overlay.MaxInputChars <= 0 {
+				t.Errorf("%s/%s%s: declares max_batch_size %d but no max_input_chars; "+
+					"oversized chunks reach the provider unprechecked",
+					v.ID, m.ID, m.Match, *overlay.MaxBatchSize)
+			}
+		}
+	}
+	if checked == 0 {
+		t.Fatal("no catalog embedding row declares max_batch_size; the catalog drifted")
+	}
+}
+
 // The chunker's protected-span ceiling (splitter.go, maxProtectedSize =
 // absoluteMaxSize = 7500) leaves chunks of up to 7499 runes, and its
 // separator-exhausted path (splitter.go:270) emits whole runs of unbounded

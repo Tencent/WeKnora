@@ -312,28 +312,32 @@
         "id": "qwen3.7-text-embedding",
         "type": "Embedding",
         "compat": {
-          "max_batch_size": 20
+          "max_batch_size": 20,
+          "max_input_chars": 128000
         }
       },
       {
         "id": "qwen3.7-text-embedding-flash",
         "type": "Embedding",
         "compat": {
-          "max_batch_size": 20
+          "max_batch_size": 20,
+          "max_input_chars": 128000
         }
       },
       {
         "id": "text-embedding-v4",
         "type": "Embedding",
         "compat": {
-          "max_batch_size": 10
+          "max_batch_size": 10,
+          "max_input_chars": 8192
         }
       },
       {
         "id": "text-embedding-v3",
         "type": "Embedding",
         "compat": {
-          "max_batch_size": 10
+          "max_batch_size": 10,
+          "max_input_chars": 8192
         }
       },
       {
@@ -341,7 +345,8 @@
         "type": "Embedding",
         "compat": {
           "dimensions_field": "",
-          "max_batch_size": 25
+          "max_batch_size": 25,
+          "max_input_chars": 2048
         }
       },
       {
@@ -349,7 +354,8 @@
         "type": "Embedding",
         "compat": {
           "dimensions_field": "",
-          "max_batch_size": 25
+          "max_batch_size": 25,
+          "max_input_chars": 2048
         }
       },
       {
@@ -389,6 +395,7 @@
           "api": "dashscope-embeddings",
           "dimensions_field": "dimension",
           "max_batch_size": 20,
+          "max_input_chars": 1024,
           "max_image_batch_size": 8,
           "max_image_bytes": 3000000
         }
@@ -400,6 +407,7 @@
           "api": "dashscope-embeddings",
           "dimensions_field": "dimension",
           "max_batch_size": 20,
+          "max_input_chars": 32000,
           "max_image_batch_size": 10,
           "max_image_bytes": 10000000
         }
@@ -411,6 +419,7 @@
           "api": "dashscope-embeddings",
           "dimensions_field": "dimension",
           "max_batch_size": 20,
+          "max_input_chars": 32000,
           "max_image_batch_size": 10,
           "max_image_bytes": 10000000
         }
@@ -422,6 +431,7 @@
           "api": "dashscope-embeddings",
           "dimensions_field": "dimension",
           "max_batch_size": 1,
+          "max_input_chars": 32000,
           "max_image_batch_size": 1,
           "max_image_bytes": 5000000
         }
@@ -433,6 +443,7 @@
           "api": "dashscope-embeddings",
           "dimensions_field": "dimension",
           "max_batch_size": 1,
+          "max_input_chars": 32000,
           "max_image_batch_size": 1,
           "max_image_bytes": 5000000
         }
@@ -444,6 +455,7 @@
           "api": "dashscope-embeddings",
           "dimensions_field": "",
           "max_batch_size": 20,
+          "max_input_chars": 512,
           "max_image_batch_size": 1,
           "max_image_bytes": 3000000
         }
@@ -455,6 +467,7 @@
           "api": "dashscope-embeddings",
           "dimensions_field": "",
           "max_batch_size": 20,
+          "max_input_chars": 512,
           "max_image_batch_size": 1,
           "max_image_bytes": 3000000
         }
@@ -1755,7 +1768,8 @@
         "id": "tao-8k",
         "type": "Embedding",
         "compat": {
-          "max_batch_size": 1
+          "max_batch_size": 1,
+          "max_input_chars": 8192
         }
       }
     ],
@@ -2012,7 +2026,8 @@
         "compat": {
           "api": "openai-embeddings",
           "dimensions_field": "",
-          "max_batch_size": 4
+          "max_batch_size": 4,
+          "max_input_chars": 4096
         }
       },
       {
@@ -2021,7 +2036,8 @@
         "compat": {
           "api": "openai-embeddings",
           "dimensions_field": "",
-          "max_batch_size": 4
+          "max_batch_size": 4,
+          "max_input_chars": 4096
         }
       }
     ],
@@ -2112,7 +2128,8 @@
         "id": "embedding-3",
         "type": "Embedding",
         "compat": {
-          "max_batch_size": 64
+          "max_batch_size": 64,
+          "max_input_chars": 3072
         }
       },
       {
