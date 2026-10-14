@@ -31,9 +31,9 @@ var webSearchTool = BaseTool{
 - Use web_fetch with a returned page ID to read the source when snippets leave gaps. User-supplied URLs can be
   fetched directly without searching first.
 - count optionally selects fewer results within the configured maximum. country and freshness require a
-  provider with filter support (Brave, Serply); unsupported providers return an error rather than ignore filters.
-  Omit country to use the provider default (Brave: US, Serply: Google default). ALL requests worldwide results
-  when the provider supports it.
+  provider with filter support (Brave, Serply; Sofya supports freshness only); unsupported providers return an
+  error rather than ignore filters. Omit country to use the provider default (Brave: US, Serply: Google default).
+  ALL requests worldwide results when the provider supports it.
 - content=true fetches readable excerpts for the first 3 results in parallel (5,000 characters each). Additional
   hits keep search snippets; use web_fetch to read them. Full saved page addresses can be read with read_file.
   Page failures retain the search evidence.

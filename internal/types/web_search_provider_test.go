@@ -117,3 +117,20 @@ func TestGetWebSearchProviderTypesIncludesSerply(t *testing.T) {
 		t.Fatalf("unexpected Serply metadata: %+v", serply)
 	}
 }
+
+func TestGetWebSearchProviderTypesIncludesSofya(t *testing.T) {
+	var sofya *WebSearchProviderTypeInfo
+	providerTypes := GetWebSearchProviderTypes()
+	for i := range providerTypes {
+		if providerTypes[i].ID == string(WebSearchProviderTypeSofya) {
+			sofya = &providerTypes[i]
+			break
+		}
+	}
+	if sofya == nil {
+		t.Fatal("Sofya provider type not found")
+	}
+	if !sofya.RequiresAPIKey || !sofya.SupportsProxy || sofya.RequiresEngineID || sofya.RequiresBaseURL {
+		t.Fatalf("unexpected Sofya metadata: %+v", sofya)
+	}
+}

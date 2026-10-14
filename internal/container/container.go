@@ -1810,6 +1810,7 @@ func registerWebSearchProviders(registry *infra_web_search.Registry) {
 	registry.Register("bocha", infra_web_search.NewBochaProvider)
 	registry.Register("brave", infra_web_search.NewBraveProvider)
 	registry.Register("serply", infra_web_search.NewSerplyProvider)
+	registry.Register("sofya", infra_web_search.NewSofyaProvider)
 }
 
 // registerIMService registers adapter factories, loads enabled channels, and
