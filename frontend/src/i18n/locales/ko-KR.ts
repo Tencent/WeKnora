@@ -5369,6 +5369,9 @@ export default {
     upload: '파일 업로드'
   },
   mentionDetail: {
+    pendingFiles: '추가할 파일: {count}개',
+    fileAlreadyAdded: '추가됨',
+    finishFileSelection: '먼저 파일 선택을 확인하거나 취소하세요.',
     readOnlyFromAgent: '이 대화에서는 읽기 전용이며 지식베이스 목록에는 표시되지 않습니다.',
     faqCount: 'Q&A {count}개',
     kbCount: '문서 {count}개',

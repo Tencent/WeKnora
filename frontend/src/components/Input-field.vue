@@ -1274,6 +1274,24 @@ const updateModelDropdownPosition = () => {
 let lastMentionQuery = '';
 // 关键词变化时旧请求可能晚于新请求返回；只采纳最新一次加载的结果
 let mentionLoadSeq = 0;
+// File drafts belong to one conversation and resource scope, not to a search page.
+const mentionContextKey = computed(() => JSON.stringify([
+  selectedAgentId.value,
+  settingsStore.selectedAgentSourceTenantId,
+  props.sessionId,
+  agentKBSelectionMode.value,
+  [...agentKnowledgeBases.value].sort(),
+  agentMode.value,
+  [...agentAllowedTools.value].sort(),
+  [...agentSupportedFileTypes.value].sort(),
+  knowledgeBases.value.filter(isKbCompatibleWithAgent).map(kb => kb.id).sort(),
+  (orgStore.sharedKnowledgeBases || []).map(shared => shared.knowledge_base)
+    .filter(kb => kb && isKbCompatibleWithAgent(kb)).map(kb => kb!.id).sort(),
+]));
+const mentionFileSelectionScope = computed(() => JSON.stringify(
+  mentionAllowedKbIds.value ? [...mentionAllowedKbIds.value].sort() : null,
+));
+
 const loadMentionItems = async (q: string, resetIndex = true, append = false) => {
   console.log('[Mention] loadMentionItems called with query:', q, 'append:', append);
 
@@ -1297,6 +1315,7 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
       // 共享智能体：按 agent_id 拉取该智能体配置的知识库范围（后端从共享关系解析空间）
       try {
         const list = await chatResources.ensureAgentKnowledgeBases(agentId, sourceTenantId);
+        if (isStale()) return;
         const orgLabel = sharedAgentOrgName.value || '';
         // 保留 capabilities / indexing_strategy，后面过滤时要用
         availableKbs = list.map((kb: any) => ({
@@ -1317,6 +1336,7 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
           chunk_count: kb.chunk_count
         }));
       } catch (e) {
+        if (isStale()) return;
         console.error('[Mention] listKnowledgeBases(agent_id) error:', e);
         availableKbs = [];
         sharedAgentKbList.value = [];
@@ -1463,6 +1483,7 @@ const loadMentionItems = async (q: string, resetIndex = true, append = false) =>
     }
   }
 
+  if (isStale()) return;
   // Fetch Files from API
   // 仅当满足以下两点才加载文件：
   //   1. 智能体确实会用到知识库（kb_selection_mode !== 'none'）；
@@ -1582,6 +1603,23 @@ const loadMoreMentionItems = () => {
 };
 
 let mentionSearchTimer: ReturnType<typeof setTimeout> | null = null;
+const invalidateMentionRequest = () => {
+  ++mentionLoadSeq;
+  if (mentionSearchTimer) clearTimeout(mentionSearchTimer);
+  mentionSearchTimer = null;
+  mentionLoading.value = false;
+};
+watch(mentionContextKey, () => {
+  showMention.value = false;
+  invalidateMentionRequest();
+  mentionItems.value = [];
+  mentionGroupCounts.value = {};
+  mentionAllowedKbIds.value = null;
+}, { flush: 'sync' });
+watch(showMention, (visible) => {
+  if (!visible) invalidateMentionRequest();
+}, { flush: 'sync' });
+
 const onMentionSearchInput = (q: string) => {
   mentionQuery.value = q;
   if (mentionSearchTimer) clearTimeout(mentionSearchTimer);
@@ -1785,11 +1823,10 @@ const triggerMention = () => {
   loadMentionItems("");
 };
 
-const onMentionSelect = (item: any) => {
+const addMentionItem = (item: MentionItem) => {
   if (item.type === 'kb') {
     settingsStore.addKnowledgeBase(item.id);
   } else if (item.type === 'file') {
-    settingsStore.addFile(item.id);
     if (item.kbId) {
       fileIdToKbId.value[item.id] = item.kbId;
       settingsStore.setFileKbMap({ [item.id]: item.kbId });
@@ -1798,6 +1835,7 @@ const onMentionSelect = (item: any) => {
     if (!fileList.value.find(f => f.id === item.id)) {
       fileList.value.push({ id: item.id, name: item.name });
     }
+    settingsStore.addFile(item.id);
   } else if (item.type === 'tag') {
     if (item.kbId) {
       settingsStore.addTag({ id: item.id, name: item.name, kbId: item.kbId, kbName: item.kbName });
@@ -1807,7 +1845,9 @@ const onMentionSelect = (item: any) => {
   } else if (item.type === 'skill') {
     settingsStore.addSkill(item.skillName || item.id);
   }
+};
 
+const finishMentionSelection = () => {
   const textarea = getTextareaEl();
   if (textarea) {
     // 如果是通过输入 @ 触发的，需要删除 @ 和后面的查询文字
@@ -1841,6 +1881,28 @@ const onMentionSelect = (item: any) => {
   }
 
   showMention.value = false;
+};
+
+const onMentionSelect = (item: MentionItem) => {
+  if (!showMention.value) return;
+  addMentionItem(item);
+  finishMentionSelection();
+};
+
+const onMentionFilesSelect = (items: MentionItem[]) => {
+  if (!showMention.value) return;
+  // Items retain their metadata even when a later search no longer displays them.
+  const added = new Set(selectedFileIds.value);
+  let hasAddedFiles = false;
+  for (const item of items) {
+    if (item.type !== 'file' || added.has(item.id)) continue;
+    if (mentionAllowedKbIds.value && (!item.kbId || !mentionAllowedKbIds.value.has(item.kbId))) continue;
+    addMentionItem(item);
+    added.add(item.id);
+    hasAddedFiles = true;
+  }
+  if (hasAddedFiles) finishMentionSelection();
+  else closeMentionFromPopup();
 };
 
 const removeFile = (id: string) => {
@@ -2429,7 +2491,9 @@ const onKeydown = (val: string, event: { e: KeyboardEvent }) => {
       return;
     }
     if (event.e.keyCode === 9 && !event.e.shiftKey) { // Tab
-      if (mentionSelectorRef.value?.enterActiveGroup()) event.e.preventDefault();
+      if (mentionSelectorRef.value?.enterActiveGroup() || mentionSelectorRef.value?.focusFileConfirm()) {
+        event.e.preventDefault();
+      }
       return;
     }
     if (event.e.keyCode === 27) { // Esc
@@ -3042,8 +3106,9 @@ defineExpose({
       <MentionSelector ref="mentionSelectorRef" :visible="showMention" :style="mentionStyle" :items="mentionItems" :hasMore="mentionHasMore"
         :loading="mentionLoading" :emptyHint="mentionEmptyHint" :query="mentionQuery" :searchable="isMentionTriggeredByButton"
         :group-counts="mentionGroupCounts" v-model:activeIndex="mentionActiveIndex"
+        :selected-file-ids="selectedFileIds" :file-selection-scope="mentionFileSelectionScope"
         @update:query="onMentionSearchInput" @close="closeMentionFromPopup"
-        @select="onMentionSelect" @loadMore="loadMoreMentionItems" />
+        @select="onMentionSelect" @select-files="onMentionFilesSelect" @loadMore="loadMoreMentionItems" />
     </Teleport>
 
     <!-- 知识库选择下拉（使用 Teleport 传送到 body，避免父容器定位影响） -->

@@ -92,10 +92,26 @@
             >
               <div
                 class="mention-row mention-item"
-                :class="{ active: group.offset + index === activeIndex }"
-                @click="$emit('select', item)"
+                :class="{ active: group.offset + index === activeIndex, 'is-disabled': fileDraft.isDisabled(item) }"
+                :aria-disabled="fileDraft.isDisabled(item) || undefined"
+                :title="item.type !== 'file' && pendingFileCount > 0 ? $t('mentionDetail.finishFileSelection') : undefined"
+                @mousedown.prevent
+                @click="selectItem(item)"
                 @mouseenter="$emit('update:activeIndex', group.offset + index)"
               >
+                <input
+                  v-if="item.type === 'file'"
+                  class="mention-file-checkbox"
+                  type="checkbox"
+                  :checked="fileDraft.isChecked(item.id)"
+                  :disabled="fileDraft.isDisabled(item)"
+                  :aria-label="item.name"
+                  @click.stop
+                  @change="selectItem(item)"
+                  @focus="$emit('update:activeIndex', group.offset + index)"
+                  @keydown.enter.prevent.stop="selectItem(item)"
+                  @keydown.esc.prevent.stop="cancelFiles"
+                />
                 <span class="mention-row__icon" :class="item.type === 'kb' && item.kbType === 'faq' ? 'faq-icon' : `${item.type}-icon`">
                   <t-icon :name="itemIcon(item)" />
                 </span>
@@ -118,6 +134,9 @@
                   v-else-if="(item.type === 'file' || item.type === 'tag') && item.kbName"
                   class="mention-row__meta mention-row__meta--text"
                 >{{ item.kbName }}</span>
+                <span v-if="item.type === 'file' && fileDraft.isAlreadySelected(item.id)" class="mention-row__meta">
+                  {{ $t('mentionDetail.fileAlreadyAdded') }}
+                </span>
               </div>
               <template #content>
                 <div class="mention-detail-content">
@@ -251,6 +270,28 @@
       </template>
     </div>
 
+    <div v-if="showFileFooter" class="mention-file-footer" @keydown.stop @keydown.esc.prevent="cancelFiles">
+      <span class="mention-file-footer__count" role="status">
+        {{ $t('mentionDetail.pendingFiles', { count: pendingFileCount }) }}
+      </span>
+      <span v-if="pendingFileCount > 0" class="mention-file-footer__hint">
+        {{ $t('mentionDetail.finishFileSelection') }}
+      </span>
+      <div class="mention-file-footer__actions">
+        <button type="button" class="mention-file-footer__button" @click="cancelFiles">
+          {{ $t('common.cancel') }}
+        </button>
+        <button
+          ref="fileConfirmRef"
+          type="button"
+          class="mention-file-footer__button mention-file-footer__button--primary"
+          :disabled="pendingFileCount === 0"
+          @click="confirmFiles"
+        >
+          {{ $t('common.confirm') }}
+        </button>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -262,6 +303,7 @@ import { getKnowledgeBaseById } from '@/api/knowledge-base';
 import { getKnowledgeDetails } from '@/api/knowledge-base';
 import { useSettingsStore } from '@/stores/settings';
 import { SKILL_ICON, type MentionItem, type MentionItemType } from '@/types/mention';
+import { useMentionFileDraft } from './useMentionFileDraft';
 
 type DetailState = { loading: boolean; error?: string; data?: any };
 
@@ -281,9 +323,12 @@ const props = defineProps<{
   searchable?: boolean;
   // 分组入口展示用的总数（如文件搜索的 total），避免仅用首屏已加载条数
   groupCounts?: Partial<Record<MentionItemType, number>>;
+  selectedFileIds?: string[];
+  // Stable key for the currently allowed knowledge-base set, supplied by the caller.
+  fileSelectionScope?: string;
 }>();
 
-const emit = defineEmits(['select', 'update:activeIndex', 'update:query', 'loadMore', 'close']);
+const emit = defineEmits(['select', 'select-files', 'update:activeIndex', 'update:query', 'loadMore', 'close']);
 
 const FLAT_GROUP_LIMIT = 5;
 
@@ -293,6 +338,9 @@ const settingsStore = useSettingsStore();
 const menuRef = ref<HTMLElement | null>(null);
 const listRef = ref<HTMLElement | null>(null);
 const searchInputRef = ref<HTMLInputElement | null>(null);
+const fileConfirmRef = ref<HTMLButtonElement | null>(null);
+const fileDraft = useMentionFileDraft(props);
+const pendingFileCount = fileDraft.pendingCount;
 const detailCache = ref<Record<string, DetailState>>({});
 const isScrolling = ref(false);
 const isComposing = ref(false);
@@ -352,6 +400,9 @@ const visibleGroups = computed(() => {
 });
 
 const visibleItems = computed(() => visibleGroups.value.flatMap(group => group.visibleItems));
+const showFileFooter = computed(() => (
+  pendingFileCount.value > 0 || currentGroupType.value === 'file' || visibleItems.value.some(item => item.type === 'file')
+));
 
 // 菜单贴着输入框向上展开，结果条数变化会让顶边上下跳；搜索期间高度只增不减
 const stableMinHeight = ref(0);
@@ -479,7 +530,30 @@ const confirmActive = () => {
     return;
   }
   const item = visibleItems.value[props.activeIndex];
-  if (item) emit('select', item);
+  if (item) selectItem(item);
+};
+
+const selectItem = (item: MentionItem) => {
+  if (fileDraft.isDisabled(item)) return;
+  if (item.type === 'file') fileDraft.toggleFile(item);
+  else emit('select', item);
+};
+
+const confirmFiles = () => {
+  const files = fileDraft.confirm();
+  if (files.length) emit('select-files', files);
+};
+
+const cancelFiles = () => {
+  fileDraft.cancel();
+  emit('close');
+};
+
+const focusFileConfirm = () => {
+  const button = fileConfirmRef.value;
+  if (!pendingFileCount.value || !button || button.disabled) return false;
+  button.focus({ preventScroll: true });
+  return true;
 };
 
 const focusSearch = () => {
@@ -514,11 +588,11 @@ const onSearchKeydown = (e: KeyboardEvent) => {
       confirmActive();
       break;
     case 'Tab':
-      if (enterActiveGroup()) e.preventDefault();
+      if (!e.shiftKey && (enterActiveGroup() || focusFileConfirm())) e.preventDefault();
       break;
     case 'Escape':
       e.preventDefault();
-      if (!leaveGroup()) emit('close');
+      if (!leaveGroup()) cancelFiles();
       break;
     case 'Backspace':
       if (!(props.query ?? '') && leaveGroup()) e.preventDefault();
@@ -531,6 +605,7 @@ defineExpose({
   confirmActive,
   leaveGroup,
   enterActiveGroup,
+  focusFileConfirm,
 });
 
 const fetchDetail = (item: MentionItem) => {
@@ -777,6 +852,66 @@ const scrollToRow = (index: number) => {
 .mention-row.active {
   background: var(--td-bg-color-secondarycontainer);
   color: var(--td-text-color-primary);
+}
+
+.mention-row.is-disabled {
+  color: var(--td-text-color-disabled);
+  cursor: not-allowed;
+}
+
+.mention-file-checkbox {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  margin: 0;
+  accent-color: var(--td-brand-color);
+  cursor: inherit;
+}
+
+.mention-file-footer {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border-top: .5px solid var(--td-component-stroke);
+  padding: 8px;
+  font-size: var(--app-text-sm);
+}
+
+.mention-file-footer__count {
+  color: var(--td-text-color-primary);
+}
+
+.mention-file-footer__hint {
+  color: var(--td-text-color-secondary);
+  line-height: 1.5;
+}
+
+.mention-file-footer__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.mention-file-footer__button {
+  border: .5px solid var(--td-component-border);
+  border-radius: var(--app-radius-sm);
+  padding: 4px 10px;
+  background: var(--td-bg-color-container);
+  color: var(--td-text-color-primary);
+  font: inherit;
+  cursor: pointer;
+}
+
+.mention-file-footer__button--primary {
+  background: var(--td-brand-color);
+  border-color: var(--td-brand-color);
+  color: var(--td-text-color-anti);
+}
+
+.mention-file-footer__button:disabled {
+  opacity: .45;
+  cursor: not-allowed;
 }
 
 .mention-row__icon {

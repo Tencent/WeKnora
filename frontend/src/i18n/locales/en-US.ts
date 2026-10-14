@@ -2808,6 +2808,9 @@ export default {
     collapse: 'Collapse'
   },
   mentionDetail: {
+    pendingFiles: 'Files to add: {count}',
+    fileAlreadyAdded: 'Already added',
+    finishFileSelection: 'Confirm or cancel the file selection first.',
     readOnlyFromAgent: 'Read-only in this conversation; not shown in Knowledge Base list',
     faqCount: '{count} Q&A entries',
     kbCount: '{count} documents',

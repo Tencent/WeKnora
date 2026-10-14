@@ -5371,6 +5371,9 @@ export default {
     upload: '上傳檔案'
   },
   mentionDetail: {
+    pendingFiles: '待新增 {count} 個檔案',
+    fileAlreadyAdded: '已新增',
+    finishFileSelection: '請先確認或取消檔案選擇',
     readOnlyFromAgent: '僅在此對話中唯讀，不顯示在知識庫清單中',
     faqCount: '共 {count} 條問答',
     kbCount: '共 {count} 個文件',

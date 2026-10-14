@@ -2808,6 +2808,9 @@ export default {
     collapse: '折りたたむ'
   },
   mentionDetail: {
+    pendingFiles: '追加予定: {count} 件',
+    fileAlreadyAdded: '追加済み',
+    finishFileSelection: '先にファイルの選択を確定またはキャンセルしてください。',
     readOnlyFromAgent: 'この会話内でのみ読み取り専用。ナレッジベース一覧には表示されません',
     faqCount: 'Q&A{count}件',
     kbCount: 'ドキュメント{count}件',
