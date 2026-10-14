@@ -376,8 +376,8 @@ func (h *MCPServiceHandler) UpdateMCPService(c *gin.Context) {
 	}
 	if authConfig, ok := updateData["auth_config"].(map[string]interface{}); ok {
 		service.AuthConfig = &types.MCPAuthConfig{}
-		// Secret fields (api_key, token) are intentionally NOT read from the
-		// main PUT body — they live behind the /credentials subresource so
+		// Secret fields (api_key, token, client_secret) are intentionally NOT
+		// read from the main PUT body — they live behind the /credentials subresource so
 		// editing unrelated config (timeout, enabled, etc.) cannot
 		// accidentally clobber a stored credential. Log a warning when a
 		// client still tries to send them so we can spot stale callers.
@@ -426,6 +426,12 @@ func (h *MCPServiceHandler) UpdateMCPService(c *gin.Context) {
 		}
 		if metaURL, ok := authConfig["auth_server_metadata_url"].(string); ok {
 			service.AuthConfig.AuthServerMetadataURL = metaURL
+		}
+		// client_id is non-secret; present-and-empty returns the service to
+		// dynamic client registration. Its secret goes through /credentials.
+		if clientID, ok := authConfig["client_id"].(string); ok {
+			service.AuthConfig.ClientID = strings.TrimSpace(clientID)
+			updateFields["client_id"] = true
 		}
 	}
 	if advancedConfig, ok := updateData["advanced_config"].(map[string]interface{}); ok {

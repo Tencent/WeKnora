@@ -68,6 +68,11 @@
       :data="toolData as ReadSkillData"
     />
 
+    <ImageViewResult
+      v-else-if="displayType === 'image_view'"
+      :data="toolData as ImageViewData"
+    />
+
     <McpToolResult
       v-else-if="displayType === 'mcp_discovery' || displayType === 'mcp_call'"
       :discovery="displayType === 'mcp_discovery'" :data="toolData"
@@ -107,7 +112,8 @@ import type {
   ShellExecData,
   ListSandboxFilesData,
   WriteSandboxFileData,
-  ReadSkillData
+  ReadSkillData,
+  ImageViewData
 } from '@/types/tool-results';
 
 import SearchResults from './tool-results/SearchResults.vue';
@@ -129,6 +135,7 @@ import SandboxFilesResult from './tool-results/SandboxFilesResult.vue';
 import WriteSandboxFileResult from './tool-results/WriteSandboxFileResult.vue';
 import ReadSkillResult from './tool-results/ReadSkillResult.vue';
 import McpToolResult from './tool-results/McpToolResult.vue';
+import ImageViewResult from './tool-results/ImageViewResult.vue';
 
 interface Props {
   success?: boolean;

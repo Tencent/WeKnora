@@ -7,11 +7,13 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/mcp"
+	"github.com/Tencent/WeKnora/internal/middleware"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	secutils "github.com/Tencent/WeKnora/internal/utils"
@@ -93,6 +95,11 @@ type mcpOAuthTestEnv struct {
 	oauth   *mcp.OAuthManager
 	manager *mcp.MCPManager
 	handler *MCPOAuthHandler
+
+	mu         sync.Mutex
+	tokenForms []url.Values
+	// tokenReply, when set, answers token requests instead of a fixed token.
+	tokenReply func(w http.ResponseWriter)
 }
 
 func newMCPOAuthTestEnv(t *testing.T) *mcpOAuthTestEnv {
@@ -111,8 +118,18 @@ func newMCPOAuthTestEnv(t *testing.T) *mcpOAuthTestEnv {
 			"token_endpoint":         serverURL + "/token",
 		})
 	})
-	mux.HandleFunc("/token", func(w http.ResponseWriter, _ *http.Request) {
+	env := &mcpOAuthTestEnv{}
+	mux.HandleFunc("/token", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
+		_ = r.ParseForm()
+		env.mu.Lock()
+		env.tokenForms = append(env.tokenForms, r.PostForm)
+		reply := env.tokenReply
+		env.mu.Unlock()
+		if reply != nil {
+			reply(w)
+			return
+		}
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"access_token": "access-new",
 			"token_type":   "Bearer",
@@ -145,13 +162,25 @@ func newMCPOAuthTestEnv(t *testing.T) *mcpOAuthTestEnv {
 	oauth := mcp.NewOAuthManager(repo, mcpOAuthTestServiceRepo{service: service}, nil)
 	manager := mcp.NewMCPManager(repo)
 	t.Cleanup(manager.Shutdown)
-	return &mcpOAuthTestEnv{
-		service: service,
-		repo:    repo,
-		oauth:   oauth,
-		manager: manager,
-		handler: NewMCPOAuthHandler(oauth, manager, nil, nil),
+	env.service = service
+	env.repo = repo
+	env.oauth = oauth
+	env.manager = manager
+	env.handler = NewMCPOAuthHandler(oauth, manager, mcpOAuthTestServices{service: service}, nil)
+	return env
+}
+
+// mcpOAuthTestServices serves the environment's single MCP service.
+type mcpOAuthTestServices struct {
+	interfaces.MCPServiceService
+	service *types.MCPService
+}
+
+func (s mcpOAuthTestServices) GetMCPServiceByID(_ context.Context, _ uint64, id string) (*types.MCPService, error) {
+	if s.service.ID == id {
+		return s.service, nil
 	}
+	return nil, nil
 }
 
 func (e *mcpOAuthTestEnv) registerClient(t *testing.T, clientID string) {
@@ -251,6 +280,145 @@ func TestMCPOAuthRevokeRecyclesOnlyTheRevokingUsersConnection(t *testing.T) {
 	token, err := env.repo.GetTokenForPrincipal(context.Background(), mcpOAuthTestTenant, alice, env.service.ID)
 	require.NoError(t, err)
 	require.Nil(t, token)
+	require.False(t, aliceConn.IsConnected())
+	require.True(t, bobConn.IsConnected())
+}
+
+// postAssertion calls AssertionGrant as principal with the given JSON body.
+func (e *mcpOAuthTestEnv) postAssertion(
+	t *testing.T, principal types.Principal, serviceID, body string,
+) *httptest.ResponseRecorder {
+	t.Helper()
+	w := httptest.NewRecorder()
+	c, engine := gin.CreateTestContext(w)
+	engine.Use(middleware.ErrorHandler())
+	engine.POST("/mcp-services/:id/oauth/assertion", func(c *gin.Context) {
+		c.Request = c.Request.WithContext(types.WithPrincipal(c.Request.Context(), principal))
+		c.Set(types.TenantIDContextKey.String(), mcpOAuthTestTenant)
+		e.handler.AssertionGrant(c)
+	})
+	c.Request = httptest.NewRequest(
+		http.MethodPost, "/mcp-services/"+serviceID+"/oauth/assertion", strings.NewReader(body),
+	)
+	c.Request.Header.Set("Content-Type", "application/json")
+	engine.HandleContext(c)
+	return w
+}
+
+func TestMCPOAuthAssertionGrantStoresTheTokenAndRecyclesTheUsersConnection(t *testing.T) {
+	env := newMCPOAuthTestEnv(t)
+	env.registerClient(t, "client-1")
+	alice := types.Principal{Type: types.PrincipalAPIExternalUser, ID: "7:alice"}
+	bob := types.Principal{Type: types.PrincipalAPIExternalUser, ID: "7:bob"}
+	aliceConn, bobConn := env.connect(t, alice), env.connect(t, bob)
+
+	w := env.postAssertion(t, alice, env.service.ID, `{"assertion":"signed.jwt.value"}`)
+
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var body struct {
+		Data mcp.OAuthAuthorizationStatus `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+	require.True(t, body.Data.Authorized)
+	require.NotNil(t, body.Data.ExpiresAt)
+	require.Len(t, env.tokenForms, 1)
+	require.Equal(t, "urn:ietf:params:oauth:grant-type:jwt-bearer", env.tokenForms[0].Get("grant_type"))
+	require.Equal(t, "signed.jwt.value", env.tokenForms[0].Get("assertion"))
+	require.Equal(t, "client-1", env.tokenForms[0].Get("client_id"))
+	token, err := env.repo.GetTokenForPrincipal(context.Background(), mcpOAuthTestTenant, alice, env.service.ID)
+	require.NoError(t, err)
+	require.Equal(t, "access-new", token.AccessToken)
+	require.False(t, aliceConn.IsConnected())
+	require.True(t, bobConn.IsConnected(), "another user's connection and its in-flight calls are left alone")
+}
+
+func TestMCPOAuthAssertionGrantReportsARejectedAssertion(t *testing.T) {
+	env := newMCPOAuthTestEnv(t)
+	env.registerClient(t, "client-1")
+	env.tokenReply = func(w http.ResponseWriter) {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]any{"error": "invalid_grant"})
+	}
+	alice := types.Principal{Type: types.PrincipalAPIExternalUser, ID: "7:alice"}
+
+	w := env.postAssertion(t, alice, env.service.ID, `{"assertion":"signed.jwt.value"}`)
+
+	require.Equal(t, http.StatusBadRequest, w.Code, w.Body.String())
+	require.Contains(t, w.Body.String(), "invalid_grant")
+	require.NotContains(t, w.Body.String(), "signed.jwt.value")
+	token, err := env.repo.GetTokenForPrincipal(context.Background(), mcpOAuthTestTenant, alice, env.service.ID)
+	require.NoError(t, err)
+	require.Nil(t, token)
+}
+
+func TestMCPOAuthAssertionGrantReportsATemporaryFailure(t *testing.T) {
+	env := newMCPOAuthTestEnv(t)
+	env.registerClient(t, "client-1")
+	env.tokenReply = func(w http.ResponseWriter) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_ = json.NewEncoder(w).Encode(map[string]any{"error": "temporarily_unavailable"})
+	}
+	alice := types.Principal{Type: types.PrincipalAPIExternalUser, ID: "7:alice"}
+
+	w := env.postAssertion(t, alice, env.service.ID, `{"assertion":"signed.jwt.value"}`)
+
+	require.Equal(t, http.StatusInternalServerError, w.Code, w.Body.String())
+}
+
+func TestMCPOAuthAssertionGrantValidatesTheRequest(t *testing.T) {
+	alice := types.Principal{Type: types.PrincipalAPIExternalUser, ID: "7:alice"}
+	cases := []struct {
+		name      string
+		principal types.Principal
+		serviceID string
+		body      string
+		oauth     bool
+		client    bool
+		status    int
+	}{
+		{"no principal", types.Principal{}, "svc-1", `{"assertion":"a.b.c"}`, true, true, http.StatusUnauthorized},
+		{"empty assertion", alice, "svc-1", `{"assertion":"  "}`, true, true, http.StatusBadRequest},
+		{"malformed body", alice, "svc-1", `{"assertion":`, true, true, http.StatusBadRequest},
+		{
+			"body over the limit", alice, "svc-1",
+			`{"assertion":"` + strings.Repeat("a", mcpOAuthAssertionMaxBytes) + `"}`, true, true, http.StatusBadRequest,
+		},
+		{"unknown service", alice, "svc-x", `{"assertion":"a.b.c"}`, true, true, http.StatusNotFound},
+		{"service without OAuth", alice, "svc-1", `{"assertion":"a.b.c"}`, false, true, http.StatusBadRequest},
+		{"no registered client", alice, "svc-1", `{"assertion":"a.b.c"}`, true, false, http.StatusBadRequest},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			env := newMCPOAuthTestEnv(t)
+			if tc.client {
+				env.registerClient(t, "client-1")
+			}
+			if !tc.oauth {
+				env.service.AuthConfig.AuthType = types.MCPAuthAPIKey
+			}
+
+			w := env.postAssertion(t, tc.principal, tc.serviceID, tc.body)
+
+			require.Equal(t, tc.status, w.Code, w.Body.String())
+			require.Empty(t, env.tokenForms, "an invalid request never reaches the authorization server")
+		})
+	}
+}
+
+// With a pre-registered client the authorization server needs no
+// registration endpoint (this one has none), and an authorization recycles
+// only the authorizing user's connection: a pre-registered client is never a
+// replaced registration, even though no registration is stored.
+func TestMCPOAuthCallbackWithAPreRegisteredClientRecyclesOnlyTheAuthorizingUsersConnection(t *testing.T) {
+	env := newMCPOAuthTestEnv(t)
+	env.service.AuthConfig.ClientID = "pre-registered"
+	alice := types.Principal{Type: types.PrincipalWebUser, ID: "alice"}
+	bob := types.Principal{Type: types.PrincipalWebUser, ID: "bob"}
+	aliceConn, bobConn := env.connect(t, alice), env.connect(t, bob)
+
+	env.authorize(t, alice)
+
+	require.Equal(t, "pre-registered", env.tokenForms[len(env.tokenForms)-1].Get("client_id"))
 	require.False(t, aliceConn.IsConnected())
 	require.True(t, bobConn.IsConnected())
 }

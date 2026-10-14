@@ -101,7 +101,9 @@ func tokenStatus(token *types.MCPOAuthToken, now time.Time) OAuthAuthorizationSt
 	}
 	status.RefreshAvailable = token.RefreshToken != ""
 	if !token.ExpiresAt.IsZero() {
-		expiresAt := token.ExpiresAt
+		// The database driver returns timestamptz values in the process time
+		// zone; report UTC so the response does not vary by deployment.
+		expiresAt := token.ExpiresAt.UTC()
 		status.ExpiresAt = &expiresAt
 	}
 	if token.ExpiresAt.IsZero() || token.ExpiresAt.After(now) {

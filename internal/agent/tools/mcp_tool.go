@@ -166,9 +166,15 @@ func (t *MCPTool) Execute(ctx context.Context, args json.RawMessage) (*types.Too
 		}, err
 	}
 
+	// The post-approval ctx is derived from ApprovalCtx, which does not carry
+	// the exec metadata; read it once here so the OAuth prompt still works
+	// for tools that require approval.
+	execMeta, _ := ToolExecFromContext(ctx)
+	callWindowDerived := false
+
 	// Human approval gate for dangerous tools (issue #1173)
 	if t.gate != nil {
-		if meta, ok := ToolExecFromContext(ctx); ok && meta != nil && meta.EventBus != nil {
+		if meta := execMeta; meta != nil && meta.EventBus != nil {
 			tenantID, _ := types.TenantIDFromContext(ctx)
 			if t.gate.NeedsApproval(ctx, tenantID, t.service.ID, t.mcpTool.Name) {
 				// Use ApprovalCtx (round-level ctx WITHOUT defaultToolExecTimeout) so
@@ -235,13 +241,14 @@ func (t *MCPTool) Execute(ctx context.Context, args json.RawMessage) (*types.Too
 					freshCtx, freshCancel := context.WithTimeout(meta.ApprovalCtx, t.callToolTimeout(meta.ExecTimeout))
 					defer freshCancel()
 					ctx = freshCtx
+					callWindowDerived = true
 				}
 			}
 		}
 	}
 
 	isStdio := t.service.TransportType == types.MCPTransportStdio
-	meta, _ := ToolExecFromContext(ctx)
+	meta := execMeta
 	oauthSess := oauthSessionFromToolExec(ctx, meta).withAuthWaitTimeout(t.authWaitTimeoutSeconds)
 	toolCallID := ""
 	if meta != nil {
@@ -254,9 +261,8 @@ func (t *MCPTool) Execute(ctx context.Context, args json.RawMessage) (*types.Too
 	// with a longer timeout were silently cancelled mid-flight even though the
 	// transport layers honor the value. Re-derive the window from ApprovalCtx —
 	// the round-level parent without the per-tool deadline. Skipped on the
-	// post-approval path, which already re-derived its window above and whose
-	// swapped ctx no longer carries the exec meta.
-	if meta != nil && meta.ApprovalCtx != nil {
+	// post-approval path, which already re-derived its window above.
+	if !callWindowDerived && meta != nil && meta.ApprovalCtx != nil {
 		callCtx, callCancel := context.WithTimeout(meta.ApprovalCtx, t.callToolTimeout(meta.ExecTimeout))
 		defer callCancel()
 		ctx = callCtx

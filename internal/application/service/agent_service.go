@@ -12,6 +12,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/agent/approval"
 	"github.com/Tencent/WeKnora/internal/agent/skills"
 	"github.com/Tencent/WeKnora/internal/agent/tools"
+	"github.com/Tencent/WeKnora/internal/application/attachment"
 	"github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/browserskill"
 	"github.com/Tencent/WeKnora/internal/config"
@@ -233,6 +234,7 @@ func (s *agentService) CreateAgentEngine(
 	s.registerSandboxShellIfAllowed(ctx, toolRegistry, sessionID, config)
 	s.registerSandboxFileTools(ctx, toolRegistry, sessionID, config)
 	s.registerWebPageFiles(ctx, toolRegistry, config, sessionID, assistantMessageID)
+	attachmentReader := s.registerAttachmentReader(ctx, toolRegistry, config, sessionID)
 	// Advertise cached service summaries independently of @mentions. Concrete
 	// tool definitions are published after describe, before the next model request.
 	toolRegistry.PrepareMCPTools(ctx)
@@ -265,9 +267,18 @@ func (s *agentService) CreateAgentEngine(
 	// Vision chat models receive the original images after the tool replies.
 	if config.VLMModelID != "" {
 		if vlmModel, err := s.modelService.GetVLMModel(ctx, config.VLMModelID); err == nil {
-			engine.SetImageDescriber(func(ctx context.Context, imgBytes []byte, prompt string) (string, error) {
+			describe := func(ctx context.Context, imgBytes []byte, prompt string) (string, error) {
 				return vlmModel.Predict(ctx, [][]byte{imgBytes}, prompt)
-			})
+			}
+			engine.SetImageDescriber(describe)
+			if attachmentReader != nil && !config.ChatModelSupportsVision {
+				tenantID, _ := types.SandboxTenantIDFromContext(ctx)
+				attachmentReader.Images = &attachment.ImageReader{
+					Model: config.VLMModelID, Describe: describe,
+					Cache: repository.NewAttachmentDescriptionRepository(s.db, tenantID),
+				}
+			}
+
 			logger.Infof(ctx, "VLM image describer set for tool result analysis (model: %s)", config.VLMModelID)
 		} else {
 			logger.Warnf(ctx, "Failed to load VLM model %s for tool image fallback: %v", config.VLMModelID, err)
@@ -1017,17 +1028,11 @@ func (s *agentService) registerTools(
 	//   - We still *filter out* tools whose capability prerequisites are missing
 	//     (no KB in scope, no Wiki-capable KB, etc.) so the LLM can't call tools
 	//     that would error at runtime.
-	//   - Legacy agents without AllowedTools fall back to DefaultAllowedTools().
-	var allowedTools []string
-	if len(config.AllowedTools) > 0 {
-		// Retired retrieval tool names in stored configs map onto their
-		// successors here, so no data migration is needed.
-		allowedTools = tools.NormalizeAllowedTools(config.AllowedTools)
-		logger.Infof(ctx, "Using custom allowed tools from config: %v", allowedTools)
-	} else {
-		allowedTools = tools.DefaultAllowedTools()
-		logger.Infof(ctx, "Using default allowed tools: %v", allowedTools)
-	}
+	//   - Agents whose AllowedTools was never set fall back to
+	//     DefaultAllowedTools(); an empty list means no built-in tools.
+	//     tools.EffectiveAllowedTools also rewrites retired names.
+	allowedTools := tools.EffectiveAllowedTools(config.AllowedTools)
+	logger.Infof(ctx, "Using allowed tools: %v (set in config: %v)", allowedTools, config.AllowedTools != nil)
 	if config.SharedAgentReadOnly {
 		allowedTools = withoutWikiWriteTools(allowedTools)
 	}
