@@ -1,17 +1,27 @@
 package confluence
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
 
+func loadFixture(t *testing.T, name string) string {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join("testdata", name))
+	if err != nil {
+		t.Fatalf("read fixture %s: %v", name, err)
+	}
+	return string(raw)
+}
+
 // TestConvertConfluenceHTML verifies that the HTML->Markdown conversion used by
 // the Confluence connector preserves content that the previous bare
-// htmltomd.ConvertString dropped: tables, strikethrough rich text, inline SVG
-// (drawio / rendered mermaid) and mermaid source, and that relative links are
-// absolutized to the Confluence host.
+// htmltomd.ConvertString dropped: tables, strikethrough rich text and mermaid
+// source, and that relative links are absolutized to the Confluence base URL.
 func TestConvertConfluenceHTML(t *testing.T) {
-	const host = "confluence.example.com"
+	domain := "https://confluence.example.com/wiki"
 	html := `
 <h2>Overview</h2>
 <p>Status: <s>draft</s> <strong>ready</strong> with a <a href="/spaces/X/pages/999">child page</a>.</p>
@@ -22,12 +32,10 @@ func TestConvertConfluenceHTML(t *testing.T) {
     <tr><td>Bob</td><td>Designer</td></tr>
   </tbody>
 </table>
-<p>drawio:</p>
-<svg viewBox="0 0 10 10"><rect width="10" height="10"/></svg>
 <p>mermaid:</p>
 <pre class="mermaid">graph TD; A--&gt;B;</pre>
 `
-	out, err := convertConfluenceHTML(host, html)
+	out, err := convertConfluenceHTML(domain, html)
 	if err != nil {
 		t.Fatalf("convert: %v", err)
 	}
@@ -35,9 +43,8 @@ func TestConvertConfluenceHTML(t *testing.T) {
 	checks := map[string]string{
 		"table rendered":         "| Name  | Role     |",
 		"strikethrough kept":     "~~draft~~",
-		"inline svg kept":        "<svg",
 		"mermaid fenced block":   "```mermaid",
-		"relative link resolved": "http://" + host + "/spaces/X/pages/999",
+		"relative link resolved": "https://confluence.example.com/spaces/X/pages/999",
 	}
 	for name, want := range checks {
 		if !strings.Contains(out, want) {
@@ -46,51 +53,62 @@ func TestConvertConfluenceHTML(t *testing.T) {
 	}
 
 	// Regression: the old converter flattened table cells into one line and
-	// dropped strikethrough/svg. Make sure those regressions are gone.
+	// dropped strikethrough. Make sure those regressions are gone.
 	if strings.Contains(out, "NameRole") {
 		t.Errorf("table was flattened: %s", out)
 	}
 }
 
-// TestConvertConfluenceCodeBlock verifies fenced code blocks keep their language
-// (Confluence uses class="brush:java" or a nested <code class="language-x">).
-func TestConvertConfluenceCodeBlock(t *testing.T) {
-	html := `<pre class="brush:java; gutter:false">public class A {}</pre>` +
-		`<div class="code panel"><div class="codeContent"><pre><code class="language-python">print(1)</code></pre></div></div>`
+// TestConvertConfluenceCodeBlocksFromView verifies that languages declared the
+// way Confluence's `body.view` actually exposes them (SyntaxHighlighter
+// data-syntaxhighlighter-params, legacy `brush:` classes and mermaid) are
+// rendered as fenced code blocks with the correct language, reusing the
+// commonmark renderer (so embedded fences and blank lines are preserved).
+func TestConvertConfluenceCodeBlocksFromView(t *testing.T) {
+	html := loadFixture(t, "confluence_code_blocks.html")
 	out, err := convertConfluenceHTML("https://c.example.com/wiki", html)
 	if err != nil {
 		t.Fatalf("convert: %v", err)
 	}
-	if !strings.Contains(out, "```java\npublic class A {}\n```") {
+
+	if !strings.Contains(out, "```java\npublic class Hello") {
 		t.Errorf("java code block missing/incorrect:\n%s", out)
 	}
-	if !strings.Contains(out, "```python\nprint(1)\n```") {
-		t.Errorf("python code block missing/incorrect:\n%s", out)
+	// The python sample contains a literal triple-backtick; the fence must not
+	// be closed early (i.e. a 4+ backtick fence is used).
+	if !strings.Contains(out, "````") || !strings.Contains(out, "```nested fence```") {
+		t.Errorf("embedded closing fence not protected:\n%s", out)
+	}
+	if !strings.Contains(out, "```mermaid\ngraph TD; A-->B;") {
+		t.Errorf("mermaid source not preserved:\n%s", out)
 	}
 }
 
-// TestConvertConfluencePanels verifies info/warning/note/tip/error panels become
-// labeled blockquotes while preserving inner formatting.
-func TestConvertConfluencePanels(t *testing.T) {
-	html := `
-<div class="panel panelNote">
-  <div class="panelContent"><p>Remember to <strong>save</strong> often.</p></div>
-</div>
-<div class="panel panelWarning">
-  <div class="panelContent"><ul><li>do not delete</li></ul></div>
-</div>`
-	out, err := convertConfluenceHTML("https://c.example.com/wiki", html)
-	if err != nil {
-		t.Fatalf("convert: %v", err)
+// TestConvertConfluencePanelsFromView verifies info/warning/tip panels from real
+// Confluence editions (Cloud uses confluence-information-macro-*, Server uses
+// panel* classes) become labeled blockquotes while preserving inner formatting.
+func TestConvertConfluencePanelsFromView(t *testing.T) {
+	// Each fixture is checked against the labels it actually contains.
+	cases := map[string][]string{
+		"confluence_panel_cloud.html":  {"Info", "Warning", "Tip"},
+		"confluence_panel_server.html": {"Note", "Error"},
 	}
-	if !strings.Contains(out, "> **Note**") || !strings.Contains(out, "> **Warning**") {
-		t.Errorf("panel labels missing:\n%s", out)
-	}
-	if !strings.Contains(out, "> Remember to **save** often.") {
-		t.Errorf("panel inner formatting lost:\n%s", out)
-	}
-	if !strings.Contains(out, "> - do not delete") {
-		t.Errorf("panel list lost:\n%s", out)
+	for fixture, labels := range cases {
+		html := loadFixture(t, fixture)
+		out, err := convertConfluenceHTML("https://c.example.com/wiki", html)
+		if err != nil {
+			t.Fatalf("convert %s: %v", fixture, err)
+		}
+		for _, label := range labels {
+			want := "> **" + label + "**"
+			if !strings.Contains(out, want) {
+				t.Errorf("%s: expected panel label %q:\n%s", fixture, want, out)
+			}
+		}
+		// Inner formatting must survive.
+		if !strings.Contains(out, "> Remember to **save**") && !strings.Contains(out, "> Server edition note") {
+			t.Errorf("%s: panel inner formatting lost:\n%s", fixture, out)
+		}
 	}
 }
 

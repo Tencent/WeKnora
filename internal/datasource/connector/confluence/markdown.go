@@ -16,7 +16,6 @@ import (
 // representation) into Markdown while preserving content that the default
 // html-to-markdown converter would otherwise drop:
 //   - tables and strikethrough (commonmark + table/strikethrough plugins)
-//   - inline diagrams: <svg> (drawio / rendered mermaid) are kept verbatim
 //   - mermaid source blocks
 //   - fenced code blocks with their language
 //   - info/warning/note/tip/error panels as labeled blockquotes
@@ -25,10 +24,20 @@ import (
 // domain is used to turn relative links/images into absolute URLs. Pass the
 // Confluence base URL (including scheme, e.g. https://host/wiki) so links on
 // HTTPS Cloud instances are not wrongly rewritten to http://.
-func convertConfluenceHTML(domain, html string) (string, error) {
+//
+// Raw <svg> (drawio) preservation is intentionally out of scope here; it is
+// handled separately to keep the diagram markup out of the chunk/embedding
+// pipeline.
+func convertConfluenceHTML(domain, inHTML string) (string, error) {
+	// Normalize Confluence-specific language hints into the `language-*` class
+	// that the commonmark plugin already understands. This lets us reuse the
+	// default code-block renderer (which protects against embedded closing
+	// fences and preserves whitespace) instead of hand-rolling a <pre> renderer.
+	inHTML = normalizeConfluenceCodeBlocks(inHTML)
+
 	conv := newConfluenceConverter()
 
-	markdown, err := conv.ConvertString(html, converter.WithDomain(domain))
+	markdown, err := conv.ConvertString(inHTML, converter.WithDomain(domain))
 	if err != nil {
 		return "", err
 	}
@@ -44,27 +53,6 @@ func newConfluenceConverter() *converter.Converter {
 			strikethrough.NewStrikethroughPlugin(),
 		),
 	)
-
-	// Keep inline diagrams (drawio / rendered mermaid) verbatim so they survive
-	// the round-trip instead of being stripped as unknown elements.
-	conv.Register.RendererFor("svg", converter.TagTypeBlock, func(ctx converter.Context, w converter.Writer, node *html.Node) converter.RenderStatus {
-		var buf bytes.Buffer
-		_ = html.Render(&buf, node)
-		_, _ = w.WriteString("\n\n" + buf.String() + "\n\n")
-		return converter.RenderSuccess
-	}, 100)
-
-	// <pre>: a mermaid block keeps its source; everything else becomes a fenced
-	// code block with the language detected from Confluence's class attribute.
-	conv.Register.RendererFor("pre", converter.TagTypeBlock, func(ctx converter.Context, w converter.Writer, node *html.Node) converter.RenderStatus {
-		if hasClass(node, "mermaid") || hasClass(node, "language-mermaid") {
-			_, _ = w.WriteString("\n\n```mermaid\n" + strings.TrimRight(textContent(node), "\n") + "\n```\n\n")
-			return converter.RenderSuccess
-		}
-		lang := codeLanguage(node)
-		_, _ = w.WriteString("\n\n```" + lang + "\n" + strings.TrimRight(textContent(node), "\n") + "\n```\n\n")
-		return converter.RenderSuccess
-	}, 200)
 
 	// <div>: mermaid wrappers and Confluence info/warning/note/tip panels.
 	conv.Register.RendererFor("div", converter.TagTypeBlock, func(ctx converter.Context, w converter.Writer, node *html.Node) converter.RenderStatus {
@@ -111,15 +99,117 @@ func newConfluenceConverter() *converter.Converter {
 	return conv
 }
 
+// normalizeConfluenceCodeBlocks rewrites Confluence's code-block language hints
+// into a standard `language-*` class on the <pre> element, so the commonmark
+// plugin renders a properly fenced code block (with language, embedded-fence
+// protection and whitespace preservation) without a custom renderer.
+//
+// Confluence exposes the language in several places depending on edition:
+//   - <pre class="brush:java; gutter:false">   (legacy / Server)
+//   - <pre class="language-java">              (already standard)
+//   - <pre data-syntaxhighlighter-params="brush: java; ...">  (SyntaxHighlighter)
+//   - <pre class="mermaid">                    (mermaid diagram source)
+func normalizeConfluenceCodeBlocks(inHTML string) string {
+	doc, err := html.Parse(strings.NewReader(inHTML))
+	if err != nil {
+		// On any parse failure, return the original input unchanged so the
+		// converter still gets a chance to produce output.
+		return inHTML
+	}
+
+	var walk func(*html.Node)
+	walk = func(n *html.Node) {
+		if n.Type == html.ElementNode && n.Data == "pre" {
+			if lang := preLanguage(n); lang != "" {
+				n.Attr = addLanguageClass(n.Attr, lang)
+			}
+		}
+		for c := n.FirstChild; c != nil; c = c.NextSibling {
+			walk(c)
+		}
+	}
+	walk(doc)
+
+	var buf bytes.Buffer
+	_ = html.Render(&buf, doc)
+	return buf.String()
+}
+
+// preLanguage extracts the code language for a <pre> element from the various
+// Confluence representations. It returns "" when no language can be detected.
+func preLanguage(n *html.Node) string {
+	// SyntaxHighlighter stores the language in a single semicolon-separated attr.
+	if params := attr(n, "data-syntaxhighlighter-params"); params != "" {
+		for _, part := range strings.Split(params, ";") {
+			kv := strings.SplitN(strings.TrimSpace(part), ":", 2)
+			if len(kv) != 2 {
+				continue
+			}
+			key, val := strings.TrimSpace(kv[0]), strings.TrimSpace(kv[1])
+			if (key == "brush" || key == "language" || key == "lang") && val != "" {
+				return val
+			}
+		}
+	}
+
+	for _, c := range strings.Fields(attr(n, "class")) {
+		if v, ok := strings.CutPrefix(c, "brush:"); ok {
+			v = strings.TrimPrefix(v, "brush:")
+			if i := strings.IndexByte(v, ';'); i >= 0 {
+				v = v[:i]
+			}
+			if v != "" {
+				return v
+			}
+		}
+		if strings.HasPrefix(c, "language-") {
+			return strings.TrimPrefix(c, "language-")
+		}
+		if strings.HasPrefix(c, "lang-") {
+			return strings.TrimPrefix(c, "lang-")
+		}
+	}
+
+	if strings.Contains(attr(n, "class"), "mermaid") {
+		return "mermaid"
+	}
+	return ""
+}
+
+// addLanguageClass appends a `language-<lang>` token to a node's class
+// attribute (creating the attribute if necessary) without duplicating it.
+func addLanguageClass(attrs []html.Attribute, lang string) []html.Attribute {
+	token := "language-" + lang
+	for i, a := range attrs {
+		if !strings.EqualFold(a.Key, "class") {
+			continue
+		}
+		if a.Val == "" {
+			attrs[i].Val = token
+		} else if !strings.Contains(" "+a.Val+" ", " "+token+" ") {
+			attrs[i].Val = a.Val + " " + token
+		}
+		return attrs
+	}
+	return append(attrs, html.Attribute{Key: "class", Val: token})
+}
+
 // isConfluencePanel reports whether a <div> is a Confluence info/warning/note/
-// tip/error panel. We match the specific panel-type classes (and panelMacro)
-// rather than the bare "panel" token, because code macros render as
-// class="code panel" and must not be mistaken for panels.
+// tip/error panel. We match the specific panel-type classes (both the legacy
+// `panel*` tokens and the modern `confluence-information-macro-*` tokens used by
+// Confluence Cloud/Data Center) rather than the bare "panel" token, because code
+// macros render as class="code panel" and must not be mistaken for panels.
 func isConfluencePanel(node *html.Node) bool {
 	if hasClass(node, "panelMacro") {
 		return true
 	}
-	for _, kind := range []string{"panelNote", "panelInfo", "panelWarning", "panelTip", "panelError"} {
+	for _, kind := range []string{
+		"panelNote", "panelInfo", "panelWarning", "panelTip", "panelError",
+		"confluence-information-macro-information",
+		"confluence-information-macro-note",
+		"confluence-information-macro-warning",
+		"confluence-information-macro-tip",
+	} {
 		if hasClass(node, kind) {
 			return true
 		}
@@ -131,13 +221,7 @@ func isConfluencePanel(node *html.Node) bool {
 // labeled Markdown blockquote. The inner content is rendered recursively so any
 // nested formatting (lists, tables, links) is preserved.
 func renderPanel(ctx converter.Context, w converter.Writer, node *html.Node) converter.RenderStatus {
-	label := ""
-	for _, kind := range []string{"panelNote", "panelInfo", "panelWarning", "panelTip", "panelError"} {
-		if hasClass(node, kind) {
-			label = strings.TrimPrefix(kind, "panel")
-			break
-		}
-	}
+	label := panelLabel(node)
 
 	var inner bytes.Buffer
 	ctx.RenderChildNodes(ctx, &inner, node)
@@ -159,6 +243,31 @@ func renderPanel(ctx converter.Context, w converter.Writer, node *html.Node) con
 	}
 	_, _ = w.WriteString("\n")
 	return converter.RenderSuccess
+}
+
+// panelLabel returns the human-readable label for a Confluence panel, or "" for
+// a generic (untyped) panel.
+func panelLabel(node *html.Node) string {
+	cases := []struct {
+		class string
+		label string
+	}{
+		{"panelNote", "Note"},
+		{"panelInfo", "Info"},
+		{"panelWarning", "Warning"},
+		{"panelTip", "Tip"},
+		{"panelError", "Error"},
+		{"confluence-information-macro-information", "Info"},
+		{"confluence-information-macro-note", "Note"},
+		{"confluence-information-macro-warning", "Warning"},
+		{"confluence-information-macro-tip", "Tip"},
+	}
+	for _, c := range cases {
+		if hasClass(node, c.class) {
+			return c.label
+		}
+	}
+	return ""
 }
 
 func attr(node *html.Node, name string) string {
@@ -197,40 +306,4 @@ func textContent(node *html.Node) string {
 	}
 	walk(node)
 	return sb.String()
-}
-
-// codeLanguage detects the language of a Confluence code block from either the
-// <pre> class (e.g. "brush:java; gutter:false") or a nested <code> element
-// (e.g. class="language-java").
-func codeLanguage(node *html.Node) string {
-	for _, c := range strings.Fields(attr(node, "class")) {
-		if strings.HasPrefix(c, "brush:") {
-			v := strings.TrimPrefix(c, "brush:")
-			if i := strings.IndexByte(v, ';'); i >= 0 {
-				v = v[:i]
-			}
-			if v != "" {
-				return v
-			}
-		}
-		if strings.HasPrefix(c, "language-") {
-			return strings.TrimPrefix(c, "language-")
-		}
-		if strings.HasPrefix(c, "lang-") {
-			return strings.TrimPrefix(c, "lang-")
-		}
-	}
-	for c := node.FirstChild; c != nil; c = c.NextSibling {
-		if c.Type == html.ElementNode && c.Data == "code" {
-			for _, cc := range strings.Fields(attr(c, "class")) {
-				if strings.HasPrefix(cc, "language-") {
-					return strings.TrimPrefix(cc, "language-")
-				}
-				if strings.HasPrefix(cc, "lang-") {
-					return strings.TrimPrefix(cc, "lang-")
-				}
-			}
-		}
-	}
-	return ""
 }
