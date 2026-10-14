@@ -131,6 +131,15 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 		thinkingOpen := false
 		answerCompleted := false
 		answerProduced := false
+		// Providers report token usage on the stream's closing chunk — after
+		// the finish_reason done — so the Done marker is held back until the
+		// channel closes and rides out with the usage it captured. Emitting
+		// Done on the finish_reason chunk instead would let the session's
+		// complete event fire before the usage exists, which is exactly how
+		// quick-answer turns lost their token counts (#3865).
+		var turnUsage *types.TokenUsage
+		pendingDone := false
+		pendingTruncated := false
 
 		closeThinking := func() {
 			if !thinkingOpen {
@@ -187,10 +196,39 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 				if !ok {
 					flushDecoders()
 					closeThinking()
+					if pendingDone {
+						doneData := event.AgentFinalAnswerData{
+							Done:      true,
+							Truncated: pendingTruncated,
+						}
+						// A typed nil in the interface would serialize as
+						// "usage": null; leave the field absent instead.
+						if turnUsage != nil {
+							doneData.Usage = turnUsage
+						}
+						if err := eventBus.Emit(ctx, types.Event{
+							ID:        answerID,
+							Type:      types.EventType(event.EventAgentFinalAnswer),
+							SessionID: chatManage.SessionID,
+							Data:      doneData,
+						}); err != nil {
+							pipelineError(ctx, "Stream", "done_emit", map[string]interface{}{
+								"session_id": chatManage.SessionID,
+								"error":      err.Error(),
+							})
+						}
+					}
 					pipelineInfo(ctx, "Stream", "channel_close", map[string]interface{}{
 						"session_id": chatManage.SessionID,
 					})
 					return
+				}
+
+				// Usage arrives on the closing chunks (and, on a broken
+				// stream, on the error chunk) — grab it from whichever chunk
+				// carries it, before the answerCompleted guard skips repeats.
+				if response.Usage != nil {
+					turnUsage = response.Usage
 				}
 
 				// A stream that stopped without a finish reason is a broken
@@ -264,13 +302,37 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 						answerProduced = true
 					}
 					closeThinking()
+					// The final content (flush tail included) goes out right
+					// away so a cancellation cannot lose it, but the Done
+					// marker itself waits for the channel to close — that is
+					// where the usage-carrying chunk arrives.
+					if response.Done {
+						if response.Content != "" {
+							if err := eventBus.Emit(ctx, types.Event{
+								ID:        answerID,
+								Type:      types.EventType(event.EventAgentFinalAnswer),
+								SessionID: chatManage.SessionID,
+								Data: event.AgentFinalAnswerData{
+									Content:   response.Content,
+									Truncated: truncated,
+								},
+							}); err != nil {
+								pipelineError(ctx, "Stream", "answer_emit", map[string]interface{}{
+									"session_id": chatManage.SessionID,
+									"error":      err.Error(),
+								})
+							}
+						}
+						pendingDone = true
+						pendingTruncated = truncated
+						continue
+					}
 					eventBus.Emit(ctx, types.Event{
 						ID:        answerID,
 						Type:      types.EventType(event.EventAgentFinalAnswer),
 						SessionID: chatManage.SessionID,
 						Data: event.AgentFinalAnswerData{
 							Content:   response.Content,
-							Done:      response.Done,
 							Truncated: truncated,
 						},
 					})

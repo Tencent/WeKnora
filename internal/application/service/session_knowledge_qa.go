@@ -1270,10 +1270,23 @@ func (s *sessionService) consumeFallbackStream(
 	var finalContent string
 	streamCompleted := false
 	decoder := modelContext.StreamDecoder()
+	// Like the main stream, the Done marker waits for the channel to close so
+	// the usage reported on the closing chunk rides out with it (#3865).
+	var turnUsage *types.TokenUsage
+	doneTruncated := false
 
 	for response := range responseChan {
+		if response.Usage != nil {
+			turnUsage = response.Usage
+		}
 		// Emit event for each answer chunk
 		if response.ResponseType == types.ResponseTypeAnswer {
+			// Providers can repeat the terminal chunk after finish_reason;
+			// once the answer is complete only usage (captured above) is
+			// still interesting.
+			if streamCompleted {
+				continue
+			}
 			response.Content = decoder.Feed(response.Content)
 			if response.Done {
 				response.Content += decoder.Flush()
@@ -1283,6 +1296,18 @@ func (s *sessionService) consumeFallbackStream(
 				response.Content = chatpipeline.EmptyTruncatedAnswerFallback
 			}
 			finalContent += response.Content
+			done := response.Done
+			if done {
+				// Update ChatResponse with final content when done; the Done
+				// marker itself is deferred to the channel close below.
+				chatManage.ChatResponse = &types.ChatResponse{Content: finalContent}
+				streamCompleted = true
+				doneTruncated = truncated
+				response.Done = false
+			}
+			if response.Content == "" && done {
+				continue
+			}
 			if err := eventBus.Emit(ctx, types.Event{
 				ID:        fallbackID,
 				Type:      types.EventType(event.EventAgentFinalAnswer),
@@ -1296,22 +1321,34 @@ func (s *sessionService) consumeFallbackStream(
 			}); err != nil {
 				logger.Errorf(ctx, "Failed to emit fallback answer chunk event: %v", err)
 			}
-
-			// Update ChatResponse with final content when done
-			if response.Done {
-				chatManage.ChatResponse = &types.ChatResponse{Content: finalContent}
-				streamCompleted = true
-				logger.Infof(ctx, "Fallback streaming response completed")
-				break
-			}
 		}
 	}
 
-	// If channel closed without Done=true, emit final event with fixed response
-	if !streamCompleted {
-		logger.Warnf(ctx, "Fallback stream closed without completion, emitting final event with fixed response")
-		s.emitFallbackAnswer(ctx, chatManage, chatManage.FallbackResponse)
+	if streamCompleted {
+		logger.Infof(ctx, "Fallback streaming response completed")
+		doneData := event.AgentFinalAnswerData{
+			Done:       true,
+			IsFallback: true,
+			Truncated:  doneTruncated,
+		}
+		// A typed nil in the interface would serialize as "usage": null;
+		// leave the field absent instead.
+		if turnUsage != nil {
+			doneData.Usage = turnUsage
+		}
+		if err := eventBus.Emit(ctx, types.Event{
+			ID:        fallbackID,
+			Type:      types.EventType(event.EventAgentFinalAnswer),
+			SessionID: chatManage.SessionID,
+			Data:      doneData,
+		}); err != nil {
+			logger.Errorf(ctx, "Failed to emit fallback answer done event: %v", err)
+		}
+		return
 	}
+	// If channel closed without Done=true, emit final event with fixed response
+	logger.Warnf(ctx, "Fallback stream closed without completion, emitting final event with fixed response")
+	s.emitFallbackAnswer(ctx, chatManage, chatManage.FallbackResponse)
 }
 
 // emitKnowledgeReferencesEvent streams retrieved chunks to the client as a
