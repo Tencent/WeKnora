@@ -346,7 +346,7 @@ if !state.IsComplete && ctx.Err() == nil {
 
 - 调用数 ≥ 2 时用 `errgroup` **并行执行**（`buildAgentConfig` 固定开启 `ParallelToolCalls`；best-effort，单个失败不取消兄弟任务），结果按原顺序回填。只有只读工具（`CanRunConcurrently`：检索、阅读、搜索类）会重叠执行；其他工具是屏障，等前面的调用结束后单独执行，再继续后面的调用；
 - 每个调用先 `NormalizeToolCallID`，然后解析 JSON 参数——解析失败会先经 `RepairJSON` 修复再试；仍失败则返回带提示的错误结果（`"[Analyze the error above and try a different approach.]"`），让模型换路子而不是让整轮失败；
-- 单个工具执行超时 `defaultToolExecTimeout = 60s`；`shell_exec` 为 `shellExecToolTimeout = 10m5s`（略长于命令自身 600s 上限，以便返回结构化超时结果），`local_browser` 的人工接管步骤使用单独的等待时长；`ToolExecContext` 中额外携带不带该超时的 `ApprovalCtx`，供 MCP 人工审批/OAuth 等合法长等待使用；
+- 单个工具执行超时 `defaultToolExecTimeout = 60s`；`shell_exec` 为 `shellExecToolTimeout = 10m5s`（略长于命令自身 600s 上限，以便返回结构化超时结果），`web_fetch` 为共享页面预算加 5s（默认 3m5s，`WEKNORA_WEB_FETCH_TIMEOUT`），`local_browser` 的人工接管步骤使用单独的等待时长；`ToolExecContext` 中额外携带不带该超时的 `ApprovalCtx`，供 MCP 人工审批/OAuth 等合法长等待使用；
 - 发射 `EventAgentToolCall`（含中文 display name 的 hint，如 `搜索网页("...")`）、`EventAgentToolResult`、`EventAgentTool` 事件。工具执行失败同样以 `tool_result` 发给客户端（`success: false` 与 `error`），不再作为 `error` 事件，智能体会根据错误继续处理。
 
 **④ Observe（观察）**：`appendToolResults`（`internal/agent/observe.go`）按 OpenAI 协议把本轮追加进消息数组：一条带 `tool_calls` 的 assistant 消息 + 每个结果一条 `role:"tool"` 消息（内容经 `modelContext.ModelToolResultForTool` 别名化）。随后 `state.CurrentRound++` 进入下一轮。
@@ -418,7 +418,7 @@ flowchart TD
 | `data_schema` | `knowledge_id`\*（`dN`） | 读取 CSV/Excel 文件的 `table_summary` + `table_column` 类型分块，返回列信息与行数；并告知模型该文档在 `data_analysis` 中固定以表名 `dataset` 访问 |
 | `data_analysis` | `knowledge_id`\*、`sql`\* | 把 CSV/Excel 载入 DuckDB 后执行 SQL。文档由 `knowledge_id` 选定，SQL 中固定以表名 `dataset` 引用它（每次查询在独立连接上建临时视图映射到物理表，模型永远不需要在 SQL 里写文档 ID）；多 Sheet Excel 合并为一张表并暴露 `__sheet_name` 列；自动纠正列名大小写/空格差异；会话结束 Cleanup 时 DROP 所建表 |
 | `web_search` | `query`\*，可选 `count`（不超过配置上限，最多 20）、`country`（两位国家码或 `ALL`）、`freshness`（`pd`/`pw`/`pm`/`py`，Brave 另支持日期区间）、`content` | 联网搜索，直接返回提供商的标题、摘要和 `wN` 页面短 ID；按任务需要选择知识库或联网检索，Agent 搜索不再自动进行 RAG 压缩；`country`/`freshness` 仅 Brave 与 Serply 支持，其他提供商传入时报错；`content=true` 在 15 秒内并行抓取前 3 条结果、各取 5000 字符正文摘录 |
-| `web_fetch` | `items[]`\*（每项 `url`\*=`wN` 或 HTTP(S) URL，可选 `offset`、`limit`；`limit` 按字符计，默认且最多 8000，多项共享输出预算） | 并发抓取最多 8 个网页（SSRF 安全客户端 + DNS pinning，必要时 chromedp 渲染），直接返回 Markdown 或支持的文本正文；60s 超时。按字符分页，使用 `next_offset` 续读；完整正文保存在 `full_output_path`（`web://` 地址，仅同一会话可读），可用 `read_file` 跨轮按行读取；逐 URL 返回 `success`/`failed`/`skipped` 状态与可重试错误码（如快照已过期的 `snapshot_expired`），部分失败不影响其它页面 |
+| `web_fetch` | `items[]`\*（每项 `url`\*=`wN` 或 HTTP(S) URL，可选 `offset`、`limit`；`limit` 按字符计，默认且最多 8000，多项共享输出预算） | 并发抓取最多 8 个网页（SSRF 安全客户端 + DNS pinning，必要时 chromedp 渲染），直接返回 Markdown 或支持的文本正文；单页预算默认 3 分钟（`WEKNORA_WEB_FETCH_TIMEOUT`，HTTP 与 chromedp 共用）。按字符分页，使用 `next_offset` 续读；完整正文保存在 `full_output_path`（`web://` 地址，仅同一会话可读），可用 `read_file` 跨轮按行读取；逐 URL 返回 `success`/`failed`/`skipped` 状态与可重试错误码（如快照已过期的 `snapshot_expired`），部分失败不影响其它页面 |
 | `read_file` | `path`\*、`offset`（从 1 开始的行号）、`limit`（默认 2000 行）、`max_bytes`（上限 64 KiB，网页快照 50 KiB）；网页可带 `line_offset` | 读取工作区文本、skill:// 资源、web:// 网页快照及 attachment:// 会话附件，按结果续读；附件支持按需阅读、等待后台解析及指定图片读取，见[会话体验](18-chat-experience.md#使用临时附件提问) |
 | `shell_exec` | `command`\*；可选 `skill_name`、`work_dir`、`timeout_sec`、`stdin`（≤ 64 KiB）、`max_output_bytes`（默认 16 KiB，上限 64 KiB）、`max_stderr_bytes`（默认 8 KiB，上限 16 KiB）、`env` | 在当前会话沙箱运行命令，默认工作目录 `/workspace`；指定技能时解析技能目录和变量 |
 | `list_sandbox_files` | `path`、`max_entries`（默认 200，上限 500） | 浏览沙箱文件和可用产物；仅在未注册 `shell_exec` 时提供 |
@@ -670,6 +670,7 @@ const (
 | `defaultLLMStallTimeout` | 120s（连续无输出的上限，非总时长） | `internal/agent/const.go` |
 | `defaultToolExecTimeout` | 60s | `internal/agent/const.go` |
 | `shellExecToolTimeout` | 10m5s | `internal/agent/const.go` |
+| `web_fetch` 页面预算 | 3m（`WEKNORA_WEB_FETCH_TIMEOUT`），工具包装层再加 5s | `internal/infrastructure/web_fetch/fetcher.go` |
 | `maxLLMRetries` | 2 | `internal/agent/const.go` |
 | `maxEmptyResponseRetries` | 2 | `internal/agent/const.go` |
 | `maxRepeatedResponseRounds` | 2 | `internal/agent/const.go` |

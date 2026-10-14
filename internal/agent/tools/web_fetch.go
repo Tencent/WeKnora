@@ -7,7 +7,6 @@ import (
 	"net/url"
 	"strings"
 	"sync"
-	"time"
 	"unicode/utf8"
 
 	webfetch "github.com/Tencent/WeKnora/internal/infrastructure/web_fetch"
@@ -16,10 +15,7 @@ import (
 	"github.com/Tencent/WeKnora/internal/utils"
 )
 
-const (
-	webPageFetchTimeout = 60 * time.Second
-	webPageCacheLimit   = 8
-)
+const webPageCacheLimit = 8
 
 var webFetchTool = BaseTool{
 	name: ToolWebFetch,
@@ -164,7 +160,7 @@ func snapshotWaitTimeoutError(err error) error {
 // storePage downloads independently of the caller's deadline so a short
 // content=true timeout cannot cancel a shared fetch for concurrent web_fetch.
 func (t *WebFetchTool) storePage(ctx context.Context, rawURL string) (webPageSnapshot, error) {
-	fetchCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), webPageFetchTimeout)
+	fetchCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), webfetch.PageFetchTimeout())
 	defer cancel()
 	content, err := t.fetcher.Fetch(fetchCtx, rawURL)
 	if err != nil {
