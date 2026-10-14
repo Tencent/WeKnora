@@ -53,7 +53,8 @@ func assertWellFormedTableChunks(t *testing.T, label string, contents []string) 
 		}
 	}
 	if dataChunks < 3 {
-		t.Fatalf("%s: expected the table to span multiple chunks, got %d data chunks in %d", label, dataChunks, len(contents))
+		t.Fatalf("%s: expected the table to span multiple chunks, got %d data chunks in %d",
+			label, dataChunks, len(contents))
 	}
 }
 
