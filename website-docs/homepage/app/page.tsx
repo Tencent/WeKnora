@@ -32,7 +32,7 @@ const withAvailability = (slide: SlideSource): GallerySlide => {
 };
 const releaseSlides = [
   { name: "画廊", icon: "monitor", image: "kb-image-gallery", title: "文档图片，集中浏览", description: "集中浏览文档图片，按来源、描述和图片属性筛选，查看原图与出处。", alt: "知识库画廊：图片瀑布流与来源文档筛选", link: guide("03-features/02-knowledge-base") + "#image-gallery" },
-  { name: "多模态 Embedding", icon: "search", image: "kb-image-vector-settings", title: "文字与图片，共同检索", description: "用文字检索图片内容，找到仅靠描述和 OCR 容易遗漏的资料。支持腾讯 WeMM-Embedding、Qwen3-VL-Embedding 等模型。", alt: "多模态 Embedding：知识库图像处理中的图片向量检索开关", link: guide("03-features/02-knowledge-base") + "#multimodal-embedding" },
+  { name: "多模态 Embedding", icon: "search", image: "kb-image-vector-settings", title: "文字与图片，共同检索", description: <>让图片、图表与文字共同参与知识检索，用自然语言查找相关内容。支持<a href="https://github.com/Tencent/WeMM-Embedding" target="_blank" rel="noreferrer">腾讯 WeMM-Embedding</a>、Qwen3-VL-Embedding 等模型。</>, alt: "多模态 Embedding：知识库图像处理中的图片向量检索开关", link: guide("03-features/02-knowledge-base") + "#multimodal-embedding" },
   { name: "Wiki 图谱", icon: "channels", image: "wiki-graph-groups", title: "知识关系，按主题展开", description: "关联页面按主题分组，在全图与分组之间切换，沿关系找到值得继续阅读的内容。", alt: "Wiki 图谱全景：主题分组、页面关系与节点类型图例", link: guide("03-features/14-wiki") + "#wiki-graph" },
   { name: "原文引用定位", icon: "trace", image: "chat-source-location", title: "从回答，回到原文", description: "点击回答中的引用，在原始文档中定位对应段落，对照上下文核对答案。", alt: "回答引用与原始文档中的对应段落高亮", link: guide("03-features/18-chat-experience") },
 ].map(withAvailability);

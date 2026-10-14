@@ -71,6 +71,7 @@
 - `go test ./docs` 通过，覆盖 Go 注册文档、swagger.json 和 swagger.yaml 的路由/schema 契约；再次执行 `make docs` 后三份产物逐字节一致。
 - 根 VERSION、文档 VERSION、前端/文档 package.json 与 lockfile 根版本、Helm appVersion 均核对为 0.8.3；`scripts/get_version.sh json` 输出 0.8.3。两个 lockfile 除根版本字段外与 main 完全一致，没有依赖变更。
 - 校验附录包含全部 282 个提交，PostgreSQL 迁移文件为 238 个；历史版本页未修改。
+- 首页 `prebuild` / `predev` 自动同步复用截图，更新文档源图后无需手动复制；同步回归覆盖替换源图、终端文件名映射及保留首页独有图片。预览中的 Wiki 图片已按 HTTP 响应逐字节核对为最新源图，顶部留白收紧，WeMM 名称链接至官方仓库。
 - 静态站点产物位于 `website-docs/static-site/`。9 张文档截图及首页复用的 4 张截图均已补齐；未执行浏览器外观验收或 Docker 部署测试。
 - 本 PR 仅包含文档、官网内容、截图、版本元数据与 Swagger 注释/生成物。附件读取修复已单独通过 #4283 合入，本 PR 不重复携带其代码或测试。
 - 未运行全量 Go/前端业务回归或实际数据库升级。迁移说明依据当前源文件核对，不能替代生产备份与升级演练。

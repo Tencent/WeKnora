@@ -18,7 +18,7 @@
 .skipLink { position: fixed; left: 20px; top: -100px; z-index: 30; padding: 12px 20px; background: var(--ink); color: var(--paper); }
 .skipLink:focus { top: 12px; }
 .brand { display: inline-flex; align-items: center; gap: 12px; color: var(--ink); flex-shrink: 0; }
-.hero { padding-top: 51px; }
+.hero { padding-top: 24px; }
 .releaseLink { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 13px; color: var(--soft); font-size: 14px; }
 .releaseLink > span { border: 1px solid var(--wk-accent-border); padding: 3px 10px; color: var(--wk-accent-text); font-family: ui-monospace, monospace; font-size: 12px; }
 .releaseLink svg { width: 17px; height: 17px; transition: transform .2s; }
@@ -183,7 +183,7 @@
 .footer > p { color: var(--mute); font-size: 12px; margin: 0; }
 .footer nav { margin-left: auto; display: flex; gap: 28px; }
 .footer nav a { display: flex; align-items: center; gap: 4px; min-height: 44px; color: var(--soft); font-size: 13px; }
-@media (min-width: 1800px) { .heroGrid { margin-bottom: 62px; } .hero { padding-top: 70px; } }
+@media (min-width: 1800px) { .heroGrid { margin-bottom: 62px; } .hero { padding-top: 28px; } }
 @media (max-width: 1100px) {
   .shell { width: calc(100% - 64px); }
   .heroGrid { gap: 32px; grid-template-columns: 1.1fr 1fr; }
@@ -199,7 +199,7 @@
 @media (max-width: 800px) {
   .navigationOpen { display: flex; position: absolute; left: 0; top: 72px; right: 0; padding: 20px 32px 26px; background: var(--paper); border-bottom: 1px solid var(--rule); flex-direction: column; align-items: stretch; gap: 4px; box-shadow: 0 15px 20px #101f380a; }
   .navigationOpen a { font-size: 16px; }
-  .hero { padding-top: 34px; }
+  .hero { padding-top: 20px; }
   .heroGrid { align-items: start; grid-template-columns: 1fr; gap: 28px; margin-top: 26px; margin-bottom: 35px; }
   .hero h1 { font-size: clamp(38px, 6.2vw, 68px); }
   .heroAside > .eyebrow { display: none; }
@@ -304,3 +304,5 @@
   .site .chapter { padding-block: 32px; }
   .chapter .sectionHeading { margin-bottom: 24px; }
 }
+
+.showcaseDetail p a { color: var(--wk-accent-text); text-decoration: underline; text-underline-offset: 3px; }

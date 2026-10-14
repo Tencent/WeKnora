@@ -163,7 +163,7 @@ npm run test:integration
 | `datasource-seafile.png` | Seafile 数据源与资料库/目录/文件选择 | Seafile 功能 |
 | `system-admin-create-user.png` | 创建用户表单；成功页使用演示账号并隐藏密码 | 平台管理，沿用此前尚未补齐的占位 |
 
-首页复用其中的 `kb-image-gallery.png`、`kb-image-vector-settings.png`、`wiki-graph-groups.png`、`chat-source-location.png`，需要将相同文件另放一份到 `website-docs/homepage/public/docs/_home/product/`。完成后运行 `npm run build`，检查输出中的待补图片列表；页面外观由维护者人工确认。
+首页复用其中的 `kb-image-gallery.png`、`kb-image-vector-settings.png`、`wiki-graph-groups.png`、`chat-source-location.png`，更新时只需替换 `website-docs/public/screenshots/` 中的源图；首页的 `prebuild` / `predev` 会自动同步已有同名副本（终端截图的旧文件名也会对应同步）。添加全新首页截图时，先在 `website-docs/homepage/public/docs/_home/product/` 建立副本。完成后运行 `npm run build`，检查输出中的待补图片列表；页面外观由维护者人工确认。
 
 本次发布整理的提交清单、文档核对依据和验证记录保存在主仓库 `docs/release-v0.8.3-audit.md`，不随独立站点发布。发布日期在正式发版时填写，当前版本页和 CHANGELOG 标记为待发布。
 

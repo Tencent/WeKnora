@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { Icon } from "./ui";
 import { homeAssets } from "../../shared/header";
 import s from "./home.module.css";
@@ -11,7 +11,7 @@ export type GallerySlide = {
   name: string;
   icon: string;
   title: string;
-  description: string;
+  description: ReactNode;
   /** One screenshot, or several views of the same capability switched inside the figure. */
   shots: GalleryShot[];
   link?: string;
