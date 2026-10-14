@@ -87,7 +87,7 @@ type UpdateAgentRequest struct {
 // @Accept       json
 // @Produce      json
 // @Param        request  body      CreateAgentRequest  true  "智能体信息"
-// @Success      201      {object}  map[string]interface{}  "创建的智能体"
+// @Success      201      {object}  handler.AgentWriteResponse  "创建的智能体"
 // @Failure      400      {object}  errors.AppError         "请求参数错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth
@@ -180,7 +180,7 @@ func (h *CustomAgentHandler) CreateAgent(c *gin.Context) {
 // @Accept       json
 // @Produce      json
 // @Param        id   path      string  true  "智能体ID"
-// @Success      200  {object}  map[string]interface{}  "智能体详情"
+// @Success      200  {object}  handler.DataResponse{data=types.CustomAgent}  "智能体详情"
 // @Failure      400  {object}  errors.AppError         "请求参数错误"
 // @Failure      404  {object}  errors.AppError         "智能体不存在"
 // @Security     Bearer
@@ -230,7 +230,8 @@ func (h *CustomAgentHandler) GetAgent(c *gin.Context) {
 // @Tags         智能体
 // @Accept       json
 // @Produce      json
-// @Success      200  {object}  map[string]interface{}  "智能体列表"
+// @Param        creator  query  string  false  "创建者过滤，仅 mine 与 others 生效"  Enums(mine, others)
+// @Success      200  {object}  handler.ListAgentsResponse  "智能体列表"
 // @Failure      500  {object}  errors.AppError         "服务器错误"
 // @Security     Bearer
 // @Security     ApiKeyAuth
@@ -357,7 +358,7 @@ func enrichAgentCreatorNames(ctx context.Context, userSvc interfaces.UserService
 // @Produce      json
 // @Param        id       path      string              true  "智能体ID"
 // @Param        request  body      UpdateAgentRequest  true  "更新请求"
-// @Success      200      {object}  map[string]interface{}  "更新后的智能体"
+// @Success      200      {object}  handler.AgentWriteResponse  "更新后的智能体"
 // @Failure      400      {object}  errors.AppError         "请求参数错误"
 // @Failure      403      {object}  errors.AppError         "无法修改内置智能体"
 // @Security     Bearer
@@ -484,7 +485,7 @@ func (h *CustomAgentHandler) UpdateAgent(c *gin.Context) {
 // @Accept       json
 // @Produce      json
 // @Param        id   path      string  true  "智能体ID"
-// @Success      200  {object}  map[string]interface{}  "删除成功"
+// @Success      200  {object}  handler.MessageResponse  "删除成功"
 // @Failure      400  {object}  errors.AppError         "请求参数错误"
 // @Failure      403  {object}  errors.AppError         "无法删除内置智能体"
 // @Failure      404  {object}  errors.AppError         "智能体不存在"
@@ -555,7 +556,7 @@ func (h *CustomAgentHandler) DeleteAgent(c *gin.Context) {
 // @Accept       json
 // @Produce      json
 // @Param        id   path      string  true  "智能体ID"
-// @Success      201  {object}  map[string]interface{}  "复制成功"
+// @Success      201  {object}  handler.DataResponse{data=types.CustomAgent}  "复制成功"
 // @Failure      400  {object}  errors.AppError         "请求参数错误"
 // @Failure      404  {object}  errors.AppError         "智能体不存在"
 // @Security     Bearer
@@ -630,7 +631,7 @@ func (h *CustomAgentHandler) CopyAgent(c *gin.Context) {
 // @Tags         智能体
 // @Accept       json
 // @Produce      json
-// @Success      200  {object}  map[string]interface{}  "占位符定义"
+// @Success      200  {object}  handler.DataResponse{data=handler.PlaceholderGroups}  "占位符定义"
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /agents/placeholders [get]
@@ -656,7 +657,7 @@ func (h *CustomAgentHandler) GetPlaceholders(c *gin.Context) {
 // @Tags         智能体
 // @Accept       json
 // @Produce      json
-// @Success      200  {object}  map[string]interface{}  "预设列表"
+// @Success      200  {object}  handler.DataResponse{data=[]types.AgentTypePresetEntry}  "预设列表"
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /agents/type-presets [get]
@@ -675,7 +676,7 @@ func (h *CustomAgentHandler) GetAgentTypePresets(c *gin.Context) {
 // @Tags         智能体
 // @Accept       json
 // @Produce      json
-// @Success      200  {object}  map[string]interface{}  "工具目录"
+// @Success      200  {object}  handler.DataResponse{data=tools.AgentToolCatalog}  "工具目录"
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /agents/tools [get]
@@ -697,7 +698,7 @@ func (h *CustomAgentHandler) GetAgentTools(c *gin.Context) {
 // @Param        knowledge_ids       query     string  false  "知识ID列表（逗号分隔），限定到具体文档"
 // @Param        tag_scopes          query     string  false  "带知识库归属的标签范围（JSON）"
 // @Param        limit               query     int     false  "返回数量上限（未传时使用智能体配置的开场问题数量，最大30）"
-// @Success      200                 {object}  map[string]interface{}  "推荐问题列表"
+// @Success      200                 {object}  handler.DataResponse{data=handler.SuggestedQuestionsData}  "推荐问题列表"
 // @Failure      400                 {object}  errors.AppError         "请求参数错误"
 // @Failure      404                 {object}  errors.AppError         "智能体不存在"
 // @Security     Bearer
