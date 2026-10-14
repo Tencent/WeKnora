@@ -293,3 +293,14 @@
   .showcaseCompact .showcaseFigure { position: static; }
   .showcaseCompact .shotLayer img { max-height: none; }
 }
+
+/* One page-wide rhythm: tinted bands own their boundaries; content shares one shell. */
+.site .chapter { padding-block: 48px; background: var(--paper); border: 0; }
+.site .chapterTint { background: var(--paper2); border-block: 1px solid var(--rule); }
+.chapter .sectionHeading { margin-bottom: 28px; }
+.chapter .eyebrow { margin-bottom: 12px; }
+.site .footer { border-top: 0; }
+@media (max-width: 700px) {
+  .site .chapter { padding-block: 32px; }
+  .chapter .sectionHeading { margin-bottom: 24px; }
+}

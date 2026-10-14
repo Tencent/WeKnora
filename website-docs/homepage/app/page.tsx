@@ -82,35 +82,35 @@ export default function Home() {
         <ProductVideo />
         <div className={s.trustBar}><span><Icon name="github" /> 腾讯开源 · MIT License</span><span><Icon name="server" /> 支持私有化部署</span><span><Icon name="model" /> 自由选择模型与存储</span></div>
       </section>
-      <section id="capabilities" className={`${s.shell} ${s.section}`} aria-labelledby="capabilities-title">
+      <section id="capabilities" className={`${s.chapter}`} data-tone="base" aria-labelledby="capabilities-title"><div className={s.shell}>
         <div className={s.sectionHeading}><div><p className={s.eyebrow}>01 / KNOWLEDGE AT WORK</p><h2 id="capabilities-title">知识问答、任务执行与自动 Wiki</h2></div><p>查询资料用 RAG，处理多步任务用 Agent，<br />整理知识用 Wiki。三种能力共享同一知识库。</p></div>
         <div className={s.modeGrid}>{modes.map(mode => <article className={s.mode} key={mode.label}>
           <div className={s.modeTop}><Icon name={mode.icon} /><span>{mode.number} / {mode.label.toUpperCase()}</span></div>
           <h3>{mode.title}</h3><p>{mode.description}</p><ul className={s.tags}>{mode.tags.map(tag => <li key={tag}>{tag}</li>)}</ul>
           <a className={s.textLink} href={mode.label === "Wiki" ? "#wiki" : guide(mode.link)}>了解 {mode.label} <Icon name="arrow" /></a>
         </article>)}</div>
-      </section>
-      <section id="release" className={`${s.release} ${s.releaseTopic}`} aria-labelledby="release-title"><div className={s.shell}>
+      </div></section>
+      <section id="release" className={`${s.chapter} ${s.chapterTint}`} data-tone="subtle" aria-labelledby="release-title"><div className={s.shell}>
         <div className={s.sectionHeading}><div><p className={s.eyebrow}>02 / INTRODUCING v0.8.3</p><h2 id="release-title">图文检索、原文核对与知识组织</h2></div><a className={s.textLink} href={guide("07-releases/v0.8.3")}>查看版本说明 <Icon name="arrow" /></a></div>
         <ProductGallery id="release-gallery" label="v0.8.3" slides={releaseSlides} layout="compact" />
         <div className={s.releaseExtras}><span>本次更新还包括</span>{releaseExtras.map(item => <a className={s.textLink} key={item.name} href={guide(item.link)}>{item.name} <Icon name="arrow" /></a>)}</div>
       </div></section>
-      <section id="agent-workflow" className={`${s.shell} ${s.section} ${s.browserTopic}`} aria-labelledby="agent-workflow-title">
+      <section id="agent-workflow" className={`${s.chapter}`} data-tone="base" aria-labelledby="agent-workflow-title"><div className={s.shell}>
         <div className={s.sectionHeading}><div><p className={s.eyebrow}>03 / YOUR LOCAL BROWSER</p><h2 id="agent-workflow-title">让智能体操作你自己的浏览器</h2></div><a className={s.textLink} href={guide("05-clients/09-local-browser")}>连接本机浏览器 <Icon name="arrow" /></a></div>
         <ProductGallery id="browser-gallery" label="本机浏览器" slides={browserSlides} layout="compact" />
-      </section>
-      <section id="skills-sandbox" className={`${s.release} ${s.sandboxTopic}`} aria-labelledby="skills-sandbox-title"><div className={s.shell}>
+      </div></section>
+      <section id="skills-sandbox" className={`${s.chapter} ${s.chapterTint}`} data-tone="subtle" aria-labelledby="skills-sandbox-title"><div className={s.shell}>
         <div className={s.sectionHeading}><div><p className={s.eyebrow}>04 / SKILLS &amp; SANDBOX</p><h2 id="skills-sandbox-title">智能体可以运行技能，<br />也能生成文件。</h2></div><a className={s.textLink} href={guide("03-features/22-skills-sandbox")}>了解技能与沙箱 <Icon name="arrow" /></a></div>
         <ProductGallery id="sandbox-gallery" label="技能与沙箱" slides={sandboxSlides} />
       </div></section>
-      <section id="wiki" className={`${s.shell} ${s.section} ${s.wiki}`} aria-labelledby="wiki-title">
+      <section id="wiki" className={`${s.chapter} ${s.wiki}`} data-tone="base" aria-labelledby="wiki-title"><div className={s.shell}>
         <div className={s.sectionHeading}>
           <div><p className={s.eyebrow}>05 / AUTOMATIC WIKI</p><h2 id="wiki-title">把文档整理成可浏览的 Wiki。</h2></div>
           <a className={s.textLink} href={guide("03-features/14-wiki")}>了解 Wiki 的使用方式 <Icon name="arrow" /></a>
         </div>
         <ProductGallery id="wiki-gallery" label="Wiki" slides={wikiSlides} />
-      </section>
-      <section id="ecosystem" className={`${s.shell} ${s.section}`} aria-labelledby="ecosystem-title">
+      </div></section>
+      <section id="ecosystem" className={`${s.chapter} ${s.chapterTint}`} data-tone="subtle" aria-labelledby="ecosystem-title"><div className={s.shell}>
         <div className={s.sectionHeading}><div><p className={s.eyebrow}>06 / INTEGRATIONS</p><h2 id="ecosystem-title">数据源与工具集成</h2></div><p>同步飞书、Confluence、GitLab 等平台的资料，<br />通过 IM、浏览器插件、MCP Server 或 API 查询和使用。</p></div>
         <div className={s.ecosystem}>
           <div className={s.ecosystemColumn}><Icon name="sources" /><h3>导入与同步资料</h3><p>上传文件、导入网页，或连接外部数据源。</p><div className={s.integrations}>{dataSources.map(item => <span key={item.name}><IntegrationMark item={item} /></span>)}</div><a className={s.textLink} href={guide("03-features/10-datasource")}>数据源集成 <Icon name="arrow" /></a></div>
@@ -118,12 +118,12 @@ export default function Home() {
           <div className={s.ecosystemColumn}><Icon name="channels" /><h3>在常用工具中访问</h3><p>支持 IM 问答、浏览器插件、MCP 客户端和开发工具集成。</p><div className={s.integrations}>{clients.map(item => <span key={item.name}><IntegrationMark item={item} /></span>)}</div><a className={s.textLink} href={guide("03-features/12-im-integration")}>客户端与渠道 <Icon name="arrow" /></a><div className={s.mcpEntry}><h4>通过 MCP Server 共享知识</h4><p>让 Claude、Cursor 等 AI 工具连接团队知识库，直接检索资料和提问。</p><a className={s.textLink} href={guide("03-features/08-mcp")}>配置 MCP 端点 <Icon name="arrow" /></a></div></div>
         </div>
         <div className={s.models}><span>模型由你选择 · 内置 30 家厂商 <a className={s.textLink} href={guide("03-features/06-models")}>查看全部 <Icon name="arrow" /></a></span>{modelProviders.map(item => <p key={item.name}><IntegrationMark item={item} /></p>)}</div>
-      </section>
-      <section id="enterprise" className={s.enterprise} aria-labelledby="enterprise-title"><div className={s.shell}>
+      </div></section>
+      <section id="enterprise" className={`${s.chapter}`} data-tone="base" aria-labelledby="enterprise-title"><div className={s.shell}>
         <div className={s.sectionHeading}><div><p className={s.eyebrow}>07 / BUILT FOR YOUR TEAM</p><h2 id="enterprise-title">私有化部署，<br />按团队需要管理权限。</h2></div><p>配置数据存储与成员权限，<br />查看操作记录和任务运行状态。</p></div>
         <div className={s.enterpriseGrid}><article><Icon name="server" /><h3>部署与存储</h3><p>支持 Docker、Kubernetes 与 Helm，也提供 Lite 单机版和桌面应用。模型、向量数据库和存储后端可按需替换，支持本地推理。</p></article><article><Icon name="shield" /><h3>空间与资源权限</h3><p>多空间隔离与四级角色矩阵。API Key 按能力和知识库限定范围，支持 OIDC 身份集成，可限制服务只访问白名单域名。</p></article><article><Icon name="trace" /><h3>审计与运行监控</h3><p>空间审计日志、运行时任务队列面板与 Langfuse 追踪，帮助团队定位问题、管理运行状态。</p></article></div>
       </div></section>
-      <section id="get-started" className={`${s.shell} ${s.closing}`} aria-labelledby="closing-title">
+      <section id="get-started" className={`${s.chapter} ${s.chapterTint} ${s.closing}`} data-tone="subtle" aria-labelledby="closing-title"><div className={s.shell}>
         <div className={s.sectionHeading}><div><p className={s.eyebrow}>GET STARTED</p><h2 id="closing-title">选择适合你的使用方式。</h2></div></div>
         <div className={s.startGrid}>
           <article className={s.startCard}>
@@ -145,7 +145,7 @@ export default function Home() {
             <a className={s.textLink} href={guide("01-getting-started/02-installation")}>查看部署文档 <Icon name="arrow" /></a>
           </article>
         </div>
-      </section>
+      </div></section>
     </main>
     <footer className={`${s.shell} ${s.footer}`}><a className={s.brand} href="/" aria-label="WeKnora 首页"><BrandLogo /></a><p>Tencent Open Source · MIT License</p><nav aria-label="页脚导航"><a href={docs}>文档</a><a href={repo} target="_blank" rel="noreferrer">GitHub <Icon name="external" /></a><a href={`${repo}/blob/main/CHANGELOG.md`} target="_blank" rel="noreferrer">更新日志</a></nav></footer>
   </div>;
