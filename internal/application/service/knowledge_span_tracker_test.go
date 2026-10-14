@@ -537,3 +537,19 @@ func TestSpanTracker_OpenAttemptCancelsSupersededOpenSpans(t *testing.T) {
 		"kid-reparse").Row().Scan(&newStatus))
 	assert.Equal(t, types.SpanStatusRunning, newStatus)
 }
+
+// TestTruncateRunesKeepsValidUTF8 records why FailSpan must truncate at rune
+// boundaries: a CJK error message cut at a byte offset emits invalid UTF-8,
+// and the span upsert into a PostgreSQL text column would reject it — the
+// failure record itself would be lost (#4199 class of errors carries CJK
+// provider messages).
+func TestTruncateRunesKeepsValidUTF8(t *testing.T) {
+	long := strings.Repeat("知识库向量化失败", 200) // 2000 runes, 6000 bytes
+	got := truncateRunes(long, 1024)
+	assert.True(t, utf8.ValidString(got), "truncated message must stay valid UTF-8")
+	assert.Equal(t, 1024, utf8.RuneCountInString(got))
+
+	assert.Equal(t, "short", truncateRunes("short", 1024))
+	// A multi-byte string under the byte cap but over the rune cap is still cut.
+	assert.Equal(t, 5, utf8.RuneCountInString(truncateRunes("知识库向量化", 5)))
+}
