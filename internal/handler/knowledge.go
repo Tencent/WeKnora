@@ -673,7 +673,9 @@ func (h *KnowledgeHandler) GetKnowledge(c *gin.Context) {
 // @Param        id        path   string  true   "知识ID"
 // @Param        attempt   query  int     false  "指定尝试号；省略=最新"
 // @Success      200       {object}  map[string]interface{}
-// @Router       /api/v1/knowledge/{id}/spans [get]
+// @Security     Bearer
+// @Security     ApiKeyAuth
+// @Router       /knowledge/{id}/spans [get]
 //
 // Always returns the canonical 5-stage timeline; missing stage rows are
 // synthesized as "pending" so the frontend timeline always renders five

@@ -26,6 +26,12 @@ curl $BASE/api/v1/agents/placeholders -H "Authorization: Bearer $TOKEN"
 curl $BASE/api/v1/agents/type-presets -H "Authorization: Bearer $TOKEN"
 ```
 
+### GET /api/v1/agents/tools
+
+用途：获取智能体可选的内置工具目录，权限 Viewer+。响应 `{"success":true,"data":{"tools":[...],"default_tools":[...],"switch_managed_tools":[...]}}`；每项工具带 `requirement.any_of` / `all_of` 知识库能力要求，编辑器据此判断是否可选。
+
+创建或更新时新增未知工具名返回 400；已存储的未知项保留，响应顶层 `allowed_tools_warnings.kept_unknown` 列出这些名称。由独立开关管理的工具及无后继的旧技能工具从列表移除，`allowed_tools_warnings.dropped` 返回移除项。旧检索工具名会映射为后继工具，重复项去重。
+
 ### POST /api/v1/agents
 
 用途：创建自定义 Agent。权限：Contributor+。
@@ -37,7 +43,7 @@ curl $BASE/api/v1/agents/type-presets -H "Authorization: Bearer $TOKEN"
 | `avatar` | string | 否 | 头像/emoji |
 | `config` | object | 否 | Agent 配置（`types.CustomAgentConfig`，见下） |
 
-`config` 主要字段：`agent_mode`（`quick-answer`/`smart-reasoning`）、`agent_type`（`rag-qa/wiki-qa/hybrid-rag-wiki/data-analysis/custom`）、`system_prompt`、`model_id`、`temperature`（0-2，非法返回 code 2103）、`max_iterations`（1-20，非法返回 code 2102）、`allowed_tools`（智能推理必填至少一个，code 2101）、`mcp_selection_mode`/`mcp_services`、`skills_selection_mode`、`kb_selection_mode`/`knowledge_bases`、`web_search_enabled`、`question_suggestions` 等（完整定义见 `internal/types/custom_agent.go`）。
+`config` 主要字段：`agent_mode`（`quick-answer`/`smart-reasoning`）、`agent_type`（`rag-qa/wiki-qa/hybrid-rag-wiki/data-analysis/custom`）、`system_prompt`、`model_id`、`temperature`（0-2，非法返回 code 2103）、`max_iterations`（1-20，非法返回 code 2102）、`allowed_tools`（未设置/null 使用默认工具，显式 `[]` 不选内置工具；联网、记忆、MCP 与沙箱按独立配置注册）、`mcp_selection_mode`/`mcp_services`、`skills_selection_mode`、`kb_selection_mode`/`knowledge_bases`、`web_search_enabled`、`question_suggestions` 等（完整定义见 `internal/types/custom_agent.go`）。
 
 响应：201 `{"success":true,"data":{id,name,description,avatar,is_builtin,created_by,config,creator_name,...}}`
 

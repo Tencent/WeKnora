@@ -81,6 +81,9 @@
 .shotPlaceholder { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; aspect-ratio: 3840 / 2112; padding: 24px; text-align: center; color: var(--mute); background: repeating-linear-gradient(135deg, var(--paper2) 0 12px, var(--paper) 12px 24px); }
 .shotPlaceholder > span { font-size: 15px; color: var(--soft); }
 .shotPlaceholder > code { font-size: 12px; word-break: break-all; }
+.mcpEntry { margin-top: 24px; padding-top: 22px; border-top: 1px solid var(--rule); }
+.mcpEntry h4 { font-size: 16px; font-weight: 550; margin: 0 0 10px; }
+.mcpEntry p { font-size: 14px; line-height: 1.85; color: var(--soft); margin: 0 0 12px; }
 .release { padding-block: 93px 44px; background: var(--paper2); border-block: 1px solid var(--rule); }
 .sandboxTopic { background: var(--paper); border-top: 0; padding-bottom: 93px; }
 .artifactFigure { margin: 0; min-width: 0; background: var(--paper); border: 1px solid var(--rule); border-radius: 5px; box-shadow: 0 18px 45px -35px #101f3844; overflow: hidden; }
@@ -93,7 +96,6 @@
 .artifactFigure figcaption > span:last-child { color: var(--mute); }
 .releaseExtras { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px 24px; padding-top: 29px; margin-top: 48px; border-top: 1px solid var(--rule); font-size: 13px; color: var(--soft); }
 .releaseExtras > span { color: var(--mute); }
-.releaseExtras p { margin: 0; }
 .site .wiki { border-bottom: 1px solid var(--rule); padding-block: 48px; scroll-margin-top: 64px; }
 .site section.wiki[id] { scroll-margin-top: 64px; }
 .wiki .sectionHeading { margin-bottom: 24px; }

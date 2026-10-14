@@ -701,6 +701,42 @@ curl -X POST $BASE/api/v1/knowledge/move -H "Authorization: Bearer $TOKEN" \
   -d '{"knowledge_ids":["k-1"],"source_kb_id":"kb-1","target_kb_id":"kb-2","mode":"reuse_vectors"}'
 ```
 
+## 画廊与图片属性 {#image-gallery-api}
+
+画廊读取要求 Viewer+、目标知识库可读；API Key 需 `retrieve` 或 full，并遵守知识库范围。画廊与图片向量开关独立，列表返回已提取图片的描述、OCR 和来源。
+
+### GET /api/v1/knowledge-bases/:id/gallery-config
+
+返回 `{"success":true,"data":{"attribute_sources":[...],"attributes":[...],"mode":"...","status":{...}}}`。客户端据返回的属性定义和使用策略构造搜索、筛选与排序；不要硬编码可用属性。属性 ID 带来源前缀，例如 `builtin:caption`、`system:contain.text`。
+
+### GET /api/v1/knowledge-bases/:id/images
+
+| 查询参数 | 说明 |
+| --- | --- |
+| `page` / `page_size` | 默认 1 / 20，page_size 最大 1000 |
+| `keyword` / `search_in` | 忽略大小写的子串搜索；search_in 为逗号分隔的可搜索属性 ID，默认描述与 OCR |
+| `sort_by` / `sort_order` | 可排序属性 ID，默认 created_at / desc；兼容 created_at、updated_at、caption 旧值 |
+| `knowledge_ids` | 逗号分隔的来源文档 ID；GET 只取前 50 个，更多文档请使用 POST |
+| `is_enabled` | true / false，按所属分块启用状态筛选 |
+| `attr_filters` | JSON 对象，属性 ID → 允许值数组，同属性 OR、不同属性 AND |
+| `attr_rules` | JSON 对象，属性 ID → 值 → on/off；on 强制显示优先于 off，未命中规则的图片保留 |
+
+只接受 gallery-config 声明适用的搜索、筛选、排序字段，不适用字段会被剔除。响应 `{"success":true,"data":[ImageAsset],"total":N,"page":1,"page_size":20}`。每项包含 `id`、`chunk_id`、`knowledge_id`、`source_name`、`url`、`original_url`、`caption`、`ocr_text`、`attrs`、`is_enabled`、`status` 与时间戳。
+
+### POST /api/v1/knowledge-bases/:id/images
+
+与 GET 相同的只读查询，参数改放 JSON body；`knowledge_ids`、`search_in` 用字符串数组，`attr_filters` / `attr_rules` 直接传对象。来源文档最多 1000 个，超出返回 400，适合来源筛选全选，避免 URL 过长。
+
+```bash
+curl -X POST "$BASE/api/v1/knowledge-bases/kb-1/images" -H "X-API-Key: $API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"page":1,"page_size":20,"knowledge_ids":["k-1","k-2"],"keyword":"架构"}'
+```
+
+### GET /api/v1/image-attrs/schema
+
+全局只读的图片观察属性注册表，需 Viewer+，API Key 需 retrieve/full，无路径知识库。知识库编辑器用它配置图片观察与 OCR 条件；画廊的实际搜索/筛选用法仍以每个知识库的 gallery-config 为准。
+
 ## 实现参考
 
 路由注册：`internal/router/routes_knowledge.go` 的 `RegisterKnowledgeBaseRoutes`、`RegisterKnowledgeRoutes`。Handler：`internal/handler/knowledgebase.go`、`internal/handler/knowledge.go`。
