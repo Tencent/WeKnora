@@ -91,7 +91,8 @@ func TestAskUserTool_ResumedUsesStoredAnswer(t *testing.T) {
 	answered := &types.AgentPrompt{ID: "p1", Kind: types.AgentPromptKindAskUser}
 	// A resumed run is served even if the client could not show a new prompt.
 	res, err := NewAskUserTool(asker).Execute(
-		askCtx(&ToolExecContext{Answered: answered, EventBus: event.NewEventBus()}), json.RawMessage(`{"question":"q"}`))
+		askCtx(&ToolExecContext{Answered: answered, EventBus: event.NewEventBus()}),
+		json.RawMessage(`{"question":"q"}`))
 	require.NoError(t, err)
 	assert.Equal(t, "The user answered.\nText: blue", res.Output)
 	assert.Empty(t, asker.asked)
@@ -159,8 +160,11 @@ func TestAskUserRegistryValidatesSerializedOptions(t *testing.T) {
 
 func TestAskUserRejectsSerializedFormChoices(t *testing.T) {
 	asker := &fakeAsker{}
-	result, err := NewAskUserTool(asker).Execute(askCtx(&ToolExecContext{Interactive: true, EventBus: event.NewEventBus()}),
-		json.RawMessage(`{"question":"which?","fields":[{"name":"env","type":"select","options":["[\"dev\",\"prod\"]"]}]}`))
+	result, err := NewAskUserTool(asker).Execute(
+		askCtx(&ToolExecContext{Interactive: true, EventBus: event.NewEventBus()}),
+		json.RawMessage(`{"question":"which?","fields":[
+			{"name":"env","type":"select","options":["[\"dev\",\"prod\"]"]}
+		]}`))
 	require.NoError(t, err)
 	require.False(t, result.Success)
 	require.Contains(t, result.Error, "one choice per string")

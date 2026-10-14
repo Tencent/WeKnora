@@ -230,7 +230,8 @@ func TestResetEventsDropsEventsAndKeepsSteer(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			ctx := context.Background()
-			require.NoError(t, manager.AppendEvent(ctx, "session", "run", interfaces.StreamEvent{ID: "old", Content: "before"}))
+			require.NoError(t, manager.AppendEvent(ctx, "session", "run",
+				interfaces.StreamEvent{ID: "old", Content: "before"}))
 			require.NoError(t, manager.AppendSteerEvents(ctx, "session", "run",
 				[]interfaces.StreamEvent{{ID: "steer-1", Content: "next"}}))
 
@@ -242,7 +243,8 @@ func TestResetEventsDropsEventsAndKeepsSteer(t *testing.T) {
 			require.NoError(t, err)
 			require.Len(t, steer, 1)
 
-			require.NoError(t, manager.AppendEvent(ctx, "session", "run", interfaces.StreamEvent{ID: "new", Content: "after"}))
+			require.NoError(t, manager.AppendEvent(ctx, "session", "run",
+				interfaces.StreamEvent{ID: "new", Content: "after"}))
 			events, _, err = manager.GetEvents(ctx, "session", "run", 0)
 			require.NoError(t, err)
 			require.Len(t, events, 1)

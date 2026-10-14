@@ -818,18 +818,19 @@ func (h *MCPServiceHandler) finishResolve(c *gin.Context, pendingID string, res 
 	if err != nil {
 		switch {
 		case stderrors.Is(err, approval.ErrPendingNotFound):
-			c.Error(errors.NewNotFoundError("pending prompt not found or already completed"))
+			_ = c.Error(errors.NewNotFoundError("pending prompt not found or already completed"))
 		case stderrors.Is(err, approval.ErrAlreadyResolved):
-			c.Error(errors.NewBadRequestError("pending prompt already resolved (timeout / cancel raced your action)"))
+			_ = c.Error(errors.NewBadRequestError(
+				"pending prompt already resolved (timeout / cancel raced your action)"))
 		case stderrors.Is(err, approval.ErrTenantMismatch):
-			c.Error(errors.NewBadRequestError("workspace mismatch"))
+			_ = c.Error(errors.NewBadRequestError("workspace mismatch"))
 		case stderrors.Is(err, approval.ErrUserMismatch):
-			c.Error(errors.NewBadRequestError("user mismatch: only the session owner may answer this prompt"))
+			_ = c.Error(errors.NewBadRequestError("user mismatch: only the session owner may answer this prompt"))
 		case stderrors.Is(err, approval.ErrInvalidDecision):
-			c.Error(errors.NewBadRequestError(err.Error()))
+			_ = c.Error(errors.NewBadRequestError(err.Error()))
 		default:
 			logger.ErrorWithFields(ctx, err, map[string]interface{}{"pending_id": pendingID})
-			c.Error(errors.NewInternalServerError(err.Error()))
+			_ = c.Error(errors.NewInternalServerError(err.Error()))
 		}
 		return
 	}
@@ -848,12 +849,16 @@ type resolveAgentPromptBody struct {
 
 // ResolveAgentPrompt godoc
 // @Summary      回答 Agent 的交互请求
-// @Description  回答 Agent 运行中发起的交互（ask_user 提问或工具审批）。kind 须与交互一致，response 为该类型的回答 JSON（不接受未知字段）：ask_user 为 {selected?, values?, text?, declined?}；tool_approval 为 {approved: bool, modified_args?: object, reason?: string}。返回 resumed=true 表示运行已挂起并在本次回答后恢复，客户端需重新接入该消息的事件流
+// @Description  回答 Agent 运行中发起的交互（ask_user 提问或工具审批）。
+// @Description  kind 须与交互一致，response 为该类型的回答 JSON（不接受未知字段）：
+// @Description  ask_user 为 {selected?, values?, text?, declined?}；
+// @Description  tool_approval 为 {approved: bool, modified_args?: object, reason?: string}。
+// @Description  返回 resumed=true 表示运行已挂起并在本次回答后恢复，客户端需重新接入该消息的事件流
 // @Tags         Agent
 // @Accept       json
 // @Produce      json
 // @Param        prompt_id  path      string                  true  "交互 ID（事件中的 pending_id）"
-// @Param        request    body      map[string]interface{}  true  "{kind: \"ask_user\"|\"tool_approval\", response: object}"
+// @Param request body map[string]interface{} true "{kind: \"ask_user\"|\"tool_approval\", response: object}"
 // @Success      200        {object}  map[string]interface{}  "{success: true, resumed: bool}"
 // @Failure      400        {object}  errors.AppError         "回答不合法或交互已结束"
 // @Failure      404        {object}  errors.AppError         "交互不存在"
@@ -865,22 +870,22 @@ func (h *MCPServiceHandler) ResolveAgentPrompt(c *gin.Context) {
 	promptID := c.Param("prompt_id")
 	tenantID := c.GetUint64(types.TenantIDContextKey.String())
 	if tenantID == 0 {
-		c.Error(errors.NewBadRequestError("Workspace ID cannot be empty"))
+		_ = c.Error(errors.NewBadRequestError("Workspace ID cannot be empty"))
 		return
 	}
 	if h.toolApprovalGate == nil {
-		c.Error(errors.NewInternalServerError("Agent prompts are not configured"))
+		_ = c.Error(errors.NewInternalServerError("Agent prompts are not configured"))
 		return
 	}
 	var body resolveAgentPromptBody
 	if err := c.ShouldBindJSON(&body); err != nil {
-		c.Error(errors.NewBadRequestError(err.Error()))
+		_ = c.Error(errors.NewBadRequestError(err.Error()))
 		return
 	}
 	principal, _ := types.PrincipalFromContext(ctx)
 	userID := principal.StorageID()
 	if strings.TrimSpace(userID) == "" {
-		c.Error(errors.NewUnauthorizedError("authenticated user required to answer a prompt"))
+		_ = c.Error(errors.NewUnauthorizedError("authenticated user required to answer a prompt"))
 		return
 	}
 	res, err := h.toolApprovalGate.ResolveResponse(ctx, hitl.ResolveRequest{

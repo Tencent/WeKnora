@@ -31,7 +31,9 @@ func TestConsumeFailureDoesNotDetachOrAuthorizeRun(t *testing.T) {
 			if kind == types.AgentPromptKindAskUser {
 				response = types.JSON(`{"text":"staging"}`)
 			}
-			prompt := &types.AgentPrompt{ID: "p", Kind: kind, Status: types.AgentPromptAnswered, OwnerInstance: "owner", Response: response}
+			prompt := &types.AgentPrompt{
+				ID: "p", Kind: kind, Status: types.AgentPromptAnswered, OwnerInstance: "owner", Response: response,
+			}
 			require.NoError(t, store.Create(ctx, prompt))
 			bus := event.NewEventBus()
 			var emitted bool
@@ -49,7 +51,8 @@ func TestConsumeFailureDoesNotDetachOrAuthorizeRun(t *testing.T) {
 				decision := g.ResumeDecision(ctx, prompt, bus)
 				require.False(t, decision.Approved)
 				require.Empty(t, decision.ModifiedArgs)
-				require.Nil(t, decision.Suspended, "storage failure must complete normally, not detach and strand the message")
+				require.Nil(t, decision.Suspended,
+					"storage failure must complete normally, not detach and strand the message")
 				require.Contains(t, decision.Reason, "could not confirm")
 			} else {
 				answer := g.ResumeAnswer(ctx, prompt, bus)
@@ -75,14 +78,18 @@ func TestOAuthConsumeFailureReportsFailureWithoutRetryingTool(t *testing.T) {
 	var emitted bool
 	bus.On(event.EventMCPOAuthRequired, func(_ context.Context, e event.Event) error {
 		promptID = e.Data.(event.MCPOAuthRequiredData).PendingID
-		return g.Resolve(ctx, ResolveRequest{TenantID: 1, PendingID: promptID, Kind: types.AgentPromptKindMCPOAuth, Decision: Decision{Approved: true}})
+		return g.Resolve(ctx, ResolveRequest{
+			TenantID: 1, PendingID: promptID, Kind: types.AgentPromptKindMCPOAuth, Decision: Decision{Approved: true},
+		})
 	})
 	bus.On(event.EventMCPOAuthResolved, func(_ context.Context, e event.Event) error {
 		emitted = true
 		require.False(t, e.Data.(event.MCPOAuthResolvedData).Authorized)
 		return nil
 	})
-	decision, err := g.RequestOAuthAndWait(ctx, OAuthPendingRequest{TenantID: 1, SessionID: "s", ServiceID: "svc", EventBus: bus, WaitTimeout: time.Second})
+	decision, err := g.RequestOAuthAndWait(ctx, OAuthPendingRequest{
+		TenantID: 1, SessionID: "s", ServiceID: "svc", EventBus: bus, WaitTimeout: time.Second,
+	})
 	require.NoError(t, err)
 	require.False(t, decision.Approved)
 	require.Contains(t, decision.Reason, "could not confirm")

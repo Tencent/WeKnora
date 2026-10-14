@@ -163,7 +163,7 @@ func (h *AgentStreamHandler) Subscribe() {
 }
 
 // handleAgentPromptEvent forwards generic prompt events to the SSE stream.
-func (h *AgentStreamHandler) handleAgentPromptEvent(ctx context.Context, evt event.Event) error {
+func (h *AgentStreamHandler) handleAgentPromptEvent(_ context.Context, evt event.Event) error {
 	var responseType types.ResponseType
 	switch evt.Data.(type) {
 	case event.AgentPromptRequiredData:

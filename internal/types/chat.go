@@ -272,10 +272,10 @@ const (
 	ResponseTypeToolApprovalRequired ResponseType = "tool_approval_required"
 	// ToolApprovalResolved: user approved/rejected (or timeout); informational for UI replay
 	ResponseTypeToolApprovalResolved ResponseType = "tool_approval_resolved"
-	// AgentPromptRequired: the agent asks the user something (ask_user);
+	// ResponseTypeAgentPromptRequired indicates that the agent asks the user something (ask_user);
 	// data carries the prompt kind and its request JSON.
 	ResponseTypeAgentPromptRequired ResponseType = "agent_prompt_required"
-	// AgentPromptResolved: the prompt was answered, declined, timed out or canceled.
+	// ResponseTypeAgentPromptResolved indicates an answered, declined, timed out or canceled prompt.
 	ResponseTypeAgentPromptResolved ResponseType = "agent_prompt_resolved"
 	// MCPOAuthRequired: an OAuth-enabled MCP service was invoked but the user
 	// has not authorized it — UI must surface an "Authorize" prompt and the

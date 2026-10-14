@@ -25,12 +25,13 @@ func (m *resumeMessages) GetMessage(_ context.Context, sessionID, id string) (*t
 	if row == nil || row.SessionID != sessionID {
 		return nil, nil
 	}
-	copy := *row
-	return &copy, nil
+	cloned := *row
+	return &cloned, nil
 }
+
 func (m *resumeMessages) UpdateMessage(_ context.Context, row *types.Message) error {
-	copy := *row
-	m.rows[row.ID] = &copy
+	cloned := *row
+	m.rows[row.ID] = &cloned
 	return nil
 }
 
@@ -48,6 +49,7 @@ func (*resumeSessionService) GetSession(_ context.Context, id string) (*types.Se
 func (r *resumeMessageRepo) GetMessage(ctx context.Context, sessionID, id string) (*types.Message, error) {
 	return r.messages.GetMessage(ctx, sessionID, id)
 }
+
 func (r *resumeMessageRepo) UpdateMessage(ctx context.Context, m *types.Message) error {
 	return r.messages.UpdateMessage(ctx, m)
 }
@@ -61,13 +63,22 @@ func TestBuildResumeRequestKeepsTurnAndRestoresLegacySteering(t *testing.T) {
 	b := hitl.NewBroker(nil, nil)
 	request, err := json.Marshal(types.ResumableAgentRequest{AgentID: "a", UserMessageID: "first"})
 	require.NoError(t, err)
-	snapshot, err := json.Marshal(agent.RunSnapshot{Version: agent.RunSnapshotVersion, Query: "original question", Request: request,
-		PendingRound: agent.PendingRound{Step: types.AgentStep{UserMessagesBefore: []string{"u"}}}})
+	snapshot, err := json.Marshal(agent.RunSnapshot{
+		Version: agent.RunSnapshotVersion, Query: "original question", Request: request,
+		PendingRound: agent.PendingRound{Step: types.AgentStep{UserMessagesBefore: []string{"u"}}},
+	})
 	require.NoError(t, err)
-	require.NoError(t, b.Suspensions().Save(ctx, &types.AgentRunSuspension{AssistantMessageID: "m", PromptID: "p", Snapshot: types.JSON(snapshot)}))
-	h := &Handler{promptBroker: b, messageService: messages, streamManager: stream.NewMemoryStreamManager(),
-		sessionService: &resumeSessionService{}, customAgentService: &resolveOwnAgentStub{agent: &types.CustomAgent{ID: "a"}}}
-	req, _, err := h.buildResumeRequest(ctx, c, &types.AgentPrompt{ID: "p", SessionID: "sess-1", AssistantMessageID: "m", RequestID: "transport"})
+	require.NoError(t, b.Suspensions().Save(ctx, &types.AgentRunSuspension{
+		AssistantMessageID: "m", PromptID: "p", Snapshot: types.JSON(snapshot),
+	}))
+	h := &Handler{
+		promptBroker: b, messageService: messages, streamManager: stream.NewMemoryStreamManager(),
+		sessionService:     &resumeSessionService{},
+		customAgentService: &resolveOwnAgentStub{agent: &types.CustomAgent{ID: "a"}},
+	}
+	req, _, err := h.buildResumeRequest(ctx, c, &types.AgentPrompt{
+		ID: "p", SessionID: "sess-1", AssistantMessageID: "m", RequestID: "transport",
+	})
 	require.NoError(t, err)
 	require.Equal(t, "original question", req.query)
 	require.Equal(t, req.query, req.userInput)
@@ -85,11 +96,16 @@ func TestResumeRecoversOwnerThatDiedBeforeSavingMessage(t *testing.T) {
 			ctx := t.Context()
 			messages := &resumeMessages{rows: map[string]*types.Message{"m": {ID: "m", SessionID: "s"}}}
 			b := hitl.NewBroker(nil, nil)
-			require.NoError(t, b.Suspensions().Save(ctx, &types.AgentRunSuspension{AssistantMessageID: "m", PromptID: "p1", Snapshot: types.JSON(`{"version":1,"completed_steps":[{"thought":"saved work"}]}`)}))
+			require.NoError(t, b.Suspensions().Save(ctx, &types.AgentRunSuspension{
+				AssistantMessageID: "m", PromptID: "p1",
+				Snapshot: types.JSON(`{"version":1,"completed_steps":[{"thought":"saved work"}]}`),
+			}))
 			mgr := stream.NewMemoryStreamManager()
 			require.NoError(t, mgr.SetLiveRun(ctx, "s", "m", "old"))
-			h := &Handler{messageService: messages, promptBroker: b, streamManager: mgr,
-				suspendedRuns: service.NewSuspendedRunService(b, &resumeMessageRepo{messages: messages})}
+			h := &Handler{
+				messageService: messages, promptBroker: b, streamManager: mgr,
+				suspendedRuns: service.NewSuspendedRunService(b, &resumeMessageRepo{messages: messages}),
+			}
 			past := time.Now().Add(-time.Second)
 			require.NoError(t, h.awaitSuspendedRunSettled(ctx, settlePrompt, ownerGone, &past))
 			require.Equal(t, types.MessageRunStateAwaitingInput, messages.rows["m"].RunState)

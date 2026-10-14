@@ -100,7 +100,7 @@ func (e *AgentEngine) Resume(
 
 	if _, err := e.executeLoop(ctx, state, snap.Query, messages, tools, sessionID, messageID); err != nil {
 		logger.Errorf(ctx, "[Agent] Resumed execution failed: %v", err)
-		e.eventBus.Emit(ctx, event.Event{
+		if emitErr := e.eventBus.Emit(ctx, event.Event{
 			ID:        generateEventID("error"),
 			Type:      event.EventError,
 			SessionID: sessionID,
@@ -109,7 +109,9 @@ func (e *AgentEngine) Resume(
 				Stage:     "agent_execution",
 				SessionID: sessionID,
 			},
-		})
+		}); emitErr != nil {
+			logger.Warnf(ctx, "[Agent] Failed to emit resumed execution error: %v", emitErr)
+		}
 		return nil, err
 	}
 	return state, nil

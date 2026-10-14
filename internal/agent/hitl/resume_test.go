@@ -63,7 +63,7 @@ func TestBroker_ResolveSuspendedHandsRunToCaller(t *testing.T) {
 	require.NotNil(t, row.LeaseUntil)
 	require.True(t, row.LeaseUntil.After(time.Now()))
 
-	require.ErrorIs(t, resolveErr(b, ctx, answer("p1", "red")), ErrAlreadyResolved)
+	require.ErrorIs(t, resolveErr(ctx, b, answer("p1", "red")), ErrAlreadyResolved)
 }
 
 func TestBroker_ResolveRejectsExpiredSuspension(t *testing.T) {
@@ -71,7 +71,7 @@ func TestBroker_ResolveRejectsExpiredSuspension(t *testing.T) {
 	b := newTestBroker(NewMemoryStore())
 	seedSuspended(t, b, "p1", "m1", time.Now().Add(-time.Second))
 
-	require.ErrorIs(t, resolveErr(b, ctx, answer("p1", "blue")), ErrAlreadyResolved)
+	require.ErrorIs(t, resolveErr(ctx, b, answer("p1", "blue")), ErrAlreadyResolved)
 	row, err := b.Store().Get(ctx, "p1")
 	require.NoError(t, err)
 	require.Equal(t, types.AgentPromptSuspended, row.Status, "left for the reaper to expire")
@@ -167,7 +167,7 @@ func TestBroker_SupersedeSessionClosesOnlyItsSuspendedPrompts(t *testing.T) {
 	row, err := b.Store().Get(ctx, "p1")
 	require.NoError(t, err)
 	require.Equal(t, types.AgentPromptSuperseded, row.Status)
-	require.ErrorIs(t, resolveErr(b, ctx, answer("p1", "blue")), ErrAlreadyResolved)
+	require.ErrorIs(t, resolveErr(ctx, b, answer("p1", "blue")), ErrAlreadyResolved)
 
 	other, err := b.Store().Get(ctx, "other")
 	require.NoError(t, err)

@@ -314,7 +314,9 @@ type ResolveAgentPromptRequest struct {
 // that the run had been suspended and now continues in the background; its
 // output lands in the same assistant message.
 // Server route: POST /api/v1/agent/prompts/{prompt_id}.
-func (c *Client) ResolveAgentPrompt(ctx context.Context, promptID string, req *ResolveAgentPromptRequest) (resumed bool, err error) {
+func (c *Client) ResolveAgentPrompt(
+	ctx context.Context, promptID string, req *ResolveAgentPromptRequest,
+) (resumed bool, err error) {
 	path := fmt.Sprintf("/api/v1/agent/prompts/%s", promptID)
 	resp, err := c.doRequest(ctx, http.MethodPost, path, req, nil)
 	if err != nil {

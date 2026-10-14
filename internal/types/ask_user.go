@@ -124,7 +124,8 @@ func validateAskUserOptions(options []string) error {
 		if strings.HasPrefix(trimmed, "[") {
 			inner := strings.TrimSpace(strings.TrimPrefix(trimmed, "["))
 			if strings.HasPrefix(inner, "\"") || inner == "]" {
-				return errors.New(`options must contain one choice per string, not an encoded array; use "options": ["first choice", "second choice"]`)
+				return errors.New("options must contain one choice per string, not an encoded array; " +
+					`use "options": ["first choice", "second choice"]`)
 			}
 		}
 		if strings.TrimSpace(o) == "" || utf8.RuneCountInString(o) > AskUserMaxOptionLen {

@@ -43,7 +43,9 @@ var (
 // answered, on this replica. It returns once the run has started; the run
 // streams to the message's event stream, where clients attach as they do to
 // any live run. ownerGone is hitl.Resolution.OwnerGone.
-func (h *Handler) ResumeSuspendedRun(c *gin.Context, prompt *types.AgentPrompt, ownerGone bool, ownerLeaseUntil *time.Time) {
+func (h *Handler) ResumeSuspendedRun(
+	c *gin.Context, prompt *types.AgentPrompt, ownerGone bool, ownerLeaseUntil *time.Time,
+) {
 	if h.promptBroker == nil || h.suspendedRuns == nil {
 		return
 	}
@@ -84,7 +86,9 @@ func (h *Handler) ResumeSuspendedRun(c *gin.Context, prompt *types.AgentPrompt, 
 // that run's teardown, which rewrites the message and clears the marker the
 // resumed run sets. A marker left by an owner that is gone is cleared here,
 // since nothing else will.
-func (h *Handler) awaitSuspendedRunSettled(ctx context.Context, prompt *types.AgentPrompt, ownerGone bool, ownerLeaseUntil *time.Time) error {
+func (h *Handler) awaitSuspendedRunSettled(
+	ctx context.Context, prompt *types.AgentPrompt, ownerGone bool, ownerLeaseUntil *time.Time,
+) error {
 	deadline := time.Now().Add(resumeSettleTimeout)
 	if ownerLeaseUntil != nil && ownerLeaseUntil.After(deadline) {
 		deadline = *ownerLeaseUntil
@@ -241,7 +245,8 @@ func (h *Handler) finishResume(ctx context.Context, prompt *types.AgentPrompt, s
 	if err == nil && row != nil && row.Status == types.AgentPromptAnswered {
 		// The message now belongs to the prompt the run suspended on again;
 		// closing it from the old state would complete it under that prompt.
-		if cur, _ := h.promptBroker.Suspensions().Get(ctx, prompt.AssistantMessageID); cur != nil && cur.PromptID != prompt.ID {
+		if cur, _ := h.promptBroker.Suspensions().Get(ctx, prompt.AssistantMessageID); cur != nil &&
+			cur.PromptID != prompt.ID {
 			h.promptBroker.Fail(ctx, prompt.ID, hitl.ReasonResumeStopped)
 			return
 		}
@@ -287,7 +292,9 @@ func decodeResumableRequest(snapshot []byte, req *types.ResumableAgentRequest) e
 
 // Older snapshots retained steering boundaries but not their text. Resolve
 // those IDs from the same session before replaying, including the pending round.
-func (h *Handler) restoreResumeUserMessages(ctx context.Context, sessionID string, snapshot []byte) (types.JSON, error) {
+func (h *Handler) restoreResumeUserMessages(
+	ctx context.Context, sessionID string, snapshot []byte,
+) (types.JSON, error) {
 	snap, err := agent.DecodeRunSnapshot(snapshot)
 	if err != nil {
 		return nil, err

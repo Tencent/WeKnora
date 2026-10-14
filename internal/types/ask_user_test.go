@@ -18,10 +18,12 @@ func TestAskUserRequestValidate(t *testing.T) {
 		req AskUserPromptRequest
 		err string
 	}{
-		"free text":        {req: AskUserPromptRequest{Question: " which? "}},
-		"options":          {req: AskUserPromptRequest{Question: "q", Options: []string{"a", "b"}}},
-		"empty question":   {req: AskUserPromptRequest{Question: "  "}, err: "question is required"},
-		"long question":    {req: AskUserPromptRequest{Question: strings.Repeat("问", AskUserMaxQuestionLen+1)}, err: "exceeds"},
+		"free text":      {req: AskUserPromptRequest{Question: " which? "}},
+		"options":        {req: AskUserPromptRequest{Question: "q", Options: []string{"a", "b"}}},
+		"empty question": {req: AskUserPromptRequest{Question: "  "}, err: "question is required"},
+		"long question": {
+			req: AskUserPromptRequest{Question: strings.Repeat("问", AskUserMaxQuestionLen+1)}, err: "exceeds",
+		},
 		"too many options": {req: AskUserPromptRequest{Question: "q", Options: many}, err: "at most"},
 		"duplicate option": {req: AskUserPromptRequest{Question: "q", Options: []string{"a", "a"}}, err: "duplicate"},
 		"options and fields": {req: AskUserPromptRequest{
@@ -34,7 +36,9 @@ func TestAskUserRequestValidate(t *testing.T) {
 			Question: "q", Fields: []AskUserField{{Name: "n", Type: AskUserFieldSelect}},
 		}, err: "needs options"},
 		"duplicate field": {req: AskUserPromptRequest{
-			Question: "q", Fields: []AskUserField{{Name: "n", Type: AskUserFieldText}, {Name: "n", Type: AskUserFieldNumber}},
+			Question: "q", Fields: []AskUserField{
+				{Name: "n", Type: AskUserFieldText}, {Name: "n", Type: AskUserFieldNumber},
+			},
 		}, err: "duplicate field"},
 	} {
 		t.Run(name, func(t *testing.T) {

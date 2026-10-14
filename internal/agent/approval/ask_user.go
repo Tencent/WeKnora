@@ -146,7 +146,9 @@ func (g *Gate) consumeAnswer(
 		a.Response = types.AskUserPromptResponse{}
 		a.Reason = "answer is no longer owned or was already consumed"
 		if consumeErr == nil {
-			a.Suspended = &types.PromptSuspension{PromptID: a.PromptID, Kind: types.AgentPromptKindAskUser, Detached: true}
+			a.Suspended = &types.PromptSuspension{
+				PromptID: a.PromptID, Kind: types.AgentPromptKindAskUser, Detached: true,
+			}
 			return
 		}
 		a.Reason = "could not confirm the user answer"
@@ -179,7 +181,10 @@ func (g *Gate) consumeAnswer(
 }
 
 func askAnswer(out hitl.Outcome) Answer {
-	a := Answer{owner: out.Prompt.OwnerInstance, answered: out.Answered, PromptID: out.Prompt.ID, Reason: out.Reason, TimedOut: out.TimedOut, Canceled: out.Canceled}
+	a := Answer{
+		owner: out.Prompt.OwnerInstance, answered: out.Answered, PromptID: out.Prompt.ID,
+		Reason: out.Reason, TimedOut: out.TimedOut, Canceled: out.Canceled,
+	}
 	if !out.Answered {
 		return a
 	}

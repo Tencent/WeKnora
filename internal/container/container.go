@@ -341,7 +341,9 @@ func BuildContainer(container *dig.Container) *dig.Container {
 	}))
 	must(container.Provide(service.NewSuspendedRunService))
 	must(container.Invoke(startAgentPromptReaper))
-	must(container.Provide(func(cfg *config.Config, s interfaces.MCPToolApprovalService, broker *hitl.Broker) *approval.Gate {
+	must(container.Provide(func(
+		cfg *config.Config, s interfaces.MCPToolApprovalService, broker *hitl.Broker,
+	) *approval.Gate {
 		return approval.NewGate(cfg, &approval.Adapter{Svc: s}, broker)
 	}))
 	// Expose Gate as MCPApproval interface so AgentService and others can depend on the abstraction.

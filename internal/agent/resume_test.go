@@ -160,8 +160,10 @@ func TestResumeReplaysSteeringAtItsOriginalBoundaries(t *testing.T) {
 	// the original query and the first steering message.
 	transcript := strings.Join(contents, "\n")
 	previous := -1
-	for _, content := range []string{types.SteerMessageContent("use staging"), "previous round",
-		types.SteerMessageContent("only two replicas"), "checking first"} {
+	for _, content := range []string{
+		types.SteerMessageContent("use staging"), "previous round",
+		types.SteerMessageContent("only two replicas"), "checking first",
+	} {
 		position := strings.Index(transcript, content)
 		require.Greater(t, position, previous, "missing or misplaced content: %s", content)
 		previous = position

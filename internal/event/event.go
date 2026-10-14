@@ -61,7 +61,7 @@ const (
 	EventToolApprovalRequired EventType = "tool_approval_required"
 	EventToolApprovalResolved EventType = "tool_approval_resolved"
 
-	// Generic user prompts (ask_user): the request and answer travel as the
+	// EventAgentPromptRequired requests user input (ask_user). The request and answer travel as the
 	// prompt kind's JSON, so a new kind needs no new event.
 	EventAgentPromptRequired EventType = "agent_prompt_required"
 	EventAgentPromptResolved EventType = "agent_prompt_resolved"

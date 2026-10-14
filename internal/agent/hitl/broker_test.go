@@ -59,7 +59,7 @@ func TestBroker_AnswerOnOtherReplicaReachesOwnerThroughStore(t *testing.T) {
 
 	out, err := owner.Await(context.Background(), testSpec(5*time.Second,
 		func(_ context.Context, p *types.AgentPrompt) error {
-			go func() { require.NoError(t, resolveErr(other, context.Background(), answer(p.ID, "blue"))) }()
+			go func() { require.NoError(t, resolveErr(context.Background(), other, answer(p.ID, "blue"))) }()
 			return nil
 		}))
 	require.NoError(t, err)
@@ -67,7 +67,8 @@ func TestBroker_AnswerOnOtherReplicaReachesOwnerThroughStore(t *testing.T) {
 	require.JSONEq(t, `{"answer":"blue"}`, string(out.Prompt.Response))
 	require.Equal(t, "alice", out.Prompt.ResolvedBy)
 
-	owner.Consume(context.Background(), out.Prompt.ID, types.AgentPromptDone, out.Prompt.OwnerInstance)
+	require.True(t, consumeWithoutError(context.Background(), t, owner,
+		out.Prompt.ID, types.AgentPromptDone, out.Prompt.OwnerInstance))
 	row, err := store.Get(context.Background(), out.Prompt.ID)
 	require.NoError(t, err)
 	require.Equal(t, types.AgentPromptDone, row.Status)
@@ -81,24 +82,24 @@ func TestBroker_ResolveChecksScopeOwnershipAndAnswer(t *testing.T) {
 				ctx := context.Background()
 				otherSession := answer(p.ID, "x")
 				otherSession.SessionID = "s2"
-				require.ErrorIs(t, resolveErr(b, ctx, otherSession), ErrPromptNotFound)
+				require.ErrorIs(t, resolveErr(ctx, b, otherSession), ErrPromptNotFound)
 
 				otherKind := answer(p.ID, "x")
 				otherKind.Kind = "something_else"
-				require.ErrorIs(t, resolveErr(b, ctx, otherKind), ErrPromptNotFound)
+				require.ErrorIs(t, resolveErr(ctx, b, otherKind), ErrPromptNotFound)
 
 				otherTenant := answer(p.ID, "x")
 				otherTenant.TenantID = 2
-				require.ErrorIs(t, resolveErr(b, ctx, otherTenant), ErrTenantMismatch)
+				require.ErrorIs(t, resolveErr(ctx, b, otherTenant), ErrTenantMismatch)
 
 				anonymous := answer(p.ID, "x")
 				anonymous.UserID = ""
-				require.ErrorIs(t, resolveErr(b, ctx, anonymous), ErrUserMismatch)
+				require.ErrorIs(t, resolveErr(ctx, b, anonymous), ErrUserMismatch)
 
-				require.ErrorIs(t, resolveErr(b, ctx, answer(p.ID, "")), ErrInvalidResponse)
+				require.ErrorIs(t, resolveErr(ctx, b, answer(p.ID, "")), ErrInvalidResponse)
 
-				require.NoError(t, resolveErr(b, ctx, answer(p.ID, "red")))
-				require.ErrorIs(t, resolveErr(b, ctx, answer(p.ID, "green")), ErrAlreadyResolved)
+				require.NoError(t, resolveErr(ctx, b, answer(p.ID, "red")))
+				require.ErrorIs(t, resolveErr(ctx, b, answer(p.ID, "green")), ErrAlreadyResolved)
 			}()
 			return nil
 		}))
@@ -111,7 +112,7 @@ func TestBroker_UnregisteredKindIsRejected(t *testing.T) {
 	b := NewBroker(nil, nil, WithPollInterval(20*time.Millisecond))
 	out, err := b.Await(context.Background(), testSpec(200*time.Millisecond,
 		func(_ context.Context, p *types.AgentPrompt) error {
-			require.ErrorIs(t, resolveErr(b, context.Background(), answer(p.ID, "x")), ErrInvalidResponse)
+			require.ErrorIs(t, resolveErr(context.Background(), b, answer(p.ID, "x")), ErrInvalidResponse)
 			return nil
 		}))
 	require.NoError(t, err)
@@ -144,7 +145,7 @@ func TestBroker_TimeoutAndCancelAreRecorded(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, out.TimedOut)
 	require.Equal(t, "no answer", out.Reason)
-	require.ErrorIs(t, resolveErr(b, context.Background(), answer(timedOutID, "x")), ErrAlreadyResolved)
+	require.ErrorIs(t, resolveErr(context.Background(), b, answer(timedOutID, "x")), ErrAlreadyResolved)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	out, err = b.Await(ctx, testSpec(time.Minute,
@@ -160,12 +161,13 @@ func TestBroker_ExecutingUntilMarkedExecuted(t *testing.T) {
 	b := newTestBroker(NewMemoryStore())
 	out, err := b.Await(context.Background(), testSpec(5*time.Second,
 		func(_ context.Context, p *types.AgentPrompt) error {
-			go func() { require.NoError(t, resolveErr(b, context.Background(), answer(p.ID, "go"))) }()
+			go func() { require.NoError(t, resolveErr(context.Background(), b, answer(p.ID, "go"))) }()
 			return nil
 		}))
 	require.NoError(t, err)
 
-	b.Consume(context.Background(), out.Prompt.ID, types.AgentPromptExecuting, out.Prompt.OwnerInstance)
+	require.True(t, consumeWithoutError(context.Background(), t, b,
+		out.Prompt.ID, types.AgentPromptExecuting, out.Prompt.OwnerInstance))
 	row, _ := b.Store().Get(context.Background(), out.Prompt.ID)
 	require.Equal(t, types.AgentPromptExecuting, row.Status)
 
@@ -174,7 +176,7 @@ func TestBroker_ExecutingUntilMarkedExecuted(t *testing.T) {
 	require.Equal(t, types.AgentPromptDone, row.Status)
 }
 
-func resolveErr(b *Broker, ctx context.Context, req ResolveRequest) error {
+func resolveErr(ctx context.Context, b *Broker, req ResolveRequest) error {
 	_, err := b.Resolve(ctx, req)
 	return err
 }
@@ -185,9 +187,9 @@ func TestBrokerConsumeFencesOwnerAndOnlyWinsOnce(t *testing.T) {
 	require.NoError(t, b.store.Create(ctx, &types.AgentPrompt{
 		ID: "p", Status: types.AgentPromptAnswered, OwnerInstance: "new-run",
 	}))
-	require.False(t, consumeWithoutError(t, b, ctx, "p", types.AgentPromptExecuting, "old-run"))
-	require.True(t, consumeWithoutError(t, b, ctx, "p", types.AgentPromptExecuting, "new-run"))
-	require.False(t, consumeWithoutError(t, b, ctx, "p", types.AgentPromptExecuting, "new-run"))
+	require.False(t, consumeWithoutError(ctx, t, b, "p", types.AgentPromptExecuting, "old-run"))
+	require.True(t, consumeWithoutError(ctx, t, b, "p", types.AgentPromptExecuting, "new-run"))
+	require.False(t, consumeWithoutError(ctx, t, b, "p", types.AgentPromptExecuting, "new-run"))
 }
 
 func TestBrokerWaiterDetachesAfterTakeoverOnSameReplica(t *testing.T) {
@@ -214,7 +216,8 @@ func TestBrokerWaiterDetachesAfterTakeoverOnSameReplica(t *testing.T) {
 	snapshot, err := b.suspensions.Get(ctx, out.Prompt.AssistantMessageID)
 	require.NoError(t, err)
 	require.NotNil(t, snapshot, "the stale waiter must not delete the new owner's state")
-	require.True(t, consumeWithoutError(t, b, ctx, resumed.Prompt.ID, types.AgentPromptExecuting, resumed.Prompt.OwnerInstance))
+	require.True(t, consumeWithoutError(ctx, t, b,
+		resumed.Prompt.ID, types.AgentPromptExecuting, resumed.Prompt.OwnerInstance))
 }
 
 type renewBeforeTransitionStore struct {
@@ -222,7 +225,9 @@ type renewBeforeTransitionStore struct {
 	renew bool
 }
 
-func (s *renewBeforeTransitionStore) Transition(ctx context.Context, id string, tr types.AgentPromptTransition) (bool, error) {
+func (s *renewBeforeTransitionStore) Transition(
+	ctx context.Context, id string, tr types.AgentPromptTransition,
+) (bool, error) {
 	if s.renew {
 		s.renew = false
 		row, err := s.Get(ctx, id)
@@ -250,7 +255,9 @@ func TestReaperDoesNotTakeOverLeaseRenewedAfterScan(t *testing.T) {
 			require.NoError(t, b.suspensions.Save(ctx, &types.AgentRunSuspension{
 				AssistantMessageID: "m", PromptID: "p", Snapshot: types.JSON(`{"version":1}`),
 			}))
-			n, err := b.Reap(ctx, time.Now(), RunHooks{Closed: func(context.Context, *types.AgentPrompt, *types.AgentRunSuspension, string) error {
+			n, err := b.Reap(ctx, time.Now(), RunHooks{Closed: func(
+				context.Context, *types.AgentPrompt, *types.AgentRunSuspension, string,
+			) error {
 				t.Fatal("must not close a renewed run")
 				return nil
 			}})
@@ -275,7 +282,9 @@ type flakyTransitionStore struct {
 	readError bool
 }
 
-func (s *flakyTransitionStore) Transition(ctx context.Context, id string, tr types.AgentPromptTransition) (bool, error) {
+func (s *flakyTransitionStore) Transition(
+	ctx context.Context, id string, tr types.AgentPromptTransition,
+) (bool, error) {
 	if s.failures > 0 {
 		s.failures--
 		if s.committed {
@@ -286,18 +295,20 @@ func (s *flakyTransitionStore) Transition(ctx context.Context, id string, tr typ
 	return s.Store.Transition(ctx, id, tr)
 }
 
-func consumeWithoutError(t *testing.T, b *Broker, ctx context.Context, id, to, owner string) bool {
+func consumeWithoutError(ctx context.Context, t *testing.T, b *Broker, id, to, owner string) bool {
 	t.Helper()
 	ok, err := b.Consume(ctx, id, to, owner)
 	require.NoError(t, err)
 	return ok
 }
+
 func (s *flakyTransitionStore) Get(ctx context.Context, id string) (*types.AgentPrompt, error) {
 	if s.readError {
 		return nil, errors.New("read unavailable")
 	}
 	return s.Store.Get(ctx, id)
 }
+
 func TestBroker_ConsumeTellsAStoreFailureFromALostClaim(t *testing.T) {
 	saved := consumeRetryDelays
 	consumeRetryDelays = []time.Duration{0, 0}
@@ -309,20 +320,40 @@ func TestBroker_ConsumeTellsAStoreFailureFromALostClaim(t *testing.T) {
 		want, wantErr        bool
 		status               string
 	}{
-		"confirms a claim committed before its error":       {failures: 1, committed: true, rowOwner: "me", want: true, status: types.AgentPromptExecuting},
-		"recovers after transient failures":                 {failures: 2, rowOwner: "me", want: true, status: types.AgentPromptExecuting},
-		"does not execute through a write outage":           {failures: 10, rowOwner: "me", wantErr: true, status: types.AgentPromptAnswered},
-		"closes an unclaimed answer when storage recovers":  {failures: 3, rowOwner: "me", wantErr: true, status: types.AgentPromptFailed},
-		"does not execute through a read outage":            {failures: 10, readError: true, rowOwner: "me", wantErr: true, status: types.AgentPromptAnswered},
-		"unknown owner cannot execute or cancel a takeover": {failures: 3, readError: true, rowOwner: "other", wantErr: true, status: types.AgentPromptAnswered},
-		"gives up an answer another owner holds":            {failures: 10, rowOwner: "other", status: types.AgentPromptAnswered},
-		"gives up without any failure when not owned":       {rowOwner: "other", status: types.AgentPromptAnswered},
+		"confirms a claim committed before its error": {
+			failures: 1, committed: true, rowOwner: "me", want: true, status: types.AgentPromptExecuting,
+		},
+		"recovers after transient failures": {
+			failures: 2, rowOwner: "me", want: true, status: types.AgentPromptExecuting,
+		},
+		"does not execute through a write outage": {
+			failures: 10, rowOwner: "me", wantErr: true, status: types.AgentPromptAnswered,
+		},
+		"closes an unclaimed answer when storage recovers": {
+			failures: 3, rowOwner: "me", wantErr: true, status: types.AgentPromptFailed,
+		},
+		"does not execute through a read outage": {
+			failures: 10, readError: true, rowOwner: "me", wantErr: true, status: types.AgentPromptAnswered,
+		},
+		"unknown owner cannot execute or cancel a takeover": {
+			failures: 3, readError: true, rowOwner: "other", wantErr: true, status: types.AgentPromptAnswered,
+		},
+		"gives up an answer another owner holds": {
+			failures: 10, rowOwner: "other", status: types.AgentPromptAnswered,
+		},
+		"gives up without any failure when not owned": {
+			rowOwner: "other", status: types.AgentPromptAnswered,
+		},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			ctx := t.Context()
-			store := &flakyTransitionStore{Store: NewMemoryStore(), failures: tc.failures, committed: tc.committed, readError: tc.readError}
-			require.NoError(t, store.Create(ctx, &types.AgentPrompt{ID: "p", Status: types.AgentPromptAnswered, OwnerInstance: tc.rowOwner}))
+			store := &flakyTransitionStore{
+				Store: NewMemoryStore(), failures: tc.failures, committed: tc.committed, readError: tc.readError,
+			}
+			require.NoError(t, store.Create(ctx, &types.AgentPrompt{
+				ID: "p", Status: types.AgentPromptAnswered, OwnerInstance: tc.rowOwner,
+			}))
 			b := NewBroker(store, nil)
 			ok, err := b.Consume(ctx, "p", types.AgentPromptExecuting, "me")
 			require.Equal(t, tc.want, ok)

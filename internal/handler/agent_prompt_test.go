@@ -25,7 +25,9 @@ func (r *recordingResumer) ResumeSuspendedRun(_ *gin.Context, p *types.AgentProm
 	r.prompts = append(r.prompts, p)
 }
 
-func postAgentPrompt(h *MCPServiceHandler, promptID, body string, principal types.Principal) (*httptest.ResponseRecorder, *gin.Context) {
+func postAgentPrompt(
+	h *MCPServiceHandler, promptID, body string, principal types.Principal,
+) (*httptest.ResponseRecorder, *gin.Context) {
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
 	req := httptest.NewRequest(http.MethodPost, "/agent/prompts/"+promptID, strings.NewReader(body))
@@ -72,7 +74,8 @@ func TestResolveAgentPrompt(t *testing.T) {
 	_, c = postAgentPrompt(h, id, `{"kind":"ask_user","response":{}}`, owner)
 	assert.Equal(t, http.StatusBadRequest, appErrorCode(t, c), "an empty answer is invalid")
 
-	_, c = postAgentPrompt(h, id, `{"kind":"ask_user","response":{"text":"red"}}`, types.Principal{Type: "user", ID: "u2"})
+	_, c = postAgentPrompt(h, id, `{"kind":"ask_user","response":{"text":"red"}}`,
+		types.Principal{Type: "user", ID: "u2"})
 	assert.Equal(t, http.StatusBadRequest, appErrorCode(t, c), "only the prompt's user may answer")
 	assert.Empty(t, resumer.prompts)
 

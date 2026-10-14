@@ -52,7 +52,7 @@ func TestBroker_AnsweredInHotWaitDropsRunState(t *testing.T) {
 	b := newTestBroker(NewMemoryStore())
 	out, err := b.Await(context.Background(), suspendableSpec(5*time.Second,
 		func(_ context.Context, p *types.AgentPrompt) error {
-			go func() { require.NoError(t, resolveErr(b, context.Background(), answer(p.ID, "blue"))) }()
+			go func() { require.NoError(t, resolveErr(context.Background(), b, answer(p.ID, "blue"))) }()
 			return nil
 		}))
 	require.NoError(t, err)
@@ -127,7 +127,9 @@ func TestBroker_ReapSuspendsOrphanedSuspendablePrompt(t *testing.T) {
 	}))
 
 	var hooked *types.AgentRunSuspension
-	n, err := b.Reap(ctx, time.Now(), RunHooks{Suspended: func(_ context.Context, p *types.AgentPrompt, s *types.AgentRunSuspension) error {
+	n, err := b.Reap(ctx, time.Now(), RunHooks{Suspended: func(
+		_ context.Context, p *types.AgentPrompt, s *types.AgentRunSuspension,
+	) error {
 		require.Equal(t, "p1", p.ID)
 		hooked = s
 		return nil
@@ -170,7 +172,9 @@ func TestBroker_ReapExpiresOrphanWithoutRunState(t *testing.T) {
 	}))
 
 	called := false
-	n, err := b.Reap(ctx, time.Now(), RunHooks{Suspended: func(context.Context, *types.AgentPrompt, *types.AgentRunSuspension) error {
+	n, err := b.Reap(ctx, time.Now(), RunHooks{Suspended: func(
+		context.Context, *types.AgentPrompt, *types.AgentRunSuspension,
+	) error {
 		called = true
 		return nil
 	}})

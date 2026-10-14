@@ -69,7 +69,7 @@ type AgentPrompt struct {
 func (AgentPrompt) TableName() string { return "agent_prompts" }
 
 // BeforeCreate sets ID for AgentPrompt.
-func (p *AgentPrompt) BeforeCreate(tx *gorm.DB) error {
+func (p *AgentPrompt) BeforeCreate(_ *gorm.DB) error {
 	if p.ID == "" {
 		p.ID = uuid.New().String()
 	}

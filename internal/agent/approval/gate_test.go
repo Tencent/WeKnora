@@ -205,7 +205,8 @@ func TestGate_Resolve_AlreadyResolvedAfterTimeout(t *testing.T) {
 }
 
 func TestGate_ApprovedCallStaysExecutingUntilMarked(t *testing.T) {
-	g := NewGate(&config.Config{Agent: &config.AgentConfig{ToolApprovalTimeoutSeconds: 5}}, &stubChecker{required: true}, nil)
+	g := NewGate(&config.Config{Agent: &config.AgentConfig{ToolApprovalTimeoutSeconds: 5}},
+		&stubChecker{required: true}, nil)
 	bus := event.NewEventBus()
 	bus.On(event.EventToolApprovalRequired, func(_ context.Context, evt event.Event) error {
 		pendingID := evt.Data.(event.ToolApprovalRequiredData).PendingID
@@ -383,7 +384,8 @@ func TestGate_ResolveSuspendedThenResumeDecision(t *testing.T) {
 	require.JSONEq(t, `{"a":2}`, string(got.ModifiedArgs))
 	require.Equal(t, d.PendingID, resolved.PendingID)
 	require.True(t, resolved.Approved)
-	require.False(t, g.ResumeDecision(context.Background(), res.Prompt, nil).Approved, "an approval can execute only once")
+	require.False(t, g.ResumeDecision(context.Background(), res.Prompt, nil).Approved,
+		"an approval can execute only once")
 
 	row, err := g.broker.Store().Get(context.Background(), d.PendingID)
 	require.NoError(t, err)
@@ -434,8 +436,10 @@ func TestAnsweredPromptOnlyCurrentOwnerCanContinue(t *testing.T) {
 				} else if accept {
 					response = `{"approved":true}`
 				}
-				current := &types.AgentPrompt{ID: "p", Kind: kind, Status: types.AgentPromptAnswered,
-					OwnerInstance: "new-run", Response: types.JSON(response)}
+				current := &types.AgentPrompt{
+					ID: "p", Kind: kind, Status: types.AgentPromptAnswered,
+					OwnerInstance: "new-run", Response: types.JSON(response),
+				}
 				require.NoError(t, g.broker.Store().Create(ctx, current))
 				stale := *current
 				stale.OwnerInstance = "old-run"

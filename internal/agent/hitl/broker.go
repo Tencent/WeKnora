@@ -562,7 +562,8 @@ func (b *Broker) Resolve(ctx context.Context, req ResolveRequest) (Resolution, e
 		}
 	}
 	ownerLeaseUntil := row.LeaseUntil
-	ownerGone := row.OwnerInstance == "" || (row.Status == types.AgentPromptSuspended && ownerLeaseUntil != nil && ownerLeaseUntil.Before(now))
+	ownerGone := row.OwnerInstance == "" ||
+		(row.Status == types.AgentPromptSuspended && ownerLeaseUntil != nil && ownerLeaseUntil.Before(now))
 	resolvedBy := req.UserID
 	answer := func(t types.AgentPromptTransition) (bool, error) {
 		t.To = types.AgentPromptAnswered
@@ -708,8 +709,8 @@ func (b *Broker) runSubscriber() {
 	const maxBackoff = 30 * time.Second
 	for {
 		sub := b.rdb.Subscribe(ctx, channel)
-		backoff = time.Second
 		for msg := range sub.Channel() {
+			backoff = time.Second
 			var m wakeMessage
 			if err := json.Unmarshal([]byte(msg.Payload), &m); err != nil {
 				logger.GetLogger(ctx).Warnf("agent prompt pubsub: bad payload: %v", err)

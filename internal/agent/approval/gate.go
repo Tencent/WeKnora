@@ -321,7 +321,9 @@ func (g *Gate) consumeDecision(
 		d.ModifiedArgs = nil
 		d.Reason = "approval is no longer owned or was already consumed"
 		if consumeErr == nil {
-			d.Suspended = &types.PromptSuspension{PromptID: d.PendingID, Kind: types.AgentPromptKindToolApproval, Detached: true}
+			d.Suspended = &types.PromptSuspension{
+				PromptID: d.PendingID, Kind: types.AgentPromptKindToolApproval, Detached: true,
+			}
 			return
 		}
 		d.Reason = "could not confirm tool approval; tool was not executed"

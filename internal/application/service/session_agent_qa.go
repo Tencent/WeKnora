@@ -315,7 +315,8 @@ func (s *sessionService) AgentQA(
 	// Events will be emitted to EventBus and handled by the Handler layer
 	logger.Info(ctx, "Executing agent with streaming")
 	if req.Resume != nil {
-		_, err = engine.Resume(ctx, sessionID, req.AssistantMessageID, llmContext, req.Resume.Snapshot, req.Resume.Prompt)
+		_, err = engine.Resume(ctx, sessionID, req.AssistantMessageID, llmContext,
+			req.Resume.Snapshot, req.Resume.Prompt)
 	} else {
 		_, err = engine.Execute(ctx, sessionID, req.AssistantMessageID, agentQuery, llmContext, agentImageURLs)
 	}

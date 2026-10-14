@@ -53,17 +53,22 @@ func newSuspendFixture(t *testing.T, firstName string, parallel bool) *suspendFi
 		Content:      "checking first",
 		ToolCalls: []types.LLMToolCall{
 			{ID: "call-a", Type: "function", Function: types.FunctionCall{Name: firstName, Arguments: `{"q":"a"}`}},
-			{ID: "call-b", Type: "function", Function: types.FunctionCall{Name: suspendingToolName, Arguments: `{"path":"/etc"}`}},
+			{
+				ID: "call-b", Type: "function",
+				Function: types.FunctionCall{Name: suspendingToolName, Arguments: `{"path":"/etc"}`},
+			},
 			{ID: "call-c", Type: "function", Function: types.FunctionCall{Name: firstName + "_after", Arguments: `{}`}},
 		},
 		Done:         true,
 		FinishReason: "tool_calls",
 	}}}}}
 	f := &suspendFixture{
-		engine:  newTestEngine(t, model),
-		first:   newCountingTool(firstName),
-		blocked: &suspendingTool{BaseTool: tools.NewBaseTool(suspendingToolName, "", json.RawMessage(`{"type":"object"}`))},
-		after:   newCountingTool(firstName + "_after"),
+		engine: newTestEngine(t, model),
+		first:  newCountingTool(firstName),
+		blocked: &suspendingTool{
+			BaseTool: tools.NewBaseTool(suspendingToolName, "", json.RawMessage(`{"type":"object"}`)),
+		},
+		after: newCountingTool(firstName + "_after"),
 	}
 	f.engine.config.ParallelToolCalls = parallel
 	f.engine.toolRegistry = tools.NewToolRegistry()
