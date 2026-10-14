@@ -17,9 +17,9 @@ type DataResponse struct {
 type PageResponse struct {
 	Success  bool  `json:"success" example:"true"`
 	Data     any   `json:"data"`
-	Total    int64 `json:"total"`
-	Page     int   `json:"page"`
-	PageSize int   `json:"page_size"`
+	Total    int64 `json:"total" extensions:"x-agent"`
+	Page     int   `json:"page" extensions:"x-agent"`
+	PageSize int   `json:"page_size" extensions:"x-agent"`
 }
 
 // DataMessageResponse is DataResponse with a human-readable message.

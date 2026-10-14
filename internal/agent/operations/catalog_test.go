@@ -110,7 +110,7 @@ func TestBuildValidatesAndEscapes(t *testing.T) {
 	assert.ErrorContains(t, err, "unknown parameter")
 	_, err = op.Build(map[string]json.RawMessage{})
 	assert.ErrorContains(t, err, "is required")
-	_, err = op.Build(map[string]json.RawMessage{"knowledge_base_id": raw("kb-1"), "parse_status": raw("deleting")})
+	_, err = op.Build(map[string]json.RawMessage{"knowledge_base_id": raw("kb-1"), "parse_status": raw("archived")})
 	assert.ErrorContains(t, err, "must be one of")
 	_, err = op.Build(map[string]json.RawMessage{"knowledge_base_id": raw("kb-1"), "page_size": raw(500)})
 	assert.ErrorContains(t, err, "between")

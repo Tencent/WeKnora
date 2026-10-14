@@ -322,7 +322,7 @@ type KnowledgeBaseView struct {
 	VectorStoreStatus     string `json:"vector_store_status,omitempty"`
 	// MyPermission is the caller's role on a knowledge base shared from
 	// another workspace; GET /knowledge-bases/{id} sets it.
-	MyPermission string `json:"my_permission,omitempty" enums:"admin,editor,viewer"`
+	MyPermission string `json:"my_permission,omitempty" enums:"admin,editor,viewer" extensions:"x-agent"`
 }
 
 // HybridSearchResponse is the hybrid-search body. meta is set only when the
@@ -539,7 +539,7 @@ func (h *KnowledgeBaseHandler) validateAndGetKnowledgeBase(
 // @Tags         知识库
 // @Accept       json
 // @Produce      json
-// @Param        id         path      string  true   "知识库ID"
+// @Param        id         path      string  true   "知识库ID"  extensions(x-agent=knowledge_base_id)
 // @Param        agent_id   query     string  false  "共享智能体 ID（用于校验智能体是否有权访问该知识库）"
 // @Success      200  {object}  handler.DataResponse{data=handler.KnowledgeBaseView}  "知识库详情"
 // @Failure      400  {object}  errors.AppError  "请求参数错误"
@@ -547,6 +547,8 @@ func (h *KnowledgeBaseHandler) validateAndGetKnowledgeBase(
 // @Failure      404  {object}  errors.AppError  "知识库不存在"
 // @Security     Bearer
 // @Security     ApiKeyAuth
+// @x-agent      {"id":"knowledge_base.get","risk":"read"}
+// @x-agent-hint "Check which indexes are enabled (vector, keyword, Wiki, graph) and whether documents are processing."
 // @Router       /knowledge-bases/{id} [get]
 func (h *KnowledgeBaseHandler) GetKnowledgeBase(c *gin.Context) {
 	// Validate and get the knowledge base

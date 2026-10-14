@@ -246,7 +246,7 @@ type SubmittedTaskResponse struct {
 
 // TaskIDData is a task id payload.
 type TaskIDData struct {
-	TaskID string `json:"task_id"`
+	TaskID string `json:"task_id" extensions:"x-agent"`
 }
 
 // AllowedToolsWarningsDoc mirrors allowedToolsWarnings for Swagger.

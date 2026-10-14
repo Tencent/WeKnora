@@ -623,13 +623,14 @@ func (h *KnowledgeHandler) CreateManualKnowledge(c *gin.Context) {
 // @Tags         知识管理
 // @Accept       json
 // @Produce      json
-// @Param        id   path      string  true  "知识ID"
+// @Param        id   path      string  true  "知识ID"  extensions(x-agent=knowledge_id)
 // @Success      200  {object}  handler.DataResponse{data=types.Knowledge}  "知识详情"
 // @Failure      400  {object}  errors.AppError                             "请求参数错误"
 // @Failure      403  {object}  errors.AppError                             "无权访问所属知识库"
 // @Failure      404  {object}  errors.AppError                             "知识不存在"
 // @Security     Bearer
 // @Security     ApiKeyAuth
+// @x-agent      {"id":"knowledge.get","risk":"read"}
 // @Router       /knowledge/{id} [get]
 func (h *KnowledgeHandler) GetKnowledge(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -671,13 +672,15 @@ func (h *KnowledgeHandler) GetKnowledge(c *gin.Context) {
 // @Tags         知识管理
 // @Accept       json
 // @Produce      json
-// @Param        id        path   string  true   "知识ID"
+// @Param        id        path   string  true   "知识ID"  extensions(x-agent=knowledge_id)
 // @Param        attempt   query  int     false  "指定尝试号；省略或非正数=最新"  minimum(1)
 // @Success      200       {object}  handler.DataResponse{data=handler.KnowledgeSpansData}
 // @Failure      403       {object}  errors.AppError  "无权访问所属知识库"
 // @Failure      404       {object}  errors.AppError  "知识不存在"
 // @Security     Bearer
 // @Security     ApiKeyAuth
+// @x-agent      {"id":"knowledge.get_parse_progress","risk":"read"}
+// @x-agent-hint "Use when a document is stuck or failed: tells a stalled parse from a running one, names the failed stage."
 // @Router       /knowledge/{id}/spans [get]
 //
 // Always returns the canonical 5-stage timeline; missing stage rows are
@@ -778,29 +781,29 @@ func (h *KnowledgeHandler) GetKnowledgeSpans(c *gin.Context) {
 
 // KnowledgeSpansData is the data object of GET /knowledge/{id}/spans.
 type KnowledgeSpansData struct {
-	KnowledgeID string `json:"knowledge_id"`
+	KnowledgeID string `json:"knowledge_id" extensions:"x-agent"`
 	// Attempt is the attempt the trace describes; equals CurrentAttempt.
-	Attempt        int    `json:"attempt"`
-	LatestAttempt  int    `json:"latest_attempt"`
-	ParseStatus    string `json:"parse_status"`
+	Attempt        int    `json:"attempt" extensions:"x-agent"`
+	LatestAttempt  int    `json:"latest_attempt" extensions:"x-agent"`
+	ParseStatus    string `json:"parse_status" extensions:"x-agent"`
 	CurrentAttempt int    `json:"current_attempt"`
 	// CurrentStage is the stage running now, or the last one that ran.
-	CurrentStage string              `json:"current_stage"`
+	CurrentStage string              `json:"current_stage" extensions:"x-agent"`
 	Trace        *types.SpanTreeNode `json:"trace"`
 	// LastActivityAt is set while the parse is in flight.
-	LastActivityAt *time.Time `json:"last_activity_at,omitempty"`
+	LastActivityAt *time.Time `json:"last_activity_at,omitempty" extensions:"x-agent"`
 	// StallState is types.StallStateQueued or types.StallStateStalled when an
 	// in-flight parse has gone quiet.
-	StallState string              `json:"stall_state,omitempty"`
-	LastError  *KnowledgeSpanError `json:"last_error,omitempty"`
+	StallState string              `json:"stall_state,omitempty" extensions:"x-agent"`
+	LastError  *KnowledgeSpanError `json:"last_error,omitempty" extensions:"x-agent"`
 }
 
 // KnowledgeSpanError is the failure of a parse attempt. Name, ErrorCode and
 // ErrorMessage repeat Stage, Code and Message for older clients.
 type KnowledgeSpanError struct {
-	Stage        string     `json:"stage"`
-	Code         string     `json:"code"`
-	Message      string     `json:"message"`
+	Stage        string     `json:"stage" extensions:"x-agent=failed_stage"`
+	Code         string     `json:"code" extensions:"x-agent=error_code"`
+	Message      string     `json:"message" extensions:"x-agent=error_message"`
 	Name         string     `json:"name"`
 	ErrorCode    string     `json:"error_code"`
 	ErrorMessage string     `json:"error_message"`
@@ -1035,25 +1038,27 @@ func buildSpanTree(knowledgeID string, attempt int, rows []types.KnowledgeProces
 // @Accept       json
 // @Produce      json
 // @Description  不传 parse_status 时不返回删除中（deleting）的文档。
-// @Param        id         path      string  true   "知识库ID"
-// @Param        page       query     int     false  "页码"  minimum(1)  default(1)
-// @Param        page_size  query     int     false  "每页数量"  minimum(1)  maximum(1000)  default(20)
+// @Param        id         path      string  true   "知识库ID"  extensions(x-agent=knowledge_base_id)
+// @Param        page       query     int     false  "页码"  minimum(1)  default(1)  extensions(x-agent,x-agent-maximum=10000)
+// @Param        page_size  query     int     false  "每页数量"  minimum(1)  maximum(1000)  default(20)  extensions(x-agent,x-agent-maximum=50)
 // @Param        tag_ids       query     string  false  "标签ID筛选，逗号分隔（OR语义）"
-// @Param        keyword       query     string  false  "关键词搜索"
-// @Param        file_type     query     string  false  "文件类型筛选"
-// @Param parse_status query string false "状态" Enums(pending,processing,finalizing,completed,failed,cancelled,deleting)
+// @Param        keyword       query     string  false  "关键词搜索"  extensions(x-agent)
+// @Param        file_type     query     string  false  "文件类型筛选"  extensions(x-agent)
+// @Param parse_status query string false "状态" Enums(pending,processing,finalizing,completed,failed,cancelled,deleting)  extensions(x-agent)
 // @Param        source        query     string  false  "来源/渠道筛选 (web/api/feishu/notion/yuque/wechat/...，或 manual/url 按 type 过滤)"
 // @Param        start_time    query     string  false  "更新时间起点，RFC3339 格式"
 // @Param        end_time      query     string  false  "更新时间终点，RFC3339 格式"
 // @Param        folder_path      query     string  false  "文件夹路径筛选，空字符串表示知识库根目录；不传该参数则不按文件夹过滤"
 // @Param        folder_recursive query     bool    false  "为 true 时同时返回子文件夹内的文档"
-// @Param        sort_by      query     string  false  "排序字段" Enums(created_at,updated_at,file_name) default(created_at)
-// @Param        sort_order   query     string  false  "排序方向"  Enums(asc, desc)  default(desc)
+// @Param        sort_by      query     string  false  "排序字段" Enums(created_at,updated_at,file_name) default(created_at)  extensions(x-agent)
+// @Param        sort_order   query     string  false  "排序方向"  Enums(asc, desc)  default(desc)  extensions(x-agent)
 // @Success      200        {object}  handler.PageResponse{data=[]types.Knowledge}  "知识列表"
 // @Failure      400        {object}  errors.AppError                               "请求参数错误"
 // @Failure      403        {object}  errors.AppError                               "无权访问知识库"
 // @Security     Bearer
 // @Security     ApiKeyAuth
+// @x-agent      {"id":"knowledge.list","risk":"read"}
+// @x-agent-hint "Use parse_status=failed to find documents that failed to parse; meta.total counts every match."
 // @Router       /knowledge-bases/{id}/knowledge [get]
 func (h *KnowledgeHandler) ListKnowledge(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -1772,13 +1777,15 @@ func (h *KnowledgeHandler) requireKnowledgeInKB(
 // @Tags         知识管理
 // @Accept       json
 // @Produce      json
-// @Param        id   path      string  true  "知识ID"
+// @Param        id   path      string  true  "知识ID"  extensions(x-agent=knowledge_id)
 // @Success      200  {object}  handler.DataMessageResponse{data=handler.TaskIDData}  "任务已提交"
 // @Failure      400  {object}  errors.AppError  "请求参数错误或知识正在移动"
 // @Failure      403  {object}  errors.AppError  "需要编辑权限"
 // @Failure      404  {object}  errors.AppError  "知识不存在"
 // @Security     Bearer
 // @Security     ApiKeyAuth
+// @x-agent      {"id":"knowledge.delete","risk":"destructive","target":"knowledge.get","label":"title"}
+// @x-agent-hint "Removes the document with its chunks, embeddings and graph data. Cannot be undone."
 // @Router       /knowledge/{id} [delete]
 func (h *KnowledgeHandler) DeleteKnowledge(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -2505,7 +2512,7 @@ type ReparseKnowledgeRequest struct {
 // @Tags         知识管理
 // @Accept       json
 // @Produce      json
-// @Param        id    path  string                   true   "知识ID"
+// @Param        id    path  string                   true   "知识ID"  extensions(x-agent=knowledge_id)
 // @Param        body  body  ReparseKnowledgeRequest  false  "可选；不传则沿用上传时的处理配置"
 // @Success      200  {object}  handler.DataMessageResponse{data=types.Knowledge}  "重新解析任务已提交"
 // @Failure      400  {object}  errors.AppError  "请求参数错误"
@@ -2513,6 +2520,8 @@ type ReparseKnowledgeRequest struct {
 // @Failure      404  {object}  errors.AppError  "知识不存在"
 // @Security     Bearer
 // @Security     ApiKeyAuth
+// @x-agent      {"id":"knowledge.reparse","risk":"write","target":"knowledge.get","label":"title"}
+// @x-agent-hint "Runs in the background; follow it with knowledge.get_parse_progress. Search results change meanwhile."
 // @Router       /knowledge/{id}/reparse [post]
 func (h *KnowledgeHandler) ReparseKnowledge(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -2573,13 +2582,14 @@ func (h *KnowledgeHandler) ReparseKnowledge(c *gin.Context) {
 // @Tags         知识管理
 // @Accept       json
 // @Produce      json
-// @Param        id   path      string  true  "知识ID"
+// @Param        id   path      string  true  "知识ID"  extensions(x-agent=knowledge_id)
 // @Success      200  {object}  handler.DataMessageResponse{data=types.Knowledge}  "取消已提交"
 // @Failure      400  {object}  errors.AppError         "状态不支持取消"
 // @Failure      403  {object}  errors.AppError         "权限不足"
 // @Failure      404  {object}  errors.AppError         "知识不存在"
 // @Security     Bearer
 // @Security     ApiKeyAuth
+// @x-agent      {"id":"knowledge.cancel_parse","risk":"write","target":"knowledge.get","label":"title"}
 // @Router       /knowledge/{id}/cancel-parse [post]
 func (h *KnowledgeHandler) CancelKnowledgeParse(c *gin.Context) {
 	ctx := c.Request.Context()

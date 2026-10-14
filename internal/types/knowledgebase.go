@@ -58,15 +58,15 @@ const (
 // KnowledgeBase represents a knowledge base entity
 type KnowledgeBase struct {
 	// Unique identifier of the knowledge base
-	ID string `yaml:"id"                      json:"id"                      gorm:"type:varchar(36);primaryKey"`
+	ID string `yaml:"id"                      json:"id"                      gorm:"type:varchar(36);primaryKey" extensions:"x-agent=knowledge_base_id"`
 	// Name of the knowledge base
-	Name string `yaml:"name"                    json:"name"`
+	Name string `yaml:"name"                    json:"name" extensions:"x-agent"`
 	// Type of the knowledge base (document, faq, etc.)
-	Type string `yaml:"type"                    json:"type"                    gorm:"type:varchar(32);default:'document'"`
+	Type string `yaml:"type"                    json:"type"                    gorm:"type:varchar(32);default:'document'" extensions:"x-agent"`
 	// Whether this knowledge base is temporary (ephemeral) and should be hidden from UI
 	IsTemporary bool `yaml:"is_temporary"            json:"is_temporary"            gorm:"default:false"`
 	// Description of the knowledge base
-	Description string `yaml:"description"             json:"description"`
+	Description string `yaml:"description"             json:"description" extensions:"x-agent"`
 	// Workspace ID
 	TenantID uint64 `yaml:"tenant_id"               json:"tenant_id"`
 	// CreatorID records the user ID of whoever originally created the KB.
@@ -120,7 +120,7 @@ type KnowledgeBase struct {
 	WikiConfig *WikiConfig `yaml:"wiki_config"             json:"wiki_config"             gorm:"column:wiki_config;type:json"`
 	// IndexingStrategy controls which indexing pipelines are active for this knowledge base.
 	// Pipelines: vector search, keyword search, wiki generation, knowledge graph extraction.
-	IndexingStrategy IndexingStrategy `yaml:"indexing_strategy"       json:"indexing_strategy"       gorm:"column:indexing_strategy;type:json"`
+	IndexingStrategy IndexingStrategy `yaml:"indexing_strategy"       json:"indexing_strategy"       gorm:"column:indexing_strategy;type:json" extensions:"x-agent"`
 	// IsPinned and PinnedAt are computed per-caller from user_kb_pins
 	// (see migration 000050). They used to be stored on the row itself,
 	// which made pinning a workspace-wide ordering decision gated behind
@@ -136,17 +136,17 @@ type KnowledgeBase struct {
 	// Creation time of the knowledge base
 	CreatedAt time.Time `yaml:"created_at"              json:"created_at"`
 	// Last updated time of the knowledge base
-	UpdatedAt time.Time `yaml:"updated_at"              json:"updated_at"`
+	UpdatedAt time.Time `yaml:"updated_at"              json:"updated_at" extensions:"x-agent"`
 	// Deletion time of the knowledge base
 	DeletedAt gorm.DeletedAt `yaml:"deleted_at"              json:"deleted_at"              gorm:"index"`
 	// Knowledge count (not stored in database, calculated on query)
-	KnowledgeCount int64 `yaml:"knowledge_count"         json:"knowledge_count"         gorm:"-"`
+	KnowledgeCount int64 `yaml:"knowledge_count"         json:"knowledge_count"         gorm:"-" extensions:"x-agent"`
 	// Chunk count (not stored in database, calculated on query)
-	ChunkCount int64 `yaml:"chunk_count"             json:"chunk_count"             gorm:"-"`
+	ChunkCount int64 `yaml:"chunk_count"             json:"chunk_count"             gorm:"-" extensions:"x-agent"`
 	// IsProcessing indicates if there is a processing import task (for FAQ type knowledge bases)
-	IsProcessing bool `yaml:"is_processing"           json:"is_processing"           gorm:"-"`
+	IsProcessing bool `yaml:"is_processing"           json:"is_processing"           gorm:"-" extensions:"x-agent"`
 	// ProcessingCount indicates the number of knowledge items being processed (for document type knowledge bases)
-	ProcessingCount int64 `yaml:"processing_count"        json:"processing_count"        gorm:"-"`
+	ProcessingCount int64 `yaml:"processing_count"        json:"processing_count"        gorm:"-" extensions:"x-agent"`
 	// ShareCount indicates the number of organizations this knowledge base is shared with (not stored in database)
 	ShareCount int64 `yaml:"share_count"             json:"share_count"             gorm:"-"`
 	// CreatorName 是 CreatorID 对应用户的展示名（username / email 等），

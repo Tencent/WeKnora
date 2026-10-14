@@ -1,8 +1,9 @@
 // Package operations is the catalog of WeKnora HTTP API operations an agent
 // may run on behalf of the signed-in user.
 //
-// Every entry is declared here by hand: the catalog is the allow-list, and
-// nothing outside it is reachable. An operation names a registered route, its
+// The catalog is the allow-list: nothing outside it is reachable. Entries are
+// declared with x-agent annotations on the handlers and compiled from the
+// Swagger document (see FromSpec). An operation names a registered route, its
 // risk, the parameters the model may supply and the slice of the response the
 // model gets back. Execution goes through the real router (see Dispatcher), so
 // authentication, RBAC guards, KB sharing and audit behave exactly as they do
