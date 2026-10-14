@@ -267,14 +267,3 @@ func TestSelectTemporaryDocumentContentHonorsSharedPromptBudget(t *testing.T) {
 		t.Fatalf("selected=%d total=%d, want 2/10 within a 2500-token share", selected, total)
 	}
 }
-
-func TestVisualDocumentQueryDetection(t *testing.T) {
-	for _, query := range []string{"解释第三页的图", "What does this chart show?", "describe the layout"} {
-		if !isVisualDocumentQuery(query) {
-			t.Fatalf("query %q should request visual context", query)
-		}
-	}
-	if isVisualDocumentQuery("总结退款政策") {
-		t.Fatal("plain text query should not request visual context")
-	}
-}

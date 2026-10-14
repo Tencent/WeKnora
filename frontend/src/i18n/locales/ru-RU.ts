@@ -1556,6 +1556,13 @@ export default {
       kbMetricRag: 'RAG баз',
       kbMetricWiki: 'Wiki баз',
       statusInactive: '{count} отмеченных инструментов не смогут работать при текущей конфигурации',
+      searchConversations: 'Поиск по прошлым диалогам',
+      searchConversationsDesc: 'Ищет то, что обсуждалось в прежних диалогах этого пользователя',
+      groupStored: 'Сохранены, но здесь не предлагаются',
+      switchManagedDesc: 'Управляется другими настройками агента, а не этим списком, поэтому отметка здесь его не включает. Снимите отметку, чтобы удалить запись.',
+      unrecognizedDesc: 'Этого инструмента нет в текущей версии, агент не может его вызвать. Снимите отметку, чтобы удалить запись.',
+      keptUnknownWarning: 'Сохранено. Этих сохранённых инструментов нет в текущей версии; они оставлены, но агент не может их вызвать: {names}',
+      droppedWarning: 'Сохранено. Эти инструменты управляются другими настройками агента и удалены из списка инструментов: {names}',
       effectiveLabel: 'Итоговые активные инструменты',
       effectiveDesc: 'Рассчитано на основе текущей конфигурации — это набор инструментов, которые агент сможет вызывать после сохранения',
       effectiveEmpty: 'Нет доступных инструментов — агент перейдёт к простому чату с моделью'
@@ -1824,6 +1831,22 @@ export default {
       heading: 'Файлы навыка',
       script: 'скрипт',
       instructions: 'Инструкции навыка'
+    },
+    attachmentTarget: {
+      list: 'все вложения',
+      file: 'вложение',
+      images: 'изображения в {name}',
+      imagesUnnamed: 'изображения вложения',
+      image: 'изображение {n} в {name}',
+      imageUnnamed: 'изображение вложения {n}'
+    },
+    imageView: {
+      summary: 'Просмотрены изображения {numbers} из {total} в «{file}»',
+      single: 'Просмотрено изображение «{file}»',
+      descriptionsHeading: 'Описания от модели компьютерного зрения',
+      imageLabel: 'Изображение #{n}',
+      noDescription: 'Не удалось описать',
+      remaining: 'Ещё не просмотрено: {count}'
     },
     sandboxFiles: {
       found: 'Найдено файлов: {count}',
@@ -2399,6 +2422,9 @@ export default {
     "serverDocumentation": "Исходная документация сервера",
     "noServerDocumentation": "Ответ initialize этого MCP-сервера не содержит instructions / serverInfo.description (оба поля необязательны). Текст инструментов — в description ниже.",
     "policyHint": "Настройки включения и подтверждения сохраняются сразу и не сбрасываются при обновлении каталога.",
+    "columnTool": "Инструмент",
+    "columnEnabled": "Вкл.",
+    "columnApproval": "Подтв.",
     "failed": "Не удалось загрузить каталог инструментов",
     "setupProgress": "Шаги настройки MCP",
     "connection": "Подключение",
@@ -2441,6 +2467,9 @@ export default {
     authTypeApiKey: 'API Key / Token',
     authTypeOAuth: 'OAuth 2.0 (авторизация при первом подключении)',
     oauthScopes: 'Области (необязательно, через пробел)',
+    oauthClientId: 'Client ID (необязательно)',
+    oauthClientIdDesc: 'Клиент, заранее зарегистрированный на сервере авторизации. Оставьте пустым, чтобы зарегистрировать клиента автоматически (динамическая регистрация). При смене Client ID обновите и Client Secret.',
+    oauthClientSecret: 'Client Secret (необязательно)',
     oauthAuthorization: 'Статус авторизации',
     oauthAuthorized: 'Авторизовано',
     oauthRefreshable: 'Срок действия токена истёк; он будет автоматически обновлён при следующем использовании',
@@ -3969,6 +3998,7 @@ export default {
     truncatedHint: 'Ответ обрезан на лимите вывода модели за один ответ. Выше — то, что было создано до обрыва.',
     rewind: {
       tooltip: 'Откатить сюда',
+      confirmTitle: 'Откатить сюда?',
       confirmBody: 'Сообщения после этой точки будут удалены. Откат от вопроса также убирает сам вопрос и возвращает его во ввод. Рабочая область откатится, если есть контрольная точка. Отменить действие нельзя.',
       confirmButton: 'Откатить',
       cancelButton: 'Отмена',
@@ -5312,7 +5342,13 @@ export default {
     mcpStale: 'Нужна повторная синхронизация',
     belongsToKb: 'База знаний: ',
     belongsToOrg: 'Пространство: ',
-    noCompatibleKbForAgent: 'Инструменты текущего агента не соответствуют возможностям ни одной базы знаний в области видимости — нечего упомянуть.'
+    noCompatibleKbForAgent: 'Инструменты текущего агента не соответствуют возможностям ни одной базы знаний в области видимости — нечего упомянуть.',
+    tag: 'Теги',
+    searchPlaceholder: 'Поиск баз, файлов, навыков…',
+    searchInGroup: 'Поиск в разделе «{group}»…',
+    typeToSearch: "Продолжайте ввод после {'@'} для поиска…",
+    viewAll: 'Показать все',
+    back: 'Назад'
   },
   common: {
     add: 'Добавить',
@@ -6233,6 +6269,7 @@ export default {
       skillTranscriptLive: 'Ход установки',
       skillTranscriptLiveHint: 'Идёт установка — нажмите, чтобы смотреть',
       skillTranscriptTitle: 'Ход установки',
+      skillTranscriptPrompt: 'Инструкции по установке',
       skillTranscriptHide: 'Hide install run',
       skillGuidance: {
         placeholder: 'Добавьте указания по установке: нужные CLI, документацию или ограничения среды',
@@ -6351,6 +6388,7 @@ export default {
       installedCount: 'Установлен в {count} песочницах',
       installPanelGroup: 'Установлено',
       installPanelAvailable: 'Не установлено',
+      installAction: 'Установить',
       viewInstallProgress: 'Смотреть ход',
       manageOnSandbox: 'Управление в песочнице «{name}»',
       manageDrawerDesc: 'В песочнице «{name}» можно включать навык, править переменные и удалять установку.',
@@ -7807,6 +7845,7 @@ export default {
   },
   menu: {
     sessionInProgress: 'Диалог выполняется',
+    sessionUnread: 'Новый ответ',
     knowledgeBase: 'База знаний',
     agents: 'Агенты',
     artifacts: 'Артефакты',

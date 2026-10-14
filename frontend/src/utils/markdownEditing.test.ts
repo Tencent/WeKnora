@@ -20,6 +20,35 @@ test('Enter on an empty item ends the list instead of stacking markers', () => {
   assert.deepEqual(patch, { value: '- first\n', start: 8, end: 8 })
 })
 
+for (const { value, at, expected } of [
+  { value: '- hello', at: 2, expected: '- \n- hello' },
+  { value: '* hello', at: 2, expected: '* \n* hello' },
+  { value: '1. hello', at: 3, expected: '1. \n2. hello' },
+  { value: '- [x] hello', at: 6, expected: '- [x] \n- [ ] hello' },
+  { value: '  - hello', at: 4, expected: '  - \n  - hello' },
+  { value: 'before\n- hello\nafter', at: 9, expected: 'before\n- \n- hello\nafter' },
+]) {
+  test(`Enter before existing list content preserves the marker: ${JSON.stringify(value)}`, () => {
+    const patch = continueListOnEnter(caret(value, at))
+    assert.ok(patch)
+    assert.equal(patch.value, expected)
+    assert.equal(patch.start, expected.indexOf('hello'))
+    assert.equal(patch.end, patch.start)
+  })
+}
+
+test('Enter in the middle of list content splits the item', () => {
+  assert.deepEqual(continueListOnEnter(caret('- hello world', 7)), {
+    value: '- hello\n-  world', start: 10, end: 10,
+  })
+})
+
+test('an empty item with trailing whitespace still exits the list', () => {
+  assert.deepEqual(continueListOnEnter(caret('- first\n-   ', 10)), {
+    value: '- first\n  ', start: 8, end: 8,
+  })
+})
+
 test('Enter outside a list and over a selection is left to the browser', () => {
   assert.equal(continueListOnEnter(caret('plain text', 10)), null)
   assert.equal(continueListOnEnter({ value: '- first', start: 2, end: 7 }), null)

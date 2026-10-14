@@ -1556,6 +1556,13 @@ export default {
       kbMetricRag: 'RAG 지식베이스',
       kbMetricWiki: 'Wiki 지식베이스',
       statusInactive: '{count}개의 체크된 도구가 현재 설정에서는 작동하지 않습니다',
+      searchConversations: '이전 대화 검색',
+      searchConversationsDesc: '사용자 본인의 이전 대화에서 나눴던 내용을 찾습니다',
+      groupStored: '저장되었지만 여기서 제공하지 않는 도구',
+      switchManagedDesc: '이 목록이 아니라 에이전트의 다른 설정으로 제어되는 도구라, 여기서 체크해도 켜지지 않습니다. 체크를 해제하면 삭제됩니다.',
+      unrecognizedDesc: '이 버전에 없는 도구라 에이전트가 호출할 수 없습니다. 체크를 해제하면 삭제됩니다.',
+      keptUnknownWarning: '저장했습니다. 다음 도구는 이 버전에 없어 그대로 남겨 두었지만, 에이전트가 호출할 수 없습니다: {names}',
+      droppedWarning: '저장했습니다. 다음 도구는 에이전트의 다른 설정으로 제어되므로 도구 목록에서 뺐습니다: {names}',
       effectiveLabel: '최종 활성 도구',
       effectiveDesc: '현재 설정 기준 저장 시 에이전트가 실제 호출할 수 있는 도구 집합',
       effectiveEmpty: '사용 가능한 도구가 없어 일반 모델 대화로 동작합니다'
@@ -1824,6 +1831,22 @@ export default {
       heading: '스킬 파일',
       script: '스크립트',
       instructions: '스킬 안내'
+    },
+    attachmentTarget: {
+      list: '모든 첨부 파일',
+      file: '첨부 파일',
+      images: '{name}의 이미지',
+      imagesUnnamed: '첨부 파일 이미지',
+      image: '{name}의 이미지 {n}',
+      imageUnnamed: '첨부 파일 이미지 {n}'
+    },
+    imageView: {
+      summary: '"{file}"의 이미지 {numbers}을(를) 확인했습니다 (총 {total}장)',
+      single: '이미지 "{file}"을(를) 확인했습니다',
+      descriptionsHeading: '비전 모델의 이미지 설명',
+      imageLabel: '이미지 #{n}',
+      noDescription: '설명을 생성하지 못했습니다',
+      remaining: '확인하지 않은 이미지 {count}장 남음'
     },
     sandboxFiles: {
       found: '파일 {count}개 발견',
@@ -2399,6 +2422,9 @@ export default {
     "serverDocumentation": "서버 원본 설명",
     "noServerDocumentation": "이 MCP 서버의 initialize 응답에 instructions / serverInfo.description이 없습니다(둘 다 선택 필드). 도구 설명은 아래 각 도구의 description에 있습니다.",
     "policyHint": "도구 활성화 및 승인 설정은 즉시 저장되며 목록을 새로 고쳐도 유지됩니다.",
+    "columnTool": "도구",
+    "columnEnabled": "활성화",
+    "columnApproval": "승인",
     "failed": "도구 목록을 불러오지 못했습니다",
     "setupProgress": "MCP 설정 단계",
     "connection": "연결 설정",
@@ -2441,6 +2467,9 @@ export default {
     authTypeApiKey: 'API Key / Token',
     authTypeOAuth: 'OAuth 2.0(최초 연결 시 인증)',
     oauthScopes: '스코프(선택, 공백으로 구분)',
+    oauthClientId: '클라이언트 ID(선택)',
+    oauthClientIdDesc: '인가 서버에 미리 등록한 클라이언트입니다. 비워 두면 동적 클라이언트 등록으로 자동 등록합니다. 클라이언트 ID를 바꾸면 시크릿도 함께 바꿔 주세요.',
+    oauthClientSecret: '클라이언트 시크릿(선택)',
     oauthAuthorization: '인증 상태',
     oauthAuthorized: '인증됨',
     oauthRefreshable: '토큰이 만료되었습니다. 다음 사용 시 자동으로 갱신됩니다',
@@ -3969,6 +3998,7 @@ export default {
     truncatedHint: '모델의 응답당 출력 한도에서 답변이 잘렸습니다. 위 내용은 잘리기 전까지 생성된 부분입니다.',
     rewind: {
       tooltip: '여기로 되돌리기',
+      confirmTitle: '여기로 되돌릴까요?',
       confirmBody: '이 메시지 이후의 대화를 삭제합니다. 질문에서 되돌리면 해당 질문도 지워지고 입력창에 다시 채워집니다. 체크포인트가 있으면 작업 영역도 되돌립니다. 이 작업은 취소할 수 없습니다.',
       confirmButton: '되돌리기',
       cancelButton: '취소',
@@ -5312,7 +5342,13 @@ export default {
     mcpStale: '다시 동기화 필요',
     belongsToKb: '지식베이스: ',
     belongsToOrg: '스페이스: ',
-    noCompatibleKbForAgent: '현재 에이전트의 도구와 범위 내 지식베이스의 기능이 일치하지 않아 참조할 수 있는 지식베이스가 없습니다.'
+    noCompatibleKbForAgent: '현재 에이전트의 도구와 범위 내 지식베이스의 기능이 일치하지 않아 참조할 수 있는 지식베이스가 없습니다.',
+    tag: '태그',
+    searchPlaceholder: '지식베이스, 파일 등 검색',
+    searchInGroup: '{group}에서 검색…',
+    typeToSearch: "{'@'} 뒤에 계속 입력하여 검색…",
+    viewAll: '모두 보기',
+    back: '뒤로'
   },
   common: {
     add: '추가',
@@ -6233,6 +6269,7 @@ export default {
       skillTranscriptLive: '설치 과정',
       skillTranscriptLiveHint: '설치 중입니다. 클릭해서 과정을 보세요',
       skillTranscriptTitle: '설치 과정',
+      skillTranscriptPrompt: '설치 지시',
       skillTranscriptHide: 'Hide install run',
       skillGuidance: {
         placeholder: '필요한 CLI, 설치 문서, 환경 제약 등 설치 안내를 추가하세요',
@@ -6351,6 +6388,7 @@ export default {
       installedCount: '{count}개 샌드박스에 설치됨',
       installPanelGroup: '설치됨',
       installPanelAvailable: '미설치',
+      installAction: '설치',
       viewInstallProgress: '진행 상황',
       manageOnSandbox: '「{name}」 샌드박스에서 관리',
       manageDrawerDesc: '샌드박스 「{name}」에서 사용 여부, 변수, 제거를 관리합니다.',
@@ -7807,6 +7845,7 @@ export default {
   },
   menu: {
     sessionInProgress: '대화 진행 중',
+    sessionUnread: '새 답변',
     knowledgeBase: '지식베이스',
     agents: '에이전트',
     artifacts: '산출물',

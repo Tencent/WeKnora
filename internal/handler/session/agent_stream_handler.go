@@ -911,6 +911,10 @@ func (h *AgentStreamHandler) handleComplete(ctx context.Context, evt event.Event
 	if turnUsage != nil {
 		completeData["usage"] = turnUsage
 	}
+	// The chat model that produced the usage, so a consumer can price it.
+	if data.ModelID != "" {
+		completeData["model_id"] = data.ModelID
+	}
 	h.completionEvent = &interfaces.StreamEvent{
 		ID:        evt.ID,
 		Type:      types.ResponseTypeComplete,
