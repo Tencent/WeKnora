@@ -13,10 +13,11 @@ linters:
       # swag embeds OpenAPI as single-line JSON strings; line-length is not meaningful.
       - docs/docs\.go$
     rules:
-      # swag annotations cannot wrap, so a parameter with its enum list or a
-      # composed response type has to stay on one line.
+      # swag annotations and struct tags cannot wrap, so a parameter with its
+      # enum list, a composed response type or a field's swag tags have to
+      # stay on one line.
       - linters: [lll]
-        source: '^\s*// @(Param|Success|Failure|x-)'
+        source: '^\s*// @(Param|Success|Failure|x-)|(swaggertype|extensions):"'
 formatters:
   enable:
     - gofmt
