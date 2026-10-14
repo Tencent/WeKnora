@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -159,11 +160,37 @@ func TestSearchKnowledge_OmittedOverridesKeepTenantConfig(t *testing.T) {
 	assert.Equal(t, types.KnowledgeSearchOptions{}, *svc.lastOpts)
 }
 
+func TestSearchKnowledge_EmbeddingTopK(t *testing.T) {
+	for _, depth := range []int{0, 1, 100, 200} {
+		t.Run(fmt.Sprint(depth), func(t *testing.T) {
+			svc := &stubSearchSessionService{}
+			body := fmt.Sprintf(
+				`{"query":"q","knowledge_base_ids":["kb-1"],"embedding_top_k":%d,"match_count":10}`, depth)
+			w := performKnowledgeSearch(t, svc, body)
+			require.Equal(t, http.StatusOK, w.Code, "body=%s", w.Body.String())
+			require.NotNil(t, svc.lastOpts.EmbeddingTopK)
+			assert.Equal(t, depth, *svc.lastOpts.EmbeddingTopK)
+			assert.Equal(t, 10, svc.lastOpts.MatchCount)
+		})
+	}
+
+	t.Run("null keeps tenant config", func(t *testing.T) {
+		svc := &stubSearchSessionService{}
+		w := performKnowledgeSearch(t, svc, `{"query":"q","knowledge_base_ids":["kb-1"],"embedding_top_k":null}`)
+		require.Equal(t, http.StatusOK, w.Code, "body=%s", w.Body.String())
+		assert.Nil(t, svc.lastOpts.EmbeddingTopK)
+	})
+}
+
 func TestSearchKnowledge_RejectsInvalidOverrides(t *testing.T) {
 	for name, extra := range map[string]string{
-		"negative match_count":  `"match_count":-1`,
-		"both recall paths off": `"disable_keywords_match":true,"disable_vector_match":true`,
-		"negative rerank top_k": `"rerank":{"top_k":-2}`,
+		"negative embedding_top_k":   `"embedding_top_k":-1`,
+		"excessive embedding_top_k":  `"embedding_top_k":201`,
+		"fractional embedding_top_k": `"embedding_top_k":1.5`,
+		"string embedding_top_k":     `"embedding_top_k":"100"`,
+		"negative match_count":       `"match_count":-1`,
+		"both recall paths off":      `"disable_keywords_match":true,"disable_vector_match":true`,
+		"negative rerank top_k":      `"rerank":{"top_k":-2}`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			svc := &stubSearchSessionService{}
