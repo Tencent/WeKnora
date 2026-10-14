@@ -160,6 +160,7 @@
                             <t-icon name="chevron-down" size="18px" />
                         </div>
                     </transition>
+                    <PendingPromptDock :embedded-mode="embeddedMode" />
                     <InputField ref="inputFieldRef" :auto-focus="focusComposerOnMount" :compact="!embeddedMode"
                         @send-msg="(query, modelId, mentionedItems, imageFiles, attachmentFiles, options) => sendMsg(query, modelId, mentionedItems, imageFiles, attachmentFiles, options)"
                         @steer-msg="(query, mentionedItems, delivery) => handleSteerMsg(query, mentionedItems, delivery)"
@@ -245,6 +246,8 @@ import { useSessionActivityStore } from '@/stores/sessionActivity';
 import { provideChatSandboxPanel } from '@/composables/useChatSandboxPanel';
 import SandboxSidePanel from '@/components/chat/SandboxSidePanel.vue';
 import BrowserTaskPreview from './components/BrowserTaskPreview.vue';
+import PendingPromptDock from './components/PendingPromptDock.vue';
+import { providePromptDock } from '@/composables/usePromptDock';
 import { collectSessionArtifacts, markSessionArtifactDeleted } from '@/utils/sessionArtifacts';
 import { isCollectingSkillArtifacts } from '@/utils/skillArtifacts';
 const referencesDrawer = provideChatReferencesDrawer();
@@ -330,6 +333,7 @@ const inputFieldRef = ref();
 const created_at = ref('');
 const limit = ref(20);
 const messagesList = reactive([]);
+providePromptDock(messagesList);
 
 function forkAffordanceOf(messageId) {
     if (!messageId) return { canFork: false }
