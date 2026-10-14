@@ -144,9 +144,7 @@ func (s *WeChatAuthService) CreateAttempt(
 		return nil, err
 	}
 	now := time.Now().UTC()
-	// Request-driven cleanup also works in Lite without a background worker.
-	if err := s.db.WithContext(ctx).Where("expires_at <= ?", now).
-		Delete(&types.WeChatLoginAttempt{}).Error; err != nil {
+	if err := s.purgeExpiredAttempts(ctx, now); err != nil {
 		return nil, err
 	}
 	a := types.WeChatLoginAttempt{
@@ -173,6 +171,13 @@ func (s *WeChatAuthService) CreateAttempt(
 		Scope:       scope,
 		ExpiresAt:   a.ExpiresAt,
 	}, nil
+}
+
+// purgeExpiredAttempts is request-driven so it also works in Lite without a
+// background worker. Completion tickets hold session tokens, so abandoned
+// ones must not outlive their expiry until the next login attempt.
+func (s *WeChatAuthService) purgeExpiredAttempts(ctx context.Context, now time.Time) error {
+	return s.db.WithContext(ctx).Where("expires_at <= ?", now).Delete(&types.WeChatLoginAttempt{}).Error
 }
 
 // WebAuthorizationURL builds the official website login URL for a server-issued attempt.
@@ -215,9 +220,13 @@ func (s *WeChatAuthService) StoreWebResult(
 	if err != nil {
 		return "", err
 	}
+	now := time.Now().UTC()
+	if err := s.purgeExpiredAttempts(ctx, now); err != nil {
+		return "", err
+	}
 	ticket := types.WeChatLoginAttempt{
 		ID: uuid.NewString(), Client: "web_result", AppID: app.AppID,
-		Challenge: WeChatChallenge(verifier), ExpiresAt: time.Now().UTC().Add(time.Minute), Result: string(b),
+		Challenge: WeChatChallenge(verifier), ExpiresAt: now.Add(time.Minute), Result: string(b),
 	}
 	if err := s.db.WithContext(ctx).Create(&ticket).Error; err != nil {
 		return "", err
@@ -349,7 +358,7 @@ func (s *WeChatAuthService) Exchange(
 		var response *types.LoginResponse
 		var isNew bool
 		err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-			if err := lockWeChatSettings(tx); err != nil {
+			if err := lockWeChatSettings(tx, false); err != nil {
 				return ErrWeChatUnavailable
 			}
 			scoped := *s

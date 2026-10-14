@@ -119,9 +119,34 @@ var publicAuthLimiter = newIPRateLimiter(
 // through the project's AppError type so it flows through the same
 // error middleware as the rest of the auth surface.
 func PublicAuthRateLimit() gin.HandlerFunc {
+	return rateLimitByIP(publicAuthLimiter, "")
+}
+
+// weChatAuthRateLimitMax covers the three requests of one website login
+// (start, callback, complete) for many users behind a shared NAT egress IP.
+const weChatAuthRateLimitMax = 120
+
+// weChatAuthLimiter is separate from the share-link budget so sign-ins and
+// invitation lookups cannot starve each other.
+var weChatAuthLimiter = newIPRateLimiter(publicAuthRateLimitWindow, weChatAuthRateLimitMax)
+
+// WeChatAuthRateLimit rate-limits WeChat sign-in endpoints by client IP.
+// A non-empty redirect is used for top-level browser navigations, which
+// cannot render a JSON error.
+func WeChatAuthRateLimit(redirect string) gin.HandlerFunc {
+	return rateLimitByIP(weChatAuthLimiter, redirect)
+}
+
+func rateLimitByIP(limiter *ipRateLimiter, redirect string) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		ip := c.ClientIP()
-		if !publicAuthLimiter.allow(ip) {
+		if !limiter.allow(ip) {
+			if redirect != "" {
+				c.Header("Cache-Control", "no-store")
+				c.Redirect(http.StatusFound, redirect)
+				c.Abort()
+				return
+			}
 			c.Error(&apperrors.AppError{
 				Code:     apperrors.ErrTooManyRequests,
 				Message:  "too many requests; please retry shortly",

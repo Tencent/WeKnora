@@ -127,6 +127,12 @@ const persistOIDCLoginResponse = async (response: any) => {
   router.replace(authStore.hasValidTenant ? '/platform/knowledge-bases' : '/onboarding/workspace')
 }
 
+const WECHAT_ERROR_MESSAGE_KEYS: Record<string, string> = {
+  registration_disabled: 'auth.wechatRegistrationDisabled',
+  rate_limited: 'auth.wechatRateLimited',
+  invalid_attempt: 'auth.wechatAttemptExpired',
+}
+
 const handleGlobalOIDCCallback = async () => {
   const hash = window.location.hash.startsWith('#') ? window.location.hash.slice(1) : ''
   if (!hash) return
@@ -134,25 +140,32 @@ const handleGlobalOIDCCallback = async () => {
   const params = new URLSearchParams(hash)
   const isWeChat = params.has('wechat_ticket') || params.has('wechat_error')
   const loginFailed = isWeChat ? t('auth.wechatLoginFailed') : t('auth.oidcLoginFailed')
-  const oidcError = params.get('wechat_error') || params.get('oidc_error')
-  const oidcErrorDescription = isWeChat ? '' : params.get('oidc_error_description')
+  const wechatError = params.get('wechat_error')
+  const oidcError = wechatError || params.get('oidc_error')
+  const oidcErrorDescription = isWeChat
+    ? (wechatError && WECHAT_ERROR_MESSAGE_KEYS[wechatError] ? t(WECHAT_ERROR_MESSAGE_KEYS[wechatError]) : '')
+    : params.get('oidc_error_description')
   const wechatTicket = params.get('wechat_ticket')
   const oidcResult = params.get('oidc_result')
 
   if (!oidcError && !oidcResult && !wechatTicket) return
 
-  if (oidcError) {
+  const failLogin = async (message: string) => {
+    // A failed external login must not leave its invitation for an unrelated later session.
+    sessionStorage.removeItem('weknora_pending_invite_token')
     clearOIDCCallbackState('/login')
     await router.replace('/login')
-    MessagePlugin.error(oidcErrorDescription || loginFailed)
+    MessagePlugin.error(message)
+  }
+
+  if (oidcError) {
+    await failLogin(oidcErrorDescription || loginFailed)
     return
   }
 
   try {
     if (!oidcResult && !wechatTicket) {
-      clearOIDCCallbackState('/login')
-      await router.replace('/login')
-      MessagePlugin.error(loginFailed)
+      await failLogin(loginFailed)
       return
     }
 
@@ -168,15 +181,11 @@ const handleGlobalOIDCCallback = async () => {
       return
     }
 
-    clearOIDCCallbackState('/login')
-    await router.replace('/login')
-    MessagePlugin.error(response.message || loginFailed)
+    await failLogin(response.message || loginFailed)
   } catch (error: any) {
     console.error('External login callback handling failed')
     authStore.logout()
-    clearOIDCCallbackState('/login')
-    await router.replace('/login')
-    MessagePlugin.error(error.message || loginFailed)
+    await failLogin(error.message || loginFailed)
   }
 }
 

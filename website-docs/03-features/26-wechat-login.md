@@ -53,7 +53,7 @@ Apple 审核依据：[4.8 登录服务](https://developer.apple.com/cn/app-store
 - AppSecret 为只写字段，读取接口只返回 `secret_configured`。输入框留空表示保留当前有效密钥；输入新值表示替换；勾选清除才会显式清空。更换 AppID 时必须同时替换或清除对应密钥，避免把旧应用的密钥带给新应用。
 - 数据库密钥使用 AES-GCM 加密。保存非空密钥前必须在所有实例设置相同且稳定的 **32 字节 `SYSTEM_AES_KEY`**，并妥善备份。此加密主密钥仍由部署环境管理，不放进系统设置。没有主密钥时仍可使用环境变量接入；不能把非空凭据保存为数据库明文。主密钥丢失或变更后需恢复原密钥，或重新输入两端凭据。
 - 配置读取或解密失败时停止微信登录，不回退到可能已过时的环境变量。配置变更会使此前配置发起的、尚未完成的授权尝试失效，用户需重新发起授权；已经签发的 WeKnora 会话沿用原有会话规则。
-- 已存在 UnionID 身份关联后，不允许更改开放平台账号标识。修改 AppID 也可能影响原有身份匹配，应先确认应用归属和账号迁移方案。
+- 已存在 UnionID 身份关联后，不允许更改开放平台账号标识。某个 AppID 已有用户登录过后也不允许再更换，否则这些用户再次登录时会被识别为新用户并另开账号；确需迁移应用时应先确认应用归属和账号迁移方案。
 - 多个管理员同时编辑时，过时版本的保存返回 `409`；重新加载已保存配置后再编辑。保存动作记录 `system.wechat_auth_updated` 审计事件，审计不包含密钥。
 
 管理接口为 `GET /api/v1/system/admin/auth/wechat` 和 `PUT /api/v1/system/admin/auth/wechat`。GET 返回 `source`（`deployment` / `database`）、`version`、`platform_id`、`encryption_ready`，以及 `web` / `mobile` 配置和密钥存在标记。PUT 必须提交 GET 得到的 `version` 和完整的 `web` / `mobile` 对象；其中 `app_secret` 不传或传 null 为保留，传空字符串为清除。示例：
@@ -166,7 +166,7 @@ Content-Type: application/json
 
 成功响应包含 `success`、`access_token`、`refresh_token`、`user`、`active_tenant`、`memberships`、`is_new_user`。`active_tenant` 可为 null；客户端随后调用 `/auth/me` 获取最新身份和权限。请求不能选择 AppID、AppSecret、内部用户 ID、空间或身份标识。
 
-登录尝试存储于数据库，一次性消费，适用于多个后端实例。过期、错误验证器、错误 state、Web / mobile 入口混用会被拒绝。对外接口共享现有 IP 限流器（单进程 30 次/分钟；多副本部署应在网关补充统一限流）。
+登录尝试存储于数据库，一次性消费，适用于多个后端实例。过期、错误验证器、错误 state、Web / mobile 入口混用会被拒绝。对外接口使用独立于邀请链接的 IP 限流器（单进程 120 次/分钟，一次网站登录消耗 3 次；多副本部署应在网关补充统一限流）。网站入口和回调被限流时跳回登录页并提示稍后重试，而不是返回 JSON 错误。
 
 交换请求开始调用微信前就消费尝试；不缓存可重放的登录结果。上游失败、客户端丢失响应或登录尝试过期时，应新建尝试并重新授权，不自动重放旧 code。
 

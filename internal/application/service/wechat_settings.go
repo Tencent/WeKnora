@@ -17,12 +17,19 @@ import (
 // ErrWeChatSettingsConflict prevents stale administrator forms overwriting credentials.
 var ErrWeChatSettingsConflict = errors.New("WeChat settings changed; reload before saving")
 
+const weChatSettingsLockKey = int64(1464550209)
+
 // Serialize configuration changes with identity provisioning, including the
 // first override where there is no singleton row to lock yet. SQLite's no-op
-// UPDATE takes the writer lock; PostgreSQL uses a transaction-scoped advisory lock.
-func lockWeChatSettings(tx *gorm.DB) error {
+// UPDATE takes the writer lock; PostgreSQL uses a transaction-scoped advisory
+// lock. Logins take it shared so they exclude configuration changes but not
+// each other; only SaveSettings takes it exclusively.
+func lockWeChatSettings(tx *gorm.DB, exclusive bool) error {
 	if tx.Name() == "postgres" {
-		return tx.Exec("SELECT pg_advisory_xact_lock(?)", int64(1464550209)).Error
+		if exclusive {
+			return tx.Exec("SELECT pg_advisory_xact_lock(?)", weChatSettingsLockKey).Error
+		}
+		return tx.Exec("SELECT pg_advisory_xact_lock_shared(?)", weChatSettingsLockKey).Error
 	}
 	return tx.Exec("UPDATE we_chat_auth_settings SET version = version WHERE id = 1").Error
 }
@@ -117,7 +124,7 @@ func (s *WeChatAuthService) SaveSettings(
 ) (*types.WeChatSettingsResponse, error) {
 	var response *types.WeChatSettingsResponse
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := lockWeChatSettings(tx); err != nil {
+		if err := lockWeChatSettings(tx, true); err != nil {
 			return ErrWeChatUnavailable
 		}
 		scoped := *s
@@ -187,6 +194,22 @@ func (s *WeChatAuthService) saveSettings(
 	}
 	if cfg.Mobile.CallbackURL != "" {
 		return nil, fmt.Errorf("mobile callback is configured in OpenSDK, not the backend")
+	}
+	// OpenID identities are namespaced by AppID. Replacing an AppID that
+	// already has linked users would provision duplicate accounts for them.
+	for _, pair := range [][2]string{{old.Web.AppID, cfg.Web.AppID}, {old.Mobile.AppID, cfg.Mobile.AppID}} {
+		if pair[0] == "" || pair[0] == pair[1] {
+			continue
+		}
+		var count int64
+		if err := s.db.WithContext(ctx).Model(&types.ExternalIdentity{}).
+			Where("provider = ? AND namespace = ?", "wechat_openid", pair[0]).
+			Count(&count).Error; err != nil {
+			return nil, ErrWeChatUnavailable
+		}
+		if count > 0 {
+			return nil, fmt.Errorf("AppID cannot change after WeChat users have signed in with it")
+		}
 	}
 	if cfg.PlatformID != old.PlatformID {
 		var count int64

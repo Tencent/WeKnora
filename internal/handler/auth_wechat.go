@@ -147,8 +147,11 @@ func (h *WeChatAuthHandler) Callback(c *gin.Context) {
 	})
 	if err != nil {
 		code := "login_failed"
-		if errors.Is(err, service.ErrWeChatRegistration) {
+		switch {
+		case errors.Is(err, service.ErrWeChatRegistration):
 			code = "registration_disabled"
+		case errors.Is(err, service.ErrWeChatAttempt):
+			code = "invalid_attempt"
 		}
 		c.Redirect(http.StatusFound, "/#wechat_error="+code)
 		return

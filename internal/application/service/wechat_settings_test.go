@@ -157,6 +157,19 @@ func TestWeChatSettingsInvalidatesPendingAttemptsAndProtectsIdentityNamespace(t 
 	req.PlatformID = "another-platform"
 	_, err = s.SaveSettings(ctx, req)
 	require.ErrorContains(t, err, "namespace cannot change")
+	// Replacing a used AppID would orphan its OpenID identities and silently
+	// provision duplicate accounts for returning users.
+	saved, err = s.GetSettings(ctx)
+	require.NoError(t, err)
+	req = weChatSettingsRequest(saved)
+	replacement := "replacement-secret"
+	req.Web.AppID, req.Web.AppSecret = "other-web-app", &replacement
+	_, err = s.SaveSettings(ctx, req)
+	require.ErrorContains(t, err, "AppID cannot change")
+	req = weChatSettingsRequest(saved)
+	req.Mobile.AppID, req.Mobile.AppSecret = "other-mobile-app", &replacement
+	_, err = s.SaveSettings(ctx, req)
+	require.NoError(t, err, "an AppID without linked users can still be replaced")
 }
 
 func TestWeChatSettingsChangeDuringProviderExchangeDoesNotProvision(t *testing.T) {

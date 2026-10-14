@@ -363,10 +363,12 @@ func RegisterWeChatAuthRoutes(r *gin.RouterGroup, h *handler.WeChatAuthHandler) 
 	if h == nil {
 		return
 	}
-	g := r.Group("/auth/wechat", middleware.PublicAuthRateLimit())
-	g.POST("/attempts", h.CreateAttempt)
-	g.POST("/exchange", h.Exchange)
-	g.POST("/complete", h.Complete)
-	g.GET("/start", h.Start)
-	g.GET("/callback", h.Callback)
+	api := middleware.WeChatAuthRateLimit("")
+	page := middleware.WeChatAuthRateLimit("/#wechat_error=rate_limited")
+	g := r.Group("/auth/wechat")
+	g.POST("/attempts", api, h.CreateAttempt)
+	g.POST("/exchange", api, h.Exchange)
+	g.POST("/complete", api, h.Complete)
+	g.GET("/start", page, h.Start)
+	g.GET("/callback", page, h.Callback)
 }
