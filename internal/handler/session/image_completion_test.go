@@ -130,6 +130,8 @@ func TestSharedImageCompletionWaitsForPersistedReferences(t *testing.T) {
 						require.Zero(t, completed)
 						require.Equal(t, types.ResponseTypeError, last.Type)
 						require.Equal(t, "message_persistence", last.Data["stage"])
+						require.False(t, last.CompletionPending,
+							"failed persistence must terminate even with prepared output")
 					} else {
 						require.Equal(t, 1, completed)
 						require.Equal(t, types.ResponseTypeComplete, last.Type)

@@ -282,3 +282,48 @@ func TestStreamReportsIncompleteAsError(t *testing.T) {
 		require.False(t, answer.Done, "a cut-off stream must not close the answer as complete")
 	}
 }
+
+func TestStreamFlushesDecoderTailsBeforeError(t *testing.T) {
+	for _, kind := range []types.ResponseType{types.ResponseTypeAnswer, types.ResponseTypeThinking} {
+		t.Run(string(kind), func(t *testing.T) {
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			bus := &syncEventBus{}
+			model := &openStreamChat{chunks: []types.StreamResponse{
+				{ResponseType: kind, Content: "after"},
+				{ResponseType: types.ResponseTypeError, Content: "upstream failed", Done: true},
+			}}
+			manage := &types.ChatManage{}
+			manage.SessionID = "sess-error"
+			manage.UserContent = "resource://AbCdEfGhIjKlMnOpQrStUv"
+			manage.EventBus = bus
+			plugin := &PluginChatCompletionStream{modelService: &stubModelService{model: model}}
+			require.Nil(t, plugin.OnEvent(ctx, types.CHAT_COMPLETION_STREAM, manage,
+				func() *PluginError { return nil }))
+			require.Eventually(t, func() bool {
+				bus.mu.Lock()
+				defer bus.mu.Unlock()
+				for _, evt := range bus.events {
+					if evt.Type == types.EventType(event.EventError) {
+						return true
+					}
+				}
+				return false
+			}, 2*time.Second, 5*time.Millisecond)
+			bus.mu.Lock()
+			events := append([]types.Event(nil), bus.events...)
+			bus.mu.Unlock()
+			var content string
+			for _, evt := range events {
+				switch data := evt.Data.(type) {
+				case event.AgentFinalAnswerData:
+					content += data.Content
+				case event.AgentThoughtData:
+					content += data.Content
+				}
+			}
+			require.Equal(t, "after", content, "normal text held by the decoder must precede the terminal error")
+			require.Equal(t, types.EventType(event.EventError), events[len(events)-1].Type)
+		})
+	}
+}

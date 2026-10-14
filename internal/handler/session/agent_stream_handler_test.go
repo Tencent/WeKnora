@@ -75,4 +75,6 @@ func TestAgentStreamHandlerInternalErrorKeepsErrorType(t *testing.T) {
 	evt := streams.events[0]
 	require.Equal(t, types.ResponseTypeError, evt.Type)
 	require.True(t, evt.Done)
+	require.False(t, evt.CompletionPending,
+		"an independent error must not wait for a completion that was never prepared")
 }

@@ -140,7 +140,7 @@ func (h *Handler) ContinueStream(c *gin.Context) {
 	// Check if the stream already ended.
 	streamCompleted := false
 	for _, evt := range events {
-		if evt.Type == types.ResponseTypeComplete || (evt.Type == types.ResponseTypeError && evt.Done) {
+		if streamEventEndsResponse(evt) {
 			streamCompleted = true
 			break
 		}
@@ -184,7 +184,7 @@ func (h *Handler) ContinueStream(c *gin.Context) {
 			streamCompletedNow := false
 			for _, evt := range newEvents {
 				// Check for a terminal event.
-				if evt.Type == types.ResponseTypeComplete || (evt.Type == types.ResponseTypeError && evt.Done) {
+				if streamEventEndsResponse(evt) {
 					streamCompletedNow = true
 				}
 
@@ -366,7 +366,6 @@ func (h *Handler) handleAgentEventsForSSE(
 			// Send any new events
 			streamCompleted := false
 			titleReceived := false
-			terminalError := false
 			for _, evt := range events {
 				// Check for stop event
 				if evt.Type == types.ResponseType(event.EventStop) {
@@ -403,9 +402,8 @@ func (h *Handler) handleAgentEventsForSSE(
 				}
 
 				// Check for a terminal event.
-				if evt.Type == types.ResponseTypeComplete || (evt.Type == types.ResponseTypeError && evt.Done) {
+				if streamEventEndsResponse(evt) {
 					streamCompleted = true
-					terminalError = terminalError || evt.Type == types.ResponseTypeError
 				}
 
 				// Check for title event
@@ -430,7 +428,7 @@ func (h *Handler) handleAgentEventsForSSE(
 
 			// Check if stream is completed - wait for title event only if needed and not already received
 			if streamCompleted {
-				if waitForTitle && !titleReceived && !terminalError {
+				if waitForTitle && !titleReceived {
 					log.Infof("Stream completed for session=%s, message=%s, waiting for title event", sessionID, assistantMessageID)
 					// Wait up to 3 seconds for title event after completion
 					titleTimeout := time.After(3 * time.Second)
@@ -474,4 +472,11 @@ func (h *Handler) handleAgentEventsForSSE(
 			}
 		}
 	}
+}
+
+// Execution errors can precede persisted output; their internal marker keeps
+// live and resumed clients connected until the completion payload is available.
+func streamEventEndsResponse(evt interfaces.StreamEvent) bool {
+	return evt.Type == types.ResponseTypeComplete ||
+		(evt.Type == types.ResponseTypeError && evt.Done && !evt.CompletionPending)
 }

@@ -202,6 +202,8 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 					response.Content = types.StreamEndedEarlyError
 				}
 				if response.ResponseType == types.ResponseTypeError {
+					flushDecoders()
+					closeThinking()
 					pipelineError(ctx, "Stream", "stream_error", map[string]interface{}{
 						"session_id": chatManage.SessionID,
 						"error":      response.Content,
@@ -216,7 +218,7 @@ func (p *PluginChatCompletionStream) OnEvent(ctx context.Context,
 							SessionID: chatManage.SessionID,
 						},
 					})
-					continue
+					return
 				}
 
 				if response.ResponseType == types.ResponseTypeThinking {

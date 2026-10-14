@@ -16,6 +16,8 @@ type StreamEvent struct {
 	Timestamp time.Time              `json:"timestamp"`       // When this event occurred
 	Data      map[string]interface{} `json:"data,omitempty"`  // Additional event data (references, metadata, etc.)
 	Usage     *types.TokenUsage      `json:"usage,omitempty"` // LLM token usage aggregated over the turn (complete events)
+	// Internal transport state: an error can precede the persisted completion.
+	CompletionPending bool `json:"completion_pending,omitempty"`
 }
 
 // StreamManager stream manager interface - minimal append-only design

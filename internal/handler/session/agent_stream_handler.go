@@ -638,15 +638,19 @@ func (h *AgentStreamHandler) handleError(ctx context.Context, evt event.Event) e
 		"stage": data.Stage,
 		"error": data.Error,
 	}
+	h.mu.Lock()
+	completionPending := h.completionEvent != nil && data.Stage != "message_persistence"
+	h.mu.Unlock()
 
 	// Append error event to stream
 	if err := h.streamManager.AppendEvent(h.ctx, h.sessionID, h.assistantMessageID, interfaces.StreamEvent{
-		ID:        evt.ID,
-		Type:      types.ResponseTypeError,
-		Content:   data.Error,
-		Done:      true,
-		Timestamp: time.Now(),
-		Data:      metadata,
+		ID:                evt.ID,
+		Type:              types.ResponseTypeError,
+		Content:           data.Error,
+		Done:              true,
+		Timestamp:         time.Now(),
+		Data:              metadata,
+		CompletionPending: completionPending,
 	}); err != nil {
 		logger.GetLogger(h.ctx).Error("Append error event to stream failed", "error", err)
 	}
