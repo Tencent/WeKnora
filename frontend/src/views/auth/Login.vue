@@ -215,29 +215,31 @@
                 {{ loading ? $t('auth.loggingIn') : $t('auth.login') }}
               </t-button>
 
-              <div class="register-cta" v-if="registrationEnabled">
-                <div class="register-cta__divider">
-                  <span>{{ $t('auth.firstTime') }}</span>
+              <div v-if="oidcEnabled || wechatEnabled" class="auth-providers">
+                <div class="auth-divider">
+                  <span>{{ $t('auth.orContinueWith') }}</span>
                 </div>
-                <t-button theme="default" variant="outline" size="large" block class="register-cta__button"
-                  :disabled="loading" @click="toggleMode">
-                  {{ $t('auth.createAccount') }}
+                <t-button v-if="oidcEnabled" variant="outline" size="large" block :loading="oidcLoading"
+                  :disabled="loading" class="provider-button" @click="handleOIDCLogin">
+                  <template #icon><t-icon name="secured" size="20px" class="provider-button__icon" /></template>
+                  {{ oidcLoading ? $t('auth.redirectingToOIDC') : oidcLoginText }}
+                </t-button>
+                <t-button v-if="wechatEnabled" variant="outline" size="large" block :disabled="loading"
+                  class="provider-button" @click="handleWeChatLogin">
+                  <template #icon>
+                    <t-icon name="logo-wechat-stroke" size="20px" class="provider-button__icon provider-button__icon--wechat" />
+                  </template>
+                  {{ $t('auth.wechatLogin') }}
                 </t-button>
               </div>
-
-              <div v-if="oidcEnabled || wechatEnabled" class="oidc-divider">
-                <span>{{ $t('auth.orContinueWith') }}</span>
-              </div>
-
-              <t-button v-if="oidcEnabled" theme="default" size="large" block :loading="oidcLoading" :disabled="loading"
-                class="oidc-button" @click="handleOIDCLogin">
-                {{ oidcLoading ? $t('auth.redirectingToOIDC') : oidcLoginText }}
-              </t-button>
-              <t-button v-if="wechatEnabled" theme="default" size="large" block :disabled="loading"
-                class="oidc-button" @click="handleWeChatLogin">
-                {{ $t('auth.wechatLogin') }}
-              </t-button>
             </t-form>
+
+            <div v-if="registrationEnabled" class="form-footer">
+              <span>{{ $t('auth.firstTime') }}</span>
+              <a href="#" class="link-button" @click.prevent="!loading && toggleMode()">
+                {{ $t('auth.createAccount') }}
+              </a>
+            </div>
 
             <!-- Features list -->
             <div class="login-features">
@@ -1425,50 +1427,6 @@ onMounted(async () => {
 
 /* 注册入口：从底部小字链接升级为带分隔线的醒目次级按钮，
    让首次访客一眼就能找到「创建账户」。 */
-.register-cta {
-  margin-top: 8px;
-
-  &__divider {
-    position: relative;
-    text-align: center;
-    margin: 4px 0 14px;
-    color: var(--td-text-color-secondary);
-    font-size: var(--app-text-md);
-    font-family: var(--app-font-family);
-
-    span {
-      position: relative;
-      z-index: 1;
-      padding: 0 12px;
-      background: rgba(255, 255, 255, 0.97);
-    }
-
-    &::before {
-      content: '';
-      position: absolute;
-      left: 0;
-      right: 0;
-      top: 50%;
-      border-top: 1px solid var(--td-component-stroke);
-    }
-  }
-
-  &__button {
-    height: 46px;
-    border-radius: var(--app-radius-md);
-    font-size: var(--app-text-lg);
-    font-weight: 500;
-    border-color: var(--td-brand-color);
-    color: var(--td-brand-color);
-
-    &:hover {
-      border-color: var(--td-brand-color-active);
-      color: var(--td-brand-color-active);
-      background: var(--td-success-color-light);
-    }
-  }
-}
-
 .form-subtitle {
   font-size: var(--app-text-md);
   color: var(--td-text-color-secondary);
@@ -1545,35 +1503,51 @@ onMounted(async () => {
   margin: 20px 0 16px 0;
 }
 
-.oidc-divider {
-  position: relative;
-  margin: 4px 0 6px;
-  text-align: center;
+.auth-providers {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.auth-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 2px;
   color: var(--td-text-color-placeholder);
   font-size: var(--app-text-sm);
+  font-family: var(--app-font-family);
 
-  span {
-    position: relative;
-    z-index: 1;
-    padding: 0 12px;
-    background: rgba(255, 255, 255, 0.95);
-  }
-
-  &::before {
+  &::before,
+  &::after {
     content: '';
-    position: absolute;
-    left: 0;
-    right: 0;
-    top: 50%;
+    flex: 1;
     border-top: 1px solid var(--td-component-stroke);
   }
 }
 
-.oidc-button {
+.provider-button {
   height: 46px;
+  margin: 0;
   border-radius: var(--app-radius-md);
+  border-color: var(--td-component-stroke);
+  background: var(--td-bg-color-container);
+  color: var(--td-text-color-primary);
   font-size: var(--app-text-lg);
   font-weight: 500;
+  font-family: var(--app-font-family);
+
+  &:hover:not(.t-is-disabled) {
+    border-color: var(--td-component-border);
+    background: var(--td-bg-color-container-hover);
+    color: var(--td-text-color-primary);
+  }
+
+  &__icon {
+    color: var(--td-text-color-secondary);
+
+    &--wechat { color: #07c160; }
+  }
 }
 
 .form-footer {
@@ -1872,10 +1846,6 @@ html[theme-mode="dark"] {
   .form-card {
     background: rgba(36, 36, 36, 0.97) !important;
     box-shadow: 0 10px 40px rgba(0, 0, 0, 0.4) !important;
-  }
-
-  .register-cta__divider span {
-    background: rgba(36, 36, 36, 0.97);
   }
 
   .form-content .t-input {
