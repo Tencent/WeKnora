@@ -320,6 +320,9 @@ type KnowledgeBaseView struct {
 	VectorStoreSource     string `json:"vector_store_source,omitempty"`
 	VectorStoreEngineType string `json:"vector_store_engine_type,omitempty"`
 	VectorStoreStatus     string `json:"vector_store_status,omitempty"`
+	// MyPermission is the caller's role on a knowledge base shared from
+	// another workspace; GET /knowledge-bases/{id} sets it.
+	MyPermission string `json:"my_permission,omitempty" enums:"admin,editor,viewer"`
 }
 
 // HybridSearchResponse is the hybrid-search body. meta is set only when the
@@ -538,9 +541,10 @@ func (h *KnowledgeBaseHandler) validateAndGetKnowledgeBase(
 // @Produce      json
 // @Param        id         path      string  true   "知识库ID"
 // @Param        agent_id   query     string  false  "共享智能体 ID（用于校验智能体是否有权访问该知识库）"
-// @Success      200  {object}  map[string]interface{}  "知识库详情"
-// @Failure      400  {object}  errors.AppError         "请求参数错误"
-// @Failure      404  {object}  errors.AppError         "知识库不存在"
+// @Success      200  {object}  handler.DataResponse{data=handler.KnowledgeBaseView}  "知识库详情"
+// @Failure      400  {object}  errors.AppError  "请求参数错误"
+// @Failure      403  {object}  errors.AppError  "无权访问知识库"
+// @Failure      404  {object}  errors.AppError  "知识库不存在"
 // @Security     Bearer
 // @Security     ApiKeyAuth
 // @Router       /knowledge-bases/{id} [get]

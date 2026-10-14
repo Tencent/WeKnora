@@ -4439,12 +4439,29 @@ const docTemplate = `{
                     "200": {
                         "description": "知识库详情",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": true
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/internal_handler.DataResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/internal_handler.KnowledgeBaseView"
+                                        }
+                                    }
+                                }
+                            ]
                         }
                     },
                     "400": {
                         "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "403": {
+                        "description": "无权访问知识库",
                         "schema": {
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
@@ -4598,7 +4615,7 @@ const docTemplate = `{
                         "Bearer": []
                     }
                 ],
-                "description": "返回知识库的重要变更与后台任务入口。仅知识库创建者或所属空间管理员可读，共享空间不可读。",
+                "description": "返回知识库的重要变更与后台任务入口。仅知识库创建者或所属空间管理员可读，共享空间不可读。\n按 id 倒序；把 next_cursor 作为 after_id 取下一页，返回空列表表示没有更多。",
                 "produces": [
                     "application/json"
                 ],
@@ -4621,20 +4638,31 @@ const docTemplate = `{
                         "in": "query"
                     },
                     {
+                        "maximum": 100,
+                        "minimum": 1,
                         "type": "integer",
-                        "description": "页大小，1-100，默认 50",
+                        "default": 50,
+                        "description": "页大小",
                         "name": "limit",
                         "in": "query"
                     },
                     {
                         "type": "string",
-                        "description": "按 action 精确过滤",
+                        "description": "按 action 精确过滤，如 knowledge.deleted",
                         "name": "action",
                         "in": "query"
                     },
                     {
+                        "enum": [
+                            "success",
+                            "accepted",
+                            "partial",
+                            "failed",
+                            "denied",
+                            "canceled"
+                        ],
                         "type": "string",
-                        "description": "按 outcome 精确过滤",
+                        "description": "结果过滤",
                         "name": "outcome",
                         "in": "query"
                     },
@@ -4653,7 +4681,13 @@ const docTemplate = `{
                         }
                     },
                     "403": {
-                        "description": "Forbidden",
+                        "description": "非创建者或管理员，或知识库来自其他空间",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "404": {
+                        "description": "知识库不存在",
                         "schema": {
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
@@ -5884,7 +5918,7 @@ const docTemplate = `{
                         "ApiKeyAuth": []
                     }
                 ],
-                "description": "获取知识库下的知识列表，支持分页和筛选",
+                "description": "获取知识库下的知识列表，支持分页和筛选\n不传 parse_status 时不返回删除中（deleting）的文档。",
                 "consumes": [
                     "application/json"
                 ],
@@ -5904,13 +5938,18 @@ const docTemplate = `{
                         "required": true
                     },
                     {
+                        "minimum": 1,
                         "type": "integer",
+                        "default": 1,
                         "description": "页码",
                         "name": "page",
                         "in": "query"
                     },
                     {
+                        "maximum": 1000,
+                        "minimum": 1,
                         "type": "integer",
+                        "default": 20,
                         "description": "每页数量",
                         "name": "page_size",
                         "in": "query"
@@ -5934,8 +5973,17 @@ const docTemplate = `{
                         "in": "query"
                     },
                     {
+                        "enum": [
+                            "pending",
+                            "processing",
+                            "finalizing",
+                            "completed",
+                            "failed",
+                            "cancelled",
+                            "deleting"
+                        ],
                         "type": "string",
-                        "description": "解析状态筛选 (pending/processing/completed/failed)",
+                        "description": "状态",
                         "name": "parse_status",
                         "in": "query"
                     },
@@ -5970,14 +6018,25 @@ const docTemplate = `{
                         "in": "query"
                     },
                     {
+                        "enum": [
+                            "created_at",
+                            "updated_at",
+                            "file_name"
+                        ],
                         "type": "string",
-                        "description": "排序字段: updated_at/created_at/file_name，默认 created_at",
+                        "default": "created_at",
+                        "description": "排序字段",
                         "name": "sort_by",
                         "in": "query"
                     },
                     {
+                        "enum": [
+                            "asc",
+                            "desc"
+                        ],
                         "type": "string",
-                        "description": "排序方向: asc/desc，默认 desc",
+                        "default": "desc",
+                        "description": "排序方向",
                         "name": "sort_order",
                         "in": "query"
                     }
@@ -5986,12 +6045,32 @@ const docTemplate = `{
                     "200": {
                         "description": "知识列表",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": true
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/internal_handler.PageResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.Knowledge"
+                                            }
+                                        }
+                                    }
+                                }
+                            ]
                         }
                     },
                     "400": {
                         "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "403": {
+                        "description": "无权访问知识库",
                         "schema": {
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
@@ -7998,12 +8077,29 @@ const docTemplate = `{
                     "200": {
                         "description": "知识详情",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": true
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/internal_handler.DataResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.Knowledge"
+                                        }
+                                    }
+                                }
+                            ]
                         }
                     },
                     "400": {
                         "description": "请求参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "403": {
+                        "description": "无权访问所属知识库",
                         "schema": {
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
@@ -8100,14 +8196,37 @@ const docTemplate = `{
                 ],
                 "responses": {
                     "200": {
-                        "description": "任务已提交，返回 task_id",
+                        "description": "任务已提交",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": true
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/internal_handler.DataMessageResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/internal_handler.TaskIDData"
+                                        }
+                                    }
+                                }
+                            ]
                         }
                     },
                     "400": {
-                        "description": "请求参数错误",
+                        "description": "请求参数错误或知识正在移动",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "403": {
+                        "description": "需要编辑权限",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "404": {
+                        "description": "知识不存在",
                         "schema": {
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
@@ -8149,8 +8268,19 @@ const docTemplate = `{
                     "200": {
                         "description": "取消已提交",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": true
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/internal_handler.DataMessageResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.Knowledge"
+                                        }
+                                    }
+                                }
+                            ]
                         }
                     },
                     "400": {
@@ -8299,11 +8429,11 @@ const docTemplate = `{
                         "required": true
                     },
                     {
-                        "description": "可选的处理配置覆盖：{\\",
+                        "description": "可选；不传则沿用上传时的处理配置",
                         "name": "body",
                         "in": "body",
                         "schema": {
-                            "type": "object"
+                            "$ref": "#/definitions/internal_handler.ReparseKnowledgeRequest"
                         }
                     }
                 ],
@@ -8311,8 +8441,19 @@ const docTemplate = `{
                     "200": {
                         "description": "重新解析任务已提交",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": true
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/internal_handler.DataMessageResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.Knowledge"
+                                        }
+                                    }
+                                }
+                            ]
                         }
                     },
                     "400": {
@@ -8323,6 +8464,12 @@ const docTemplate = `{
                     },
                     "403": {
                         "description": "权限不足",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "404": {
+                        "description": "知识不存在",
                         "schema": {
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
@@ -8360,8 +8507,9 @@ const docTemplate = `{
                         "required": true
                     },
                     {
+                        "minimum": 1,
                         "type": "integer",
-                        "description": "指定尝试号；省略=最新",
+                        "description": "指定尝试号；省略或非正数=最新",
                         "name": "attempt",
                         "in": "query"
                     }
@@ -8370,8 +8518,31 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": true
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/internal_handler.DataResponse"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/internal_handler.KnowledgeSpansData"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "403": {
+                        "description": "无权访问所属知识库",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
+                        }
+                    },
+                    "404": {
+                        "description": "知识不存在",
+                        "schema": {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError"
                         }
                     }
                 }
@@ -8775,8 +8946,13 @@ const docTemplate = `{
                         "in": "query"
                     },
                     {
+                        "enum": [
+                            "pending",
+                            "ignored",
+                            "resolved"
+                        ],
                         "type": "string",
-                        "description": "Filter by status (pending, ignored, resolved)",
+                        "description": "Filter by status",
                         "name": "status",
                         "in": "query"
                     }
@@ -8789,6 +8965,18 @@ const docTemplate = `{
                             "items": {
                                 "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WikiPageIssue"
                             }
+                        }
+                    },
+                    "400": {
+                        "description": "Not a Wiki knowledge base, or no access",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.WikiErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.WikiErrorResponse"
                         }
                     }
                 }
@@ -8885,6 +9073,18 @@ const docTemplate = `{
                         "description": "OK",
                         "schema": {
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_application_service.WikiLintReport"
+                        }
+                    },
+                    "400": {
+                        "description": "Not a Wiki knowledge base, or no access",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.WikiErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.WikiErrorResponse"
                         }
                     }
                 }
@@ -9237,6 +9437,9 @@ const docTemplate = `{
                     }
                 ],
                 "description": "Re-parse all pages and rebuild bidirectional link references",
+                "produces": [
+                    "application/json"
+                ],
                 "tags": [
                     "Wiki"
                 ],
@@ -9254,10 +9457,19 @@ const docTemplate = `{
                     "200": {
                         "description": "OK",
                         "schema": {
-                            "type": "object",
-                            "additionalProperties": {
-                                "type": "string"
-                            }
+                            "$ref": "#/definitions/internal_handler.WikiMessageResponse"
+                        }
+                    },
+                    "400": {
+                        "description": "Not a Wiki knowledge base, or no access",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.WikiErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.WikiErrorResponse"
                         }
                     }
                 }
@@ -9471,6 +9683,18 @@ const docTemplate = `{
                         "description": "OK",
                         "schema": {
                             "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.WikiStats"
+                        }
+                    },
+                    "400": {
+                        "description": "Not a Wiki knowledge base, or no access",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.WikiErrorResponse"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/internal_handler.WikiErrorResponse"
                         }
                     }
                 }
@@ -24837,6 +25061,10 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_Tencent_WeKnora_internal_types.JSONMap": {
+            "type": "object",
+            "additionalProperties": {}
+        },
         "github_com_Tencent_WeKnora_internal_types.JoinByOrganizationIDRequest": {
             "type": "object",
             "required": [
@@ -29311,6 +29539,68 @@ const docTemplate = `{
                 }
             }
         },
+        "github_com_Tencent_WeKnora_internal_types.SpanTreeNode": {
+            "type": "object",
+            "properties": {
+                "attempt": {
+                    "type": "integer"
+                },
+                "children": {
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.SpanTreeNode"
+                    }
+                },
+                "created_at": {
+                    "type": "string"
+                },
+                "duration_ms": {
+                    "type": "integer"
+                },
+                "error_code": {
+                    "type": "string"
+                },
+                "error_message": {
+                    "type": "string"
+                },
+                "finished_at": {
+                    "type": "string"
+                },
+                "input": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.JSONMap"
+                },
+                "kind": {
+                    "type": "string"
+                },
+                "knowledge_id": {
+                    "type": "string"
+                },
+                "metadata": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.JSONMap"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "output": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.JSONMap"
+                },
+                "parent_span_id": {
+                    "type": "string"
+                },
+                "span_id": {
+                    "type": "string"
+                },
+                "started_at": {
+                    "type": "string"
+                },
+                "status": {
+                    "type": "string"
+                },
+                "updated_at": {
+                    "type": "string"
+                }
+            }
+        },
         "github_com_Tencent_WeKnora_internal_types.StarterSuggestionConfig": {
             "type": "object",
             "properties": {
@@ -32101,6 +32391,19 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_handler.DataMessageResponse": {
+            "type": "object",
+            "properties": {
+                "data": {},
+                "message": {
+                    "type": "string"
+                },
+                "success": {
+                    "type": "boolean",
+                    "example": true
+                }
+            }
+        },
         "internal_handler.DataResponse": {
             "type": "object",
             "properties": {
@@ -32902,6 +33205,15 @@ const docTemplate = `{
                     "description": "Knowledge count (not stored in database, calculated on query)",
                     "type": "integer"
                 },
+                "my_permission": {
+                    "description": "MyPermission is the caller's role on a knowledge base shared from\nanother workspace; GET /knowledge-bases/{id} sets it.",
+                    "type": "string",
+                    "enum": [
+                        "admin",
+                        "editor",
+                        "viewer"
+                    ]
+                },
                 "name": {
                     "description": "Name of the knowledge base",
                     "type": "string"
@@ -33022,6 +33334,71 @@ const docTemplate = `{
                 },
                 "total": {
                     "type": "integer"
+                }
+            }
+        },
+        "internal_handler.KnowledgeSpanError": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string"
+                },
+                "error_code": {
+                    "type": "string"
+                },
+                "error_message": {
+                    "type": "string"
+                },
+                "finished_at": {
+                    "type": "string"
+                },
+                "message": {
+                    "type": "string"
+                },
+                "name": {
+                    "type": "string"
+                },
+                "stage": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_handler.KnowledgeSpansData": {
+            "type": "object",
+            "properties": {
+                "attempt": {
+                    "description": "Attempt is the attempt the trace describes; equals CurrentAttempt.",
+                    "type": "integer"
+                },
+                "current_attempt": {
+                    "type": "integer"
+                },
+                "current_stage": {
+                    "description": "CurrentStage is the stage running now, or the last one that ran.",
+                    "type": "string"
+                },
+                "knowledge_id": {
+                    "type": "string"
+                },
+                "last_activity_at": {
+                    "description": "LastActivityAt is set while the parse is in flight.",
+                    "type": "string"
+                },
+                "last_error": {
+                    "$ref": "#/definitions/internal_handler.KnowledgeSpanError"
+                },
+                "latest_attempt": {
+                    "type": "integer"
+                },
+                "parse_status": {
+                    "type": "string"
+                },
+                "stall_state": {
+                    "description": "StallState is types.StallStateQueued or types.StallStateStalled when an\nin-flight parse has gone quiet.",
+                    "type": "string"
+                },
+                "trace": {
+                    "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.SpanTreeNode"
                 }
             }
         },
@@ -33869,6 +34246,19 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_handler.ReparseKnowledgeRequest": {
+            "type": "object",
+            "properties": {
+                "process_config": {
+                    "description": "ProcessConfig overrides the processing options stored at upload time.",
+                    "allOf": [
+                        {
+                            "$ref": "#/definitions/github_com_Tencent_WeKnora_internal_types.KnowledgeProcessOverrides"
+                        }
+                    ]
+                }
+            }
+        },
         "internal_handler.ResetUserPasswordRequest": {
             "type": "object",
             "required": [
@@ -34639,6 +35029,22 @@ const docTemplate = `{
                 }
             }
         },
+        "internal_handler.WikiErrorResponse": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "type": "string"
+                }
+            }
+        },
+        "internal_handler.WikiMessageResponse": {
+            "type": "object",
+            "properties": {
+                "message": {
+                    "type": "string"
+                }
+            }
+        },
         "internal_handler.WikiSearchHit": {
             "type": "object",
             "properties": {
@@ -34794,6 +35200,7 @@ const docTemplate = `{
                     }
                 },
                 "next_cursor": {
+                    "description": "NextCursor is the id of the last entry on this page, 0 when it is empty.",
                     "type": "integer"
                 },
                 "success": {

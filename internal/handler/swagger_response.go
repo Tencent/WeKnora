@@ -22,6 +22,13 @@ type PageResponse struct {
 	PageSize int   `json:"page_size"`
 }
 
+// DataMessageResponse is DataResponse with a human-readable message.
+type DataMessageResponse struct {
+	Success bool   `json:"success" example:"true"`
+	Message string `json:"message"`
+	Data    any    `json:"data"`
+}
+
 // MessageResponse is the {"success": true, "message": ...} body.
 type MessageResponse struct {
 	Success bool   `json:"success" example:"true"`

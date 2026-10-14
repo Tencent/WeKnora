@@ -3317,6 +3317,9 @@ definitions:
     required:
     - role
     type: object
+  github_com_Tencent_WeKnora_internal_types.JSONMap:
+    additionalProperties: {}
+    type: object
   github_com_Tencent_WeKnora_internal_types.JoinByOrganizationIDRequest:
     properties:
       message:
@@ -6817,6 +6820,47 @@ definitions:
       type:
         type: string
     type: object
+  github_com_Tencent_WeKnora_internal_types.SpanTreeNode:
+    properties:
+      attempt:
+        type: integer
+      children:
+        items:
+          $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.SpanTreeNode'
+        type: array
+      created_at:
+        type: string
+      duration_ms:
+        type: integer
+      error_code:
+        type: string
+      error_message:
+        type: string
+      finished_at:
+        type: string
+      input:
+        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.JSONMap'
+      kind:
+        type: string
+      knowledge_id:
+        type: string
+      metadata:
+        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.JSONMap'
+      name:
+        type: string
+      output:
+        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.JSONMap'
+      parent_span_id:
+        type: string
+      span_id:
+        type: string
+      started_at:
+        type: string
+      status:
+        type: string
+      updated_at:
+        type: string
+    type: object
   github_com_Tencent_WeKnora_internal_types.StarterSuggestionConfig:
     properties:
       count:
@@ -8988,6 +9032,15 @@ definitions:
       user:
         $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.UserInfo'
     type: object
+  internal_handler.DataMessageResponse:
+    properties:
+      data: {}
+      message:
+        type: string
+      success:
+        example: true
+        type: boolean
+    type: object
   internal_handler.DataResponse:
     properties:
       data: {}
@@ -9546,6 +9599,15 @@ definitions:
       knowledge_count:
         description: Knowledge count (not stored in database, calculated on query)
         type: integer
+      my_permission:
+        description: |-
+          MyPermission is the caller's role on a knowledge base shared from
+          another workspace; GET /knowledge-bases/{id} sets it.
+        enum:
+        - admin
+        - editor
+        - viewer
+        type: string
       name:
         description: Name of the knowledge base
         type: string
@@ -9640,6 +9702,52 @@ definitions:
         type: boolean
       total:
         type: integer
+    type: object
+  internal_handler.KnowledgeSpanError:
+    properties:
+      code:
+        type: string
+      error_code:
+        type: string
+      error_message:
+        type: string
+      finished_at:
+        type: string
+      message:
+        type: string
+      name:
+        type: string
+      stage:
+        type: string
+    type: object
+  internal_handler.KnowledgeSpansData:
+    properties:
+      attempt:
+        description: Attempt is the attempt the trace describes; equals CurrentAttempt.
+        type: integer
+      current_attempt:
+        type: integer
+      current_stage:
+        description: CurrentStage is the stage running now, or the last one that ran.
+        type: string
+      knowledge_id:
+        type: string
+      last_activity_at:
+        description: LastActivityAt is set while the parse is in flight.
+        type: string
+      last_error:
+        $ref: '#/definitions/internal_handler.KnowledgeSpanError'
+      latest_attempt:
+        type: integer
+      parse_status:
+        type: string
+      stall_state:
+        description: |-
+          StallState is types.StallStateQueued or types.StallStateStalled when an
+          in-flight parse has gone quiet.
+        type: string
+      trace:
+        $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.SpanTreeNode'
     type: object
   internal_handler.ListAgentsResponse:
     properties:
@@ -10229,6 +10337,14 @@ definitions:
     - from
     - to
     type: object
+  internal_handler.ReparseKnowledgeRequest:
+    properties:
+      process_config:
+        allOf:
+        - $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.KnowledgeProcessOverrides'
+        description: ProcessConfig overrides the processing options stored at upload
+          time.
+    type: object
   internal_handler.ResetUserPasswordRequest:
     properties:
       email:
@@ -10758,6 +10874,16 @@ definitions:
       user:
         $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.UserInfo'
     type: object
+  internal_handler.WikiErrorResponse:
+    properties:
+      error:
+        type: string
+    type: object
+  internal_handler.WikiMessageResponse:
+    properties:
+      message:
+        type: string
+    type: object
   internal_handler.WikiSearchHit:
     properties:
       aliases:
@@ -10862,6 +10988,8 @@ definitions:
           $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.AuditLog'
         type: array
       next_cursor:
+        description: NextCursor is the id of the last entry on this page, 0 when it
+          is empty.
         type: integer
       success:
         type: boolean
@@ -14229,10 +14357,18 @@ paths:
         "200":
           description: 知识库详情
           schema:
-            additionalProperties: true
-            type: object
+            allOf:
+            - $ref: '#/definitions/internal_handler.DataResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/internal_handler.KnowledgeBaseView'
+              type: object
         "400":
           description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "403":
+          description: 无权访问知识库
           schema:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
         "404":
@@ -14293,7 +14429,9 @@ paths:
       - 知识库
   /knowledge-bases/{id}/activity:
     get:
-      description: 返回知识库的重要变更与后台任务入口。仅知识库创建者或所属空间管理员可读，共享空间不可读。
+      description: |-
+        返回知识库的重要变更与后台任务入口。仅知识库创建者或所属空间管理员可读，共享空间不可读。
+        按 id 倒序；把 next_cursor 作为 after_id 取下一页，返回空列表表示没有更多。
       parameters:
       - description: 知识库ID
         in: path
@@ -14304,15 +14442,25 @@ paths:
         in: query
         name: after_id
         type: integer
-      - description: 页大小，1-100，默认 50
+      - default: 50
+        description: 页大小
         in: query
+        maximum: 100
+        minimum: 1
         name: limit
         type: integer
-      - description: 按 action 精确过滤
+      - description: 按 action 精确过滤，如 knowledge.deleted
         in: query
         name: action
         type: string
-      - description: 按 outcome 精确过滤
+      - description: 结果过滤
+        enum:
+        - success
+        - accepted
+        - partial
+        - failed
+        - denied
+        - canceled
         in: query
         name: outcome
         type: string
@@ -14328,7 +14476,11 @@ paths:
           schema:
             $ref: '#/definitions/internal_handler.auditLogListResponse'
         "403":
-          description: Forbidden
+          description: 非创建者或管理员，或知识库来自其他空间
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "404":
+          description: 知识库不存在
           schema:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
@@ -15116,19 +15268,26 @@ paths:
     get:
       consumes:
       - application/json
-      description: 获取知识库下的知识列表，支持分页和筛选
+      description: |-
+        获取知识库下的知识列表，支持分页和筛选
+        不传 parse_status 时不返回删除中（deleting）的文档。
       parameters:
       - description: 知识库ID
         in: path
         name: id
         required: true
         type: string
-      - description: 页码
+      - default: 1
+        description: 页码
         in: query
+        minimum: 1
         name: page
         type: integer
-      - description: 每页数量
+      - default: 20
+        description: 每页数量
         in: query
+        maximum: 1000
+        minimum: 1
         name: page_size
         type: integer
       - description: 标签ID筛选，逗号分隔（OR语义）
@@ -15143,7 +15302,15 @@ paths:
         in: query
         name: file_type
         type: string
-      - description: 解析状态筛选 (pending/processing/completed/failed)
+      - description: 状态
+        enum:
+        - pending
+        - processing
+        - finalizing
+        - completed
+        - failed
+        - cancelled
+        - deleting
         in: query
         name: parse_status
         type: string
@@ -15168,11 +15335,20 @@ paths:
         in: query
         name: folder_recursive
         type: boolean
-      - description: '排序字段: updated_at/created_at/file_name，默认 created_at'
+      - default: created_at
+        description: 排序字段
+        enum:
+        - created_at
+        - updated_at
+        - file_name
         in: query
         name: sort_by
         type: string
-      - description: '排序方向: asc/desc，默认 desc'
+      - default: desc
+        description: 排序方向
+        enum:
+        - asc
+        - desc
         in: query
         name: sort_order
         type: string
@@ -15182,10 +15358,20 @@ paths:
         "200":
           description: 知识列表
           schema:
-            additionalProperties: true
-            type: object
+            allOf:
+            - $ref: '#/definitions/internal_handler.PageResponse'
+            - properties:
+                data:
+                  items:
+                    $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.Knowledge'
+                  type: array
+              type: object
         "400":
           description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "403":
+          description: 无权访问知识库
           schema:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
@@ -16088,12 +16274,24 @@ paths:
       - application/json
       responses:
         "200":
-          description: 任务已提交，返回 task_id
+          description: 任务已提交
           schema:
-            additionalProperties: true
-            type: object
+            allOf:
+            - $ref: '#/definitions/internal_handler.DataMessageResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/internal_handler.TaskIDData'
+              type: object
         "400":
-          description: 请求参数错误
+          description: 请求参数错误或知识正在移动
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "403":
+          description: 需要编辑权限
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "404":
+          description: 知识不存在
           schema:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
@@ -16118,10 +16316,18 @@ paths:
         "200":
           description: 知识详情
           schema:
-            additionalProperties: true
-            type: object
+            allOf:
+            - $ref: '#/definitions/internal_handler.DataResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.Knowledge'
+              type: object
         "400":
           description: 请求参数错误
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "403":
+          description: 无权访问所属知识库
           schema:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
         "404":
@@ -16185,8 +16391,12 @@ paths:
         "200":
           description: 取消已提交
           schema:
-            additionalProperties: true
-            type: object
+            allOf:
+            - $ref: '#/definitions/internal_handler.DataMessageResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.Knowledge'
+              type: object
         "400":
           description: 状态不支持取消
           schema:
@@ -16275,25 +16485,33 @@ paths:
         name: id
         required: true
         type: string
-      - description: 可选的处理配置覆盖：{\
+      - description: 可选；不传则沿用上传时的处理配置
         in: body
         name: body
         schema:
-          type: object
+          $ref: '#/definitions/internal_handler.ReparseKnowledgeRequest'
       produces:
       - application/json
       responses:
         "200":
           description: 重新解析任务已提交
           schema:
-            additionalProperties: true
-            type: object
+            allOf:
+            - $ref: '#/definitions/internal_handler.DataMessageResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.Knowledge'
+              type: object
         "400":
           description: 请求参数错误
           schema:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
         "403":
           description: 权限不足
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "404":
+          description: 知识不存在
           schema:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
@@ -16314,8 +16532,9 @@ paths:
         name: id
         required: true
         type: string
-      - description: 指定尝试号；省略=最新
+      - description: 指定尝试号；省略或非正数=最新
         in: query
+        minimum: 1
         name: attempt
         type: integer
       produces:
@@ -16324,8 +16543,20 @@ paths:
         "200":
           description: OK
           schema:
-            additionalProperties: true
-            type: object
+            allOf:
+            - $ref: '#/definitions/internal_handler.DataResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/internal_handler.KnowledgeSpansData'
+              type: object
+        "403":
+          description: 无权访问所属知识库
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
+        "404":
+          description: 知识不存在
+          schema:
+            $ref: '#/definitions/github_com_Tencent_WeKnora_internal_errors.AppError'
       security:
       - Bearer: []
       - ApiKeyAuth: []
@@ -16959,7 +17190,11 @@ paths:
         in: query
         name: slug
         type: string
-      - description: Filter by status (pending, ignored, resolved)
+      - description: Filter by status
+        enum:
+        - pending
+        - ignored
+        - resolved
         in: query
         name: status
         type: string
@@ -16972,6 +17207,14 @@ paths:
             items:
               $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WikiPageIssue'
             type: array
+        "400":
+          description: Not a Wiki knowledge base, or no access
+          schema:
+            $ref: '#/definitions/internal_handler.WikiErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handler.WikiErrorResponse'
       security:
       - Bearer: []
       summary: List wiki page issues
@@ -17033,6 +17276,14 @@ paths:
           description: OK
           schema:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_application_service.WikiLintReport'
+        "400":
+          description: Not a Wiki knowledge base, or no access
+          schema:
+            $ref: '#/definitions/internal_handler.WikiErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handler.WikiErrorResponse'
       security:
       - Bearer: []
       summary: Run wiki lint
@@ -17272,13 +17523,21 @@ paths:
         name: kb_id
         required: true
         type: string
+      produces:
+      - application/json
       responses:
         "200":
           description: OK
           schema:
-            additionalProperties:
-              type: string
-            type: object
+            $ref: '#/definitions/internal_handler.WikiMessageResponse'
+        "400":
+          description: Not a Wiki knowledge base, or no access
+          schema:
+            $ref: '#/definitions/internal_handler.WikiErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handler.WikiErrorResponse'
       security:
       - Bearer: []
       summary: Rebuild wiki links
@@ -17422,6 +17681,14 @@ paths:
           description: OK
           schema:
             $ref: '#/definitions/github_com_Tencent_WeKnora_internal_types.WikiStats'
+        "400":
+          description: Not a Wiki knowledge base, or no access
+          schema:
+            $ref: '#/definitions/internal_handler.WikiErrorResponse'
+        "500":
+          description: Internal Server Error
+          schema:
+            $ref: '#/definitions/internal_handler.WikiErrorResponse'
       security:
       - Bearer: []
       summary: Get wiki statistics
