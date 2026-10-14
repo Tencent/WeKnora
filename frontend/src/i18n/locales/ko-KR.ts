@@ -5606,6 +5606,15 @@ export default {
     howToEnable: '지식 그래프를 활성화하는 방법?'
   },
   retrievalSettings: {
+    recallTab: '검색 후보',
+    rerankTab: '재순위 지정',
+    rrfTitle: '결과 통합 (RRF)',
+    rrfKLabel: 'RRF 평활 상수 (K)',
+    rrfKDescription: '값이 클수록 상위 검색 결과의 우위가 줄어듭니다. 기본값은 60이며, 0은 기본값을 사용합니다.',
+    rrfVectorWeightLabel: 'RRF 벡터 가중치',
+    rrfVectorWeightDescription: '통합 결과에 대한 벡터 검색의 영향을 조정합니다. 기본값은 0.7이며, 0은 기본값을 사용합니다. 가중치의 합이 1일 필요는 없습니다.',
+    rrfKeywordWeightLabel: 'RRF 키워드 가중치',
+    rrfKeywordWeightDescription: '통합 결과에 대한 키워드 검색의 영향을 조정합니다. 기본값은 0.3이며, 0은 기본값을 사용합니다. 가중치의 합이 1일 필요는 없습니다.',
     title: '검색 설정',
     description: '전역 검색 파라미터를 설정합니다. 지식베이스 검색과 메시지 검색이 이 설정을 공유합니다',
     embeddingTopKLabel: '벡터 검색 Top K',

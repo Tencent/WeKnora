@@ -2563,6 +2563,15 @@ export default {
     }
   },
   retrievalSettings: {
+    recallTab: 'Recall',
+    rerankTab: 'Reranking',
+    rrfTitle: 'Result fusion (RRF)',
+    rrfKLabel: 'RRF smoothing constant (K)',
+    rrfKDescription: 'Larger values reduce the advantage of top-ranked results. Default: 60; 0 uses the default.',
+    rrfVectorWeightLabel: 'RRF vector weight',
+    rrfVectorWeightDescription: 'Controls the contribution of vector search to merged results. Default: 0.7; 0 uses the default. Weights do not need to sum to 1.',
+    rrfKeywordWeightLabel: 'RRF keyword weight',
+    rrfKeywordWeightDescription: 'Controls the contribution of keyword search to merged results. Default: 0.3; 0 uses the default. Weights do not need to sum to 1.',
     title: 'Search Settings',
     description: 'Configure global retrieval parameters for knowledge search and message search',
     embeddingTopKLabel: 'Vector Search Top K',

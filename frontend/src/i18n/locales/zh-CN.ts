@@ -5608,6 +5608,15 @@ export default {
     howToEnable: '如何启用知识图谱？'
   },
   retrievalSettings: {
+    recallTab: '召回',
+    rerankTab: '重排序',
+    rrfTitle: '结果融合（RRF）',
+    rrfKLabel: 'RRF 平滑常数 (K)',
+    rrfKDescription: '值越大，排名靠前结果的优势越小。默认 60；设为 0 使用默认值。',
+    rrfVectorWeightLabel: 'RRF 向量权重',
+    rrfVectorWeightDescription: '控制向量检索对融合结果的影响。默认 0.7；设为 0 使用默认值。两项权重之和无需等于 1。',
+    rrfKeywordWeightLabel: 'RRF 关键词权重',
+    rrfKeywordWeightDescription: '控制关键词检索对融合结果的影响。默认 0.3；设为 0 使用默认值。两项权重之和无需等于 1。',
     title: '搜索设置',
     description: '配置知识库搜索和消息搜索的全局检索参数',
     embeddingTopKLabel: '向量检索数量 (Top K)',

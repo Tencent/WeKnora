@@ -2563,6 +2563,15 @@ export default {
     }
   },
   retrievalSettings: {
+    recallTab: '検索候補',
+    rerankTab: '再ランキング',
+    rrfTitle: '結果の統合（RRF）',
+    rrfKLabel: 'RRF 平滑化定数 (K)',
+    rrfKDescription: '値が大きいほど上位の検索結果の優位性が小さくなります。既定値は 60。0 は既定値を使用します。',
+    rrfVectorWeightLabel: 'RRF ベクトル重み',
+    rrfVectorWeightDescription: '統合結果に対するベクトル検索の影響を調整します。既定値は 0.7。0 は既定値を使用します。重みの合計を 1 にする必要はありません。',
+    rrfKeywordWeightLabel: 'RRF キーワード重み',
+    rrfKeywordWeightDescription: '統合結果に対するキーワード検索の影響を調整します。既定値は 0.3。0 は既定値を使用します。重みの合計を 1 にする必要はありません。',
     title: '検索設定',
     description: 'ナレッジベース検索とメッセージ検索に共通する検索パラメータを設定します',
     embeddingTopKLabel: 'ベクトル検索のTop K',
