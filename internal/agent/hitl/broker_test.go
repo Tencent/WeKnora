@@ -67,7 +67,7 @@ func TestBroker_AnswerOnOtherReplicaReachesOwnerThroughStore(t *testing.T) {
 	require.JSONEq(t, `{"answer":"blue"}`, string(out.Prompt.Response))
 	require.Equal(t, "alice", out.Prompt.ResolvedBy)
 
-	owner.Consume(context.Background(), out.Prompt.ID, types.AgentPromptDone)
+	owner.Consume(context.Background(), out.Prompt.ID, types.AgentPromptDone, out.Prompt.OwnerInstance)
 	row, err := store.Get(context.Background(), out.Prompt.ID)
 	require.NoError(t, err)
 	require.Equal(t, types.AgentPromptDone, row.Status)
@@ -165,7 +165,7 @@ func TestBroker_ExecutingUntilMarkedExecuted(t *testing.T) {
 		}))
 	require.NoError(t, err)
 
-	b.Consume(context.Background(), out.Prompt.ID, types.AgentPromptExecuting)
+	b.Consume(context.Background(), out.Prompt.ID, types.AgentPromptExecuting, out.Prompt.OwnerInstance)
 	row, _ := b.Store().Get(context.Background(), out.Prompt.ID)
 	require.Equal(t, types.AgentPromptExecuting, row.Status)
 
@@ -177,4 +177,91 @@ func TestBroker_ExecutingUntilMarkedExecuted(t *testing.T) {
 func resolveErr(b *Broker, ctx context.Context, req ResolveRequest) error {
 	_, err := b.Resolve(ctx, req)
 	return err
+}
+
+func TestBrokerConsumeFencesOwnerAndOnlyWinsOnce(t *testing.T) {
+	b := newTestBroker(NewMemoryStore())
+	ctx := t.Context()
+	require.NoError(t, b.store.Create(ctx, &types.AgentPrompt{
+		ID: "p", Status: types.AgentPromptAnswered, OwnerInstance: "new-run",
+	}))
+	require.False(t, b.Consume(ctx, "p", types.AgentPromptExecuting, "old-run"))
+	require.True(t, b.Consume(ctx, "p", types.AgentPromptExecuting, "new-run"))
+	require.False(t, b.Consume(ctx, "p", types.AgentPromptExecuting, "new-run"))
+}
+
+func TestBrokerWaiterDetachesAfterTakeoverOnSameReplica(t *testing.T) {
+	b := newTestBroker(NewMemoryStore())
+	ctx := t.Context()
+	var resumed Resolution
+	out, err := b.Await(ctx, suspendableSpec(time.Second, func(_ context.Context, p *types.AgentPrompt) error {
+		oldOwner := p.OwnerInstance
+		past := time.Now().Add(-time.Second)
+		_, err := b.store.Transition(ctx, p.ID, types.AgentPromptTransition{
+			From: []string{types.AgentPromptPending}, To: types.AgentPromptPending, LeaseUntil: &past,
+		})
+		require.NoError(t, err)
+		resumed, err = b.Resolve(ctx, answer(p.ID, "blue"))
+		require.NoError(t, err)
+		require.True(t, resumed.Resume)
+		require.NotEqual(t, oldOwner, resumed.Prompt.OwnerInstance)
+		return nil
+	}))
+	require.NoError(t, err)
+	require.True(t, out.Detached)
+	require.True(t, out.Suspended)
+	require.False(t, out.Answered)
+	snapshot, err := b.suspensions.Get(ctx, out.Prompt.AssistantMessageID)
+	require.NoError(t, err)
+	require.NotNil(t, snapshot, "the stale waiter must not delete the new owner's state")
+	require.True(t, b.Consume(ctx, resumed.Prompt.ID, types.AgentPromptExecuting, resumed.Prompt.OwnerInstance))
+}
+
+type renewBeforeTransitionStore struct {
+	Store
+	renew bool
+}
+
+func (s *renewBeforeTransitionStore) Transition(ctx context.Context, id string, tr types.AgentPromptTransition) (bool, error) {
+	if s.renew {
+		s.renew = false
+		row, err := s.Get(ctx, id)
+		if err != nil {
+			return false, err
+		}
+		if _, err := s.RenewLease(ctx, id, row.OwnerInstance, time.Now().Add(time.Hour)); err != nil {
+			return false, err
+		}
+	}
+	return s.Store.Transition(ctx, id, tr)
+}
+
+func TestReaperDoesNotTakeOverLeaseRenewedAfterScan(t *testing.T) {
+	for _, status := range []string{types.AgentPromptPending, types.AgentPromptAnswered, types.AgentPromptExecuting} {
+		t.Run(status, func(t *testing.T) {
+			ctx := t.Context()
+			store := &renewBeforeTransitionStore{Store: NewMemoryStore(), renew: true}
+			b := NewBroker(store, nil)
+			past := time.Now().Add(-time.Minute)
+			require.NoError(t, store.Create(ctx, &types.AgentPrompt{
+				ID: "p", Status: status, OwnerInstance: "owner", LeaseUntil: &past,
+				Suspendable: true, AssistantMessageID: "m",
+			}))
+			require.NoError(t, b.suspensions.Save(ctx, &types.AgentRunSuspension{
+				AssistantMessageID: "m", PromptID: "p", Snapshot: types.JSON(`{"version":1}`),
+			}))
+			n, err := b.Reap(ctx, time.Now(), RunHooks{Closed: func(context.Context, *types.AgentPrompt, *types.AgentRunSuspension, string) error {
+				t.Fatal("must not close a renewed run")
+				return nil
+			}})
+			require.NoError(t, err)
+			require.Zero(t, n)
+			row, err := store.Get(ctx, "p")
+			require.NoError(t, err)
+			require.Equal(t, status, row.Status)
+			saved, err := b.suspensions.Get(ctx, "m")
+			require.NoError(t, err)
+			require.NotNil(t, saved)
+		})
+	}
 }

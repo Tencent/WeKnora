@@ -30,6 +30,8 @@ type Checker interface {
 
 // Decision is the outcome of a pending tool approval.
 type Decision struct {
+	owner    string // execution token of the waiter or resumed run
+	answered bool
 	// PendingID identifies the prompt the decision belongs to; callers that
 	// execute an approved call report back with MarkExecuted(PendingID).
 	PendingID       string
@@ -274,6 +276,7 @@ func (g *Gate) RequestAndWait(ctx context.Context, req PendingRequest) (Decision
 		return Decision{
 			PendingID: out.Prompt.ID,
 			Suspended: &types.PromptSuspension{
+				Detached:  out.Detached,
 				PromptID:  out.Prompt.ID,
 				Kind:      types.AgentPromptKindToolApproval,
 				ExpiresAt: out.ExpiresAt,
@@ -282,7 +285,7 @@ func (g *Gate) RequestAndWait(ctx context.Context, req PendingRequest) (Decision
 	}
 
 	d := toolApprovalDecision(out)
-	g.consumeDecision(ctx, d, req.EventBus, req.SessionID, req.AssistantMessageID, req.RequestID)
+	g.consumeDecision(ctx, &d, req.EventBus, req.SessionID, req.AssistantMessageID, req.RequestID)
 	return d, nil
 }
 
@@ -300,19 +303,25 @@ func promptWaitSeconds(p *types.AgentPrompt, wait, fallback time.Duration) int {
 // returned it.
 func (g *Gate) ResumeDecision(ctx context.Context, prompt *types.AgentPrompt, bus *event.EventBus) Decision {
 	d := toolApprovalDecision(hitl.Outcome{Prompt: prompt, Answered: true})
-	g.consumeDecision(ctx, d, bus, prompt.SessionID, prompt.AssistantMessageID, prompt.RequestID)
+	g.consumeDecision(ctx, &d, bus, prompt.SessionID, prompt.AssistantMessageID, prompt.RequestID)
 	return d
 }
 
 func (g *Gate) consumeDecision(
-	ctx context.Context, d Decision, bus *event.EventBus, sessionID, assistantMessageID, requestID string,
+	ctx context.Context, d *Decision, bus *event.EventBus, sessionID, assistantMessageID, requestID string,
 ) {
 	// An approved call stays "executing" until MarkExecuted.
 	consumeTo := types.AgentPromptDone
 	if d.Approved {
 		consumeTo = types.AgentPromptExecuting
 	}
-	g.broker.Consume(ctx, d.PendingID, consumeTo)
+	if !g.broker.Consume(ctx, d.PendingID, consumeTo, d.owner) && d.answered {
+		d.Approved = false
+		d.ModifiedArgs = nil
+		d.Reason = "approval is no longer owned or was already consumed"
+		d.Suspended = &types.PromptSuspension{PromptID: d.PendingID, Kind: types.AgentPromptKindToolApproval, Detached: true}
+		return
+	}
 	if bus == nil {
 		return
 	}
@@ -407,7 +416,11 @@ func (g *Gate) RequestOAuthAndWait(ctx context.Context, req OAuthPendingRequest)
 	}
 
 	d := oauthDecision(out)
-	g.broker.Consume(ctx, d.PendingID, types.AgentPromptDone)
+	if !g.broker.Consume(ctx, d.PendingID, types.AgentPromptDone, d.owner) && d.Approved {
+		d.Approved = false
+		d.Reason = "authorization is no longer owned or was already consumed"
+		return d, nil
+	}
 	_ = req.EventBus.Emit(context.WithoutCancel(ctx), event.Event{
 		ID:        d.PendingID + "-mcp-oauth-resolved",
 		Type:      event.EventMCPOAuthResolved,
@@ -503,6 +516,8 @@ func (g *Gate) ResolveResponse(ctx context.Context, req hitl.ResolveRequest) (hi
 func toolApprovalDecision(out hitl.Outcome) Decision {
 	d := Decision{
 		PendingID:       out.Prompt.ID,
+		owner:           out.Prompt.OwnerInstance,
+		answered:        out.Answered,
 		Reason:          out.Reason,
 		TimedOut:        out.TimedOut,
 		ContextCanceled: out.Canceled,
@@ -525,6 +540,8 @@ func toolApprovalDecision(out hitl.Outcome) Decision {
 func oauthDecision(out hitl.Outcome) Decision {
 	d := Decision{
 		PendingID:       out.Prompt.ID,
+		owner:           out.Prompt.OwnerInstance,
+		answered:        out.Answered,
 		Reason:          out.Reason,
 		TimedOut:        out.TimedOut,
 		ContextCanceled: out.Canceled,

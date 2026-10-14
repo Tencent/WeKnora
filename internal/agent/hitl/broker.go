@@ -32,7 +32,7 @@ import (
 // deployments sharing the same Redis don't cross-talk.
 const pubsubChannelBase = "weknora:agent_prompt:wake"
 
-// instanceID identifies this process as the owner of in-memory waiters.
+// instanceID identifies this process for pub/sub wake-up suppression.
 var instanceID = uuid.New().String()
 
 // Timing of the owner-side wait loop. The poll covers lost pub/sub wake-ups;
@@ -71,6 +71,9 @@ type Outcome struct {
 	// Suspended means the prompt outlived the in-memory wait: the run must
 	// end now and be resumed once the prompt is answered.
 	Suspended bool
+	// Detached means another owner already took over this run. The old
+	// waiter must exit without publishing or persisting completion.
+	Detached  bool
 	ExpiresAt *time.Time
 	Reason    string
 }
@@ -238,6 +241,8 @@ func (b *Broker) Await(ctx context.Context, spec Spec) (out Outcome, err error) 
 		p.ID = uuid.New().String()
 	}
 	dbCtx := context.WithoutCancel(ctx)
+	// A fresh token also fences a takeover by another run on this same replica.
+	owner := uuid.NewString()
 	if spec.Suspend != nil {
 		if p.AssistantMessageID == "" {
 			return Outcome{}, errors.New("agent prompt: a suspendable prompt needs an assistant message")
@@ -255,7 +260,10 @@ func (b *Broker) Await(ctx context.Context, spec Spec) (out Outcome, err error) 
 		case err == nil:
 			defer func() {
 				if !out.Suspended {
-					b.dropSnapshot(dbCtx, p.AssistantMessageID, p.ID)
+					row, readErr := b.store.Get(dbCtx, p.ID)
+					if readErr == nil && (row == nil || row.OwnerInstance == owner) {
+						b.dropSnapshot(dbCtx, p.AssistantMessageID, p.ID)
+					}
 				}
 			}()
 		case spec.FallbackTimeout > 0:
@@ -267,7 +275,7 @@ func (b *Broker) Await(ctx context.Context, spec Spec) (out Outcome, err error) 
 	}
 	lease := time.Now().Add(b.leaseTTL)
 	p.Status = types.AgentPromptPending
-	p.OwnerInstance = instanceID
+	p.OwnerInstance = owner
 	p.LeaseUntil = &lease
 	if err := b.store.Create(dbCtx, p); err != nil {
 		return Outcome{}, fmt.Errorf("persist agent prompt: %w", err)
@@ -278,7 +286,7 @@ func (b *Broker) Await(ctx context.Context, spec Spec) (out Outcome, err error) 
 
 	if spec.Emit != nil {
 		if err := spec.Emit(ctx, p); err != nil {
-			b.closeAsOwner(dbCtx, p.ID, types.AgentPromptCanceled, "prompt could not be delivered")
+			b.closeAsOwner(dbCtx, p.ID, owner, types.AgentPromptCanceled, "prompt could not be delivered")
 			return Outcome{}, fmt.Errorf("emit agent prompt: %w", err)
 		}
 	}
@@ -293,47 +301,48 @@ func (b *Broker) Await(ctx context.Context, spec Spec) (out Outcome, err error) 
 	for {
 		select {
 		case <-wake:
-			if out, ok := b.closed(dbCtx, p.ID); ok {
+			if out, ok := b.closed(dbCtx, p.ID, owner); ok {
 				return out, nil
 			}
 		case <-poll.C:
-			if out, ok := b.closed(dbCtx, p.ID); ok {
+			if out, ok := b.closed(dbCtx, p.ID, owner); ok {
 				return out, nil
 			}
 		case <-renew.C:
-			if _, err := b.store.RenewLease(dbCtx, p.ID, instanceID, time.Now().Add(b.leaseTTL)); err != nil {
+			if _, err := b.store.RenewLease(dbCtx, p.ID, owner, time.Now().Add(b.leaseTTL)); err != nil {
 				logger.GetLogger(ctx).Warnf("renew agent prompt lease %s: %v", p.ID, err)
 			}
 		case <-timer.C:
 			if spec.Suspend != nil {
-				return b.suspend(dbCtx, p.ID), nil
+				return b.suspend(dbCtx, p.ID, owner), nil
 			}
-			return b.closeAsOwner(dbCtx, p.ID, types.AgentPromptExpired, spec.TimeoutReason), nil
+			return b.closeAsOwner(dbCtx, p.ID, owner, types.AgentPromptExpired, spec.TimeoutReason), nil
 		case <-ctx.Done():
-			return b.closeAsOwner(dbCtx, p.ID, types.AgentPromptCanceled, "request canceled"), nil
+			return b.closeAsOwner(dbCtx, p.ID, owner, types.AgentPromptCanceled, "request canceled"), nil
 		}
 	}
 }
 
 // suspend moves a pending prompt to suspended. When an answer won the race,
 // that answer is returned instead.
-func (b *Broker) suspend(ctx context.Context, id string) Outcome {
+func (b *Broker) suspend(ctx context.Context, id, owner string) Outcome {
 	expiresAt := b.expiresAt(time.Now())
 	ok, err := b.store.Transition(ctx, id, types.AgentPromptTransition{
-		From:      []string{types.AgentPromptPending},
-		To:        types.AgentPromptSuspended,
-		ExpiresAt: expiresAt,
+		From:          []string{types.AgentPromptPending},
+		To:            types.AgentPromptSuspended,
+		ExpiresAt:     expiresAt,
+		ExpectedOwner: &owner,
 	})
 	if err != nil {
 		logger.GetLogger(ctx).Warnf("suspend agent prompt %s: %v", id, err)
 	}
 	if !ok {
-		if out, closed := b.closed(ctx, id); closed {
+		if out, closed := b.closed(ctx, id, owner); closed {
 			return out
 		}
 		// The row could not be read or moved; fail the prompt rather than
 		// leave a run suspended on state nobody can confirm.
-		return b.closeAsOwner(ctx, id, types.AgentPromptExpired, "prompt could not be suspended")
+		return b.closeAsOwner(ctx, id, owner, types.AgentPromptExpired, "prompt could not be suspended")
 	}
 	return Outcome{
 		Prompt:    &types.AgentPrompt{ID: id, Status: types.AgentPromptSuspended, ExpiresAt: expiresAt},
@@ -358,17 +367,18 @@ func (b *Broker) dropSnapshot(ctx context.Context, messageID, promptID string) {
 
 // closeAsOwner ends a pending prompt from the waiting side. When an answer
 // won the race, that answer is returned instead.
-func (b *Broker) closeAsOwner(ctx context.Context, id, status, reason string) Outcome {
+func (b *Broker) closeAsOwner(ctx context.Context, id, owner, status, reason string) Outcome {
 	ok, err := b.store.Transition(ctx, id, types.AgentPromptTransition{
-		From:        []string{types.AgentPromptPending},
-		To:          status,
-		CloseReason: &reason,
+		From:          []string{types.AgentPromptPending},
+		To:            status,
+		CloseReason:   &reason,
+		ExpectedOwner: &owner,
 	})
 	if err != nil {
 		logger.GetLogger(ctx).Warnf("close agent prompt %s as %s: %v", id, status, err)
 	}
 	if !ok {
-		if out, closed := b.closed(ctx, id); closed {
+		if out, closed := b.closed(ctx, id, owner); closed {
 			return out
 		}
 	}
@@ -383,7 +393,7 @@ func (b *Broker) closeAsOwner(ctx context.Context, id, status, reason string) Ou
 // closed reads the row and reports its outcome once the owner should stop
 // waiting: the prompt ended, or another replica suspended it after this
 // owner's lease lapsed.
-func (b *Broker) closed(ctx context.Context, id string) (Outcome, bool) {
+func (b *Broker) closed(ctx context.Context, id, owner string) (Outcome, bool) {
 	row, err := b.store.Get(ctx, id)
 	if err != nil {
 		logger.GetLogger(ctx).Warnf("read agent prompt %s: %v", id, err)
@@ -391,6 +401,9 @@ func (b *Broker) closed(ctx context.Context, id string) (Outcome, bool) {
 	}
 	if row == nil || row.Status == types.AgentPromptPending {
 		return Outcome{}, false
+	}
+	if row.OwnerInstance != owner {
+		return Outcome{Prompt: row, Suspended: true, Detached: true, ExpiresAt: row.ExpiresAt}, true
 	}
 	if row.Status == types.AgentPromptSuspended {
 		return Outcome{Prompt: row, Suspended: true, ExpiresAt: row.ExpiresAt}, true
@@ -404,17 +417,20 @@ func (b *Broker) closed(ctx context.Context, id string) (Outcome, bool) {
 	}, true
 }
 
-// Consume moves an answered prompt to `to` once the waiter has acted on it:
+// Consume claims an answered prompt before its owner acts on it:
 // AgentPromptExecuting when the answer authorized a side effect still to run,
-// AgentPromptDone otherwise. Prompts closed by the system are left alone.
-func (b *Broker) Consume(ctx context.Context, id, to string) {
-	_, err := b.store.Transition(context.WithoutCancel(ctx), id, types.AgentPromptTransition{
-		From: []string{types.AgentPromptAnswered},
-		To:   to,
+// AgentPromptDone otherwise. Only the winner may continue the run.
+// Prompts closed by the system are left alone.
+func (b *Broker) Consume(ctx context.Context, id, to, owner string) bool {
+	ok, err := b.store.Transition(context.WithoutCancel(ctx), id, types.AgentPromptTransition{
+		From:          []string{types.AgentPromptAnswered},
+		To:            to,
+		ExpectedOwner: &owner,
 	})
 	if err != nil {
 		logger.GetLogger(ctx).Warnf("consume agent prompt %s: %v", id, err)
 	}
+	return err == nil && ok
 }
 
 // MarkExecuted records that the side effect an answer authorized has run.
@@ -444,6 +460,8 @@ type Resolution struct {
 	// left behind (such as its live-run marker). Otherwise the owner suspended
 	// the run itself and may still be finishing it.
 	OwnerGone bool
+	// OwnerLeaseUntil bounds how long the previous waiter may still finish.
+	OwnerLeaseUntil *time.Time
 }
 
 // Resolve records a user answer on an open prompt. A pending prompt's waiter
@@ -499,7 +517,8 @@ func (b *Broker) Resolve(ctx context.Context, req ResolveRequest) (Resolution, e
 			return Resolution{}, ErrAlreadyResolved
 		}
 	}
-	ownerGone := row.OwnerInstance == ""
+	ownerLeaseUntil := row.LeaseUntil
+	ownerGone := row.OwnerInstance == "" || (row.Status == types.AgentPromptSuspended && ownerLeaseUntil != nil && ownerLeaseUntil.Before(now))
 	resolvedBy := req.UserID
 	answer := func(t types.AgentPromptTransition) (bool, error) {
 		t.To = types.AgentPromptAnswered
@@ -509,7 +528,7 @@ func (b *Broker) Resolve(ctx context.Context, req ResolveRequest) (Resolution, e
 		return b.store.Transition(ctx, req.PromptID, t)
 	}
 
-	owner, lease := instanceID, now.Add(b.leaseTTL)
+	owner, lease := uuid.NewString(), now.Add(b.leaseTTL)
 	ok, err := answer(types.AgentPromptTransition{
 		From:        []string{types.AgentPromptSuspended},
 		UnexpiredAt: &now,
@@ -523,7 +542,7 @@ func (b *Broker) Resolve(ctx context.Context, req ResolveRequest) (Resolution, e
 		row.Status, row.Response = types.AgentPromptAnswered, types.JSON(req.Response)
 		row.ResolvedBy, row.ResolvedAt = resolvedBy, &now
 		row.OwnerInstance, row.LeaseUntil = owner, &lease
-		return Resolution{Prompt: row, Resume: true, OwnerGone: ownerGone}, nil
+		return Resolution{Prompt: row, Resume: true, OwnerGone: ownerGone, OwnerLeaseUntil: ownerLeaseUntil}, nil
 	}
 
 	ok, err = answer(types.AgentPromptTransition{From: []string{types.AgentPromptPending}})
@@ -542,7 +561,7 @@ func (b *Broker) Resolve(ctx context.Context, req ResolveRequest) (Resolution, e
 // KeepLease renews this replica's lease on a prompt it resumes until stop is
 // called or the prompt leaves the leased states. Without it the reaper
 // treats the resumed run as abandoned.
-func (b *Broker) KeepLease(ctx context.Context, id string) (stop func()) {
+func (b *Broker) KeepLease(ctx context.Context, id, owner string) (stop func()) {
 	ctx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	go func() {
 		ticker := time.NewTicker(b.renewInterval)
@@ -552,7 +571,7 @@ func (b *Broker) KeepLease(ctx context.Context, id string) (stop func()) {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				ok, err := b.store.RenewLease(ctx, id, instanceID, time.Now().Add(b.leaseTTL))
+				ok, err := b.store.RenewLease(ctx, id, owner, time.Now().Add(b.leaseTTL))
 				if err != nil {
 					logger.GetLogger(ctx).Warnf("renew agent prompt lease %s: %v", id, err)
 					continue

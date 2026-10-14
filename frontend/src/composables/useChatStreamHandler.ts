@@ -572,18 +572,20 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
             item.usage,
           ),
         )
-        if (awaiting) {
-          item.agentEventStream = markRaw(
-            (item.agentEventStream as ChatMessage[])
-              .filter((e) => e.type !== 'agent_complete')
-              .concat(pendingPromptEvents(item.pending_prompt)),
-          )
-        }
         item.hideContent = true
         if (agentStepsAreTruncated(item.agent_steps as unknown[])) item.truncated = true
       }
 
-      if (awaiting) item.is_completed = true
+      if (awaiting) {
+        item.isAgentMode = true
+        item.hideContent = true
+        item.agentEventStream = markRaw(
+          (item.agentEventStream as ChatMessage[])
+            .filter((e) => e.type !== 'agent_complete')
+            .concat(pendingPromptEvents(item.pending_prompt)),
+        )
+        item.is_completed = true
+      }
       restoreQuickAnswerFlags(item)
 
       if (item.content) {

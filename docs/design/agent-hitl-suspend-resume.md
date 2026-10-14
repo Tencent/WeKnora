@@ -113,7 +113,7 @@ stateDiagram-v2
 | `close_reason` | text | 系统侧关闭的原因（超时、取消、取代） |
 | `resolved_by` | varchar | 作答的用户 |
 | `resolved_at` | timestamptz | |
-| `owner_instance` | varchar | 短等待阶段持有 waiter 的实例 id |
+| `owner_instance` | varchar | 当前等待或恢复运行的唯一所有权令牌（同一副本接管时也更换） |
 | `lease_until` | timestamptz | 持有者租约，持有者每 10s 续约 |
 | `expires_at` | timestamptz | 挂起后的过期时间；为空表示不过期 |
 | `created_at` / `updated_at` | timestamptz | |
@@ -195,11 +195,13 @@ type PendingCall struct {
 }
 ```
 
-`types.ResumableAgentRequest` 保存 AgentID、SummaryModelID、ReasoningEffort、SharedAgentReadOnly、KnowledgeBaseIDs、KnowledgeIDs、TagScopes、MCPServiceIDs、SkillNames、WebSearchEnabled、QuestionOrigin、UserMessageID、Language。会话、附件和图片在恢复时从存储重新读取；本机浏览器连接绑定在某个副本的 WebSocket 上，恢复时一律视为不可用。`AgentTenantID`（P3 新增）记录智能体所属工作区，用来在恢复时解析共享智能体。已注入本轮的 steer 事件 id 仍未保存：挂起时未消费的 steer 消息会触发新一轮并取代挂起（8.1），因此恢复时 steer 列表里通常只剩已消费的记录；如果仍出现重复注入，再在快照中补存。
+`types.ResumableAgentRequest` 保存原始 Query、AgentID、SummaryModelID、ReasoningEffort、SharedAgentReadOnly、KnowledgeBaseIDs、KnowledgeIDs、TagScopes、MCPServiceIDs、SkillNames、WebSearchEnabled、QuestionOrigin、UserMessageID、Language。会话、附件和图片在恢复时从存储重新读取；本机浏览器连接绑定在某个副本的 WebSocket 上，恢复时一律视为不可用。`AgentTenantID`（P3 新增）记录智能体所属工作区，用来在恢复时解析共享智能体。快照中的 `UserMessages` 保存 `UserMessagesBefore` 引用的补充消息正文，恢复时按原轮次边界插入；旧快照缺少正文时，从同一会话的消息记录补齐。已消费事件仍由 steer 列表中的 consumed 标记去重。
 
 **临时句柄的处理（关键）**：模型输出里的 cN/dN/res:// 句柄只在本次运行的 `modelcontext.Registry` 中有效，恢复后 Registry 是新建的，编号可能不同。本轮 user 消息和工具结果在发给模型前都被编码过，所以快照里不存渲染后的消息，只存原始 query 和已解码的步骤。`think.go` 在拿到模型响应时已经对 `response.ToolCalls` 执行 `DecodeToolCalls`，`Function.Arguments` 即解码后的参数（`ModelArguments` 不落库），快照直接保存它和 `UnresolvedHandles`。恢复时跳过解码步骤；`UnresolvedHandles` 非空的调用照旧在执行前失败。
 
 已完成步骤里的 thought、工具参数和结果本来就以解码后的形式存储（`modelcontext` 的约定是“模型输出在被工具、存储、UI 消费前先解码”）。恢复后每次调用 LLM 前 `EncodeMessages` 会重新编码，编号一致性由新 Registry 自己保证。
+
+恢复 MCP 工具注册表时，同时读取已完成历史和挂起轮次中已发出的调用，确保首次调用的延迟加载工具也能重建。
 
 ## 5. 后端流程
 
@@ -215,8 +217,8 @@ type PendingCall struct {
    - 每 3 秒轮询一次数据库状态，兜底 Pub/Sub 丢消息。
    - 短等待计时器到期：可挂起时执行 `pending → suspended` 的 CAS，同时写入 `expires_at`；不可挂起时执行 `pending → expired`。CAS 失败说明用户刚好回答，转为读取回答。
    - ctx 取消（用户停止）：执行 `pending → canceled` 的 CAS。失败同样转为读取回答。
-5. 后台每 10 秒续约 `lease_until`，续约 CAS 条件为 `status='pending' AND owner_instance=self`。
-6. 拿到回答后由适配层 `Consume`：
+5. 后台每 10 秒续约 `lease_until`，续约 CAS 同时校验可续约状态和本次运行的 `owner_instance` 令牌。
+6. 拿到回答后由适配层 `Consume`，CAS 必须匹配本次运行的所有权令牌且成功后才能继续。失去所有权的等待者退出，不再落库或发布完成事件：
    - 需要外部副作用（批准的工具调用）：CAS `answered → executing`，执行工具，再 CAS `executing → done`（`MarkExecuted`），删除快照。
    - 其他（拒绝、OAuth、提问）：CAS `answered → done`，把回答交给调用方，删除快照。
    - 挂起：返回带 `Suspend` 标记的结果（见 6.2），引擎停止本轮并结束运行。
@@ -233,7 +235,7 @@ P1 已实现第 2 至 6 步中除快照与挂起以外的部分：超时一律�
 2. 调用该类型注册的校验函数。两类回答都拒绝未知字段。工具审批：回答为 `{approved, modified_args?, reason?}`，`approved` 必填；`modified_args` 只在批准时生效，必须是 JSON 对象；P2 起再按工具的 InputSchema 校验，工具定义取自 MCP 元数据快照，取不到就拒绝请求。提问：按问题的 schema 校验。校验失败返回 400。
 3. 记录仍为 `pending` 但持有者租约已过期（持有者已退出、回收任务尚未扫到）时，先按回收任务的规则把它转为 `suspended`（清空 `owner_instance`，并把消息改为等待输入），再走下面的 CAS，使这次回答直接恢复运行，而不是记给一个已经不存在的 waiter。
 4. 依次尝试两个 CAS，以区分之前的状态，同时兼容不支持 `RETURNING` 的场景：
-   - `UPDATE … SET status='answered', response=?, resolved_* WHERE id=? AND status='suspended' AND (expires_at IS NULL OR expires_at > now)`，同时把 `owner_instance` 和 `lease_until` 改为回答所在的副本。成功则由该副本恢复运行（5.4）。（P3 已实现）
+   - `UPDATE … SET status='answered', response=?, resolved_* WHERE id=? AND status='suspended' AND (expires_at IS NULL OR expires_at > now)`，同时生成新的 `owner_instance` 令牌并设置 `lease_until`，交给回答所在的副本。成功则由该副本恢复运行（5.4）。（P3 已实现）
    - `UPDATE … WHERE id=? AND status='pending'`。成功则通过 Pub/Sub 唤醒持有者，不等待 ack，因为持有者会轮询数据库兜底。（P1 已实现）
    - 两者都失败：重新读取记录，返回 `already_resolved`、`expired` 或 `not_found`。
 5. 响应体新增 `resumed: bool`。为 `true` 时，前端需要从偏移 0 重新接入该消息的事件流（旧事件已被清空）。（P3 已实现于 `POST /agent/tool-approvals/{id}`；MCP OAuth 回调不会挂起，忽略恢复结果。）
@@ -254,7 +256,7 @@ P1 已实现第 2 至 6 步中除快照与挂起以外的部分：超时一律�
 外层 defer：
 
 - 落库只调用 `UpdateMessage`（`Updates` 会写入非空的 `run_state`），**不**写入聊天历史知识库、不生成追问建议、不记录长期记忆，这些留到恢复后完成时再做。
-- 处理 steer 队列：未消费的 `after` 类消息照常触发 `kickNextRunFromSteerBacklog`。新一轮启动时会按 8.1 取代这次审批，语义与“用户发了新消息”一致。未消费的 `inject` 类消息按 `after` 处理。
+- 处理 steer 队列：未消费的 `after` 类消息照常触发 `kickNextRunFromSteerBacklog`。新一轮启动时会按 8.1 取代这次审批，语义与“用户发了新消息”一致。未消费的 `inject` 类消息按 `after` 处理。下一轮清空 `Resume`，不重放上一轮快照。
 - `ClearLiveRun`。`liveAgentRun` 把 `awaiting_input` 的消息视为没有运行中的任务，残留的 live-run 标记会被清掉。
 
 ### 5.4 恢复运行（回答所在的副本）
@@ -263,11 +265,11 @@ P1 已实现第 2 至 6 步中除快照与挂起以外的部分：超时一律�
 
 入口为 `session.Handler.ResumeSuspendedRun`，由 `MCPServiceHandler` 在 `resumed=true` 时调用，立即返回，运行在后台进行：
 
-1. `Broker.KeepLease` 开始续约，直到运行结束或交互离开 answered / executing。
+1. `Broker.KeepLease` 按新的所有权令牌续约，直到运行结束或交互离开 answered / executing。先等待旧运行落库并释放 live-run 标记；旧持有者失联或其租约到期后，从持久快照恢复尚未落库的等待消息，再清理残留标记。
 2. 读取快照，确认属于该交互；从快照的 `Request` 解出 `ResumableAgentRequest`，恢复语言设置。
 3. 用回答请求的身份（已在 `Resolve` 中校验为会话所有者）读取会话和助手消息，消息必须仍是 `awaiting_input` 且未完成；用 `AgentID` 和 `AgentTenantID` 重新解析智能体（共享智能体按原工作区解析）。
 4. 把消息的 `run_state` 清空后再发布 live run：`liveAgentRun` 把 `awaiting_input` 视为空闲，不先清空的话恢复中的运行会被当成残留标记清掉。
-5. `StreamManager.ResetEvents` 清空该消息的事件列表（steer 列表保留）。
+5. `StreamManager.ResetEvents` 清空该消息的事件列表（steer 列表保留）。恢复请求沿用原始 Query 和 RequestID，确保记忆、追问和历史分组保留本轮语义。
 6. 以 `skipSSE=true` 走 `executeQA`，和 steer 接力的服务端发起运行同一路径：会话互斥、沙箱 turn lease、`setupSSEStream`、完成落库都复用。`setupSSEStream` 在 `agent_query` 之后追加 `run_resumed`。`AgentQA` 看到 `QARequest.Resume` 时调用 `engine.Resume` 而不是 `Execute`。
 7. 运行结束后检查交互：仍是 `answered` 说明运行在执行工具之前就失败了（会话被占用、智能体加载失败等），此时把交互标记为 `failed`，并按 5.6 的方式收尾消息；否则按 `(assistant_message_id, prompt_id)` 条件删除快照。再次挂起时新快照属于新的交互，不会被删除。
 8. 第 2、3 步失败（快照缺失、智能体已删除、消息状态不符）时同样标记 `failed` 并收尾消息。
@@ -282,7 +284,7 @@ P1 已实现第 2 至 6 步中除快照与挂起以外的部分：超时一律�
 
 ### 5.6 回收任务
 
-复用 housekeeping 的 cron 方式，每分钟执行一次：
+复用 housekeeping 的 cron 方式，每分钟执行一次。租约过期后的状态更新同时校验扫描时的所有权令牌和当前租约仍已过期，避免误回收扫描后续约或接管的运行：
 
 1. `status='pending' AND lease_until < now`：持有者已失联。可挂起且快照属于该交互时，CAS 为 `suspended`（写入 `expires_at`），用快照的 `DisplaySteps()` 覆盖消息的 `agent_steps` 并标记为 `awaiting_input`；否则 CAS 为 `expired`。快照在进入审批时已经写入，此处直接可用。（P2 已实现，由容器里每分钟一次的 `AgentPromptReaper` 执行；开关关闭时同样运行，用来关闭崩溃遗留的 pending 记录。）
 2. `status IN ('answered','executing') AND lease_until < now` 且快照仍属于该交互：恢复运行的副本已失联。CAS 为 `failed`，消息收尾为已完成，被阻塞的调用及之后的调用写为失败（`executing` 时说明结果未知），删除快照。短等待中回答的交互快照已被持有者删除，不受影响。

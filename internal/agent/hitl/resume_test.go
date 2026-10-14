@@ -59,7 +59,7 @@ func TestBroker_ResolveSuspendedHandsRunToCaller(t *testing.T) {
 	row, err := b.Store().Get(ctx, "p1")
 	require.NoError(t, err)
 	require.Equal(t, types.AgentPromptAnswered, row.Status)
-	require.Equal(t, instanceID, row.OwnerInstance, "the resuming replica holds the lease")
+	require.Equal(t, res.Prompt.OwnerInstance, row.OwnerInstance, "the resuming replica holds the lease")
 	require.NotNil(t, row.LeaseUntil)
 	require.True(t, row.LeaseUntil.After(time.Now()))
 
@@ -82,10 +82,10 @@ func TestBroker_KeepLeaseRenewsUntilPromptCloses(t *testing.T) {
 	b := NewBroker(nil, nil, withLease(80*time.Millisecond, 10*time.Millisecond))
 	b.RegisterKind(testKind, validateTestAnswer)
 	seedSuspended(t, b, "p1", "m1", time.Now().Add(time.Hour))
-	_, err := b.Resolve(ctx, answer("p1", "blue"))
+	res, err := b.Resolve(ctx, answer("p1", "blue"))
 	require.NoError(t, err)
 
-	stop := b.KeepLease(ctx, "p1")
+	stop := b.KeepLease(ctx, "p1", res.Prompt.OwnerInstance)
 	defer stop()
 	time.Sleep(200 * time.Millisecond)
 	row, err := b.Store().Get(ctx, "p1")

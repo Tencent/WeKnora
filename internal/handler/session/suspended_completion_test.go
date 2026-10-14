@@ -57,3 +57,25 @@ func TestSuspendedRunIsSavedIncompleteAndAnnounced(t *testing.T) {
 	require.True(t, complete.Done)
 	require.Equal(t, suspension, complete.Data["suspended"])
 }
+
+func TestDetachedRunDoesNotOverwriteOrAnnounceCompletion(t *testing.T) {
+	messages := &imageCompletionMessages{}
+	stream := &imageCompletionStream{}
+	h := &Handler{messageService: messages, streamManager: stream}
+	bus := event.NewEventBus()
+	message := &types.Message{ID: "m", SessionID: "s", Role: "assistant", Content: "original"}
+	ctx := types.WithExecutionTenant(t.Context(), 1)
+	handler := h.setupStreamHandler(ctx, "s", "m", "req", 1, time.Now(), message, bus)
+	suspension := &types.PromptSuspension{PromptID: "p", Detached: true}
+	require.NoError(t, bus.Emit(ctx, event.Event{
+		Type: event.EventAgentComplete,
+		Data: event.AgentCompleteData{MessageID: "m", FinalAnswer: "stale result", Suspended: suspension},
+	}))
+	h.completeStreamAssistantMessage(ctx, &sseStreamContext{
+		eventBus: bus, streamHandler: handler, assistantMessage: message,
+	}, "question", "u")
+	require.Equal(t, "original", message.Content)
+	require.False(t, message.IsCompleted)
+	require.Nil(t, messages.saved)
+	require.Empty(t, stream.events)
+}

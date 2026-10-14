@@ -13,7 +13,6 @@ import (
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
 )
 
 // SetSuspendedRuns wires what resuming and superseding suspended runs need.
@@ -44,13 +43,13 @@ var (
 // answered, on this replica. It returns once the run has started; the run
 // streams to the message's event stream, where clients attach as they do to
 // any live run. ownerGone is hitl.Resolution.OwnerGone.
-func (h *Handler) ResumeSuspendedRun(c *gin.Context, prompt *types.AgentPrompt, ownerGone bool) {
+func (h *Handler) ResumeSuspendedRun(c *gin.Context, prompt *types.AgentPrompt, ownerGone bool, ownerLeaseUntil *time.Time) {
 	if h.promptBroker == nil || h.suspendedRuns == nil {
 		return
 	}
 	ctx := logger.CloneContext(context.WithoutCancel(c.Request.Context()))
-	stopLease := h.promptBroker.KeepLease(ctx, prompt.ID)
-	if err := h.awaitSuspendedRunSettled(ctx, prompt, ownerGone); err != nil {
+	stopLease := h.promptBroker.KeepLease(ctx, prompt.ID, prompt.OwnerInstance)
+	if err := h.awaitSuspendedRunSettled(ctx, prompt, ownerGone, ownerLeaseUntil); err != nil {
 		stopLease()
 		logger.Errorf(ctx, "resume run of prompt %s: %v", prompt.ID, err)
 		state, _ := h.promptBroker.Suspensions().Get(ctx, prompt.AssistantMessageID)
@@ -85,8 +84,11 @@ func (h *Handler) ResumeSuspendedRun(c *gin.Context, prompt *types.AgentPrompt, 
 // that run's teardown, which rewrites the message and clears the marker the
 // resumed run sets. A marker left by an owner that is gone is cleared here,
 // since nothing else will.
-func (h *Handler) awaitSuspendedRunSettled(ctx context.Context, prompt *types.AgentPrompt, ownerGone bool) error {
+func (h *Handler) awaitSuspendedRunSettled(ctx context.Context, prompt *types.AgentPrompt, ownerGone bool, ownerLeaseUntil *time.Time) error {
 	deadline := time.Now().Add(resumeSettleTimeout)
+	if ownerLeaseUntil != nil && ownerLeaseUntil.After(deadline) {
+		deadline = *ownerLeaseUntil
+	}
 	for {
 		msg, err := h.messageService.GetMessage(ctx, prompt.SessionID, prompt.AssistantMessageID)
 		if err != nil {
@@ -94,6 +96,22 @@ func (h *Handler) awaitSuspendedRunSettled(ctx context.Context, prompt *types.Ag
 		}
 		if msg == nil || msg.IsCompleted {
 			return fmt.Errorf("assistant message is no longer open")
+		}
+		if msg.RunState != types.MessageRunStateAwaitingInput &&
+			(ownerGone || (ownerLeaseUntil != nil && time.Now().After(deadline))) {
+			// The waiter may have died after suspending the prompt but before
+			// persisting its message. Rebuild it from the durable snapshot.
+			if h.promptBroker == nil || h.suspendedRuns == nil {
+				return fmt.Errorf("suspended run recovery is unavailable")
+			}
+			state, err := h.promptBroker.Suspensions().Get(ctx, prompt.AssistantMessageID)
+			if err != nil || state == nil || state.PromptID != prompt.ID {
+				return fmt.Errorf("read suspended run state: %v", err)
+			}
+			if err := h.suspendedRuns.MarkAwaitingInput(ctx, prompt, state); err != nil {
+				return fmt.Errorf("restore suspended message: %w", err)
+			}
+			msg.RunState = types.MessageRunStateAwaitingInput
 		}
 		if msg.RunState == types.MessageRunStateAwaitingInput {
 			liveID, _, err := h.streamManager.GetLiveRun(ctx, prompt.SessionID)
@@ -128,6 +146,10 @@ func (h *Handler) buildResumeRequest(
 	}
 	if state == nil || state.PromptID != prompt.ID {
 		return nil, nil, fmt.Errorf("no run state saved for this prompt")
+	}
+	state.Snapshot, err = h.restoreResumeUserMessages(ctx, prompt.SessionID, state.Snapshot)
+	if err != nil {
+		return nil, state, err
 	}
 	var req types.ResumableAgentRequest
 	if err := decodeResumableRequest(state.Snapshot, &req); err != nil {
@@ -164,9 +186,15 @@ func (h *Handler) buildResumeRequest(
 		logger.Warnf(ctx, "reset events of message %s: %v", msg.ID, err)
 	}
 
-	requestID := uuid.New().String()
+	// Steering messages must stay in the original assistant's history turn.
+	requestID := msg.RequestID
+	if requestID == "" {
+		requestID = prompt.RequestID
+	}
 	return &qaRequestContext{
-		ctx: ctx,
+		ctx:       ctx,
+		query:     req.Query,
+		userInput: req.Query,
 		// The run outlives this request, and gin recycles its context.
 		c:                   c.Copy(),
 		sessionID:           prompt.SessionID,
@@ -247,7 +275,38 @@ func decodeResumableRequest(snapshot []byte, req *types.ResumableAgentRequest) e
 	if err := json.Unmarshal(snap.Request, req); err != nil {
 		return fmt.Errorf("decode saved request: %w", err)
 	}
+	if req.Query == "" {
+		// Snapshots written before Query was included in the request.
+		req.Query = snap.Query
+	}
 	return nil
+}
+
+// Older snapshots retained steering boundaries but not their text. Resolve
+// those IDs from the same session before replaying, including the pending round.
+func (h *Handler) restoreResumeUserMessages(ctx context.Context, sessionID string, snapshot []byte) (types.JSON, error) {
+	snap, err := agent.DecodeRunSnapshot(snapshot)
+	if err != nil {
+		return nil, err
+	}
+	if snap.UserMessages == nil {
+		snap.UserMessages = make(map[string]string)
+	}
+	steps := append(append([]types.AgentStep(nil), snap.CompletedSteps...), snap.PendingRound.Step)
+	for _, step := range steps {
+		for _, id := range step.UserMessagesBefore {
+			if _, ok := snap.UserMessages[id]; ok {
+				continue
+			}
+			msg, err := h.messageService.GetMessage(ctx, sessionID, id)
+			if err != nil || msg == nil || msg.Role != "user" || msg.SessionID != sessionID {
+				return nil, fmt.Errorf("load steered message %s: %v", id, err)
+			}
+			snap.UserMessages[id] = msg.Content
+		}
+	}
+	data, err := json.Marshal(snap)
+	return types.JSON(data), err
 }
 
 func (h *Handler) writeRunResumedEvent(ctx context.Context, sessionID, messageID, promptID string) {

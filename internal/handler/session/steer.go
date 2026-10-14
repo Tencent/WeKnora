@@ -947,6 +947,8 @@ func (h *Handler) claimNextSteerFollowUp(
 		prevReqCtx.sessionID, len(backlog), len(injected))
 
 	followUp := *prevReqCtx
+	// A queued message starts a new turn, never another replay of this one.
+	followUp.resume = nil
 	followUp.ctx = ctx
 	followUp.query = first.Content
 	followUp.userInput = first.Content

@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/types"
@@ -134,4 +135,59 @@ func TestClosedStepsFailUnfinishedCalls(t *testing.T) {
 		require.Equal(t, "expired", c.Result.Error)
 	}
 	require.Equal(t, "/etc", calls[1].Args["path"])
+}
+
+func TestResumeReplaysSteeringAtItsOriginalBoundaries(t *testing.T) {
+	snap, err := DecodeRunSnapshot(suspendedSnapshot(t))
+	require.NoError(t, err)
+	snap.CompletedSteps = []types.AgentStep{{Thought: "previous round", UserMessagesBefore: []string{"u1"}}}
+	snap.PendingRound.Step.UserMessagesBefore = []string{"u2"}
+	snap.UserMessages = map[string]string{"u1": "use staging", "u2": "only two replicas"}
+	data, err := json.Marshal(snap)
+	require.NoError(t, err)
+	f := newSuspendFixture(t, "first_tool", false)
+	model := f.engine.chatModel.(*mockChat)
+	model.responses = []mockResponse{{chunks: []types.StreamResponse{{
+		ResponseType: types.ResponseTypeAnswer, Content: "done", Done: true, FinishReason: "stop",
+	}}}}
+	_, err = f.engine.Resume(t.Context(), "sess-1", "msg-1", nil, data, answeredPrompt("call-b"))
+	require.NoError(t, err)
+	var contents []string
+	for _, m := range model.calls[0] {
+		contents = append(contents, m.Content)
+	}
+	// The provider normalization can merge adjacent user messages, including
+	// the original query and the first steering message.
+	transcript := strings.Join(contents, "\n")
+	previous := -1
+	for _, content := range []string{types.SteerMessageContent("use staging"), "previous round",
+		types.SteerMessageContent("only two replicas"), "checking first"} {
+		position := strings.Index(transcript, content)
+		require.Greater(t, position, previous, "missing or misplaced content: %s", content)
+		previous = position
+	}
+}
+
+func TestSteeringTextSurvivesAnotherSuspension(t *testing.T) {
+	f := newSuspendFixture(t, "first_tool", false)
+	f.engine.EnableSuspension(nil)
+	f.engine.SetSteerSink(&fakeSteerSink{queued: []map[string]interface{}{steerEntry("s1", "use staging")}})
+	state := f.run(t)
+	require.NotNil(t, state.Suspended)
+	snap, err := DecodeRunSnapshot(f.blocked.snapshot)
+	require.NoError(t, err)
+	require.Len(t, snap.PendingRound.Step.UserMessagesBefore, 1)
+	id := snap.PendingRound.Step.UserMessagesBefore[0]
+	require.Equal(t, "use staging", snap.UserMessages[id])
+	// A second suspension retains the already-consumed steering text.
+	snap.PendingRound.Calls[2].Name = suspendingToolName
+	data, err := json.Marshal(snap)
+	require.NoError(t, err)
+	f2 := newSuspendFixture(t, "first_tool", false)
+	f2.engine.EnableSuspension(nil)
+	_, err = f2.engine.Resume(t.Context(), "sess-1", "msg-1", nil, data, answeredPrompt("call-b"))
+	require.NoError(t, err)
+	again, err := DecodeRunSnapshot(f2.blocked.snapshot)
+	require.NoError(t, err)
+	require.Equal(t, snap.UserMessages, again.UserMessages)
 }

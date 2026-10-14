@@ -50,13 +50,35 @@ func (e *AgentEngine) Resume(
 	}
 	systemPrompt := e.buildSystemPrompt(ctx)
 	e.beginTurn(snap.Query, snap.ImageURLs, state)
+	for id, content := range snap.UserMessages {
+		e.recordSteerMessage(id, content)
+	}
 	messages := e.buildMessagesWithLLMContext(systemPrompt, snap.Query, sessionID, llmContext, snap.ImageURLs)
+	appendUsers := func(step types.AgentStep) error {
+		for _, id := range step.UserMessagesBefore {
+			content, ok := snap.UserMessages[id]
+			if !ok {
+				return fmt.Errorf("missing steered message %s in run snapshot", id)
+			}
+			messages = append(messages, chat.Message{Role: "user", Content: types.SteerMessageContent(content)})
+		}
+		return nil
+	}
 	for _, step := range state.RoundSteps {
+		if err := appendUsers(step); err != nil {
+			return nil, err
+		}
 		messages = e.appendToolResults(messages, step)
 		messages = e.appendToolImages(ctx, messages, step)
 	}
+	if err := appendUsers(p.Step); err != nil {
+		return nil, err
+	}
 	if e.toolRegistry != nil {
 		e.toolRegistry.RememberMCPHistory(messages)
+		// These calls were issued before suspension, including the first call
+		// to a tool whose definition was only exposed by a describe round.
+		e.toolRegistry.RememberMCPHistory(pendingCallHistory(p))
 		e.toolRegistry.RefreshMCPTools(ctx)
 	}
 	tools := e.buildToolsForLLM()
@@ -91,6 +113,16 @@ func (e *AgentEngine) Resume(
 		return nil, err
 	}
 	return state, nil
+}
+
+func pendingCallHistory(p PendingRound) []chat.Message {
+	calls := make([]chat.ToolCall, len(p.Calls))
+	for i, c := range p.Calls {
+		calls[i] = chat.ToolCall{ID: c.ID, Type: "function", Function: chat.FunctionCall{
+			Name: c.Name, Arguments: c.Arguments,
+		}}
+	}
+	return []chat.Message{{Role: "assistant", ToolCalls: calls}}
 }
 
 // finishPendingRound runs the interrupted round from its blocked call on,

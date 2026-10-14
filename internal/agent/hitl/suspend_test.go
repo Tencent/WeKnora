@@ -221,7 +221,7 @@ func TestBroker_ResolveTakesOverPromptOfVanishedOwner(t *testing.T) {
 	row, err := store.Get(ctx, "p1")
 	require.NoError(t, err)
 	require.Equal(t, types.AgentPromptAnswered, row.Status)
-	require.Equal(t, instanceID, row.OwnerInstance)
+	require.Equal(t, res.Prompt.OwnerInstance, row.OwnerInstance)
 }
 
 // A run that suspended itself still has an owner tearing it down.

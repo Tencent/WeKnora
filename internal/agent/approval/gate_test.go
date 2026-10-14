@@ -383,6 +383,7 @@ func TestGate_ResolveSuspendedThenResumeDecision(t *testing.T) {
 	require.JSONEq(t, `{"a":2}`, string(got.ModifiedArgs))
 	require.Equal(t, d.PendingID, resolved.PendingID)
 	require.True(t, resolved.Approved)
+	require.False(t, g.ResumeDecision(context.Background(), res.Prompt, nil).Approved, "an approval can execute only once")
 
 	row, err := g.broker.Store().Get(context.Background(), d.PendingID)
 	require.NoError(t, err)
@@ -410,6 +411,58 @@ func TestValidateToolApprovalResponse_IsStrict(t *testing.T) {
 			require.NoError(t, err, body)
 		} else {
 			require.Error(t, err, body)
+		}
+	}
+}
+
+func TestAnsweredPromptOnlyCurrentOwnerCanContinue(t *testing.T) {
+	for _, kind := range []string{types.AgentPromptKindToolApproval, types.AgentPromptKindAskUser} {
+		for _, accept := range []bool{true, false} {
+			name := kind + "/decline"
+			if accept {
+				name = kind + "/accept"
+			}
+			t.Run(name, func(t *testing.T) {
+				ctx := t.Context()
+				g := NewGate(nil, nil, nil)
+				response := `{"approved":false}`
+				if kind == types.AgentPromptKindAskUser {
+					response = `{"declined":true}`
+					if accept {
+						response = `{"text":"staging"}`
+					}
+				} else if accept {
+					response = `{"approved":true}`
+				}
+				current := &types.AgentPrompt{ID: "p", Kind: kind, Status: types.AgentPromptAnswered,
+					OwnerInstance: "new-run", Response: types.JSON(response)}
+				require.NoError(t, g.broker.Store().Create(ctx, current))
+				stale := *current
+				stale.OwnerInstance = "old-run"
+				if kind == types.AgentPromptKindAskUser {
+					denied := g.ResumeAnswer(ctx, &stale, nil)
+					require.False(t, denied.Answered)
+					require.NotNil(t, denied.Suspended)
+					require.True(t, denied.Suspended.Detached)
+					winner := g.ResumeAnswer(ctx, current, nil)
+					require.Nil(t, winner.Suspended)
+					require.Equal(t, accept, winner.Answered)
+					duplicate := g.ResumeAnswer(ctx, current, nil)
+					require.NotNil(t, duplicate.Suspended)
+					require.True(t, duplicate.Suspended.Detached)
+				} else {
+					denied := g.ResumeDecision(ctx, &stale, nil)
+					require.False(t, denied.Approved)
+					require.NotNil(t, denied.Suspended)
+					require.True(t, denied.Suspended.Detached)
+					winner := g.ResumeDecision(ctx, current, nil)
+					require.Nil(t, winner.Suspended)
+					require.Equal(t, accept, winner.Approved)
+					duplicate := g.ResumeDecision(ctx, current, nil)
+					require.NotNil(t, duplicate.Suspended)
+					require.True(t, duplicate.Suspended.Detached)
+				}
+			})
 		}
 	}
 }

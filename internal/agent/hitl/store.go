@@ -65,6 +65,12 @@ func (s *memoryStore) Transition(_ context.Context, id string, t types.AgentProm
 	if t.UnexpiredAt != nil && row.ExpiresAt != nil && !row.ExpiresAt.After(*t.UnexpiredAt) {
 		return false, nil
 	}
+	if t.ExpectedOwner != nil && row.OwnerInstance != *t.ExpectedOwner {
+		return false, nil
+	}
+	if t.LeaseBefore != nil && (row.LeaseUntil == nil || !row.LeaseUntil.Before(*t.LeaseBefore)) {
+		return false, nil
+	}
 	if t.Owner != nil {
 		row.OwnerInstance = *t.Owner
 	}

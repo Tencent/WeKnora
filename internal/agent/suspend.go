@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"sync"
 
 	agenttools "github.com/Tencent/WeKnora/internal/agent/tools"
@@ -25,6 +26,8 @@ type RunSnapshot struct {
 	Request   json.RawMessage `json:"request,omitempty"`
 	Query     string          `json:"query"`
 	ImageURLs []string        `json:"image_urls,omitempty"`
+	// UserMessages holds the raw text referenced by UserMessagesBefore.
+	UserMessages map[string]string `json:"user_messages,omitempty"`
 
 	CompletedSteps []types.AgentStep     `json:"completed_steps"`
 	KnowledgeRefs  []*types.SearchResult `json:"knowledge_refs,omitempty"`
@@ -106,10 +109,11 @@ func (s *RunSnapshot) ClosedSteps(reason string) []types.AgentStep {
 // turnProgress tracks the turn so it can be captured mid-round. Tool calls
 // finish on errgroup goroutines, hence the lock.
 type turnProgress struct {
-	mu        sync.Mutex
-	query     string
-	imageURLs []string
-	state     *types.AgentState
+	mu           sync.Mutex
+	query        string
+	imageURLs    []string
+	state        *types.AgentState
+	userMessages map[string]string
 	// round is the round executing tools, nil between rounds.
 	round *roundProgress
 }
@@ -138,6 +142,16 @@ func (e *AgentEngine) beginTurn(query string, imageURLs []string, state *types.A
 	e.progress.mu.Lock()
 	defer e.progress.mu.Unlock()
 	e.progress.query, e.progress.imageURLs, e.progress.state = query, imageURLs, state
+	e.progress.userMessages = make(map[string]string)
+}
+
+func (e *AgentEngine) recordSteerMessage(id, content string) {
+	e.progress.mu.Lock()
+	defer e.progress.mu.Unlock()
+	if e.progress.userMessages == nil {
+		e.progress.userMessages = make(map[string]string)
+	}
+	e.progress.userMessages[id] = content
 }
 
 func (e *AgentEngine) beginRound(step types.AgentStep, calls []types.LLMToolCall) {
@@ -240,6 +254,7 @@ func (e *AgentEngine) snapshot(blocked int) (*RunSnapshot, error) {
 		Request:        e.suspendRequest,
 		Query:          p.query,
 		ImageURLs:      p.imageURLs,
+		UserMessages:   maps.Clone(p.userMessages),
 		CompletedSteps: append([]types.AgentStep(nil), p.state.RoundSteps...),
 		KnowledgeRefs:  append([]*types.SearchResult(nil), p.state.KnowledgeRefs...),
 		CurrentRound:   p.state.CurrentRound,

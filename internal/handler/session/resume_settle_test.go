@@ -56,7 +56,7 @@ func TestResumeWaitsForSuspendingRunToFinish(t *testing.T) {
 	}()
 
 	start := time.Now()
-	require.NoError(t, h.awaitSuspendedRunSettled(t.Context(), settlePrompt, false))
+	require.NoError(t, h.awaitSuspendedRunSettled(t.Context(), settlePrompt, false, nil))
 	require.GreaterOrEqual(t, time.Since(start), 100*time.Millisecond)
 }
 
@@ -69,7 +69,7 @@ func TestResumeClearsMarkerLeftByVanishedOwner(t *testing.T) {
 	}}
 	h := &Handler{messageService: messages, streamManager: mgr}
 
-	require.NoError(t, h.awaitSuspendedRunSettled(t.Context(), settlePrompt, true))
+	require.NoError(t, h.awaitSuspendedRunSettled(t.Context(), settlePrompt, true, nil))
 	live, _, err := mgr.GetLiveRun(t.Context(), "s")
 	require.NoError(t, err)
 	require.Empty(t, live)
@@ -79,8 +79,8 @@ func TestResumeGivesUpOnMessageThatNeverSettles(t *testing.T) {
 	shortResumeSettle(t, 60*time.Millisecond)
 	messages := &settleMessages{msg: types.Message{ID: "m", SessionID: "s"}}
 	h := &Handler{messageService: messages, streamManager: stream.NewMemoryStreamManager()}
-	require.Error(t, h.awaitSuspendedRunSettled(t.Context(), settlePrompt, false))
+	require.Error(t, h.awaitSuspendedRunSettled(t.Context(), settlePrompt, false, nil))
 
 	messages.set(func(m *types.Message) { m.IsCompleted = true })
-	require.Error(t, h.awaitSuspendedRunSettled(t.Context(), settlePrompt, true))
+	require.Error(t, h.awaitSuspendedRunSettled(t.Context(), settlePrompt, true, nil))
 }

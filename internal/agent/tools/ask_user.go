@@ -105,7 +105,7 @@ func (t *AskUserTool) Execute(ctx context.Context, args json.RawMessage) (*types
 				snapshot = nil
 			}
 		}
-		tenantID, _ := types.TenantIDFromContext(ctx)
+		tenantID := types.CallerFromContext(ctx).TenantID
 		var err error
 		answer, err = t.asker.AskUser(waitCtx, approval.AskRequest{
 			TenantID:           tenantID,

@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -20,7 +21,7 @@ import (
 
 type recordingResumer struct{ prompts []*types.AgentPrompt }
 
-func (r *recordingResumer) ResumeSuspendedRun(_ *gin.Context, p *types.AgentPrompt, _ bool) {
+func (r *recordingResumer) ResumeSuspendedRun(_ *gin.Context, p *types.AgentPrompt, _ bool, _ *time.Time) {
 	r.prompts = append(r.prompts, p)
 }
 

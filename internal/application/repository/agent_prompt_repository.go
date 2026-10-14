@@ -84,6 +84,12 @@ func (r *AgentPromptRepository) Transition(
 	if t.UnexpiredAt != nil {
 		q = q.Where("expires_at IS NULL OR expires_at > ?", *t.UnexpiredAt)
 	}
+	if t.ExpectedOwner != nil {
+		q = q.Where("owner_instance = ?", *t.ExpectedOwner)
+	}
+	if t.LeaseBefore != nil {
+		q = q.Where("lease_until < ?", *t.LeaseBefore)
+	}
 	res := q.Updates(updates)
 	if res.Error != nil {
 		return false, fmt.Errorf("transition agent prompt: %w", res.Error)

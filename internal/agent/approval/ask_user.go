@@ -28,6 +28,8 @@ type AskRequest struct {
 
 // Answer is how an ask_user prompt ended.
 type Answer struct {
+	owner    string
+	answered bool
 	PromptID string
 	Answered bool
 	Response types.AskUserPromptResponse
@@ -116,6 +118,7 @@ func (g *Gate) AskUser(ctx context.Context, req AskRequest) (Answer, error) {
 		return Answer{
 			PromptID: out.Prompt.ID,
 			Suspended: &types.PromptSuspension{
+				Detached:  out.Detached,
 				PromptID:  out.Prompt.ID,
 				Kind:      types.AgentPromptKindAskUser,
 				ExpiresAt: out.ExpiresAt,
@@ -123,21 +126,27 @@ func (g *Gate) AskUser(ctx context.Context, req AskRequest) (Answer, error) {
 		}, nil
 	}
 	a := askAnswer(out)
-	g.consumeAnswer(ctx, a, req.EventBus, req.SessionID, req.AssistantMessageID, req.RequestID)
+	g.consumeAnswer(ctx, &a, req.EventBus, req.SessionID, req.AssistantMessageID, req.RequestID)
 	return a, nil
 }
 
 // ResumeAnswer implements UserAsker.
 func (g *Gate) ResumeAnswer(ctx context.Context, prompt *types.AgentPrompt, bus *event.EventBus) Answer {
 	a := askAnswer(hitl.Outcome{Prompt: prompt, Answered: true})
-	g.consumeAnswer(ctx, a, bus, prompt.SessionID, prompt.AssistantMessageID, prompt.RequestID)
+	g.consumeAnswer(ctx, &a, bus, prompt.SessionID, prompt.AssistantMessageID, prompt.RequestID)
 	return a
 }
 
 func (g *Gate) consumeAnswer(
-	ctx context.Context, a Answer, bus *event.EventBus, sessionID, assistantMessageID, requestID string,
+	ctx context.Context, a *Answer, bus *event.EventBus, sessionID, assistantMessageID, requestID string,
 ) {
-	g.broker.Consume(ctx, a.PromptID, types.AgentPromptDone)
+	if !g.broker.Consume(ctx, a.PromptID, types.AgentPromptDone, a.owner) && a.answered {
+		a.Answered = false
+		a.Response = types.AskUserPromptResponse{}
+		a.Reason = "answer is no longer owned or was already consumed"
+		a.Suspended = &types.PromptSuspension{PromptID: a.PromptID, Kind: types.AgentPromptKindAskUser, Detached: true}
+		return
+	}
 	if bus == nil {
 		return
 	}
@@ -166,7 +175,7 @@ func (g *Gate) consumeAnswer(
 }
 
 func askAnswer(out hitl.Outcome) Answer {
-	a := Answer{PromptID: out.Prompt.ID, Reason: out.Reason, TimedOut: out.TimedOut, Canceled: out.Canceled}
+	a := Answer{owner: out.Prompt.OwnerInstance, answered: out.Answered, PromptID: out.Prompt.ID, Reason: out.Reason, TimedOut: out.TimedOut, Canceled: out.Canceled}
 	if !out.Answered {
 		return a
 	}

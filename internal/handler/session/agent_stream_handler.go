@@ -749,6 +749,9 @@ func (h *AgentStreamHandler) handleComplete(ctx context.Context, evt event.Event
 
 	suspended, _ := data.Suspended.(*types.PromptSuspension)
 	h.suspension = suspended
+	if suspended != nil && suspended.Detached {
+		return nil
+	}
 
 	// Update assistant message with final data
 	if data.MessageID == h.assistantMessageID {

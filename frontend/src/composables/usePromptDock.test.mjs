@@ -114,3 +114,30 @@ test('Enter submits unless it inserts a line break or confirms an IME candidate'
   assert.equal(isSubmitKey(key({ keyCode: 229 })), false)
   assert.equal(isSubmitKey(key({ key: 'a' })), false)
 })
+
+test('Enter on a focused control keeps its native action instead of submitting the prompt', () => {
+  for (const control of ['reject', 'skip', 'option', 'args-toggle', 'dock-next']) {
+    const key = {
+      key: 'Enter', shiftKey: false, isComposing: false, keyCode: 13,
+      target: { closest: (selector) => selector.includes('button') ? { control } : null },
+    }
+    assert.equal(isSubmitKey(key), false, control)
+  }
+})
+
+test('the approval handler does not approve when Enter targets Reject', () => {
+  const card = readFileSync(new URL('../views/chat/components/ToolApprovalCard.vue', import.meta.url), 'utf8')
+  const handler = card.slice(card.indexOf('const handleKey ='), card.indexOf('defineExpose'))
+  const decisions = []
+  const compiled = ts.transpileModule(handler, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText
+  const handleKey = vm.runInNewContext(compiled + '\nhandleKey', {
+    interactive: { value: true }, isJsonValid: { value: true }, isSubmitKey,
+    submit: (decision) => decisions.push(decision),
+  })
+  const key = { key: 'Enter', shiftKey: false, isComposing: false, keyCode: 13,
+    target: { tagName: 'BUTTON', closest: () => ({ textContent: 'Reject' }) } }
+  assert.equal(handleKey(key), false)
+  assert.deepEqual(decisions, [])
+  assert.equal(handleKey({ ...key, target: { tagName: 'SECTION', closest: () => null } }), true)
+  assert.deepEqual(decisions, ['approve'])
+})

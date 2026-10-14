@@ -193,3 +193,32 @@ func TestAgentPromptRepositoryExpiryAndSessionQueries(t *testing.T) {
 	require.True(t, answer("open"))
 	require.True(t, answer("forever"), "a prompt without expiry stays answerable")
 }
+
+func TestAgentPromptTransitionRechecksOwnerAndLease(t *testing.T) {
+	repo := newAgentPromptTestRepo(t)
+	ctx := t.Context()
+	past, now, future := time.Now().Add(-time.Minute), time.Now(), time.Now().Add(time.Minute)
+	owner, other := "owner", "other"
+	require.NoError(t, repo.Create(ctx, &types.AgentPrompt{
+		ID: "p", TenantID: 1, SessionID: "s", Kind: "ask_user",
+		Status: types.AgentPromptPending, OwnerInstance: owner, LeaseUntil: &past,
+	}))
+	transition := types.AgentPromptTransition{
+		From: []string{types.AgentPromptPending}, To: types.AgentPromptSuspended,
+		ExpectedOwner: &other, LeaseBefore: &now,
+	}
+	ok, err := repo.Transition(ctx, "p", transition)
+	require.NoError(t, err)
+	require.False(t, ok)
+	transition.ExpectedOwner = &owner
+	_, err = repo.RenewLease(ctx, "p", owner, future)
+	require.NoError(t, err)
+	ok, err = repo.Transition(ctx, "p", transition)
+	require.NoError(t, err)
+	require.False(t, ok)
+	_, err = repo.RenewLease(ctx, "p", owner, past)
+	require.NoError(t, err)
+	ok, err = repo.Transition(ctx, "p", transition)
+	require.NoError(t, err)
+	require.True(t, ok)
+}

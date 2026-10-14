@@ -18,5 +18,9 @@ export function isTextEntry(el: EventTarget | null): boolean {
 
 /** Enter that submits: not composing an IME candidate, not a soft line break. */
 export function isSubmitKey(e: KeyboardEvent): boolean {
+  // Let focused controls perform their own action (especially Reject/Skip).
+  // The dock receives bubbled keydowns from both its cards and its header.
+  const target = e.target as Element | null
+  if (target?.closest?.('button, a, [role="button"], [role="option"]')) return false
   return e.key === 'Enter' && !e.shiftKey && !e.isComposing && e.keyCode !== 229
 }

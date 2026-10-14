@@ -6,6 +6,7 @@ import (
 	stderrors "errors"
 	"net/http"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/Tencent/WeKnora/internal/agent/approval"
@@ -38,7 +39,7 @@ type MCPServiceHandler struct {
 // RunResumer continues an agent run that ended suspended on prompt, now
 // answered by the request c. It must not block on the run.
 type RunResumer interface {
-	ResumeSuspendedRun(c *gin.Context, prompt *types.AgentPrompt, ownerGone bool)
+	ResumeSuspendedRun(c *gin.Context, prompt *types.AgentPrompt, ownerGone bool, ownerLeaseUntil *time.Time)
 }
 
 // SetRunResumer wires the resumer of suspended runs.
@@ -835,7 +836,7 @@ func (h *MCPServiceHandler) finishResolve(c *gin.Context, pendingID string, res 
 	// A suspended run has ended; this replica now continues it.
 	resumed := res.Resume && h.runResumer != nil
 	if resumed {
-		h.runResumer.ResumeSuspendedRun(c, res.Prompt, res.OwnerGone)
+		h.runResumer.ResumeSuspendedRun(c, res.Prompt, res.OwnerGone, res.OwnerLeaseUntil)
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true, "resumed": resumed})
 }

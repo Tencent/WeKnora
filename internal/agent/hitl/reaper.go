@@ -70,7 +70,7 @@ func (b *Broker) Reap(ctx context.Context, now time.Time, hooks RunHooks) (int, 
 		if row.Status == types.AgentPromptExecuting {
 			reason = ReasonExecuteStopped
 		}
-		if b.closeRun(ctx, row, state, []string{row.Status}, types.AgentPromptFailed, reason, hooks) {
+		if b.closeRun(ctx, row, state, []string{row.Status}, types.AgentPromptFailed, reason, hooks, now) {
 			reaped++
 		}
 	}
@@ -129,9 +129,11 @@ func (b *Broker) reapPending(ctx context.Context, now time.Time, row *types.Agen
 	if state == nil {
 		reason := ReasonOwnerStopped
 		ok, err := b.store.Transition(ctx, row.ID, types.AgentPromptTransition{
-			From:        []string{types.AgentPromptPending},
-			To:          types.AgentPromptExpired,
-			CloseReason: &reason,
+			From:          []string{types.AgentPromptPending},
+			To:            types.AgentPromptExpired,
+			ExpectedOwner: &row.OwnerInstance,
+			LeaseBefore:   &now,
+			CloseReason:   &reason,
 		})
 		if err != nil {
 			log.Warnf("expire orphaned agent prompt %s: %v", row.ID, err)
@@ -144,10 +146,12 @@ func (b *Broker) reapPending(ctx context.Context, now time.Time, row *types.Agen
 	// Resolve reports as Resolution.OwnerGone.
 	noOwner := ""
 	ok, err := b.store.Transition(ctx, row.ID, types.AgentPromptTransition{
-		From:      []string{types.AgentPromptPending},
-		To:        types.AgentPromptSuspended,
-		ExpiresAt: expiresAt,
-		Owner:     &noOwner,
+		From:          []string{types.AgentPromptPending},
+		To:            types.AgentPromptSuspended,
+		ExpiresAt:     expiresAt,
+		Owner:         &noOwner,
+		ExpectedOwner: &row.OwnerInstance,
+		LeaseBefore:   &now,
 	})
 	if err != nil {
 		log.Warnf("suspend orphaned agent prompt %s: %v", row.ID, err)
@@ -170,14 +174,19 @@ func (b *Broker) reapPending(ctx context.Context, now time.Time, row *types.Agen
 // drops the saved state. state may be nil when the run left none.
 func (b *Broker) closeRun(
 	ctx context.Context, row *types.AgentPrompt, state *types.AgentRunSuspension,
-	from []string, to, reason string, hooks RunHooks,
+	from []string, to, reason string, hooks RunHooks, staleBefore ...time.Time,
 ) bool {
 	log := logger.GetLogger(ctx)
-	ok, err := b.store.Transition(ctx, row.ID, types.AgentPromptTransition{
+	transition := types.AgentPromptTransition{
 		From:        from,
 		To:          to,
 		CloseReason: &reason,
-	})
+	}
+	if len(staleBefore) > 0 {
+		transition.ExpectedOwner = &row.OwnerInstance
+		transition.LeaseBefore = &staleBefore[0]
+	}
+	ok, err := b.store.Transition(ctx, row.ID, transition)
 	if err != nil {
 		log.Warnf("close agent prompt %s as %s: %v", row.ID, to, err)
 	}

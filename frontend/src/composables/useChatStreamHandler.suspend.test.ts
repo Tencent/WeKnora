@@ -187,3 +187,15 @@ test('history shows a pending question and turns answered ones into cards', asyn
   handler.prepareForNewOutgoingMessage()
   assert.equal(prompts(m)[1].abandoned, true)
 })
+
+test('a prompt without display steps remains answerable after orphan recovery', async () => {
+  const { handler, messagesList } = setup()
+  const row = awaitingRow()
+  row.agent_steps = []
+  await handler.handleMsgList([row])
+  const message = messagesList[0]
+  assert.equal(message.isAgentMode, true)
+  assert.equal(message.is_completed, true)
+  assert.equal(cards(message).length, 1)
+  assert.equal(cards(message)[0].pending_id, 'p1')
+})

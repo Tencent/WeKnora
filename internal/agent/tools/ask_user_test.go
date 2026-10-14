@@ -106,3 +106,14 @@ func TestAskUserTool_NoAnswer(t *testing.T) {
 	assert.True(t, res.Success)
 	assert.Contains(t, res.Output, "did not answer (the user declined to answer)")
 }
+
+func TestAskUserUsesCallerTenantForSharedAgent(t *testing.T) {
+	asker := &fakeAsker{}
+	ctx := context.WithValue(t.Context(), types.TenantIDContextKey, uint64(1))
+	ctx = types.WithExecutionTenant(ctx, 2)
+	ctx = WithToolExecContext(ctx, &ToolExecContext{Interactive: true, EventBus: event.NewEventBus()})
+	_, err := NewAskUserTool(asker).Execute(ctx, json.RawMessage(`{"question":"which?"}`))
+	require.NoError(t, err)
+	require.Len(t, asker.asked, 1)
+	require.Equal(t, uint64(1), asker.asked[0].TenantID)
+}

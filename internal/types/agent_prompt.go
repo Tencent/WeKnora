@@ -97,6 +97,10 @@ type AgentPromptTransition struct {
 	// UnexpiredAt additionally requires the row not to have expired at that
 	// time (expires_at empty or later).
 	UnexpiredAt *time.Time
+	// ExpectedOwner and LeaseBefore fence a stale reader against a takeover
+	// or renewal between reading the row and updating it.
+	ExpectedOwner *string
+	LeaseBefore   *time.Time
 }
 
 // AgentRunSuspension is the persisted state of a run blocked on a prompt, so
@@ -118,6 +122,8 @@ func (AgentRunSuspension) TableName() string { return "agent_run_suspensions" }
 
 // PromptSuspension describes a run that ended waiting on a prompt.
 type PromptSuspension struct {
+	// Detached is runtime-only: another owner already controls the message.
+	Detached  bool       `json:"-"`
 	PromptID  string     `json:"pending_id"`
 	Kind      string     `json:"kind"`
 	ExpiresAt *time.Time `json:"expires_at,omitempty"`
@@ -135,9 +141,10 @@ type PendingPromptView struct {
 }
 
 // ResumableAgentRequest is the part of a QARequest needed to rebuild the run
-// on another replica. It holds durable identifiers only.
+// on another replica. It holds the original query and durable request settings.
 type ResumableAgentRequest struct {
 	AgentID string `json:"agent_id"`
+	Query   string `json:"query,omitempty"`
 	// AgentTenantID is the agent owner's workspace; it differs from the
 	// session's when the agent is shared.
 	AgentTenantID       uint64          `json:"agent_tenant_id,omitempty"`

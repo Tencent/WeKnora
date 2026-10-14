@@ -1432,6 +1432,11 @@ func (h *Handler) executeQA(reqCtx *qaRequestContext, mode qaMode, generateTitle
 				if streamCtx.releaseTurn != nil {
 					streamCtx.releaseTurn()
 				}
+				if streamCtx.streamHandler != nil {
+					if suspension := streamCtx.streamHandler.Suspension(); suspension != nil && suspension.Detached {
+						return // The new owner controls persistence and the live-run marker.
+					}
+				}
 				// Use WithoutCancel so a user-triggered stop (which cancels
 				// asyncCtx) doesn't also cancel the GORM UPDATE that persists
 				// AgentSteps/Content. Without this, cancelled-ctx makes
@@ -2039,6 +2044,11 @@ func (h *Handler) sessionTenantInfoContext(ctx context.Context) (context.Context
 func (h *Handler) completeStreamAssistantMessage(
 	ctx context.Context, streamCtx *sseStreamContext, query, userMessageID string,
 ) {
+	if streamCtx.streamHandler != nil {
+		if suspension := streamCtx.streamHandler.Suspension(); suspension != nil && suspension.Detached {
+			return
+		}
+	}
 	persist := func() error {
 		return h.completeAssistantMessage(ctx, streamCtx.assistantMessage, query, userMessageID)
 	}
