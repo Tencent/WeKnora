@@ -34,15 +34,16 @@ var (
 
 // 无需认证的API列表
 var noAuthAPI = map[string][]string{
-	"/health":                      {"GET"},
-	"/api/v1/auth/wechat/attempts": {"POST"},
-	"/api/v1/auth/wechat/exchange": {"POST"},
-	"/api/v1/auth/wechat/complete": {"POST"},
-	"/api/v1/auth/wechat/start":    {"GET"},
-	"/api/v1/auth/wechat/callback": {"GET"},
-	"/api/v1/auth/register":        {"POST"},
-	"/api/v1/auth/login":           {"POST"},
-	"/api/v1/auth/auto-setup":      {"POST"},
+	"/health":                          {"GET"},
+	"/api/v1/auth/wechat/attempts":     {"POST"},
+	"/api/v1/auth/wechat/exchange":     {"POST"},
+	"/api/v1/auth/wechat/complete":     {"POST"},
+	"/api/v1/auth/wechat/web-attempts": {"POST"},
+	"/api/v1/auth/wechat/start":        {"GET"},
+	"/api/v1/auth/wechat/callback":     {"GET"},
+	"/api/v1/auth/register":            {"POST"},
+	"/api/v1/auth/login":               {"POST"},
+	"/api/v1/auth/auto-setup":          {"POST"},
 	// Share-link surfaces accept a plaintext invite token from anonymous
 	// callers (an invitee who hasn't registered yet). They are registered
 	// as public routes in RegisterAuthRoutes and rate-limited by IP, so the

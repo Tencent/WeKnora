@@ -97,25 +97,17 @@ func (h *WeChatAuthHandler) exchange(
 		h.auth.resolveDefaultTenantMode(ctx))
 }
 
-// Start uses the configured HTTPS callback, never a caller-provided Host or
-// redirect URI. A host-only HttpOnly cookie binds the attempt to this browser.
-func (h *WeChatAuthHandler) Start(c *gin.Context) {
-	c.Header("Cache-Control", "no-store")
-	c.Header("Referrer-Policy", "no-referrer")
+// startWebAttempt uses the configured HTTPS callback, never a caller-provided
+// Host or redirect URI. A host-only HttpOnly cookie binds the attempt to this
+// browser; starting another attempt replaces it.
+func (h *WeChatAuthHandler) startWebAttempt(c *gin.Context) (*types.WeChatAttemptResponse, error) {
 	verifier, err := service.WeChatRandomVerifier()
 	if err != nil {
-		weChatHTTPError(c, err)
-		return
+		return nil, err
 	}
 	a, err := h.service.CreateAttempt(c.Request.Context(), "web", service.WeChatChallenge(verifier))
 	if err != nil {
-		weChatHTTPError(c, err)
-		return
-	}
-	authorizationURL, err := h.service.WebAuthorizationURL(a)
-	if err != nil {
-		weChatHTTPError(c, err)
-		return
+		return nil, err
 	}
 	c.SetSameSite(http.SameSiteLaxMode)
 	c.SetCookie(
@@ -127,7 +119,43 @@ func (h *WeChatAuthHandler) Start(c *gin.Context) {
 		true,
 		true,
 	)
+	return a, nil
+}
+
+// Start redirects the whole page to WeChat's hosted QR code page.
+func (h *WeChatAuthHandler) Start(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
+	c.Header("Referrer-Policy", "no-referrer")
+	a, err := h.startWebAttempt(c)
+	if err != nil {
+		weChatHTTPError(c, err)
+		return
+	}
+	authorizationURL, err := h.service.WebAuthorizationURL(a)
+	if err != nil {
+		weChatHTTPError(c, err)
+		return
+	}
 	c.Redirect(http.StatusFound, authorizationURL)
+}
+
+// CreateWebAttempt returns the parameters for a QR code embedded in the login
+// page. After the user confirms on their phone, WeChat navigates the top
+// window to the same callback used by Start.
+func (h *WeChatAuthHandler) CreateWebAttempt(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
+	a, err := h.startWebAttempt(c)
+	if err != nil {
+		weChatHTTPError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{
+		"app_id":       a.AppID,
+		"scope":        a.Scope,
+		"state":        a.State,
+		"redirect_uri": a.CallbackURL,
+		"expires_at":   a.ExpiresAt,
+	}})
 }
 
 // Callback completes browser authorization using the initiating browser cookie.

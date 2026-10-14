@@ -13,7 +13,7 @@ import (
 func TestWeChatPublicRoutesAreMethodScoped(t *testing.T) {
 	for path, method := range map[string]string{
 		"attempts": http.MethodPost, "exchange": http.MethodPost, "complete": http.MethodPost,
-		"start": http.MethodGet, "callback": http.MethodGet,
+		"web-attempts": http.MethodPost, "start": http.MethodGet, "callback": http.MethodGet,
 	} {
 		route := "/api/v1/auth/wechat/" + path
 		require.True(t, isNoAuthAPI(route, method))

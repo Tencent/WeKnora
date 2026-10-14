@@ -369,6 +369,7 @@ func RegisterWeChatAuthRoutes(r *gin.RouterGroup, h *handler.WeChatAuthHandler) 
 	g.POST("/attempts", api, h.CreateAttempt)
 	g.POST("/exchange", api, h.Exchange)
 	g.POST("/complete", api, h.Complete)
+	g.POST("/web-attempts", api, h.CreateWebAttempt)
 	g.GET("/start", page, h.Start)
 	g.GET("/callback", page, h.Callback)
 }

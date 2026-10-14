@@ -569,6 +569,19 @@ export async function registerByInvite(data: RegisterByInviteRequest): Promise<L
 /** Redeem a browser-bound, one-time WeChat callback ticket. */
 export type WeChatWebCompletionResponse = Pick<LoginResponse, 'success' | 'token' | 'refresh_token'>
 
+export interface WeChatWebAttempt {
+  app_id: string
+  scope: string
+  state: string
+  redirect_uri: string
+  expires_at: string
+}
+
+/** Start a browser-bound attempt for a QR code embedded in the login page. */
+export async function createWeChatWebAttempt(): Promise<{ success: boolean; data: WeChatWebAttempt }> {
+  return await post('/api/v1/auth/wechat/web-attempts') as unknown as { success: boolean; data: WeChatWebAttempt }
+}
+
 export async function completeWeChatLogin(ticket: string): Promise<WeChatWebCompletionResponse> {
   return await post('/api/v1/auth/wechat/complete', { ticket }) as unknown as WeChatWebCompletionResponse
 }

@@ -74,7 +74,47 @@ func weChatTestRouter(s *stubWeChatService, mode string) *gin.Engine {
 	r.POST("/api/v1/auth/wechat/exchange", h.Exchange)
 	r.POST("/api/v1/auth/wechat/complete", h.Complete)
 	r.POST("/api/v1/auth/wechat/attempts", h.CreateAttempt)
+	r.POST("/api/v1/auth/wechat/web-attempts", h.CreateWebAttempt)
 	return r
+}
+
+func TestWeChatEmbeddedQRCodeBindsBrowserWithoutLeakingVerifier(t *testing.T) {
+	var challenge string
+	s := &stubWeChatService{
+		create: func(_ context.Context, client, ch string) (*types.WeChatAttemptResponse, error) {
+			require.Equal(t, "web", client)
+			challenge = ch
+			return &types.WeChatAttemptResponse{
+				AttemptID: "attempt", State: "state", AppID: "wx-web", Scope: "snsapi_login",
+				CallbackURL: "https://example.com/api/v1/auth/wechat/callback",
+			}, nil
+		},
+	}
+	r := weChatTestRouter(s, config.AuthRegistrationModeSelfServe)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "https://example.com/api/v1/auth/wechat/web-attempts", nil))
+	require.Equal(t, http.StatusOK, w.Code)
+	require.Equal(t, "no-store", w.Header().Get("Cache-Control"))
+	var body struct {
+		Data map[string]any `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+	require.Equal(t, "wx-web", body.Data["app_id"])
+	require.Equal(t, "snsapi_login", body.Data["scope"])
+	require.Equal(t, "state", body.Data["state"])
+	require.Equal(t, "https://example.com/api/v1/auth/wechat/callback", body.Data["redirect_uri"])
+	require.NotContains(t, body.Data, "attempt_id")
+	cookies := w.Result().Cookies()
+	require.Len(t, cookies, 1)
+	require.Equal(t, weChatCookieName, cookies[0].Name)
+	require.True(t, cookies[0].HttpOnly)
+	require.True(t, cookies[0].Secure)
+	require.Equal(t, http.SameSiteLaxMode, cookies[0].SameSite)
+	attemptID, verifier, ok := strings.Cut(cookies[0].Value, ".")
+	require.True(t, ok)
+	require.Equal(t, "attempt", attemptID)
+	require.Equal(t, challenge, service.WeChatChallenge(verifier))
+	require.NotContains(t, w.Body.String(), verifier)
 }
 
 func TestWeChatWebBrowserBindingAndSafePayload(t *testing.T) {

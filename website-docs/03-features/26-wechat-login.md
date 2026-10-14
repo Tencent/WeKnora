@@ -1,6 +1,6 @@
 # 微信登录（Web 与移动应用）
 
-WeKnora 提供微信身份认证入口。Web 用户点击登录页的「微信登录」，进入微信官方授权页扫码或使用微信支持的快速登录；iOS / Android 使用微信官方 OpenSDK 获得授权码后调用后端接口。两种入口最终使用同一套 WeKnora 用户、空间、JWT 和权限体系，无需先注册邮箱密码账号。
+WeKnora 提供微信身份认证入口。Web 用户点击登录页的「微信登录」，在弹出的微信二维码中扫码，并在手机上确认登录；iOS / Android 使用微信官方 OpenSDK 获得授权码后调用后端接口。两种入口最终使用同一套 WeKnora 用户、空间、JWT 和权限体系，无需先注册邮箱密码账号。
 
 这与「IM 渠道」中的微信机器人二维码绑定是独立功能。`/wechat/qrcode` 返回的是机器人连接凭据，不能用来登录 WeKnora。网站扫码授权也不同于微信公众号内的网页授权，本功能未接入公众号 `snsapi_base` 流程。
 
@@ -115,13 +115,15 @@ Web 必须使用 HTTPS，回调地址与打开登录页的域名保持一致，�
 
 ## Web 流程
 
-1. 登录页跳转 `GET /api/v1/auth/wechat/start`。
-2. 后端持久化有效期 5 分钟的登录尝试，将随机验证器存入浏览器 Cookie，并跳转微信官方 `qrconnect` 授权页。
+1. 登录页调用 `POST /api/v1/auth/wechat/web-attempts`。后端持久化有效期 5 分钟的登录尝试，将随机验证器存入浏览器 Cookie，只向页面返回 `app_id`、`scope`、`state`、`redirect_uri` 和 `expires_at`。
+2. 登录页在弹窗中嵌入微信官方 `qrconnect` 二维码（`login_type=jssdk`，参数与官方 `wxLogin.js` 一致，但不加载该第三方脚本）。用户扫码并在手机上确认后，微信把整个页面跳转到回调地址。二维码在登录尝试过期前提示刷新，刷新会创建新的尝试并替换 Cookie。
+   - 也可直接打开 `GET /api/v1/auth/wechat/start`，由后端创建同样的尝试后整页跳转到微信官方扫码页。
+   - 网站扫码登录面向电脑浏览器；在微信内置浏览器中打开登录页时无法扫描本页二维码，弹窗会提示改用电脑浏览器。
 3. 微信回调 `GET /api/v1/auth/wechat/callback?code=...&state=...`。
 4. 后端验证浏览器绑定及 state，一次性消费登录尝试，用网站应用的凭据交换微信身份。
 5. 后端创建或查找用户，签发 WeKnora 令牌，通过 `#wechat_ticket=...` 返回 SPA，票据有效期为 1 分钟。前端立即清除片段，再调用 `POST /api/v1/auth/wechat/complete`，请求 `{ "ticket": "..." }`。后端要求发起登录浏览器的 HttpOnly Cookie 并一次性消费票据，成功返回 `token` / `refresh_token`；前端读取 `/auth/me` 并进入对应空间。令牌不出现在重定向 URL 中。
 
-失败时返回 `#wechat_error=...`，前端显示微信登录失败提示。回调和授权入口响应禁止缓存；微信凭据不返回浏览器。
+失败时返回 `#wechat_error=...`，前端按 `registration_disabled`、`invalid_attempt`、`rate_limited` 等原因显示对应提示。回调和授权入口响应禁止缓存；微信凭据不返回浏览器。
 
 ## 移动端接口
 

@@ -234,6 +234,8 @@
               </div>
             </t-form>
 
+            <WeChatQRCodeDialog v-if="wechatEnabled" v-model:visible="wechatQRVisible" />
+
             <div v-if="registrationEnabled" class="form-footer">
               <span>{{ $t('auth.firstTime') }}</span>
               <a href="#" class="link-button" @click.prevent="!loading && toggleMode()">
@@ -343,8 +345,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, nextTick, onMounted, onBeforeUnmount, computed } from 'vue'
+import { ref, reactive, nextTick, onMounted, onBeforeUnmount, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import WeChatQRCodeDialog from './WeChatQRCodeDialog.vue'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useRoleLabel } from '@/composables/useRoleLabel'
 import { notifyLoginSuccess } from '@/utils/loginNotify'
@@ -630,12 +633,19 @@ const loadAuthConfig = async () => {
   }
 }
 
+const wechatQRVisible = ref(false)
+
 const handleWeChatLogin = () => {
   if (inviteToken.value) {
     sessionStorage.setItem('weknora_pending_invite_token', inviteToken.value)
   }
-  window.location.assign('/api/v1/auth/wechat/start')
+  wechatQRVisible.value = true
 }
+
+watch(wechatQRVisible, visible => {
+  // A successful scan navigates away; closing the dialog abandons the attempt.
+  if (!visible) sessionStorage.removeItem('weknora_pending_invite_token')
+})
 
 const handleOIDCLogin = async () => {
   try {
