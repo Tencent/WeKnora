@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	werrors "github.com/Tencent/WeKnora/internal/errors"
+	"github.com/Tencent/WeKnora/internal/infrastructure/chunker"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -297,8 +298,21 @@ func mergeChunkingConfig(base types.ChunkingConfig, override *types.ChunkingConf
 	if override.ChildChunkSize != 0 {
 		result.ChildChunkSize = override.ChildChunkSize
 	}
+	// Strategy is authoritative for the custom-separator marker: the marker
+	// fields are only meaningful under the "custom_separator" strategy, so
+	// selecting any other strategy during upload must clear a marker
+	// inherited from the KB (otherwise it would silently re-activate after
+	// the chunker-side migration of marker-without-strategy configs).
 	if override.Strategy != "" {
 		result.Strategy = override.Strategy
+		if override.Strategy != chunker.StrategyCustomSeparator {
+			result.CustomSeparator = ""
+			result.CustomSeparatorOnly = false
+		} else {
+			// Explicitly re-selecting the strategy lets the override steer
+			// the mode flag even when it inherits the KB marker.
+			result.CustomSeparatorOnly = override.CustomSeparatorOnly
+		}
 	}
 	if override.TokenLimit != 0 {
 		result.TokenLimit = override.TokenLimit
@@ -308,6 +322,13 @@ func mergeChunkingConfig(base types.ChunkingConfig, override *types.ChunkingConf
 	}
 	if override.TableMetadataInstructions != "" {
 		result.TableMetadataInstructions = override.TableMetadataInstructions
+	}
+	// Pre-chunked document marker: a non-empty override marker replaces the
+	// inherited one and carries its mode flag. An empty marker keeps the
+	// KB-level setting (omitempty on the wire).
+	if override.CustomSeparator != "" {
+		result.CustomSeparator = override.CustomSeparator
+		result.CustomSeparatorOnly = override.CustomSeparatorOnly
 	}
 	return result
 }

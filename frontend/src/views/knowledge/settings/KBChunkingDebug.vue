@@ -230,6 +230,8 @@ interface Props {
     strategy?: string
     tokenLimit?: number
     languages?: string[]
+    customSeparator?: string
+    customSeparatorOnly?: boolean
   }
 }
 
@@ -293,7 +295,10 @@ const runPreview = async () => {
         child_chunk_size: props.config.childChunkSize,
         strategy: props.config.strategy ?? '',
         token_limit: props.config.tokenLimit ?? 0,
-        languages: props.config.languages ?? []
+        languages: props.config.languages ?? [],
+        custom_separator: props.config.customSeparator?.trim() ?? '',
+        custom_separator_only: !!props.config.customSeparator?.trim()
+          && !!props.config.customSeparatorOnly
       }
     })
     // The axios interceptor in utils/request.ts already unwraps the

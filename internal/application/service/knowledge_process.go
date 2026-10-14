@@ -319,16 +319,42 @@ func (s *knowledgeService) failKnowledgeAtEmbedding(
 }
 
 // buildSplitterConfigFromChunking normalizes effective chunking settings with
-// the shared chunker defaults.
-func buildSplitterConfigFromChunking(cc types.ChunkingConfig) chunker.SplitterConfig {
+// the shared chunker defaults. embeddingCharLimit is the embedding model's
+// declared per-input character limit (0 = unknown); the chunker uses it to
+// cap marker-only segments so the embedding batch layer cannot reject them.
+func buildSplitterConfigFromChunking(cc types.ChunkingConfig, embeddingCharLimit int) chunker.SplitterConfig {
 	return chunker.NormalizeSplitterConfig(chunker.SplitterConfig{
-		ChunkSize:    cc.ChunkSize,
-		ChunkOverlap: cc.ChunkOverlap,
-		Separators:   cc.Separators,
-		Strategy:     cc.Strategy,
-		TokenLimit:   cc.TokenLimit,
-		Languages:    cc.Languages,
+		ChunkSize:           cc.ChunkSize,
+		ChunkOverlap:        cc.ChunkOverlap,
+		Separators:          cc.Separators,
+		Strategy:            cc.Strategy,
+		TokenLimit:          cc.TokenLimit,
+		Languages:           cc.Languages,
+		CustomSeparator:     cc.CustomSeparator,
+		CustomSeparatorOnly: cc.CustomSeparatorOnly,
+		EmbeddingCharLimit:  embeddingCharLimit,
 	})
+}
+
+// embeddingInputLimit resolves the KB embedding model's per-input character
+// limit for chunk sizing. Best-effort: an unresolvable model, or a test
+// double that does not implement the capability, yields 0 (no extra cap) —
+// the batch layer still hard-rejects oversized inputs downstream.
+func (s *knowledgeService) embeddingInputLimit(ctx context.Context, kb *types.KnowledgeBase) int {
+	if s.modelService == nil || kb == nil || !kb.NeedsEmbeddingModel() || kb.EmbeddingModelID == "" {
+		return 0
+	}
+	resolver, ok := s.modelService.(interface {
+		GetEmbeddingInputCharLimit(ctx context.Context, modelId string) (int, error)
+	})
+	if !ok {
+		return 0
+	}
+	limit, err := resolver.GetEmbeddingInputCharLimit(ctx, kb.EmbeddingModelID)
+	if err != nil || limit <= 0 {
+		return 0
+	}
+	return limit
 }
 
 // buildParentChildConfigs derives parent and child SplitterConfig from ChunkingConfig.
@@ -4073,7 +4099,7 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 
 	// Step 3: Split into chunks using Go chunker. Line endings and inline
 	// HTML tables were normalized before image resolution above.
-	chunkCfg := buildSplitterConfigFromChunking(eff.ChunkingConfig)
+	chunkCfg := buildSplitterConfigFromChunking(eff.ChunkingConfig, s.embeddingInputLimit(ctx, kb))
 
 	processOpts := ProcessChunksOptions{
 		EnableQuestionGeneration: payload.EnableQuestionGeneration,
@@ -4086,7 +4112,10 @@ func (s *knowledgeService) ProcessDocument(ctx context.Context, t *asynq.Task) e
 		processOpts.Metadata = convertResult.Metadata
 	}
 
-	if eff.ChunkingConfig.EnableParentChild {
+	// Pre-chunked (custom separator) mode bypasses parent-child chunking:
+	// the marker decides every boundary, and flattening mid-pipeline would
+	// store parent chunks with no children, leaving nothing retrievable.
+	if eff.ChunkingConfig.EnableParentChild && eff.ChunkingConfig.Strategy != chunker.StrategyCustomSeparator {
 		parentCfg, childCfg := buildParentChildConfigs(eff.ChunkingConfig, chunkCfg)
 		pcResult := chunker.SplitParentChild(convertResult.MarkdownContent, parentCfg, childCfg)
 		chunks = make([]types.ParsedChunk, len(pcResult.Children))

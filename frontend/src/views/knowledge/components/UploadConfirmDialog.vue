@@ -278,7 +278,7 @@
                       </button>
 
                       <div v-if="chunkingMoreOpen" class="settings-group settings-group--more">
-                        <div class="setting-row setting-row--separators">
+                        <div v-if="!isCustomChunking" class="setting-row setting-row--separators">
                           <div class="setting-info">
                             <label>{{ t('knowledgeEditor.chunking.separatorsLabel') }}</label>
                             <p class="desc">{{ t('knowledgeEditor.chunking.separatorsDescription') }}</p>
@@ -292,6 +292,27 @@
                               filterable
                               :style="{ width: '280px' }"
                             />
+                          </div>
+                        </div>
+                        <div v-if="isCustomChunking" class="setting-row setting-row--separators">
+                          <div class="setting-info">
+                            <label>{{ t('knowledgeEditor.chunking.customSeparatorLabel') }}</label>
+                            <p class="desc">{{ t('knowledgeEditor.chunking.customSeparatorDescription') }}</p>
+                          </div>
+                          <div class="setting-control">
+                            <t-input
+                              v-model="uiState.chunkingConfig.customSeparator"
+                              :placeholder="t('knowledgeEditor.chunking.customSeparatorPlaceholder')"
+                              clearable
+                              :style="{ width: '280px' }"
+                            />
+                            <div :style="{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '8px', justifyContent: 'flex-end' }">
+                              <t-switch
+                                v-model="uiState.chunkingConfig.customSeparatorOnly"
+                                :disabled="!uiState.chunkingConfig.customSeparator"
+                              />
+                              <span :style="{ fontSize: '12px' }">{{ t('knowledgeEditor.chunking.customSeparatorOnlyOn') }}</span>
+                            </div>
                           </div>
                         </div>
                         <div class="setting-row">
@@ -322,7 +343,7 @@
                             />
                           </div>
                         </div>
-                        <div class="setting-row">
+                        <div v-if="!isCustomChunking" class="setting-row">
                           <div class="setting-info">
                             <label>{{ t('knowledgeEditor.chunking.parentChildLabel') }}</label>
                             <p class="desc">{{ t('knowledgeEditor.chunking.parentChildDescription') }}</p>
@@ -726,6 +747,8 @@ interface ChunkingUIConfig {
   strategy?: string
   tokenLimit?: number
   languages?: string[]
+  customSeparator?: string
+  customSeparatorOnly?: boolean
   tableMetadataInstructions?: string
 }
 
@@ -975,7 +998,18 @@ const chunkingStrategyOptions = computed(() => [
   { label: t('knowledgeEditor.chunking.strategies.heading.label'), value: 'heading' },
   { label: t('knowledgeEditor.chunking.strategies.heuristic.label'), value: 'heuristic' },
   { label: t('knowledgeEditor.chunking.strategies.legacy.label'), value: 'legacy' },
+  { label: t('knowledgeEditor.chunking.strategies.custom.label'), value: 'custom_separator' },
 ])
+
+// The "custom_separator" strategy value maps 1:1 to the backend: it selects
+// the pre-chunked document mode driven by custom_separator.
+const isCustomChunking = computed(() => uiState.value.chunkingConfig.strategy === 'custom_separator')
+
+// Selecting the pre-chunked strategy turns parent-child chunking off: the
+// custom marker decides every boundary, a parent/child split would fight it.
+watch(isCustomChunking, (v) => {
+  if (v) uiState.value.chunkingConfig.enableParentChild = false
+})
 
 const separatorOptions = computed(() => [
   { label: t('knowledgeEditor.chunking.separators.doubleNewline'), value: '\n\n' },
@@ -1262,12 +1296,22 @@ function initFromKbInfo(kb: any) {
       chunkOverlap: kb.chunking_config?.chunk_overlap || 80,
       separators: kb.chunking_config?.separators || ['\n\n', '\n', '。', '！', '？', ';', '；'],
       parserEngineRules: kb.chunking_config?.parser_engine_rules || undefined,
-      enableParentChild: kb.chunking_config?.enable_parent_child ?? false,
+      // Pre-chunked (custom separator) mode flattens parent-child chunking:
+      // the marker decides every boundary, there is no parent/child split.
+      enableParentChild:
+        kb.chunking_config?.custom_separator || kb.chunking_config?.strategy === 'custom_separator'
+          ? false
+          : (kb.chunking_config?.enable_parent_child ?? false),
       parentChunkSize: kb.chunking_config?.parent_chunk_size || 4096,
       childChunkSize: kb.chunking_config?.child_chunk_size || 384,
-      strategy: kb.chunking_config?.strategy || 'auto',
+      strategy:
+        kb.chunking_config?.custom_separator && !kb.chunking_config?.strategy
+          ? 'custom_separator'
+          : (kb.chunking_config?.strategy || 'auto'),
       tokenLimit: kb.chunking_config?.token_limit || 0,
       languages: kb.chunking_config?.languages || [],
+      customSeparator: kb.chunking_config?.custom_separator || '',
+      customSeparatorOnly: !!kb.chunking_config?.custom_separator_only,
       tableMetadataInstructions: kb.chunking_config?.table_metadata_instructions || '',
     },
     multimodalConfig: {
@@ -1319,12 +1363,17 @@ function buildProcessOverrides(): KnowledgeProcessOverrides {
       chunk_size: chunking.chunkSize,
       chunk_overlap: chunking.chunkOverlap,
       separators: chunking.separators,
-      enable_parent_child: chunking.enableParentChild,
+      // Pre-chunked mode: flat chunks, parent-child is meaningless here.
+      enable_parent_child: isCustomChunking.value ? false : chunking.enableParentChild,
       parent_chunk_size: chunking.parentChunkSize,
       child_chunk_size: chunking.childChunkSize,
-      strategy: chunking.strategy,
+      // Strategy travels verbatim: the backend clears an inherited marker
+      // whenever the upload selects any strategy other than custom_separator.
+      strategy: chunking.strategy ?? '',
       token_limit: chunking.tokenLimit,
       languages: chunking.languages,
+      custom_separator: isCustomChunking.value ? (chunking.customSeparator?.trim() || undefined) : undefined,
+      custom_separator_only: isCustomChunking.value && chunking.customSeparator?.trim() ? !!chunking.customSeparatorOnly : undefined,
       table_metadata_instructions: chunking.tableMetadataInstructions,
     },
     enable_multimodel: state.multimodalConfig.enabled,
@@ -1387,6 +1436,12 @@ function applyOverridesToState(o?: KnowledgeProcessOverrides | null) {
     if (cc.parent_chunk_size != null) s.chunkingConfig.parentChunkSize = cc.parent_chunk_size
     if (cc.child_chunk_size != null) s.chunkingConfig.childChunkSize = cc.child_chunk_size
     if (cc.strategy != null) s.chunkingConfig.strategy = cc.strategy
+    if (cc.custom_separator) {
+      // Reflect API-configured pre-chunked mode as the strategy value.
+      s.chunkingConfig.strategy = 'custom_separator'
+      s.chunkingConfig.customSeparator = cc.custom_separator
+      if (cc.custom_separator_only != null) s.chunkingConfig.customSeparatorOnly = cc.custom_separator_only
+    }
     if (cc.token_limit != null) s.chunkingConfig.tokenLimit = cc.token_limit
     if (cc.languages) s.chunkingConfig.languages = cc.languages
     if (cc.table_metadata_instructions != null) s.chunkingConfig.tableMetadataInstructions = cc.table_metadata_instructions
