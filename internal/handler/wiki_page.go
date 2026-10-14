@@ -1065,7 +1065,7 @@ type WikiSearchHit struct {
 // @Accept       json
 // @Produce      json
 // @Param        request  body  SearchWikiRequest  true  "Wiki search request"
-// @Success      200  {object}  map[string]interface{}
+// @Success      200  {object}  handler.DataResponse{data=[]handler.WikiSearchHit}
 // @Failure      400  {object}  errors.AppError
 // @Security     Bearer
 // @Security     ApiKeyAuth
@@ -1203,7 +1203,7 @@ func (h *WikiPageHandler) Lint(c *gin.Context) {
 // @Tags         Wiki
 // @Produce      json
 // @Param        kb_id  path  string  true  "Knowledge base ID"
-// @Success      200  {object}  map[string]interface{}
+// @Success      200  {object}  handler.AutoFixResponse
 // @Security     Bearer
 // @Router       /knowledgebase/{kb_id}/wiki/auto-fix [post]
 func (h *WikiPageHandler) AutoFix(c *gin.Context) {
