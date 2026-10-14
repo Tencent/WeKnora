@@ -272,7 +272,7 @@
 
 .ecosystemCore > :global(.wk-logo) { margin-bottom: 18px; }
 
-/* Keep multi-feature descriptions beside screenshots; single topics have a compact introduction. */
+/* Keep feature descriptions and state controls beside their screenshots. */
 .releaseTopic { padding-top: 48px; }
 .releaseTopic .sectionHeading, .browserTopic .sectionHeading { margin-bottom: 24px; }
 .releaseTopic .eyebrow, .browserTopic .eyebrow { margin-bottom: 12px; }
@@ -285,14 +285,6 @@
 .showcaseCompact .showcaseFigure { position: sticky; top: 100px; }
 .showcaseCompact .shotLayer img { max-height: calc(100svh - 240px); object-fit: contain; }
 .site .browserTopic { padding-block: 44px; }
-.showcaseSingle { grid-template-columns: minmax(0, 1fr); gap: 18px; }
-.showcaseSingle .showcaseList { border: 0; }
-.showcaseSingle .showcaseItem { border: 0; padding: 0; cursor: default; }
-.showcaseSingle .showcaseItem::before { display: none; }
-.showcaseSingle .showcaseDetail { padding: 0; }
-.showcaseSingle .showcaseDetail p { max-width: 1050px; color: var(--soft); font-size: 15px; }
-.showcaseSingle .viewChips, .showcaseSingle .slideLinks { display: inline-flex; vertical-align: middle; margin: 10px 24px 0 0; }
-.showcaseSingle .showcaseFigure { width: min(100%, max(560px, calc((100svh - 300px) * 1.81818))); margin-inline: auto; }
 @media (max-width: 1100px) {
   .showcaseCompact { grid-template-columns: minmax(220px, 280px) minmax(0, 1fr); gap: 24px; }
 }
@@ -300,5 +292,4 @@
   .showcaseCompact { grid-template-columns: minmax(0, 1fr); }
   .showcaseCompact .showcaseFigure { position: static; }
   .showcaseCompact .shotLayer img { max-height: none; }
-  .showcaseSingle .showcaseFigure { width: 100%; }
 }

@@ -36,16 +36,19 @@ const releaseSlides = [
   { name: "Wiki 图谱", icon: "channels", image: "wiki-graph-groups", title: "知识关系，按主题展开", description: "关联页面按主题分组，在全图与分组之间切换，沿关系找到值得继续阅读的内容。", alt: "Wiki 图谱全景：主题分组、页面关系与节点类型图例", link: guide("03-features/14-wiki") + "#wiki-graph" },
   { name: "原文引用定位", icon: "trace", image: "chat-source-location", title: "从回答，回到原文", description: "点击回答中的引用，在原始文档中定位对应段落，对照上下文核对答案。", alt: "回答引用与原始文档中的对应段落高亮", link: guide("03-features/18-chat-experience") },
 ].map(withAvailability);
-const browserSlides = [{
-  name: "本机浏览器", icon: "browser", title: "打开网页、查询信息、填写表单",
-  description: "通过腾讯开源的 BrowserSkill 扩展操作自己的 Chrome 或 Edge。任务过程实时可见，支持暂停与继续；登录和验证码由你接手。",
-  shots: [
-    { label: "执行任务", icon: "browser", image: "local-browser-task", alt: "智能体操作本机浏览器，对话中显示任务预览与暂停控制" },
-    { label: "连接扩展", icon: "plug", image: "browser-connection", alt: "工具箱的浏览器连接页，BrowserSkill 扩展已连接" },
-  ],
-  link: guide("05-clients/09-local-browser"),
-  external: { label: "BrowserSkill", href: "https://github.com/Tencent/BrowserSkill", logo: "browserskill.png" },
-}].map(withAvailability);
+const browserSlides = [
+  { name: "执行任务", icon: "browser", title: "在自己的浏览器里完成任务",
+    description: "让智能体打开网页、查询信息、填写表单。任务过程实时可见，可随时暂停；遇到登录或验证码时由你接手，完成后继续。",
+    image: "local-browser-task", alt: "智能体操作本机浏览器，对话中显示任务预览与暂停控制",
+    link: guide("05-clients/09-local-browser"),
+  },
+  { name: "连接扩展", icon: "plug", title: "连接 Chrome 或 Edge，开始使用",
+    description: "安装腾讯开源的 BrowserSkill 扩展，在工具箱中连接本机浏览器，查看连接状态，再将网页操作交给智能体。",
+    image: "browser-connection", alt: "工具箱的浏览器连接页，BrowserSkill 扩展已连接",
+    link: guide("05-clients/09-local-browser"),
+    external: { label: "BrowserSkill", href: "https://github.com/Tencent/BrowserSkill", logo: "browserskill.png" },
+  },
+].map(withAvailability);
 const wikiSlides = [
   { name: "知识图谱", icon: "channels", image: "wiki-graph-groups", title: "从整体关系，聚焦一组页面", description: "关联页面分组展示，配上主题说明。聚焦感兴趣的分组，沿链接阅读相关内容，随时返回全图。", alt: "Wiki 图谱：关联页面分组、主题说明和分组聚焦入口", link: guide("03-features/14-wiki") + "#wiki-graph" },
   { name: "页面浏览", icon: "wiki", image: "wiki-browser", title: "按主题整理，保留出处", description: "开启 Wiki 后，从知识库文档中提取人物、产品和概念，生成带来源引用的页面，按目录浏览。", alt: "Wiki 浏览器：按主题组织的目录、年假页面、关联条目和原始文档引用" },
@@ -94,7 +97,7 @@ export default function Home() {
       </div></section>
       <section id="agent-workflow" className={`${s.shell} ${s.section} ${s.browserTopic}`} aria-labelledby="agent-workflow-title">
         <div className={s.sectionHeading}><div><p className={s.eyebrow}>03 / YOUR LOCAL BROWSER</p><h2 id="agent-workflow-title">让智能体操作你自己的浏览器</h2></div><a className={s.textLink} href={guide("05-clients/09-local-browser")}>连接本机浏览器 <Icon name="arrow" /></a></div>
-        <ProductGallery id="browser-gallery" label="本机浏览器" slides={browserSlides} layout="single" />
+        <ProductGallery id="browser-gallery" label="本机浏览器" slides={browserSlides} layout="compact" />
       </section>
       <section id="skills-sandbox" className={`${s.release} ${s.sandboxTopic}`} aria-labelledby="skills-sandbox-title"><div className={s.shell}>
         <div className={s.sectionHeading}><div><p className={s.eyebrow}>04 / SKILLS &amp; SANDBOX</p><h2 id="skills-sandbox-title">智能体可以运行技能，<br />也能生成文件。</h2></div><a className={s.textLink} href={guide("03-features/22-skills-sandbox")}>了解技能与沙箱 <Icon name="arrow" /></a></div>
