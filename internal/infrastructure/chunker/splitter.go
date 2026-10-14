@@ -137,9 +137,10 @@ var protectedPatterns = []*regexp.Regexp{
 	// header tracker can see "<table>" + first (header) row as one unit.
 	// Overlap resolution drops these when they sit inside fenced/inline code,
 	// which match at an earlier start.
-	regexp.MustCompile(`(?is)<table\b[^>]*>\s*(?:<thead\b[^>]*>\s*)?<tr\b[^>]*>.*?</tr\s*>`), // table open + first (header) row
-	regexp.MustCompile(`(?is)</?(?:table|thead|tbody)\b[^>]*>`),                              // container open/close tags
-	regexp.MustCompile(`(?is)<tr\b[^>]*>.*?</tr\s*>`),                                        // individual table rows
+	// table open + first (header) row
+	regexp.MustCompile(`(?is)<table\b[^>]*>\s*(?:<thead\b[^>]*>\s*)?<tr\b[^>]*>.*?</tr\s*>`),
+	regexp.MustCompile(`(?is)</?(?:table|thead|tbody)\b[^>]*>`), // container open/close tags
+	regexp.MustCompile(`(?is)<tr\b[^>]*>.*?</tr\s*>`), // individual table rows
 }
 
 type span struct {

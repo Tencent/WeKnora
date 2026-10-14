@@ -15,9 +15,11 @@ func buildMergedCellHTMLTable(rows int) string {
 	var b strings.Builder
 	b.WriteString("<table>\n")
 	b.WriteString("<tr><th>构件名称</th><th>规格</th><th>单位</th><th>跨号1</th><th>跨号2</th><th>跨号3</th><th>合计</th></tr>\n")
-	b.WriteString("<tr><td rowspan=\"2\">小石子混凝土</td><td>C20</td><td>m3</td><td>21.6</td><td>31.6</td><td></td><td>53.2</td></tr>\n")
+	b.WriteString("<tr><td rowspan=\"2\">小石子混凝土</td><td>C20</td><td>m3</td>" +
+		"<td>21.6</td><td>31.6</td><td></td><td>53.2</td></tr>\n")
 	for i := 0; i < rows; i++ {
-		b.WriteString("<tr><td>现浇混凝土</td><td colspan=\"2\">C40</td><td>493.7</td><td>1181.6</td><td>59.4</td><td>1734.7</td></tr>\n")
+		b.WriteString("<tr><td>现浇混凝土</td><td colspan=\"2\">C40</td>" +
+			"<td>493.7</td><td>1181.6</td><td>59.4</td><td>1734.7</td></tr>\n")
 	}
 	b.WriteString("</table>\n")
 	return b.String()
@@ -96,9 +98,11 @@ func TestHTMLTableParentChildCarryHeader(t *testing.T) {
 // is closed with </thead></table> when prepended to later chunks.
 func TestHTMLTableWithTheadCarryHeader(t *testing.T) {
 	var b strings.Builder
-	b.WriteString("<table>\n<thead>\n<tr><th>构件名称</th><th>规格</th><th>单位</th><th>跨号1</th><th>跨号2</th><th>跨号3</th><th>合计</th></tr>\n</thead>\n")
+	b.WriteString("<table>\n<thead>\n<tr><th>构件名称</th><th>规格</th><th>单位</th>" +
+		"<th>跨号1</th><th>跨号2</th><th>跨号3</th><th>合计</th></tr>\n</thead>\n")
 	for i := 0; i < 25; i++ {
-		b.WriteString("<tr><td>现浇混凝土</td><td>C40</td><td>m3</td><td>493.7</td><td>1181.6</td><td>59.4</td><td>1734.7</td></tr>\n")
+		b.WriteString("<tr><td>现浇混凝土</td><td>C40</td><td>m3</td><td>493.7</td>" +
+			"<td>1181.6</td><td>59.4</td><td>1734.7</td></tr>\n")
 	}
 	b.WriteString("</table>\n")
 
