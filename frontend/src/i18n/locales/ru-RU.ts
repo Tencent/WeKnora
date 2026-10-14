@@ -1497,6 +1497,8 @@ export default {
       thinkingDesc: 'Динамический инструмент рефлексивного решения проблем',
       todoWrite: 'Планирование',
       todoWriteDesc: 'Создание структурированных исследовательских планов',
+      askUser: 'Вопрос пользователю',
+      askUserDesc: 'Задаёт пользователю вопрос, когда не хватает данных, и ждёт ответа',
       searchKnowledge: 'Поиск по базе знаний',
       searchKnowledgeDesc: 'Семантический, ключевой или гибридный поиск по фрагментам базы знаний',
       readDocument: 'Чтение документа',
@@ -1809,6 +1811,7 @@ export default {
       readDocument: 'Чтение документа',
       listDocuments: 'Список документов',
       todoWrite: 'Управление планами',
+      askUser: 'Вопрос пользователю',
       knowledgeGraphExtract: 'Извлечение графа знаний',
       thinking: 'Размышление',
       attachmentParsing: 'Разбор вложения',
@@ -1884,6 +1887,21 @@ export default {
       startFailed: 'Не удалось начать авторизацию',
       resumeFailed: 'Не удалось возобновить выполнение, повторите попытку',
       skipFailed: 'Не удалось пропустить, повторите попытку'
+    },
+    askUser: {
+      title: 'Вопрос к вам',
+      selectPlaceholder: 'Выберите',
+      textPlaceholder: 'Введите ответ',
+      otherPlaceholder: 'Другое (необязательно)',
+      decline: 'Не отвечать',
+      submit: 'Отправить',
+      declinedTag: 'Отказ от ответа',
+      submitted: 'Отправлено',
+      answeredTag: 'Ответ дан',
+      timedOutTag: 'Нет ответа вовремя',
+      canceledTag: 'Отменено',
+      unansweredTag: 'Без ответа',
+      submitFailed: 'Не удалось отправить',
     },
     toolApproval: {
       waiting: 'Ожидание проверки · {target}',
@@ -2014,7 +2032,8 @@ export default {
     getDocumentInfo: 'Получить информацию о документе',
     queryKnowledgeGraph: 'Запрос к графу знаний',
     think: 'Глубокое размышление',
-    todoWrite: 'Составить план'
+    todoWrite: 'Составить план',
+    askUser: 'Вопрос пользователю'
   },
   commandPalette: {
     placeholder: 'Поиск по базам знаний, файлам, диалогам…',

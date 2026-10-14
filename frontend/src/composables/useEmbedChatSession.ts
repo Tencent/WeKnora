@@ -20,7 +20,7 @@ import { embedToast } from '@/utils/embedToast'
 import { buildQueryWithHostContext } from '@/utils/embedContext'
 import { fileToDataURI } from '@/utils/embedFile'
 import { useI18n } from 'vue-i18n'
-import { useChatStreamHandler } from '@/composables/useChatStreamHandler'
+import { useChatStreamHandler, isPromptCard } from '@/composables/useChatStreamHandler'
 import { resumeSuspendedRunKey } from '@/utils/suspendedRun'
 import { useStickyBottomOnResize } from '@/composables/useStickyBottomOnResize'
 
@@ -341,7 +341,7 @@ export function useEmbedChatSession(options: {
   const followResumedRun = (pendingId: string) => {
     const sid = options.sessionId.value
     const message = messagesList.find((m) => m.role === 'assistant' && ((m.agentEventStream as Record<string, unknown>[] | undefined) || []).some(
-      (e) => e.type === 'tool_approval_required' && e.pending_id === pendingId,
+      (e) => isPromptCard(e) && e.pending_id === pendingId,
     ))
     const messageId = String(message?.id || '')
     if (!message || !sid || !messageId || isReplying.value) return

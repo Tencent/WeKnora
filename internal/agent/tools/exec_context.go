@@ -35,6 +35,9 @@ type ToolExecContext struct {
 	// it raised, now answered. The tool acts on the answer instead of
 	// raising the prompt again.
 	Answered *types.AgentPrompt
+	// Interactive is set when the client can show and answer prompts; IM
+	// and MCP-server runs have no such surface.
+	Interactive bool
 }
 
 // WithToolExecContext returns ctx that carries ToolExecContext for MCP approval and similar features.

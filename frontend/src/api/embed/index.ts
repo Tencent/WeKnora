@@ -416,6 +416,24 @@ export async function resolveEmbedToolApproval(
   return { resumed: Boolean(res?.resumed) }
 }
 
+export async function resolveEmbedAgentPrompt(
+  channelId: string,
+  token: string,
+  sessionId: string,
+  sessionSig: string,
+  visitorId: string,
+  promptId: string,
+  kind: string,
+  response: Record<string, unknown>,
+): Promise<{ resumed: boolean }> {
+  const res: any = await post(
+    `/api/v1/embed/${channelId}/sessions/${encodeURIComponent(sessionId)}/prompts/${encodeURIComponent(promptId)}`,
+    { kind, response },
+    { headers: embedSessionHeaders(token, sessionSig, visitorId) },
+  )
+  return { resumed: Boolean(res?.resumed) }
+}
+
 export async function getEmbedMessageList(
   channelId: string,
   token: string,

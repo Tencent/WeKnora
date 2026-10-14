@@ -52,6 +52,13 @@ function mergeToolCallArguments(previous: unknown, incoming: unknown): Record<st
 
 const AWAITING_INPUT = 'awaiting_input'
 
+const PROMPT_CARD_TYPES = new Set(['tool_approval_required', 'agent_prompt_required'])
+
+/** Whether e is the card of a prompt the user answers (approval, question). */
+export function isPromptCard(e: ChatMessage | undefined): boolean {
+  return PROMPT_CARD_TYPES.has(String(e?.type || ''))
+}
+
 export function isAwaitingInput(message: ChatMessage | undefined): boolean {
   return message?.run_state === AWAITING_INPUT
 }
@@ -59,9 +66,25 @@ export function isAwaitingInput(message: ChatMessage | undefined): boolean {
 /** Rebuilds the card of the prompt a suspended run waits on, from history. */
 export function pendingPromptEvents(prompt: unknown): ChatMessage[] {
   const p = prompt as Record<string, any> | undefined
-  if (!p?.id || p.kind !== 'tool_approval') return []
+  if (!p?.id) return []
   const request = (p.request || {}) as Record<string, any>
   const createdAt = Date.parse(String(p.created_at || ''))
+  const requestedAt = Number.isNaN(createdAt) ? undefined : Math.floor(createdAt / 1000)
+  if (p.kind === 'ask_user') {
+    return [{
+      type: 'agent_prompt_required',
+      pending_id: p.id,
+      kind: p.kind,
+      request,
+      tool_call_id: p.tool_call_id,
+      requested_at: requestedAt,
+      suspendable: true,
+      suspended: true,
+      expires_at: p.expires_at,
+      resolved: false,
+    }]
+  }
+  if (p.kind !== 'tool_approval') return []
   return [{
     type: 'tool_approval_required',
     pending_id: p.id,
@@ -70,12 +93,29 @@ export function pendingPromptEvents(prompt: unknown): ChatMessage[] {
     description: request.description,
     args_json: request.args === undefined ? '' : JSON.stringify(request.args),
     tool_call_id: p.tool_call_id,
-    requested_at: Number.isNaN(createdAt) ? undefined : Math.floor(createdAt / 1000),
+    requested_at: requestedAt,
     suspendable: true,
     suspended: true,
     expires_at: p.expires_at,
     resolved: false,
   }]
+}
+
+/** The card of an ask_user call that finished, from the stored tool result. */
+function askUserHistoryCard(toolCallId: string, data: ChatMessage): ChatMessage {
+  return {
+    type: 'agent_prompt_required',
+    pending_id: `history-${toolCallId}`,
+    kind: 'ask_user',
+    request: data.question,
+    tool_call_id: toolCallId,
+    resolved: true,
+    answered: Boolean(data.answered),
+    response: data.answer,
+    resolve_reason: data.reason,
+    timed_out: Boolean(data.timed_out),
+    canceled: Boolean(data.canceled),
+  }
 }
 
 export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
@@ -168,7 +208,7 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
   const abandonPendingPrompts = (msg: ChatMessage) => {
     const stream = (msg.agentEventStream as ChatMessage[] | undefined) || []
     msg.agentEventStream = stream.map((e) =>
-      e.type === 'tool_approval_required' && !e.resolved ? { ...e, resolved: true, abandoned: true } : e,
+      isPromptCard(e) && !e.resolved ? { ...e, resolved: true, abandoned: true } : e,
     )
     msg.run_state = ''
   }
@@ -414,6 +454,10 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
             const result = toolCall.result as ChatMessage | undefined
             const resultData = result?.data as ChatMessage | undefined
             const target = toolCall.target as ChatMessage | undefined
+            if (resultData?.display_type === 'ask_user') {
+              events.push(askUserHistoryCard(String(toolCall.id || ''), resultData))
+              return
+            }
             events.push({
               type: 'tool_call',
               tool_call_id: toolCall.id,
@@ -474,7 +518,7 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
    */
   const prepareResumedMessage = (message: ChatMessage, pendingId: string) => {
     const stream = (message.agentEventStream as ChatMessage[] | undefined) || []
-    const card = stream.find((e) => e.type === 'tool_approval_required' && e.pending_id === pendingId)
+    const card = stream.find((e) => isPromptCard(e) && e.pending_id === pendingId)
     const blockedCall = card?.tool_call_id
     message.agentEventStream = stream.filter((e) => {
       if (e.type === 'agent_complete' || e.type === 'stop') return false
@@ -670,7 +714,8 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
       (data.response_type === 'thinking' ||
         data.response_type === 'answer' ||
         data.response_type === 'tool_call' ||
-        data.response_type === 'tool_approval_required')
+        data.response_type === 'tool_approval_required' ||
+        data.response_type === 'agent_prompt_required')
     ) {
       log('[Agent Chunk] Closing loading for continued stream')
       loading.value = false
@@ -766,11 +811,43 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
         })
         break
       }
+      case 'agent_prompt_required': {
+        if (!message.agentEventStream) message.agentEventStream = []
+        const d = dataPayload || {}
+        ;(message.agentEventStream as ChatMessage[]).push({
+          type: 'agent_prompt_required',
+          pending_id: d.pending_id,
+          kind: d.kind,
+          request: d.request,
+          timeout_seconds: d.timeout_seconds,
+          hot_wait_seconds: d.hot_wait_seconds,
+          suspendable: d.suspendable,
+          requested_at: d.requested_at,
+          tool_call_id: d.tool_call_id,
+          resolved: false,
+        })
+        break
+      }
+      case 'agent_prompt_resolved': {
+        const d = dataPayload || {}
+        const ev = (message.agentEventStream as ChatMessage[] | undefined)?.find(
+          (e) => e.type === 'agent_prompt_required' && e.pending_id === d.pending_id,
+        )
+        if (ev) {
+          ev.resolved = true
+          ev.answered = d.answered
+          ev.response = d.response
+          ev.resolve_reason = d.reason
+          ev.timed_out = d.timed_out
+          ev.canceled = d.canceled
+        }
+        break
+      }
       case 'run_suspended': {
         // The run ended waiting on this prompt; answering it resumes the run.
         const d = dataPayload || {}
         const card = (message.agentEventStream as ChatMessage[] | undefined)?.find(
-          (e) => e.type === 'tool_approval_required' && e.pending_id === d.pending_id,
+          (e) => isPromptCard(e) && e.pending_id === d.pending_id,
         )
         if (card) {
           card.suspended = true
@@ -1280,7 +1357,9 @@ export function useChatStreamHandler(options: UseChatStreamHandlerOptions) {
       data.response_type === 'context_compacted' ||
       data.response_type === 'user_message_injected' ||
       data.response_type === 'run_suspended' ||
-      data.response_type === 'run_resumed'
+      data.response_type === 'run_resumed' ||
+      data.response_type === 'agent_prompt_required' ||
+      data.response_type === 'agent_prompt_resolved'
 
     const activeAssistant = getTrailingIncompleteAssistant()
     const isCurrentlyAgentMode = activeAssistant?.isAgentMode === true

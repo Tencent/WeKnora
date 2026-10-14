@@ -174,6 +174,7 @@ var toolHandlePolicies = map[string]toolHandlePolicy{
 	// never structured source rendering.
 	"thinking":   {},
 	"todo_write": {},
+	"ask_user":   {},
 	// Skill output is user-authored content of unknown shape. Compact known
 	// durable IDs, but do not mine it for source keys: a skill's JSON may use
 	// "url"/"knowledge_id" with unrelated semantics.

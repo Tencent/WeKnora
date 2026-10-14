@@ -1499,6 +1499,8 @@ export default {
       thinkingDesc: '动态和反思性的问题解决思考工具',
       todoWrite: '制定计划',
       todoWriteDesc: '创建结构化的研究计划',
+      askUser: '向用户提问',
+      askUserDesc: '在缺少关键信息时向用户提问，并等待回答后继续',
       searchKnowledge: '检索知识库',
       searchKnowledgeDesc: '语义、关键词或混合检索知识库分块',
       readDocument: '阅读文档',
@@ -1811,6 +1813,7 @@ export default {
       readDocument: '阅读文档',
       listDocuments: '浏览文档列表',
       todoWrite: '计划管理',
+      askUser: '向用户提问',
       knowledgeGraphExtract: '知识图谱抽取',
       thinking: '思考',
       attachmentParsing: '解析附件',
@@ -1886,6 +1889,21 @@ export default {
       startFailed: '发起授权失败',
       resumeFailed: '恢复执行失败，请重试',
       skipFailed: '跳过失败，请重试'
+    },
+    askUser: {
+      title: '向你提问',
+      selectPlaceholder: '请选择',
+      textPlaceholder: '输入你的回答',
+      otherPlaceholder: '其他（可选）',
+      decline: '不回答',
+      submit: '提交',
+      declinedTag: '已拒绝回答',
+      submitted: '已提交',
+      answeredTag: '已回答',
+      timedOutTag: '超时未回答',
+      canceledTag: '已取消',
+      unansweredTag: '未回答',
+      submitFailed: '提交失败',
     },
     toolApproval: {
       waiting: '等待审核 · {target}',
@@ -2016,7 +2034,8 @@ export default {
     getDocumentInfo: '获取文档信息',
     queryKnowledgeGraph: '查询知识图谱',
     think: '深度思考',
-    todoWrite: '制定计划'
+    todoWrite: '制定计划',
+    askUser: '向用户提问'
   },
   commandPalette: {
     placeholder: '搜索知识库、文件、对话…',

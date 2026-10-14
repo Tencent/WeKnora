@@ -548,6 +548,18 @@ func (h *EmbedChannelHandler) EmbedResolveToolApproval(c *gin.Context) {
 	h.mcpServiceHandler.ResolveToolApproval(c)
 }
 
+// EmbedResolveAgentPrompt answers a prompt raised in the visitor's session.
+func (h *EmbedChannelHandler) EmbedResolveAgentPrompt(c *gin.Context) {
+	if err := h.ensureEmbedSession(c); err != nil {
+		return
+	}
+	if h.mcpServiceHandler == nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "agent prompt handler unavailable"})
+		return
+	}
+	h.mcpServiceHandler.ResolveAgentPrompt(c)
+}
+
 type embedWebhookEventRequest struct {
 	Type      string `json:"type"`
 	SessionID string `json:"session_id"`

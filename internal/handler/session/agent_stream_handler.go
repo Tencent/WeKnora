@@ -158,6 +158,31 @@ func (h *AgentStreamHandler) Subscribe() {
 	h.eventBus.On(event.EventToolApprovalResolved, h.handleToolApprovalResolved)
 	h.eventBus.On(event.EventMCPOAuthRequired, h.handleMCPOAuthRequired)
 	h.eventBus.On(event.EventMCPOAuthResolved, h.handleMCPOAuthResolved)
+	h.eventBus.On(event.EventAgentPromptRequired, h.handleAgentPromptEvent)
+	h.eventBus.On(event.EventAgentPromptResolved, h.handleAgentPromptEvent)
+}
+
+// handleAgentPromptEvent forwards generic prompt events to the SSE stream.
+func (h *AgentStreamHandler) handleAgentPromptEvent(ctx context.Context, evt event.Event) error {
+	var responseType types.ResponseType
+	switch evt.Data.(type) {
+	case event.AgentPromptRequiredData:
+		responseType = types.ResponseTypeAgentPromptRequired
+	case event.AgentPromptResolvedData:
+		responseType = types.ResponseTypeAgentPromptResolved
+	default:
+		return nil
+	}
+	if err := h.streamManager.AppendEvent(h.ctx, h.sessionID, h.assistantMessageID, interfaces.StreamEvent{
+		ID:        evt.ID,
+		Type:      responseType,
+		Done:      true,
+		Timestamp: time.Now(),
+		Data:      toolApprovalDataToMap(evt.Data),
+	}); err != nil {
+		logger.GetLogger(h.ctx).Error("Append agent prompt event failed", "error", err)
+	}
+	return nil
 }
 
 // handleThought handles agent thought events

@@ -122,6 +122,16 @@
                   :expires-at="event.expires_at" :abandoned="event.abandoned" v-bind="embedAuthProps" />
               </div>
 
+              <!-- Question the agent asked the user (ask_user) -->
+              <div v-else-if="event.type === 'agent_prompt_required' && event.kind === 'ask_user'" class="tool-event">
+                <AskUserCard :pending-id="event.pending_id" :request="event.request"
+                  :timeout-seconds="event.timeout_seconds" :hot-wait-seconds="event.hot_wait_seconds"
+                  :suspendable="event.suspendable" :suspended="event.suspended" :expires-at="event.expires_at"
+                  :requested-at="event.requested_at" :resolved="event.resolved" :answered="event.answered"
+                  :response="event.response" :resolve-reason="event.resolve_reason" :timed-out="event.timed_out"
+                  :canceled="event.canceled" :abandoned="event.abandoned" v-bind="embedAuthProps" />
+              </div>
+
               <!-- MCP OAuth in-conversation authorization prompt -->
               <div v-else-if="event.type === 'mcp_oauth_required'" class="tool-event">
                 <McpOAuthCard :pending-id="event.pending_id" :service-id="event.service_id || ''"
@@ -346,6 +356,16 @@
                 :approved="event.approved" :resolve-reason="event.resolve_reason" :suspendable="event.suspendable"
                 :hot-wait-seconds="event.hot_wait_seconds" :suspended="event.suspended" :expires-at="event.expires_at"
                 :abandoned="event.abandoned" v-bind="embedAuthProps" />
+            </div>
+
+            <!-- Question the agent asked the user (ask_user) -->
+            <div v-else-if="event.type === 'agent_prompt_required' && event.kind === 'ask_user'" class="tool-event">
+              <AskUserCard :pending-id="event.pending_id" :request="event.request"
+                :timeout-seconds="event.timeout_seconds" :hot-wait-seconds="event.hot_wait_seconds"
+                :suspendable="event.suspendable" :suspended="event.suspended" :expires-at="event.expires_at"
+                :requested-at="event.requested_at" :resolved="event.resolved" :answered="event.answered"
+                :response="event.response" :resolve-reason="event.resolve_reason" :timed-out="event.timed_out"
+                :canceled="event.canceled" :abandoned="event.abandoned" v-bind="embedAuthProps" />
             </div>
 
             <!-- MCP OAuth in-conversation authorization prompt -->
@@ -638,6 +658,7 @@
 <script setup lang="ts">
 import { readDocumentReferences } from '@/utils/readDocumentReferences';
 import { isAssistantTurnComplete } from '@/utils/steerStreamFork';
+import { isAwaitingInput } from '@/composables/useChatStreamHandler';
 import { ref, computed, watch, onMounted, onBeforeUnmount, onUpdated, nextTick } from 'vue';
 import { useRouter, useRoute } from 'vue-router';
 import { marked } from 'marked';
@@ -646,6 +667,7 @@ import SandboxCommandProgress from '@/components/SandboxCommandProgress.vue';
 import ToolResultRenderer from './ToolResultRenderer.vue';
 import ToolApprovalCard from './ToolApprovalCard.vue';
 import McpOAuthCard from './McpOAuthCard.vue';
+import AskUserCard from './AskUserCard.vue';
 import ChatRequestInfoButton from '@/components/ChatRequestInfoButton.vue';
 import ChatCitationFloat from '@/components/ChatCitationFloat.vue';
 import picturePreview from '@/components/picture-preview.vue';
@@ -762,6 +784,7 @@ const TOOL_NAME_KEYS: Record<string, string> = {
   wiki_read_issue: 'agentEditor.tools.wikiReadIssue',
   wiki_update_issue: 'agentEditor.tools.wikiUpdateIssue',
   todo_write: 'agentStream.tools.todoWrite',
+  ask_user: 'agentStream.tools.askUser',
   knowledge_graph_extract: 'agentStream.tools.knowledgeGraphExtract',
   thinking: 'agentStream.tools.thinking',
   attachment_parsing: 'agentStream.tools.attachmentParsing',
@@ -1566,7 +1589,11 @@ watch(eventStream, (stream) => {
 
 
 // A steer boundary stops local animation without completing or folding the task.
-const isConversationDone = computed(() => isAssistantTurnComplete(props.session));
+// A run awaiting input keeps its steps in the timeline: the card it waits on
+// must stay in view rather than fold into the collapsed steps.
+const isConversationDone = computed(
+  () => isAssistantTurnComplete(props.session) && !isAwaitingInput(props.session),
+);
 const isSegmentDone = computed(() => Boolean(props.session?.steerForked) || isConversationDone.value);
 
 const streamingMermaidSvgCache = ref<string[]>([]);
@@ -1673,7 +1700,11 @@ const hasPendingStreamingActivity = computed(() => {
     ) {
       return true;
     }
-    return event.type === 'tool_approval_required' || event.type === 'mcp_oauth_required';
+    return (
+      event.type === 'tool_approval_required' ||
+      event.type === 'mcp_oauth_required' ||
+      event.type === 'agent_prompt_required'
+    );
   });
 });
 
@@ -1768,9 +1799,10 @@ const finalContent = computed(() => {
 // Count intermediate steps (after merging consecutive thinking events, matching what user sees in tree)
 const intermediateStepsCount = computed(() => {
   if (!hasAnswerStarted.value && !isSegmentDone.value) return 0;
-  // Count only thinking and tool_call events (exclude plan_task_change, etc.)
+  // Count only thinking and tool_call events (exclude plan_task_change, etc.);
+  // a question card stands in for its ask_user call.
   return intermediateEvents.value.filter(
-    (e: any) => e.type === 'thinking' || e.type === 'tool_call'
+    (e: any) => e.type === 'thinking' || e.type === 'tool_call' || e.type === 'agent_prompt_required'
   ).length;
 });
 
@@ -1785,7 +1817,9 @@ const reasoningRoundsCount = computed(() => {
 
 const toolCallsCount = computed(() => {
   if (!hasAnswerStarted.value && !isSegmentDone.value) return 0;
-  return intermediateEvents.value.filter((e: any) => e.type === 'tool_call').length;
+  return intermediateEvents.value.filter(
+    (e: any) => e.type === 'tool_call' || e.type === 'agent_prompt_required'
+  ).length;
 });
 
 const intermediateStepsSummary = computed(() => {
@@ -1878,7 +1912,17 @@ const getThinkingSummary = (event: any): string => {
 
 // Helper: build the full result list with plan_task_change injections and thinking merging
 const buildFullEventList = (stream: any[]) => {
-  const validStream = stream.filter((e: any) => e && typeof e === 'object' && e.type);
+  // An ask_user call is shown by its card; its tool row would repeat it.
+  const askedCalls = new Set(
+    stream
+      .filter((e: any) => e?.type === 'agent_prompt_required' && e.tool_call_id)
+      .map((e: any) => e.tool_call_id),
+  );
+  const validStream = stream.filter(
+    (e: any) =>
+      e && typeof e === 'object' && e.type &&
+      !(e.type === 'tool_call' && askedCalls.has(e.tool_call_id)),
+  );
   let lastTask: string | null = null;
   const result: any[] = [];
 
@@ -2134,13 +2178,18 @@ const displayEvents = computed(() => {
 const getEventKey = (event: any, index: number): string => {
   if (!event) return `event-${index}`;
   if (event.event_id) return `event-${event.event_id}`;
-  if (event.tool_call_id) return `tool-${event.tool_call_id}`;
+  // Prompt cards carry the tool_call_id of the call they block, so they are
+  // keyed by their own id to stay distinct from that call's row.
   if (event.type === 'tool_approval_required' && event.pending_id) {
     return `approval-${event.pending_id}`;
   }
   if (event.type === 'mcp_oauth_required' && event.pending_id) {
     return `mcp-oauth-${event.pending_id}`;
   }
+  if (event.type === 'agent_prompt_required' && event.pending_id) {
+    return `prompt-${event.pending_id}`;
+  }
+  if (event.tool_call_id) return `tool-${event.tool_call_id}`;
   return `event-${index}-${event.type || 'unknown'}`;
 };
 

@@ -268,6 +268,7 @@ func (s *sessionService) AgentQA(
 		engine.SetSteerSink(req.SteerSink)
 	}
 
+	engine.SetInteractive(req.Interactive)
 	if req.Suspendable && s.cfg != nil && s.cfg.Agent.PromptSuspend() {
 		if request, err := json.Marshal(resumableAgentRequest(ctx, req)); err != nil {
 			logger.Warnf(ctx, "Run cannot be suspended, encoding its request failed: %v", err)

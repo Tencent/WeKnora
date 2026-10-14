@@ -299,6 +299,17 @@ export async function resolveToolApproval(
   return { resumed: Boolean(res?.resumed) }
 }
 
+// Answer a prompt the agent raised (ask_user, tool approval) with the kind's
+// response object.
+export async function resolveAgentPrompt(
+  promptId: string,
+  kind: string,
+  response: Record<string, unknown>,
+): Promise<{ resumed: boolean }> {
+  const res: any = await post(`/api/v1/agent/prompts/${encodeURIComponent(promptId)}`, { kind, response })
+  return { resumed: Boolean(res?.resumed) }
+}
+
 // Resume an agent run that paused on an in-conversation MCP OAuth prompt.
 // Call after the per-user authorization popup completes; the backend verifies
 // the token exists before unblocking the paused tool call.

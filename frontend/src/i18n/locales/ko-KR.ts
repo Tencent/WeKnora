@@ -1497,6 +1497,8 @@ export default {
       thinkingDesc: '동적이고 반성적인 문제 해결 사고 도구',
       todoWrite: '계획 수립',
       todoWriteDesc: '구조화된 연구 계획 생성',
+      askUser: '사용자에게 질문',
+      askUserDesc: '필요한 정보가 부족할 때 사용자에게 질문하고 답변을 기다린 후 계속합니다',
       searchKnowledge: '지식베이스 검색',
       searchKnowledgeDesc: '의미, 키워드 또는 하이브리드 방식으로 지식베이스 청크 검색',
       readDocument: '문서 읽기',
@@ -1809,6 +1811,7 @@ export default {
       readDocument: '문서 읽기',
       listDocuments: '문서 목록 보기',
       todoWrite: '계획 관리',
+      askUser: '사용자에게 질문',
       knowledgeGraphExtract: '지식 그래프 추출',
       thinking: '사고',
       attachmentParsing: '첨부 파일 파싱',
@@ -1884,6 +1887,21 @@ export default {
       startFailed: '인증 시작 실패',
       resumeFailed: '실행 재개 실패, 다시 시도하세요',
       skipFailed: '건너뛰기 실패, 다시 시도하세요'
+    },
+    askUser: {
+      title: '질문이 있습니다',
+      selectPlaceholder: '선택하세요',
+      textPlaceholder: '답변을 입력하세요',
+      otherPlaceholder: '기타(선택)',
+      decline: '답변 안 함',
+      submit: '제출',
+      declinedTag: '답변 거절함',
+      submitted: '제출됨',
+      answeredTag: '답변함',
+      timedOutTag: '시간 내 답변 없음',
+      canceledTag: '취소됨',
+      unansweredTag: '답변 없음',
+      submitFailed: '제출 실패',
     },
     toolApproval: {
       waiting: '승인 대기 · {target}',
@@ -2014,7 +2032,8 @@ export default {
     getDocumentInfo: '문서 정보 조회',
     queryKnowledgeGraph: '지식 그래프 쿼리',
     think: '깊이 생각하기',
-    todoWrite: '계획 수립'
+    todoWrite: '계획 수립',
+    askUser: '사용자에게 질문'
   },
   commandPalette: {
     placeholder: '지식베이스, 파일, 대화 검색…',

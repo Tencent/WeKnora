@@ -143,6 +143,7 @@ func NewGate(cfg *config.Config, checker Checker, broker *hitl.Broker) *Gate {
 	}
 	broker.RegisterKind(types.AgentPromptKindToolApproval, validateToolApprovalResponse)
 	broker.RegisterKind(types.AgentPromptKindMCPOAuth, validateMCPOAuthResponse)
+	broker.RegisterKind(types.AgentPromptKindAskUser, types.ValidateAskUserResponse)
 	// Default fail-close: if the checker errors, require approval (safer for a
 	// HITL feature). Set WEKNORA_AGENT_TOOL_APPROVAL_FAIL_OPEN=true to revert.
 	failClose := !strings.EqualFold(strings.TrimSpace(os.Getenv("WEKNORA_AGENT_TOOL_APPROVAL_FAIL_OPEN")), "true")
@@ -467,6 +468,26 @@ func (g *Gate) ResolveForResume(ctx context.Context, req ResolveRequest) (hitl.R
 		PromptID:  req.PendingID,
 		Response:  payload,
 	})
+}
+
+// AnswerableKinds are the prompt kinds a user may answer with a raw
+// response. MCP OAuth is absent: only the OAuth callback may report an
+// authorization, never the user's own claim.
+var AnswerableKinds = map[string]bool{
+	types.AgentPromptKindAskUser:      true,
+	types.AgentPromptKindToolApproval: true,
+}
+
+// ResolveResponse records a user's answer given as the kind's response
+// JSON. Authorization and validation are the same as ResolveForResume.
+func (g *Gate) ResolveResponse(ctx context.Context, req hitl.ResolveRequest) (hitl.Resolution, error) {
+	if g == nil {
+		return hitl.Resolution{}, fmt.Errorf("gate is nil")
+	}
+	if !AnswerableKinds[req.Kind] {
+		return hitl.Resolution{}, fmt.Errorf("%w: prompt kind %q cannot be answered here", ErrInvalidDecision, req.Kind)
+	}
+	return g.broker.Resolve(ctx, req)
 }
 
 func toolApprovalDecision(out hitl.Outcome) Decision {

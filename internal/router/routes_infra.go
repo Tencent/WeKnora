@@ -201,6 +201,8 @@ func RegisterMCPServiceRoutes(
 		// people who actually have context to approve, so the gate is
 		// kept at "anyone in the tenant" instead.
 		agentTool.POST("/tool-approvals/:pending_id", g.Viewer(), handler.ResolveToolApproval)
+		// Answer any user-answerable prompt (ask_user, tool approval); same gating.
+		agentTool.POST("/prompts/:prompt_id", g.Viewer(), handler.ResolveAgentPrompt)
 		// Resume an agent run paused on an in-conversation MCP OAuth prompt.
 		// Same tenant-member (Viewer+) gating rationale as tool-approvals.
 		agentTool.POST("/mcp-oauth-resolutions/:pending_id", g.Viewer(), oauthHandler.ResolveMCPOAuth)

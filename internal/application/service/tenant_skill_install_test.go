@@ -3228,6 +3228,8 @@ func (e *installAgentEngine) SetContextCheckpointSink(types.ContextCheckpointSin
 
 func (e *installAgentEngine) EnableSuspension(json.RawMessage) {}
 
+func (e *installAgentEngine) SetInteractive(bool) {}
+
 func (e *installAgentEngine) Resume(context.Context, string, string, []chat.Message,
 	[]byte, *types.AgentPrompt) (*types.AgentState, error) {
 	return nil, errors.New("not supported")

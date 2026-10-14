@@ -1229,6 +1229,12 @@ func (s *agentService) registerTools(
 			toolToRegister = tools.NewSequentialThinkingTool()
 		case tools.ToolTodoWrite:
 			toolToRegister = tools.NewTodoWriteTool()
+		case tools.ToolAskUser:
+			asker, ok := s.toolApprovalGate.(approval.UserAsker)
+			if !ok || asker == nil {
+				continue
+			}
+			toolToRegister = tools.NewAskUserTool(asker)
 		case tools.ToolSearchKnowledge:
 			toolToRegister = tools.NewSearchKnowledgeTool(
 				s.knowledgeBaseService,

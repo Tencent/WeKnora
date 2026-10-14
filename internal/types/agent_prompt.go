@@ -12,6 +12,7 @@ import (
 const (
 	AgentPromptKindToolApproval = "tool_approval"
 	AgentPromptKindMCPOAuth     = "mcp_oauth"
+	AgentPromptKindAskUser      = "ask_user"
 )
 
 // Lifecycle states of an AgentPrompt. Transitions are compare-and-set on the

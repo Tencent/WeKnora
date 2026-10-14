@@ -6148,7 +6148,8 @@ export default {
     getDocumentInfo: 'Get Document Info',
     queryKnowledgeGraph: 'Query Knowledge Graph',
     think: 'Deep Thinking',
-    todoWrite: 'Make Plan'
+    todoWrite: 'Make Plan',
+    askUser: 'Ask User'
   },
   vectorStoreBadge: {
     systemDefault: 'System default',
@@ -6246,6 +6247,21 @@ export default {
     }
   },
   agentStream: {
+    askUser: {
+      title: 'Question for you',
+      selectPlaceholder: 'Select',
+      textPlaceholder: 'Type your answer',
+      otherPlaceholder: 'Other (optional)',
+      decline: 'Skip',
+      submit: 'Submit',
+      declinedTag: 'Declined to answer',
+      submitted: 'Submitted',
+      answeredTag: 'Answered',
+      timedOutTag: 'No answer in time',
+      canceledTag: 'Canceled',
+      unansweredTag: 'Not answered',
+      submitFailed: 'Failed to submit',
+    },
     toolApproval: {
       waiting: 'Awaiting review · {target}',
       waitingStatus: 'Awaiting review',
@@ -6297,6 +6313,7 @@ export default {
       readDocument: 'Read document',
       listDocuments: 'List documents',
       todoWrite: 'Plan Management',
+      askUser: 'Ask User',
       knowledgeGraphExtract: 'Knowledge Graph Extraction',
       thinking: 'Thinking',
       attachmentParsing: 'Parsing Attachment',
@@ -6590,6 +6607,8 @@ export default {
       thinkingDesc: 'Dynamic and reflective problem-solving thinking tool',
       todoWrite: 'Plan',
       todoWriteDesc: 'Create structured research plans',
+      askUser: 'Ask User',
+      askUserDesc: 'Ask the user for missing information and wait for the answer before continuing',
       searchKnowledge: 'Search knowledge',
       searchKnowledgeDesc: 'Semantic, keyword or hybrid search over knowledge-base chunks',
       readDocument: 'Read document',

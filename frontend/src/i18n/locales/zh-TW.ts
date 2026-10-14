@@ -1499,6 +1499,8 @@ export default {
       thinkingDesc: '動態和反思性的問題解決思考工具',
       todoWrite: '制定計劃',
       todoWriteDesc: '建立結構化的研究計劃',
+      askUser: '向使用者提問',
+      askUserDesc: '在缺少關鍵資訊時向使用者提問，並等待回答後繼續',
       searchKnowledge: '檢索知識庫',
       searchKnowledgeDesc: '語義、關鍵字或混合檢索知識庫切塊',
       readDocument: '閱讀文件',
@@ -1811,6 +1813,7 @@ export default {
       readDocument: '閱讀文件',
       listDocuments: '瀏覽文件清單',
       todoWrite: '計劃管理',
+      askUser: '向使用者提問',
       knowledgeGraphExtract: '知識圖譜抽取',
       thinking: '思考',
       attachmentParsing: '解析附件',
@@ -1886,6 +1889,21 @@ export default {
       startFailed: '發起授權失敗',
       resumeFailed: '復原執行失敗，請重試',
       skipFailed: '跳過失敗，請重試'
+    },
+    askUser: {
+      title: '向你提問',
+      selectPlaceholder: '請選擇',
+      textPlaceholder: '輸入你的回答',
+      otherPlaceholder: '其他（選填）',
+      decline: '不回答',
+      submit: '提交',
+      declinedTag: '已拒絕回答',
+      submitted: '已提交',
+      answeredTag: '已回答',
+      timedOutTag: '逾時未回答',
+      canceledTag: '已取消',
+      unansweredTag: '未回答',
+      submitFailed: '提交失敗',
     },
     toolApproval: {
       waiting: '等待審核 · {target}',
@@ -2016,7 +2034,8 @@ export default {
     getDocumentInfo: '獲取文件資訊',
     queryKnowledgeGraph: '查詢知識圖譜',
     think: '深度思考',
-    todoWrite: '制定計劃'
+    todoWrite: '制定計劃',
+    askUser: '向使用者提問'
   },
   commandPalette: {
     placeholder: '搜尋知識庫、檔案、對話…',

@@ -11,6 +11,9 @@ const (
 	ToolCallMCPTool      = "call_mcp_tool"
 	ToolThinking         = "thinking"
 	ToolTodoWrite        = "todo_write"
+	// ToolAskUser asks the user a question through a card and waits for the
+	// answer; the run may suspend until it arrives.
+	ToolAskUser = "ask_user"
 	// Knowledge retrieval surface. search_knowledge covers semantic, keyword
 	// and hybrid retrieval over chunk-indexed knowledge bases; read_document
 	// reads a document's metadata and chunks (by page, by chunk handle, or by
@@ -106,6 +109,7 @@ func AvailableToolDefinitions() []AvailableTool {
 	return []AvailableTool{
 		{Name: ToolThinking, Label: "思考", Description: "动态和反思性的问题解决思考工具", Group: ToolGroupBase},
 		{Name: ToolTodoWrite, Label: "制定计划", Description: "创建结构化的研究计划", Group: ToolGroupBase},
+		{Name: ToolAskUser, Label: "向用户提问", Description: "需要用户补充信息或做选择时，弹出卡片等待回答", Group: ToolGroupBase},
 		{
 			Name:        ToolSearchConversations,
 			Label:       "回顾历史对话",
@@ -194,6 +198,9 @@ func DefaultAllowedTools() []string {
 		// own history, and it is what lets "上次你给我的那个配置" resolve at all
 		// without stuffing every past conversation into the context window.
 		ToolSearchConversations,
+		// Asking the user only reaches someone on clients that render the
+		// card; elsewhere the tool tells the model to ask in its reply.
+		ToolAskUser,
 		// ToolSearchMemory is deliberately absent here and from
 		// AvailableToolDefinitions. Like web_search it is not chosen from this
 		// list at all: registerTools injects it whenever the workspace, the

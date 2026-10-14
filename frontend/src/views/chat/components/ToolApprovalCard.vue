@@ -23,12 +23,12 @@
         <template v-if="!resolved && !parked && secondsLeft >= 0">
           <span class="inline-dot">·</span>
           <span class="action-timer" :class="timerClass">
-            {{ formatCountdown(secondsLeft) }}
+            {{ countdownText }}
           </span>
         </template>
         <template v-if="!resolved && parked">
           <span class="inline-dot">·</span>
-          <span class="action-timer">{{ parkedLine }}</span>
+          <span class="action-timer">{{ parkedText }}</span>
         </template>
       </div>
     </div>
@@ -74,12 +74,13 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, inject, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, inject } from 'vue'
 import { MessagePlugin } from 'tdesign-vue-next'
 import { useI18n } from 'vue-i18n'
 import { resolveToolApproval } from '@/api/mcp-service'
 import { resolveEmbedToolApproval } from '@/api/embed'
 import { resumeSuspendedRunKey } from '@/utils/suspendedRun'
+import { usePromptCountdown } from '@/composables/usePromptCountdown'
 
 const props = defineProps<{
   pendingId: string
@@ -115,7 +116,7 @@ const useEmbedApproval = () =>
   && props.embedSessionSig
   && props.embedVisitorId
 
-const { t, locale } = useI18n()
+const { t } = useI18n()
 const resumeSuspendedRun = inject(resumeSuspendedRunKey, undefined)
 
 function formatJson(raw: string): string {
@@ -130,8 +131,7 @@ const initialArgs = formatJson(props.argsJson || '{}')
 const argsText = ref(initialArgs)
 const argsExpanded = ref(false)
 const submitting = ref(false)
-const now = ref(Date.now())
-let timer: ReturnType<typeof setInterval> | null = null
+const { parked, secondsLeft, timerClass, countdownText, parkedText } = usePromptCountdown(props)
 
 const hasArgs = computed(() => argsText.value.trim().length > 0)
 
@@ -146,35 +146,6 @@ const isJsonValid = computed(() => {
 })
 
 const argsDirty = computed(() => argsText.value.trim() !== initialArgs.trim())
-
-const deadline = computed(() => {
-  const base = (props.requestedAt || 0) * 1000
-  const wait = props.suspendable ? props.hotWaitSeconds || props.timeoutSeconds : props.timeoutSeconds
-  return base + (wait || 600) * 1000
-})
-
-// Parked: the run no longer waits in memory; answering later resumes it.
-const parked = computed(() => props.suspended || (props.suspendable && now.value >= deadline.value))
-
-const parkedLine = computed(() => {
-  const expires = props.expiresAt ? new Date(props.expiresAt) : null
-  if (!expires || Number.isNaN(expires.getTime())) return t('agentStream.toolApproval.parked')
-  const time = expires.toLocaleString(locale.value, {
-    month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit',
-  })
-  return t('agentStream.toolApproval.parkedUntil', { time })
-})
-
-const secondsLeft = computed(() => {
-  if (props.resolved) return -1
-  return Math.max(0, Math.floor((deadline.value - now.value) / 1000))
-})
-
-const timerClass = computed(() => {
-  if (secondsLeft.value <= 30) return 'timer-critical'
-  if (secondsLeft.value <= 120) return 'timer-warning'
-  return ''
-})
 
 const headerIcon = computed(() => {
   if (!props.resolved) return 'secured'
@@ -210,23 +181,6 @@ const statusLine = computed(() => {
 function toggleArgs() {
   argsExpanded.value = !argsExpanded.value
 }
-
-function formatCountdown(s: number): string {
-  if (s < 60) return t('agentStream.toolApproval.countdownShort', { seconds: s })
-  const m = Math.floor(s / 60)
-  const r = s % 60
-  return `${m}:${r.toString().padStart(2, '0')}`
-}
-
-onMounted(() => {
-  timer = setInterval(() => {
-    now.value = Date.now()
-  }, 1000)
-})
-
-onBeforeUnmount(() => {
-  if (timer) clearInterval(timer)
-})
 
 const submit = async (decision: 'approve' | 'reject') => {
   if (props.resolved || submitting.value) return

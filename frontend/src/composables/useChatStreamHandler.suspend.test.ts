@@ -131,3 +131,59 @@ test('a new message abandons the prompt a suspended run waits on', async () => {
   assert.equal(card.abandoned, true)
   assert.equal(m.run_state, '')
 })
+
+const prompts = (m: Record<string, any>) =>
+  (m.agentEventStream as Record<string, any>[]).filter((e) => e.type === 'agent_prompt_required')
+
+test('a question card follows the prompt events of a live run', () => {
+  const { handler, messagesList } = setup()
+  handler.processStreamChunk({ response_type: 'agent_query', id: 'r1', assistant_message_id: 'a1' })
+  handler.processStreamChunk({
+    response_type: 'agent_prompt_required', id: 'r1',
+    data: { pending_id: 'q1', kind: 'ask_user', tool_call_id: 'call-2', request: { question: 'Which?' } },
+  })
+  handler.processStreamChunk({
+    response_type: 'agent_prompt_resolved', id: 'r1',
+    data: { pending_id: 'q1', kind: 'ask_user', answered: true, response: { text: 'this one' } },
+  })
+  const [card] = prompts(messagesList[0])
+  assert.equal(card.kind, 'ask_user')
+  assert.equal(card.request.question, 'Which?')
+  assert.equal(card.resolved, true)
+  assert.equal(card.answered, true)
+  assert.deepEqual(card.response, { text: 'this one' })
+})
+
+test('history shows a pending question and turns answered ones into cards', async () => {
+  const { handler, messagesList } = setup()
+  const row = awaitingRow()
+  row.agent_steps = [{
+    iteration: 0, thought: '',
+    tool_calls: [
+      { id: 'call-0', name: 'ask_user', args: {}, result: { success: true, output: 'x', data: {
+        display_type: 'ask_user', question: { question: 'First?' }, answered: false,
+        reason: 'the user declined to answer',
+      } } },
+      { id: 'call-1', name: 'ask_user', args: {} },
+    ],
+  }] as any
+  row.pending_prompt = {
+    id: 'q2', kind: 'ask_user', tool_call_id: 'call-1', created_at: '2026-10-13T08:00:00Z',
+    expires_at: '2026-10-20T08:00:00Z', request: { question: 'Second?' },
+  } as any
+  await handler.handleMsgList([row])
+  const m = messagesList[0]
+  const [answered, pending] = prompts(m)
+  assert.equal(answered.request.question, 'First?')
+  assert.equal(answered.resolved, true)
+  assert.equal(answered.answered, false)
+  assert.equal(answered.resolve_reason, 'the user declined to answer')
+  assert.ok(!(m.agentEventStream as Record<string, any>[]).some(
+    (e) => e.type === 'tool_call' && e.tool_call_id === 'call-0',
+  ))
+  assert.equal(pending.pending_id, 'q2')
+  assert.equal(pending.suspended, true)
+  assert.equal(pending.request.question, 'Second?')
+  handler.prepareForNewOutgoingMessage()
+  assert.equal(prompts(m)[1].abandoned, true)
+})

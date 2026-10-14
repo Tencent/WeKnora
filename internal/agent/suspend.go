@@ -127,6 +127,12 @@ func (e *AgentEngine) EnableSuspension(request json.RawMessage) {
 	e.suspendable = true
 }
 
+// SetInteractive marks the run's client as able to render and answer
+// prompts such as ask_user, whether or not the run may also suspend.
+func (e *AgentEngine) SetInteractive(interactive bool) {
+	e.interactive = interactive
+}
+
 func (e *AgentEngine) beginTurn(query string, imageURLs []string, state *types.AgentState) {
 	e.progress.mu.Lock()
 	defer e.progress.mu.Unlock()

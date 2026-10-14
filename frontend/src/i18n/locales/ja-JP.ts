@@ -6148,7 +6148,8 @@ export default {
     getDocumentInfo: 'ドキュメント情報の取得',
     queryKnowledgeGraph: 'ナレッジグラフの照会',
     think: '深い思考',
-    todoWrite: '計画の作成'
+    todoWrite: '計画の作成',
+    askUser: 'ユーザーに質問'
   },
   vectorStoreBadge: {
     systemDefault: 'システムデフォルト',
@@ -6246,6 +6247,21 @@ export default {
     }
   },
   agentStream: {
+    askUser: {
+      title: 'あなたへの質問',
+      selectPlaceholder: '選択してください',
+      textPlaceholder: '回答を入力',
+      otherPlaceholder: 'その他（任意）',
+      decline: '回答しない',
+      submit: '送信',
+      declinedTag: '回答を辞退しました',
+      submitted: '送信済み',
+      answeredTag: '回答済み',
+      timedOutTag: '時間内に回答なし',
+      canceledTag: 'キャンセル済み',
+      unansweredTag: '未回答',
+      submitFailed: '送信に失敗しました',
+    },
     toolApproval: {
       waiting: '承認待ち · {target}',
       waitingStatus: '承認待ち',
@@ -6297,6 +6313,7 @@ export default {
       readDocument: 'ドキュメントを読む',
       listDocuments: 'ドキュメント一覧',
       todoWrite: '計画管理',
+      askUser: 'ユーザーに質問',
       knowledgeGraphExtract: 'ナレッジグラフ抽出',
       thinking: '思考',
       attachmentParsing: '添付ファイルを解析',
@@ -6590,6 +6607,8 @@ export default {
       thinkingDesc: '動的かつ内省的に問題を解決する思考ツール',
       todoWrite: '計画',
       todoWriteDesc: '構造化された調査計画を作成します',
+      askUser: 'ユーザーに質問',
+      askUserDesc: '必要な情報が不足しているときにユーザーへ質問し、回答を待ってから続行します',
       searchKnowledge: 'ナレッジベースを検索',
       searchKnowledgeDesc: 'セマンティック・キーワード・ハイブリッド検索でナレッジベースのチャンクを検索します',
       readDocument: 'ドキュメントを読む',

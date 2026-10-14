@@ -99,6 +99,10 @@ type QARequest struct {
 	// message and answer it afterwards (web, embed, API); IM and MCP callers
 	// wait synchronously.
 	Suspendable bool
+	// Interactive marks a caller that can show and answer a prompt the agent
+	// raises on its own, such as an ask_user question. API-key callers cannot
+	// answer prompts, so their runs are not interactive.
+	Interactive bool
 	// Resume, when set, continues a suspended run instead of starting one.
 	Resume *AgentResume
 }

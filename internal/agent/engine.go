@@ -86,7 +86,9 @@ type AgentEngine struct {
 	// suspendRequest is saved with the run for that (see EnableSuspension).
 	suspendable    bool
 	suspendRequest []byte
-	progress       turnProgress
+	// interactive: the client renders prompt cards and can answer them.
+	interactive bool
+	progress    turnProgress
 }
 
 // maxSteerOverruns caps loop-end injects past MaxIterations. One extra round

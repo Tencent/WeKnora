@@ -107,6 +107,13 @@ type qaRequestContext struct {
 // buildQARequest converts the qaRequestContext into a types.QARequest for service invocation.
 // steerSink rides along when the caller set one, so agent runs drain mid-run
 // message injections at round boundaries.
+// calledWithAPIKey reports an X-API-Key caller; the prompt endpoints are
+// closed to API keys, so such a caller cannot answer a question.
+func calledWithAPIKey(ctx context.Context) bool {
+	_, ok := types.TenantAPIKeyScopeFromContext(ctx)
+	return ok
+}
+
 func (rc *qaRequestContext) buildQARequest() *types.QARequest {
 	imageURLs, imageDescription := extractImageURLsAndOCRText(rc.images)
 	req := &types.QARequest{
@@ -133,6 +140,7 @@ func (rc *qaRequestContext) buildQARequest() *types.QARequest {
 		// The HTTP stream (web, embed, API) renders a suspended message and
 		// can answer its prompt later.
 		Suspendable: true,
+		Interactive: !calledWithAPIKey(rc.ctx),
 		Resume:      rc.resume,
 	}
 	if rc.steerSink != nil {

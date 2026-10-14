@@ -220,7 +220,7 @@ import { useI18n } from 'vue-i18n';
 import { useUIStore } from '@/stores/ui';
 import KnowledgeBaseEditorModal from '@/views/knowledge/KnowledgeBaseEditorModal.vue';
 import { useKnowledgeBaseCreationNavigation } from '@/hooks/useKnowledgeBaseCreationNavigation';
-import { useChatStreamHandler, isAwaitingInput } from '@/composables/useChatStreamHandler';
+import { useChatStreamHandler, isAwaitingInput, isPromptCard } from '@/composables/useChatStreamHandler';
 import { useStickyBottomOnResize } from '@/composables/useStickyBottomOnResize';
 import { clearCitationChunkCache } from '@/utils/citationChunkCache';
 import ChatReferencesDrawer from '@/components/ChatReferencesDrawer.vue';
@@ -1619,7 +1619,7 @@ let attachingResumedRun = false;
 const resumeSuspendedRun = async (pendingId) => {
     const sessionId = session_id.value;
     const message = findLastMessage((m) => m.role === 'assistant' && (m.agentEventStream || []).some(
-        (e) => e.type === 'tool_approval_required' && e.pending_id === pendingId,
+        (e) => isPromptCard(e) && e.pending_id === pendingId,
     ));
     if (!message || !sessionId || isReplying.value) return;
     const resumeId = persistedAssistantId(message);
